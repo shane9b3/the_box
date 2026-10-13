@@ -3256,6 +3256,21 @@ Generators live in test code:
 | I-8 | (reviewed 2026-10-13, S4) Platform-parser parity: `XmltvParser(Xml::newPullParser)` on `entities.xml`, `latin1.xml`, `basic.xml` gives the same `XmltvProgramme` values as the JVM `KXmlParser` run, including `&nbsp;` → U+00A0 and the DOCTYPE skipped |
 | I-9 | (reviewed 2026-10-13, B4) On `Pixel_6_Pro_API_34`: `EpgImportWorker` started from the background, where `setForeground` throws and the import still completes. On the API 30 TV AVD: an expedited `PlaylistRefreshWorker` runs as an FGS without crashing |
 
+#### Integration results (M1 integration pass, 2026-10-13)
+
+**§5.6 (Robolectric):** `M3uToRoomIT` (5), `XtreamRefreshIT` (1) and `EpgBuildIT` (1) are enabled and pass. `GetPhpEqualsXtreamKeysIT` already ships as WP-A's `GetPhpVsXtreamApiTest`. Test-side corrections: `XtreamRefreshIT` expects 19 channels, not 20, because `live_streams.json` has 20 entries and the decoder skips the one without a `stream_id`. `EpgBuildIT` pins the clock to the fixture day (2026-10-13), and its classloader lookup no longer resolves through `File`.
+
+**§5.7 (`TheBox_TV_API30`, x86):** 12 pass, 1 ignored (I-5, manual). AGP's JUnit XML writes the ignored test as an empty `<failure/>`, but the task passes and logcat says `ignored`. The androidTest APK carries x86 natives: I-1 opens the bundled driver. I-8 compares `Xml.newPullParser()` output with JVM KXml goldens (`core/src/test/resources/xmltv/parity/`, copied into `data/src/androidTest/assets/xmltv/`). `XmltvParityGoldenTest` checks those copies for drift.
+
+Production bugs found on the device or under Robolectric:
+- `EpgStoreImpl` caught `androidx.sqlite.SQLiteException`. That is a real class in the JVM variant, but on Android it is a typealias of `android.database.SQLException`, so `EpgStoreImpl` threw `NoClassDefFoundError` there. It now catches `RuntimeException` and filters with `isSqliteException()` (`Sql.kt`).
+- `NameNormalizer.BRACKETS` used an unescaped `}`. Android's ICU regex engine rejects it, so `NameNormalizer` failed in its static initializer. That broke every EPG import and channel search on the device.
+- With Tink 1.23, a deleted Keystore master key surfaces as `InvalidKeyException`, which mapped to UNAVAILABLE. `KeystoreAeadProvider` now raises `MasterKeyLostException` when the Keystore confirms the alias is gone, and the store treats that as KEY_INVALIDATED (S16 still holds for transient errors).
+
+Test configuration: `data/src/androidTest/AndroidManifest.xml` adds the dataSync FGS type and cleartext, as the app does. `HiltTestRunner` installs a logcat `BoxLog` sink. I-4 now waits for a terminal work state.
+
+**Perf (`:core:perfTest`, Intel Mac, JDK 21, 64 MB heap):** M3U 200k first import 1.88 s, unchanged refresh 1.83 s with 0 rows written, retained heap 3.3 / 10.6 MB. XMLTV 980k-programme rebuild 20.2 s, retained heap 6.5 MB, DB 78 MB. Window warm p95 0.76 ms, cold 7.6 ms. Search p95 0.98 ms. Matcher 20k × 50k 2.34 s with an index of about 7.8 MB. All of these are within the §5.5 JVM budgets.
+
 ---
 
 ## 6. Build wiring (commit 0, lead)

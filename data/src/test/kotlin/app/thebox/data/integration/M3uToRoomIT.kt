@@ -18,7 +18,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
-import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -29,7 +28,6 @@ import org.robolectric.annotation.Config
  * `core/src/test/resources/refresh/`, shared into :data tests by the build). Favourites must survive
  * `basic`, `host_rotation` and `xc_templated`.
  */
-@Ignore("needs WP-A")
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class M3uToRoomIT {

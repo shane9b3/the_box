@@ -29,7 +29,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Before
-import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -40,7 +39,6 @@ import java.io.File
  * §5.6 `XtreamRefreshIT`: login, categories and streams from MockWebServer (the `xtream/` fixtures, clean and
  * quirks) through WP-C's client and decoder and WP-A's differ into library.db; account card; active_base_index.
  */
-@Ignore("needs WP-A, WP-C")
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class XtreamRefreshIT {
@@ -91,7 +89,8 @@ class XtreamRefreshIT {
         val id = (g.playlists.addXtream("X", listOf(dead, base), "user", "pass") as Outcome.Ok).value
         val r = repo().refresh(id, Trigger.ONBOARDING)
         assertNull(r.error)
-        assertEquals(20L, db.scalar("SELECT COUNT(*) FROM channel WHERE playlist_id = ?", id))
+        // live_streams.json has 20 entries; the one without a stream_id is skipped by the decoder (WP-C), so 19.
+        assertEquals(19L, db.scalar("SELECT COUNT(*) FROM channel WHERE playlist_id = ?", id))
         assertEquals(0L, db.scalar("SELECT COUNT(*) FROM channel WHERE url LIKE '%pass%'"))
         assertEquals(1, db.playlistDao().get(id)!!.activeBaseIndex)
         assertNotNull(g.playlists.account(id).first())

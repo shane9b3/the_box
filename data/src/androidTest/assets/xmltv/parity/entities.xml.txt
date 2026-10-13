@@ -1,0 +1,32 @@
+channel id=ent icon=<null> name[<null>]=Ent & Co
+programme channel=ent start=29864520 stop=29864580
+  title=Tom & Jerry été A\u00A0B
+  subtitle=Fish & <Chips>
+  description=Before  after …  end – — € 'q'
+  categories=
+  episodeLabel=<null>
+  season/episode/part/partTotal=-1/-1/-1/-1
+  seriesRef=<null>
+  icon=<null>
+  rating=<null>
+  starRating=<null>
+  year=-1
+  credits=<null>
+  flags=0
+  catchupId=<null>
+programme channel=ent start=29864580 stop=29864640
+  title=Stray & ampersand
+  subtitle=<null>
+  description=<null>
+  categories=
+  episodeLabel=<null>
+  season/episode/part/partTotal=-1/-1/-1/-1
+  seriesRef=<null>
+  icon=<null>
+  rating=<null>
+  starRating=<null>
+  year=-1
+  credits=<null>
+  flags=0
+  catchupId=<null>
+end

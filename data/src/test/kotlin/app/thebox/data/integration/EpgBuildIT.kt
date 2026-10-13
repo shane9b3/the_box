@@ -19,7 +19,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
-import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -31,7 +30,6 @@ import java.io.File
  * with the real MatcherWhitelistResolver: whitelist, `epg_match.has_data`, and the patch for a mapping to a
  * channel the build did not import.
  */
-@Ignore("needs WP-B")
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class EpgBuildIT {
@@ -50,8 +48,11 @@ class EpgBuildIT {
 
     @Test
     fun buildWhitelistsHasDataAndPatch() = runBlocking {
+        // basic.xml's programmes are on 2026-10-13 (UTC); FakeClock's default (2025-10-09) would drop all of them
+        // from the 7/7-day window, so pin "now" to the fixture's day (12:00Z).
+        g.clock.time.set(1_791_892_800_000L)
         val xml = File(TestDb.context.cacheDir, "basic.xml").apply {
-            writeBytes(requireNotNull(javaClass.classLoader!!.getResource("xmltv/basic.xml")).readBytes())
+            writeBytes(requireNotNull(EpgBuildIT::class.java.classLoader!!.getResource("xmltv/basic.xml")).readBytes())
         }
         val store = EpgStoreImpl(dir, AndroidSQLiteDriver(), { Long.MAX_VALUE }, Xml::newPullParser, { g.clock.now() }, forceFts4 = true)
         store.recover()

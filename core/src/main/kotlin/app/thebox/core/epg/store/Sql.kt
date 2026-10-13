@@ -68,6 +68,21 @@ internal class StatementCache(private val conn: SQLiteConnection) {
     }
 }
 
+/**
+ * True for a SQLite driver error on either platform. `androidx.sqlite.SQLiteException` is a KMP `expect class`:
+ * a real class in the JVM variant :core compiles against, but a typealias of `android.database.SQLException` in
+ * the Android variant, so the class does not exist on a device (or under Robolectric). Naming it in a catch
+ * clause makes `EpgStoreImpl` fail with `NoClassDefFoundError` there, so match by class name instead.
+ */
+internal fun Throwable.isSqliteException(): Boolean {
+    var c: Class<*>? = javaClass
+    while (c != null) {
+        if (c.name == "androidx.sqlite.SQLiteException" || c.name == "android.database.SQLException") return true
+        c = c.superclass
+    }
+    return false
+}
+
 /** Reads `meta` into a map. */
 internal fun SQLiteConnection.readMeta(): Map<String, String> = query("SELECT key, value FROM meta") { st ->
     val m = HashMap<String, String>()
