@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tv SYSTEM "http://example.invalid/xmltv.dtd">
+<?xml-stylesheet type="text/xsl" href="style.xsl"?>
+<tv>
+  <!-- a comment before the channels -->
+  <channel id="ent"><display-name>Ent &amp; Co</display-name></channel>
+  <programme start="20261013060000 +0000" stop="20261013070000 +0000" channel="ent">
+    <title>Tom &amp; Jerry &#233;t&#xE9; A&nbsp;B</title>
+    <sub-title><![CDATA[Fish & <Chips>]]></sub-title>
+    <desc>Before <!-- inner comment --> after &hellip; &unknown; end &ndash; &mdash; &euro; &apos;q&apos;</desc>
+  </programme>
+  <?processing instruction?>
+  <programme start="20261013070000 +0000" stop="20261013080000 +0000" channel="ent"><title>Stray & ampersand</title></programme>
+</tv>

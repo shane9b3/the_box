@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="ov"><display-name>Overlaps</display-name></channel>
+  <channel id="ph"><display-name>Placeholder</display-name></channel>
+  <programme start="20261013060000 +0000" stop="20261013073000 +0000" channel="ov"><title>A</title></programme>
+  <programme start="20261013070000 +0000" stop="20261013080000 +0000" channel="ov"><title>B</title></programme>
+  <programme start="20261013080000 +0000" stop="20261013090000 +0000" channel="ov"><title>C1</title></programme>
+  <programme start="20261013080000 +0000" stop="20261013083000 +0000" channel="ov"><title>C2</title></programme>
+  <programme start="20261013100000 +0000" stop="20261013110000 +0000" channel="ov"><title>E</title></programme>
+  <programme start="20261013090000 +0000" stop="20261013100000 +0000" channel="ov"><title>D</title></programme>
+  <programme start="20261013110000 +0000" channel="ov"><title>F</title></programme>
+  <programme start="20261013120000 +0000" stop="20261013120000 +0000" channel="ov"><title>Z</title></programme>
+  <programme start="20261013120000 +0000" stop="20261013110000 +0000" channel="ov"><title>N</title></programme>
+  <programme start="20261013120000 +0000" stop="20261013190000 +0000" channel="ov"><title>Seven</title></programme>
+  <programme start="20261013190000 +0000" channel="ov"><title>Last</title></programme>
+  <programme start="20261013000000 +0000" stop="20261014060000 +0000" channel="ph"><title>Off air</title></programme>
+  <programme start="20261013073000 +0000" stop="20261013083000 +0000" channel="ph"><title>R1</title></programme>
+  <programme start="20261013083000 +0000" stop="20261013123000 +0000" channel="ph"><title>R2</title></programme>
+  <programme start="20261013123000 +0000" stop="20261013130000 +0000" channel="ph"><title>R3</title></programme>
+  <programme start="20261013200000 +0000" stop="20261013210000 +0000" channel="ph"><title>R4</title></programme>
+</tv>

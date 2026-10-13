@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="ep"><display-name>Episodes</display-name></channel>
+  <programme start="20261013060000 +0000" stop="20261013070000 +0000" channel="ep"><title>ns_full</title><episode-num system="xmltv_ns">2.9.0/2</episode-num></programme>
+  <programme start="20261013070000 +0000" stop="20261013080000 +0000" channel="ep"><title>ns_episode_only</title><episode-num system="xmltv_ns">.9.</episode-num></programme>
+  <programme start="20261013080000 +0000" stop="20261013090000 +0000" channel="ep"><title>ns_zero</title><episode-num system="xmltv_ns">0.0.</episode-num></programme>
+  <programme start="20261013090000 +0000" stop="20261013100000 +0000" channel="ep"><title>ns_totals</title><episode-num system="xmltv_ns">1/3.4/10.</episode-num></programme>
+  <programme start="20261013100000 +0000" stop="20261013110000 +0000" channel="ep"><title>onscreen</title><episode-num system="onscreen">S03E10</episode-num></programme>
+  <programme start="20261013110000 +0000" stop="20261013120000 +0000" channel="ep"><title>onscreen_ep</title><episode-num system="onscreen">Ep. 5</episode-num></programme>
+  <programme start="20261013120000 +0000" stop="20261013130000 +0000" channel="ep"><title>dd_progid</title><episode-num system="dd_progid">EP01234567.0012</episode-num></programme>
+  <programme start="20261013130000 +0000" stop="20261013140000 +0000" channel="ep"><title>several</title><episode-num system="dd_progid">SH0001.0002</episode-num><episode-num system="onscreen">S6E3</episode-num><episode-num system="xmltv_ns">4.1.</episode-num></programme>
+  <programme start="20261013140000 +0000" stop="20261013150000 +0000" channel="ep"><title>sxxexx</title><episode-num system="SxxExx">S01E04</episode-num></programme>
+</tv>

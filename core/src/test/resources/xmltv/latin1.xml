@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<tv>
+  <channel id="lat"><display-name>Télé Latin</display-name></channel>
+  <programme start="20261013060000 +0000" stop="20261013070000 +0000" channel="lat"><title>Télé Matin</title><desc>Ça va très bien</desc></programme>
+</tv>

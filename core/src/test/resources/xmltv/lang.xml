@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="lang"><display-name lang="fr">Chaîne</display-name><display-name lang="en">Channel</display-name><display-name>Bare</display-name></channel>
+  <programme start="20261013060000 +0000" stop="20261013070000 +0000" channel="lang">
+    <title lang="fr">Le Journal</title><title lang="en">The News</title>
+    <sub-title lang="fr">Édition</sub-title><sub-title lang="en-GB">Edition</sub-title>
+    <desc lang="fr">Les infos</desc><desc lang="en">The headlines</desc>
+    <category lang="fr">Actualités</category><category lang="en">News</category><category lang="en">Info</category><category lang="en">news</category>
+  </programme>
+  <programme start="20261013070000 +0000" stop="20261013080000 +0000" channel="lang">
+    <title>No Lang</title><title lang="fr">Français</title>
+  </programme>
+</tv>

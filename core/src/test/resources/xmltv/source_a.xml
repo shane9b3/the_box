@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="shared.id"><display-name>Shared A</display-name></channel>
+  <programme start="20261013060000 +0000" stop="20261013070000 +0000" channel="shared.id"><title>A1</title><sub-title>Télévision</sub-title></programme>
+</tv>

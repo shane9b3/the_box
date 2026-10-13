@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="shared.id"><display-name>Shared B</display-name></channel>
+  <channel id="b.only"><display-name>B Only</display-name></channel>
+  <programme start="20261013060000 +0000" stop="20261013070000 +0000" channel="shared.id"><title>B1</title></programme>
+  <programme start="20261013070000 +0000" stop="20261013080000 +0000" channel="shared.id"><title>B2</title></programme>
+  <programme start="20261013070000 +0000" stop="20261013080000 +0000" channel="b.only"><title>B Only Show</title></programme>
+</tv>

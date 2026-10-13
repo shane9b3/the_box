@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="early"><display-name>Early Channel</display-name></channel>
+  <programme start="20261013060000 +0000" stop="20261013070000 +0000" channel="early"><title>E1</title></programme>
+  <programme start="20261013060000 +0000" stop="20261013070000 +0000" channel="late"><title>L1</title></programme>
+  <channel id="late"><display-name lang="en">Late Channel</display-name><icon src="http://img.example/late.png"/></channel>
+  <channel id="other"><display-name>Other Channel</display-name></channel>
+  <programme start="20261013070000 +0000" stop="20261013080000 +0000" channel="late"><title>L2</title></programme>
+  <programme start="20261013070000 +0000" stop="20261013080000 +0000" channel="other"><title>O1</title></programme>
+</tv>

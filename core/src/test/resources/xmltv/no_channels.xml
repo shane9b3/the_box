@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <programme start="20261013060000 +0000" stop="20261013070000 +0000" channel="a.id"><title>A1</title></programme>
+  <programme start="20261013060000 +0000" stop="20261013070000 +0000" channel="b.id"><title>B1</title></programme>
+  <programme start="20261013070000 +0000" stop="20261013080000 +0000" channel="a.id"><title>A2</title></programme>
+</tv>
