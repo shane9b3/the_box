@@ -104,6 +104,8 @@ The ranked top-25 "make or break" list and the complaint → decision → verifi
 
 Run the ten experiments in `review/architecture-review.md` §D. The ones that can change the architecture: **D1** hole-punch surface rendering on Fire OS 6/7, **D2** Compose grid vs View grid at 60 fps, **D3** zap latency, **D4** transparent TS reconnect, **D5** max-connection behaviour. Build a **fake Xtream panel** (LAN server with configurable linger, 302 tokens, 403/458/509 behaviours, PTS resets) first; most experiments and later tests depend on it.
 
+**Hardware status (2026-10-13):** no Fire TV Stick or Onn 4K is available. D1–D5 run first on the Android TV API 30 emulator (`TheBox_TV_API30`) for *correctness only*; the frame-time and zap-time gates in §6 stay open until a low-end device is on hand. Recommended reference device: Onn 4K (Google TV, ~US$20) plus a Fire TV Stick 4K (Fire OS 6, API 25) for the oldest supported path. M1 proceeds in parallel because it does not depend on these spikes.
+
 Also in the spike phase:
 - Version catalog is pinned in §3 (fact-checked). Bundled SQLite FTS5 support is confirmed; keep the FTS4 fallback path only if a device test contradicts it.
 - 2-hour hands-on check of TiviMate's actual key map and settings labels (most "TiviMate does X" claims in the research are single-source).
