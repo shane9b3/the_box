@@ -29,7 +29,13 @@ data class RawCatchup(
 data class ParsedChannel(
     val kind: EntryKind,
     val name: String,
-    /** Absolute, pipe headers removed, credentials NOT yet templated (the differ templates). */
+    /**
+     * Pipe headers removed. (amended 2026-10-13) The form depends on the producer:
+     * - M3U (WP-A parser): absolute, credentials still in clear. The differ templates them to `{{u}}`/`{{p}}`
+     *   when the list is Xtream-shaped (§3.2.4); nothing else may template them before or after it.
+     * - Xtream API (WP-C decoder): already templated, `{{base}}/live/{{u}}/{{p}}/<id>.{{ext}}`. The differ
+     *   never templates XTREAM playlists, so this is stored as is.
+     */
     val url: String,
     /** 0-based position among emitted entries (all kinds). */
     val position: Int,

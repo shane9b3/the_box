@@ -30,10 +30,10 @@ class CatchupUrlBuilderTest {
     @Test
     fun variantOrder() {
         assertEquals(listOf("xc-path", "xc-php", "xc-path-sec"), b.variants(target(CatchupMode.XC)))
-        assertEquals(listOf("xc-php", "xc-path", "xc-path-sec"), b.variants(target(CatchupMode.XC), winner = "xc-php"))
-        assertEquals(listOf("xc-path", "xc-php", "xc-path-sec"), b.variants(target(CatchupMode.XC), winner = "flussonic-abs"), "winner of another mode ignored")
+        assertEquals(listOf("xc-php", "xc-path", "xc-path-sec"), b.variants(target(CatchupMode.XC).copy(winner = "xc-php")))
+        assertEquals(listOf("xc-path", "xc-php", "xc-path-sec"), b.variants(target(CatchupMode.XC).copy(winner = "flussonic-abs")), "winner of another mode ignored")
         assertEquals(listOf("flussonic-range", "flussonic-abs", "flussonic-kodi"), b.variants(target(CatchupMode.FLUSSONIC_TS)))
-        assertEquals(listOf("flussonic-kodi", "flussonic-range", "flussonic-abs"), b.variants(target(CatchupMode.FLUSSONIC), "flussonic-kodi"))
+        assertEquals(listOf("flussonic-kodi", "flussonic-range", "flussonic-abs"), b.variants(target(CatchupMode.FLUSSONIC).copy(winner = "flussonic-kodi")))
         assertEquals(listOf("default"), b.variants(target(CatchupMode.DEFAULT, source = "http://a/{utc}")))
         assertEquals(listOf("append"), b.variants(target(CatchupMode.APPEND, source = "?u={utc}")))
         assertEquals(listOf("vod"), b.variants(target(CatchupMode.VOD, source = "http://v/{catchup-id}")))
@@ -41,6 +41,32 @@ class CatchupUrlBuilderTest {
         assertEquals(listOf("shift", "xc-path", "xc-php"), b.variants(target(CatchupMode.SHIFT)))
         assertEquals(listOf("shift"), b.variants(target(CatchupMode.SHIFT, xtream = null)))
         assertEquals(emptyList(), b.variants(target(CatchupMode.OFF)))
+    }
+
+    @Test
+    fun persistedWinnerIsTheDefaultVariant() {
+        // (amended 2026-10-13) CatchupTarget.winner drives both the probe order and build()'s default.
+        val tb = TimeBase(serverZone = ZoneOffset.UTC)
+        assertEquals("xc-path", ok(b.build(target(CatchupMode.XC), tb, window)).variant)
+        assertEquals("xc-php", ok(b.build(target(CatchupMode.XC).copy(winner = "xc-php"), tb, window)).variant)
+        assertEquals("xc-path", ok(b.build(target(CatchupMode.XC).copy(winner = "flussonic-abs"), tb, window)).variant)
+    }
+
+    @Test
+    fun diagnosticsReachTheCaller() {
+        // (amended 2026-10-13) Fallbacks are returned in CatchupBuild.Ok.diagnostics, not only logged.
+        val noZone = assertIs<CatchupBuild.Ok>(b.build(target(CatchupMode.XC), TimeBase.DEFAULT, window))
+        assertEquals(listOf<CatchupDiagnostic>(CatchupDiagnostic.PanelZoneUnknown), noZone.diagnostics)
+        val known = assertIs<CatchupBuild.Ok>(b.build(target(CatchupMode.XC), TimeBase(serverZone = ZoneOffset.UTC), window))
+        assertEquals(emptyList(), known.diagnostics)
+
+        val tpl = target(CatchupMode.DEFAULT, live = "http://h/ch.ts", source = "http://h/a?s={utc}&x={bogus}", xtream = null)
+        val r = assertIs<CatchupBuild.Ok>(b.build(tpl, TimeBase.DEFAULT, window))
+        assertTrue(CatchupDiagnostic.TemplateZoneUnknown in r.diagnostics, "${r.diagnostics}")
+        val unknown = r.diagnostics.filterIsInstance<CatchupDiagnostic.UnknownPlaceholders>().single()
+        assertEquals(listOf("{bogus}"), unknown.placeholders)
+        assertEquals("catchup.unknown_placeholder", unknown.code)
+        assertEquals(emptyList(), assertIs<CatchupBuild.Ok>(b.build(tpl.copy(catchup = tpl.catchup.copy(source = "http://h/a?s={utc}")), TimeBase(templateZone = ZoneOffset.UTC), window)).diagnostics)
     }
 
     @Test

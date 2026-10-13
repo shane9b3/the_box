@@ -93,6 +93,7 @@ class M3uParserImpl : M3uPlaylistParser {
             return M3uParseSummary(
                 entries = entries, live = live, radio = radio, movies = movies, series = series,
                 skippedLines = skippedLines, warnings = warnings, charset = chain.reportedName, hadHeader = header.seen,
+                header = header.build(),
             )
         }
 
@@ -141,10 +142,9 @@ class M3uParserImpl : M3uPlaylistParser {
             when {
                 starts(line, "#EXTINF:") || starts(line, "#EXTINF ") -> extinf(line, lineNo)
                 starts(line, "#EXTM3U") -> {
-                    if (!headerSent) {
-                        header.add(line, 7)
-                        urlLogo = header.build().urlLogo
-                    }
+                    // M25: every #EXTM3U merges (first value per key wins); a late one reaches only the summary.
+                    header.add(line, 7)
+                    if (!headerSent) urlLogo = header.build().urlLogo
                 }
                 starts(line, "#EXTGRP:") -> aux.extGrp(line.substring(8))
                 starts(line, "#EXTVLCOPT:") -> if (!aux.vlcOpt(line.substring(11))) warn(lineNo, WarningCode.BAD_ATTRIBUTE, "EXTVLCOPT")

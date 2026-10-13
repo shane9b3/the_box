@@ -21,6 +21,8 @@ internal class RefreshReportBuilder(private val ctx: MergeContext) {
     var restored = 0
     var newlyMissing = 0
     var groupsTotal = 0
+    var groupsAdded = 0
+    var groupsRemoved = 0
     var duplicateKeys = 0
     var credentialsTemplated = false
     private val keyRules = IntArray(KeyRule.entries.size)
@@ -46,6 +48,8 @@ internal class RefreshReportBuilder(private val ctx: MergeContext) {
         added = added, updated = updated, urlChanged = urlChanged, renamed = renamed, moved = moved,
         unchanged = unchanged, restored = restored, newlyMissing = newlyMissing, purged = finish.purged,
         groupsTotal = groupsTotal,
+        groupsAdded = groupsAdded,
+        groupsRemoved = groupsRemoved,
         duplicateKeys = duplicateKeys,
         keyRules = buildMap { for (r in KeyRule.entries) if (keyRules[r.ordinal] > 0) put(r.name, keyRules[r.ordinal]) },
         favouritesKept = finish.favouritesKept,

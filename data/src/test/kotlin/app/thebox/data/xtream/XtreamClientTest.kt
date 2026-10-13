@@ -44,7 +44,7 @@ class XtreamClientTest {
     private lateinit var server: MockWebServer
     private val sleeps = Collections.synchronizedList(ArrayList<Long>())
     private val http = OkHttpClient.Builder().connectTimeout(2, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).build()
-    private val client = XtreamClient(http, XtreamCatalogDecoderImpl(), Dispatchers.IO, { 1_234_000L }, { sleeps += it })
+    private val client = XtreamClient(http, http, XtreamCatalogDecoderImpl(), Dispatchers.IO, { 1_234_000L }, { sleeps += it })
 
     @Before fun setUp() {
         server = MockWebServer()

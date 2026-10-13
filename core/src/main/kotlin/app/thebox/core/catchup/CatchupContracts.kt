@@ -71,6 +71,12 @@ data class CatchupTarget(
     val catchup: Catchup,
     /** Present for Xtream API channels and for Xtream-shaped M3U URLs. */
     val xtream: XtreamStreamRef?,
+    /**
+     * (amended 2026-10-13) The persisted probe winner (`playlist.catchup_probe_winner`, an [ArchiveRequest.variant]).
+     * [CatchupUrlBuilder.variants] moves it first when it applies to this target, so it is also the default
+     * variant of [CatchupUrlBuilder.build]. A winner of another mode is ignored.
+     */
+    val winner: String? = null,
 )
 
 data class ArchiveWindow(
@@ -97,8 +103,33 @@ data class ArchiveRequest(
 )
 
 sealed interface CatchupBuild {
-    data class Ok(val request: ArchiveRequest) : CatchupBuild
+    /**
+     * (amended 2026-10-13) [diagnostics]: the URL was built, but with a fallback the user may need to fix.
+     * M4 shows them (with the next step) when playback of the archive fails, and in the channel's diagnostics.
+     */
+    data class Ok(val request: ArchiveRequest, val diagnostics: List<CatchupDiagnostic> = emptyList()) : CatchupBuild
     data class Unsupported(val reason: String) : CatchupBuild
+}
+
+/** (amended 2026-10-13) Non-fatal catch-up build findings, surfaced to the UI through [CatchupBuild.Ok.diagnostics]. */
+sealed interface CatchupDiagnostic {
+    /** Stable code for logs and diagnostics screens. */
+    val code: String
+
+    /** `xc`: the panel time zone is unknown, so the timeshift segment used UTC. Next step: set the zone in playlist settings. */
+    data object PanelZoneUnknown : CatchupDiagnostic {
+        override val code: String get() = "catchup.panel_zone_unknown"
+    }
+
+    /** Template date tokens used UTC because no template zone is known. */
+    data object TemplateZoneUnknown : CatchupDiagnostic {
+        override val code: String get() = "catchup.template_zone_unknown"
+    }
+
+    /** `catchup-source` placeholders the builder does not know; they were left as written (at most 5). */
+    data class UnknownPlaceholders(val placeholders: List<String>) : CatchupDiagnostic {
+        override val code: String get() = "catchup.unknown_placeholder"
+    }
 }
 
 object CatchupVariants {
@@ -118,6 +149,9 @@ object CatchupVariants {
 interface CatchupUrlBuilder {
     fun build(target: CatchupTarget, timeBase: TimeBase, window: ArchiveWindow, variant: String? = null): CatchupBuild
 
-    /** Probe order for this target (first = default). M4 tries them in order and stores the winner. */
+    /**
+     * Probe order for this target (first = default). M4 tries them in order and stores the winner.
+     * (amended 2026-10-13) [CatchupTarget.winner] comes first when it belongs to this target's list.
+     */
     fun variants(target: CatchupTarget): List<String>
 }

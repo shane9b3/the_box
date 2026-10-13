@@ -4,6 +4,7 @@ import app.thebox.core.catchup.TimeBaseFactory
 import app.thebox.core.common.BoxLog
 import app.thebox.core.common.CancelCheck
 import app.thebox.core.common.Hash64
+import app.thebox.core.common.ImportGate
 import app.thebox.core.common.Outcome
 import app.thebox.core.common.Redact
 import app.thebox.core.common.SourceError
@@ -130,6 +131,8 @@ class RefreshRepository @Inject constructor(
             val ctx = MergeContext(
                 playlistId = playlistId, playlistType = playlist.type, refreshSeq = playlist.refreshSeq + 1, nowMs = clock.now(),
                 previousLiveCount = playlist.liveCount, forceAcceptShrink = forceAcceptShrink,
+                // Read the shared gate per batch, so a gate installed mid-refresh (M2) applies at once.
+                gate = ImportGate { importMutex.gate.awaitClear() },
             )
             val cancel = cancelCheck()
             val report = importMutex.withLock {
@@ -252,7 +255,11 @@ class RefreshRepository @Inject constructor(
 
     // ---------------------------------------------------------------- producers
 
-    /** Re-opens and decompresses the cached file on every pass (the differ runs two). */
+    /**
+     * Re-opens and decompresses the cached file on every pass (the differ runs two). The stored header is the
+     * summary's merged one (amended 2026-10-13: it includes `#EXTM3U` lines after the first entry).
+     * Channel URLs are passed raw: the differ templates them once (§3.2.4).
+     */
     private fun m3uProducer(p: PlaylistEntity, secret: PlaylistSecret, dl: Download, headerOut: (M3uHeader) -> Unit) = EntryProducer { consumer ->
         val options = M3uParseOptions(
             baseUrl = if (p.type == PlaylistType.M3U_URL) secret.urls.firstOrNull() else null,
@@ -261,14 +268,16 @@ class RefreshRepository @Inject constructor(
             extgrpSticky = p.extgrpSticky,
         )
         Compression.decompress(dl.file.source().buffer()).use { src ->
-            parser.parse(
+            var early: M3uHeader? = null
+            val summary = parser.parse(
                 src, options,
                 object : M3uSink {
-                    override fun onHeader(header: M3uHeader) = headerOut(header)
+                    override fun onHeader(header: M3uHeader) { early = header }
                     override fun onEntry(entry: ParsedChannel) = consumer(entry)
                     override fun onWarning(warning: ParseWarning) {}
                 },
             )
+            (summary.header ?: early)?.let(headerOut)
         }
     }
 
@@ -277,7 +286,14 @@ class RefreshRepository @Inject constructor(
             dl.categoriesFile?.takeIf { it.exists() }?.inputStream()?.use { decoder.categories(it) } ?: emptyList()
         }
         return EntryProducer { consumer ->
-            dl.file.inputStream().buffered(64 * 1024).use { input -> decoder.liveChannels(input, categories).forEach(consumer) }
+            dl.file.inputStream().buffered(64 * 1024).use { input ->
+                decoder.liveChannels(input, categories).forEach { e ->
+                    // Xtream API channels arrive templated from the decoder; the differ never templates XTREAM
+                    // playlists, so a raw URL here would store credentials. Refuse rather than leak or re-template.
+                    if (!isXtreamTemplate(e.url)) throw SourceException(SourceError.Internal("xtream channel url is not templated"))
+                    consumer(e)
+                }
+            }
         }
     }
 
@@ -395,6 +411,15 @@ class RefreshRepository @Inject constructor(
     companion object {
         private const val TAG = "RefreshRepository"
         const val PLAYLIST_CACHE_DIR = "playlistCacheDir"
+
+        /** `{{base}}/…/{{u}}/{{p}}/…` with each token exactly once: the stored form of an Xtream API channel URL (§1.2.4 ParsedChannel.url). */
+        internal fun isXtreamTemplate(url: String): Boolean =
+            url.startsWith("{{base}}/") && once(url, "{{u}}") && once(url, "{{p}}")
+
+        private fun once(s: String, token: String): Boolean {
+            val i = s.indexOf(token)
+            return i >= 0 && s.indexOf(token, i + token.length) < 0
+        }
 
         /** Replaces credential literals with `{{u}}`/`{{p}}` (§3.2.4) before anything derived is stored. */
         fun template(s: String, user: String?, pass: String?): String {

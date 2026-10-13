@@ -18,6 +18,7 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testFixturesImplementation(libs.sqlite.bundled)
     testFixturesImplementation(libs.okio)
+    testFixturesImplementation(libs.kxml2)       // EpgTestDb.openStore() builds a real EpgStoreImpl (amended 2026-10-13)
 }
 
 tasks.named<Test>("test") { useJUnitPlatform { excludeTags("perf") } }

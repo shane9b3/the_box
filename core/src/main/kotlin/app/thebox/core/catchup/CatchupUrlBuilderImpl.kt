@@ -19,13 +19,9 @@ import java.time.ZoneOffset
  */
 class CatchupUrlBuilderImpl : CatchupUrlBuilder {
 
-    override fun variants(target: CatchupTarget): List<String> = variants(target, winner = null)
-
-    /**
-     * Probe order with the persisted winner (`playlist.catchup_probe_winner`) moved first when it belongs to this
-     * target's list. (The contract's `variants(target)` has no winner parameter; M4 calls this overload.)
-     */
-    fun variants(target: CatchupTarget, winner: String?): List<String> {
+    /** Probe order with [CatchupTarget.winner] (`playlist.catchup_probe_winner`) moved first when it belongs to this target's list. */
+    override fun variants(target: CatchupTarget): List<String> {
+        val winner = target.winner
         val mode = target.catchup.mode
         val own: List<String> = when {
             mode == CatchupMode.XC -> XC_VARIANTS
@@ -72,8 +68,13 @@ class CatchupUrlBuilderImpl : CatchupUrlBuilder {
         if (open && isXc) e = s + minOf(now - s, MAX_OPEN_XC_SEC).coerceAtLeast(0) // B5.1
         val d = e - s
 
+        val diagnostics = ArrayList<CatchupDiagnostic>(2)
+        // The template zone only matters when the variant expands a template.
         val templateZone: ZoneId = timeBase.effectiveTemplateZone ?: ZoneOffset.UTC.also {
-            BoxLog.i(TAG) { "template zone unknown: using UTC for date tokens" }
+            if (v == CatchupVariants.DEFAULT || v == CatchupVariants.APPEND || v == CatchupVariants.VOD) {
+                BoxLog.i(TAG) { "template zone unknown: using UTC for date tokens" }
+                diagnostics += CatchupDiagnostic.TemplateZoneUnknown
+            }
         }
         val values = TemplateExpander.Values(s, e, now, templateZone, window.catchupId)
         val seekRange = s..e
@@ -88,16 +89,17 @@ class CatchupUrlBuilderImpl : CatchupUrlBuilder {
                 requestEnd = if (open) null else Instant.ofEpochSecond(e),
                 nativeSeekRange = seek,
             ),
+            diagnostics.toList(),
         )
 
         return when (v) {
             CatchupVariants.DEFAULT -> {
                 val src = catchup.source ?: return CatchupBuild.Unsupported("no catchup-source")
-                ok(resolveAgainst(target.liveUrl, expand(src, values)), null)
+                ok(resolveAgainst(target.liveUrl, expand(src, values, diagnostics)), null)
             }
             CatchupVariants.APPEND -> {
                 val src = catchup.source ?: return CatchupBuild.Unsupported("no catchup-source")
-                var tail = expand(src, values)
+                var tail = expand(src, values, diagnostics)
                 if (tail.startsWith("?") && target.liveUrl.contains('?')) tail = "&" + tail.substring(1)
                 ok(target.liveUrl + tail, null)
             }
@@ -108,12 +110,13 @@ class CatchupUrlBuilderImpl : CatchupUrlBuilder {
             CatchupVariants.VOD -> {
                 if (window.catchupId.isNullOrEmpty()) return CatchupBuild.Unsupported("no catchup-id")
                 val src = catchup.source ?: return CatchupBuild.Unsupported("no catchup-source")
-                ok(resolveAgainst(target.liveUrl, expand(src, values)), seekRange)
+                ok(resolveAgainst(target.liveUrl, expand(src, values, diagnostics)), seekRange)
             }
             CatchupVariants.XC_PATH, CatchupVariants.XC_PHP, CatchupVariants.XC_PATH_SECONDS -> {
                 val ref = target.xtream ?: return CatchupBuild.Unsupported("no Xtream stream reference for xc catch-up")
                 val zone: ZoneId = timeBase.effectiveTokenZone ?: ZoneOffset.UTC.also {
                     BoxLog.w(TAG, "panel time zone unknown, set it in playlist settings: xc catch-up uses UTC")
+                    diagnostics += CatchupDiagnostic.PanelZoneUnknown
                 }
                 val urls = XtreamUrls(ref.base, ref.username, ref.password)
                 val ext = ref.extension.trim().trimStart('.').ifEmpty { "ts" }
@@ -145,9 +148,13 @@ class CatchupUrlBuilderImpl : CatchupUrlBuilder {
         }
     }
 
-    private fun expand(template: String, values: TemplateExpander.Values): String {
+    private fun expand(template: String, values: TemplateExpander.Values, diagnostics: MutableList<CatchupDiagnostic>): String {
         val r = TemplateExpander.expand(template, values)
-        if (r.unknown.isNotEmpty()) BoxLog.w(TAG, "unknown catch-up placeholders left as written: ${r.unknown.distinct().take(5)}")
+        if (r.unknown.isNotEmpty()) {
+            val unknown = r.unknown.distinct().take(5)
+            BoxLog.w(TAG, "unknown catch-up placeholders left as written: $unknown")
+            diagnostics += CatchupDiagnostic.UnknownPlaceholders(unknown)
+        }
         return r.url
     }
 

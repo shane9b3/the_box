@@ -627,7 +627,13 @@ data class RawCatchup(
 data class ParsedChannel(
     val kind: EntryKind,
     val name: String,
-    /** Absolute, pipe headers removed, credentials NOT yet templated (the differ templates). */
+    /**
+     * Pipe headers removed. (amended 2026-10-13: the old "credentials NOT yet templated" was wrong for Xtream.)
+     * - M3U (WP-A parser): absolute, credentials still in clear. The differ templates them to `{{u}}`/`{{p}}`
+     *   when the list is Xtream-shaped (§3.2.4); nothing else may template them before or after it.
+     * - Xtream API (WP-C decoder): already templated, `{{base}}/live/{{u}}/{{p}}/<id>.{{ext}}`. The differ
+     *   never templates XTREAM playlists, so this is stored as is.
+     */
     val url: String,
     /** 0-based position among emitted entries (all kinds). */
     val position: Int,
@@ -722,6 +728,12 @@ interface M3uSink {
 data class M3uParseSummary(
     val entries: Int, val live: Int, val radio: Int, val movies: Int, val series: Int,
     val skippedLines: Int, val warnings: Int, val charset: String, val hadHeader: Boolean,
+    /**
+     * (amended 2026-10-13: merged header) The header merged over every `#EXTM3U` line (§3.4 M25), including
+     * ones after the first entry, which onHeader cannot include. Callers that store the header use this one.
+     * Null only from parsers that predate the field (fall back to the onHeader value).
+     */
+    val header: M3uHeader? = null,
 )
 
 /** Stub in commit 0 at m3u/M3uParserImpl.kt; WP-A owns the body. */
@@ -732,6 +744,7 @@ data class M3uParseSummary(
 package app.thebox.core.refresh
 
 import app.thebox.core.common.CancelCheck
+import app.thebox.core.common.ImportGate
 import app.thebox.core.model.StableKey
 import app.thebox.core.source.EntryKind
 import app.thebox.core.source.ParsedChannel
@@ -775,7 +788,12 @@ data class KeyedChannel(
     val channel: ParsedChannel,
 )
 
-/** One existing row, streamed from library.db by WP-D; the differ keeps only primitives (§3.3.2). */
+/**
+ * One existing row, streamed from library.db by WP-D; the differ keeps only primitives (§3.3.2).
+ * (amended 2026-10-13: kind, groupKey) They let the differ count S18 "newly missing" over LIVE+RADIO only,
+ * set KeyRemap.sameGroup on automatic remaps, and compute groupsAdded/groupsRemoved. A row without [kind]
+ * counts as LIVE; when any row has a null [groupKey] the differ reports 0 groups added/removed.
+ */
 class ExistingChannel(
     val id: Long,
     val stableKey: String,
@@ -785,6 +803,9 @@ class ExistingChannel(
     val sortIndex: Int,
     val missingSince: Long?,
     val missingCount: Int,
+    val kind: EntryKind = EntryKind.LIVE,
+    /** The row's group key (KeyedChannel.groupKey of the last refresh), "" when the row has no group row, null when unknown. */
+    val groupKey: String? = null,
 )
 
 fun interface ExistingChannels {
@@ -836,6 +857,10 @@ data class FinishStats(val purged: Int, val favouritesKept: Int, val favouritesO
 interface MergeSink {
     fun begin(groups: List<GroupRow>, detected: DetectedCredentials?)
     fun apply(batch: MergeBatch)
+    /**
+     * One transaction (§3.3.3). (amended 2026-10-13: refresh_log) It does **not** write refresh_log: WP-D's
+     * RefreshRepository logs the final report after the post-merge steps, so a failure there is logged too.
+     */
     fun finish(finish: MergeFinish): FinishStats
     fun abort(error: Throwable)
 }
@@ -851,6 +876,11 @@ data class MergeContext(
     val graceMs: Long = 7L * 24 * 3600 * 1000,
     val purgeAfterMissingRefreshes: Int = 2,
     val batchSize: Int = 2_000,
+    /**
+     * (amended 2026-10-13: gate in the context, not the PlaylistDifferImpl constructor) Awaited before every
+     * MergeSink.apply. WP-D passes the process-wide gate held by ImportMutex, shared with EPG build/patch.
+     */
+    val gate: ImportGate = ImportGate.Open,
 )
 
 /** Stub in commit 0 at refresh/PlaylistDifferImpl.kt; WP-A owns the body. */
@@ -1402,6 +1432,11 @@ data class CatchupTarget(
     val catchup: Catchup,
     /** Present for Xtream API channels and for Xtream-shaped M3U URLs. */
     val xtream: XtreamStreamRef?,
+    /**
+     * (amended 2026-10-13: persisted probe winner) playlist.catchup_probe_winner. variants(target) moves it first
+     * when it applies to this target, so it is also build()'s default variant. A winner of another mode is ignored.
+     */
+    val winner: String? = null,
 )
 
 data class ArchiveWindow(
@@ -1428,8 +1463,20 @@ data class ArchiveRequest(
 )
 
 sealed interface CatchupBuild {
-    data class Ok(val request: ArchiveRequest) : CatchupBuild
+    /** (amended 2026-10-13: diagnostics) Built, but with fallbacks M4 surfaces in the UI (with the next step). */
+    data class Ok(val request: ArchiveRequest, val diagnostics: List<CatchupDiagnostic> = emptyList()) : CatchupBuild
     data class Unsupported(val reason: String) : CatchupBuild
+}
+
+/** (amended 2026-10-13) Non-fatal catch-up build findings. [code] is stable. */
+sealed interface CatchupDiagnostic {
+    val code: String
+    /** `xc` used UTC because the panel zone is unknown. Next step: set it in playlist settings. */
+    data object PanelZoneUnknown : CatchupDiagnostic { override val code get() = "catchup.panel_zone_unknown" }
+    /** Template date tokens used UTC because no template zone is known. */
+    data object TemplateZoneUnknown : CatchupDiagnostic { override val code get() = "catchup.template_zone_unknown" }
+    /** catchup-source placeholders left as written (at most 5). */
+    data class UnknownPlaceholders(val placeholders: List<String>) : CatchupDiagnostic { override val code get() = "catchup.unknown_placeholder" }
 }
 
 object CatchupVariants {
@@ -1449,7 +1496,10 @@ object CatchupVariants {
 interface CatchupUrlBuilder {
     fun build(target: CatchupTarget, timeBase: TimeBase, window: ArchiveWindow, variant: String? = null): CatchupBuild
 
-    /** Probe order for this target (first = default). M4 tries them in order and stores the winner. */
+    /**
+     * Probe order for this target (first = default). M4 tries them in order and stores the winner.
+     * (amended 2026-10-13) CatchupTarget.winner comes first when it belongs to the list; no concrete-class overload.
+     */
     fun variants(target: CatchupTarget): List<String>
 }
 ```
@@ -1615,7 +1665,7 @@ Module `:core`. Consumes: `Compression`, `Hash64`, `NameNormalizer.forMatch` (fo
 | `epg/store/RepairPass.kt` | Per-channel clip/infer/stats (§3.5.5) |
 | `epg/store/EpgReaderImpl.kt` | `window`, `detail`, `at`, `search`, `forEachChannel`, `findChannels`, `resolve`, title LRU |
 
-Tests: `core/src/test/kotlin/app/thebox/core/{xmltv,epg/store}/…`, plus the `perf` tag (§5.5). Test utilities `XmltvGenerator.kt` and `EpgTestDb.kt` live in `core/src/testFixtures/kotlin/app/thebox/core/epg/testutil/` (owned by B; WP-D uses them read-only through `testImplementation(testFixtures(project(":core")))`). (reviewed 2026-10-13, B2: another module cannot see `src/test` classes, so these moved to test fixtures.)
+Tests: `core/src/test/kotlin/app/thebox/core/{xmltv,epg/store}/…`, plus the `perf` tag (§5.5). Test utilities `XmltvGenerator.kt` and `EpgTestDb.kt` live in `core/src/testFixtures/kotlin/app/thebox/core/epg/testutil/` (owned by B; WP-D uses them read-only through `testImplementation(testFixtures(project(":core")))`). (amended 2026-10-13) `EpgTestDb.openStore(dir, driver, freeSpace, clock, forceFts4)` builds a real `EpgStoreImpl` with `KXmlParser`; the fixtures get `testFixturesImplementation(libs.kxml2)` for it (kxml2 stays `compileOnly` for `:core` main). (reviewed 2026-10-13, B2: another module cannot see `src/test` classes, so these moved to test fixtures.)
 
 ### 1.5 WP-C: Xtream client, URL builders, account info, TimeBase, CatchupUrlBuilder
 
@@ -1670,7 +1720,7 @@ Modules `:core` (matcher), `:data`, `:app`. Consumes everything above. Exposes t
 | `data/.../security/TinkCredentialStore.kt` | `CredentialStore` (§3.9) |
 | `data/.../epg/AndroidFreeSpace.kt` | `StatFs`. (reviewed 2026-10-13, S1: `SqliteTmpDir.kt` removed. The bundled SQLite is built with `TEMP_STORE=3`, so `SQLITE_TMPDIR` is never read) |
 | `data/.../work/PlaylistRefreshWorker.kt`, `EpgImportWorker.kt`, `EpgPatchWorker.kt` | `@HiltWorker` (§3.10); each implements `getForegroundInfo()` (reviewed 2026-10-13, B4) |
-| `data/.../work/ImportMutex.kt` | (reviewed 2026-10-13, S9) Process-wide `Mutex` held by the playlist merge phase and by EPG build/patch, so the two importers never overlap (§4.5 budget) |
+| `data/.../work/ImportMutex.kt` | (reviewed 2026-10-13, S9) Process-wide `Mutex` held by the playlist merge phase and by EPG build/patch, so the two importers never overlap (§4.5 budget). (amended 2026-10-13) It also holds the single `ImportGate` both importers await between batches (`MergeContext.gate`, `EpgStore.build/patch(gate)`); M2 installs the zap gate there |
 | `data/.../work/RefreshScheduler.kt` | Periodic and one-time scheduling, app-start staleness |
 | `data/.../work/WorkNotifications.kt` | Channel + foreground info (dataSync) |
 | `data/.../di/DataModule.kt`, `DatabaseModule.kt`, `EpgModule.kt`, `DispatchersModule.kt`, `Qualifiers.kt` | Hilt bindings |
@@ -2411,7 +2461,7 @@ No `String` is retained per existing row.
 | found | same, and (`sortIndex` differs or missing) | `ChannelTouch` | `moved` / `restored` |
 | found | same, same position, not missing | nothing | `unchanged` |
 
-When `inserts + updates + touches ≥ batchSize` (2,000): `gate.awaitClear()`, `cancel.throwIfCancelled()`, `sink.apply(batch)`. Each `apply` is **one write transaction** in WP-D.
+When `inserts + updates + touches ≥ batchSize` (2,000): `ctx.gate.awaitClear()` (amended 2026-10-13: `MergeContext.gate`), `cancel.throwIfCancelled()`, `sink.apply(batch)`. Each `apply` is **one write transaction** in WP-D.
 
 **Finish:** for every slot not `seen`:
 
@@ -2419,9 +2469,11 @@ When `inserts + updates + touches ≥ batchSize` (2,000): `gate.awaitClear()`, `
 - missing before, and `now − missingSince ≥ graceMs` and `missingCount + 1 ≥ purgeAfterMissingRefreshes` → `purgeIds` (their keys → `purgedKeys`);
 - otherwise → `stillMissingIds`.
 
-(reviewed 2026-10-13, S7) **Automatic single-key migration.** During pass 2 the differ remembers each *inserted* entry's `urlHash → key`. Values are kept only while unique, and a second occurrence sets a sentinel. At finish, every *newly missing* slot whose `urlHash` maps to exactly one inserted key, used by no other missing slot, becomes a `KeyRemap(old, new, sameGroup)` in `MergeFinish.autoRemaps`. This catches the common single-channel case that the 70 % mass-remap prompt misses: the provider adds or fixes a `tvg-id`, so the key moves from `url:`/`ng:` to `tvg:`, or renames a `tvg:` channel. Tokenised URLs that change every refresh simply never match. The sink applies the remaps with the same `remapUserData` SQL (§3.3.6) inside the finish transaction and counts `keysMigrated`. The old row is then soft-deleted as usual.
+(amended 2026-10-13) `RefreshReport.newlyMissing` counts LIVE+RADIO slots only (S18; `ExistingChannel.kind`), while `newlyMissingIds` still lists every kind. `groupsAdded`/`groupsRemoved` compare the `(groupKind, groupKey)` set of this refresh with the groups that had at least one non-missing row before (`ExistingChannel.groupKey`); both stay 0 when the existing rows carry no group key.
 
-`sink.finish(…)` is one transaction. It also sets `missing_since` on groups not in `groupKeysSeen`, clears it on seen ones, and deletes groups that are past grace with no channels. It updates `playlist.live_count`, `refresh_seq` and `last_success_at`, and **only here** `playlist.etag`/`last_modified` (reviewed 2026-10-13, S10: persisting them before a merge that then fails would make the next refresh a 304 that never retries the merge). It applies `autoRemaps`, writes `purged_key` tombstones and deletes tombstones for keys seen again, writes `refresh_log`, and computes `favouritesKept`/`favouritesOrphaned` with a join of `favourite` against non-missing channels. On any exception the differ calls `sink.abort(e)` (no-op except logging) and rethrows. Batches already applied stay applied: they are correct upserts, and nothing has been marked missing yet.
+(reviewed 2026-10-13, S7) **Automatic single-key migration.** During pass 2 the differ remembers each *inserted* entry's `urlHash → key`. Values are kept only while unique, and a second occurrence sets a sentinel. At finish, every *newly missing* slot whose `urlHash` maps to exactly one inserted key, used by no other missing slot, becomes a `KeyRemap(old, new, sameGroup)` in `MergeFinish.autoRemaps` (`sameGroup`: the old row's `(groupKind, groupKey)` equals the new entry's; amended 2026-10-13). This catches the common single-channel case that the 70 % mass-remap prompt misses: the provider adds or fixes a `tvg-id`, so the key moves from `url:`/`ng:` to `tvg:`, or renames a `tvg:` channel. Tokenised URLs that change every refresh simply never match. The sink applies the remaps with the same `remapUserData` SQL (§3.3.6) inside the finish transaction and counts `keysMigrated`. The old row is then soft-deleted as usual.
+
+`sink.finish(…)` is one transaction. It also sets `missing_since` on groups not in `groupKeysSeen`, clears it on seen ones, and deletes groups that are past grace with no channels. It updates `playlist.live_count`, `refresh_seq` and `last_success_at`, and **only here** `playlist.etag`/`last_modified` (reviewed 2026-10-13, S10: persisting them before a merge that then fails would make the next refresh a 304 that never retries the merge). It applies `autoRemaps`, writes `purged_key` tombstones and deletes tombstones for keys seen again, and computes `favouritesKept`/`favouritesOrphaned` with a join of `favourite` against non-missing channels. (amended 2026-10-13) `refresh_log` is **not** written here: `RefreshRepository` writes it after the post-merge steps (header, account, EPG sources, matching), on success and on failure. On any exception the differ calls `sink.abort(e)` (no-op except logging) and rethrows. Batches already applied stay applied: they are correct upserts, and nothing has been marked missing yet.
 
 **Sort-index preservation:** `channel.sort_index` is always the provider position, and the refresh owns it. The user's own order lives in `channel_prefs.custom_sort_index` and `group_prefs.custom_sort_index`, which the refresh never touches. The browse query orders by custom index, then provider index (§2.1.4). Channel `number` follows `numbering_mode` at read time (`PROVIDER`: `number` else position+1; `PLAYLIST_ORDER`: position+1; `START_AT:n`: n + position), and `custom_number` overrides it.
 
@@ -2469,7 +2521,7 @@ The parser is a state machine over lines: `pending = null` → `#EXTINF` opens `
 | M22 | Logos | A relative `tvg-logo` with header `url-logo` → `urlLogo + value`, plus `.png` when the value has no extension (Kodi). Without `url-logo` → resolved against `baseUrl`. Inline `data:` logos over 4 KB are dropped (M8) |
 | M23 | Orphans | An `#EXTINF` followed by another `#EXTINF` or EOF → dropped, `EXTINF_WITHOUT_URL`. A URL without `#EXTINF` → an entry named after the URL's last segment, `URL_WITHOUT_EXTINF` |
 | M24 | HLS manifest | Any `#EXT-X-TARGETDURATION`, `#EXT-X-STREAM-INF`, `#EXT-X-MEDIA-SEQUENCE` or `#EXT-X-PLAYLIST-TYPE` **before the first `#EXTINF`** → `NotASource(HLS_MANIFEST)` (M5 offers "Add as a single channel"). After the first `#EXTINF`, `#EXT-X-*` lines are ignored |
-| M25 | Header attributes | `x-tvg-url`, `url-tvg`, `tvg-url` split on `,` and whitespace, trimmed, de-duplicated → `epgUrls`. Also `tvg-shift`; `catchup`/`catchup-type`, `catchup-source`, `catchup-days`, `catchup-correction` → `M3uHeader.catchup`; `url-logo`, `refresh`, `max-conn`. Everything else goes into `attributes`. Several `#EXTM3U` lines (concatenated lists): attributes merge with the first value per key winning, and `epgUrls` is the union |
+| M25 | Header attributes | `x-tvg-url`, `url-tvg`, `tvg-url` split on `,` and whitespace, trimmed, de-duplicated → `epgUrls`. Also `tvg-shift`; `catchup`/`catchup-type`, `catchup-source`, `catchup-days`, `catchup-correction` → `M3uHeader.catchup`; `url-logo`, `refresh`, `max-conn`. Everything else goes into `attributes`. Several `#EXTM3U` lines (concatenated lists): attributes merge with the first value per key winning, and `epgUrls` is the union. (amended 2026-10-13) Lines after the first entry merge too and reach `M3uParseSummary.header` (onHeader has already fired); `RefreshRepository` stores the summary header |
 | M26 | Catch-up attributes | `catchup`/`catchup-type` → `type`; `catchup-source`; `catchup-days` (leading digits, e.g. `7d` → 7); `catchup-correction` (Double); `timeshift` (Int days); `tvg-rec` (Int); `catchup-time` (Long seconds) |
 | M27 | Adult | `adult="1|true"`, `censored="1"`, or a non-empty `parent-code` → `adult = true` |
 | M28 | Nested playlists | `type="playlist"` → skipped with `UNSUPPORTED_SCHEME` (not followed in v1) |
@@ -2727,7 +2779,7 @@ Decided **per response**. Take the first ≤ 5 non-empty titles. A title is deco
 
 #### 3.7.6 Client behaviour (`XtreamClient`, `:data`)
 
-- **Clients:** OkHttp clients from WP-D's `HttpModule`. `@ApiClient`: connect 10 s, read 60 s. `@DownloadClient`: read 120 s. Redirects followed. `User-Agent` = playlist UA, else the app default. Extra headers are added.
+- **Clients:** OkHttp clients from WP-D's `HttpModule`. `@ApiClient`: connect 10 s, read 60 s. `@DownloadClient`: read 120 s (amended 2026-10-13: `XtreamClient` injects `@DownloadClient` for `download()` instead of deriving it from the API client). Redirects followed. `User-Agent` = playlist UA, else the app default. Extra headers are added.
 - **Concurrency:** at most **3** concurrent requests per playlist (`Semaphore` in a `ConcurrentHashMap<Long, Semaphore>`).
 - **Base rotation:** start at `preferredBaseIndex`. On `IOException` (DNS, connect, timeout, reset), 5xx or 520–524, move to the next base. When every base has failed → `Network`/`Http`. `XtreamLogin.baseIndexUsed` is persisted by WP-D.
 - **429:** back off 2, 4 and 8 s (honour `Retry-After` up to 30 s), then `Http(429)`.
@@ -2962,7 +3014,7 @@ Every source is **downloaded to a file first** (`SourceFetcher` or `XtreamApi.do
   1. `forcedCharset`, if set.
   2. A BOM (UTF-8 is stripped; UTF-16 LE/BE switches to `Utf16LineReader`).
   3. `charsetHint` from `Content-Type`, if it is not UTF-8.
-  4. Otherwise strict UTF-8 (`CodingErrorAction.REPORT`) **per line**. On the first malformed line, choose the fallback charset once and emit `CHARSET_FALLBACK`. From then on each line is still tried as strict UTF-8 first, and only lines that fail are decoded with the fallback. (reviewed 2026-10-13, S15: a permanent switch garbles every later line of a UTF-8 file with one corrupt line. High bytes in 1251/1252 text almost never form valid UTF-8, so trying UTF-8 per line is safe.) The fallback is `windows-1251` when at least 70 % of the line's bytes ≥ `0x80` fall in `0xC0–0xFF` (Cyrillic letters) and there are at least 3 of them, otherwise `windows-1252` (a printable superset of Latin-1). The charset appears in the report.
+  4. Otherwise strict UTF-8 (`CodingErrorAction.REPORT`) **per line**. On the first malformed line, choose the fallback charset once and emit `CHARSET_FALLBACK`. From then on each line is still tried as strict UTF-8 first, and only lines that fail are decoded with the fallback. (reviewed 2026-10-13, S15: a permanent switch garbles every later line of a UTF-8 file with one corrupt line. High bytes in 1251/1252 text almost never form valid UTF-8, so trying UTF-8 per line is safe.) The fallback is `windows-1251` when at least 70 % of the line's bytes ≥ `0x80` fall in `0xC0–0xFF` (Cyrillic letters) and there are at least 3 of them, otherwise `windows-1252` (a printable superset of Latin-1). (amended 2026-10-13: lead signed off WP-A's adjacent-high-byte rule) In addition, at least half of those `0xC0–0xFF` bytes must sit next to another high byte: Cyrillic words are runs of high bytes, while French/Spanish accents (`Télé Québec`) are isolated between ASCII letters and would otherwise be decoded as Cyrillic. The charset appears in the report.
 
   The user can override with `playlist.charset_override`. No charset-detection library is added (§7).
 - **Line endings:** LF, CRLF and lone CR. Lines are trimmed. No `\r` survives into a URL or a name.
@@ -3262,6 +3314,7 @@ dependencies {
     testImplementation(libs.kotlinx.coroutines.test)
     testFixturesImplementation(libs.sqlite.bundled)
     testFixturesImplementation(libs.okio)
+    testFixturesImplementation(libs.kxml2)       // (amended 2026-10-13) EpgTestDb.openStore()
 }
 
 tasks.named<Test>("test") { useJUnitPlatform { excludeTags("perf") } }

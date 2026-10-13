@@ -1,20 +1,25 @@
 package app.thebox.data.repo
 
 import app.thebox.core.common.AuthReason
+import app.thebox.core.common.ImportGate
 import app.thebox.core.common.CredentialFailure
 import app.thebox.core.common.NetworkKind
 import app.thebox.core.common.Outcome
 import app.thebox.core.common.SourceError
+import app.thebox.core.identity.StableKeyDeriverImpl
 import app.thebox.core.refresh.DetectedCredentials
+import app.thebox.core.refresh.PlaylistDifferImpl
 import app.thebox.core.refresh.RefreshOutcome
 import app.thebox.core.xtream.AccountStatus
 import app.thebox.core.xtream.XtreamAccountInfo
+import app.thebox.core.xtream.XtreamCatalogDecoder
 import app.thebox.core.xtream.XtreamServerInfo
 import app.thebox.data.contracts.XtreamAction
 import app.thebox.data.contracts.XtreamLogin
 import app.thebox.data.db.LibraryDatabase
 import app.thebox.data.db.entity.EpgMappingEntity
 import app.thebox.data.testutil.FakeDiffer
+import app.thebox.data.testutil.FakeXtreamDecoder
 import app.thebox.data.testutil.TestDb
 import app.thebox.data.testutil.TestGraph
 import app.thebox.data.testutil.scalar
@@ -190,6 +195,69 @@ class RefreshRepositoryTest {
         assertEquals(1, db.playlistDao().get(id)!!.activeBaseIndex)
         assertNotNull(db.xtreamAccountDao().get(id))
         assertNoSecretInDatabase("pw123")
+    }
+
+    // ---- amended 2026-10-13: templating happens exactly once, gate is the shared import gate ----------------
+
+    @Test
+    fun xtreamUrlsAreNeverTemplatedTwice() = runBlocking {
+        // Credentials that collide with the template's literal words: any second pass would rewrite them.
+        val id = (g.playlists.addXtream("X", listOf("http://a.example"), "live", "base1") as Outcome.Ok).value
+        g.xtream.login = Outcome.Ok(XtreamLogin(account(), baseIndexUsed = 0))
+        g.xtream.downloads[XtreamAction.LIVE_CATEGORIES] = "1|News\n"
+        g.xtream.downloads[XtreamAction.LIVE_STREAMS] = "10|BBC|1\n11|ITV|1\n"
+        val differ = PlaylistDifferImpl(StableKeyDeriverImpl())
+        assertNull(g.refresh(differ = differ).refresh(id, Trigger.MANUAL).error)
+        val first = db.strings("SELECT url FROM channel ORDER BY sort_index")
+        assertEquals(listOf("{{base}}/live/{{u}}/{{p}}/10.{{ext}}", "{{base}}/live/{{u}}/{{p}}/11.{{ext}}"), first)
+        val again = g.refresh(differ = differ).refresh(id, Trigger.PERIODIC).report!!
+        assertEquals(2, again.unchanged)
+        assertEquals(0, again.updated)
+        assertEquals(first, db.strings("SELECT url FROM channel ORDER BY sort_index"))
+    }
+
+    @Test
+    fun anUntemplatedXtreamUrlIsRefusedNotStored() = runBlocking {
+        val id = (g.playlists.addXtream("X", listOf("http://a.example"), "bob", "pw123") as Outcome.Ok).value
+        g.xtream.login = Outcome.Ok(XtreamLogin(account(), baseIndexUsed = 0))
+        g.xtream.downloads[XtreamAction.LIVE_CATEGORIES] = "1|News\n"
+        g.xtream.downloads[XtreamAction.LIVE_STREAMS] = "10|BBC|1\n"
+        val fake = FakeXtreamDecoder()
+        val raw = object : XtreamCatalogDecoder by fake {
+            override fun liveChannels(input: java.io.InputStream, categories: List<app.thebox.core.xtream.XtreamCategory>) =
+                fake.liveChannels(input, categories).map { it.copy(url = "http://a.example/live/bob/pw123/10.ts") }
+        }
+        val r = g.refresh(differ = PlaylistDifferImpl(StableKeyDeriverImpl()), decoder = raw).refresh(id, Trigger.MANUAL)
+        assertEquals("internal", r.error!!.code)
+        assertEquals(0L, db.scalar("SELECT COUNT(*) FROM channel"))
+        assertNoSecretInDatabase("pw123")
+    }
+
+    @Test
+    fun xtreamShapedM3uIsTemplatedOnceAcrossRefreshes() = runBlocking {
+        val id = addPlaylist()
+        g.fetcher.bodies[url] = m3u("BBC", "CNN", "ITV")
+        g.xtream.login = Outcome.Ok(XtreamLogin(account(), 0))
+        val differ = PlaylistDifferImpl(StableKeyDeriverImpl())
+        assertNull(g.refresh(differ = differ).refresh(id, Trigger.MANUAL).error)
+        val stored = db.strings("SELECT url FROM channel ORDER BY sort_index")
+        assertEquals((1..3).map { "http://panel.example:8080/live/{{u}}/{{p}}/$it.ts" }, stored)
+        val again = g.refresh(differ = differ).refresh(id, Trigger.PERIODIC).report!!
+        assertEquals(3, again.unchanged)
+        assertEquals(stored, db.strings("SELECT url FROM channel ORDER BY sort_index"))
+        assertNoSecretInDatabase("SECRETPW")
+    }
+
+    @Test
+    fun theMergeAwaitsTheSharedImportGate() = runBlocking {
+        val id = addPlaylist()
+        g.fetcher.bodies[url] = m3u("BBC", "CNN")
+        var waits = 0
+        g.importMutex.gate = ImportGate { waits++ }
+        assertNull(g.refresh(differ = PlaylistDifferImpl(StableKeyDeriverImpl())).refresh(id, Trigger.MANUAL).error)
+        assertTrue("merge batches pause on ImportMutex.gate", waits >= 1)
+        // EpgRepository exposes the same gate.
+        assertTrue(g.epg.gate === g.importMutex.gate)
     }
 
     private fun account() = XtreamAccountInfo(

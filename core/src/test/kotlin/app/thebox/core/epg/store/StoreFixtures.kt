@@ -8,7 +8,6 @@ import app.thebox.core.epg.EpgWhitelist
 import app.thebox.core.epg.EpgWhitelistResolver
 import app.thebox.core.epg.FreeSpace
 import app.thebox.core.epg.testutil.EpgTestDb
-import org.kxml2.io.KXmlParser
 import java.io.File
 import java.time.ZoneId
 
@@ -32,7 +31,7 @@ internal object StoreFixtures {
         freeSpace: FreeSpace = EpgTestDb.PLENTY_OF_SPACE,
         fts4: Boolean = false,
         clock: () -> Long = { NOW_MS },
-    ): EpgStoreImpl = EpgStoreImpl(dir, BundledSQLiteDriver(), freeSpace, ::KXmlParser, clock, fts4)
+    ): EpgStoreImpl = EpgTestDb.openStore(dir, BundledSQLiteDriver(), freeSpace, clock, fts4)
 
     fun request(vararg sources: Pair<Long, File>, zone: ZoneId? = null, pastDays: Int = 1, futureDays: Int = 7, forceInPlace: Boolean = false) =
         EpgBuildRequest(

@@ -287,6 +287,26 @@ class M3uParserRulesTest {
         assertEquals(mapOf("m3uautoload" to "1", "deinterlace" to "auto", "cache" to "500"), h.attributes)
     }
 
+    @Test fun `M25 a second EXTM3U after entries reaches the summary header (amended 2026-10-13)`() {
+        val text = """
+            #EXTM3U url-tvg="http://a/1.xml" refresh="3600"
+            #EXTINF:-1,A
+            http://h/a
+            #EXTM3U url-tvg="http://b/2.xml" refresh="60" max-conn="3"
+            #EXTINF:-1,B
+            http://h/b
+        """.trimIndent()
+        val r = M3u.parseText(text)
+        assertEquals(2, r.entries.size)
+        assertEquals(1, r.sink.headerCalls)
+        assertEquals(listOf("http://a/1.xml"), r.header.epgUrls, "onHeader fires before the first entry")
+        val merged = r.summary.header!!
+        assertEquals(listOf("http://a/1.xml", "http://b/2.xml"), merged.epgUrls)
+        assertEquals(3600L, merged.refreshSec, "first value per key wins")
+        assertEquals(3, merged.maxConnections)
+        assertEquals(r.header, M3u.parseText("#EXTM3U url-tvg=\"http://a/1.xml\" refresh=\"3600\"\n#EXTINF:-1,A\nhttp://h/a\n").summary.header)
+    }
+
     // M26/M27/M28/M29/M30
     @Test fun `M26 catch-up days take leading digits`() {
         assertEquals(7, one("#EXTINF:-1 catchup-days=\"7d\",N").catchup.days)
