@@ -1,0 +1,26 @@
+# Refresh pair xc_templated, v1: Xtream-shaped, password oldpass.
+#EXTM3U
+#EXTINF:-1 tvg-name="X 1" group-title="UK",X Channel 1
+http://panel.example.tv:8080/live/acct/oldpass/501.ts
+#EXTINF:-1 tvg-name="X 2" group-title="UK",X Channel 2
+http://panel.example.tv:8080/live/acct/oldpass/502.ts
+#EXTINF:-1 tvg-name="X 3" group-title="UK",X Channel 3
+http://panel.example.tv:8080/live/acct/oldpass/503.ts
+#EXTINF:-1 tvg-name="X 4" group-title="UK",X Channel 4
+http://panel.example.tv:8080/live/acct/oldpass/504.ts
+#EXTINF:-1 tvg-name="X 5" group-title="UK",X Channel 5
+http://panel.example.tv:8080/live/acct/oldpass/505.ts
+#EXTINF:-1 tvg-name="X 6" group-title="UK",X Channel 6
+http://panel.example.tv:8080/live/acct/oldpass/506.ts
+#EXTINF:-1 tvg-name="X 7" group-title="UK",X Channel 7
+http://panel.example.tv:8080/live/acct/oldpass/507.ts
+#EXTINF:-1 tvg-name="X 8" group-title="UK",X Channel 8
+http://panel.example.tv:8080/live/acct/oldpass/508.ts
+#EXTINF:-1 tvg-name="X 9" group-title="UK",X Channel 9
+http://panel.example.tv:8080/live/acct/oldpass/509.ts
+#EXTINF:-1 tvg-name="X 10" group-title="UK",X Channel 10
+http://panel.example.tv:8080/live/acct/oldpass/510.ts
+#EXTINF:-1 tvg-type="movie" group-title="VOD",Movie One
+http://panel.example.tv:8080/movie/acct/oldpass/9001.mkv
+#EXTINF:-1 catchup="xc" catchup-source="http://panel.example.tv:8080/timeshift/acct/oldpass/{duration}/{Y}-{m}-{d}:{H}-{M}/511.ts" group-title="UK",X Catchup
+http://panel.example.tv:8080/live/acct/oldpass/511.ts

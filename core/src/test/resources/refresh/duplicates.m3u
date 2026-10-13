@@ -1,0 +1,10 @@
+# Duplicates: same tvg-id + name 3 times -> key, key~2, key~3.
+#EXTM3U
+#EXTINF:-1 tvg-id="Dup.uk" group-title="A",Dup Channel
+http://d.example.com/a/1.m3u8
+#EXTINF:-1 tvg-id="Dup.uk" group-title="B",Dup Channel
+http://d.example.com/b/2.m3u8
+#EXTINF:-1 tvg-id="Dup.uk" group-title="C",Dup Channel HD
+http://d.example.com/c/3.m3u8
+#EXTINF:-1 tvg-id="Other.uk",Other
+http://d.example.com/o/4.m3u8

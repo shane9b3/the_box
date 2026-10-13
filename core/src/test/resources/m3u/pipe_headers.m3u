@@ -1,0 +1,16 @@
+# Fixture: pipe headers. Covers M9 (last pipe, ! prefix, percent-decoding, + literal, malformed pair), M10 (pipe beats EXTVLCOPT).
+#EXTM3U
+#EXTINF:-1 tvg-id="Foo.us",Foo Bar
+https://cdn.example.com/foo/index.m3u8|User-Agent=Foo%20Bar&Referer=https://x/
+#EXTINF:-1 tvg-id="Tok.us",Token Channel
+https://cdn.example.com/tok/master.m3u8|!X-Token=abc&Origin=https%3A%2F%2Forigin.example
+#EXTINF:-1,Query With Pipe
+http://h.example.com/play?ids=1|2|3
+#EXTINF:-1,Empty Pipe
+http://h.example.com/empty/stream.m3u8|
+#EXTINF:-1 http-user-agent="ExtinfUA",Conflict
+#EXTVLCOPT:http-user-agent=VlcUA
+#EXTVLCOPT:http-referrer=https://vlc.example/
+http://h.example.com/conflict/index.m3u8|User-Agent=PipeUA
+#EXTINF:-1,Plus And Bad Pair
+http://h.example.com/plus/index.m3u8|User-Agent=A+B&=novalue&broken

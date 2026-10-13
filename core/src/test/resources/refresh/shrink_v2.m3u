@@ -1,0 +1,18 @@
+# Refresh pair shrink, v2: 8 of 400 -> SuspiciousShrink.
+#EXTM3U
+#EXTINF:-1 tvg-id="s0.example" group-title="G0",Shrink 0
+http://s.example.com/hls/s0/index.m3u8
+#EXTINF:-1 tvg-id="s1.example" group-title="G1",Shrink 1
+http://s.example.com/hls/s1/index.m3u8
+#EXTINF:-1 tvg-id="s2.example" group-title="G2",Shrink 2
+http://s.example.com/hls/s2/index.m3u8
+#EXTINF:-1 tvg-id="s3.example" group-title="G3",Shrink 3
+http://s.example.com/hls/s3/index.m3u8
+#EXTINF:-1 tvg-id="s4.example" group-title="G4",Shrink 4
+http://s.example.com/hls/s4/index.m3u8
+#EXTINF:-1 tvg-id="s5.example" group-title="G5",Shrink 5
+http://s.example.com/hls/s5/index.m3u8
+#EXTINF:-1 tvg-id="s6.example" group-title="G6",Shrink 6
+http://s.example.com/hls/s6/index.m3u8
+#EXTINF:-1 tvg-id="s7.example" group-title="G7",Shrink 7
+http://s.example.com/hls/s7/index.m3u8

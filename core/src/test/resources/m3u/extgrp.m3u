@@ -1,0 +1,15 @@
+# Fixture: #EXTGRP. Covers M14 (per-entry default, sticky option, empty #EXTGRP: clears, explicit group-title wins without resetting).
+#EXTM3U
+#EXTGRP:News
+#EXTINF:-1,N1
+http://h.example.com/n1.ts
+#EXTINF:-1,N2
+http://h.example.com/n2.ts
+#EXTGRP:Sports
+#EXTINF:-1 group-title="Football",S1
+http://h.example.com/s1.ts
+#EXTINF:-1,S2
+http://h.example.com/s2.ts
+#EXTGRP:
+#EXTINF:-1,Cleared
+http://h.example.com/c.ts

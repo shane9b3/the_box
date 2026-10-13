@@ -1,0 +1,802 @@
+# Refresh pair shrink, v1: 400 live channels.
+#EXTM3U
+#EXTINF:-1 tvg-id="s0.example" group-title="G0",Shrink 0
+http://s.example.com/hls/s0/index.m3u8
+#EXTINF:-1 tvg-id="s1.example" group-title="G1",Shrink 1
+http://s.example.com/hls/s1/index.m3u8
+#EXTINF:-1 tvg-id="s2.example" group-title="G2",Shrink 2
+http://s.example.com/hls/s2/index.m3u8
+#EXTINF:-1 tvg-id="s3.example" group-title="G3",Shrink 3
+http://s.example.com/hls/s3/index.m3u8
+#EXTINF:-1 tvg-id="s4.example" group-title="G4",Shrink 4
+http://s.example.com/hls/s4/index.m3u8
+#EXTINF:-1 tvg-id="s5.example" group-title="G5",Shrink 5
+http://s.example.com/hls/s5/index.m3u8
+#EXTINF:-1 tvg-id="s6.example" group-title="G6",Shrink 6
+http://s.example.com/hls/s6/index.m3u8
+#EXTINF:-1 tvg-id="s7.example" group-title="G7",Shrink 7
+http://s.example.com/hls/s7/index.m3u8
+#EXTINF:-1 tvg-id="s8.example" group-title="G8",Shrink 8
+http://s.example.com/hls/s8/index.m3u8
+#EXTINF:-1 tvg-id="s9.example" group-title="G9",Shrink 9
+http://s.example.com/hls/s9/index.m3u8
+#EXTINF:-1 tvg-id="s10.example" group-title="G0",Shrink 10
+http://s.example.com/hls/s10/index.m3u8
+#EXTINF:-1 tvg-id="s11.example" group-title="G1",Shrink 11
+http://s.example.com/hls/s11/index.m3u8
+#EXTINF:-1 tvg-id="s12.example" group-title="G2",Shrink 12
+http://s.example.com/hls/s12/index.m3u8
+#EXTINF:-1 tvg-id="s13.example" group-title="G3",Shrink 13
+http://s.example.com/hls/s13/index.m3u8
+#EXTINF:-1 tvg-id="s14.example" group-title="G4",Shrink 14
+http://s.example.com/hls/s14/index.m3u8
+#EXTINF:-1 tvg-id="s15.example" group-title="G5",Shrink 15
+http://s.example.com/hls/s15/index.m3u8
+#EXTINF:-1 tvg-id="s16.example" group-title="G6",Shrink 16
+http://s.example.com/hls/s16/index.m3u8
+#EXTINF:-1 tvg-id="s17.example" group-title="G7",Shrink 17
+http://s.example.com/hls/s17/index.m3u8
+#EXTINF:-1 tvg-id="s18.example" group-title="G8",Shrink 18
+http://s.example.com/hls/s18/index.m3u8
+#EXTINF:-1 tvg-id="s19.example" group-title="G9",Shrink 19
+http://s.example.com/hls/s19/index.m3u8
+#EXTINF:-1 tvg-id="s20.example" group-title="G0",Shrink 20
+http://s.example.com/hls/s20/index.m3u8
+#EXTINF:-1 tvg-id="s21.example" group-title="G1",Shrink 21
+http://s.example.com/hls/s21/index.m3u8
+#EXTINF:-1 tvg-id="s22.example" group-title="G2",Shrink 22
+http://s.example.com/hls/s22/index.m3u8
+#EXTINF:-1 tvg-id="s23.example" group-title="G3",Shrink 23
+http://s.example.com/hls/s23/index.m3u8
+#EXTINF:-1 tvg-id="s24.example" group-title="G4",Shrink 24
+http://s.example.com/hls/s24/index.m3u8
+#EXTINF:-1 tvg-id="s25.example" group-title="G5",Shrink 25
+http://s.example.com/hls/s25/index.m3u8
+#EXTINF:-1 tvg-id="s26.example" group-title="G6",Shrink 26
+http://s.example.com/hls/s26/index.m3u8
+#EXTINF:-1 tvg-id="s27.example" group-title="G7",Shrink 27
+http://s.example.com/hls/s27/index.m3u8
+#EXTINF:-1 tvg-id="s28.example" group-title="G8",Shrink 28
+http://s.example.com/hls/s28/index.m3u8
+#EXTINF:-1 tvg-id="s29.example" group-title="G9",Shrink 29
+http://s.example.com/hls/s29/index.m3u8
+#EXTINF:-1 tvg-id="s30.example" group-title="G0",Shrink 30
+http://s.example.com/hls/s30/index.m3u8
+#EXTINF:-1 tvg-id="s31.example" group-title="G1",Shrink 31
+http://s.example.com/hls/s31/index.m3u8
+#EXTINF:-1 tvg-id="s32.example" group-title="G2",Shrink 32
+http://s.example.com/hls/s32/index.m3u8
+#EXTINF:-1 tvg-id="s33.example" group-title="G3",Shrink 33
+http://s.example.com/hls/s33/index.m3u8
+#EXTINF:-1 tvg-id="s34.example" group-title="G4",Shrink 34
+http://s.example.com/hls/s34/index.m3u8
+#EXTINF:-1 tvg-id="s35.example" group-title="G5",Shrink 35
+http://s.example.com/hls/s35/index.m3u8
+#EXTINF:-1 tvg-id="s36.example" group-title="G6",Shrink 36
+http://s.example.com/hls/s36/index.m3u8
+#EXTINF:-1 tvg-id="s37.example" group-title="G7",Shrink 37
+http://s.example.com/hls/s37/index.m3u8
+#EXTINF:-1 tvg-id="s38.example" group-title="G8",Shrink 38
+http://s.example.com/hls/s38/index.m3u8
+#EXTINF:-1 tvg-id="s39.example" group-title="G9",Shrink 39
+http://s.example.com/hls/s39/index.m3u8
+#EXTINF:-1 tvg-id="s40.example" group-title="G0",Shrink 40
+http://s.example.com/hls/s40/index.m3u8
+#EXTINF:-1 tvg-id="s41.example" group-title="G1",Shrink 41
+http://s.example.com/hls/s41/index.m3u8
+#EXTINF:-1 tvg-id="s42.example" group-title="G2",Shrink 42
+http://s.example.com/hls/s42/index.m3u8
+#EXTINF:-1 tvg-id="s43.example" group-title="G3",Shrink 43
+http://s.example.com/hls/s43/index.m3u8
+#EXTINF:-1 tvg-id="s44.example" group-title="G4",Shrink 44
+http://s.example.com/hls/s44/index.m3u8
+#EXTINF:-1 tvg-id="s45.example" group-title="G5",Shrink 45
+http://s.example.com/hls/s45/index.m3u8
+#EXTINF:-1 tvg-id="s46.example" group-title="G6",Shrink 46
+http://s.example.com/hls/s46/index.m3u8
+#EXTINF:-1 tvg-id="s47.example" group-title="G7",Shrink 47
+http://s.example.com/hls/s47/index.m3u8
+#EXTINF:-1 tvg-id="s48.example" group-title="G8",Shrink 48
+http://s.example.com/hls/s48/index.m3u8
+#EXTINF:-1 tvg-id="s49.example" group-title="G9",Shrink 49
+http://s.example.com/hls/s49/index.m3u8
+#EXTINF:-1 tvg-id="s50.example" group-title="G0",Shrink 50
+http://s.example.com/hls/s50/index.m3u8
+#EXTINF:-1 tvg-id="s51.example" group-title="G1",Shrink 51
+http://s.example.com/hls/s51/index.m3u8
+#EXTINF:-1 tvg-id="s52.example" group-title="G2",Shrink 52
+http://s.example.com/hls/s52/index.m3u8
+#EXTINF:-1 tvg-id="s53.example" group-title="G3",Shrink 53
+http://s.example.com/hls/s53/index.m3u8
+#EXTINF:-1 tvg-id="s54.example" group-title="G4",Shrink 54
+http://s.example.com/hls/s54/index.m3u8
+#EXTINF:-1 tvg-id="s55.example" group-title="G5",Shrink 55
+http://s.example.com/hls/s55/index.m3u8
+#EXTINF:-1 tvg-id="s56.example" group-title="G6",Shrink 56
+http://s.example.com/hls/s56/index.m3u8
+#EXTINF:-1 tvg-id="s57.example" group-title="G7",Shrink 57
+http://s.example.com/hls/s57/index.m3u8
+#EXTINF:-1 tvg-id="s58.example" group-title="G8",Shrink 58
+http://s.example.com/hls/s58/index.m3u8
+#EXTINF:-1 tvg-id="s59.example" group-title="G9",Shrink 59
+http://s.example.com/hls/s59/index.m3u8
+#EXTINF:-1 tvg-id="s60.example" group-title="G0",Shrink 60
+http://s.example.com/hls/s60/index.m3u8
+#EXTINF:-1 tvg-id="s61.example" group-title="G1",Shrink 61
+http://s.example.com/hls/s61/index.m3u8
+#EXTINF:-1 tvg-id="s62.example" group-title="G2",Shrink 62
+http://s.example.com/hls/s62/index.m3u8
+#EXTINF:-1 tvg-id="s63.example" group-title="G3",Shrink 63
+http://s.example.com/hls/s63/index.m3u8
+#EXTINF:-1 tvg-id="s64.example" group-title="G4",Shrink 64
+http://s.example.com/hls/s64/index.m3u8
+#EXTINF:-1 tvg-id="s65.example" group-title="G5",Shrink 65
+http://s.example.com/hls/s65/index.m3u8
+#EXTINF:-1 tvg-id="s66.example" group-title="G6",Shrink 66
+http://s.example.com/hls/s66/index.m3u8
+#EXTINF:-1 tvg-id="s67.example" group-title="G7",Shrink 67
+http://s.example.com/hls/s67/index.m3u8
+#EXTINF:-1 tvg-id="s68.example" group-title="G8",Shrink 68
+http://s.example.com/hls/s68/index.m3u8
+#EXTINF:-1 tvg-id="s69.example" group-title="G9",Shrink 69
+http://s.example.com/hls/s69/index.m3u8
+#EXTINF:-1 tvg-id="s70.example" group-title="G0",Shrink 70
+http://s.example.com/hls/s70/index.m3u8
+#EXTINF:-1 tvg-id="s71.example" group-title="G1",Shrink 71
+http://s.example.com/hls/s71/index.m3u8
+#EXTINF:-1 tvg-id="s72.example" group-title="G2",Shrink 72
+http://s.example.com/hls/s72/index.m3u8
+#EXTINF:-1 tvg-id="s73.example" group-title="G3",Shrink 73
+http://s.example.com/hls/s73/index.m3u8
+#EXTINF:-1 tvg-id="s74.example" group-title="G4",Shrink 74
+http://s.example.com/hls/s74/index.m3u8
+#EXTINF:-1 tvg-id="s75.example" group-title="G5",Shrink 75
+http://s.example.com/hls/s75/index.m3u8
+#EXTINF:-1 tvg-id="s76.example" group-title="G6",Shrink 76
+http://s.example.com/hls/s76/index.m3u8
+#EXTINF:-1 tvg-id="s77.example" group-title="G7",Shrink 77
+http://s.example.com/hls/s77/index.m3u8
+#EXTINF:-1 tvg-id="s78.example" group-title="G8",Shrink 78
+http://s.example.com/hls/s78/index.m3u8
+#EXTINF:-1 tvg-id="s79.example" group-title="G9",Shrink 79
+http://s.example.com/hls/s79/index.m3u8
+#EXTINF:-1 tvg-id="s80.example" group-title="G0",Shrink 80
+http://s.example.com/hls/s80/index.m3u8
+#EXTINF:-1 tvg-id="s81.example" group-title="G1",Shrink 81
+http://s.example.com/hls/s81/index.m3u8
+#EXTINF:-1 tvg-id="s82.example" group-title="G2",Shrink 82
+http://s.example.com/hls/s82/index.m3u8
+#EXTINF:-1 tvg-id="s83.example" group-title="G3",Shrink 83
+http://s.example.com/hls/s83/index.m3u8
+#EXTINF:-1 tvg-id="s84.example" group-title="G4",Shrink 84
+http://s.example.com/hls/s84/index.m3u8
+#EXTINF:-1 tvg-id="s85.example" group-title="G5",Shrink 85
+http://s.example.com/hls/s85/index.m3u8
+#EXTINF:-1 tvg-id="s86.example" group-title="G6",Shrink 86
+http://s.example.com/hls/s86/index.m3u8
+#EXTINF:-1 tvg-id="s87.example" group-title="G7",Shrink 87
+http://s.example.com/hls/s87/index.m3u8
+#EXTINF:-1 tvg-id="s88.example" group-title="G8",Shrink 88
+http://s.example.com/hls/s88/index.m3u8
+#EXTINF:-1 tvg-id="s89.example" group-title="G9",Shrink 89
+http://s.example.com/hls/s89/index.m3u8
+#EXTINF:-1 tvg-id="s90.example" group-title="G0",Shrink 90
+http://s.example.com/hls/s90/index.m3u8
+#EXTINF:-1 tvg-id="s91.example" group-title="G1",Shrink 91
+http://s.example.com/hls/s91/index.m3u8
+#EXTINF:-1 tvg-id="s92.example" group-title="G2",Shrink 92
+http://s.example.com/hls/s92/index.m3u8
+#EXTINF:-1 tvg-id="s93.example" group-title="G3",Shrink 93
+http://s.example.com/hls/s93/index.m3u8
+#EXTINF:-1 tvg-id="s94.example" group-title="G4",Shrink 94
+http://s.example.com/hls/s94/index.m3u8
+#EXTINF:-1 tvg-id="s95.example" group-title="G5",Shrink 95
+http://s.example.com/hls/s95/index.m3u8
+#EXTINF:-1 tvg-id="s96.example" group-title="G6",Shrink 96
+http://s.example.com/hls/s96/index.m3u8
+#EXTINF:-1 tvg-id="s97.example" group-title="G7",Shrink 97
+http://s.example.com/hls/s97/index.m3u8
+#EXTINF:-1 tvg-id="s98.example" group-title="G8",Shrink 98
+http://s.example.com/hls/s98/index.m3u8
+#EXTINF:-1 tvg-id="s99.example" group-title="G9",Shrink 99
+http://s.example.com/hls/s99/index.m3u8
+#EXTINF:-1 tvg-id="s100.example" group-title="G0",Shrink 100
+http://s.example.com/hls/s100/index.m3u8
+#EXTINF:-1 tvg-id="s101.example" group-title="G1",Shrink 101
+http://s.example.com/hls/s101/index.m3u8
+#EXTINF:-1 tvg-id="s102.example" group-title="G2",Shrink 102
+http://s.example.com/hls/s102/index.m3u8
+#EXTINF:-1 tvg-id="s103.example" group-title="G3",Shrink 103
+http://s.example.com/hls/s103/index.m3u8
+#EXTINF:-1 tvg-id="s104.example" group-title="G4",Shrink 104
+http://s.example.com/hls/s104/index.m3u8
+#EXTINF:-1 tvg-id="s105.example" group-title="G5",Shrink 105
+http://s.example.com/hls/s105/index.m3u8
+#EXTINF:-1 tvg-id="s106.example" group-title="G6",Shrink 106
+http://s.example.com/hls/s106/index.m3u8
+#EXTINF:-1 tvg-id="s107.example" group-title="G7",Shrink 107
+http://s.example.com/hls/s107/index.m3u8
+#EXTINF:-1 tvg-id="s108.example" group-title="G8",Shrink 108
+http://s.example.com/hls/s108/index.m3u8
+#EXTINF:-1 tvg-id="s109.example" group-title="G9",Shrink 109
+http://s.example.com/hls/s109/index.m3u8
+#EXTINF:-1 tvg-id="s110.example" group-title="G0",Shrink 110
+http://s.example.com/hls/s110/index.m3u8
+#EXTINF:-1 tvg-id="s111.example" group-title="G1",Shrink 111
+http://s.example.com/hls/s111/index.m3u8
+#EXTINF:-1 tvg-id="s112.example" group-title="G2",Shrink 112
+http://s.example.com/hls/s112/index.m3u8
+#EXTINF:-1 tvg-id="s113.example" group-title="G3",Shrink 113
+http://s.example.com/hls/s113/index.m3u8
+#EXTINF:-1 tvg-id="s114.example" group-title="G4",Shrink 114
+http://s.example.com/hls/s114/index.m3u8
+#EXTINF:-1 tvg-id="s115.example" group-title="G5",Shrink 115
+http://s.example.com/hls/s115/index.m3u8
+#EXTINF:-1 tvg-id="s116.example" group-title="G6",Shrink 116
+http://s.example.com/hls/s116/index.m3u8
+#EXTINF:-1 tvg-id="s117.example" group-title="G7",Shrink 117
+http://s.example.com/hls/s117/index.m3u8
+#EXTINF:-1 tvg-id="s118.example" group-title="G8",Shrink 118
+http://s.example.com/hls/s118/index.m3u8
+#EXTINF:-1 tvg-id="s119.example" group-title="G9",Shrink 119
+http://s.example.com/hls/s119/index.m3u8
+#EXTINF:-1 tvg-id="s120.example" group-title="G0",Shrink 120
+http://s.example.com/hls/s120/index.m3u8
+#EXTINF:-1 tvg-id="s121.example" group-title="G1",Shrink 121
+http://s.example.com/hls/s121/index.m3u8
+#EXTINF:-1 tvg-id="s122.example" group-title="G2",Shrink 122
+http://s.example.com/hls/s122/index.m3u8
+#EXTINF:-1 tvg-id="s123.example" group-title="G3",Shrink 123
+http://s.example.com/hls/s123/index.m3u8
+#EXTINF:-1 tvg-id="s124.example" group-title="G4",Shrink 124
+http://s.example.com/hls/s124/index.m3u8
+#EXTINF:-1 tvg-id="s125.example" group-title="G5",Shrink 125
+http://s.example.com/hls/s125/index.m3u8
+#EXTINF:-1 tvg-id="s126.example" group-title="G6",Shrink 126
+http://s.example.com/hls/s126/index.m3u8
+#EXTINF:-1 tvg-id="s127.example" group-title="G7",Shrink 127
+http://s.example.com/hls/s127/index.m3u8
+#EXTINF:-1 tvg-id="s128.example" group-title="G8",Shrink 128
+http://s.example.com/hls/s128/index.m3u8
+#EXTINF:-1 tvg-id="s129.example" group-title="G9",Shrink 129
+http://s.example.com/hls/s129/index.m3u8
+#EXTINF:-1 tvg-id="s130.example" group-title="G0",Shrink 130
+http://s.example.com/hls/s130/index.m3u8
+#EXTINF:-1 tvg-id="s131.example" group-title="G1",Shrink 131
+http://s.example.com/hls/s131/index.m3u8
+#EXTINF:-1 tvg-id="s132.example" group-title="G2",Shrink 132
+http://s.example.com/hls/s132/index.m3u8
+#EXTINF:-1 tvg-id="s133.example" group-title="G3",Shrink 133
+http://s.example.com/hls/s133/index.m3u8
+#EXTINF:-1 tvg-id="s134.example" group-title="G4",Shrink 134
+http://s.example.com/hls/s134/index.m3u8
+#EXTINF:-1 tvg-id="s135.example" group-title="G5",Shrink 135
+http://s.example.com/hls/s135/index.m3u8
+#EXTINF:-1 tvg-id="s136.example" group-title="G6",Shrink 136
+http://s.example.com/hls/s136/index.m3u8
+#EXTINF:-1 tvg-id="s137.example" group-title="G7",Shrink 137
+http://s.example.com/hls/s137/index.m3u8
+#EXTINF:-1 tvg-id="s138.example" group-title="G8",Shrink 138
+http://s.example.com/hls/s138/index.m3u8
+#EXTINF:-1 tvg-id="s139.example" group-title="G9",Shrink 139
+http://s.example.com/hls/s139/index.m3u8
+#EXTINF:-1 tvg-id="s140.example" group-title="G0",Shrink 140
+http://s.example.com/hls/s140/index.m3u8
+#EXTINF:-1 tvg-id="s141.example" group-title="G1",Shrink 141
+http://s.example.com/hls/s141/index.m3u8
+#EXTINF:-1 tvg-id="s142.example" group-title="G2",Shrink 142
+http://s.example.com/hls/s142/index.m3u8
+#EXTINF:-1 tvg-id="s143.example" group-title="G3",Shrink 143
+http://s.example.com/hls/s143/index.m3u8
+#EXTINF:-1 tvg-id="s144.example" group-title="G4",Shrink 144
+http://s.example.com/hls/s144/index.m3u8
+#EXTINF:-1 tvg-id="s145.example" group-title="G5",Shrink 145
+http://s.example.com/hls/s145/index.m3u8
+#EXTINF:-1 tvg-id="s146.example" group-title="G6",Shrink 146
+http://s.example.com/hls/s146/index.m3u8
+#EXTINF:-1 tvg-id="s147.example" group-title="G7",Shrink 147
+http://s.example.com/hls/s147/index.m3u8
+#EXTINF:-1 tvg-id="s148.example" group-title="G8",Shrink 148
+http://s.example.com/hls/s148/index.m3u8
+#EXTINF:-1 tvg-id="s149.example" group-title="G9",Shrink 149
+http://s.example.com/hls/s149/index.m3u8
+#EXTINF:-1 tvg-id="s150.example" group-title="G0",Shrink 150
+http://s.example.com/hls/s150/index.m3u8
+#EXTINF:-1 tvg-id="s151.example" group-title="G1",Shrink 151
+http://s.example.com/hls/s151/index.m3u8
+#EXTINF:-1 tvg-id="s152.example" group-title="G2",Shrink 152
+http://s.example.com/hls/s152/index.m3u8
+#EXTINF:-1 tvg-id="s153.example" group-title="G3",Shrink 153
+http://s.example.com/hls/s153/index.m3u8
+#EXTINF:-1 tvg-id="s154.example" group-title="G4",Shrink 154
+http://s.example.com/hls/s154/index.m3u8
+#EXTINF:-1 tvg-id="s155.example" group-title="G5",Shrink 155
+http://s.example.com/hls/s155/index.m3u8
+#EXTINF:-1 tvg-id="s156.example" group-title="G6",Shrink 156
+http://s.example.com/hls/s156/index.m3u8
+#EXTINF:-1 tvg-id="s157.example" group-title="G7",Shrink 157
+http://s.example.com/hls/s157/index.m3u8
+#EXTINF:-1 tvg-id="s158.example" group-title="G8",Shrink 158
+http://s.example.com/hls/s158/index.m3u8
+#EXTINF:-1 tvg-id="s159.example" group-title="G9",Shrink 159
+http://s.example.com/hls/s159/index.m3u8
+#EXTINF:-1 tvg-id="s160.example" group-title="G0",Shrink 160
+http://s.example.com/hls/s160/index.m3u8
+#EXTINF:-1 tvg-id="s161.example" group-title="G1",Shrink 161
+http://s.example.com/hls/s161/index.m3u8
+#EXTINF:-1 tvg-id="s162.example" group-title="G2",Shrink 162
+http://s.example.com/hls/s162/index.m3u8
+#EXTINF:-1 tvg-id="s163.example" group-title="G3",Shrink 163
+http://s.example.com/hls/s163/index.m3u8
+#EXTINF:-1 tvg-id="s164.example" group-title="G4",Shrink 164
+http://s.example.com/hls/s164/index.m3u8
+#EXTINF:-1 tvg-id="s165.example" group-title="G5",Shrink 165
+http://s.example.com/hls/s165/index.m3u8
+#EXTINF:-1 tvg-id="s166.example" group-title="G6",Shrink 166
+http://s.example.com/hls/s166/index.m3u8
+#EXTINF:-1 tvg-id="s167.example" group-title="G7",Shrink 167
+http://s.example.com/hls/s167/index.m3u8
+#EXTINF:-1 tvg-id="s168.example" group-title="G8",Shrink 168
+http://s.example.com/hls/s168/index.m3u8
+#EXTINF:-1 tvg-id="s169.example" group-title="G9",Shrink 169
+http://s.example.com/hls/s169/index.m3u8
+#EXTINF:-1 tvg-id="s170.example" group-title="G0",Shrink 170
+http://s.example.com/hls/s170/index.m3u8
+#EXTINF:-1 tvg-id="s171.example" group-title="G1",Shrink 171
+http://s.example.com/hls/s171/index.m3u8
+#EXTINF:-1 tvg-id="s172.example" group-title="G2",Shrink 172
+http://s.example.com/hls/s172/index.m3u8
+#EXTINF:-1 tvg-id="s173.example" group-title="G3",Shrink 173
+http://s.example.com/hls/s173/index.m3u8
+#EXTINF:-1 tvg-id="s174.example" group-title="G4",Shrink 174
+http://s.example.com/hls/s174/index.m3u8
+#EXTINF:-1 tvg-id="s175.example" group-title="G5",Shrink 175
+http://s.example.com/hls/s175/index.m3u8
+#EXTINF:-1 tvg-id="s176.example" group-title="G6",Shrink 176
+http://s.example.com/hls/s176/index.m3u8
+#EXTINF:-1 tvg-id="s177.example" group-title="G7",Shrink 177
+http://s.example.com/hls/s177/index.m3u8
+#EXTINF:-1 tvg-id="s178.example" group-title="G8",Shrink 178
+http://s.example.com/hls/s178/index.m3u8
+#EXTINF:-1 tvg-id="s179.example" group-title="G9",Shrink 179
+http://s.example.com/hls/s179/index.m3u8
+#EXTINF:-1 tvg-id="s180.example" group-title="G0",Shrink 180
+http://s.example.com/hls/s180/index.m3u8
+#EXTINF:-1 tvg-id="s181.example" group-title="G1",Shrink 181
+http://s.example.com/hls/s181/index.m3u8
+#EXTINF:-1 tvg-id="s182.example" group-title="G2",Shrink 182
+http://s.example.com/hls/s182/index.m3u8
+#EXTINF:-1 tvg-id="s183.example" group-title="G3",Shrink 183
+http://s.example.com/hls/s183/index.m3u8
+#EXTINF:-1 tvg-id="s184.example" group-title="G4",Shrink 184
+http://s.example.com/hls/s184/index.m3u8
+#EXTINF:-1 tvg-id="s185.example" group-title="G5",Shrink 185
+http://s.example.com/hls/s185/index.m3u8
+#EXTINF:-1 tvg-id="s186.example" group-title="G6",Shrink 186
+http://s.example.com/hls/s186/index.m3u8
+#EXTINF:-1 tvg-id="s187.example" group-title="G7",Shrink 187
+http://s.example.com/hls/s187/index.m3u8
+#EXTINF:-1 tvg-id="s188.example" group-title="G8",Shrink 188
+http://s.example.com/hls/s188/index.m3u8
+#EXTINF:-1 tvg-id="s189.example" group-title="G9",Shrink 189
+http://s.example.com/hls/s189/index.m3u8
+#EXTINF:-1 tvg-id="s190.example" group-title="G0",Shrink 190
+http://s.example.com/hls/s190/index.m3u8
+#EXTINF:-1 tvg-id="s191.example" group-title="G1",Shrink 191
+http://s.example.com/hls/s191/index.m3u8
+#EXTINF:-1 tvg-id="s192.example" group-title="G2",Shrink 192
+http://s.example.com/hls/s192/index.m3u8
+#EXTINF:-1 tvg-id="s193.example" group-title="G3",Shrink 193
+http://s.example.com/hls/s193/index.m3u8
+#EXTINF:-1 tvg-id="s194.example" group-title="G4",Shrink 194
+http://s.example.com/hls/s194/index.m3u8
+#EXTINF:-1 tvg-id="s195.example" group-title="G5",Shrink 195
+http://s.example.com/hls/s195/index.m3u8
+#EXTINF:-1 tvg-id="s196.example" group-title="G6",Shrink 196
+http://s.example.com/hls/s196/index.m3u8
+#EXTINF:-1 tvg-id="s197.example" group-title="G7",Shrink 197
+http://s.example.com/hls/s197/index.m3u8
+#EXTINF:-1 tvg-id="s198.example" group-title="G8",Shrink 198
+http://s.example.com/hls/s198/index.m3u8
+#EXTINF:-1 tvg-id="s199.example" group-title="G9",Shrink 199
+http://s.example.com/hls/s199/index.m3u8
+#EXTINF:-1 tvg-id="s200.example" group-title="G0",Shrink 200
+http://s.example.com/hls/s200/index.m3u8
+#EXTINF:-1 tvg-id="s201.example" group-title="G1",Shrink 201
+http://s.example.com/hls/s201/index.m3u8
+#EXTINF:-1 tvg-id="s202.example" group-title="G2",Shrink 202
+http://s.example.com/hls/s202/index.m3u8
+#EXTINF:-1 tvg-id="s203.example" group-title="G3",Shrink 203
+http://s.example.com/hls/s203/index.m3u8
+#EXTINF:-1 tvg-id="s204.example" group-title="G4",Shrink 204
+http://s.example.com/hls/s204/index.m3u8
+#EXTINF:-1 tvg-id="s205.example" group-title="G5",Shrink 205
+http://s.example.com/hls/s205/index.m3u8
+#EXTINF:-1 tvg-id="s206.example" group-title="G6",Shrink 206
+http://s.example.com/hls/s206/index.m3u8
+#EXTINF:-1 tvg-id="s207.example" group-title="G7",Shrink 207
+http://s.example.com/hls/s207/index.m3u8
+#EXTINF:-1 tvg-id="s208.example" group-title="G8",Shrink 208
+http://s.example.com/hls/s208/index.m3u8
+#EXTINF:-1 tvg-id="s209.example" group-title="G9",Shrink 209
+http://s.example.com/hls/s209/index.m3u8
+#EXTINF:-1 tvg-id="s210.example" group-title="G0",Shrink 210
+http://s.example.com/hls/s210/index.m3u8
+#EXTINF:-1 tvg-id="s211.example" group-title="G1",Shrink 211
+http://s.example.com/hls/s211/index.m3u8
+#EXTINF:-1 tvg-id="s212.example" group-title="G2",Shrink 212
+http://s.example.com/hls/s212/index.m3u8
+#EXTINF:-1 tvg-id="s213.example" group-title="G3",Shrink 213
+http://s.example.com/hls/s213/index.m3u8
+#EXTINF:-1 tvg-id="s214.example" group-title="G4",Shrink 214
+http://s.example.com/hls/s214/index.m3u8
+#EXTINF:-1 tvg-id="s215.example" group-title="G5",Shrink 215
+http://s.example.com/hls/s215/index.m3u8
+#EXTINF:-1 tvg-id="s216.example" group-title="G6",Shrink 216
+http://s.example.com/hls/s216/index.m3u8
+#EXTINF:-1 tvg-id="s217.example" group-title="G7",Shrink 217
+http://s.example.com/hls/s217/index.m3u8
+#EXTINF:-1 tvg-id="s218.example" group-title="G8",Shrink 218
+http://s.example.com/hls/s218/index.m3u8
+#EXTINF:-1 tvg-id="s219.example" group-title="G9",Shrink 219
+http://s.example.com/hls/s219/index.m3u8
+#EXTINF:-1 tvg-id="s220.example" group-title="G0",Shrink 220
+http://s.example.com/hls/s220/index.m3u8
+#EXTINF:-1 tvg-id="s221.example" group-title="G1",Shrink 221
+http://s.example.com/hls/s221/index.m3u8
+#EXTINF:-1 tvg-id="s222.example" group-title="G2",Shrink 222
+http://s.example.com/hls/s222/index.m3u8
+#EXTINF:-1 tvg-id="s223.example" group-title="G3",Shrink 223
+http://s.example.com/hls/s223/index.m3u8
+#EXTINF:-1 tvg-id="s224.example" group-title="G4",Shrink 224
+http://s.example.com/hls/s224/index.m3u8
+#EXTINF:-1 tvg-id="s225.example" group-title="G5",Shrink 225
+http://s.example.com/hls/s225/index.m3u8
+#EXTINF:-1 tvg-id="s226.example" group-title="G6",Shrink 226
+http://s.example.com/hls/s226/index.m3u8
+#EXTINF:-1 tvg-id="s227.example" group-title="G7",Shrink 227
+http://s.example.com/hls/s227/index.m3u8
+#EXTINF:-1 tvg-id="s228.example" group-title="G8",Shrink 228
+http://s.example.com/hls/s228/index.m3u8
+#EXTINF:-1 tvg-id="s229.example" group-title="G9",Shrink 229
+http://s.example.com/hls/s229/index.m3u8
+#EXTINF:-1 tvg-id="s230.example" group-title="G0",Shrink 230
+http://s.example.com/hls/s230/index.m3u8
+#EXTINF:-1 tvg-id="s231.example" group-title="G1",Shrink 231
+http://s.example.com/hls/s231/index.m3u8
+#EXTINF:-1 tvg-id="s232.example" group-title="G2",Shrink 232
+http://s.example.com/hls/s232/index.m3u8
+#EXTINF:-1 tvg-id="s233.example" group-title="G3",Shrink 233
+http://s.example.com/hls/s233/index.m3u8
+#EXTINF:-1 tvg-id="s234.example" group-title="G4",Shrink 234
+http://s.example.com/hls/s234/index.m3u8
+#EXTINF:-1 tvg-id="s235.example" group-title="G5",Shrink 235
+http://s.example.com/hls/s235/index.m3u8
+#EXTINF:-1 tvg-id="s236.example" group-title="G6",Shrink 236
+http://s.example.com/hls/s236/index.m3u8
+#EXTINF:-1 tvg-id="s237.example" group-title="G7",Shrink 237
+http://s.example.com/hls/s237/index.m3u8
+#EXTINF:-1 tvg-id="s238.example" group-title="G8",Shrink 238
+http://s.example.com/hls/s238/index.m3u8
+#EXTINF:-1 tvg-id="s239.example" group-title="G9",Shrink 239
+http://s.example.com/hls/s239/index.m3u8
+#EXTINF:-1 tvg-id="s240.example" group-title="G0",Shrink 240
+http://s.example.com/hls/s240/index.m3u8
+#EXTINF:-1 tvg-id="s241.example" group-title="G1",Shrink 241
+http://s.example.com/hls/s241/index.m3u8
+#EXTINF:-1 tvg-id="s242.example" group-title="G2",Shrink 242
+http://s.example.com/hls/s242/index.m3u8
+#EXTINF:-1 tvg-id="s243.example" group-title="G3",Shrink 243
+http://s.example.com/hls/s243/index.m3u8
+#EXTINF:-1 tvg-id="s244.example" group-title="G4",Shrink 244
+http://s.example.com/hls/s244/index.m3u8
+#EXTINF:-1 tvg-id="s245.example" group-title="G5",Shrink 245
+http://s.example.com/hls/s245/index.m3u8
+#EXTINF:-1 tvg-id="s246.example" group-title="G6",Shrink 246
+http://s.example.com/hls/s246/index.m3u8
+#EXTINF:-1 tvg-id="s247.example" group-title="G7",Shrink 247
+http://s.example.com/hls/s247/index.m3u8
+#EXTINF:-1 tvg-id="s248.example" group-title="G8",Shrink 248
+http://s.example.com/hls/s248/index.m3u8
+#EXTINF:-1 tvg-id="s249.example" group-title="G9",Shrink 249
+http://s.example.com/hls/s249/index.m3u8
+#EXTINF:-1 tvg-id="s250.example" group-title="G0",Shrink 250
+http://s.example.com/hls/s250/index.m3u8
+#EXTINF:-1 tvg-id="s251.example" group-title="G1",Shrink 251
+http://s.example.com/hls/s251/index.m3u8
+#EXTINF:-1 tvg-id="s252.example" group-title="G2",Shrink 252
+http://s.example.com/hls/s252/index.m3u8
+#EXTINF:-1 tvg-id="s253.example" group-title="G3",Shrink 253
+http://s.example.com/hls/s253/index.m3u8
+#EXTINF:-1 tvg-id="s254.example" group-title="G4",Shrink 254
+http://s.example.com/hls/s254/index.m3u8
+#EXTINF:-1 tvg-id="s255.example" group-title="G5",Shrink 255
+http://s.example.com/hls/s255/index.m3u8
+#EXTINF:-1 tvg-id="s256.example" group-title="G6",Shrink 256
+http://s.example.com/hls/s256/index.m3u8
+#EXTINF:-1 tvg-id="s257.example" group-title="G7",Shrink 257
+http://s.example.com/hls/s257/index.m3u8
+#EXTINF:-1 tvg-id="s258.example" group-title="G8",Shrink 258
+http://s.example.com/hls/s258/index.m3u8
+#EXTINF:-1 tvg-id="s259.example" group-title="G9",Shrink 259
+http://s.example.com/hls/s259/index.m3u8
+#EXTINF:-1 tvg-id="s260.example" group-title="G0",Shrink 260
+http://s.example.com/hls/s260/index.m3u8
+#EXTINF:-1 tvg-id="s261.example" group-title="G1",Shrink 261
+http://s.example.com/hls/s261/index.m3u8
+#EXTINF:-1 tvg-id="s262.example" group-title="G2",Shrink 262
+http://s.example.com/hls/s262/index.m3u8
+#EXTINF:-1 tvg-id="s263.example" group-title="G3",Shrink 263
+http://s.example.com/hls/s263/index.m3u8
+#EXTINF:-1 tvg-id="s264.example" group-title="G4",Shrink 264
+http://s.example.com/hls/s264/index.m3u8
+#EXTINF:-1 tvg-id="s265.example" group-title="G5",Shrink 265
+http://s.example.com/hls/s265/index.m3u8
+#EXTINF:-1 tvg-id="s266.example" group-title="G6",Shrink 266
+http://s.example.com/hls/s266/index.m3u8
+#EXTINF:-1 tvg-id="s267.example" group-title="G7",Shrink 267
+http://s.example.com/hls/s267/index.m3u8
+#EXTINF:-1 tvg-id="s268.example" group-title="G8",Shrink 268
+http://s.example.com/hls/s268/index.m3u8
+#EXTINF:-1 tvg-id="s269.example" group-title="G9",Shrink 269
+http://s.example.com/hls/s269/index.m3u8
+#EXTINF:-1 tvg-id="s270.example" group-title="G0",Shrink 270
+http://s.example.com/hls/s270/index.m3u8
+#EXTINF:-1 tvg-id="s271.example" group-title="G1",Shrink 271
+http://s.example.com/hls/s271/index.m3u8
+#EXTINF:-1 tvg-id="s272.example" group-title="G2",Shrink 272
+http://s.example.com/hls/s272/index.m3u8
+#EXTINF:-1 tvg-id="s273.example" group-title="G3",Shrink 273
+http://s.example.com/hls/s273/index.m3u8
+#EXTINF:-1 tvg-id="s274.example" group-title="G4",Shrink 274
+http://s.example.com/hls/s274/index.m3u8
+#EXTINF:-1 tvg-id="s275.example" group-title="G5",Shrink 275
+http://s.example.com/hls/s275/index.m3u8
+#EXTINF:-1 tvg-id="s276.example" group-title="G6",Shrink 276
+http://s.example.com/hls/s276/index.m3u8
+#EXTINF:-1 tvg-id="s277.example" group-title="G7",Shrink 277
+http://s.example.com/hls/s277/index.m3u8
+#EXTINF:-1 tvg-id="s278.example" group-title="G8",Shrink 278
+http://s.example.com/hls/s278/index.m3u8
+#EXTINF:-1 tvg-id="s279.example" group-title="G9",Shrink 279
+http://s.example.com/hls/s279/index.m3u8
+#EXTINF:-1 tvg-id="s280.example" group-title="G0",Shrink 280
+http://s.example.com/hls/s280/index.m3u8
+#EXTINF:-1 tvg-id="s281.example" group-title="G1",Shrink 281
+http://s.example.com/hls/s281/index.m3u8
+#EXTINF:-1 tvg-id="s282.example" group-title="G2",Shrink 282
+http://s.example.com/hls/s282/index.m3u8
+#EXTINF:-1 tvg-id="s283.example" group-title="G3",Shrink 283
+http://s.example.com/hls/s283/index.m3u8
+#EXTINF:-1 tvg-id="s284.example" group-title="G4",Shrink 284
+http://s.example.com/hls/s284/index.m3u8
+#EXTINF:-1 tvg-id="s285.example" group-title="G5",Shrink 285
+http://s.example.com/hls/s285/index.m3u8
+#EXTINF:-1 tvg-id="s286.example" group-title="G6",Shrink 286
+http://s.example.com/hls/s286/index.m3u8
+#EXTINF:-1 tvg-id="s287.example" group-title="G7",Shrink 287
+http://s.example.com/hls/s287/index.m3u8
+#EXTINF:-1 tvg-id="s288.example" group-title="G8",Shrink 288
+http://s.example.com/hls/s288/index.m3u8
+#EXTINF:-1 tvg-id="s289.example" group-title="G9",Shrink 289
+http://s.example.com/hls/s289/index.m3u8
+#EXTINF:-1 tvg-id="s290.example" group-title="G0",Shrink 290
+http://s.example.com/hls/s290/index.m3u8
+#EXTINF:-1 tvg-id="s291.example" group-title="G1",Shrink 291
+http://s.example.com/hls/s291/index.m3u8
+#EXTINF:-1 tvg-id="s292.example" group-title="G2",Shrink 292
+http://s.example.com/hls/s292/index.m3u8
+#EXTINF:-1 tvg-id="s293.example" group-title="G3",Shrink 293
+http://s.example.com/hls/s293/index.m3u8
+#EXTINF:-1 tvg-id="s294.example" group-title="G4",Shrink 294
+http://s.example.com/hls/s294/index.m3u8
+#EXTINF:-1 tvg-id="s295.example" group-title="G5",Shrink 295
+http://s.example.com/hls/s295/index.m3u8
+#EXTINF:-1 tvg-id="s296.example" group-title="G6",Shrink 296
+http://s.example.com/hls/s296/index.m3u8
+#EXTINF:-1 tvg-id="s297.example" group-title="G7",Shrink 297
+http://s.example.com/hls/s297/index.m3u8
+#EXTINF:-1 tvg-id="s298.example" group-title="G8",Shrink 298
+http://s.example.com/hls/s298/index.m3u8
+#EXTINF:-1 tvg-id="s299.example" group-title="G9",Shrink 299
+http://s.example.com/hls/s299/index.m3u8
+#EXTINF:-1 tvg-id="s300.example" group-title="G0",Shrink 300
+http://s.example.com/hls/s300/index.m3u8
+#EXTINF:-1 tvg-id="s301.example" group-title="G1",Shrink 301
+http://s.example.com/hls/s301/index.m3u8
+#EXTINF:-1 tvg-id="s302.example" group-title="G2",Shrink 302
+http://s.example.com/hls/s302/index.m3u8
+#EXTINF:-1 tvg-id="s303.example" group-title="G3",Shrink 303
+http://s.example.com/hls/s303/index.m3u8
+#EXTINF:-1 tvg-id="s304.example" group-title="G4",Shrink 304
+http://s.example.com/hls/s304/index.m3u8
+#EXTINF:-1 tvg-id="s305.example" group-title="G5",Shrink 305
+http://s.example.com/hls/s305/index.m3u8
+#EXTINF:-1 tvg-id="s306.example" group-title="G6",Shrink 306
+http://s.example.com/hls/s306/index.m3u8
+#EXTINF:-1 tvg-id="s307.example" group-title="G7",Shrink 307
+http://s.example.com/hls/s307/index.m3u8
+#EXTINF:-1 tvg-id="s308.example" group-title="G8",Shrink 308
+http://s.example.com/hls/s308/index.m3u8
+#EXTINF:-1 tvg-id="s309.example" group-title="G9",Shrink 309
+http://s.example.com/hls/s309/index.m3u8
+#EXTINF:-1 tvg-id="s310.example" group-title="G0",Shrink 310
+http://s.example.com/hls/s310/index.m3u8
+#EXTINF:-1 tvg-id="s311.example" group-title="G1",Shrink 311
+http://s.example.com/hls/s311/index.m3u8
+#EXTINF:-1 tvg-id="s312.example" group-title="G2",Shrink 312
+http://s.example.com/hls/s312/index.m3u8
+#EXTINF:-1 tvg-id="s313.example" group-title="G3",Shrink 313
+http://s.example.com/hls/s313/index.m3u8
+#EXTINF:-1 tvg-id="s314.example" group-title="G4",Shrink 314
+http://s.example.com/hls/s314/index.m3u8
+#EXTINF:-1 tvg-id="s315.example" group-title="G5",Shrink 315
+http://s.example.com/hls/s315/index.m3u8
+#EXTINF:-1 tvg-id="s316.example" group-title="G6",Shrink 316
+http://s.example.com/hls/s316/index.m3u8
+#EXTINF:-1 tvg-id="s317.example" group-title="G7",Shrink 317
+http://s.example.com/hls/s317/index.m3u8
+#EXTINF:-1 tvg-id="s318.example" group-title="G8",Shrink 318
+http://s.example.com/hls/s318/index.m3u8
+#EXTINF:-1 tvg-id="s319.example" group-title="G9",Shrink 319
+http://s.example.com/hls/s319/index.m3u8
+#EXTINF:-1 tvg-id="s320.example" group-title="G0",Shrink 320
+http://s.example.com/hls/s320/index.m3u8
+#EXTINF:-1 tvg-id="s321.example" group-title="G1",Shrink 321
+http://s.example.com/hls/s321/index.m3u8
+#EXTINF:-1 tvg-id="s322.example" group-title="G2",Shrink 322
+http://s.example.com/hls/s322/index.m3u8
+#EXTINF:-1 tvg-id="s323.example" group-title="G3",Shrink 323
+http://s.example.com/hls/s323/index.m3u8
+#EXTINF:-1 tvg-id="s324.example" group-title="G4",Shrink 324
+http://s.example.com/hls/s324/index.m3u8
+#EXTINF:-1 tvg-id="s325.example" group-title="G5",Shrink 325
+http://s.example.com/hls/s325/index.m3u8
+#EXTINF:-1 tvg-id="s326.example" group-title="G6",Shrink 326
+http://s.example.com/hls/s326/index.m3u8
+#EXTINF:-1 tvg-id="s327.example" group-title="G7",Shrink 327
+http://s.example.com/hls/s327/index.m3u8
+#EXTINF:-1 tvg-id="s328.example" group-title="G8",Shrink 328
+http://s.example.com/hls/s328/index.m3u8
+#EXTINF:-1 tvg-id="s329.example" group-title="G9",Shrink 329
+http://s.example.com/hls/s329/index.m3u8
+#EXTINF:-1 tvg-id="s330.example" group-title="G0",Shrink 330
+http://s.example.com/hls/s330/index.m3u8
+#EXTINF:-1 tvg-id="s331.example" group-title="G1",Shrink 331
+http://s.example.com/hls/s331/index.m3u8
+#EXTINF:-1 tvg-id="s332.example" group-title="G2",Shrink 332
+http://s.example.com/hls/s332/index.m3u8
+#EXTINF:-1 tvg-id="s333.example" group-title="G3",Shrink 333
+http://s.example.com/hls/s333/index.m3u8
+#EXTINF:-1 tvg-id="s334.example" group-title="G4",Shrink 334
+http://s.example.com/hls/s334/index.m3u8
+#EXTINF:-1 tvg-id="s335.example" group-title="G5",Shrink 335
+http://s.example.com/hls/s335/index.m3u8
+#EXTINF:-1 tvg-id="s336.example" group-title="G6",Shrink 336
+http://s.example.com/hls/s336/index.m3u8
+#EXTINF:-1 tvg-id="s337.example" group-title="G7",Shrink 337
+http://s.example.com/hls/s337/index.m3u8
+#EXTINF:-1 tvg-id="s338.example" group-title="G8",Shrink 338
+http://s.example.com/hls/s338/index.m3u8
+#EXTINF:-1 tvg-id="s339.example" group-title="G9",Shrink 339
+http://s.example.com/hls/s339/index.m3u8
+#EXTINF:-1 tvg-id="s340.example" group-title="G0",Shrink 340
+http://s.example.com/hls/s340/index.m3u8
+#EXTINF:-1 tvg-id="s341.example" group-title="G1",Shrink 341
+http://s.example.com/hls/s341/index.m3u8
+#EXTINF:-1 tvg-id="s342.example" group-title="G2",Shrink 342
+http://s.example.com/hls/s342/index.m3u8
+#EXTINF:-1 tvg-id="s343.example" group-title="G3",Shrink 343
+http://s.example.com/hls/s343/index.m3u8
+#EXTINF:-1 tvg-id="s344.example" group-title="G4",Shrink 344
+http://s.example.com/hls/s344/index.m3u8
+#EXTINF:-1 tvg-id="s345.example" group-title="G5",Shrink 345
+http://s.example.com/hls/s345/index.m3u8
+#EXTINF:-1 tvg-id="s346.example" group-title="G6",Shrink 346
+http://s.example.com/hls/s346/index.m3u8
+#EXTINF:-1 tvg-id="s347.example" group-title="G7",Shrink 347
+http://s.example.com/hls/s347/index.m3u8
+#EXTINF:-1 tvg-id="s348.example" group-title="G8",Shrink 348
+http://s.example.com/hls/s348/index.m3u8
+#EXTINF:-1 tvg-id="s349.example" group-title="G9",Shrink 349
+http://s.example.com/hls/s349/index.m3u8
+#EXTINF:-1 tvg-id="s350.example" group-title="G0",Shrink 350
+http://s.example.com/hls/s350/index.m3u8
+#EXTINF:-1 tvg-id="s351.example" group-title="G1",Shrink 351
+http://s.example.com/hls/s351/index.m3u8
+#EXTINF:-1 tvg-id="s352.example" group-title="G2",Shrink 352
+http://s.example.com/hls/s352/index.m3u8
+#EXTINF:-1 tvg-id="s353.example" group-title="G3",Shrink 353
+http://s.example.com/hls/s353/index.m3u8
+#EXTINF:-1 tvg-id="s354.example" group-title="G4",Shrink 354
+http://s.example.com/hls/s354/index.m3u8
+#EXTINF:-1 tvg-id="s355.example" group-title="G5",Shrink 355
+http://s.example.com/hls/s355/index.m3u8
+#EXTINF:-1 tvg-id="s356.example" group-title="G6",Shrink 356
+http://s.example.com/hls/s356/index.m3u8
+#EXTINF:-1 tvg-id="s357.example" group-title="G7",Shrink 357
+http://s.example.com/hls/s357/index.m3u8
+#EXTINF:-1 tvg-id="s358.example" group-title="G8",Shrink 358
+http://s.example.com/hls/s358/index.m3u8
+#EXTINF:-1 tvg-id="s359.example" group-title="G9",Shrink 359
+http://s.example.com/hls/s359/index.m3u8
+#EXTINF:-1 tvg-id="s360.example" group-title="G0",Shrink 360
+http://s.example.com/hls/s360/index.m3u8
+#EXTINF:-1 tvg-id="s361.example" group-title="G1",Shrink 361
+http://s.example.com/hls/s361/index.m3u8
+#EXTINF:-1 tvg-id="s362.example" group-title="G2",Shrink 362
+http://s.example.com/hls/s362/index.m3u8
+#EXTINF:-1 tvg-id="s363.example" group-title="G3",Shrink 363
+http://s.example.com/hls/s363/index.m3u8
+#EXTINF:-1 tvg-id="s364.example" group-title="G4",Shrink 364
+http://s.example.com/hls/s364/index.m3u8
+#EXTINF:-1 tvg-id="s365.example" group-title="G5",Shrink 365
+http://s.example.com/hls/s365/index.m3u8
+#EXTINF:-1 tvg-id="s366.example" group-title="G6",Shrink 366
+http://s.example.com/hls/s366/index.m3u8
+#EXTINF:-1 tvg-id="s367.example" group-title="G7",Shrink 367
+http://s.example.com/hls/s367/index.m3u8
+#EXTINF:-1 tvg-id="s368.example" group-title="G8",Shrink 368
+http://s.example.com/hls/s368/index.m3u8
+#EXTINF:-1 tvg-id="s369.example" group-title="G9",Shrink 369
+http://s.example.com/hls/s369/index.m3u8
+#EXTINF:-1 tvg-id="s370.example" group-title="G0",Shrink 370
+http://s.example.com/hls/s370/index.m3u8
+#EXTINF:-1 tvg-id="s371.example" group-title="G1",Shrink 371
+http://s.example.com/hls/s371/index.m3u8
+#EXTINF:-1 tvg-id="s372.example" group-title="G2",Shrink 372
+http://s.example.com/hls/s372/index.m3u8
+#EXTINF:-1 tvg-id="s373.example" group-title="G3",Shrink 373
+http://s.example.com/hls/s373/index.m3u8
+#EXTINF:-1 tvg-id="s374.example" group-title="G4",Shrink 374
+http://s.example.com/hls/s374/index.m3u8
+#EXTINF:-1 tvg-id="s375.example" group-title="G5",Shrink 375
+http://s.example.com/hls/s375/index.m3u8
+#EXTINF:-1 tvg-id="s376.example" group-title="G6",Shrink 376
+http://s.example.com/hls/s376/index.m3u8
+#EXTINF:-1 tvg-id="s377.example" group-title="G7",Shrink 377
+http://s.example.com/hls/s377/index.m3u8
+#EXTINF:-1 tvg-id="s378.example" group-title="G8",Shrink 378
+http://s.example.com/hls/s378/index.m3u8
+#EXTINF:-1 tvg-id="s379.example" group-title="G9",Shrink 379
+http://s.example.com/hls/s379/index.m3u8
+#EXTINF:-1 tvg-id="s380.example" group-title="G0",Shrink 380
+http://s.example.com/hls/s380/index.m3u8
+#EXTINF:-1 tvg-id="s381.example" group-title="G1",Shrink 381
+http://s.example.com/hls/s381/index.m3u8
+#EXTINF:-1 tvg-id="s382.example" group-title="G2",Shrink 382
+http://s.example.com/hls/s382/index.m3u8
+#EXTINF:-1 tvg-id="s383.example" group-title="G3",Shrink 383
+http://s.example.com/hls/s383/index.m3u8
+#EXTINF:-1 tvg-id="s384.example" group-title="G4",Shrink 384
+http://s.example.com/hls/s384/index.m3u8
+#EXTINF:-1 tvg-id="s385.example" group-title="G5",Shrink 385
+http://s.example.com/hls/s385/index.m3u8
+#EXTINF:-1 tvg-id="s386.example" group-title="G6",Shrink 386
+http://s.example.com/hls/s386/index.m3u8
+#EXTINF:-1 tvg-id="s387.example" group-title="G7",Shrink 387
+http://s.example.com/hls/s387/index.m3u8
+#EXTINF:-1 tvg-id="s388.example" group-title="G8",Shrink 388
+http://s.example.com/hls/s388/index.m3u8
+#EXTINF:-1 tvg-id="s389.example" group-title="G9",Shrink 389
+http://s.example.com/hls/s389/index.m3u8
+#EXTINF:-1 tvg-id="s390.example" group-title="G0",Shrink 390
+http://s.example.com/hls/s390/index.m3u8
+#EXTINF:-1 tvg-id="s391.example" group-title="G1",Shrink 391
+http://s.example.com/hls/s391/index.m3u8
+#EXTINF:-1 tvg-id="s392.example" group-title="G2",Shrink 392
+http://s.example.com/hls/s392/index.m3u8
+#EXTINF:-1 tvg-id="s393.example" group-title="G3",Shrink 393
+http://s.example.com/hls/s393/index.m3u8
+#EXTINF:-1 tvg-id="s394.example" group-title="G4",Shrink 394
+http://s.example.com/hls/s394/index.m3u8
+#EXTINF:-1 tvg-id="s395.example" group-title="G5",Shrink 395
+http://s.example.com/hls/s395/index.m3u8
+#EXTINF:-1 tvg-id="s396.example" group-title="G6",Shrink 396
+http://s.example.com/hls/s396/index.m3u8
+#EXTINF:-1 tvg-id="s397.example" group-title="G7",Shrink 397
+http://s.example.com/hls/s397/index.m3u8
+#EXTINF:-1 tvg-id="s398.example" group-title="G8",Shrink 398
+http://s.example.com/hls/s398/index.m3u8
+#EXTINF:-1 tvg-id="s399.example" group-title="G9",Shrink 399
+http://s.example.com/hls/s399/index.m3u8
