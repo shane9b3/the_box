@@ -35,3 +35,6 @@ __pycache__/
 
 # Prebuilt FFmpeg AAR is produced by CI, never committed
 ffmpeg/libs/*.aar
+
+# Claude Code worktrees and local state
+.claude/worktrees/
