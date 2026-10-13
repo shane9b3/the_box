@@ -68,7 +68,8 @@ export ANDROID_HOME=$HOME/Library/Android/sdk
 # local.properties (gitignored): sdk.dir=/Users/<you>/Library/Android/sdk
 # One-time: sdkmanager "platforms;android-37.0"
 
-./gradlew --no-daemon :core:test :app:assembleDebug :ui:assembleDebug :player:assembleDebug :data:assembleDebug :benchmark:assembleBenchmark
+./gradlew --no-daemon :core:test :data:testDebugUnitTest :app:assembleDebug   # CI smoke build (M1 onwards)
+./gradlew --no-daemon :ui:assembleDebug :player:assembleDebug :benchmark:assembleBenchmark :core:perfTest   # extras
 ```
 
 Also verified: `:app:assembleBenchmark` (R8 minify + resource shrink),

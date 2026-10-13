@@ -3338,6 +3338,24 @@ It is already in the catalog, with the plugin applied in `:core` and `:data` and
 - **Naming:** contract implementations are `*Impl` (`:core`) or named by technology (`Room*`, `OkHttp*`, `Tink*`) in `:data`. Tests are `<Class>Test`; integration tests `*IT`; perf tests `*PerfTest` with `@Tag("perf")`.
 - **Public API:** everything not in §1.2 is `internal` unless WP-D needs it, in which case the doc for that WP lists it (§1.3–1.6).
 
+
+### 6.7 Day-0 check results (commit 0, 2026-10-13)
+
+Run on the dev Mac (Intel x86_64, JDK 21.0.2, Gradle 9.8.1, AGP 9.4.1). `./gradlew -q :core:test :data:testDebugUnitTest :app:assembleDebug` exits 0, and `./gradlew -q :core:perfTest` configures and passes with zero tests.
+
+| # | Check | Result | Evidence |
+|---|---|---|---|
+| 1 | `BundledSQLiteDriver().open(":memory:")` on the JVM reports `ENABLE_FTS5` | **Pass** (Mac half). The Linux x64 half runs on the first CI build | `core/src/test/kotlin/app/thebox/core/sqlite/BundledSqliteDay0Test.kt`: SQLite 3.50.1; `compile_options` contains `ENABLE_FTS4`, `ENABLE_FTS5` and `TEMP_STORE=3`. The test also creates a `WITHOUT ROWID` `programme` table and an external-content FTS5 table (`unicode61 remove_diacritics 2`), runs `'rebuild'`, and finds "Télé Matin" with `MATCH '"tele"*'` |
+| 2 | One `libsqliteJni.so` per ABI, no `natives/` jar entries | **Pass** | `unzip -l`: the universal debug APK has `lib/{arm64-v8a,armeabi-v7a,x86,x86_64}/libsqliteJni.so` (one each; x86 is kept in debug for the emulator). The per-ABI debug APKs and the minified benchmark APK have only the ARM ABIs. There are 0 `natives/` entries in any APK. `:data`/`:app` resolve `sqlite-bundled-android`, not the `-jvm` jar |
+| 3 | `org.xmlpull` not packaged | **Pass** | 0 `org/xmlpull` or kxml entries in `unzip -l`. `dexdump` of the universal APK's `classes*.dex` shows no `Lorg/xmlpull/…` or kxml class definitions (kxml2 is `compileOnly` in `:core`) |
+| 4 | `:core:test :data:testDebugUnitTest :app:assembleDebug` green with every stub in place | **Pass** | `:core`: 43 tests in 7 classes. `:data`: 1 Robolectric test. `:app:assembleBenchmark` (R8) is also green |
+| 5 | Robolectric (`sdk=35`) through `AndroidSQLiteDriver`: `WITHOUT ROWID`, FTS4 `tokenize=unicode61 "remove_diacritics=2"`, `PRAGMA journal_mode=OFF` | **Pass**, with one driver quirk | `data/src/test/kotlin/app/thebox/data/RobolectricSqliteDay0Test.kt`. Robolectric 4.17's native SQLite is **3.44.3**. `journal_mode=OFF` returns `off` on a file database. A PK range query on the `WITHOUT ROWID` table works. FTS4 with external content, `'rebuild'` and the diacritic-folding prefix query (`tele*` → "Télé Matin") work. **Quirk (WP-B):** `AndroidSQLiteDriver` routes `PRAGMA journal_mode=…` through a special `JournalModeSetStatement` that throws `CursorIndexOutOfBoundsException` on a second `step()`. Step it exactly once, or use `execSQL`. `EpgBuildIT` can therefore use the real `EpgStoreImpl` on the FTS4 path |
+
+Other commit-0 verifications:
+- **okio:** `:data` and `:app` `debugRuntimeClasspath` resolve `com.squareup.okio:okio:3.18.1`, matching OkHttp 5.5.0's requirement, with no upgrade. 3.18.2 exists but is not taken.
+- **Catalog:** every new pin exists on Maven Central or Google Maven today. Those pins are xz 1.12, kxml2 2.3.0, androidx.collection 1.7.0, Robolectric 4.17, JUnit 4.13.2, androidx.test core-ktx/runner 1.7.0, `mockwebserver3` 5.5.0, hilt-android-testing 2.60.1, room-testing 2.8.5, work-testing 2.12.0, and sqlite/sqlite-framework 2.6.2. The newer androidx.sqlite release is `2.8.0-alpha01`, which is not taken: the pin stays on Room 2.8.5's 2.6.2.
+- **AGP 9 DSL (§6.3 note):** `android.sourceSets["test"]` (both `getByName` and `named`) fails with a class-cast error in AGP 9.4.1. The shared `core/src/test/resources` directory is added through `androidComponents.onVariants { hostTests…sources.resources?.addStaticSourceDirectory(…) }`. The directory does not need to exist yet.
+
 ---
 
 ## 7. Decisions made and alternatives rejected

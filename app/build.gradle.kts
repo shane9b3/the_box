@@ -17,6 +17,10 @@ val keystoreProperties = Properties().apply {
 android {
     namespace = "app.thebox"
 
+    buildFeatures {
+        buildConfig = true // TheBoxApplication reads BuildConfig.DEBUG (WorkManager log level)
+    }
+
     defaultConfig {
         applicationId = "app.thebox"
         versionCode = 1
@@ -97,6 +101,10 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.profileinstaller)
     implementation(libs.acra.core)
+
+    // Configuration.Provider + HiltWorkerFactory (docs/design/m1-data-layer.md §3.10, §6.4).
+    implementation(libs.work.runtime.ktx)
+    implementation(libs.androidx.hilt.work)
 
     baselineProfile(project(":baselineprofile"))
 }

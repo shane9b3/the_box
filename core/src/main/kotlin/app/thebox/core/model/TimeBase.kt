@@ -33,6 +33,12 @@ data class TimeBase(
     val tokenZone: ZoneId? = null,
     val paddingBefore: Duration = Duration.ZERO,
     val paddingAfter: Duration = Duration.ZERO,
+    /**
+     * Zone for `{Y}{m}{d}{H}{M}{S}` / `{utc:FMT}` / `${start-iso}` template tokens when [tokenZone] is
+     * null. TokenZoneSetting.Auto sets UTC for M3U playlists and null for Xtream (→ [effectiveTokenZone]).
+     * Never used for the `xc` timeshift segment, which always uses [effectiveTokenZone].
+     */
+    val templateZone: ZoneId? = null,
 ) {
     /**
      * Zone used to format panel-local catch-up times: [tokenZone] → [serverZone] →
@@ -40,6 +46,9 @@ data class TimeBase(
      * playlist's explicit setting or UTC, never `ZoneId.systemDefault()` silently.
      */
     val effectiveTokenZone: ZoneId? get() = tokenZone ?: serverZone ?: serverOffset
+
+    /** Zone for template tokens: [tokenZone] → [templateZone] → [effectiveTokenZone]; null → caller uses UTC with a diagnostic. */
+    val effectiveTemplateZone: ZoneId? get() = tokenZone ?: templateZone ?: effectiveTokenZone
 
     /**
      * Archive request start for a programme starting at [programmeStart] (UTC):

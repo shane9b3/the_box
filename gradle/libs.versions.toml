@@ -41,6 +41,19 @@ tink = "1.23.0"
 acra = "5.14.2"
 junit5 = "6.1.3"
 
+# M1 data layer (docs/design/m1-data-layer.md §6.1). Verified on Maven Central / Google Maven 2026-10-13.
+# okio must equal what OkHttp 5.5.0 requires (okhttp-5.5.0.module: okio 3.18.1); 3.18.2 exists but is not taken.
+okio = "3.18.1"
+xz = "1.12"
+kxml2 = "2.3.0"
+# MutableLongIntMap etc. (KMP; JVM variant in :core).
+androidxCollection = "1.7.0"
+# sdk=35 needs a JDK 21 runtime.
+robolectric = "4.17"
+junit4 = "4.13.2"
+androidxTestCore = "1.7.0"
+androidxTestRunner = "1.7.0"
+
 [libraries]
 # Desugaring
 desugar-jdk-libs = { module = "com.android.tools:desugar_jdk_libs", version.ref = "desugarJdkLibs" }
@@ -75,19 +88,26 @@ room-ktx = { module = "androidx.room:room-ktx", version.ref = "room" }
 room-compiler = { module = "androidx.room:room-compiler", version.ref = "room" }
 sqlite-bundled = { module = "androidx.sqlite:sqlite-bundled", version.ref = "sqlite" }
 sqlite-ktx = { module = "androidx.sqlite:sqlite-ktx", version.ref = "sqlite" }
+sqlite = { module = "androidx.sqlite:sqlite", version.ref = "sqlite" }
+sqlite-framework = { module = "androidx.sqlite:sqlite-framework", version.ref = "sqlite" }
+room-testing = { module = "androidx.room:room-testing", version.ref = "room" }
 
 # Background work
 work-runtime-ktx = { module = "androidx.work:work-runtime-ktx", version.ref = "work" }
 androidx-hilt-work = { module = "androidx.hilt:hilt-work", version.ref = "androidxHilt" }
 androidx-hilt-compiler = { module = "androidx.hilt:hilt-compiler", version.ref = "androidxHilt" }
+work-testing = { module = "androidx.work:work-testing", version.ref = "work" }
 
 # DI
 hilt-android = { module = "com.google.dagger:hilt-android", version.ref = "hilt" }
 hilt-compiler = { module = "com.google.dagger:hilt-compiler", version.ref = "hilt" }
+hilt-android-testing = { module = "com.google.dagger:hilt-android-testing", version.ref = "hilt" }
 
 # Networking / images
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 okhttp-dnsoverhttps = { module = "com.squareup.okhttp3:okhttp-dnsoverhttps", version.ref = "okhttp" }
+okhttp-mockwebserver = { module = "com.squareup.okhttp3:mockwebserver3", version.ref = "okhttp" }
+okio = { module = "com.squareup.okio:okio", version.ref = "okio" }
 coil-compose = { module = "io.coil-kt.coil3:coil-compose", version.ref = "coil" }
 coil-network-okhttp = { module = "io.coil-kt.coil3:coil-network-okhttp", version.ref = "coil" }
 
@@ -96,6 +116,11 @@ kotlinx-coroutines-core = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-c
 kotlinx-coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }
 kotlinx-coroutines-test = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-test", version.ref = "coroutines" }
 kotlinx-serialization-json = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json", version.ref = "serialization" }
+androidx-collection = { module = "androidx.collection:collection", version.ref = "androidxCollection" }
+
+# Parsing / compression
+xz = { module = "org.tukaani:xz", version.ref = "xz" }
+kxml2 = { module = "net.sf.kxml:kxml2", version.ref = "kxml2" }
 
 # Security / crash reporting
 tink-android = { module = "com.google.crypto.tink:tink-android", version.ref = "tink" }
@@ -107,6 +132,10 @@ junit-bom = { module = "org.junit:junit-bom", version.ref = "junit5" }
 junit-jupiter = { module = "org.junit.jupiter:junit-jupiter" }
 junit-platform-launcher = { module = "org.junit.platform:junit-platform-launcher" }
 androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidxTestExtJunit" }
+androidx-test-core = { module = "androidx.test:core-ktx", version.ref = "androidxTestCore" }
+androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTestRunner" }
+robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+junit4 = { module = "junit:junit", version.ref = "junit4" }
 androidx-test-uiautomator = { module = "androidx.test.uiautomator:uiautomator", version.ref = "uiautomator" }
 androidx-benchmark-macro-junit4 = { module = "androidx.benchmark:benchmark-macro-junit4", version.ref = "benchmark" }
 

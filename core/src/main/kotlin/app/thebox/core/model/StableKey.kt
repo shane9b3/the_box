@@ -21,10 +21,17 @@ value class StableKey(val value: String) {
 
     override fun toString(): String = value
 
+    /** Occurrence suffix for duplicate keys inside one playlist (2nd occurrence → `~2`). */
+    fun withOccurrence(n: Int): StableKey = if (n <= 1) this else StableKey("$value~$n")
+
     companion object {
         fun xtream(streamId: Long): StableKey = StableKey("xc:$streamId")
         fun tvgId(tvgId: String, name: String): StableKey = StableKey("tvg:$tvgId|$name")
         fun urlPath(hostAgnosticPath: String): StableKey = StableKey("url:$hostAgnosticPath")
         fun nameGroup(name: String, group: String?): StableKey = StableKey("ng:$name|${group.orEmpty()}")
+
+        /** Xtream VOD (`/movie/`) and series-episode (`/series/`) ids live in other id spaces. */
+        fun xtreamMovie(streamId: Long): StableKey = StableKey("xcm:$streamId")
+        fun xtreamEpisode(episodeId: Long): StableKey = StableKey("xce:$episodeId")
     }
 }
