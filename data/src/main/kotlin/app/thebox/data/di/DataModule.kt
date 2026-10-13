@@ -22,6 +22,21 @@ import app.thebox.data.contracts.XtreamApi
 import app.thebox.data.net.OkHttpSourceFetcher
 import app.thebox.data.security.TinkCredentialStore
 import app.thebox.data.xtream.XtreamClient
+import android.content.Context
+import androidx.work.WorkManager
+import app.thebox.data.repo.DataSettings
+import app.thebox.data.repo.EpgImporter
+import app.thebox.data.repo.EpgRepository
+import app.thebox.data.repo.EpgWorkRequester
+import app.thebox.data.repo.InMemoryDataSettings
+import app.thebox.data.repo.PlaylistRefresher
+import app.thebox.data.repo.RefreshRepository
+import app.thebox.data.security.AeadProvider
+import app.thebox.data.security.KeystoreAeadProvider
+import app.thebox.data.work.RefreshScheduler
+import dagger.hilt.android.qualifiers.ApplicationContext
+import java.io.File
+import javax.inject.Named
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -52,4 +67,22 @@ abstract class DataModule {
     @Binds @Singleton abstract fun xtreamApi(impl: XtreamClient): XtreamApi
     @Binds @Singleton abstract fun sourceFetcher(impl: OkHttpSourceFetcher): SourceFetcher
     @Binds @Singleton abstract fun credentialStore(impl: TinkCredentialStore): CredentialStore
+    @Binds @Singleton abstract fun dataSettings(impl: InMemoryDataSettings): DataSettings
+    @Binds abstract fun playlistRefresher(impl: RefreshRepository): PlaylistRefresher
+    @Binds abstract fun epgImporter(impl: EpgRepository): EpgImporter
+    @Binds abstract fun epgWorkRequester(impl: RefreshScheduler): EpgWorkRequester
+
+    companion object {
+        @Provides fun wallClock(): WallClock = WallClock.SYSTEM
+
+        @Provides @Singleton
+        fun aeadProvider(@ApplicationContext context: Context): AeadProvider = KeystoreAeadProvider(context)
+
+        @Provides
+        fun workManager(@ApplicationContext context: Context): WorkManager = WorkManager.getInstance(context)
+
+        /** `cacheDir/playlists`: the last downloaded playlist (`<id>.src`) and Xtream categories. */
+        @Provides @Named(RefreshRepository.PLAYLIST_CACHE_DIR)
+        fun playlistCacheDir(@ApplicationContext context: Context): File = File(context.cacheDir, "playlists")
+    }
 }
