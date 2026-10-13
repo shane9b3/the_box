@@ -21,8 +21,13 @@ object NameNormalizer {
     private val TVG_COUNTRY = Regex("""\.([a-z]{2})(?:@|$)""")
     private val ISO2: Set<String> = Locale.getISOCountries().mapTo(HashSet()) { it.lowercase(Locale.ROOT) } + "uk"
 
-    fun fold(s: String): String =
-        MARKS.replace(Normalizer.normalize(s, Normalizer.Form.NFKD), "").lowercase(Locale.ROOT)
+    fun fold(s: String): String {
+        // ASCII fast path (most channel names): no NFKD, no regex. Behaviour-identical for ASCII input.
+        var ascii = true
+        for (i in s.indices) if (s[i].code >= 0x80) { ascii = false; break }
+        if (ascii) return s.lowercase(Locale.ROOT)
+        return MARKS.replace(Normalizer.normalize(s, Normalizer.Form.NFKD), "").lowercase(Locale.ROOT)
+    }
 
     fun forKey(name: String): String {
         val folded = fold(name)
@@ -59,5 +64,18 @@ object NameNormalizer {
         return (fromName ?: fromId)?.let { if (it == "gb") "uk" else it }
     }
 
-    private fun collapse(s: String): String = s.trim().replace(Regex(" {2,}"), " ")
+    /** Trim and collapse runs of spaces in one pass (no regex; this ran per row in the M3U import). */
+    private fun collapse(s: String): String {
+        val sb = StringBuilder(s.length)
+        var pendingSpace = false
+        for (c in s) {
+            if (c == ' ') {
+                if (sb.isNotEmpty()) pendingSpace = true
+            } else {
+                if (pendingSpace) { sb.append(' '); pendingSpace = false }
+                sb.append(c)
+            }
+        }
+        return sb.toString()
+    }
 }
