@@ -1,0 +1,26 @@
+{
+ "user_info": {
+  "username": "test",
+  "password": "test",
+  "auth": "1",
+  "status": "Active",
+  "exp_date": "0",
+  "is_trial": "1",
+  "active_cons": "0",
+  "max_connections": "3",
+  "allowed_output_formats": []
+ },
+ "server_info": {
+  "xui": true,
+  "version": "1.5.12",
+  "revision": 2,
+  "url": "xui.example.com",
+  "port": "80",
+  "https_port": "443",
+  "server_protocol": "http",
+  "rtmp_port": "8880",
+  "timezone": "UTC+3",
+  "timestamp_now": "1791919800",
+  "time_now": "2026-10-13 22:30:00"
+ }
+}

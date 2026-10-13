@@ -1,0 +1,74 @@
+{
+ "epg_listings": [
+  {
+   "id": "0",
+   "epg_id": "1",
+   "title": "Test",
+   "lang": "en",
+   "start": "2026-10-13 21:30:00",
+   "end": "2026-10-13 22:30:00",
+   "description": "Plain",
+   "channel_id": "ch1.test",
+   "now_playing": 0,
+   "has_archive": 0,
+   "start_timestamp": "1791919800",
+   "stop_timestamp": "1791923400"
+  },
+  {
+   "id": "1",
+   "epg_id": "1",
+   "title": "QUJD",
+   "lang": "en",
+   "start": "2026-10-13 21:30:00",
+   "end": "2026-10-13 22:30:00",
+   "description": "Looks like base64",
+   "channel_id": "ch1.test",
+   "now_playing": 0,
+   "has_archive": 0,
+   "start_timestamp": "1791923400",
+   "stop_timestamp": "1791927000"
+  },
+  {
+   "id": "2",
+   "epg_id": "1",
+   "title": "News at Ten",
+   "lang": "en",
+   "start": "2026-10-13 21:30:00",
+   "end": "2026-10-13 22:30:00",
+   "description": "Plain desc",
+   "channel_id": "ch1.test",
+   "now_playing": 0,
+   "has_archive": 0,
+   "start_timestamp": "1791927000",
+   "stop_timestamp": "1791930600"
+  },
+  {
+   "id": "3",
+   "epg_id": "1",
+   "title": "Weather",
+   "lang": "en",
+   "start": "2026-10-13 21:30:00",
+   "end": "2026-10-13 22:30:00",
+   "description": "w",
+   "channel_id": "ch1.test",
+   "now_playing": 0,
+   "has_archive": 0,
+   "start_timestamp": "1791930600",
+   "stop_timestamp": "1791934200"
+  },
+  {
+   "id": "4",
+   "epg_id": "1",
+   "title": "Film",
+   "lang": "en",
+   "start": "2026-10-13 21:30:00",
+   "end": "2026-10-13 22:30:00",
+   "description": "f",
+   "channel_id": "ch1.test",
+   "now_playing": 0,
+   "has_archive": 0,
+   "start_timestamp": "1791934200",
+   "stop_timestamp": "1791937800"
+  }
+ ]
+}

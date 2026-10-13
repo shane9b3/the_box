@@ -1,0 +1,25 @@
+[
+ {
+  "category_id": "1",
+  "category_name": "News",
+  "parent_id": 0
+ },
+ {
+  "category_id": 2,
+  "category_name": "Sports",
+  "parent_id": "0"
+ },
+ {
+  "category_id": "5",
+  "category_name": "UK Sports",
+  "parent_id": "2"
+ },
+ {
+  "category_id": "7",
+  "category_name": "",
+  "parent_id": null
+ },
+ {
+  "category_name": "No id"
+ }
+]

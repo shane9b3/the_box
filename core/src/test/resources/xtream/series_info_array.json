@@ -1,0 +1,101 @@
+{
+ "seasons": [
+  {
+   "season_number": 1,
+   "name": "Season 1",
+   "episode_count": 2,
+   "air_date": "2020-01-01"
+  },
+  {
+   "season_number": 2,
+   "name": "Season 2",
+   "episode_count": 1,
+   "air_date": "2021-01-01"
+  }
+ ],
+ "info": [],
+ "episodes": [
+  [
+   {
+    "id": "3011",
+    "episode_num": 1,
+    "title": "SNoneE1",
+    "container_extension": "mp4",
+    "season": null,
+    "added": "1700000000",
+    "custom_sid": "",
+    "direct_source": "",
+    "info": {
+     "movie_image": "",
+     "plot": "Episode plot",
+     "releasedate": "2020-01-01",
+     "rating": 8,
+     "duration_secs": 1800,
+     "duration": "00:30:00",
+     "tmdb_id": "1"
+    }
+   },
+   {
+    "id": "3012",
+    "episode_num": 2,
+    "title": "SNoneE2",
+    "container_extension": "mp4",
+    "season": null,
+    "added": "1700000000",
+    "custom_sid": "",
+    "direct_source": "",
+    "info": {
+     "movie_image": "",
+     "plot": "Episode plot",
+     "releasedate": "2020-01-01",
+     "rating": 8,
+     "duration_secs": 1800,
+     "duration": "00:30:00",
+     "tmdb_id": "1"
+    }
+   }
+  ],
+  [
+   {
+    "id": "3021",
+    "episode_num": 1,
+    "title": "SNoneE1",
+    "container_extension": "mp4",
+    "season": null,
+    "added": "1700000000",
+    "custom_sid": "",
+    "direct_source": "",
+    "info": {
+     "movie_image": "",
+     "plot": "Episode plot",
+     "releasedate": "2020-01-01",
+     "rating": 8,
+     "duration_secs": 1800,
+     "duration": "00:30:00",
+     "tmdb_id": "1"
+    }
+   }
+  ],
+  [
+   {
+    "id": "3031",
+    "episode_num": 1,
+    "title": "S5E1",
+    "container_extension": "mp4",
+    "season": 5,
+    "added": "1700000000",
+    "custom_sid": "",
+    "direct_source": "",
+    "info": {
+     "movie_image": "",
+     "plot": "Episode plot",
+     "releasedate": "2020-01-01",
+     "rating": 8,
+     "duration_secs": 1800,
+     "duration": "00:30:00",
+     "tmdb_id": "1"
+    }
+   }
+  ]
+ ]
+}
