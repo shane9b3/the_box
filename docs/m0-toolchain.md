@@ -12,7 +12,7 @@ on 2026-10-13.
 | Android Gradle Plugin | **9.4.1** | as planned; uses AGP 9 **built-in Kotlin** (no `org.jetbrains.kotlin.android` plugin) |
 | Kotlin (KGP, compose compiler, serialization) | **2.4.21** | as planned; root `build.gradle.kts` puts KGP 2.4.21 on the classpath, overriding the 2.2.10 AGP depends on |
 | KSP | **2.3.12** | KSP2, versioned independently of Kotlin since 2.3.0; 2.3.10+ has the AGP 9 built-in-Kotlin and Kotlin 2.4 fixes |
-| JDK (build) | **21** (17 also supported) | AGP 9.4 minimum is 17. Bytecode target is 17 in all modules |
+| JDK (build) | **21** | AGP 9.4 minimum is 17, but `:data` unit tests use Robolectric SDK 35 which needs JDK 21 (M1 design review). Bytecode target is 17 in all modules |
 | compileSdk / minSdk / targetSdk | **37** / 25 / 35 | compileSdk changed from 36 (see substitutions) |
 | SDK Build Tools | 36.0.0 | AGP 9.4 default |
 | Compose BOM | **2026.09.00** | as planned (Compose 1.12) |
@@ -64,7 +64,6 @@ on 2026-10-13.
 
 ```sh
 export JAVA_HOME=/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home   # Homebrew JDK 21
-# (JDK 17 also works: /Library/Java/JavaVirtualMachines/jdk-17.jdk/Contents/Home)
 export ANDROID_HOME=$HOME/Library/Android/sdk
 # local.properties (gitignored): sdk.dir=/Users/<you>/Library/Android/sdk
 # One-time: sdkmanager "platforms;android-37.0"
