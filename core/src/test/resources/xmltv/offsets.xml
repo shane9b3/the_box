@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="off"><display-name>Offsets</display-name></channel>
+  <programme start="20261013190000 +0100" channel="off"><title>plus0100</title></programme>
+  <programme start="20261013130000 -0500" channel="off"><title>minus0500</title></programme>
+  <programme start="20261013233000 +05:30" channel="off"><title>plus0530</title></programme>
+  <programme start="20261013234500 +0545" channel="off"><title>plus0545</title></programme>
+  <programme start="20261013190000+0100" channel="off"><title>nospace</title></programme>
+  <programme start="20261013180000Z" channel="off"><title>zulu</title></programme>
+  <programme start="20261013180000 GMT" channel="off"><title>gmt</title></programme>
+  <programme start="20261013180000 UTC" channel="off"><title>utc</title></programme>
+  <programme start="20261013130000 EST" channel="off"><title>est</title></programme>
+  <programme start="20261013180000" channel="off"><title>nooffset</title></programme>
+  <programme start="20261025003000" channel="off"><title>dst_before</title></programme>
+  <programme start="20261025013000" channel="off"><title>dst_overlap</title></programme>
+  <programme start="20261025023000" channel="off"><title>dst_after</title></programme>
+  <programme start="202610131800" channel="off"><title>truncated</title></programme>
+  <programme start="20261013" channel="off"><title>dateonly</title></programme>
+  <programme start="2026131319" channel="off"><title>invalid</title></programme>
+</tv>

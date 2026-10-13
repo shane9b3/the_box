@@ -1,0 +1,663 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE tv SYSTEM "xmltv.dtd">
+<tv generator-info-name="fixture" source-info-url="http://example">
+  <channel id="bbc1.uk">
+    <display-name lang="en">BBC One</display-name>
+    <display-name>BBC 1</display-name>
+    <icon src="http://img.example/bbc1.png" width="100" height="100"/>
+    <url>http://example/channel</url>
+  </channel>
+  <channel id="itv1.uk">
+    <display-name lang="en">ITV1</display-name>
+    <display-name lang="fr">ITV</display-name>
+    <icon src="http://img.example/itv1.png" width="100" height="100"/>
+    <url>http://example/channel</url>
+  </channel>
+  <channel id="cnn.us">
+    <display-name lang="en">CNN International</display-name>
+    <display-name>CNN</display-name>
+    <url>http://example/channel</url>
+  </channel>
+  <programme start="20261013060000 +0000" stop="20261013070000 +0000" channel="bbc1.uk" catchup-id="bbc1.uk-0">
+    <title lang="en">BBC1 Show 0</title>
+    <title lang="fr">Emission 0</title>
+    <sub-title lang="en">Part 0</sub-title>
+    <desc lang="en">Description of show 0 on bbc1.uk.</desc>
+    <credits>
+      <director>Jane Director</director>
+      <actor role="Detective">Sam Actor</actor>
+      <actor>Alex Actor</actor>
+      <writer>Will Writer</writer>
+      <presenter>Pat Presenter</presenter>
+    </credits>
+    <date>2019</date>
+    <category lang="en">News</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/bbc1.uk/0.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">0.0.</episode-num>
+    <episode-num system="onscreen">S01E01</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>HDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013070000 +0000" stop="20261013080000 +0000" channel="bbc1.uk">
+    <title lang="en">BBC1 Show 1</title>
+    <sub-title lang="en">Part 1</sub-title>
+    <desc lang="en">Description of show 1 on bbc1.uk.</desc>
+    <category lang="en">Drama</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/bbc1.uk/1.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">0.1.</episode-num>
+    <episode-num system="onscreen">S01E02</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>UHD</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <previously-shown start="20261012070000 +0000" channel="bbc1.uk"/>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013080000 +0000" stop="20261013090000 +0000" channel="bbc1.uk" catchup-id="bbc1.uk-2">
+    <title lang="en">BBC1 Show 2</title>
+    <sub-title lang="en">Part 2</sub-title>
+    <desc lang="en">Description of show 2 on bbc1.uk.</desc>
+    <category lang="en">News</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/bbc1.uk/2.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">0.2.</episode-num>
+    <episode-num system="onscreen">S01E03</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>SDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <premiere>First showing</premiere>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013090000 +0000" stop="20261013100000 +0000" channel="bbc1.uk">
+    <title lang="en">BBC1 Show 3</title>
+    <sub-title lang="en">Part 3</sub-title>
+    <desc lang="en">Description of show 3 on bbc1.uk.</desc>
+    <category lang="en">Drama</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/bbc1.uk/3.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">0.3.</episode-num>
+    <episode-num system="onscreen">S01E04</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>HDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <last-chance/>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013100000 +0000" stop="20261013110000 +0000" channel="bbc1.uk" catchup-id="bbc1.uk-4">
+    <title lang="en">BBC1 Show 4</title>
+    <sub-title lang="en">Part 4</sub-title>
+    <desc lang="en">Description of show 4 on bbc1.uk.</desc>
+    <category lang="en">News</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/bbc1.uk/4.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">0.4.</episode-num>
+    <episode-num system="onscreen">S01E05</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>UHD</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <new/>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013110000 +0000" stop="20261013120000 +0000" channel="bbc1.uk">
+    <title lang="en">BBC1 Show 5</title>
+    <sub-title lang="en">Part 5</sub-title>
+    <desc lang="en">Description of show 5 on bbc1.uk.</desc>
+    <category lang="en">Drama</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/bbc1.uk/5.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">0.5.</episode-num>
+    <episode-num system="onscreen">S01E06</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>SDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <subtitles type="teletext"><language>English</language></subtitles>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013120000 +0000" stop="20261013130000 +0000" channel="bbc1.uk" catchup-id="bbc1.uk-6">
+    <title lang="en">BBC1 Show 6</title>
+    <sub-title lang="en">Part 6</sub-title>
+    <desc lang="en">Description of show 6 on bbc1.uk.</desc>
+    <category lang="en">News</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/bbc1.uk/6.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">0.6.</episode-num>
+    <episode-num system="onscreen">S01E07</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>HDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013130000 +0000" stop="20261013140000 +0000" channel="bbc1.uk">
+    <title lang="en">BBC1 Show 7</title>
+    <sub-title lang="en">Part 7</sub-title>
+    <desc lang="en">Description of show 7 on bbc1.uk.</desc>
+    <category lang="en">Drama</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/bbc1.uk/7.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">0.7.</episode-num>
+    <episode-num system="onscreen">S01E08</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>UHD</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013140000 +0000" stop="20261013150000 +0000" channel="bbc1.uk" catchup-id="bbc1.uk-8">
+    <title lang="en">BBC1 Show 8</title>
+    <sub-title lang="en">Part 8</sub-title>
+    <desc lang="en">Description of show 8 on bbc1.uk.</desc>
+    <category lang="en">News</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/bbc1.uk/8.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">0.8.</episode-num>
+    <episode-num system="onscreen">S01E09</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>SDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013150000 +0000" stop="20261013160000 +0000" channel="bbc1.uk">
+    <title lang="en">BBC1 Show 9</title>
+    <sub-title lang="en">Part 9</sub-title>
+    <desc lang="en">Description of show 9 on bbc1.uk.</desc>
+    <category lang="en">Drama</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/bbc1.uk/9.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">0.9.</episode-num>
+    <episode-num system="onscreen">S01E10</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>HDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013060000 +0000" stop="20261013070000 +0000" channel="itv1.uk" catchup-id="itv1.uk-0">
+    <title lang="en">ITV1 Show 0</title>
+    <title lang="fr">Emission 0</title>
+    <sub-title lang="en">Part 0</sub-title>
+    <desc lang="en">Description of show 0 on itv1.uk.</desc>
+    <credits>
+      <director>Jane Director</director>
+      <actor role="Detective">Sam Actor</actor>
+      <actor>Alex Actor</actor>
+      <writer>Will Writer</writer>
+      <presenter>Pat Presenter</presenter>
+    </credits>
+    <date>2019</date>
+    <category lang="en">News</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/itv1.uk/0.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">1.0.</episode-num>
+    <episode-num system="onscreen">S02E01</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>HDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013070000 +0000" stop="20261013080000 +0000" channel="itv1.uk">
+    <title lang="en">ITV1 Show 1</title>
+    <sub-title lang="en">Part 1</sub-title>
+    <desc lang="en">Description of show 1 on itv1.uk.</desc>
+    <category lang="en">Drama</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/itv1.uk/1.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">1.1.</episode-num>
+    <episode-num system="onscreen">S02E02</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>UHD</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <previously-shown start="20261012070000 +0000" channel="itv1.uk"/>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013080000 +0000" stop="20261013090000 +0000" channel="itv1.uk" catchup-id="itv1.uk-2">
+    <title lang="en">ITV1 Show 2</title>
+    <sub-title lang="en">Part 2</sub-title>
+    <desc lang="en">Description of show 2 on itv1.uk.</desc>
+    <category lang="en">News</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/itv1.uk/2.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">1.2.</episode-num>
+    <episode-num system="onscreen">S02E03</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>SDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <premiere>First showing</premiere>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013090000 +0000" stop="20261013100000 +0000" channel="itv1.uk">
+    <title lang="en">ITV1 Show 3</title>
+    <sub-title lang="en">Part 3</sub-title>
+    <desc lang="en">Description of show 3 on itv1.uk.</desc>
+    <category lang="en">Drama</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/itv1.uk/3.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">1.3.</episode-num>
+    <episode-num system="onscreen">S02E04</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>HDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <last-chance/>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013100000 +0000" stop="20261013110000 +0000" channel="itv1.uk" catchup-id="itv1.uk-4">
+    <title lang="en">ITV1 Show 4</title>
+    <sub-title lang="en">Part 4</sub-title>
+    <desc lang="en">Description of show 4 on itv1.uk.</desc>
+    <category lang="en">News</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/itv1.uk/4.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">1.4.</episode-num>
+    <episode-num system="onscreen">S02E05</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>UHD</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <new/>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013110000 +0000" stop="20261013120000 +0000" channel="itv1.uk">
+    <title lang="en">ITV1 Show 5</title>
+    <sub-title lang="en">Part 5</sub-title>
+    <desc lang="en">Description of show 5 on itv1.uk.</desc>
+    <category lang="en">Drama</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/itv1.uk/5.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">1.5.</episode-num>
+    <episode-num system="onscreen">S02E06</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>SDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <subtitles type="teletext"><language>English</language></subtitles>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013120000 +0000" stop="20261013130000 +0000" channel="itv1.uk" catchup-id="itv1.uk-6">
+    <title lang="en">ITV1 Show 6</title>
+    <sub-title lang="en">Part 6</sub-title>
+    <desc lang="en">Description of show 6 on itv1.uk.</desc>
+    <category lang="en">News</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/itv1.uk/6.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">1.6.</episode-num>
+    <episode-num system="onscreen">S02E07</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>HDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013130000 +0000" stop="20261013140000 +0000" channel="itv1.uk">
+    <title lang="en">ITV1 Show 7</title>
+    <sub-title lang="en">Part 7</sub-title>
+    <desc lang="en">Description of show 7 on itv1.uk.</desc>
+    <category lang="en">Drama</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/itv1.uk/7.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">1.7.</episode-num>
+    <episode-num system="onscreen">S02E08</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>UHD</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013140000 +0000" stop="20261013150000 +0000" channel="itv1.uk" catchup-id="itv1.uk-8">
+    <title lang="en">ITV1 Show 8</title>
+    <sub-title lang="en">Part 8</sub-title>
+    <desc lang="en">Description of show 8 on itv1.uk.</desc>
+    <category lang="en">News</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/itv1.uk/8.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">1.8.</episode-num>
+    <episode-num system="onscreen">S02E09</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>SDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013150000 +0000" stop="20261013160000 +0000" channel="itv1.uk">
+    <title lang="en">ITV1 Show 9</title>
+    <sub-title lang="en">Part 9</sub-title>
+    <desc lang="en">Description of show 9 on itv1.uk.</desc>
+    <category lang="en">Drama</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/itv1.uk/9.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">1.9.</episode-num>
+    <episode-num system="onscreen">S02E10</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>HDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013060000 +0000" stop="20261013070000 +0000" channel="cnn.us" catchup-id="cnn.us-0">
+    <title lang="en">CNN Show 0</title>
+    <title lang="fr">Emission 0</title>
+    <sub-title lang="en">Part 0</sub-title>
+    <desc lang="en">Description of show 0 on cnn.us.</desc>
+    <credits>
+      <director>Jane Director</director>
+      <actor role="Detective">Sam Actor</actor>
+      <actor>Alex Actor</actor>
+      <writer>Will Writer</writer>
+      <presenter>Pat Presenter</presenter>
+    </credits>
+    <date>2019</date>
+    <category lang="en">News</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/cnn.us/0.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">2.0.</episode-num>
+    <episode-num system="onscreen">S03E01</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>HDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013070000 +0000" stop="20261013080000 +0000" channel="cnn.us">
+    <title lang="en">CNN Show 1</title>
+    <sub-title lang="en">Part 1</sub-title>
+    <desc lang="en">Description of show 1 on cnn.us.</desc>
+    <category lang="en">Drama</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/cnn.us/1.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">2.1.</episode-num>
+    <episode-num system="onscreen">S03E02</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>UHD</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <previously-shown start="20261012070000 +0000" channel="cnn.us"/>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013080000 +0000" stop="20261013090000 +0000" channel="cnn.us" catchup-id="cnn.us-2">
+    <title lang="en">CNN Show 2</title>
+    <sub-title lang="en">Part 2</sub-title>
+    <desc lang="en">Description of show 2 on cnn.us.</desc>
+    <category lang="en">News</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/cnn.us/2.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">2.2.</episode-num>
+    <episode-num system="onscreen">S03E03</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>SDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <premiere>First showing</premiere>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013090000 +0000" stop="20261013100000 +0000" channel="cnn.us">
+    <title lang="en">CNN Show 3</title>
+    <sub-title lang="en">Part 3</sub-title>
+    <desc lang="en">Description of show 3 on cnn.us.</desc>
+    <category lang="en">Drama</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/cnn.us/3.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">2.3.</episode-num>
+    <episode-num system="onscreen">S03E04</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>HDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <last-chance/>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013100000 +0000" stop="20261013110000 +0000" channel="cnn.us" catchup-id="cnn.us-4">
+    <title lang="en">CNN Show 4</title>
+    <sub-title lang="en">Part 4</sub-title>
+    <desc lang="en">Description of show 4 on cnn.us.</desc>
+    <category lang="en">News</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/cnn.us/4.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">2.4.</episode-num>
+    <episode-num system="onscreen">S03E05</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>UHD</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <new/>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013110000 +0000" stop="20261013120000 +0000" channel="cnn.us">
+    <title lang="en">CNN Show 5</title>
+    <sub-title lang="en">Part 5</sub-title>
+    <desc lang="en">Description of show 5 on cnn.us.</desc>
+    <category lang="en">Drama</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/cnn.us/5.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">2.5.</episode-num>
+    <episode-num system="onscreen">S03E06</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>SDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <subtitles type="teletext"><language>English</language></subtitles>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013120000 +0000" stop="20261013130000 +0000" channel="cnn.us" catchup-id="cnn.us-6">
+    <title lang="en">CNN Show 6</title>
+    <sub-title lang="en">Part 6</sub-title>
+    <desc lang="en">Description of show 6 on cnn.us.</desc>
+    <category lang="en">News</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/cnn.us/6.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">2.6.</episode-num>
+    <episode-num system="onscreen">S03E07</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>HDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013130000 +0000" stop="20261013140000 +0000" channel="cnn.us">
+    <title lang="en">CNN Show 7</title>
+    <sub-title lang="en">Part 7</sub-title>
+    <desc lang="en">Description of show 7 on cnn.us.</desc>
+    <category lang="en">Drama</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/cnn.us/7.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">2.7.</episode-num>
+    <episode-num system="onscreen">S03E08</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>UHD</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013140000 +0000" stop="20261013150000 +0000" channel="cnn.us" catchup-id="cnn.us-8">
+    <title lang="en">CNN Show 8</title>
+    <sub-title lang="en">Part 8</sub-title>
+    <desc lang="en">Description of show 8 on cnn.us.</desc>
+    <category lang="en">News</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/cnn.us/8.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">2.8.</episode-num>
+    <episode-num system="onscreen">S03E09</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>SDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+  <programme start="20261013150000 +0000" stop="20261013160000 +0000" channel="cnn.us">
+    <title lang="en">CNN Show 9</title>
+    <sub-title lang="en">Part 9</sub-title>
+    <desc lang="en">Description of show 9 on cnn.us.</desc>
+    <category lang="en">Drama</category>
+    <category lang="en">Factual</category>
+    <keyword lang="en">keyword</keyword>
+    <language>English</language>
+    <length units="minutes">60</length>
+    <icon src="http://img.example/cnn.us/9.jpg"/>
+    <url>http://example/programme</url>
+    <country>UK</country>
+    <episode-num system="xmltv_ns">2.9.</episode-num>
+    <episode-num system="onscreen">S03E10</episode-num>
+    <video><present>yes</present><colour>yes</colour><aspect>16:9</aspect><quality>HDTV</quality></video>
+    <audio><stereo>stereo</stereo></audio>
+    <rating system="MPAA"><value>PG-13</value><icon src="http://img.example/pg13.png"/></rating>
+    <star-rating><value>7.5/10</value></star-rating>
+    <review type="text">Good.</review>
+  </programme>
+</tv>
