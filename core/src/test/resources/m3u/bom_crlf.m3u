@@ -1,0 +1,10 @@
+﻿# Fixture: UTF-8 BOM + CRLF. Covers M1, M4 (CRLF, lone CR, trailing whitespace, blank lines).
+#EXTM3U 	
+
+#EXTINF:-1 tvg-id="One.uk",Channel One  	
+http://h.example.com/one.ts
+
+
+#EXTINF:-1 tvg-id="Two.uk",Channel Twohttp://h.example.com/two.ts   	
+#EXTINF:-1,Café Three
+http://h.example.com/three.ts

@@ -1,0 +1,42 @@
+# Refresh pair basic, v1: 20 channels.
+#EXTM3U
+#EXTINF:-1 tvg-id="ch01.uk" tvg-logo="http://logo.example.com/ch01.uk.png" group-title="General",Channel 01 HD
+http://lb1.example.com/hls/ch01/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch02.uk" tvg-logo="http://logo.example.com/ch02.uk.png" group-title="General",Channel 02 HD
+http://lb1.example.com/hls/ch02/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch03.uk" tvg-logo="http://logo.example.com/ch03.uk.png" group-title="General",Channel 03 HD
+http://lb1.example.com/hls/ch03/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch04.uk" tvg-logo="http://logo.example.com/ch04.uk.png" group-title="General",Channel 04 HD
+http://lb1.example.com/hls/ch04/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch05.uk" tvg-logo="http://logo.example.com/ch05.uk.png" group-title="General",Channel 05 HD
+http://lb1.example.com/hls/ch05/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch06.uk" tvg-logo="http://logo.example.com/ch06.uk.png" group-title="General",Channel 06 HD
+http://lb1.example.com/hls/ch06/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch07.uk" tvg-logo="http://logo.example.com/ch07.uk.png" group-title="General",Channel 07 HD
+http://lb1.example.com/hls/ch07/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch08.uk" tvg-logo="http://logo.example.com/ch08.uk.png" group-title="General",Channel 08 HD
+http://lb1.example.com/hls/ch08/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch09.uk" tvg-logo="http://logo.example.com/ch09.uk.png" group-title="General",Channel 09 HD
+http://lb1.example.com/hls/ch09/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch10.uk" tvg-logo="http://logo.example.com/ch10.uk.png" group-title="General",Channel 10 HD
+http://lb1.example.com/hls/ch10/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch11.uk" tvg-logo="http://logo.example.com/ch11.uk.png" group-title="General",Channel 11 HD
+http://lb1.example.com/hls/ch11/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch12.uk" tvg-logo="http://logo.example.com/ch12.uk.png" group-title="General",Channel 12 HD
+http://lb1.example.com/hls/ch12/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch13.uk" tvg-logo="http://logo.example.com/ch13.uk.png" group-title="General",Channel 13 HD
+http://lb1.example.com/hls/ch13/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch14.uk" tvg-logo="http://logo.example.com/ch14.uk.png" group-title="General",Channel 14 HD
+http://lb1.example.com/hls/ch14/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch15.uk" tvg-logo="http://logo.example.com/ch15.uk.png" group-title="General",Channel 15 HD
+http://lb1.example.com/hls/ch15/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch16.uk" tvg-logo="http://logo.example.com/ch16.uk.png" group-title="General",Channel 16 HD
+http://lb1.example.com/hls/ch16/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch17.uk" tvg-logo="http://logo.example.com/ch17.uk.png" group-title="General",Channel 17 HD
+http://lb1.example.com/hls/ch17/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch18.uk" tvg-logo="http://logo.example.com/ch18.uk.png" group-title="General",Channel 18 HD
+http://lb1.example.com/hls/ch18/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch19.uk" tvg-logo="http://logo.example.com/ch19.uk.png" group-title="General",Channel 19 HD
+http://lb1.example.com/hls/ch19/index.m3u8?token=t1
+#EXTINF:-1 tvg-id="ch20.uk" tvg-logo="http://logo.example.com/ch20.uk.png" group-title="General",Channel 20 HD
+http://lb1.example.com/hls/ch20/index.m3u8?token=t1

@@ -1,0 +1,5 @@
+<!-- Fixture: an XMLTV file given as a playlist. Covers M2 (WRONG_FORMAT). -->
+<?xml version="1.0" encoding="UTF-8"?>
+<tv generator-info-name="fixture">
+  <channel id="bbc1.uk"><display-name>BBC One</display-name></channel>
+</tv>

@@ -1,0 +1,8 @@
+# Fixture: windows-1251 Cyrillic names. Covers M6 and design s4.3 (1251 chosen by the high-byte rule). Comment kept ASCII.
+#EXTM3U
+#EXTINF:-1 tvg-id="Perviy.ru" group-title="Россия",Первый канал
+http://h.example.com/1kanal.ts
+#EXTINF:-1 group-title="Россия",Россия 1 HD
+http://h.example.com/russia1.ts
+#EXTINF:-1,НТВ
+http://h.example.com/ntv.ts

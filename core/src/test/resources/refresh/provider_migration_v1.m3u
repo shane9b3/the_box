@@ -1,0 +1,52 @@
+# Refresh pair provider_migration, v1: 25 Xtream channels, ids 1000+.
+#EXTM3U
+#EXTINF:-1 group-title="UK",BBC One
+http://prov.example.tv/live/user1/pass1/1000.ts
+#EXTINF:-1 group-title="UK",BBC Two
+http://prov.example.tv/live/user1/pass1/1001.ts
+#EXTINF:-1 group-title="UK",ITV
+http://prov.example.tv/live/user1/pass1/1002.ts
+#EXTINF:-1 group-title="UK",Channel 4
+http://prov.example.tv/live/user1/pass1/1003.ts
+#EXTINF:-1 group-title="UK",Channel 5
+http://prov.example.tv/live/user1/pass1/1004.ts
+#EXTINF:-1 group-title="UK",Sky News
+http://prov.example.tv/live/user1/pass1/1005.ts
+#EXTINF:-1 group-title="UK",Sky Sports Main Event
+http://prov.example.tv/live/user1/pass1/1006.ts
+#EXTINF:-1 group-title="UK",Sky Sports F1
+http://prov.example.tv/live/user1/pass1/1007.ts
+#EXTINF:-1 group-title="UK",Dave
+http://prov.example.tv/live/user1/pass1/1008.ts
+#EXTINF:-1 group-title="UK",E4
+http://prov.example.tv/live/user1/pass1/1009.ts
+#EXTINF:-1 group-title="UK",More4
+http://prov.example.tv/live/user1/pass1/1010.ts
+#EXTINF:-1 group-title="UK",Film4
+http://prov.example.tv/live/user1/pass1/1011.ts
+#EXTINF:-1 group-title="UK",Gold
+http://prov.example.tv/live/user1/pass1/1012.ts
+#EXTINF:-1 group-title="UK",W
+http://prov.example.tv/live/user1/pass1/1013.ts
+#EXTINF:-1 group-title="UK",Alibi
+http://prov.example.tv/live/user1/pass1/1014.ts
+#EXTINF:-1 group-title="UK",Eden
+http://prov.example.tv/live/user1/pass1/1015.ts
+#EXTINF:-1 group-title="UK",Yesterday
+http://prov.example.tv/live/user1/pass1/1016.ts
+#EXTINF:-1 group-title="UK",Quest
+http://prov.example.tv/live/user1/pass1/1017.ts
+#EXTINF:-1 group-title="UK",Really
+http://prov.example.tv/live/user1/pass1/1018.ts
+#EXTINF:-1 group-title="UK",Discovery
+http://prov.example.tv/live/user1/pass1/1019.ts
+#EXTINF:-1 group-title="UK",National Geographic
+http://prov.example.tv/live/user1/pass1/1020.ts
+#EXTINF:-1 group-title="UK",History
+http://prov.example.tv/live/user1/pass1/1021.ts
+#EXTINF:-1 group-title="UK",Comedy Central
+http://prov.example.tv/live/user1/pass1/1022.ts
+#EXTINF:-1 group-title="UK",MTV
+http://prov.example.tv/live/user1/pass1/1023.ts
+#EXTINF:-1 group-title="UK",Nickelodeon
+http://prov.example.tv/live/user1/pass1/1024.ts

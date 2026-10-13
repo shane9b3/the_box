@@ -1,0 +1,16 @@
+# Fixture: catch-up attributes. Covers M25 (header catch-up defaults), M26 (each mode, catchup-type alias, timeshift, tvg-rec, catchup-time, per-channel correction).
+#EXTM3U catchup="append" catchup-source="?utc={utc}&lutc={lutc}" catchup-days="5" catchup-correction="-1.5" tvg-shift="2" url-tvg="http://epg.example.com/guide.xml.gz"
+#EXTINF:-1 tvg-id="Def.uk" catchup="default" catchup-source="http://archive.example.com/def/{Y}-{m}-{d}/{H}{M}.ts" catchup-days="7d",Default Mode
+http://h.example.com/def.ts
+#EXTINF:-1 tvg-id="App.uk" catchup="append" catchup-source="?start={utc}&end={utcend}",Append Mode
+http://h.example.com/app.m3u8
+#EXTINF:-1 tvg-id="Shift.uk" catchup-type="shift" catchup-days="3",Shift Alias
+http://h.example.com/shift.m3u8
+#EXTINF:-1 tvg-id="Flu.uk" catchup="flussonic" catchup-correction="0,5",Flussonic
+http://flu.example.com/channel/index.m3u8
+#EXTINF:-1 tvg-id="Old.uk" timeshift="4",Legacy Timeshift
+http://h.example.com/old.ts
+#EXTINF:-1 tvg-id="Rec.uk" tvg-rec="2" catchup-time="86400",Tvg Rec
+http://h.example.com/rec.ts
+#EXTINF:-1 tvg-id="Weird.uk" catchup="1",Unrecognised Mode
+http://h.example.com/weird.ts

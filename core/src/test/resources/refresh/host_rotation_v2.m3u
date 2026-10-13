@@ -1,0 +1,32 @@
+# Refresh pair host_rotation, v2: every host lb1 -> lb7; keys identical.
+#EXTM3U
+#EXTINF:-1 group-title="Live",Rotating 1
+http://lb7.cdn.example.net:8000/live/stream1/index.m3u8?token=abc1
+#EXTINF:-1 group-title="Live",Rotating 2
+http://lb7.cdn.example.net:8000/live/stream2/index.m3u8?token=abc2
+#EXTINF:-1 group-title="Live",Rotating 3
+http://lb7.cdn.example.net:8000/live/stream3/index.m3u8?token=abc3
+#EXTINF:-1 group-title="Live",Rotating 4
+http://lb7.cdn.example.net:8000/live/stream4/index.m3u8?token=abc4
+#EXTINF:-1 group-title="Live",Rotating 5
+http://lb7.cdn.example.net:8000/live/stream5/index.m3u8?token=abc5
+#EXTINF:-1 group-title="Live",Rotating 6
+http://lb7.cdn.example.net:8000/live/stream6/index.m3u8?token=abc6
+#EXTINF:-1 group-title="Live",Rotating 7
+http://lb7.cdn.example.net:8000/live/stream7/index.m3u8?token=abc7
+#EXTINF:-1 group-title="Live",Rotating 8
+http://lb7.cdn.example.net:8000/live/stream8/index.m3u8?token=abc8
+#EXTINF:-1 group-title="Live",Rotating 9
+http://lb7.cdn.example.net:8000/live/stream9/index.m3u8?token=abc9
+#EXTINF:-1 group-title="Live",Rotating 10
+http://lb7.cdn.example.net:8000/live/stream10/index.m3u8?token=abc10
+#EXTINF:-1 group-title="Live",Rotating 11
+http://lb7.cdn.example.net:8000/live/stream11/index.m3u8?token=abc11
+#EXTINF:-1 group-title="Live",Rotating 12
+http://lb7.cdn.example.net:8000/live/stream12/index.m3u8?token=abc12
+#EXTINF:-1 group-title="Live",Rotating 13
+http://lb7.cdn.example.net:8000/live/stream13/index.m3u8?token=abc13
+#EXTINF:-1 group-title="Live",Rotating 14
+http://lb7.cdn.example.net:8000/live/stream14/index.m3u8?token=abc14
+#EXTINF:-1 group-title="Live",Rotating 15
+http://lb7.cdn.example.net:8000/live/stream15/index.m3u8?token=abc15

@@ -1,0 +1,5 @@
+# Fixture: no #EXTM3U. Covers M3, M23 (URL without EXTINF, EXTINF without URL at EOF).
+#EXTINF:-1 tvg-id="First.uk",First
+http://h.example.com/first.ts
+http://h.example.com/streams/Orphan%20Stream.m3u8
+#EXTINF:-1,Dangling At EOF

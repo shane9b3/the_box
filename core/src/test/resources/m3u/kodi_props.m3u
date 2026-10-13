@@ -1,0 +1,20 @@
+# Fixture: KODIPROP / EXTHTTP. Covers M12 (props before and after EXTINF, inputstreamaddon alias, encoded stream_headers, DRM keys kept), M13 (EXTHTTP JSON, invalid JSON).
+#EXTM3U
+#KODIPROP:inputstream.adaptive.manifest_type=mpd
+#EXTINF:-1 tvg-id="DrmOne.uk" group-title="DRM",DRM One
+#KODIPROP:inputstreamaddon=inputstream.adaptive
+#KODIPROP:inputstream.adaptive.license_type=com.widevine.alpha
+#KODIPROP:inputstream.adaptive.license_key=https://lic.example.com/wv|Content-Type=application/octet-stream|R{SSM}|
+#KODIPROP:inputstream.adaptive.stream_headers=User-Agent%3DX%26Referer%3DY
+https://dash.example.com/drm1/manifest.mpd
+#EXTINF:-1 tvg-id="Clear.uk" group-title="DRM",ClearKey Two
+#KODIPROP:inputstream=inputstream.adaptive
+#KODIPROP:inputstream.adaptive.license_type=clearkey
+#KODIPROP:inputstream.adaptive.license_key=0123456789abcdef0123456789abcdef:fedcba9876543210fedcba9876543210
+#EXTHTTP:{"Cookie":"a=b","X-Num":5}
+https://dash.example.com/clear2/manifest.mpd
+#EXTINF:-1,Bad Json
+#EXTHTTP:{not json
+http://h.example.com/badjson/index.m3u8
+#EXTINF:-1,Plain After
+http://h.example.com/plain/index.m3u8
