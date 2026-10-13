@@ -17,4 +17,17 @@ Android TV / Fire TV IPTV player (M3U + XMLTV EPG + Xtream Codes) built to match
 | `docs/research/tivimate-feature-audit.md` | TiviMate feature inventory (free/premium, confidence-tagged) and opportunities |
 | `design/` | Exported prototype (`TV Guide.dc.html`, `support.js`, `thumbnail.webp`) |
 
-No application code yet. Next step is the spike phase in `docs/00-master-plan.md` §7.
+## Status
+
+- **M0 foundations** done: Gradle skeleton, design density rule and tokens, fake Xtream panel (`tools/fakepanel/`), FFmpeg audio decoder pipeline (`tools/ffmpeg/`), TV emulator smoke test.
+- **M1 data layer** done: streaming M3U/XMLTV/Xtream parsers, stable channel identity and diff-merge, generation-swapped `epg.db`, Room `library.db`, EPG matcher, WorkManager refresh, Tink credentials. Design: `docs/design/m1-data-layer.md`.
+- Next: **M2 playback core**. Spike experiments D1–D5 wait for low-end hardware.
+
+## Build
+
+```sh
+export ANDROID_HOME=~/Library/Android/sdk
+export JAVA_HOME=/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+./gradlew :core:test :data:testDebugUnitTest :app:assembleDebug
+```
+See `docs/m0-toolchain.md` for the pinned toolchain.

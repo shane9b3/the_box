@@ -115,8 +115,8 @@ Also in the spike phase:
 
 | # | Milestone | Contents |
 |---|---|---|
-| M0 | Foundations (spikes done) | Repo, version catalog, modules, CI building the FFmpeg AAR, fake panel, benchmark harness, design tokens + density rule |
-| M1 | Data in | M3U/XMLTV/Xtream parsers with fixtures, `library.db`/`epg.db`, stable keys, diff-merge, refresh report, EPG matcher + unmatched screen, WorkManager refresh |
+| M0 | Foundations — **done 2026-10-13** (spikes D1–D5 deferred: no hardware) | Repo, version catalog, modules, CI building the FFmpeg AAR, fake panel, benchmark harness, design tokens + density rule |
+| M1 | Data in — **done 2026-10-13** (`docs/design/m1-data-layer.md`, reviews in `docs/review/m1-*.md`) | M3U/XMLTV/Xtream parsers with fixtures, `library.db`/`epg.db`, stable keys, diff-merge, refresh report, EPG matcher (the unmatched-channels *screen* moves to M5), WorkManager refresh, Tink credential store. JVM perf: 200k-entry M3U import 1.9 s; 980k-programme EPG rebuild 20 s with 6.5 MB retained heap; warm window query < 1 ms; matcher 20k×50k 2.3 s. Device numbers still open (no low-end hardware) |
 | M2 | Playback core | `PlaybackController`, `LiveTsDataSource`, broker, error policy, adaptive buffer, stall detectors, audio fallback, AFR/HDR policy, lifecycle |
 | M3 | Guide | Custom grid, hole-punch mini player, focused panel, group/favourites filter, day strip, archive band, reminders, search |
 | M4 | Full-screen player UX | Info bar, channel list, number entry, pickers, stats overlay, error cards, catch-up scrub bar and `ArchivePlayback` |
