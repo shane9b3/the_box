@@ -7,7 +7,10 @@ import app.thebox.core.common.SourceError
 import app.thebox.data.contracts.FetchRequest
 import app.thebox.data.contracts.FetchResult
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import okio.Buffer
@@ -36,6 +39,20 @@ class OkHttpSourceFetcherTest {
 
     private fun dest(): File = File(tmp.root, "1.src")
     private fun ok(r: Outcome<FetchResult>): FetchResult = (r as Outcome.Ok).value
+
+    @Test
+    fun cancellationDuringAStalledBodyReturnsPromptly() = runBlocking {
+        // Code review M1 S-6: 1 KB, then the server stalls for 60 s; the read must not hold the worker.
+        server.enqueue(MockResponse.Builder().code(200).body("x".repeat(64 * 1024)).throttleBody(1024, 60, TimeUnit.SECONDS).build())
+        val job = launch(Dispatchers.IO) { fetcher.fetch(FetchRequest(server.url("/big.xml").toString()), dest()) }
+        delay(500)
+        val t0 = System.nanoTime()
+        withTimeout(5_000) { job.cancel(); job.join() }
+        assertTrue(job.isCancelled)
+        assertTrue("took ${(System.nanoTime() - t0) / 1_000_000} ms", System.nanoTime() - t0 < 3_000_000_000L)
+        assertFalse(File(dest().path + ".part").exists())
+        assertFalse(dest().exists())
+    }
 
     @Test
     fun downloadsToPartThenRenamesAndReportsValidators() = runBlocking {

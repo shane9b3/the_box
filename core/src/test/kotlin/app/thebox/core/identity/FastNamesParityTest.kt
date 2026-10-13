@@ -12,6 +12,9 @@ class FastNamesParityTest {
     private fun check(s: String) {
         assertEquals(NameNormalizer.forKey(s), FastNames.forKey(s), "forKey(\"$s\")")
         assertEquals(NameNormalizer.forGroup(s), FastNames.forGroup(s), "forGroup(\"$s\")")
+        // Code review M1 S-3: norm_name / matcher fast path.
+        assertEquals(NameNormalizer.forMatchRegex(s), FastNames.forMatch(s), "forMatch(\"$s\")")
+        assertEquals(NameNormalizer.forMatchRegex(s), NameNormalizer.forMatch(s), "forMatch(\"$s\") public")
     }
 
     @ParameterizedTest
@@ -31,6 +34,8 @@ class FastNamesParityTest {
             "HD", "hd", "FHD", "uhd", "sd", "4K", "8k", "HEVC", "h.264", "H265", "x264", "avc", "2160p", "1080i", "720P", "576p", "50 fps",
             "60fps", "HDR10+", "hdr", "hlg", "backup", "VIP", "raw", "BBC", "One", "+1", "(", ")", "[", "]", "|", ":", "-", "_", ".", ",",
             " ", "  ", "\t", "1", "22", "a", "Z", "&", "'", "\"", "/", "+", "fps", "50", "h", ".", "26", "4",
+            // forMatch: country prefixes (ISO, uk, non-country) and every bracket kind.
+            "UK", "uk:", "|DE|", "de", "XX", "xx:", "US - ", "fr |", "{", "}", "(East)", "[VIP]", "\n", "\u000B",
         )
         val rnd = Random(2026)
         repeat(50_000) {

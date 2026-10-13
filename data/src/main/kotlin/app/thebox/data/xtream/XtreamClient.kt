@@ -255,8 +255,15 @@ class XtreamClient internal constructor(
             val start = Math.floorMod(conn.preferredBaseIndex, bases.size)
             for (k in bases.indices) {
                 val idx = (start + k) % bases.size
-                val urls = XtreamUrls(bases[idx], conn.username, conn.password)
-                val req = buildRequest(conn, url(urls))
+                // OkHttp rejects an invalid host/port or a non-ASCII header value with IllegalArgumentException,
+                // whose message can quote the header value: map it, never let it escape (code review M1, S-4).
+                val req = try {
+                    buildRequest(conn, url(XtreamUrls(bases[idx], conn.username, conn.password)))
+                } catch (e: IllegalArgumentException) {
+                    last = SourceError.Unsupported("invalid server address or header")
+                    BoxLog.w(TAG, "base #$idx: invalid address or header")
+                    continue
+                }
                 var retries429 = 0
                 while (true) {
                     val attempt = try {

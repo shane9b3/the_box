@@ -83,8 +83,29 @@ internal class ImportSession(
     /** Commits the open batch and makes sure the whitelist was asked even for a source without programmes. */
     fun finish() {
         ensureWhitelist()
+        acceptChannelsWithoutProgrammes()
         commitTx()
         statements.closeAll()
+    }
+
+    /**
+     * A whitelisted `<channel>` with no programme (in the file or the window) never reaches [decide], so it stayed
+     * `imported = 0` and every build and refresh queued an `epg-patch` (a full XMLTV re-parse) for it that could
+     * never mark it either. Accept it now: repair writes `programme_count = 0`. A patch also accepts requested
+     * channels whose `<channel>` element is gone, since [begin] deleted their rows (code review M1, S-7).
+     */
+    private fun acceptChannelsWithoutProgrammes() {
+        val wl = whitelist ?: return
+        val known = ArrayList<String>()
+        decision.forEach { id, v -> if (v != ABSENT && v and 3 == KNOWN && wl.accepts(id)) known += id }
+        for (id in known) decide(id, decision[id])
+        if (mode == ImportMode.PATCH) {
+            for (id in patchIds.orEmpty()) {
+                if (decision.containsKey(id)) continue
+                val row = lookupChannel(id)
+                if (row > 0) decide(id, row shl 2 or KNOWN)
+            }
+        }
     }
 
     /** Leaves the connection without an open transaction after a failure. */

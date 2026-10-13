@@ -105,7 +105,7 @@ class PlaylistDifferImpl internal constructor(
         try {
             val result = pass2(entries, index, sink, ctx, cancel, report, groupCache, detected)
             cancel.throwIfCancelled()
-            val finish = computeFinish(index, existing, ctx, result.insertsByUrl, report, groupKeysSeen)
+            val finish = computeFinish(index, existing, ctx, result.insertsByUrl, result.familyByUrl, report, groupKeysSeen)
             val stats = sink.finish(finish)
             val mass = massRemap(ctx, report)
             BoxLog.i(TAG) {
@@ -122,7 +122,7 @@ class PlaylistDifferImpl internal constructor(
     /** An inserted entry that may be the new key of a newly-missing row (S7): its key and group map key. */
     private class UrlInsert(val key: String, val group: String)
 
-    private class Pass2Result(val insertsByUrl: HashMap<Long, UrlInsert?>)
+    private class Pass2Result(val insertsByUrl: HashMap<Long, UrlInsert?>, val familyByUrl: HashMap<Long, UrlInsert?>)
 
     private fun pass2(
         entries: EntryProducer,
@@ -138,6 +138,7 @@ class PlaylistDifferImpl internal constructor(
         val newKeys = NewKeySet(keyHash, if (index.size == 0) 4096 else 256)
         val dupCounts = HashMap<String, Int>()
         val insertsByUrl = HashMap<Long, UrlInsert?>()
+        val familyByUrl = HashMap<Long, UrlInsert?>()
         val batchSize = ctx.batchSize.coerceAtLeast(1)
         var inserts = ArrayList<KeyedChannel>()
         var updates = ArrayList<ChannelUpdate>()
@@ -214,7 +215,16 @@ class PlaylistDifferImpl internal constructor(
                 if (index.contentHash(slot) != contentHash) {
                     updates += ChannelUpdate(index.id(slot), kc, restored = missing)
                     report.updated++
-                    if (index.urlHash(slot) != urlHash) report.urlChanged++
+                    if (index.urlHash(slot) != urlHash) {
+                        report.urlChanged++
+                        // Code review M1 S-11: a duplicate family [X(u1) → k, X(u2) → k~2] loses its first copy, so
+                        // u2 now takes k (an update) and k~2 goes missing. Remember u2 → k; finish remaps k~2 → k
+                        // when both keys belong to the same occurrence family, so k~2's favourites follow u2.
+                        if (index.hasUrl(urlHash)) {
+                            familyByUrl[urlHash] =
+                                if (familyByUrl.containsKey(urlHash)) null else UrlInsert(key, groupMapKey(GroupKeys.groupKind(raw.kind), groupKey))
+                        }
+                    }
                     if (index.nameHash32(slot) != nameHash.toInt()) report.renamed++
                     if (missing) report.restored++
                 } else if (missing || index.sortIndex(slot) != raw.position) {
@@ -232,7 +242,7 @@ class PlaylistDifferImpl internal constructor(
             throw SourceException(SourceError.Parse("pass 2 saw $n2 entries, pass 1 saw ${report.entries}"))
         }
         flush()
-        return Pass2Result(insertsByUrl)
+        return Pass2Result(insertsByUrl, familyByUrl)
     }
 
     private fun computeFinish(
@@ -240,6 +250,7 @@ class PlaylistDifferImpl internal constructor(
         existing: ExistingChannels,
         ctx: MergeContext,
         insertsByUrl: HashMap<Long, UrlInsert?>,
+        familyByUrl: HashMap<Long, UrlInsert?>,
         report: RefreshReportBuilder,
         groupKeysSeen: Set<String>,
     ): MergeFinish {
@@ -265,9 +276,9 @@ class PlaylistDifferImpl internal constructor(
             } else {
                 still.add(index.id(slot))
             }
-            if (insertsByUrl.isNotEmpty()) {
+            if (insertsByUrl.isNotEmpty() || familyByUrl.isNotEmpty()) {
                 val u = index.urlHash(slot)
-                if (insertsByUrl.containsKey(u)) unseenPerUrl[u] = (unseenPerUrl[u] ?: 0) + 1
+                if (insertsByUrl.containsKey(u) || familyByUrl.containsKey(u)) unseenPerUrl[u] = (unseenPerUrl[u] ?: 0) + 1
             }
             slot = index.seen.nextClearBit(slot + 1)
         }
@@ -275,12 +286,20 @@ class PlaylistDifferImpl internal constructor(
 
         // S7: a newly-missing slot and an inserted entry with the same url hash, unique on both sides.
         val remapSlots = HashMap<Long, UrlInsert>() // existing row id -> new key and group
-        if (insertsByUrl.isNotEmpty()) {
+        val familyOnly = HashSet<Long>() // S-11 candidates: valid only inside one occurrence family
+        if (insertsByUrl.isNotEmpty() || familyByUrl.isNotEmpty()) {
             for (i in 0 until newlySlots.size) {
                 val s = newlySlots[i]
                 val u = index.urlHash(s)
-                val newKey = insertsByUrl[u] ?: continue
-                if (unseenPerUrl[u] == 1) remapSlots[index.id(s)] = newKey
+                if (unseenPerUrl[u] != 1) continue
+                val inserted = insertsByUrl[u]
+                if (inserted != null) {
+                    remapSlots[index.id(s)] = inserted
+                } else if (!insertsByUrl.containsKey(u)) {
+                    val updated = familyByUrl[u] ?: continue
+                    remapSlots[index.id(s)] = updated
+                    familyOnly += index.id(s)
+                }
             }
         }
         // Key strings are not retained per row; fetch the few that are needed with one more scan.
@@ -294,6 +313,7 @@ class PlaylistDifferImpl internal constructor(
         for ((id, target) in remapSlots) {
             val old = needed[id] ?: continue
             if (old.stableKey == target.key) continue
+            if (id in familyOnly && occurrenceBase(old.stableKey) != occurrenceBase(target.key)) continue
             val oldGroup = old.groupKey?.let { groupMapKey(GroupKeys.groupKind(old.kind), it) }
             remaps += KeyRemap(old.stableKey, target.key, sameGroup = oldGroup == target.group)
         }
@@ -309,6 +329,14 @@ class PlaylistDifferImpl internal constructor(
             autoRemaps = remaps,
             purgedKeys = purgedKeys,
         )
+    }
+
+    /** `key~n` → `key` (the §3.2.1 occurrence suffix); any other key unchanged. */
+    private fun occurrenceBase(key: String): String {
+        val t = key.lastIndexOf('~')
+        if (t < 0 || t == key.length - 1) return key
+        for (i in t + 1 until key.length) if (key[i] !in '0'..'9') return key
+        return key.substring(0, t)
     }
 
     /** §3.3.6 with S18: every term counts LIVE+RADIO only. */

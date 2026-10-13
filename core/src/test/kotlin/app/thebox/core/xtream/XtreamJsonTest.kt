@@ -30,6 +30,16 @@ class XtreamJsonTest {
     }
 
     @Test
+    fun parseErrorDetailNeverQuotesTheBody() {
+        // Code review M1 S-5: kotlinx appends "JSON input: …" (the login body holds user_info.password).
+        val body = """{"user_info":{"username":"alice","password":"SECRETPW","auth":1},"server_info":{"url":"h" """
+        val e = assertFailsWith<SourceException> { XtreamJson.tree(bytes(body)) }
+        val detail = (e.error as SourceError.Parse).detail
+        kotlin.test.assertFalse(detail.contains("SECRETPW"), detail)
+        kotlin.test.assertFalse(generateSequence<Throwable>(e) { it.cause }.any { it.message.orEmpty().contains("SECRETPW") })
+    }
+
+    @Test
     fun itemsArrayAndObjectFormAgree() {
         val a = Fixtures.use("xtream/live_streams.json") { XtreamJson.items(it).toList() }
         val o = Fixtures.use("xtream/live_streams_object.json") { XtreamJson.items(it).toList() }

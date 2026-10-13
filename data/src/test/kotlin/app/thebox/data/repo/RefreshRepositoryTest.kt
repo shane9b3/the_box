@@ -24,6 +24,8 @@ import app.thebox.data.testutil.TestDb
 import app.thebox.data.testutil.TestGraph
 import app.thebox.data.testutil.scalar
 import app.thebox.data.testutil.strings
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -98,6 +100,21 @@ class RefreshRepositoryTest {
     }
 
     @Test
+    fun headerCatchupSourceIsTemplated() = runBlocking {
+        // Code review M1 B-1: the header-level catchup-source reached playlist.header_json with the password.
+        val id = addPlaylist()
+        g.fetcher.bodies[url] = m3u("BBC").replaceFirst(
+            "#EXTM3U ",
+            "#EXTM3U catchup=\"default\" catchup-source=\"http://panel.example:8080/timeshift/alice/SECRETPW/{duration:60}/{Y}-{m}-{d}:{H}-{M}/1.ts\" ",
+        )
+        g.xtream.login = Outcome.Ok(XtreamLogin(account(), 0))
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.MANUAL).error)
+        assertNoSecretInDatabase("SECRETPW")
+        val header = db.playlistDao().get(id)!!.headerJson!!
+        assertTrue(header, header.contains("/timeshift/{{u}}/{{p}}/{duration:60}/"))
+    }
+
+    @Test
     fun notModifiedKeepsChannelsAndLogs() = runBlocking {
         val id = addPlaylist()
         g.fetcher.bodies[url] = m3u("BBC")
@@ -109,6 +126,38 @@ class RefreshRepositoryTest {
         assertEquals(1L, db.scalar("SELECT COUNT(*) FROM channel"))
         assertEquals(listOf("NOT_MODIFIED", "SUCCESS"), db.refreshLogDao().latest("PLAYLIST", id, 5).map { it.outcome })
         assertEquals("NOT_MODIFIED", db.playlistDao().get(id)!!.lastStatus)
+    }
+
+    @Test
+    fun concurrentRefreshesOfOnePlaylistAreSerialised() = runBlocking {
+        // Code review M1 S-1: playlist-periodic-<id> and playlist-refresh-<id> can run at once.
+        val id = addPlaylist()
+        g.fetcher.bodies[url] = m3u("BBC", "CNN")
+        g.fetcher.delayMs = 150
+        val repo = g.refresh(FakeDiffer(detected))
+        val a = async(Dispatchers.IO) { repo.refresh(id, Trigger.PERIODIC) }
+        val b = async(Dispatchers.IO) { repo.refresh(id, Trigger.APP_START) }
+        assertNull(a.await().error)
+        assertNull(b.await().error)
+        assertEquals("one download at a time per playlist", 1, g.fetcher.maxInFlight.get())
+        assertEquals(2L, db.scalar("SELECT COUNT(*) FROM channel"))
+    }
+
+    @Test
+    fun unexpectedExceptionIsLoggedAsFailure() = runBlocking {
+        val id = addPlaylist()
+        g.fetcher.bodies[url] = m3u("BBC")
+        val boom = object : app.thebox.core.refresh.PlaylistDiffer {
+            override fun merge(
+                entries: app.thebox.core.refresh.EntryProducer, existing: app.thebox.core.refresh.ExistingChannels,
+                sink: app.thebox.core.refresh.MergeSink, ctx: app.thebox.core.refresh.MergeContext, cancel: app.thebox.core.common.CancelCheck,
+            ): app.thebox.core.refresh.RefreshReport = throw IllegalStateException("http://panel.example:8080/live/alice/SECRETPW/1.ts")
+        }
+        val r = g.refresh(boom).refresh(id, Trigger.PERIODIC)
+        assertEquals("internal", r.error!!.code)
+        val log = db.refreshLogDao().latest("PLAYLIST", id).single()
+        assertEquals("FAILED", log.outcome)
+        assertFalse(log.errorDetail.orEmpty().contains("SECRETPW"))
     }
 
     @Test

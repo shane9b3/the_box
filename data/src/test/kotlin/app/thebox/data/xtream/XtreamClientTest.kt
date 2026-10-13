@@ -253,6 +253,13 @@ class XtreamClientTest {
         assertTrue("heap grew by ${(after - before) / 1_000_000} MB", after - before < 64L * 1024 * 1024)
     }
 
+    @Test fun invalidHeaderOrHostIsAnErrorNotAThrow(): Unit = runBlocking {
+        // Code review M1 S-4: OkHttp throws IllegalArgumentException for a non-ASCII header value.
+        assertEquals("unsupported", client.login(conn(ua = "Tëst")).error().code)
+        assertEquals("unsupported", client.login(conn("http://my host:99999")).error().code)
+        assertEquals(0, server.requestCount)
+    }
+
     @Test fun cancellationCancelsTheCallAndCleansUp(): Unit = runBlocking {
         server.enqueue(
             MockResponse.Builder().code(200).body("[" + "{\"stream_id\":1},".repeat(20_000) + "{}]")

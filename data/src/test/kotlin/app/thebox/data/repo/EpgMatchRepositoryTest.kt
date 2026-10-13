@@ -60,6 +60,16 @@ class EpgMatchRepositoryTest {
     )
 
     @Test
+    fun whitelistDuringABuildKeepsThePublishedHasData() = runBlocking {
+        // Code review M1 S-9: the building generation reports programme_count 0 for every channel (pre-repair).
+        g.matches.whitelistFor(src, catalogue.asSequence())
+        assertEquals(1L, db.scalar("SELECT has_data FROM epg_match WHERE stable_key = 'bbc'"))
+        val building = catalogue.map { it.copy(programmeCount = 0) }
+        g.matches.whitelistFor(src, building.asSequence())
+        assertEquals("has_data survives until afterBuild", 1L, db.scalar("SELECT has_data FROM epg_match WHERE stable_key = 'bbc'"))
+    }
+
+    @Test
     fun whitelistPersistsMatchesAndAcceptsSubjectIds() = runBlocking {
         db.epgMappingDao().upsert(EpgMappingEntity(p, "hbo", src, "hbo.west", 1))
         val wl = g.matches.whitelistFor(src, catalogue.asSequence())

@@ -117,6 +117,48 @@ class EpgRepositoryTest {
     }
 
     @Test
+    fun transientFailureOfASourceWithoutCachedFileKeepsTheCurrentGuide() = runBlocking {
+        // Code review M1 S-10: without a last-good file a rebuild would publish the guide without that source.
+        val a = userSource()
+        val xml2 = "http://epg2.example/guide.xml"
+        val b = (g.epg.addUserSource("Guide 2", xml2) as Outcome.Ok).value
+        g.fetcher.bodies[xml2] = "<tv/>"
+        g.store.catalogue[b] = listOf(epgChannel(b, "cnn", "CNN"))
+        assertNull(g.epg.build(Trigger.MANUAL).error)
+        assertEquals(1, g.store.builds.get())
+        File(g.cacheRoot, "epg/$b.src").delete() // KeepCachedXmltv policy dropped it
+        g.fetcher.bodies[xml] = "<tv>changed</tv>"
+        g.fetcher.errors[xml2] = SourceError.Network(NetworkKind.TIMEOUT)
+        val r = g.epg.build(Trigger.PERIODIC)
+        assertEquals("net.timeout", r.error!!.code)
+        assertEquals("no rebuild without source $b", 1, g.store.builds.get())
+        assertTrue(File(g.cacheRoot, "epg/$a.src").exists())
+    }
+
+    @Test
+    fun runtimeErrorDuringBuildIsLoggedAsFailure() = runBlocking {
+        // Code review M1 S-13: e.g. SQLITE_FULL escaped the worker with no refresh_log row.
+        userSource()
+        g.store.duringBuild = { throw IllegalStateException("disk full") }
+        val r = g.epg.build(Trigger.PERIODIC)
+        assertEquals("internal", r.error!!.code)
+        assertEquals("FAILED", db.refreshLogDao().latest("EPG_BUILD", null).single().outcome)
+    }
+
+    @Test
+    fun concurrentBuildsDoNotDownloadAtTheSameTime() = runBlocking {
+        // Code review M1 S-2: epg-periodic and epg-import are different unique works and both run on first start.
+        val s = userSource()
+        g.fetcher.delayMs = 150
+        val a = async(Dispatchers.IO) { g.epg.build(Trigger.PERIODIC) }
+        val b = async(Dispatchers.IO) { g.epg.build(Trigger.APP_START) }
+        assertNull(a.await().error)
+        assertNull(b.await().error)
+        assertEquals(1, g.fetcher.maxInFlight.get())
+        assertTrue(File(g.cacheRoot, "epg/$s.src").exists())
+    }
+
+    @Test
     fun noSourcesIsANoOp() = runBlocking {
         assertTrue(g.epg.build(Trigger.PERIODIC).skipped)
         assertTrue(g.epg.patch().skipped)

@@ -28,6 +28,73 @@ internal object FastNames {
 
     fun forKey(name: String): String {
         if (!isAscii(name)) return NameNormalizer.forKey(name)
+        val words = keyWords(name)
+        if (words.isNotEmpty()) return words
+        // Fallback of forKey: collapse(NON_WORD(folded)), else folded.trim().
+        return forGroup(name)
+    }
+
+    /**
+     * [NameNormalizer.forMatch] for ASCII input (code review M1, S-3: `channel.norm_name` ran four regexes per
+     * inserted/updated row in the merge). Country prefix (ISO-3166 or `uk`), then bracket groups → " ", then the
+     * forKey word pass; empty → forKey. `FastNamesParityTest` checks it like the other two.
+     */
+    fun forMatch(name: String): String {
+        if (!isAscii(name)) return NameNormalizer.forMatchRegex(name)
+        var s = lowerAll(name)
+        val cut = countryPrefixEnd(s)
+        if (cut > 0) s = s.substring(cut)
+        val words = keyWords(stripBrackets(s))
+        return words.ifEmpty { forKey(name) }
+    }
+
+    /** `^\s*\|?\s*([a-z]{2})\s*[:|\-–]\s*(?=\S)` on lower-case ASCII; end of the match when the code is a country, else 0. */
+    private fun countryPrefixEnd(s: String): Int {
+        val n = s.length
+        var i = 0
+        while (i < n && isRegexSpace(s[i])) i++
+        if (i < n && s[i] == '|') i++
+        while (i < n && isRegexSpace(s[i])) i++
+        if (i + 2 > n || s[i] !in 'a'..'z' || s[i + 1] !in 'a'..'z') return 0
+        val code = s.substring(i, i + 2)
+        i += 2
+        while (i < n && isRegexSpace(s[i])) i++
+        if (i >= n || (s[i] != ':' && s[i] != '|' && s[i] != '-')) return 0 // '–' is not ASCII
+        i++
+        while (i < n && isRegexSpace(s[i])) i++
+        if (i >= n) return 0 // (?=\S)
+        return if (NameNormalizer.isCountryCode(code)) i else 0
+    }
+
+    /** `\([^)]*\)|\[[^\]]*\]|\{[^}]*\}` → " ", scanning left to right like the regex. */
+    private fun stripBrackets(s: String): String {
+        if (s.indexOf('(') < 0 && s.indexOf('[') < 0 && s.indexOf('{') < 0) return s
+        val sb = StringBuilder(s.length)
+        var i = 0
+        while (i < s.length) {
+            val close = when (s[i]) {
+                '(' -> ')'
+                '[' -> ']'
+                '{' -> '}'
+                else -> null
+            }
+            val j = if (close != null) s.indexOf(close, i + 1) else -1
+            if (j >= 0) {
+                sb.append(' ')
+                i = j + 1
+            } else {
+                sb.append(s[i])
+                i++
+            }
+        }
+        return sb.toString()
+    }
+
+    /** Java's `\s`: space, \t, \n, \x0B, \f, \r. */
+    private fun isRegexSpace(c: Char): Boolean = c == ' ' || c in '\t'..'\r'
+
+    /** QUALITY → " ", NON_WORD → " ", collapse; may be empty. */
+    private fun keyWords(name: String): String {
         val n = name.length
         val sb = StringBuilder(n)
         var pendingSpace = false
@@ -51,10 +118,7 @@ internal object FastNames {
             }
             i++
         }
-        if (sb.isNotEmpty()) return sb.toString()
-        // Fallback of forKey: collapse(NON_WORD(folded)), else folded.trim().
-        val words = forGroup(name)
-        return words
+        return sb.toString()
     }
 
     /** `fold` + NON_WORD → " " + collapse; `ifEmpty { folded.trim() }`. */

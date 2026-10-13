@@ -48,8 +48,22 @@ class FakeFetcher : SourceFetcher {
     val bodies = HashMap<String, String>()
     val errors = HashMap<String, SourceError>()
     val notModified = HashSet<String>()
-    val requests = ArrayList<FetchRequest>()
+    val requests: MutableList<FetchRequest> = java.util.Collections.synchronizedList(ArrayList())
+    /** Simulated download time; with [maxInFlight] it shows whether two runs download at once. */
+    @Volatile var delayMs = 0L
+    val maxInFlight = java.util.concurrent.atomic.AtomicInteger()
+    private val inFlight = java.util.concurrent.atomic.AtomicInteger()
     override suspend fun fetch(request: FetchRequest, dest: File): Outcome<FetchResult> {
+        maxInFlight.accumulateAndGet(inFlight.incrementAndGet(), ::maxOf)
+        try {
+            if (delayMs > 0) kotlinx.coroutines.delay(delayMs)
+            return fetchNow(request, dest)
+        } finally {
+            inFlight.decrementAndGet()
+        }
+    }
+
+    private fun fetchNow(request: FetchRequest, dest: File): Outcome<FetchResult> {
         requests += request
         errors[request.url]?.let { return Outcome.Err(it) }
         if (request.url in notModified && (request.etag != null || request.lastModified != null)) {
@@ -110,7 +124,12 @@ class FakeM3uParser : M3uPlaylistParser {
             when {
                 t.startsWith("#EXTM3U") -> {
                     val a = attr.findAll(t).associate { it.groupValues[1].lowercase() to it.groupValues[2] }
-                    header = M3uHeader(epgUrls = (a["url-tvg"] ?: a["x-tvg-url"])?.split(',')?.filter { it.isNotBlank() } ?: emptyList(), attributes = a)
+                    header = M3uHeader(
+                        epgUrls = (a["url-tvg"] ?: a["x-tvg-url"])?.split(',')?.filter { it.isNotBlank() } ?: emptyList(),
+                        // Like WP-A's HeaderAttrs: catchup-source is a typed field, not an attribute.
+                        catchup = app.thebox.core.source.RawCatchup(source = a["catchup-source"]),
+                        attributes = a - "catchup-source",
+                    )
                 }
                 t.startsWith("#EXTINF") -> {
                     if (!headerSent) { sink.onHeader(header); headerSent = true }
