@@ -11,7 +11,9 @@ import app.thebox.data.contracts.TimeoutProfile
 import app.thebox.data.di.DownloadClient
 import app.thebox.data.di.IoDispatcher
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.InternalCoroutinesApi
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.job
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.Call
@@ -54,8 +56,15 @@ class OkHttpSourceFetcher @Inject constructor(
             return@withContext Outcome.Err(SourceError.Unsupported("bad url: ${Redact.text(request.url)}"))
         }
         val client = if (request.profile == TimeoutProfile.API) apiClient else http
+        val call = client.newCall(httpRequest)
+        // await() only cancels the call while it is suspended. The body copy below blocks in read(), so without
+        // this a cancelled worker keeps the socket and the part file until the read timeout (code review M1, S-6).
+        @OptIn(InternalCoroutinesApi::class)
+        val onCancel = coroutineContext.job.invokeOnCompletion(onCancelling = true, invokeImmediately = true) { cause ->
+            if (cause != null) call.cancel()
+        }
         try {
-            client.newCall(httpRequest).await().use { response ->
+            call.await().use { response ->
                 val etag = response.header("ETag")
                 val lastModified = response.header("Last-Modified")
                 if (response.code == 304) {
@@ -98,8 +107,11 @@ class OkHttpSourceFetcher @Inject constructor(
             throw e
         } catch (e: IOException) {
             part.delete()
+            coroutineContext.ensureActive() // "Canceled" from call.cancel() above: rethrow as cancellation
             BoxLog.w(TAG, "fetch failed for ${request.url}: ${e.javaClass.simpleName}")
             Outcome.Err(NetErrors.fromIo(e))
+        } finally {
+            onCancel.dispose()
         }
     }
 

@@ -116,12 +116,20 @@ object XtreamJson {
     private inline fun <T> guard(block: () -> T): T = try {
         block()
     } catch (e: SerializationException) {
-        throw SourceException(SourceError.Parse(e.message?.take(200) ?: "invalid JSON"), e)
+        throw SourceException(SourceError.Parse(parseDetail(e.message, "invalid JSON")))
     } catch (e: IllegalArgumentException) {
-        throw SourceException(SourceError.Parse(e.message?.take(200) ?: "invalid JSON"), e)
+        throw SourceException(SourceError.Parse(parseDetail(e.message, "invalid JSON")))
     } catch (e: IOException) {
         throw SourceException(SourceError.Parse(e.message?.take(200) ?: "read failed"), e)
     }
+
+    /**
+     * kotlinx-serialization messages end with `\nJSON input: …`, an excerpt of the body. A `player_api.php` body
+     * holds `user_info` (username and password), so the excerpt is cut, and the exception is not kept as the
+     * cause (its message would reach logs through the stack trace). Code review M1, S-5.
+     */
+    internal fun parseDetail(message: String?, fallback: String): String =
+        message?.substringBefore("\nJSON input")?.substringBefore("JSON input:")?.trim()?.take(200)?.ifEmpty { null } ?: fallback
 }
 
 /**

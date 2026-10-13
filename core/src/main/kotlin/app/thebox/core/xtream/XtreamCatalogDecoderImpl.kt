@@ -54,7 +54,8 @@ class XtreamCatalogDecoderImpl : XtreamCatalogDecoder {
                 .distinct()
                 .toList()
             val attributes = LinkedHashMap<String, String>(4)
-            s.directSource?.let { attributes["direct_source"] = it }
+            // direct_source is not kept: it is the panel's upstream URL, often with a reseller's credentials or
+            // tokens, and Xtream channels are never templated by the differ (code review M1, S-12). Nothing reads it.
             s.customSid?.let { attributes["custom_sid"] = it }
             s.added?.let { attributes["added"] = it }
             s.thumbnail?.let { attributes["thumbnail"] = it }

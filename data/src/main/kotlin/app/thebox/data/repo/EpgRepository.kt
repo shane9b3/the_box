@@ -34,6 +34,7 @@ import app.thebox.data.db.entity.RefreshLogEntity
 import app.thebox.data.di.IoDispatcher
 import app.thebox.data.di.WallClock
 import app.thebox.data.epg.EpgRecovery
+import app.thebox.data.net.NetErrors
 import app.thebox.data.work.ImportMutex
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
@@ -141,7 +142,18 @@ class EpgRepository @Inject constructor(
         null // WP-B stub on a branch without WP-B
     }
 
-    override suspend fun build(trigger: Trigger, force: Boolean, progress: (String) -> Unit): EpgRunResult {
+    /**
+     * Serialises whole build/patch runs, downloads and `.new` → `.src` promotion included. `epg-periodic` and
+     * `epg-import` are different unique works and both run on the first app start after a source is added (a new
+     * periodic work runs at once); without this they download into the same `<id>.new.part`, and a patch can
+     * read `<id>.src` between a build's delete and rename (code review M1, S-2). Taken before ImportMutex.
+     */
+    private val runLock = Mutex()
+
+    override suspend fun build(trigger: Trigger, force: Boolean, progress: (String) -> Unit): EpgRunResult =
+        runLock.withLock { buildLocked(trigger, force, progress) }
+
+    private suspend fun buildLocked(trigger: Trigger, force: Boolean, progress: (String) -> Unit): EpgRunResult {
         recovery.await()
         val started = clock.now()
         val sources = sourceDao.active()
@@ -153,6 +165,7 @@ class EpgRepository @Inject constructor(
         val picked = ArrayList<Picked>()
         var anyChanged = false
         var lastError: SourceError? = null
+        var transientLoss: SourceError? = null
         for ((i, s) in sources.withIndex()) {
             progress("Downloading guide ${i + 1} of ${sources.size}")
             val src = File(dir, "${s.id}.src")
@@ -181,10 +194,18 @@ class EpgRepository @Inject constructor(
                     lastError = res.error
                     sourceDao.setStatus(s.id, res.error.code, clock.now())
                     BoxLog.w(TAG, "source ${s.id} download failed: ${res.error.code}")
-                    if (haveSrc) picked += Picked(s, src, false, s.etag, s.lastModified, src.length())
+                    if (haveSrc) {
+                        picked += Picked(s, src, false, s.etag, s.lastModified, src.length())
+                    } else if (NetErrors.isTransient(res.error) && s.programmeCount > 0) {
+                        // No last-good file (cache policy dropped it) and the guide has this source's data: a
+                        // rebuild now would publish without it. Keep the current generation and retry later
+                        // (code review M1, S-10).
+                        transientLoss = res.error
+                    }
                 }
             }
         }
+        transientLoss?.let { if (generationBuiltAt() != null) return finishBuild(started, trigger, null, it) }
         if (picked.isEmpty()) return finishBuild(started, trigger, null, lastError ?: SourceError.Internal("no source available"))
         if (!anyChanged && !force && generationBuiltAt() != null) {
             BoxLog.i(TAG) { "all sources not modified: build skipped" }
@@ -219,6 +240,11 @@ class EpgRepository @Inject constructor(
             return finishBuild(started, trigger, null, e.error)
         } catch (e: NotImplementedError) {
             return finishBuild(started, trigger, null, SourceError.Unsupported("EPG store not available in this build"))
+        } catch (e: Exception) {
+            // SQLite (disk full, I/O) and other runtime errors: log a FAILED row instead of escaping the worker
+            // with no refresh_log entry (code review M1, S-13).
+            BoxLog.e(TAG, "EPG build crashed", e)
+            return finishBuild(started, trigger, null, SourceError.Internal(e.javaClass.simpleName))
         }
         if (report.failedSourceId != null) return finishBuild(started, trigger, report, SourceError.Parse("source ${report.failedSourceId} failed"))
 
@@ -245,7 +271,9 @@ class EpgRepository @Inject constructor(
         return finishBuild(started, trigger, report, null)
     }
 
-    override suspend fun patch(progress: (String) -> Unit): EpgRunResult {
+    override suspend fun patch(progress: (String) -> Unit): EpgRunResult = runLock.withLock { patchLocked(progress) }
+
+    private suspend fun patchLocked(progress: (String) -> Unit): EpgRunResult {
         recovery.await()
         val started = clock.now()
         val refs = try { matches.pendingPatchRefs(store) } catch (e: NotImplementedError) { emptyList() }
@@ -270,6 +298,9 @@ class EpgRepository @Inject constructor(
             throw e
         } catch (e: SourceException) {
             EpgRunResult(null, e.error)
+        } catch (e: Exception) {
+            BoxLog.e(TAG, "EPG patch crashed", e) // S-13
+            EpgRunResult(null, SourceError.Internal(e.javaClass.simpleName))
         }
         log(RefreshLogEntity.TARGET_EPG_PATCH, Trigger.MAPPING, started, result.report, result.error)
         return result

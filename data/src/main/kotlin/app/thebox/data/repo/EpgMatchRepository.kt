@@ -65,7 +65,10 @@ class EpgMatchRepository @Inject constructor(
         val subjects = subjectsFor(source)
         val overrides = overrides(subjects)
         val match = settings.current.match
-        val withData = HashSet<String>()
+        // The channels streamed here come from the generation being built, where programme_count is still 0
+        // (repair has not run). Keep the published generation's has_data until afterBuild sets the new one;
+        // otherwise every match reads "no data" during a build and after a failed one (code review M1, S-9).
+        val withData = matchDao.xmltvIdsWithData(sourceId).toHashSet()
         val results = if (subjects.isEmpty()) {
             channels.forEach { } // drain: the importer may expect the sequence to be consumed
             emptyList()

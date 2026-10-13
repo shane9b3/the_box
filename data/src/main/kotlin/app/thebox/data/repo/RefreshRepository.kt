@@ -48,10 +48,13 @@ import app.thebox.data.net.ContentCopier
 import app.thebox.data.work.ImportMutex
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import okio.buffer
 import okio.source
 import java.io.File
+import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Named
 import javax.inject.Singleton
@@ -90,7 +93,18 @@ class RefreshRepository @Inject constructor(
     private val clock: WallClock,
 ) : PlaylistRefresher {
 
-    override suspend fun refresh(playlistId: Long, trigger: Trigger, forceAcceptShrink: Boolean, progress: (String) -> Unit): RefreshResult {
+    /**
+     * One lock per playlist around the whole refresh. `playlist-periodic-<id>` and `playlist-refresh-<id>` are
+     * different unique works, so both can run at once (a new periodic work runs immediately, and app start also
+     * enqueues the one-time refresh). Without this they download into the same `<id>.src.part`, and pass 2 of
+     * one merge can re-open a file the other download replaced after pass 1 (code review M1, S-1).
+     */
+    private val playlistLocks = ConcurrentHashMap<Long, Mutex>()
+
+    override suspend fun refresh(playlistId: Long, trigger: Trigger, forceAcceptShrink: Boolean, progress: (String) -> Unit): RefreshResult =
+        playlistLocks.computeIfAbsent(playlistId) { Mutex() }.withLock { refreshLocked(playlistId, trigger, forceAcceptShrink, progress) }
+
+    private suspend fun refreshLocked(playlistId: Long, trigger: Trigger, forceAcceptShrink: Boolean, progress: (String) -> Unit): RefreshResult {
         val started = clock.now()
         val playlist = playlistDao.get(playlistId) ?: return RefreshResult(null, SourceError.Internal("no playlist $playlistId"))
         try {
@@ -180,6 +194,11 @@ class RefreshRepository @Inject constructor(
             return fail(playlist, trigger, started, e.error)
         } catch (e: NotImplementedError) {
             return fail(playlist, trigger, started, SourceError.Unsupported("not available in this build: ${e.message}"))
+        } catch (e: Exception) {
+            // Room/IO/state errors would otherwise escape the worker with no refresh_log row and no last_status
+            // (§3.10 step 6: a log row on success and on failure). Only the class name: messages may hold URLs.
+            BoxLog.e(TAG, "playlist $playlistId refresh crashed", e)
+            return fail(playlist, trigger, started, SourceError.Internal(e.javaClass.simpleName))
         }
     }
 
@@ -381,6 +400,9 @@ class RefreshRepository @Inject constructor(
             epgUrls = h.epgUrls.map(::clean),
             urlLogo = h.urlLogo?.let(::clean),
             attributes = h.attributes.mapValues { clean(it.value) },
+            // B3: the header-level catchup-source is a typed field, not an attribute. Templated only (no Redact):
+            // catch-up reads it back and M2 expands {{u}}/{{p}} (code review M1, B-1).
+            catchup = h.catchup.copy(source = h.catchup.source?.let { template(it, user, pass) }),
         )
     }
 

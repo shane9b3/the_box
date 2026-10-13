@@ -151,20 +151,25 @@ class EpgStoreImpl(
             val texts = TextDedup(conn, firstId = 1, seedFromDb = false)
             val ids = IdCounter(1)
             val stats = ArrayList<EpgSourceStat>(request.sources.size)
-            for (src in request.sources) {
-                cancel.throwIfCancelled()
-                val r = importSource(
-                    conn, src, ImportMode.REBUILD, resolver, null, from, to, texts, ids,
-                    SourceOptions(request.storeDescriptions, request.maxDescriptionChars, request.preferredLanguages),
-                    gate, cancel, progress,
-                )
-                stats += r.stat
-                if (r.failed) {
-                    BoxLog.w(TAG, "source ${src.sourceId} failed (${r.stat.errorCode}); generation $gen abandoned")
-                    return failedReport(EpgImportReport.Mode.REBUILD, stats, src.sourceId, fts, t0)
+            // Closed on every path: an unfinalized statement turns conn.close() into a zombie connection that
+            // keeps the deleted .building file's space and the page cache (code review M1, S-8).
+            try {
+                for (src in request.sources) {
+                    cancel.throwIfCancelled()
+                    val r = importSource(
+                        conn, src, ImportMode.REBUILD, resolver, null, from, to, texts, ids,
+                        SourceOptions(request.storeDescriptions, request.maxDescriptionChars, request.preferredLanguages),
+                        gate, cancel, progress,
+                    )
+                    stats += r.stat
+                    if (r.failed) {
+                        BoxLog.w(TAG, "source ${src.sourceId} failed (${r.stat.errorCode}); generation $gen abandoned")
+                        return failedReport(EpgImportReport.Mode.REBUILD, stats, src.sourceId, fts, t0)
+                    }
                 }
+            } finally {
+                texts.close()
             }
-            texts.close()
 
             progress.emit(EpgProgress(0, EpgProgress.Stage.INDEXING, 0, null, stats.sumOf { it.programmesKept }), force = true)
             for (ddl in EpgSchema.POST_LOAD_INDEXES) {
@@ -256,21 +261,24 @@ class EpgStoreImpl(
             val ids = IdCounter(maxId(conn, "epg_channel") + 1)
             val (from, to) = window(request.nowMs, request.pastDays, request.futureDays)
             val stats = ArrayList<EpgSourceStat>()
-            for (src in request.sources) {
-                cancel.throwIfCancelled()
-                val r = importSource(
-                    conn, src, ImportMode.IN_PLACE, resolver, null, from, to, texts, ids,
-                    SourceOptions(request.storeDescriptions, request.maxDescriptionChars, request.preferredLanguages),
-                    gate, cancel, progress,
-                )
-                stats += r.stat
-                if (r.failed) {
-                    report = failedReport(EpgImportReport.Mode.IN_PLACE, stats, src.sourceId, fts, t0)
-                    break
+            try {
+                for (src in request.sources) {
+                    cancel.throwIfCancelled()
+                    val r = importSource(
+                        conn, src, ImportMode.IN_PLACE, resolver, null, from, to, texts, ids,
+                        SourceOptions(request.storeDescriptions, request.maxDescriptionChars, request.preferredLanguages),
+                        gate, cancel, progress,
+                    )
+                    stats += r.stat
+                    if (r.failed) {
+                        report = failedReport(EpgImportReport.Mode.IN_PLACE, stats, src.sourceId, fts, t0)
+                        break
+                    }
+                    conn.inTransaction(immediate = true) { dropUntouched(conn, src.sourceId, r.accepted!!) }
                 }
-                conn.inTransaction(immediate = true) { dropUntouched(conn, src.sourceId, r.accepted!!) }
+            } finally {
+                texts.close() // S-8: also on cancellation and SQLite errors
             }
-            texts.close()
             if (report == null) {
                 progress.emit(EpgProgress(0, EpgProgress.Stage.INDEXING, 0, null, stats.sumOf { it.programmesKept }), force = true)
                 conn.inTransaction(immediate = true) {
@@ -385,22 +393,25 @@ class EpgStoreImpl(
             val (from, to) = window(request.nowMs, request.pastDays, request.futureDays)
             val stats = ArrayList<EpgSourceStat>()
             var failed: Long? = null
-            for (src in request.sources) {
-                val wanted = request.refs.filter { it.sourceId == src.sourceId }.mapTo(HashSet()) { it.xmltvId }
-                if (wanted.isEmpty()) continue
-                cancel.throwIfCancelled()
-                val r = importSource(
-                    conn, src, ImportMode.PATCH, null, wanted, from, to, texts, ids,
-                    SourceOptions(request.storeDescriptions, request.maxDescriptionChars, request.preferredLanguages),
-                    gate, cancel, progress,
-                )
-                stats += r.stat
-                if (r.failed) {
-                    failed = src.sourceId
-                    break
+            try {
+                for (src in request.sources) {
+                    val wanted = request.refs.filter { it.sourceId == src.sourceId }.mapTo(HashSet()) { it.xmltvId }
+                    if (wanted.isEmpty()) continue
+                    cancel.throwIfCancelled()
+                    val r = importSource(
+                        conn, src, ImportMode.PATCH, null, wanted, from, to, texts, ids,
+                        SourceOptions(request.storeDescriptions, request.maxDescriptionChars, request.preferredLanguages),
+                        gate, cancel, progress,
+                    )
+                    stats += r.stat
+                    if (r.failed) {
+                        failed = src.sourceId
+                        break
+                    }
                 }
+            } finally {
+                texts.close() // S-8: also on cancellation and SQLite errors
             }
-            texts.close()
             val programmes = conn.longOrNull("SELECT count(*) FROM programme")?.toInt() ?: 0
             conn.inTransaction(immediate = true) {
                 val seq = (conn.textOrNull("SELECT value FROM meta WHERE key = 'patch_seq'")?.toIntOrNull() ?: 0) + 1

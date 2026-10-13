@@ -16,6 +16,14 @@ class XtreamCatalogDecoderImplTest {
     }
 
     @Test
+    fun directSourceIsNotStored() {
+        // Code review M1 S-12: an upstream URL with credentials must not reach channel extras.
+        val json = """[{"num":1,"name":"A","stream_type":"live","stream_id":7,"category_id":"1","direct_source":"http://up.example/live/res/SECRETPW/7.ts"}]"""
+        val c = decoder.liveChannels(json.byteInputStream(), emptyList()).single()
+        assertTrue(c.attributes.values.none { "SECRETPW" in it }, c.attributes.toString())
+    }
+
+    @Test
     fun fieldByField() {
         val c = channels()
         assertEquals(19, c.size)
@@ -58,7 +66,7 @@ class XtreamCatalogDecoderImplTest {
         assertEquals(EntryKind.RADIO, byId[108]!!.kind)
         assertTrue(byId[109]!!.adult)
         assertEquals(
-            mapOf("direct_source" to "http://upstream.example/a.ts", "custom_sid" to "SID9", "added" to "1700000000", "thumbnail" to "http://t/x.jpg"),
+            mapOf("custom_sid" to "SID9", "added" to "1700000000", "thumbnail" to "http://t/x.jpg"), // S-12: no direct_source
             byId[110]!!.attributes,
         )
         assertEquals(42, byId[111]!!.number)

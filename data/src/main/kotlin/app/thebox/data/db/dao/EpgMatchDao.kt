@@ -32,6 +32,10 @@ interface EpgMatchDao {
     @Query("SELECT playlist_id, stable_key, MAX(inputs_hash) AS inputs_hash FROM epg_match WHERE playlist_id = :playlistId GROUP BY playlist_id, stable_key")
     suspend fun subjectHashes(playlistId: Long): List<SubjectHash>
 
+    /** EPG channels of [sourceId] last known to have programmes (the published generation's `has_data`). */
+    @Query("SELECT DISTINCT xmltv_id FROM epg_match WHERE source_id = :sourceId AND has_data = 1")
+    suspend fun xmltvIdsWithData(sourceId: Long): List<String>
+
     @Query("SELECT COUNT(*) FROM epg_match")
     suspend fun count(): Int
 

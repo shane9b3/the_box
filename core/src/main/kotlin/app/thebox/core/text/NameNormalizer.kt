@@ -36,7 +36,20 @@ object NameNormalizer {
         return collapse(NON_WORD.replace(folded, " ")).ifEmpty { folded.trim() }
     }
 
-    fun forMatch(name: String): String {
+    /**
+     * ASCII names take the regex-free `FastNames.forMatch` (identical output, `FastNamesParityTest`): this runs
+     * per row in the merge (`channel.norm_name`), the EPG import (display names) and the matcher (code review
+     * M1, S-3). Everything else takes [forMatchRegex].
+     */
+    fun forMatch(name: String): String = if (isAscii(name)) app.thebox.core.identity.FastNames.forMatch(name) else forMatchRegex(name)
+
+    private fun isAscii(s: String): Boolean {
+        for (i in s.indices) if (s[i].code >= 0x80) return false
+        return true
+    }
+
+    /** The reference definition of [forMatch]. */
+    internal fun forMatchRegex(name: String): String {
         var s = fold(name)
         PREFIX.find(s)?.let { m -> if (m.groupValues[1] in ISO2) s = s.substring(m.range.last + 1) }
         s = QUALITY.replace(BRACKETS.replace(s, " "), " ")
@@ -52,6 +65,9 @@ object NameNormalizer {
         val folded = fold(name)
         return collapse(NON_WORD.replace(folded, " ")).ifEmpty { folded.trim() }
     }
+
+    /** True for an ISO-3166 alpha-2 code or `uk` (lower case): the [forMatch] prefix rule, shared with FastNames. */
+    internal fun isCountryCode(code: String): Boolean = code in ISO2
 
     fun compact(normalized: String): String = normalized.replace(" ", "")
 

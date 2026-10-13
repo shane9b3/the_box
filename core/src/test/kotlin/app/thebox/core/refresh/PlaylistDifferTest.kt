@@ -276,6 +276,28 @@ class PlaylistDifferTest {
         assertEquals(4, r2.unchanged)
     }
 
+    @Test fun `dropping the first of two duplicates moves the second's user data with its stream`() {
+        // Code review M1 S-11: [X(u1) → k, X(u2) → k~2], then the provider drops u1. u2 takes k (an update) and
+        // k~2 goes missing; its favourites must follow u2 to k.
+        val a = ch(0, tvg = "dup.uk", name = "Dup", url = "http://h/hls/u1/index.m3u8")
+        val b = ch(1, tvg = "dup.uk", name = "Dup", url = "http://h/hls/u2/index.m3u8")
+        val existing = listOf(existingOf(10, a, "tvg:dup.uk|dup"), existingOf(11, b, "tvg:dup.uk|dup~2"))
+        val (r, s) = run(list(b), existing)
+        assertEquals(listOf("tvg:dup.uk|dup"), s.updates.map { it.channel.stableKey.value })
+        assertEquals(listOf(11L), s.finish!!.newlyMissingIds.toList())
+        assertEquals(listOf(KeyRemap("tvg:dup.uk|dup~2", "tvg:dup.uk|dup", sameGroup = true)), s.finish!!.autoRemaps)
+        assertEquals(1, r.keysMigrated)
+    }
+
+    @Test fun `a url moving between unrelated keys is not remapped`() {
+        // S-11 is limited to one occurrence family: A takes B's URL while B disappears; B's data stays put.
+        val a = ch(0, tvg = "a.uk", name = "A", url = "http://h/hls/ua/index.m3u8")
+        val b = ch(1, tvg = "b.uk", name = "B", url = "http://h/hls/ub/index.m3u8")
+        val existing = listOf(existingOf(10, a), existingOf(11, b))
+        val (_, s) = run(list(a.copy(url = b.url)), existing)
+        assertTrue(s.finish!!.autoRemaps.isEmpty())
+    }
+
     @Test fun `a literal key that looks like a suffix never collides with an occurrence suffix`() {
         val keys = ArrayDeque(listOf("K~2", "K", "K", "K~3"))
         val fixed = object : StableKeyDeriver {
