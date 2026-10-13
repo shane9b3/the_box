@@ -235,6 +235,43 @@ class TestTimeshift(PanelCase):
         self.assertEqual(self.get(f"/timeshift/test/test/60/{utc}/1.ts")[0], 200)
         self.assertEqual(self.panel.stats["timeshift_tz_warnings"], 1)
 
+    def test_flussonic_and_shift_archive_use_unix_utc(self):
+        slot = int(time.time() - 7200) // 1800 * 1800
+        self.admin({"strict_timeshift_tz": True, "timeshift_expect": [slot]})
+        st, _, body = self.get(f"/live/test/test/4/archive-{slot}-1800.m3u8")
+        self.assertEqual(st, 200)
+        seg = [l for l in body.decode().splitlines() if l.endswith(".ts")][0]
+        self.assertEqual(seg, "/vodseg/4_0.ts")
+        self.assertEqual(self.get(seg)[0], 200)
+        self.assertEqual(self.get(f"/live/test/test/3.ts?utc={slot}&lutc={int(time.time())}")[0], 200)
+        self.assertEqual(self.get(f"/live/test/test/3.ts?utc={slot + 3600}&lutc={int(time.time())}")[0], 404)
+
+
+class TestHlsEdgeCases(PanelCase):
+    def test_m3u8_only_panel_serves_segments(self):
+        self.admin({"allowed_output_formats": ["m3u8"]})
+        self.assertEqual(self.read_stream("/live/test/test/1.ts")[0], 405)
+        st, _, body = self.get("/live/test/test/1.m3u8")
+        self.assertEqual(st, 200)
+        seg = [l for l in body.decode().splitlines() if l.endswith(".ts")][-1]
+        self.assertEqual(self.get("/live/test/test/" + seg)[0], 200)
+
+    def test_redirected_hls_segments_carry_token(self):
+        self.admin({"faults": {"redirect": True}})
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+        c.request("GET", "/live/test/test/1.m3u8")
+        r = c.getresponse()
+        self.assertEqual(r.status, 302)
+        lb_path = r.getheader("Location").split(str(self.panel.lb_port), 1)[1]
+        c2 = http.client.HTTPConnection("127.0.0.1", self.panel.lb_port, timeout=5)
+        c2.request("GET", lb_path)
+        r2 = c2.getresponse()
+        self.assertEqual(r2.status, 200)
+        seg = [l for l in r2.read().decode().splitlines() if ".ts?token=" in l][-1]
+        c3 = http.client.HTTPConnection("127.0.0.1", self.panel.lb_port, timeout=5)
+        c3.request("GET", "/live/test/test/" + seg)
+        self.assertEqual(c3.getresponse().status, 200)
+
 
 if __name__ == "__main__":
     unittest.main()

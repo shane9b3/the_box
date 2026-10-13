@@ -64,7 +64,9 @@ Non-`Active` `status` and `auth_mode` 401/403/513 make streams 403/401/513 as we
 ## Timeshift
 
 `/timeshift/{u}/{p}/{minutes}/{YYYY-MM-DD:HH-MM}/{id}.ts|.m3u8` and `/streaming/timeshift.php?username&password&stream&start&duration`.
-The start must be server-zone wall time. If `timeshift_expect` is set (list of unix instants or server-zone strings, e.g. the programme start the test fixture just
+Also served as archive (start = unix UTC seconds, no zone): Flussonic `/live/{u}/{p}/{id}/{archive|index|video|mono}-{FROM}-{DUR|now}.m3u8|.ts`
+(catalog ch4) and SHIFT `/live/{u}/{p}/{id}.ts?utc={FROM}&lutc={NOW}` (catalog ch3). Redirected live HLS playlists carry the token on segment URLs.
+The XC start must be server-zone wall time. If `timeshift_expect` is set (list of unix instants or server-zone strings, e.g. the programme start the test fixture just
 selected), the start is compared against it (tolerance 90 s) and the log says whether the client sent UTC. Without it, starts in the future or outside the 3-day window are flagged.
 A WARNING is logged on mismatch; with `strict_timeshift_tz` the response is 404. The `.ts` form returns `Content-Length` + `Accept-Ranges` + 206 support (set `timeshift_ranges:false` to emulate panels that do not, for D10).
 

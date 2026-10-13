@@ -98,7 +98,7 @@ for d in "${DECODER_LIST[@]}"; do
   [[ "$d" =~ ^[a-z0-9_]+$ ]] || die "Bad decoder name '$d'"
 done
 # LGPL guard: nothing we pass may switch on GPL / nonfree / version3 code.
-case " $ENABLED_DECODERS " in *gpl*|*nonfree*) die "GPL/nonfree tokens in ENABLED_DECODERS";; esac
+case " $ENABLED_DECODERS " in *gpl*|*nonfree*|*version3*) die "GPL/nonfree tokens in ENABLED_DECODERS";; esac
 
 if [[ -z "$HOST_PLATFORM" ]]; then
   case "$(uname -s)" in
@@ -186,8 +186,8 @@ fi
 MEDIA3_COMMIT="$(git -C "$MEDIA_DIR" rev-parse HEAD)"
 UPSTREAM_SCRIPT="$MODULE_PATH/jni/build_ffmpeg.sh"
 [[ -f "$UPSTREAM_SCRIPT" ]] || die "build_ffmpeg.sh not found at $UPSTREAM_SCRIPT"
-if grep -Eq -- '--enable-(gpl|nonfree)' "$UPSTREAM_SCRIPT"; then
-  die "Upstream build_ffmpeg.sh enables GPL/nonfree code; refusing to build"
+if grep -Eq -- '--enable-(gpl|nonfree|version3)' "$UPSTREAM_SCRIPT"; then
+  die "Upstream build_ffmpeg.sh enables GPL/nonfree/version3 code; refusing to build"
 fi
 README_BRANCH="$(grep -Eo -- '--branch=release/[0-9.]+' "$MEDIA_DIR/libraries/decoder_ffmpeg/README.md" | head -1 | cut -d= -f2 || true)"
 if [[ -n "$README_BRANCH" && "$README_BRANCH" != "$FFMPEG_BRANCH" ]]; then
@@ -261,8 +261,10 @@ for abi in "${ABI_LIST[@]}"; do
   conf_line="$(sed -n 's/^#define FFMPEG_CONFIGURATION "\(.*\)"$/\1/p' "$FFMPEG_DIR/config.h")"
   grep -q '^#define CONFIG_GPL 0' "$FFMPEG_DIR/config.h"     || die "$abi: CONFIG_GPL is not 0"
   grep -q '^#define CONFIG_NONFREE 0' "$FFMPEG_DIR/config.h" || die "$abi: CONFIG_NONFREE is not 0"
+  # version3 would make the build LGPLv3 (the NOTICE and docs promise LGPL v2.1+).
+  grep -q '^#define CONFIG_VERSION3 0' "$FFMPEG_DIR/config.h" || die "$abi: CONFIG_VERSION3 is not 0"
   license="$(sed -n 's/^#define FFMPEG_LICENSE "\(.*\)"$/\1/p' "$FFMPEG_DIR/config.h")"
-  [[ "$license" == LGPL* ]] || die "$abi: FFmpeg licence is '$license', expected LGPL"
+  [[ "$license" == "LGPL version 2.1 or later" ]] || die "$abi: FFmpeg licence is '$license', expected LGPL version 2.1 or later"
   for lib in avcodec swresample avutil; do
     [[ -f "$libdir/lib$lib.a" ]] || die "$abi: lib$lib.a missing after build"
   done

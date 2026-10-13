@@ -32,3 +32,6 @@ __pycache__/
 # Secrets
 *.pem
 *.p8
+
+# Prebuilt FFmpeg AAR is produced by CI, never committed
+ffmpeg/libs/*.aar

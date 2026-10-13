@@ -261,7 +261,7 @@ class Panel:
             self.tokens[tok] = [now + ttl, path, 0]
         return tok
 
-    def check_token(self, tok, path):
+    def check_token(self, tok, path, count=True):
         with self.lock:
             t = self.tokens.get(tok)
             if not t or t[1] != path:
@@ -270,7 +270,8 @@ class Panel:
                 return "expired"
             if self.cfg.get("token_single_use") and t[2] >= 1:
                 return "expired"
-            t[2] += 1
+            if count:
+                t[2] += 1
             return "ok"
 
 
@@ -417,8 +418,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(200, segs[int(m[2]) % len(segs)][0], "video/mp2t")
         if path.startswith("/logo/"):
             return self.send(200, b"\x89PNG\r\n\x1a\n", "image/png")
+        # Flussonic-style archive under the live path (catalog: catchup="flussonic" on ch4):
+        # /live/u/p/{id}/{archive|index|video|mono}-{FROM}-{DURATION|now}.{m3u8|ts}, FROM = unix UTC s.
+        m = re.match(r"^/live/([^/]+)/([^/]+)/(\d+)/(?:archive|index|video|mono)-(\d+)-(\d+|now)\.(m3u8|ts)$", path)
+        if m:
+            self._notes.append("FLUSSONIC-ARCHIVE")
+            return self.stream_request("timeshift", m[1], m[2], m[3], m[6], start="@" + m[4], dur=m[5])
         m = re.match(r"^/(live|movie|series)/([^/]+)/([^/]+)/([^/]+?)(?:\.([A-Za-z0-9]+))?$", path)
         if m:
+            utc = self.q.get("utc", "")
+            if m[1] == "live" and utc.isdigit():  # catchup="shift": liveUrl?utc={utc}&lutc={lutc}
+                self._notes.append("SHIFT-ARCHIVE")
+                return self.stream_request("timeshift", m[2], m[3], m[4], m[5] or "ts", start="@" + utc, dur=None)
             return self.stream_request(m[1], m[2], m[3], m[4], m[5] or "ts")
         m = re.match(r"^/timeshift/([^/]+)/([^/]+)/(\d+)/([^/]+)/(\d+)(?:\.([A-Za-z0-9]+))?$", path)
         if m:
@@ -556,11 +567,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def timeshift_check(self, start, dur):
         """Returns (ok, message). Logs WARNING on suspected wrong-timezone start."""
         p, c = self.panel, self.panel.cfg
-        naive = parse_start(start)
-        if naive is None:
-            return False, "unparseable start"
         tz = p.tz()
-        inst = naive.replace(tzinfo=tz).timestamp()
+        if start.startswith("@") and start[1:].isdigit():  # Flussonic / shift: unix UTC, zone-free
+            naive, inst = None, float(start[1:])
+        else:
+            naive = parse_start(start)
+            if naive is None:
+                return False, "unparseable start"
+            inst = naive.replace(tzinfo=tz).timestamp()
         now = time.time()
         problem = None
         exp = []
@@ -573,8 +587,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     exp.append(n2.replace(tzinfo=tz).timestamp())
         if exp:
             if not any(abs(inst - e) <= 90 for e in exp):
-                as_utc = naive.replace(tzinfo=dt.timezone.utc).timestamp()
-                diag = "client sent UTC wall time" if any(abs(as_utc - e) <= 90 for e in exp) else "matches neither server zone nor UTC (device zone?)"
+                if naive is None:
+                    diag = "unix start does not match (correction/padding applied twice?)"
+                else:
+                    as_utc = naive.replace(tzinfo=dt.timezone.utc).timestamp()
+                    diag = "client sent UTC wall time" if any(abs(as_utc - e) <= 90 for e in exp) else "matches neither server zone nor UTC (device zone?)"
                 problem = (f"timeshift start {start} read in {c['timezone']} is {dt.datetime.fromtimestamp(inst, tz).isoformat()}, "
                            f"expected one of {c['timeshift_expect']}: {diag}")
         elif inst > now + 60:
@@ -609,7 +626,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         path = self.path_only
 
         if self.server.is_lb:  # second port: token required
-            res = p.check_token(self.q.get("token", ""), path)
+            # HLS segments carry the playlist's token (see hls_playlist), so check it against that path.
+            tok_path = re.sub(r"/\d+_seg\d+\.ts$", f"/{sid}.m3u8", path) if seg else path
+            res = p.check_token(self.q.get("token", ""), tok_path, count=not seg)
             if res != "ok":
                 p.bump("token_expired") if res == "expired" else None
                 return self.reject(403, "token_" + res)
@@ -631,11 +650,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if wl and not any(w.lower() in ua.lower() for w in wl):
             return self.reject(403, "ua_whitelist")
         allowed = [x.lower() for x in c["allowed_output_formats"]]
-        if kind == "live" and ((ext == "m3u8" and (f.get("405_on_m3u8") or "m3u8" not in allowed))
+        if kind == "live" and not seg and ((ext == "m3u8" and (f.get("405_on_m3u8") or "m3u8" not in allowed))
                                or (ext == "ts" and "ts" not in allowed)):
             return self.reject(405, "output_format_not_allowed")
         rng = self.headers.get("Range")
-        if rng and kind == "live" and ext == "ts":
+        if rng and kind == "live" and ext == "ts" and not seg:
             p.bump("range_requests_seen")
             with p.lock:
                 p.stats["range_requests"] = (p.stats["range_requests"] + [{"path": path, "range": rng, "ua": ua}])[-20:]
@@ -678,7 +697,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if kind == "live":
                 return self.live_ts(clip, sid, f, slot)
             if kind == "timeshift" and hls:
-                return self.timeshift_playlist(clip)
+                return self.timeshift_playlist(clip, sid)
             data, ctype = (clip.data * 3, "video/mp2t") if kind == "timeshift" else (p.vod_data, p.vod_ctype)
             if f.get("wrong_content_type"):
                 ctype = "text/html"
@@ -777,12 +796,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         d, nseg = self.seg_dur(clip), len(clip.segments)
         cur = int(time.time() / d)
         first = max(0, cur - c["hls_window"] + 1)
+        tok = f"?token={self.q['token']}" if self.server.is_lb and self.q.get("token") else ""
         L = ["#EXTM3U", "#EXT-X-VERSION:3", f"#EXT-X-TARGETDURATION:{math.ceil(d)}", f"#EXT-X-MEDIA-SEQUENCE:{first}",
              f"#EXT-X-DISCONTINUITY-SEQUENCE:{(first - 1) // nseg if first > 0 else 0}"]
         for n in range(first, cur + 1):
             if n > 0 and n % nseg == 0:
                 L.append("#EXT-X-DISCONTINUITY")  # clip loop: timestamps restart
-            L += [f"#EXTINF:{clip.segments[n % nseg][1]:.3f},", f"{sid}_seg{n}.ts"]
+            L += [f"#EXTINF:{clip.segments[n % nseg][1]:.3f},", f"{sid}_seg{n}.ts{tok}"]
         ctype = "text/html" if f.get("wrong_content_type") else "application/vnd.apple.mpegurl"
         self.send(200, "\n".join(L) + "\n", ctype, {"Cache-Control": "no-cache"})
 
@@ -793,11 +813,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.reject(404, "segment_out_of_window")
         self.send(200, clip.segments[n % nseg][0], "video/mp2t")
 
-    def timeshift_playlist(self, clip):
+    def timeshift_playlist(self, clip, sid):
         d, nseg = self.seg_dur(clip), len(clip.segments)
         L = ["#EXTM3U", "#EXT-X-VERSION:3", f"#EXT-X-TARGETDURATION:{math.ceil(d)}", "#EXT-X-MEDIA-SEQUENCE:0",
              "#EXT-X-PLAYLIST-TYPE:VOD"]
-        sid = self.path_only.rsplit("/", 1)[1].split(".")[0]
         for n in range(nseg):
             L += [f"#EXTINF:{clip.segments[n][1]:.3f},", f"/vodseg/{sid}_{n}.ts"]
         L.append("#EXT-X-ENDLIST")
