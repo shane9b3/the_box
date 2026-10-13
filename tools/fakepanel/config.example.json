@@ -1,0 +1,35 @@
+{
+  "_comment": "Pass with --config. Keys starting with _ are ignored. CLI flags override. Runtime: POST /admin/config.",
+  "username": "test",
+  "password": "test",
+  "timezone": "Europe/Berlin",
+  "quirks": false,
+  "series_episodes_array": false,
+  "epg_plain": false,
+  "auth_mode": "ok",
+  "bad_creds_mode": "auth0",
+  "status": "Active",
+  "max_connections": 1,
+  "exp_days": 30,
+  "allowed_output_formats": ["ts", "m3u8"],
+  "epg_offset": "+0100",
+  "epg_gzip": false,
+  "strict_timeshift_tz": true,
+  "timeshift_expect": [],
+  "timeshift_ranges": true,
+  "token_ttl": 30,
+  "pace": true,
+  "faults": {
+    "linger": 10,
+    "linger_status": 458,
+    "close_every": 90,
+    "reconnect_mode": "continue",
+    "range_rejects": true
+  },
+  "stream_faults": {
+    "3": { "redirect": true, "token_ttl": 5 },
+    "4": { "stall": 8 },
+    "5": { "ua_whitelist": ["VLC", "TiviMate"] },
+    "6": { "html_splash": true }
+  }
+}
