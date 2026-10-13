@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;background:#07090d;overflow:hidden;}
+a{color:oklch(0.78 0.12 240);} a:hover{color:oklch(0.88 0.08 240);}
+@keyframes tvA{0%{transform:translate(0,0) scale(1)}50%{transform:translate(180px,90px) scale(1.25)}100%{transform:translate(0,0) scale(1)}}
+@keyframes tvB{0%{transform:translate(0,0) scale(1.1)}50%{transform:translate(-200px,-60px) scale(.85)}100%{transform:translate(0,0) scale(1.1)}}
+@keyframes tvC{0%{transform:translate(0,0)}50%{transform:translate(-80px,120px)}100%{transform:translate(0,0)}}
+@keyframes tvFade{0%{opacity:0;filter:brightness(2.5)}100%{opacity:1;filter:brightness(1)}}
+@keyframes tvPulse{0%,100%{opacity:1}50%{opacity:.35}}
+</style>
+</helmet>
+<div ref="{{ outerRef }}" style="position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:#07090d;font-family:'Instrument Sans',system-ui,sans-serif;color:#eef1f6;">
+<div style="position:relative;width:1920px;height:1080px;flex:none;overflow:hidden;background:#0a0d13;transform:{{ scaleT }};transform-origin:center;">
+
+  <div style="position:absolute;inset:0;overflow:hidden;">
+    <div style="position:absolute;left:-200px;top:-260px;width:1300px;height:1000px;border-radius:50%;background:{{ ambientA }};filter:blur(140px);opacity:.55;transition:background 1.2s;"></div>
+    <div style="position:absolute;right:-300px;top:200px;width:1100px;height:900px;border-radius:50%;background:{{ ambientB }};filter:blur(160px);opacity:.35;transition:background 1.2s;"></div>
+    <div style="position:absolute;inset:0;background:linear-gradient(180deg,rgba(10,13,19,0) 0%,rgba(10,13,19,.6) 45%,rgba(10,13,19,.92) 100%);"></div>
+  </div>
+
+  <div style="position:absolute;left:64px;top:56px;width:720px;height:405px;border-radius:20px;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.14);background:#000;">
+    {{ previewEl }}
+    <div style="position:absolute;left:20px;top:18px;display:flex;gap:10px;align-items:center;">
+      <div style="display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;background:rgba(0,0,0,.45);backdrop-filter:blur(12px);font-size:15px;font-weight:600;letter-spacing:.08em;">
+        <div style="width:8px;height:8px;border-radius:50%;background:#ff4d5e;animation:tvPulse 1.6s infinite;"></div>LIVE
+      </div>
+      <div style="padding:6px 12px;border-radius:999px;background:rgba(0,0,0,.45);backdrop-filter:blur(12px);font-size:15px;font-family:'JetBrains Mono',monospace;">CH {{ tuned.num }}</div>
+    </div>
+    <div style="position:absolute;right:20px;top:22px;font-family:'JetBrains Mono',monospace;font-size:13px;color:rgba(255,255,255,.55);">live video feed</div>
+    <div style="position:absolute;left:0;right:0;bottom:0;padding:48px 24px 20px;background:linear-gradient(180deg,rgba(0,0,0,0),rgba(0,0,0,.75));display:flex;flex-direction:column;gap:10px;">
+      <div style="display:flex;align-items:baseline;gap:12px;">
+        <div style="font-size:30px;font-weight:600;letter-spacing:-.01em;">{{ tunedNow.title }}</div>
+        <div style="font-size:18px;color:rgba(255,255,255,.7);">{{ tuned.name }}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:14px;font-family:'JetBrains Mono',monospace;font-size:14px;color:rgba(255,255,255,.75);">
+        <div>{{ tunedNow.startLabel }}</div>
+        <div style="flex:1;height:4px;border-radius:2px;background:rgba(255,255,255,.2);overflow:hidden;"><div style="height:100%;width:{{ tunedNow.progress }};background:#fff;border-radius:2px;"></div></div>
+        <div>{{ tunedNow.endLabel }}</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="position:absolute;left:832px;top:56px;right:64px;height:405px;display:flex;flex-direction:column;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div style="display:flex;gap:8px;">
+        <div style="padding:8px 18px;border-radius:999px;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.16);font-size:18px;font-weight:500;">Guide</div>
+        <div style="padding:8px 18px;border-radius:999px;font-size:18px;color:rgba(238,241,246,.6);">Recordings</div>
+        <div style="padding:8px 18px;border-radius:999px;font-size:18px;color:rgba(238,241,246,.6);">Search</div>
+      </div>
+      <div style="display:flex;align-items:baseline;gap:14px;">
+        <div style="font-size:18px;color:rgba(238,241,246,.65);">Tue 13 Oct</div>
+        <div style="font-size:34px;font-weight:500;font-variant-numeric:tabular-nums;">19:47</div>
+      </div>
+    </div>
+    <div style="margin-top:auto;display:flex;flex-direction:column;gap:16px;">
+      <div style="display:flex;align-items:center;gap:12px;font-size:18px;color:rgba(238,241,246,.7);">
+        <div style="font-family:'JetBrains Mono',monospace;font-size:16px;padding:4px 10px;border-radius:8px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.12);">{{ focusCh.num }}</div>
+        <div>{{ focusCh.name }}</div>
+        <div style="width:4px;height:4px;border-radius:50%;background:rgba(238,241,246,.4);"></div>
+        <div>{{ focusProg.genre }}</div>
+        <sc-if value="{{ focusProg.isNow }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:3px 10px;border-radius:999px;background:oklch(0.72 0.14 240 / .22);color:oklch(0.86 0.09 240);font-size:15px;font-weight:600;letter-spacing:.06em;">ON NOW</div>
+        </sc-if>
+      </div>
+      <div style="font-size:64px;line-height:1.02;font-weight:600;letter-spacing:-.025em;text-wrap:balance;">{{ focusProg.title }}</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:18px;color:rgba(238,241,246,.75);">{{ focusProg.timeLabel }} · {{ focusProg.durLabel }}</div>
+      <div style="font-size:21px;line-height:1.45;color:rgba(238,241,246,.78);max-width:860px;text-wrap:pretty;">{{ focusProg.desc }}</div>
+      <div style="display:flex;gap:12px;margin-top:8px;">
+        <div style="display:flex;align-items:center;gap:10px;padding:14px 26px;border-radius:14px;background:#eef1f6;color:#0a0d13;font-size:19px;font-weight:600;">
+          <div style="width:0;height:0;border-left:11px solid #0a0d13;border-top:7px solid transparent;border-bottom:7px solid transparent;"></div>{{ watchLabel }}
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;padding:14px 24px;border-radius:14px;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.16);backdrop-filter:blur(20px);font-size:19px;font-weight:500;">
+          <div style="width:10px;height:10px;border-radius:50%;background:{{ recDot }};"></div>{{ recLabel }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="position:absolute;left:64px;right:64px;top:500px;height:460px;border-radius:24px;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.09);backdrop-filter:blur(30px);padding:0 16px 12px;box-sizing:border-box;">
+    <div style="display:flex;height:48px;align-items:center;">
+      <div style="width:200px;flex:none;font-size:15px;letter-spacing:.1em;color:rgba(238,241,246,.5);font-weight:600;padding-left:12px;">TONIGHT</div>
+      <div style="position:relative;flex:1;height:100%;">
+        <sc-for list="{{ ticks }}" as="t" hint-placeholder-count="6">
+          <div style="position:absolute;top:0;bottom:0;left:{{ t.left }};display:flex;align-items:center;padding-left:10px;border-left:1px solid rgba(255,255,255,.1);font-family:'JetBrains Mono',monospace;font-size:15px;color:rgba(238,241,246,.55);">{{ t.label }}</div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="position:relative;display:flex;flex-direction:column;gap:8px;">
+      <sc-for list="{{ rows }}" as="r" hint-placeholder-count="6">
+        <div style="display:flex;height:60px;">
+          <div style="width:200px;flex:none;display:flex;align-items:center;gap:14px;padding:0 12px;box-sizing:border-box;border-radius:12px;background:{{ r.chBg }};">
+            <div style="font-family:'JetBrains Mono',monospace;font-size:15px;color:rgba(238,241,246,.5);">{{ r.num }}</div>
+            <div style="font-size:19px;font-weight:600;white-space:nowrap;">{{ r.name }}</div>
+            <sc-if value="{{ r.isTuned }}" hint-placeholder-val="{{ false }}">
+              <div style="width:7px;height:7px;border-radius:50%;background:#ff4d5e;margin-left:auto;"></div>
+            </sc-if>
+          </div>
+          <div style="position:relative;flex:1;">
+            <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="4">
+              <div onClick="{{ c.onClick }}" onDoubleClick="{{ c.onTune }}" style="position:absolute;top:0;bottom:0;left:{{ c.left }};width:{{ c.width }};padding:0 3px;box-sizing:border-box;cursor:pointer;">
+                <div style="position:relative;height:100%;border-radius:12px;overflow:hidden;background:{{ c.bg }};border:1px solid {{ c.border }};box-shadow:{{ c.shadow }};color:{{ c.color }};display:flex;flex-direction:column;justify-content:center;gap:3px;padding:0 16px;box-sizing:border-box;transition:background .15s,box-shadow .15s;">
+                  <div style="font-size:18px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ c.title }}</div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:13px;opacity:.6;white-space:nowrap;overflow:hidden;">{{ c.time }}</div>
+                  <sc-if value="{{ c.isNow }}" hint-placeholder-val="{{ false }}">
+                    <div style="position:absolute;left:0;bottom:0;height:3px;width:{{ c.progress }};background:{{ c.barColor }};"></div>
+                  </sc-if>
+                </div>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+      </sc-for>
+      <div style="position:absolute;top:-6px;bottom:0;left:{{ nowLeft }};width:2px;background:oklch(0.72 0.14 240);box-shadow:0 0 12px oklch(0.72 0.14 240);pointer-events:none;">
+        <div style="position:absolute;top:-4px;left:-4px;width:10px;height:10px;border-radius:50%;background:oklch(0.72 0.14 240);"></div>
+      </div>
+    </div>
+  </div>
+
+  <div style="position:absolute;left:64px;right:64px;bottom:40px;display:flex;gap:36px;font-size:17px;color:rgba(238,241,246,.55);">
+    <div style="display:flex;align-items:center;gap:10px;"><div style="padding:3px 10px;border-radius:7px;border:1px solid rgba(255,255,255,.22);font-family:'JetBrains Mono',monospace;font-size:14px;">← → ↑ ↓</div>Browse</div>
+    <div style="display:flex;align-items:center;gap:10px;"><div style="padding:3px 10px;border-radius:7px;border:1px solid rgba(255,255,255,.22);font-family:'JetBrains Mono',monospace;font-size:14px;">OK / Enter</div>Watch</div>
+    <div style="display:flex;align-items:center;gap:10px;"><div style="padding:3px 10px;border-radius:7px;border:1px solid rgba(255,255,255,.22);font-family:'JetBrains Mono',monospace;font-size:14px;">R</div>Record</div>
+  </div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+const WIN = 180, NOW = 47;
+const CH = [
+  { num: '101', name: 'Northline', hue: 240, progs: [
+    [-30,60,'Evening Report','News','The day\'s top stories from across the country, with live reports from the capital and the regions.'],
+    [30,30,'Market Close','Business','Stocks, currencies and commodities: what moved today and why.'],
+    [60,60,'The Briefing Room','Current affairs','Ministers and critics face a single long interview, without the soundbites.'],
+    [120,30,'World Tonight','News','International headlines with correspondents in Nairobi, Seoul and São Paulo.'],
+    [150,60,'Late Edition','News','The night\'s developing stories and tomorrow\'s front pages.']]},
+  { num: '102', name: 'Atlas Sports', hue: 150, progs: [
+    [-45,120,'Champions Cup: Semi-Final','Football · Live','Second leg, level on aggregate. Coverage continues through extra time and penalties if needed.'],
+    [75,45,'Matchday Analysis','Football','The panel breaks down the semi-final with tactical replays and post-match interviews.'],
+    [120,90,'Fight Night Countdown','Boxing','Weigh-ins, training camps and predictions ahead of Saturday\'s heavyweight bout.']]},
+  { num: '103', name: 'Meridian', hue: 20, progs: [
+    [0,60,'Saltmarsh  S2·E4','Drama','A storm cuts the island off from the mainland, and Ada finally reads the letter.'],
+    [60,60,'The Cartographers','Drama','A family of mapmakers in 1920s Lisbon competes for a commission that could ruin them.'],
+    [120,30,'Short Stories','Anthology','Three new short films from first-time directors.'],
+    [150,60,'Night Shift','Thriller','An emergency dispatcher takes a call she recognises from twenty years ago.']]},
+  { num: '104', name: 'Kinema', hue: 300, progs: [
+    [-20,125,'Paper Lanterns (2019)','Film · Romance','Two strangers keep missing each other at the same festival, year after year.'],
+    [105,120,'The Long Light (2023)','Film · Sci-fi','A lighthouse keeper on a terraformed moon receives signals from a ship that left a century ago.']]},
+  { num: '105', name: 'Fieldnote', hue: 190, progs: [
+    [0,30,'Small Worlds','Nature','Macro photography of life inside a single rotting log.'],
+    [30,60,'Ocean Atlas: The Deep','Nature','A submersible descends into the Mariana Trench, filming species never seen alive.'],
+    [90,30,'Field Notes','Science','Researchers explain the work behind tonight\'s footage.'],
+    [120,60,'Wild Nights','Nature','Thermal cameras follow nocturnal hunters across the Kalahari.'],
+    [180,30,'Small Worlds','Nature','Repeat.']]},
+  { num: '106', name: 'Halcyon', hue: 60, progs: [
+    [-15,45,'Table for Two','Food','Two chefs, one market basket, forty minutes.'],
+    [30,30,'Kitchen Lab','Food','Why does bread go stale? A food scientist tests the theories.'],
+    [60,90,'Studio Sessions: Live','Music','A live set from the rooftop studio, with guests announced on the night.'],
+    [150,60,'After Hours','Talk','Late conversation with musicians, writers and comedians.']]},
+];
+const fmt = m => { const t = 19*60 + m; const h = Math.floor(t/60) % 24, mm = ((t%60)+60)%60; return String(h).padStart(2,'0') + ':' + String(mm).padStart(2,'0'); };
+const DATA = CH.map(c => ({ ...c, progs: c.progs.map(([s,d,title,genre,desc]) => ({ s, e: s+d, d, title, genre, desc })).filter(p => p.e > 0 && p.s < WIN) }));
+const nowIdx = row => Math.max(0, DATA[row].progs.findIndex(p => p.s <= NOW && p.e > NOW));
+
+function Preview({ hue, num }) {
+  const blob = (w, h, l, t, c, anim) => React.createElement('div', { style: { position:'absolute', width:w, height:h, left:l, top:t, borderRadius:'50%', background:c, filter:'blur(60px)', animation:anim } });
+  return React.createElement('div', { key: num, style: { position:'absolute', inset:0, overflow:'hidden', animation:'tvFade .6s ease-out', background:`oklch(0.22 0.06 ${hue})` } },
+    blob(460,360,-80,-60,`oklch(0.62 0.16 ${hue})`,'tvA 9s ease-in-out infinite'),
+    blob(420,380,360,120,`oklch(0.5 0.14 ${(hue+40)%360})`,'tvB 11s ease-in-out infinite'),
+    blob(300,260,220,-40,`oklch(0.78 0.1 ${(hue+330)%360})`,'tvC 7s ease-in-out infinite'),
+    React.createElement('div', { style: { position:'absolute', inset:0, backgroundImage:'repeating-linear-gradient(0deg, rgba(255,255,255,.035) 0 1px, transparent 1px 3px)' } }));
+}
+
+class Component extends DCLogic {
+  state = { row: 0, col: nowIdx(0), tuned: 1, scale: 1, rec: {} };
+  outerRef = React.createRef();
+  componentDidMount() {
+    this.onKey = e => {
+      const { row, col } = this.state;
+      if (e.key === 'ArrowRight') this.setState({ col: Math.min(col+1, DATA[row].progs.length-1) });
+      else if (e.key === 'ArrowLeft') this.setState({ col: Math.max(col-1, 0) });
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        const nr = Math.max(0, Math.min(DATA.length-1, row + (e.key === 'ArrowDown' ? 1 : -1)));
+        if (nr === row) return;
+        const p = DATA[row].progs[col]; const anchor = Math.max(p.s, 0) + 1;
+        let nc = DATA[nr].progs.findIndex(q => q.s <= anchor && q.e > anchor);
+        if (nc < 0) nc = DATA[nr].progs.length - 1;
+        this.setState({ row: nr, col: nc });
+      } else if (e.key === 'Enter' || e.key === ' ') this.setState({ tuned: row });
+      else if (e.key === 'r' || e.key === 'R') { const k = row+'-'+col; this.setState(s => ({ rec: { ...s.rec, [k]: !s.rec[k] } })); }
+      else return;
+      e.preventDefault();
+    };
+    this.onResize = () => { const el = this.outerRef.current; if (el) this.setState({ scale: Math.min(el.clientWidth/1920, el.clientHeight/1080) }); };
+    window.addEventListener('keydown', this.onKey); window.addEventListener('resize', this.onResize); this.onResize();
+  }
+  componentWillUnmount() { window.removeEventListener('keydown', this.onKey); window.removeEventListener('resize', this.onResize); }
+  renderVals() {
+    const { row, col, tuned, scale, rec } = this.state;
+    const pct = v => (v / WIN * 100) + '%';
+    const accent = 'oklch(0.72 0.14 240)';
+    const rows = DATA.map((c, ri) => ({
+      num: c.num, name: c.name, isTuned: ri === tuned,
+      chBg: ri === row ? 'rgba(255,255,255,.08)' : 'transparent',
+      cells: c.progs.map((p, ci) => {
+        const f = ri === row && ci === col, isNow = p.s <= NOW && p.e > NOW, past = p.e <= NOW;
+        const s = Math.max(p.s, 0), e = Math.min(p.e, WIN);
+        return {
+          left: pct(s), width: pct(e - s), title: (rec[ri+'-'+ci] ? '● ' : '') + p.title, time: fmt(p.s) + ' – ' + fmt(p.e), isNow,
+          progress: ((NOW - s) / (e - s) * 100) + '%',
+          bg: f ? '#eef1f6' : isNow ? 'rgba(255,255,255,.11)' : 'rgba(255,255,255,.05)',
+          border: f ? '#eef1f6' : 'rgba(255,255,255,.08)',
+          shadow: f ? `0 0 0 3px ${accent}, 0 12px 30px rgba(0,0,0,.4)` : 'none',
+          color: f ? '#0a0d13' : past ? 'rgba(238,241,246,.45)' : '#eef1f6',
+          barColor: f ? accent : 'rgba(238,241,246,.6)',
+          onClick: () => this.setState({ row: ri, col: ci }),
+          onTune: () => this.setState({ row: ri, col: ci, tuned: ri }),
+        };
+      }),
+    }));
+    const fp = DATA[row].progs[col], tc = DATA[tuned], tp = tc.progs[nowIdx(tuned)];
+    const isNow = fp.s <= NOW && fp.e > NOW, isRec = !!rec[row+'-'+col];
+    return {
+      outerRef: this.outerRef, scaleT: `scale(${scale})`,
+      ambientA: `oklch(0.45 0.12 ${tc.hue})`, ambientB: `oklch(0.4 0.1 ${(tc.hue+40)%360})`,
+      previewEl: React.createElement(Preview, { hue: tc.hue, num: tc.num }),
+      tuned: tc,
+      tunedNow: { title: tp.title, startLabel: fmt(tp.s), endLabel: fmt(tp.e), progress: ((NOW - tp.s) / tp.d * 100) + '%' },
+      focusCh: DATA[row],
+      focusProg: { ...fp, isNow, timeLabel: fmt(fp.s) + ' – ' + fmt(fp.e), durLabel: fp.d >= 60 ? `${Math.floor(fp.d/60)} h${fp.d%60 ? ' ' + fp.d%60 + ' min' : ''}` : fp.d + ' min' },
+      watchLabel: row === tuned && isNow ? 'Watching' : isNow ? 'Watch now' : 'Watch from start',
+      recLabel: isRec ? 'Recording set' : 'Record', recDot: isRec ? '#ff4d5e' : 'rgba(238,241,246,.5)',
+      ticks: [0,30,60,90,120,150].map(m => ({ left: pct(m), label: fmt(m) })),
+      nowLeft: `calc(200px + (100% - 200px) * ${NOW / WIN})`,
+      rows,
+    };
+  }
+}
+</script>
+</body>
+</html>
