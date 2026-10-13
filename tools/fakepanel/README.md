@@ -50,8 +50,9 @@ EPG titles are base64 unless `epg_plain`. `epg_gzip` returns a gzip file body fr
 | `redirect` | 302 to `http://host:<redirect-port>/<same path>?token=T`; token valid `token_ttl` seconds (fault `token_ttl` or config), expired/unknown -> 403 |
 | `linger` + `linger_status` | closed connection still counts toward `max_connections` for N s; a rejected open gets 403 (default), 458, 509, 503, or `"close"` = 200 headers then immediate close |
 | `close_every` | server closes the socket N s into a live TS |
-| `reconnect_mode` | on reconnect after a close: `continue` (resume at saved loop position), `reset` (restart clip, PTS back to start), `jump` (skip ahead ~5 s of clip) |
+| `reconnect_mode` | on reconnect after a close: `continue` (keep byte position, timestamp offset and CCs: as if nothing happened), `reset` (restart the clip and the timestamp offset at 0: PTS/PCR go back to the clip start), `jump` (timestamp offset +5 s, i.e. PTS/DTS/PCR jump forward 5 s; the clip position and CCs continue) |
 | `stall` | accept, send nothing for N s, then serve normally |
+| `stall_after` | `[after_s, duration_s]`: serve live TS normally for `after_s` s, then hold the socket open writing nothing for `duration_s` s, then continue (timestamps stay continuous; paced output resumes at real-time speed, no catch-up burst). Fires once per connection |
 | `slow` | throttle to N bytes/sec |
 | `ua_whitelist` | list of substrings; 403 unless User-Agent contains one |
 | `wrong_content_type` | serve with `text/html` |
@@ -79,7 +80,7 @@ curl -X POST localhost:8080/admin/config -d '{"stream_faults":{"3":{"redirect":t
 curl -X POST localhost:8080/admin/config -d '{"faults":{"linger":null}}'   # null inside faults deletes the key
 curl -X POST localhost:8080/admin/config -d '{"status":"Expired","quirks":true}'
 curl -X POST localhost:8080/admin/config -d '{"timeshift_expect":[1791900000],"strict_timeshift_tz":true}'
-curl localhost:8080/admin/stats        # requests, rejections by reason, range_requests_seen, connections{active,open,lingering}, ...
+curl localhost:8080/admin/stats        # requests, request_log[{path,ua,token_present}], rejections by reason, range_requests_seen, connections{active,open,lingering,max_open_seen}, ...
 curl localhost:8080/admin/faults       # documented fault keys and current faults
 curl -X POST localhost:8080/admin/kick # close every open stream
 curl -X POST localhost:8080/admin/reset
@@ -96,9 +97,21 @@ From the repo root: `python3 -m unittest tools/fakepanel/test_fakepanel.py`.
 With `-I` (which drops the cwd from `sys.path`) use `python3 -I -m unittest discover -s tools/fakepanel -p test_fakepanel.py`.
 Tests start the server on ephemeral ports with the null-packet media and need neither ffmpeg nor network.
 
-## Limitations (v0)
+## Live TS timestamps
 
-- Live TS loops the clip without rewriting PCR/PTS/continuity counters: loop points are timestamp discontinuities and CC errors. `reset` vs `continue` differ only in where the loop restarts; real PTS continuity or a +5 s PTS offset is not synthesised (`jump` skips clip bytes instead).
+The live endpoint loops the 10 s clip and makes the loop invisible: on every loop it adds `loop_count x clip_duration` (90 kHz, measured
+from the clip: last minus first PTS of the lowest-frame-rate PID plus one frame interval) to every PES PTS/DTS and to the PCR base
+(33-bit fields, modulo 2^33; the 9-bit 27 MHz PCR extension is untouched), and rewrites the continuity counter per PID so it keeps
+counting (AF-only packets repeat the previous value). The first loop is byte-identical to the clip. It works on any 188-aligned TS;
+`fallback_null.ts` (PID 0x1FFF only) has nothing to rewrite and is served as is. One 10 s loop rewrites in ~15 ms.
+Each connection's position, timestamp offset and CCs are saved per stream when it ends, so `reconnect_mode` decides what the next connection sees (see Faults).
+
+## Limitations
+
+- Clip loop continuity is exact for video; audio frames are not re-cut, so at a loop point the audio can overlap or gap by up to
+  ~1 AAC frame plus the difference between the audio and video clip lengths (a few hundred ms in the ffmpeg-generated clips).
+  PCR spacing at the loop point can likewise be larger than elsewhere (the clip's last PCR precedes the end of its last frame); it never goes backwards.
+- Timestamps are only rewritten for live TS (`/live/.../N.ts`). VOD, timeshift and archive TS are served unmodified.
 - HLS live playlists use `#EXT-X-DISCONTINUITY` at each loop; segments are 2 s keyframe-aligned cuts of the clip.
 - Client disconnects are noticed on the next write (within ~0.1 s on paced live streams).
 - HTTP only (no TLS), HTTP/1.0 close-delimited responses, no HTTP keep-alive.

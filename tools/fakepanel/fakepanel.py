@@ -3,8 +3,8 @@
 
     python3 tools/fakepanel/fakepanel.py --port 8080
 
-See README.md. Known v0 limitation: live TS loops a 10 s clip without rewriting PCR/PTS/continuity
-counters, so the loop point is a timestamp discontinuity and CC errors; players must tolerate it.
+See README.md. The live TS endpoint loops a 10 s clip and rewrites PTS/DTS/PCR base and continuity
+counters on every loop so the stream is continuous (see TsPlan / TsState and the reconnect_mode fault).
 """
 import argparse
 import copy
@@ -47,7 +47,7 @@ DEFAULTS = {
 }
 FAULT_DOC = {
     "redirect": False, "token_ttl": None, "linger": 0, "linger_status": 403, "close_every": 0,
-    "reconnect_mode": "continue", "stall": 0, "slow": 0, "ua_whitelist": [], "wrong_content_type": False,
+    "reconnect_mode": "continue", "stall": 0, "stall_after": None, "slow": 0, "ua_whitelist": [], "wrong_content_type": False,
     "html_splash": False, "405_on_m3u8": False, "range_rejects": False,
 }
 SPLASH = b"<html><head><title>Subscription</title></head><body><h1>Your subscription has expired</h1></body></html>"
@@ -55,10 +55,140 @@ SPLASH = b"<html><head><title>Subscription</title></head><body><h1>Your subscrip
 
 # ------------------------------------------------------------------ media
 
+MOD33 = 1 << 33
+JUMP_90K = 5 * 90000  # reconnect_mode=jump: forward timestamp jump
+
+
+def _get_ts(b, i):
+    """Decode a 33-bit PES PTS/DTS spread over 5 bytes with marker bits."""
+    return (((b[i] >> 1) & 7) << 30) | (b[i + 1] << 22) | ((b[i + 2] >> 1) << 15) | (b[i + 3] << 7) | (b[i + 4] >> 1)
+
+
+def _put_ts(b, i, v):
+    b[i] = (b[i] & 0xF0) | (((v >> 30) & 7) << 1) | 1
+    b[i + 1] = (v >> 22) & 0xFF
+    b[i + 2] = (((v >> 15) & 0x7F) << 1) | 1
+    b[i + 3] = (v >> 7) & 0xFF
+    b[i + 4] = ((v & 0x7F) << 1) | 1
+
+
+def _get_pcr_base(b, i):
+    return (b[i] << 25) | (b[i + 1] << 17) | (b[i + 2] << 9) | (b[i + 3] << 1) | (b[i + 4] >> 7)
+
+
+def _put_pcr_base(b, i, v):
+    b[i] = (v >> 25) & 0xFF
+    b[i + 1] = (v >> 17) & 0xFF
+    b[i + 2] = (v >> 9) & 0xFF
+    b[i + 3] = (v >> 1) & 0xFF
+    b[i + 4] = ((v & 1) << 7) | (b[i + 4] & 0x7F)  # keep reserved bits and the 9-bit 27 MHz extension
+
+
+# stream ids without a PES optional header
+_NO_PES_HEADER = {0xBC, 0xBE, 0xBF, 0xF0, 0xF1, 0xF2, 0xF8, 0xFF}
+
+
+class TsPlan:
+    """Per-packet rewrite plan for a 188-byte aligned MPEG-TS clip (any TS, not only ffmpeg output).
+
+    pkts[i] is None (null packet, nothing to do, also not CC-rewritten) or
+    (pid, has_payload, pcr_pos, pts_pos, dts_pos) with positions relative to the packet start (-1 = absent).
+    dur90k is the loop length in 90 kHz ticks: (last - first PTS of the lowest-frame-rate PID) + one frame interval,
+    or from PCRs when there are no PTS. active is False when there is nothing to rewrite.
+    """
+
+    def __init__(self, data):
+        self.pkts, self.dur90k, self.active = [], 0, False
+        n = len(data) // PKT
+        if n == 0 or len(data) % PKT:
+            return
+        pkts, pts_by_pid, pcrs = [None] * n, {}, []
+        for i in range(n):
+            o = i * PKT
+            if data[o] != 0x47:
+                return  # not aligned: leave the clip alone
+            b1, b2, b3 = data[o + 1], data[o + 2], data[o + 3]
+            pid = ((b1 & 0x1F) << 8) | b2
+            if pid == 0x1FFF:
+                continue
+            afc = (b3 >> 4) & 3
+            payload = bool(afc & 1)
+            p = o + 4
+            pcr_pos = pts_pos = dts_pos = -1
+            if afc & 2:
+                af_len = data[p]
+                if af_len >= 7 and data[p + 1] & 0x10 and p + 7 <= o + PKT:
+                    pcr_pos = p + 2 - o
+                    pcrs.append(_get_pcr_base(data, p + 2))
+                p += 1 + af_len
+            if payload and (b1 & 0x40) and p + 14 <= o + PKT and data[p] == 0 and data[p + 1] == 0 and data[p + 2] == 1 \
+                    and data[p + 3] not in _NO_PES_HEADER and (data[p + 7] >> 6) in (2, 3):
+                pts_pos = p + 9 - o
+                pts_by_pid.setdefault(pid, []).append(_get_ts(data, p + 9))
+                if (data[p + 7] >> 6) == 3 and p + 19 <= o + PKT:
+                    dts_pos = p + 14 - o
+            pkts[i] = (pid, payload, pcr_pos, pts_pos, dts_pos)
+        self.pkts = pkts
+        self.active = any(pkts)
+        best = 0
+        for vals in pts_by_pid.values():
+            if max(vals) - min(vals) > MOD33 // 2:  # the clip itself straddles a 33-bit wrap: unwrap
+                vals = [v + MOD33 if v < MOD33 // 2 else v for v in vals]
+            u = sorted(set(vals))
+            if len(u) < 2:
+                continue
+            diffs = sorted(b - a for a, b in zip(u, u[1:]))
+            step = diffs[len(diffs) // 2]
+            if step > best:  # lowest frame rate PID = video
+                best, self.dur90k = step, u[-1] - u[0] + step
+        if not self.dur90k and len(pcrs) >= 2:
+            span = pcrs[-1] - pcrs[0]
+            self.dur90k = span + span // (len(pcrs) - 1)
+
+
+class TsState:
+    """Where a live connection is in the looped clip: byte position, timestamp offset (90 kHz) and per-PID CC."""
+
+    def __init__(self, pos=0, off=0, cc=None):
+        self.pos, self.off, self.cc = pos, off, dict(cc or {})
+
+    def emit(self, plan, data, pos, e):
+        """Return data[pos:e] (packet aligned) with timestamps and CCs rewritten for this state."""
+        if not plan.active:
+            return data[pos:e]
+        buf = bytearray(data[pos:e])
+        pk, ccs, off = plan.pkts, self.cc, self.off
+        for k, i in enumerate(range(pos // PKT, e // PKT)):
+            ent = pk[i]
+            if ent is None:
+                continue
+            pid, payload, pcr, pts, dts = ent
+            b = k * PKT
+            nxt = ccs.get(pid)
+            if nxt is None:  # first sight of this PID on this connection: keep the clip's own counter
+                nxt = buf[b + 3] & 15
+                if not payload:
+                    nxt = (nxt + 1) & 15
+            if payload:
+                cc, ccs[pid] = nxt, (nxt + 1) & 15
+            else:
+                cc, ccs[pid] = (nxt - 1) & 15, nxt
+            buf[b + 3] = (buf[b + 3] & 0xF0) | cc
+            if off:
+                if pcr >= 0:
+                    _put_pcr_base(buf, b + pcr, (_get_pcr_base(buf, b + pcr) + off) % MOD33)
+                if pts >= 0:
+                    _put_ts(buf, b + pts, (_get_ts(buf, b + pts) + off) % MOD33)
+                    if dts >= 0:
+                        _put_ts(buf, b + dts, (_get_ts(buf, b + dts) + off) % MOD33)
+        return buf
+
+
 class Clip:
     def __init__(self, data, duration, segments):
         self.data, self.duration, self.segments = data, duration, segments
         self.rate = len(data) / duration  # bytes/sec
+        self.plan = TsPlan(data)
 
 
 def _read(path):
@@ -129,6 +259,7 @@ class Registry:
     def __init__(self):
         self.lock = threading.Lock()
         self.slots = []
+        self.max_open_seen = 0
 
     def _purge(self, now, hls_timeout):
         keep = []
@@ -160,6 +291,7 @@ class Registry:
                 return None
             s = Slot(user, sid, linger, hls)
             self.slots.append(s)
+            self.max_open_seen = max(self.max_open_seen, sum(1 for x in self.slots if not x.hls and x.closed_at is None))
             return s
 
     def touch(self, user, sid):
@@ -208,7 +340,8 @@ class Panel:
     def reset_stats(self):
         self.stats = {"requests": 0, "stream_opens": 0, "rejections": {}, "range_requests_seen": 0,
                       "range_requests": [], "auth_failures": 0, "redirects": 0, "token_expired": 0,
-                      "forced_closes": 0, "stalls": 0, "timeshift_tz_warnings": 0}
+                      "forced_closes": 0, "stalls": 0, "timeshift_tz_warnings": 0, "request_log": []}
+        self.registry.max_open_seen = 0
 
     def tz(self):
         try:
@@ -461,6 +594,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/admin/stats":
             s = copy.deepcopy(p.stats)
             s["connections"] = p.registry.counts(p.cfg["username"], p.cfg["hls_timeout"])
+            s["connections"]["max_open_seen"] = p.registry.max_open_seen
             return self.json(s)
         if path == "/admin/reset" and self.command != "GET":
             p.reset()
@@ -609,6 +743,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def stream_request(self, kind, user, pw, ident, ext, start=None, dur=None):
         p, c = self.panel, self.panel.cfg
         self._user = user
+        with p.lock:  # `requests` stays the counter; per-request detail is `request_log` (last 200 stream requests)
+            p.stats["request_log"] = (p.stats["request_log"] + [
+                {"path": self.path_only, "ua": self.headers.get("User-Agent", ""), "token_present": bool(self.q.get("token"))}])[-200:]
         ext = (ext or "ts").lower()
         if c["auth_mode"] in ("401", "403", "513"):
             return self.reject(int(c["auth_mode"]), "auth_mode")
@@ -657,7 +794,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if rng and kind == "live" and ext == "ts" and not seg:
             p.bump("range_requests_seen")
             with p.lock:
-                p.stats["range_requests"] = (p.stats["range_requests"] + [{"path": path, "range": rng, "ua": ua}])[-20:]
+                p.stats["range_requests"] = (p.stats["range_requests"] + [{"path": path, "range": rng, "ua": ua, "token_present": "token" in self.q}])[-20:]
             p.log(f"!!!!! RANGE REQUEST ON LIVE TS: '{rng}' {self.command} {path} ua={ua!r} "
                   "(IPTVnator-class bug: live TS must never be range-requested)")
             if f.get("range_rejects"):
@@ -748,25 +885,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 break
 
     def live_ts(self, clip, sid, f, slot):
-        p, data, n = self.panel, clip.data, len(clip.data)
+        p, data, n, plan = self.panel, clip.data, len(clip.data), clip.plan
         ctype = "text/html" if f.get("wrong_content_type") else "video/mp2t"
         self.begin_stream(200, ctype, {"Connection": "close"})
         if self.command == "HEAD":
             return
         mode = f.get("reconnect_mode", "continue")
-        last = p.live_pos.get(sid, 0)
-        pos = {"continue": last, "reset": 0, "jump": (last + int(clip.rate * 5)) // PKT * PKT % n}.get(mode, last)
-        self._notes.append(f"start@{pos}/{mode}")
+        last = p.live_pos.get(sid) or TsState()
+        if mode == "reset":
+            st = TsState()                                              # clip start, timestamps back at 0
+        elif mode == "jump":
+            st = TsState(last.pos, (last.off + JUMP_90K) % MOD33, last.cc)  # forward timestamp jump
+        else:
+            st = TsState(last.pos, last.off, last.cc)                   # as if nothing happened
+        self._notes.append(f"start@{st.pos}+{st.off}/{mode}")
         slow = float(f.get("slow") or 0)
         rate = slow or clip.rate
         chunk = max(PKT, min(CHUNK, int(rate / 10) // PKT * PKT))
         pace = bool(p.cfg["pace"]) or bool(slow)
         burst = 0 if slow else rate  # 1 s of burst so zaps start fast
         close_every = float(f.get("close_every") or 0)
+        sa = f.get("stall_after")
+        stall_at, stall_for = (float(sa[0]), float(sa[1])) if isinstance(sa, (list, tuple)) and len(sa) == 2 else (None, 0.0)
         t0, sent = time.monotonic(), 0
+        t_pace = t0  # pacing clock; shifted forward by a stall_after window so playback resumes at real-time speed
         try:
             while not p.stopping.is_set() and not slot.killed:
-                el = time.monotonic() - t0
+                now = time.monotonic()
+                el = now - t0
                 if close_every and el >= close_every:
                     p.bump("forced_closes")
                     self._notes.append(f"FORCED-CLOSE after {close_every}s")
@@ -775,16 +921,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     except OSError:
                         pass
                     break
-                e = min(pos + chunk, n)
-                self.out(data[pos:e])
-                sent += e - pos
-                pos = 0 if e == n else e
+                if stall_at is not None and el >= stall_at:
+                    stall_at = None
+                    p.bump("stalls")
+                    self._notes.append(f"STALL-AFTER {sa[0]}s for {sa[1]}s")
+                    if not self.nap(stall_for, slot):
+                        break
+                    t_pace += time.monotonic() - now
+                    continue
+                e = min(st.pos + chunk, n)
+                self.out(st.emit(plan, data, st.pos, e))
+                sent += e - st.pos
+                if e == n:
+                    st.pos = 0
+                    st.off = (st.off + plan.dur90k) % MOD33 if plan.active else 0
+                else:
+                    st.pos = e
                 if pace:
-                    wait = (sent - burst) / rate - (time.monotonic() - t0)
+                    wait = (sent - burst) / rate - (time.monotonic() - t_pace)
                     if wait > 0:
                         time.sleep(min(wait, 0.1))
         finally:
-            p.live_pos[sid] = pos
+            p.live_pos[sid] = st
             self.close_connection = True
 
     # ---- HLS

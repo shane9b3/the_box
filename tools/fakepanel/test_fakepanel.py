@@ -273,5 +273,297 @@ class TestHlsEdgeCases(PanelCase):
         self.assertEqual(c3.getresponse().status, 200)
 
 
+# ------------------------------------------------------------------ synthetic TS + independent decoders
+
+VPID, APID = 0x100, 0x101
+FRAME = 3600            # 40 ms
+FRAMES = 40             # clip = 40 frames = 1.6 s = 144000 ticks
+MASK33 = (1 << 33) - 1
+
+
+def enc_ts(prefix, v):
+    bits = (prefix << 36) | (((v >> 30) & 7) << 33) | (1 << 32) | (((v >> 15) & 0x7FFF) << 17) | (1 << 16) | ((v & 0x7FFF) << 1) | 1
+    return bits.to_bytes(5, "big")
+
+
+def dec_ts(b):
+    bits = int.from_bytes(b, "big")
+    assert bits & 1 and (bits >> 16) & 1 and (bits >> 32) & 1, "marker bits"
+    return (((bits >> 33) & 7) << 30) | (((bits >> 17) & 0x7FFF) << 15) | ((bits >> 1) & 0x7FFF)
+
+
+def make_pkt(pid, cc, payload, pusi=False, af=b"", afc=None):
+    afc = afc if afc is not None else (3 if af else 1)
+    head = bytes([0x47, (0x40 if pusi else 0) | (pid >> 8), pid & 0xFF, (afc << 4) | cc])
+    body = (bytes([len(af)]) + af) if afc & 2 else b""
+    pad = 188 - 4 - len(body) - len(payload)
+    assert pad >= 0
+    if afc & 2 and pad:  # stuff the adaptation field
+        body = bytes([len(af) + pad]) + af + b"\xff" * pad
+        pad = 0
+    return head + body + payload + b"\xaa" * pad
+
+
+def synth_clip(base=90000):
+    """Program-table-free TS: video PID (PES with PTS+DTS, PCR in AF, AF-only packets), audio PID (PTS only)."""
+    out, cc = [], {VPID: 0, APID: 0}
+
+    def nxt(pid, has_payload=True):
+        c = cc[pid]
+        if has_payload:
+            cc[pid] = (c + 1) & 15
+        return c if has_payload else (c - 1) & 15
+
+    for i in range(FRAMES):
+        pts = (base + i * FRAME) & MASK33
+        dts = (pts - FRAME) & MASK33
+        pcr = (pts - 2 * FRAME) & MASK33
+        pcr_field = ((pcr << 15) | (0x3F << 9) | 123).to_bytes(6, "big")  # base | reserved | 27 MHz extension 123
+        pes = b"\x00\x00\x01\xe0\x00\x00\x80\xc0\x0a" + enc_ts(3, pts) + enc_ts(1, dts)
+        out.append(make_pkt(VPID, nxt(VPID), pes, True, b"\x10" + pcr_field))
+        for _ in range(3):
+            out.append(make_pkt(VPID, nxt(VPID), b"\x11" * 184))
+        out.append(make_pkt(VPID, nxt(VPID, False), b"", afc=2, af=b"\x00"))
+        for j in range(2):
+            apts = (base + i * FRAME + j * FRAME // 2) & MASK33
+            apes = b"\x00\x00\x01\xc0\x00\x00\x80\x80\x05" + enc_ts(2, apts)
+            out.append(make_pkt(APID, nxt(APID), apes, True))
+            out.append(make_pkt(APID, nxt(APID), b"\x22" * 184))
+    return b"".join(out)
+
+
+def scan(data):
+    """Independent TS walk: returns pcrs [(base, ext)], per-PID pts and dts lists, per-PID [(cc, has_payload)]."""
+    pcrs, pts, dts, ccs = [], {VPID: [], APID: []}, {VPID: [], APID: []}, {}
+    assert len(data) % 188 == 0
+    for o in range(0, len(data), 188):
+        p = data[o:o + 188]
+        assert p[0] == 0x47
+        pid = ((p[1] & 0x1F) << 8) | p[2]
+        afc, cc = (p[3] >> 4) & 3, p[3] & 15
+        ccs.setdefault(pid, []).append((cc, bool(afc & 1)))
+        i = 4
+        if afc & 2:
+            if p[5] & 0x10:
+                v = int.from_bytes(p[6:12], "big")
+                pcrs.append((v >> 15, v & 0x1FF))
+            i = 5 + p[4]
+        if afc & 1 and p[1] & 0x40 and p[i:i + 3] == b"\x00\x00\x01":
+            fl = p[i + 7] >> 6
+            pts[pid].append(dec_ts(p[i + 9:i + 14]))
+            if fl == 3:
+                dts[pid].append(dec_ts(p[i + 14:i + 19]))
+    return pcrs, pts, dts, ccs
+
+
+def read_until_close(host, port, path, timeout=15):
+    c = http.client.HTTPConnection(host, port, timeout=timeout)
+    c.request("GET", path)
+    r = c.getresponse()
+    data = r.read()
+    c.close()
+    return r.status, data[:len(data) // 188 * 188]
+
+
+class SynthCase(PanelCase):
+    base = 90000
+    overrides = {"pace": True}
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.saved = dict(cls.panel.clips)
+        cls.src = synth_clip(cls.base)
+        # nominal duration 1.0 s => about one loop per second of paced output
+        clip = fakepanel.Clip(cls.src, 1.0, [(cls.src, 1.0)])
+        for k in cls.panel.clips:
+            cls.panel.clips[k] = clip
+        cls.clip = clip
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.panel.clips.update(cls.saved)
+        super().tearDownClass()
+
+    def fetch(self, faults, path="/live/test/test/1.ts"):
+        self.admin({"faults": faults})
+        st, data = read_until_close("127.0.0.1", self.port, path)
+        self.assertEqual(st, 200)
+        return data
+
+
+class TestContinuousTimestamps(SynthCase):
+    def test_plan_measures_clip_duration(self):
+        self.assertTrue(self.clip.plan.active)
+        self.assertEqual(self.clip.plan.dur90k, FRAMES * FRAME)
+
+    def check_two_loops(self, data):
+        self.assertGreater(len(data), 2 * len(self.src))
+        pcrs, pts, dts, ccs = scan(data)
+        dur = FRAMES * FRAME
+        # every consecutive pair is exactly one step apart (mod 2^33), including at both loop boundaries
+        for a, b in zip(pcrs, pcrs[1:]):
+            self.assertEqual((b[0] - a[0]) & MASK33, FRAME)
+            self.assertEqual(a[1], 123)  # 27 MHz extension untouched
+        for series, step in ((pts[VPID], FRAME), (dts[VPID], FRAME), (pts[APID], FRAME // 2)):
+            for a, b in zip(series, series[1:]):
+                self.assertEqual((b - a) & MASK33, step)
+        # loop 2 is exactly loop 1 + clip_duration
+        self.assertEqual((pts[VPID][FRAMES] - pts[VPID][0]) & MASK33, dur)
+        self.assertEqual((dts[VPID][FRAMES] - dts[VPID][0]) & MASK33, dur)
+        self.assertEqual((pcrs[FRAMES][0] - pcrs[0][0]) & MASK33, dur)
+        return ccs
+
+    def test_monotonic_and_exact_across_loops(self):
+        self.check_two_loops(self.fetch({"close_every": 1.5}))
+
+    def test_continuity_counters(self):
+        ccs = self.check_two_loops(self.fetch({"close_every": 1.5}))
+        for pid, lst in ccs.items():
+            exp = lst[0][0]
+            for cc, payload in lst:
+                if payload:
+                    self.assertEqual(cc, exp, f"pid {pid:#x}")
+                    exp = (exp + 1) & 15
+                else:  # AF-only: repeats the previous value
+                    self.assertEqual(cc, (exp - 1) & 15, f"pid {pid:#x}")
+
+    def test_first_loop_is_byte_identical(self):
+        data = self.fetch({"close_every": 1.2})
+        self.assertEqual(data[:len(self.src)], self.src)
+
+    def test_rewriter_speed(self):
+        t = time.monotonic()
+        st = fakepanel.TsState(0, 123456)
+        for pos in range(0, len(self.src), 188 * 28):
+            st.emit(self.clip.plan, self.src, pos, min(pos + 188 * 28, len(self.src)))
+        self.assertLess(time.monotonic() - t, 1.0)
+
+
+class TestTimestampWrap(SynthCase):
+    base = (1 << 33) - 3 * FRAME  # PTS/PCR wrap inside the first loop
+
+    def test_wrap_mod_2_33(self):
+        data = self.fetch({"close_every": 1.5})
+        pcrs, pts, dts, _ = scan(data)
+        self.assertTrue(any(b[0] < a[0] for a, b in zip(pcrs, pcrs[1:])), "expected a 33-bit wrap")
+        for a, b in zip(pcrs, pcrs[1:]):
+            self.assertEqual((b[0] - a[0]) & MASK33, FRAME)
+        for a, b in zip(pts[VPID], pts[VPID][1:]):
+            self.assertEqual((b - a) & MASK33, FRAME)
+
+
+class TestReconnectModes(SynthCase):
+    def two_connections(self, mode):
+        f = {"close_every": 0.3, "reconnect_mode": mode}
+        d1 = self.fetch(f)
+        d2 = self.fetch(f)
+        return scan(d1)[0], scan(d2)[0]
+
+    def test_continue_is_monotonic(self):
+        p1, p2 = self.two_connections("continue")
+        self.assertEqual((p2[0][0] - p1[-1][0]) & MASK33, FRAME)
+
+    def test_reset_goes_back_to_clip_start(self):
+        p1, p2 = self.two_connections("reset")
+        first = scan(self.src)[0][0][0]
+        self.assertEqual(p2[0][0], first)
+        self.assertGreater(p1[-1][0], first)  # the first connection ran past the start => a backwards jump
+
+    def test_reset_clears_offset_after_loops(self):
+        # first connection loops (offset != 0); the second one must still restart at the clip's own PCR
+        self.fetch({"close_every": 1.3, "reconnect_mode": "reset"})
+        p2 = scan(self.fetch({"close_every": 0.2}))[0]
+        self.assertEqual(p2[0][0], scan(self.src)[0][0][0])
+
+    def test_jump_is_plus_five_seconds(self):
+        p1, p2 = self.two_connections("jump")
+        self.assertEqual((p2[0][0] - p1[-1][0]) & MASK33, FRAME + 5 * 90000)
+
+    def test_jump_keeps_cc_continuous(self):
+        f = {"close_every": 0.3, "reconnect_mode": "jump"}
+        d1, d2 = self.fetch(f), self.fetch(f)
+        c1, c2 = scan(d1)[3], scan(d2)[3]
+        for pid in (VPID, APID):
+            exp = None
+            for cc, payload in c1[pid] + c2[pid]:  # one unbroken sequence across the reconnect
+                if exp is not None:
+                    self.assertEqual(cc, exp if payload else (exp - 1) & 15, f"pid {pid:#x}")
+                exp = (cc + 1) & 15
+
+
+class TestStallAfter(SynthCase):
+    def test_stall_after_pauses_output(self):
+        self.admin({"faults": {"stall_after": [0.6, 1.2]}})
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.request("GET", "/live/test/test/1.ts")
+        r = c.getresponse()
+        stamps, chunks = [], []
+        t0 = time.monotonic()
+        while time.monotonic() - t0 < 3.4:
+            d = r.read1(65536)
+            if not d:
+                break
+            stamps.append(time.monotonic() - t0)
+            chunks.append(d)
+        c.close()
+        gap, at = max((b - a, a) for a, b in zip(stamps, stamps[1:]))
+        self.assertGreater(gap, 1.0)
+        self.assertLess(gap, 1.8)
+        self.assertGreater(at, 0.4)
+        self.assertLess(at, 1.1)
+        self.assertGreater(stamps[-1], 1.8 + 0.3, "output resumed after the stall")
+        data = b"".join(chunks)
+        pcrs = scan(data[:len(data) // 188 * 188])[0]
+        for a, b in zip(pcrs, pcrs[1:]):
+            self.assertEqual((b[0] - a[0]) & MASK33, FRAME)
+
+    def test_plain_stall_still_delays_first_byte(self):
+        self.admin({"faults": {"stall": 0.5}})
+        t = time.monotonic()
+        st, _ = self.read_stream("/live/test/test/1.ts", 188)
+        self.assertEqual(st, 200)
+        self.assertGreaterEqual(time.monotonic() - t, 0.45)
+
+    def test_stall_after_is_documented(self):
+        st, _, body = self.get("/admin/faults")
+        self.assertIn("stall_after", json.loads(body)["documented_fault_keys"])
+
+
+class TestStatsAdditions(PanelCase):
+    def test_request_log_and_max_open_seen(self):
+        self.read_stream("/live/test/test/1.ts", 188, headers={"User-Agent": "UnitTest/1.0"})
+        self.get("/live/test/test/1.m3u8?token=abc", headers={"User-Agent": "Other/2"})
+        st, _, body = self.get("/admin/stats")
+        s = json.loads(body)
+        self.assertIsInstance(s["requests"], int)  # existing field kept
+        log = s["request_log"]
+        self.assertEqual(log[0]["ua"], "UnitTest/1.0")
+        self.assertIs(log[0]["token_present"], False)
+        self.assertEqual(log[1]["ua"], "Other/2")
+        self.assertIs(log[1]["token_present"], True)
+        self.assertGreaterEqual(s["connections"]["max_open_seen"], 1)
+        for k in ("active", "open", "lingering"):
+            self.assertIn(k, s["connections"])
+
+    def test_max_open_seen_tracks_simultaneous_and_resets(self):
+        conns = []
+        for _ in range(2):
+            c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=5)
+            c.request("GET", "/live/test/test/2.ts")
+            r = c.getresponse()
+            r.read(188)
+            conns.append((c, r))
+        s = json.loads(self.get("/admin/stats")[2])
+        self.assertEqual(s["connections"]["max_open_seen"], 2)
+        for c, r in conns:
+            r.close()
+            c.close()
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}/admin/reset", b"{}", method="POST")
+        urllib.request.urlopen(req, timeout=5).read()
+        s = json.loads(self.get("/admin/stats")[2])
+        self.assertEqual(s["connections"]["max_open_seen"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()
