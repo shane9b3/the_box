@@ -1,0 +1,6 @@
+# Clones and intermediate build output (Media3 checkout, FFmpeg checkout, Gradle).
+work/
+# Built binaries are published as CI artifacts / GitHub Releases, not committed.
+out/*
+!out/NOTICE-ffmpeg.txt
+!out/*.sha256
