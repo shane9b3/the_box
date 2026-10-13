@@ -32,7 +32,8 @@ import kotlin.coroutines.cancellation.CancellationException
  *
  * Failure policy (S16):
  * - **Permanent** key loss only (KeyPermanentlyInvalidatedException, UnrecoverableKeyException, or the
- *   keyset itself failing with AEADBadTagException): delete the keyset and every credential row, flag every
+ *   keyset itself failing with AEADBadTagException, or [MasterKeyLostException]: the Keystore confirms the master
+ *   key alias is gone): delete the keyset and every credential row, flag every
  *   playlist `needs_reauth`, return KEY_INVALIDATED.
  * - Anything else while building the primitive: retry once after 1 s, then UNAVAILABLE with nothing deleted.
  * - One row that does not decrypt: CORRUPT for that ref.
@@ -103,7 +104,7 @@ class TinkCredentialStore @Inject constructor(
                     return Outcome.Err(SourceError.Credentials(CredentialFailure.KEY_INVALIDATED))
                 }
                 if (attempt++ >= 1) {
-                    BoxLog.w(TAG, "keystore unavailable: ${e.javaClass.simpleName}")
+                    BoxLog.w(TAG, "keystore unavailable: ${e.javaClass.simpleName}", e)
                     return Outcome.Err(SourceError.Credentials(CredentialFailure.UNAVAILABLE))
                 }
                 delay(retryDelayMs)
@@ -131,7 +132,9 @@ class TinkCredentialStore @Inject constructor(
             var t: Throwable? = e
             var depth = 0
             while (t != null && depth++ < 10) {
-                if (t is KeyPermanentlyInvalidatedException || t is UnrecoverableKeyException || t is AEADBadTagException) return true
+                if (t is KeyPermanentlyInvalidatedException || t is UnrecoverableKeyException || t is AEADBadTagException ||
+                    t is MasterKeyLostException
+                ) return true
                 t = t.cause
             }
             return false

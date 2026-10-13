@@ -15,7 +15,7 @@ object NameNormalizer {
     private val QUALITY = Regex(
         """(?<![\p{L}\p{N}])(?:uhd|fhd|qhd|hd|sd|4k|8k|hevc|h\.?26[45]|x26[45]|avc|2160p|1080[pi]|720p|576[pi]|50 ?fps|60 ?fps|hdr10\+?|hdr|hlg|backup|vip|raw)(?![\p{L}\p{N}])""",
     )
-    private val BRACKETS = Regex("""\([^)]*\)|\[[^\]]*]|\{[^}]*}""")
+    private val BRACKETS = Regex("""\([^)]*\)|\[[^\]]*\]|\{[^}]*\}""") // `]`/`}` escaped: Android ICU regex rejects a bare `}`
     private val NON_WORD = Regex("""[^\p{L}\p{N}+]+""")
     private val PREFIX = Regex("""^\s*\|?\s*([a-z]{2})\s*[:|\-–]\s*(?=\S)""")
     private val TVG_COUNTRY = Regex("""\.([a-z]{2})(?:@|$)""")

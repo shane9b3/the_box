@@ -1,0 +1,17 @@
+channel id=lat icon=<null> name[<null>]=Télé Latin
+programme channel=lat start=29864520 stop=29864580
+  title=Télé Matin
+  subtitle=<null>
+  description=Ça va très bien
+  categories=
+  episodeLabel=<null>
+  season/episode/part/partTotal=-1/-1/-1/-1
+  seriesRef=<null>
+  icon=<null>
+  rating=<null>
+  starRating=<null>
+  year=-1
+  credits=<null>
+  flags=0
+  catchupId=<null>
+end

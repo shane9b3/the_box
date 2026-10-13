@@ -24,7 +24,9 @@ import app.thebox.data.work.EpgImportWorker
 import app.thebox.data.work.PlaylistRefreshWorker
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import org.junit.After
@@ -85,7 +87,9 @@ class WorkerDeviceTests {
             .build()
         val wm = WorkManager.getInstance(context)
         wm.enqueue(request).result.get()
-        val info = wm.getWorkInfoById(request.id).get()!!
+        // SynchronousExecutor only covers WorkManager's own executor; a CoroutineWorker's doWork still runs on its
+        // dispatcher, so wait for a terminal state instead of reading the state right after enqueue.
+        val info = withTimeout(60_000) { wm.getWorkInfoByIdFlow(request.id).first { it?.state?.isFinished == true } }!!
         assertEquals(WorkInfo.State.SUCCEEDED, info.state)
         assertEquals("SUCCESS", db.refreshLogDao().latest("PLAYLIST", id).single().outcome)
         assertTrue(status.status.value.failures.isEmpty())

@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The :data test APK has no :app manifest, so it mirrors what the app declares. FGS wiring (§3.10):
+  without the dataSync type on SystemForegroundService, an expedited worker's setForeground fails on API 29+ with
+  "foregroundServiceType 0x1 is not a subset of foregroundServiceType attribute 0x0" (I-4, I-9).
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+
+    <!-- Cleartext HTTP is allowed app-wide (CLAUDE.md); MockWebServer serves http://127.0.0.1 (I-3, I-4). -->
+    <application android:usesCleartextTraffic="true">
+        <service
+            android:name="androidx.work.impl.foreground.SystemForegroundService"
+            android:foregroundServiceType="dataSync"
+            tools:node="merge" />
+    </application>
+</manifest>

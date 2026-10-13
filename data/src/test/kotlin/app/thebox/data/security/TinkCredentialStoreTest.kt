@@ -123,5 +123,9 @@ class TinkCredentialStoreTest {
         assertTrue(TinkCredentialStore.isPermanent(android.security.keystore.KeyPermanentlyInvalidatedException()))
         assertFalse(TinkCredentialStore.isPermanent(KeyStoreException("x")))
         assertFalse(TinkCredentialStore.isPermanent(java.security.ProviderException("x")))
+        // Tink 1.23 reports a deleted master key as a bare InvalidKeyException; only the provider's confirmed
+        // "alias absent" wrapper is permanent (I-2).
+        assertTrue(TinkCredentialStore.isPermanent(MasterKeyLostException(java.security.InvalidKeyException("x"))))
+        assertFalse(TinkCredentialStore.isPermanent(java.security.InvalidKeyException("x")))
     }
 }

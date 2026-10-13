@@ -3,7 +3,6 @@ package app.thebox.core.epg.store
 import androidx.collection.MutableIntSet
 import androidx.sqlite.SQLiteConnection
 import androidx.sqlite.SQLiteDriver
-import androidx.sqlite.SQLiteException
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.driver.bundled.SQLITE_OPEN_READONLY
 import app.thebox.core.common.BoxLog
@@ -224,7 +223,8 @@ class EpgStoreImpl(
             )
             BoxLog.i(TAG) { "generation $gen: ${report.programmes} programmes, ${report.texts} texts, ${report.dbBytes} bytes, ${report.durationMs} ms" }
             return report
-        } catch (e: SQLiteException) {
+        } catch (e: RuntimeException) {
+            if (!e.isSqliteException()) throw e
             throw mapSqlite(e, request.sources)
         } catch (e: IOException) {
             throw SourceException(SourceError.Internal("epg build: ${e.message}"), e)
@@ -312,7 +312,8 @@ class EpgStoreImpl(
                     fts = fts.id,
                 )
             }
-        } catch (e: SQLiteException) {
+        } catch (e: RuntimeException) {
+            if (!e.isSqliteException()) throw e
             throw mapSqlite(e, request.sources)
         } catch (e: IOException) {
             throw SourceException(SourceError.Internal("epg in-place: ${e.message}"), e)
@@ -422,7 +423,8 @@ class EpgStoreImpl(
                 fts = fts.id,
                 failedSourceId = failed,
             )
-        } catch (e: SQLiteException) {
+        } catch (e: RuntimeException) {
+            if (!e.isSqliteException()) throw e
             throw mapSqlite(e, request.sources)
         } catch (e: IOException) {
             throw SourceException(SourceError.Internal("epg patch: ${e.message}"), e)
@@ -478,8 +480,8 @@ class EpgStoreImpl(
         } catch (e: CancellationException) {
             session.abort()
             throw e
-        } catch (e: SQLiteException) {
-            session.abort()
+        } catch (e: RuntimeException) {
+            if (e.isSqliteException()) session.abort()
             throw e
         } catch (e: SourceException) {
             error = e.error.code
@@ -733,7 +735,7 @@ class EpgStoreImpl(
         return (now - pastDays * 1440L).toInt() to (now + futureDays * 1440L).toInt()
     }
 
-    private fun mapSqlite(e: SQLiteException, sources: List<EpgSourceFile>): SourceException {
+    private fun mapSqlite(e: RuntimeException, sources: List<EpgSourceFile>): SourceException {
         val msg = e.message.orEmpty()
         return if (msg.contains("full", ignoreCase = true) || msg.contains("code: 13") || msg.contains("SQLITE_FULL")) {
             val (required, free) = try { diskCheck(sources) } catch (_: Exception) { 0L to 0L }
