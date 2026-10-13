@@ -1,0 +1,60 @@
+{
+ "epg_listings": [
+  {
+   "id": "0",
+   "epg_id": "1",
+   "title": "Morning News",
+   "lang": "en",
+   "start": "2026-10-13 21:30:00",
+   "end": "2026-10-13 22:30:00",
+   "description": "Héadlines & weather",
+   "channel_id": "ch1.test",
+   "now_playing": 1,
+   "has_archive": 0,
+   "start_timestamp": "1791919800",
+   "stop_timestamp": "1791923400"
+  },
+  {
+   "id": "1",
+   "epg_id": "1",
+   "title": "Quiz Time",
+   "lang": "en",
+   "start": "2026-10-13 21:30:00",
+   "end": "2026-10-13 22:30:00",
+   "description": "Questions",
+   "channel_id": "ch1.test",
+   "now_playing": 0,
+   "has_archive": 0,
+   "start_timestamp": "1791923400",
+   "stop_timestamp": "1791927000"
+  },
+  {
+   "id": "2",
+   "epg_id": "1",
+   "title": "Documentary",
+   "lang": "en",
+   "start": "2026-10-13 21:30:00",
+   "end": "2026-10-13 22:30:00",
+   "description": "Nature",
+   "channel_id": "ch1.test",
+   "now_playing": 0,
+   "has_archive": 0,
+   "start_timestamp": "1791927000",
+   "stop_timestamp": "1791930600"
+  },
+  {
+   "id": "3",
+   "epg_id": "1",
+   "title": "Match Day",
+   "lang": "en",
+   "start": "2026-10-13 21:30:00",
+   "end": "2026-10-13 22:30:00",
+   "description": "Football ⚽",
+   "channel_id": "ch1.test",
+   "now_playing": 0,
+   "has_archive": 0,
+   "start_timestamp": "1791930600",
+   "stop_timestamp": "1791934200"
+  }
+ ]
+}

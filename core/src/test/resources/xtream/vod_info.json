@@ -1,0 +1,38 @@
+{
+ "info": {
+  "tmdb_id": "603",
+  "name": "Movie One",
+  "o_name": "Movie One (orig)",
+  "movie_image": "http://img/1.jpg",
+  "backdrop_path": [
+   "http://img/bg1.jpg",
+   "http://img/bg2.jpg"
+  ],
+  "youtube_trailer": "abc",
+  "genre": "Action",
+  "plot": "Plot",
+  "cast": "A, B",
+  "director": "D",
+  "releasedate": "2001-01-01",
+  "duration_secs": "6130",
+  "duration": "01:42:10",
+  "rating": "7,5",
+  "country": "US",
+  "video": {
+   "codec_name": "h264"
+  },
+  "audio": {
+   "codec_name": "aac"
+  },
+  "bitrate": 2000
+ },
+ "movie_data": {
+  "stream_id": "201",
+  "name": "Movie One",
+  "added": "1700000000",
+  "category_id": "10",
+  "container_extension": "mkv",
+  "custom_sid": "",
+  "direct_source": ""
+ }
+}

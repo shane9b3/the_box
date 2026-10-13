@@ -1,0 +1,56 @@
+{
+ "epg_listings": [
+  {
+   "id": "0",
+   "epg_id": "1",
+   "title": "UGFzdCBTaG93",
+   "lang": "en",
+   "start": "2026-10-13 21:30:00",
+   "end": "2026-10-13 22:30:00",
+   "description": "QXJjaGl2ZWQ=",
+   "channel_id": "ch1.test",
+   "now_playing": 0,
+   "has_archive": 1,
+   "start_timestamp": "1791912600",
+   "stop_timestamp": "1791916200"
+  },
+  {
+   "id": "1",
+   "epg_id": "1",
+   "title": "UHJldmlvdXM=",
+   "lang": "en",
+   "start": "2026-10-13 21:30:00",
+   "end": "2026-10-13 22:30:00",
+   "description": "QXJjaGl2ZWQgdG9v",
+   "channel_id": "ch1.test",
+   "now_playing": 0,
+   "has_archive": "1",
+   "start_timestamp": "1791916200",
+   "stop_timestamp": "1791919800"
+  },
+  {
+   "id": "2",
+   "epg_id": "1",
+   "title": "TG9jYWwgT25seQ==",
+   "lang": "en",
+   "start": "2026-10-13 21:30:00",
+   "end": "2026-10-13 22:30:00",
+   "description": "Tm8gdGltZXN0YW1wcw==",
+   "channel_id": "ch1.test",
+   "now_playing": 1,
+   "has_archive": 0
+  },
+  {
+   "id": "3",
+   "epg_id": "1",
+   "title": "TG9jYWwgTmV4dA==",
+   "lang": "en",
+   "start": "2026-10-13 22:30:00",
+   "end": "2026-10-13 23:15:00",
+   "description": "Tm8gdGltZXN0YW1wcw==",
+   "channel_id": "ch1.test",
+   "now_playing": 0,
+   "has_archive": 0
+  }
+ ]
+}
