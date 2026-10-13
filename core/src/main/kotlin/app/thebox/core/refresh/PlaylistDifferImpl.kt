@@ -3,7 +3,6 @@ package app.thebox.core.refresh
 import app.thebox.core.common.BoxLog
 import app.thebox.core.common.CancelCheck
 import app.thebox.core.common.Hash64
-import app.thebox.core.common.ImportGate
 import app.thebox.core.common.NotASourceKind
 import app.thebox.core.common.SourceError
 import app.thebox.core.common.SourceException
@@ -24,21 +23,20 @@ import app.thebox.core.model.StableKey
  * emits inserts/updates/touches to [MergeSink.apply] in batches of [MergeContext.batchSize]. Missing rows,
  * purges and automatic key remaps are computed only at the end and handed to [MergeSink.finish].
  *
- * [gate] is awaited between batches (zap protection, architecture review B3.4). [clock] stamps
- * `finishedAtMs`. [keyHash] exists for the collision tests only.
+ * [MergeContext.gate] is awaited between batches (zap protection, architecture review B3.4; amended
+ * 2026-10-13: the gate moved from this constructor into the context). [clock] stamps `finishedAtMs`.
+ * [keyHash] exists for the collision tests only.
  */
 class PlaylistDifferImpl internal constructor(
     private val deriver: StableKeyDeriver,
-    private val gate: ImportGate,
     private val clock: () -> Long,
     private val keyHash: (String) -> Long,
 ) : PlaylistDiffer {
 
     constructor(
         deriver: StableKeyDeriver,
-        gate: ImportGate = ImportGate.Open,
         clock: () -> Long = System::currentTimeMillis,
-    ) : this(deriver, gate, clock, Hash64::of)
+    ) : this(deriver, clock, Hash64::of)
 
     override fun merge(
         entries: EntryProducer,
@@ -83,11 +81,24 @@ class PlaylistDifferImpl internal constructor(
         report.groupsTotal = groups.size
         val groupRows = groups.values.map { GroupRow(it.key, it.name, it.kind, it.order, isAdultGroup(it)) }
         val groupKeysSeen = groups.values.mapTo(LinkedHashSet(groups.size * 2)) { it.key }
+        val groupsNow = HashSet(groups.keys)
         groups.clear()
 
         // ---- Existing index --------------------------------------------------------------------------
         val index = ExistingIndex(keyHash, capacityHint = n1)
-        existing.forEach { index.add(it) }
+        // Groups that had at least one present channel last time (amended 2026-10-13: ExistingChannel.groupKey).
+        val groupsBefore = HashSet<String>()
+        var groupsKnown = true
+        existing.forEach {
+            index.add(it)
+            val gk = it.groupKey
+            if (gk == null) groupsKnown = false
+            else if (gk.isNotEmpty() && it.missingSince == null) groupsBefore += groupMapKey(GroupKeys.groupKind(it.kind), gk)
+        }
+        if (groupsKnown) {
+            report.groupsAdded = groupsNow.count { it !in groupsBefore }
+            report.groupsRemoved = groupsBefore.count { it !in groupsNow }
+        }
         cancel.throwIfCancelled()
 
         sink.begin(groupRows, detected)
@@ -108,7 +119,10 @@ class PlaylistDifferImpl internal constructor(
         }
     }
 
-    private class Pass2Result(val insertsByUrl: HashMap<Long, String?>)
+    /** An inserted entry that may be the new key of a newly-missing row (S7): its key and group map key. */
+    private class UrlInsert(val key: String, val group: String)
+
+    private class Pass2Result(val insertsByUrl: HashMap<Long, UrlInsert?>)
 
     private fun pass2(
         entries: EntryProducer,
@@ -123,7 +137,7 @@ class PlaylistDifferImpl internal constructor(
         val keyCtx = KeyContext(ctx.playlistType, xtreamShaped = detected != null, credentials = detected)
         val newKeys = NewKeySet(keyHash, if (index.size == 0) 4096 else 256)
         val dupCounts = HashMap<String, Int>()
-        val insertsByUrl = HashMap<Long, String?>()
+        val insertsByUrl = HashMap<Long, UrlInsert?>()
         val batchSize = ctx.batchSize.coerceAtLeast(1)
         var inserts = ArrayList<KeyedChannel>()
         var updates = ArrayList<ChannelUpdate>()
@@ -132,7 +146,7 @@ class PlaylistDifferImpl internal constructor(
 
         fun flush() {
             if (inserts.isEmpty() && updates.isEmpty() && touches.isEmpty()) return
-            gate.awaitClear()
+            ctx.gate.awaitClear()
             cancel.throwIfCancelled()
             sink.apply(MergeBatch(inserts, updates, touches))
             inserts = ArrayList()
@@ -192,7 +206,8 @@ class PlaylistDifferImpl internal constructor(
                 report.added(stored.name)
                 if (raw.kind == EntryKind.LIVE || raw.kind == EntryKind.RADIO) report.addedLive++
                 if (index.size > 0 && index.hasUrl(urlHash)) {
-                    insertsByUrl[urlHash] = if (insertsByUrl.containsKey(urlHash)) null else key
+                    insertsByUrl[urlHash] =
+                        if (insertsByUrl.containsKey(urlHash)) null else UrlInsert(key, groupMapKey(GroupKeys.groupKind(raw.kind), groupKey))
                 }
             } else {
                 val missing = index.missingSince(slot) != null
@@ -224,7 +239,7 @@ class PlaylistDifferImpl internal constructor(
         index: ExistingIndex,
         existing: ExistingChannels,
         ctx: MergeContext,
-        insertsByUrl: HashMap<Long, String?>,
+        insertsByUrl: HashMap<Long, UrlInsert?>,
         report: RefreshReportBuilder,
         groupKeysSeen: Set<String>,
     ): MergeFinish {
@@ -234,12 +249,16 @@ class PlaylistDifferImpl internal constructor(
         val purge = LongList()
         val purgeSlots = IntList()
         val unseenPerUrl = HashMap<Long, Int>()
+        var newlyLive = 0
         var slot = index.seen.nextClearBit(0)
         while (slot < index.size) {
             val since = index.missingSince(slot)
             if (since == null) {
                 newly.add(index.id(slot))
                 newlySlots.add(slot)
+                // S18: the report counts LIVE+RADIO only (amended 2026-10-13: ExistingChannel.kind).
+                val k = index.kind(slot)
+                if (k == EntryKind.LIVE || k == EntryKind.RADIO) newlyLive++
             } else if (ctx.nowMs - since >= ctx.graceMs && index.missingCount(slot) + 1 >= ctx.purgeAfterMissingRefreshes) {
                 purge.add(index.id(slot))
                 purgeSlots.add(slot)
@@ -252,10 +271,10 @@ class PlaylistDifferImpl internal constructor(
             }
             slot = index.seen.nextClearBit(slot + 1)
         }
-        report.newlyMissing = newly.size
+        report.newlyMissing = newlyLive
 
         // S7: a newly-missing slot and an inserted entry with the same url hash, unique on both sides.
-        val remapSlots = HashMap<Long, String>() // existing row id -> new key
+        val remapSlots = HashMap<Long, UrlInsert>() // existing row id -> new key and group
         if (insertsByUrl.isNotEmpty()) {
             for (i in 0 until newlySlots.size) {
                 val s = newlySlots[i]
@@ -265,20 +284,22 @@ class PlaylistDifferImpl internal constructor(
             }
         }
         // Key strings are not retained per row; fetch the few that are needed with one more scan.
-        val needed = HashMap<Long, String?>()
+        val needed = HashMap<Long, ExistingChannel?>()
         for (id in remapSlots.keys) needed[id] = null
         for (i in 0 until purge.size) needed[purge[i]] = null
         if (needed.isNotEmpty()) {
-            existing.forEach { e -> if (needed.containsKey(e.id)) needed[e.id] = e.stableKey }
+            existing.forEach { e -> if (needed.containsKey(e.id)) needed[e.id] = e }
         }
         val remaps = ArrayList<KeyRemap>(remapSlots.size)
-        for ((id, newKey) in remapSlots) {
+        for ((id, target) in remapSlots) {
             val old = needed[id] ?: continue
-            if (old != newKey) remaps += KeyRemap(old, newKey, sameGroup = false)
+            if (old.stableKey == target.key) continue
+            val oldGroup = old.groupKey?.let { groupMapKey(GroupKeys.groupKind(old.kind), it) }
+            remaps += KeyRemap(old.stableKey, target.key, sameGroup = oldGroup == target.group)
         }
         remaps.sortBy { it.oldKey }
         val purgedKeys = ArrayList<String>(purge.size)
-        for (i in 0 until purge.size) needed[purge[i]]?.let { purgedKeys += it }
+        for (i in 0 until purge.size) needed[purge[i]]?.let { purgedKeys += it.stableKey }
         return MergeFinish(
             nowMs = ctx.nowMs,
             newlyMissingIds = newly.toArray(),

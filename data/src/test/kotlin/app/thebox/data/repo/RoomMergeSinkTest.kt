@@ -11,6 +11,7 @@ import app.thebox.core.refresh.MergeFinish
 import app.thebox.core.refresh.MergeSink
 import app.thebox.core.refresh.RefreshReport
 import app.thebox.core.refresh.DetectedCredentials
+import app.thebox.core.source.EntryKind
 import app.thebox.core.source.ParsedChannel
 import app.thebox.core.source.PlaylistType
 import app.thebox.data.db.LibraryDatabase
@@ -66,6 +67,24 @@ class RoomMergeSinkTest {
     }
 
     private fun list(vararg names: String) = names.mapIndexed { i, n -> pc(n, position = i) }
+
+    @Test
+    fun existingChannelsCarryKindAndGroupKey() {
+        // (amended 2026-10-13) ExistingChannel.kind/groupKey feed S18, KeyRemap.sameGroup and the group counts.
+        run(
+            listOf(
+                pc("BBC", position = 0, group = "News"),
+                pc("Radio 1", position = 1, group = "Music", kind = EntryKind.RADIO),
+                pc("Film", url = "http://h/v/1.mkv", position = 2, group = "News", kind = EntryKind.MOVIE),
+            ),
+        )
+        val rows = ArrayList<Triple<String, EntryKind, String?>>()
+        RoomExistingChannels(db, p).forEach { rows += Triple(it.stableKey, it.kind, it.groupKey) }
+        assertEquals(
+            setOf(EntryKind.LIVE to "g:news", EntryKind.RADIO to "g:music", EntryKind.MOVIE to "g:news"),
+            rows.map { it.second to it.third }.toSet(),
+        )
+    }
 
     @Test
     fun batchesOf2000AndFtsRows() = runBlocking {

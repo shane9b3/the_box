@@ -37,8 +37,13 @@ class PlaylistDifferTest {
     private fun list(vararg c: ParsedChannel) = c.mapIndexed { i, x -> x.copy(position = i) }
 
     /** An existing row exactly as the differ would have stored [c] last time. */
-    private fun existingOf(id: Long, c: ParsedChannel, key: String = StableKeyDeriverImpl().derive(c, KeyContext(PlaylistType.M3U_URL, false)).key.value, missingSince: Long? = null, missingCount: Int = 0) =
-        ExistingChannel(id, key, ContentHasher.contentHash(c, GroupKeys.m3u(c.groupTitle)), Hash64.of(c.url), Hash64.of(c.name), c.position, missingSince, missingCount)
+    private fun existingOf(
+        id: Long, c: ParsedChannel, key: String = StableKeyDeriverImpl().derive(c, KeyContext(PlaylistType.M3U_URL, false)).key.value,
+        missingSince: Long? = null, missingCount: Int = 0, groupKey: String? = GroupKeys.m3u(c.groupTitle),
+    ) = ExistingChannel(
+        id, key, ContentHasher.contentHash(c, GroupKeys.m3u(c.groupTitle)), Hash64.of(c.url), Hash64.of(c.name), c.position, missingSince, missingCount,
+        kind = c.kind, groupKey = groupKey,
+    )
 
     private class Recorder : MergeSink {
         var begun = false
@@ -59,8 +64,8 @@ class PlaylistDifferTest {
         val touches get() = batches.flatMap { it.touches }
     }
 
-    private fun ctx(prevLive: Int = 0, force: Boolean = false, batch: Int = 2_000, type: PlaylistType = PlaylistType.M3U_URL) =
-        MergeContext(playlistId = 1, playlistType = type, refreshSeq = 2, nowMs = now, previousLiveCount = prevLive, forceAcceptShrink = force, batchSize = batch)
+    private fun ctx(prevLive: Int = 0, force: Boolean = false, batch: Int = 2_000, type: PlaylistType = PlaylistType.M3U_URL, gate: ImportGate = ImportGate.Open) =
+        MergeContext(playlistId = 1, playlistType = type, refreshSeq = 2, nowMs = now, previousLiveCount = prevLive, forceAcceptShrink = force, batchSize = batch, gate = gate)
 
     private fun run(
         entries: List<ParsedChannel>, existing: List<ExistingChannel> = emptyList(), sink: Recorder = Recorder(), ctx: MergeContext = ctx(),
@@ -225,8 +230,8 @@ class PlaylistDifferTest {
 
     @Test fun `gate is awaited and cancellation checked between batches`() {
         var gates = 0
-        val differ = PlaylistDifferImpl(StableKeyDeriverImpl(), gate = ImportGate { gates++ }, clock = { now })
-        run((0 until 4500).map { ch(it) }, differ = differ)
+        // (amended 2026-10-13) The gate comes from MergeContext.gate.
+        run((0 until 4500).map { ch(it) }, ctx = ctx(gate = ImportGate { gates++ }))
         assertEquals(3, gates)
     }
 
@@ -292,7 +297,7 @@ class PlaylistDifferTest {
     @Test fun `colliding key hashes are resolved through the side table`() {
         val a = ch(0); val b = ch(1); val c = ch(2); val d = ch(3)
         val existing = listOf(existingOf(10, a), existingOf(11, b), existingOf(12, c))
-        val differ = PlaylistDifferImpl(StableKeyDeriverImpl(), ImportGate.Open, { now }, { 42L }) // every key collides
+        val differ = PlaylistDifferImpl(StableKeyDeriverImpl(), { now }, { 42L }) // every key collides
         val (r, s) = run(list(a, b.copy(name = "Chan 1"), d.copy(position = 2)), existing, differ = differ)
         assertEquals(2, r.unchanged, "a and b still match their own rows although every hash collides")
         assertEquals(listOf("tvg:c3.uk|chan 3"), s.inserts.map { it.stableKey.value })
@@ -300,7 +305,7 @@ class PlaylistDifferTest {
     }
 
     @Test fun `collisions among new keys still give distinct keys`() {
-        val differ = PlaylistDifferImpl(StableKeyDeriverImpl(), ImportGate.Open, { now }, { 7L })
+        val differ = PlaylistDifferImpl(StableKeyDeriverImpl(), { now }, { 7L })
         val (r, s) = run((0 until 50).map { ch(it) }, differ = differ)
         assertEquals(50, s.inserts.map { it.stableKey.value }.toSet().size)
         assertEquals(0, r.duplicateKeys)
@@ -314,9 +319,18 @@ class PlaylistDifferTest {
         assertEquals("url:c0/index.m3u8", existing[0].stableKey)
         val after = list(ch(0, tvg = "new0.uk"), ch(1, tvg = null))
         val (r, s) = run(after, existing)
-        assertEquals(listOf(KeyRemap("url:c0/index.m3u8", "tvg:new0.uk|chan 0", sameGroup = false)), s.finish!!.autoRemaps)
+        assertEquals(listOf(KeyRemap("url:c0/index.m3u8", "tvg:new0.uk|chan 0", sameGroup = true)), s.finish!!.autoRemaps)
         assertEquals(1, r.keysMigrated)
         assertEquals(listOf(10L), s.finish!!.newlyMissingIds.toList(), "the old row is soft-deleted as usual")
+    }
+
+    @Test fun `S7 - sameGroup reflects the old row's group (amended 2026-10-13)`() {
+        val before = list(ch(0, tvg = null))
+        val moved = list(ch(0, tvg = "new0.uk").copy(groupTitle = "Other"))
+        val (_, s) = run(moved, before.mapIndexed { i, c -> existingOf(10L + i, c) })
+        assertEquals(listOf(false), s.finish!!.autoRemaps.map { it.sameGroup })
+        val (_, unknown) = run(list(ch(0, tvg = "new0.uk")), before.mapIndexed { i, c -> existingOf(10L + i, c, groupKey = null) })
+        assertEquals(listOf(false), unknown.finish!!.autoRemaps.map { it.sameGroup }, "unknown old group is never the same group")
     }
 
     @Test fun `S7 - duplicate url hash on the inserted side gives no remap`() {
@@ -369,6 +383,36 @@ class PlaylistDifferTest {
         val (r, _) = run(list(*new.toTypedArray()), existing, ctx = ctx(prevLive = 100, force = true))
         assertEquals(70, r.newlyMissing)
         assertFalse(r.massRemapSuggested)
+    }
+
+    @Test fun `S18 - newly missing counts live and radio only (amended 2026-10-13)`() {
+        val old = list(ch(0), ch(1, kind = EntryKind.RADIO), ch(2, kind = EntryKind.MOVIE, url = "http://h/v/2.mkv"), ch(3, kind = EntryKind.SERIES, url = "http://h/s/3.mkv"), ch(4))
+        val existing = old.mapIndexed { i, c -> existingOf(10L + i, c) }
+        val (r, s) = run(list(old[4]), existing)
+        assertEquals(2, r.newlyMissing, "the missing movie and series are not counted")
+        assertEquals(listOf(10L, 11L, 12L, 13L), s.finish!!.newlyMissingIds.sorted(), "but every kind is still soft-deleted")
+    }
+
+    // ---- group counts (amended 2026-10-13) --------------------------------------------------------------
+
+    @Test fun `groups added and removed compare present groups by kind`() {
+        val old = list(ch(0).copy(groupTitle = "News"), ch(1).copy(groupTitle = "Sport"), ch(2, kind = EntryKind.RADIO).copy(groupTitle = "Music"))
+        val existing = old.mapIndexed { i, c -> existingOf(10L + i, c) } +
+            existingOf(20, ch(9).copy(groupTitle = "Gone Before"), missingSince = now - day, missingCount = 1)
+        val new = list(old[0], ch(5).copy(groupTitle = "Kids"), ch(6, kind = EntryKind.MOVIE, url = "http://h/v/6.mkv").copy(groupTitle = "News"), old[2])
+        val (r, _) = run(new, existing)
+        assertEquals(4, r.groupsTotal)
+        assertEquals(2, r.groupsAdded, "Kids (live) and News (movie); radio Music shares the live space and is not new")
+        assertEquals(1, r.groupsRemoved, "Sport; a group whose channels were already missing does not count again")
+    }
+
+    @Test fun `group counts stay 0 when the existing rows carry no group key`() {
+        val old = list(ch(0).copy(groupTitle = "News"))
+        val (r, _) = run(list(ch(1).copy(groupTitle = "Kids")), old.mapIndexed { i, c -> existingOf(10L + i, c, groupKey = null) })
+        assertEquals(0, r.groupsAdded)
+        assertEquals(0, r.groupsRemoved)
+        val (first, _) = run(list(ch(1).copy(groupTitle = "Kids"), ch(2).copy(groupTitle = "News")))
+        assertEquals(2, first.groupsAdded, "a first import adds every group")
     }
 
     @Test fun `mass remap needs at least 20 channels before`() {

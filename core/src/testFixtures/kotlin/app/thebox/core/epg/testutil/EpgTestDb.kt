@@ -6,6 +6,8 @@ import androidx.sqlite.SQLiteStatement
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.driver.bundled.SQLITE_OPEN_READONLY
 import app.thebox.core.epg.FreeSpace
+import app.thebox.core.epg.store.EpgStoreImpl
+import org.kxml2.io.KXmlParser
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.time.Instant
@@ -15,8 +17,9 @@ import java.util.zip.GZIPOutputStream
  * Helpers that build XMLTV inputs and inspect epg.db generations in tests (docs/design/m1-data-layer.md §1.4).
  * Shared with `:data` tests through `testFixtures(project(":core"))`, read-only for WP-D.
  *
- * It deliberately does not construct `EpgStoreImpl` (its constructor takes an `XmlPullParser` factory,
- * which is compile-only in `:core`): tests pass `::KXmlParser` (JVM) or `Xml::newPullParser` themselves.
+ * (amended 2026-10-13) [openStore] constructs a real `EpgStoreImpl` with kxml2's `KXmlParser`
+ * (`testFixturesImplementation(libs.kxml2)`; kxml2 stays compile-only for `:core` main). On Robolectric pass
+ * `AndroidSQLiteDriver()` (and usually `forceFts4 = true`) to exercise the device SQLite path.
  */
 object EpgTestDb {
     data class ProgrammeRow(
@@ -43,6 +46,21 @@ object EpgTestDb {
     fun freeSpace(bytes: Long): FreeSpace = FreeSpace { bytes }
 
     val PLENTY_OF_SPACE: FreeSpace = freeSpace(Long.MAX_VALUE / 4)
+
+    /**
+     * A real `EpgStoreImpl` in [dir] (created if missing) with the JVM `KXmlParser`. The caller owns the store's
+     * lifecycle (call `recover()` first when the directory may hold an earlier generation, as the app does).
+     */
+    fun openStore(
+        dir: File,
+        driver: SQLiteDriver = BundledSQLiteDriver(),
+        freeSpace: FreeSpace = PLENTY_OF_SPACE,
+        clock: () -> Long = System::currentTimeMillis,
+        forceFts4: Boolean = false,
+    ): EpgStoreImpl {
+        dir.mkdirs()
+        return EpgStoreImpl(dir, driver, freeSpace, ::KXmlParser, clock, forceFts4)
+    }
 
     /** Epoch minutes of an ISO instant ("2026-10-13T19:00:00Z"). */
     fun minutes(iso: String): Int = (Instant.parse(iso).toEpochMilli() / 60_000L).toInt()

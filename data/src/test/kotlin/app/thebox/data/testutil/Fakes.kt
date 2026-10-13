@@ -125,6 +125,6 @@ class FakeM3uParser : M3uPlaylistParser {
             }
         }
         if (!headerSent) sink.onHeader(header)
-        return M3uParseSummary(n, n, 0, 0, 0, 0, 0, "UTF-8", true)
+        return M3uParseSummary(n, n, 0, 0, 0, 0, 0, "UTF-8", true, header = header)
     }
 }

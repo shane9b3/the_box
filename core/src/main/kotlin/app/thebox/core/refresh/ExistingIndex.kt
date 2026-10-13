@@ -3,6 +3,7 @@ package app.thebox.core.refresh
 import androidx.collection.MutableIntIntMap
 import androidx.collection.MutableIntLongMap
 import androidx.collection.MutableLongIntMap
+import app.thebox.core.source.EntryKind
 import java.util.BitSet
 
 /**
@@ -15,7 +16,7 @@ import java.util.BitSet
  * that collides with an existing one is never matched to the wrong row.
  *
  * Per row: map entry (~15 B) + id, content hash, url hash (8 B each) + name hash, sort index, check hash
- * (4 B each) ≈ 51 B. `missing_since`/`missing_count` live in sparse maps (only missing rows have them).
+ * (4 B each) + kind (1 B) ≈ 52 B. `missing_since`/`missing_count` live in sparse maps (only missing rows have them).
  *
  * [capacityHint] is the entry count of pass 1 (the existing row count is usually close to it). Storage is
  * allocated at that size on the first [add], so a first import allocates nothing and a refresh does not
@@ -30,6 +31,7 @@ internal class ExistingIndex(private val keyHash: (String) -> Long, private val 
     private var names = IntArray(0)
     private var sorts = IntArray(0)
     private var checks = IntArray(0)
+    private var kinds = ByteArray(0)
     private val missingSince = MutableIntLongMap()
     private val missingCount = MutableIntIntMap()
     private var sortedUrls: LongArray? = null
@@ -51,6 +53,7 @@ internal class ExistingIndex(private val keyHash: (String) -> Long, private val 
             names = IntArray(cap)
             sorts = IntArray(cap)
             checks = IntArray(cap)
+            kinds = ByteArray(cap)
         }
         ensure(slot + 1)
         ids[slot] = e.id
@@ -59,6 +62,7 @@ internal class ExistingIndex(private val keyHash: (String) -> Long, private val 
         names[slot] = e.nameHash.toInt()
         sorts[slot] = e.sortIndex
         checks[slot] = e.stableKey.hashCode()
+        kinds[slot] = e.kind.ordinal.toByte()
         if (e.missingSince != null) missingSince[slot] = e.missingSince
         if (e.missingCount != 0) missingCount[slot] = e.missingCount
         val h = keyHash(e.stableKey)
@@ -88,6 +92,7 @@ internal class ExistingIndex(private val keyHash: (String) -> Long, private val 
     fun sortIndex(slot: Int) = sorts[slot]
     fun missingSince(slot: Int): Long? = if (missingSince.containsKey(slot)) missingSince[slot] else null
     fun missingCount(slot: Int): Int = missingCount.getOrDefault(slot, 0)
+    fun kind(slot: Int): EntryKind = EntryKind.entries[kinds[slot].toInt()]
 
     /** Whether any existing row has [urlHash] (S7 auto-remap candidates). Built lazily on first use. */
     fun hasUrl(urlHash: Long): Boolean {
@@ -105,6 +110,7 @@ internal class ExistingIndex(private val keyHash: (String) -> Long, private val 
         names = names.copyOf(cap)
         sorts = sorts.copyOf(cap)
         checks = checks.copyOf(cap)
+        kinds = kinds.copyOf(cap)
     }
 }
 

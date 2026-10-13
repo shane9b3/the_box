@@ -1,6 +1,7 @@
 package app.thebox.core.refresh
 
 import app.thebox.core.common.CancelCheck
+import app.thebox.core.common.ImportGate
 import app.thebox.core.model.StableKey
 import app.thebox.core.source.EntryKind
 import app.thebox.core.source.ParsedChannel
@@ -44,7 +45,14 @@ data class KeyedChannel(
     val channel: ParsedChannel,
 )
 
-/** One existing row, streamed from library.db by WP-D; the differ keeps only primitives (§3.3.2). */
+/**
+ * One existing row, streamed from library.db by WP-D; the differ keeps only primitives (§3.3.2).
+ *
+ * (amended 2026-10-13) [kind] and [groupKey] let the differ count S18 "newly missing" over LIVE+RADIO only,
+ * set [KeyRemap.sameGroup] on automatic remaps, and compute `groupsAdded`/`groupsRemoved`. The defaults keep
+ * old callers compiling: a row without [kind] counts as LIVE, and when any row has a null [groupKey] the
+ * differ reports 0 groups added/removed instead of guessing.
+ */
 class ExistingChannel(
     val id: Long,
     val stableKey: String,
@@ -54,6 +62,9 @@ class ExistingChannel(
     val sortIndex: Int,
     val missingSince: Long?,
     val missingCount: Int,
+    val kind: EntryKind = EntryKind.LIVE,
+    /** The row's group key ([KeyedChannel.groupKey] of the last refresh), `""` when the row has no group row, null when unknown. */
+    val groupKey: String? = null,
 )
 
 fun interface ExistingChannels {
@@ -105,6 +116,12 @@ data class FinishStats(val purged: Int, val favouritesKept: Int, val favouritesO
 interface MergeSink {
     fun begin(groups: List<GroupRow>, detected: DetectedCredentials?)
     fun apply(batch: MergeBatch)
+
+    /**
+     * One transaction: missing/purge/group state, auto remaps, tombstones, playlist counters and validators.
+     * (amended 2026-10-13) It does **not** write `refresh_log`: the caller (WP-D's RefreshRepository) logs
+     * the final report after the post-merge steps, so a failure there is logged too.
+     */
     fun finish(finish: MergeFinish): FinishStats
     fun abort(error: Throwable)
 }
@@ -120,6 +137,11 @@ data class MergeContext(
     val graceMs: Long = 7L * 24 * 3600 * 1000,
     val purgeAfterMissingRefreshes: Int = 2,
     val batchSize: Int = 2_000,
+    /**
+     * (amended 2026-10-13) Awaited before every [MergeSink.apply] (zap protection, architecture review B3.4).
+     * WP-D passes the process-wide gate held by `ImportMutex`, the same one EPG build/patch use.
+     */
+    val gate: ImportGate = ImportGate.Open,
 )
 
 /** Stub in commit 0 at refresh/PlaylistDifferImpl.kt; WP-A owns the body. */

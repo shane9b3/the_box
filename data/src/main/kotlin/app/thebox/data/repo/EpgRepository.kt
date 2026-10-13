@@ -89,8 +89,10 @@ class EpgRepository @Inject constructor(
     @param:IoDispatcher private val io: CoroutineDispatcher,
     private val clock: WallClock,
 ) : EpgImporter {
-    /** M2 plugs the zap gate in here. */
-    @Volatile var gate: ImportGate = ImportGate.Open
+    /** The zap gate (amended 2026-10-13): delegates to [ImportMutex.gate], shared with the playlist merge. */
+    var gate: ImportGate
+        get() = importMutex.gate
+        set(value) { importMutex.gate = value }
 
     fun sources(): Flow<List<EpgSourceEntity>> = sourceDao.observeAll()
 

@@ -43,6 +43,7 @@ class FakeLibrary(private val playlistType: PlaylistType = PlaylistType.M3U_URL)
                 ExistingChannel(
                     r.id, r.key, r.channel.contentHash, Hash64.of(r.channel.urlTemplate), Hash64.of(r.channel.channel.name),
                     r.sortIndex, r.missingSince, r.missingCount,
+                    kind = r.channel.channel.kind, groupKey = r.channel.groupKey,
                 ),
             )
         }

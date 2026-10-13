@@ -20,7 +20,9 @@ import app.thebox.data.contracts.XtreamApi
 import app.thebox.data.contracts.XtreamConnection
 import app.thebox.data.contracts.XtreamLogin
 import app.thebox.data.di.ApiClient
+import app.thebox.data.di.DownloadClient
 import app.thebox.data.di.IoDispatcher
+import app.thebox.data.net.HttpModule
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.delay
@@ -41,7 +43,6 @@ import java.io.ByteArrayInputStream
 import java.io.File
 import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
@@ -58,6 +59,8 @@ import kotlin.coroutines.resumeWithException
  */
 class XtreamClient internal constructor(
     private val http: OkHttpClient,
+    /** Large lists (get_live_streams without a category) use the download profile (amended 2026-10-13: injected). */
+    private val downloadHttp: OkHttpClient,
     private val decoder: XtreamCatalogDecoder,
     private val io: CoroutineDispatcher,
     private val clock: () -> Long,
@@ -66,14 +69,19 @@ class XtreamClient internal constructor(
 
     @Inject constructor(
         @ApiClient http: OkHttpClient,
+        @DownloadClient downloadHttp: OkHttpClient,
         decoder: XtreamCatalogDecoder,
         @IoDispatcher io: CoroutineDispatcher,
-    ) : this(http, decoder, io, { System.currentTimeMillis() }, { delay(it) })
+    ) : this(http, downloadHttp, decoder, io, { System.currentTimeMillis() }, { delay(it) })
+
+    /** Without Hilt (tests): the download profile is derived from [http] the way [HttpModule.downloadClient] does. */
+    constructor(
+        http: OkHttpClient,
+        decoder: XtreamCatalogDecoder,
+        io: CoroutineDispatcher,
+    ) : this(http, HttpModule.downloadClient(http), decoder, io)
 
     private val permits = ConcurrentHashMap<Long, Semaphore>()
-
-    /** Large lists (get_live_streams without a category) get the download read timeout. */
-    private val downloadHttp: OkHttpClient by lazy { http.newBuilder().readTimeout(DOWNLOAD_READ_TIMEOUT_S, TimeUnit.SECONDS).build() }
 
     override suspend fun login(conn: XtreamConnection): Outcome<XtreamLogin> = request(conn, http, { it.playerApi(null) }) { resp ->
         val measuredAt = clock()
@@ -334,7 +342,6 @@ class XtreamClient internal constructor(
         private const val TAG = "XtreamClient"
         const val MAX_CONCURRENT = 3
         const val DEFAULT_USER_AGENT = "TheBox/1.0 (Linux; Android TV)"
-        private const val DOWNLOAD_READ_TIMEOUT_S = 120L
         private const val MAX_SMALL_BODY = 2L * 1024 * 1024
         private const val MAX_EPG_BODY = 16L * 1024 * 1024
         private const val PREFIX_BYTES = 256L
