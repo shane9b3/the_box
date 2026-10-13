@@ -24,6 +24,7 @@
     "linger_status": 458,
     "close_every": 90,
     "reconnect_mode": "continue",
+    "stall_after": [20, 8],
     "range_rejects": true
   },
   "stream_faults": {
