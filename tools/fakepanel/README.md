@@ -21,7 +21,7 @@ M3U: `http://<mac-ip>:8080/get.php?username=test&password=test&type=m3u_plus&out
 XMLTV: `http://<mac-ip>:8080/xmltv.php?username=test&password=test`.
 Tokenised redirect targets are served on a second port (default main port + 1, `--redirect-port`).
 
-Catalog: live 1-12 (cat 1 News, 2 Sports, 3 Movies; 3 and 12 have MP2 audio, 4 is 50 fps, 5 uses `#EXTVLCOPT` UA, 6 uses a `|User-Agent=` pipe URL,
+Catalog: live 1-13 (cat 1 News, 2 Sports, 3 Movies, 4 Radio; 13 "Radio Test" is AAC-audio-only (`media/aac_only_25.ts`, no video PID; M3U carries `radio="true"` and `group-title="Radio"`); 3 and 12 have MP2 audio, 4 is 50 fps, 5 uses `#EXTVLCOPT` UA, 6 uses a `|User-Agent=` pipe URL,
 archive on 1,2,3,4,7,9; catch-up variants xc/default/shift/flussonic on 1-4), movies 101-106 (`.mp4`), series 201-203 (episode ids 3xxx).
 
 ## Flags
@@ -80,7 +80,7 @@ curl -X POST localhost:8080/admin/config -d '{"stream_faults":{"3":{"redirect":t
 curl -X POST localhost:8080/admin/config -d '{"faults":{"linger":null}}'   # null inside faults deletes the key
 curl -X POST localhost:8080/admin/config -d '{"status":"Expired","quirks":true}'
 curl -X POST localhost:8080/admin/config -d '{"timeshift_expect":[1791900000],"strict_timeshift_tz":true}'
-curl localhost:8080/admin/stats        # requests, request_log[{path,ua,token_present}], rejections by reason, range_requests_seen, connections{active,open,lingering,max_open_seen}, ...
+curl localhost:8080/admin/stats        # requests, request_log[{path,ua,token_present,end_reason}], client_eof, rejections by reason, range_requests_seen, connections{active,open,lingering,max_open_seen}, ...
 curl localhost:8080/admin/faults       # documented fault keys and current faults
 curl -X POST localhost:8080/admin/kick # close every open stream
 curl -X POST localhost:8080/admin/reset
@@ -113,5 +113,6 @@ Each connection's position, timestamp offset and CCs are saved per stream when i
   PCR spacing at the loop point can likewise be larger than elsewhere (the clip's last PCR precedes the end of its last frame); it never goes backwards.
 - Timestamps are only rewritten for live TS (`/live/.../N.ts`). VOD, timeshift and archive TS are served unmodified.
 - HLS live playlists use `#EXT-X-DISCONTINUITY` at each loop; segments are 2 s keyframe-aligned cuts of the clip.
-- Client disconnects are noticed on the next write (within ~0.1 s on paced live streams).
+- Client disconnects (peer FIN/RST) are detected within ~50 ms by polling the socket for readability (`select` + `MSG_PEEK`), also while the server is not writing (`stall`, `stall_after` hold, `slow` naps, pacing sleeps). The stream stops, the slot is released (the `linger` fault still applies), the log says `CLIENT-EOF`, `client_eof` in `/admin/stats` increments and the request's `end_reason` is `client_eof` (others: `server_close`, `forced_close`, `error`; `null` while open). A client that stays connected and sends nothing is not EOF; a client that half-closes its write side (`shutdown(SHUT_WR)`) after the request is.
+- Audio-only ch13: the loop length comes from the audio PTS span plus one median PES step (ffmpeg packs ~15 AAC frames per PES), so the loop point can have an audio gap of up to one PES (< ~0.4 s); timestamps never go backwards. Manual check: `curl -m 25 -o /tmp/r.ts http://localhost:8080/live/test/test/13.ts` and scan PTS (see `pid_pts`/`parse_psi` in `test_fakepanel.py`).
 - HTTP only (no TLS), HTTP/1.0 close-delimited responses, no HTTP keep-alive.
