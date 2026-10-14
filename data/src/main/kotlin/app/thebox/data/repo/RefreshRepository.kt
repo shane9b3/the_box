@@ -24,6 +24,7 @@ import app.thebox.core.source.M3uHeader
 import app.thebox.core.source.ParsedChannel
 import app.thebox.core.source.ParseWarning
 import app.thebox.core.source.PlaylistType
+import app.thebox.core.text.NamePrefixRules
 import app.thebox.core.xtream.XtreamCatalogDecoder
 import app.thebox.core.xtream.XtreamCategory
 import app.thebox.core.xtream.XtreamUrls
@@ -137,6 +138,8 @@ class RefreshRepository @Inject constructor(
                 db, playlistId, nowMs = clock.now(), refreshSeq = playlist.refreshSeq + 1,
                 etag = dl.fetch?.etag, lastModified = dl.fetch?.lastModified,
                 onDetected = { storeDetected(playlist, secret, it) },
+                // M3 §3.12.3: display_name from the playlist's prefix rule.
+                prefixRule = NamePrefixRules.parse(playlist.namePrefixMode, playlist.namePrefixCustom),
             )
             val producer: EntryProducer = when (playlist.type) {
                 PlaylistType.XTREAM -> xtreamProducer(dl)

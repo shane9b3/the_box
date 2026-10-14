@@ -34,6 +34,7 @@ import app.thebox.data.db.entity.RefreshLogEntity
 import app.thebox.data.di.IoDispatcher
 import app.thebox.data.di.WallClock
 import app.thebox.data.epg.EpgRecovery
+import app.thebox.data.guide.EpgRefRule
 import app.thebox.data.net.NetErrors
 import app.thebox.data.work.ImportMutex
 import kotlinx.coroutines.CoroutineDispatcher
@@ -49,7 +50,6 @@ import javax.inject.Named
 import javax.inject.Singleton
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.coroutineContext
-import kotlin.math.roundToInt
 
 /** Single writer for epg.db build/patch/clear (§4.6). Lock order: ImportMutex → EpgWriteLock. */
 @Singleton
@@ -318,42 +318,21 @@ class EpgRepository @Inject constructor(
      */
     suspend fun resolvedRefs(playlistIds: List<Long>): Map<ChannelIdentity, ResolvedEpg> {
         if (playlistIds.isEmpty()) return emptyMap()
-        val sources = sourceDao.active()
-        val rank = sources.withIndex().associate { (i, s) -> s.id to i }
-        val sourceById = sources.associateBy { it.id }
+        // M3 (docs/design/m3-guide.md §3.2.2): one rule, shared with the guide's EpgRefResolver.
+        val sources = EpgRefRule.Sources(sourceDao.active())
         val wanted = playlistIds.toSet()
-        val mappings = mappingDao.all().filter { it.playlistId in wanted }.associateBy { it.playlistId to it.stableKey }
-        val autos = matchDao.autos().filter { it.playlistId in wanted }.groupBy { it.playlistId to it.stableKey }
-        val headerShift = playlistIds.associateWith { id ->
-            playlistDao.get(id)?.let { PlaylistRepository.header(it)?.tvgShiftHours }?.let { (it * 60).roundToInt() }
-        }
+        val mappings = mappingDao.all().filter { it.playlistId in wanted }
+            .associate { (it.playlistId to it.stableKey) to EpgRefRule.Mapping(it.sourceId, it.xmltvId) }
+        val autos = matchDao.autos().filter { it.playlistId in wanted }
+            .groupBy({ it.playlistId to it.stableKey }) { EpgRefRule.Auto(it.sourceId, it.xmltvId, it.hasData, it.method) }
+        val headerShift = playlistIds.associateWith { id -> EpgRefRule.headerShiftMin(playlistDao.get(id)) }
         val global = settings.current.globalShiftMin
         val out = HashMap<ChannelIdentity, ResolvedEpg>()
         for (row in channelDao.shiftInputs(playlistIds)) {
             val k = row.playlistId to row.stableKey
             val channelShift = row.prefShiftMin ?: row.channelShiftMin ?: headerShift[row.playlistId] ?: 0
-            val identity = ChannelIdentity(row.playlistId, StableKey(row.stableKey))
-            val mapping = mappings[k]
-            if (mapping != null) {
-                val ref = if (mapping.sourceId != null && mapping.xmltvId != null) EpgChannelRef(mapping.sourceId, mapping.xmltvId) else null
-                val srcShift = ref?.let { sourceById[it.sourceId]?.shiftMin } ?: 0
-                out[identity] = ResolvedEpg(ref, srcShift + channelShift + global, MatchMethod.OVERRIDE, ref != null)
-                continue
-            }
-            val candidates = autos[k].orEmpty()
-                .filter { it.sourceId in rank && (sourceById[it.sourceId]?.playlistId ?: row.playlistId) == row.playlistId }
-                .sortedBy { rank.getValue(it.sourceId) }
-            val pick = candidates.firstOrNull { it.hasData } ?: candidates.firstOrNull()
-            out[identity] = if (pick == null) {
-                ResolvedEpg(null, channelShift + global, null, false)
-            } else {
-                ResolvedEpg(
-                    EpgChannelRef(pick.sourceId, pick.xmltvId),
-                    (sourceById[pick.sourceId]?.shiftMin ?: 0) + channelShift + global,
-                    runCatching { MatchMethod.valueOf(pick.method) }.getOrNull(),
-                    pick.hasData,
-                )
-            }
+            out[ChannelIdentity(row.playlistId, StableKey(row.stableKey))] =
+                EpgRefRule.resolve(row.playlistId, channelShift, mappings[k], autos[k].orEmpty(), sources, global)
         }
         return out
     }

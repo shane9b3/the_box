@@ -1,10 +1,340 @@
 package app.thebox.ui.search
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsFocusedAsState
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicText
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import app.thebox.core.guide.GuideChannel
+import app.thebox.core.guide.ProgrammeHit
+import app.thebox.ui.R
+import app.thebox.ui.theme.BoxTextStyles
+import app.thebox.ui.theme.DesignTokens
+import coil3.compose.AsyncImage
+import java.time.Instant
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.util.Locale
 
-/** WP-B stub (docs/design/m3-guide.md §1.3, §3.10.3): the S9 screen. */
+/**
+ * The S9 Search screen (docs/design/m3-guide.md §3.10.3; review S15). It is the one guide screen on real Compose focus
+ * (the IME needs it): the field takes focus on entry, DOWN moves into the result rows. OK on a channel tunes it; on a
+ * programme it tunes (on now), plays catch-up (in archive) or toggles the reminder (future). Long OK opens a small menu
+ * (Remind/Cancel, Add/Remove favourite). BACK goes results → field → guide; the screen leaves SEARCH only through
+ * [SearchEffect.Close] on [SearchViewModel.effects], which the host forwards to the state machine (B7).
+ *
+ * Sizes are design px (`.dp` inside `BoxDesignScale`, 1 dp = 1 design px).
+ */
 @Composable
 fun SearchScreen(viewModel: SearchViewModel, modifier: Modifier = Modifier) {
-    TODO("WP-B")
+    val state by viewModel.state.collectAsStateWithLifecycle()
+    val field = remember { FocusRequester() }
+    var fieldFocused by remember { mutableStateOf(false) }
+    var menu by remember { mutableStateOf<MenuTarget?>(null) }
+    LaunchedEffect(Unit) { runCatching { field.requestFocus() } }
+
+    Column(
+        modifier
+            .fillMaxSize()
+            .padding(start = 64.dp, end = 64.dp, top = 56.dp, bottom = 40.dp)
+            .onPreviewKeyEvent { e ->
+                if (e.key != Key.Back || e.type != KeyEventType.KeyUp) return@onPreviewKeyEvent e.key == Key.Back
+                when {
+                    menu != null -> menu = null
+                    !fieldFocused -> runCatching { field.requestFocus() }
+                    else -> viewModel.onBack()
+                }
+                true
+            },
+    ) {
+        Tabs()
+        Spacer(Modifier.height(32.dp))
+        SearchField(state.query, field, onFocus = { fieldFocused = it }, onChange = viewModel::onQuery)
+        Spacer(Modifier.height(40.dp))
+        val results = state.results
+        when {
+            results == null -> Hint(stringResource(if (state.searching) R.string.search_searching else R.string.search_min_chars))
+            results.channels.isEmpty() && results.programmes.isEmpty() && !state.guideDataMissing -> {
+                Hint(stringResource(R.string.search_nothing_found, results.query))
+                Hint(stringResource(R.string.search_nothing_next))
+            }
+            else -> {
+                if (results.channels.isNotEmpty()) {
+                    RowTitle(stringResource(R.string.search_channels))
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
+                        items(results.channels, key = { it.rowId }) { ch ->
+                            ChannelCard(ch, onClick = { viewModel.onChannel(ch) }, onLongClick = { menu = MenuTarget.Channel(ch) })
+                        }
+                    }
+                    Spacer(Modifier.height(32.dp))
+                }
+                RowTitle(stringResource(R.string.search_programmes))
+                when {
+                    state.guideDataMissing -> Hint(stringResource(R.string.search_needs_guide))
+                    results.programmes.isEmpty() -> Hint(stringResource(R.string.search_no_programmes))
+                    else -> LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
+                        items(results.programmes, key = { "${it.channel.identityHash}:${it.info.rawStartMin}" }) { hit ->
+                            ProgrammeCard(
+                                hit,
+                                reminder = state.reminders.contains(hit.channel.identityHash, hit.info.rawStartMin),
+                                onClick = { viewModel.onProgramme(hit) },
+                                onLongClick = { menu = MenuTarget.Programme(hit) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+    menu?.let { target ->
+        ResultMenu(
+            target = target,
+            hasReminder = (target as? MenuTarget.Programme)?.let { viewModel.hasReminder(it.hit) } ?: false,
+            isFavourite = { ch -> viewModel.isFavourite(ch) },
+            onReminder = { hit -> viewModel.toggleReminder(hit); menu = null },
+            onFavourite = { ch -> viewModel.toggleFavourite(ch); menu = null },
+            onDismiss = { menu = null },
+        )
+    }
+}
+
+private sealed interface MenuTarget {
+    val channel: GuideChannel
+    data class Channel(override val channel: GuideChannel) : MenuTarget
+    data class Programme(val hit: ProgrammeHit) : MenuTarget { override val channel get() = hit.channel }
+}
+
+private val Fg = DesignTokens.Colors.Fg
+private val Dim = Fg.copy(alpha = 0.6f)
+private val Body = BoxTextStyles.Body.copy(color = Fg)
+private val Small = TextStyle(color = Dim, fontSize = 17.sp)
+
+@Composable
+private fun Tabs() {
+    Row(horizontalArrangement = Arrangement.spacedBy(36.dp), verticalAlignment = Alignment.CenterVertically) {
+        BasicText(stringResource(R.string.search_tab_guide), style = Body.copy(color = Dim))
+        BasicText(stringResource(R.string.search_tab_search), style = Body.copy(color = DesignTokens.Colors.AccentText))
+        BasicText("⚙", style = Body.copy(color = Dim))
+    }
+}
+
+@Composable
+private fun SearchField(text: String, focus: FocusRequester, onFocus: (Boolean) -> Unit, onChange: (String) -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    Box(
+        Modifier
+            .fillMaxWidth()
+            .height(72.dp)
+            .background(DesignTokens.Colors.GlassFill, RoundedCornerShape(DesignTokens.Radii.Button))
+            .border(if (focused) 3.dp else 1.dp, if (focused) DesignTokens.Colors.Accent else DesignTokens.Colors.GlassBorder, RoundedCornerShape(DesignTokens.Radii.Button))
+            .padding(horizontal = 24.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        if (text.isEmpty()) BasicText(stringResource(R.string.search_hint), style = Body.copy(color = Dim))
+        BasicTextField(
+            value = text,
+            onValueChange = onChange,
+            singleLine = true,
+            textStyle = Body,
+            cursorBrush = SolidColor(DesignTokens.Colors.Accent),
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(focus)
+                .onFocusChanged { focused = it.isFocused; onFocus(it.isFocused) },
+        )
+    }
+}
+
+@Composable
+private fun RowTitle(text: String) {
+    BasicText(text, style = Small.copy(color = Dim, fontSize = 15.sp, letterSpacing = 1.5.sp))
+}
+
+@Composable
+private fun Hint(text: String) {
+    BasicText(text, style = Body.copy(color = Dim), modifier = Modifier.padding(vertical = 8.dp))
+}
+
+/** A focusable card: OK = click, long OK (key repeat or long press) = [onLongClick]. Draws its own ring (no tv-material scaling). */
+@Composable
+private fun ResultCard(width: Int, height: Int, onClick: () -> Unit, onLongClick: () -> Unit, content: @Composable () -> Unit) {
+    val source = remember { MutableInteractionSource() }
+    val focused by source.collectIsFocusedAsState()
+    var longFired by remember { mutableStateOf(false) }
+    Box(
+        Modifier
+            .size(width.dp, height.dp)
+            .onPreviewKeyEvent { e ->
+                val ok = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
+                if (!ok) return@onPreviewKeyEvent false
+                when (e.type) {
+                    KeyEventType.KeyDown -> {
+                        if (e.nativeKeyEvent.repeatCount > 0 || e.nativeKeyEvent.isLongPress) {
+                            if (!longFired) { longFired = true; onLongClick() }
+                        }
+                        true
+                    }
+                    KeyEventType.KeyUp -> {
+                        if (!longFired) onClick()
+                        longFired = false
+                        true
+                    }
+                    else -> false
+                }
+            }
+            .background(if (focused) Fg else DesignTokens.Colors.GlassFill, RoundedCornerShape(DesignTokens.Radii.Cell))
+            .border(if (focused) 3.dp else 1.dp, if (focused) DesignTokens.Colors.Accent else DesignTokens.Colors.GlassBorder, RoundedCornerShape(DesignTokens.Radii.Cell))
+            .focusable(interactionSource = source)
+            .clickable(interactionSource = source, indication = null, onClick = onClick)
+            .padding(16.dp),
+    ) {
+        androidx.compose.runtime.CompositionLocalProvider(LocalCardFocused provides focused) { content() }
+    }
+}
+
+private val LocalCardFocused = androidx.compose.runtime.staticCompositionLocalOf { false }
+
+@Composable
+private fun cardText(): Color = if (LocalCardFocused.current) DesignTokens.Colors.Canvas else Fg
+
+@Composable
+private fun ChannelCard(ch: GuideChannel, onClick: () -> Unit, onLongClick: () -> Unit) {
+    ResultCard(220, 124, onClick, onLongClick) {
+        val color = cardText()
+        Column(verticalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxSize()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (ch.logoUrl != null) AsyncImage(model = ch.logoUrl, contentDescription = null, modifier = Modifier.size(56.dp, 40.dp))
+                Spacer(Modifier.width(8.dp))
+                ch.number?.let { BasicText(it.toString(), style = Small.copy(color = color.copy(alpha = 0.6f), fontSize = 15.sp)) }
+            }
+            BasicText(ch.displayName, style = Body.copy(color = color, fontSize = 19.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+        }
+    }
+}
+
+@Composable
+private fun ProgrammeCard(hit: ProgrammeHit, reminder: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
+    ResultCard(360, 124, onClick, onLongClick) {
+        val color = cardText()
+        Column(verticalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxSize()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                BasicText(hit.info.title, style = Body.copy(color = color, fontSize = 19.sp), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                if (hit.inArchive) BasicText("  ↺", style = Body.copy(color = color, fontSize = 19.sp))
+                if (reminder) BasicText("  ●", style = Body.copy(color = DesignTokens.Colors.Live, fontSize = 15.sp))
+            }
+            BasicText(hit.channel.displayName, style = Small.copy(color = color.copy(alpha = 0.7f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            BasicText(timeText(hit), style = Small.copy(color = color.copy(alpha = 0.6f), fontSize = 15.sp))
+        }
+    }
+}
+
+private val HM: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
+private val DAY: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
+
+/** "Tue 13 Oct · 19:30 – 20:00" in the device zone; the day only when it is not today. */
+internal fun timeText(hit: ProgrammeHit, zone: ZoneId = ZoneId.systemDefault(), nowMs: Long = System.currentTimeMillis()): String {
+    val s = Instant.ofEpochSecond(hit.info.startMin * 60L).atZone(zone)
+    val e = Instant.ofEpochSecond(hit.info.endMin * 60L).atZone(zone)
+    val today = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+    val day = if (s.toLocalDate() == today) "" else DAY.format(s) + " · "
+    return day + HM.format(s) + " – " + HM.format(e)
+}
+
+@Composable
+private fun ResultMenu(
+    target: MenuTarget,
+    hasReminder: Boolean,
+    isFavourite: suspend (GuideChannel) -> Boolean,
+    onReminder: (ProgrammeHit) -> Unit,
+    onFavourite: (GuideChannel) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var favourite by remember(target) { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(target) { favourite = isFavourite(target.channel) }
+    val first = remember { FocusRequester() }
+    LaunchedEffect(favourite) { if (favourite != null) runCatching { first.requestFocus() } }
+    Box(Modifier.fillMaxSize().background(Color(0x99000000)), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier
+                .width(520.dp)
+                .background(DesignTokens.Colors.Canvas, RoundedCornerShape(DesignTokens.Radii.Panel))
+                .border(1.dp, DesignTokens.Colors.GlassBorder, RoundedCornerShape(DesignTokens.Radii.Panel))
+                .padding(24.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            var firstUsed = false
+            fun Modifier.firstItem(): Modifier = if (!firstUsed) { firstUsed = true; focusRequester(first) } else this
+            if (target is MenuTarget.Programme) {
+                MenuItem(stringResource(if (hasReminder) R.string.search_menu_cancel_reminder else R.string.search_menu_remind), Modifier.firstItem()) {
+                    onReminder(target.hit)
+                }
+            }
+            favourite?.let { fav ->
+                MenuItem(stringResource(if (fav) R.string.search_menu_remove_favourite else R.string.search_menu_add_favourite), Modifier.firstItem()) {
+                    onFavourite(target.channel)
+                }
+            }
+            MenuItem(stringResource(R.string.search_menu_close), Modifier.firstItem(), onDismiss)
+        }
+    }
+}
+
+@Composable
+private fun MenuItem(label: String, modifier: Modifier, onClick: () -> Unit) {
+    val source = remember { MutableInteractionSource() }
+    val focused by source.collectIsFocusedAsState()
+    Box(
+        modifier
+            .fillMaxWidth()
+            .height(56.dp)
+            .background(if (focused) Fg else Color.Transparent, RoundedCornerShape(DesignTokens.Radii.Button))
+            .focusable(interactionSource = source)
+            .clickable(interactionSource = source, indication = null, onClick = onClick)
+            .padding(horizontal = 16.dp),
+        contentAlignment = Alignment.CenterStart,
+    ) {
+        BasicText(label, style = Body.copy(color = if (focused) DesignTokens.Colors.Canvas else Fg))
+    }
 }

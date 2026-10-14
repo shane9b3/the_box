@@ -17,7 +17,13 @@ data class ChannelRow(
     @ColumnInfo(name = "pref_sort") val customSortIndex: Int?,
     @ColumnInfo(name = "group_name") val groupName: String?,
     @ColumnInfo(name = "group_key") val groupKey: String?,
-)
+) {
+    /**
+     * M3 read-side name (docs/design/m3-guide.md §2.9.3, §3.12): `COALESCE(channel_prefs.custom_name,
+     * channel.display_name, channel.name)`. [channel]`.name` stays the raw provider name (stable keys, matcher, FTS).
+     */
+    val displayName: String get() = customName ?: channel.displayName ?: channel.name
+}
 
 data class UnmatchedRow(
     @ColumnInfo(name = "playlist_id") val playlistId: Long,

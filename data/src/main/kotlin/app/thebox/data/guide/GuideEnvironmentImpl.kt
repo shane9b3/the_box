@@ -4,18 +4,40 @@ import app.thebox.core.guide.GuideDataWindow
 import app.thebox.core.guide.GuideDataWindowSource
 import app.thebox.core.guide.SyncFeed
 import app.thebox.core.guide.SyncFeedState
+import app.thebox.data.di.ApplicationScope
+import app.thebox.data.repo.DataSettings
+import app.thebox.data.repo.SyncStatus
+import app.thebox.data.repo.SyncStatusRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** WP-B stub (docs/design/m3-guide.md §1.3, §2.4a, review B7): [SyncFeed] over `SyncStatusRepository`. */
+/** [SyncFeed] over `SyncStatusRepository` (docs/design/m3-guide.md §2.4a, review B7): the guide's sync chip input. */
 @Singleton
-class SyncFeedImpl @Inject constructor() : SyncFeed {
-    override val state: StateFlow<SyncFeedState> get() = TODO("WP-B")
+class SyncFeedImpl @Inject constructor(
+    repo: SyncStatusRepository,
+    @ApplicationScope scope: CoroutineScope,
+) : SyncFeed {
+    override val state: StateFlow<SyncFeedState> = repo.status
+        .map(::toFeed)
+        .stateIn(scope, SharingStarted.WhileSubscribed(5_000), toFeed(repo.status.value))
+
+    companion object {
+        fun toFeed(s: SyncStatus) = SyncFeedState(busy = s.busy, progress = s.progress, unacknowledgedFailures = s.failures.size)
+    }
 }
 
-/** WP-B stub (§2.4a, B7): [GuideDataWindowSource] over `DataSettings` (epgPastDays / epgFutureDays). */
+/** [GuideDataWindowSource] over `DataSettings` (epgPastDays / epgFutureDays; §2.4a, B7). */
 @Singleton
-class GuideDataWindowSourceImpl @Inject constructor() : GuideDataWindowSource {
-    override val window: StateFlow<GuideDataWindow> get() = TODO("WP-B")
+class GuideDataWindowSourceImpl @Inject constructor(
+    settings: DataSettings,
+    @ApplicationScope scope: CoroutineScope,
+) : GuideDataWindowSource {
+    override val window: StateFlow<GuideDataWindow> = settings.settings
+        .map { GuideDataWindow(it.epgPastDays, it.epgFutureDays) }
+        .stateIn(scope, SharingStarted.Eagerly, settings.current.let { GuideDataWindow(it.epgPastDays, it.epgFutureDays) })
 }
