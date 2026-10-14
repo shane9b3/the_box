@@ -107,7 +107,16 @@ dependencies {
     implementation(libs.work.runtime.ktx)
     implementation(libs.androidx.hilt.work)
 
+    // M3 ImageModule: the app's Coil ImageLoader (docs/design/m3-guide.md §6.2).
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
+
     baselineProfile(project(":baselineprofile"))
+
+    // M3 ReminderSchedulerTest / CatchupLauncherImpl tests (JUnit 4 + coroutines-test, §5.4).
+    testImplementation(libs.junit4)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(testFixtures(project(":core")))
 
     // M2 instrumented suite against the fake panel (docs/design/m2-playback-core.md §5.5, §6.5). Default
     // AndroidJUnitRunner: the tests use the real TheBoxApplication and a Hilt @EntryPoint.

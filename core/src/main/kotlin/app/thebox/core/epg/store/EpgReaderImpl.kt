@@ -111,7 +111,8 @@ internal class EpgReaderImpl(private val handle: GenerationHandle) : EpgReader {
         }
     }
 
-    override fun search(query: String, nowMin: Int, limit: Int): List<EpgSearchHit> {
+    // M3 commit 0: [perText], the CONTINUATION filter and searchPast are WP-B's (docs/design/m3-guide.md §2.7).
+    override fun search(query: String, nowMin: Int, limit: Int, perText: Int): List<EpgSearchHit> {
         checkOpen()
         val kind = handle.fts
         val match = FtsSupport.matchExpression(query, kind) ?: return emptyList()

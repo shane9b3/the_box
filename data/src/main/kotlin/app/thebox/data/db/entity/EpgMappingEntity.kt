@@ -13,7 +13,11 @@ import androidx.room.Index
         ForeignKey(entity = PlaylistEntity::class, parentColumns = ["id"], childColumns = ["playlist_id"], onDelete = ForeignKey.CASCADE),
         ForeignKey(entity = EpgSourceEntity::class, parentColumns = ["id"], childColumns = ["source_id"], onDelete = ForeignKey.CASCADE),
     ],
-    indices = [Index(value = ["source_id"], name = "index_epg_mapping_source")],
+    indices = [
+        Index(value = ["source_id"], name = "index_epg_mapping_source"),
+        // v3 (docs/design/m3-guide.md §2.9): reverse lookup for programme search (§3.10.2).
+        Index(value = ["source_id", "xmltv_id"], name = "index_epg_mapping_ref"),
+    ],
 )
 data class EpgMappingEntity(
     @ColumnInfo(name = "playlist_id") val playlistId: Long,

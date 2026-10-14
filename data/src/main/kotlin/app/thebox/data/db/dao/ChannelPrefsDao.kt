@@ -89,6 +89,15 @@ interface ChannelPrefsDao {
     )
     suspend fun upsertBufferProfile(playlistId: Long, stableKey: String, bufferProfile: String?, now: Long)
 
+    /** M3 "Hide channel" (docs/design/m3-guide.md §2.9.3): column-targeted, fixes N-L13 for hide. */
+    @Query(
+        """
+        INSERT INTO channel_prefs(playlist_id, stable_key, hidden, watch_count, updated_at)
+        VALUES (:playlistId, :stableKey, :hidden, 0, :now)
+        ON CONFLICT(playlist_id, stable_key) DO UPDATE SET hidden = :hidden, updated_at = :now""",
+    )
+    suspend fun upsertHidden(playlistId: Long, stableKey: String, hidden: Boolean, now: Long)
+
     @Query(
         """
         SELECT cp.* FROM channel_prefs cp

@@ -4,6 +4,7 @@ import androidx.room.ColumnInfo
 import androidx.room.Dao
 import androidx.room.Embedded
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Upsert
 import app.thebox.data.db.entity.ChannelGroupEntity
 import app.thebox.data.db.entity.GroupPrefsEntity
@@ -44,4 +45,28 @@ interface GroupDao {
 
     @Query("DELETE FROM group_prefs WHERE playlist_id = :playlistId AND kind = :kind AND group_key = :groupKey")
     suspend fun deletePrefs(playlistId: Long, kind: Int, groupKey: String)
+
+    // ---- M3 (docs/design/m3-guide.md §2.9.3): column-targeted writes for the Groups panel menu.
+
+    @Query(
+        """
+        INSERT INTO group_prefs(playlist_id, kind, group_key, hidden, updated_at)
+        VALUES (:playlistId, :kind, :groupKey, :hidden, :now)
+        ON CONFLICT(playlist_id, kind, group_key) DO UPDATE SET hidden = :hidden, updated_at = :now""",
+    )
+    suspend fun upsertGroupHidden(playlistId: Long, kind: Int, groupKey: String, hidden: Boolean, now: Long)
+
+    @Query(
+        """
+        INSERT INTO group_prefs(playlist_id, kind, group_key, hidden, custom_sort_index, updated_at)
+        VALUES (:playlistId, :kind, :groupKey, 0, :index, :now)
+        ON CONFLICT(playlist_id, kind, group_key) DO UPDATE SET custom_sort_index = :index, updated_at = :now""",
+    )
+    suspend fun upsertGroupSortIndex(playlistId: Long, kind: Int, groupKey: String, index: Int, now: Long)
+
+    /** Reorder: rewrites a dense `custom_sort_index` (0, 1, …) for [orderedKeys] of one playlist/kind in one transaction. */
+    @Transaction
+    suspend fun setGroupOrder(playlistId: Long, kind: Int, orderedKeys: List<String>, now: Long) {
+        orderedKeys.forEachIndexed { i, key -> upsertGroupSortIndex(playlistId, kind, key, i, now) }
+    }
 }

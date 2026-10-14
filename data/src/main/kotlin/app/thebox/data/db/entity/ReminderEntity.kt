@@ -29,6 +29,11 @@ data class ReminderEntity(
     /** 0 PENDING, 1 FIRED, 2 DISMISSED, 3 ORPHANED */
     @ColumnInfo(defaultValue = "0") val state: Int = STATE_PENDING,
     @ColumnInfo(name = "created_at") val createdAt: Long,
+    /**
+     * v3 (docs/design/m3-guide.md §2.9, review S1): the channel's guide shift when the reminder was set. The key stays
+     * raw; the reminder fires at the displayed start `(start_min + shift_min) × 60_000 − lead_sec × 1000`.
+     */
+    @ColumnInfo(name = "shift_min", defaultValue = "0") val shiftMin: Int = 0,
 ) {
     companion object {
         const val STATE_PENDING = 0

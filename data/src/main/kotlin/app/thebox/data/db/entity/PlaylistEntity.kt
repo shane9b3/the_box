@@ -65,4 +65,10 @@ data class PlaylistEntity(
      * `AUTO`. Written only by [PlaylistDao.setXtreamOutputLearned]; cleared by [PlaylistDao.setXtreamOutput].
      */
     @ColumnInfo(name = "xtream_output_learned") val xtreamOutputLearned: String? = null,
+    /** v3 (docs/design/m3-guide.md §2.9): channel-name prefix rule, `AUTO` | `OFF` | `CUSTOM`. */
+    @ColumnInfo(name = "name_prefix_mode", defaultValue = "'AUTO'") val namePrefixMode: String = "AUTO",
+    /** v3: JSON `{"literals":[…]}` or `{"regex":"…"}` when [namePrefixMode] is `CUSTOM`. */
+    @ColumnInfo(name = "name_prefix_custom") val namePrefixCustom: String? = null,
+    /** v3: `ChannelNamePrefix.RULE_VERSION` the stored `channel.display_name`s were computed with; 0 = never. */
+    @ColumnInfo(name = "name_prefix_ver", defaultValue = "0") val namePrefixVer: Int = 0,
 )

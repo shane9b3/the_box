@@ -1,0 +1,11 @@
+package app.thebox.ui.guide.screen
+
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import app.thebox.core.guide.GuideUiState
+
+/** WP-C stub (docs/design/m3-guide.md §1.4, §3.15). */
+@Composable
+fun GridHeaderChips(state: GuideUiState, modifier: Modifier = Modifier) {
+    TODO("WP-C")
+}

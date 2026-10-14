@@ -48,7 +48,7 @@ class LibraryDatabaseTest {
         assertEquals(
             listOf(
                 "index_channel_browse", "index_channel_group", "index_channel_group_identity", "index_channel_identity", "index_channel_missing",
-                "index_channel_number", "index_channel_prefs_recent", "index_channel_tvg", "index_epg_mapping_source", "index_epg_match_source",
+                "index_channel_number", "index_channel_prefs_recent", "index_channel_tvg", "index_epg_mapping_ref", "index_epg_mapping_source", "index_epg_match_ref", "index_epg_match_source",
                 "index_epg_match_status", "index_epg_source_hash", "index_epg_source_origin", "index_epg_source_playlist",
                 "index_favourite_channel", "index_purged_key_age", "index_refresh_log_target", "index_reminder_due", "index_reminder_identity",
                 "index_stream_source_source",

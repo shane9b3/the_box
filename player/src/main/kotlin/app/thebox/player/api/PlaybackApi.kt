@@ -79,6 +79,20 @@ interface ZapList {
 /** [request] comes straight from CatchupUrlBuilder.build (credentials still templated; M2 expands them last). */
 data class ArchiveTune(val identity: ChannelIdentity, val request: ArchiveRequest, val startOffsetMs: Long = 0)
 
+// ---- M3 commit 0 (docs/design/m3-guide.md §2.8): the catch-up seam, additive.
+
+/** (reviewed 2026-10-14, S13) Distinguishes "channel gone" from "credentials missing" so the toast names the right next step. */
+sealed interface CatchupTargetResult {
+    data class Found(val target: app.thebox.core.catchup.CatchupTarget) : CatchupTargetResult
+    data object ChannelGone : CatchupTargetResult
+    data object CredentialsUnavailable : CatchupTargetResult
+}
+/** M3 catch-up seam (M2 §3.14). Bound in PlaybackModule over the internal StreamUrlResolver.catchupTarget. */
+interface ArchiveTargets {
+    /** Main-safe. */
+    suspend fun catchupTarget(identity: app.thebox.core.refresh.ChannelIdentity): CatchupTargetResult
+}
+
 data class PositionSnapshot(val positionMs: Long, val bufferedMs: Long, val durationMs: Long?, val isSeekable: Boolean, val archiveStartUtcMs: Long?)
 
 enum class StopReason { USER, BACKGROUND, STANDBY, HDMI_UNPLUGGED, DISPLAY_OFF, LIVE_PAUSE_TIMEOUT, ERROR, RELEASE }

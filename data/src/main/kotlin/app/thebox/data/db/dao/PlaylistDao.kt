@@ -61,4 +61,14 @@ interface PlaylistDao {
 
     @Query("UPDATE playlist SET credential_ref = :ref WHERE id = :id")
     suspend fun setCredentialRef(id: Long, ref: String)
+
+    // ---- M3 (docs/design/m3-guide.md §2.9.3, §3.12)
+
+    /** The user's prefix rule (`AUTO`/`OFF`/`CUSTOM` + JSON). Resets `name_prefix_ver` so the recompute pass runs. */
+    @Query("UPDATE playlist SET name_prefix_mode = :mode, name_prefix_custom = :customJson, name_prefix_ver = 0 WHERE id = :id")
+    suspend fun setNamePrefix(id: Long, mode: String, customJson: String?)
+
+    /** Stamped after a recompute pass over the playlist's `channel.display_name`s. */
+    @Query("UPDATE playlist SET name_prefix_ver = :ver WHERE id = :id")
+    suspend fun setNamePrefixVer(id: Long, ver: Int)
 }

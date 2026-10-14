@@ -19,6 +19,8 @@ import androidx.room.Index
     indices = [
         Index(value = ["playlist_id", "status"], name = "index_epg_match_status"),
         Index(value = ["source_id"], name = "index_epg_match_source"),
+        // v3 (docs/design/m3-guide.md §2.9): reverse lookup for programme search (§3.10.2).
+        Index(value = ["source_id", "xmltv_id"], name = "index_epg_match_ref"),
     ],
 )
 data class EpgMatchEntity(

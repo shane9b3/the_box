@@ -250,8 +250,19 @@ interface EpgReader : AutoCloseable {
     /** Programme airing at display minute [atMin], or null (gap). */
     fun at(channel: Int, atMin: Int, shiftMin: Int): ProgrammeDetail?
 
-    /** FTS over title+subtitle; returns airings ending after [nowMin] (raw), best match first. */
-    fun search(query: String, nowMin: Int, limit: Int = 50): List<EpgSearchHit>
+    /**
+     * FTS over title+subtitle; airings ending after [nowMin] (raw), best text first, at most [perText] airings per
+     * text in start order. Rows flagged ProgrammeFlags.CONTINUATION are never returned (M1 code review Later 10).
+     * (M3 commit 0, docs/design/m3-guide.md §2.7; WP-B implements [perText] and the CONTINUATION filter.)
+     */
+    fun search(query: String, nowMin: Int, limit: Int = 50, perText: Int = Int.MAX_VALUE): List<EpgSearchHit>
+
+    /**
+     * Past airings for catch-up search: end_min in (pastFromMin, nowMin] (raw), best text first, at most [perText]
+     * airings per text, newest first. CONTINUATION rows are never returned. Default body returns emptyList() so
+     * fakes compile; EpgReaderImpl overrides it.
+     */
+    fun searchPast(query: String, nowMin: Int, pastFromMin: Int, limit: Int = 100, perText: Int = 5): List<EpgSearchHit> = emptyList()
 
     /**
      * All channels (optionally of one source), pushed to [block] on the calling thread.

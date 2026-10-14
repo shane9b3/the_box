@@ -8,6 +8,7 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import app.thebox.core.source.PlaylistType
 import app.thebox.data.db.LibraryDatabase
+import app.thebox.data.db.Migrations
 import app.thebox.data.db.entity.PlaylistEntity
 import app.thebox.data.repo.ChannelRepository
 import kotlinx.coroutines.Dispatchers
@@ -96,6 +97,61 @@ class I1LibraryDatabaseTest {
             val db = LibraryDatabase.build(context, Dispatchers.IO, BundledSQLiteDriver(), file.name)
             try {
                 runBlocking { assertEquals(0, db.channelPrefsDao().get(7, "xc:1")!!.playbackFlags) }
+            } finally {
+                db.close()
+            }
+        } finally {
+            context.deleteDatabase(file.name)
+        }
+    }
+
+    /**
+     * M3 (docs/design/m3-guide.md §2.9, §5.2 `LibraryV3MigrationTest`): the additive v2 → v3 auto-migration on the
+     * device's bundled SQLite keeps user rows, adds `display_name`, the `name_prefix_*` columns and `reminder.shift_min`
+     * with their defaults, and creates the two reverse-lookup indexes.
+     */
+    @Test
+    fun migrate2To3() {
+        val file = context.getDatabasePath("i1-migration-3.db").apply { delete() }
+        val helper = MigrationTestHelper(instrumentation, file, BundledSQLiteDriver(), LibraryDatabase::class, { LibraryDatabase.build(context, Dispatchers.IO, BundledSQLiteDriver(), file.name) }, emptyList())
+        try {
+            val v2 = helper.createDatabase(2)
+            try {
+                v2.prepare("INSERT INTO playlist(id, name, type, credential_ref, display_source, sort_index, created_at) VALUES (7, 'P', 'XTREAM', 'r', 'h', 0, 1)").use { it.step() }
+                v2.prepare("INSERT INTO channel(id, playlist_id, stable_key, key_rule, kind, name, norm_name, sort_index, url, content_hash, first_seen_at, updated_at) VALUES (11, 7, 'xc:1', 'XTREAM', 0, 'UK: One', 'uk one', 0, 'u', 1, 1, 1)").use { it.step() }
+                v2.prepare("INSERT INTO reminder(id, playlist_id, stable_key, start_min, end_min, title_hash, title, channel_name, created_at) VALUES (3, 7, 'xc:1', 1000, 1030, 42, 'News', 'One', 2)").use { it.step() }
+            } finally {
+                v2.close()
+            }
+            val v3 = helper.runMigrationsAndValidate(3, Migrations.ALL.toList())
+            try {
+                v3.prepare("SELECT name, display_name FROM channel WHERE id = 11").use {
+                    assertEquals(true, it.step())
+                    assertEquals("UK: One", it.getText(0))
+                    assertEquals(true, it.isNull(1))
+                }
+                v3.prepare("SELECT name_prefix_mode, name_prefix_custom, name_prefix_ver FROM playlist WHERE id = 7").use {
+                    assertEquals(true, it.step())
+                    assertEquals("AUTO", it.getText(0))
+                    assertEquals(true, it.isNull(1))
+                    assertEquals(0L, it.getLong(2))
+                }
+                v3.prepare("SELECT title, lead_sec, shift_min FROM reminder WHERE id = 3").use {
+                    assertEquals(true, it.step())
+                    assertEquals("News", it.getText(0))
+                    assertEquals(60L, it.getLong(1))
+                    assertEquals(0L, it.getLong(2))
+                }
+                v3.prepare("SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name IN ('index_epg_match_ref', 'index_epg_mapping_ref')").use {
+                    it.step()
+                    assertEquals(2L, it.getLong(0))
+                }
+            } finally {
+                v3.close()
+            }
+            val db = LibraryDatabase.build(context, Dispatchers.IO, BundledSQLiteDriver(), file.name)
+            try {
+                runBlocking { assertEquals(0, db.reminderDao().all().single().shiftMin) }
             } finally {
                 db.close()
             }
