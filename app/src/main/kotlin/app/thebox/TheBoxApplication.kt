@@ -8,7 +8,9 @@ import androidx.work.Configuration
 import app.thebox.core.common.BoxLog
 import app.thebox.data.di.ApplicationScope
 import app.thebox.data.repo.PlaylistRepository
+import app.thebox.data.work.ImportMutex
 import app.thebox.data.work.RefreshScheduler
+import app.thebox.player.controller.ZapImportGate
 import dagger.Lazy
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
@@ -27,6 +29,8 @@ class TheBoxApplication : Application(), Configuration.Provider {
     @Inject lateinit var scheduler: Lazy<RefreshScheduler>
     @Inject lateinit var playlists: Lazy<PlaylistRepository>
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
+    @Inject lateinit var importMutex: ImportMutex
+    @Inject lateinit var zapImportGate: ZapImportGate
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -38,6 +42,7 @@ class TheBoxApplication : Application(), Configuration.Provider {
         super.onCreate()
         BoxLog.minLevel = if (BuildConfig.DEBUG) BoxLog.DEBUG else BoxLog.INFO
         BoxLog.sink = BoxLog.Sink { level, tag, message, error -> Log.println(level, tag, if (error == null) message else message + "\n" + app.thebox.core.common.Redact.text(Log.getStackTraceString(error))) }
+        importMutex.gate = zapImportGate // M2 §3.5.5: importers pause while a zap is in progress
         appScope.launch {
             try {
                 scheduler.get().onAppStart()
