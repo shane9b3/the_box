@@ -21,7 +21,8 @@ Android TV / Fire TV IPTV player (M3U + XMLTV EPG + Xtream Codes) built to match
 
 - **M0 foundations** done: Gradle skeleton, design density rule and tokens, fake Xtream panel (`tools/fakepanel/`), FFmpeg audio decoder pipeline (`tools/ffmpeg/`), TV emulator smoke test.
 - **M1 data layer** done: streaming M3U/XMLTV/Xtream parsers, stable channel identity and diff-merge, generation-swapped `epg.db`, Room `library.db`, EPG matcher, WorkManager refresh, Tink credentials. Design: `docs/design/m1-data-layer.md`.
-- **M2 playback core** in progress: design `docs/design/m2-playback-core.md` (reviewed, `docs/review/m2-design-review.md`), Media3 1.11.1 facts `docs/design/m2-media3-api-notes.md`, fake panel v1 with continuous TS timestamps. Spike experiments D1–D5 wait for low-end hardware.
+- **M2 playback core** done: one ExoPlayer behind the root `SurfaceView`, `LiveTsDataSource` with in-source reconnect and no `Range` on live, connection broker, 44-row error ladder, adaptive buffer with a None…Extra large override, stall detectors, HW→SW and FFmpeg audio fallback, AFR/HDR policy, lifecycle rules, debug harness (`thebox-debug://play`), instrumented suite against the fake panel. Design `docs/design/m2-playback-core.md`; reviews `docs/review/m2-design-review.md`, `docs/review/m2-code-review.md`. Spike experiments D1–D5 and the I-3 reconnect test wait for low-end hardware.
+- **M3 guide** next.
 
 ## Build
 
