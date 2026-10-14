@@ -7,7 +7,10 @@ import gzip
 import http.client
 import json
 import os
+import shutil
+import socket
 import sys
+import tempfile
 import time
 import unittest
 import urllib.error
@@ -119,8 +122,11 @@ class TestM3uXmltv(PanelCase):
         self.assertEqual(lines[0].split()[0], "#EXTM3U")
         infs = [l for l in lines if l.startswith("#EXTINF")]
         urls = [l for l in lines if l.startswith("http")]
-        self.assertEqual(len(infs), 12)
-        self.assertEqual(len(urls), 12)
+        self.assertEqual(len(infs), 13)
+        self.assertEqual(len(urls), 13)
+        radio = [l for l in infs if "Radio Test" in l][0]
+        self.assertIn('radio="true"', radio)
+        self.assertIn('group-title="Radio"', radio)
         self.assertIn('tvg-id="ch1.test"', infs[0])
         self.assertIn('catchup="xc"', infs[0])
         self.assertTrue(any("#EXTVLCOPT:http-user-agent" in l for l in lines))
@@ -130,8 +136,8 @@ class TestM3uXmltv(PanelCase):
         self.admin({"epg_offset": "+0100"})
         st, _, body = self.get("/xmltv.php?username=test&password=test")
         txt = body.decode()
-        self.assertEqual(txt.count("<channel "), 12)
-        self.assertGreater(txt.count("<programme "), 12 * 280)
+        self.assertEqual(txt.count("<channel "), 13)
+        self.assertGreater(txt.count("<programme "), 13 * 280)
         self.assertIn(" +0100\"", txt)
 
     def test_xmltv_gzip(self):
@@ -563,6 +569,243 @@ class TestStatsAdditions(PanelCase):
         urllib.request.urlopen(req, timeout=5).read()
         s = json.loads(self.get("/admin/stats")[2])
         self.assertEqual(s["connections"]["max_open_seen"], 0)
+
+
+def raw_get(port, path):
+    """Plain socket GET (no HTTP client buffering); returns the connected socket."""
+    sk = socket.create_connection(("127.0.0.1", port), timeout=5)
+    sk.sendall(f"GET {path} HTTP/1.0\r\nHost: x\r\n\r\n".encode())
+    return sk
+
+
+def stats(port):
+    return json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/admin/stats", timeout=5).read())
+
+
+def wait_for(pred, timeout):
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if pred():
+            return True
+        time.sleep(0.02)
+    return pred()
+
+
+class TestClientEof(SynthCase):
+    def tearDown(self):  # let the server notice this test's own close before the next test resets the stats
+        wait_for(lambda: stats(self.port)["connections"]["open"] == 0, 2.0)
+
+    def test_eof_during_stall_after_hold_frees_slot(self):
+        self.admin({"faults": {"stall_after": [0.3, 5]}})
+        sk = raw_get(self.port, "/live/test/test/1.ts")
+        got = b""
+        while len(got) < 2000:
+            got += sk.recv(65536)
+        time.sleep(0.6)  # now inside the 5 s hold
+        self.assertEqual(stats(self.port)["connections"]["open"], 1)
+        t = time.monotonic()
+        sk.close()
+        self.assertTrue(wait_for(lambda: stats(self.port)["connections"]["active"] == 0, 0.5),
+                        "slot not released within 0.5 s of the close")
+        self.assertLess(time.monotonic() - t, 0.5)
+        self.assertTrue(wait_for(lambda: stats(self.port)["client_eof"] == 1, 0.5))
+        self.assertTrue(wait_for(lambda: stats(self.port)["request_log"][-1]["end_reason"] == "client_eof", 0.5))
+
+    def test_eof_during_plain_stall_before_first_byte(self):
+        self.admin({"faults": {"stall": 4}})
+        sk = raw_get(self.port, "/live/test/test/1.ts")
+        time.sleep(0.3)
+        sk.close()
+        self.assertTrue(wait_for(lambda: stats(self.port)["client_eof"] == 1, 0.5))
+        self.assertEqual(stats(self.port)["connections"]["active"], 0)
+
+    def test_silent_connected_client_is_not_eof(self):
+        sk = raw_get(self.port, "/live/test/test/1.ts")
+        sk.recv(188)
+        time.sleep(2.0)  # connected, not reading: the stream must be kept, not dropped
+        s = stats(self.port)
+        self.assertEqual(s["client_eof"], 0)
+        self.assertEqual(s["connections"]["open"], 1)
+        self.assertIsNone(s["request_log"][-1]["end_reason"])
+        sk.close()
+        self.assertTrue(wait_for(lambda: stats(self.port)["connections"]["open"] == 0, 1.0))
+
+    def test_silent_client_during_stall_after_hold_is_not_eof(self):
+        self.admin({"faults": {"stall_after": [0.2, 4]}})
+        sk = raw_get(self.port, "/live/test/test/1.ts")
+        time.sleep(2.0)  # never reads at all, sends nothing
+        s = stats(self.port)
+        self.assertEqual((s["client_eof"], s["connections"]["open"]), (0, 1))
+        sk.close()
+
+    def test_linger_still_applies_after_eof(self):
+        self.admin({"max_connections": 1, "faults": {"linger": 1.5, "linger_status": 458, "stall_after": [0.2, 5]}})
+        sk = raw_get(self.port, "/live/test/test/1.ts")
+        sk.recv(188)
+        time.sleep(0.5)
+        sk.close()
+        self.assertTrue(wait_for(lambda: stats(self.port)["client_eof"] == 1, 0.5))
+        c = stats(self.port)["connections"]
+        self.assertEqual((c["open"], c["lingering"]), (0, 1))
+        self.assertEqual(self.read_stream("/live/test/test/2.ts")[0], 458)  # slot still occupied
+        self.assertTrue(wait_for(lambda: stats(self.port)["connections"]["active"] == 0, 2.0))
+        self.admin({"faults": {"linger": 0, "stall_after": None}})
+        self.assertEqual(self.read_stream("/live/test/test/2.ts")[0], 200)
+
+    def test_end_reasons(self):
+        self.admin({"faults": {"close_every": 0.3}})
+        read_until_close("127.0.0.1", self.port, "/live/test/test/1.ts")
+        self.admin({"faults": {"close_every": 0}})
+        self.get("/live/test/test/999.ts")
+        log = stats(self.port)["request_log"]
+        self.assertEqual([e["end_reason"] for e in log], ["forced_close", "server_close"])
+        self.assertEqual(stats(self.port)["client_eof"], 0)
+
+
+def parse_psi(data):
+    """Return {pid: stream_type} of the first program by walking PAT then PMT (single-section tables)."""
+    pkts = [data[o:o + 188] for o in range(0, len(data) // 188 * 188, 188)]
+
+    def section(pid):
+        for p in pkts:
+            if (((p[1] & 0x1F) << 8) | p[2]) == pid and p[1] & 0x40 and p[3] & 0x10:
+                i = 5 + p[4]  # header + pointer_field
+                return p[i:]
+        return None
+
+    sec = section(0)
+    assert sec and sec[0] == 0x00, "no PAT"
+    pmt_pid = ((sec[10] & 0x1F) << 8) | sec[11]  # first program entry
+    sec = section(pmt_pid)
+    assert sec and sec[0] == 0x02, "no PMT"
+    end = 3 + (((sec[1] & 0x0F) << 8) | sec[2]) - 4
+    i = 12 + (((sec[10] & 0x0F) << 8) | sec[11])
+    out = {}
+    while i + 5 <= end:
+        out[((sec[i + 1] & 0x1F) << 8) | sec[i + 2]] = sec[i]
+        i += 5 + (((sec[i + 3] & 0x0F) << 8) | sec[i + 4])
+    return out
+
+
+def pid_pts(data, pid):
+    """PTS list of one PID (independent of scan(), which only knows VPID/APID)."""
+    out = []
+    for o in range(0, len(data), 188):
+        p = data[o:o + 188]
+        if (((p[1] & 0x1F) << 8) | p[2]) != pid or not (p[1] & 0x40):
+            continue
+        i = 5 + p[4] if (p[3] >> 4) & 2 else 4
+        if p[i:i + 3] == b"\x00\x00\x01" and p[i + 7] >> 6 in (2, 3):
+            out.append(dec_ts(p[i + 9:i + 14]))
+    return out
+
+
+def synth_audio_clip(base=90000):
+    """Audio-only TS: just APID, PES with PTS every FRAME//2, PCR in the AF of each PES start packet."""
+    out, cc = [], 0
+    for i in range(FRAMES * 2):
+        pts = (base + i * (FRAME // 2)) & MASK33
+        pcr = (pts - FRAME // 4) & MASK33
+        pcr_field = ((pcr << 15) | (0x3F << 9)).to_bytes(6, "big")
+        pes = b"\x00\x00\x01\xc0\x00\x00\x80\x80\x05" + enc_ts(2, pts)
+        out.append(make_pkt(APID, cc, pes, True, b"\x10" + pcr_field))
+        cc = (cc + 1) & 15
+        out.append(make_pkt(APID, cc, b"\x22" * 184))
+        cc = (cc + 1) & 15
+    return b"".join(out)
+
+
+class TestAudioOnlyContinuity(PanelCase):
+    overrides = {"pace": True}
+
+    def test_audio_only_synth_clip_is_continuous_across_loops(self):
+        src = synth_audio_clip()
+        clip = fakepanel.Clip(src, 1.0, [(src, 1.0)])
+        self.assertTrue(clip.plan.active)
+        self.assertEqual(clip.plan.dur90k, FRAMES * FRAME)  # from the audio PTS span (+ one step)
+        saved = dict(self.panel.clips)
+        try:
+            for k in self.panel.clips:
+                self.panel.clips[k] = clip
+            self.admin({"faults": {"close_every": 1.5}})
+            st, data = read_until_close("127.0.0.1", self.port, "/live/test/test/13.ts")
+        finally:
+            self.panel.clips.update(saved)
+        self.assertEqual(st, 200)
+        pcrs, pts, dts, ccs = scan(data)
+        self.assertEqual(pts[VPID], [])
+        self.assertGreater(len(pts[APID]), 2 * FRAMES * 2)
+        for a, b in zip(pts[APID], pts[APID][1:]):
+            self.assertEqual((b - a) & MASK33, FRAME // 2)
+        for a, b in zip(pcrs, pcrs[1:]):
+            self.assertEqual((b[0] - a[0]) & MASK33, FRAME // 2)
+        exp = None
+        for cc, payload in ccs[APID]:
+            if exp is not None:
+                self.assertEqual(cc, exp)
+            exp = (cc + 1) & 15
+
+
+class TestRadioChannel(unittest.TestCase):
+    """Channel 13 with the null fallback, and with real ffmpeg media (skipped without ffmpeg)."""
+
+    def make(self, **kw):
+        import copy
+        cfg = copy.deepcopy(fakepanel.DEFAULTS)
+        cfg["pace"] = False
+        panel = fakepanel.Panel(cfg, quiet=True, **kw)
+        main, lb = fakepanel.start_servers(panel, "127.0.0.1", 0)
+        self.addCleanup(fakepanel.stop_servers, panel, main, lb)
+        return panel
+
+    def test_fallback_serves_ch13(self):
+        panel = self.make(use_ffmpeg=False)
+        c = http.client.HTTPConnection("127.0.0.1", panel.main_port, timeout=5)
+        c.request("GET", "/live/test/test/13.ts")
+        r = c.getresponse()
+        self.assertEqual(r.status, 200)
+        d = r.read(1880)
+        c.close()
+        self.assertEqual(len(d) % 188, 0)
+        self.assertTrue(all(d[o] == 0x47 for o in range(0, len(d), 188)))
+        c = http.client.HTTPConnection("127.0.0.1", panel.main_port, timeout=5)
+        c.request("GET", "/player_api.php?username=test&password=test&action=get_live_streams&category_id=4")
+        self.assertEqual([x["name"] for x in json.loads(c.getresponse().read())], ["Radio Test"])
+        c.close()
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg not on PATH")
+    def test_real_aac_only_clip(self):
+        tmp = tempfile.mkdtemp(prefix="fakepanel-media-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        panel = self.make(media_dir=tmp, use_ffmpeg=True)
+        self.assertTrue(os.path.exists(os.path.join(tmp, "aac_only_25.ts")))
+        clip = panel.clips["radio"]
+        self.assertIsNot(clip, panel.clips["std"])
+        self.assertTrue(clip.plan.active)
+        self.assertGreater(clip.plan.dur90k, 9 * 90000)
+        self.assertLess(clip.plan.dur90k, 11 * 90000)
+        c = http.client.HTTPConnection("127.0.0.1", panel.main_port, timeout=10)
+        c.request("GET", "/live/test/test/13.ts")
+        r = c.getresponse()
+        self.assertEqual(r.status, 200)
+        data = b""
+        while len(data) < len(clip.data) * 2.5:  # unpaced: about 2.5 loops, quickly
+            d = r.read(65536)
+            if not d:
+                break
+            data += d
+        c.close()
+        data = data[:len(data) // 188 * 188]
+        self.assertTrue(all(data[o] == 0x47 for o in range(0, len(data), 188)))
+        streams = parse_psi(data)
+        self.assertEqual(list(streams.values()), [0x0F], f"expected a single ADTS-AAC stream, got {streams}")
+        ser = pid_pts(data, next(iter(streams)))
+        self.assertGreater(len(ser), 60)  # ~32 PES per 10 s loop
+        steps = [(b - a) & MASK33 for a, b in zip(ser, ser[1:])]
+        self.assertGreater(min(steps), 0)
+        # no jump bigger than ordinary PES spacing at either loop boundary (ffmpeg packs several AAC frames per PES)
+        self.assertLess(max(steps), 34000,  # 17 AAC frames, the largest ffmpeg PES
+                         f"PTS discontinuity across a loop: {sorted(steps)[-3:]}")
 
 
 if __name__ == "__main__":

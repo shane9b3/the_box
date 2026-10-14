@@ -15,6 +15,7 @@ import math
 import os
 import re
 import secrets
+import select
 import shutil
 import socket
 import subprocess
@@ -209,19 +210,25 @@ def build_media(media_dir, use_ffmpeg, log):
     ff = shutil.which("ffmpeg") if use_ffmpeg else None
     if not ff:
         log("media: ffmpeg not used; serving null-packet fallback TS (no decodable video)")
-        return {k: fb_clip for k in ("std", "mp2", "50fps")}, fb_data * 3, "video/mp2t"
+        return {k: fb_clip for k in ("std", "mp2", "50fps", "radio")}, fb_data * 3, "video/mp2t"
     os.makedirs(os.path.join(media_dir, "hls"), exist_ok=True)
-    spec = {"std": ("h264_aac_25", 25, "aac"), "mp2": ("h264_mp2_25", 25, "mp2"), "50fps": ("h264_aac_50", 50, "aac")}
+    spec = {"std": ("h264_aac_25", 25, "aac"), "mp2": ("h264_mp2_25", 25, "mp2"), "50fps": ("h264_aac_50", 50, "aac"),
+            "radio": ("aac_only_25", 0, "aac")}  # fps 0 = audio only (no video PID)
     clips = {}
     for key, (name, fps, ac) in spec.items():
         path = os.path.join(media_dir, name + ".ts")
         if not os.path.exists(path):
             log(f"media: generating {path}")
-            r = _run([ff, "-y", "-v", "error", "-f", "lavfi", "-i", f"testsrc2=size=1280x720:rate={fps}",
-                      "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "10",
-                      "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-g", str(fps * 2),
-                      "-keyint_min", str(fps * 2), "-sc_threshold", "0", "-b:v", "2M", "-maxrate", "2M", "-bufsize", "2M",
-                      "-c:a", "aac" if ac == "aac" else "mp2", "-b:a", "128k", "-f", "mpegts", path])
+            if fps:
+                cmd = [ff, "-y", "-v", "error", "-f", "lavfi", "-i", f"testsrc2=size=1280x720:rate={fps}",
+                       "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "10",
+                       "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-g", str(fps * 2),
+                       "-keyint_min", str(fps * 2), "-sc_threshold", "0", "-b:v", "2M", "-maxrate", "2M", "-bufsize", "2M",
+                       "-c:a", "aac" if ac == "aac" else "mp2", "-b:a", "128k", "-f", "mpegts", path]
+            else:  # audio only: no video stream, no video PID in the PMT
+                cmd = [ff, "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "10",
+                       "-vn", "-c:a", "aac", "-b:a", "128k", "-f", "mpegts", path]
+            r = _run(cmd)
             if r.returncode:
                 log("media: ffmpeg failed: " + r.stderr.decode(errors="replace")[-300:])
                 clips[key] = fb_clip
@@ -340,7 +347,7 @@ class Panel:
     def reset_stats(self):
         self.stats = {"requests": 0, "stream_opens": 0, "rejections": {}, "range_requests_seen": 0,
                       "range_requests": [], "auth_failures": 0, "redirects": 0, "token_expired": 0,
-                      "forced_closes": 0, "stalls": 0, "timeshift_tz_warnings": 0, "request_log": []}
+                      "forced_closes": 0, "client_eof": 0, "stalls": 0, "timeshift_tz_warnings": 0, "request_log": []}
         self.registry.max_open_seen = 0
 
     def tz(self):
@@ -452,6 +459,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def route(self):
         self._status, self._bytes, self._notes, self._user = 0, 0, [], None
+        self._end, self._log_entry = None, None
         self.panel.bump("requests")
         u = urllib.parse.urlsplit(self.path)
         self.path_only = urllib.parse.unquote(u.path)
@@ -460,13 +468,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.dispatch()
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, socket.timeout):
             self._notes.append("client-gone")
+            self.mark_end("client_eof" if self._log_entry is not None else "error")
         except Exception:
             traceback.print_exc()
+            self.mark_end("error")
             try:
                 self.send(500, b"internal error", "text/plain")
             except Exception:
                 pass
         finally:
+            if self._log_entry is not None:
+                with self.panel.lock:
+                    self._log_entry["end_reason"] = self._end or "server_close"
             self.access_log()
 
     def access_log(self):
@@ -512,8 +525,41 @@ class Handler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(data)
         self._bytes += len(data)
 
+    def mark_end(self, reason):
+        """Record why the stream ended (first reason wins); client_eof also bumps the counter."""
+        if self._end is None:
+            self._end = reason
+            if reason == "client_eof":
+                self._notes.append("CLIENT-EOF")
+                self.panel.bump("client_eof")
+                self.panel.log(f"CLIENT-EOF {self.path_only} (peer closed the socket)")
+
+    def peer_closed(self, timeout=0.0):
+        """Wait up to `timeout` s for the socket to become readable; True (and marked) if the peer closed it.
+
+        Readable-with-data (a client that sent extra bytes) is not EOF; then the remaining time is slept so
+        callers never busy-loop. A client that stays connected and sends nothing stays unreadable."""
+        sock = self.connection
+        try:
+            r, _, x = select.select([sock], [], [sock], max(0.0, timeout))
+            if r or x:
+                try:
+                    if sock.recv(1, socket.MSG_PEEK) == b"":
+                        self.mark_end("client_eof")
+                        return True
+                except (BlockingIOError, InterruptedError):
+                    pass
+                except OSError:
+                    self.mark_end("client_eof")
+                    return True
+                time.sleep(min(timeout, 0.02))  # data pending but not EOF
+        except (OSError, ValueError):
+            self.mark_end("client_eof")
+            return True
+        return False
+
     def nap(self, secs, slot=None):
-        """Sleep in small steps; False if the server is stopping or the slot was kicked."""
+        """Sleep in small steps; False if the server is stopping, the slot was kicked or the client closed."""
         end = time.monotonic() + secs
         while True:
             left = end - time.monotonic()
@@ -521,7 +567,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return False
             if left <= 0:
                 return True
-            time.sleep(min(left, 0.1))
+            if self.peer_closed(min(left, 0.05)):
+                return False
 
     def reject(self, status, reason, body=b"", ctype="text/plain"):
         self.panel.bump("rejections", reason)
@@ -743,9 +790,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def stream_request(self, kind, user, pw, ident, ext, start=None, dur=None):
         p, c = self.panel, self.panel.cfg
         self._user = user
+        entry = {"path": self.path_only, "ua": self.headers.get("User-Agent", ""), "token_present": bool(self.q.get("token")),
+                 "end_reason": None}
         with p.lock:  # `requests` stays the counter; per-request detail is `request_log` (last 200 stream requests)
-            p.stats["request_log"] = (p.stats["request_log"] + [
-                {"path": self.path_only, "ua": self.headers.get("User-Agent", ""), "token_present": bool(self.q.get("token"))}])[-200:]
+            p.stats["request_log"] = (p.stats["request_log"] + [entry])[-200:]
+        self._log_entry = entry
         ext = (ext or "ts").lower()
         if c["auth_mode"] in ("401", "403", "513"):
             return self.reject(int(c["auth_mode"]), "auth_mode")
@@ -879,6 +928,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pos = start
         while pos <= end:
             e = min(pos + step, end + 1)
+            if self.peer_closed():
+                break
             self.out(data[pos:e])
             pos = e
             if slow and not self.nap(step / slow):
@@ -911,10 +962,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         t_pace = t0  # pacing clock; shifted forward by a stall_after window so playback resumes at real-time speed
         try:
             while not p.stopping.is_set() and not slot.killed:
+                if self.peer_closed():
+                    break
                 now = time.monotonic()
                 el = now - t0
                 if close_every and el >= close_every:
                     p.bump("forced_closes")
+                    self.mark_end("forced_close")
                     self._notes.append(f"FORCED-CLOSE after {close_every}s")
                     try:
                         self.connection.shutdown(socket.SHUT_RDWR)
@@ -938,9 +992,16 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 else:
                     st.pos = e
                 if pace:
-                    wait = (sent - burst) / rate - (time.monotonic() - t_pace)
-                    if wait > 0:
-                        time.sleep(min(wait, 0.1))
+                    eof = False
+                    while not eof:  # sleep out the whole pacing debt, polling the socket for EOF every <= 50 ms
+                        wait = (sent - burst) / rate - (time.monotonic() - t_pace)
+                        if wait <= 0 or p.stopping.is_set() or slot.killed:
+                            break
+                        eof = self.peer_closed(min(wait, 0.05))
+                    if eof:
+                        break
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+            self.mark_end("client_eof")
         finally:
             p.live_pos[sid] = st
             self.close_connection = True

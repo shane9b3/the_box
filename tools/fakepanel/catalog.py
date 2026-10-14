@@ -10,11 +10,11 @@ EPG_BACK_DAYS = 3
 EPG_FWD_DAYS = 3
 SHOWS = ["Morning News", "Quiz Time", "Documentary", "Match Day", "Late Movie", "Cooking", "Weather", "Talk Show"]
 
-LIVE_CATS = [(1, "News"), (2, "Sports"), (3, "Movies")]
+LIVE_CATS = [(1, "News"), (2, "Sports"), (3, "Movies"), (4, "Radio")]
 VOD_CATS = [(10, "Action"), (11, "Comedy")]
 SERIES_CATS = [(20, "Drama"), (21, "Sitcom")]
 
-# media: std = H.264+AAC 25fps, mp2 = H.264+MP2 audio, 50fps = H.264+AAC 50fps
+# media: std = H.264+AAC 25fps, mp2 = H.264+MP2 audio, 50fps = H.264+AAC 50fps, radio = AAC audio only (no video PID)
 _CH = [
     (1, "News One", 1, True, "xc", "std"),
     (2, "Sports Arena", 2, True, "default", "std"),
@@ -28,6 +28,7 @@ _CH = [
     (10, "Music Mix", 3, False, "", "std"),
     (11, "World Report", 1, False, "", "std"),
     (12, "Late Cinema", 3, False, "", "mp2"),
+    (13, "Radio Test", 4, False, "", "radio"),
 ]
 CHANNELS = [dict(id=i, name=n, cat=c, archive=a, catchup=cu, media=m, tvg_id=f"ch{i}.test")
             for i, n, c, a, cu, m in _CH]
@@ -233,6 +234,8 @@ def m3u(cfg, base, host, port, ext, plus=True):
     L = [f'#EXTM3U x-tvg-url="{base}/xmltv.php?username={u}&password={p}"']
     for c in CHANNELS:
         attrs = f'tvg-id="{c["tvg_id"]}" tvg-name="{c["name"]}" tvg-logo="{base}/logo/{c["id"]}.png" group-title="{dict(LIVE_CATS)[c["cat"]]}"'
+        if c["media"] == "radio":
+            attrs += ' radio="true"'  # EntryClassifier: Attr.truthy(radio) -> RADIO
         if plus and c["catchup"]:
             cu = c["catchup"]
             attrs += f' catchup="{cu}" catchup-days="{ARCHIVE_DAYS}"'
