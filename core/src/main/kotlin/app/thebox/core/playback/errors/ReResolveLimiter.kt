@@ -1,10 +1,44 @@
 package app.thebox.core.playback.errors
 
-// Commit-0 stub (docs/design/m2-playback-core.md §1.4/§1.5). Owner: WP-A. Replace the TODO bodies; keep the public names.
 import app.thebox.core.playback.ReResolveLimiter
 import app.thebox.core.refresh.ChannelIdentity
 
-/** 2 per 60 s per channel, sliding window (§4.5). */
-class ReResolveLimiterImpl : ReResolveLimiter {
-    override fun tryAcquire(key: ChannelIdentity?, nowMs: Long): Boolean = TODO("WP-A")
+/**
+ * 2 per 60 s per channel, sliding window (§4.5). Survives re-tunes of the same channel. A null key (direct URLs) shares
+ * one bucket. Thread-safe.
+ *
+ * Beyond the contract: [wouldAllow] peeks without consuming (to fill `LadderContext.reResolveAllowed` before the
+ * ladder decides), and [reset] clears a channel ("Retry" from the error card, §4.3).
+ */
+class ReResolveLimiterImpl(
+    private val maxPerWindow: Int = ErrorConstants.RE_RESOLVE_MAX_PER_WINDOW,
+    private val windowMs: Long = ErrorConstants.RE_RESOLVE_WINDOW_MS,
+) : ReResolveLimiter {
+    private val stamps = HashMap<ChannelIdentity?, ArrayDeque<Long>>()
+
+    @Synchronized
+    override fun tryAcquire(key: ChannelIdentity?, nowMs: Long): Boolean {
+        val q = stamps.getOrPut(key) { ArrayDeque(maxPerWindow) }
+        prune(q, nowMs)
+        if (q.size >= maxPerWindow) return false
+        q.addLast(nowMs)
+        return true
+    }
+
+    @Synchronized
+    fun wouldAllow(key: ChannelIdentity?, nowMs: Long): Boolean {
+        val q = stamps[key] ?: return true
+        prune(q, nowMs)
+        if (q.isEmpty()) stamps.remove(key)
+        return q.size < maxPerWindow
+    }
+
+    @Synchronized
+    fun reset(key: ChannelIdentity?) {
+        stamps.remove(key)
+    }
+
+    private fun prune(q: ArrayDeque<Long>, nowMs: Long) {
+        while (q.isNotEmpty() && nowMs - q.first() >= windowMs) q.removeFirst()
+    }
 }

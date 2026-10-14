@@ -1,0 +1,220 @@
+# Golden table for ErrorLadderImpl (docs/design/m2-playback-core.md §4.3). One line per (signal, context) case.
+# Columns (';'-separated): rule ; signal ; context overrides ; expected decision ; row id reported by ErrorLadderImpl.trace
+# rule     = the design row (L1..L44) or global rule (G-gate, G-timeout, G-limiter) the case exercises. Every L1..L44 must appear.
+#            L0 (stale tuneId) is the controller's filter and never reaches the ladder.
+# signal   = Http <status> <origin> | Network <kind> before|after | ReconnectExhausted <status|-> bytes|nobytes | Html |
+#            TinyBody <n> | FormatIsHls | FormatUnrecognized | Pcr <deltaMs> | BehindLive | Parsing media|manifest |
+#            DecoderInit|DecodingFailed|FormatUnsupported video|audio <mime> [decoder] | AudioTrackInit encoded|pcm <ch> <mime> |
+#            AudioWrite | ResourcesReclaimed | Stuck <type> | Stall <StallKind> | LiveEnded | Credentials transient|permanent |
+#            LocalLimit <active> <max> | ChannelMissing | Unknown <code>
+# context  = key=value overrides of the default context (ErrorLadderTableTest.ctx): ms (since tune), firstFrame, live, archive,
+#            format, xtream, baseCount, output, reResolveAllowed, attempts, tunneling, passthrough, passthroughMime, decoderMode,
+#            swVideo, uaFallback, backup, compat, active, max, account, prior (feed the same signal N times first), and every
+#            LadderCounters field (uaTried = uaFallbackTried). ffmpeg supports audio/ac3, audio/eac3, audio/mpeg-L2. Jitter is off.
+# expected = ErrorLadderImpl.describe(decision): Fail(CODE) for failures, the data-class toString otherwise.
+#
+# ---- L1 401
+L1;Http 401 PROGRESSIVE;;ReResolve(delayMs=0, refreshAccount=true, rotateBase=false);L1
+L1;Http 401 PROGRESSIVE;reResolveAllowed=false;Fail(AUTH_REJECTED);L1
+L1;Http 401 PROGRESSIVE;forbiddenSteps=1;Fail(AUTH_REJECTED);L1b
+L1;Http 401 PROGRESSIVE;forbiddenSteps=1,account=ACTIVE;Fail(FORBIDDEN);L1b
+L1;Http 401 PROGRESSIVE;xtream=false;Fail(AUTH_REJECTED);L1b
+L1;ReconnectExhausted 401 bytes;;ReResolve(delayMs=0, refreshAccount=true, rotateBase=false);L1
+# ---- L2-L6 connection limits in the zap window / before first media
+L2;Http 403 PROGRESSIVE;;RetrySame(delayMs=1500);L2
+L2;Http 458 PROGRESSIVE;;RetrySame(delayMs=1500);L2
+L2;Http 509 PROGRESSIVE;;RetrySame(delayMs=1500);L2
+L2;Http 503 HLS_MANIFEST;;RetrySame(delayMs=1500);L2
+L2;ReconnectExhausted 403 bytes;;RetrySame(delayMs=1500);L2
+L2;Http 403 PROGRESSIVE;firstFrame=true,ms=4999;RetrySame(delayMs=1500);L2
+L2;Http 403 PROGRESSIVE;firstFrame=false,ms=9000;RetrySame(delayMs=1500);L2
+L3;Http 403 PROGRESSIVE;limitSteps=1;ReResolve(delayMs=1500, refreshAccount=true, rotateBase=false);L3
+L3;Http 509 PROGRESSIVE;limitSteps=1,firstFrame=true,ms=8000;ReResolve(delayMs=1500, refreshAccount=true, rotateBase=false);L3
+G-limiter;Http 403 PROGRESSIVE;limitSteps=1,reResolveAllowed=false;RetrySame(delayMs=1500);L3
+L4;Http 509 PROGRESSIVE;limitSteps=2,account=ACTIVE,active=0,max=1;Fail(CONNECTION_LIMIT);L4
+L4;Http 458 PROGRESSIVE;limitSteps=2,account=ACTIVE,active=0,max=2;Fail(CONNECTION_LIMIT);L4
+L4;Http 403 PROGRESSIVE;limitSteps=2,account=ACTIVE,active=1,max=1;Fail(CONNECTION_LIMIT);L4
+L4;Http 403 PROGRESSIVE;limitSteps=2;Fail(CONNECTION_LIMIT);L4
+L4;Http 503 PROGRESSIVE;limitSteps=2;Fail(CONNECTION_LIMIT);L4
+L5;Http 403 PROGRESSIVE;limitSteps=2,account=ACTIVE,active=0,max=1,uaFallback=true;UserAgentFallback;L5
+L6;Http 403 PROGRESSIVE;limitSteps=2,account=ACTIVE,active=0,max=1,uaFallback=true,uaTried=true;Fail(FORBIDDEN);L6
+L6;Http 403 PROGRESSIVE;limitSteps=2,account=ACTIVE,active=0,max=1;Fail(FORBIDDEN);L6
+L6;Http 403 PROGRESSIVE;limitSteps=2,account=UNKNOWN,active=0,max=1,uaFallback=true;Fail(FORBIDDEN);L6
+# ---- L7 mid-playback 403/458/509 (token expiry), then the L4/L6 rules
+L7;Http 403 PROGRESSIVE;firstFrame=true,ms=60000;ReResolve(delayMs=0, refreshAccount=true, rotateBase=false);L7
+L7;Http 458 PROGRESSIVE;firstFrame=true,ms=60000;ReResolve(delayMs=0, refreshAccount=true, rotateBase=false);L7
+L7;ReconnectExhausted 403 bytes;firstFrame=true,ms=60000;ReResolve(delayMs=0, refreshAccount=true, rotateBase=false);L7
+G-limiter;Http 403 PROGRESSIVE;firstFrame=true,ms=60000,reResolveAllowed=false,account=ACTIVE,active=0,max=1;Fail(FORBIDDEN);L7b
+G-limiter;Http 403 PROGRESSIVE;firstFrame=true,ms=60000,reResolveAllowed=false;Fail(CONNECTION_LIMIT);L7b
+L7;Http 509 PROGRESSIVE;firstFrame=true,ms=60000,forbiddenSteps=1,account=ACTIVE,active=0,max=1;Fail(CONNECTION_LIMIT);L7b
+L7;Http 403 PROGRESSIVE;firstFrame=true,ms=60000,forbiddenSteps=1,account=ACTIVE,active=0,max=1;Fail(FORBIDDEN);L7b
+# ---- L8 503 mid-playback = 5xx
+L8;Http 503 PROGRESSIVE;firstFrame=true,ms=60000;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=false);L8
+L8;Http 503 PROGRESSIVE;limitSteps=2,account=ACTIVE,active=0,max=2;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=false);L8
+# ---- L9/L10 405/406
+L9;Http 405 PROGRESSIVE;;FlipXtreamOutput(to=HLS);L9
+L9;Http 406 HLS_MANIFEST;output=HLS,format=HLS;FlipXtreamOutput(to=TS);L9
+L10;Http 405 PROGRESSIVE;formatFlips=1;Fail(FORMAT_REFUSED);L10
+L10;Http 406 PROGRESSIVE;xtream=false,output=null;Fail(FORMAT_REFUSED);L10
+L10;Http 405 PROGRESSIVE;output=null;Fail(FORMAT_REFUSED);L10
+# ---- L11-L14 404/410
+L11;Http 404 PROGRESSIVE;backup=true;TryBackupSource;L11
+L11;Http 410 HLS_MANIFEST;backup=true,format=HLS;TryBackupSource;L11
+L12;Http 404 HLS_SEGMENT;format=HLS,firstFrame=true,ms=60000;ReResolve(delayMs=0, refreshAccount=false, rotateBase=false);L12
+L12;Http 404 HLS_SEGMENT;format=HLS,firstFrame=true,ms=60000,transientRetries=1;Fail(CHANNEL_OFFLINE);L14
+G-limiter;Http 404 HLS_SEGMENT;format=HLS,firstFrame=true,ms=60000,reResolveAllowed=false;Fail(CHANNEL_OFFLINE);L12
+L13;Http 404 ARCHIVE;archive=true,live=false;Fail(CATCHUP_NOT_IN_ARCHIVE);L13
+L13;Http 410 ARCHIVE;archive=true,live=false,backup=true;Fail(CATCHUP_NOT_IN_ARCHIVE);L13
+L14;Http 404 PROGRESSIVE;;Fail(CHANNEL_OFFLINE);L14
+L14;Http 410 HLS_MANIFEST;format=HLS;Fail(CHANNEL_OFFLINE);L14
+L14;ReconnectExhausted 404 bytes;firstFrame=true,ms=60000;Fail(CHANNEL_OFFLINE);L14
+# ---- L15 5xx/408/429
+L15;Http 500 PROGRESSIVE;;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=false);L15
+L15;Http 502 PROGRESSIVE;baseCount=2;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=true);L15
+L15;Http 502 PROGRESSIVE;baseCount=2,baseRotations=1;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=false);L15
+L15;Http 502 PROGRESSIVE;baseCount=2,firstFrame=true,ms=60000;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=false);L15
+L15;Http 429 HLS_MANIFEST;transientRetries=1;ReResolve(delayMs=2000, refreshAccount=false, rotateBase=false);L15
+L15;Http 408 PROGRESSIVE;transientRetries=2;ReResolve(delayMs=4000, refreshAccount=false, rotateBase=false);L15
+L15;Http 504 PROGRESSIVE;transientRetries=4;ReResolve(delayMs=4000, refreshAccount=false, rotateBase=false);L15
+L15;Http 500 PROGRESSIVE;transientRetries=5;Fail(SERVER_ERROR);L15
+L15;Http 500 PROGRESSIVE;attempts=3,transientRetries=3;Fail(SERVER_ERROR);L15
+G-limiter;Http 500 PROGRESSIVE;reResolveAllowed=false;RetrySame(delayMs=1000);L15
+L15;Http 400 PROGRESSIVE;;Fail(FORBIDDEN);LHX
+# ---- L16-L18 network before the first byte
+L16;Network DNS before;baseCount=3;ReResolve(delayMs=0, refreshAccount=false, rotateBase=true);L16
+L16;Network DNS before;baseCount=3,baseRotations=1;ReResolve(delayMs=0, refreshAccount=false, rotateBase=true);L16
+L16;Network DNS before;baseCount=3,baseRotations=2;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=false);L16b
+L16;Network DNS before;;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=false);L16b
+L16;Network DNS before;transientRetries=1;Fail(DNS_FAILURE);L16c
+G-limiter;Network DNS before;reResolveAllowed=false;RetrySame(delayMs=1000);L16b
+L17;Network CONNECT before;;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=false);L17
+L17;Network RESET before;baseCount=2;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=true);L17
+L17;Network TIMEOUT before;baseCount=2,firstFrame=true,ms=60000;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=true);L17
+L17;Network CONNECT before;transientRetries=5;Fail(CONNECT_FAILED);L17
+L17;Network TIMEOUT before;transientRetries=5;Fail(NO_DATA_TIMEOUT);L17
+L18;Network TLS before;;Fail(TLS_FAILURE);L18
+L18;Network TLS after;firstFrame=true,ms=60000;Fail(TLS_FAILURE);L18
+# ---- L19/L20 reconnects and no-bytes stalls
+L19;ReconnectExhausted - bytes;firstFrame=true,ms=60000;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=false);L19
+L19;ReconnectExhausted 500 bytes;firstFrame=true,ms=60000;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=false);L19
+L19;Network RESET after;firstFrame=true,ms=60000,transientRetries=1;ReResolve(delayMs=2000, refreshAccount=false, rotateBase=false);L19
+L19;Network TIMEOUT after;firstFrame=true,ms=60000,transientRetries=3;ReResolve(delayMs=4000, refreshAccount=false, rotateBase=false);L19
+L19;Stall NO_BYTES;firstFrame=true,ms=60000;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=false);L19
+L19;Stall HLS_NO_PROGRESS;firstFrame=true,ms=60000,format=HLS;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=false);L19
+L19;ReconnectExhausted - bytes;firstFrame=true,ms=60000,attempts=-1,transientRetries=40;ReResolve(delayMs=5000, refreshAccount=false, rotateBase=false);L19
+G-limiter;ReconnectExhausted - bytes;firstFrame=true,ms=60000,reResolveAllowed=false;RetrySame(delayMs=1000);L19
+L20;ReconnectExhausted - bytes;firstFrame=true,ms=60000,transientRetries=5;Fail(STREAM_INTERRUPTED);L20
+L20;ReconnectExhausted - bytes;firstFrame=true,ms=60000,attempts=3,transientRetries=3;Fail(STREAM_INTERRUPTED);L20
+L20;ReconnectExhausted - nobytes;ms=3000,transientRetries=5;Fail(NO_DATA_TIMEOUT);L20
+L20;Stall NO_BYTES;ms=3000,transientRetries=5;Fail(NO_DATA_TIMEOUT);L20
+# ---- L21/L22 bodies that are not a stream
+L21;Html;;ReResolve(delayMs=0, refreshAccount=true, rotateBase=false);L21
+L21;Html;forbiddenSteps=1;Fail(WEB_PAGE_INSTEAD);L21b
+L21;Html;xtream=false;Fail(WEB_PAGE_INSTEAD);L21b
+L21;Html;xtream=false,account=ACTIVE;ReResolve(delayMs=0, refreshAccount=true, rotateBase=false);L21
+L21;Html;account=EXPIRED;Fail(ACCOUNT_EXPIRED);G1
+G-limiter;Html;reResolveAllowed=false;Fail(WEB_PAGE_INSTEAD);L21
+L22a;TinyBody 0;;RetrySame(delayMs=1500);L22a/L2
+L22a;TinyBody 0;limitSteps=1;ReResolve(delayMs=1500, refreshAccount=true, rotateBase=false);L22a/L3
+L22a;TinyBody 0;limitSteps=2,account=ACTIVE,active=0,max=1;Fail(CONNECTION_LIMIT);L22a/L4
+L22;TinyBody 200;;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=false);L22
+L22;TinyBody 0;firstFrame=true,ms=60000;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=false);L22
+L22;TinyBody 200;transientRetries=1;Fail(EMPTY_RESPONSE);L22b
+G-limiter;TinyBody 200;reResolveAllowed=false;RetrySame(delayMs=1000);L22
+# ---- L23/L24 sniffed format
+L23;FormatIsHls;;SwitchSourceType(to=HLS);L23
+L23;FormatIsHls;sourceTypeSwitches=1;Fail(UNSUPPORTED_SOURCE);L23b
+L24;FormatUnrecognized;;SwitchSourceType(to=PROGRESSIVE_OTHER);L24
+L24;FormatUnrecognized;sourceTypeSwitches=1;Fail(UNSUPPORTED_SOURCE);L24b
+# ---- L25/L26 timeline
+L25;Pcr 10000;firstFrame=true,ms=60000;Reprepare(raiseTsCompat=false);L25
+L25;Pcr -3600000;firstFrame=true,ms=60000,pcrResets=2;Reprepare(raiseTsCompat=false);L25
+L25;Pcr 10000;firstFrame=true,ms=60000,pcrResets=3;Reprepare(raiseTsCompat=false);L27a
+L25;Pcr 10000;firstFrame=true,ms=60000,pcrResets=3,stallRecoveries=1;Reprepare(raiseTsCompat=true);L27b
+L26;BehindLive;firstFrame=true,ms=60000;SeekToLiveAndPrepare;L26
+L26;BehindLive;firstFrame=true,ms=60000,behindLiveWindow=2;SeekToLiveAndPrepare;L26
+L26;BehindLive;firstFrame=true,ms=60000,behindLiveWindow=3;ReResolve(delayMs=0, refreshAccount=false, rotateBase=false);L26b
+L26;BehindLive;firstFrame=true,ms=60000,behindLiveWindow=4;Fail(STREAM_INTERRUPTED);L26c
+G-limiter;BehindLive;firstFrame=true,ms=60000,behindLiveWindow=3,reResolveAllowed=false;Fail(STREAM_INTERRUPTED);L26b
+# ---- L27 stuck pipelines
+L27;Stall FROZEN_VIDEO;firstFrame=true,ms=60000,tunneling=true;DisableTunnelingAndReprepare;L27
+L27;Stall DECODER_STUCK;firstFrame=true,ms=60000,tunneling=true;DisableTunnelingAndReprepare;L27
+L27;Stuck 1;firstFrame=true,ms=60000,tunneling=true;DisableTunnelingAndReprepare;L27
+L27a;Parsing media;firstFrame=true,ms=60000,tunneling=true;Reprepare(raiseTsCompat=false);L27a
+L27a;Stall DECODER_STUCK;firstFrame=true,ms=60000;Reprepare(raiseTsCompat=false);L27a
+L27a;Stall POSITION_STUCK;firstFrame=true,ms=60000;Reprepare(raiseTsCompat=false);L27a
+L27a;Stuck 0;firstFrame=true,ms=60000;Reprepare(raiseTsCompat=false);L27a
+L27a;LiveEnded;firstFrame=true,ms=60000;Reprepare(raiseTsCompat=false);L27a
+L27a;Parsing manifest;firstFrame=true,ms=60000,format=HLS;Reprepare(raiseTsCompat=false);L27a
+L27b;Stall DECODER_STUCK;firstFrame=true,ms=60000,stallRecoveries=1;Reprepare(raiseTsCompat=true);L27b
+L27b;Stall FROZEN_VIDEO;firstFrame=true,ms=60000,stallRecoveries=1;Reprepare(raiseTsCompat=true);L27b
+L27c;Stall DECODER_STUCK;firstFrame=true,ms=60000,stallRecoveries=1,compat=1;Fail(STREAM_UNDECODABLE);L27c
+L27c;Stall FROZEN_VIDEO;firstFrame=true,ms=60000,stallRecoveries=1,format=HLS;Fail(STREAM_UNDECODABLE);L27c
+L27c;Stall DECODER_STUCK;firstFrame=true,ms=60000,stallRecoveries=2;Fail(STREAM_UNDECODABLE);L27c
+L27c;LiveEnded;firstFrame=true,ms=60000,stallRecoveries=2,format=HLS;Fail(STREAM_INTERRUPTED);L27c
+# ---- L28-L30 video decoders
+L28;DecoderInit video video/hevc c2.hevc.decoder;tunneling=true;DisableTunnelingAndReprepare;L28
+L28;DecodingFailed video video/avc;tunneling=true;DisableTunnelingAndReprepare;L28
+L29;DecoderInit video video/hevc c2.hevc.decoder;;SoftwareVideoAndReprepare;L29
+L29;FormatUnsupported video video/hevc;;SoftwareVideoAndReprepare;L29
+L29;DecodingFailed video video/avc;decoderSteps=1;SoftwareVideoAndReprepare;L29
+L29;DecoderInit video video/hevc c2.hevc.decoder;decoderMode=HARDWARE_ONLY;SoftwareVideoAndReprepare;L29
+L30;DecodingFailed video video/avc;;Reprepare(raiseTsCompat=false);L30a
+L30;DecoderInit video video/hevc c2.hevc.decoder;decoderSteps=1;Fail(CODEC_UNSUPPORTED);L30
+L30;DecoderInit video video/hevc c2.hevc.decoder;swVideo=false;Fail(CODEC_UNSUPPORTED);L30
+L30;FormatUnsupported video video/hevc;decoderMode=SOFTWARE_PREFERRED;Fail(CODEC_UNSUPPORTED);L30
+L30;DecodingFailed video video/avc;decoderSteps=2;Fail(CODEC_UNSUPPORTED);L30
+# ---- L31-L33 audio decoders and audio stalls
+L31;DecoderInit audio audio/eac3 c2.eac3;passthrough=true,passthroughMime=audio/eac3;DisablePassthroughAndReprepare(mimeType=audio/eac3);L31
+L31;Stall AUDIO_NOT_STARTED;firstFrame=true,ms=60000,passthrough=true,passthroughMime=audio/ac3;DisablePassthroughAndReprepare(mimeType=audio/ac3);L31
+L31;Stall AUDIO_UNDERRUN_STORM;firstFrame=true,ms=60000,passthrough=true,passthroughMime=audio/eac3;DisablePassthroughAndReprepare(mimeType=audio/eac3);L31
+L32;DecoderInit audio audio/mpeg-L2 c2.mp2;;SoftwareAudioAndReprepare(mimeType=audio/mpeg-L2);L32
+L32;DecoderInit audio audio/eac3 c2.eac3;passthrough=true,passthroughMime=audio/ac3;SoftwareAudioAndReprepare(mimeType=audio/eac3);L32
+L32;Stall AUDIO_NOT_STARTED;firstFrame=true,ms=60000,passthroughMime=audio/ac3;SoftwareAudioAndReprepare(mimeType=audio/ac3);L32
+L32;Stall AUDIO_NOT_STARTED;firstFrame=true,ms=60000,passthrough=true,passthroughMime=audio/ac3,audioSteps=1;SoftwareAudioAndReprepare(mimeType=audio/ac3);L32
+L33;FormatUnsupported audio audio/opus;;DropAudioAndReprepare(warning=AUDIO_UNSUPPORTED);L33
+L33;DecoderInit audio audio/mpeg-L2 c2.mp2;audioSteps=2;DropAudioAndReprepare(warning=AUDIO_UNSUPPORTED);L33
+L33;Stall AUDIO_NOT_STARTED;firstFrame=true,ms=60000;DropAudioAndReprepare(warning=NO_AUDIO);L33
+L33;DecodingFailed audio audio/mpeg-L2;audioSteps=2;DropAudioAndReprepare(warning=NO_AUDIO);L33
+L33;Stall AUDIO_NOT_STARTED;firstFrame=true,ms=60000,audioSteps=8;Fail(AUDIO_OUTPUT_FAILED);L33b
+# ---- L34-L37 audio output
+L34;AudioTrackInit encoded 6 audio/ac3;passthrough=true,passthroughMime=audio/ac3;DisablePassthroughAndReprepare(mimeType=audio/ac3);L34
+L35;AudioTrackInit pcm 6 audio/ac3;;StereoAndReprepare;L35
+L35;AudioTrackInit encoded 6 audio/ac3;audioSteps=1;StereoAndReprepare;L35
+L36;AudioTrackInit pcm 2 audio/mp4a-latm;;DropAudioAndReprepare(warning=NO_AUDIO);L36
+L36;AudioTrackInit pcm 6 audio/ac3;audioSteps=4;DropAudioAndReprepare(warning=NO_AUDIO);L36
+L36;AudioTrackInit pcm 2 audio/mp4a-latm;audioSteps=8;Fail(AUDIO_OUTPUT_FAILED);L36b
+L37;AudioWrite;firstFrame=true,ms=60000;Reprepare(raiseTsCompat=false);L37
+L37;AudioWrite;firstFrame=true,ms=60000,audioSteps=16;DropAudioAndReprepare(warning=NO_AUDIO);L36
+L37;AudioWrite;firstFrame=true,ms=60000,audioSteps=24;Fail(AUDIO_OUTPUT_FAILED);L36b
+# ---- L38-L44
+L38;ResourcesReclaimed;firstFrame=true,ms=60000;Reprepare(raiseTsCompat=false);L38
+L38;ResourcesReclaimed;firstFrame=true,ms=60000,prior=1;Fail(STREAM_UNDECODABLE);L38b
+L39;Credentials transient;;RetrySame(delayMs=1000);L39
+L39;Credentials transient;transientRetries=1;Fail(CREDENTIALS_UNAVAILABLE);L39b
+L40;Credentials permanent;;Fail(NEEDS_REAUTH);L40
+L41;LocalLimit 1 1;;Fail(CONNECTION_LIMIT_LOCAL);L41
+L42;ChannelMissing;;Fail(CHANNEL_NOT_FOUND);L42
+L43;Network CLEARTEXT before;;Fail(INTERNAL);L43
+L43;Network CLEARTEXT after;firstFrame=true,ms=60000;Fail(INTERNAL);L43
+L44;Unknown 1000;firstFrame=true,ms=60000;Reprepare(raiseTsCompat=false);L44
+L44;Unknown 1000;firstFrame=true,ms=60000,unknownRetries=1;Fail(INTERNAL);L44b
+# ---- global: account gate (reviewed 2026-10-13, S7)
+G-gate;Http 403 PROGRESSIVE;account=EXPIRED;Fail(ACCOUNT_EXPIRED);G1
+G-gate;Http 401 PROGRESSIVE;account=DISABLED;Fail(ACCOUNT_DISABLED);G1
+G-gate;Http 509 PROGRESSIVE;account=AUTH_FAILED;Fail(AUTH_REJECTED);G1
+G-gate;ReconnectExhausted 403 bytes;account=EXPIRED,firstFrame=true,ms=60000;Fail(ACCOUNT_EXPIRED);G1
+G-gate;Http 404 PROGRESSIVE;account=EXPIRED,limitSteps=2;Fail(ACCOUNT_EXPIRED);G1
+G-gate;Network CONNECT before;account=EXPIRED,forbiddenSteps=1;Fail(ACCOUNT_EXPIRED);G1
+G-gate;Http 404 PROGRESSIVE;account=EXPIRED;Fail(CHANNEL_OFFLINE);L14
+G-gate;Stall DECODER_STUCK;account=EXPIRED,forbiddenSteps=1,firstFrame=true,ms=60000;Reprepare(raiseTsCompat=false);L27a
+G-gate;Http 403 PROGRESSIVE;account=ACTIVE,limitSteps=2,active=0,max=1;Fail(FORBIDDEN);L6
+# ---- global: stream switch timeout (15 s without first media)
+G-timeout;Http 500 PROGRESSIVE;ms=15000;Fail(SERVER_ERROR);GT/L15
+G-timeout;Http 403 PROGRESSIVE;ms=15000;Fail(CONNECTION_LIMIT);GT/L2
+G-timeout;Network CONNECT before;ms=15000;Fail(NO_DATA_TIMEOUT);GT/L17
+G-timeout;ReconnectExhausted - nobytes;ms=16000;Fail(NO_DATA_TIMEOUT);GT/L19
+G-timeout;FormatIsHls;ms=15000;Fail(UNSUPPORTED_SOURCE);GT/L23
+G-timeout;Http 403 PROGRESSIVE;ms=14999;RetrySame(delayMs=1500);L2
+G-timeout;Http 500 PROGRESSIVE;ms=20000,firstFrame=true;ReResolve(delayMs=1000, refreshAccount=false, rotateBase=false);L15
+G-timeout;ReconnectExhausted - nobytes;ms=16000,attempts=-1;ReResolve(delayMs=5000, refreshAccount=false, rotateBase=false);L19
