@@ -38,6 +38,18 @@ class ReminderRepository @Inject constructor(
 
     suspend fun due(nowMin: Int = (clock.now() / 60_000).toInt()): List<ReminderEntity> = dao.due(nowMin)
 
+    // ---- M3 (docs/design/m3-guide.md §2.9.3, §3.11.1)
+
+    /** Every pending reminder, no lower bound (the planner expires old ones). */
+    fun allPending(): Flow<List<ReminderEntity>> = dao.observeAllPending()
+
+    /** N5: the identity index ignores state, so a fired/dismissed row for the key is removed before re-setting. */
+    suspend fun clearFinished(channel: ChannelIdentity, rawStartMin: Int): Int =
+        dao.deleteIfNotPending(channel.playlistId, channel.stableKey.value, rawStartMin)
+
+    /** Two writers (the card and the planner): only a pending row changes. True when this call changed it. */
+    suspend fun finishIfPending(id: Long, state: Int): Boolean = dao.setStateIfPending(id, state) > 0
+
     suspend fun markFired(id: Long) = dao.setState(id, ReminderEntity.STATE_FIRED)
     suspend fun dismiss(id: Long) = dao.setState(id, ReminderEntity.STATE_DISMISSED)
     suspend fun markOrphaned(id: Long) = dao.setState(id, ReminderEntity.STATE_ORPHANED)

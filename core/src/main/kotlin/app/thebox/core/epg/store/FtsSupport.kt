@@ -42,28 +42,42 @@ internal object FtsSupport {
     }
 
     /**
-     * FTS5 stage 1: best texts first (?1 match, ?2 page size, ?3 offset). Ranking texts before joining
-     * airings keeps the sort to the matching texts instead of every matching airing (perf: 170 → a few ms
-     * for "news" on the 1M-programme database).
+     * Stage 1, FTS5: best texts first (?1 match, ?2 page size, ?3 offset). Ranking texts before joining airings keeps
+     * the sort to the matching texts instead of every matching airing (perf: 170 → a few ms for "news" on the
+     * 1M-programme database).
      */
     const val FTS5_TEXTS_SQL = "SELECT rowid FROM epg_fts WHERE epg_fts MATCH ?1 ORDER BY bm25(epg_fts) LIMIT ?2 OFFSET ?3"
 
-    /** FTS5 stage 2: airings of one text still on air or upcoming, via `programme_by_text` (?1 text, ?2 now − 360, ?3 now, ?4 limit). */
-    const val AIRINGS_SQL =
-        "SELECT p.epg_channel_id, p.start_min, p.end_min, c.source_id, c.xmltv_id FROM programme p " +
-            "JOIN epg_channel c ON c.id = p.epg_channel_id " +
-            "WHERE p.text_id = ?1 AND p.start_min >= ?2 AND p.end_min > ?3 ORDER BY p.start_min LIMIT ?4"
+    /** Stage 1, FTS4 (no ranking function): matching texts in docid order. */
+    const val FTS4_TEXTS_SQL = "SELECT docid FROM epg_fts WHERE epg_fts MATCH ?1 ORDER BY docid LIMIT ?2 OFFSET ?3"
 
-    /** One-statement form (§2.4); used for FTS4, which has no bm25. ?1 match, ?2 now (raw), ?3 limit. */
-    fun searchSql(kind: FtsKind): String {
-        val order = if (kind == FtsKind.FTS5) "bm25(epg_fts), p.start_min" else "p.start_min"
-        return "SELECT p.epg_channel_id, p.start_min, p.end_min, t.title, t.subtitle, c.source_id, c.xmltv_id " +
-            "FROM epg_fts JOIN epg_text t ON t.id = epg_fts.rowid " +
-            "JOIN programme p ON p.text_id = t.id " +
-            "JOIN epg_channel c ON c.id = p.epg_channel_id " +
-            "WHERE epg_fts MATCH ?1 AND p.end_min > ?2 " +
-            "ORDER BY $order LIMIT ?3"
-    }
+    fun textsSql(kind: FtsKind): String = if (kind == FtsKind.FTS5) FTS5_TEXTS_SQL else FTS4_TEXTS_SQL
+
+    /** `programme.flags` bits the search never returns: CONTINUATION (M1 code review Later 10). */
+    private const val NOT_CONTINUATION = "(p.flags & 32) = 0"
+
+    /** Past search also skips CONTINUED first segments: their stored end is the 6 h cut (§3.10.2 item 3, N18). */
+    private const val NOT_SPLIT = "(p.flags & 96) = 0"
+
+    private const val AIRING_COLUMNS =
+        "SELECT p.epg_channel_id, p.start_min, p.end_min, c.source_id, c.xmltv_id FROM programme p JOIN epg_channel c ON c.id = p.epg_channel_id "
+
+    /** Stage 2, on now: ?1 text, ?2 now − 360, ?3 now, ?4 limit; a `programme_by_text` range scan in start order. */
+    const val AIRINGS_NOW_SQL =
+        AIRING_COLUMNS + "WHERE p.text_id = ?1 AND p.start_min >= ?2 AND p.start_min <= ?3 AND p.end_min > ?3 AND $NOT_CONTINUATION " +
+            "ORDER BY p.start_min LIMIT ?4"
+
+    /** Stage 2, upcoming: ?1 text, ?2 now, ?3 limit. */
+    const val AIRINGS_NEXT_SQL =
+        AIRING_COLUMNS + "WHERE p.text_id = ?1 AND p.start_min > ?2 AND $NOT_CONTINUATION ORDER BY p.start_min LIMIT ?3"
+
+    /**
+     * Stage 2 for `searchPast` (review B6): ?1 text, ?2 past-from, ?3 now, ?4 limit; end in (past-from, now], newest
+     * first. The start bound keeps it a `programme_by_text` range scan.
+     */
+    const val PAST_AIRINGS_SQL =
+        AIRING_COLUMNS + "WHERE p.text_id = ?1 AND p.start_min >= ?2 - ${EpgSchema.MAX_ROW_MIN} AND p.start_min < ?3 " +
+            "AND p.end_min > ?2 AND p.end_min <= ?3 AND $NOT_SPLIT ORDER BY p.start_min DESC LIMIT ?4"
 
     /**
      * Builds the MATCH expression from user text: split on non-letter/digit, drop empties, double `"`,

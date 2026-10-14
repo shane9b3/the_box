@@ -46,8 +46,15 @@ class ChannelRepository @Inject constructor(
     /** Number entry (M3 "type 101"): custom number first, then the playlist's numbering mode. */
     suspend fun byNumber(playlistId: Long, number: Int, unlocked: Boolean): Channel? {
         val p = playlists.get(playlistId) ?: return null
+        val row = rowByNumber(p, number, unlocked) ?: return null
+        return toChannel(p, defaults(p), row)
+    }
+
+    /** The row behind [byNumber]; M3's `GuideLibrary.byNumber` loads its guide row from the id. */
+    suspend fun rowByNumber(p: PlaylistEntity, number: Int, unlocked: Boolean): ChannelRow? {
+        val playlistId = p.id
         val mode = p.numberingMode
-        val row = when {
+        return when {
             mode.startsWith("START_AT:") -> {
                 val start = mode.substringAfter(':').toIntOrNull() ?: 1
                 channelDao.byNumber(playlistId, number, unlocked)?.takeIf { it.customNumber == number }
@@ -57,8 +64,7 @@ class ChannelRepository @Inject constructor(
                 ?: channelDao.bySortIndex(playlistId, number - 1, unlocked)
             else -> channelDao.byNumber(playlistId, number, unlocked) ?: channelDao.bySortIndex(playlistId, number - 1, unlocked)
                 ?.takeIf { it.channel.number == null }
-        } ?: return null
-        return toChannel(p, defaults(p), row)
+        }
     }
 
     suspend fun get(identity: ChannelIdentity): Channel? {
@@ -105,7 +111,7 @@ class ChannelRepository @Inject constructor(
         return Channel(
             playlistId = c.playlistId,
             stableKey = StableKey(c.stableKey),
-            name = row.customName ?: c.name,
+            name = row.displayName,
             streamUrl = c.url,
             number = row.customNumber ?: number(p.numberingMode, c.number, c.sortIndex),
             group = row.groupName,

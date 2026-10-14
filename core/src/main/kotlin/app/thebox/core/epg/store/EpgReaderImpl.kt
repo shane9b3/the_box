@@ -111,42 +111,79 @@ internal class EpgReaderImpl(private val handle: GenerationHandle) : EpgReader {
         }
     }
 
-    // M3 commit 0: [perText], the CONTINUATION filter and searchPast are WP-B's (docs/design/m3-guide.md §2.7).
+    /**
+     * M3 (docs/design/m3-guide.md §2.7, §3.10.2, review B6): on-now and upcoming airings, best text first, at most
+     * [perText] per text in start order, CONTINUATION segments never returned (M1 code review Later 10).
+     *
+     * The per-text cap is shared between on-now and upcoming airings: a text airing on many channels at once (an hourly
+     * "News" on 20 channels) keeps at most half its slots for on-now copies when it also has upcoming ones, so the next
+     * airing is never starved by simultaneous copies. Unused slots go to the other kind.
+     */
     override fun search(query: String, nowMin: Int, limit: Int, perText: Int): List<EpgSearchHit> {
         checkOpen()
         val kind = handle.fts
         val match = FtsSupport.matchExpression(query, kind) ?: return emptyList()
-        if (kind == FtsKind.FTS5) return searchRanked(match, nowMin, limit)
+        if (limit <= 0 || perText <= 0) return emptyList()
         return handle.aux.use { s ->
-            val st = s.statement(FtsSupport.searchSql(kind))
-            st.bindText(1, match)
-            st.bindLong(2, nowMin.toLong())
-            st.bindLong(3, limit.toLong())
-            val hits = ArrayList<EpgSearchHit>()
-            try {
-                while (st.step()) {
-                    hits += EpgSearchHit(
-                        channel = st.getLong(0).toInt(),
-                        ref = EpgChannelRef(st.getLong(5), st.getText(6)),
-                        rawStartMin = st.getLong(1).toInt(),
-                        rawEndMin = st.getLong(2).toInt(),
-                        title = st.getText(3),
-                        subtitle = st.textOrNull(4),
-                    )
-                }
-            } finally {
-                st.reset()
+            val onNow = s.statement(FtsSupport.AIRINGS_NOW_SQL)
+            val next = s.statement(FtsSupport.AIRINGS_NEXT_SQL)
+            val cap = if (perText == Int.MAX_VALUE) Int.MAX_VALUE else perText
+            searchByText(s, match, kind, limit) { textId, room ->
+                val per = minOf(cap, room)
+                val now = airings(onNow, textId, (nowMin - EpgSchema.MAX_ROW_MIN).toLong(), nowMin.toLong(), per)
+                val up = airings(next, textId, nowMin.toLong(), null, per)
+                val keepNow = minOf(now.size, maxOf(per - up.size, (per + 1) / 2))
+                now.subList(0, keepNow) + up.subList(0, minOf(up.size, per - keepNow))
             }
-            hits
         }
     }
 
-    /** FTS5: texts by bm25, then each text's current and upcoming airings in start order, until [limit]. */
-    private fun searchRanked(match: String, nowMin: Int, limit: Int): List<EpgSearchHit> = handle.aux.use { s ->
+    /**
+     * Catch-up search (B6): airings with end_min in (pastFromMin, nowMin], best text first, newest first within a text,
+     * at most [perText] per text. CONTINUATION rows and CONTINUED first segments (a split programme whose stored end is
+     * the 6 h cut, not its real end; §3.10.2 item 3, N18) are never returned.
+     */
+    override fun searchPast(query: String, nowMin: Int, pastFromMin: Int, limit: Int, perText: Int): List<EpgSearchHit> {
+        checkOpen()
+        val kind = handle.fts
+        val match = FtsSupport.matchExpression(query, kind) ?: return emptyList()
+        if (limit <= 0 || perText <= 0 || pastFromMin >= nowMin) return emptyList()
+        return handle.aux.use { s ->
+            val past = s.statement(FtsSupport.PAST_AIRINGS_SQL)
+            searchByText(s, match, kind, limit) { textId, room ->
+                airings(past, textId, pastFromMin.toLong(), nowMin.toLong(), minOf(perText, room))
+            }
+        }
+    }
+
+    private class Airing(val channel: Int, val start: Int, val end: Int, val sourceId: Long, val xmltvId: String)
+
+    /** Runs one per-text airings statement: ?1 text, ?2 [a], ?3 [b] (when not null), last param the limit. */
+    private fun airings(st: SQLiteStatement, textId: Int, a: Long, b: Long?, limit: Int): List<Airing> {
+        if (limit <= 0) return emptyList()
+        st.bindLong(1, textId.toLong())
+        st.bindLong(2, a)
+        if (b != null) st.bindLong(3, b)
+        st.bindLong(if (b != null) 4 else 3, limit.toLong())
+        val out = ArrayList<Airing>(minOf(limit, 16))
+        try {
+            while (st.step()) out += Airing(st.getLong(0).toInt(), st.getLong(1).toInt(), st.getLong(2).toInt(), st.getLong(3), st.getText(4))
+        } finally {
+            st.reset()
+        }
+        return out
+    }
+
+    /**
+     * Texts in rank order (bm25 on FTS5; docid order on FTS4, which has no ranking function), then [airingsOf] per text
+     * with the room left under [limit]. Ranking texts before joining airings keeps the sort to the matching texts
+     * (M1 perf note: 170 → a few ms for "news" on the 1M-programme database).
+     */
+    private fun searchByText(
+        s: ReaderConnection.Scope, match: String, kind: FtsKind, limit: Int, airingsOf: (textId: Int, room: Int) -> List<Airing>,
+    ): List<EpgSearchHit> {
         val hits = ArrayList<EpgSearchHit>()
-        if (limit <= 0) return@use hits
-        val textsSt = s.statement(FtsSupport.FTS5_TEXTS_SQL)
-        val airSt = s.statement(FtsSupport.AIRINGS_SQL)
+        val textsSt = s.statement(FtsSupport.textsSql(kind))
         val textSt = s.statement("SELECT title, subtitle FROM epg_text WHERE id = ?")
         val page = IntArray(SEARCH_TEXT_PAGE)
         var offset = 0
@@ -162,42 +199,25 @@ internal class EpgReaderImpl(private val handle: GenerationHandle) : EpgReader {
             }
             for (k in 0 until n) {
                 if (hits.size >= limit) break
-                airSt.bindLong(1, page[k].toLong())
-                airSt.bindLong(2, (nowMin - EpgSchema.MAX_ROW_MIN).toLong())
-                airSt.bindLong(3, nowMin.toLong())
-                airSt.bindLong(4, (limit - hits.size).toLong())
-                var title: String? = null
+                val list = airingsOf(page[k], limit - hits.size)
+                if (list.isEmpty()) continue
+                textSt.bindLong(1, page[k].toLong())
+                var title = ""
                 var subtitle: String? = null
                 try {
-                    while (airSt.step()) {
-                        if (title == null) {
-                            textSt.bindLong(1, page[k].toLong())
-                            try {
-                                if (textSt.step()) {
-                                    title = textSt.getText(0)
-                                    subtitle = textSt.textOrNull(1)
-                                }
-                            } finally {
-                                textSt.reset()
-                            }
-                        }
-                        hits += EpgSearchHit(
-                            channel = airSt.getLong(0).toInt(),
-                            ref = EpgChannelRef(airSt.getLong(3), airSt.getText(4)),
-                            rawStartMin = airSt.getLong(1).toInt(),
-                            rawEndMin = airSt.getLong(2).toInt(),
-                            title = title ?: "",
-                            subtitle = subtitle,
-                        )
+                    if (textSt.step()) {
+                        title = textSt.getText(0)
+                        subtitle = textSt.textOrNull(1)
                     }
                 } finally {
-                    airSt.reset()
+                    textSt.reset()
                 }
+                for (a in list) hits += EpgSearchHit(a.channel, EpgChannelRef(a.sourceId, a.xmltvId), a.start, a.end, title, subtitle)
             }
             if (n < SEARCH_TEXT_PAGE) break
             offset += n
         }
-        hits
+        return hits
     }
 
     override fun forEachChannel(sourceId: Long?, block: (EpgChannelInfo) -> Unit) {

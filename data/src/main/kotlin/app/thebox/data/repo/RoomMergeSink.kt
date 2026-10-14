@@ -11,6 +11,9 @@ import app.thebox.core.refresh.MergeBatch
 import app.thebox.core.refresh.MergeFinish
 import app.thebox.core.refresh.MergeSink
 import app.thebox.core.source.EntryKind
+import app.thebox.core.text.ChannelNamePrefix
+import app.thebox.core.text.ChannelNamePrefixImpl
+import app.thebox.core.text.NamePrefixRule
 import app.thebox.core.text.NameNormalizer
 import app.thebox.data.db.Converters
 import app.thebox.data.db.LibraryDatabase
@@ -39,6 +42,14 @@ class RoomMergeSink(
     private val lastModified: String? = null,
     /** Stores credentials found by pass 1 in the playlist secret. */
     private val onDetected: suspend (DetectedCredentials) -> Unit = {},
+    /**
+     * M3 (docs/design/m3-guide.md §3.12.3): the playlist's channel-name prefix rule. `display_name` is a content column
+     * bound from `strip(name, group-title, rule)` on insert and update; touches never change it (name and group are in
+     * the content hash). A rule change alone is not a channel change: it never reaches the differ (no stable-key or diff
+     * churn) and is applied by `DisplayNames.recompute`.
+     */
+    private val prefixRule: NamePrefixRule = NamePrefixRule.Auto,
+    private val prefix: ChannelNamePrefix = ChannelNamePrefixImpl(),
 ) : MergeSink {
     private val groupIds = HashMap<String, Long>()
 
@@ -178,6 +189,9 @@ class RoomMergeSink(
                 bindLong(1, liveCount); bindLong(2, refreshSeq); bindLong(3, now); bindLong(4, now)
                 bindTextOrNull(5, etag); bindTextOrNull(6, lastModified); bindLong(7, playlistId)
             }
+            // (M3 §3.12.3, review S4) `name_prefix_ver` is never raised here. Rows this merge did not insert or update
+            // keep display names from whatever rule computed them, so stamping RULE_VERSION when the stored value is
+            // older would make the startup backfill skip this playlist forever. Only DisplayNames.recompute raises it.
             FinishStats(finish.purgeIds.size, favKept.toInt(), (favTotal - favKept).toInt(), removedSample)
         }
         BoxLog.i(TAG) {
@@ -237,7 +251,15 @@ class RoomMergeSink(
         st.bindIntOrNull(i++, c.xtreamArchiveDays)
         st.bindBool(i++, ch.adult)
         st.bindTextOrNull(i++, extrasJson(kc))
-        st.bindLong(i, kc.contentHash)
+        st.bindLong(i++, kc.contentHash)
+        st.bindTextOrNull(i, displayName(ch.name, ch.groupTitle))
+    }
+
+    private fun displayName(name: String, group: String?): String? = try {
+        prefix.strip(name, group, prefixRule)
+    } catch (e: RuntimeException) {
+        BoxLog.w(TAG, "prefix rule failed: ${e.javaClass.simpleName}")
+        null
     }
 
     companion object {
@@ -249,7 +271,7 @@ class RoomMergeSink(
             "key_rule", "kind", "name", "norm_name", "number", "sort_index", "group_id", "logo_url", "tvg_id", "tvg_name",
             "url", "headers_json", "xtream_stream_id", "container_ext", "epg_shift_min", "catchup_type", "catchup_source",
             "catchup_days", "catchup_correction_h", "timeshift_days", "tvg_rec_days", "catchup_time_sec", "tv_archive",
-            "tv_archive_days", "is_adult", "extras_json", "content_hash",
+            "tv_archive_days", "is_adult", "extras_json", "content_hash", "display_name",
         )
 
         private val INSERT_SQL =
