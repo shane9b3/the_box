@@ -24,6 +24,7 @@ import threading
 import time
 import traceback
 import urllib.parse
+import zlib
 from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -45,6 +46,8 @@ DEFAULTS = {
     "strict_timeshift_tz": False, "timeshift_expect": [], "timeshift_ranges": True,
     "hls_timeout": 20, "hls_window": 5, "token_ttl": 30, "token_single_use": False, "pace": True,
     "faults": {}, "stream_faults": {},
+    "synthetic": 0, "synthetic_days_back": 3, "synthetic_days_ahead": 7,  # --synthetic N: N generated live channels
+    "epg_version": 0,           # bump (via /admin/config) to change synthetic programme titles (" v2", ...)
 }
 FAULT_DOC = {
     "redirect": False, "token_ttl": None, "linger": 0, "linger_status": 403, "close_every": 0,
@@ -340,6 +343,7 @@ class Panel:
         self.tokens = {}
         self.live_pos = {}
         self.main_port = self.lb_port = 0
+        self.start_time = time.time()  # anchors the synthetic EPG schedule for this server run
         self.reset_stats()
         self.clips, self.vod_data, self.vod_ctype = build_media(
             media_dir or os.path.join(HERE, "media"), use_ffmpeg, self.log)
@@ -349,6 +353,17 @@ class Panel:
                       "range_requests": [], "auth_failures": 0, "redirects": 0, "token_expired": 0,
                       "forced_closes": 0, "client_eof": 0, "stalls": 0, "timeshift_tz_warnings": 0, "request_log": [], "stream_requests": 0}
         self.registry.max_open_seen = 0
+
+    def syn(self):
+        """The synthetic lineup helper for the current config, or None when synthetic mode is off."""
+        if int(self.cfg.get("synthetic") or 0) > 0:
+            return cat.Synthetic(self.cfg, self.start_time)
+        return None
+
+    def channel(self, i):
+        """Live channel dict by id (catalog, or synthetic in synthetic mode), or None."""
+        syn = self.syn()
+        return syn.channel(i) if syn else cat.CH_BY_ID.get(i)
 
     def tz(self):
         try:
@@ -377,6 +392,9 @@ class Panel:
         unknown = [k for k in patch if k not in DEFAULTS]
         if unknown:
             raise ValueError("unknown config keys: " + ", ".join(unknown))
+        for k, hi in (("synthetic", 20000), ("synthetic_days_back", 400), ("synthetic_days_ahead", 400), ("epg_version", 10**6)):
+            if k in patch and (isinstance(patch[k], bool) or not isinstance(patch[k], int) or not 0 <= patch[k] <= hi):
+                raise ValueError(f"{k} must be an integer 0..{hi}")
         with self.lock:
             for k, v in patch.items():
                 if k in ("faults", "stream_faults"):
@@ -593,8 +611,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.stream_request("timeshift", q.get("username"), q.get("password"),
                                        q.get("stream", ""), "ts", start=q.get("start", ""), dur=q.get("duration", "60"))
         m = re.match(r"^/vodseg/(\d+)_(\d+)\.ts$", path)
-        if m and int(m[1]) in cat.CH_BY_ID:
-            segs = p.clips[cat.CH_BY_ID[int(m[1])]["media"]].segments
+        if m and p.channel(int(m[1])):
+            segs = p.clips[p.channel(int(m[1]))["media"]].segments
             return self.send(200, segs[int(m[2]) % len(segs)][0], "video/mp2t")
         if path.startswith("/logo/"):
             return self.send(200, b"\x89PNG\r\n\x1a\n", "image/png")
@@ -642,6 +660,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             s = copy.deepcopy(p.stats)
             s["connections"] = p.registry.counts(p.cfg["username"], p.cfg["hls_timeout"])
             s["connections"]["max_open_seen"] = p.registry.max_open_seen
+            syn = p.syn()
+            if syn:
+                s["synthetic"] = syn.info()
             return self.json(s)
         if path == "/admin/reset" and self.command != "GET":
             p.reset()
@@ -694,14 +715,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if n is None:
                 n = p.registry.counts(c["username"], c["hls_timeout"])["active"]
             return self.json(cat.user_info(c, n, host, port, tz, now))
+        syn = p.syn()
         if act == "get_live_categories":
-            return self.json(cat.categories(cat.LIVE_CATS))
+            return self.json(cat.categories(syn.categories() if syn else cat.LIVE_CATS))
         if act == "get_vod_categories":
             return self.json(cat.categories(cat.VOD_CATS))
         if act == "get_series_categories":
             return self.json(cat.categories(cat.SERIES_CATS))
         if act == "get_live_streams":
-            return self.json(cat.live_streams(c, host, port, cid))
+            return self.json(cat.live_streams(c, host, port, cid, syn))
         if act == "get_vod_streams":
             return self.json(cat.vod_streams(c, host, port, cid))
         if act == "get_vod_info":
@@ -712,12 +734,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.json(cat.series_info(c, host, port, q.get("series_id", q.get("series", ""))))
         if act in ("get_short_epg", "get_simple_data_table"):
             sid = q.get("stream_id", "")
-            ch = cat.CH_BY_ID.get(int(sid)) if sid.isdigit() else None
+            ch = p.channel(int(sid)) if sid.isdigit() else None
             if not ch:
                 return self.json({"epg_listings": []})
             short = act == "get_short_epg"
             lim = int(q["limit"]) if q.get("limit", "").isdigit() else 4
-            return self.json(cat.epg_listings(c, ch, tz, now, short, lim))
+            return self.json(cat.epg_listings(c, ch, tz, now, short, lim, syn))
         self.json([])
 
     def get_php(self):
@@ -729,7 +751,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.auth_fail("403" if c["bad_creds_mode"] == "auth0" else c["bad_creds_mode"])
         ext = "m3u8" if q.get("output") in ("m3u8", "hls") else "ts"
         host, port = self.hostport()
-        self.send(200, cat.m3u(c, self.base(), host, port, ext, q.get("type", "m3u_plus") == "m3u_plus"),
+        self.send(200, cat.m3u(c, self.base(), host, port, ext, q.get("type", "m3u_plus") == "m3u_plus", self.panel.syn()),
                   "audio/x-mpegurl", {"Content-Disposition": 'attachment; filename="playlist.m3u"'})
 
     def xmltv_php(self):
@@ -739,13 +761,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.auth_fail(c["auth_mode"])
         if not self.creds_ok(q.get("username"), q.get("password")):
             return self.auth_fail("403" if c["bad_creds_mode"] == "auth0" else c["bad_creds_mode"])
+        syn = self.panel.syn()
+        if syn:  # streamed: the document is generated while writing, never held in memory
+            return self.xmltv_stream(syn, c)
         body = cat.xmltv(c, self.base(), None, time.time(), c["epg_offset"])
         if c["epg_gzip"]:
             return self.send(200, cat.maybe_gzip(body, True), "application/gzip")
         self.send(200, body, "text/xml; charset=utf-8")
 
+    def xmltv_stream(self, syn, c):
+        gz = bool(c["epg_gzip"])
+        self.begin_stream(200, "application/gzip" if gz else "text/xml; charset=utf-8", {"Connection": "close"})
+        self.close_connection = True
+        if self.command == "HEAD":
+            return
+        co = zlib.compressobj(6, zlib.DEFLATED, 31) if gz else None
+        for chunk in syn.xmltv_chunks(self.base(), c["epg_offset"]):
+            if co:
+                chunk = co.compress(chunk)
+            if chunk:
+                self.out(chunk)
+        if co:
+            self.out(co.flush())
+
     # ---- streams
-    def timeshift_check(self, start, dur):
+    def timeshift_check(self, start, dur, days=None):
         """Returns (ok, message). Logs WARNING on suspected wrong-timezone start."""
         p, c = self.panel, self.panel.cfg
         tz = p.tz()
@@ -777,8 +817,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                            f"expected one of {c['timeshift_expect']}: {diag}")
         elif inst > now + 60:
             problem = f"timeshift start {start} is in the FUTURE in {c['timezone']}: client probably sent UTC/device time (zone west of server)"
-        elif now - inst > cat.ARCHIVE_DAYS * 86400 + 3600:
-            problem = f"timeshift start {start} is older than the {cat.ARCHIVE_DAYS}-day archive window"
+        elif now - inst > (days or cat.ARCHIVE_DAYS) * 86400 + 3600:
+            problem = f"timeshift start {start} is older than the {days or cat.ARCHIVE_DAYS}-day archive window"
         if problem:
             p.bump("timeshift_tz_warnings")
             p.log("WARNING " + problem)
@@ -854,11 +894,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._notes.append("HTML-SPLASH")
             return self.send(200, SPLASH, "text/html")
         if kind == "timeshift":
-            ok, msg = self.timeshift_check(start or "", dur)
+            ok, msg = self.timeshift_check(start or "", dur, (p.channel(sid) or {}).get("archive_days"))
             if not ok:
                 return self.reject(404, "timeshift_tz" if msg != "unparseable start" else "timeshift_bad_start")
 
-        clip = p.clips[cat.CH_BY_ID[sid]["media"]] if kind in ("live", "timeshift") else None
+        clip = p.clips[p.channel(sid)["media"]] if kind in ("live", "timeshift") else None
         hls = kind in ("live", "timeshift") and ext == "m3u8"
         if seg:
             p.registry.touch(user, sid)
@@ -895,7 +935,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def known(self, kind, i):
         if kind in ("live", "timeshift"):
-            return i in cat.CH_BY_ID
+            return self.panel.channel(i) is not None
         if kind == "movie":
             return i in cat.MOVIE_BY_ID
         return i in cat.EPISODE_IDS
@@ -1102,6 +1142,9 @@ def main(argv=None):
     ap.add_argument("--fault", action="append", default=[], metavar="KEY=JSON", help="global fault, e.g. linger=5")
     ap.add_argument("--stream-fault", action="append", default=[], metavar="ID:KEY=JSON")
     ap.add_argument("--media-dir", default=os.path.join(HERE, "media"))
+    ap.add_argument("--synthetic", type=int, metavar="N", help="replace the catalog live channels with N generated ones (<= 20000)")
+    ap.add_argument("--synthetic-days-back", type=int, help="synthetic EPG days before server start (default 3)")
+    ap.add_argument("--synthetic-days-ahead", type=int, help="synthetic EPG days after server start (default 7)")
     ap.add_argument("--no-ffmpeg", action="store_true")
     ap.add_argument("--no-pace", action="store_true", help="send live TS as fast as possible")
     ap.add_argument("--verbose", action="store_true")
@@ -1127,6 +1170,9 @@ def main(argv=None):
             cfg[flag] = True
     if a.no_pace:
         cfg["pace"] = False
+    for flag in ("synthetic", "synthetic_days_back", "synthetic_days_ahead"):
+        if getattr(a, flag) is not None:
+            cfg[flag] = getattr(a, flag)
     for kv in a.set:
         k, v = parse_kv(kv)
         cfg[k] = v

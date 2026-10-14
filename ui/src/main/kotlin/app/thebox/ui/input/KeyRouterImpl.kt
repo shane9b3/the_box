@@ -1,21 +1,153 @@
 package app.thebox.ui.input
 
+import android.os.Handler
+import android.os.Looper
+import android.os.SystemClock
+import androidx.compose.foundation.focusable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.KeyEvent
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import app.thebox.core.guide.GuideEvent
 import app.thebox.core.guide.GuideStateMachine
+import app.thebox.core.guide.ScreenMode
+import app.thebox.core.input.BoxAction
 import app.thebox.core.input.KeyCapabilities
+import app.thebox.core.input.KeyContext
+import app.thebox.core.input.KeyGesture
 import app.thebox.core.input.KeyGestureDetector
+import app.thebox.core.input.KeyInput
 import app.thebox.core.input.KeyMap
+import android.view.KeyEvent as AndroidKeyEvent
 
-/** WP-D stub (docs/design/m3-guide.md §1.5, §2.10, §3.18.1): the one key path. */
+/**
+ * The one key path (docs/design/m3-guide.md §2.10, §3.18.1; reviewed 2026-10-14, B1/F5):
+ * Compose `KeyEvent.nativeKeyEvent` → [KeyInput] → [KeyGestureDetector] → [KeyMap] → `GuideEvent.Act`/`Release`,
+ * dispatched to the attached machine. Main thread only.
+ *
+ * - Context PLAYER in `ScreenMode.FULL`, else GUIDE; `hasLong = keyMap.long(context, code) != null`.
+ * - A key with a long binding arms a [LONG_PRESS_MS] timer on its first DOWN (remotes that never auto-repeat OK);
+ *   the UP cancels it.
+ * - Returns true for every key it handled including the matching UP; keys with no binding (volume, Home) return
+ *   false. In SEARCH every key returns false except BACK while [searchFieldIdle] (empty field, IME hidden).
+ * - [KeyCapabilities.record] runs for every bound or unbound DOWN with repeat 0 (the impl writes only new codes, N7).
+ */
 class KeyRouterImpl(
     private val keyMap: KeyMap,
     private val detector: KeyGestureDetector,
     private val capabilities: KeyCapabilities,
+    private val timers: Timers = HandlerTimers(),
+    private val uptimeMs: () -> Long = SystemClock::uptimeMillis,
 ) : KeyRouter {
-    override fun onKey(event: KeyEvent): Boolean = TODO("WP-D")
-    override fun onFocusLost(): Unit = TODO("WP-D")
-    override fun attach(machine: GuideStateMachine?, searchFieldIdle: () -> Boolean): Unit = TODO("WP-D")
-    override fun sinkModifier(requester: FocusRequester): Modifier = TODO("WP-D")
+
+    /** Delayed main-thread callbacks; injectable so tests run without a Looper. */
+    interface Timers {
+        fun post(delayMs: Long, block: () -> Unit): Any
+        fun cancel(token: Any)
+    }
+
+    private class HandlerTimers : Timers {
+        private val handler = Handler(Looper.getMainLooper())
+        override fun post(delayMs: Long, block: () -> Unit): Any = Runnable(block).also { handler.postDelayed(it, delayMs) }
+        override fun cancel(token: Any) = handler.removeCallbacks(token as Runnable)
+    }
+
+    private var machine: GuideStateMachine? = null
+    private var searchFieldIdle: () -> Boolean = { true }
+    /** Codes whose DOWN we consumed, so the matching UP is consumed too (and only then). */
+    private val consumedDown = HashSet<Int>()
+    /** Context of each held key, fixed at its first DOWN (a mode change mid-press must not remap the UP). */
+    private val heldContext = HashMap<Int, KeyContext>()
+    private val longTimers = HashMap<Int, Any>()
+    private val out = ArrayList<KeyGesture>(2)
+
+    override fun attach(machine: GuideStateMachine?, searchFieldIdle: () -> Boolean) {
+        this.machine = machine
+        this.searchFieldIdle = searchFieldIdle
+        onFocusLost()
+    }
+
+    override fun onKey(event: KeyEvent): Boolean {
+        val n = event.nativeKeyEvent
+        val isDown = when (n.action) {
+            AndroidKeyEvent.ACTION_DOWN -> true
+            AndroidKeyEvent.ACTION_UP -> false
+            else -> return false
+        }
+        return onNative(n.keyCode, isDown, n.repeatCount, n.downTime, n.eventTime, (n.flags and AndroidKeyEvent.FLAG_CANCELED) != 0)
+    }
+
+    /** The routing without Compose/Android event types (tests). */
+    fun onNative(code: Int, isDown: Boolean, repeatCount: Int, downTimeMs: Long, eventTimeMs: Long, canceled: Boolean = false): Boolean {
+        val m = machine ?: return false
+        if (!isDown) {
+            if (!consumedDown.remove(code)) return false
+        } else if (repeatCount == 0) {
+            capabilities.record(code)
+            val mode = m.ui.value.mode
+            val context = if (mode == ScreenMode.FULL) KeyContext.PLAYER else KeyContext.GUIDE
+            val short = keyMap.short(context, code)
+            val long = keyMap.long(context, code)
+            if (short == null && long == null) return false
+            if (mode == ScreenMode.SEARCH && !(short == BoxAction.BACK && searchFieldIdle())) return false
+            consumedDown += code
+            heldContext[code] = context
+        } else if (code !in consumedDown) {
+            return false
+        }
+        val context = heldContext[code] ?: KeyContext.GUIDE
+        if (!isDown) heldContext.remove(code)
+        val hasLong = keyMap.long(context, code) != null
+        out.clear()
+        detector.onKey(KeyInput(code, isDown, repeatCount, downTimeMs, eventTimeMs, canceled), hasLong, out)
+        if (isDown && repeatCount == 0 && hasLong) armLong(code, context)
+        if (!isDown || out.any { it is KeyGesture.LongPress }) longTimers.remove(code)?.let { timers.cancel(it) }
+        deliver(context, if (isDown) eventTimeMs - downTimeMs else 0L)
+        return true
+    }
+
+    private fun armLong(code: Int, context: KeyContext) {
+        longTimers.remove(code)?.let { timers.cancel(it) }
+        longTimers[code] = timers.post(LONG_PRESS_MS) {
+            longTimers.remove(code)
+            out.clear()
+            detector.onTimer(code, uptimeMs(), out)
+            deliver(context, LONG_PRESS_MS)
+        }
+    }
+
+    private fun deliver(context: KeyContext, heldMs: Long) {
+        val m = machine ?: return
+        for (g in out) {
+            when (g) {
+                is KeyGesture.Press -> keyMap.short(context, g.keyCode)?.let { a ->
+                    m.dispatch(GuideEvent.Act(a, g.repeat, if (a == BoxAction.DIGIT) keyMap.digit(g.keyCode) else -1, heldMs))
+                }
+                is KeyGesture.LongPress -> keyMap.long(context, g.keyCode)?.let { m.dispatch(GuideEvent.Act(it, 0, -1, heldMs)) }
+                is KeyGesture.ReleaseAfterRepeat -> keyMap.short(context, g.keyCode)?.let { m.dispatch(GuideEvent.Release(it)) }
+            }
+        }
+        out.clear()
+    }
+
+    override fun onFocusLost() {
+        detector.reset()
+        consumedDown.clear()
+        heldContext.clear()
+        for (t in longTimers.values) timers.cancel(t)
+        longTimers.clear()
+    }
+
+    override fun sinkModifier(requester: FocusRequester): Modifier =
+        Modifier
+            .focusRequester(requester)
+            .onFocusChanged { if (!it.isFocused) onFocusLost() }
+            .onPreviewKeyEvent(::onKey)
+            .focusable()
+
+    companion object {
+        const val LONG_PRESS_MS = 500L
+    }
 }

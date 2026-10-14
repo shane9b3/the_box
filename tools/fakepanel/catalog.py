@@ -2,6 +2,7 @@
 import base64
 import datetime as dt
 import gzip
+import random
 import time
 from xml.sax.saxutils import escape, quoteattr
 
@@ -83,7 +84,9 @@ def categories(cats):
     return [{"category_id": str(i), "category_name": n, "parent_id": 0} for i, n in cats]
 
 
-def live_streams(cfg, host, port, category_id=None):
+def live_streams(cfg, host, port, category_id=None, syn=None):
+    if syn:
+        return syn.live_streams(cfg, host, port, category_id)
     out = []
     for n, c in enumerate(CHANNELS, 1):
         cid = c["cat"]
@@ -188,7 +191,9 @@ def programmes(ch, t_from, t_to, tz):
         s += SLOT
 
 
-def epg_listings(cfg, ch, tz, now, short=False, limit=4):
+def epg_listings(cfg, ch, tz, now, short=False, limit=4, syn=None):
+    if syn and ch.get("synthetic"):
+        return syn.epg_listings(cfg, ch, tz, now, short, limit)
     plain = cfg.get("epg_plain")
     enc = (lambda s: s) if plain else (lambda s: base64.b64encode(s.encode()).decode())
     cur = int(now) // SLOT * SLOT
@@ -229,7 +234,9 @@ def xmltv(cfg, base, tz_unused, now, offset):
 
 # ---------------------------------------------------------------- M3U
 
-def m3u(cfg, base, host, port, ext, plus=True):
+def m3u(cfg, base, host, port, ext, plus=True, syn=None):
+    if syn:
+        return syn.m3u(cfg, base, ext, plus)
     u, p = cfg["username"], cfg["password"]
     L = [f'#EXTM3U x-tvg-url="{base}/xmltv.php?username={u}&password={p}"']
     for c in CHANNELS:
@@ -256,3 +263,181 @@ def m3u(cfg, base, host, port, ext, plus=True):
 
 def maybe_gzip(data, on):
     return gzip.compress(data) if on else data
+
+
+# ---------------------------------------------------------------- synthetic mode (--synthetic N)
+
+SYN_GROUP = 50
+SYN_CAT_BASE = 1000  # category ids 1000+g never collide with VOD/series (10, 11, 20, 21)
+SYN_THEMES = ["News", "Sports", "Movies", "Kids", "Music", "Docs", "Nature", "Cinema"]
+SYN_PREFIX = {3: "UK: ", 5: "[DE] ", 7: "FR | "}  # by id % 10 -> 30 % of channels
+SYN_DURS = [m * 60 for m in (5, 10, 30, 60, 120, 360)]
+SYN_TITLES = ["Morning News", "Evening News", "News at Ten", "Sports News Roundup", "Quiz Time", "Documentary",
+              "Match Day", "Late Movie", "Cooking with Friends", "Weather Report", "Talk Show", "Nature Wild",
+              "Kids Cartoon Hour", "Music Mix", "Arts & Culture", "Drama Series"]
+SYN_NT = len(SYN_TITLES)
+SYN_TITLES += ["Reminder Test Start", "Reminder Test Next"]  # forced programmes on channel 1
+SYN_TITLES_ESC = [escape(t) for t in SYN_TITLES]
+SYN_LONG = " - The Extended Special Edition With Additional Commentary and Bonus Material"  # makes a title > 60 chars
+SYN_CHUNK = 64 * 1024
+
+
+class Synthetic:
+    """Deterministic large lineup. Everything derives from (cfg, server start time), so the schedule is identical on
+    every request during one server run. ids and `num` are 1..n; groups of 50; EPG window anchored to the start hour."""
+
+    def __init__(self, cfg, start_time):
+        self.n = int(cfg["synthetic"])
+        self.back = int(cfg.get("synthetic_days_back", 3))
+        self.ahead = int(cfg.get("synthetic_days_ahead", 7))
+        self.ver = int(cfg.get("epg_version") or 0)
+        self.suffix = f" v{self.ver + 1}" if self.ver else ""
+        hour = int(start_time) // 3600 * 3600
+        self.start_unix = int(start_time) // 60 * 60
+        self.s0 = hour - self.back * 86400
+        self.e = hour + 3600 + self.ahead * 86400
+        self.reminders = (self.start_unix + 120, self.start_unix + 300)
+        self.groups = -(-self.n // SYN_GROUP)
+
+    def info(self):
+        return {"n": self.n, "start_unix": self.start_unix, "reminder_starts": list(self.reminders),
+                "epg_window": [self.s0, self.e], "epg_version": self.ver,
+                "days_back": self.back, "days_ahead": self.ahead, "group_size": SYN_GROUP}
+
+    def categories(self):
+        return [(SYN_CAT_BASE + g, f"{SYN_THEMES[g % len(SYN_THEMES)]} {g + 1}") for g in range(self.groups)]
+
+    def channel(self, i):
+        if not 1 <= i <= self.n:
+            return None
+        g = (i - 1) // SYN_GROUP
+        archive = i % 5 == 1
+        has_epg = i == 1 or i % 20 != 9
+        return dict(id=i, name=f"{SYN_PREFIX.get(i % 10, '')}{SYN_THEMES[g % len(SYN_THEMES)]} {i}", cat=SYN_CAT_BASE + g,
+                    archive=archive, archive_days=(7 if (i == 1 or (i // 5) % 2 == 0) else 3) if archive else 0,
+                    catchup="xc" if archive else "", media="std", has_epg=has_epg,
+                    tvg_id=f"syn{i}.test" if has_epg else "", synthetic=True)
+
+    def _ids(self, category_id=None):
+        if category_id is None:
+            return range(1, self.n + 1)
+        try:
+            g = int(category_id) - SYN_CAT_BASE
+        except ValueError:
+            return range(0)
+        if not 0 <= g < self.groups:
+            return range(0)
+        return range(g * SYN_GROUP + 1, min(self.n, (g + 1) * SYN_GROUP) + 1)
+
+    def live_streams(self, cfg, host, port, category_id=None):
+        out, q = [], cfg.get("quirks")
+        for i in self._ids(category_id):
+            c = self.channel(i)
+            out.append({
+                "num": _n(cfg, i), "name": c["name"], "stream_type": "live", "stream_id": _n(cfg, i),
+                "stream_icon": f"http://{host}:{port}/logo/{i}.png", "epg_channel_id": c["tvg_id"],
+                "added": "1700000000", "is_adult": "0", "category_id": str(c["cat"]) if q else c["cat"],
+                "category_ids": [c["cat"]], "custom_sid": "", "tv_archive": _n(cfg, 1 if c["archive"] else 0),
+                "direct_source": "", "tv_archive_duration": _n(cfg, c["archive_days"])})
+        return out
+
+    def schedule(self, cid):
+        """Yield (start, stop, title_index, long_flag) in unix seconds, contiguous from s0 past e. Whole minutes."""
+        bits = random.Random(cid * 7919 + 17).getrandbits
+        r1, r2 = self.reminders if cid == 1 else (None, None)
+        t, e, durs, nt = self.s0, self.e, SYN_DURS, SYN_NT
+        while t < e:
+            if t == r1:
+                yield t, r2, nt, False
+                yield r2, r2 + 1800, nt + 1, False
+                t, r1 = r2 + 1800, None
+                continue
+            b = bits(24)
+            stop = t + durs[b % 6]
+            if r1 is not None and t < r1 < stop:
+                stop = r1
+            yield t, stop, (b >> 3) % nt, (b >> 12) % 10 == 0
+            t = stop
+
+    def title(self, ti, lng):
+        return SYN_TITLES[ti] + (SYN_LONG if lng else "") + self.suffix
+
+    def epg_listings(self, cfg, ch, tz, now, short, limit):
+        if not ch["has_epg"]:
+            return {"epg_listings": []}
+        plain = cfg.get("epg_plain")
+        enc = (lambda s: s) if plain else (lambda s: base64.b64encode(s.encode()).decode())
+        out = []
+        for a, b, ti, lng in self.schedule(ch["id"]):
+            if short and b <= now:
+                continue
+            t = self.title(ti, lng)
+            out.append({
+                "id": str(a), "epg_id": "1", "title": enc(t), "lang": "en",
+                "start": dt.datetime.fromtimestamp(a, tz).strftime("%Y-%m-%d %H:%M:%S"),
+                "end": dt.datetime.fromtimestamp(b, tz).strftime("%Y-%m-%d %H:%M:%S"),
+                "description": enc(f"{ch['name']} - {t}"), "channel_id": ch["tvg_id"],
+                "start_timestamp": str(a), "stop_timestamp": str(b),
+                "now_playing": 1 if a <= now < b else 0,
+                "has_archive": 1 if (ch["archive"] and b <= now and a >= now - ch["archive_days"] * 86400) else 0})
+            if short and len(out) >= limit:
+                break
+        return {"epg_listings": out}
+
+    def xmltv_chunks(self, base, offset):
+        """Generator of ~64 KB bytes chunks; the document is never held in memory."""
+        sign = -1 if offset.startswith("-") else 1
+        zone = dt.timezone(dt.timedelta(seconds=sign * (int(offset[1:3]) * 3600 + int(offset[3:5]) * 60)))
+        cache = {}
+
+        def fmt(ts):
+            r = cache.get(ts)
+            if r is None:
+                r = cache[ts] = dt.datetime.fromtimestamp(ts, zone).strftime("%Y%m%d%H%M%S") + " " + offset
+            return r
+
+        parts, size = ['<?xml version="1.0" encoding="UTF-8"?>\n<tv generator-info-name="fakepanel">\n'], 0
+        suffix = self.suffix
+        titles = [t + suffix for t in SYN_TITLES_ESC]
+        longs = [t + escape(SYN_LONG) + suffix for t in SYN_TITLES_ESC]
+        for pass_ in (0, 1):  # 0: <channel> elements, 1: <programme> elements
+            for i in range(1, self.n + 1):
+                c = self.channel(i)
+                if not c["has_epg"]:
+                    continue
+                tvg = c["tvg_id"]
+                if pass_ == 0:
+                    s = (f'<channel id="{tvg}"><display-name>{escape(c["name"])}</display-name>'
+                         f'<icon src="{base}/logo/{i}.png"/></channel>\n')
+                    parts.append(s)
+                    size += len(s)
+                else:
+                    tail = f'" channel="{tvg}"><title lang="en">'
+                    for a, b, ti, lng in self.schedule(i):
+                        s = f'<programme start="{fmt(a)}" stop="{fmt(b)}{tail}{longs[ti] if lng else titles[ti]}</title></programme>\n'
+                        parts.append(s)
+                        size += len(s)
+                        if size >= SYN_CHUNK:
+                            yield "".join(parts).encode()
+                            parts, size = [], 0
+                if size >= SYN_CHUNK:
+                    yield "".join(parts).encode()
+                    parts, size = [], 0
+        parts.append("</tv>\n")
+        yield "".join(parts).encode()
+
+    def m3u(self, cfg, base, ext, plus=True):
+        u, p = cfg["username"], cfg["password"]
+        names = dict(self.categories())
+        L = [f'#EXTM3U x-tvg-url="{base}/xmltv.php?username={u}&password={p}"']
+        for i in range(1, self.n + 1):
+            c = self.channel(i)
+            if plus:
+                attrs = f'tvg-id="{c["tvg_id"]}" tvg-name="{c["name"]}" tvg-logo="{base}/logo/{i}.png" group-title="{names[c["cat"]]}"'
+                if c["archive"]:
+                    attrs += f' catchup="xc" catchup-days="{c["archive_days"]}"'
+                L.append(f"#EXTINF:-1 {attrs},{c['name']}")
+            else:
+                L.append(f"#EXTINF:-1,{c['name']}")
+            L.append(f"{base}/live/{u}/{p}/{i}.{ext}")
+        return ("\n".join(L) + "\n").encode()

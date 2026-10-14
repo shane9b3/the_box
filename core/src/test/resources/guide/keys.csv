@@ -1,0 +1,183 @@
+# Key tables of docs/design/m3-guide.md §3.4.2–§3.4.6, one row per (zone/overlay/mode, precondition, action).
+# Read by GuideKeyTableTest. Preconditions are named setups (GuideKeyTableTest.PRE). Columns:
+# section, pre, action (BoxAction name; DIGITn = DIGIT with digit n), mode, zone, overlay, effects, check
+# overlay: none | Groups | GroupMenu | Days | Menu | Sheet | Number | ExitHint | ExitDialog | Card
+# effects: '-' = no effect besides ensureRows/ensureWindow/announce/loadInfo/loadTunedNow; else ';'-separated names that must occur
+# check: '-' | same | moved | home | now | row:N | tab:N | chip:X | panel:N | groups:N | days:N | menu:N | sheet:N | digits:S | card:N
+section,pre,action,mode,zone,overlay,effects,check
+# ---- GRID §3.4.2
+grid,grid_row1,LEFT,GUIDE,GRID,Groups,-,same
+grid,grid_home,LEFT,GUIDE,GRID,none,-,moved
+grid,grid_home,RIGHT,GUIDE,GRID,none,-,moved
+grid,grid_row1,UP,GUIDE,GRID,none,-,row:0
+grid,grid_home,UP,GUIDE,HEADER,none,-,chip:GROUP
+grid,grid_home,DOWN,GUIDE,GRID,none,-,row:1
+grid,grid_last,DOWN,GUIDE,GRID,none,-,row:9
+grid,grid_home,ZAP_DOWN,GUIDE,GRID,none,-,row:6
+grid,grid_home,PAGE_DOWN,GUIDE,GRID,none,-,row:6
+grid,grid_last,ZAP_UP,GUIDE,GRID,none,-,row:3
+grid,grid_last,PAGE_UP,GUIDE,GRID,none,-,row:3
+grid,grid_home,SEEK_FORWARD,GUIDE,GRID,none,-,moved
+grid,grid_home,SEEK_BACK,GUIDE,GRID,none,-,moved
+grid,grid_home,SELECT,FULL,GRID,none,setFullScreen,-
+grid,grid_row1,SELECT,GUIDE,GRID,none,tune,same
+grid,grid_row0_past_archive,SELECT,FULL,GRID,none,playArchive;setFullScreen,-
+grid,grid_row1_past,SELECT,GUIDE,GRID,none,tune,same
+grid,grid_row1_future,SELECT,GUIDE,GRID,Sheet,-,same
+grid,grid_row3_noepg,SELECT,GUIDE,GRID,none,tune,same
+grid,grid_home_error_retry,SELECT,GUIDE,GRID,none,retry,same
+grid,grid_home_error_noretry,SELECT,FULL,GRID,none,setFullScreen,-
+grid,grid_home,CONTEXT_MENU,GUIDE,GRID,Menu,queryFavourite,same
+grid,grid_scrolled,BACK,GUIDE,GRID,none,-,home
+grid,grid_home,BACK,FULL,GRID,none,setFullScreen,-
+grid,grid_home,PLAY_PAUSE,FULL,GRID,none,setFullScreen,-
+grid,grid_idle_home,PLAY_PAUSE,GUIDE,GRID,none,-,same
+grid,grid_scrolled,JUMP_TO_NOW,GUIDE,GRID,none,-,now
+grid,grid_scrolled,OPEN_GUIDE,GUIDE,GRID,none,-,now
+grid,grid_home,FAVOURITES,GUIDE,GRID,none,loadLineup;persistSource,-
+grid,grid_home_no_favourites,FAVOURITES,GUIDE,GRID,none,toast,same
+grid,grid_row0_onnow_untuned,START_OVER,FULL,GRID,none,playArchive;setFullScreen,-
+grid,grid_row1_future,START_OVER,GUIDE,GRID,none,setReminder,same
+grid,grid_row1,START_OVER,GUIDE,GRID,none,toast,same
+grid,grid_row1_future,REMIND,GUIDE,GRID,none,setReminder,same
+grid,grid_row1,REMIND,GUIDE,GRID,none,-,same
+grid,grid_home,GROUPS_PANEL,GUIDE,GRID,Groups,-,same
+grid,grid_home,DAY_STRIP,GUIDE,GRID,Days,-,same
+grid,grid_home,PREVIOUS_CHANNEL,GUIDE,GRID,none,previousChannel,same
+grid,grid_home,DIGIT1,GUIDE,GRID,Number,-,digits:1
+grid,grid_home,NUMBER_ENTRY,GUIDE,GRID,Number,-,digits:0
+grid,grid_home,AUDIO,GUIDE,GRID,none,-,same
+grid,grid_home,SUBTITLES,GUIDE,GRID,none,-,same
+grid,grid_home,ASPECT,GUIDE,GRID,none,-,same
+grid,grid_home,QUICK_MENU,GUIDE,GRID,none,-,same
+grid,grid_home,INFO_BAR,GUIDE,GRID,none,-,same
+grid,grid_home,CHANNEL_LIST,GUIDE,GRID,none,-,same
+grid,grid_home,STATS_OVERLAY,GUIDE,GRID,none,-,same
+grid,grid_home,JUMP_TO_LIVE,GUIDE,GRID,none,-,same
+grid,grid_home,SCREEN_OFF,GUIDE,GRID,none,-,same
+grid,grid_home,GROUP_NEXT,GUIDE,GRID,none,-,same
+grid,grid_home,GROUP_PREV,GUIDE,GRID,none,-,same
+# ---- TABS §3.4.3
+tabs,tabs,RIGHT,GUIDE,TABS,none,-,tab:1
+tabs,tabs,LEFT,GUIDE,TABS,none,-,tab:0
+tabs,tabs_settings,RIGHT,GUIDE,TABS,none,-,tab:2
+tabs,tabs,SELECT,GUIDE,GRID,none,-,same
+tabs,tabs_search,SELECT,SEARCH,TABS,none,openSearch,-
+tabs,tabs_settings,SELECT,SETTINGS,TABS,none,openSettings,-
+tabs,tabs,UP,GUIDE,TABS,none,-,tab:0
+tabs,tabs,DOWN,GUIDE,PANEL,none,-,panel:0
+tabs,tabs,BACK,GUIDE,GRID,none,-,same
+# ---- PANEL §3.4.3 (home buttons: WATCHING, FROM_START, MORE)
+panel,panel,RIGHT,GUIDE,PANEL,none,-,panel:1
+panel,panel,LEFT,GUIDE,PANEL,none,-,panel:0
+panel,panel,SELECT,FULL,PANEL,none,setFullScreen,-
+panel,panel_from_start,SELECT,FULL,PANEL,none,playArchive;setFullScreen,-
+panel,panel_more,SELECT,GUIDE,PANEL,Menu,queryFavourite,-
+panel,panel,UP,GUIDE,TABS,none,-,-
+panel,panel,DOWN,GUIDE,HEADER,none,-,chip:GROUP
+panel,panel,BACK,GUIDE,GRID,none,-,same
+# ---- HEADER §3.4.3
+header,header,RIGHT,GUIDE,HEADER,none,-,chip:DAY
+header,header,LEFT,GUIDE,HEADER,none,-,chip:GROUP
+header,header,SELECT,GUIDE,HEADER,Groups,-,-
+header,header_day,SELECT,GUIDE,HEADER,Days,-,-
+header,header_now,SELECT,GUIDE,GRID,none,-,now
+header,header,UP,GUIDE,PANEL,none,-,panel:0
+header,header,DOWN,GUIDE,GRID,none,-,same
+header,header,BACK,GUIDE,GRID,none,-,same
+header,header_now,PLAY_PAUSE,GUIDE,HEADER,none,-,now
+header,header,ZAP_DOWN,GUIDE,HEADER,none,-,row:6
+# ---- Groups overlay §3.4.4 (entries: Favourites, All, News, Sport; current All → focused 3)
+groups,groups,DOWN,GUIDE,GRID,Groups,-,groups:4
+groups,groups,UP,GUIDE,GRID,Groups,-,groups:2
+groups,groups,RIGHT,GUIDE,GRID,none,-,-
+groups,groups,LEFT,GUIDE,GRID,Groups,-,groups:3
+groups,groups,SELECT,GUIDE,GRID,none,loadLineup;persistSource,-
+groups,groups_search,SELECT,SEARCH,GRID,none,openSearch,-
+groups,groups_settings,SELECT,SETTINGS,GRID,none,openSettings,-
+groups,groups_news,CONTEXT_MENU,GUIDE,GRID,GroupMenu,-,-
+groups,groups,CONTEXT_MENU,GUIDE,GRID,Groups,-,groups:3
+groups,groups,BACK,GUIDE,GRID,none,-,-
+groups,groups,ZAP_DOWN,GUIDE,GRID,Groups,loadLineup;persistSource,groups:4
+groups,groups,PAGE_DOWN,GUIDE,GRID,Groups,loadLineup;persistSource,groups:4
+groups,groups,ZAP_UP,GUIDE,GRID,Groups,loadLineup;persistSource,groups:2
+groups,groups,PAGE_UP,GUIDE,GRID,Groups,loadLineup;persistSource,groups:2
+groupmenu,groups_menu,DOWN,GUIDE,GRID,GroupMenu,-,-
+groupmenu,groups_menu,SELECT,GUIDE,GRID,Groups,groupAction,-
+groupmenu,groups_menu,BACK,GUIDE,GRID,Groups,-,-
+# ---- Days (items: D20738, Yesterday, Today, Tonight, Tomorrow, D20742; focused Today = 2)
+days,days,RIGHT,GUIDE,HEADER,Days,-,days:3
+days,days,LEFT,GUIDE,HEADER,Days,-,days:1
+days,days,UP,GUIDE,HEADER,Days,-,days:2
+days,days,SELECT,GUIDE,HEADER,none,-,-
+days,days,BACK,GUIDE,HEADER,none,-,-
+# ---- Menu (home on now, covered: WATCH_FROM_START, ADD_FAVOURITE, HIDE_CHANNEL)
+menu,menu,DOWN,GUIDE,GRID,Menu,-,menu:1
+menu,menu,UP,GUIDE,GRID,Menu,-,menu:0
+menu,menu,SELECT,FULL,GRID,none,playArchive;setFullScreen,-
+menu,menu_favourite,SELECT,GUIDE,GRID,none,setFavourite;toast,-
+menu,menu_hide,SELECT,GUIDE,GRID,none,hideChannel;toast,-
+menu,menu,BACK,GUIDE,GRID,none,-,-
+menu,menu,LEFT,GUIDE,GRID,Menu,-,menu:0
+# ---- Sheet (future cell)
+sheet,sheet,RIGHT,GUIDE,GRID,Sheet,-,sheet:1
+sheet,sheet,LEFT,GUIDE,GRID,Sheet,-,sheet:0
+sheet,sheet,SELECT,GUIDE,GRID,none,setReminder,-
+sheet,sheet_watch,SELECT,GUIDE,GRID,none,tune,-
+sheet,sheet,BACK,GUIDE,GRID,none,-,-
+sheet,sheet,UP,GUIDE,GRID,Sheet,-,sheet:0
+# ---- Number entry
+number,number,DIGIT2,GUIDE,GRID,Number,-,digits:12
+number,number,UP,GUIDE,GRID,Number,-,digits:2
+number,number,DOWN,GUIDE,GRID,Number,-,digits:0
+number,number,RIGHT,GUIDE,GRID,Number,-,digits:10
+number,number,SELECT,GUIDE,GRID,Number,lookupNumber,-
+number,number,BACK,GUIDE,GRID,none,-,-
+number,number,PLAY_PAUSE,FULL,GRID,Number,lookupNumber;setFullScreen,-
+# ---- Exit
+exit,exit_hint,BACK,GUIDE,GRID,none,exitApp,-
+exit,exit_hint,DOWN,GUIDE,GRID,none,-,row:1
+exit,exit_dialog,RIGHT,GUIDE,GRID,ExitDialog,-,-
+exit,exit_dialog,SELECT,GUIDE,GRID,none,exitApp,-
+exit,exit_dialog_cancel,SELECT,GUIDE,GRID,none,-,-
+exit,exit_dialog,BACK,GUIDE,GRID,none,-,-
+# ---- Reminder card (modal, S2)
+card,card_guard,SELECT,GUIDE,GRID,Card,-,card:0
+card,card_guard,BACK,GUIDE,GRID,Card,-,card:0
+card,card,RIGHT,GUIDE,GRID,Card,-,card:1
+card,card,SELECT,FULL,GRID,none,answerReminder;setFullScreen,-
+card,card_dismiss,SELECT,GUIDE,GRID,none,answerReminder,-
+card,card,BACK,GUIDE,GRID,none,answerReminder,-
+card,card,UP,GUIDE,GRID,Card,-,card:0
+card,card,CONTEXT_MENU,GUIDE,GRID,Card,-,card:0
+card,card,DIGIT1,GUIDE,GRID,Card,-,card:0
+# ---- FULL §3.4.5
+full,full,BACK,GUIDE,GRID,none,setFullScreen,home
+full,full,UP,FULL,GRID,none,zap,-
+full,full,ZAP_UP,FULL,GRID,none,zap,-
+full,full,DOWN,FULL,GRID,none,zap,-
+full,full,ZAP_DOWN,FULL,GRID,none,zap,-
+full,full,GROUP_NEXT,FULL,GRID,none,loadLineup;persistSource,-
+full,full,GROUP_PREV,FULL,GRID,none,loadLineup;persistSource,-
+full,full_error_retry,SELECT,FULL,GRID,none,retry,-
+full,full_error_noretry,SELECT,FULL,GRID,none,-,-
+full,full,SELECT,FULL,GRID,none,-,-
+full,full,DIGIT1,FULL,GRID,Number,-,digits:1
+full,full,NUMBER_ENTRY,FULL,GRID,Number,-,digits:0
+full,full,PREVIOUS_CHANNEL,FULL,GRID,none,previousChannel,-
+full,full,OPEN_GUIDE,GUIDE,GRID,none,setFullScreen,home
+full,full,CONTEXT_MENU,FULL,GRID,none,-,-
+full,full,LEFT,FULL,GRID,none,-,-
+full,full,AUDIO,FULL,GRID,none,-,-
+full,full,FAVOURITES,FULL,GRID,none,-,-
+# ---- Back ladder §3.4.6 (B2)
+back,grid_scrolled,BACK,GUIDE,GRID,none,-,home
+back,full_returned,BACK,GUIDE,GRID,ExitHint,-,home
+back,grid_idle_home,BACK,GUIDE,GRID,ExitHint,-,home
+back,ask_home,BACK,GUIDE,GRID,ExitDialog,-,home
+back,none_home,BACK,GUIDE,GRID,none,exitApp,home
+# ---- SEARCH / SETTINGS
+search,search,BACK,GUIDE,TABS,none,-,-
+search,search,DOWN,SEARCH,TABS,none,-,-
+settings,settings,BACK,GUIDE,TABS,none,-,-
+settings,settings,SELECT,SETTINGS,TABS,none,-,-

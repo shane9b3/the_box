@@ -17,5 +17,18 @@
                 <data android:scheme="thebox-debug" android:host="stop" />
             </intent-filter>
         </activity>
+        <!-- M3 guide seeding and switches (docs/design/m3-guide.md §5.6; WP-D): thebox-debug://guide?seed=… -->
+        <activity
+            android:name="app.thebox.debug.GuideDebugReceiver"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:screenOrientation="landscape"
+            android:theme="@style/Theme.TheBox">
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:scheme="thebox-debug" android:host="guide" />
+            </intent-filter>
+        </activity>
     </application>
 </manifest>
