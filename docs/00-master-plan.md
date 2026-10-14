@@ -88,6 +88,8 @@ Full detail: `review/architecture-review.md` §E (one page) and §B (each change
 
 The full tree (section → setting → type → default → scope → simple/advanced → which complaint it fixes) is in `review/product-review.md` §4. Rules: simple view ≤ 35 rows, never deeper than two levels, every per-playlist and per-channel override listed. Protocol-level inventory with rationale is in `research/protocols-m3u-xmltv-xtream.md` §6.
 
+Owner additions 2026-10-14 (`decisions/2026-10-14-settings-and-branding.md`): "Always passthrough" audio option, per-playlist channel-name prefix stripping (display name only), Groups-panel accelerators (Left at the column edge, CH± in the panel, long-press ←/→ in the player), and a full button-mapping screen pulled forward from v1.1 to v1. Tunneling, stream format and hide/show already exist in the tree.
+
 ## 6. Issue-prevention plan
 
 The ranked top-25 "make or break" list and the complaint → decision → verification → phase table are in `research/user-issues-and-mitigations.md` (list) and `review/product-review.md` §5 (table). Release gates taken from it:
@@ -118,9 +120,9 @@ Also in the spike phase:
 | M0 | Foundations — **done 2026-10-13** (spikes D1–D5 deferred: no hardware) | Repo, version catalog, modules, CI building the FFmpeg AAR, fake panel, benchmark harness, design tokens + density rule |
 | M1 | Data in — **done 2026-10-13** (`docs/design/m1-data-layer.md`, reviews in `docs/review/m1-*.md`) | M3U/XMLTV/Xtream parsers with fixtures, `library.db`/`epg.db`, stable keys, diff-merge, refresh report, EPG matcher (the unmatched-channels *screen* moves to M5), WorkManager refresh, Tink credential store. JVM perf: 200k-entry M3U import 1.9 s; 980k-programme EPG rebuild 20 s with 6.5 MB retained heap; warm window query < 1 ms; matcher 20k×50k 2.3 s. Device numbers still open (no low-end hardware) |
 | M2 | Playback core — **done 2026-10-14** (design `docs/design/m2-playback-core.md`, reviews `docs/review/m2-design-review.md`, `docs/review/m2-code-review.md`, Media3 facts `docs/design/m2-media3-api-notes.md`) | One `ExoPlayer` behind the root `SurfaceView`, `PlaybackController`/`TuneSession`, `LiveTsDataSource` (reconnect in-source, no `Range` on live, PCR verdict), `StreamConnectionBroker`, two-layer error policy with 44-row ladder, adaptive buffer (Auto + None/Small/Medium/Large/Extra large), five stall detectors incl. readiness stall, HW→SW codec fallback + FFmpeg audio, passthrough gate, AFR/HDR policy, lifecycle (no service in v1), debug harness, fake panel v1.1. JVM: core 1,318 / data 124 / player 302 tests. Device (API 30 TV emulator): 34 instrumented pass; I-3 ignored (emulator decoder wedge after splices, §5.10); zap P50 ≈ 0.4–0.6 s on the emulator. Open: hardware D1–D5, I-3 on hardware, I-21 flake, 35 review 'later' items |
-| M3 | Guide | Custom grid, hole-punch mini player, focused panel, group/favourites filter, day strip, archive band, reminders, search |
+| M3 | Guide | Custom grid, hole-punch mini player, focused panel, group/favourites filter, Groups panel with the accelerators of the 2026-10-14 decision, day strip, archive band, reminders, search, channel-name prefix stripping (`channel.display_name`), logo-derived banner/icon/wordmark assets |
 | M4 | Full-screen player UX | Info bar, channel list, number entry, pickers, stats overlay, error cards, catch-up scrub bar and `ArchivePlayback` |
-| M5 | Setup, settings, parental, backup | Onboarding + phone page/QR, settings tree, PIN, backup/restore, diagnostics, updater |
+| M5 | Setup, settings, parental, backup | Onboarding + phone page/QR, settings tree (incl. Always passthrough, stream format label, prefix rule, button-mapping screen), PIN, backup/restore, diagnostics, updater |
 | M6 | Hardening | Benchmarks against the gates, soak, device matrix (Fire OS 6/7/8, Onn, CCwGTV, Shield), beta |
 | v1.1 | see §2 | |
 | v2 | DVR + SMB | `:dvr` module on the broker/Tee seams, scheduler, storage backends, Recordings tab |
