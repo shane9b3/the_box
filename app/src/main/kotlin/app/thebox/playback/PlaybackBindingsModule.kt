@@ -1,12 +1,13 @@
 package app.thebox.playback
 
-// Commit-0 stub (docs/design/m2-playback-core.md §1.7). Owner: WP-D. Replace the TODO bodies; keep the names.
+import app.thebox.data.net.HttpModule
 import app.thebox.player.api.ChannelMemory
 import app.thebox.player.api.InMemoryPlaybackSettings
 import app.thebox.player.api.PlaybackSettingsSource
 import app.thebox.player.api.PlaybackSourceProvider
 import dagger.Binds
 import dagger.Module
+import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
@@ -17,5 +18,11 @@ import javax.inject.Singleton
 abstract class PlaybackBindingsModule {
     @Binds @Singleton abstract fun sourceProvider(impl: DataPlaybackSourceProvider): PlaybackSourceProvider
     @Binds @Singleton abstract fun channelMemory(impl: RoomChannelMemory): ChannelMemory
-    @Binds abstract fun settings(impl: InMemoryPlaybackSettings): PlaybackSettingsSource
+
+    companion object {
+        /** In memory in M2 (M5 binds DataStore); `defaultUserAgent` comes from `HttpModule.DEFAULT_USER_AGENT`. */
+        @Provides @Singleton
+        fun settings(impl: InMemoryPlaybackSettings): PlaybackSettingsSource =
+            impl.apply { update { it.copy(defaultUserAgent = HttpModule.DEFAULT_USER_AGENT) } }
+    }
 }
