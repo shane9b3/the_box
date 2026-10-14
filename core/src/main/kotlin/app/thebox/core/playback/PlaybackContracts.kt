@@ -247,7 +247,11 @@ sealed interface LadderDecision {
 
 // ------------------------------------------------------------------ buffer, viewport, AFR, decoders
 
-enum class BufferMode { AUTO, SMALL, MEDIUM, LARGE, EXTRA_LARGE }
+/**
+ * Buffer profile choice (§3.6.1). AUTO is adaptive (default); the others are fixed manual overrides.
+ * (follow-up 2026-10-14) NONE: live TV with the smallest profile that still plays ("None (live TV, fastest zapping)").
+ */
+enum class BufferMode { AUTO, SMALL, MEDIUM, LARGE, EXTRA_LARGE, NONE }
 
 /** Effective LoadControl thresholds. All in milliseconds except [targetBytes]. */
 data class BufferProfile(

@@ -48,6 +48,20 @@ class TsExtractorsFactoryTest {
         assertEquals(TsExtractor.MODE_MULTI_PMT, modeOf(TsExtractorsFactory(TsCompat.MULTI_PMT)))
     }
 
+    @Test
+    fun theDebugOverrideTurnsOffOnlyAccessUnitDetection() {
+        // Follow-up 2026-10-14 (O-1 diagnosis): compat level and PMT mode untouched.
+        try {
+            app.thebox.player.debug.PlayerDebugHooks.detectAccessUnitsOff = true
+            assertEquals(DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES, TsExtractorsFactory.flagsFor(TsCompat.DEFAULT))
+            assertEquals(TsExtractor.MODE_SINGLE_PMT, modeOf(TsExtractorsFactory(TsCompat.DEFAULT)))
+            assertEquals(TsExtractor.MODE_MULTI_PMT, modeOf(TsExtractorsFactory(TsCompat.MULTI_PMT)))
+        } finally {
+            app.thebox.player.debug.PlayerDebugHooks.detectAccessUnitsOff = false
+        }
+        assertEquals(TsExtractorsFactory.TS_FLAGS, TsExtractorsFactory.flagsFor(TsCompat.DEFAULT))
+    }
+
     private fun modeOf(factory: TsExtractorsFactory): Int {
         val ts = factory.createExtractors().single().underlyingImplementation
         return TsExtractor::class.java.getDeclaredField("mode").apply { isAccessible = true }.getInt(ts)

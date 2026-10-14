@@ -190,6 +190,95 @@ class StallDetectorsTest {
         repeat(30) { assertNull(step { bytesTotal += 40_000 }) }
     }
 
+    // ------------------------------------------------------------------ (b1r) readiness stall, follow-up 2026-10-14 (O-1)
+
+    /** The O-1 shape: playing, then BUFFERING with a full buffer (loader parked), no bytes, nothing rendered. */
+    private fun o1(bufferedMs: Long = 20_000, loading: Boolean = false) = playing().apply {
+        playbackState = StallConstants.STATE_BUFFERING; isPlaying = false
+        bufferedDurationMs = bufferedMs; isLoading = loading; readyThresholdMs = 3_000
+        firstMediaThisSession = true; framesSinceDisruption = 500; msSinceSeek = Long.MAX_VALUE / 4; videoDecoderInits = 1
+        videoQueuedMinusOutput = 40
+    }
+
+    @Test
+    fun readinessStallFiresInTheO1Shape() {
+        o1()
+        assertNull(d.onSample(s)) // baseline
+        repeat(4) { assertNull(step()) }
+        val v = step()
+        assertEquals(StallKind.DECODER_STUCK, v?.kind)
+        assertTrue(v!!.evidence.startsWith("readiness stall"), v.evidence)
+        assertTrue(v.evidence.contains("queued-output 40"), v.evidence)
+    }
+
+    @Test
+    fun readinessStallFiresWhileLoadingOnceTheStartThresholdIsBuffered() {
+        o1(bufferedMs = 3_000, loading = true)
+        d.onSample(s)
+        repeat(4) { assertNull(step()) }
+        assertEquals(StallKind.DECODER_STUCK, step()?.kind)
+    }
+
+    @Test
+    fun readinessStallIsSilentInAStarvedRebuffer() {
+        o1(bufferedMs = 1_500, loading = true) // below the after-rebuffer threshold and still loading
+        d.onSample(s)
+        repeat(30) { assertNull(step { bufferedDurationMs = minOf(bufferedDurationMs + 40, 2_900) }) }
+    }
+
+    @Test
+    fun readinessStallIsSilentDuringStartBuffering() {
+        o1().apply { firstMediaThisSession = false; framesSinceDisruption = 0 }
+        d.onSample(s)
+        repeat(30) { assertNull(step()) }
+    }
+
+    @Test
+    fun readinessStallWaitsSixSecondsAfterASeek() {
+        o1().apply { msSinceSeek = 0 }
+        d.onSample(s)
+        repeat(5) { assertNull(step { msSinceSeek += tick }) } // 5 s buffering, but only 5 s since the seek
+        assertEquals(StallKind.DECODER_STUCK, step { msSinceSeek += tick }?.kind)
+    }
+
+    @Test
+    fun readinessStallNeedsFramesSinceTheLastDisruption() {
+        o1().apply { framesSinceDisruption = 0 }
+        d.onSample(s)
+        repeat(30) { assertNull(step()) }
+    }
+
+    @Test
+    fun readinessStallIsSilentWithoutVideoExpected() {
+        // Invalid surface, standby grace, audio-only and the HDR poster all reach the detector as videoExpected = false.
+        o1().apply { videoExpected = false }
+        d.onSample(s)
+        repeat(30) { assertNull(step()) }
+    }
+
+    @Test
+    fun aDecoderReinitRestartsTheReadinessBaseline() {
+        o1()
+        d.onSample(s)
+        repeat(3) { assertNull(step()) }
+        assertNull(step { videoDecoderInits = 2 }) // SPS/resolution change: codec re-initialised
+        repeat(4) { assertNull(step()) }
+        assertEquals(StallKind.DECODER_STUCK, step()?.kind) // 5 s after the re-init, not 5 s after BUFFERING began
+    }
+
+    @Test
+    fun readinessStallSharesTheDecoderStuckCoolDownWithB1() {
+        // Both b1 (bytes flow, no media growth, 2.4 MB per window) and the readiness stall qualify: whichever fires
+        // first, the other stays silent for the 15 s DECODER_STUCK cool-down.
+        o1(bufferedMs = 20_000, loading = true)
+        d.onSample(s)
+        val kinds = mutableListOf<Pair<Long, StallKind>>()
+        repeat(20) { step { bytesTotal += 400_000 }?.let { kinds += s.nowMs to it.kind } }
+        assertTrue(kinds.isNotEmpty())
+        assertTrue(kinds.all { it.second == StallKind.DECODER_STUCK })
+        for (i in 1 until kinds.size) assertTrue(kinds[i].first - kinds[i - 1].first >= 15_000, "$kinds")
+    }
+
     // ------------------------------------------------------------------ (b2)
 
     @Test

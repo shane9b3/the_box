@@ -26,6 +26,18 @@ object StallConstants {
     const val DECODER_STALL_MIN_BYTES_UNKNOWN_RATE = 2_097_152L
     /** The stream rate (bytes per media second) is learned over spans in which the buffered position grew this much. */
     const val STREAM_RATE_LEARN_MEDIA_MS = 2_000L
+    /**
+     * (follow-up 2026-10-14, O-1) Readiness stall: BUFFERING this long while enough media is buffered to start means a
+     * renderer is not ready although its source has data (Media3 goes READY as soon as every renderer is ready and the
+     * LoadControl's start threshold is met).
+     */
+    const val READINESS_STALL_MS = 5_000L
+    /** No readiness-stall verdict within this long after a seek (a long GOP is decoded up to the seek target). */
+    const val READINESS_SEEK_GRACE_MS = 6_000L
+    /** "Media available" when the loader stopped (`!isLoading`) with at least this much buffered. */
+    const val READINESS_NOT_LOADING_MIN_BUFFER_MS = 2_000L
+    /** Floor of the readiness "media available" threshold (BufferMode.NONE starts at 500 ms). */
+    const val READINESS_MIN_BUFFER_MS = 1_000L
     const val POSITION_STUCK_MS = 4_000L
     /** b2: "positionMs advanced < 500 ms over POSITION_STUCK_MS". */
     const val POSITION_STUCK_MIN_ADVANCE_MS = 500L
@@ -55,6 +67,10 @@ data class StallThresholds(
     val decoderStallMaxMediaGrowthMs: Long = StallConstants.DECODER_STALL_MAX_MEDIA_GROWTH_MS,
     val decoderStallMinBytesUnknownRate: Long = StallConstants.DECODER_STALL_MIN_BYTES_UNKNOWN_RATE,
     val streamRateLearnMediaMs: Long = StallConstants.STREAM_RATE_LEARN_MEDIA_MS,
+    val readinessStallMs: Long = StallConstants.READINESS_STALL_MS,
+    val readinessSeekGraceMs: Long = StallConstants.READINESS_SEEK_GRACE_MS,
+    val readinessNotLoadingMinBufferMs: Long = StallConstants.READINESS_NOT_LOADING_MIN_BUFFER_MS,
+    val readinessMinBufferMs: Long = StallConstants.READINESS_MIN_BUFFER_MS,
     val positionStuckMs: Long = StallConstants.POSITION_STUCK_MS,
     val positionStuckMinAdvanceMs: Long = StallConstants.POSITION_STUCK_MIN_ADVANCE_MS,
     val frozenVideoMs: Long = StallConstants.FROZEN_VIDEO_MS,
@@ -94,6 +110,10 @@ class StallDetectorsImpl(private val t: StallThresholds = StallThresholds()) : S
     private var rateBaseMedia = NEVER
     private var streamBytesPerMediaSecond = 0L
 
+    // (b1r) readiness stall
+    private var rsSince = NEVER
+    private var rsDecoderInits = -1
+
     // (b2)
     private var b2Since = NEVER
     private var b2Pos = 0L
@@ -108,6 +128,7 @@ class StallDetectorsImpl(private val t: StallThresholds = StallThresholds()) : S
     override fun reset(nowMs: Long) {
         hlsSince = NEVER
         b1Since = NEVER
+        rsSince = NEVER
         b2Since = NEVER
         cSince = NEVER
         rateBaseMedia = NEVER // a seek or re-prepare moves the buffered position: start a new learning span
@@ -133,6 +154,7 @@ class StallDetectorsImpl(private val t: StallThresholds = StallThresholds()) : S
         learnStreamRate(s)
         return checkNoBytes(s, now)
             ?: checkDecoderStuck(s, now)
+            ?: checkReadinessStall(s, now)
             ?: checkPositionStuck(s, now)
             ?: checkFrozen(s, now)
             ?: checkAudioStart(s, now)
@@ -206,6 +228,35 @@ class StallDetectorsImpl(private val t: StallThresholds = StallThresholds()) : S
         }
         rebaseB1(s, now, media) // next window
         return null
+    }
+
+    /**
+     * (b1r, follow-up 2026-10-14, O-1) Readiness stall: BUFFERING continuously for [StallThresholds.readinessStallMs]
+     * although enough media is buffered to start (`bufferedDurationMs ≥ readyThresholdMs`, the current profile's
+     * after-rebuffer threshold, or the loader stopped with ≥ 2 s), after this session's first media, with frames
+     * rendered since the last seek/prepare/track change, ≥ 6 s after a seek, and video expected (valid surface, no
+     * grace, not audio-only or poster). The baseline restarts when the video decoder is re-initialised. Shares
+     * DECODER_STUCK (and its cool-down) with b1; routes to L27. The decoder counters are evidence only.
+     */
+    private fun checkReadinessStall(s: WatchdogSample, now: Long): StallVerdict? {
+        val buffering = s.playbackState == StallConstants.STATE_BUFFERING && !s.inDataSourceReconnect
+        if (!buffering || rsSince == NEVER || s.videoDecoderInits != rsDecoderInits) {
+            rsSince = if (buffering) now else NEVER
+            rsDecoderInits = s.videoDecoderInits
+            return null
+        }
+        val elapsed = now - rsSince
+        if (elapsed < t.readinessStallMs) return null
+        if (!s.videoExpected || !s.firstMediaThisSession || s.framesSinceDisruption <= 0 || s.msSinceSeek < t.readinessSeekGraceMs) return null
+        val threshold = s.readyThresholdMs
+        val mediaReady = (threshold > 0 && s.bufferedDurationMs >= maxOf(threshold, t.readinessMinBufferMs)) ||
+            (!s.isLoading && s.bufferedDurationMs >= t.readinessNotLoadingMinBufferMs)
+        if (!mediaReady || coolingDown(StallKind.DECODER_STUCK, now)) return null
+        rsSince = now
+        return fire(
+            StallKind.DECODER_STUCK, now,
+            "readiness stall: buffering ${elapsed}ms buffered ${s.bufferedDurationMs}ms queued-output ${s.videoQueuedMinusOutput}",
+        )
     }
 
     private fun rebaseB1(s: WatchdogSample, now: Long, media: Long) {

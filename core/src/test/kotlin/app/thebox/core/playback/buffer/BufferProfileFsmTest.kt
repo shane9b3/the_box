@@ -66,6 +66,8 @@ class BufferProfileFsmTest {
             BufferMode.MEDIUM to BufferProfile(5_000, 5_000, 15_000, 30_000, normal, -1),
             BufferMode.LARGE to BufferProfile(10_000, 10_000, 30_000, 45_000, normal, -1),
             BufferMode.EXTRA_LARGE to BufferProfile(20_000, 20_000, 40_000, 60_000, normal, -1),
+            // Follow-up 2026-10-14: None (live TV, fastest zapping), a manual mode with no adaptive climb.
+            BufferMode.NONE to BufferProfile(500, 500, 2_000, 5_000, normal, -1),
         )
         for ((mode, p) in expect) {
             assertEquals(p, fsm.profileFor(key, mode, false))

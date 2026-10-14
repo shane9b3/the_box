@@ -194,6 +194,22 @@ class WatchdogSample {
     var audioUnderrunsLast3s = 0
     var audioPassthrough = false
     var msSinceSeekOrPrepare = 0L
+
+    // (follow-up 2026-10-14, O-1) readiness stall inputs, filled by WP-C's PlaybackWatchdog.
+    /** `isLoading` of the player (false: the loader stopped, e.g. the buffer reached `maxBufferMs`). */
+    var isLoading = true
+    /** The current profile's after-rebuffer start threshold in ms (0 = unknown: that branch is off). */
+    var readyThresholdMs = 0L
+    /** This session reached its first-media milestone (first frame, or audio for audio-only). */
+    var firstMediaThisSession = false
+    /** Video frames rendered since the last seek, prepare or track change. */
+    var framesSinceDisruption = 0L
+    /** Time since the last seek (a large value when there was none). */
+    var msSinceSeek = Long.MAX_VALUE / 4
+    /** `onVideoDecoderInitialized` count: a change re-takes the readiness-stall baseline. */
+    var videoDecoderInits = 0
+    /** Diagnostics only: `queuedInputBufferCount − (rendered + skipped + dropped)` of the video decoder. */
+    var videoQueuedMinusOutput = 0L
 }
 
 data class StallVerdict(val kind: StallKind, val evidence: String)

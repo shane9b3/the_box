@@ -6,6 +6,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.C
 import androidx.media3.common.Format
 import androidx.media3.common.MimeTypes
+import androidx.media3.common.Player
 import androidx.media3.common.Timeline
 import androidx.media3.common.TrackGroup
 import androidx.media3.common.Tracks
@@ -282,6 +283,39 @@ class PlaybackWatchdogTest {
         watchdog.sampleNow()
         assertEquals("measured from the start of the pending read", 9_000L, watchdog.sample.lastByteAgeMs)
         assertEquals(StallKind.NO_BYTES, backstop(watchdog.sample.lastByteAgeMs)?.kind)
+    }
+
+    @Test
+    fun readinessStallInputsAreFed() {
+        // Follow-up 2026-10-14 (O-1): profile threshold read fresh, decoder re-inits, seeks and the session milestone.
+        var profile = app.thebox.core.playback.BufferProfile(1_000, 3_000, 10_000, 20_000, 48 shl 20, 0)
+        val w = PlaybackWatchdog(bundle.player, detectors, clock, profile = { profile })
+        try {
+            w.beginSession()
+            w.sampleNow()
+            assertEquals(3_000L, w.sample.readyThresholdMs)
+            assertFalse(w.sample.firstMediaThisSession)
+            assertEquals(0, w.sample.videoDecoderInits)
+            assertTrue("no seek yet", w.sample.msSinceSeek > 1_000_000)
+            profile = profile.copy(afterRebufferMs = 6_000)
+            w.onVideoDecoderInitialized(eventTime, "OMX.test", 0, 0)
+            w.onTracksChanged(eventTime, tracks(video = true, audio = true))
+            w.onRenderedFirstFrame(eventTime, Any(), 0)
+            val seek = Player.PositionInfo(null, 0, null, null, 0, 0, 0, -1, -1)
+            w.onPositionDiscontinuity(eventTime, seek, seek, Player.DISCONTINUITY_REASON_SEEK)
+            idle(1_000)
+            w.sampleNow()
+            assertEquals(6_000L, w.sample.readyThresholdMs)
+            assertTrue(w.sample.firstMediaThisSession)
+            assertEquals(1, w.sample.videoDecoderInits)
+            assertEquals(1_000L, w.sample.msSinceSeek)
+            assertEquals(0L, w.sample.framesSinceDisruption)
+            w.beginSession()
+            w.sampleNow()
+            assertFalse("per session", w.sample.firstMediaThisSession)
+        } finally {
+            w.release()
+        }
     }
 
     private fun tracks(video: Boolean, audio: Boolean): Tracks {

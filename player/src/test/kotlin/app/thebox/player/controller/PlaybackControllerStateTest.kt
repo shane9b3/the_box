@@ -460,4 +460,14 @@ class PlaybackControllerStateTest {
         f.idle()
         assertEquals(PlaybackErrorCode.INTERNAL, (f.state as PlaybackState.Error).error.code)
     }
+
+    @Test
+    fun ladderWindowsAreKeyedByPlaylistAndStableKey() {
+        // Follow-up 2026-10-14 (half of Later N-L2): the same stable key in two playlists is two channels.
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.controller.tune(TuneTarget.Channel(ChannelIdentity(2, CH1.stableKey)))
+        f.idle()
+        assertEquals(listOf<String?>("1/ch1", "2/ch1"), f.ladder.channels)
+    }
 }

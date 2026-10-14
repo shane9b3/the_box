@@ -68,7 +68,10 @@ internal class TsExtractorsFactory(
          */
         const val COMPAT_TS_FLAGS: Int = DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES
 
-        fun flagsFor(compat: TsCompat): Int = if (compat == TsCompat.MULTI_PMT) COMPAT_TS_FLAGS else TS_FLAGS
+        fun flagsFor(compat: TsCompat): Int {
+            val flags = if (compat == TsCompat.MULTI_PMT) COMPAT_TS_FLAGS else TS_FLAGS
+            return if (TsDebugOverrides.detectAccessUnitsOff) flags and DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS.inv() else flags
+        }
 
         /** `DEAD_TRACK_GRACE_BYTES` (App. B). */
         const val DEAD_TRACK_GRACE_BYTES: Long = 1_048_576L
@@ -286,4 +289,12 @@ internal class DeadTrackGuard(
     private companion object {
         const val INITIAL_PENDING = 16 * 1024
     }
+}
+
+/**
+ * (follow-up 2026-10-14, O-1 diagnosis) Debug-only override, set only through `app.thebox.player.debug.PlayerDebugHooks`
+ * (the `debug` source set); always false in release. Turns off `FLAG_DETECT_ACCESS_UNITS` alone.
+ */
+internal object TsDebugOverrides {
+    @Volatile var detectAccessUnitsOff: Boolean = false
 }

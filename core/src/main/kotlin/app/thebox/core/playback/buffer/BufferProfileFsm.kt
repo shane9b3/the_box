@@ -26,6 +26,11 @@ object BufferConstants {
         Thresholds(2_500, 10_000, 30_000, 45_000),
         Thresholds(5_000, 20_000, 40_000, 60_000),
     )
+    /**
+     * (follow-up 2026-10-14) Manual "None": the smallest profile that still plays (the decoder needs one full frame).
+     * Fastest zapping; rebuffers more often on unstable providers.
+     */
+    val NONE = Thresholds(500, 500, 2_000, 5_000)
     val SMALL = Thresholds(2_000, 2_000, 10_000, 20_000)
     val MEDIUM = Thresholds(5_000, 5_000, 15_000, 30_000)
     val LARGE = Thresholds(10_000, 10_000, 30_000, 45_000)
@@ -111,6 +116,7 @@ class BufferProfileFsmImpl : BufferProfileFsm {
             BufferMode.MEDIUM -> profile(BufferConstants.MEDIUM, BufferConstants.MANUAL_LEVEL, lowRam)
             BufferMode.LARGE -> profile(BufferConstants.LARGE, BufferConstants.MANUAL_LEVEL, lowRam)
             BufferMode.EXTRA_LARGE -> profile(BufferConstants.EXTRA_LARGE, BufferConstants.MANUAL_LEVEL, lowRam)
+            BufferMode.NONE -> profile(BufferConstants.NONE, BufferConstants.MANUAL_LEVEL, lowRam)
         }
 
         private fun profile(t: BufferConstants.Thresholds, level: Int, lowRam: Boolean) =

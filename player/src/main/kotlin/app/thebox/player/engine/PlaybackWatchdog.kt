@@ -13,6 +13,8 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioSink
 import app.thebox.core.common.BoxLog
+import app.thebox.core.playback.BufferProfile
+import androidx.media3.exoplayer.DecoderCounters
 import app.thebox.core.playback.MonoClock
 import app.thebox.core.playback.StallDetectors
 import app.thebox.core.playback.StallVerdict
@@ -45,6 +47,8 @@ internal class PlaybackWatchdog(
     private val detectors: StallDetectors,
     private val clock: MonoClock,
     looper: Looper = player.applicationLooper,
+    /** (follow-up 2026-10-14) The current buffer profile, read fresh each tick for the readiness stall's threshold. */
+    private val profile: () -> BufferProfile? = { null },
 ) : PlaybackWatchdogApi, AnalyticsListener {
 
     /** The one sample, reused every tick. Exposed for diagnostics and tests (read it on the main thread). */
@@ -75,6 +79,12 @@ internal class PlaybackWatchdog(
     private var lastState = Player.STATE_IDLE
     private val underrunAtMs = LongArray(UNDERRUN_RING)
     private var underrunNext = 0
+
+    // Readiness stall (follow-up 2026-10-14, O-1).
+    private var renderBase = 0L
+    private var renderBaseStale = true
+    private var lastSeekAtMs = NONE
+    private var videoDecoderInits = 0
 
     /** -1 undecided, 0 audio milestone, 1 video milestone. */
     private var milestone = -1
@@ -129,6 +139,7 @@ internal class PlaybackWatchdog(
         val now = clock.nowMs()
         seekOrPrepareAtMs = now
         underrunAtMs.fill(0L)
+        renderBaseStale = true
         // (code review 2026-10-14, N-S4) reset() plus the stream rate b1 learned from the previous stream.
         detectors.newStream(now)
     }
@@ -214,10 +225,24 @@ internal class PlaybackWatchdog(
             counters.ensureUpdated()
             s.videoRenderedCount = counters.renderedOutputBufferCount.toLong()
             s.videoDroppedCount = counters.droppedBufferCount.toLong()
+            s.videoQueuedMinusOutput = queuedMinusOutput(counters)
         } else {
             s.videoRenderedCount = 0
             s.videoDroppedCount = 0
+            s.videoQueuedMinusOutput = 0
         }
+        // Readiness stall inputs (follow-up 2026-10-14). The counters object is new per renderer enable, so a drop
+        // below the base also re-takes it.
+        if (renderBaseStale || s.videoRenderedCount < renderBase) {
+            renderBase = s.videoRenderedCount
+            renderBaseStale = false
+        }
+        s.framesSinceDisruption = s.videoRenderedCount - renderBase
+        s.isLoading = player.isLoading
+        s.readyThresholdMs = profile()?.afterRebufferMs?.toLong() ?: 0L
+        s.firstMediaThisSession = milestoneReached
+        s.msSinceSeek = if (lastSeekAtMs == NONE) Long.MAX_VALUE / 4 else now - lastSeekAtMs
+        s.videoDecoderInits = videoDecoderInits
         s.tunneling = player.isTunnelingEnabled
         s.audioExpected = expectAudio && audioSelected
         s.audioAdvancing = audioAdvancing
@@ -238,6 +263,13 @@ internal class PlaybackWatchdog(
 
     override fun onPlaybackStateChanged(eventTime: AnalyticsListener.EventTime, state: Int) {
         if (lastState == Player.STATE_IDLE && state == Player.STATE_BUFFERING) seekOrPrepareAtMs = clock.nowMs()
+        if (lastState == Player.STATE_READY && state == Player.STATE_BUFFERING) {
+            // D4 data for the hardware run (O-1): how far input runs ahead of output at every rebuffer.
+            player.videoDecoderCounters?.let { c ->
+                c.ensureUpdated()
+                BoxLog.d(TAG) { "rebuffer: video queued=${c.queuedInputBufferCount} rendered=${c.renderedOutputBufferCount} skipped=${c.skippedOutputBufferCount} dropped=${c.droppedBufferCount} inits=${c.decoderInitCount}" }
+            }
+        }
         lastState = state
     }
 
@@ -253,10 +285,13 @@ internal class PlaybackWatchdog(
     ) {
         if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) {
             seekOrPrepareAtMs = clock.nowMs()
+            lastSeekAtMs = seekOrPrepareAtMs
+            renderBaseStale = true
         }
     }
 
     override fun onTracksChanged(eventTime: AnalyticsListener.EventTime, tracks: Tracks) {
+        renderBaseStale = true
         videoSelected = tracks.isTypeSelected(C.TRACK_TYPE_VIDEO)
         audioSelected = tracks.isTypeSelected(C.TRACK_TYPE_AUDIO)
         if (milestone == -1 && !tracks.isEmpty) {
@@ -281,6 +316,15 @@ internal class PlaybackWatchdog(
         audioPassthrough = !Util.isEncodingLinearPcm(audioTrackConfig.encoding)
     }
 
+    override fun onVideoDecoderInitialized(
+        eventTime: AnalyticsListener.EventTime,
+        decoderName: String,
+        initializedTimestampMs: Long,
+        initializationDurationMs: Long,
+    ) {
+        videoDecoderInits++
+    }
+
     override fun onAudioUnderrun(eventTime: AnalyticsListener.EventTime, bufferSize: Int, bufferSizeMs: Long, elapsedSinceLastFeedMs: Long) {
         underrunAtMs[underrunNext] = clock.nowMs()
         underrunNext = (underrunNext + 1) % UNDERRUN_RING
@@ -291,6 +335,9 @@ internal class PlaybackWatchdog(
         milestoneReached = true
         firstMediaListener?.invoke(video)
     }
+
+    private fun queuedMinusOutput(c: DecoderCounters): Long =
+        c.queuedInputBufferCount.toLong() - c.renderedOutputBufferCount - c.skippedOutputBufferCount - c.droppedBufferCount
 
     companion object {
         private const val TAG = "Watchdog"

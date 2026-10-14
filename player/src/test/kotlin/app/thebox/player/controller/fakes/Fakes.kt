@@ -242,6 +242,8 @@ internal class FakeLadder : ErrorLadder {
     data class Seen(val signal: FailureSignal, val ctx: LadderContext)
 
     val seen = mutableListOf<Seen>()
+    val channels = mutableListOf<String?>()
+    override fun beginChannel(channelKey: String?) { channels += channelKey }
     var script: (FailureSignal, LadderContext) -> LadderDecision = { _, _ -> LadderDecision.Fail(PlaybackError(PlaybackErrorCode.INTERNAL)) }
     var counters: (LadderCounters) -> LadderCounters = { it.copy(transientRetries = it.transientRetries + 1) }
 

@@ -176,7 +176,7 @@ Both lists, deduplicated. Two one-line items sat in code already being changed f
 
 ## O-1 decoder-output stall detector (proposal under review)
 
-**Status: pending.** Copied from the engine half unchanged. Not implemented: a separate adversarial review of this proposal is running and the lead decides afterwards. I-3 stays `@Ignore`d. Note that the "recovery from E-B1's false-positive backstop" mentioned below no longer exists after the E-B1 fix; only Media3's 30 s stuck-buffering backstop remains for O-1 until then.
+**Status: decided 2026-10-14 (follow-up): not adopted.** Replaced by the readiness stall (design §3.7 b1r, §5.9, §5.10). Copied from the engine half unchanged below for the record. I-3 stays `@Ignore`d. The "recovery from E-B1's false-positive backstop" mentioned below no longer exists after the E-B1 fix.
 
 **What O-1 is, from the code.** The four §3.7 detectors gate on state:
 - b2 (position stuck) and c (frozen picture) need READY + `isPlaying`;

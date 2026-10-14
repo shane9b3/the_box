@@ -212,6 +212,7 @@ internal class DefaultEngineParts(
         player,
         StallDetectorsImpl(StallThresholds(tsNoBytesBackstopMs = 2 * LiveTsDataSource.NO_BYTES_TIMEOUT_MS)),
         clock,
+        profile = { bundle.loadControl.profile },
     )
     private val displayModeImpl = DisplayModeController.create(
         context, picker, clock, afrMode = { settings.current.afrMode }, setPlayerStrategy = { player.setVideoChangeFrameRateStrategy(it) },

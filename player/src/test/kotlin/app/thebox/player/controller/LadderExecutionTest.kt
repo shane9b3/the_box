@@ -19,6 +19,9 @@ import app.thebox.player.api.TuneTarget
 import app.thebox.player.controller.fakes.CH1
 import app.thebox.player.controller.fakes.ControllerFixture
 import app.thebox.player.internal.TsCompat
+import app.thebox.player.datasource.FailureInfo
+import app.thebox.player.datasource.LiveFailureKind
+import app.thebox.player.datasource.LiveStreamException
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -142,13 +145,73 @@ class LadderExecutionTest {
     }
 
     @Test
-    fun reprepareWithTsCompatPersistsLevelOneAndRebuildsMultiPmt() {
+    fun reprepareWithTsCompatRebuildsMultiPmtWithoutSavingAtOnce() {
+        // Follow-up 2026-10-14: the raise applies to the cycle at once; saving waits for healthy playback (below).
         tuneAndFail(LadderDecision.Reprepare(raiseTsCompat = true), playFirst = true)
         f.idle()
         assertEquals(TsCompat.MULTI_PMT, f.sources.last.compat)
-        assertEquals(1, f.memory.rows[CH1]?.tsCompatLevel)
+        assertEquals(null, f.memory.rows[CH1]?.tsCompatLevel?.takeIf { it > 0 })
         val st = f.state as PlaybackState.Stalled
         assertEquals("Reprepare", st.step)
+    }
+
+    /** Plays CH1, then the ladder answers [signalOf]'s failure with an L27b raise and the raised session plays. */
+    private fun raiseCompatAndPlay(fire: () -> Unit) {
+        var used = false
+        f.ladder.script = { _, _ -> if (!used) { used = true; LadderDecision.Reprepare(raiseTsCompat = true) } else LadderDecision.Fail(PlaybackError(PlaybackErrorCode.INTERNAL)) }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle(); f.play(); f.advance(1_000)
+        fire()
+        f.idle()
+        assertEquals(TsCompat.MULTI_PMT, f.sources.last.compat)
+        f.play() // the raised session reaches first media
+    }
+
+    private fun savedLevel() = f.memory.rows[CH1]?.tsCompatLevel ?: 0
+
+    @Test
+    fun aCompatRaiseFromADecoderStallIsSavedAfterThirtySecondsHealthy() {
+        raiseCompatAndPlay { f.engine.watchdog.onStall!!(StallVerdict(StallKind.DECODER_STUCK, "test")) }
+        f.advance(29_000)
+        assertEquals("not yet", 0, savedLevel())
+        f.advance(1_500)
+        assertEquals(1, savedLevel())
+    }
+
+    @Test
+    fun aCompatRaiseIsNotSavedWhenTheSessionEndsFirst() {
+        raiseCompatAndPlay { f.engine.watchdog.onStall!!(StallVerdict(StallKind.DECODER_STUCK, "test")) }
+        f.advance(20_000)
+        f.controller.stop(app.thebox.player.api.StopReason.USER)
+        f.advance(30_000)
+        assertEquals(0, savedLevel())
+    }
+
+    @Test
+    fun aCompatRaiseFromPcrExhaustionIsNeverSaved() {
+        raiseCompatAndPlay {
+            val id = f.state.target!!.tuneId
+            val e = LiveStreamException(
+                LiveFailureKind.PCR_DISCONTINUITY,
+                FailureInfo(null, "panel.example:8080", 1_000, 1, FailureInfo.Phase.READ, null, 5_000L, 0),
+                androidx.media3.datasource.DataSpec(android.net.Uri.parse("thebox-session://$id")),
+                null,
+            )
+            f.exo.emitError(androidx.media3.exoplayer.ExoPlaybackException.createForSource(e, e.reason))
+        }
+        assertTrue(f.ladder.seen.first().signal is FailureSignal.PcrDiscontinuity)
+        f.advance(60_000)
+        assertEquals(0, savedLevel())
+    }
+
+    @Test
+    fun aRebufferAtTheRaisedLevelPreventsSaving() {
+        raiseCompatAndPlay { f.engine.watchdog.onStall!!(StallVerdict(StallKind.DECODER_STUCK, "test")) }
+        f.advance(10_000)
+        f.exo.emitState(androidx.media3.common.Player.STATE_BUFFERING)
+        f.exo.emitState(androidx.media3.common.Player.STATE_READY)
+        f.advance(30_000)
+        assertEquals(0, savedLevel())
     }
 
     @Test

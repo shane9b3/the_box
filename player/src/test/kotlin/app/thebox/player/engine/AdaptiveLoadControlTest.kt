@@ -82,6 +82,27 @@ class AdaptiveLoadControlTest {
     }
 
     @Test
+    fun bufferModeNoneThresholdsAreNotFloored() {
+        // Follow-up 2026-10-14: NONE = 500 / 500 / 2,000 / 5,000. Start and rebuffer at 500 ms (no floor on start); the
+        // 500 ms low-water floor is below NONE's 2 s minimum, so loading follows 2 s / 5 s.
+        val none = app.thebox.core.playback.buffer.BufferProfileFsmImpl.manual(app.thebox.core.playback.BufferMode.NONE, lowRam = false)
+        val alc = control(none)
+        assertFalse(alc.shouldStartPlayback(params(499)))
+        assertTrue(alc.shouldStartPlayback(params(500)))
+        assertFalse(alc.shouldStartPlayback(params(499, rebuffering = true)))
+        assertTrue(alc.shouldStartPlayback(params(500, rebuffering = true)))
+        assertTrue(alc.shouldContinueLoading(params(1_999)))
+        assertTrue("between min and max: keep loading", alc.shouldContinueLoading(params(4_000)))
+        assertFalse(alc.shouldContinueLoading(params(5_000)))
+        assertFalse("between min and max: stay stopped", alc.shouldContinueLoading(params(3_000)))
+        assertTrue(alc.shouldContinueLoading(params(1_999)))
+        // HLS live: min(500 ms, offset / 2) stays 500 ms for any offset ≥ 1 s, and drops below it only for a tiny offset.
+        assertTrue(alc.shouldStartPlayback(params(500, targetLiveOffsetUs = 3_000_000)))
+        assertFalse(alc.shouldStartPlayback(params(499, targetLiveOffsetUs = 3_000_000)))
+        assertTrue(alc.shouldStartPlayback(params(300, targetLiveOffsetUs = 600_000)))
+    }
+
+    @Test
     fun hlsLiveClampsTheStartThresholdToHalfTheTargetOffset() {
         val alc = control(l0.copy(startMs = 5_000))
         assertFalse(alc.shouldStartPlayback(params(1_400, targetLiveOffsetUs = 3_000_000)))

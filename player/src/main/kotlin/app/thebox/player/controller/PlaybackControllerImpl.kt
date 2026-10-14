@@ -230,6 +230,7 @@ internal class PlaybackControllerImpl @Inject constructor(
     private var switchTimeoutJob: Job? = null
     private var livePauseJob: Job? = null
     private var healthyJob: Job? = null
+    private var compatPersistJob: Job? = null
     private var recordWatchedJob: Job? = null
     private var zapFireJob: Job? = null
     /** (E-S1) `neighbour()` lookups in flight, and the generation that [cancelPendingZap] bumps. Main thread only. */
@@ -297,6 +298,14 @@ internal class PlaybackControllerImpl @Inject constructor(
         var audioDropped = false
         var warning: PlaybackWarning? = null
         var tsCompat = 0
+        /**
+         * (follow-up 2026-10-14) A compat raise (L27b) from a decoder-type signal, applied for this cycle but saved to
+         * ChannelMemory only after [COMPAT_PERSIST_HEALTHY_MS] of healthy playback at the raised level.
+         */
+        var compatPending = false
+        /** Failures and rebuffers in this cycle (the compat-persist window checks that neither changed). */
+        var failureCount = 0
+        var rebufferCount = 0
         var reconnectNoticeShown = false
 
         // Buffer and video facts.
@@ -430,7 +439,9 @@ internal class PlaybackControllerImpl @Inject constructor(
         cancelCycleJobs()
         val c = Cycle(spec, identity, now)
         cycle = c
-        ladder.beginChannel(identity?.stableKey?.value)
+        // (follow-up 2026-10-14, half of Later N-L2) Per (playlist, stable key): the same stable key in another playlist
+        // is another channel and must not share the 5-min escalation windows.
+        ladder.beginChannel(identity?.let { "${it.playlistId}/${it.stableKey.value}" })
         importGate.closeForZap()
         _video.value = VideoInfo(aspectMode = settings.current.defaultAspect)
         _tracks.value = TrackInfo()
@@ -863,6 +874,7 @@ internal class PlaybackControllerImpl @Inject constructor(
     private fun onRebuffer(c: Cycle, s: TuneSession) {
         val now = clock.nowMs()
         c.lastRebufferAtMs = now
+        c.rebufferCount++
         eventLog.add(PlaybackEventType.REBUFFER, s.tuneId, "", "")
         if (c.isArchive) return
         val mode = c.memory.bufferMode ?: settings.current.bufferMode
@@ -973,6 +985,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             if (player?.playbackState == Player.STATE_READY) setState(PlaybackState.Playing(nowPlaying(c), c.paused, c.warning))
         }
         scheduleHealthyReset(c)
+        if (c.compatPending) scheduleCompatPersist(c, s)
         // Learned values are persisted and announced only once the new variant actually played (§4.3 L5/L9/L15).
         val id = c.identity
         c.flipPending?.let { to ->
@@ -996,6 +1009,25 @@ internal class PlaybackControllerImpl @Inject constructor(
         if (c.reconnectNoticeShown) {
             c.reconnectNoticeShown = false
             _notices.tryEmit(PlaybackNotice.Reconnected)
+        }
+    }
+
+    /**
+     * (follow-up 2026-10-14) Saves a pending compat raise after [COMPAT_PERSIST_HEALTHY_MS] at the raised level: same
+     * session, Playing, no failure (stall verdicts included) and no rebuffer since the raised session's first media.
+     */
+    private fun scheduleCompatPersist(c: Cycle, s: TuneSession) {
+        compatPersistJob?.cancel()
+        val failures = c.failureCount
+        val rebuffers = c.rebufferCount
+        compatPersistJob = scope.launch {
+            delay(COMPAT_PERSIST_HEALTHY_MS)
+            val healthy = cycle === c && session === s && c.compatPending && c.tsCompat > 0 &&
+                c.failureCount == failures && c.rebufferCount == rebuffers && _state.value is PlaybackState.Playing
+            if (!healthy) return@launch
+            c.compatPending = false
+            eventLog.add(PlaybackEventType.DECISION, s.tuneId, "CompatPersisted", "level ${c.tsCompat}")
+            c.identity?.let { idn -> remember(idn) { it.copy(tsCompatLevel = c.tsCompat) } }
         }
     }
 
@@ -1100,7 +1132,11 @@ internal class PlaybackControllerImpl @Inject constructor(
         val id = c.currentTuneId
         c.lastSignal = signal
         c.lastErrorAtMs = now
+        c.failureCount++
         healthyJob?.cancel()
+        // (follow-up 2026-10-14) Any failure before the raised level proved itself: the raise is never saved.
+        compatPersistJob?.cancel()
+        c.compatPending = false
         eventLog.add(PlaybackEventType.ERROR, id, signal.name, error?.errorCodeName ?: "")
         BoxLog.i(TAG) { "failure ${signal.name} (tune $id, ${now - c.startedAtMs} ms)" }
 
@@ -1193,9 +1229,13 @@ internal class PlaybackControllerImpl @Inject constructor(
             LadderDecision.SeekToLiveAndPrepare -> restart(c, d, signal, Plan(reuseResolved = c.resolved != null))
             is LadderDecision.Reprepare -> {
                 if (d.raiseTsCompat && c.tsCompat == 0) {
+                    // (follow-up 2026-10-14) The raise applies to this cycle at once; it is saved only after 30 s of
+                    // healthy playback at level 1, and only when a decoder-type signal caused it (never NO_BYTES, PCR,
+                    // network), so a misfire or a provider problem does not leave a permanent flag.
                     c.tsCompat = 1
                     c.memory = c.memory.copy(tsCompatLevel = 1)
-                    c.identity?.let { idn -> remember(idn) { it.copy(tsCompatLevel = 1) } }
+                    c.compatPending = isDecoderTypeSignal(signal)
+                    if (!c.compatPending) BoxLog.i(TAG) { "compat raised for this cycle only (${signal.name})" }
                 }
                 restart(c, d, signal, Plan(reuseResolved = c.resolved != null))
             }
@@ -1397,6 +1437,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         switchTimeoutJob?.cancel()
         livePauseJob?.cancel()
         healthyJob?.cancel()
+        compatPersistJob?.cancel()
         recordWatchedJob?.cancel()
     }
 
@@ -1772,6 +1813,21 @@ internal class PlaybackControllerImpl @Inject constructor(
 
         const val LIVE_PAUSE_RELEASE_MS = 10_000L
         const val RECORD_WATCHED_AFTER_MS = 5_000L
+
+        /** (follow-up 2026-10-14) Healthy playback at a raised TS compat level before it is saved (L27b). */
+        const val COMPAT_PERSIST_HEALTHY_MS = 30_000L
+
+        /**
+         * Signals that may persist a compat raise: decoder-side stalls (b1 and the readiness stall are DECODER_STUCK;
+         * FROZEN_VIDEO is decoder output) and container/decoding failures. Not POSITION_STUCK (usually provider PTS),
+         * PCR exhaustion, NO_BYTES or network.
+         */
+        fun isDecoderTypeSignal(s: FailureSignal): Boolean = when (s) {
+            is FailureSignal.Stall -> s.kind == StallKind.DECODER_STUCK || s.kind == StallKind.FROZEN_VIDEO
+            is FailureSignal.Parsing -> !s.manifest
+            is FailureSignal.DecodingFailed -> true
+            else -> false
+        }
         const val PREVIOUS_CHANNEL_MIN_PLAY_MS = 1_000L
 
         // Owners' constants (Appendix B), pointed at at integration.

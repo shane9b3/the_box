@@ -12,6 +12,7 @@ import app.thebox.player.api.ChannelPlaybackMemory
 import app.thebox.player.api.PlaybackState
 import app.thebox.player.api.TuneTarget
 import app.thebox.player.controller.fakes.CH1
+import app.thebox.player.controller.fakes.CH2
 import app.thebox.player.controller.fakes.ControllerFixture
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -78,6 +79,27 @@ class ArchiveAndMemoryTest {
         f.idle()
         f.controller.seekTo(10_000)
         assertTrue(f.exo.seeks.isEmpty())
+    }
+
+    @Test
+    fun bufferModeNoneFromSettingsAndFromAChannelOverride() {
+        // Follow-up 2026-10-14: BufferMode.NONE is a manual mode like the others; archive keeps MEDIUM.
+        f.settings.update { it.copy(bufferMode = BufferMode.NONE) }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        assertEquals(BufferMode.NONE, f.bufferFsm.modes.last())
+        f.controller.tuneArchive(ArchiveTune(CH1, request))
+        f.idle()
+        assertEquals(BufferMode.MEDIUM, f.bufferFsm.modes.last())
+
+        f.settings.update { it.copy(bufferMode = BufferMode.AUTO) }
+        f.memory.rows[CH2] = ChannelPlaybackMemory(bufferMode = BufferMode.NONE)
+        f.controller.tune(TuneTarget.Channel(CH2))
+        f.idle()
+        assertEquals(BufferMode.NONE, f.bufferFsm.modes.last())
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        assertEquals(BufferMode.AUTO, f.bufferFsm.modes.last())
     }
 
     @Test
