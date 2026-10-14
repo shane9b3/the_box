@@ -1,18 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
+    <!-- ExoPlayer WAKE_MODE_NETWORK (docs/design/m2-playback-core.md §3.10.5). -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
-    <application>
-        <service
-            android:name="app.thebox.player.PlaybackService"
-            android:exported="true"
-            android:foregroundServiceType="mediaPlayback">
-            <intent-filter>
-                <action android:name="androidx.media3.session.MediaSessionService" />
-            </intent-filter>
-        </service>
-    </application>
+    <!--
+        No MediaSessionService and no FOREGROUND_SERVICE_MEDIA_PLAYBACK in v1 (design review B5, §3.10.4): the
+        MediaSession lives in the PlaybackController without a service. v1.1/v2 re-add the service with a real
+        startForeground path.
+    -->
 </manifest>

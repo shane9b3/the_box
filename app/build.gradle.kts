@@ -99,6 +99,7 @@ dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.compose)
+    implementation(libs.androidx.lifecycle.process)
     implementation(libs.androidx.profileinstaller)
     implementation(libs.acra.core)
 
@@ -107,4 +108,13 @@ dependencies {
     implementation(libs.androidx.hilt.work)
 
     baselineProfile(project(":baselineprofile"))
+
+    // M2 instrumented suite against the fake panel (docs/design/m2-playback-core.md §5.5, §6.5). Default
+    // AndroidJUnitRunner: the tests use the real TheBoxApplication and a Hilt @EntryPoint.
+    androidTestImplementation(libs.androidx.test.ext.junit)
+    androidTestImplementation(libs.androidx.test.runner)
+    androidTestImplementation(libs.androidx.test.core)
+    androidTestImplementation(libs.androidx.test.uiautomator)
+    androidTestImplementation(libs.okhttp)
+    androidTestImplementation(libs.kotlinx.coroutines.test)
 }

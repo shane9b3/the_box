@@ -59,4 +59,48 @@ class I1LibraryDatabaseTest {
             file.delete()
         }
     }
+
+    /**
+     * I-23 / day-0 check 5 (docs/design/m2-playback-core.md §2.10, §6.8): the additive v1 → v2 auto-migration on the
+     * device's bundled SQLite keeps user rows and adds `playback_flags`, `fps_milli` and `xtream_output_learned`.
+     */
+    @Test
+    fun migrate1To2() {
+        val file = context.getDatabasePath("i1-migration-2.db").apply { delete() }
+        val helper = MigrationTestHelper(instrumentation, file, BundledSQLiteDriver(), LibraryDatabase::class, { LibraryDatabase.build(context, Dispatchers.IO, BundledSQLiteDriver(), file.name) }, emptyList())
+        try {
+            val v1 = helper.createDatabase(1)
+            try {
+                v1.prepare("INSERT INTO playlist(id, name, type, credential_ref, display_source, sort_index, created_at) VALUES (7, 'P', 'XTREAM', 'r', 'h', 0, 1)").use { it.step() }
+                v1.prepare("INSERT INTO channel_prefs(playlist_id, stable_key, hidden, audio_lang, watch_count, updated_at) VALUES (7, 'xc:1', 1, 'deu', 3, 5)").use { it.step() }
+            } finally {
+                v1.close()
+            }
+            val v2 = helper.runMigrationsAndValidate(2, emptyList())
+            try {
+                v2.prepare("SELECT hidden, audio_lang, watch_count, playback_flags, fps_milli FROM channel_prefs").use {
+                    assertEquals(true, it.step())
+                    assertEquals(1L, it.getLong(0))
+                    assertEquals("deu", it.getText(1))
+                    assertEquals(3L, it.getLong(2))
+                    assertEquals(0L, it.getLong(3))
+                    assertEquals(true, it.isNull(4))
+                }
+                v2.prepare("SELECT xtream_output_learned FROM playlist WHERE id = 7").use {
+                    assertEquals(true, it.step())
+                    assertEquals(true, it.isNull(0))
+                }
+            } finally {
+                v2.close()
+            }
+            val db = LibraryDatabase.build(context, Dispatchers.IO, BundledSQLiteDriver(), file.name)
+            try {
+                runBlocking { assertEquals(0, db.channelPrefsDao().get(7, "xc:1")!!.playbackFlags) }
+            } finally {
+                db.close()
+            }
+        } finally {
+            context.deleteDatabase(file.name)
+        }
+    }
 }

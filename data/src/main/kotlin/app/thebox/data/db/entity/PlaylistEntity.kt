@@ -60,4 +60,9 @@ data class PlaylistEntity(
     @ColumnInfo(name = "last_success_at") val lastSuccessAt: Long? = null,
     @ColumnInfo(name = "last_status") val lastStatus: String? = null,
     @ColumnInfo(name = "created_at") val createdAt: Long,
+    /**
+     * v2 (docs/design/m2-playback-core.md §2.10): `TS`/`HLS` after a successful 405/406 flip while [xtreamOutput] is
+     * `AUTO`. Written only by [PlaylistDao.setXtreamOutputLearned]; cleared by [PlaylistDao.setXtreamOutput].
+     */
+    @ColumnInfo(name = "xtream_output_learned") val xtreamOutputLearned: String? = null,
 )

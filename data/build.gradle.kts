@@ -25,6 +25,9 @@ androidComponents {
     onVariants { variant ->
         variant.hostTests.values.forEach { hostTest ->
             hostTest.sources.resources?.addStaticSourceDirectory("../core/src/test/resources")
+            // Exported Room schemas as assets for the Robolectric MigrationTestHelper (m2 §2.10, day-0 check 7). The Room
+            // Gradle plugin only wires them into androidTest.
+            hostTest.sources.assets?.addStaticSourceDirectory("schemas")
         }
     }
 }

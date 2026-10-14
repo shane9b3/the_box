@@ -52,6 +52,21 @@ class TemplateExpanderTest {
     }
 
     @Test
+    fun doubleBracePlaceholdersPassThroughUntouched() {
+        // docs/design/m2-playback-core.md §2.9: {{u}}/{{p}}/{{base}}/{{ext}} survive the catch-up pass and are not unknown.
+        val r = TemplateExpander.expand("http://h/{{u}}/{{p}}/{utc}.ts", v)
+        assertEquals("http://h/{{u}}/{{p}}/$s.ts", r.url)
+        assertEquals(emptyList<String>(), r.unknown)
+        assertEquals("{{base}}/timeshift/{{u}}/{{p}}/60/x/$s.{{ext}}", x("{{base}}/timeshift/{{u}}/{{p}}/60/x/\${start}.{{ext}}"))
+        assertEquals("\${{u}}/$s", x("\${{u}}/{utc}"))
+        // Unterminated "{{" is copied as written (no "}}" → rest of the template).
+        assertEquals("a/{{u/{utc}", x("a/{{u/{utc}"))
+        // M2 substitutes credentials afterwards: a password containing "{utc}" stays literal (never re-scanned).
+        val withPassword = r.url.replace("{{u}}", "user").replace("{{p}}", "pa{utc}ss")
+        assertEquals("http://h/user/pa{utc}ss/$s.ts", withPassword)
+    }
+
+    @Test
     fun tokenFormatterPadding() {
         assertEquals("0099-01-02 03:04:05", TokenFormatter.format(-59_042_897_755L, ZoneOffset.UTC, "Y-m-d H:M:S"))
         assertEquals("2026-10-14T01:15:00+05:45", TokenFormatter.iso(s, ZoneId.of("Asia/Kathmandu")))

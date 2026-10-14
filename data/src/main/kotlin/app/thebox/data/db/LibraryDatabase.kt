@@ -1,6 +1,7 @@
 package app.thebox.data.db
 
 import android.content.Context
+import androidx.room.AutoMigration
 import androidx.room.Database
 import androidx.room.Room
 import androidx.room.RoomDatabase
@@ -43,10 +44,15 @@ import kotlinx.coroutines.CoroutineDispatcher
  * library.db (docs/design/m1-data-layer.md §2.1). Room 2.8.5 on the bundled SQLite driver, WAL.
  * No open callback: Room's open delegate enables foreign keys on every pooled connection (§2.1.3, S2).
  * Migration policy: [Migrations].
+ *
+ * v2 (docs/design/m2-playback-core.md §2.10, review S10): additive `channel_prefs.playback_flags`,
+ * `channel_prefs.fps_milli` and `playlist.xtream_output_learned`, auto-migrated (three `ALTER TABLE … ADD COLUMN`s,
+ * no table rebuild).
  */
 @Database(
     version = LibraryDatabase.VERSION,
     exportSchema = true,
+    autoMigrations = [AutoMigration(from = 1, to = 2)],
     entities = [
         PlaylistEntity::class,
         CredentialEntity::class,
@@ -84,7 +90,7 @@ abstract class LibraryDatabase : RoomDatabase() {
     abstract fun maintenanceDao(): MaintenanceDao
 
     companion object {
-        const val VERSION = 1
+        const val VERSION = 2
         const val NAME = "library.db"
 
         /** Production builder (§2.1.3). Tests pass `AndroidSQLiteDriver` (Robolectric) instead. */
