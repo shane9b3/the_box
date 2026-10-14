@@ -1,4 +1,61 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Headline and next-step line for every PlaybackErrorCode (docs/design/m3-guide.md §1.4, §3.13.4; owner WP-C). -->
+<!-- Headline and next-step line for every PlaybackErrorCode (docs/design/m3-guide.md §1.4, §3.13.4; owner WP-C).
+     CLAUDE.md: every error the user sees carries a reason (headline) and a next step. ErrorTextTest enforces both. -->
 <resources>
+    <!-- Headlines: the reason, one per PlaybackErrorCode. -->
+    <string name="error_auth_rejected">Your provider rejected the login</string>
+    <string name="error_account_expired">Your subscription has expired</string>
+    <string name="error_account_disabled">Your provider disabled this account</string>
+    <string name="error_needs_reauth">This playlist needs you to sign in again</string>
+    <string name="error_credentials_unavailable">Your saved login could not be read</string>
+    <string name="error_connection_limit">Your provider\'s connection limit is reached</string>
+    <string name="error_connection_limit_local">Another stream from this playlist is still open</string>
+    <string name="error_forbidden">The server refused this stream</string>
+    <string name="error_channel_offline">This channel is offline</string>
+    <string name="error_format_refused">The server refused this stream format</string>
+    <string name="error_web_page">The server sent a web page instead of video</string>
+    <string name="error_empty_response">The server sent no video</string>
+    <string name="error_no_data">The stream stopped sending data</string>
+    <string name="error_interrupted">The stream was interrupted</string>
+    <string name="error_server_error">The provider\'s server had an error</string>
+    <string name="error_dns">The server address could not be found</string>
+    <string name="error_connect">Could not connect to the server</string>
+    <string name="error_tls">The secure connection to the server failed</string>
+    <string name="error_codec_unsupported">This device can\'t decode this channel\'s video</string>
+    <string name="error_undecodable">This stream could not be decoded</string>
+    <string name="error_audio_output">The sound output failed</string>
+    <string name="error_unsupported_source">This kind of stream isn\'t supported</string>
+    <string name="error_catchup_missing">This programme isn\'t in the catch-up archive</string>
+    <string name="error_channel_missing">This channel is no longer in your playlist</string>
+    <string name="error_internal">Something went wrong in the player</string>
+
+    <!-- Next steps, one per NextStep. RETRY is the only one the remote can act on from the card in M3 (OK). -->
+    <string name="error_step_retry">Press OK to retry</string>
+    <string name="error_step_account_details">Check your account in Settings</string>
+    <string name="error_step_edit_login">Update your login in Settings</string>
+    <string name="error_step_stop_and_wait">Stop watching on another device, then try again</string>
+    <string name="error_step_try_backup">Try another channel, or come back later</string>
+    <string name="error_step_previous_channel">Press the Last key to go back to the previous channel</string>
+    <string name="error_step_change_user_agent">Try another user agent in playlist settings</string>
+    <string name="error_step_playlist_settings">Check this playlist\'s settings</string>
+    <string name="error_step_secure_dns">Check your internet connection, or turn on secure DNS in Settings</string>
+    <string name="error_step_diagnostics">Open diagnostics in Settings for details</string>
+    <string name="error_step_software_decoder">Try the software video decoder in Settings</string>
+    <string name="error_step_open_external">Open it in another player app</string>
+    <string name="error_step_audio_options">Change the audio output in the audio options</string>
+    <string name="error_step_watch_live">Watch the channel live instead</string>
+    <string name="error_step_other_catchup_mode">Try another catch-up mode in playlist settings</string>
+    <string name="error_step_refresh_playlist">Refresh the playlist in Settings</string>
+
+    <!-- Catch-up launch failures (CatchupFailure, §3.13.6, S13): reason + next step, shown as a toast. -->
+    <string name="catchup_channel_gone">This channel is no longer in your playlist</string>
+    <string name="catchup_channel_gone_step">Refresh the playlist in Settings</string>
+    <string name="catchup_no_archive">This channel has no catch-up</string>
+    <string name="catchup_no_archive_step">Press OK on a programme that is on now to watch live</string>
+    <string name="catchup_outside_archive">This programme is older than the channel\'s catch-up archive</string>
+    <string name="catchup_outside_archive_step">Pick a more recent programme</string>
+    <string name="catchup_unsupported_mode">Couldn\'t build a catch-up link for this channel\'s catch-up mode</string>
+    <string name="catchup_unsupported_mode_step">Try another mode in playlist settings</string>
+    <string name="catchup_credentials">Your saved login could not be read</string>
+    <string name="catchup_credentials_step">Check your login in Settings</string>
 </resources>
