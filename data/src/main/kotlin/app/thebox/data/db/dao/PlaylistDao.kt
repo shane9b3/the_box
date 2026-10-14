@@ -51,6 +51,14 @@ interface PlaylistDao {
     @Query("UPDATE playlist SET active_base_index = :index WHERE id = :id")
     suspend fun setActiveBaseIndex(id: Long, index: Int)
 
+    /** `TS`/`HLS` learned by the player after a 405/406 flip, or null (docs/design/m2-playback-core.md §2.10). */
+    @Query("UPDATE playlist SET xtream_output_learned = :value WHERE id = :id")
+    suspend fun setXtreamOutputLearned(id: Long, value: String?)
+
+    /** The user's `AUTO`/`TS`/`HLS` choice. Clears the learned value (§2.10: "cleared when the user changes it"). */
+    @Query("UPDATE playlist SET xtream_output = :value, xtream_output_learned = NULL WHERE id = :id")
+    suspend fun setXtreamOutput(id: Long, value: String)
+
     @Query("UPDATE playlist SET credential_ref = :ref WHERE id = :id")
     suspend fun setCredentialRef(id: Long, ref: String)
 }

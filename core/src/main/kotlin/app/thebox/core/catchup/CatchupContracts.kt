@@ -65,8 +65,13 @@ interface CatchupResolver {
 }
 
 data class CatchupTarget(
-    /** Live URL with credentials expanded (M2 StreamUrlResolver output, before redirects). */
+    /**
+     * Live URL with `{{base}}`/`{{ext}}` expanded and `{{u}}`/`{{p}}` **still templated** (M2's
+     * `ResolvedStream.liveUrlTemplate`). `ArchiveRequest.url` therefore may contain `{{u}}`/`{{p}}`; M2 expands them
+     * after `build()` (M1 code review Later 28).
+     */
     val liveUrl: String,
+    /** Headers with `{{u}}`/`{{p}}` still templated (M2's `ResolvedStream.headerTemplates`); M2 expands them last. */
     val headers: Map<String, String>,
     val catchup: Catchup,
     /** Present for Xtream API channels and for Xtream-shaped M3U URLs. */

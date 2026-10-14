@@ -1,0 +1,200 @@
+package app.thebox.player.api
+
+import androidx.media3.common.Player
+import app.thebox.core.catchup.ArchiveRequest
+import app.thebox.core.playback.*
+import app.thebox.core.refresh.ChannelIdentity
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+
+/** The one playback engine of the app (plan §3 "Process"). Implemented by WP-D's PlaybackControllerImpl. */
+interface PlaybackController {
+    val state: StateFlow<PlaybackState>
+    /** The channel a debounced zap will tune, for the banner; null when no zap is pending. */
+    val pendingZap: StateFlow<ChannelIdentity?>
+    val video: StateFlow<VideoInfo>
+    val tracks: StateFlow<TrackInfo>
+    /** Updated at ≤ 2 Hz while [setStatsEnabled] is true; otherwise frozen at the last value. */
+    val stats: StateFlow<StreamStats>
+    /** Toast-level events (replay 0, buffer 8, DROP_OLDEST). */
+    val notices: SharedFlow<PlaybackNotice>
+    /** The UI layer sets FLAG_KEEP_SCREEN_ON from this (§3.10.6). */
+    val keepScreenOn: StateFlow<Boolean>
+    /** API < 31 AFR: the window's preferredDisplayModeId (0 = system default). Applied by WindowDisplayModeBinder. */
+    val displayModeRequest: StateFlow<Int>
+    /** Give this to media3-ui-compose PlayerSurface and nothing else: it exposes only the video-surface commands. */
+    val surfacePlayer: Player
+    val diagnostics: PlaybackDiagnostics
+
+    /** Tune now (no debounce). [zapList] becomes the CH±/Up/Down list when non-null. */
+    fun tune(target: TuneTarget, zapList: ZapList? = null)
+    /** ±n within the current zap list. Repeats and presses within 350 ms are coalesced (§3.5.4). */
+    fun zap(delta: Int, isRepeat: Boolean = false)
+    fun setZapList(list: ZapList)
+    /** Tunes the previously played channel (KEYCODE_LAST_CHANNEL). False when there is none. */
+    fun previousChannel(): Boolean
+    /** Archive seam (§3.14): plays one ArchiveRequest built by CatchupUrlBuilder. ArchivePlayback proper is M4. */
+    fun tuneArchive(tune: ArchiveTune)
+    /** Native seek inside the current archive request only. No-op on live. */
+    fun seekTo(positionMs: Long)
+    fun position(): PositionSnapshot
+    /** Live: freeze now, release the connection after 10 s; resume() re-tunes at the live edge. Archive: real pause. */
+    fun pause()
+    fun resume()
+    fun stop(reason: StopReason = StopReason.USER)
+    /** Error card "Retry": restart the current target with a fresh ladder cycle. */
+    fun retry()
+    fun setViewport(viewport: Viewport)
+    fun setStatsEnabled(enabled: Boolean)
+    fun selectAudioTrack(track: TrackRef?, remember: Boolean = true)
+    /** null = subtitles off. */
+    fun selectTextTrack(track: TrackRef?, remember: Boolean = true)
+    fun setAspectMode(mode: AspectMode, remember: Boolean = true)
+    /** null = follow the global setting. Takes effect with a re-prepare of the current channel. */
+    fun setVideoDecoderOverride(mode: VideoDecoderMode?, remember: Boolean = true)
+    /** Creates the player and warms the HTTP pool (startup path, architecture review C9). */
+    fun prewarm()
+}
+
+sealed interface TuneTarget {
+    data class Channel(val identity: ChannelIdentity) : TuneTarget
+    /** Debug harness and external "play this URL" intents. Never persisted. [brokerKey] groups connection limits. */
+    data class DirectUrl(
+        val url: String,
+        val headers: Map<String, String> = emptyMap(),
+        val maxConnections: Int = 1,
+        val formatHint: StreamFormat = StreamFormat.UNKNOWN,
+    ) : TuneTarget {
+        override fun toString(): String = "DirectUrl(${app.thebox.core.common.Redact.text(url)})"
+    }
+}
+
+/** Ordered channel list for zapping, supplied by the UI (group, favourites, search results). */
+interface ZapList {
+    val id: String
+    /** The channel [delta] steps from [from], wrapping; null when the list is empty. Skips hidden/locked channels (the list does). */
+    suspend fun neighbour(from: ChannelIdentity, delta: Int): ChannelIdentity?
+}
+
+/** [request] comes straight from CatchupUrlBuilder.build (credentials still templated; M2 expands them last). */
+data class ArchiveTune(val identity: ChannelIdentity, val request: ArchiveRequest, val startOffsetMs: Long = 0)
+
+data class PositionSnapshot(val positionMs: Long, val bufferedMs: Long, val durationMs: Long?, val isSeekable: Boolean, val archiveStartUtcMs: Long?)
+
+enum class StopReason { USER, BACKGROUND, STANDBY, HDMI_UNPLUGGED, DISPLAY_OFF, LIVE_PAUSE_TIMEOUT, ERROR, RELEASE }
+
+/** What is on screen. [tuneId] increases with every tune/retry. */
+data class NowPlaying(
+    val tuneId: Long,
+    val identity: ChannelIdentity?,
+    val title: String?,
+    val isArchive: Boolean,
+    val format: StreamFormat,
+)
+
+enum class ConnectPhase { RESOLVING, WAITING_FOR_SLOT, CONNECTING, BUFFERING_INITIAL, SWITCHING_DISPLAY_MODE }
+enum class BufferingCause { REBUFFER, RECONNECTING, RECOVERING }
+
+data class ReconnectProgress(val attempt: Int, val maxAttempts: Int)
+
+sealed interface PlaybackState {
+    val target: NowPlaying?
+
+    data object Idle : PlaybackState { override val target: NowPlaying? get() = null }
+    data class Connecting(override val target: NowPlaying, val phase: ConnectPhase, val attempt: Int, val sinceElapsedMs: Long) : PlaybackState
+    data class Buffering(override val target: NowPlaying, val cause: BufferingCause, val reconnect: ReconnectProgress?) : PlaybackState
+    data class Playing(override val target: NowPlaying, val paused: Boolean = false, val warning: PlaybackWarning? = null) : PlaybackState
+    /** A detector or recoverable error fired and the ladder is acting ([step] is the LadderDecision name). */
+    data class Stalled(override val target: NowPlaying, val kind: StallKind?, val step: String, val attempt: Int, val maxAttempts: Int) : PlaybackState
+    data class Stopped(override val target: NowPlaying?, val reason: StopReason, val resumable: Boolean) : PlaybackState
+    data class Error(override val target: NowPlaying, val error: PlaybackError) : PlaybackState
+}
+
+data class VideoInfo(
+    val width: Int = 0,
+    val height: Int = 0,
+    val pixelRatio: Float = 1f,
+    /** Snapped fps, or null while unknown. */
+    val fps: Float? = null,
+    val hdr: HdrKind = HdrKind.SDR,
+    /** True while the HDR poster rule keeps the video track disabled (M3 shows the poster). */
+    val posterMode: Boolean = false,
+    val aspectMode: AspectMode = AspectMode.FIT,
+    val interlacedHint: Boolean = false,
+)
+
+/** Stable within one tune: [groupId] is TrackGroup.id, [index] the track index in the group. */
+data class TrackRef(val type: Int, val groupId: String, val index: Int)
+
+data class AudioTrackOption(
+    val ref: TrackRef,
+    val language: String?,
+    val label: String?,
+    /** "E-AC-3", "AC-3", "AAC", "MP2", … */
+    val codec: String,
+    val channels: Int,
+    val describesVideo: Boolean,
+    val selected: Boolean,
+    val supported: Boolean,
+)
+
+data class TextTrackOption(val ref: TrackRef, val language: String?, val label: String?, val kind: String, val selected: Boolean)
+
+data class TrackInfo(
+    val audio: List<AudioTrackOption> = emptyList(),
+    val text: List<TextTrackOption> = emptyList(),
+    val textEnabled: Boolean = false,
+)
+
+data class StreamStats(
+    val videoMime: String? = null,
+    val videoCodecs: String? = null,
+    val videoDecoder: String? = null,
+    val width: Int = 0,
+    val height: Int = 0,
+    val fps: Float? = null,
+    val hdr: HdrKind = HdrKind.SDR,
+    val audioMime: String? = null,
+    val audioChannels: Int = 0,
+    val audioDecoder: String? = null,
+    val audioPassthrough: Boolean = false,
+    /** Measured over the last 2 s at the data source (bits/s). Media3's bandwidth meter does not report on endless loads. */
+    val streamBitrateBps: Long = 0,
+    val bufferMs: Long = 0,
+    val droppedFrames: Long = 0,
+    val httpStatus: Int? = null,
+    /** Final host after redirects (host[:port] only). */
+    val host: String? = null,
+    val redirects: Int = 0,
+    val format: StreamFormat = StreamFormat.UNKNOWN,
+    val reconnects: Int = 0,
+    val broker: BrokerSnapshot? = null,
+    val bufferProfile: BufferProfile? = null,
+    val afr: AfrMode = AfrMode.SEAMLESS,
+    val displayRefreshHz: Float? = null,
+    val tunneling: Boolean = false,
+    val updatedAtElapsedMs: Long = 0,
+)
+
+sealed interface PlaybackNotice {
+    data class Reconnecting(val attempt: Int, val maxAttempts: Int) : PlaybackNotice
+    data object Reconnected : PlaybackNotice
+    data class SwitchedToBackupServer(val baseIndex: Int) : PlaybackNotice
+    data class SwitchedFormat(val to: StreamFormat) : PlaybackNotice
+    data class AudioDecoderSwitched(val toSoftware: Boolean, val mimeType: String) : PlaybackNotice
+    data class PassthroughDisabled(val mimeType: String?) : PlaybackNotice
+    data object VideoDecoderSwitchedToSoftware : PlaybackNotice
+    data object TunnelingDisabled : PlaybackNotice
+    data class UserAgentSwitched(val preset: String) : PlaybackNotice
+    data class BufferIncreased(val level: Int) : PlaybackNotice
+    /** Live resumed after pause (no time-shift on this channel). */
+    data object LiveResumed : PlaybackNotice
+    data class Warning(val warning: PlaybackWarning) : PlaybackNotice
+}
+
+interface PlaybackDiagnostics {
+    fun events(): List<PlaybackEvent>
+    fun zaps(): List<ZapRecord>
+    /** Device capability dump for S16 (decoders, HDR, display modes, audio encodings, FFmpeg). */
+    suspend fun capabilities(): Map<String, String>
+}

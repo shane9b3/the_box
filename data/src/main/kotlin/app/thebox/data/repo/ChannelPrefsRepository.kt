@@ -37,6 +37,23 @@ class ChannelPrefsRepository @Inject constructor(
 
     suspend fun recordWatched(c: ChannelIdentity) = dao.recordWatched(c.playlistId, c.stableKey.value, clock.now())
 
+    // Playback memory (docs/design/m2-playback-core.md §2.4.2, §2.10, review S10): column-targeted writes, never the
+    // whole-row [edit], so they cannot revert a concurrent setHidden/setLocked. Used by :app's RoomChannelMemory.
+
+    suspend fun setPlaybackFlags(c: ChannelIdentity, flags: Int) = dao.upsertPlaybackFlags(c.playlistId, c.stableKey.value, flags, clock.now())
+
+    suspend fun setFpsMilli(c: ChannelIdentity, fpsMilli: Int?) = dao.upsertFpsMilli(c.playlistId, c.stableKey.value, fpsMilli, clock.now())
+
+    suspend fun setAudioLang(c: ChannelIdentity, lang: String?) = dao.upsertAudioLang(c.playlistId, c.stableKey.value, lang, clock.now())
+
+    suspend fun setSubtitleLang(c: ChannelIdentity, lang: String?) = dao.upsertSubtitleLang(c.playlistId, c.stableKey.value, lang, clock.now())
+
+    suspend fun setAspectMode(c: ChannelIdentity, mode: String?) = dao.upsertAspectMode(c.playlistId, c.stableKey.value, mode, clock.now())
+
+    suspend fun setVideoDecoder(c: ChannelIdentity, mode: String?) = dao.upsertVideoDecoder(c.playlistId, c.stableKey.value, mode, clock.now())
+
+    suspend fun setBufferProfile(c: ChannelIdentity, mode: String?) = dao.upsertBufferProfile(c.playlistId, c.stableKey.value, mode, clock.now())
+
     fun recent(limit: Int = 20): Flow<List<ChannelPrefsEntity>> = dao.recent(limit)
 
     suspend fun editGroup(playlistId: Long, kind: EntryKind, groupKey: String, change: (GroupPrefsEntity) -> GroupPrefsEntity) {

@@ -32,4 +32,11 @@ data class ChannelPrefsEntity(
     @ColumnInfo(name = "last_watched_at") val lastWatchedAt: Long? = null,
     @ColumnInfo(name = "watch_count", defaultValue = "0") val watchCount: Int = 0,
     @ColumnInfo(name = "updated_at") val updatedAt: Long,
+    /**
+     * v2 (docs/design/m2-playback-core.md §2.10). Learned, not a user choice (M5 export leaves it out): bits 0–1 the
+     * learned TS compatibility level, bit 2 "last tune was HDR". Written only by [ChannelPrefsDao.upsertPlaybackFlags].
+     */
+    @ColumnInfo(name = "playback_flags", defaultValue = "0") val playbackFlags: Int = 0,
+    /** v2. Learned: last snapped fps × 1000. Written only by [ChannelPrefsDao.upsertFpsMilli]. */
+    @ColumnInfo(name = "fps_milli") val fpsMilli: Int? = null,
 )

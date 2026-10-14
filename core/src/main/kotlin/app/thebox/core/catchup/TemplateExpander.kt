@@ -9,6 +9,10 @@ import java.time.ZoneId
  *
  * Both the `{name}` and the `${name}` spelling are accepted for every name.
  *
+ * `{{…}}` (M2 credential and base placeholders such as `{{u}}`, `{{p}}`, `{{base}}`, `{{ext}}`) is copied through
+ * literally up to and including the next `}}`, and is not reported as unknown: M2 expands those after this pass
+ * (docs/design/m2-playback-core.md §2.9, M1 code review Later 28).
+ *
  * | Token(s) | Value |
  * |---|---|
  * | `{utc}` `{start}` | [Values.start], unix seconds |
@@ -46,6 +50,18 @@ object TemplateExpander {
                 continue
             }
             val open = if (dollar) i + 1 else i
+            if (open + 1 < n && template[open + 1] == '{') {
+                // M2 `{{…}}` placeholders ({{u}}, {{p}}, {{base}}, {{ext}}) are expanded after this pass (M1 code
+                // review Later 28): copy through the next "}}" literally; they are not unknown tokens.
+                val end = template.indexOf("}}", open + 2)
+                if (end < 0) {
+                    sb.append(template, i, n)
+                    break
+                }
+                sb.append(template, i, end + 2)
+                i = end + 2
+                continue
+            }
             val close = template.indexOf('}', open + 1)
             if (close < 0) {
                 sb.append(template, i, n)

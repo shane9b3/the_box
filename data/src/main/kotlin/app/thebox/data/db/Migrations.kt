@@ -3,7 +3,8 @@ package app.thebox.data.db
 import androidx.room.migration.Migration
 
 /**
- * library.db migrations (docs/design/m1-data-layer.md §2.1.3). Empty in v1.
+ * library.db migrations (docs/design/m1-data-layer.md §2.1.3). Hand-written migrations only; none so far.
+ * 1 → 2 is an `@AutoMigration` declared on [LibraryDatabase] (docs/design/m2-playback-core.md §2.10).
  *
  * Policy:
  * - Every schema change bumps `LibraryDatabase.VERSION`, commits the new exported JSON under

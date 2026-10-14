@@ -9,6 +9,9 @@ android {
 
 dependencies {
     implementation(project(":core"))
+    // VideoLayer (M2) and the M3/M4 screens observe the PlaybackController (docs/design/m2-playback-core.md §1.2).
+    implementation(project(":player"))
+    implementation(libs.media3.ui.compose)
 
     api(libs.tv.material)
     api(libs.compose.foundation)
