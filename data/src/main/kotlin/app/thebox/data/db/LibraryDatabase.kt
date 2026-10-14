@@ -48,6 +48,11 @@ import kotlinx.coroutines.CoroutineDispatcher
  * v2 (docs/design/m2-playback-core.md §2.10, review S10): additive `channel_prefs.playback_flags`,
  * `channel_prefs.fps_milli` and `playlist.xtream_output_learned`, auto-migrated (three `ALTER TABLE … ADD COLUMN`s,
  * no table rebuild).
+ *
+ * v3 (docs/design/m3-guide.md §2.9): additive `channel.display_name`, `playlist.name_prefix_{mode,custom,ver}`,
+ * `reminder.shift_min` and the reverse-lookup indexes `index_epg_match_ref`/`index_epg_mapping_ref`, by the
+ * hand-written [Migrations.MIGRATION_2_3] (five `ALTER TABLE … ADD COLUMN`s and two `CREATE INDEX`es, no table
+ * rebuild; an `@AutoMigration` would rebuild the two indexed tables).
  */
 @Database(
     version = LibraryDatabase.VERSION,
@@ -90,7 +95,7 @@ abstract class LibraryDatabase : RoomDatabase() {
     abstract fun maintenanceDao(): MaintenanceDao
 
     companion object {
-        const val VERSION = 2
+        const val VERSION = 3
         const val NAME = "library.db"
 
         /** Production builder (§2.1.3). Tests pass `AndroidSQLiteDriver` (Robolectric) instead. */

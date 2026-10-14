@@ -37,7 +37,7 @@ jobs:
           cache-read-only: ${{ github.ref != 'refs/heads/main' }}
 
       - name: Unit tests and debug APK
-        run: ./gradlew --no-daemon :core:test :data:testDebugUnitTest :player:testDebugUnitTest :app:assembleDebug
+        run: ./gradlew --no-daemon :core:test :data:testDebugUnitTest :player:testDebugUnitTest :ui:testDebugUnitTest :app:assembleDebug
 
       - uses: actions/upload-artifact@v7
         if: always()
@@ -53,3 +53,5 @@ jobs:
           path: |
             core/build/reports/tests/
             data/build/reports/tests/
+            player/build/reports/tests/
+            ui/build/reports/tests/

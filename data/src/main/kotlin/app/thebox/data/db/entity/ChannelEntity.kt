@@ -63,4 +63,10 @@ data class ChannelEntity(
     @ColumnInfo(name = "missing_count", defaultValue = "0") val missingCount: Int = 0,
     @ColumnInfo(name = "first_seen_at") val firstSeenAt: Long,
     @ColumnInfo(name = "updated_at") val updatedAt: Long,
+    /**
+     * v3 (docs/design/m3-guide.md §2.9): [name] after the playlist's prefix rule; NULL = same as [name]. Readers use
+     * `COALESCE(channel_prefs.custom_name, channel.display_name, channel.name)`. Stable keys, the matcher and
+     * `channel_fts` keep the raw [name].
+     */
+    @ColumnInfo(name = "display_name") val displayName: String? = null,
 )

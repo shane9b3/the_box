@@ -114,7 +114,7 @@ class FakeEpgStore(
         override fun window(channels: IntArray, shiftMin: IntArray, fromMin: Int, toMin: Int, out: EpgWindow) = out.clear()
         override fun detail(channel: Int, rawStartMin: Int, shiftMin: Int): ProgrammeDetail? = null
         override fun at(channel: Int, atMin: Int, shiftMin: Int): ProgrammeDetail? = null
-        override fun search(query: String, nowMin: Int, limit: Int): List<EpgSearchHit> = emptyList()
+        override fun search(query: String, nowMin: Int, limit: Int, perText: Int): List<EpgSearchHit> = emptyList()
         override fun findChannels(text: String, limit: Int): List<EpgChannelInfo> = emptyList()
         override fun refOf(channel: Int): EpgChannelRef? = null
         override fun close() { openReaders.decrementAndGet() }

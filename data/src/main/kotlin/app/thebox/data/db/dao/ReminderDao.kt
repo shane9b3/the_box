@@ -34,4 +34,18 @@ interface ReminderDao {
 
     @Query("SELECT * FROM reminder ORDER BY start_min")
     suspend fun all(): List<ReminderEntity>
+
+    // ---- M3 (docs/design/m3-guide.md §2.9.3; commit 0 declares, WP-B uses)
+
+    /** Every pending reminder, no lower bound: the planner expires old ones. */
+    @Query("SELECT * FROM reminder WHERE state = 0 ORDER BY start_min")
+    fun observeAllPending(): Flow<List<ReminderEntity>>
+
+    /** Two writers (the card and the planner): only a still-pending row changes. Returns the rows updated (0 or 1). */
+    @Query("UPDATE reminder SET state = :state WHERE id = :id AND state = 0")
+    suspend fun setStateIfPending(id: Long, state: Int): Int
+
+    /** Before re-setting a reminder (N5): the identity index ignores state, so a fired/dismissed row is removed first. */
+    @Query("DELETE FROM reminder WHERE playlist_id = :playlistId AND stable_key = :stableKey AND start_min = :startMin AND state <> 0")
+    suspend fun deleteIfNotPending(playlistId: Long, stableKey: String, startMin: Int): Int
 }

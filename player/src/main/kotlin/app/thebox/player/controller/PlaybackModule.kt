@@ -85,6 +85,8 @@ internal abstract class PlaybackModule {
     @Binds abstract fun playerFactory(impl: PlayerFactory): PlayerFactoryApi
     @Binds abstract fun mediaSources(impl: MediaSourceBuilder): MediaSourceBuilderApi
     @Binds abstract fun engine(impl: DefaultEngineEnvironment): EngineEnvironment
+    /** M3 catch-up seam (docs/design/m3-guide.md §2.8). */
+    @Binds abstract fun archiveTargets(impl: app.thebox.player.resolve.ArchiveTargetsImpl): app.thebox.player.api.ArchiveTargets
 
     companion object {
         @Provides fun monoClock(): MonoClock = MonoClock { SystemClock.elapsedRealtime() }

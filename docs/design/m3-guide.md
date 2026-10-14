@@ -421,8 +421,12 @@ interface GuideMetrics {
     val rowsBottom: Float
     val pxPerMin: Float
     fun px(designPx: Float): Float
-    /** x of display minute [min] for a window starting at [windowStartMin] (fractional during animation). */
-    fun xOf(min: Int, windowStartMin: Float): Float
+    /**
+     * x of display minute [min] for a window starting at [windowStartMin] + [scrollOffsetMin]. Absolute minutes stay
+     * `Int` (an epoch minute in a Float has 2-minute spacing, §2.12 item 3); the animated fraction is the small
+     * [scrollOffsetMin] (about −180..+180). Compute `(min − windowStartMin)` in Int, then subtract the offset.
+     */
+    fun xOf(min: Int, windowStartMin: Int, scrollOffsetMin: Float): Float
     /** Device-px rect of the mini-player hole, rounded to whole pixels: [left, top, right, bottom]. */
     fun holeRect(out: IntArray)
 }
@@ -633,10 +637,14 @@ class GuideFrame {
 }
 
 interface GuideRenderer {
-    /** Draws the whole grid panel. [scrollMin]/[scrollRow]: animated window start (epoch min) and top row. Zero allocation. */
-    fun draw(canvas: GuideCanvas, frame: GuideFrame, scrollMin: Float, scrollRow: Float)
+    /**
+     * Draws the whole grid panel. The animated window start is [windowStartMin] (Int epoch minutes, normally
+     * `frame.windowStartMin`) + [scrollOffsetMin] (small Float, about −180..+180; §2.12 item 3); [scrollRow] is the
+     * animated top row. Zero allocation.
+     */
+    fun draw(canvas: GuideCanvas, frame: GuideFrame, windowStartMin: Int, scrollOffsetMin: Float, scrollRow: Float)
     /** Device-px bounds of the focused cell at the current scroll into [out] (l, t, r, b); false if off-screen. */
-    fun focusedCellBounds(frame: GuideFrame, scrollMin: Float, scrollRow: Float, out: FloatArray): Boolean
+    fun focusedCellBounds(frame: GuideFrame, windowStartMin: Int, scrollOffsetMin: Float, scrollRow: Float, out: FloatArray): Boolean
     /** Accessibility text for the focused cell (§3.6.6). Allocates; call debounced. */
     fun describeFocus(frame: GuideFrame): String
 }
@@ -1353,6 +1361,19 @@ interface KeyRouter {
 
 No `runBlocking` in any M3 code. Nothing on main waits on the epg thread.
 
+### 2.12 Commit-0 corrections (2026-10-14)
+
+Every Kotlin block of §2.1–§2.10 compiled verbatim; the contract files carry them unchanged under a one-line header comment. What commit 0 changed or added against the text above:
+
+1. **`library.db` 2 → 3 is a hand-written `Migration`, not an `@AutoMigration` (§2.9.1).** Room 2.8.5's auto-migration treats an added index as a complex change and rebuilds `epg_match` and `epg_mapping` (`_new_…` table, copy, drop, rename), which §2.9.1 forbids and which would rewrite the user's `epg_mapping` rows. `data/.../db/Migrations.kt` now has `MIGRATION_2_3`, running exactly the seven statements of §2.9.1 (`Migrations.SQL_2_3`), listed in `Migrations.ALL`; `LibraryDatabase` keeps only `AutoMigration(from = 1, to = 2)`. `3.json` is Room's export of the v3 entities. `LibraryDatabaseMigrationTest.migrate2To3…` (Robolectric) and `I1LibraryDatabaseTest.migrate2To3` (instrumented) run `runMigrationsAndValidate(3, Migrations.ALL)`; the JVM test also asserts that the `CREATE TABLE` text of `epg_match`, `epg_mapping`, `channel_prefs`, `favourite` and `group_prefs` is unchanged.
+2. **`EpgReader.search` gained `perText` (§2.7):** `EpgReaderImpl` and `data/src/test/.../FakeEpgStore` changed their override signatures only. `perText`, the CONTINUATION filter and the `searchPast` override stay WP-B's; until then `perText` is ignored and `searchPast` returns the interface default (empty).
+3. **Amended (lead decision 2026-10-14): no absolute epoch minute in a `Float`.** The proposal passed epoch minutes (≈ 2.99 × 10⁷ in 2026) as `Float`s, whose spacing there is **2 minutes**: odd minutes rounded and a fractional animated scroll could not be represented. Absolute positions are now `Int` epoch minutes and the animated fraction is a small `scrollOffsetMin: Float` relative to the window start (about −180..+180): `GuideMetrics.xOf(min: Int, windowStartMin: Int, scrollOffsetMin: Float): Float`, `GuideRenderer.draw(canvas, frame, windowStartMin: Int, scrollOffsetMin: Float, scrollRow: Float)` and `GuideRenderer.focusedCellBounds(frame, windowStartMin: Int, scrollOffsetMin: Float, scrollRow: Float, out)`. Implementations compute `min − windowStartMin` in `Int` first. `GuideGridHost` (§3.6.5) animates the offset from `frame.windowStartMin` and rebases it when the target changes; §3.3.3, §3.6.1, §3.6.2 and §5.1 use the new names. No other contract member carried an epoch minute in a `Float` (`scrollRow` is a row index). Not `Double`: the renderer stays `Float`-only.
+4. **`GroupDao.setGroupOrder` signature (§2.9.3 left it as `…`):** `setGroupOrder(playlistId, kind, orderedKeys: List<String>, now)`, a `@Transaction` over a new column-targeted `upsertGroupSortIndex(playlistId, kind, groupKey, index, now)`. The other §2.9.3 DAO methods are real Room queries with the SQL given there; `ReminderRepository.add` gained `shiftMin: Int = 0`. The read-side `COALESCE(cp.custom_name, c.display_name, c.name)` is WP-B's (`ChannelRow` already carries `display_name` through its embedded `ChannelEntity`).
+5. **`ArchiveTargetsImpl` (`player/.../resolve/`):** asks `PlaybackSourceProvider.channel` first (null → `ChannelGone`), then the internal `StreamUrlResolver.catchupTarget`; any other null (playlist gone, re-auth needed, credentials unavailable) → `CredentialsUnavailable`, whose toast names the login as the next step.
+6. **Build additions beyond §6.2** (test scope only): `:ui` `testImplementation(kotlinx-coroutines-test)`, `testImplementation(platform(compose-bom))` (the BOM is not on the unit-test configurations otherwise) and `testImplementation(testFixtures(":core"))` for the fakes; `:app` `testImplementation(testFixtures(":core"))`. CI runs `:ui:testDebugUnitTest` too. The catalog gained exactly the three §6.1 entries; `lifecycle-viewmodel-compose` resolves to 2.10.0 like `lifecycle-runtime-compose`.
+7. **Stubs that are not `TODO`:** `GuideDebugProbeImpl` is the plain holder in `ui/src/debug` and a no-op in `ui/src/release` (the instrumented suite needs nothing more); `Modifier.boxKeySink` delegates to `KeyRouter.sinkModifier` (its definition in §2.10); `BenchSeedActivity` (`app/src/benchmark`) finishes immediately; `ImageModule` provides a default Coil `ImageLoader`. `MainActivity` still shows the M0 placeholder with a `TODO("WP-C")` comment; no guide binding is constructed at app start. `GuideDebugReceiver` is an empty object; its manifest entries are WP-D's.
+8. **Fakes** (`core/src/testFixtures/.../guide/fakes/`): `GuideFixtures` (channels, `ProgrammeInfo`, a synthetic row generator and a `GuideWindowData` builder), `FakeGuideMetrics(+Factory)`, `RecordingCellSink`, `FakeRowCellsBuilder`, `FakeNavigator` (simplified moves, not §3.4.2), `FakeTimeLabels` (UTC), `RecordingGuideCanvas`, `FakeTextMeasurer` (§5.1 widths), `FakeGuideImages`, `FakeGuideRows`, `FakeGuideRenderer`, `FakeGuideLibrary`, `FakeGuideRowsCache`, `FakeGuideWindowPager`, `FakeGuideSettings`, `FakeGuideSessionStore`, `FakeGuideDataWindowSource`, `FakeSyncFeed`, `FakeDeviceClassSource`, `FakeGuideDebugProbe`, `RecordingGuideEffects`, `FakeGuideStateMachine`, `FakeNumberEntry`, `FakeReminderBook`, `FakeReminderPlanner`, `FakeReminderAlerts`, `FakeGuideSearch`, `FakeChannelNamePrefix`, `FakeKeyGestureDetector`, `FakeKeyMap`, `FakeKeyCapabilities`. The `:ui`/`:player` contracts (`KeyRouter`, `CatchupLauncher`, `ArchiveTargets`) have no fake in `:core` testFixtures (it cannot see them); WP-C/WP-D write their own.
+
 ---
 ## 3. Algorithms
 
@@ -1369,7 +1390,7 @@ No `runBlocking` in any M3 code. Nothing on main waits on the epg thread.
 | Timeline | x 281 – 1839 | width 1558; `pxPerMin = 1558 s / 180` |
 | Row *i* (visible index) | top = 549 + 68 *i*, height 60 | `rowTop(i) = round((549 + 68 i) s)`, `rowBottom = rowTop + round(60 s)` (rounded per row, so 6 rows never drift) |
 | Rows area | y 549 – 947 | clip; row 5 ends at 949 in the prototype (2 px into the padding, which the prototype does not clip); we clip at 947 + 12 = 959 (inner panel bottom), so nothing is cut |
-| Cell *x* | `xOf(start) + 3` – `xOf(end) − 3` | `xOf(m) = timelineLeft + (m − scrollMin) × pxPerMin`, not snapped (anti-aliased edges) |
+| Cell *x* | `xOf(start) + 3` – `xOf(end) − 3` | `xOf(m) = timelineLeft + ((m − windowStartMin) − scrollOffsetMin) × pxPerMin` (Int difference first, §2.12 item 3), not snapped (anti-aliased edges) |
 | Now line | `xOf(now)`, from `rowsTop − 6` to rows bottom | dot centre `(x, rowsTop − 5)`, radius 5 |
 | Hole | (64, 56) – (784, 461) | `holeRect = [round(64 s), round(56 s), round(784 s), round(461 s)]`: (64, 56, 784, 461) at 1080p, (43, 37, 523, 307) at 720p |
 
@@ -1437,7 +1458,7 @@ Input: one row's programmes in start order, the coverage `[fromMin, toMin)`, `no
 
 #### 3.3.3 Animation
 
-Every placement says `animate = !ctx.snap`. `ctx.snap` is true in low-end mode and when the key's `repeat ≥ SNAP_AFTER_REPEATS` (3) (B2.5). The host animates `scrollMin`/`scrollRow` over `SCROLL_ANIM_MS` (200 ms, ease-out, product §3.1); a new target while animating retargets from the current value.
+Every placement says `animate = !ctx.snap`. `ctx.snap` is true in low-end mode and when the key's `repeat ≥ SNAP_AFTER_REPEATS` (3) (B2.5). The host animates `scrollOffsetMin` (relative to `frame.windowStartMin`, §3.6.5) and `scrollRow` over `SCROLL_ANIM_MS` (200 ms, ease-out, product §3.1); a new target while animating retargets from the current value.
 
 #### 3.3.4 Limits (WP-D `GuideLimits`)
 
@@ -1580,7 +1601,7 @@ Every v1 guide function is reachable with UP/DOWN/LEFT/RIGHT/SELECT/BACK and CON
    1. Label cell (§3.6.3).
    2. `save`; clip to the row's timeline rect.
    3. Archive band (§3.6.2).
-   4. Cells overlapping `[scrollMin, scrollMin + 180]`, except the focused one (§3.6.4).
+   4. Cells overlapping `[scrollMin, scrollMin + 180]` (here and below, `scrollMin` is shorthand for `windowStartMin + scrollOffsetMin`; the renderer compares in Int minutes relative to `windowStartMin`, never an absolute Float), except the focused one (§3.6.4).
    5. `restore`.
 5. Focused cell, drawn last so its ring and shadow overlap neighbours, clipped to the timeline columns of the rows area.
 6. Now line (if `now ∈ [scrollMin, scrollMin + 180]`): `NOW_GLOW` asset 24 px wide centred on x, a 2 px `ACCENT` rect from `rowsTop − 6` to the rows bottom, a radius-5 `ACCENT` dot at `(x, rowsTop − 5)`. Drawn over the cells (B2.6).
@@ -1627,7 +1648,9 @@ Overflow: if `cellTitleWidth ≤ available` draw the whole title; else `(n, cutW
 ```kotlin
 @Composable
 fun GuideGridHost(sm: GuideStateMachine, renderer: GuideRenderer, canvas: AndroidGuideCanvas, modifier: Modifier) {
-    val scrollMin = remember { Animatable(sm.frame.windowStartMin.toFloat()) }
+    // (amended 2026-10-14, §2.12 item 3) Offset from frame.windowStartMin, never an absolute epoch minute in a Float.
+    // On a new target W' (old base W, current offset o): snapTo(o + (W − W')), then animateTo(0f) (or snapTo(0f)).
+    val scrollOffsetMin = remember { Animatable(0f) }
     val scrollRow = remember { Animatable(sm.frame.topRow.toFloat()) }
     val version = sm.frameVersion.collectAsState()  // a State object; its value is read only inside drawBehind
     // LaunchedEffect collects sm.frameVersion: on change, animateTo/snapTo the frame's targets (§3.3.3).
@@ -1635,12 +1658,12 @@ fun GuideGridHost(sm: GuideStateMachine, renderer: GuideRenderer, canvas: Androi
         version.value                              // State read in draw: invalidates the draw only
         imageTick.intValue                         // logo arrivals
         // the renderer works in window px: translate by −panelOrigin before drawing (N4)
-        drawIntoCanvas { c -> canvas.bind(c.nativeCanvas); renderer.draw(canvas, sm.frame, scrollMin.value, scrollRow.value) }
+        drawIntoCanvas { c -> canvas.bind(c.nativeCanvas); renderer.draw(canvas, sm.frame, sm.frame.windowStartMin, scrollOffsetMin.value, scrollRow.value) }
     })
 }
 ```
 
-The composable never reads `frameVersion`, `scrollMin` or `scrollRow` in composition, so focus moves and scroll frames cause **no recomposition** (checked by I-12). (reviewed 2026-10-14, B8/F6) The node carries `Modifier.graphicsLayer()` with default parameters (no alpha, clip, shape or render effect): a plain RenderNode, so a grid redraw re-records only the grid. `GuideScreen`'s header/panel column and `AmbientBackground` carry one too. None of them is an ancestor of `VideoLayer`. The root rule (§3.13.1) forbids layers only on ancestors of `VideoLayer`. Without them, every scroll frame re-recorded the whole window (ambient, hole chrome, header, panel, footer text). WP-A confirms it on the device with a Perfetto/Compose trace: a `Trace` section around the panel's draw must not fire on a grid-only frame (I-18; the layer-scope behaviour itself is **(verify; owner WP-A, §8)**). `drawBehind` redraws only when state read inside it changes, and `drawIntoCanvas { it.nativeCanvas }` yields the `android.graphics.Canvas` (API notes §1.1, §1.2; `DrawModifier.kt:93`, `AndroidCanvas.android.kt:53`). (reviewed 2026-10-14, B1/F5) The node carries no focus or key modifiers (keys arrive through the root key sink, §2.10, §3.18.1). The `Spacer` is sized to the panel rect, not the window, so TalkBack's focus rectangle is the grid (N4).
+The composable never reads `frameVersion`, `scrollOffsetMin` or `scrollRow` in composition, so focus moves and scroll frames cause **no recomposition** (checked by I-12). (reviewed 2026-10-14, B8/F6) The node carries `Modifier.graphicsLayer()` with default parameters (no alpha, clip, shape or render effect): a plain RenderNode, so a grid redraw re-records only the grid. `GuideScreen`'s header/panel column and `AmbientBackground` carry one too. None of them is an ancestor of `VideoLayer`. The root rule (§3.13.1) forbids layers only on ancestors of `VideoLayer`. Without them, every scroll frame re-recorded the whole window (ambient, hole chrome, header, panel, footer text). WP-A confirms it on the device with a Perfetto/Compose trace: a `Trace` section around the panel's draw must not fire on a grid-only frame (I-18; the layer-scope behaviour itself is **(verify; owner WP-A, §8)**). `drawBehind` redraws only when state read inside it changes, and `drawIntoCanvas { it.nativeCanvas }` yields the `android.graphics.Canvas` (API notes §1.1, §1.2; `DrawModifier.kt:93`, `AndroidCanvas.android.kt:53`). (reviewed 2026-10-14, B1/F5) The node carries no focus or key modifiers (keys arrive through the root key sink, §2.10, §3.18.1). The `Spacer` is sized to the panel rect, not the window, so TalkBack's focus rectangle is the grid (N4).
 
 #### 3.6.6 Accessibility (B2.7)
 
@@ -2032,7 +2055,7 @@ Nothing of the guide: the grid panel starts at y 500 and the hole ends at y 461 
 
 | Test | Cases |
 |---|---|
-| `GuideMetricsTest` | §3.1 table at s = 1, 0.6667, 2; per-row rounding never drifts; hole rects; `xOf` of the prototype's now line (687.8 at 19:47) |
+| `GuideMetricsTest` | §3.1 table at s = 1, 0.6667, 2; per-row rounding never drifts; hole rects; `xOf` of the prototype's now line (687.8 at 19:47); `scrollOffsetMin = 0.5` shifts by 4.33 px at s = 1 |
 | `RowCellsBuilderTest` | empty row → NO_EPG hour blocks; gap split at hours (19:47–21:10 → 3 cells); sliver flagged; overlap clipped; nested programme skipped (S10b); continuation merged; programme crossing both edges; DST day (Europe/London, 2026-03-29 and 2026-10-25) hour cuts |
 | `GuideNavigatorTest` | every row of §3.4.2 for LEFT/RIGHT/UP/DOWN/PAGE/TIME/STEP/TO_ROW/TO_TIME/RESOLVE; LeftEdge from the on-now cell on a row without archive and at the archive limit on an archive row (lead §7 item 4), STEP_BACK past it; LeftEdge at `earliest`; TopEdge; Blocked; long programme on Left (window jumps to its start); sliver skip; LOADING cells outside coverage; RESOLVE after a snapshot whose cell boundaries changed; anchor invariants (§3.3.2) checked by a property test over 10,000 random walks on random rows |
 | `TimeLabelsTest` | 24/12 h, DST, contextual labels at each boundary, day labels; zero allocation for `minuteOfDay`/`dayOf`; concurrent `reset` while another thread reads (S12) |

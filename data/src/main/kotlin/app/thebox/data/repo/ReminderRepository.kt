@@ -18,13 +18,15 @@ class ReminderRepository @Inject constructor(
     private val dao: ReminderDao,
     private val clock: WallClock,
 ) {
-    /** False when a reminder for that airing already exists. */
+    /** False when a reminder for that airing already exists. [shiftMin]: the guide shift at set time (M3 §2.9, S1). */
     suspend fun add(
         channel: ChannelIdentity, rawStartMin: Int, rawEndMin: Int, title: String, channelName: String, leadSec: Int = 60,
+        shiftMin: Int = 0,
     ): Boolean = dao.insert(
         ReminderEntity(
             playlistId = channel.playlistId, stableKey = channel.stableKey.value, startMin = rawStartMin, endMin = rawEndMin,
             titleHash = Hash64.of(title), title = title, channelName = channelName, leadSec = leadSec, createdAt = clock.now(),
+            shiftMin = shiftMin,
         ),
     ) != -1L
 

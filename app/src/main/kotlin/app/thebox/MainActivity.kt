@@ -34,6 +34,7 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch { controller.keepScreenOn.collect { if (it) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) } }
         WindowDisplayModeBinder(controller).bind(this)
         setContent {
+            // TODO("WP-C"): replace with AppRoot (docs/design/m3-guide.md §1.4, §3.13.1) and prewarm() (M2 E-L17).
             BoxTheme { PlaceholderScreen() }
         }
     }
