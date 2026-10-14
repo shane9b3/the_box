@@ -90,7 +90,8 @@ class PlaybackDebugActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        setIntent(intent)
+        // No setIntent(): ActivityScenario matches lifecycle events on the launch intent, and a replaced intent made
+        // scenario.close() time out after a second deep link (device integration pass, 2026-10-13).
         handle(intent)
     }
 

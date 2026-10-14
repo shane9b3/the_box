@@ -97,7 +97,7 @@ class ErrorLadderImpl(
     private val reclaimWindow = TimeWindow()
 
     /** Scopes the per-channel windows; a different [channelKey] clears them. */
-    fun beginChannel(channelKey: String?) {
+    override fun beginChannel(channelKey: String?) {
         if (channelKey == windowKey) return
         windowKey = channelKey
         decoderWindow.clear(); pcrWindow.clear(); behindWindow.clear(); reclaimWindow.clear()

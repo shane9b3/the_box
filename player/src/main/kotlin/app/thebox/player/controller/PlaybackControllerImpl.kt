@@ -59,6 +59,13 @@ import app.thebox.core.playback.Viewport
 import app.thebox.core.playback.XtreamOutput
 import app.thebox.core.playback.ZapDebouncer
 import app.thebox.core.playback.ZapRecord
+import app.thebox.core.playback.broker.BrokerConstants
+import app.thebox.core.playback.errors.ErrorConstants
+import app.thebox.core.playback.errors.ErrorLadderImpl
+import app.thebox.core.playback.stall.StallConstants
+import app.thebox.player.engine.PlayerFactory
+import app.thebox.player.engine.StatsCollector
+import app.thebox.player.engine.UnsupportedStreamFormatException
 import app.thebox.core.refresh.ChannelIdentity
 import app.thebox.core.source.PlaylistType
 import app.thebox.core.xtream.AccountStatus
@@ -108,6 +115,9 @@ import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -206,7 +216,9 @@ internal class PlaybackControllerImpl @Inject constructor(
     private var zapList: ZapList? = null
     private var previousIdentity: ChannelIdentity? = null
     private var lifecycleStopAtMs = 0L
-    private var watchdogStarted = false
+
+    /** Passthrough denials learned on the current audio route (L33); survive tunes, cleared on a route change (§3.8.3). */
+    private val routeDeniedPassthrough = LinkedHashSet<String>()
 
     private var sessionJob: Job? = null
     private var switchTimeoutJob: Job? = null
@@ -271,7 +283,6 @@ internal class PlaybackControllerImpl @Inject constructor(
         var softwareVideo = false
         var decoderOverride: VideoDecoderMode? = null
         val softwareAudioMimes = LinkedHashSet<String>()
-        val deniedPassthrough = LinkedHashSet<String>()
         var forceStereo = false
         var tunnelingOff = false
         var audioDropped = false
@@ -355,7 +366,8 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     override fun retry() {
         val c = cycle ?: return
-        // §4.3 "Retry from the card": fresh counters. The limiter has no per-channel reset in the contract (reported).
+        // §4.3 "Retry from the card": fresh counters (new cycle) and a fresh re-resolve window for the channel.
+        limiter.reset(c.identity)
         startCycle(c.specForRestart())
     }
 
@@ -385,6 +397,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         cancelCycleJobs()
         val c = Cycle(spec, identity, now)
         cycle = c
+        ladder.beginChannel(identity?.stableKey?.value)
         importGate.closeForZap()
         _video.value = VideoInfo(aspectMode = settings.current.defaultAspect)
         _tracks.value = TrackInfo()
@@ -427,7 +440,21 @@ internal class PlaybackControllerImpl @Inject constructor(
         val e = ensureEngine()
         if (!c.factsLoaded) loadFacts(c)
         if (!current(c, id)) return
-        if (plan.refreshAccount) refreshAccount(c)
+        if (plan.refreshAccount) {
+            refreshAccount(c)
+            if (!current(c, id)) return
+            // (integration 2026-10-13, device I-17) The §4.3 G1 gate with the fresh account, before another open the
+            // panel is known to refuse: an EXPIRED/DISABLED/AUTH_FAILED account fails now instead of after one more 403.
+            val last = c.lastSignal
+            if (last != null && c.accountGate != AccountGate.ACTIVE && c.accountGate != AccountGate.UNKNOWN) {
+                val decision = ladder.decide(last, ladderContext(c, reResolveAllowed = false)).first
+                if (decision is LadderDecision.Fail) {
+                    eventLog.add(PlaybackEventType.DECISION, id, decisionName(decision), "account ${c.accountGate.name}")
+                    fail(c, decision.error, last)
+                    return
+                }
+            }
+        }
         if (!current(c, id)) return
 
         // Step 3: resolve (never reuse a resolved URL across a user request; only RetrySame/Reprepare reuse it).
@@ -462,6 +489,11 @@ internal class PlaybackControllerImpl @Inject constructor(
         val s = TuneSession(id, resolved, ctx, transport, format, clock.nowMs())
         val built = try {
             mediaSources.build(ctx, format, if (c.tsCompat > 0) TsCompat.MULTI_PMT else TsCompat.DEFAULT, transport, c.archive?.request)
+        } catch (ex: UnsupportedStreamFormatException) {
+            BoxLog.w(TAG, "media source $id not built: unsupported ${ex.format}")
+            s.end()
+            fail(c, PlaybackError(PlaybackErrorCode.UNSUPPORTED_SOURCE, ErrorDetail(host = resolved.host, signal = ex.format.name)), null)
+            return
         } catch (ex: Exception) {
             BoxLog.w(TAG, "media source $id not built: ${ex.javaClass.simpleName}")
             s.end()
@@ -480,10 +512,10 @@ internal class PlaybackControllerImpl @Inject constructor(
         c.firstSession = false
         e.parts.watchdog.bind(built.telemetry)
         e.parts.watchdog.reset()
-        if (!watchdogStarted) {
-            watchdogStarted = true
-            e.parts.watchdog.start { verdict -> onStall(verdict) }
-        }
+        // WP-C: per session beginSession + setSessionKind + bind (watchdog), bind (stats), fps estimator reset.
+        e.parts.beginSession(built.telemetry, format, isLive = !c.isArchive, isHls = format == StreamFormat.HLS)
+        // Stopped in endSession() while a ladder decision runs (§3.7 global guard); started again for the new session.
+        e.parts.watchdog.start { verdict -> onStall(verdict) }
         updateExpectations()
         if (!c.firstMediaReached && _state.value is PlaybackState.Connecting) {
             setActiveState(c, PlaybackState.Connecting(nowPlaying(c), ConnectPhase.CONNECTING, c.attempt, clock.nowMs()))
@@ -577,20 +609,23 @@ internal class PlaybackControllerImpl @Inject constructor(
         }
     }
 
+    /** §3.5.1 via WP-A's rule: direct URLs use their own value (broker `d:<host>`), playlists override → account → 1. */
     private fun maxConnections(c: Cycle): Int {
-        c.directTarget?.let { return it.maxConnections.coerceIn(1, MAX_CONNECTIONS_CAP) }
-        val max = c.playlistInfo?.maxConnectionsOverride ?: c.account?.maxConnections?.takeIf { it > 0 } ?: 1
-        return max.coerceIn(1, MAX_CONNECTIONS_CAP)
+        c.directTarget?.let { return BrokerConstants.clamp(it.maxConnections) }
+        return BrokerConstants.effectiveMax(c.playlistInfo?.maxConnectionsOverride, c.account?.maxConnections)
     }
 
     /** §3.1.1 step 5: runtime switches read by the long-lived engine components (no player rebuild). */
     private fun applySwitches(e: Engine, c: Cycle, resolved: ResolvedStream) {
         val b = e.bundle
         val s = settings.current
+        // WP-C: settings-derived switches first, then the union of what the ladder learned (applies at the next prepare).
+        engine.applySettings(b, s)
         b.codecPolicy.videoMode = effectiveVideoMode(c)
-        b.codecPolicy.softwareAudioMimes = c.softwareAudioMimes.toSet()
-        b.audioPolicy.deniedPassthrough = if (s.audioOutput == AudioOutputMode.ALWAYS_DECODE) c.deniedPassthrough + "*" else c.deniedPassthrough.toSet()
-        b.audioPolicy.forceStereo = c.forceStereo || s.audioOutput == AudioOutputMode.STEREO
+        b.codecPolicy.softwareAudioMimes = b.codecPolicy.softwareAudioMimes + c.softwareAudioMimes
+        val denied = b.audioPolicy.deniedPassthrough + routeDeniedPassthrough
+        b.audioPolicy.deniedPassthrough = if (s.audioOutput == AudioOutputMode.ALWAYS_DECODE) denied + "*" else denied
+        b.audioPolicy.forceStereo = b.audioPolicy.forceStereo || c.forceStereo || s.audioOutput == AudioOutputMode.STEREO
         val mode = if (c.isArchive) BufferMode.MEDIUM else c.memory.bufferMode ?: s.bufferMode
         val profile = bufferFsm.profileFor(resolved.brokerKey, mode, engine.isLowRam)
         b.loadControl.profile = profile
@@ -598,18 +633,13 @@ internal class PlaybackControllerImpl @Inject constructor(
         b.trackSelector.setParameters(b.trackSelector.buildUponParameters().setTunnelingEnabled(s.tunneling && !c.tunnelingOff))
 
         val p = b.player
+        if (c.firstSession) {
+            // §3.8.6 / §3.12 defaults and per-channel memory, once per cycle (WP-C TrackController.applyTuneDefaults).
+            val audioLangs = (listOfNotNull(c.memory.audioLanguage) + PlayerFactory.preferredAudioLanguages(s)).distinct().take(3)
+            e.parts.applyTuneDefaults(audioLangs, s.preferredTextLanguages.take(3), c.memory.subtitleLanguage, s.subtitlesEnabled)
+        }
         val params = p.trackSelectionParameters.buildUpon()
         if (c.firstSession) {
-            // §3.8.6 / §3.12 defaults and per-channel memory, once per cycle.
-            val audioLangs = listOfNotNull(c.memory.audioLanguage) + s.preferredAudioLanguages
-            params.setPreferredAudioLanguages(*audioLangs.distinct().take(3).toTypedArray())
-            params.clearOverridesOfType(C.TRACK_TYPE_AUDIO).clearOverridesOfType(C.TRACK_TYPE_TEXT)
-            when (val sub = c.memory.subtitleLanguage) {
-                "" -> params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true)
-                null -> params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !s.subtitlesEnabled)
-                    .setPreferredTextLanguages(*s.preferredTextLanguages.take(3).toTypedArray())
-                else -> params.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, false).setPreferredTextLanguages(sub)
-            }
             applyAspect(c.memory.aspect ?: s.defaultAspect)
             c.fpsMilli = c.memory.fpsMilli
             e.parts.displayMode.onTune(c.memory.fpsMilli)
@@ -627,6 +657,7 @@ internal class PlaybackControllerImpl @Inject constructor(
     private fun endSession() {
         val s = session ?: return
         session = null
+        eng?.parts?.watchdog?.stop()
         s.end()
         player?.stop()
     }
@@ -657,6 +688,25 @@ internal class PlaybackControllerImpl @Inject constructor(
         eng = created
         scope.launch { parts.displayMode.request.collect { _displayModeRequest.value = it } }
         scope.launch { parts.fps.collect { onFps(it) } }
+        parts.setFirstMediaListener { video ->
+            session?.let { s ->
+                if (s.milestoneVideo == null) s.milestoneVideo = video
+                onFirstMedia(s)
+            }
+        }
+        parts.setDisplaySwitchListener(onStarted = ::onDisplaySwitchStarted, onSettled = ::onDisplaySwitchSettled)
+        parts.setStatsEnabled(statsEnabled)
+        scope.launch {
+            settings.settings.map { it.afrMode }.distinctUntilChanged().drop(1).collect { parts.onAfrModeChanged(it) }
+        }
+        try {
+            engine.observeAudioRoute {
+                if (routeDeniedPassthrough.isNotEmpty()) BoxLog.i(TAG) { "audio route changed: passthrough denials cleared" }
+                routeDeniedPassthrough.clear()
+            }
+        } catch (e: Exception) {
+            BoxLog.w(TAG, "audio route observer unavailable: ${e.javaClass.simpleName}")
+        }
         try {
             lifecycle.start()
         } catch (e: Exception) {
@@ -809,7 +859,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         val s = session ?: return
         if (tracks.isEmpty) return
         _tracks.value = try {
-            eng?.parts?.tracks() ?: TrackInfo()
+            eng?.parts?.tracks(tracks) ?: TrackInfo()
         } catch (e: Exception) {
             TrackInfo()
         }
@@ -846,6 +896,12 @@ internal class PlaybackControllerImpl @Inject constructor(
             c.firstMediaReached = true
             c.firstMediaAtMs = now
             c.zap.firstMediaMs = now - c.startedAtMs
+            // WP-B emits no FIRST_BYTE event; its telemetry stamps the first byte on the same monotonic clock.
+            val firstByteAt = s.telemetry?.firstByteAtMs ?: 0L
+            if (firstByteAt > 0L && firstByteAt >= c.startedAtMs) {
+                val fromTelemetry = firstByteAt - c.startedAtMs
+                c.zap.firstByteMs = c.zap.firstByteMs?.let { minOf(it, fromTelemetry) } ?: fromTelemetry
+            }
             finishZapRecord(c, "ok")
             traceEnd(c.firstTuneId)
             importGate.releaseAfterFirstMedia()
@@ -900,7 +956,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         healthyJob = scope.launch {
             delay(LADDER_HEALTHY_RESET_MS)
             if (cycle === c && clock.nowMs() - c.lastErrorAtMs >= LADDER_HEALTHY_RESET_MS) {
-                c.counters = LadderCounters()
+                c.counters = ErrorLadderImpl.countersAfterHealthy(c.counters, clock.nowMs() - maxOf(c.lastErrorAtMs, c.firstMediaAtMs))
                 c.attempt = 1
                 BoxLog.d(TAG) { "ladder counters reset after healthy playback" }
             }
@@ -913,7 +969,13 @@ internal class PlaybackControllerImpl @Inject constructor(
         if (session?.tuneId != id) return
         val since = clock.nowMs() - c.startedAtMs
         when (type) {
-            PlaybackEventType.LEASE -> if (c.zap.leaseMs == null) c.zap.leaseMs = since
+            PlaybackEventType.LEASE -> {
+                if (c.zap.leaseMs == null) c.zap.leaseMs = since
+                val st = _state.value
+                if (st is PlaybackState.Connecting && st.phase == ConnectPhase.WAITING_FOR_SLOT) {
+                    setActiveState(c, st.copy(phase = ConnectPhase.CONNECTING))
+                }
+            }
             PlaybackEventType.FIRST_BYTE -> {
                 if (c.zap.firstByteMs == null) c.zap.firstByteMs = since
                 val st = _state.value
@@ -925,6 +987,14 @@ internal class PlaybackControllerImpl @Inject constructor(
                 val st = _state.value
                 if ((st is PlaybackState.Playing && !st.paused) || (st is PlaybackState.Buffering && st.cause == BufferingCause.REBUFFER)) {
                     setState(PlaybackState.Buffering(nowPlaying(c), BufferingCause.RECONNECTING, null))
+                }
+            }
+            PlaybackEventType.RECONNECT_OK -> {
+                // (integration 2026-10-13) The player usually never left READY during an in-source reconnect, so no
+                // READY callback ends Buffering(RECONNECTING): end it here (and in pollTick, from the telemetry).
+                val st = _state.value
+                if (st is PlaybackState.Buffering && st.cause == BufferingCause.RECONNECTING && player?.playbackState == Player.STATE_READY && !c.paused) {
+                    setState(PlaybackState.Playing(nowPlaying(c), paused = false, warning = c.warning))
                 }
             }
             else -> Unit
@@ -942,6 +1012,20 @@ internal class PlaybackControllerImpl @Inject constructor(
             eng?.parts?.displayMode?.onFps(fps)
             c.identity?.let { id -> remember(id) { it.copy(fpsMilli = milli) } }
         }
+    }
+
+    /** API < 31 AFR switch while a session plays (WP-C switchListener): pause and show SWITCHING_DISPLAY_MODE. */
+    private fun onDisplaySwitchStarted() {
+        val c = cycle ?: return
+        if (session == null) return
+        player?.playWhenReady = false
+        if (!c.paused) setActiveState(c, PlaybackState.Connecting(nowPlaying(c), ConnectPhase.SWITCHING_DISPLAY_MODE, c.attempt, clock.nowMs()))
+    }
+
+    private fun onDisplaySwitchSettled() {
+        val c = cycle ?: return
+        if (session == null || c.paused) return
+        player?.playWhenReady = true
     }
 
     private fun onSwitchTimeout(c: Cycle) {
@@ -972,8 +1056,10 @@ internal class PlaybackControllerImpl @Inject constructor(
         eventLog.add(PlaybackEventType.ERROR, id, signal.name, error?.errorCodeName ?: "")
         BoxLog.i(TAG) { "failure ${signal.name} (tune $id, ${now - c.startedAtMs} ms)" }
 
-        var result = ladder.decide(signal, ladderContext(c, reResolveAllowed = true))
-        if (needsReResolve(result.first) && !limiter.tryAcquire(c.identity, now)) {
+        // WP-A: peek the limiter for the context; consume a slot only when the ladder actually re-resolves (format flip
+        // and UA fallback are not rate-limited). The second decision only runs if the slot vanished in between.
+        var result = ladder.decide(signal, ladderContext(c, reResolveAllowed = limiter.wouldAllow(c.identity, now)))
+        if (result.first is LadderDecision.ReResolve && !limiter.tryAcquire(c.identity, now)) {
             result = ladder.decide(signal, ladderContext(c, reResolveAllowed = false))
         }
         c.counters = result.second
@@ -987,9 +1073,6 @@ internal class PlaybackControllerImpl @Inject constructor(
         execute(c, decision, signal, error)
     }
 
-    private fun needsReResolve(d: LadderDecision) =
-        d is LadderDecision.ReResolve || d is LadderDecision.FlipXtreamOutput || d is LadderDecision.UserAgentFallback
-
     private fun ladderContext(c: Cycle, reResolveAllowed: Boolean): LadderContext {
         val now = clock.nowMs()
         val s = session
@@ -1002,6 +1085,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             isLive = !c.isArchive,
             isArchive = c.isArchive,
             format = s?.format ?: c.format ?: r?.formatHint ?: StreamFormat.UNKNOWN,
+            // WP-A: resolved.xtream != null; an XTREAM playlist always resolves with it (the type covers a failed resolve).
             isXtream = r?.xtream != null || c.playlistInfo?.type == PlaylistType.XTREAM,
             baseCount = r?.baseCount ?: 1,
             output = r?.output,
@@ -1010,7 +1094,8 @@ internal class PlaybackControllerImpl @Inject constructor(
             reconnectAttemptsSetting = settings.current.reconnectAttempts,
             tunnelingActive = settings.current.tunneling && !c.tunnelingOff,
             passthroughActive = stats.audioPassthrough,
-            passthroughMime = stats.audioMime.takeIf { stats.audioPassthrough },
+            // WP-A reads it as the selected audio MIME (also for PCM stalls, L33/L34).
+            passthroughMime = stats.audioMime,
             audioChannelCount = stats.audioChannels,
             videoDecoderMode = effectiveVideoMode(c),
             softwareVideoAvailable = engine.softwareVideoDecoderAvailable(stats.videoMime),
@@ -1077,7 +1162,7 @@ internal class PlaybackControllerImpl @Inject constructor(
                 restart(c, d, signal, Plan(reuseResolved = c.resolved != null))
             }
             is LadderDecision.DisablePassthroughAndReprepare -> {
-                c.deniedPassthrough += d.mimeType ?: "*"
+                routeDeniedPassthrough += d.mimeType ?: "*"
                 c.warning = PlaybackWarning.PASSTHROUGH_DISABLED
                 _notices.tryEmit(PlaybackNotice.PassthroughDisabled(d.mimeType))
                 restart(c, d, signal, Plan(reuseResolved = c.resolved != null))
@@ -1341,6 +1426,7 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     override fun setStatsEnabled(enabled: Boolean) {
         statsEnabled = enabled
+        eng?.parts?.setStatsEnabled(enabled)
         if (enabled) publishStats()
     }
 
@@ -1464,12 +1550,20 @@ internal class PlaybackControllerImpl @Inject constructor(
         val t = s.telemetry
         if (t != null) {
             val st = _state.value
+            if (t.waitingForLease && st is PlaybackState.Connecting && st.phase == ConnectPhase.CONNECTING) {
+                setActiveState(c, st.copy(phase = ConnectPhase.WAITING_FOR_SLOT))
+            }
             if (t.bytesTotal > 0) {
                 if (c.zap.firstByteMs == null) c.zap.firstByteMs = now - c.startedAtMs
                 if (st is PlaybackState.Connecting && st.phase == ConnectPhase.CONNECTING) setActiveState(c, st.copy(phase = ConnectPhase.BUFFERING_INITIAL))
             }
             if (t.inReconnect && ((st is PlaybackState.Playing && !st.paused) || (st is PlaybackState.Buffering && st.cause == BufferingCause.REBUFFER))) {
                 setState(PlaybackState.Buffering(nowPlaying(c), BufferingCause.RECONNECTING, null))
+            } else if (!t.inReconnect && st is PlaybackState.Buffering && st.cause == BufferingCause.RECONNECTING &&
+                player?.playbackState == Player.STATE_READY && player?.playWhenReady == true
+            ) {
+                // The player never left READY (buffer covered the gap), so no READY callback will end the state.
+                setState(PlaybackState.Playing(nowPlaying(c), paused = false, warning = c.warning))
             }
         }
         if (statsEnabled) publishStats()
@@ -1614,12 +1708,13 @@ internal class PlaybackControllerImpl @Inject constructor(
         const val RECORD_WATCHED_AFTER_MS = 5_000L
         const val PREVIOUS_CHANNEL_MIN_PLAY_MS = 1_000L
 
-        // Mirrors of WP-A/WP-C constants (Appendix B); the integration pass may point these at their owners.
-        const val SEEK_GRACE_MS = 2_000L
-        const val LADDER_HEALTHY_RESET_MS = 30_000L
-        const val POLL_INTERVAL_MS = 500L
+        // Owners' constants (Appendix B), pointed at at integration.
+        const val SEEK_GRACE_MS = StallConstants.SEEK_GRACE_MS
+        const val LADDER_HEALTHY_RESET_MS = ErrorConstants.LADDER_HEALTHY_RESET_MS
+        const val POLL_INTERVAL_MS = StatsCollector.STATS_INTERVAL_MS
+        /** Buffer-decay tick (§3.6.2); the FSM owns the 10-min decay rule, this is only how often it is asked. */
         const val STABLE_TICK_MS = 60_000L
-        const val MAX_CONNECTIONS_CAP = 50
+        const val MAX_CONNECTIONS_CAP = BrokerConstants.MAX_CONNECTIONS_CAP
 
         private val LIFECYCLE_REASONS = setOf(StopReason.BACKGROUND, StopReason.STANDBY, StopReason.HDMI_UNPLUGGED, StopReason.DISPLAY_OFF)
 

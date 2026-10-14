@@ -26,7 +26,7 @@ class ReResolveLimiterImpl(
     }
 
     @Synchronized
-    fun wouldAllow(key: ChannelIdentity?, nowMs: Long): Boolean {
+    override fun wouldAllow(key: ChannelIdentity?, nowMs: Long): Boolean {
         val q = stamps[key] ?: return true
         prune(q, nowMs)
         if (q.isEmpty()) stamps.remove(key)
@@ -34,7 +34,7 @@ class ReResolveLimiterImpl(
     }
 
     @Synchronized
-    fun reset(key: ChannelIdentity?) {
+    override fun reset(key: ChannelIdentity?) {
         stamps.remove(key)
     }
 

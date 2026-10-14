@@ -73,13 +73,15 @@ class SmokeAndZapTest : PanelTestBase() {
         val list = listOf(ch(1), ch(2), ch(4), ch(3))
         launch(list[0], zap = list)
         awaitFirstMedia(1)
-        val opensBefore = panel.stats().requestLog.size
+        val opensBefore = panel.stats().streamRequests
+        val tuneBefore = currentTuneId()
         repeat(10) {
             onMain { controller.zap(+1, isRepeat = true) }
             Thread.sleep(300)
         }
-        awaitPlaying(15_000)
-        val burstRequests = panel.stats().requestLog.size - opensBefore
+        // The trailing (debounced) zap fires after the burst: wait for its first media, not the old channel's Playing.
+        awaitFirstMedia(tuneBefore + 1, 15_000)
+        val burstRequests = panel.stats().streamRequests - opensBefore
         log("I-6 linger_status=$status: $burstRequests stream requests for a 10-press burst")
         assertTrue("debounced burst made $burstRequests requests", burstRequests <= 2 + 3) // + ladder L2/L3 retries on linger
 

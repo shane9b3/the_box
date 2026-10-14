@@ -185,6 +185,10 @@ abstract class PanelTestBase {
 
     protected fun awaitPlaying(timeoutMs: Long = 15_000) = awaitState("Playing", timeoutMs) { it is PlaybackState.Playing && !it.paused }
 
+    /** Playing on [channel] (a second deep link would otherwise match the previous channel's Playing state). */
+    protected fun awaitPlayingOn(channel: ChannelIdentity, timeoutMs: Long = 15_000) =
+        awaitState("Playing ${channel.stableKey.value}", timeoutMs) { it is PlaybackState.Playing && !it.paused && it.target?.identity == channel }
+
     protected fun awaitError(timeoutMs: Long) = awaitState("Error", timeoutMs) { it is PlaybackState.Error }.let { it.first as PlaybackState.Error to it.second }
 
     /** Waits for the first-media ZapRecord of the cycle started by tune [tuneIdAtLeast]. */

@@ -1312,6 +1312,24 @@ Additive columns, `@AutoMigration(from = 1, to = 2)`, `LibraryDatabase.VERSION =
 - The migration tests live in `:data` (Room's schema assets are wired there; `I1LibraryDatabaseTest` already has the `MigrationTestHelper` pattern), not in `:app`.
 
 ---
+### 2.11 Contract amendments (integration, 2026-10-13)
+
+All additive; defaults keep every existing implementation and fake compiling.
+
+- (amended 2026-10-13) `ErrorLadder.beginChannel(channelKey: String?)` (default no-op; `ErrorLadderImpl` overrides) — the per-channel escalation windows (5-min compat, PCR/behind-live, reclaim) outlive a cycle's `LadderCounters`; the controller calls it on every tune with the stable key (WP-A gap 2).
+- (amended 2026-10-13) `ReResolveLimiter.wouldAllow(key, nowMs)` (default `true`) and `reset(key)` (default no-op) — `LadderContext.reResolveAllowed` is filled by a peek before the decision, a slot is consumed (`tryAcquire`) only when the ladder returns `ReResolve` (format flip and UA fallback are not rate-limited), and card Retry resets the channel (WP-A gap 7, WP-D gap 1).
+- (amended 2026-10-13) The stream-switch timeout reaches the ladder through `ErrorLadderImpl(streamSwitchTimeoutMs = { settings.current.streamSwitchTimeoutMs })` (provided in `PlaybackModule`), not through `LadderContext` (WP-A gap 1).
+- (amended 2026-10-13) `StreamTelemetry.waitingForLease: Boolean` (default `false`; `SessionTelemetry` overrides) — drives `Connecting(WAITING_FOR_SLOT)`; it leaves on the `LEASE` event. `positionIgnoredCount`/`noBytesCount` stay diagnostics-only on `SessionTelemetry` (WP-B gap 8).
+- (amended 2026-10-13) Reading `LiveStreamException` (WP-B convention, adopted): `RECONNECT_EXHAUSTED.noBytes = info.networkKind == TIMEOUT`; `LOCAL_LIMIT` active/max from the `ConnectionLimitException` in `e.suppressed` (the classifier also accepts it in the cause chain); `TINY_BODY` carries `info.bytesRead`; `PREEMPTED` is stale.
+- (amended 2026-10-13) `EngineEnvironment` (the `:player` controller seam) gained `applySettings(bundle, settings)` and `observeAudioRoute(onChanged)`; `EngineParts` gained `beginSession(telemetry, format, isLive, isHls)`, `setFirstMediaListener`, `setStatsEnabled`, `applyTuneDefaults`, `onAfrModeChanged`, `setDisplaySwitchListener`, `release`, and `tracks()` became `tracks(tracks: Tracks)` — so the controller drives WP-C's real constructors and lifecycles (`PlaybackWatchdog`, `StatsCollector`, `TrackController`, `DisplayModeController.create`, `FpsEstimator`) as the WP-C hand-off describes.
+- (amended 2026-10-13) Passthrough denials learned by L33 are kept per **audio route** in the controller (survive tunes) and cleared by `DeviceCapabilities.observeAudioRoute`; settings-derived switches come from `PlayerFactory.applySettings` and the ladder's learned values are unioned on top at every prepare.
+- (amended 2026-10-13) `MediaSourceBuilder` throws `UnsupportedStreamFormatException` for DASH; the controller maps it to `UNSUPPORTED_SOURCE`. Load origins confirmed against WP-B's policy: live TS `PROGRESSIVE`, live HLS `HLS_MANIFEST` family, archive `ARCHIVE`; the archive URL is `ctx.resolved.url` (never the templated request).
+- (amended 2026-10-13) `TsCompat.MULTI_PMT` (compat level 1) also turns `FLAG_DETECT_ACCESS_UNITS` off (`TsExtractorsFactory.flagsFor`). Media3's Javadoc says the flag "should be disabled if the stream contains access unit delimiters (AUDs)", and WP-B saw an ffmpeg (AUD-carrying) IDR split into several samples. Whether a stream has AUDs is unknown before its first PES, so the design default (flag on) stays for level 0; a channel that escalates (L27) gets slice-header detection off as part of the level. The device pass did not show a problem attributable to the flag (I-3 stalls identically with it off, §5.8).
+- (amended 2026-10-13) State table §3.1.2: `Buffering(RECONNECTING)` ends on `RECONNECT_OK` (or `inReconnect` false at the next poll) when the player is still READY — an in-source reconnect usually never starves the player, so no READY callback would end it.
+- (amended 2026-10-13) After an L3 `ReResolve(refreshAccount)`, a refreshed EXPIRED/DISABLED/AUTH_FAILED account runs the §4.3 G1 gate **before** the next open (device I-17: one fewer refused request).
+- (amended 2026-10-13) `ZapRecord.firstByteMs` comes from `StreamTelemetry.firstByteAtMs` (WP-B emits no `FIRST_BYTE` event). `readyMs` stays null when READY follows the first frame (emulator, §6.9 finding 2).
+- (amended 2026-10-13) Owner constants: the controller's `SEEK_GRACE_MS`, `LADDER_HEALTHY_RESET_MS`, `MAX_CONNECTIONS_CAP`, poll interval and `StandaloneScope.PREEMPT_RELEASE_WAIT_MS` now point at `StallConstants`, `ErrorConstants`, `BrokerConstants`, `StatsCollector.STATS_INTERVAL_MS`; the healthy reset uses `ErrorLadderImpl.countersAfterHealthy`; `max_connections` uses `BrokerConstants.effectiveMax/clamp`. `StallDetectorsImpl(StallThresholds(tsNoBytesBackstopMs = 2 × LiveTsDataSource.NO_BYTES_TIMEOUT_MS))`.
+
 ## 3. Components and algorithms
 
 ### 3.1 Controller: tune pipeline and state machine (WP-D)
@@ -1540,6 +1558,8 @@ loop:
 ```
 
 `attempt` and `windowStart` reset after `RECONNECT_BUDGET_RESET_MS` (30 s) of uninterrupted bytes. The three attempts fit the plan's "transparent 3 s reconnect".
+
+(amended 2026-10-13) The budget is read as **bursts**: at most `RECONNECT_MAX_ATTEMPTS` (3) attempts inside one `RECONNECT_WINDOW_MS` (3 s) burst; a loss that happens after the window, with bytes flowing again since the last reconnect, starts a new burst (`attempt = 0; windowStart = now`). `RECONNECT_BUDGET_RESET_MS` is therefore unused (kept in App. B only as a historical value). Why: the literal 30-s reset would exhaust the budget on a panel that closes every 15 s (I-3 `close_every: 15`), which the plan requires to stay transparent. This is WP-B's implementation, accepted by the lead at integration.
 
 | Timeout | Value | Where |
 |---|---|---|
@@ -2246,6 +2266,53 @@ The v0 panel loops a 10 s clip **without rewriting PCR/PTS or continuity counter
 Real HDMI behaviour (AFR re-sync time, HDR switching, passthrough to a soundbar), frame-time impact on the guide, zap time on low-end hardware, Fire OS-specific lifecycle (CEC), and 12 h soak. These are D1, D6, D7 and M6 items on hardware.
 
 ---
+### 5.8 Integration results (2026-10-13)
+
+Run on the API 30 TV emulator (`TheBox_TV_API30`, x86, software `OMX.google.*` decoders, local FFmpeg AAR with x86 natives) against `tools/fakepanel/fakepanel.py` on port 18480 via `run-instrumented.sh`, one class per call. Numbers are emulator measurements, **not gate-relevant**. I-9 (`range_requests_seen == 0`) is asserted in every test's `@After` and held in every run.
+
+**JVM suite** (`:core:test :data:testDebugUnitTest :player:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :player:lintDebug :app:lintDebug`): green. `:core` 1,295 tests, `:data` 124, `:player` 271, 0 skipped (the two WP-D `LiveStreamException` classifier rows are un-skipped). Lint: no errors (warnings only, pre-existing kinds). New: `RealEngineControllerTest` (R-4): the controller over the real `PlayerFactory`, `MediaSourceBuilder`, `DefaultEngineEnvironment`, ladder, limiter, buffer FSM and broker registry; (1) TS fixture to first media, (2) a zap while connecting (old session ended before the new build, zap records `superseded`/`ok`), (3) the real WP-B transport against `mockwebserver3` answering 403: L2 `RetrySame` → L3 `ReResolve(refreshAccount)` → L6 `Fail(FORBIDDEN)`, 3 requests. These use `Clock.DEFAULT` (an auto-advancing `FakeClock` never advanced the loader while the controller's coroutine delays ran on the Robolectric clock).
+
+| Class | Pass | Fail | Ignored | Notes |
+|---|---|---|---|---|
+| `PanelAdminTest` | 1 | 0 | 0 | |
+| `ProvidersDeviceTest` | 4 | 0 | 0 | real Room |
+| `SmokeAndZapTest` (I-1, I-2, I-6 ×4, I-7) | 7 | 0 | 0 | |
+| `ReconnectTest` (I-3, I-4, I-5, I-8, I-14, I-15, I-16) | 6 | 0 | 1 | I-3 `@Ignore`d, open item O-1 (AGP's XML writes the ignored case as an empty `<failure/>`; the Gradle task passes) |
+| `ErrorPathTest` (I-10, I-11, I-12 ×2, I-17, I-18) | 6 | 0 | 0 | |
+| `MediaAndLifecycleTest` (I-13, I-19, I-20, I-20a, I-21, I-22) | 6 | 0 | 0 | I-22 runs its no-50 Hz branch (the AVD has one 60 Hz mode) |
+| `:data` `I1LibraryDatabaseTest` (I-23) | 3 | 0 | 0 | |
+
+**Measured (emulator)**
+- I-1 tune → first media: 530–950 ms over three runs (resolve 200–356, lease 220–408, first byte 313–598 ms). `ready` is null in the zap record: READY follows the first frame here (§6.9 finding 2).
+- I-2, 40 zaps at `max_connections = 1`: P50 365–572 ms, P90 778–1,352 ms; panel `maxOpen` 1, no rejections.
+- I-6 (linger 2 s, statuses 403/458/509/close): a 10-press repeat burst makes 3 stream requests; 10/10 single zaps reach first media. I-7 (linger 30 s, 458): `CONNECTION_LIMIT` after 3.5 s.
+- I-3 (`close_every: 15`, continue): reconnect gaps from the event log 10–30 ms; `Buffering(RECONNECTING)` lasts ~20 ms; 4 reconnects in 70 s when no decoder stall occurs. I-4/I-5: 2 (jump) and 4 (reset) `PCR_JUMP`s, each followed by a `Reprepare`. I-15: 2 `NO_BYTES` events, back to Playing. I-14: Playing after 6.3–6.5 s (6 s stall at start). I-16: 3 rebuffers, profile raised to L2.
+- Connections (I-5 family and every class): panel `max_open_seen` 1 in every test.
+- I-11 `WEB_PAGE_INSTEAD` 59–174 ms; I-17 `ACCOUNT_EXPIRED` 3.0 s with 2 refused requests; I-18 `CHANNEL_OFFLINE` < 10 ms; I-19 `Stopped(BACKGROUND)` 0.75–1.25 s; I-20 `Stopped(STANDBY)` after 4.1 s (grace scaled to 3 s).
+
+**Day-0 checks 5 and 6**
+- Check 5, `MigrationTestHelper` 1 → 2 on the API 30 AVD: **pass** (`I1LibraryDatabaseTest.migrate1To2`, plus `exportedSchemaVersion1Creates` and `bundledDriverFtsAndForeignKeysOnEveryConnection`).
+- Check 6, `FfmpegAvailability.isAvailable` on the emulator: **true**. I-13 (MP2) decodes with `ffmpegLavc60.3.100-mp3`.
+
+**Device-only bugs found and fixed**
+
+| # | Where | Symptom | Cause | Fix | Test |
+|---|---|---|---|---|---|
+| D1 | `PlaybackControllerImpl` | After an in-source reconnect the state stayed `Buffering(RECONNECTING)` for minutes while video played | The state table had no exit: the player never left READY, so no READY callback came | `RECONNECT_OK`, or `inReconnect` false at the next poll with the player READY, returns to Playing (§2.11) | `PlaybackControllerStateTest.reconnectThatNeverStarvedThePlayerReturnsToPlaying`; I-3 logs |
+| D2 | `PlaybackControllerImpl` | I-17 made 3 refused requests (≤ 2 expected) | The account refreshed by L3 was only checked at the next failure | G1 runs right after the refresh, before the next open | `LadderExecutionTest.refreshedTerminalAccountFailsBeforeAnotherOpen`; I-17 |
+| D3 | `LifecycleCoordinator` | Screen off reported `DISPLAY_OFF` instead of `STANDBY` | On API 30 the `DisplayListener` fires before `ACTION_SCREEN_OFF`; the first trigger named the stop | `STANDBY` renames a pending `DISPLAY_OFF` grace | `LifecycleTest.screenOffAfterTheDisplayTurnedOffIsStandby`; I-20 |
+| D4 | `PlaybackControllerImpl` | Zap records had `firstByte = null` | WP-B emits no `FIRST_BYTE` event; the 500 ms poll often missed it before first media | Taken from `StreamTelemetry.firstByteAtMs` at first media | I-1 log |
+| D5 | `PlaybackDebugActivity` (debug) | `ActivityScenario.close()` timed out after a second deep link (I-10, I-12) | `onNewIntent` called `setIntent`, so the scenario ignored later lifecycle events | No `setIntent` in the harness | I-10, I-12 |
+| D6 | `ErrorPathTest` I-10 | Flaky `NoSuchElementException` | `awaitPlaying` matched the previous channel's Playing | `PanelTestBase.awaitPlayingOn(channel)` | I-10 |
+| D7 | `SmokeAndZapTest` I-6 | "0 stream requests for a 10-press burst" (assertion trivially true) | `request_log` is capped at 200 entries, and the count was read before the debounced zap fired | Panel `stream_requests` monotonic counter (`FakePanelAdmin.streamRequests`); wait for the trailing zap's first media | I-6 now reports 3 |
+| D8 | `MediaAndLifecycleTest` I-20 | One failure left the screen off and failed every later test | `wakeUp()` was after the assertions | `try/finally` | I-20 |
+
+**Open items**
+- **O-1 (I-3, ignored).** On the emulator, after some in-source splices (`close_every: 15`, continue mode) `OMX.google.h264.decoder` keeps accepting input but produces no output: the rendered count stays flat, the position freezes just before the splice, and the buffer fills to `maxBufferMs`. The decoder stall is not caught by the §3.7 detectors: b1 needs flat media growth, and extraction keeps growing. Recovery only comes from the TS `NO_BYTES` backstop (the loader parks on a full buffer), then L19 `ReResolve`, about 30 s later. The same happens with `FLAG_DETECT_ACCESS_UNITS` off. Without faults, ch1 plays 70 s cleanly. Two things are needed before un-ignoring: a run on real hardware (HW decoder), and a reviewed decision on a decoder-output stall detector (for example BUFFERING ≥ 4 s with queued video input growing and the rendered count flat → `DECODER_STUCK` → Reprepare).
+- O-2: with `FLAG_DETECT_ACCESS_UNITS`, ffmpeg (AUD) streams queue about 2 video samples per frame on the emulator (`queuedInputBufferCount` ≈ 2 × rendered). Playback is unaffected. Kept as the default (§2.11); revisit with real broadcast captures.
+- O-3: the emulator's audio for ch1 logs `UnexpectedDiscontinuityException` (~213 ms) at every 10.24 s loop of the fake panel's clip. This is a fake-panel media artefact (the audio is shorter than the video per loop) and is non-fatal.
+- O-4: I-22 cannot exercise a real AFR switch (one display mode). HDR (§3.9.5) is not covered on the emulator.
+
 ## 6. Build wiring (commit 0, lead)
 
 ### 6.1 Catalog additions (`gradle/libs.versions.toml`)

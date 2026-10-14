@@ -132,7 +132,15 @@ internal class LifecycleCoordinator(
     }
 
     private fun startGrace(reason: StopReason) {
-        if (graceReason != null) return // the first trigger names the stop
+        if (graceReason != null) {
+            // The first trigger names the stop, except that going to sleep wins over the display-off it causes: on API 30
+            // the DisplayListener reports OFF before ACTION_SCREEN_OFF (device integration pass, 2026-10-13, I-20).
+            if (reason == StopReason.STANDBY && graceReason == StopReason.DISPLAY_OFF) {
+                BoxLog.i(TAG) { "grace renamed STANDBY" }
+                graceReason = reason
+            }
+            return
+        }
         if (!target.isPlaybackActive()) return
         graceReason = reason
         val ms = (STANDBY_GRACE_MS * timeScale().coerceIn(0.001f, 1000f)).toLong()

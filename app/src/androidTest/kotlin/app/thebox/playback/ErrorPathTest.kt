@@ -35,7 +35,7 @@ class ErrorPathTest : PanelTestBase() {
         }
         refreshPlaylist()
         launch(ch(2))
-        awaitPlaying(15_000)
+        awaitPlayingOn(ch(2), 15_000)
         val first = panel.stats().streamRequests(2).first().optString("path")
         log("I-10 first ch2 request: $first")
         assertTrue(first.endsWith(".m3u8"))

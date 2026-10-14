@@ -130,14 +130,17 @@ internal class FailureClassifier {
         return when (e.kind) {
             LiveFailureKind.HTTP_STATUS -> FailureSignal.Http(info.status ?: 0, if (facts.isArchive) LoadOrigin.ARCHIVE else LoadOrigin.PROGRESSIVE)
             LiveFailureKind.NETWORK -> FailureSignal.Network(info.networkKind ?: NetworkFailureKind.OTHER, beforeFirstByte = info.bytesRead == 0L)
-            LiveFailureKind.RECONNECT_EXHAUSTED -> FailureSignal.ReconnectExhausted(info.status, noBytes = info.bytesRead == 0L)
+            // (integration 2026-10-13) WP-B: the last attempt ended on the byte watchdog / a socket timeout.
+            LiveFailureKind.RECONNECT_EXHAUSTED -> FailureSignal.ReconnectExhausted(info.status, noBytes = info.networkKind == NetworkFailureKind.TIMEOUT)
             LiveFailureKind.HTML_PAGE -> FailureSignal.HtmlInsteadOfStream
             LiveFailureKind.TINY_BODY -> FailureSignal.TinyBody(info.bytesRead.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
             LiveFailureKind.FORMAT_IS_HLS -> FailureSignal.FormatIsHls
             LiveFailureKind.FORMAT_UNRECOGNIZED -> FailureSignal.FormatUnrecognized
             LiveFailureKind.PCR_DISCONTINUITY -> FailureSignal.PcrDiscontinuity(info.deltaMs ?: 0L)
             LiveFailureKind.LOCAL_LIMIT -> {
-                val limit = chain.firstOrNull { it is ConnectionLimitException } as ConnectionLimitException?
+                // (integration 2026-10-13) WP-B attaches the broker's exception as e.suppressed[0]; read the chain too.
+                val limit = (e.suppressed.firstOrNull { it is ConnectionLimitException } ?: chain.firstOrNull { it is ConnectionLimitException })
+                    as ConnectionLimitException?
                 FailureSignal.LocalConnectionLimit(limit?.active ?: 0, limit?.max ?: 0)
             }
             LiveFailureKind.PREEMPTED -> null

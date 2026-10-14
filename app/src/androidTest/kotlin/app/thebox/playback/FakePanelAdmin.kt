@@ -86,6 +86,8 @@ class FakePanelAdmin(val base: String) {
     class Stats(val json: JSONObject) {
         val requests: Int get() = json.optInt("requests")
         val streamOpens: Int get() = json.optInt("stream_opens")
+        /** Every live/archive stream request (monotonic; `requestLog` keeps only the last 200). Integration 2026-10-13. */
+        val streamRequests: Int get() = json.optInt("stream_requests")
         val rangeRequestsSeen: Int get() = json.optInt("range_requests_seen")
         val clientEof: Int get() = json.optInt("client_eof")
         val activeConnections: Int get() = json.optJSONObject("connections")?.optInt("active") ?: 0

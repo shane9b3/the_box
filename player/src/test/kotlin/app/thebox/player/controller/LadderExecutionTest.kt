@@ -270,4 +270,22 @@ class LadderExecutionTest {
         assertEquals(StreamFormat.TS, ctx.format)
         assertTrue(ctx.ffmpegSupportsMime("audio/mpeg-L2"))
     }
+
+    @Test
+    fun refreshedTerminalAccountFailsBeforeAnotherOpen() {
+        // Integration 2026-10-13 (device I-17): the account refreshed by an L3 re-resolve is EXPIRED, so G1 fails the
+        // cycle before the panel is asked again.
+        f.ladder.script = { _, ctx ->
+            if (ctx.accountStatus == app.thebox.core.playback.AccountGate.EXPIRED) LadderDecision.Fail(PlaybackError(PlaybackErrorCode.ACCOUNT_EXPIRED))
+            else LadderDecision.ReResolve(0, refreshAccount = true)
+        }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.provider.account = app.thebox.player.controller.fakes.FakeProvider.account(app.thebox.core.xtream.AccountStatus.EXPIRED)
+        f.exo.emitError(error())
+        f.idle()
+        assertEquals(1, f.provider.refreshes)
+        assertEquals(1, f.sources.builds.size)
+        assertEquals(PlaybackErrorCode.ACCOUNT_EXPIRED, (f.state as PlaybackState.Error).error.code)
+    }
 }

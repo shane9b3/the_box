@@ -120,12 +120,15 @@ class MediaAndLifecycleTest : PanelTestBase() {
         launch(ch(1))
         awaitFirstMedia(1)
         device.sleep()
-        val early = runFor(1_500)
-        assertTrue("no BACKGROUND stop on standby (B4)", early.none { it is PlaybackState.Stopped && it.reason == StopReason.BACKGROUND })
-        val (st, ms) = awaitState("Stopped(STANDBY)", 10_000) { it is PlaybackState.Stopped }
-        log("I-20 standby stop after ${ms + 1_500} ms (scaled grace 3 s)")
-        assertEquals(StopReason.STANDBY, (st as PlaybackState.Stopped).reason)
-        device.wakeUp()
+        try {
+            val early = runFor(1_500)
+            assertTrue("no BACKGROUND stop on standby (B4)", early.none { it is PlaybackState.Stopped && it.reason == StopReason.BACKGROUND })
+            val (st, ms) = awaitState("Stopped(STANDBY)", 10_000) { it is PlaybackState.Stopped }
+            log("I-20 standby stop after ${ms + 1_500} ms (scaled grace 3 s)")
+            assertEquals(StopReason.STANDBY, (st as PlaybackState.Stopped).reason)
+        } finally {
+            device.wakeUp() // a failure must not leave the screen off for the next test
+        }
         awaitPlaying(20_000)
     }
 }

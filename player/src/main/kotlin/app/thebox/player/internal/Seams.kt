@@ -52,6 +52,8 @@ internal interface StreamTelemetry {
     val inReconnect: Boolean
     val reconnects: Int
     val sniffed: StreamFormat
+    /** (amended 2026-10-13) True while an open is blocked in `broker.acquire` (the controller's WAITING_FOR_SLOT). */
+    val waitingForLease: Boolean get() = false
 }
 
 /** Everything a data source of one tune needs. Created by WP-D's TuneSession, consumed by WP-B. */

@@ -48,7 +48,7 @@ internal class TsExtractorsFactory(
 
     override fun createExtractors(): Array<Extractor> {
         val mode = if (compat == TsCompat.MULTI_PMT) TsExtractor.MODE_MULTI_PMT else TsExtractor.MODE_SINGLE_PMT
-        val defaults = DefaultExtractorsFactory().setTsExtractorFlags(TS_FLAGS).setTsExtractorMode(mode)
+        val defaults = DefaultExtractorsFactory().setTsExtractorFlags(flagsFor(compat)).setTsExtractorMode(mode)
         return defaults.createExtractors()
             .filterIsInstance<TsExtractor>()
             .map { GuardedTsExtractor(it, graceBytes, onDeadTrack) }
@@ -58,6 +58,17 @@ internal class TsExtractorsFactory(
     companion object {
         /** `FLAG_ALLOW_NON_IDR_KEYFRAMES | FLAG_DETECT_ACCESS_UNITS`; HDMV DTS deliberately off (review S5, Q10). */
         const val TS_FLAGS: Int = DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS
+
+        /**
+         * (integration 2026-10-13) The compat level also drops `FLAG_DETECT_ACCESS_UNITS`: Media3's Javadoc says the flag
+         * "should be disabled if the stream contains access unit delimiters", and with AUD-carrying H.264 (ffmpeg's
+         * muxer adds AUDs) it can split one access unit into several samples. Whether a stream has AUDs is not known
+         * before the first PES, so the design default (flag on, for AUD-less broadcast encoders) stays; a channel that
+         * escalated to compat level 1 (L27) gets slice-header detection off as part of that level.
+         */
+        const val COMPAT_TS_FLAGS: Int = DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES
+
+        fun flagsFor(compat: TsCompat): Int = if (compat == TsCompat.MULTI_PMT) COMPAT_TS_FLAGS else TS_FLAGS
 
         /** `DEAD_TRACK_GRACE_BYTES` (App. B). */
         const val DEAD_TRACK_GRACE_BYTES: Long = 1_048_576L

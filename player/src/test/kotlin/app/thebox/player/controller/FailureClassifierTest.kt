@@ -26,7 +26,6 @@ import app.thebox.player.datasource.LiveFailureKind
 import app.thebox.player.datasource.LiveStreamException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -149,18 +148,34 @@ class FailureClassifierTest {
         assertEquals(FailureSignal.Unknown(PlaybackException.ERROR_CODE_DRM_UNSPECIFIED), classifier.classify(PlaybackException("x", null, PlaybackException.ERROR_CODE_DRM_UNSPECIFIED), facts))
     }
 
-    // ---- LiveStreamException rows: need WP-B's media3Reason()/media3Type(); skipped until WP-B lands (integration).
+    // ---- LiveStreamException rows (un-skipped at integration, 2026-10-13: WP-B's media3Reason() is real).
 
-    private fun live(kind: LiveFailureKind, tuneId: Long = 7, status: Int? = null, bytes: Long = 0, net: NetworkFailureKind? = null, delta: Long? = null): LiveStreamException? = try {
+    private fun live(kind: LiveFailureKind, tuneId: Long = 7, status: Int? = null, bytes: Long = 0, net: NetworkFailureKind? = null, delta: Long? = null): LiveStreamException =
         LiveStreamException(kind, FailureInfo(status, "panel.example:8080", bytes, 1, FailureInfo.Phase.READ, net, delta, 0), DataSpec(Uri.parse("thebox-session://$tuneId")), null)
-    } catch (e: NotImplementedError) {
-        null
-    }
 
     private fun liveOrSkip(kind: LiveFailureKind, tuneId: Long = 7, status: Int? = null, bytes: Long = 0, net: NetworkFailureKind? = null, delta: Long? = null): PlaybackException {
         val e = live(kind, tuneId, status, bytes, net, delta)
-        assumeTrue("WP-B LiveStreamException mapping not merged yet", e != null)
-        return source(e!!, e.reason)
+        return source(e, e.reason)
+    }
+
+    @Test
+    fun reconnectExhaustedNoBytesComesFromTheTimeoutKind() {
+        // WP-B: noBytes = info.networkKind == TIMEOUT (bytes may have flowed before the last attempt).
+        assertEquals(
+            FailureSignal.ReconnectExhausted(null, true),
+            classifier.classify(liveOrSkip(LiveFailureKind.RECONNECT_EXHAUSTED, bytes = 1_000, net = NetworkFailureKind.TIMEOUT), facts),
+        )
+    }
+
+    @Test
+    fun localLimitReadsTheSuppressedBrokerException() {
+        val e = live(LiveFailureKind.LOCAL_LIMIT).apply { addSuppressed(app.thebox.core.playback.ConnectionLimitException(2, 2)) }
+        assertEquals(FailureSignal.LocalConnectionLimit(2, 2), classifier.classify(source(e, e.reason), facts))
+    }
+
+    @Test
+    fun tinyBodyCarriesTheBytes() {
+        assertEquals(FailureSignal.TinyBody(37), classifier.classify(liveOrSkip(LiveFailureKind.TINY_BODY, bytes = 37), facts))
     }
 
     @Test

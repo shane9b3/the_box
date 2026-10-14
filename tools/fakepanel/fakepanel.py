@@ -347,7 +347,7 @@ class Panel:
     def reset_stats(self):
         self.stats = {"requests": 0, "stream_opens": 0, "rejections": {}, "range_requests_seen": 0,
                       "range_requests": [], "auth_failures": 0, "redirects": 0, "token_expired": 0,
-                      "forced_closes": 0, "client_eof": 0, "stalls": 0, "timeshift_tz_warnings": 0, "request_log": []}
+                      "forced_closes": 0, "client_eof": 0, "stalls": 0, "timeshift_tz_warnings": 0, "request_log": [], "stream_requests": 0}
         self.registry.max_open_seen = 0
 
     def tz(self):
@@ -794,6 +794,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                  "end_reason": None}
         with p.lock:  # `requests` stays the counter; per-request detail is `request_log` (last 200 stream requests)
             p.stats["request_log"] = (p.stats["request_log"] + [entry])[-200:]
+            p.stats["stream_requests"] = p.stats.get("stream_requests", 0) + 1  # monotonic; request_log is capped
         self._log_entry = entry
         ext = (ext or "ts").lower()
         if c["auth_mode"] in ("401", "403", "513"):

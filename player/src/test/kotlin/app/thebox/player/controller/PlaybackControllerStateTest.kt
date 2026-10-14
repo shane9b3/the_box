@@ -226,6 +226,21 @@ class PlaybackControllerStateTest {
     }
 
     @Test
+    fun reconnectThatNeverStarvedThePlayerReturnsToPlaying() {
+        // Integration 2026-10-13 (device I-3): the player stays READY through a transparent reconnect, so no READY
+        // callback ends Buffering(RECONNECTING); the telemetry going quiet does.
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.play()
+        f.telemetry().inReconnect = true
+        f.advance(600)
+        assertTrue(f.state is PlaybackState.Buffering)
+        f.telemetry().inReconnect = false
+        f.advance(600)
+        assertTrue("state ${f.state}", f.state is PlaybackState.Playing)
+    }
+
+    @Test
     fun livePauseReleasesAfterTenSecondsAndResumeReResolves() {
         f.controller.tune(TuneTarget.Channel(CH1))
         f.idle()

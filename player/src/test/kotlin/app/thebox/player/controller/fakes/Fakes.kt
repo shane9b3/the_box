@@ -249,6 +249,8 @@ internal class FakeLimiter : ReResolveLimiter {
     var allow = true
     var calls = 0
     override fun tryAcquire(key: ChannelIdentity?, nowMs: Long): Boolean { calls++; return allow }
+    val resets = mutableListOf<ChannelIdentity?>()
+    override fun reset(key: ChannelIdentity?) { resets += key }
 }
 
 /** §3.5.4 as written (leading edge, 350 ms trailing). */
@@ -311,9 +313,22 @@ internal class FakeEngine : EngineEnvironment, EngineParts {
     override fun capabilities() = mapOf("fake" to "1")
     override fun ffmpegSupports(mimeType: String) = mimeType in ffmpegMimes
     override fun softwareVideoDecoderAvailable(mimeType: String?) = true
-    override fun createParts(bundle: PlayerBundle): EngineParts = this
+    private var bundle: PlayerBundle? = null
+    override fun createParts(bundle: PlayerBundle): EngineParts = this.also { it.bundle = bundle }
     override fun stats(): StreamStats = statsValue
-    override fun tracks(): TrackInfo = TrackInfo()
+    override fun tracks(tracks: androidx.media3.common.Tracks): TrackInfo = TrackInfo()
+    var sessions = 0
+    var statsOn = false
+    var tuneDefaults: List<Any?>? = null
+    var milestoneListener: ((Boolean) -> Unit)? = null
+    override fun beginSession(telemetry: StreamTelemetry?, format: app.thebox.core.playback.StreamFormat, isLive: Boolean, isHls: Boolean) { sessions++ }
+    override fun setFirstMediaListener(listener: ((video: Boolean) -> Unit)?) { milestoneListener = listener }
+    override fun setStatsEnabled(enabled: Boolean) { statsOn = enabled }
+    override fun applyTuneDefaults(audioLanguages: List<String>, textLanguages: List<String>, subtitles: String?, subtitlesEnabled: Boolean) {
+        tuneDefaults = listOf(audioLanguages, textLanguages, subtitles, subtitlesEnabled)
+        // The real WP-C behaviour on the fake player, so the parameter assertions keep testing the outcome.
+        bundle?.let { app.thebox.player.engine.TrackController(it).applyTuneDefaults(audioLanguages, textLanguages, subtitles, subtitlesEnabled) }
+    }
 }
 
 internal class FakeEventLog : PlaybackEventLog {

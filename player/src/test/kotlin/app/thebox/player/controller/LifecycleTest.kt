@@ -121,6 +121,15 @@ class LifecycleTest {
     }
 
     @Test
+    fun screenOffAfterTheDisplayTurnedOffIsStandby() {
+        // Integration 2026-10-13 (device I-20, API 30): the display listener fires before ACTION_SCREEN_OFF.
+        playing()
+        lc.onDisplayStateChanged(on = false)
+        lc.onScreenOff()
+        assertEquals(StopReason.STANDBY, lc.graceReason)
+    }
+
+    @Test
     fun resumeAfterFifteenMinutesRefreshesTheAccountFirst() {
         playing()
         lc.onProcessStop()

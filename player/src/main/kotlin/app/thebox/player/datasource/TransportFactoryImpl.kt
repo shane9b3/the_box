@@ -137,7 +137,7 @@ internal open class StandaloneScope : SessionScope {
         private const val TAG = "Transport"
 
         /** How long an acquire waits for CLOSING leases (§3.5.2; WP-A's value, repeated here for the call site). */
-        const val PREEMPT_RELEASE_WAIT_MS = 300L
+        const val PREEMPT_RELEASE_WAIT_MS = app.thebox.core.playback.broker.BrokerConstants.PREEMPT_RELEASE_WAIT_MS
     }
 }
 
@@ -166,9 +166,9 @@ internal class SessionTelemetry(private val clock: MonoClock) : StreamTelemetry 
     override val reconnects: Int get() = reconnectCount.get()
     @Volatile override var sniffed: StreamFormat = StreamFormat.UNKNOWN
 
-    // Not in the StreamTelemetry contract (see the WP-B report): readable by casting in :player.
-    /** True while an open is blocked in `broker.acquire` (the controller's WAITING_FOR_SLOT). */
-    @Volatile var waitingForLease: Boolean = false
+    /** True while an open is blocked in `broker.acquire` (the controller's WAITING_FOR_SLOT; contract since 2026-10-13). */
+    @Volatile override var waitingForLease: Boolean = false
+    // Not in the StreamTelemetry contract (diagnostics only): readable by casting in :player.
     /** Times Media3 asked a live source to open at a non-zero position (§3.3.3; must stay 0). */
     val positionIgnoredCount = AtomicInteger()
     /** Byte-watchdog cancels in this session. */

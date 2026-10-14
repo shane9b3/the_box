@@ -80,7 +80,7 @@ curl -X POST localhost:8080/admin/config -d '{"stream_faults":{"3":{"redirect":t
 curl -X POST localhost:8080/admin/config -d '{"faults":{"linger":null}}'   # null inside faults deletes the key
 curl -X POST localhost:8080/admin/config -d '{"status":"Expired","quirks":true}'
 curl -X POST localhost:8080/admin/config -d '{"timeshift_expect":[1791900000],"strict_timeshift_tz":true}'
-curl localhost:8080/admin/stats        # requests, request_log[{path,ua,token_present,end_reason}], client_eof, rejections by reason, range_requests_seen, connections{active,open,lingering,max_open_seen}, ...
+curl localhost:8080/admin/stats        # requests, stream_requests (monotonic), request_log[{path,ua,token_present,end_reason}] (last 200), client_eof, rejections by reason, range_requests_seen, connections{active,open,lingering,max_open_seen}, ...
 curl localhost:8080/admin/faults       # documented fault keys and current faults
 curl -X POST localhost:8080/admin/kick # close every open stream
 curl -X POST localhost:8080/admin/reset

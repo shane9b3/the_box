@@ -124,11 +124,24 @@ data class LadderCounters(
 interface ErrorLadder {
     /** Pure. Also returns the counters to store for the next failure in this cycle. */
     fun decide(signal: FailureSignal, ctx: LadderContext): Pair<LadderDecision, LadderCounters>
+
+    /**
+     * (amended 2026-10-13) Scopes the per-channel windows that outlive a cycle's [LadderCounters] (5-min compat
+     * escalation, PCR/behind-live/reclaim windows). Called on every tune with the channel's stable key; a different key
+     * clears them. Default: no windows.
+     */
+    fun beginChannel(channelKey: String?) {}
 }
 
 /** At most [maxPerWindow] re-resolves per [windowMs] per channel (§4.5). */
 interface ReResolveLimiter {
     fun tryAcquire(key: ChannelIdentity?, nowMs: Long): Boolean
+
+    /** (amended 2026-10-13) Peeks without consuming, to fill `LadderContext.reResolveAllowed` before the decision. */
+    fun wouldAllow(key: ChannelIdentity?, nowMs: Long): Boolean = true
+
+    /** (amended 2026-10-13) Clears [key]'s window ("Retry" from the error card, §4.3). */
+    fun reset(key: ChannelIdentity?) {}
 }
 
 /** Loader-level retry rules (§4.2), shared by WP-B's LoadErrorHandlingPolicy. Returns null for "do not retry". */
