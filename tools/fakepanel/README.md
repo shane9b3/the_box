@@ -28,7 +28,7 @@ archive on 1,2,3,4,7,9; catch-up variants xc/default/shift/flussonic on 1-4), mo
 
 `--port --host --redirect-port --config FILE --username --password --timezone IANA --quirks --series-episodes-array --epg-plain
 --epg-offset +HHMM --epg-gzip --strict-timeshift-tz --max-connections N --auth-mode ok|auth0|empty|array|401|403|513
---status Active|Expired|Banned|Disabled --fault K=JSON --stream-fault ID:K=JSON --set K=JSON --media-dir --no-ffmpeg --no-pace --verbose`
+--status Active|Expired|Banned|Disabled --fault K=JSON --stream-fault ID:K=JSON --set K=JSON --synthetic N --synthetic-days-back D --synthetic-days-ahead D --media-dir --no-ffmpeg --no-pace --verbose`
 
 Examples: `--fault linger=10 --fault linger_status=458 --max-connections 1`, `--stream-fault 3:redirect=true`.
 All are changeable at runtime through `/admin`. See `config.example.json` for every config key.
@@ -37,11 +37,32 @@ All are changeable at runtime through `/admin`. See `config.example.json` for ev
 
 `username password timezone quirks series_episodes_array epg_plain auth_mode bad_creds_mode status max_connections
 active_cons_override exp_days allowed_output_formats epg_offset epg_gzip strict_timeshift_tz timeshift_expect timeshift_ranges
-hls_timeout hls_window token_ttl token_single_use pace faults stream_faults`
+hls_timeout hls_window token_ttl token_single_use pace faults stream_faults synthetic synthetic_days_back synthetic_days_ahead epg_version`
 
 `--quirks`: numbers as strings (`stream_id`, `tv_archive:"1"`, `max_connections`...), `exp_date` string, `category_id` null for stream 5,
 `backdrop_path` string for vod 103 / series 202, `info: []` for vod 102, `seasons: []` with populated `episodes`.
 EPG titles are base64 unless `epg_plain`. `epg_gzip` returns a gzip file body from `xmltv.php` (Content-Type `application/gzip`, no Content-Encoding).
+
+## Synthetic mode
+
+`--synthetic N` (or config `synthetic`, N <= 20000; `--synthetic-days-back 3`, `--synthetic-days-ahead 7`) replaces the 13 catalog live channels
+with N generated ones (VOD and series unchanged), for the guide's instrumented tests (docs/design/m3-guide.md section 5.6).
+- Ids and Xtream `num` are 1..N; groups ("categories") of 50 with ids `1000+g` and names `News 1`, `Sports 2`, `Movies 3`... (8 themes cycling);
+  channel names are `<theme> <id>`.
+- 30 % of channels carry a prefix by `id % 10`: 3 `UK: `, 5 `[DE] `, 7 `FR | `. 20 % (`id % 5 == 1`) have `tv_archive = 1`
+  with 3 or 7 days (channel 1: 7), catch-up through the plain Xtream timeshift URL (`catchup="xc"` in the M3U). All streams serve the "std" clip.
+- EPG for 95 % of channels (all but `id % 20 == 9`; channel 1 always) from start-hour minus back days to start-hour plus ahead days, durations from
+  {5, 10, 30, 60, 120, 360} min, about 10 % of titles over 60 characters, some titles contain "News". Whole-minute boundaries. Seeded per channel
+  and anchored to the server start time, so every request in one run returns the identical schedule. No-EPG channels have an empty `epg_channel_id`.
+- Channel 1 also has programmes starting exactly 2 min and 5 min after the server start (floored to the minute): `... -> [S+2, S+5) -> [S+5, S+35) -> ...`.
+  `GET /admin/stats` returns `synthetic: {n, start_unix, reminder_starts: [S+2, S+5], epg_window: [from, to], epg_version, days_back, days_ahead, group_size}`
+  (only in synthetic mode).
+- `xmltv.php` is generated while streaming (64 KB chunks, no Content-Length, nothing held in memory); `epg_gzip` is gzip-streamed and `epg_offset` applies.
+  Cost: roughly 4 MB and 0.25 s per 200 channels over the default 10 days (N=2000: ~43 MB, ~1.5 s; N=20000: ~430 MB, ~25 s). `get_short_epg` / `get_simple_data_table`,
+  `get.php` and `get_live_streams` use the same lineup. `epg_plain` still selects base64 for the player_api listings.
+- `epg_version` (int, default 0): `POST /admin/config {"epg_version":1}` appends ` v2` to every programme title (` v<N+1>`), so the next EPG import differs
+  (generation-swap test). The schedule times do not change.
+- Limits: all archive channels use the plain Xtream `xc` variant (Flussonic/SHIFT URLs are accepted for synthetic ids but not advertised); the window is fixed at server start, so a server left running for days drifts away from "now".
 
 ## Faults (in `faults` for all streams, `stream_faults[<id>]` per stream; per-stream overrides global)
 

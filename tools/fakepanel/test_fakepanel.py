@@ -808,5 +808,159 @@ class TestRadioChannel(unittest.TestCase):
                          f"PTS discontinuity across a loop: {sorted(steps)[-3:]}")
 
 
+class TestSynthetic(PanelCase):
+    """--synthetic N: generated lineup, streamed deterministic XMLTV, admin reminder instants."""
+    overrides = {"synthetic": 400, "synthetic_days_back": 1, "synthetic_days_ahead": 2}
+
+    def xml(self):
+        import xml.etree.ElementTree as ET
+        st, _, body = self.get("/xmltv.php?username=test&password=test")
+        self.assertEqual(st, 200)
+        return body, ET.fromstring(body)
+
+    def progs(self, root, ch):
+        out = []
+        for p in root.iter("programme"):
+            if p.get("channel") == ch:
+                f = lambda k: int(dt.datetime.strptime(p.get(k), "%Y%m%d%H%M%S %z").timestamp())
+                out.append((f("start"), f("stop"), p.find("title").text))
+        return out
+
+    def test_lineup_and_groups(self):
+        ls = self.api("get_live_streams")
+        self.assertEqual(len(ls), 400)
+        self.assertEqual([c["num"] for c in ls], list(range(1, 401)))
+        self.assertEqual([c["stream_id"] for c in ls], list(range(1, 401)))
+        cats = self.api("get_live_categories")
+        self.assertEqual(len(cats), 8)
+        ids = {int(c["category_id"]) for c in cats}
+        self.assertEqual(ids, set(range(1000, 1008)))
+        self.assertFalse(ids & {10, 11, 20, 21})
+        for c in cats:
+            n = len(self.api("get_live_streams", "&category_id=" + c["category_id"]))
+            self.assertEqual(n, 50)
+        self.assertEqual(cats[0]["category_name"], "News 1")
+        self.assertEqual(self.api("get_live_streams", "&category_id=1"), [])
+        self.assertEqual(len(self.api("get_vod_streams")), 6)  # VOD catalog unchanged
+        self.assertTrue(any("News" in c["name"] for c in ls))
+
+    def test_prefix_archive_shares(self):
+        ls = self.api("get_live_streams")
+        pre = [c for c in ls if c["name"].startswith(("UK: ", "[DE] ", "FR | "))]
+        self.assertEqual(len(pre), 120)
+        for p in ("UK: ", "[DE] ", "FR | "):
+            self.assertEqual(sum(c["name"].startswith(p) for c in ls), 40)
+        arch = [c for c in ls if c["tv_archive"] == 1]
+        self.assertEqual(len(arch), 80)
+        self.assertEqual({c["tv_archive_duration"] for c in arch}, {3, 7})
+        self.assertTrue(all(c["tv_archive_duration"] == 0 for c in ls if c["tv_archive"] == 0))
+        self.assertEqual((ls[0]["tv_archive"], ls[0]["tv_archive_duration"]), (1, 7))
+        self.assertEqual(sum(1 for c in ls if c["epg_channel_id"]), 380)  # 95 % have EPG
+
+    def test_xmltv_wellformed_and_reminders(self):
+        body, root = self.xml()
+        chans = root.findall("channel")
+        self.assertEqual(len(chans), 380)
+        syn = json.loads(self.get("/admin/stats")[2])["synthetic"]
+        self.assertEqual(syn["n"], 400)
+        r1, r2 = syn["reminder_starts"]
+        start = syn["start_unix"]
+        self.assertEqual((r1, r2, start % 60), (start + 120, start + 300, 0))
+        self.assertLessEqual(abs(start - self.panel.start_time), 60)
+        pr = self.progs(root, "syn1.test")
+        starts = {a: (b, t) for a, b, t in pr}
+        self.assertEqual(starts[r1][0], r2)
+        self.assertEqual(starts[r2][0], r2 + 1800)
+        # contiguous, non overlapping, whole minutes, durations from the allowed set (r1 truncation excepted)
+        for (a, b, _), (a2, _, _) in zip(pr, pr[1:]):
+            self.assertEqual(b, a2)
+        allowed = {m * 60 for m in (5, 10, 30, 60, 120, 360)}
+        bad = [(a, b) for a, b, _ in pr if b - a not in allowed]
+        # the programme truncated at the +2 min instant, and the 3 min reminder programme itself
+        self.assertEqual(sorted(b for _, b in bad), sorted([r1, r2]))
+        for ch in ("syn1.test", "syn2.test", "syn50.test"):
+            for a, b, _ in self.progs(root, ch):
+                self.assertEqual((a % 60, b % 60), (0, 0))
+        self.assertLessEqual(pr[0][0], syn["epg_window"][0])
+        self.assertGreaterEqual(pr[-1][1], syn["epg_window"][1])
+        titles = [t for ch in ("syn1.test", "syn2.test", "syn3.test", "syn4.test") for _, _, t in self.progs(root, ch)]
+        self.assertTrue(any("News" in t for t in titles))
+
+    def test_deterministic_and_ten_percent_long(self):
+        b1, root = self.xml()
+        b2, _ = self.xml()
+        self.assertEqual(b1, b2)
+        allt = [p.find("title").text for p in root.iter("programme")]
+        share = sum(len(t) > 60 for t in allt) / len(allt)
+        self.assertTrue(0.05 < share < 0.15, share)
+
+    def test_epg_version_changes_titles(self):
+        _, root = self.xml()
+        t0 = {p.get("start") + p.get("channel"): p.find("title").text for p in root.iter("programme")}
+        self.admin({"epg_version": 1})
+        _, root = self.xml()
+        t1 = {p.get("start") + p.get("channel"): p.find("title").text for p in root.iter("programme")}
+        self.assertEqual(t0.keys(), t1.keys())
+        self.assertTrue(all(t1[k] == t0[k] + " v2" for k in t0))
+
+    def test_player_api_epg_and_m3u(self):
+        j = self.api("get_short_epg", "&stream_id=1&limit=3")
+        self.assertEqual(len(j["epg_listings"]), 3)
+        self.assertEqual(self.api("get_simple_data_table", "&stream_id=9")["epg_listings"], [])  # id 9: no EPG share
+        st, _, m3u = self.get("/get.php?username=test&password=test&type=m3u_plus&output=ts")
+        text = m3u.decode()
+        self.assertEqual(text.count("#EXTINF"), 400)
+        self.assertIn("/live/test/test/400.ts", text)
+        self.assertIn('group-title="News 1"', text)
+        self.assertIn('catchup="xc" catchup-days="7"', text)
+
+    def test_streams_and_unknown(self):
+        st, data = self.read_stream("/live/test/test/399.ts")
+        self.assertEqual((st, data[:1]), (200, b"\x47"))
+        self.assertEqual(self.read_stream("/live/test/test/401.ts")[0], 404)
+        st, data = self.read_stream("/timeshift/test/test/60/2026-01-01:10-00/1.ts")
+        self.assertEqual((st, data[:1]), (200, b"\x47"))
+        st, _, pl = self.get("/live/test/test/250.m3u8")
+        self.assertEqual(st, 200)
+        self.assertIn(b"250_seg", pl)
+
+    def test_unknown_key_and_validation(self):
+        for patch in ({"nope": 1}, {"synthetic": 20001}, {"epg_version": "x"}):
+            req = urllib.request.Request(f"http://127.0.0.1:{self.port}/admin/config", json.dumps(patch).encode(), method="POST")
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                urllib.request.urlopen(req, timeout=5)
+            self.assertEqual(cm.exception.code, 400)
+
+    def test_gzip_streamed(self):
+        self.admin({"epg_gzip": True})
+        st, h, body = self.get("/xmltv.php?username=test&password=test")
+        self.assertEqual(st, 200)
+        self.assertTrue(gzip.decompress(body).startswith(b"<?xml"))
+
+
+class TestSyntheticLarge(PanelCase):
+    overrides = {"synthetic": 2000}
+
+    def test_xmltv_streams_fast(self):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=60)
+        t0 = time.time()
+        c.request("GET", "/xmltv.php?username=test&password=test")
+        r = c.getresponse()
+        self.assertIsNone(r.getheader("Content-Length"))  # streamed, not buffered
+        total, first = 0, None
+        while True:
+            d = r.read(65536)
+            if not d:
+                break
+            first = first or d[:5]
+            total += len(d)
+        c.close()
+        self.assertEqual(first, b"<?xml")
+        self.assertGreater(total, 5_000_000)
+        self.assertLess(time.time() - t0, 30)
+        self.assertEqual(len(self.api("get_live_streams")), 2000)
+        self.assertEqual(len(self.api("get_live_categories")), 40)
+
+
 if __name__ == "__main__":
     unittest.main()

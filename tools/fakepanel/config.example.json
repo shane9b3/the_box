@@ -19,6 +19,10 @@
   "timeshift_ranges": true,
   "token_ttl": 30,
   "pace": true,
+  "synthetic": 0,
+  "synthetic_days_back": 3,
+  "synthetic_days_ahead": 7,
+  "epg_version": 0,
   "faults": {
     "linger": 10,
     "linger_status": 458,
