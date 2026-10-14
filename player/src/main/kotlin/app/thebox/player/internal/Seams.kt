@@ -54,6 +54,12 @@ internal interface StreamTelemetry {
     val sniffed: StreamFormat
     /** (amended 2026-10-13) True while an open is blocked in `broker.acquire` (the controller's WAITING_FOR_SLOT). */
     val waitingForLease: Boolean get() = false
+    /**
+     * (amended 2026-10-14, code review E-B1/N-S2) Monotonic time at which the live source's current `read()` started
+     * waiting on the socket, or 0 when no read is pending (the loader is parked on a full buffer, or between reads).
+     * The watchdog's TS no-bytes age is measured only while this is non-zero (§3.3.6, §3.7 a).
+     */
+    val readPendingSinceMs: Long get() = 0L
 }
 
 /** Everything a data source of one tune needs. Created by WP-D's TuneSession, consumed by WP-B. */

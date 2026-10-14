@@ -75,7 +75,8 @@ internal class LiveTsDataSource(
         fun sleep(ms: Long)
     }
 
-    private enum class Fail { STATUS, NETWORK, NO_BYTES, READ_ERROR, EOF, HLS, HTML, TINY, UNRECOGNIZED, PREEMPTED }
+    /** BAD_REQUEST: OkHttp refused to build the request (an invalid header name or value, code review N-S1). */
+    private enum class Fail { STATUS, NETWORK, NO_BYTES, READ_ERROR, EOF, HLS, HTML, TINY, UNRECOGNIZED, PREEMPTED, BAD_REQUEST }
 
     /** Internal outcome of one connection attempt (allocated on failures only). */
     private class Failure(
@@ -142,7 +143,8 @@ internal class LiveTsDataSource(
             blockedSinceMs = clock.nowMs()
             val f = connect(reconnect = false)
             if (f != null) onFirstConnectFailed(f)
-        } catch (e: IOException) {
+        } catch (e: Throwable) {
+            // (code review 2026-10-14, N-S1) Any failure, not only IOException: a lease must never outlive a failed open.
             shutdown()
             throw e
         } finally {
@@ -164,6 +166,8 @@ internal class LiveTsDataSource(
                     bytesTransferred(n)
                     return n
                 }
+                // (code review 2026-10-14, E-B1) Waiting on the socket: the watchdog's no-bytes age runs from here.
+                if (telemetry.readPendingSinceMs == 0L) telemetry.readPendingSinceMs = blockedSinceMs
                 pump()
             }
         } catch (e: LiveStreamException) {
@@ -171,6 +175,7 @@ internal class LiveTsDataSource(
             throw e
         } finally {
             blockedSinceMs = 0
+            telemetry.readPendingSinceMs = 0
         }
     }
 
@@ -255,6 +260,7 @@ internal class LiveTsDataSource(
             Fail.TINY -> throw failure(LiveFailureKind.TINY_BODY, FailureInfo.Phase.SNIFF)
             Fail.UNRECOGNIZED -> throw failure(LiveFailureKind.FORMAT_UNRECOGNIZED, FailureInfo.Phase.SNIFF)
             Fail.PREEMPTED -> throw failure(LiveFailureKind.PREEMPTED, phase)
+            Fail.BAD_REQUEST -> throw failure(LiveFailureKind.NETWORK, phase, net = NetworkFailureKind.OTHER)
             // A silent server (first-byte timeout) or a body cut during the sniff: reconnect (§3.3.6, I-14).
             Fail.NO_BYTES, Fail.READ_ERROR, Fail.EOF -> reconnectLoop(f)
         }
@@ -279,6 +285,12 @@ internal class LiveTsDataSource(
         } catch (e: IOException) {
             closeInner()
             return ioFailure(e, afterHeaders = false)
+        } catch (e: IllegalArgumentException) {
+            // (code review 2026-10-14, N-S1) OkHttp's header check; its message carries the header value, so it is
+            // neither logged nor kept as a cause. HeaderPolicy.sanitize drops such headers upstream; this is the backstop.
+            closeInner()
+            BoxLog.w(TAG, "tune ${ctx.tuneId}: request refused by OkHttp (invalid header)")
+            return Failure(Fail.BAD_REQUEST)
         }
         return sniff(ds)
     }
@@ -444,6 +456,10 @@ internal class LiveTsDataSource(
                 Fail.HLS -> throwSurfaced(LiveFailureKind.FORMAT_IS_HLS, phase)
                 Fail.UNRECOGNIZED -> throwSurfaced(LiveFailureKind.FORMAT_UNRECOGNIZED, phase)
                 Fail.PREEMPTED -> throwSurfaced(LiveFailureKind.PREEMPTED, phase)
+                Fail.BAD_REQUEST -> {
+                    telemetry.inReconnect = false
+                    throw failure(LiveFailureKind.NETWORK, phase, net = NetworkFailureKind.OTHER)
+                }
             }
         }
     }
@@ -474,8 +490,7 @@ internal class LiveTsDataSource(
             throw InterruptedIOException("interrupted")
         }
         val kind = networkKindOf(e)
-        val root = rootCause(e) as? IOException
-        return Failure(if (afterHeaders) Fail.READ_ERROR else Fail.NETWORK, net = kind, cause = root)
+        return Failure(if (afterHeaders) Fail.READ_ERROR else Fail.NETWORK, net = kind, cause = safeCause(e))
     }
 
     private fun isPreempted(): Boolean = terminated || lease?.isPreempted == true

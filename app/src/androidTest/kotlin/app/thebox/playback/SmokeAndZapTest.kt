@@ -2,6 +2,7 @@ package app.thebox.playback
 
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.thebox.core.playback.PlaybackErrorCode
+import app.thebox.core.playback.PlaybackEventType
 import app.thebox.core.playback.NextStep
 import app.thebox.player.api.PlaybackState
 import org.junit.Assert.assertEquals
@@ -23,6 +24,12 @@ class SmokeAndZapTest : PanelTestBase() {
         awaitPlaying(10_000)
         val zap = awaitFirstMedia(1, 10_000)
         log("I-1 zap: resolve=${zap.resolveMs} lease=${zap.leaseMs} firstByte=${zap.firstByteMs} ready=${zap.readyMs} firstMedia=${zap.firstFrameMs}")
+        // §5.5 I-1, scoped to this test's tune (E-S5): first frame within 10 s, complete record.
+        assertTrue("this test's tune", zap.tuneId > startTuneId)
+        val firstFrame = zap.firstFrameMs
+        assertNotNull("first media time", firstFrame)
+        assertTrue("first frame after $firstFrame ms", firstFrame!! <= 10_000)
+        assertNotNull("resolve time", zap.resolveMs)
         Thread.sleep(1_000) // one stats publish
         val s = stats()
         log("I-1 stats: $s")
@@ -75,6 +82,7 @@ class SmokeAndZapTest : PanelTestBase() {
         awaitFirstMedia(1)
         val opensBefore = panel.stats().streamRequests
         val tuneBefore = currentTuneId()
+        val burstStart = android.os.SystemClock.elapsedRealtime()
         repeat(10) {
             onMain { controller.zap(+1, isRepeat = true) }
             Thread.sleep(300)
@@ -82,19 +90,27 @@ class SmokeAndZapTest : PanelTestBase() {
         // The trailing (debounced) zap fires after the burst: wait for its first media, not the old channel's Playing.
         awaitFirstMedia(tuneBefore + 1, 15_000)
         val burstRequests = panel.stats().streamRequests - opensBefore
-        log("I-6 linger_status=$status: $burstRequests stream requests for a 10-press burst")
-        assertTrue("debounced burst made $burstRequests requests", burstRequests <= 2 + 3) // + ladder L2/L3 retries on linger
+        val burstTunes = events(PlaybackEventType.TUNE).count { it.elapsedMs >= burstStart }
+        log("I-6 linger_status=$status: $burstTunes tunes, $burstRequests stream requests for a 10-press burst")
+        // §5.5 I-6 (code review 2026-10-14, E-S6; §2.11): the debouncer turns the burst into ≤ 2 tunes (here 1: every
+        // press is a repeat, so there is no leading edge). Each tune that lands in the 2 s linger costs the ladder's
+        // L2 RetrySame (1.5 s, still lingering) and L3 ReResolve (3.0 s): ≤ 3 stream requests for this config.
+        assertTrue("debounced burst made $burstTunes tunes", burstTunes in 1..2)
+        assertTrue("debounced burst made $burstRequests requests", burstRequests <= 3)
 
         var ok = 0
+        var last: app.thebox.core.refresh.ChannelIdentity? = null
         repeat(10) {
             val before = currentTuneId()
             onMain { controller.zap(+1) }
             Thread.sleep(1_000)
             val reached = runCatching { awaitFirstMedia(before + 1, 10_000) }.isSuccess
             if (reached) ok++
+            last = controller.state.value.target?.identity
         }
         log("I-6 linger_status=$status: $ok/10 single zaps reached first media")
-        awaitPlaying(15_000)
+        assertEquals("every final channel reaches Playing (ladder L2/L3)", 10, ok)
+        awaitPlayingOn(last!!, 15_000)
     }
 
     @Test fun i06LingerStatus403() = lingerRun(403)

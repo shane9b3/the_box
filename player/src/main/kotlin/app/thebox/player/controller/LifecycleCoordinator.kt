@@ -30,6 +30,10 @@ import app.thebox.player.api.StopReason
  * - `ON_START`, `ACTION_SCREEN_ON`, HDMI plug-in or display-on cancel the grace; `ON_START` (and the others when the
  *   app is already in the foreground) asks the target to resume a lifecycle stop ([Target.resumeAfterLifecycle], which
  *   re-resolves and prepares a fresh session at the live edge).
+ * - (code review 2026-10-14, E-B2) A wake-type event (`ACTION_SCREEN_ON`, display on, HDMI re-plug) while the process
+ *   is **not** STARTED (woken to the launcher, which many TV devices do) stops playback at once with BACKGROUND, as the
+ *   Home rule does (Q1/B4); an `ON_START` that follows resumes it. The 30 s grace itself is unchanged.
+ * - (E-S4) [Target.onGraceChanged] tells the target when a grace starts or ends (video is not expected meanwhile).
  *
  * The entry points (`onProcessStart` …) are what [start]'s platform observers call; tests call them directly with a
  * fake [DeviceState].
@@ -49,6 +53,8 @@ internal class LifecycleCoordinator(
         /** Back in the foreground: resume when the last stop was a lifecycle stop (the target applies §3.10.2). */
         fun resumeAfterLifecycle()
         fun onForegroundChanged(foreground: Boolean)
+        /** (code review 2026-10-14, E-S4) A standby/HDMI/display-off grace started (true) or ended (false). */
+        fun onGraceChanged(active: Boolean) {}
     }
 
     /** Power and display facts (B4). */
@@ -71,6 +77,7 @@ internal class LifecycleCoordinator(
     private val graceExpired = Runnable {
         val reason = graceReason ?: return@Runnable
         graceReason = null
+        target.onGraceChanged(false)
         if (target.isPlaybackActive()) {
             BoxLog.i(TAG) { "grace expired: stop ${reason.name}" }
             target.stopForLifecycle(reason)
@@ -104,30 +111,31 @@ internal class LifecycleCoordinator(
 
     fun onScreenOff() = startGrace(StopReason.STANDBY)
 
-    fun onScreenOn() {
-        cancelGrace("screen on")
-        if (isForeground) target.resumeAfterLifecycle()
-    }
+    fun onScreenOn() = onWake("screen on")
 
     /** [initialSticky]: the broadcast replayed at registration (never a transition). */
     fun onHdmiAudioPlug(plugged: Boolean, initialSticky: Boolean) {
         val previous = hdmiPlugged
         hdmiPlugged = plugged
         if (initialSticky || previous == null || previous == plugged) return
-        if (!plugged) {
-            startGrace(StopReason.HDMI_UNPLUGGED)
-        } else {
-            cancelGrace("hdmi plugged")
-            if (isForeground) target.resumeAfterLifecycle()
-        }
+        if (!plugged) startGrace(StopReason.HDMI_UNPLUGGED) else onWake("hdmi plugged")
     }
 
     fun onDisplayStateChanged(on: Boolean) {
-        if (!on) {
-            startGrace(StopReason.DISPLAY_OFF)
-        } else {
-            cancelGrace("display on")
-            if (isForeground) target.resumeAfterLifecycle()
+        if (!on) startGrace(StopReason.DISPLAY_OFF) else onWake("display on")
+    }
+
+    /**
+     * Screen on, display on or HDMI re-plug. In the foreground: cancel the grace and keep playing (or resume a lifecycle
+     * stop). In the background (E-B2: woken to the launcher, no `ON_START`): stop now, as Home does.
+     */
+    private fun onWake(why: String) {
+        cancelGrace(why)
+        if (isForeground) {
+            target.resumeAfterLifecycle()
+        } else if (target.isPlaybackActive()) {
+            BoxLog.i(TAG) { "$why while not started: stop now" }
+            target.stopForLifecycle(StopReason.BACKGROUND)
         }
     }
 
@@ -146,6 +154,7 @@ internal class LifecycleCoordinator(
         val ms = (STANDBY_GRACE_MS * timeScale().coerceIn(0.001f, 1000f)).toLong()
         BoxLog.i(TAG) { "grace ${reason.name} ${ms}ms" }
         handler.postDelayed(graceExpired, ms)
+        target.onGraceChanged(true)
     }
 
     private fun cancelGrace(why: String) {
@@ -153,6 +162,7 @@ internal class LifecycleCoordinator(
         BoxLog.i(TAG) { "grace cancelled ($why)" }
         graceReason = null
         handler.removeCallbacks(graceExpired)
+        target.onGraceChanged(false)
     }
 
     // ------------------------------------------------------------------ platform wiring

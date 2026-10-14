@@ -168,6 +168,9 @@ internal class SessionTelemetry(private val clock: MonoClock) : StreamTelemetry 
 
     /** True while an open is blocked in `broker.acquire` (the controller's WAITING_FOR_SLOT; contract since 2026-10-13). */
     @Volatile override var waitingForLease: Boolean = false
+
+    /** Set by `LiveTsDataSource` while a `read()` waits on the socket, 0 otherwise (contract since 2026-10-14, E-B1). */
+    @Volatile override var readPendingSinceMs: Long = 0L
     // Not in the StreamTelemetry contract (diagnostics only): readable by casting in :player.
     /** Times Media3 asked a live source to open at a non-zero position (§3.3.3; must stay 0). */
     val positionIgnoredCount = AtomicInteger()

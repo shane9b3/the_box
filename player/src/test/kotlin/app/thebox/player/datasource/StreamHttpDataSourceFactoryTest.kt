@@ -77,6 +77,24 @@ class StreamHttpDataSourceFactoryTest {
     }
 
     @Test
+    fun aBadHeaderValueIsATypedFailureWithoutTheValue() {
+        // Code review 2026-10-14, N-S1.
+        val ctx = sessionCtx(server.url("/timeshift/user/pass/1.ts").toString(), headers = mapOf("User-Agent" to "Box", "X-Token" to "a\r\nb-s3cr"))
+        val ds = StreamHttpDataSourceFactory(ctx, client, SessionTelemetry(REAL_CLOCK), StandaloneScope(), REAL_CLOCK).createDataSource()
+        try {
+            ds.open(DataSpec.Builder().setUri("thebox-session://7").build())
+            fail("typed failure expected")
+        } catch (e: LiveStreamException) {
+            assertEquals(LiveFailureKind.NETWORK, e.kind)
+            assertEquals("thebox-session://7", e.dataSpec.uri.toString())
+            assertFalse(e.toString().contains("s3cr"))
+            assertEquals(null, e.cause)
+        }
+        ds.close()
+        assertEquals(0, server.requestCount)
+    }
+
+    @Test
     fun aSessionPlaceholderUriIsReplacedAndStaysHidden() {
         server.enqueue(MockResponse.Builder().code(200).body("archive").build())
         server.enqueue(MockResponse.Builder().code(404).body("gone").build())

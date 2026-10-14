@@ -3,6 +3,7 @@ package app.thebox.playback
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.SystemClock
 import android.util.Log
 import androidx.test.core.app.ActivityScenario
 import androidx.test.platform.app.InstrumentationRegistry
@@ -47,6 +48,10 @@ import java.util.UUID
  * - Waits are explicit, bounded and on state flows. Measured timings are logged under the `PlaybackIT` tag, never
  *   asserted (plan §7): only correctness is asserted.
  * - `@After`: I-9 — the panel never saw a `Range` header on a live request.
+ * - (code review 2026-10-14, E-S5) The event log and zap history are process-wide rings that outlive a test. `@Before`
+ *   snapshots a cursor (the highest tune id seen and the elapsed-realtime clock); [awaitFirstMedia] only accepts zap
+ *   records of tunes after it and [events] only returns events logged after it, so no wait or assertion can be
+ *   satisfied by an earlier test's events.
  */
 abstract class PanelTestBase {
     protected val context: Context = InstrumentationRegistry.getInstrumentation().targetContext
@@ -63,6 +68,14 @@ abstract class PanelTestBase {
 
     protected val notices: MutableList<PlaybackNotice> = Collections.synchronizedList(mutableListOf())
     protected val states: MutableList<PlaybackState> = Collections.synchronizedList(mutableListOf())
+    /** [states] with the `elapsedRealtime` at which each arrived (same clock as `PlaybackEvent.elapsedMs`). */
+    protected val timedStates: MutableList<Pair<Long, PlaybackState>> = Collections.synchronizedList(mutableListOf())
+
+    /** E-S5 cursor: the highest tune id in the process before this test, and the clock at its start. */
+    protected var startTuneId = 0L
+        private set
+    protected var startElapsedMs = 0L
+        private set
     private val collectors = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     @Before
@@ -76,8 +89,20 @@ abstract class PanelTestBase {
         ep.settings().update { PlaybackSettings(defaultUserAgent = it.defaultUserAgent, lifecycleTimeScale = 0.1f) }
         playlistId = addXtreamPlaylist()
         channelsByStream = channelsOf(playlistId) { it.xtreamStreamId?.toInt() }
+        startElapsedMs = SystemClock.elapsedRealtime()
+        startTuneId = maxOf(
+            controller.diagnostics.events().maxOfOrNull { it.tuneId } ?: 0L,
+            controller.diagnostics.zaps().maxOfOrNull { it.tuneId } ?: 0L,
+            controller.state.value.target?.tuneId ?: 0L,
+        )
+        log("cursor: tune > $startTuneId, events after ${startElapsedMs} ms")
         collectors.launch { controller.notices.collect { notices += it } }
-        collectors.launch { controller.state.collect { states += it } }
+        collectors.launch {
+            controller.state.collect {
+                states += it
+                timedStates += SystemClock.elapsedRealtime() to it
+            }
+        }
     }
 
     @After
@@ -191,15 +216,19 @@ abstract class PanelTestBase {
 
     protected fun awaitError(timeoutMs: Long) = awaitState("Error", timeoutMs) { it is PlaybackState.Error }.let { it.first as PlaybackState.Error to it.second }
 
-    /** Waits for the first-media ZapRecord of the cycle started by tune [tuneIdAtLeast]. */
+    /**
+     * Waits for the first-media ZapRecord of the cycle started by tune [tuneIdAtLeast] (never one of a tune before this
+     * test's cursor, E-S5: `awaitFirstMedia(1)` means "this test's first tune").
+     */
     protected fun awaitFirstMedia(tuneIdAtLeast: Long, timeoutMs: Long = 15_000): app.thebox.core.playback.ZapRecord {
+        val from = maxOf(tuneIdAtLeast, startTuneId + 1)
         val deadline = System.currentTimeMillis() + timeoutMs
         while (System.currentTimeMillis() < deadline) {
-            val z = controller.diagnostics.zaps().lastOrNull { it.tuneId >= tuneIdAtLeast && it.outcome == "ok" }
+            val z = controller.diagnostics.zaps().lastOrNull { it.tuneId >= from && it.outcome == "ok" }
             if (z != null) return z
             Thread.sleep(100)
         }
-        fail("no first media for tune ≥ $tuneIdAtLeast within $timeoutMs ms; state=${controller.state.value}")
+        fail("no first media for tune ≥ $from within $timeoutMs ms; state=${controller.state.value}")
         error("unreachable")
     }
 
@@ -212,7 +241,13 @@ abstract class PanelTestBase {
 
     protected fun currentTuneId(): Long = controller.state.value.target?.tuneId ?: 0
 
-    protected fun events(type: PlaybackEventType) = controller.diagnostics.events().filter { it.type == type }
+    /** This test's events of [type] (E-S5: nothing logged before the test's cursor). */
+    protected fun events(type: PlaybackEventType) =
+        controller.diagnostics.events().filter { it.type == type && it.elapsedMs >= startElapsedMs }
+
+    /** Elapsed time of the first state after [afterElapsedMs] matching [predicate], or null. */
+    protected fun firstStateAfter(afterElapsedMs: Long, predicate: (PlaybackState) -> Boolean): Long? =
+        synchronized(timedStates) { timedStates.firstOrNull { it.first >= afterElapsedMs && predicate(it.second) }?.first }
 
     protected fun assertNoError(seen: List<PlaybackState>) {
         val err = seen.firstOrNull { it is PlaybackState.Error }

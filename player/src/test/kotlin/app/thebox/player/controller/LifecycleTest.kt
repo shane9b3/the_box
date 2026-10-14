@@ -167,4 +167,91 @@ class LifecycleTest {
         lc.onScreenOff()
         assertNull(lc.graceReason)
     }
+
+    // ------------------------------------------------------------------ code review 2026-10-14
+
+    /** Sleep: the Activity stops while not interactive, so the STANDBY grace runs. */
+    private fun asleepInTheGrace() {
+        playing()
+        f.device.interactive = false
+        lc.onScreenOff()
+        lc.onProcessStop()
+        f.advance(5_000)
+        assertEquals(StopReason.STANDBY, lc.graceReason)
+        f.device.interactive = true
+    }
+
+    @Test
+    fun wakeWithoutStartStopsAsBackground() {
+        // E-B2 (the reviewer's repro): woken to the launcher, no ON_START. Playback must not run behind the launcher.
+        asleepInTheGrace()
+        lc.onScreenOn()
+        assertNull(lc.graceReason)
+        assertEquals(StopReason.BACKGROUND, (f.state as PlaybackState.Stopped).reason)
+        f.advance(120_000)
+        assertEquals(StopReason.BACKGROUND, (f.state as PlaybackState.Stopped).reason)
+        // The app comes to the front later: the lifecycle stop is resumed with a fresh resolve.
+        lc.onProcessStart()
+        f.idle()
+        assertTrue(f.state is PlaybackState.Connecting)
+        assertEquals(2, f.resolver.calls.size)
+    }
+
+    @Test
+    fun wakeWithStartKeepsPlaying() {
+        asleepInTheGrace()
+        lc.onProcessStart() // the device brings the Activity back
+        lc.onScreenOn()
+        f.idle()
+        assertTrue(f.state is PlaybackState.Playing)
+        f.advance(120_000)
+        assertTrue(f.state is PlaybackState.Playing)
+        assertEquals(1, f.resolver.calls.size)
+    }
+
+    @Test
+    fun displayOnAndHdmiReplugInTheBackgroundStopToo() {
+        playing()
+        lc.onHdmiAudioPlug(plugged = true, initialSticky = true)
+        f.device.displayOn = false
+        lc.onProcessStop() // display off: grace, not a stop
+        assertEquals(StopReason.DISPLAY_OFF, lc.graceReason)
+        f.device.displayOn = true
+        lc.onDisplayStateChanged(on = true)
+        assertEquals(StopReason.BACKGROUND, (f.state as PlaybackState.Stopped).reason)
+
+        lc.onProcessStart()
+        f.idle()
+        f.play()
+        lc.onHdmiAudioPlug(plugged = false, initialSticky = false)
+        lc.onProcessStop() // Home during the HDMI grace while interactive: stops at once anyway
+        assertEquals(StopReason.BACKGROUND, (f.state as PlaybackState.Stopped).reason)
+    }
+
+    @Test
+    fun theStandbyGraceSuspendsTheVideoExpectation() {
+        // E-S4: no FROZEN_VIDEO from a missing surface during the grace (it would count toward compat escalation).
+        playing()
+        f.controller.onSurfaceValidChanged(true)
+        assertEquals(true to true, f.engine.watchdog.expectations)
+        lc.onScreenOff()
+        assertEquals(false to true, f.engine.watchdog.expectations)
+        val resets = f.engine.watchdog.resets
+        lc.onScreenOn() // foreground: the grace ends, playing continues
+        assertEquals(true to true, f.engine.watchdog.expectations)
+        assertTrue("baselines re-taken after the grace", f.engine.watchdog.resets > resets)
+    }
+
+    @Test
+    fun aDestroyedSurfaceSuspendsTheVideoExpectation() {
+        playing()
+        f.controller.onSurfaceValidChanged(true)
+        assertEquals(true to true, f.engine.watchdog.expectations)
+        f.controller.onSurfaceValidChanged(false) // surfaceDestroyed (Activity stopped) or the view detached
+        assertEquals(false to true, f.engine.watchdog.expectations)
+        val resets = f.engine.watchdog.resets
+        f.controller.onSurfaceValidChanged(true)
+        assertEquals(true to true, f.engine.watchdog.expectations)
+        assertEquals(resets + 1, f.engine.watchdog.resets)
+    }
 }

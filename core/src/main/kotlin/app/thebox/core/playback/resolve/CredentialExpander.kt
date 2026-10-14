@@ -97,10 +97,23 @@ class CredentialExpanderImpl : CredentialExpander {
 
 /**
  * Registers what a resolution exposes with [Redact] (§3.2.8, reviewed 2026-10-13 S9): the raw, path-encoded and
- * query-encoded forms of each credential, and the resolved URL itself. Values shorter than three characters are
- * ignored by [Redact]; those rely on the URL registration and the `/live/u/p/` pattern.
+ * query-encoded forms of each credential, and the token components of the resolved URL. Values shorter than three
+ * characters are ignored by [Redact]; those rely on the `/live/u/p/` and query patterns.
+ *
+ * (code review 2026-10-14, N-S5) The whole URL is no longer registered: every tune, retry and archive seek made a new
+ * entry and the set grew without bound. Only the URL's userinfo and token-like query values are registered, in
+ * [Redact]'s bounded transient set; query strings and Xtream paths are masked by [Redact]'s patterns anyway.
  */
 object ResolveSecrets {
+    /** Query parameter names whose values are secrets whatever their length (lower case). */
+    private val TOKEN_KEYS = setOf(
+        "token", "auth", "authorization", "key", "apikey", "api_key", "sig", "signature", "hash", "session", "sid",
+        "password", "pass", "pwd", "username", "user", "wmsauthsign", "hdnts", "hdntl", "access_token", "jwt",
+    )
+
+    /** Any other query value at least this long is treated as an opaque token. */
+    const val OPAQUE_TOKEN_MIN_LENGTH = 16
+
     fun registerCredentials(username: String?, password: String?) {
         for (v in arrayOf(username, password)) {
             if (v.isNullOrEmpty()) continue
@@ -116,6 +129,37 @@ object ResolveSecrets {
         for (v in credentials.secretHeaders.values) Redact.registerSecret(v)
     }
 
-    /** The resolved URL, whole: it may carry tokens that are not credentials. */
-    fun registerUrl(url: String) = Redact.registerSecret(url)
+    /** The resolved URL's userinfo and token-like query values (never the URL itself). */
+    fun registerUrl(url: String) {
+        for (component in tokenComponents(url)) Redact.registerTransient(component)
+    }
+
+    /** What [registerUrl] registers for [url] (exposed for tests). */
+    fun tokenComponents(url: String): List<String> {
+        val out = ArrayList<String>(2)
+        val schemeEnd = url.indexOf("://")
+        if (schemeEnd >= 0) {
+            val start = schemeEnd + 3
+            var end = url.length
+            for (i in start until url.length) if (url[i] == '/' || url[i] == '?' || url[i] == '#') { end = i; break }
+            val at = url.lastIndexOf('@', end - 1)
+            if (at >= start) {
+                val info = url.substring(start, at)
+                val colon = info.indexOf(':')
+                if (colon < 0) out += info else { out += info.substring(0, colon); out += info.substring(colon + 1) }
+            }
+        }
+        val q = url.indexOf('?')
+        if (q >= 0) {
+            val query = url.substring(q + 1).substringBefore('#')
+            for (pair in query.split('&')) {
+                val eq = pair.indexOf('=')
+                if (eq <= 0) continue
+                val name = pair.substring(0, eq).lowercase()
+                val value = pair.substring(eq + 1)
+                if (name in TOKEN_KEYS || value.length >= OPAQUE_TOKEN_MIN_LENGTH) out += value
+            }
+        }
+        return out.filter { it.isNotEmpty() }
+    }
 }

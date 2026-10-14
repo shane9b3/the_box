@@ -16,8 +16,16 @@ object StallConstants {
      */
     const val TS_NO_BYTES_BACKSTOP_MS = 8_000L
     const val DECODER_STALL_BUFFERING_MS = 6_000L
+    /** b1's byte floor (256 KiB). With a learned stream rate the threshold is the larger of this and the window's worth. */
     const val DECODER_STALL_MIN_BYTES = 262_144L
     const val DECODER_STALL_MAX_MEDIA_GROWTH_MS = 500L
+    /**
+     * (code review 2026-10-14, N-S4) b1's byte threshold while the stream's own rate is not learned yet (2 MiB). A
+     * working extractor turns 2 MiB into ≥ 500 ms of media for any stream below about 33 Mbit/s.
+     */
+    const val DECODER_STALL_MIN_BYTES_UNKNOWN_RATE = 2_097_152L
+    /** The stream rate (bytes per media second) is learned over spans in which the buffered position grew this much. */
+    const val STREAM_RATE_LEARN_MEDIA_MS = 2_000L
     const val POSITION_STUCK_MS = 4_000L
     /** b2: "positionMs advanced < 500 ms over POSITION_STUCK_MS". */
     const val POSITION_STUCK_MIN_ADVANCE_MS = 500L
@@ -45,6 +53,8 @@ data class StallThresholds(
     val decoderStallBufferingMs: Long = StallConstants.DECODER_STALL_BUFFERING_MS,
     val decoderStallMinBytes: Long = StallConstants.DECODER_STALL_MIN_BYTES,
     val decoderStallMaxMediaGrowthMs: Long = StallConstants.DECODER_STALL_MAX_MEDIA_GROWTH_MS,
+    val decoderStallMinBytesUnknownRate: Long = StallConstants.DECODER_STALL_MIN_BYTES_UNKNOWN_RATE,
+    val streamRateLearnMediaMs: Long = StallConstants.STREAM_RATE_LEARN_MEDIA_MS,
     val positionStuckMs: Long = StallConstants.POSITION_STUCK_MS,
     val positionStuckMinAdvanceMs: Long = StallConstants.POSITION_STUCK_MIN_ADVANCE_MS,
     val frozenVideoMs: Long = StallConstants.FROZEN_VIDEO_MS,
@@ -79,6 +89,11 @@ class StallDetectorsImpl(private val t: StallThresholds = StallThresholds()) : S
     private var b1Bytes = 0L
     private var b1Media = 0L
 
+    // (b1, N-S4) the stream's own rate: bytes per second of media, learned from the buffered position's growth.
+    private var rateBaseBytes = 0L
+    private var rateBaseMedia = NEVER
+    private var streamBytesPerMediaSecond = 0L
+
     // (b2)
     private var b2Since = NEVER
     private var b2Pos = 0L
@@ -95,7 +110,17 @@ class StallDetectorsImpl(private val t: StallThresholds = StallThresholds()) : S
         b1Since = NEVER
         b2Since = NEVER
         cSince = NEVER
+        rateBaseMedia = NEVER // a seek or re-prepare moves the buffered position: start a new learning span
     }
+
+    /** A new tune or re-prepare: the learned stream rate belongs to the previous stream. */
+    override fun newStream(nowMs: Long) {
+        reset(nowMs)
+        streamBytesPerMediaSecond = 0L
+    }
+
+    /** The learned stream rate in bytes per media second, 0 while unknown (tests and diagnostics). */
+    val learnedStreamRate: Long get() = streamBytesPerMediaSecond
 
     override fun onSample(s: WatchdogSample): StallVerdict? {
         val now = s.nowMs
@@ -105,6 +130,7 @@ class StallDetectorsImpl(private val t: StallThresholds = StallThresholds()) : S
             reset(now)
             return null
         }
+        learnStreamRate(s)
         return checkNoBytes(s, now)
             ?: checkDecoderStuck(s, now)
             ?: checkPositionStuck(s, now)
@@ -114,6 +140,8 @@ class StallDetectorsImpl(private val t: StallThresholds = StallThresholds()) : S
     }
 
     // (a) HLS: BUFFERING with bytesTotal unchanged for HLS_NO_PROGRESS_MS. TS: backstop when the byte watchdog failed.
+    // (code review 2026-10-14, E-B1/N-S2) `lastByteAgeMs` is non-zero only while a read() is pending in the live source
+    // (WP-C fills it from `StreamTelemetry.readPendingSinceMs`), so a loader parked on a full buffer never trips it.
     private fun checkNoBytes(s: WatchdogSample, now: Long): StallVerdict? {
         if (s.isHls) {
             if (s.playbackState != StallConstants.STATE_BUFFERING || hlsSince == NEVER || s.bytesTotal != hlsBytes) {
@@ -130,7 +158,38 @@ class StallDetectorsImpl(private val t: StallThresholds = StallThresholds()) : S
         return fire(StallKind.NO_BYTES, now, "ts last byte ${s.lastByteAgeMs}ms ago, not reconnecting")
     }
 
-    // (b1) BUFFERING ≥ 6 s, ≥ 256 KiB arrived, buffered position grew < 500 ms (reviewed 2026-10-13, B6).
+    /**
+     * (N-S4) Bytes per media second over spans where the buffered position grew ≥ [StallThresholds.streamRateLearnMediaMs].
+     * Bytes that arrive while media does not grow (a stuck extractor) only inflate the estimate, which makes b1 more
+     * conservative, never less. Reconnects, seeks and a new session's counters start a new span.
+     */
+    private fun learnStreamRate(s: WatchdogSample) {
+        val media = s.positionMs + s.bufferedDurationMs
+        if (s.inDataSourceReconnect || rateBaseMedia == NEVER || media < rateBaseMedia || s.bytesTotal < rateBaseBytes) {
+            rateBaseMedia = media
+            rateBaseBytes = s.bytesTotal
+            return
+        }
+        val grown = media - rateBaseMedia
+        if (grown < t.streamRateLearnMediaMs) return
+        streamBytesPerMediaSecond = (s.bytesTotal - rateBaseBytes) * 1_000 / grown
+        rateBaseMedia = media
+        rateBaseBytes = s.bytesTotal
+    }
+
+    /**
+     * (N-S4) Bytes that must arrive in a b1 window of [elapsedMs] before "no media growth" means a stuck decoder: the
+     * window's worth of media at the learned stream rate (the network kept up with real time), at least
+     * [StallThresholds.decoderStallMinBytes]; [StallThresholds.decoderStallMinBytesUnknownRate] before a rate is known.
+     * A network slower than the stream turns its bytes into proportionally less media and never reaches the threshold.
+     */
+    private fun decoderStallBytesNeeded(elapsedMs: Long): Long {
+        val rate = streamBytesPerMediaSecond
+        if (rate <= 0) return t.decoderStallMinBytesUnknownRate
+        return maxOf(t.decoderStallMinBytes, rate * elapsedMs / 1_000)
+    }
+
+    // (b1) BUFFERING ≥ 6 s, bytes ≥ the window's worth at the stream rate (N-S4), buffered position grew < 500 ms (B6).
     private fun checkDecoderStuck(s: WatchdogSample, now: Long): StallVerdict? {
         val media = s.positionMs + s.bufferedDurationMs
         if (s.playbackState != StallConstants.STATE_BUFFERING || s.inDataSourceReconnect || b1Since == NEVER) {
@@ -140,8 +199,8 @@ class StallDetectorsImpl(private val t: StallThresholds = StallThresholds()) : S
         if (now - b1Since < t.decoderStallBufferingMs) return null
         val bytes = s.bytesTotal - b1Bytes
         val grown = media - b1Media
-        if (bytes >= t.decoderStallMinBytes && grown < t.decoderStallMaxMediaGrowthMs && !coolingDown(StallKind.DECODER_STUCK, now)) {
-            val elapsed = now - b1Since
+        val elapsed = now - b1Since
+        if (bytes >= decoderStallBytesNeeded(elapsed) && grown < t.decoderStallMaxMediaGrowthMs && !coolingDown(StallKind.DECODER_STUCK, now)) {
             rebaseB1(s, now, media)
             return fire(StallKind.DECODER_STUCK, now, "buffering ${elapsed}ms bytes+$bytes media+${grown}ms")
         }

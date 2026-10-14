@@ -101,6 +101,11 @@ class ResolvedStream(
     val liveUrlTemplate: String,
     /** Headers before `{{u}}`/`{{p}}` expansion: CatchupTarget.headers. */
     val headerTemplates: Map<String, String>,
+    /**
+     * (code review 2026-10-14, N-S1) Names of headers dropped from [headers] because the name is not a token or the
+     * expanded value is not printable ASCII (`HeaderPolicy.sanitize`). Names only; the controller logs them.
+     */
+    val droppedHeaders: List<String> = emptyList(),
 ) {
     override fun toString(): String = "ResolvedStream($brokerKey, $host, $formatHint, base=$baseIndex/$baseCount)"
 }

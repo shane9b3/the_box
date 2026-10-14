@@ -50,6 +50,27 @@ class SurfaceAndSessionPlayerTest {
     }
 
     @Test
+    fun surfaceValidityFollowsTheHolderAndTheView() {
+        // Code review 2026-10-14, E-S4.
+        val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
+        val root = FrameLayout(activity)
+        activity.setContentView(root)
+        val view = SurfaceView(activity)
+        root.addView(view, ViewGroup.LayoutParams(100, 100))
+        val reports = mutableListOf<Boolean>()
+        val sp = SurfacePlayer(fake.player, onSurfaceValid = { reports += it })
+        sp.setVideoSurfaceView(view)
+        sp.holderCallback.surfaceCreated(view.holder)
+        assertTrue(sp.surfaceValid)
+        sp.holderCallback.surfaceDestroyed(view.holder) // standby: the Activity stopped, the view stays attached
+        assertFalse(sp.surfaceValid)
+        sp.holderCallback.surfaceCreated(view.holder)
+        root.removeView(view) // detached: no surface for the player any more
+        assertFalse(sp.surfaceValid)
+        assertEquals(listOf(true, false, true, false), reports)
+    }
+
+    @Test
     fun surfaceViewIsForwardedCapturedAndClearedWhenItDetaches() {
         val activity = Robolectric.buildActivity(Activity::class.java).setup().get()
         val root = FrameLayout(activity)

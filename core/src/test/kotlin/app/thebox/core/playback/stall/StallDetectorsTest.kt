@@ -83,6 +83,14 @@ class StallDetectorsTest {
     }
 
     @Test
+    fun tsBackstopIsSilentWhileNoReadIsPending() {
+        // E-B1/N-S2: WP-C reports age 0 when the loader is parked (no pending read), whatever the buffer level.
+        playing().apply { bufferedDurationMs = 20_000; lastByteAgeMs = 0 }
+        d.onSample(s)
+        repeat(30) { assertNull(step { positionMs += tick; videoRenderedCount += 25; lastByteAgeMs = 0 }) }
+    }
+
+    @Test
     fun tsBackstopFiresOnlyWhenTheByteWatchdogFailed() {
         playing()
         assertNull(step { lastByteAgeMs = 8_000 })
@@ -95,14 +103,76 @@ class StallDetectorsTest {
 
     private fun bufferingWithBytes() = playing().apply { playbackState = StallConstants.STATE_BUFFERING; isPlaying = false; audioAdvancing = true }
 
+    /** (N-S4) Ten seconds of healthy READY playback at [bytesPerSecond]: b1 learns the stream's own rate from them. */
+    private fun learnRate(bytesPerSecond: Long) {
+        playing()
+        d.onSample(s)
+        repeat(10) { assertNull(step { positionMs += tick; bytesTotal += bytesPerSecond; videoRenderedCount += 25 }) }
+        assertEquals(bytesPerSecond, d.learnedStreamRate)
+    }
+
+    /** Switches the running sample to a rebuffer (keeps the learned rate and the counters). */
+    private fun startRebuffer() = step { playbackState = StallConstants.STATE_BUFFERING; isPlaying = false }
+
     @Test
-    fun decoderStuckFiresAtSixSecondsWhenBytesFlowButMediaDoesNot() {
+    fun slowNetworkOnAHighBitrateStreamDoesNotFire() {
+        // Code review 2026-10-14, N-S4. This was the old "fires at six seconds" case: 50 kB/s that turn into 50 ms of
+        // media per second is an 8 Mbit/s stream on a 400 kbit/s link — a slow network, not a stuck decoder.
         bufferingWithBytes()
-        assertNull(d.onSample(s))
-        repeat(5) { assertNull(step { bytesTotal += 50_000; bufferedDurationMs += 50 }) }
-        val v = step { bytesTotal += 50_000; bufferedDurationMs += 50 }
+        d.onSample(s)
+        repeat(30) { assertNull(step { bytesTotal += 50_000; bufferedDurationMs += 50 }) }
+    }
+
+    @Test
+    fun slowNetworkOnALearnedHighBitrateStreamDoesNotFire() {
+        // 8 Mbit/s stream (1 MB per media second) learned while playing, then a 500 kbit/s network for 30 s.
+        learnRate(1_000_000)
+        assertNull(startRebuffer())
+        repeat(30) { assertNull(step { bytesTotal += 62_500; bufferedDurationMs += 62 }) }
+    }
+
+    @Test
+    fun decoderStuckFiresWhenBytesMatchTheStreamRateButMediaDoesNotGrow() {
+        learnRate(1_000_000)
+        assertNull(startRebuffer())
+        repeat(5) { assertNull(step { bytesTotal += 1_000_000 }) }
+        val v = step { bytesTotal += 1_000_000 }
         assertEquals(StallKind.DECODER_STUCK, v?.kind)
-        assertTrue(v!!.evidence.contains("bytes+300000"), v.evidence)
+        assertTrue(v!!.evidence.contains("bytes+6000000"), v.evidence)
+    }
+
+    @Test
+    fun decoderStuckNeedsTheWindowsWorthAtTheLearnedRate() {
+        // 5.4 s of media's worth of bytes in a 6 s window: the network is slower than real time, so no verdict.
+        learnRate(1_000_000)
+        startRebuffer()
+        repeat(30) { assertNull(step { bytesTotal += 900_000 }) }
+    }
+
+    @Test
+    fun decoderStuckWithoutALearnedRateNeedsTwoMebibytes() {
+        bufferingWithBytes()
+        d.onSample(s)
+        repeat(30) { assertNull(step { bytesTotal += 300_000 }) } // 1.8 MB per window: below the unknown-rate floor
+    }
+
+    @Test
+    fun decoderStuckWithoutALearnedRateFiresAboveTwoMebibytes() {
+        bufferingWithBytes()
+        d.onSample(s)
+        repeat(5) { assertNull(step { bytesTotal += 400_000 }) }
+        assertEquals(StallKind.DECODER_STUCK, step { bytesTotal += 400_000 }?.kind) // 2.4 MB, no media growth
+    }
+
+    @Test
+    fun newStreamForgetsTheLearnedRate() {
+        learnRate(1_000_000)
+        d.newStream(s.nowMs)
+        assertEquals(0L, d.learnedStreamRate)
+        d.reset(s.nowMs)
+        learnRate(250_000)
+        d.reset(s.nowMs) // a seek keeps the rate
+        assertEquals(250_000L, d.learnedStreamRate)
     }
 
     @Test
@@ -246,7 +316,7 @@ class StallDetectorsTest {
         bufferingWithBytes()
         d.onSample(s)
         val kinds = mutableListOf<StallKind>()
-        repeat(40) { step { bytesTotal += 50_000 }?.let { kinds += it.kind } }
+        repeat(40) { step { bytesTotal += 400_000 }?.let { kinds += it.kind } } // 2.4 MB per window ≥ the unknown-rate floor
         // Every 6 s window qualifies, but the cool-down spaces verdicts ≥ 15 s apart: t = 6, 24 (next window end ≥ 21), 42 is out of range.
         assertEquals(listOf(StallKind.DECODER_STUCK, StallKind.DECODER_STUCK), kinds)
     }

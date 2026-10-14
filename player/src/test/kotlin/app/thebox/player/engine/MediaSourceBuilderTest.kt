@@ -27,6 +27,7 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Rule
+import org.junit.Assert.assertNotNull
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -62,6 +63,28 @@ class MediaSourceBuilderTest {
             assertFalse("no URL in the MediaItem", built.source.mediaItem.toString().contains("panel.example"))
         }
         assertEquals(listOf(LoadOrigin.PROGRESSIVE, LoadOrigin.PROGRESSIVE), origins)
+    }
+
+    @Test
+    fun nonHttpSchemesAreUnsupportedBeforeAnyTransport() {
+        // Code review 2026-10-14, N-S3: rtmp/rtsp/udp/rtp/mms/mmsh never reach a data source (no 15 s of "network"
+        // retries); the exception names the scheme, never the URL.
+        for (url in listOf("rtmp://h.example/app/user/pass", "rtsp://h.example/s", "udp://@239.0.0.1:1234", "rtp://239.0.0.1:5004",
+            "mms://h.example/s", "mmsh://h.example/s", "RTMP://h.example/a")) {
+            val transport = EngineTestSupport.FakeTransport(clip)
+            val e = try {
+                builder.build(EngineTestSupport.context(resolved = EngineTestSupport.resolved(url)), StreamFormat.TS, TsCompat.DEFAULT, transport, null)
+                null
+            } catch (x: UnsupportedStreamFormatException) { x }
+            assertNotNull(url, e)
+            assertEquals(url.substringBefore("://").lowercase(), e!!.scheme)
+            assertFalse(e.message!!.contains("h.example") || e.message!!.contains("239.0.0.1"))
+            assertTrue("no transport for $url", transport.calls.isEmpty())
+        }
+        // http/https are built.
+        val transport = EngineTestSupport.FakeTransport(clip)
+        builder.build(EngineTestSupport.context(resolved = EngineTestSupport.resolved("https://h.example/1.ts")), StreamFormat.TS, TsCompat.DEFAULT, transport, null)
+        assertEquals(listOf("liveTs"), transport.calls)
     }
 
     @Test

@@ -97,9 +97,11 @@ fun stream(
     baseIndex: Int = 0,
     baseCount: Int = 1,
     output: XtreamOutput? = null,
+    brokerKey: String = "p:1",
+    droppedHeaders: List<String> = emptyList(),
 ) = ResolvedStream(
     identity = identity,
-    brokerKey = "p:1",
+    brokerKey = brokerKey,
     url = "http://panel.example:8080/live/u/p/1.ts",
     headers = mapOf("User-Agent" to "TheBox"),
     formatHint = format,
@@ -111,6 +113,7 @@ fun stream(
     ignoreTlsErrors = false,
     liveUrlTemplate = "{{base}}/live/{{u}}/{{p}}/1.{{ext}}",
     headerTemplates = emptyMap(),
+    droppedHeaders = droppedHeaders,
 )
 
 internal class FakeResolver(private val journal: Journal) : StreamUrlResolver {
@@ -190,8 +193,11 @@ internal class FakeMediaSourceBuilder(private val journal: Journal) : MediaSourc
     val builds = mutableListOf<Build>()
     val telemetry = HashMap<Long, FakeTelemetry>()
     val last: Build get() = builds.last()
+    /** Thrown by the next [build] (then cleared), e.g. the real builder's UnsupportedStreamFormatException. */
+    var failNext: Exception? = null
 
     override fun build(ctx: StreamSessionContext, format: StreamFormat, compat: TsCompat, transport: TransportFactory, archive: ArchiveRequest?): MediaSourceWithTelemetry {
+        failNext?.let { failNext = null; throw it }
         builds += Build(ctx, format, compat, archive)
         journal("build:${ctx.tuneId}:$format")
         val t = FakeTelemetry().also { telemetry[ctx.tuneId] = it }
@@ -248,7 +254,8 @@ internal class FakeLadder : ErrorLadder {
 internal class FakeLimiter : ReResolveLimiter {
     var allow = true
     var calls = 0
-    override fun tryAcquire(key: ChannelIdentity?, nowMs: Long): Boolean { calls++; return allow }
+    val keys = mutableListOf<ChannelIdentity?>()
+    override fun tryAcquire(key: ChannelIdentity?, nowMs: Long): Boolean { calls++; keys += key; return allow }
     val resets = mutableListOf<ChannelIdentity?>()
     override fun reset(key: ChannelIdentity?) { resets += key }
 }

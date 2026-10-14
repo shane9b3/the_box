@@ -28,6 +28,20 @@ class ReResolveLimiterTest {
     }
 
     @Test
+    fun directUrlsAreLimitedPerBrokerKey() {
+        // Code review 2026-10-14, N-S6: §4.5 "direct URLs: per broker key", not one shared bucket.
+        val l = ReResolveLimiterImpl()
+        val hostA = ReResolveKeys.of(null, "d:a.example:80")
+        val hostB = ReResolveKeys.of(null, "d:b.example:80")
+        assertTrue(l.tryAcquire(hostA, 0))
+        assertTrue(l.tryAcquire(hostA, 1))
+        assertFalse(l.tryAcquire(hostA, 2))
+        assertTrue(l.tryAcquire(hostB, 3), "another host has its own window")
+        assertEquals(a, ReResolveKeys.of(a, "p:1"), "a channel keeps its identity")
+        assertNull(ReResolveKeys.of(null, null))
+    }
+
+    @Test
     fun nullKeyIsOneBucket() {
         val l = ReResolveLimiterImpl()
         assertTrue(l.tryAcquire(null, 0))

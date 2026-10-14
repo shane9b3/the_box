@@ -33,6 +33,33 @@ class HeaderPolicyTest {
     }
 
     @Test
+    fun sanitizeDropsControlCharactersNonAsciiAndBadNames() {
+        // Code review 2026-10-14, N-S1: OkHttp would throw IllegalArgumentException with the value in the message.
+        val (kept, dropped) = HeaderPolicy.sanitize(
+            linkedMapOf(
+                "User-Agent" to "Box/1",
+                "X-Crlf" to "a\r\nX-Injected: 1",
+                "X-Nul" to "a\u0000b",
+                "X-Token" to "s3cr\u00e9t",
+                "Bad Name" to "v",
+                "X-Tab" to "a\tb",
+                "" to "empty",
+            ),
+        )
+        assertEquals(linkedMapOf("User-Agent" to "Box/1", "X-Tab" to "a\tb"), kept)
+        assertEquals(listOf("X-Crlf", "X-Nul", "X-Token", "Bad?Name", ""), dropped)
+        assertEquals(false, dropped.any { it.contains("s3cr") }, "names only, never a value")
+    }
+
+    @Test
+    fun sanitizeKeepsAValidMapAsIs() {
+        val h = mapOf("User-Agent" to "VLC/3.0.20 LibVLC/3.0.20", "Referer" to "http://x/?a=b&c=~d")
+        val (kept, dropped) = HeaderPolicy.sanitize(h)
+        assertEquals(h, kept)
+        assertEquals(emptyList(), dropped)
+    }
+
+    @Test
     fun overrideNeverBeatsAChannelUserAgent() {
         val h = merge(channel = mapOf("user-agent" to "Chan"), override = "VLC/3.0.20")
         assertEquals("Chan", h["User-Agent"])
@@ -59,7 +86,10 @@ class HeaderPolicyTest {
         val h = merge(
             channel = mapOf("Range" to "bytes=0-", "Host" to "evil"),
             secret = mapOf("Accept-Encoding" to "gzip"),
-            extra = mapOf("connection" to "close", "Icy-MetaData" to "1", "X-Keep" to "1"),
+            extra = mapOf(
+                "connection" to "close", "Icy-MetaData" to "1", "X-Keep" to "1",
+                "Content-Length" to "5", "Transfer-Encoding" to "chunked", "TE" to "trailers", "Upgrade" to "h2c", "Expect" to "100-continue",
+            ),
         )
         assertEquals(setOf("X-Keep", "User-Agent"), h.keys)
     }

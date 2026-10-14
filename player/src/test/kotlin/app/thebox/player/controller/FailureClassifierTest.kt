@@ -140,6 +140,34 @@ class FailureClassifierTest {
     }
 
     @Test
+    fun passthroughInitFailureIsEncoded() {
+        // Code review 2026-10-14, E-S3: passthroughActive is false at an init failure (onAudioTrackInitialized never
+        // fired); the sink's input format says it all.
+        for (mime in listOf(MimeTypes.AUDIO_AC3, MimeTypes.AUDIO_E_AC3, MimeTypes.AUDIO_E_AC3_JOC, MimeTypes.AUDIO_DTS, MimeTypes.AUDIO_DTS_HD, MimeTypes.AUDIO_TRUEHD)) {
+            val f = Format.Builder().setSampleMimeType(mime).setChannelCount(6).build()
+            val init = AudioSink.InitializationException("init", 0, f, false, null)
+            assertEquals(mime, FailureSignal.AudioTrackInit(true, 6, mime), classifier.classify(renderer(init, f, PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED), facts.copy(passthroughActive = false)))
+        }
+    }
+
+    @Test
+    fun decodedPcmInitFailureIsNotEncoded() {
+        // Decoding AC-3 to PCM: the sink input is audio/raw even though the renderer format is AC-3.
+        val ac3 = Format.Builder().setSampleMimeType(MimeTypes.AUDIO_AC3).setChannelCount(6).build()
+        val pcm = Format.Builder().setSampleMimeType(MimeTypes.AUDIO_RAW).setChannelCount(6).build()
+        val init = AudioSink.InitializationException("init", 0, pcm, false, null)
+        assertEquals(
+            FailureSignal.AudioTrackInit(false, 6, MimeTypes.AUDIO_RAW),
+            classifier.classify(renderer(init, ac3, PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED), facts.copy(passthroughActive = true)),
+        )
+        // Error code only (no exception in the chain): the renderer's encoded MIME decides.
+        assertEquals(
+            FailureSignal.AudioTrackInit(true, 6, MimeTypes.AUDIO_AC3),
+            classifier.classify(renderer(IllegalStateException(), ac3, PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED), facts),
+        )
+    }
+
+    @Test
     fun parsingStuckAndUnknown() {
         assertEquals(FailureSignal.Parsing(false), classifier.classify(source(ParserException.createForMalformedContainer("x", null), PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED), facts))
         assertEquals(FailureSignal.Parsing(true), classifier.classify(source(ParserException.createForMalformedManifest("x", null), PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED), facts))

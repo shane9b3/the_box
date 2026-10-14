@@ -95,8 +95,9 @@ class StreamUrlBuilderImpl(private val expander: CredentialExpander = Credential
         val host = FormatHints.host(url)
         if (host.isEmpty()) return ResolveOutcome.Failed(PlaybackErrorCode.UNSUPPORTED_SOURCE, "not an absolute URL")
 
-        val headers = LinkedHashMap<String, String>(headerTemplates.size * 2)
-        for ((k, v) in headerTemplates) headers[k] = expander.expandHeaderValue(v, user, pass)
+        val expanded = LinkedHashMap<String, String>(headerTemplates.size * 2)
+        for ((k, v) in headerTemplates) expanded[k] = expander.expandHeaderValue(v, user, pass)
+        val (headers, droppedHeaders) = HeaderPolicy.sanitize(expanded)
 
         val xtreamRef: XtreamStreamRef? = when {
             xtreamApi -> {
@@ -126,6 +127,7 @@ class StreamUrlBuilderImpl(private val expander: CredentialExpander = Credential
                 ignoreTlsErrors = !direct && pl.ignoreTlsErrors,
                 liveUrlTemplate = liveUrlTemplate,
                 headerTemplates = headerTemplates,
+                droppedHeaders = droppedHeaders,
             ),
         )
     }
@@ -145,8 +147,9 @@ class StreamUrlBuilderImpl(private val expander: CredentialExpander = Credential
         val url = expander.expandCredentials(request.url, user, pass)
         val host = FormatHints.host(url)
         if (host.isEmpty()) return ResolveOutcome.Failed(PlaybackErrorCode.UNSUPPORTED_SOURCE, "not an absolute URL")
-        val headers = LinkedHashMap<String, String>(request.headers.size * 2)
-        for ((k, v) in request.headers) headers[k] = expander.expandHeaderValue(v, user, pass)
+        val expanded = LinkedHashMap<String, String>(request.headers.size * 2)
+        for ((k, v) in request.headers) expanded[k] = expander.expandHeaderValue(v, user, pass)
+        val (headers, droppedHeaders) = HeaderPolicy.sanitize(expanded)
         val bases = creds?.baseUrls.orEmpty()
         return ResolveOutcome.Ok(
             ResolvedStream(
@@ -163,6 +166,7 @@ class StreamUrlBuilderImpl(private val expander: CredentialExpander = Credential
                 ignoreTlsErrors = input.playlist.ignoreTlsErrors,
                 liveUrlTemplate = request.url,
                 headerTemplates = request.headers,
+                droppedHeaders = droppedHeaders,
             ),
         )
     }

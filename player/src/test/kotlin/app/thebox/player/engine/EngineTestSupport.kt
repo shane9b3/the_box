@@ -127,6 +127,7 @@ internal object EngineTestSupport {
         @Volatile override var inReconnect = false
         @Volatile override var reconnects = 0
         @Volatile override var sniffed = StreamFormat.UNKNOWN
+        @Volatile override var readPendingSinceMs = 0L
     }
 
     /**

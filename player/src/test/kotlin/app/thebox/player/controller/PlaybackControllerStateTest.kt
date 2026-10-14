@@ -357,4 +357,107 @@ class PlaybackControllerStateTest {
         assertEquals("p:1" to 2, f.brokers.configured.single())
         assertEquals(StreamFormat.HLS, f.sources.last.format)
     }
+
+    // ------------------------------------------------------------------ code review 2026-10-14
+
+    private fun gatedList(gate: CompletableDeferred<Unit>, next: ChannelIdentity = CH2) = object : ZapList {
+        override val id = "slow"
+        override suspend fun neighbour(from: ChannelIdentity, delta: Int): ChannelIdentity { gate.await(); return next }
+    }
+
+    @Test
+    fun stopDuringZapLookupStaysStopped() {
+        // E-S1 (the reviewer's repro): Home right after CH± must not re-tune in the background.
+        val gate = CompletableDeferred<Unit>()
+        f.controller.tune(TuneTarget.Channel(CH1), gatedList(gate))
+        f.idle(); f.play(); f.advance(1_000)
+        f.controller.zap(+1) // neighbour() suspends
+        f.idle()
+        f.controller.stop(StopReason.BACKGROUND)
+        f.idle()
+        gate.complete(Unit)
+        f.idle()
+        assertTrue("state after stop + late zap: ${f.state}", f.state is PlaybackState.Stopped)
+        assertEquals(1, f.resolver.calls.size)
+        assertNull(f.controller.pendingZap.value)
+    }
+
+    @Test
+    fun tuneDuringZapLookupWins() {
+        val gate = CompletableDeferred<Unit>()
+        f.controller.tune(TuneTarget.Channel(CH1), gatedList(gate))
+        f.idle(); f.play(); f.advance(1_000)
+        f.controller.zap(+1)
+        f.idle()
+        f.controller.tune(TuneTarget.Channel(CH3)) // OK on a guide channel
+        f.idle()
+        gate.complete(Unit)
+        f.idle()
+        assertEquals(CH3, f.state.target?.identity)
+        assertEquals(listOf("ch1", "ch3"), f.resolver.calls.map { (it.target as app.thebox.player.internal.TuneTargetKey.Channel).identity.stableKey.value })
+    }
+
+    @Test
+    fun theInitialViewportReachesTheDisplayModeController() {
+        // E-S2: DisplayModeController starts at NONE; setViewport(FULL) is a no-op on the controller, so without the
+        // push at engine creation AFR ALWAYS never evaluated.
+        f.controller.setViewport(app.thebox.core.playback.Viewport.FULL)
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        assertEquals(listOf(app.thebox.core.playback.Viewport.FULL), f.engine.displayMode.viewports)
+    }
+
+    @Test
+    fun directUrlsAreLimitedPerBrokerKey() {
+        // N-S6: the re-resolve limiter key of a direct URL is its broker key, not one shared null bucket.
+        f.ladder.script = { _, _ -> LadderDecision.ReResolve(0) }
+        for (host in listOf("a.example", "b.example")) {
+            f.resolver.next = { ResolveOutcome.Ok(app.thebox.player.controller.fakes.stream(null, brokerKey = "d:$host")) }
+            f.controller.tune(TuneTarget.DirectUrl("http://$host/x.ts"))
+            f.idle()
+            f.exo.emitError(PlaybackException("x", null, PlaybackException.ERROR_CODE_IO_UNSPECIFIED))
+            f.idle()
+        }
+        val keys = f.limiter.keys.map { it?.stableKey?.value }
+        assertEquals(listOf("d:a.example", "d:b.example"), keys.distinct())
+        f.resolver.next = { c -> ResolveOutcome.Ok(app.thebox.player.controller.fakes.stream((c.target as app.thebox.player.internal.TuneTargetKey.Channel).identity)) }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.exo.emitError(PlaybackException("x", null, PlaybackException.ERROR_CODE_IO_UNSPECIFIED))
+        f.idle()
+        assertEquals(CH1, f.limiter.keys.last())
+    }
+
+    @Test
+    fun droppedHeadersAreLoggedByName() {
+        // N-S1: HeaderPolicy dropped an invalid header; the event log records its name.
+        f.resolver.next = { ResolveOutcome.Ok(app.thebox.player.controller.fakes.stream(CH1, droppedHeaders = listOf("X-Bad"))) }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        val e = f.events.events.single { it.type == PlaybackEventType.RESOLVED && it.code == "headers_dropped" }
+        assertEquals("X-Bad", e.detail)
+    }
+
+    @Test
+    fun anUnsupportedSchemeIsUnsupportedSourceWithoutAnOpen() {
+        // N-S3: the real MediaSourceBuilder throws before any transport; the controller fails at once.
+        f.sources.failNext = app.thebox.player.engine.UnsupportedStreamFormatException(StreamFormat.TS, scheme = "rtmp")
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        val err = f.state as PlaybackState.Error
+        assertEquals(PlaybackErrorCode.UNSUPPORTED_SOURCE, err.error.code)
+        assertEquals("scheme rtmp", err.error.detail.signal)
+        assertTrue(NextStep.OPEN_EXTERNAL in err.error.actions)
+        assertTrue(f.sources.builds.isEmpty())
+        assertTrue(f.ladder.seen.isEmpty())
+    }
+
+    @Test
+    fun aBuilderBugIsInternalNotUnsupportedSource() {
+        // Later E-4 (taken with N-S3): only UnsupportedStreamFormatException means "this source cannot be played".
+        f.sources.failNext = IllegalStateException("bug")
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        assertEquals(PlaybackErrorCode.INTERNAL, (f.state as PlaybackState.Error).error.code)
+    }
 }

@@ -7,6 +7,7 @@ import app.thebox.player.api.BufferingCause
 import app.thebox.player.api.PlaybackNotice
 import app.thebox.player.api.PlaybackState
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Ignore
 import org.junit.Test
@@ -50,6 +51,28 @@ class ReconnectTest : PanelTestBase() {
         assertTrue("position advancing $p0 → $p1", p1 > p0)
     }
 
+    @Test
+    fun i03bTransparentReconnectAudioOnly() {
+        // Code review 2026-10-14, E-S6: D4a coverage while I-3 stays ignored for O-1 (the emulator's soft H.264 decoder).
+        // ch 13 is audio-only, so no video decoder can stall at the splice.
+        panel.config(FakePanelAdmin.Config(faults = FakePanelAdmin.Faults(closeEvery = 15, reconnectMode = "continue")))
+        launch(ch(13))
+        awaitFirstMedia(1)
+        val from = states.size
+        Thread.sleep(50_000)
+        val seen = synchronized(states) { states.drop(from) }
+        assertNoError(seen)
+        val s = stats()
+        log("I-3b reconnects=${s.reconnects} buffering=${seen.count { it is PlaybackState.Buffering }} gaps=${bufferingGaps(seen)}")
+        assertTrue("telemetry reconnects ${s.reconnects}", s.reconnects >= 2)
+        assertTrue("no Reconnecting notice", notices.none { it is PlaybackNotice.Reconnecting })
+        assertTrue("no re-resolve", events(PlaybackEventType.DECISION).none { it.code == "ReResolve" })
+        val p0 = main { controller.position().positionMs }
+        Thread.sleep(1_000)
+        val p1 = main { controller.position().positionMs }
+        assertTrue("position advancing $p0 → $p1", p1 > p0)
+    }
+
     private fun ptsDiscontinuity(mode: String) {
         panel.config(FakePanelAdmin.Config(faults = FakePanelAdmin.Faults(closeEvery = 15, reconnectMode = mode)))
         launch(ch(1))
@@ -61,6 +84,17 @@ class ReconnectTest : PanelTestBase() {
         log("I-4/5 $mode: PCR_JUMP=${jumps.size} Reprepare=${decisions.size}")
         assertTrue("PCR_JUMP logged", jumps.isNotEmpty())
         assertTrue("Reprepare decision after the jump", decisions.any { d -> jumps.any { it.elapsedMs <= d.elapsedMs } })
+        // §5.5 I-4/I-5 (code review 2026-10-14, E-S6): back to Playing within 5 s of the rebuffer that follows each
+        // jump. The jump surfaces when the buffer drains; the Reprepare decision marks that moment.
+        val endAt = android.os.SystemClock.elapsedRealtime()
+        for (j in jumps) {
+            val d = decisions.firstOrNull { it.elapsedMs >= j.elapsedMs } ?: continue
+            if (endAt - d.elapsedMs < 5_000) continue // the run ended inside the window; checked by the wait below
+            val back = firstStateAfter(d.elapsedMs) { it is PlaybackState.Playing && !it.paused }
+            log("I-4/5 $mode: jump at ${j.elapsedMs}, Reprepare at ${d.elapsedMs}, Playing at $back")
+            assertNotNull("Playing again after the Reprepare at ${d.elapsedMs}", back)
+            assertTrue("back to Playing ${back!! - d.elapsedMs} ms after the rebuffer", back - d.elapsedMs <= 5_000)
+        }
         awaitPlaying(10_000)
     }
 
@@ -83,8 +117,14 @@ class ReconnectTest : PanelTestBase() {
         val log = stats.streamRequests(1)
         log("I-8 requests for ch1: ${log.map { "${it.optString("path")} token=${it.optBoolean("token_present")}" }}")
         assertFalse("expired token rejected", stats.rejections.containsKey("token_expired"))
-        // Every reconnect starts from the original /live/… URL (re-resolve; the tokenised redirect is never reused).
-        assertTrue(log.isNotEmpty() && !log.first().optBoolean("token_present"))
+        // §5.5 I-8 (code review 2026-10-14, E-S6): every connection, the first and every reconnect, requests the original
+        // /live/… URL first: each tokenised request directly follows a tokenless one (the redirect is never reused).
+        assertTrue("requests logged", log.size >= 4)
+        assertFalse("first request is tokenless", log.first().optBoolean("token_present"))
+        log.forEachIndexed { i, r ->
+            if (r.optBoolean("token_present")) assertFalse("request $i reused a token", log[i - 1].optBoolean("token_present"))
+        }
+        assertTrue("reconnects happened", log.count { !it.optBoolean("token_present") } >= 2)
         assertTrue(controller.state.value is PlaybackState.Playing || controller.state.value is PlaybackState.Buffering)
     }
 

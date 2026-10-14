@@ -6,6 +6,7 @@ import android.view.SurfaceView
 import android.view.TextureView
 import android.view.View
 import androidx.annotation.OptIn
+import androidx.annotation.VisibleForTesting
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
@@ -28,15 +29,33 @@ import java.lang.ref.WeakReference
  * Activity's `SurfaceView` is never kept by the player. A re-attached view (same instance) is given back.
  *
  * [onSurfaceView] reports the current view (or null) for AFR's `Surface.setFrameRate` (§3.9.2). The reference is weak.
+ *
+ * (code review 2026-10-14, E-S4) [onSurfaceValid] reports whether the current view has a valid surface: the view's
+ * `SurfaceHolder` callbacks (the surface is destroyed when the Activity stops, e.g. during the standby grace, while the
+ * view stays attached), plus view attach/detach. Without a surface ExoPlayer skips frames, so the controller does not
+ * expect rendered video then (detector c).
  */
 @OptIn(UnstableApi::class)
 internal class SurfacePlayer(
     private val exo: Player,
+    private val onSurfaceValid: (Boolean) -> Unit = {},
     private val onSurfaceView: (SurfaceView?) -> Unit = {},
 ) : ForwardingPlayer(exo) {
 
     private var current: WeakReference<SurfaceView>? = null
     private var detached: WeakReference<SurfaceView>? = null
+    private var watched: WeakReference<SurfaceView>? = null
+
+    /** The last validity reported through [onSurfaceValid]. */
+    var surfaceValid: Boolean = false
+        private set
+
+    @VisibleForTesting
+    internal val holderCallback = object : SurfaceHolder.Callback {
+        override fun surfaceCreated(holder: SurfaceHolder) = report(true)
+        override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) = Unit
+        override fun surfaceDestroyed(holder: SurfaceHolder) = report(false)
+    }
 
     /** The view currently given to the player (tests and diagnostics). */
     val currentView: SurfaceView? get() = current?.get()
@@ -56,6 +75,7 @@ internal class SurfacePlayer(
                 exo.clearVideoSurfaceView(view)
                 current = null
                 detached = WeakReference(view)
+                unwatch()
                 onSurfaceView(null)
             }
         }
@@ -69,6 +89,7 @@ internal class SurfacePlayer(
         if (surfaceView == null) {
             current?.get()?.let { exo.clearVideoSurfaceView(it) }
             current = null
+            unwatch()
             onSurfaceView(null)
             return
         }
@@ -82,6 +103,7 @@ internal class SurfacePlayer(
         exo.clearVideoSurfaceView(surfaceView)
         if (surfaceView != null && current?.get() === surfaceView) {
             current = null
+            unwatch()
             onSurfaceView(null)
         }
     }
@@ -89,7 +111,29 @@ internal class SurfacePlayer(
     private fun attach(view: SurfaceView) {
         exo.setVideoSurfaceView(view)
         current = WeakReference(view)
+        watch(view)
         onSurfaceView(view)
+    }
+
+    private fun watch(view: SurfaceView) {
+        if (watched?.get() !== view) {
+            unwatch()
+            view.holder.addCallback(holderCallback)
+            watched = WeakReference(view)
+        }
+        report(view.holder.surface?.isValid == true)
+    }
+
+    private fun unwatch() {
+        watched?.get()?.holder?.removeCallback(holderCallback)
+        watched = null
+        report(false)
+    }
+
+    private fun report(valid: Boolean) {
+        if (surfaceValid == valid) return
+        surfaceValid = valid
+        onSurfaceValid(valid)
     }
 
     // ------------------------------------------------------------- everything else is not M3's to call

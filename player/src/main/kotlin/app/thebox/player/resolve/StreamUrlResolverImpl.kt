@@ -145,7 +145,7 @@ internal class StreamUrlResolverImpl @Inject constructor(
             ResolveOutcome.Ok(
                 ResolvedStream(
                     s.identity, s.brokerKey, s.url, s.headers, target.formatHint, s.xtream, s.output, s.baseIndex, s.baseCount, s.host,
-                    s.ignoreTlsErrors, s.liveUrlTemplate, s.headerTemplates,
+                    s.ignoreTlsErrors, s.liveUrlTemplate, s.headerTemplates, s.droppedHeaders,
                 ),
             ),
             null,

@@ -670,6 +670,65 @@ class LiveTsDataSourceTest {
         assertEquals(1, broker.lease.releaseCount.get())
     }
 
+    // ------------------------------------------------------------------ code review 2026-10-14
+
+    @Test
+    fun aBadHeaderValueIsATypedFailureThatReleasesTheLeaseAndHidesTheValue() {
+        // N-S1: OkHttp's IllegalArgumentException("Unexpected char 0xe9 at 4 in X-Token value: s3crét") used to escape
+        // open() as a RuntimeException with the lease held.
+        val broker = FakeBroker()
+        val ds = source(sessionCtx(liveUrl, broker = broker, headers = mapOf("User-Agent" to "Box", "X-Token" to "s3crét")))
+        val e = expectLive { ds.open(sessionSpec()) }
+        assertEquals(LiveFailureKind.NETWORK, e.kind)
+        assertEquals(NetworkFailureKind.OTHER, e.info.networkKind)
+        assertNoUrl(e)
+        var t: Throwable? = e
+        while (t != null) {
+            assertFalse("value in $t", t.toString().contains("s3cr"))
+            t = t.cause
+        }
+        assertEquals("the lease is released by the failed open", 1, broker.lease.releaseCount.get())
+        assertEquals(0, server.requestCount)
+        ds.close()
+        assertEquals(1, broker.lease.releaseCount.get())
+    }
+
+    @Test
+    fun noLiveStreamExceptionCarriesARealDataSpecAsItsCause() {
+        // N-S3: OkHttpDataSource's "Malformed URL" HttpDataSourceException holds the real DataSpec; it must not become
+        // the cause (the builder rejects such schemes first; this is the transport's own guarantee).
+        val ds = source(sessionCtx("rtmp://example.com/live/user/pass"))
+        val e = expectLive { ds.open(sessionSpec()) }
+        assertNoUrl(e)
+        var t: Throwable? = e.cause
+        while (t != null) {
+            if (t is androidx.media3.datasource.DataSourceException && t is HttpDataSource.HttpDataSourceException) {
+                assertEquals(LiveTsDataSource.SESSION_SCHEME, t.dataSpec.uri.scheme)
+            }
+            assertFalse("URL in $t", t.toString().contains("example.com"))
+            t = t.cause
+        }
+        ds.close()
+    }
+
+    @Test
+    fun readPendingIsReportedOnlyWhileAReadWaitsOnTheSocket() {
+        // E-B1/N-S2: the watchdog's no-bytes age runs only while this is non-zero.
+        val stalled = LiveBody(FIXTURE.copyOf(3 * PKT), stall = true).also { toRelease += it }
+        server.enqueue(liveResponse(stalled))
+        val telemetry = SessionTelemetry(REAL_CLOCK)
+        val ds = source(sessionCtx(liveUrl), telemetry = telemetry)
+        ds.open(sessionSpec())
+        readExactly(ds, 3 * PKT)
+        assertEquals("no read in progress", 0L, telemetry.readPendingSinceMs)
+        val blocked = executor.submit<Int> { ds.read(ByteArray(PKT), 0, PKT) }
+        Thread.sleep(300)
+        assertTrue("a read waits on the socket", telemetry.readPendingSinceMs > 0)
+        ds.close()
+        try { blocked.get(2, TimeUnit.SECONDS) } catch (_: ExecutionException) { }
+        assertEquals(0L, telemetry.readPendingSinceMs)
+    }
+
     /** A body that declares [declared] bytes but sends [data] and then closes the socket. */
     private class TruncatedBody(private val data: ByteArray, private val declared: Long) : MockResponseBody {
         override val contentLength: Long = declared

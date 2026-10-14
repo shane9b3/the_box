@@ -31,8 +31,13 @@ import app.thebox.player.internal.TsCompat
 import javax.inject.Inject
 import javax.inject.Singleton
 
-/** DASH and other formats v1 does not build (§7 D20). The controller maps it to `UNSUPPORTED_SOURCE`. */
-internal class UnsupportedStreamFormatException(val format: StreamFormat) : IllegalArgumentException("unsupported stream format $format")
+/**
+ * DASH and other formats v1 does not build (§7 D20), and (code review 2026-10-14, N-S3) any URL scheme other than
+ * `http`/`https`/`thebox-session` (`rtmp`, `rtsp`, `udp`, `rtp`, `mms`, `mmsh`, …): [scheme] is set then. The controller
+ * maps it to `UNSUPPORTED_SOURCE` before any network attempt. The message names the format or scheme, never the URL.
+ */
+internal class UnsupportedStreamFormatException(val format: StreamFormat, val scheme: String? = null) :
+    IllegalArgumentException(if (scheme != null) "unsupported scheme $scheme" else "unsupported stream format $format")
 
 /**
  * One tune session → one `MediaSource` (docs/design/m2-playback-core.md §3.1.3).
@@ -66,6 +71,8 @@ internal class MediaSourceBuilder(
         transport: TransportFactory,
         archive: ArchiveRequest?,
     ): MediaSourceWithTelemetry {
+        val scheme = schemeOf(ctx.resolved.url)
+        if (scheme !in SUPPORTED_SCHEMES) throw UnsupportedStreamFormatException(format, scheme.ifEmpty { "none" })
         val isArchive = archive != null
         return when (format) {
             StreamFormat.TS, StreamFormat.UNKNOWN -> {
@@ -131,6 +138,17 @@ internal class MediaSourceBuilder(
 
         /** HLS segments: the TS flags of §3.8.5 (`DefaultHlsExtractorFactory` adds its own HLS-specific flags). */
         const val HLS_TS_FLAGS: Int = DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS
+
+        /** URL schemes the transports can open (lower case). */
+        val SUPPORTED_SCHEMES = setOf("http", "https", SESSION_SCHEME)
+
+        /** The scheme of [url], lower case, or "" when it has none. Never logs or keeps the URL. */
+        fun schemeOf(url: String): String {
+            val i = url.indexOf("://")
+            if (i <= 0) return ""
+            val s = url.substring(0, i)
+            return if (s.all { it.isLetterOrDigit() || it == '+' || it == '-' || it == '.' }) s.lowercase(java.util.Locale.ROOT) else ""
+        }
 
         fun sessionUri(tuneId: Long): Uri = "$SESSION_SCHEME://$tuneId".toUri()
 

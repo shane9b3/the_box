@@ -94,7 +94,10 @@ internal class FailureClassifier {
         chain.firstOrNull { it is AudioSink.InitializationException }?.let {
             val a = it as AudioSink.InitializationException
             val mime = a.format.sampleMimeType
-            return FailureSignal.AudioTrackInit(encoded = mime != MimeTypes.AUDIO_RAW && facts.passthroughActive, a.format.channelCount, mime)
+            // (code review 2026-10-14, E-S3) `format` is the sink's INPUT format: audio/raw when decoding, the encoded MIME
+            // only for passthrough/offload. `passthroughActive` cannot help: it is set by onAudioTrackInitialized, which
+            // never fires when the init fails, so it is always false here.
+            return FailureSignal.AudioTrackInit(encoded = isPassthroughMime(mime), a.format.channelCount, mime)
         }
         chain.firstOrNull { it is StuckPlayerException }?.let { return FailureSignal.Stuck((it as StuckPlayerException).stuckType) }
         chain.firstOrNull { it is ParserException }?.let {
@@ -107,8 +110,10 @@ internal class FailureClassifier {
             PlaybackException.ERROR_CODE_DECODING_FAILED -> FailureSignal.DecodingFailed(isVideo(rendererMime, rendererFormat), rendererMime)
             PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES, PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED ->
                 FailureSignal.FormatUnsupported(isVideo(rendererMime, rendererFormat), rendererMime)
+            // Without the exception the renderer's (encoded) format is all there is: a passthrough-capable encoding goes
+            // to L34 first (cheap, once per cycle), then L35/L36 as before.
             PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED -> FailureSignal.AudioTrackInit(
-                encoded = rendererMime != null && rendererMime != MimeTypes.AUDIO_RAW && facts.passthroughActive,
+                encoded = isPassthroughMime(rendererMime),
                 channelCount = rendererFormat?.channelCount ?: 0,
                 mimeType = rendererMime,
             )
@@ -200,3 +205,14 @@ internal class FailureClassifier {
         }
     }
 }
+
+/**
+ * (code review 2026-10-14, E-S3) Encodings the sink can send as passthrough (AC-3, E-AC-3, E-AC-3 JOC, DTS, DTS-HD,
+ * TrueHD): an `AudioTrack` init failure in one of them is a passthrough failure (ladder L34, passthrough off).
+ */
+internal val PASSTHROUGH_MIMES: Set<String> = setOf(
+    MimeTypes.AUDIO_AC3, MimeTypes.AUDIO_E_AC3, MimeTypes.AUDIO_E_AC3_JOC, MimeTypes.AUDIO_DTS, MimeTypes.AUDIO_DTS_HD,
+    MimeTypes.AUDIO_TRUEHD,
+)
+
+internal fun isPassthroughMime(mime: String?): Boolean = mime != null && mime in PASSTHROUGH_MIMES

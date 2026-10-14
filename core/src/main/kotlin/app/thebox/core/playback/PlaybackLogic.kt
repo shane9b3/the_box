@@ -173,10 +173,15 @@ class WatchdogSample {
     var positionMs = 0L
     var bufferedDurationMs = 0L
     var bytesTotal = 0L                 // monotonic, from telemetry
+    /**
+     * (code review 2026-10-14, E-B1/N-S2) Age of the last byte **while a read() is pending** in the live source
+     * (`now - max(lastByteAt, readPendingSince)`), else 0: a loader parked on a full buffer reads nothing and is not
+     * starving (§3.3.6).
+     */
     var lastByteAgeMs = 0L
     var inDataSourceReconnect = false
     var isHls = false
-    var videoExpected = false           // video track selected, surface attached, viewport MINI/FULL, not poster
+    var videoExpected = false           // video track selected, valid surface, viewport MINI/FULL, not poster, no standby grace (E-S4)
     var firstFrameRendered = false
     var videoRenderedCount = 0L
     var videoDroppedCount = 0L
@@ -198,6 +203,9 @@ interface StallDetectors {
     fun onSample(s: WatchdogSample): StallVerdict?
     /** Reset baselines (tune, seek, re-prepare, viewport/track change). */
     fun reset(nowMs: Long)
+
+    /** (code review 2026-10-14, N-S4) A new tune or re-prepare: [reset] plus anything learned about the old stream. */
+    fun newStream(nowMs: Long) = reset(nowMs)
 }
 
 // ------------------------------------------------------------------ TS (WP-B, §3.3)

@@ -100,6 +100,10 @@ internal class BrokeredHttpDataSource(
             closeInner()
             if (factory.leaseIsPreempted || scope.isEnded) throw failure(LiveFailureKind.PREEMPTED, dataSpec)
             throw if (placeholder) hide(e, dataSpec) else e
+        } catch (e: IllegalArgumentException) {
+            // (code review 2026-10-14, N-S1) OkHttp refused a header; its message carries the value. Typed, no cause.
+            closeInner()
+            throw failure(LiveFailureKind.NETWORK, dataSpec)
         }
         bytesRemaining = length
         opened = true
@@ -176,9 +180,15 @@ internal class BrokeredHttpDataSource(
     private fun hide(e: HttpDataSource.HttpDataSourceException, spec: DataSpec): HttpDataSource.HttpDataSourceException {
         val safe = spec.withUri(sessionSpecUri)
         return if (e is HttpDataSource.InvalidResponseCodeException) {
-            HttpDataSource.InvalidResponseCodeException(e.responseCode, null, e.cause as? IOException, emptyMap(), safe, ByteArray(0))
+            HttpDataSource.InvalidResponseCodeException(e.responseCode, null, e.cause?.let(::safeCause), emptyMap(), safe, ByteArray(0))
         } else {
-            HttpDataSource.HttpDataSourceException(rootCause(e) as? IOException ?: e, safe, e.reason, e.type)
+            // (code review 2026-10-14, N-S3) Never keep a DataSourceException (it holds the real DataSpec) as the cause.
+            val cause = safeCause(e)
+            if (cause != null) {
+                HttpDataSource.HttpDataSourceException(cause, safe, e.reason, e.type)
+            } else {
+                HttpDataSource.HttpDataSourceException(safe, e.reason, e.type)
+            }
         }
     }
 }

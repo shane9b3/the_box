@@ -40,7 +40,7 @@ internal data class FailureInfo(
  * [LiveFailureKind.RECONNECT_EXHAUSTED], `noBytes` is `info.networkKind == NetworkFailureKind.TIMEOUT` (the last
  * attempt ended on the byte watchdog or a socket timeout; [reason] is then `ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT`).
  * For [LiveFailureKind.LOCAL_LIMIT] the broker's `ConnectionLimitException` (active/max) is in [getSuppressed].
- * [cause] is the root network exception for NETWORK (never an exception that carries the real `DataSpec`).
+ * [cause] is the root network exception for NETWORK (never an exception that carries the real `DataSpec`: [safeCause]).
  */
 @OptIn(UnstableApi::class)
 internal class LiveStreamException(
@@ -90,6 +90,15 @@ internal fun rootCause(t: Throwable): Throwable {
         cur = next
     }
     return cur
+}
+
+/**
+ * (code review 2026-10-14, N-S3) The root of [t] when it may be kept as a failure's cause: never a
+ * `DataSourceException`, whose `DataSpec` may hold the real (credentialed) URL. Null when the root is one.
+ */
+internal fun safeCause(t: Throwable): IOException? {
+    val root = rootCause(t)
+    return if (root is DataSourceException) null else root as? IOException
 }
 
 /**

@@ -17,6 +17,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
+import org.junit.Assume.assumeTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import kotlin.math.abs
@@ -38,8 +39,11 @@ class MediaAndLifecycleTest : PanelTestBase() {
         if (FfmpegAvailability.isAvailable) {
             assertTrue(s.audioDecoder.orEmpty().contains("ffmpeg", ignoreCase = true))
         } else {
+            // §5.5 I-13 (E-S6): AUDIO_UNSUPPORTED, or a *platform MP2* decoder on the MP2 track (not just any decoder).
             assertTrue(
-                (st is PlaybackState.Playing && st.warning == PlaybackWarning.AUDIO_UNSUPPORTED) || s.audioDecoder != null,
+                "state=$st audio=${s.audioMime}/${s.audioDecoder}",
+                (st is PlaybackState.Playing && st.warning == PlaybackWarning.AUDIO_UNSUPPORTED) ||
+                    (s.audioMime == "audio/mpeg-L2" && s.audioDecoder != null && st is PlaybackState.Playing && st.warning == null),
             )
         }
     }
@@ -48,9 +52,9 @@ class MediaAndLifecycleTest : PanelTestBase() {
     fun i20aRadioReachesFirstMediaOnAudio() {
         launch(ch(13))
         awaitPlaying(15_000)
-        val z = awaitFirstMedia(1, 15_000)
+        val z = awaitFirstMedia(1, 15_000) // this test's tune (E-S5)
         assertNotNull(z.firstFrameMs)
-        assertEquals("audio", events(PlaybackEventType.FIRST_FRAME).last().code)
+        assertEquals("audio", events(PlaybackEventType.FIRST_FRAME).last { it.tuneId == z.tuneId }.code)
         assertNoError(runFor(20_000))
     }
 
@@ -83,6 +87,28 @@ class MediaAndLifecycleTest : PanelTestBase() {
         return (uniform && (first and 0xFFFFFF) == 0) to diff
     }
 
+    private fun has50HzMode(): Boolean {
+        val display = context.getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY)
+        log("I-22 modes=${display.supportedModes.map { "${it.modeId}@${it.refreshRate}" }}")
+        return display.supportedModes.any { abs(it.refreshRate - 50f) < 0.5f }
+    }
+
+    /** §5.5 I-22 FULL: the controller evaluated AFR for this 50 fps channel; a switch where the display can do 50 Hz. */
+    private fun assertAfrInFull(what: String) {
+        // The fps estimate needs 30 rendered frames with steady deltas; the emulator's soft decoder can take a few s.
+        val deadline = System.currentTimeMillis() + 10_000
+        while (stats().fps == null && System.currentTimeMillis() < deadline) Thread.sleep(250)
+        val s = stats()
+        log("I-22 $what: request=${controller.displayModeRequest.value} afr=${s.afr} fps=${s.fps} refresh=${s.displayRefreshHz}")
+        assertEquals("$what: AFR mode in the stats", AfrMode.ALWAYS, s.afr)
+        assertNotNull("$what: fps known for ch 4", s.fps)
+        assertEquals("$what: ch 4 is 50 fps", 50f, s.fps!!, 0.5f)
+        // The emulator AVD has one 60 Hz mode (§5.8 O-4): a real switch cannot be shown there. Skipped with a reason,
+        // never passed vacuously (code review 2026-10-14, E-S6).
+        assumeTrue("display has no 50 Hz mode: the AFR switch itself cannot be asserted on this device", has50HzMode())
+        assertTrue("$what: a display mode request in FULL", controller.displayModeRequest.value != 0)
+    }
+
     @Test
     fun i22AfrGatedByViewport() {
         ep.settings().update { it.copy(afrMode = AfrMode.ALWAYS) }
@@ -92,10 +118,17 @@ class MediaAndLifecycleTest : PanelTestBase() {
         assertEquals("no AFR request in MINI", 0, controller.displayModeRequest.value)
         onMain { controller.setViewport(Viewport.FULL) }
         Thread.sleep(3_500)
-        val display = context.getSystemService(DisplayManager::class.java).getDisplay(Display.DEFAULT_DISPLAY)
-        val has50 = display.supportedModes.any { abs(it.refreshRate - 50f) < 0.5f }
-        log("I-22 FULL request=${controller.displayModeRequest.value} modes=${display.supportedModes.map { it.refreshRate }}")
-        if (!has50) assertEquals("no 50 Hz mode: no switch", 0, controller.displayModeRequest.value)
+        assertAfrInFull("MINI → FULL")
+    }
+
+    @Test
+    fun i22bAfrInFullFromTheStart() {
+        // Code review 2026-10-14, E-S2: FULL from the start (no viewport change) must evaluate AFR too.
+        ep.settings().update { it.copy(afrMode = AfrMode.ALWAYS) }
+        launch(ch(4))
+        awaitFirstMedia(1)
+        Thread.sleep(3_500)
+        assertAfrInFull("FULL")
     }
 
     @Test
@@ -119,6 +152,7 @@ class MediaAndLifecycleTest : PanelTestBase() {
     fun i20ScreenOffUsesTheGrace() {
         launch(ch(1))
         awaitFirstMedia(1)
+        val sleptAt = android.os.SystemClock.elapsedRealtime()
         device.sleep()
         try {
             val early = runFor(1_500)
@@ -126,6 +160,9 @@ class MediaAndLifecycleTest : PanelTestBase() {
             val (st, ms) = awaitState("Stopped(STANDBY)", 10_000) { it is PlaybackState.Stopped }
             log("I-20 standby stop after ${ms + 1_500} ms (scaled grace 3 s)")
             assertEquals(StopReason.STANDBY, (st as PlaybackState.Stopped).reason)
+            // E-S4: the surface is gone during the grace; no frozen-picture verdict may come from that.
+            val frozen = events(PlaybackEventType.STALL).filter { it.elapsedMs >= sleptAt && it.code == "FROZEN_VIDEO" }
+            assertTrue("FROZEN_VIDEO during the standby grace: $frozen", frozen.isEmpty())
         } finally {
             device.wakeUp() // a failure must not leave the screen off for the next test
         }

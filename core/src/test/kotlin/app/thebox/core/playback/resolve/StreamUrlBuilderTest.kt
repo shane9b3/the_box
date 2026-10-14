@@ -207,6 +207,19 @@ class StreamUrlBuilderTest {
     }
 
     @Test
+    fun headersWithInvalidValuesAfterExpansionAreDroppedByName() {
+        // N-S1: a percent-decoded pipe header with CR/LF and a non-ASCII password expanded into a header.
+        val ch = shaped("http://cdn/live/{{u}}/{{p}}/1.ts").copy(headers = mapOf("X-Pipe" to "a\r\nb", "X-Pass" to "{{p}}", "X-Ok" to "1"))
+        val c = StreamCredentials(m3uCreds.baseUrls, "joe", "pässwort")
+        val s = ok(input(channel = ch, playlist = m3u, credentials = c))
+        assertEquals("1", s.headers["X-Ok"])
+        assertNull(s.headers["X-Pipe"])
+        assertNull(s.headers["X-Pass"])
+        assertEquals(listOf("X-Pipe", "X-Pass"), s.droppedHeaders)
+        assertTrue(s.headers.values.none { it.contains("pässwort") })
+    }
+
+    @Test
     fun headerTemplateWithoutCredentialsFails() {
         val ch = shaped("http://cdn/a.ts").copy(headers = mapOf("Cookie" to "p={{p}}"))
         assertFailed(PlaybackErrorCode.NEEDS_REAUTH, builder.build(input(channel = ch, playlist = m3u, credentials = null)))

@@ -19,10 +19,13 @@ import app.thebox.core.playback.StallDetectors
 import app.thebox.core.playback.StallKind
 import app.thebox.core.playback.StallVerdict
 import app.thebox.core.playback.WatchdogSample
+import app.thebox.core.playback.stall.StallConstants
+import app.thebox.core.playback.stall.StallDetectorsImpl
 import app.thebox.player.internal.PlayerBundle
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -229,6 +232,7 @@ class PlaybackWatchdogTest {
         assertEquals("no byte yet: no age", 0L, watchdog.sample.lastByteAgeMs)
         t.bytesTotal = 1234
         t.lastByteAtMs = clock.nowMs()
+        t.readPendingSinceMs = t.lastByteAtMs
         t.inReconnect = true
         idle(700)
         watchdog.sampleNow()
@@ -241,6 +245,43 @@ class PlaybackWatchdogTest {
         assertEquals(0L, watchdog.sample.bytesTotal)
         assertFalse(watchdog.sample.isLive)
         assertTrue(watchdog.sample.isHls)
+    }
+
+    /** The real §3.7 detectors over a healthy live-TS "playing" sample that carries the watchdog's [lastByteAgeMs]. */
+    private fun backstop(lastByteAgeMs: Long): StallVerdict? {
+        val s = WatchdogSample().apply {
+            nowMs = 100_000; playbackState = StallConstants.STATE_READY; playWhenReady = true; isPlaying = true; isLive = true
+            msSinceSeekOrPrepare = 10_000; this.lastByteAgeMs = lastByteAgeMs
+        }
+        return StallDetectorsImpl().onSample(s)
+    }
+
+    @Test
+    fun parkedLoaderWithAFullBufferIsNotNoBytes() {
+        // Code review 2026-10-14, E-B1/N-S2: the loader is parked (no read pending) for 20 s with a full buffer.
+        val t = EngineTestSupport.FakeTelemetry()
+        watchdog.bind(t)
+        t.bytesTotal = 5_000_000
+        t.lastByteAtMs = clock.nowMs()
+        t.readPendingSinceMs = 0
+        idle(20_000)
+        watchdog.sampleNow()
+        assertEquals(0L, watchdog.sample.lastByteAgeMs)
+        assertNull(backstop(watchdog.sample.lastByteAgeMs))
+    }
+
+    @Test
+    fun readPendingForNineSecondsIsNoBytes() {
+        val t = EngineTestSupport.FakeTelemetry()
+        watchdog.bind(t)
+        t.bytesTotal = 5_000_000
+        t.lastByteAtMs = clock.nowMs()
+        idle(15_000) // parked: does not count
+        t.readPendingSinceMs = clock.nowMs()
+        idle(9_000)
+        watchdog.sampleNow()
+        assertEquals("measured from the start of the pending read", 9_000L, watchdog.sample.lastByteAgeMs)
+        assertEquals(StallKind.NO_BYTES, backstop(watchdog.sample.lastByteAgeMs)?.kind)
     }
 
     private fun tracks(video: Boolean, audio: Boolean): Tracks {

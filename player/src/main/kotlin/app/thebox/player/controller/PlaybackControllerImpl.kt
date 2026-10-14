@@ -49,6 +49,9 @@ import app.thebox.core.playback.PlaybackEventType
 import app.thebox.core.playback.PlaybackWarning
 import app.thebox.core.playback.PlaylistPlaybackInfo
 import app.thebox.core.playback.ReResolveLimiter
+import app.thebox.core.playback.errors.ReResolveKeys
+import app.thebox.core.playback.resolve.FormatHints
+import app.thebox.core.playback.resolve.ResolveConstants
 import app.thebox.core.playback.ResolveOutcome
 import app.thebox.core.playback.ResolvedStream
 import app.thebox.core.playback.StallKind
@@ -104,6 +107,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
@@ -212,6 +216,8 @@ internal class PlaybackControllerImpl @Inject constructor(
     private var session: TuneSession? = null
     private var lastTuneId = 0L
     private var viewport = Viewport.FULL
+    /** (E-S4) The root `SurfaceView` has a valid surface (reported by [SurfacePlayer]). */
+    private var surfaceValid = false
     private var statsEnabled = false
     private var zapList: ZapList? = null
     private var previousIdentity: ChannelIdentity? = null
@@ -226,6 +232,9 @@ internal class PlaybackControllerImpl @Inject constructor(
     private var healthyJob: Job? = null
     private var recordWatchedJob: Job? = null
     private var zapFireJob: Job? = null
+    /** (E-S1) `neighbour()` lookups in flight, and the generation that [cancelPendingZap] bumps. Main thread only. */
+    private val zapLookups = LinkedHashSet<Job>()
+    private var zapGeneration = 0
     private var pollJob: Job? = null
     private val zapMutex = Mutex()
 
@@ -328,8 +337,10 @@ internal class PlaybackControllerImpl @Inject constructor(
     override fun zap(delta: Int, isRepeat: Boolean) {
         val list = zapList ?: return
         val plan = debouncer.onZap(clock.nowMs(), isRepeat)
-        scope.launch {
+        val generation = zapGeneration
+        val job = scope.launch(start = CoroutineStart.LAZY) {
             zapMutex.withLock {
+                if (generation != zapGeneration) return@withLock
                 val from = _pendingZap.value ?: cycle?.identity ?: return@withLock
                 val next = try {
                     list.neighbour(from, delta)
@@ -339,6 +350,8 @@ internal class PlaybackControllerImpl @Inject constructor(
                     BoxLog.w(TAG, "zap list failed: ${e.javaClass.simpleName}")
                     null
                 } ?: return@withLock
+                // (code review 2026-10-14, E-S1) tune(), stop() or a lifecycle stop happened during the lookup.
+                if (generation != zapGeneration) return@withLock
                 if (plan.immediate) {
                     zapFireJob?.cancel()
                     _pendingZap.value = null
@@ -356,6 +369,9 @@ internal class PlaybackControllerImpl @Inject constructor(
                 }
             }
         }
+        zapLookups += job
+        job.invokeOnCompletion { zapLookups -= job }
+        job.start()
     }
 
     override fun previousChannel(): Boolean {
@@ -367,16 +383,33 @@ internal class PlaybackControllerImpl @Inject constructor(
     override fun retry() {
         val c = cycle ?: return
         // §4.3 "Retry from the card": fresh counters (new cycle) and a fresh re-resolve window for the channel.
-        limiter.reset(c.identity)
+        limiter.reset(limiterKey(c))
         startCycle(c.specForRestart())
     }
 
     private fun cancelPendingZap() {
         debouncer.reset()
+        // (code review 2026-10-14, E-S1) A neighbour() lookup still in flight belongs to the zap being cancelled.
+        zapGeneration++
+        if (zapLookups.isNotEmpty()) {
+            zapLookups.toList().forEach { it.cancel() }
+            zapLookups.clear()
+        }
         zapFireJob?.cancel()
         zapFireJob = null
         _pendingZap.value = null
     }
+
+    /**
+     * (code review 2026-10-14, N-S6) The re-resolve limiter key (§4.5): the channel, or for a direct URL its broker key
+     * (`d:<host>`), so direct tunes on different hosts never share one window.
+     */
+    private fun limiterKey(c: Cycle): ChannelIdentity? = ReResolveKeys.of(
+        c.identity,
+        c.resolved?.brokerKey ?: c.directTarget?.url?.let { url ->
+            FormatHints.host(url).takeIf { it.isNotEmpty() }?.let { ResolveConstants.DIRECT_BROKER_PREFIX + it }
+        },
+    )
 
     // ------------------------------------------------------------------ pipeline (§3.1.1)
 
@@ -461,6 +494,11 @@ internal class PlaybackControllerImpl @Inject constructor(
         val resolved = reuse ?: resolve(c) ?: return
         if (!current(c, id)) return
         c.resolved = resolved
+        if (resolved.droppedHeaders.isNotEmpty()) {
+            // (code review 2026-10-14, N-S1) Names only; the event log redacts anyway.
+            eventLog.add(PlaybackEventType.RESOLVED, id, "headers_dropped", resolved.droppedHeaders.joinToString(","))
+            BoxLog.w(TAG, "invalid request headers dropped: ${resolved.droppedHeaders.joinToString(",")}")
+        }
         val now = clock.nowMs()
         if (c.zap.resolveMs == null) c.zap.resolveMs = now - c.startedAtMs
         eventLog.add(PlaybackEventType.RESOLVED, id, resolved.formatHint.name, resolved.host)
@@ -490,14 +528,17 @@ internal class PlaybackControllerImpl @Inject constructor(
         val built = try {
             mediaSources.build(ctx, format, if (c.tsCompat > 0) TsCompat.MULTI_PMT else TsCompat.DEFAULT, transport, c.archive?.request)
         } catch (ex: UnsupportedStreamFormatException) {
-            BoxLog.w(TAG, "media source $id not built: unsupported ${ex.format}")
+            val what = ex.scheme?.let { "scheme $it" } ?: ex.format.name
+            BoxLog.w(TAG, "media source $id not built: unsupported $what")
+            eventLog.add(PlaybackEventType.ERROR, id, "unsupported_source", what)
             s.end()
-            fail(c, PlaybackError(PlaybackErrorCode.UNSUPPORTED_SOURCE, ErrorDetail(host = resolved.host, signal = ex.format.name)), null)
+            fail(c, PlaybackError(PlaybackErrorCode.UNSUPPORTED_SOURCE, ErrorDetail(host = resolved.host, signal = what)), null)
             return
         } catch (ex: Exception) {
             BoxLog.w(TAG, "media source $id not built: ${ex.javaClass.simpleName}")
             s.end()
-            fail(c, PlaybackError(PlaybackErrorCode.UNSUPPORTED_SOURCE, ErrorDetail(host = resolved.host, signal = ex.javaClass.simpleName)), null)
+            // (code review 2026-10-14, Later E-4) Anything but UnsupportedStreamFormatException is a bug, not the source.
+            fail(c, PlaybackError(PlaybackErrorCode.INTERNAL, ErrorDetail(host = resolved.host, signal = ex.javaClass.simpleName)), null)
             return
         }
         s.telemetry = built.telemetry
@@ -675,7 +716,11 @@ internal class PlaybackControllerImpl @Inject constructor(
         check(Looper.myLooper() == Looper.getMainLooper()) { "PlaybackController is main-thread only" }
         val bundle = playerFactory.create(Looper.getMainLooper(), settings.current.softwareAudioFallback)
         val parts = engine.createParts(bundle)
-        val surface = SurfacePlayer(bundle.player) { view -> parts.displayMode.attachSurfaceView(view) }
+        val surface = SurfacePlayer(
+            bundle.player,
+            onSurfaceView = { view -> parts.displayMode.attachSurfaceView(view) },
+            onSurfaceValid = { valid -> onSurfaceValidChanged(valid) },
+        )
         bundle.player.addListener(listener)
         bundle.player.addAnalyticsListener(listener)
         val handle = try {
@@ -696,6 +741,9 @@ internal class PlaybackControllerImpl @Inject constructor(
         }
         parts.setDisplaySwitchListener(onStarted = ::onDisplaySwitchStarted, onSettled = ::onDisplaySwitchSettled)
         parts.setStatsEnabled(statsEnabled)
+        // (code review 2026-10-14, E-S2) The display-mode controller starts at Viewport.NONE and setViewport() ignores an
+        // unchanged value, so the current viewport (FULL by default) must be pushed once, or AFR ALWAYS never evaluates.
+        parts.displayMode.onViewport(viewport)
         scope.launch {
             settings.settings.map { it.afrMode }.distinctUntilChanged().drop(1).collect { parts.onAfrModeChanged(it) }
         }
@@ -1058,8 +1106,9 @@ internal class PlaybackControllerImpl @Inject constructor(
 
         // WP-A: peek the limiter for the context; consume a slot only when the ladder actually re-resolves (format flip
         // and UA fallback are not rate-limited). The second decision only runs if the slot vanished in between.
-        var result = ladder.decide(signal, ladderContext(c, reResolveAllowed = limiter.wouldAllow(c.identity, now)))
-        if (result.first is LadderDecision.ReResolve && !limiter.tryAcquire(c.identity, now)) {
+        val limiterKey = limiterKey(c)
+        var result = ladder.decide(signal, ladderContext(c, reResolveAllowed = limiter.wouldAllow(limiterKey, now)))
+        if (result.first is LadderDecision.ReResolve && !limiter.tryAcquire(limiterKey, now)) {
             result = ladder.decide(signal, ladderContext(c, reResolveAllowed = false))
         }
         c.counters = result.second
@@ -1384,6 +1433,21 @@ internal class PlaybackControllerImpl @Inject constructor(
         eng?.session?.player?.refresh()
     }
 
+    /** (code review 2026-10-14, E-S4) No rendered video is expected during a standby/HDMI/display-off grace. */
+    override fun onGraceChanged(active: Boolean) {
+        if (!active) eng?.parts?.watchdog?.reset()
+        updateExpectations()
+    }
+
+    /** (E-S4) The root `SurfaceView`'s surface was created (true) or destroyed/detached (false). */
+    internal fun onSurfaceValidChanged(valid: Boolean) {
+        if (surfaceValid == valid) return
+        surfaceValid = valid
+        // A new surface: the frozen-picture baseline starts again (frames were skipped while there was none).
+        if (valid) eng?.parts?.watchdog?.reset()
+        updateExpectations()
+    }
+
     // ------------------------------------------------------------------ viewport, tracks, aspect, decoder
 
     override fun setViewport(viewport: Viewport) {
@@ -1419,7 +1483,9 @@ internal class PlaybackControllerImpl @Inject constructor(
     private fun updateExpectations() {
         val e = eng ?: return
         val c = cycle
-        val videoExpected = !videoShouldBeDisabled(c) && session?.milestoneVideo != false
+        // (code review 2026-10-14, E-S4) Frames are only rendered onto a valid surface, and the standby/display-off grace
+        // runs without one: detector c (FROZEN_VIDEO) must not count those windows toward compat escalation.
+        val videoExpected = !videoShouldBeDisabled(c) && session?.milestoneVideo != false && surfaceValid && lifecycle.graceReason == null
         val audioExpected = c?.audioDropped != true
         e.parts.watchdog.setExpectations(videoExpected, audioExpected)
     }

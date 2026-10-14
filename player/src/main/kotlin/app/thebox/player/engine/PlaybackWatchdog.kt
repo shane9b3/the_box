@@ -126,7 +126,11 @@ internal class PlaybackWatchdog(
         milestoneReached = false
         videoSelected = false
         audioSelected = false
-        reset()
+        val now = clock.nowMs()
+        seekOrPrepareAtMs = now
+        underrunAtMs.fill(0L)
+        // (code review 2026-10-14, N-S4) reset() plus the stream rate b1 learned from the previous stream.
+        detectors.newStream(now)
     }
 
     fun setSessionKind(isLive: Boolean, isHls: Boolean) {
@@ -191,8 +195,11 @@ internal class PlaybackWatchdog(
         if (t != null) {
             s.bytesTotal = t.bytesTotal
             val lastByte = t.lastByteAtMs
-            // No byte yet: the data source's first-byte timeout owns that case, so report no age.
-            s.lastByteAgeMs = if (lastByte > 0) (now - lastByte).coerceAtLeast(0) else 0
+            val pending = t.readPendingSinceMs
+            // No byte yet: the data source's first-byte timeout owns that case, so report no age. (Code review
+            // 2026-10-14, E-B1/N-S2) Silence counts only while a read() is pending (§3.3.6): a loader parked on a full
+            // buffer reads nothing for 10–20 s and is not starving.
+            s.lastByteAgeMs = if (lastByte > 0 && pending > 0) (now - maxOf(lastByte, pending)).coerceAtLeast(0) else 0
             s.inDataSourceReconnect = t.inReconnect
         } else {
             s.bytesTotal = 0
