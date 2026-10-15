@@ -918,8 +918,11 @@ class TestSynthetic(PanelCase):
         st, data = self.read_stream("/live/test/test/399.ts")
         self.assertEqual((st, data[:1]), (200, b"\x47"))
         self.assertEqual(self.read_stream("/live/test/test/401.ts")[0], 404)
-        st, data = self.read_stream("/timeshift/test/test/60/2026-01-01:10-00/1.ts")
+        recent = dt.datetime.fromtimestamp(time.time() - 7200, ZoneInfo("Asia/Tokyo")).strftime("%Y-%m-%d:%H-%M")
+        st, data = self.read_stream(f"/timeshift/test/test/60/{recent}/1.ts")
         self.assertEqual((st, data[:1]), (200, b"\x47"))
+        # M4 timeshift_window (default on): a start older than channel 1's 7-day archive is 404
+        self.assertEqual(self.read_stream("/timeshift/test/test/60/2020-01-01:10-00/1.ts")[0], 404)
         st, _, pl = self.get("/live/test/test/250.m3u8")
         self.assertEqual(st, 200)
         self.assertIn(b"250_seg", pl)
@@ -960,6 +963,464 @@ class TestSyntheticLarge(PanelCase):
         self.assertLess(time.time() - t0, 30)
         self.assertEqual(len(self.api("get_live_streams")), 2000)
         self.assertEqual(len(self.api("get_live_categories")), 40)
+
+
+# ------------------------------------------------------------------ M4 additions (docs/design/m4-player-ux.md §5.6)
+
+def astats(case):
+    return json.loads(case.get("/admin/stats")[2])
+
+
+def post(case, path, body):
+    req = urllib.request.Request(f"http://127.0.0.1:{case.port}{path}", json.dumps(body).encode(), method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return r.status, json.loads(r.read())
+    except urllib.error.HTTPError as e:
+        return e.code, json.loads(e.read() or b"{}")
+
+
+def xc_start(ts, zone="Asia/Tokyo", secs=False):
+    return dt.datetime.fromtimestamp(ts, ZoneInfo(zone)).strftime("%Y-%m-%d:%H-%M-%S" if secs else "%Y-%m-%d:%H-%M")
+
+
+def full_get(port, path, headers=None, timeout=30):
+    c = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+    c.request("GET", path, headers=headers or {})
+    r = c.getresponse()
+    try:
+        body = r.read()
+    except http.client.IncompleteRead as e:  # the server cut the body (token_kill)
+        body = e.partial
+    hdrs = {k.lower(): v for k, v in r.getheaders()}
+    c.close()
+    return r.status, hdrs, body
+
+
+class LoopCase(SynthCase):
+    """The synthetic 40-frame clip with its true duration (1.6 s), so `duration` mode sizes match its timestamps."""
+    overrides = {"pace": False, "timeshift_mode": "duration"}
+
+    @classmethod
+    def setUpClass(cls):
+        PanelCase.setUpClass.__func__(cls)
+        cls.saved = dict(cls.panel.clips)
+        cls.src = synth_clip(cls.base)
+        clip = fakepanel.Clip(cls.src, FRAMES * FRAME / 90000, [(cls.src[:len(cls.src) // 2], 0.8), (cls.src[len(cls.src) // 2:], 0.8)])
+        for k in cls.panel.clips:
+            cls.panel.clips[k] = clip
+        cls.clip = clip
+
+    def path(self, minutes, back=3600, ch=1):
+        return f"/timeshift/test/test/{minutes}/{xc_start(time.time() - back)}/{ch}.ts"
+
+
+class TestTimeshiftDuration(LoopCase):
+    """§5.6 item 1: body sized to `duration`, continuous PCR/PTS/CC across loops, exact Content-Length, Range/206."""
+
+    def expected_len(self, secs):
+        return int(secs * self.clip.rate) // 188 * 188
+
+    def test_length_follows_duration_units(self):
+        st, h, body = full_get(self.port, self.path(1))
+        self.assertEqual(st, 200)
+        self.assertEqual(int(h["content-length"]), self.expected_len(60))
+        self.assertEqual(len(body), self.expected_len(60))
+        self.assertEqual(h.get("accept-ranges"), "bytes")
+        php = f"/streaming/timeshift.php?username=test&password=test&stream=1&start={xc_start(time.time() - 3600)}&duration=2"
+        st, h, _ = full_get(self.port, php)
+        self.assertEqual(int(h["content-length"]), self.expected_len(120))  # php duration is minutes too
+        flus = f"/live/test/test/4/archive-{int(time.time()) - 3600}-90.ts"
+        st, h, _ = full_get(self.port, flus)
+        self.assertEqual((st, int(h["content-length"])), (200, self.expected_len(90)))  # Flussonic DURATION is seconds
+        # a 30-minute request is a 30-minute file (not materialised: HEAD-like ranged read of the tail)
+        st, h, tail = full_get(self.port, self.path(30), {"Range": "bytes=-1880"})
+        self.assertEqual(st, 206)
+        self.assertEqual(h["content-range"], f"bytes {self.expected_len(1800) - 1880}-{self.expected_len(1800) - 1}/{self.expected_len(1800)}")
+
+    def test_timestamps_and_cc_continuous_and_true_duration(self):
+        st, _, body = full_get(self.port, self.path(1))
+        pcrs, pts, dts, ccs = scan(body)
+        for a, b in zip(pcrs, pcrs[1:]):
+            self.assertEqual((b[0] - a[0]) & MASK33, FRAME)
+        for series, step in ((pts[VPID], FRAME), (dts[VPID], FRAME), (pts[APID], FRAME // 2)):
+            for a, b in zip(series, series[1:]):
+                self.assertEqual((b - a) & MASK33, step)
+        for pid in (VPID, APID):
+            exp = None
+            for cc, payload in ccs[pid]:
+                if exp is not None:
+                    self.assertEqual(cc, exp if payload else (exp - 1) & 15)
+                if payload:
+                    exp = (cc + 1) & 15
+        # TsDurationReader's view: last PCR - first PCR ~= the requested 60 s (to within one clip loop)
+        span = ((pcrs[-1][0] - pcrs[0][0]) & MASK33) / 90000
+        self.assertAlmostEqual(span, 60, delta=FRAMES * FRAME / 90000)
+
+    def test_ranged_reads_equal_the_full_body(self):
+        _, _, body = full_get(self.port, self.path(1))
+        for a, b in ((0, 187), (1000, 50000), (len(body) - 5000, len(body) - 1), (len(self.src) * 7 + 13, len(self.src) * 9)):
+            st, h, part = full_get(self.port, self.path(1), {"Range": f"bytes={a}-{b}"})
+            self.assertEqual(st, 206)
+            self.assertEqual(part, body[a:b + 1], (a, b))
+        st, h, _ = full_get(self.port, self.path(1), {"Range": f"bytes={len(body)}-"})
+        self.assertEqual(st, 416)
+
+    def test_looped_ts_matches_live_rewriter(self):
+        """Random access (emit_loop) produces exactly the bytes the sequential live rewriter (TsState) would."""
+        n = len(self.src)
+        st = fakepanel.TsState()
+        seq = b""
+        for _ in range(3):
+            seq += bytes(st.emit(self.clip.plan, self.src, 0, n))
+            st.off = (st.off + self.clip.plan.dur90k) % fakepanel.MOD33
+        lt = fakepanel.LoopedTs(self.clip, 3 * n)
+        self.assertEqual(lt.slice(0, 3 * n), seq)
+        self.assertEqual(lt.slice(n + 100, 2 * n + 7), seq[n + 100:2 * n + 7])
+
+    def test_range_ignored_mode(self):
+        self.admin({"timeshift_range_ignored": True})
+        st, h, body = full_get(self.port, self.path(1), {"Range": "bytes=5000-"})
+        self.assertEqual(st, 200)
+        self.assertEqual(int(h["content-length"]), self.expected_len(60))
+        self.assertNotIn("accept-ranges", h)
+        self.assertEqual(body[:188], full_get(self.port, self.path(1))[2][:188])
+
+    def test_clip3_default_unchanged(self):
+        self.admin({"timeshift_mode": "clip3"})
+        st, h, body = full_get(self.port, self.path(30))
+        self.assertEqual((st, int(h["content-length"]), body), (200, 3 * len(self.src), self.src * 3))
+
+    def test_mode_validation(self):
+        self.assertEqual(post(self, "/admin/config", {"timeshift_mode": "minutes"})[0], 400)
+
+
+class TestLiveShiftedAndEvent(LoopCase):
+    """§5.6 items 1 and 7: open-ended forms are length-less live-paced streams; -now/timeshift_abs/rel .m3u8 are EVENT."""
+
+    def head_and_some(self, path, n=188 * 400):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.request("GET", path)
+        r = c.getresponse()
+        data = r.read(n) if r.status == 200 else r.read()
+        hdrs = {k.lower(): v for k, v in r.getheaders()}
+        c.close()
+        return r.status, hdrs, data
+
+    def test_open_ts_forms_have_no_length(self):
+        s = int(time.time()) - 600
+        for path in (f"/live/test/test/1/timeshift_abs-{s}.ts", f"/live/test/test/1/index-timeshift_abs-{s}.ts",
+                     f"/live/test/test/3.ts?utc={s}&lutc={int(time.time())}",
+                     f"/live/test/test/4/archive-{s}-now.ts"):
+            st, h, data = self.head_and_some(path)
+            self.assertEqual(st, 200, path)
+            self.assertNotIn("content-length", h, path)
+            self.assertEqual(data[0], 0x47)
+            pcrs = scan(data[:len(data) // 188 * 188])[0]
+            for a, b in zip(pcrs, pcrs[1:]):
+                self.assertEqual((b[0] - a[0]) & MASK33, FRAME)
+        forms = [e["form"] for e in astats(self)["timeshift_requests"]]
+        self.assertEqual(forms, ["timeshift_abs", "timeshift_abs", "shift", "flussonic_now"])
+
+    def test_clip3_keeps_finite_shift(self):
+        self.admin({"timeshift_mode": "clip3"})
+        st, h, _ = full_get(self.port, f"/live/test/test/3.ts?utc={int(time.time()) - 600}&lutc={int(time.time())}")
+        self.assertEqual((st, int(h["content-length"])), (200, 3 * len(self.src)))
+        # the new Flussonic routes are live-like in every mode
+        st, h, _ = self.head_and_some(f"/live/test/test/1/timeshift_abs-{int(time.time()) - 600}.ts")
+        self.assertNotIn("content-length", h)
+
+    def test_event_playlists_grow_and_never_end(self):
+        s = int(time.time()) - 60
+        for path in (f"/live/test/test/4/index-{s}-now.m3u8", f"/live/test/test/1/timeshift_abs-{s}.m3u8",
+                     "/live/test/test/1/timeshift_rel-60.m3u8", "/live/test/test/1/mono-timeshift_rel-60.m3u8"):
+            st, _, body = full_get(self.port, path)
+            text = body.decode()
+            self.assertEqual(st, 200, path)
+            self.assertIn("#EXT-X-PLAYLIST-TYPE:EVENT", text)
+            self.assertNotIn("#EXT-X-ENDLIST", text)
+            segs = [l for l in text.splitlines() if l.startswith("/tseg/")]
+            self.assertAlmostEqual(len(segs), 60 / 0.8, delta=3, msg=path)
+        st, _, body = full_get(self.port, "/live/test/test/1/timeshift_rel-60.m3u8")
+        first = len([l for l in body.decode().splitlines() if l.startswith("/tseg/")])
+        time.sleep(1.7)
+        st, _, body = full_get(self.port, "/live/test/test/1/timeshift_rel-60.m3u8")
+        self.assertGreater(len([l for l in body.decode().splitlines() if l.startswith("/tseg/")]), first)  # anchored, grows
+
+    def test_vod_duration_playlist_and_continuous_segments(self):
+        st, _, body = full_get(self.port, f"/live/test/test/4/archive-{int(time.time()) - 3600}-40.m3u8")
+        text = body.decode()
+        self.assertIn("#EXT-X-PLAYLIST-TYPE:VOD", text)
+        self.assertIn("#EXT-X-ENDLIST", text)
+        segs = [l for l in text.splitlines() if l.startswith("/tseg/")]
+        self.assertEqual(len(segs), 50)  # 40 s of 0.8 s segments
+        a = scan(full_get(self.port, "/tseg/4_0.ts")[2])[1][VPID][0]
+        b = scan(full_get(self.port, "/tseg/4_2.ts")[2])[1][VPID][0]  # segment 0 of the next loop
+        self.assertEqual((b - a) & MASK33, FRAMES * FRAME)
+
+    def test_clip3_now_m3u8_stays_vod(self):
+        self.admin({"timeshift_mode": "clip3"})
+        st, _, body = full_get(self.port, f"/live/test/test/4/index-{int(time.time()) - 60}-now.m3u8")
+        self.assertIn("#EXT-X-ENDLIST", body.decode())
+
+
+class TestArchiveWindowAndLag(PanelCase):
+    """§5.6 items 2-3: out-of-archive is 404 by default (not only under strict_timeshift_tz); recent-archive lag."""
+
+    def test_window(self):
+        now = time.time()
+        self.assertEqual(self.get(f"/timeshift/test/test/60/{xc_start(now - 3600)}/1.ts")[0], 200)
+        for start, ch in ((now - 4 * 86400, 1), (now + 3600, 1), (now - 3600, 5)):  # catalog: 3 days; ch5 has no archive
+            self.assertEqual(self.get(f"/timeshift/test/test/60/{xc_start(start)}/{ch}.ts")[0], 404, (start - now, ch))
+        self.assertEqual(astats(self)["rejections"].get("timeshift_window"), 3)
+        self.assertEqual(self.get(f"/live/test/test/3.ts?utc={int(now - 4 * 86400)}")[0], 404)
+        self.admin({"timeshift_window": False})
+        self.assertEqual(self.get(f"/timeshift/test/test/60/{xc_start(now - 4 * 86400)}/1.ts")[0], 200)
+
+    def test_lag(self):
+        self.admin({"archive_lag_sec": 120})
+        now = time.time()
+        self.assertEqual(self.get(f"/timeshift/test/test/1/{xc_start(now - 60)}/1.ts")[0], 404)
+        self.assertEqual(self.get(f"/timeshift/test/test/1/{xc_start(now - 300)}/1.ts")[0], 200)
+        self.assertEqual(astats(self)["rejections"].get("archive_lag"), 1)
+        self.assertEqual(post(self, "/admin/config", {"archive_lag_sec": -1})[0], 400)
+
+
+class TestRejectForms(PanelCase):
+    """§5.6 item 4: per-form (and per-channel) rejection with a configurable status."""
+
+    def urls(self, ch=1, back=3600):
+        s = time.time() - back
+        return {"path": f"/timeshift/test/test/60/{xc_start(s)}/{ch}.ts",
+                "path_sec": f"/timeshift/test/test/60/{xc_start(s, secs=True)}/{ch}.ts",
+                "php": f"/streaming/timeshift.php?username=test&password=test&stream={ch}&start={xc_start(s)}&duration=60"}
+
+    def test_global_statuses(self):
+        u = self.urls()
+        self.admin({"timeshift_reject_forms": {"xc-path": 404, "php": 400}})
+        self.assertEqual(self.get(u["path"])[0], 404)
+        self.assertEqual(self.get(u["php"])[0], 400)
+        self.assertEqual(self.get(u["path_sec"])[0], 200)
+        self.admin({"timeshift_reject_forms": {"path": "200-html", "php": "200-empty"}})
+        st, h, body = self.get(u["path"])
+        self.assertEqual((st, h["Content-Type"]), (200, "text/html"))
+        st, h, body = self.get(u["php"])
+        self.assertEqual((st, body), (200, b""))
+        log = astats(self)["timeshift_requests"]
+        self.assertEqual([e["form"] for e in log], ["path", "php", "path_sec", "path", "php"])
+        self.assertEqual([e["status"] for e in log], [404, 400, 200, 200, 200])
+
+    def test_per_channel_fault_overrides(self):
+        self.admin({"stream_faults": {"1": {"timeshift_reject_forms": {"path": 403}}}})
+        self.assertEqual(self.get(self.urls(1)["path"])[0], 403)
+        self.assertEqual(self.get(self.urls(7)["path"])[0], 200)
+
+    def test_validation(self):
+        for bad in ({"timeshift_reject_forms": {"nope": 404}}, {"timeshift_reject_forms": {"path": "500-html"}},
+                    {"stream_faults": {"1": {"timeshift_reject_forms": {"path": True}}}}, {"timeshift_reject_forms": []}):
+            self.assertEqual(post(self, "/admin/config", bad)[0], 400, bad)
+
+
+class TestTimeshiftLogAndFaults(LoopCase):
+    """/admin/stats.timeshift_requests; §5.6 item 5 (ranged-open faults, linger) and item 8 (timeshift tokens)."""
+
+    def test_request_log_fields(self):
+        s = time.time() - 3600
+        full_get(self.port, f"/timeshift/test/test/2/{xc_start(s)}/1.ts", {"Range": "bytes=376-"})
+        e = astats(self)["timeshift_requests"][-1]
+        self.assertEqual((e["form"], e["channel"], e["duration_s"], e["range"], e["status"], e["ext"]),
+                         ("path", 1, 120, "bytes=376-", 206, "ts"))
+        self.assertAlmostEqual(e["start_unix"], int(s) // 60 * 60, delta=1)
+        for _ in range(55):
+            self.get(f"/timeshift/test/test/1/{xc_start(s)}/1.ts", {"Range": "bytes=0-187"})
+        st = astats(self)
+        self.assertEqual(len(st["timeshift_requests"]), 50)
+        self.assertEqual(st["timeshift_request_count"], 56)
+
+    def test_ranged_reopen_rejects(self):
+        p = self.path(1)
+        for val, code in ((True, 458), (509, 509)):
+            self.admin({"faults": {"timeshift_range_rejects": val}})
+            self.assertEqual(full_get(self.port, p)[0], 200)
+            self.assertEqual(full_get(self.port, p, {"Range": "bytes=0-"})[0], 206)
+            self.assertEqual(full_get(self.port, p, {"Range": "bytes=10000-"})[0], code)
+        self.assertEqual(astats(self)["rejections"]["timeshift_range_rejects"], 2)
+
+    def test_linger_refuses_the_timeshift_reopen(self):
+        self.admin({"max_connections": 1, "faults": {"linger": 5, "linger_status": 458}})
+        p = self.path(1)
+        self.assertEqual(full_get(self.port, p)[0], 200)
+        self.assertEqual(full_get(self.port, p, {"Range": "bytes=-1880"})[0], 458)  # the tail read of a prepare
+
+    def test_timeshift_redirect_keeps_query_and_token_kill(self):
+        self.admin({"faults": {"timeshift_redirect": True, "token_ttl": 1, "token_kill": True, "slow": 20000}})
+        self.assertEqual(self.read_stream("/live/test/test/1.ts")[0], 200)  # live is not redirected
+        php = f"/streaming/timeshift.php?username=test&password=test&stream=1&start={xc_start(time.time() - 3600)}&duration=1"
+        st, h, _ = full_get(self.port, php)
+        self.assertEqual(st, 302)
+        loc = h["location"].split(str(self.panel.lb_port), 1)[1]
+        self.assertIn("stream=1", loc)
+        self.assertIn("token=", loc)
+        t0 = time.time()
+        st, h, body = full_get(self.panel.lb_port, loc)
+        self.assertEqual(st, 200)
+        self.assertLess(len(body), int(h["content-length"]))  # cut when the 1 s token expired
+        self.assertLess(time.time() - t0, 4)
+        self.assertGreaterEqual(astats(self)["token_expired"], 1)
+        # an archive playlist served by the redirect port: its absolute segment paths are served there too
+        self.admin({"faults": {"token_ttl": 30, "token_kill": None, "slow": None}})
+        st, h, _ = full_get(self.port, f"/live/test/test/4/archive-{int(time.time()) - 600}-20.m3u8")
+        loc = h["location"].split(str(self.panel.lb_port), 1)[1]
+        st, _, body = full_get(self.panel.lb_port, loc)
+        seg = [l for l in body.decode().splitlines() if l.startswith("/tseg/")][0]
+        self.assertEqual(full_get(self.panel.lb_port, seg)[0], 200)
+
+
+class TestPlayerFixtures(PanelCase):
+    """§5.6 items 9-11: correction channels, the short-programme channel, multi channels; timeshift_expect helper."""
+    overrides = {"synthetic": 50, "synthetic_days_back": 1, "synthetic_days_ahead": 1, "player_fixtures": True,
+                 "timezone": "Europe/Berlin"}
+
+    def test_m3u_and_api(self):
+        text = self.get("/get.php?username=test&password=test&type=m3u_plus&output=ts")[2].decode()
+        lines = text.splitlines()
+
+        def extinf(i):
+            return next(l for l in lines if f'tvg-logo="http://127.0.0.1:{self.port}/logo/{i}.png"' in l)
+
+        self.assertIn('catchup="xc" catchup-days="1" catchup-correction="+2"', extinf(3))
+        self.assertIn('catchup-correction="-1.5"', extinf(4))
+        self.assertIn('catchup="xc" catchup-days="1"', extinf(2))
+        self.assertNotIn("catchup-correction", extinf(2))
+        self.assertIn('catchup="xc" catchup-days="1"', extinf(7))
+        self.assertIn("/live/test/test/8.m3u8", text)
+        self.assertIn("/live/test/test/9.ts", text)
+        live = {s["stream_id"]: s for s in self.api("get_live_streams")}
+        self.assertEqual([live[i]["tv_archive"] for i in (2, 3, 4, 7, 8)], [1, 1, 1, 1, 0])
+        self.assertEqual(astats(self)["synthetic"]["player_fixtures"],
+                         {"short": 2, "plus2": 3, "minus15": 4, "multi_ts": 7, "multi_hls": 8})
+
+    def test_short_programme_channel(self):
+        syn = astats(self)["synthetic"]
+        sf, st = syn["short_window"]
+        rows = self.api("get_simple_data_table", "&stream_id=2")["epg_listings"]
+        spans = [(int(r["start_timestamp"]), int(r["stop_timestamp"])) for r in rows]
+        for a, b in zip(spans, spans[1:]):
+            self.assertEqual(a[1], b[0])  # contiguous
+        minutes = [s for s in spans if s[1] - s[0] == 60 and sf <= s[0] < st]
+        self.assertEqual(len(minutes), (st - sf) // 60)
+        now = time.time()
+        self.assertTrue(any(a <= now < b and b - a == 60 for a, b in spans))
+        past = [r for r in rows if int(r["stop_timestamp"]) <= now and int(r["start_timestamp"]) >= sf]
+        self.assertTrue(past and all(r["has_archive"] == 1 for r in past))
+        self.admin({"player_fixtures": False})
+        rows = self.api("get_simple_data_table", "&stream_id=2")["epg_listings"]
+        self.assertFalse(any(int(r["stop_timestamp"]) - int(r["start_timestamp"]) == 60 for r in rows))
+
+    def test_xmltv_contains_minute_programmes(self):
+        body = self.get("/xmltv.php?username=test&password=test")[2].decode()
+        self.assertIn("Minute Programme", body)
+        self.assertGreater(body.count('channel="syn2.test"><title lang="en">Minute Programme'), 400)
+
+    def test_timeshift_expect_helper_and_now(self):
+        now = json.loads(self.get("/admin/now")[2])
+        self.assertAlmostEqual(now["unix"], time.time(), delta=2)
+        self.assertEqual(now["timezone"], "Europe/Berlin")
+        start = int(time.time()) // 60 * 60 - 1800
+        code, r = post(self, "/admin/timeshift_expect", {"start_unix": start, "channel": 3, "padding_before": 60, "strict": True})
+        self.assertEqual(code, 200)
+        self.assertEqual(r["expect_unix"], start - 7200 - 60)
+        self.assertEqual(r["xc_start"], xc_start(start - 7260, "Europe/Berlin"))
+        cfg = json.loads(self.get("/admin/config")[2])
+        self.assertEqual((cfg["timeshift_expect"], cfg["strict_timeshift_tz"]), ([start - 7260], True))
+        # a correct client's request for channel 3 passes, the uncorrected one is 404 (strict)
+        self.assertEqual(self.get(f"/timeshift/test/test/30/{r['xc_start']}/3.ts")[0], 200)
+        self.assertEqual(self.get(f"/timeshift/test/test/30/{xc_start(start - 60, 'Europe/Berlin')}/3.ts")[0], 404)
+        code, r = post(self, "/admin/timeshift_expect", {"start_unix": start, "channel": 4, "apply_correction": False})
+        self.assertEqual(r["expect_unix"], start)
+        code, r = post(self, "/admin/timeshift_expect", {"start_unix": start, "channel": 4})
+        self.assertEqual(r["expect_unix"], start + 5400)
+        self.assertEqual(post(self, "/admin/timeshift_expect", {"channel": 3})[0], 400)
+
+
+class TestMultiHls(PanelCase):
+    """§5.6 item 10 (live HLS side): channel 8's master playlist with a WebVTT SUBTITLES rendition."""
+    overrides = {"synthetic": 20, "player_fixtures": True}
+
+    def test_master_media_subs(self):
+        st, h, body = self.get("/live/test/test/8.m3u8")
+        text = body.decode()
+        self.assertEqual(st, 200)
+        self.assertIn('#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",LANGUAGE="en"', text)
+        self.assertIn('SUBTITLES="subs"', text)
+        self.assertIn("8_media.m3u8", text)
+        media = self.get("/live/test/test/8_media.m3u8")[2].decode()
+        subs = self.get("/live/test/test/8_subs.m3u8")[2].decode()
+        msegs = [l for l in media.splitlines() if l.startswith("8_tseg")]
+        vsegs = [l for l in subs.splitlines() if l.startswith("8_vtt")]
+        self.assertEqual([m.split("tseg")[1].split(".")[0] for m in msegs], [v.split("vtt")[1].split(".")[0] for v in vsegs])
+        self.assertEqual(self.get("/live/test/test/" + msegs[-1])[0], 200)
+        vtts = [self.get("/live/test/test/" + v)[2].decode() for v in vsegs]
+        self.assertTrue(all(v.startswith("WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:") for v in vtts))
+        self.assertTrue(any("Subtitle" in v for v in vtts))
+        self.assertEqual(astats(self)["range_requests_seen"], 0)
+
+    def test_other_channels_unchanged(self):
+        self.assertIn("1_seg", self.get("/live/test/test/1.m3u8")[2].decode())
+
+    def test_srt_fixture_parses(self):
+        cues = fakepanel.load_srt(os.path.join(os.path.dirname(fakepanel.__file__), "multi_subs.srt"))
+        self.assertEqual(len(cues), 7)
+        self.assertTrue(all(0 <= a < b <= 10 for a, b, _ in cues))
+
+
+class TestCea608(unittest.TestCase):
+    """The SEI writer behind the multi clip's CEA-608 track (pure functions)."""
+
+    def test_parity_and_schedule(self):
+        pairs = fakepanel.cea608_pairs(120)
+        self.assertEqual(len(pairs), 120)
+        for a, b in pairs:
+            self.assertEqual(bin(a).count("1") % 2, 1)
+            self.assertEqual(bin(b).count("1") % 2, 1)
+        self.assertEqual((pairs[0][0] & 0x7F, pairs[0][1] & 0x7F), (0x14, 0x25))  # RU2
+        self.assertEqual((pairs[2][0] & 0x7F, pairs[2][1] & 0x7F), (0x14, 0x2D))  # CR
+        text = "".join(chr(a & 0x7F) + chr(b & 0x7F) for a, b in pairs[4:10])
+        self.assertTrue(text.startswith("CC1 line 1"))
+        self.assertEqual((pairs[50][0] & 0x7F, pairs[50][1] & 0x7F), (0x14, 0x25))
+
+    def test_epb(self):
+        self.assertEqual(fakepanel._epb(b"\x00\x00\x01\x00\x00\x03\x00\x00\x04"), b"\x00\x00\x03\x01\x00\x00\x03\x03\x00\x00\x04")
+
+    def test_injection_before_first_slice(self):
+        aud, sps, slc = b"\x09\xf0", b"\x67\x42\x00", b"\x65\x88\x80"
+        au = b"".join(b"\x00\x00\x00\x01" + n for n in (aud, sps, slc, b"\x01\x9a"))
+        out, frames = fakepanel.inject_cea608(au * 3)
+        self.assertEqual(frames, 3)
+        types = [n[0] & 0x1F for n in fakepanel.split_annexb(out)]
+        self.assertEqual(types, [9, 7, 6, 5, 1] * 3)
+        sei = [n for n in fakepanel.split_annexb(out) if n[0] & 0x1F == 6][0]
+        self.assertEqual(sei[1], 4)  # user_data_registered_itu_t_t35
+        self.assertIn(b"\xb5\x00\x31GA94\x03", sei)
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg not on PATH")
+    def test_real_multi_clip(self):
+        tmp = tempfile.mkdtemp(prefix="fakepanel-multi-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = os.path.join(tmp, "h264_multi_25.ts")
+        r = fakepanel.build_multi(shutil.which("ffmpeg"), tmp, path, lambda m: None)
+        self.assertEqual(r.returncode, 0, r.stderr[-300:])
+        data = fakepanel._read(path)
+        streams = parse_psi(data[:188 * 2000])
+        self.assertEqual(sorted(streams.values()), [0x03, 0x0F, 0x1B])  # MP2 audio, AAC, H.264
+        langs = [l for l in (b"eng", b"deu") if l in data[:188 * 50]]
+        self.assertEqual(langs, [b"eng", b"deu"])  # ISO-639 descriptors in the PMT
+        if shutil.which("ffprobe"):
+            import subprocess
+            out = subprocess.run(["ffmpeg", "-v", "error", "-f", "lavfi", "-i", f"movie={path}[out0+subcc]", "-map", "0:s",
+                                  "-f", "srt", "-"], capture_output=True, timeout=120).stdout.decode()
+            self.assertIn("CC1 line 1", out)
+            self.assertIn("CC1 line 4", out)  # line 5 is still on screen when the clip ends
 
 
 if __name__ == "__main__":

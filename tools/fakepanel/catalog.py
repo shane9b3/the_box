@@ -277,7 +277,19 @@ SYN_TITLES = ["Morning News", "Evening News", "News at Ten", "Sports News Roundu
               "Kids Cartoon Hour", "Music Mix", "Arts & Culture", "Drama Series"]
 SYN_NT = len(SYN_TITLES)
 SYN_TITLES += ["Reminder Test Start", "Reminder Test Next"]  # forced programmes on channel 1
+SYN_TITLES += ["Minute Programme"]  # player fixtures: channel 2's 1-minute programmes (index SYN_NT + 2)
 SYN_TITLES_ESC = [escape(t) for t in SYN_TITLES]
+# M4 player fixtures (docs/design/m4-player-ux.md §5.6 items 9-11; config player_fixtures, synthetic mode only).
+# id -> overrides of the generated channel. Archive 1 day, plain Xtream `xc` catch-up.
+SYN_FIXTURES = {
+    2: {"role": "short", "archive": True, "archive_days": 1, "catchup": "xc"},
+    3: {"role": "plus2", "archive": True, "archive_days": 1, "catchup": "xc", "correction": 2.0},
+    4: {"role": "minus15", "archive": True, "archive_days": 1, "catchup": "xc", "correction": -1.5},
+    7: {"role": "multi_ts", "archive": True, "archive_days": 1, "catchup": "xc", "media": "multi"},
+    8: {"role": "multi_hls", "media": "multi", "hls": True},
+}
+SYN_SHORT_BACK = 3 * 3600   # channel 2: 1-minute programmes from server start - 3 h ...
+SYN_SHORT_AHEAD = 4 * 3600  # ... to server start + 4 h (normal schedule outside)
 SYN_LONG = " - The Extended Special Edition With Additional Commentary and Bonus Material"  # makes a title > 60 chars
 SYN_CHUNK = 64 * 1024
 
@@ -298,11 +310,17 @@ class Synthetic:
         self.e = hour + 3600 + self.ahead * 86400
         self.reminders = (self.start_unix + 120, self.start_unix + 300)
         self.groups = -(-self.n // SYN_GROUP)
+        self.fx = bool(cfg.get("player_fixtures"))
+        self.short = (self.start_unix - SYN_SHORT_BACK, self.start_unix + SYN_SHORT_AHEAD)
 
     def info(self):
-        return {"n": self.n, "start_unix": self.start_unix, "reminder_starts": list(self.reminders),
-                "epg_window": [self.s0, self.e], "epg_version": self.ver,
-                "days_back": self.back, "days_ahead": self.ahead, "group_size": SYN_GROUP}
+        out = {"n": self.n, "start_unix": self.start_unix, "reminder_starts": list(self.reminders),
+               "epg_window": [self.s0, self.e], "epg_version": self.ver,
+               "days_back": self.back, "days_ahead": self.ahead, "group_size": SYN_GROUP}
+        if self.fx:
+            out["player_fixtures"] = {v["role"]: k for k, v in SYN_FIXTURES.items() if k <= self.n}
+            out["short_window"] = list(self.short)
+        return out
 
     def categories(self):
         return [(SYN_CAT_BASE + g, f"{SYN_THEMES[g % len(SYN_THEMES)]} {g + 1}") for g in range(self.groups)]
@@ -313,10 +331,13 @@ class Synthetic:
         g = (i - 1) // SYN_GROUP
         archive = i % 5 == 1
         has_epg = i == 1 or i % 20 != 9
-        return dict(id=i, name=f"{SYN_PREFIX.get(i % 10, '')}{SYN_THEMES[g % len(SYN_THEMES)]} {i}", cat=SYN_CAT_BASE + g,
-                    archive=archive, archive_days=(7 if (i == 1 or (i // 5) % 2 == 0) else 3) if archive else 0,
-                    catchup="xc" if archive else "", media="std", has_epg=has_epg,
-                    tvg_id=f"syn{i}.test" if has_epg else "", synthetic=True)
+        ch = dict(id=i, name=f"{SYN_PREFIX.get(i % 10, '')}{SYN_THEMES[g % len(SYN_THEMES)]} {i}", cat=SYN_CAT_BASE + g,
+                  archive=archive, archive_days=(7 if (i == 1 or (i // 5) % 2 == 0) else 3) if archive else 0,
+                  catchup="xc" if archive else "", media="std", has_epg=has_epg,
+                  tvg_id=f"syn{i}.test" if has_epg else "", synthetic=True)
+        if self.fx and i in SYN_FIXTURES:
+            ch.update({k: v for k, v in SYN_FIXTURES[i].items() if k != "role"})
+        return ch
 
     def _ids(self, category_id=None):
         if category_id is None:
@@ -342,7 +363,34 @@ class Synthetic:
         return out
 
     def schedule(self, cid):
-        """Yield (start, stop, title_index, long_flag) in unix seconds, contiguous from s0 past e. Whole minutes."""
+        """Yield (start, stop, title_index, long_flag) in unix seconds, contiguous from s0 past e. Whole minutes.
+        Player fixtures: channel 2 has 1-minute programmes inside `short` (the generated ones are cut at its edges)."""
+        if not (self.fx and cid == 2):
+            yield from self._schedule(cid)
+            return
+        sf, st = self.short
+        done = False
+        for a, b, ti, lng in self._schedule(cid):
+            if b <= sf or a >= st:
+                if a >= st and not done:
+                    yield from self._minutes(sf, st)
+                    done = True
+                yield a, b, ti, lng
+                continue
+            if a < sf:
+                yield a, sf, ti, lng
+            if not done:
+                yield from self._minutes(sf, st)
+                done = True
+            if b > st:
+                yield st, b, ti, lng
+
+    @staticmethod
+    def _minutes(sf, st):
+        for t in range(sf, st, 60):
+            yield t, t + 60, SYN_NT + 2, False
+
+    def _schedule(self, cid):
         bits = random.Random(cid * 7919 + 17).getrandbits
         r1, r2 = self.reminders if cid == 1 else (None, None)
         t, e, durs, nt = self.s0, self.e, SYN_DURS, SYN_NT
@@ -436,8 +484,10 @@ class Synthetic:
                 attrs = f'tvg-id="{c["tvg_id"]}" tvg-name="{c["name"]}" tvg-logo="{base}/logo/{i}.png" group-title="{names[c["cat"]]}"'
                 if c["archive"]:
                     attrs += f' catchup="xc" catchup-days="{c["archive_days"]}"'
+                    if c.get("correction"):
+                        attrs += f' catchup-correction="{c["correction"]:+g}"'
                 L.append(f"#EXTINF:-1 {attrs},{c['name']}")
             else:
                 L.append(f"#EXTINF:-1,{c['name']}")
-            L.append(f"{base}/live/{u}/{p}/{i}.{ext}")
+            L.append(f"{base}/live/{u}/{p}/{i}.{'m3u8' if c.get('hls') else ext}")
         return ("\n".join(L) + "\n").encode()

@@ -1,0 +1,27 @@
+1
+00:00:00,200 --> 00:00:01,400
+Subtitle one: the multi clip
+
+2
+00:00:01,600 --> 00:00:02,800
+Subtitle two: English rendition
+
+3
+00:00:03,000 --> 00:00:04,200
+Subtitle three: WebVTT over HLS
+
+4
+00:00:04,400 --> 00:00:05,600
+Subtitle four: halfway through the loop
+
+5
+00:00:05,800 --> 00:00:07,000
+Subtitle five: two audio languages
+
+6
+00:00:07,200 --> 00:00:08,400
+Subtitle six: eng 440 Hz, deu 880 Hz
+
+7
+00:00:08,600 --> 00:00:09,800
+Subtitle seven: the loop restarts next
