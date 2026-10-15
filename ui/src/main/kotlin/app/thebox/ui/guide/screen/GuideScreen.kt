@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.dp
 import app.thebox.core.guide.GuideGeometry
 import app.thebox.core.guide.GuideUiState
 import app.thebox.core.guide.Overlay
+import app.thebox.core.guide.Zone
 import app.thebox.core.playback.RectPx
 import app.thebox.ui.guide.overlay.ContextMenu
 import app.thebox.ui.guide.overlay.DayStrip
@@ -45,6 +46,10 @@ const val GRID_SLOT_TAG = "grid_slot"
  * - header chips, footer hints, and the overlays. No overlay intersects the hole (I-3).
  *
  * This composable is a child of the root key sink and never an ancestor of `VideoLayer`.
+ *
+ * (code review 2026-10-14, H-S9) `GuideUiState` is a new instance on every change, so the children take narrow
+ * slices (the machine keeps unchanged slices identical), and strong skipping skips every child whose slice did not
+ * change: a grid move recomposes the panel only, a Tuned the mini overlay only.
  */
 /** Trace section around the header/panel column draw (I-18, §2.13 item 20). */
 const val TRACE_PANEL = "guide-panel"
@@ -71,7 +76,7 @@ fun GuideScreen(
                     val b = c.boundsInWindow(clipBounds = false)
                     onHoleMeasured(HoleGeometry.round(b.left, b.top, b.right, b.bottom))
                 },
-        ) { MiniPlayerOverlay(state, clock24, lowEnd, poster) }
+        ) { MiniPlayerOverlay(state.tuned, state.tunedNow, state.tunedChannel, clock24, lowEnd, poster) }
 
         Column(
             Modifier
@@ -85,9 +90,9 @@ fun GuideScreen(
                     try { drawContent() } finally { android.os.Trace.endSection() }
                 },
         ) {
-            HeaderTabs(state, clock24)
+            HeaderTabs(state.zone, state.tabFocused, state.sync, clock24)
             Spacer(Modifier.weight(1f))
-            FocusedPanel(state)
+            FocusedPanel(state.panel, if (state.zone == Zone.PANEL) state.panelFocused else -1)
         }
 
         grid(
@@ -96,10 +101,16 @@ fun GuideScreen(
                 .size(GuideGeometry.PANEL_W.dp, GuideGeometry.PANEL_H.dp)
                 .testTag(GRID_SLOT_TAG),
         )
-        GridHeaderChips(state)
-        EmptyState(state, debugHint = debugHint)
+        GridHeaderChips(
+            chips = state.headerChips,
+            focusedChip = if (state.zone == Zone.HEADER) state.headerChips.getOrNull(state.headerFocused) else null,
+            sourceLabel = state.sourceLabel,
+            nowDirection = state.nowDirection,
+            dayLabel = state.dayLabel,
+        )
+        EmptyState(state.empty, debugHint = debugHint)
 
-        FooterHints(state, Modifier.align(Alignment.BottomStart).padding(start = GuideGeometry.FOOTER_L.dp, bottom = GuideGeometry.FOOTER_B.dp))
+        FooterHints(state.footer, Modifier.align(Alignment.BottomStart).padding(start = GuideGeometry.FOOTER_L.dp, bottom = GuideGeometry.FOOTER_B.dp))
 
         when (val o = state.overlay) {
             is Overlay.Groups -> GroupsPanel(state)

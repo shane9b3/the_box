@@ -110,3 +110,24 @@ fun KeyCap(keys: String, modifier: Modifier = Modifier) {
             .padding(horizontal = 10.dp, vertical = 3.dp),
     ) { Line(keys, GuideUi.mono(14, color = GuideUi.Fg55)) }
 }
+
+/**
+ * (code review 2026-10-14, H-S9) `SimpleDateFormat`s for the header clock and the mini player, cached per (pattern,
+ * locale, default zone) instead of built on every recomposition. A zone change (ACTION_TIMEZONE_CHANGED updates the
+ * default `TimeZone`) gives a new key. Main thread only.
+ */
+object TimeFormats {
+    private data class Key(val pattern: String, val locale: java.util.Locale, val zoneId: String)
+    private val cache = HashMap<Key, java.text.SimpleDateFormat>()
+
+    fun format(pattern: String, locale: java.util.Locale, date: java.util.Date): String {
+        val key = Key(pattern, locale, java.util.TimeZone.getDefault().id)
+        val f = cache.getOrPut(key) {
+            if (cache.size >= MAX) cache.clear()
+            java.text.SimpleDateFormat(pattern, locale)
+        }
+        return f.format(date)
+    }
+
+    private const val MAX = 16
+}

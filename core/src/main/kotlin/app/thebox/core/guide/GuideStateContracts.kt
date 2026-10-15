@@ -127,7 +127,8 @@ interface GuideEffects {
     fun retry()
     fun setReminder(channel: GuideChannel, info: ProgrammeInfo)
     fun cancelReminder(channel: GuideChannel, rawStartMin: Int)
-    fun answerReminder(reminderId: Long, accept: Boolean)
+    /** (code review 2026-10-14, H-S7) The alert the card showed; the effect must not re-read the current alert. */
+    fun answerReminder(alert: ReminderAlert, accept: Boolean)
     fun queryFavourite(token: Long, channel: GuideChannel)
     fun setFavourite(channel: GuideChannel, on: Boolean)
     fun hideChannel(channel: GuideChannel)
@@ -159,6 +160,13 @@ interface GuideStateMachine {
     /** Bumped on every change of [frame]; the grid host reads it in its draw lambda. */
     val frameVersion: StateFlow<Long>
     fun dispatch(event: GuideEvent)
+
+    /**
+     * (code review 2026-10-14, H-S4) False when the machine would ignore [action] in its current state and the key
+     * should go on to the framework (FULL leaves Play/Pause and FF/RW to M2's media session). The key router asks it on
+     * a key's first DOWN.
+     */
+    fun handles(action: BoxAction): Boolean = true
 
     /**
      * (amended 2026-10-14, §2.13 item 4) Wall-clock ms of the next timer the machine waits for (panel description

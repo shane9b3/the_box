@@ -118,6 +118,12 @@ data class GuideChannel(
     /** [GuideChannel.hashOf] of [identity]; the renderer's key for tuned/reminder/suspect lookups. */
     val identityHash: Long,
 ) {
+    /**
+     * (code review 2026-10-14, O-2) The renderer's `TextFit` key for [displayName], computed where the row is built
+     * (the rows cache's IO thread), not per row per frame on main (§3.6.4). Not part of equality.
+     */
+    val nameHash: Long = app.thebox.core.common.Hash64.of(displayName)
+
     companion object {
         fun hashOf(identity: ChannelIdentity): Long =
             app.thebox.core.common.Hash64.str(app.thebox.core.common.Hash64.long(app.thebox.core.common.Hash64.of(null), identity.playlistId), identity.stableKey.value)
@@ -131,7 +137,10 @@ data class GuideChannel(
 object CellFlags {
     /** A GAP piece shorter than `GridConstants.SLIVER_MIN`: tiles the row, not focusable, draws nothing (WP-A builder). */
     const val SLIVER: Int = 1 shl 30
-    /** Title needs bidi (`java.text.Bidi.requiresBidi`), set by the pager once per textId (S6). */
+    /**
+     * Right-to-left paragraph: the title's first strong character is RTL (`TextFit.isRtl`), set by the pager once per
+     * textId (S6; code review 2026-10-14, G-S4: not `Bidi.requiresBidi`, which flagged LTR titles with an RTL word).
+     */
     const val RTL: Int = 1 shl 29
     /** Title contains a combining mark, variation selector or ZWJ: grapheme cuts use `BreakIterator` (S6). */
     const val COMPLEX: Int = 1 shl 28
@@ -193,7 +202,10 @@ data class TunedState(
     val error: PlaybackErrorCode? = null,
     val reconnectAttempt: Int = 0,
     val reconnectMax: Int = 0,
-    /** HDR poster (VideoInfo.posterMode) or the Still setting: the hole shows a still, not video. */
+    /**
+     * The Still setting or low memory: the hole shows a still, not video (viewport HIDDEN). (code review 2026-10-14,
+     * H-B1) Not the HDR poster: that is the controller's MINI state (`VideoInfo.posterMode`), drawn by the shell.
+     */
     val still: Boolean = false,
 )
 

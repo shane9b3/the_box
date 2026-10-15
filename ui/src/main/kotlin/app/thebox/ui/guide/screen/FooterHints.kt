@@ -7,7 +7,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import app.thebox.core.guide.GuideUiState
+import app.thebox.core.guide.FooterHint
 
 const val FOOTER_TAG = "footer_hints"
 
@@ -16,10 +16,10 @@ const val FOOTER_TAG = "footer_hints"
  * 14 with a .22 border, gap 36. The list is built by the state machine from the keys the device has reported.
  */
 @Composable
-fun FooterHints(state: GuideUiState, modifier: Modifier = Modifier) {
-    if (state.footer.isEmpty()) return
+fun FooterHints(footer: List<FooterHint>, modifier: Modifier = Modifier) {
+    if (footer.isEmpty()) return
     Row(modifier.testTag(FOOTER_TAG), horizontalArrangement = Arrangement.spacedBy(36.dp), verticalAlignment = Alignment.CenterVertically) {
-        state.footer.forEach { hint ->
+        footer.forEach { hint ->
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 KeyCap(hint.keys)
                 Line(hint.label, GuideUi.sans(17, color = GuideUi.Fg55))

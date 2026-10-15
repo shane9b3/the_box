@@ -132,10 +132,13 @@ class GuideRowsCacheImpl(private val library: GuideLibrary, private val scope: C
             jobs.remove(b)
             val arr = arrayOfNulls<GuideChannel>(ROW_BLOCK)
             for (i in 0 until minOf(loaded.size, to - from)) arr[i] = loaded[i]
+            val old = blocks[b]
             blocks[b] = arr
             if (b !in lru) lru += b
             evict()
-            bump()
+            // (code review 2026-10-14, G-S6) A B5 reload that found the same rows changes nothing: no version bump,
+            // so the pager and the machine do not re-check (and the grid does not redraw).
+            if (old == null || !old.contentEquals(arr)) bump()
         }
     }
 

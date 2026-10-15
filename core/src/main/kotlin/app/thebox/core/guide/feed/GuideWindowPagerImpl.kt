@@ -2,6 +2,8 @@ package app.thebox.core.guide.feed
 
 import androidx.collection.MutableIntFloatMap
 import androidx.collection.MutableIntIntMap
+import androidx.collection.MutableIntLongMap
+import androidx.collection.MutableIntObjectMap
 import app.thebox.core.common.BoxLog
 import app.thebox.core.common.Hash64
 import app.thebox.core.epg.EpgChannelRef
@@ -25,6 +27,7 @@ import app.thebox.core.guide.ProgrammeInfo
 import app.thebox.core.guide.RowCellsBuilder
 import app.thebox.core.guide.RowStatus
 import app.thebox.core.guide.TimeLabels
+import app.thebox.core.guide.render.TextFit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.asCoroutineDispatcher
@@ -35,7 +38,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.text.Bidi
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
@@ -125,6 +127,15 @@ class GuideWindowPagerImpl(
     private val refIds = HashMap<EpgChannelRef, Int>()
     private val widths = MutableIntFloatMap()
     private val textFlags = MutableIntIntMap()
+    /** (code review 2026-10-14, O-1) `Hash64.of(title)` per text id; cleared with [widths]. */
+    private val titleHashes = MutableIntLongMap()
+    /**
+     * (code review 2026-10-14, O-1) Cell time lines by `(minute of day of start) × 1440 + (minute of day of end)`, and
+     * their width by length (`CELL_TIME` is monospaced). Cleared on a scale or [TimeLabels.version] change.
+     */
+    private val timeTexts = MutableIntObjectMap<String>()
+    private val timeWidthByLength = FloatArray(TIME_TEXT_MAX_LEN) { -1f }
+    private var timeLabelsVersion = Int.MIN_VALUE
     private var widthScale = Float.NaN
     private val epgWindow = EpgWindow(512)
     private val sink = Sink()
@@ -157,9 +168,10 @@ class GuideWindowPagerImpl(
         lastHold = holdDirection
         val size = rows.size
         if (size == 0) return
-        val marginRows = if (holdDirection != 0) HOLD_MARGIN_ROWS else MARGIN_ROWS
-        val needFirst = (topRow - marginRows).coerceIn(0, size)
-        val needEnd = (topRow + VISIBLE_ROWS + marginRows).coerceIn(0, size)
+        // (code review 2026-10-14, G-S1) The hold margin is directional, like the hold target: a symmetric margin always
+        // fell outside the asymmetric target and re-queried on every row step of a hold (S16 defeated).
+        val needFirst = (if (holdDirection < 0) topRow - HOLD_MARGIN_ROWS else if (holdDirection > 0) topRow else topRow - MARGIN_ROWS).coerceIn(0, size)
+        val needEnd = (if (holdDirection > 0) topRow + VISIBLE_ROWS + HOLD_MARGIN_ROWS else if (holdDirection < 0) topRow + VISIBLE_ROWS else topRow + VISIBLE_ROWS + MARGIN_ROWS).coerceIn(0, size)
         val needFrom = windowStartMin - MARGIN_MIN
         val needTo = windowStartMin + VISIBLE_MIN + MARGIN_MIN
         val scale = metrics()?.scale ?: Float.NaN
@@ -217,8 +229,7 @@ class GuideWindowPagerImpl(
             snaps.value = null
         }
         scope.launch {
-            widths.clear()
-            textFlags.clear()
+            clearTextCaches()
             infoCache.clear()
         }
     }
@@ -309,6 +320,9 @@ class GuideWindowPagerImpl(
                 readerPatch = info.patchSeq
                 refIds.clear()
                 infoCache.clear()
+                // (code review 2026-10-14, G-S2) In-place refreshes and patches reuse freed `epg_text` ids (max + 1
+                // after orphans were deleted): a cached width or RTL flag could belong to another string.
+                clearTextCaches()
                 lastRun?.let { rebuild(it) }
             }
         }
@@ -316,9 +330,15 @@ class GuideWindowPagerImpl(
 
     private fun clearGenerationCaches() {
         refIds.clear()
+        clearTextCaches()
+        infoCache.clear()
+    }
+
+    /** Caches keyed by `epg_text` id (width, flags, title hash). Epg thread. */
+    private fun clearTextCaches() {
         widths.clear()
         textFlags.clear()
-        infoCache.clear()
+        titleHashes.clear()
     }
 
     private fun rebuild(r: Request) {
@@ -365,10 +385,18 @@ class GuideWindowPagerImpl(
         val scale = metrics()?.scale ?: (textMeasurer?.scale ?: 1f)
         if (scale != widthScale) {
             widths.clear()
+            timeWidthByLength.fill(-1f)
             widthScale = scale
+        }
+        if (labels.version != timeLabelsVersion) {
+            timeTexts.clear()
+            timeWidthByLength.fill(-1f)
+            timeLabelsVersion = labels.version
         }
         if (widths.size > WIDTH_CACHE_MAX) widths.clear()
         if (textFlags.size > WIDTH_CACHE_MAX) textFlags.clear()
+        if (titleHashes.size > WIDTH_CACHE_MAX) titleHashes.clear()
+        if (timeTexts.size > TIME_CACHE_MAX) timeTexts.clear()
 
         val ids = IntArray(n) { -1 }
         val shifts = IntArray(n)
@@ -479,7 +507,12 @@ class GuideWindowPagerImpl(
                 val t = outTitle[i]
                 if (t != null) {
                     val id = textId[i]
-                    titleKey[i] = Hash64.of(t)
+                    titleKey[i] = if (id >= 0) {
+                        val h = titleHashes.getOrDefault(id, 0L)
+                        if (h != 0L) h else Hash64.of(t).also { titleHashes[id] = it }
+                    } else {
+                        Hash64.of(t)
+                    }
                     titleWidth[i] = if (id >= 0) {
                         val cached = widths.getOrDefault(id, -1f)
                         if (cached >= 0f) cached else m.width(t, 0, t.length, GuideTextStyle.CELL_TITLE).also { widths[id] = it }
@@ -490,9 +523,9 @@ class GuideWindowPagerImpl(
                     val f = if (tf >= 0) tf else textFlagsOf(t).also { if (id >= 0) textFlags[id] = it }
                     outFlags[i] = outFlags[i] or f
                 }
-                val tt = labels.hm(start[i]) + TIME_SEPARATOR + labels.hm(end[i])
+                val tt = timeTextOf(start[i], end[i])
                 timeText[i] = tt
-                timeWidth[i] = m.width(tt, 0, tt.length, GuideTextStyle.CELL_TIME)
+                timeWidth[i] = timeWidthOf(m, tt)
             }
             return GuideWindowData(
                 seq = snapshotSeq.incrementAndGet(), lineupVersion = r.lineupVersion, generation = generation, patchSeq = patchSeq,
@@ -503,6 +536,24 @@ class GuideWindowPagerImpl(
                 cellTimeWidth = timeWidth, metricsScale = scale, rowsVersion = r.rowsVersion, rowEpgBasis = basis,
             )
         }
+    }
+
+    /** O-1: the cell's "19:30 – 20:00", built once per distinct (start, end) minute-of-day pair. Epg thread. */
+    private fun timeTextOf(startMin: Int, endMin: Int): String {
+        val key = labels.minuteOfDay(startMin) * MIN_PER_DAY + labels.minuteOfDay(endMin)
+        timeTexts[key]?.let { return it }
+        val tt = labels.hm(startMin) + TIME_SEPARATOR + labels.hm(endMin)
+        timeTexts[key] = tt
+        return tt
+    }
+
+    /** O-1: `CELL_TIME` is monospaced (JetBrains Mono, tabular), so a time line's width depends only on its length. */
+    private fun timeWidthOf(m: GuideTextMeasurer, tt: String): Float {
+        val n = tt.length
+        if (n >= TIME_TEXT_MAX_LEN) return m.width(tt, 0, n, GuideTextStyle.CELL_TIME)
+        val cached = timeWidthByLength[n]
+        if (cached >= 0f) return cached
+        return m.width(tt, 0, n, GuideTextStyle.CELL_TIME).also { timeWidthByLength[n] = it }
     }
 
     companion object {
@@ -526,6 +577,9 @@ class GuideWindowPagerImpl(
         const val WIDTH_CACHE_MAX = 8_192
         private const val BUILD_LOG_MS = 8.0
         private const val TIME_SEPARATOR = " – "
+        private const val MIN_PER_DAY = 1440
+        private const val TIME_TEXT_MAX_LEN = 32
+        private const val TIME_CACHE_MAX = 4_096
 
         /** Row basis (B5): 0 = not loaded; otherwise a hash of (epg ref, epgShiftMin). */
         const val PENDING_BASIS = 0L
@@ -534,8 +588,9 @@ class GuideWindowPagerImpl(
 
         internal fun textFlagsOf(t: String): Int {
             var f = 0
-            val chars = t.toCharArray()
-            if (Bidi.requiresBidi(chars, 0, chars.size)) f = f or CellFlags.RTL
+            // (code review 2026-10-14, G-S4) The paragraph direction is the first strong character's, as the renderer
+            // draws it: "BBC News عربي" is a left-to-right title with an Arabic word, not a right-aligned one.
+            if (TextFit.isRtl(t)) f = f or CellFlags.RTL
             var i = 0
             while (i < t.length) {
                 val cp = t.codePointAt(i)

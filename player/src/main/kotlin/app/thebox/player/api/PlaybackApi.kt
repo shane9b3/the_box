@@ -135,6 +135,11 @@ data class VideoInfo(
     val posterMode: Boolean = false,
     val aspectMode: AspectMode = AspectMode.FIT,
     val interlacedHint: Boolean = false,
+    /**
+     * (M3 code review 2026-10-14, H-S10) Count of rendered first frames (`onRenderedFirstFrame`: a new stream, surface
+     * or re-enabled video track), kept across tunes. The shell lifts its still → FULL scrim on the next one.
+     */
+    val renderedFirstFrames: Long = 0,
 )
 
 /** Stable within one tune: [groupId] is TrackGroup.id, [index] the track index in the group. */

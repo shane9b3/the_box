@@ -150,4 +150,67 @@ class KeyRouterTest {
         assertTrue(router.onKey(KeyEvent(android.view.KeyEvent(1_000, 1_050, ACTION_UP, Keys.DPAD_UP, 0))))
         assertEquals(BoxAction.UP, acts().single().action)
     }
+
+    // ---- code review 2026-10-14 (docs/review/m3-code-review.md)
+
+    /** H-S4: keys the machine ignores in FULL go on to M2's media session (the activity does not consume them). */
+    @Test fun mediaKeysNotHandledInFullPassThrough() {
+        mode(ScreenMode.FULL)
+        machine.handlesFn = { it !in setOf(BoxAction.PLAY_PAUSE, BoxAction.SEEK_BACK, BoxAction.SEEK_FORWARD) }
+        for (code in listOf(Keys.MEDIA_PLAY_PAUSE, Keys.MEDIA_PLAY, Keys.MEDIA_PAUSE, Keys.MEDIA_FAST_FORWARD, Keys.MEDIA_REWIND)) {
+            assertFalse("$code DOWN passes through", down(code))
+            assertFalse("$code UP passes through", up(code))
+        }
+        assertTrue(machine.events.isEmpty())
+        assertTrue("CH+ still zaps", down(Keys.CHANNEL_UP))
+        assertTrue("⏭ zaps in the player", down(Keys.MEDIA_NEXT))
+        assertEquals(listOf(BoxAction.ZAP_UP, BoxAction.ZAP_DOWN), acts().map { it.action })
+    }
+
+    @Test fun mediaNextIsUnboundInTheGuide() {
+        assertFalse(down(Keys.MEDIA_NEXT))
+        assertFalse(down(Keys.MEDIA_PREVIOUS))
+    }
+
+    /** H-S5: the old view model's onCleared must not detach the new one's machine. */
+    @Test fun detachOfAStaleMachineKeepsTheCurrent() {
+        val newer = app.thebox.core.guide.fakes.FakeGuideStateMachine()
+        router.attach(newer) { true }
+        router.detach(machine) // the old VM clears after the new activity attached
+        assertTrue(router.attached === newer)
+        assertTrue(down(Keys.DPAD_DOWN))
+        assertEquals(1, newer.events.size)
+        router.detach(newer)
+        assertTrue(router.attached == null)
+    }
+
+    /** H-S11: focus loss ends the holds of keys whose UP will never arrive. */
+    @Test fun focusLossReleasesHeldActions() {
+        down(Keys.DPAD_RIGHT)
+        down(Keys.DPAD_RIGHT, repeat = 3, at = 1_200)
+        machine.events.clear()
+        router.onFocusLost()
+        assertEquals(listOf<GuideEvent>(GuideEvent.Release(BoxAction.RIGHT)), machine.events)
+        assertFalse("the late UP is not ours any more", up(Keys.DPAD_RIGHT))
+    }
+
+    /** H-S11: a held key that stops repeating for 1.5 s lost its UP: the watchdog ends the hold. */
+    @Test fun holdWatchdogReleasesAfterSilence() {
+        down(Keys.DPAD_DOWN)
+        down(Keys.DPAD_DOWN, repeat = 1, at = 1_050)
+        assertEquals(KeyRouterImpl.HOLD_WATCHDOG_MS, timers.pending.values.single().first)
+        down(Keys.DPAD_DOWN, repeat = 2, at = 1_100)
+        assertEquals("re-armed on every repeat", 1, timers.pending.size)
+        machine.events.clear()
+        timers.fireAll()
+        assertEquals(listOf<GuideEvent>(GuideEvent.Release(BoxAction.DOWN)), machine.events)
+        assertFalse(down(Keys.DPAD_DOWN, repeat = 3, at = 3_000))
+    }
+
+    @Test fun watchdogIsCancelledByTheUp() {
+        down(Keys.DPAD_DOWN)
+        down(Keys.DPAD_DOWN, repeat = 1, at = 1_050)
+        up(Keys.DPAD_DOWN, at = 1_100)
+        assertTrue(timers.pending.isEmpty())
+    }
 }

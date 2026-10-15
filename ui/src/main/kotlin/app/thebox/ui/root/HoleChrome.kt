@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.RoundRect
@@ -33,17 +34,21 @@ private val STILL_TINT = Color.Black.copy(alpha = 0.28f)
 
 /**
  * Drawn after the `SurfaceView`, so it composites over the video (docs/design/m3-guide.md §3.13.3). A sibling after
- * `VideoLayer`, never an ancestor: no layer, alpha or clip on the node itself; clips happen only inside the draw.
+ * `VideoLayer`, never an ancestor. (code review 2026-10-14, H-S8) It carries its own default layer, like the ambient
+ * background (B8): its draw reads the ambient cross-fade and the scrim, and without a layer every such frame re-recorded
+ * the root's content (mini overlay, chips, footer). A sibling's layer does not touch the surface rule. Clips happen only
+ * inside the draw.
  *
  * Nothing is drawn inside the video rect except at its edges:
  * 1. black in `hole − video` (letterbox, B1.5b);
  * 2. the four corners `hole − roundRect(hole, 20)`: the ambient field (same cross-fade as the background, N9);
  * 3. the 1 px ring;
- * 4. the still background (ambient clipped to the rounded hole) when the mini shows a still;
+ * 4. the still background (ambient clipped to the rounded hole) when the mini shows a still, or the HDR poster
+ *    ([poster]: viewport MINI with the video track off, code review 2026-10-14, H-B1);
  * 5. the transition scrim ([scrim], 0..1, read in the draw phase only).
  */
 @Composable
-fun HoleChrome(rects: HoleRects, mode: HoleMode, ambient: AmbientState, scrim: () -> Float, modifier: Modifier = Modifier) {
+fun HoleChrome(rects: HoleRects, mode: HoleMode, ambient: AmbientState, scrim: () -> Float, modifier: Modifier = Modifier, poster: Boolean = false) {
     val hole = rects.hole
     val corners = remember(hole) { hole?.let(::cornerPathFor) }
     val rounded = remember(hole) { hole?.let(::roundPathFor) }
@@ -51,6 +56,7 @@ fun HoleChrome(rects: HoleRects, mode: HoleMode, ambient: AmbientState, scrim: (
         modifier
             .fillMaxSize()
             .testTag(HOLE_CHROME_TAG)
+            .graphicsLayer()
             .drawBehind {
                 if (hole == null) return@drawBehind
                 val video = rects.video
@@ -76,7 +82,7 @@ fun HoleChrome(rects: HoleRects, mode: HoleMode, ambient: AmbientState, scrim: (
                                 drawRect(Color.Black, Offset(hl, ht), hs)
                             }
                         }
-                        if (mode == HoleMode.STILL && rounded != null) {
+                        if ((mode == HoleMode.STILL || poster) && rounded != null) {
                             // Repaint the field inside the hole so the background's drop shadow does not show through.
                             clipPath(rounded) { drawAmbient(ambient) }
                             drawRoundRect(STILL_TINT, Offset(hl, ht), hs, CornerRadius(radius))

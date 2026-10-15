@@ -72,7 +72,11 @@ class LogoCache internal constructor(
 
     override fun failed(url: String): Boolean = url in failedUrls
 
+    override var version: Long = 0L
+        private set
+
     override fun trim() {
+        version++
         val maxEntries = if (lowEnd) GridConstants.LOGO_CACHE_LOW_END else GridConstants.LOGO_CACHE
         val maxBytes = if (lowEnd) GridConstants.LOGO_CACHE_BYTES_LOW_END else GridConstants.LOGO_CACHE_BYTES
         val it = lru.entries.iterator()
@@ -85,6 +89,7 @@ class LogoCache internal constructor(
 
     /** Drops every bitmap and pending result (`onTrimMemory`, a scale change). Failures stay remembered. */
     override fun clear() {
+        version++
         lru.clear()
         inFlight.clear()
         bytes = 0
@@ -114,6 +119,7 @@ class LogoCache internal constructor(
             lru[url] = Entry(BitmapGuideImage(bmp), b)
             bytes += b
             trim()
+            version++
             onLoaded?.invoke()
         }
     }

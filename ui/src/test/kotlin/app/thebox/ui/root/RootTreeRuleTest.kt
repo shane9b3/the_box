@@ -156,6 +156,34 @@ class RootTreeRuleTest {
         rule.onNodeWithTag(SETTINGS_TAG).fetchSemanticsNode()
     }
 
+    /** Code review 2026-10-14, H-S8: HoleChrome has its own default layer, as a sibling (not an ancestor) of the video. */
+    @Test
+    fun holeChromeCarriesItsOwnLayerAsASibling() {
+        show(GuideUiState(tuned = playing()))
+        val chrome = layoutOf(HOLE_CHROME_TAG)
+        assertTrue("HoleChrome has a layer (H-S8)", hasLayer(chrome))
+        assertFalse("not an ancestor of the video layer", ancestors(layoutOf(VIDEO_LAYER_TAG)).contains(chrome))
+    }
+
+    /**
+     * Code review 2026-10-14, H-B1: an HDR poster in the mini player keeps viewport MINI and shows the poster still; the
+     * host reacts like the controller (posterMode while MINI) and the viewport settles at once.
+     */
+    @Test
+    fun hdrPosterStaysMiniAndShowsThePoster() {
+        val host = FakeShellHost(FakeGuideStateMachine(GuideUiState(tuned = playing())))
+        host.onViewport = { vp -> host.videoFlow.value = host.videoFlow.value.copy(posterMode = vp == Viewport.MINI) }
+        rule.setContent { BoxTheme { AppRoot(host, grid = { m -> Spacer(m.graphicsLayer()) }) } }
+        rule.waitForIdle()
+        rule.mainClock.advanceTimeBy(2_000)
+        rule.waitForIdle()
+        assertEquals("one MINI request, no flip-flop", listOf(Viewport.MINI), host.viewports.distinct())
+        assertTrue("settled: ${host.viewports}", host.viewports.size <= 2)
+        assertTrue(host.videoFlow.value.posterMode)
+        rule.onNodeWithTag(app.thebox.ui.guide.screen.MINI_STILL_TAG, useUnmergedTree = true).fetchSemanticsNode()
+        assertEquals(listOf(64, 56, 784, 461), windowRect(surfaceView()).toList())
+    }
+
     private companion object {
         val LAYER_NAMES = listOf("GraphicsLayer", "Clip", "Shadow", "RenderEffect", "Alpha")
     }

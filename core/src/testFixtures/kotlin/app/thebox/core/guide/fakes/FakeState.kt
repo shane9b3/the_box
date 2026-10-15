@@ -41,7 +41,9 @@ class RecordingGuideEffects : GuideEffects {
     override fun retry() = rec("retry")
     override fun setReminder(channel: GuideChannel, info: ProgrammeInfo) = rec("setReminder", channel, info)
     override fun cancelReminder(channel: GuideChannel, rawStartMin: Int) = rec("cancelReminder", channel, rawStartMin)
-    override fun answerReminder(reminderId: Long, accept: Boolean) = rec("answerReminder", reminderId, accept)
+    /** Recorded as (reminderId, accept); [lastAlert] keeps the whole alert. */
+    override fun answerReminder(alert: app.thebox.core.guide.ReminderAlert, accept: Boolean) { lastAlert = alert; rec("answerReminder", alert.reminderId, accept) }
+    var lastAlert: app.thebox.core.guide.ReminderAlert? = null
     override fun queryFavourite(token: Long, channel: GuideChannel) = rec("queryFavourite", token, channel)
     override fun setFavourite(channel: GuideChannel, on: Boolean) = rec("setFavourite", channel, on)
     override fun hideChannel(channel: GuideChannel) = rec("hideChannel", channel)
@@ -64,6 +66,9 @@ class FakeGuideStateMachine(initial: GuideUiState = GuideUiState()) : GuideState
     override val frame: GuideFrame = GuideFrame()
     override val frameVersion: StateFlow<Long> = version.asStateFlow()
     override fun dispatch(event: GuideEvent) { events += event }
+    /** What [handles] answers (code review 2026-10-14, H-S4). */
+    var handlesFn: (app.thebox.core.input.BoxAction) -> Boolean = { true }
+    override fun handles(action: app.thebox.core.input.BoxAction): Boolean = handlesFn(action)
     fun bumpFrame() = version.update { it + 1 }
 
     companion object {

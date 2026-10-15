@@ -113,7 +113,7 @@ class RealEngineControllerTest {
             events, mono, ErrorLadderImpl({ settings.current.streamSwitchTimeoutMs }), ReResolveLimiterImpl(), ZapDebouncerImpl(),
             BufferProfileFsmImpl(), DefaultEngineEnvironment(context, DeviceCapabilities(context), settings, mono),
             ZapImportGate({ SystemClock.elapsedRealtime() }, 200), MediaSessionFactory.None, FakeDeviceState(),
-        )
+        ).also { it.ioDispatcher = kotlinx.coroutines.Dispatchers.Main.immediate }
     }
 
     private val player: ExoPlayer get() = checkNotNull(bundle).player

@@ -17,7 +17,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.thebox.core.guide.EmptyKind
-import app.thebox.core.guide.GuideUiState
 import app.thebox.ui.R
 import app.thebox.ui.guide.screen.GuideUi
 import app.thebox.ui.guide.screen.Line
@@ -29,8 +28,8 @@ const val EMPTY_STATE_TAG = "empty_state"
  * next (CLAUDE.md). [debugHint] (debug builds) names the seeding deep link for "No playlist yet".
  */
 @Composable
-fun EmptyState(state: GuideUiState, modifier: Modifier = Modifier, debugHint: Boolean = false) {
-    val kind = state.empty ?: return
+fun EmptyState(empty: EmptyKind?, modifier: Modifier = Modifier, debugHint: Boolean = false) {
+    val kind = empty ?: return
     val (title, step) = when (kind) {
         EmptyKind.NO_PLAYLIST -> R.string.guide_empty_no_playlist to R.string.guide_empty_no_playlist_step
         EmptyKind.EMPTY_SOURCE -> R.string.guide_empty_source to R.string.guide_empty_source_step

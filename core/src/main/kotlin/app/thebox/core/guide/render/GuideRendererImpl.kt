@@ -1,5 +1,6 @@
 package app.thebox.core.guide.render
 
+import androidx.collection.MutableIntFloatMap
 import androidx.collection.MutableIntObjectMap
 import app.thebox.core.common.Hash64
 import app.thebox.core.guide.CellKind
@@ -29,6 +30,11 @@ import kotlin.math.floor
  * except the focused one, restore; 5. the focused cell (shadow, fill, ring, text, progress); 6. the now line
  * (glow, line, dot); 7. the channel-number bubble; 8. restore.
  *
+ * (code review 2026-10-14, O-2) Step 4 runs in two passes over the visible rows, backgrounds then text (cells do not
+ * overlap, so the image is the same), each in its own trace section: `guide-draw-cells` and `guide-draw-text`; steps
+ * 1–3 and 5–7 are `guide-draw-chrome`. Ruler label and channel-number widths are cached per clock form/zone and
+ * scale; the name `TextFit` key is [GuideChannel.nameHash].
+ *
  * **Zero allocation** in [draw] and [focusedCellBounds] (§4.2): titles, time texts and labels are pre-built strings
  * (snapshot, [TimeLabels] tables, constants); an ellipsis is a ranged `drawText` plus the constant "…" placed with
  * the [TextFit] cut width; channel numbers come from a lazily filled per-number string cache (one allocation per
@@ -47,7 +53,15 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
     private val ellW = FloatArray(STYLES.size)
     private val asc = FloatArray(STYLES.size)
     private val desc = FloatArray(STYLES.size)
-    private var clockProbe: String? = null
+    /** (G-L7) Text caches follow [TimeLabels.version], not a probed label. */
+    private var lastLabels: TimeLabels? = null
+    private var labelsVersion = Int.MIN_VALUE
+    /** O-2: ruler label width by minute of day (-1 = not measured), for the current labels version and scale. */
+    private val rulerW = FloatArray(1440) { -1f }
+    /** O-2: channel-number width by number, per scale. */
+    private val numberW = MutableIntFloatMap()
+    /** O-2: which part of the rows the current pass draws. */
+    private var pass = PASS_ALL
 
     // Per-draw scratch (set at the top of draw/focusedCellBounds).
     private var s = 1f
@@ -65,7 +79,7 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
 
     /** Drops the text caches (`onTrimMemory`, §4.7). */
     override fun trimCaches() {
-        titleFit.clear(); nameFit.clear(); numbers.clear()
+        titleFit.clear(); nameFit.clear(); numbers.clear(); numberW.clear()
     }
 
     // ------------------------------------------------------------------------------------------------------------
@@ -75,6 +89,7 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
     override fun draw(canvas: GuideCanvas, frame: GuideFrame, windowStartMin: Int, scrollOffsetMin: Float, scrollRow: Float) {
         val m = frame.metrics ?: return
         begin(frame, m, windowStartMin, scrollOffsetMin)
+        canvas.beginSection(SECTION_CHROME)
 
         // 1. Panel.
         val bw = s * G.PANEL_BORDER
@@ -89,20 +104,23 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
         // 3. Ruler.
         drawRuler(canvas, frame, m)
 
-        // 4. Rows.
+        canvas.endSection()
+
+        // 4. Rows: backgrounds, then text (O-2).
         val rowsSave = canvas.save()
         canvas.clipRect(m.labelLeft, m.rowsTop, contentRight, m.rowsBottom)
-        val rows = frame.rows
-        var i = maxOf(0, floor(scrollRow).toInt())
-        while (i < rows.size) {
-            val top = m.rowTopPx(i - scrollRow)
-            if (top >= m.rowsBottom) break
-            val bottom = top + m.rowHeight
-            if (bottom > m.rowsTop) drawRow(canvas, frame, m, i, top, bottom)
-            i++
-        }
+        canvas.beginSection(SECTION_CELLS)
+        pass = PASS_BG
+        drawRows(canvas, frame, m, scrollRow)
+        canvas.endSection()
+        canvas.beginSection(SECTION_TEXT)
+        pass = PASS_TEXT
+        drawRows(canvas, frame, m, scrollRow)
+        pass = PASS_ALL
+        canvas.endSection()
         canvas.restoreToCount(rowsSave)
 
+        canvas.beginSection(SECTION_CHROME)
         // 5. Focused cell, last so its ring and shadow overlap the neighbours.
         drawFocused(canvas, frame, m, scrollRow)
 
@@ -119,7 +137,53 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
         // 7. Bubble.
         drawBubble(canvas, frame, m, scrollRow)
 
+        canvas.endSection()
         canvas.restoreToCount(outer)
+    }
+
+    private fun drawRows(canvas: GuideCanvas, frame: GuideFrame, m: GuideMetrics, scrollRow: Float) {
+        val rows = frame.rows
+        val base = frameKey(frame)
+        var i = maxOf(0, floor(scrollRow).toInt())
+        while (i < rows.size) {
+            val top = m.rowTopPx(i - scrollRow)
+            if (top >= m.rowsBottom) break
+            val bottom = top + m.rowHeight
+            if (bottom > m.rowsTop) {
+                // O-2: a row whose inputs did not change (a vertical scroll animation frame) replays its recording.
+                if (!canvas.beginRow(rowKey(base, frame, i), top)) {
+                    drawRow(canvas, frame, m, i, top, bottom)
+                    canvas.endRow()
+                }
+            }
+            i++
+        }
+    }
+
+    /** O-2: everything every row's ops depend on (per draw pass), except the row itself and its vertical position. */
+    private fun frameKey(frame: GuideFrame): Long {
+        var h = Hash64.long(ROW_KEY_SEED, pass.toLong())
+        h = Hash64.long(h, frame.data?.seq ?: -1L)
+        h = Hash64.long(h, frame.rows.version)
+        h = Hash64.long(h, ws.toLong())
+        h = Hash64.long(h, off.toRawBits().toLong())
+        h = Hash64.long(h, now.toLong())
+        h = Hash64.long(h, s.toRawBits().toLong())
+        h = Hash64.long(h, labelsVersion.toLong())
+        h = Hash64.long(h, frame.tunedHash)
+        h = Hash64.long(h, System.identityHashCode(frame.reminders).toLong())
+        h = Hash64.long(h, System.identityHashCode(frame.suspectArchive).toLong())
+        h = Hash64.long(h, (if (frame.showLogos) 1L else 0L) or (if (frame.showNumbers) 2L else 0L) or (if (frame.gridFocused) 4L else 0L))
+        h = Hash64.long(h, frame.images?.version ?: 0L)
+        return h
+    }
+
+    private fun rowKey(base: Long, frame: GuideFrame, row: Int): Long {
+        val f = frame.focus
+        var h = Hash64.long(base, row.toLong())
+        // The focused row draws its label highlight and leaves out the focused cell.
+        h = Hash64.long(h, if (f != null && f.row == row) f.cellStart.toLong() else Long.MIN_VALUE)
+        return h
     }
 
     override fun focusedCellBounds(frame: GuideFrame, windowStartMin: Int, scrollOffsetMin: Float, scrollRow: Float, out: FloatArray): Boolean {
@@ -170,9 +234,11 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
     private fun begin(frame: GuideFrame, m: GuideMetrics, windowStartMin: Int, scrollOffsetMin: Float) {
         if (m.scale != preparedScale) prepare(m.scale)
         val l = frame.labels
-        if (l != null) {
-            val probe = l.hm(0)
-            if (probe !== clockProbe) { clockProbe = probe; titleFit.clear(); nameFit.clear() }
+        if (l != null && (l !== lastLabels || l.version != labelsVersion)) {
+            lastLabels = l
+            labelsVersion = l.version
+            titleFit.clear(); nameFit.clear()
+            rulerW.fill(-1f)
         }
         labels = l
         s = m.scale
@@ -192,6 +258,8 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
         titleFit.widthScale = widthScale
         nameFit.widthScale = widthScale
         titleFit.clear(); nameFit.clear()
+        rulerW.fill(-1f)
+        numberW.clear()
         for (k in STYLES.indices) {
             val st = STYLES[k]
             ellW[k] = mm.width(ELLIPSIS, 0, 1, st) * widthScale
@@ -227,7 +295,7 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
             if (x >= contentRight) break
             if (hasContext && x < m.timelineLeft) { t = next30(l, t); continue } // scrolled off under the label
             val text = l.hm(t)
-            val tw = width(text, GuideTextStyle.RULER)
+            val tw = rulerWidth(l, t, text)
             var lx = x + s * G.TICK_LABEL_PAD
             if (lx < minLabelX) lx = minLabelX
             if (x + ruleW > m.timelineLeft) canvas.fillRect(x, m.headerTop, x + ruleW, m.headerBottom, C.TICK_RULE)
@@ -245,13 +313,15 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
     private fun drawRow(canvas: GuideCanvas, frame: GuideFrame, m: GuideMetrics, i: Int, top: Float, bottom: Float) {
         val ch = frame.rows.channel(i)
         val focusRow = frame.focus?.row ?: -1
-        if (ch == null) drawSkeletonLabel(canvas, m, top, bottom, i == focusRow) else drawLabel(canvas, frame, m, ch, top, bottom, i == focusRow)
+        val bg = pass != PASS_TEXT
+        if (ch == null) { if (bg) drawSkeletonLabel(canvas, m, top, bottom, i == focusRow) } else drawLabel(canvas, frame, m, ch, top, bottom, i == focusRow)
         val sv = canvas.save()
-        canvas.clipRect(m.timelineLeft, maxOf(top, m.rowsTop), contentRight, minOf(bottom, m.rowsBottom))
+        // The row's own bounds (the caller's rows-area clip bounds it further), so a recording replays anywhere (O-2).
+        canvas.clipRect(m.timelineLeft, top, contentRight, bottom)
         if (ch == null) {
-            drawSkeletonBlocks(canvas, m, top, bottom)
+            if (bg) drawSkeletonBlocks(canvas, m, top, bottom)
         } else {
-            drawArchiveBand(canvas, m, ch, top, bottom)
+            if (bg) drawArchiveBand(canvas, m, ch, top, bottom)
             drawCells(canvas, frame, m, ch, i, top, bottom)
         }
         canvas.restoreToCount(sv)
@@ -260,25 +330,27 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
     private fun drawLabel(canvas: GuideCanvas, frame: GuideFrame, m: GuideMetrics, ch: GuideChannel, top: Float, bottom: Float, focusedRow: Boolean) {
         val l = m.labelLeft
         val r = l + m.labelWidth
-        if (focusedRow) canvas.fillRoundRect(l, top, r, bottom, s * G.CELL_R, C.ROW_FOCUS_FILL)
+        val bg = pass != PASS_TEXT
+        if (focusedRow && bg) canvas.fillRoundRect(l, top, r, bottom, s * G.CELL_R, C.ROW_FOCUS_FILL)
         val mid = (top + bottom) / 2
         var x = l + s * G.LABEL_PAD_X
         var right = r - s * G.LABEL_PAD_X
         if (ch.identityHash == frame.tunedHash && frame.tunedHash != 0L) {
-            canvas.fillCircle(right - s * TUNED_DOT / 2, mid, s * TUNED_DOT / 2, C.LIVE)
+            if (bg) canvas.fillCircle(right - s * TUNED_DOT / 2, mid, s * TUNED_DOT / 2, C.LIVE)
             right -= s * (TUNED_DOT + LABEL_ICON_GAP)
         }
         if (ch.archiveDays > 0) {
             val g = s * GLYPH
             val asset = if (isSuspect(frame, ch)) GuideAsset.ARCHIVE_GLYPH_HOLLOW else GuideAsset.ARCHIVE_GLYPH
-            canvas.drawAsset(asset, right - g, mid - g / 2, right, mid + g / 2, C.TEXT_LABEL)
+            if (bg) canvas.drawAsset(asset, right - g, mid - g / 2, right, mid + g / 2, C.TEXT_LABEL)
             right -= g + s * LABEL_ICON_GAP
         }
+        if (pass == PASS_BG) return
         val num = ch.number
         if (frame.showNumbers && num != null) {
             val str = numberString(num)
             canvas.drawText(str, 0, str.length, x, centredBaseline(top, bottom, GuideTextStyle.CH_NUMBER), GuideTextStyle.CH_NUMBER, C.TEXT_LABEL)
-            x += width(str, GuideTextStyle.CH_NUMBER) + s * G.LABEL_GAP
+            x += numberWidth(num, str) + s * G.LABEL_GAP
         }
         val avail = right - x
         if (avail <= 0f) return
@@ -297,7 +369,7 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
             }
         }
         val name = ch.displayName
-        drawFitted(canvas, nameFit, name, Hash64.of(name), GuideTextStyle.CH_NAME, x, avail, -1f, rtlFlag = false, complex = false,
+        drawFitted(canvas, nameFit, name, ch.nameHash, GuideTextStyle.CH_NAME, x, avail, -1f, rtlFlag = false, complex = false,
             baseline = centredBaseline(top, bottom, GuideTextStyle.CH_NAME), argb = C.FG, alignRight = false)
     }
 
@@ -325,6 +397,7 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
 
     /** LOADING cells: skeleton rects over [a, b) cut at local :00/:30. */
     private fun drawLoading(canvas: GuideCanvas, m: GuideMetrics, a: Int, b: Int, top: Float, bottom: Float) {
+        if (pass == PASS_TEXT) return
         val l = labels
         val inset = s * G.CELL_INSET_X
         var t = a
@@ -406,7 +479,7 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
             past -> if (archived && !suspect) C.TEXT_ARCHIVE else C.TEXT_PAST
             else -> C.FG
         }
-        if (!focused) {
+        if (!focused && pass != PASS_TEXT) {
             val rr = s * G.CELL_R
             val bw = s * G.CELL_BORDER
             canvas.fillRoundRect(x0, top, x1, bottom, rr, if (onNow) C.CELL_NOW_FILL else C.CELL_FILL)
@@ -418,7 +491,7 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
         val pad = s * if (narrow) G.CELL_PAD_X_NARROW else G.CELL_PAD_X
         var textX = maxOf(x0, m.timelineLeft) + pad
         val rightEdge = x1 - pad
-        if (rightEdge - textX >= s * G.MIN_TEXT_W) {
+        if (pass != PASS_BG && rightEdge - textX >= s * G.MIN_TEXT_W) {
             val twoLines = programme && !narrow
             val tStyle = if (programme) GuideTextStyle.CELL_TITLE else GuideTextStyle.NO_INFO
             val ti = tStyle.ordinal
@@ -449,7 +522,7 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
             if (twoLines) drawTimeLine(canvas, d, c, textX, rightEdge, timeBase, textColor, archived, suspect)
         }
 
-        if (onNow) {
+        if (onNow && pass != PASS_TEXT) {
             val ph = s * G.PROGRESS_H
             val bx0 = x0 + s * PROGRESS_INSET_X
             val bx1 = x1 - s * PROGRESS_INSET_X
@@ -561,7 +634,8 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
         }
         val n = fit.fit(text, key, style, avail, ellW[style.ordinal], complex)
         val w = fit.lastWidth
-        val rtl = rtlFlag || fit.lastRtl
+        // G-S4: cells carry the pager's first-strong-character flag; names (no flag) use the fit's own detection.
+        val rtl = if (alignRight) rtlFlag else rtlFlag || fit.lastRtl
         if (n >= text.length) {
             val dx = if (rtl && alignRight) avail - w else 0f
             canvas.drawText(text, 0, text.length, x + dx, baseline, style, argb)
@@ -579,6 +653,21 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
     }
 
     private fun width(text: String, style: GuideTextStyle): Float = measurer.width(text, 0, text.length, style) * widthScale
+
+    /** O-2: the ruler label at minute [t] (text [text] = `hm(t)`), measured once per minute of day per labels/scale. */
+    private fun rulerWidth(l: TimeLabels, t: Int, text: String): Float {
+        val k = l.minuteOfDay(t)
+        val cached = rulerW[k]
+        if (cached >= 0f) return cached
+        return width(text, GuideTextStyle.RULER).also { rulerW[k] = it }
+    }
+
+    private fun numberWidth(n: Int, str: String): Float {
+        val cached = numberW.getOrDefault(n, -1f)
+        if (cached >= 0f) return cached
+        if (numberW.size >= MAX_NUMBER_STRINGS) numberW.clear()
+        return width(str, GuideTextStyle.CH_NUMBER).also { numberW[n] = it }
+    }
 
     private fun scaledWidth(w: Float, dataScale: Float): Float = if (w < 0f || dataScale <= 0f) -1f else w * (s / dataScale)
 
@@ -625,6 +714,14 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
     }
 
     companion object {
+        /** O-2 trace sub-sections of `guide-draw`. */
+        const val SECTION_CHROME = "guide-draw-chrome"
+        const val SECTION_CELLS = "guide-draw-cells"
+        const val SECTION_TEXT = "guide-draw-text"
+        private const val PASS_ALL = 0
+        private const val PASS_BG = 1
+        private const val PASS_TEXT = 2
+        private const val ROW_KEY_SEED = 0x6775696465726f77L
         const val ELLIPSIS = "…"
         const val NO_INFO = "No information"
         const val TIME_DASH = " – "

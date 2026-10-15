@@ -39,6 +39,10 @@ class ZapThroughGuideTest : GuideTestBase() {
         val full = ok.drop(10).mapNotNull { it.firstFrameMs }
         log("I-17 zaps=${zaps.size} ok=${ok.size} outcomes=${zaps.groupingBy { it.outcome }.eachCount()}")
         log("I-17 first frame all P50=${percentile(first, 0.5)} P90=${percentile(first, 0.9)} ms; guide OK P50=${percentile(guide, 0.5)} P90=${percentile(guide, 0.9)}; FULL CH+ P50=${percentile(full, 0.5)} P90=${percentile(full, 0.9)}")
+        // O-3 (code review 2026-10-14): the resolve step alone, guide path against FULL.
+        val guideResolve = ok.take(10).map { it.resolveMs }
+        val fullResolve = ok.drop(10).map { it.resolveMs }
+        log("I-17 resolve guide OK P50=${percentile(guideResolve, 0.5)} P90=${percentile(guideResolve, 0.9)}; FULL CH+ P50=${percentile(fullResolve, 0.5)} P90=${percentile(fullResolve, 0.9)} ms")
         assertTrue("10 guide tunes + CH+ zaps recorded (${zaps.size})", zaps.size >= 10)
         // CH+ at 1 Hz may coalesce under M2's debounce; the guide tunes must all reach first media.
         assertTrue("guide tunes reached first media (${guide.size}/10)", guide.size >= 10)

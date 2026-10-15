@@ -63,6 +63,33 @@ class ReminderTest : GuideTestBase() {
     }
 
     /**
+     * (code review 2026-10-14, H-B3, test gap 7) "Missed while The Box was closed": the activity is closed (the process
+     * goes to the background and the reminder runtime stops), a reminder whose programme has already ended is stored,
+     * and the guide is started again. The runtime's first pass at ON_START counts it as missed; the toast is sent before
+     * the new root composes and must still be shown.
+     */
+    @Test
+    fun missedToastAfterARestart() {
+        launchGuide()
+        awaitGuideReady()
+        stopPlayback()
+        toRow(0)
+        val ch = channelAt(0)!!
+        closeGuide()
+        Thread.sleep(2_000) // ProcessLifecycleOwner ON_STOP (700 ms) stops the runtime and forgets what it saw
+        val now = nowMin()
+        val info = ProgrammeInfo(now - 40, now - 40, now - 10, "Missed test", null, null, null, null, 0, 0)
+        runBlocking { ep.reminderBook().set(ch, info, 60) }
+        val t0 = SystemClock.elapsedRealtime()
+        launchGuide()
+        val device = androidx.test.uiautomator.UiDevice.getInstance(instrumentation)
+        val shown = device.wait(androidx.test.uiautomator.Until.hasObject(androidx.test.uiautomator.By.textContains("Missed while The Box was closed")), 10_000)
+        log("I-10 missed toast ${if (shown) "shown" else "NOT shown"} ${SystemClock.elapsedRealtime() - t0} ms after the restart")
+        assertTrue("the missed-reminders toast is shown after a restart", shown == true)
+        assertTrue("the missed reminder is no longer pending", ep.reminderBook().pending.value.none { it.rawStartMin == now - 40 && it.identity == ch.identity })
+    }
+
+    /**
      * The late path of "missed while closed": a reminder whose programme is already running is caught up by the
      * scheduler's first pass as a late card. A real process restart cannot be done from inside the instrumented
      * process; the scheduler's start-up pass and this in-process pass are the same `decide` call (§3.11.3).

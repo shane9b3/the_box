@@ -144,24 +144,50 @@ class GuideEffectsImplTest {
     @Test
     fun acceptingAReminderTunesAndGoneChannelsAreOrphaned() = runTest {
         val r = Rig(this, channels)
-        r.alerts.mutable.value = ReminderAlert(11, ch.identity, ch.displayName, "Late Edition", 0, late = false, autoSwitch = false)
-        r.effects.answerReminder(11, accept = true)
+        val a11 = ReminderAlert(11, ch.identity, ch.displayName, "Late Edition", 0, late = false, autoSwitch = false)
+        r.alerts.mutable.value = a11
+        r.effects.answerReminder(a11, accept = true)
         advanceUntilIdle()
         assertEquals(listOf(11L), r.alerts.accepted)
         assertEquals(TuneTarget.Channel(ch.identity), r.controller.tunes.single().first)
 
         val gone = GuideFixtures.channel(99)
-        r.alerts.mutable.value = ReminderAlert(12, gone.identity, "Gone TV", "X", 0, late = false, autoSwitch = false)
-        r.effects.answerReminder(12, accept = true)
+        val a12 = ReminderAlert(12, gone.identity, "Gone TV", "X", 0, late = false, autoSwitch = false)
+        r.alerts.mutable.value = a12
+        r.effects.answerReminder(a12, accept = true)
         advanceUntilIdle()
         assertEquals(listOf(12L), r.alerts.dismissed)
         assertEquals(GuideToast.REMINDER_CHANNEL_GONE to "Gone TV", r.shell.toasts.last())
         assertEquals(1, r.controller.tunes.size)
 
-        r.alerts.mutable.value = ReminderAlert(13, ch.identity, ch.displayName, "Y", 0, late = false, autoSwitch = false)
-        r.effects.answerReminder(13, accept = false)
+        val a13 = ReminderAlert(13, ch.identity, ch.displayName, "Y", 0, late = false, autoSwitch = false)
+        r.alerts.mutable.value = a13
+        r.effects.answerReminder(a13, accept = false)
         advanceUntilIdle()
         assertEquals(listOf(12L, 13L), r.alerts.dismissed)
+    }
+
+    /**
+     * Code review 2026-10-14, H-S7: the card's alert may already be gone from `alerts.current` (its lifetime ended, the
+     * next card replaced it) when the accept runs. The effect tunes the alert it was given, never orphaning a valid one.
+     */
+    @Test
+    fun acceptUsesTheShownAlertNotTheCurrentOne() = runTest {
+        val r = Rig(this, channels)
+        val shown = ReminderAlert(21, ch.identity, ch.displayName, "News", 0, late = false, autoSwitch = false)
+        r.alerts.mutable.value = null // the card already cleared
+        r.effects.answerReminder(shown, accept = true)
+        advanceUntilIdle()
+        assertEquals(listOf(21L), r.alerts.accepted)
+        assertTrue(r.alerts.dismissed.isEmpty())
+        assertEquals(TuneTarget.Channel(ch.identity), r.controller.tunes.single().first)
+        assertTrue("no channel-gone toast", r.shell.toasts.none { it.first == GuideToast.REMINDER_CHANNEL_GONE })
+
+        val other = ReminderAlert(22, channels[3].identity, channels[3].displayName, "Other", 0, late = false, autoSwitch = false)
+        r.alerts.mutable.value = other // a newer card replaced it
+        r.effects.answerReminder(shown.copy(reminderId = 23), accept = true)
+        advanceUntilIdle()
+        assertEquals(TuneTarget.Channel(ch.identity), r.controller.tunes.last().first)
     }
 
     @Test

@@ -184,5 +184,7 @@ class FakeTimeLabels : TimeLabels {
         minutes % 60 == 0 -> "${minutes / 60} h"
         else -> "${minutes / 60} h ${minutes % 60} min"
     }
-    override fun reset(zone: ZoneId, clock24: Boolean) { this.zone = zone; this.clock24 = clock24 }
+    override fun reset(zone: ZoneId, clock24: Boolean) { this.zone = zone; this.clock24 = clock24; version++; resets++ }
+    override var version: Int = 0; private set
+    var resets = 0; private set
 }

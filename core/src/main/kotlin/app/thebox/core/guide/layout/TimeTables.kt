@@ -44,7 +44,11 @@ class TimeTables(
 
     override fun reset(zone: ZoneId, clock24: Boolean) {
         tables = build(zone, clock24)
+        version++
     }
+
+    @Volatile override var version: Int = 0
+        private set
 
     /** Current zone and clock form (for tests and the panel's 12 h clock). */
     val zone: ZoneId get() = tables.zone

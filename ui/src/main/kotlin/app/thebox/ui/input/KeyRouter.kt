@@ -12,6 +12,13 @@ interface KeyRouter {
     fun onFocusLost()
     fun attach(machine: app.thebox.core.guide.GuideStateMachine?, searchFieldIdle: () -> Boolean)
     /**
+     * (code review 2026-10-14, H-S5) Detaches [machine] only if it is still the attached one: an old view model's
+     * `onCleared` can run after the new activity's view model attached its machine.
+     */
+    fun detach(machine: app.thebox.core.guide.GuideStateMachine) {
+        attach(null) { true }
+    }
+    /**
      * The key sink ("Modifier.boxKeySink" elsewhere in this document) = focusRequester(requester)
      * .onFocusChanged { if (!it.isFocused) onFocusLost() }.onPreviewKeyEvent(::onKey).focusable(). No layer, alpha or clip.
      */

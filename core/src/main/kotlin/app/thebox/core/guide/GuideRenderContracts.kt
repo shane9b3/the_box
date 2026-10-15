@@ -24,6 +24,21 @@ interface GuideCanvas {
     fun drawImage(image: GuideImage, l: Float, t: Float, r: Float, b: Float, alpha: Float)
     /** Draws a pre-rendered asset stretched to the rect, multiplied by [argb] where the asset is a mask. */
     fun drawAsset(asset: GuideAsset, l: Float, t: Float, r: Float, b: Float, argb: Int)
+    /**
+     * (code review 2026-10-14, O-2) Trace sub-sections of the draw pass (`guide-draw-chrome`, `-cells`, `-text`); the
+     * Android adapter maps them to `android.os.Trace`. [name] is a constant (no allocation). Default: nothing.
+     */
+    fun beginSection(name: String) {}
+    fun endSection() {}
+
+    /**
+     * (code review 2026-10-14, O-2) Per-row recording. The renderer calls [beginRow] before drawing one row pass with a
+     * [key] that covers everything the row's ops depend on except its vertical position [top]. True: a recording for
+     * [key] was replayed (translated to [top]) and the renderer skips the row; false: the renderer draws the row and then
+     * calls [endRow]. Default: no recording (every row is drawn directly; the counting canvas and API ≤ 28).
+     */
+    fun beginRow(key: Long, top: Float): Boolean = false
+    fun endRow() {}
 }
 
 /** Text measurement in device px. One instance per thread (Paint is not thread-safe). */
@@ -39,6 +54,8 @@ interface GuideTextMeasurer {
 
 /** Logo cache (§3.7). Non-blocking: [get] returns null and starts a load; [onLoaded] fires on main. */
 interface GuideImages {
+    /** (code review 2026-10-14, O-2) Bumped whenever what [get] returns can change (a load, a trim, a clear). */
+    val version: Long get() = 0
     fun get(url: String): GuideImage?
     /** True when [url] failed this session (draw the name instead, do not retry). */
     fun failed(url: String): Boolean

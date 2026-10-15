@@ -124,6 +124,22 @@ class GuideRowsCacheTest {
         assertEquals(1_000, c.size, "lineup and indices kept")
     }
 
+    /** Code review 2026-10-14, G-S6 (a): a reload that finds the same rows changes nothing (no version bump, no redraw). */
+    @Test
+    fun reloadWithTheSameRowsDoesNotBump() = runTest(StandardTestDispatcher()) {
+        val lib = CountingLibrary(channels)
+        val c = cache(lib)
+        c.setLineup(lineup())
+        c.ensure(0, 18)
+        advanceUntilIdle()
+        val v = c.version
+        val loads = lib.loads.size
+        c.reloadLoaded()
+        advanceUntilIdle()
+        assertTrue(lib.loads.size > loads, "the blocks were reloaded")
+        assertEquals(v, c.version, "same rows: no bump")
+    }
+
     @Test
     fun channelAtLoadsOnDemandAndTrimDropsFarBlocks() = runTest(StandardTestDispatcher()) {
         val lib = CountingLibrary(channels)

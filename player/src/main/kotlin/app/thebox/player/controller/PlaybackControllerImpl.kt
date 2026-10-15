@@ -105,6 +105,7 @@ import app.thebox.player.internal.TsCompat
 import app.thebox.player.internal.TuneTargetKey
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
@@ -201,6 +202,12 @@ internal class PlaybackControllerImpl @Inject constructor(
     private val scope = CoroutineScope(
         SupervisorJob() + Dispatchers.Main.immediate + CoroutineExceptionHandler { _, t -> BoxLog.e(TAG, "controller job failed", t) },
     )
+
+    /**
+     * (M3 code review 2026-10-14, O-3) The tune's facts and resolve run in one hop to this dispatcher instead of about
+     * 18 IO ↔ main hops, each of which waited for a busy main thread. Tests set it to the main dispatcher.
+     */
+    internal var ioDispatcher: CoroutineDispatcher = Dispatchers.IO
     private val mainHandler = Handler(Looper.getMainLooper())
     private val classifier = FailureClassifier()
 
@@ -443,7 +450,8 @@ internal class PlaybackControllerImpl @Inject constructor(
         // is another channel and must not share the 5-min escalation windows.
         ladder.beginChannel(identity?.let { "${it.playlistId}/${it.stableKey.value}" })
         importGate.closeForZap()
-        _video.value = VideoInfo(aspectMode = settings.current.defaultAspect)
+        // The first-frame counter survives the tune: the shell waits for "the next one" (H-S10).
+        _video.value = VideoInfo(aspectMode = settings.current.defaultAspect, renderedFirstFrames = _video.value.renderedFirstFrames)
         _tracks.value = TrackInfo()
         launchSession(c, Plan(refreshAccount = refreshAccount), waiting = null)
         c.firstTuneId = c.currentTuneId
@@ -482,6 +490,16 @@ internal class PlaybackControllerImpl @Inject constructor(
     private suspend fun runSession(c: Cycle, id: Long, plan: Plan, reuse: ResolvedStream?) {
         if (plan.delayMs > 0) delay(clipDelay(c, plan.delayMs))
         val e = ensureEngine()
+        // O-3: a plain first session loads its facts and resolves in one IO hop; the main thread only applies results.
+        var early: ResolveOutcome? = null
+        if (!c.factsLoaded && reuse == null && !plan.refreshAccount) {
+            val identity = c.identity
+            val request = resolveRequest(c)
+            val (facts, outcome) = withContext(ioDispatcher) { (identity?.let { readFacts(it) }) to resolveOutcome(request) }
+            facts?.let { applyFacts(c, it) }
+            c.factsLoaded = true
+            early = outcome
+        }
         if (!c.factsLoaded) loadFacts(c)
         if (!current(c, id)) return
         if (plan.refreshAccount) {
@@ -502,7 +520,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         if (!current(c, id)) return
 
         // Step 3: resolve (never reuse a resolved URL across a user request; only RetrySame/Reprepare reuse it).
-        val resolved = reuse ?: resolve(c) ?: return
+        val resolved = reuse ?: (if (early != null) handleResolveOutcome(c, early) else resolve(c)) ?: return
         if (!current(c, id)) return
         c.resolved = resolved
         if (resolved.droppedHeaders.isNotEmpty()) {
@@ -582,24 +600,44 @@ internal class PlaybackControllerImpl @Inject constructor(
     private fun current(c: Cycle, id: Long) = cycle === c && c.currentTuneId == id
 
     private suspend fun loadFacts(c: Cycle) {
-        val id = c.identity
-        if (id != null) {
-            try {
-                c.channelInfo = provider.channel(id)
-                c.title = c.channelInfo?.name
-                c.playlistInfo = provider.playlist(id.playlistId)
-                c.account = provider.account(id.playlistId)
-                c.accountGate = gateOf(c.account)
-                c.memory = memory.read(id)
-                c.tsCompat = c.memory.tsCompatLevel
-                c.backups = if (settings.current.failoverToBackup) provider.backupSources(id) else emptyList()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                BoxLog.w(TAG, "playback facts unavailable: ${e.javaClass.simpleName}")
-            }
-        }
+        c.identity?.let { id -> readFacts(id)?.let { applyFacts(c, it) } }
         c.factsLoaded = true
+    }
+
+    /** The cycle's facts, read on any thread (no cycle state is touched until [applyFacts] on main). */
+    private class Facts(
+        val channelInfo: ChannelStreamInfo?,
+        val playlistInfo: PlaylistPlaybackInfo?,
+        val account: XtreamAccountInfo?,
+        val memory: ChannelPlaybackMemory,
+        val backups: List<ChannelIdentity>,
+    )
+
+    private suspend fun readFacts(id: ChannelIdentity): Facts? = try {
+        val failover = settings.current.failoverToBackup
+        Facts(
+            channelInfo = provider.channel(id),
+            playlistInfo = provider.playlist(id.playlistId),
+            account = provider.account(id.playlistId),
+            memory = memory.read(id),
+            backups = if (failover) provider.backupSources(id) else emptyList(),
+        )
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        BoxLog.w(TAG, "playback facts unavailable: ${e.javaClass.simpleName}")
+        null
+    }
+
+    private fun applyFacts(c: Cycle, f: Facts) {
+        c.channelInfo = f.channelInfo
+        c.title = f.channelInfo?.name
+        c.playlistInfo = f.playlistInfo
+        c.account = f.account
+        c.accountGate = gateOf(f.account)
+        c.memory = f.memory
+        c.tsCompat = f.memory.tsCompatLevel
+        c.backups = f.backups
     }
 
     private suspend fun refreshAccount(c: Cycle) {
@@ -628,22 +666,30 @@ internal class PlaybackControllerImpl @Inject constructor(
         }
     }
 
-    private suspend fun resolve(c: Cycle): ResolvedStream? {
-        val outcome = try {
-            when (val spec = c.spec) {
-                is Spec.Archive -> resolver.expandArchive(spec.tune.identity, spec.tune.request)
-                is Spec.Live -> when (val t = spec.target) {
-                    is TuneTarget.Channel -> resolver.resolve(TuneTargetKey.Channel(t.identity), c.baseIndex, c.output, c.userAgentOverride)
-                    is TuneTarget.DirectUrl -> resolver.resolve(
-                        TuneTargetKey.Direct(t.url, t.headers, t.maxConnections, t.formatHint), null, null, c.userAgentOverride,
-                    )
-                }
+    /** What [resolveOutcome] needs from the cycle, captured on main. */
+    private class ResolveRequest(val spec: Spec, val baseIndex: Int?, val output: XtreamOutput?, val userAgent: String?)
+
+    private fun resolveRequest(c: Cycle) = ResolveRequest(c.spec, c.baseIndex, c.output, c.userAgentOverride)
+
+    private suspend fun resolveOutcome(r: ResolveRequest): ResolveOutcome = try {
+        when (val spec = r.spec) {
+            is Spec.Archive -> resolver.expandArchive(spec.tune.identity, spec.tune.request)
+            is Spec.Live -> when (val t = spec.target) {
+                is TuneTarget.Channel -> resolver.resolve(TuneTargetKey.Channel(t.identity), r.baseIndex, r.output, r.userAgent)
+                is TuneTarget.DirectUrl -> resolver.resolve(
+                    TuneTargetKey.Direct(t.url, t.headers, t.maxConnections, t.formatHint), null, null, r.userAgent,
+                )
             }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            ResolveOutcome.Failed(PlaybackErrorCode.INTERNAL, e.javaClass.simpleName)
         }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        ResolveOutcome.Failed(PlaybackErrorCode.INTERNAL, e.javaClass.simpleName)
+    }
+
+    private suspend fun resolve(c: Cycle): ResolvedStream? = handleResolveOutcome(c, resolveOutcome(resolveRequest(c)))
+
+    private fun handleResolveOutcome(c: Cycle, outcome: ResolveOutcome): ResolvedStream? {
         return when (outcome) {
             is ResolveOutcome.Ok -> outcome.stream
             is ResolveOutcome.Failed -> {
@@ -803,6 +849,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         override fun onPlayerError(error: PlaybackException) = onPlayerFailure(error)
 
         override fun onRenderedFirstFrame() {
+            _video.update { it.copy(renderedFirstFrames = it.renderedFirstFrames + 1) }
             val s = session ?: return
             if (s.milestoneVideo != false) onFirstMedia(s)
         }

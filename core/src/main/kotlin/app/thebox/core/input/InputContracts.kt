@@ -82,6 +82,8 @@ object Keys {
     const val PROG_RED = 183; const val PROG_GREEN = 184; const val PROG_YELLOW = 185; const val PROG_BLUE = 186
     const val LAST_CHANNEL = 229; const val GUIDE = 172; const val INFO = 165; const val CAPTIONS = 175
     const val MEDIA_AUDIO_TRACK = 222; const val TV_ZOOM_MODE = 255; const val SEARCH = 84
+    /** (code review 2026-10-14, H-L14) CEC and Bluetooth remotes send these for ⏭/⏮. */
+    const val MEDIA_NEXT = 87; const val MEDIA_PREVIOUS = 88
 }
 
 /** Keys the device has actually reported (product §2.1). :ui implements (SharedPreferences `keys_seen`; writes only a newly seen code, N7). */

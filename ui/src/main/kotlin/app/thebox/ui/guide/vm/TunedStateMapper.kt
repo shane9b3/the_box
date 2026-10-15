@@ -9,8 +9,9 @@ import app.thebox.player.api.PlaybackState
 /** `PlaybackState` → `TunedState` (docs/design/m3-guide.md §3.16.2). Pure. */
 object TunedStateMapper {
     /**
-     * [rowId] = `channel.id` of the tuned identity in the library (−1 unknown); [still] = `video.posterMode ||
-     * settings.miniStill || device.stillByDefault` (computed by the caller).
+     * [rowId] = `channel.id` of the tuned identity in the library (−1 unknown); [still] = `settings.miniStill ||
+     * device.stillByDefault` (computed by the caller). (code review 2026-10-14, H-B1) Not `video.posterMode`: the
+     * HDR poster keeps the viewport MINI and the shell draws it from `VideoInfo.posterMode` directly.
      */
     fun map(state: PlaybackState, rowId: Long, still: Boolean): TunedState {
         val identity = state.target?.identity

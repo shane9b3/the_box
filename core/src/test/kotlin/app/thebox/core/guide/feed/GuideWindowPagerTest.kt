@@ -1,5 +1,9 @@
 package app.thebox.core.guide.feed
 
+import kotlin.test.assertSame
+import app.thebox.core.guide.GuideTextStyle
+import app.thebox.core.guide.CellFlags
+import java.util.concurrent.atomic.AtomicBoolean
 import app.thebox.core.common.BoxLog
 import app.thebox.core.epg.EpgBuildRequest
 import app.thebox.core.epg.EpgChannelRef
@@ -317,6 +321,84 @@ class GuideWindowPagerTest {
         assertEquals(q + 1, p.queries)
     }
 
+    /** Code review 2026-10-14, G-S1: a steady hold re-queries about every 12 rows, not on every row step. */
+    @Test
+    fun steadyHoldRequeriesAboutEveryTwelveRows() {
+        val s = store().also { it.buildWith(xmltv(10).writeTo(File(tmp, "a.xml"))) }
+        val p = pager(s, MutableRows(400))
+        p.ensure(50, ws, holdDirection = 1)
+        await(p) { true }
+        drain(p)
+        val q0 = p.queries
+        for (top in 51..70) { p.ensure(top, ws, holdDirection = 1); drain(p) }
+        val down = p.queries - q0
+        assertTrue(down <= 2, "down hold re-queried $down times in 20 one-row steps")
+        val q1 = p.queries
+        for (top in 69 downTo 50) { p.ensure(top, ws, holdDirection = -1); drain(p) }
+        val up = p.queries - q1
+        assertTrue(up <= 2, "up hold re-queried $up times in 20 one-row steps")
+        // The hold target still covers what the next steps need.
+        val d = p.snapshots.value!!
+        assertTrue(d.firstRow <= 50 - GuideWindowPagerImpl.HOLD_MARGIN_ROWS && d.firstRow + d.rowCount >= 50 + 6, "covers the up margin")
+    }
+
+    /** Code review 2026-10-14, G-S2: a patch can hand a freed `epg_text` id to another string; widths and flags follow it. */
+    @Test
+    fun patchClearsTextCaches() {
+        val s = store()
+        val file = xmltv(10).writeTo(File(tmp, "a.xml"))
+        s.buildWith(file)
+        val retitle = AtomicBoolean(false)
+        val p = pager(s, MutableRows(10), openReader = { s.openReader()?.let { RetitleSpy(it, retitle) } })
+        p.ensure(0, ws)
+        val d1 = await(p) { true }
+        val i = (0 until d1.cellCount).first { d1.cellKind[it] == CellKind.PROGRAMME && d1.cellTextId[it] >= 0 }
+        val id = d1.cellTextId[i]
+        assertEquals(0, d1.cellFlags[i] and CellFlags.RTL)
+        retitle.set(true) // from now on the same ids carry other strings, as after an id reuse
+        s.patch(EpgPatchRequest(listOf(EpgSourceFile(1, file)), listOf(EpgChannelRef(1, "ch3")), nowMs, 1, 2))
+        val d2 = await(p, "patched snapshot") { it.patchSeq == 1 }
+        val j = (0 until d2.cellCount).first { d2.cellTextId[it] == id && d2.cellKind[it] == CellKind.PROGRAMME }
+        val t = d2.cellTitle[j]!!
+        assertTrue(t.startsWith(RetitleSpy.PREFIX))
+        assertEquals(FakeTextMeasurer().width(t, 0, t.length, GuideTextStyle.CELL_TITLE), d2.cellTitleWidth[j], "width of the new string")
+        assertTrue(d2.cellFlags[j] and CellFlags.RTL != 0, "RTL flag of the new string")
+        assertEquals(app.thebox.core.common.Hash64.of(t), d2.cellTitleKey[j], "title key of the new string")
+    }
+
+    /** Code review 2026-10-14, G-S4: the RTL flag is the paragraph direction (first strong character). */
+    @Test
+    fun rtlFlagFollowsTheFirstStrongCharacter() {
+        fun rtl(t: String) = GuideWindowPagerImpl.textFlagsOf(t) and CellFlags.RTL != 0
+        assertFalse(rtl("BBC News عربي"))
+        assertFalse(rtl("Match of the Day (مباراة)"))
+        assertFalse(rtl("123 Show"))
+        assertTrue(rtl("الأخبار المسائية"))
+        assertTrue(rtl("חדשות ערב"))
+        assertTrue(rtl("2026 الأخبار"), "digits are weak: the first strong character decides")
+    }
+
+    /** Code review 2026-10-14, O-1: time lines are shared per minute pair and follow a TimeLabels reset. */
+    @Test
+    fun timeTextsAreCachedAndFollowTheClockForm() {
+        val s = store().also { it.buildWith(xmltv(10).writeTo(File(tmp, "a.xml"))) }
+        val labels = FakeTimeLabels()
+        val p = GuideWindowPagerImpl(s, MutableRows(10), { FakeGuideMetrics() }, { FakeTextMeasurer() }, FakeRowCellsBuilder(), labels, busyRetryMs = 20)
+            .also { pagers += it }
+        p.ensure(0, ws)
+        val d1 = await(p) { true }
+        val i = (0 until d1.cellCount).first { d1.cellKind[it] == CellKind.PROGRAMME }
+        p.ensure(0, ws + 1440) // the same times of day, a day later
+        val d2 = await(p, "second") { it.seq > d1.seq }
+        val j = (0 until d2.cellCount).first { d2.cellKind[it] == CellKind.PROGRAMME && labels.minuteOfDay(d2.cellStart[it]) == labels.minuteOfDay(d1.cellStart[i]) && labels.minuteOfDay(d2.cellEnd[it]) == labels.minuteOfDay(d1.cellEnd[i]) }
+        assertSame(d1.cellTimeText[i], d2.cellTimeText[j], "one string per minute pair")
+        labels.reset(java.time.ZoneId.of("UTC"), clock24 = false)
+        p.invalidate()
+        val d3 = await(p, "12 h") { it.seq > d2.seq }
+        val k = (0 until d3.cellCount).first { d3.cellKind[it] == CellKind.PROGRAMME }
+        assertEquals(labels.hm(d3.cellStart[k]) + " – " + labels.hm(d3.cellEnd[k]), d3.cellTimeText[k])
+    }
+
     @Test
     fun basisChangeRequeriesButANameChangeDoesNot() {
         val s = store().also { it.buildWith(xmltv(20).writeTo(File(tmp, "a.xml"))) }
@@ -379,6 +461,15 @@ class GuideWindowPagerTest {
             closedOn += Thread.currentThread().name
             d.close()
         }
+    }
+
+    /** While [on], window() returns other strings for the same text ids (an `epg_text` id reused by a patch). */
+    private class RetitleSpy(private val d: EpgReader, private val on: AtomicBoolean) : EpgReader by d {
+        override fun window(channels: IntArray, shiftMin: IntArray, fromMin: Int, toMin: Int, out: EpgWindow) {
+            d.window(channels, shiftMin, fromMin, toMin, out)
+            if (on.get()) for (k in 0 until out.size) out.titles[k] = out.titles[k]?.let { PREFIX + it + " (extended edition)" }
+        }
+        companion object { const val PREFIX = "عربي " }
     }
 
     /** window() throws SQLITE_BUSY while [failures] > 0. */

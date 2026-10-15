@@ -316,6 +316,24 @@ class GuideRendererTest {
         assertTrue(near(cellR - 16f, body.x + body.text.length * 9f, 1f), "right-aligned to the inner edge")
     }
 
+    /**
+     * Code review 2026-10-14, G-S4: an LTR title with an Arabic word is an LTR paragraph. With the pager's flags it is
+     * left-aligned and cut on the right ("Match of the D…"), not right-aligned with the ellipsis on the left.
+     */
+    @Test
+    fun mixedLtrTitleWithArabicStaysLeftAligned() {
+        val title = "Match of the Day (مباراة اليوم) extended highlights and analysis"
+        val flags = app.thebox.core.guide.feed.GuideWindowPagerImpl.textFlagsOf(title)
+        val rows = listOf(listOf(Cell(at(15), at(19, 30)), Cell(at(19, 30), at(20), title = title, flags = flags), Cell(at(20), at(23))))
+        val ops = draw(frame(rows))
+        val cellL = m.xOf(at(19, 30), h19, 0f)
+        val body = texts(ops).first { it.style == GuideTextStyle.CELL_TITLE && title.startsWith(it.text) && it.text.isNotEmpty() }
+        val ell = texts(ops).first { it.style == GuideTextStyle.CELL_TITLE && it.text == GuideRendererImpl.ELLIPSIS }
+        assertTrue(body.text.startsWith("Match"), "the cut keeps the logical start")
+        assertTrue(ell.x > body.x, "ellipsis after the prefix, on the right")
+        assertTrue(body.x < cellL + 40f, "left-aligned at the inner edge (${body.x} vs cell ${cellL})")
+    }
+
     @Test
     fun noArchiveBandWhenNowIsLeftOfTheWindow() {
         val ch = listOf(GuideFixtures.channel(0, archiveDays = 7))

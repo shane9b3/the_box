@@ -1,6 +1,10 @@
 package app.thebox.ui.guide.vm
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.Player
@@ -57,13 +61,13 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
@@ -72,6 +76,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.time.ZoneId
 import javax.inject.Inject
 
 /**
@@ -112,7 +117,27 @@ class GuideViewModel @Inject constructor(
     private val io = Dispatchers.IO
     private val device: DeviceClass = deviceClassSource.get()
     private val rowsCache: GuideRowsCache = rowsCacheFactory.create(library, viewModelScope)
-    private val shellEvents = MutableSharedFlow<ShellEvent>(extraBufferCapacity = 8)
+    /**
+     * (code review 2026-10-14, H-B3) A buffered queue, consumed once: events sent before the root subscribes (the
+     * missed-reminders toast at a cold start) wait for it instead of being dropped like a SharedFlow without replay.
+     */
+    private val shellEvents = Channel<ShellEvent>(Channel.BUFFERED)
+
+    /**
+     * (code review 2026-10-14, G-S3/H-S3) The device zone, refreshed by ACTION_TIMEZONE_CHANGED; [clockJumps] counts
+     * ACTION_TIME_CHANGED (the zone tables are built around "now", so a large clock change rebuilds them too).
+     */
+    private val zone = MutableStateFlow<ZoneId>(ZoneId.systemDefault())
+    private val clockJumps = MutableStateFlow(0)
+    private val timeReceiver = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, intent: Intent?) {
+            when (intent?.action) {
+                Intent.ACTION_TIMEZONE_CHANGED -> zone.value = ZoneId.systemDefault()
+                Intent.ACTION_TIME_CHANGED -> { zone.value = ZoneId.systemDefault(); clockJumps.value++ }
+            }
+        }
+    }
+    private var receiverRegistered = false
     private val hueSource = AmbientHueSource(context, imageLoader)
     private var pager: GuideWindowPager? = null
     private var windowW = 0
@@ -165,6 +190,7 @@ class GuideViewModel @Inject constructor(
         pager = pagerFactory.create(rowsCache, { machine.frame.metrics }, { scale -> AndroidTextMeasurer(context, scale) }, rowCellsBuilder, labels)
         debugProbe.register(machine)
         keyRouter.attach(machine) { searchFieldIdle }
+        registerTimeReceiver()
         forwardFeeds(reminderBook)
         startTicker()
         startup()
@@ -172,7 +198,7 @@ class GuideViewModel @Inject constructor(
 
     // ---- ShellHost
 
-    override val events: SharedFlow<ShellEvent> = shellEvents.asSharedFlow()
+    override val events: Flow<ShellEvent> = shellEvents.receiveAsFlow()
 
     override fun setViewport(viewport: Viewport) = controller.setViewport(viewport)
 
@@ -192,9 +218,9 @@ class GuideViewModel @Inject constructor(
     // ---- ShellEffects
 
     override fun setFullScreen(full: Boolean) = Unit // the root follows ui.mode and runs the scrim sequence (§3.13.5)
-    override fun toast(kind: GuideToast, arg: String?) { shellEvents.tryEmit(ShellEvent.Toast(kind, arg)) }
-    override fun announce(text: String) { shellEvents.tryEmit(ShellEvent.Announce(text)) }
-    override fun exitApp() { shellEvents.tryEmit(ShellEvent.Exit) }
+    override fun toast(kind: GuideToast, arg: String?) { shellEvents.trySend(ShellEvent.Toast(kind, arg)) }
+    override fun announce(text: String) { shellEvents.trySend(ShellEvent.Announce(text)) }
+    override fun exitApp() { shellEvents.trySend(ShellEvent.Exit) }
     override fun openSearch() = Unit // mode SEARCH is the machine's; the root swaps the screen and hides the viewport
     override fun openSettings() = Unit
 
@@ -237,6 +263,22 @@ class GuideViewModel @Inject constructor(
                 ambient.flat = !s.ambient || lowEndFor(s, device)
             }
         }
+        // G-S3/H-S3: the grid's time tables follow the 12/24 h setting and the device zone. A change resets them, drops
+        // the pager's snapshot texts and re-sends Settings so the machine re-runs its labels and panel.
+        scope.launch {
+            var applied: Triple<ZoneId, Boolean, Int>? = null
+            combine(settingsSource.settings.map { it.clock24 }.distinctUntilChanged(), zone, clockJumps) { c24, z, j -> Triple(z, c24, j) }
+                .collect { t ->
+                    if (t == applied) return@collect
+                    val first = applied == null
+                    applied = t
+                    labels.reset(t.first, t.second)
+                    if (!first) {
+                        pager?.invalidate()
+                        machine.dispatch(GuideEvent.Settings(settingsSource.settings.value, device))
+                    }
+                }
+        }
         scope.launch {
             // §2.13 item 10: the machine picks the startup source from this hint on the first Sources, so the hint is
             // read (on IO) before any Sources is forwarded; the view model never loads a lineup itself.
@@ -278,7 +320,9 @@ class GuideViewModel @Inject constructor(
             combine(controller.state, controller.video, settingsSource.settings) { st, v, s -> Triple(st, v, s) }.collect { (st, v, s) ->
                 val identity = st.target?.identity
                 val channel = identity?.let { channelOf(it) }
-                val still = v.posterMode || s.miniStill || device.stillByDefault
+                // H-B1: the HDR poster is not a still. It is the controller's MINI state (video track off, viewport
+                // MINI); mapping it to a still hid the viewport, which ended the poster, which showed MINI again: a loop.
+                val still = s.miniStill || device.stillByDefault
                 machine.dispatch(GuideEvent.Tuned(TunedStateMapper.map(st, channel?.rowId ?: -1L, still), channel))
             }
         }
@@ -360,13 +404,32 @@ class GuideViewModel @Inject constructor(
         if (controller.state.value !is PlaybackState.Idle) controller.setZapList(LineupZapList(lineup, library))
     }
 
+    private fun registerTimeReceiver() {
+        try {
+            val filter = IntentFilter().apply {
+                addAction(Intent.ACTION_TIMEZONE_CHANGED)
+                addAction(Intent.ACTION_TIME_CHANGED)
+            }
+            ContextCompat.registerReceiver(context, timeReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+            receiverRegistered = true
+        } catch (e: RuntimeException) {
+            BoxLog.w(TAG, "time receiver not registered: ${e.javaClass.simpleName}")
+        }
+    }
+
     override fun onCleared() {
         trimHandle.close()
         effects.close()
         pager?.close()
         pager = null
-        debugProbe.register(null)
-        keyRouter.attach(null) { true }
+        if (receiverRegistered) {
+            try { context.unregisterReceiver(timeReceiver) } catch (e: IllegalArgumentException) { /* already gone */ }
+            receiverRegistered = false
+        }
+        // H-S5: the old view model's onCleared can run after the new activity's view model attached its machine.
+        if (debugProbe.current === machine) debugProbe.register(null)
+        keyRouter.detach(machine)
+        shellEvents.close()
         super.onCleared()
     }
 

@@ -118,4 +118,9 @@ interface TimeLabels {
     fun duration(minutes: Int): String
     /** Rebuild the zone tables (zone or 12/24 h change). */
     fun reset(zone: java.time.ZoneId, clock24: Boolean)
+    /**
+     * (code review 2026-10-14, G-S3, G-L7) Bumped by every [reset]: caches of formatted times (the pager's cell time
+     * texts, the renderer's ruler widths) compare it instead of probing a label.
+     */
+    val version: Int get() = 0
 }

@@ -42,7 +42,7 @@ import app.thebox.ui.guide.screen.ProvideShellImageLoader
 import app.thebox.ui.playback.VideoLayer
 import app.thebox.ui.reminder.ReminderCard
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.drop
+import androidx.compose.runtime.DisposableEffect
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -51,7 +51,10 @@ const val VIDEO_LAYER_TAG = "video_layer"
 
 /** `SCRIM_MS` (Appendix B): the black scrim over the hole fades in/out in 120 ms (§3.13.5). */
 const val SCRIM_MS = 120
-/** Coming from a still, the FULL scrim waits for the re-enabled video track's first frame at most this long (N6). */
+/**
+ * Coming from a still (or the HDR poster), the FULL scrim lifts on the re-enabled video track's first rendered frame
+ * (`VideoInfo.renderedFirstFrames`, code review 2026-10-14, H-S10), waiting at most this long (N6).
+ */
 const val STILL_TO_FULL_MAX_WAIT_MS = 2_000L
 
 /** §3.13.2: what the hole shows for the displayed mode. */
@@ -87,7 +90,10 @@ private fun nothingTuned(t: TunedState) = t.identity == null || t.phase == MiniP
  *
  * GUIDE ↔ FULL runs the scrim sequence (§3.13.5): the scrim fades over the hole in [SCRIM_MS], the displayed mode
  * switches in one layout pass (viewport and video rect follow the *displayed* mode), two frames later it fades out;
- * coming from a still it waits for the next `Playing` (re-enabled video track) or [STILL_TO_FULL_MAX_WAIT_MS] (N6).
+ * coming from a still or the HDR poster it waits for the next rendered first frame or [STILL_TO_FULL_MAX_WAIT_MS] (N6).
+ *
+ * (code review 2026-10-14, H-B1) The HDR poster is the controller's state, not a hole mode: the viewport stays MINI
+ * (the controller keeps the video track off there) and the mini overlay and [HoleChrome] draw the poster still.
  */
 @Composable
 fun AppRoot(
@@ -118,9 +124,11 @@ fun AppRoot(
     var shown by remember { mutableStateOf(ui.mode) }
     val scrim = remember { Animatable(0f) }
     val tunedNow by rememberUpdatedState(ui.tuned)
+    val posterNow by rememberUpdatedState(video.posterMode)
     LaunchedEffect(ui.mode) {
         val target = ui.mode
         val from = shown
+        val framesBefore = host.video.value.renderedFirstFrames
         if (from == target) {
             scrim.snapTo(0f)
             return@LaunchedEffect
@@ -131,13 +139,14 @@ fun AppRoot(
             scrim.snapTo(0f)
             return@LaunchedEffect
         }
-        val fromStill = holeModeFor(from, tunedNow) == HoleMode.STILL
+        val fromStill = holeModeFor(from, tunedNow) == HoleMode.STILL || (from == ScreenMode.GUIDE && posterNow)
         scrim.animateTo(1f, tween(SCRIM_MS, easing = LinearEasing))
         shown = target
         withFrameNanos { }
         withFrameNanos { }
-        if (target == ScreenMode.FULL && fromStill) {
-            withTimeoutOrNull(STILL_TO_FULL_MAX_WAIT_MS) { host.playback.drop(1).first { it is PlaybackState.Playing } }
+        if (target == ScreenMode.FULL && fromStill && host.playback.value !is PlaybackState.Idle) {
+            // H-S10: the re-enabled track's first frame, not the next `Playing` (often equal, so never emitted).
+            withTimeoutOrNull(STILL_TO_FULL_MAX_WAIT_MS) { host.video.first { it.renderedFirstFrames != framesBefore } }
         }
         scrim.animateTo(0f, tween(SCRIM_MS, easing = LinearEasing))
     }
@@ -153,6 +162,9 @@ fun AppRoot(
     val sink = remember(host.keyRouter, requester) { host.keyRouter.sinkModifier(requester) }
     LaunchedEffect(ui.mode) { requestSinkFocus(requester) }
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { requestSinkFocus(requester) }
+    // H-S11: Compose drops the key-ups of keys held while the window loses focus or detaches; end their holds.
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { host.keyRouter.onFocusLost() }
+    DisposableEffect(host.keyRouter) { onDispose { host.keyRouter.onFocusLost() } }
 
     // ---- shell events
     val context = LocalContext.current
@@ -190,7 +202,7 @@ fun AppRoot(
             // everything except the video rect.
             videoLayer(rects.video)
             AmbientBackground(host.ambient, rects.video, ambientShadowHole, black = holeMode == HoleMode.FULL)
-            HoleChrome(rects, holeMode, host.ambient, scrim = { scrim.value })
+            HoleChrome(rects, holeMode, host.ambient, scrim = { scrim.value }, poster = holeMode == HoleMode.MINI && video.posterMode)
             Box(Modifier.fillMaxSize().testTag(KEY_SINK_TAG).then(sink)) {
                 when (shown) {
                     ScreenMode.GUIDE -> GuideScreen(

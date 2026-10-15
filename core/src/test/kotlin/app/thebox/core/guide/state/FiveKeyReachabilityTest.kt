@@ -35,6 +35,22 @@ class FiveKeyReachabilityTest {
     private class Reached {
         val menu = HashSet<MenuItem>(); val buttons = HashSet<PanelButton>(); val chips = HashSet<HeaderChip>()
         val overlays = HashSet<String>(); val modes = HashSet<ScreenMode>(); var exited = false
+        /** (code review 2026-10-14, test gap 3) What SELECT on each reached item did: item → effect names seen. */
+        val selected = HashMap<String, HashSet<String>>()
+    }
+
+    /** The item SELECT acts on in this state, or null (grid cells, chips and tabs are covered by keys.csv). */
+    private fun selectable(w: GuideWorld): String? {
+        val ui = w.ui
+        if (ui.reminder != null) return null
+        return when (val o = ui.overlay) {
+            is Overlay.Menu -> "menu:" + o.items[o.focused]
+            is Overlay.Groups -> o.entries.getOrNull(o.focused - o.shortcuts.size)?.let { "groups:" + it.section } ?: "shortcut:" + o.shortcuts[o.focused]
+            is Overlay.Sheet -> "sheet:" + o.focused
+            is Overlay.Exit -> if (o.dialog) "exit:" + o.focused else null
+            null -> if (ui.mode == ScreenMode.GUIDE && ui.zone == app.thebox.core.guide.Zone.PANEL) ui.panel?.buttons?.getOrNull(ui.panelFocused)?.let { "button:$it" } else null
+            else -> null
+        }
     }
 
     private fun observe(w: GuideWorld, r: Reached) {
@@ -59,6 +75,34 @@ class FiveKeyReachabilityTest {
         ).joinToString("|")
     }
 
+    private companion object {
+        /** Item → effects SELECT may produce (alternatives depend on the cell; at least one must be seen). */
+        val EXPECTED: Map<String, Set<String>> = buildMap {
+            put("menu:" + MenuItem.WATCH, setOf("playArchive"))
+            put("menu:" + MenuItem.WATCH_FROM_START, setOf("playArchive"))
+            put("menu:" + MenuItem.REMIND, setOf("setReminder"))
+            put("menu:" + MenuItem.CANCEL_REMINDER, setOf("cancelReminder"))
+            put("menu:" + MenuItem.ADD_FAVOURITE, setOf("setFavourite"))
+            put("menu:" + MenuItem.REMOVE_FAVOURITE, setOf("setFavourite"))
+            put("menu:" + MenuItem.HIDE_CHANNEL, setOf("hideChannel"))
+            put("button:" + PanelButton.WATCHING, setOf("setFullScreen"))
+            put("button:" + PanelButton.WATCH_NOW, setOf("tune", "setFullScreen", "retry"))
+            put("button:" + PanelButton.WATCH, setOf("playArchive"))
+            put("button:" + PanelButton.FROM_START, setOf("playArchive"))
+            put("button:" + PanelButton.REMIND, setOf("setReminder"))
+            put("button:" + PanelButton.REMINDER_SET, setOf("cancelReminder"))
+            put("button:" + PanelButton.WATCH_CHANNEL_NOW, setOf("tune"))
+            put("button:" + PanelButton.MORE, setOf("queryFavourite"))
+            put("sheet:0", setOf("setReminder", "cancelReminder"))
+            put("sheet:1", setOf("tune"))
+            put("groups:FAVOURITES", setOf("loadLineup:Favourites"))
+            put("groups:ALL", setOf("loadLineup:All"))
+            put("groups:GROUP", setOf("loadLineup:Group"))
+            put("shortcut:SEARCH", setOf("openSearch"))
+            put("shortcut:SETTINGS", setOf("openSettings"))
+        }
+    }
+
     @ParameterizedTest
     @EnumSource(ExitConfirmation::class)
     fun everyFunctionReachableWithFiveKeys(exit: ExitConfirmation) {
@@ -73,7 +117,12 @@ class FiveKeyReachabilityTest {
                 val w = world(exit)
                 for (a in seq) w.press(a)
                 if (w.exited) continue
+                val item = if (k == BoxAction.SELECT) selectable(w) else null
+                val mark = w.calls.calls.size
                 w.press(k)
+                if (item != null) r.selected.getOrPut(item) { HashSet() } += w.calls.calls.drop(mark).map { c ->
+                    if (c.name == "loadLineup") "loadLineup:" + c.args[0]!!.javaClass.simpleName else c.name
+                }
                 observe(w, r)
                 if (w.exited) continue
                 if (seen.add(signature(w))) next += seq + k
@@ -95,6 +144,10 @@ class FiveKeyReachabilityTest {
             if (!r.exited) add("exit")
         }
         assertTrue(missing.isEmpty(), "$exit: not reachable with five keys: $missing (states ${seen.size})")
+        // Reaching an item is not enough: SELECT on it must do what it says (any one of the alternatives).
+        val wrong = EXPECTED.filter { (item, effects) -> r.selected[item]?.any { it in effects } != true }
+            .map { (item, effects) -> "$item → expected one of $effects, saw ${r.selected[item]}" }
+        assertTrue(wrong.isEmpty(), "$exit: SELECT without its effect: $wrong")
         if (exit != ExitConfirmation.ASK) assertTrue("ExitDialog" !in r.overlays, "the dialog only exists in ASK")
     }
 }

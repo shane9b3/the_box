@@ -26,13 +26,12 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import app.thebox.core.guide.GuideUiState
+import app.thebox.core.guide.SyncChip
 import app.thebox.core.guide.Zone
 import app.thebox.ui.R
 import app.thebox.ui.guide.overlay.SyncChipView
 import app.thebox.ui.theme.BoxTextStyles
 import kotlinx.coroutines.delay
-import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
@@ -47,12 +46,12 @@ enum class GuideTab { GUIDE, SEARCH, SETTINGS }
  * recomposes once a minute from its own minute-aligned producer, not from `GuideUiState` (§3.5.2).
  */
 @Composable
-fun HeaderTabs(state: GuideUiState, clock24: Boolean, modifier: Modifier = Modifier) {
+fun HeaderTabs(zone: Zone, tabFocused: Int, sync: SyncChip?, clock24: Boolean, modifier: Modifier = Modifier) {
     Row(modifier.fillMaxWidth().testTag(HEADER_TABS_TAG), verticalAlignment = Alignment.CenterVertically) {
         Wordmark()
         Row(Modifier.padding(start = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             GuideTab.entries.forEachIndexed { i, tab ->
-                val focused = state.zone == Zone.TABS && state.tabFocused == i
+                val focused = zone == Zone.TABS && tabFocused == i
                 val active = tab == GuideTab.GUIDE
                 Chip(
                     focused = focused,
@@ -71,7 +70,7 @@ fun HeaderTabs(state: GuideUiState, clock24: Boolean, modifier: Modifier = Modif
                 }
             }
         }
-        state.sync?.let { SyncChipView(state, Modifier.padding(start = 16.dp)) }
+        sync?.let { SyncChipView(it, Modifier.padding(start = 16.dp)) }
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
             Clock(clock24)
         }
@@ -104,8 +103,9 @@ private fun Clock(clock24: Boolean) {
     val date = Date(now)
     // The configuration's locale (observable: a locale change recomposes); lint NonObservableLocale.
     val locale: Locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
-    val dateText = SimpleDateFormat("EEE d MMM", locale).format(date)
-    val timeText = SimpleDateFormat(if (clock24) "HH:mm" else "h:mm a", locale).format(date)
+    // H-S9: formatters cached per (locale, zone, clock form), not built on every recomposition.
+    val dateText = TimeFormats.format("EEE d MMM", locale, date)
+    val timeText = TimeFormats.format(if (clock24) "HH:mm" else "h:mm a", locale, date)
     Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Bottom) {
         Line(dateText, GuideUi.sans(18, color = GuideUi.Fg65), Modifier.padding(bottom = 6.dp))
         Line(timeText, BoxTextStyles.Clock.copy(color = GuideUi.Fg))

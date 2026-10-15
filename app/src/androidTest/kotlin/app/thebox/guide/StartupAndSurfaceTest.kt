@@ -30,13 +30,20 @@ class StartupAndSurfaceTest : GuideTestBase() {
         stopPlayback()
         val t0 = SystemClock.elapsedRealtime()
         relaunchGuide()
-        val firstFrame = SystemClock.elapsedRealtime()
+        val registered = SystemClock.elapsedRealtime()
+        // (code review 2026-10-14, test gap 5) "First frame" is the new activity's first drawn frame, not the moment the
+        // machine registered (which is before setContent).
+        var guard = 0
+        while (MainActivity.firstFrameAtElapsedMs < t0 && guard++ < 100) Thread.sleep(50)
+        val firstFrame = MainActivity.firstFrameAtElapsedMs
+        assertTrue("first frame recorded after the relaunch", firstFrame >= t0)
+        awaitUi("lineup shown", 3_000) { it.empty == null && it.sourceLabel.isNotEmpty() }
         awaitUi("last channel tuned in the mini player", 3_000) { it.tuned.identity == last.identity && it.tuned.phase != MiniPhase.IDLE }
         awaitFrame("focus on the last channel's row at now", 3_000) { f ->
             val fo = f.focus
             fo != null && f.rows.channel(fo.row)?.identity == last.identity && nowMin() in fo.cellStart until fo.cellEnd
         }
-        log("I-1: machine ${firstFrame - t0} ms after launch, startup state ${SystemClock.elapsedRealtime() - firstFrame} ms after it")
+        log("I-1: machine ${registered - t0} ms after launch, first frame ${firstFrame - t0} ms, startup state ${SystemClock.elapsedRealtime() - firstFrame} ms after the first frame")
         assertTrue("startup within 3 s of the guide's first frame", SystemClock.elapsedRealtime() - firstFrame <= 3_000)
     }
 

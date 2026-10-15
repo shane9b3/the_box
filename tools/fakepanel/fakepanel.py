@@ -195,6 +195,29 @@ class Clip:
         self.plan = TsPlan(data)
 
 
+_PNG_CACHE = {}
+
+
+def tiny_png(key, w=96, h=54):
+    """A valid 8-bit RGB PNG (w x h) in one colour derived from [key]: a hue wheel step per id, full saturation."""
+    if key in _PNG_CACHE:
+        return _PNG_CACHE[key]
+    hue = (key * 47) % 360
+    c, x = 200, int(200 * (1 - abs((hue / 60) % 2 - 1)))
+    r, g, b = [(c, x, 0), (x, c, 0), (0, c, x), (0, x, c), (x, 0, c), (c, 0, x)][hue // 60]
+    raw = b"".join(b"\x00" + bytes((r + 40, g + 40, b + 40)) * w for _ in range(h))
+
+    def chunk(kind, data):
+        body = kind + data
+        return len(data).to_bytes(4, "big") + body + (zlib.crc32(body) & 0xFFFFFFFF).to_bytes(4, "big")
+
+    ihdr = w.to_bytes(4, "big") + h.to_bytes(4, "big") + bytes((8, 2, 0, 0, 0))
+    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", ihdr) + chunk(b"IDAT", zlib.compress(raw, 9)) + chunk(b"IEND", b"")
+    if len(_PNG_CACHE) < 25000:
+        _PNG_CACHE[key] = png
+    return png
+
+
 def _read(path):
     with open(path, "rb") as fh:
         return fh.read()
@@ -615,6 +638,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
             segs = p.clips[p.channel(int(m[1]))["media"]].segments
             return self.send(200, segs[int(m[2]) % len(segs)][0], "video/mp2t")
         if path.startswith("/logo/"):
+            # Synthetic mode (M3 code review 2026-10-14, O-3): a tiny valid PNG per channel, one colour per id, so the
+            # guide's logo display, LogoCache hits and the ambient hue path run as with a real panel. Otherwise the
+            # historical 8-byte signature (decoders reject it; the M2 suite never draws logos).
+            if p.syn() is not None:
+                m = re.match(r"^/logo/(\d+)\.png$", path)
+                if m:
+                    return self.send(200, tiny_png(int(m[1])), "image/png")
             return self.send(200, b"\x89PNG\r\n\x1a\n", "image/png")
         # Flussonic-style archive under the live path (catalog: catchup="flussonic" on ch4):
         # /live/u/p/{id}/{archive|index|video|mono}-{FROM}-{DURATION|now}.{m3u8|ts}, FROM = unix UTC s.

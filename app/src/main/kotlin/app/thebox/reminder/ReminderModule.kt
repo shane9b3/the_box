@@ -23,6 +23,10 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import app.thebox.data.di.StartupGate
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import javax.inject.Qualifier
@@ -58,7 +62,13 @@ object ReminderModule {
         settings: GuideSettingsSource,
         @AppForeground foreground: StateFlow<Boolean>,
         @ApplicationScope scope: CoroutineScope,
-    ): ReminderSchedulerImpl = ReminderSchedulerImpl(book, planner, settings, foreground, scope, System::currentTimeMillis)
+        gate: StartupGate,
+    ): ReminderSchedulerImpl {
+        // (M3 code review 2026-10-14, O-7) No reminder work until the process is STARTED and the first frame has drawn.
+        val ready = combine(foreground, gate.isOpen) { fg, open -> fg && open }
+            .stateIn(scope, SharingStarted.Eagerly, foreground.value && gate.isOpen.value)
+        return ReminderSchedulerImpl(book, planner, settings, ready, scope, System::currentTimeMillis)
+    }
 
     @Provides
     fun alerts(impl: ReminderSchedulerImpl): ReminderAlerts = impl

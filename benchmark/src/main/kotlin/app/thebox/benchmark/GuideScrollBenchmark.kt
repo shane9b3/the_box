@@ -83,7 +83,14 @@ class GuideScrollBenchmark(private val perf: String) {
 
     private fun journey(block: MacrobenchmarkScope.() -> Unit) = rule.measureRepeated(
         packageName = target,
-        metrics = listOf(FrameTimingMetric(), TraceSectionMetric("guide-draw", TraceSectionMetric.Mode.Sum)),
+        metrics = listOf(
+            FrameTimingMetric(),
+            TraceSectionMetric("guide-draw", TraceSectionMetric.Mode.Sum),
+            // M3 code review 2026-10-14, O-2: where guide-draw goes (renderer sub-sections).
+            TraceSectionMetric("guide-draw-chrome", TraceSectionMetric.Mode.Sum),
+            TraceSectionMetric("guide-draw-cells", TraceSectionMetric.Mode.Sum),
+            TraceSectionMetric("guide-draw-text", TraceSectionMetric.Mode.Sum),
+        ),
         compilationMode = CompilationMode.Partial(BaselineProfileMode.UseIfAvailable),
         startupMode = StartupMode.WARM,
         iterations = ITERATIONS,

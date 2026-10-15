@@ -1,5 +1,6 @@
 package app.thebox.guide
 
+import android.os.SystemClock
 import android.graphics.Color
 import android.view.KeyEvent
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -48,15 +49,49 @@ class LowEndTest : GuideTestBase() {
         val stats = main { controller.stats.value }
         main { controller.setStatsEnabled(false) }
         log("I-16 stats in still mode: v=${stats.videoDecoder} a=${stats.audioDecoder}")
-        assertTrue("audio keeps decoding", stats.audioDecoder != null)
+        assertTrue("audio decoder known", stats.audioDecoder != null)
         val holeStill = colourfulness(shot, holeRect())
         log("I-16 hole colourfulness with the still: $holeStill")
 
+        // (code review 2026-10-14, H-S10) The scrim lifts on the re-enabled track's first rendered frame: measure it.
+        val frames0 = main { controller.video.value.renderedFirstFrames }
+        val ok = SystemClock.elapsedRealtime()
         press(KeyEvent.KEYCODE_DPAD_CENTER)
         awaitUi("FULL") { it.mode == ScreenMode.FULL }
-        Thread.sleep(2_500) // scrim until first media or 2 s
+        var firstFrameMs = -1L
+        while (SystemClock.elapsedRealtime() - ok < 5_000) {
+            if (main { controller.video.value.renderedFirstFrames } != frames0) { firstFrameMs = SystemClock.elapsedRealtime() - ok; break }
+            Thread.sleep(20)
+        }
+        log("I-16 still → FULL: first rendered frame ${firstFrameMs} ms after OK")
+        assertTrue("still → FULL renders a frame within 2 s (${firstFrameMs} ms)", firstFrameMs in 0..2_000)
+        Thread.sleep(1_000) // the scrim fades out right after that frame
         val full = screenshot("i16-full")
         val c = colourfulness(full, intArrayOf(0, 0, full.width, full.height))
         assertTrue("FULL shows video after the scrim (colourfulness $c)", c > 20.0)
+    }
+
+    /**
+     * (code review 2026-10-14, test gap 8) I-16's "audio keeps decoding" with the video track off, proved by the playback
+     * position, not by `stats.audioDecoder` (which stays set once known). Open item Q-1 (review doc): with the track
+     * off the session rebuffers once right after first media; once, right after a stats-overlay toggle, it stayed in
+     * `Buffering` for over 8 s (also at `dc88fab`), so this probe runs on its own, without the toggle.
+     */
+    @Test
+    fun audioKeepsPlayingWithTheVideoTrackOff() {
+        assumeTrue("switches not applied", app.thebox.debug.GuideDebugReceiver.status.value.settingsApplied)
+        launchGuide()
+        awaitGuideReady()
+        toRow(0)
+        tuneFocusedRow()
+        awaitUi("still in the mini player") { it.tuned.still && it.tuned.phase == MiniPhase.PLAYING }
+        Thread.sleep(1_500)
+        // (code review 2026-10-14, test gap 8) The decoder name stays set once known: prove audio is still decoding by
+        // the playback position advancing while the video track is off.
+        val p0 = main { controller.position().positionMs }
+        Thread.sleep(2_000)
+        val p1 = main { controller.position().positionMs }
+        log("I-16 position advanced ${p1 - p0} ms in 2 s with the video track off")
+        assertTrue("audio keeps decoding: position advanced ${p1 - p0} ms in 2 s", p1 - p0 >= 1_000)
     }
 }

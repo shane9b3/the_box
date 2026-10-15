@@ -50,6 +50,11 @@ class GuideWorld(
     val dataWindow: GuideDataWindow = GuideDataWindow(pastDays = 2, futureDays = 2),
     startMs: Long = NOW_MIN * 60_000L + 20_000L,
     realNavigator: Boolean = REAL_NAVIGATOR,
+    /**
+     * (code review 2026-10-14, test gap 2) Answer order at start: false = the startup Tuned before Sources (the
+     * default), true = Sources and the first Lineup first, the startup Tuned after them (H-S2).
+     */
+    tuneAfterLineup: Boolean = false,
 ) {
     var nowMs = startMs
     val calls = RecordingGuideEffects()
@@ -59,6 +64,12 @@ class GuideWorld(
     var tunedHash = 0L
     var exited = false
     var archiveSucceeds = true
+    /** H-S7: "Switch now" finds the reminder's channel gone (the host toasts and tunes nothing). */
+    var reminderChannelGone = false
+    /** Hidden channels (Sim.hideChannel): left out of every lineup, which re-emits (H-S1). */
+    val hidden = HashSet<Long>()
+    var currentSource: GuideSource? = null
+        private set
     val rows = FakeGuideRows(channels)
     val labels = FakeTimeLabels()
     /**
@@ -87,9 +98,10 @@ class GuideWorld(
         send(GuideEvent.DataWindow(dataWindow))
         send(GuideEvent.Generation(GENERATION))
         machine.lastSourceHint = lastSourceHint
-        if (startTuned) tuneTo(channels[tunedRow])
+        if (startTuned && !tuneAfterLineup) tuneTo(channels[tunedRow])
         if (sendSources) send(GuideEvent.Sources(entries))
         flush()
+        if (startTuned && tuneAfterLineup) { tuneTo(channels[tunedRow]); flush() }
     }
 
     fun send(e: GuideEvent) { machine.dispatch(e); flush() }
@@ -121,17 +133,26 @@ class GuideWorld(
 
     private fun lineupFor(source: GuideSource): GuideLineup {
         val ids = when (source) {
-            is GuideSource.Favourites -> channels.filter { it.identityHash in favourites }.map { it.rowId }
-            else -> channels.map { it.rowId }
+            is GuideSource.Favourites -> channels.filter { it.identityHash in favourites && it.identityHash !in hidden }.map { it.rowId }
+            else -> channels.filter { it.identityHash !in hidden }.map { it.rowId }
         }
         return GuideLineup(source, lineupVersion, ids.toLongArray(), archiveDaysUpperBound = channels.maxOf { it.archiveDays })
+    }
+
+    /** The library's re-emission of the current source after a write (hide, unfavourite): same version, new rows. */
+    private fun reemitLineup() {
+        val src = currentSource ?: return
+        val l = lineupFor(src)
+        rows.rows = l.rowIds.map { id -> channels.first { it.rowId == id } }
+        queue += GuideEvent.Lineup(l)
     }
 
     private inner class Sim : GuideEffects by calls {
         override fun loadLineup(source: GuideSource) {
             calls.loadLineup(source)
+            currentSource = source
             val l = lineupFor(source)
-            if (source is GuideSource.Favourites) {
+            if (source is GuideSource.Favourites || hidden.isNotEmpty()) {
                 // Favourites lineups are a different row order: give them their own snapshot-free lineup.
                 rows.rows = l.rowIds.map { id -> channels.first { it.rowId == id } }
             } else {
@@ -149,6 +170,12 @@ class GuideWorld(
         override fun setFavourite(channel: GuideChannel, on: Boolean) {
             calls.setFavourite(channel, on)
             if (on) favourites += channel.identityHash else favourites -= channel.identityHash
+            if (currentSource is GuideSource.Favourites) reemitLineup()
+        }
+        override fun hideChannel(channel: GuideChannel) {
+            calls.hideChannel(channel)
+            hidden += channel.identityHash
+            reemitLineup()
         }
         override fun setReminder(channel: GuideChannel, info: ProgrammeInfo) {
             calls.setReminder(channel, info)
@@ -165,10 +192,12 @@ class GuideWorld(
             val ch = channels.firstOrNull { it.number == number }
             queue += GuideEvent.Number(token, ch, if (ch == null) -1 else rows.indexOf(ch.rowId))
         }
-        override fun answerReminder(reminderId: Long, accept: Boolean) {
-            calls.answerReminder(reminderId, accept)
+        override fun answerReminder(alert: ReminderAlert, accept: Boolean) {
+            calls.answerReminder(alert, accept)
             queue += GuideEvent.Alert(null)
-            if (accept) tuneTo(channels[1])
+            if (!accept) return
+            if (reminderChannelGone) calls.toast(GuideToast.REMINDER_CHANNEL_GONE, alert.channelName)
+            else tuneTo(channels.first { it.identity == alert.identity })
         }
         override fun groupAction(entry: GuideSourceEntry, action: GroupAction) = calls.groupAction(entry, action)
         override fun exitApp() { calls.exitApp(); exited = true }

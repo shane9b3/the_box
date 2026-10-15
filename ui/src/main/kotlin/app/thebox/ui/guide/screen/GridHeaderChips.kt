@@ -15,9 +15,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import app.thebox.core.guide.GuideUiState
 import app.thebox.core.guide.HeaderChip
-import app.thebox.core.guide.Zone
 import app.thebox.ui.R
 
 const val GROUP_CHIP_TAG = "group_chip"
@@ -37,10 +35,15 @@ private val ChipBorder = GuideUi.White12
  * Day chip right-aligned ending at x 1827. Positions are absolute design px on the 1920 × 1080 canvas.
  */
 @Composable
-fun GridHeaderChips(state: GuideUiState, modifier: Modifier = Modifier) {
+fun GridHeaderChips(
+    chips: List<HeaderChip>,
+    focusedChip: HeaderChip?,
+    sourceLabel: String,
+    nowDirection: Int,
+    dayLabel: String,
+    modifier: Modifier = Modifier,
+) {
     Box(modifier) {
-        val chips = state.headerChips
-        val focusedChip = if (state.zone == Zone.HEADER) chips.getOrNull(state.headerFocused) else null
         Chip(
             focused = focusedChip == HeaderChip.GROUP,
             modifier = Modifier.offset(93.dp, 507.dp).widthIn(max = 184.dp).height(36.dp).testTag(GROUP_CHIP_TAG),
@@ -48,20 +51,20 @@ fun GridHeaderChips(state: GuideUiState, modifier: Modifier = Modifier) {
             border = ChipBorder,
             padding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
         ) { color ->
-            Line(state.sourceLabel, GuideUi.sans(16, FontWeight.SemiBold, color), Modifier.weight(1f, fill = false))
+            Line(sourceLabel, GuideUi.sans(16, FontWeight.SemiBold, color), Modifier.weight(1f, fill = false))
             Line("▾", GuideUi.sans(14, color = color))
         }
         Box(Modifier.offset(0.dp, 507.dp).width(1827.dp).height(36.dp), contentAlignment = Alignment.CenterEnd) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (HeaderChip.NOW in chips && state.nowDirection != 0) {
+                if (HeaderChip.NOW in chips && nowDirection != 0) {
                     Chip(focusedChip == HeaderChip.NOW, Modifier.height(36.dp), ChipFillOpaque, ChipBorder, padding = PaddingValues(horizontal = 14.dp)) { color ->
-                        val label = if (state.nowDirection < 0) R.string.guide_chip_now_left else R.string.guide_chip_now_right
+                        val label = if (nowDirection < 0) R.string.guide_chip_now_left else R.string.guide_chip_now_right
                         Line(stringResource(label), GuideUi.sans(16, FontWeight.SemiBold, color))
                     }
                 }
                 if (HeaderChip.DAY in chips) {
                     Chip(focusedChip == HeaderChip.DAY, Modifier.height(36.dp).testTag(DAY_CHIP_TAG), ChipFillOpaque, ChipBorder, padding = PaddingValues(horizontal = 14.dp)) { color ->
-                        Line(state.dayLabel, GuideUi.sans(16, FontWeight.SemiBold, color))
+                        Line(dayLabel, GuideUi.sans(16, FontWeight.SemiBold, color))
                         Line("▾", GuideUi.sans(14, color = color))
                     }
                 }

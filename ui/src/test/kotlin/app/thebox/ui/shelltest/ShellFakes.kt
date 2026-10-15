@@ -107,7 +107,8 @@ class FakeShellHost(
     val playbackFlow = MutableStateFlow<PlaybackState>(PlaybackState.Idle)
     override val playback: StateFlow<PlaybackState> = playbackFlow
     override val settings: StateFlow<GuideSettings> = MutableStateFlow(GuideSettings())
-    override val lowEnd: StateFlow<Boolean> = MutableStateFlow(false)
+    val lowEndFlow = MutableStateFlow(false)
+    override val lowEnd: StateFlow<Boolean> = lowEndFlow
     override val ambient = AmbientState().apply { flat = true }
     val eventsFlow = MutableSharedFlow<ShellEvent>(extraBufferCapacity = 8)
     override val events: SharedFlow<ShellEvent> = eventsFlow
@@ -115,7 +116,9 @@ class FakeShellHost(
     override val versionName = "test"
     val viewports = ArrayList<Viewport>()
     var window = 0 to 0
-    override fun setViewport(viewport: Viewport) { viewports += viewport }
+    /** Called after each [setViewport] (a test can mimic the controller's reaction, e.g. the HDR poster rule). */
+    var onViewport: (Viewport) -> Unit = {}
+    override fun setViewport(viewport: Viewport) { viewports += viewport; onViewport(viewport) }
     override fun onWindowSize(widthPx: Int, heightPx: Int) { window = widthPx to heightPx }
     override fun focusedCellBounds(out: FloatArray): Boolean = false
 }

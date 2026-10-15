@@ -23,10 +23,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.Text
-import app.thebox.core.guide.GuideUiState
 import app.thebox.core.guide.PanelButton
 import app.thebox.core.guide.PanelState
-import app.thebox.core.guide.Zone
 import app.thebox.ui.R
 import app.thebox.ui.theme.BoxTextStyles
 import app.thebox.ui.theme.DesignTokens
@@ -43,9 +41,9 @@ const val FOCUSED_PANEL_TAG = "focused_panel"
 const val COMPOSITIONS_PANEL = "FocusedPanel"
 
 @Composable
-fun FocusedPanel(state: GuideUiState, modifier: Modifier = Modifier) {
+fun FocusedPanel(panel: PanelState?, focusedButton: Int, modifier: Modifier = Modifier) {
     if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) androidx.compose.runtime.SideEffect { app.thebox.ui.guide.GuideDebugCounters.bump(COMPOSITIONS_PANEL) } // I-12
-    val panel = state.panel ?: return
+    if (panel == null) return
     Column(modifier.testTag(FOCUSED_PANEL_TAG), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         MetaRow(panel)
         val titleStyle = remember { BoxTextStyles.Title.copy(color = GuideUi.Fg, lineBreak = LineBreak.Heading) }
@@ -58,7 +56,7 @@ fun FocusedPanel(state: GuideUiState, modifier: Modifier = Modifier) {
         if (panel.buttons.isNotEmpty()) {
             Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 panel.buttons.forEachIndexed { i, b ->
-                    PanelButtonView(b, primary = i == 0, focused = state.zone == Zone.PANEL && state.panelFocused == i)
+                    PanelButtonView(b, primary = i == 0, focused = focusedButton == i)
                 }
             }
         }

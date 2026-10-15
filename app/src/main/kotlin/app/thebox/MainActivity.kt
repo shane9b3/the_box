@@ -1,6 +1,8 @@
 package app.thebox
 
 import android.os.Bundle
+import androidx.core.view.OneShotPreDrawListener
+import app.thebox.data.di.StartupGate
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -22,16 +24,21 @@ import javax.inject.Inject
 
 /**
  * The one activity (docs/design/m3-guide.md §1.4, §3.13.1, §3.16.1): keeps M2's screen-on and API < 31 display-mode
- * wiring, warms the player before the first composition (M2 E-L17), and hosts [AppRoot] with the guide view model as
+ * wiring, and hosts [AppRoot] with the guide view model as
  * its [app.thebox.ui.root.ShellHost]. View models come from the activity's Hilt default factory (`by viewModels()`), so
  * no `hilt-navigation-compose` is needed. The Search screen's effects go to the guide view model (B7, §2.13 item 7);
  * `onTrimMemory` goes to [GuideTrim] (§4.7, §2.13 item 6).
+ *
+ * (M3 code review 2026-10-14, O-7) Startup order: the guide view model first (its feeds and the startup tune are the
+ * first frame's content), then the composition; after the first frame has drawn, the [StartupGate] opens (reminders)
+ * and `controller.prewarm()` runs (a no-op when the composition's `VideoLayer` already built the engine).
  */
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     @Inject lateinit var controller: PlaybackController
     @Inject lateinit var renderer: GuideRenderer
     @Inject lateinit var guideTrim: GuideTrim
+    @Inject lateinit var startupGate: StartupGate
 
     private val guide: GuideViewModel by viewModels()
     private val search: SearchViewModel by viewModels()
@@ -41,7 +48,6 @@ class MainActivity : ComponentActivity() {
         // M2 §3.10.6 / §3.9.2: screen-on while playing, API < 31 AFR mode on this window.
         lifecycleScope.launch { controller.keepScreenOn.collect { if (it) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) } }
         WindowDisplayModeBinder(controller).bind(this)
-        controller.prewarm()
 
         val host = guide // creates the view model: feeds, startup tune (§3.16.1)
         lifecycleScope.launch { search.effects.collect { host.onSearchEffect(it) } }
@@ -56,11 +62,26 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+        val decor = window.decorView
+        OneShotPreDrawListener.add(decor) {
+            // Runs after the first frame's draw pass (posted from its pre-draw).
+            decor.post {
+                firstFrameAtElapsedMs = android.os.SystemClock.elapsedRealtime()
+                startupGate.open()
+                controller.prewarm()
+            }
+        }
     }
 
     @Suppress("DEPRECATION")
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         guideTrim.onTrimMemory(level)
+    }
+
+    companion object {
+        /** `elapsedRealtime` just after the latest instance's first frame drew (I-1 measures from it). */
+        @Volatile var firstFrameAtElapsedMs: Long = 0L
+            private set
     }
 }

@@ -48,7 +48,7 @@ internal class ControllerFixture {
     val controller = PlaybackControllerImpl(
         context, provider, memory, settings, resolver, brokers, transport, playerFactory, sources, events, clock,
         ladder, limiter, debouncer, bufferFsm, engine, gate, MediaSessionFactory.None, device,
-    )
+    ).also { it.ioDispatcher = Dispatchers.Main.immediate } // O-3 hop runs inline on the paused looper
 
     val exo get() = playerFactory.exo
     val states = mutableListOf<PlaybackState>()

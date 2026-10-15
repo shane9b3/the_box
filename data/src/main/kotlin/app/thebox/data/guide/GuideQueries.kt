@@ -36,11 +36,18 @@ class GuideQueries @Inject constructor(
     private val playlists: PlaylistRepository,
     private val catchupResolver: CatchupResolver,
     private val refs: EpgRefResolver,
+    /** (code review 2026-10-14, O-1) Per-playlist facts cached behind table invalidation (null: read every call). */
+    private val meta: GuideMetaCache? = null,
 ) {
     /** A lineup's row ids (process-local `channel.id`s) and its archive upper bound (§3.3.4). */
     class LineupRows(val ids: LongArray, val archiveDaysUpperBound: Int)
 
+    /** Diagnostics (tests): lineup queries run so far. */
+    @Volatile var lineupQueries: Int = 0
+        private set
+
     suspend fun lineup(source: GuideSource, unlocked: Boolean): LineupRows = db.read {
+        lineupQueries++
         val q = lineupClause(source)
         val ids = longs("SELECT c.id ${q.from} WHERE ${q.where} $PARENTAL_RAW ${q.order}") { st -> st.bindBool(1, unlocked); q.bind(st) }
         val archive = int("SELECT $ARCHIVE_DAYS ${q.from} WHERE ${q.where} $PARENTAL_RAW") { st -> st.bindBool(1, unlocked); q.bind(st) }
@@ -92,7 +99,11 @@ class GuideQueries @Inject constructor(
         val playlistCache = HashMap<Long, Pair<PlaylistEntity, PlaylistCatchupDefaults>?>()
         for (r in raw.values) {
             if (!playlistCache.containsKey(r.playlistId)) {
-                playlistCache[r.playlistId] = playlists.get(r.playlistId)?.let { it to playlists.catchupDefaults(it) }
+                playlistCache[r.playlistId] = if (meta != null) {
+                    meta.playlist(r.playlistId)?.let { it.entity to it.catchup }
+                } else {
+                    playlists.get(r.playlistId)?.let { it to playlists.catchupDefaults(it) }
+                }
             }
         }
         val resolved = refs.resolve(raw.values.map { EpgRefResolver.Input(it.identity, it.channelShift, it.prefShift) })
@@ -129,6 +140,33 @@ class GuideQueries @Inject constructor(
         val ms = (System.nanoTime() - t0) / 1e6
         if (ms > BLOCK_LOG_MS) BoxLog.i(TAG) { "row block of ${wanted.size} in ${"%.1f".format(ms)} ms" }
         return out
+    }
+
+    /**
+     * (code review 2026-10-14, G-S6) A hash of the `channel_prefs` columns the guide reads (hidden, locked, custom
+     * name/number/logo/sort, shift) over the rows that set any of them, and with [withRecentCount] the number of
+     * watched channels. A tune's watch-history and learned-playback writes leave it unchanged, so they no longer
+     * re-run the lineup, the Groups panel or the row blocks.
+     */
+    suspend fun prefsSignature(withRecentCount: Boolean): Long = db.read {
+        var h = Hash64.of(null)
+        usePrepared(PREFS_SIGNATURE_SELECT) { st ->
+            while (st.step()) {
+                h = Hash64.long(h, st.getLong(0))
+                h = Hash64.str(h, st.getText(1))
+                h = Hash64.long(h, st.getLong(2))
+                h = Hash64.long(h, if (st.isNull(3)) -1L else st.getLong(3))
+                h = Hash64.str(h, if (st.isNull(4)) null else st.getText(4))
+                h = Hash64.long(h, if (st.isNull(5)) Long.MIN_VALUE else st.getLong(5))
+                h = Hash64.str(h, if (st.isNull(6)) null else st.getText(6))
+                h = Hash64.long(h, if (st.isNull(7)) Long.MIN_VALUE else st.getLong(7))
+                h = Hash64.long(h, if (st.isNull(8)) Long.MIN_VALUE else st.getLong(8))
+            }
+        }
+        if (withRecentCount) {
+            h = Hash64.long(h, usePrepared("SELECT COUNT(*) FROM channel_prefs WHERE last_watched_at IS NOT NULL") { st -> if (st.step()) st.getLong(0) else 0L })
+        }
+        h
     }
 
     suspend fun rowIdOf(identity: ChannelIdentity): Long? = db.read {
@@ -285,6 +323,11 @@ class GuideQueries @Inject constructor(
     }
 
     companion object {
+        /** G-S6: the guide-relevant `channel_prefs` rows (any non-default user preference). */
+        const val PREFS_SIGNATURE_SELECT =
+            "SELECT playlist_id, stable_key, hidden, locked, custom_name, custom_number, custom_logo, custom_sort_index, epg_shift_min " +
+                "FROM channel_prefs WHERE hidden != 0 OR locked IS NOT NULL OR custom_name IS NOT NULL OR custom_number IS NOT NULL " +
+                "OR custom_logo IS NOT NULL OR custom_sort_index IS NOT NULL OR epg_shift_min IS NOT NULL ORDER BY playlist_id, stable_key"
         private const val TAG = "GuideQueries"
         const val RECENT_LIMIT = 50
         const val REF_BATCH = 50

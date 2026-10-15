@@ -1,5 +1,7 @@
 package app.thebox.core.guide.fakes
 
+import kotlinx.coroutines.flow.receiveAsFlow
+
 import app.thebox.core.guide.GuideChannel
 import app.thebox.core.guide.PendingReminder
 import app.thebox.core.guide.ProgrammeInfo
@@ -78,4 +80,7 @@ class FakeReminderAlerts : ReminderAlerts {
     override val current: StateFlow<ReminderAlert?> = mutable.asStateFlow()
     override suspend fun accept(reminderId: Long) { accepted += reminderId; mutable.value = null }
     override suspend fun dismiss(reminderId: Long) { dismissed += reminderId; mutable.value = null }
+    /** Missed counts, buffered until collected (like the scheduler's channel). */
+    val missedCounts = kotlinx.coroutines.channels.Channel<Int>(kotlinx.coroutines.channels.Channel.BUFFERED)
+    override val missed: kotlinx.coroutines.flow.Flow<Int> = missedCounts.receiveAsFlow()
 }

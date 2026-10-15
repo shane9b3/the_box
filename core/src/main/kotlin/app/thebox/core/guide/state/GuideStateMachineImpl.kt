@@ -122,6 +122,18 @@ class GuideStateMachineImpl(
     private var pendingFull = false
     /** Identity hash of a live channel tuned from Search: FULL on its first active Tuned (§2.13 item 7). */
     private var pendingFullHash = 0L
+    /**
+     * (code review 2026-10-14, H-S7) Identity hash of a reminder's channel after "Switch now": FULL on its first active
+     * Tuned, so an accept whose channel is gone (toast, no tune) stays in the guide. Any user action clears it.
+     */
+    private var pendingReminderHash = 0L
+    /**
+     * (code review 2026-10-14, H-S2) True until the first Tuned with a channel, or the first user action: a startup
+     * Tuned that arrives after the first Lineup still moves focus to the tuned row at now (§3.8.4, I-1).
+     */
+    private var startupFocusPending = true
+    /** (code review 2026-10-14, H-B2) Whether the reminder card was visible (GUIDE/FULL) after the last dispatch. */
+    private var cardWasVisible = false
     private var lastRowsVersion = Long.MIN_VALUE
 
     private var tuned = TunedState()
@@ -169,6 +181,16 @@ class GuideStateMachineImpl(
         _ui.value = u
     }
 
+    /**
+     * (code review 2026-10-14, H-S4) False for media keys FULL leaves to M2's media session (Play/Pause, FF/RW): the key
+     * sink then returns false and the framework hands the key to the session. True everywhere else.
+     */
+    override fun handles(action: BoxAction): Boolean {
+        val s = _ui.value
+        if (s.mode != ScreenMode.FULL || s.overlay != null || s.reminder != null) return true
+        return action !in FULL_PASSTHROUGH
+    }
+
     // ---------------------------------------------------------------- dispatch
 
     override fun dispatch(event: GuideEvent) {
@@ -184,7 +206,7 @@ class GuideStateMachineImpl(
             is GuideEvent.Window -> onWindow(event.data)
             is GuideEvent.Generation -> onGeneration(event.info)
             is GuideEvent.Info -> onInfo(event.token, event.info)
-            is GuideEvent.TunedNow -> u = u.copy(tunedNow = event.info)
+            is GuideEvent.TunedNow -> if (event.info != u.tunedNow) u = u.copy(tunedNow = event.info)
             is GuideEvent.Tuned -> onTuned(event.state, event.channel)
             is GuideEvent.Reminders -> onReminders(event)
             is GuideEvent.Alert -> onAlert(event.alert)
@@ -199,6 +221,7 @@ class GuideStateMachineImpl(
             is GuideEvent.MissedReminders -> if (event.count > 0) effects.toast(GuideToast.REMINDERS_MISSED, event.count.toString())
         }
         frame.gridFocused = u.zone == Zone.GRID
+        rearmDeferredCard()
         if (u !== _ui.value) _ui.value = u
         if (frameDirty) {
             frameDirty = false
@@ -211,12 +234,13 @@ class GuideStateMachineImpl(
 
     private fun act(a: GuideEvent.Act) {
         val action = a.action
-        if (u.reminder != null) { cardKey(a); return }
+        // H-B2: the card is modal only where it is drawn (GUIDE, FULL); in SEARCH/SETTINGS it waits for the mode to return.
+        if (u.reminder != null && cardShown()) { cardKey(a); return }
         if (action != BoxAction.BACK) returnedFromFull = false
-        if (a.repeat == 0) {
-            if (action == BoxAction.UP || action == BoxAction.DOWN) endVerticalHold()
-            if (action == BoxAction.LEFT || action == BoxAction.RIGHT) holdingHorizontal = false
-        }
+        startupFocusPending = false
+        pendingReminderHash = 0L
+        // H-S11: a fresh press (repeat 0) of any key ends every hold, so a lost key-up cannot leave a hold stuck.
+        if (a.repeat == 0) clearHolds(action)
         if (u.overlay != null && overlayKey(a)) return
         if (globalKey(a)) return
         when (u.mode) {
@@ -251,6 +275,17 @@ class GuideStateMachineImpl(
         }
     }
 
+    /**
+     * Ends both holds on a fresh press (H-S11). A D-pad press of the same axis only drops the flag (its own move rebuilds
+     * the window and panel); any other key ends the hold as its release would.
+     */
+    private fun clearHolds(action: BoxAction) {
+        val vertical = action == BoxAction.UP || action == BoxAction.DOWN
+        val horizontal = action == BoxAction.LEFT || action == BoxAction.RIGHT
+        if (vertical || !holdingVertical) endVerticalHold() else release(BoxAction.DOWN)
+        if (holdingHorizontal) { if (horizontal) holdingHorizontal = false else release(BoxAction.RIGHT) }
+    }
+
     private fun endVerticalHold() {
         if (!holdingVertical && frame.bubbleNumber < 0) return
         holdingVertical = false
@@ -278,7 +313,8 @@ class GuideStateMachineImpl(
         val f = frame.focus
         when (a.action) {
             BoxAction.LEFT, BoxAction.RIGHT -> {
-                if (f == null) return
+                // H-S6: an empty source's next step reads "Press Left to choose another group".
+                if (f == null) { if (a.action == BoxAction.LEFT && a.repeat == 0 && lineupSize() == 0) openGroups(); return }
                 val left = a.action == BoxAction.LEFT
                 if (a.repeat > 0) holdingHorizontal = true
                 val step = a.repeat > 0 && a.heldMs >= HOLD_TIME_STEP_AFTER_MS
@@ -795,6 +831,11 @@ class GuideStateMachineImpl(
         return ((end - curMs + 999) / 1000).toInt().coerceAtLeast(0)
     }
 
+    private fun secondsLeftFrom(c: ReminderCardState): Int {
+        val end = maxOf(c.alert.startAtMs, c.inputFromMs - REMINDER_CARD_GUARD_MS) + REMINDER_CARD_MS
+        return ((end - curMs + 999) / 1000).toInt().coerceAtLeast(0)
+    }
+
     private fun cardKey(a: GuideEvent.Act) {
         val c = u.reminder ?: return
         if (curMs < c.inputFromMs) return
@@ -807,11 +848,33 @@ class GuideStateMachineImpl(
         }
     }
 
-    /** "Switch now": the host tunes the alert's channel on accept (it owns the identity → channel lookup); we go FULL. */
+    /**
+     * "Switch now": the host tunes the alert's channel on accept (it owns the identity → channel lookup). (code review
+     * 2026-10-14, H-S7) FULL follows the first active Tuned of that channel, like Search's (§2.13 item 7): an accept
+     * whose channel is gone toasts and stays in the guide. Already playing it live: FULL at once.
+     */
     private fun answerCard(c: ReminderCardState, accept: Boolean) {
         u = u.copy(reminder = null)
-        effects.answerReminder(c.alert.reminderId, accept)
-        if (accept) { closeOverlay(); goFull() }
+        effects.answerReminder(c.alert, accept)
+        if (!accept) return
+        closeOverlay()
+        val hash = GuideChannel.hashOf(c.alert.identity)
+        if (tuned.identityHash == hash && !tuned.isArchive && somethingTuned() && tuned.phase != MiniPhase.ERROR) goFull()
+        else pendingReminderHash = hash
+    }
+
+    /** H-B2: the card is drawn (and modal) only in GUIDE and FULL. */
+    private fun cardShown(): Boolean = u.mode == ScreenMode.GUIDE || u.mode == ScreenMode.FULL
+
+    /** H-B2: a card that waited in SEARCH/SETTINGS gets a fresh guard and countdown when it becomes visible. */
+    private fun rearmDeferredCard() {
+        val c = u.reminder
+        val visible = c != null && cardShown()
+        if (visible && !cardWasVisible && c != null && c.inputFromMs - REMINDER_CARD_GUARD_MS < curMs) {
+            val shown = c.copy(inputFromMs = curMs + REMINDER_CARD_GUARD_MS)
+            u = u.copy(reminder = shown.copy(secondsLeft = secondsLeftFrom(shown)))
+        }
+        cardWasVisible = visible
     }
 
     // ---------------------------------------------------------------- number entry (§3.9.4)
@@ -972,7 +1035,8 @@ class GuideStateMachineImpl(
             return
         }
         val pending = if (pendingFocusRowId >= 0) indexOf(l, pendingFocusRowId) else -1
-        val kept = if (prev != null && prev.source == l.source && prevRowId >= 0) indexOf(l, prevRowId) else -1
+        val sameSource = prev != null && prev.source == l.source && prevRowId >= 0
+        val kept = if (sameSource) indexOf(l, prevRowId) else -1
         val f = frame.focus
         val newFocus = when {
             pending >= 0 -> navigator.focusAt(pending, nowMin, ctx(0))
@@ -980,9 +1044,17 @@ class GuideStateMachineImpl(
                 val moved = f.copy(row = kept, topRow = clampTop(f.topRow + (kept - f.row), kept, l.rowIds.size))
                 (navigator.move(moved, GridMove.RESOLVE, 0, ctx(0)) as? GridMoveResult.Moved)?.focus ?: moved
             }
+            // H-S1 (§3.9.3): the focused row left the same source (hidden, unfavourited, purged): focus the same index
+            // at the current anchor instead of jumping to row 0.
+            sameSource && f != null -> {
+                val row = minOf(f.row, l.rowIds.size - 1)
+                val moved = f.copy(row = row, topRow = clampTop(f.topRow, row, l.rowIds.size))
+                (navigator.move(moved, GridMove.RESOLVE, 0, ctx(0)) as? GridMoveResult.Moved)?.focus ?: moved
+            }
             prev == null && f == null && tunedIndex >= 0 -> navigator.focusAt(tunedIndex, nowMin, ctx(0))
             else -> navigator.focusAt(0, nowMin, ctx(0))
         }
+        if (prev == null && f == null && tunedIndex >= 0 && pending < 0) startupFocusPending = false
         if (pending >= 0 || l.source == requestedSource) pendingFocusRowId = -1
         setFocus(newFocus)
         refreshEmpty()
@@ -1053,7 +1125,14 @@ class GuideStateMachineImpl(
         tunedChannel = channel
         if (frame.tunedHash != state.identityHash) { frame.tunedHash = state.identityHash; frameDirty = true }
         tunedIndex = lineup?.let { indexOf(it, state.rowId) } ?: -1
-        u = u.copy(tuned = state, tunedChannel = channel, tunedNow = if (identityChanged) null else u.tunedNow)
+        // H-S9: keep the slices identical when nothing changed (the host re-sends Tuned for every video/settings
+        // emission), so the mini overlay is skipped by Compose's strong skipping.
+        val tunedSlice = if (state == u.tuned) u.tuned else state
+        val channelSlice = if (channel == u.tunedChannel) u.tunedChannel else channel
+        val nowSlice = if (identityChanged) null else u.tunedNow
+        if (tunedSlice !== u.tuned || channelSlice !== u.tunedChannel || nowSlice !== u.tunedNow) {
+            u = u.copy(tuned = tunedSlice, tunedChannel = channelSlice, tunedNow = nowSlice)
+        }
         if (identityChanged && channel != null) { tunedNowRequestedFor = nowMin; effects.loadTunedNow(channel, nowMin) }
         if (state.phase == MiniPhase.ERROR && state.isArchive && state.error == PlaybackErrorCode.CATCHUP_NOT_IN_ARCHIVE) {
             if (suspect.add(state.identityHash)) {
@@ -1069,6 +1148,21 @@ class GuideStateMachineImpl(
             }
         }
         if (pendingFull && state.phase != MiniPhase.IDLE && state.phase != MiniPhase.STOPPED) { pendingFull = false; goFull() }
+        if (pendingReminderHash != 0L && state.identityHash == pendingReminderHash && !state.isArchive) {
+            when (state.phase) {
+                MiniPhase.CONNECTING, MiniPhase.BUFFERING, MiniPhase.RECONNECTING, MiniPhase.PLAYING, MiniPhase.PAUSED -> { pendingReminderHash = 0; if (u.mode == ScreenMode.GUIDE) goFull() }
+                MiniPhase.ERROR, MiniPhase.STOPPED -> pendingReminderHash = 0
+                MiniPhase.IDLE -> Unit
+            }
+        }
+        // H-S2: the startup Tuned lost the race with the first Lineup: focus the tuned row at now (§3.8.4, I-1).
+        if (startupFocusPending && state.identity != null) {
+            startupFocusPending = false
+            val f = frame.focus
+            if (identityChanged && tunedIndex >= 0 && f != null && f.row != tunedIndex && u.mode == ScreenMode.GUIDE) {
+                setFocus(navigator.focusAt(tunedIndex, nowMin, ctx(0)))
+            }
+        }
         if (pendingFullHash != 0L && state.identityHash == pendingFullHash && !state.isArchive) {
             when (state.phase) {
                 MiniPhase.CONNECTING, MiniPhase.BUFFERING, MiniPhase.RECONNECTING, MiniPhase.PLAYING, MiniPhase.PAUSED -> { pendingFullHash = 0; if (u.mode == ScreenMode.GUIDE) goFull() }
@@ -1087,6 +1181,8 @@ class GuideStateMachineImpl(
         frame.showNumbers = s.showNumbers
         frame.lowEnd = lowEnd
         frameDirty = true
+        // G-S3/H-S3: the host re-sends Settings after a clock-form or zone change (TimeLabels reset): re-run every text.
+        refreshWindowLabels()
         rebuildPanel(newCell = false)
     }
 
@@ -1097,6 +1193,7 @@ class GuideStateMachineImpl(
      */
     private fun onSearchClosed(channel: GuideChannel?, tunedFromSearch: Boolean, archive: Boolean) {
         // I-19 (§5.5, device bug G4): every exit from Search lands in the grid, with the Guide tab current.
+        startupFocusPending = false
         u = u.copy(mode = ScreenMode.GUIDE, overlay = null, zone = Zone.GRID, tabFocused = TAB_GUIDE)
         if (channel != null) {
             val l = lineup
@@ -1151,7 +1248,7 @@ class GuideStateMachineImpl(
         if (o is Overlay.Exit && !o.dialog && curMs >= exitHintUntil) closeOverlay()
         if (u.groupCard != null && curMs >= groupCardUntil) { u = u.copy(groupCard = null); groupCardUntil = Long.MAX_VALUE }
         val c = u.reminder
-        if (c != null) {
+        if (c != null && cardShown()) {
             if (c.alert.autoSwitch && curMs >= c.alert.startAtMs && curMs >= c.inputFromMs) { answerCard(c, accept = true) }
             else {
                 val left = secondsLeft(c.alert)
@@ -1170,7 +1267,7 @@ class GuideStateMachineImpl(
         if (o is Overlay.Exit && !o.dialog) d = minOf(d, exitHintUntil)
         if (u.groupCard != null) d = minOf(d, groupCardUntil)
         val c = u.reminder
-        if (c != null) {
+        if (c != null && cardShown()) {
             d = minOf(d, if (curMs < c.inputFromMs) c.inputFromMs else (curMs / 1000 + 1) * 1000)
             if (c.alert.autoSwitch) d = minOf(d, maxOf(c.alert.startAtMs, c.inputFromMs))
         }
@@ -1490,6 +1587,8 @@ class GuideStateMachineImpl(
         const val TAB_GUIDE = 0
         const val TAB_SEARCH = 1
 
+        /** H-S4: actions FULL does not use; their keys go on to the media session. */
+        val FULL_PASSTHROUGH: Set<BoxAction> = java.util.EnumSet.of(BoxAction.PLAY_PAUSE, BoxAction.SEEK_BACK, BoxAction.SEEK_FORWARD)
         val SHORTCUTS = listOf(GroupsShortcut.SEARCH, GroupsShortcut.SETTINGS)
         val GROUP_MENU = listOf(GroupMenuItem.HIDE, GroupMenuItem.MOVE_UP, GroupMenuItem.MOVE_DOWN)
         private val CHIPS_NO_NOW = listOf(HeaderChip.GROUP, HeaderChip.DAY)

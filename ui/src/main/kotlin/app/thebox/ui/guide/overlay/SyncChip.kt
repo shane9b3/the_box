@@ -11,7 +11,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
-import app.thebox.core.guide.GuideUiState
+import app.thebox.core.guide.SyncChip
 import app.thebox.ui.guide.screen.Dot
 import app.thebox.ui.guide.screen.GuideUi
 import app.thebox.ui.guide.screen.Line
@@ -25,8 +25,7 @@ const val SYNC_CHIP_TAG = "sync_chip"
  * no details screen in M3.
  */
 @Composable
-fun SyncChipView(state: GuideUiState, modifier: Modifier = Modifier) {
-    val chip = state.sync ?: return
+fun SyncChipView(chip: SyncChip, modifier: Modifier = Modifier) {
     Row(
         modifier
             .testTag(SYNC_CHIP_TAG)

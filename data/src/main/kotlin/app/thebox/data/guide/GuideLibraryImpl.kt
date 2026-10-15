@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.runningFold
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -53,12 +54,17 @@ class GuideLibraryImpl @Inject constructor(
 ) : GuideLibrary {
 
     override fun sources(unlocked: Boolean): Flow<List<GuideSourceEntry>> =
-        db.invalidationTracker.createFlow(*SOURCE_TABLES)
+        trigger(SOURCE_TABLES, withRecentCount = true, emitInitial = true)
             .map { buildSources(unlocked) }
             .distinctUntilChanged()
             .flowOn(io)
 
+    /** Diagnostics (tests): Groups-panel builds so far. */
+    @Volatile var sourceBuilds: Int = 0
+        private set
+
     private suspend fun buildSources(unlocked: Boolean): List<GuideSourceEntry> {
+        sourceBuilds++
         val out = ArrayList<GuideSourceEntry>()
         for (l in queries.favouriteListCounts(unlocked)) {
             if (l.count > 0) out += GuideSourceEntry(GuideSource.Favourites(l.listId), l.name, l.count, SourceSection.FAVOURITES, null)
@@ -84,8 +90,10 @@ class GuideLibraryImpl @Inject constructor(
      * ones first, so the focused row does not jump after every tune.
      */
     override fun lineup(source: GuideSource, unlocked: Boolean): Flow<GuideLineup> {
-        val raw = db.invalidationTracker.createFlow(*LINEUP_TABLES)
-            .map { queries.lineup(source, unlocked) }
+        // G-S6: only Recent depends on the watch history (`last_watched_at`); every other lineup ignores tune-time writes.
+        val changes = if (source == GuideSource.Recent) db.invalidationTracker.createFlow(*LINEUP_TABLES, "channel_prefs").map { }
+        else trigger(LINEUP_TABLES, withRecentCount = false, emitInitial = true)
+        val raw = changes.map { queries.lineup(source, unlocked) }
         val shaped = if (source != GuideSource.Recent) {
             raw.map { GuideLineup(source, GuideQueries.versionOf(source, it.ids), it.ids, it.archiveDaysUpperBound) }
         } else {
@@ -149,11 +157,26 @@ class GuideLibraryImpl @Inject constructor(
     /** B5/F3: ticks (debounced 500 ms) on any change that can alter a loaded row without changing lineup membership. */
     @OptIn(FlowPreview::class)
     override val rowContent: Flow<Long> =
-        db.invalidationTracker.createFlow(*ROW_CONTENT_TABLES, emitInitialState = false)
+        trigger(ROW_CONTENT_TABLES, withRecentCount = false, emitInitial = false)
             .debounce(ROW_CONTENT_DEBOUNCE_MS)
             .runningFold(0L) { n, _ -> n + 1 }
             .drop(1)
             .flowOn(io)
+
+    /**
+     * (code review 2026-10-14, G-S6) Changes of [tables] (which leave out `channel_prefs`) plus changes of the guide's
+     * `channel_prefs` columns ([GuideQueries.prefsSignature]): a tune's watch-history and learned-playback writes to
+     * `channel_prefs` are not guide changes. With [emitInitial] it emits once at start (from [tables]).
+     */
+    private fun trigger(tables: Array<String>, withRecentCount: Boolean, emitInitial: Boolean): Flow<Unit> {
+        val base = db.invalidationTracker.createFlow(*tables, emitInitialState = emitInitial).map { }
+        val prefs = db.invalidationTracker.createFlow("channel_prefs")
+            .map { queries.prefsSignature(withRecentCount) }
+            .distinctUntilChanged()
+            .drop(1) // the subscription's own value; only changes trigger
+            .map { }
+        return merge(base, prefs)
+    }
 
     companion object {
         const val ROW_CONTENT_DEBOUNCE_MS = 500L
@@ -161,9 +184,10 @@ class GuideLibraryImpl @Inject constructor(
         const val LABEL_ALL = "All channels"
         const val LABEL_RECENT = "Recently watched"
 
-        val LINEUP_TABLES = arrayOf("channel", "channel_prefs", "group_prefs", "channel_group", "favourite", "playlist")
-        val SOURCE_TABLES = arrayOf("channel", "channel_prefs", "group_prefs", "channel_group", "favourite", "favourite_list", "playlist")
-        val ROW_CONTENT_TABLES = arrayOf("channel", "channel_prefs", "playlist", "epg_mapping", "epg_match", "epg_source")
+        /** G-S6: `channel_prefs` is watched through [GuideQueries.prefsSignature], not as a table (Recent adds it back). */
+        val LINEUP_TABLES = arrayOf("channel", "group_prefs", "channel_group", "favourite", "playlist")
+        val SOURCE_TABLES = arrayOf("channel", "group_prefs", "channel_group", "favourite", "favourite_list", "playlist")
+        val ROW_CONTENT_TABLES = arrayOf("channel", "playlist", "epg_mapping", "epg_match", "epg_source")
 
         /** N2: surviving ids keep their order; ids new to Recent go first (most recent). */
         fun frozenRecent(prev: LongArray, now: LongArray): LongArray {

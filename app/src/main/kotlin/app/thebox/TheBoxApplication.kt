@@ -7,6 +7,7 @@ import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import app.thebox.core.common.BoxLog
 import app.thebox.data.di.ApplicationScope
+import app.thebox.data.di.StartupGate
 import app.thebox.data.epg.EpgRecovery
 import app.thebox.data.guide.DisplayNames
 import app.thebox.data.repo.PlaylistRepository
@@ -18,6 +19,7 @@ import dagger.Lazy
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -28,8 +30,9 @@ import javax.inject.Inject
  * (docs/design/m1-data-layer.md §3.10, M0 L2). Installs the `BoxLog` sink (redaction happens in BoxLog)
  * and runs the app-start staleness check on a background scope.
  *
- * M3 (docs/design/m3-guide.md §2.13 items 5 and 18): the reminder runtime is injected eagerly so reminders fire (and
- * missed ones are counted) from process start, not only once the guide view model exists; the channel display-name
+ * M3 (docs/design/m3-guide.md §2.13 items 5 and 18): the reminder runtime is started from the application, so reminders
+ * fire (and missed ones are counted) whether or not the guide view model exists; (code review 2026-10-14, O-7) it is
+ * created once the first frame has drawn ([StartupGate]), not during `Application.onCreate`. The channel display-name
  * backfill (§3.12.3) runs after `EpgRecovery`, off the startup path.
  */
 @HiltAndroidApp
@@ -40,8 +43,9 @@ class TheBoxApplication : Application(), Configuration.Provider {
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
     @Inject lateinit var importMutex: ImportMutex
     @Inject lateinit var zapImportGate: ZapImportGate
-    /** Eager (§2.13 item 5): constructing it starts its foreground loop. */
-    @Inject lateinit var reminderScheduler: ReminderSchedulerImpl
+    /** Created after the first frame (O-7): constructing it starts its foreground loop (§2.13 item 5). */
+    @Inject lateinit var reminderScheduler: Lazy<ReminderSchedulerImpl>
+    @Inject lateinit var startupGate: StartupGate
     @Inject lateinit var epgRecovery: Lazy<EpgRecovery>
     @Inject lateinit var displayNames: Lazy<DisplayNames>
 
@@ -56,6 +60,10 @@ class TheBoxApplication : Application(), Configuration.Provider {
         BoxLog.minLevel = if (BuildConfig.DEBUG) BoxLog.DEBUG else BoxLog.INFO
         BoxLog.sink = BoxLog.Sink { level, tag, message, error -> Log.println(level, tag, if (error == null) message else message + "\n" + app.thebox.core.common.Redact.text(Log.getStackTraceString(error))) }
         importMutex.gate = zapImportGate // M2 §3.5.5: importers pause while a zap is in progress
+        appScope.launch(Dispatchers.Main) {
+            startupGate.awaitOpen()
+            reminderScheduler.get()
+        }
         appScope.launch {
             try {
                 scheduler.get().onAppStart()

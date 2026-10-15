@@ -2,10 +2,8 @@ package app.thebox.ui.guide.screen
 
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.StartOffset
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.keyframes
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -24,6 +22,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.staticCompositionLocalOf
@@ -40,16 +41,15 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.thebox.core.guide.GuideChannel
-import app.thebox.core.guide.GuideUiState
 import app.thebox.core.guide.MiniPhase
 import app.thebox.core.guide.ProgrammeInfo
+import app.thebox.core.guide.TunedState
 import app.thebox.core.playback.PlaybackErrorCode
 import app.thebox.ui.R
 import app.thebox.ui.playback.ErrorText
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
 import kotlinx.coroutines.delay
-import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
@@ -70,8 +70,16 @@ fun ProvideShellImageLoader(loader: ImageLoader?, content: @Composable () -> Uni
  * bottom gradient panel; the still and the error card replace the picture.
  */
 @Composable
-fun MiniPlayerOverlay(state: GuideUiState, clock24: Boolean, lowEnd: Boolean, poster: Boolean, modifier: Modifier = Modifier) {
-    val tuned = state.tuned
+fun MiniPlayerOverlay(
+    tuned: TunedState,
+    tunedNow: ProgrammeInfo?,
+    tunedChannel: GuideChannel?,
+    clock24: Boolean,
+    lowEnd: Boolean,
+    poster: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) androidx.compose.runtime.SideEffect { app.thebox.ui.guide.GuideDebugCounters.bump(COMPOSITIONS_MINI) } // H-S9
     val now by produceState(System.currentTimeMillis()) {
         while (true) {
             value = System.currentTimeMillis()
@@ -82,18 +90,18 @@ fun MiniPlayerOverlay(state: GuideUiState, clock24: Boolean, lowEnd: Boolean, po
         val nothing = tuned.identity == null || tuned.phase == MiniPhase.IDLE || tuned.phase == MiniPhase.STOPPED
         when {
             tuned.phase == MiniPhase.ERROR && tuned.error != null ->
-                ErrorCard(tuned.error!!, state.tunedChannel, Modifier.align(Alignment.Center))
-            tuned.still || nothing ->
-                Still(state.tunedChannel, state.tunedNow, poster && !nothing, Modifier.align(Alignment.Center))
-            else -> BottomPanel(state.tunedNow, state.tunedChannel, now, clock24, Modifier.align(Alignment.BottomStart))
+                ErrorCard(tuned.error!!, tunedChannel, Modifier.align(Alignment.Center))
+            // H-B1: the HDR poster shows the still in MINI (the controller keeps the video track off; viewport MINI).
+            tuned.still || nothing || poster ->
+                Still(tunedChannel, tunedNow, poster && !nothing, Modifier.align(Alignment.Center))
+            else -> BottomPanel(tunedNow, tunedChannel, now, clock24, Modifier.align(Alignment.BottomStart))
         }
-        if (!nothing) Pills(state, lowEnd, Modifier.offset(20.dp, 18.dp))
+        if (!nothing) Pills(tuned, tunedChannel, lowEnd, Modifier.offset(20.dp, 18.dp))
     }
 }
 
 @Composable
-private fun Pills(state: GuideUiState, lowEnd: Boolean, modifier: Modifier) {
-    val tuned = state.tuned
+private fun Pills(tuned: TunedState, tunedChannel: GuideChannel?, lowEnd: Boolean, modifier: Modifier) {
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         val pill = Modifier.background(GuideUi.PillDark, RoundedCornerShape(999.dp)).padding(horizontal = 12.dp, vertical = 6.dp)
         Row(pill, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -110,36 +118,58 @@ private fun Pills(state: GuideUiState, lowEnd: Boolean, modifier: Modifier) {
                 }
             }
         }
-        state.tunedChannel?.number?.let { n ->
+        tunedChannel?.number?.let { n ->
             Box(pill) { Line(stringResource(R.string.guide_mini_ch, n.toString()), GuideUi.mono(15)) }
         }
     }
 }
 
 /**
- * The LIVE dot pulses 1 → .35 over 1.6 s (prototype `tvPulse`); in low-end mode it is a 1 Hz alpha step. The alpha is
- * applied in the dot's own layer (draw phase only; ModulateAlpha, no offscreen buffer). This node is inside the
- * mini-player overlay, a sibling subtree of `VideoLayer`, never its ancestor.
+ * The LIVE dot pulses 1 → .35 over 1.6 s (prototype `tvPulse`); in low-end mode it is a 1 Hz alpha step (§3.13.4):
+ * (code review 2026-10-14, H-S8) a coroutine toggles the alpha once a second, so the window draws two frames a second,
+ * not one per vsync as a keyframed infinite transition does. The alpha is applied in the dot's own layer (draw phase
+ * only; ModulateAlpha, no offscreen buffer). This node is inside the mini-player overlay, a sibling subtree of
+ * `VideoLayer`, never its ancestor.
  */
 @Composable
 private fun LiveDot(lowEnd: Boolean) {
-    val t = rememberInfiniteTransition(label = "live")
-    val alpha by if (lowEnd) {
-        t.animateFloat(
-            1f, 0.35f,
-            infiniteRepeatable(keyframes { durationMillis = 2000; 1f at 0; 1f at 999; 0.35f at 1000; 0.35f at 1999 }, RepeatMode.Restart, StartOffset(0)),
-            label = "step",
-        )
+    if (lowEnd) {
+        val step = remember { mutableFloatStateOf(1f) }
+        LaunchedEffect(Unit) {
+            while (true) {
+                delay(LIVE_STEP_MS)
+                step.floatValue = if (step.floatValue == 1f) 0.35f else 1f
+            }
+        }
+        LiveDotView(alpha = { step.floatValue })
     } else {
-        t.animateFloat(1f, 0.35f, infiniteRepeatable(tween(800, easing = LinearEasing), RepeatMode.Reverse), label = "pulse")
+        val t = rememberInfiniteTransition(label = "live")
+        val pulse = t.animateFloat(1f, 0.35f, infiniteRepeatable(tween(800, easing = LinearEasing), RepeatMode.Reverse), label = "pulse")
+        LiveDotView(alpha = { pulse.value })
     }
+}
+
+@Composable
+private fun LiveDotView(alpha: () -> Float) {
     Box(
         Modifier
             .size(8.dp)
-            .graphicsLayer { this.alpha = alpha; compositingStrategy = CompositingStrategy.ModulateAlpha }
+            .testTag(LIVE_DOT_TAG)
+            .graphicsLayer {
+                if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) app.thebox.ui.guide.GuideDebugCounters.bump(LIVE_DOT_DRAWS) // H-S8
+                this.alpha = alpha(); compositingStrategy = CompositingStrategy.ModulateAlpha
+            }
             .background(GuideUi.Live, CircleShape),
     )
 }
+
+/** H-S8: the low-end LIVE dot's alpha step period. */
+const val LIVE_STEP_MS = 1_000L
+const val LIVE_DOT_TAG = "live_dot"
+/** Debug counter key: LIVE dot layer updates (H-S8). */
+const val LIVE_DOT_DRAWS = "LiveDotLayer"
+/** Debug composition counter key (H-S9). */
+const val COMPOSITIONS_MINI = "MiniPlayerOverlay"
 
 private val BottomGradient = Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0f), Color.Black.copy(alpha = 0.75f)))
 
@@ -228,4 +258,4 @@ private fun Logo(channel: GuideChannel?, modifier: Modifier) {
 }
 
 private fun hm(min: Int, clock24: Boolean): String =
-    SimpleDateFormat(if (clock24) "HH:mm" else "h:mm", Locale.getDefault()).format(Date(min * 60_000L))
+    TimeFormats.format(if (clock24) "HH:mm" else "h:mm", Locale.getDefault(), Date(min * 60_000L))

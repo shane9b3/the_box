@@ -13,6 +13,9 @@ import app.thebox.data.di.IoDispatcher
 import app.thebox.data.repo.ReminderRepository
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import app.thebox.data.di.StartupGate
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flowOn
@@ -32,8 +35,10 @@ class ReminderBookImpl @Inject constructor(
     private val repo: ReminderRepository,
     @ApplicationScope scope: CoroutineScope,
     @IoDispatcher private val io: CoroutineDispatcher,
+    /** (code review 2026-10-14, O-7) The Room query starts once the first frame has drawn. */
+    gate: StartupGate = StartupGate.opened(),
 ) : ReminderBook {
-    override val pending: StateFlow<List<PendingReminder>> = repo.allPending()
+    override val pending: StateFlow<List<PendingReminder>> = flow { gate.awaitOpen(); emitAll(repo.allPending()) }
         .map { rows -> rows.map(::toPending) }
         .flowOn(io)
         .stateIn(scope, SharingStarted.Eagerly, emptyList())

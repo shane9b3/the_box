@@ -25,6 +25,8 @@ class DefaultKeyMap : KeyMap {
         both(Keys.CHANNEL_UP, ZAP_UP); both(Keys.CHANNEL_DOWN, ZAP_DOWN)
         guideShort[Keys.PAGE_UP] = PAGE_UP; guideShort[Keys.PAGE_DOWN] = PAGE_DOWN
         playerShort[Keys.PAGE_UP] = ZAP_UP; playerShort[Keys.PAGE_DOWN] = ZAP_DOWN
+        // (code review 2026-10-14, H-S4/H-L14) ⏭/⏮ zap in the player; in the guide they stay unbound (media session).
+        playerShort[Keys.MEDIA_NEXT] = ZAP_DOWN; playerShort[Keys.MEDIA_PREVIOUS] = ZAP_UP
         for (c in intArrayOf(Keys.MEDIA_PLAY_PAUSE, Keys.MEDIA_PLAY, Keys.MEDIA_PAUSE)) both(c, PLAY_PAUSE)
         both(Keys.MEDIA_FAST_FORWARD, SEEK_FORWARD); both(Keys.MEDIA_REWIND, SEEK_BACK)
         for (i in 0..9) { both(Keys.DIGIT_0 + i, DIGIT); both(Keys.NUMPAD_0 + i, DIGIT) }

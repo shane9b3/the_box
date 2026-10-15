@@ -5,7 +5,10 @@ import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import androidx.test.core.app.ApplicationProvider
+import app.thebox.core.guide.GuideAsset
+import app.thebox.core.guide.GuideCanvas
 import app.thebox.core.guide.GuideColors
+import app.thebox.core.guide.GuideTextStyle
 import app.thebox.core.guide.GuideImage
 import app.thebox.core.guide.GuideImages
 import app.thebox.core.guide.render.GuideReferenceFrame
@@ -26,7 +29,9 @@ import kotlin.math.abs
  * `src/test/resources/golden/guide-reference-1080p.png`.
  *
  * Deterministic per Robolectric version and host OS font rasteriser, so the comparison tolerates small anti-aliasing
- * differences: a pixel differs when a channel is off by more than 24, and at most 0.5 % of pixels may differ.
+ * differences: a pixel differs when a channel (alpha included) is off by more than 24. (code review 2026-10-14, G-S5)
+ * At most 0.05 % of pixels may differ (was 0.5 %, which let a lost focus ring, ruler or time lines pass), and the
+ * mutation tests below prove a frame without the ring, the ruler labels, the cell time lines or the now line fails.
  * Re-record with `THEBOX_RECORD_GOLDEN=1 ./gradlew :ui:testDebugUnitTest`; a failing run writes the actual image to
  * `ui/build/golden/`.
  */
@@ -46,7 +51,7 @@ class GoldenFrameTest {
     private var focusX = 0
     private var focusY = 0
 
-    private fun render(): Bitmap {
+    private fun render(wrap: (GuideCanvas) -> GuideCanvas = { it }): Bitmap {
         val measurer = AndroidTextMeasurer(context, 1f)
         val logo = Bitmap.createBitmap(160, 90, Bitmap.Config.ARGB_8888).apply {
             eraseColor(Color.rgb(200, 60, 60))
@@ -58,7 +63,7 @@ class GoldenFrameTest {
         val gc = AndroidGuideCanvas(context)
         gc.bind(Canvas(bmp), 1f)
         val renderer = GuideRendererImpl(measurer)
-        renderer.draw(gc, frame, frame.windowStartMin, 0f, GuideReferenceFrame.SCROLL_ROW)
+        renderer.draw(wrap(gc), frame, frame.windowStartMin, 0f, GuideReferenceFrame.SCROLL_ROW)
         val b = FloatArray(4)
         assertTrue(renderer.focusedCellBounds(frame, frame.windowStartMin, 0f, GuideReferenceFrame.SCROLL_ROW, b))
         focusX = (b[0] + 6).toInt(); focusY = ((b[1] + b[3]) / 2).toInt()
@@ -77,12 +82,8 @@ class GoldenFrameTest {
             return
         }
         assertTrue(golden.width == actual.width && golden.height == actual.height)
-        var differing = 0
-        for (y in 0 until actual.height) for (x in 0 until actual.width) {
-            val a = actual.getPixel(x, y); val g = golden.getPixel(x, y)
-            if (abs(Color.red(a) - Color.red(g)) > 24 || abs(Color.green(a) - Color.green(g)) > 24 || abs(Color.blue(a) - Color.blue(g)) > 24) differing++
-        }
-        val allowed = actual.width * actual.height / 200
+        val differing = differing(actual, golden)
+        val allowed = allowed(actual)
         if (differing > allowed) {
             val dir = File("build/golden").apply { mkdirs() }
             File(dir, NAME).outputStream().use { actual.compress(Bitmap.CompressFormat.PNG, 100, it) }
@@ -103,5 +104,69 @@ class GoldenFrameTest {
         assertTrue("focused fill (${Integer.toHexString(fp)})", Color.red(fp) > 220 && Color.green(fp) > 220)
     }
 
-    private companion object { const val NAME = "guide-reference-1080p.png" }
+    /** G-S5 mutation checks: each of these regressions must exceed the tolerance against the golden image. */
+    @Test
+    fun goldenCatchesALostFocusRing() = assertMutationFails("focus ring") { inner ->
+        object : GuideCanvas by inner {
+            override fun strokeRoundRect(l: Float, t: Float, r: Float, b: Float, radius: Float, width: Float, argb: Int) {
+                if (argb != GuideColors.ACCENT) inner.strokeRoundRect(l, t, r, b, radius, width, argb)
+            }
+        }
+    }
+
+    @Test
+    fun goldenCatchesLostRulerLabels() = assertMutationFails("ruler labels") { inner ->
+        object : GuideCanvas by inner {
+            override fun drawText(text: String, start: Int, end: Int, x: Float, baseline: Float, style: GuideTextStyle, argb: Int) {
+                if (style != GuideTextStyle.RULER && style != GuideTextStyle.RULER_CONTEXT) inner.drawText(text, start, end, x, baseline, style, argb)
+            }
+        }
+    }
+
+    @Test
+    fun goldenCatchesLostTimeLines() = assertMutationFails("cell time lines") { inner ->
+        object : GuideCanvas by inner {
+            override fun drawText(text: String, start: Int, end: Int, x: Float, baseline: Float, style: GuideTextStyle, argb: Int) {
+                if (style != GuideTextStyle.CELL_TIME) inner.drawText(text, start, end, x, baseline, style, argb)
+            }
+        }
+    }
+
+    @Test
+    fun goldenCatchesALostNowLine() = assertMutationFails("now line") { inner ->
+        object : GuideCanvas by inner {
+            override fun fillRect(l: Float, t: Float, r: Float, b: Float, argb: Int) {
+                if (argb != GuideColors.ACCENT) inner.fillRect(l, t, r, b, argb)
+            }
+            override fun drawAsset(asset: GuideAsset, l: Float, t: Float, r: Float, b: Float, argb: Int) {
+                if (asset != GuideAsset.NOW_GLOW) inner.drawAsset(asset, l, t, r, b, argb)
+            }
+        }
+    }
+
+    private fun assertMutationFails(what: String, wrap: (GuideCanvas) -> GuideCanvas) {
+        val golden = javaClass.getResourceAsStream("/golden/$NAME")?.use { BitmapFactory.decodeStream(it) } ?: return fail("no golden image")
+        val mutated = render(wrap)
+        val d = differing(mutated, golden)
+        assertTrue("a frame without the $what differs in $d px, within the tolerance ${allowed(mutated)}", d > allowed(mutated))
+    }
+
+    private fun differing(actual: Bitmap, golden: Bitmap): Int {
+        var differing = 0
+        for (y in 0 until actual.height) for (x in 0 until actual.width) {
+            val a = actual.getPixel(x, y); val g = golden.getPixel(x, y)
+            if (abs(Color.red(a) - Color.red(g)) > TOLERANCE || abs(Color.green(a) - Color.green(g)) > TOLERANCE ||
+                abs(Color.blue(a) - Color.blue(g)) > TOLERANCE || abs(Color.alpha(a) - Color.alpha(g)) > TOLERANCE
+            ) differing++
+        }
+        return differing
+    }
+
+    /** 0.05 % of the frame (1,036 px at 1920 × 1080). */
+    private fun allowed(b: Bitmap): Int = b.width * b.height / 2000
+
+    private companion object {
+        const val NAME = "guide-reference-1080p.png"
+        const val TOLERANCE = 24
+    }
 }

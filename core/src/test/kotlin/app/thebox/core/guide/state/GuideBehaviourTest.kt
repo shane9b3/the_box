@@ -645,4 +645,170 @@ class GuideBehaviourTest {
             assertFalse(w.machine.frame.animate, "a lineup change is a jump, not a move")
         }
     }
+
+    // ------------------------------------------------------------------ code review 2026-10-14 (docs/review/m3-code-review.md)
+    @Nested inner class CodeReviewFixes {
+        private fun GuideWorld.menuSelect(item: app.thebox.core.guide.MenuItem) {
+            press(CONTEXT_MENU)
+            val m = ui.overlay as Overlay.Menu
+            repeat(m.items.indexOf(item)) { press(DOWN) }
+            press(SELECT)
+        }
+
+        /** H-S1 (§3.9.3): hiding the focused channel keeps the index (the lineup re-emits without it). */
+        @Test fun hideKeepsTheIndex() {
+            val w = GuideWorld()
+            repeat(5) { w.press(DOWN) }
+            assertEquals(5, w.machine.frame.focus!!.row)
+            w.menuSelect(app.thebox.core.guide.MenuItem.HIDE_CHANNEL)
+            assertNotNull(w.calls.last("hideChannel"))
+            assertEquals(5, w.machine.frame.focus!!.row, "focus stays on index 5")
+            assertEquals(w.channels[6], w.rows.channel(5), "row 5 is now the next channel")
+        }
+
+        @Test fun hidingTheLastRowFocusesTheNewLastRow() {
+            val w = GuideWorld()
+            repeat(9) { w.press(DOWN) }
+            w.menuSelect(app.thebox.core.guide.MenuItem.HIDE_CHANNEL)
+            assertEquals(8, w.machine.frame.focus!!.row)
+        }
+
+        @Test fun unfavouritingInFavouritesKeepsTheIndex() {
+            val w = GuideWorld()
+            w.channels.take(4).forEach { w.favourites += it.identityHash }
+            w.press(FAVOURITES)
+            w.press(DOWN); w.press(DOWN)
+            assertEquals(2, w.machine.frame.focus!!.row)
+            w.menuSelect(app.thebox.core.guide.MenuItem.REMOVE_FAVOURITE)
+            assertEquals(2, w.machine.frame.focus!!.row, "same index, not row 0")
+            assertEquals(w.channels[3], w.rows.channel(2))
+        }
+
+        /** H-S2: the startup Tuned arrives after the first Lineup. */
+        @Test fun startupTuneAfterLineupFocusesTheTunedRow() {
+            val w = GuideWorld(tuneAfterLineup = true, tunedRow = 4)
+            val f = w.machine.frame.focus!!
+            assertEquals(4, f.row, "focus after the startup Tuned")
+            assertTrue(w.nowMin() in f.cellStart until f.cellEnd, "at now")
+            assertEquals(4, GuideWorld(tunedRow = 4).machine.frame.focus!!.row, "the usual order still focuses the tuned row")
+        }
+
+        @Test fun startupTuneAfterAUserMoveKeepsTheUserFocus() {
+            val w = GuideWorld(startTuned = false)
+            w.press(DOWN)
+            w.tuneTo(w.channels[4]); w.flush()
+            assertEquals(1, w.machine.frame.focus!!.row, "a user action cancels the startup focus")
+        }
+
+        @Test fun laterTunesDoNotMoveFocus() {
+            val w = GuideWorld(tuneAfterLineup = true, tunedRow = 4)
+            w.tuneTo(w.channels[7]); w.flush()
+            assertEquals(4, w.machine.frame.focus!!.row, "only the first Tuned is the startup one")
+        }
+
+        /** H-B2: the card waits in SETTINGS (not drawn there): BACK leaves Settings and the card then shows, modal. */
+        @Test fun invisibleCardDoesNotEatBackInSettings() {
+            val w = GuideWorld()
+            w.press(GROUPS_PANEL)
+            while ((w.ui.overlay as Overlay.Groups).focused > 1) w.press(UP)
+            w.press(SELECT)
+            assertEquals(ScreenMode.SETTINGS, w.ui.mode)
+            w.alert()
+            w.advance(700)
+            val n = w.calls.calls.size
+            w.press(BACK)
+            assertEquals(ScreenMode.GUIDE, w.ui.mode, "BACK left Settings")
+            assertTrue("answerReminder" !in w.effectsSince(n), "the card was not answered")
+            val c = assertNotNull(w.ui.reminder, "the card is still pending")
+            assertEquals(w.nowMs + GuideStateMachineImpl.REMINDER_CARD_GUARD_MS, c.inputFromMs, "a fresh guard once it is visible")
+            w.press(SELECT)
+            assertNotNull(w.ui.reminder, "guarded")
+            w.advance(600)
+            w.press(BACK)
+            assertNull(w.ui.reminder)
+            assertEquals(listOf(99L, false), w.calls.last("answerReminder")!!.args)
+        }
+
+        @Test fun invisibleCardDoesNotEatBackInSearchNorAutoSwitch() {
+            val w = GuideWorld()
+            w.press(UP); w.press(UP); w.press(UP); w.press(RIGHT); w.press(SELECT)
+            assertEquals(ScreenMode.SEARCH, w.ui.mode)
+            w.advance(200) // let the panel description timer run out
+            w.alert(startAtMs = w.nowMs + 1_000, autoSwitch = true)
+            assertEquals(Long.MAX_VALUE, w.machine.nextDeadlineMs.value, "no card timers while it is hidden")
+            w.advance(5_000)
+            assertEquals(ScreenMode.SEARCH, w.ui.mode, "no auto-switch out of Search")
+            assertNull(w.calls.last("answerReminder"))
+            w.press(BACK)
+            assertEquals(ScreenMode.GUIDE, w.ui.mode, "BACK closed Search")
+            assertNotNull(w.ui.reminder)
+            w.advance(600)
+            assertEquals(ScreenMode.FULL, w.ui.mode, "auto-switch once the card is visible and the guard passed")
+        }
+
+        /** H-S7: Switch now on a channel that is gone toasts and stays in the guide; the effect gets the shown alert. */
+        @Test fun cardAcceptChannelGoneStaysInGuide() {
+            val w = GuideWorld()
+            w.reminderChannelGone = true
+            w.alert(id = 42)
+            w.advance(600)
+            w.press(SELECT)
+            assertEquals(ScreenMode.GUIDE, w.ui.mode)
+            assertEquals(42L, w.calls.lastAlert!!.reminderId)
+            assertEquals(w.channels[1].identity, w.calls.lastAlert!!.identity)
+            assertEquals(GuideToast.REMINDER_CHANNEL_GONE, w.calls.last("toast")!!.args[0])
+            w.press(DOWN)
+            w.tuneTo(w.channels[1]); w.flush()
+            assertEquals(ScreenMode.GUIDE, w.ui.mode, "a later tune of that channel does not go FULL")
+        }
+
+        @Test fun cardAcceptOfTheTunedChannelGoesFullAtOnce() {
+            val w = GuideWorld(tunedRow = 1)
+            w.reminderChannelGone = true // no Tuned follows; FULL must not wait for one
+            w.alert(); w.advance(600); w.press(SELECT)
+            assertEquals(ScreenMode.FULL, w.ui.mode)
+        }
+
+        /** H-S11: a lost key-up must not leave a hold stuck (no descriptions, a past deadline). */
+        @Test fun freshPressEndsAStuckHorizontalHold() {
+            val w = GuideWorld()
+            w.press(RIGHT, repeat = 1, heldMs = 300)
+            w.advance(200)
+            val n = w.calls.calls.size
+            w.press(DOWN)
+            w.advance(200)
+            assertTrue(w.calls.calls.drop(n).any { it.name == "loadInfo" }, "description loads after a plain DOWN")
+            assertTrue(w.machine.nextDeadlineMs.value == Long.MAX_VALUE || w.machine.nextDeadlineMs.value > w.nowMs, "no past deadline")
+        }
+
+        @Test fun freshPressEndsAStuckVerticalHold() {
+            val w = GuideWorld()
+            w.press(DOWN, repeat = 3)
+            assertTrue(w.machine.frame.bubbleNumber >= 0, "holding: bubble shown")
+            w.press(SELECT)
+            assertEquals(-1, w.machine.frame.bubbleNumber, "a fresh press ends the hold")
+            assertEquals(0, w.calls.last("ensureWindow")!!.args[2], "the window is re-ensured without hold bias")
+        }
+
+        /** H-S4: FULL leaves media keys to the session; everywhere else the machine takes them. */
+        @Test fun fullLeavesMediaKeysToTheSession() {
+            val w = GuideWorld()
+            assertTrue(w.machine.handles(PLAY_PAUSE), "GUIDE: Play/Pause goes FULL")
+            w.press(SELECT)
+            assertEquals(ScreenMode.FULL, w.ui.mode)
+            for (a in listOf(PLAY_PAUSE, SEEK_BACK, SEEK_FORWARD)) assertFalse(w.machine.handles(a), "$a passes through in FULL")
+            for (a in listOf(UP, DOWN, ZAP_UP, BACK, SELECT, DIGIT)) assertTrue(w.machine.handles(a), "$a stays with the machine")
+            w.alert()
+            assertTrue(w.machine.handles(PLAY_PAUSE), "the modal card takes every key")
+        }
+
+        /** H-S6: Left on an empty source opens Groups, as the empty-state next step says. */
+        @Test fun leftOnAnEmptySourceOpensGroups() {
+            val w = GuideWorld()
+            w.press(FAVOURITES)
+            assertEquals(EmptyKind.EMPTY_SOURCE, w.ui.empty)
+            w.press(LEFT)
+            assertIs<Overlay.Groups>(w.ui.overlay)
+        }
+    }
 }

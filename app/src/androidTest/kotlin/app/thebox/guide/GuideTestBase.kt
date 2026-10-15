@@ -138,6 +138,12 @@ abstract class GuideTestBase {
         return awaitMachine()
     }
 
+    /** Closes MainActivity (the process goes to the background); [launchGuide] starts a new one. */
+    protected fun closeGuide() {
+        scenario?.close()
+        scenario = null
+    }
+
     /** Closes MainActivity and launches a new one; returns the new machine (never the old instance). */
     protected fun relaunchGuide(): GuideStateMachine {
         val old = ep.probe().current

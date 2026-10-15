@@ -66,41 +66,44 @@ class EpgRefResolver @Inject constructor(
     private val sourceDao: EpgSourceDao,
     private val playlistDao: PlaylistDao,
     private val settings: DataSettings,
+    /** (code review 2026-10-14, O-1) Active sources and header shifts, cached behind table invalidation. */
+    private val meta: GuideMetaCache? = null,
 ) {
     /** Per channel: its own `epg_shift_min` and the `channel_prefs.epg_shift_min` override (both nullable). */
     data class Input(val identity: ChannelIdentity, val channelShiftMin: Int?, val prefShiftMin: Int?)
 
     suspend fun resolve(inputs: List<Input>): Map<ChannelIdentity, ResolvedEpg> {
         if (inputs.isEmpty()) return emptyMap()
-        val sources = EpgRefRule.Sources(sourceDao.active())
+        val sources = EpgRefRule.Sources(meta?.activeSources() ?: sourceDao.active())
         val global = settings.current.globalShiftMin
         val out = HashMap<ChannelIdentity, ResolvedEpg>(inputs.size * 2)
         for ((playlistId, group) in inputs.groupBy { it.identity.playlistId }) {
-            val headerShift = EpgRefRule.headerShiftMin(playlistDao.get(playlistId))
+            val headerShift = if (meta != null) meta.playlist(playlistId)?.headerShiftMin else EpgRefRule.headerShiftMin(playlistDao.get(playlistId))
             val keys = group.map { it.identity.stableKey.value }.distinct()
             val mappings = HashMap<String, EpgRefRule.Mapping>()
             val autos = HashMap<String, MutableList<EpgRefRule.Auto>>()
             db.read {
                 for (chunk in keys.chunked(MAX_VARS)) {
-                    val marks = chunk.joinToString(",") { "?" }
-                    usePrepared("SELECT stable_key, source_id, xmltv_id FROM epg_mapping WHERE playlist_id = ? AND stable_key IN ($marks)") { st ->
-                        st.bindLong(1, playlistId)
-                        chunk.forEachIndexed { i, k -> st.bindText(i + 2, k) }
-                        while (st.step()) {
-                            mappings[st.getText(0)] = EpgRefRule.Mapping(
-                                if (st.isNull(1)) null else st.getLong(1), if (st.isNull(2)) null else st.getText(2),
-                            )
-                        }
-                    }
+                    // (code review 2026-10-14, O-1) Mapping and AUTO matches in one statement; numbered parameters (?1
+                    // the playlist, ?2… the keys) are shared by both halves. Matches come in primary-key order (source,
+                    // xmltv id), as the two statements returned them, so ties resolve as in `EpgRepository.resolvedRefs`.
+                    val marks = chunk.indices.joinToString(",") { "?${it + 2}" }
                     usePrepared(
-                        "SELECT stable_key, source_id, xmltv_id, has_data, method FROM epg_match " +
-                            "WHERE playlist_id = ? AND status = 0 AND stable_key IN ($marks) ORDER BY playlist_id, stable_key",
+                        "SELECT 0, stable_key, source_id, xmltv_id, 0, NULL FROM epg_mapping WHERE playlist_id = ?1 AND stable_key IN ($marks) " +
+                            "UNION ALL SELECT 1, stable_key, source_id, xmltv_id, has_data, method FROM epg_match " +
+                            "WHERE playlist_id = ?1 AND status = 0 AND stable_key IN ($marks) ORDER BY 1, 2, 3, 4",
                     ) { st ->
                         st.bindLong(1, playlistId)
                         chunk.forEachIndexed { i, k -> st.bindText(i + 2, k) }
                         while (st.step()) {
-                            autos.getOrPut(st.getText(0)) { ArrayList(2) } +=
-                                EpgRefRule.Auto(st.getLong(1), st.getText(2), st.getLong(3) != 0L, st.getText(4))
+                            if (st.getLong(0) == 0L) {
+                                mappings[st.getText(1)] = EpgRefRule.Mapping(
+                                    if (st.isNull(2)) null else st.getLong(2), if (st.isNull(3)) null else st.getText(3),
+                                )
+                            } else {
+                                autos.getOrPut(st.getText(1)) { ArrayList(2) } +=
+                                    EpgRefRule.Auto(st.getLong(2), st.getText(3), st.getLong(4) != 0L, st.getText(5))
+                            }
                         }
                     }
                 }

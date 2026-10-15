@@ -33,6 +33,9 @@ class DefaultKeyMapTest {
         both(Keys.LAST_CHANNEL, PREVIOUS_CHANNEL); both(Keys.GUIDE, OPEN_GUIDE); both(Keys.INFO, INFO_BAR)
         both(Keys.CAPTIONS, SUBTITLES); both(Keys.MEDIA_AUDIO_TRACK, AUDIO); both(Keys.TV_ZOOM_MODE, ASPECT)
         assertEquals(REMIND, m.short(GUIDE, Keys.MEDIA_RECORD)); assertNull(m.short(PLAYER, Keys.MEDIA_RECORD))
+        // code review 2026-10-14 (H-S4/H-L14): ⏭/⏮ zap in the player, unbound in the guide
+        assertEquals(ZAP_DOWN, m.short(PLAYER, Keys.MEDIA_NEXT)); assertEquals(ZAP_UP, m.short(PLAYER, Keys.MEDIA_PREVIOUS))
+        assertNull(m.short(GUIDE, Keys.MEDIA_NEXT)); assertNull(m.short(GUIDE, Keys.MEDIA_PREVIOUS))
         assertNull(m.short(GUIDE, Keys.SEARCH), "SEARCH unbound in M3 (§8 Q3)")
         assertNull(m.short(GUIDE, 24), "volume is never bound")
     }

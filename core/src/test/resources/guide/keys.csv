@@ -28,6 +28,8 @@ grid,grid_row3_noepg,SELECT,GUIDE,GRID,none,tune,same
 grid,grid_home_error_retry,SELECT,GUIDE,GRID,none,retry,same
 grid,grid_home_error_noretry,SELECT,FULL,GRID,none,setFullScreen,-
 grid,grid_home,CONTEXT_MENU,GUIDE,GRID,Menu,queryFavourite,same
+# (code review 2026-10-14, H-S6) "Press Left to choose another group" on an empty source
+grid,grid_empty_source,LEFT,GUIDE,GRID,Groups,-,-
 grid,grid_scrolled,BACK,GUIDE,GRID,none,-,home
 grid,grid_home,BACK,FULL,GRID,none,setFullScreen,-
 grid,grid_home,PLAY_PAUSE,FULL,GRID,none,setFullScreen,-
@@ -151,6 +153,12 @@ card,card,BACK,GUIDE,GRID,none,answerReminder,-
 card,card,UP,GUIDE,GRID,Card,-,card:0
 card,card,CONTEXT_MENU,GUIDE,GRID,Card,-,card:0
 card,card,DIGIT1,GUIDE,GRID,Card,-,card:0
+# (code review 2026-10-14, H-B2) the card is modal only where it is drawn: in SEARCH/SETTINGS it waits, keys go on
+card,settings_card,BACK,GUIDE,TABS,Card,-,card:0
+card,settings_card,SELECT,SETTINGS,TABS,Card,-,-
+card,search_card,BACK,GUIDE,GRID,Card,-,card:0
+# (code review 2026-10-14, H-S7) Switch now on a channel that is gone: toast, stay in the guide
+card,card_channel_gone,SELECT,GUIDE,GRID,none,answerReminder;toast,-
 # ---- FULL §3.4.5
 full,full,BACK,GUIDE,GRID,none,setFullScreen,home
 full,full,UP,FULL,GRID,none,zap,-
@@ -170,6 +178,9 @@ full,full,CONTEXT_MENU,FULL,GRID,none,-,-
 full,full,LEFT,FULL,GRID,none,-,-
 full,full,AUDIO,FULL,GRID,none,-,-
 full,full,FAVOURITES,FULL,GRID,none,-,-
+# (code review 2026-10-14, H-S4) the machine ignores these in FULL; handles() = false lets the router pass the key to the media session
+full,full,PLAY_PAUSE,FULL,GRID,none,-,-
+full,full,SEEK_FORWARD,FULL,GRID,none,-,-
 # ---- Back ladder §3.4.6 (B2)
 back,grid_scrolled,BACK,GUIDE,GRID,none,-,home
 back,full_returned,BACK,GUIDE,GRID,ExitHint,-,home

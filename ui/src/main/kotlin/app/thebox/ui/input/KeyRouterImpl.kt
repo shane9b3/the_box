@@ -33,6 +33,11 @@ import android.view.KeyEvent as AndroidKeyEvent
  * - Returns true for every key it handled including the matching UP; keys with no binding (volume, Home) return
  *   false. In SEARCH every key returns false except BACK while [searchFieldIdle] (empty field, IME hidden).
  * - [KeyCapabilities.record] runs for every bound or unbound DOWN with repeat 0 (the impl writes only new codes, N7).
+ * - (code review 2026-10-14, H-S4) A key whose action the machine would ignore (`GuideStateMachine.handles` false:
+ *   Play/Pause and FF/RW in FULL) returns false, so the framework hands it to M2's media session.
+ * - (code review 2026-10-14, H-S11) A held (repeating) key whose UP is lost still ends its hold: focus loss, window
+ *   detach ([onFocusLost]) and a [HOLD_WATCHDOG_MS] gap without a repeat dispatch `Release` for it.
+ * - (code review 2026-10-14, H-S5) [detach] clears the machine only if it is still the attached one.
  */
 class KeyRouterImpl(
     private val keyMap: KeyMap,
@@ -61,13 +66,25 @@ class KeyRouterImpl(
     /** Context of each held key, fixed at its first DOWN (a mode change mid-press must not remap the UP). */
     private val heldContext = HashMap<Int, KeyContext>()
     private val longTimers = HashMap<Int, Any>()
+    /** Repeating keys without a long binding (holds) → their watchdog timer token. */
+    private val holdWatchdogs = HashMap<Int, Any>()
     private val out = ArrayList<KeyGesture>(2)
 
     override fun attach(machine: GuideStateMachine?, searchFieldIdle: () -> Boolean) {
+        onFocusLost() // ends the holds of the machine that was attached
         this.machine = machine
         this.searchFieldIdle = searchFieldIdle
-        onFocusLost()
     }
+
+    override fun detach(machine: GuideStateMachine) {
+        if (this.machine !== machine) return // a newer view model owns the router (H-S5)
+        onFocusLost()
+        this.machine = null
+        this.searchFieldIdle = { true }
+    }
+
+    /** The attached machine (tests). */
+    val attached: GuideStateMachine? get() = machine
 
     override fun onKey(event: KeyEvent): Boolean {
         val n = event.nativeKeyEvent
@@ -92,6 +109,7 @@ class KeyRouterImpl(
             val long = keyMap.long(context, code)
             if (short == null && long == null) return false
             if (mode == ScreenMode.SEARCH && !(short == BoxAction.BACK && searchFieldIdle())) return false
+            if (long == null && short != null && !m.handles(short)) return false // H-S4: on to the media session
             consumedDown += code
             heldContext[code] = context
         } else if (code !in consumedDown) {
@@ -104,8 +122,28 @@ class KeyRouterImpl(
         detector.onKey(KeyInput(code, isDown, repeatCount, downTimeMs, eventTimeMs, canceled), hasLong, out)
         if (isDown && repeatCount == 0 && hasLong) armLong(code, context)
         if (!isDown || out.any { it is KeyGesture.LongPress }) longTimers.remove(code)?.let { timers.cancel(it) }
+        holdWatchdogs.remove(code)?.let { timers.cancel(it) }
+        if (isDown && repeatCount > 0 && !hasLong) armWatchdog(code, context)
         deliver(context, if (isDown) eventTimeMs - downTimeMs else 0L)
         return true
+    }
+
+    /** H-S11: no repeat for [HOLD_WATCHDOG_MS] on a held key means its UP was lost: end the hold. */
+    private fun armWatchdog(code: Int, context: KeyContext) {
+        holdWatchdogs[code] = timers.post(HOLD_WATCHDOG_MS) {
+            holdWatchdogs.remove(code)
+            if (code in consumedDown) endHold(code, context)
+        }
+    }
+
+    /** Forgets a held key as if its UP had been canceled and tells the machine the hold ended. */
+    private fun endHold(code: Int, context: KeyContext) {
+        consumedDown.remove(code)
+        heldContext.remove(code)
+        out.clear()
+        detector.onKey(KeyInput(code, false, 0, 0L, uptimeMs(), canceled = true), keyMap.long(context, code) != null, out)
+        out.clear()
+        keyMap.short(context, code)?.let { a -> machine?.dispatch(GuideEvent.Release(a)) }
     }
 
     private fun armLong(code: Int, context: KeyContext) {
@@ -133,6 +171,11 @@ class KeyRouterImpl(
     }
 
     override fun onFocusLost() {
+        // H-S11: Compose drops the UPs of keys held across a focus change; end their holds in the machine.
+        val held = holdWatchdogs.keys.toList()
+        for (t in holdWatchdogs.values) timers.cancel(t)
+        holdWatchdogs.clear()
+        for (code in held) if (code in consumedDown) endHold(code, heldContext[code] ?: KeyContext.GUIDE)
         detector.reset()
         consumedDown.clear()
         heldContext.clear()
@@ -149,5 +192,7 @@ class KeyRouterImpl(
 
     companion object {
         const val LONG_PRESS_MS = 500L
+        /** H-S11: a held key that has not repeated for this long lost its UP. Key repeat runs at ~20 Hz. */
+        const val HOLD_WATCHDOG_MS = 1_500L
     }
 }

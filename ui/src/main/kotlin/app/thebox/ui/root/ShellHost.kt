@@ -10,7 +10,7 @@ import app.thebox.player.api.VideoInfo
 import app.thebox.ui.ambient.AmbientState
 import app.thebox.ui.input.KeyRouter
 import coil3.ImageLoader
-import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 
 /** One-shot shell events (toasts, announcements, exit). */
@@ -35,7 +35,12 @@ interface ShellHost {
     /** Low-end mode resolved from [GuideSettings.performance] and the device class (§0.11). */
     val lowEnd: StateFlow<Boolean>
     val ambient: AmbientState
-    val events: SharedFlow<ShellEvent>
+    /**
+     * One-shot events, each delivered once to one collector and buffered while nobody collects (code review
+     * 2026-10-14, H-B3): a toast emitted before the root composes (the missed-reminders toast at a cold start) is shown
+     * when it does.
+     */
+    val events: Flow<ShellEvent>
     /** The app's Coil loader for logos on Compose surfaces (panel, mini player, error card); null in tests. */
     val imageLoader: ImageLoader?
     /** `BuildConfig.VERSION_NAME` of the app, for the Settings placeholder. */

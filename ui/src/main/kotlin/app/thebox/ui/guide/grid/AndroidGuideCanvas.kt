@@ -44,6 +44,7 @@ class AndroidGuideCanvas(context: Context) : GuideCanvas {
     fun bind(target: Canvas, scale: Float) {
         canvas = target
         if (scale != this.scale) {
+            clearRows()
             this.scale = scale
             GuidePaints.applyScale(text, scale)
             assets = GuideAssets(scale)
@@ -104,6 +105,77 @@ class AndroidGuideCanvas(context: Context) : GuideCanvas {
         c.drawBitmap(bmp, null, dst, bitmapPaint)
     }
 
+    /** O-2: `guide-draw-chrome` / `-cells` / `-text` sub-sections inside the host's `guide-draw` (constant names). */
+    override fun beginSection(name: String) = android.os.Trace.beginSection(name)
+
+    override fun endSection() = android.os.Trace.endSection()
+
+    // ---- O-2 per-row recordings (API 29+ RenderNode, hardware canvases only; ROW_LAYERS is the flag)
+    private val rowNodes = arrayOfNulls<android.graphics.RenderNode>(ROW_SLOTS)
+    private val rowKeys = LongArray(ROW_SLOTS)
+    private val rowTops = FloatArray(ROW_SLOTS)
+    private var recordingNode: android.graphics.RenderNode? = null
+    private var outerCanvas: Canvas? = null
+
+    /** Rows replayed / recorded (debug measurement). */
+    var rowReplays: Long = 0
+        private set
+    var rowRecords: Long = 0
+        private set
+
+    override fun beginRow(key: Long, top: Float): Boolean {
+        val c = canvas ?: return false
+        if (!ROW_LAYERS || android.os.Build.VERSION.SDK_INT < 29 || recordingNode != null || !c.isHardwareAccelerated) return false
+        return beginRow29(c, key, top)
+    }
+
+    @androidx.annotation.RequiresApi(29)
+    private fun beginRow29(c: Canvas, key: Long, top: Float): Boolean {
+        val slot = ((key xor (key ushr 29)).toInt()) and (ROW_SLOTS - 1)
+        val existing = rowNodes[slot]
+        if (existing != null && rowKeys[slot] == key && existing.hasDisplayList()) {
+            val sv = c.save()
+            c.translate(0f, top - rowTops[slot])
+            c.drawRenderNode(existing)
+            c.restoreToCount(sv)
+            rowReplays++
+            return true
+        }
+        val node = existing ?: android.graphics.RenderNode("guide-row").also {
+            it.setPosition(0, 0, ROW_NODE_EXTENT, ROW_NODE_EXTENT)
+            it.setClipToBounds(false)
+            rowNodes[slot] = it
+        }
+        rowKeys[slot] = key
+        rowTops[slot] = top
+        outerCanvas = c
+        recordingNode = node
+        canvas = node.beginRecording(ROW_NODE_EXTENT, ROW_NODE_EXTENT)
+        rowRecords++
+        return false
+    }
+
+    override fun endRow() {
+        val node = recordingNode ?: return
+        if (android.os.Build.VERSION.SDK_INT >= 29) endRow29(node)
+    }
+
+    @androidx.annotation.RequiresApi(29)
+    private fun endRow29(node: android.graphics.RenderNode) {
+        node.endRecording()
+        val outer = outerCanvas
+        recordingNode = null
+        outerCanvas = null
+        canvas = outer
+        outer?.drawRenderNode(node)
+    }
+
+    /** Drops every recording (trim, scale change). */
+    fun clearRows() {
+        rowKeys.fill(0L)
+        if (android.os.Build.VERSION.SDK_INT >= 29) for (n in rowNodes) n?.discardDisplayList()
+    }
+
     override fun drawAsset(asset: GuideAsset, l: Float, t: Float, r: Float, b: Float, argb: Int) {
         val c = canvas ?: return
         val bmp = assets.bitmap(asset)
@@ -139,5 +211,16 @@ class AndroidGuideCanvas(context: Context) : GuideCanvas {
                 c.drawBitmap(bmp, src, dst, bitmapPaint)
             }
         }
+    }
+
+    companion object {
+        /**
+         * O-2 flag: per-row recordings on API 29+ hardware canvases. Off = the direct-draw path (always used on API ≤ 28
+         * and on software canvases such as the golden-frame test).
+         */
+        @Volatile var ROW_LAYERS: Boolean = true
+        private const val ROW_SLOTS = 32
+        /** Recordings are in window px; their bounds only need to cover the window (no clip to bounds). */
+        private const val ROW_NODE_EXTENT = 8192
     }
 }

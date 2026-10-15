@@ -15,6 +15,7 @@ import app.thebox.core.guide.GuideSourceEntry
 import app.thebox.core.guide.GuideToast
 import app.thebox.core.guide.GuideWindowPager
 import app.thebox.core.guide.ProgrammeInfo
+import app.thebox.core.guide.ReminderAlert
 import app.thebox.core.guide.ReminderAlerts
 import app.thebox.core.guide.ReminderBook
 import app.thebox.player.api.PlaybackController
@@ -155,26 +156,27 @@ class GuideEffectsImpl(
     }
 
     /**
-     * "Switch now" / auto-switch accepts (marks fired) and tunes the channel; the state machine goes FULL. A channel
-     * that is gone is marked orphaned and toasted instead (§3.11.3, S13).
+     * "Switch now" / auto-switch accepts (marks fired) and tunes the channel; the state machine goes FULL on that
+     * channel's first active Tuned. A channel that is gone is marked orphaned and toasted instead, and the guide stays
+     * (§3.11.3, S13). (code review 2026-10-14, H-S7) Works from the [alert] the card showed, never from
+     * `alerts.current`, which may have moved on (or cleared) between the key and this coroutine.
      */
-    override fun answerReminder(reminderId: Long, accept: Boolean) {
-        val alert = alerts.current.value?.takeIf { it.reminderId == reminderId }
+    override fun answerReminder(alert: ReminderAlert, accept: Boolean) {
+        val reminderId = alert.reminderId
         launchSafely("answerReminder") {
             if (!accept) {
                 alerts.dismiss(reminderId)
                 return@launchSafely
             }
-            val identity = alert?.identity
-            if (identity == null || library.rowIdOf(identity) == null) {
+            if (library.rowIdOf(alert.identity) == null) {
                 reminders.markOrphaned(reminderId)
                 alerts.dismiss(reminderId)
-                shell.toast(GuideToast.REMINDER_CHANNEL_GONE, alert?.channelName)
+                shell.toast(GuideToast.REMINDER_CHANNEL_GONE, alert.channelName)
                 return@launchSafely
             }
             alerts.accept(reminderId)
             val zap = currentLineup?.let { LineupZapList(it, library) }
-            controller.tune(TuneTarget.Channel(identity), zap)
+            controller.tune(TuneTarget.Channel(alert.identity), zap)
         }
     }
 

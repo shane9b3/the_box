@@ -1,5 +1,6 @@
 package app.thebox.guide
 
+import kotlinx.coroutines.launch
 import app.thebox.ui.guide.GuideDebugCounters
 import app.thebox.ui.guide.grid.COMPOSITIONS_GRID
 import app.thebox.ui.guide.screen.COMPOSITIONS_PANEL
@@ -28,10 +29,19 @@ class RecompositionTest : GuideTestBase() {
         val ui0 = machine.ui.value
         val grid0 = GuideDebugCounters.count(COMPOSITIONS_GRID)
         val panel0 = GuideDebugCounters.count(COMPOSITIONS_PANEL)
+        val mini0 = GuideDebugCounters.count(app.thebox.ui.guide.screen.COMPOSITIONS_MINI)
+        // (code review 2026-10-14, H-S9) Count the panel slices the machine publishes; the panel may compose once per slice.
+        var panelChanges = 0
+        val counter = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main.immediate).launch {
+            var last = machine.ui.value.panel
+            machine.ui.collect { s -> if (s.panel !== last) { panelChanges++; last = s.panel } }
+        }
         assertTrue("GuideGridHost composed at least once (counter wired)", grid0 >= 1)
         press(KeyEvent.KEYCODE_DPAD_DOWN, times = 50, intervalMs = 60)
         press(KeyEvent.KEYCODE_DPAD_RIGHT, times = 20, intervalMs = 60)
         Thread.sleep(800)
+        counter.cancel()
+        val mini = GuideDebugCounters.count(app.thebox.ui.guide.screen.COMPOSITIONS_MINI) - mini0
         val dv = machine.frameVersion.value - v0
         val grid = GuideDebugCounters.count(COMPOSITIONS_GRID) - grid0
         val panel = GuideDebugCounters.count(COMPOSITIONS_PANEL) - panel0
@@ -39,7 +49,10 @@ class RecompositionTest : GuideTestBase() {
         assertEquals("row after 50 DOWN", 50, focus()?.row)
         assertTrue("frameVersion moved for the moves (+$dv)", dv >= 70)
         assertEquals("GuideGridHost recomposed while scrolling", 0, grid)
-        // ≤ focus changes (70) + description loads (≤ 70): the panel's state changes per move and per description.
-        assertTrue("FocusedPanel recomposed $panel times for 70 moves", panel <= 140)
+        // H-S9: the panel composes once per published panel slice (focus change or description load), nothing more,
+        // and the mini player not at all (its slice does not change while the grid moves).
+        log("I-12 panel slices $panelChanges, MiniPlayerOverlay +$mini")
+        assertTrue("FocusedPanel recomposed $panel times for $panelChanges panel changes", panel <= panelChanges + 2)
+        assertTrue("MiniPlayerOverlay recomposed $mini times while only the grid moved", mini <= 2)
     }
 }

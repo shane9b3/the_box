@@ -23,6 +23,7 @@ import app.thebox.player.controller.fakes.CH2
 import app.thebox.player.controller.fakes.CH3
 import app.thebox.player.controller.fakes.ControllerFixture
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.launch
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -194,6 +195,48 @@ class PlaybackControllerStateTest {
         f.controller.setViewport(app.thebox.core.playback.Viewport.FULL)
         assertFalse(C.TRACK_TYPE_VIDEO in f.exo.params.disabledTrackTypes)
         assertFalse(f.controller.video.value.posterMode)
+    }
+
+    /**
+     * M3 code review 2026-10-14, H-B1: the poster is the controller's own state in MINI. Repeated MINI requests (the
+     * shell re-applying its viewport) never flip it, and the controller never asks for another viewport: the poster
+     * shows while the viewport stays MINI, with the video track off and audio expected.
+     */
+    @Test
+    fun hdrPosterIsStableWhileTheViewportStaysMini() {
+        f.memory.rows[CH1] = app.thebox.player.api.ChannelPlaybackMemory(knownHdr = true)
+        f.controller.setViewport(app.thebox.core.playback.Viewport.MINI)
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.exo.emitState(Player.STATE_READY)
+        f.exo.emitAudioAdvancing()
+        f.idle()
+        val seen = mutableListOf<Boolean>()
+        val job = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Main.immediate).launch {
+            f.controller.video.collect { seen += it.posterMode }
+        }
+        repeat(5) { f.controller.setViewport(app.thebox.core.playback.Viewport.MINI); f.idle() }
+        f.advance(2_000)
+        job.cancel()
+        assertTrue(f.controller.video.value.posterMode)
+        assertEquals("posterMode never flips while MINI", listOf(true), seen.distinct())
+        assertTrue(C.TRACK_TYPE_VIDEO in f.exo.params.disabledTrackTypes)
+        assertEquals(false to true, f.engine.watchdog.expectations)
+        assertTrue("audio keeps playing", f.state is PlaybackState.Playing)
+    }
+
+    /** M3 code review 2026-10-14, H-S10: every rendered first frame bumps a counter that survives the tune. */
+    @Test
+    fun renderedFirstFramesCountAcrossTunes() {
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.play()
+        assertEquals(1L, f.controller.video.value.renderedFirstFrames)
+        f.exo.emitFirstFrame() // a re-enabled video track renders again
+        assertEquals(2L, f.controller.video.value.renderedFirstFrames)
+        f.controller.tune(TuneTarget.Channel(CH2))
+        f.idle()
+        assertEquals("kept across the tune", 2L, f.controller.video.value.renderedFirstFrames)
     }
 
     @Test
