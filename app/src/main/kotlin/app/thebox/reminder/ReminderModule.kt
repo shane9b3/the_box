@@ -7,14 +7,9 @@ import app.thebox.core.guide.GuideSettingsSource
 import app.thebox.core.guide.ReminderAlerts
 import app.thebox.core.guide.ReminderBook
 import app.thebox.core.guide.ReminderPlanner
-import app.thebox.core.catchup.CatchupUrlBuilder
 import app.thebox.data.di.ApplicationScope
 import app.thebox.data.repo.PlaylistRepository
-import app.thebox.playback.CatchupLauncherImpl
 import app.thebox.playback.TimeBaseLookup
-import app.thebox.player.api.ArchiveTargets
-import app.thebox.player.api.PlaybackController
-import app.thebox.ui.playback.CatchupLauncher
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -37,7 +32,7 @@ import javax.inject.Singleton
 @Retention(AnnotationRetention.BINARY)
 annotation class AppForeground
 
-/** Reminder runtime and catch-up launch bindings (docs/design/m3-guide.md §1.5; owner WP-D). */
+/** Reminder runtime bindings (docs/design/m3-guide.md §1.5; owner WP-D). */
 @Module
 @InstallIn(SingletonComponent::class)
 object ReminderModule {
@@ -77,11 +72,5 @@ object ReminderModule {
     fun timeBaseLookup(playlists: PlaylistRepository): TimeBaseLookup =
         TimeBaseLookup { playlistId -> playlists.get(playlistId)?.let { playlists.timeBase(it) } }
 
-    @Provides @Singleton
-    fun catchupLauncher(
-        targets: ArchiveTargets,
-        controller: PlaybackController,
-        builder: CatchupUrlBuilder,
-        timeBases: TimeBaseLookup,
-    ): CatchupLauncher = CatchupLauncherImpl(targets, controller, builder, timeBases, System::currentTimeMillis)
+    // (M4 commit 0, docs/design/m4-player-ux.md §1.3) The CatchupLauncher binding moved to app.thebox.playback.ArchiveModule.
 }

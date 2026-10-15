@@ -26,6 +26,7 @@ import app.thebox.core.guide.GuideRowsCacheFactory
 import app.thebox.core.guide.GuideSessionStore
 import app.thebox.core.guide.GuideSettings
 import app.thebox.core.guide.GuideSettingsSource
+import app.thebox.core.full.PlayerStateMachine
 import app.thebox.core.guide.GuideStateMachine
 import app.thebox.core.guide.GuideStateMachineFactory
 import app.thebox.core.guide.GuideToast
@@ -193,7 +194,15 @@ class GuideViewModel @Inject constructor(
         registerTimeReceiver()
         forwardFeeds(reminderBook)
         startTicker()
-        startup()
+        // (M4 commit 0, docs/design/m4-player-ux.md §1.7 item 10, S9) startup() is MainActivity's call, after attachPlayer.
+    }
+
+    /**
+     * (M4, S9) The player machine FULL delegates to. MainActivity calls this **before** [startup], so no FULL state
+     * runs without it (the machine's `full` setter enters FULL at once when the mode already is FULL).
+     */
+    fun attachPlayer(machine: PlayerStateMachine) {
+        this.machine.full = machine
     }
 
     // ---- ShellHost
@@ -384,8 +393,15 @@ class GuideViewModel @Inject constructor(
         }
     }
 
-    /** Startup (§3.16.1): "guide with last channel" tunes the last watched channel; the machine picks the source. */
-    private fun startup() {
+    private var started = false
+
+    /**
+     * Startup (§3.16.1): "guide with last channel" tunes the last watched channel; the machine picks the source. (M4
+     * commit 0, S9) Called by MainActivity after [attachPlayer]; runs once per view model.
+     */
+    fun startup() {
+        if (started) return
+        started = true
         viewModelScope.launch {
             try {
                 if (controller.state.value is PlaybackState.Idle) {

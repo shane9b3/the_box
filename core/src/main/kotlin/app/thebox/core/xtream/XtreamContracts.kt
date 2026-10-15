@@ -44,7 +44,10 @@ data class XtreamAccountInfo(
 data class XtreamCategory(val id: String, val name: String, val parentId: String?)
 
 /** Everything the catch-up builder needs to address an Xtream stream (credentials already decrypted). */
-data class XtreamStreamRef(val base: String, val username: String, val password: String, val streamId: Long, val extension: String)
+data class XtreamStreamRef(val base: String, val username: String, val password: String, val streamId: Long, val extension: String) {
+    /** (M4, M2 N-L9) Host only: never the credentials. */
+    override fun toString(): String = "XtreamStreamRef(${app.thebox.core.common.Redact.host(base)}, .$extension)"
+}
 
 data class XtreamEpgListing(
     val title: String,

@@ -207,6 +207,12 @@ data class TunedState(
      * H-B1) Not the HDR poster: that is the controller's MINI state (`VideoInfo.posterMode`), drawn by the shell.
      */
     val still: Boolean = false,
+    /** (M4) The ladder's error behind [error] (code, detail, narrowed actions, retry), for the error cards (§3.7, H-L9). */
+    val errorDetail: app.thebox.core.playback.PlaybackError? = null,
+    /** (M4, reviewed 2026-10-15, F2) `NowPlaying.tuneId` of the controller cycle this state came from (ArchiveVisibility). */
+    val tuneId: Long = 0,
+    /** (M4, reviewed 2026-10-15, F2) An owned archive hand-off is hidden behind this state (ArchiveVisibility, §3.2.3). */
+    val handoff: Boolean = false,
 )
 
 enum class MiniPhase { IDLE, CONNECTING, BUFFERING, RECONNECTING, PLAYING, PAUSED, STOPPED, ERROR }
@@ -224,6 +230,9 @@ data class ProgrammeInfo(
     val flags: Int,
     val titleHash: Long,
 )
+
+/** (M4, reviewed 2026-10-15, N6) The one definition of a programme's raw (unshifted) end minute (§3.5, §3.8). */
+val ProgrammeInfo.rawEndMin: Int get() = rawStartMin + (endMin - startMin)
 
 /**
  * (amended 2026-10-14, §2.13 item 20) A row's programme basis (B5/S10a): 0 = not loaded, otherwise a hash of

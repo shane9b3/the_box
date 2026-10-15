@@ -25,8 +25,15 @@ enum class BoxAction(val id: String, val remappable: Boolean) {
     REMIND("remind", true), JUMP_TO_NOW("jump_to_now", true), DAY_STRIP("day_strip", true),
     /** A digit key; the digit travels in GuideEvent.Act.digit. Not remappable (numbers are numbers). */
     DIGIT("digit", false),
+    // M4 additions (docs/design/m4-player-ux.md §2.9)
+    PLAY("play", true), PAUSE("pause", true),
+    TOGGLE_FAVOURITE("favourite_toggle", true), VIDEO_DECODER("video_decoder", true),
+    PREV_PROGRAMME("prev_programme", true), NEXT_PROGRAMME("next_programme", true),
+    /** Opens the scrub bar on live at the live edge (pause/rewind entry, §3.5.1). */
+    TIME_SHIFT("time_shift", true),
 }
 
+// (reviewed 2026-10-15, S5/F9) KeyContext is unchanged: enum class KeyContext { GUIDE, PLAYER }
 enum class KeyContext { GUIDE, PLAYER }
 
 /** Android KeyEvent fields, copied without Android types. */
@@ -84,6 +91,10 @@ object Keys {
     const val MEDIA_AUDIO_TRACK = 222; const val TV_ZOOM_MODE = 255; const val SEARCH = 84
     /** (code review 2026-10-14, H-L14) CEC and Bluetooth remotes send these for ⏭/⏮. */
     const val MEDIA_NEXT = 87; const val MEDIA_PREVIOUS = 88
+    // M4 (docs/design/m4-player-ux.md §2.9)
+    const val MEDIA_STOP = 86
+    const val MEDIA_SKIP_FORWARD = 272; const val MEDIA_SKIP_BACKWARD = 273
+    const val MEDIA_STEP_FORWARD = 274; const val MEDIA_STEP_BACKWARD = 275
 }
 
 /** Keys the device has actually reported (product §2.1). :ui implements (SharedPreferences `keys_seen`; writes only a newly seen code, N7). */

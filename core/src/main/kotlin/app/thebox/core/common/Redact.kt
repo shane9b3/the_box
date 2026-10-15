@@ -52,6 +52,14 @@ object Redact {
     private val QUERY = Regex("""(://[^\s?#"'<>]*)\?[^\s#"'<>]*""")
     private val HEADER = Regex("""(?i)\b(authorization|cookie|x-token|token)\s*[:=]\s*[^\s,;&]+""")
 
+    private val HOST = Regex("""(?i)^[a-z][a-z0-9+.\-]*://(?:[^/\s@?#]*@)?([^/\s?#]*)""")
+
+    /**
+     * (M4, M2 N-L9) `host[:port]` of [url] (userinfo, path and query dropped) for redacted `toString()`s; "?" when
+     * [url] has no scheme.
+     */
+    fun host(url: String): String = HOST.find(url)?.groupValues?.get(1)?.takeIf { it.isNotEmpty() } ?: "?"
+
     fun text(s: String): String {
         var r = s
         for (secret in snapshot) if (r.contains(secret)) r = r.replace(secret, "***")

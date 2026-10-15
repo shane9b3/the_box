@@ -75,6 +75,8 @@ data class GuideUiState(
     val empty: EmptyKind? = null,
     /** Group-name card in FULL after a group cycle (decision note accelerator 3). */
     val groupCard: String? = null,
+    /** (M4) The archive session, for the mini player's PAUSED / −MM:SS pills (PillRules, §3.2.3). */
+    val archive: app.thebox.core.catchup.archive.ArchiveStatus? = null,
 )
 
 /** Inputs of the state machine. All delivered on main. */
@@ -109,6 +111,14 @@ sealed interface GuideEvent {
     data class DataWindow(val window: GuideDataWindow) : GuideEvent
     /** Missed reminders found on start (N5): a toast with the count. */
     data class MissedReminders(val count: Int) : GuideEvent
+    /** (M4) ArchivePlayback.status: suspect ↺ and the pending catch-up FULL follow phase FAILED, not raw errors (§0.6). */
+    data class Archive(val status: app.thebox.core.catchup.archive.ArchiveStatus) : GuideEvent
+    /** (M4) Player settings the guide machine reads (number-entry wait, Back in player). */
+    data class Player(val settings: app.thebox.core.full.PlayerSettings) : GuideEvent
+    /** (M4) "On launch: Full screen last channel": go FULL on the first active Tuned (the existing pendingFull path). */
+    data object StartFull : GuideEvent
+    /** (M4, owner ruling 2026-10-15) Quick bar → Settings: mode SETTINGS; BACK from SETTINGS returns to FULL when opened from it. */
+    data object OpenSettings : GuideEvent
 }
 
 /** Side effects requested by the state machine; implemented by :ui's GuideEffectsImpl (WP-C). Main-safe, non-blocking. */
@@ -163,8 +173,9 @@ interface GuideStateMachine {
 
     /**
      * (code review 2026-10-14, H-S4) False when the machine would ignore [action] in its current state and the key
-     * should go on to the framework (FULL leaves Play/Pause and FF/RW to M2's media session). The key router asks it on
-     * a key's first DOWN.
+     * should go on to the framework. The key router asks it on a key's first DOWN. (M4, docs/design/m4-player-ux.md
+     * §2.9) FULL handles Play/Pause and FF/RW itself; the media session still receives Assistant/phone transport
+     * commands through `SessionPlayer` (§8 Q7).
      */
     fun handles(action: BoxAction): Boolean = true
 
@@ -183,6 +194,13 @@ interface GuideStateMachine {
     var lastSourceHint: GuideSource?
         get() = null
         set(@Suppress("UNUSED_PARAMETER") value) = Unit
+
+    /** (M4) The player machine FULL delegates to (§3.1.1); the host sets it once after create. */
+    var full: app.thebox.core.full.PlayerStateMachine?
+        get() = null
+        set(@Suppress("UNUSED_PARAMETER") value) = Unit
+    /** (M4, reviewed 2026-10-15, S5/F9) A player layer is open or archive video is on screen: D-pad LEFT/RIGHT act on DOWN with auto-repeat (their long bindings are ignored). */
+    val horizontalRepeat: Boolean get() = false
 
     companion object {
         val NO_DEADLINE: StateFlow<Long> = kotlinx.coroutines.flow.MutableStateFlow(Long.MAX_VALUE)
@@ -205,4 +223,6 @@ interface NumberEntry {
     /** True when the auto-commit deadline passed. */
     fun due(nowMs: Long): Boolean
     fun clear()
+    /** (M4) The auto-commit wait (PlayerSettings.numberEntryWaitMs); default NUMBER_COMMIT_MS. */
+    fun setCommitAfterMs(ms: Long) = Unit
 }
