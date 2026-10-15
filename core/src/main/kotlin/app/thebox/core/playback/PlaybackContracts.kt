@@ -167,6 +167,7 @@ data class ErrorDetail(
     val signal: String? = null,
 )
 
+/** (M4, lead ruling 2026-10-15) `maxAttempts == 0` means unlimited retries. Filled by the controller from the ladder's row (WP-C); null when the ladder gave up. */
 data class RetryInfo(val attemptsMade: Int, val maxAttempts: Int, val nextAttemptInMs: Long?)
 
 /** A user-facing failure. [actions] is [code].defaultSteps filtered by availability (e.g. TRY_BACKUP only with a backup). */
