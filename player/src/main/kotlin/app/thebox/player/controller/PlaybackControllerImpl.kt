@@ -15,6 +15,7 @@ import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
+import androidx.media3.common.text.CueGroup
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.LoadEventInfo
@@ -54,6 +55,7 @@ import app.thebox.core.playback.resolve.FormatHints
 import app.thebox.core.playback.resolve.ResolveConstants
 import app.thebox.core.playback.ResolveOutcome
 import app.thebox.core.playback.ResolvedStream
+import app.thebox.core.playback.RetryInfo
 import app.thebox.core.playback.StallKind
 import app.thebox.core.playback.StallVerdict
 import app.thebox.core.playback.StreamFormat
@@ -190,9 +192,14 @@ internal class PlaybackControllerImpl @Inject constructor(
     override val displayModeRequest: StateFlow<Int> = _displayModeRequest.asStateFlow()
 
     override val surfacePlayer: Player get() = ensureEngine().surface
-    // M4 commit 0 (docs/design/m4-player-ux.md §1.7 item 4): trivial bodies; WP-C wires onCues and the previous channel.
+    /**
+     * (M4, docs/design/m4-player-ux.md §3.6.3) `Player.Listener.onCues(CueGroup)` on the application (main) looper;
+     * emptied whenever a session ends ([endSession]: every tune, ladder re-open, error and stop), because
+     * `ExoPlayerImpl.stop()` resets its cue group without a callback (API notes §1.2).
+     */
     private val _cues = MutableStateFlow<List<androidx.media3.common.text.Cue>>(emptyList())
     override val cues: StateFlow<List<androidx.media3.common.text.Cue>> = _cues.asStateFlow()
+    /** (M4, §2.9) Mirrors [previousIdentity]: what [previousChannel] would tune (M2 §3.1.1 rule). */
     private val _previous = MutableStateFlow<ChannelIdentity?>(null)
     override val previous: StateFlow<ChannelIdentity?> = _previous.asStateFlow()
 
@@ -233,7 +240,16 @@ internal class PlaybackControllerImpl @Inject constructor(
     private var statsEnabled = false
     private var zapList: ZapList? = null
     private var previousIdentity: ChannelIdentity? = null
+        set(value) {
+            field = value
+            _previous.value = value
+        }
     private var lifecycleStopAtMs = 0L
+    /**
+     * (M4, M2 E-L2) The session whose display-mode gate opened (`awaitSettled`): only then may a resume set
+     * `playWhenReady`; before it, the gate itself applies `!c.paused`.
+     */
+    private var settledSession: TuneSession? = null
 
     /** Passthrough denials learned on the current audio route (L33); survive tunes, cleared on a route change (§3.8.3). */
     private val routeDeniedPassthrough = LinkedHashSet<String>()
@@ -597,7 +613,10 @@ internal class PlaybackControllerImpl @Inject constructor(
         }
         eventLog.add(PlaybackEventType.OPEN, id, format.name, resolved.host)
         e.parts.displayMode.awaitSettled {
-            if (session === s) p.playWhenReady = !c.paused
+            if (session === s) {
+                settledSession = s
+                p.playWhenReady = !c.paused
+            }
         }
         startPolling()
     }
@@ -750,23 +769,30 @@ internal class PlaybackControllerImpl @Inject constructor(
         params.setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, c.audioDropped)
         params.setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, videoShouldBeDisabled(c))
         p.trackSelectionParameters = params.build()
-        _video.update { it.copy(posterMode = posterMode(c)) }
+        _video.update { it.copy(posterMode = posterMode(c), decoderOverride = channelDecoderOverride(c)) }
     }
 
     private fun effectiveVideoMode(c: Cycle): VideoDecoderMode =
-        if (c.softwareVideo) VideoDecoderMode.SOFTWARE_PREFERRED else c.decoderOverride ?: c.memory.videoDecoder ?: settings.current.videoDecoderMode
+        if (c.softwareVideo) VideoDecoderMode.SOFTWARE_PREFERRED else channelDecoderOverride(c) ?: settings.current.videoDecoderMode
+
+    /** (M4, §2.9 `VideoInfo.decoderOverride`) The channel's own choice (picker or memory); null = the global setting. */
+    private fun channelDecoderOverride(c: Cycle): VideoDecoderMode? = c.decoderOverride ?: c.memory.videoDecoder
 
     /** Ends the transport of the current session, then stops the player (keeps the last frame; never clears the surface). */
     private fun endSession() {
+        if (_cues.value.isNotEmpty()) _cues.value = emptyList()
         val s = session ?: return
         session = null
+        settledSession = null
         eng?.parts?.watchdog?.stop()
         s.end()
         player?.stop()
     }
 
     private fun clipDelay(c: Cycle, delayMs: Long): Long {
-        if (c.firstMediaReached) return delayMs
+        // (M4) Behind the unlimited-retry card the switch timeout has already passed: clipping to it would turn L19's
+        // UNLIMITED_RETRY_INTERVAL_MS into back-to-back reconnects.
+        if (c.firstMediaReached || c.cardShown) return delayMs
         val left = c.startedAtMs + settings.current.streamSwitchTimeoutMs - clock.nowMs()
         return delayMs.coerceAtMost(left.coerceAtLeast(0))
     }
@@ -861,6 +887,12 @@ internal class PlaybackControllerImpl @Inject constructor(
 
         override fun onTracksChanged(tracks: Tracks) = onTracks(tracks)
 
+        /** (M4, §3.6.3) The non-deprecated form only (API notes §1.2). Nothing is published between sessions. */
+        override fun onCues(cueGroup: CueGroup) {
+            if (session == null) return
+            _cues.value = cueGroup.cues
+        }
+
         override fun onVideoSizeChanged(videoSize: VideoSize) {
             if (videoSize.width == 0 && videoSize.height == 0) return
             _video.update { it.copy(width = videoSize.width, height = videoSize.height, pixelRatio = videoSize.pixelWidthHeightRatio) }
@@ -914,7 +946,8 @@ internal class PlaybackControllerImpl @Inject constructor(
             }
             Player.STATE_ENDED -> {
                 if (c.isArchive) {
-                    setState(PlaybackState.Playing(nowPlaying(c), paused = true, warning = c.warning))
+                    // (M4, §2.9) `ended` tells the archive session the request ran out (continuation), not a user pause.
+                    setState(PlaybackState.Playing(nowPlaying(c), paused = true, warning = c.warning, ended = true))
                 } else {
                     onFailure(c, FailureSignal.LiveEnded, null)
                 }
@@ -1170,7 +1203,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         if (settings.current.reconnectAttempts < 0 && signal != null && isTransient(signal)) {
             // L19 unlimited: the card shows, retries continue behind it.
             c.cardShown = true
-            setState(PlaybackState.Error(nowPlaying(c), enrich(c, error, signal)))
+            setState(PlaybackState.Error(nowPlaying(c), enrich(c, error, signal).copy(retry = retryInfo(c, nextAttemptInMs = null))))
         } else {
             fail(c, error, signal)
         }
@@ -1373,11 +1406,29 @@ internal class PlaybackControllerImpl @Inject constructor(
             }
         }
         launchSession(c, plan, waiting)
+        // (M4, lead ruling) Behind the unlimited-retry card the waiting state is not shown (setActiveState), so the card
+        // itself carries the progress: attempts so far and the wait before the next one.
+        val st = _state.value
+        if (c.cardShown && st is PlaybackState.Error) {
+            setState(PlaybackState.Error(nowPlaying(c), st.error.copy(retry = retryInfo(c, nextAttemptInMs = clipDelay(c, plan.delayMs)))))
+        }
+    }
+
+    /**
+     * (M4, lead ruling) [PlaybackError.retry] for a card behind which the ladder keeps retrying: [RetryInfo.attemptsMade]
+     * counts the connection attempts this cycle has started (the next one excluded), [RetryInfo.maxAttempts] is 0 for
+     * the unlimited setting (the only case that shows a card while retrying, L19), else the setting.
+     */
+    private fun retryInfo(c: Cycle, nextAttemptInMs: Long?): RetryInfo {
+        val max = settings.current.reconnectAttempts
+        val made = if (nextAttemptInMs != null) c.attempt - 1 else c.attempt
+        return RetryInfo(attemptsMade = made.coerceAtLeast(1), maxAttempts = if (max < 0) 0 else max, nextAttemptInMs = nextAttemptInMs)
     }
 
     private fun fail(c: Cycle, error: PlaybackError, signal: FailureSignal?) {
         if (cycle !== c) return
-        val enriched = enrich(c, error, signal)
+        // The ladder gave up: no retry runs behind this card.
+        val enriched = enrich(c, error, signal).copy(retry = null)
         sessionJob?.cancel()
         switchTimeoutJob?.cancel()
         livePauseJob?.cancel()
@@ -1421,7 +1472,12 @@ internal class PlaybackControllerImpl @Inject constructor(
         if (c.paused) return
         c.paused = true
         player?.playWhenReady = false
-        setState(PlaybackState.Playing(nowPlaying(c), paused = true, warning = c.warning))
+        // (M4, M2 E-L2) Before first media or while the ladder acts, the state stays honest (Connecting / Stalled); the
+        // pause is applied when the player reaches READY (onPlayerState reports Playing(paused) then), and the
+        // display-mode gate of every later session opens with playWhenReady = false.
+        if (st !is PlaybackState.Connecting && st !is PlaybackState.Stalled) {
+            setState(PlaybackState.Playing(nowPlaying(c), paused = true, warning = c.warning))
+        }
         if (!c.isArchive) {
             livePauseJob?.cancel()
             livePauseJob = scope.launch {
@@ -1458,6 +1514,15 @@ internal class PlaybackControllerImpl @Inject constructor(
                 if (!st.resumable) return
                 startCycle(c.specForRestart())
                 if (!c.isArchive) _notices.tryEmit(PlaybackNotice.LiveResumed)
+            }
+            // (M4, M2 E-L2) Paused before READY: nothing was frozen yet, so un-pause in place (no re-tune). The gate
+            // opens the player later when it has not opened yet.
+            is PlaybackState.Connecting, is PlaybackState.Stalled -> {
+                if (!c.paused) return
+                c.paused = false
+                livePauseJob?.cancel()
+                val s = session
+                if (s != null && settledSession === s) player?.playWhenReady = true
             }
             else -> Unit
         }
@@ -1656,6 +1721,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             c.memory = c.memory.copy(videoDecoder = mode)
             remember(id) { it.copy(videoDecoder = mode) }
         }
+        _video.update { it.copy(decoderOverride = channelDecoderOverride(c)) }
         if (isPlaybackActive() && session != null) {
             eventLog.add(PlaybackEventType.DECISION, c.currentTuneId, "Reprepare", "decoder override")
             launchSession(c, Plan(reuseResolved = c.resolved != null), waiting = { np -> _state.value.withTarget(np) })
@@ -1788,6 +1854,8 @@ internal class PlaybackControllerImpl @Inject constructor(
         _keepScreenOn.value = when (s) {
             is PlaybackState.Connecting, is PlaybackState.Buffering, is PlaybackState.Stalled -> true
             is PlaybackState.Playing -> !s.paused
+            // (M4, M2 E-L7) The unlimited-retry card (L19) keeps retrying behind it: the screen must stay on.
+            is PlaybackState.Error -> cycle?.cardShown == true
             else -> false
         }
         BoxLog.d(TAG) { "state ${s.javaClass.simpleName}" }

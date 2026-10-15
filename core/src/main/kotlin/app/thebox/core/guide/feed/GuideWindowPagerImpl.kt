@@ -456,10 +456,7 @@ class GuideWindowPagerImpl(
         return id
     }
 
-    private fun ProgrammeDetail.toInfo() = ProgrammeInfo(
-        rawStartMin = rawStartMin, startMin = startMin, endMin = endMin, title = title, subtitle = subtitle,
-        description = description, genre = categories.firstOrNull(), episodeLabel = episodeLabel, flags = flags, titleHash = titleHash,
-    )
+    private fun ProgrammeDetail.toInfo() = toProgrammeInfo()
 
     /** Growable scratch arrays on the epg thread; [snapshot] copies them into exact-size fresh arrays. */
     private inner class Sink : CellSink {

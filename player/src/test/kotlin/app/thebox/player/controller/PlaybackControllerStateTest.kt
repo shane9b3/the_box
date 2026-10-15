@@ -513,4 +513,252 @@ class PlaybackControllerStateTest {
         f.idle()
         assertEquals(listOf<String?>("1/ch1", "2/ch1"), f.ladder.channels)
     }
+
+    // ------------------------------------------------------------------ M4 WP-C (docs/design/m4-player-ux.md §5.3)
+
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    private fun emitCues(vararg texts: String) {
+        val cues = texts.map { androidx.media3.common.text.Cue.Builder().setText(it).build() }
+        f.exo.listeners.toList().forEach { it.onCues(androidx.media3.common.text.CueGroup(cues, 0)) }
+        f.idle()
+    }
+
+    /** A connection reset under Media3's HTTP source: classified Network(RESET), a transient signal (L19). */
+    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
+    private fun resetError(): PlaybackException = androidx.media3.exoplayer.ExoPlaybackException.createForSource(
+        androidx.media3.datasource.HttpDataSource.HttpDataSourceException(
+            java.io.IOException("reset"),
+            androidx.media3.datasource.DataSpec(android.net.Uri.parse("http://panel.example:8080/x.ts")),
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+            androidx.media3.datasource.HttpDataSource.HttpDataSourceException.TYPE_READ,
+        ),
+        PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+    )
+
+    @Test
+    fun cuesFollowTheSessionAndAreClearedOnTuneAndStop() {
+        emitCues("before any session")
+        assertTrue("no session, no cues", f.controller.cues.value.isEmpty())
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.play()
+        emitCues("Hello", "world")
+        assertEquals(listOf("Hello", "world"), f.controller.cues.value.map { it.text.toString() })
+        emitCues()
+        assertTrue("an empty CueGroup clears", f.controller.cues.value.isEmpty())
+
+        emitCues("still on CH1")
+        f.controller.tune(TuneTarget.Channel(CH2))
+        f.idle()
+        assertTrue("cleared on tune (ExoPlayer.stop() resets its cues without a callback)", f.controller.cues.value.isEmpty())
+
+        f.play()
+        emitCues("CH2")
+        f.controller.stop()
+        f.idle()
+        assertTrue("cleared on stop", f.controller.cues.value.isEmpty())
+        emitCues("late cue after stop")
+        assertTrue("nothing published between sessions", f.controller.cues.value.isEmpty())
+    }
+
+    @Test
+    fun cuesAreClearedWhenTheLadderReopensTheSession() {
+        f.ladder.script = { _, _ -> LadderDecision.Reprepare() }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.play()
+        emitCues("old session")
+        f.exo.emitError(PlaybackException("x", null, PlaybackException.ERROR_CODE_IO_UNSPECIFIED))
+        f.idle()
+        assertTrue(f.controller.cues.value.isEmpty())
+    }
+
+    @Test
+    fun archiveEndIsReportedAsEndedNotAsAUserPause() {
+        val request = app.thebox.core.catchup.ArchiveRequest(
+            url = "http://panel.example:8080/timeshift/{{u}}/{{p}}/60/2026-10-13:20-00/1.ts", headers = emptyMap(),
+            mode = app.thebox.core.model.CatchupMode.entries.first(), variant = "xc",
+            requestStart = java.time.Instant.parse("2026-10-13T18:00:00Z"), requestEnd = null, nativeSeekRange = null,
+        )
+        f.controller.tuneArchive(app.thebox.player.api.ArchiveTune(CH1, request))
+        f.idle()
+        f.play()
+        assertEquals(false, (f.state as PlaybackState.Playing).ended)
+        f.controller.pause()
+        assertEquals("a user pause is not the end", false, (f.state as PlaybackState.Playing).ended)
+        f.controller.resume()
+        f.exo.emitState(Player.STATE_ENDED)
+        f.idle()
+        val st = f.state as PlaybackState.Playing
+        assertTrue(st.paused)
+        assertTrue(st.ended)
+        assertTrue("archive end never reaches the ladder", f.ladder.seen.isEmpty())
+        assertFalse(f.controller.keepScreenOn.value)
+    }
+
+    @Test
+    fun previousFollowsTheOneSecondRule() {
+        assertNull(f.controller.previous.value)
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.play()
+        f.advance(1_500)
+        f.controller.tune(TuneTarget.Channel(CH2))
+        f.idle()
+        assertEquals(CH1, f.controller.previous.value)
+        // CH2 never reached first media: leaving it does not make it the previous channel.
+        f.controller.tune(TuneTarget.Channel(CH3))
+        f.idle()
+        assertEquals(CH1, f.controller.previous.value)
+        f.play()
+        f.advance(1_500)
+        assertTrue(f.controller.previousChannel())
+        f.idle()
+        assertEquals("previousChannel() tunes what `previous` showed", CH1, f.state.target?.identity)
+        assertEquals(CH3, f.controller.previous.value)
+    }
+
+    @Test
+    fun pauseWhileConnectingStaysConnectingAndIsAppliedAtReady() {
+        // M2 E-L2: pause before first media must not claim Playing(paused) while nothing is prepared.
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        assertTrue(f.state is PlaybackState.Connecting)
+        f.controller.pause()
+        f.idle()
+        assertTrue("state stays honest: ${f.state}", f.state is PlaybackState.Connecting)
+        assertFalse(f.exo.playWhenReady)
+        assertTrue(f.controller.keepScreenOn.value)
+        f.play()
+        val st = f.state as PlaybackState.Playing
+        assertTrue("applied at READY", st.paused)
+        assertFalse(f.exo.playWhenReady)
+        assertFalse(f.controller.keepScreenOn.value)
+    }
+
+    @Test
+    fun resumeWhileConnectingUnpausesInPlaceWithoutARetune() {
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.controller.pause()
+        f.controller.resume()
+        f.idle()
+        assertTrue(f.state is PlaybackState.Connecting)
+        assertTrue(f.exo.playWhenReady)
+        assertEquals(1, f.resolver.calls.size)
+        assertTrue(f.notices.none { it == PlaybackNotice.LiveResumed })
+        f.play()
+        assertEquals(false, (f.state as PlaybackState.Playing).paused)
+    }
+
+    @Test
+    fun pauseDuringALadderDelayKeepsStalledAndTheNextSessionOpensPaused() {
+        // M2 test gap 7: pause while the ladder waits before re-opening.
+        f.ladder.script = { _, _ -> LadderDecision.Reprepare() }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.play()
+        f.advance(1_000)
+        f.exo.emitError(PlaybackException("x", null, PlaybackException.ERROR_CODE_IO_UNSPECIFIED))
+        f.idle()
+        assertTrue(f.state is PlaybackState.Stalled)
+        f.controller.pause()
+        f.idle()
+        assertTrue("stays Stalled: ${f.state}", f.state is PlaybackState.Stalled)
+        assertFalse(f.exo.playWhenReady)
+        val builds = f.sources.builds.size
+        f.advance(500)
+        f.exo.emitError(PlaybackException("y", null, PlaybackException.ERROR_CODE_IO_UNSPECIFIED))
+        f.idle()
+        assertEquals("the ladder re-opened", builds + 1, f.sources.builds.size)
+        assertTrue(f.state is PlaybackState.Stalled)
+        assertFalse("the re-opened session's gate keeps the pause", f.exo.playWhenReady)
+        f.play()
+        assertEquals(true, (f.state as PlaybackState.Playing).paused)
+    }
+
+    @Test
+    fun unlimitedRetryCardCarriesRetryInfoKeepsTheScreenOnAndWaitsTheInterval() {
+        // Lead ruling (M4): RetryInfo(maxAttempts = 0) = unlimited; M2 E-L7: keepScreenOn stays true behind the card.
+        f.settings.update { it.copy(reconnectAttempts = -1) }
+        f.ladder.script = { _, _ -> LadderDecision.RetrySame(5_000) }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.exo.emitError(resetError())
+        f.idle()
+        f.advance(15_100)
+        val card = f.state as PlaybackState.Error
+        assertEquals(PlaybackErrorCode.NO_DATA_TIMEOUT, card.error.code)
+        val retry = assertNotNullAndGet(card.error.retry)
+        assertEquals(0, retry.maxAttempts)
+        assertEquals(2, retry.attemptsMade)
+        assertNull("an attempt is in flight", retry.nextAttemptInMs)
+        assertTrue("E-L7", f.controller.keepScreenOn.value)
+
+        val builds = f.sources.builds.size
+        f.exo.emitError(resetError())
+        f.idle()
+        val again = f.state as PlaybackState.Error
+        val next = assertNotNullAndGet(again.error.retry)
+        assertEquals(0, next.maxAttempts)
+        assertEquals(2, next.attemptsMade)
+        assertEquals("L19 interval behind the card, not clipped to the passed switch timeout", 5_000L, next.nextAttemptInMs)
+        assertTrue(f.controller.keepScreenOn.value)
+        f.advance(4_900)
+        assertEquals("no back-to-back reconnects behind the card", builds, f.sources.builds.size)
+        f.advance(200)
+        assertEquals(builds + 1, f.sources.builds.size)
+        assertTrue("the card stays while retrying", f.state is PlaybackState.Error)
+
+        f.play()
+        assertTrue("first media lifts the card", f.state is PlaybackState.Playing)
+    }
+
+    @Test
+    fun terminalErrorHasNoRetryInfoAndLetsTheScreenSleep() {
+        f.ladder.script = { _, _ ->
+            LadderDecision.Fail(PlaybackError(PlaybackErrorCode.STREAM_INTERRUPTED, retry = app.thebox.core.playback.RetryInfo(3, 5, 1_000)))
+        }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.play()
+        f.exo.emitError(resetError())
+        f.idle()
+        val err = f.state as PlaybackState.Error
+        assertEquals(PlaybackErrorCode.STREAM_INTERRUPTED, err.error.code)
+        assertNull("the ladder gave up", err.error.retry)
+        assertFalse(f.controller.keepScreenOn.value)
+    }
+
+    @Test
+    fun videoInfoCarriesTheChannelDecoderOverride() {
+        f.memory.rows[CH1] = app.thebox.player.api.ChannelPlaybackMemory(videoDecoder = app.thebox.core.playback.VideoDecoderMode.SOFTWARE_PREFERRED)
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        assertEquals(app.thebox.core.playback.VideoDecoderMode.SOFTWARE_PREFERRED, f.controller.video.value.decoderOverride)
+        f.controller.setVideoDecoderOverride(app.thebox.core.playback.VideoDecoderMode.HARDWARE_ONLY)
+        f.idle()
+        assertEquals(app.thebox.core.playback.VideoDecoderMode.HARDWARE_ONLY, f.controller.video.value.decoderOverride)
+        f.controller.tune(TuneTarget.Channel(CH2))
+        f.idle()
+        assertNull("no override on CH2: follow the global setting", f.controller.video.value.decoderOverride)
+    }
+
+    @Test
+    fun statsCarryTheServerPosition() {
+        // E23: "Server: n of m" from the resolved stream's backup-server position.
+        f.resolver.next = { c -> ResolveOutcome.Ok(app.thebox.player.controller.fakes.stream((c.target as app.thebox.player.internal.TuneTargetKey.Channel).identity, baseIndex = 1, baseCount = 3)) }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.play()
+        f.controller.setStatsEnabled(true)
+        f.idle()
+        assertEquals(1, f.controller.stats.value.serverIndex)
+        assertEquals(3, f.controller.stats.value.serverCount)
+    }
+
+    private fun <T : Any> assertNotNullAndGet(v: T?): T {
+        assertNotNull(v)
+        return v!!
+    }
 }

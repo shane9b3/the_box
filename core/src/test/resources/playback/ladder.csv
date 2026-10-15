@@ -65,6 +65,15 @@ L12;Http 404 HLS_SEGMENT;format=HLS,firstFrame=true,ms=60000,transientRetries=1;
 G-limiter;Http 404 HLS_SEGMENT;format=HLS,firstFrame=true,ms=60000,reResolveAllowed=false;Fail(CHANNEL_OFFLINE);L12
 L13;Http 404 ARCHIVE;archive=true,live=false;Fail(CATCHUP_NOT_IN_ARCHIVE);L13
 L13;Http 410 ARCHIVE;archive=true,live=false,backup=true;Fail(CATCHUP_NOT_IN_ARCHIVE);L13
+# ---- L13a (M4, m4-player-ux §3.8.8, review S3): archive 400 before first media is "not in archive"; after it, LHX
+L13a;Http 400 ARCHIVE;archive=true,live=false;Fail(CATCHUP_NOT_IN_ARCHIVE);L13a
+L13a;Http 400 HLS_MANIFEST;archive=true,live=false,format=HLS;Fail(CATCHUP_NOT_IN_ARCHIVE);L13a
+L13a;Http 400 ARCHIVE;archive=true,live=false,firstFrame=true,ms=60000;Fail(FORBIDDEN);LHX
+L13a;Http 400 PROGRESSIVE;;Fail(FORBIDDEN);LHX
+# 403 on an archive first open is not a variant failure: it still walks the connection-limit rows L2-L4 (S3)
+L13a;Http 403 ARCHIVE;archive=true,live=false;RetrySame(delayMs=1500);L2
+L13a;Http 403 ARCHIVE;archive=true,live=false,limitSteps=1;ReResolve(delayMs=1500, refreshAccount=true, rotateBase=false);L3
+L13a;Http 403 ARCHIVE;archive=true,live=false,limitSteps=2,account=ACTIVE,active=1,max=1;Fail(CONNECTION_LIMIT);L4
 L14;Http 404 PROGRESSIVE;;Fail(CHANNEL_OFFLINE);L14
 L14;Http 410 HLS_MANIFEST;format=HLS;Fail(CHANNEL_OFFLINE);L14
 L14;ReconnectExhausted 404 bytes;firstFrame=true,ms=60000;Fail(CHANNEL_OFFLINE);L14

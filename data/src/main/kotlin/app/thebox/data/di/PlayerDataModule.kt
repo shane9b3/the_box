@@ -15,8 +15,8 @@ import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 
 /**
- * Player data (docs/design/m4-player-ux.md §1.4, §2.7; owner WP-C). Commit 0 binds the stubs so `:app` compiles;
- * nothing constructs them at app start until WP-D wires the player.
+ * Player data (docs/design/m4-player-ux.md §1.4, §2.7; owner WP-C). The feed is a singleton: it owns the one
+ * `box-player-epg` thread and its reader for the life of the process (constructed lazily, on first injection).
  */
 @Module
 @InstallIn(SingletonComponent::class)

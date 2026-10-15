@@ -183,6 +183,12 @@ class PlaylistRepository @Inject constructor(
         )
     }
 
+    /** (M4, §3.8.8) The persisted catch-up probe winner of [playlistId], or null. */
+    suspend fun probeWinner(playlistId: Long): String? = playlistDao.catchupProbeWinner(playlistId)
+
+    /** (M4, §3.8.8) Column-targeted write of the probe winner; never the whole-row [update] (M2 N-L13). */
+    suspend fun setProbeWinner(playlistId: Long, variant: String?) = playlistDao.setCatchupProbeWinner(playlistId, variant)
+
     // ---------------------------------------------------------------- account card
 
     fun account(playlistId: Long): Flow<XtreamAccountInfo?> = accountDao.observe(playlistId).map { it?.let { e -> decodeAccount(e.infoJson) } }

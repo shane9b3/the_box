@@ -370,6 +370,12 @@ class ErrorLadderImpl(
         Row("L13", { httpIn(it, GONE_STATUSES) && it.ctx.isArchive }) {
             Step(it.fail(PlaybackErrorCode.CATCHUP_NOT_IN_ARCHIVE), it.c, PlaybackErrorCode.CATCHUP_NOT_IN_ARCHIVE)
         },
+        // (M4, docs/design/m4-player-ux.md §3.8.8, review S3) L13a: a panel that rejects an archive URL form answers 400 on
+        // the first open; that is the variant's "not in archive", which ArchivePlayback probes past. A 400 after first
+        // media (a mid-play re-open) stays with LHX.
+        Row("L13a", { it.status == HTTP_BAD_REQUEST && it.ctx.isArchive && !it.ctx.firstFrameRendered }) {
+            Step(it.fail(PlaybackErrorCode.CATCHUP_NOT_IN_ARCHIVE), it.c, PlaybackErrorCode.CATCHUP_NOT_IN_ARCHIVE)
+        },
         Row("L14", { httpIn(it, GONE_STATUSES) }) { Step(it.fail(PlaybackErrorCode.CHANNEL_OFFLINE), it.c, PlaybackErrorCode.CHANNEL_OFFLINE) },
 
         // ---- 5xx, 408, 429
@@ -560,6 +566,7 @@ class ErrorLadderImpl(
         const val GATE_ROW = "G1"
         const val TIMEOUT_ROW = "GT"
         private const val HTTP_BANDWIDTH_EXCEEDED = 509
+        private const val HTTP_BAD_REQUEST = 400
         private const val STEREO_CHANNELS = 2
         private val LIMIT_STATUSES = setOf(403, 458, 509, 503)
         private val HARD_LIMIT_STATUSES = setOf(458, 509)
