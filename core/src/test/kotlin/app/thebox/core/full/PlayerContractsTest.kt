@@ -39,7 +39,7 @@ class PlayerContractsTest {
             val e = PlayerFixtures.error(code)
             assertEquals(code, e.code)
             assertEquals(code.defaultSteps, e.actions, "$code: the ladder's default actions")
-            assertEquals(code == PlaybackErrorCode.STREAM_INTERRUPTED, e.retry != null, "$code: retry only under unlimited retries")
+            assertEquals(code == PlaybackErrorCode.NO_DATA_TIMEOUT, e.retry != null, "$code: retry only on the switch-timeout card (unlimited retries)")
         }
         assertEquals(PlaybackErrorCode.entries.size, PlayerFixtures.allErrors().map { it.code }.toSet().size)
     }

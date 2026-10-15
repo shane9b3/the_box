@@ -87,7 +87,10 @@ object PlayerFixtures {
             CHANNEL_NOT_FOUND -> ErrorDetail()
             INTERNAL -> ErrorDetail(signal = "Unknown")
         }
-        val retry = if (code == STREAM_INTERRUPTED) RetryInfo(attemptsMade = 3, maxAttempts = 0, nextAttemptInMs = 30_000) else null
+        // (WP-C finding, 2026-10-15) The only card the controller shows while retrying is the switch-timeout card
+        // before first media (NO_DATA_TIMEOUT, unlimited retries); STREAM_INTERRUPTED after first media is
+        // Buffering(RECONNECTING), never a card, and a terminal error has retry = null.
+        val retry = if (code == NO_DATA_TIMEOUT) RetryInfo(attemptsMade = 3, maxAttempts = 0, nextAttemptInMs = 5_000) else null
         return PlaybackError(code, detail, code.defaultSteps, retry)
     }
 
