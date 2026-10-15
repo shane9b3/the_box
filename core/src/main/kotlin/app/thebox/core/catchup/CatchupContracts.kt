@@ -82,7 +82,11 @@ data class CatchupTarget(
      * variant of [CatchupUrlBuilder.build]. A winner of another mode is ignored.
      */
     val winner: String? = null,
-)
+) {
+    /** (M4, M2 N-L9) Mode, variant and host only: the live URL and headers carry credentials. */
+    override fun toString(): String =
+        "CatchupTarget(${catchup.mode}, ${app.thebox.core.common.Redact.host(liveUrl)}, winner=$winner)"
+}
 
 data class ArchiveWindow(
     /** Raw (unshifted) programme times. */
@@ -105,7 +109,10 @@ data class ArchiveRequest(
     val requestEnd: Instant?,
     /** Epoch seconds the player can seek natively inside this request; null = re-request to seek. */
     val nativeSeekRange: LongRange?,
-)
+) {
+    /** (M4, M2 N-L9) Mode, variant and host only: the URL and headers carry credentials and tokens. */
+    override fun toString(): String = "ArchiveRequest($mode, $variant, ${app.thebox.core.common.Redact.host(url)})"
+}
 
 sealed interface CatchupBuild {
     /**

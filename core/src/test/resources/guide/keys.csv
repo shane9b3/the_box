@@ -57,6 +57,14 @@ grid,grid_home,CHANNEL_LIST,GUIDE,GRID,none,-,same
 grid,grid_home,STATS_OVERLAY,GUIDE,GRID,none,-,same
 grid,grid_home,JUMP_TO_LIVE,GUIDE,GRID,none,-,same
 grid,grid_home,SCREEN_OFF,GUIDE,GRID,none,-,same
+# M4 commit 0 (docs/design/m4-player-ux.md §2.9): the appended actions are no-ops in the guide grid until WP-A says otherwise.
+grid,grid_home,PLAY,GUIDE,GRID,none,-,same
+grid,grid_home,PAUSE,GUIDE,GRID,none,-,same
+grid,grid_home,TOGGLE_FAVOURITE,GUIDE,GRID,none,-,same
+grid,grid_home,VIDEO_DECODER,GUIDE,GRID,none,-,same
+grid,grid_home,PREV_PROGRAMME,GUIDE,GRID,none,-,same
+grid,grid_home,NEXT_PROGRAMME,GUIDE,GRID,none,-,same
+grid,grid_home,TIME_SHIFT,GUIDE,GRID,none,-,same
 grid,grid_home,GROUP_NEXT,GUIDE,GRID,none,-,same
 grid,grid_home,GROUP_PREV,GUIDE,GRID,none,-,same
 # ---- TABS §3.4.3

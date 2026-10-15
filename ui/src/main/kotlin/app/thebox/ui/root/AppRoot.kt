@@ -181,6 +181,7 @@ fun AppRoot(
                 }
                 is ShellEvent.Announce -> announce(view, e.text)
                 ShellEvent.Exit -> exit()
+                is ShellEvent.Message -> Unit // M4 commit 0 (§1.7 item 7); WP-D shows it as a toast
             }
         }
     }

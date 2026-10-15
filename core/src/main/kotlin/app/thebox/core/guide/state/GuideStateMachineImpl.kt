@@ -48,6 +48,8 @@ import app.thebox.core.guide.SourceSection
 import app.thebox.core.guide.TimeLabels
 import app.thebox.core.guide.TunedState
 import app.thebox.core.guide.Zone
+import app.thebox.core.full.EnterReason
+import app.thebox.core.full.PlayerStateMachine
 import app.thebox.core.input.BoxAction
 import app.thebox.core.input.Keys
 import app.thebox.core.playback.NextStep
@@ -94,6 +96,16 @@ class GuideStateMachineImpl(
      * the first [GuideEvent.Sources] when it is still listed (§3.8.4, §2.13 item 10).
      */
     override var lastSourceHint: GuideSource? = null
+
+    /**
+     * (M4 commit 0, docs/design/m4-player-ux.md §1.7 item 10, S9) The player machine FULL delegates to; the host sets it
+     * before its first act. Set while the mode is already FULL, it is entered at once, so no FULL state runs without it.
+     */
+    override var full: PlayerStateMachine? = null
+        set(value) {
+            field = value
+            if (value != null && _ui.value.mode == ScreenMode.FULL) value.enterFull(curMs, EnterReason.LAUNCH)
+        }
 
     private val limits = GuideLimits(labels)
     private val number = NumberEntryImpl()
@@ -219,6 +231,11 @@ class GuideStateMachineImpl(
             is GuideEvent.SearchClosed -> onSearchClosed(event.channel, event.tuned, event.archive)
             is GuideEvent.DataWindow -> { dataWindow = event.window; recomputeLimits(reclamp = true) }
             is GuideEvent.MissedReminders -> if (event.count > 0) effects.toast(GuideToast.REMINDERS_MISSED, event.count.toString())
+            // M4 commit 0 (docs/design/m4-player-ux.md §1.7 item 7, S9): no-op branches; WP-A gives them bodies.
+            is GuideEvent.Archive -> Unit
+            is GuideEvent.Player -> Unit
+            GuideEvent.StartFull -> pendingFull = true
+            GuideEvent.OpenSettings -> Unit
         }
         frame.gridFocused = u.zone == Zone.GRID
         rearmDeferredCard()

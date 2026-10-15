@@ -46,6 +46,7 @@ object TunedStateMapper {
             reconnectAttempt = attempt,
             reconnectMax = max,
             still = still,
+            tuneId = state.target?.tuneId ?: 0L, // M4 commit 0 (docs/design/m4-player-ux.md §1.7 item 8, B1)
         )
     }
 }

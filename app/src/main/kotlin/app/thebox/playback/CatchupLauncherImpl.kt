@@ -25,7 +25,7 @@ fun interface TimeBaseLookup {
  * [CatchupUrlBuilder] and the playlist's [TimeBase], then [PlaybackController.tuneArchive]. The viewport is the root's
  * (it follows the displayed mode; §2.13 item 11).
  * Panel times are never computed here: the builder applies the panel zone, correction and skew (CLAUDE.md timeshift
- * rule). Window times are the raw (unshifted) programme times. Bound in [app.thebox.reminder.ReminderModule].
+ * rule). Window times are the raw (unshifted) programme times. Bound in [app.thebox.playback.ArchiveModule] (M4).
  */
 class CatchupLauncherImpl(
     private val targets: ArchiveTargets,

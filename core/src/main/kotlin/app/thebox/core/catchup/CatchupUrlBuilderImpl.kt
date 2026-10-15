@@ -52,10 +52,13 @@ class CatchupUrlBuilderImpl : CatchupUrlBuilder {
         val corr = catchup.correctionHours
         val nowI = window.deviceNow.plus(timeBase.clockSkew)
         val now = nowI.epochSecond
-        if (window.programmeStart.isAfter(nowI)) return CatchupBuild.Unsupported("the programme has not started yet")
         val days = catchup.days.coerceAtLeast(1)
         val windowStart = now - days * SECONDS_PER_DAY
-        val correctedStart = timeBase.copy(paddingBefore = Duration.ZERO).archiveStart(window.programmeStart, corr).epochSecond
+        // (M4 commit 0, review B2, docs/design/m4-player-ux.md §1.7 item 9) "Not started" compares the corrected start
+        // (archive frame) with the panel's now; the raw programme start is in the programme frame.
+        val correctedStartI = timeBase.copy(paddingBefore = Duration.ZERO).archiveStart(window.programmeStart, corr)
+        if (correctedStartI.isAfter(nowI)) return CatchupBuild.Unsupported("the programme has not started yet")
+        val correctedStart = correctedStartI.epochSecond
         if (correctedStart < windowStart) {
             return CatchupBuild.Unsupported("the programme is older than the $days-day archive")
         }

@@ -190,6 +190,11 @@ internal class PlaybackControllerImpl @Inject constructor(
     override val displayModeRequest: StateFlow<Int> = _displayModeRequest.asStateFlow()
 
     override val surfacePlayer: Player get() = ensureEngine().surface
+    // M4 commit 0 (docs/design/m4-player-ux.md §1.7 item 4): trivial bodies; WP-C wires onCues and the previous channel.
+    private val _cues = MutableStateFlow<List<androidx.media3.common.text.Cue>>(emptyList())
+    override val cues: StateFlow<List<androidx.media3.common.text.Cue>> = _cues.asStateFlow()
+    private val _previous = MutableStateFlow<ChannelIdentity?>(null)
+    override val previous: StateFlow<ChannelIdentity?> = _previous.asStateFlow()
 
     override val diagnostics: PlaybackDiagnostics = object : PlaybackDiagnostics {
         override fun events() = eventLog.events()
@@ -1757,6 +1762,8 @@ internal class PlaybackControllerImpl @Inject constructor(
             bufferProfile = c?.profile ?: base.bufferProfile,
             fps = _video.value.fps ?: base.fps,
             updatedAtElapsedMs = clock.nowMs(),
+            serverIndex = s?.resolved?.baseIndex ?: base.serverIndex,
+            serverCount = s?.resolved?.baseCount ?: base.serverCount,
         )
     }
 

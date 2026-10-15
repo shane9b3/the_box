@@ -1,6 +1,9 @@
 package app.thebox.ui.input
 
 import android.content.Context
+import app.thebox.core.catchup.archive.ArchivePlayback
+import app.thebox.core.full.PlayerStateMachineFactory
+import app.thebox.core.full.state.PlayerStateMachineFactoryImpl
 import app.thebox.core.guide.DeviceClassSource
 import app.thebox.core.guide.GuideDebugProbe
 import app.thebox.core.guide.GuideStateMachineFactory
@@ -12,6 +15,8 @@ import app.thebox.core.input.KeyCapabilities
 import app.thebox.core.input.KeyGestureDetector
 import app.thebox.core.input.KeyGestureDetectorImpl
 import app.thebox.core.input.KeyMap
+import app.thebox.ui.full.PlayerDebugProbe
+import app.thebox.ui.full.PlayerDebugProbeImpl
 import app.thebox.ui.guide.GuideDebugProbeImpl
 import dagger.Module
 import dagger.Provides
@@ -33,4 +38,8 @@ object InputModule {
     @Provides @Singleton fun debugProbe(): GuideDebugProbe = GuideDebugProbeImpl()
     @Provides fun stateMachineFactory(): GuideStateMachineFactory = GuideStateMachineImpl.FACTORY
     @Provides fun reminderPlanner(): ReminderPlanner = ReminderPlannerImpl()
+
+    // M4 commit 0 (docs/design/m4-player-ux.md §1.2, §2.7): the player machine (WP-A) and its debug probe (WP-E).
+    @Provides fun playerStateMachineFactory(): PlayerStateMachineFactory = PlayerStateMachineFactoryImpl()
+    @Provides @Singleton fun playerDebugProbe(archive: ArchivePlayback): PlayerDebugProbe = PlayerDebugProbeImpl(archive)
 }

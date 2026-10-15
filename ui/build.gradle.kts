@@ -19,6 +19,8 @@ dependencies {
     // VideoLayer (M2) and the M3/M4 screens observe the PlaybackController (docs/design/m2-playback-core.md §1.2).
     implementation(project(":player"))
     implementation(libs.media3.ui.compose)
+    // M4 (docs/design/m4-player-ux.md §6.2): SubtitleView in an AndroidView (§3.6.3).
+    implementation(libs.media3.ui)
 
     api(libs.tv.material)
     api(libs.compose.foundation)

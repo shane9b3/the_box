@@ -104,6 +104,7 @@ class GuideViewModelTest {
                 ) as T
             }
             val vm = ViewModelProvider(store, factory)[GuideViewModel::class.java]
+            vm.startup() // M4 commit 0 (S9): MainActivity's call after attachPlayer
             idle()
             return vm
         }
@@ -154,6 +155,16 @@ class GuideViewModelTest {
         assertEquals(null, w.router.attached)
         assertEquals(null, w.probe.current)
         assertNotNull(old)
+    }
+
+    /** M4 commit 0 (docs/design/m4-player-ux.md §1.7 item 10, S9): attachPlayer sets the guide machine's `full`. */
+    @Test fun attachPlayerSetsTheGuideMachinesFull() {
+        val w = World()
+        val vm = w.viewModel()
+        val player = app.thebox.core.full.fakes.FakePlayerStateMachine()
+        vm.attachPlayer(player)
+        assertSame(player, vm.machine.full)
+        assertTrue("not FULL: not entered", player.entered.isEmpty())
     }
 
     /** H-S2 through the real feeds: the first lineup lands before the startup tune reports Playing. */

@@ -113,9 +113,37 @@ class CatchupUrlBuilderTest {
         val tb = TimeBase(serverZone = ZoneOffset.UTC, correctionHours = 2.0)
         val playlist = ok(b.build(target(CatchupMode.SHIFT, live = "http://h/c.m3u8", xtream = null), tb, window))
         assertEquals(start.minus(Duration.ofHours(2)), playlist.requestStart)
-        val channel = ok(b.build(target(CatchupMode.SHIFT, live = "http://h/c.m3u8", xtream = null, corr = -4.0), tb, window))
-        assertEquals(start.plus(Duration.ofHours(4)), channel.requestStart)
-        assertEquals("http://h/c.m3u8?utc=1791934200&lutc=1791928800", channel.url)
+        // (M4 commit 0, review B2) The corrected start must not be after the panel's now: with −4 h the programme starts
+        // 6 h before now (before B2 this row used the 19:30 window, whose corrected start 23:30 is in the panel's future).
+        val early = ArchiveWindow(start.minus(Duration.ofHours(6)), start.minus(Duration.ofHours(5)), deviceNow = now)
+        val channel = ok(b.build(target(CatchupMode.SHIFT, live = "http://h/c.m3u8", xtream = null, corr = -4.0), tb, early))
+        assertEquals(start.minus(Duration.ofHours(2)), channel.requestStart)
+        assertEquals("http://h/c.m3u8?utc=1791912600&lutc=1791928800", channel.url)
+        assertTrue(unsupported(b.build(target(CatchupMode.SHIFT, live = "http://h/c.m3u8", xtream = null, corr = -4.0), tb, window)).contains("not started"))
+    }
+
+    /**
+     * (M4 commit 0, docs/design/m4-player-ux.md §1.7 item 9, review B2) A live-anchored request planned from
+     * `ArchiveFrames.liveEdge − 30 s` (programme frame) builds with `requestStart == panel now − 30 s` for every sign of
+     * the correction. Before the builder edit the corr = +2 h row failed with "the programme has not started yet".
+     */
+    @Test
+    fun b2LiveAnchoredRequestStartsAtThePanelClockForEveryCorrection() {
+        val skew = Duration.ofSeconds(45)
+        val panelNow = now.plus(skew)
+        for (corrH in listOf(-1.5, 0.0, 2.0)) {
+            val tb = TimeBase(serverZone = ZoneOffset.UTC, clockSkew = skew)
+            val corrMs = Duration.ofSeconds((corrH * 3600).toLong()).toMillis()
+            val frames = app.thebox.core.catchup.archive.ArchiveFrames(correctionMs = corrMs, skewMs = skew.toMillis(), displayShiftMs = 0)
+            assertEquals(panelNow.toEpochMilli(), frames.archiveOf(frames.liveEdge(now.toEpochMilli())), "corr $corrH: liveEdge − correction is the panel's now")
+            val start = Instant.ofEpochMilli(frames.liveEdge(now.toEpochMilli()) - 30_000)
+            val t = target(CatchupMode.SHIFT, live = "http://h/c.m3u8", xtream = null, corr = corrH)
+            val req = ok(b.build(t, tb, ArchiveWindow(start, null, deviceNow = now)))
+            assertEquals(panelNow.minusSeconds(30), req.requestStart, "corr $corrH")
+            // The check still rejects a start whose corrected instant is after the panel's now.
+            val future = Instant.ofEpochMilli(frames.liveEdge(now.toEpochMilli()) + 60_000)
+            assertTrue(unsupported(b.build(t, tb, ArchiveWindow(future, null, deviceNow = now))).contains("not started"), "corr $corrH")
+        }
     }
 
     @Test

@@ -18,6 +18,8 @@ sealed interface ShellEvent {
     data class Toast(val kind: GuideToast, val arg: String?) : ShellEvent
     data class Announce(val text: String) : ShellEvent
     data object Exit : ShellEvent
+    /** (M4, docs/design/m4-player-ux.md §2.5) Already-localised text, used for notices. */
+    data class Message(val text: String) : ShellEvent
 }
 
 /**
@@ -54,4 +56,7 @@ interface ShellHost {
 
     /** Device-px bounds of the focused grid cell (l, t, r, b) for anchoring Menu/Sheet; false when unknown. */
     fun focusedCellBounds(out: FloatArray): Boolean
+
+    /** (M4, docs/design/m4-player-ux.md §2.5) The player view model; null in tests and the debug shell preview. */
+    val player: app.thebox.ui.full.PlayerHost? get() = null
 }

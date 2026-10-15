@@ -49,7 +49,10 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch { controller.keepScreenOn.collect { if (it) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) } }
         WindowDisplayModeBinder(controller).bind(this)
 
-        val host = guide // creates the view model: feeds, startup tune (§3.16.1)
+        val host = guide // creates the view model and its feeds (§3.16.1)
+        // (M4 commit 0, docs/design/m4-player-ux.md §1.7 item 10, S9) Startup runs after the player machine is attached:
+        // WP-D creates the PlayerViewModel here and calls host.attachPlayer(player.machine) before this line.
+        host.startup()
         lifecycleScope.launch { search.effects.collect { host.onSearchEffect(it) } }
         setContent {
             BoxTheme {

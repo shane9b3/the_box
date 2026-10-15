@@ -68,6 +68,15 @@ class CatchupGoldenTest {
             )
             val variant = r.getValue("variant")
             val build = builder.build(target, tb, window, variant)
+            // (M4 commit 0, review B2, docs/design/m4-player-ux.md §1.7 item 9) "Not started" now compares the corrected
+            // start with the panel's now. Rows whose corrected start lies after it (c = −4 h on a programme that started
+            // less than 4 h ago) were built by the old frame-mixed check; they are now refused, and their reference
+            // values stay in the matrix for the day it is regenerated.
+            val correctedStart = tb.copy(paddingBefore = Duration.ZERO).archiveStart(window.programmeStart)
+            if (correctedStart.isAfter(window.deviceNow.plus(tb.clockSkew))) {
+                assertTrue(assertIs<CatchupBuild.Unsupported>(build, "$build").reason.contains("not started"))
+                return@dynamicTest
+            }
             val ok = assertIs<CatchupBuild.Ok>(build, "$build")
             val req = ok.request
             assertEquals(r.getValue("expectedUrl"), req.url)
@@ -91,6 +100,12 @@ class CatchupGoldenTest {
         assertEquals(setOf("0", "-4.0", "1.5"), rows.map { it.getValue("correction") }.toSet())
         assertEquals(setOf("0/0", "60/300"), rows.map { it.getValue("padding") }.toSet())
         assertEquals(setOf("0", "95"), rows.map { it.getValue("skew") }.toSet())
+        // (M4 commit 0, B2) Three quarters of the matrix still build after the corrected "not started" check.
+        val buildable = rows.count { r ->
+            val corr = Duration.ofSeconds((r.getValue("correction").toDouble() * 3600).roundToLong())
+            !Instant.parse(r.getValue("start")).minus(corr).isAfter(Instant.parse(r.getValue("now")).plusSeconds(r.getValue("skew").toLong()))
+        }
+        assertTrue(buildable >= 150, "buildable=$buildable") // 161 of 214 at M4 commit 0
     }
 
     @Test

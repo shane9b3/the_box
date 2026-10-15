@@ -54,6 +54,12 @@ interface PlaybackController {
     fun setVideoDecoderOverride(mode: VideoDecoderMode?, remember: Boolean = true)
     /** Creates the player and warms the HTTP pool (startup path, architecture review C9). */
     fun prewarm()
+
+    // M4 (docs/design/m4-player-ux.md §2.9): two members with defaults (implementations override)
+    /** (M4) Current subtitle cues from Player.Listener.onCues(CueGroup); emptied on every tune and stop. */
+    val cues: StateFlow<List<androidx.media3.common.text.Cue>> get() = NO_CUES
+    /** (M4) The channel previousChannel() would tune (M2 §3.1.1 rule), for the channel list's pinned row. */
+    val previous: StateFlow<ChannelIdentity?> get() = NO_PREVIOUS
 }
 
 sealed interface TuneTarget {
@@ -117,7 +123,13 @@ sealed interface PlaybackState {
     data object Idle : PlaybackState { override val target: NowPlaying? get() = null }
     data class Connecting(override val target: NowPlaying, val phase: ConnectPhase, val attempt: Int, val sinceElapsedMs: Long) : PlaybackState
     data class Buffering(override val target: NowPlaying, val cause: BufferingCause, val reconnect: ReconnectProgress?) : PlaybackState
-    data class Playing(override val target: NowPlaying, val paused: Boolean = false, val warning: PlaybackWarning? = null) : PlaybackState
+    data class Playing(
+        override val target: NowPlaying,
+        val paused: Boolean = false,
+        val warning: PlaybackWarning? = null,
+        /** (M4) Archive only: STATE_ENDED reached (the controller reports it as paused, PlaybackControllerImpl.kt:910-915). */
+        val ended: Boolean = false,
+    ) : PlaybackState
     /** A detector or recoverable error fired and the ladder is acting ([step] is the LadderDecision name). */
     data class Stalled(override val target: NowPlaying, val kind: StallKind?, val step: String, val attempt: Int, val maxAttempts: Int) : PlaybackState
     data class Stopped(override val target: NowPlaying?, val reason: StopReason, val resumable: Boolean) : PlaybackState
@@ -140,6 +152,8 @@ data class VideoInfo(
      * or re-enabled video track), kept across tunes. The shell lifts its still → FULL scrim on the next one.
      */
     val renderedFirstFrames: Long = 0,
+    /** (M4) The channel's decoder override (null = global setting). */
+    val decoderOverride: VideoDecoderMode? = null,
 )
 
 /** Stable within one tune: [groupId] is TrackGroup.id, [index] the track index in the group. */
@@ -193,6 +207,10 @@ data class StreamStats(
     val displayRefreshHz: Float? = null,
     val tunneling: Boolean = false,
     val updatedAtElapsedMs: Long = 0,
+    // (M4, reviewed 2026-10-15, E23)
+    /** 0-based base URL in use (ResolvedStream.baseIndex) and the number of bases. */
+    val serverIndex: Int = 0,
+    val serverCount: Int = 1,
 )
 
 sealed interface PlaybackNotice {
@@ -217,3 +235,7 @@ interface PlaybackDiagnostics {
     /** Device capability dump for S16 (decoders, HDR, display modes, audio encodings, FFmpeg). */
     suspend fun capabilities(): Map<String, String>
 }
+
+// M4 (docs/design/m4-player-ux.md §2.9): defaults of PlaybackController.cues/previous; fakes in other modules override them.
+internal val NO_CUES: StateFlow<List<androidx.media3.common.text.Cue>> = kotlinx.coroutines.flow.MutableStateFlow(emptyList())
+internal val NO_PREVIOUS: StateFlow<ChannelIdentity?> = kotlinx.coroutines.flow.MutableStateFlow(null)
