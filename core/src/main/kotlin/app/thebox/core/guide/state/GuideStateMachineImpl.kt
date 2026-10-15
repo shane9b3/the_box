@@ -48,7 +48,11 @@ import app.thebox.core.guide.SourceSection
 import app.thebox.core.guide.TimeLabels
 import app.thebox.core.guide.TunedState
 import app.thebox.core.guide.Zone
+import app.thebox.core.catchup.archive.ArchiveFailure
+import app.thebox.core.catchup.archive.ArchivePhase
+import app.thebox.core.catchup.archive.ArchiveStatus
 import app.thebox.core.full.EnterReason
+import app.thebox.core.full.PlayerLayer
 import app.thebox.core.full.PlayerStateMachine
 import app.thebox.core.input.BoxAction
 import app.thebox.core.input.Keys
@@ -104,7 +108,19 @@ class GuideStateMachineImpl(
     override var full: PlayerStateMachine? = null
         set(value) {
             field = value
-            if (value != null && _ui.value.mode == ScreenMode.FULL) value.enterFull(curMs, EnterReason.LAUNCH)
+            // The last dispatch's curMs may be stale (the host attaches between events): read the clock now.
+            if (value != null && _ui.value.mode == ScreenMode.FULL) value.enterFull(nowMs(), EnterReason.LAUNCH)
+        }
+
+    /**
+     * (M4, docs/design/m4-player-ux.md §3.1.1, S5) In FULL the player machine decides whether D-pad LEFT/RIGHT act on
+     * DOWN with auto-repeat (a layer is open or archive video is on screen); never while a guide overlay or the
+     * reminder card owns the keys.
+     */
+    override val horizontalRepeat: Boolean
+        get() {
+            val s = _ui.value
+            return s.mode == ScreenMode.FULL && s.overlay == null && s.reminder == null && full?.horizontalRepeat == true
         }
 
     private val limits = GuideLimits(labels)
@@ -132,6 +148,11 @@ class GuideStateMachineImpl(
     private var lastNonFavourite: GuideSource? = null
     private var pendingFocusRowId = -1L
     private var pendingFull = false
+    /** Why [pendingFull] is armed: StartFull (LAUNCH) or Search (SEARCH) (§3.1.1 enterFull reasons). */
+    private var pendingFullReason = EnterReason.USER
+    /** (M4, owner ruling 2026-10-15) SETTINGS was opened from the quick bar: BACK returns to FULL. */
+    private var settingsFromFull = false
+    private var archive: ArchiveStatus? = null
     /** Identity hash of a live channel tuned from Search: FULL on its first active Tuned (§2.13 item 7). */
     private var pendingFullHash = 0L
     /**
@@ -168,6 +189,8 @@ class GuideStateMachineImpl(
     private var menuToken = 0L
     private var menuTarget: Target? = null
     private var menuFavourite = false
+    /** (M4) The channel a TOGGLE_FAVOURITE query is for; the answer toggles instead of opening the menu. */
+    private var favouriteToggle: GuideChannel? = null
     private var sheetTarget: Target? = null
 
     private var numberToken = 0L
@@ -194,13 +217,14 @@ class GuideStateMachineImpl(
     }
 
     /**
-     * (code review 2026-10-14, H-S4) False for media keys FULL leaves to M2's media session (Play/Pause, FF/RW): the key
-     * sink then returns false and the framework hands the key to the session. True everywhere else.
+     * (code review 2026-10-14, H-S4; M4 §3.1.1, §7 item 15) In FULL the player machine answers: it handles Play/Pause
+     * and FF/RW itself (the media session still receives Assistant/phone transport commands, §8 Q7). True everywhere
+     * else.
      */
     override fun handles(action: BoxAction): Boolean {
         val s = _ui.value
         if (s.mode != ScreenMode.FULL || s.overlay != null || s.reminder != null) return true
-        return action !in FULL_PASSTHROUGH
+        return full?.handles(action) ?: true
     }
 
     // ---------------------------------------------------------------- dispatch
@@ -231,11 +255,11 @@ class GuideStateMachineImpl(
             is GuideEvent.SearchClosed -> onSearchClosed(event.channel, event.tuned, event.archive)
             is GuideEvent.DataWindow -> { dataWindow = event.window; recomputeLimits(reclamp = true) }
             is GuideEvent.MissedReminders -> if (event.count > 0) effects.toast(GuideToast.REMINDERS_MISSED, event.count.toString())
-            // M4 commit 0 (docs/design/m4-player-ux.md §1.7 item 7, S9): no-op branches; WP-A gives them bodies.
-            is GuideEvent.Archive -> Unit
-            is GuideEvent.Player -> Unit
-            GuideEvent.StartFull -> pendingFull = true
-            GuideEvent.OpenSettings -> Unit
+            // M4 (docs/design/m4-player-ux.md §3.1.1, §0.6, owner ruling 2026-10-15)
+            is GuideEvent.Archive -> onArchive(event.status)
+            is GuideEvent.Player -> number.setCommitAfterMs(event.settings.numberEntryWaitMs)
+            GuideEvent.StartFull -> if (somethingTuned()) goFull(EnterReason.LAUNCH) else { pendingFull = true; pendingFullReason = EnterReason.LAUNCH }
+            GuideEvent.OpenSettings -> { val fromFull = u.mode == ScreenMode.FULL; openSettings(); settingsFromFull = fromFull }
         }
         frame.gridFocused = u.zone == Zone.GRID
         rearmDeferredCard()
@@ -259,11 +283,16 @@ class GuideStateMachineImpl(
         // H-S11: a fresh press (repeat 0) of any key ends every hold, so a lost key-up cannot leave a hold stuck.
         if (a.repeat == 0) clearHolds(action)
         if (u.overlay != null && overlayKey(a)) return
+        // M4 §3.1.1 step 3: in FULL the player machine takes the action first; false falls through to the guide.
+        if (u.mode == ScreenMode.FULL) { val f = full; if (f != null && f.act(a)) return }
         if (globalKey(a)) return
         when (u.mode) {
             ScreenMode.FULL -> fullKey(a)
             ScreenMode.SEARCH -> if (action == BoxAction.BACK) onSearchClosed(null, tunedFromSearch = false, archive = false)
-            ScreenMode.SETTINGS -> if (action == BoxAction.BACK) setMode(ScreenMode.GUIDE)
+            ScreenMode.SETTINGS -> if (action == BoxAction.BACK) {
+                // Owner ruling 2026-10-15: Settings opened from the quick bar returns to FULL.
+                if (settingsFromFull) { settingsFromFull = false; goFull(EnterReason.USER) } else setMode(ScreenMode.GUIDE)
+            }
             ScreenMode.GUIDE -> when (u.zone) {
                 Zone.GRID -> gridKey(a)
                 Zone.TABS -> tabsKey(a)
@@ -274,6 +303,7 @@ class GuideStateMachineImpl(
     }
 
     private fun release(action: BoxAction) {
+        if (u.mode == ScreenMode.FULL) full?.release(action)
         when (action) {
             BoxAction.UP, BoxAction.DOWN, BoxAction.ZAP_UP, BoxAction.ZAP_DOWN, BoxAction.PAGE_UP, BoxAction.PAGE_DOWN -> {
                 if (holdingVertical) {
@@ -364,8 +394,13 @@ class GuideStateMachineImpl(
             BoxAction.SELECT -> gridOk()
             BoxAction.CONTEXT_MENU -> openMenu()
             BoxAction.BACK -> backLadder()
-            BoxAction.PLAY_PAUSE -> if (somethingTuned()) goFull()
+            BoxAction.PLAY_PAUSE, BoxAction.PLAY -> if (somethingTuned()) goFull()
             BoxAction.JUMP_TO_NOW -> jumpToNow()
+            // M4 actions in the grid (§2.9): programme steps move along the row (never opening Groups at the edge).
+            BoxAction.PREV_PROGRAMME, BoxAction.NEXT_PROGRAMME -> if (f != null) {
+                val r = navigator.move(f, if (a.action == BoxAction.PREV_PROGRAMME) GridMove.LEFT else GridMove.RIGHT, 0, ctx(a.repeat))
+                if (r is GridMoveResult.Moved) setFocus(r.focus, r.animate)
+            }
             else -> commonGuideKey(a.action)
         }
     }
@@ -379,7 +414,10 @@ class GuideStateMachineImpl(
             BoxAction.GROUPS_PANEL -> openGroups()
             BoxAction.DAY_STRIP -> openDays()
             BoxAction.JUMP_TO_NOW -> jumpToNow()
-            else -> Unit // AUDIO, SUBTITLES, ASPECT, QUICK_MENU, INFO_BAR, CHANNEL_LIST, … are player actions (M4)
+            BoxAction.TOGGLE_FAVOURITE -> toggleFavourite()
+            // AUDIO, SUBTITLES, ASPECT, QUICK_MENU, INFO_BAR, CHANNEL_LIST, PAUSE, VIDEO_DECODER, TIME_SHIFT, … are
+            // player actions (M4): no-ops in the guide.
+            else -> Unit
         }
     }
 
@@ -502,15 +540,18 @@ class GuideStateMachineImpl(
 
     // ---------------------------------------------------------------- FULL (§3.4.5)
 
+    /**
+     * M4 §3.1.1 step 5: what the player machine left to the guide in FULL. M3's zap and SELECT-retry branches moved into
+     * the player machine (`PlayerStateMachineImpl`); without one attached (never in production, S9) the rest is a no-op.
+     * An unconsumed SELECT over the error card is its Guide button.
+     */
     private fun fullKey(a: GuideEvent.Act) {
         when (a.action) {
             BoxAction.BACK -> returnToGuide()
-            BoxAction.UP, BoxAction.ZAP_UP -> effects.zap(-1, a.repeat > 0)
-            BoxAction.DOWN, BoxAction.ZAP_DOWN -> effects.zap(1, a.repeat > 0)
             BoxAction.GROUP_PREV -> cycleGroup(-1)
             BoxAction.GROUP_NEXT -> cycleGroup(1)
-            BoxAction.SELECT -> if (tuned.phase == MiniPhase.ERROR && retryOffered()) effects.retry()
-            else -> Unit // CONTEXT_MENU (M4 quick menu) and every player action: M4
+            BoxAction.SELECT -> if (full?.ui?.value?.layer == PlayerLayer.ERROR) returnToGuide()
+            else -> Unit
         }
     }
 
@@ -524,19 +565,24 @@ class GuideStateMachineImpl(
         groupCardUntil = curMs + GROUP_CARD_MS
     }
 
-    private fun goFull() {
+    /** [reason] decides the player's auto-shown bar (§3.1.1): ARCHIVE, REMINDER, SEARCH, LAUNCH, else USER. */
+    private fun goFull(reason: EnterReason = EnterReason.USER) {
         if (u.mode == ScreenMode.FULL) return
         u = u.copy(mode = ScreenMode.FULL, overlay = null, groupCard = null)
         groupCardUntil = Long.MAX_VALUE
+        settingsFromFull = false
         effects.setFullScreen(true)
         refreshFooter()
+        full?.enterFull(curMs, reason)
     }
 
     /** BACK/OPEN_GUIDE in FULL (B2/F10): GUIDE, viewport MINI, focus home, `returnedFromFull`. */
     private fun returnToGuide() {
+        val wasFull = u.mode == ScreenMode.FULL
         u = u.copy(mode = ScreenMode.GUIDE, zone = Zone.GRID, overlay = null, groupCard = null)
         groupCardUntil = Long.MAX_VALUE
         effects.setFullScreen(false)
+        if (wasFull) full?.leaveFull()
         goHome()
         returnedFromFull = true
         frameDirty = true
@@ -547,7 +593,8 @@ class GuideStateMachineImpl(
         if (u.mode == mode) return
         val wasFull = u.mode == ScreenMode.FULL
         u = u.copy(mode = mode, overlay = if (mode == ScreenMode.FULL) null else u.overlay)
-        if (wasFull && mode != ScreenMode.FULL) effects.setFullScreen(false)
+        if (wasFull && mode != ScreenMode.FULL) { effects.setFullScreen(false); full?.leaveFull() }
+        if (mode == ScreenMode.GUIDE) settingsFromFull = false
         refreshFooter()
     }
 
@@ -765,6 +812,7 @@ class GuideStateMachineImpl(
     private fun openMenu() {
         val t = target() ?: return
         val ch = t.channel ?: return
+        favouriteToggle = null
         menuToken++
         menuTarget = t
         effects.queryFavourite(menuToken, ch)
@@ -772,6 +820,7 @@ class GuideStateMachineImpl(
 
     private fun onFavourite(token: Long, isFavourite: Boolean) {
         if (token != menuToken) return
+        favouriteToggle?.let { ch -> favouriteToggle = null; effects.setFavourite(ch, !isFavourite); return }
         val t = menuTarget ?: return
         menuFavourite = isFavourite
         val items = ArrayList<MenuItem>(4)
@@ -876,7 +925,7 @@ class GuideStateMachineImpl(
         if (!accept) return
         closeOverlay()
         val hash = GuideChannel.hashOf(c.alert.identity)
-        if (tuned.identityHash == hash && !tuned.isArchive && somethingTuned() && tuned.phase != MiniPhase.ERROR) goFull()
+        if (tuned.identityHash == hash && !tuned.isArchive && somethingTuned() && tuned.phase != MiniPhase.ERROR) goFull(EnterReason.REMINDER)
         else pendingReminderHash = hash
     }
 
@@ -1151,23 +1200,19 @@ class GuideStateMachineImpl(
             u = u.copy(tuned = tunedSlice, tunedChannel = channelSlice, tunedNow = nowSlice)
         }
         if (identityChanged && channel != null) { tunedNowRequestedFor = nowMin; effects.loadTunedNow(channel, nowMin) }
-        if (state.phase == MiniPhase.ERROR && state.isArchive && state.error == PlaybackErrorCode.CATCHUP_NOT_IN_ARCHIVE) {
-            if (suspect.add(state.identityHash)) {
-                frame.suspectArchive = suspect.toLongArray().also { it.sort() }
-                frameDirty = true
-            }
-        }
+        // §0.6 (B1): the hollow ↺ follows ArchiveStatus FAILED(NOT_IN_ARCHIVE) only (onArchive), never a raw probe error.
         if (pendingArchiveHash != 0L && state.identityHash == pendingArchiveHash && state.isArchive) {
             when (state.phase) {
-                MiniPhase.CONNECTING, MiniPhase.BUFFERING, MiniPhase.RECONNECTING, MiniPhase.PLAYING, MiniPhase.PAUSED -> { pendingArchiveHash = 0; if (u.mode == ScreenMode.GUIDE) goFull() }
-                MiniPhase.ERROR, MiniPhase.STOPPED -> pendingArchiveHash = 0
+                MiniPhase.CONNECTING, MiniPhase.BUFFERING, MiniPhase.RECONNECTING, MiniPhase.PLAYING, MiniPhase.PAUSED -> { pendingArchiveHash = 0; if (u.mode == ScreenMode.GUIDE) goFull(EnterReason.ARCHIVE) }
+                // §0.6 / §5.1: a request still starting or probing does not end the wait; ArchiveStatus FAILED does.
+                MiniPhase.ERROR, MiniPhase.STOPPED -> if (!archiveInFlight(state.identityHash)) pendingArchiveHash = 0
                 MiniPhase.IDLE -> Unit
             }
         }
-        if (pendingFull && state.phase != MiniPhase.IDLE && state.phase != MiniPhase.STOPPED) { pendingFull = false; goFull() }
+        if (pendingFull && state.phase != MiniPhase.IDLE && state.phase != MiniPhase.STOPPED) { pendingFull = false; goFull(pendingFullReason) }
         if (pendingReminderHash != 0L && state.identityHash == pendingReminderHash && !state.isArchive) {
             when (state.phase) {
-                MiniPhase.CONNECTING, MiniPhase.BUFFERING, MiniPhase.RECONNECTING, MiniPhase.PLAYING, MiniPhase.PAUSED -> { pendingReminderHash = 0; if (u.mode == ScreenMode.GUIDE) goFull() }
+                MiniPhase.CONNECTING, MiniPhase.BUFFERING, MiniPhase.RECONNECTING, MiniPhase.PLAYING, MiniPhase.PAUSED -> { pendingReminderHash = 0; if (u.mode == ScreenMode.GUIDE) goFull(EnterReason.REMINDER) }
                 MiniPhase.ERROR, MiniPhase.STOPPED -> pendingReminderHash = 0
                 MiniPhase.IDLE -> Unit
             }
@@ -1182,12 +1227,43 @@ class GuideStateMachineImpl(
         }
         if (pendingFullHash != 0L && state.identityHash == pendingFullHash && !state.isArchive) {
             when (state.phase) {
-                MiniPhase.CONNECTING, MiniPhase.BUFFERING, MiniPhase.RECONNECTING, MiniPhase.PLAYING, MiniPhase.PAUSED -> { pendingFullHash = 0; if (u.mode == ScreenMode.GUIDE) goFull() }
+                MiniPhase.CONNECTING, MiniPhase.BUFFERING, MiniPhase.RECONNECTING, MiniPhase.PLAYING, MiniPhase.PAUSED -> { pendingFullHash = 0; if (u.mode == ScreenMode.GUIDE) goFull(EnterReason.SEARCH) }
                 MiniPhase.ERROR, MiniPhase.STOPPED -> pendingFullHash = 0
                 MiniPhase.IDLE -> Unit
             }
         }
         if (!holdingVertical) rebuildPanel(newCell = false)
+    }
+
+    /**
+     * (M4 §0.6, §3.1.1) The archive session's status: kept for the mini player's pills ([GuideUiState.archive]); a
+     * FAILED(NOT_IN_ARCHIVE) marks the channel suspect (hollow ↺); FAILED ends a pending catch-up FULL.
+     */
+    private fun onArchive(s: ArchiveStatus) {
+        archive = s
+        if (u.archive != s) u = u.copy(archive = s)
+        if (s.phase != ArchivePhase.FAILED) return
+        if (s.failure == ArchiveFailure.NOT_IN_ARCHIVE && s.identityHash != 0L && suspect.add(s.identityHash)) {
+            frame.suspectArchive = suspect.toLongArray().also { it.sort() }
+            frameDirty = true
+            if (!holdingVertical) rebuildPanel(newCell = false)
+        }
+        if (pendingArchiveHash == s.identityHash) pendingArchiveHash = 0
+    }
+
+    /** A request for [hash] is still being started or probed (STARTING, PROBING): its errors are not final. */
+    private fun archiveInFlight(hash: Long): Boolean {
+        val s = archive ?: return false
+        return s.identityHash == hash && (s.phase == ArchivePhase.STARTING || s.phase == ArchivePhase.PROBING)
+    }
+
+    /** (M4 §2.9) TOGGLE_FAVOURITE in the guide: the focused row's channel, through the menu's favourite query. */
+    private fun toggleFavourite() {
+        val ch = target()?.channel ?: return
+        menuToken++
+        menuTarget = null
+        favouriteToggle = ch
+        effects.queryFavourite(menuToken, ch)
     }
 
     private fun onSettings(s: GuideSettings, d: DeviceClass) {
@@ -1220,9 +1296,9 @@ class GuideStateMachineImpl(
         }
         if (tunedFromSearch) {
             when {
-                channel == null -> if (somethingTuned()) goFull() else pendingFull = true
+                channel == null -> if (somethingTuned()) goFull(EnterReason.SEARCH) else { pendingFull = true; pendingFullReason = EnterReason.SEARCH }
                 archive -> pendingArchiveHash = channel.identityHash
-                tunedLive(channel) -> goFull()
+                tunedLive(channel) -> goFull(EnterReason.SEARCH)
                 else -> pendingFullHash = channel.identityHash
             }
         }
@@ -1604,8 +1680,6 @@ class GuideStateMachineImpl(
         const val TAB_GUIDE = 0
         const val TAB_SEARCH = 1
 
-        /** H-S4: actions FULL does not use; their keys go on to the media session. */
-        val FULL_PASSTHROUGH: Set<BoxAction> = java.util.EnumSet.of(BoxAction.PLAY_PAUSE, BoxAction.SEEK_BACK, BoxAction.SEEK_FORWARD)
         val SHORTCUTS = listOf(GroupsShortcut.SEARCH, GroupsShortcut.SETTINGS)
         val GROUP_MENU = listOf(GroupMenuItem.HIDE, GroupMenuItem.MOVE_UP, GroupMenuItem.MOVE_DOWN)
         private val CHIPS_NO_NOW = listOf(HeaderChip.GROUP, HeaderChip.DAY)

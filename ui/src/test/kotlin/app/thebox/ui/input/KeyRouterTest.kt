@@ -156,7 +156,8 @@ class KeyRouterTest {
     /** H-S4: keys the machine ignores in FULL go on to M2's media session (the activity does not consume them). */
     @Test fun mediaKeysNotHandledInFullPassThrough() {
         mode(ScreenMode.FULL)
-        machine.handlesFn = { it !in setOf(BoxAction.PLAY_PAUSE, BoxAction.SEEK_BACK, BoxAction.SEEK_FORWARD) }
+        // M4: the machine decides (FULL now handles these itself); the router's pass-through rule is what is tested here.
+        machine.handlesFn = { it !in setOf(BoxAction.PLAY_PAUSE, BoxAction.PLAY, BoxAction.PAUSE, BoxAction.SEEK_BACK, BoxAction.SEEK_FORWARD) }
         for (code in listOf(Keys.MEDIA_PLAY_PAUSE, Keys.MEDIA_PLAY, Keys.MEDIA_PAUSE, Keys.MEDIA_FAST_FORWARD, Keys.MEDIA_REWIND)) {
             assertFalse("$code DOWN passes through", down(code))
             assertFalse("$code UP passes through", up(code))
@@ -164,7 +165,8 @@ class KeyRouterTest {
         assertTrue(machine.events.isEmpty())
         assertTrue("CH+ still zaps", down(Keys.CHANNEL_UP))
         assertTrue("⏭ zaps in the player", down(Keys.MEDIA_NEXT))
-        assertEquals(listOf(BoxAction.ZAP_UP, BoxAction.ZAP_DOWN), acts().map { it.action })
+        // M4 S6 + owner ruling: ⏭ follows CH+ (ZAP_UP = +1).
+        assertEquals(listOf(BoxAction.ZAP_UP, BoxAction.ZAP_UP), acts().map { it.action })
     }
 
     @Test fun mediaNextIsUnboundInTheGuide() {
@@ -212,5 +214,60 @@ class KeyRouterTest {
         down(Keys.DPAD_DOWN, repeat = 1, at = 1_050)
         up(Keys.DPAD_DOWN, at = 1_100)
         assertTrue(timers.pending.isEmpty())
+    }
+
+    // ---- M4 (docs/design/m4-player-ux.md §3.1.7, reviewed 2026-10-15, S5)
+
+    /** A machine whose [horizontalRepeat] the test drives (the fake's contract default is false). */
+    private class RepeatMachine(val inner: FakeGuideStateMachine) : app.thebox.core.guide.GuideStateMachine by inner {
+        var repeat = false
+        override val horizontalRepeat: Boolean get() = repeat
+    }
+
+    @Test fun leftWithHorizontalRepeatRepeatsAndNeverFiresGroupPrev() {
+        val m = RepeatMachine(machine).also { it.repeat = true }
+        router.attach(m) { true }
+        mode(ScreenMode.FULL)
+        assertTrue(down(Keys.DPAD_LEFT))
+        down(Keys.DPAD_LEFT, repeat = 1, at = 1_050)
+        down(Keys.DPAD_LEFT, repeat = 2, at = 1_100)
+        clock = 1_600
+        val longTimers = timers.pending.values.filter { it.first == KeyRouterImpl.LONG_PRESS_MS }
+        assertTrue("no long-press timer armed", longTimers.isEmpty())
+        assertTrue(up(Keys.DPAD_LEFT, at = 1_150))
+        assertEquals(listOf(BoxAction.LEFT, BoxAction.LEFT, BoxAction.LEFT), acts().map { it.action })
+        assertEquals(listOf(0, 1, 2), acts().map { it.repeat })
+        assertEquals(GuideEvent.Release(BoxAction.LEFT), machine.events.last())
+    }
+
+    @Test fun decisionIsFixedAtTheFirstDown() {
+        val m = RepeatMachine(machine)
+        router.attach(m) { true }
+        mode(ScreenMode.FULL)
+        // Off at the first DOWN: the long binding stands even if the machine raises the flag mid-hold.
+        down(Keys.DPAD_RIGHT)
+        m.repeat = true
+        down(Keys.DPAD_RIGHT, repeat = 1, at = 1_050)
+        assertEquals(listOf(BoxAction.GROUP_NEXT), acts().map { it.action })
+        up(Keys.DPAD_RIGHT, at = 1_100)
+        machine.events.clear()
+        // On at the first DOWN: a later drop of the flag (the scrub bar closing) does not turn the hold into a long press.
+        down(Keys.DPAD_RIGHT, at = 2_000, downAt = 2_000)
+        m.repeat = false
+        down(Keys.DPAD_RIGHT, repeat = 1, at = 2_050, downAt = 2_000)
+        assertEquals(listOf(BoxAction.RIGHT, BoxAction.RIGHT), acts().map { it.action })
+        up(Keys.DPAD_RIGHT, at = 2_100)
+        assertEquals(GuideEvent.Release(BoxAction.RIGHT), machine.events.last())
+    }
+
+    @Test fun horizontalRepeatLeavesOkAndUpDownAlone() {
+        val m = RepeatMachine(machine).also { it.repeat = true }
+        router.attach(m) { true }
+        mode(ScreenMode.FULL)
+        down(Keys.DPAD_CENTER)
+        assertTrue("OK keeps its long binding", machine.events.isEmpty())
+        clock = 1_500
+        timers.fireAll()
+        assertEquals(BoxAction.CONTEXT_MENU, acts().single().action)
     }
 }

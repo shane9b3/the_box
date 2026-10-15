@@ -11,6 +11,8 @@ import app.thebox.core.guide.NumberEntry
 class NumberEntryImpl : NumberEntry {
     private val sb = StringBuilder(MAX_DIGITS)
     private var lastDigitMs = NO_DEADLINE
+    /** (M4) PlayerSettings.numberEntryWaitMs (1 / 1.5 / 2.5 s); [NUMBER_COMMIT_MS] until the host sends one. */
+    private var commitAfterMs = NUMBER_COMMIT_MS
     /** Index of the D-pad cursor digit, −1 when not in D-pad mode. */
     var cursor = -1
         private set
@@ -60,15 +62,20 @@ class NumberEntryImpl : NumberEntry {
 
     override fun commitValue(): Int? = if (sb.isEmpty()) null else sb.toString().toInt()
 
-    override fun due(nowMs: Long): Boolean = sb.isNotEmpty() && lastDigitMs != NO_DEADLINE && nowMs - lastDigitMs >= NUMBER_COMMIT_MS
+    override fun due(nowMs: Long): Boolean = sb.isNotEmpty() && lastDigitMs != NO_DEADLINE && nowMs - lastDigitMs >= commitAfterMs
 
     /** True when the live preview is due: [NUMBER_PREVIEW_MS] after the last digit. */
     fun previewDue(nowMs: Long): Boolean = sb.isNotEmpty() && lastDigitMs != NO_DEADLINE && nowMs - lastDigitMs >= NUMBER_PREVIEW_MS
 
     /** Wall ms of the auto-commit, or [Long.MAX_VALUE] when none is armed. */
-    fun commitAtMs(): Long = if (sb.isEmpty() || lastDigitMs == NO_DEADLINE) Long.MAX_VALUE else lastDigitMs + NUMBER_COMMIT_MS
+    fun commitAtMs(): Long = if (sb.isEmpty() || lastDigitMs == NO_DEADLINE) Long.MAX_VALUE else lastDigitMs + commitAfterMs
 
     fun previewAtMs(): Long = if (sb.isEmpty() || lastDigitMs == NO_DEADLINE) Long.MAX_VALUE else lastDigitMs + NUMBER_PREVIEW_MS
+
+    /** (M4) The auto-commit wait; values below the preview delay are raised to it (the preview must come first). */
+    override fun setCommitAfterMs(ms: Long) {
+        commitAfterMs = maxOf(ms, NUMBER_PREVIEW_MS + 1)
+    }
 
     override fun clear() {
         sb.setLength(0)

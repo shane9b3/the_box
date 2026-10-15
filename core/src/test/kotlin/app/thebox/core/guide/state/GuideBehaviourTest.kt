@@ -543,9 +543,15 @@ class GuideBehaviourTest {
             assertEquals(listOf(GuideToast.REMINDERS_MISSED, "3"), w.calls.last("toast")!!.args)
         }
 
+        /** (M4 §0.6, review B1) The hollow ↺ follows ArchiveStatus FAILED(NOT_IN_ARCHIVE), not a raw probe error. */
         @Test fun catchupNotInArchiveMarksSuspect() {
             val w = GuideWorld()
             w.tuneTo(w.channels[0], MiniPhase.ERROR, archive = true, error = PlaybackErrorCode.CATCHUP_NOT_IN_ARCHIVE); w.flush()
+            assertFalse(w.channels[0].identityHash in w.machine.frame.suspectArchive.toList(), "a probe error is not final")
+            w.send(GuideEvent.Archive(app.thebox.core.catchup.archive.ArchiveStatus(
+                phase = app.thebox.core.catchup.archive.ArchivePhase.FAILED, identityHash = w.channels[0].identityHash,
+                failure = app.thebox.core.catchup.archive.ArchiveFailure.NOT_IN_ARCHIVE,
+            )))
             assertTrue(w.channels[0].identityHash in w.machine.frame.suspectArchive.toList())
             assertEquals(0, w.ui.panel!!.catchupDays)
             assertFalse(PanelButton.FROM_START in w.ui.panel!!.buttons)
@@ -790,13 +796,13 @@ class GuideBehaviourTest {
             assertEquals(0, w.calls.last("ensureWindow")!!.args[2], "the window is re-ensured without hold bias")
         }
 
-        /** H-S4: FULL leaves media keys to the session; everywhere else the machine takes them. */
-        @Test fun fullLeavesMediaKeysToTheSession() {
+        /** H-S4, as reversed by M4 §7 item 15: FULL handles the media keys itself (the player machine answers). */
+        @Test fun fullHandlesMediaKeys() {
             val w = GuideWorld()
             assertTrue(w.machine.handles(PLAY_PAUSE), "GUIDE: Play/Pause goes FULL")
             w.press(SELECT)
             assertEquals(ScreenMode.FULL, w.ui.mode)
-            for (a in listOf(PLAY_PAUSE, SEEK_BACK, SEEK_FORWARD)) assertFalse(w.machine.handles(a), "$a passes through in FULL")
+            for (a in listOf(PLAY_PAUSE, SEEK_BACK, SEEK_FORWARD)) assertTrue(w.machine.handles(a), "$a is FULL's own")
             for (a in listOf(UP, DOWN, ZAP_UP, BACK, SELECT, DIGIT)) assertTrue(w.machine.handles(a), "$a stays with the machine")
             w.alert()
             assertTrue(w.machine.handles(PLAY_PAUSE), "the modal card takes every key")

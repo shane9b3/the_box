@@ -20,6 +20,7 @@ import app.thebox.core.input.KeyGesture
 import app.thebox.core.input.KeyGestureDetector
 import app.thebox.core.input.KeyInput
 import app.thebox.core.input.KeyMap
+import app.thebox.core.input.Keys
 import android.view.KeyEvent as AndroidKeyEvent
 
 /**
@@ -34,10 +35,15 @@ import android.view.KeyEvent as AndroidKeyEvent
  *   false. In SEARCH every key returns false except BACK while [searchFieldIdle] (empty field, IME hidden).
  * - [KeyCapabilities.record] runs for every bound or unbound DOWN with repeat 0 (the impl writes only new codes, N7).
  * - (code review 2026-10-14, H-S4) A key whose action the machine would ignore (`GuideStateMachine.handles` false:
- *   Play/Pause and FF/RW in FULL) returns false, so the framework hands it to M2's media session.
+ *   M3 FULL passed Play/Pause and FF/RW; M4 FULL handles them, §7 item 15) returns false, so the framework hands it
+ *   to M2's media session.
  * - (code review 2026-10-14, H-S11) A held (repeating) key whose UP is lost still ends its hold: focus loss, window
  *   detach ([onFocusLost]) and a [HOLD_WATCHDOG_MS] gap without a repeat dispatch `Release` for it.
  * - (code review 2026-10-14, H-S5) [detach] clears the machine only if it is still the attached one.
+ * - (M4, docs/design/m4-player-ux.md §3.1.7, reviewed 2026-10-15, S5) While `GuideStateMachine.horizontalRepeat` is set
+ *   on a key's first DOWN, D-pad LEFT/RIGHT ignore their long binding for that press (they act on DOWN with
+ *   auto-repeat). The decision is stored per held key next to [heldContext], so a change mid-hold (the scrub bar
+ *   opening on LEFT) never turns the held key into a long press.
  */
 class KeyRouterImpl(
     private val keyMap: KeyMap,
@@ -65,6 +71,8 @@ class KeyRouterImpl(
     private val consumedDown = HashSet<Int>()
     /** Context of each held key, fixed at its first DOWN (a mode change mid-press must not remap the UP). */
     private val heldContext = HashMap<Int, KeyContext>()
+    /** Held D-pad LEFT/RIGHT whose long binding is ignored for this press (S5), fixed at its first DOWN. */
+    private val heldNoLong = HashSet<Int>()
     private val longTimers = HashMap<Int, Any>()
     /** Repeating keys without a long binding (holds) → their watchdog timer token. */
     private val holdWatchdogs = HashMap<Int, Any>()
@@ -106,18 +114,20 @@ class KeyRouterImpl(
             val mode = m.ui.value.mode
             val context = if (mode == ScreenMode.FULL) KeyContext.PLAYER else KeyContext.GUIDE
             val short = keyMap.short(context, code)
-            val long = keyMap.long(context, code)
+            val dropLong = m.horizontalRepeat && (code == Keys.DPAD_LEFT || code == Keys.DPAD_RIGHT)
+            val long = if (dropLong) null else keyMap.long(context, code)
             if (short == null && long == null) return false
             if (mode == ScreenMode.SEARCH && !(short == BoxAction.BACK && searchFieldIdle())) return false
             if (long == null && short != null && !m.handles(short)) return false // H-S4: on to the media session
             consumedDown += code
             heldContext[code] = context
+            if (dropLong) heldNoLong += code else heldNoLong -= code
         } else if (code !in consumedDown) {
             return false
         }
         val context = heldContext[code] ?: KeyContext.GUIDE
-        if (!isDown) heldContext.remove(code)
-        val hasLong = keyMap.long(context, code) != null
+        val hasLong = longOf(context, code) != null
+        if (!isDown) { heldContext.remove(code); heldNoLong.remove(code) }
         out.clear()
         detector.onKey(KeyInput(code, isDown, repeatCount, downTimeMs, eventTimeMs, canceled), hasLong, out)
         if (isDown && repeatCount == 0 && hasLong) armLong(code, context)
@@ -140,8 +150,10 @@ class KeyRouterImpl(
     private fun endHold(code: Int, context: KeyContext) {
         consumedDown.remove(code)
         heldContext.remove(code)
+        val hasLong = longOf(context, code) != null
+        heldNoLong.remove(code)
         out.clear()
-        detector.onKey(KeyInput(code, false, 0, 0L, uptimeMs(), canceled = true), keyMap.long(context, code) != null, out)
+        detector.onKey(KeyInput(code, false, 0, 0L, uptimeMs(), canceled = true), hasLong, out)
         out.clear()
         keyMap.short(context, code)?.let { a -> machine?.dispatch(GuideEvent.Release(a)) }
     }
@@ -163,7 +175,7 @@ class KeyRouterImpl(
                 is KeyGesture.Press -> keyMap.short(context, g.keyCode)?.let { a ->
                     m.dispatch(GuideEvent.Act(a, g.repeat, if (a == BoxAction.DIGIT) keyMap.digit(g.keyCode) else -1, heldMs))
                 }
-                is KeyGesture.LongPress -> keyMap.long(context, g.keyCode)?.let { m.dispatch(GuideEvent.Act(it, 0, -1, heldMs)) }
+                is KeyGesture.LongPress -> longOf(context, g.keyCode)?.let { m.dispatch(GuideEvent.Act(it, 0, -1, heldMs)) }
                 is KeyGesture.ReleaseAfterRepeat -> keyMap.short(context, g.keyCode)?.let { m.dispatch(GuideEvent.Release(it)) }
             }
         }
@@ -179,9 +191,13 @@ class KeyRouterImpl(
         detector.reset()
         consumedDown.clear()
         heldContext.clear()
+        heldNoLong.clear()
         for (t in longTimers.values) timers.cancel(t)
         longTimers.clear()
     }
+
+    /** The long binding of a held key, or null when S5 dropped it for this press. */
+    private fun longOf(context: KeyContext, code: Int): BoxAction? = if (code in heldNoLong) null else keyMap.long(context, code)
 
     override fun sinkModifier(requester: FocusRequester): Modifier =
         Modifier
