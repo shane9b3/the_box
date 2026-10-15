@@ -45,4 +45,14 @@ class NumberEntryImplTest {
         n.digit(1, 0); n.clear()
         assertNull(n.commitValue()); assertFalse(n.due(10_000))
     }
+
+    /** M4: PlayerSettings.numberEntryWaitMs (1 / 1.5 / 2.5 s) through GuideEvent.Player. */
+    @Test fun commitWaitFollowsTheSetting() {
+        n.setCommitAfterMs(2_500)
+        n.digit(1, 0)
+        assertFalse(n.due(2_499)); assertTrue(n.due(2_500))
+        assertEquals(2_500L, n.commitAtMs())
+        n.setCommitAfterMs(1_000)
+        assertTrue(n.due(1_000))
+    }
 }

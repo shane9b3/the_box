@@ -57,13 +57,16 @@ grid,grid_home,CHANNEL_LIST,GUIDE,GRID,none,-,same
 grid,grid_home,STATS_OVERLAY,GUIDE,GRID,none,-,same
 grid,grid_home,JUMP_TO_LIVE,GUIDE,GRID,none,-,same
 grid,grid_home,SCREEN_OFF,GUIDE,GRID,none,-,same
-# M4 commit 0 (docs/design/m4-player-ux.md §2.9): the appended actions are no-ops in the guide grid until WP-A says otherwise.
-grid,grid_home,PLAY,GUIDE,GRID,none,-,same
+# M4 (docs/design/m4-player-ux.md §2.9; WP-A): the appended actions in the guide grid. PLAY acts as PLAY_PAUSE (FULL when
+# something is tuned; the default map sends MEDIA_PLAY as PLAY_PAUSE in the guide anyway), TOGGLE_FAVOURITE toggles the
+# focused channel, PREV/NEXT_PROGRAMME step along the row; PAUSE, VIDEO_DECODER and TIME_SHIFT are player-only no-ops.
+grid,grid_home,PLAY,FULL,GRID,none,setFullScreen,-
 grid,grid_home,PAUSE,GUIDE,GRID,none,-,same
-grid,grid_home,TOGGLE_FAVOURITE,GUIDE,GRID,none,-,same
+grid,grid_home,TOGGLE_FAVOURITE,GUIDE,GRID,none,queryFavourite;setFavourite,same
 grid,grid_home,VIDEO_DECODER,GUIDE,GRID,none,-,same
-grid,grid_home,PREV_PROGRAMME,GUIDE,GRID,none,-,same
-grid,grid_home,NEXT_PROGRAMME,GUIDE,GRID,none,-,same
+grid,grid_home,PREV_PROGRAMME,GUIDE,GRID,none,-,moved
+grid,grid_home,NEXT_PROGRAMME,GUIDE,GRID,none,-,moved
+grid,grid_row1,PREV_PROGRAMME,GUIDE,GRID,none,-,row:1
 grid,grid_home,TIME_SHIFT,GUIDE,GRID,none,-,same
 grid,grid_home,GROUP_NEXT,GUIDE,GRID,none,-,same
 grid,grid_home,GROUP_PREV,GUIDE,GRID,none,-,same
@@ -167,26 +170,32 @@ card,settings_card,SELECT,SETTINGS,TABS,Card,-,-
 card,search_card,BACK,GUIDE,GRID,Card,-,card:0
 # (code review 2026-10-14, H-S7) Switch now on a channel that is gone: toast, stay in the guide
 card,card_channel_gone,SELECT,GUIDE,GRID,none,answerReminder;toast,-
-# ---- FULL §3.4.5
+# ---- FULL §3.4.5, as reduced by M4 §3.1.1: the guide keeps BACK, OPEN_GUIDE, EXIT, GROUP_PREV/NEXT, number entry and (with
+# no player machine) PREVIOUS_CHANNEL. These rows run without a player machine attached (never in production, S9): every
+# other FULL key is the player's and lives in core/src/test/resources/player_keys.csv (M4 §5.1: "keys.csv rows for FULL
+# are moved to player_keys.csv"), incl. M3's zap (UP/DOWN/CH±) and SELECT-retry rows. The composed behaviour is in
+# GuideFullDelegationTest and ComposedFullBackLadderTest.
 full,full,BACK,GUIDE,GRID,none,setFullScreen,home
-full,full,UP,FULL,GRID,none,zap,-
-full,full,ZAP_UP,FULL,GRID,none,zap,-
-full,full,DOWN,FULL,GRID,none,zap,-
-full,full,ZAP_DOWN,FULL,GRID,none,zap,-
+full,full,UP,FULL,GRID,none,-,-
+full,full,ZAP_UP,FULL,GRID,none,-,-
+full,full,DOWN,FULL,GRID,none,-,-
+full,full,ZAP_DOWN,FULL,GRID,none,-,-
 full,full,GROUP_NEXT,FULL,GRID,none,loadLineup;persistSource,-
 full,full,GROUP_PREV,FULL,GRID,none,loadLineup;persistSource,-
-full,full_error_retry,SELECT,FULL,GRID,none,retry,-
+full,full_error_retry,SELECT,FULL,GRID,none,-,-
 full,full_error_noretry,SELECT,FULL,GRID,none,-,-
 full,full,SELECT,FULL,GRID,none,-,-
 full,full,DIGIT1,FULL,GRID,Number,-,digits:1
 full,full,NUMBER_ENTRY,FULL,GRID,Number,-,digits:0
 full,full,PREVIOUS_CHANNEL,FULL,GRID,none,previousChannel,-
 full,full,OPEN_GUIDE,GUIDE,GRID,none,setFullScreen,home
+# (M3 H-L4, M4 WP-A) EXIT in FULL opens the guide's Exit hint, drawn by FullScreenHost
+full,full,EXIT,FULL,GRID,ExitHint,-,-
 full,full,CONTEXT_MENU,FULL,GRID,none,-,-
 full,full,LEFT,FULL,GRID,none,-,-
 full,full,AUDIO,FULL,GRID,none,-,-
 full,full,FAVOURITES,FULL,GRID,none,-,-
-# (code review 2026-10-14, H-S4) the machine ignores these in FULL; handles() = false lets the router pass the key to the media session
+# (M4 §7 item 15) FULL consumes Play/Pause and FF/RW (the player machine acts on them); without one they are no-ops
 full,full,PLAY_PAUSE,FULL,GRID,none,-,-
 full,full,SEEK_FORWARD,FULL,GRID,none,-,-
 # ---- Back ladder §3.4.6 (B2)

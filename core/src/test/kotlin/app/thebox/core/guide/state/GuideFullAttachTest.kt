@@ -34,13 +34,17 @@ class GuideFullAttachTest {
         assertEquals(listOf(EnterReason.LAUNCH), player.entered)
     }
 
+    /** WP-A gave the commit-0 no-op events their bodies: Archive and Player keep the mode, OpenSettings opens SETTINGS. */
     @Test
-    fun newEventsAreNoOpsInCommitZero() {
+    fun newEventsHaveTheirM4Bodies() {
         val w = GuideWorld()
         val before = w.ui
         w.send(GuideEvent.Archive(app.thebox.core.catchup.archive.ArchiveStatus()))
         w.send(GuideEvent.Player(app.thebox.core.full.PlayerSettings()))
-        w.send(GuideEvent.OpenSettings)
         assertEquals(before.mode, w.ui.mode)
+        w.send(GuideEvent.OpenSettings)
+        assertEquals(ScreenMode.SETTINGS, w.ui.mode)
+        w.press(app.thebox.core.input.BoxAction.BACK)
+        assertEquals(ScreenMode.GUIDE, w.ui.mode, "opened from the guide: BACK returns to the guide")
     }
 }

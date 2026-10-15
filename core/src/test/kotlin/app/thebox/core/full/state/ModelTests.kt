@@ -1,0 +1,345 @@
+package app.thebox.core.full.state
+
+import app.thebox.core.catchup.archive.ArchiveFailure
+import app.thebox.core.catchup.archive.ArchivePhase
+import app.thebox.core.catchup.archive.ArchiveStatus
+import app.thebox.core.full.ErrorButton
+import app.thebox.core.full.PillKind
+import app.thebox.core.full.PillState
+import app.thebox.core.full.QuickItem
+import app.thebox.core.full.QuickItem.*
+import app.thebox.core.full.TrackMenu
+import app.thebox.core.full.fakes.PlayerFixtures
+import app.thebox.core.guide.MiniPhase
+import app.thebox.core.guide.TunedState
+import app.thebox.core.guide.fakes.GuideFixtures
+import app.thebox.core.playback.ErrorDetail
+import app.thebox.core.playback.NextStep
+import app.thebox.core.playback.PlaybackError
+import app.thebox.core.playback.PlaybackErrorCode
+import app.thebox.core.playback.PlaybackErrorCode.*
+import app.thebox.core.playback.VideoDecoderMode
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.CsvSource
+import org.junit.jupiter.params.provider.EnumSource
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+
+/** §3.5.2 / E21 step table and the pure scrub arithmetic. */
+class ScrubModelTest {
+    @ParameterizedTest
+    @CsvSource("0,10000", "999,10000", "1000,30000", "2999,30000", "3000,120000", "9999,120000", "10000,300000", "60000,300000")
+    fun stepByHeldMs(held: Long, step: Long) = assertEquals(step, ScrubModel.stepMs(held))
+
+    @ParameterizedTest
+    @CsvSource("0,0,30000", "0,5000,30000", "1,100,30000", "3,2000,30000", "5,4000,120000", "9,12000,300000")
+    fun ffRwUsesTheTableFromItsSecondRow(repeat: Int, held: Long, step: Long) = assertEquals(step, ScrubModel.ffRwStepMs(repeat, held))
+
+    @Test fun previewClampsAtBothEnds() {
+        assertEquals(1_000L, ScrubModel.preview(null, 5_000, -10_000, 1_000, 100_000), "archive start")
+        assertEquals(100_000L, ScrubModel.preview(null, 95_000, 10_000, 1_000, 100_000), "live edge")
+        assertEquals(50_000L, ScrubModel.preview(60_000, 5_000, -10_000, 1_000, 100_000), "steps from the preview, not the playhead")
+        assertEquals(15_000L, ScrubModel.preview(null, 5_000, 10_000, 1_000, 100_000))
+    }
+
+    @Test fun programmeContainmentAndChipTargets() {
+        val p = GuideFixtures.info(1_000, 1_030)
+        assertTrue(ScrubModel.contains(p, 1_000 * 60_000L))
+        assertFalse(ScrubModel.contains(p, 1_030 * 60_000L))
+        assertEquals(60_000_000L, ScrubModel.chipTarget(p, 70_000_000L))
+        assertNull(ScrubModel.chipTarget(p, 60_000_000L), "starting at or beyond the live edge → live")
+        assertEquals(1, ScrubModel.indexAt(listOf(GuideFixtures.info(970, 1_000), p), 1_010 * 60_000L))
+    }
+
+    @Test fun noEpgSpansThirtyMinutesEachSideClamped() {
+        val b = ScrubModel.noEpgBounds(100 * 60_000L, 0, 110 * 60_000L)
+        assertEquals(70 * 60_000L, b[0]); assertEquals(110 * 60_000L, b[1])
+    }
+
+    @Test fun mergeKeepsStartOrderAndReplaces() {
+        val a = GuideFixtures.info(10, 20, "a"); val b = GuideFixtures.info(20, 30, "b"); val b2 = GuideFixtures.info(20, 30, "b2")
+        assertEquals(listOf("a", "b2"), ScrubModel.merge(listOf(b), listOf(a, b2)).map { it.title })
+    }
+}
+
+/** §3.3 / §3.1.4 cursor, holds, Previous row, pages. */
+class ChannelListModelTest {
+    @Test fun opensOnTheTunedRowAtVisibleRowThree() {
+        val m = ChannelListModel()
+        m.open(50, 20, hasPrevious = false)
+        assertEquals(20, m.focused); assertEquals(17, m.top)
+        m.open(50, 1, hasPrevious = false)
+        assertEquals(0, m.top, "clamped at the top")
+        m.open(50, 49, hasPrevious = false)
+        assertEquals(40, m.top, "clamped at the end")
+        m.open(0, 5, hasPrevious = true)
+        assertEquals(-1, m.focused, "an empty list with a previous channel focuses the Previous row")
+    }
+
+    @ParameterizedTest
+    @CsvSource("0,1", "7,1", "8,3", "19,3", "20,10", "40,10")
+    fun holdAcceleration(repeat: Int, rows: Int) = assertEquals(rows, ChannelListModel.rowsPerEvent(repeat))
+
+    @Test fun holdsMoveFasterAndClamp() {
+        val m = ChannelListModel()
+        m.open(100, 0, hasPrevious = false)
+        for (r in 0 until 8) m.move(1, r)
+        assertEquals(8, m.focused)
+        m.move(1, 8); assertEquals(11, m.focused)
+        m.move(1, 20); assertEquals(21, m.focused)
+        m.move(1, 200); m.move(1, 200); m.move(1, 200); m.move(1, 200); m.move(1, 200); m.move(1, 200); m.move(1, 200); m.move(1, 200)
+        assertEquals(99, m.focused)
+        assertTrue(m.focused in m.top until m.top + ChannelListModel.LIST_VISIBLE, "cursor stays visible")
+    }
+
+    @Test fun previousRowAboveRowZero() {
+        val m = ChannelListModel()
+        m.open(10, 0, hasPrevious = true)
+        m.move(-1, 0); assertEquals(-1, m.focused, "UP from 0 → Previous")
+        m.move(-1, 0); assertEquals(-1, m.focused, "nothing above Previous")
+        m.move(1, 0); assertEquals(0, m.focused)
+        val n = ChannelListModel()
+        n.open(10, 0, hasPrevious = false)
+        n.move(-1, 0); assertEquals(0, n.focused, "no Previous row without a previous channel")
+        n.open(10, 2, hasPrevious = true)
+        n.move(-1, 9); assertEquals(0, n.focused, "an accelerated hold (3 rows) clamps at row 0, not past it")
+        n.move(-1, 9); assertEquals(-1, n.focused, "from row 0 UP reaches the Previous row")
+    }
+
+    @Test fun pagesTowardsLowerAndHigherNumbers() {
+        val m = ChannelListModel()
+        m.open(100, 50, hasPrevious = false)
+        m.page(-1); assertEquals(40, m.focused)
+        m.page(1); m.page(1); assertEquals(60, m.focused)
+        m.open(100, 5, hasPrevious = false)
+        m.page(-1); assertEquals(0, m.focused)
+    }
+
+    @Test fun resizeKeepsTheIndex() {
+        val m = ChannelListModel()
+        m.open(20, 15, hasPrevious = false)
+        m.resize(10, hasPrevious = false)
+        assertEquals(9, m.focused)
+        assertEquals(0, m.top)
+    }
+}
+
+/** §3.7 (S8/F5): every code × availability; no prepended Retry; no bare card. */
+class ErrorCardModelTest {
+    private val ch = GuideFixtures.channel(1)
+
+    private fun narrowed(e: PlaybackError) = e.copy(actions = e.actions.filter { it != NextStep.TRY_BACKUP && it != NextStep.PREVIOUS_CHANNEL })
+
+    @ParameterizedTest
+    @EnumSource(PlaybackErrorCode::class)
+    fun everyCodeHasAHeadlineAButtonAndAFirstStep(code: PlaybackErrorCode) {
+        for (e in listOf(PlayerFixtures.error(code), narrowed(PlayerFixtures.error(code)))) {
+            for (variantLeft in listOf(true, false)) for (decoder in listOf(null, VideoDecoderMode.SOFTWARE_PREFERRED)) {
+                val c = ErrorCardModel.card(e, ch, decoder, variantLeft, archiveFailed = false)
+                assertTrue(code.key.isNotEmpty(), "headline key")
+                assertTrue(c.buttons.isNotEmpty(), "$code: at least one button")
+                assertEquals(ErrorButton.GUIDE, c.buttons.last(), "$code: Guide always last")
+                assertEquals(c.buttons.size, c.buttons.toSet().size, "$code: no duplicates")
+                val first = e.actions.firstOrNull()
+                if (first != null && first != NextStep.TRY_SOFTWARE_DECODER) {
+                    val firstHasButton = c.buttons.size > 1 && buttonFor(first) in c.buttons
+                    assertTrue(firstHasButton || c.textStep == first, "$code: the first action is a button or the text step ($c)")
+                }
+                if (NextStep.RETRY !in e.actions) assertFalse(ErrorButton.RETRY in c.buttons, "$code: no prepended Retry")
+                else assertTrue(ErrorButton.RETRY in c.buttons, "$code: Retry from its own actions")
+                assertTrue(c.buttons.indexOf(ErrorButton.RETRY) <= 0 || e.actions.first() != NextStep.RETRY || c.buttons.first() == ErrorButton.RETRY)
+            }
+        }
+    }
+
+    private fun buttonFor(s: NextStep): ErrorButton? = when (s) {
+        NextStep.RETRY -> ErrorButton.RETRY
+        NextStep.PREVIOUS_CHANNEL -> ErrorButton.PREVIOUS_CHANNEL
+        NextStep.WATCH_LIVE -> ErrorButton.WATCH_LIVE
+        NextStep.TRY_OTHER_CATCHUP_MODE -> ErrorButton.TRY_OTHER_CATCHUP_FORMAT
+        NextStep.TRY_SOFTWARE_DECODER -> ErrorButton.TRY_SOFTWARE_DECODER
+        NextStep.AUDIO_OPTIONS -> ErrorButton.AUDIO_OPTIONS
+        NextStep.STOP_AND_WAIT -> ErrorButton.STOP
+        else -> null
+    }
+
+    private fun card(code: PlaybackErrorCode, decoder: VideoDecoderMode? = null, variantLeft: Boolean = true, error: PlaybackError = PlayerFixtures.error(code)) =
+        ErrorCardModel.card(error, ch, decoder, variantLeft, archiveFailed = false)
+
+    /** The §3.7 per-code table (default actions). */
+    @Test fun perCodeTable() {
+        val b = ErrorButton.entries.associateBy { it.name }
+        fun check(code: PlaybackErrorCode, buttons: String, text: NextStep?) {
+            val c = card(code)
+            assertEquals(buttons.split(' ').map { b.getValue(it) }, c.buttons, "$code buttons")
+            assertEquals(text, c.textStep, "$code text step")
+        }
+        check(AUTH_REJECTED, "GUIDE", NextStep.ACCOUNT_DETAILS)
+        check(ACCOUNT_EXPIRED, "GUIDE", NextStep.ACCOUNT_DETAILS)
+        check(ACCOUNT_DISABLED, "GUIDE", NextStep.ACCOUNT_DETAILS)
+        check(NEEDS_REAUTH, "GUIDE", NextStep.EDIT_LOGIN)
+        check(CREDENTIALS_UNAVAILABLE, "RETRY GUIDE", null)
+        check(CONNECTION_LIMIT, "RETRY STOP GUIDE", null)
+        check(CONNECTION_LIMIT_LOCAL, "RETRY GUIDE", null)
+        check(FORBIDDEN, "RETRY GUIDE", NextStep.CHANGE_USER_AGENT)
+        check(CHANNEL_OFFLINE, "PREVIOUS_CHANNEL RETRY GUIDE", NextStep.TRY_BACKUP)
+        check(FORMAT_REFUSED, "GUIDE", NextStep.PLAYLIST_SETTINGS)
+        check(WEB_PAGE_INSTEAD, "RETRY GUIDE", NextStep.ACCOUNT_DETAILS)
+        for (c in listOf(EMPTY_RESPONSE, NO_DATA_TIMEOUT, STREAM_INTERRUPTED, CONNECT_FAILED, INTERNAL)) check(c, "RETRY GUIDE", NextStep.DIAGNOSTICS)
+        check(SERVER_ERROR, "RETRY GUIDE", NextStep.TRY_BACKUP)
+        check(DNS_FAILURE, "GUIDE", NextStep.USE_SECURE_DNS)
+        check(TLS_FAILURE, "GUIDE", NextStep.PLAYLIST_SETTINGS)
+        check(CODEC_UNSUPPORTED, "TRY_SOFTWARE_DECODER GUIDE", NextStep.OPEN_EXTERNAL)
+        check(STREAM_UNDECODABLE, "RETRY GUIDE", NextStep.OPEN_EXTERNAL)
+        check(AUDIO_OUTPUT_FAILED, "AUDIO_OPTIONS GUIDE", null)
+        check(UNSUPPORTED_SOURCE, "GUIDE", NextStep.OPEN_EXTERNAL)
+        check(CATCHUP_NOT_IN_ARCHIVE, "WATCH_LIVE TRY_OTHER_CATCHUP_FORMAT GUIDE", null)
+        check(CHANNEL_NOT_FOUND, "GUIDE", NextStep.REFRESH_PLAYLIST)
+    }
+
+    @Test fun ladderNarrowedActions() {
+        val offline = PlayerFixtures.error(CHANNEL_OFFLINE).copy(actions = listOf(NextStep.RETRY))
+        assertEquals(listOf(ErrorButton.RETRY, ErrorButton.GUIDE), card(CHANNEL_OFFLINE, error = offline).buttons, "no previous channel: the ladder filtered it")
+        assertNull(card(CHANNEL_OFFLINE, error = offline).textStep)
+        val server = PlayerFixtures.error(SERVER_ERROR).copy(actions = listOf(NextStep.RETRY))
+        assertNull(card(SERVER_ERROR, error = server).textStep, "no backup: no text step")
+    }
+
+    /**
+     * WP-C finding (2026-10-15): the only card shown while retrying is the switch-timeout NO_DATA_TIMEOUT with
+     * RetryInfo(maxAttempts = 0 = unlimited); STREAM_INTERRUPTED is terminal (retry = null). The card's buttons never
+     * depend on `retry` (the retry line is WP-D's drawing of `error.retry`).
+     */
+    @Test fun retriedCardIsNoDataTimeoutAndButtonsIgnoreRetryInfo() {
+        val retried = PlaybackError(NO_DATA_TIMEOUT, ErrorDetail(host = PlayerFixtures.HOST), retry = app.thebox.core.playback.RetryInfo(4, 0, 15_000))
+        val c = card(NO_DATA_TIMEOUT, error = retried)
+        assertEquals(listOf(ErrorButton.RETRY, ErrorButton.GUIDE), c.buttons)
+        assertEquals(NextStep.DIAGNOSTICS, c.textStep)
+        assertEquals(retried.retry, c.error.retry, "the retry info reaches the card unchanged")
+        val terminal = PlayerFixtures.error(STREAM_INTERRUPTED).copy(retry = null)
+        assertEquals(card(STREAM_INTERRUPTED).buttons, card(STREAM_INTERRUPTED, error = terminal).buttons)
+    }
+
+    @Test fun dnsFailureHasNoRetry() = assertFalse(ErrorButton.RETRY in card(DNS_FAILURE).buttons)
+
+    @Test fun softwareDecoderHiddenWhenAlreadySoftwareOrAudio() {
+        val sw = card(CODEC_UNSUPPORTED, decoder = VideoDecoderMode.SOFTWARE_PREFERRED)
+        assertFalse(ErrorButton.TRY_SOFTWARE_DECODER in sw.buttons)
+        assertEquals(NextStep.OPEN_EXTERNAL, sw.textStep, "the step is dropped, not shown as text")
+        val audio = card(CODEC_UNSUPPORTED, error = PlayerFixtures.error(CODEC_UNSUPPORTED).copy(detail = ErrorDetail(codec = "audio/eac3")))
+        assertFalse(ErrorButton.TRY_SOFTWARE_DECODER in audio.buttons)
+        assertTrue(ErrorButton.TRY_SOFTWARE_DECODER in card(CODEC_UNSUPPORTED, decoder = VideoDecoderMode.HARDWARE_ONLY).buttons)
+    }
+
+    @Test fun otherCatchupFormatOnlyWhileAVariantIsLeft() {
+        val none = card(CATCHUP_NOT_IN_ARCHIVE, variantLeft = false)
+        assertEquals(listOf(ErrorButton.WATCH_LIVE, ErrorButton.GUIDE), none.buttons)
+        assertEquals(NextStep.TRY_OTHER_CATCHUP_MODE, none.textStep)
+    }
+
+    @Test fun archiveFailureCards() {
+        for (f in ArchiveFailure.entries) {
+            val e = ErrorCardModel.archiveFailure(f)
+            val c = ErrorCardModel.card(e, ch, null, variantLeft = false, archiveFailed = true)
+            assertTrue(c.archiveFailed)
+            assertTrue(ErrorButton.WATCH_LIVE in c.buttons, "$f: Watch live")
+            assertEquals(ErrorButton.GUIDE, c.buttons.last())
+        }
+        assertEquals(CATCHUP_NOT_IN_ARCHIVE, ErrorCardModel.archiveFailure(ArchiveFailure.NOT_IN_ARCHIVE).code)
+    }
+}
+
+/** §3.2.3 pill table (B1/F3), extrapolation, and the UI debounce (PILL_DEBOUNCE_MS, M2 E-L8). */
+class PillRulesTest {
+    private val ch = GuideFixtures.channel(0, archiveDays = 7)
+    private fun tuned(phase: MiniPhase, archive: Boolean = false, handoff: Boolean = false) =
+        TunedState(ch.identity, ch.rowId, ch.identityHash, phase, archive, reconnectAttempt = 2, reconnectMax = 5, handoff = handoff)
+    private fun status(phase: ArchivePhase, timeShift: Boolean, wall: Long = 1_000_000, live: Long = 1_090_000, at: Long = 2_000_000, advancing: Boolean = phase == ArchivePhase.PLAYING, hash: Long = ch.identityHash) =
+        ArchiveStatus(phase = phase, identityHash = hash, wallMs = wall, liveEdgeMs = live, atMs = at, advancing = advancing, timeShift = timeShift)
+
+    @Test fun table() {
+        val now = 2_010_000L
+        assertEquals(PillKind.LIVE, PillRules.pill(tuned(MiniPhase.PLAYING), null, now).kind)
+        assertEquals(PillKind.CONNECTING, PillRules.pill(tuned(MiniPhase.CONNECTING), null, now).kind)
+        assertEquals(PillKind.CONNECTING, PillRules.pill(tuned(MiniPhase.BUFFERING), null, now).kind)
+        val rc = PillRules.pill(tuned(MiniPhase.RECONNECTING), null, now)
+        assertEquals(PillKind.RECONNECTING, rc.kind); assertEquals(2, rc.reconnectAttempt); assertEquals(5, rc.reconnectMax)
+        assertEquals(PillKind.PAUSED, PillRules.pill(tuned(MiniPhase.PAUSED), null, now).kind, "plain pause")
+        assertFalse(PillRules.pill(tuned(MiniPhase.PAUSED), null, now).behindGrows)
+        val pl = PillRules.pill(tuned(MiniPhase.PAUSED), status(ArchivePhase.PAUSED_LIVE, true), now)
+        assertEquals(PillKind.PAUSED, pl.kind); assertTrue(pl.behindGrows)
+        assertEquals(1_090_000L + 10_000 - 1_000_000, pl.behindMs, "live − wall at now: grows 1:1 while paused")
+        assertEquals(now, pl.atMs)
+        val behind = PillRules.pill(tuned(MiniPhase.PLAYING, archive = true), status(ArchivePhase.PLAYING, true), now)
+        assertEquals(PillKind.BEHIND, behind.kind); assertEquals(90_000L, behind.behindMs); assertFalse(behind.behindGrows)
+        for (p in listOf(ArchivePhase.STARTING, ArchivePhase.SEEKING, ArchivePhase.CONTINUING, ArchivePhase.PROBING)) {
+            assertEquals(PillKind.BEHIND, PillRules.pill(tuned(MiniPhase.PLAYING, archive = true), status(p, true), now).kind, "$p time-shift")
+            assertEquals(PillKind.CATCH_UP, PillRules.pill(tuned(MiniPhase.PLAYING, archive = true), status(p, false), now).kind, "$p catch-up")
+        }
+        assertEquals(PillKind.CATCH_UP, PillRules.pill(tuned(MiniPhase.PLAYING, archive = true), null, now).kind, "archive tune without a session")
+        assertEquals(PillKind.LIVE, PillRules.pill(tuned(MiniPhase.PLAYING), status(ArchivePhase.FAILED, true), now).kind, "FAILED is no session")
+        assertEquals(PillKind.LIVE, PillRules.pill(tuned(MiniPhase.PLAYING), status(ArchivePhase.PLAYING, true, hash = 42), now).kind, "another channel's session")
+    }
+
+    /** B1: an owned hand-off never reads CONNECTING; it keeps the session's pill. */
+    @Test fun handoffKeepsTheSessionPill() {
+        val now = 2_010_000L
+        assertEquals(PillKind.BEHIND, PillRules.pill(tuned(MiniPhase.PLAYING, true, handoff = true), status(ArchivePhase.SEEKING, true), now).kind)
+        assertEquals(PillKind.CATCH_UP, PillRules.pill(tuned(MiniPhase.PLAYING, true, handoff = true), status(ArchivePhase.CONTINUING, false), now).kind)
+    }
+
+    @Test fun reconnectFlickerIsDebounced() {
+        val d = PillRules.Debouncer()
+        val live = PillState(PillKind.LIVE); val rc = PillState(PillKind.RECONNECTING, reconnectAttempt = 1)
+        assertEquals(live, d.offer(live, 0))
+        assertEquals(live, d.offer(rc, 100), "a 300 ms flicker never shows")
+        assertEquals(500L, d.nextChangeAtMs)
+        assertEquals(live, d.offer(live, 400))
+        assertEquals(Long.MAX_VALUE, d.nextChangeAtMs)
+        assertEquals(live, d.offer(rc, 1_000))
+        assertEquals(live, d.offer(rc.copy(reconnectAttempt = 2), 1_399))
+        assertEquals(PillKind.RECONNECTING, d.offer(rc.copy(reconnectAttempt = 2), 1_400).kind, "stable for 400 ms → shown")
+        assertEquals(3, d.offer(rc.copy(reconnectAttempt = 3), 1_500).reconnectAttempt, "same kind: numbers update at once")
+    }
+}
+
+/** §3.4.1 item order and hiding (owner ruling 2026-10-15). */
+class QuickBarModelTest {
+    private val menu = PlayerFixtures.trackMenu()
+    private val prev = GuideFixtures.channel(9)
+
+    @Test fun liveWithArchiveFullOrder() {
+        assertEquals(
+            listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, START_OVER, TIME_SHIFT, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, SCREEN_OFF, SETTINGS),
+            QuickBarModel.items(menu, archiveCapable = true, inArchive = false, nowProgramme = true, favourite = false, previous = prev),
+        )
+    }
+
+    @Test fun archiveSwapsStartOverForJumpToLive() {
+        val items = QuickBarModel.items(menu, archiveCapable = true, inArchive = true, nowProgramme = true, favourite = true, previous = prev)
+        assertEquals(listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_REMOVE, JUMP_TO_LIVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, SCREEN_OFF, SETTINGS), items)
+    }
+
+    @Test fun hiding() {
+        val bare = QuickBarModel.items(TrackMenu(), archiveCapable = false, inArchive = false, nowProgramme = true, favourite = null, previous = null)
+        assertEquals(listOf(ASPECT, STREAM_INFO, VIDEO_DECODER, SCREEN_OFF, SETTINGS), bare, "favourite hidden until the answer; no audio/subtitles")
+        val oneUnsupported = TrackMenu(audio = listOf(PlayerFixtures.audio(0, "en", selected = true, supported = false)))
+        assertTrue(AUDIO in QuickBarModel.items(oneUnsupported, false, false, false, null, null), "a single unsupported track still offers Audio")
+        assertFalse(START_OVER in QuickBarModel.items(menu, true, false, nowProgramme = false, favourite = null, previous = null), "no programme on now")
+        assertTrue(TIME_SHIFT in QuickBarModel.items(menu, true, false, nowProgramme = false, favourite = null, previous = null))
+        for (s in listOf(true, false)) for (a in listOf(true, false)) {
+            val items = QuickBarModel.items(menu, a, s, true, null, prev)
+            assertEquals(SETTINGS, items.last(), "Settings always last")
+            assertEquals(items.sortedBy { it.ordinal }, items, "display order is the enum order")
+        }
+    }
+
+    @Test fun quickItemOrderIsTheContractOrder() =
+        assertEquals(listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, START_OVER, JUMP_TO_LIVE, TIME_SHIFT, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, SCREEN_OFF, SETTINGS), QuickItem.entries.toList())
+
+    @Suppress("unused") private fun unused() = assertNotNull(prev)
+}

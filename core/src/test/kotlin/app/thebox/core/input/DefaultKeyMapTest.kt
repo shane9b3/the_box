@@ -26,18 +26,50 @@ class DefaultKeyMapTest {
         both(Keys.CHANNEL_UP, ZAP_UP); both(Keys.CHANNEL_DOWN, ZAP_DOWN)
         assertEquals(PAGE_UP, m.short(GUIDE, Keys.PAGE_UP)); assertEquals(PAGE_DOWN, m.short(GUIDE, Keys.PAGE_DOWN))
         assertEquals(ZAP_UP, m.short(PLAYER, Keys.PAGE_UP)); assertEquals(ZAP_DOWN, m.short(PLAYER, Keys.PAGE_DOWN))
-        both(Keys.MEDIA_PLAY_PAUSE, PLAY_PAUSE); both(Keys.MEDIA_PLAY, PLAY_PAUSE); both(Keys.MEDIA_PAUSE, PLAY_PAUSE)
+        both(Keys.MEDIA_PLAY_PAUSE, PLAY_PAUSE)
+        // M4 §3.1.7: MEDIA_PLAY/MEDIA_PAUSE split in the player; the guide keeps PLAY_PAUSE for all three
+        assertEquals(PLAY_PAUSE, m.short(GUIDE, Keys.MEDIA_PLAY)); assertEquals(PLAY_PAUSE, m.short(GUIDE, Keys.MEDIA_PAUSE))
+        assertEquals(PLAY, m.short(PLAYER, Keys.MEDIA_PLAY)); assertEquals(PAUSE, m.short(PLAYER, Keys.MEDIA_PAUSE))
         both(Keys.MEDIA_FAST_FORWARD, SEEK_FORWARD); both(Keys.MEDIA_REWIND, SEEK_BACK)
         for (i in 0..9) { both(Keys.DIGIT_0 + i, DIGIT); both(Keys.NUMPAD_0 + i, DIGIT) }
         both(Keys.PROG_RED, START_OVER); both(Keys.PROG_GREEN, FAVOURITES); both(Keys.PROG_YELLOW, AUDIO); both(Keys.PROG_BLUE, PREVIOUS_CHANNEL)
         both(Keys.LAST_CHANNEL, PREVIOUS_CHANNEL); both(Keys.GUIDE, OPEN_GUIDE); both(Keys.INFO, INFO_BAR)
         both(Keys.CAPTIONS, SUBTITLES); both(Keys.MEDIA_AUDIO_TRACK, AUDIO); both(Keys.TV_ZOOM_MODE, ASPECT)
         assertEquals(REMIND, m.short(GUIDE, Keys.MEDIA_RECORD)); assertNull(m.short(PLAYER, Keys.MEDIA_RECORD))
-        // code review 2026-10-14 (H-S4/H-L14): ⏭/⏮ zap in the player, unbound in the guide
-        assertEquals(ZAP_DOWN, m.short(PLAYER, Keys.MEDIA_NEXT)); assertEquals(ZAP_UP, m.short(PLAYER, Keys.MEDIA_PREVIOUS))
+        // code review 2026-10-14 (H-S4/H-L14): ⏭/⏮ zap in the player, unbound in the guide; M4 S6: ⏭ = ZAP_UP (+1)
+        assertEquals(ZAP_UP, m.short(PLAYER, Keys.MEDIA_NEXT)); assertEquals(ZAP_DOWN, m.short(PLAYER, Keys.MEDIA_PREVIOUS))
         assertNull(m.short(GUIDE, Keys.MEDIA_NEXT)); assertNull(m.short(GUIDE, Keys.MEDIA_PREVIOUS))
         assertNull(m.short(GUIDE, Keys.SEARCH), "SEARCH unbound in M3 (§8 Q3)")
         assertNull(m.short(GUIDE, 24), "volume is never bound")
+    }
+
+    /** M4 §3.1.7 new PLAYER bindings; the guide leaves these keys unbound (media session). */
+    @Test fun m4PlayerBindings() {
+        assertEquals(JUMP_TO_LIVE, m.short(PLAYER, Keys.MEDIA_STOP)); assertNull(m.short(GUIDE, Keys.MEDIA_STOP))
+        for (c in intArrayOf(Keys.MEDIA_SKIP_FORWARD, Keys.MEDIA_STEP_FORWARD)) { assertEquals(SEEK_FORWARD, m.short(PLAYER, c)); assertNull(m.short(GUIDE, c)) }
+        for (c in intArrayOf(Keys.MEDIA_SKIP_BACKWARD, Keys.MEDIA_STEP_BACKWARD)) { assertEquals(SEEK_BACK, m.short(PLAYER, c)); assertNull(m.short(GUIDE, c)) }
+        for (c in intArrayOf(Keys.MEDIA_STOP, Keys.MEDIA_SKIP_FORWARD, Keys.MEDIA_SKIP_BACKWARD, Keys.MEDIA_STEP_FORWARD, Keys.MEDIA_STEP_BACKWARD, Keys.MEDIA_PLAY, Keys.MEDIA_PAUSE)) {
+            assertNull(m.long(PLAYER, c), "no long binding on $c")
+        }
+    }
+
+    /** M4 S6 + owner ruling: CH+, ⏭ and PAGE_UP give the same action in PLAYER (+1); CH−, ⏮ and PAGE_DOWN the other. */
+    @Test fun chPlusNextAndPageUpAgree() {
+        val up = setOf(m.short(PLAYER, Keys.CHANNEL_UP), m.short(PLAYER, Keys.MEDIA_NEXT), m.short(PLAYER, Keys.PAGE_UP))
+        val down = setOf(m.short(PLAYER, Keys.CHANNEL_DOWN), m.short(PLAYER, Keys.MEDIA_PREVIOUS), m.short(PLAYER, Keys.PAGE_DOWN))
+        assertEquals(setOf<BoxAction?>(ZAP_UP), up)
+        assertEquals(setOf<BoxAction?>(ZAP_DOWN), down)
+        // GUIDE unchanged: CH± zap actions (the grid pages them towards lower/higher numbers), PAGE keys page.
+        assertEquals(ZAP_UP, m.short(GUIDE, Keys.CHANNEL_UP)); assertEquals(PAGE_UP, m.short(GUIDE, Keys.PAGE_UP))
+    }
+
+    /** S5/F9: two contexts only; the M4 actions with no default key stay unbound in both. */
+    @Test fun twoContextsAndUnboundM4Actions() {
+        assertEquals(listOf(GUIDE, PLAYER), KeyContext.entries.toList())
+        val bound = (m.bindings(GUIDE) + m.bindings(PLAYER)).flatMap { listOfNotNull(it.short, it.long) }.toSet()
+        for (a in listOf(TOGGLE_FAVOURITE, VIDEO_DECODER, PREV_PROGRAMME, NEXT_PROGRAMME, TIME_SHIFT, STATS_OVERLAY, SCREEN_OFF, QUICK_MENU)) {
+            assertTrue(a !in bound, "$a has no default key (quick bar / M5 mapping)")
+        }
     }
 
     @Test fun onlyOkFamilyAndPlayerLeftRightHaveLongBindings() {
