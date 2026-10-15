@@ -71,4 +71,16 @@ interface PlaylistDao {
     /** Stamped after a recompute pass over the playlist's `channel.display_name`s. */
     @Query("UPDATE playlist SET name_prefix_ver = :ver WHERE id = :id")
     suspend fun setNamePrefixVer(id: Long, ver: Int)
+
+    // ---- M4 (docs/design/m4-player-ux.md §1.4, §3.8.8)
+
+    /**
+     * The catch-up variant that reached first media (`CatchupUrlBuilder.variants` key), or null to forget it. One-column
+     * `UPDATE`: a whole-row [update] from a stale entity would overwrite concurrent writes (M2 N-L13).
+     */
+    @Query("UPDATE playlist SET catchup_probe_winner = :value WHERE id = :id")
+    suspend fun setCatchupProbeWinner(id: Long, value: String?)
+
+    @Query("SELECT catchup_probe_winner FROM playlist WHERE id = :id")
+    suspend fun catchupProbeWinner(id: Long): String?
 }

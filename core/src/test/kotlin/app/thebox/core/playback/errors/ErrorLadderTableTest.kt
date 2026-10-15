@@ -50,7 +50,8 @@ class ErrorLadderTableTest {
         val covered = cases.map { it.rule }.toSet()
         val missing = (1..44).map { "L$it" }.filter { it !in covered }
         assertTrue(missing.isEmpty(), "ladder.csv lacks rows for $missing")
-        assertTrue("L22a" in covered && "G-gate" in covered && "G-timeout" in covered && "G-limiter" in covered)
+        assertTrue("L13a" in covered, "ladder.csv lacks the M4 row L13a")
+        assertTrue("L22a" in covered &&"G-gate" in covered && "G-timeout" in covered && "G-limiter" in covered)
     }
 
     companion object {
