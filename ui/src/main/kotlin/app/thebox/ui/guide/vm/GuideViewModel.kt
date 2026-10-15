@@ -26,6 +26,9 @@ import app.thebox.core.guide.GuideRowsCacheFactory
 import app.thebox.core.guide.GuideSessionStore
 import app.thebox.core.guide.GuideSettings
 import app.thebox.core.guide.GuideSettingsSource
+import app.thebox.core.catchup.archive.ArchivePlayback
+import app.thebox.core.full.OnLaunch
+import app.thebox.core.full.PlayerSettingsSource
 import app.thebox.core.full.PlayerStateMachine
 import app.thebox.core.guide.GuideStateMachine
 import app.thebox.core.guide.GuideStateMachineFactory
@@ -36,6 +39,7 @@ import app.thebox.core.guide.PerformanceMode
 import app.thebox.core.guide.ReminderAlerts
 import app.thebox.core.guide.ReminderBook
 import app.thebox.core.guide.RowCellsBuilder
+import app.thebox.core.guide.ScreenMode
 import app.thebox.core.guide.SyncChip
 import app.thebox.core.guide.SyncFeedState
 import app.thebox.core.guide.SyncFeed
@@ -52,6 +56,8 @@ import app.thebox.ui.ambient.AmbientHueSource
 import app.thebox.ui.ambient.AmbientState
 import app.thebox.ui.guide.grid.AndroidTextMeasurer
 import app.thebox.ui.guide.grid.GuideTrim
+import app.thebox.ui.full.PlayerHost
+import app.thebox.ui.full.vm.PlayerGuideBridge
 import app.thebox.ui.search.SearchEffect
 import app.thebox.ui.input.KeyRouter
 import app.thebox.ui.playback.CatchupLauncher
@@ -113,6 +119,9 @@ class GuideViewModel @Inject constructor(
     private val guideImages: GuideImages,
     override val imageLoader: ImageLoader,
     guideTrim: GuideTrim,
+    // M4 (docs/design/m4-player-ux.md §3.10.1, §3.10.3; review B1)
+    private val archive: ArchivePlayback,
+    private val playerSettings: PlayerSettingsSource,
 ) : ViewModel(), ShellHost, ShellEffects {
 
     private val io = Dispatchers.IO
@@ -203,6 +212,30 @@ class GuideViewModel @Inject constructor(
      */
     fun attachPlayer(machine: PlayerStateMachine) {
         this.machine.full = machine
+        sendGuideSource()
+    }
+
+    /**
+     * (M4, §3.10.1) Attaches the player view model: its machine becomes the guide machine's `full` ([attachPlayer]),
+     * it becomes [ShellHost.player] for the root, and (when it is a [PlayerGuideBridge]) it gets the guide machine
+     * (quick bar Settings, the displayed mode, the number-entry preview) and the guide's source and lineup.
+     */
+    fun attachPlayer(player: PlayerHost) {
+        attachedPlayer = player
+        (player as? PlayerGuideBridge)?.attachGuide(machine)
+        attachPlayer(player.machine)
+    }
+
+    private var attachedPlayer: PlayerHost? = null
+    override val player: PlayerHost? get() = attachedPlayer
+
+    /** `PlayerEvent.GuideSourceNow` (§3.3.1): the guide's current source and lineup, through the bridge when attached. */
+    private fun sendGuideSource() {
+        val source = effects.currentSource
+        val lineup = effects.currentLineup
+        val bridge = attachedPlayer as? PlayerGuideBridge
+        if (bridge != null) bridge.onGuideLineup(source, lineup)
+        else machine.full?.dispatch(app.thebox.core.full.PlayerEvent.GuideSourceNow(source, lineup))
     }
 
     // ---- ShellHost
@@ -326,19 +359,27 @@ class GuideViewModel @Inject constructor(
         scope.launch { alerts.current.collect { machine.dispatch(GuideEvent.Alert(it)) } }
         scope.launch { keyCapabilities.seen.collect { machine.dispatch(GuideEvent.KeysSeen(it)) } }
         scope.launch {
-            combine(controller.state, controller.video, settingsSource.settings) { st, v, s -> Triple(st, v, s) }.collect { (st, v, s) ->
+            combine(controller.state, archive.status, settingsSource.settings) { st, a, s -> Triple(st, a, s) }.collect { (st, a, s) ->
                 val identity = st.target?.identity
                 val channel = identity?.let { channelOf(it) }
                 // H-B1: the HDR poster is not a still. It is the controller's MINI state (video track off, viewport
                 // MINI); mapping it to a still hid the viewport, which ended the poster, which showed MINI again: a loop.
                 val still = s.miniStill || device.stillByDefault
-                machine.dispatch(GuideEvent.Tuned(TunedStateMapper.map(st, channel?.rowId ?: -1L, still), channel))
+                // (M4, B1) An archive session's own hand-offs and probe errors are hidden by the one shared rule.
+                val visible = app.thebox.ui.full.vm.TunedVisibility.visible(TunedStateMapper.map(st, channel?.rowId ?: -1L, still), a)
+                machine.dispatch(GuideEvent.Tuned(visible, channel))
             }
         }
+        // (M4, §0.6, §3.10.3) The archive session (suspect ↺ and the pending catch-up FULL follow FAILED, the mini
+        // player's PAUSED / −MM:SS pills) and the player settings the guide machine reads.
+        scope.launch { archive.status.collect { machine.dispatch(GuideEvent.Archive(it)) } }
+        scope.launch { playerSettings.settings.collect { machine.dispatch(GuideEvent.Player(it)) } }
         scope.launch {
-            machine.ui.map { it.tunedChannel }.distinctUntilChanged { a, b -> a?.identityHash == b?.identityHash }.collect { ch ->
-                ambient.targetHue = ch?.let { hueSource.hue(it) }
-            }
+            // (M4, M3 H-L5) No hue work while FULL: the background is black there. The hue of the channel tuned in FULL
+            // is computed when the guide shows again.
+            machine.ui.map { if (it.mode == ScreenMode.FULL) null else it.tunedChannel }
+                .distinctUntilChanged { a, b -> a?.identityHash == b?.identityHash }
+                .collect { ch -> if (ch != null || machine.ui.value.mode != ScreenMode.FULL) ambient.targetHue = ch?.let { hueSource.hue(it) } }
         }
     }
 
@@ -398,14 +439,23 @@ class GuideViewModel @Inject constructor(
     /**
      * Startup (§3.16.1): "guide with last channel" tunes the last watched channel; the machine picks the source. (M4
      * commit 0, S9) Called by MainActivity after [attachPlayer]; runs once per view model.
+     *
+     * (M4, docs/design/m4-player-ux.md §3.10.3) `PlayerSettings.onLaunch`: GUIDE_WITH_LAST is the M3 behaviour;
+     * FULL_LAST tunes the same channel and dispatches `GuideEvent.StartFull` (the machine's pendingFull path: FULL on the
+     * first active Tuned); GUIDE_NOTHING tunes nothing. StartFull is sent only when there is a channel to tune, so a
+     * later tune from the guide never jumps to FULL by surprise.
      */
     fun startup() {
         if (started) return
         started = true
         viewModelScope.launch {
             try {
-                if (controller.state.value is PlaybackState.Idle) {
-                    library.lastWatched()?.let { controller.tune(TuneTarget.Channel(it.identity)) }
+                val onLaunch = playerSettings.settings.value.onLaunch
+                if (onLaunch != OnLaunch.GUIDE_NOTHING && controller.state.value is PlaybackState.Idle) {
+                    library.lastWatched()?.let {
+                        if (onLaunch == OnLaunch.FULL_LAST) machine.dispatch(GuideEvent.StartFull)
+                        controller.tune(TuneTarget.Channel(it.identity))
+                    }
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -415,9 +465,13 @@ class GuideViewModel @Inject constructor(
         }
     }
 
-    /** A new lineup for the current source: it becomes the zap list while something plays (§3.16.3, N13). */
+    /**
+     * A new lineup for the current source: it becomes the zap list while something plays (§3.16.3, N13). (M4, §3.3.1)
+     * The player hears of it too (`GuideSourceNow`): the channel list opens on it and its ←/→ browse follows it.
+     */
     private fun onLineup(lineup: GuideLineup) {
         if (controller.state.value !is PlaybackState.Idle) controller.setZapList(LineupZapList(lineup, library))
+        sendGuideSource()
     }
 
     private fun registerTimeReceiver() {

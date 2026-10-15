@@ -85,4 +85,64 @@ class ErrorTextTest {
         assertEquals("Missed while The Box was closed: 3 reminders", toastText(ctx.resources, GuideToast.REMINDERS_MISSED, "3"))
         assertTrue(toastText(ctx.resources, GuideToast.REMINDER_CHANNEL_GONE, "Northline").startsWith("Northline is no longer"))
     }
+    // ---- M4 (docs/design/m4-player-ux.md §3.7, §5.4): the full-screen card
+
+    @Test
+    fun detailLineForEveryCodeEndsWithItsKey() {
+        for (e in app.thebox.core.full.fakes.PlayerFixtures.allErrors()) {
+            val line = ErrorText.detailLine(ctx.resources, e.code, e.detail)
+            assertTrue("${e.code}: $line", line.endsWith(e.code.key))
+            assertFalse("no URL or query in the line: $line", line.contains("://") || line.contains('?'))
+        }
+    }
+
+    @Test
+    fun detailLineCombinations() {
+        val r = ctx.resources
+        fun line(d: app.thebox.core.playback.ErrorDetail) = ErrorText.detailLine(r, PlaybackErrorCode.FORBIDDEN, d)
+        assertEquals("play.forbidden", line(app.thebox.core.playback.ErrorDetail()))
+        assertEquals("HTTP 403 · panel:80 · play.forbidden", line(app.thebox.core.playback.ErrorDetail(httpStatus = 403, host = "panel:80")))
+        assertEquals("video/hevc Main10 · c2.hevc · play.forbidden", line(app.thebox.core.playback.ErrorDetail(codec = "video/hevc Main10", decoderName = "c2.hevc")))
+        assertEquals("HTTP 458 · panel:80 · 1/1 connections · play.forbidden", line(app.thebox.core.playback.ErrorDetail(httpStatus = 458, host = "panel:80", activeConnections = 1, maxConnections = 1)))
+        assertEquals("one count alone is not shown", "play.forbidden", line(app.thebox.core.playback.ErrorDetail(activeConnections = 1)))
+        assertEquals("HTTP 1 · h · c · d · 2/3 connections · play.forbidden",
+            line(app.thebox.core.playback.ErrorDetail(httpStatus = 1, host = "h", codec = "c", decoderName = "d", activeConnections = 2, maxConnections = 3, media3ErrorCode = 2001, signal = "Http")))
+    }
+
+    @Test
+    fun everyButtonHasADistinctLabel() {
+        val labels = app.thebox.core.full.ErrorButton.entries.map { ctx.getString(ErrorText.button(it)) }
+        assertTrue(labels.all { it.isNotBlank() })
+        assertEquals(labels.size, labels.toSet().size)
+    }
+
+    /**
+     * WP-C finding: the only card the controller shows with RetryInfo is NO_DATA_TIMEOUT before first media
+     * (maxAttempts = 0, unlimited, refreshed per retry); terminal errors have retry = null.
+     */
+    @Test
+    fun retryLine() {
+        val r = ctx.resources
+        val unlimited = app.thebox.core.playback.RetryInfo(attemptsMade = 3, maxAttempts = 0, nextAttemptInMs = 12_000)
+        val card = PlaybackError(PlaybackErrorCode.NO_DATA_TIMEOUT, retry = unlimited)
+        assertEquals("Still trying… next attempt in 12 s", ErrorText.retryLine(r, card.retry))
+        assertEquals("counts down", "Still trying… next attempt in 7 s", ErrorText.retryLine(r, card.retry, elapsedMs = 5_000))
+        assertEquals("Still trying… next attempt in 0 s", ErrorText.retryLine(r, card.retry, elapsedMs = 60_000))
+        assertEquals("Still trying… attempt 4", ErrorText.retryLine(r, unlimited.copy(nextAttemptInMs = null)))
+        assertEquals("Still trying… attempt 2 of 5", ErrorText.retryLine(r, app.thebox.core.playback.RetryInfo(1, 5, 3_000)))
+        assertEquals(null, ErrorText.retryLine(r, null))
+    }
+
+    @Test
+    fun everyArchiveFailureHasAReasonAndAStepAndTheStoppedHintExists() {
+        for (f in app.thebox.core.catchup.archive.ArchiveFailure.entries) {
+            val h = ctx.getString(ErrorText.archiveHeadline(f))
+            val st = ctx.getString(ErrorText.archiveStep(f))
+            assertTrue("$f", h.isNotBlank() && st.isNotBlank())
+            assertNotEquals(h, st)
+            val toast = app.thebox.ui.full.PlayerText.toast(ctx.resources, app.thebox.core.full.PlayerToast.CATCHUP_FAILED, f.name)
+            assertTrue("toast carries both: $toast", toast.contains(h) && toast.contains(st))
+        }
+        assertEquals("Stopped to free the connection. Press OK to play again.", ctx.getString(ErrorText.stoppedHint()))
+    }
 }

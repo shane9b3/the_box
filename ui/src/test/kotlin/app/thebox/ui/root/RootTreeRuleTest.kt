@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.LayoutInfo
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.assertIsFocused
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.semantics.SemanticsProperties
@@ -182,6 +183,91 @@ class RootTreeRuleTest {
         assertTrue(host.videoFlow.value.posterMode)
         rule.onNodeWithTag(app.thebox.ui.guide.screen.MINI_STILL_TAG, useUnmergedTree = true).fetchSemanticsNode()
         assertEquals(listOf(64, 56, 784, 461), windowRect(surfaceView()).toList())
+    }
+
+    // ---- M4 (docs/design/m4-player-ux.md §3.6.3, §5.4; N11, N15)
+
+    private fun showFull(player: app.thebox.ui.shelltest.FakePlayerHost = app.thebox.ui.shelltest.FakePlayerHost()): FakeShellHost {
+        val host = FakeShellHost(FakeGuideStateMachine(GuideUiState(mode = ScreenMode.FULL, tuned = playing())), player = player)
+        rule.setContent { BoxTheme { AppRoot(host, grid = { m -> Spacer(m.graphicsLayer()) }) } }
+        rule.waitForIdle()
+        return host
+    }
+
+    private fun subtitleView(): androidx.media3.ui.SubtitleView {
+        fun find(v: View): androidx.media3.ui.SubtitleView? {
+            if (v is androidx.media3.ui.SubtitleView) return v
+            if (v is ViewGroup) for (i in 0 until v.childCount) find(v.getChildAt(i))?.let { return it }
+            return null
+        }
+        val v = find(rule.activity.window.decorView)
+        assertNotNull("SubtitleLayer created its SubtitleView", v)
+        return v!!
+    }
+
+    /** §5.4: SubtitleLayer is a direct child of the root Box, after HoleChrome and before the key sink; never an ancestor. */
+    @Test
+    fun subtitleLayerIsADirectSiblingBetweenChromeAndSink() {
+        showFull()
+        val video = layoutOf(VIDEO_LAYER_TAG)
+        val subs = layoutOf(app.thebox.ui.full.SUBTITLE_LAYER_TAG)
+        assertSame("direct child of the root Box (N11)", video.parentInfo, subs.parentInfo)
+        assertFalse("not an ancestor of the video layer", ancestors(video).contains(subs))
+        val tags = rule.onRoot(useUnmergedTree = true).fetchSemanticsNode().children.mapNotNull { it.config.getOrNull(SemanticsProperties.TestTag) }
+        val order = listOf(VIDEO_LAYER_TAG, AMBIENT_TAG, HOLE_CHROME_TAG, app.thebox.ui.full.SUBTITLE_LAYER_TAG, KEY_SINK_TAG)
+        assertEquals(order, tags.filter { it in order })
+        // §8 Q16: record whether AndroidView adds a layer of its own (a sibling's layer is allowed by the surface rule).
+        println("RootTreeRuleTest: AndroidView(SubtitleView) node has a layer = ${hasLayer(subs)}; modifiers = " +
+            subs.getModifierInfo().map { it.modifier::class.java.simpleName + "/" + (it.extra?.let { e -> e::class.java.simpleName } ?: "-") })
+    }
+
+    /** §5.4: FULL with every overlay drawn keeps the rule: no layer on any ancestor of VideoLayer, overlays are in the sink. */
+    @Test
+    fun fullOverlaysStaySiblingsOfTheVideoLayer() {
+        val player = app.thebox.ui.shelltest.FakePlayerHost()
+        player.machine.mutableUi.value = app.thebox.ui.full.PlayerOverlayStates.all(GuideFixtures.channel(1))
+        showFull(player)
+        val video = layoutOf(VIDEO_LAYER_TAG)
+        for (a in ancestors(video)) {
+            val topLevel = a.parentInfo?.parentInfo == null
+            assertFalse(a.getModifierInfo().any { mi -> LAYER_NAMES.any { mi.modifier::class.java.name.contains(it) } })
+            if (!topLevel) assertFalse(a.getModifierInfo().any { it.extra != null })
+        }
+        val sink = layoutOf(KEY_SINK_TAG)
+        for (tag in listOf(app.thebox.ui.full.INFO_BAR_TAG, app.thebox.ui.full.QUICK_BAR_TAG, app.thebox.ui.full.STATS_OVERLAY_TAG, app.thebox.ui.full.PICKER_SHEET_TAG, app.thebox.ui.full.PLAYER_ERROR_CARD_TAG)) {
+            val node = layoutOf(tag)
+            assertTrue("$tag is inside the key sink", ancestors(node).contains(sink))
+            assertFalse("$tag is not an ancestor of the video layer", ancestors(video).contains(node))
+        }
+    }
+
+    /** N15 (`SubtitleViewFocusTest`): the SubtitleView never takes focus from the key sink and is hidden from a11y. */
+    @Test
+    fun subtitleViewNeverTakesFocus() {
+        showFull()
+        val v = subtitleView()
+        assertFalse(v.isFocusable)
+        assertFalse(v.isFocusableInTouchMode)
+        assertFalse(v.isClickable)
+        assertEquals(ViewGroup.FOCUS_BLOCK_DESCENDANTS, v.descendantFocusability)
+        assertEquals(View.IMPORTANT_FOR_ACCESSIBILITY_NO, v.importantForAccessibility)
+        rule.onNodeWithTag(KEY_SINK_TAG).assertIsFocused()
+        assertFalse("the view does not hold focus", v.hasFocus())
+    }
+
+    /** The subtitle layer sits on the video rect (window px). */
+    @Test
+    fun subtitleLayerSitsOnTheVideoRect() {
+        showFull()
+        assertEquals(listOf(0, 0, 1920, 1080), windowRect(subtitleView()).toList())
+    }
+
+    @Test
+    fun noSubtitleLayerInTheGuide() {
+        val host = FakeShellHost(FakeGuideStateMachine(GuideUiState(tuned = playing())), player = app.thebox.ui.shelltest.FakePlayerHost())
+        rule.setContent { BoxTheme { AppRoot(host, grid = { m -> Spacer(m.graphicsLayer()) }) } }
+        rule.waitForIdle()
+        rule.onNodeWithTag(app.thebox.ui.full.SUBTITLE_LAYER_TAG, useUnmergedTree = true).assertDoesNotExist()
     }
 
     private companion object {

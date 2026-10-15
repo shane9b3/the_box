@@ -43,6 +43,8 @@ object TunedStateMapper {
             phase = phase,
             isArchive = state.target?.isArchive ?: false,
             error = (state as? PlaybackState.Error)?.error?.code,
+            // (M4, docs/design/m4-player-ux.md §2.9, §3.7, M3 H-L9) the ladder's own error: detail, narrowed actions, retry.
+            errorDetail = (state as? PlaybackState.Error)?.error,
             reconnectAttempt = attempt,
             reconnectMax = max,
             still = still,
