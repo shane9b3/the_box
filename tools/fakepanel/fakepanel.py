@@ -49,12 +49,30 @@ DEFAULTS = {
     "media_override": {},       # {"<stream id>": "std|mp2|50fps|radio|hdr"}: serve another clip for that live stream
     "synthetic": 0, "synthetic_days_back": 3, "synthetic_days_ahead": 7,  # --synthetic N: N generated live channels
     "epg_version": 0,           # bump (via /admin/config) to change synthetic programme titles (" v2", ...)
+    # M4 (docs/design/m4-player-ux.md §5.6): archive behaviour for the player suite
+    "timeshift_mode": "clip3",  # clip3 = clip x 3 (M2/M3); duration = body sized to the requested duration, continuous PCR/PTS
+    "timeshift_window": True,   # 404 for a start outside the channel's archive (older than archive_days, in the future, no archive)
+    "archive_lag_sec": 0,       # 404 for a start within N s of now ("not written yet")
+    "timeshift_reject_forms": {},  # {form: status}: path, path_sec, php, shift, flussonic_range, flussonic_now, timeshift_abs, timeshift_rel
+    "timeshift_range_ignored": False,  # 200 + full Content-Length, Range ignored (bytesToSkip path)
+    "player_fixtures": False,   # synthetic mode: short-programme ch2, correction ch3 (+2) / ch4 (-1.5), multi ch7 (TS) / ch8 (HLS)
 }
 FAULT_DOC = {
     "redirect": False, "token_ttl": None, "linger": 0, "linger_status": 403, "close_every": 0,
     "reconnect_mode": "continue", "stall": 0, "stall_after": None, "slow": 0, "ua_whitelist": [], "wrong_content_type": False,
     "html_splash": False, "405_on_m3u8": False, "range_rejects": False,
+    # M4 §5.6: timeshift-only faults
+    "timeshift_range_rejects": False,  # true (458) or a status: reject timeshift requests with a Range other than bytes=0-
+    "timeshift_redirect": False,       # 302 to the LB port with a token, timeshift requests only (token_ttl applies)
+    "token_kill": False,               # the LB closes an open body when its token expires (mid-play expiry)
+    "timeshift_reject_forms": {},      # per stream: as the config key, overrides it
 }
+# Timeshift URL forms the panel can tell apart (the request log's `form`, the keys of timeshift_reject_forms).
+TS_FORMS = ("path", "path_sec", "php", "shift", "flussonic_range", "flussonic_now", "timeshift_abs", "timeshift_rel")
+TS_FORM_ALIASES = {"xc-path": "path", "xc-path-sec": "path_sec", "xc-php": "php", "flussonic-range": "flussonic_range",
+                   "flussonic-abs": "timeshift_abs", "flussonic-kodi": "timeshift_rel"}
+TS_LOG_MAX = 50
+EVENT_MAX_SEGMENTS = 5400  # an EVENT playlist lists at most 3 h of 2 s segments
 SPLASH = b"<html><head><title>Subscription</title></head><body><h1>Your subscription has expired</h1></body></html>"
 
 
@@ -149,6 +167,84 @@ class TsPlan:
         if not self.dur90k and len(pcrs) >= 2:
             span = pcrs[-1] - pcrs[0]
             self.dur90k = span + span // (len(pcrs) - 1)
+        allpts = [v for vals in pts_by_pid.values() for v in vals]
+        self.first_pts = min(allpts) if allpts else 0  # HLS WebVTT X-TIMESTAMP-MAP anchor (multi clip)
+        self._cc = None
+
+    def cc_table(self, data):
+        """Deterministic CCs for random access into the looped clip (timeshift `duration` mode, M4 §5.6 item 1).
+
+        Returns (first, before, per_loop): `first[pid]` = the counter the live rewriter gives that PID's first packet,
+        `before[i]` = payload packets of packet i's PID earlier in the clip, `per_loop[pid]` = payload packets per loop.
+        A payload packet in loop L then carries (first + L*per_loop + before) & 15, an AF-only packet one less: exactly
+        the sequence TsState.emit produces when it streams the loops back to back from loop 0."""
+        if self._cc is None:
+            first, before, count = {}, [0] * len(self.pkts), {}
+            for i, ent in enumerate(self.pkts):
+                if ent is None:
+                    continue
+                pid, payload = ent[0], ent[1]
+                if pid not in first:
+                    c = data[i * PKT + 3] & 15
+                    first[pid] = c if payload else (c + 1) & 15
+                before[i] = count.get(pid, 0)
+                if payload:
+                    count[pid] = before[i] + 1
+            self._cc = (first, before, count)
+        return self._cc
+
+    def emit_loop(self, data, loop, a, e):
+        """data[a:e] (packet aligned) as it appears in loop [loop] of an endless looped stream: timestamps + loop*dur90k
+        (mod 2^33) and continuity counters continuing across loops. Random access: no state carried between calls."""
+        if not self.active:
+            return data[a:e]
+        first, before, per_loop = self.cc_table(data)
+        off = (loop * self.dur90k) % MOD33
+        buf = bytearray(data[a:e])
+        pk = self.pkts
+        for k, i in enumerate(range(a // PKT, e // PKT)):
+            ent = pk[i]
+            if ent is None:
+                continue
+            pid, payload, pcr, pts, dts = ent
+            b = k * PKT
+            cc = first[pid] + loop * per_loop.get(pid, 0) + before[i] - (0 if payload else 1)
+            buf[b + 3] = (buf[b + 3] & 0xF0) | (cc & 15)
+            if off:
+                if pcr >= 0:
+                    _put_pcr_base(buf, b + pcr, (_get_pcr_base(buf, b + pcr) + off) % MOD33)
+                if pts >= 0:
+                    _put_ts(buf, b + pts, (_get_ts(buf, b + pts) + off) % MOD33)
+                    if dts >= 0:
+                        _put_ts(buf, b + dts, (_get_ts(buf, b + dts) + off) % MOD33)
+        return buf
+
+
+class LoopedTs:
+    """A virtual finite TS body of [size] bytes: the clip looped with continuous PCR/PTS/CC (timeshift `duration` mode).
+
+    Never materialised: slice(a, e) renders only the requested bytes, so a 3-hour archive file costs nothing until read
+    and a ranged reopen (Range: bytes=N-) starts mid-file with the right timestamps."""
+
+    def __init__(self, clip, size):
+        self.clip, self.size = clip, size
+
+    def __len__(self):
+        return self.size
+
+    def slice(self, a, e):
+        data, n, plan = self.clip.data, len(self.clip.data), self.clip.plan
+        out = bytearray()
+        pos = a
+        while pos < e:
+            loop, off = divmod(pos, n)
+            end_in = min(n, off + (e - pos))
+            pa = off // PKT * PKT
+            pe = min(n, -(-end_in // PKT) * PKT)
+            chunk = plan.emit_loop(data, loop, pa, pe)
+            out += chunk[off - pa:end_in - pa]
+            pos += end_in - off
+        return bytes(out)
 
 
 class TsState:
@@ -194,6 +290,39 @@ class Clip:
         self.data, self.duration, self.segments = data, duration, segments
         self.rate = len(data) / duration  # bytes/sec
         self.plan = TsPlan(data)
+        self._seg_plans = {}
+
+    def seg_plan(self, i):
+        """TsPlan of HLS segment i (continuous-timestamp segments, /tseg/ and the multi live HLS)."""
+        p = self._seg_plans.get(i)
+        if p is None:
+            p = self._seg_plans[i] = TsPlan(self.segments[i][0])
+        return p
+
+    def loop_segment(self, n):
+        """Absolute segment n of the endlessly looped clip: segment n % count with timestamps + (n // count) loops."""
+        nseg = len(self.segments)
+        loop, i = divmod(n, nseg)
+        data = self.segments[i][0]
+        plan = self.seg_plan(i)
+        if not plan.active or not self.plan.dur90k:
+            return data
+        off = (loop * self.plan.dur90k) % MOD33
+        if not off:
+            return data
+        buf = bytearray(data)
+        for k, ent in enumerate(plan.pkts):
+            if ent is None:
+                continue
+            _, _, pcr, pts, dts = ent
+            b = k * PKT
+            if pcr >= 0:
+                _put_pcr_base(buf, b + pcr, (_get_pcr_base(buf, b + pcr) + off) % MOD33)
+            if pts >= 0:
+                _put_ts(buf, b + pts, (_get_ts(buf, b + pts) + off) % MOD33)
+                if dts >= 0:
+                    _put_ts(buf, b + dts, (_get_ts(buf, b + dts) + off) % MOD33)
+        return bytes(buf)
 
 
 _PNG_CACHE = {}
@@ -228,6 +357,144 @@ def _run(cmd):
     return subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=180)
 
 
+# ---- CEA-608 captions for the `multi` clip (M4 §5.6 item 10). ffmpeg 4.x/6.x has no CEA-608 encoder, so the captions
+# are written here as ATSC A/53 cc_data in H.264 SEI (user_data_registered_itu_t_t35, payload type 4), one SEI per
+# access unit, before the first slice NAL. Field 1, channel 1 (CC1), roll-up 2 rows.
+
+CC_PAD = (0x80, 0x80)
+CC_EVERY = 50  # frames between caption lines (2 s at 25 fps): 5 lines per 10 s loop
+
+
+def _odd(b):
+    b &= 0x7F
+    return b | (0x80 if bin(b).count("1") % 2 == 0 else 0)
+
+
+def cea608_pairs(nframes):
+    """One (b1, b2) byte pair per frame (odd parity), CC1 roll-up: RU2, CR, then 'CC1 line N' every CC_EVERY frames.
+    Control codes are sent twice in consecutive frames (608 redundancy; decoders drop the repeat)."""
+    pairs = [CC_PAD] * nframes
+    for line, f0 in enumerate(range(0, nframes, CC_EVERY)):
+        seq = [(0x14, 0x25), (0x14, 0x25), (0x14, 0x2D), (0x14, 0x2D)]  # RU2 x2, CR x2
+        text = f"CC1 line {line + 1}"
+        if len(text) % 2:
+            text += " "
+        seq += [(ord(text[i]), ord(text[i + 1])) for i in range(0, len(text), 2)]
+        for k, (a, b) in enumerate(seq):
+            if f0 + k < nframes:
+                pairs[f0 + k] = (_odd(a), _odd(b))
+    return pairs
+
+
+def _epb(rbsp):
+    """Insert H.264 emulation-prevention bytes (00 00 0x -> 00 00 03 0x for x <= 3)."""
+    out, zeros = bytearray(), 0
+    for b in rbsp:
+        if zeros >= 2 and b <= 3:
+            out.append(3)
+            zeros = 0
+        out.append(b)
+        zeros = zeros + 1 if b == 0 else 0
+    return bytes(out)
+
+
+def cc_sei_nal(b1, b2):
+    cc = bytes([0x40 | 1, 0xFF, 0xFC, b1, b2, 0xFF])  # process_cc_data_flag | cc_count=1, em_data, field-1 triplet, marker
+    payload = bytes([0xB5, 0x00, 0x31]) + b"GA94" + bytes([0x03]) + cc
+    return b"\x00\x00\x00\x01\x06" + _epb(bytes([4, len(payload)]) + payload + b"\x80")
+
+
+def split_annexb(data):
+    """NAL unit payloads (header byte first) of an Annex B H.264 stream."""
+    starts, i = [], 0
+    while True:
+        j = data.find(b"\x00\x00\x01", i)
+        if j < 0:
+            break
+        starts.append(j + 3)
+        i = j + 3
+    nals = []
+    for k, s in enumerate(starts):
+        e = starts[k + 1] - 3 if k + 1 < len(starts) else len(data)
+        nals.append(data[s:e].rstrip(b"\x00") if k + 1 < len(starts) else data[s:e])
+    return nals
+
+
+def inject_cea608(h264):
+    """Add one cc_data SEI per access unit (AUD-delimited) before its first slice; returns (stream, frames)."""
+    nals = split_annexb(h264)
+    nframes = sum(1 for n in nals if n and n[0] & 0x1F == 9)
+    pairs = cea608_pairs(nframes)
+    out, frame, pending = bytearray(), -1, False
+    for n in nals:
+        if not n:
+            continue
+        t = n[0] & 0x1F
+        if t == 9:
+            frame += 1
+            pending = True
+        if t in (1, 5) and pending and 0 <= frame < len(pairs):
+            out += cc_sei_nal(*pairs[frame])
+            pending = False
+        out += b"\x00\x00\x00\x01" + n
+    return bytes(out), nframes
+
+
+def build_multi(ff, media_dir, path, log):
+    """`multi` clip: H.264 25 fps (no B-frames, AUDs, CEA-608 CC1 in SEI) + AAC eng 440 Hz + MP2 deu 880 Hz, 10 s."""
+    raw = os.path.join(media_dir, "multi_video.h264")
+    cc = os.path.join(media_dir, "multi_video_cc.h264")
+    r = _run([ff, "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=size=1280x720:rate=25", "-t", "10",
+              "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-g", "50", "-keyint_min", "50",
+              "-sc_threshold", "0", "-bf", "0", "-b:v", "2M", "-maxrate", "2M", "-bufsize", "2M",
+              "-x264-params", "aud=1", "-f", "h264", raw])
+    if r.returncode:
+        return r
+    data, frames = inject_cea608(_read(raw))
+    with open(cc, "wb") as fh:
+        fh.write(data)
+    log(f"media: multi: CEA-608 SEI injected into {frames} frames")
+    r = _run([ff, "-y", "-v", "error", "-fflags", "+genpts", "-framerate", "25", "-f", "h264", "-i", cc,
+              "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000",
+              "-f", "lavfi", "-i", "sine=frequency=880:sample_rate=48000", "-t", "10",
+              "-map", "0:v", "-map", "1:a", "-map", "2:a", "-c:v", "copy",
+              "-c:a:0", "aac", "-b:a:0", "128k", "-c:a:1", "mp2", "-b:a:1", "128k",
+              "-metadata:s:a:0", "language=eng", "-metadata:s:a:1", "language=deu", "-f", "mpegts", path])
+    for f in (raw, cc):
+        try:
+            os.remove(f)
+        except OSError:
+            pass
+    return r
+
+
+def load_srt(path):
+    """[(start_s, end_s, text)] from a SubRip file (the multi clip's WebVTT rendition)."""
+    cues = []
+    try:
+        with open(path, encoding="utf-8") as fh:
+            blocks = fh.read().replace("\r\n", "\n").strip().split("\n\n")
+    except OSError:
+        return cues
+
+    def secs(t):
+        h, m, rest = t.strip().split(":")
+        s, ms = rest.split(",")
+        return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000
+
+    for b in blocks:
+        lines = b.strip().split("\n")
+        if len(lines) >= 3 and "-->" in lines[1]:
+            a, z = lines[1].split("-->")
+            cues.append((secs(a), secs(z), "\n".join(lines[2:])))
+    return cues
+
+
+def vtt_time(t):
+    ms = int(round(t * 1000))
+    return f"{ms // 3600000:02d}:{ms // 60000 % 60:02d}:{ms // 1000 % 60:02d}.{ms % 1000:03d}"
+
+
 def build_media(media_dir, use_ffmpeg, log):
     """Return ({variant: Clip}, vod_bytes, vod_ctype)."""
     fb = os.path.join(HERE, "fallback_null.ts")
@@ -237,18 +504,27 @@ def build_media(media_dir, use_ffmpeg, log):
     ff = shutil.which("ffmpeg") if use_ffmpeg else None
     if not ff:
         log("media: ffmpeg not used; serving null-packet fallback TS (no decodable video)")
-        return {k: fb_clip for k in ("std", "mp2", "50fps", "radio", "hdr")}, fb_data * 3, "video/mp2t"
+        return {k: fb_clip for k in ("std", "mp2", "50fps", "radio", "hdr", "multi")}, fb_data * 3, "video/mp2t"
     os.makedirs(os.path.join(media_dir, "hls"), exist_ok=True)
     spec = {"std": ("h264_aac_25", 25, "aac"), "mp2": ("h264_mp2_25", 25, "mp2"), "50fps": ("h264_aac_50", 50, "aac"),
             "radio": ("aac_only_25", 0, "aac"),  # fps 0 = audio only (no video PID)
             # Q-1 HDR poster: 8-bit H.264 whose SPS VUI signals BT.2020 + PQ, so the player sees HDR10 (§3.9.5).
-            "hdr": ("h264_aac_25_hdr10", 25, "aac")}
+            "hdr": ("h264_aac_25_hdr10", 25, "aac"),
+            # M4 §5.6 item 10: two audio languages + CEA-608 captions (pickers, subtitles)
+            "multi": ("h264_multi_25", 25, "multi")}
     clips = {}
     for key, (name, fps, ac) in spec.items():
         path = os.path.join(media_dir, name + ".ts")
         if not os.path.exists(path):
             log(f"media: generating {path}")
-            if fps:
+            if ac == "multi":
+                r = build_multi(ff, media_dir, path, log)
+                if r.returncode or not os.path.exists(path):
+                    log("media: multi: ffmpeg failed: " + r.stderr.decode(errors="replace")[-300:])
+                    clips[key] = fb_clip
+                    continue
+                cmd = None
+            elif fps:
                 cmd = [ff, "-y", "-v", "error", "-f", "lavfi", "-i", f"testsrc2=size=1280x720:rate={fps}",
                        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "10",
                        "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-g", str(fps * 2),
@@ -259,14 +535,14 @@ def build_media(media_dir, use_ffmpeg, log):
             else:  # audio only: no video stream, no video PID in the PMT
                 cmd = [ff, "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "10",
                        "-vn", "-c:a", "aac", "-b:a", "128k", "-f", "mpegts", path]
-            r = _run(cmd)
-            if r.returncode:
+            r = _run(cmd) if cmd else None
+            if r is not None and r.returncode:
                 log("media: ffmpeg failed: " + r.stderr.decode(errors="replace")[-300:])
                 clips[key] = fb_clip
                 continue
         segs_glob = os.path.join(media_dir, "hls", name + "_%03d.ts")
         if not os.path.exists(segs_glob % 0):
-            _run([ff, "-y", "-v", "error", "-i", path, "-c", "copy", "-f", "segment", "-segment_time", "2",
+            _run([ff, "-y", "-v", "error", "-i", path, "-map", "0", "-c", "copy", "-f", "segment", "-segment_time", "2",
                   "-segment_format", "mpegts", segs_glob])
         segs, i = [], 0
         while os.path.exists(segs_glob % i):
@@ -350,6 +626,18 @@ class Registry:
 
 # ------------------------------------------------------------------ panel state
 
+def check_reject_forms(v):
+    if not isinstance(v, dict):
+        raise ValueError("timeshift_reject_forms must be an object {form: status}")
+    for k, st in v.items():
+        if TS_FORM_ALIASES.get(k, k) not in TS_FORMS:
+            raise ValueError(f"unknown timeshift form {k!r} (one of {', '.join(TS_FORMS)})")
+        if st is None:
+            continue  # deletes the key (faults are deep-merged)
+        if not (isinstance(st, int) and not isinstance(st, bool) and 100 <= st <= 599) and st not in ("200-html", "200-empty"):
+            raise ValueError(f"timeshift_reject_forms[{k!r}]: status must be an HTTP code, '200-html' or '200-empty'")
+
+
 def deep_merge_faults(dst, src):
     for k, v in src.items():
         if v is None:
@@ -372,6 +660,8 @@ class Panel:
         self.live_pos = {}
         self.main_port = self.lb_port = 0
         self.start_time = time.time()  # anchors the synthetic EPG schedule for this server run
+        self.event_anchor = {}  # timeshift_rel EVENT playlists: (sid, path) -> fixed start (unix s)
+        self.subs = load_srt(os.path.join(HERE, "multi_subs.srt"))
         self.reset_stats()
         self.clips, self.vod_data, self.vod_ctype = build_media(
             media_dir or os.path.join(HERE, "media"), use_ffmpeg, self.log)
@@ -379,7 +669,8 @@ class Panel:
     def reset_stats(self):
         self.stats = {"requests": 0, "stream_opens": 0, "rejections": {}, "range_requests_seen": 0,
                       "range_requests": [], "auth_failures": 0, "redirects": 0, "token_expired": 0,
-                      "forced_closes": 0, "client_eof": 0, "stalls": 0, "timeshift_tz_warnings": 0, "request_log": [], "stream_requests": 0}
+                      "forced_closes": 0, "client_eof": 0, "stalls": 0, "timeshift_tz_warnings": 0, "request_log": [], "stream_requests": 0,
+                      "timeshift_requests": [], "timeshift_request_count": 0}
         self.registry.max_open_seen = 0
 
     def syn(self):
@@ -421,6 +712,19 @@ class Panel:
         f.update(self.cfg.get("stream_faults", {}).get(str(sid), {}))
         return f
 
+    def correction_h(self, sid):
+        """The channel's catchup-correction in hours (player fixtures: ch3 +2, ch4 -1.5), 0 otherwise."""
+        ch = self.channel(sid) if sid is not None else None
+        return float((ch or {}).get("correction") or 0)
+
+    def reject_status(self, sid, form):
+        """timeshift_reject_forms for this channel and form (stream fault first, then the config key), or None."""
+        for table in (self.faults(sid).get("timeshift_reject_forms") or {}, self.cfg.get("timeshift_reject_forms") or {}):
+            for k, v in table.items():
+                if TS_FORM_ALIASES.get(k, k) == form:
+                    return v
+        return None
+
     def update_config(self, patch):
         unknown = [k for k in patch if k not in DEFAULTS]
         if unknown:
@@ -428,6 +732,16 @@ class Panel:
         for k, hi in (("synthetic", 20000), ("synthetic_days_back", 400), ("synthetic_days_ahead", 400), ("epg_version", 10**6)):
             if k in patch and (isinstance(patch[k], bool) or not isinstance(patch[k], int) or not 0 <= patch[k] <= hi):
                 raise ValueError(f"{k} must be an integer 0..{hi}")
+        if "timeshift_mode" in patch and patch["timeshift_mode"] not in ("clip3", "duration"):
+            raise ValueError("timeshift_mode must be clip3 or duration")
+        lag = patch.get("archive_lag_sec", 0)
+        if isinstance(lag, bool) or not isinstance(lag, int) or lag < 0:
+            raise ValueError("archive_lag_sec must be an integer >= 0")
+        if "timeshift_reject_forms" in patch:
+            check_reject_forms(patch["timeshift_reject_forms"])
+        for table in [patch.get("faults") or {}] + list((patch.get("stream_faults") or {}).values()):
+            if isinstance(table, dict) and table.get("timeshift_reject_forms") is not None:
+                check_reject_forms(table["timeshift_reject_forms"])
         with self.lock:
             for k, v in patch.items():
                 if k in ("faults", "stream_faults"):
@@ -510,7 +824,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     def route(self):
         self._status, self._bytes, self._notes, self._user = 0, 0, [], None
-        self._end, self._log_entry = None, None
+        self._end, self._log_entry, self._ts_entry, self._token_exp = None, None, None, None
         self.panel.bump("requests")
         u = urllib.parse.urlsplit(self.path)
         self.path_only = urllib.parse.unquote(u.path)
@@ -531,6 +845,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if self._log_entry is not None:
                 with self.panel.lock:
                     self._log_entry["end_reason"] = self._end or "server_close"
+                    if self._ts_entry is not None:
+                        self._ts_entry["status"] = self._status
+                        self._ts_entry["bytes"] = self._bytes
             self.access_log()
 
     def access_log(self):
@@ -549,7 +866,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def send(self, status, body=b"", ctype="application/json", headers=None, reason=None):
         if isinstance(body, str):
             body = body.encode()
-        self._status = status
+        self.set_status(status)
         self.send_response(status, reason)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
@@ -563,8 +880,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def json(self, obj, status=200):
         self.send(status, json.dumps(obj), "application/json")
 
-    def begin_stream(self, status, ctype, headers=None):
+    def set_status(self, status):
         self._status = status
+        if self._ts_entry is not None:
+            with self.panel.lock:
+                self._ts_entry["status"] = status
+
+    def begin_stream(self, status, ctype, headers=None):
+        self.set_status(status)
         self.send_response(status)
         self.send_header("Content-Type", ctype)
         self.send_header("Cache-Control", "no-cache")
@@ -631,7 +954,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         p, path = self.panel, self.path_only
         if path.startswith("/admin"):
             return self.admin(path)
-        if self.server.is_lb and not re.match(r"^/(live|movie|series|timeshift)/", path):
+        # The redirect port also serves the archive playlists' absolute segment paths (/vodseg/, /tseg/).
+        if self.server.is_lb and not re.match(r"^/(live|movie|series|timeshift|vodseg|tseg)/|^/streaming/timeshift\.php$", path):
             return self.send(404, b"lb: stream paths only", "text/plain")
         if path == "/player_api.php":
             return self.player_api()
@@ -642,11 +966,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/streaming/timeshift.php":
             q = self.q
             return self.stream_request("timeshift", q.get("username"), q.get("password"),
-                                       q.get("stream", ""), "ts", start=q.get("start", ""), dur=q.get("duration", "60"))
+                                       q.get("stream", ""), "ts", start=q.get("start", ""), dur=q.get("duration", "60"),
+                                       form="php", dur_unit=60)
         m = re.match(r"^/vodseg/(\d+)_(\d+)\.ts$", path)
         if m and p.channel(int(m[1])):
             segs = p.clips[p.media(int(m[1]))].segments
             return self.send(200, segs[int(m[2]) % len(segs)][0], "video/mp2t")
+        # M4: segment n of the endlessly looped clip with continuous timestamps (duration-mode VOD and EVENT archives)
+        m = re.match(r"^/tseg/(\d+)_(\d+)\.ts$", path)
+        if m and p.channel(int(m[1])):
+            return self.send(200, p.clips[p.media(int(m[1]))].loop_segment(int(m[2])), "video/mp2t")
+        # M4 (API notes §7 gap 7): Flussonic live-like archive forms, start = FROM (abs) or now - N (rel).
+        m = re.match(r"^/live/([^/]+)/([^/]+)/(\d+)/(?:(?:index|video|mono)-)?timeshift_(abs|rel)-(\d+)\.(m3u8|ts)$", path)
+        if m:
+            self._notes.append("FLUSSONIC-" + m[4].upper())
+            if m[4] == "abs":
+                start = int(m[5])
+            else:
+                with p.lock:
+                    start = p.event_anchor.setdefault((m[3], path), int(time.time()) - int(m[5]))
+            return self.stream_request("timeshift", m[1], m[2], m[3], m[6], start="@" + str(start), dur=None,
+                                       form="timeshift_" + m[4])
         if path.startswith("/logo/"):
             # Synthetic mode (M3 code review 2026-10-14, O-3): a tiny valid PNG per channel, one colour per id, so the
             # guide's logo display, LogoCache hits and the ambient hue path run as with a real panel. Otherwise the
@@ -661,17 +1001,20 @@ class Handler(http.server.BaseHTTPRequestHandler):
         m = re.match(r"^/live/([^/]+)/([^/]+)/(\d+)/(?:archive|index|video|mono)-(\d+)-(\d+|now)\.(m3u8|ts)$", path)
         if m:
             self._notes.append("FLUSSONIC-ARCHIVE")
-            return self.stream_request("timeshift", m[1], m[2], m[3], m[6], start="@" + m[4], dur=m[5])
+            return self.stream_request("timeshift", m[1], m[2], m[3], m[6], start="@" + m[4], dur=m[5],
+                                       form="flussonic_now" if m[5] == "now" else "flussonic_range", dur_unit=1)
         m = re.match(r"^/(live|movie|series)/([^/]+)/([^/]+)/([^/]+?)(?:\.([A-Za-z0-9]+))?$", path)
         if m:
             utc = self.q.get("utc", "")
             if m[1] == "live" and utc.isdigit():  # catchup="shift": liveUrl?utc={utc}&lutc={lutc}
                 self._notes.append("SHIFT-ARCHIVE")
-                return self.stream_request("timeshift", m[2], m[3], m[4], m[5] or "ts", start="@" + utc, dur=None)
+                return self.stream_request("timeshift", m[2], m[3], m[4], m[5] or "ts", start="@" + utc, dur=None, form="shift")
             return self.stream_request(m[1], m[2], m[3], m[4], m[5] or "ts")
         m = re.match(r"^/timeshift/([^/]+)/([^/]+)/(\d+)/([^/]+)/(\d+)(?:\.([A-Za-z0-9]+))?$", path)
         if m:
-            return self.stream_request("timeshift", m[1], m[2], m[5], m[6] or "ts", start=m[4], dur=m[3])
+            sm = TS_START_RE.match(m[4])
+            return self.stream_request("timeshift", m[1], m[2], m[5], m[6] or "ts", start=m[4], dur=m[3],
+                                       form="path_sec" if sm and sm[6] else "path", dur_unit=60)
         m = re.match(r"^/([^/]+)/([^/]+)/(\d+)(?:\.([A-Za-z0-9]+))?$", path)  # short live form
         if m:
             return self.stream_request("live", m[1], m[2], m[3], m[4] or "ts")
@@ -704,6 +1047,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if syn:
                 s["synthetic"] = syn.info()
             return self.json(s)
+        if path == "/admin/now":
+            now = time.time()
+            return self.json({"unix": now, "panel_wall": dt.datetime.fromtimestamp(now, p.tz()).strftime("%Y-%m-%d %H:%M:%S"),
+                              "timezone": p.cfg["timezone"]})
+        if path == "/admin/timeshift_expect" and self.command in ("POST", "PUT"):
+            return self.admin_expect(data)
         if path == "/admin/reset" and self.command != "GET":
             p.reset()
             p.log("ADMIN reset")
@@ -714,6 +1063,28 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/admin/faults":
             return self.json({"documented_fault_keys": FAULT_DOC, "global": p.cfg["faults"], "per_stream": p.cfg["stream_faults"]})
         self.json({"error": "unknown admin endpoint"}, 404)
+
+    def admin_expect(self, data):
+        """POST /admin/timeshift_expect {start_unix, channel?, padding_before?, apply_correction?, strict?}: the archive
+        (panel-clock) start a correct client requests = start_unix - correction(channel) - padding_before; set as
+        `timeshift_expect` (I-M4-13b, §5.6 item 9). For a live-anchored instant (pause, RW) pass apply_correction=false:
+        it has no EPG component, so the panel's own clock is the expectation for every sign of the correction."""
+        p = self.panel
+        try:
+            start = float(data["start_unix"])
+            sid = int(data["channel"]) if data.get("channel") is not None else None
+            pad = float(data.get("padding_before") or 0)
+        except (KeyError, TypeError, ValueError):
+            return self.json({"error": "start_unix (number) required; channel and padding_before optional numbers"}, 400)
+        corr = p.correction_h(sid) if data.get("apply_correction", True) else 0.0
+        exp = start - corr * 3600 - pad
+        patch = {"timeshift_expect": [exp]}
+        if "strict" in data:
+            patch["strict_timeshift_tz"] = bool(data["strict"])
+        p.update_config(patch)
+        local = dt.datetime.fromtimestamp(exp, p.tz())
+        return self.json({"expect_unix": exp, "correction_h": corr, "panel_wall": local.strftime("%Y-%m-%d %H:%M:%S"),
+                          "xc_start": local.strftime("%Y-%m-%d:%H-%M")})
 
     # ---- Xtream API
     def auth_fail(self, mode):
@@ -825,17 +1196,42 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.out(co.flush())
 
     # ---- streams
+    def start_instant(self, start):
+        """(naive panel-wall datetime or None, unix instant) of a timeshift start token, or (None, None)."""
+        if start.startswith("@") and start[1:].isdigit():  # Flussonic / shift: unix UTC, zone-free
+            return None, float(start[1:])
+        naive = parse_start(start)
+        if naive is None:
+            return None, None
+        return naive, naive.replace(tzinfo=self.panel.tz()).timestamp()
+
+    def archive_gate(self, sid, inst):
+        """M4 §5.6 items 2-3: (reason, message) when the panel has no such archive, else None. `timeshift_window`
+        (default on): no archive on the channel, a start older than its archive days (+120 s slack for the client's
+        edge margin and clock skew), or later than now + 60 s. `archive_lag_sec`: the last N s are not written yet.
+        Evaluated against the wall clock of each request, so a long-running panel does not drift (gap 8)."""
+        c, now = self.panel.cfg, time.time()
+        ch = self.panel.channel(sid) or {}
+        if c.get("timeshift_window", True):
+            days = ch.get("archive_days") or (cat.ARCHIVE_DAYS if ch.get("archive") else 0)
+            if not ch.get("archive"):
+                return "timeshift_window", "the channel has no archive"
+            if inst < now - days * 86400 - 120:
+                return "timeshift_window", f"start is older than the {days}-day archive"
+            if inst > now + 60:
+                return "timeshift_window", "start is in the future"
+        lag = int(c.get("archive_lag_sec") or 0)
+        if lag and inst > now - lag:
+            return "archive_lag", f"the last {lag} s of the archive are not written yet"
+        return None
+
     def timeshift_check(self, start, dur, days=None):
         """Returns (ok, message). Logs WARNING on suspected wrong-timezone start."""
         p, c = self.panel, self.panel.cfg
         tz = p.tz()
-        if start.startswith("@") and start[1:].isdigit():  # Flussonic / shift: unix UTC, zone-free
-            naive, inst = None, float(start[1:])
-        else:
-            naive = parse_start(start)
-            if naive is None:
-                return False, "unparseable start"
-            inst = naive.replace(tzinfo=tz).timestamp()
+        naive, inst = self.start_instant(start)
+        if inst is None:
+            return False, "unparseable start"
         now = time.time()
         problem = None
         exp = []
@@ -867,7 +1263,21 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return False, problem
         return True, ""
 
-    def stream_request(self, kind, user, pw, ident, ext, start=None, dur=None):
+    def log_timeshift(self, form, ident, start, dur, dur_unit, ext):
+        """`/admin/stats.timeshift_requests` (last TS_LOG_MAX, oldest first): the request sequence the M4 suite asserts."""
+        p = self.panel
+        _, inst = self.start_instant(start or "")
+        dur_s = int(dur) * dur_unit if dur is not None and str(dur).isdigit() else None
+        e = {"form": form, "channel": int(ident) if str(ident).isdigit() else ident, "start": start, "start_unix": inst,
+             "duration_s": dur_s, "range": self.headers.get("Range"), "status": None, "bytes": 0, "at": time.time(),
+             "ext": ext, "lb": bool(self.server.is_lb)}
+        with p.lock:
+            p.stats["timeshift_requests"] = (p.stats["timeshift_requests"] + [e])[-TS_LOG_MAX:]
+            p.stats["timeshift_request_count"] += 1
+        self._ts_entry = e
+        return dur_s
+
+    def stream_request(self, kind, user, pw, ident, ext, start=None, dur=None, form=None, dur_unit=60):
         p, c = self.panel, self.panel.cfg
         self._user = user
         entry = {"path": self.path_only, "ua": self.headers.get("User-Agent", ""), "token_present": bool(self.q.get("token")),
@@ -877,37 +1287,47 @@ class Handler(http.server.BaseHTTPRequestHandler):
             p.stats["stream_requests"] = p.stats.get("stream_requests", 0) + 1  # monotonic; request_log is capped
         self._log_entry = entry
         ext = (ext or "ts").lower()
+        dur_s = self.log_timeshift(form, ident, start, dur, dur_unit, ext) if kind == "timeshift" else None
         if c["auth_mode"] in ("401", "403", "513"):
             return self.reject(int(c["auth_mode"]), "auth_mode")
         if not self.creds_ok(user, pw):
             return self.reject(403, "bad_credentials")
         if c["status"] != "Active":
             return self.reject(403, "account_" + c["status"].lower())
-        # HLS segment: /live/u/p/{id}_seg{n}.ts
+        # HLS segment: /live/u/p/{id}_seg{n}.ts; multi live HLS (§5.6 item 10): {id}_media.m3u8, {id}_subs.m3u8,
+        # {id}_tseg{n}.ts (continuous-timestamp segment), {id}_vtt{n}.vtt (WebVTT segment)
         seg = re.match(r"^(\d+)_seg(\d+)$", ident) if kind == "live" else None
-        sid_s = seg[1] if seg else ident
+        sub = re.match(r"^(\d+)_(media|subs|tseg|vtt)(\d*)$", ident) if kind == "live" else None
+        sid_s = seg[1] if seg else (sub[1] if sub else ident)
         if not sid_s.isdigit() or not self.known(kind, int(sid_s)):
             return self.reject(404, "unknown_stream")
         sid = int(sid_s)
         f = p.faults(sid)
         path = self.path_only
+        seg_like = bool(seg) or bool(sub and sub[2] in ("tseg", "vtt"))
 
         if self.server.is_lb:  # second port: token required
-            # HLS segments carry the playlist's token (see hls_playlist), so check it against that path.
-            tok_path = re.sub(r"/\d+_seg\d+\.ts$", f"/{sid}.m3u8", path) if seg else path
-            res = p.check_token(self.q.get("token", ""), tok_path, count=not seg)
+            # HLS segments and the multi sub-playlists carry the playlist's token (see hls_playlist), so check it
+            # against that path.
+            tok_path = re.sub(r"/\d+_(?:seg\d+\.ts|media\.m3u8|subs\.m3u8|tseg\d+\.ts|vtt\d+\.vtt)$", f"/{sid}.m3u8", path) \
+                if (seg or sub) else path
+            tok = self.q.get("token", "")
+            res = p.check_token(tok, tok_path, count=not (seg or sub))
             if res != "ok":
                 p.bump("token_expired") if res == "expired" else None
                 return self.reject(403, "token_" + res)
-        elif f.get("redirect") and not seg:
+            with p.lock:
+                self._token_exp = (p.tokens.get(tok) or [None])[0]
+        elif (f.get("redirect") or (kind == "timeshift" and f.get("timeshift_redirect"))) and not seg_like:
             ttl = f.get("token_ttl") or c["token_ttl"]
             tok = p.make_token(path, ttl)
             h = (self.headers.get("Host") or "127.0.0.1").split(":")[0]
+            query = urllib.parse.urlsplit(self.path).query  # timeshift.php and ?utc= keep their parameters
             p.bump("redirects")
             self._notes.append("REDIRECT")
-            self._status = 302
+            self.set_status(302)
             self.send_response(302)
-            self.send_header("Location", f"http://{h}:{p.lb_port}{path}?token={tok}")
+            self.send_header("Location", f"http://{h}:{p.lb_port}{path}?{query + '&' if query else ''}token={tok}")
             self.send_header("Content-Length", "0")
             self.end_headers()
             return
@@ -917,11 +1337,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if wl and not any(w.lower() in ua.lower() for w in wl):
             return self.reject(403, "ua_whitelist")
         allowed = [x.lower() for x in c["allowed_output_formats"]]
-        if kind == "live" and not seg and ((ext == "m3u8" and (f.get("405_on_m3u8") or "m3u8" not in allowed))
+        if kind == "live" and not seg_like and ((ext == "m3u8" and (f.get("405_on_m3u8") or "m3u8" not in allowed))
                                or (ext == "ts" and "ts" not in allowed)):
             return self.reject(405, "output_format_not_allowed")
         rng = self.headers.get("Range")
-        if rng and kind == "live" and ext == "ts" and not seg:
+        if rng and kind == "live" and ext == "ts" and not seg_like:
             p.bump("range_requests_seen")
             with p.lock:
                 p.stats["range_requests"] = (p.stats["range_requests"] + [{"path": path, "range": rng, "ua": ua, "token_present": "token" in self.q}])[-20:]
@@ -934,15 +1354,39 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._notes.append("HTML-SPLASH")
             return self.send(200, SPLASH, "text/html")
         if kind == "timeshift":
+            st = p.reject_status(sid, form)  # §5.6 item 4: this panel does not serve this URL form
+            if st is not None:
+                p.bump("rejections", "timeshift_reject_form")
+                self._notes.append(f"REJECT-FORM:{form}={st}")
+                if st == "200-html":
+                    return self.send(200, SPLASH, "text/html")
+                if st == "200-empty":
+                    return self.send(200, b"", "video/mp2t")
+                return self.reject(int(st), "timeshift_reject_form")
+            _, inst = self.start_instant(start or "")
+            if inst is None:
+                return self.reject(404, "timeshift_bad_start")
+            gate = self.archive_gate(sid, inst)
+            if gate:
+                self._notes.append("ARCHIVE-404:" + gate[1])
+                return self.reject(404, gate[0])
             ok, msg = self.timeshift_check(start or "", dur, (p.channel(sid) or {}).get("archive_days"))
             if not ok:
                 return self.reject(404, "timeshift_tz" if msg != "unparseable start" else "timeshift_bad_start")
+            trr = f.get("timeshift_range_rejects")
+            rng = (self.headers.get("Range") or "").strip()
+            if trr and rng and rng != "bytes=0-":  # §5.6 item 5: the extra ranged opens of a finite-TS prepare / seek
+                return self.reject(458 if trr is True else int(trr), "timeshift_range_rejects")
 
         clip = p.clips[p.media(sid)] if kind in ("live", "timeshift") else None
         hls = kind in ("live", "timeshift") and ext == "m3u8"
         if seg:
             p.registry.touch(user, sid)
             return self.hls_segment(clip, sid, int(seg[2]))
+        if sub and sub[2] in ("tseg", "vtt"):
+            p.registry.touch(user, sid)
+            return self.multi_segment(clip, sid, sub[2], int(sub[3] or 0))
+        hls = hls or bool(sub)
         slot = p.registry.acquire(user, sid, c["max_connections"], float(f.get("linger") or 0), c["hls_timeout"], hls=(kind == "live" and hls))
         if slot is None:
             st = f.get("linger_status", 403)
@@ -959,16 +1403,40 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 self._notes.append(f"STALL{f['stall']}s")
                 if not self.nap(float(f["stall"]), slot):
                     return
+            if kind == "live" and sub:
+                return self.multi_playlist(clip, sid, sub[2], f)
             if kind == "live" and hls:
+                if p.media(sid) == "multi":
+                    return self.multi_master(sid, f)
                 return self.hls_playlist(clip, sid, f)
             if kind == "live":
                 return self.live_ts(clip, sid, f, slot)
-            if kind == "timeshift" and hls:
-                return self.timeshift_playlist(clip, sid)
-            data, ctype = (clip.data * 3, "video/mp2t") if kind == "timeshift" else (p.vod_data, p.vod_ctype)
+            if kind == "timeshift":
+                _, inst = self.start_instant(start or "")
+                duration_mode = c.get("timeshift_mode") == "duration"
+                # §5.6 items 1, 7: live-shifted forms have no length (Flussonic timeshift_abs/rel always; SHIFT ?utc= and
+                # Flussonic -now in duration mode; in clip3 mode those keep the M2/M3 finite file)
+                live_like = form in ("timeshift_abs", "timeshift_rel") or (duration_mode and dur_s is None)
+                if hls:
+                    if live_like:
+                        return self.event_playlist(clip, sid, inst)
+                    if duration_mode:
+                        return self.timeshift_playlist(clip, sid, dur_s or 60)
+                    return self.timeshift_playlist(clip, sid)
+                if live_like:
+                    self._notes.append("LIVE-SHIFTED")
+                    return self.live_ts(clip, sid, f, slot, state=TsState())
+                if duration_mode:
+                    size = max(PKT, int(max(1, dur_s or 60) * clip.rate) // PKT * PKT)
+                    data = LoopedTs(clip, size)
+                else:
+                    data = clip.data * 3
+                ctype = "text/html" if f.get("wrong_content_type") else "video/mp2t"
+                return self.finite(data, ctype, f, ranges=c["timeshift_ranges"], ignore_range=bool(c.get("timeshift_range_ignored")))
+            data, ctype = p.vod_data, p.vod_ctype
             if f.get("wrong_content_type"):
                 ctype = "text/html"
-            return self.finite(data, ctype, f, ranges=(c["timeshift_ranges"] if kind == "timeshift" else True))
+            return self.finite(data, ctype, f, ranges=True)
         finally:
             if not slot.hls:
                 p.registry.close(slot)
@@ -980,12 +1448,25 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return i in cat.MOVIE_BY_ID
         return i in cat.EPISODE_IDS
 
-    def finite(self, data, ctype, f, ranges=True):
+    def token_dead(self, f):
+        """token_kill: the LB ends a body whose token has expired (mid-play expiry, §5.6 item 8)."""
+        if f.get("token_kill") and self._token_exp is not None and time.time() >= self._token_exp:
+            self.panel.bump("token_expired")
+            self._notes.append("TOKEN-KILL")
+            self.mark_end("token_expired")
+            return True
+        return False
+
+    def finite(self, data, ctype, f, ranges=True, ignore_range=False):
+        """A finite body (bytes, or a LoopedTs rendered on demand). ranges: Accept-Ranges/Content-Length/206 as a VOD
+        server; ignore_range: Content-Length of the whole body but Range ignored (200 from byte 0, §5.6 item 6)."""
         n = len(data)
         rng = self.headers.get("Range")
         start, end, status = 0, n - 1, 200
-        hdr = {"Accept-Ranges": "bytes"} if ranges else {}
-        if rng and ranges:
+        hdr = {"Accept-Ranges": "bytes"} if ranges and not ignore_range else {}
+        if rng and ignore_range:
+            self._notes.append("RANGE-IGNORED")
+        if rng and ranges and not ignore_range:
             m = re.match(r"^bytes=(\d*)-(\d*)$", rng.strip())
             if m and (m[1] or m[2]):
                 if m[1]:
@@ -999,24 +1480,27 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 status = 206
                 hdr["Content-Range"] = f"bytes {start}-{end}/{n}"
         body_len = end - start + 1
-        if ranges:
+        if ranges or ignore_range:
             hdr["Content-Length"] = str(body_len)
         self.begin_stream(status, ctype, hdr)
         if self.command == "HEAD":
             return
         slow = float(f.get("slow") or 0)
         step = max(PKT, int(slow / 10)) if slow else 64 * 1024
+        render = data.slice if isinstance(data, LoopedTs) else (lambda a, b: data[a:b])
         pos = start
         while pos <= end:
             e = min(pos + step, end + 1)
-            if self.peer_closed():
+            if self.peer_closed() or self.panel.stopping.is_set() or self.token_dead(f):
                 break
-            self.out(data[pos:e])
+            self.out(render(pos, e))
             pos = e
             if slow and not self.nap(step / slow):
                 break
 
-    def live_ts(self, clip, sid, f, slot):
+    def live_ts(self, clip, sid, f, slot, state=None):
+        """Endless paced TS. [state] given (live-shifted archive forms): start there and do not touch the live
+        channel's saved position; otherwise continue from the channel's last connection per reconnect_mode."""
         p, data, n, plan = self.panel, clip.data, len(clip.data), clip.plan
         ctype = "text/html" if f.get("wrong_content_type") else "video/mp2t"
         self.begin_stream(200, ctype, {"Connection": "close"})
@@ -1024,7 +1508,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         mode = f.get("reconnect_mode", "continue")
         last = p.live_pos.get(sid) or TsState()
-        if mode == "reset":
+        if state is not None:
+            st, mode = state, "archive"
+        elif mode == "reset":
             st = TsState()                                              # clip start, timestamps back at 0
         elif mode == "jump":
             st = TsState(last.pos, (last.off + JUMP_90K) % MOD33, last.cc)  # forward timestamp jump
@@ -1043,7 +1529,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         t_pace = t0  # pacing clock; shifted forward by a stall_after window so playback resumes at real-time speed
         try:
             while not p.stopping.is_set() and not slot.killed:
-                if self.peer_closed():
+                if self.peer_closed() or self.token_dead(f):
                     break
                 now = time.monotonic()
                 el = now - t0
@@ -1084,7 +1570,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
             self.mark_end("client_eof")
         finally:
-            p.live_pos[sid] = st
+            if state is None:
+                p.live_pos[sid] = st
             self.close_connection = True
 
     # ---- HLS
@@ -1113,14 +1600,74 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.reject(404, "segment_out_of_window")
         self.send(200, clip.segments[n % nseg][0], "video/mp2t")
 
-    def timeshift_playlist(self, clip, sid):
+    def timeshift_playlist(self, clip, sid, dur_s=None):
+        """VOD archive playlist: the clip's segments once (clip3), or [dur_s] seconds of continuous-timestamp segments
+        (duration mode, /tseg/)."""
         d, nseg = self.seg_dur(clip), len(clip.segments)
         L = ["#EXTM3U", "#EXT-X-VERSION:3", f"#EXT-X-TARGETDURATION:{math.ceil(d)}", "#EXT-X-MEDIA-SEQUENCE:0",
              "#EXT-X-PLAYLIST-TYPE:VOD"]
-        for n in range(nseg):
-            L += [f"#EXTINF:{clip.segments[n][1]:.3f},", f"/vodseg/{sid}_{n}.ts"]
+        if dur_s is None:
+            for n in range(nseg):
+                L += [f"#EXTINF:{clip.segments[n][1]:.3f},", f"/vodseg/{sid}_{n}.ts"]
+        else:
+            for n in range(max(1, math.ceil(dur_s / d))):
+                L += [f"#EXTINF:{clip.segments[n % nseg][1]:.3f},", f"/tseg/{sid}_{n}.ts"]
         L.append("#EXT-X-ENDLIST")
         self.send(200, "\n".join(L) + "\n", "application/vnd.apple.mpegurl")
+
+    def event_playlist(self, clip, sid, start):
+        """§5.6 item 7: EVENT archive (Flussonic -now.m3u8, timeshift_abs/rel .m3u8): segments from [start] up to the
+        panel's now, no ENDLIST, growing with wall time; continuous timestamps (/tseg/), at most EVENT_MAX_SEGMENTS."""
+        d, nseg = self.seg_dur(clip), len(clip.segments)
+        count = max(1, min(EVENT_MAX_SEGMENTS, int((time.time() - start) / d)))
+        L = ["#EXTM3U", "#EXT-X-VERSION:3", f"#EXT-X-TARGETDURATION:{math.ceil(d)}", "#EXT-X-MEDIA-SEQUENCE:0",
+             "#EXT-X-PLAYLIST-TYPE:EVENT"]
+        for n in range(count):
+            L += [f"#EXTINF:{clip.segments[n % nseg][1]:.3f},", f"/tseg/{sid}_{n}.ts"]
+        self.send(200, "\n".join(L) + "\n", "application/vnd.apple.mpegurl", {"Cache-Control": "no-cache"})
+
+    # ---- multi live HLS (§5.6 item 10): master + media playlist + WebVTT subtitle rendition
+
+    def multi_master(self, sid, f):
+        tok = f"?token={self.q['token']}" if self.server.is_lb and self.q.get("token") else ""
+        L = ["#EXTM3U", "#EXT-X-VERSION:4",
+             f'#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subs",NAME="English",LANGUAGE="en",DEFAULT=NO,AUTOSELECT=YES,'
+             f'FORCED=NO,URI="{sid}_subs.m3u8{tok}"',
+             '#EXT-X-STREAM-INF:BANDWIDTH=2600000,RESOLUTION=1280x720,SUBTITLES="subs"',
+             f"{sid}_media.m3u8{tok}"]
+        ctype = "text/html" if f.get("wrong_content_type") else "application/vnd.apple.mpegurl"
+        self.send(200, "\n".join(L) + "\n", ctype, {"Cache-Control": "no-cache"})
+
+    def multi_playlist(self, clip, sid, which, f):
+        """The live window (same sequence numbers for media and subtitles): {sid}_tseg{n}.ts or {sid}_vtt{n}.vtt."""
+        c = self.panel.cfg
+        d = self.seg_dur(clip)
+        cur = int(time.time() / d)
+        first = max(0, cur - c["hls_window"] + 1)
+        tok = f"?token={self.q['token']}" if self.server.is_lb and self.q.get("token") else ""
+        L = ["#EXTM3U", "#EXT-X-VERSION:3", f"#EXT-X-TARGETDURATION:{math.ceil(d)}", f"#EXT-X-MEDIA-SEQUENCE:{first}"]
+        for n in range(first, cur + 1):
+            name = f"{sid}_tseg{n}.ts" if which == "media" else f"{sid}_vtt{n}.vtt"
+            L += [f"#EXTINF:{d:.3f},", name + tok]
+        self.send(200, "\n".join(L) + "\n", "application/vnd.apple.mpegurl", {"Cache-Control": "no-cache"})
+
+    def multi_segment(self, clip, sid, which, n):
+        d = self.seg_dur(clip)
+        cur = int(time.time() / d)
+        if n > cur + 1 or n < cur - self.panel.cfg["hls_window"] - 3:
+            return self.reject(404, "segment_out_of_window")
+        if which == "tseg":
+            return self.send(200, clip.loop_segment(n), "video/mp2t")
+        # WebVTT segment n: cues of the clip loop overlapping [t0, t0 + d), local time 0 = this loop's first PTS
+        nseg = len(clip.segments)
+        loop, i = divmod(n, nseg)
+        t0 = i * d
+        mpegts = (clip.plan.first_pts + loop * clip.plan.dur90k) % MOD33
+        L = ["WEBVTT", f"X-TIMESTAMP-MAP=MPEGTS:{mpegts},LOCAL:00:00:00.000", ""]
+        for a, b, text in self.panel.subs:
+            if a < t0 + d and b > t0:
+                L += [f"{vtt_time(a)} --> {vtt_time(b)}", text, ""]
+        self.send(200, "\n".join(L) + "\n", "text/vtt")
 
 
 class Server(http.server.ThreadingHTTPServer):

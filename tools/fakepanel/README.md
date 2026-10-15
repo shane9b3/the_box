@@ -14,7 +14,18 @@ python3 tools/fakepanel/fakepanel.py --config tools/fakepanel/config.example.jso
 
 On first start, with `ffmpeg` on PATH, it generates into `tools/fakepanel/media/` (gitignored): 10 s H.264+AAC 1280x720 25 fps
 (`testsrc2`+`sine`), an MP2-audio variant, a 50 fps variant, an HDR10-signalled variant (`h264_aac_25_hdr10.ts`: 8-bit H.264
-whose VUI says BT.2020 + PQ, only served through `media_override`), 2 s HLS segments of each, and a `vod.mp4`. Takes ~10 s once.
+whose VUI says BT.2020 + PQ, only served through `media_override`), the `multi` clip (below), 2 s HLS segments of each, and a
+`vod.mp4`. Takes ~15 s once.
+
+`multi` (`h264_multi_25.ts`, M4 pickers and subtitles): H.264 25 fps without B-frames, **two audio PIDs** (AAC `eng` 440 Hz,
+MP2 `deu` 880 Hz, ISO-639 descriptors from `-metadata:s:a:N language=`) and **CEA-608 captions** (CC1, roll-up 2 rows,
+"CC1 line N" every 2 s). ffmpeg has no CEA-608 encoder, so `fakepanel.py` writes the captions itself as ATSC A/53 `cc_data`
+in an H.264 SEI (`user_data_registered_itu_t_t35`, `GA94`) before the first slice of every access unit, then muxes with
+`-c:v copy` (`build_multi`; check with `ffmpeg -f lavfi -i "movie=media/h264_multi_25.ts[out0+subcc]" -map 0:s -f srt -`).
+The PMT carries no caption descriptor, so players expose the 608 track speculatively (API notes §1.3). Over HLS the clip gets
+a **WebVTT** rendition instead, built at request time from the committed `multi_subs.srt` (7 cues inside the 10 s loop).
+**DVB bitmap subtitles are not generated**: ffmpeg's `dvbsub` encoder needs bitmap input and nothing here rasterises text,
+so DVB stays a manual check on a real stream (design §8 Q5). The HLS segments of `multi` lose the audio language tags.
 Without ffmpeg (or with `--no-ffmpeg`) it serves the checked-in `fallback_null.ts` (null packets: valid 0x47 framing, no decodable video).
 
 Point The Box at it: Xtream server `http://<mac-ip>:8080`, user `test`, password `test`.
@@ -38,10 +49,12 @@ All are changeable at runtime through `/admin`. See `config.example.json` for ev
 
 `username password timezone quirks series_episodes_array epg_plain auth_mode bad_creds_mode status max_connections
 active_cons_override exp_days allowed_output_formats epg_offset epg_gzip strict_timeshift_tz timeshift_expect timeshift_ranges
-hls_timeout hls_window token_ttl token_single_use pace faults stream_faults media_override synthetic synthetic_days_back synthetic_days_ahead epg_version`
+hls_timeout hls_window token_ttl token_single_use pace faults stream_faults media_override synthetic synthetic_days_back synthetic_days_ahead epg_version
+timeshift_mode timeshift_window archive_lag_sec timeshift_reject_forms timeshift_range_ignored player_fixtures`
 
-`media_override`: `{"<stream id>": "std|mp2|50fps|radio|hdr"}` serves another clip for that live stream (Q-1: `{"1": "hdr"}`
-makes ch1 HDR10 for the HDR-poster test).
+`media_override`: `{"<stream id>": "std|mp2|50fps|radio|hdr|multi"}` serves another clip for that stream, live and archive
+(Q-1: `{"1": "hdr"}` makes ch1 HDR10 for the HDR-poster test). `multi` on a live `.m3u8` serves the master playlist with
+the WebVTT rendition (see "Player fixtures").
 
 `--quirks`: numbers as strings (`stream_id`, `tv_archive:"1"`, `max_connections`...), `exp_date` string, `category_id` null for stream 5,
 `backdrop_path` string for vod 103 / series 202, `info: []` for vod 102, `seasons: []` with populated `episodes`.
@@ -84,6 +97,13 @@ with N generated ones (VOD and series unchanged), for the guide's instrumented t
 | `html_splash` | 200 HTML "subscription expired" instead of media |
 | `405_on_m3u8` | `.m3u8` gets 405 (also whenever `allowed_output_formats` lacks `m3u8`) |
 | `range_rejects` | `true`/`416` -> 416, `400` -> 400 when a live `.ts` request carries `Range`; always logged loudly and counted |
+| `timeshift_range_rejects` | `true` (458) or a status (400, 416, 458, 509, 503...): a **timeshift** request with a `Range` other than `bytes=0-` (the tail/head reopens of a finite-TS prepare, a native seek) is refused; reason `timeshift_range_rejects` |
+| `timeshift_redirect` | like `redirect`, for timeshift requests only (live stays direct); the `Location` keeps the original query (`timeshift.php`, `?utc=`) |
+| `token_kill` | on the redirect port, an open body is closed when its token expires (`token_ttl`): mid-play token expiry; counts `token_expired` |
+| `timeshift_reject_forms` | per stream (`stream_faults`), as the config key below; wins over it |
+
+`linger`/`linger_status` and `max_connections` apply to timeshift opens too, so `{"max_connections":1,"faults":{"linger":5,"linger_status":458}}`
+refuses the ranged reopen a finite-TS prepare makes right after its first open (I-M4-10 linger variant).
 
 Non-`Active` `status` and `auth_mode` 401/403/513 make streams 403/401/513 as well. HLS counts as one session per (user, stream), freed `hls_timeout` s after the last request.
 
@@ -96,6 +116,44 @@ The XC start must be server-zone wall time. If `timeshift_expect` is set (list o
 selected), the start is compared against it (tolerance 90 s) and the log says whether the client sent UTC. Without it, starts in the future or outside the 3-day window are flagged.
 A WARNING is logged on mismatch; with `strict_timeshift_tz` the response is 404. The `.ts` form returns `Content-Length` + `Accept-Ranges` + 206 support (set `timeshift_ranges:false` to emulate panels that do not, for D10).
 
+### Archive behaviour for the player (M4, docs/design/m4-player-ux.md §5.6)
+
+URL forms the panel tells apart (`form` in the request log, keys of `timeshift_reject_forms`): `path` (`/timeshift/.../YYYY-MM-DD:HH-MM/id`,
+the `xc-path` variant), `path_sec` (`...:HH-MM-SS`, `xc-path-sec`), `php` (`/streaming/timeshift.php`, `xc-php`; also what catalog ch2's
+`default` source expands to), `shift` (`/live/u/p/id.ts?utc=`), `flussonic_range` (`.../{archive|index|video|mono}-FROM-DUR.{ts,m3u8}`),
+`flussonic_now` (`...-FROM-now...`), `timeshift_abs` (`/live/u/p/id/[index-|video-|mono-]timeshift_abs-FROM.{ts,m3u8}`), `timeshift_rel`
+(`...timeshift_rel-N.m3u8`, start = now − N, anchored at the first request). Aliases `xc-path`, `xc-php`, `xc-path-sec`, `flussonic-range`,
+`flussonic-abs`, `flussonic-kodi` are accepted. A `default`/`append` template reaches the panel as whatever URL it expands to.
+
+| key | default | effect |
+|---|---|---|
+| `timeshift_mode` | `"clip3"` | `clip3`: the `.ts` archive is the clip × 3 (30 s, byte-identical loops), `.m3u8` the clip's segments once (M2/M3 behaviour). `"duration"`: the `.ts` body is **sized to the requested duration** (`{minutes}` × 60 for `path`/`php`, seconds for Flussonic `DUR`), the clip looped with the live rewriter so **PCR/PTS/CC run on** across loops (a 30-min request is a 30-min file; `TsDurationReader` reads the true length); exact `Content-Length`, `Range`/206/416 as before; rendered on demand (`LoopedTs`), so ranged reopens start mid-file with the right timestamps. `.m3u8`: a VOD playlist of `ceil(D/2)` continuous-timestamp segments (`/tseg/{id}_{n}.ts`). Open-ended forms (`shift`, `flussonic_now`) stream **paced like live, without Content-Length** from the clip start |
+| (always) | | `timeshift_abs`/`timeshift_rel` `.ts` stream live-like; their `.m3u8` and (duration mode) `-now.m3u8` are **EVENT** playlists (`#EXT-X-PLAYLIST-TYPE:EVENT`, no `ENDLIST`) listing `/tseg/` segments from the start up to now, growing with wall time (≤ 3 h) |
+| `timeshift_window` | `true` | **404** (`timeshift_window`) for a channel without archive, a start older than its `archive_days` (+120 s slack; catalog 3 days, synthetic per channel), or later than now + 60 s. Independent of `timeshift_expect`/`strict_timeshift_tz`; evaluated against each request's wall clock, so a long-running panel does not drift. `false` restores the old warn-only behaviour |
+| `archive_lag_sec` | `0` | **404** (`archive_lag`) for a start within N s of now: the archive's last minutes are not written yet (I-M4-14) |
+| `timeshift_reject_forms` | `{}` | `{form: status}`: the panel does not serve that form. Status: any HTTP code (`404`, `400`, `403`, `500`...), `"200-html"` (200 + the HTML splash), `"200-empty"` (200, empty body). Per channel through `stream_faults["<id>"].timeshift_reject_forms` (I-M4-11/12/21) |
+| `timeshift_range_ignored` | `false` | `Content-Length` of the whole body, no `Accept-Ranges`, `Range` ignored (200 from byte 0): the `bytesToSkip` path a native seek hits on real panels |
+
+Order of checks for a timeshift request: auth/account, redirect/token, `ua_whitelist`, `html_splash`, `timeshift_reject_forms`,
+unparseable start (404 `timeshift_bad_start`), `timeshift_window`, `archive_lag_sec`, `timeshift_expect`/`strict_timeshift_tz`,
+`timeshift_range_rejects`, then the connection slot (`max_connections`, `linger`).
+
+### Player fixtures (`player_fixtures: true`, synthetic mode only)
+
+`--synthetic N --set player_fixtures=true` changes five generated channels (`/admin/stats.synthetic.player_fixtures` lists them):
+
+| id | role | what |
+|---|---|---|
+| 2 | `short` | **1-minute programmes** from server start − 3 h to + 4 h (`synthetic.short_window`; the generated schedule outside, cut at the edges; title "Minute Programme"), archive 1 day, `catchup="xc"` (I-M4-9) |
+| 3 | `plus2` | `catchup-correction="+2"` in the M3U, archive 1 day, `xc` (I-M4-13b) |
+| 4 | `minus15` | `catchup-correction="-1.5"`, archive 1 day, `xc` |
+| 7 | `multi_ts` | the `multi` clip (two audio languages + CEA-608), archive 1 day, `xc` (I-M4-7, I-M4-23) |
+| 8 | `multi_hls` | the `multi` clip as **live HLS**: its M3U URL is `.m3u8`, a master playlist with `#EXT-X-MEDIA:TYPE=SUBTITLES` (`LANGUAGE="en"`, `NAME="English"`) whose WebVTT segments (`8_vtt{n}.vtt`, `X-TIMESTAMP-MAP` per loop) share the media playlist's sequence numbers; media segments `8_tseg{n}.ts` have continuous timestamps (I-M4-8) |
+
+The correction exists only in the M3U (`get.php`): the Xtream API has no such field, so a client must import the panel as an
+M3U URL playlist to see it (the M4 suite does, `m3u=1` on the debug seed link). The panel's zone stays `timezone`
+(default `Europe/Berlin`, ≠ UTC). With the flag off, the synthetic lineup is exactly the M3 one.
+
 ## Admin API
 
 ```
@@ -107,9 +165,27 @@ curl -X POST localhost:8080/admin/config -d '{"status":"Expired","quirks":true}'
 curl -X POST localhost:8080/admin/config -d '{"timeshift_expect":[1791900000],"strict_timeshift_tz":true}'
 curl localhost:8080/admin/stats        # requests, stream_requests (monotonic), request_log[{path,ua,token_present,end_reason}] (last 200), client_eof, rejections by reason, range_requests_seen, connections{active,open,lingering,max_open_seen}, ...
 curl localhost:8080/admin/faults       # documented fault keys and current faults
+curl localhost:8080/admin/now          # {"unix", "panel_wall", "timezone"}: the panel's clock (live-anchored expectations)
+curl -X POST localhost:8080/admin/timeshift_expect -d '{"start_unix":1791900000,"channel":3,"padding_before":60,"strict":true}'
+#   sets timeshift_expect to start_unix - correction(channel)*3600 - padding_before; returns {expect_unix, correction_h, panel_wall, xc_start}.
+#   For a live-anchored instant (pause, RW: no EPG component) pass "apply_correction": false, so the panel's own clock is expected.
+curl -X POST localhost:8080/admin/config -d '{"timeshift_mode":"duration","archive_lag_sec":120}'
+curl -X POST localhost:8080/admin/config -d '{"timeshift_reject_forms":{"path":404},"stream_faults":{"3":{"timeshift_reject_forms":{"php":"200-html"}}}}'
+curl -X POST localhost:8080/admin/config -d '{"max_connections":1,"faults":{"timeshift_range_rejects":458}}'
 curl -X POST localhost:8080/admin/kick # close every open stream
 curl -X POST localhost:8080/admin/reset
 ```
+
+`/admin/stats` also has `timeshift_requests` (last 50, oldest first; M4 tests assert request sequences from it):
+`{form, channel, start (raw token), start_unix (as the panel read it, in its zone), duration_s (null when open-ended), range (the Range
+header or null), status (set when the response starts, 302/404/... included), bytes, at (unix), ext, lb (served on the redirect port)}`,
+and `timeshift_request_count` (monotonic). `/admin/reset` restores the start configuration (CLI flags and `--set` values survive it).
+
+## M4 player suite
+
+`python3 tools/fakepanel/fakepanel.py --port 18080 --synthetic 2000 --set player_fixtures=true --set timeshift_mode=duration`
+(the suite also POSTs both keys after every reset, so a panel started without them works for every class except the M4 seed,
+which must see the fixture M3U).
 
 ## Logging
 
@@ -136,7 +212,9 @@ Each connection's position, timestamp offset and CCs are saved per stream when i
 - Clip loop continuity is exact for video; audio frames are not re-cut, so at a loop point the audio can overlap or gap by up to
   ~1 AAC frame plus the difference between the audio and video clip lengths (a few hundred ms in the ffmpeg-generated clips).
   PCR spacing at the loop point can likewise be larger than elsewhere (the clip's last PCR precedes the end of its last frame); it never goes backwards.
-- Timestamps are only rewritten for live TS (`/live/.../N.ts`). VOD, timeshift and archive TS are served unmodified.
+- Timestamps are rewritten for live TS (`/live/.../N.ts`), for timeshift in `duration` mode and the live-shifted forms, and for
+  `/tseg/` and multi-HLS segments. VOD, `clip3` timeshift and `/vodseg/` are served unmodified.
+- Live-shifted archive forms start at the clip's first frame, whatever the requested start; only the request log records the start.
 - HLS live playlists use `#EXT-X-DISCONTINUITY` at each loop; segments are 2 s keyframe-aligned cuts of the clip.
 - Client disconnects (peer FIN/RST) are detected within ~50 ms by polling the socket for readability (`select` + `MSG_PEEK`), also while the server is not writing (`stall`, `stall_after` hold, `slow` naps, pacing sleeps). The stream stops, the slot is released (the `linger` fault still applies), the log says `CLIENT-EOF`, `client_eof` in `/admin/stats` increments and the request's `end_reason` is `client_eof` (others: `server_close`, `forced_close`, `error`; `null` while open). A client that stays connected and sends nothing is not EOF; a client that half-closes its write side (`shutdown(SHUT_WR)`) after the request is.
 - Audio-only ch13: the loop length comes from the audio PTS span plus one median PES step (ffmpeg packs ~15 AAC frames per PES), so the loop point can have an audio gap of up to one PES (< ~0.4 s); timestamps never go backwards. Manual check: `curl -m 25 -o /tmp/r.ts http://localhost:8080/live/test/test/13.ts` and scan PTS (see `pid_pts`/`parse_psi` in `test_fakepanel.py`).

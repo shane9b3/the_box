@@ -8,8 +8,13 @@ import android.view.Gravity
 import android.widget.TextView
 import androidx.activity.ComponentActivity
 import app.thebox.MainActivity
+import app.thebox.core.catchup.archive.ArchivePlayback
 import app.thebox.core.common.Outcome
 import app.thebox.core.epg.EpgStore
+import app.thebox.core.full.BackInPlayer
+import app.thebox.core.full.PlayerSettings
+import app.thebox.core.full.PlayerSettingsSource
+import app.thebox.core.full.UpDownInPlayer
 import app.thebox.core.guide.ExitConfirmation
 import app.thebox.core.guide.GuideDebugProbe
 import app.thebox.core.guide.GuideSearch
@@ -26,6 +31,7 @@ import app.thebox.data.repo.PlaylistRefresher
 import app.thebox.data.repo.PlaylistRepository
 import app.thebox.data.repo.Trigger
 import app.thebox.player.api.PlaybackController
+import app.thebox.ui.full.PlayerDebugProbe
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.AndroidEntryPoint
@@ -52,9 +58,18 @@ import javax.inject.Inject
  *   TV emulator can classify as low-end by `memoryClass` (§0.11), and a test that says "not low-end" must get the full
  *   path deterministically.) `perf=auto|high|low` sets the mode explicitly and wins over `lowend`.
  * - `still=0|1` → `miniStill`; `clock24=0|1`; `exit=twice|ask|none` → `exitConfirmation`; `unlocked=1` → `debugUnlocked`.
+ * Player switches (docs/design/m4-player-ux.md §1.6, §5.5; owner WP-E), applied to the in-memory [PlayerSettingsSource]
+ * before the seed, last occurrence wins:
+ * - `infobar=<ms>` → `infoBarMs`; `numwait=<ms>` → `numberEntryWaitMs`;
+ * - `updown=quick|zap|list` → `upDown` QUICK_BAR_AND_INFO / ZAP / CHANNEL_LIST; `invert=0|1` → `invertChannelDirection`;
+ * - `back=guide|list` → `back` GUIDE / CHANNEL_LIST.
+ * - `padding=<before>[,<after>]` (seconds) → the seeded playlist's `paddingBeforeSec` / `paddingAfterSec` (applied after the
+ *   playlist exists, also with `refresh=0`; a whole-row update, debug only). Needs `seed`.
  * Other parameters: `reset=1` deletes every playlist first (a test that needs exactly one source), `refresh=0` skips the
  * refresh and the EPG build when the playlist already exists, `open=0` does not start MainActivity (tests launch it
- * through ActivityScenario).
+ * through ActivityScenario). `m3u=1` seeds the panel as an **M3U URL** playlist
+ * (`<seed>/get.php?username=…&password=…&type=m3u_plus&output=ts`, idempotent by host like the Xtream form) instead of
+ * an Xtream login: the M4 suite needs it because `catchup-correction` exists only in the M3U (I-M4-13b).
  *
  * The outcome is published on [status] (same process as the instrumented suite) and logged under [TAG].
  */
@@ -66,6 +81,7 @@ class GuideDebugReceiver : ComponentActivity() {
     @Inject lateinit var epgStore: EpgStore
     @Inject lateinit var channels: ChannelRepository
     @Inject lateinit var guideSettings: GuideSettingsSource
+    @Inject lateinit var playerSettings: PlayerSettingsSource
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
 
     private lateinit var text: TextView
@@ -113,6 +129,8 @@ class GuideDebugReceiver : ComponentActivity() {
                         pass = uri.getQueryParameter("pass") ?: "test",
                         reset = uri.getQueryParameter("reset") == "1",
                         refresh = uri.getQueryParameter("refresh") != "0",
+                        m3u = uri.lastParam("m3u") == "1",
+                        padding = parsePadding(uri.lastParam("padding")),
                     )
                 }
             }.copy(seq = seq, settingsApplied = settingsResult == null, settingsError = settingsResult)
@@ -125,27 +143,60 @@ class GuideDebugReceiver : ComponentActivity() {
         }
     }
 
-    /** Null on success, else why the settings were not applied (WP-B's InMemoryGuideSettings may still be a stub). */
+    /** Null on success, else why the settings were not applied (an in-memory settings source may still be a stub). */
     private fun applySettings(uri: Uri): String? {
         val names = uri.queryParameterNames
-        if (SETTING_KEYS.none { it in names }) return null
-        return try {
-            guideSettings.update { applySwitches(it, uri) }
-            null
-        } catch (t: Throwable) {
-            Log.w(TAG, "guide settings not applied: $t")
-            t.toString()
+        val errors = ArrayList<String>(2)
+        if (SETTING_KEYS.any { it in names }) {
+            try {
+                guideSettings.update { applySwitches(it, uri) }
+            } catch (t: Throwable) {
+                Log.w(TAG, "guide settings not applied: $t")
+                errors += t.toString()
+            }
         }
+        if (PLAYER_KEYS.any { it in names }) {
+            try {
+                playerSettings.update { applyPlayerSwitches(it, uri) }
+            } catch (t: Throwable) {
+                Log.w(TAG, "player settings not applied: $t")
+                errors += "player: $t"
+            }
+        }
+        return errors.takeIf { it.isNotEmpty() }?.joinToString("; ")
     }
 
-    private suspend fun seed(base: String, user: String, pass: String, reset: Boolean, refresh: Boolean): SeedStatus {
+    private suspend fun seed(
+        base: String,
+        user: String,
+        pass: String,
+        reset: Boolean,
+        refresh: Boolean,
+        m3u: Boolean = false,
+        padding: Pair<Int, Int?>? = null,
+    ): SeedStatus {
         try {
             if (reset) playlists.all().forEach { playlists.delete(it.id) }
             val host = PlaylistRepository.displayHost(base)
-            val existing = playlists.all().firstOrNull { it.type == PlaylistType.XTREAM && it.displaySource == host }
-            val id = existing?.id ?: when (val r = playlists.addXtream("Guide seed $host", listOf(base), user, pass)) {
-                is Outcome.Ok -> r.value
-                is Outcome.Err -> return SeedStatus(state = SeedState.FAILED, error = "addXtream: ${r.error.code}")
+            val type = if (m3u) PlaylistType.M3U_URL else PlaylistType.XTREAM
+            val existing = playlists.all().firstOrNull { it.type == type && it.displaySource == host }
+            val id = existing?.id ?: run {
+                val added = if (m3u) {
+                    playlists.addM3uUrl("Player seed $host", "$base/get.php?username=${Uri.encode(user)}&password=${Uri.encode(pass)}&type=m3u_plus&output=ts")
+                } else {
+                    playlists.addXtream("Guide seed $host", listOf(base), user, pass)
+                }
+                when (added) {
+                    is Outcome.Ok -> added.value
+                    is Outcome.Err -> return SeedStatus(state = SeedState.FAILED, error = "${if (m3u) "addM3uUrl" else "addXtream"}: ${added.error.code}")
+                }
+            }
+            if (padding != null) {
+                playlists.get(id)?.let { p ->
+                    val after = padding.second ?: p.paddingAfterSec
+                    playlists.update(p.copy(paddingBeforeSec = padding.first, paddingAfterSec = after))
+                    Log.i(TAG, "playlist $id padding set to ${padding.first}/$after s")
+                }
             }
             if (existing == null || refresh) {
                 Log.i(TAG, "refreshing playlist $id ($host)")
@@ -189,6 +240,7 @@ class GuideDebugReceiver : ComponentActivity() {
         const val TAG = "GuideDebug"
         const val HOST = "guide"
         private val SETTING_KEYS = listOf("lowend", "perf", "still", "clock24", "exit", "unlocked")
+        private val PLAYER_KEYS = listOf("infobar", "numwait", "updown", "invert", "back")
         private val seedMutex = Mutex()
         @Volatile private var requestSeq = 0
         private val statusFlow = MutableStateFlow(SeedStatus())
@@ -206,6 +258,33 @@ class GuideDebugReceiver : ComponentActivity() {
          * switches after the defaults, and `getQueryParameter` returns the first occurrence.
          */
         private fun Uri.lastParam(key: String): String? = getQueryParameters(key).lastOrNull()
+
+        /** `padding=<before>[,<after>]` in seconds; null when absent or malformed. */
+        fun parsePadding(v: String?): Pair<Int, Int?>? {
+            if (v.isNullOrBlank()) return null
+            val parts = v.split(',')
+            val before = parts[0].trim().toIntOrNull()?.takeIf { it >= 0 } ?: return null
+            val after = parts.getOrNull(1)?.trim()?.toIntOrNull()?.takeIf { it >= 0 }
+            return before to after
+        }
+
+        /** Pure mapping of the player switches onto [PlayerSettings] (documented on the class). Unknown values are ignored. */
+        fun applyPlayerSwitches(s: PlayerSettings, uri: Uri): PlayerSettings {
+            var out = s
+            uri.lastParam("infobar")?.toLongOrNull()?.takeIf { it > 0 }?.let { out = out.copy(infoBarMs = it) }
+            uri.lastParam("numwait")?.toLongOrNull()?.takeIf { it > 0 }?.let { out = out.copy(numberEntryWaitMs = it) }
+            when (uri.lastParam("updown")?.lowercase()) {
+                "quick" -> out = out.copy(upDown = UpDownInPlayer.QUICK_BAR_AND_INFO)
+                "zap" -> out = out.copy(upDown = UpDownInPlayer.ZAP)
+                "list" -> out = out.copy(upDown = UpDownInPlayer.CHANNEL_LIST)
+            }
+            uri.lastParam("invert")?.let { out = out.copy(invertChannelDirection = it == "1") }
+            when (uri.lastParam("back")?.lowercase()) {
+                "guide" -> out = out.copy(back = BackInPlayer.GUIDE)
+                "list" -> out = out.copy(back = BackInPlayer.CHANNEL_LIST)
+            }
+            return out
+        }
 
         /** Pure mapping of the deep-link switches onto [GuideSettings] (documented on the class). */
         fun applySwitches(s: GuideSettings, uri: Uri): GuideSettings {
@@ -249,4 +328,8 @@ interface GuideDebugEntryPoint {
     fun search(): GuideSearch
     /** The logo cache (I-16 reads `LogoCache.capacity`). */
     fun guideImages(): app.thebox.core.guide.GuideImages
+    /** M4 (docs/design/m4-player-ux.md §2.8): the live player machine and the archive session. */
+    fun playerProbe(): PlayerDebugProbe
+    fun playerSettings(): PlayerSettingsSource
+    fun archivePlayback(): ArchivePlayback
 }
