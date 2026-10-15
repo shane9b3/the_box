@@ -69,6 +69,8 @@ class FakePanelAdmin(val base: String) {
         val activeConsOverride: Int? = null,
         val faults: Faults? = null,
         val streamFaults: Map<Int, Faults> = emptyMap(),
+        /** Q-1: `media_override`, stream id → clip key (`std`, `mp2`, `50fps`, `radio`, `hdr`). */
+        val mediaOverride: Map<Int, String> = emptyMap(),
     ) {
         fun toJson(): JSONObject = JSONObject().apply {
             maxConnections?.let { put("max_connections", it) }
@@ -79,6 +81,7 @@ class FakePanelAdmin(val base: String) {
             activeConsOverride?.let { put("active_cons_override", it) }
             faults?.let { put("faults", it.toJson()) }
             if (streamFaults.isNotEmpty()) put("stream_faults", JSONObject().apply { streamFaults.forEach { (id, f) -> put(id.toString(), f.toJson()) } })
+            if (mediaOverride.isNotEmpty()) put("media_override", JSONObject().apply { mediaOverride.forEach { (id, m) -> put(id.toString(), m) } })
         }
     }
 

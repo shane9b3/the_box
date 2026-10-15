@@ -73,9 +73,9 @@ class LowEndTest : GuideTestBase() {
 
     /**
      * (code review 2026-10-14, test gap 8) I-16's "audio keeps decoding" with the video track off, proved by the playback
-     * position, not by `stats.audioDecoder` (which stays set once known). Open item Q-1 (review doc): with the track
-     * off the session rebuffers once right after first media; once, right after a stats-overlay toggle, it stayed in
-     * `Buffering` for over 8 s (also at `dc88fab`), so this probe runs on its own, without the toggle.
+     * position, not by `stats.audioDecoder` (which stays set once known). Q-1 (fixed 2026-10-15, M2 design §5.13): the
+     * early rebuffer seen here is the emulator audio HAL's start-up drop; the track-off path itself is covered by
+     * `app.thebox.playback.DisabledVideoTrackTest`.
      */
     @Test
     fun audioKeepsPlayingWithTheVideoTrackOff() {

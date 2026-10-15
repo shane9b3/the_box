@@ -120,7 +120,7 @@ class AdaptiveLoadControlTest {
     fun backBufferIsAlwaysZeroAndLifecycleCallsDoNotThrow() {
         val alc = control()
         assertEquals(0L, alc.getBackBufferDurationUs(player))
-        assertFalse(alc.retainBackBufferFromKeyframe(player))
+        assertTrue("Q-1: keyframe retained", alc.retainBackBufferFromKeyframe(player))
         alc.onStopped(player)
         alc.onPrepared(player)
         alc.onReleased(player)

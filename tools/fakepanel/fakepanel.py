@@ -46,6 +46,7 @@ DEFAULTS = {
     "strict_timeshift_tz": False, "timeshift_expect": [], "timeshift_ranges": True,
     "hls_timeout": 20, "hls_window": 5, "token_ttl": 30, "token_single_use": False, "pace": True,
     "faults": {}, "stream_faults": {},
+    "media_override": {},       # {"<stream id>": "std|mp2|50fps|radio|hdr"}: serve another clip for that live stream
     "synthetic": 0, "synthetic_days_back": 3, "synthetic_days_ahead": 7,  # --synthetic N: N generated live channels
     "epg_version": 0,           # bump (via /admin/config) to change synthetic programme titles (" v2", ...)
 }
@@ -236,10 +237,12 @@ def build_media(media_dir, use_ffmpeg, log):
     ff = shutil.which("ffmpeg") if use_ffmpeg else None
     if not ff:
         log("media: ffmpeg not used; serving null-packet fallback TS (no decodable video)")
-        return {k: fb_clip for k in ("std", "mp2", "50fps", "radio")}, fb_data * 3, "video/mp2t"
+        return {k: fb_clip for k in ("std", "mp2", "50fps", "radio", "hdr")}, fb_data * 3, "video/mp2t"
     os.makedirs(os.path.join(media_dir, "hls"), exist_ok=True)
     spec = {"std": ("h264_aac_25", 25, "aac"), "mp2": ("h264_mp2_25", 25, "mp2"), "50fps": ("h264_aac_50", 50, "aac"),
-            "radio": ("aac_only_25", 0, "aac")}  # fps 0 = audio only (no video PID)
+            "radio": ("aac_only_25", 0, "aac"),  # fps 0 = audio only (no video PID)
+            # Q-1 HDR poster: 8-bit H.264 whose SPS VUI signals BT.2020 + PQ, so the player sees HDR10 (§3.9.5).
+            "hdr": ("h264_aac_25_hdr10", 25, "aac")}
     clips = {}
     for key, (name, fps, ac) in spec.items():
         path = os.path.join(media_dir, name + ".ts")
@@ -251,6 +254,8 @@ def build_media(media_dir, use_ffmpeg, log):
                        "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-g", str(fps * 2),
                        "-keyint_min", str(fps * 2), "-sc_threshold", "0", "-b:v", "2M", "-maxrate", "2M", "-bufsize", "2M",
                        "-c:a", "aac" if ac == "aac" else "mp2", "-b:a", "128k", "-f", "mpegts", path]
+                if key == "hdr":
+                    cmd[-3:-3] = ["-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc"]
             else:  # audio only: no video stream, no video PID in the PMT
                 cmd = [ff, "-y", "-v", "error", "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "10",
                        "-vn", "-c:a", "aac", "-b:a", "128k", "-f", "mpegts", path]
@@ -405,6 +410,11 @@ class Panel:
                 self.stats[key] += 1
             else:
                 self.stats[key][sub] = self.stats[key].get(sub, 0) + 1
+
+    def media(self, sid):
+        """Clip key of live stream [sid]: the `media_override` entry, else the catalog's."""
+        key = self.cfg.get("media_override", {}).get(str(sid))
+        return key if key in self.clips else self.channel(sid)["media"]
 
     def faults(self, sid):
         f = dict(self.cfg.get("faults", {}))
@@ -635,7 +645,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                                        q.get("stream", ""), "ts", start=q.get("start", ""), dur=q.get("duration", "60"))
         m = re.match(r"^/vodseg/(\d+)_(\d+)\.ts$", path)
         if m and p.channel(int(m[1])):
-            segs = p.clips[p.channel(int(m[1]))["media"]].segments
+            segs = p.clips[p.media(int(m[1]))].segments
             return self.send(200, segs[int(m[2]) % len(segs)][0], "video/mp2t")
         if path.startswith("/logo/"):
             # Synthetic mode (M3 code review 2026-10-14, O-3): a tiny valid PNG per channel, one colour per id, so the
@@ -928,7 +938,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             if not ok:
                 return self.reject(404, "timeshift_tz" if msg != "unparseable start" else "timeshift_bad_start")
 
-        clip = p.clips[p.channel(sid)["media"]] if kind in ("live", "timeshift") else None
+        clip = p.clips[p.media(sid)] if kind in ("live", "timeshift") else None
         hls = kind in ("live", "timeshift") and ext == "m3u8"
         if seg:
             p.registry.touch(user, sid)

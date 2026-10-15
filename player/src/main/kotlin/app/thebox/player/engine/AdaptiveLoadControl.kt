@@ -24,6 +24,13 @@ import app.thebox.player.internal.AdaptiveLoadControlHandle
  *
  * Only the `PlayerId`/`Parameters` overloads are overridden: in 1.11.1 the deprecated overloads' default bodies throw
  * (review S4). The back buffer is always 0 because `ExoPlayerImplInternal` reads it once per player.
+ *
+ * (reviewed 2026-10-15, Q-1) [retainBackBufferFromKeyframe] is true: every sample queue keeps the keyframe at or before
+ * the playback position (at most one GOP behind it, counted in [BufferProfile.targetBytes]). With it false, the queue of
+ * a **disabled** video track (still mini player, HIDDEN/NONE, HDR poster) was trimmed to the position without regard to
+ * keyframes, so re-enabling the track could not seek inside it: `ProgressiveMediaPeriod.selectTracks` fell back to
+ * `seekToUs`, which for an unseekable live TS is position 0 — load cancelled, connection re-opened, buffer dropped,
+ * a rebuffer and a position jump (docs/design/m2-playback-core.md §5.13).
  */
 @OptIn(UnstableApi::class)
 internal class AdaptiveLoadControl(
@@ -35,12 +42,14 @@ internal class AdaptiveLoadControl(
     @Volatile override var profile: BufferProfile = initialProfile
 
     private val allocator = DefaultAllocator(/* trimOnReset = */ true, C.DEFAULT_BUFFER_SEGMENT_SIZE)
-    private val delegate: DefaultLoadControl = DefaultLoadControl.Builder()
+    /** Visible for the Q-1 test: its back-buffer settings must agree with ours (they are never read; ours win). */
+    @androidx.annotation.VisibleForTesting
+    internal val delegate: DefaultLoadControl = DefaultLoadControl.Builder()
         .setAllocator(allocator)
         .setTargetBufferBytes(maxTargetBytes)
         // Irrelevant to our decisions; must merely satisfy the builder's argument checks.
         .setBufferDurationsMs(40_000, 60_000, 1_000, 2_000)
-        .setBackBuffer(0, false)
+        .setBackBuffer(0, true) // agrees with retainBackBufferFromKeyframe (Q-1); never read
         .build()
 
     /** Hysteresis state of [shouldContinueLoading] (one player per instance; playback thread only). */
@@ -78,7 +87,8 @@ internal class AdaptiveLoadControl(
 
     override fun getBackBufferDurationUs(playerId: PlayerId): Long = 0L
 
-    override fun retainBackBufferFromKeyframe(playerId: PlayerId): Boolean = false
+    /** Q-1: keep the keyframe before the position so a re-enabled (video) track continues from the buffer. */
+    override fun retainBackBufferFromKeyframe(playerId: PlayerId): Boolean = true
 
     override fun shouldContinueLoading(parameters: LoadControl.Parameters): Boolean {
         val p = profile

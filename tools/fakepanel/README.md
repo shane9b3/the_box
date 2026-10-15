@@ -13,7 +13,8 @@ python3 tools/fakepanel/fakepanel.py --config tools/fakepanel/config.example.jso
 ```
 
 On first start, with `ffmpeg` on PATH, it generates into `tools/fakepanel/media/` (gitignored): 10 s H.264+AAC 1280x720 25 fps
-(`testsrc2`+`sine`), an MP2-audio variant, a 50 fps variant, 2 s HLS segments of each, and a `vod.mp4`. Takes ~10 s once.
+(`testsrc2`+`sine`), an MP2-audio variant, a 50 fps variant, an HDR10-signalled variant (`h264_aac_25_hdr10.ts`: 8-bit H.264
+whose VUI says BT.2020 + PQ, only served through `media_override`), 2 s HLS segments of each, and a `vod.mp4`. Takes ~10 s once.
 Without ffmpeg (or with `--no-ffmpeg`) it serves the checked-in `fallback_null.ts` (null packets: valid 0x47 framing, no decodable video).
 
 Point The Box at it: Xtream server `http://<mac-ip>:8080`, user `test`, password `test`.
@@ -37,7 +38,10 @@ All are changeable at runtime through `/admin`. See `config.example.json` for ev
 
 `username password timezone quirks series_episodes_array epg_plain auth_mode bad_creds_mode status max_connections
 active_cons_override exp_days allowed_output_formats epg_offset epg_gzip strict_timeshift_tz timeshift_expect timeshift_ranges
-hls_timeout hls_window token_ttl token_single_use pace faults stream_faults synthetic synthetic_days_back synthetic_days_ahead epg_version`
+hls_timeout hls_window token_ttl token_single_use pace faults stream_faults media_override synthetic synthetic_days_back synthetic_days_ahead epg_version`
+
+`media_override`: `{"<stream id>": "std|mp2|50fps|radio|hdr"}` serves another clip for that live stream (Q-1: `{"1": "hdr"}`
+makes ch1 HDR10 for the HDR-poster test).
 
 `--quirks`: numbers as strings (`stream_id`, `tv_archive:"1"`, `max_connections`...), `exp_date` string, `category_id` null for stream 5,
 `backdrop_path` string for vod 103 / series 202, `info: []` for vod 102, `seasons: []` with populated `episodes`.

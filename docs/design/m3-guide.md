@@ -2306,7 +2306,7 @@ Behaviour in one line each: the reminder card is modal only in GUIDE/FULL and wa
 - **O-4:** **open**, unchanged (journey b, "no renderthread slices").
 - **O-5:** **open**, unchanged (baseline profile needs API 33+ or root).
 - **O-6:** **settled** on a quiet host: M2 `SmokeAndZapTest` I-6 passes in every linger variant and I-22/I-22b reach their 50 Hz assumption; I-21 stays the known emulator flake.
-- **Q-1 (new):** with the video track off (Still/low memory) the session rebuffers right after first media; once it stayed in `Buffering` over 8 s (also at `dc88fab`). M2 investigation before M3 sign-off.
+- **Q-1 (new):** with the video track off (Still/low memory) the session rebuffers right after first media; once it stayed in `Buffering` over 8 s (also at `dc88fab`). M2 investigation before M3 sign-off. (2026-10-15: **fixed**, M2 design §5.13: the early rebuffer is the emulator audio HAL; the defect was the video re-enable resetting the live TS period, fixed by `retainBackBufferFromKeyframe = true`.)
 - **O-7:** **open:** cold start unchanged within noise; the engine is still built by the first composition's `VideoLayer`. Next: hand `VideoLayer` the surface player after the first frame (needs a review, M2 surface wiring).
 
 ---

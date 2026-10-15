@@ -165,13 +165,17 @@ abstract class PanelTestBase {
     // ------------------------------------------------------------------ harness
 
     /** Launches the debug harness on [channel] (optionally with a zap list over [zap]). */
-    protected fun launch(channel: ChannelIdentity, zap: List<ChannelIdentity> = emptyList(), stats: Boolean = true, mini: Boolean = false) {
+    protected fun launch(channel: ChannelIdentity, zap: List<ChannelIdentity> = emptyList(), stats: Boolean = true, mini: Boolean = false, hidden: Boolean = false) {
         val q = StringBuilder("thebox-debug://play?playlist=${channel.playlistId}&key=${Uri.encode(channel.stableKey.value)}")
         if (zap.isNotEmpty()) q.append("&zap=").append(Uri.encode(zap.joinToString(",") { it.stableKey.value }))
         if (stats) q.append("&stats=1")
         if (mini) q.append("&viewport=mini")
+        if (hidden) q.append("&viewport=hidden")
         open(Uri.parse(q.toString()))
     }
+
+    /** Q-1: changes the harness's viewport (rect and `setViewport`) without a tune: `full`, `mini` or `hidden`. */
+    protected fun setHarnessViewport(viewport: String) = open(Uri.parse("thebox-debug://viewport?viewport=$viewport"))
 
     protected fun launchUrl(url: String, max: Int = 1) =
         open(Uri.parse("thebox-debug://play?url=${Uri.encode(url)}&max=$max&stats=1"))

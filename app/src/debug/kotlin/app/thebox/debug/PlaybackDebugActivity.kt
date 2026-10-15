@@ -65,7 +65,9 @@ import javax.inject.Inject
  *
  * Parameters (URL-encoded): `url` (+ `ua`, `max`, `format=ts|hls`) → [TuneTarget.DirectUrl]; `playlist` + `key` →
  * [TuneTarget.Channel]; `zap=k1,k2,…` → a [ZapList] over those keys of the same playlist; `stats=1`;
- * `viewport=mini` (the M3 mini-player rect: left 64, top 56, 720×405 design px, 1 design px = width / 1920).
+ * `viewport=mini` (the M3 mini-player rect: left 64, top 56, 720×405 design px, 1 design px = width / 1920);
+ * `viewport=hidden` (Q-1: the surface parked at 1×1 and the video track off, as the M3 still mini player does);
+ * `thebox-debug://viewport?viewport=…` changes only the viewport.
  *
  * Keys: CH± / DPAD_UP/DOWN → zap, DPAD_CENTER → retry, MENU or S → stats, BACK → stop and finish.
  */
@@ -73,7 +75,7 @@ import javax.inject.Inject
 class PlaybackDebugActivity : ComponentActivity() {
     @Inject lateinit var controller: PlaybackController
 
-    private var mini by mutableStateOf(false)
+    private var viewport by mutableStateOf(Viewport.FULL)
     private var statsOn by mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -84,7 +86,7 @@ class PlaybackDebugActivity : ComponentActivity() {
             }
         }
         WindowDisplayModeBinder(controller).bind(this)
-        setContent { Harness(controller, mini, statsOn) }
+        setContent { Harness(controller, viewport, statsOn) }
         handle(intent)
     }
 
@@ -97,7 +99,7 @@ class PlaybackDebugActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        controller.setViewport(if (mini) Viewport.MINI else Viewport.FULL)
+        controller.setViewport(viewport)
     }
 
     private fun handle(intent: Intent?) {
@@ -106,12 +108,22 @@ class PlaybackDebugActivity : ComponentActivity() {
         when (uri.host) {
             "stop" -> controller.stop(StopReason.USER)
             "play" -> play(uri)
+            "viewport" -> applyViewport(uri)
         }
     }
 
+    /** `thebox-debug://viewport?viewport=full|mini|hidden`: changes the rect and the viewport without a tune (Q-1 tests). */
+    private fun applyViewport(uri: Uri) {
+        viewport = when (uri.getQueryParameter("viewport")) {
+            "mini" -> Viewport.MINI
+            "hidden" -> Viewport.HIDDEN
+            else -> Viewport.FULL
+        }
+        controller.setViewport(viewport)
+    }
+
     private fun play(uri: Uri) {
-        mini = uri.getQueryParameter("viewport") == "mini"
-        controller.setViewport(if (mini) Viewport.MINI else Viewport.FULL)
+        applyViewport(uri)
         statsOn = uri.getQueryParameter("stats") == "1"
         controller.setStatsEnabled(statsOn)
         val url = uri.getQueryParameter("url")
@@ -186,15 +198,17 @@ class PlaybackDebugActivity : ComponentActivity() {
 
 /** Surface rule: the root Box has no graphicsLayer/alpha/clip; VideoLayer is its first child. */
 @Composable
-private fun Harness(controller: PlaybackController, mini: Boolean, statsOn: Boolean) {
+private fun Harness(controller: PlaybackController, viewport: Viewport, statsOn: Boolean) {
     BoxWithConstraints(Modifier.fillMaxSize()) {
         val w = if (constraints.maxWidth == Constraints.Infinity) 1920 else constraints.maxWidth
         val h = if (constraints.maxHeight == Constraints.Infinity) 1080 else constraints.maxHeight
-        val rect = if (mini) {
-            val px = w / 1920f
-            RectPx((64 * px).toInt(), (56 * px).toInt(), ((64 + 720) * px).toInt(), ((56 + 405) * px).toInt())
-        } else {
-            RectPx(0, 0, w, h)
+        val rect = when (viewport) {
+            Viewport.MINI -> {
+                val px = w / 1920f
+                RectPx((64 * px).toInt(), (56 * px).toInt(), ((64 + 720) * px).toInt(), ((56 + 405) * px).toInt())
+            }
+            Viewport.HIDDEN, Viewport.NONE -> null
+            else -> RectPx(0, 0, w, h)
         }
         VideoLayer(controller.surfacePlayer, rect)
         Overlay(controller, statsOn, Modifier.align(Alignment.BottomStart).fillMaxWidth())

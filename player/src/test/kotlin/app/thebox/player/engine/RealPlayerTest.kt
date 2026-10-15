@@ -192,7 +192,7 @@ class RealPlayerTest {
         val bundle = newBundle()
         val alc = bundle.loadControl as AdaptiveLoadControl
         assertEquals(0L, alc.getBackBufferDurationUs(PlayerId.UNSET))
-        assertFalse(alc.retainBackBufferFromKeyframe(PlayerId.UNSET))
+        assertTrue("Q-1: keyframe retained", alc.retainBackBufferFromKeyframe(PlayerId.UNSET))
         repeat(2) {
             playFixture(bundle, "h264_aac_2s.ts")
             TestPlayerRunHelper.runUntilRenderedFirstFrame(bundle.player)
