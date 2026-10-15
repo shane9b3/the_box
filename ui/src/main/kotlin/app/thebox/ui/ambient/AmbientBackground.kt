@@ -37,8 +37,10 @@ const val TRACE_AMBIENT = "guide-ambient"
  */
 @Composable
 fun AmbientBackground(state: AmbientState, videoRect: RectPx?, shadowHole: RectPx?, black: Boolean, modifier: Modifier = Modifier) {
-    LaunchedEffect(state.targetHue, state.flat) {
-        if (!state.flat) state.show(state.targetHue ?: AmbientState.DEFAULT_HUE)
+    // (M4, M3 H-L5) No ambient work while the field is black (FULL, screen off): no bitmap is rendered or cross-faded
+    // for a hue nobody sees; the hue of the channel tuned meanwhile is shown when the guide returns.
+    LaunchedEffect(state.targetHue, state.flat, black) {
+        if (!state.flat && !black) state.show(state.targetHue ?: AmbientState.DEFAULT_HUE)
     }
     Spacer(
         modifier

@@ -7,6 +7,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -20,7 +22,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.geometry.Rect
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -28,6 +29,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
+import androidx.media3.common.text.Cue
+import app.thebox.core.full.PlayerLayer
+import app.thebox.core.full.PlayerUiState
 import app.thebox.core.guide.MiniPhase
 import app.thebox.core.guide.Overlay
 import app.thebox.core.guide.ScreenMode
@@ -37,12 +41,18 @@ import app.thebox.core.playback.Viewport
 import app.thebox.player.api.PlaybackState
 import app.thebox.ui.ambient.AmbientBackground
 import app.thebox.ui.full.FullScreenHost
+import app.thebox.ui.full.PlayerUi
+import app.thebox.ui.full.StickyVideo
+import app.thebox.ui.full.SubtitleLayer
+import app.thebox.ui.full.subtitleBottomPadding
 import app.thebox.ui.guide.screen.GuideScreen
+import app.thebox.ui.guide.screen.LocalPlayerArchive
 import app.thebox.ui.guide.screen.ProvideShellImageLoader
 import app.thebox.ui.playback.VideoLayer
 import app.thebox.ui.reminder.ReminderCard
 import kotlinx.coroutines.delay
-import androidx.compose.runtime.DisposableEffect
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -74,19 +84,36 @@ fun viewportFor(hole: HoleMode): Viewport = when (hole) {
 private fun nothingTuned(t: TunedState) = t.identity == null || t.phase == MiniPhase.IDLE || t.phase == MiniPhase.STOPPED
 
 /**
- * The root tree (docs/design/m3-guide.md §3.13.1, B1, B8):
+ * Bottom offset (design px) of the toasts in the displayed mode (docs/design/m4-player-ux.md §3.9, N8): 96, lifted to
+ * 276 while the info or scrub bar shows in FULL and to 156 over the quick bar.
+ */
+fun toastBottomFor(shown: ScreenMode, player: PlayerUiState): Float = when {
+    shown != ScreenMode.FULL -> PlayerUi.TOAST_B
+    player.info != null || player.scrub != null -> PlayerUi.TOAST_B_OVER_BAR
+    player.quick != null -> PlayerUi.TOAST_B_OVER_QUICK
+    else -> PlayerUi.TOAST_B
+}
+
+/** Right offset (design px) of the reminder card: 64, or 568 while the picker sheet is open in FULL (N8). */
+fun reminderEndFor(shown: ScreenMode, player: PlayerUiState): Float =
+    if (shown == ScreenMode.FULL && player.picker != null) PlayerUi.REMINDER_R_BESIDE_PICKER else PlayerUi.REMINDER_R
+
+/**
+ * The root tree (docs/design/m3-guide.md §3.13.1, B1, B8; M4 docs/design/m4-player-ux.md §3.6.3):
  * ```
  * Box {                       // at the window origin; no layer, alpha or clip
  *   VideoLayer                 // the one SurfaceView; first, because it clears with an unclipped CLEAR on API ≤ 30
  *   AmbientBackground          // own default layer (B8): base, ambient bitmap, hole shadow; never inside the video rect
  *   HoleChrome                 // corners, ring, letterbox, still, scrim; drawn after the surface
+ *   SubtitleLayer              // (M4, FULL only) AndroidView(SubtitleView) on the video rect; a direct child (N11)
  *   Box(key sink) {            // the one key sink (WP-D's KeyRouter.sinkModifier), survives every mode change
  *     GUIDE | FULL | SEARCH | SETTINGS screen; reminder card; toast
  *   }
  * }
  * ```
  * No node here applies `graphicsLayer`, alpha, clip, shadow or a RenderEffect to an ancestor of `VideoLayer`;
- * `RootTreeRuleTest` walks the tree. The key sink is a sibling after `HoleChrome`, never an ancestor of `VideoLayer`.
+ * `RootTreeRuleTest` walks the tree. The key sink and the subtitle layer are siblings after `HoleChrome`, never
+ * ancestors of `VideoLayer`.
  *
  * GUIDE ↔ FULL runs the scrim sequence (§3.13.5): the scrim fades over the hole in [SCRIM_MS], the displayed mode
  * switches in one layout pass (viewport and video rect follow the *displayed* mode), two frames later it fades out;
@@ -94,6 +121,11 @@ private fun nothingTuned(t: TunedState) = t.identity == null || t.phase == MiniP
  *
  * (code review 2026-10-14, H-B1) The HDR poster is the controller's state, not a hole mode: the viewport stays MINI
  * (the controller keeps the video track off there) and the mini overlay and [HoleChrome] draw the poster still.
+ *
+ * (M4) The video rect comes from [StickyVideo] (§3.6.2): the previous picture's size and aspect are held across a zap
+ * until the new tune renders or settles. The player's SCREEN_OFF layer maps to `HoleMode.COVERED` (viewport HIDDEN,
+ * black); waking runs the scrim until the next rendered first frame (M3 H-S10). Player toasts and notices
+ * ([ShellHost.player] events) share the toast slot, which lifts over the bottom bars (N8).
  */
 @Composable
 fun AppRoot(
@@ -107,8 +139,14 @@ fun AppRoot(
 ) {
     val ui by host.machine.ui.collectAsState()
     val video by host.video.collectAsState()
+    val playback by host.playback.collectAsState()
     val settings by host.settings.collectAsState()
     val lowEnd by host.lowEnd.collectAsState()
+    val player = host.player
+    val playerFlow = remember(player) { player?.machine?.ui ?: MutableStateFlow(PlayerUiState()) }
+    val pui by playerFlow.collectAsState()
+    val cuesFlow: StateFlow<List<Cue>> = remember(player) { player?.cues ?: MutableStateFlow(emptyList()) }
+    val cues by cuesFlow.collectAsState()
 
     // ---- geometry (window px)
     val container = LocalWindowInfo.current.containerSize
@@ -151,10 +189,28 @@ fun AppRoot(
         scrim.animateTo(0f, tween(SCRIM_MS, easing = LinearEasing))
     }
 
-    val holeMode = holeModeFor(shown, ui.tuned)
+    // ---- screen off (§3.4.5): COVERED while off; waking waits for the next rendered first frame under the scrim.
+    val screenOff = shown == ScreenMode.FULL && pui.layer == PlayerLayer.SCREEN_OFF
+    var wasOff by remember { mutableStateOf(false) }
+    LaunchedEffect(screenOff) {
+        if (screenOff) {
+            wasOff = true
+            return@LaunchedEffect
+        }
+        if (!wasOff) return@LaunchedEffect
+        wasOff = false
+        val framesBefore = host.video.value.renderedFirstFrames
+        scrim.snapTo(1f)
+        withTimeoutOrNull(STILL_TO_FULL_MAX_WAIT_MS) { host.video.first { it.renderedFirstFrames != framesBefore } }
+        scrim.animateTo(0f, tween(SCRIM_MS, easing = LinearEasing))
+    }
+
+    val holeMode = if (screenOff) HoleMode.COVERED else holeModeFor(shown, ui.tuned)
     LaunchedEffect(holeMode) { host.setViewport(viewportFor(holeMode)) }
-    val rects = remember(holeMode, holeVersion, container, video.width, video.height, video.pixelRatio, video.aspectMode) {
-        geometry.rects(holeMode, video.width, video.height, video.pixelRatio, video.aspectMode)
+    val sticky = remember { StickyVideo() }
+    val placed = sticky.resolve(video, playback, ui.tuned.handoff)
+    val rects = remember(holeMode, holeVersion, container, placed.width, placed.height, placed.pixelRatio, placed.aspectMode) {
+        geometry.rects(holeMode, placed.width, placed.height, placed.pixelRatio, placed.aspectMode)
     }
 
     // ---- key sink focus (B1): on every mode change and on resume
@@ -166,25 +222,25 @@ fun AppRoot(
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { host.keyRouter.onFocusLost() }
     DisposableEffect(host.keyRouter) { onDispose { host.keyRouter.onFocusLost() } }
 
-    // ---- shell events
-    val context = LocalContext.current
+    // ---- shell events (the guide's and the player's share one toast slot)
+    val resources = androidx.compose.ui.platform.LocalResources.current
     val view = LocalView.current
     var toast by remember { mutableStateOf<Pair<Long, String>?>(null) }
     val exit by rememberUpdatedState(onExit)
-    LaunchedEffect(host) {
-        var seq = 0L
-        host.events.collect { e ->
-            when (e) {
-                is ShellEvent.Toast -> {
-                    val text = toastText(context.resources, e.kind, e.arg)
-                    if (toast?.second != text) toast = (++seq) to text
-                }
-                is ShellEvent.Announce -> announce(view, e.text)
-                ShellEvent.Exit -> exit()
-                is ShellEvent.Message -> Unit // M4 commit 0 (§1.7 item 7); WP-D shows it as a toast
+    val seq = remember { longArrayOf(0L) }
+    val onEvent: (ShellEvent) -> Unit = { e ->
+        when (e) {
+            is ShellEvent.Toast -> {
+                val text = toastText(resources, e.kind, e.arg)
+                if (toast?.second != text) toast = (++seq[0]) to text
             }
+            is ShellEvent.Message -> if (toast?.second != e.text) toast = (++seq[0]) to e.text
+            is ShellEvent.Announce -> announce(view, e.text)
+            ShellEvent.Exit -> exit()
         }
     }
+    LaunchedEffect(host) { host.events.collect { onEvent(it) } }
+    LaunchedEffect(player) { player?.events?.collect { onEvent(it) } }
     LaunchedEffect(toast) {
         if (toast != null) {
             delay(TOAST_MS)
@@ -195,35 +251,48 @@ fun AppRoot(
     val density = LocalDensity.current.density
     val anchor = remember(ui.overlay) { if (ui.overlay is Overlay.Menu || ui.overlay is Overlay.Sheet) cellAnchor(host, density) else null }
     val ambientShadowHole = if (holeMode == HoleMode.MINI || holeMode == HoleMode.STILL) rects.hole else null
+    val toastBottom = toastBottomFor(shown, pui)
+    val reminderEnd = reminderEndFor(shown, pui)
 
     ProvideShellImageLoader(host.imageLoader) {
-        Box(modifier.fillMaxSize()) {
-            // VideoLayer first: on API ≤ 30 its SurfaceView punches the hole with an unclipped drawColor(CLEAR), which
-            // would erase anything drawn before it in the frame (see AmbientBackground). The background then paints
-            // everything except the video rect.
-            videoLayer(rects.video)
-            AmbientBackground(host.ambient, rects.video, ambientShadowHole, black = holeMode == HoleMode.FULL)
-            HoleChrome(rects, holeMode, host.ambient, scrim = { scrim.value }, poster = holeMode == HoleMode.MINI && video.posterMode)
-            Box(Modifier.fillMaxSize().testTag(KEY_SINK_TAG).then(sink)) {
-                when (shown) {
-                    ScreenMode.GUIDE -> GuideScreen(
-                        state = ui,
-                        clock24 = settings.clock24,
-                        lowEnd = lowEnd,
-                        poster = video.posterMode,
-                        anchor = anchor,
-                        onHoleMeasured = onHoleMeasured,
-                        debugHint = debugHint,
-                        grid = grid,
-                    )
-                    ScreenMode.FULL -> FullScreenHost(ui)
-                    ScreenMode.SEARCH -> search()
-                    ScreenMode.SETTINGS -> SettingsPlaceholder(host.versionName)
+        CompositionLocalProvider(LocalPlayerArchive provides ui.archive) {
+            Box(modifier.fillMaxSize()) {
+                // VideoLayer first: on API ≤ 30 its SurfaceView punches the hole with an unclipped drawColor(CLEAR), which
+                // would erase anything drawn before it in the frame (see AmbientBackground). The background then paints
+                // everything except the video rect.
+                videoLayer(rects.video)
+                AmbientBackground(host.ambient, rects.video, ambientShadowHole, black = holeMode == HoleMode.FULL || screenOff)
+                HoleChrome(rects, holeMode, host.ambient, scrim = { scrim.value }, poster = holeMode == HoleMode.MINI && video.posterMode)
+                val videoRect = rects.video
+                if (shown == ScreenMode.FULL && !screenOff && player != null && videoRect != null) {
+                    val barTop = when {
+                        pui.info != null || pui.scrub != null -> PlayerUi.BAR_T * density
+                        pui.quick != null -> PlayerUi.QUICK_T * density
+                        else -> null
+                    }
+                    SubtitleLayer(cues, videoRect, subtitleBottomPadding(videoRect, barTop, density))
                 }
-                if (shown == ScreenMode.GUIDE || shown == ScreenMode.FULL) {
-                    ui.reminder?.let { ReminderCard(it, Modifier.align(Alignment.BottomEnd).padding(end = 64.dp, bottom = 96.dp)) }
+                Box(Modifier.fillMaxSize().testTag(KEY_SINK_TAG).then(sink)) {
+                    when (shown) {
+                        ScreenMode.GUIDE -> GuideScreen(
+                            state = ui,
+                            clock24 = settings.clock24,
+                            lowEnd = lowEnd,
+                            poster = video.posterMode,
+                            anchor = anchor,
+                            onHoleMeasured = onHoleMeasured,
+                            debugHint = debugHint,
+                            grid = grid,
+                        )
+                        ScreenMode.FULL -> FullScreenHost(ui, player = player, clock24 = settings.clock24, lowEnd = lowEnd)
+                        ScreenMode.SEARCH -> search()
+                        ScreenMode.SETTINGS -> SettingsPlaceholder(host.versionName)
+                    }
+                    if (shown == ScreenMode.GUIDE || shown == ScreenMode.FULL) {
+                        ui.reminder?.let { ReminderCard(it, Modifier.align(Alignment.BottomEnd).padding(end = reminderEnd.dp, bottom = toastBottom.dp)) }
+                    }
+                    toast?.let { (_, text) -> ToastView(text, Modifier.align(Alignment.BottomStart).padding(start = PlayerUi.TOAST_L.dp, bottom = toastBottom.dp)) }
                 }
-                toast?.let { (_, text) -> ToastView(text, Modifier.align(Alignment.BottomStart).padding(start = 64.dp, bottom = 96.dp)) }
             }
         }
     }

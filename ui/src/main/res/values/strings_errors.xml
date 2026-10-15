@@ -58,4 +58,30 @@
     <string name="catchup_unsupported_mode_step">Try another mode in playlist settings</string>
     <string name="catchup_credentials">Your saved login could not be read</string>
     <string name="catchup_credentials_step">Check your login in Settings</string>
+    <!-- M4 full-screen error card (docs/design/m4-player-ux.md §3.7; owner WP-D). Buttons exist only for steps M4 can
+         execute; every other step is a text line (strings above). -->
+    <string name="error_button_retry">Retry</string>
+    <string name="error_button_previous_channel">Previous channel</string>
+    <string name="error_button_watch_live">Watch live</string>
+    <string name="error_button_other_catchup_format">Try another catch-up format</string>
+    <string name="error_button_software_decoder">Use the software decoder</string>
+    <string name="error_button_audio_options">Audio options</string>
+    <string name="error_button_stop">Stop</string>
+    <string name="error_button_guide">Guide</string>
+    <!-- Detail line pieces (fields joined by " · ", then the code key). -->
+    <string name="error_detail_http">HTTP %1$d</string>
+    <string name="error_detail_connections">%1$d/%2$d connections</string>
+    <string name="error_detail_separator">" · "</string>
+    <!-- Retry line behind the card (M2 §4.3). -->
+    <string name="error_retry_attempt_of">Still trying… attempt %1$d of %2$d</string>
+    <string name="error_retry_next_in">Still trying… next attempt in %1$d s</string>
+    <string name="error_retry_attempt">Still trying… attempt %1$d</string>
+    <!-- After the error card's Stop (review N12). -->
+    <string name="error_stopped_hint">Stopped to free the connection. Press OK to play again.</string>
+    <!-- Archive session failures that have no CatchupFailure twin (ArchiveFailure, §3.7 last paragraph). -->
+    <string name="archive_no_programme">There is no programme here to play from the archive</string>
+    <string name="archive_no_programme_step">Pick a programme in the guide, or watch the channel live</string>
+    <string name="archive_not_in_archive_step">Watch the channel live, or try another catch-up mode in playlist settings</string>
+    <string name="archive_playback">Catch-up playback stopped</string>
+    <string name="archive_playback_step">Watch the channel live, or try the programme again from the guide</string>
 </resources>

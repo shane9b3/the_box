@@ -88,9 +88,11 @@ class GuideViewModelTest {
         val labels = FakeTimeLabels()
         val router = KeyRouterImpl(DefaultKeyMap(), KeyGestureDetectorImpl(), FakeKeyCapabilities())
         val pagers = ArrayList<FakeGuideWindowPager>()
+        val archive = app.thebox.core.full.fakes.FakeArchivePlayback()
+        val playerSettings = app.thebox.core.full.fakes.FakePlayerSettings()
         val stores = ArrayList<ViewModelStore>()
 
-        fun viewModel(): GuideViewModel {
+        fun viewModel(machineFactory: app.thebox.core.guide.GuideStateMachineFactory = GuideStateMachineImpl.FACTORY): GuideViewModel {
             val store = ViewModelStore().also { stores += it }
             val factory = object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
@@ -98,9 +100,10 @@ class GuideViewModelTest {
                     context, controller, FakeCatchupLauncher(), library,
                     GuideRowsCacheFactory { lib, scope -> GuideRowsCacheImpl(lib, scope) },
                     GuideWindowPagerFactory { _, _, _, _, _ -> FakeGuideWindowPager().also { pagers += it } },
-                    settings, FakeGuideSessionStore(), FakeReminderBook(), alerts, FakeKeyCapabilities(), GuideStateMachineImpl.FACTORY,
+                    settings, FakeGuideSessionStore(), FakeReminderBook(), alerts, FakeKeyCapabilities(), machineFactory,
                     FakeNavigator(), labels, FakeGuideRenderer(), FakeDeviceClassSource(), FakeSyncFeed(), FakeGuideDataWindowSource(),
                     probe, router, FakeGuideMetricsFactory(), FakeRowCellsBuilder(), FakeGuideImages(), ImageLoader(context), GuideTrim(null, null),
+                    archive, playerSettings,
                 ) as T
             }
             val vm = ViewModelProvider(store, factory)[GuideViewModel::class.java]
@@ -222,5 +225,92 @@ class GuideViewModelTest {
         idle()
         assertEquals(ZoneId.of("Asia/Kolkata"), w.labels.zone)
         assertTrue(pager.invalidations > inv2)
+    }
+
+    // ---- M4 (docs/design/m4-player-ux.md §3.10.1, §3.10.3, §5.4; B1, S9)
+
+    /** A player host that is also the guide bridge (what PlayerViewModel is), recording what the guide VM hands it. */
+    private class BridgeHost : app.thebox.ui.full.PlayerHost, app.thebox.ui.full.vm.PlayerGuideBridge {
+        override val machine = app.thebox.core.full.fakes.FakePlayerStateMachine()
+        override val listRows: app.thebox.core.guide.GuideRows = app.thebox.core.guide.GuideRows.EMPTY
+        override fun nowOf(row: GuideChannel): app.thebox.core.guide.ProgrammeInfo? = null
+        override val cues = kotlinx.coroutines.flow.MutableStateFlow<List<androidx.media3.common.text.Cue>>(emptyList())
+        override val events = kotlinx.coroutines.flow.emptyFlow<ShellEvent>()
+        var guide: app.thebox.core.guide.GuideStateMachine? = null
+        val lineups = ArrayList<Pair<app.thebox.core.guide.GuideSource?, app.thebox.core.guide.GuideLineup?>>()
+        override fun attachGuide(guide: app.thebox.core.guide.GuideStateMachine) { this.guide = guide }
+        override fun onGuideLineup(source: app.thebox.core.guide.GuideSource?, lineup: app.thebox.core.guide.GuideLineup?) { lineups += source to lineup }
+    }
+
+    @Test fun attachPlayerHostWiresTheShellTheMachineAndTheBridge() {
+        val w = World()
+        val vm = w.viewModel()
+        assertEquals(null, vm.player)
+        val host = BridgeHost()
+        vm.attachPlayer(host)
+        idle()
+        assertSame(host, vm.player)
+        assertSame(host.machine, vm.machine.full)
+        assertSame(vm.machine, host.guide)
+        assertTrue("the guide's source and lineup reach the player (GuideSourceNow)", host.lineups.isNotEmpty())
+        assertNotNull(host.lineups.last().second)
+    }
+
+    /** B1 through the guide VM: an owned archive probe error never reaches the guide machine as ERROR. */
+    @Test fun archiveProbeErrorsAreHiddenFromTheGuide() {
+        val w = World()
+        val vm = w.viewModel()
+        val ch = channels[5]
+        val np5 = NowPlaying(5, ch.identity, ch.displayName, true, StreamFormat.TS)
+        w.archive.mutableStatus.value = app.thebox.core.catchup.archive.ArchiveStatus(app.thebox.core.catchup.archive.ArchivePhase.STARTING, channel = ch, identityHash = ch.identityHash, ownedTuneId = 5)
+        w.controller.state.value = PlaybackState.Error(np5, app.thebox.core.playback.PlaybackError(app.thebox.core.playback.PlaybackErrorCode.CATCHUP_NOT_IN_ARCHIVE))
+        idle()
+        assertEquals(app.thebox.core.guide.MiniPhase.CONNECTING, vm.machine.ui.value.tuned.phase)
+        assertEquals(null, vm.machine.ui.value.tuned.errorDetail)
+        // FAILED: the session gave up, the error shows with its detail.
+        w.archive.mutableStatus.value = w.archive.status.value.copy(phase = app.thebox.core.catchup.archive.ArchivePhase.FAILED)
+        idle()
+        assertEquals(app.thebox.core.guide.MiniPhase.ERROR, vm.machine.ui.value.tuned.phase)
+        assertEquals(app.thebox.core.playback.PlaybackErrorCode.CATCHUP_NOT_IN_ARCHIVE, vm.machine.ui.value.tuned.errorDetail?.code)
+    }
+
+    @Test fun archiveStatusAndPlayerSettingsAreForwarded() {
+        val w = World()
+        val fake = app.thebox.core.guide.fakes.FakeGuideStateMachine()
+        w.viewModel(app.thebox.core.guide.fakes.FakeGuideStateMachine.factory(fake))
+        val st = app.thebox.core.catchup.archive.ArchiveStatus(app.thebox.core.catchup.archive.ArchivePhase.PAUSED_LIVE)
+        w.archive.mutableStatus.value = st
+        w.playerSettings.update { it.copy(numberEntryWaitMs = 2_500) }
+        idle()
+        assertEquals(st, fake.events.filterIsInstance<GuideEvent.Archive>().last().status)
+        assertEquals(2_500L, fake.events.filterIsInstance<GuideEvent.Player>().last().settings.numberEntryWaitMs)
+    }
+
+    @Test fun onLaunchModes() {
+        fun run(mode: app.thebox.core.full.OnLaunch): Pair<World, app.thebox.core.guide.fakes.FakeGuideStateMachine> {
+            val w = World()
+            w.playerSettings.update { it.copy(onLaunch = mode) }
+            val fake = app.thebox.core.guide.fakes.FakeGuideStateMachine()
+            w.viewModel(app.thebox.core.guide.fakes.FakeGuideStateMachine.factory(fake))
+            return w to fake
+        }
+        run(app.thebox.core.full.OnLaunch.GUIDE_WITH_LAST).let { (w, m) ->
+            assertTrue("tune" in w.controller.calls)
+            assertFalse(m.events.contains(GuideEvent.StartFull))
+        }
+        run(app.thebox.core.full.OnLaunch.FULL_LAST).let { (w, m) ->
+            assertTrue("tune" in w.controller.calls)
+            assertTrue(m.events.contains(GuideEvent.StartFull))
+        }
+        run(app.thebox.core.full.OnLaunch.GUIDE_NOTHING).let { (w, m) ->
+            assertFalse("tune" in w.controller.calls)
+            assertFalse(m.events.contains(GuideEvent.StartFull))
+        }
+        val w = World()
+        w.library.lastWatched = null
+        w.playerSettings.update { it.copy(onLaunch = app.thebox.core.full.OnLaunch.FULL_LAST) }
+        val fake = app.thebox.core.guide.fakes.FakeGuideStateMachine()
+        w.viewModel(app.thebox.core.guide.fakes.FakeGuideStateMachine.factory(fake))
+        assertFalse("nothing to tune: no pending FULL", fake.events.contains(GuideEvent.StartFull))
     }
 }

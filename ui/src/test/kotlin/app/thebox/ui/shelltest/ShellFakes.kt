@@ -100,6 +100,7 @@ class TestKeyRouter : KeyRouter {
 class FakeShellHost(
     override val machine: GuideStateMachine,
     override val keyRouter: KeyRouter = TestKeyRouter().also { it.attach(machine) { true } },
+    override val player: app.thebox.ui.full.PlayerHost? = null,
 ) : ShellHost {
     override val surfacePlayer = StubPlayer()
     val videoFlow = MutableStateFlow(VideoInfo(width = 1920, height = 1080))
@@ -152,7 +153,11 @@ class FakePlaybackController : PlaybackController {
     override val video = MutableStateFlow(VideoInfo())
     override val tracks = MutableStateFlow(TrackInfo())
     override val stats = MutableStateFlow(StreamStats())
-    override val notices = MutableSharedFlow<PlaybackNotice>()
+    override val notices = MutableSharedFlow<PlaybackNotice>(extraBufferCapacity = 8)
+    override val cues = MutableStateFlow<List<androidx.media3.common.text.Cue>>(emptyList())
+    override val previous = MutableStateFlow<ChannelIdentity?>(null)
+    val audioSelections = ArrayList<TrackRef?>()
+    var statsOn = false
     override val keepScreenOn = MutableStateFlow(false)
     override val displayModeRequest = MutableStateFlow(0)
     override val surfacePlayer: androidx.media3.common.Player get() = error("unused")
@@ -169,10 +174,23 @@ class FakePlaybackController : PlaybackController {
     override fun stop(reason: StopReason) { calls += "stop" }
     override fun retry() { calls += "retry" }
     override fun setViewport(viewport: Viewport) { calls += "viewport:$viewport" }
-    override fun setStatsEnabled(enabled: Boolean) = Unit
-    override fun selectAudioTrack(track: TrackRef?, remember: Boolean) = Unit
+    override fun setStatsEnabled(enabled: Boolean) { statsOn = enabled }
+    override fun selectAudioTrack(track: TrackRef?, remember: Boolean) { audioSelections += track }
     override fun selectTextTrack(track: TrackRef?, remember: Boolean) = Unit
     override fun setAspectMode(mode: AspectMode, remember: Boolean) = Unit
     override fun setVideoDecoderOverride(mode: VideoDecoderMode?, remember: Boolean) = Unit
     override fun prewarm() { calls += "prewarm" }
+}
+
+/** (M4) A [app.thebox.ui.full.PlayerHost] over a fake machine; tests drive `machine.mutableUi`, cues and events. */
+class FakePlayerHost(
+    override val machine: app.thebox.core.full.fakes.FakePlayerStateMachine = app.thebox.core.full.fakes.FakePlayerStateMachine(),
+    override val listRows: app.thebox.core.guide.GuideRows = app.thebox.core.guide.GuideRows.EMPTY,
+) : app.thebox.ui.full.PlayerHost {
+    val now = HashMap<Long, ProgrammeInfo>()
+    override fun nowOf(row: GuideChannel): ProgrammeInfo? = now[row.identityHash]
+    val cuesFlow = MutableStateFlow<List<androidx.media3.common.text.Cue>>(emptyList())
+    override val cues: StateFlow<List<androidx.media3.common.text.Cue>> = cuesFlow
+    val eventsFlow = MutableSharedFlow<ShellEvent>(extraBufferCapacity = 8)
+    override val events: SharedFlow<ShellEvent> = eventsFlow
 }

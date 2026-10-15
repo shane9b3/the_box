@@ -13,6 +13,7 @@ import app.thebox.player.api.PlaybackController
 import app.thebox.player.engine.WindowDisplayModeBinder
 import app.thebox.ui.guide.grid.GuideGridHost
 import app.thebox.ui.guide.grid.GuideTrim
+import app.thebox.ui.full.vm.PlayerViewModel
 import app.thebox.ui.guide.vm.GuideViewModel
 import app.thebox.ui.root.AppRoot
 import app.thebox.ui.search.SearchScreen
@@ -25,7 +26,7 @@ import javax.inject.Inject
 /**
  * The one activity (docs/design/m3-guide.md §1.4, §3.13.1, §3.16.1): keeps M2's screen-on and API < 31 display-mode
  * wiring, and hosts [AppRoot] with the guide view model as
- * its [app.thebox.ui.root.ShellHost]. View models come from the activity's Hilt default factory (`by viewModels()`), so
+ * its [app.thebox.ui.root.ShellHost] (and the player view model attached to it, M4 §3.10.1). View models come from the activity's Hilt default factory (`by viewModels()`), so
  * no `hilt-navigation-compose` is needed. The Search screen's effects go to the guide view model (B7, §2.13 item 7);
  * `onTrimMemory` goes to [GuideTrim] (§4.7, §2.13 item 6).
  *
@@ -41,6 +42,7 @@ class MainActivity : ComponentActivity() {
     @Inject lateinit var startupGate: StartupGate
 
     private val guide: GuideViewModel by viewModels()
+    private val player: PlayerViewModel by viewModels()
     private val search: SearchViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,8 +52,10 @@ class MainActivity : ComponentActivity() {
         WindowDisplayModeBinder(controller).bind(this)
 
         val host = guide // creates the view model and its feeds (§3.16.1)
-        // (M4 commit 0, docs/design/m4-player-ux.md §1.7 item 10, S9) Startup runs after the player machine is attached:
-        // WP-D creates the PlayerViewModel here and calls host.attachPlayer(player.machine) before this line.
+        // (M4, docs/design/m4-player-ux.md §1.7 item 10, §3.10.1, S9) The player view model and its machine exist, and
+        // the guide machine delegates FULL to it, before the startup tune: no FULL state runs without the player machine.
+        host.attachPlayer(player)
+        player.runTicker(lifecycle)
         host.startup()
         lifecycleScope.launch { search.effects.collect { host.onSearchEffect(it) } }
         setContent {

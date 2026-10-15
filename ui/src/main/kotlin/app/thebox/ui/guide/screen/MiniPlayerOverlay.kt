@@ -40,12 +40,20 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.thebox.core.catchup.archive.ArchivePhase
+import app.thebox.core.catchup.archive.ArchiveStatus
+import app.thebox.core.full.PillKind
+import app.thebox.core.full.PillState
+import app.thebox.core.full.state.PillRules
 import app.thebox.core.guide.GuideChannel
 import app.thebox.core.guide.MiniPhase
 import app.thebox.core.guide.ProgrammeInfo
 import app.thebox.core.guide.TunedState
+import app.thebox.core.playback.PlaybackError
 import app.thebox.core.playback.PlaybackErrorCode
 import app.thebox.ui.R
+import app.thebox.ui.full.BehindLabel
+import app.thebox.ui.full.rememberDebouncedPill
 import app.thebox.ui.playback.ErrorText
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
@@ -78,6 +86,11 @@ fun MiniPlayerOverlay(
     lowEnd: Boolean,
     poster: Boolean,
     modifier: Modifier = Modifier,
+    /**
+     * (M4, docs/design/m4-player-ux.md §3.2.3) The archive session (`GuideUiState.archive`), for the PAUSED and
+     * −MM:SS pills. Defaults to the root's [LocalPlayerArchive] so `GuideScreen` needs no edit.
+     */
+    archive: ArchiveStatus? = LocalPlayerArchive.current,
 ) {
     if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) androidx.compose.runtime.SideEffect { app.thebox.ui.guide.GuideDebugCounters.bump(COMPOSITIONS_MINI) } // H-S9
     val now by produceState(System.currentTimeMillis()) {
@@ -90,21 +103,40 @@ fun MiniPlayerOverlay(
         val nothing = tuned.identity == null || tuned.phase == MiniPhase.IDLE || tuned.phase == MiniPhase.STOPPED
         when {
             tuned.phase == MiniPhase.ERROR && tuned.error != null ->
-                ErrorCard(tuned.error!!, tunedChannel, Modifier.align(Alignment.Center))
+                ErrorCard(tuned.error!!, tunedChannel, Modifier.align(Alignment.Center), tuned.errorDetail)
             // H-B1: the HDR poster shows the still in MINI (the controller keeps the video track off; viewport MINI).
             tuned.still || nothing || poster ->
                 Still(tunedChannel, tunedNow, poster && !nothing, Modifier.align(Alignment.Center))
             else -> BottomPanel(tunedNow, tunedChannel, now, clock24, Modifier.align(Alignment.BottomStart))
         }
-        if (!nothing) Pills(tuned, tunedChannel, lowEnd, Modifier.offset(20.dp, 18.dp))
+        if (!nothing) Pills(tuned, tunedChannel, lowEnd, archivePill(tuned, archive), Modifier.offset(20.dp, 18.dp))
     }
 }
 
+/**
+ * (M4, docs/design/m4-player-ux.md §2.5, §3.2.3) The root provides `GuideUiState.archive` here, so the mini player
+ * reads the archive session without a `GuideScreen` edit.
+ */
+val LocalPlayerArchive = staticCompositionLocalOf<ArchiveStatus?> { null }
+
+/**
+ * The shared pill rule (`PillRules`, §3.2.3) while an archive session exists; null otherwise (M3's pills: the
+ * visible tuned state alone decides). [tuned] is already the visible state (`ArchiveVisibility`, B1).
+ */
 @Composable
-private fun Pills(tuned: TunedState, tunedChannel: GuideChannel?, lowEnd: Boolean, modifier: Modifier) {
+private fun archivePill(tuned: TunedState, archive: ArchiveStatus?): PillState? {
+    if (archive == null || archive.phase == ArchivePhase.IDLE || archive.phase == ArchivePhase.FAILED) return null
+    val pill = remember(tuned, archive) { PillRules.pill(tuned, archive, System.currentTimeMillis()) }
+    return rememberDebouncedPill(pill)
+}
+
+@Composable
+private fun Pills(tuned: TunedState, tunedChannel: GuideChannel?, lowEnd: Boolean, archivePill: PillState?, modifier: Modifier) {
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         val pill = Modifier.background(GuideUi.PillDark, RoundedCornerShape(999.dp)).padding(horizontal = 12.dp, vertical = 6.dp)
-        Row(pill, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (archivePill != null && (archivePill.kind == PillKind.PAUSED || archivePill.kind == PillKind.BEHIND)) {
+            MiniArchivePill(archivePill)
+        } else Row(pill, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             when {
                 tuned.phase == MiniPhase.CONNECTING || tuned.phase == MiniPhase.BUFFERING ->
                     Line(stringResource(R.string.guide_mini_connecting), GuideUi.sans(15, FontWeight.SemiBold))
@@ -125,14 +157,34 @@ private fun Pills(tuned: TunedState, tunedChannel: GuideChannel?, lowEnd: Boolea
 }
 
 /**
+ * (M4, §3.2.3) PAUSED (white 12 %) and `−MM:SS` / `−H:MM:SS` (BEHIND, or PAUSED with a growing distance to live) in
+ * the M3 pill style; the label is drawn from a reused buffer and ticks at 1 Hz only while it grows (§4.1).
+ */
+@Composable
+internal fun MiniArchivePill(p: PillState, modifier: Modifier = Modifier) {
+    val fill = if (p.kind == PillKind.PAUSED) Color.White.copy(alpha = 0.12f) else GuideUi.PillDark
+    Row(
+        modifier.testTag(MINI_ARCHIVE_PILL_TAG).background(fill, RoundedCornerShape(999.dp)).padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (p.kind == PillKind.PAUSED) Line(stringResource(R.string.player_pill_paused), GuideUi.sans(15, FontWeight.SemiBold, letterSpacingEm = 0.08f))
+        if (p.kind == PillKind.BEHIND || p.behindMs > 0) BehindLabel(p)
+    }
+}
+
+const val MINI_ARCHIVE_PILL_TAG = "mini_archive_pill"
+
+/**
  * The LIVE dot pulses 1 → .35 over 1.6 s (prototype `tvPulse`); in low-end mode it is a 1 Hz alpha step (§3.13.4):
  * (code review 2026-10-14, H-S8) a coroutine toggles the alpha once a second, so the window draws two frames a second,
  * not one per vsync as a keyframed infinite transition does. The alpha is applied in the dot's own layer (draw phase
  * only; ModulateAlpha, no offscreen buffer). This node is inside the mini-player overlay, a sibling subtree of
- * `VideoLayer`, never its ancestor.
+ * `VideoLayer`, never its ancestor. (M4) The full-screen pills always pass `lowEnd = true`: no infinite transition runs
+ * in FULL (docs/design/m4-player-ux.md §3.9, §4.1).
  */
 @Composable
-private fun LiveDot(lowEnd: Boolean) {
+internal fun LiveDot(lowEnd: Boolean) {
     if (lowEnd) {
         val step = remember { mutableFloatStateOf(1f) }
         LaunchedEffect(Unit) {
@@ -221,9 +273,12 @@ private fun Still(channel: GuideChannel?, info: ProgrammeInfo?, poster: Boolean,
     }
 }
 
-/** Compact error card (phase ERROR): logo, amber dot, headline (reason) and one next-step line (§3.13.4). */
+/**
+ * Compact error card (phase ERROR): logo, amber dot, headline (reason) and one next-step line (§3.13.4). (M4, M3 H-L9)
+ * The step is [detail]'s own first action (the ladder narrows the defaults, `TunedState.errorDetail`) when known.
+ */
 @Composable
-fun ErrorCard(code: PlaybackErrorCode, channel: GuideChannel?, modifier: Modifier = Modifier) {
+fun ErrorCard(code: PlaybackErrorCode, channel: GuideChannel?, modifier: Modifier = Modifier, detail: PlaybackError? = null) {
     Column(
         modifier
             .testTag(ERROR_CARD_TAG)
@@ -238,7 +293,8 @@ fun ErrorCard(code: PlaybackErrorCode, channel: GuideChannel?, modifier: Modifie
             Dot(GuideUi.Warn, 10.dp)
             Line(stringResource(ErrorText.headline(code)), GuideUi.sans(22, FontWeight.SemiBold), maxLines = 2)
         }
-        Line(stringResource(ErrorText.step(code)), GuideUi.sans(18, color = GuideUi.Fg70), maxLines = 2)
+        val step = if (detail != null && detail.code == code) ErrorText.step(detail) else ErrorText.step(code)
+        Line(stringResource(step), GuideUi.sans(18, color = GuideUi.Fg70), maxLines = 2)
     }
 }
 
