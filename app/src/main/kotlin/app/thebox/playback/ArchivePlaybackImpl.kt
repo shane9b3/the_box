@@ -20,6 +20,7 @@ import app.thebox.core.catchup.archive.ArchivePhase.SEEKING
 import app.thebox.core.catchup.archive.ArchivePhase.STARTING
 import app.thebox.core.catchup.archive.ArchivePlanner
 import app.thebox.core.catchup.archive.ArchivePlannerImpl
+import app.thebox.core.catchup.archive.ArchiveNotice
 import app.thebox.core.catchup.archive.ArchivePlayback
 import app.thebox.core.catchup.archive.ArchiveStart
 import app.thebox.core.catchup.archive.ArchiveStatus
@@ -100,13 +101,13 @@ class ArchivePlaybackImpl(
     private val _status = MutableStateFlow(ArchiveStatus())
     override val status: StateFlow<ArchiveStatus> = _status.asStateFlow()
 
-    private val _liveNotReady = MutableSharedFlow<ChannelIdentity>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+    private val _liveNotReady = MutableSharedFlow<ArchiveNotice>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
     /**
      * The lag rule gave up near the live edge and tuned live (§3.8.7): the UI toasts ARCHIVE_NOT_READY. Not on the
      * [ArchivePlayback] contract (contract gap reported to the lead); the status alone shows only `IDLE`.
      */
-    val liveNotReady: SharedFlow<ChannelIdentity> = _liveNotReady.asSharedFlow()
+    override val notices: SharedFlow<ArchiveNotice> = _liveNotReady.asSharedFlow()
 
     private val mainContext = scope.coroutineContext[ContinuationInterceptor] ?: io
 
@@ -1023,7 +1024,7 @@ class ArchivePlaybackImpl(
     private fun goLive(s: Session, notReady: Boolean) {
         controller.tune(TuneTarget.Channel(s.channel.identity))
         end(s)
-        if (notReady) _liveNotReady.tryEmit(s.channel.identity)
+        if (notReady) _liveNotReady.tryEmit(ArchiveNotice.LiveNotReady(s.channel.identity))
     }
 
     private fun end(s: Session) {

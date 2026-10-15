@@ -70,8 +70,16 @@ sealed interface ArchiveStart {
 }
 
 /** The catch-up engine (§3.8). Main-safe; suspend functions switch to IO internally. One session at a time. */
+/** (M4 integration, lead 2026-10-15) One-shot notices the session raises outside [ArchiveStatus]; WP-D toasts them. */
+sealed interface ArchiveNotice {
+    /** The panel has not written the recent archive yet (lag step exhausted, §3.8.7): playback went back to live. */
+    data class LiveNotReady(val channel: app.thebox.core.refresh.ChannelIdentity) : ArchiveNotice
+}
+
 interface ArchivePlayback {
     val status: StateFlow<ArchiveStatus>
+    /** (M4 integration, lead 2026-10-15) Notices such as [ArchiveNotice.LiveNotReady]; buffered, delivered once. */
+    val notices: kotlinx.coroutines.flow.Flow<ArchiveNotice>
     /** Catch-up from the programme's start (guide Watch / From start, Search, info bar OK on a past programme). */
     suspend fun playProgramme(channel: GuideChannel, info: ProgrammeInfo, rawEndMin: Int, timeShift: Boolean = false): ArchiveStart
     /** Start over the programme airing now on [channel] (Red, quick bar). */

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Runs the M2 instrumented playback suite (docs/design/m2-playback-core.md §5.5) against the fake panel.
 #
-#   tools/fakepanel/run-instrumented.sh [--port 18080] [--host-url http://10.0.2.2:18080] [--synthetic 2000] [--class app.thebox.playback.SmokeAndZapTest] [gradle args…]
+#   tools/fakepanel/run-instrumented.sh [--port 18080] [--host-url http://10.0.2.2:18080] [--synthetic 2000] [--set KEY=JSON]… [--class app.thebox.playback.SmokeAndZapTest] [gradle args…]
+#
+# --set KEY=JSON passes a config key to the panel (repeatable; M4 player suite: --set player_fixtures=true --set timeshift_mode='"duration"').
 #
 # --synthetic N starts the panel in synthetic mode (the M3 guide suite, app.thebox.guide.*; docs/design/m3-guide.md §5.6).
 # Starts fakepanel.py on --port (all interfaces), waits for GET /admin/config, runs
@@ -23,6 +25,7 @@ while [[ $# -gt 0 ]]; do
     --host-url) HOST_URL="$2"; shift 2 ;;
     --class) CLASS="$2"; shift 2 ;;
     --synthetic) PANEL_ARGS+=(--synthetic "$2"); shift 2 ;;
+    --set) PANEL_ARGS+=(--set "$2"); shift 2 ;;
     *) EXTRA+=("$1"); shift ;;
   esac
 done

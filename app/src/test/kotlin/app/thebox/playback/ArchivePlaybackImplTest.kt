@@ -1,5 +1,6 @@
 package app.thebox.playback
 
+import app.thebox.core.catchup.archive.ArchiveNotice
 import app.thebox.core.catchup.CatchupTarget
 import app.thebox.core.catchup.CatchupUrlBuilderImpl
 import app.thebox.core.catchup.archive.ArchiveFailure
@@ -194,7 +195,7 @@ class ArchivePlaybackImplTest {
 
         init {
             scope.launch { archive.status.collect { statuses += it } }
-            scope.launch { archive.liveNotReady.collect { notReady += it } }
+            scope.launch { archive.notices.collect { if (it is ArchiveNotice.LiveNotReady) notReady += it.channel } }
         }
 
         fun now(): Long = base + ts.testScheduler.currentTime

@@ -3,6 +3,7 @@ package app.thebox.core.full.fakes
 import app.thebox.core.catchup.archive.ActiveRequest
 import app.thebox.core.catchup.archive.ArchiveFrames
 import app.thebox.core.catchup.archive.ArchivePlanner
+import app.thebox.core.catchup.archive.ArchiveNotice
 import app.thebox.core.catchup.archive.ArchivePlayback
 import app.thebox.core.catchup.archive.ArchiveStart
 import app.thebox.core.catchup.archive.ArchiveStatus
@@ -70,6 +71,9 @@ class FakeArchivePlayback(initial: ArchiveStatus = ArchiveStatus()) : ArchivePla
 
     val mutableStatus = MutableStateFlow(initial)
     override val status: StateFlow<ArchiveStatus> = mutableStatus.asStateFlow()
+    /** Push an [ArchiveNotice] to test the toast path. */
+    val mutableNotices = kotlinx.coroutines.flow.MutableSharedFlow<ArchiveNotice>(extraBufferCapacity = 4)
+    override val notices: kotlinx.coroutines.flow.Flow<ArchiveNotice> = mutableNotices
     var startResult: ArchiveStart = ArchiveStart.Started
     var variantLeft = true
     /** Every `seekTo(programmeMs, seq)` in order (B3). */
