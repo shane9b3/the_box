@@ -153,7 +153,7 @@ Scope: what a key press does, everything that fires on time, and proving the who
 | `ui/.../guide/overlay/NumberEntryOverlay.kt` | Digits UI |
 | `app/.../playback/CatchupLauncherImpl.kt` | §3.13.6 |
 | `app/src/debug/kotlin/app/thebox/debug/GuideDebugReceiver.kt` + manifest entries | `thebox-debug://guide?...` seeding and switches (§5.6) |
-| `app/src/benchmark/kotlin/app/thebox/bench/BenchSeedActivity.kt` + manifest | Seeding for the benchmark build (§5.7) |
+| `app/src/benchShared/kotlin/app/thebox/bench/BenchSeedActivity.kt` + manifest (amended 2026-10-14, §2.13 item 19; was `app/src/benchmark`) | Seeding for the benchmark and nonMinifiedRelease builds (§5.7) |
 | `tools/fakepanel/catalog.py`, `fakepanel.py` (edits), `README.md` | `--synthetic N` channels/groups/EPG (§5.6) |
 | `app/src/androidTest/kotlin/app/thebox/guide/*` | Instrumented suite I-1…I-16 (§5.5) |
 | `benchmark/src/main/kotlin/app/thebox/benchmark/GuideScrollBenchmark.kt`, `baselineprofile/.../BaselineProfileGenerator.kt` (edit) | §5.7 |
@@ -1374,6 +1374,46 @@ Every Kotlin block of §2.1–§2.10 compiled verbatim; the contract files carry
 7. **Stubs that are not `TODO`:** `GuideDebugProbeImpl` is the plain holder in `ui/src/debug` and a no-op in `ui/src/release` (the instrumented suite needs nothing more); `Modifier.boxKeySink` delegates to `KeyRouter.sinkModifier` (its definition in §2.10); `BenchSeedActivity` (`app/src/benchmark`) finishes immediately; `ImageModule` provides a default Coil `ImageLoader`. `MainActivity` still shows the M0 placeholder with a `TODO("WP-C")` comment; no guide binding is constructed at app start. `GuideDebugReceiver` is an empty object; its manifest entries are WP-D's.
 8. **Fakes** (`core/src/testFixtures/.../guide/fakes/`): `GuideFixtures` (channels, `ProgrammeInfo`, a synthetic row generator and a `GuideWindowData` builder), `FakeGuideMetrics(+Factory)`, `RecordingCellSink`, `FakeRowCellsBuilder`, `FakeNavigator` (simplified moves, not §3.4.2), `FakeTimeLabels` (UTC), `RecordingGuideCanvas`, `FakeTextMeasurer` (§5.1 widths), `FakeGuideImages`, `FakeGuideRows`, `FakeGuideRenderer`, `FakeGuideLibrary`, `FakeGuideRowsCache`, `FakeGuideWindowPager`, `FakeGuideSettings`, `FakeGuideSessionStore`, `FakeGuideDataWindowSource`, `FakeSyncFeed`, `FakeDeviceClassSource`, `FakeGuideDebugProbe`, `RecordingGuideEffects`, `FakeGuideStateMachine`, `FakeNumberEntry`, `FakeReminderBook`, `FakeReminderPlanner`, `FakeReminderAlerts`, `FakeGuideSearch`, `FakeChannelNamePrefix`, `FakeKeyGestureDetector`, `FakeKeyMap`, `FakeKeyCapabilities`. The `:ui`/`:player` contracts (`KeyRouter`, `CatchupLauncher`, `ArchiveTargets`) have no fake in `:core` testFixtures (it cannot see them); WP-C/WP-D write their own.
 
+### 2.13 Integration amendments (2026-10-14)
+
+The integration pass reconciled every contract gap in the five hand-off notes. Contract changes are additive (defaults keep every fake and implementation compiling) unless marked **changed**. Lead decisions are items 1–19; item 20 lists the rest.
+
+1. **Cell flags.** `CellFlags { SLIVER = 1 shl 30; RTL = 1 shl 29; COMPLEX = 1 shl 28 }` moved to `GuideModel.kt` (package `app.thebox.core.guide`), same bit values. WP-A's `layout.CellFlags` and WP-B's `GuideWindowPagerImpl.CELL_RTL/CELL_COMPLEX` are gone; the builder, navigator, renderer and pager all use the one object.
+2. **`GuideFrame.animate: Boolean = true`.** The machine sets it on every placement: the navigator's `Moved.animate` (`!ctx.snap`: low-end, or repeat ≥ `SNAP_AFTER_REPEATS`) for moves; `!lowEnd` for jump-to-now; **false** for placements that are not navigator moves (lineup change, number entry, search). A target more than two windows or two pages from the current one always snaps (decided in the machine, not guessed by the host). `GuideGridHost` keeps only the low-end snap and otherwise follows `frame.animate`; the 120 ms "third rapid target" and distance heuristics are removed. Tests: `GuideBehaviourTest.AnimateFlag`.
+3. **Measurer per pager thread (changed signature).** `GuideWindowPagerFactory.create(…, measurer: (scale: Float) -> GuideTextMeasurer, …)`: a factory the pager calls on `box-guide-epg`. The pager keeps the instance it gets, rescales it when it is a `RescalableTextMeasurer` and calls the factory again only on a scale change otherwise. The VM passes `{ scale -> AndroidTextMeasurer(context, scale) }` (one Paint set per pager thread; before, a new measurer with fresh typefaces was built for every snapshot). `RescalableTextMeasurer` stays for the renderer.
+4. **`GuideStateMachine.nextDeadlineMs: StateFlow<Long>`** (default: never). The VM ticks at `min(nextDeadlineMs, next minute boundary)`, at least 16 ms apart, and wakes early when the deadline moves earlier (`GuideViewModel.nextTickAt`). The fixed 250 ms cadence is gone, so the 150 ms description debounce and the number-entry timers fire on time.
+5. **`ReminderAlerts.missed: Flow<Int>`** (default empty). `ReminderSchedulerImpl.missed` overrides it; the VM forwards each count as `GuideEvent.MissedReminders`. `TheBoxApplication` injects `ReminderSchedulerImpl` eagerly, so the foreground loop (and the missed count) starts with the process, not with the guide VM.
+6. **Trim on the interfaces** (§4.7; defaults no-op): `GuideImages.clear()`, `GuideRenderer.trimCaches()`, `GuideRowsCache.trim(keepFrom, keepTo)`, `GuideWindowPager.trimMemory(dropSnapshot)`. `MainActivity.onTrimMemory` → `GuideTrim.onTrimMemory(level)`: at ≥ RUNNING_LOW it clears the logo cache and the renderer's text-fit caches and fans out to registered targets (`GuideTrim.register`); the guide VM registers one that trims row blocks to `[top − 6, top + 12)`, the pager's width/detail caches (plus its snapshot at ≥ UI_HIDDEN), the non-current ambient bitmap and the hue cache. Test: `LogoCacheTest.trimFansOutToRegisteredTargetsUntilClosed`.
+7. **Search.** `SearchResults.guideDataMissing: Boolean = false`, set by `GuideSearchImpl` when `EpgStore.info` is null; `SearchViewModel` no longer injects `EpgStore`. `MainActivity` collects `SearchViewModel.effects` into `GuideViewModel.onSearchEffect`: `Tune` → controller (current lineup as zap list), `PlayArchive` → `GuideEffects.playArchive`, `Toast` → toast, `Close(event)` → `machine.dispatch(event)` (every exit from SEARCH, B7). `SearchScreen(onIdleChanged)` sets `GuideViewModel.searchFieldIdle` (empty field and no menu: the IME eats BACK while it shows, so a BACK that reaches the root sink with an empty field means "leave"). A live channel tuned from Search goes FULL on that channel's own first active `Tuned` (immediately if it is already the live channel), no longer on whatever was playing. Tests: `SearchViewModelTest.noGuideDataIsReported`, `GuideBehaviourTest.searchClosedFocusesAndGoesFull`.
+8. **`GuideRows.lineupVersion: Long`** (default 0). `GuideRowsCacheImpl` overrides it; the pager stamps `rows.lineupVersion` on snapshots (no `as? GuideRowsCacheImpl` cast), so any `GuideRows` works with the S10a check. `FakeGuideRowsCache` overrides it too.
+9. **Toast ownership.** Effects toast the outcomes they learn asynchronously: REMINDER_SET / _FIRST_TIME / _CANCELLED / _CHANNEL_GONE, ADDED/REMOVED_FAVOURITE, CHANNEL_HIDDEN, CATCHUP_FAILED. The machine toasts only synchronous ones: NO_FAVOURITES, NO_CATCHUP, REMINDERS_MISSED. The machine's duplicate favourite/hide toasts in the context menu are removed (`keys.csv` rows `menu_favourite`, `menu_hide` updated). The exit hint stays `Overlay.Exit(dialog = false)`; EXIT_HINT is never toasted.
+10. **Startup source.** `GuideStateMachine.lastSourceHint: GuideSource?` (default accessor no-op). The VM reads `GuideSessionStore.lastSource()` on IO, sets the hint, and only then starts forwarding `Sources`; the machine picks the startup source on the first `Sources` (§3.8.4). The VM's own `initialSource`/`loadLineup` path is removed, so there is exactly one load.
+11. **Catch-up and FULL.** FULL follows the first archive `Tuned` for the requested channel (CONNECTING…PAUSED); ERROR/STOPPED clear the request and the user stays in the guide with the S13 toast. `CatchupLauncherImpl` no longer calls `setViewport(FULL)`: the root sets the viewport from the displayed mode, so a launch that fails after `tuneArchive` cannot leave a FULL viewport behind in GUIDE; `GuideEffects.setFullScreen` is a no-op in the VM (idempotent by construction). `GuideEvent.SearchClosed` gained `archive: Boolean = false`: a catch-up started from Search follows the same rule. Tests: `CatchupLauncherImplTest.okTunesArchiveOnceAndLeavesTheViewportToTheRoot`, `GuideBehaviourTest.searchCatchupGoesFullOnlyWhenTheArchivePlays`.
+12. **Design tokens.** The hex values of `01-design-reference.md` are normative: accent `#5CA8F2` = `oklch(.7144 .1325 249.61)`, accent text `#B6D4F7` = `oklch(.8596 .0585 252.45)` (exact). The `oklch(.72 .14 240)` / `oklch(.86 .09 240)` of the prototype CSS are `#3FAFF3` / `#9AD9FF` and are not used by the UI. `OklchHueTest` keeps WP-C's exact conversions and adds the two equivalences; the ambient keeps the true oklch blob formulas (§3.14). §5.3's "round-trip within 1/255" is replaced.
+13. **Root order.** `VideoLayer → AmbientBackground → HoleChrome → key sink` (WP-C) is accepted; §3.13.1 and §3.14 amended with the API ≤ 30 unclipped `SurfaceView` CLEAR reason.
+14. **Per-text search cap split** between on-now and upcoming (WP-B) is accepted; recorded in §3.10.2.
+15. **"All channels" / "Recently watched".** Not a small change: the labels flow from `GuideSourceEntry.label` into the machine (`sourceLabel`, the FULL group card, announcements) as well as the Groups panel, and `GuideTexts` holds the machine's other English strings. Recorded for M5's localisation pass with `GuideTexts` (open item).
+16. **Wordmark.** `wordmark.xml` moved to `ui/src/main/res/drawable/`; `tools/branding/make_assets.py` writes it there and the README says so. `HeaderTabs` draws it (28 design px high, 1158:480, tinted `FG`, content description "The Box") in place of WP-C's text.
+17. **Debug shell preview removed:** `app/.../shell/ShellPreview.kt`, `app/src/debug/.../ShellPreviewImpl.kt` and the `MainActivity` branch.
+18. **`DisplayNames.backfill()`** runs from `TheBoxApplication` after `EpgRecovery.await()` and a 3 s delay (`DISPLAY_NAMES_DELAY_MS`, "after the first frame", §3.12.3), on IO under `ImportMutex`; each pass is logged.
+19. **Benchmarks on the emulator.** `:app` excludes x86/x86_64 native libraries only for `release` and `benchmarkRelease`; `debug`, `benchmark` (`:benchmark`'s macrobenchmarks) and `nonMinifiedRelease` (the baseline-profile generator) keep them so their universal APK installs on the x86 TV emulator. `BenchSeedActivity` moved to `app/src/benchShared/` and is added (Kotlin + manifest) to the `benchmark` and `nonMinifiedRelease` variants through `androidComponents`; release never contains it.
+20. **Other gaps** (resolved as the design intends):
+    - **Rows, labels and images on the frame:** the VM assigns `frame.rows` (the rows cache), `frame.labels` and `frame.images` once after `create`; the machine reads them and never replaces them (WP-C 3, WP-D 2).
+    - **Pager re-query after a block arrives (bug):** nothing re-ensured the pager when row blocks landed, so rows that were PENDING when the first window was built stayed without programmes until the next key. The VM now calls `pager.ensure(top, windowStart)` on every `rowsCache.changes` emission; the pager re-queries only rows whose `(epg ref, shift)` basis changed (B5), so a name-only change still costs nothing.
+    - **Logo prefetch (§3.7):** on every block arrival the VM calls `images.get(url)` for rows `[top − 6, top + 12)` (skipping failed URLs) when logos are on.
+    - **One reminder-explained flag:** `GuideSessionStore.FLAG_REMINDER_EXPLAINED = "reminder_first_set"`, used by both `GuideEffectsImpl` and `SearchViewModel` (they had different names, so the explanation could show twice).
+    - **State machine on the real navigator (§1.7 step 2):** `GuideWorld` takes the navigator from `-Dthebox.realNavigator`; the `:core:stateOnRealNavigator` task (run after `:core:test`) runs every `app.thebox.core.guide.state` test on `GuideNavigatorImpl` (227 tests, all pass) through a `RecordingNavigator`.
+    - **Header chips:** the Now and Day chips overlap the ruler's last tick label (WP-A), so their fill is opaque (`#1E2026`, 8 % white over the canvas).
+    - **NO_GUIDE_DATA** is a banner at the bottom of the grid panel (the grid stays usable with NO_EPG rows), not a centred message over the rows (WP-D 8).
+    - **Instrumented hooks:** trace sections `guide-panel` (header/panel column, `drawWithContent`) and `guide-ambient` (ambient draw) for I-18; debug-only `GuideDebugCounters` (composition counts of `GuideGridHost` and `FocusedPanel`, release no-op) for I-12; `LogoCache.capacity` and `GuideDebugEntryPoint.guideImages()` for I-16. `run-instrumented.sh --synthetic N` starts the panel in synthetic mode.
+    - **WP-C stub signatures** (`AppRoot`, `AmbientBackground`, `HoleChrome`, `GuideScreen`, `HeaderTabs`, `MiniPlayerOverlay`, `ContextMenu`/`ProgrammeSheet`, `ReminderCard`, `GuideEffectsImpl`, new `root/` and `ambient/` files) are accepted as WP-C wrote them; they were stubs, not contracts.
+    - **S10a stale-window rule (device bug G1, changed):** `epgBasisOf(GuideChannel?)` moved to `GuideModel.kt` (the pager's `basisOf` delegates to it). The machine drops a snapshot built from an older rows version **only when a row's basis changed** since; before, two row blocks landing back to back made the pager correctly skip a re-query while the machine dropped the only snapshot, and the grid stayed LOADING until the next key. Test: `GuideBehaviourTest.olderRowsVersionWithUnchangedBasisIsAccepted`.
+    - **Leaving Search lands in the grid (device bug G4, I-19):** every `SearchClosed`, and BACK in SEARCH through the root sink, sets zone GRID and the Guide tab (`keys.csv` row `search,BACK` now ends in GRID). Test: `GuideBehaviourTest.searchClosedWithoutAChannelReturnsToTheGrid`.
+    - **Search field and the remote (device bug G5):** D-pad Down and the IME's Search action leave the field for the first result row (the single-line field consumed Down). Test: `SearchScreenFocusTest`.
+    - **Debug deep-link switches (device bug G2):** a switch given twice takes its last value (`GuideDebugReceiver`), so a test class's switches override the suite defaults.
+    - **Pager timings:** every snapshot build logs `timing query=… build=…` at debug level (`lastQueryMs` is the `EpgReader.window` call alone), so the device pass can compute P50/P90 rather than only the builds over 8 ms.
+    - **`searchPast` and CONTINUED** (WP-B 7): a film running longer than 6 h and still on shows in neither list. Rare; recorded as an open item (an `EpgSearchHit.flags` field or folding the continuation into its first segment).
+
 ---
 ## 3. Algorithms
 
@@ -1743,6 +1783,8 @@ Items, in this order, only when they apply: WATCH (past, in archive) · WATCH_FR
 
 1. (reviewed 2026-10-14, B6/F2) `reader.search(q, now, limit = 150, perText = 8)` and `reader.searchPast(q, now, now − min(7, D) × 1440, limit = 100, perText = 5)`, merged, on a reader opened for the call (aux connection; closed in `finally`) with `D` from §3.3.4. The single overloaded query returned the oldest airings of the best text first (an hourly "News" filled all 200 hits with week-old airings) and starved on-now and upcoming hits.
 2. Distinct refs → library channels: `SELECT playlist_id, stable_key FROM epg_mapping WHERE source_id = ? AND xmltv_id = ?` and the same on `epg_match` with `status = 0` (both indexed by v3, §2.9.1), batched 50 refs per statement; candidates are loaded with the lineup predicate (enabled, not missing, `PARENTAL`, live/radio); `EpgRefResolver` confirms each candidate's **resolved** ref equals the hit's ref (a channel with a lower-priority AUTO match to this EPG channel must not show it). At most 3 channels per airing.
+(amended 2026-10-14, §2.13 item 14) `EpgReader.search`'s per-text cap is **split** between on-now and upcoming airings: when a text has both, at most half of `perText` goes to on-now copies and unused slots pass to the other kind. Without the split, 20 channels airing "News" at once fill all 8 slots and no UPCOMING hit is possible, which would make B6's assertion unsatisfiable.
+
 3. Display times = raw + the channel's `epgShiftMin`. "Ended" is decided on the **display** end; rows flagged `CONTINUED` (a 6 h split) are skipped in past results so a long film in progress never reads as finished (N18). A hit that ended is kept only if it is in archive for that channel (§3.6.2), else dropped.
 4. Rank: first the hits whose folded title equals or starts with the folded query; within that, bucket ON NOW < UPCOMING within 24 h < ARCHIVE < LATER; within a bucket, the reader's order (bm25 for FTS5), then start (ascending for upcoming, descending for archive). Dedupe `(identityHash, rawStart)`. Keep 50. `GuideSearchTest`'s fixture has an hourly title on 20 channels over 14 days and asserts at least one ON NOW and one UPCOMING hit (B6).
 5. Cancellation between stages (the screen debounces 300 ms and cancels the previous search).
@@ -1829,10 +1871,12 @@ Off → always NULL. Custom literals: case-insensitive `startsWith` against the 
 
 #### 3.13.1 Root tree (B1.2, M2 §3.11)
 
+(amended 2026-10-14, §2.13 item 13) `VideoLayer` comes **first**, then `AmbientBackground`. On API ≤ 30 `SurfaceView.draw` punches its hole with `canvas.drawColor(0, PorterDuff.Mode.CLEAR)` and relies on its parent's clip; Compose's `AndroidView` holder sets `clipChildren = false` and draws the view with no clip, so the CLEAR covers the root RenderNode's whole clip and erases everything drawn before it in the frame, the ambient background included (seen on the API 30 emulator by WP-C; it affects Fire OS 6 and 7, API 25 and 28). `AmbientBackground` therefore paints everything **except** the video rect, after the surface. The rule is unchanged: nothing is drawn inside the video rect and no ancestor of the surface has a layer, alpha or clip.
+
 ```kotlin
 Box(Modifier.fillMaxSize()) {                       // at the window origin (M2 E-L18): VideoLayer places in window px
-    AmbientBackground(state.ambient, holeRect, mode)   // draws the base, the ambient bitmap and the hole shadow
-    VideoLayer(controller.surfacePlayer, videoRect)    // the one SurfaceView, behind the window; clears its rect
+    VideoLayer(controller.surfacePlayer, videoRect)    // the one SurfaceView; first: its API ≤ 30 CLEAR is unclipped
+    AmbientBackground(state.ambient, videoRect, shadowHole, black)   // base, ambient bitmap, hole shadow; never inside videoRect
     HoleChrome(holeRect, videoRect, ambient, mode)     // corners, ring, letterbox, still/poster, scrim
     Box(Modifier.fillMaxSize().then(keyRouter.sinkModifier(requester))) {   // B1: the one key sink, survives every mode change
         when (ui.mode) { GUIDE -> GuideScreen(…) ; FULL -> FullScreenHost(…) ; SEARCH -> SearchScreen(…) ; SETTINGS -> SettingsPlaceholder(…) }
@@ -1881,6 +1925,7 @@ GUIDE → FULL: `HoleChrome` fades a black scrim over the hole in `SCRIM_MS` (12
 - Hue: the tuned channel's logo, loaded once at 16 × 16 with `allowHardware(false)` (`imageRequests.android.kt:299`, API notes §5); `HueExtractor` takes the pixels (`IntArray`), drops pixels with alpha < 128, saturation < .25 or lightness outside .15–.9, and returns the circular mean hue weighted by saturation; fewer than 8 usable pixels → fallback `(GuideChannel.hashOf(identity) ushr 1) % 360`. Cached in an LRU of 64 by identity hash; not persisted (§7 Q6).
 - Bitmap: 480 × 270 ARGB_8888 rendered on `Dispatchers.Default`: base `#0A0D13`; blob A = `oklch(.45 .12 h)` ellipse 1300 × 1000 at (−200, −260), opacity .55; blob B = `oklch(.40 .10 h+40)` 1100 × 900 at (right −300, top 200), opacity .35 (01-design-reference "Ambient background"); each as a `RadialGradient` with 8 stops along `exp(−r²/2σ²)` where σ = blur/2 (B1.4), scaled to the 480 × 270 canvas; then the vertical overlay `0 → .6 @45 % → .92`. `Oklch.toArgb` converts (OKLab → linear sRGB → gamma; out-of-gamut channels clamped).
 - Drawing: `drawImage(bitmap, dstSize = window, filterQuality = Low)`; a hue change cross-fades the previous and next bitmaps over `AMBIENT_FADE_MS` (1,200) by alpha in the draw phase. Low-end or Ambient off → a flat `#0A0D13` fill.
+- (amended 2026-10-14, §2.13 item 13) It is drawn **after** `VideoLayer` (§3.13.1: the API ≤ 30 `SurfaceView` CLEAR is unclipped and would erase it) and paints the window **minus the video rect**, so the surface still shows through its own rect only.
 
 ### 3.15 Screen layout (WP-C)
 
@@ -2083,7 +2128,7 @@ Nothing of the guide: the grid panel starts at y 500 and the hole ends at y 461 
 
 ### 5.3 WP-C (Robolectric + Compose UI test)
 
-`RootTreeRuleTest` (no `graphicsLayer`/`alpha`/`clip` modifiers on any **ancestor** of `VideoLayer`, by walking the modifier chain of the root's `LayoutInfo`; separately, a layer modifier **on** `GuideGridHost`, the header/panel column and `AmbientBackground`, B8; the key-sink `Box` is a sibling of `VideoLayer`, B1), `KeySinkModeTest` (Robolectric: the sink keeps focus across GUIDE → FULL → GUIDE and BACK in FULL reaches the state machine, B1), `LineupZapListTest` (captured row ids survive a lineup re-emission; purged ids skipped, S9), `HoleGeometryTest`, `OklchTest` (the four design tokens round-trip to their sRGB fallbacks within 1/255), `HueExtractorTest`, `TunedStateMapperTest` (§3.16.2 table), `ErrorTextTest` (every `PlaybackErrorCode` has a headline and a step), `AmbientRendererTest` (same hue → identical bitmap hash), `GuideEffectsImplTest` (each effect calls the right collaborator, fakes).
+`RootTreeRuleTest` (no `graphicsLayer`/`alpha`/`clip` modifiers on any **ancestor** of `VideoLayer`, by walking the modifier chain of the root's `LayoutInfo`; separately, a layer modifier **on** `GuideGridHost`, the header/panel column and `AmbientBackground`, B8; the key-sink `Box` is a sibling of `VideoLayer`, B1), `KeySinkModeTest` (Robolectric: the sink keeps focus across GUIDE → FULL → GUIDE and BACK in FULL reaches the state machine, B1), `LineupZapListTest` (captured row ids survive a lineup re-emission; purged ids skipped, S9), `HoleGeometryTest`, `OklchTest` (amended 2026-10-14, §2.13 item 12: the hex tokens are normative; the test checks exact conversions, CSS reference points and the hex tokens' exact oklch equivalents, `oklch(.7144 .1325 249.61)` = `#5CA8F2` and `oklch(.8596 .0585 252.45)` = `#B6D4F7`), `HueExtractorTest`, `TunedStateMapperTest` (§3.16.2 table), `ErrorTextTest` (every `PlaybackErrorCode` has a headline and a step), `AmbientRendererTest` (same hue → identical bitmap hash), `GuideEffectsImplTest` (each effect calls the right collaborator, fakes).
 
 ### 5.4 WP-D (JVM)
 
@@ -2127,12 +2172,12 @@ Launched through `MainActivity` with the debug seeding route (§5.6); state read
 
 ### 5.7 Benchmarks (WP-D)
 
-- `GuideScrollBenchmark` (Macrobenchmark, `FrameTimingMetric`, `CompilationMode.Partial(BaselineProfileMode.UseIfAvailable)` until the profile is committed, then `Require`; reviewed 2026-10-14, S14): journeys (a) 100× DOWN at 25 Hz, (b) 100× RIGHT at 10 Hz, (c) 20× CH+ (pages the grid), (d) FULL then 20× CH+ at 1 Hz reading `controller.diagnostics.zaps()` P50/P90 (logged), each with the mini player decoding the fake panel's 1080i50 H.264 + MP2 clip, and each run twice: `PerformanceMode` Auto and forced High (S3). Seeding through `BenchSeedActivity` in `app/src/benchmark` (the benchmark build type does not include `src/debug`). The emulator run needs `androidx.benchmark.suppressErrors=EMULATOR`. Metrics logged: `frameDurationCpuMs` P50/P90/P95/P99 on API 30; `frameOverrunMs` only where reported (it is API 31+ **(verify; owner WP-D, §8)**), so the API 30 numbers exclude GPU time and are not comparable to the gate.
+- `GuideScrollBenchmark` (Macrobenchmark, `FrameTimingMetric`, `CompilationMode.Partial(BaselineProfileMode.UseIfAvailable)` until the profile is committed, then `Require`; reviewed 2026-10-14, S14): journeys (a) 100× DOWN at 25 Hz, (b) 100× RIGHT at 10 Hz, (c) 20× CH+ (pages the grid), (d) FULL then 20× CH+ at 1 Hz reading `controller.diagnostics.zaps()` P50/P90 (logged), each with the mini player decoding the fake panel's 1080i50 H.264 + MP2 clip, and each run twice: `PerformanceMode` Auto and forced High (S3). Seeding through `BenchSeedActivity` in `app/src/benchShared`, compiled into the `benchmark` and `nonMinifiedRelease` build types only (the benchmark build type does not include `src/debug`; amended 2026-10-14, §2.13 item 19). The emulator run needs `androidx.benchmark.suppressErrors=EMULATOR`. Metrics logged: `frameDurationCpuMs` P50/P90/P95/P99 on API 30; `frameOverrunMs` only where reported (it is API 31+ **(verify; owner WP-D, §8)**), so the API 30 numbers exclude GPU time and are not comparable to the gate.
 - Baseline profile: `BaselineProfileGenerator` adds the guide journey (30× DOWN, 10× RIGHT, open Groups, open Search) and the profile is regenerated on the emulator.
 
 ### 5.8 Integration results
 
-To be filled by WP-D after the integration pass (as M1/M2 did).
+See §5.11 (integration pass, 2026-10-14).
 
 ### 5.9 Gates M3 can measure (plan §6)
 
@@ -2148,6 +2193,83 @@ To be filled by WP-D after the integration pass (as M1/M2 did).
 | Prefix recompute | 20k ≤ 2 s | `DisplayNamesTest` perf variant + log | logged |
 
 Golden images: **none**. The renderer is verified op by op against a recording canvas (exact, toolkit-free); the hole punch involves a `SurfaceView`, which JVM screenshot tools (Paparazzi, Roborazzi) cannot render, so I-3's device probes cover it; overlays are simple Compose and get manual screenshots in the WP-C hand-off. Adding a screenshot library would cost a dependency and a reference-image workflow for little coverage.
+
+### 5.11 Integration results (2026-10-14)
+
+Integration of WP-A…WP-E on `main` (base `8a4e12c`), contract amendments in §2.13. Device: API 30 TV emulator `TheBox_TV_API30` (x86, 4 vCPU, 2 GB), fake panel via `tools/fakepanel/run-instrumented.sh [--synthetic 2000] --class …`, one class per call. Every number below is an **emulator** number and not gate-relevant (plan §6 gates are asserted on hardware in M6). `range_requests_seen == 0` is asserted in every guide and M2 test's `@After` and held in every run.
+
+**Emulator state.** The AVD had resumed from a snapshot with its clock 47 min behind the host (it breaks the synthetic EPG's "now" and I-10's reminder times); a cold boot (`-no-snapshot-load`) resynced it. The AVD runs with `hw.gpu.enabled=no`, i.e. SwiftShader software GL; the instrumented suite ran on SwiftShader, the benchmarks were repeated with `-gpu host` (AMD, ANGLE) because SwiftShader frame times (CPU P50 134–356 ms) say nothing about the app.
+
+**JVM suite** (`:core:test :data:testDebugUnitTest :player:testDebugUnitTest :ui:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :player:lintDebug :ui:lintDebug :app:lintDebug`): green. `:core` 1,679 (+ `stateOnRealNavigator` 227: every `guide.state` test again on `GuideNavigatorImpl`), `:data` 151, `:player` 304, `:ui` 120, `:app` 21; 0 skipped. Lint: 0 errors (`:ui` had 2 `NonObservableLocale` errors in WP-C's header clock, fixed: the clock formats with `LocalConfiguration.current.locales[0]`).
+
+| Class (§5.5) | Pass | Fail | Notes |
+|---|---|---|---|
+| `HarnessTest` | 5 | 0 | `switchesReachTheSettingsSource` now runs (WP-B settings real) and found G2 |
+| `StartupAndSurfaceTest` (I-1, I-2, I-3) | 3 | 0 | I-2: a full-window rectangular outline on `DecorView` is not a clip (test fix T1) |
+| `KeysOnDeviceTest` (I-4, 32 sequences) | 1 | 0 | test fixes T2, T3 |
+| `PagingTest` (I-5) | 1 | 0 | |
+| `GenerationSwapTest` (I-6) | 1 | 0 | |
+| `GroupsAndBackTest` (I-7, I-8) | 2 | 0 | test fixes T3, T4, T5, T6 |
+| `CatchupTest` (I-9, panel `Asia/Tokyo`) | 1 | 0 | request `/timeshift/test/test/11/2026-10-15:06-59/1.ts` |
+| `ReminderTest` (I-10 ×2) | 2 | 0 | |
+| `SearchTest` (I-11) | 1 | 0 | found G5; test fixes T7, T8 |
+| `RecompositionTest` (I-12) | 1 | 0 | now asserts composition counts (`GuideDebugCounters`) |
+| `PrefixTest` (I-13), `NumberEntryTest` (I-14) | 2 | 0 | both live in `PrefixAndNumberTest.kt`: run them by these class names |
+| `MemoryTest` (I-15) | 1 | 0 | |
+| `LowEndTest` (I-16) | 1 | 0 | now asserts the logo cap 48; test fix T9 |
+| `ZapThroughGuideTest` (I-17) | 1 | 0 | |
+| `LayerScopeTest` (I-18) | 1 | 0 | now asserts the panel/ambient sections (B8) |
+| `ModeSurvivalTest` (I-19) | 1 | 0 | found G4 |
+| M2 `SmokeAndZapTest` | 6 | 1 | I-6 burst: 4–5 requests (≤ 3) in one of the four linger variants per run, a different one each run; **the same on the pre-integration commit `8a4e12c` today** (O-6) |
+| M2 `ErrorPathTest` | 6 | 0 | |
+| M2 `MediaAndLifecycleTest` | 4 | 3 | I-21 "picture does not change", I-22/I-22b "fps known for ch 4": **identical on `8a4e12c` today**, so emulator state, not M3 (O-6) |
+| M2 `ReconnectTest` | 7 | 0 | + I-3 `@Ignore`d (M2 O-1) |
+| `:data` `I1LibraryDatabaseTest` | 4 | 0 | includes `migrate2To3` on the device |
+
+No `assumeTrue` skip fired in the guide suite. I-22's `assumeTrue` (no 50 Hz mode, M2 O-4) is not reached because the fps assertion before it fails (O-6).
+
+**Bugs found on the device and fixed**
+
+| # | Where | Symptom | Cause | Fix | Test |
+|---|---|---|---|---|---|
+| G1 | `GuideStateMachineImpl` (S10a) | Grid stayed LOADING after start until a key was pressed | Two row blocks landed back to back: the pager (rightly) skipped a re-query because no row's basis changed, while the machine dropped its only snapshot for an older rows version | Stale only when a row's `(epg ref, shift)` basis changed (`epgBasisOf`, §2.13) | `GuideBehaviourTest.olderRowsVersionWithUnchangedBasisIsAccepted`; I-1, I-5 |
+| G1b | `GuideViewModel` | Rows that were PENDING when the first window was built never got programmes | Nothing re-ensured the pager when row blocks arrived | `pager.ensure` on every `rowsCache.changes` (§2.13 item 20) | I-1, I-5 (device; the VM has no JVM harness) |
+| G2 | `GuideDebugReceiver` (debug) | Per-class switches (`lowend=1`, `exit=ask`) ignored | The suite appends switches after `DEFAULT_SWITCHES`; `getQueryParameter` returns the first value | Last value wins | `HarnessTest.switchesMapOntoGuideSettings`, `switchesReachTheSettingsSource` |
+| G3 | emulator | Reminder/EPG times 47 min off | AVD clock stale after snapshot resume | Cold boot; recorded here | — |
+| G4 | `GuideStateMachineImpl` | Back from Search returned to the TABS zone, not the grid (I-19) | `SearchClosed`/BACK kept the zone Search was opened from | Zone GRID and the Guide tab on every exit from Search | `GuideBehaviourTest.searchClosedWithoutAChannelReturnsToTheGrid`, `keys.csv`; I-19 |
+| G5 | `SearchScreen` | Results unreachable with the remote: D-pad Down stayed in the field | The single-line `BasicTextField` consumed Down | Down and the IME Search action move focus to the results | `SearchScreenFocusTest`; I-11 |
+
+Test-expectation corrections (the app was right): T1 I-2 treats a full-bounds rectangular outline as no clip; T2 I-4 PAGE_DOWN expects `topRow = clamp(top + 6, row − 4, row − 1)` (§3.3.2, focus at visible index 1…4); T3 `Overlay.Groups.focused` counts the two shortcuts first (`focused = shortcuts + current`); T4 the day strip has "Tonight 20:00" after Today, so "next day" is the Tomorrow item; T5 after the day jump the test presses Back once (scrolled → home) before tuning; T6 the header label follows the group lineup asynchronously (await it); T7 the TV IME keeps the D-pad while shown (the test hides it); T8 FULL follows the first archive Tuned, which can precede the panel's request (await it), and the k-th card may be another archive airing (assert "an archive hit's channel"); T9 `StreamStats` publish only while stats are enabled (enable them for the audio probe).
+
+**Measured (emulator)**
+
+| What | Result | Gate (plan §6) | Gate verdict here |
+|---|---|---|---|
+| I-1 startup | debug: machine registered 5.4–6.3 s after launch (cold debug start, `am start` TotalTime 5.7–6.3 s); release-like (`benchmark` build, temporary timing): `onCreate` → first post 1.5 s, view model created at 0.3 s; focus on the tuned row at now within the 3 s criterion | — | criterion met |
+| Guide scroll, `frameDurationCpuMs` (host GPU, `benchmark` build, 3 iterations) | (a) 100× DOWN @25 Hz: Auto P50 19.9 / P90 33.5 / P95 36.9 / P99 46.7; High 31.2 / 36.4 / 43.2 / 65.5. (b) 100× RIGHT @10 Hz: **harness failure** both modes ("no renderthread slices"; O-4); `gfxinfo` instead, High: total frame P50 21 / P90 34 / P95 38 / P99 44 ms. (c) 20× CH−/CH+: Auto 19.2 / 32.6 / 36.3 / 39.5; High 24.9 / 35.2 / 38.5 / 60.6. (d) FULL + 20× CH+ @1 Hz: Auto 13.2 / 26.9 / 30.6 / 63.0; High 20.7 / 44.5 / 52.9 / 65.3 ms | P90 < 16.7, P99 < 33 | **not measurable**: API 30 reports CPU time only (`frameOverrunMs` and full frame duration are API 31+); emulator x86 CPU. "Auto" is low-end on this AVD (memoryClass), so it snaps |
+| Main-thread draw (`guide-draw`) | (a) Auto 108 draws, 394 ms → 3.6 ms per draw; High 543 draws, 2,589 ms → 4.8 ms (sum metric; no P90 from the macro run) | ≤ 2 ms P90 | above budget on the emulator; JVM 0.015 ms/frame (WP-A). Re-measure on hardware (O-2) |
+| B8 / I-18 layer scope | 50× DOWN: 143 frames, `guide-draw` 109, `guide-panel` 74, `guide-ambient` 0. Grid-only frames re-record only the grid; the panel column re-records once per focus change (its text changes) | — | **B8 confirmed** |
+| I-12 recomposition | 50 DOWN + 20 RIGHT: `GuideGridHost` +0 compositions, `FocusedPanel` +91 (≤ 70 focus changes + description loads) | — | met |
+| Zap (I-17) | 10 guide OK + 20 CH+ in FULL: FULL CH+ first frame P50 453 / P90 631 ms; guide OK P50 2,534 / P90 3,852 ms (dominated by `resolve` 0.6–2.6 s; O-3); all P50 516 / P90 3,025 | P50 ≤ 1.2 s, P90 ≤ 2.0 s | FULL path inside; guide OK path outside on the emulator (O-3) |
+| Window query (`EpgReader.window` on device, debug build, I-5 journey, 58 builds) | P50 1.5 / P90 8.3 / max 61 ms | warm ≤ 5, cold ≤ 30 | logged (debuggable build) |
+| Snapshot build (query + cells + measurement) | debug: P50 42 / P90 84 ms (n 58); release-like: 473 builds over 8 ms logged during the benchmark journeys, P50 of those 15.2 / P90 31.5 ms | ≤ 8 ms | **over budget on the emulator** (O-1) |
+| Row block (32 rows) | debug P50 68 / P90 140 ms; release-like P50 24.5 / P90 41.5 ms (n 55) | ≤ 15 ms | over budget on the emulator (O-1) |
+| Memory, I-15 | journey ×5: Java heap used 8.25 MB every run, growth −8 KiB; guide + player retained 3,815 KiB over the pre-guide baseline | ≤ 5 MB retained, no growth | **met** |
+| Memory, `dumpsys meminfo` (guide open, 2,000 channels, mini player playing, 30 rows scrolled) | debug: PSS 140 MB (Java heap 17.6, native 39.3, `.dex` 53 MB unoptimised); `benchmark` build: PSS 71.7 MB (Java heap 11.8, native 37.5, code 7.8) | — | logged |
+| Reminders (I-10) | card 17 ms after T − 60 s; late card 13 ms after start | ±2 s | met |
+| Prefix backfill | 2,000 channels, nothing to change: 70 ms (debug) | 20k ≤ 2 s | not measured at 20k on the device |
+
+**Baseline profile: not regenerated.** `:app:generateBaselineProfile` now builds and installs (`nonMinifiedRelease` keeps x86 libraries and carries `BenchSeedActivity`, §2.13 item 19), but `BaselineProfileRule` refuses the device: "Baseline Profile collection requires API 33+, or a rooted device running API 28 or higher and rooted adb session". `TheBox_TV_API30` is a production (non-rootable) Google TV image. Generate it on an API 33+ TV AVD or a rooted device (O-5). `GuideScrollBenchmark` keeps `CompilationMode.Partial(UseIfAvailable)`.
+
+**Open items**
+- **O-1 snapshot build and row block over budget on the emulator.** The `EpgReader.window` call is cheap (P50 1.5 ms); the rest of the build is cell building and measurement: each build concatenates and measures the time text of every cell (not cached, unlike title widths) and measures new titles with `Paint`. Candidates for the code-review pass: cache the mono time-text width by length, build the time string lazily. Row blocks include ref resolution and playlist defaults (WP-B: 16 ms on the JVM). Re-measure on a Fire TV Stick 4K before optimising further.
+- **O-2 `guide-draw` 3.6–4.8 ms per draw on the emulator** against the ≤ 2 ms P90 budget (0.015 ms on the JVM): measure on hardware; if it holds, profile `AndroidGuideCanvas` (Paint state changes per op).
+- **O-3 guide-path tune resolve 0.6–2.6 s** on the emulator against 0.13 s for CH+ in FULL; suspect `library.db` contention with the row-block and window queries the moves trigger. Trace it in the code review.
+- **O-4 `GuideScrollBenchmark` journey (b) fails in the harness** ("Observed no renderthread slices") in both modes and both GPU modes, while the same 100× RIGHT through `adb input` renders 568 frames: investigate the measure block (it follows journey (a) in the same process).
+- **O-5 baseline profile** needs an API 33+ or rooted device.
+- **O-6 M2 classes on today's emulator:** `MediaAndLifecycleTest` I-21/I-22/I-22b and one `SmokeAndZapTest` I-6 linger variant per run fail identically on `8a4e12c`; host load (Spotlight indexing at 100 % CPU) and SwiftShader composition are the likely causes. Re-run on a quiet host before M3 sign-off.
+- **O-7 debug cold start** registers the guide machine 5.4–6.3 s after launch (main thread skipped about 240 frames); the release-like build creates the view model 0.3 s into `onCreate`. Check with `StartupBenchmark` on hardware.
+- Carried from §2.13: "All channels"/"Recently watched" and `GuideTexts` localisation (M5); `searchPast` and films over 6 h; `01-design-reference.md`'s "≈" next to the oklch tokens is approximate (the hex values are normative, §2.13 item 12).
 
 ---
 
@@ -2176,7 +2298,7 @@ No new versions. Commit 0 runs `./gradlew :ui:dependencies` once: the cache show
 - `:core`: no new dependencies (`androidx.collection` is already there for `MutableIntFloatMap`). New packages `app.thebox.core.guide{,.layout,.render,.feed,.state,.reminder}` and `app.thebox.core.input`. Fakes in `testFixtures`.
 - `:ui`: add `alias(libs.plugins.thebox.hilt)`; `implementation(libs.androidx.lifecycle.viewmodel.compose)`, `implementation(libs.androidx.lifecycle.runtime.compose)`, `implementation(libs.androidx.core.ktx)`; tests: `testImplementation(libs.robolectric)`, `libs.junit4`, `libs.androidx.test.core`, `libs.compose.ui.test.junit4`, `debugImplementation(libs.compose.ui.test.manifest)`; `testOptions.unitTests.isIncludeAndroidResources = true`.
 - `:data`: none.
-- `:app`: `implementation(libs.coil.compose)`, `implementation(libs.coil.network.okhttp)` (for `ImageModule`); `testImplementation(libs.junit4)`, `testImplementation(libs.kotlinx.coroutines.test)` (scheduler and launcher tests); the `benchmark` source set (`app/src/benchmark/{kotlin,AndroidManifest.xml}`).
+- `:app`: `implementation(libs.coil.compose)`, `implementation(libs.coil.network.okhttp)` (for `ImageModule`); `testImplementation(libs.junit4)`, `testImplementation(libs.kotlinx.coroutines.test)` (scheduler and launcher tests); the `benchmark` source set (`app/src/benchmark/{kotlin,AndroidManifest.xml}`; amended 2026-10-14, §2.13 item 19: now `app/src/benchShared`, added to the `benchmark` and `nonMinifiedRelease` variants).
 - `:benchmark`: none.
 
 ### 6.3 Conventions

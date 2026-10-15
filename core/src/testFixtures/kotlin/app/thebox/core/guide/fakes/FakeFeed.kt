@@ -98,6 +98,9 @@ class FakeGuideRowsCache(private val source: Map<Long, GuideChannel>) : GuideRow
     override val changes: StateFlow<Long> = versionFlow.asStateFlow()
     override suspend fun channelAt(index: Int): GuideChannel? = channel(index)
     override fun reloadLoaded() { reloads++; versionFlow.update { it + 1 } }
+    override val lineupVersion: Long get() = lineup?.version ?: 0L
+    var trims = ArrayList<IntRange>()
+    override fun trim(keepFrom: Int, keepTo: Int) { trims += keepFrom until keepTo }
     fun loadAll() { loaded = true; versionFlow.update { it + 1 } }
 }
 

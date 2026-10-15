@@ -10,6 +10,10 @@ sealed interface CatchupLaunch {
 enum class CatchupFailure { CHANNEL_GONE, NO_ARCHIVE, OUTSIDE_ARCHIVE, UNSUPPORTED_MODE, CREDENTIALS }
 
 interface CatchupLauncher {
-    /** Builds one ArchiveRequest (default variant) and calls PlaybackController.tuneArchive; FULL viewport. */
+    /**
+     * Builds one ArchiveRequest (default variant) and calls PlaybackController.tuneArchive. (amended 2026-10-14,
+     * §2.13 item 11) It does not set the viewport: the state machine goes FULL on the first archive Tuned and the root
+     * sets the viewport from the displayed mode.
+     */
     suspend fun play(channel: app.thebox.core.guide.GuideChannel, info: app.thebox.core.guide.ProgrammeInfo, rawEndMin: Int): CatchupLaunch
 }

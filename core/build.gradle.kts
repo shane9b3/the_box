@@ -23,6 +23,20 @@ dependencies {
 
 tasks.named<Test>("test") { useJUnitPlatform { excludeTags("perf") } }
 
+// M3 §1.7 step 2 / §2.13 item 20: the state machine's tests run again on WP-A's GuideNavigatorImpl (GuideWorld reads
+// the property). Runs after `test`, so `:core:test` covers both navigators.
+val stateOnRealNavigator by tasks.registering(Test::class) {
+    description = "Guide state-machine tests on GuideNavigatorImpl (docs/design/m3-guide.md §2.13)"
+    group = "verification"
+    testClassesDirs = sourceSets["test"].output.classesDirs
+    classpath = sourceSets["test"].runtimeClasspath
+    useJUnitPlatform { excludeTags("perf") }
+    filter { includeTestsMatching("app.thebox.core.guide.state.*") }
+    systemProperty("thebox.realNavigator", "true")
+    reports.html.outputLocation.set(layout.buildDirectory.dir("reports/tests/stateOnRealNavigator"))
+}
+tasks.named("test") { finalizedBy(stateOnRealNavigator) }
+
 // M1 performance budgets (§5.5). Not part of `check`; run explicitly or nightly.
 val perfTest by tasks.registering(Test::class) {
     description = "M1 performance budgets (docs/design/m1-data-layer.md §5.5)"

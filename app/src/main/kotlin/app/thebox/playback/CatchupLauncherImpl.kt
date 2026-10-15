@@ -6,7 +6,6 @@ import app.thebox.core.catchup.CatchupUrlBuilder
 import app.thebox.core.guide.GuideChannel
 import app.thebox.core.guide.ProgrammeInfo
 import app.thebox.core.model.TimeBase
-import app.thebox.core.playback.Viewport
 import app.thebox.player.api.ArchiveTargets
 import app.thebox.player.api.ArchiveTune
 import app.thebox.player.api.CatchupTargetResult
@@ -23,7 +22,8 @@ fun interface TimeBaseLookup {
 
 /**
  * docs/design/m3-guide.md §3.13.6 (WP-D): one `ArchiveRequest` (default variant) from [ArchiveTargets],
- * [CatchupUrlBuilder] and the playlist's [TimeBase], then [PlaybackController.tuneArchive] and the FULL viewport.
+ * [CatchupUrlBuilder] and the playlist's [TimeBase], then [PlaybackController.tuneArchive]. The viewport is the root's
+ * (it follows the displayed mode; §2.13 item 11).
  * Panel times are never computed here: the builder applies the panel zone, correction and skew (CLAUDE.md timeshift
  * rule). Window times are the raw (unshifted) programme times. Bound in [app.thebox.reminder.ReminderModule].
  */
@@ -57,7 +57,8 @@ class CatchupLauncherImpl(
         return when (val built = builder.build(target, timeBase, window)) {
             is CatchupBuild.Ok -> {
                 controller.tuneArchive(ArchiveTune(identity, built.request))
-                controller.setViewport(Viewport.FULL)
+                // No setViewport here (§2.13 item 11): the machine goes FULL on the first archive Tuned and the root
+                // sets the viewport from the displayed mode, so a launch that fails later never leaves FULL behind.
                 CatchupLaunch.Started
             }
             is CatchupBuild.Unsupported -> failed(CatchupFailure.UNSUPPORTED_MODE)

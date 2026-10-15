@@ -2,7 +2,6 @@ package app.thebox.ui.search
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import app.thebox.core.epg.EpgStore
 import app.thebox.core.guide.GuideChannel
 import app.thebox.core.guide.GuideEvent
 import app.thebox.core.guide.GuideLibrary
@@ -34,7 +33,7 @@ import javax.inject.Inject
 sealed interface SearchEffect {
     /** Tune the channel (live); always followed by [Close] with `tuned = true`. */
     data class Tune(val channel: GuideChannel) : SearchEffect
-    /** Catch-up from the programme's start (§3.13.6); followed by [Close] with `tuned = true`. */
+    /** Catch-up from the programme's start (§3.13.6); followed by [Close] with `tuned = true, archive = true`. */
     data class PlayArchive(val channel: GuideChannel, val info: ProgrammeInfo) : SearchEffect
     data class Toast(val kind: GuideToast, val arg: String? = null) : SearchEffect
     /** Leave SEARCH (review B7: the state machine owns the mode; forward this to `GuideStateMachine.dispatch`). */
@@ -46,7 +45,7 @@ data class SearchUiState(
     /** Null before the first search of at least [SearchViewModel.MIN_CHARS] letters/digits. */
     val results: SearchResults? = null,
     val searching: Boolean = false,
-    /** No EPG generation: channels still show, the programmes row says "Programme search needs guide data." */
+    /** The last search had no EPG generation (§2.13 item 7): channels still show, the programmes row says "Programme search needs guide data." */
     val guideDataMissing: Boolean = false,
     val reminders: ReminderIndex = ReminderIndex.EMPTY,
 )
@@ -64,7 +63,6 @@ class SearchViewModel internal constructor(
     private val library: GuideLibrary,
     private val settings: GuideSettingsSource,
     private val session: GuideSessionStore,
-    private val epg: EpgStore,
     private val clock: () -> Long,
 ) : ViewModel() {
     @Inject constructor(
@@ -73,10 +71,9 @@ class SearchViewModel internal constructor(
         library: GuideLibrary,
         settings: GuideSettingsSource,
         session: GuideSessionStore,
-        epg: EpgStore,
-    ) : this(search, reminders, library, settings, session, epg, System::currentTimeMillis)
+    ) : this(search, reminders, library, settings, session, System::currentTimeMillis)
 
-    private val mutable = MutableStateFlow(SearchUiState(guideDataMissing = epg.info.value == null))
+    private val mutable = MutableStateFlow(SearchUiState())
     val state: StateFlow<SearchUiState> = mutable.asStateFlow()
 
     private val resultsFlow = MutableStateFlow<SearchResults?>(null)
@@ -120,7 +117,7 @@ class SearchViewModel internal constructor(
 
     private fun publish(r: SearchResults?, searching: Boolean) {
         resultsFlow.value = r
-        mutable.update { it.copy(results = r, searching = searching, guideDataMissing = epg.info.value == null) }
+        mutable.update { it.copy(results = r, searching = searching, guideDataMissing = r?.guideDataMissing ?: it.guideDataMissing) }
     }
 
     /** OK on a channel: tune it and go FULL. */
@@ -136,7 +133,7 @@ class SearchViewModel internal constructor(
             hit.info.startMin <= now && hit.info.endMin > now -> onChannel(hit.channel)
             hit.inArchive -> {
                 emit(SearchEffect.PlayArchive(hit.channel, hit.info))
-                close(hit.channel, tuned = true)
+                close(hit.channel, tuned = true, archive = true)
             }
             hit.info.startMin > now -> toggleReminder(hit)
             else -> emit(SearchEffect.Toast(GuideToast.NO_CATCHUP))
@@ -171,9 +168,9 @@ class SearchViewModel internal constructor(
     /** BACK from the field (or with nothing focused): back to the guide, nothing tuned. */
     fun onBack() = close(null, tuned = false)
 
-    private fun close(channel: GuideChannel?, tuned: Boolean) {
+    private fun close(channel: GuideChannel?, tuned: Boolean, archive: Boolean = false) {
         job?.cancel()
-        emit(SearchEffect.Close(GuideEvent.SearchClosed(channel, tuned)))
+        emit(SearchEffect.Close(GuideEvent.SearchClosed(channel, tuned, archive)))
     }
 
     private fun emit(e: SearchEffect) {
@@ -184,6 +181,6 @@ class SearchViewModel internal constructor(
         const val DEBOUNCE_MS = 300L
         const val MIN_CHARS = 2
         /** Shared with the guide (§3.11.3): the first "Remind me" explains that reminders need the app open. */
-        const val FLAG_REMINDER_SEEN = "reminder_first_set"
+        const val FLAG_REMINDER_SEEN = GuideSessionStore.FLAG_REMINDER_EXPLAINED
     }
 }

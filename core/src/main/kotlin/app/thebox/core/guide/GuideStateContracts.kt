@@ -100,8 +100,12 @@ sealed interface GuideEvent {
     data class Sync(val chip: SyncChip?) : GuideEvent
     data class KeysSeen(val keyCodes: Set<Int>) : GuideEvent
     data class Metrics(val metrics: GuideMetrics) : GuideEvent
-    /** (reviewed 2026-10-14, B7) SEARCH closed. [channel] non-null: focus it in the grid; [tuned]: it was tuned from search, go FULL. */
-    data class SearchClosed(val channel: GuideChannel?, val tuned: Boolean) : GuideEvent
+    /**
+     * (reviewed 2026-10-14, B7) SEARCH closed. [channel] non-null: focus it in the grid; [tuned]: it was tuned from
+     * search, go FULL once it plays. (amended 2026-10-14, §2.13 item 11) [archive]: it was a catch-up launch, FULL
+     * follows the first archive Tuned only (a failed launch stays in the guide).
+     */
+    data class SearchClosed(val channel: GuideChannel?, val tuned: Boolean, val archive: Boolean = false) : GuideEvent
     data class DataWindow(val window: GuideDataWindow) : GuideEvent
     /** Missed reminders found on start (N5): a toast with the count. */
     data class MissedReminders(val count: Int) : GuideEvent
@@ -155,6 +159,26 @@ interface GuideStateMachine {
     /** Bumped on every change of [frame]; the grid host reads it in its draw lambda. */
     val frameVersion: StateFlow<Long>
     fun dispatch(event: GuideEvent)
+
+    /**
+     * (amended 2026-10-14, §2.13 item 4) Wall-clock ms of the next timer the machine waits for (panel description
+     * debounce, number entry, exit hint, group card, reminder card); `Long.MAX_VALUE` = none. The host posts a
+     * [GuideEvent.Tick] at that time (and at every minute boundary).
+     */
+    val nextDeadlineMs: StateFlow<Long> get() = NO_DEADLINE
+
+    /**
+     * (amended 2026-10-14, §2.13 item 10) The persisted last source (`GuideSessionStore.lastSource()`, read on IO by
+     * the host before it forwards the first [GuideEvent.Sources]). The machine picks the startup source itself
+     * (§3.8.4); the host never loads one.
+     */
+    var lastSourceHint: GuideSource?
+        get() = null
+        set(@Suppress("UNUSED_PARAMETER") value) = Unit
+
+    companion object {
+        val NO_DEADLINE: StateFlow<Long> = kotlinx.coroutines.flow.MutableStateFlow(Long.MAX_VALUE)
+    }
 }
 
 fun interface GuideStateMachineFactory {

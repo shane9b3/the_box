@@ -149,10 +149,10 @@ class CatchupLauncherImplTest {
     }
 
     @Test
-    fun okTunesArchiveOnceAndGoesFull() = runTest {
+    fun okTunesArchiveOnceAndLeavesTheViewportToTheRoot() = runTest {
         assertEquals(CatchupLaunch.Started, play(nowMin - 60, nowMin - 30))
         assertEquals(listOf(ArchiveTune(channel.identity, request)), controller.tunes)
-        assertEquals(listOf(Viewport.FULL), controller.viewports)
+        assertEquals("FULL follows the first archive Tuned (§2.13 item 11)", emptyList<Viewport>(), controller.viewports)
         assertEquals(listOf(channel.identity), targets.asked)
     }
 }

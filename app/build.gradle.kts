@@ -74,12 +74,22 @@ android {
     }
 }
 
-// Ship ARM only (master plan §3). Debug keeps x86/x86_64 native libs (from sqlite-bundled) so the
-// universal debug APK still runs on an x86_64 emulator.
+// Ship ARM only (master plan §3). The non-shipping build types keep x86/x86_64 native libs (from sqlite-bundled
+// and the FFmpeg AAR) so their universal APK runs on the x86 TV emulator: debug, benchmark (:benchmark's
+// macrobenchmarks) and nonMinifiedRelease (the baseline-profile generator) (docs/design/m3-guide.md §2.13 item 19).
+// release and benchmarkRelease stay ARM only.
+val emulatorBuildTypes = setOf("debug", "benchmark", "nonMinifiedRelease")
+// BenchSeedActivity (deep-link-free seeding for GuideScrollBenchmark and BaselineProfileGenerator) is compiled into
+// the benchmark and nonMinifiedRelease build types only, never into release (§2.13 item 19).
+val benchSeedBuildTypes = setOf("benchmark", "nonMinifiedRelease")
 androidComponents {
     onVariants(selector().all()) { variant ->
-        if (variant.buildType != "debug") {
+        if (variant.buildType !in emulatorBuildTypes) {
             variant.packaging.jniLibs.excludes.addAll("lib/x86/**", "lib/x86_64/**")
+        }
+        if (variant.buildType in benchSeedBuildTypes) {
+            variant.sources.kotlin?.addStaticSourceDirectory("src/benchShared/kotlin")
+            variant.sources.manifests.addStaticManifestFile("src/benchShared/AndroidManifest.xml")
         }
     }
 }

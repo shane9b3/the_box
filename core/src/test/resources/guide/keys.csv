@@ -115,8 +115,8 @@ days,days,BACK,GUIDE,HEADER,none,-,-
 menu,menu,DOWN,GUIDE,GRID,Menu,-,menu:1
 menu,menu,UP,GUIDE,GRID,Menu,-,menu:0
 menu,menu,SELECT,FULL,GRID,none,playArchive;setFullScreen,-
-menu,menu_favourite,SELECT,GUIDE,GRID,none,setFavourite;toast,-
-menu,menu_hide,SELECT,GUIDE,GRID,none,hideChannel;toast,-
+menu,menu_favourite,SELECT,GUIDE,GRID,none,setFavourite,-
+menu,menu_hide,SELECT,GUIDE,GRID,none,hideChannel,-
 menu,menu,BACK,GUIDE,GRID,none,-,-
 menu,menu,LEFT,GUIDE,GRID,Menu,-,menu:0
 # ---- Sheet (future cell)
@@ -177,7 +177,7 @@ back,grid_idle_home,BACK,GUIDE,GRID,ExitHint,-,home
 back,ask_home,BACK,GUIDE,GRID,ExitDialog,-,home
 back,none_home,BACK,GUIDE,GRID,none,exitApp,home
 # ---- SEARCH / SETTINGS
-search,search,BACK,GUIDE,TABS,none,-,-
+search,search,BACK,GUIDE,GRID,none,-,-
 search,search,DOWN,SEARCH,TABS,none,-,-
 settings,settings,BACK,GUIDE,TABS,none,-,-
 settings,settings,SELECT,SETTINGS,TABS,none,-,-

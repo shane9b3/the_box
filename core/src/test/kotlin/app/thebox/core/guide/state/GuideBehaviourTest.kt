@@ -208,6 +208,20 @@ class GuideBehaviourTest {
         assertTrue(w.machine.frameVersion.value > v)
     }
 
+    /** Device bug G1 (§2.13 item 20): an older rows version whose rows all have the current basis is not stale. */
+    @Test fun olderRowsVersionWithUnchangedBasisIsAccepted() {
+        val w = GuideWorld()
+        w.send(GuideEvent.RowsChanged(9))
+        val basis = LongArray(10) { app.thebox.core.guide.epgBasisOf(w.rows.channel(it)) }
+        val same = GuideFixtures.windowData(GuideFixtures.syntheticRows(10, GuideWorld.FROM, GuideWorld.TO), fromMin = GuideWorld.FROM, toMin = GuideWorld.TO, rowsVersion = 8, rowEpgBasis = basis)
+        w.send(GuideEvent.Window(same))
+        assertSame(same, w.machine.frame.data, "basis unchanged: accepted")
+        basis[3] = basis[3] + 1
+        val changed = GuideFixtures.windowData(GuideFixtures.syntheticRows(10, GuideWorld.FROM, GuideWorld.TO), fromMin = GuideWorld.FROM, toMin = GuideWorld.TO, rowsVersion = 8, rowEpgBasis = basis)
+        w.send(GuideEvent.Window(changed))
+        assertSame(same, w.machine.frame.data, "a changed basis is still stale")
+    }
+
     // ------------------------------------------------------------------ HoldTest (§3.4.7, S16)
     @Nested inner class Hold {
         @Test fun verticalHoldShowsBubbleAndFreezesThePanel() {
@@ -482,9 +496,45 @@ class GuideBehaviourTest {
             w.press(UP); w.press(UP); w.press(UP); w.press(RIGHT); w.press(SELECT)
             assertEquals(ScreenMode.SEARCH, w.ui.mode)
             w.send(GuideEvent.SearchClosed(w.channels[6], tuned = true))
-            assertEquals(ScreenMode.FULL, w.ui.mode)
+            assertEquals(ScreenMode.GUIDE, w.ui.mode, "FULL waits for the searched channel's own Tuned (§2.13 item 7)")
             assertEquals(6, w.machine.frame.focus!!.row)
             assertEquals(Zone.GRID, w.ui.zone)
+            w.tuneTo(w.channels[6], MiniPhase.CONNECTING); w.flush()
+            assertEquals(ScreenMode.FULL, w.ui.mode)
+        }
+
+        /** Device bug G4 (I-19): leaving Search without a channel returns to the grid, not the TABS zone it came from. */
+        @Test fun searchClosedWithoutAChannelReturnsToTheGrid() {
+            val w = GuideWorld()
+            w.press(UP); w.press(UP); w.press(UP); w.press(RIGHT); w.press(SELECT)
+            assertEquals(ScreenMode.SEARCH, w.ui.mode)
+            w.send(GuideEvent.SearchClosed(null, tuned = false))
+            assertEquals(ScreenMode.GUIDE, w.ui.mode)
+            assertEquals(Zone.GRID, w.ui.zone)
+            w.press(UP); w.press(UP); w.press(UP); w.press(RIGHT); w.press(SELECT)
+            w.press(BACK) // the root sink's BACK with an idle field
+            assertEquals(ScreenMode.GUIDE, w.ui.mode)
+            assertEquals(Zone.GRID, w.ui.zone)
+        }
+
+        /** §2.13 item 11: a catch-up launched from Search goes FULL on the archive Tuned only; a failure stays in GUIDE. */
+        @Test fun searchCatchupGoesFullOnlyWhenTheArchivePlays() {
+            val w = GuideWorld()
+            w.tuneTo(w.channels[0]); w.flush()
+            w.press(UP); w.press(UP); w.press(UP); w.press(RIGHT); w.press(SELECT)
+            w.send(GuideEvent.SearchClosed(w.channels[3], tuned = true, archive = true))
+            assertEquals(ScreenMode.GUIDE, w.ui.mode)
+            w.tuneTo(w.channels[0]); w.flush() // the old channel keeps updating: no FULL
+            assertEquals(ScreenMode.GUIDE, w.ui.mode)
+            w.tuneTo(w.channels[3], MiniPhase.ERROR, archive = true, error = PlaybackErrorCode.CATCHUP_NOT_IN_ARCHIVE); w.flush()
+            assertEquals(ScreenMode.GUIDE, w.ui.mode)
+
+            val ok = GuideWorld()
+            ok.tuneTo(ok.channels[0]); ok.flush()
+            ok.press(UP); ok.press(UP); ok.press(UP); ok.press(RIGHT); ok.press(SELECT)
+            ok.send(GuideEvent.SearchClosed(ok.channels[3], tuned = true, archive = true))
+            ok.tuneTo(ok.channels[3], MiniPhase.CONNECTING, archive = true); ok.flush()
+            assertEquals(ScreenMode.FULL, ok.ui.mode)
         }
 
         @Test fun missedRemindersToast() {
@@ -562,6 +612,37 @@ class GuideBehaviourTest {
             w.press(SELECT)
             assertNull(w.calls.last("tune"))
             assertEquals(CellKind.PROGRAMME, GuideWorld.cellKindAt(w.data, 0, w.nowMin()))
+        }
+    }
+
+    /** §2.13 item 2: the machine tells the host whether to animate (the host no longer guesses). */
+    @Nested inner class AnimateFlag {
+        @Test fun singleMovesAnimateRepeatsAndLowEndSnap() {
+            val w = GuideWorld()
+            w.press(DOWN)
+            assertTrue(w.machine.frame.animate, "a single move animates")
+            w.press(DOWN, repeat = 1)
+            assertTrue(w.machine.frame.animate, "repeat 1 still animates")
+            w.press(DOWN, repeat = GuideStateMachineImpl.SNAP_AFTER_REPEATS)
+            assertFalse(w.machine.frame.animate, "repeat >= SNAP_AFTER_REPEATS snaps")
+            w.release(DOWN)
+            val before = w.machine.frame.windowStartMin
+            w.press(UP) // row 3 is a multi-day NO_EPG row: its window is days away from row 2's
+            val far = kotlin.math.abs(w.machine.frame.windowStartMin - before) > 2 * app.thebox.core.guide.GuideGeometry.WINDOW_MIN
+            assertEquals(!far, w.machine.frame.animate, "a target more than two windows away snaps")
+
+            val low = GuideWorld(settings = GuideSettings(performance = PerformanceMode.LOW))
+            low.press(DOWN)
+            assertFalse(low.machine.frame.animate, "low-end mode always snaps")
+        }
+
+        @Test fun lineupPlacementsSnap() {
+            val w = GuideWorld()
+            w.press(DOWN)
+            val ids = w.channels.map { it.rowId }.reversed().toLongArray()
+            w.rows.rows = w.channels.reversed()
+            w.send(GuideEvent.Lineup(GuideLineup(w.allSource, 2, ids, 7)))
+            assertFalse(w.machine.frame.animate, "a lineup change is a jump, not a move")
         }
     }
 }

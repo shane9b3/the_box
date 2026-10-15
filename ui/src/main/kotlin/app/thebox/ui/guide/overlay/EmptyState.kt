@@ -1,11 +1,14 @@
 package app.thebox.ui.guide.overlay
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +36,19 @@ fun EmptyState(state: GuideUiState, modifier: Modifier = Modifier, debugHint: Bo
         EmptyKind.EMPTY_SOURCE -> R.string.guide_empty_source to R.string.guide_empty_source_step
         EmptyKind.NO_GUIDE_DATA -> R.string.guide_empty_no_guide to R.string.guide_empty_no_guide_step
     }
+    if (kind == EmptyKind.NO_GUIDE_DATA) {
+        // A banner, not a replacement: the grid stays usable with NO_EPG rows (WP-D hand-off gap 8, §2.13 item 20).
+        Box(
+            modifier.offset(81.dp, 892.dp).width(1758.dp).height(56.dp).background(BannerFill, RoundedCornerShape(12.dp)).testTag(EMPTY_STATE_TAG),
+            contentAlignment = Alignment.Center,
+        ) {
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Line(stringResource(title), GuideUi.sans(20, FontWeight.SemiBold))
+                Line(stringResource(step), GuideUi.sans(18, color = GuideUi.Fg70))
+            }
+        }
+        return
+    }
     Box(modifier.offset(64.dp, 549.dp).width(1792.dp).height(400.dp).testTag(EMPTY_STATE_TAG), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Line(stringResource(title), GuideUi.sans(30, FontWeight.SemiBold))
@@ -43,3 +59,6 @@ fun EmptyState(state: GuideUiState, modifier: Modifier = Modifier, debugHint: Bo
         }
     }
 }
+
+/** Opaque so the banner reads over NO_EPG rows: 8 % white over the canvas colour. */
+private val BannerFill = androidx.compose.ui.graphics.Color(0xFF1E2026)

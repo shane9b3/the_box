@@ -61,4 +61,10 @@ interface ReminderAlerts {
     /** The user chose "Switch now" (or auto-switch fired): marks fired and clears the card; the caller tunes. */
     suspend fun accept(reminderId: Long)
     suspend fun dismiss(reminderId: Long)
+    /**
+     * (amended 2026-10-14, §2.13 item 5) Missed-reminder counts found by the start-up catch-up pass (N5), each
+     * delivered once to one collector and buffered until collected; the guide forwards it as
+     * [GuideEvent.MissedReminders].
+     */
+    val missed: kotlinx.coroutines.flow.Flow<Int> get() = kotlinx.coroutines.flow.emptyFlow()
 }

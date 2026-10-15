@@ -11,6 +11,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
@@ -45,6 +46,9 @@ const val GRID_SLOT_TAG = "grid_slot"
  *
  * This composable is a child of the root key sink and never an ancestor of `VideoLayer`.
  */
+/** Trace section around the header/panel column draw (I-18, §2.13 item 20). */
+const val TRACE_PANEL = "guide-panel"
+
 @Composable
 fun GuideScreen(
     state: GuideUiState,
@@ -74,7 +78,12 @@ fun GuideScreen(
                 .offset(GuideGeometry.HEAD_L.dp, GuideGeometry.HEAD_T.dp)
                 .size((GuideGeometry.CANVAS_W - GuideGeometry.HEAD_L - GuideGeometry.HEAD_R).dp, GuideGeometry.HEAD_H.dp)
                 .testTag(HEADER_COLUMN_TAG)
-                .graphicsLayer(),
+                .graphicsLayer()
+                .drawWithContent {
+                    // I-18 (B8): this section must not fire on grid-only frames.
+                    android.os.Trace.beginSection(TRACE_PANEL)
+                    try { drawContent() } finally { android.os.Trace.endSection() }
+                },
         ) {
             HeaderTabs(state, clock24)
             Spacer(Modifier.weight(1f))

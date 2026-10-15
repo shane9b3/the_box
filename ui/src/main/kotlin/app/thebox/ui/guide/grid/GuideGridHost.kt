@@ -1,7 +1,6 @@
 package app.thebox.ui.guide.grid
 
 import android.content.Context
-import android.os.SystemClock
 import android.os.Trace
 import android.view.accessibility.AccessibilityManager
 import androidx.compose.animation.core.CubicBezierEasing
@@ -34,7 +33,6 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import app.thebox.core.guide.GuideFrame
-import app.thebox.core.guide.GuideGeometry
 import app.thebox.core.guide.GuideRenderer
 import app.thebox.core.guide.GuideStateMachine
 import app.thebox.core.guide.layout.GridConstants
@@ -43,7 +41,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
-import kotlin.math.abs
 
 /**
  * The one draw node of the guide grid (docs/design/m3-guide.md §0.2, §3.6.5; review B1, B8, N4).
@@ -56,8 +53,8 @@ import kotlin.math.abs
  *   inside `onDrawBehind`, so focus moves and scroll frames invalidate the draw only, with no recomposition.
  * - Scroll: the window start is an Int base plus a small animated `Float` offset (§2.12 item 3). On a new target
  *   the offset is rebased (`offset += oldBase − newBase`) and animated to 0 over `SCROLL_ANIM_MS` (ease-out);
- *   rows likewise. Snap in low-end mode, for jumps beyond two windows / two pages, and from the third rapid move
- *   (key repeat; see the hand-off note: `GuideFrame` does not carry the navigator's `animate` flag).
+ *   rows likewise. It snaps when `frame.animate` is false (the state machine sets it from the navigator's
+ *   `Moved.animate`, §2.13 item 2) and always in low-end mode.
  * - No focus or key modifiers (B1): keys arrive through the root key sink.
  * - Accessibility (§3.6.6): `contentDescription` = `renderer.describeFocus` 300 ms after the last change, polite
  *   live region, role Button; computed only while a touch-exploration service (TalkBack) is on.
@@ -82,9 +79,10 @@ fun GuideGridHost(machine: GuideStateMachine, renderer: GuideRenderer, modifier:
     }
     LaunchedEffect(machine) {
         val scope: CoroutineScope = this
-        machine.frameVersion.collect { scroll.retarget(frame, scope, SystemClock.uptimeMillis()) }
+        machine.frameVersion.collect { scroll.retarget(frame, scope) }
     }
 
+    if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) androidx.compose.runtime.SideEffect { app.thebox.ui.guide.GuideDebugCounters.bump(COMPOSITIONS_GRID) } // I-12
     val a11y = remember { touchExplorationOn(context) }
     var description by remember { mutableStateOf("") }
     if (a11y) {
@@ -140,6 +138,9 @@ fun GuideGridHost(machine: GuideStateMachine, renderer: GuideRenderer, modifier:
     )
 }
 
+/** Debug composition counter key (I-12, §2.13 item 20). */
+const val COMPOSITIONS_GRID = "GuideGridHost"
+
 /** Trace section around the renderer pass (`guide-draw`, §4.1). */
 const val TRACE_SECTION = "guide-draw"
 
@@ -164,23 +165,18 @@ internal class GridScrollState(base: Int, row: Float) {
     private var targetRow = row
     private var offsetJob: Job? = null
     private var rowJob: Job? = null
-    private var lastTargetMs = Long.MIN_VALUE / 2
-    private var rapid = 0
-
-    fun retarget(frame: GuideFrame, scope: CoroutineScope, nowMs: Long) {
+    fun retarget(frame: GuideFrame, scope: CoroutineScope) {
         val newWs = frame.windowStartMin
         val newRow = frame.topRow.toFloat()
         val wsChanged = newWs != baseWs
         val rowChanged = newRow != targetRow
         if (!wsChanged && !rowChanged) return
-        rapid = if (nowMs - lastTargetMs < RAPID_MS) rapid + 1 else 0
-        lastTargetMs = nowMs
-        val snapAll = frame.lowEnd || rapid >= GridConstants.SNAP_AFTER_REPEATS - 1
+        val snapAll = frame.lowEnd || !frame.animate
         if (wsChanged) {
             val delta = baseWs - newWs
             offsetJob?.cancel()
             baseWs = newWs
-            if (snapAll || abs(offset + delta) > 2 * GuideGeometry.WINDOW_MIN) {
+            if (snapAll) {
                 offset = 0f
             } else {
                 offset += delta
@@ -191,7 +187,7 @@ internal class GridScrollState(base: Int, row: Float) {
         if (rowChanged) {
             targetRow = newRow
             rowJob?.cancel()
-            if (snapAll || abs(newRow - row) > 2 * GuideGeometry.VISIBLE_ROWS) {
+            if (snapAll) {
                 row = newRow
             } else {
                 val from = row
@@ -201,8 +197,6 @@ internal class GridScrollState(base: Int, row: Float) {
     }
 
     private companion object {
-        /** Two target changes closer than this are a key repeat (Android TV repeats at ~20 Hz). */
-        const val RAPID_MS = 120L
         /** CSS `ease-out`. */
         val EASE_OUT = CubicBezierEasing(0f, 0f, 0.58f, 1f)
     }

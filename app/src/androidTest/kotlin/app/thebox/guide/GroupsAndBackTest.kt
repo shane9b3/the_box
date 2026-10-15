@@ -6,7 +6,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.thebox.core.guide.Overlay
 import app.thebox.core.guide.ScreenMode
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -28,7 +27,8 @@ class GroupsAndBackTest : GuideTestBase() {
         press(KeyEvent.KEYCODE_CHANNEL_DOWN)
         val g1 = awaitUi("CH− applies the next entry, panel open") { (it.overlay as? Overlay.Groups)?.current != g0.current }.overlay as Overlay.Groups
         awaitUi("source label changed") { it.sourceLabel != label0 }
-        assertEquals("focused follows the applied entry", g1.current, g1.focused)
+        // `focused` indexes the shortcuts first, then the entries; `current` indexes the entries (Overlay.Groups KDoc).
+        assertEquals("focused follows the applied entry", g1.shortcuts.size + g1.current, g1.focused)
         press(KeyEvent.KEYCODE_CHANNEL_UP)
         awaitUi("CH+ applies the previous entry") { (it.overlay as? Overlay.Groups)?.current == g0.current }
         press(KeyEvent.KEYCODE_BACK)
@@ -44,7 +44,8 @@ class GroupsAndBackTest : GuideTestBase() {
         longPress(KeyEvent.KEYCODE_DPAD_RIGHT)
         val card = awaitUi("group card after long →") { it.groupCard != null }.groupCard
         log("I-7 group card: $card (was $src)")
-        assertNotEquals("source changed", src, ui().sourceLabel)
+        // The card names the new group at once; the header label follows when its lineup arrives (async).
+        awaitUi("source changed") { it.sourceLabel != src }
         assertEquals("the channel keeps playing", ch.identity, controller.state.value.target?.identity)
         longPress(KeyEvent.KEYCODE_DPAD_LEFT)
         awaitUi("long ← back to the first source") { it.sourceLabel == src }
@@ -65,7 +66,10 @@ class GroupsAndBackTest : GuideTestBase() {
         press(KeyEvent.KEYCODE_DPAD_CENTER)
         val days = awaitUi("Days") { it.overlay is Overlay.Days }.overlay as Overlay.Days
         log("I-8 days: ${days.items.map { it.label }} focused=${days.focused}")
-        press(KeyEvent.KEYCODE_DPAD_RIGHT)
+        // §3.5.1: "Tonight 20:00" sits right after Today, so "next day" is the Tomorrow item, not the next item.
+        val tomorrow = days.items.indexOfFirst { it.label == "Tomorrow" }
+        assertTrue("a Tomorrow item after the focused day", tomorrow > days.focused)
+        press(KeyEvent.KEYCODE_DPAD_RIGHT, times = tomorrow - days.focused)
         press(KeyEvent.KEYCODE_DPAD_CENTER)
         awaitUi("Days closed") { it.overlay == null }
         val jumped = focus()!!
@@ -74,6 +78,11 @@ class GroupsAndBackTest : GuideTestBase() {
 
         // Back ladder (B2): scrolled → home → FULL → GUIDE home → exit hint → exit.
         goHome()
+        // The day jump left the focus on tomorrow: one Back is "scrolled → home" (focus at now), then OK tunes.
+        if (!focusContainsNow()) {
+            press(KeyEvent.KEYCODE_BACK)
+            awaitUi("Back → home after the day jump") { it.overlay == null && focusContainsNow() }
+        }
         val ch = tuneFocusedRow()
         press(KeyEvent.KEYCODE_DPAD_RIGHT, 3)
         press(KeyEvent.KEYCODE_BACK)

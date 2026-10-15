@@ -2,6 +2,7 @@ package app.thebox.guide
 
 import android.view.KeyEvent
 import androidx.test.ext.junit.runners.AndroidJUnit4
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -10,8 +11,10 @@ import org.junit.runner.RunWith
  * I-18 (B8; criterion owned by WP-A): capture app trace sections with `atrace` during 50× DOWN and count them.
  * WP-A's criterion: on grid-only frames the panel's and the ambient's draw sections do not fire; only `guide-draw`
  * does. This harness captures and logs the section counts; the only assertion is that `guide-draw` was traced at all
- * (otherwise the capture proves nothing). TODO(integrator, WP-A): set [PANEL_SECTIONS]/[AMBIENT_SECTIONS] to the
- * real section names and add the "≤ focus changes" bound WP-A signs off.
+ * (otherwise the capture proves nothing). The panel column (`guide-panel`) and the ambient (`guide-ambient`) carry
+ * their own trace sections (§2.13 item 20): the ambient must not redraw at all while scrolling, and the panel at most
+ * once per focus change (its content changes with the focus) plus description loads, so most `guide-draw` frames are
+ * grid-only.
  */
 @RunWith(AndroidJUnit4::class)
 class LayerScopeTest : GuideTestBase() {
@@ -37,11 +40,14 @@ class LayerScopeTest : GuideTestBase() {
         log("I-18 trace ${dump.length} chars, frames=$frames $GRID_SECTION=$grid panel=$panel ambient=$ambient")
         log("I-18 top sections: ${counts.entries.sortedByDescending { it.value }.take(25)}")
         assertTrue("no '$GRID_SECTION' section traced (WP-A renderer section missing, or atrace capture failed: ${dump.take(200)})", grid > 0)
+        assertEquals("ambient redrawn while scrolling the grid", 0, ambient)
+        assertTrue("panel redrawn $panel times for 50 moves", panel <= 100)
+        assertTrue("grid-only frames exist (guide-draw $grid > panel $panel)", grid > panel)
     }
 
     companion object {
         const val GRID_SECTION = "guide-draw"
-        val PANEL_SECTIONS = listOf("guide-panel", "FocusedPanel")
-        val AMBIENT_SECTIONS = listOf("guide-ambient", "AmbientBackground")
+        val PANEL_SECTIONS = listOf(app.thebox.ui.guide.screen.TRACE_PANEL)
+        val AMBIENT_SECTIONS = listOf(app.thebox.ui.ambient.TRACE_AMBIENT)
     }
 }

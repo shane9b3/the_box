@@ -1,5 +1,6 @@
 package app.thebox.core.guide.state
 
+import app.thebox.core.guide.layout.GuideNavigatorImpl
 import app.thebox.core.epg.EpgGenerationInfo
 import app.thebox.core.guide.CellKind
 import app.thebox.core.guide.DeviceClass
@@ -48,6 +49,7 @@ class GuideWorld(
     val data: GuideWindowData = DEFAULT_DATA,
     val dataWindow: GuideDataWindow = GuideDataWindow(pastDays = 2, futureDays = 2),
     startMs: Long = NOW_MIN * 60_000L + 20_000L,
+    realNavigator: Boolean = REAL_NAVIGATOR,
 ) {
     var nowMs = startMs
     val calls = RecordingGuideEffects()
@@ -58,8 +60,12 @@ class GuideWorld(
     var exited = false
     var archiveSucceeds = true
     val rows = FakeGuideRows(channels)
-    val nav = FakeNavigator()
     val labels = FakeTimeLabels()
+    /**
+     * §1.7 step 2 / §2.13 item 20: the machine's tests run on both navigators. `-Dthebox.realNavigator=true` (the
+     * `stateOnRealNavigator` Gradle test task) swaps in WP-A's [GuideNavigatorImpl], recorded through [RecordingNavigator].
+     */
+    val nav: RecordingNavigator = RecordingNavigator(if (realNavigator) GuideNavigatorImpl(labels) else FakeNavigator())
     val machine = GuideStateMachineImpl(Sim(), nav, labels, FakeGuideRenderer(), { nowMs })
     val ui: GuideUiState get() = machine.ui.value
     private var lineupVersion = 1L
@@ -193,3 +199,15 @@ class GuideWorld(
         fun exitWorld(mode: ExitConfirmation) = GuideWorld(settings = GuideSettings(exitConfirmation = mode))
     }
 }
+
+/** Records the moves of the wrapped navigator (the tests assert on [moves]). */
+class RecordingNavigator(private val inner: app.thebox.core.guide.GuideNavigator) : app.thebox.core.guide.GuideNavigator by inner {
+    val moves = ArrayList<app.thebox.core.guide.GridMove>()
+    override fun move(from: app.thebox.core.guide.GridFocus, move: app.thebox.core.guide.GridMove, arg: Int, ctx: app.thebox.core.guide.GridContext): app.thebox.core.guide.GridMoveResult {
+        moves += move
+        return inner.move(from, move, arg, ctx)
+    }
+}
+
+/** `-Dthebox.realNavigator=true`: run the state-machine tests on GuideNavigatorImpl. */
+val REAL_NAVIGATOR: Boolean = System.getProperty("thebox.realNavigator") == "true"

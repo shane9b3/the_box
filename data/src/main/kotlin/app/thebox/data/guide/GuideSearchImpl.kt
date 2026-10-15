@@ -42,7 +42,8 @@ class GuideSearchImpl @Inject constructor(
 
     override suspend fun search(query: String, nowMs: Long, unlocked: Boolean): SearchResults = withContext(io) {
         val q = query.trim()
-        if (q.count { it.isLetterOrDigit() } < MIN_CHARS) return@withContext SearchResults(q, emptyList(), emptyList())
+        val noGuide = store.info.value == null
+        if (q.count { it.isLetterOrDigit() } < MIN_CHARS) return@withContext SearchResults(q, emptyList(), emptyList(), noGuide)
         val folded = NameNormalizer.fold(q).trim()
         val channels = searchChannels(q, folded, unlocked)
         coroutineContext.ensureActive()
@@ -54,7 +55,7 @@ class GuideSearchImpl @Inject constructor(
             BoxLog.w(TAG, "programme search failed: ${e.javaClass.simpleName}")
             emptyList()
         }
-        SearchResults(q, channels, programmes)
+        SearchResults(q, channels, programmes, guideDataMissing = noGuide)
     }
 
     private suspend fun searchChannels(q: String, folded: String, unlocked: Boolean): List<GuideChannel> {

@@ -22,21 +22,15 @@ import app.thebox.core.guide.GuideRowsCacheFactory
 import app.thebox.core.guide.GuideSessionStore
 import app.thebox.core.guide.GuideSettings
 import app.thebox.core.guide.GuideSettingsSource
-import app.thebox.core.guide.GuideSource
-import app.thebox.core.guide.GuideSourceEntry
 import app.thebox.core.guide.GuideStateMachine
 import app.thebox.core.guide.GuideStateMachineFactory
 import app.thebox.core.guide.GuideToast
-import app.thebox.core.guide.GuideUiState
 import app.thebox.core.guide.GuideWindowPager
 import app.thebox.core.guide.GuideWindowPagerFactory
-import app.thebox.core.guide.OpenGuideOn
-import app.thebox.core.guide.Overlay
 import app.thebox.core.guide.PerformanceMode
 import app.thebox.core.guide.ReminderAlerts
 import app.thebox.core.guide.ReminderBook
 import app.thebox.core.guide.RowCellsBuilder
-import app.thebox.core.guide.SourceSection
 import app.thebox.core.guide.SyncChip
 import app.thebox.core.guide.SyncFeedState
 import app.thebox.core.guide.SyncFeed
@@ -52,6 +46,8 @@ import app.thebox.ui.R
 import app.thebox.ui.ambient.AmbientHueSource
 import app.thebox.ui.ambient.AmbientState
 import app.thebox.ui.guide.grid.AndroidTextMeasurer
+import app.thebox.ui.guide.grid.GuideTrim
+import app.thebox.ui.search.SearchEffect
 import app.thebox.ui.input.KeyRouter
 import app.thebox.ui.playback.CatchupLauncher
 import app.thebox.ui.root.ShellEvent
@@ -110,6 +106,7 @@ class GuideViewModel @Inject constructor(
     rowCellsBuilder: RowCellsBuilder,
     private val guideImages: GuideImages,
     override val imageLoader: ImageLoader,
+    guideTrim: GuideTrim,
 ) : ViewModel(), ShellHost, ShellEffects {
 
     private val io = Dispatchers.IO
@@ -121,7 +118,10 @@ class GuideViewModel @Inject constructor(
     private var windowW = 0
     private var windowH = 0
 
-    /** Set by the Search screen (WP-B): true while its field is empty and the IME is hidden (KeyRouter, B1). */
+    /**
+     * Set by the Search screen (§2.13 item 7): true while its field is empty and no menu is open. The IME consumes
+     * BACK while it shows, so BACK reaching the key sink with an empty field means "leave Search" (KeyRouter, B1).
+     */
     @Volatile var searchFieldIdle: Boolean = true
 
     override val ambient = AmbientState()
@@ -154,17 +154,15 @@ class GuideViewModel @Inject constructor(
 
     override val machine: GuideStateMachine = stateMachineFactory.create(effects, navigator, labels, renderer, System::currentTimeMillis)
 
+    /** §2.13 item 6: `MainActivity.onTrimMemory` → [GuideTrim] → [trim]. */
+    private val trimHandle: AutoCloseable = guideTrim.register { _, uiHidden -> trim(uiHidden) }
+
     init {
         machine.frame.rows = rowsCache
         machine.frame.labels = labels
         machine.frame.images = guideImages
-        pager = pagerFactory.create(
-            rowsCache,
-            { machine.frame.metrics },
-            { AndroidTextMeasurer(context, machine.frame.metrics?.scale ?: 1f) },
-            rowCellsBuilder,
-            labels,
-        )
+        // One measurer per pager thread, built there at the metrics scale (§2.13 item 3).
+        pager = pagerFactory.create(rowsCache, { machine.frame.metrics }, { scale -> AndroidTextMeasurer(context, scale) }, rowCellsBuilder, labels)
         debugProbe.register(machine)
         keyRouter.attach(machine) { searchFieldIdle }
         forwardFeeds(reminderBook)
@@ -200,12 +198,32 @@ class GuideViewModel @Inject constructor(
     override fun openSearch() = Unit // mode SEARCH is the machine's; the root swaps the screen and hides the viewport
     override fun openSettings() = Unit
 
-    /** onTrimMemory fan-out for the shell's own caches (§4.7); grid/pager caches are trimmed by their owners. */
-    @Suppress("DEPRECATION") // TRIM_MEMORY_RUNNING_LOW is still delivered on the API levels we ship to (25–35)
-    fun onTrimMemory(level: Int) {
-        if (level >= android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
-            ambient.trim()
-            hueSource.trim()
+    /**
+     * The view model's share of `onTrimMemory` ≥ RUNNING_LOW (§4.7, §2.13 item 6), called by [GuideTrim] (which
+     * clears the logo cache and the renderer's text caches itself): row blocks outside `[top − 6, top + 12)`, the
+     * pager's width/detail caches (and its snapshot when the UI is hidden), the non-current ambient bitmap and the hue
+     * cache.
+     */
+    private fun trim(uiHidden: Boolean) {
+        val top = machine.frame.topRow
+        rowsCache.trim(top - ROWS_BEHIND, top + ROWS_AHEAD)
+        pager?.trimMemory(dropSnapshot = uiHidden)
+        ambient.trim()
+        hueSource.trim()
+    }
+
+    // ---- Search host (§2.13 item 7; WP-B hand-off "Search host", B7)
+
+    /** Every [SearchEffect] of the Search screen; `Close` is the only way out of SEARCH. Main thread. */
+    fun onSearchEffect(effect: SearchEffect) {
+        when (effect) {
+            is SearchEffect.Tune -> controller.tune(TuneTarget.Channel(effect.channel.identity), effects.currentLineup?.let { LineupZapList(it, library) })
+            is SearchEffect.PlayArchive -> effects.playArchive(effect.channel, effect.info)
+            is SearchEffect.Toast -> toast(effect.kind, effect.arg)
+            is SearchEffect.Close -> {
+                searchFieldIdle = true
+                machine.dispatch(effect.event)
+            }
         }
     }
 
@@ -220,12 +238,33 @@ class GuideViewModel @Inject constructor(
             }
         }
         scope.launch {
+            // §2.13 item 10: the machine picks the startup source from this hint on the first Sources, so the hint is
+            // read (on IO) before any Sources is forwarded; the view model never loads a lineup itself.
+            machine.lastSourceHint = try {
+                withContext(io) { session.lastSource() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                BoxLog.w(TAG, "last source read failed: ${e.javaClass.simpleName}")
+                null
+            }
             settingsSource.settings.map { it.debugUnlocked }.distinctUntilChanged().collect { unlocked ->
                 library.sources(unlocked).collect { machine.dispatch(GuideEvent.Sources(it)) }
             }
         }
         scope.launch { library.rowContent.collect { rowsCache.reloadLoaded() } }
-        scope.launch { rowsCache.changes.collect { machine.dispatch(GuideEvent.RowsChanged(it)) } }
+        scope.launch {
+            rowsCache.changes.collect {
+                machine.dispatch(GuideEvent.RowsChanged(it))
+                // A block arrival (or a B5 in-place reload) can change a row's (epg ref, shift) basis: the pager
+                // re-queries only the rows whose basis changed, so rows that were PENDING get their programmes
+                // without waiting for the next move (§2.13 item 20; WP-B hand-off "VM glue").
+                val f = machine.frame
+                pager?.ensure(f.topRow, f.windowStartMin)
+                prefetchLogos()
+            }
+        }
+        scope.launch { alerts.missed.collect { machine.dispatch(GuideEvent.MissedReminders(it)) } }
         scope.launch { syncFeed.state.collect { machine.dispatch(GuideEvent.Sync(syncChip(it))) } }
         scope.launch { dataWindow.window.collect { machine.dispatch(GuideEvent.DataWindow(it)) } }
         pager?.let { p ->
@@ -275,21 +314,33 @@ class GuideViewModel @Inject constructor(
         else -> null
     }
 
-    /** Minute-aligned ticks, plus 250 ms ticks while a countdown or the exit hint shows (§3.16.1). */
+    /** §3.7: logos for rows `[top − 6, top + 12)` are requested when a block arrives, before they scroll in. */
+    private fun prefetchLogos() {
+        val f = machine.frame
+        if (!f.showLogos) return
+        val rows = f.rows
+        val from = maxOf(0, f.topRow - ROWS_BEHIND)
+        val to = minOf(rows.size, f.topRow + ROWS_AHEAD)
+        for (i in from until to) rows.channel(i)?.logoUrl?.let { url -> if (!guideImages.failed(url)) guideImages.get(url) }
+    }
+
+    /**
+     * Ticks (§2.13 item 4): one at every minute boundary and one at the machine's [GuideStateMachine.nextDeadlineMs]
+     * (150 ms description debounce, number entry, exit hint, group card, reminder card), whichever is first. A deadline
+     * that moves earlier wakes the loop at once.
+     */
     private fun startTicker() {
         viewModelScope.launch {
             while (true) {
                 val now = System.currentTimeMillis()
                 machine.dispatch(GuideEvent.Tick(now))
-                val fast = needsFastTicks(machine.ui.value)
-                val wait = if (fast) FAST_TICK_MS else MINUTE_MS - now % MINUTE_MS
-                // Wake early when a countdown appears so it starts ticking at once.
-                withTimeoutOrNull(wait) { machine.ui.first { needsFastTicks(it) != fast } }
+                val target = nextTickAt(now, machine.nextDeadlineMs.value)
+                withTimeoutOrNull(target - System.currentTimeMillis()) { machine.nextDeadlineMs.first { it < target } }
             }
         }
     }
 
-    /** Startup (§3.8.4, §3.16.1): the initial source from `openGuideOn` and the "guide with last channel" tune. */
+    /** Startup (§3.16.1): "guide with last channel" tunes the last watched channel; the machine picks the source. */
     private fun startup() {
         viewModelScope.launch {
             try {
@@ -302,12 +353,6 @@ class GuideViewModel @Inject constructor(
                 BoxLog.w(TAG, "startup tune failed: ${e.javaClass.simpleName}")
             }
         }
-        viewModelScope.launch {
-            val last = withContext(io) { session.lastSource() }
-            val entries = library.sources(settingsSource.settings.value.debugUnlocked).first()
-            if (effects.currentSource != null) return@launch // the machine already chose a source
-            initialSource(settingsSource.settings.value.openGuideOn, last, entries)?.let { effects.loadLineup(it) }
-        }
     }
 
     /** A new lineup for the current source: it becomes the zap list while something plays (§3.16.3, N13). */
@@ -316,6 +361,7 @@ class GuideViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        trimHandle.close()
         effects.close()
         pager?.close()
         pager = null
@@ -326,26 +372,20 @@ class GuideViewModel @Inject constructor(
 
     companion object {
         private const val TAG = "GuideViewModel"
-        const val FAST_TICK_MS = 250L
         const val MINUTE_MS = 60_000L
+        /** Floor between two ticks, so a deadline that is already due cannot spin the loop. */
+        const val MIN_TICK_GAP_MS = 16L
+        const val ROWS_BEHIND = 6
+        const val ROWS_AHEAD = 12
 
-        fun needsFastTicks(ui: GuideUiState): Boolean =
-            ui.reminder != null || ui.overlay is Overlay.Number || ui.overlay is Overlay.Exit || ui.groupCard != null
+        /** The next tick: the machine's deadline or the next minute boundary, whichever is first, at least [MIN_TICK_GAP_MS] away. */
+        fun nextTickAt(nowMs: Long, deadlineMs: Long): Long =
+            maxOf(nowMs + MIN_TICK_GAP_MS, minOf(deadlineMs, nowMs - Math.floorMod(nowMs, MINUTE_MS) + MINUTE_MS))
 
         fun lowEndFor(s: GuideSettings, device: DeviceClass): Boolean = when (s.performance) {
             PerformanceMode.LOW -> true
             PerformanceMode.HIGH -> false
             PerformanceMode.AUTO -> device.lowEnd
-        }
-
-        /** §3.8.4: LAST → the stored source if it still exists, FAVOURITES → the default list if present, else All. */
-        fun initialSource(open: OpenGuideOn, last: GuideSource?, entries: List<GuideSourceEntry>): GuideSource? {
-            val firstAll = entries.firstOrNull { it.section == SourceSection.ALL }?.source
-            return when (open) {
-                OpenGuideOn.LAST -> last?.takeIf { l -> entries.any { it.source == l } } ?: firstAll
-                OpenGuideOn.FAVOURITES -> entries.firstOrNull { it.section == SourceSection.FAVOURITES && it.count > 0 }?.source ?: firstAll
-                OpenGuideOn.ALL -> firstAll
-            } ?: entries.firstOrNull()?.source
         }
 
         private fun versionNameOf(context: Context): String = try {

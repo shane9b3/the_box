@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Benchmark build type only (docs/design/m3-guide.md §5.7, §6.2): seeding for GuideScrollBenchmark. -->
+<!-- benchmark and nonMinifiedRelease build types only, never release (docs/design/m3-guide.md §5.7, §2.13 item 19): seeding for GuideScrollBenchmark and BaselineProfileGenerator. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application>

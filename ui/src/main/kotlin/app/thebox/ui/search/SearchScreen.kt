@@ -41,6 +41,7 @@ import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
@@ -67,13 +68,19 @@ import java.util.Locale
  *
  * Sizes are design px (`.dp` inside `BoxDesignScale`, 1 dp = 1 design px).
  */
+const val SEARCH_FIELD_TAG = "search_field"
+
 @Composable
-fun SearchScreen(viewModel: SearchViewModel, modifier: Modifier = Modifier) {
+fun SearchScreen(viewModel: SearchViewModel, modifier: Modifier = Modifier, onIdleChanged: (Boolean) -> Unit = {}) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val field = remember { FocusRequester() }
     var fieldFocused by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf<MenuTarget?>(null) }
     LaunchedEffect(Unit) { runCatching { field.requestFocus() } }
+    // §2.13 item 7: the root key sink may take BACK only while the field is empty and no menu is open (B1). The IME
+    // consumes BACK while it shows, so an empty field that still gets BACK means "leave Search".
+    val idle = state.query.isEmpty() && menu == null
+    LaunchedEffect(idle) { onIdleChanged(idle) }
 
     Column(
         modifier
@@ -163,6 +170,8 @@ private fun Tabs() {
 @Composable
 private fun SearchField(text: String, focus: FocusRequester, onFocus: (Boolean) -> Unit, onChange: (String) -> Unit) {
     var focused by remember { mutableStateOf(false) }
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
     Box(
         Modifier
             .fillMaxWidth()
@@ -179,10 +188,26 @@ private fun SearchField(text: String, focus: FocusRequester, onFocus: (Boolean) 
             singleLine = true,
             textStyle = Body,
             cursorBrush = SolidColor(DesignTokens.Colors.Accent),
+            // Device bug G5 (§5.11): the single-line field consumed D-pad Down, so the result rows were unreachable
+            // with a remote. Down (and the IME's Search action) leave the field for the first result row.
+            keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(imeAction = androidx.compose.ui.text.input.ImeAction.Search),
+            keyboardActions = androidx.compose.foundation.text.KeyboardActions(onSearch = {
+                keyboard?.hide()
+                focusManager.moveFocus(androidx.compose.ui.focus.FocusDirection.Down)
+            }),
             modifier = Modifier
                 .fillMaxWidth()
                 .focusRequester(focus)
-                .onFocusChanged { focused = it.isFocused; onFocus(it.isFocused) },
+                .onFocusChanged { focused = it.isFocused; onFocus(it.isFocused) }
+                .onPreviewKeyEvent { e ->
+                    if (e.key == Key.DirectionDown && e.type == KeyEventType.KeyDown) {
+                        keyboard?.hide()
+                        focusManager.moveFocus(androidx.compose.ui.focus.FocusDirection.Down)
+                    } else {
+                        false
+                    }
+                }
+                .testTag(SEARCH_FIELD_TAG),
         )
     }
 }

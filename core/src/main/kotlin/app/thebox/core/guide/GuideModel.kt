@@ -125,6 +125,19 @@ data class GuideChannel(
 }
 
 /**
+ * Bits of [GuideWindowData.cellFlags] above the `ProgrammeFlags` range (§3.2.4, §3.6.4). (amended 2026-10-14, §2.13
+ * item 1: WP-A and WP-B each defined these locally; one definition here, same values.)
+ */
+object CellFlags {
+    /** A GAP piece shorter than `GridConstants.SLIVER_MIN`: tiles the row, not focusable, draws nothing (WP-A builder). */
+    const val SLIVER: Int = 1 shl 30
+    /** Title needs bidi (`java.text.Bidi.requiresBidi`), set by the pager once per textId (S6). */
+    const val RTL: Int = 1 shl 29
+    /** Title contains a combining mark, variation selector or ZWJ: grapheme cuts use `BreakIterator` (S6). */
+    const val COMPLEX: Int = 1 shl 28
+}
+
+/**
  * Immutable programme snapshot for rows [firstRow, firstRow + rowCount) of one lineup and display minutes
  * [fromMin, toMin). Built on `box-guide-epg`, published to main, never mutated after publication.
  * Cells of a row are contiguous, sorted by start, non-overlapping, and tile [fromMin, toMin) exactly
@@ -148,7 +161,7 @@ class GuideWindowData(
     /** Raw (unshifted) start: the catch-up and reminder key. Equals [cellStart] for GAP/NO_EPG. */
     val cellRawStart: IntArray,
     val cellKind: ByteArray,
-    /** ProgrammeFlags (EpgContracts.kt:161-179). */
+    /** ProgrammeFlags (EpgContracts.kt:161-179) plus [CellFlags]. */
     val cellFlags: IntArray,
     /** epg_text id, generation-local: used only as a text-cache key, never persisted. −1 for non-programmes. */
     val cellTextId: IntArray,
@@ -199,3 +212,17 @@ data class ProgrammeInfo(
     val flags: Int,
     val titleHash: Long,
 )
+
+/**
+ * (amended 2026-10-14, §2.13 item 20) A row's programme basis (B5/S10a): 0 = not loaded, otherwise a hash of
+ * (epg ref, epgShiftMin). The pager stamps it per row on every snapshot ([GuideWindowData.rowEpgBasis]); the state
+ * machine accepts a snapshot built from an older rows version when every row's basis is unchanged.
+ */
+fun epgBasisOf(ch: GuideChannel?): Long {
+    if (ch == null) return 0L
+    val ref = ch.epg
+    var h = app.thebox.core.common.Hash64.long(app.thebox.core.common.Hash64.of(null), ch.epgShiftMin.toLong())
+    h = app.thebox.core.common.Hash64.long(h, ref?.sourceId ?: -1L)
+    h = app.thebox.core.common.Hash64.str(h, ref?.xmltvId)
+    return if (h == 0L) 1L else h
+}

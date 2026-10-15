@@ -1,11 +1,14 @@
 package app.thebox.ui.guide.screen
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
@@ -13,9 +16,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -73,11 +78,20 @@ fun HeaderTabs(state: GuideUiState, clock24: Boolean, modifier: Modifier = Modif
     }
 }
 
-/** White wordmark, 28 high. WP-E's `drawable/wordmark` vector replaces this text when it lands (integrator). */
+/** WP-E's white wordmark vector (§3.17), 28 high, tinted `FG` (§2.13 item 16). */
 @Composable
 private fun Wordmark() {
-    Line(stringResource(R.string.guide_wordmark), GuideUi.sans(26, FontWeight.Bold, GuideUi.Fg, -0.02f))
+    Image(
+        painter = painterResource(R.drawable.wordmark),
+        contentDescription = stringResource(R.string.guide_wordmark),
+        colorFilter = ColorFilter.tint(GuideUi.Fg),
+        modifier = Modifier.height(WORDMARK_H.dp).width((WORDMARK_H * WORDMARK_ASPECT).dp),
+    )
 }
+
+/** Design px; the vector's viewport is 1158 × 480. */
+private const val WORDMARK_H = 28f
+private const val WORDMARK_ASPECT = 1158f / 480f
 
 @Composable
 private fun Clock(clock24: Boolean) {
@@ -88,8 +102,10 @@ private fun Clock(clock24: Boolean) {
         }
     }
     val date = Date(now)
-    val dateText = SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(date)
-    val timeText = SimpleDateFormat(if (clock24) "HH:mm" else "h:mm a", Locale.getDefault()).format(date)
+    // The configuration's locale (observable: a locale change recomposes); lint NonObservableLocale.
+    val locale: Locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
+    val dateText = SimpleDateFormat("EEE d MMM", locale).format(date)
+    val timeText = SimpleDateFormat(if (clock24) "HH:mm" else "h:mm a", locale).format(date)
     Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Bottom) {
         Line(dateText, GuideUi.sans(18, color = GuideUi.Fg65), Modifier.padding(bottom = 6.dp))
         Line(timeText, BoxTextStyles.Clock.copy(color = GuideUi.Fg))

@@ -39,8 +39,12 @@ const val FOCUSED_PANEL_TAG = "focused_panel"
  * description is at most 3 lines and only arrives after the 150 ms debounce (B2.8). The secondary button is a flat
  * 10 % fill, no blur (B1.3).
  */
+/** Debug composition counter key (I-12, §2.13 item 20). */
+const val COMPOSITIONS_PANEL = "FocusedPanel"
+
 @Composable
 fun FocusedPanel(state: GuideUiState, modifier: Modifier = Modifier) {
+    if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) androidx.compose.runtime.SideEffect { app.thebox.ui.guide.GuideDebugCounters.bump(COMPOSITIONS_PANEL) } // I-12
     val panel = state.panel ?: return
     Column(modifier.testTag(FOCUSED_PANEL_TAG), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         MetaRow(panel)

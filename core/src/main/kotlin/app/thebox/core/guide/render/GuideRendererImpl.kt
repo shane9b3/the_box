@@ -16,7 +16,7 @@ import app.thebox.core.guide.GuideTextStyle
 import app.thebox.core.guide.GuideWindowData
 import app.thebox.core.guide.RowStatus
 import app.thebox.core.guide.TimeLabels
-import app.thebox.core.guide.layout.CellFlags
+import app.thebox.core.guide.CellFlags
 import app.thebox.core.guide.layout.GridConstants
 import app.thebox.core.guide.layout.rowTopPx
 import kotlin.math.floor
@@ -64,7 +64,7 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
     val textFitMisses: Long get() = titleFit.misses + nameFit.misses
 
     /** Drops the text caches (`onTrimMemory`, §4.7). */
-    fun trimCaches() {
+    override fun trimCaches() {
         titleFit.clear(); nameFit.clear(); numbers.clear()
     }
 

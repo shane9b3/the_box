@@ -58,6 +58,8 @@ class LogoCache internal constructor(
     override var onLoaded: (() -> Unit)? = null
 
     val size: Int get() = lru.size
+    /** Entry cap in force (§3.7: 160, 48 in low-end mode); read by I-16. */
+    val capacity: Int get() = if (lowEnd) GridConstants.LOGO_CACHE_LOW_END else GridConstants.LOGO_CACHE
     val byteCount: Long get() = bytes
 
     override fun get(url: String): GuideImage? {
@@ -82,7 +84,7 @@ class LogoCache internal constructor(
     }
 
     /** Drops every bitmap and pending result (`onTrimMemory`, a scale change). Failures stay remembered. */
-    fun clear() {
+    override fun clear() {
         lru.clear()
         inFlight.clear()
         bytes = 0

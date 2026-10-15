@@ -21,6 +21,8 @@ import app.thebox.ui.theme.DesignTokens
 import kotlin.math.roundToInt
 
 const val AMBIENT_TAG = "ambient"
+/** Trace section around the ambient draw (I-18, §2.13 item 20). */
+const val TRACE_AMBIENT = "guide-ambient"
 
 /**
  * The window background (docs/design/m3-guide.md §3.14, §3.13.3): the ambient bitmap scaled to the window and
@@ -44,14 +46,19 @@ fun AmbientBackground(state: AmbientState, videoRect: RectPx?, shadowHole: RectP
             .testTag(AMBIENT_TAG)
             .graphicsLayer()
             .drawBehind {
-                val v = videoRect
-                if (v == null) {
-                    drawField(state, shadowHole, black)
-                } else {
-                    // Never paint inside the video rect: the SurfaceView shows through it.
-                    clipRect(v.left.toFloat(), v.top.toFloat(), v.right.toFloat(), v.bottom.toFloat(), ClipOp.Difference) {
+                android.os.Trace.beginSection(TRACE_AMBIENT) // I-18: must not fire on grid-only frames (B8)
+                try {
+                    val v = videoRect
+                    if (v == null) {
                         drawField(state, shadowHole, black)
+                    } else {
+                        // Never paint inside the video rect: the SurfaceView shows through it.
+                        clipRect(v.left.toFloat(), v.top.toFloat(), v.right.toFloat(), v.bottom.toFloat(), ClipOp.Difference) {
+                            drawField(state, shadowHole, black)
+                        }
                     }
+                } finally {
+                    android.os.Trace.endSection()
                 }
             },
     )

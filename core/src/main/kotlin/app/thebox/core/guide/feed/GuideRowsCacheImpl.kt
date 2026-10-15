@@ -41,7 +41,7 @@ class GuideRowsCacheImpl(private val library: GuideLibrary, private val scope: C
     override val changes: StateFlow<Long> = versionFlow.asStateFlow()
 
     /** The current lineup's [GuideLineup.version] (0 before the first); the pager stamps snapshots with it (§3.2.3). */
-    val lineupVersion: Long get() = lineup?.version ?: 0L
+    override val lineupVersion: Long get() = lineup?.version ?: 0L
 
     override fun channel(index: Int): GuideChannel? {
         if (index < 0 || index >= rowIds.size) return null
@@ -100,7 +100,7 @@ class GuideRowsCacheImpl(private val library: GuideLibrary, private val scope: C
     }
 
     /** §4.7 trim: drops blocks that do not intersect `[keepFrom, keepTo)` (the VM passes `[top − 6, top + 12)`). */
-    fun trim(keepFrom: Int, keepTo: Int) {
+    override fun trim(keepFrom: Int, keepTo: Int) {
         val lo = keepFrom.coerceAtLeast(0) / ROW_BLOCK
         val hi = (keepTo - 1).coerceAtLeast(0) / ROW_BLOCK
         val drop = ArrayList<Int>()

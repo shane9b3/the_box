@@ -16,7 +16,7 @@ import app.thebox.core.guide.fakes.GuideFixtures
 import app.thebox.core.guide.fakes.GuideFixtures.Cell
 import app.thebox.core.guide.fakes.RecordingGuideCanvas
 import app.thebox.core.guide.fakes.RecordingGuideCanvas.Op
-import app.thebox.core.guide.layout.CellFlags
+import app.thebox.core.guide.CellFlags
 import app.thebox.core.guide.layout.GuideMetricsImpl
 import kotlin.math.abs
 import kotlin.test.Test

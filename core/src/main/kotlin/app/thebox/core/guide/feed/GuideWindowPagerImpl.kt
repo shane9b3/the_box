@@ -10,12 +10,14 @@ import app.thebox.core.epg.EpgReader
 import app.thebox.core.epg.EpgStore
 import app.thebox.core.epg.EpgWindow
 import app.thebox.core.epg.ProgrammeDetail
+import app.thebox.core.guide.CellFlags
 import app.thebox.core.guide.CellKind
 import app.thebox.core.guide.CellSink
 import app.thebox.core.guide.GuideChannel
 import app.thebox.core.guide.GuideMetrics
 import app.thebox.core.guide.GuideRows
 import app.thebox.core.guide.GuideTextMeasurer
+import app.thebox.core.guide.render.RescalableTextMeasurer
 import app.thebox.core.guide.GuideTextStyle
 import app.thebox.core.guide.GuideWindowData
 import app.thebox.core.guide.GuideWindowPager
@@ -57,7 +59,8 @@ class GuideWindowPagerImpl(
     private val store: EpgStore,
     private val rows: GuideRows,
     private val metrics: () -> GuideMetrics?,
-    private val measurer: () -> GuideTextMeasurer,
+    /** Called on the pager thread only (§2.13 item 3); see [measurerFor]. */
+    private val measurer: (scale: Float) -> GuideTextMeasurer,
     private val builder: RowCellsBuilder,
     private val labels: TimeLabels,
     /** Test hook: the reader factory (defaults to [EpgStore.openReader]). */
@@ -72,6 +75,16 @@ class GuideWindowPagerImpl(
     private val gen = MutableStateFlow<EpgGenerationInfo?>(null)
     override val snapshots: StateFlow<GuideWindowData?> = snaps.asStateFlow()
     override val generation: StateFlow<EpgGenerationInfo?> = gen.asStateFlow()
+
+    /** The pager thread's one measurer (§2.13 item 3). Touched only on [THREAD_NAME]. */
+    private var textMeasurer: GuideTextMeasurer? = null
+
+    private fun measurerFor(scale: Float): GuideTextMeasurer {
+        val m = textMeasurer
+        if (m != null && m.scale == scale) return m
+        if (m is RescalableTextMeasurer) { m.rescale(scale); return m }
+        return measurer(scale).also { textMeasurer = it }
+    }
 
     /** One target: rows [firstRow, firstRow + channels.size) × display minutes [fromMin, toMin). Immutable. */
     private class Request(
@@ -125,6 +138,9 @@ class GuideWindowPagerImpl(
         private set
     @Volatile var lastBuildMs: Double = 0.0
         private set
+    /** The `EpgReader.window` call alone of the last build (0 without a reader). */
+    @Volatile var lastQueryMs: Double = 0.0
+        private set
 
     private data class InfoKey(val generation: Long, val identityHash: Long, val rawStart: Int)
 
@@ -165,7 +181,7 @@ class GuideWindowPagerImpl(
         for (i in channels.indices) channels[i] = rows.channel(first + i)
         covFirst = first; covEnd = end; covFrom = from; covTo = to
         covRowsVersion = rows.version; covScale = scale; covValid = true
-        val lineupVersion = (rows as? GuideRowsCacheImpl)?.lineupVersion ?: 0L
+        val lineupVersion = rows.lineupVersion
         post(Request(first, channels, from, to, rows.version, lineupVersion, requestSeq.incrementAndGet()))
     }
 
@@ -194,7 +210,7 @@ class GuideWindowPagerImpl(
      * §4.7 trim (called by the VM's `onTrimMemory` fan-out): clears the width cache and the detail LRU; with
      * [dropSnapshot] (`TRIM_MEMORY_UI_HIDDEN`) also the current snapshot, which the next [ensure] rebuilds.
      */
-    fun trimMemory(dropSnapshot: Boolean) {
+    override fun trimMemory(dropSnapshot: Boolean) {
         if (closed.get()) return
         if (dropSnapshot) {
             covValid = false
@@ -321,6 +337,8 @@ class GuideWindowPagerImpl(
             val data = build(r)
             lastBuildMs = (System.nanoTime() - t0) / 1e6
             if (lastBuildMs > BUILD_LOG_MS) BoxLog.i(TAG) { "snapshot ${data.rowCount} rows, ${data.cellCount} cells in ${"%.1f".format(lastBuildMs)} ms" }
+            // Every build at debug level (§5.11 device timings: window query and snapshot build P50/P90).
+            BoxLog.d(TAG) { "timing query=${"%.2f".format(lastQueryMs)} build=${"%.2f".format(lastBuildMs)} rows=${data.rowCount} cells=${data.cellCount}" }
             if (!closed.get()) snaps.value = data
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
@@ -344,7 +362,7 @@ class GuideWindowPagerImpl(
         val rd = reader
         val generation = rd?.info?.generation ?: -1L
         val patchSeq = rd?.info?.patchSeq ?: 0
-        val scale = metrics()?.scale ?: measurer().scale
+        val scale = metrics()?.scale ?: (textMeasurer?.scale ?: 1f)
         if (scale != widthScale) {
             widths.clear()
             widthScale = scale
@@ -370,8 +388,11 @@ class GuideWindowPagerImpl(
                 shifts[i] = ch.epgShiftMin
                 ids[i] = ch.epg?.let { refIds[it] } ?: -1
             }
+            val q0 = System.nanoTime()
             rd.window(ids, shifts, r.fromMin, r.toMin, epgWindow)
+            lastQueryMs = (System.nanoTime() - q0) / 1e6
         } else {
+            lastQueryMs = 0.0
             epgWindow.clear()
         }
 
@@ -446,7 +467,7 @@ class GuideWindowPagerImpl(
             status: ByteArray, firstCell: IntArray, cellCount: IntArray, basis: LongArray,
         ): GuideWindowData {
             val n = size
-            val m = measurer()
+            val m = measurerFor(scale)
             val outFlags = flags.copyOf(n)
             val outTitle = title.copyOf(n)
             val titleWidth = FloatArray(n) { -1f }
@@ -506,27 +527,15 @@ class GuideWindowPagerImpl(
         private const val BUILD_LOG_MS = 8.0
         private const val TIME_SEPARATOR = " – "
 
-        /** Title needs bidi layout (S6): the renderer right-aligns it. Not yet in the contract (hand-off note). */
-        const val CELL_RTL = 1 shl 29
-        /** Title has a combining mark, variation selector or ZWJ: TextFit backs off to a grapheme boundary (S6). */
-        const val CELL_COMPLEX = 1 shl 28
-
         /** Row basis (B5): 0 = not loaded; otherwise a hash of (epg ref, epgShiftMin). */
         const val PENDING_BASIS = 0L
 
-        fun basisOf(ch: GuideChannel?): Long {
-            if (ch == null) return PENDING_BASIS
-            val ref = ch.epg
-            var h = Hash64.long(Hash64.of(null), ch.epgShiftMin.toLong())
-            h = Hash64.long(h, ref?.sourceId ?: -1L)
-            h = Hash64.str(h, ref?.xmltvId)
-            return if (h == PENDING_BASIS) 1L else h
-        }
+        fun basisOf(ch: GuideChannel?): Long = app.thebox.core.guide.epgBasisOf(ch)
 
         internal fun textFlagsOf(t: String): Int {
             var f = 0
             val chars = t.toCharArray()
-            if (Bidi.requiresBidi(chars, 0, chars.size)) f = f or CELL_RTL
+            if (Bidi.requiresBidi(chars, 0, chars.size)) f = f or CellFlags.RTL
             var i = 0
             while (i < t.length) {
                 val cp = t.codePointAt(i)
@@ -534,7 +543,7 @@ class GuideWindowPagerImpl(
                 if (type == Character.NON_SPACING_MARK.toInt() || type == Character.ENCLOSING_MARK.toInt() ||
                     type == Character.COMBINING_SPACING_MARK.toInt() || cp == 0x200D || cp in 0xFE00..0xFE0F || cp in 0xE0100..0xE01EF
                 ) {
-                    f = f or CELL_COMPLEX
+                    f = f or CellFlags.COMPLEX
                     break
                 }
                 i += Character.charCount(cp)

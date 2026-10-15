@@ -201,26 +201,32 @@ class GuideDebugReceiver : ComponentActivity() {
             Log.i(TAG, "status: $s")
         }
 
+        /**
+         * A switch given twice takes its **last** value (device bug G2, §2.13 item 20): the suite appends per-class
+         * switches after the defaults, and `getQueryParameter` returns the first occurrence.
+         */
+        private fun Uri.lastParam(key: String): String? = getQueryParameters(key).lastOrNull()
+
         /** Pure mapping of the deep-link switches onto [GuideSettings] (documented on the class). */
         fun applySwitches(s: GuideSettings, uri: Uri): GuideSettings {
             var out = s
-            when (uri.getQueryParameter("lowend")) {
+            when (uri.lastParam("lowend")) {
                 "1" -> out = out.copy(performance = PerformanceMode.LOW)
                 "0" -> out = out.copy(performance = PerformanceMode.HIGH)
             }
-            when (uri.getQueryParameter("perf")?.lowercase()) {
+            when (uri.lastParam("perf")?.lowercase()) {
                 "auto" -> out = out.copy(performance = PerformanceMode.AUTO)
                 "high" -> out = out.copy(performance = PerformanceMode.HIGH)
                 "low" -> out = out.copy(performance = PerformanceMode.LOW)
             }
-            uri.getQueryParameter("still")?.let { out = out.copy(miniStill = it == "1") }
-            uri.getQueryParameter("clock24")?.let { out = out.copy(clock24 = it == "1") }
-            when (uri.getQueryParameter("exit")?.lowercase()) {
+            uri.lastParam("still")?.let { out = out.copy(miniStill = it == "1") }
+            uri.lastParam("clock24")?.let { out = out.copy(clock24 = it == "1") }
+            when (uri.lastParam("exit")?.lowercase()) {
                 "twice" -> out = out.copy(exitConfirmation = ExitConfirmation.BACK_TWICE)
                 "ask" -> out = out.copy(exitConfirmation = ExitConfirmation.ASK)
                 "none" -> out = out.copy(exitConfirmation = ExitConfirmation.NONE)
             }
-            uri.getQueryParameter("unlocked")?.let { out = out.copy(debugUnlocked = it == "1") }
+            uri.lastParam("unlocked")?.let { out = out.copy(debugUnlocked = it == "1") }
             return out
         }
     }
@@ -241,4 +247,6 @@ interface GuideDebugEntryPoint {
     fun channels(): ChannelRepository
     fun controller(): PlaybackController
     fun search(): GuideSearch
+    /** The logo cache (I-16 reads `LogoCache.capacity`). */
+    fun guideImages(): app.thebox.core.guide.GuideImages
 }

@@ -172,5 +172,6 @@ class GuideSearchTest {
         assertTrue(search("n").channels.isEmpty() && search("n").programmes.isEmpty())
         assertEquals("FTS keeps the raw name", listOf("Late Adult"), search("late adult", unlocked = true).channels.map { it.displayName })
         assertTrue("adult channel hidden while locked", search("late adult").channels.isEmpty())
+        assertFalse("a generation exists", r.guideDataMissing)
     }
 }

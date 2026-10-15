@@ -50,7 +50,7 @@ class TextFit(private val measurer: GuideTextMeasurer, slots: Int) {
     /**
      * Chars of [text] to draw in [availPx]: `text.length` when the whole string fits ([lastWidth] = its width), else
      * the count that fits in `availPx − ellipsisPx` at a grapheme boundary ([lastWidth] = width of that prefix).
-     * [complex]: the string needs the `BreakIterator` path (pager flag `CELL_COMPLEX`).
+     * [complex]: the string needs the `BreakIterator` path (`CellFlags.COMPLEX`).
      */
     fun fit(text: String, key: Long, style: GuideTextStyle, availPx: Float, ellipsisPx: Float, complex: Boolean = false): Int {
         val p = availPx.toInt()

@@ -25,6 +25,8 @@ import app.thebox.core.guide.GuideSettings
 import app.thebox.core.guide.GuideSource
 import app.thebox.core.guide.GuideSourceEntry
 import app.thebox.core.guide.GuideStateMachine
+import app.thebox.core.guide.GuideGeometry
+import app.thebox.core.guide.epgBasisOf
 import app.thebox.core.guide.GuideStateMachineFactory
 import app.thebox.core.guide.GuideToast
 import app.thebox.core.guide.GuideUiState
@@ -50,6 +52,7 @@ import app.thebox.core.input.BoxAction
 import app.thebox.core.input.Keys
 import app.thebox.core.playback.NextStep
 import app.thebox.core.playback.PlaybackErrorCode
+import kotlin.math.abs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -63,11 +66,11 @@ import kotlinx.coroutines.flow.asStateFlow
  * PREVIOUS_CHANNEL, EXIT, OPEN_GUIDE) → mode (FULL, SEARCH, SETTINGS) → zone (§3.4.1).
  *
  * Timers (panel description debounce, number entry, exit hint, group card, reminder card guard/countdown and
- * auto-switch) run on [GuideEvent.Tick]s. [nextDeadlineMs] says when the next one is due so the host can post a Tick
- * then (contract gap, hand-off note: the minute ticker plus 250 ms ticks is too coarse for the 150 ms debounce).
+ * auto-switch) run on [GuideEvent.Tick]s. [nextDeadlineMs] says when the next one is due so the host posts a Tick
+ * then (§2.13 item 4).
  *
- * The host must assign [GuideFrame.rows] (the rows cache) and [GuideFrame.images] once after creation; the machine
- * reads rows but never replaces them (contract gap: no event carries the rows object).
+ * The host assigns [GuideFrame.rows] (the rows cache), [GuideFrame.labels] and [GuideFrame.images] once after
+ * creation; the machine reads rows but never replaces them (§2.13 item 20).
  */
 class GuideStateMachineImpl(
     private val effects: GuideEffects,
@@ -84,13 +87,13 @@ class GuideStateMachineImpl(
     override val frameVersion: StateFlow<Long> = _frameVersion.asStateFlow()
     private val _nextDeadline = MutableStateFlow(Long.MAX_VALUE)
     /** Wall ms of the next timer the machine waits for (post a [GuideEvent.Tick] then); MAX_VALUE = none. */
-    val nextDeadlineMs: StateFlow<Long> = _nextDeadline.asStateFlow()
+    override val nextDeadlineMs: StateFlow<Long> = _nextDeadline.asStateFlow()
 
     /**
      * Last persisted source (`GuideSessionStore.lastSource()`, read on IO by the host) for `OpenGuideOn.LAST`; used on
-     * the first [GuideEvent.Sources] when it is still listed (§3.8.4). Contract gap: no event carries it.
+     * the first [GuideEvent.Sources] when it is still listed (§3.8.4, §2.13 item 10).
      */
-    var lastSourceHint: GuideSource? = null
+    override var lastSourceHint: GuideSource? = null
 
     private val limits = GuideLimits(labels)
     private val number = NumberEntryImpl()
@@ -117,6 +120,8 @@ class GuideStateMachineImpl(
     private var lastNonFavourite: GuideSource? = null
     private var pendingFocusRowId = -1L
     private var pendingFull = false
+    /** Identity hash of a live channel tuned from Search: FULL on its first active Tuned (§2.13 item 7). */
+    private var pendingFullHash = 0L
     private var lastRowsVersion = Long.MIN_VALUE
 
     private var tuned = TunedState()
@@ -189,7 +194,7 @@ class GuideStateMachineImpl(
             is GuideEvent.Sync -> u = u.copy(sync = event.chip)
             is GuideEvent.KeysSeen -> { keysSeen = event.keyCodes; refreshFooter() }
             is GuideEvent.Metrics -> { frame.metrics = event.metrics; frameDirty = true }
-            is GuideEvent.SearchClosed -> onSearchClosed(event.channel, event.tuned)
+            is GuideEvent.SearchClosed -> onSearchClosed(event.channel, event.tuned, event.archive)
             is GuideEvent.DataWindow -> { dataWindow = event.window; recomputeLimits(reclamp = true) }
             is GuideEvent.MissedReminders -> if (event.count > 0) effects.toast(GuideToast.REMINDERS_MISSED, event.count.toString())
         }
@@ -216,7 +221,7 @@ class GuideStateMachineImpl(
         if (globalKey(a)) return
         when (u.mode) {
             ScreenMode.FULL -> fullKey(a)
-            ScreenMode.SEARCH -> if (action == BoxAction.BACK) setMode(ScreenMode.GUIDE)
+            ScreenMode.SEARCH -> if (action == BoxAction.BACK) onSearchClosed(null, tunedFromSearch = false, archive = false)
             ScreenMode.SETTINGS -> if (action == BoxAction.BACK) setMode(ScreenMode.GUIDE)
             ScreenMode.GUIDE -> when (u.zone) {
                 Zone.GRID -> gridKey(a)
@@ -284,7 +289,7 @@ class GuideStateMachineImpl(
                     else -> GridMove.RIGHT
                 }
                 when (val r = navigator.move(f, move, 0, ctx(a.repeat))) {
-                    is GridMoveResult.Moved -> setFocus(r.focus)
+                    is GridMoveResult.Moved -> setFocus(r.focus, r.animate)
                     GridMoveResult.LeftEdge -> if (a.repeat == 0) openGroups()
                     GridMoveResult.TopEdge, GridMoveResult.Blocked -> Unit
                 }
@@ -294,7 +299,7 @@ class GuideStateMachineImpl(
                 if (f == null) { if (up && a.repeat == 0) enterZone(Zone.HEADER); return }
                 if (a.repeat > 0) { holdingVertical = true; holdDirection = if (up) -1 else 1 }
                 when (val r = navigator.move(f, if (up) GridMove.UP else GridMove.DOWN, 0, ctx(a.repeat))) {
-                    is GridMoveResult.Moved -> setFocus(r.focus)
+                    is GridMoveResult.Moved -> setFocus(r.focus, r.animate)
                     GridMoveResult.TopEdge -> if (a.repeat == 0) enterZone(Zone.HEADER)
                     else -> Unit
                 }
@@ -329,13 +334,13 @@ class GuideStateMachineImpl(
         val f = frame.focus ?: return
         if (repeat > 0) { holdingVertical = true; holdDirection = dir }
         val r = navigator.move(f, if (dir < 0) GridMove.PAGE_UP else GridMove.PAGE_DOWN, 0, ctx(repeat))
-        if (r is GridMoveResult.Moved) setFocus(r.focus)
+        if (r is GridMoveResult.Moved) setFocus(r.focus, r.animate)
     }
 
     private fun timeMove(move: GridMove, repeat: Int) {
         val f = frame.focus ?: return
         val r = navigator.move(f, move, 0, ctx(repeat))
-        if (r is GridMoveResult.Moved) setFocus(r.focus)
+        if (r is GridMoveResult.Moved) setFocus(r.focus, r.animate)
     }
 
     /** OK in GRID (§3.9.2, last column). */
@@ -549,12 +554,12 @@ class GuideStateMachineImpl(
 
     private fun goHome() {
         if (frame.focus == null || lineupSize() == 0) return
-        setFocus(navigator.focusAt(homeRow().coerceIn(0, lineupSize() - 1), nowMin, ctx(0)))
+        setFocus(navigator.focusAt(homeRow().coerceIn(0, lineupSize() - 1), nowMin, ctx(0)), animate = !lowEnd)
     }
 
     private fun jumpToNow() {
         val f = frame.focus ?: return
-        setFocus(navigator.focusAt(f.row, nowMin, ctx(0)))
+        setFocus(navigator.focusAt(f.row, nowMin, ctx(0)), animate = !lowEnd)
     }
 
     // ---------------------------------------------------------------- overlays (§3.4.4)
@@ -699,7 +704,7 @@ class GuideStateMachineImpl(
         val f = frame.focus ?: return
         val target = limits.dayTarget(item, f.anchorMin, nowMin)
         val r = navigator.move(f, GridMove.TO_TIME, target, ctx(0))
-        if (r is GridMoveResult.Moved) setFocus(r.focus)
+        if (r is GridMoveResult.Moved) setFocus(r.focus, r.animate)
     }
 
     // ---------------------------------------------------------------- menu, sheet, reminders, favourites (§3.9)
@@ -733,9 +738,10 @@ class GuideStateMachineImpl(
             MenuItem.WATCH, MenuItem.WATCH_FROM_START -> playArchive(ch, t.info())
             MenuItem.REMIND -> effects.setReminder(ch, t.info())
             MenuItem.CANCEL_REMINDER -> effects.cancelReminder(ch, t.rawStart)
-            MenuItem.ADD_FAVOURITE -> { effects.setFavourite(ch, true); effects.toast(GuideToast.ADDED_FAVOURITE) }
-            MenuItem.REMOVE_FAVOURITE -> { effects.setFavourite(ch, false); effects.toast(GuideToast.REMOVED_FAVOURITE) }
-            MenuItem.HIDE_CHANNEL -> { effects.hideChannel(ch); effects.toast(GuideToast.CHANNEL_HIDDEN) }
+            // Toast ownership (§2.13 item 9): the effects toast these once the library write has succeeded.
+            MenuItem.ADD_FAVOURITE -> effects.setFavourite(ch, true)
+            MenuItem.REMOVE_FAVOURITE -> effects.setFavourite(ch, false)
+            MenuItem.HIDE_CHANNEL -> effects.hideChannel(ch)
         }
     }
 
@@ -997,7 +1003,10 @@ class GuideStateMachineImpl(
     private fun onWindow(data: GuideWindowData) {
         val l = lineup ?: return
         if (data.lineupVersion != l.version) return
-        if (lastRowsVersion != Long.MIN_VALUE && data.rowsVersion < lastRowsVersion) return
+        // S10a, amended 2026-10-14 (§2.13 item 20, device bug G1): an older rows version is stale only when a row's
+        // (epg ref, shift) basis changed since. Two blocks landing back to back made the pager (correctly) skip a
+        // re-query while the machine dropped its only snapshot, leaving the grid LOADING until the next key.
+        if (lastRowsVersion != Long.MIN_VALUE && data.rowsVersion < lastRowsVersion && !basisUnchanged(data)) return
         frame.data = data
         frameDirty = true
         val f = frame.focus ?: return
@@ -1010,6 +1019,14 @@ class GuideStateMachineImpl(
             val changed = nf.cellStart != f.cellStart || nf.cellEnd != f.cellEnd || nf.cellKind != f.cellKind
             if ((changed || u.panel?.noInfo == true || u.panel?.title.isNullOrEmpty()) && !holdingVertical) rebuildPanel(newCell = changed || u.panel?.description == null)
         }
+    }
+
+    private fun basisUnchanged(data: GuideWindowData): Boolean {
+        val rows = frame.rows
+        for (i in 0 until data.rowCount) {
+            if (epgBasisOf(rows.channel(data.firstRow + i)) != data.rowEpgBasis[i]) return false
+        }
+        return true
     }
 
     private fun onGeneration(gen: EpgGenerationInfo?) {
@@ -1052,6 +1069,13 @@ class GuideStateMachineImpl(
             }
         }
         if (pendingFull && state.phase != MiniPhase.IDLE && state.phase != MiniPhase.STOPPED) { pendingFull = false; goFull() }
+        if (pendingFullHash != 0L && state.identityHash == pendingFullHash && !state.isArchive) {
+            when (state.phase) {
+                MiniPhase.CONNECTING, MiniPhase.BUFFERING, MiniPhase.RECONNECTING, MiniPhase.PLAYING, MiniPhase.PAUSED -> { pendingFullHash = 0; if (u.mode == ScreenMode.GUIDE) goFull() }
+                MiniPhase.ERROR, MiniPhase.STOPPED -> pendingFullHash = 0
+                MiniPhase.IDLE -> Unit
+            }
+        }
         if (!holdingVertical) rebuildPanel(newCell = false)
     }
 
@@ -1066,8 +1090,14 @@ class GuideStateMachineImpl(
         rebuildPanel(newCell = false)
     }
 
-    private fun onSearchClosed(channel: GuideChannel?, tunedFromSearch: Boolean) {
-        u = u.copy(mode = ScreenMode.GUIDE, overlay = null)
+    /**
+     * (amended 2026-10-14, §2.13 items 7 and 11) A channel tuned from Search goes FULL on its own first active
+     * [GuideEvent.Tuned] (immediately when it is already the live channel); a catch-up from Search goes FULL on the
+     * first archive Tuned, like the grid's, so a failed launch stays in the guide with the S13 toast.
+     */
+    private fun onSearchClosed(channel: GuideChannel?, tunedFromSearch: Boolean, archive: Boolean) {
+        // I-19 (§5.5, device bug G4): every exit from Search lands in the grid, with the Guide tab current.
+        u = u.copy(mode = ScreenMode.GUIDE, overlay = null, zone = Zone.GRID, tabFocused = TAB_GUIDE)
         if (channel != null) {
             val l = lineup
             val idx = if (l != null) indexOf(l, channel.rowId) else -1
@@ -1075,7 +1105,12 @@ class GuideStateMachineImpl(
             else { u = u.copy(zone = Zone.GRID); applySource(GuideSource.All(channel.identity.playlistId), focusRowId = channel.rowId) }
         }
         if (tunedFromSearch) {
-            if (somethingTuned()) goFull() else pendingFull = true
+            when {
+                channel == null -> if (somethingTuned()) goFull() else pendingFull = true
+                archive -> pendingArchiveHash = channel.identityHash
+                tunedLive(channel) -> goFull()
+                else -> pendingFullHash = channel.identityHash
+            }
         }
         refreshFooter()
     }
@@ -1144,7 +1179,14 @@ class GuideStateMachineImpl(
 
     // ---------------------------------------------------------------- focus, panel, footer
 
-    private fun setFocus(f: GridFocus) {
+    /**
+     * (amended 2026-10-14, §2.13 item 2) [animate] is the navigator's `Moved.animate` (`!ctx.snap`); placements that
+     * are not navigator moves (lineup change, number entry, search) pass false. A target more than two windows or two
+     * pages away always snaps (the host no longer guesses).
+     */
+    private fun setFocus(f: GridFocus, animate: Boolean = false) {
+        frame.animate = animate && !lowEnd &&
+            abs(f.windowStartMin - frame.windowStartMin) <= 2 * GuideGeometry.WINDOW_MIN && abs(f.topRow - frame.topRow) <= 2 * VISIBLE_ROWS
         frame.focus = f
         frame.windowStartMin = f.windowStartMin
         frame.topRow = f.topRow

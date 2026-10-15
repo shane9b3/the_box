@@ -71,6 +71,8 @@ interface GuideRowsCache : GuideRows {
     suspend fun channelAt(index: Int): GuideChannel?
     /** (reviewed 2026-10-14, B5/F3) Reload every loaded block in place (keeps the lineup and indices); bumps [version] and emits [changes]. */
     fun reloadLoaded()
+    /** (amended 2026-10-14, §2.13 item 6) `onTrimMemory`: drop blocks that do not intersect `[keepFrom, keepTo)` (§4.7). */
+    fun trim(keepFrom: Int, keepTo: Int) = Unit
 }
 
 fun interface GuideRowsCacheFactory {
@@ -92,10 +94,20 @@ interface GuideWindowPager : AutoCloseable {
     suspend fun info(channel: GuideChannel, rawStartMin: Int): ProgrammeInfo?
     /** The programme airing at display minute [atMin] (mini player bottom panel). */
     suspend fun at(channel: GuideChannel, atMin: Int): ProgrammeInfo?
+    /**
+     * (amended 2026-10-14, §2.13 item 6) `onTrimMemory` (§4.7): clear the width and detail caches; with
+     * [dropSnapshot] (`TRIM_MEMORY_UI_HIDDEN`) also the current snapshot, which the next [ensure] rebuilds.
+     */
+    fun trimMemory(dropSnapshot: Boolean) = Unit
 }
 
 fun interface GuideWindowPagerFactory {
-    fun create(rows: GuideRows, metrics: () -> GuideMetrics?, measurer: () -> GuideTextMeasurer, builder: RowCellsBuilder, labels: TimeLabels): GuideWindowPager
+    /**
+     * (amended 2026-10-14, §2.13 item 3) [measurer] is a factory called on the pager's own thread with the metrics
+     * scale: the pager keeps the one instance it gets (Paint is not thread-safe) and calls the factory again only when
+     * the scale changes and the instance is not a `RescalableTextMeasurer`.
+     */
+    fun create(rows: GuideRows, metrics: () -> GuideMetrics?, measurer: (scale: Float) -> GuideTextMeasurer, builder: RowCellsBuilder, labels: TimeLabels): GuideWindowPager
 }
 
 enum class PerformanceMode { AUTO, HIGH, LOW }
@@ -129,6 +141,14 @@ interface GuideSessionStore {
     fun setLastSource(source: GuideSource)
     fun flag(name: String): Boolean
     fun setFlag(name: String)
+
+    companion object {
+        /**
+         * (amended 2026-10-14, §2.13 item 20) The one flag for "the first Remind me explains that reminders need the
+         * app open" (§3.11.3), shared by the guide's effects and the Search screen (they used different names).
+         */
+        const val FLAG_REMINDER_EXPLAINED = "reminder_first_set"
+    }
 }
 
 /**

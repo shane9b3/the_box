@@ -257,6 +257,6 @@ class GuideEffectsImpl(
     companion object {
         private const val TAG = "GuideEffects"
         /** GuideSessionStore flag: the first "Remind me" explained that reminders need the app open (§3.11.3). */
-        const val FLAG_REMINDER_EXPLAINED = "reminder_explained"
+        const val FLAG_REMINDER_EXPLAINED = GuideSessionStore.FLAG_REMINDER_EXPLAINED
     }
 }

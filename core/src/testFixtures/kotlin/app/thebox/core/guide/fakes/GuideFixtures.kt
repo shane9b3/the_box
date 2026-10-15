@@ -93,6 +93,7 @@ object GuideFixtures {
         generation: Long = 1,
         rowStatus: ByteArray? = null,
         metricsScale: Float = 1f,
+        rowEpgBasis: LongArray? = null,
     ): GuideWindowData {
         val n = rows.sumOf { it.size }
         val first = IntArray(rows.size)
@@ -122,7 +123,7 @@ object GuideFixtures {
             rowCellCount = count, cellStart = start, cellEnd = end, cellRawStart = raw, cellKind = kind, cellFlags = flags,
             cellTextId = textId, cellTitle = title, cellTitleWidth = titleWidth, cellTitleKey = titleKey,
             cellTimeText = timeText, cellTimeWidth = timeWidth, metricsScale = metricsScale, rowsVersion = rowsVersion,
-            rowEpgBasis = LongArray(rows.size),
+            rowEpgBasis = rowEpgBasis ?: LongArray(rows.size),
         )
     }
 

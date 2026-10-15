@@ -65,7 +65,10 @@ class KeysOnDeviceTest : GuideTestBase() {
         },
         Seq("Day chip OK → Days", keys = { press(KEYCODE_DPAD_UP); press(KEYCODE_DPAD_RIGHT); press(KEYCODE_DPAD_CENTER) }) { ok(ui.overlay is Overlay.Days) { "overlay ${ui.overlay}" } },
         Seq("Days BACK closes", keys = { press(KEYCODE_DPAD_UP); press(KEYCODE_DPAD_RIGHT); press(KEYCODE_DPAD_CENTER); press(KEYCODE_BACK) }) { ok(ui.overlay == null) { "overlay ${ui.overlay}" } },
-        Seq("PAGE_DOWN → +6 rows", keys = { press(KEYCODE_PAGE_DOWN) }) { ok(focus?.row == start.row + 6 && focus.topRow >= 6) { "focus $focus" } },
+        Seq("PAGE_DOWN → +6 rows", keys = { press(KEYCODE_PAGE_DOWN) }) {
+            // §3.3.2: the focus stays at visible index 1…4, so topRow = clamp(start.topRow + 6, row − 4, row − 1).
+            ok(focus?.row == start.row + 6 && focus.topRow == (start.topRow + 6).coerceIn(focus.row - 4, focus.row - 1)) { "focus $focus from $start" }
+        },
         // CH− = ZAP_DOWN = PAGE_DOWN in the grid (§3.4.2, §3.18.2); CH+ = ZAP_UP = PAGE_UP.
         Seq("CH− CH− → +12 rows", keys = { press(KEYCODE_CHANNEL_DOWN, 2) }) { ok(focus?.row == start.row + 12) { "row ${focus?.row}" } },
         Seq("CH− CH+ → back", keys = { press(KEYCODE_CHANNEL_DOWN); press(KEYCODE_CHANNEL_UP) }) { ok(focus?.row == start.row) { "row ${focus?.row}" } },
@@ -79,7 +82,8 @@ class KeysOnDeviceTest : GuideTestBase() {
         Seq("LEFT on a row without archive → Groups", fromPlainRow = true, keys = { press(KEYCODE_DPAD_LEFT) }) { ok(ui.overlay is Overlay.Groups) { "overlay ${ui.overlay}" } },
         Seq("Groups CH− applies the next entry, stays open", fromPlainRow = true, keys = { press(KEYCODE_DPAD_LEFT); press(KEYCODE_CHANNEL_DOWN) }) {
             val g = ui.overlay as? Overlay.Groups
-            ok(g != null && g.current == g.focused) { "overlay ${ui.overlay}" }
+            // `focused` indexes shortcuts first, then entries; `current` indexes entries (Overlay.Groups KDoc).
+            ok(g != null && g.focused == g.shortcuts.size + g.current && g.current > 0) { "overlay focused=${g?.focused} current=${g?.current} shortcuts=${g?.shortcuts?.size}" }
         },
         Seq("Groups RIGHT closes", fromPlainRow = true, keys = { press(KEYCODE_DPAD_LEFT); press(KEYCODE_DPAD_RIGHT) }) { ok(ui.overlay == null) { "overlay ${ui.overlay}" } },
         Seq("FF → +3 h", keys = { press(KEYCODE_MEDIA_FAST_FORWARD) }) {

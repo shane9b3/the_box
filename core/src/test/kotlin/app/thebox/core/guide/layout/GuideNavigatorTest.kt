@@ -1,5 +1,6 @@
 package app.thebox.core.guide.layout
 
+import app.thebox.core.guide.CellFlags
 import app.thebox.core.epg.EpgWindow
 import app.thebox.core.guide.CellKind
 import app.thebox.core.guide.GridContext

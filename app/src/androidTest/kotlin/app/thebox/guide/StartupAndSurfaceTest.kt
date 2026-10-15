@@ -64,7 +64,9 @@ class StartupAndSurfaceTest : GuideTestBase() {
                 while (p is View) {
                     if (p.alpha < 1f) out += "${p.javaClass.simpleName} alpha=${p.alpha}"
                     if (p.layerType != View.LAYER_TYPE_NONE) out += "${p.javaClass.simpleName} layerType=${p.layerType}"
-                    if (p.clipToOutline) out += "${p.javaClass.simpleName} clipToOutline"
+                    // A rectangular outline covering the view's own bounds clips nothing (API 30: the DecorView clips
+                    // to its colour-drawable background outline, which is the whole window). Anything else is a clip.
+                    if (p.clipToOutline && !fullRectOutline(p)) out += "${p.javaClass.simpleName} clipToOutline"
                     p = p.parent
                 }
             }
@@ -126,4 +128,13 @@ class StartupAndSurfaceTest : GuideTestBase() {
         assertEquals(null, ui().overlay as Overlay?)
     }
 
+    private fun fullRectOutline(v: View): Boolean {
+        val provider = v.outlineProvider ?: return true
+        val outline = android.graphics.Outline()
+        provider.getOutline(v, outline)
+        if (outline.isEmpty) return true
+        val r = android.graphics.Rect()
+        if (!outline.getRect(r)) return false
+        return outline.radius <= 0f && r.left <= 0 && r.top <= 0 && r.right >= v.width && r.bottom >= v.height
+    }
 }

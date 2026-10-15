@@ -33,6 +33,9 @@ class OklchHueTest {
         // accent #5CA8F2 vs oklch(.72 .14 240) = #3FAFF3, accentText #B6D4F7 vs oklch(.86 .09 240) = #9AD9FF.
         assertRgb(0x3FAFF3, Oklch.toArgb(0.72f, 0.14f, 240f))
         assertRgb(0x9AD9FF, Oklch.toArgb(0.86f, 0.09f, 240f))
+        // §2.13 item 12: the hex tokens are normative; their exact oklch equivalents (as the design now states).
+        assertRgb(0x5CA8F2, Oklch.toArgb(0.7144f, 0.1325f, 249.61f))
+        assertRgb(0xB6D4F7, Oklch.toArgb(0.8596f, 0.0585f, 252.45f))
         // The ambient blob colours at the default hue, and alpha packing.
         assertRgb(0x005B90, Oklch.toArgb(0.45f, 0.12f, 240f))
         assertRgb(0x3E3F7C, Oklch.toArgb(0.40f, 0.10f, 280f))

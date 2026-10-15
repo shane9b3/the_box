@@ -1,15 +1,5 @@
 package app.thebox.ui.search
 
-import app.thebox.core.common.CancelCheck
-import app.thebox.core.common.ImportGate
-import app.thebox.core.epg.EpgBuildRequest
-import app.thebox.core.epg.EpgGenerationInfo
-import app.thebox.core.epg.EpgImportReport
-import app.thebox.core.epg.EpgPatchRequest
-import app.thebox.core.epg.EpgProgress
-import app.thebox.core.epg.EpgReader
-import app.thebox.core.epg.EpgStore
-import app.thebox.core.epg.EpgWhitelistResolver
 import app.thebox.core.guide.GuideEvent
 import app.thebox.core.guide.GuideSearch
 import app.thebox.core.guide.GuideToast
@@ -24,8 +14,6 @@ import app.thebox.core.guide.fakes.GuideFixtures
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
@@ -49,21 +37,11 @@ class SearchViewModelTest {
     private val dispatcher = StandardTestDispatcher()
     private val nowMin = GuideFixtures.NOW_MIN
     private val channel = GuideFixtures.channel(1, name = "BBC News")
-    private val epgInfo = MutableStateFlow<EpgGenerationInfo?>(EpgGenerationInfo(1, 0, 0, 1, 1, 1, 0, 0, "fts5"))
-
-    private class StubStore(override val info: StateFlow<EpgGenerationInfo?>) : EpgStore {
-        override fun openReader(): EpgReader? = null
-        override fun build(request: EpgBuildRequest, whitelist: EpgWhitelistResolver, gate: ImportGate, cancel: CancelCheck, progress: (EpgProgress) -> Unit): EpgImportReport = error("unused")
-        override fun patch(request: EpgPatchRequest, gate: ImportGate, cancel: CancelCheck, progress: (EpgProgress) -> Unit): EpgImportReport = error("unused")
-        override fun recover() = Unit
-        override fun clear() = Unit
-    }
-
     @Before fun setUp() { Dispatchers.setMain(dispatcher) }
     @After fun tearDown() { Dispatchers.resetMain() }
 
     private fun TestScope.vm(search: GuideSearch = FakeGuideSearch(listOf(channel)), reminders: FakeReminderBook = FakeReminderBook()) =
-        SearchViewModel(search, reminders, FakeGuideLibrary(listOf(channel)), FakeGuideSettings(), FakeGuideSessionStore(), StubStore(epgInfo)) {
+        SearchViewModel(search, reminders, FakeGuideLibrary(listOf(channel)), FakeGuideSettings(), FakeGuideSessionStore()) {
             nowMin * 60_000L
         }
 
@@ -162,7 +140,7 @@ class SearchViewModelTest {
         val past = hit(nowMin - 120, nowMin - 60, inArchive = true)
         vm.onProgramme(past)
         runCurrent()
-        assertEquals(listOf(SearchEffect.PlayArchive(channel, past.info), SearchEffect.Close(GuideEvent.SearchClosed(channel, tuned = true))), out)
+        assertEquals(listOf(SearchEffect.PlayArchive(channel, past.info), SearchEffect.Close(GuideEvent.SearchClosed(channel, tuned = true, archive = true))), out)
         out.clear()
         val future = hit(nowMin + 60, nowMin + 120)
         vm.onProgramme(future)
@@ -182,15 +160,23 @@ class SearchViewModelTest {
         assertEquals(SearchEffect.Toast(GuideToast.NO_CATCHUP), out.last())
     }
 
+    /** §2.13 item 7: "no guide data" comes from the results, not from an injected EpgStore. */
     @Test
     fun noGuideDataIsReported() = runTest(dispatcher) {
-        epgInfo.value = null
-        val vm = vm()
-        assertTrue(vm.state.value.guideDataMissing)
+        val noGuide = object : GuideSearch {
+            override suspend fun search(query: String, nowMs: Long, unlocked: Boolean) =
+                SearchResults(query, listOf(channel), emptyList(), guideDataMissing = true)
+        }
+        val vm = vm(noGuide)
+        assertFalse(vm.state.value.guideDataMissing)
         vm.onQuery("bbc")
         advanceUntilIdle()
         assertTrue(vm.state.value.guideDataMissing)
         assertEquals(listOf(channel), vm.state.value.results!!.channels)
+        val withGuide = vm(FakeGuideSearch(listOf(channel)))
+        withGuide.onQuery("bbc")
+        advanceUntilIdle()
+        assertFalse(withGuide.state.value.guideDataMissing)
     }
 
     @Test

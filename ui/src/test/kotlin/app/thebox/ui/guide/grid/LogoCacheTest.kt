@@ -132,4 +132,19 @@ class LogoCacheTest {
         assertEquals(2, trim.trims)
         GuideTrim(null, FakeGuideRenderer()).onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
     }
+
+    /** §2.13 item 6: registered owners (the guide VM) get the level; closing the handle unregisters. */
+    @Test
+    fun trimFansOutToRegisteredTargetsUntilClosed() {
+        val trim = GuideTrim(null, null)
+        val seen = ArrayList<Pair<Int, Boolean>>()
+        val handle = trim.register { level, hidden -> seen += level to hidden }
+        trim.onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_RUNNING_MODERATE)
+        trim.onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW)
+        trim.onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN)
+        handle.close()
+        trim.onTrimMemory(ComponentCallbacks2.TRIM_MEMORY_COMPLETE)
+        assertEquals(listOf(ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW to false, ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN to true), seen)
+        assertEquals(3, trim.trims)
+    }
 }

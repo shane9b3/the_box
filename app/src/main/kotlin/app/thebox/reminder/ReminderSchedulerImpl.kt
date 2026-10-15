@@ -70,12 +70,10 @@ class ReminderSchedulerImpl(
     private val missedChannel = Channel<Int>(Channel.BUFFERED)
 
     /**
-     * Contract gap (§2.6 `ReminderAlerts` has no member for it): "Missed while The Box was closed: {n} reminders".
-     * Each count is delivered once, to one collector, buffered until collected (so a VM that subscribes after the first
-     * pass still gets it). The guide VM must forward it as `GuideEvent.MissedReminders(n)`; until the contract gains a
-     * member, nothing in `:ui` can see this (it is `:app`-only).
+     * `ReminderAlerts.missed` (§2.13 item 5): "Missed while The Box was closed: {n} reminders". Each count is delivered
+     * once, to one collector, buffered until collected (so a VM that subscribes after the first pass still gets it).
      */
-    val missed: Flow<Int> = missedChannel.receiveAsFlow()
+    override val missed: Flow<Int> = missedChannel.receiveAsFlow()
 
     private val decisions = ArrayList<ReminderDecision>()
 

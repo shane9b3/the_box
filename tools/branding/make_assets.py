@@ -1,4 +1,4 @@
-"""Branding pipeline: design/logo/The_Box.png -> vectors + rasters under app/src/main/res.
+"""Branding pipeline: design/logo/The_Box.png -> vectors + rasters under app/src/main/res (the wordmark under ui/src/main/res).
 
 Tracing: sub-pixel marching squares (skimage.find_contours at the 50 % level of the
 anti-aliased ink field) + Douglas-Peucker simplification. Paths are even-odd polygons.
@@ -11,6 +11,7 @@ from skimage import measure
 root = pathlib.Path(sys.argv[1])
 preview = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 and sys.argv[2] else None
 res = root / "app/src/main/res"
+ui_res = root / "ui/src/main/res"  # the guide header (:ui) draws the wordmark (design §3.17, §2.13 item 16)
 BG = (0x0A, 0x0D, 0x13)
 DENS = {"mdpi": 1.0, "hdpi": 1.5, "xhdpi": 2.0, "xxhdpi": 3.0, "xxxhdpi": 4.0}
 FRAME_MIN_X = 148  # contours left of this are the rotated "The"
@@ -80,7 +81,8 @@ def vector(path, vw, vh, dw, dh, comment):
 
 # ---- vectors --------------------------------------------------------------------------
 (res / "drawable").mkdir(parents=True, exist_ok=True)
-(res / "drawable/wordmark.xml").write_text(vector(
+(ui_res / "drawable").mkdir(parents=True, exist_ok=True)
+(ui_res / "drawable/wordmark.xml").write_text(vector(
     path_data(polys, lambda x, y: (x, y)), W, H, 96, round(96 * H / W, 1),
     "Monochrome wordmark (white); tint at the use site."))
 

@@ -77,6 +77,11 @@ class HarnessTest : GuideTestBase() {
         assertEquals(PerformanceMode.HIGH, d.performance)
         assertEquals(ExitConfirmation.NONE, d.exitConfirmation)
         assertEquals(PerformanceMode.AUTO, GuideDebugReceiver.applySwitches(d, Uri.parse("thebox-debug://guide?lowend=1&perf=auto")).performance)
+        // Device bug G2: per-class switches come after DEFAULT_SWITCHES; the last value wins.
+        val dup = GuideDebugReceiver.applySwitches(GuideSettings(), Uri.parse("thebox-debug://guide?lowend=0&still=0&exit=twice&lowend=1&still=1&exit=ask"))
+        assertEquals(PerformanceMode.LOW, dup.performance)
+        assertTrue(dup.miniStill)
+        assertEquals(ExitConfirmation.ASK, dup.exitConfirmation)
     }
 
     @Test

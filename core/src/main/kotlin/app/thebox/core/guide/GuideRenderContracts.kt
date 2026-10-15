@@ -45,6 +45,8 @@ interface GuideImages {
     var onLoaded: (() -> Unit)?
     /** Trim to the cap, least recently drawn first (called on lineup change). */
     fun trim()
+    /** (amended 2026-10-14, §2.13 item 6) `onTrimMemory` ≥ RUNNING_LOW: drop every cached image (§4.7). */
+    fun clear() = trim()
 }
 
 /** Channel rows of the current lineup (WP-B's cache). Main-thread reads only. */
@@ -55,6 +57,12 @@ interface GuideRows {
     fun channel(index: Int): GuideChannel?
     /** Lineup index of [rowId], −1 if not in this lineup. O(n) scan, call on events only, never per frame. */
     fun indexOf(rowId: Long): Int
+    /**
+     * (amended 2026-10-14, §2.13 item 8) [GuideLineup.version] of the lineup these rows belong to (0 = none). The
+     * pager stamps it on every snapshot, and the state machine drops a snapshot whose version is not the current
+     * lineup's (S10a).
+     */
+    val lineupVersion: Long get() = 0L
 
     companion object {
         val EMPTY: GuideRows = object : GuideRows {
@@ -88,6 +96,11 @@ class GuideFrame {
     /** Target window; the host animates towards these (§3.6.5). */
     var windowStartMin: Int = 0
     var topRow: Int = 0
+    /**
+     * (amended 2026-10-14, §2.13 item 2) False: the host snaps to the new target instead of animating. Set by the
+     * state machine from the navigator's `GridMoveResult.Moved.animate` on every placement.
+     */
+    var animate: Boolean = true
     var focus: GridFocus? = null
     /** False while focus is in another zone: the row highlight stays, the focused cell draws as "selected" (ring only). */
     var gridFocused: Boolean = true
@@ -118,4 +131,6 @@ interface GuideRenderer {
     fun focusedCellBounds(frame: GuideFrame, windowStartMin: Int, scrollOffsetMin: Float, scrollRow: Float, out: FloatArray): Boolean
     /** Accessibility text for the focused cell (§3.6.6). Allocates; call debounced. */
     fun describeFocus(frame: GuideFrame): String
+    /** (amended 2026-10-14, §2.13 item 6) `onTrimMemory` ≥ RUNNING_LOW: drop the text-fit caches (§4.7). */
+    fun trimCaches() = Unit
 }
