@@ -18,7 +18,7 @@ class LineupZapListTest {
     @Test
     fun stepsWithWrap() = runTest {
         val lib = FakeGuideLibrary(channels)
-        val zap = LineupZapList(lib.lineup(GuideSource.All(1), false).first(), lib)
+        val zap = LineupZapList(lib.lineup(GuideSource.All(1), app.thebox.core.parental.ParentalAccess.LOCKED_AUTO).first(), lib)
         assertEquals(id(1), zap.neighbour(id(0), +1))
         assertEquals(id(4), zap.neighbour(id(0), -1))
         assertEquals(id(0), zap.neighbour(id(4), +1))
@@ -28,11 +28,11 @@ class LineupZapListTest {
     @Test
     fun capturedRowIdsSurviveALineupReEmission() = runTest {
         val lib = FakeGuideLibrary(channels)
-        val captured = lib.lineup(GuideSource.All(1), false).first()
+        val captured = lib.lineup(GuideSource.All(1), app.thebox.core.parental.ParentalAccess.LOCKED_AUTO).first()
         val zap = LineupZapList(captured, lib)
         // The library re-emits a different lineup (channel 2 hidden); the captured list does not change.
         lib.hideChannel(id(2))
-        assertEquals(4, lib.lineup(GuideSource.All(1), false).first().rowIds.size)
+        assertEquals(4, lib.lineup(GuideSource.All(1), app.thebox.core.parental.ParentalAccess.LOCKED_AUTO).first().rowIds.size)
         assertEquals("id is from the captured version", "lineup:" + captured.version, zap.id)
         assertEquals(id(2), zap.neighbour(id(1), +1))
     }

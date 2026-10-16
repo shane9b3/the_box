@@ -307,11 +307,15 @@ fun AppRoot(
                         )
                         ScreenMode.FULL -> FullScreenHost(ui, player = player, clock24 = settings.clock24, lowEnd = lowEnd)
                         ScreenMode.SEARCH -> search()
-                        ScreenMode.SETTINGS -> SettingsPlaceholder(host.versionName)
+                        ScreenMode.SETTINGS -> app.thebox.ui.settings.SettingsScreen(host.versionName)
                     }
                     if (shown == ScreenMode.GUIDE || shown == ScreenMode.FULL) {
                         ui.reminder?.let { ReminderCard(it, Modifier.align(Alignment.BottomEnd).padding(end = reminderEnd.dp, bottom = toastBottom.dp)) }
                     }
+                    // M5 commit 0 (docs/design/m5-setup-settings.md §1.3a): the update card in the guide only (S17), the
+                    // PIN prompt above every mode (§0.9). Bodies: WP-E, WP-C.
+                    if (shown == ScreenMode.GUIDE) ui.update?.let { app.thebox.ui.update.UpdateCard(it) }
+                    ui.pin?.let { app.thebox.ui.parental.PinPadView(it) }
                     toast?.let { (_, text) -> ToastView(text, Modifier.align(Alignment.BottomStart).padding(start = PlayerUi.TOAST_L.dp, bottom = toastBottom.dp)) }
                 }
             }

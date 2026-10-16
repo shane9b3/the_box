@@ -1,5 +1,6 @@
 package app.thebox.ui.full.vm
 
+import app.thebox.core.parental.legacyParentalAccess
 import android.content.Context
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.Lifecycle
@@ -109,6 +110,8 @@ class PlayerViewModel @Inject constructor(
     machineFactory: PlayerStateMachineFactory,
     private val probe: PlayerDebugProbe,
     internal val reminders: ReminderBook,
+    /** (M5 commit 0, docs/design/m5-setup-settings.md §1.3a) What PlayerEffectsImpl's M5 effects delegate to. */
+    delegates: app.thebox.ui.root.EffectDelegates = app.thebox.ui.root.EffectDelegates.NONE,
 ) : ViewModel(), PlayerHost, PlayerGuideBridge, app.thebox.ui.full.PlayerExtras {
 
     /** Wall clock (tests substitute a virtual one). */
@@ -118,7 +121,7 @@ class PlayerViewModel @Inject constructor(
     private val shellEvents = Channel<ShellEvent>(Channel.BUFFERED)
     private val rowsCache: GuideRowsCache = rowsFactory.create(library, viewModelScope)
     internal val nowCache = ChannelNowCache()
-    internal val effects = PlayerEffectsImpl(this)
+    internal val effects = PlayerEffectsImpl(this, delegates)
 
     override val listRows: GuideRowsCache get() = rowsCache
     override val machine: PlayerStateMachine = machineFactory.create(effects, rowsCache) { clock() }
@@ -260,8 +263,9 @@ class PlayerViewModel @Inject constructor(
         }
         scope.launch { controller.previous.collect { id -> machine.dispatch(PlayerEvent.Previous(id?.let { channelOf(it) })) } }
         scope.launch {
+            // (M5 commit 0, S10) explicit access; WP-C feeds it from ParentalSession.state.
             guideSettings.settings.map { it.debugUnlocked }.distinctUntilChanged().collectLatest { unlocked ->
-                library.sources(unlocked).collect { machine.dispatch(PlayerEvent.Sources(it)) }
+                library.sources(access = legacyParentalAccess(unlocked)).collect { machine.dispatch(PlayerEvent.Sources(it)) }
             }
         }
         scope.launch { library.rowContent.collect { channelCache.clear() } }
@@ -386,9 +390,9 @@ class PlayerViewModel @Inject constructor(
             machine.dispatch(PlayerEvent.ListLineup(g))
             return
         }
-        val unlocked = guideSettings.settings.value.debugUnlocked
+        val access = legacyParentalAccess(guideSettings.settings.value.debugUnlocked) // (M5 commit 0, S10)
         listJob = launchSafely("listLineup") {
-            library.lineup(source, unlocked).collect { lineup ->
+            library.lineup(source, access = access).collect { lineup ->
                 listSource = source
                 rowsCache.setLineup(lineup)
                 machine.dispatch(PlayerEvent.ListLineup(lineup))

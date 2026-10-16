@@ -222,6 +222,7 @@ object PlayerText {
         QuickItem.VIDEO_DECODER -> R.string.player_quick_decoder
         QuickItem.SCREEN_OFF -> R.string.player_quick_screen_off
         QuickItem.SETTINGS -> R.string.player_quick_settings
+        QuickItem.SOURCES -> R.string.player_quick_sources // M5
     }
 
     /** The current value shown after the label ("Audio · English 5.1"), or null. */
@@ -242,6 +243,7 @@ object PlayerText {
         PickerKind.SUBTITLES -> R.string.player_picker_subtitles
         PickerKind.ASPECT -> R.string.player_picker_aspect
         PickerKind.VIDEO_DECODER -> R.string.player_picker_decoder
+        PickerKind.SERVER -> R.string.player_picker_server // M5
     }
 
     fun choice(res: Resources, c: PickerChoice, index: Int): String = when (c) {
@@ -257,5 +259,7 @@ object PlayerText {
         ChannelMenuItem.ADD_FAVOURITE -> R.string.player_menu_add_favourite
         ChannelMenuItem.REMOVE_FAVOURITE -> R.string.player_menu_remove_favourite
         ChannelMenuItem.HIDE_CHANNEL -> R.string.player_menu_hide_channel
+        ChannelMenuItem.LOCK_CHANNEL -> R.string.player_menu_lock_channel // M5
+        ChannelMenuItem.CHANNEL_OPTIONS -> R.string.player_menu_channel_options
     }
 }

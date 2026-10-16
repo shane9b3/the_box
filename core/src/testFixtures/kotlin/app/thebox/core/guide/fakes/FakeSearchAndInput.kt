@@ -26,7 +26,7 @@ class FakeGuideSearch(
     var programmes: List<ProgrammeHit> = emptyList(),
 ) : GuideSearch {
     val queries = ArrayList<String>()
-    override suspend fun search(query: String, nowMs: Long, unlocked: Boolean): SearchResults {
+    override suspend fun search(query: String, nowMs: Long, access: app.thebox.core.parental.ParentalAccess): SearchResults {
         queries += query
         if (query.count { it.isLetterOrDigit() } < 2) return SearchResults(query, emptyList(), emptyList())
         val q = query.trim().lowercase()

@@ -1,5 +1,6 @@
 package app.thebox.ui.search
 
+import app.thebox.core.parental.legacyParentalAccess
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.thebox.core.guide.GuideChannel
@@ -105,7 +106,8 @@ class SearchViewModel internal constructor(
             delay(DEBOUNCE_MS)
             started++
             try {
-                val r = search.search(text, clock(), settings.settings.value.debugUnlocked)
+                // (M5 commit 0, S10) explicit access; WP-C feeds it from ParentalSession.state.
+                val r = search.search(text, clock(), access = legacyParentalAccess(settings.settings.value.debugUnlocked))
                 publish(r, searching = false)
             } catch (e: CancellationException) {
                 throw e

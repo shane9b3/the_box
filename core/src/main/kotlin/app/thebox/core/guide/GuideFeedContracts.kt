@@ -23,6 +23,11 @@ data class GuideSourceEntry(
     val section: SourceSection,
     /** Non-null for ALL/GROUP when more than one playlist is enabled (section header in the panel). */
     val playlistName: String?,
+    /**
+     * (M5, docs/design/m5-setup-settings.md §2.12 item 3) True only when the entry is a locked group and access is not
+     * OPEN; [count] is then the group's channel count.
+     */
+    val locked: Boolean = false,
 )
 
 /** Ordered rows of one source. [version] changes whenever the order or membership changes. */
@@ -36,16 +41,23 @@ class GuideLineup(
 
 enum class GroupAction { HIDE, MOVE_UP, MOVE_DOWN }
 
+/**
+ * (M5, docs/design/m5-setup-settings.md §2.12 item 9, S10) Every query takes the caller's [ParentalAccess] explicitly
+ * (fed by WP-C from `ParentalSession.state`; a source in `openedAnyway` is queried with OPEN); no query reads global
+ * parental state. Semantic change for an existing caller once WP-C lands §4.3: [sources] lists locked groups with
+ * `locked = true` instead of omitting them (unless `lockedInGuide = HIDE`). Until then (commit 0) OPEN behaves like
+ * M3's `unlocked = true` and every other value like `unlocked = false`.
+ */
 interface GuideLibrary {
-    /** Groups panel content (§3.8.1). Re-emits on library changes. [unlocked] = PIN session open (always false until M5). */
-    fun sources(unlocked: Boolean): Flow<List<GuideSourceEntry>>
+    /** Groups panel content (§3.8.1). Re-emits on library changes. */
+    fun sources(access: app.thebox.core.parental.ParentalAccess): Flow<List<GuideSourceEntry>>
     /** Re-emits when membership/order changes (refresh finish, favourites edit, hide, reorder). */
-    fun lineup(source: GuideSource, unlocked: Boolean): Flow<GuideLineup>
+    fun lineup(source: GuideSource, access: app.thebox.core.parental.ParentalAccess): Flow<GuideLineup>
     /** Rows for rowIds[from, to) in order; an id purged meanwhile yields null. Main-safe (switches to IO). */
     suspend fun channels(rowIds: LongArray, from: Int, to: Int): List<GuideChannel?>
     suspend fun rowIdOf(identity: ChannelIdentity): Long?
     /** Number entry: in [playlistId]'s numbering (M1 §3.3.3); null playlist = first enabled playlist. */
-    suspend fun byNumber(playlistId: Long?, number: Int, unlocked: Boolean): GuideChannel?
+    suspend fun byNumber(playlistId: Long?, number: Int, access: app.thebox.core.parental.ParentalAccess): GuideChannel?
     suspend fun isFavourite(identity: ChannelIdentity): Boolean
     /** Adds to / removes from the default list (FavouritesRepository.defaultList). */
     suspend fun setFavourite(identity: ChannelIdentity, on: Boolean)

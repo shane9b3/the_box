@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- M5 commit 0 (docs/design/m5-setup-settings.md §2.12 items 2 and 4): labels of the enum values appended to existing
+     contracts, so every exhaustive `when` over them has a string. The WPs that offer these items may reword them. -->
+<resources>
+    <string name="player_quick_sources">Sources</string>
+    <string name="player_picker_server">Server</string>
+    <string name="player_menu_lock_channel">Lock channel</string>
+    <string name="player_menu_channel_options">Channel options</string>
+    <string name="guide_menu_lock_channel">Lock channel</string>
+    <string name="guide_menu_unlock_channel">Unlock channel</string>
+    <string name="guide_menu_fix_guide_data">Fix guide data</string>
+    <string name="guide_menu_channel_options">Channel options</string>
+    <string name="guide_group_lock">Lock group</string>
+    <string name="guide_group_unlock">Unlock group</string>
+    <string name="error_button_open_settings">Open settings</string>
+    <string name="error_button_secure_dns">Use secure DNS</string>
+    <string name="error_button_refresh_playlist">Refresh playlist</string>
+    <string name="error_button_open_external">Open in another player</string>
+</resources>

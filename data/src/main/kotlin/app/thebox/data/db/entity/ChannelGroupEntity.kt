@@ -22,4 +22,6 @@ data class ChannelGroupEntity(
     @ColumnInfo(name = "sort_index") val sortIndex: Int,
     @ColumnInfo(name = "is_adult", defaultValue = "0") val isAdult: Boolean = false,
     @ColumnInfo(name = "missing_since") val missingSince: Long? = null,
+    /** v4 (docs/design/m5-setup-settings.md §4.2): derived by WP-D's hide-rule pass (never backed up). */
+    @ColumnInfo(name = "rule_hidden", defaultValue = "0") val ruleHidden: Boolean = false,
 )

@@ -67,6 +67,9 @@ abstract class DataModule {
     @Binds @Singleton abstract fun xtreamApi(impl: XtreamClient): XtreamApi
     @Binds @Singleton abstract fun sourceFetcher(impl: OkHttpSourceFetcher): SourceFetcher
     @Binds @Singleton abstract fun credentialStore(impl: TinkCredentialStore): CredentialStore
+    // M5 commit 0 (docs/design/m5-setup-settings.md §2.12 item 8): the same store holds the PIN verifier and passphrase.
+    @Binds @Singleton abstract fun secureBlobStore(impl: TinkCredentialStore): app.thebox.data.contracts.SecureBlobStore
+    @Binds @Singleton abstract fun keyResetFlag(impl: app.thebox.data.security.PrefsKeyResetFlag): app.thebox.data.security.KeyResetFlag
     @Binds @Singleton abstract fun dataSettings(impl: InMemoryDataSettings): DataSettings
     @Binds abstract fun playlistRefresher(impl: RefreshRepository): PlaylistRefresher
     @Binds abstract fun epgImporter(impl: EpgRepository): EpgImporter

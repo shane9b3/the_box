@@ -84,3 +84,21 @@ interface CredentialStore {
     suspend fun get(ref: String): Outcome<PlaylistSecret>
     suspend fun delete(ref: String)
 }
+
+/**
+ * (M5, docs/design/m5-setup-settings.md §2.12 item 8) Opaque secrets in the same `credential` table and AEAD as
+ * [CredentialStore] (AD = ref): the parental PIN verifier and the stored backup passphrase. Implemented by
+ * `TinkCredentialStore`; the failure policy is the same (permanent key loss wipes every row, KEY_INVALIDATED; a
+ * transient failure is UNAVAILABLE with nothing deleted; a row that does not decrypt is CORRUPT; no row is MISSING).
+ */
+interface SecureBlobStore {
+    suspend fun putBlob(ref: String, bytes: ByteArray): Outcome<Unit>
+    suspend fun getBlob(ref: String): Outcome<ByteArray>
+    suspend fun deleteBlob(ref: String)
+
+    companion object {
+        /** Reserved refs (never "cred-…", so they cannot collide with playlist secrets). */
+        const val REF_PARENTAL_PIN = "parental-pin"
+        const val REF_BACKUP_PASSPHRASE = "backup-passphrase"
+    }
+}

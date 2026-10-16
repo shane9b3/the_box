@@ -74,7 +74,7 @@ class SearchViewModelTest {
     fun typingCancelsThePendingAndTheRunningSearch() = runTest(dispatcher) {
         val seen = ArrayList<String>()
         val slow = object : GuideSearch {
-            override suspend fun search(query: String, nowMs: Long, unlocked: Boolean): SearchResults {
+            override suspend fun search(query: String, nowMs: Long, access: app.thebox.core.parental.ParentalAccess): SearchResults {
                 seen += query
                 delay(1_000)
                 return SearchResults(query, listOf(channel), emptyList())
@@ -164,7 +164,7 @@ class SearchViewModelTest {
     @Test
     fun noGuideDataIsReported() = runTest(dispatcher) {
         val noGuide = object : GuideSearch {
-            override suspend fun search(query: String, nowMs: Long, unlocked: Boolean) =
+            override suspend fun search(query: String, nowMs: Long, access: app.thebox.core.parental.ParentalAccess) =
                 SearchResults(query, listOf(channel), emptyList(), guideDataMissing = true)
         }
         val vm = vm(noGuide)

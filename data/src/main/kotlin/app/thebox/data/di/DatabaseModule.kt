@@ -45,4 +45,9 @@ object DatabaseModule {
     @Provides fun reminderDao(db: LibraryDatabase): ReminderDao = db.reminderDao()
     @Provides fun refreshLogDao(db: LibraryDatabase): RefreshLogDao = db.refreshLogDao()
     @Provides fun maintenanceDao(db: LibraryDatabase): MaintenanceDao = db.maintenanceDao()
+    // M5 commit 0 (docs/design/m5-setup-settings.md §1.3a, §4.2)
+    @Provides fun appSettingDao(db: LibraryDatabase): app.thebox.data.db.dao.AppSettingDao = db.appSettingDao()
+    @Provides fun hideRuleDao(db: LibraryDatabase): app.thebox.data.db.dao.HideRuleDao = db.hideRuleDao()
+    @Provides fun hiddenChannelsDao(db: LibraryDatabase): app.thebox.data.db.dao.HiddenChannelsDao = db.hiddenChannelsDao()
+    @Provides fun groupAdminDao(db: LibraryDatabase): app.thebox.data.db.dao.GroupAdminDao = db.groupAdminDao()
 }

@@ -52,6 +52,11 @@ object GuideTexts {
         MenuItem.ADD_FAVOURITE -> "Add to favourites"
         MenuItem.REMOVE_FAVOURITE -> "Remove from favourites"
         MenuItem.HIDE_CHANNEL -> "Hide channel"
+        // M5 (announcements only; WP-C/WP-A own the visible labels)
+        MenuItem.LOCK_CHANNEL -> "Lock channel"
+        MenuItem.UNLOCK_CHANNEL -> "Unlock channel"
+        MenuItem.FIX_GUIDE_DATA -> "Fix guide data"
+        MenuItem.CHANNEL_OPTIONS -> "Channel options"
     }
     fun shortcut(s: GroupsShortcut): String = if (s == GroupsShortcut.SEARCH) "Search" else "Settings"
 }

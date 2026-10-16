@@ -10,6 +10,8 @@ import androidx.sqlite.execSQL
  * 2 → 3 is hand-written ([MIGRATION_2_3], docs/design/m3-guide.md §2.9, §2.12 item 1): Room's auto-migration
  * rebuilds `epg_match` and `epg_mapping` (create `_new_…`, copy, drop, rename) whenever an index is added, and the
  * design requires exactly five `ALTER TABLE … ADD COLUMN`s and two `CREATE INDEX`es with no table rebuild.
+ * 3 → 4 is hand-written too ([MIGRATION_3_4], docs/design/m5-setup-settings.md §4.2): `playlist` gains a unique index
+ * and a backfilled `uid`, which an auto-migration would do by rebuilding the table.
  *
  * Policy:
  * - Every schema change bumps `LibraryDatabase.VERSION`, commits the new exported JSON under
@@ -39,5 +41,28 @@ object Migrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3)
+    /**
+     * v3 → v4, the statements of docs/design/m5-setup-settings.md §4.2, verbatim: two CREATE TABLEs, four ADD COLUMNs, one
+     * UPDATE (backfills `playlist.uid`), two CREATE INDEXes; no table rebuild. Existing rows get `rule_hidden = 0`,
+     * `hide_rules_ver = 0` and a random 32-hex `uid`.
+     */
+    val SQL_3_4: List<String> = listOf(
+        "CREATE TABLE IF NOT EXISTS `app_setting` (`domain` TEXT NOT NULL, `json` TEXT NOT NULL, `schema_ver` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`domain`))",
+        "CREATE TABLE IF NOT EXISTS `hide_rule` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `playlist_id` INTEGER NOT NULL, `target` INTEGER NOT NULL, `pattern` TEXT NOT NULL, `is_regex` INTEGER NOT NULL, `enabled` INTEGER NOT NULL DEFAULT 1, `disabled_reason` TEXT, `created_at` INTEGER NOT NULL, FOREIGN KEY(`playlist_id`) REFERENCES `playlist`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE)",
+        "CREATE INDEX IF NOT EXISTS `index_hide_rule_playlist` ON `hide_rule` (`playlist_id`)",
+        "ALTER TABLE `channel` ADD COLUMN `rule_hidden` INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE `channel_group` ADD COLUMN `rule_hidden` INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE `playlist` ADD COLUMN `uid` TEXT",
+        "UPDATE `playlist` SET `uid` = lower(hex(randomblob(16))) WHERE `uid` IS NULL",
+        "CREATE UNIQUE INDEX IF NOT EXISTS `index_playlist_uid` ON `playlist` (`uid`)",
+        "ALTER TABLE `playlist` ADD COLUMN `hide_rules_ver` INTEGER NOT NULL DEFAULT 0",
+    )
+
+    val MIGRATION_3_4: Migration = object : Migration(3, 4) {
+        override fun migrate(connection: SQLiteConnection) {
+            for (sql in SQL_3_4) connection.execSQL(sql)
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4)
 }

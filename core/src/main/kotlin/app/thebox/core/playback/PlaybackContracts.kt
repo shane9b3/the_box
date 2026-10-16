@@ -271,8 +271,12 @@ enum class HdrPreviewMode { POSTER, ALLOW }
 enum class HdrKind { SDR, HDR10, HLG, DOLBY_VISION, UNKNOWN_HDR }
 enum class AspectMode { FIT, FILL, ZOOM, RATIO_16_9, RATIO_4_3 }
 enum class VideoDecoderMode { AUTO, HARDWARE_ONLY, SOFTWARE_PREFERRED }
-/** Product §4.4 "Audio output". */
-enum class AudioOutputMode { AUTO, ALWAYS_DECODE, STEREO }
+/**
+ * Product §4.4 "Audio output". (M5, docs/design/m5-setup-settings.md §2.12 item 7, B2) FORCE_PASSTHROUGH = "Always
+ * passthrough" (decision 2026-10-14): the sink is built with AC-3, E-AC-3, DTS and TrueHD added to the reported
+ * capabilities (WP-A, the F19 hook); append-only.
+ */
+enum class AudioOutputMode { AUTO, ALWAYS_DECODE, STEREO, FORCE_PASSTHROUGH }
 
 // ------------------------------------------------------------------ broker
 

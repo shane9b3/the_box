@@ -1,5 +1,9 @@
 package app.thebox.ui.full.vm
 
+import app.thebox.core.full.ErrorButton
+import app.thebox.core.full.ErrorCardState
+import app.thebox.core.settings.SettingsRoute
+import app.thebox.ui.root.EffectDelegates
 import app.thebox.core.catchup.archive.ArchiveFailure
 import app.thebox.core.catchup.archive.ArchivePhase
 import app.thebox.core.catchup.archive.ArchiveStart
@@ -26,7 +30,11 @@ import app.thebox.ui.guide.vm.LineupZapList
  * to IO), answers come back as [PlayerEvent]s. Toast ownership as in M3 (§2.13 item 9): effects toast what they learn
  * asynchronously (favourite, hide, catch-up failure, reminder), the machine toasts the rest.
  */
-class PlayerEffectsImpl(private val vm: PlayerViewModel) : PlayerEffects {
+class PlayerEffectsImpl(
+    private val vm: PlayerViewModel,
+    /** (M5 commit 0, docs/design/m5-setup-settings.md §1.3a) What the M5 effects delegate to. */
+    private val delegates: EffectDelegates = EffectDelegates.NONE,
+) : PlayerEffects {
     private val controller get() = vm.controller
     private val archive get() = vm.archive
 
@@ -57,6 +65,15 @@ class PlayerEffectsImpl(private val vm: PlayerViewModel) : PlayerEffects {
     }
 
     override fun stopPlayback() = controller.stop(StopReason.USER)
+
+    // ---- M5 commit 0 (docs/design/m5-setup-settings.md §1.3a, §3.14): one-line delegations
+
+    /** Error-card routes open detached and return to FULL on BACK (S2). */
+    override fun openSettings(route: SettingsRoute) = delegates.settings.openSettings(route, fromFull = true, detached = true)
+
+    override fun errorAction(button: ErrorButton, card: ErrorCardState) = delegates.errors.run(button, card)
+
+    override fun setChannelLocked(channel: GuideChannel, locked: Boolean) = delegates.parental.setChannelLocked(channel, locked)
     override fun pausePlain() = controller.pause()
     override fun resumePlain() = controller.resume()
 

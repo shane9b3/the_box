@@ -17,7 +17,11 @@ enum class BackInPlayer { GUIDE, CHANNEL_LIST }
 /** Product §4.4 "On launch". */
 enum class OnLaunch { GUIDE_WITH_LAST, FULL_LAST, GUIDE_NOTHING }
 
-/** Rows of product §4.4/§4.7 the player reads. In memory until M5 persists and edits them. */
+/**
+ * Rows of product §4.4/§4.7 the player reads. (M5, docs/design/m5-setup-settings.md §2.12 item 4) `@Serializable`: stored
+ * as is in the `player` settings domain (`app_setting`).
+ */
+@kotlinx.serialization.Serializable
 data class PlayerSettings(
     /** 3 / 5 / 8 s (product §4.4 "Info bar duration"). */
     val infoBarMs: Long = 5_000,

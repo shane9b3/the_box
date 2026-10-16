@@ -104,9 +104,12 @@ class GuideViewModelTest {
                     FakeNavigator(), labels, FakeGuideRenderer(), FakeDeviceClassSource(), FakeSyncFeed(), FakeGuideDataWindowSource(),
                     probe, router, FakeGuideMetricsFactory(), FakeRowCellsBuilder(), FakeGuideImages(), ImageLoader(context), GuideTrim(null, null),
                     archive, playerSettings,
+                    app.thebox.core.settings.fakes.FakeSettingsStore(), // M5 commit 0: startup waits for it (S1)
                 ) as T
             }
             val vm = ViewModelProvider(store, factory)[GuideViewModel::class.java]
+            // M5 commit 0 (S11): MainActivity attaches the settings machine before startup, which waits for it.
+            vm.attachSettings(app.thebox.core.settings.fakes.RecordingSettingsMachine(consume = { false }))
             vm.startup() // M4 commit 0 (S9): MainActivity's call after attachPlayer
             idle()
             return vm

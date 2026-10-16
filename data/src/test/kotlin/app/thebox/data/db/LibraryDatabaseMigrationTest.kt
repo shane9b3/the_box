@@ -199,6 +199,79 @@ class LibraryDatabaseMigrationTest {
         }
     }
 
+    /**
+     * library.db v3 → v4 (docs/design/m5-setup-settings.md §4.2; F22): user rows survive; `app_setting` and `hide_rule`
+     * exist; `rule_hidden` and `hide_rules_ver` arrive as 0; every playlist gets a distinct 32-hex `uid` from
+     * `lower(hex(randomblob(16)))`; the nullable unique `uid` index validates against the entity; no table is rebuilt;
+     * the file opens through the production builder and new rows get a Kotlin-generated uid.
+     */
+    @Test
+    fun migrate3To4BackfillsUidsAndAddsTablesAndColumns() {
+        val helper = MigrationTestHelper(instrumentation, file, AndroidSQLiteDriver(), LibraryDatabase::class)
+        var v3TableSql: Map<String, String> = emptyMap()
+        helper.createDatabase(3).closing { c ->
+            for (id in listOf(7, 8)) {
+                c.execSQL(
+                    "INSERT INTO playlist(id, name, type, credential_ref, display_source, sort_index, created_at) " +
+                        "VALUES ($id, 'P$id', 'XTREAM', 'r$id', 'h', 0, 1)",
+                )
+            }
+            c.execSQL("INSERT INTO channel_group(id, playlist_id, kind, group_key, name, sort_index, is_adult) VALUES (3, 7, 0, 'g:news', 'News', 0, 0)")
+            c.execSQL(
+                "INSERT INTO channel(id, playlist_id, stable_key, key_rule, kind, name, norm_name, sort_index, group_id, url, content_hash, first_seen_at, updated_at) " +
+                    "VALUES (11, 7, 'xc:1', 'XTREAM', 0, 'BBC One', 'bbc one', 0, 3, 'u', 9, 1, 1)",
+            )
+            c.execSQL("INSERT INTO channel_prefs(playlist_id, stable_key, hidden, custom_name, watch_count, updated_at) VALUES (7, 'xc:1', 1, 'Beeb', 2, 4)")
+            c.execSQL("INSERT INTO credential(ref, ciphertext, key_version, updated_at) VALUES ('r7', x'00', 1, 1)")
+            v3TableSql = c.tableSql()
+        }
+        helper.runMigrationsAndValidate(4, Migrations.ALL.toList()).closing { c ->
+            val v4TableSql = c.tableSql()
+            for (t in listOf("channel_prefs", "group_prefs", "favourite", "epg_mapping", "reminder", "credential", "epg_match")) {
+                assertEquals(t, v3TableSql[t], v4TableSql[t])
+            }
+            assertTrue("app_setting" in v4TableSql && "hide_rule" in v4TableSql)
+            assertEquals(listOf("rule_hidden"), c.columns("channel") - V2_CHANNEL_COLUMNS - "display_name")
+            assertEquals(listOf("uid", "hide_rules_ver"), c.columns("playlist") - (V1_PLAYLIST_COLUMNS + "xtream_output_learned" + "name_prefix_mode" + "name_prefix_custom" + "name_prefix_ver"))
+            val uids = c.prepare("SELECT uid, hide_rules_ver FROM playlist ORDER BY id").use { st ->
+                buildList { while (st.step()) { assertEquals(0L, st.getLong(1)); add(st.getText(0)) } }
+            }
+            assertEquals(2, uids.size)
+            for (u in uids) assertTrue(u, u.matches(Regex("[0-9a-f]{32}")))
+            assertTrue("randomblob gives each playlist its own uid", uids[0] != uids[1])
+            c.prepare("SELECT rule_hidden FROM channel WHERE id = 11").use { st -> assertTrue(st.step()); assertEquals(0L, st.getLong(0)) }
+            c.prepare("SELECT rule_hidden FROM channel_group WHERE id = 3").use { st -> assertTrue(st.step()); assertEquals(0L, st.getLong(0)) }
+            c.prepare("SELECT custom_name, hidden FROM channel_prefs").use { st ->
+                assertTrue(st.step()); assertEquals("Beeb", st.getText(0)); assertEquals(1L, st.getLong(1))
+            }
+            val idx = c.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'index_playlist_uid'").use { st -> assertTrue(st.step()); st.getText(0) }
+            assertTrue(idx, idx.contains("UNIQUE") && idx.contains("(`uid`)"))
+            // A nullable unique column: NULLs never collide (rows inserted by raw SQL without a uid stay legal).
+            c.execSQL("INSERT INTO playlist(id, name, type, credential_ref, display_source, sort_index, created_at, uid) VALUES (9, 'N1', 'M3U', 'r9', 'h', 0, 1, NULL)")
+            c.execSQL("INSERT INTO playlist(id, name, type, credential_ref, display_source, sort_index, created_at, uid) VALUES (10, 'N2', 'M3U', 'r10', 'h', 0, 1, NULL)")
+            c.execSQL("DELETE FROM playlist WHERE id IN (9, 10)")
+            c.execSQL("INSERT INTO hide_rule(playlist_id, target, pattern, is_regex, created_at) VALUES (7, 0, 'XXX', 0, 5)")
+            c.prepare("SELECT enabled, disabled_reason FROM hide_rule").use { st -> assertTrue(st.step()); assertEquals(1L, st.getLong(0)); assertTrue(st.isNull(1)) }
+        }
+
+        val db = LibraryDatabase.build(context, Dispatchers.IO, AndroidSQLiteDriver(), file.name)
+        try {
+            runBlocking {
+                val p = db.playlistDao().get(7)!!
+                assertTrue(p.uid!!.matches(Regex("[0-9a-f]{32}")))
+                assertEquals(0, p.hideRulesVer)
+                assertEquals(false, db.channelDao().byId(11)!!.ruleHidden)
+                val fresh = app.thebox.data.db.entity.PlaylistEntity(name = "New", type = app.thebox.core.source.PlaylistType.M3U_URL, credentialRef = "r-new", displaySource = "x", sortIndex = 1, createdAt = 2)
+                assertTrue("N6: the Kotlin default generates the uid", fresh.uid!!.matches(Regex("[0-9a-f]{32}")))
+                db.appSettingDao().upsert(app.thebox.data.db.entity.AppSettingEntity("guide", "{}", 1, 3))
+                assertEquals(listOf("guide"), db.appSettingDao().all().map { it.domain })
+                assertEquals(1, db.hideRuleDao().enabledRules(7).size)
+            }
+        } finally {
+            db.close()
+        }
+    }
+
     private var v2TableSql: Map<String, String> = emptyMap()
 
     private fun SQLiteConnection.tableSql(): Map<String, String> =

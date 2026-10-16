@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
     private val guide: GuideViewModel by viewModels()
     private val player: PlayerViewModel by viewModels()
     private val search: SearchViewModel by viewModels()
+    private val settings: app.thebox.ui.settings.vm.SettingsViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -55,6 +56,9 @@ class MainActivity : ComponentActivity() {
         // (M4, docs/design/m4-player-ux.md §1.7 item 10, §3.10.1, S9) The player view model and its machine exist, and
         // the guide machine delegates FULL to it, before the startup tune: no FULL state runs without the player machine.
         host.attachPlayer(player)
+        // (M5 commit 0, docs/design/m5-setup-settings.md §2.13, S11) The settings machine SETTINGS delegates to; attached
+        // before startup, which waits for it (bounded) before the first-run decision.
+        host.attachSettings(settings.machine)
         player.runTicker(lifecycle)
         host.startup()
         lifecycleScope.launch { search.effects.collect { host.onSearchEffect(it) } }

@@ -232,6 +232,10 @@ class PlayerStateMachineImpl(
             is PlayerEvent.GuideSourceNow -> { guideSource = event.source; guideLineup = event.lineup }
             is PlayerEvent.Settings -> settings = event.settings
             is PlayerEvent.ArchiveStartFailed -> onArchiveStartFailed()
+            // M5 commit 0 (docs/design/m5-setup-settings.md §1.3a): no-op branches until WP-C fills them.
+            is PlayerEvent.Parental -> Unit
+            is PlayerEvent.PinResult -> Unit
+            is PlayerEvent.KeyHints -> Unit
         }
         publish()
     }
@@ -297,6 +301,8 @@ class PlayerStateMachineImpl(
             BoxAction.SCREEN_OFF -> screenOff()
             BoxAction.BACK -> return backAtBase(justClosedByBack)
             BoxAction.DIGIT, BoxAction.NUMBER_ENTRY, BoxAction.OPEN_GUIDE, BoxAction.EXIT -> return false
+            // M5 commit 0: the guide machine owns OPEN_SEARCH / OPEN_SETTINGS (WP-C binds and handles them).
+            BoxAction.OPEN_SEARCH, BoxAction.OPEN_SETTINGS -> return false
             BoxAction.REMIND, BoxAction.PAGE_UP, BoxAction.PAGE_DOWN, BoxAction.JUMP_TO_NOW, BoxAction.DAY_STRIP -> Unit
         }
         return true
@@ -702,6 +708,7 @@ class PlayerStateMachineImpl(
             QuickItem.STREAM_INFO -> toggleStats()
             QuickItem.SCREEN_OFF -> screenOff()
             QuickItem.SETTINGS -> { closeLayer(); effects.openSettings() }
+            QuickItem.SOURCES -> Unit // M5 commit 0: never listed before WP-C's QuickBarModel (Sources picker, §3.6.2)
         }
     }
 
@@ -756,6 +763,7 @@ class PlayerStateMachineImpl(
         }
         PickerKind.ASPECT -> AspectMode.entries.map { PickerChoice.Aspect(it) }
         PickerKind.VIDEO_DECODER -> DECODER_CHOICES
+        PickerKind.SERVER -> emptyList() // M5 commit 0: WP-C (Sources picker, §3.6.2)
     }
 
     private fun currentChoice(kind: PickerKind, choices: List<PickerChoice>): Int = when (kind) {
@@ -766,6 +774,7 @@ class PlayerStateMachineImpl(
             val d = video.decoderOverride?.takeIf { it != VideoDecoderMode.AUTO }
             choices.indexOfFirst { it is PickerChoice.Decoder && it.mode == d }.coerceAtLeast(0)
         }
+        PickerKind.SERVER -> 0 // M5 commit 0: WP-C (Sources picker, §3.6.2)
     }
 
     private fun pickerKey(a: GuideEvent.Act): Boolean {
@@ -882,7 +891,7 @@ class PlayerStateMachineImpl(
             BoxAction.UP, BoxAction.DOWN -> upDown(a, fromError = true)
             BoxAction.LEFT -> errorFocused = (card.focused - 1).coerceAtLeast(0)
             BoxAction.RIGHT -> errorFocused = (card.focused + 1).coerceAtMost(card.buttons.size - 1)
-            BoxAction.SELECT -> return errorButton(card.buttons[card.focused])
+            BoxAction.SELECT -> return errorButton(card.buttons[card.focused], card)
             BoxAction.BACK -> return backAtBase(justClosed)
             BoxAction.ZAP_UP -> zap(+1, a.repeat)
             BoxAction.ZAP_DOWN -> zap(-1, a.repeat)
@@ -894,7 +903,7 @@ class PlayerStateMachineImpl(
     }
 
     /** False for GUIDE: the guide machine's FULL code returns to the guide on an unconsumed SELECT over the card. */
-    private fun errorButton(b: ErrorButton): Boolean {
+    private fun errorButton(b: ErrorButton, card: ErrorCardState): Boolean {
         val ch = tunedChannel
         when (b) {
             // F5: an archive Retry goes through ArchivePlayback, never controller.retry(): archiveResume() is
@@ -907,6 +916,9 @@ class PlayerStateMachineImpl(
             ErrorButton.AUDIO_OPTIONS -> openPicker(PickerKind.AUDIO, fromQuickBar = false)
             ErrorButton.STOP -> effects.stopPlayback()
             ErrorButton.GUIDE -> return false
+            // M5 commit 0 (§3.14): one-line hand-offs; WP-C's ErrorCardModel is what offers these buttons.
+            ErrorButton.OPEN_SETTINGS -> card.route?.let { effects.openSettings(it) }
+            ErrorButton.USE_SECURE_DNS, ErrorButton.REFRESH_PLAYLIST, ErrorButton.OPEN_EXTERNAL -> effects.errorAction(b, card)
         }
         return true
     }
@@ -1344,6 +1356,9 @@ class PlayerStateMachineImpl(
                     ChannelMenuItem.ADD_FAVOURITE -> effects.setFavourite(ch, true)
                     ChannelMenuItem.REMOVE_FAVOURITE -> effects.setFavourite(ch, false)
                     ChannelMenuItem.HIDE_CHANNEL -> effects.hideChannel(ch)
+                    // M5 commit 0: never listed before WP-C (lock, §3.9.1) / WP-A (Channel options, §3.3.12).
+                    ChannelMenuItem.LOCK_CHANNEL -> effects.setChannelLocked(ch, true)
+                    ChannelMenuItem.CHANNEL_OPTIONS -> Unit
                 }
             }
             else -> Unit

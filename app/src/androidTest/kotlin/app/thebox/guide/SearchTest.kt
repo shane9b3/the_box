@@ -25,7 +25,7 @@ class SearchTest : GuideTestBase() {
 
     @Test
     fun newsFindsChannelsAndProgrammesAndPlaysArchive() {
-        val results = runBlocking { ep.search().search("news", System.currentTimeMillis(), unlocked = false) }
+        val results = runBlocking { ep.search().search("news", System.currentTimeMillis(), access = app.thebox.core.parental.ParentalAccess.LOCKED_AUTO) }
         log("I-11 data: ${results.channels.size} channels, ${results.programmes.size} programmes, ${results.programmes.count { it.inArchive }} in archive")
         assertTrue("channel hits", results.channels.isNotEmpty())
         assertTrue("programme hits", results.programmes.isNotEmpty())

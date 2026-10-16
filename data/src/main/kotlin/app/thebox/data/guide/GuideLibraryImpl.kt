@@ -1,5 +1,7 @@
 package app.thebox.data.guide
 
+import app.thebox.core.parental.ParentalAccess
+import app.thebox.core.parental.legacyUnlocked
 import app.thebox.core.guide.GroupAction
 import app.thebox.core.guide.GuideChannel
 import app.thebox.core.guide.GuideLibrary
@@ -53,9 +55,10 @@ class GuideLibraryImpl @Inject constructor(
     @IoDispatcher private val io: CoroutineDispatcher,
 ) : GuideLibrary {
 
-    override fun sources(unlocked: Boolean): Flow<List<GuideSourceEntry>> =
+    // (M5 commit 0, S10) `access` is explicit; until WP-C's §4.3 predicate it maps onto M3's `unlocked` flag.
+    override fun sources(access: ParentalAccess): Flow<List<GuideSourceEntry>> =
         trigger(SOURCE_TABLES, withRecentCount = true, emitInitial = true)
-            .map { buildSources(unlocked) }
+            .map { buildSources(access.legacyUnlocked) }
             .distinctUntilChanged()
             .flowOn(io)
 
@@ -89,7 +92,8 @@ class GuideLibraryImpl @Inject constructor(
      * Recent keeps the order it had when it was selected (N2): later emissions keep surviving ids in place and put new
      * ones first, so the focused row does not jump after every tune.
      */
-    override fun lineup(source: GuideSource, unlocked: Boolean): Flow<GuideLineup> {
+    override fun lineup(source: GuideSource, access: ParentalAccess): Flow<GuideLineup> {
+        val unlocked = access.legacyUnlocked
         // G-S6: only Recent depends on the watch history (`last_watched_at`); every other lineup ignores tune-time writes.
         val changes = if (source == GuideSource.Recent) db.invalidationTracker.createFlow(*LINEUP_TABLES, "channel_prefs").map { }
         else trigger(LINEUP_TABLES, withRecentCount = false, emitInitial = true)
@@ -110,7 +114,8 @@ class GuideLibraryImpl @Inject constructor(
 
     override suspend fun rowIdOf(identity: ChannelIdentity): Long? = withContext(io) { queries.rowIdOf(identity) }
 
-    override suspend fun byNumber(playlistId: Long?, number: Int, unlocked: Boolean): GuideChannel? = withContext(io) {
+    override suspend fun byNumber(playlistId: Long?, number: Int, access: ParentalAccess): GuideChannel? = withContext(io) {
+        val unlocked = access.legacyUnlocked
         val p = (if (playlistId != null) playlistDao.get(playlistId) else null)
             ?: playlistDao.all().filter { it.enabled }.minWithOrNull(compareBy({ it.sortIndex }, { it.id }))
             ?: return@withContext null

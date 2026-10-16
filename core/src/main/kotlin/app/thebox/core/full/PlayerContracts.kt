@@ -182,7 +182,11 @@ data class ScrubState(
 )
 
 enum class ListColumn { GROUPS, CHANNELS }
-enum class ChannelMenuItem { WATCH_FROM_START, ADD_FAVOURITE, REMOVE_FAVOURITE, HIDE_CHANNEL }
+enum class ChannelMenuItem {
+    WATCH_FROM_START, ADD_FAVOURITE, REMOVE_FAVOURITE, HIDE_CHANNEL,
+    // M5 (docs/design/m5-setup-settings.md §2.12 item 4; append-only)
+    LOCK_CHANNEL, CHANNEL_OPTIONS,
+}
 
 /**
  * Channel list panel (§3.3). Rows are read from the `GuideRows` the factory received (main-only); [rowsVersion] bumps
@@ -213,7 +217,13 @@ data class ChannelListState(
 /** Quick bar items in display order (owner ruling 2026-10-15; §3.4.1). Hidden items are left out of [QuickBarState.items]. */
 enum class QuickItem {
     AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, START_OVER, JUMP_TO_LIVE, TIME_SHIFT,
-    PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, SCREEN_OFF, SETTINGS,
+    PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, SCREEN_OFF,
+    /**
+     * (M5, docs/design/m5-setup-settings.md §2.12 item 4; M4 E23) The server picker. Placed before SETTINGS, not after
+     * it: QuickItem is never persisted, and M4's rule "display order is the enum order, Settings always last" holds.
+     */
+    SOURCES,
+    SETTINGS,
 }
 
 /** The quick bar (D-pad Up on bare video, CONTEXT_MENU, QUICK_MENU). Current values are shown on the items. */
@@ -229,7 +239,11 @@ data class QuickBarState(
     val previous: GuideChannel?,
 )
 
-enum class PickerKind { AUDIO, SUBTITLES, ASPECT, VIDEO_DECODER }
+enum class PickerKind {
+    AUDIO, SUBTITLES, ASPECT, VIDEO_DECODER,
+    // M5 (§2.12 item 4; append-only)
+    SERVER,
+}
 
 sealed interface PickerChoice {
     data class Audio(val track: AudioChoice) : PickerChoice
@@ -255,7 +269,11 @@ data class PickerState(
 )
 
 /** Buttons M4 can execute (§3.7). Everything else is a text step until M5 routes it. */
-enum class ErrorButton { RETRY, PREVIOUS_CHANNEL, WATCH_LIVE, TRY_OTHER_CATCHUP_FORMAT, TRY_SOFTWARE_DECODER, AUDIO_OPTIONS, STOP, GUIDE }
+enum class ErrorButton {
+    RETRY, PREVIOUS_CHANNEL, WATCH_LIVE, TRY_OTHER_CATCHUP_FORMAT, TRY_SOFTWARE_DECODER, AUDIO_OPTIONS, STOP, GUIDE,
+    // M5 (docs/design/m5-setup-settings.md §2.12 item 4, §3.14; append-only)
+    OPEN_SETTINGS, USE_SECURE_DNS, REFRESH_PLAYLIST, OPEN_EXTERNAL,
+}
 
 data class ErrorCardState(
     val error: PlaybackError,
@@ -266,6 +284,8 @@ data class ErrorCardState(
     val textStep: NextStep?,
     /** Catch-up probing ended without a working format (ArchiveStatus.FAILED). */
     val archiveFailed: Boolean,
+    /** (M5, §2.12 item 4, §3.14) The OPEN_SETTINGS target; opened detached (S2). */
+    val route: app.thebox.core.settings.SettingsRoute? = null,
 )
 
 data class PlayerUiState(
@@ -325,6 +345,14 @@ sealed interface PlayerEvent {
      * focus to now when the start came from the bar (§3.2.2).
      */
     data class ArchiveStartFailed(val reason: app.thebox.core.catchup.archive.ArchiveFailure) : PlayerEvent
+
+    // M5 commit 0 (docs/design/m5-setup-settings.md §1.3a, §3.9.2; additive, WP-C fills the machine's branches)
+    /** ParentalSession.state, for locked entries in the channel list and the lock menu items. */
+    data class Parental(val state: app.thebox.core.parental.ParentalState) : PlayerEvent
+    /** The answer to a PIN the player machine asked for through its [PlayerStateMachine.pinGate]. */
+    data class PinResult(val purpose: app.thebox.core.parental.PinPurpose, val granted: Boolean) : PlayerEvent
+    /** Keys bound to each action (EffectiveKeyMap), for hints in the player's bars. */
+    data class KeyHints(val hints: Map<app.thebox.core.input.BoxAction, List<Int>>) : PlayerEvent
 }
 
 /** Side effects; implemented by :ui's PlayerEffectsImpl (WP-D). Main-safe, non-blocking. */
@@ -359,6 +387,14 @@ interface PlayerEffects {
     fun toggleReminder(channel: GuideChannel, info: ProgrammeInfo)
     /** (owner ruling 2026-10-15) Quick bar Settings: the host dispatches GuideEvent.OpenSettings to the guide machine. */
     fun openSettings()
+    // M5 commit 0 (docs/design/m5-setup-settings.md §1.3a, §3.14, §3.9). Defaults keep test doubles compiling;
+    // PlayerEffectsImpl delegates each to the interface the owning WP implements.
+    /** Error-card OPEN_SETTINGS (detached, S2) and other routes into Settings from FULL. */
+    fun openSettings(route: app.thebox.core.settings.SettingsRoute) = Unit
+    /** Error-card buttons that act outside the player (USE_SECURE_DNS, REFRESH_PLAYLIST, OPEN_EXTERNAL; §3.14). */
+    fun errorAction(button: ErrorButton, card: ErrorCardState) = Unit
+    /** Channel-list menu LOCK_CHANNEL (§3.9.1). */
+    fun setChannelLocked(channel: GuideChannel, locked: Boolean) = Unit
     // Data
     fun loadProgrammes(token: Long, channel: GuideChannel, aroundMin: Int, before: Int, after: Int)
     fun loadChannel(token: Long, from: GuideChannel, delta: Int)
@@ -402,6 +438,14 @@ interface PlayerStateMachine {
     fun enterFull(nowMs: Long, reason: EnterReason)
     /** Closes every layer, stops stats, cancels a pending scrub commit (no seek). */
     fun leaveFull()
+
+    /**
+     * (M5 commit 0, docs/design/m5-setup-settings.md §0.9, §2.6 `PinGate`) Injected by the guide machine: the player
+     * asks for a PIN through it and gets the answer as [PlayerEvent.PinResult].
+     */
+    var pinGate: app.thebox.core.parental.PinGate?
+        get() = null
+        set(@Suppress("UNUSED_PARAMETER") value) = Unit
 }
 
 fun interface PlayerStateMachineFactory {

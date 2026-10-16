@@ -19,5 +19,6 @@ data class SearchResults(
 
 interface GuideSearch {
     /** Empty results for fewer than 2 letters/digits (product S9). Main-safe. Cancellable (checks between stages). */
-    suspend fun search(query: String, nowMs: Long, unlocked: Boolean): SearchResults
+    /** (M5, §2.12 item 9, S10) [access] passed explicitly by the caller (see GuideLibrary). */
+    suspend fun search(query: String, nowMs: Long, access: app.thebox.core.parental.ParentalAccess): SearchResults
 }

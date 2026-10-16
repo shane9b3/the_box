@@ -67,9 +67,9 @@ class RowBlockTest {
         assertEquals(app.thebox.core.guide.GuideChannel.hashOf(ra.identity), ra.identityHash)
         assertNull(ra.epg)
         // Number entry goes through the same rows.
-        assertEquals(b, gg.library.byNumber(provider, 42, false)!!.rowId)
-        assertEquals(d, gg.library.byNumber(start, 102, false)!!.rowId)
-        assertEquals(c, gg.library.byNumber(order, 5, false)!!.rowId)
+        assertEquals(b, gg.library.byNumber(provider, 42, app.thebox.core.parental.ParentalAccess.LOCKED_AUTO)!!.rowId)
+        assertEquals(d, gg.library.byNumber(start, 102, app.thebox.core.parental.ParentalAccess.LOCKED_AUTO)!!.rowId)
+        assertEquals(c, gg.library.byNumber(order, 5, app.thebox.core.parental.ParentalAccess.LOCKED_AUTO)!!.rowId)
         assertEquals(a, gg.library.rowIdOf(ChannelIdentity(provider, StableKey("a"))))
     }
 

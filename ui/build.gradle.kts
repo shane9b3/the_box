@@ -34,6 +34,9 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.compose)
     implementation(libs.androidx.core.ktx)
 
+    // M5 (docs/design/m5-setup-settings.md §6.6): QR code of the phone-setup URL (WP-D's QrImage).
+    implementation(libs.qrcodegen)
+
     testImplementation(platform(libs.compose.bom))
     testImplementation(libs.junit4)
     testImplementation(libs.robolectric)

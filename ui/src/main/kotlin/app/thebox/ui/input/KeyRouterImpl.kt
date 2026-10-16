@@ -21,6 +21,7 @@ import app.thebox.core.input.KeyGestureDetector
 import app.thebox.core.input.KeyInput
 import app.thebox.core.input.KeyMap
 import app.thebox.core.input.Keys
+import app.thebox.core.settings.SettingsEvent
 import android.view.KeyEvent as AndroidKeyEvent
 
 /**
@@ -107,6 +108,14 @@ class KeyRouterImpl(
     /** The routing without Compose/Android event types (tests). */
     fun onNative(code: Int, isDown: Boolean, repeatCount: Int, downTimeMs: Long, eventTimeMs: Long, canceled: Boolean = false): Boolean {
         val m = machine ?: return false
+        // (M5 commit 0, docs/design/m5-setup-settings.md §2.12 item 5, S3) The settings editor owns every key but BACK:
+        // BACK never reaches the Activity (no BackHandler exists) and becomes SettingsEvent.EditorBack. Keys held from
+        // before the editor opened finish on the normal path.
+        if (m.textInputActive && code !in consumedDown) {
+            if (code != Keys.BACK && code != Keys.ESCAPE && code != Keys.BUTTON_B) return false
+            if (isDown && repeatCount == 0) m.settings?.dispatch(SettingsEvent.EditorBack)
+            return true
+        }
         if (!isDown) {
             if (!consumedDown.remove(code)) return false
         } else if (repeatCount == 0) {

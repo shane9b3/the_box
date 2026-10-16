@@ -31,6 +31,8 @@ enum class BoxAction(val id: String, val remappable: Boolean) {
     PREV_PROGRAMME("prev_programme", true), NEXT_PROGRAMME("next_programme", true),
     /** Opens the scrub bar on live at the live edge (pause/rewind entry, §3.5.1). */
     TIME_SHIFT("time_shift", true),
+    // M5 additions (docs/design/m5-setup-settings.md §2.12 item 1; append-only ids). WP-C binds them in DefaultKeyMap.
+    OPEN_SEARCH("open_search", true), OPEN_SETTINGS("open_settings", true),
 }
 
 // (reviewed 2026-10-15, S5/F9) KeyContext is unchanged: enum class KeyContext { GUIDE, PLAYER }
@@ -95,6 +97,11 @@ object Keys {
     const val MEDIA_STOP = 86
     const val MEDIA_SKIP_FORWARD = 272; const val MEDIA_SKIP_BACKWARD = 273
     const val MEDIA_STEP_FORWARD = 274; const val MEDIA_STEP_BACKWARD = 275
+    // M5 (docs/design/m5-setup-settings.md §2.12 item 1): SETTINGS is bindable (OPEN_SETTINGS); the rest are reserved
+    // and never bound (the framework or the OS owns them; the mapping screen refuses them).
+    const val SETTINGS = 176
+    const val VOLUME_UP = 24; const val VOLUME_DOWN = 25; const val VOLUME_MUTE = 164; const val MUTE = 91
+    const val HOME = 3; const val POWER = 26; const val TV_POWER = 177; const val SLEEP = 223; const val WAKEUP = 224
 }
 
 /** Keys the device has actually reported (product §2.1). :ui implements (SharedPreferences `keys_seen`; writes only a newly seen code, N7). */

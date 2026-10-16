@@ -76,6 +76,7 @@ class FiveKeyReachabilityTest {
     }
 
     private companion object {
+        val M5_NOT_OFFERED_YET = setOf(MenuItem.LOCK_CHANNEL, MenuItem.UNLOCK_CHANNEL, MenuItem.FIX_GUIDE_DATA, MenuItem.CHANNEL_OPTIONS)
         /** Item → effects SELECT may produce (alternatives depend on the cell; at least one must be seen). */
         val EXPECTED: Map<String, Set<String>> = buildMap {
             put("menu:" + MenuItem.WATCH, setOf("playArchive"))
@@ -131,7 +132,8 @@ class FiveKeyReachabilityTest {
             if (frontier.isEmpty() || seen.size > 60_000) break
         }
         val missing = buildList {
-            addAll(MenuItem.entries.filter { it !in r.menu })
+            // M5 commit 0: the four appended items are offered only once WP-C/WP-A build them into the menu; WP-C drops this filter.
+            addAll(MenuItem.entries.filter { it !in r.menu && it !in M5_NOT_OFFERED_YET })
             addAll(PanelButton.entries.filter { it !in r.buttons })
             addAll(HeaderChip.entries.filter { it !in r.chips })
             addAll(ScreenMode.entries.filter { it !in r.modes })
@@ -150,4 +152,5 @@ class FiveKeyReachabilityTest {
         assertTrue(wrong.isEmpty(), "$exit: SELECT without its effect: $wrong")
         if (exit != ExitConfirmation.ASK) assertTrue("ExitDialog" !in r.overlays, "the dialog only exists in ASK")
     }
+
 }
