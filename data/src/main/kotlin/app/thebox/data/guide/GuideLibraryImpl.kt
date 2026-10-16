@@ -1,7 +1,6 @@
 package app.thebox.data.guide
 
 import app.thebox.core.parental.ParentalAccess
-import app.thebox.core.parental.legacyUnlocked
 import app.thebox.core.guide.GroupAction
 import app.thebox.core.guide.GuideChannel
 import app.thebox.core.guide.GuideLibrary
@@ -11,7 +10,10 @@ import app.thebox.core.guide.GuideSourceEntry
 import app.thebox.core.guide.SourceSection
 import app.thebox.core.refresh.ChannelIdentity
 import app.thebox.data.db.LibraryDatabase
+import app.thebox.data.db.dao.ChannelDao
 import app.thebox.data.db.dao.ChannelPrefsDao
+import app.thebox.data.db.dao.ChannelRow
+import app.thebox.data.db.entity.PlaylistEntity
 import app.thebox.data.db.dao.FavouriteDao
 import app.thebox.data.db.dao.GroupDao
 import app.thebox.data.db.dao.PlaylistDao
@@ -51,14 +53,19 @@ class GuideLibraryImpl @Inject constructor(
     private val favourites: FavouritesRepository,
     private val prefsDao: ChannelPrefsDao,
     private val channels: ChannelRepository,
+    private val channelDao: ChannelDao,
     private val clock: WallClock,
     @IoDispatcher private val io: CoroutineDispatcher,
 ) : GuideLibrary {
 
-    // (M5 commit 0, S10) `access` is explicit; until WP-C's §4.3 predicate it maps onto M3's `unlocked` flag.
+    /**
+     * (M5, docs/design/m5-setup-settings.md §4.3, §2.12 item 9, S10) [access] is the caller's. Locked groups are listed
+     * with `locked = true` (Show with lock) instead of being omitted; "Locked channels in guide: Hide" is applied by
+     * the callers from the session's policy (`ParentalRules.visibleEntries`), which this query does not read.
+     */
     override fun sources(access: ParentalAccess): Flow<List<GuideSourceEntry>> =
         trigger(SOURCE_TABLES, withRecentCount = true, emitInitial = true)
-            .map { buildSources(access.legacyUnlocked) }
+            .map { buildSources(access) }
             .distinctUntilChanged()
             .flowOn(io)
 
@@ -66,22 +73,25 @@ class GuideLibraryImpl @Inject constructor(
     @Volatile var sourceBuilds: Int = 0
         private set
 
-    private suspend fun buildSources(unlocked: Boolean): List<GuideSourceEntry> {
+    private suspend fun buildSources(access: ParentalAccess): List<GuideSourceEntry> {
         sourceBuilds++
         val out = ArrayList<GuideSourceEntry>()
-        for (l in queries.favouriteListCounts(unlocked)) {
+        for (l in queries.favouriteListCounts(access)) {
             if (l.count > 0) out += GuideSourceEntry(GuideSource.Favourites(l.listId), l.name, l.count, SourceSection.FAVOURITES, null)
         }
-        val recent = queries.recentCount(unlocked)
+        val recent = queries.recentCount(access)
         if (recent > 0) out += GuideSourceEntry(GuideSource.Recent, LABEL_RECENT, recent, SourceSection.RECENT, null)
         val enabled = playlistDao.all().filter { it.enabled }.sortedWith(compareBy({ it.sortIndex }, { it.id }))
         val multi = enabled.size > 1
         for (p in enabled) {
             val header = if (multi) p.name else null
             out += GuideSourceEntry(GuideSource.All(p.id), LABEL_ALL, p.liveCount, SourceSection.ALL, header)
-            for (g in groupDao.groups(p.id, 0, unlocked).first()) {
+            for (g in groupDao.panelGroups(p.id, 0, access.ordinal).first()) {
                 if (g.channelCount <= 0) continue
-                out += GuideSourceEntry(GuideSource.Group(p.id, g.group.groupKey), g.customName ?: g.group.name, g.channelCount, SourceSection.GROUP, header)
+                out += GuideSourceEntry(
+                    GuideSource.Group(p.id, g.group.groupKey), g.customName ?: g.group.name, g.channelCount, SourceSection.GROUP, header,
+                    locked = g.locked,
+                )
             }
         }
         return out
@@ -93,11 +103,10 @@ class GuideLibraryImpl @Inject constructor(
      * ones first, so the focused row does not jump after every tune.
      */
     override fun lineup(source: GuideSource, access: ParentalAccess): Flow<GuideLineup> {
-        val unlocked = access.legacyUnlocked
         // G-S6: only Recent depends on the watch history (`last_watched_at`); every other lineup ignores tune-time writes.
         val changes = if (source == GuideSource.Recent) db.invalidationTracker.createFlow(*LINEUP_TABLES, "channel_prefs").map { }
         else trigger(LINEUP_TABLES, withRecentCount = false, emitInitial = true)
-        val raw = changes.map { queries.lineup(source, unlocked) }
+        val raw = changes.map { queries.lineup(source, access) }
         val shaped = if (source != GuideSource.Recent) {
             raw.map { GuideLineup(source, GuideQueries.versionOf(source, it.ids), it.ids, it.archiveDaysUpperBound) }
         } else {
@@ -115,12 +124,27 @@ class GuideLibraryImpl @Inject constructor(
     override suspend fun rowIdOf(identity: ChannelIdentity): Long? = withContext(io) { queries.rowIdOf(identity) }
 
     override suspend fun byNumber(playlistId: Long?, number: Int, access: ParentalAccess): GuideChannel? = withContext(io) {
-        val unlocked = access.legacyUnlocked
         val p = (if (playlistId != null) playlistDao.get(playlistId) else null)
             ?: playlistDao.all().filter { it.enabled }.minWithOrNull(compareBy({ it.sortIndex }, { it.id }))
             ?: return@withContext null
-        val row = channels.rowByNumber(p, number, unlocked) ?: return@withContext null
+        val row = rowByNumber(p, number, access.ordinal) ?: return@withContext null
         queries.channels(longArrayOf(row.channel.id), 0, 1).firstOrNull()
+    }
+
+    /** `ChannelRepository.rowByNumber` with the §4.3 access predicate (custom number first, then the numbering mode). */
+    private suspend fun rowByNumber(p: PlaylistEntity, number: Int, access: Int): ChannelRow? {
+        val mode = p.numberingMode
+        return when {
+            mode.startsWith("START_AT:") -> {
+                val start = mode.substringAfter(':').toIntOrNull() ?: 1
+                channelDao.byNumberAccess(p.id, number, access)?.takeIf { it.customNumber == number }
+                    ?: channelDao.bySortIndexAccess(p.id, number - start, access)
+            }
+            mode == "PLAYLIST_ORDER" -> channelDao.byNumberAccess(p.id, number, access)?.takeIf { it.customNumber == number }
+                ?: channelDao.bySortIndexAccess(p.id, number - 1, access)
+            else -> channelDao.byNumberAccess(p.id, number, access) ?: channelDao.bySortIndexAccess(p.id, number - 1, access)
+                ?.takeIf { it.channel.number == null }
+        }
     }
 
     override suspend fun isFavourite(identity: ChannelIdentity): Boolean = withContext(io) {
@@ -155,7 +179,8 @@ class GuideLibraryImpl @Inject constructor(
     }
 
     override suspend fun lastWatched(): GuideChannel? = withContext(io) {
-        val id = queries.lastWatched(unlocked = false) ?: return@withContext null
+        // N13: the startup tune never plays locked content (filtered as LOCKED_AUTO; the TuneGuard checks it too).
+        val id = queries.lastWatched(ParentalAccess.LOCKED_AUTO) ?: return@withContext null
         queries.channels(longArrayOf(id), 0, 1).firstOrNull()
     }
 

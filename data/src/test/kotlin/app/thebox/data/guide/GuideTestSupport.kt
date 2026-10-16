@@ -24,7 +24,7 @@ class GuideGraph(val g: TestGraph, store: EpgStore = g.store) {
     val favourites = FavouritesRepository(db.favouriteDao(), g.clock)
     val channelRepo = ChannelRepository(db, db.channelDao(), db.groupDao(), g.playlists, catchup)
     val library = GuideLibraryImpl(
-        db, queries, db.playlistDao(), db.groupDao(), db.favouriteDao(), favourites, db.channelPrefsDao(), channelRepo, g.clock, Dispatchers.IO,
+        db, queries, db.playlistDao(), db.groupDao(), db.favouriteDao(), favourites, db.channelPrefsDao(), channelRepo, db.channelDao(), g.clock, Dispatchers.IO,
     )
     val prefix = ChannelNamePrefixImpl()
     val displayNames = DisplayNames(db, db.playlistDao(), prefix, g.importMutex, Dispatchers.IO)

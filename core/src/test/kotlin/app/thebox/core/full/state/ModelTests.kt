@@ -164,13 +164,18 @@ class ErrorCardModelTest {
         NextStep.TRY_SOFTWARE_DECODER -> ErrorButton.TRY_SOFTWARE_DECODER
         NextStep.AUDIO_OPTIONS -> ErrorButton.AUDIO_OPTIONS
         NextStep.STOP_AND_WAIT -> ErrorButton.STOP
+        // M5 (docs/design/m5-setup-settings.md §3.14)
+        NextStep.ACCOUNT_DETAILS, NextStep.EDIT_LOGIN, NextStep.PLAYLIST_SETTINGS, NextStep.DIAGNOSTICS, NextStep.CHANGE_USER_AGENT -> ErrorButton.OPEN_SETTINGS
+        NextStep.USE_SECURE_DNS -> ErrorButton.USE_SECURE_DNS
+        NextStep.REFRESH_PLAYLIST -> ErrorButton.REFRESH_PLAYLIST
+        NextStep.OPEN_EXTERNAL -> ErrorButton.OPEN_EXTERNAL
         else -> null
     }
 
     private fun card(code: PlaybackErrorCode, decoder: VideoDecoderMode? = null, variantLeft: Boolean = true, error: PlaybackError = PlayerFixtures.error(code)) =
         ErrorCardModel.card(error, ch, decoder, variantLeft, archiveFailed = false)
 
-    /** The §3.7 per-code table (default actions). */
+    /** The §3.7 per-code table (default actions), with M5's routes (§3.14): one route button per card. */
     @Test fun perCodeTable() {
         val b = ErrorButton.entries.associateBy { it.name }
         fun check(code: PlaybackErrorCode, buttons: String, text: NextStep?) {
@@ -178,27 +183,73 @@ class ErrorCardModelTest {
             assertEquals(buttons.split(' ').map { b.getValue(it) }, c.buttons, "$code buttons")
             assertEquals(text, c.textStep, "$code text step")
         }
-        check(AUTH_REJECTED, "GUIDE", NextStep.ACCOUNT_DETAILS)
-        check(ACCOUNT_EXPIRED, "GUIDE", NextStep.ACCOUNT_DETAILS)
-        check(ACCOUNT_DISABLED, "GUIDE", NextStep.ACCOUNT_DETAILS)
-        check(NEEDS_REAUTH, "GUIDE", NextStep.EDIT_LOGIN)
+        check(AUTH_REJECTED, "OPEN_SETTINGS GUIDE", NextStep.EDIT_LOGIN) // the second route step is the text line
+        check(ACCOUNT_EXPIRED, "OPEN_SETTINGS GUIDE", NextStep.ACCOUNT_DETAILS)
+        check(ACCOUNT_DISABLED, "OPEN_SETTINGS GUIDE", NextStep.ACCOUNT_DETAILS)
+        check(NEEDS_REAUTH, "OPEN_SETTINGS GUIDE", NextStep.EDIT_LOGIN)
         check(CREDENTIALS_UNAVAILABLE, "RETRY GUIDE", NextStep.RETRY) // P-S2
         check(CONNECTION_LIMIT, "RETRY STOP GUIDE", NextStep.STOP_AND_WAIT) // P-S2
         check(CONNECTION_LIMIT_LOCAL, "RETRY GUIDE", NextStep.RETRY) // P-S2
-        check(FORBIDDEN, "RETRY GUIDE", NextStep.CHANGE_USER_AGENT)
+        check(FORBIDDEN, "RETRY OPEN_SETTINGS GUIDE", NextStep.DIAGNOSTICS)
         check(CHANNEL_OFFLINE, "PREVIOUS_CHANNEL RETRY GUIDE", NextStep.TRY_BACKUP)
-        check(FORMAT_REFUSED, "GUIDE", NextStep.PLAYLIST_SETTINGS)
-        check(WEB_PAGE_INSTEAD, "RETRY GUIDE", NextStep.ACCOUNT_DETAILS)
-        for (c in listOf(EMPTY_RESPONSE, NO_DATA_TIMEOUT, STREAM_INTERRUPTED, CONNECT_FAILED, INTERNAL)) check(c, "RETRY GUIDE", NextStep.DIAGNOSTICS)
+        check(FORMAT_REFUSED, "OPEN_SETTINGS GUIDE", NextStep.DIAGNOSTICS)
+        check(WEB_PAGE_INSTEAD, "OPEN_SETTINGS RETRY GUIDE", NextStep.ACCOUNT_DETAILS)
+        for (c in listOf(EMPTY_RESPONSE, NO_DATA_TIMEOUT, STREAM_INTERRUPTED, CONNECT_FAILED, INTERNAL)) check(c, "RETRY OPEN_SETTINGS GUIDE", NextStep.DIAGNOSTICS)
         check(SERVER_ERROR, "RETRY GUIDE", NextStep.TRY_BACKUP)
-        check(DNS_FAILURE, "GUIDE", NextStep.USE_SECURE_DNS)
-        check(TLS_FAILURE, "GUIDE", NextStep.PLAYLIST_SETTINGS)
-        check(CODEC_UNSUPPORTED, "TRY_SOFTWARE_DECODER GUIDE", NextStep.OPEN_EXTERNAL)
-        check(STREAM_UNDECODABLE, "RETRY GUIDE", NextStep.OPEN_EXTERNAL)
+        check(DNS_FAILURE, "USE_SECURE_DNS OPEN_SETTINGS GUIDE", NextStep.USE_SECURE_DNS)
+        check(TLS_FAILURE, "OPEN_SETTINGS GUIDE", NextStep.DIAGNOSTICS)
+        check(CODEC_UNSUPPORTED, "TRY_SOFTWARE_DECODER OPEN_EXTERNAL GUIDE", NextStep.TRY_SOFTWARE_DECODER)
+        check(STREAM_UNDECODABLE, "RETRY OPEN_EXTERNAL GUIDE", NextStep.OPEN_EXTERNAL)
         check(AUDIO_OUTPUT_FAILED, "AUDIO_OPTIONS GUIDE", NextStep.AUDIO_OPTIONS) // P-S2
-        check(UNSUPPORTED_SOURCE, "GUIDE", NextStep.OPEN_EXTERNAL)
+        check(UNSUPPORTED_SOURCE, "OPEN_EXTERNAL GUIDE", NextStep.OPEN_EXTERNAL)
         check(CATCHUP_NOT_IN_ARCHIVE, "WATCH_LIVE TRY_OTHER_CATCHUP_FORMAT GUIDE", NextStep.WATCH_LIVE) // P-S2
-        check(CHANNEL_NOT_FOUND, "GUIDE", NextStep.REFRESH_PLAYLIST)
+        check(CHANNEL_NOT_FOUND, "REFRESH_PLAYLIST GUIDE", NextStep.REFRESH_PLAYLIST)
+    }
+
+    /** (M5 §3.14) Every OPEN_SETTINGS button carries a non-null route, the route of the first route step. */
+    @ParameterizedTest
+    @EnumSource(PlaybackErrorCode::class)
+    fun everyOpenSettingsButtonCarriesItsRoute(code: PlaybackErrorCode) {
+        val e = PlayerFixtures.error(code)
+        val c = card(code)
+        if (ErrorButton.OPEN_SETTINGS in c.buttons) {
+            val route = assertNotNull(c.route, "$code: OPEN_SETTINGS without a route")
+            val step = e.actions.first { buttonFor(it) == ErrorButton.OPEN_SETTINGS }
+            assertEquals(ErrorCardModel.routeOf(step, code, ch.identity.playlistId), route)
+        } else {
+            assertEquals(null, c.route, "$code: a route without its button")
+        }
+    }
+
+    /** (M5 §3.14) No code is left with a route step as its text line unless a route button already took the card's one route. */
+    @ParameterizedTest
+    @EnumSource(PlaybackErrorCode::class)
+    fun routeStepsAreButtonsWhereTheyCanBe(code: PlaybackErrorCode) {
+        val c = card(code)
+        val t = c.textStep
+        val routeStep = t != null && buttonFor(t) == ErrorButton.OPEN_SETTINGS
+        if (routeStep) assertTrue(ErrorButton.OPEN_SETTINGS in c.buttons, "$code: a route step as text while no route button exists")
+        assertFalse(t == NextStep.TRY_BACKUP && NextStep.TRY_BACKUP !in PlayerFixtures.error(code).actions)
+    }
+
+    @Test fun routesPerStep() {
+        val pid = ch.identity.playlistId
+        assertEquals(app.thebox.core.settings.SettingsRoute.Playlist(pid), card(ACCOUNT_EXPIRED).route)
+        assertEquals(app.thebox.core.settings.SettingsRoute.PlaylistSource(pid), card(NEEDS_REAUTH).route)
+        assertEquals(app.thebox.core.settings.SettingsRoute.Playlist(pid, ErrorCardModel.ROW_STREAM_FORMAT), card(FORMAT_REFUSED).route)
+        assertEquals(app.thebox.core.settings.SettingsRoute.Playlist(pid, ErrorCardModel.ROW_IGNORE_TLS), card(TLS_FAILURE).route)
+        assertEquals(app.thebox.core.settings.SettingsRoute.Playlist(pid, ErrorCardModel.ROW_USER_AGENT), card(FORBIDDEN).route)
+        assertEquals(app.thebox.core.settings.SettingsRoute.NetworkTest(pid), card(CONNECT_FAILED).route)
+    }
+
+    /** Without a channel there is no playlist to open: the route steps and Refresh stay text (M4 behaviour). */
+    @Test fun noChannelNoRoutes() {
+        val c = ErrorCardModel.card(PlayerFixtures.error(AUTH_REJECTED), null, null, variantLeft = true, archiveFailed = false)
+        assertEquals(listOf(ErrorButton.GUIDE), c.buttons)
+        assertEquals(NextStep.ACCOUNT_DETAILS, c.textStep)
+        assertEquals(null, c.route)
+        val r = ErrorCardModel.card(PlayerFixtures.error(CHANNEL_NOT_FOUND), null, null, variantLeft = true, archiveFailed = false)
+        assertEquals(listOf(ErrorButton.GUIDE), r.buttons)
     }
 
     @Test fun ladderNarrowedActions() {
@@ -238,7 +289,7 @@ class ErrorCardModelTest {
     @Test fun retriedCardIsNoDataTimeoutAndButtonsIgnoreRetryInfo() {
         val retried = PlaybackError(NO_DATA_TIMEOUT, ErrorDetail(host = PlayerFixtures.HOST), retry = app.thebox.core.playback.RetryInfo(4, 0, 15_000))
         val c = card(NO_DATA_TIMEOUT, error = retried)
-        assertEquals(listOf(ErrorButton.RETRY, ErrorButton.GUIDE), c.buttons)
+        assertEquals(listOf(ErrorButton.RETRY, ErrorButton.OPEN_SETTINGS, ErrorButton.GUIDE), c.buttons)
         assertEquals(NextStep.DIAGNOSTICS, c.textStep)
         assertEquals(retried.retry, c.error.retry, "the retry info reaches the card unchanged")
         val terminal = PlayerFixtures.error(STREAM_INTERRUPTED).copy(retry = null)

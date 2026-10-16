@@ -193,6 +193,8 @@ private fun GroupsColumn(state: ChannelListState) {
             val focused = i == state.groupFocused
             Chip(focused, Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { c ->
                 Line(e.label, GuideUi.sans(19, if (i == state.groupCurrent) FontWeight.SemiBold else FontWeight.Normal, if (i == state.groupCurrent && !focused) DesignTokens.Colors.AccentText else c), Modifier.weight(1f))
+                // M5 (§3.9.1 "Show with a lock"): OK asks for the PIN (or shows the not-protected card) first.
+                if (e.locked) app.thebox.ui.parental.LockGlyph(if (focused) c else GuideUi.Fg50)
             }
         }
         Spacer(Modifier.height(1.dp))

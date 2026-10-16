@@ -157,6 +157,9 @@ class PlayerFiveKeyReachabilityTest {
             ErrorButton.WATCH_LIVE to setOf("jumpToLive"), ErrorButton.TRY_OTHER_CATCHUP_FORMAT to setOf("tryNextCatchupFormat"),
             ErrorButton.TRY_SOFTWARE_DECODER to setOf("setDecoder"), ErrorButton.AUDIO_OPTIONS to setOf("picker"),
             ErrorButton.STOP to setOf("stopPlayback"), ErrorButton.GUIDE to setOf("unconsumed"),
+            // M5 (§3.14)
+            ErrorButton.OPEN_SETTINGS to setOf("openSettingsRoute"), ErrorButton.USE_SECURE_DNS to setOf("errorAction"),
+            ErrorButton.REFRESH_PLAYLIST to setOf("errorAction"), ErrorButton.OPEN_EXTERNAL to setOf("errorAction"),
         )
         val seen = HashSet<ErrorButton>()
         val wrong = ArrayList<String>()
@@ -176,9 +179,7 @@ class PlayerFiveKeyReachabilityTest {
             }
         }
         assertTrue(wrong.isEmpty(), "error buttons: $wrong")
-        // M5 commit 0: the four appended buttons are offered only by WP-C's ErrorCardModel (§3.14); WP-C drops this filter.
-        val m4Buttons = ErrorButton.entries - setOf(ErrorButton.OPEN_SETTINGS, ErrorButton.USE_SECURE_DNS, ErrorButton.REFRESH_PLAYLIST, ErrorButton.OPEN_EXTERNAL)
-        assertTrue(seen.containsAll(m4Buttons), "every ErrorButton occurs for some code: missing ${m4Buttons - seen}")
+        assertTrue(seen.containsAll(ErrorButton.entries), "every ErrorButton occurs for some code: missing ${ErrorButton.entries - seen}")
     }
 
     /** A live error for most codes; CATCHUP_NOT_IN_ARCHIVE as a FAILED archive session with a variant left (§3.7). */

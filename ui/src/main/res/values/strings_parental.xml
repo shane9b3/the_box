@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- WP-C (docs/design/m5-setup-settings.md §3.8, §3.9, §3.3.8): parental controls, the PIN pad, the not-protected card,
+     button mapping and the capture overlay. Every error line carries a reason and a next step. -->
+<resources>
+    <!-- Parental controls page (§3.3.8) -->
+    <string name="parental_page_title">Parental controls</string>
+    <string name="parental_row_set_pin">Set a PIN</string>
+    <string name="parental_row_change_pin">Change PIN</string>
+    <string name="parental_value_not_set">Not set</string>
+    <string name="parental_value_set">Set</string>
+    <string name="parental_row_auto_lock">Lock adult content automatically</string>
+    <string name="parental_row_auto_lock_desc">Groups and channels your provider marks as adult</string>
+    <string name="parental_value_on">On</string>
+    <string name="parental_value_off">Off</string>
+    <string name="parental_value_not_protected">On · not protected: set a PIN</string>
+    <string name="parental_row_locked_in_guide">Locked channels in guide</string>
+    <string name="parental_option_show_with_lock">Show with a lock</string>
+    <string name="parental_option_hide">Hide</string>
+    <string name="parental_row_lock_settings">Lock settings and playlist editing</string>
+    <string name="parental_reason_set_pin_first">Set a PIN first: without one nothing can be locked.</string>
+    <string name="parental_row_stay_unlocked">Stay unlocked</string>
+    <string name="parental_option_until_close">Until The Box closes</string>
+    <string name="parental_option_one_hour">1 hour</string>
+    <string name="parental_option_ask_every_time">Ask every time</string>
+    <string name="parental_row_lock_now">Lock now</string>
+    <string name="parental_row_remove_pin">Remove PIN</string>
+    <string name="parental_confirm_remove_title">Remove the PIN?</string>
+    <string name="parental_confirm_remove_body">Locked groups and channels stay hidden from mixed lists, but anyone can open them. You can set a new PIN at any time.</string>
+    <string name="parental_confirm_remove_ok">Remove PIN</string>
+    <string name="parental_confirm_cancel">Cancel</string>
+    <string name="parental_info_forgot">Forgot the PIN? There is no way to recover it. Clear The Box\'s data in Android Settings → Apps → The Box, then restore a backup: backups keep your playlists and favourites but never the PIN.</string>
+    <string name="parental_info_threat">The PIN keeps children with a remote out. It does not protect against someone who can open Android settings.</string>
+    <string name="parental_info_key_reset">This TV\'s secure storage was reset, so the PIN was removed. Adult content stays hidden until you set a new PIN.</string>
+
+    <!-- PIN pad (§3.9.3) -->
+    <string name="pin_title_verify">Enter your PIN</string>
+    <string name="pin_title_create">Choose a 4-digit PIN</string>
+    <string name="pin_title_confirm">Enter it again</string>
+    <string name="pin_wrong">Wrong PIN. Try again.</string>
+    <string name="pin_wrong_tries">Wrong PIN. %1$d tries before a pause.</string>
+    <string name="pin_wrong_last_try">Wrong PIN. 1 try before a pause.</string>
+    <string name="pin_locked_out">Too many wrong PINs. Try again in %1$s.</string>
+    <string name="pin_unavailable">The PIN can\'t be checked right now: secure storage did not answer. Try again.</string>
+    <string name="pin_mismatch">The PINs don\'t match. Try again.</string>
+    <string name="pin_store_failed">The PIN could not be saved: secure storage did not answer. Try again.</string>
+    <string name="pin_forgot">Forgot the PIN? See Settings → Parental controls.</string>
+    <string name="pin_checking">Checking…</string>
+    <string name="pin_easy_title">Easy to guess. Use it anyway?</string>
+    <string name="pin_easy_use">Use it</string>
+    <string name="pin_easy_another">Choose another</string>
+    <string name="pin_key_delete">Delete</string>
+    <string name="pin_key_ok">OK</string>
+    <string name="pin_digits_entered">%1$d of 4 digits entered</string>
+    <string name="pin_pad_description">PIN pad</string>
+
+    <!-- Not-protected card (B3) -->
+    <string name="pin_np_title">This group is not protected.</string>
+    <string name="pin_np_title_channel">This channel is not protected.</string>
+    <string name="pin_np_body">Adult content is hidden from your lists, but no PIN protects it yet. Set a PIN to lock it.</string>
+    <string name="pin_np_set">Set a PIN</string>
+    <string name="pin_np_open">Open anyway</string>
+
+    <!-- Button mapping (§3.8.3) -->
+    <string name="mapping_page_title">Button mapping</string>
+    <string name="mapping_row_test">Test a key</string>
+    <string name="mapping_row_test_desc">Shows a key\'s name, the remote it came from and what it does now</string>
+    <string name="mapping_row_reset_all">Reset all to defaults</string>
+    <string name="mapping_confirm_reset_all_title">Reset every button?</string>
+    <string name="mapping_confirm_reset_all_body">All your button changes are removed and every key does what it did when The Box was installed.</string>
+    <string name="mapping_confirm_reset_all_ok">Reset all</string>
+    <string name="mapping_confirm_cancel">Cancel</string>
+    <string name="mapping_value_no_button">No button</string>
+    <string name="mapping_value_hold">Hold %1$s</string>
+    <string name="mapping_value_separator">" · "</string>
+    <string name="mapping_info_dpad_note">D-pad and OK always navigate. To change what Up and Down do while watching, use Remote control → Up/Down in player.</string>
+    <string name="mapping_row_add_short">Add a button (press)</string>
+    <string name="mapping_row_add_long">Add a button (hold)</string>
+    <string name="mapping_row_reset_action">Reset %1$s to default</string>
+    <string name="mapping_value_default">Default</string>
+    <string name="mapping_value_captured_from">Press · captured from %1$s</string>
+    <string name="mapping_value_press">Press</string>
+    <string name="mapping_menu_remove">Remove</string>
+    <string name="mapping_menu_reset_key">Reset this key to default</string>
+    <string name="mapping_group_watching">Watching</string>
+    <string name="mapping_group_channels">Channels</string>
+    <string name="mapping_group_guide">Guide</string>
+    <string name="mapping_group_player_overlays">Player overlays</string>
+    <string name="mapping_group_app">App</string>
+
+    <!-- Action labels (BoxAction.id) -->
+    <string name="mapping_action_play_pause">Play / pause</string>
+    <string name="mapping_action_play">Play</string>
+    <string name="mapping_action_pause">Pause</string>
+    <string name="mapping_action_seek_back">Seek back</string>
+    <string name="mapping_action_seek_forward">Seek forward</string>
+    <string name="mapping_action_start_over">Start over</string>
+    <string name="mapping_action_jump_to_live">Jump to live</string>
+    <string name="mapping_action_time_shift">Time shift</string>
+    <string name="mapping_action_prev_programme">Previous programme</string>
+    <string name="mapping_action_next_programme">Next programme</string>
+    <string name="mapping_action_zap_up">Channel up</string>
+    <string name="mapping_action_zap_down">Channel down</string>
+    <string name="mapping_action_previous_channel">Previous channel</string>
+    <string name="mapping_action_number_entry">Number entry</string>
+    <string name="mapping_action_channel_list">Channel list</string>
+    <string name="mapping_action_groups_panel">Groups panel</string>
+    <string name="mapping_action_group_next">Next group</string>
+    <string name="mapping_action_group_prev">Previous group</string>
+    <string name="mapping_action_favourites">Favourites</string>
+    <string name="mapping_action_favourite_toggle">Add or remove favourite</string>
+    <string name="mapping_action_guide">Open the guide</string>
+    <string name="mapping_action_page_up">Page up</string>
+    <string name="mapping_action_page_down">Page down</string>
+    <string name="mapping_action_jump_to_now">Jump to now</string>
+    <string name="mapping_action_day_strip">Days</string>
+    <string name="mapping_action_remind">Remind me</string>
+    <string name="mapping_action_info_bar">Info bar</string>
+    <string name="mapping_action_quick_menu">Quick bar</string>
+    <string name="mapping_action_audio">Audio track</string>
+    <string name="mapping_action_subtitles">Subtitles</string>
+    <string name="mapping_action_aspect">Aspect ratio</string>
+    <string name="mapping_action_video_decoder">Video decoder</string>
+    <string name="mapping_action_stats_overlay">Stream info</string>
+    <string name="mapping_action_screen_off">Screen off</string>
+    <string name="mapping_action_context_menu">Options menu</string>
+    <string name="mapping_action_open_search">Search</string>
+    <string name="mapping_action_open_settings">Settings</string>
+    <string name="mapping_action_exit">Exit</string>
+
+    <!-- Capture overlay (§3.8.3) -->
+    <string name="capture_title">Press the button for %1$s now</string>
+    <string name="capture_test_title">Press any button</string>
+    <string name="capture_from">from %1$s</string>
+    <string name="capture_unknown_device">from an unknown device</string>
+    <string name="capture_save">Save</string>
+    <string name="capture_try_another">Try another</string>
+    <string name="capture_cancel">Cancel</string>
+    <string name="capture_verdict_free">This button does nothing yet.</string>
+    <string name="capture_verdict_replaces">This button now does %1$s; saving moves it here.</string>
+    <string name="capture_verdict_loses_repeat">Holding %1$s will no longer repeat %2$s.</string>
+    <string name="capture_reserved_navigation">The D-pad always navigates. Try another button.</string>
+    <string name="capture_reserved_ok">OK always selects. Try another button.</string>
+    <string name="capture_reserved_back">Back always closes the top layer. Try another button.</string>
+    <string name="capture_reserved_digit">Number keys always enter numbers. Try another button.</string>
+    <string name="capture_reserved_system">The TV owns this button. Try another button.</string>
+    <string name="capture_reserved_long_ok">Holding OK always opens the options menu. Try another button.</string>
+    <string name="capture_reserved_unknown">This remote sends the same code for several buttons, so it can\'t be mapped. Try another button.</string>
+    <string name="capture_timeout">No button arrived. Some buttons (Home, voice, app buttons, volume) are handled by the TV and can\'t be used.</string>
+    <string name="capture_test_guide">In the guide: %1$s</string>
+    <string name="capture_test_player">While watching: %1$s</string>
+    <string name="capture_test_nothing">nothing</string>
+
+    <!-- Error-card routes (§3.14) -->
+    <string name="error_route_secure_dns_on">Secure DNS is on (Cloudflare). Change it in Settings → Network.</string>
+    <string name="error_route_refresh_started">Refreshing the playlist. The guide updates when it finishes.</string>
+
+    <!-- Key names (§3.8.3: common codes; others show the platform name) -->
+    <string name="key_channel_up">Channel up</string>
+    <string name="key_channel_down">Channel down</string>
+    <string name="key_page_up">Page Up</string>
+    <string name="key_page_down">Page Down</string>
+    <string name="key_red">Red</string>
+    <string name="key_green">Green</string>
+    <string name="key_yellow">Yellow</string>
+    <string name="key_blue">Blue</string>
+    <string name="key_play_pause">⏯ Play/Pause</string>
+    <string name="key_play">▶ Play</string>
+    <string name="key_pause">⏸ Pause</string>
+    <string name="key_stop">⏹ Stop</string>
+    <string name="key_fast_forward">⏩ Fast forward</string>
+    <string name="key_rewind">⏪ Rewind</string>
+    <string name="key_next">⏭ Next</string>
+    <string name="key_previous">⏮ Previous</string>
+    <string name="key_record">⏺ Record</string>
+    <string name="key_skip_forward">Skip forward</string>
+    <string name="key_skip_backward">Skip back</string>
+    <string name="key_guide">Guide</string>
+    <string name="key_info">Info</string>
+    <string name="key_menu">Menu</string>
+    <string name="key_search">Search</string>
+    <string name="key_settings">Settings</string>
+    <string name="key_last_channel">Last channel</string>
+    <string name="key_captions">Subtitles</string>
+    <string name="key_audio_track">Audio</string>
+    <string name="key_zoom">Zoom</string>
+    <string name="key_up">↑ Up</string>
+    <string name="key_down">↓ Down</string>
+    <string name="key_left">← Left</string>
+    <string name="key_right">→ Right</string>
+    <string name="key_ok">OK</string>
+    <string name="key_enter">Enter</string>
+    <string name="key_back">Back</string>
+    <string name="key_escape">Escape</string>
+    <string name="key_button_a">A</string>
+    <string name="key_button_b">B</string>
+    <string name="key_digit">%1$d</string>
+    <string name="key_unknown_code">Unknown code</string>
+</resources>

@@ -45,14 +45,14 @@ class LineupQueryPlanTest {
             )
             for ((label, source, binds) in cases) {
                 val plan = plan(db, gg.queries.lineupSql(source), binds)
-                gg.queries.lineup(source, false) // warm
+                gg.queries.lineup(source, app.thebox.core.parental.ParentalAccess.LOCKED_AUTO) // warm
                 val t0 = System.nanoTime()
-                val n = gg.queries.lineup(source, false).ids.size
+                val n = gg.queries.lineup(source, app.thebox.core.parental.ParentalAccess.LOCKED_AUTO).ids.size
                 println("Lineup $label: $n rows in ${"%.1f".format((System.nanoTime() - t0) / 1e6)} ms; plan: $plan")
                 if (source is GuideSource.All) assertEquals(20_000, n)
                 if (source is GuideSource.Group) assertEquals(400, n)
             }
-            val ids = gg.queries.lineup(GuideSource.All(p), false).ids
+            val ids = gg.queries.lineup(GuideSource.All(p), app.thebox.core.parental.ParentalAccess.LOCKED_AUTO).ids
             val blockPlan = plan(db, gg.queries.blockSql(32), ids.take(32).toList())
             gg.queries.channels(ids, 0, 32)
             val t0 = System.nanoTime()

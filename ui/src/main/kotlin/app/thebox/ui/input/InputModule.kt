@@ -11,6 +11,12 @@ import app.thebox.core.guide.ReminderPlanner
 import app.thebox.core.guide.reminder.ReminderPlannerImpl
 import app.thebox.core.guide.state.GuideStateMachineImpl
 import app.thebox.core.input.DefaultKeyMap
+import app.thebox.core.input.EffectiveKeyMap
+import app.thebox.core.input.KeyBindingStore
+import app.thebox.core.input.RemappedKeyMap
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import app.thebox.core.input.KeyCapabilities
 import app.thebox.core.input.KeyGestureDetector
 import app.thebox.core.input.KeyGestureDetectorImpl
@@ -29,7 +35,13 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object InputModule {
-    @Provides @Singleton fun keyMap(): KeyMap = DefaultKeyMap()
+    /**
+     * (M5, docs/design/m5-setup-settings.md §3.8.4, decision §0.7) The router's key map: the defaults plus the user's
+     * overrides, as an immutable snapshot rebuilt on Dispatchers.Default when they change (app-lifetime scope).
+     */
+    @Provides @Singleton fun effectiveKeyMap(store: KeyBindingStore): EffectiveKeyMap =
+        RemappedKeyMap(DefaultKeyMap(), store.overrides, CoroutineScope(SupervisorJob() + Dispatchers.Default))
+    @Provides @Singleton fun keyMap(map: EffectiveKeyMap): KeyMap = map
     @Provides fun gestureDetector(): KeyGestureDetector = KeyGestureDetectorImpl()
     @Provides @Singleton fun keyCapabilities(@ApplicationContext context: Context): KeyCapabilities = KeyCapabilitiesImpl(context)
     @Provides @Singleton fun keyRouter(keyMap: KeyMap, detector: KeyGestureDetector, capabilities: KeyCapabilities): KeyRouter =

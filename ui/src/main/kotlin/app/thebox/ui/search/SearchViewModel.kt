@@ -1,6 +1,10 @@
 package app.thebox.ui.search
 
 import app.thebox.core.parental.legacyParentalAccess
+import app.thebox.core.parental.ParentalAccess
+import app.thebox.core.parental.ParentalRules
+import app.thebox.core.parental.ParentalSession
+import app.thebox.ui.parental.NoPinSession
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.thebox.core.guide.GuideChannel
@@ -54,8 +58,8 @@ data class SearchUiState(
 /**
  * The S9 Search screen's view model (docs/design/m3-guide.md §3.10.3; review S15, B7). Debounces typing by
  * [DEBOUNCE_MS], searches from [MIN_CHARS] letters/digits, cancels the previous search when the text changes, and leaves
- * SEARCH only through [SearchEffect.Close]. Locked groups are filtered by [GuideSearch] unless the debug unlock switch
- * (`GuideSettings.debugUnlocked`, `thebox-debug://guide?unlocked=1`) is on; M5's PIN session replaces it.
+ * SEARCH only through [SearchEffect.Close]. Locked content is filtered by [GuideSearch] with the parental session's
+ * access (M5, S10: OPEN while unlocked), or OPEN while the debug unlock switch (`GuideSettings.debugUnlocked`) is on.
  */
 @HiltViewModel
 class SearchViewModel internal constructor(
@@ -64,6 +68,8 @@ class SearchViewModel internal constructor(
     private val library: GuideLibrary,
     private val settings: GuideSettingsSource,
     private val session: GuideSessionStore,
+    /** (M5, S10) Search filters locked content with the session's access (OPEN while unlocked). */
+    private val parental: ParentalSession = NoPinSession,
     private val clock: () -> Long,
 ) : ViewModel() {
     @Inject constructor(
@@ -72,7 +78,14 @@ class SearchViewModel internal constructor(
         library: GuideLibrary,
         settings: GuideSettingsSource,
         session: GuideSessionStore,
-    ) : this(search, reminders, library, settings, session, System::currentTimeMillis)
+        parental: ParentalSession,
+    ) : this(search, reminders, library, settings, session, parental, System::currentTimeMillis)
+
+    /** The debug unlock switch forces OPEN; otherwise the session's access (§4.3, S10). */
+    private fun access(): ParentalAccess {
+        val requested = legacyParentalAccess(settings.settings.value.debugUnlocked)
+        return if (requested == ParentalAccess.OPEN) requested else ParentalRules.accessFor(parental.state.value, null)
+    }
 
     private val mutable = MutableStateFlow(SearchUiState())
     val state: StateFlow<SearchUiState> = mutable.asStateFlow()
@@ -107,7 +120,7 @@ class SearchViewModel internal constructor(
             started++
             try {
                 // (M5 commit 0, S10) explicit access; WP-C feeds it from ParentalSession.state.
-                val r = search.search(text, clock(), access = legacyParentalAccess(settings.settings.value.debugUnlocked))
+                val r = search.search(text, clock(), access = access())
                 publish(r, searching = false)
             } catch (e: CancellationException) {
                 throw e

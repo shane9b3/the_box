@@ -154,7 +154,12 @@ class LineupQueryTest {
         assertEquals(listOf(SourceSection.ALL, SourceSection.GROUP), entries.map { it.section }.distinct())
         assertEquals(GuideSource.All(p), entries.first().source)
         assertEquals(5, entries.first().count)
-        assertEquals("hidden, locked and adult groups excluded", listOf("News"), entries.filter { it.section == SourceSection.GROUP }.map { it.label })
+        // M5 (docs/design/m5-setup-settings.md §2.12 item 9, §4.3): locked and adult groups are listed with `locked = true`
+        // ("Show with a lock"); hidden groups never are.
+        val groups = entries.filter { it.section == SourceSection.GROUP }
+        assertEquals("hidden groups excluded", listOf("Adult", "Locked", "News"), groups.map { it.label }.sorted())
+        assertEquals(setOf("Adult", "Locked"), groups.filter { it.locked }.map { it.label }.toSet())
+        assertTrue("OPEN lists nothing as locked", gg.library.sources(app.thebox.core.parental.ParentalAccess.OPEN).first().none { it.locked })
         assertTrue("one enabled playlist: no section headers", entries.all { it.playlistName == null })
         db.exec("INSERT INTO channel_prefs(playlist_id, stable_key, hidden, watch_count, updated_at, last_watched_at) VALUES (?, 'n1', 0, 1, 1, 200)", p)
         val list = db.favouriteDao().insertList(FavouriteListEntity(name = "Mine", sortIndex = 0, createdAt = 0))

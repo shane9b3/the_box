@@ -63,9 +63,10 @@ internal fun groupsRows(o: Overlay.Groups): List<GroupsRow> {
 
 /**
  * The Groups panel over the label column, (64, 500) – (424, 960) (docs/design/m3-guide.md §3.15, §3.8; S7a, E22): the
- * Search and Settings shortcut rows, then every source with its count; the current source carries an accent dot. The
- * list is lazy (a playlist can have hundreds of groups) and follows the virtual focus. The group menu (Hide, Move up,
- * Move down) opens beside the focused entry, still inside the grid area (never over the hole).
+ * Search and Settings shortcut rows, then every source with its count (a locked group with the padlock, M5 §3.9.1); the
+ * current source carries an accent dot. The
+ * list is lazy (a playlist can have hundreds of groups) and follows the virtual focus. The group menu (Hide, Lock or
+ * Unlock, Move up, Move down) opens beside the focused entry, still inside the grid area (never over the hole).
  */
 @Composable
 fun GroupsPanel(state: GuideUiState, modifier: Modifier = Modifier) {
@@ -92,7 +93,7 @@ fun GroupsPanel(state: GuideUiState, modifier: Modifier = Modifier) {
                             label = stringResource(if (r.shortcut == GroupsShortcut.SEARCH) R.string.guide_groups_search else R.string.guide_groups_settings),
                             count = null, focused = o.focused == r.index, current = false,
                         )
-                        is GroupsRow.Entry -> GroupRow(r.entry.label, r.entry.count, o.focused == r.index, o.current == r.entryIndex)
+                        is GroupsRow.Entry -> GroupRow(r.entry.label, r.entry.count, o.focused == r.index, o.current == r.entryIndex, r.entry.locked)
                     }
                 }
             }
@@ -118,7 +119,7 @@ internal suspend fun keepVisible(list: LazyListState, index: Int) {
 }
 
 @Composable
-private fun GroupRow(label: String, count: Int?, focused: Boolean, current: Boolean) {
+private fun GroupRow(label: String, count: Int?, focused: Boolean, current: Boolean, locked: Boolean = false) {
     Chip(
         focused = focused,
         modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -128,6 +129,8 @@ private fun GroupRow(label: String, count: Int?, focused: Boolean, current: Bool
     ) { color ->
         if (current) Dot(GuideUi.Accent, 7.dp) else Box(Modifier.width(7.dp))
         Line(label, GuideUi.sans(19, FontWeight.SemiBold, color), Modifier.weight(1f))
+        // M5 (§3.9.1 "Show with a lock"): a locked group keeps its count; OK asks for the PIN first.
+        if (locked) app.thebox.ui.parental.LockGlyph(if (focused) color else GuideUi.Fg50, Modifier.padding(end = 8.dp))
         count?.let { Line(it.toString(), GuideUi.mono(15, color = if (focused) color else GuideUi.Fg50)) }
     }
 }

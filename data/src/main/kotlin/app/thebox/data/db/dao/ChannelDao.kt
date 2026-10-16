@@ -57,7 +57,8 @@ data class SubjectRow(
 
 /**
  * Read side of `channel`. Writes go through RoomMergeSink (prepared statements). Every query that feeds UI
- * applies `missing_since IS NULL` and the parental predicate ([PARENTAL]) in SQL (architecture review C7).
+ * applies `missing_since IS NULL` and the parental predicate ([PARENTAL] / [PARENTAL_ACCESS], §4.3) in SQL
+ * (architecture review C7).
  */
 @Dao
 interface ChannelDao {
@@ -103,6 +104,24 @@ interface ChannelDao {
         ORDER BY cp.custom_number IS NULL, c.sort_index LIMIT 1""",
     )
     suspend fun byNumber(playlistId: Long, number: Int, unlocked: Boolean): ChannelRow?
+
+    /** (M5, §4.3) [byNumber] with the caller's `ParentalAccess.ordinal` (number entry, GuideLibraryImpl). */
+    @Query(
+        SELECT_ROW + """
+        WHERE c.playlist_id = :playlistId AND c.kind IN (0, 1) AND c.missing_since IS NULL
+          AND (cp.custom_number = :number OR (cp.custom_number IS NULL AND c.number = :number))
+        """ + PARENTAL_ACCESS + """
+        ORDER BY cp.custom_number IS NULL, c.sort_index LIMIT 1""",
+    )
+    suspend fun byNumberAccess(playlistId: Long, number: Int, access: Int): ChannelRow?
+
+    /** (M5, §4.3) [bySortIndex] with the caller's `ParentalAccess.ordinal`. */
+    @Query(
+        SELECT_ROW + """
+        WHERE c.playlist_id = :playlistId AND c.kind IN (0, 1) AND c.missing_since IS NULL AND c.sort_index = :sortIndex
+        """ + PARENTAL_ACCESS,
+    )
+    suspend fun bySortIndexAccess(playlistId: Long, sortIndex: Int, access: Int): ChannelRow?
 
     @Query(
         SELECT_ROW + """
@@ -150,29 +169,12 @@ interface ChannelDao {
     suspend fun search(match: String, unlocked: Boolean, limit: Int): List<ChannelRow>
 
     /** S13 unmatched channels, most watched first (§2.1.4). */
-    @Query(
-        """
-        SELECT c.playlist_id, c.stable_key, c.name, c.tvg_id, c.tvg_name, g.name AS group_name,
-               COALESCE(cp.watch_count, 0) AS watch_count,
-               (SELECT em.source_id || char(31) || em.xmltv_id || char(31) || em.score
-                  FROM epg_match em
-                 WHERE em.playlist_id = c.playlist_id AND em.stable_key = c.stable_key AND em.status = 1
-                 ORDER BY em.score DESC LIMIT 1) AS best_suggestion
-        FROM channel c
-        JOIN playlist p            ON p.id = c.playlist_id AND p.enabled = 1
-        LEFT JOIN channel_group g  ON g.id = c.group_id
-        LEFT JOIN channel_prefs cp ON cp.playlist_id = c.playlist_id AND cp.stable_key = c.stable_key
-        LEFT JOIN group_prefs gp   ON gp.playlist_id = c.playlist_id AND gp.kind = 0 AND gp.group_key = g.group_key
-        LEFT JOIN epg_mapping m    ON m.playlist_id = c.playlist_id AND m.stable_key = c.stable_key
-        WHERE c.kind IN (0, 1)
-          AND c.missing_since IS NULL
-          AND m.stable_key IS NULL
-          AND NOT EXISTS (SELECT 1 FROM epg_match a
-                           WHERE a.playlist_id = c.playlist_id AND a.stable_key = c.stable_key AND a.status = 0)
-        """ + PARENTAL + """
-        ORDER BY watch_count DESC, COALESCE(cp.last_watched_at, 0) DESC, c.playlist_id, c.sort_index""",
-    )
+    @Query(UNMATCHED_HEAD + PARENTAL + UNMATCHED_ORDER)
     fun unmatched(unlocked: Boolean): Flow<List<UnmatchedRow>>
+
+    /** (M5, §4.3, S10) [unmatched] with the caller's `ParentalAccess.ordinal` (for `EpgMatchRepository.unmatched(access)`, WP-B). */
+    @Query(UNMATCHED_HEAD + PARENTAL_ACCESS + UNMATCHED_ORDER)
+    fun unmatchedAccess(access: Int): Flow<List<UnmatchedRow>>
 
     /** Channels matched (AUTO) only to EPG channels without programmes: "No EPG" diagnostics. */
     @Query(
@@ -225,6 +227,28 @@ interface ChannelDao {
     suspend fun tvgIds(playlistId: Long?): List<String>
 
     companion object {
+        const val UNMATCHED_HEAD = """
+        SELECT c.playlist_id, c.stable_key, c.name, c.tvg_id, c.tvg_name, g.name AS group_name,
+               COALESCE(cp.watch_count, 0) AS watch_count,
+               (SELECT em.source_id || char(31) || em.xmltv_id || char(31) || em.score
+                  FROM epg_match em
+                 WHERE em.playlist_id = c.playlist_id AND em.stable_key = c.stable_key AND em.status = 1
+                 ORDER BY em.score DESC LIMIT 1) AS best_suggestion
+        FROM channel c
+        JOIN playlist p            ON p.id = c.playlist_id AND p.enabled = 1
+        LEFT JOIN channel_group g  ON g.id = c.group_id
+        LEFT JOIN channel_prefs cp ON cp.playlist_id = c.playlist_id AND cp.stable_key = c.stable_key
+        LEFT JOIN group_prefs gp   ON gp.playlist_id = c.playlist_id AND gp.kind = 0 AND gp.group_key = g.group_key
+        LEFT JOIN epg_mapping m    ON m.playlist_id = c.playlist_id AND m.stable_key = c.stable_key
+        WHERE c.kind IN (0, 1)
+          AND c.missing_since IS NULL
+          AND m.stable_key IS NULL
+          AND NOT EXISTS (SELECT 1 FROM epg_match a
+                           WHERE a.playlist_id = c.playlist_id AND a.stable_key = c.stable_key AND a.status = 0)
+        """
+        const val UNMATCHED_ORDER = """
+        ORDER BY watch_count DESC, COALESCE(cp.last_watched_at, 0) DESC, c.playlist_id, c.sort_index"""
+
         const val SELECT_ROW = """
         SELECT c.*, cp.custom_name, cp.custom_number, cp.custom_logo, cp.epg_shift_min AS pref_shift,
                cp.custom_sort_index AS pref_sort, g.name AS group_name, g.group_key AS group_key
@@ -234,11 +258,35 @@ interface ChannelDao {
         LEFT JOIN group_prefs gp   ON gp.playlist_id = c.playlist_id AND gp.kind = g.kind AND gp.group_key = g.group_key
         """
 
-        /** §2.1.1: `:unlocked = 1` when the PIN session is open. Hidden channels/groups never show. */
-        const val PARENTAL = """
+        /** Hidden channels and groups (by the user or by a hide rule) never show (§4.3). */
+        private const val HIDDEN = """
           AND COALESCE(cp.hidden, 0) = 0
           AND COALESCE(gp.hidden, 0) = 0
-          AND (:unlocked = 1 OR (COALESCE(cp.locked, c.is_adult) = 0 AND COALESCE(gp.locked, g.is_adult, 0) = 0))
+          AND c.rule_hidden = 0
+          AND COALESCE(g.rule_hidden, 0) = 0
+        """
+
+        /**
+         * The parental and rule predicate (docs/design/m5-setup-settings.md §4.3; reviewed 2026-10-16, B3, S5, S10):
+         * `:access` = `ParentalAccess.ordinal` (OPEN 0, LOCKED_AUTO 1, LOCKED_MANUAL_ONLY 2, FILTERED_NO_PIN 3).
+         * FILTERED_NO_PIN filters exactly as LOCKED_AUTO. An explicit group decision (`gp.locked` not null) overrides
+         * per-channel adult detection; an explicit channel lock still wins over everything. No query reads global
+         * parental state: the caller passes the access.
+         */
+        const val PARENTAL_ACCESS = HIDDEN + """
+          AND (:access = 0 OR (
+                COALESCE(cp.locked, CASE WHEN :access IN (1, 3) AND gp.locked IS NULL THEN c.is_adult ELSE 0 END) = 0
+            AND COALESCE(gp.locked, CASE WHEN :access IN (1, 3) THEN g.is_adult ELSE 0 END, 0) = 0))
+        """
+
+        /**
+         * The same predicate for the M1–M4 signatures that still pass `unlocked: Boolean` (ChannelRepository,
+         * FavouritesRepository, EpgMatchRepository, tests): `unlocked = true` is OPEN, `false` is LOCKED_AUTO.
+         */
+        const val PARENTAL = HIDDEN + """
+          AND (:unlocked = 1 OR (
+                COALESCE(cp.locked, CASE WHEN gp.locked IS NULL THEN c.is_adult ELSE 0 END) = 0
+            AND COALESCE(gp.locked, g.is_adult, 0) = 0))
         """
     }
 }

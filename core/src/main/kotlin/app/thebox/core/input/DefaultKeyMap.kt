@@ -7,7 +7,9 @@ import app.thebox.core.input.BoxAction.*
  * mapping screen edits them. Only the DPAD_CENTER family (both contexts) and, in PLAYER, DPAD_LEFT/RIGHT have long
  * bindings, so every other key acts on DOWN with auto-repeat (lowest latency for D-pad browsing).
  *
- * SEARCH is deliberately unbound in M3 (§8 Q3). MEDIA_RECORD is REMIND in the guide only (v1; Record in v2).
+ * SEARCH was unbound in M3 (§8 Q3); M5 binds it to OPEN_SEARCH in the guide only (docs/design/m5-setup-settings.md
+ * §2.12 item 1, §8 Q15: the player leaves it unbound, bindable) and SETTINGS to OPEN_SETTINGS in both contexts.
+ * MEDIA_RECORD is REMIND in the guide only (v1; Record in v2).
  *
  * M4 (docs/design/m4-player-ux.md §3.1.7; owner ruling 2026-10-15): in PLAYER, CH+, PAGE_UP and ⏭ are ZAP_UP (+1, the
  * higher number); MEDIA_PLAY/MEDIA_PAUSE are PLAY/PAUSE; MEDIA_STOP is JUMP_TO_LIVE; skip/step keys seek. `KeyContext`
@@ -48,6 +50,9 @@ class DefaultKeyMap : KeyMap {
         both(Keys.INFO, INFO_BAR)
         both(Keys.CAPTIONS, SUBTITLES); both(Keys.MEDIA_AUDIO_TRACK, AUDIO); both(Keys.TV_ZOOM_MODE, ASPECT)
         guideShort[Keys.MEDIA_RECORD] = REMIND
+        // M5 (§2.12 item 1)
+        guideShort[Keys.SEARCH] = OPEN_SEARCH
+        both(Keys.SETTINGS, OPEN_SETTINGS)
     }
 
     override fun short(context: KeyContext, keyCode: Int): BoxAction? =

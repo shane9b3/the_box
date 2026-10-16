@@ -39,7 +39,9 @@ class DefaultKeyMapTest {
         // code review 2026-10-14 (H-S4/H-L14): ⏭/⏮ zap in the player, unbound in the guide; M4 S6: ⏭ = ZAP_UP (+1)
         assertEquals(ZAP_UP, m.short(PLAYER, Keys.MEDIA_NEXT)); assertEquals(ZAP_DOWN, m.short(PLAYER, Keys.MEDIA_PREVIOUS))
         assertNull(m.short(GUIDE, Keys.MEDIA_NEXT)); assertNull(m.short(GUIDE, Keys.MEDIA_PREVIOUS))
-        assertNull(m.short(GUIDE, Keys.SEARCH), "SEARCH unbound in M3 (§8 Q3)")
+        // M5 (docs/design/m5-setup-settings.md §2.12 item 1, §8 Q15): Search opens Search in the guide only; Settings in both.
+        assertEquals(OPEN_SEARCH, m.short(GUIDE, Keys.SEARCH)); assertNull(m.short(PLAYER, Keys.SEARCH), "the player leaves SEARCH unbound")
+        both(Keys.SETTINGS, OPEN_SETTINGS)
         assertNull(m.short(GUIDE, 24), "volume is never bound")
     }
 

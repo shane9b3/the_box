@@ -202,7 +202,9 @@ class GuideFullDelegationTest {
         val w = PlayerWorld(withGuide = true, tunedIndex = 1)
         w.fail(PlayerFixtures.error(PlaybackErrorCode.DNS_FAILURE))
         assertEquals(PlayerLayer.ERROR, w.ui.layer)
-        w.press(SELECT) // the only button: Guide
+        // M5 (§3.14): Use secure DNS, Test the connection, Guide (last).
+        w.press(RIGHT); w.press(RIGHT)
+        w.press(SELECT)
         assertEquals(ScreenMode.GUIDE, w.gui.mode)
     }
 

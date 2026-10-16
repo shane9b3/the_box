@@ -8,6 +8,27 @@ import app.thebox.core.settings.SettingsTimings
 import app.thebox.ui.root.EffectDelegates
 import kotlinx.coroutines.CompletableDeferred
 import app.thebox.core.parental.legacyParentalAccess
+import app.thebox.core.input.BoxAction
+import app.thebox.core.input.KeyBindingStore
+import app.thebox.core.input.KeyContext
+import app.thebox.core.input.Press
+import app.thebox.core.input.RemappedKeyMap
+import app.thebox.core.input.DefaultKeyMap
+import app.thebox.core.parental.ParentalAccess
+import app.thebox.core.parental.ParentalControls
+import app.thebox.core.parental.ParentalHost
+import app.thebox.core.parental.ParentalSession
+import app.thebox.core.parental.PinOwner
+import app.thebox.core.parental.PinPurpose
+import app.thebox.core.playback.TuneGuard
+import app.thebox.core.playback.TuneVerdict
+import app.thebox.player.api.StopReason
+import app.thebox.ui.parental.EmptyZapList
+import app.thebox.ui.parental.GuardedPlaybackController
+import app.thebox.ui.parental.NoKeyBindings
+import app.thebox.ui.parental.NoPinSession
+import app.thebox.ui.parental.ParentalEffectsImpl
+import app.thebox.ui.parental.ParentalGuideLibrary
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -81,6 +102,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -134,7 +156,21 @@ class GuideViewModel @Inject constructor(
     private val settingsStore: SettingsStore,
     private val firstRun: FirstRunDecider = FirstRunDecider.NONE,
     delegates: EffectDelegates = EffectDelegates.NONE,
+    // M5 WP-C (docs/design/m5-setup-settings.md §3.8.4, §3.9; S10, B1)
+    private val parental: ParentalSession = NoPinSession,
+    private val parentalControls: ParentalControls = ParentalControls.NONE,
+    tuneGuard: TuneGuard = TuneGuard.ALLOW_ALL,
+    private val keyBindings: KeyBindingStore = NoKeyBindings,
 ) : ViewModel(), ShellHost, ShellEffects {
+
+    /**
+     * (M5, B1) Every tune the guide's effects, Search and the startup make asks the guard first; a refusal opens the
+     * PIN prompt (or the not-protected card) instead of a cycle ([onRefused]).
+     */
+    private val guarded: PlaybackController = GuardedPlaybackController(controller, tuneGuard) { id, v -> onRefused(id, v) }
+
+    /** (M5, S10) The library with the session's access in every query; flows restart when it changes. */
+    private val parentalLibrary: GuideLibrary = ParentalGuideLibrary(library, parental)
 
     private val io = Dispatchers.IO
     private val device: DeviceClass = deviceClassSource.get()
@@ -185,8 +221,8 @@ class GuideViewModel @Inject constructor(
     private val effects: GuideEffectsImpl = GuideEffectsImpl(
         scope = viewModelScope,
         io = io,
-        controller = controller,
-        library = library,
+        controller = guarded,
+        library = parentalLibrary,
         rows = { rowsCache },
         pager = { pager },
         reminders = reminderBook,
@@ -213,6 +249,8 @@ class GuideViewModel @Inject constructor(
         pager = pagerFactory.create(rowsCache, { machine.frame.metrics }, { scale -> AndroidTextMeasurer(context, scale) }, rowCellsBuilder, labels)
         debugProbe.register(machine)
         keyRouter.attach(machine) { searchFieldIdle }
+        // (M5, §0.9) The one PIN prompt: PIN creation and Open anyway go through the parental effects.
+        (machine as? ParentalHost)?.let { host -> (delegates.parental as? ParentalEffectsImpl)?.let { host.parentalActions = it.actionsFor(host) } }
         registerTimeReceiver()
         forwardFeeds(reminderBook)
         startTicker()
@@ -311,7 +349,7 @@ class GuideViewModel @Inject constructor(
     /** Every [SearchEffect] of the Search screen; `Close` is the only way out of SEARCH. Main thread. */
     fun onSearchEffect(effect: SearchEffect) {
         when (effect) {
-            is SearchEffect.Tune -> controller.tune(TuneTarget.Channel(effect.channel.identity), effects.currentLineup?.let { LineupZapList(it, library) })
+            is SearchEffect.Tune -> guarded.tune(TuneTarget.Channel(effect.channel.identity), effects.currentLineup?.let { LineupZapList(it, library) })
             is SearchEffect.PlayArchive -> effects.playArchive(effect.channel, effect.info)
             is SearchEffect.Toast -> toast(effect.kind, effect.arg)
             is SearchEffect.Close -> {
@@ -358,9 +396,9 @@ class GuideViewModel @Inject constructor(
                 BoxLog.w(TAG, "last source read failed: ${e.javaClass.simpleName}")
                 null
             }
-            // (M5 commit 0, S10) explicit access; WP-C feeds it from ParentalSession.state.
-            settingsSource.settings.map { it.debugUnlocked }.distinctUntilChanged().collect { unlocked ->
-                library.sources(access = legacyParentalAccess(unlocked)).collect { machine.dispatch(GuideEvent.Sources(it)) }
+            // (M5, S10) ParentalGuideLibrary feeds the session's access (the debug switch still forces OPEN).
+            settingsSource.settings.map { it.debugUnlocked }.distinctUntilChanged().collectLatest { unlocked ->
+                parentalLibrary.sources(access = legacyParentalAccess(unlocked)).collect { machine.dispatch(GuideEvent.Sources(it)) }
             }
         }
         scope.launch { library.rowContent.collect { rowsCache.reloadLoaded() } }
@@ -385,6 +423,7 @@ class GuideViewModel @Inject constructor(
         scope.launch { reminderBook.index.collect { machine.dispatch(GuideEvent.Reminders(it)) } }
         scope.launch { alerts.current.collect { machine.dispatch(GuideEvent.Alert(it)) } }
         scope.launch { keyCapabilities.seen.collect { machine.dispatch(GuideEvent.KeysSeen(it)) } }
+        forwardParental()
         scope.launch {
             combine(controller.state, archive.status, settingsSource.settings) { st, a, s -> Triple(st, a, s) }.collect { (st, a, s) ->
                 val identity = st.target?.identity
@@ -393,7 +432,9 @@ class GuideViewModel @Inject constructor(
                 // MINI); mapping it to a still hid the viewport, which ended the poster, which showed MINI again: a loop.
                 val still = s.miniStill || device.stillByDefault
                 // (M4, B1) An archive session's own hand-offs and probe errors are hidden by the one shared rule.
-                val visible = app.thebox.core.catchup.archive.ArchiveVisibility.visible(TunedStateMapper.map(st, channel?.rowId ?: -1L, still), a)
+                // (M5, B1) A tune the guard refused never played: the mini player shows nothing for it.
+                val shown = if (st is PlaybackState.Stopped && st.reason == StopReason.LOCKED) PlaybackState.Idle else st
+                val visible = app.thebox.core.catchup.archive.ArchiveVisibility.visible(TunedStateMapper.map(shown, channel?.rowId ?: -1L, still), a)
                 machine.dispatch(GuideEvent.Tuned(visible, channel))
             }
         }
@@ -455,6 +496,7 @@ class GuideViewModel @Inject constructor(
             while (true) {
                 val now = System.currentTimeMillis()
                 machine.dispatch(GuideEvent.Tick(now))
+                parental.onTick(now) // (M5, §3.9.5) the 1-hour stay-unlocked timer
                 val deadline = machine.nextDeadlineMs.value
                 val target = nextTickAt(now, deadline)
                 // U-B1: wake early only for a *new* deadline before the target. A deadline the machine left in the past
@@ -498,7 +540,7 @@ class GuideViewModel @Inject constructor(
                 if (onLaunch != OnLaunch.GUIDE_NOTHING && controller.state.value is PlaybackState.Idle) {
                     library.lastWatched()?.let {
                         if (onLaunch == OnLaunch.FULL_LAST) machine.dispatch(GuideEvent.StartFull)
-                        controller.tune(TuneTarget.Channel(it.identity))
+                        guarded.tune(TuneTarget.Channel(it.identity)) // N13: never a locked channel (the guard too)
                     }
                 }
             } catch (e: CancellationException) {
@@ -523,6 +565,77 @@ class GuideViewModel @Inject constructor(
     private fun onLineup(lineup: GuideLineup) {
         if (controller.state.value !is PlaybackState.Idle) controller.setZapList(LineupZapList(lineup, library))
         sendGuideSource()
+    }
+
+    // ---- parental (M5, WP-C; docs/design/m5-setup-settings.md §3.9)
+
+    /**
+     * The session's state to the machine (the PIN layer and the Groups panel doors); on every relock (access leaves
+     * OPEN) the zap list is cleared and rebuilt from the next, filtered lineup (§3.9.2). What plays goes to the session
+     * (never relock mid-programme, ASK_EVERY_TIME); leaving Settings too. A resume the controller refused
+     * (`Stopped(LOCKED)`, B1) opens the PIN prompt for that channel. Key hints follow the user's mapping (§3.8.4).
+     */
+    private fun forwardParental() {
+        val scope = viewModelScope
+        scope.launch {
+            var before: ParentalAccess? = null
+            parental.state.collect { st ->
+                machine.dispatch(GuideEvent.Parental(st))
+                val was = before
+                before = st.access
+                if (was == ParentalAccess.OPEN && st.access != ParentalAccess.OPEN && controller.state.value !is PlaybackState.Idle) {
+                    controller.setZapList(EmptyZapList) // rebuilt by the re-queried, filtered lineup (onLineup)
+                }
+            }
+        }
+        scope.launch {
+            var lastLockedTune = -1L
+            controller.state.collect { st ->
+                val playing = when (st) {
+                    is PlaybackState.Playing, is PlaybackState.Buffering, is PlaybackState.Connecting, is PlaybackState.Stalled -> st.target?.identity
+                    else -> null
+                }
+                parentalControls.watching(playing)
+                if (st is PlaybackState.Stopped && st.reason == StopReason.LOCKED) {
+                    val id = st.target?.identity
+                    val tuneId = st.target?.tuneId ?: 0L
+                    if (id != null && tuneId != lastLockedTune) {
+                        lastLockedTune = tuneId
+                        onRefused(id, TuneVerdict.NEEDS_PIN)
+                    }
+                }
+            }
+        }
+        scope.launch {
+            var was = machine.ui.value.mode
+            machine.ui.map { it.mode }.distinctUntilChanged().collect { m ->
+                if (was == ScreenMode.SETTINGS && m != ScreenMode.SETTINGS) parentalControls.leftSettings()
+                was = m
+            }
+        }
+        scope.launch {
+            combine(keyCapabilities.seen, keyBindings.overrides) { seen, o -> seen to o }.collect { (seen, o) ->
+                machine.dispatch(GuideEvent.KeyHints(keyHints(seen, o, KeyContext.GUIDE)))
+            }
+        }
+    }
+
+    /**
+     * A tune the guard refused (B1): the PIN prompt with `Tune(channel, GUIDE)` (the not-protected card in
+     * FILTERED_NO_PIN). On success the guide machine tunes it again; the guard then allows it.
+     */
+    private fun onRefused(identity: ChannelIdentity, @Suppress("UNUSED_PARAMETER") verdict: TuneVerdict) {
+        viewModelScope.launch {
+            val ch = try {
+                library.rowIdOf(identity)?.let { id -> library.channels(longArrayOf(id), 0, 1).firstOrNull() }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                BoxLog.w(TAG, "refused channel lookup failed: ${e.javaClass.simpleName}")
+                null
+            } ?: return@launch
+            (machine as? ParentalHost)?.request(PinPurpose.Tune(ch, PinOwner.GUIDE))
+        }
     }
 
     private fun registerTimeReceiver() {
@@ -565,6 +678,15 @@ class GuideViewModel @Inject constructor(
         /** The next tick: the machine's deadline or the next minute boundary, whichever is first, at least [MIN_TICK_GAP_MS] away. */
         fun nextTickAt(nowMs: Long, deadlineMs: Long): Long =
             maxOf(nowMs + MIN_TICK_GAP_MS, minOf(deadlineMs, nowMs - Math.floorMod(nowMs, MINUTE_MS) + MINUTE_MS))
+
+        /** The actions the footer hints name (§3.8.4). */
+        private val HINTED = listOf(BoxAction.START_OVER, BoxAction.REMIND, BoxAction.ZAP_UP, BoxAction.PAGE_UP)
+
+        /** For each hinted action, the seen keys bound to it (short presses) in [context]: EffectiveKeyMap ∩ seen. */
+        fun keyHints(seen: Set<Int>, overrides: app.thebox.core.input.KeyBindingOverrides, context: KeyContext): Map<BoxAction, List<Int>> {
+            val map = RemappedKeyMap(DefaultKeyMap(), null, null).also { it.apply(overrides) }
+            return HINTED.associateWith { a -> map.keysFor(context, a).filter { it.second == Press.SHORT && it.first in seen }.map { it.first } }
+        }
 
         fun lowEndFor(s: GuideSettings, device: DeviceClass): Boolean = when (s.performance) {
             PerformanceMode.LOW -> true

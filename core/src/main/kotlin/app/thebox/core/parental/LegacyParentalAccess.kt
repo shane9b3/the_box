@@ -1,13 +1,17 @@
 package app.thebox.core.parental
 
 /**
- * (M5 commit 0, docs/design/m5-setup-settings.md §2.12 item 9, S10) What the six `GuideLibrary`/`GuideSearch` call
- * sites pass until WP-C feeds them from `ParentalSession.state`: M3's debug switch (`GuideSettings.debugUnlocked`,
- * `thebox-debug://guide?unlocked=1`) as OPEN, else LOCKED_AUTO, which the commit-0 library maps to M3's
- * `unlocked = false`. Behaviour is unchanged. WP-C deletes this file when the call sites read the session.
+ * (M5 commit 0, docs/design/m5-setup-settings.md §2.12 item 9, S10) M3's debug switch (`GuideSettings.debugUnlocked`,
+ * `thebox-debug://guide?unlocked=1`) as an access value: OPEN, else LOCKED_AUTO. Since WP-C the call sites feed the
+ * session's access through `ui/.../parental/ParentalGuideLibrary` (which keeps a requested OPEN, i.e. the debug switch,
+ * and replaces every other value with the session's); this mapping only carries the debug switch there. Kept while
+ * `GuideEffectsImpl` (commit-0 skeleton) and `EpgMatchRepository` (WP-B) still call it.
  */
 fun legacyParentalAccess(debugUnlocked: Boolean): ParentalAccess =
     if (debugUnlocked) ParentalAccess.OPEN else ParentalAccess.LOCKED_AUTO
 
-/** (M5 commit 0) The M3 predicate's flag for [access] until WP-C's §4.3 predicate binds the ordinal. */
+/**
+ * (M5 commit 0) M3's `unlocked` flag for [this] access, for the M1–M4 DAO signatures that still take a Boolean
+ * (`ChannelDao.PARENTAL`: true = OPEN, false = LOCKED_AUTO). New code binds the ordinal (`ChannelDao.PARENTAL_ACCESS`).
+ */
 val ParentalAccess.legacyUnlocked: Boolean get() = this == ParentalAccess.OPEN
