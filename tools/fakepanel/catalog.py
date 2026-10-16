@@ -34,6 +34,24 @@ _CH = [
 CHANNELS = [dict(id=i, name=n, cat=c, archive=a, catchup=cu, media=m, tvg_id=f"ch{i}.test")
             for i, n, c, a, cu, m in _CH]
 CH_BY_ID = {c["id"]: c for c in CHANNELS}
+# M5 (docs/design/m5-setup-settings.md §6.4): an adult category, only with config adult_category (the M2-M4 suites
+# count the 13 catalog channels). is_adult = 1 in get_live_streams, group "Adult 18+" in the M3U.
+ADULT_CAT = (5, "Adult 18+")
+ADULT_CH = dict(id=14, name="Late Night 18+", cat=5, archive=False, catchup="", media="std", tvg_id="ch14.test", adult=True)
+
+
+def live_cats(cfg):
+    return LIVE_CATS + ([ADULT_CAT] if cfg.get("adult_category") else [])
+
+
+def channels(cfg):
+    return CHANNELS + ([ADULT_CH] if cfg.get("adult_category") else [])
+
+
+def channel_by_id(cfg, i):
+    if cfg.get("adult_category") and i == ADULT_CH["id"]:
+        return ADULT_CH
+    return CH_BY_ID.get(i)
 ARCHIVE_DAYS = 3
 
 MOVIES = [dict(id=100 + i, name=f"Test Movie {i}", cat=10 if i % 2 else 11, year=2000 + i) for i in range(1, 7)]
@@ -88,7 +106,7 @@ def live_streams(cfg, host, port, category_id=None, syn=None):
     if syn:
         return syn.live_streams(cfg, host, port, category_id)
     out = []
-    for n, c in enumerate(CHANNELS, 1):
+    for n, c in enumerate(channels(cfg), 1):
         cid = c["cat"]
         if cfg.get("quirks") and c["id"] == 5:
             cid = None  # category_id null for one stream
@@ -97,7 +115,7 @@ def live_streams(cfg, host, port, category_id=None, syn=None):
         out.append({
             "num": _n(cfg, n), "name": c["name"], "stream_type": "live", "stream_id": _n(cfg, c["id"]),
             "stream_icon": f"http://{host}:{port}/logo/{c['id']}.png", "epg_channel_id": c["tvg_id"],
-            "added": "1700000000", "is_adult": "0", "category_id": None if cid is None else (str(cid) if cfg.get("quirks") else cid),
+            "added": "1700000000", "is_adult": "1" if c.get("adult") else "0", "category_id": None if cid is None else (str(cid) if cfg.get("quirks") else cid),
             "category_ids": [] if cid is None else [cid], "custom_sid": "", "tv_archive": _n(cfg, 1 if c["archive"] else 0),
             "direct_source": "", "tv_archive_duration": _n(cfg, ARCHIVE_DAYS if c["archive"] else 0),
         })
@@ -220,11 +238,11 @@ def xmltv(cfg, base, tz_unused, now, offset):
     off_s = sign * (int(offset[1:3]) * 3600 + int(offset[3:5]) * 60)
     zone = dt.timezone(dt.timedelta(seconds=off_s))
     parts = ['<?xml version="1.0" encoding="UTF-8"?>\n<tv generator-info-name="fakepanel">\n']
-    for c in CHANNELS:
+    for c in channels(cfg):
         parts.append(f'<channel id={quoteattr(c["tvg_id"])}><display-name>{escape(c["name"])}</display-name>'
                      f'<icon src={quoteattr(base + "/logo/" + str(c["id"]) + ".png")}/></channel>\n')
     fmt = lambda ts: dt.datetime.fromtimestamp(ts, zone).strftime("%Y%m%d%H%M%S") + " " + offset
-    for c in CHANNELS:
+    for c in channels(cfg):
         for p in programmes(c, now - EPG_BACK_DAYS * 86400, now + EPG_FWD_DAYS * 86400, zone):
             parts.append(f'<programme start="{fmt(p["start"])}" stop="{fmt(p["stop"])}" channel={quoteattr(c["tvg_id"])}>'
                          f'<title lang="en">{escape(p["title"])}</title><desc lang="en">{escape(p["desc"])}</desc></programme>\n')
@@ -239,8 +257,8 @@ def m3u(cfg, base, host, port, ext, plus=True, syn=None):
         return syn.m3u(cfg, base, ext, plus)
     u, p = cfg["username"], cfg["password"]
     L = [f'#EXTM3U x-tvg-url="{base}/xmltv.php?username={u}&password={p}"']
-    for c in CHANNELS:
-        attrs = f'tvg-id="{c["tvg_id"]}" tvg-name="{c["name"]}" tvg-logo="{base}/logo/{c["id"]}.png" group-title="{dict(LIVE_CATS)[c["cat"]]}"'
+    for c in channels(cfg):
+        attrs = f'tvg-id="{c["tvg_id"]}" tvg-name="{c["name"]}" tvg-logo="{base}/logo/{c["id"]}.png" group-title="{dict(live_cats(cfg))[c["cat"]]}"'
         if c["media"] == "radio":
             attrs += ' radio="true"'  # EntryClassifier: Attr.truthy(radio) -> RADIO
         if plus and c["catchup"]:
@@ -311,6 +329,7 @@ class Synthetic:
         self.reminders = (self.start_unix + 120, self.start_unix + 300)
         self.groups = -(-self.n // SYN_GROUP)
         self.fx = bool(cfg.get("player_fixtures"))
+        self.adult = bool(cfg.get("adult_category"))
         self.short = (self.start_unix - SYN_SHORT_BACK, self.start_unix + SYN_SHORT_AHEAD)
 
     def info(self):
@@ -323,7 +342,13 @@ class Synthetic:
         return out
 
     def categories(self):
-        return [(SYN_CAT_BASE + g, f"{SYN_THEMES[g % len(SYN_THEMES)]} {g + 1}") for g in range(self.groups)]
+        return [(SYN_CAT_BASE + g, self.group_name(g)) for g in range(self.groups)]
+
+    def group_name(self, g):
+        # M5 §6.4: with adult_category the last group is "Adult 18+" (is_adult = 1 on its channels)
+        if self.adult and g == self.groups - 1:
+            return ADULT_CAT[1]
+        return f"{SYN_THEMES[g % len(SYN_THEMES)]} {g + 1}"
 
     def channel(self, i):
         if not 1 <= i <= self.n:
@@ -357,7 +382,8 @@ class Synthetic:
             out.append({
                 "num": _n(cfg, i), "name": c["name"], "stream_type": "live", "stream_id": _n(cfg, i),
                 "stream_icon": f"http://{host}:{port}/logo/{i}.png", "epg_channel_id": c["tvg_id"],
-                "added": "1700000000", "is_adult": "0", "category_id": str(c["cat"]) if q else c["cat"],
+                "added": "1700000000", "is_adult": "1" if self.adult and c["cat"] == SYN_CAT_BASE + self.groups - 1 else "0",
+                "category_id": str(c["cat"]) if q else c["cat"],
                 "category_ids": [c["cat"]], "custom_sid": "", "tv_archive": _n(cfg, 1 if c["archive"] else 0),
                 "direct_source": "", "tv_archive_duration": _n(cfg, c["archive_days"])})
         return out

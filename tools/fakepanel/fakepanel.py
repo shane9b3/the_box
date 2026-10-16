@@ -29,6 +29,7 @@ from zoneinfo import ZoneInfo
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import catalog as cat  # noqa: E402
+import ed25519  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PKT = 188
@@ -60,6 +61,16 @@ DEFAULTS = {
     "timeshift_reject_forms": {},  # {form: status}: path, path_sec, php, shift, flussonic_range, flussonic_now, timeshift_abs, timeshift_rel
     "timeshift_range_ignored": False,  # 200 + full Content-Length, Range ignored (bytesToSkip path)
     "player_fixtures": False,   # synthetic mode: short-programme ch2, correction ch3 (+2) / ch4 (-1.5), multi ch7 (TS) / ch8 (HLS)
+    # M5 (docs/design/m5-setup-settings.md §6.4)
+    "adult_category": False,    # catalog: category 5 "Adult 18+" + channel 14 (is_adult 1); synthetic: the last group
+    "sleep_login": 0,           # seconds player_api.php login (no action) waits before answering (the busy state)
+    "api_fault": None,          # player_api.php: html_splash | timeout | 429 | redirect (S16)
+    "dns_records": {},          # /dns-query (RFC 8484) A records, e.g. {"panel.test": "10.0.2.2"}
+    # The update endpoints (/update/update.json, .sig, /update/<apk>.apk), signed with the debug update key.
+    # update_mode: valid | bad_signature | wrong_hash | wrong_cert (the manifest lists another certificate digest)
+    "update_mode": "valid",
+    "update_manifest": {},      # overrides of the generated manifest (versionCode, versionName, packageName, sequence, ...)
+    "update_apk": "app",        # which uploaded APK (POST /admin/update_apk?name=...) the manifest offers
 }
 FAULT_DOC = {
     "redirect": False, "token_ttl": None, "linger": 0, "linger_status": 403, "close_every": 0,
@@ -72,6 +83,9 @@ FAULT_DOC = {
     "timeshift_reject_forms": {},      # per stream: as the config key, overrides it
 }
 # Timeshift URL forms the panel can tell apart (the request log's `form`, the keys of timeshift_reject_forms).
+API_FAULTS = (None, "html_splash", "timeout", "429", "redirect")
+UPDATE_MODES = ("valid", "bad_signature", "wrong_hash", "wrong_cert")
+UPDATE_KEY_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "update_test_key")
 TS_FORMS = ("path", "path_sec", "php", "shift", "flussonic_range", "flussonic_now", "timeshift_abs", "timeshift_rel")
 TS_FORM_ALIASES = {"xc-path": "path", "xc-path-sec": "path_sec", "xc-php": "php", "flussonic-range": "flussonic_range",
                    "flussonic-abs": "timeshift_abs", "flussonic-kodi": "timeshift_rel"}
@@ -509,14 +523,16 @@ def build_media(media_dir, use_ffmpeg, log):
     ff = shutil.which("ffmpeg") if use_ffmpeg else None
     if not ff:
         log("media: ffmpeg not used; serving null-packet fallback TS (no decodable video)")
-        return {k: fb_clip for k in ("std", "mp2", "50fps", "radio", "hdr", "multi")}, fb_data * 3, "video/mp2t"
+        return {k: fb_clip for k in ("std", "mp2", "50fps", "radio", "hdr", "multi", "ac3")}, fb_data * 3, "video/mp2t"
     os.makedirs(os.path.join(media_dir, "hls"), exist_ok=True)
     spec = {"std": ("h264_aac_25", 25, "aac"), "mp2": ("h264_mp2_25", 25, "mp2"), "50fps": ("h264_aac_50", 50, "aac"),
             "radio": ("aac_only_25", 0, "aac"),  # fps 0 = audio only (no video PID)
             # Q-1 HDR poster: 8-bit H.264 whose SPS VUI signals BT.2020 + PQ, so the player sees HDR10 (§3.9.5).
             "hdr": ("h264_aac_25_hdr10", 25, "aac"),
             # M4 §5.6 item 10: two audio languages + CEA-608 captions (pickers, subtitles)
-            "multi": ("h264_multi_25", 25, "multi")}
+            "multi": ("h264_multi_25", 25, "multi"),
+            # M5 I-M5-27 (B2): AC-3 audio for "Always passthrough" on a PCM-only sink (media_override {"<id>": "ac3"})
+            "ac3": ("h264_ac3_25", 25, "ac3")}
     clips = {}
     for key, (name, fps, ac) in spec.items():
         path = os.path.join(media_dir, name + ".ts")
@@ -534,7 +550,7 @@ def build_media(media_dir, use_ffmpeg, log):
                        "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "10",
                        "-c:v", "libx264", "-preset", "veryfast", "-pix_fmt", "yuv420p", "-g", str(fps * 2),
                        "-keyint_min", str(fps * 2), "-sc_threshold", "0", "-b:v", "2M", "-maxrate", "2M", "-bufsize", "2M",
-                       "-c:a", "aac" if ac == "aac" else "mp2", "-b:a", "128k", "-f", "mpegts", path]
+                       "-c:a", ac, "-b:a", "192k" if ac == "ac3" else "128k", "-f", "mpegts", path]
                 if key == "hdr":
                     cmd[-3:-3] = ["-color_primaries", "bt2020", "-color_trc", "smpte2084", "-colorspace", "bt2020nc"]
             else:  # audio only: no video stream, no video PID in the PMT
@@ -654,7 +670,7 @@ def deep_merge_faults(dst, src):
 
 
 class Panel:
-    def __init__(self, cfg, media_dir=None, use_ffmpeg=True, verbose=False, quiet=False):
+    def __init__(self, cfg, media_dir=None, use_ffmpeg=True, verbose=False, quiet=False, update_key=None):
         self.initial = copy.deepcopy(cfg)
         self.cfg = copy.deepcopy(cfg)
         self.lock = threading.Lock()
@@ -668,12 +684,15 @@ class Panel:
         self.start_time = time.time()  # anchors the synthetic EPG schedule for this server run
         self.event_anchor = {}  # timeshift_rel EVENT playlists: (sid, path) -> fixed start (unix s)
         self.subs = load_srt(os.path.join(HERE, "multi_subs.srt"))
+        self.holds = []        # M5: /admin/hold_connection slots (I-M5-6)
+        self.update_apks = {}  # M5: name -> APK bytes (POST /admin/update_apk)
+        self.update_seed = load_update_key(update_key)
         self.reset_stats()
         self.clips, self.vod_data, self.vod_ctype = build_media(
             media_dir or os.path.join(HERE, "media"), use_ffmpeg, self.log)
 
     def reset_stats(self):
-        self.stats = {"requests": 0, "stream_opens": 0, "rejections": {}, "range_requests_seen": 0,
+        self.stats = {"dns_queries": 0, "requests": 0, "stream_opens": 0, "rejections": {}, "range_requests_seen": 0,
                       "range_requests": [], "auth_failures": 0, "redirects": 0, "token_expired": 0,
                       "forced_closes": 0, "client_eof": 0, "stalls": 0, "timeshift_tz_warnings": 0, "request_log": [], "stream_requests": 0,
                       "timeshift_requests": [], "timeshift_request_count": 0}
@@ -688,7 +707,7 @@ class Panel:
     def channel(self, i):
         """Live channel dict by id (catalog, or synthetic in synthetic mode), or None."""
         syn = self.syn()
-        return syn.channel(i) if syn else cat.CH_BY_ID.get(i)
+        return syn.channel(i) if syn else cat.channel_by_id(self.cfg, i)
 
     def tz(self):
         try:
@@ -749,6 +768,15 @@ class Panel:
             raise ValueError("archive_lag_sec must be an integer >= 0")
         if "timeshift_reject_forms" in patch:
             check_reject_forms(patch["timeshift_reject_forms"])
+        if "api_fault" in patch and patch["api_fault"] not in API_FAULTS:
+            raise ValueError("api_fault must be null, html_splash, timeout, 429 or redirect")
+        if "update_mode" in patch and patch["update_mode"] not in UPDATE_MODES:
+            raise ValueError("update_mode must be one of " + ", ".join(UPDATE_MODES))
+        sl = patch.get("sleep_login", 0)
+        if isinstance(sl, bool) or not isinstance(sl, (int, float)) or sl < 0:
+            raise ValueError("sleep_login must be a number >= 0")
+        if "dns_records" in patch and not isinstance(patch["dns_records"], dict):
+            raise ValueError("dns_records must be an object {name: ipv4}")
         for table in [patch.get("faults") or {}] + list((patch.get("stream_faults") or {}).values()):
             if isinstance(table, dict) and table.get("timeshift_reject_forms") is not None:
                 check_reject_forms(table["timeshift_reject_forms"])
@@ -767,7 +795,39 @@ class Panel:
             self.live_pos.clear()
         self.registry.kill_all()
         self.registry.slots = []
+        self.holds = []
         self.reset_stats()
+
+    # ---- M5: update manifest (docs/design/m5-setup-settings.md §3.12.1, §6.4)
+    def update_public_hex(self):
+        return ed25519.public_key(self.update_seed).hex()
+
+    def update_manifest_bytes(self, base):
+        """The exact bytes of update.json for the current config (signed as they are)."""
+        c = self.cfg
+        name = c.get("update_apk") or "app"
+        apk = self.update_apks.get(name, b"")
+        sha = hashlib_sha256(apk)
+        if c.get("update_mode") == "wrong_hash":
+            sha = ("0" if sha[0] != "0" else "1") + sha[1:]
+        certs = list((c.get("update_manifest") or {}).get("signingCertSha256") or [])
+        if c.get("update_mode") == "wrong_cert":
+            certs = ["AB" * 32]
+        m = {
+            "schema": 1, "sequence": 1, "packageName": "app.thebox.debug", "channel": "stable",
+            "versionCode": 2, "versionName": "0.0.2-test", "minSdk": 25, "publishedAt": "2026-10-16T12:00:00Z",
+            "notes": "Fake panel test release\n- Signed with the debug update key",
+            "apks": [{"abi": "universal", "url": f"{base}/update/{name}.apk", "sizeBytes": len(apk), "sha256": sha}],
+            "signingCertSha256": certs or ["00" * 32], "withdrawn": [], "rolloutPercent": 100,
+        }
+        m.update({k: v for k, v in (c.get("update_manifest") or {}).items() if k != "signingCertSha256"})
+        return json.dumps(m, separators=(",", ":")).encode()
+
+    def update_signature(self, data):
+        sig = bytearray(ed25519.sign(self.update_seed, data))
+        if self.cfg.get("update_mode") == "bad_signature":
+            sig[5] ^= 0x01
+        return bytes(sig)
 
     def make_token(self, path, ttl):
         tok = secrets.token_hex(8)
@@ -795,6 +855,56 @@ class Panel:
 
 TS_START_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2}):(\d{2})-(\d{2})(?:-(\d{2}))?$")
 ALT_START_RE = re.compile(r"^(\d{4})(\d{2})(\d{2})-(\d{2})$")
+
+
+def hashlib_sha256(b):
+    import hashlib
+    return hashlib.sha256(b).hexdigest().upper()
+
+
+def load_update_key(path=None):
+    """The debug update key's 32-byte seed: [path], else tools/fakepanel/update_test_key (gitignored), else a fresh
+    per-run key (the suite then registers /update/pubkey through the debug link)."""
+    for p in [path, UPDATE_KEY_FILE]:
+        if p and os.path.isfile(p):
+            with open(p) as fh:
+                return bytes.fromhex(fh.read().strip())
+    return ed25519.new_seed()
+
+
+def dns_answer(query, records):
+    """RFC 1035 answer for an RFC 8484 query: A records from [records]; known name without A data = NOERROR, no
+    answer; unknown name = NXDOMAIN. Returns None for a malformed query."""
+    if len(query) < 12:
+        return None
+    qid, flags, qd = query[0:2], int.from_bytes(query[2:4], "big"), int.from_bytes(query[4:6], "big")
+    if qd != 1:
+        return None
+    i, labels = 12, []
+    while i < len(query):
+        n = query[i]
+        i += 1
+        if n == 0:
+            break
+        labels.append(query[i:i + n].decode("ascii", "replace"))
+        i += n
+    if i + 4 > len(query):
+        return None
+    qtype = int.from_bytes(query[i:i + 2], "big")
+    question = query[12:i + 4]
+    name = ".".join(labels).lower().rstrip(".")
+    ip = {k.lower().rstrip("."): v for k, v in (records or {}).items()}.get(name)
+    rd = flags & 0x0100
+    answers = b""
+    rcode = 0
+    if ip is None:
+        rcode = 3
+    elif qtype == 1:
+        answers = (b"\xc0\x0c" + (1).to_bytes(2, "big") + (1).to_bytes(2, "big") + (60).to_bytes(4, "big")
+                   + (4).to_bytes(2, "big") + socket.inet_aton(ip))
+    header = (qid + (0x8000 | 0x0080 | rd | rcode).to_bytes(2, "big") + (1).to_bytes(2, "big")
+              + (1 if answers else 0).to_bytes(2, "big") + b"\x00\x00\x00\x00")
+    return header + question + answers
 
 
 def parse_start(s):
@@ -970,6 +1080,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.send(404, b"lb: stream paths only", "text/plain")
         if path == "/player_api.php":
             return self.player_api()
+        if path.startswith("/update/"):
+            return self.update_endpoint(path)
+        if path == "/dns-query":
+            return self.dns_query()
         if path == "/get.php":
             return self.get_php()
         if path == "/xmltv.php":
@@ -1039,7 +1153,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if n:
             body = self.rfile.read(n)
         try:
-            data = json.loads(body) if body.strip() else {}
+            # M5: /admin/update_apk takes the raw APK bytes, not JSON
+            data = {} if path == "/admin/update_apk" else (json.loads(body) if body.strip() else {})
         except ValueError:
             return self.json({"error": "invalid JSON"}, 400)
         if path in ("/admin", "/admin/config"):
@@ -1071,6 +1186,31 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/admin/kick" and self.command != "GET":
             p.registry.kill_all()
             return self.json({"kicked": True})
+        if path == "/admin/hold_connection":
+            # M5 I-M5-6: hold one connection slot of the panel user (as an open stream would) until /admin/release_holds
+            c = p.cfg
+            sid = self.q.get("stream", "0")
+            slot = p.registry.acquire(c["username"], sid, c["max_connections"], 0, c["hls_timeout"])
+            if slot is None:
+                return self.json({"held": False, "reason": "no free slot"}, 409)
+            with p.lock:
+                p.holds.append(slot)
+            return self.json({"held": True, "holds": len(p.holds)})
+        if path == "/admin/release_holds" and self.command != "GET":
+            with p.lock:
+                holds, p.holds = p.holds, []
+            for slot in holds:
+                p.registry.close(slot)
+            return self.json({"released": len(holds)})
+        if path == "/admin/update_apk" and self.command in ("POST", "PUT"):
+            name = self.q.get("name", "app")
+            if not re.match(r"^[A-Za-z0-9_.-]+$", name):
+                return self.json({"error": "bad name"}, 400)
+            with p.lock:
+                p.update_apks[name] = body
+            return self.json({"name": name, "bytes": len(body), "sha256": hashlib_sha256(body)})
+        if path == "/admin/update_key":
+            return self.json({"public_key": p.update_public_hex()})
         if path == "/admin/faults":
             return self.json({"documented_fault_keys": FAULT_DOC, "global": p.cfg["faults"], "per_stream": p.cfg["stream_faults"]})
         self.json({"error": "unknown admin endpoint"}, 404)
@@ -1096,6 +1236,38 @@ class Handler(http.server.BaseHTTPRequestHandler):
         local = dt.datetime.fromtimestamp(exp, p.tz())
         return self.json({"expect_unix": exp, "correction_h": corr, "panel_wall": local.strftime("%Y-%m-%d %H:%M:%S"),
                           "xc_start": local.strftime("%Y-%m-%d:%H-%M")})
+
+    # ---- M5: update endpoints and DNS-over-HTTPS
+    def update_endpoint(self, path):
+        p = self.panel
+        base = self.base()
+        if path == "/update/update.json":
+            return self.send(200, p.update_manifest_bytes(base), "application/json")
+        if path == "/update/update.json.sig":
+            return self.send(200, p.update_signature(p.update_manifest_bytes(base)), "application/octet-stream")
+        if path == "/update/pubkey":
+            return self.send(200, p.update_public_hex(), "text/plain")
+        m = re.match(r"^/update/([A-Za-z0-9_.-]+)\.apk$", path)
+        if m and m[1] in p.update_apks:
+            return self.send(200, p.update_apks[m[1]], "application/vnd.android.package-archive")
+        return self.send(404, b"no such update file", "text/plain")
+
+    def dns_query(self):
+        import base64
+        if self.command == "POST":
+            n = int(self.headers.get("Content-Length") or 0)
+            q = self.rfile.read(n) if n else b""
+        else:
+            raw = self.q.get("dns", "")
+            try:
+                q = base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
+            except ValueError:
+                q = b""
+        ans = dns_answer(q, self.panel.cfg.get("dns_records") or {})
+        if ans is None:
+            return self.send(400, b"bad dns query", "text/plain")
+        self.panel.bump("dns_queries")
+        return self.send(200, ans, "application/dns-message")
 
     # ---- Xtream API
     def auth_fail(self, mode):
@@ -1124,6 +1296,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
         p, q = self.panel, self.q
         c = p.cfg
         self._user = q.get("username")
+        fault = c.get("api_fault")
+        if fault and q.get("_redirected") != "1":
+            self._notes.append("API_FAULT:" + fault)
+            if fault == "html_splash":
+                return self.send(200, SPLASH, "text/html")
+            if fault == "timeout":
+                self.nap(120)
+                return None
+            if fault == "429":
+                return self.send(429, b"Too Many Requests", "text/plain", {"Retry-After": "2"})
+            if fault == "redirect":
+                sep = "&" if "?" in self.path else "?"
+                return self.send(302, b"", "text/plain", {"Location": f"{self.base()}{self.path}{sep}_redirected=1"})
         if c["auth_mode"] != "ok":
             return self.auth_fail(c["auth_mode"])
         if not self.creds_ok(q.get("username"), q.get("password")):
@@ -1132,6 +1317,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         tz, now = p.tz(), time.time()
         act = q.get("action")
         cid = q.get("category_id")
+        if act is None and c.get("sleep_login"):
+            self.nap(float(c["sleep_login"]))
         if act is None:
             n = c["active_cons_override"]
             if n is None:
@@ -1139,7 +1326,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.json(cat.user_info(c, n, host, port, tz, now))
         syn = p.syn()
         if act == "get_live_categories":
-            return self.json(cat.categories(syn.categories() if syn else cat.LIVE_CATS))
+            return self.json(cat.categories(syn.categories() if syn else cat.live_cats(c)))
         if act == "get_vod_categories":
             return self.json(cat.categories(cat.VOD_CATS))
         if act == "get_series_categories":
@@ -1770,6 +1957,8 @@ def main(argv=None):
     ap.add_argument("--no-ffmpeg", action="store_true")
     ap.add_argument("--no-pace", action="store_true", help="send live TS as fast as possible")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--update-key", help="file with the 32-byte Ed25519 seed (hex) the update manifest is signed with "
+                                         "(default tools/fakepanel/update_test_key if present, else a fresh key per run)")
     a = ap.parse_args(argv)
 
     cfg = copy.deepcopy(DEFAULTS)
@@ -1806,7 +1995,7 @@ def main(argv=None):
         k, v = parse_kv(rest)
         cfg["stream_faults"].setdefault(sid, {})[k] = v
 
-    panel = Panel(cfg, a.media_dir, not a.no_ffmpeg, a.verbose)
+    panel = Panel(cfg, a.media_dir, not a.no_ffmpeg, a.verbose, update_key=a.update_key)
     main_srv, lb = start_servers(panel, a.host, a.port, a.redirect_port)
     panel.log(f"fakepanel up: http://{a.host}:{panel.main_port}  (token/redirect target port {panel.lb_port})  "
               f"user={cfg['username']} pass={cfg['password']} tz={cfg['timezone']} quirks={cfg['quirks']}")

@@ -1481,5 +1481,191 @@ class TestCea608(unittest.TestCase):
             self.assertIn("CC1 line 4", out)  # line 5 is still on screen when the clip ends
 
 
+# ------------------------------------------------------------------ M5 (docs/design/m5-setup-settings.md §6.4)
+
+class TestEd25519(unittest.TestCase):
+    """RFC 8032 §7.1 vectors for the panel's signer (the app verifies with Tink; TinkEd25519VerifierTest)."""
+    VECTORS = [
+        ("9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60", "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a", "",
+         "e5564300c360ac729086e2cc806e828a84877f1eb8e5d974d873e065224901555fb8821590a33bacc61e39701cf9b46bd25bf5f0595bbe24655141438e7a100b"),
+        ("4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb", "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c", "72",
+         "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00"),
+        ("c5aa8df43f9f837bedb7442f31dcb7b166d38535076f094b85ce3a2e0b4458f7", "fc51cd8e6218a1a38da47ed00230f0580816ed13ba3303ac5deb911548908025", "af82",
+         "6291d657deec24024827e69c3abe01a30ce548a284743a445e3680d7db5ac3ac18ff9b538d16f290ae67f760984dc6594a7c15e9716ed28dc027beceea1ec40a"),
+    ]
+
+    def test_rfc8032_vectors(self):
+        import ed25519
+        for sk, pk, msg, sig in self.VECTORS:
+            seed = bytes.fromhex(sk)
+            self.assertEqual(ed25519.public_key(seed).hex(), pk)
+            self.assertEqual(ed25519.sign(seed, bytes.fromhex(msg)).hex(), sig)
+            self.assertTrue(ed25519.verify(bytes.fromhex(pk), bytes.fromhex(msg), bytes.fromhex(sig)))
+            bad = bytearray(bytes.fromhex(sig))
+            bad[3] ^= 1
+            self.assertFalse(ed25519.verify(bytes.fromhex(pk), bytes.fromhex(msg), bytes(bad)))
+
+
+class TestUpdateEndpoints(PanelCase):
+    def upload(self, data, name="app"):
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}/admin/update_apk?name={name}", data, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            return json.loads(r.read())
+
+    def manifest(self):
+        import ed25519
+        st, _, body = self.get("/update/update.json")
+        self.assertEqual(st, 200)
+        _, _, sig = self.get("/update/update.json.sig")
+        _, _, pk = self.get("/update/pubkey")
+        return json.loads(body), body, sig, bytes.fromhex(pk.decode()), ed25519
+
+    def test_valid_manifest_is_signed_over_its_exact_bytes(self):
+        up = self.upload(b"PK\x03\x04 fake apk bytes")
+        m, body, sig, pk, ed = self.manifest()
+        self.assertEqual(len(sig), 64)
+        self.assertTrue(ed.verify(pk, body, sig))
+        self.assertEqual(m["packageName"], "app.thebox.debug")
+        self.assertEqual(m["apks"][0]["sha256"], up["sha256"])
+        self.assertEqual(m["apks"][0]["sizeBytes"], up["bytes"])
+        st, _, apk = self.get("/update/app.apk")
+        self.assertEqual((st, apk), (200, b"PK\x03\x04 fake apk bytes"))
+
+    def test_modes(self):
+        self.upload(b"apk")
+        self.admin({"update_mode": "bad_signature"})
+        _, body, sig, pk, ed = self.manifest()
+        self.assertFalse(ed.verify(pk, body, sig))
+        self.admin({"update_mode": "wrong_hash"})
+        m, body, sig, pk, ed = self.manifest()
+        self.assertTrue(ed.verify(pk, body, sig))
+        self.assertNotEqual(m["apks"][0]["sha256"], fakepanel.hashlib_sha256(b"apk"))
+        self.admin({"update_mode": "wrong_cert", "update_manifest": {"signingCertSha256": ["11" * 32]}})
+        m, *_ = self.manifest()
+        self.assertEqual(m["signingCertSha256"], ["AB" * 32])
+
+    def test_overrides_and_sequence(self):
+        self.upload(b"apk")
+        self.admin({"update_manifest": {"versionCode": 7, "sequence": 3, "signingCertSha256": ["CD" * 32]}})
+        m, *_ = self.manifest()
+        self.assertEqual((m["versionCode"], m["sequence"], m["signingCertSha256"]), (7, 3, ["CD" * 32]))
+        with self.assertRaises(urllib.error.HTTPError):
+            urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{self.port}/admin/config", json.dumps({"update_mode": "nope"}).encode(), method="POST"), timeout=5)
+
+    def test_missing_apk_is_404(self):
+        self.assertEqual(self.get("/update/nothing.apk")[0], 404)
+
+
+class TestDnsQuery(PanelCase):
+    @staticmethod
+    def query(name, qtype=1):
+        q = b"\x12\x34\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+        for label in name.split("."):
+            q += bytes([len(label)]) + label.encode()
+        return q + b"\x00" + qtype.to_bytes(2, "big") + b"\x00\x01"
+
+    def test_get_and_post_answer_a_records(self):
+        import base64
+        self.admin({"dns_records": {"panel.test": "10.0.2.2"}})
+        q = self.query("panel.test")
+        st, h, body = self.get("/dns-query?dns=" + base64.urlsafe_b64encode(q).decode().rstrip("="))
+        self.assertEqual(st, 200)
+        self.assertEqual(h["Content-Type"], "application/dns-message")
+        self.assertEqual(body[:2], b"\x12\x34")
+        self.assertEqual(int.from_bytes(body[6:8], "big"), 1)
+        self.assertEqual(body[-4:], bytes([10, 0, 2, 2]))
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}/dns-query", q, {"Content-Type": "application/dns-message"}, method="POST")
+        with urllib.request.urlopen(req, timeout=5) as r:
+            self.assertEqual(r.read()[-4:], bytes([10, 0, 2, 2]))
+
+    def test_unknown_name_is_nxdomain_and_aaaa_is_empty(self):
+        self.admin({"dns_records": {"panel.test": "10.0.2.2"}})
+        _, _, body = self.get("/dns-query?dns=" + __import__("base64").urlsafe_b64encode(self.query("other.test")).decode().rstrip("="))
+        self.assertEqual(body[3] & 0x0F, 3)
+        ans = fakepanel.dns_answer(self.query("panel.test", 28), {"panel.test": "10.0.2.2"})
+        self.assertEqual((ans[3] & 0x0F, int.from_bytes(ans[6:8], "big")), (0, 0))
+        self.assertIsNone(fakepanel.dns_answer(b"\x00", {}))
+
+
+class TestApiFaults(PanelCase):
+    def test_html_splash_429_and_redirect(self):
+        self.admin({"api_fault": "html_splash"})
+        st, h, body = self.get("/player_api.php?username=test&password=test")
+        self.assertEqual((st, h["Content-Type"]), (200, "text/html"))
+        self.assertIn(b"<html>", body)
+        self.admin({"api_fault": "429"})
+        st, h, _ = self.get("/player_api.php?username=test&password=test")
+        self.assertEqual((st, h.get("Retry-After")), (429, "2"))
+        self.admin({"api_fault": "redirect"})
+        j = self.api()  # urllib follows the one redirect, which answers normally
+        self.assertEqual(j["user_info"]["auth"], 1)
+
+    def test_timeout_answers_nothing(self):
+        self.admin({"api_fault": "timeout"})
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=1.5)
+        c.request("GET", "/player_api.php?username=test&password=test")
+        with self.assertRaises((socket.timeout, TimeoutError)):
+            c.getresponse()
+        c.close()
+
+    def test_sleep_login_delays_only_the_login(self):
+        self.admin({"sleep_login": 1})
+        t0 = time.monotonic()
+        self.api()
+        self.assertGreaterEqual(time.monotonic() - t0, 0.9)
+        t0 = time.monotonic()
+        self.api("get_live_categories")
+        self.assertLess(time.monotonic() - t0, 0.9)
+
+    def test_unknown_fault_is_refused(self):
+        with self.assertRaises(urllib.error.HTTPError):
+            self.admin({"api_fault": "explode"})
+
+
+class TestHoldConnection(PanelCase):
+    overrides = {"max_connections": 1}
+
+    def test_hold_takes_the_slot_until_released(self):
+        st, j = post(self, "/admin/hold_connection?stream=1", {})
+        self.assertEqual((st, j["held"]), (200, True))
+        self.assertEqual(int(self.api()["user_info"]["active_cons"]), 1)
+        st, _ = post(self, "/admin/hold_connection?stream=2", {})
+        self.assertEqual(st, 409)
+        st, data = self.read_stream("/live/test/test/1.ts")
+        self.assertNotEqual(st, 200)
+        self.assertEqual(post(self, "/admin/release_holds", {})[1]["released"], 1)
+        self.assertEqual(int(self.api()["user_info"]["active_cons"]), 0)
+
+
+class TestAdultCategory(PanelCase):
+    def test_catalog_adult_category_only_when_enabled(self):
+        self.assertEqual(len(self.api("get_live_streams")), 13)
+        self.admin({"adult_category": True})
+        cats = self.api("get_live_categories")
+        self.assertIn({"category_id": "5", "category_name": "Adult 18+", "parent_id": 0}, cats)
+        streams = self.api("get_live_streams")
+        self.assertEqual(len(streams), 14)
+        adult = [s for s in streams if s["is_adult"] == "1"]
+        self.assertEqual([s["stream_id"] for s in adult], [14])
+        _, _, m3u = self.get("/get.php?username=test&password=test&type=m3u_plus&output=ts")
+        self.assertIn(b'group-title="Adult 18+",Late Night 18+', m3u)
+        _, _, xml = self.get("/xmltv.php?username=test&password=test")
+        self.assertIn(b'channel id="ch14.test"', xml)
+        self.assertEqual(self.read_stream("/live/test/test/14.ts")[0], 200)
+
+
+class TestAdultSynthetic(PanelCase):
+    overrides = {"synthetic": 120}
+
+    def test_last_group_is_adult(self):
+        self.admin({"adult_category": True})
+        cats = self.api("get_live_categories")
+        self.assertEqual(cats[-1]["category_name"], "Adult 18+")
+        last = self.api("get_live_streams", f"&category_id={cats[-1]['category_id']}")
+        self.assertTrue(last and all(s["is_adult"] == "1" for s in last))
+        first = self.api("get_live_streams", f"&category_id={cats[0]['category_id']}")
+        self.assertTrue(all(s["is_adult"] == "0" for s in first))
+
+
 if __name__ == "__main__":
     unittest.main()

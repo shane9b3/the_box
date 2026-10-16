@@ -1,2 +1,6 @@
 media/
 __pycache__/
+# The private half of the throwaway debug update key (docs/design/m5-setup-settings.md §3.12.1, §8 Q7): never checked
+# in. Only its public half is in app/src/debug/.../DebugUpdateEndpoint.kt; the fake panel signs with this file when it
+# exists and with a fresh per-run key otherwise (the instrumented suite registers that key through the debug link).
+update_test_key
