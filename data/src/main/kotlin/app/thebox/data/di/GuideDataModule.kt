@@ -6,7 +6,6 @@ import app.thebox.core.guide.GuideLibrary
 import app.thebox.core.guide.GuideRowsCacheFactory
 import app.thebox.core.guide.GuideSearch
 import app.thebox.core.guide.GuideSessionStore
-import app.thebox.core.guide.GuideSettingsSource
 import app.thebox.core.guide.GuideWindowPagerFactory
 import app.thebox.core.guide.ReminderBook
 import app.thebox.core.guide.SyncFeed
@@ -18,7 +17,6 @@ import app.thebox.data.guide.GuideDataWindowSourceImpl
 import app.thebox.data.guide.GuideLibraryImpl
 import app.thebox.data.guide.GuideSearchImpl
 import app.thebox.data.guide.GuideSessionStoreImpl
-import app.thebox.data.guide.InMemoryGuideSettings
 import app.thebox.data.guide.SyncFeedImpl
 import app.thebox.data.reminder.ReminderBookImpl
 import dagger.Binds
@@ -39,7 +37,7 @@ abstract class GuideDataModule {
     @Binds abstract fun search(impl: GuideSearchImpl): GuideSearch
     @Binds abstract fun reminderBook(impl: ReminderBookImpl): ReminderBook
     @Binds abstract fun sessionStore(impl: GuideSessionStoreImpl): GuideSessionStore
-    @Binds abstract fun settings(impl: InMemoryGuideSettings): GuideSettingsSource
+    // (M5, WP-A) GuideSettingsSource → PersistedGuideSettings, bound in data/.../settings/SettingsDataModule.
     @Binds abstract fun syncFeed(impl: SyncFeedImpl): SyncFeed
     @Binds abstract fun dataWindow(impl: GuideDataWindowSourceImpl): GuideDataWindowSource
 

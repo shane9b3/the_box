@@ -44,10 +44,15 @@ internal class ControllerFixture {
     val device = FakeDeviceState()
     val clock = MonoClock { SystemClock.elapsedRealtime() }
     val gate = ZapImportGate({ SystemClock.elapsedRealtime() }, 200)
+    /** (M5, B1) Per-identity guard verdicts; absent = ALLOWED. Every check is recorded in [guardChecks]. */
+    val verdicts = HashMap<app.thebox.core.refresh.ChannelIdentity, app.thebox.core.playback.TuneVerdict>()
+    val guardChecks = mutableListOf<app.thebox.core.refresh.ChannelIdentity>()
+    var guardThrows = false
+    val guard = app.thebox.core.playback.TuneGuard { id -> guardChecks += id; if (guardThrows) error("guard down"); verdicts[id] ?: app.thebox.core.playback.TuneVerdict.ALLOWED }
 
     val controller = PlaybackControllerImpl(
         context, provider, memory, settings, resolver, brokers, transport, playerFactory, sources, events, clock,
-        ladder, limiter, debouncer, bufferFsm, engine, gate, MediaSessionFactory.None, device,
+        ladder, limiter, debouncer, bufferFsm, engine, gate, MediaSessionFactory.None, device, guard,
     ).also { it.ioDispatcher = Dispatchers.Main.immediate } // O-3 hop runs inline on the paused looper
 
     val exo get() = playerFactory.exo

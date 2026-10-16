@@ -137,9 +137,14 @@ internal class PlayerFactory @Inject constructor(
                 .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, !settings.subtitlesEnabled)
                 .build()
 
-        /** Passthrough denied for every encoding unless the output mode is AUTO (§3.8.3). */
-        fun baseDeniedPassthrough(settings: PlaybackSettings): Set<String> =
-            if (settings.audioOutput == AudioOutputMode.AUTO) emptySet() else setOf(AudioOutputPolicy.ALL)
+        /**
+         * Passthrough denied for every encoding when the output mode decodes (ALWAYS_DECODE, STEREO; §3.8.3). AUTO and
+         * (M5, B2) FORCE_PASSTHROUGH deny nothing up front; route denials the ladder learned are added by the controller.
+         */
+        fun baseDeniedPassthrough(settings: PlaybackSettings): Set<String> = when (settings.audioOutput) {
+            AudioOutputMode.AUTO, AudioOutputMode.FORCE_PASSTHROUGH -> emptySet()
+            AudioOutputMode.ALWAYS_DECODE, AudioOutputMode.STEREO -> setOf(AudioOutputPolicy.ALL)
+        }
 
         /** FFmpeg-preferred MIME types from the "prefer software audio" setting (§3.8.1). */
         fun baseSoftwareAudioMimes(settings: PlaybackSettings, ffmpegSupports: (String) -> Boolean): Set<String> =
@@ -165,6 +170,9 @@ internal class PlayerFactory @Inject constructor(
             bundle.codecPolicy.softwareAudioMimes = baseSoftwareAudioMimes(settings, ffmpegSupports)
             bundle.audioPolicy.deniedPassthrough = baseDeniedPassthrough(settings)
             bundle.audioPolicy.forceStereo = settings.audioOutput == AudioOutputMode.STEREO
+            // (M5, docs/design/m5-setup-settings.md §2.12 item 7, B2) "Always passthrough", read by the sink's output
+            // provider on every prepare (REPREPARE, lead ruling §1.9a). Test doubles of the handle have no force switch.
+            (bundle.audioPolicy as? AudioOutputPolicy)?.forcePassthrough = settings.audioOutput == AudioOutputMode.FORCE_PASSTHROUGH
             if (bundle.trackSelector.parameters.tunnelingEnabled != settings.tunneling) {
                 bundle.trackSelector.setParameters(bundle.trackSelector.buildUponParameters().setTunnelingEnabled(settings.tunneling))
             }
