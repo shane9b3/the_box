@@ -17,6 +17,7 @@ import app.thebox.core.text.NamePrefixRule
 import app.thebox.core.text.NameNormalizer
 import app.thebox.data.db.Converters
 import app.thebox.data.db.LibraryDatabase
+import app.thebox.data.rules.RuleHiddenPass
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -160,6 +161,16 @@ class RoomMergeSink(
             ) { bindLong(1, playlistId); bindText(2, it); bindLong(3, now) }
 
             updateGroups(this, finish.groupKeysSeen, now)
+
+            // M5 (docs/design/m5-setup-settings.md §3.7.3): the hide-rule pass after every merge, inside this
+            // transaction and under the merge's ImportMutex. New rows arrive with rule_hidden = 0 (column default);
+            // the UPDATE and ON CONFLICT paths above never list rule_hidden, so existing flags survive until the pass
+            // recomputes them. A failing pass must not undo the merge.
+            try {
+                RuleHiddenPass.run(this, playlistId)
+            } catch (e: RuntimeException) {
+                BoxLog.w(TAG, "hide-rule pass failed for playlist $playlistId: ${e.javaClass.simpleName}")
+            }
 
             val removedSample = ArrayList<String>()
             if (finish.newlyMissingIds.isNotEmpty()) {

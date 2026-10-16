@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Box - Setup</title>
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<header><p class="brand">The Box</p></header>
+<main>
+<section class="card" aria-label="Status">
+<p id="status" class="status" role="status" aria-live="polite">Connecting to your TV…</p>
+<p id="statusmsg" class="hint hidden"></p>
+</section>
+<div id="tabs" class="tabs" role="tablist"></div>
+
+<section id="p-xtream" class="card hidden">
+<label for="x-name">Name (optional)</label>
+<input id="x-name" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
+<label for="x-server">Server URL</label>
+<input id="x-server" type="url" inputmode="url" placeholder="http://panel.example.com:8080" autocomplete="off" autocapitalize="none" spellcheck="false">
+<label for="x-user">Username</label>
+<input id="x-user" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
+<label for="x-pass">Password</label>
+<div class="row"><input id="x-pass" type="password" autocomplete="off" autocapitalize="none" spellcheck="false"><button type="button" class="secondary show" data-for="x-pass">Show</button></div>
+<label for="x-output">Output</label>
+<select id="x-output"><option value="AUTO">Automatic</option><option value="TS">TS</option><option value="HLS">HLS</option></select>
+<button type="button" id="x-send" class="send">Send to TV</button>
+</section>
+
+<section id="p-m3u" class="card hidden">
+<label for="m-name">Name (optional)</label>
+<input id="m-name" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
+<label for="m-url">Playlist URL</label>
+<input id="m-url" type="url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false">
+<label for="m-epg">Guide (EPG) URL (optional)</label>
+<input id="m-epg" type="url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false">
+<button type="button" id="m-send" class="send">Send to TV</button>
+<div class="section">
+<h2>Or send a playlist file from this phone</h2>
+<label for="m-file">Playlist file</label>
+<input id="m-file" type="file" accept=".m3u,.m3u8,audio/x-mpegurl,application/vnd.apple.mpegurl,text/plain">
+<p class="hint limit">Files up to 256 MB.</p>
+<button type="button" id="m-fsend" class="send">Send file</button>
+</div>
+</section>
+
+<section id="p-link" class="card hidden">
+<label for="l-url">Any playlist or panel link</label>
+<input id="l-url" type="url" inputmode="url" autocomplete="off" autocapitalize="none" spellcheck="false">
+<label for="l-name">Name (optional)</label>
+<input id="l-name" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
+<button type="button" id="l-send" class="send">Send to TV</button>
+</section>
+
+<section id="p-restore" class="card hidden">
+<label for="r-file">Backup file</label>
+<input id="r-file" type="file" accept=".thebox">
+<p class="hint limit">Files up to 256 MB.</p>
+<button type="button" id="r-send" class="send">Send backup</button>
+<div id="r-pass" class="section hidden">
+<label for="r-phrase">Passphrase (only if the backup includes logins)</label>
+<div class="row"><input id="r-phrase" type="password" autocomplete="off" autocapitalize="none" spellcheck="false"><button type="button" class="secondary show" data-for="r-phrase">Show</button></div>
+<p class="note">The backup and the passphrase both travel over this unencrypted connection. The passphrase protects the file where you keep it, not this transfer.</p>
+<button type="button" id="r-psend" class="send">Send passphrase</button>
+</div>
+</section>
+
+<section id="p-backup" class="card hidden">
+<p>Choose a passphrase to include your logins in the backup, or leave it empty to back up without logins.</p>
+<div id="b-form">
+<label for="b-p1">Passphrase</label>
+<div class="row"><input id="b-p1" type="password" autocomplete="off" autocapitalize="none" spellcheck="false"><button type="button" class="secondary show" data-for="b-p1">Show</button></div>
+<label for="b-p2">Repeat passphrase</label>
+<div class="row"><input id="b-p2" type="password" autocomplete="off" autocapitalize="none" spellcheck="false"><button type="button" class="secondary show" data-for="b-p2">Show</button></div>
+<p class="note">The backup and the passphrase both travel over this unencrypted connection. The passphrase protects the file where you keep it, not this transfer.</p>
+<button type="button" id="b-send" class="send">Make backup</button>
+</div>
+<p id="b-wait" class="hint hidden">The TV is making the backup…</p>
+<div id="b-dl" class="hidden">
+<a id="b-link" class="btn big" href="#" download>Download</a>
+<p id="b-saved" class="hint hidden">Saved? Keep it somewhere safe, for example your cloud drive. The TV offers each file only once.</p>
+</div>
+</section>
+
+<section id="p-logs" class="card hidden">
+<p id="g-wait">The TV is preparing the log file…</p>
+<div id="g-dl" class="hidden">
+<a id="g-link" class="btn big" href="#" download>Download logs</a>
+<p class="hint">Logs never contain your passwords.</p>
+</div>
+</section>
+
+<div id="msg" class="msg hidden" role="status" aria-live="polite"></div>
+</main>
+<footer>This page is not encrypted (plain HTTP on your home network). Use it on your own Wi-Fi only.</footer>
+</body>
+</html>
