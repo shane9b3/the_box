@@ -189,6 +189,23 @@ and `timeshift_request_count` (monotonic). `/admin/reset` restores the start con
 (the suite also POSTs both keys after every reset, so a panel started without them works for every class except the M4 seed,
 which must see the fixture M3U).
 
+## M5 additions (docs/design/m5-setup-settings.md §6.4)
+
+| Key / endpoint | What |
+|---|---|
+| `adult_category: true` | catalog: category 5 "Adult 18+" and channel 14 "Late Night 18+" (`is_adult: "1"`, in the M3U and XMLTV); synthetic mode: the last group is "Adult 18+" with `is_adult: "1"`. Off by default (the M2–M4 suites count 13 catalog channels) |
+| `sleep_login: N` | `player_api.php` login (no `action`) waits N s before answering (the onboarding busy state) |
+| `api_fault` | on `player_api.php`: `html_splash` (200 HTML page), `timeout` (no answer for 120 s), `429` (`Retry-After: 2`), `redirect` (one 302 to the same URL + `_redirected=1`) |
+| `dns_records: {"panel.test": "10.0.2.2"}` + `/dns-query` | RFC 8484 DoH, GET (`?dns=` base64url) and POST (`application/dns-message`): A records from the map, an empty NOERROR for other types of a known name, NXDOMAIN otherwise; `dns_queries` in `/admin/stats` |
+| `/update/update.json`, `/update/update.json.sig`, `/update/<name>.apk`, `/update/pubkey` | the updater's manifest (signed over its exact bytes with Ed25519, `ed25519.py`), its raw 64-byte signature and the APKs uploaded with `POST /admin/update_apk?name=<name>` (raw bytes). Manifest defaults: `app.thebox.debug`, versionCode 2, sequence 1, the uploaded APK's SHA-256 and size; `update_manifest: {...}` overrides fields (`signingCertSha256`, `versionCode`, `sequence`, …); `update_apk` picks the APK; `update_mode`: `valid`, `bad_signature` (one bit flipped), `wrong_hash`, `wrong_cert` (the manifest lists another certificate digest) |
+| update key | `--update-key FILE` (hex seed), else `tools/fakepanel/update_test_key` when present (gitignored; the private half of the debug key whose public half is compiled into debug builds), else a fresh key per run: the suite reads `/admin/update_key` (or `/update/pubkey`) and registers it through `thebox-debug://guide?update_key=…` |
+| `/admin/hold_connection?stream=ID`, `POST /admin/release_holds` | hold one connection slot of the panel user (I-M5-6), 409 when none is free |
+| `media_override: {"<id>": "ac3"}` | an H.264 + AC-3 clip for the "Always passthrough" test (I-M5-27) |
+
+`make_update_apk.py IN.apk OUT.apk --version-code N [--new-key]` rewrites `versionCode` in a debug APK and re-signs it
+(debug key, or a throwaway key for the "another signer" case); `run-instrumented.sh --update-fixtures` builds both fixtures,
+pushes them to `/data/local/tmp`, installs the app and grants it "Install unknown apps" before the run (I-M5-19).
+
 ## Logging
 
 One line per request: timestamp, client, method+path, UA, status, bytes, `cons[user]=active/max`, notes (`REJECT:reason`, `REDIRECT`, `FORCED-CLOSE`, `TZ-WARN`...).

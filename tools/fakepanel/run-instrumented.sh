@@ -10,6 +10,8 @@
 # :app:connectedDebugAndroidTest with -Pandroid.testInstrumentationRunnerArguments.fakepanel=<host-url>, then stops the
 # panel. The emulator reaches the Mac at 10.0.2.2; for a device on the LAN pass --host-url http://<mac-ip>:<port>.
 # --class limits the run to one test class (or Class#method). ffmpeg media are generated on the first panel start.
+# --update-fixtures (M5 I-M5-19, app.thebox.settings.UpdaterTest): builds the debug APK, derives versionCode-2 copies
+# signed with the debug key and with a throwaway key (make_update_apk.py) and pushes them to /data/local/tmp.
 # Needs ANDROID_HOME and JAVA_HOME (docs/m0-toolchain.md) and one connected device/emulator (adb devices).
 set -euo pipefail
 
@@ -17,6 +19,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 PORT=18080
 HOST_URL=""
 CLASS=""
+UPDATE_FIXTURES=0
 EXTRA=()
 PANEL_ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -24,6 +27,7 @@ while [[ $# -gt 0 ]]; do
     --port) PORT="$2"; shift 2 ;;
     --host-url) HOST_URL="$2"; shift 2 ;;
     --class) CLASS="$2"; shift 2 ;;
+    --update-fixtures) UPDATE_FIXTURES=1; shift ;;
     --synthetic) PANEL_ARGS+=(--synthetic "$2"); shift 2 ;;
     --set) PANEL_ARGS+=(--set "$2"); shift 2 ;;
     *) EXTRA+=("$1"); shift ;;
@@ -49,4 +53,22 @@ ARGS=(":app:connectedDebugAndroidTest" "-Pandroid.testInstrumentationRunnerArgum
 if [[ -n "$CLASS" ]]; then ARGS+=("-Pandroid.testInstrumentationRunnerArguments.class=${CLASS}"); fi
 
 cd "$ROOT"
+if [[ "$UPDATE_FIXTURES" == 1 ]]; then
+  ./gradlew :app:assembleDebug
+  FIX="${TMPDIR:-/tmp}/thebox-update-fixtures"
+  mkdir -p "$FIX"
+  APK="$ROOT/app/build/outputs/apk/debug/app-universal-debug.apk"
+  python3 "$ROOT/tools/fakepanel/make_update_apk.py" "$APK" "$FIX/thebox-update-v2.apk" --version-code 2
+  python3 "$ROOT/tools/fakepanel/make_update_apk.py" "$APK" "$FIX/thebox-update-other.apk" --version-code 2 --new-key
+  for f in thebox-update-v2.apk thebox-update-other.apk; do
+    adb push "$FIX/$f" "/data/local/tmp/$f" >/dev/null
+    adb shell chmod 644 "/data/local/tmp/$f"
+  done
+  echo "update fixtures pushed to /data/local/tmp"
+  # "Install unknown apps" must be granted before the app process starts: the platform kills the app when the
+  # REQUEST_INSTALL_PACKAGES app-op changes. Install now and grant; Gradle's `install -r` keeps the app-op.
+  adb install -r -t "$APK" >/dev/null
+  adb shell appops set app.thebox.debug REQUEST_INSTALL_PACKAGES allow
+  echo "REQUEST_INSTALL_PACKAGES granted to app.thebox.debug"
+fi
 ./gradlew "${ARGS[@]}" ${EXTRA[@]+"${EXTRA[@]}"}

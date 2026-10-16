@@ -83,6 +83,8 @@ class GuideDebugReceiver : ComponentActivity() {
     @Inject lateinit var guideSettings: GuideSettingsSource
     @Inject lateinit var playerSettings: PlayerSettingsSource
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
+    /** M5 (WP-E): the settings/updater/diagnostics harness. */
+    @Inject lateinit var settingsProbe: SettingsDebugProbe
 
     private lateinit var text: TextView
 
@@ -104,6 +106,16 @@ class GuideDebugReceiver : ComponentActivity() {
 
     private fun handle(intent: Intent?) {
         val uri = intent?.data
+        // M5 (docs/design/m5-setup-settings.md §6.5; WP-E): settings route, wipe, clock offset, update manifest, phone
+        // port and keystore reset, on the `guide` host (the debug manifest registers only that one) or on their own
+        // hosts once the manifest lists them. Seeding on the same link still runs afterwards.
+        if (uri != null && uri.scheme == PlaybackDebugActivity.SCHEME && SettingsDebugProbe.isM5(uri)) {
+            handleM5(uri)
+            if (uri.host != HOST || uri.getQueryParameter("seed").isNullOrBlank()) {
+                finish()
+                return
+            }
+        }
         if (uri == null || uri.scheme != PlaybackDebugActivity.SCHEME || uri.host != HOST) {
             finish()
             return
@@ -142,6 +154,49 @@ class GuideDebugReceiver : ComponentActivity() {
             }
         }
     }
+
+    /**
+     * The M5 switches (§6.5), applied in this order: `keystore_reset=1` (or host `keystore-reset`), `wipe=1` (host
+     * `wipe`), `clock_offset_ms=N` (host `clock?offsetMs=N`), `phone_port=N` (host `phone?port=N`),
+     * `update_manifest=URL` + `update_key=HEX` (host `update?manifest=URL&key=HEX`), `update_check=1|manual`,
+     * `settings=<route>` / `route=<route>` (host `settings?route=…`; [SettingsDebugProbe.parseRoute]). The outcome is
+     * published on [m5Status] (seq + done) for the suite.
+     */
+    private fun handleM5(uri: Uri) {
+        val probe = settingsProbe
+        val seq = ++m5Seq
+        val keystore = uri.host == "keystore-reset" || uri.lastParam("keystore_reset") == "1"
+        val wipe = uri.host == "wipe" || uri.lastParam("wipe") == "1"
+        (uri.lastParam("clock_offset_ms") ?: uri.lastParam("offsetMs"))?.toLongOrNull()?.let { app.thebox.core.diag.DebugOverrides.clockOffsetMs = it }
+        (uri.lastParam("phone_port") ?: if (uri.host == "phone") uri.lastParam("port") else null)?.toIntOrNull()?.let { app.thebox.core.diag.DebugOverrides.phonePort = it }
+        (uri.lastParam("update_manifest") ?: uri.lastParam("manifest"))?.let { probe.updateEndpoint.manifestUrl = it.ifBlank { null } }
+        (uri.lastParam("update_key") ?: if (uri.host == "update") uri.lastParam("key") else null)?.let { probe.updateEndpoint.runtimeKeyHex = it.ifBlank { null } }
+        val check = uri.lastParam("update_check")
+        val route = SettingsDebugProbe.parseRoute(uri.lastParam("settings") ?: uri.lastParam("route"))
+        m5StatusFlow.value = M5Status(seq, done = false)
+        appScope.launch {
+            var error: String? = null
+            try {
+                if (keystore) probe.keystoreReset()
+                if (wipe) probe.wipe(restart = uri.lastParam("restart") != "0")
+                when (check) {
+                    "1", "auto" -> probe.updater.runCheck(manual = false)
+                    "manual" -> probe.updater.runCheck(manual = true)
+                }
+                if (route != null) {
+                    if (uri.lastParam("open") != "0") withContext(Dispatchers.Main) { openGuide() }
+                    probe.open(route)
+                }
+            } catch (t: Throwable) {
+                Log.e(TAG, "M5 switch failed", t)
+                error = t.toString()
+            }
+            m5StatusFlow.value = M5Status(seq, done = true, error = error)
+            Log.i(TAG, "m5 status: ${m5StatusFlow.value} (keystore=$keystore wipe=$wipe check=$check route=$route)")
+        }
+    }
+
+    data class M5Status(val seq: Int = 0, val done: Boolean = true, val error: String? = null)
 
     /** Null on success, else why the settings were not applied (an in-memory settings source may still be a stub). */
     private fun applySettings(uri: Uri): String? {
@@ -247,6 +302,12 @@ class GuideDebugReceiver : ComponentActivity() {
 
         /** Last seed outcome (in-process; the instrumented suite waits on it). */
         val status: StateFlow<SeedStatus> get() = statusFlow
+
+        @Volatile private var m5Seq = 0
+        private val m5StatusFlow = MutableStateFlow(M5Status())
+
+        /** Last M5 switch outcome (§6.5; the M5 suite waits for `seq > before && done`). */
+        val m5Status: StateFlow<M5Status> get() = m5StatusFlow
 
         private fun publish(s: SeedStatus) {
             statusFlow.value = s
