@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Box - Connect</title>
+<link rel="stylesheet" href="/app.css">
+<script src="/pair.js" defer></script>
+</head>
+<body>
+<header><p class="brand">The Box</p></header>
+<main>
+<section class="card">
+<h1>Connect to your TV</h1>
+<p>Enter the 6-digit code shown on the TV.</p>
+<form id="form" novalidate>
+<label for="code">Code</label>
+<input id="code" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="7" autocomplete="off" autocapitalize="none" spellcheck="false">
+<button id="go" type="button" class="send">Connect</button>
+<div id="msg" class="msg hidden" role="status" aria-live="polite"></div>
+</form>
+</section>
+</main>
+<footer>This page is not encrypted (plain HTTP on your home network). Use it on your own Wi-Fi only.</footer>
+</body>
+</html>
