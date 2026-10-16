@@ -83,4 +83,66 @@ interface PlaylistDao {
 
     @Query("SELECT catchup_probe_winner FROM playlist WHERE id = :id")
     suspend fun catchupProbeWinner(id: Long): String?
+
+    // ---- M5 WP-B (docs/design/m5-setup-settings.md §3.3.1, §3.4.5): one column per playlist row, never the whole-row
+    // [update] from a possibly stale entity (M2 N-L13): a refresh writes other columns of the same row concurrently.
+
+    @Query("UPDATE playlist SET name = :name WHERE id = :id")
+    suspend fun setName(id: Long, name: String)
+
+    /** Redacted host or file name only (never a URL with credentials). */
+    @Query("UPDATE playlist SET display_source = :display WHERE id = :id")
+    suspend fun setDisplaySource(id: Long, display: String)
+
+    @Query("UPDATE playlist SET enabled = :enabled WHERE id = :id")
+    suspend fun setEnabled(id: Long, enabled: Boolean)
+
+    @Query("UPDATE playlist SET update_on_start = :value WHERE id = :id")
+    suspend fun setUpdateOnStart(id: Long, value: Boolean)
+
+    /** `PROVIDER` | `PLAYLIST_ORDER` | `START_AT:<n>`. */
+    @Query("UPDATE playlist SET numbering_mode = :mode WHERE id = :id")
+    suspend fun setNumberingMode(id: Long, mode: String)
+
+    /** `PROVIDER` | `NUMBER` | `NAME`. */
+    @Query("UPDATE playlist SET order_mode = :mode WHERE id = :id")
+    suspend fun setOrderMode(id: Long, mode: String)
+
+    /** 0 = manual. */
+    @Query("UPDATE playlist SET refresh_interval_h = :hours WHERE id = :id")
+    suspend fun setRefreshInterval(id: Long, hours: Int)
+
+    @Query("UPDATE playlist SET use_playlist_epg = :value WHERE id = :id")
+    suspend fun setUsePlaylistEpg(id: Long, value: Boolean)
+
+    /** null = the default user agent. Written by the UA row and after a working VLC probe (§3.4.5). */
+    @Query("UPDATE playlist SET user_agent = :userAgent WHERE id = :id")
+    suspend fun setUserAgent(id: Long, userAgent: String?)
+
+    /** Non-secret extra headers (secret ones live in the credential blob). */
+    @Query("UPDATE playlist SET extra_headers_json = :headers WHERE id = :id")
+    suspend fun setExtraHeaders(id: Long, headers: Map<String, String>?)
+
+    /** `AUTO` | `OFF` | a `CatchupMode` name. Clears the probe winner: it was learned for the old mode. */
+    @Query("UPDATE playlist SET catchup_mode_setting = :mode, catchup_probe_winner = NULL WHERE id = :id")
+    suspend fun setCatchupModeSetting(id: Long, mode: String)
+
+    @Query("UPDATE playlist SET catchup_days_override = :days WHERE id = :id")
+    suspend fun setCatchupDaysOverride(id: Long, days: Int?)
+
+    /** `AUTO` | `UTC` | `DEVICE` | `SERVER` | an IANA id. */
+    @Query("UPDATE playlist SET token_zone_setting = :value WHERE id = :id")
+    suspend fun setTokenZoneSetting(id: Long, value: String)
+
+    @Query("UPDATE playlist SET padding_before_sec = :sec WHERE id = :id")
+    suspend fun setPaddingBefore(id: Long, sec: Int)
+
+    @Query("UPDATE playlist SET padding_after_sec = :sec WHERE id = :id")
+    suspend fun setPaddingAfter(id: Long, sec: Int)
+
+    @Query("UPDATE playlist SET max_connections_override = :max WHERE id = :id")
+    suspend fun setMaxConnectionsOverride(id: Long, max: Int?)
+
+    @Query("UPDATE playlist SET ignore_tls_errors = :value WHERE id = :id")
+    suspend fun setIgnoreTlsErrors(id: Long, value: Boolean)
 }
