@@ -38,8 +38,9 @@ class LibraryDatabaseTest {
         val tables = db.strings("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE 'room_%' AND name NOT LIKE 'android_%' AND name NOT LIKE 'channel_fts_%' ORDER BY name")
         assertEquals(
             listOf(
-                "channel", "channel_fts", "channel_group", "channel_prefs", "credential", "epg_mapping", "epg_match", "epg_source",
-                "favourite", "favourite_list", "group_prefs", "playlist", "purged_key", "refresh_log", "reminder", "stream_source",
+                // v4 (docs/design/m5-setup-settings.md §4.2): app_setting, hide_rule
+                "app_setting", "channel", "channel_fts", "channel_group", "channel_prefs", "credential", "epg_mapping", "epg_match", "epg_source",
+                "favourite", "favourite_list", "group_prefs", "hide_rule", "playlist", "purged_key", "refresh_log", "reminder", "stream_source",
                 "xtream_account",
             ),
             tables,
@@ -50,7 +51,7 @@ class LibraryDatabaseTest {
                 "index_channel_browse", "index_channel_group", "index_channel_group_identity", "index_channel_identity", "index_channel_missing",
                 "index_channel_number", "index_channel_prefs_recent", "index_channel_tvg", "index_epg_mapping_ref", "index_epg_mapping_source", "index_epg_match_ref", "index_epg_match_source",
                 "index_epg_match_status", "index_epg_source_hash", "index_epg_source_origin", "index_epg_source_playlist",
-                "index_favourite_channel", "index_purged_key_age", "index_refresh_log_target", "index_reminder_due", "index_reminder_identity",
+                "index_favourite_channel", "index_hide_rule_playlist", "index_playlist_uid", "index_purged_key_age", "index_refresh_log_target", "index_reminder_due", "index_reminder_identity",
                 "index_stream_source_source",
             ),
             indexes,

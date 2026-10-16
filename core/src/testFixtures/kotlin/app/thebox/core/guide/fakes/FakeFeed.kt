@@ -52,9 +52,9 @@ class FakeGuideLibrary(channels: List<GuideChannel> = GuideFixtures.channels(50)
     fun tickRowContent() { rowContentTicks.update { it + 1 } }
     fun replace(channel: GuideChannel) { byRowId[channel.rowId] = channel; tickRowContent() }
 
-    override fun sources(unlocked: Boolean): Flow<List<GuideSourceEntry>> = sourceEntries
+    override fun sources(access: app.thebox.core.parental.ParentalAccess): Flow<List<GuideSourceEntry>> = sourceEntries
 
-    override fun lineup(source: GuideSource, unlocked: Boolean): Flow<GuideLineup> = version.map { v ->
+    override fun lineup(source: GuideSource, access: app.thebox.core.parental.ParentalAccess): Flow<GuideLineup> = version.map { v ->
         val ids = when (source) {
             is GuideSource.All -> byRowId.values.filter { it.identity !in hidden }.map { it.rowId }
             is GuideSource.Favourites -> byRowId.values.filter { it.identity in favourites && it.identity !in hidden }.map { it.rowId }
@@ -65,7 +65,7 @@ class FakeGuideLibrary(channels: List<GuideChannel> = GuideFixtures.channels(50)
 
     override suspend fun channels(rowIds: LongArray, from: Int, to: Int): List<GuideChannel?> = (from until to).map { byRowId[rowIds[it]] }
     override suspend fun rowIdOf(identity: ChannelIdentity): Long? = byRowId.values.firstOrNull { it.identity == identity }?.rowId
-    override suspend fun byNumber(playlistId: Long?, number: Int, unlocked: Boolean): GuideChannel? =
+    override suspend fun byNumber(playlistId: Long?, number: Int, access: app.thebox.core.parental.ParentalAccess): GuideChannel? =
         byRowId.values.firstOrNull { it.number == number && it.identity !in hidden }
     override suspend fun isFavourite(identity: ChannelIdentity): Boolean = identity in favourites
     override suspend fun setFavourite(identity: ChannelIdentity, on: Boolean) {

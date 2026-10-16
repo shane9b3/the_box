@@ -69,4 +69,9 @@ data class ChannelEntity(
      * `channel_fts` keep the raw [name].
      */
     @ColumnInfo(name = "display_name") val displayName: String? = null,
+    /**
+     * v4 (docs/design/m5-setup-settings.md §4.2): derived by WP-D's hide-rule pass (never backed up); the §4.3 predicate
+     * filters on it. Not in RoomMergeSink's column list: inserts get the column default.
+     */
+    @ColumnInfo(name = "rule_hidden", defaultValue = "0") val ruleHidden: Boolean = false,
 )

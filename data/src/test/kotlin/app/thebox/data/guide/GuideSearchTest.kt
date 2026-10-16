@@ -103,7 +103,8 @@ class GuideSearchTest {
 
     @After fun tearDown() { db.close(); dir.deleteRecursively() }
 
-    private fun search(q: String, unlocked: Boolean = false) = runBlocking { gg.search.search(q, nowMs, unlocked) }
+    private fun search(q: String, unlocked: Boolean = false) =
+        runBlocking { gg.search.search(q, nowMs, access = app.thebox.core.parental.legacyParentalAccess(unlocked)) }
     private fun key(h: ProgrammeHit) = ids.entries.single { it.value == h.channel.rowId }.key
 
     @Test

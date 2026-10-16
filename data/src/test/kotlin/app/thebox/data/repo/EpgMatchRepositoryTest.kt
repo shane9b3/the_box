@@ -92,7 +92,7 @@ class EpgMatchRepositoryTest {
         val hbo = g.matches.matches(ChannelIdentity(p, StableKey("hbo")))
         assertEquals(setOf("hbo.east", "hbo.west"), hbo.map { it.xmltvId }.toSet())
         assertTrue(hbo.all { it.status == 1 })
-        assertEquals(listOf("hbo"), g.matches.unmatched(unlocked = true).first().map { it.stableKey })
+        assertEquals(listOf("hbo"), g.matches.unmatched(access = app.thebox.core.parental.ParentalAccess.OPEN).first().map { it.stableKey })
     }
 
     @Test

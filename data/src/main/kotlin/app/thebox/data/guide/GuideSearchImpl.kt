@@ -1,5 +1,7 @@
 package app.thebox.data.guide
 
+import app.thebox.core.parental.ParentalAccess
+import app.thebox.core.parental.legacyUnlocked
 import app.thebox.core.common.BoxLog
 import app.thebox.core.common.Hash64
 import app.thebox.core.epg.EpgChannelRef
@@ -40,7 +42,8 @@ class GuideSearchImpl @Inject constructor(
     @IoDispatcher private val io: CoroutineDispatcher,
 ) : GuideSearch {
 
-    override suspend fun search(query: String, nowMs: Long, unlocked: Boolean): SearchResults = withContext(io) {
+    override suspend fun search(query: String, nowMs: Long, access: ParentalAccess): SearchResults = withContext(io) {
+        val unlocked = access.legacyUnlocked // (M5 commit 0, S10) until WP-C's §4.3 predicate
         val q = query.trim()
         val noGuide = store.info.value == null
         if (q.count { it.isLetterOrDigit() } < MIN_CHARS) return@withContext SearchResults(q, emptyList(), emptyList(), noGuide)

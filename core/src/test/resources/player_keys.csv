@@ -76,6 +76,9 @@ bare,live,D,DIGIT,0,0,NONE,F,-,-,-
 bare,live,D,NUMBER_ENTRY,0,0,NONE,F,-,-,-
 bare,live,D,OPEN_GUIDE,0,0,NONE,F,-,-,-
 bare,live,D,EXIT,0,0,NONE,F,-,-,-
+# M5 commit 0 (docs/design/m5-setup-settings.md §2.12 item 1): the guide machine owns the appended actions (WP-C).
+bare,live,D,OPEN_SEARCH,0,0,NONE,F,-,-,-
+bare,live,D,OPEN_SETTINGS,0,0,NONE,F,-,-,-
 bare,live,D,REMIND,0,0,NONE,T,-,-,-
 bare,live,D,PAGE_UP,0,0,NONE,T,-,-,-
 bare,live,D,PAGE_DOWN,0,0,NONE,T,-,-,-

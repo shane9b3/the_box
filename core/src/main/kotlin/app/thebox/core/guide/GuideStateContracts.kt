@@ -11,8 +11,16 @@ enum class PanelButton { WATCHING, WATCH_NOW, WATCH, FROM_START, REMIND, REMINDE
 /** (reviewed 2026-10-14, E22) Rows at the top of the Groups panel. */
 enum class GroupsShortcut { SEARCH, SETTINGS }
 enum class HeaderChip { GROUP, NOW, DAY }
-enum class MenuItem { WATCH, WATCH_FROM_START, REMIND, CANCEL_REMINDER, ADD_FAVOURITE, REMOVE_FAVOURITE, HIDE_CHANNEL }
-enum class GroupMenuItem { HIDE, MOVE_UP, MOVE_DOWN }
+enum class MenuItem {
+    WATCH, WATCH_FROM_START, REMIND, CANCEL_REMINDER, ADD_FAVOURITE, REMOVE_FAVOURITE, HIDE_CHANNEL,
+    // M5 (docs/design/m5-setup-settings.md §2.12 item 2; append-only)
+    LOCK_CHANNEL, UNLOCK_CHANNEL, FIX_GUIDE_DATA, CHANNEL_OPTIONS,
+}
+enum class GroupMenuItem {
+    HIDE, MOVE_UP, MOVE_DOWN,
+    // M5 (§2.12 item 2; append-only)
+    LOCK, UNLOCK,
+}
 
 data class PanelState(
     val channelNumber: Int?,
@@ -77,6 +85,10 @@ data class GuideUiState(
     val groupCard: String? = null,
     /** (M4) The archive session, for the mini player's PAUSED / −MM:SS pills (PillRules, §3.2.3). */
     val archive: app.thebox.core.catchup.archive.ArchiveStatus? = null,
+    /** (M5, §2.12 item 2, decision §0.9) The PIN prompt: one modal layer drawn above every mode. */
+    val pin: app.thebox.core.parental.PinPromptState? = null,
+    /** (M5, §2.12 item 2) The update card (S17), in the guide only (never in FULL). */
+    val update: app.thebox.core.update.UpdateCardState? = null,
 )
 
 /** Inputs of the state machine. All delivered on main. */
@@ -119,6 +131,16 @@ sealed interface GuideEvent {
     data object StartFull : GuideEvent
     /** (M4, owner ruling 2026-10-15) Quick bar → Settings: mode SETTINGS; BACK from SETTINGS returns to FULL when opened from it. */
     data object OpenSettings : GuideEvent
+
+    // M5 (docs/design/m5-setup-settings.md §2.12 item 2)
+    /** Startup's first-run decision (§3.4.1) and other setup entries: mode SETTINGS on [route] (FirstRun: Back exits). */
+    data class OpenSetup(val route: app.thebox.core.settings.SettingsRoute) : GuideEvent
+    data class Parental(val state: app.thebox.core.parental.ParentalState) : GuideEvent
+    /** Answer to [GuideEffects.verifyPin]. */
+    data class PinChecked(val token: Long, val check: app.thebox.core.parental.PinCheck) : GuideEvent
+    /** Keys bound to each action (EffectiveKeyMap), for the footer hints. */
+    data class KeyHints(val hints: Map<BoxAction, List<Int>>) : GuideEvent
+    data class Update(val card: app.thebox.core.update.UpdateCardState?) : GuideEvent
 }
 
 /** Side effects requested by the state machine; implemented by :ui's GuideEffectsImpl (WP-C). Main-safe, non-blocking. */
@@ -148,6 +170,20 @@ interface GuideEffects {
     fun openSearch()
     fun openSettings()
     fun exitApp()
+    // M5 (docs/design/m5-setup-settings.md §2.12 item 2). Defaults keep test doubles compiling; GuideEffectsImpl
+    // delegates each to the interface the owning WP implements (§1.3a).
+    /** PBKDF2 check on IO; the answer is [GuideEvent.PinChecked]. The effect zeroes [digits] after the check. */
+    fun verifyPin(token: Long, digits: CharArray) { digits.fill('\u0000') }
+    /** Overload of [openSettings]; the old `openSettings()` = [app.thebox.core.settings.SettingsRoute.Root]. */
+    fun openSettings(route: app.thebox.core.settings.SettingsRoute) = Unit
+    /** EXIT stops playback (M3 H-L3, M4 §7.1): `controller.stop(USER)`. */
+    fun stopPlayback() = Unit
+    /** A button of the update card (S17). */
+    fun updateAction(action: app.thebox.core.update.UpdateAction) = Unit
+    /** (lead amendment, §1.9a) Channel menu Lock / Unlock (`MenuItem.LOCK_CHANNEL` / `UNLOCK_CHANNEL`); WP-C dispatches it. */
+    fun setChannelLocked(channel: GuideChannel, locked: Boolean) = Unit
+    /** (lead amendment, §1.9a) Group menu Lock / Unlock (`GroupMenuItem.LOCK` / `UNLOCK`); WP-C dispatches it. */
+    fun setGroupLocked(entry: GuideSourceEntry, locked: Boolean) = Unit
     fun toast(kind: GuideToast, arg: String? = null)
     /** TalkBack/VoiceView announcement (debounced by the caller). */
     fun announce(text: String)
@@ -201,6 +237,16 @@ interface GuideStateMachine {
         set(@Suppress("UNUSED_PARAMETER") value) = Unit
     /** (M4, reviewed 2026-10-15, S5/F9) A player layer is open or archive video is on screen: D-pad LEFT/RIGHT act on DOWN with auto-repeat (their long bindings are ignored). */
     val horizontalRepeat: Boolean get() = false
+
+    /**
+     * (M5, docs/design/m5-setup-settings.md §2.12 item 2, §1.9 item 5) The settings machine SETTINGS delegates to; the
+     * host sets it once after create (S11: while it is null in SETTINGS the machine waits; only BACK on FirstRun acts).
+     */
+    var settings: app.thebox.core.settings.SettingsMachine?
+        get() = null
+        set(@Suppress("UNUSED_PARAMETER") value) = Unit
+    /** (M5, §2.12 item 5, S3) The settings editor is open: the router passes every key except BACK to Compose. */
+    val textInputActive: Boolean get() = false
 
     companion object {
         val NO_DEADLINE: StateFlow<Long> = kotlinx.coroutines.flow.MutableStateFlow(Long.MAX_VALUE)

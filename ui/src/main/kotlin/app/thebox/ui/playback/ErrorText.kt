@@ -99,6 +99,11 @@ object ErrorText {
         ErrorButton.AUDIO_OPTIONS -> R.string.error_button_audio_options
         ErrorButton.STOP -> R.string.error_button_stop
         ErrorButton.GUIDE -> R.string.error_button_guide
+        // M5 (§2.12 item 4, §3.14)
+        ErrorButton.OPEN_SETTINGS -> R.string.error_button_open_settings
+        ErrorButton.USE_SECURE_DNS -> R.string.error_button_secure_dns
+        ErrorButton.REFRESH_PLAYLIST -> R.string.error_button_refresh_playlist
+        ErrorButton.OPEN_EXTERNAL -> R.string.error_button_open_external
     }
 
     /**

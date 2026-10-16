@@ -60,6 +60,37 @@ interface PlaybackController {
     val cues: StateFlow<List<androidx.media3.common.text.Cue>> get() = NO_CUES
     /** (M4) The channel previousChannel() would tune (M2 §3.1.1 rule), for the channel list's pinned row. */
     val previous: StateFlow<ChannelIdentity?> get() = NO_PREVIOUS
+
+    // M5 (docs/design/m5-setup-settings.md §2.12 item 6): members with defaults (WP-A overrides in PlaybackControllerImpl)
+    /**
+     * Re-prepares the current **live** tune with the current settings at the live edge; counts as one re-prepare in the
+     * event log, never a new engine. Called once by `LiveSettingsApplier` when Settings closes (S9). Default: no-op.
+     */
+    fun reapplySettings() = Unit
+    /**
+     * Stops the stream (frees the connection) and returns the resolved URL and headers for the external-player intent
+     * (product §4.4); null when nothing can be handed off. Default: null.
+     */
+    fun handOffExternal(): ExternalHandOff? = null
+    /**
+     * (M5 commit 0, B1) [previousChannel] with the [TuneGuard][app.thebox.core.playback.TuneGuard] refusal visible:
+     * [PreviousResult.Locked] when the target needs the PIN. The default maps the M2 Boolean (never Locked); WP-A
+     * overrides it when the guard lands in the controller.
+     */
+    fun previousChannelResult(): PreviousResult = if (previousChannel()) PreviousResult.Started else PreviousResult.NoPrevious
+}
+
+/** (M5, §2.12 item 6) The external-player hand-off (product §4.4). Never logged with its URL. */
+data class ExternalHandOff(val url: String, val headers: Map<String, String>, val title: String?) {
+    override fun toString(): String = "ExternalHandOff(${app.thebox.core.common.Redact.host(url)})"
+}
+
+/** (M5, §2.12 item 6, B1) Result of a previous-channel request. */
+sealed interface PreviousResult {
+    data object Started : PreviousResult
+    data object NoPrevious : PreviousResult
+    /** The guard refused the target: the caller opens the PIN prompt (or the "not protected" card) for it. */
+    data class Locked(val identity: ChannelIdentity) : PreviousResult
 }
 
 sealed interface TuneTarget {
@@ -101,7 +132,11 @@ interface ArchiveTargets {
 
 data class PositionSnapshot(val positionMs: Long, val bufferedMs: Long, val durationMs: Long?, val isSeekable: Boolean, val archiveStartUtcMs: Long?)
 
-enum class StopReason { USER, BACKGROUND, STANDBY, HDMI_UNPLUGGED, DISPLAY_OFF, LIVE_PAUSE_TIMEOUT, ERROR, RELEASE }
+enum class StopReason {
+    USER, BACKGROUND, STANDBY, HDMI_UNPLUGGED, DISPLAY_OFF, LIVE_PAUSE_TIMEOUT, ERROR, RELEASE,
+    /** (M5, §2.12 item 6, B1) resumeAfterLifecycle refused by the TuneGuard: the guide machine opens the PIN prompt. */
+    LOCKED,
+}
 
 /** What is on screen. [tuneId] increases with every tune/retry. */
 data class NowPlaying(

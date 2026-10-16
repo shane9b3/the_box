@@ -49,7 +49,7 @@ class PlayerContractsTest {
         val ids = BoxAction.entries.map { it.id }
         assertEquals(ids.size, ids.toSet().size, "ids are persisted: unique")
         val m4 = listOf(BoxAction.PLAY, BoxAction.PAUSE, BoxAction.TOGGLE_FAVOURITE, BoxAction.VIDEO_DECODER, BoxAction.PREV_PROGRAMME, BoxAction.NEXT_PROGRAMME, BoxAction.TIME_SHIFT)
-        assertEquals(m4, BoxAction.entries.drop(BoxAction.DIGIT.ordinal + 1), "append-only, after DIGIT")
+        assertEquals(m4, BoxAction.entries.drop(BoxAction.DIGIT.ordinal + 1).take(m4.size), "append-only, after DIGIT (M5 appends after these)")
         assertEquals("favourite_toggle", BoxAction.TOGGLE_FAVOURITE.id)
     }
 

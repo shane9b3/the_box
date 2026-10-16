@@ -149,6 +149,8 @@ private fun GroupMenu(items: List<GroupMenuItem>, focused: Int, modifier: Modifi
                     GroupMenuItem.HIDE -> R.string.guide_group_hide
                     GroupMenuItem.MOVE_UP -> R.string.guide_group_up
                     GroupMenuItem.MOVE_DOWN -> R.string.guide_group_down
+                    GroupMenuItem.LOCK -> R.string.guide_group_lock // M5
+                    GroupMenuItem.UNLOCK -> R.string.guide_group_unlock
                 }
                 Line(stringResource(label), GuideUi.sans(18, FontWeight.Medium, color))
             }

@@ -45,6 +45,30 @@ class KeyRouterTest {
     private fun up(code: Int, at: Long = 1_100) = router.onNative(code, false, 0, 1_000, at)
     private fun acts() = machine.events.filterIsInstance<GuideEvent.Act>()
 
+    /** M5 commit 0 (docs/design/m5-setup-settings.md §2.12 item 5, S3): the editor owns every key but BACK. */
+    @Test fun textInputActivePassesEveryKeyButBackWhichBecomesEditorBack() {
+        val settings = app.thebox.core.settings.fakes.RecordingSettingsMachine()
+        machine.settings = settings
+        mode(ScreenMode.SETTINGS)
+        machine.textInput = true
+        for (code in intArrayOf(Keys.DPAD_DOWN, Keys.DPAD_CENTER, Keys.DIGIT_0 + 5, Keys.CHANNEL_UP, Keys.MENU)) {
+            assertFalse("$code goes to Compose", down(code))
+            assertFalse(up(code))
+        }
+        assertTrue(machine.events.isEmpty())
+        for (code in intArrayOf(Keys.BACK, Keys.ESCAPE, Keys.BUTTON_B)) {
+            assertTrue(down(code))
+            assertTrue("repeats consumed", down(code, repeat = 1, at = 1_050))
+            assertTrue(up(code))
+        }
+        assertEquals(List(3) { app.thebox.core.settings.SettingsEvent.EditorBack }, settings.events)
+        assertTrue("BACK never reaches the guide machine as an Act", machine.events.isEmpty())
+        machine.textInput = false
+        assertTrue(down(Keys.BACK))
+        assertTrue(up(Keys.BACK))
+        assertEquals(BoxAction.BACK, acts().single().action)
+    }
+
     @Test fun dpadActsOnDownAndConsumesItsUp() {
         assertTrue(down(Keys.DPAD_DOWN))
         assertTrue(up(Keys.DPAD_DOWN))

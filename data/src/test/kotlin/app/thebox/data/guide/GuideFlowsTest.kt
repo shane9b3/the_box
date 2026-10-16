@@ -49,8 +49,8 @@ class GuideFlowsTest {
         val ticks = Collections.synchronizedList(ArrayList<Long>())
         val jobs = listOf(
             launch(Dispatchers.IO) { gg.library.rowContent.collect { ticks += it } },
-            launch(Dispatchers.IO) { gg.library.lineup(GuideSource.All(p), false).collect() },
-            launch(Dispatchers.IO) { gg.library.sources(false).collect() },
+            launch(Dispatchers.IO) { gg.library.lineup(GuideSource.All(p), app.thebox.core.parental.ParentalAccess.LOCKED_AUTO).collect() },
+            launch(Dispatchers.IO) { gg.library.sources(app.thebox.core.parental.ParentalAccess.LOCKED_AUTO).collect() },
         )
         withTimeout(5_000) { while (gg.queries.lineupQueries == 0 || gg.library.sourceBuilds == 0) delay(20) }
         // The first watch of a channel adds it to "Recently watched": the Groups panel may rebuild once for that.
@@ -81,7 +81,7 @@ class GuideFlowsTest {
     fun recentFollowsTheWatchHistory() = runBlocking {
         db.channelPrefsDao().recordWatched(p, "k1", 1_000)
         val seen = Collections.synchronizedList(ArrayList<List<Long>>())
-        val job = launch(Dispatchers.IO) { gg.library.lineup(GuideSource.Recent, false).collect { seen += it.rowIds.toList() } }
+        val job = launch(Dispatchers.IO) { gg.library.lineup(GuideSource.Recent, app.thebox.core.parental.ParentalAccess.LOCKED_AUTO).collect { seen += it.rowIds.toList() } }
         withTimeout(5_000) { while (seen.isEmpty()) delay(20) }
         db.channelPrefsDao().recordWatched(p, "k4", 2_000)
         withTimeout(5_000) { while (seen.last().size < 2) delay(20) }

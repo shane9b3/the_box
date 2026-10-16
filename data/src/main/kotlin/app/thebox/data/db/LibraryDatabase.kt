@@ -21,7 +21,9 @@ import app.thebox.data.db.dao.PlaylistDao
 import app.thebox.data.db.dao.RefreshLogDao
 import app.thebox.data.db.dao.ReminderDao
 import app.thebox.data.db.dao.XtreamAccountDao
+import app.thebox.data.db.entity.AppSettingEntity
 import app.thebox.data.db.entity.ChannelEntity
+import app.thebox.data.db.entity.HideRuleEntity
 import app.thebox.data.db.entity.ChannelFtsEntity
 import app.thebox.data.db.entity.ChannelGroupEntity
 import app.thebox.data.db.entity.ChannelPrefsEntity
@@ -53,6 +55,10 @@ import kotlinx.coroutines.CoroutineDispatcher
  * `reminder.shift_min` and the reverse-lookup indexes `index_epg_match_ref`/`index_epg_mapping_ref`, by the
  * hand-written [Migrations.MIGRATION_2_3] (five `ALTER TABLE … ADD COLUMN`s and two `CREATE INDEX`es, no table
  * rebuild; an `@AutoMigration` would rebuild the two indexed tables).
+ *
+ * v4 (docs/design/m5-setup-settings.md §4.2): `app_setting` and `hide_rule`, derived `rule_hidden` on `channel` and
+ * `channel_group`, `playlist.uid` (backfilled, unique) and `playlist.hide_rules_ver`, by the hand-written
+ * [Migrations.MIGRATION_3_4] (no table rebuild).
  */
 @Database(
     version = LibraryDatabase.VERSION,
@@ -76,6 +82,9 @@ import kotlinx.coroutines.CoroutineDispatcher
         ReminderEntity::class,
         RefreshLogEntity::class,
         PurgedKeyEntity::class,
+        // v4 (docs/design/m5-setup-settings.md §4.2)
+        AppSettingEntity::class,
+        HideRuleEntity::class,
     ],
 )
 @TypeConverters(Converters::class)
@@ -93,9 +102,14 @@ abstract class LibraryDatabase : RoomDatabase() {
     abstract fun reminderDao(): ReminderDao
     abstract fun refreshLogDao(): RefreshLogDao
     abstract fun maintenanceDao(): MaintenanceDao
+    // M5 commit 0 (docs/design/m5-setup-settings.md §1.3a): signatures; the named WPs write the real queries.
+    abstract fun appSettingDao(): app.thebox.data.db.dao.AppSettingDao
+    abstract fun hideRuleDao(): app.thebox.data.db.dao.HideRuleDao
+    abstract fun hiddenChannelsDao(): app.thebox.data.db.dao.HiddenChannelsDao
+    abstract fun groupAdminDao(): app.thebox.data.db.dao.GroupAdminDao
 
     companion object {
-        const val VERSION = 3
+        const val VERSION = 4
         const val NAME = "library.db"
 
         /** Production builder (§2.1.3). Tests pass `AndroidSQLiteDriver` (Robolectric) instead. */

@@ -92,4 +92,9 @@ fun menuLabel(item: MenuItem): Int = when (item) {
     MenuItem.ADD_FAVOURITE -> R.string.guide_menu_add_favourite
     MenuItem.REMOVE_FAVOURITE -> R.string.guide_menu_remove_favourite
     MenuItem.HIDE_CHANNEL -> R.string.guide_menu_hide_channel
+    // M5 (§2.12 item 2)
+    MenuItem.LOCK_CHANNEL -> R.string.guide_menu_lock_channel
+    MenuItem.UNLOCK_CHANNEL -> R.string.guide_menu_unlock_channel
+    MenuItem.FIX_GUIDE_DATA -> R.string.guide_menu_fix_guide_data
+    MenuItem.CHANNEL_OPTIONS -> R.string.guide_menu_channel_options
 }

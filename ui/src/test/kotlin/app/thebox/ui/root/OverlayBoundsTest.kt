@@ -92,7 +92,7 @@ class OverlayBoundsTest {
         assertOutsideHole(GROUPS_PANEL_TAG)
         show(base.copy(overlay = Overlay.Days(List(15) { DayItem(it, "Day $it", it % 4 != 0) }, focused = 5)))
         assertOutsideHole(DAY_STRIP_TAG)
-        show(base.copy(overlay = Overlay.Menu(MenuItem.entries, focused = 2)))
+        show(base.copy(overlay = Overlay.Menu(MenuItem.entries.take(7), focused = 2))) // the M4 items; M5 commit 0 appends four not offered yet
         assertOutsideHole(CONTEXT_MENU_TAG)
         show(base.copy(overlay = Overlay.Sheet(reminderSet = true, focused = 1)))
         assertOutsideHole(PROGRAMME_SHEET_TAG)

@@ -11,6 +11,7 @@ import app.thebox.data.db.LibraryDatabase
 import app.thebox.data.db.entity.PlaylistEntity
 import app.thebox.data.di.WallClock
 import app.thebox.data.security.KeystoreAeadProvider
+import app.thebox.data.security.PrefsKeyResetFlag
 import app.thebox.data.security.TinkCredentialStore
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import kotlinx.coroutines.Dispatchers
@@ -36,7 +37,7 @@ class I2KeystoreCredentialTest {
         val provider = KeystoreAeadProvider(context)
         provider.reset()
         try {
-            val store = TinkCredentialStore(provider, db.credentialDao(), db.playlistDao(), Dispatchers.IO, WallClock.SYSTEM)
+            val store = TinkCredentialStore(provider, db.credentialDao(), db.playlistDao(), Dispatchers.IO, WallClock.SYSTEM, PrefsKeyResetFlag(context))
             val p = db.playlistDao().insert(PlaylistEntity(name = "P", type = PlaylistType.XTREAM, credentialRef = "cred-x", displaySource = "h", sortIndex = 0, createdAt = 1))
             val secret = PlaylistSecret(listOf("http://panel"), "user", "pass")
             assertEquals(Outcome.Ok(Unit), store.put("cred-x", secret))
@@ -44,7 +45,7 @@ class I2KeystoreCredentialTest {
 
             // Simulate a Keystore reset: the master key disappears, the wrapped keyset stays in prefs.
             KeyStore.getInstance("AndroidKeyStore").apply { load(null) }.deleteEntry(KeystoreAeadProvider.MASTER_KEY_ALIAS)
-            val fresh = TinkCredentialStore(KeystoreAeadProvider(context), db.credentialDao(), db.playlistDao(), Dispatchers.IO, WallClock.SYSTEM)
+            val fresh = TinkCredentialStore(KeystoreAeadProvider(context), db.credentialDao(), db.playlistDao(), Dispatchers.IO, WallClock.SYSTEM, PrefsKeyResetFlag(context))
             val r = fresh.get("cred-x")
             assertEquals(Outcome.Err(SourceError.Credentials(CredentialFailure.KEY_INVALIDATED)), r)
             assertEquals(0, db.credentialDao().count())

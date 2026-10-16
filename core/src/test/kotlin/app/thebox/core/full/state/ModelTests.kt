@@ -360,7 +360,7 @@ class QuickBarModelTest {
     }
 
     @Test fun quickItemOrderIsTheContractOrder() =
-        assertEquals(listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, START_OVER, JUMP_TO_LIVE, TIME_SHIFT, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, SCREEN_OFF, SETTINGS), QuickItem.entries.toList())
+        assertEquals(listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, START_OVER, JUMP_TO_LIVE, TIME_SHIFT, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, SCREEN_OFF, SOURCES, SETTINGS), QuickItem.entries.toList())
 
     @Suppress("unused") private fun unused() = assertNotNull(prev)
 }

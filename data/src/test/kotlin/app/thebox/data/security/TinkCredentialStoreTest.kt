@@ -5,6 +5,7 @@ import app.thebox.core.common.Outcome
 import app.thebox.core.common.Redact
 import app.thebox.core.common.SourceError
 import app.thebox.data.contracts.PlaylistSecret
+import app.thebox.data.contracts.SecureBlobStore
 import app.thebox.data.db.LibraryDatabase
 import app.thebox.data.db.entity.CredentialEntity
 import app.thebox.data.testutil.FakeClock
@@ -56,11 +57,12 @@ class TinkCredentialStoreTest {
     private lateinit var db: LibraryDatabase
     private val provider = FakeProvider()
     private lateinit var store: TinkCredentialStore
+    private val resetFlag by lazy { PrefsKeyResetFlag(androidx.test.core.app.ApplicationProvider.getApplicationContext()) }
 
     @Before
     fun setUp() {
         db = TestDb.create()
-        store = TinkCredentialStore(provider, db.credentialDao(), db.playlistDao(), Dispatchers.IO, FakeClock()).apply { retryDelayMs = 1 }
+        store = TinkCredentialStore(provider, db.credentialDao(), db.playlistDao(), Dispatchers.IO, FakeClock(), resetFlag).apply { retryDelayMs = 1 }
     }
 
     @After fun tearDown() { db.close() }
@@ -115,6 +117,52 @@ class TinkCredentialStoreTest {
         assertTrue(db.playlistDao().get(p)!!.needsReauth)
         provider.failures += UnrecoverableKeyException("gone")
         assertEquals(Outcome.Err(SourceError.Credentials(CredentialFailure.KEY_INVALIDATED)), store.put("cred-c", secret))
+    }
+
+    // ---- M5 commit 0 (docs/design/m5-setup-settings.md §2.12 item 8): SecureBlobStore on the same AEAD
+
+    @Test
+    fun blobsRoundTripBoundToTheirRef() = runBlocking {
+        val pin = byteArrayOf(1, 2, 3, 4, 5)
+        assertEquals(Outcome.Err(SourceError.Credentials(CredentialFailure.MISSING)), store.getBlob(SecureBlobStore.REF_PARENTAL_PIN))
+        assertEquals(Outcome.Ok(Unit), store.putBlob(SecureBlobStore.REF_PARENTAL_PIN, pin))
+        assertTrue((store.getBlob(SecureBlobStore.REF_PARENTAL_PIN) as Outcome.Ok).value.contentEquals(pin))
+        assertFalse("stored encrypted", db.credentialDao().get(SecureBlobStore.REF_PARENTAL_PIN)!!.ciphertext.contentEquals(pin))
+        // AD = ref: the PIN blob moved under the passphrase ref does not decrypt.
+        val moved = db.credentialDao().get(SecureBlobStore.REF_PARENTAL_PIN)!!
+        db.credentialDao().upsert(CredentialEntity(SecureBlobStore.REF_BACKUP_PASSPHRASE, moved.ciphertext, updatedAt = 1))
+        assertEquals(Outcome.Err(SourceError.Credentials(CredentialFailure.CORRUPT)), store.getBlob(SecureBlobStore.REF_BACKUP_PASSPHRASE))
+        // A playlist secret ref read as a blob gives the AEAD plaintext; a blob is never readable as a PlaylistSecret.
+        assertEquals(Outcome.Err(SourceError.Credentials(CredentialFailure.CORRUPT)), store.get(SecureBlobStore.REF_PARENTAL_PIN))
+        store.deleteBlob(SecureBlobStore.REF_PARENTAL_PIN)
+        assertEquals(Outcome.Err(SourceError.Credentials(CredentialFailure.MISSING)), store.getBlob(SecureBlobStore.REF_PARENTAL_PIN))
+    }
+
+    @Test
+    fun blobTransientFailureIsUnavailableAndKeepsTheRow() = runBlocking {
+        store.putBlob(SecureBlobStore.REF_PARENTAL_PIN, byteArrayOf(9))
+        provider.failures += KeyStoreException("busy"); provider.failures += KeyStoreException("busy")
+        assertEquals(Outcome.Err(SourceError.Credentials(CredentialFailure.UNAVAILABLE)), store.getBlob(SecureBlobStore.REF_PARENTAL_PIN))
+        assertEquals(1, db.credentialDao().count())
+        assertFalse(resetFlag.pinLost())
+    }
+
+    /** §3.9.6, S8: the permanent-loss wipe deletes the PIN verifier with every other row and sets pin_lost_to_key_reset. */
+    @Test
+    fun permanentKeyLossWipesBlobsAndSetsTheKeyResetFlag() = runBlocking {
+        resetFlag.clearPinLost()
+        store.putBlob(SecureBlobStore.REF_PARENTAL_PIN, byteArrayOf(9))
+        store.putBlob(SecureBlobStore.REF_BACKUP_PASSPHRASE, byteArrayOf(8))
+        store.put("cred-a", secret)
+        provider.failures += UnrecoverableKeyException("gone")
+        assertEquals(Outcome.Err(SourceError.Credentials(CredentialFailure.KEY_INVALIDATED)), store.getBlob(SecureBlobStore.REF_PARENTAL_PIN))
+        assertEquals(0, db.credentialDao().count())
+        assertTrue(resetFlag.pinLost())
+        val prefs = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+            .getSharedPreferences(PrefsKeyResetFlag.PREFS, android.content.Context.MODE_PRIVATE)
+        assertTrue("SharedPreferences parental_attempts", prefs.getBoolean(PrefsKeyResetFlag.KEY_PIN_LOST, false))
+        resetFlag.clearPinLost()
+        assertFalse(resetFlag.pinLost())
     }
 
     @Test

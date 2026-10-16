@@ -2,11 +2,16 @@ package app.thebox.data.db.entity
 
 import androidx.room.ColumnInfo
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 import app.thebox.core.source.PlaylistType
 
 /** `playlist` (docs/design/m1-data-layer.md §2.1.2). Secrets live in `credential(ref = credentialRef)`. */
-@Entity(tableName = "playlist")
+@Entity(
+    tableName = "playlist",
+    // v4 (docs/design/m5-setup-settings.md §4.2): the portable identity backups key playlists by.
+    indices = [Index(value = ["uid"], unique = true, name = "index_playlist_uid")],
+)
 data class PlaylistEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
@@ -71,4 +76,18 @@ data class PlaylistEntity(
     @ColumnInfo(name = "name_prefix_custom") val namePrefixCustom: String? = null,
     /** v3: `ChannelNamePrefix.RULE_VERSION` the stored `channel.display_name`s were computed with; 0 = never. */
     @ColumnInfo(name = "name_prefix_ver", defaultValue = "0") val namePrefixVer: Int = 0,
-)
+    /**
+     * v4 (docs/design/m5-setup-settings.md §4.2, §2.12 item 10, N6): random identity that survives a reinstall through
+     * a backup (restore maps uid → local id). Nullable in the schema so `ADD COLUMN` is legal (the migration backfills
+     * `lower(hex(randomblob(16)))`); the Kotlin default generates one at construction, so every insert path (tests,
+     * debug receiver, fixtures) has one. Never reassigned: updates go through `copy()`.
+     */
+    val uid: String? = newUid(),
+    /** v4: bumped on every hide-rule change of this playlist; the rule pass recomputes `rule_hidden` when it moves. */
+    @ColumnInfo(name = "hide_rules_ver", defaultValue = "0") val hideRulesVer: Int = 0,
+) {
+    companion object {
+        /** 32 lower-case hex chars, the same shape as the migration's `lower(hex(randomblob(16)))`. */
+        fun newUid(): String = java.util.UUID.randomUUID().toString().replace("-", "")
+    }
+}

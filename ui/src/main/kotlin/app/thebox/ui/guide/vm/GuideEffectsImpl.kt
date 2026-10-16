@@ -1,5 +1,10 @@
 package app.thebox.ui.guide.vm
 
+import app.thebox.core.settings.SettingsRoute
+import app.thebox.core.update.UpdateAction
+import app.thebox.player.api.StopReason
+import app.thebox.ui.root.EffectDelegates
+import app.thebox.core.parental.legacyParentalAccess
 import app.thebox.core.common.BoxLog
 import app.thebox.core.guide.GroupAction
 import app.thebox.core.guide.GuideChannel
@@ -64,6 +69,8 @@ class GuideEffectsImpl(
     private val shell: ShellEffects,
     /** Called with every lineup the current source emits (the view model updates the zap list, §3.16.3). */
     private val onLineup: (GuideLineup) -> Unit = {},
+    /** (M5 commit 0, docs/design/m5-setup-settings.md §1.3a) What the M5 effects delegate to. */
+    private val delegates: EffectDelegates = EffectDelegates.NONE,
 ) : GuideEffects {
 
     private var lineupJob: Job? = null
@@ -80,9 +87,9 @@ class GuideEffectsImpl(
         lineupJob?.cancel()
         currentSource = source
         currentLineup = null
-        val unlocked = settings.settings.value.debugUnlocked
+        val access = legacyParentalAccess(settings.settings.value.debugUnlocked) // (M5 commit 0, S10)
         lineupJob = scope.launch {
-            library.lineup(source, unlocked).collect { lineup ->
+            library.lineup(source, access = access).collect { lineup ->
                 currentLineup = lineup
                 rows()?.setLineup(lineup)
                 pager()?.invalidate()
@@ -209,9 +216,9 @@ class GuideEffectsImpl(
             is GuideSource.Group -> s.playlistId
             else -> controller.state.value.target?.identity?.playlistId
         }
-        val unlocked = settings.settings.value.debugUnlocked
+        val access = legacyParentalAccess(settings.settings.value.debugUnlocked) // (M5 commit 0, S10)
         launchSafely("number") {
-            val ch = library.byNumber(playlistId, number, unlocked)
+            val ch = library.byNumber(playlistId, number, access = access)
             val index = ch?.let { rows()?.indexOf(it.rowId) } ?: -1
             dispatch(GuideEvent.Number(token, ch, index))
         }
@@ -234,6 +241,20 @@ class GuideEffectsImpl(
     override fun openSettings() = shell.openSettings()
 
     override fun exitApp() = shell.exitApp()
+
+    // ---- M5 commit 0 (docs/design/m5-setup-settings.md §2.12 item 2, §1.3a): one-line delegations
+
+    override fun verifyPin(token: Long, digits: CharArray) = delegates.parental.verifyPin(token, digits) { dispatch(GuideEvent.PinChecked(token, it)) }
+
+    override fun openSettings(route: SettingsRoute) = delegates.settings.openSettings(route, fromFull = false, detached = false)
+
+    override fun stopPlayback() = controller.stop(StopReason.USER)
+
+    override fun updateAction(action: UpdateAction) = delegates.updates.act(action)
+
+    override fun setChannelLocked(channel: GuideChannel, locked: Boolean) = delegates.parental.setChannelLocked(channel, locked)
+
+    override fun setGroupLocked(entry: GuideSourceEntry, locked: Boolean) = delegates.parental.setGroupLocked(entry, locked)
 
     override fun toast(kind: GuideToast, arg: String?) = shell.toast(kind, arg)
 

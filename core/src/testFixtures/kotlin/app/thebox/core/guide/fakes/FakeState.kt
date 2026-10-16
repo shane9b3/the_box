@@ -55,6 +55,11 @@ class RecordingGuideEffects : GuideEffects {
     override fun exitApp() = rec("exitApp")
     override fun toast(kind: GuideToast, arg: String?) = rec("toast", kind, arg)
     override fun announce(text: String) = rec("announce", text)
+    // M5 commit 0 (docs/design/m5-setup-settings.md §2.12 item 2). verifyPin records the digit count only, then zeroes.
+    override fun verifyPin(token: Long, digits: CharArray) { rec("verifyPin", token, digits.size); digits.fill('\u0000') }
+    override fun openSettings(route: app.thebox.core.settings.SettingsRoute) = rec("openSettingsRoute", route)
+    override fun stopPlayback() = rec("stopPlayback")
+    override fun updateAction(action: app.thebox.core.update.UpdateAction) = rec("updateAction", action)
 }
 
 /** Records dispatched events; the test drives [ui] and [frame] directly. For WP-C's shell tests. */
@@ -74,6 +79,10 @@ class FakeGuideStateMachine(initial: GuideUiState = GuideUiState()) : GuideState
     /** What [handles] answers (code review 2026-10-14, H-S4). */
     var handlesFn: (app.thebox.core.input.BoxAction) -> Boolean = { true }
     override fun handles(action: app.thebox.core.input.BoxAction): Boolean = handlesFn(action)
+    // M5 commit 0 (§2.12 items 2 and 5): the settings seam the router reads.
+    override var settings: app.thebox.core.settings.SettingsMachine? = null
+    var textInput = false
+    override val textInputActive: Boolean get() = textInput
     fun bumpFrame() = version.update { it + 1 }
 
     companion object {

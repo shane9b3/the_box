@@ -1,0 +1,143 @@
+// Contract (M5 commit 0): docs/design/m5-setup-settings.md §2.2. Verbatim; changes go through the lead.
+package app.thebox.core.settings
+
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.json.JsonElement
+
+/**
+ * One persisted document per domain (`app_setting` row, decision §0.4). Values are kept in memory as StateFlows;
+ * [update] is main-safe: it applies in memory at once and persists on IO, coalesced per domain
+ * (SETTINGS_WRITE_DEBOUNCE_MS) and flushed on ON_STOP.
+ * (reviewed 2026-10-16, S1) Nothing is written for a domain before its first read completed: earlier [update]s are
+ * queued and replayed on the stored document when the read lands (also after the ready timeout, which only unblocks
+ * the first frame with defaults). [importInTransaction] cancels pending writes of the domains it replaces. Values that
+ * are not user choices (PlaybackSettings.defaultUserAgent, test hooks) never enter the store. JSON is `ignoreUnknownKeys`, `encodeDefaults = false`, so a
+ * value equal to its default is not stored and a later default change reaches users who never touched it.
+ */
+class SettingsDomain<T>(
+    val name: String,
+    val serializer: KSerializer<T>,
+    val default: T,
+    /** Carried by backups (§3.10.2). Learned or device-bound domains say false. */
+    val backedUp: Boolean = true,
+    /** Bumped on an incompatible change; the store passes old documents through [migrate]. */
+    val schema: Int = 1,
+    val migrate: (fromSchema: Int, json: JsonElement) -> JsonElement = { _, j -> j },
+)
+
+interface SettingsStore {
+    /** True once every domain was read (or SETTINGS_LOAD_TIMEOUT_MS passed: defaults, logged). */
+    val ready: StateFlow<Boolean>
+    suspend fun awaitReady()
+    /**
+     * (M5 commit 0, additive: the `TheBoxApplication` hook of §1.3a, "settingsStore.load() first") Starts the one
+     * `SELECT * FROM app_setting` on IO and returns at once; idempotent. [ready] opens when it lands.
+     */
+    fun load()
+    fun <T> flow(domain: SettingsDomain<T>): StateFlow<T>
+    fun <T> update(domain: SettingsDomain<T>, transform: (T) -> T)
+    /** Writes pending changes now (ON_STOP, before a backup, before process kill in tests). */
+    suspend fun flush()
+    /** Backup: every [SettingsDomain.backedUp] domain as stored JSON. */
+    suspend fun export(): Map<String, JsonElement>
+    /** Restore inside the caller's library.db transaction (§3.10.4). Unknown domains are ignored. */
+    suspend fun importInTransaction(documents: Map<String, JsonElement>, replace: Boolean)
+}
+
+/** (M5 commit 0) Named constants of Appendix B that commit-0 code reads. */
+object SettingsTimings {
+    /** §0.5: the first frame waits at most this long for [SettingsStore.ready], then uses defaults (S1). */
+    const val SETTINGS_LOAD_TIMEOUT_MS = 1_000L
+    /** §5 item 7: the store's load on the emulator (measured in I-M5-10). */
+    const val SETTINGS_LOAD_BUDGET_MS = 50L
+    /** §2.2: writes are coalesced per domain. */
+    const val SETTINGS_WRITE_DEBOUNCE_MS = 250L
+}
+
+/** The domains (single source of the names; §4.1 lists their fields). */
+object Domains {
+    const val GUIDE = "guide"          // GuidePrefs below (mapped onto core.guide.GuideSettings)
+    const val PLAYER = "player"        // core.full.PlayerSettings
+    const val PLAYBACK = "playback"    // PlaybackPrefs below
+    const val DATA = "data"            // DataPrefs below
+    const val NETWORK = "network"      // core.net.NetworkSettings
+    const val PARENTAL = "parental"    // core.parental.ParentalPolicy
+    const val REMOTE = "remote"        // core.input.KeyBindingOverrides
+    const val BACKUP = "backup"        // BackupPrefs (not backed up: device-bound)
+    const val UPDATE = "update"        // core.update.UpdatePrefs (not backed up)
+    const val SETUP = "setup"          // SetupState (not backed up)
+}
+
+enum class ClockMode { SYSTEM, H12, H24 }
+
+/** Stored form of the guide/interface rows; PersistedGuideSettings maps it onto GuideSettings (SYSTEM → DateFormat.is24HourFormat). */
+@kotlinx.serialization.Serializable
+data class GuidePrefs(
+    val clock: ClockMode = ClockMode.SYSTEM,
+    val showLogos: Boolean = true,
+    val showNumbers: Boolean = true,
+    val performance: app.thebox.core.guide.PerformanceMode = app.thebox.core.guide.PerformanceMode.AUTO,
+    /** null = automatic (Still in low-RAM mode, product §4.6). */
+    val miniStill: Boolean? = null,
+    /** null = automatic (Off in low-end mode). */
+    val ambient: Boolean? = null,
+    val exitConfirmation: app.thebox.core.guide.ExitConfirmation = app.thebox.core.guide.ExitConfirmation.BACK_TWICE,
+    val openGuideOn: app.thebox.core.guide.OpenGuideOn = app.thebox.core.guide.OpenGuideOn.LAST,
+    val reminderAutoSwitch: Boolean = false,
+    val reminderLeadSec: Int = 60,
+    /** "Show advanced settings" (product S11). */
+    val advancedSettings: Boolean = false,
+)
+
+enum class SubtitleMode { OFF, ON, FORCED_ONLY }
+
+/** User-settable part of :player's PlaybackSettings (the rest are test hooks or derived). */
+@kotlinx.serialization.Serializable
+data class PlaybackPrefs(
+    val bufferMode: app.thebox.core.playback.BufferMode = app.thebox.core.playback.BufferMode.AUTO,
+    val videoDecoderMode: app.thebox.core.playback.VideoDecoderMode = app.thebox.core.playback.VideoDecoderMode.AUTO,
+    val softwareAudioFallback: Boolean = true,
+    val preferSoftwareAudio: Boolean = false,
+    val audioOutput: app.thebox.core.playback.AudioOutputMode = app.thebox.core.playback.AudioOutputMode.AUTO,
+    val tunneling: Boolean = false,
+    val afrMode: app.thebox.core.playback.AfrMode = app.thebox.core.playback.AfrMode.SEAMLESS,
+    val hdrInPreview: app.thebox.core.playback.HdrPreviewMode = app.thebox.core.playback.HdrPreviewMode.POSTER,
+    val preferredAudioLanguages: List<String> = emptyList(),
+    /** OFF/ON map to PlaybackSettings.subtitlesEnabled; FORCED_ONLY needs a Media3 check (§9 F21) or ships as OFF/ON only. */
+    val subtitles: SubtitleMode = SubtitleMode.OFF,
+    val preferredTextLanguages: List<String> = emptyList(),
+    val defaultAspect: app.thebox.core.playback.AspectMode = app.thebox.core.playback.AspectMode.FIT,
+    val reconnectAttempts: Int = 5,
+    val failoverToBackup: Boolean = true,
+    val resumeAfterStandby: Boolean = true,
+    /** Package name of the external player, null = none (product §4.4). */
+    val externalPlayer: String? = null,
+)
+
+/** User-settable part of :data's DataSettingsSnapshot. */
+@kotlinx.serialization.Serializable
+data class DataPrefs(
+    /** 0 = Auto (max catch-up days, minimum 1; product §4.3). */
+    val epgPastDays: Int = 0,
+    val epgFutureDays: Int = 7,
+    /** (reviewed 2026-10-16, S12) The existing core.match.MatchLevel (MatchContracts.kt:32), not a new enum. */
+    val matchLevel: app.thebox.core.match.MatchLevel = app.thebox.core.match.MatchLevel.SUGGEST_FUZZY,
+    val storeDescriptions: Boolean = true,
+    val epgRefreshIntervalH: Int = 12,
+    /** (N4) "Daily at a set time": hour 0–23; null = use [epgRefreshIntervalH]. */
+    val epgDailyAtHour: Int? = null,
+    val globalShiftMin: Int = 0,
+)
+
+@kotlinx.serialization.Serializable
+data class SetupState(val completed: Boolean = false, val lastAddedPlaylistId: Long? = null, val pinOfferedFor: Set<String> = emptySet())
+
+@kotlinx.serialization.Serializable
+data class BackupPrefs(
+    val weekly: Boolean = true,
+    val lastAutoAtMs: Long? = null,
+    val lastAutoFile: String? = null,
+    /** A Keystore-wrapped backup passphrase exists (secure blob `backup-passphrase`), so weekly backups include logins. */
+    val passphraseStored: Boolean = false,
+)

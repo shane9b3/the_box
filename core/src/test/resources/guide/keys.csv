@@ -70,6 +70,10 @@ grid,grid_row1,PREV_PROGRAMME,GUIDE,GRID,none,-,row:1
 grid,grid_home,TIME_SHIFT,GUIDE,GRID,none,-,same
 grid,grid_home,GROUP_NEXT,GUIDE,GRID,none,-,same
 grid,grid_home,GROUP_PREV,GUIDE,GRID,none,-,same
+# M5 commit 0 (docs/design/m5-setup-settings.md §2.12 item 1): the appended actions are no-ops in the guide grid until
+# WP-C binds and handles them (OPEN_SEARCH opens Search, OPEN_SETTINGS opens Settings).
+grid,grid_home,OPEN_SEARCH,GUIDE,GRID,none,-,same
+grid,grid_home,OPEN_SETTINGS,GUIDE,GRID,none,-,same
 # ---- TABS §3.4.3
 tabs,tabs,RIGHT,GUIDE,TABS,none,-,tab:1
 tabs,tabs,LEFT,GUIDE,TABS,none,-,tab:0

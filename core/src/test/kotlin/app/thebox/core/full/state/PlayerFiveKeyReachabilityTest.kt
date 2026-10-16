@@ -141,7 +141,7 @@ class PlayerFiveKeyReachabilityTest {
         val missing = buildList {
             addAll(layers.filter { it !in r.layers })
             addAll(items.filter { it !in r.quickSelected }.map { "quick:$it" })
-            addAll(PickerKind.entries.filter { it !in r.pickers }.map { "picker:$it" })
+            addAll(PickerKind.entries.filter { it !in r.pickers && it != PickerKind.SERVER }.map { "picker:$it" }) // M5 commit 0: SERVER arrives with WP-C
             addAll(scrub.filter { it !in r.scrub }.map { "scrub:$it" })
             if (!r.previousRow) add("Previous row")
             addAll(effects.filter { it !in r.effects }.map { "effect:$it" })
@@ -176,7 +176,9 @@ class PlayerFiveKeyReachabilityTest {
             }
         }
         assertTrue(wrong.isEmpty(), "error buttons: $wrong")
-        assertTrue(seen.containsAll(ErrorButton.entries), "every ErrorButton occurs for some code: missing ${ErrorButton.entries - seen}")
+        // M5 commit 0: the four appended buttons are offered only by WP-C's ErrorCardModel (§3.14); WP-C drops this filter.
+        val m4Buttons = ErrorButton.entries - setOf(ErrorButton.OPEN_SETTINGS, ErrorButton.USE_SECURE_DNS, ErrorButton.REFRESH_PLAYLIST, ErrorButton.OPEN_EXTERNAL)
+        assertTrue(seen.containsAll(m4Buttons), "every ErrorButton occurs for some code: missing ${m4Buttons - seen}")
     }
 
     /** A live error for most codes; CATCHUP_NOT_IN_ARCHIVE as a FAILED archive session with a variant left (§3.7). */

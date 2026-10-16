@@ -72,7 +72,8 @@ class LineupQueryTest {
 
     @After fun tearDown() { db.close() }
 
-    private suspend fun lineup(source: GuideSource, unlocked: Boolean = false): GuideLineup = gg.library.lineup(source, unlocked).first()
+    private suspend fun lineup(source: GuideSource, unlocked: Boolean = false): GuideLineup =
+        gg.library.lineup(source, access = app.thebox.core.parental.legacyParentalAccess(unlocked)).first()
     private fun keysOf(l: GuideLineup) = l.rowIds.map { id -> ids.entries.single { it.value == id }.key }
 
     @Test
@@ -114,7 +115,7 @@ class LineupQueryTest {
         val list = db.favouriteDao().insertList(FavouriteListEntity(name = "Fav", sortIndex = 0, createdAt = 0))
         db.favouriteDao().insert(FavouriteEntity(list, p, "n1", 0, 0))
         val seen = Collections.synchronizedList(ArrayList<GuideLineup>())
-        val job = launch(Dispatchers.IO) { gg.library.lineup(GuideSource.Favourites(list), false).toList(seen) }
+        val job = launch(Dispatchers.IO) { gg.library.lineup(GuideSource.Favourites(list), app.thebox.core.parental.ParentalAccess.LOCKED_AUTO).toList(seen) }
         withTimeout(5_000) { while (seen.isEmpty()) delay(20) }
         val v1 = seen.single().version
         // A write that changes nothing visible re-queries but does not re-emit.
@@ -149,7 +150,7 @@ class LineupQueryTest {
         assertEquals(14, lineup(GuideSource.All(p), unlocked = true).archiveDaysUpperBound)
 
         db.exec("UPDATE playlist SET live_count = 5 WHERE id = ?", p)
-        val entries = gg.library.sources(false).first()
+        val entries = gg.library.sources(app.thebox.core.parental.ParentalAccess.LOCKED_AUTO).first()
         assertEquals(listOf(SourceSection.ALL, SourceSection.GROUP), entries.map { it.section }.distinct())
         assertEquals(GuideSource.All(p), entries.first().source)
         assertEquals(5, entries.first().count)
@@ -158,7 +159,7 @@ class LineupQueryTest {
         db.exec("INSERT INTO channel_prefs(playlist_id, stable_key, hidden, watch_count, updated_at, last_watched_at) VALUES (?, 'n1', 0, 1, 1, 200)", p)
         val list = db.favouriteDao().insertList(FavouriteListEntity(name = "Mine", sortIndex = 0, createdAt = 0))
         db.favouriteDao().insert(FavouriteEntity(list, p, "n2", 0, 0))
-        val again = gg.library.sources(false).first()
+        val again = gg.library.sources(app.thebox.core.parental.ParentalAccess.LOCKED_AUTO).first()
         assertEquals(listOf(SourceSection.FAVOURITES, SourceSection.RECENT, SourceSection.ALL, SourceSection.GROUP), again.map { it.section }.distinct())
         assertEquals("Mine", again.first().label)
         assertEquals(n1Id(), gg.library.lastWatched()!!.rowId)

@@ -1,5 +1,13 @@
 package app.thebox.ui.guide.vm
 
+import app.thebox.core.settings.FirstRunDecider
+import app.thebox.core.settings.SettingsMachine
+import app.thebox.core.settings.SettingsRoute
+import app.thebox.core.settings.SettingsStore
+import app.thebox.core.settings.SettingsTimings
+import app.thebox.ui.root.EffectDelegates
+import kotlinx.coroutines.CompletableDeferred
+import app.thebox.core.parental.legacyParentalAccess
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -122,6 +130,10 @@ class GuideViewModel @Inject constructor(
     // M4 (docs/design/m4-player-ux.md §3.10.1, §3.10.3; review B1)
     private val archive: ArchivePlayback,
     private val playerSettings: PlayerSettingsSource,
+    // M5 commit 0 (docs/design/m5-setup-settings.md §0.5, §1.3a, S1/S11)
+    private val settingsStore: SettingsStore,
+    private val firstRun: FirstRunDecider = FirstRunDecider.NONE,
+    delegates: EffectDelegates = EffectDelegates.NONE,
 ) : ViewModel(), ShellHost, ShellEffects {
 
     private val io = Dispatchers.IO
@@ -185,6 +197,7 @@ class GuideViewModel @Inject constructor(
         dispatch = { machine.dispatch(it) },
         shell = this,
         onLineup = ::onLineup,
+        delegates = delegates,
     )
 
     override val machine: GuideStateMachine = stateMachineFactory.create(effects, navigator, labels, renderer, System::currentTimeMillis)
@@ -227,6 +240,19 @@ class GuideViewModel @Inject constructor(
     }
 
     private var attachedPlayer: PlayerHost? = null
+
+    /** (M5 commit 0, S11) Completed by [attachSettings]; [startup] waits for it (bounded, see there). */
+    private val settingsAttached = CompletableDeferred<Unit>()
+
+    /**
+     * (M5 commit 0, docs/design/m5-setup-settings.md §2.13, S11) The settings machine SETTINGS delegates to (the settings
+     * view model's). MainActivity calls this before [startup]; the two activity view models have no creation order, so
+     * the guide machine also copes with a late attach (it waits in SETTINGS while the machine is missing).
+     */
+    fun attachSettings(settings: SettingsMachine) {
+        machine.settings = settings
+        settingsAttached.complete(Unit)
+    }
     override val player: PlayerHost? get() = attachedPlayer
 
     /** `PlayerEvent.GuideSourceNow` (§3.3.1): the guide's current source and lineup, through the bridge when attached. */
@@ -332,8 +358,9 @@ class GuideViewModel @Inject constructor(
                 BoxLog.w(TAG, "last source read failed: ${e.javaClass.simpleName}")
                 null
             }
+            // (M5 commit 0, S10) explicit access; WP-C feeds it from ParentalSession.state.
             settingsSource.settings.map { it.debugUnlocked }.distinctUntilChanged().collect { unlocked ->
-                library.sources(unlocked).collect { machine.dispatch(GuideEvent.Sources(it)) }
+                library.sources(access = legacyParentalAccess(unlocked)).collect { machine.dispatch(GuideEvent.Sources(it)) }
             }
         }
         scope.launch { library.rowContent.collect { rowsCache.reloadLoaded() } }
@@ -455,6 +482,18 @@ class GuideViewModel @Inject constructor(
         started = true
         viewModelScope.launch {
             try {
+                // (M5 commit 0, §0.5, S1/S11) Persisted settings decide the first frame ("On launch", "Open guide on", …):
+                // wait for the store and the settings machine, bounded by SETTINGS_LOAD_TIMEOUT_MS (then defaults, logged).
+                val waited = withTimeoutOrNull(SettingsTimings.SETTINGS_LOAD_TIMEOUT_MS) {
+                    settingsStore.awaitReady()
+                    settingsAttached.await()
+                }
+                if (waited == null) BoxLog.w(TAG, "startup: settings not ready after ${SettingsTimings.SETTINGS_LOAD_TIMEOUT_MS} ms; defaults")
+                // §3.4.1: the first-run decision replaces the startup tune.
+                firstRunRoute()?.let { route ->
+                    machine.dispatch(GuideEvent.OpenSetup(route))
+                    return@launch
+                }
                 val onLaunch = playerSettings.settings.value.onLaunch
                 if (onLaunch != OnLaunch.GUIDE_NOTHING && controller.state.value is PlaybackState.Idle) {
                     library.lastWatched()?.let {
@@ -469,6 +508,13 @@ class GuideViewModel @Inject constructor(
             }
         }
     }
+
+    /**
+     * (M5 commit 0, docs/design/m5-setup-settings.md §3.4.1) The first-run decision, made once after the waits above:
+     * no row in `playlist` and `SetupState.completed == false` → [SettingsRoute.FirstRun]. Delegated to
+     * [FirstRunDecider] (WP-A implements it; commit 0 binds the stub that always answers null, the guide).
+     */
+    private suspend fun firstRunRoute(): SettingsRoute? = firstRun.route()
 
     /**
      * A new lineup for the current source: it becomes the zap list while something plays (§3.16.3, N13). (M4, §3.3.1)

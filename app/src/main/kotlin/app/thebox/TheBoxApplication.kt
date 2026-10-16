@@ -6,6 +6,7 @@ import android.util.Log
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import app.thebox.core.common.BoxLog
+import app.thebox.crash.CrashConfig
 import app.thebox.data.di.ApplicationScope
 import app.thebox.data.di.StartupGate
 import app.thebox.data.epg.EpgRecovery
@@ -48,6 +49,10 @@ class TheBoxApplication : Application(), Configuration.Provider {
     @Inject lateinit var startupGate: StartupGate
     @Inject lateinit var epgRecovery: Lazy<EpgRecovery>
     @Inject lateinit var displayNames: Lazy<DisplayNames>
+    // M5 commit 0 (docs/design/m5-setup-settings.md §1.3a): the startup hooks, in order (bodies: WP-A, WP-E).
+    @Inject lateinit var settingsStore: app.thebox.core.settings.SettingsStore
+    @Inject lateinit var logRing: app.thebox.core.diag.LogRing
+    @Inject lateinit var updates: app.thebox.core.update.UpdateCheckScheduler
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -57,8 +62,20 @@ class TheBoxApplication : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+        // M5 commit 0: ACRA's sender process (`:acra`) only hands stored crash reports to the local file sender.
+        if (CrashConfig.isSenderProcess()) {
+            CrashConfig.installLocalOnly(this)
+            return
+        }
         BoxLog.minLevel = if (BuildConfig.DEBUG) BoxLog.DEBUG else BoxLog.INFO
         BoxLog.sink = BoxLog.Sink { level, tag, message, error -> Log.println(level, tag, if (error == null) message else message + "\n" + app.thebox.core.common.Redact.text(Log.getStackTraceString(error))) }
+        // M5 commit 0 (docs/design/m5-setup-settings.md §1.3a, §0.5): settings load first (one SELECT on IO, returns at
+        // once), the log ring before anything logs (it wraps the sink above), crash reports local only, then the update
+        // check's schedule.
+        settingsStore.load()
+        logRing.install()
+        CrashConfig.installLocalOnly(this)
+        updates.scheduleCheck()
         importMutex.gate = zapImportGate // M2 §3.5.5: importers pause while a zap is in progress
         appScope.launch(Dispatchers.Main) {
             startupGate.awaitOpen()

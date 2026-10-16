@@ -8,6 +8,7 @@ import app.thebox.core.common.Redact
 import app.thebox.core.common.SourceError
 import app.thebox.data.contracts.CredentialStore
 import app.thebox.data.contracts.PlaylistSecret
+import app.thebox.data.contracts.SecureBlobStore
 import app.thebox.data.db.Converters
 import app.thebox.data.db.dao.CredentialDao
 import app.thebox.data.db.dao.PlaylistDao
@@ -37,6 +38,11 @@ import kotlin.coroutines.cancellation.CancellationException
  *   playlist `needs_reauth`, return KEY_INVALIDATED.
  * - Anything else while building the primitive: retry once after 1 s, then UNAVAILABLE with nothing deleted.
  * - One row that does not decrypt: CORRUPT for that ref.
+ *
+ * (M5 commit 0, docs/design/m5-setup-settings.md §2.12 item 8) Also the [SecureBlobStore]: opaque blobs (the parental
+ * PIN verifier, the stored backup passphrase) in the same table under the same AEAD, AD = ref, same failure policy. The
+ * permanent-loss wipe still deletes every row (so the PIN verifier and the passphrase go too) and now also sets
+ * [KeyResetFlag] (`pin_lost_to_key_reset` in SharedPreferences `parental_attempts`, §3.9.6, S8).
  */
 @Singleton
 class TinkCredentialStore @Inject constructor(
@@ -45,7 +51,8 @@ class TinkCredentialStore @Inject constructor(
     private val playlistDao: PlaylistDao,
     @param:IoDispatcher private val io: CoroutineDispatcher,
     private val clock: WallClock,
-) : CredentialStore {
+    private val keyResetFlag: KeyResetFlag,
+) : CredentialStore, SecureBlobStore {
     /** Test hook: delay before the single retry of a transient Keystore failure. */
     internal var retryDelayMs: Long = 1_000
 
@@ -87,6 +94,39 @@ class TinkCredentialStore @Inject constructor(
 
     override suspend fun delete(ref: String) = withContext(io) { credentialDao.delete(ref) }
 
+    // ---- SecureBlobStore (M5 commit 0, §2.12 item 8)
+
+    override suspend fun putBlob(ref: String, bytes: ByteArray): Outcome<Unit> = withContext(io) {
+        when (val a = obtainAead()) {
+            is Outcome.Err -> a
+            is Outcome.Ok -> try {
+                val ct = a.value.encrypt(bytes, ref.encodeToByteArray())
+                credentialDao.upsert(CredentialEntity(ref, ct, KEY_VERSION, clock.now()))
+                Outcome.Ok(Unit)
+            } catch (e: GeneralSecurityException) {
+                BoxLog.w(TAG, "blob encrypt failed", e)
+                Outcome.Err(SourceError.Credentials(CredentialFailure.UNAVAILABLE))
+            }
+        }
+    }
+
+    override suspend fun getBlob(ref: String): Outcome<ByteArray> = withContext(io) {
+        val row = credentialDao.get(ref) ?: return@withContext Outcome.Err(SourceError.Credentials(CredentialFailure.MISSING))
+        when (val a = obtainAead()) {
+            is Outcome.Err -> a
+            is Outcome.Ok -> try {
+                Outcome.Ok(a.value.decrypt(row.ciphertext, ref.encodeToByteArray()))
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                BoxLog.w(TAG, "blob $ref does not decrypt: ${e.javaClass.simpleName}")
+                Outcome.Err(SourceError.Credentials(CredentialFailure.CORRUPT))
+            }
+        }
+    }
+
+    override suspend fun deleteBlob(ref: String) = withContext(io) { credentialDao.delete(ref) }
+
     /** Diagnostics: false when the keyset is not Keystore-wrapped. */
     val usingKeystore: Boolean get() = provider.usingKeystore
 
@@ -114,6 +154,8 @@ class TinkCredentialStore @Inject constructor(
 
     private suspend fun wipe() {
         runCatching { provider.reset() }.onFailure { BoxLog.w(TAG, "keyset reset failed", it) }
+        // (M5, S8) Flag first: the content stays filtered even if the process dies before the rows are gone.
+        runCatching { keyResetFlag.markPinLost() }.onFailure { BoxLog.w(TAG, "key-reset flag not written", it) }
         credentialDao.deleteAll()
         playlistDao.setNeedsReauthAll()
     }

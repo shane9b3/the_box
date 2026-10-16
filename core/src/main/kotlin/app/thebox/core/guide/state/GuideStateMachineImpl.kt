@@ -58,6 +58,8 @@ import app.thebox.core.input.BoxAction
 import app.thebox.core.input.Keys
 import app.thebox.core.playback.NextStep
 import app.thebox.core.playback.PlaybackErrorCode
+import app.thebox.core.settings.SettingsMachine
+import app.thebox.core.settings.SettingsRoute
 import kotlin.math.abs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -124,6 +126,22 @@ class GuideStateMachineImpl(
             return s.mode == ScreenMode.FULL && s.overlay == null && s.reminder == null && full?.horizontalRepeat == true
         }
 
+    /**
+     * (M5 commit 0, docs/design/m5-setup-settings.md §1.9 item 5, §2.12 item 2) The settings machine SETTINGS delegates
+     * to; the host sets it once after create. Set while the mode already is SETTINGS (S11: the activity's view models have
+     * no creation order), it is opened on the pending route at once.
+     */
+    override var settings: SettingsMachine? = null
+        set(value) {
+            if (field === value) return
+            field = value
+            if (value != null && _ui.value.mode == ScreenMode.SETTINGS) value.open(settingsRoute, settingsFromFull)
+        }
+
+    /** (M5, §2.12 item 5, S3) The settings editor is open: the router hands every key but BACK to Compose. */
+    override val textInputActive: Boolean
+        get() = _ui.value.mode == ScreenMode.SETTINGS && settings?.textInputActive == true
+
     private val limits = GuideLimits(labels)
     private val number = NumberEntryImpl()
 
@@ -133,7 +151,7 @@ class GuideStateMachineImpl(
     private var curMs = nowMs()
     private var nowMin = (curMs / 60_000L).toInt()
 
-    private var settings = GuideSettings()
+    private var guideSettings = GuideSettings()
     private var device: DeviceClass? = null
     private var lowEnd = false
     private var dataWindow = GuideDataWindow()
@@ -153,6 +171,8 @@ class GuideStateMachineImpl(
     private var pendingFullReason = EnterReason.USER
     /** (M4, owner ruling 2026-10-15) SETTINGS was opened from the quick bar: BACK returns to FULL. */
     private var settingsFromFull = false
+    /** (M5 commit 0) The route SETTINGS was opened on (FirstRun: BACK exits while the settings machine is missing, S11). */
+    private var settingsRoute: SettingsRoute = SettingsRoute.Root
     private var archive: ArchiveStatus? = null
     /** Identity hash of a live channel tuned from Search: FULL on its first active Tuned (§2.13 item 7). */
     private var pendingFullHash = 0L
@@ -261,6 +281,13 @@ class GuideStateMachineImpl(
             is GuideEvent.Player -> number.setCommitAfterMs(event.settings.numberEntryWaitMs)
             GuideEvent.StartFull -> if (somethingTuned()) goFull(EnterReason.LAUNCH) else { pendingFull = true; pendingFullReason = EnterReason.LAUNCH }
             GuideEvent.OpenSettings -> { val fromFull = u.mode == ScreenMode.FULL; openSettings(); settingsFromFull = fromFull }
+            // M5 commit 0 (docs/design/m5-setup-settings.md §1.9 item 5): OpenSetup opens SETTINGS on its route (the
+            // first-run decision sends FirstRun, §3.4.1); the other new events are no-ops until WP-C fills them.
+            is GuideEvent.OpenSetup -> openSettings(event.route)
+            is GuideEvent.Parental -> Unit
+            is GuideEvent.PinChecked -> Unit
+            is GuideEvent.KeyHints -> Unit
+            is GuideEvent.Update -> Unit
         }
         frame.gridFocused = u.zone == Zone.GRID
         rearmDeferredCard()
@@ -276,6 +303,8 @@ class GuideStateMachineImpl(
 
     private fun act(a: GuideEvent.Act) {
         val action = a.action
+        // M5 commit 0 (§0.9, §1.9 item 5): the PIN prompt is modal above every mode and gets the first refusal.
+        if (u.pin != null && pinKey(a)) return
         // H-B2: the card is modal only where it is drawn (GUIDE, FULL); in SEARCH/SETTINGS it waits for the mode to return.
         if (u.reminder != null && cardShown()) { cardKey(a); return }
         if (action != BoxAction.BACK) returnedFromFull = false
@@ -286,6 +315,8 @@ class GuideStateMachineImpl(
         if (u.overlay != null && overlayKey(a)) return
         // M4 §3.1.1 step 3: in FULL the player machine takes the action first; false falls through to the guide.
         if (u.mode == ScreenMode.FULL) { val f = full; if (f != null && f.act(a)) return }
+        // M5 commit 0 (§1.9 item 5): in SETTINGS the settings machine acts first; the guide acts on what it declines.
+        if (u.mode == ScreenMode.SETTINGS && settingsKey(a)) return
         if (globalKey(a)) return
         when (u.mode) {
             ScreenMode.FULL -> fullKey(a)
@@ -303,8 +334,27 @@ class GuideStateMachineImpl(
         }
     }
 
+    /**
+     * (M5 commit 0, §1.9 item 5, S11) SETTINGS with the settings machine attached: [SettingsMachine.act] first; true when
+     * it consumed the action. Without it (its view model not attached yet) the machine waits: every key is consumed except
+     * BACK, which on FirstRun exits the app (product S1) and elsewhere falls through to M4's "leave Settings" (so a missing
+     * machine can never trap the user).
+     */
+    private fun settingsKey(a: GuideEvent.Act): Boolean {
+        val s = settings
+        if (s != null) return s.act(a)
+        if (a.action != BoxAction.BACK) return true
+        if (settingsRoute == SettingsRoute.FirstRun) { exitApp(); return true }
+        return false
+    }
+
+    /** (M5 commit 0, §0.9, §3.9.3) The PIN pad's keys; WP-C fills the body. False: the key goes on. */
+    @Suppress("UNUSED_PARAMETER")
+    private fun pinKey(a: GuideEvent.Act): Boolean = false
+
     private fun release(action: BoxAction) {
         if (u.mode == ScreenMode.FULL) full?.release(action)
+        if (u.mode == ScreenMode.SETTINGS) settings?.release(action)
         when (action) {
             BoxAction.UP, BoxAction.DOWN, BoxAction.ZAP_UP, BoxAction.ZAP_DOWN, BoxAction.PAGE_UP, BoxAction.PAGE_DOWN -> {
                 if (holdingVertical) {
@@ -569,6 +619,7 @@ class GuideStateMachineImpl(
     /** [reason] decides the player's auto-shown bar (§3.1.1): ARCHIVE, REMINDER, SEARCH, LAUNCH, else USER. */
     private fun goFull(reason: EnterReason = EnterReason.USER) {
         if (u.mode == ScreenMode.FULL) return
+        leavingSettings(ScreenMode.FULL)
         u = u.copy(mode = ScreenMode.FULL, overlay = null, groupCard = null)
         groupCardUntil = Long.MAX_VALUE
         settingsFromFull = false
@@ -590,8 +641,14 @@ class GuideStateMachineImpl(
         refreshFooter()
     }
 
+    /** (M5 commit 0, S9) Every exit from SETTINGS, whatever the route, tells the settings machine once. */
+    private fun leavingSettings(to: ScreenMode) {
+        if (u.mode == ScreenMode.SETTINGS && to != ScreenMode.SETTINGS) settings?.onLeave()
+    }
+
     private fun setMode(mode: ScreenMode) {
         if (u.mode == mode) return
+        leavingSettings(mode)
         val wasFull = u.mode == ScreenMode.FULL
         u = u.copy(mode = mode, overlay = if (mode == ScreenMode.FULL) null else u.overlay)
         if (wasFull && mode != ScreenMode.FULL) { effects.setFullScreen(false); full?.leaveFull() }
@@ -605,10 +662,17 @@ class GuideStateMachineImpl(
         effects.openSearch()
     }
 
-    private fun openSettings() {
+    /**
+     * (M5 commit 0) [route] Root keeps M4's `effects.openSettings()`; other routes use the overload (§2.12 item 2). The
+     * settings machine, when attached, opens on the route (else the `settings` setter opens it on attach, S11).
+     */
+    private fun openSettings(route: SettingsRoute = SettingsRoute.Root) {
+        val fromFull = u.mode == ScreenMode.FULL
         u = u.copy(overlay = null)
+        settingsRoute = route
         setMode(ScreenMode.SETTINGS)
-        effects.openSettings()
+        if (route == SettingsRoute.Root) effects.openSettings() else effects.openSettings(route)
+        settings?.open(route, fromFull)
     }
 
     // ---------------------------------------------------------------- Back ladder and exit (§3.4.6)
@@ -623,7 +687,7 @@ class GuideStateMachineImpl(
     }
 
     private fun exitStep() {
-        when (settings.exitConfirmation) {
+        when (guideSettings.exitConfirmation) {
             ExitConfirmation.BACK_TWICE -> {
                 u = u.copy(overlay = Overlay.Exit(dialog = false, focused = 0))
                 exitHintUntil = curMs + EXIT_CONFIRM_MS
@@ -734,7 +798,7 @@ class GuideStateMachineImpl(
                     val entry = o.entries.getOrNull(o.focused - o.shortcuts.size)
                     val item = menu.getOrNull(o.menuFocused)
                     u = u.copy(overlay = o.copy(menu = null, menuFocused = 0))
-                    if (entry != null && item != null) effects.groupAction(entry, item.toAction())
+                    if (entry != null && item != null) item.toAction()?.let { effects.groupAction(entry, it) }
                 }
                 BoxAction.BACK -> u = u.copy(overlay = o.copy(menu = null, menuFocused = 0))
                 else -> Unit
@@ -845,6 +909,8 @@ class GuideStateMachineImpl(
             MenuItem.ADD_FAVOURITE -> effects.setFavourite(ch, true)
             MenuItem.REMOVE_FAVOURITE -> effects.setFavourite(ch, false)
             MenuItem.HIDE_CHANNEL -> effects.hideChannel(ch)
+            // M5 commit 0: never listed before WP-C (lock, §3.9.1) and WP-A/B (Fix guide data, Channel options).
+            MenuItem.LOCK_CHANNEL, MenuItem.UNLOCK_CHANNEL, MenuItem.FIX_GUIDE_DATA, MenuItem.CHANNEL_OPTIONS -> Unit
         }
     }
 
@@ -1069,7 +1135,7 @@ class GuideStateMachineImpl(
     /** §3.8.4: LAST → the last source if still listed; FAVOURITES → the default list if any; else All(first playlist). */
     private fun initialSource(entries: List<GuideSourceEntry>): GuideSource? {
         val all = entries.firstOrNull { it.section == SourceSection.ALL }?.source
-        return when (settings.openGuideOn) {
+        return when (guideSettings.openGuideOn) {
             OpenGuideOn.LAST -> lastSourceHint?.takeIf { h -> entries.any { it.source == h } } ?: all
             OpenGuideOn.FAVOURITES -> entries.firstOrNull { it.section == SourceSection.FAVOURITES && it.count > 0 }?.source ?: all
             OpenGuideOn.ALL -> all
@@ -1287,7 +1353,7 @@ class GuideStateMachineImpl(
     }
 
     private fun onSettings(s: GuideSettings, d: DeviceClass) {
-        settings = s
+        guideSettings = s
         device = d
         lowEnd = s.performance == PerformanceMode.LOW || (s.performance == PerformanceMode.AUTO && d.lowEnd)
         frame.showLogos = s.showLogos
@@ -1678,6 +1744,7 @@ class GuideStateMachineImpl(
         GroupMenuItem.HIDE -> app.thebox.core.guide.GroupAction.HIDE
         GroupMenuItem.MOVE_UP -> app.thebox.core.guide.GroupAction.MOVE_UP
         GroupMenuItem.MOVE_DOWN -> app.thebox.core.guide.GroupAction.MOVE_DOWN
+        GroupMenuItem.LOCK, GroupMenuItem.UNLOCK -> null // M5 commit 0: never listed before WP-C (§3.9.1)
     }
 
     companion object {

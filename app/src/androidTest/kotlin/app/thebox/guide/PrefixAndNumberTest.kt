@@ -28,7 +28,7 @@ class PrefixTest : GuideTestBase() {
         assertEquals("[DE] News 5 → News 5", "News 5", names[4])
         assertEquals("FR | News 7 → News 7", "News 7", names[6])
         assertEquals("unprefixed unchanged", "News 2", names[1])
-        val hits = runBlocking { ep.search().search("uk", System.currentTimeMillis(), unlocked = false) }.channels
+        val hits = runBlocking { ep.search().search("uk", System.currentTimeMillis(), access = app.thebox.core.parental.ParentalAccess.LOCKED_AUTO) }.channels
         log("I-13 search \"uk\": ${hits.take(5).map { it.displayName }} (${hits.size})")
         assertTrue("search \"uk\" finds UK-prefixed channels (shown stripped)", hits.any { it.number == 3 && it.displayName == "News 3" })
     }
