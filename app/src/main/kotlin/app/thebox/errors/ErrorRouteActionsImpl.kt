@@ -29,8 +29,8 @@ import javax.inject.Inject
  * `:data` (settings, `RefreshScheduler`) and `:player`. Main thread, non-blocking:
  * - USE_SECURE_DNS: `network.dns = CLOUDFLARE`, then `retry()`, toast "Secure DNS is on (Cloudflare)…";
  * - REFRESH_PLAYLIST: `refreshNow(MANUAL)` for the card's playlist, toast;
- * - OPEN_EXTERNAL: Settings → Playback (the external-player row), detached, until WP-A's `ExternalPlayerLauncher`
- *   offers the direct hand-off (§3.3.4: "when a player is chosen or exactly one is installed");
+ * - OPEN_EXTERNAL: (M5 integration) WP-A's `ExternalPlayerLauncher` hands the stream off when a player is chosen or
+ *   exactly one is installed (§3.3.4); otherwise Settings → Playback (the external-player row), detached;
  * - OPEN_SETTINGS is the player machine's own (`PlayerEffects.openSettings(card.route)`).
  */
 class ErrorRouteActionsImpl @Inject constructor(
@@ -39,6 +39,8 @@ class ErrorRouteActionsImpl @Inject constructor(
     private val refresh: RefreshScheduler,
     private val controller: PlaybackController,
     private val navigator: SettingsNavigator,
+    private val launcher: app.thebox.external.ExternalPlayerLauncher,
+    private val applier: app.thebox.core.catchup.archive.LiveSettingsApplier,
 ) : ErrorRouteActions {
     override fun run(button: ErrorButton, card: ErrorCardState) {
         when (button) {
@@ -56,10 +58,29 @@ class ErrorRouteActionsImpl @Inject constructor(
                     BoxLog.w(TAG, "refresh not scheduled: ${e.javaClass.simpleName}")
                 }
             }
-            ErrorButton.OPEN_EXTERNAL -> navigator.openSettings(SettingsRoute.Section(SectionId.PLAYBACK), fromFull = true, detached = true)
+            ErrorButton.OPEN_EXTERNAL -> if (!handOff()) navigator.openSettings(SettingsRoute.Section(SectionId.PLAYBACK), fromFull = true, detached = true)
             ErrorButton.OPEN_SETTINGS -> card.route?.let { navigator.openSettings(it, fromFull = true, detached = true) }
+            // (M5 integration, B2, §3.14) One tap: "Always passthrough" off, applied by one re-prepare (the row is REPREPARE).
+            ErrorButton.BACK_TO_AUTO -> {
+                store.update(app.thebox.core.settings.state.PlaybackDomain) { it.copy(audioOutput = app.thebox.core.playback.AudioOutputMode.AUTO) }
+                try {
+                    applier.apply()
+                } catch (e: RuntimeException) {
+                    BoxLog.w(TAG, "re-prepare after Back to Auto failed: ${e.javaClass.simpleName}")
+                }
+                toast(app.thebox.ui.R.string.error_route_back_to_auto)
+            }
             else -> Unit
         }
+    }
+
+    /** The direct hand-off (§3.3.4): false when no player is chosen and not exactly one is installed, or it refused. */
+    private fun handOff(): Boolean {
+        val pkg = store.flow(app.thebox.core.settings.state.PlaybackDomain).value.externalPlayer
+            ?: launcher.installed().singleOrNull()?.packageName
+            ?: return false
+        val h = controller.handOffExternal() ?: return false
+        return launcher.launch(h, pkg)
     }
 
     private fun toast(res: Int) {
@@ -69,11 +90,8 @@ class ErrorRouteActionsImpl @Inject constructor(
     companion object {
         private const val TAG = "ErrorRoutes"
 
-        /**
-         * The `network` domain (§4.1). WP-A owns the network rows and their domain object; this copy has the same name,
-         * serializer and default, so both address one document. Replace with WP-A's object at integration.
-         */
-        val NetworkDomain: SettingsDomain<NetworkSettings> = SettingsDomain(Domains.NETWORK, NetworkSettings.serializer(), NetworkSettings())
+        /** The `network` domain (§4.1): WP-A's object (M5 integration). */
+        val NetworkDomain: SettingsDomain<NetworkSettings> get() = app.thebox.core.settings.state.NetworkDomain
     }
 }
 

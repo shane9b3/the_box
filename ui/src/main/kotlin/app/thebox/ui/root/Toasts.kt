@@ -49,6 +49,12 @@ fun toastText(res: Resources, kind: GuideToast, arg: String?): String = when (ki
         res.getQuantityString(R.plurals.toast_reminders_missed, n, n)
     }
     GuideToast.EXIT_HINT -> res.getString(R.string.guide_exit_hint)
+    // M5 integration (§3.9.1, B3)
+    GuideToast.CHANNEL_LOCKED -> res.getString(R.string.guide_toast_channel_locked)
+    GuideToast.CHANNEL_UNLOCKED -> res.getString(R.string.guide_toast_channel_unlocked)
+    GuideToast.GROUP_LOCKED -> res.getString(R.string.guide_toast_group_locked)
+    GuideToast.GROUP_UNLOCKED -> res.getString(R.string.guide_toast_group_unlocked)
+    GuideToast.LOCKED_NOT_PROTECTED -> res.getString(R.string.guide_toast_locked_not_protected)
 }
 
 /** A toast at left 64 / bottom 96 (§3.15); never takes focus (keys stay with the root sink). */

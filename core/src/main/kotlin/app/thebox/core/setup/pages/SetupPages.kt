@@ -21,7 +21,7 @@ class SetupPages(private val d: SetupPageDeps) : SetupPageProvider {
     private val editedInPlace = HashSet<Long>()
 
     override fun handles(route: SettingsRoute): Boolean = when (route) {
-        SettingsRoute.FirstRun, is SettingsRoute.AddSource, is SettingsRoute.ImportProgress, is SettingsRoute.GroupsReview,
+        SettingsRoute.FirstRun, is SettingsRoute.AddSource, is SettingsRoute.ImportProgress, is SettingsRoute.GroupsReview, is SettingsRoute.MatchingReport,
         is SettingsRoute.Playlist, is SettingsRoute.PlaylistSource, is SettingsRoute.FixGuide -> true
         is SettingsRoute.Section -> route.id == SectionId.PLAYLISTS
         else -> false
@@ -84,6 +84,7 @@ class SetupPages(private val d: SetupPageDeps) : SetupPageProvider {
             if (route.playlistId in editedInPlace) SettingsRoute.PlaylistSource(route.playlistId) else formRoute(type, route.firstRun)
         }
         is SettingsRoute.GroupsReview -> GroupsReviewPage(route, d, trackers[route.playlistId])
+        is SettingsRoute.MatchingReport -> MatchingReportPage(route, d, trackers[route.playlistId])
         is SettingsRoute.Section -> if (route.id == SectionId.PLAYLISTS) PlaylistsSectionPage(d) else null
         is SettingsRoute.Playlist -> PlaylistPage(route, d)
         is SettingsRoute.PlaylistSource -> PlaylistSourcePage(route, d) { id -> editedInPlace += id; importStarted(id) }

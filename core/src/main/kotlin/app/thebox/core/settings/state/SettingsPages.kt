@@ -106,4 +106,25 @@ interface SettingsShellLink : SettingsPageNavigation {
      * nowhere) → Cancel, i.e. it dispatches `SettingsEvent.EditorClosed(row, null, committed = false)`.
      */
     val editorBacks: SharedFlow<Unit>
+
+    /**
+     * (M5 integration) Keys on a page drawn by another WP's screen (WP-D's phone page): consulted before the page's own
+     * key table (after overlays); true = consumed. Set by the shell (`MainActivity`).
+     */
+    var keyHandler: ((SettingsRoute, GuideEvent.Act) -> Boolean)?
+        get() = null
+        set(@Suppress("UNUSED_PARAMETER") value) = Unit
+
+    /**
+     * (M5 integration) Opens WP-C's capture overlay (`CaptureFlow`) for [action]/[press]; [test] = "Test a key". Save
+     * calls [captureSaved] (the mapping page source writes `KeyBindingStore.bind`).
+     */
+    fun startCapture(action: app.thebox.core.input.BoxAction, press: app.thebox.core.input.Press, test: Boolean = false) = Unit
+
+    var captureSaved: ((app.thebox.core.input.BoxAction, app.thebox.core.input.CapturedKey, app.thebox.core.input.Press) -> Unit)?
+        get() = null
+        set(@Suppress("UNUSED_PARAMETER") value) = Unit
+
+    /** (M5 integration) Set a PIN ([change] = change it) through the guide's one prompt (`PinPurpose.CreatePin`). */
+    fun requestPinSetup(change: Boolean) = Unit
 }

@@ -101,7 +101,7 @@ fun PlayerErrorCard(state: ErrorCardState, modifier: Modifier = Modifier, archiv
                         fill = PlayerUi.ChipFill,
                         shape = RoundedCornerShape(DesignTokens.Radii.Button),
                         padding = PaddingValues(horizontal = 26.dp, vertical = 14.dp),
-                    ) { c -> Line(stringResource(ErrorText.button(b)), GuideUi.sans(19, FontWeight.SemiBold, c)) }
+                    ) { c -> Line(stringResource(ErrorText.button(b, state.route)), GuideUi.sans(19, FontWeight.SemiBold, c)) }
                 }
             }
         }

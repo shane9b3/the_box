@@ -68,7 +68,9 @@ fun valueText(row: SettingsRow): String? {
         is RowKind.MultiChoice -> k.selected.sorted().mapNotNull { k.options.getOrNull(it)?.label }.joinToString(", ").ifEmpty { null }
         is RowKind.Text -> if (k.masked && k.value.isNotEmpty()) stringResource(R.string.settings_ui_masked) else k.value.ifEmpty { null }
         is RowKind.Number -> if (k.unit != null) "${k.value} ${k.unit}" else k.value.toString()
-        is RowKind.Item -> k.primary
+        // (M5 integration) An Item's `primary` is the id of the action OK runs (contract §2.1), not text: the device pass
+        // showed "restore" as the value of WP-D's Downloads entries.
+        is RowKind.Item -> null
         else -> null
     }
 }
@@ -79,6 +81,11 @@ fun valueText(row: SettingsRow): String? {
  */
 @Composable
 fun SettingsRowView(row: SettingsRow, focused: Boolean, choice: ChoiceState?, moving: Boolean, modifier: Modifier = Modifier) {
+    // (M5 integration) The lifted row of move mode is WP-D's MoveModeRow (§3.2.2).
+    if (moving) {
+        MoveModeRow(row.label, valueText(row), modifier.testTag(SETTINGS_ROW_TAG + row.id.key))
+        return
+    }
     Column(modifier.fillMaxWidth()) {
         RowBody(row, focused && choice == null, moving)
         if (choice != null && choice.row == row.id) {
@@ -108,6 +115,13 @@ private fun RowBody(row: SettingsRow, focused: Boolean, moving: Boolean) {
         else -> m
     }
     Row(m.padding(horizontal = SettingsUi.ROW_PAD_H.dp), verticalAlignment = Alignment.CenterVertically) {
+        // (M5 integration, WP-E §1.8a) The About header card carries the wordmark.
+        if (row.id == app.thebox.core.settings.tree.AboutRows.HEADER) {
+            androidx.compose.foundation.Image(
+                androidx.compose.ui.res.painterResource(R.drawable.wordmark), contentDescription = null,
+                modifier = Modifier.padding(end = 32.dp).width(WORDMARK_W.dp),
+            )
+        }
         if (moving) {
             Line(stringResource(R.string.settings_ui_move_glyph), SettingsUi.RowLabel.copy(color = text), Modifier.padding(end = 16.dp))
         }
@@ -152,6 +166,8 @@ private fun Trailing(row: SettingsRow, focused: Boolean, text: Color) {
 }
 
 private const val VALUE_MAX_W = 560
+/** The wordmark on the About header row (design px). */
+private const val WORDMARK_W = 200
 
 @Composable
 private fun Dot(color: Color, size: Int) {

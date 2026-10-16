@@ -63,13 +63,21 @@ class AutoBackupScheduler @Inject constructor(private val workManager: WorkManag
             workManager.cancelUniqueWork(NAME)
             return
         }
+        // (M5 integration) A periodic request runs at once when first enqueued: on a fresh install that wrote a nearly
+        // empty backup to Download/TheBox at the first start (31 orphaned files after the device pass's reinstalls).
+        // The first weekly backup waits a day, when there is something to keep.
         val request = PeriodicWorkRequestBuilder<AutoBackupWorker>(7, TimeUnit.DAYS)
             .setConstraints(Constraints.Builder().setRequiresStorageNotLow(true).build())
+            .setInitialDelay(FIRST_DELAY_HOURS, TimeUnit.HOURS)
             .build()
         workManager.enqueueUniquePeriodicWork(NAME, ExistingPeriodicWorkPolicy.KEEP, request)
     }
 
-    companion object { const val NAME = "backup-weekly" }
+    companion object {
+        const val NAME = "backup-weekly"
+        /** The first automatic backup after the schedule starts (Appendix B style constant). */
+        const val FIRST_DELAY_HOURS = 24L
+    }
 }
 
 @HiltWorker

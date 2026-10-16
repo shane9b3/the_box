@@ -31,7 +31,11 @@ data class SetupCard(
 enum class SetupAction { CONTINUE, SAVE_ANYWAY, EDIT, RETRY, USE_XTREAM_INSTEAD, ADD_AS_SINGLE_CHANNEL, USE_SECURE_DNS, PHONE_SETUP, CANCEL }
 
 data class XtreamForm(val name: String?, val server: String, val username: String, val password: String, val output: String = "AUTO", val userAgent: String? = null, val backups: List<String> = emptyList())
-data class M3uForm(val name: String?, val url: String?, val fileUri: String?, val epgUrls: List<String>, val userAgent: String? = null)
+data class M3uForm(
+    val name: String?, val url: String?, val fileUri: String?, val epgUrls: List<String>, val userAgent: String? = null,
+    /** (M5 integration 2026-10-16, WP-B amendment) The picked document's display name (the playlist's source label). */
+    val fileName: String? = null,
+)
 
 sealed interface SetupProgress {
     data class Stage(val stage: ImportStage, val done: Boolean, val count: String?) : SetupProgress

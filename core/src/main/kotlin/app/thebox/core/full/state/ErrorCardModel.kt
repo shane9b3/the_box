@@ -47,7 +47,12 @@ object ErrorCardModel {
         var text: NextStep? = null
         var route: SettingsRoute? = null
         val playlistId = channel?.identity?.playlistId
-        for (step in error.actions) {
+        // (M5 integration, I-M5-21) The card carries one route: "Edit login" wins over "Account details" (the login is
+        // what the user can fix; the account card stays the text line).
+        val steps = if (NextStep.EDIT_LOGIN in error.actions && NextStep.ACCOUNT_DETAILS in error.actions) {
+            error.actions.sortedBy { if (it == NextStep.EDIT_LOGIN) 0 else 1 }
+        } else error.actions
+        for (step in steps) {
             val b = button(step, error, decoder, variantLeft, playlistId)
             when {
                 b == ErrorButton.OPEN_SETTINGS -> if (route == null) {
@@ -63,6 +68,11 @@ object ErrorCardModel {
         if (text == null) {
             text = error.actions.firstOrNull { it != NextStep.RETRY && button(it, error, decoder, variantLeft, playlistId) != null } ?: NextStep.RETRY
         }
+        // (M5 integration, §3.14, I-M5-21) A card whose Settings route edits the playlist (the login, or a focused
+        // playlist row) also offers Retry after that button: BACK from the detached Settings layer returns to this card,
+        // and Retry applies the fix. Account-only routes (Account details) keep M4's "no Retry that cannot help" (F5).
+        val fixable = route is SettingsRoute.PlaylistSource || (route as? SettingsRoute.Playlist)?.focus != null
+        if (fixable && ErrorButton.OPEN_SETTINGS in buttons && ErrorButton.RETRY !in buttons) buttons.add(buttons.indexOf(ErrorButton.OPEN_SETTINGS) + 1, ErrorButton.RETRY)
         buttons += ErrorButton.GUIDE
         return ErrorCardState(error, channel, buttons, focused = 0, textStep = text, archiveFailed = archiveFailed, route = route)
     }
@@ -106,6 +116,7 @@ object ErrorCardModel {
         NextStep.USE_SECURE_DNS -> ErrorButton.USE_SECURE_DNS
         NextStep.REFRESH_PLAYLIST -> if (playlistId != null) ErrorButton.REFRESH_PLAYLIST else null
         NextStep.OPEN_EXTERNAL -> ErrorButton.OPEN_EXTERNAL
+        NextStep.BACK_TO_AUTO -> ErrorButton.BACK_TO_AUTO
         NextStep.TRY_BACKUP -> null
         else -> null
     }

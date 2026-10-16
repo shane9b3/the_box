@@ -185,8 +185,8 @@ class EpgMatchRepository @Inject constructor(
 
     suspend fun override(channel: ChannelIdentity): EpgMappingEntity? = mappingDao.get(channel.playlistId, channel.stableKey.value)
 
-    /** (M5 commit 0, S10) [access] explicit; until WP-C's §4.3 predicate it maps onto M3's `unlocked` flag. */
-    fun unmatched(access: ParentalAccess): Flow<List<UnmatchedRow>> = channelDao.unmatched(access.legacyUnlocked)
+    /** (M5 integration) [access] through WP-C's §4.3 predicate (`ChannelDao.unmatchedAccess`). */
+    fun unmatched(access: ParentalAccess): Flow<List<UnmatchedRow>> = channelDao.unmatchedAccess(access.ordinal)
     fun matchedWithoutData(unlocked: Boolean): Flow<List<UnmatchedRow>> = channelDao.matchedWithoutData(unlocked)
     suspend fun matchCounts(playlistId: Long): MatchCounts = channelDao.matchCounts(playlistId)
     suspend fun matches(channel: ChannelIdentity): List<EpgMatchEntity> = matchDao.forSubject(channel.playlistId, channel.stableKey.value)

@@ -35,6 +35,8 @@ object QuickBarModel {
         out += QuickItem.STREAM_INFO
         out += QuickItem.VIDEO_DECODER
         out += QuickItem.SCREEN_OFF
+        // (M5 integration, §3.6.2, E23) The Sources picker when the playlist has backup servers.
+        if (menu.servers.size >= 2) out += QuickItem.SOURCES
         out += QuickItem.SETTINGS
         return out
     }

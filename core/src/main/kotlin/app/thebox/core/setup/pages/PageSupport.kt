@@ -88,8 +88,8 @@ abstract class SetupPage(val route: SettingsRoute, protected val d: SetupPageDep
 
     internal fun num(n: Int): String = String.format(d.locale(), "%,d", n)
 
-    internal fun page(title: String, rows: List<SettingsRow>, subtitle: String? = null, placeholder: String? = null, list: app.thebox.core.settings.PagedList? = null) =
-        PageModel(route, title, subtitle, rows, list, VERSION.incrementAndGet(), placeholder)
+    internal fun page(title: String, rows: List<SettingsRow>, subtitle: String? = null, placeholder: String? = null, list: app.thebox.core.settings.PagedList? = null, focus: String? = null) =
+        PageModel(route, title, subtitle, rows, list, VERSION.incrementAndGet(), placeholder, focus = focus?.let(::RowId))
 
     /** A row whose visibility and effect come from its [SettingsTree] spec when it has one (§3.3). */
     internal fun row(

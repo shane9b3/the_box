@@ -53,6 +53,8 @@ class ChannelsPagesImpl @Inject constructor(
     private val store: SettingsStore,
     private val parental: ParentalSession,
     private val clock: WallClock,
+    /** (M5 integration, WP-C §1.6a) Group locks go through the one parental write path. */
+    private val controls: app.thebox.core.parental.ParentalControls = app.thebox.core.parental.ParentalControls.NONE,
 ) : SectionPages {
     private val version = AtomicLong()
     private val _invalidations = MutableSharedFlow<SettingsRoute>(extraBufferCapacity = 8)
@@ -203,6 +205,15 @@ class ChannelsPagesImpl @Inject constructor(
         }
     }
 
+    /** Live groups (kind 0) lock through `ParentalControls.setGroupLocked` (WP-C); other kinds keep the direct write. */
+    private suspend fun lockGroup(pid: Long, kind: Int, groupKey: String, locked: Boolean, now: Long) {
+        if (kind == 0 && controls !== app.thebox.core.parental.ParentalControls.NONE) {
+            controls.setGroupLocked(app.thebox.core.guide.GuideSource.Group(pid, groupKey), locked)
+        } else {
+            db.groupAdminDao().upsertLocked(pid, kind, groupKey, locked, now)
+        }
+    }
+
     private suspend fun groupIntent(pid: Long, intent: RowIntent, key: String, now: Long): PageAction {
         if (intent.row == ChannelsRows.SHOW_ALL && intent is RowIntent.Run) {
             db.groupAdminDao().showAll(pid, now)
@@ -219,8 +230,8 @@ class ChannelsPagesImpl @Inject constructor(
             is RowIntent.Menu -> when (intent.optionId) {
                 ChannelsRows.M_HIDE -> { dao.upsertGroupHidden(pid, kind, groupKey, true, now); PageAction() }
                 ChannelsRows.M_SHOW -> { dao.upsertGroupHidden(pid, kind, groupKey, false, now); PageAction() }
-                ChannelsRows.M_LOCK -> { db.groupAdminDao().upsertLocked(pid, kind, groupKey, true, now); PageAction() }
-                ChannelsRows.M_UNLOCK -> { db.groupAdminDao().upsertLocked(pid, kind, groupKey, false, now); PageAction() }
+                ChannelsRows.M_LOCK -> { lockGroup(pid, kind, groupKey, true, now); PageAction() }
+                ChannelsRows.M_UNLOCK -> { lockGroup(pid, kind, groupKey, false, now); PageAction() }
                 ChannelsRows.M_RESET -> { dao.deletePrefs(pid, kind, groupKey); PageAction() }
                 else -> PageAction.NONE // M_MOVE: the machine enters move mode itself (§3.2.2)
             }
@@ -323,11 +334,8 @@ class ChannelsPagesImpl @Inject constructor(
     companion object {
         private val LIVE = EntryKind.LIVE.ordinal
 
-        /**
-         * The guide domain, declared by name: WP-A owns the registry (`core/.../settings/state/`); a store keyed by
-         * domain name (as `FakeSettingsStore`) sees the same document.
-         */
-        val GUIDE: SettingsDomain<GuidePrefs> = SettingsDomain(Domains.GUIDE, GuidePrefs.serializer(), GuidePrefs())
+        /** The guide domain: WP-A's object (M5 integration). */
+        val GUIDE: SettingsDomain<GuidePrefs> get() = app.thebox.core.settings.state.GuideDomain
 
         fun <T> reorder(list: MutableList<T>, item: T, toIndex: Int) {
             val from = list.indexOf(item)

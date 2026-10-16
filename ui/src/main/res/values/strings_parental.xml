@@ -152,6 +152,8 @@
 
     <!-- Error-card routes (§3.14) -->
     <string name="error_route_secure_dns_on">Secure DNS is on (Cloudflare). Change it in Settings → Network.</string>
+    <!-- M5 integration (B2) -->
+    <string name="error_route_back_to_auto">Audio output is back to Auto. Change it in Settings → Playback.</string>
     <string name="error_route_refresh_started">Refreshing the playlist. The guide updates when it finishes.</string>
 
     <!-- Key names (§3.8.3: common codes; others show the platform name) -->

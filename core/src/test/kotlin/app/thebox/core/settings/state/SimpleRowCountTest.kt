@@ -20,13 +20,19 @@ class SimpleRowCountTest {
         SectionId.REMOTE to 2, SectionId.PARENTAL to 4, SectionId.BACKUP to 2, SectionId.ABOUT to 5, SectionId.NETWORK to 0,
     )
 
+    /**
+     * Section pages only (§3.3.13; WP-C's rule at integration): Channel options are per channel and the button-mapping
+     * pages (ButtonMapping, ActionBindings) are sub-pages of Remote control, so their registered rows are not counted.
+     */
+    private val SUB_PAGE_SOURCES = listOf(ChannelOptionsRows, app.thebox.core.settings.tree.ButtonMappingRows)
+
     private fun simple(section: SectionId) =
         SettingsTree.rowsOf(section).count {
-            it.visibility == Visibility.SIMPLE && it.id !in NOT_COUNTED && SettingsTree.sources.none { s -> s === ChannelOptionsRows && it in s.rows }
+            it.visibility == Visibility.SIMPLE && it.id !in NOT_COUNTED && SettingsTree.sources.none { s -> s in SUB_PAGE_SOURCES && it in s.rows }
         }
 
     /** §3.3.5: the playlist chooser is a context control (WP-D's `ChannelsRows.NOT_COUNTED`). */
-    private val NOT_COUNTED = setOf(app.thebox.core.settings.RowId("channels.playlist"))
+    private val NOT_COUNTED = app.thebox.core.settings.tree.ChannelsRows.NOT_COUNTED
 
     @Test
     fun simpleRowsMatchTheTarget() {

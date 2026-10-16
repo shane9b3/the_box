@@ -24,11 +24,8 @@ import app.thebox.core.setup.SetupText
 import app.thebox.core.setup.XtreamForm
 import java.net.URI
 
-/**
- * The `network` domain as WP-B writes it for "Use secure DNS" (§3.4.4). WP-A owns the domain registry
- * (`core/.../settings/state/`); the store keys domains by name, so this instance and WP-A's share one document.
- */
-internal val SetupNetworkDomain: SettingsDomain<NetworkSettings> = SettingsDomain(Domains.NETWORK, NetworkSettings.serializer(), NetworkSettings())
+/** The `network` domain as WP-B writes it for "Use secure DNS" (§3.4.4): WP-A's object (M5 integration). */
+internal val SetupNetworkDomain: SettingsDomain<NetworkSettings> get() = app.thebox.core.settings.state.NetworkDomain
 
 /** The result card as rows: an Info block with the tone, then one or two action rows (§3.4.4). */
 internal fun SetupPage.cardRows(card: SetupCard?, labelOf: (SetupAction) -> String): List<SettingsRow> {
@@ -103,6 +100,8 @@ class XtreamFormPage(
             title = t(if (existingId == null) SetupText.XTREAM_TITLE else SetupText.SOURCE_TITLE),
             subtitle = t(if (existingId == null) SetupText.XTREAM_SUBTITLE else SetupText.SOURCE_SUBTITLE),
             rows = rows,
+            // (M5 integration) A new result card takes the focus on its primary button (§3.4.4, I-M5-4).
+            focus = if (card != null) ROW_CARD_PRIMARY else null,
         )
     }
 
@@ -291,6 +290,8 @@ class M3uFormPage(
             title = t(if (existingId == null) SetupText.M3U_TITLE else SetupText.SOURCE_TITLE),
             subtitle = t(if (existingId == null) SetupText.M3U_SUBTITLE else SetupText.SOURCE_SUBTITLE),
             rows = rows,
+            // (M5 integration) A new result card takes the focus on its primary button (§3.4.4, I-M5-4).
+            focus = if (card != null) ROW_CARD_PRIMARY else null,
         )
     }
 
@@ -376,7 +377,7 @@ class M3uFormPage(
         }
         val form = M3uForm(
             name = dr.name.ifBlank { null }, url = dr.url.ifEmpty { null }, fileUri = dr.fileUri,
-            epgUrls = dr.epgUrls, userAgent = dr.userAgent.ifBlank { null },
+            epgUrls = dr.epgUrls, userAgent = dr.userAgent.ifBlank { null }, fileName = dr.fileName,
         )
         busy = true
         launch {

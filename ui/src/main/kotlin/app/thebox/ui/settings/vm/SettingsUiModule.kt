@@ -1,6 +1,7 @@
 package app.thebox.ui.settings.vm
 
 import android.content.Context
+import app.thebox.core.input.EffectiveKeyMap
 import app.thebox.core.settings.SettingsMachineFactory
 import app.thebox.core.settings.SettingsNavigator
 import app.thebox.core.settings.state.HintValidator
@@ -34,8 +35,8 @@ abstract class SettingsUiModule {
         fun settingsTexts(@ApplicationContext context: Context): SettingsTexts = ResourceSettingsTexts(context.resources)
 
         @Provides
-        fun settingsMachineFactory(texts: SettingsTexts): SettingsMachineFactory = SettingsMachineFactory { effects, nowMs ->
-            SettingsMachineImpl(effects, nowMs, texts, HintValidator(texts, WpaPages.rowRules(texts)))
+        fun settingsMachineFactory(texts: SettingsTexts, keyMap: EffectiveKeyMap): SettingsMachineFactory = SettingsMachineFactory { effects, nowMs ->
+            SettingsMachineImpl(effects, nowMs, texts, HintValidator(texts, WpaPages.rowRules(texts)), keyMap = { keyMap })
         }
     }
 }

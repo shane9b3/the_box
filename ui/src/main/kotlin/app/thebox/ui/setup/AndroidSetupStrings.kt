@@ -283,6 +283,7 @@ class AndroidSetupStrings(private val context: Context) : SetupStrings {
             SetupText.PREFIX_CUSTOM -> R.string.setup_prefix_custom
             SetupText.PREFIX_PREVIEW -> R.string.setup_prefix_preview
             SetupText.PREFIX_CUSTOM_HINT -> R.string.setup_prefix_custom_hint
+            SetupText.PREFIX_TOO_SLOW -> R.string.setup_prefix_too_slow
             SetupText.INTERVAL_HOURS -> R.string.setup_interval_hours
             SetupText.INTERVAL_MANUAL -> R.string.setup_interval_manual
             SetupText.ORDER_PROVIDER -> R.string.setup_order_provider

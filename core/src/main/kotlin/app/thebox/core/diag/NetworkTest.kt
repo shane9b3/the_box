@@ -90,8 +90,7 @@ object NetworkVerdict {
     /**
      * The first rule that matches (`NetworkVerdictTest`, order of §3.11.2):
      * 1. system DNS failed or blocked and secure DNS works → DNS_BLOCKED_TRY_SECURE;
-     * 2. both DNS failed → SERVER_UNREACHABLE with no args ("the name does not exist"; the contract has no own key, see
-     *    the WP-E notes in §1.8a);
+     * 2. both DNS failed → NAME_NOT_FOUND (M5 integration amendment; WP-E used SERVER_UNREACHABLE with no args);
      * 3. no address connects (or the server step failed below HTTP) → SERVER_UNREACHABLE(port);
      * 4. TLS failed → TLS_PROBLEM; 5. 401/403/`auth:0` → AUTH_PROBLEM;
      * 6. IPv6 fails and IPv4 works → IPV6_BROKEN;
@@ -102,7 +101,7 @@ object NetworkVerdict {
     fun decide(f: NetworkFindings): Verdict {
         val systemBad = f.systemDns != DnsOutcome.OK
         if (systemBad && f.secureDns == DnsOutcome.OK) return Verdict(VerdictKey.DNS_BLOCKED_TRY_SECURE, emptyList())
-        if (systemBad) return Verdict(VerdictKey.SERVER_UNREACHABLE, emptyList())
+        if (systemBad) return Verdict(VerdictKey.NAME_NOT_FOUND, emptyList())
         val anyConnects = f.ipv4Connects == true || f.ipv6Connects == true
         if (!anyConnects || f.server == HttpOutcome.NETWORK_ERROR) return Verdict(VerdictKey.SERVER_UNREACHABLE, listOf(f.port.toString()))
         if (f.server == HttpOutcome.TLS_FAILED) return Verdict(VerdictKey.TLS_PROBLEM, emptyList())

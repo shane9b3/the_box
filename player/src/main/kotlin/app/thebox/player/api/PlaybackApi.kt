@@ -78,7 +78,17 @@ interface PlaybackController {
      * overrides it when the guard lands in the controller.
      */
     fun previousChannelResult(): PreviousResult = if (previousChannel()) PreviousResult.Started else PreviousResult.NoPrevious
+    /**
+     * (M5 integration 2026-10-16, E23 / WP-C amendment) The current tune's servers (base URLs as `host[:port]`) and the one
+     * in use; empty unless the playlist has backup servers. Feeds the player's Sources picker (§3.6.2). Default: none.
+     */
+    val servers: StateFlow<ServerList> get() = NO_SERVERS
+    /** (M5 integration) Re-resolves the current tune on base URL [index] (the Sources picker); kept as the active one once it plays. */
+    fun selectServer(index: Int) = Unit
 }
+
+/** (M5 integration, E23) [labels] are `host[:port]` (no credentials); [current] indexes them. */
+data class ServerList(val labels: List<String> = emptyList(), val current: Int = 0)
 
 /** (M5, §2.12 item 6) The external-player hand-off (product §4.4). Never logged with its URL. */
 data class ExternalHandOff(val url: String, val headers: Map<String, String>, val title: String?) {
@@ -254,7 +264,8 @@ sealed interface PlaybackNotice {
     data class SwitchedToBackupServer(val baseIndex: Int) : PlaybackNotice
     data class SwitchedFormat(val to: StreamFormat) : PlaybackNotice
     data class AudioDecoderSwitched(val toSoftware: Boolean, val mimeType: String) : PlaybackNotice
-    data class PassthroughDisabled(val mimeType: String?) : PlaybackNotice
+    /** (M5 integration, B2) [forced]: "Always passthrough" is on (the toast names the way back to Auto). */
+    data class PassthroughDisabled(val mimeType: String?, val forced: Boolean = false) : PlaybackNotice
     data object VideoDecoderSwitchedToSoftware : PlaybackNotice
     data object TunnelingDisabled : PlaybackNotice
     data class UserAgentSwitched(val preset: String) : PlaybackNotice
@@ -274,3 +285,4 @@ interface PlaybackDiagnostics {
 // M4 (docs/design/m4-player-ux.md §2.9): defaults of PlaybackController.cues/previous; fakes in other modules override them.
 internal val NO_CUES: StateFlow<List<androidx.media3.common.text.Cue>> = kotlinx.coroutines.flow.MutableStateFlow(emptyList())
 internal val NO_PREVIOUS: StateFlow<ChannelIdentity?> = kotlinx.coroutines.flow.MutableStateFlow(null)
+internal val NO_SERVERS: StateFlow<ServerList> = kotlinx.coroutines.flow.MutableStateFlow(ServerList())

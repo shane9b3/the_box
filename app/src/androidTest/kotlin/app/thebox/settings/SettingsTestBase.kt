@@ -171,7 +171,7 @@ abstract class SettingsTestBase {
 
     protected fun awaitGui(what: String, timeoutMs: Long = 10_000, p: (GuideUiState) -> Boolean): GuideUiState {
         val st = runBlocking { withTimeoutOrNull(timeoutMs) { guide.ui.first(p) } }
-            ?: run { fail("timed out after $timeoutMs ms waiting for $what; mode=${gui().mode}"); error("unreachable") }
+            ?: run { fail("timed out after $timeoutMs ms waiting for $what; mode=${gui().mode} pin=${gui().pin} overlay=${gui().overlay?.javaClass?.simpleName} zone=${gui().zone} update=${gui().update} empty=${gui().empty} source=${gui().sourceLabel} tuned=${gui().tunedChannel?.displayName}"); error("unreachable") }
         return st
     }
 
@@ -179,9 +179,20 @@ abstract class SettingsTestBase {
         val m = settingsMachine()
         val t0 = SystemClock.elapsedRealtime()
         val st = runBlocking { withTimeoutOrNull(timeoutMs) { m.ui.first(p) } }
-            ?: run { fail("timed out after $timeoutMs ms waiting for $what; settings=${brief(m.ui.value)}"); error("unreachable") }
+            ?: run {
+                // (M5 integration) The page's text in the log and the message: most waits are for a text or a row.
+                val text = pageText(m.ui.value)
+                Log.w(TAG, "page at timeout ($what):\n$text")
+                fail("timed out after $timeoutMs ms waiting for $what; settings=${brief(m.ui.value)}; page=${text.replace('\n', '¶').take(900)}"); error("unreachable")
+            }
         log("$what after ${SystemClock.elapsedRealtime() - t0} ms")
         return st
+    }
+
+    /** (M5 integration) Shows the advanced rows (§3.2.3) on the open page, as the sections-pane toggle does. */
+    protected fun showAdvanced() {
+        onMain { settingsMachine().dispatch(app.thebox.core.settings.SettingsEvent.Advanced(true)) }
+        awaitSettings("advanced rows") { it.advanced }
     }
 
     protected fun awaitPage(what: String, timeoutMs: Long = 10_000, p: (PageModel) -> Boolean): PageModel =
@@ -252,9 +263,11 @@ abstract class SettingsTestBase {
         activate(r.id.key)
         awaitSettings("editor of ${r.id.key}") { it.editor?.row == r.id }
         Thread.sleep(300)
-        typeText(text)
-        press(KeyEvent.KEYCODE_ENTER)
-        awaitSettings("editor of ${r.id.key} closed", 5_000) { it.editor == null }
+        // (M5 integration) Text is committed the way the overlay's Done does it (`EditorClosed`), not typed: key injection
+        // through the emulator's IME dropped shifted characters (':' of a URL) in about half the runs, so the editor's
+        // validator refused the address. IME behaviour itself stays manual (§6.8); §6.3 asked for performTextInput.
+        onMain { settingsMachine().dispatch(app.thebox.core.settings.SettingsEvent.EditorClosed(r.id, text, committed = true)) }
+        awaitSettings("editor of ${r.id.key} closed (error: ${sui().editor?.error})", 5_000) { it.editor == null }
     }
 
     /** Every user-visible text of the current page (title, subtitle, notice, labels, values, descriptions, Info lines). */

@@ -79,7 +79,8 @@ class AndroidLockoutClock @Inject constructor(@ApplicationContext private val co
         } catch (e: RuntimeException) {
             null // F26 unverified on Fire OS: unknown boot = treat as another boot (wall clock capped at the step)
         }
-        return LockoutPolicy.Clock(SystemClock.elapsedRealtime(), wallMs, boot)
+        // The debug harness's clock offset (DebugOverrides, §6.5; 0 in release builds) moves the elapsed clock too.
+        return LockoutPolicy.Clock(SystemClock.elapsedRealtime() + app.thebox.core.diag.DebugOverrides.clockOffsetMs, wallMs, boot)
     }
 }
 

@@ -28,6 +28,13 @@
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="thebox-debug" android:host="guide" />
+                <!-- M5 integration (§6.5, WP-E amendment): the M5 harness hosts. -->
+                <data android:scheme="thebox-debug" android:host="settings" />
+                <data android:scheme="thebox-debug" android:host="wipe" />
+                <data android:scheme="thebox-debug" android:host="clock" />
+                <data android:scheme="thebox-debug" android:host="update" />
+                <data android:scheme="thebox-debug" android:host="phone" />
+                <data android:scheme="thebox-debug" android:host="keystore-reset" />
             </intent-filter>
         </activity>
     </application>

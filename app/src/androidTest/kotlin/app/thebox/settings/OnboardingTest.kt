@@ -21,6 +21,8 @@ import org.junit.Test
  * texts). Rows are found by kind and route (the contract), not by WP-B's row ids; texts by the §3.4 wording.
  */
 class OnboardingTest : SettingsTestBase() {
+    /** WP-B's result card buttons (`SourceFormPages.kt`). */
+    private val CARD_PRIMARY = "setup.card.primary"
 
     private fun firstRun() {
         wipe()
@@ -42,7 +44,8 @@ class OnboardingTest : SettingsTestBase() {
     }
 
     private fun connect() {
-        val action = rowWhere("Connect action") { it.kind is RowKind.Action }
+        // (M5 integration) WP-B's form has two Action rows before the card (More options, Connect): match Connect by id.
+        val action = rowWhere("Connect action") { it.kind is RowKind.Action && (it.id.key == "setup.xtream.connect" || it.id.key == "setup.m3u.add") }
         activate(action.id.key)
     }
 
@@ -57,6 +60,8 @@ class OnboardingTest : SettingsTestBase() {
         connect()
         val text = awaitText("result card Connected · Active", 30_000) { it.contains("Active") && it.contains("connection") }
         assertTrue(text, text.contains("0 of 1") || text.contains("0 / 1") || text.contains("of 2"))
+        // (M5 integration) §3.4.4: the result card's primary button (Continue) saves and starts the import.
+        activate(CARD_PRIMARY)
         // Import progress reaches stage 3, Start watching → groups review → guide.
         awaitSettings("import progress", 30_000) { it.route is SettingsRoute.ImportProgress || it.route is SettingsRoute.GroupsReview }
         val start = rowWhere("Start watching", 180_000) { it.kind is RowKind.Action && it.enabled }
@@ -82,8 +87,8 @@ class OnboardingTest : SettingsTestBase() {
         connect()
         awaitText("rejected card", 30_000) { it.contains("rejected the username or password", ignoreCase = true) }
         assertTrue("no playlist row", runBlocking { ep.playlists().all() }.isEmpty())
-        // Edit keeps the typed fields.
-        press(KeyEvent.KEYCODE_BACK)
+        // Edit keeps the typed fields. (M5 integration) Edit is the card's button (§3.4.4); BACK leaves the form.
+        activate(rowWhere("Edit on the card") { it.kind is RowKind.Action && it.id.key.startsWith("setup.card.") && it.label.contains("Edit", ignoreCase = true) }.id.key)
         val user = rowWhere("username kept") { r -> (r.kind as? RowKind.Text)?.let { it.hint == TextHint.USERNAME && it.value == "test" } == true }
         assertTrue(user.id.key.isNotEmpty())
     }
@@ -101,7 +106,8 @@ class OnboardingTest : SettingsTestBase() {
         val created = runBlocking { kotlinx.coroutines.withTimeoutOrNull(30_000) { while (ep.playlists().all().isEmpty()) kotlinx.coroutines.delay(200); true } }
         assertTrue("Save anyway creates the playlist", created == true)
         openSettings("playlist:${runBlocking { ep.playlists().all().single().id }}")
-        val card = rowWhere("account card") { it.kind is RowKind.Info }
+        // (M5 integration) The account card is WP-B's `playlist.account` row; the import stores the account a moment later.
+        val card = rowWhere("account card", 60_000) { it.id.key == "playlist.account" && (it.kind as? RowKind.Info)?.tone == app.thebox.core.settings.Tone.BAD }
         assertEquals("the account card is red", app.thebox.core.settings.Tone.BAD, (card.kind as RowKind.Info).tone)
     }
 
@@ -116,12 +122,14 @@ class OnboardingTest : SettingsTestBase() {
         val user = rowWhere("username filled") { r -> (r.kind as? RowKind.Text)?.let { it.hint == TextHint.USERNAME && it.value == "test" } == true }
         val pass = rowWhere("password filled") { r -> (r.kind as? RowKind.Text)?.let { it.hint == TextHint.PASSWORD && it.value.isNotEmpty() } == true }
         assertTrue(user.id != pass.id)
-        assertTrue("output TS", pageText().contains("TS"))
+        // (M5 integration) The output row is under More options (§3.4.3).
+        activate("setup.xtream.more")
+        assertTrue("output TS", awaitText("output TS") { it.contains("TS") }.isNotEmpty())
         // The same URL in the M3U form offers "Use Xtream login instead".
         leaveToWelcome()
         activate(rowWhere("M3U entry") { r -> isLinkTo(r) { it is SettingsRoute.AddSource && it.kind == SourceKind.M3U } }.id.key)
         editText(rowWhere("playlist URL", p = textRow(TextHint.URL)), url)
-        val offer = rowWhere("Use Xtream login instead") { it.label.contains("Xtream login", ignoreCase = true) }
+        val offer = rowWhere("Use Xtream login instead") { it.kind is RowKind.Action && it.label.contains("Xtream login", ignoreCase = true) }
         assertEquals("focused", offer.id, focusedRow()?.id)
     }
 
@@ -138,17 +146,28 @@ class OnboardingTest : SettingsTestBase() {
         firstRun()
         activate(rowWhere("M3U entry") { r -> isLinkTo(r) { it is SettingsRoute.AddSource && it.kind == SourceKind.M3U } }.id.key)
         editText(rowWhere("playlist URL", p = textRow(TextHint.URL)), "$base/get.php?username=test&password=test&type=m3u_plus&output=ts")
+        // (M5 integration) WP-B's form does not prefill the EPG field from url-tvg (§3.4.3 has no such step; the importer
+        // uses the playlist's own guide link, `use_playlist_epg`). The get.php link offers Xtream; keep it as M3U and add.
+        activate(rowWhere("Keep as M3U") { it.kind is RowKind.Action && it.label.contains("Keep as M3U", ignoreCase = true) }.id.key)
         connect()
-        awaitText("EPG field prefilled from url-tvg", 30_000) { it.contains("xmltv.php") || it.contains("guide", ignoreCase = true) }
+        awaitSettings("import of the M3U playlist", 30_000) { it.route is SettingsRoute.ImportProgress }
         // A URL serving HTML → "web page instead of data"; an HLS manifest → "Add as a single channel".
-        leaveToWelcome()
+        // (M5 integration) BACK on the import page asks "Stop the import?" (§3.4.5): start the next case from fresh data.
+        firstRun()
         activate(rowWhere("M3U entry") { r -> isLinkTo(r) { it is SettingsRoute.AddSource && it.kind == SourceKind.M3U } }.id.key)
-        editText(rowWhere("playlist URL", p = textRow(TextHint.URL)), "$base/logo/1.png")
+        // (M5 integration) The panel's only HTML answer is player_api.php under api_fault html_splash (its fake PNG has no
+        // NUL byte, so M1's sniffer reads it as a one-line list); the HTML card then shows on the import page.
+        panel.apiFault("html_splash")
+        editText(rowWhere("playlist URL", p = textRow(TextHint.URL)), "$base/player_api.php?username=test&password=test")
+        activate(rowWhere("Keep as M3U", 10_000) { it.kind is RowKind.Action && it.label.contains("Keep as M3U", ignoreCase = true) }.id.key)
         connect()
-        awaitText("not a playlist", 30_000) { it.contains("web page instead of data") || it.contains("not a playlist", ignoreCase = true) }
-        leaveToWelcome()
+        awaitText("not a playlist", 60_000) { it.contains("web page instead of data") || it.contains("not a playlist", ignoreCase = true) }
+        panel.apiFault(null)
+        firstRun()
         activate(rowWhere("M3U entry") { r -> isLinkTo(r) { it is SettingsRoute.AddSource && it.kind == SourceKind.M3U } }.id.key)
         editText(rowWhere("playlist URL", p = textRow(TextHint.URL)), "$base/live/test/test/1.m3u8")
+        // (M5 integration) An Xtream-shaped address: the form offers Xtream login first (§3.4.3).
+        activate(rowWhere("Keep as M3U", 10_000) { it.kind is RowKind.Action && it.label.contains("Keep as M3U", ignoreCase = true) }.id.key)
         connect()
         val single = rowWhere("Add as a single channel", 30_000) { it.label.contains("single channel", ignoreCase = true) }
         activate(single.id.key)
@@ -160,7 +179,7 @@ class OnboardingTest : SettingsTestBase() {
     @Test
     fun transportFailures() {
         firstRun()
-        for ((fault, text) in listOf("html_splash" to "web page instead of data", "timeout" to "did not answer", "429" to "Retry")) {
+        for ((fault, text) in listOf("html_splash" to "web page instead of data", "timeout" to "did not answer", "429" to "Try again")) {
             panel.apiFault(fault)
             leaveToWelcome()
             toXtreamForm()
@@ -176,7 +195,9 @@ class OnboardingTest : SettingsTestBase() {
         connect()
         val busy = awaitText("checking state while the login sleeps", 5_000) { it.contains("Checking", ignoreCase = true) || it.contains("Connecting", ignoreCase = true) }
         assertFalse(busy.isEmpty())
-        // Keep-screen-on during ImportProgress (S4).
+        // Keep-screen-on during ImportProgress (S4). (M5 integration) Continue on the result card starts the import.
+        rowWhere("Continue on the result card", 30_000) { it.id.key == CARD_PRIMARY }
+        activate(CARD_PRIMARY)
         awaitSettings("import progress", 60_000) { it.route is SettingsRoute.ImportProgress }
         var keepOn = false
         scenario!!.onActivity { a -> keepOn = a.window.attributes.flags and WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON != 0 }

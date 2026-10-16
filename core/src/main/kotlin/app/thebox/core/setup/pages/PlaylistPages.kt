@@ -298,6 +298,9 @@ class PlaylistPage(private val r: SettingsRoute.Playlist, d: SetupPageDeps) : Se
                     if (days <= 0) t(SetupText.ACCOUNT_EXPIRED, t(statusLabel(a.status))) else t(SetupText.ACCOUNT_EXPIRES_IN, t(statusLabel(a.status)), days)
                 }
             }
+            // (M5 integration, I-M5-3) A panel that reports Expired / Banned / Disabled is red whatever the date says.
+            if (a.status == app.thebox.core.xtream.AccountStatus.EXPIRED || a.status == app.thebox.core.xtream.AccountStatus.BANNED ||
+                a.status == app.thebox.core.xtream.AccountStatus.DISABLED) tone = Tone.BAD
             if (a.maxConnections != null) lines += t(SetupText.ACCOUNT_CONNECTIONS, a.activeConnections ?: 0, a.maxConnections)
             if (a.allowedOutputFormats.isNotEmpty()) lines += t(SetupText.CARD_FORMATS, a.allowedOutputFormats.map(SetupResultMapper::formatName).distinct().joinToString(", "))
         }
@@ -318,6 +321,8 @@ class PlaylistPage(private val r: SettingsRoute.Playlist, d: SetupPageDeps) : Se
             is RowIntent.Edit -> when (val k = intent.row.key) {
                 ROW_NAME -> launch { d.admin.rename(id, d.normalizer.field(intent.text).ifEmpty { p.summary.displaySource }) }
                 ROW_NAME_PREFIX_CUSTOM -> launch {
+                    // (M5 integration, G-L19) A pattern that could backtrack exponentially is refused, as for hide rules.
+                    if (PrefixRuleText.risky(intent.text)) { act(PageAction.Notice(t(SetupText.PREFIX_TOO_SLOW))); return@launch }
                     val json = PrefixRuleText.toJson(intent.text)
                     d.admin.setNamePrefix(id, "CUSTOM", json)
                     preview = d.admin.previewNamePrefix(id, "CUSTOM", json)
@@ -482,6 +487,12 @@ class PlaylistPage(private val r: SettingsRoute.Playlist, d: SetupPageDeps) : Se
 /** The custom prefix rule as one editor line: `/regex/`, or literals separated by commas (§3.3.1, M3 §3.12). */
 object PrefixRuleText {
     private val json = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+
+    /** True when [text] is a `/regex/` whose shape [app.thebox.core.text.RegexSafety] refuses. */
+    fun risky(text: String): Boolean {
+        val s = text.trim()
+        return s.length >= 2 && s.startsWith("/") && s.endsWith("/") && app.thebox.core.text.RegexSafety.isRisky(s.substring(1, s.length - 1))
+    }
 
     fun toJson(text: String): String? {
         val s = text.trim()

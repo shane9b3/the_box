@@ -30,8 +30,13 @@ object BoxDnsPolicy {
 
     /** §3.3.11: a custom endpoint must be `https://host[:port]/path…` (no credentials, no spaces). */
     fun isValidCustomUrl(url: String): Boolean {
-        if (!url.startsWith("https://", ignoreCase = true)) return false
-        val rest = url.substring("https://".length)
+        // (M5 integration) http:// only under the debug harness's allowance (DebugOverrides.allowHttpDoh, I-M5-25).
+        val scheme = when {
+            url.startsWith("https://", ignoreCase = true) -> "https://"
+            app.thebox.core.diag.DebugOverrides.allowHttpDoh && url.startsWith("http://", ignoreCase = true) -> "http://"
+            else -> return false
+        }
+        val rest = url.substring(scheme.length)
         if (rest.isEmpty() || rest.any { it.isWhitespace() } || '@' in rest.substringBefore('/')) return false
         val host = rest.substringBefore('/').substringBefore(':')
         return host.isNotEmpty() && host.all { it.isLetterOrDigit() || it == '.' || it == '-' }

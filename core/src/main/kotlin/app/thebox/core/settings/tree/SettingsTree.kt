@@ -61,7 +61,7 @@ object SettingsTree {
         SettingsRoute.Root, SettingsRoute.FirstRun -> null
         is SettingsRoute.Section -> route.id
         is SettingsRoute.AddSource, is SettingsRoute.PhoneSetup, is SettingsRoute.ImportProgress,
-        is SettingsRoute.GroupsReview, is SettingsRoute.Playlist, is SettingsRoute.PlaylistSource,
+        is SettingsRoute.GroupsReview, is SettingsRoute.MatchingReport, is SettingsRoute.Playlist, is SettingsRoute.PlaylistSource,
         SettingsRoute.EpgSources, is SettingsRoute.FixGuide -> SectionId.PLAYLISTS
         is SettingsRoute.Groups, is SettingsRoute.HiddenChannels, is SettingsRoute.HideRules,
         SettingsRoute.FavouriteLists, is SettingsRoute.FavouriteList, is SettingsRoute.Channel -> SectionId.CHANNELS

@@ -272,6 +272,8 @@ enum class SetupText {
     PREFIX_CUSTOM,
     PREFIX_PREVIEW,
     PREFIX_CUSTOM_HINT,
+    /** (M5 integration, G-L19) A custom prefix regex RegexSafety refuses. */
+    PREFIX_TOO_SLOW,
     INTERVAL_HOURS,
     INTERVAL_MANUAL,
     ORDER_PROVIDER,

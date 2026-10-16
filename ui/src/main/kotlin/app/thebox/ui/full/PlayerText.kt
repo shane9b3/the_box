@@ -89,7 +89,7 @@ object PlayerText {
             if (notice.toSoftware) R.string.player_notice_audio_software else R.string.player_notice_audio_hardware,
             codecName(notice.mimeType),
         )
-        is PlaybackNotice.PassthroughDisabled -> passthrough(res, notice.mimeType)
+        is PlaybackNotice.PassthroughDisabled -> passthrough(res, notice.mimeType).let { if (notice.forced) it + res.getString(R.string.player_notice_passthrough_forced) else it }
         PlaybackNotice.VideoDecoderSwitchedToSoftware -> res.getString(R.string.player_notice_video_software)
         PlaybackNotice.TunnelingDisabled -> res.getString(R.string.player_notice_tunneling_off)
         is PlaybackNotice.UserAgentSwitched -> res.getString(R.string.player_notice_user_agent, notice.preset)
@@ -252,6 +252,7 @@ object PlayerText {
         PickerChoice.TextOff -> res.getString(R.string.player_value_off)
         is PickerChoice.Aspect -> res.getString(aspect(c.mode))
         is PickerChoice.Decoder -> res.getString(decoder(c.mode))
+        is PickerChoice.Server -> res.getString(R.string.player_picker_server_row, c.index + 1, c.label) // M5 integration
     }
 
     @StringRes fun menuItem(item: ChannelMenuItem): Int = when (item) {

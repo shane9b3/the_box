@@ -152,6 +152,8 @@ fun AppRoot(
     debugHint: Boolean = false,
     videoLayer: @Composable (RectPx?) -> Unit = { rect -> VideoLayer(host.surfacePlayer, rect, Modifier.testTag(VIDEO_LAYER_TAG)) },
     search: @Composable () -> Unit = {},
+    /** (M5 integration) WP-D's phone page for `SettingsRoute.PhoneSetup` (the activity owns its view model). */
+    settingsPhone: (@Composable (app.thebox.core.settings.PhonePurpose) -> Unit)? = null,
     grid: @Composable (Modifier) -> Unit,
 ) {
     if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) androidx.compose.runtime.SideEffect { app.thebox.ui.guide.GuideDebugCounters.bump(COMPOSITIONS_ROOT) } // U-S5
@@ -333,7 +335,7 @@ fun AppRoot(
                         ScreenMode.FULL -> FullScreenHost(ui, player = player, clock24 = settings.clock24, lowEnd = lowEnd)
                         ScreenMode.SEARCH -> search()
                         ScreenMode.SETTINGS -> if (settingsMachine != null) {
-                            app.thebox.ui.settings.SettingsScreen(settingsMachine, settings.clock24)
+                            app.thebox.ui.settings.SettingsScreen(settingsMachine, settings.clock24, phone = settingsPhone)
                         } else {
                             // S11: the settings machine is not attached yet; the guide machine waits. Opaque, covers the hole.
                             Box(Modifier.fillMaxSize().background(app.thebox.ui.theme.DesignTokens.Colors.Canvas).testTag(SETTINGS_TAG))

@@ -4,7 +4,10 @@ import app.thebox.core.guide.GuideEvent
 import app.thebox.core.guide.GuideStateMachine
 import app.thebox.core.input.BoxAction
 import app.thebox.core.input.CaptureState
-import app.thebox.core.input.Keys
+import app.thebox.core.input.CapturedKey
+import app.thebox.core.input.DefaultKeyMap
+import app.thebox.core.input.EffectiveKeyMap
+import app.thebox.core.input.RemappedKeyMap
 import app.thebox.core.input.Press
 import app.thebox.core.parental.PinGate
 import app.thebox.core.parental.PinPurpose
@@ -30,6 +33,7 @@ import app.thebox.core.settings.SettingsRoute
 import app.thebox.core.settings.SettingsRow
 import app.thebox.core.settings.SettingsUiState
 import app.thebox.core.settings.ChoiceState
+import app.thebox.core.settings.tree.CaptureFlow
 import app.thebox.core.settings.tree.SettingsTree
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -59,7 +63,11 @@ class SettingsMachineImpl(
     private val nowMs: () -> Long,
     private val texts: SettingsTexts = SettingsTexts.KEYS,
     private val validator: SettingsValidator = HintValidator(texts),
+    /** The router's effective key map (WP-C's `RemappedKeyMap`): capture verdicts and "Test a key" read it. */
+    keyMap: () -> EffectiveKeyMap = { DEFAULT_KEY_MAP },
 ) : SettingsMachine, SettingsShellLink {
+    /** (M5 integration) WP-C's capture overlay flow (§3.8.3, S14): verdict, Save / Try another / Cancel, Test a key. */
+    private val captureFlow = CaptureFlow(keyMap)
     private val _ui = MutableStateFlow(SettingsUiState())
     override val ui: StateFlow<SettingsUiState> = _ui.asStateFlow()
     private val _deadline = MutableStateFlow(GuideStateMachine.NO_DEADLINE.value)
@@ -94,7 +102,7 @@ class SettingsMachineImpl(
     private var editor: EditorState? = null
     private var numberPad: NumberPadState? = null
     private var move: MoveState? = null
-    private var capture: CaptureState? = null
+    private val capture: CaptureState? get() = captureFlow.state
     private var captureRow: RowId? = null
     private var captureUntilMs = Long.MAX_VALUE
     private var notice: String? = null
@@ -115,7 +123,6 @@ class SettingsMachineImpl(
     /** A PIN request in flight: what runs when [SettingsEvent.PinResult] grants it. */
     private var pinToken = 0L
     private var pinPending: (() -> Unit)? = null
-    private var captureToken = 0L
 
     // ---------------------------------------------------------------- SettingsMachine
 
@@ -159,6 +166,7 @@ class SettingsMachineImpl(
         if (editor != null) return true // the router hands the editor's keys to Compose; BACK arrives as EditorBack
         val consumed = when {
             capture != null -> captureKey(a)
+            keyHandler?.invoke(currentRoute(), action) == true -> true
             numberPad != null -> padKey(action)
             confirm != null -> confirmKey(a)
             menu != null -> menuKey(a)
@@ -190,7 +198,7 @@ class SettingsMachineImpl(
             is SettingsEvent.EditorClosed -> onEditorClosed(event)
             SettingsEvent.EditorBack -> if (editor != null) _editorBacks.tryEmit(Unit)
             is SettingsEvent.Captured -> onCaptured(event)
-            is SettingsEvent.CaptureTimedOut -> if (capture?.token == event.token) cancelCapture(texts[SettingsText.CAPTURE_TIMED_OUT])
+            is SettingsEvent.CaptureTimedOut -> captureResult(captureFlow.onTimeout(event.token))
             is SettingsEvent.PinResult -> onPinResult(event)
             is SettingsEvent.Notice -> showNotice(event.text)
             is SettingsEvent.Advanced -> setAdvanced(event.on, emit = false)
@@ -221,7 +229,9 @@ class SettingsMachineImpl(
 
     override fun replace(route: SettingsRoute) {
         closeOverlays()
+        val old = currentRoute()
         path = if (path.size > 1) path.dropLast(1) + route else listOf(route)
+        if (old != route && old !in path) forget(old)
         pane = Pane.PAGE
         restoreCursor(route)
         requestDisplayed()
@@ -240,7 +250,9 @@ class SettingsMachineImpl(
         if (i < 0) { pushRoute(route); publish(); return }
         if (i == path.lastIndex) { publish(); return }
         rememberCursor()
+        val dropped = path.subList(i + 1, path.size).toList()
         path = path.subList(0, i + 1)
+        for (r in dropped) if (r !in path) forget(r)
         if (route == SettingsRoute.Root) pane = Pane.SECTIONS else restoreCursor(route)
         requestDisplayed()
         publish()
@@ -251,6 +263,21 @@ class SettingsMachineImpl(
         closeOverlays()
         publish()
         guideDispatch?.invoke(GuideEvent.Act(BoxAction.OPEN_GUIDE))
+    }
+
+    override var keyHandler: ((SettingsRoute, GuideEvent.Act) -> Boolean)? = null
+
+    override var captureSaved: ((BoxAction, CapturedKey, Press) -> Unit)? = null
+
+    override fun startCapture(action: BoxAction, press: Press, test: Boolean) {
+        closeOverlays()
+        captureRow = null
+        armCapture(action, press, test)
+        publish()
+    }
+
+    override fun requestPinSetup(change: Boolean) {
+        pinGate?.request(PinPurpose.CreatePin(change))
     }
 
     override fun confirm(spec: app.thebox.core.settings.ConfirmSpec, intent: RowIntent) {
@@ -274,11 +301,15 @@ class SettingsMachineImpl(
                 } else {
                     val s = secs[sectionCursor]
                     lastSection = s
-                    path = listOf(SettingsRoute.Root, SettingsRoute.Section(s))
-                    pane = Pane.PAGE
-                    restoreCursor(currentRoute())
-                    requestDisplayed()
-                    announceRow()
+                    val enter = {
+                        path = listOf(SettingsRoute.Root, SettingsRoute.Section(s))
+                        pane = Pane.PAGE
+                        restoreCursor(currentRoute())
+                        requestDisplayed()
+                        announceRow()
+                    }
+                    // (M5 integration, §3.3.8, §3.9.2) The Parental controls page asks for the PIN while one is set.
+                    if (s == SectionId.PARENTAL) gated(enter) else enter()
                 }
             }
             BoxAction.BACK -> return false // leave Settings (the guide applies the M4 rule)
@@ -300,6 +331,18 @@ class SettingsMachineImpl(
     private fun pageKey(act: GuideEvent.Act): Boolean {
         val page = displayedPage()
         val row = page?.let { rowAt(it, cursor) }
+        // (M5 integration) Welcome's cards are its Link rows; the footer note (an Info row) is not a card. ←/→ (and ↑/↓)
+        // move between the cards only: the device pass left the focus on the note, with no card highlighted.
+        if (currentRoute() == SettingsRoute.FirstRun && page != null && act.action in WELCOME_MOVES) {
+            val cards = page.rows.indices.filter { page.rows[it].kind is RowKind.Link }
+            if (cards.isNotEmpty()) {
+                val here = cards.indexOfFirst { it >= cursor }.let { if (it < 0) cards.lastIndex else it }
+                val step = if (act.action == BoxAction.RIGHT || act.action == BoxAction.DOWN) 1 else -1
+                val target = cards[(if (cards[here] == cursor) here + step else here).coerceIn(0, cards.lastIndex)]
+                if (target != cursor) { cursor = target; announceRow() }
+                return true
+            }
+        }
         when (act.action) {
             BoxAction.UP -> moveCursor(cursor - step(act))
             BoxAction.DOWN -> moveCursor(cursor + step(act))
@@ -563,50 +606,62 @@ class SettingsMachineImpl(
         }
     }
 
-    /** `capture:<actionId>:<SHORT|LONG>` Action rows start a capture (§3.8.3, WP-C's pages). */
+    /** `capture:<actionId>:<SHORT|LONG>` Action rows start a capture (§3.8.3); OK on Save emits `Menu(row, "bind:<keyCode>")`. */
     private fun startCapture(row: RowId) {
         val parts = row.key.removePrefix(CAPTURE_PREFIX).split(':')
         val action = BoxAction.entries.firstOrNull { it.id == parts.getOrNull(0) } ?: return
         val press = Press.entries.firstOrNull { it.name == parts.getOrNull(1) } ?: Press.entries.first()
-        val now = nowMs()
-        capture = CaptureState(++captureToken, action, press, now)
         captureRow = row
+        armCapture(action, press, test = false)
+    }
+
+    private fun armCapture(action: BoxAction, press: Press, test: Boolean) {
+        val now = nowMs()
         captureUntilMs = now + CAPTURE_TIMEOUT_MS
-        effects.armCapture(true)
+        captureResult(captureFlow.start(action, press, now, test))
     }
 
     private fun onCaptured(e: SettingsEvent.Captured) {
-        val c = capture ?: return
-        if (c.captured != null) return
-        effects.armCapture(false)
-        captureUntilMs = Long.MAX_VALUE
-        if (e.key.keyCode == Keys.BACK || e.key.keyCode == Keys.ESCAPE || e.key.keyCode == Keys.BUTTON_B) {
-            cancelCapture(null)
-            return
-        }
-        capture = c.copy(captured = e.key)
+        if (capture == null) return
+        captureResult(captureFlow.onKey(e.key))
     }
 
     private fun captureKey(a: BoxAction): Boolean {
-        val c = capture ?: return true
-        when (a) {
-            BoxAction.BACK -> cancelCapture(null)
-            BoxAction.SELECT -> {
-                val key = c.captured ?: return true
-                val row = captureRow
-                cancelCapture(null)
-                if (row != null) emit(RowIntent.Menu(row, BIND_PREFIX + key.keyCode), findRow(row))
-            }
-            else -> Unit
-        }
+        if (capture == null) return true
+        captureResult(captureFlow.act(a, nowMs()))
         return true
     }
 
+    /** Runs what [CaptureFlow] asks for: the router hook, the deadline, the save. */
+    private fun captureResult(r: CaptureFlow.Result) {
+        when (r) {
+            CaptureFlow.Result.None -> Unit
+            is CaptureFlow.Result.Arm -> {
+                effects.armCapture(r.on)
+                captureUntilMs = if (r.on) nowMs() + CAPTURE_TIMEOUT_MS else Long.MAX_VALUE
+            }
+            is CaptureFlow.Result.Save -> {
+                val row = captureRow
+                captureRow = null
+                captureUntilMs = Long.MAX_VALUE
+                val saved = captureSaved
+                when {
+                    row != null -> emit(RowIntent.Menu(row, BIND_PREFIX + r.key.keyCode), findRow(row))
+                    saved != null -> { changed += EffectTiming.LIVE; saved(r.action, r.key, r.press) }
+                }
+            }
+            is CaptureFlow.Result.Closed -> {
+                captureRow = null
+                if (captureUntilMs != Long.MAX_VALUE) effects.armCapture(false)
+                captureUntilMs = Long.MAX_VALUE
+                if (r.timedOut) showNotice(texts[SettingsText.CAPTURE_TIMED_OUT])
+            }
+        }
+    }
+
     private fun cancelCapture(message: String?) {
-        if (capture?.captured == null && capture != null) effects.armCapture(false)
-        capture = null
-        captureRow = null
-        captureUntilMs = Long.MAX_VALUE
+        if (capture == null) return
+        captureResult(captureFlow.act(BoxAction.BACK, nowMs()))
         if (message != null) showNotice(message)
     }
 
@@ -636,6 +691,7 @@ class SettingsMachineImpl(
         }
         rememberCursor()
         path = path.dropLast(1)
+        forget(route)
         val parent = currentRoute()
         if (parent == SettingsRoute.Root) {
             pane = Pane.SECTIONS
@@ -645,6 +701,14 @@ class SettingsMachineImpl(
         }
         requestDisplayed()
         return true
+    }
+
+    /**
+     * (M5 integration) A route that left the open path loses its cached page: its source stops observing it (`closed`)
+     * and the next visit must ask for a fresh page (WP-B's providers drop intents for a page they no longer hold).
+     */
+    private fun forget(route: SettingsRoute) {
+        pages.remove(route); listRows.remove(route); requested.remove(route)
     }
 
     private fun pathTo(route: SettingsRoute): List<SettingsRoute> {
@@ -728,6 +792,9 @@ class SettingsMachineImpl(
             }
             else -> cursor
         }
+        // (M5 integration) The page asks for focus on a row (a result card's button) when that request is new.
+        val focus = page.focus
+        if (focus != null && focus != old?.focus && pane == Pane.PAGE) indexOf(pub, focus)?.let { cursor = it }
         cursor = cursor.coerceIn(0, (total(pub) - 1).coerceAtLeast(0))
         fixTop(pub)
         // Overlays whose row vanished close.
@@ -799,12 +866,15 @@ class SettingsMachineImpl(
             path = listOf(SettingsRoute.Root); pane = Pane.SECTIONS
             sectionCursor = secs.size
         }
+        // (M5 integration) Publish first: the effects build the page with the *published* `advanced` flag (PageContext);
+        // before this the rebuild still saw the old value and the advanced rows never appeared.
+        publish()
         displayedRoute()?.let { effects.loadPage(it) }
     }
 
     private fun onTick(now: Long) {
         if (now >= noticeUntilMs) { notice = null; noticeUntilMs = Long.MAX_VALUE }
-        if (now >= captureUntilMs) capture?.let { c -> if (c.captured == null) cancelCapture(texts[SettingsText.CAPTURE_TIMED_OUT]) }
+        if (now >= captureUntilMs) capture?.let { c -> if (c.captured == null) captureResult(captureFlow.onTimeout(c.token)) }
     }
 
     private fun showNotice(text: String) {
@@ -894,6 +964,9 @@ class SettingsMachineImpl(
             move = move,
             capture = capture,
             notice = notice,
+            captureButton = if (capture != null) captureFlow.focusedButton else 0,
+            captureTest = capture != null && captureFlow.testMode,
+            captureReport = if (capture != null) captureFlow.testReport else null,
         )
         if (next != _ui.value) _ui.value = next
         val deadline = minOf(noticeUntilMs, captureUntilMs)
@@ -902,6 +975,9 @@ class SettingsMachineImpl(
 
     companion object {
         val FACTORY = SettingsMachineFactory { effects, nowMs -> SettingsMachineImpl(effects, nowMs) }
+
+        /** The default key map with no user overrides (tests and machines built without the router's map). */
+        val DEFAULT_KEY_MAP: EffectiveKeyMap = RemappedKeyMap(DefaultKeyMap(), null, null)
 
         /** The pinned "Show advanced settings" toggle of the sections pane (§3.2.3); `GuidePrefs.advancedSettings`. */
         val ADVANCED_ROW = RowId("settings.advanced")
@@ -918,7 +994,9 @@ class SettingsMachineImpl(
         const val HOLD_ACCEL_MS = 600L
         const val HOLD_ACCEL_ROWS = 3
         /** `CAPTURE_TIMEOUT_MS` (Appendix B). */
-        const val CAPTURE_TIMEOUT_MS = 10_000L
+        const val CAPTURE_TIMEOUT_MS = CaptureFlow.CAPTURE_TIMEOUT_MS
+        private val WELCOME_MOVES = setOf(BoxAction.LEFT, BoxAction.RIGHT, BoxAction.UP, BoxAction.DOWN)
+
         /** About eight one-line rows fit the page pane (§3.1). */
         const val VISIBLE_ROWS = 8
         /** CH± / PAGE_UP/DOWN (§3.2.2). */
@@ -942,6 +1020,7 @@ class SettingsMachineImpl(
             is SettingsRoute.PhoneSetup -> if (route.firstRun) SettingsRoute.FirstRun else SettingsRoute.Section(SectionId.PLAYLISTS)
             is SettingsRoute.ImportProgress -> if (route.firstRun) SettingsRoute.FirstRun else SettingsRoute.Section(SectionId.PLAYLISTS)
             is SettingsRoute.GroupsReview -> if (route.firstRun) SettingsRoute.FirstRun else SettingsRoute.Playlist(route.playlistId)
+            is SettingsRoute.MatchingReport -> if (route.firstRun) SettingsRoute.FirstRun else SettingsRoute.Playlist(route.playlistId)
             is SettingsRoute.PlaylistSource -> SettingsRoute.Playlist(route.playlistId)
             is SettingsRoute.NetworkTest -> SettingsRoute.Playlist(route.playlistId)
             is SettingsRoute.FavouriteList -> SettingsRoute.FavouriteLists

@@ -69,6 +69,13 @@ class ChannelNamePrefixImpl : ChannelNamePrefix {
     private fun pattern(regex: String): Pattern? {
         val c = compiled
         if (c != null && c.source == regex) return c.pattern
+        // (M5 integration, G-L19, WP-D's finding) Android's Matcher hands ICU a copy of the input, so a match cannot be
+        // time-boxed on the device: the exponential shapes are refused up front, as for hide rules (§3.7.3).
+        if (RegexSafety.isRisky(regex)) {
+            BoxLog.w(TAG, "custom prefix regex refused as too slow; using Auto")
+            compiled = CompiledRegex(regex, null)
+            return null
+        }
         val p = try {
             Pattern.compile(regex)
         } catch (e: PatternSyntaxException) {

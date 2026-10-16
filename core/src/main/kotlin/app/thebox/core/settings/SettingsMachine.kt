@@ -39,6 +39,13 @@ data class SettingsUiState(
     val capture: CaptureState? = null,
     /** Transient line at the bottom of the page ("Saved", "Copied from link"). */
     val notice: String? = null,
+    /**
+     * (M5 integration 2026-10-16, additive) The capture overlay's button focus (0 Save, 1 Try another, 2 Cancel),
+     * "Test a key" mode and its report (what the key does now in the guide and the player): WP-C's `CaptureFlow`.
+     */
+    val captureButton: Int = 0,
+    val captureTest: Boolean = false,
+    val captureReport: Pair<BoxAction?, BoxAction?>? = null,
 )
 
 /** Effects the machine requests; :ui's SettingsEffectsImpl implements them. Main-safe, non-blocking. */

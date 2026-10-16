@@ -4,6 +4,8 @@
 <resources>
     <string name="player_quick_sources">Sources</string>
     <string name="player_picker_server">Server</string>
+    <!-- M5 integration (§3.6.2): "Server 2 · backup.example.net:8080" -->
+    <string name="player_picker_server_row">Server %1$d · %2$s</string>
     <string name="player_menu_lock_channel">Lock channel</string>
     <string name="player_menu_channel_options">Channel options</string>
     <string name="guide_menu_lock_channel">Lock channel</string>
@@ -16,4 +18,17 @@
     <string name="error_button_secure_dns">Use secure DNS</string>
     <string name="error_button_refresh_playlist">Refresh playlist</string>
     <string name="error_button_open_external">Open in another player</string>
+    <!-- M5 integration 2026-10-16: route-specific Settings buttons (§3.14) and Back to Auto (B2) -->
+    <string name="error_button_edit_login">Edit login</string>
+    <string name="error_button_account">Account details</string>
+    <string name="error_button_user_agent">Change user agent</string>
+    <string name="error_button_playlist_settings">Playlist settings</string>
+    <string name="error_button_connection_test">Connection test</string>
+    <string name="error_button_back_to_auto">Back to Auto</string>
+    <!-- M5 integration: lock feedback (GuideToast) -->
+    <string name="guide_toast_channel_locked">Channel locked. It asks for the PIN.</string>
+    <string name="guide_toast_channel_unlocked">Channel unlocked</string>
+    <string name="guide_toast_group_locked">Group locked. It asks for the PIN.</string>
+    <string name="guide_toast_group_unlocked">Group unlocked</string>
+    <string name="guide_toast_locked_not_protected">Locked and hidden from mixed lists. Set a PIN in Settings → Parental controls to protect it.</string>
 </resources>

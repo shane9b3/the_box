@@ -74,6 +74,9 @@ class PlayerEffectsImpl(
     override fun errorAction(button: ErrorButton, card: ErrorCardState) = delegates.errors.run(button, card)
 
     override fun setChannelLocked(channel: GuideChannel, locked: Boolean) = delegates.parental.setChannelLocked(channel, locked)
+
+    /** (M5 integration, §3.6.2) The Sources picker. */
+    override fun selectServer(index: Int) = controller.selectServer(index)
     override fun pausePlain() = controller.pause()
     override fun resumePlain() = controller.resume()
 

@@ -135,7 +135,7 @@ class DiagPagesTest {
 
     @Test
     fun verdictTexts() {
-        assertEquals("The server's name does not exist. Check the address.", pages.verdictText(Verdict(VerdictKey.SERVER_UNREACHABLE, emptyList())))
+        assertEquals("The server's name does not exist. Check the address.", pages.verdictText(Verdict(VerdictKey.NAME_NOT_FOUND, emptyList())))
         assertEquals("The server does not answer on port 8080. It may be down, or the address changed.", pages.verdictText(Verdict(VerdictKey.SERVER_UNREACHABLE, listOf("8080"))))
         assertTrue(pages.verdictText(Verdict(VerdictKey.SLOW_PROVIDER, listOf("6.1", "8.0"))).contains("6.1 of 8.0 Mbit/s"))
     }

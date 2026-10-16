@@ -27,7 +27,8 @@ class ButtonMappingTest : SettingsTestBase() {
     }
 
     private fun captureKey(keyCode: Int, long: Boolean = false) {
-        activate(rowWhere("Add a button") { it.kind is RowKind.Action }.id.key)
+        // (M5 integration) WP-C's rows: "Add a button (press)" = binding.add_short, "(hold)" = binding.add_long.
+        activate(if (long) "binding.add_long" else "binding.add_short")
         awaitSettings("capture armed") { it.capture != null }
         if (long) longPress(keyCode) else press(keyCode)
     }
@@ -39,13 +40,22 @@ class ButtonMappingTest : SettingsTestBase() {
         launch()
         bindingsPage(BoxAction.SUBTITLES)
         captureKey(KeyEvent.KEYCODE_PROG_YELLOW)
-        val text = awaitText("capture shows Yellow from an unknown device") { it.contains("Yellow") }
-        assertTrue("injected events carry no real device (S16, F1): $text", text.contains("unknown device", ignoreCase = true))
-        assertTrue("the card says it replaces Audio in the player", text.contains("Audio"))
-        activate(rowWhere("Save") { it.kind is RowKind.Action && it.label.contains("Save", true) }.id.key)
-        leaveSettings()
-        // In FULL, Yellow opens the subtitles picker.
+        // (M5 integration) The capture card is WP-C's CaptureOverlay over the page (not page rows): its state is
+        // SettingsUiState.capture (CaptureFlow); the texts "Yellow", "from an unknown device" and "replaces Audio" are
+        // drawn from it (CaptureOverlay; checked on the screenshot, not here).
+        val c = awaitSettings("capture shows Yellow from an unknown device") { it.capture?.captured != null }.capture!!
+        val key = c.captured!!
+        assertEquals("Yellow captured", KeyEvent.KEYCODE_PROG_YELLOW, key.keyCode)
+        assertTrue("injected events carry no real device (S16, F1): $key", key.deviceName == null || key.deviceId < 0 || key.isVirtual)
+        val verdict = c.verdict
+        assertTrue("it replaces Audio in the player: $verdict", verdict is app.thebox.core.input.BindingVerdict.Replaces && verdict.current == BoxAction.AUDIO)
+        assertEquals("focus on Save", 0, sui().captureButton)
         press(KeyEvent.KEYCODE_DPAD_CENTER)
+        awaitSettings("capture closed") { it.capture == null }
+        leaveSettings()
+        // In FULL, Yellow opens the subtitles picker. (M5 integration) OK tunes the focused channel, a second OK opens FULL.
+        var ok = 0
+        while (gui().mode != ScreenMode.FULL && ok++ < 3) { press(KeyEvent.KEYCODE_DPAD_CENTER); Thread.sleep(2_000) }
         awaitGui("FULL") { it.mode == ScreenMode.FULL }
         press(KeyEvent.KEYCODE_PROG_YELLOW)
         Thread.sleep(800)
@@ -61,7 +71,11 @@ class ButtonMappingTest : SettingsTestBase() {
         }
         bindingsPage(BoxAction.AUDIO)
         captureKey(KeyEvent.KEYCODE_DPAD_UP)
-        awaitText("D-pad is reserved") { it.contains("always navigate", ignoreCase = true) }
+        // (M5 integration) "always navigate" is the Reserved(NAVIGATION) verdict's line on the overlay.
+        val r = awaitSettings("D-pad is reserved") { it.capture?.verdict != null }.capture!!.verdict
+        assertTrue("D-pad reserved: $r", r is app.thebox.core.input.BindingVerdict.Reserved && r.reason == app.thebox.core.input.ReservedReason.NAVIGATION)
+        assertEquals("focus moves to Try another", 1, sui().captureButton)
+        press(KeyEvent.KEYCODE_BACK)
     }
 
     /** I-M5-13 */
@@ -71,8 +85,12 @@ class ButtonMappingTest : SettingsTestBase() {
         launch()
         bindingsPage(BoxAction.GROUPS_PANEL)
         captureKey(KeyEvent.KEYCODE_CHANNEL_UP, long = true)
-        awaitText("the card warns about repeat") { it.contains("repeat", ignoreCase = true) || it.contains("hold", ignoreCase = true) }
-        activate(rowWhere("Save") { it.kind is RowKind.Action && it.label.contains("Save", true) }.id.key)
+        // (M5 integration) The warning is the LosesRepeat verdict CaptureOverlay draws ("…acts on release, no repeat").
+        val v = awaitSettings("the card warns about repeat") { it.capture?.verdict != null }.capture!!.verdict
+        assertTrue("short CH+ loses its repeat: $v", v is app.thebox.core.input.BindingVerdict.LosesRepeat)
+        assertEquals("focus on Save", 0, sui().captureButton)
+        press(KeyEvent.KEYCODE_DPAD_CENTER)
+        awaitSettings("capture closed") { it.capture == null }
         leaveSettings()
         val before = gui().overlay
         press(KeyEvent.KEYCODE_CHANNEL_UP)

@@ -724,7 +724,7 @@ class PlayerStateMachineImpl(
             QuickItem.STREAM_INFO -> toggleStats()
             QuickItem.SCREEN_OFF -> screenOff()
             QuickItem.SETTINGS -> { closeLayer(); effects.openSettings() }
-            QuickItem.SOURCES -> Unit // M5 commit 0: never listed before WP-C's QuickBarModel (Sources picker, §3.6.2)
+            QuickItem.SOURCES -> openPicker(PickerKind.SERVER, fromQuickBar = true) // M5 integration (§3.6.2, E23)
         }
     }
 
@@ -780,7 +780,7 @@ class PlayerStateMachineImpl(
         }
         PickerKind.ASPECT -> AspectMode.entries.map { PickerChoice.Aspect(it) }
         PickerKind.VIDEO_DECODER -> DECODER_CHOICES
-        PickerKind.SERVER -> emptyList() // M5 commit 0: WP-C (Sources picker, §3.6.2)
+        PickerKind.SERVER -> m.servers.mapIndexed { i, label -> PickerChoice.Server(i, label) } // M5 integration (§3.6.2)
     }
 
     private fun currentChoice(kind: PickerKind, choices: List<PickerChoice>): Int = when (kind) {
@@ -791,7 +791,7 @@ class PlayerStateMachineImpl(
             val d = video.decoderOverride?.takeIf { it != VideoDecoderMode.AUTO }
             choices.indexOfFirst { it is PickerChoice.Decoder && it.mode == d }.coerceAtLeast(0)
         }
-        PickerKind.SERVER -> 0 // M5 commit 0: WP-C (Sources picker, §3.6.2)
+        PickerKind.SERVER -> menu.server.coerceIn(0, (choices.size - 1).coerceAtLeast(0))
     }
 
     private fun pickerKey(a: GuideEvent.Act): Boolean {
@@ -823,6 +823,7 @@ class PlayerStateMachineImpl(
             PickerChoice.TextOff -> effects.selectText(null)
             is PickerChoice.Aspect -> effects.setAspect(c.mode, remember)
             is PickerChoice.Decoder -> effects.setDecoder(c.mode)
+            is PickerChoice.Server -> effects.selectServer(c.index)
         }
     }
 
@@ -935,7 +936,7 @@ class PlayerStateMachineImpl(
             ErrorButton.GUIDE -> return false
             // M5 commit 0 (§3.14): one-line hand-offs; WP-C's ErrorCardModel is what offers these buttons.
             ErrorButton.OPEN_SETTINGS -> card.route?.let { effects.openSettings(it) }
-            ErrorButton.USE_SECURE_DNS, ErrorButton.REFRESH_PLAYLIST, ErrorButton.OPEN_EXTERNAL -> effects.errorAction(b, card)
+            ErrorButton.USE_SECURE_DNS, ErrorButton.REFRESH_PLAYLIST, ErrorButton.OPEN_EXTERNAL, ErrorButton.BACK_TO_AUTO -> effects.errorAction(b, card)
         }
         return true
     }
@@ -1416,6 +1417,7 @@ class PlayerStateMachineImpl(
             is PinPurpose.Tune -> if (granted) effects.tune(purpose.channel, null)
             is PinPurpose.SettingsAction -> pendingLocks.remove(purpose.token)?.let { if (granted) it() }
             is PinPurpose.EnterSettings -> Unit
+            is PinPurpose.CreatePin -> Unit
         }
     }
 

@@ -73,7 +73,7 @@ class LanPhoneLink(
                 h.handle(req).also { publish() } // lastRequestAtMs drives the TV's "nothing reached the TV" hint
             }
             try {
-                srv.start(LanBind(address, portOverride ?: LanLimits.PHONE_PORT_PREFERRED, LanLimits.HTTP_MAX_SOCKETS), lazyHandler)
+                srv.start(LanBind(address, portOverride ?: app.thebox.core.diag.DebugOverrides.phonePort ?: LanLimits.PHONE_PORT_PREFERRED, LanLimits.HTTP_MAX_SOCKETS), lazyHandler)
             } catch (e: IOException) {
                 BoxLog.w(TAG, "bind failed: ${e.javaClass.simpleName}")
                 _state.value = LanServerState(ServerPhase.FAILED, failure = LanFailure.BIND_FAILED)

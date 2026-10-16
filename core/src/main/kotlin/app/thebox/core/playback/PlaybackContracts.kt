@@ -106,6 +106,11 @@ class ResolvedStream(
      * expanded value is not printable ASCII (`HeaderPolicy.sanitize`). Names only; the controller logs them.
      */
     val droppedHeaders: List<String> = emptyList(),
+    /**
+     * (M5 integration 2026-10-16, E23 / WP-C amendment) `host[:port]` of every base URL in order (not secret): the
+     * labels of the player's Sources picker. Empty when the stream has one base.
+     */
+    val baseHosts: List<String> = emptyList(),
 ) {
     override fun toString(): String = "ResolvedStream($brokerKey, $host, $formatHint, base=$baseIndex/$baseCount)"
 }
@@ -117,6 +122,8 @@ enum class NextStep {
     RETRY, ACCOUNT_DETAILS, EDIT_LOGIN, STOP_AND_WAIT, TRY_BACKUP, PREVIOUS_CHANNEL, CHANGE_USER_AGENT,
     PLAYLIST_SETTINGS, USE_SECURE_DNS, DIAGNOSTICS, TRY_SOFTWARE_DECODER, OPEN_EXTERNAL, AUDIO_OPTIONS,
     WATCH_LIVE, TRY_OTHER_CATCHUP_MODE, REFRESH_PLAYLIST,
+    /** (M5 integration 2026-10-16, B2 amendment) "Always passthrough" failed: set Audio output back to Auto. */
+    BACK_TO_AUTO,
 }
 
 /**

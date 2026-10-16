@@ -44,6 +44,7 @@ import app.thebox.data.repo.read
 import app.thebox.data.repo.writeTransaction
 import app.thebox.data.work.PlaylistRefreshWorker
 import app.thebox.data.work.RefreshScheduler
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.async
@@ -178,8 +179,9 @@ class SourceSetupImpl @Inject constructor(
             val r = if (url != null) {
                 playlists.addM3uUrl(form.name?.takeIf { it.isNotBlank() } ?: PlaylistRepository.displayHost(url), url, form.userAgent)
             } else {
-                val display = fileName(file!!)
-                playlists.addM3uFile(form.name?.takeIf { it.isNotBlank() } ?: display, file, display)
+                val f = file!!
+                val display = form.fileName?.takeIf { it.isNotBlank() } ?: fileName(f)
+                playlists.addM3uFile(form.name?.takeIf { it.isNotBlank() } ?: display, f, display)
             }
             id = when (r) {
                 is Outcome.Ok -> r.value
@@ -195,7 +197,7 @@ class SourceSetupImpl @Inject constructor(
                 is Outcome.Err -> return r
                 is Outcome.Ok -> Unit
             }
-            playlistDao.setDisplaySource(existingId, if (url != null) PlaylistRepository.displayHost(url) else fileName(file!!))
+            playlistDao.setDisplaySource(existingId, if (url != null) PlaylistRepository.displayHost(url) else form.fileName?.takeIf { it.isNotBlank() } ?: fileName(file!!))
             if (form.userAgent != null && form.userAgent != p.userAgent) playlistDao.setUserAgent(existingId, form.userAgent)
             id = existingId
         }
@@ -357,6 +359,15 @@ class SourceSetupImpl @Inject constructor(
         return SetupResultMapper.Context(if (p.type == PlaylistType.XTREAM) SourceKind.XTREAM else SourceKind.M3U, host, port, editing = false)
     }
 
+    /** The stored login says every connection is in use (`active ≥ max`). */
+    private suspend fun accountFull(playlistId: Long): Boolean = try {
+        db.xtreamAccountDao().get(playlistId)?.let { a -> val max = a.maxConnections; val active = a.activeConnections; max != null && active != null && max > 0 && active >= max } == true
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: Exception) {
+        false
+    }
+
     // ------------------------------------------------------------------ UA probe (§3.4.5)
 
     /**
@@ -383,7 +394,9 @@ class SourceSetupImpl @Inject constructor(
                     playlistDao.setUserAgent(playlistId, SetupConstants.VLC_USER_AGENT)
                     BoxLog.i(TAG) { "playlist $playlistId answers VLC only: user agent switched" }
                     strings.text(SetupText.UA_FALLBACK_NOTE)
-                } else if (vlc.verdict == ProbeVerdict.LIMIT) {
+                } else if (vlc.verdict == ProbeVerdict.LIMIT || accountFull(playlistId)) {
+                    // (M5 integration, I-M5-6) Many panels answer a full account with 403, not 458/509: when the login's
+                    // account says every connection is in use, both refusals are the limit, not the user agent.
                     strings.text(SetupText.UA_PROBE_LIMIT_NOTE)
                 } else {
                     null

@@ -6,7 +6,7 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class UpdateManifest(
     val schema: Int,
-    /** (reviewed 2026-10-16, S7) Monotonic per channel; the client stores the highest accepted and rejects lower ones (replay). */
+    /** (reviewed 2026-10-16, S7) Monotonic per channel; the client stores the highest accepted and rejects lower ones (replay). (M5 integration 2026-10-16, lead ruling) An equal sequence is accepted: the daily re-check sees the same manifest again. */
     val sequence: Long,
     val packageName: String,
     val channel: String = "stable",

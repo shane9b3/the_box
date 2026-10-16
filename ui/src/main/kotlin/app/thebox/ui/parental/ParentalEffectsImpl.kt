@@ -41,7 +41,8 @@ class ParentalEffectsImpl @Inject constructor(
 ) : ParentalEffects {
     /** App-lifetime main scope (the singleton outlives the activities). Tests replace it. */
     internal var scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-    internal var clock: () -> Long = System::currentTimeMillis
+    /** The PIN lockout's wall clock: the debug harness's offset is added (DebugOverrides, §6.5; 0 in release builds). */
+    internal var clock: () -> Long = app.thebox.core.diag.DebugOverrides::nowMs
 
     override fun verifyPin(token: Long, digits: CharArray, answer: (PinCheck) -> Unit) {
         scope.launch {

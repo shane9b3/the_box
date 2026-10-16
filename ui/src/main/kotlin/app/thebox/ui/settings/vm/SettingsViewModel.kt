@@ -45,6 +45,7 @@ class SettingsViewModel internal constructor(
     keyRouter: KeyRouter?,
     dnsNotices: SecureDnsNotices?,
     navigator: SettingsNavigatorImpl?,
+    adapters: SettingsPageAdapters?,
     scope: CoroutineScope?,
     main: CoroutineDispatcher,
     work: CoroutineDispatcher,
@@ -59,16 +60,25 @@ class SettingsViewModel internal constructor(
         keyRouter: KeyRouter,
         dnsNotices: SecureDnsNotices,
         navigator: SettingsNavigatorImpl,
-    ) : this(factory, sources, store, applier, texts, keyRouter, dnsNotices, navigator, null, Dispatchers.Main.immediate, Dispatchers.Default, System::currentTimeMillis)
+        adapters: SettingsPageAdapters,
+    ) : this(factory, sources, store, applier, texts, keyRouter, dnsNotices, navigator, adapters, null, Dispatchers.Main.immediate, Dispatchers.Default, System::currentTimeMillis)
 
     private val scope: CoroutineScope = scope ?: viewModelScope
-    private val ordered = sources.sortedBy { it.javaClass.name }
+    private var machineRef: SettingsMachine? = null
+    /** (M5 integration) The pages of WP-B…WP-E hosted through adapters (`SettingsPageAdapters`), after WP-A's set. */
+    private val built = adapters?.create(this.scope, main, work) { machineRef as? SettingsShellLink }
+    private val ordered = sources.sortedBy { it.javaClass.name } + built?.sources.orEmpty()
+
+    /** WP-B's pages: the activity answers their document-picker requests (`PageAction.PickM3uFile`). */
+    val setupPages: SetupPagesSource? get() = built?.setup
     private val effects = SettingsEffectsImpl(ordered, store, applier, texts, keyRouter, this.scope, main, work, nowMs)
 
     val machine: SettingsMachine = factory.create(effects, nowMs)
 
     init {
+        machineRef = machine
         effects.machine = machine
+        built?.mapping?.let { m -> (machine as? SettingsShellLink)?.captureSaved = m::save }
         navigator?.attach(machine)
         val s = this.scope
         // BACK asks the page's source first (WP-B's import page confirms before it is left, §3.4.5).
@@ -77,6 +87,7 @@ class SettingsViewModel internal constructor(
         s.launch(main) {
             var live = emptySet<app.thebox.core.settings.SettingsRoute>()
             machine.ui.collect { u ->
+                built?.phone?.onRoute(u.route)
                 val now = (u.stack + u.route + listOfNotNull(u.page?.route)).toSet()
                 for (gone in live - now) ordered.firstOrNull { it.handles(gone) }?.closed(gone)
                 live = now

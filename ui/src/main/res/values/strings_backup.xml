@@ -150,6 +150,8 @@
     <string name="backup_phone_waiting">Waiting for your phone…</string>
     <string name="backup_phone_connected">Phone connected: %1$s</string>
     <string name="backup_phone_received">Received. Checking…</string>
+    <!-- M5 integration: the TV's notice when the phone page's setup submission was accepted (I-M5-9) -->
+    <string name="backup_phone_received_tv">Received from your phone</string>
     <string name="backup_phone_footer">Your phone and TV must be on the same Wi-Fi. The page is not encrypted: use it on your home network only.</string>
     <string name="backup_phone_isolation_hint">Nothing has reached the TV yet. Check that the phone is on the same Wi-Fi (not mobile data or a guest network). Some routers block devices from seeing each other (‘client isolation’ or ‘AP isolation’); if so, type the details on the TV instead.</string>
     <string name="backup_phone_vpn">A VPN app is on: allow local network access in it, or pause it while you set up.</string>

@@ -99,6 +99,7 @@ fun stream(
     output: XtreamOutput? = null,
     brokerKey: String = "p:1",
     droppedHeaders: List<String> = emptyList(),
+    baseHosts: List<String> = if (baseCount > 1) List(baseCount) { "panel$it.example:8080" } else emptyList(),
 ) = ResolvedStream(
     identity = identity,
     brokerKey = brokerKey,
@@ -114,6 +115,7 @@ fun stream(
     liveUrlTemplate = "{{base}}/live/{{u}}/{{p}}/1.{{ext}}",
     headerTemplates = emptyMap(),
     droppedHeaders = droppedHeaders,
+    baseHosts = baseHosts,
 )
 
 internal class FakeResolver(private val journal: Journal) : StreamUrlResolver {

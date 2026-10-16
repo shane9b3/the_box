@@ -48,6 +48,14 @@ class BackupRoundTripTest : SettingsTestBase() {
         assertEquals("user data equal after restore", before["playlists"], snapshot()["playlists"])
         val p = runBlocking { ep.playlists().all().single() }
         assertTrue("credentials decrypt", runBlocking { ep.playlists().secret(p) } is Outcome.Ok)
+        // (M5 integration) A restored playlist is imported again in the background (channels are not in a backup): wait
+        // for that import, so the comparison below sees only what the second restore could change.
+        runBlocking {
+            kotlinx.coroutines.withTimeoutOrNull(60_000) {
+                while (ep.channels().browseAll(p.id, unlocked = true).first().isEmpty()) kotlinx.coroutines.delay(500)
+            }
+        }
+        Thread.sleep(3_000)
         val once = snapshot()
         runBlocking { backup.restore(file, "correct horse 42".toCharArray(), RestoreMode.MERGE) }
         assertEquals("a second restore changes nothing", once, snapshot())

@@ -23,6 +23,18 @@
             <action android:name="android.intent.action.VIEW" />
             <data android:scheme="https" android:mimeType="video/*" />
         </intent>
+        <!-- M5 integration (docs/design/m5-setup-settings.md §1.7a, F17): package visibility for DocumentsUI, so the
+             "To a file" / "From a file" backup targets and the M3U file picker are detected on API 30+. -->
+        <intent>
+            <action android:name="android.intent.action.OPEN_DOCUMENT" />
+            <category android:name="android.intent.category.OPENABLE" />
+            <data android:mimeType="*/*" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.CREATE_DOCUMENT" />
+            <category android:name="android.intent.category.OPENABLE" />
+            <data android:mimeType="application/octet-stream" />
+        </intent>
     </queries>
 
     <!-- Runs on TV boxes and also on phones/tablets; neither touch nor leanback is required. -->

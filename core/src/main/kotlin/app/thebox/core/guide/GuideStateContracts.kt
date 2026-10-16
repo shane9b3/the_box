@@ -198,6 +198,10 @@ enum class GuideToast {
     /** arg = count (N5). */
     REMINDERS_MISSED,
     EXIT_HINT,
+    /** (M5 integration 2026-10-16, WP-C amendment) Lock feedback from the channel and group menus (§3.9.1). */
+    CHANNEL_LOCKED, CHANNEL_UNLOCKED, GROUP_LOCKED, GROUP_UNLOCKED,
+    /** A lock applied in FILTERED_NO_PIN: it filters now; a PIN protects it (B3). */
+    LOCKED_NOT_PROTECTED,
 }
 
 interface GuideStateMachine {
@@ -247,6 +251,11 @@ interface GuideStateMachine {
         set(@Suppress("UNUSED_PARAMETER") value) = Unit
     /** (M5, §2.12 item 5, S3) The settings editor is open: the router passes every key except BACK to Compose. */
     val textInputActive: Boolean get() = false
+    /**
+     * (M5 integration 2026-10-16, WP-C amendment) The PIN layer (decision §0.9) the host routes controller refusals and
+     * PIN-store answers to; null when the machine has none (fakes). Replaces the hosts' `machine as? ParentalHost` cast.
+     */
+    val parentalHost: app.thebox.core.parental.ParentalHost? get() = null
 
     companion object {
         val NO_DEADLINE: StateFlow<Long> = kotlinx.coroutines.flow.MutableStateFlow(Long.MAX_VALUE)

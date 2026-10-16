@@ -270,6 +270,7 @@
     <string name="setup_prefix_custom">Custom</string>
     <string name="setup_prefix_preview">Removes the prefix from %1$s of %2$s names</string>
     <string name="setup_prefix_custom_hint">Prefixes separated by commas, or one /regular expression/</string>
+    <string name="setup_prefix_too_slow">This pattern could make the app slow. Use a simpler pattern, or prefixes separated by commas.</string>
     <string name="setup_interval_hours">%1$s h</string>
     <string name="setup_interval_manual">Manual</string>
     <string name="setup_order_provider">Provider</string>

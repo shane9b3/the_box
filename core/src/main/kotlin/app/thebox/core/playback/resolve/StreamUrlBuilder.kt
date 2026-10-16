@@ -128,6 +128,7 @@ class StreamUrlBuilderImpl(private val expander: CredentialExpander = Credential
                 liveUrlTemplate = liveUrlTemplate,
                 headerTemplates = headerTemplates,
                 droppedHeaders = droppedHeaders,
+                baseHosts = if (xtreamApi && baseCount > 1) creds?.baseUrls.orEmpty().map { FormatHints.host(it) } else emptyList(),
             ),
         )
     }
@@ -167,6 +168,7 @@ class StreamUrlBuilderImpl(private val expander: CredentialExpander = Credential
                 liveUrlTemplate = request.url,
                 headerTemplates = request.headers,
                 droppedHeaders = droppedHeaders,
+                baseHosts = if (bases.size > 1) bases.map { FormatHints.host(it) } else emptyList(),
             ),
         )
     }

@@ -121,9 +121,12 @@ class SetupResultMapper(
     }
 
     private fun auth(reason: AuthReason): SetupCard = when (reason) {
-        AuthReason.BAD_CREDENTIALS, AuthReason.UNKNOWN -> card(
+        AuthReason.BAD_CREDENTIALS -> card(
             Tone.BAD, s.text(SetupText.CARD_BAD_LOGIN), listOf(s.text(SetupText.CARD_BAD_LOGIN_NEXT)), SetupAction.EDIT, SetupAction.PHONE_SETUP,
         )
+        // (M5 integration, I-M5-30) M1's decoder reports an HTML page on login as Auth(UNKNOWN) (an expiry or portal
+        // page): the user sees "a web page instead of data" (§3.4.4, S16), not "wrong password".
+        AuthReason.UNKNOWN -> notASource(NotASourceKind.HTML_PAGE)
         AuthReason.EXPIRED -> expired(null)
         AuthReason.BANNED, AuthReason.DISABLED -> disabled(null)
     }

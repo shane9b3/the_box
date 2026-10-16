@@ -65,7 +65,8 @@ class ChannelManagementTest : SettingsTestBase() {
         openSettings("fixguide")
         // Synthetic channel 9 (id % 20 == 9) has no EPG id.
         val unmatched = rowWhere("unmatched channel 9", 20_000) { it.label.endsWith(" 9") }
-        val countBefore = rows().count { it.kind is RowKind.Item }
+        // (M5 integration) The list is paged: compare the page's list count, not the rows loaded so far.
+        val countBefore = sui().page?.list?.count ?: rows().count { it.kind is RowKind.Item }
         activate(unmatched.id.key)
         awaitSettings("the picker") { it.route is SettingsRoute.FixGuide && (it.route as SettingsRoute.FixGuide).channel != null }
         editText(rowWhere("search field", p = { r -> (r.kind as? RowKind.Text) != null }), "News")
@@ -76,7 +77,7 @@ class ChannelManagementTest : SettingsTestBase() {
             press(KeyEvent.KEYCODE_DPAD_CENTER)
         }
         awaitSettings("back on the list without the row", 30_000) { s -> s.route == SettingsRoute.FixGuide() && rows(s).none { it.id == unmatched.id } }
-        assertTrue(rows().count { it.kind is RowKind.Item } < countBefore)
+        assertTrue(awaitSettings("one fewer unmatched") { s -> (s.page?.list?.count ?: Int.MAX_VALUE) < countBefore }.page != null)
         assertTrue(pid > 0)
     }
 }

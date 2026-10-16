@@ -150,6 +150,8 @@ class GuideStateMachineImpl(
      * to; the host sets it once after create. Set while the mode already is SETTINGS (S11: the activity's view models have
      * no creation order), it is opened on the pending route at once.
      */
+    override val parentalHost: ParentalHost get() = this
+
     override var settings: SettingsMachine? = null
         set(value) {
             if (field === value) return
@@ -312,6 +314,7 @@ class GuideStateMachineImpl(
 
     /** Publishes [u], the frame version and the deadline (the end of every dispatch, and of an outside [request]). */
     private fun publish() {
+        refreshUpdate()
         frame.gridFocused = u.zone == Zone.GRID
         rearmDeferredCard()
         if (u !== _ui.value) _ui.value = u
@@ -370,7 +373,31 @@ class GuideStateMachineImpl(
             is GuideEvent.Parental -> onParental(event.state)
             is GuideEvent.PinChecked -> onPinChecked(event.token, event.check)
             is GuideEvent.KeyHints -> { keyHints = event.hints; refreshFooter() }
-            is GuideEvent.Update -> Unit
+            is GuideEvent.Update -> updateCard = event.card?.let { c -> u.update?.let { c.copy(focused = it.focused) } ?: c }
+        }
+    }
+
+    // ---------------------------------------------------------------- update card (M5 integration, WP-E S17, §3.12.3)
+
+    /** The updater's latest card; shown as [GuideUiState.update] in GUIDE only, never over the PIN prompt or a reminder. */
+    private var updateCard: app.thebox.core.update.UpdateCardState? = null
+
+    private fun refreshUpdate() {
+        val shown = updateCard?.takeIf { u.mode == ScreenMode.GUIDE && u.pin == null && u.reminder == null }
+        if (u.update != shown) u = u.copy(update = shown)
+    }
+
+    /** Keys while the card shows ([app.thebox.core.update.UpdateCardModel]); the guide keeps its focus. */
+    private fun updateKey(a: GuideEvent.Act): Boolean {
+        val card = u.update ?: return false
+        return when (val r = app.thebox.core.update.UpdateCardModel.onAction(card, a.action)) {
+            is app.thebox.core.update.UpdateCardModel.KeyResult.Moved -> { updateCard = r.card; u = u.copy(update = r.card); true }
+            is app.thebox.core.update.UpdateCardModel.KeyResult.Pressed -> {
+                if (r.action != app.thebox.core.update.UpdateAction.UPDATE) { updateCard = null; u = u.copy(update = null) }
+                effects.updateAction(r.action)
+                true
+            }
+            app.thebox.core.update.UpdateCardModel.KeyResult.NotMine -> false
         }
     }
 
@@ -382,6 +409,7 @@ class GuideStateMachineImpl(
         if (u.pin != null && pinKey(a)) return
         // H-B2: the card is modal only where it is drawn (GUIDE, FULL); in SEARCH/SETTINGS it waits for the mode to return.
         if (u.reminder != null && cardShown()) { cardKey(a); return }
+        if (u.update != null && u.mode == ScreenMode.GUIDE && updateKey(a)) return
         if (action != BoxAction.BACK) returnedFromFull = false
         startupFocusPending = false
         pendingReminderHash = 0L
@@ -791,6 +819,11 @@ class GuideStateMachineImpl(
     override fun request(purpose: PinPurpose): Boolean = external {
         val p = parental
         when {
+            // (M5 integration) Create / change the PIN for the settings layer (onboarding offer, Parental page).
+            purpose is PinPurpose.CreatePin -> {
+                beginPinSetup(purpose.change) { settings?.dispatch(SettingsEvent.PinResult(purpose, granted = true)) }
+                true
+            }
             purpose is PinPurpose.SettingsAction && p.pinSet -> { openPin(purpose, PinPadMode.VERIFY); true }
             p.pinSet && p.unlocked -> false
             p.pinSet -> { openPin(purpose, PinPadMode.VERIFY); true }
@@ -822,9 +855,12 @@ class GuideStateMachineImpl(
         }
     }
 
-    override fun startPinSetup(change: Boolean) = external {
+    override fun startPinSetup(change: Boolean) = external { beginPinSetup(change) {} }
+
+    /** Set a PIN (create twice) or change it (verify first); [done] runs once the new PIN is stored. */
+    private fun beginPinSetup(change: Boolean, done: () -> Unit) {
         val create = GUIDE_ACTION_TOKEN_BASE - guideActionToken++
-        guideActions[create] = {}
+        guideActions[create] = done
         if (change && parental.pinSet) {
             val verify = GUIDE_ACTION_TOKEN_BASE - guideActionToken++
             guideActions[verify] = { openPin(PinPurpose.SettingsAction(create), PinPadMode.CREATE_FIRST) }
@@ -979,7 +1015,8 @@ class GuideStateMachineImpl(
     /** The lockout countdown ended (tick): digits work again. */
     private fun tickPin() {
         val until = pinLockedUntil ?: return
-        if (curMs < until) return
+        // The lockout runs on the PIN store's clock, which carries the debug harness's offset (DebugOverrides, §6.5).
+        if (curMs + app.thebox.core.diag.DebugOverrides.clockOffsetMs < until) return
         pinLockedUntil = null
         pad.inputDisabled = false
         if (pinMessage == PinMessage.LOCKED_OUT) pinMessage = null
@@ -1014,6 +1051,7 @@ class GuideStateMachineImpl(
                 openSettings(purpose.route)
             }
             is PinPurpose.SettingsAction -> notifyOwner(purpose, granted = true)
+            is PinPurpose.CreatePin -> notifyOwner(purpose, granted = true)
         }
     }
 
@@ -1071,6 +1109,12 @@ class GuideStateMachineImpl(
                 openPin(PinPurpose.SettingsAction(t), PinPadMode.CREATE_FIRST)
             }
         }
+    }
+
+    /** (M5 integration) Lock feedback; a lock with no PIN filters only, and says a PIN would protect it (B3). */
+    private fun lockToast(kind: GuideToast) {
+        val locking = kind == GuideToast.CHANNEL_LOCKED || kind == GuideToast.GROUP_LOCKED
+        effects.toast(if (locking && !parental.pinSet) GuideToast.LOCKED_NOT_PROTECTED else kind, null)
     }
 
     private fun groupMenu(entry: GuideSourceEntry): List<GroupMenuItem> {
@@ -1238,8 +1282,8 @@ class GuideStateMachineImpl(
                     if (entry != null && item != null) {
                         when (item) {
                             // M5 (§3.9.1, §3.9.2): Lock / Unlock ask for the PIN when one is set (SettingsAction).
-                            GroupMenuItem.LOCK -> lockAction(locking = true) { effects.setGroupLocked(entry, true) }
-                            GroupMenuItem.UNLOCK -> lockAction(locking = false) { effects.setGroupLocked(entry, false) }
+                            GroupMenuItem.LOCK -> lockAction(locking = true) { effects.setGroupLocked(entry, true); lockToast(GuideToast.GROUP_LOCKED) }
+                            GroupMenuItem.UNLOCK -> lockAction(locking = false) { effects.setGroupLocked(entry, false); lockToast(GuideToast.GROUP_UNLOCKED) }
                             else -> item.toAction()?.let { effects.groupAction(entry, it) }
                         }
                     }
@@ -1362,8 +1406,8 @@ class GuideStateMachineImpl(
             MenuItem.REMOVE_FAVOURITE -> effects.setFavourite(ch, false)
             MenuItem.HIDE_CHANNEL -> effects.hideChannel(ch)
             // M5 (§3.9.1, §3.9.2, §3.2.5)
-            MenuItem.LOCK_CHANNEL -> lockAction(locking = true) { effects.setChannelLocked(ch, true) }
-            MenuItem.UNLOCK_CHANNEL -> lockAction(locking = false) { effects.setChannelLocked(ch, false) }
+            MenuItem.LOCK_CHANNEL -> lockAction(locking = true) { effects.setChannelLocked(ch, true); lockToast(GuideToast.CHANNEL_LOCKED) }
+            MenuItem.UNLOCK_CHANNEL -> lockAction(locking = false) { effects.setChannelLocked(ch, false); lockToast(GuideToast.CHANNEL_UNLOCKED) }
             MenuItem.FIX_GUIDE_DATA -> openSettingsGated(SettingsRoute.FixGuide(ch.identity))
             MenuItem.CHANNEL_OPTIONS -> openSettingsGated(SettingsRoute.Channel(ch.identity))
         }

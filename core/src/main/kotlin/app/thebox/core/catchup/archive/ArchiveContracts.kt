@@ -96,6 +96,12 @@ interface ArchivePlayback {
     fun jumpToLive()
     /** Error card "Try another catch-up format": next variant from the current playhead; false when none is left. */
     fun tryNextVariant(): Boolean
+    /**
+     * (M5 integration 2026-10-16, WP-A amendment, S9) Re-request at [playheadMs] so a REPREPARE setting applies to a
+     * playing archive session (`LiveSettingsApplier`): a new pipeline, never a native seek inside the current request.
+     * Default: [seekTo] with seq 0 (fakes).
+     */
+    fun reapply(playheadMs: Long) = seekTo(playheadMs, 0)
 }
 
 /** playlist.catchup_probe_winner (M1 §2.1.2). Main-safe. */

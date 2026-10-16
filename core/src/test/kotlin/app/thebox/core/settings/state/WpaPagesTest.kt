@@ -74,7 +74,7 @@ class WpaPagesTest {
         Triple(SectionId.NETWORK, NetworkRows.DNS, "DNS_SYSTEM") to (EffectTiming.LIVE to Visibility.ADVANCED),
         Triple(SectionId.NETWORK, NetworkRows.IPV4, "IPV4_AUTO") to (EffectTiming.LIVE to Visibility.ADVANCED),
         Triple(SectionId.NETWORK, NetworkRows.CONNECT_TIMEOUT, "SECONDS(10)") to (EffectTiming.LIVE to Visibility.ADVANCED),
-        Triple(SectionId.NETWORK, NetworkRows.READ_TIMEOUT, "SECONDS(20)") to (EffectTiming.LIVE to Visibility.ADVANCED),
+        Triple(SectionId.NETWORK, NetworkRows.READ_TIMEOUT, "SECONDS(30)") to (EffectTiming.LIVE to Visibility.ADVANCED),
     )
 
     @TestFactory

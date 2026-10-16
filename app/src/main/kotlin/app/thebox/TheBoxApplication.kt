@@ -53,6 +53,8 @@ class TheBoxApplication : Application(), Configuration.Provider {
     @Inject lateinit var settingsStore: app.thebox.core.settings.SettingsStore
     @Inject lateinit var logRing: app.thebox.core.diag.LogRing
     @Inject lateinit var updates: app.thebox.core.update.UpdateCheckScheduler
+    /** (M5 integration, WP-D §1.7a item 2) The weekly automatic backup is scheduled from the stored choice once per start. */
+    @Inject lateinit var autoBackup: Lazy<app.thebox.data.backup.AutoBackupScheduler>
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -80,6 +82,19 @@ class TheBoxApplication : Application(), Configuration.Provider {
         appScope.launch(Dispatchers.Main) {
             startupGate.awaitOpen()
             reminderScheduler.get()
+        }
+        // (M5 integration) After the settings read and the first frame, off the startup path: the weekly backup's
+        // WorkManager entry follows the stored "weekly" choice (on by default), not only a toggle of the row.
+        appScope.launch {
+            try {
+                settingsStore.awaitReady()
+                startupGate.awaitOpen()
+                autoBackup.get().sync(settingsStore.flow(app.thebox.core.backup.BackupDomain).value.weekly)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                BoxLog.e("TheBoxApplication", "weekly backup scheduling failed", e)
+            }
         }
         appScope.launch {
             try {

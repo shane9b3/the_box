@@ -17,6 +17,11 @@ sealed interface SettingsRoute {
     data class PhoneSetup(val firstRun: Boolean = false, val purpose: PhonePurpose = PhonePurpose.SETUP) : SettingsRoute
     data class ImportProgress(val playlistId: Long, val firstRun: Boolean) : SettingsRoute
     data class GroupsReview(val playlistId: Long, val firstRun: Boolean) : SettingsRoute
+    /**
+     * (M5 integration 2026-10-16, WP-B amendment) The guide-matching report after an import (§3.4.7): its own route, so
+     * BACK from it is "Later" and a test can address it. [firstRun] decides where "Start watching" goes.
+     */
+    data class MatchingReport(val playlistId: Long, val firstRun: Boolean) : SettingsRoute
     data class Playlist(val playlistId: Long, val focus: RowId? = null) : SettingsRoute
     data class PlaylistSource(val playlistId: Long) : SettingsRoute
     data class Groups(val playlistId: Long) : SettingsRoute
@@ -98,6 +103,11 @@ data class PageModel(
     val version: Long,
     /** Shown instead of rows while loading or when empty ("No hidden channels"). */
     val placeholder: String? = null,
+    /**
+     * (M5 integration 2026-10-16, WP-B amendment) A row the cursor moves to when this value changes from the previous
+     * version of the page (a result card's primary button as the card appears, I-M5-4); null = the cursor stays.
+     */
+    val focus: RowId? = null,
 )
 
 data class PagedList(val count: Int, val pageSize: Int = PAGE_SIZE, val loaded: Map<Int, List<SettingsRow>>) {

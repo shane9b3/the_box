@@ -40,6 +40,7 @@ class ReapplyOnExitTest {
             when (name) {
                 "getStatus" -> status
                 "seekTo" -> { seeks += (args!![0] as Long) to (args[1] as Long); null }
+                "reapply" -> { seeks += (args!![0] as Long) to 0L; null }
                 else -> null
             }
         }

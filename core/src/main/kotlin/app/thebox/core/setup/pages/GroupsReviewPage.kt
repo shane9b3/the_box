@@ -17,9 +17,8 @@ import app.thebox.core.setup.UnmatchedChannel
 import kotlinx.coroutines.flow.first
 
 /**
- * S6 groups review (§3.4.6) and, after Done, the matching report (§3.4.7) on the same route: commit 0 has no
- * `SettingsRoute.MatchingReport`, so the review page turns into the report (Back = Later). A contract amendment
- * (`SettingsRoute.MatchingReport(playlistId, firstRun)`) would give it its own address.
+ * S6 groups review (§3.4.6); Done applies the choices and replaces the page with the matching report (§3.4.7,
+ * `SettingsRoute.MatchingReport`, M5 integration amendment), unless the guide is still downloading.
  */
 class GroupsReviewPage(
     private val r: SettingsRoute.GroupsReview,
@@ -37,10 +36,6 @@ class GroupsReviewPage(
     private var uid: String? = null
     private var busy = false
 
-    private enum class Phase { REVIEW, REPORT }
-    private var phase = Phase.REVIEW
-    private var totals: MatchTotals? = null
-    private var topUnmatched: List<UnmatchedChannel> = emptyList()
 
     override fun start() {
         publish()
@@ -61,9 +56,7 @@ class GroupsReviewPage(
 
     private fun locked(g: ReviewGroup): Boolean = lockEdits[g.key] ?: g.locked
 
-    override fun build(): PageModel = if (phase == Phase.REPORT) report() else review()
-
-    private fun review(): PageModel {
+    override fun build(): PageModel {
         val rows = ArrayList<SettingsRow>(groups.size + 6)
         if (countries.size >= 2) {
             val options = countries.map { (c, n) -> ChoiceOption(c, t(SetupText.GROUPS_COUNTRY_CHIP, c, num(n))) }
@@ -101,29 +94,12 @@ class GroupsReviewPage(
         )
     }
 
-    private fun report(): PageModel {
-        val rows = ArrayList<SettingsRow>(14)
-        val tt = totals
-        val lines = ArrayList<String>(2)
-        if (tracker?.finished != true) lines += t(SetupText.REPORT_CONTINUES)
-        rows += info(
-            ROW_REPORT_SUMMARY,
-            if (tt != null) t(SetupText.REPORT_SUMMARY, num(tt.matchedWithData), num(tt.live), percent(tt.matchedWithData, tt.live)) else t(SetupText.LOADING),
-            lines, if (tt != null && tt.live > 0 && tt.matchedWithData * 10 >= tt.live * 8) Tone.GOOD else Tone.NORMAL,
-        )
-        topUnmatched.forEachIndexed { i, c -> rows += info("$ROW_REPORT_CHANNEL$i", c.name, listOfNotNull(c.groupName)) }
-        rows += link(ROW_REPORT_FIX, t(SetupText.REPORT_FIX_NOW), SettingsRoute.FixGuide(null))
-        rows += action(ROW_REPORT_LATER, t(SetupText.REPORT_LATER))
-        return page(t(SetupText.REPORT_TITLE), rows)
-    }
-
     override fun onIntent(intent: RowIntent) {
         when (intent) {
             is RowIntent.Run -> when (val k = intent.row.key) {
                 ROW_DONE -> done()
                 ROW_PIN_SET -> { pinOffer = false; act(PageAction.CreatePin) }
                 ROW_PIN_LATER -> pinOffer = false
-                ROW_REPORT_LATER -> { act(PageAction.LeaveToGuide); return }
                 else -> keyOf(k)?.let { if (!hidden.remove(it)) hidden += it }
             }
             is RowIntent.Menu -> {
@@ -141,9 +117,9 @@ class GroupsReviewPage(
         publish()
     }
 
-    /** Back = Done (§3.4.6: the review is skippable, nothing is lost); on the report Back = Later. */
+    /** Back = Done (§3.4.6: the review is skippable, nothing is lost). */
     override fun onBack(): Boolean {
-        if (phase == Phase.REPORT) act(PageAction.LeaveToGuide) else done()
+        done()
         return true
     }
 
@@ -172,17 +148,10 @@ class GroupsReviewPage(
                 act(PageAction.LeaveToGuide)
                 return@launch
             }
-            totals = d.matching.totals(r.playlistId)
-            topUnmatched = d.matching.unmatched(d.parental.value.access).first()
-                .filter { it.identity.playlistId == r.playlistId }
-                .sortedBy { it.name.lowercase(d.locale()) }
-                .take(SetupConstants.MATCHING_REPORT_TOP)
-            phase = Phase.REPORT
-            publish()
+            // (M5 integration) The report has its own route (amendment `SettingsRoute.MatchingReport`); Back on it = Later.
+            act(PageAction.Replace(SettingsRoute.MatchingReport(r.playlistId, r.firstRun)))
         }
     }
-
-    private fun percent(a: Int, b: Int): String = if (b <= 0) "0" else ((a * 100L + b / 2) / b).toString()
 
     companion object {
         const val ROW_COUNTRIES = "setup.groups.countries"
@@ -213,4 +182,56 @@ class GroupsReviewPage(
                 .sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
                 .map { it.key to it.value }
     }
+}
+
+/**
+ * The matching report (§3.4.7) on its own route (M5 integration amendment `SettingsRoute.MatchingReport`): matched
+ * channels with guide data, the top unmatched, "Fix now" and "Later". Back = Later (to the guide).
+ */
+class MatchingReportPage(
+    private val r: SettingsRoute.MatchingReport,
+    d: SetupPageDeps,
+    private val tracker: ImportTracker?,
+) : SetupPage(r, d) {
+    private var totals: MatchTotals? = null
+    private var topUnmatched: List<UnmatchedChannel> = emptyList()
+
+    override fun start() {
+        publish()
+        launch {
+            totals = d.matching.totals(r.playlistId)
+            topUnmatched = d.matching.unmatched(d.parental.value.access).first()
+                .filter { it.identity.playlistId == r.playlistId }
+                .sortedBy { it.name.lowercase(d.locale()) }
+                .take(SetupConstants.MATCHING_REPORT_TOP)
+            publish()
+        }
+    }
+
+    override fun build(): PageModel {
+        val rows = ArrayList<SettingsRow>(14)
+        val tt = totals
+        val lines = ArrayList<String>(2)
+        if (tracker?.finished != true) lines += t(SetupText.REPORT_CONTINUES)
+        rows += info(
+            GroupsReviewPage.ROW_REPORT_SUMMARY,
+            if (tt != null) t(SetupText.REPORT_SUMMARY, num(tt.matchedWithData), num(tt.live), percent(tt.matchedWithData, tt.live)) else t(SetupText.LOADING),
+            lines, if (tt != null && tt.live > 0 && tt.matchedWithData * 10 >= tt.live * 8) Tone.GOOD else Tone.NORMAL,
+        )
+        topUnmatched.forEachIndexed { i, c -> rows += info("${GroupsReviewPage.ROW_REPORT_CHANNEL}$i", c.name, listOfNotNull(c.groupName)) }
+        rows += link(GroupsReviewPage.ROW_REPORT_FIX, t(SetupText.REPORT_FIX_NOW), SettingsRoute.FixGuide(null))
+        rows += action(GroupsReviewPage.ROW_REPORT_LATER, t(SetupText.REPORT_LATER))
+        return page(t(SetupText.REPORT_TITLE), rows)
+    }
+
+    override fun onIntent(intent: RowIntent) {
+        if (intent is RowIntent.Run && intent.row.key == GroupsReviewPage.ROW_REPORT_LATER) act(PageAction.LeaveToGuide)
+    }
+
+    override fun onBack(): Boolean {
+        act(PageAction.LeaveToGuide)
+        return true
+    }
+
+    private fun percent(a: Int, b: Int): String = if (b <= 0) "0" else ((a * 100L + b / 2) / b).toString()
 }

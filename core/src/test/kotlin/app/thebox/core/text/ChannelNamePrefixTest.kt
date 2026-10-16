@@ -89,6 +89,16 @@ class ChannelNamePrefixTest {
         assertNull(p.strip("TV: Live", null, rule), "literals replace Auto: nothing else is stripped")
     }
 
+    /** (M5 integration, G-L19) An exponential shape is refused up front (RegexSafety) and the rule falls back to Auto. */
+    @Test
+    fun riskyCustomRegexFallsBackToAuto() {
+        val rule = NamePrefixRule.Custom(regex = "(\\w+\\s?)*:")
+        assertEquals(auto("UK: BBC One"), p.strip("UK: BBC One", null, rule))
+        assertEquals(auto("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!"), p.strip("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!", null, rule))
+        assertTrue(app.thebox.core.setup.pages.PrefixRuleText.risky("/(a+)+/"))
+        assertTrue(!app.thebox.core.setup.pages.PrefixRuleText.risky("/\\[[A-Z]+\\]/"))
+    }
+
     @Test
     fun customRegexAndPreviewCount() {
         val rule = NamePrefixRule.Custom(regex = "\\[[A-Z]+\\]\\s*")

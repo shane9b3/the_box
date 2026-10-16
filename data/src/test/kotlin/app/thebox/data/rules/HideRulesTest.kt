@@ -1,5 +1,7 @@
 package app.thebox.data.rules
 
+import app.thebox.core.text.RegexSafety
+
 import app.thebox.core.refresh.EntryProducer
 import app.thebox.core.refresh.MergeContext
 import app.thebox.core.settings.tree.RuleDisabledReason

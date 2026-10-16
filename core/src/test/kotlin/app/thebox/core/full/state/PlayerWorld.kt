@@ -430,13 +430,13 @@ class PlayerWorld(
         fun PlayerWorld.pastProgramme(ch: GuideChannel): ProgrammeInfo = programmeAt(ch, nowMin() - 120)!!
 
         /** Start states of the five-key proof (§3.1.6). */
-        fun liveWithArchive(s: PlayerSettings = PlayerSettings()) = PlayerWorld(settings = s, tunedIndex = 0)
-        fun liveWithoutArchive(s: PlayerSettings = PlayerSettings()) = PlayerWorld(settings = s, tunedIndex = 1)
-        fun archive(s: PlayerSettings = PlayerSettings()) = PlayerWorld(settings = s, tunedIndex = 0).also { w ->
+        fun liveWithArchive(s: PlayerSettings = PlayerSettings(), tracks: TrackMenu = PlayerFixtures.trackMenu()) = PlayerWorld(settings = s, tunedIndex = 0, tracks = tracks)
+        fun liveWithoutArchive(s: PlayerSettings = PlayerSettings(), tracks: TrackMenu = PlayerFixtures.trackMenu()) = PlayerWorld(settings = s, tunedIndex = 1, tracks = tracks)
+        fun archive(s: PlayerSettings = PlayerSettings(), tracks: TrackMenu = PlayerFixtures.trackMenu()) = PlayerWorld(settings = s, tunedIndex = 0, tracks = tracks).also { w ->
             w.startArchive(w.channels[0], w.pastProgramme(w.channels[0]).rawStartMin * 60_000L, timeShift = false); w.flush()
         }
         /** Time-shift as §3.1.6 builds it: pause on live (pauseLive), then resume (archiveResume). */
-        fun timeShift(s: PlayerSettings = PlayerSettings()) = PlayerWorld(settings = s, tunedIndex = 0).also { w ->
+        fun timeShift(s: PlayerSettings = PlayerSettings(), tracks: TrackMenu = PlayerFixtures.trackMenu()) = PlayerWorld(settings = s, tunedIndex = 0, tracks = tracks).also { w ->
             w.press(BoxAction.PLAY_PAUSE)
             w.advance(5_000)
             w.press(BoxAction.PLAY_PAUSE)

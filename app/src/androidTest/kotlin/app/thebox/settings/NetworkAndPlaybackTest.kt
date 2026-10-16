@@ -34,7 +34,9 @@ class NetworkAndPlaybackTest : SettingsTestBase() {
         // Without the custom DoH the name does not resolve: adding the playlist fails.
         seedXtream()
         launch()
+        debugLink("doh_http=1") // the lead's ruling: plain-http DoH (the fake panel) is a debug-only allowance
         openSettings("network")
+        showAdvanced() // (M5 integration) Network is the advanced section (§3.3.11): its page is empty in the simple view
         choose("network.dns", DnsChoice.CUSTOM.name)
         editText(rowWhere("custom DoH URL", p = { r -> (r.kind as? RowKind.Text)?.hint == TextHint.URL }), "$base/dns-query")
         leaveSettings()

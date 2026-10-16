@@ -169,6 +169,8 @@ class GuideDebugReceiver : ComponentActivity() {
         val wipe = uri.host == "wipe" || uri.lastParam("wipe") == "1"
         (uri.lastParam("clock_offset_ms") ?: uri.lastParam("offsetMs"))?.toLongOrNull()?.let { app.thebox.core.diag.DebugOverrides.clockOffsetMs = it }
         (uri.lastParam("phone_port") ?: if (uri.host == "phone") uri.lastParam("port") else null)?.toIntOrNull()?.let { app.thebox.core.diag.DebugOverrides.phonePort = it }
+        // (M5 integration, I-M5-25) a plain-http custom DoH endpoint (the fake panel) is accepted in debug builds only.
+        uri.lastParam("doh_http")?.let { app.thebox.core.diag.DebugOverrides.allowHttpDoh = it == "1" }
         (uri.lastParam("update_manifest") ?: uri.lastParam("manifest"))?.let { probe.updateEndpoint.manifestUrl = it.ifBlank { null } }
         (uri.lastParam("update_key") ?: if (uri.host == "update") uri.lastParam("key") else null)?.let { probe.updateEndpoint.runtimeKeyHex = it.ifBlank { null } }
         val check = uri.lastParam("update_check")

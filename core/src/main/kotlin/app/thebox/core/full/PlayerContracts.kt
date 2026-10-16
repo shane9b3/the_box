@@ -71,6 +71,9 @@ data class TrackMenu(
     val audio: List<AudioChoice> = emptyList(),
     val text: List<TextChoice> = emptyList(),
     val textEnabled: Boolean = false,
+    /** (M5 integration 2026-10-16, E23) The tune's servers (`host[:port]` labels; ≥ 2 offers Sources) and the one in use. */
+    val servers: List<String> = emptyList(),
+    val server: Int = 0,
 )
 
 /** What the player machine needs from :player's VideoInfo. */
@@ -252,6 +255,8 @@ sealed interface PickerChoice {
     data class Aspect(val mode: AspectMode) : PickerChoice
     /** null = Auto (follow the global setting). */
     data class Decoder(val mode: VideoDecoderMode?) : PickerChoice
+    /** (M5 integration 2026-10-16, E23 / WP-C amendment) Base URL [index] of the tune, labelled `host[:port]`. */
+    data class Server(val index: Int, val label: String) : PickerChoice
 }
 
 /**
@@ -273,6 +278,8 @@ enum class ErrorButton {
     RETRY, PREVIOUS_CHANNEL, WATCH_LIVE, TRY_OTHER_CATCHUP_FORMAT, TRY_SOFTWARE_DECODER, AUDIO_OPTIONS, STOP, GUIDE,
     // M5 (docs/design/m5-setup-settings.md §2.12 item 4, §3.14; append-only)
     OPEN_SETTINGS, USE_SECURE_DNS, REFRESH_PLAYLIST, OPEN_EXTERNAL,
+    /** (M5 integration 2026-10-16, B2 amendment; WP-C's one-tap) `playback.audioOutput = AUTO`, applied by a re-prepare. */
+    BACK_TO_AUTO,
 }
 
 data class ErrorCardState(
@@ -395,6 +402,8 @@ interface PlayerEffects {
     fun errorAction(button: ErrorButton, card: ErrorCardState) = Unit
     /** Channel-list menu LOCK_CHANNEL (§3.9.1). */
     fun setChannelLocked(channel: GuideChannel, locked: Boolean) = Unit
+    /** (M5 integration 2026-10-16, E23 / WP-C amendment) The Sources picker: play the current tune from base [index]. */
+    fun selectServer(index: Int) = Unit
     // Data
     fun loadProgrammes(token: Long, channel: GuideChannel, aroundMin: Int, before: Int, after: Int)
     fun loadChannel(token: Long, from: GuideChannel, delta: Int)

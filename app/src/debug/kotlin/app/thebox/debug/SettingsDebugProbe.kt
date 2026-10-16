@@ -75,6 +75,8 @@ class SettingsDebugProbe @Inject constructor(
     private val credentials: CredentialDao,
     private val playlists: PlaylistDao,
     @ApplicationScope private val scope: CoroutineScope,
+    /** (M5 integration) WP-B's in-memory form drafts: "Clear data" must not keep a draft's created playlist id. */
+    private val setupDrafts: app.thebox.core.setup.SetupDraftStore,
 ) {
     val settings: SettingsMachine? get() = guide.current?.settings
     fun settingsUi(): SettingsUiState? = settings?.ui?.value
@@ -107,7 +109,15 @@ class SettingsDebugProbe @Inject constructor(
             wipeLibrary.clearAll()
             for (name in listOf(app.thebox.data.security.PrefsKeyResetFlag.PREFS, "guide_session")) context.getSharedPreferences(name, Context.MODE_PRIVATE).edit().clear().commit()
             runCatching { store.importInTransaction(emptyMap(), replace = true) }
+            // (M5 integration) A replace leaves the device-bound domains alone (restore semantics); "Clear data" must not:
+            // with `setup.completed` still true the next start skipped Welcome.
+            store.update(app.thebox.core.settings.state.SetupDomain) { app.thebox.core.settings.SetupState() }
+            store.update(app.thebox.core.backup.BackupDomain) { app.thebox.core.settings.BackupPrefs() }
+            store.update(app.thebox.core.update.UpdateDomain) { app.thebox.core.update.UpdatePrefs() }
+            setupDrafts.clear()
         }
+        // (M5 integration) The parental session re-reads the (now absent) PIN and forgets the unlock and Open anyway.
+        (parentalSession as? app.thebox.data.parental.ParentalSessionImpl)?.let { it.relock(app.thebox.core.parental.RelockReason.APP_STOPPED); it.refresh() }
         DebugOverrides.reset()
         if (restart) restartActivity()
     }
@@ -173,7 +183,7 @@ class SettingsDebugProbe @Inject constructor(
         fun isM5(uri: Uri): Boolean = uri.host in M5_HOSTS || M5_KEYS.any { it in uri.queryParameterNames }
 
         val M5_HOSTS = setOf("settings", "wipe", "clock", "update", "phone", "keystore-reset")
-        val M5_KEYS = listOf("settings", "route", "wipe", "clock_offset_ms", "offsetMs", "update_manifest", "manifest", "update_key", "update_check", "phone_port", "keystore_reset")
+        val M5_KEYS = listOf("settings", "route", "wipe", "clock_offset_ms", "offsetMs", "update_manifest", "manifest", "update_key", "update_check", "phone_port", "keystore_reset", "doh_http")
     }
 }
 

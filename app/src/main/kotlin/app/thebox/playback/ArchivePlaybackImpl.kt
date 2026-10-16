@@ -350,6 +350,17 @@ class ArchivePlaybackImpl(
         }
     }
 
+    /**
+     * (M5 integration, S9) A REPREPARE setting changed while the session plays: one re-request at [playheadMs] (a new
+     * pipeline, so the setting applies), never a native seek. Before first media it is a plain [seekTo].
+     */
+    override fun reapply(playheadMs: Long) {
+        val s = session ?: return
+        if (s.phase == IDLE || s.phase == FAILED || s.phase == PAUSED || s.phase == PAUSED_LIVE) return
+        if (s.ctx == null || s.request == null || !s.requestFirstMedia) { seekTo(playheadMs, 0); return }
+        seekRerequest(s, RequestPlan(playheadMs, null, padBefore = false, targetMs = playheadMs), wasPaused = false)
+    }
+
     override fun seekTo(programmeMs: Long, seq: Long) {
         if (seq > pendingSeq) pendingSeq = seq
         val s = session

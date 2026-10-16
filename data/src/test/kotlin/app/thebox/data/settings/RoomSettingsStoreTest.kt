@@ -182,7 +182,7 @@ class RoomSettingsStoreTest {
         assertFalse("setup is device-bound", Domains.SETUP in out)
         s.importInTransaction(mapOf(Domains.GUIDE to JsonObject(mapOf("clock" to JsonPrimitive("H24"))), "nonsense" to JsonObject(emptyMap())), replace = true)
         assertEquals(ClockMode.H24, s.flow(GuideDomain).value.clock)
-        assertEquals("replace resets backed-up domains not in the backup", 20, s.flow(NetworkDomain).value.readTimeoutSec)
+        assertEquals("replace resets backed-up domains not in the backup", 30, s.flow(NetworkDomain).value.readTimeoutSec)
         assertTrue("setup is not touched by a restore", s.flow(SetupDomain).value.completed)
         assertNull(row(Domains.NETWORK)); assertNull(row(Domains.REMOTE)); assertNull(row("nonsense"))
     }

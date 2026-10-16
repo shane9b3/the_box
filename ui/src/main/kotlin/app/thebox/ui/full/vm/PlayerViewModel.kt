@@ -3,7 +3,6 @@ package app.thebox.ui.full.vm
 import app.thebox.core.parental.legacyParentalAccess
 import app.thebox.core.input.KeyBindingStore
 import app.thebox.core.input.KeyContext
-import app.thebox.core.parental.ParentalHost
 import app.thebox.core.parental.ParentalSession
 import app.thebox.core.parental.PinOwner
 import app.thebox.core.parental.PinPurpose
@@ -280,7 +279,12 @@ class PlayerViewModel @Inject constructor(
             }
         }
         scope.launch { controller.pendingZap.collect { id -> machine.dispatch(PlayerEvent.PendingZap(id?.let { channelOf(it) })) } }
-        scope.launch { controller.tracks.collect { machine.dispatch(PlayerEvent.Tracks(PlayerMappers.trackMenu(it))) } }
+        // (M5 integration, E23) The servers of the tune ride with the track menu (the Sources picker).
+        scope.launch {
+            kotlinx.coroutines.flow.combine(controller.tracks, controller.servers) { t, s ->
+                PlayerMappers.trackMenu(t).copy(servers = s.labels, server = s.current)
+            }.collect { machine.dispatch(PlayerEvent.Tracks(it)) }
+        }
         scope.launch { controller.video.collect { machine.dispatch(PlayerEvent.Video(PlayerMappers.videoFacts(it))) } }
         scope.launch {
             statsOn.flatMapLatest { on -> if (on) controller.stats else emptyFlow() }.collect {
@@ -414,7 +418,7 @@ class PlayerViewModel @Inject constructor(
     private fun onRefused(identity: ChannelIdentity) {
         launchSafely("refused") {
             val ch = channelOf(identity) ?: return@launchSafely
-            (guide as? ParentalHost)?.request(PinPurpose.Tune(ch, PinOwner.PLAYER))
+            guide?.parentalHost?.request(PinPurpose.Tune(ch, PinOwner.PLAYER))
         }
     }
 

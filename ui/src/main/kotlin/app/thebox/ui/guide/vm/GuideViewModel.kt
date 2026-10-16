@@ -16,7 +16,6 @@ import app.thebox.core.input.RemappedKeyMap
 import app.thebox.core.input.DefaultKeyMap
 import app.thebox.core.parental.ParentalAccess
 import app.thebox.core.parental.ParentalControls
-import app.thebox.core.parental.ParentalHost
 import app.thebox.core.parental.ParentalSession
 import app.thebox.core.parental.PinOwner
 import app.thebox.core.parental.PinPurpose
@@ -161,6 +160,8 @@ class GuideViewModel @Inject constructor(
     private val parentalControls: ParentalControls = ParentalControls.NONE,
     tuneGuard: TuneGuard = TuneGuard.ALLOW_ALL,
     private val keyBindings: KeyBindingStore = NoKeyBindings,
+    // (M5 integration, WP-E §1.8a item 2) The S17 update card and the "Updated to …" notice.
+    private val updateCards: app.thebox.core.update.UpdateCardSource = NoUpdateCards,
 ) : ViewModel(), ShellHost, ShellEffects {
 
     /**
@@ -250,7 +251,7 @@ class GuideViewModel @Inject constructor(
         debugProbe.register(machine)
         keyRouter.attach(machine) { searchFieldIdle }
         // (M5, §0.9) The one PIN prompt: PIN creation and Open anyway go through the parental effects.
-        (machine as? ParentalHost)?.let { host -> (delegates.parental as? ParentalEffectsImpl)?.let { host.parentalActions = it.actionsFor(host) } }
+        machine.parentalHost?.let { host -> (delegates.parental as? ParentalEffectsImpl)?.let { host.parentalActions = it.actionsFor(host) } }
         registerTimeReceiver()
         forwardFeeds(reminderBook)
         startTicker()
@@ -363,6 +364,16 @@ class GuideViewModel @Inject constructor(
 
     private fun forwardFeeds(reminderBook: ReminderBook) {
         val scope = viewModelScope
+        // (M5 integration) The updater's card (guide only; the machine decides when it shows) and its one-time notice.
+        scope.launch { updateCards.card.collect { machine.dispatch(GuideEvent.Update(it)) } }
+        scope.launch {
+            updateCards.updatedNotice.collect { text ->
+                if (text != null) {
+                    shellEvents.trySend(ShellEvent.Message(text))
+                    updateCards.noticeShown()
+                }
+            }
+        }
         scope.launch {
             settingsSource.settings.collect { s ->
                 machine.dispatch(GuideEvent.Settings(s, device))
@@ -496,7 +507,8 @@ class GuideViewModel @Inject constructor(
             while (true) {
                 val now = System.currentTimeMillis()
                 machine.dispatch(GuideEvent.Tick(now))
-                parental.onTick(now) // (M5, §3.9.5) the 1-hour stay-unlocked timer
+                // (M5, §3.9.5) the 1-hour stay-unlocked timer, on the debug-offset clock (DebugOverrides, §6.5; 0 in release)
+                parental.onTick(app.thebox.core.diag.DebugOverrides.nowMs())
                 val deadline = machine.nextDeadlineMs.value
                 val target = nextTickAt(now, deadline)
                 // U-B1: wake early only for a *new* deadline before the target. A deadline the machine left in the past
@@ -634,7 +646,7 @@ class GuideViewModel @Inject constructor(
                 BoxLog.w(TAG, "refused channel lookup failed: ${e.javaClass.simpleName}")
                 null
             } ?: return@launch
-            (machine as? ParentalHost)?.request(PinPurpose.Tune(ch, PinOwner.GUIDE))
+            machine.parentalHost?.request(PinPurpose.Tune(ch, PinOwner.GUIDE))
         }
     }
 
@@ -700,4 +712,11 @@ class GuideViewModel @Inject constructor(
             ""
         }
     }
+}
+
+/** No updater (tests, previews): no card, no notice. */
+private object NoUpdateCards : app.thebox.core.update.UpdateCardSource {
+    override val card: kotlinx.coroutines.flow.StateFlow<app.thebox.core.update.UpdateCardState?> = kotlinx.coroutines.flow.MutableStateFlow(null)
+    override val updatedNotice: kotlinx.coroutines.flow.StateFlow<String?> = kotlinx.coroutines.flow.MutableStateFlow(null)
+    override fun noticeShown() = Unit
 }

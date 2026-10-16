@@ -33,8 +33,8 @@ class LiveSettingsApplierImpl internal constructor(
             ArchivePhase.PLAYING, ArchivePhase.CONTINUING, ArchivePhase.SEEKING, ArchivePhase.STARTING, ArchivePhase.PROBING -> {
                 val playhead = if (s.advancing) s.wallMs + (nowMs() - s.atMs).coerceAtLeast(0) else s.wallMs
                 BoxLog.i(TAG) { "reapply: archive at the playhead" }
-                // seq 0: never advances the player machine's scrub sequence (ArchivePlayback keeps the max it saw).
-                archive.seekTo(playhead, 0)
+                // (M5 integration) An exact re-request at the playhead (ArchivePlayback.reapply amendment).
+                archive.reapply(playhead)
             }
             ArchivePhase.PAUSED, ArchivePhase.PAUSED_LIVE -> BoxLog.i(TAG) { "reapply: archive paused; applies on resume" }
             ArchivePhase.IDLE, ArchivePhase.FAILED -> controller.reapplySettings()

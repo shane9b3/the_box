@@ -174,7 +174,7 @@ class NetworkProbesImpl @Inject constructor(
         private val AUTH = Regex(""""auth"\s*:\s*"?(\d)""")
         private val STATUS = Regex(""""status"\s*:\s*"([A-Za-z]+)"""")
 
-        /** The `network` domain as WP-A stores it (same name, serializer and default; the store keys documents by name). */
-        val NetworkDomain: SettingsDomain<NetworkSettings> = SettingsDomain(Domains.NETWORK, NetworkSettings.serializer(), NetworkSettings())
+        /** The `network` domain: WP-A's object (M5 integration). */
+        val NetworkDomain: SettingsDomain<NetworkSettings> get() = app.thebox.core.settings.state.NetworkDomain
     }
 }

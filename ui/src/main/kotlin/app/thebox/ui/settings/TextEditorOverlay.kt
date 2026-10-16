@@ -139,6 +139,9 @@ fun TextEditorOverlay(
     val cancel by rememberUpdatedState(onCancel)
     val masked = editor.masked || editor.hint == TextHint.PASSWORD || editor.hint == TextHint.PASSPHRASE
 
+    // (M5 integration) The keyboard goes with the overlay however it closes (Done, Cancel, BACK, or the machine closing it):
+    // on the emulator a keyboard left "shown" after the field went away kept swallowing the D-pad keys.
+    androidx.compose.runtime.DisposableEffect(editor.row) { onDispose { keyboard?.hide() } }
     LaunchedEffect(editor.row, keyboardAvailable) {
         runCatching { if (keyboardAvailable) field.requestFocus() else phone.requestFocus() }
         if (keyboardAvailable) keyboard?.show()

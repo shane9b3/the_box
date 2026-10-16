@@ -85,6 +85,16 @@ interface ParentalSession {
     /** Relock now (app stop, ASK_EVERY_TIME triggers, "Lock now" row). */
     fun relock(reason: RelockReason)
     fun onTick(nowMs: Long)
+    /**
+     * (M5 integration 2026-10-16, WP-C amendment) "Open anyway" on the not-protected card (FILTERED_NO_PIN): [source]
+     * joins [ParentalState.openedAnyway] until the app closes. Default: nothing (fakes).
+     */
+    fun openAnyway(source: app.thebox.core.guide.GuideSource) = Unit
+    /**
+     * (M5 integration 2026-10-16, WP-C amendment) What plays now (null = nothing): drives "never relock mid-programme"
+     * and ASK_EVERY_TIME's relock when the user leaves locked content. Default: nothing (fakes).
+     */
+    fun watching(identity: app.thebox.core.refresh.ChannelIdentity?) = Unit
 }
 enum class RelockReason { APP_STOPPED, TIMEOUT, LEFT_LOCKED_CONTENT, USER, PIN_CHANGED }
 
@@ -101,6 +111,12 @@ sealed interface PinPurpose {
     data class Tune(val channel: GuideChannel, override val owner: PinOwner) : PinPurpose
     data class EnterSettings(val route: app.thebox.core.settings.SettingsRoute) : PinPurpose { override val owner = PinOwner.GUIDE }
     data class SettingsAction(val token: Long) : PinPurpose { override val owner = PinOwner.SETTINGS }
+    /**
+     * (M5 integration 2026-10-16, WP-B/WP-C amendment) Create a PIN (enter twice), or change it ([change]: verify the
+     * current one first). The onboarding PIN offer and the Parental page ask the guide machine's one prompt through
+     * [PinGate.request]; the answer comes back to the settings machine as `SettingsEvent.PinResult(CreatePin, granted)`.
+     */
+    data class CreatePin(val change: Boolean = false) : PinPurpose { override val owner = PinOwner.SETTINGS }
 }
 enum class PinOwner { GUIDE, PLAYER, SETTINGS }
 

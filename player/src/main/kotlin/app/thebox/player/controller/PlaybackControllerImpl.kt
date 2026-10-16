@@ -85,6 +85,7 @@ import app.thebox.player.api.ConnectPhase
 import app.thebox.player.api.ExternalHandOff
 import app.thebox.player.api.NowPlaying
 import app.thebox.player.api.PreviousResult
+import app.thebox.player.api.ServerList
 import app.thebox.player.api.PlaybackController
 import app.thebox.player.api.PlaybackDiagnostics
 import app.thebox.player.api.PlaybackNotice
@@ -516,6 +517,19 @@ internal class PlaybackControllerImpl @Inject constructor(
         return handOff
     }
 
+    private val _servers = MutableStateFlow(ServerList())
+    override val servers: StateFlow<ServerList> = _servers.asStateFlow()
+
+    /** (M5 integration, §3.6.2) The Sources picker: the same cycle, re-resolved on base [index]; the guard still applies. */
+    override fun selectServer(index: Int) {
+        val c = cycle ?: return
+        val count = c.resolved?.baseCount ?: return
+        if (index !in 0 until count || index == c.resolved?.baseIndex) return
+        if (c.identity != null && refused(c.identity, c.isArchive)) return
+        c.baseIndex = index
+        launchSession(c, Plan(), waiting = null)
+    }
+
     override fun retry() {
         val c = cycle ?: return
         if (c.identity != null && refused(c.identity, c.isArchive)) return
@@ -644,6 +658,8 @@ internal class PlaybackControllerImpl @Inject constructor(
         val resolved = reuse ?: (if (early != null) handleResolveOutcome(c, early) else resolve(c)) ?: return
         if (!current(c, id)) return
         c.resolved = resolved
+        // (M5 integration, E23) The Sources picker's servers for this tune.
+        _servers.value = if (resolved.baseHosts.size > 1) ServerList(resolved.baseHosts, resolved.baseIndex) else ServerList()
         if (resolved.droppedHeaders.isNotEmpty()) {
             // (code review 2026-10-14, N-S1) Names only; the event log redacts anyway.
             eventLog.add(PlaybackEventType.RESOLVED, id, "headers_dropped", resolved.droppedHeaders.joinToString(","))
@@ -1436,17 +1452,21 @@ internal class PlaybackControllerImpl @Inject constructor(
             LadderDecision.SoftwareVideoAndReprepare -> {
                 c.softwareVideo = true
                 c.warning = PlaybackWarning.SOFTWARE_VIDEO
+                // (M5 integration) The event types M2 declared for the fallbacks (diagnostics, I-M5-27).
+                eventLog.add(PlaybackEventType.VIDEO_FALLBACK, c.currentTuneId, "software_video", "")
                 _notices.tryEmit(PlaybackNotice.VideoDecoderSwitchedToSoftware)
                 restart(c, d, signal, Plan(reuseResolved = c.resolved != null))
             }
             is LadderDecision.DisablePassthroughAndReprepare -> {
                 routeDeniedPassthrough += d.mimeType ?: "*"
                 c.warning = PlaybackWarning.PASSTHROUGH_DISABLED
-                _notices.tryEmit(PlaybackNotice.PassthroughDisabled(d.mimeType))
+                eventLog.add(PlaybackEventType.AUDIO_FALLBACK, c.currentTuneId, "passthrough_off", d.mimeType ?: "*")
+                _notices.tryEmit(PlaybackNotice.PassthroughDisabled(d.mimeType, forced = settings.current.audioOutput == AudioOutputMode.FORCE_PASSTHROUGH))
                 restart(c, d, signal, Plan(reuseResolved = c.resolved != null))
             }
             is LadderDecision.SoftwareAudioAndReprepare -> {
                 c.softwareAudioMimes += d.mimeType
+                eventLog.add(PlaybackEventType.AUDIO_FALLBACK, c.currentTuneId, "software_audio", d.mimeType)
                 _notices.tryEmit(PlaybackNotice.AudioDecoderSwitched(toSoftware = true, mimeType = d.mimeType))
                 restart(c, d, signal, Plan(reuseResolved = c.resolved != null))
             }
@@ -1457,6 +1477,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             is LadderDecision.DropAudioAndReprepare -> {
                 c.audioDropped = true
                 c.warning = d.warning
+                eventLog.add(PlaybackEventType.AUDIO_FALLBACK, c.currentTuneId, "audio_dropped", "")
                 _notices.tryEmit(PlaybackNotice.Warning(d.warning))
                 val p = player
                 if (error != null || p == null || p.playbackState == Player.STATE_IDLE) {
@@ -1564,7 +1585,11 @@ internal class PlaybackControllerImpl @Inject constructor(
                 else -> true
             }
         }
-        return error.copy(detail = detail, actions = actions)
+        // (M5 integration, B2, §3.14) While "Always passthrough" is on, an audio-output failure offers Back to Auto first.
+        val withAuto = if (error.code == PlaybackErrorCode.AUDIO_OUTPUT_FAILED && settings.current.audioOutput == AudioOutputMode.FORCE_PASSTHROUGH && NextStep.BACK_TO_AUTO !in actions) {
+            listOf(NextStep.BACK_TO_AUTO) + actions
+        } else actions
+        return error.copy(detail = detail, actions = withAuto)
     }
 
     // ------------------------------------------------------------------ pause, resume, stop

@@ -504,7 +504,7 @@ class WpaPages(
         val NUMBER_WAIT_MS = listOf(1_000L, 1_500L, 2_500L)
         val REMINDER_LEAD_SEC = listOf(60, 120, 300)
         val CONNECT_TIMEOUTS = listOf(5, 10, 20)
-        val READ_TIMEOUTS = listOf(10, 20, 40)
+        val READ_TIMEOUTS = listOf(10, 20, 30, 40, 60)
         val DOH_CHIPS = listOf("https://", "/dns-query", ".com")
         /** Frame-rate "Seamless only" needs API 30 (N5). */
         const val AFR_SEAMLESS_MIN_SDK = 30
@@ -539,7 +539,7 @@ class WpaPages(
 
         /** Validators stricter than the hint's (§3.3.11: the custom DoH address is https:// only). */
         fun rowRules(texts: SettingsTexts): Map<RowId, (String) -> String?> = mapOf(
-            NetworkRows.CUSTOM_DOH to { s: String -> if (s.isBlank() || HintValidator.isHttpsUrl(s)) null else texts[SettingsText.ERR_HTTPS] },
+            NetworkRows.CUSTOM_DOH to { s: String -> if (s.isBlank() || HintValidator.isHttpsUrl(s) || app.thebox.core.net.BoxDnsPolicy.isValidCustomUrl(s.trim())) null else texts[SettingsText.ERR_HTTPS] },
         )
 
         inline fun <reified E : Enum<E>> enumOf(name: String): E? = enumValues<E>().firstOrNull { it.name == name }

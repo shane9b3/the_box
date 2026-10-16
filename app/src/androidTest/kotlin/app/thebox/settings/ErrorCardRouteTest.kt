@@ -44,7 +44,8 @@ class ErrorCardRouteTest : SettingsTestBase() {
         repeat(idx) { press(KeyEvent.KEYCODE_DPAD_RIGHT) }
         press(KeyEvent.KEYCODE_DPAD_CENTER)
         awaitSettings("Settings on the login rows (detached)") { it.route == SettingsRoute.PlaylistSource(pid) && it.stack.none { r -> r == SettingsRoute.Root } }
-        assertNotNull(row(rows().first { (it.kind as? app.thebox.core.settings.RowKind.Text)?.hint == TextHint.PASSWORD }.id.key))
+        // (M5 integration) WP-B's page loads the stored source first (a placeholder), then the form rows.
+        assertNotNull(rowWhere("the password row", 15_000) { (it.kind as? app.thebox.core.settings.RowKind.Text)?.hint == TextHint.PASSWORD })
         press(KeyEvent.KEYCODE_BACK)
         awaitGui("BACK → FULL with the card") { it.mode == ScreenMode.FULL }
         assertNotNull(ep.playerProbe().current?.ui?.value?.error)

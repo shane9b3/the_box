@@ -28,9 +28,9 @@ class NetworkVerdictTest {
 
     @Test
     fun bothDnsFailIsTheNameDoesNotExist() {
-        assertEquals(Verdict(VerdictKey.SERVER_UNREACHABLE, emptyList()), NetworkVerdict.decide(good.copy(systemDns = DnsOutcome.FAILED, secureDns = DnsOutcome.FAILED)))
+        assertEquals(Verdict(VerdictKey.NAME_NOT_FOUND, emptyList()), NetworkVerdict.decide(good.copy(systemDns = DnsOutcome.FAILED, secureDns = DnsOutcome.FAILED)))
         // Secure lookup skipped (DNS already secure) and the system lookup failed: same.
-        assertEquals(Verdict(VerdictKey.SERVER_UNREACHABLE, emptyList()), NetworkVerdict.decide(good.copy(systemDns = DnsOutcome.FAILED, secureDns = null)))
+        assertEquals(Verdict(VerdictKey.NAME_NOT_FOUND, emptyList()), NetworkVerdict.decide(good.copy(systemDns = DnsOutcome.FAILED, secureDns = null)))
     }
 
     @Test

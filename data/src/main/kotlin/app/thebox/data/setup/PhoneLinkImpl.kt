@@ -47,7 +47,8 @@ class PhoneLinkImpl @Inject constructor(
         assets = ::asset,
         spoolDir = File(context.cacheDir, "phone"),
         scope = scope,
-        clock = clock::now,
+        // The session's idle/absolute lifetime runs on the debug harness's offset clock (DebugOverrides, §6.5; 0 in release).
+        clock = { clock.now() + app.thebox.core.diag.DebugOverrides.clockOffsetMs },
     )
 
     /** Fixed port for the debug route `thebox-debug://phone?port=N` (WP-E); null = 47100 with the random fallback. */

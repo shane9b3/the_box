@@ -1,4 +1,4 @@
-package app.thebox.data.rules
+package app.thebox.core.text
 
 /**
  * Refuses the regex shapes that backtrack exponentially (docs/design/m5-setup-settings.md §3.7.3), because Android's
@@ -6,6 +6,9 @@ package app.thebox.data.rules
  * contains a quantifier (`(a+)+`, `(.*a){20}`, `(\w+\s?)*`), a quantified group with alternation (`(a|aa)+`), and
  * back-references (`\1`, `\k<name>`). A rule a user wants hardly ever needs these; the message suggests Contains.
  * Conservative by design: a false positive only means "use a simpler pattern".
+ *
+ * (M5 integration 2026-10-16) Moved from `data/.../rules/` to `:core` so M3's custom channel-name prefix regex
+ * (`ChannelNamePrefixImpl`, G-L19) and its editor (WP-B's playlist page) apply the same check as WP-D's hide rules.
  */
 object RegexSafety {
     fun isRisky(pattern: String): Boolean {

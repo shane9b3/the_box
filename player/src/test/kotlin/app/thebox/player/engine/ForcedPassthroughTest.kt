@@ -184,11 +184,59 @@ class ForcedPassthroughTest {
             f.exo.emitError(PlaybackException("audio track init", null, PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED))
             f.idle()
             assertTrue(MimeTypes.AUDIO_AC3 in f.playerFactory.bundle!!.audioPolicy.deniedPassthrough)
-            assertTrue(f.notices.contains(PlaybackNotice.PassthroughDisabled(MimeTypes.AUDIO_AC3)))
+            assertTrue(f.notices.contains(PlaybackNotice.PassthroughDisabled(MimeTypes.AUDIO_AC3, forced = true))) // M5 integration: the toast names the way back
             // The route memory survives the next tune while the force stays on.
             f.controller.tune(TuneTarget.Channel(CH1))
             f.idle()
             assertTrue(MimeTypes.AUDIO_AC3 in f.playerFactory.bundle!!.audioPolicy.deniedPassthrough)
+        } finally {
+            f.close()
+        }
+    }
+
+    /** (M5 integration, B2, §3.14) An audio-output failure under the force offers Back to Auto first; never otherwise. */
+    @Test
+    fun audioOutputFailedOffersBackToAutoOnlyUnderTheForce() {
+        for (force in listOf(true, false)) {
+            val f = ControllerFixture()
+            try {
+                if (force) f.settings.update { it.copy(audioOutput = AudioOutputMode.FORCE_PASSTHROUGH) }
+                f.ladder.script = { _, _ -> LadderDecision.Fail(PlaybackError(PlaybackErrorCode.AUDIO_OUTPUT_FAILED, actions = listOf(app.thebox.core.playback.NextStep.AUDIO_OPTIONS))) }
+                f.controller.tune(TuneTarget.Channel(CH1))
+                f.idle()
+                f.play()
+                f.advance(1_000)
+                f.exo.emitError(PlaybackException("audio track init", null, PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED))
+                f.idle()
+                val st = f.controller.state.value
+                assertTrue("error state: $st", st is app.thebox.player.api.PlaybackState.Error)
+                val actions = (st as app.thebox.player.api.PlaybackState.Error).error.actions
+                assertEquals(force, actions.firstOrNull() == app.thebox.core.playback.NextStep.BACK_TO_AUTO)
+            } finally {
+                f.close()
+            }
+        }
+    }
+
+    /** (M5 integration, §3.6.2, E23) The Sources picker: servers published with the tune; selectServer re-resolves on that base. */
+    @Test
+    fun selectServerReResolvesTheSameCycleOnTheChosenBase() {
+        val f = ControllerFixture()
+        try {
+            f.resolver.baseCount = 3
+            f.controller.tune(TuneTarget.Channel(CH1))
+            f.idle()
+            assertEquals(listOf("panel0.example:8080", "panel1.example:8080", "panel2.example:8080"), f.controller.servers.value.labels)
+            assertEquals(0, f.controller.servers.value.current)
+            f.controller.selectServer(2)
+            f.idle()
+            assertEquals(2, f.resolver.calls.last().baseIndex)
+            assertEquals(2, f.controller.servers.value.current)
+            val calls = f.resolver.calls.size
+            f.controller.selectServer(2) // already in use: nothing
+            f.controller.selectServer(7) // out of range: nothing
+            f.idle()
+            assertEquals(calls, f.resolver.calls.size)
         } finally {
             f.close()
         }

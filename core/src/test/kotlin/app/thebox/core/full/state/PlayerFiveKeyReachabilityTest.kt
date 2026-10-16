@@ -47,11 +47,14 @@ class PlayerFiveKeyReachabilityTest {
 
     enum class Start { LIVE_WITH_ARCHIVE, LIVE_WITHOUT_ARCHIVE, ARCHIVE, TIME_SHIFT }
 
+    /** (M5 integration) Two servers, so the Sources item and the SERVER picker are offered (§3.6.2). */
+    private val tracks = PlayerFixtures.trackMenu().copy(servers = listOf("panel.example:8080", "backup.example:8080"))
+
     private fun world(start: Start, s: PlayerSettings): PlayerWorld = when (start) {
-        Start.LIVE_WITH_ARCHIVE -> liveWithArchive(s)
-        Start.LIVE_WITHOUT_ARCHIVE -> liveWithoutArchive(s)
-        Start.ARCHIVE -> archive(s)
-        Start.TIME_SHIFT -> timeShift(s)
+        Start.LIVE_WITH_ARCHIVE -> liveWithArchive(s, tracks)
+        Start.LIVE_WITHOUT_ARCHIVE -> liveWithoutArchive(s, tracks)
+        Start.ARCHIVE -> archive(s, tracks)
+        Start.TIME_SHIFT -> timeShift(s, tracks)
     }
 
     private class Reached {
@@ -112,28 +115,28 @@ class PlayerFiveKeyReachabilityTest {
     @EnumSource(UpDownInPlayer::class)
     fun liveWithArchive(u: UpDownInPlayer) = assertReach(Start.LIVE_WITH_ARCHIVE, u,
         layers = PlayerLayer.entries - PlayerLayer.ERROR,
-        items = listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, START_OVER, TIME_SHIFT, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, SETTINGS),
+        items = listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, START_OVER, TIME_SHIFT, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, SETTINGS),
         scrub = ScrubFocus.entries, effects = listOf("startOver", "pauseLive", "playProgramme", "rewindLive"))
 
     @ParameterizedTest
     @EnumSource(UpDownInPlayer::class)
     fun liveWithoutArchive(u: UpDownInPlayer) = assertReach(Start.LIVE_WITHOUT_ARCHIVE, u,
         layers = PlayerLayer.entries - PlayerLayer.ERROR - PlayerLayer.SCRUB,
-        items = listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, SETTINGS),
+        items = listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, SETTINGS),
         scrub = emptyList(), effects = emptyList())
 
     @ParameterizedTest
     @EnumSource(UpDownInPlayer::class)
     fun archive(u: UpDownInPlayer) = assertReach(Start.ARCHIVE, u,
         layers = PlayerLayer.entries - PlayerLayer.ERROR - PlayerLayer.INFO,
-        items = listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, JUMP_TO_LIVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, SETTINGS),
+        items = listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, JUMP_TO_LIVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, SETTINGS),
         scrub = ScrubFocus.entries, effects = listOf("jumpToLive", "archiveSeek", "archivePause"))
 
     @ParameterizedTest
     @EnumSource(UpDownInPlayer::class)
     fun timeShift(u: UpDownInPlayer) = assertReach(Start.TIME_SHIFT, u,
         layers = PlayerLayer.entries - PlayerLayer.ERROR - PlayerLayer.INFO,
-        items = listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, JUMP_TO_LIVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, SETTINGS),
+        items = listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, JUMP_TO_LIVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, SETTINGS),
         scrub = ScrubFocus.entries, effects = listOf("jumpToLive", "archiveSeek", "archivePause"))
 
     private fun assertReach(start: Start, u: UpDownInPlayer, layers: List<PlayerLayer>, items: List<QuickItem>, scrub: List<ScrubFocus>, effects: List<String>) {
@@ -141,7 +144,7 @@ class PlayerFiveKeyReachabilityTest {
         val missing = buildList {
             addAll(layers.filter { it !in r.layers })
             addAll(items.filter { it !in r.quickSelected }.map { "quick:$it" })
-            addAll(PickerKind.entries.filter { it !in r.pickers && it != PickerKind.SERVER }.map { "picker:$it" }) // M5 commit 0: SERVER arrives with WP-C
+            addAll(PickerKind.entries.filter { it !in r.pickers }.map { "picker:$it" }) // M5 integration: SERVER is offered (Sources)
             addAll(scrub.filter { it !in r.scrub }.map { "scrub:$it" })
             if (!r.previousRow) add("Previous row")
             addAll(effects.filter { it !in r.effects }.map { "effect:$it" })
@@ -160,6 +163,8 @@ class PlayerFiveKeyReachabilityTest {
             // M5 (§3.14)
             ErrorButton.OPEN_SETTINGS to setOf("openSettingsRoute"), ErrorButton.USE_SECURE_DNS to setOf("errorAction"),
             ErrorButton.REFRESH_PLAYLIST to setOf("errorAction"), ErrorButton.OPEN_EXTERNAL to setOf("errorAction"),
+            // M5 integration (B2)
+            ErrorButton.BACK_TO_AUTO to setOf("errorAction"),
         )
         val seen = HashSet<ErrorButton>()
         val wrong = ArrayList<String>()
@@ -189,7 +194,9 @@ class PlayerFiveKeyReachabilityTest {
             w.setStatus(w.status.copy(phase = ArchivePhase.FAILED, failure = ArchiveFailure.NOT_IN_ARCHIVE, error = e, attempt = 1, attempts = 2))
             w.fail(e, archive = true)
         }
-        return PlayerWorld(tunedIndex = 1).also { it.fail(PlayerFixtures.error(code)) }
+        // (M5 integration, B2) AUDIO_OUTPUT_FAILED as the controller reports it under "Always passthrough".
+        val e = PlayerFixtures.error(code).let { if (code == PlaybackErrorCode.AUDIO_OUTPUT_FAILED) it.copy(actions = listOf(app.thebox.core.playback.NextStep.BACK_TO_AUTO) + it.actions) else it }
+        return PlayerWorld(tunedIndex = 1).also { it.fail(e) }
     }
 
     private companion object {

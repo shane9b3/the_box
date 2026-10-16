@@ -15,7 +15,8 @@ data class StepResult(val step: TestStep, val ok: Boolean, val ms: Long?, val de
 data class NetworkTestResult(val playlistId: Long, val steps: List<StepResult>, val verdict: Verdict)
 /** Text keys resolved in :ui; [args] are numbers only (never hosts with credentials). */
 data class Verdict(val key: VerdictKey, val args: List<String>)
-enum class VerdictKey { ALL_GOOD, DNS_BLOCKED_TRY_SECURE, SERVER_UNREACHABLE, TLS_PROBLEM, AUTH_PROBLEM, SLOW_PROVIDER, SLOW_CONNECTION, IPV6_BROKEN }
+/** (M5 integration 2026-10-16, WP-E amendment) NAME_NOT_FOUND appended: both resolvers failed (the name does not exist). */
+enum class VerdictKey { ALL_GOOD, DNS_BLOCKED_TRY_SECURE, SERVER_UNREACHABLE, TLS_PROBLEM, AUTH_PROBLEM, SLOW_PROVIDER, SLOW_CONNECTION, IPV6_BROKEN, NAME_NOT_FOUND }
 
 interface Diagnostics {
     suspend fun deviceFacts(): DeviceFacts

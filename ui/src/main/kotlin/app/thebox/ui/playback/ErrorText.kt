@@ -69,6 +69,7 @@ object ErrorText {
         NextStep.WATCH_LIVE -> R.string.error_step_watch_live
         NextStep.TRY_OTHER_CATCHUP_MODE -> R.string.error_step_other_catchup_mode
         NextStep.REFRESH_PLAYLIST -> R.string.error_step_refresh_playlist
+        NextStep.BACK_TO_AUTO -> R.string.error_step_back_to_auto
     }
 
     @StringRes fun catchupHeadline(failure: CatchupFailure): Int = when (failure) {
@@ -104,6 +105,25 @@ object ErrorText {
         ErrorButton.USE_SECURE_DNS -> R.string.error_button_secure_dns
         ErrorButton.REFRESH_PLAYLIST -> R.string.error_button_refresh_playlist
         ErrorButton.OPEN_EXTERNAL -> R.string.error_button_open_external
+        ErrorButton.BACK_TO_AUTO -> R.string.error_button_back_to_auto
+    }
+
+    /**
+     * (M5 integration 2026-10-16, WP-C amendment) The label of [button] on a card whose OPEN_SETTINGS goes to [route]:
+     * named after where it leads ("Edit login", "Account", "User agent", "Playlist settings", "Connection test").
+     */
+    @StringRes fun button(button: ErrorButton, route: app.thebox.core.settings.SettingsRoute?): Int {
+        if (button != ErrorButton.OPEN_SETTINGS) return button(button)
+        return when (route) {
+            is app.thebox.core.settings.SettingsRoute.PlaylistSource -> R.string.error_button_edit_login
+            is app.thebox.core.settings.SettingsRoute.NetworkTest -> R.string.error_button_connection_test
+            is app.thebox.core.settings.SettingsRoute.Playlist -> when (route.focus?.key) {
+                null -> R.string.error_button_account
+                "playlist.user_agent" -> R.string.error_button_user_agent
+                else -> R.string.error_button_playlist_settings
+            }
+            else -> R.string.error_button_open_settings
+        }
     }
 
     /**

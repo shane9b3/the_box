@@ -350,6 +350,7 @@ class DiagPages @Inject constructor(
         VerdictKey.SLOW_PROVIDER -> context.getString(R.string.verdict_slow_provider, v.args.getOrElse(0) { "?" }, v.args.getOrElse(1) { "?" })
         VerdictKey.SLOW_CONNECTION -> context.getString(R.string.verdict_slow_connection, v.args.getOrElse(0) { "?" }, v.args.getOrElse(1) { "?" })
         VerdictKey.IPV6_BROKEN -> s(R.string.verdict_ipv6)
+        VerdictKey.NAME_NOT_FOUND -> s(R.string.verdict_name_not_found)
     }
 
     // ---------------------------------------------------------------- Sync status (§3.3.2, S15)
@@ -524,7 +525,7 @@ class DiagPages @Inject constructor(
             Licence("JetBrainsMono-OFL.txt", R.string.licences_jetbrains, R.string.licences_ofl),
         )
 
-        /** The `network` domain (WP-A's; same name, serializer and default, the store keys documents by name). */
-        val NetworkDomain: SettingsDomain<NetworkSettings> = SettingsDomain(Domains.NETWORK, NetworkSettings.serializer(), NetworkSettings())
+        /** The `network` domain: WP-A's object (M5 integration). */
+        val NetworkDomain: SettingsDomain<NetworkSettings> get() = app.thebox.core.settings.state.NetworkDomain
     }
 }

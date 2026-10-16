@@ -339,10 +339,15 @@ class SetupPagesTest {
 
         assertTrue(p.onBack(r, host), "Back = Done")
         assertEquals("applyGroupsReview(1,h=2,l=1,u=1)", setup.calls.last())
+        // (M5 integration) The report has its own route: Done replaces the review with it.
+        val report = SettingsRoute.MatchingReport(1, firstRun = true)
+        assertEquals(PageAction.Replace(report), host.actions.last())
+        p.open(report, host)
         assertEquals("REPORT_SUMMARY(1,912|2,140|89)", host.row(GroupsReviewPage.ROW_REPORT_SUMMARY).label)
         assertEquals(SettingsRoute.FixGuide(null), (host.row(GroupsReviewPage.ROW_REPORT_FIX).kind as RowKind.Link).route)
-        run(p, r, GroupsReviewPage.ROW_REPORT_LATER)
+        run(p, report, GroupsReviewPage.ROW_REPORT_LATER)
         assertEquals(PageAction.LeaveToGuide, host.actions.last())
+        assertTrue(p.onBack(report, host), "Back on the report = Later")
     }
 
     @Test

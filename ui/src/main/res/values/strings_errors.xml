@@ -40,6 +40,7 @@
     <string name="error_step_playlist_settings">Check this playlist\'s settings</string>
     <string name="error_step_secure_dns">Check your internet connection, or turn on secure DNS in Settings</string>
     <string name="error_step_diagnostics">Open diagnostics in Settings for details</string>
+    <string name="error_step_back_to_auto">Set Audio output back to Auto</string>
     <string name="error_step_software_decoder">Try the software video decoder in Settings</string>
     <string name="error_step_open_external">Open it in another player app</string>
     <string name="error_step_audio_options">Change the audio output in the audio options</string>

@@ -124,6 +124,8 @@
     <string name="player_notice_audio_hardware">Audio decoder switched to hardware (%1$s)</string>
     <string name="player_notice_passthrough">Your audio system didn\'t play %1$s; the TV box is decoding it now</string>
     <string name="player_notice_passthrough_generic">Your audio system didn\'t play this sound format; the TV box is decoding it now</string>
+    <!-- M5 integration (B2): appended while "Always passthrough" is on -->
+    <string name="player_notice_passthrough_forced">. To stop forcing it: Settings → Playback → Audio output → Auto</string>
     <string name="player_notice_video_software">Using the software video decoder for this channel</string>
     <string name="player_notice_tunneling_off">Tunneled playback turned off for this channel</string>
     <string name="player_notice_user_agent">Playing with a different user agent (%1$s)</string>

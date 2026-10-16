@@ -108,9 +108,13 @@ class PhoneSetupTest : SettingsTestBase() {
         openSettings("backup")
         val toPhone = rowWhere("Back up now") { it.id.key == "backup.now" }
         activate(toPhone.id.key)
+        // (M5 integration) Back up now → choose the target (WP-D's flow stages): "To your phone" opens the phone page.
+        activate(rowWhere("To your phone") { it.id.key == "backup.now.phone" }.id.key)
         awaitSettings("PhoneSetup for the download", 20_000) { (it.route as? SettingsRoute.PhoneSetup)?.purpose == app.thebox.core.settings.PhonePurpose.BACKUP_DOWNLOAD }
         val base = startPhoneSetupFromCurrent()
         val cookie = pairWithToken(base)
+        // (M5 integration) WP-D's BACKUP_DOWNLOAD takes the passphrase on the phone first, then exports and offers it.
+        req(base, "/api/passphrase", cookie, json = JSONObject().put("passphrase", "correct horse 42")).use { assertEquals(202, it.code) }
         val name = awaitOfferedName(base, cookie)
         val bytes = req(base, "/api/download/$name", cookie).use { r -> assertEquals(200, r.code); r.body.bytes() }
         assertTrue(bytes.isNotEmpty())
@@ -123,6 +127,12 @@ class PhoneSetupTest : SettingsTestBase() {
         http.newCall(Request.Builder().url("$b2/api/upload?kind=backup&name=$name").header("Cookie", c2).header("X-TheBox", "1")
             .post(bytes.toRequestBody("application/octet-stream".toMediaType())).build()).execute().use { assertEquals(202, it.code) }
         req(b2, "/api/passphrase", c2, json = JSONObject().put("passphrase", "correct horse 42")).use { assertEquals(202, it.code) }
+        // (M5 integration) WP-D: the passphrase is taken on the phone, Merge / Replace on the TV's RestorePreview.
+        awaitSettings("restore preview", 60_000) { it.route is SettingsRoute.RestorePreview }
+        // "How" is Merge by default; "Restore now" runs it.
+        val go = rowWhere("Restore now", 15_000) { it.kind is app.thebox.core.settings.RowKind.Action && it.label.contains("Restore now", ignoreCase = true) }
+        activate(go.id.key)
+        if (sui().confirm != null) { press(android.view.KeyEvent.KEYCODE_DPAD_LEFT); press(android.view.KeyEvent.KEYCODE_DPAD_CENTER) }
         awaitText("restored", 60_000) { it.contains("Restored", ignoreCase = true) }
         assertNotNull(pid)
     }
@@ -142,7 +152,8 @@ class PhoneSetupTest : SettingsTestBase() {
         while (android.os.SystemClock.elapsedRealtime() < deadline) {
             req(base, "/api/state", cookie).use { r ->
                 val j = JSONObject(r.body.string())
-                j.optString("download").takeIf { it.isNotBlank() }?.let { return it }
+                // (M5 integration) WP-D's state carries {"download": {"name", "url", "bytes"}}.
+                j.optJSONObject("download")?.optString("name")?.takeIf { it.isNotBlank() }?.let { return it }
             }
             Thread.sleep(500)
         }

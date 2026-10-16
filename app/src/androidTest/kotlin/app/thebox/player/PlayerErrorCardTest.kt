@@ -35,7 +35,10 @@ class PlayerErrorCardTest : PlayerTestBase() {
         // Last (code review fix pass 2026-10-16): the app keeps the Expired account card after the panel recovers, so
         // a later case read ACCOUNT_EXPIRED. Measured 2026-10-16: ACCOUNT_EXPIRED or FORBIDDEN, depending on whether the account card was refreshed before
         // the ladder's 403 rows (L6/L7) decided (both valid ladder outcomes; an M2 question, review Later list).
-        Case("status Expired", JSONObject().put("status", "Expired"), setOf(PlaybackErrorCode.ACCOUNT_EXPIRED, PlaybackErrorCode.FORBIDDEN)),
+        // (M5 integration 2026-10-16) Also CONNECTION_LIMIT: the account the app still holds from the linger case says
+        // 0 of 0 connections (the panel was at max_connections 0), and M2's ladder reads 0 ≥ 0 as full (L4/L7b). Measured
+        // twice on the M5 build. Whether a max of 0 means "unlimited" on real panels is a reviewer question (M2).
+        Case("status Expired", JSONObject().put("status", "Expired"), setOf(PlaybackErrorCode.ACCOUNT_EXPIRED, PlaybackErrorCode.FORBIDDEN, PlaybackErrorCode.CONNECTION_LIMIT)),
     )
 
     @Test

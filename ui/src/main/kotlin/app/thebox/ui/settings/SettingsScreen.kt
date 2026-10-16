@@ -65,9 +65,30 @@ const val SETTINGS_PAGE_PLACEHOLDER_TAG = "settings_page_placeholder"
  * [SettingsEvent.EditorClosed]. Every overlay is in-tree (no Popup/Dialog), inside the root key sink.
  */
 @Composable
-fun SettingsScreen(machine: SettingsMachine, clock24: Boolean, modifier: Modifier = Modifier) {
+fun SettingsScreen(
+    machine: SettingsMachine,
+    clock24: Boolean,
+    modifier: Modifier = Modifier,
+    /** (M5 integration) WP-D's phone page for `SettingsRoute.PhoneSetup` (the activity supplies its view model). */
+    phone: (@Composable (app.thebox.core.settings.PhonePurpose) -> Unit)? = null,
+) {
     val ui by machine.ui.collectAsState()
     val link = machine as? SettingsShellLink
+    val route = ui.route
+    // (M5 integration) Full-screen pages other WPs draw: WP-D's phone page, WP-B's Welcome cards (first run).
+    if (route is SettingsRoute.PhoneSetup && phone != null) {
+        phone(route.purpose)
+        return
+    }
+    val page = ui.page
+    if (route == SettingsRoute.FirstRun && page != null && page.route == SettingsRoute.FirstRun && page.placeholder == null) {
+        Box(modifier.fillMaxSize().testTag(SETTINGS_SCREEN_TAG)) {
+            app.thebox.ui.setup.WelcomeScreen(page, ui.cursor)
+            ui.notice?.let { Line(it, SettingsUi.Notice, Modifier.offset(64.dp, 960.dp).testTag(SETTINGS_NOTICE_TAG)) }
+            ui.confirm?.let { ConfirmCard(it, Modifier.fillMaxSize()) }
+        }
+        return
+    }
     SettingsContent(
         ui = ui,
         clock24 = clock24,
@@ -109,7 +130,8 @@ fun SettingsContent(
         ui.confirm?.let { ConfirmCard(it, Modifier.fillMaxSize()) }
         ui.numberPad?.let { NumberPad(it, Modifier.fillMaxSize()) }
         ui.editor?.let { editor(it) }
-        // ui.capture: WP-C's CaptureOverlay (§3.8.3) draws here once it exists.
+        // (M5 integration) WP-C's capture overlay (§3.8.3), driven by the machine's CaptureFlow.
+        ui.capture?.let { CaptureOverlay(it, ui.captureButton, Modifier.fillMaxSize(), testReport = ui.captureReport, testMode = ui.captureTest) }
     }
 }
 
@@ -257,15 +279,26 @@ private fun Rows(ui: SettingsUiState, page: PageModel, list: LazyListState, modi
         if (count > 0) list.scrollToItem(ui.top.coerceIn(0, count - 1))
     }
     val pageFocus = ui.pane == Pane.PAGE && !overlayOpen(ui)
+    // (M5 integration) Move mode shows the lifted row at its target index; the rows between shift by one (§3.2.2).
+    val move = ui.move
+    val shown: (Int) -> Int = if (move == null || move.index == move.fromIndex) { i -> i } else { i ->
+        when {
+            i == move.index -> move.fromIndex
+            move.index > move.fromIndex && i in move.fromIndex until move.index -> i + 1
+            move.index < move.fromIndex && i in (move.index + 1)..move.fromIndex -> i - 1
+            else -> i
+        }
+    }
     LazyColumn(modifier.fillMaxSize(), state = list, verticalArrangement = Arrangement.spacedBy(SettingsUi.ROW_GAP.dp), userScrollEnabled = false) {
-        items(count, key = { keys.getOrElse(it) { "i:$it" } }) { i ->
+        items(count, key = { keys.getOrElse(shown(it)) { "i:$it" } }) { slot ->
+            val i = shown(slot)
             val row = rowAt(page, i)
             if (row == null) {
                 PlaceholderRow(i)
             } else {
                 SettingsRowView(
                     row = row,
-                    focused = pageFocus && ui.cursor == i,
+                    focused = pageFocus && ui.cursor == slot,
                     choice = ui.choice?.takeIf { pageFocus && it.row == row.id },
                     moving = ui.move?.row == row.id,
                 )

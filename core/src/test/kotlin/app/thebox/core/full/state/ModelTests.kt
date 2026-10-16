@@ -149,8 +149,13 @@ class ErrorCardModelTest {
                     val firstHasButton = c.buttons.size > 1 && buttonFor(first) in c.buttons
                     assertTrue(firstHasButton || c.textStep == first, "$code: the first action is a button or the text step ($c)")
                 }
-                if (NextStep.RETRY !in e.actions) assertFalse(ErrorButton.RETRY in c.buttons, "$code: no prepended Retry")
-                else assertTrue(ErrorButton.RETRY in c.buttons, "$code: Retry from its own actions")
+                // (M5 integration, §3.14) A route that edits the playlist is followed by Retry (it applies the fix).
+                val fixRoute = c.route is app.thebox.core.settings.SettingsRoute.PlaylistSource || (c.route as? app.thebox.core.settings.SettingsRoute.Playlist)?.focus != null
+                when {
+                    NextStep.RETRY in e.actions -> assertTrue(ErrorButton.RETRY in c.buttons, "$code: Retry from its own actions")
+                    fixRoute -> assertEquals(c.buttons.indexOf(ErrorButton.OPEN_SETTINGS) + 1, c.buttons.indexOf(ErrorButton.RETRY), "$code: Retry right after the route")
+                    else -> assertFalse(ErrorButton.RETRY in c.buttons, "$code: no prepended Retry")
+                }
                 assertTrue(c.buttons.indexOf(ErrorButton.RETRY) <= 0 || e.actions.first() != NextStep.RETRY || c.buttons.first() == ErrorButton.RETRY)
             }
         }
@@ -183,21 +188,22 @@ class ErrorCardModelTest {
             assertEquals(buttons.split(' ').map { b.getValue(it) }, c.buttons, "$code buttons")
             assertEquals(text, c.textStep, "$code text step")
         }
-        check(AUTH_REJECTED, "OPEN_SETTINGS GUIDE", NextStep.EDIT_LOGIN) // the second route step is the text line
+        // (M5 integration, I-M5-21) Edit login is the button, the account the text line.
+        check(AUTH_REJECTED, "OPEN_SETTINGS RETRY GUIDE", NextStep.ACCOUNT_DETAILS)
         check(ACCOUNT_EXPIRED, "OPEN_SETTINGS GUIDE", NextStep.ACCOUNT_DETAILS)
         check(ACCOUNT_DISABLED, "OPEN_SETTINGS GUIDE", NextStep.ACCOUNT_DETAILS)
-        check(NEEDS_REAUTH, "OPEN_SETTINGS GUIDE", NextStep.EDIT_LOGIN)
+        check(NEEDS_REAUTH, "OPEN_SETTINGS RETRY GUIDE", NextStep.EDIT_LOGIN)
         check(CREDENTIALS_UNAVAILABLE, "RETRY GUIDE", NextStep.RETRY) // P-S2
         check(CONNECTION_LIMIT, "RETRY STOP GUIDE", NextStep.STOP_AND_WAIT) // P-S2
         check(CONNECTION_LIMIT_LOCAL, "RETRY GUIDE", NextStep.RETRY) // P-S2
         check(FORBIDDEN, "RETRY OPEN_SETTINGS GUIDE", NextStep.DIAGNOSTICS)
         check(CHANNEL_OFFLINE, "PREVIOUS_CHANNEL RETRY GUIDE", NextStep.TRY_BACKUP)
-        check(FORMAT_REFUSED, "OPEN_SETTINGS GUIDE", NextStep.DIAGNOSTICS)
+        check(FORMAT_REFUSED, "OPEN_SETTINGS RETRY GUIDE", NextStep.DIAGNOSTICS)
         check(WEB_PAGE_INSTEAD, "OPEN_SETTINGS RETRY GUIDE", NextStep.ACCOUNT_DETAILS)
         for (c in listOf(EMPTY_RESPONSE, NO_DATA_TIMEOUT, STREAM_INTERRUPTED, CONNECT_FAILED, INTERNAL)) check(c, "RETRY OPEN_SETTINGS GUIDE", NextStep.DIAGNOSTICS)
         check(SERVER_ERROR, "RETRY GUIDE", NextStep.TRY_BACKUP)
         check(DNS_FAILURE, "USE_SECURE_DNS OPEN_SETTINGS GUIDE", NextStep.USE_SECURE_DNS)
-        check(TLS_FAILURE, "OPEN_SETTINGS GUIDE", NextStep.DIAGNOSTICS)
+        check(TLS_FAILURE, "OPEN_SETTINGS RETRY GUIDE", NextStep.DIAGNOSTICS)
         check(CODEC_UNSUPPORTED, "TRY_SOFTWARE_DECODER OPEN_EXTERNAL GUIDE", NextStep.TRY_SOFTWARE_DECODER)
         check(STREAM_UNDECODABLE, "RETRY OPEN_EXTERNAL GUIDE", NextStep.OPEN_EXTERNAL)
         check(AUDIO_OUTPUT_FAILED, "AUDIO_OPTIONS GUIDE", NextStep.AUDIO_OPTIONS) // P-S2
@@ -214,7 +220,9 @@ class ErrorCardModelTest {
         val c = card(code)
         if (ErrorButton.OPEN_SETTINGS in c.buttons) {
             val route = assertNotNull(c.route, "$code: OPEN_SETTINGS without a route")
-            val step = e.actions.first { buttonFor(it) == ErrorButton.OPEN_SETTINGS }
+            // (M5 integration) Edit login takes the card's one route before Account details.
+            val routeSteps = e.actions.filter { buttonFor(it) == ErrorButton.OPEN_SETTINGS }
+            val step = if (NextStep.EDIT_LOGIN in routeSteps) NextStep.EDIT_LOGIN else routeSteps.first()
             assertEquals(ErrorCardModel.routeOf(step, code, ch.identity.playlistId), route)
         } else {
             assertEquals(null, c.route, "$code: a route without its button")
@@ -236,6 +244,7 @@ class ErrorCardModelTest {
         val pid = ch.identity.playlistId
         assertEquals(app.thebox.core.settings.SettingsRoute.Playlist(pid), card(ACCOUNT_EXPIRED).route)
         assertEquals(app.thebox.core.settings.SettingsRoute.PlaylistSource(pid), card(NEEDS_REAUTH).route)
+        assertEquals(app.thebox.core.settings.SettingsRoute.PlaylistSource(pid), card(AUTH_REJECTED).route)
         assertEquals(app.thebox.core.settings.SettingsRoute.Playlist(pid, ErrorCardModel.ROW_STREAM_FORMAT), card(FORMAT_REFUSED).route)
         assertEquals(app.thebox.core.settings.SettingsRoute.Playlist(pid, ErrorCardModel.ROW_IGNORE_TLS), card(TLS_FAILURE).route)
         assertEquals(app.thebox.core.settings.SettingsRoute.Playlist(pid, ErrorCardModel.ROW_USER_AGENT), card(FORBIDDEN).route)
@@ -246,7 +255,7 @@ class ErrorCardModelTest {
     @Test fun noChannelNoRoutes() {
         val c = ErrorCardModel.card(PlayerFixtures.error(AUTH_REJECTED), null, null, variantLeft = true, archiveFailed = false)
         assertEquals(listOf(ErrorButton.GUIDE), c.buttons)
-        assertEquals(NextStep.ACCOUNT_DETAILS, c.textStep)
+        assertEquals(NextStep.EDIT_LOGIN, c.textStep) // (M5 integration) Edit login ordered first
         assertEquals(null, c.route)
         val r = ErrorCardModel.card(PlayerFixtures.error(CHANNEL_NOT_FOUND), null, null, variantLeft = true, archiveFailed = false)
         assertEquals(listOf(ErrorButton.GUIDE), r.buttons)
@@ -389,6 +398,14 @@ class QuickBarModelTest {
             listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, START_OVER, TIME_SHIFT, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, SCREEN_OFF, SETTINGS),
             QuickBarModel.items(menu, archiveCapable = true, inArchive = false, nowProgramme = true, favourite = false, previous = prev),
         )
+    }
+
+    /** (M5 integration, §3.6.2) Sources shows only with two or more servers, just before Settings. */
+    @Test fun sourcesWithBackupServers() {
+        val one = QuickBarModel.items(menu.copy(servers = listOf("a:80")), archiveCapable = false, inArchive = false, nowProgramme = false, favourite = null, previous = null)
+        assertTrue(app.thebox.core.full.QuickItem.SOURCES !in one)
+        val two = QuickBarModel.items(menu.copy(servers = listOf("a:80", "b:80")), archiveCapable = false, inArchive = false, nowProgramme = false, favourite = null, previous = null)
+        assertEquals(listOf(app.thebox.core.full.QuickItem.SOURCES, SETTINGS), two.takeLast(2))
     }
 
     @Test fun archiveSwapsStartOverForJumpToLive() {
