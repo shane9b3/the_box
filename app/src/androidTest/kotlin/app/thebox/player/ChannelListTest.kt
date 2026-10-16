@@ -83,6 +83,9 @@ class ChannelListTest : PlayerTestBase() {
     fun previousRowAndQuickBar() {
         val a = fullOn(10)
         awaitController("A playing") { it is PlaybackState.Playing && it.target.identity == a.identity }
+        // Integration 2026-10-15 (test fix): A becomes "previous" only after PREVIOUS_CHANNEL_MIN_PLAY_MS (1 s) of media
+        // (M2 §3.1.1 rule, PlaybackControllerImpl); zapping at once leaves no Previous row.
+        Thread.sleep(2_000)
         press(K_CH_UP)
         val b = awaitPlayer("zap card for B") { it.info?.channel != null && it.info!!.channel!!.identity != a.identity }.info!!.channel!!
         awaitController("B playing") { it is PlaybackState.Playing && it.target.identity == b.identity }

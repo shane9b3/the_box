@@ -366,7 +366,7 @@ class GuideViewModel @Inject constructor(
                 // MINI); mapping it to a still hid the viewport, which ended the poster, which showed MINI again: a loop.
                 val still = s.miniStill || device.stillByDefault
                 // (M4, B1) An archive session's own hand-offs and probe errors are hidden by the one shared rule.
-                val visible = app.thebox.ui.full.vm.TunedVisibility.visible(TunedStateMapper.map(st, channel?.rowId ?: -1L, still), a)
+                val visible = app.thebox.core.catchup.archive.ArchiveVisibility.visible(TunedStateMapper.map(st, channel?.rowId ?: -1L, still), a)
                 machine.dispatch(GuideEvent.Tuned(visible, channel))
             }
         }

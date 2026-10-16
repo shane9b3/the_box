@@ -844,7 +844,7 @@ object ArchiveVisibility {
 
     fun visible(tuned: TunedState, status: ArchiveStatus?): TunedState {
         if (status == null || status.phase == ArchivePhase.IDLE || status.phase == ArchivePhase.FAILED) return tuned
-        if (!tuned.isArchive || tuned.identityHash != status.identityHash || tuned.tuneId < status.ownedTuneId) return tuned
+        if (!tuned.isArchive || tuned.identityHash != status.identityHash) return tuned
         val waiting = tuned.phase == MiniPhase.ERROR || tuned.phase == MiniPhase.CONNECTING || tuned.phase == MiniPhase.BUFFERING
         if (!waiting) return tuned
         val handoff = status.phase in HANDOFF || (status.phase == ArchivePhase.PLAYING && tuned.phase == MiniPhase.ERROR)
@@ -859,6 +859,8 @@ object ArchiveVisibility {
 ```
 
 Both view models forward `Tuned(ArchiveVisibility.visible(mapped, archive.status.value))` from `combine(controller.state, archive.status)`; the mini player reads the guide's (already visible) `TunedState`. Nothing else filters controller states.
+
+(Integration 2026-10-15, §5.8 item C1; lead-authorised contract edit) The `tuned.tuneId < status.ownedTuneId` clause is gone: `ArchivePlaybackImpl` raises `ownedTuneId` in the same turn as `tuneArchive`, so for one emission the controller still reports the session's **previous** cycle (e.g. the `Error(CATCHUP_NOT_IN_ARCHIVE)` of the variant that just failed) with a lower tuneId, and the clause let that ERROR through. While a session is active, an archive state of the session's channel is judged as owned whatever its tuneId; a zap away changes the identity and a live tune clears `isArchive`, so neither is hidden. `ownedTuneId` still decides session ownership inside `ArchivePlaybackImpl` (§3.8.2). WP-D's `TunedVisibility` workaround is deleted; both view models call this function. Covered by `ArchiveVisibilityTest` and `PlayerViewModelTest.probeNeverShowsTheCard`.
 
 ### 2.4 `core/.../full/ProgrammeFeed.kt` (WP-C implements)
 
@@ -1717,9 +1719,103 @@ From API notes §7's gap list and review S11, each behind a config key (defaults
 
 `PlayerOverlayBenchmark` (Macrobenchmark, `FrameTimingMetric`, the M3 setup incl. `androidx.benchmark.suppressErrors=EMULATOR`, `-gpu host`): (a) FULL idle 10 s with no overlay — frame count must be ~0 (asserted ≤ 5 on the emulator); (b) scrub hold ← for 5 s; (c) channel list 100 × DOWN at 25 Hz; (d) 20 × CH+ at 1 Hz with the passive bar (zap P50/P90 from `controller.diagnostics.zaps()`, **filtered to live tunes**: archive cycles are logged as TUNE and zap records too, `PlaybackControllerImpl.kt:458`, and continuations would skew P50; reviewed 2026-10-15, N14); (e) quick bar open + 12 × RIGHT. `frameDurationCpuMs` P50/P90/P99 logged; API 30 reports CPU time only (M3 §5.11), so hardware decides the gates (M6).
 
-### 5.8 Integration results
+### 5.8 Integration results (2026-10-15)
 
-To be written by WP-E in the integration pass (M3 §5.11 format: per-class pass/fail, device bugs found and fixed, test-expectation corrections, emulator numbers, open items).
+Integration of commit 0 and WP-A…WP-E on `main` (base `b8de83d`), step 3 of §1.9. Device: API 30 TV emulator `TheBox_TV_API30` (x86, 4 vCPU, 2 GB), fake panel via `tools/fakepanel/run-instrumented.sh --synthetic 2000 --set player_fixtures=true --set timeshift_mode='"duration"' --class …`, one class per call (M3 and M2 classes with their own flags, M3 §5.11). Every number below is an **emulator** number and not gate-relevant (plan §6 gates are asserted on hardware in M6). `range_requests_seen == 0` on live TS held in every `@After`.
+
+**Emulator state (E-1…E-5, all host/emulator, none app).** The AVD had been relaunched by Android Studio with software rendering; it was cold-booted as asked with `-gpu host`, clock in sync with the Mac (± 1 s) on every boot. On this host (emulator 37.1.11, macOS 15, AMD Radeon "Baffin", HVF) the emulator was unstable in four ways, each recorded with its evidence:
+- **E-1** `-gpu host` crashed the emulator twice inside `InfoBarTest.passiveBarOnZap` (crash dumps in `libgfxstream_backend`).
+- **E-2** `-gpu swiftshader_indirect` (M3's suite setting) piled up 400–980 POSIX shared-memory descriptors from gfxstream; past ~1,000 descriptors the slirp network died (guest `NUD_FAILED` on 10.0.2.2/10.0.2.3, "CANNOT TRANSLATE guest DNS ip", `ConnectException` in the suite) and later the whole guest wedged (`adb shell` unresponsive). Three runs lost this way.
+- **E-3** With `-feature -Vulkan,-GLDirectMem,-HasSharedSlotsHostMemoryAllocator` the descriptors stayed under 220, but the emulator then aborted with `hvf_map_safe: no free slots` (HVF memory-slot exhaustion), always during the second test of a process in `InfoBarTest` (guide navigation after a full session); also with `-HardwareDecoder,-GLDMA,-GLDMA2`. Alone, `passiveBarOnZap` passes.
+- **E-4** After a crash the next emulator start blocks on a modal crash-report consent dialog (`CrashConsentProvider::showDialog`): the dumps must be moved out of `/tmp/android-<user>/emu-crash-*.db/completed` first.
+- **E-5** The emulator audio HAL's underrun storms trigger L32 `SoftwareAudioAndReprepare` every 30–60 s on long runs (M2 §5.13), each adding ~1–1.5 s of stall.
+
+The suite finally ran with `-feature -Vulkan,-GLDirectMem,-HasSharedSlotsHostMemoryAllocator,-HardwareDecoder,-GLDMA,-GLDMA2` (software video decoding), first with `-gpu swiftshader_indirect` (M3/M2 regression and most M4 classes; CPU-starved: the main thread skips 30–60 frames during seeding) and at the end with `-gpu host` (benchmarks and the final `PlayerErrorCardTest`, `PlayerMemoryTest`, `TimeShiftTest`, `InfoBarTest` runs), with a runner that cold-boots the emulator again after a crash (scratch tooling, not in the repo).
+
+**JVM suite** (`:core:test :core:stateOnRealNavigator :data:testDebugUnitTest :player:testDebugUnitTest :ui:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest :app:assembleRelease :ui:lintDebug :app:lintDebug`), after every source change of this pass: green except one flake. `:core` 2,154 (+ `stateOnRealNavigator` 261), `:data` 158, `:player` 321, `:ui` 187, `:app` 40; 0 skipped. Lint: 0 errors (`:ui` 25 warnings, `:app` 23). Flakes: `ScrubBarRendererTest.zeroAllocationPerDraw` (`:ui`, WP-D) reports exactly 2,088 bytes over 1,000 draws in the full parallel gate (twice) and 0 alone (twice) and inside the smaller `:core :ui :app` run: the same class as `RendererAllocationTest.referenceFrameAllocatesNothing` (JIT/profile state of a shared JVM), listed for the reviewers (L-5). `GuideViewModelTest.hidingTheFocusedChannelKeepsTheIndex` (known flake) passed in every run today. Fake panel: `test_fakepanel.py` 88 tests OK.
+
+| Class (§5.5) | Pass | Fail | Notes |
+|---|---|---|---|
+| `InfoBarTest` (I-M4-1, I-M4-2) | 2 | 0 | I-M4-2 in every run (auto-hide 2.4–3.1 s). I-M4-1 passes alone (`#passiveBarOnZap`); as the class's second test it is where E-1/E-3 kill the emulator, on both GPU modes (last run: `hvf_map_safe: no free slots` under `-gpu host`). Key → passive bar measured 114, 169, 200, 445, 533 ms over five runs (criterion 100 ms; emulator ceiling 600 ms, T3) |
+| `ChannelListTest` (I-M4-3…5) | 3 | 0 | I-M4-3: 200 × DOWN, no PENDING row; T5 |
+| `NumberEntryFullTest` (I-M4-6) | 1 | 0 | commit 1,141 ms after the last digit (1 s ± 150); T6 |
+| `TracksTest` (I-M4-7, 8, 23) | 3 | 0 | I-M4-23 needed C2 (no tracks in catch-up) |
+| `CatchupPlaybackTest` (I-M4-9, 10, 10 linger, 22) | 4 | 0 | needed C2 and C3; T8. I-M4-22 settled 2.4 s after the key. Linger variant ends on the CONNECTION_LIMIT card (`max_connections` rejections 3) |
+| `ProbeTest` (I-M4-11, 12, 21) | 3 | 0 | `path:404 → php:200` (and `path:400 → php:200`), winner `xc-php` tried first next time; no ERROR layer sampled during probing (B1, C1) |
+| `TimeShiftTest` (I-M4-13, 13b, 14, 15) | 4 | 0 | needed C4; T1, T2, T10. Final run (`-gpu host`): I-M4-13 21.5 s behind after resume (20 s + 0.9 s live buffer + start-up), 19.2 s after 150 s, exactly 2 continuations, never live; I-M4-13b 21.6 s, request on the panel clock, not 2 h back (B2); I-M4-14 404 at the floored pause minute, then 60 s back, then live. On SwiftShader: 26.0 → 31.6 s over 150 s with three L32 re-prepares (E-5) |
+| `PlayerErrorCardTest` (I-M4-16) | 1 | 0 | |
+| `StatsOverlayTest` (I-M4-17) | 1 | 0 | T7 |
+| `PlayerMemoryTest` (I-M4-18) | 1 | 0 | growth −918 KiB (final run) and −1,484 KiB (heap 12,147 → 10,662 KiB) over 5 journeys; criterion < 2 MB |
+| `PlayerSurfaceTest` (I-M4-19) | 1 | 0 | |
+| `FiveKeyJourneyTest` (I-M4-20) | 1 | 0 | T9 |
+| M3 `HarnessTest`, `StartupAndSurfaceTest`, `KeysOnDeviceTest`, `PagingTest`, `GenerationSwapTest`, `GroupsAndBackTest`, `CatchupTest`, `RecompositionTest`, `PrefixTest`, `NumberEntryTest`, `MemoryTest`, `LowEndTest`, `ZapThroughGuideTest`, `LayerScopeTest`, `ModeSurvivalTest` | 23 | 0 | |
+| M3 `ReminderTest` | 2 | 0 | 1 skip: `lateReminderShowsStarted` assumption ("the on-now programme started over a minute ago", time of day) |
+| M3 `SearchTest` (I-11) | 0 | 1 | twice: OK lands on a live card, no archive start attempted. Only one archive hit for "news" at 03:00; the test counts RIGHT presses from its own search while the screen searches a moment later during a guide rebuild. No M4 code on that path; M3 test fragility (L-9) |
+| M2 `SmokeAndZapTest` | 7 | 0 | |
+| M2 `ErrorPathTest` | 6 | 0 | |
+| M2 `MediaAndLifecycleTest` | 5 | 2 | I-22/I-22b "fps known for ch 4": M3 O-6's emulator symptom; with software decoding (E-3 configuration) the 50 fps estimate never settles. I-21 passed |
+| M2 `ReconnectTest` | 7 | 0 | + I-3 `@Ignore`d (M2 O-1) |
+
+**Bugs found on the device and fixed**
+
+| # | Where (owner) | Symptom | Cause | Fix | Test |
+|---|---|---|---|---|---|
+| C1 | `core/.../catchup/archive/ArchiveVisibility.kt` (contract, lead-authorised; WP-D hand-off) | for one emission the previous cycle's `Error(CATCHUP_NOT_IN_ARCHIVE)` reached both machines while probing | `ownedTuneId` rises in the same turn as `tuneArchive`; the `tuned.tuneId < ownedTuneId` clause passed the earlier own cycle through | clause removed: while a session is active, an archive state of its channel is owned whatever its tuneId (§2.3a updated); WP-D's `ui/.../vm/TunedVisibility.kt` deleted, both VMs call the contract | `ArchiveVisibilityTest` (new: every active phase × visible phase × owned/earlier/later tuneId; B1 row; pass-through table), `PlayerContractsTest` row changed, `PlayerViewModelTest.probeNeverShowsTheCard`; I-M4-11/12/21 |
+| C2 | `player/.../engine/TsExtractorsFactory.kt` (M2 dead-track guard) | every catch-up with a `Content-Length` over 1 MiB (every real archive file) went READY with **no tracks** (no decoder, `controller.tracks` empty), then NO_DATA_TIMEOUT after 15 s (I-M4-9, 10, 23) | the guard measured "bytes read since the PMT" as an input-position difference; on a finite TS, `TsExtractor` ends its tracks after the PMT and `TsDurationReader` then seeks to the end of the file, so the jump counted as > 1 MiB read and every track was given up before its first PES. Hidden until now because `clip3` archive files were < 1 MiB | the guard counts the bytes each `read` call consumed (seeks are not reads) | `TsExtractorsFactoryTest.durationReadSeekOnAFiniteInputIsNotCountedAsRead` (fails with the fix reverted); I-M4-9, 10, 22, 23 |
+| C3 | `core/.../full/state/PlayerStateMachineImpl.kt` (WP-A) | I-M4-10's native seek never settled (second test of the process) | `ArchivePlayback` is app-wide and its `settledSeq` outlives a `PlayerViewModel`; a new machine's first `archiveSeek` reused seq 1, already settled, so the preview cleared at once and the session never echoed a new seq. In production: any activity recreation with the process alive | `onArchive` adopts the session's high-water mark (`seekSeq = max(seekSeq, status.settledSeq)`) | `ScrubInteractionTest.firstSeekOfANewMachineContinuesAfterTheSessionsSettledSeq` (fails with the fix reverted); I-M4-10 |
+| C4 | `player/.../controller/PlaybackControllerImpl.kt` (M2/WP-C) | a 20 s time-shift ended 125 s behind after 150 s (I-M4-13) | a ladder re-prepare (here L32 after E-5) starts a new session of the same archive cycle; `setMediaSource(resetPosition = true)` dropped the playhead and only the cycle's first session seeked to `startOffsetMs`, so the file restarted at 0 | a later session of an archive cycle seeks back to the player's position before replacing the source (`stop()` keeps it) | `ArchiveAndMemoryTest.ladderReprepareOfAnArchiveCycleContinuesAtThePlayhead` (fails with the fix reverted); I-M4-13 |
+
+Test-expectation corrections (the merged app was right; `app/src/androidTest/.../player/`): **T1** I-M4-13 expects 2–3 continuations in 150 s (WP-B hand-off: each xc open request is `ceil((now − S)/60)` min), counted after the resume request by identity; on the emulator the offset may grow by stall time but never move towards live (E-5), the design's ± 3 s stays for hardware. **T2** I-M4-14 `archive_lag_sec: 180` (WP-B: the first request floors the pause instant, up to ~80 s behind, so with 120 the step back plays). **T3** I-M4-1 samples the passive bar from a thread started before the key (the old loop started after both synchronous injections returned); emulator ceiling 600 ms, 100 ms on hardware. **T4** I-M4-2 sets the reminder on a programme ≥ 3 min ahead (one starting within the 60 s lead fires the modal card at once, which took the remaining keys) and times the auto-hide from the key. **T5** I-M4-5 waits 2 s before zapping (M2 `PREVIOUS_CHANNEL_MIN_PLAY_MS` = 1 s). **T6** I-M4-6 awaits the preview for "123" (each digit keeps the previous preview until its own lookup lands, L-7). **T7** I-M4-17 accepts the host alone on the SERVER line with one base URL (`StatsFormatter.server`, §3.4.4/E23: "server n of m" only with a choice). **T8** I-M4-9/10 count logical requests: a finite TS is opened twice without a Range (before and after `TsDurationReader`'s tail read), `PlayerPanel.timeshiftLogical`; I-M4-9 identifies "after the first request" by identity (WP-B: request 2 repeats request 1's minute with a longer D). **T9** I-M4-20 rewinds four steps from a 5 s live pause (one step lands inside `LIVE_SNAP_MS` and rightly snaps to live, L-6), accepts a PAUSED time-shift (S2: a seek while paused stays paused), waits 2 s before the list tune (T5's rule), and `quickSelect` steers by the live state (the quick bar's items change while it is open). **T10** I-M4-13/13b expect −00:20 **plus the live buffer at the pause** (N3 resumes at the pause point minus `bufferedMs`; 0.9–4.6 s measured), with 4 s tolerance on the emulator for the time-shift start-up. `PlayerTestBase.isEmulator()` added.
+
+**Measured (emulator)**
+
+`PlayerOverlayBenchmark` (§5.7; `benchmark` build, `CompilationMode.Partial`, 3 iterations, `-gpu host` with `-feature -Vulkan,-GLDirectMem,-HasSharedSlotsHostMemoryAllocator,-HardwareDecoder,-GLDMA,-GLDMA2`, panel `--synthetic 2000`): `frameDurationCpuMs` over all frames of the three iterations (API 30 reports CPU time only, M3 §5.11).
+
+| Journey | Frames (median) | P50 / P90 / P95 / P99 ms | Note |
+|---|---|---|---|
+| (a) FULL idle 10 s, no overlay | **0** | — | the gate (~0, ≤ 5 on the emulator) is met, but Macrobenchmark throws "At least one result is necessary, 0 found for frameDurationCpuMs", so the journey reports a failure (L-16) |
+| (b) scrub: RW, ← held 5 s | 110 | 15.6 / 37.6 / 42.5 / 57.6 | |
+| (c) channel list, 100 × DOWN at 25 Hz | 214 | 18.1 / 31.5 / 37.0 / 57.4 | |
+| (d) 20 × CH+ at 1 Hz, passive bar | 241 | 11.7 / 25.5 / 28.8 / 38.7 | zap times live in `controller.diagnostics.zaps()`, not readable from the benchmark process; I-M4-1 above |
+| (e) quick bar + 12 × RIGHT | 29 | 19.2 / 29.5 / 33.9 / 35.5 | |
+
+`player-scrub` / `player-info` trace sections: count 0 in every journey (not emitted, L-14). `GuideScrollBenchmark` (§5.9 "Guide scroll unchanged") was not rerun in this pass (the emulator time went to E-1…E-4; open, below).
+
+| What | Result | Gate (plan §6) | Verdict here |
+|---|---|---|---|
+| Zap (I-M4-1, CH+ in FULL) | key → passive bar 114–533 ms (5 runs); the controller's Connecting 40–550 ms after the key, the rest is `PlayerViewModel.channelOf` (2 queries on a cache miss, L-3) | bar ≤ 100 ms (§5.5); zap P50 ≤ 1.2 s | not measurable on this emulator; hardware (M6) |
+| FULL idle frames (benchmark a) | 0 frames in 10 s | ~0 (≤ 5 on the emulator) | **met** (harness reports an error on the empty metric, L-16) |
+| Overlay draw (trace sections) | not emitted | ≤ 1 ms P90 | not measurable (L-14) |
+| Memory (I-M4-18) | Java heap growth −0.9 / −1.5 MB over 5 journeys (two runs) | < 2 MB | **met** |
+| Catch-up correctness (I-M4-10/11/13/13b) | starts on the panel clock, correction subtracted, `timeshift_expect` never warned | asserted | **met** |
+| Info-bar auto-hide (I-M4-2) | 2.4–3.1 s for `infobar=3000` | — | met |
+| I-M4-22 settle | 2.4 s from the key (600 ms commit included) | ≤ 5 s | met |
+
+**Screenshots** (`m4-screens/`, scratch, not in the repo; 1920 × 1080 device = design px) checked against §3.9 and `01-design-reference.md`. Matching: passive and active info bar (rect (64, 820) 1792 × 220, header, title, time row, Next row, browsing hint), quick bar ((64, 952) 1792 × 88, 64 px pills, focused FG fill + accent ring, label · value), pickers (Aspect with the Remember row, Video decoder, Audio, Subtitles: (1376, 48) 496 × 880, 64 px rows, check mark), channel list ((48, 48) 620 × 984, 72/80 px rows, ten visible, Previous row with the accent label) and groups column (260 px, rows dimmed), stream info ((64, 56) 600 wide, mono rows), scrub bar (track (128, 952) 1664 × 6, labels, focused playhead ring, preview bubble, live-edge marker, two chips), error cards (720 wide, centred; fill measured .94 over the yellow bar), probing line, number entry ((1520, 72) 320 × 160 with logo), group card, screen off, mini player error and stopped hint. Contradictions found (for WP-D, L-1, L-2, L-10…L-13):
+- **V1** Subtitles ignore the bottom padding (N5): WebVTT cues (channel 8) sit on the bottom edge, partly off-screen, with no bar (0.08 expected) and under the info bar (padding above the bar expected). `SubtitleLayer` passes `bottomPaddingFraction`, but Media3 maps a WebVTT "auto" line to `LINE_TYPE_NUMBER` −1, which `SubtitleView` anchors to its bottom without the fraction (probable cause; verify).
+- **V2** The stream-info overlay stays on under the channel list; both sit at the top left, so the stats text shows through the .86 panel.
+- **V3** Info header glyphs (`↺ 7d · 720p · 1.0`) end around x = 1240 instead of right-aligned in the header; the resolution label lacks the frame rate until fps is known ("720p", §3.2.4 "1080p50").
+- **V4** The CONNECTION_LIMIT card has no next-step line (FORBIDDEN and NO_DATA_TIMEOUT have one), against the rule "errors carry a reason and a next step".
+- **V5** Number entry in FULL showed name and logo but not the now title (§3.10.4) in a capture ~1 s after the digit.
+- **V6** While browsing another channel in the active info bar, the header shows a LIVE pill next to the browsed (not tuned) channel.
+- **V7** After a media-key pause/resume in FULL, Back to the guide showed the mini player's "Press OK to watch" (stopped) instead of the PAUSED / −MM:SS pill, twice (live on channel 8, time-shift on channel 1); not covered by the suite.
+- **V8** Channel 7's CEA-608 captions (no PMT descriptor) are not offered as a text choice, so the quick bar has no Subtitles item there (API notes §1.3 expected a speculative CC track; §3.6.3 "verify on the multi clip", owner WP-C).
+Not captured: Exit dialog in FULL (EXIT has no default key; the guide's dialog was captured), NO_DATA_TIMEOUT countdown (needs the unlimited-retry setting, not reachable through the debug link), 4:3→16:9 zap (no 4:3 fixture in the panel), mini player −MM:SS pill (V7).
+
+**Later list for the reviewers** (none blocks a test)
+- L-1…L-4 from the hand-offs: `GuideViewModel.startTicker` can spin when a deadline is in the past (WP-D fixed the player ticker only); N17 "focus returns to now" after a synchronous archive-start failure needs a `PlayerEvent`; `PlayerFixtures.error` is attached to NO_DATA_TIMEOUT; `GuideScreen.kt` could pass `state.archive` instead of `LocalPlayerArchive`.
+- L-3 `PlayerViewModel.channelOf` on a cache miss runs `rowIdOf` + `channels` (two queries) before the first `Tuned` of a zap target; prefetching the CH± neighbours into `channelCache` when the tuned channel changes would take it off the 100 ms path.
+- L-5 `ScrubBarRendererTest.zeroAllocationPerDraw`: 2,088 B in the full gate, 0 alone; find the allocation (or measure per draw with the warm-up in the same JIT state).
+- L-6 `LIVE_SNAP_MS` (30 s) against the 10 s scrub step: from a fresh live pause the first two ← commits snap back to live; UX review.
+- L-7 Number entry keeps the previous number's preview until the new lookup lands ("12" under "123" for ≥ 150 ms; M3 behaviour).
+- L-8 The 15 s switch timeout can fire while a live cycle is paused before its first media; the Error then ends the PAUSED_LIVE session and resume makes no archive request (seen once on the starved emulator).
+- L-9 M3 `SearchTest` (I-11) navigates by a RIGHT count computed from its own search; make it find the archive card by state.
+- L-10…L-13 the screenshot findings V1–V8 above.
+- L-14 `player-scrub` / `player-info` trace sections are not emitted, so §5.9 "Overlay draw ≤ 1 ms P90" is not measurable yet.
+- L-15 L32 `SoftwareAudioAndReprepare` repeats on AAC underrun storms (E-5); check on hardware whether an underrun storm should switch decoders at all.
+- L-16 `PlayerOverlayBenchmark.fullIdle10s` cannot report its own success: zero frames make Macrobenchmark throw; catch it and report `frameCount = 0`, or add a metric that tolerates an empty frame list (WP-E).
+
+**Open**: `GuideScrollBenchmark` rerun against M3 §5.12 (next emulator session). **For M6 (hardware)**: zap P50/P90 and the 100 ms passive bar; FULL idle frames and overlay draw time with real GPU timings; I-M4-13's ± 3 s over 150 s without emulator stalls; I-M4-1 in sequence (E-1/E-3); M2 I-22 fps; DVB bitmap subtitles (§8 Q5); the baseline profile (M3 O-5).
 
 ### 5.9 Gates M4 can measure (plan §6)
 

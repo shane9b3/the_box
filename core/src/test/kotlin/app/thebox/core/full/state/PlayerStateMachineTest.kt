@@ -140,6 +140,24 @@ class ScrubInteractionTest {
         assertTrue(w.ui.scrub!!.seeking)
     }
 
+    /**
+     * (M4 integration 2026-10-15) A new machine (new PlayerViewModel) over an app-wide session that already settled seq 7:
+     * its first seek must use seq 8, so the preview stays until the session echoes it (B3; I-M4-10 on the device).
+     */
+    @Test fun firstSeekOfANewMachineContinuesAfterTheSessionsSettledSeq() {
+        val w = archive()
+        w.settleSeeks = false
+        w.send(PlayerEvent.Archive(w.archive(w.channels[0], ArchivePhase.PLAYING, w.status.wallMs, false, settledSeq = 7)))
+        w.press(RIGHT)
+        w.press(SELECT)
+        val seq = w.fx.last("archiveSeek")!!.args[1] as Long
+        assertEquals(8L, seq)
+        assertNotNull(w.ui.scrub!!.previewMs, "seq 8 is not settled yet")
+        assertTrue(w.ui.scrub!!.seeking)
+        w.send(PlayerEvent.Archive(w.archive(w.channels[0], ArchivePhase.PLAYING, w.status.wallMs, false, settledSeq = 8)))
+        assertNull(w.ui.scrub!!.previewMs)
+    }
+
     /** B3: the preview clears when settledSeq reaches our seq, wherever the playhead landed (45 s before the target). */
     @Test fun previewClearsOnSettledSeq() {
         val w = archive()

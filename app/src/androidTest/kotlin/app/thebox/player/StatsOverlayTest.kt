@@ -31,7 +31,9 @@ class StatsOverlayTest : PlayerTestBase() {
         val first = awaitPlayer("stats lines", 1_000) { !it.stats.isNullOrEmpty() }.stats!! // WP-A/WP-C behaviour
         log("I-M4-17 lines: $first")
         val server = first.firstOrNull { it.label == StatLabel.SERVER }
-        assertTrue("SERVER line says \"server 1 of 1\": $server", server?.value?.contains("1 of 1") == true) // WP-C behaviour (E23)
+        // Integration 2026-10-15 (test fix): with one base URL StatsFormatter.server prints the host alone ("host · server
+        // n of m" only when there is a choice, §3.4.4/E23); the panel has one base URL.
+        assertTrue("SERVER line is the host alone with one base URL: $server", !server?.value.isNullOrBlank() && server?.value?.contains(" of ") == false) // WP-C behaviour (E23)
         val changed = awaitPlayer("stats update", 4_000) { it.stats != null && it.stats != first } // M2 publishes at ≤ 2 Hz
         assertNotEquals(first, changed.stats)
         // Back closes the quick bar, then the overlay (ladder steps 4 and 8).

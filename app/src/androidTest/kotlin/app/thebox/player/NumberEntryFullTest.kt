@@ -25,7 +25,9 @@ class NumberEntryFullTest : PlayerTestBase() {
         toBareVideo()
         digits("123", intervalMs = 200)
         val tLast = SystemClock.elapsedRealtime()
-        val o = awaitUi("number preview", 1_000) { it.overlay is Overlay.Number && (it.overlay as Overlay.Number).preview != null }.overlay as Overlay.Number
+        // Integration 2026-10-15 (test fix): each digit keeps the previous preview until its own lookup lands
+        // (NUMBER_PREVIEW_MS after the digit, M3 §3.9.4), so "123" briefly shows the preview of "12"; await the one for 123.
+        val o = awaitUi("number preview for 123", 1_000) { u -> (u.overlay as? Overlay.Number)?.let { it.digits == "123" && it.preview?.displayName?.endsWith(" 123") == true } == true }.overlay as Overlay.Number
         log("I-M4-6 preview ${o.digits} → ${o.preview?.displayName} logo=${o.preview?.logoUrl}")
         assertEquals("123", o.digits)
         assertTrue("preview names channel 123", o.preview!!.displayName.endsWith(" 123"))

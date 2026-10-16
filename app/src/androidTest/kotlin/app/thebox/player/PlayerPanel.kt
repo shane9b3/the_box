@@ -85,6 +85,23 @@ class PlayerPanel(val guide: GuidePanel) {
     /** Timeshift requests that reached the panel at or after panel time [sinceUnix]. */
     fun timeshiftSince(sinceUnix: Double): List<TsRequest> = timeshiftRequests().filter { it.at >= sinceUnix }
 
+    /**
+     * (Integration 2026-10-15) One entry per **logical** archive request since [sinceUnix]: unranged opens with
+     * consecutive duplicates of the same (form, channel, start, duration) merged. A finite TS with a Content-Length is
+     * opened twice without a Range (ExoPlayer's first read, then again from byte 0 after TsDurationReader's tail read),
+     * with the ranged tail read in between, so counting raw unranged opens doubles every request.
+     */
+    fun timeshiftLogical(sinceUnix: Double): List<TsRequest> {
+        val out = ArrayList<TsRequest>()
+        for (r in timeshiftSince(sinceUnix)) {
+            if (r.ranged) continue
+            val last = out.lastOrNull()
+            if (last != null && last.form == r.form && last.channel == r.channel && last.startUnix == r.startUnix && last.durationS == r.durationS && last.status == r.status) continue
+            out += r
+        }
+        return out
+    }
+
     fun timeshiftCount(): Int = guide.stats().json.optInt("timeshift_request_count")
     fun timeshiftWarnings(): Int = guide.timeshiftWarnings()
     fun rejections(): Map<String, Int> = guide.stats().rejections

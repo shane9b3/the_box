@@ -27,7 +27,8 @@ import kotlin.math.abs
 class CatchupPlaybackTest : PlayerTestBase() {
     override val playerSwitches = "padding=0,0"
 
-    private fun fresh(since: Double) = pp.timeshiftSince(since).filter { !it.ranged }
+    /** Logical requests (integration 2026-10-15: a finite TS is opened twice without a Range, see [PlayerPanel.timeshiftLogical]). */
+    private fun fresh(since: Double) = pp.timeshiftLogical(since)
 
     /**
      * I-M4-9: OK on a past 1-min programme plays; after ~60 s the scrub bar's programme changes from the timeline (no
@@ -44,10 +45,14 @@ class CatchupPlaybackTest : PlayerTestBase() {
         assertTrue("a timeshift request was made", first.isNotEmpty())
         assertEquals("first request 200", 200, first.last().status)
         val p0 = st.programme
-        val tFirst = pp.now().unix
         val changed = awaitArchive("programme re-scoped by the timeline", 75_000) { it.programme != null && it.programme?.rawStartMin != p0?.rawStartMin } // WP-B behaviour
         log("I-M4-9 programme ${p0?.rawStartMin} → ${changed.programme?.rawStartMin}")
-        val sameSession = fresh(tFirst + 1)
+        // Integration 2026-10-15 (test fix): count requests after the first one by identity, not by arrival time (the
+        // first request's second unranged open can land after first media). WP-B hand-off: under 1-min programmes request
+        // 2 repeats request 1's minute with a longer D (the open-ended continuation, §3.8.5).
+        val firstReq = first.last()
+        fun after() = fresh(t0).dropWhile { it != firstReq }.drop(1)
+        val sameSession = after()
         log("I-M4-9 requests after the first: $sameSession")
         assertTrue("at most the one continuation request around the boundary (no per-programme request): $sameSession", sameSession.size <= 1) // WP-B behaviour (§3.8.5)
         // Continuation: the request after the file's end.
@@ -55,7 +60,7 @@ class CatchupPlaybackTest : PlayerTestBase() {
         var cont = sameSession.firstOrNull()
         while (cont == null && SystemClock.elapsedRealtime() < deadline) {
             Thread.sleep(500)
-            cont = fresh(tFirst + 1).firstOrNull()
+            cont = after().firstOrNull()
         }
         if (cont == null) fail("no continuation request within 90 s of first media")
         val wall = archive().wallMs / 1000.0

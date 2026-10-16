@@ -8,6 +8,7 @@ import androidx.lifecycle.repeatOnLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.media3.common.text.Cue
 import app.thebox.core.catchup.archive.ArchivePhase
+import app.thebox.core.catchup.archive.ArchiveVisibility
 import app.thebox.core.catchup.archive.ArchivePlayback
 import app.thebox.core.common.BoxLog
 import app.thebox.core.full.PlayerEvent
@@ -240,7 +241,7 @@ class PlayerViewModel @Inject constructor(
             combine(controller.state, archive.status) { st, status -> st to status }.collect { (st, status) ->
                 val ch = st.target?.identity?.let { channelOf(it) }
                 val mapped = TunedStateMapper.map(st, ch?.rowId ?: -1L, still = false)
-                machine.dispatch(PlayerEvent.Tuned(TunedVisibility.visible(mapped, status), ch))
+                machine.dispatch(PlayerEvent.Tuned(ArchiveVisibility.visible(mapped, status), ch))
             }
         }
         scope.launch {

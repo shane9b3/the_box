@@ -1118,6 +1118,10 @@ class PlayerStateMachineImpl(
         val was = statusForTuned()
         status = s
         val now = statusForTuned()
+        // (M4 integration 2026-10-15) The archive session is app-wide and outlives this machine (a new PlayerViewModel
+        // after an activity recreation): continue from its high-water mark, or our first seq would equal an already
+        // settled one and the preview would clear before the seek settled (B3).
+        if (s.settledSeq > seekSeq) seekSeq = s.settledSeq
         // B3: the preview clears when the session echoes our seek, wherever the playhead landed.
         if (awaitSeq != 0L && s.settledSeq >= awaitSeq) { awaitSeq = 0; if (commitAt == Long.MAX_VALUE) preview = null }
         if (atLiveCommitPending && now != null && (now.phase == ArchivePhase.PLAYING || now.phase == ArchivePhase.PAUSED || now.phase == ArchivePhase.PAUSED_LIVE)) {

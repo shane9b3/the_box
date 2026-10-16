@@ -96,8 +96,13 @@ internal class GuardedTsExtractor(
     }
 
     override fun read(input: ExtractorInput, seekPosition: PositionHolder): Int {
+        // (M4 integration 2026-10-15) Bytes consumed by this call, not the input position: on a finite TS (archive with a
+        // Content-Length) TsExtractor ends its tracks after the PMT and then TsDurationReader seeks to the end of the file
+        // for the last PCR; a position difference counted that jump as read bytes, gave up every track before its first
+        // PES and prepared the period with no tracks (READY, no decoder, NO_DATA_TIMEOUT after 15 s).
+        val before = input.position
         val result = delegate.read(input, seekPosition)
-        guard?.onRead(input.position, result == Extractor.RESULT_END_OF_INPUT)
+        guard?.onRead((input.position - before).coerceAtLeast(0), result == Extractor.RESULT_END_OF_INPUT)
         return result
     }
 
@@ -118,8 +123,8 @@ internal class DeadTrackGuard(
     private val tracks = LinkedHashMap<Int, LazyTrackOutput>()
     private val discard = DiscardingTrackOutput()
     private var endRequested = false
-    private var endRequestedAt = 0L
-    private var lastPosition = 0L
+    /** TS bytes consumed since `endTracks()` was requested (seeks do not count). */
+    private var readSinceEnd = 0L
 
     /** True once `endTracks()` was forwarded. */
     var tracksEnded = false
@@ -133,15 +138,17 @@ internal class DeadTrackGuard(
     override fun endTracks() {
         if (endRequested) return
         endRequested = true
-        endRequestedAt = lastPosition
+        readSinceEnd = 0L
         maybeEnd()
     }
 
     override fun seekMap(seekMap: SeekMap) = output.seekMap(seekMap)
 
-    fun onRead(position: Long, endOfInput: Boolean) {
-        lastPosition = position
-        if (endRequested && !tracksEnded && (endOfInput || position - endRequestedAt >= graceBytes)) giveUp()
+    /** After each extractor read: [consumedBytes] read by that call (a seek in between is not a read). */
+    fun onRead(consumedBytes: Long, endOfInput: Boolean) {
+        if (!endRequested || tracksEnded) return
+        readSinceEnd += consumedBytes
+        if (endOfInput || readSinceEnd >= graceBytes) giveUp()
     }
 
     private fun maybeEnd() {

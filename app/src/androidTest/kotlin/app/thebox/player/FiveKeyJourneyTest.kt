@@ -37,9 +37,13 @@ class FiveKeyJourneyTest : PlayerTestBase() {
         awaitArchive("PAUSED_LIVE by OK", 5_000) { it.phase == ArchivePhase.PAUSED_LIVE } // WP-A/WP-B behaviour
         steps += "OK → ${archive().phase}"
         Thread.sleep(5_000)
-        // 3. LEFT rewinds (preview −10 s) and commits: time-shift.
-        press(K_LEFT)
-        awaitArchive("time-shift after the rewind commit", 20_000) { it.timeShift && it.phase == ArchivePhase.PLAYING } // WP-A/WP-B behaviour
+        // 3. LEFT rewinds and commits: time-shift. Integration 2026-10-15 (test fix): one step (−10 s) from a 5 s pause
+        // targets ~15 s behind the edge, inside LIVE_SNAP_MS (30 s), so the commit rightly snaps to live (§3.8.4,
+        // seekFromLivePause); four steps (−40 s) land outside the snap.
+        repeat(4) { press(K_LEFT, intervalMs = 120) }
+        // Integration 2026-10-15 (test fix): a seek while paused stays paused (S2, ArchivePlaybackImpl.seekRerequest with
+        // wasPaused), so the rewind from PAUSED_LIVE lands in a PAUSED time-shift.
+        awaitArchive("time-shift after the rewind commit", 20_000) { it.timeShift && (it.phase == ArchivePhase.PLAYING || it.phase == ArchivePhase.PAUSED) } // WP-A/WP-B behaviour
         steps += "LEFT → ${archive().brief()}"
         // 4. UP in the scrub bar → jump to live.
         if (pui().layer != PlayerLayer.SCRUB || pui().scrub?.focused != true) {
@@ -63,6 +67,9 @@ class FiveKeyJourneyTest : PlayerTestBase() {
         assertTrue("Back to live offered in catch-up", q.items.contains(QuickItem.JUMP_TO_LIVE)) // WP-A behaviour
         quickSelect(QuickItem.JUMP_TO_LIVE)
         awaitController("Back to live", 15_000) { it is PlaybackState.Playing && !it.target.isArchive }
+        // Integration 2026-10-15 (test fix): the live cycle must play PREVIOUS_CHANNEL_MIN_PLAY_MS (1 s) before a zap away
+        // makes it "previous" (M2 §3.1.1); without the wait the quick bar has no Previous channel.
+        Thread.sleep(2_000)
         // 7. Previous channel: zap through the channel list (OK, DOWN, RIGHT), then quick bar → Previous channel.
         toBareVideo()
         press(K_OK)

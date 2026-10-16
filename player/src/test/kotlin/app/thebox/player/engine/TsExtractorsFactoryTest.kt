@@ -151,6 +151,42 @@ class TsExtractorsFactoryTest {
         assertTrue(ac3 != null && ac3.lastFormat == null)
     }
 
+    /**
+     * (M4 integration 2026-10-15) A finite TS (archive with a Content-Length) larger than the grace: after the PMT,
+     * TsExtractor's duration reader seeks to the end of the file and back. The guard counted that jump as read bytes and
+     * gave up every track before its first PES (a period prepared with no tracks, NO_DATA_TIMEOUT on the device).
+     */
+    @Test
+    fun durationReadSeekOnAFiniteInputIsNotCountedAsRead() {
+        val looped = ByteArray(clip.size * 30).also { for (i in 0 until 30) System.arraycopy(clip, 0, it, i * clip.size, clip.size) }
+        assertTrue("larger than the grace (${looped.size})", looped.size > TsExtractorsFactory.DEAD_TRACK_GRACE_BYTES * 2)
+        val dead = mutableListOf<Pair<Int, Int>>()
+        val extractor = TsExtractorsFactory(TsCompat.DEFAULT, onDeadTrack = { pid, type -> dead += pid to type }).createExtractors().single()
+        val output = FakeExtractorOutput()
+        extractor.init(output)
+        fun open(position: Long): DefaultExtractorInput {
+            val source = ByteArrayDataSource(looped)
+            source.open(DataSpec.Builder().setUri(Uri.parse("thebox-session://1")).setPosition(position).build())
+            return DefaultExtractorInput(source, position, looped.size.toLong())
+        }
+        var input = open(0)
+        val holder = PositionHolder()
+        var seeks = 0
+        var reads = 0
+        while (output.trackOutputs.size() == 0 || !output.tracksEnded || output.getTrackOutputsForType(C.TRACK_TYPE_VIDEO).single().sampleCount == 0) {
+            check(++reads < 200_000) { "no samples" }
+            when (extractor.read(input, holder)) {
+                Extractor.RESULT_END_OF_INPUT -> break
+                Extractor.RESULT_SEEK -> { seeks++; input = open(holder.position) }
+            }
+        }
+        assertTrue("the duration reader seeked ($seeks)", seeks >= 1)
+        assertTrue("no track given up: $dead", dead.isEmpty())
+        assertTrue(output.tracksEnded)
+        assertTrue("video has a format", output.getTrackOutputsForType(C.TRACK_TYPE_VIDEO).single().lastFormat != null)
+        assertTrue("audio has a format", output.getTrackOutputsForType(C.TRACK_TYPE_AUDIO).single().lastFormat != null)
+    }
+
     @Test
     fun smallGraceStillKeepsLiveTracks() {
         val run = extract(EngineTestSupport.withExtraPmtEntries(clip, listOf(0x81 to 0x333)), guarded = true, grace = 32 * 1024)

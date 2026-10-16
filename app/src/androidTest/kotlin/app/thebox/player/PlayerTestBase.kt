@@ -195,13 +195,15 @@ abstract class PlayerTestBase : GuideTestBase() {
 
     /** Moves the quick bar's focus to [item] with LEFT/RIGHT and presses OK. */
     protected fun quickSelect(item: QuickItem) {
-        val q = awaitPlayer("quick bar shows $item") { it.layer == PlayerLayer.QUICK_BAR && it.quick?.items?.contains(item) == true }.quick!!
-        val target = q.items.indexOf(item)
-        var cur = q.focused
-        while (cur != target) {
-            val step = if (target > cur) 1 else -1
-            press(if (step > 0) KeyEvent.KEYCODE_DPAD_RIGHT else KeyEvent.KEYCODE_DPAD_LEFT, intervalMs = 80)
-            cur += step
+        awaitPlayer("quick bar shows $item") { it.layer == PlayerLayer.QUICK_BAR && it.quick?.items?.contains(item) == true }
+        // Integration 2026-10-15 (test fix): steer by the live state; the item list can change while the bar is open (a
+        // Previous channel or favourite answer arriving), so counting presses from one snapshot can overshoot.
+        var guard = 0
+        while (true) {
+            val q = pui().quick ?: break
+            val target = q.items.indexOf(item)
+            if (target < 0 || target == q.focused || ++guard > 30) break
+            press(if (target > q.focused) KeyEvent.KEYCODE_DPAD_RIGHT else KeyEvent.KEYCODE_DPAD_LEFT, intervalMs = 120)
         }
         awaitPlayer("quick focus on $item") { s -> s.quick?.let { it.items.getOrNull(it.focused) == item } == true }
         press(KeyEvent.KEYCODE_DPAD_CENTER)
@@ -298,6 +300,10 @@ abstract class PlayerTestBase : GuideTestBase() {
             "attempt=$attempt/$attempts failure=$failure settled=$settledSeq owned=$ownedTuneId"
 
     protected fun ArchiveStatus.active(): Boolean = phase != ArchivePhase.IDLE && phase != ArchivePhase.FAILED
+
+    /** True on the Android emulator (timing criteria that §5.9 leaves to hardware get an emulator ceiling). */
+    protected fun isEmulator(): Boolean =
+        android.os.Build.HARDWARE.contains("ranchu") || android.os.Build.HARDWARE.contains("goldfish") || android.os.Build.FINGERPRINT.contains("generic")
 
     companion object {
         /** Deterministic player settings for every test (§2.2 defaults spelled out), then default padding 60/300. */

@@ -60,6 +60,24 @@ class ArchiveAndMemoryTest {
         assertEquals(120_000L, f.exo.seeks.last())
     }
 
+    /** (M4 integration 2026-10-15) A ladder re-prepare of an archive cycle seeks back to the playhead, not to 0 (I-M4-13). */
+    @Test
+    fun ladderReprepareOfAnArchiveCycleContinuesAtThePlayhead() {
+        f.controller.tuneArchive(ArchiveTune(CH1, request, startOffsetMs = 34_000))
+        f.idle()
+        f.play()
+        f.exo.position = 58_000
+        var used = false
+        f.ladder.script = { _, _ ->
+            if (!used) { used = true; app.thebox.core.playback.LadderDecision.SoftwareAudioAndReprepare("audio/mp4a-latm") }
+            else app.thebox.core.playback.LadderDecision.Fail(app.thebox.core.playback.PlaybackError(app.thebox.core.playback.PlaybackErrorCode.INTERNAL))
+        }
+        f.exo.emitError(androidx.media3.common.PlaybackException("e", null, androidx.media3.common.PlaybackException.ERROR_CODE_IO_UNSPECIFIED))
+        f.idle()
+        assertEquals("re-prepared once", 2, f.sources.builds.size)
+        assertEquals("first session at the request offset, the re-prepare at the playhead", listOf(34_000L, 58_000L), f.exo.seeks)
+    }
+
     @Test
     fun archivePauseIsARealPause() {
         f.controller.tuneArchive(ArchiveTune(CH1, request))

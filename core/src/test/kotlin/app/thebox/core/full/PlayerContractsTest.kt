@@ -91,12 +91,13 @@ class PlayerContractsTest {
         val starting = ArchiveVisibility.visible(tuned(MiniPhase.CONNECTING), status(ArchivePhase.STARTING))
         assertEquals(MiniPhase.CONNECTING, starting.phase)
         assertFalse(starting.handoff)
-        // FAILED, IDLE, null status, a cycle older than the session, live, another channel: unchanged.
+        // FAILED, IDLE, null status, live, another channel: unchanged.
         val err = tuned(MiniPhase.ERROR)
         assertSame(err, ArchiveVisibility.visible(err, status(ArchivePhase.FAILED)))
         assertSame(err, ArchiveVisibility.visible(err, status(ArchivePhase.IDLE)))
         assertSame(err, ArchiveVisibility.visible(err, null))
-        assertSame(err, ArchiveVisibility.visible(err, status(ArchivePhase.PROBING, owned = 11)))
+        // The session's own earlier cycle (ownedTuneId already raised) is a hand-off too (integration 2026-10-15).
+        assertTrue(ArchiveVisibility.visible(err, status(ArchivePhase.PROBING, owned = 11)).handoff)
         val live = tuned(MiniPhase.ERROR, archive = false)
         assertSame(live, ArchiveVisibility.visible(live, status(ArchivePhase.PROBING)))
         val other = err.copy(identityHash = 42)

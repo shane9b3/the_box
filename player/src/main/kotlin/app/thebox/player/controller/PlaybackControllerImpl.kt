@@ -596,10 +596,14 @@ internal class PlaybackControllerImpl @Inject constructor(
 
         // Step 7: prepare and play.
         val p = e.bundle.player
+        val archive = c.archive
+        // (M4 integration 2026-10-15) A later session of an archive cycle (a ladder re-prepare: L32 software audio, a
+        // stall, a retry) continues at the playhead; `stop()` keeps the position, `setMediaSource(resetPosition)` drops it.
+        // Without this the file restarted at 0 and a 20 s time-shift fell minutes behind (I-M4-13 on the device).
+        val startAtMs = if (archive == null) 0L else if (c.firstSession) archive.startOffsetMs else p.currentPosition.coerceAtLeast(0)
         p.setMediaSource(built.source, /* resetPosition = */ true)
         p.prepare()
-        val archive = c.archive
-        if (archive != null && c.firstSession && archive.startOffsetMs > 0) p.seekTo(archive.startOffsetMs)
+        if (archive != null && startAtMs > 0) p.seekTo(startAtMs)
         c.firstSession = false
         e.parts.watchdog.bind(built.telemetry)
         e.parts.watchdog.reset()
