@@ -29,8 +29,13 @@ class FiveKeyReachabilityTest {
     private val to = GuideFixtures.floor30(GuideWorld.NOW_MIN) + 1440
     private val data = GuideFixtures.windowData(GuideFixtures.syntheticRows(3, from, to, durationsMin = intArrayOf(60, 90, 120)), fromMin = from, toMin = to)
 
+    /**
+     * (M5, WP-C) The session is unlocked (a PIN is set): the channel menu then offers both Lock and Unlock (§3.9.1),
+     * so every MenuItem is reachable in one world.
+     */
     private fun world(exit: ExitConfirmation) =
         GuideWorld(channels = channels, data = data, settings = GuideSettings(exitConfirmation = exit), dataWindow = app.thebox.core.guide.GuideDataWindow(1, 1))
+            .also { it.send(app.thebox.core.guide.GuideEvent.Parental(app.thebox.core.parental.ParentalState(pinSet = true, unlocked = true, policy = app.thebox.core.parental.ParentalPolicy()))) }
 
     private class Reached {
         val menu = HashSet<MenuItem>(); val buttons = HashSet<PanelButton>(); val chips = HashSet<HeaderChip>()
@@ -76,7 +81,6 @@ class FiveKeyReachabilityTest {
     }
 
     private companion object {
-        val M5_NOT_OFFERED_YET = setOf(MenuItem.LOCK_CHANNEL, MenuItem.UNLOCK_CHANNEL, MenuItem.FIX_GUIDE_DATA, MenuItem.CHANNEL_OPTIONS)
         /** Item → effects SELECT may produce (alternatives depend on the cell; at least one must be seen). */
         val EXPECTED: Map<String, Set<String>> = buildMap {
             put("menu:" + MenuItem.WATCH, setOf("playArchive"))
@@ -86,6 +90,10 @@ class FiveKeyReachabilityTest {
             put("menu:" + MenuItem.ADD_FAVOURITE, setOf("setFavourite"))
             put("menu:" + MenuItem.REMOVE_FAVOURITE, setOf("setFavourite"))
             put("menu:" + MenuItem.HIDE_CHANNEL, setOf("hideChannel"))
+            // M5 (§3.9.1, §3.2.5)
+            put("menu:" + MenuItem.LOCK_CHANNEL, setOf("setChannelLocked"))
+            put("menu:" + MenuItem.UNLOCK_CHANNEL, setOf("setChannelLocked"))
+            // FIX_GUIDE_DATA and CHANNEL_OPTIONS sit past the search depth; PinRoutingTest checks what SELECT does on them.
             put("button:" + PanelButton.WATCHING, setOf("setFullScreen"))
             put("button:" + PanelButton.WATCH_NOW, setOf("tune", "setFullScreen", "retry"))
             put("button:" + PanelButton.WATCH, setOf("playArchive"))
@@ -132,8 +140,7 @@ class FiveKeyReachabilityTest {
             if (frontier.isEmpty() || seen.size > 60_000) break
         }
         val missing = buildList {
-            // M5 commit 0: the four appended items are offered only once WP-C/WP-A build them into the menu; WP-C drops this filter.
-            addAll(MenuItem.entries.filter { it !in r.menu && it !in M5_NOT_OFFERED_YET })
+            addAll(MenuItem.entries.filter { it !in r.menu })
             addAll(PanelButton.entries.filter { it !in r.buttons })
             addAll(HeaderChip.entries.filter { it !in r.chips })
             addAll(ScreenMode.entries.filter { it !in r.modes })

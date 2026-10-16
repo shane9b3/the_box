@@ -10,6 +10,7 @@ import app.thebox.core.epg.EpgChannelRef
 import app.thebox.core.guide.GuideChannel
 import app.thebox.core.guide.GuideSource
 import app.thebox.core.model.Catchup
+import app.thebox.core.parental.ParentalAccess
 import app.thebox.core.model.StableKey
 import app.thebox.core.refresh.ChannelIdentity
 import app.thebox.core.source.RawCatchup
@@ -25,8 +26,9 @@ import javax.inject.Singleton
 /**
  * Raw-statement queries for the guide (docs/design/m3-guide.md §3.2.1): lineups fill a `LongArray` without boxing or
  * entity mapping, blocks select only the columns a [GuideChannel] needs. Every lineup variant applies
- * `c.missing_since IS NULL`, `c.kind IN (0, 1)`, `p.enabled = 1` and the parental predicate ([ChannelDao.PARENTAL]:
- * hidden channels/groups never, locked groups and adult channels only when `unlocked`) in SQL.
+ * `c.missing_since IS NULL`, `c.kind IN (0, 1)`, `p.enabled = 1` and the parental and rule predicate
+ * ([ChannelDao.PARENTAL_ACCESS], docs/design/m5-setup-settings.md §4.3: hidden or rule-hidden channels/groups never,
+ * locked content only for the caller's `access`) in SQL.
  *
  * Main-safe callers switch to IO first ([GuideLibraryImpl], [GuideSearchImpl]); these run on Room's reader pool.
  */
@@ -46,29 +48,29 @@ class GuideQueries @Inject constructor(
     @Volatile var lineupQueries: Int = 0
         private set
 
-    suspend fun lineup(source: GuideSource, unlocked: Boolean): LineupRows = db.read {
+    suspend fun lineup(source: GuideSource, access: ParentalAccess): LineupRows = db.read {
         lineupQueries++
         val q = lineupClause(source)
-        val ids = longs("SELECT c.id ${q.from} WHERE ${q.where} $PARENTAL_RAW ${q.order}") { st -> st.bindBool(1, unlocked); q.bind(st) }
-        val archive = int("SELECT $ARCHIVE_DAYS ${q.from} WHERE ${q.where} $PARENTAL_RAW") { st -> st.bindBool(1, unlocked); q.bind(st) }
+        val ids = longs("SELECT c.id ${q.from} WHERE ${q.where} $PARENTAL_RAW ${q.order}") { st -> st.bindAccess(access); q.bind(st) }
+        val archive = int("SELECT $ARCHIVE_DAYS ${q.from} WHERE ${q.where} $PARENTAL_RAW") { st -> st.bindAccess(access); q.bind(st) }
         LineupRows(ids, archive)
     }
 
     /** Upper bound of archive days over every lineup-visible channel (search look-back, §3.10.2). */
-    suspend fun archiveDaysAll(unlocked: Boolean): Int = db.read {
-        int("SELECT $ARCHIVE_DAYS $LINEUP_FROM WHERE $LINEUP_BASE $PARENTAL_RAW") { st -> st.bindBool(1, unlocked) }
+    suspend fun archiveDaysAll(access: ParentalAccess): Int = db.read {
+        int("SELECT $ARCHIVE_DAYS $LINEUP_FROM WHERE $LINEUP_BASE $PARENTAL_RAW") { st -> st.bindAccess(access) }
     }
 
     /** Lineup-visible ids among [ids] (search candidates and hits get the same predicate as the grid). */
-    suspend fun visible(ids: Collection<Long>, unlocked: Boolean): Set<Long> {
+    suspend fun visible(ids: Collection<Long>, access: ParentalAccess): Set<Long> {
         if (ids.isEmpty()) return emptySet()
         val out = HashSet<Long>()
         db.read {
             for (chunk in ids.chunked(EpgRefResolver.MAX_VARS)) {
-                // Numbered parameters throughout: ?1 is the unlock flag inside PARENTAL_RAW.
+                // Numbered parameters throughout: ?1 is the access ordinal inside PARENTAL_RAW.
                 val marks = chunk.indices.joinToString(",") { "?${it + 2}" }
                 usePrepared("SELECT c.id $LINEUP_FROM WHERE $LINEUP_BASE AND c.id IN ($marks) $PARENTAL_RAW") { st ->
-                    st.bindBool(1, unlocked)
+                    st.bindAccess(access)
                     chunk.forEachIndexed { i, id -> st.bindLong(i + 2, id) }
                     while (st.step()) out += st.getLong(0)
                 }
@@ -178,9 +180,9 @@ class GuideQueries @Inject constructor(
     }
 
     /** The last watched lineup-visible channel (startup tune never plays a locked channel, N13). */
-    suspend fun lastWatched(unlocked: Boolean): Long? = db.read {
+    suspend fun lastWatched(access: ParentalAccess): Long? = db.read {
         usePrepared("SELECT c.id $RECENT_FROM WHERE $LINEUP_BASE AND cp.last_watched_at IS NOT NULL $PARENTAL_RAW ORDER BY cp.last_watched_at DESC LIMIT 1") { st ->
-            st.bindBool(1, unlocked)
+            st.bindAccess(access)
             if (st.step()) st.getLong(0) else null
         }
     }
@@ -188,24 +190,24 @@ class GuideQueries @Inject constructor(
     /** Groups panel counts (§3.8.1): favourites lists with present channels, and the Recent count. */
     data class ListCount(val listId: Long, val name: String, val count: Int)
 
-    suspend fun favouriteListCounts(unlocked: Boolean): List<ListCount> = db.read {
+    suspend fun favouriteListCounts(access: ParentalAccess): List<ListCount> = db.read {
         val lists = ArrayList<Pair<Long, String>>()
         usePrepared("SELECT id, name FROM favourite_list ORDER BY sort_index, id") { st -> while (st.step()) lists += st.getLong(0) to st.getText(1) }
         lists.map { (id, name) ->
-            ListCount(id, name, int("SELECT COUNT(*) $FAV_FROM WHERE f.list_id = ?2 AND $LINEUP_BASE $PARENTAL_RAW") { st -> st.bindBool(1, unlocked); st.bindLong(2, id) })
+            ListCount(id, name, int("SELECT COUNT(*) $FAV_FROM WHERE f.list_id = ?2 AND $LINEUP_BASE $PARENTAL_RAW") { st -> st.bindAccess(access); st.bindLong(2, id) })
         }
     }
 
-    suspend fun recentCount(unlocked: Boolean): Int = db.read {
+    suspend fun recentCount(access: ParentalAccess): Int = db.read {
         int("SELECT COUNT(*) FROM (SELECT c.id $RECENT_FROM WHERE $LINEUP_BASE AND cp.last_watched_at IS NOT NULL $PARENTAL_RAW LIMIT $RECENT_LIMIT)") { st ->
-            st.bindBool(1, unlocked)
+            st.bindAccess(access)
         }
     }
 
     /** Channel search (§3.10.1): `channel_fts` MATCH with the lineup predicate, with what the ranking needs. */
     data class ChannelHit(val id: Long, val displayName: String, val favourite: Boolean, val watchCount: Int, val playlistSort: Int, val sortIndex: Int)
 
-    suspend fun searchChannels(match: String, unlocked: Boolean, limit: Int): List<ChannelHit> = db.read {
+    suspend fun searchChannels(match: String, access: ParentalAccess, limit: Int): List<ChannelHit> = db.read {
         usePrepared(
             "SELECT c.id, COALESCE(cp.custom_name, c.display_name, c.name), " +
                 "EXISTS (SELECT 1 FROM favourite f WHERE f.playlist_id = c.playlist_id AND f.stable_key = c.stable_key), " +
@@ -213,7 +215,7 @@ class GuideQueries @Inject constructor(
                 "FROM channel_fts JOIN channel c ON c.id = channel_fts.rowid " +
                 LINEUP_JOINS + "WHERE channel_fts MATCH ?2 AND $LINEUP_BASE $PARENTAL_RAW ORDER BY p.sort_index, c.sort_index LIMIT ?3",
         ) { st ->
-            st.bindBool(1, unlocked)
+            st.bindAccess(access)
             st.bindText(2, match)
             st.bindLong(3, limit.toLong())
             buildList {
@@ -227,12 +229,12 @@ class GuideQueries @Inject constructor(
      * use the v3 `(source_id, xmltv_id)` indexes), batched [REF_BATCH] refs per statement, restricted to the lineup
      * predicate, in playlist then provider order.
      */
-    suspend fun channelsForRefs(refs: Collection<EpgChannelRef>, unlocked: Boolean): Map<EpgChannelRef, List<Long>> {
+    suspend fun channelsForRefs(refs: Collection<EpgChannelRef>, access: ParentalAccess): Map<EpgChannelRef, List<Long>> {
         if (refs.isEmpty()) return emptyMap()
         val out = HashMap<EpgChannelRef, MutableList<Long>>()
         db.read {
             for (chunk in refs.chunked(REF_BATCH)) {
-                // Numbered parameters: ?1 is the unlock flag; each ref binds ?(2 + 2k) and ?(3 + 2k), used by both arms.
+                // Numbered parameters: ?1 is the access ordinal; each ref binds ?(2 + 2k) and ?(3 + 2k), used by both arms.
                 val pairs = chunk.indices.joinToString(" OR ") { k -> "(x.source_id = ?${2 + 2 * k} AND x.xmltv_id = ?${3 + 2 * k})" }
                 val sql = "SELECT x.source_id, x.xmltv_id, c.id FROM (" +
                     "SELECT source_id, xmltv_id, playlist_id, stable_key FROM epg_mapping x WHERE $pairs " +
@@ -240,7 +242,7 @@ class GuideQueries @Inject constructor(
                     ") x JOIN channel c ON c.playlist_id = x.playlist_id AND c.stable_key = x.stable_key " +
                     LINEUP_JOINS + "WHERE $LINEUP_BASE $PARENTAL_RAW ORDER BY p.sort_index, c.sort_index"
                 usePrepared(sql) { st ->
-                    st.bindBool(1, unlocked)
+                    st.bindAccess(access)
                     chunk.forEachIndexed { k, r -> st.bindLong(2 + 2 * k, r.sourceId); st.bindText(3 + 2 * k, r.xmltvId) }
                     while (st.step()) out.getOrPut(EpgChannelRef(st.getLong(0), st.getText(1))) { ArrayList(2) } += st.getLong(2)
                 }
@@ -251,7 +253,7 @@ class GuideQueries @Inject constructor(
 
     // ---------------------------------------------------------------------------------------------- helpers
 
-    /** The statement [lineup] runs for [source] (hand-off `EXPLAIN QUERY PLAN`; binds ?1 unlock, ?2/?3 as in [lineupClause]). */
+    /** The statement [lineup] runs for [source] (hand-off `EXPLAIN QUERY PLAN`; binds ?1 access, ?2/?3 as in [lineupClause]). */
     internal fun lineupSql(source: GuideSource): String = lineupClause(source).let { "SELECT c.id ${it.from} WHERE ${it.where} $PARENTAL_RAW ${it.order}" }
 
     internal fun blockSql(ids: Int): String = "$BLOCK_SELECT WHERE c.id IN (${List(ids) { "?" }.joinToString(",")})"
@@ -294,7 +296,8 @@ class GuideQueries @Inject constructor(
         if (st.step() && !st.isNull(0)) st.getLong(0).toInt() else 0
     }
 
-    private fun SQLiteStatement.bindBool(i: Int, v: Boolean) = bindLong(i, if (v) 1L else 0L)
+    /** ?1 of every guide statement: `ParentalAccess.ordinal` inside [PARENTAL_RAW] (§4.3). */
+    private fun SQLiteStatement.bindAccess(access: ParentalAccess) = bindLong(1, access.ordinal.toLong())
 
     private class RawRow(st: SQLiteStatement) {
         val id = st.getLong(0)
@@ -333,8 +336,8 @@ class GuideQueries @Inject constructor(
         const val REF_BATCH = 50
         private const val BLOCK_LOG_MS = 15.0
 
-        /** `ChannelDao.PARENTAL` with the unlock flag as `?1` (every guide statement binds it first). */
-        val PARENTAL_RAW: String = ChannelDao.PARENTAL.replace(":unlocked", "?1")
+        /** `ChannelDao.PARENTAL_ACCESS` with the access ordinal as `?1` (every guide statement binds it first, §4.3). */
+        val PARENTAL_RAW: String = ChannelDao.PARENTAL_ACCESS.replace(":access", "?1")
 
         const val LINEUP_JOINS = """
         JOIN playlist p            ON p.id = c.playlist_id AND p.enabled = 1

@@ -8,6 +8,8 @@ import app.thebox.core.playback.NextStep
 import app.thebox.core.playback.PlaybackError
 import app.thebox.core.playback.PlaybackErrorCode
 import app.thebox.core.playback.VideoDecoderMode
+import app.thebox.core.settings.RowId
+import app.thebox.core.settings.SettingsRoute
 
 /**
  * `PlaybackError` → buttons + the first text step (docs/design/m4-player-ux.md §3.7; review S8/F5).
@@ -24,6 +26,13 @@ import app.thebox.core.playback.VideoDecoderMode
  * a ladder-narrowed SERVER_ERROR, …) the text line is the sentence of the first action other than RETRY that became a
  * button (STOP_AND_WAIT: "Stop watching on another device, then try again"); when only RETRY (and GUIDE) remain, the
  * RETRY sentence.
+ *
+ * (M5, docs/design/m5-setup-settings.md §3.14) The M4 text steps become buttons: ACCOUNT_DETAILS, EDIT_LOGIN,
+ * PLAYLIST_SETTINGS, DIAGNOSTICS and CHANGE_USER_AGENT open Settings on the step's route ([ErrorButton.OPEN_SETTINGS],
+ * [ErrorCardState.route]; opened detached, S2); USE_SECURE_DNS, REFRESH_PLAYLIST and OPEN_EXTERNAL are their own buttons
+ * (run by `ErrorRouteActions`). The card carries one route, so only the first route step becomes a button; a second one
+ * is the text line. Without a channel (no playlist to open) the route steps stay text, and so does REFRESH_PLAYLIST.
+ * TRY_BACKUP stays filtered (M4).
  */
 object ErrorCardModel {
     /** [variantLeft]: ArchivePlayback has another catch-up variant; [decoder]: the channel's decoder override. */
@@ -36,9 +45,15 @@ object ErrorCardModel {
     ): ErrorCardState {
         val buttons = ArrayList<ErrorButton>(4)
         var text: NextStep? = null
+        var route: SettingsRoute? = null
+        val playlistId = channel?.identity?.playlistId
         for (step in error.actions) {
-            val b = button(step, error, decoder, variantLeft)
+            val b = button(step, error, decoder, variantLeft, playlistId)
             when {
+                b == ErrorButton.OPEN_SETTINGS -> if (route == null) {
+                    route = routeOf(step, error.code, playlistId!!)
+                    buttons += b
+                } else if (text == null) text = step
                 b != null -> if (b !in buttons) buttons += b
                 step == NextStep.TRY_SOFTWARE_DECODER -> Unit
                 text == null -> text = step
@@ -46,13 +61,37 @@ object ErrorCardModel {
         }
         // P-S2 = U-S4: fill the next-step line from the buttons when the walk left it empty.
         if (text == null) {
-            text = error.actions.firstOrNull { it != NextStep.RETRY && button(it, error, decoder, variantLeft) != null } ?: NextStep.RETRY
+            text = error.actions.firstOrNull { it != NextStep.RETRY && button(it, error, decoder, variantLeft, playlistId) != null } ?: NextStep.RETRY
         }
         buttons += ErrorButton.GUIDE
-        return ErrorCardState(error, channel, buttons, focused = 0, textStep = text, archiveFailed = archiveFailed)
+        return ErrorCardState(error, channel, buttons, focused = 0, textStep = text, archiveFailed = archiveFailed, route = route)
     }
 
-    private fun button(step: NextStep, error: PlaybackError, decoder: VideoDecoderMode?, variantLeft: Boolean): ErrorButton? = when (step) {
+    /** (M5 §3.14) The Settings route of a route step. */
+    fun routeOf(step: NextStep, code: PlaybackErrorCode, playlistId: Long): SettingsRoute? = when (step) {
+        NextStep.ACCOUNT_DETAILS -> SettingsRoute.Playlist(playlistId)
+        NextStep.EDIT_LOGIN -> SettingsRoute.PlaylistSource(playlistId)
+        NextStep.PLAYLIST_SETTINGS -> SettingsRoute.Playlist(
+            playlistId,
+            when (code) {
+                PlaybackErrorCode.FORMAT_REFUSED -> ROW_STREAM_FORMAT
+                PlaybackErrorCode.TLS_FAILURE -> ROW_IGNORE_TLS
+                else -> null
+            },
+        )
+        NextStep.DIAGNOSTICS -> SettingsRoute.NetworkTest(playlistId)
+        NextStep.CHANGE_USER_AGENT -> SettingsRoute.Playlist(playlistId, ROW_USER_AGENT)
+        else -> null
+    }
+
+    /** Row ids of WP-B's playlist page the routes focus (§3.3.1). */
+    val ROW_STREAM_FORMAT = RowId("playlist.stream_format")
+    val ROW_IGNORE_TLS = RowId("playlist.ignore_tls")
+    val ROW_USER_AGENT = RowId("playlist.user_agent")
+
+    private val ROUTE_STEPS = setOf(NextStep.ACCOUNT_DETAILS, NextStep.EDIT_LOGIN, NextStep.PLAYLIST_SETTINGS, NextStep.DIAGNOSTICS, NextStep.CHANGE_USER_AGENT)
+
+    private fun button(step: NextStep, error: PlaybackError, decoder: VideoDecoderMode?, variantLeft: Boolean, playlistId: Long?): ErrorButton? = when (step) {
         NextStep.RETRY -> ErrorButton.RETRY
         NextStep.PREVIOUS_CHANNEL -> ErrorButton.PREVIOUS_CHANNEL
         NextStep.WATCH_LIVE -> ErrorButton.WATCH_LIVE
@@ -62,10 +101,13 @@ object ErrorCardModel {
             else ErrorButton.TRY_SOFTWARE_DECODER
         NextStep.AUDIO_OPTIONS -> ErrorButton.AUDIO_OPTIONS
         NextStep.STOP_AND_WAIT -> ErrorButton.STOP
-        // M5 routes (§7 item 8): a text line, never a button to a placeholder.
-        NextStep.ACCOUNT_DETAILS, NextStep.EDIT_LOGIN, NextStep.PLAYLIST_SETTINGS, NextStep.DIAGNOSTICS,
-        NextStep.CHANGE_USER_AGENT, NextStep.USE_SECURE_DNS, NextStep.REFRESH_PLAYLIST, NextStep.OPEN_EXTERNAL,
+        // M5 routes (§3.14): Settings on the step's route; without a playlist they stay a text line.
+        in ROUTE_STEPS -> if (playlistId != null) ErrorButton.OPEN_SETTINGS else null
+        NextStep.USE_SECURE_DNS -> ErrorButton.USE_SECURE_DNS
+        NextStep.REFRESH_PLAYLIST -> if (playlistId != null) ErrorButton.REFRESH_PLAYLIST else null
+        NextStep.OPEN_EXTERNAL -> ErrorButton.OPEN_EXTERNAL
         NextStep.TRY_BACKUP -> null
+        else -> null
     }
 
     /**

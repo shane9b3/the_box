@@ -329,6 +329,10 @@ class PlayerWorld(
             startArchive(channel, info.rawStartMin * 60_000L, timeShift = timeShift)
         }
         override fun openSettings() { fx.openSettings(); guide?.let { queue += GuideEvent.OpenSettings } }
+        // M5 (docs/design/m5-setup-settings.md §3.14, §3.9.1): recorded like the M4 effects.
+        override fun openSettings(route: app.thebox.core.settings.SettingsRoute) { fx.calls += RecordingPlayerEffects.Call("openSettingsRoute", listOf(route)) }
+        override fun errorAction(button: app.thebox.core.full.ErrorButton, card: app.thebox.core.full.ErrorCardState) { fx.calls += RecordingPlayerEffects.Call("errorAction", listOf(button)) }
+        override fun setChannelLocked(channel: GuideChannel, locked: Boolean) { fx.calls += RecordingPlayerEffects.Call("setChannelLocked", listOf(channel, locked)) }
         override fun loadProgrammes(token: Long, channel: GuideChannel, aroundMin: Int, before: Int, after: Int) {
             fx.loadProgrammes(token, channel, aroundMin, before, after)
             val all = schedules[channel.identityHash].orEmpty()

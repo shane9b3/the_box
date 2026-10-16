@@ -1,6 +1,17 @@
 package app.thebox.ui.full.vm
 
 import app.thebox.core.parental.legacyParentalAccess
+import app.thebox.core.input.KeyBindingStore
+import app.thebox.core.input.KeyContext
+import app.thebox.core.parental.ParentalHost
+import app.thebox.core.parental.ParentalSession
+import app.thebox.core.parental.PinOwner
+import app.thebox.core.parental.PinPurpose
+import app.thebox.core.playback.TuneGuard
+import app.thebox.ui.parental.GuardedPlaybackController
+import app.thebox.ui.parental.NoKeyBindings
+import app.thebox.ui.parental.NoPinSession
+import app.thebox.ui.parental.ParentalGuideLibrary
 import android.content.Context
 import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.Lifecycle
@@ -99,10 +110,10 @@ interface PlayerGuideBridge {
 @HiltViewModel
 class PlayerViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    internal val controller: PlaybackController,
+    rawController: PlaybackController,
     internal val archive: ArchivePlayback,
     internal val feed: ProgrammeFeed,
-    internal val library: GuideLibrary,
+    rawLibrary: GuideLibrary,
     rowsFactory: GuideRowsCacheFactory,
     private val playerSettings: PlayerSettingsSource,
     internal val guideSettings: GuideSettingsSource,
@@ -112,14 +123,27 @@ class PlayerViewModel @Inject constructor(
     internal val reminders: ReminderBook,
     /** (M5 commit 0, docs/design/m5-setup-settings.md §1.3a) What PlayerEffectsImpl's M5 effects delegate to. */
     delegates: app.thebox.ui.root.EffectDelegates = app.thebox.ui.root.EffectDelegates.NONE,
+    // M5 WP-C (docs/design/m5-setup-settings.md §3.9; S10, B1)
+    private val parental: ParentalSession = NoPinSession,
+    tuneGuard: TuneGuard = TuneGuard.ALLOW_ALL,
+    private val keyBindings: KeyBindingStore = NoKeyBindings,
 ) : ViewModel(), PlayerHost, PlayerGuideBridge, app.thebox.ui.full.PlayerExtras {
+
+    /**
+     * (M5, B1) The player's effects tune through the guard: a refused channel-list tune or previous channel opens the
+     * guide's PIN prompt with `Tune(channel, PLAYER)`; on success the player machine tunes it ([PlayerEvent.PinResult]).
+     */
+    internal val controller: PlaybackController = GuardedPlaybackController(rawController, tuneGuard) { id, _ -> onRefused(id) }
+
+    /** (M5, S10) The library with the session's access in every query; flows restart when it changes. */
+    internal val library: GuideLibrary = ParentalGuideLibrary(rawLibrary, parental)
 
     /** Wall clock (tests substitute a virtual one). */
     internal var clock: () -> Long = System::currentTimeMillis
 
     private val device: DeviceClass = deviceClass.get()
     private val shellEvents = Channel<ShellEvent>(Channel.BUFFERED)
-    private val rowsCache: GuideRowsCache = rowsFactory.create(library, viewModelScope)
+    private val rowsCache: GuideRowsCache = rowsFactory.create(rawLibrary, viewModelScope)
     internal val nowCache = ChannelNowCache()
     internal val effects = PlayerEffectsImpl(this, delegates)
 
@@ -243,7 +267,9 @@ class PlayerViewModel @Inject constructor(
         scope.launch {
             combine(controller.state, archive.status) { st, status -> st to status }.collect { (st, status) ->
                 val ch = st.target?.identity?.let { channelOf(it) }
-                val mapped = TunedStateMapper.map(st, ch?.rowId ?: -1L, still = false)
+                // (M5, B1) A tune the guard refused never played.
+        val shown = if (st is app.thebox.player.api.PlaybackState.Stopped && st.reason == app.thebox.player.api.StopReason.LOCKED) app.thebox.player.api.PlaybackState.Idle else st
+        val mapped = TunedStateMapper.map(shown, ch?.rowId ?: -1L, still = false)
                 machine.dispatch(PlayerEvent.Tuned(ArchiveVisibility.visible(mapped, status), ch))
             }
         }
@@ -263,7 +289,7 @@ class PlayerViewModel @Inject constructor(
         }
         scope.launch { controller.previous.collect { id -> machine.dispatch(PlayerEvent.Previous(id?.let { channelOf(it) })) } }
         scope.launch {
-            // (M5 commit 0, S10) explicit access; WP-C feeds it from ParentalSession.state.
+            // (M5, S10) ParentalGuideLibrary feeds the session's access (the debug switch still forces OPEN).
             guideSettings.settings.map { it.debugUnlocked }.distinctUntilChanged().collectLatest { unlocked ->
                 library.sources(access = legacyParentalAccess(unlocked)).collect { machine.dispatch(PlayerEvent.Sources(it)) }
             }
@@ -282,6 +308,11 @@ class PlayerViewModel @Inject constructor(
             }
         }
         scope.launch { controller.notices.collect(::onNotice) }
+        // M5 (§3.9): the session for the channel list's doors and the lock menu; key hints for the player's bars.
+        scope.launch { parental.state.collect { machine.dispatch(PlayerEvent.Parental(it)) } }
+        scope.launch {
+            keyBindings.overrides.collect { o -> machine.dispatch(PlayerEvent.KeyHints(GuideViewModel.keyHints(ALL_KEYS, o, KeyContext.PLAYER))) }
+        }
         scope.launch {
             archive.notices.collect { n ->
                 when (n) {
@@ -379,6 +410,14 @@ class PlayerViewModel @Inject constructor(
         return ch
     }
 
+    /** (M5, B1) A refused tune from the player's effects: the guide's one PIN prompt, owner PLAYER. */
+    private fun onRefused(identity: ChannelIdentity) {
+        launchSafely("refused") {
+            val ch = channelOf(identity) ?: return@launchSafely
+            (guide as? ParentalHost)?.request(PinPurpose.Tune(ch, PinOwner.PLAYER))
+        }
+    }
+
     // ---- channel list (§3.3)
 
     internal fun loadListLineup(source: GuideSource) {
@@ -390,7 +429,8 @@ class PlayerViewModel @Inject constructor(
             machine.dispatch(PlayerEvent.ListLineup(g))
             return
         }
-        val access = legacyParentalAccess(guideSettings.settings.value.debugUnlocked) // (M5 commit 0, S10)
+        // (M5, S10) the decorated library replaces this with the session's access (a source opened anyway: OPEN).
+        val access = legacyParentalAccess(guideSettings.settings.value.debugUnlocked)
         listJob = launchSafely("listLineup") {
             library.lineup(source, access = access).collect { lineup ->
                 listSource = source
@@ -464,6 +504,8 @@ class PlayerViewModel @Inject constructor(
         const val CHANNEL_CACHE = 64
         /** A LiveResumed this soon after the archive session was active belongs to it (§3.10.2). */
         const val LIVE_RESUMED_GRACE_MS = 3_000L
+        /** Every key code: the player has no "seen" filter of its own (the bars hint whatever is bound). */
+        private val ALL_KEYS: Set<Int> = (0..300).toSet()
         /** Focus changes in the info bar settle this long before the synopsis is read. */
         const val DETAIL_DEBOUNCE_MS = 150L
     }

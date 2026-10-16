@@ -438,7 +438,8 @@ class GuideBehaviourTest {
 
         @Test fun groupMenuActs() {
             val w = GuideWorld()
-            w.press(GROUPS_PANEL); w.press(DOWN); w.press(CONTEXT_MENU); w.press(DOWN); w.press(SELECT)
+            // M5: Hide, Lock, Move up, Move down.
+            w.press(GROUPS_PANEL); w.press(DOWN); w.press(CONTEXT_MENU); w.press(DOWN); w.press(DOWN); w.press(SELECT)
             val c = w.calls.last("groupAction")!!
             assertEquals(w.groupSource, (c.args[0] as app.thebox.core.guide.GuideSourceEntry).source)
             assertEquals(app.thebox.core.guide.GroupAction.MOVE_UP, c.args[1])

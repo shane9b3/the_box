@@ -1,7 +1,6 @@
 package app.thebox.data.guide
 
 import app.thebox.core.parental.ParentalAccess
-import app.thebox.core.parental.legacyUnlocked
 import app.thebox.core.common.BoxLog
 import app.thebox.core.common.Hash64
 import app.thebox.core.epg.EpgChannelRef
@@ -32,7 +31,7 @@ import kotlin.coroutines.coroutineContext
  * per-text cap, at most 7 days or the archive upper bound back) on a reader opened for the call (aux connection, closed
  * in `finally`); each hit maps back to library channels that map or AUTO-match its EPG ref, keeps only channels whose
  * **resolved** ref is that ref (the guide's rule), at most 3 per airing; locked groups, hidden and adult channels are
- * filtered in SQL unless [search]'s `unlocked` is set (PIN session, or `GuideSettings.debugUnlocked` in debug builds);
+ * filtered in SQL by the caller's `access` (§4.3: OPEN for an unlocked PIN session or `GuideSettings.debugUnlocked`);
  * ended hits survive only inside the channel's archive. Cancellable between stages.
  */
 @Singleton
@@ -43,15 +42,14 @@ class GuideSearchImpl @Inject constructor(
 ) : GuideSearch {
 
     override suspend fun search(query: String, nowMs: Long, access: ParentalAccess): SearchResults = withContext(io) {
-        val unlocked = access.legacyUnlocked // (M5 commit 0, S10) until WP-C's §4.3 predicate
         val q = query.trim()
         val noGuide = store.info.value == null
         if (q.count { it.isLetterOrDigit() } < MIN_CHARS) return@withContext SearchResults(q, emptyList(), emptyList(), noGuide)
         val folded = NameNormalizer.fold(q).trim()
-        val channels = searchChannels(q, folded, unlocked)
+        val channels = searchChannels(q, folded, access)
         coroutineContext.ensureActive()
         val programmes = try {
-            searchProgrammes(q, folded, (nowMs / 60_000L).toInt(), unlocked)
+            searchProgrammes(q, folded, (nowMs / 60_000L).toInt(), access)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -61,9 +59,9 @@ class GuideSearchImpl @Inject constructor(
         SearchResults(q, channels, programmes, guideDataMissing = noGuide)
     }
 
-    private suspend fun searchChannels(q: String, folded: String, unlocked: Boolean): List<GuideChannel> {
+    private suspend fun searchChannels(q: String, folded: String, access: ParentalAccess): List<GuideChannel> {
         val match = ChannelRepository.ftsQuery(q) ?: return emptyList()
-        val hits = queries.searchChannels(match, unlocked, CHANNEL_FTS_LIMIT)
+        val hits = queries.searchChannels(match, access, CHANNEL_FTS_LIMIT)
         val ranked = hits.sortedWith(
             compareBy<GuideQueries.ChannelHit> {
                 val name = NameNormalizer.fold(it.displayName).trim()
@@ -94,14 +92,14 @@ class GuideSearchImpl @Inject constructor(
         val textRank: Int,
     )
 
-    private suspend fun searchProgrammes(q: String, folded: String, nowMin: Int, unlocked: Boolean): List<ProgrammeHit> {
+    private suspend fun searchProgrammes(q: String, folded: String, nowMin: Int, access: ParentalAccess): List<ProgrammeHit> {
         val reader = store.openReader() ?: return emptyList()
         val live: List<EpgSearchHit>
         val past: List<EpgSearchHit>
         try {
             live = reader.search(q, nowMin, LIVE_LIMIT, LIVE_PER_TEXT)
             coroutineContext.ensureActive()
-            val days = minOf(PAST_DAYS, queries.archiveDaysAll(unlocked))
+            val days = minOf(PAST_DAYS, queries.archiveDaysAll(access))
             past = if (days > 0) reader.searchPast(q, nowMin, nowMin - days * 1440, PAST_LIMIT, PAST_PER_TEXT) else emptyList()
         } finally {
             reader.close()
@@ -111,7 +109,7 @@ class GuideSearchImpl @Inject constructor(
 
         // Step 2: refs → library channels, confirmed by the guide's resolution rule.
         val refs = (live.asSequence() + past.asSequence()).map { it.ref }.toSet()
-        val byRef = queries.channelsForRefs(refs, unlocked)
+        val byRef = queries.channelsForRefs(refs, access)
         coroutineContext.ensureActive()
         val ids = byRef.values.flatten().distinct().toLongArray()
         val loaded = if (ids.isEmpty()) emptyMap() else queries.channels(ids, 0, ids.size).filterNotNull().associateBy { it.rowId }

@@ -58,8 +58,25 @@ import app.thebox.core.input.BoxAction
 import app.thebox.core.input.Keys
 import app.thebox.core.playback.NextStep
 import app.thebox.core.playback.PlaybackErrorCode
+import app.thebox.core.settings.SettingsEvent
 import app.thebox.core.settings.SettingsMachine
 import app.thebox.core.settings.SettingsRoute
+import app.thebox.core.full.PlayerEvent
+import app.thebox.core.input.FooterKeyNames
+import app.thebox.core.parental.ParentalAccess
+import app.thebox.core.parental.ParentalActions
+import app.thebox.core.parental.ParentalAnswer
+import app.thebox.core.parental.ParentalHost
+import app.thebox.core.parental.ParentalPolicy
+import app.thebox.core.parental.ParentalRules
+import app.thebox.core.parental.ParentalState
+import app.thebox.core.parental.PinCheck
+import app.thebox.core.parental.PinMessage
+import app.thebox.core.parental.PinOwner
+import app.thebox.core.parental.PinPadMode
+import app.thebox.core.parental.PinPadModel
+import app.thebox.core.parental.PinPromptState
+import app.thebox.core.parental.PinPurpose
 import kotlin.math.abs
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -86,7 +103,7 @@ class GuideStateMachineImpl(
     private val labels: TimeLabels,
     @Suppress("unused") private val renderer: GuideRenderer,
     private val nowMs: () -> Long,
-) : GuideStateMachine {
+) : GuideStateMachine, ParentalHost {
 
     private val _ui = MutableStateFlow(GuideUiState())
     override val ui: StateFlow<GuideUiState> = _ui.asStateFlow()
@@ -111,6 +128,8 @@ class GuideStateMachineImpl(
         set(value) {
             if (field === value) return // U-L7: re-attaching the same machine (activity recreation) keeps its open layers
             field = value
+            // (M5, §0.9) The player asks for the PIN through the guide's one prompt.
+            value?.pinGate = this
             // The last dispatch's curMs may be stale (the host attaches between events): read the clock now.
             if (value != null && _ui.value.mode == ScreenMode.FULL) value.enterFull(nowMs(), EnterReason.LAUNCH)
         }
@@ -135,8 +154,12 @@ class GuideStateMachineImpl(
         set(value) {
             if (field === value) return
             field = value
+            value?.pinGate = this
             if (value != null && _ui.value.mode == ScreenMode.SETTINGS) value.open(settingsRoute, settingsFromFull)
         }
+
+    /** (M5, WP-C) What the PIN layer asks the host for beyond `GuideEffects.verifyPin` (PIN creation, Open anyway). */
+    override var parentalActions: ParentalActions? = null
 
     /** (M5, §2.12 item 5, S3) The settings editor is open: the router hands every key but BACK to Compose. */
     override val textInputActive: Boolean
@@ -223,6 +246,30 @@ class GuideStateMachineImpl(
     private var exitHintUntil = Long.MAX_VALUE
     private var groupCardUntil = Long.MAX_VALUE
     private var keysSeen: Set<Int> = emptySet()
+    /** (M5, §3.8.4) Keys bound to each hinted action (EffectiveKeyMap ∩ seen); null until the first KeyHints (M3 rule). */
+    private var keyHints: Map<BoxAction, List<Int>>? = null
+
+    // ---------------------------------------------------------------- parental (M5, WP-C; §0.9, §3.9)
+    private var parental = ParentalState(pinSet = false, unlocked = false, policy = ParentalPolicy())
+    private val pad = PinPadModel()
+    private var pinPurpose: PinPurpose? = null
+    private var pinToken = 0L
+    private var pinChecking = false
+    private var pinWrong = false
+    private var pinMessage: String? = null
+    private var pinLockedUntil: Long? = null
+    /** The not-protected card is up instead of the pad (FILTERED_NO_PIN, B3); [cardFocused] 0 = Set a PIN, 1 = Open anyway. */
+    private var pinCard = false
+    private var cardFocused = 0
+    /** Guide-owned `SettingsAction` tokens (Lock / Unlock in the menus), negative so they never meet the settings machine's. */
+    private val guideActions = HashMap<Long, () -> Unit>()
+    private var guideActionToken = 0L
+    /** Settings was asked for from FULL while its PIN prompt is open (EnterSettings keeps the M4 return-to-FULL rule). */
+    private var pendingSettingsFromFull = false
+    /** A relock (access left OPEN) waits for the next Sources to move a locked current group to All channels (§3.9.5). */
+    private var relockMovePending = false
+    /** True while [dispatch] runs: [request] and [parentalAnswer] from outside publish themselves. */
+    private var dispatching = false
 
     private val watchable = RowWatchable { row ->
         val ch = frame.rows.channel(row)
@@ -251,8 +298,42 @@ class GuideStateMachineImpl(
     // ---------------------------------------------------------------- dispatch
 
     override fun dispatch(event: GuideEvent) {
+        if (dispatching) { dispatchInner(event); return }
         u = _ui.value
         curMs = if (event is GuideEvent.Tick) event.nowMs else nowMs()
+        dispatching = true
+        try {
+            dispatchInner(event)
+        } finally {
+            dispatching = false
+        }
+        publish()
+    }
+
+    /** Publishes [u], the frame version and the deadline (the end of every dispatch, and of an outside [request]). */
+    private fun publish() {
+        frame.gridFocused = u.zone == Zone.GRID
+        rearmDeferredCard()
+        if (u !== _ui.value) _ui.value = u
+        if (frameDirty) {
+            frameDirty = false
+            _frameVersion.value = _frameVersion.value + 1
+        }
+        _nextDeadline.value = nextDeadline()
+    }
+
+    /** Runs [block] on the machine's state: inside a dispatch as is; from outside (the host) with its own load and publish. */
+    private inline fun <T> external(block: () -> T): T {
+        if (dispatching) return block()
+        u = _ui.value
+        curMs = nowMs()
+        dispatching = true
+        val r = try { block() } finally { dispatching = false }
+        publish()
+        return r
+    }
+
+    private fun dispatchInner(event: GuideEvent) {
         when (event) {
             is GuideEvent.Act -> act(event)
             is GuideEvent.Release -> release(event.action)
@@ -280,23 +361,17 @@ class GuideStateMachineImpl(
             is GuideEvent.Archive -> onArchive(event.status)
             is GuideEvent.Player -> number.setCommitAfterMs(event.settings.numberEntryWaitMs)
             GuideEvent.StartFull -> if (somethingTuned()) goFull(EnterReason.LAUNCH) else { pendingFull = true; pendingFullReason = EnterReason.LAUNCH }
-            GuideEvent.OpenSettings -> { val fromFull = u.mode == ScreenMode.FULL; openSettings(); settingsFromFull = fromFull }
+            // (M5, §3.2.5) Quick bar → Settings asks for the PIN first when "Lock settings" is on.
+            GuideEvent.OpenSettings -> openSettingsGated(SettingsRoute.Root)
             // M5 commit 0 (docs/design/m5-setup-settings.md §1.9 item 5): OpenSetup opens SETTINGS on its route (the
-            // first-run decision sends FirstRun, §3.4.1); the other new events are no-ops until WP-C fills them.
+            // first-run decision sends FirstRun, §3.4.1); setup routes never ask for the PIN.
             is GuideEvent.OpenSetup -> openSettings(event.route)
-            is GuideEvent.Parental -> Unit
-            is GuideEvent.PinChecked -> Unit
-            is GuideEvent.KeyHints -> Unit
+            // M5 WP-C (§3.9)
+            is GuideEvent.Parental -> onParental(event.state)
+            is GuideEvent.PinChecked -> onPinChecked(event.token, event.check)
+            is GuideEvent.KeyHints -> { keyHints = event.hints; refreshFooter() }
             is GuideEvent.Update -> Unit
         }
-        frame.gridFocused = u.zone == Zone.GRID
-        rearmDeferredCard()
-        if (u !== _ui.value) _ui.value = u
-        if (frameDirty) {
-            frameDirty = false
-            _frameVersion.value = _frameVersion.value + 1
-        }
-        _nextDeadline.value = nextDeadline()
     }
 
     // ---------------------------------------------------------------- actions
@@ -321,9 +396,14 @@ class GuideStateMachineImpl(
         when (u.mode) {
             ScreenMode.FULL -> fullKey(a)
             ScreenMode.SEARCH -> if (action == BoxAction.BACK) onSearchClosed(null, tunedFromSearch = false, archive = false)
-            ScreenMode.SETTINGS -> if (action == BoxAction.BACK) {
+            ScreenMode.SETTINGS -> when (action) {
                 // Owner ruling 2026-10-15: Settings opened from the quick bar returns to FULL.
-                if (settingsFromFull) { settingsFromFull = false; goFull(EnterReason.USER) } else setMode(ScreenMode.GUIDE)
+                BoxAction.BACK -> if (settingsFromFull) { settingsFromFull = false; goFull(EnterReason.USER) } else setMode(ScreenMode.GUIDE)
+                // (reviewed 2026-10-16, N11) the Guide key leaves Settings to the guide from any depth; EXIT opens the exit
+                // dialog (in the guide, where it is drawn).
+                BoxAction.OPEN_GUIDE -> leaveSettingsToGuide()
+                BoxAction.EXIT -> { leaveSettingsToGuide(); exitStep() }
+                else -> Unit
             }
             ScreenMode.GUIDE -> when (u.zone) {
                 Zone.GRID -> gridKey(a)
@@ -343,14 +423,21 @@ class GuideStateMachineImpl(
     private fun settingsKey(a: GuideEvent.Act): Boolean {
         val s = settings
         if (s != null) return s.act(a)
+        // (N11) The Guide key and Exit still leave a waiting Settings (never the first-run Welcome).
+        if (a.action == BoxAction.OPEN_GUIDE || a.action == BoxAction.EXIT) return settingsRoute == SettingsRoute.FirstRun
         if (a.action != BoxAction.BACK) return true
         if (settingsRoute == SettingsRoute.FirstRun) { exitApp(); return true }
         return false
     }
 
-    /** (M5 commit 0, §0.9, §3.9.3) The PIN pad's keys; WP-C fills the body. False: the key goes on. */
-    @Suppress("UNUSED_PARAMETER")
-    private fun pinKey(a: GuideEvent.Act): Boolean = false
+    /** (N11) Settings → the guide grid at now, whatever opened it (FULL included). */
+    private fun leaveSettingsToGuide() {
+        settingsFromFull = false
+        setMode(ScreenMode.GUIDE)
+        u = u.copy(zone = Zone.GRID, overlay = null)
+        jumpToNow()
+        refreshFooter()
+    }
 
     private fun release(action: BoxAction) {
         if (u.mode == ScreenMode.FULL) full?.release(action)
@@ -400,6 +487,9 @@ class GuideStateMachineImpl(
             BoxAction.PREVIOUS_CHANNEL -> effects.previousChannel()
             BoxAction.EXIT -> exitStep()
             BoxAction.OPEN_GUIDE -> if (u.mode == ScreenMode.FULL) returnToGuide() else { u = u.copy(zone = Zone.GRID); jumpToNow() }
+            // M5 (§2.12 item 1, §3.2.5): the bindable Search and Settings keys, from the guide and from FULL.
+            BoxAction.OPEN_SEARCH -> openSearch()
+            BoxAction.OPEN_SETTINGS -> openSettingsGated(SettingsRoute.Root)
             else -> return false
         }
         return true
@@ -522,7 +612,7 @@ class GuideStateMachineImpl(
             BoxAction.SELECT -> when (u.tabFocused) {
                 TAB_GUIDE -> enterZone(Zone.GRID)
                 TAB_SEARCH -> openSearch()
-                else -> openSettings()
+                else -> openSettingsGated(SettingsRoute.Root)
             }
             BoxAction.DOWN -> enterZone(if (panelButtons().isNotEmpty()) Zone.PANEL else Zone.HEADER)
             BoxAction.BACK -> enterZone(Zone.GRID)
@@ -671,9 +761,356 @@ class GuideStateMachineImpl(
         u = u.copy(overlay = null)
         settingsRoute = route
         setMode(ScreenMode.SETTINGS)
+        settingsFromFull = fromFull
         if (route == SettingsRoute.Root) effects.openSettings() else effects.openSettings(route)
         settings?.open(route, fromFull)
     }
+
+    /**
+     * (M5, §3.2.5, §3.9.2) Every entry into Settings except FirstRun and the detached routes: with "Lock settings" on
+     * and a PIN set (session locked) the PIN prompt comes first (`EnterSettings(route)`), and Settings opens on success.
+     */
+    private fun openSettingsGated(route: SettingsRoute) {
+        val p = parental
+        if (route != SettingsRoute.FirstRun && p.policy.lockSettings && p.pinSet && !p.unlocked) {
+            pendingSettingsFromFull = u.mode == ScreenMode.FULL
+            openPin(PinPurpose.EnterSettings(route), PinPadMode.VERIFY)
+            return
+        }
+        openSettings(route)
+    }
+
+    // ---------------------------------------------------------------- PIN layer (M5, WP-C; §0.9, §3.9.2, §3.9.3)
+
+    /**
+     * [app.thebox.core.parental.PinGate]: the player and settings machines (and the host, for controller refusals) ask
+     * here. False when nothing opened (no PIN, or the session is already unlocked): the caller proceeds at once. A
+     * `SettingsAction` always asks while a PIN is set. In FILTERED_NO_PIN an `OpenSource`/`Tune` opens the not-protected
+     * card instead of the pad (B3).
+     */
+    override fun request(purpose: PinPurpose): Boolean = external {
+        val p = parental
+        when {
+            purpose is PinPurpose.SettingsAction && p.pinSet -> { openPin(purpose, PinPadMode.VERIFY); true }
+            p.pinSet && p.unlocked -> false
+            p.pinSet -> { openPin(purpose, PinPadMode.VERIFY); true }
+            p.access == ParentalAccess.FILTERED_NO_PIN && (purpose is PinPurpose.OpenSource || purpose is PinPurpose.Tune) -> {
+                openCard(purpose)
+                true
+            }
+            else -> false
+        }
+    }
+
+    override fun parentalAnswer(answer: ParentalAnswer) = external {
+        when (answer) {
+            is ParentalAnswer.PinStored -> {
+                val purpose = pinPurpose
+                if (u.pin == null || !pinChecking || purpose == null) return@external
+                pinChecking = false
+                if (answer.ok) grant(purpose)
+                else { pad.reset(PinPadMode.CREATE_FIRST); pinMessage = PinMessage.STORE_FAILED; publishPin() }
+            }
+            is ParentalAnswer.LockedUntil -> {
+                if (u.pin == null || pad.mode != PinPadMode.VERIFY) return@external
+                val until = answer.untilMs?.takeIf { it > curMs } ?: return@external
+                pinLockedUntil = until
+                pad.inputDisabled = true
+                pinMessage = PinMessage.LOCKED_OUT
+                publishPin()
+            }
+        }
+    }
+
+    override fun startPinSetup(change: Boolean) = external {
+        val create = GUIDE_ACTION_TOKEN_BASE - guideActionToken++
+        guideActions[create] = {}
+        if (change && parental.pinSet) {
+            val verify = GUIDE_ACTION_TOKEN_BASE - guideActionToken++
+            guideActions[verify] = { openPin(PinPurpose.SettingsAction(create), PinPadMode.CREATE_FIRST) }
+            openPin(PinPurpose.SettingsAction(verify), PinPadMode.VERIFY)
+        } else {
+            openPin(PinPurpose.SettingsAction(create), PinPadMode.CREATE_FIRST)
+        }
+    }
+
+    private fun openPin(purpose: PinPurpose, mode: PinPadMode) {
+        cancelOpenPrompt(except = purpose)
+        pinPurpose = purpose
+        pinCard = false
+        pinChecking = false
+        pinWrong = false
+        pinMessage = null
+        pinLockedUntil = null
+        pad.reset(mode)
+        publishPin()
+        // A prompt opened during a lockout shows the countdown at once (§2.6 lockedUntil).
+        if (mode == PinPadMode.VERIFY) parentalActions?.queryLockout()
+    }
+
+    private fun openCard(purpose: PinPurpose) {
+        cancelOpenPrompt(except = purpose)
+        pinPurpose = purpose
+        pinCard = true
+        cardFocused = 0
+        pinChecking = false
+        pinWrong = false
+        pinMessage = PinMessage.NOT_PROTECTED
+        pinLockedUntil = null
+        pad.reset(PinPadMode.CREATE_FIRST)
+        publishPin()
+    }
+
+    /** A second request while a prompt is open replaces it; the first owner hears "not granted". */
+    private fun cancelOpenPrompt(except: PinPurpose) {
+        val old = pinPurpose ?: return
+        if (old == except) return
+        closePin()
+        notifyOwner(old, granted = false)
+    }
+
+    private fun publishPin() {
+        val purpose = pinPurpose
+        if (purpose == null) { if (u.pin != null) u = u.copy(pin = null); return }
+        val message = when {
+            pinCard -> PinMessage.NOT_PROTECTED
+            pad.easyConfirm -> PinMessage.EASY
+            else -> pinMessage
+        }
+        val focused = when {
+            pinCard -> cardFocused
+            pad.easyConfirm -> pad.easyFocused
+            else -> pad.focusedKey
+        }
+        val s = PinPromptState(
+            purpose = purpose, mode = pad.mode, filled = pad.filled, focusedKey = focused, checking = pinChecking,
+            wrong = pinWrong, lockedUntilMs = pinLockedUntil, message = message,
+        )
+        if (s != u.pin) u = u.copy(pin = s)
+    }
+
+    private fun closePin() {
+        pad.clear()
+        pinPurpose = null
+        pinCard = false
+        pinChecking = false
+        pinWrong = false
+        pinMessage = null
+        pinLockedUntil = null
+        if (u.pin != null) u = u.copy(pin = null)
+    }
+
+    /** The prompt is modal above every mode (§3.9.3): every key is consumed while it is open. */
+    private fun pinKey(a: GuideEvent.Act): Boolean {
+        val purpose = pinPurpose ?: run { if (u.pin != null) u = u.copy(pin = null); return false }
+        if (pinCard) {
+            when (a.action) {
+                BoxAction.LEFT -> cardFocused = 0
+                BoxAction.RIGHT -> cardFocused = 1
+                BoxAction.SELECT -> if (cardFocused == 0) {
+                    // Set a PIN: the pad in CREATE_FIRST for the same purpose.
+                    pinCard = false
+                    pinMessage = null
+                    pad.reset(PinPadMode.CREATE_FIRST)
+                } else {
+                    openAnyway(purpose)
+                    return true
+                }
+                BoxAction.BACK -> { cancelPin(); return true }
+                else -> Unit
+            }
+            publishPin()
+            return true
+        }
+        if (pinChecking) {
+            // A check or a store is in flight: BACK still cancels (the answer is then dropped by its token).
+            if (a.action == BoxAction.BACK) cancelPin()
+            return true
+        }
+        val r = when (a.action) {
+            BoxAction.DIGIT -> if (a.digit in 0..9) pad.digit(a.digit) else PinPadModel.Result.None
+            BoxAction.UP -> { pad.move(0, -1); PinPadModel.Result.None }
+            BoxAction.DOWN -> { pad.move(0, 1); PinPadModel.Result.None }
+            BoxAction.LEFT -> { pad.move(-1, 0); PinPadModel.Result.None }
+            BoxAction.RIGHT -> { pad.move(1, 0); PinPadModel.Result.None }
+            BoxAction.SELECT -> pad.press()
+            BoxAction.BACK -> pad.back()
+            else -> PinPadModel.Result.None
+        }
+        if (pad.filled > 0 && pinMessage != PinMessage.LOCKED_OUT) { pinWrong = false; pinMessage = null }
+        when (r) {
+            is PinPadModel.Result.Submit -> {
+                pinChecking = true
+                pinToken++
+                effects.verifyPin(pinToken, r.digits)
+            }
+            is PinPadModel.Result.Created -> {
+                pinChecking = true
+                val actions = parentalActions
+                if (actions != null) actions.storePin(r.digits)
+                else { r.digits.fill('\u0000'); pinChecking = false; pinMessage = PinMessage.STORE_FAILED; pad.reset(PinPadMode.CREATE_FIRST) }
+            }
+            PinPadModel.Result.Mismatch -> pinMessage = PinMessage.MISMATCH
+            PinPadModel.Result.Cancel -> { cancelPin(); return true }
+            PinPadModel.Result.None -> Unit
+        }
+        publishPin()
+        return true
+    }
+
+    private fun onPinChecked(token: Long, check: PinCheck) {
+        val purpose = pinPurpose ?: return
+        if (token != pinToken || !pinChecking) return
+        pinChecking = false
+        when (check) {
+            PinCheck.Ok -> { grant(purpose); return }
+            is PinCheck.Wrong -> { pinWrong = true; pinMessage = PinMessage.wrong(check.attemptsBeforeLockout) }
+            is PinCheck.LockedOut -> {
+                pinWrong = true
+                pinLockedUntil = check.untilMs
+                pad.inputDisabled = true
+                pinMessage = PinMessage.LOCKED_OUT
+            }
+            PinCheck.Unavailable -> pinMessage = PinMessage.UNAVAILABLE // fail closed: nothing unlocks (§3.9.6)
+        }
+        publishPin()
+    }
+
+    /** The lockout countdown ended (tick): digits work again. */
+    private fun tickPin() {
+        val until = pinLockedUntil ?: return
+        if (curMs < until) return
+        pinLockedUntil = null
+        pad.inputDisabled = false
+        if (pinMessage == PinMessage.LOCKED_OUT) pinMessage = null
+        pinWrong = false
+        publishPin()
+    }
+
+    /** "Open anyway" (FILTERED_NO_PIN): the group joins openedAnyway until the app closes, then the purpose runs. */
+    private fun openAnyway(purpose: PinPurpose) {
+        val actions = parentalActions
+        when (purpose) {
+            is PinPurpose.OpenSource -> actions?.openAnyway(purpose.entry.source)
+            is PinPurpose.Tune -> actions?.openAnyway(purpose.channel.identity)
+            else -> Unit
+        }
+        grant(purpose)
+    }
+
+    /** The purpose succeeded (§3.9.2 "After success"). */
+    private fun grant(purpose: PinPurpose) {
+        closePin()
+        when (purpose) {
+            is PinPurpose.OpenSource -> if (purpose.owner == PinOwner.GUIDE) {
+                closeOverlay()
+                enterZone(Zone.GRID)
+                applySource(purpose.entry.source)
+            } else notifyOwner(purpose, granted = true)
+            is PinPurpose.Tune -> if (purpose.owner == PinOwner.PLAYER && full != null) notifyOwner(purpose, granted = true)
+            else effects.tune(purpose.channel, lineup ?: emptyLineupFor(purpose.channel))
+            is PinPurpose.EnterSettings -> {
+                pendingSettingsFromFull = false
+                openSettings(purpose.route)
+            }
+            is PinPurpose.SettingsAction -> notifyOwner(purpose, granted = true)
+        }
+    }
+
+    /** BACK on the prompt: `granted = false`, the owner stays where it was (§3.9.3). */
+    private fun cancelPin() {
+        val purpose = pinPurpose
+        closePin()
+        if (purpose != null) notifyOwner(purpose, granted = false)
+        pendingSettingsFromFull = false
+        // A refused resume / tune in FULL with nothing playing: BACK leaves the guide on All channels (§3.9.2).
+        if (purpose is PinPurpose.Tune && purpose.owner == PinOwner.GUIDE && u.mode == ScreenMode.FULL && !somethingTuned()) {
+            returnToGuide()
+            moveOffLockedSource()
+        }
+    }
+
+    private fun notifyOwner(purpose: PinPurpose, granted: Boolean) {
+        when (purpose) {
+            is PinPurpose.SettingsAction -> {
+                val t = purpose.token
+                val mine = guideActions.remove(t)
+                when {
+                    mine != null -> if (granted) mine()
+                    t >= PLAYER_ACTION_TOKEN_BASE -> full?.dispatch(PlayerEvent.PinResult(purpose, granted))
+                    else -> settings?.dispatch(SettingsEvent.PinResult(purpose, granted))
+                }
+            }
+            is PinPurpose.EnterSettings -> Unit
+            else -> when (purpose.owner) {
+                PinOwner.PLAYER -> full?.dispatch(PlayerEvent.PinResult(purpose, granted))
+                PinOwner.SETTINGS -> settings?.dispatch(SettingsEvent.PinResult(purpose, granted))
+                PinOwner.GUIDE -> Unit
+            }
+        }
+    }
+
+    /**
+     * Lock / Unlock from a menu (§3.9.1, §3.9.2 `SettingsAction`): with a PIN, the PIN first (unless the session is
+     * already unlocked); without one, an unlock runs at once, a lock in FILTERED_NO_PIN applies as a filter at once (the
+     * effect toasts "Set a PIN to protect it"), and with auto-lock off a lock first creates a PIN.
+     */
+    private fun lockAction(locking: Boolean, run: () -> Unit) {
+        val p = parental
+        when {
+            p.pinSet && p.unlocked -> run()
+            p.pinSet -> {
+                val t = GUIDE_ACTION_TOKEN_BASE - guideActionToken++
+                guideActions[t] = run
+                openPin(PinPurpose.SettingsAction(t), PinPadMode.VERIFY)
+            }
+            !locking || p.access == ParentalAccess.FILTERED_NO_PIN -> run()
+            else -> {
+                val t = GUIDE_ACTION_TOKEN_BASE - guideActionToken++
+                guideActions[t] = run
+                openPin(PinPurpose.SettingsAction(t), PinPadMode.CREATE_FIRST)
+            }
+        }
+    }
+
+    private fun groupMenu(entry: GuideSourceEntry): List<GroupMenuItem> {
+        val lock = if (entry.locked) GroupMenuItem.UNLOCK else GroupMenuItem.LOCK
+        return listOf(GroupMenuItem.HIDE, lock, GroupMenuItem.MOVE_UP, GroupMenuItem.MOVE_DOWN)
+    }
+
+    /**
+     * `ParentalSession.state` (§3.9.5). Leaving OPEN arms [relockMovePending]: the next Sources moves a locked current
+     * group to All channels of its playlist at now. The host restarts its library flows by `queryKey` and clears the
+     * zap list.
+     */
+    private fun onParental(state: ParentalState) {
+        val before = parental
+        parental = state
+        if (before.access == ParentalAccess.OPEN && state.access != ParentalAccess.OPEN) relockMovePending = true
+        // A PIN appeared (set elsewhere) while the not-protected card is up: the card's question is moot.
+        if (pinCard && state.pinSet) {
+            val p = pinPurpose
+            closePin()
+            if (p != null) notifyOwner(p, granted = false)
+        }
+        refreshFooter()
+    }
+
+    /** The current source is a locked group the session can no longer open: All channels of its playlist at now. */
+    private fun moveOffLockedSource(): Boolean {
+        val src = lineup?.source ?: requestedSource
+        if (src !is GuideSource.Group) return false
+        val entry = sources.firstOrNull { it.source == src }
+        val blocked = if (entry == null) parental.access != ParentalAccess.OPEN && src !in parental.openedAnyway
+        else ParentalRules.needsDoor(entry, parental)
+        if (!blocked) return false
+        u = u.copy(zone = Zone.GRID)
+        applySource(GuideSource.All(src.playlistId))
+        return true
+    }
+
+    private fun emptyLineupFor(ch: GuideChannel) =
+        GuideLineup(GuideSource.All(ch.identity.playlistId), 0L, LongArray(0), archiveDaysUpperBound = 0)
 
     // ---------------------------------------------------------------- Back ladder and exit (§3.4.6)
 
@@ -798,7 +1235,14 @@ class GuideStateMachineImpl(
                     val entry = o.entries.getOrNull(o.focused - o.shortcuts.size)
                     val item = menu.getOrNull(o.menuFocused)
                     u = u.copy(overlay = o.copy(menu = null, menuFocused = 0))
-                    if (entry != null && item != null) item.toAction()?.let { effects.groupAction(entry, it) }
+                    if (entry != null && item != null) {
+                        when (item) {
+                            // M5 (§3.9.1, §3.9.2): Lock / Unlock ask for the PIN when one is set (SettingsAction).
+                            GroupMenuItem.LOCK -> lockAction(locking = true) { effects.setGroupLocked(entry, true) }
+                            GroupMenuItem.UNLOCK -> lockAction(locking = false) { effects.setGroupLocked(entry, false) }
+                            else -> item.toAction()?.let { effects.groupAction(entry, it) }
+                        }
+                    }
                 }
                 BoxAction.BACK -> u = u.copy(overlay = o.copy(menu = null, menuFocused = 0))
                 else -> Unit
@@ -813,10 +1257,12 @@ class GuideStateMachineImpl(
                 if (o.focused < o.shortcuts.size) {
                     when (o.shortcuts[o.focused]) {
                         GroupsShortcut.SEARCH -> openSearch()
-                        GroupsShortcut.SETTINGS -> openSettings()
+                        GroupsShortcut.SETTINGS -> openSettingsGated(SettingsRoute.Root)
                     }
                 } else {
                     val entry = o.entries.getOrNull(o.focused - o.shortcuts.size) ?: return
+                    // M5 (§3.9.2): a locked group asks for the PIN (or shows the not-protected card) first.
+                    if (ParentalRules.needsDoor(entry, parental) && request(PinPurpose.OpenSource(entry, PinOwner.GUIDE))) return
                     closeOverlay()
                     enterZone(Zone.GRID)
                     applySource(entry.source)
@@ -824,7 +1270,7 @@ class GuideStateMachineImpl(
             }
             BoxAction.CONTEXT_MENU -> {
                 val entry = o.entries.getOrNull(o.focused - o.shortcuts.size) ?: return
-                if (entry.section == SourceSection.GROUP) u = u.copy(overlay = o.copy(menu = GROUP_MENU, menuFocused = 0))
+                if (entry.section == SourceSection.GROUP) u = u.copy(overlay = o.copy(menu = groupMenu(entry), menuFocused = 0))
             }
             BoxAction.ZAP_UP, BoxAction.PAGE_UP, BoxAction.ZAP_DOWN, BoxAction.PAGE_DOWN -> {
                 if (o.entries.isEmpty()) return
@@ -894,6 +1340,12 @@ class GuideStateMachineImpl(
         if (t.cls == CellClass.FUTURE) items += if (reminderSet(t)) MenuItem.CANCEL_REMINDER else MenuItem.REMIND
         items += if (isFavourite) MenuItem.REMOVE_FAVOURITE else MenuItem.ADD_FAVOURITE
         items += MenuItem.HIDE_CHANNEL
+        // M5 (§3.9.1): a channel listed while locked content is filtered is not locked; while unlocked (OPEN) the
+        // machine cannot tell, so both are offered. Then the Settings routes of §3.2.5.
+        items += MenuItem.LOCK_CHANNEL
+        if (parental.access == ParentalAccess.OPEN) items += MenuItem.UNLOCK_CHANNEL
+        items += MenuItem.FIX_GUIDE_DATA
+        items += MenuItem.CHANNEL_OPTIONS
         if (u.mode != ScreenMode.GUIDE || u.reminder != null) return
         u = u.copy(overlay = Overlay.Menu(items, 0))
     }
@@ -909,8 +1361,11 @@ class GuideStateMachineImpl(
             MenuItem.ADD_FAVOURITE -> effects.setFavourite(ch, true)
             MenuItem.REMOVE_FAVOURITE -> effects.setFavourite(ch, false)
             MenuItem.HIDE_CHANNEL -> effects.hideChannel(ch)
-            // M5 commit 0: never listed before WP-C (lock, §3.9.1) and WP-A/B (Fix guide data, Channel options).
-            MenuItem.LOCK_CHANNEL, MenuItem.UNLOCK_CHANNEL, MenuItem.FIX_GUIDE_DATA, MenuItem.CHANNEL_OPTIONS -> Unit
+            // M5 (§3.9.1, §3.9.2, §3.2.5)
+            MenuItem.LOCK_CHANNEL -> lockAction(locking = true) { effects.setChannelLocked(ch, true) }
+            MenuItem.UNLOCK_CHANNEL -> lockAction(locking = false) { effects.setChannelLocked(ch, false) }
+            MenuItem.FIX_GUIDE_DATA -> openSettingsGated(SettingsRoute.FixGuide(ch.identity))
+            MenuItem.CHANNEL_OPTIONS -> openSettingsGated(SettingsRoute.Channel(ch.identity))
         }
     }
 
@@ -1128,6 +1583,14 @@ class GuideStateMachineImpl(
             val initial = initialSource(entries)
             if (initial != null) applySource(initial, persist = false)
         }
+        // (M5, §3.9.5) After a relock, a locked current group moves to All channels of its playlist at now. The flag stays
+        // until the re-queried entries show the group locked (an answer still in flight from OPEN lists it unlocked).
+        if (relockMovePending && parental.access != ParentalAccess.OPEN) {
+            val src = lineup?.source ?: requestedSource
+            val entry = sources.firstOrNull { it.source == src }
+            if (src !is GuideSource.Group || (entry != null && !entry.locked && src !in parental.openedAnyway)) Unit
+            else if (moveOffLockedSource()) relockMovePending = false
+        } else if (parental.access == ParentalAccess.OPEN) relockMovePending = false
         refreshSourceLabel()
         refreshEmpty()
     }
@@ -1410,6 +1873,7 @@ class GuideStateMachineImpl(
             }
         }
         if (descDueAtMs <= curMs && !holdingVertical && !holdingHorizontal) loadDescription()
+        tickPin()
         // Number entry
         val o = u.overlay
         if (o is Overlay.Number) {
@@ -1448,6 +1912,8 @@ class GuideStateMachineImpl(
         }
         if (o is Overlay.Exit && !o.dialog) d = minOf(d, exitHintUntil)
         if (u.groupCard != null) d = minOf(d, groupCardUntil)
+        // (M5) The lockout countdown ticks once a second while the prompt shows it.
+        pinLockedUntil?.let { until -> if (u.pin != null) d = minOf(d, minOf(until, (curMs / 1000 + 1) * 1000)) }
         val c = u.reminder
         if (c != null && cardShown()) {
             d = minOf(d, if (curMs < c.inputFromMs) c.inputFromMs else (curMs / 1000 + 1) * 1000)
@@ -1603,12 +2069,33 @@ class GuideStateMachineImpl(
         if (f != u.footer) u = u.copy(footer = f)
     }
 
-    /** §3.18.3: from KeysSeen (keys the device has actually reported), never from deviceHasKey. */
+    /**
+     * §3.18.3: from KeysSeen (keys the device has actually reported), never from deviceHasKey. (M5, §3.8.4) Once the
+     * host sends [GuideEvent.KeyHints] (EffectiveKeyMap.keysFor ∩ seen), the hints follow the user's mapping: a
+     * remapped Red stops advertising Remind and the key that now carries Start over / Remind / Page is named instead.
+     */
     private fun footer(t: Target?): List<FooterHint> {
         val out = ArrayList<FooterHint>(6)
         out += FooterHint(GuideTexts.KEYS_ARROWS, GuideTexts.HINT_BROWSE)
         out += FooterHint(GuideTexts.KEYS_OK, GuideTexts.HINT_WATCH)
         out += FooterHint(GuideTexts.KEYS_HOLD_OK, GuideTexts.HINT_OPTIONS)
+        val hints = keyHints
+        if (hints != null) {
+            val future = t?.cls == CellClass.FUTURE
+            val startOver = hints[BoxAction.START_OVER].orEmpty()
+            val remind = hints[BoxAction.REMIND].orEmpty()
+            when {
+                startOver.isNotEmpty() -> out += FooterHint(FooterKeyNames.of(startOver.first()), if (future) GuideTexts.HINT_REMIND else GuideTexts.HINT_FROM_START)
+                future && remind.isNotEmpty() -> out += FooterHint(FooterKeyNames.of(remind.first()), GuideTexts.HINT_REMIND)
+            }
+            val page = hints[BoxAction.ZAP_UP].orEmpty() + hints[BoxAction.PAGE_UP].orEmpty()
+            if (Keys.CHANNEL_UP in page) out += FooterHint(GuideTexts.KEYS_CH, GuideTexts.HINT_PAGE)
+            else page.firstOrNull()?.let { out += FooterHint(FooterKeyNames.of(it), GuideTexts.HINT_PAGE) }
+            if (keysSeen.any { it in Keys.DIGIT_0..Keys.DIGIT_0 + 9 || it in Keys.NUMPAD_0..Keys.NUMPAD_0 + 9 }) {
+                out += FooterHint(GuideTexts.KEYS_DIGITS, GuideTexts.HINT_CHANNEL)
+            }
+            return out
+        }
         if (Keys.PROG_RED in keysSeen) {
             out += FooterHint(GuideTexts.KEYS_RED, if (t?.cls == CellClass.FUTURE) GuideTexts.HINT_REMIND else GuideTexts.HINT_FROM_START)
         }
@@ -1744,7 +2231,7 @@ class GuideStateMachineImpl(
         GroupMenuItem.HIDE -> app.thebox.core.guide.GroupAction.HIDE
         GroupMenuItem.MOVE_UP -> app.thebox.core.guide.GroupAction.MOVE_UP
         GroupMenuItem.MOVE_DOWN -> app.thebox.core.guide.GroupAction.MOVE_DOWN
-        GroupMenuItem.LOCK, GroupMenuItem.UNLOCK -> null // M5 commit 0: never listed before WP-C (§3.9.1)
+        GroupMenuItem.LOCK, GroupMenuItem.UNLOCK -> null // handled by lockAction (§3.9.1), not a library GroupAction
     }
 
     companion object {
@@ -1775,6 +2262,10 @@ class GuideStateMachineImpl(
 
         val SHORTCUTS = listOf(GroupsShortcut.SEARCH, GroupsShortcut.SETTINGS)
         val GROUP_MENU = listOf(GroupMenuItem.HIDE, GroupMenuItem.MOVE_UP, GroupMenuItem.MOVE_DOWN)
+        /** (M5) Base for the guide's own SettingsAction tokens (negative: the settings machine counts up from 0). */
+        const val GUIDE_ACTION_TOKEN_BASE = -1L
+        /** (M5) The player machine's SettingsAction tokens start here; the guide routes their answers to the player. */
+        const val PLAYER_ACTION_TOKEN_BASE = app.thebox.core.full.state.PlayerStateMachineImpl.PLAYER_ACTION_TOKEN_BASE
         private val CHIPS_NO_NOW = listOf(HeaderChip.GROUP, HeaderChip.DAY)
         private val CHIPS_WITH_NOW = listOf(HeaderChip.GROUP, HeaderChip.NOW, HeaderChip.DAY)
     }

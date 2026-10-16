@@ -200,6 +200,9 @@ class GuideWorld(
             else tuneTo(channels.first { it.identity == alert.identity })
         }
         override fun groupAction(entry: GuideSourceEntry, action: GroupAction) = calls.groupAction(entry, action)
+        // M5 (docs/design/m5-setup-settings.md §3.9.1): recorded like the M3 effects.
+        override fun setChannelLocked(channel: GuideChannel, locked: Boolean) { calls.calls += RecordingGuideEffects.Call("setChannelLocked", listOf(channel, locked)) }
+        override fun setGroupLocked(entry: GuideSourceEntry, locked: Boolean) { calls.calls += RecordingGuideEffects.Call("setGroupLocked", listOf(entry, locked)) }
         override fun exitApp() { calls.exitApp(); exited = true }
         override fun toast(kind: GuideToast, arg: String?) = calls.toast(kind, arg)
     }

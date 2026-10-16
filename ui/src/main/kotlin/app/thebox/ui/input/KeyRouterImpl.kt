@@ -14,6 +14,7 @@ import app.thebox.core.guide.GuideEvent
 import app.thebox.core.guide.GuideStateMachine
 import app.thebox.core.guide.ScreenMode
 import app.thebox.core.input.BoxAction
+import app.thebox.core.input.CapturedKey
 import app.thebox.core.input.KeyCapabilities
 import app.thebox.core.input.KeyContext
 import app.thebox.core.input.KeyGesture
@@ -45,6 +46,12 @@ import android.view.KeyEvent as AndroidKeyEvent
  *   on a key's first DOWN, D-pad LEFT/RIGHT ignore their long binding for that press (they act on DOWN with
  *   auto-repeat). The decision is stored per held key next to [heldContext], so a change mid-hold (the scrub bar
  *   opening on LEFT) never turns the held key into a long press.
+ * - (M5, docs/design/m5-setup-settings.md §2.12 item 5, §3.8.4; reviewed 2026-10-16, S14) [capture]: while armed, the
+ *   next DOWN with repeat 0 of any key (BACK/ESCAPE/BUTTON_B included: the screen treats them as cancel) goes to the
+ *   listener with its `InputDevice` name instead of the key map; the router disarms itself, consumes that DOWN and
+ *   then **every** event of the captured code until its UP (a held key's repeats never re-enter routing as a fresh
+ *   press). Keys held from before arming finish on the normal path. Focus loss disarms. The key map is never asked
+ *   while armed: capture is a mode of the one router, not a second key path.
  */
 class KeyRouterImpl(
     private val keyMap: KeyMap,
@@ -78,6 +85,17 @@ class KeyRouterImpl(
     /** Repeating keys without a long binding (holds) → their watchdog timer token. */
     private val holdWatchdogs = HashMap<Int, Any>()
     private val out = ArrayList<KeyGesture>(2)
+    /** (M5, S14) The armed capture listener, or null. */
+    private var captureListener: ((CapturedKey) -> Unit)? = null
+    /** (M5, S14) The captured code, swallowed until its UP; [NO_CODE] when none. */
+    private var swallowCode = NO_CODE
+
+    override fun capture(listener: ((CapturedKey) -> Unit)?) {
+        captureListener = listener
+    }
+
+    /** True while a capture listener waits for a key (tests). */
+    val captureArmed: Boolean get() = captureListener != null
 
     override fun attach(machine: GuideStateMachine?, searchFieldIdle: () -> Boolean) {
         onFocusLost() // ends the holds of the machine that was attached
@@ -102,11 +120,32 @@ class KeyRouterImpl(
             AndroidKeyEvent.ACTION_UP -> false
             else -> return false
         }
-        return onNative(n.keyCode, isDown, n.repeatCount, n.downTime, n.eventTime, (n.flags and AndroidKeyEvent.FLAG_CANCELED) != 0)
+        val device = if (captureListener != null) n.device else null
+        return onNative(
+            n.keyCode, isDown, n.repeatCount, n.downTime, n.eventTime, (n.flags and AndroidKeyEvent.FLAG_CANCELED) != 0,
+            deviceId = n.deviceId, deviceName = device?.name, isVirtual = device?.isVirtual ?: true,
+        )
     }
 
-    /** The routing without Compose/Android event types (tests). */
-    fun onNative(code: Int, isDown: Boolean, repeatCount: Int, downTimeMs: Long, eventTimeMs: Long, canceled: Boolean = false): Boolean {
+    /** The routing without Compose/Android event types (tests). [deviceName]/[isVirtual] matter only to a capture (S14). */
+    fun onNative(
+        code: Int, isDown: Boolean, repeatCount: Int, downTimeMs: Long, eventTimeMs: Long, canceled: Boolean = false,
+        deviceId: Int = -1, deviceName: String? = null, isVirtual: Boolean = deviceName == null,
+    ): Boolean {
+        // (M5, S14) A captured key is swallowed until its UP, even after the capture disarmed.
+        if (swallowCode != NO_CODE && code == swallowCode) {
+            if (!isDown) swallowCode = NO_CODE
+            return true
+        }
+        val listener = captureListener
+        if (listener != null && code !in consumedDown) {
+            if (isDown && repeatCount == 0) {
+                captureListener = null
+                swallowCode = code
+                listener(CapturedKey(code, keyName(code), deviceName, deviceId, isVirtual))
+            }
+            return true // repeats and stray UPs are ignored while armed
+        }
         val m = machine ?: return false
         // (M5 commit 0, docs/design/m5-setup-settings.md §2.12 item 5, S3) The settings editor owns every key but BACK:
         // BACK never reaches the Activity (no BackHandler exists) and becomes SettingsEvent.EditorBack. Keys held from
@@ -192,6 +231,9 @@ class KeyRouterImpl(
     }
 
     override fun onFocusLost() {
+        // (M5, S14) Focus loss disarms a capture and forgets a swallowed key (its UP will not arrive).
+        captureListener = null
+        swallowCode = NO_CODE
         // H-S11: Compose drops the UPs of keys held across a focus change; end their holds in the machine.
         val held = holdWatchdogs.keys.toList()
         for (t in holdWatchdogs.values) timers.cancel(t)
@@ -216,6 +258,15 @@ class KeyRouterImpl(
             .focusable()
 
     companion object {
+        private const val NO_CODE = Int.MIN_VALUE
+
+        /** `KEYCODE_…` names (§9 F2); the overlay shows its own table first. */
+        fun keyName(code: Int): String = try {
+            AndroidKeyEvent.keyCodeToString(code)
+        } catch (e: RuntimeException) {
+            code.toString()
+        }
+
         const val LONG_PRESS_MS = 500L
         /** H-S11: a held key that has not repeated for this long lost its UP. Key repeat runs at ~20 Hz. */
         const val HOLD_WATCHDOG_MS = 1_500L

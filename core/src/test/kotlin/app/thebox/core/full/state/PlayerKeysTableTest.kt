@@ -203,7 +203,8 @@ class PlayerKeysTableTest {
             "list_menu" to { liveWithArchive().k(SELECT, CONTEXT_MENU) },
             "list_menu_fav" to { liveWithArchive().k(SELECT, CONTEXT_MENU, DOWN) },
             "error" to { failed(liveWithoutArchive(), PlaybackErrorCode.STREAM_INTERRUPTED) },
-            "error_guide" to { failed(liveWithoutArchive(), PlaybackErrorCode.STREAM_INTERRUPTED).k(RIGHT) },
+            // M5 (§3.14): Retry, Test the connection (OPEN_SETTINGS), Guide.
+            "error_guide" to { failed(liveWithoutArchive(), PlaybackErrorCode.STREAM_INTERRUPTED).k(RIGHT).k(RIGHT) },
             "error_stop" to { failed(liveWithoutArchive(), PlaybackErrorCode.CONNECTION_LIMIT).k(RIGHT) },
             "error_audio" to { failed(liveWithoutArchive(), PlaybackErrorCode.AUDIO_OUTPUT_FAILED) },
             "error_archive" to { archiveFailed(attempts = 1) },

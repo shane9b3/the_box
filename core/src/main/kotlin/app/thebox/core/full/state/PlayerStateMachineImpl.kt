@@ -48,6 +48,13 @@ import app.thebox.core.playback.AspectMode
 import app.thebox.core.playback.PlaybackError
 import app.thebox.core.playback.PlaybackErrorCode
 import app.thebox.core.playback.VideoDecoderMode
+import app.thebox.core.parental.ParentalAccess
+import app.thebox.core.parental.ParentalPolicy
+import app.thebox.core.parental.ParentalRules
+import app.thebox.core.parental.ParentalState
+import app.thebox.core.parental.PinGate
+import app.thebox.core.parental.PinOwner
+import app.thebox.core.parental.PinPurpose
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -165,6 +172,15 @@ class PlayerStateMachineImpl(
     private var listMenuFocused = 0
     private var listMenuChannel: GuideChannel? = null
 
+    // Parental (M5, WP-C; docs/design/m5-setup-settings.md §3.9.1, §3.9.2)
+    /** Injected by the guide machine (§0.9): the one PIN prompt. */
+    override var pinGate: PinGate? = null
+    private var parental = ParentalState(pinSet = false, unlocked = false, policy = ParentalPolicy())
+    /** Lock actions waiting for the PIN, by SettingsAction token (the guide routes tokens ≥ PLAYER_ACTION_TOKEN_BASE here). */
+    private val pendingLocks = HashMap<Long, () -> Unit>()
+    private var lockToken = 0L
+    @Suppress("unused") private var keyHints: Map<BoxAction, List<Int>> = emptyMap()
+
     private enum class FavPurpose { NONE, QUICK, TOGGLE, LIST_MENU }
     private class ScopeBounds(val programme: ProgrammeInfo?, val from: Long, val to: Long)
 
@@ -232,10 +248,10 @@ class PlayerStateMachineImpl(
             is PlayerEvent.GuideSourceNow -> { guideSource = event.source; guideLineup = event.lineup }
             is PlayerEvent.Settings -> settings = event.settings
             is PlayerEvent.ArchiveStartFailed -> onArchiveStartFailed()
-            // M5 commit 0 (docs/design/m5-setup-settings.md §1.3a): no-op branches until WP-C fills them.
-            is PlayerEvent.Parental -> Unit
-            is PlayerEvent.PinResult -> Unit
-            is PlayerEvent.KeyHints -> Unit
+            // M5 (docs/design/m5-setup-settings.md §3.9)
+            is PlayerEvent.Parental -> parental = event.state
+            is PlayerEvent.PinResult -> onPinResult(event.purpose, event.granted)
+            is PlayerEvent.KeyHints -> keyHints = event.hints
         }
         publish()
     }
@@ -730,6 +746,7 @@ class PlayerStateMachineImpl(
                 if (ch.archiveDays > 0) items += ChannelMenuItem.WATCH_FROM_START
                 items += if (isFavourite) ChannelMenuItem.REMOVE_FAVOURITE else ChannelMenuItem.ADD_FAVOURITE
                 items += ChannelMenuItem.HIDE_CHANNEL
+                items += ChannelMenuItem.LOCK_CHANNEL // M5 (§3.9.1)
                 listMenu = items
                 listMenuFocused = 0
             }
@@ -1329,7 +1346,12 @@ class PlayerStateMachineImpl(
             BoxAction.DOWN -> listGroupFocused = (listGroupFocused + 1).coerceAtMost(maxOf(0, sources.size - 1))
             BoxAction.RIGHT, BoxAction.BACK -> listColumn = ListColumn.CHANNELS
             BoxAction.LEFT -> Unit
-            BoxAction.SELECT -> sources.getOrNull(listGroupFocused)?.let { listColumn = ListColumn.CHANNELS; applyListSource(it.source) }
+            BoxAction.SELECT -> sources.getOrNull(listGroupFocused)?.let { e ->
+                // M5 (§3.9.2): a locked group asks for the PIN (or the not-protected card) through the guide's prompt.
+                if (ParentalRules.needsDoor(e, parental) && pinGate?.request(PinPurpose.OpenSource(e, PinOwner.PLAYER)) == true) return true
+                listColumn = ListColumn.CHANNELS
+                applyListSource(e.source)
+            }
             BoxAction.ZAP_UP, BoxAction.ZAP_DOWN -> {
                 if (sources.isEmpty()) return true
                 val cur = currentGroupIndex().let { if (it < 0) listGroupFocused else it }
@@ -1356,14 +1378,45 @@ class PlayerStateMachineImpl(
                     ChannelMenuItem.ADD_FAVOURITE -> effects.setFavourite(ch, true)
                     ChannelMenuItem.REMOVE_FAVOURITE -> effects.setFavourite(ch, false)
                     ChannelMenuItem.HIDE_CHANNEL -> effects.hideChannel(ch)
-                    // M5 commit 0: never listed before WP-C (lock, §3.9.1) / WP-A (Channel options, §3.3.12).
-                    ChannelMenuItem.LOCK_CHANNEL -> effects.setChannelLocked(ch, true)
-                    ChannelMenuItem.CHANNEL_OPTIONS -> Unit
+                    // M5 (§3.9.1, §3.9.2): with a PIN set (session locked) the PIN comes first.
+                    ChannelMenuItem.LOCK_CHANNEL -> lockAction { effects.setChannelLocked(ch, true) }
+                    ChannelMenuItem.CHANNEL_OPTIONS -> Unit // WP-A's Channel options page (§3.3.12) offers it
                 }
             }
             else -> Unit
         }
         return true
+    }
+
+    /**
+     * (M5, §3.9.2) Lock from the channel list's menu: with a PIN and a locked session the PIN first (a `SettingsAction`
+     * whose token the guide routes back here); otherwise at once (without a PIN the lock filters at once and the effect
+     * toasts "Set a PIN to protect it").
+     */
+    private fun lockAction(run: () -> Unit) {
+        val gate = pinGate
+        if (parental.pinSet && !parental.unlocked && gate != null) {
+            val t = PLAYER_ACTION_TOKEN_BASE + lockToken++
+            pendingLocks[t] = run
+            if (gate.request(PinPurpose.SettingsAction(t))) return
+            pendingLocks.remove(t)
+        }
+        run()
+    }
+
+    /** The guide's prompt answered (§0.9). */
+    private fun onPinResult(purpose: PinPurpose, granted: Boolean) {
+        when (purpose) {
+            is PinPurpose.OpenSource -> if (granted && layer == PlayerLayer.CHANNELS) {
+                listColumn = ListColumn.CHANNELS
+                applyListSource(purpose.entry.source)
+                listGroupFocused = sources.indexOfFirst { it.source == purpose.entry.source }.coerceAtLeast(0)
+            }
+            // A refused tune the player asked about (list, zap target, previous): tune it now (the guard allows it).
+            is PinPurpose.Tune -> if (granted) effects.tune(purpose.channel, null)
+            is PinPurpose.SettingsAction -> pendingLocks.remove(purpose.token)?.let { if (granted) it() }
+            is PinPurpose.EnterSettings -> Unit
+        }
     }
 
     private fun listState(): ChannelListState? {
@@ -1554,6 +1607,8 @@ class PlayerStateMachineImpl(
     }
 
     companion object {
+        /** (M5) The player's SettingsAction tokens (lock actions); equals GuideStateMachineImpl.PLAYER_ACTION_TOKEN_BASE. */
+        const val PLAYER_ACTION_TOKEN_BASE = 1L shl 40
         /** Passive info bar after first media (§3.2.1). */
         const val INFO_AFTER_ZAP_MS = 4_000L
         /** The quick bar closes after this long without a key (§3.4.1, owner ruling 2026-10-15). */
