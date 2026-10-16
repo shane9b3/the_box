@@ -319,6 +319,12 @@ sealed interface PlayerEvent {
     /** The guide's current source and lineup (the channel list opens on it). */
     data class GuideSourceNow(val source: GuideSource?, val lineup: GuideLineup?) : PlayerEvent
     data class Settings(val settings: PlayerSettings, val lowEnd: Boolean) : PlayerEvent
+    /**
+     * (code review 2026-10-16, U-S7 = N17; contract amendment) An archive start the effects launched returned
+     * `ArchiveStart.Failed` synchronously. The host has already toasted CATCHUP_FAILED; the machine returns the info bar's
+     * focus to now when the start came from the bar (§3.2.2).
+     */
+    data class ArchiveStartFailed(val reason: app.thebox.core.catchup.archive.ArchiveFailure) : PlayerEvent
 }
 
 /** Side effects; implemented by :ui's PlayerEffectsImpl (WP-D). Main-safe, non-blocking. */
@@ -342,7 +348,12 @@ interface PlayerEffects {
     fun jumpToLive()
     fun startOver(channel: GuideChannel)
     fun rewindLive(channel: GuideChannel, backMs: Long)
-    fun playProgramme(channel: GuideChannel, info: ProgrammeInfo)
+    /**
+     * EPG-anchored start of [info] (raw programme times; the builder subtracts the correction). (code review 2026-10-16,
+     * P-B1) [timeShift] true from the at-live scrub bar (a chip or PREV_PROGRAMME): the session is a time-shift that
+     * continues past the programme's end, like start over. Never converted into a `rewindLive` distance.
+     */
+    fun playProgramme(channel: GuideChannel, info: ProgrammeInfo, timeShift: Boolean = false)
     fun tryNextCatchupFormat()
     /** (reviewed 2026-10-15, S7) Info bar OK on a future programme: M3 reminder store, toasts REMINDER_SET / REMINDER_CANCELLED. */
     fun toggleReminder(channel: GuideChannel, info: ProgrammeInfo)

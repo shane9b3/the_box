@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.thebox.core.playback.NextStep
 import app.thebox.core.catchup.archive.ArchiveFailure
 import app.thebox.core.full.ErrorCardState
 import app.thebox.ui.guide.screen.Chip
@@ -31,6 +32,8 @@ import app.thebox.ui.theme.DesignTokens
 import kotlinx.coroutines.delay
 
 const val PLAYER_ERROR_CARD_TAG = "player_error_card"
+/** P-S2 = U-S4: the next-step line (I-M4-16 asserts it on every card). */
+const val PLAYER_ERROR_STEP_TAG = "player_error_step"
 const val PLAYER_ERROR_BUTTON_TAG = "player_error_button"
 
 /**
@@ -80,9 +83,14 @@ fun PlayerErrorCard(state: ErrorCardState, modifier: Modifier = Modifier, archiv
                 }
                 ErrorText.retryLine(res, retry, elapsed)?.let { Line(it, GuideUi.sans(19, color = GuideUi.Fg70)) }
             }
-            state.textStep?.let { step ->
-                Line(stringResource(ErrorText.step(step)), GuideUi.sans(19, color = GuideUi.Fg.copy(alpha = 0.75f)), maxLines = 2)
-            }
+            // P-S2 = U-S4: the core model always fills the next step (from the buttons when every step became one), so
+            // this line is always drawn; the fallback covers a hand-built state without one.
+            Line(
+                stringResource(ErrorText.step(state.textStep ?: NextStep.RETRY)),
+                GuideUi.sans(19, color = GuideUi.Fg.copy(alpha = 0.75f)),
+                Modifier.testTag(PLAYER_ERROR_STEP_TAG),
+                maxLines = 2,
+            )
         }
         if (state.buttons.isNotEmpty()) {
             Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {

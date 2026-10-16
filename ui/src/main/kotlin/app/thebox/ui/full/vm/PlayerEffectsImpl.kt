@@ -90,8 +90,8 @@ class PlayerEffectsImpl(private val vm: PlayerViewModel) : PlayerEffects {
 
     override fun rewindLive(channel: GuideChannel, backMs: Long) = launchArchive("rewindLive") { archive.rewindLive(channel, backMs) }
 
-    override fun playProgramme(channel: GuideChannel, info: ProgrammeInfo) =
-        launchArchive("playProgramme") { archive.playProgramme(channel, info, info.rawEndMin) }
+    override fun playProgramme(channel: GuideChannel, info: ProgrammeInfo, timeShift: Boolean) =
+        launchArchive("playProgramme") { archive.playProgramme(channel, info, info.rawEndMin, timeShift) } // P-B1
 
     override fun tryNextCatchupFormat() {
         if (!archive.tryNextVariant()) vm.toast(PlayerToast.CATCHUP_FAILED, ArchiveFailure.NOT_IN_ARCHIVE.name)
@@ -185,7 +185,11 @@ class PlayerEffectsImpl(private val vm: PlayerViewModel) : PlayerEffects {
         vm.launchSafely(what) {
             when (val r = start()) {
                 ArchiveStart.Started -> Unit
-                is ArchiveStart.Failed -> vm.toast(PlayerToast.CATCHUP_FAILED, r.reason.name)
+                is ArchiveStart.Failed -> {
+                    vm.toast(PlayerToast.CATCHUP_FAILED, r.reason.name)
+                    // U-S7 = N17: the machine returns the info bar's focus to now (the toast stays).
+                    vm.machine.dispatch(PlayerEvent.ArchiveStartFailed(r.reason))
+                }
             }
         }
     }

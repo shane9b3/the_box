@@ -979,7 +979,9 @@ class ArchivePlaybackImpl(
     private fun seekFromLivePause(s: Session, ctx: Ctx, programmeMs: Long) {
         val live = liveWindow(ctx, clock())
         val t = programmeMs.coerceIn(live.archiveFromMs, live.liveEdgeMs)
-        if (t >= live.liveEdgeMs - ArchivePlannerImpl.LIVE_SNAP_MS) {
+        // P-S1 = U-L3: direction-aware, as the planner. Only a target later than the pause point snaps to live; the first
+        // ← after a fresh live pause requests the archive.
+        if (t > s.pausedAtMs && t >= live.liveEdgeMs - ArchivePlannerImpl.LIVE_SNAP_MS) {
             settle(s)
             goLive(s, notReady = false)
             return

@@ -53,6 +53,10 @@ DEFAULTS = {
     "timeshift_mode": "clip3",  # clip3 = clip x 3 (M2/M3); duration = body sized to the requested duration, continuous PCR/PTS
     "timeshift_window": True,   # 404 for a start outside the channel's archive (older than archive_days, in the future, no archive)
     "archive_lag_sec": 0,       # 404 for a start within N s of now ("not written yet")
+    # (code review 2026-10-16, U-S9) duration mode only: "clamp" serves at most what the panel has written
+    # (now - archive_lag_sec - start), as a real Xtream panel; "serve" sends the whole requested duration at once
+    "timeshift_future": "clamp",
+    "timeshift_chunked": False,  # duration mode: no Content-Length / Accept-Ranges (close-delimited), as many panels
     "timeshift_reject_forms": {},  # {form: status}: path, path_sec, php, shift, flussonic_range, flussonic_now, timeshift_abs, timeshift_rel
     "timeshift_range_ignored": False,  # 200 + full Content-Length, Range ignored (bytesToSkip path)
     "player_fixtures": False,   # synthetic mode: short-programme ch2, correction ch3 (+2) / ch4 (-1.5), multi ch7 (TS) / ch8 (HLS)
@@ -72,6 +76,7 @@ TS_FORMS = ("path", "path_sec", "php", "shift", "flussonic_range", "flussonic_no
 TS_FORM_ALIASES = {"xc-path": "path", "xc-path-sec": "path_sec", "xc-php": "php", "flussonic-range": "flussonic_range",
                    "flussonic-abs": "timeshift_abs", "flussonic-kodi": "timeshift_rel"}
 TS_LOG_MAX = 50
+CLAMP_SNAPSHOT_S = 5  # U-S9: the written length is re-read at most every 5 s (a panel writing its archive in chunks)
 EVENT_MAX_SEGMENTS = 5400  # an EVENT playlist lists at most 3 h of 2 s segments
 SPLASH = b"<html><head><title>Subscription</title></head><body><h1>Your subscription has expired</h1></body></html>"
 
@@ -658,6 +663,7 @@ class Panel:
         self.stopping = threading.Event()
         self.tokens = {}
         self.live_pos = {}
+        self.clamp_cache = {}  # U-S9: (form, stream, start, duration) -> (first open, written seconds)
         self.main_port = self.lb_port = 0
         self.start_time = time.time()  # anchors the synthetic EPG schedule for this server run
         self.event_anchor = {}  # timeshift_rel EVENT playlists: (sid, path) -> fixed start (unix s)
@@ -734,6 +740,10 @@ class Panel:
                 raise ValueError(f"{k} must be an integer 0..{hi}")
         if "timeshift_mode" in patch and patch["timeshift_mode"] not in ("clip3", "duration"):
             raise ValueError("timeshift_mode must be clip3 or duration")
+        if "timeshift_future" in patch and patch["timeshift_future"] not in ("clamp", "serve"):
+            raise ValueError("timeshift_future must be clamp or serve")
+        if "timeshift_chunked" in patch and not isinstance(patch["timeshift_chunked"], bool):
+            raise ValueError("timeshift_chunked must be true or false")
         lag = patch.get("archive_lag_sec", 0)
         if isinstance(lag, bool) or not isinstance(lag, int) or lag < 0:
             raise ValueError("archive_lag_sec must be an integer >= 0")
@@ -751,6 +761,7 @@ class Panel:
 
     def reset(self):
         with self.lock:
+            self.clamp_cache = {}
             self.cfg = copy.deepcopy(self.initial)
             self.tokens.clear()
             self.live_pos.clear()
@@ -1426,12 +1437,36 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 if live_like:
                     self._notes.append("LIVE-SHIFTED")
                     return self.live_ts(clip, sid, f, slot, state=TsState())
+                chunked = False
                 if duration_mode:
-                    size = max(PKT, int(max(1, dur_s or 60) * clip.rate) // PKT * PKT)
+                    secs = max(1, dur_s or 60)
+                    if c.get("timeshift_future", "clamp") == "clamp" and inst is not None:
+                        # U-S9: only what is written by now (the xc minute count reaches up to 59 s past the panel's now).
+                        # The written length is snapshotted for CLAMP_SNAPSHOT_S, as a panel that writes its archive in
+                        # chunks: the reopens of one load (TsDurationReader's tail read, binary-search seeks) see one
+                        # total (a total growing per millisecond sent Media3's seeker into a reopen loop on the
+                        # emulator), and a continuation a few seconds later sees the new data (a long snapshot made
+                        # every continuation of the same minute end at the old edge: a re-request storm).
+                        key = (form, sid, start, dur_s)
+                        cache = self.panel.clamp_cache
+                        hit = cache.get(key)
+                        if hit is None or time.time() - hit[0] > CLAMP_SNAPSHOT_S:
+                            hit = (time.time(), time.time() - int(c.get("archive_lag_sec") or 0) - inst)
+                            cache[key] = hit
+                        written = hit[1]
+                        if written < secs:
+                            self._notes.append(f"CLAMPED{max(0, int(written))}s/{int(secs)}s")
+                            secs = max(1, written)
+                    size = max(PKT, int(secs * clip.rate) // PKT * PKT)
                     data = LoopedTs(clip, size)
+                    chunked = bool(c.get("timeshift_chunked"))
                 else:
                     data = clip.data * 3
                 ctype = "text/html" if f.get("wrong_content_type") else "video/mp2t"
+                if chunked:
+                    # U-S9: no Content-Length, no ranges: a close-delimited body (HTTP/1.0), the player cannot seek in it.
+                    self._notes.append("NO-LENGTH")
+                    return self.finite(data, ctype, f, ranges=False)
                 return self.finite(data, ctype, f, ranges=c["timeshift_ranges"], ignore_range=bool(c.get("timeshift_range_ignored")))
             data, ctype = p.vod_data, p.vod_ctype
             if f.get("wrong_content_type"):

@@ -88,9 +88,10 @@ fun MiniPlayerOverlay(
     modifier: Modifier = Modifier,
     /**
      * (M4, docs/design/m4-player-ux.md §3.2.3) The archive session (`GuideUiState.archive`), for the PAUSED and
-     * −MM:SS pills. Defaults to the root's [LocalPlayerArchive] so `GuideScreen` needs no edit.
+     * −MM:SS pills. (U-S5, L-4) Passed explicitly by `GuideScreen`: the root's static composition local invalidated the
+     * whole root content on every status.
      */
-    archive: ArchiveStatus? = LocalPlayerArchive.current,
+    archive: ArchiveStatus? = null,
 ) {
     if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) androidx.compose.runtime.SideEffect { app.thebox.ui.guide.GuideDebugCounters.bump(COMPOSITIONS_MINI) } // H-S9
     val now by produceState(System.currentTimeMillis()) {
@@ -114,19 +115,15 @@ fun MiniPlayerOverlay(
 }
 
 /**
- * (M4, docs/design/m4-player-ux.md §2.5, §3.2.3) The root provides `GuideUiState.archive` here, so the mini player
- * reads the archive session without a `GuideScreen` edit.
- */
-val LocalPlayerArchive = staticCompositionLocalOf<ArchiveStatus?> { null }
-
-/**
  * The shared pill rule (`PillRules`, §3.2.3) while an archive session exists; null otherwise (M3's pills: the
  * visible tuned state alone decides). [tuned] is already the visible state (`ArchiveVisibility`, B1).
  */
 @Composable
 private fun archivePill(tuned: TunedState, archive: ArchiveStatus?): PillState? {
-    if (archive == null || archive.phase == ArchivePhase.IDLE || archive.phase == ArchivePhase.FAILED) return null
-    val pill = remember(tuned, archive) { PillRules.pill(tuned, archive, System.currentTimeMillis()) }
+    val session = archive != null && archive.phase != ArchivePhase.IDLE && archive.phase != ArchivePhase.FAILED
+    // U-B3: a plain pause (no session, or the 10 s live-pause release mapped to PAUSED) draws the PAUSED pill too (§3.2.3).
+    if (!session && tuned.phase != MiniPhase.PAUSED) return null
+    val pill = remember(tuned, archive) { PillRules.pill(tuned, archive.takeIf { session }, System.currentTimeMillis()) }
     return rememberDebouncedPill(pill)
 }
 

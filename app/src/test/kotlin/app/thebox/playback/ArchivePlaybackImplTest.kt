@@ -579,6 +579,35 @@ class ArchivePlaybackImplTest {
         }
     }
 
+    /** P-S1: the first ← (10 s) after a fresh live pause requests the archive; it used to snap forward to live. */
+    @Test
+    fun firstLeftAfterAFreshLivePauseRequestsTheArchive() = runTest {
+        with(Rig(this)) {
+            controller.liveOn(channel.identity)
+            at(0, buffered = 2_000)
+            archive.pauseLive(channel)
+            runCurrent()
+            advance(5_000)
+            val pausedAt = status.wallMs
+            archive.seekTo(pausedAt - 10_000, 1)
+            runCurrent()
+            assertEquals("one archive request, no jump to live", 1, urls.size)
+            assertFalse(controller.calls.contains("tune"))
+            assertEquals(ArchivePhase.SEEKING, status.phase)
+        }
+        // A forward commit inside the zone still goes live.
+        with(Rig(this)) {
+            controller.liveOn(channel.identity)
+            at(0, buffered = 2_000)
+            archive.pauseLive(channel)
+            runCurrent()
+            advance(5_000)
+            archive.seekTo(status.wallMs + 1_500, 1)
+            runCurrent()
+            assertTrue(urls.isEmpty())
+        }
+    }
+
     // ------------------------------------------------------------------ ownership, mid-play, lifecycle
 
     @Test
@@ -782,6 +811,27 @@ class ArchivePlaybackImplTest {
             // P1 starts after the panel's now in the programme frame: refused, nothing tuned.
             assertEquals(ArchiveStart.Failed(ArchiveFailure.NO_PROGRAMME), archive.playProgramme(channel, p1, p1.rawStartMin + 30))
             assertEquals(1, urls.size)
+        }
+    }
+
+    /**
+     * P-B1: a chip or PREV_PROGRAMME on the at-live bar is EPG-anchored (`playProgramme(…, timeShift = true)`), so the
+     * request starts at `P.start − corr − padding` on the panel whatever the correction and the clock skew.
+     */
+    @Test
+    fun atLiveProgrammeChipStartsEpgAnchoredForEveryCorrection() = runTest {
+        val p = info("2026-10-15T09:30:00Z", "2026-10-15T10:00:00Z", "P")
+        for (corr in listOf(-1.5, 0.0, 2.0)) {
+            val rig = Rig(this, channelCorrH = corr, skewSec = 42)
+            with(rig) {
+                feed.put(channel, listOf(p))
+                controller.liveOn(channel.identity)
+                assertEquals("corr $corr", ArchiveStart.Started, archive.playProgramme(channel, p, p.rawStartMin + 30, timeShift = true))
+                val corrMs = (corr * 3_600_000).toLong()
+                assertEquals("corr $corr: A frame", Instant.ofEpochMilli(ms("2026-10-15T09:30:00Z") - corrMs - 60_000), lastTune.request.requestStart)
+                assertEquals("corr $corr: P frame", ms("2026-10-15T09:29:00Z"), status.wallMs)
+                assertTrue("a time-shift session (the pill shows −MM:SS; continuations run past the programme)", status.timeShift)
+            }
         }
     }
 

@@ -45,7 +45,7 @@ class RecordingPlayerEffects : PlayerEffects {
     override fun jumpToLive() = rec("jumpToLive")
     override fun startOver(channel: GuideChannel) = rec("startOver", channel)
     override fun rewindLive(channel: GuideChannel, backMs: Long) = rec("rewindLive", channel, backMs)
-    override fun playProgramme(channel: GuideChannel, info: ProgrammeInfo) = rec("playProgramme", channel, info)
+    override fun playProgramme(channel: GuideChannel, info: ProgrammeInfo, timeShift: Boolean) = rec("playProgramme", channel, info, timeShift)
     override fun tryNextCatchupFormat() = rec("tryNextCatchupFormat")
     override fun toggleReminder(channel: GuideChannel, info: ProgrammeInfo) = rec("toggleReminder", channel, info)
     override fun openSettings() = rec("openSettings")

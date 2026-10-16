@@ -205,6 +205,25 @@ class ArchivePlannerTest {
         assertIs<SeekPlan.Rerequest>(p.seek(lw.liveEdgeMs - 30_001, wall, req(origin), unseekable, lw))
     }
 
+    /** P-S1: a back step at 20 s behind is a Rerequest (it used to snap forward to live). */
+    @Test
+    fun backStepAtTwentySecondsBehindIsARerequest() {
+        val lw = live()
+        val wall = lw.liveEdgeMs - 20_000
+        val plan = p.seek(wall - 10_000, wall, req(origin), unseekable, lw)
+        assertIs<SeekPlan.Rerequest>(plan)
+        assertEquals(wall - 10_000, plan.plan.targetMs)
+        assertIs<SeekPlan.Rerequest>(p.seek(wall - 1_000, wall, req(origin), unseekable, lw), "even a 1 s step back")
+    }
+
+    /** P-S1: a forward step inside the zone still snaps to live. */
+    @Test
+    fun forwardStepAtTwentyFiveSecondsBehindIsLive() {
+        val lw = live()
+        val wall = lw.liveEdgeMs - 25_000
+        assertEquals(SeekPlan.Live, p.seek(wall + 10_000, wall, req(origin), unseekable, lw))
+    }
+
     @Test
     fun nativeThroughSeekableAndDuration() {
         val wall = origin + 600_000

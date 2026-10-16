@@ -19,6 +19,11 @@ import app.thebox.core.playback.VideoDecoderMode
  *   is then dropped, not shown as text: telling the user to try what cannot help would be a loop (F5's intent);
  * - TRY_OTHER_CATCHUP_MODE: no variant is left (the step then becomes the text line, §3.7 table);
  * - PREVIOUS_CHANNEL: never filtered here, the ladder already filtered it.
+ *
+ * P-S2 = U-S4: every card carries a next-step line. When every step became a button (CONNECTION_LIMIT, AUDIO_OUTPUT_FAILED,
+ * a ladder-narrowed SERVER_ERROR, …) the text line is the sentence of the first action other than RETRY that became a
+ * button (STOP_AND_WAIT: "Stop watching on another device, then try again"); when only RETRY (and GUIDE) remain, the
+ * RETRY sentence.
  */
 object ErrorCardModel {
     /** [variantLeft]: ArchivePlayback has another catch-up variant; [decoder]: the channel's decoder override. */
@@ -38,6 +43,10 @@ object ErrorCardModel {
                 step == NextStep.TRY_SOFTWARE_DECODER -> Unit
                 text == null -> text = step
             }
+        }
+        // P-S2 = U-S4: fill the next-step line from the buttons when the walk left it empty.
+        if (text == null) {
+            text = error.actions.firstOrNull { it != NextStep.RETRY && button(it, error, decoder, variantLeft) != null } ?: NextStep.RETRY
         }
         buttons += ErrorButton.GUIDE
         return ErrorCardState(error, channel, buttons, focused = 0, textStep = text, archiveFailed = archiveFailed)

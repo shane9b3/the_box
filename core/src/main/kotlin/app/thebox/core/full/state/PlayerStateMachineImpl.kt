@@ -120,6 +120,8 @@ class PlayerStateMachineImpl(
     private var passiveSawConnecting = false
     private var infoChannel: GuideChannel? = null
     private var infoFocused = -1
+    /** U-S7: the last archive start came from the info bar and no key followed it yet. */
+    private var barLaunchPending = false
     private var infoHideAt = Long.MAX_VALUE
     private var browseToken = 0L
     private var browseHolding = false
@@ -174,6 +176,7 @@ class PlayerStateMachineImpl(
         curMs = nowMs()
         val justClosed = listJustClosedByBack
         listJustClosedByBack = false
+        barLaunchPending = false // U-S7: a key after the launch means the user moved on
         val consumed = when (layer) {
             PlayerLayer.SCREEN_OFF -> { wake(); true }
             PlayerLayer.QUICK_BAR -> quickKey(a)
@@ -228,6 +231,7 @@ class PlayerStateMachineImpl(
             is PlayerEvent.Favourite -> onFavourite(event.token, event.isFavourite)
             is PlayerEvent.GuideSourceNow -> { guideSource = event.source; guideLineup = event.lineup }
             is PlayerEvent.Settings -> settings = event.settings
+            is PlayerEvent.ArchiveStartFailed -> onArchiveStartFailed()
         }
         publish()
     }
@@ -539,8 +543,36 @@ class PlayerStateMachineImpl(
         val now = nowMin()
         when {
             p == null || (p.startMin <= now && now < p.endMin) -> openQuick()
-            p.endMin <= now -> if (inArchiveWindow(ch, p)) { effects.playProgramme(ch, p); closeLayer() } else effects.toast(PlayerToast.NO_CATCHUP)
+            p.endMin <= now -> if (inArchiveWindow(ch, p)) {
+                effects.playProgramme(ch, p)
+                closeLayer()
+                barLaunchPending = true // U-S7: a synchronous failure brings the bar back at now
+            } else effects.toast(PlayerToast.NO_CATCHUP)
             else -> effects.toggleReminder(ch, p)
+        }
+    }
+
+    /**
+     * U-S7 = N17 (§3.2.2): `playProgramme` from the info bar failed synchronously (the host toasted CATCHUP_FAILED, and the
+     * toast stays). The bar closed at the launch; it comes back on the tuned channel with the focus on now, so the user is
+     * not left on the past programme that could not play. A failure of any other start (chips, RW, start over) or after a
+     * further key changes nothing here.
+     */
+    private fun onArchiveStartFailed() {
+        val fromBar = barLaunchPending
+        barLaunchPending = false
+        if (!fromBar || !inFull) return
+        when (layer) {
+            PlayerLayer.INFO -> {
+                infoChannel = tunedChannel
+                tunedChannel?.let { loadProgrammesFor(it, force = false) }
+                infoFocused = if (progHash == tuned.identityHash) nowOrNext(progs) else -1
+            }
+            PlayerLayer.NONE -> {
+                openInfo()
+                infoHideAt = curMs + settings.infoBarMs
+            }
+            else -> Unit
         }
     }
 
@@ -1011,7 +1043,9 @@ class PlayerStateMachineImpl(
         val edge = liveEdgeNow()
         val target = ScrubModel.chipTarget(p, edge)
         when {
-            scrubAtLive -> if (target != null) { tunedChannel?.let { effects.rewindLive(it, edge - target) }; preview = target; atLiveCommitPending = true }
+            // P-B1: a programme target is EPG-anchored. Before a session exists the machine's edge is the device clock, so
+            // `edge − target` as a rewindLive distance landed `correction + skew` away from the programme on the panel.
+            scrubAtLive -> if (target != null) { tunedChannel?.let { effects.playProgramme(it, p, timeShift = true) }; preview = target; atLiveCommitPending = true }
             target == null -> jumpToLive()
             else -> seekTo(target)
         }

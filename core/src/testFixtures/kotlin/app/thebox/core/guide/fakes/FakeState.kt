@@ -65,7 +65,12 @@ class FakeGuideStateMachine(initial: GuideUiState = GuideUiState()) : GuideState
     override val ui: StateFlow<GuideUiState> = mutableUi.asStateFlow()
     override val frame: GuideFrame = GuideFrame()
     override val frameVersion: StateFlow<Long> = version.asStateFlow()
-    override fun dispatch(event: GuideEvent) { events += event }
+    /** The deadline the host's ticker waits for (U-B1 drives a past one). */
+    val deadline = MutableStateFlow(Long.MAX_VALUE)
+    override val nextDeadlineMs: StateFlow<Long> get() = deadline
+    /** Called after each dispatch (U-B1 counts Ticks). */
+    var onDispatch: (GuideEvent) -> Unit = {}
+    override fun dispatch(event: GuideEvent) { events += event; onDispatch(event) }
     /** What [handles] answers (code review 2026-10-14, H-S4). */
     var handlesFn: (app.thebox.core.input.BoxAction) -> Boolean = { true }
     override fun handles(action: app.thebox.core.input.BoxAction): Boolean = handlesFn(action)

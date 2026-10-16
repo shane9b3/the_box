@@ -73,4 +73,77 @@ class ShellRedrawTest {
         val draws = GuideDebugCounters.count(LIVE_DOT_DRAWS) - d0
         assertTrue("LIVE dot layer updates in 3 s of low-end MINI: $draws (a per-frame animation gives ~180)", draws in 1..6)
     }
+
+    // ---------------------------------------------------------------- M4 code review, U-S5
+
+    /** U-S5 (L-4): ten archive statuses in GUIDE recompose the mini player only (the static local recomposed the root). */
+    @Test
+    fun archiveStatusesInGuideRecomposeTheMiniPlayerOnly() {
+        val ch = GuideFixtures.channel(1, archiveDays = 7)
+        val t = TunedState(identity = ch.identity, rowId = ch.rowId, identityHash = ch.identityHash, phase = MiniPhase.PLAYING, isArchive = true)
+        val machine = FakeGuideStateMachine(GuideUiState(tuned = t, tunedChannel = ch, footer = footer, panel = panel(0)))
+        val host = FakeShellHost(machine)
+        rule.setContent { BoxTheme { AppRoot(host, grid = { m -> Spacer(m.graphicsLayer()) }) } }
+        rule.waitForIdle()
+        val mini0 = GuideDebugCounters.count(COMPOSITIONS_MINI)
+        val panel0 = GuideDebugCounters.count(COMPOSITIONS_PANEL)
+        for (i in 1..10) {
+            val st = app.thebox.core.catchup.archive.ArchiveStatus(
+                if (i % 2 == 0) app.thebox.core.catchup.archive.ArchivePhase.PLAYING else app.thebox.core.catchup.archive.ArchivePhase.PAUSED,
+                channel = ch, identityHash = ch.identityHash, wallMs = 1_000L * i, atMs = 1_000L * i, liveEdgeMs = 60_000L + i, timeShift = true,
+            )
+            machine.mutableUi.value = machine.mutableUi.value.copy(archive = st)
+            rule.waitForIdle()
+        }
+        val minis = GuideDebugCounters.count(COMPOSITIONS_MINI) - mini0
+        assertTrue("the mini player follows the status ($minis)", minis >= 1)
+        assertEquals("the focused panel never recomposes", 0, GuideDebugCounters.count(COMPOSITIONS_PANEL) - panel0)
+    }
+
+    /** U-S5: cue lists (CEA-608 paint-on emits per character) re-run SubtitleLayer's update, never FullScreenHost. */
+    @Test
+    fun cueListsDoNotRecomposeTheFullScreen() {
+        val ch = GuideFixtures.channel(1)
+        val t = TunedState(identity = ch.identity, rowId = ch.rowId, identityHash = ch.identityHash, phase = MiniPhase.PLAYING)
+        val machine = FakeGuideStateMachine(GuideUiState(mode = app.thebox.core.guide.ScreenMode.FULL, tuned = t, tunedChannel = ch))
+        val player = app.thebox.ui.shelltest.FakePlayerHost()
+        val host = FakeShellHost(machine, player = player)
+        rule.setContent { BoxTheme { AppRoot(host, grid = { m -> Spacer(m) }) } }
+        rule.waitForIdle()
+        val full0 = GuideDebugCounters.count(app.thebox.ui.full.COMPOSITIONS_FULL)
+        val root0 = GuideDebugCounters.count(COMPOSITIONS_ROOT)
+        for (i in 1..10) {
+            player.cuesFlow.value = listOf(androidx.media3.common.text.Cue.Builder().setText("caption ".repeat(i)).build())
+            rule.waitForIdle()
+        }
+        assertEquals("FullScreenHost compositions over 10 cue lists", 0, GuideDebugCounters.count(app.thebox.ui.full.COMPOSITIONS_FULL) - full0)
+        assertEquals("root compositions over 10 cue lists", 0, GuideDebugCounters.count(COMPOSITIONS_ROOT) - root0)
+    }
+
+    /** U-S5: one scrolling channel-list step recomposes at most the rows whose focus changed, plus the row that enters. */
+    @Test
+    fun oneListStepRecomposesAtMostTwoRows() {
+        val channels = GuideFixtures.channels(30)
+        val rows = object : app.thebox.core.guide.GuideRows {
+            override val size = channels.size
+            override val version = 1L
+            override fun channel(index: Int) = channels.getOrNull(index)
+            override fun indexOf(rowId: Long) = channels.indexOfFirst { it.rowId == rowId }
+        }
+        val ch = channels[0]
+        val t = TunedState(identity = ch.identity, rowId = ch.rowId, identityHash = ch.identityHash, phase = MiniPhase.PLAYING)
+        val machine = FakeGuideStateMachine(GuideUiState(mode = app.thebox.core.guide.ScreenMode.FULL, tuned = t, tunedChannel = ch))
+        val player = app.thebox.ui.shelltest.FakePlayerHost(listRows = rows)
+        val host = FakeShellHost(machine, player = player)
+        val list = app.thebox.ui.full.PlayerOverlayStates.channels().copy(size = channels.size, focused = 9, top = 0, tunedRowId = ch.rowId)
+        player.machine.mutableUi.value = app.thebox.core.full.PlayerUiState(layer = app.thebox.core.full.PlayerLayer.CHANNELS, channels = list)
+        rule.setContent { BoxTheme { AppRoot(host, grid = { m -> Spacer(m) }) } }
+        rule.waitForIdle()
+        val rows0 = GuideDebugCounters.count(app.thebox.ui.full.COMPOSITIONS_LIST_ROW)
+        // A step that scrolls the window by one row: nine rows keep their channel, one leaves and one enters.
+        player.machine.mutableUi.value = player.machine.mutableUi.value.copy(channels = list.copy(focused = 10, top = 1))
+        rule.waitForIdle()
+        val n = GuideDebugCounters.count(app.thebox.ui.full.COMPOSITIONS_LIST_ROW) - rows0
+        assertTrue("rows (re)composed by one scrolling step: $n (the two whose focus changed and the new one)", n <= 3)
+    }
 }

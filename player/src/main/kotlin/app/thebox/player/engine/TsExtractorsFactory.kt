@@ -49,6 +49,7 @@ internal class TsExtractorsFactory(
     override fun createExtractors(): Array<Extractor> {
         val mode = if (compat == TsCompat.MULTI_PMT) TsExtractor.MODE_MULTI_PMT else TsExtractor.MODE_SINGLE_PMT
         val defaults = DefaultExtractorsFactory().setTsExtractorFlags(flagsFor(compat)).setTsExtractorMode(mode)
+            .setTsSubtitleFormats(SPECULATIVE_CC_FORMATS) // V8
         return defaults.createExtractors()
             .filterIsInstance<TsExtractor>()
             .map { GuardedTsExtractor(it, graceBytes, onDeadTrack) }
@@ -72,6 +73,16 @@ internal class TsExtractorsFactory(
             val flags = if (compat == TsCompat.MULTI_PMT) COMPAT_TS_FLAGS else TS_FLAGS
             return if (TsDebugOverrides.detectAccessUnitsOff) flags and DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS.inv() else flags
         }
+
+        /**
+         * (code review 2026-10-16, V8) One speculative CEA-608 track per H.264/H.265 stream without a caption descriptor.
+         * Media3 1.11.1's `DefaultExtractorsFactory` passes an empty list to `DefaultTsPayloadReaderFactory`, and with no
+         * descriptor `SeiReader` then creates no caption track at all, so CC1 in SEI was never offered (API notes §1.3
+         * corrected). `PlayerMappers.isSpeculative` labels the track and sorts it last; a stream without captions just
+         * leaves it empty.
+         */
+        val SPECULATIVE_CC_FORMATS: List<Format> =
+            listOf(Format.Builder().setSampleMimeType(androidx.media3.common.MimeTypes.APPLICATION_CEA608).build())
 
         /** `DEAD_TRACK_GRACE_BYTES` (App. B). */
         const val DEAD_TRACK_GRACE_BYTES: Long = 1_048_576L

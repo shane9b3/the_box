@@ -428,8 +428,13 @@ class GuideViewModel @Inject constructor(
             while (true) {
                 val now = System.currentTimeMillis()
                 machine.dispatch(GuideEvent.Tick(now))
-                val target = nextTickAt(now, machine.nextDeadlineMs.value)
-                withTimeoutOrNull(target - System.currentTimeMillis()) { machine.nextDeadlineMs.first { it < target } }
+                val deadline = machine.nextDeadlineMs.value
+                val target = nextTickAt(now, deadline)
+                // U-B1: wake early only for a *new* deadline before the target. A deadline the machine left in the past
+                // satisfies `it < target` at once, `first` returns without suspending and the loop spun on main (ANR).
+                withTimeoutOrNull((target - System.currentTimeMillis()).coerceAtLeast(1)) {
+                    machine.nextDeadlineMs.first { it != deadline && it < target }
+                }
             }
         }
     }

@@ -131,13 +131,22 @@ class CatchupPlaybackTest : PlayerTestBase() {
                 "a refused reopen ends in playback or the CONNECTION_LIMIT card, got $outcome",
                 outcome == "playing" || outcome!!.contains(PlaybackErrorCode.CONNECTION_LIMIT.name),
             ) // WP-B/WP-C behaviour (§3.8.2 CONNECTION_LIMIT row)
+        } else {
+            // U-S8 (b): no refusal recorded, so nothing excuses a card or a failure.
+            assertEquals("no rejection: the archive plays", "playing", outcome)
         }
         if (outcome == "playing") {
             Thread.sleep(40_000)
             val seq = archive().settledSeq
             repeat(3) { press(K_LEFT, intervalMs = 150) }
-            awaitArchive("native seek under linger settles or fails visibly", 20_000) { it.settledSeq > seq || it.phase == ArchivePhase.FAILED }
+            // U-S8 (b): the seek settles, or ends on the CONNECTION_LIMIT card when the panel refused; FAILED is not a pass.
+            awaitArchive("native seek under linger settles or ends on the card", 20_000) {
+                it.settledSeq > seq || pui().error?.error?.code == PlaybackErrorCode.CONNECTION_LIMIT || it.phase == ArchivePhase.FAILED
+            }
             log("I-M4-10 linger seek: ${archive().brief()} rejections=${pp.rejections()}")
+            val settled = archive().settledSeq > seq
+            val card = pui().error?.error?.code == PlaybackErrorCode.CONNECTION_LIMIT && (pp.rejections()["max_connections"] ?: 0) > 0
+            assertTrue("the seek settled or ended on a refused-reopen card: ${archive().brief()} ${pui().brief()}", settled || card)
         }
     }
 

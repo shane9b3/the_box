@@ -89,14 +89,23 @@ class PlayerPanel(val guide: GuidePanel) {
      * (Integration 2026-10-15) One entry per **logical** archive request since [sinceUnix]: unranged opens with
      * consecutive duplicates of the same (form, channel, start, duration) merged. A finite TS with a Content-Length is
      * opened twice without a Range (ExoPlayer's first read, then again from byte 0 after TsDurationReader's tail read),
-     * with the ranged tail read in between, so counting raw unranged opens doubles every request.
+     * with the ranged tail read in between, so counting raw unranged opens doubles every request. (U-S8 (c)) Only that
+     * pattern is merged.
      */
     fun timeshiftLogical(sinceUnix: Double): List<TsRequest> {
         val out = ArrayList<TsRequest>()
+        // U-S8 (c): merge a repeated unranged open only when a ranged read of the same request sits between the two (the
+        // TsDurationReader pattern); a plain duplicate (a needless retry of the same URL) stays visible as two requests.
+        var rangedSinceLast = false
+        fun same(a: TsRequest, b: TsRequest) = a.form == b.form && a.channel == b.channel && a.startUnix == b.startUnix && a.durationS == b.durationS
         for (r in timeshiftSince(sinceUnix)) {
-            if (r.ranged) continue
             val last = out.lastOrNull()
-            if (last != null && last.form == r.form && last.channel == r.channel && last.startUnix == r.startUnix && last.durationS == r.durationS && last.status == r.status) continue
+            if (r.ranged) {
+                if (last != null && same(last, r)) rangedSinceLast = true
+                continue
+            }
+            if (last != null && rangedSinceLast && same(last, r) && last.status == r.status) { rangedSinceLast = false; continue }
+            rangedSinceLast = false
             out += r
         }
         return out

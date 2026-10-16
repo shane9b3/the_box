@@ -5,6 +5,7 @@ import app.thebox.core.guide.MiniPhase
 import app.thebox.core.guide.TunedState
 import app.thebox.player.api.BufferingCause
 import app.thebox.player.api.PlaybackState
+import app.thebox.player.api.StopReason
 
 /** `PlaybackState` → `TunedState` (docs/design/m3-guide.md §3.16.2). Pure. */
 object TunedStateMapper {
@@ -33,7 +34,11 @@ object TunedStateMapper {
                 max = state.maxAttempts
                 MiniPhase.RECONNECTING
             }
-            is PlaybackState.Stopped -> MiniPhase.STOPPED
+            // P-S4 = U-B3 (V7): the 10 s live-pause release (M2) frees the connection but is still the user's pause: the
+            // mini keeps PAUSED / −MM:SS, the FULL stopped hint stays away and PLAY_PAUSE resumes (`controller.resume()`
+            // handles a resumable Stopped). Every other stop is STOPPED.
+            is PlaybackState.Stopped ->
+                if (state.reason == StopReason.LIVE_PAUSE_TIMEOUT && state.resumable) MiniPhase.PAUSED else MiniPhase.STOPPED
             is PlaybackState.Error -> MiniPhase.ERROR
         }
         return TunedState(

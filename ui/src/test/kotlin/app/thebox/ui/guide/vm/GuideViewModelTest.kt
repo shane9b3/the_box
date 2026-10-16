@@ -286,6 +286,21 @@ class GuideViewModelTest {
         assertEquals(2_500L, fake.events.filterIsInstance<GuideEvent.Player>().last().settings.numberEntryWaitMs)
     }
 
+    /** U-B1: a deadline the machine left in the past must not spin the ticker on main. */
+    @Test fun pastDeadlineDoesNotSpinTheTicker() {
+        val w = World()
+        val fake = app.thebox.core.guide.fakes.FakeGuideStateMachine()
+        var ticks = 0
+        fake.onDispatch = { e -> if (e is GuideEvent.Tick && ++ticks > 5_000) throw IllegalStateException("the ticker spins: $ticks Ticks in one turn") }
+        fake.deadline.value = 1L // long past
+        w.viewModel(app.thebox.core.guide.fakes.FakeGuideStateMachine.factory(fake))
+        val afterStart = ticks
+        assertTrue("≤ 2 Ticks per looper turn ($afterStart)", afterStart <= 2)
+        shadowOf(Looper.getMainLooper()).idleFor(java.time.Duration.ofSeconds(1))
+        val perSecond = ticks - afterStart
+        assertTrue("about one Tick per 16 ms ($perSecond in 1 s)", perSecond in 1..80)
+    }
+
     @Test fun onLaunchModes() {
         fun run(mode: app.thebox.core.full.OnLaunch): Pair<World, app.thebox.core.guide.fakes.FakeGuideStateMachine> {
             val w = World()

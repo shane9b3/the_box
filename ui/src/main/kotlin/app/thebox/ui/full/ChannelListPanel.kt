@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
@@ -50,6 +51,9 @@ const val CHANNEL_ROW_TAG = "player_channel_row"
  * dims them to .4. Focus is virtual: the machine owns the cursor and `top`, so the panel draws exactly the window
  * `[top, top + 10)` (no scroll state to keep in step with the machine).
  */
+/** U-S5: debug composition counter of one channel-list row. */
+const val COMPOSITIONS_LIST_ROW = "ChannelListRow"
+
 @Composable
 fun ChannelListPanel(state: ChannelListState, host: PlayerHost, modifier: Modifier = Modifier, nowMs: Long = System.currentTimeMillis()) {
     val shape = RoundedCornerShape(DesignTokens.Radii.Panel)
@@ -71,14 +75,18 @@ fun ChannelListPanel(state: ChannelListState, host: PlayerHost, modifier: Modifi
             val end = minOf(state.size, state.top + PlayerUi.LIST_VISIBLE)
             for (i in state.top.coerceAtLeast(0) until end) {
                 val ch = rows.channel(i)
-                ChannelRow(
-                    channel = ch,
-                    now = ch?.let { host.nowOf(it) },
-                    focused = !groups && state.focused == i,
-                    tuned = ch != null && ch.rowId == state.tunedRowId,
-                    nowMs = nowMs,
-                    alpha = rowsAlpha,
-                )
+                // U-S5: rows keyed by channel, so a list step moves the rows' compositions with their channels and only
+                // the rows whose focus changed recompose (not all ten, nor their logo requests).
+                key(ch?.identityHash ?: -1L - i) {
+                    ChannelRow(
+                        channel = ch,
+                        now = ch?.let { host.nowOf(it) },
+                        focused = !groups && state.focused == i,
+                        tuned = ch != null && ch.rowId == state.tunedRowId,
+                        nowMs = nowMs,
+                        alpha = rowsAlpha,
+                    )
+                }
             }
         }
         if (groups) GroupsColumn(state)
@@ -126,6 +134,7 @@ private fun PreviousRow(prev: GuideChannel, focused: Boolean, alpha: Float) {
 
 @Composable
 private fun ChannelRow(channel: GuideChannel?, now: ProgrammeInfo?, focused: Boolean, tuned: Boolean, nowMs: Long, alpha: Float) {
+    if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) androidx.compose.runtime.SideEffect { app.thebox.ui.guide.GuideDebugCounters.bump(COMPOSITIONS_LIST_ROW) } // U-S5
     RowFrame(focused, alpha, Modifier.testTag(CHANNEL_ROW_TAG)) { text ->
         Line(channel?.number?.toString() ?: "", GuideUi.mono(18, color = text.copy(alpha = 0.5f)), Modifier.width(56.dp))
         ChannelLogo(channel, PlayerUi.LIST_LOGO.dp, 8.dp)

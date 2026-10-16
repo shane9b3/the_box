@@ -156,6 +156,17 @@ class GuideFullDelegationTest {
         assertEquals(w.nowMs, enteredAt)
     }
 
+    /** U-L7: re-attaching the same player machine (activity recreation in FULL) does not re-enter FULL. */
+    @Test fun reattachingTheSameMachineDoesNotReEnterFull() {
+        val w = GuideWorld()
+        w.press(SELECT)
+        val player = FakePlayerStateMachine()
+        w.machine.full = player
+        assertEquals(listOf(EnterReason.LAUNCH), player.entered)
+        w.machine.full = player
+        assertEquals(listOf(EnterReason.LAUNCH), player.entered, "no second enterFull: open layers survive")
+    }
+
     @Test fun openSettingsRoundTripFromTheQuickBar() {
         val w = full()
         w.press(UP)

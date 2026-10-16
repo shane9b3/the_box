@@ -24,9 +24,7 @@ import org.junit.runner.RunWith
  * ([GuideScrollBenchmark]: seeding, `androidx.benchmark.suppressErrors=EMULATOR`, emulator `-gpu host`).
  *
  * Journeys, each starting in FULL on the guide's focused row (channel 1 of the synthetic panel: live with archive):
- * (a) FULL idle 10 s, no overlay — the gate is ~0 frames (≤ 5 on the emulator, §5.9 "FULL idle frames"): read
- *     `frameCount` from the `FrameTimingMetric` output; a macrobenchmark cannot assert on its own metrics in-process,
- *     so the integration pass checks the JSON result and records it in §5.8;
+ * (a) removed (U-S6): FULL idle frames are asserted by the instrumented `FullIdleFramesTest`;
  * (b) scrub: RW opens the scrub bar on live with archive (rewindLive), then ← for 5 s at ~20 Hz (see [holdKey]);
  * (c) channel list: OK, then 100 × DOWN at 25 Hz;
  * (d) 20 × CH+ at 1 Hz with the passive bar — zap P50/P90 live in the app's `controller.diagnostics.zaps()` (filtered to
@@ -34,7 +32,7 @@ import org.junit.runner.RunWith
  *     gate is measured in-process by I-M4-1 (`InfoBarTest`) and M3 I-17;
  * (e) quick bar open + 12 × RIGHT.
  * Metrics: `FrameTimingMetric` (`frameDurationCpuMs` P50/P90/P99; API 30 reports CPU time only, M3 §5.11) and the
- * draw-phase trace sections `player-scrub`, `player-info` (§5.9 "Overlay draw ≤ 1 ms P90", when WP-D emits them).
+ * draw-phase trace sections `player-scrub`, `player-info` (§5.9 "Overlay draw ≤ 1 ms P90"; emitted since U-S6).
  *
  * Run (panel up with `--synthetic 2000`):
  * `./gradlew :benchmark:connectedBenchmarkAndroidTest -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.suppressErrors=EMULATOR
@@ -51,13 +49,9 @@ class PlayerOverlayBenchmark {
     private val target = InstrumentationRegistry.getArguments().getString("targetPackage") ?: GuideScrollBenchmark.TARGET_PACKAGE
     private val debugTarget get() = target.endsWith(".debug")
 
-    /** (a) FULL idle for 10 s with no overlay: frame count must be ~0 (≤ 5 on the emulator). */
-    @Test
-    fun fullIdle10s() = journey {
-        Log.i(TAG, "idle start ${SystemClock.elapsedRealtime()}")
-        Thread.sleep(10_000)
-        Log.i(TAG, "idle end ${SystemClock.elapsedRealtime()} (gate: frameCount ≤ 5 in the result JSON)")
-    }
+    // (a) FULL idle 10 s was removed (code review 2026-10-16, U-S6, L-16): with ~0 frames `FrameTimingMetric` has no
+    // result and Macrobenchmark throws, so the journey could never report its own success. The gate is now asserted
+    // in-process by the instrumented `app.thebox.player.FullIdleFramesTest` (FrameMetrics listener, 10 s idle FULL).
 
     /** (b) Scrub hold ← for 5 s. */
     @Test

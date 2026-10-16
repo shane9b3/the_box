@@ -62,6 +62,8 @@ class PlayerWorld(
     favouritesEntry: Boolean = true,
 ) {
     var nowMs = startMs
+    /** U-S7: archive starts record the call and start nothing (a synchronous `ArchiveStart.Failed`). */
+    var failArchiveStarts = false
     var settings: PlayerSettings = settings
         private set
     val fx = RecordingPlayerEffects()
@@ -321,7 +323,11 @@ class PlayerWorld(
             startArchive(channel, p.rawStartMin * 60_000L, timeShift = true)
         }
         override fun rewindLive(channel: GuideChannel, backMs: Long) { fx.rewindLive(channel, backMs); startArchive(channel, nowMs - backMs, timeShift = true) }
-        override fun playProgramme(channel: GuideChannel, info: ProgrammeInfo) { fx.playProgramme(channel, info); startArchive(channel, info.rawStartMin * 60_000L, timeShift = false) }
+        override fun playProgramme(channel: GuideChannel, info: ProgrammeInfo, timeShift: Boolean) {
+            fx.playProgramme(channel, info, timeShift)
+            if (failArchiveStarts) return // U-S7: the start failed synchronously; the test sends ArchiveStartFailed
+            startArchive(channel, info.rawStartMin * 60_000L, timeShift = timeShift)
+        }
         override fun openSettings() { fx.openSettings(); guide?.let { queue += GuideEvent.OpenSettings } }
         override fun loadProgrammes(token: Long, channel: GuideChannel, aroundMin: Int, before: Int, after: Int) {
             fx.loadProgrammes(token, channel, aroundMin, before, after)

@@ -83,11 +83,54 @@ class TracksTest : PlayerTestBase() {
         val v = screenRect(surface)
         log("I-M4-8 SubtitleView ${r.toList()} video ${v.toList()}")
         assertTrue("SubtitleView bounds inside videoRect", r[0] >= v[0] - 1 && r[1] >= v[1] - 1 && r[2] <= v[2] + 1 && r[3] <= v[3] + 1) // WP-D behaviour
+        // U-B2 / U-S8 (d): where cues are drawn. The view's bottom padding shrinks the box the cues are laid out in (its
+        // one child, the canvas output): 8 % of the video above the bottom with no bar, 16 design px above the info bar.
+        toBareVideo()
+        Thread.sleep(500)
+        val scale = v[2].let { (it - v[0]) / 1920f }
+        val box = cueBox(subs[0])
+        log("I-M4-8 cue box without a bar ${box.toList()}")
+        assertTrue("no bar: cue box ends ≥ 8 % above the video bottom (${box[3]} vs ${v[3]})", box[3] <= v[3] - 0.08f * (v[3] - v[1]) + 1)
+        press(K_RIGHT) // live without archive: RIGHT opens the info bar
+        awaitPlayer("info bar") { it.layer == PlayerLayer.INFO }
+        Thread.sleep(500)
+        val boxBar = cueBox(subs[0])
+        log("I-M4-8 cue box with the info bar ${boxBar.toList()}")
+        assertTrue("info bar: cue box ends 16 px above y 820 (${boxBar[3]})", boxBar[3] <= (804f * scale) + 1)
+        toBareVideo()
         openQuickBar()
         quickSelect(QuickItem.SUBTITLES)
         pickerSelect(PickerKind.SUBTITLES) { it is PickerChoice.TextOff }
         val cleared = runBlocking { withTimeoutOrNull(3_000) { controller.cues.first { it.isEmpty() } } }
         assertNotNull("Off clears the cues", cleared) // WP-C behaviour
+    }
+
+    /** The screen rect of the box cues are laid out in: the SubtitleView's child (its padding shrinks it, U-B2). */
+    private fun cueBox(subtitleView: android.view.View): IntArray {
+        val child = main { (subtitleView as android.view.ViewGroup).getChildAt(0) }
+        assertNotNull("SubtitleView has its output child", child)
+        return screenRect(child!!)
+    }
+
+    /**
+     * V8: channel 7 (`multi` TS: CC1 in H.264 SEI, no caption descriptor) offers a speculative CEA-608 track, so the quick
+     * bar has a Subtitles item; choosing it decodes the clip's captions.
+     */
+    @Test
+    fun speculativeCea608OnTsWithoutDescriptor() {
+        fullOn(fx.multiTs)
+        awaitController("multi TS playing") { it is PlaybackState.Playing }
+        val tracks = runBlocking { withTimeoutOrNull(15_000) { controller.tracks.first { t -> t.text.isNotEmpty() } } }
+        assertNotNull("a speculative CC track is exposed: ${controller.tracks.value}", tracks)
+        log("V8 text tracks: ${controller.tracks.value.text}")
+        openQuickBar()
+        assertTrue("the quick bar has a Subtitles item: ${pui().quick?.items}", pui().quick?.items?.contains(QuickItem.SUBTITLES) == true)
+        quickSelect(QuickItem.SUBTITLES)
+        val chosen = pickerSelect(PickerKind.SUBTITLES) { it is PickerChoice.Text } as PickerChoice.Text
+        assertTrue("the CC track is labelled speculative: ${chosen.track}", chosen.track.speculative)
+        val cues = runBlocking { withTimeoutOrNull(10_000) { controller.cues.first { it.isNotEmpty() } } }
+        log("V8 cues: ${cues?.map { it.text }}")
+        assertNotNull("CC1 captions decode within 10 s", cues)
     }
 
     /** I-M4-23: `multi` archive: Back, Up → quick bar → Audio → second language, D-pad/OK/Back only (B4, owner ruling). */

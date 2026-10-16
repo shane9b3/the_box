@@ -50,7 +50,7 @@ All are changeable at runtime through `/admin`. See `config.example.json` for ev
 `username password timezone quirks series_episodes_array epg_plain auth_mode bad_creds_mode status max_connections
 active_cons_override exp_days allowed_output_formats epg_offset epg_gzip strict_timeshift_tz timeshift_expect timeshift_ranges
 hls_timeout hls_window token_ttl token_single_use pace faults stream_faults media_override synthetic synthetic_days_back synthetic_days_ahead epg_version
-timeshift_mode timeshift_window archive_lag_sec timeshift_reject_forms timeshift_range_ignored player_fixtures`
+timeshift_mode timeshift_window archive_lag_sec timeshift_future timeshift_chunked timeshift_reject_forms timeshift_range_ignored player_fixtures`
 
 `media_override`: `{"<stream id>": "std|mp2|50fps|radio|hdr|multi"}` serves another clip for that stream, live and archive
 (Q-1: `{"1": "hdr"}` makes ch1 HDR10 for the HDR-poster test). `multi` on a live `.m3u8` serves the master playlist with
@@ -131,6 +131,8 @@ the `xc-path` variant), `path_sec` (`...:HH-MM-SS`, `xc-path-sec`), `php` (`/str
 | (always) | | `timeshift_abs`/`timeshift_rel` `.ts` stream live-like; their `.m3u8` and (duration mode) `-now.m3u8` are **EVENT** playlists (`#EXT-X-PLAYLIST-TYPE:EVENT`, no `ENDLIST`) listing `/tseg/` segments from the start up to now, growing with wall time (≤ 3 h) |
 | `timeshift_window` | `true` | **404** (`timeshift_window`) for a channel without archive, a start older than its `archive_days` (+120 s slack; catalog 3 days, synthetic per channel), or later than now + 60 s. Independent of `timeshift_expect`/`strict_timeshift_tz`; evaluated against each request's wall clock, so a long-running panel does not drift. `false` restores the old warn-only behaviour |
 | `archive_lag_sec` | `0` | **404** (`archive_lag`) for a start within N s of now: the archive's last minutes are not written yet (I-M4-14) |
+| `timeshift_future` | `"clamp"` | (code review 2026-10-16, U-S9) `duration` mode only. `"clamp"`: the body ends at what the panel has written, `now − archive_lag_sec − start`, as a real Xtream panel (an xc request is `ceil((now − S)/60)` minutes, so its end is up to 59 s past now); the log notes `CLAMPED{n}s/{D}s`. `"serve"`: the whole requested duration at once (the 2026-10-15 behaviour) |
+| `timeshift_chunked` | `false` | (U-S9) `duration` mode only: no `Content-Length` and no `Accept-Ranges`, a close-delimited body (HTTP/1.0), `Range` ignored (200 from byte 0), as many panels serve archive; the log notes `NO-LENGTH` |
 | `timeshift_reject_forms` | `{}` | `{form: status}`: the panel does not serve that form. Status: any HTTP code (`404`, `400`, `403`, `500`...), `"200-html"` (200 + the HTML splash), `"200-empty"` (200, empty body). Per channel through `stream_faults["<id>"].timeshift_reject_forms` (I-M4-11/12/21) |
 | `timeshift_range_ignored` | `false` | `Content-Length` of the whole body, no `Accept-Ranges`, `Range` ignored (200 from byte 0): the `bytesToSkip` path a native seek hits on real panels |
 

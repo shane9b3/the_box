@@ -37,10 +37,9 @@ class FiveKeyJourneyTest : PlayerTestBase() {
         awaitArchive("PAUSED_LIVE by OK", 5_000) { it.phase == ArchivePhase.PAUSED_LIVE } // WP-A/WP-B behaviour
         steps += "OK → ${archive().phase}"
         Thread.sleep(5_000)
-        // 3. LEFT rewinds and commits: time-shift. Integration 2026-10-15 (test fix): one step (−10 s) from a 5 s pause
-        // targets ~15 s behind the edge, inside LIVE_SNAP_MS (30 s), so the commit rightly snaps to live (§3.8.4,
-        // seekFromLivePause); four steps (−40 s) land outside the snap.
-        repeat(4) { press(K_LEFT, intervalMs = 120) }
+        // 3. LEFT rewinds and commits: time-shift. (Code review 2026-10-16, P-S1: the live snap is direction-aware, so
+        // the one step back (−10 s) from a 5 s pause requests the archive; the integration pass needed four, T9/L-6.)
+        press(K_LEFT)
         // Integration 2026-10-15 (test fix): a seek while paused stays paused (S2, ArchivePlaybackImpl.seekRerequest with
         // wasPaused), so the rewind from PAUSED_LIVE lands in a PAUSED time-shift.
         awaitArchive("time-shift after the rewind commit", 20_000) { it.timeShift && (it.phase == ArchivePhase.PLAYING || it.phase == ArchivePhase.PAUSED) } // WP-A/WP-B behaviour

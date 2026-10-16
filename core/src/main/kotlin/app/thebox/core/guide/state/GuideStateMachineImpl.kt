@@ -107,6 +107,7 @@ class GuideStateMachineImpl(
      */
     override var full: PlayerStateMachine? = null
         set(value) {
+            if (field === value) return // U-L7: re-attaching the same machine (activity recreation) keeps its open layers
             field = value
             // The last dispatch's curMs may be stale (the host attaches between events): read the clock now.
             if (value != null && _ui.value.mode == ScreenMode.FULL) value.enterFull(nowMs(), EnterReason.LAUNCH)
@@ -1241,7 +1242,9 @@ class GuideStateMachineImpl(
      */
     private fun onArchive(s: ArchiveStatus) {
         archive = s
-        if (u.archive != s) u = u.copy(archive = s)
+        // U-S5 (core half) = P-L1: the session publishes once a second while playing; the guide's UI state changes only
+        // when the mini player's inputs do, so GUIDE with catch-up in the mini does not recompose every second.
+        if (archiveUiChanged(u.archive, s)) u = u.copy(archive = s)
         if (s.phase != ArchivePhase.FAILED) return
         if (s.failure == ArchiveFailure.NOT_IN_ARCHIVE && s.identityHash != 0L && suspect.add(s.identityHash)) {
             frame.suspectArchive = suspect.toLongArray().also { it.sort() }
@@ -1249,6 +1252,23 @@ class GuideStateMachineImpl(
             if (!holdingVertical) rebuildPanel(newCell = false)
         }
         if (pendingArchiveHash == s.identityHash) pendingArchiveHash = 0
+    }
+
+    /**
+     * U-S5 / P-L1: [new] differs from the published [old] in what the mini player and the FULL card read (phase,
+     * channel, programme, failure, time-shift, advancing), or its wall clock or live edge left [old]'s extrapolation by
+     * more than [ARCHIVE_UI_SLACK_MS].
+     */
+    private fun archiveUiChanged(old: ArchiveStatus?, new: ArchiveStatus): Boolean {
+        if (old == null) return true
+        if (old.phase != new.phase || old.identityHash != new.identityHash || old.channel != new.channel ||
+            old.programme != new.programme || old.failure != new.failure || old.error != new.error ||
+            old.timeShift != new.timeShift || old.advancing != new.advancing || old.displayShiftMs != new.displayShiftMs
+        ) return true
+        val dt = new.atMs - old.atMs
+        val wall = old.wallMs + if (old.advancing) dt else 0L
+        val edge = old.liveEdgeMs + dt
+        return kotlin.math.abs(new.wallMs - wall) > ARCHIVE_UI_SLACK_MS || kotlin.math.abs(new.liveEdgeMs - edge) > ARCHIVE_UI_SLACK_MS
     }
 
     /** A request for [hash] is still being started or probed (STARTING, PROBING): its errors are not final. */
@@ -1351,7 +1371,10 @@ class GuideStateMachineImpl(
     }
 
     private fun nextDeadline(): Long {
-        var d = descDueAtMs
+        // U-B1: a hold blocks the description load (tick()), so its due time is not a deadline while the hold lasts;
+        // publishing it would leave a past deadline the host ticker spins on. The release re-arms it (armDescription /
+        // rebuildPanel), which republishes the deadline.
+        var d = if (holdingVertical || holdingHorizontal) Long.MAX_VALUE else descDueAtMs
         val o = u.overlay
         if (o is Overlay.Number) {
             d = if (o.notFound) minOf(d, numberNotFoundUntil)
@@ -1661,6 +1684,9 @@ class GuideStateMachineImpl(
         val FACTORY = GuideStateMachineFactory { effects, navigator, labels, renderer, nowMs ->
             GuideStateMachineImpl(effects, navigator, labels, renderer, nowMs)
         }
+
+        /** U-S5 / P-L1: how far a status's clocks may leave the published one's extrapolation before it is republished. */
+        const val ARCHIVE_UI_SLACK_MS = 1_000L
 
         // Appendix B (WP-D)
         const val HOLD_TIME_STEP_AFTER_MS = 1_000L

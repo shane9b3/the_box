@@ -76,7 +76,7 @@ fun GuideScreen(
                     val b = c.boundsInWindow(clipBounds = false)
                     onHoleMeasured(HoleGeometry.round(b.left, b.top, b.right, b.bottom))
                 },
-        ) { MiniPlayerOverlay(state.tuned, state.tunedNow, state.tunedChannel, clock24, lowEnd, poster) }
+        ) { MiniPlayerOverlay(state.tuned, state.tunedNow, state.tunedChannel, clock24, lowEnd, poster, archive = state.archive) } // U-S5/L-4
 
         Column(
             Modifier

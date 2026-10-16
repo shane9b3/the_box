@@ -74,8 +74,12 @@ fun ScrubBar(state: ScrubState, nowMs: Long, modifier: Modifier = Modifier, chan
                 .size(PlayerUi.BAR_W.dp, PlayerUi.SCRUB_NODE_H.dp)
                 .testTag(SCRUB_TRACK_TAG)
                 .drawBehind {
-                    val now = maxOf(tick.value, nowMs)
-                    drawIntoCanvas { renderer.draw(it.nativeCanvas, state, now, size.width, size.height) }
+                    // U-S5: the wall clock is read here, in the draw phase (the tick only invalidates the node).
+                    val now = maxOf(tick.value, nowMs, System.currentTimeMillis())
+                    drawIntoCanvas {
+                        android.os.Trace.beginSection(TRACE_SCRUB) // U-S6 (L-14)
+                        try { renderer.draw(it.nativeCanvas, state, now, size.width, size.height) } finally { android.os.Trace.endSection() }
+                    }
                 },
         )
         if (state.focus == ScrubFocus.CHIPS) {

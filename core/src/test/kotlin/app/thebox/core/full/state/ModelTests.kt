@@ -182,9 +182,9 @@ class ErrorCardModelTest {
         check(ACCOUNT_EXPIRED, "GUIDE", NextStep.ACCOUNT_DETAILS)
         check(ACCOUNT_DISABLED, "GUIDE", NextStep.ACCOUNT_DETAILS)
         check(NEEDS_REAUTH, "GUIDE", NextStep.EDIT_LOGIN)
-        check(CREDENTIALS_UNAVAILABLE, "RETRY GUIDE", null)
-        check(CONNECTION_LIMIT, "RETRY STOP GUIDE", null)
-        check(CONNECTION_LIMIT_LOCAL, "RETRY GUIDE", null)
+        check(CREDENTIALS_UNAVAILABLE, "RETRY GUIDE", NextStep.RETRY) // P-S2
+        check(CONNECTION_LIMIT, "RETRY STOP GUIDE", NextStep.STOP_AND_WAIT) // P-S2
+        check(CONNECTION_LIMIT_LOCAL, "RETRY GUIDE", NextStep.RETRY) // P-S2
         check(FORBIDDEN, "RETRY GUIDE", NextStep.CHANGE_USER_AGENT)
         check(CHANNEL_OFFLINE, "PREVIOUS_CHANNEL RETRY GUIDE", NextStep.TRY_BACKUP)
         check(FORMAT_REFUSED, "GUIDE", NextStep.PLAYLIST_SETTINGS)
@@ -195,18 +195,39 @@ class ErrorCardModelTest {
         check(TLS_FAILURE, "GUIDE", NextStep.PLAYLIST_SETTINGS)
         check(CODEC_UNSUPPORTED, "TRY_SOFTWARE_DECODER GUIDE", NextStep.OPEN_EXTERNAL)
         check(STREAM_UNDECODABLE, "RETRY GUIDE", NextStep.OPEN_EXTERNAL)
-        check(AUDIO_OUTPUT_FAILED, "AUDIO_OPTIONS GUIDE", null)
+        check(AUDIO_OUTPUT_FAILED, "AUDIO_OPTIONS GUIDE", NextStep.AUDIO_OPTIONS) // P-S2
         check(UNSUPPORTED_SOURCE, "GUIDE", NextStep.OPEN_EXTERNAL)
-        check(CATCHUP_NOT_IN_ARCHIVE, "WATCH_LIVE TRY_OTHER_CATCHUP_FORMAT GUIDE", null)
+        check(CATCHUP_NOT_IN_ARCHIVE, "WATCH_LIVE TRY_OTHER_CATCHUP_FORMAT GUIDE", NextStep.WATCH_LIVE) // P-S2
         check(CHANNEL_NOT_FOUND, "GUIDE", NextStep.REFRESH_PLAYLIST)
     }
 
     @Test fun ladderNarrowedActions() {
         val offline = PlayerFixtures.error(CHANNEL_OFFLINE).copy(actions = listOf(NextStep.RETRY))
         assertEquals(listOf(ErrorButton.RETRY, ErrorButton.GUIDE), card(CHANNEL_OFFLINE, error = offline).buttons, "no previous channel: the ladder filtered it")
-        assertNull(card(CHANNEL_OFFLINE, error = offline).textStep)
+        assertEquals(NextStep.RETRY, card(CHANNEL_OFFLINE, error = offline).textStep, "P-S2: only Retry left, its sentence")
         val server = PlayerFixtures.error(SERVER_ERROR).copy(actions = listOf(NextStep.RETRY))
-        assertNull(card(SERVER_ERROR, error = server).textStep, "no backup: no text step")
+        assertEquals(NextStep.RETRY, card(SERVER_ERROR, error = server).textStep, "P-S2: no backup, the Retry sentence")
+    }
+
+    /** P-S2 = U-S4: every code × {defaults, ladder-narrowed} × variantLeft × decoder carries a next-step line. */
+    @ParameterizedTest
+    @EnumSource(PlaybackErrorCode::class)
+    fun everyCardCarriesANextStepLine(code: PlaybackErrorCode) {
+        val bases = listOf(PlayerFixtures.error(code), narrowed(PlayerFixtures.error(code)), PlayerFixtures.error(code).copy(actions = listOf(NextStep.RETRY)))
+        for (e in bases) for (variantLeft in listOf(true, false)) for (decoder in listOf(null, VideoDecoderMode.SOFTWARE_PREFERRED)) {
+            val c = ErrorCardModel.card(e, ch, decoder, variantLeft, archiveFailed = false)
+            val step = assertNotNull(c.textStep, "$code ${e.actions} variantLeft=$variantLeft decoder=$decoder: a next-step line")
+            if (step == NextStep.RETRY) {
+                assertTrue(e.actions.none { it != NextStep.RETRY && buttonFor(it)?.let { b -> b in c.buttons } == true },
+                    "$code: the Retry sentence only when no other action became a button ($c)")
+            }
+        }
+    }
+
+    @Test fun connectionLimitShowsStopAndWaitAsText() {
+        val c = card(CONNECTION_LIMIT)
+        assertEquals(NextStep.STOP_AND_WAIT, c.textStep, "P-S2: the instruction about the other device is drawn")
+        assertEquals(listOf(ErrorButton.RETRY, ErrorButton.STOP, ErrorButton.GUIDE), c.buttons)
     }
 
     /**

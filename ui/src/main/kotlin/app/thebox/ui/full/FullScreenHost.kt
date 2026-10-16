@@ -16,6 +16,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +39,7 @@ import app.thebox.ui.guide.screen.GuideUi
 import app.thebox.ui.guide.screen.Line
 import app.thebox.ui.playback.ErrorText
 import app.thebox.ui.theme.DesignTokens
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 
 const val FULL_SCREEN_TAG = "full_screen"
@@ -45,6 +47,9 @@ const val GROUP_CARD_TAG = "group_card"
 const val BOTTOM_SCRIM_TAG = "player_bottom_scrim"
 const val PROBING_TAG = "player_probing"
 const val STOPPED_HINT_TAG = "player_stopped_hint"
+/** U-S5: debug composition counter of [FullScreenHost] (`GuideDebugCounters`). */
+const val COMPOSITIONS_FULL = "FullScreenHost"
+private const val MINUTE_MS = 60_000L
 
 /**
  * FULL (docs/design/m4-player-ux.md §3.9): the player overlays, each a sibling inside this box (which sits in the key
@@ -66,6 +71,7 @@ fun FullScreenHost(
     clock24: Boolean = true,
     lowEnd: Boolean = false,
 ) {
+    if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) androidx.compose.runtime.SideEffect { app.thebox.ui.guide.GuideDebugCounters.bump(COMPOSITIONS_FULL) } // U-S5
     val flow = remember(player) { player?.machine?.ui ?: MutableStateFlow(PlayerUiState()) }
     val ui by flow.collectAsState()
     val extras = player as? PlayerExtras
@@ -73,7 +79,15 @@ fun FullScreenHost(
     val detail by detailFlow.collectAsState()
     val failureFlow = remember(player) { extras?.archiveFailure ?: MutableStateFlow(null) }
     val archiveFailure by failureFlow.collectAsState()
-    val nowMs = System.currentTimeMillis()
+    // U-S5: a per-minute clock (past / now / future, list progress); never read in composition per recomposition, so
+    // the bars and the list skip when only the stats (2 Hz) change. Sub-minute time is read in the draw lambdas.
+    val nowMs by produceState(System.currentTimeMillis()) {
+        while (true) {
+            val n = System.currentTimeMillis()
+            value = n
+            delay(MINUTE_MS - n % MINUTE_MS)
+        }
+    }
     Box(modifier.fillMaxSize().testTag(FULL_SCREEN_TAG)) {
         val bottomBar = ui.info != null || ui.scrub != null || ui.quick != null
         Fade(if (bottomBar) Unit else null, lowEnd) {
@@ -89,10 +103,14 @@ fun FullScreenHost(
             ScrubBar(s, nowMs, Modifier.offset(PlayerUi.BAR_L.dp, PlayerUi.BAR_T.dp), channel = state.tunedChannel, clock24 = clock24)
         }
         Fade(if (ui.scrub == null) ui.info else null, lowEnd) { info ->
-            InfoBar(info, nowMs, Modifier.offset(PlayerUi.BAR_L.dp, PlayerUi.BAR_T.dp).size(PlayerUi.BAR_W.dp, PlayerUi.BAR_H.dp), clock24 = clock24, detail = detail)
+            InfoBar(
+                info, nowMs, Modifier.offset(PlayerUi.BAR_L.dp, PlayerUi.BAR_T.dp).size(PlayerUi.BAR_W.dp, PlayerUi.BAR_H.dp), clock24 = clock24, detail = detail,
+                showPill = info.channel != null && info.channel?.identityHash == state.tuned.identityHash, // U-S2 (V6)
+            )
         }
         Fade(ui.quick, lowEnd) { q -> QuickBar(q, Modifier.offset(PlayerUi.QUICK_L.dp, PlayerUi.QUICK_T.dp)) }
-        ui.stats?.let { StatsOverlay(it, Modifier.offset(PlayerUi.STATS_L.dp, PlayerUi.STATS_T.dp)) }
+        // U-S3 (V2): the stats share the top-left corner with the channel list and the group card; hidden while either shows.
+        if (ui.channels == null && state.groupCard == null) ui.stats?.let { StatsOverlay(it, Modifier.offset(PlayerUi.STATS_L.dp, PlayerUi.STATS_T.dp)) }
         if (player != null) {
             Fade(ui.channels, lowEnd) { c -> ChannelListPanel(c, player, Modifier.offset(PlayerUi.LIST_L.dp, PlayerUi.LIST_T.dp), nowMs) }
         }

@@ -26,6 +26,17 @@ class PlayerMemoryTest : PlayerTestBase() {
     }
 
     private fun journey() {
+        // Scrub on live with archive first, on channel 1: quick bar → Pause / rewind → LEFT ×3 → BACK cancels the preview.
+        // U-S8 (e): asserted, not skipped (the leg used to run after ten zaps, on a channel the test did not choose, and
+        // skipped itself silently when that channel had no archive).
+        toBareVideo()
+        openQuickBar()
+        assertTrue("the quick bar offers Pause / rewind on channel 1: ${pui().quick?.items}", pui().quick?.items?.contains(QuickItem.TIME_SHIFT) == true)
+        quickSelect(QuickItem.TIME_SHIFT)
+        awaitPlayer("scrub bar") { it.layer == PlayerLayer.SCRUB }
+        press(K_LEFT, times = 3, intervalMs = 100)
+        press(K_BACK) // cancel the preview (nothing sent)
+        toBareVideo()
         repeat(10) { press(K_CH_UP, intervalMs = 700) }
         awaitController("playing after the zaps", 20_000) { it is PlaybackState.Playing }
         toBareVideo()
@@ -41,14 +52,6 @@ class PlayerMemoryTest : PlayerTestBase() {
         awaitPlayer("stats on") { it.stats != null }
         toBareVideo()
         press(K_BACK) // stats off
-        // Scrub on live with archive: quick bar → Pause / rewind → LEFT ×3 → BACK cancels the preview.
-        openQuickBar()
-        if (pui().quick?.items?.contains(QuickItem.TIME_SHIFT) == true) {
-            quickSelect(QuickItem.TIME_SHIFT)
-            awaitPlayer("scrub bar") { it.layer == PlayerLayer.SCRUB }
-            press(K_LEFT, times = 3, intervalMs = 100)
-            press(K_BACK) // cancel the preview (nothing sent)
-        }
         toBareVideo()
     }
 

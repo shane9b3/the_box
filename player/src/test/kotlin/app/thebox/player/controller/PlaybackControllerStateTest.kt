@@ -757,6 +757,28 @@ class PlaybackControllerStateTest {
         assertEquals(3, f.controller.stats.value.serverCount)
     }
 
+    /** P-S3: after the L29 switch to software, a further decoder failure (L30) offers no "Software decoder" button. */
+    @Test
+    fun softwareFallbackFailureOffersNoSoftwareButton() {
+        val real = app.thebox.core.playback.errors.ErrorLadderImpl(random = { 0.5 })
+        val signal = FailureSignal.DecoderInit(true, "video/hevc", "c2.hevc.decoder")
+        var calls = 0
+        f.ladder.script = { _, ctx -> if (calls++ == 0) LadderDecision.SoftwareVideoAndReprepare else real.decide(signal, ctx).first }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.play()
+        f.exo.emitError(PlaybackException("e", null, PlaybackException.ERROR_CODE_DECODER_INIT_FAILED))
+        f.idle()
+        f.play()
+        f.exo.emitError(PlaybackException("e", null, PlaybackException.ERROR_CODE_DECODER_INIT_FAILED))
+        f.idle()
+        assertEquals(app.thebox.core.playback.VideoDecoderMode.SOFTWARE_PREFERRED, f.ladder.seen.last().ctx.videoDecoderMode)
+        val err = f.state as PlaybackState.Error
+        assertEquals(PlaybackErrorCode.CODEC_UNSUPPORTED, err.error.code)
+        assertFalse("no loop back into software", NextStep.TRY_SOFTWARE_DECODER in err.error.actions)
+        assertEquals(listOf(NextStep.OPEN_EXTERNAL), err.error.actions)
+    }
+
     private fun <T : Any> assertNotNullAndGet(v: T?): T {
         assertNotNull(v)
         return v!!

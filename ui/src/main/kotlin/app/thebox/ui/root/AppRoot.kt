@@ -7,10 +7,10 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -44,9 +44,8 @@ import app.thebox.ui.full.FullScreenHost
 import app.thebox.ui.full.PlayerUi
 import app.thebox.ui.full.StickyVideo
 import app.thebox.ui.full.SubtitleLayer
-import app.thebox.ui.full.subtitleBottomPadding
+import app.thebox.ui.full.subtitleLiftPx
 import app.thebox.ui.guide.screen.GuideScreen
-import app.thebox.ui.guide.screen.LocalPlayerArchive
 import app.thebox.ui.guide.screen.ProvideShellImageLoader
 import app.thebox.ui.playback.VideoLayer
 import app.thebox.ui.reminder.ReminderCard
@@ -58,6 +57,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 
 const val KEY_SINK_TAG = "key_sink"
 const val VIDEO_LAYER_TAG = "video_layer"
+/** U-S5: debug composition counter of the root body. */
+const val COMPOSITIONS_ROOT = "AppRoot"
 
 /** `SCRIM_MS` (Appendix B): the black scrim over the hole fades in/out in 120 ms (§3.13.5). */
 const val SCRIM_MS = 120
@@ -83,20 +84,33 @@ fun viewportFor(hole: HoleMode): Viewport = when (hole) {
 
 private fun nothingTuned(t: TunedState) = t.identity == null || t.phase == MiniPhase.IDLE || t.phase == MiniPhase.STOPPED
 
+/** The bottom bar FULL shows (toasts and captions lift over it, N8, U-B2). */
+enum class PlayerBar { NONE, INFO_OR_SCRUB, QUICK }
+
+fun barOf(player: PlayerUiState): PlayerBar = when {
+    player.info != null || player.scrub != null -> PlayerBar.INFO_OR_SCRUB
+    player.quick != null -> PlayerBar.QUICK
+    else -> PlayerBar.NONE
+}
+
 /**
  * Bottom offset (design px) of the toasts in the displayed mode (docs/design/m4-player-ux.md §3.9, N8): 96, lifted to
  * 276 while the info or scrub bar shows in FULL and to 156 over the quick bar.
  */
-fun toastBottomFor(shown: ScreenMode, player: PlayerUiState): Float = when {
+fun toastBottomFor(shown: ScreenMode, bar: PlayerBar): Float = when {
     shown != ScreenMode.FULL -> PlayerUi.TOAST_B
-    player.info != null || player.scrub != null -> PlayerUi.TOAST_B_OVER_BAR
-    player.quick != null -> PlayerUi.TOAST_B_OVER_QUICK
+    bar == PlayerBar.INFO_OR_SCRUB -> PlayerUi.TOAST_B_OVER_BAR
+    bar == PlayerBar.QUICK -> PlayerUi.TOAST_B_OVER_QUICK
     else -> PlayerUi.TOAST_B
 }
 
+fun toastBottomFor(shown: ScreenMode, player: PlayerUiState): Float = toastBottomFor(shown, barOf(player))
+
 /** Right offset (design px) of the reminder card: 64, or 568 while the picker sheet is open in FULL (N8). */
-fun reminderEndFor(shown: ScreenMode, player: PlayerUiState): Float =
-    if (shown == ScreenMode.FULL && player.picker != null) PlayerUi.REMINDER_R_BESIDE_PICKER else PlayerUi.REMINDER_R
+fun reminderEndFor(shown: ScreenMode, pickerOpen: Boolean): Float =
+    if (shown == ScreenMode.FULL && pickerOpen) PlayerUi.REMINDER_R_BESIDE_PICKER else PlayerUi.REMINDER_R
+
+fun reminderEndFor(shown: ScreenMode, player: PlayerUiState): Float = reminderEndFor(shown, player.picker != null)
 
 /**
  * The root tree (docs/design/m3-guide.md §3.13.1, B1, B8; M4 docs/design/m4-player-ux.md §3.6.3):
@@ -137,6 +151,7 @@ fun AppRoot(
     search: @Composable () -> Unit = {},
     grid: @Composable (Modifier) -> Unit,
 ) {
+    if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) androidx.compose.runtime.SideEffect { app.thebox.ui.guide.GuideDebugCounters.bump(COMPOSITIONS_ROOT) } // U-S5
     val ui by host.machine.ui.collectAsState()
     val video by host.video.collectAsState()
     val playback by host.playback.collectAsState()
@@ -144,9 +159,15 @@ fun AppRoot(
     val lowEnd by host.lowEnd.collectAsState()
     val player = host.player
     val playerFlow = remember(player) { player?.machine?.ui ?: MutableStateFlow(PlayerUiState()) }
-    val pui by playerFlow.collectAsState()
+    // U-S5: the player's state and the cues are never read in the root body. The root derives the few values it needs
+    // (screen off, the bar under the toast and the captions, the picker), so a 25 Hz list or quick-bar hold recomposes
+    // FullScreenHost only, and a cue list re-runs SubtitleLayer's update only.
+    val puiState = playerFlow.collectAsState()
     val cuesFlow: StateFlow<List<Cue>> = remember(player) { player?.cues ?: MutableStateFlow(emptyList()) }
-    val cues by cuesFlow.collectAsState()
+    val cues = cuesFlow.collectAsState()
+    val playerScreenOff by remember(puiState) { derivedStateOf { puiState.value.layer == PlayerLayer.SCREEN_OFF } }
+    val playerBar by remember(puiState) { derivedStateOf { barOf(puiState.value) } }
+    val pickerOpen by remember(puiState) { derivedStateOf { puiState.value.picker != null } }
 
     // ---- geometry (window px)
     val container = LocalWindowInfo.current.containerSize
@@ -190,7 +211,7 @@ fun AppRoot(
     }
 
     // ---- screen off (§3.4.5): COVERED while off; waking waits for the next rendered first frame under the scrim.
-    val screenOff = shown == ScreenMode.FULL && pui.layer == PlayerLayer.SCREEN_OFF
+    val screenOff = shown == ScreenMode.FULL && playerScreenOff
     var wasOff by remember { mutableStateOf(false) }
     LaunchedEffect(screenOff) {
         if (screenOff) {
@@ -251,11 +272,11 @@ fun AppRoot(
     val density = LocalDensity.current.density
     val anchor = remember(ui.overlay) { if (ui.overlay is Overlay.Menu || ui.overlay is Overlay.Sheet) cellAnchor(host, density) else null }
     val ambientShadowHole = if (holeMode == HoleMode.MINI || holeMode == HoleMode.STILL) rects.hole else null
-    val toastBottom = toastBottomFor(shown, pui)
-    val reminderEnd = reminderEndFor(shown, pui)
+    val toastBottom = toastBottomFor(shown, playerBar)
+    val reminderEnd = reminderEndFor(shown, pickerOpen)
 
     ProvideShellImageLoader(host.imageLoader) {
-        CompositionLocalProvider(LocalPlayerArchive provides ui.archive) {
+        run { // (was the static LocalPlayerArchive provider; U-S5/L-4: GuideScreen passes state.archive itself)
             Box(modifier.fillMaxSize()) {
                 // VideoLayer first: on API ≤ 30 its SurfaceView punches the hole with an unclipped drawColor(CLEAR), which
                 // would erase anything drawn before it in the frame (see AmbientBackground). The background then paints
@@ -265,12 +286,12 @@ fun AppRoot(
                 HoleChrome(rects, holeMode, host.ambient, scrim = { scrim.value }, poster = holeMode == HoleMode.MINI && video.posterMode)
                 val videoRect = rects.video
                 if (shown == ScreenMode.FULL && !screenOff && player != null && videoRect != null) {
-                    val barTop = when {
-                        pui.info != null || pui.scrub != null -> PlayerUi.BAR_T * density
-                        pui.quick != null -> PlayerUi.QUICK_T * density
-                        else -> null
+                    val barTop = when (playerBar) {
+                        PlayerBar.INFO_OR_SCRUB -> PlayerUi.BAR_T * density
+                        PlayerBar.QUICK -> PlayerUi.QUICK_T * density
+                        PlayerBar.NONE -> null
                     }
-                    SubtitleLayer(cues, videoRect, subtitleBottomPadding(videoRect, barTop, density))
+                    SubtitleLayer(cues, videoRect, subtitleLiftPx(videoRect, barTop, density)) // U-B2
                 }
                 Box(Modifier.fillMaxSize().testTag(KEY_SINK_TAG).then(sink)) {
                     when (shown) {

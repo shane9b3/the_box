@@ -4,6 +4,7 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.annotation.OptIn
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.State
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.testTag
@@ -27,22 +28,22 @@ const val SUBTITLE_LAYER_TAG = "subtitle_layer"
  * N15: a classic `View` must never take focus from the key sink, so the factory sets `isFocusable = false`,
  * `FOCUS_BLOCK_DESCENDANTS` and `IMPORTANT_FOR_ACCESSIBILITY_NO`; the view is not clickable either. Style: the system
  * captioning style (`setUserDefaultStyle`/`setUserDefaultTextSize`), embedded styles applied, canvas rendering.
- * [bottomPaddingFraction] lifts captions over a visible bar (N5); `setCues` runs in `update`, on main.
+ *
+ * U-B2 (V1, lead decision 7): captions are lifted by the view's **bottom padding** [liftPx] (device px), not by
+ * `setBottomPaddingFraction`: Media3's `SubtitlePainter` applies the fraction only to cues whose line is unset, and
+ * WebVTT "auto" lines and CEA-608 rows are `LINE_TYPE_NUMBER`, anchored to the box's bottom. `SubtitleView` is a
+ * `FrameLayout`, so the padding shrinks the box every cue type is laid out in; the fraction is 0 so unset-line cues are
+ * not lifted twice. DVB bitmap cues are scaled into the shorter box while a bar shows (accepted; M6 DVB check).
+ *
+ * U-S5: [cues] is read only in `update`, so a cue list (CEA-608 paint-on emits per character) re-runs `setCues` and
+ * recomposes nothing.
  */
 @OptIn(UnstableApi::class)
 @Composable
-fun SubtitleLayer(cues: List<Cue>, videoRect: RectPx, bottomPaddingFraction: Float, modifier: Modifier = Modifier) {
+fun SubtitleLayer(cues: State<List<Cue>>, videoRect: RectPx, liftPx: Int, modifier: Modifier = Modifier) {
     val rect = videoRect
     AndroidView(
-        factory = { context ->
-            SubtitleView(context).apply {
-                setUserDefaultStyle()
-                setUserDefaultTextSize()
-                setApplyEmbeddedStyles(true)
-                setViewType(SubtitleView.VIEW_TYPE_CANVAS)
-                configureNoFocus(this)
-            }
-        },
+        factory = { context -> newSubtitleView(context) },
         modifier = modifier
             .testTag(SUBTITLE_LAYER_TAG)
             .layout { measurable, constraints ->
@@ -53,11 +54,26 @@ fun SubtitleLayer(cues: List<Cue>, videoRect: RectPx, bottomPaddingFraction: Flo
                 val outerH = if (constraints.hasBoundedHeight) constraints.maxHeight else rect.bottom
                 layout(outerW, outerH) { placeable.place(rect.left, rect.top) }
             },
-        update = { view ->
-            view.setBottomPaddingFraction(bottomPaddingFraction)
-            view.setCues(cues)
-        },
+        update = { view -> applySubtitleState(view, cues.value, liftPx) },
     )
+}
+
+/** The configured view (style, canvas output, no focus); shared by the layer and its placement test. */
+@OptIn(UnstableApi::class)
+fun newSubtitleView(context: android.content.Context): SubtitleView = SubtitleView(context).apply {
+    setUserDefaultStyle()
+    setUserDefaultTextSize()
+    setApplyEmbeddedStyles(true)
+    setViewType(SubtitleView.VIEW_TYPE_CANVAS)
+    setBottomPaddingFraction(0f) // U-B2: the view padding lifts every cue type
+    configureNoFocus(this)
+}
+
+/** U-B2: the lift as bottom padding (fraction 0), then the cues. Shared by the layer and its placement test. */
+@OptIn(UnstableApi::class)
+fun applySubtitleState(view: SubtitleView, cues: List<Cue>, liftPx: Int) {
+    if (view.paddingBottom != liftPx) view.setPadding(0, 0, 0, liftPx)
+    view.setCues(cues)
 }
 
 /** N15: never focusable, blocks its descendants, hidden from accessibility, not clickable. */
@@ -71,11 +87,14 @@ fun configureNoFocus(view: View) {
 }
 
 /**
- * N5: the bottom padding that keeps captions above a bar whose top is [barTopPx] (device px), as a fraction of the
- * video height: `((videoRect.bottom − barTop + 16·scale) / videoRect.height).coerceIn(0.08, 0.5)`; 0.08 without a bar.
+ * N5 as amended by U-B2 (lead decision 7): the bottom lift of the caption box in device px, `max(8 % of the video
+ * height, the distance from the video's bottom to 16 design px above the highest open bar)`, capped at half the video
+ * height. [barTopPx] is the bar's top in window px (null: no bar).
  */
-fun subtitleBottomPadding(videoRect: RectPx, barTopPx: Float?, scale: Float): Float {
-    if (barTopPx == null || videoRect.height <= 0) return PlayerUi.SUB_PAD_DEFAULT
-    val f = (videoRect.bottom - barTopPx + PlayerUi.SUB_PAD_GAP * scale) / videoRect.height
-    return f.coerceIn(PlayerUi.SUB_PAD_DEFAULT, PlayerUi.SUB_PAD_MAX)
+fun subtitleLiftPx(videoRect: RectPx, barTopPx: Float?, scale: Float): Int {
+    val h = videoRect.height
+    if (h <= 0) return 0
+    val base = PlayerUi.SUB_PAD_DEFAULT * h
+    val overBar = if (barTopPx == null) 0f else videoRect.bottom - (barTopPx - PlayerUi.SUB_PAD_GAP * scale)
+    return kotlin.math.ceil(maxOf(base, overBar).coerceAtMost(PlayerUi.SUB_PAD_MAX * h)).toInt()
 }

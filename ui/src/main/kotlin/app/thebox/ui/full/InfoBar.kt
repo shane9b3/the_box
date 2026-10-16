@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -16,6 +15,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -32,6 +32,10 @@ import app.thebox.ui.guide.screen.GuideUi
 import app.thebox.ui.guide.screen.Line
 
 const val INFO_BAR_TAG = "player_info_bar"
+const val BAR_GLYPHS_TAG = "player_bar_glyphs"
+/** U-S6: trace sections for §5.9 "Overlay draw ≤ 1 ms P90" (benchmark journeys (b) and (d)). */
+const val TRACE_INFO = "player-info"
+const val TRACE_SCRUB = "player-scrub"
 
 /**
  * The info bar (docs/design/m4-player-ux.md §3.2, §3.9): passive (the zap card, no keys) or active (↑/↓ programmes,
@@ -42,18 +46,31 @@ const val INFO_BAR_TAG = "player_info_bar"
  * [nowMs] classifies past / now / future (the composition's clock; the progress bar ticks on its own).
  */
 @Composable
-fun InfoBar(state: InfoBarState, nowMs: Long, modifier: Modifier = Modifier, clock24: Boolean = true, detail: ProgrammeInfo? = null) {
+fun InfoBar(
+    state: InfoBarState,
+    nowMs: Long,
+    modifier: Modifier = Modifier,
+    clock24: Boolean = true,
+    detail: ProgrammeInfo? = null,
+    /** U-S2 (V6): the state pill describes the tuned playback; false while the bar shows another (browsed, pending) channel. */
+    showPill: Boolean = true,
+) {
     val res = androidx.compose.ui.platform.LocalResources.current
     val shape = RoundedCornerShape(PlayerUi.BAR_R.dp)
     Column(
         modifier
             .testTag(INFO_BAR_TAG)
+            // U-S6 (L-14): the §5.9 overlay-draw gate's trace section; no layer, allocation-free.
+            .drawWithContent {
+                android.os.Trace.beginSection(TRACE_INFO)
+                try { drawContent() } finally { android.os.Trace.endSection() }
+            }
             .background(PlayerUi.BarFill, shape)
             .border(1.dp, PlayerUi.Border09, shape)
             .padding(horizontal = PlayerUi.BAR_PAD_H.dp, vertical = PlayerUi.BAR_PAD_V.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        BarHeader(state.channel, state.pill, glyphsText(res, state.glyphs, state.channel), title = null)
+        BarHeader(state.channel, state.pill.takeIf { showPill }, glyphsText(res, state.glyphs, state.channel), title = null)
         val focused = state.programmes.getOrNull(state.focused)
         val nowMin = (nowMs / 60_000L).toInt()
         when {
@@ -79,17 +96,20 @@ fun InfoBar(state: InfoBarState, nowMs: Long, modifier: Modifier = Modifier, clo
 
 /** Header row shared with the scrub bar: number chip, logo, name (+ [title] under it), pill, glyphs on the right. */
 @Composable
-internal fun BarHeader(channel: GuideChannel?, pill: PillState, glyphs: String?, title: String?) {
+internal fun BarHeader(channel: GuideChannel?, pill: PillState?, glyphs: String?, title: String?) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         NumberChip(channel?.number)
         ChannelLogo(channel, PlayerUi.LOGO.dp, PlayerUi.LOGO_R.dp)
-        Column(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            if (title != null) Line(title, GuideUi.sans(26, FontWeight.SemiBold))
-            channel?.let { Line(it.displayName, if (title != null) GuideUi.sans(17, color = GuideUi.Fg70) else GuideUi.sans(24, FontWeight.SemiBold)) }
+        // U-S1 (V3): name and pill share one weighted row and the glyphs end at the bar's inner right. Two weights in one
+        // row split the free width, so the glyphs used to land mid-bar.
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+            Column(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                if (title != null) Line(title, GuideUi.sans(26, FontWeight.SemiBold))
+                channel?.let { Line(it.displayName, if (title != null) GuideUi.sans(17, color = GuideUi.Fg70) else GuideUi.sans(24, FontWeight.SemiBold)) }
+            }
+            pill?.let { PlayerPill(it) }
         }
-        PlayerPill(pill)
-        Spacer(Modifier.weight(1f))
-        glyphs?.let { Line(it, GuideUi.mono(15, color = GuideUi.Fg70)) }
+        glyphs?.let { Line(it, GuideUi.mono(15, color = GuideUi.Fg70), Modifier.testTag(BAR_GLYPHS_TAG)) }
     }
 }
 

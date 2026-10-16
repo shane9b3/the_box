@@ -204,6 +204,57 @@ class ScrubInteractionTest {
         assertEquals(s.archiveFromMs, s.previewMs)
     }
 
+    /** P-B1: a chip on the at-live bar starts the programme EPG-anchored, never as a device-clock rewind distance. */
+    @Test fun chipFromTheAtLiveBarIsEpgAnchored() {
+        val w = liveWithArchive()
+        w.press(TIME_SHIFT)
+        w.press(DOWN)
+        val prev = assertNotNull(w.ui.scrub!!.prev, "the previous-programme chip")
+        val mark = w.mark()
+        w.press(SELECT)
+        val names = w.effectsSince(mark)
+        assertFalse("rewindLive" in names, "no rewindLive(now − start): $names")
+        val call = assertNotNull(w.callsSince(mark).firstOrNull { it.name == "playProgramme" }, "playProgramme: $names")
+        assertEquals(w.channels[0].identityHash, (call.args[0] as app.thebox.core.guide.GuideChannel).identityHash)
+        assertEquals(prev.rawStartMin, (call.args[1] as app.thebox.core.guide.ProgrammeInfo).rawStartMin)
+        assertEquals(true, call.args[2], "a time-shift session (continues past the programme)")
+    }
+
+    /** P-B1: PREV_PROGRAMME on the at-live bar takes the same EPG-anchored path. */
+    @Test fun prevProgrammeFromTheAtLiveBarIsEpgAnchored() {
+        val w = liveWithArchive()
+        w.press(TIME_SHIFT)
+        val mark = w.mark()
+        w.press(PREV_PROGRAMME)
+        val names = w.effectsSince(mark)
+        assertFalse("rewindLive" in names, "no rewindLive(now − start): $names")
+        val call = assertNotNull(w.callsSince(mark).firstOrNull { it.name == "playProgramme" }, "playProgramme: $names")
+        assertTrue((call.args[1] as app.thebox.core.guide.ProgrammeInfo).endMin <= w.nowMin(), "a past programme")
+        assertEquals(true, call.args[2])
+    }
+
+    /** U-S7 = N17: a synchronous failure of playProgramme from the info bar brings the bar back with the focus on now. */
+    @Test fun syncArchiveFailureReturnsFocusToNow() {
+        val w = liveWithArchive()
+        w.failArchiveStarts = true
+        w.press(RIGHT)
+        assertEquals(PlayerLayer.INFO, w.ui.layer)
+        val nowIndex = w.ui.info!!.nowIndex
+        w.press(UP)
+        assertEquals(nowIndex - 1, w.ui.info!!.focused, "focus on the past programme")
+        w.press(SELECT)
+        assertNotNull(w.fx.last("playProgramme"))
+        assertEquals(PlayerLayer.NONE, w.ui.layer, "the bar closed at the launch")
+        w.send(PlayerEvent.ArchiveStartFailed(app.thebox.core.catchup.archive.ArchiveFailure.OUTSIDE_ARCHIVE))
+        assertEquals(PlayerLayer.INFO, w.ui.layer, "the bar is back")
+        assertEquals(w.ui.info!!.nowIndex, w.ui.info!!.focused, "focus returned to now")
+        assertFalse(w.ui.info!!.browsing)
+        // A failure of a start that did not come from the bar (or after another key) changes nothing.
+        w.press(BACK)
+        w.send(PlayerEvent.ArchiveStartFailed(app.thebox.core.catchup.archive.ArchiveFailure.OUTSIDE_ARCHIVE))
+        assertEquals(PlayerLayer.NONE, w.ui.layer)
+    }
+
     @Test fun reScopesWithThePreviewAndHasTwoChipsOnly() {
         val w = archive()
         w.press(INFO_BAR)
@@ -326,5 +377,39 @@ class PlayerStateMachineTest {
         w.player.leaveFull()
         assertNull(w.ui.stats)
         assertEquals(false, w.fx.last("setStatsEnabled")!!.args[0])
+    }
+}
+
+/** P-S4 = U-B3: after M2's 10 s live-pause release the visible phase is PAUSED (the mapper), so the keys resume. */
+class LivePauseReleaseTest {
+    private fun released(w: PlayerWorld) {
+        val ch = w.tunedChannel!!
+        w.setTuned(TunedState(ch.identity, ch.rowId, ch.identityHash, MiniPhase.PAUSED, false), ch)
+        w.flush()
+    }
+
+    @Test fun playPauseAfterTheReleaseResumesPlain() {
+        val w = liveWithoutArchive()
+        w.press(PLAY_PAUSE)
+        assertNotNull(w.fx.last("pausePlain"))
+        w.advance(12_000)
+        released(w)
+        val mark = w.mark()
+        w.press(PLAY_PAUSE)
+        assertEquals(listOf("resumePlain"), w.effectsSince(mark).filter { it == "resumePlain" || it == "retry" || it == "pausePlain" })
+        released(w)
+        val m2 = w.mark()
+        w.press(PLAY)
+        assertTrue("resumePlain" in w.effectsSince(m2))
+    }
+
+    @Test fun selectAfterTheReleaseIsNotTheStoppedHint() {
+        val w = liveWithoutArchive()
+        w.press(PLAY_PAUSE)
+        w.advance(12_000)
+        released(w)
+        val mark = w.mark()
+        w.press(SELECT)
+        assertFalse("retry" in w.effectsSince(mark), "the N12 'Press OK to play again' path is for real stops only")
     }
 }

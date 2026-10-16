@@ -32,6 +32,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
 import kotlin.test.assertNotNull
+import kotlin.test.assertNotSame
 import kotlin.test.assertNull
 import kotlin.test.assertSame
 import kotlin.test.assertTrue
@@ -557,6 +558,27 @@ class GuideBehaviourTest {
             assertFalse(PanelButton.FROM_START in w.ui.panel!!.buttons)
         }
 
+        /** U-S5 / P-L1: the session's 1 s status polls leave GuideUiState.archive identical; a phase change publishes. */
+        @Test fun archiveStatusPollsDoNotChurnTheGuideState() {
+            val w = GuideWorld()
+            val h = w.channels[0].identityHash
+            val t0 = w.nowMs
+            fun st(i: Int, phase: app.thebox.core.catchup.archive.ArchivePhase = app.thebox.core.catchup.archive.ArchivePhase.PLAYING) =
+                app.thebox.core.catchup.archive.ArchiveStatus(
+                    phase = phase, channel = w.channels[0], identityHash = h, wallMs = t0 - 600_000 + i * 1_000L, atMs = t0 + i * 1_000L,
+                    advancing = true, liveEdgeMs = t0 + i * 1_000L, timeShift = true, settledSeq = i.toLong(),
+                )
+            w.send(GuideEvent.Archive(st(0)))
+            val first = w.ui.archive
+            for (i in 1..10) w.send(GuideEvent.Archive(st(i)))
+            assertSame(first, w.ui.archive, "ten polls on the extrapolation: the same object")
+            w.send(GuideEvent.Archive(st(11).copy(wallMs = t0 - 400_000)))
+            assertNotSame(first, w.ui.archive, "a seek (wall left the extrapolation) publishes")
+            val sought = w.ui.archive
+            w.send(GuideEvent.Archive(st(12, app.thebox.core.catchup.archive.ArchivePhase.PAUSED).copy(wallMs = t0 - 400_000 + 1_000, advancing = false)))
+            assertNotSame(sought, w.ui.archive, "a phase change publishes")
+        }
+
         @Test fun archiveGoesFullOnlyWhenTheArchiveTuneArrives() {
             val w = GuideWorld()
             w.archiveSucceeds = false // the launcher failed (toast by the host): no archive Tuned arrives
@@ -794,6 +816,20 @@ class GuideBehaviourTest {
             w.press(SELECT)
             assertEquals(-1, w.machine.frame.bubbleNumber, "a fresh press ends the hold")
             assertEquals(0, w.calls.last("ensureWindow")!!.args[2], "the window is re-ensured without hold bias")
+        }
+
+        /** U-B1: a hold that stops moving (edge, refused step) leaves no past deadline; the release re-arms the description. */
+        @Test fun heldRightAtTheEdgeLeavesNoPastDeadline() {
+            val w = GuideWorld()
+            w.press(RIGHT, repeat = 1)
+            w.advance(200)
+            val d = w.machine.nextDeadlineMs.value
+            assertTrue(d == Long.MAX_VALUE || d > w.nowMs, "no past deadline while the hold lasts ($d at ${w.nowMs})")
+            val n = w.calls.calls.size
+            w.release(RIGHT)
+            assertTrue(w.machine.nextDeadlineMs.value in (w.nowMs + 1)..(w.nowMs + 1_000), "the release re-arms the description")
+            w.advance(200)
+            assertTrue(w.calls.calls.drop(n).any { it.name == "loadInfo" }, "description loads after the release")
         }
 
         /** H-S4, as reversed by M4 §7 item 15: FULL handles the media keys itself (the player machine answers). */

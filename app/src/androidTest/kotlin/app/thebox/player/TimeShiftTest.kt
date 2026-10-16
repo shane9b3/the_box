@@ -3,10 +3,14 @@ package app.thebox.player
 import android.os.SystemClock
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.thebox.core.catchup.archive.ArchivePhase
+import app.thebox.core.full.PillKind
 import app.thebox.core.full.PlayerLayer
+import app.thebox.core.full.state.PillRules
 import app.thebox.core.guide.GuideChannel
+import app.thebox.core.guide.MiniPhase
 import app.thebox.core.guide.ScreenMode
 import app.thebox.player.api.PlaybackState
+import app.thebox.player.api.StopReason
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -107,7 +111,11 @@ class TimeShiftTest : PlayerTestBase() {
         // WP-B hand-off (integration 2026-10-15): each xc open request is ceil((now − S)/60) minutes and the user is ~20 s
         // behind, so a 150 s run makes 2–3 continuations (the design's "exactly one" assumed a longer D). S1's intent is
         // "never live, the offset holds", asserted by the pill and the live sampler.
-        assertTrue("2–3 continuation requests in 150 s: $conts", conts.size in 2..3) // WP-B behaviour (S1; xc open D)
+        // Code review fix pass 2026-10-16 (U-S9): the fake panel now serves only what is written (`timeshift_future:
+        // clamp`), so each request ends at the panel's now and carries about the time-shift (~20 s) ahead of the playhead:
+        // a continuation about every 20 s (8 measured in 150 s), the offset still holds and live is never reached. The
+        // unclamped file of the integration pass gave 2–3.
+        assertTrue("2–10 continuation requests in 150 s: $conts", conts.size in 2..10) // WP-B behaviour (S1; xc open D)
         if (isEmulator()) {
             // Integration 2026-10-15: on the emulator the audio HAL's underrun storms trigger L32 re-prepares (M2 §5.13) that
             // each add ~1–1.5 s to the offset (22.6 → 29.7 s measured over three of them); the offset may grow by stall
@@ -166,6 +174,55 @@ class TimeShiftTest : PlayerTestBase() {
         press(K_BACK)
         awaitUi("guide", 5_000) { it.mode == ScreenMode.GUIDE }
         assertFalse("no hollow ↺ for a lag", onFrame { f -> f.suspectArchive.contains(p.channel.identityHash) }) // WP-A behaviour
+    }
+
+    /**
+     * I-M4-13 extension (code review 2026-10-16, P-S4 = U-B3, V7): 12 s into a live pause (after M2's 10 s release) the
+     * visible phase stays PAUSED: no FULL stopped hint at any time, Back to the guide shows the mini player's PAUSED /
+     * −MM:SS pill (not "Press OK to watch"), OK returns to FULL without a re-tune, and PLAY_PAUSE resumes from the archive.
+     * Logs (and screenshots) what the GUIDE hole shows after the release: the frozen frame or black.
+     */
+    @Test
+    fun livePauseReleaseStaysPausedInTheGuide() {
+        val ch = fullOn(1)
+        awaitController("live playing") { it is PlaybackState.Playing && !it.target.isArchive }
+        Thread.sleep(3_000)
+        press(K_PLAY_PAUSE, intervalMs = 0)
+        awaitArchive("PAUSED_LIVE", 5_000) { it.phase == ArchivePhase.PAUSED_LIVE }
+        val stopped = Sampler(100) { ui().tuned.phase == MiniPhase.STOPPED }
+        try {
+            Thread.sleep(12_000)
+            val st = controller.state.value
+            log("12 s into the pause: controller=$st")
+            assertTrue("M2 released the live connection: $st", st is PlaybackState.Stopped && st.reason == StopReason.LIVE_PAUSE_TIMEOUT)
+            screenshot("v7-full-paused-12s")
+            toBareVideo()
+            press(K_BACK)
+            awaitUi("guide", 5_000) { it.mode == ScreenMode.GUIDE }
+            Thread.sleep(1_500)
+            val g = ui()
+            assertEquals("the mini player's tuned phase", MiniPhase.PAUSED, g.tuned.phase)
+            val pill = PillRules.pill(g.tuned, g.archive, System.currentTimeMillis())
+            log("mini pill after the release: $pill archive=${g.archive?.phase}")
+            assertEquals("the mini player draws PAUSED / −MM:SS", PillKind.PAUSED, pill.kind)
+            assertTrue("−MM:SS grows (${pill.behindMs} ms)", pill.behindGrows && pill.behindMs >= 10_000)
+            val shot = screenshot("v7-guide-mini-paused")
+            val hole = holeRect()
+            val colour = colourfulness(shot, hole)
+            log("GUIDE hole after the release: rect ${hole.toList()} colourfulness $colour (frozen frame if well above 0, black if ~0)")
+        } finally {
+            stopped.close()
+        }
+        assertFalse("the stopped state (and its FULL hint) never showed", stopped.snapshot().any { it })
+        press(K_OK)
+        awaitUi("FULL again", 5_000) { it.mode == ScreenMode.FULL }
+        Thread.sleep(500)
+        assertEquals("OK on the paused channel is not a re-tune", ArchivePhase.PAUSED_LIVE, archive().phase)
+        assertTrue("no new tune: ${controller.state.value}", controller.state.value is PlaybackState.Stopped)
+        toBareVideo()
+        press(K_PLAY_PAUSE, intervalMs = 0)
+        awaitArchive("resumed from the archive", 20_000) { it.phase == ArchivePhase.PLAYING && it.timeShift }
+        log("resumed on ${ch.displayName}: ${archive().brief()}")
     }
 
     /** I-M4-15: 40 s behind, UP in the scrub bar → live; scrub to 10 s behind → live (30 s snap). */

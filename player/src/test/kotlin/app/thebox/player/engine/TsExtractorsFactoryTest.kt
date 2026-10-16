@@ -74,7 +74,8 @@ class TsExtractorsFactoryTest {
         val extractor: Extractor = if (guarded) {
             TsExtractorsFactory(TsCompat.DEFAULT, onDeadTrack = { pid, type -> dead += pid to type }, graceBytes = grace).createExtractors().single()
         } else {
-            DefaultExtractorsFactory().setTsExtractorFlags(TsExtractorsFactory.TS_FLAGS).createExtractors().filterIsInstance<TsExtractor>().single()
+            DefaultExtractorsFactory().setTsExtractorFlags(TsExtractorsFactory.TS_FLAGS).setTsSubtitleFormats(TsExtractorsFactory.SPECULATIVE_CC_FORMATS)
+                .createExtractors().filterIsInstance<TsExtractor>().single()
         }
         val output = FakeExtractorOutput()
         extractor.init(output)
@@ -90,6 +91,18 @@ class TsExtractorsFactoryTest {
             check(r == Extractor.RESULT_CONTINUE) { "unexpected result $r" }
         }
         return Run(output, dead, endedAt)
+    }
+
+    /** V8: the `multi` clip (CC1 in H.264 SEI, no caption descriptor in the PMT) lists one CEA-608 text track. */
+    @Test
+    fun multiClipListsOneSpeculativeCea608Track() {
+        val run = extract(EngineTestSupport.fixture("h264_multi_cc_1s.ts"), guarded = true)
+        assertTrue(run.output.tracksEnded)
+        val text = run.output.getTrackOutputsForType(C.TRACK_TYPE_TEXT)
+        assertEquals(1, text.size)
+        assertEquals(androidx.media3.common.MimeTypes.APPLICATION_CEA608, text.single().lastFormat?.sampleMimeType)
+        assertTrue("the SEI carries caption samples", text.single().sampleCount > 0)
+        assertTrue(run.dead.isEmpty())
     }
 
     @Test

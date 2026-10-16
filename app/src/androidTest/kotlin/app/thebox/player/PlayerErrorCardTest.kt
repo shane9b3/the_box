@@ -5,6 +5,7 @@ import app.thebox.core.full.ErrorButton
 import app.thebox.core.full.PlayerLayer
 import app.thebox.core.guide.ScreenMode
 import app.thebox.core.playback.NextStep
+import app.thebox.core.playback.PlaybackErrorCode
 import app.thebox.player.api.PlaybackState
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
@@ -21,13 +22,20 @@ import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class PlayerErrorCardTest : PlayerTestBase() {
 
-    private class Case(val name: String, val config: JSONObject)
+    private class Case(val name: String, val config: JSONObject, val codes: Set<PlaybackErrorCode>) {
+        constructor(name: String, config: JSONObject, code: PlaybackErrorCode) : this(name, config, setOf(code))
+    }
 
+    // U-S8 (a): each case names the code it must produce (four NO_DATA_TIMEOUT cards used to pass).
     private val cases = listOf(
-        Case("auth_mode 403", JSONObject().put("auth_mode", "403")),
-        Case("status Expired", JSONObject().put("status", "Expired")),
-        Case("max_connections 0 linger", JSONObject().put("max_connections", 0).put("faults", JSONObject().put("linger", 5).put("linger_status", 458))),
-        Case("html_splash", JSONObject().put("faults", JSONObject().put("html_splash", true))),
+        // A stream 403 is FORBIDDEN (M2 ladder L6/L7); AUTH_REJECTED needs a 401 or an AUTH_FAILED account gate.
+        Case("auth_mode 403", JSONObject().put("auth_mode", "403"), PlaybackErrorCode.FORBIDDEN),
+        Case("max_connections 0 linger", JSONObject().put("max_connections", 0).put("faults", JSONObject().put("linger", 5).put("linger_status", 458)), PlaybackErrorCode.CONNECTION_LIMIT),
+        Case("html_splash", JSONObject().put("faults", JSONObject().put("html_splash", true)), PlaybackErrorCode.WEB_PAGE_INSTEAD),
+        // Last (code review fix pass 2026-10-16): the app keeps the Expired account card after the panel recovers, so
+        // a later case read ACCOUNT_EXPIRED. Measured 2026-10-16: ACCOUNT_EXPIRED or FORBIDDEN, depending on whether the account card was refreshed before
+        // the ladder's 403 rows (L6/L7) decided (both valid ladder outcomes; an M2 question, review Later list).
+        Case("status Expired", JSONObject().put("status", "Expired"), setOf(PlaybackErrorCode.ACCOUNT_EXPIRED, PlaybackErrorCode.FORBIDDEN)),
     )
 
     @Test
@@ -44,6 +52,12 @@ class PlayerErrorCardTest : PlayerTestBase() {
             val e = card.error
             results += "${c.name}: ${e.code} detail=${e.detail} buttons=${card.buttons} text=${card.textStep} actions=${e.actions}"
             log("I-M4-16 ${results.last()}")
+            assertTrue("${c.name}: the code ${e.code} in ${c.codes}", e.code in c.codes) // U-S8 (a)
+            // U-S8 (a), P-S2 = U-S4: a next step on every card; the Retry sentence only when no other action became a button.
+            val step = card.textStep
+            assertTrue("${c.name}: a next-step line", step != null)
+            if (step == NextStep.RETRY) assertTrue("${c.name}: Retry sentence with other buttons ${card.buttons}", (card.buttons - ErrorButton.GUIDE - ErrorButton.RETRY).isEmpty() || e.actions.none { it != NextStep.RETRY })
+            if (e.code == PlaybackErrorCode.CONNECTION_LIMIT) assertEquals("CONNECTION_LIMIT tells to stop the other device", NextStep.STOP_AND_WAIT, step)
             assertTrue("${c.name}: buttons present", card.buttons.isNotEmpty())
             assertEquals("${c.name}: GUIDE is always last", ErrorButton.GUIDE, card.buttons.last()) // WP-A behaviour (§3.7)
             assertEquals("${c.name}: RETRY only when the code's actions contain it", e.actions.contains(NextStep.RETRY), card.buttons.contains(ErrorButton.RETRY)) // WP-A behaviour

@@ -4,6 +4,8 @@ import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import app.thebox.core.full.PlayerLayer
@@ -147,5 +149,61 @@ class PlayerOverlayBoundsTest {
         show(PlayerUiState(layer = PlayerLayer.PICKER, picker = PlayerOverlayStates.picker()))
         assertEquals(1920f - 568f, bounds(REMINDER_CARD_TAG).right)
         assertTrue("left of the sheet", bounds(REMINDER_CARD_TAG).right <= bounds(PICKER_SHEET_TAG).left)
+    }
+
+    /** U-S1 (V3): the header glyphs end at the bar's inner right (1856 − 28 = 1828), not mid-bar. */
+    @Test
+    fun headerGlyphsAreRightAligned() {
+        render()
+        show(PlayerUiState(layer = PlayerLayer.INFO, info = PlayerOverlayStates.info(ch)))
+        assertEquals(1828f, bounds(BAR_GLYPHS_TAG).right, 1f)
+        assertTrue("the pill sits between the name and the glyphs", bounds(PLAYER_PILL_TAG).right < bounds(BAR_GLYPHS_TAG).left)
+    }
+
+    /** U-S3 (V2): the stats overlay never shows through the channel list or under the group card. */
+    @Test
+    fun statsNeverOverlapTheListOrTheGroupCard() {
+        render()
+        show(PlayerUiState(stats = PlayerOverlayStates.stats))
+        rule.onNodeWithTag(STATS_OVERLAY_TAG, useUnmergedTree = true).assertExists()
+        show(PlayerUiState(layer = PlayerLayer.CHANNELS, channels = PlayerOverlayStates.channels(), stats = PlayerOverlayStates.stats))
+        rule.onNodeWithTag(CHANNEL_LIST_TAG, useUnmergedTree = true).assertExists()
+        rule.onAllNodesWithTag(STATS_OVERLAY_TAG, useUnmergedTree = true).assertCountEquals(0)
+        show(PlayerUiState(stats = PlayerOverlayStates.stats))
+        guide.mutableUi.value = guide.ui.value.copy(groupCard = "News")
+        rule.waitForIdle()
+        rule.onNodeWithTag(GROUP_CARD_TAG, useUnmergedTree = true).assertExists()
+        rule.onAllNodesWithTag(STATS_OVERLAY_TAG, useUnmergedTree = true).assertCountEquals(0)
+        guide.mutableUi.value = guide.ui.value.copy(groupCard = null)
+        rule.waitForIdle()
+        rule.onNodeWithTag(STATS_OVERLAY_TAG, useUnmergedTree = true).assertExists()
+    }
+
+    /** U-S2 (V6): the state pill describes the tuned playback; a browsed (or pending) channel's bar has none. */
+    @Test
+    fun pillOnlyForTheTunedChannel() {
+        render()
+        show(PlayerUiState(layer = PlayerLayer.INFO, info = PlayerOverlayStates.info(ch)))
+        rule.onNodeWithTag(PLAYER_PILL_TAG, useUnmergedTree = true).assertExists()
+        val other = GuideFixtures.channel(2)
+        show(PlayerUiState(layer = PlayerLayer.INFO, info = PlayerOverlayStates.info(other).copy(browsing = true)))
+        rule.onAllNodesWithTag(PLAYER_PILL_TAG, useUnmergedTree = true).assertCountEquals(0)
+    }
+
+    /** P-S2 = U-S4 (V4): every code's card (default actions) draws a next-step line. */
+    @Test
+    fun everyErrorCardDrawsANextStep() {
+        render()
+        for (code in app.thebox.core.playback.PlaybackErrorCode.entries) {
+            val card = app.thebox.core.full.state.ErrorCardModel.card(
+                app.thebox.core.full.fakes.PlayerFixtures.error(code), ch, decoder = null, variantLeft = true, archiveFailed = false,
+            )
+            show(PlayerUiState(layer = PlayerLayer.ERROR, error = card))
+            rule.onNodeWithTag(PLAYER_ERROR_STEP_TAG, useUnmergedTree = true).assertExists("$code: next-step line")
+        }
+        show(PlayerUiState(layer = PlayerLayer.ERROR, error = app.thebox.core.full.state.ErrorCardModel.card(
+            app.thebox.core.full.fakes.PlayerFixtures.error(app.thebox.core.playback.PlaybackErrorCode.CONNECTION_LIMIT), ch, null, true, false,
+        )))
+        rule.onNodeWithText("Stop watching on another device, then try again").assertExists()
     }
 }

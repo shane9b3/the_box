@@ -4,6 +4,8 @@ import app.thebox.core.playback.AccountGate
 import app.thebox.core.playback.FailureSignal
 import app.thebox.core.playback.LadderContext
 import app.thebox.core.playback.LadderCounters
+import app.thebox.core.playback.LadderDecision
+import app.thebox.core.playback.NextStep
 import app.thebox.core.playback.LoadOrigin
 import app.thebox.core.playback.NetworkFailureKind
 import app.thebox.core.playback.StallKind
@@ -52,6 +54,20 @@ class ErrorLadderTableTest {
         assertTrue(missing.isEmpty(), "ladder.csv lacks rows for $missing")
         assertTrue("L13a" in covered, "ladder.csv lacks the M4 row L13a")
         assertTrue("L22a" in covered &&"G-gate" in covered && "G-timeout" in covered && "G-limiter" in covered)
+    }
+
+    /** P-S3: L30 after software (setting, override or the L29 switch) or without a software decoder offers no software button. */
+    @Test
+    fun l30OffersTheSoftwareDecoderOnlyWhenItCanHelp() {
+        fun actions(context: String, sig: String = "DecoderInit video video/hevc c2.hevc.decoder"): List<NextStep> {
+            val t = ErrorLadderImpl(random = { 0.5 }).trace(signal(sig), ctx(parseContext(context)))
+            assertEquals("L30", t.row, context)
+            return (t.decision as LadderDecision.Fail).error.actions
+        }
+        assertEquals(listOf(NextStep.TRY_SOFTWARE_DECODER, NextStep.OPEN_EXTERNAL), actions("decoderSteps=1"), "hardware failed after the hardware step: software can help")
+        assertEquals(listOf(NextStep.OPEN_EXTERNAL), actions("decoderSteps=1,decoderMode=SOFTWARE_PREFERRED"), "software already runs")
+        assertEquals(listOf(NextStep.OPEN_EXTERNAL), actions("swVideo=false"), "no software decoder for the MIME")
+        assertEquals(listOf(NextStep.OPEN_EXTERNAL), actions("decoderMode=SOFTWARE_PREFERRED", "FormatUnsupported video video/hevc"))
     }
 
     companion object {

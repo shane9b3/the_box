@@ -145,6 +145,22 @@ class PlayerViewModelTest {
     }
 
     /** Unowned (a zap away) or live errors are not hidden: the card shows, with the ladder's detail (H-L9). */
+    /**
+     * P-S4 = U-B3: 10 s into a live pause M2 releases the connection (`Stopped(LIVE_PAUSE_TIMEOUT, resumable)`). The
+     * machine sees PAUSED (no N12 stopped hint; PLAY_PAUSE resumes), with and without an archive session.
+     */
+    @Test
+    fun livePauseOverTenSecondsShowsNoStoppedHint() {
+        vm()
+        controller.state.value = PlaybackState.Playing(np(3, archive = false), paused = true); idle()
+        controller.state.value = PlaybackState.Stopped(np(3, archive = false), app.thebox.player.api.StopReason.LIVE_PAUSE_TIMEOUT, resumable = true); idle()
+        assertEquals(MiniPhase.PAUSED, tunedEvents().last().state.phase)
+        archive.mutableStatus.value = ArchiveStatus(ArchivePhase.PAUSED_LIVE, channel = ch, identityHash = ch.identityHash, timeShift = true); idle()
+        assertEquals(MiniPhase.PAUSED, tunedEvents().last().state.phase)
+        controller.state.value = PlaybackState.Stopped(np(3, archive = false), app.thebox.player.api.StopReason.USER, resumable = false); idle()
+        assertEquals("a real stop is still STOPPED", MiniPhase.STOPPED, tunedEvents().last().state.phase)
+    }
+
     @Test
     fun liveErrorsAreForwardedWithTheirDetail() {
         vm()
@@ -306,6 +322,8 @@ class PlayerViewModelTest {
         assertTrue(archive.names().contains("startOver"))
         val failed = (events.last() as ShellEvent.Message).text
         assertTrue(failed, failed.startsWith("This programme is older than the channel's catch-up archive."))
+        // U-S7 = N17: the machine hears about the synchronous failure (it returns the bar's focus to now).
+        assertEquals(PlayerEvent.ArchiveStartFailed(ArchiveFailure.OUTSIDE_ARCHIVE), machine.events.filterIsInstance<PlayerEvent.ArchiveStartFailed>().last())
 
         // Error-card Retry on an archive error resumes the session (WP-B), never controller.retry().
         archive.mutableStatus.value = ArchiveStatus(ArchivePhase.FAILED, channel = ch, failure = ArchiveFailure.PLAYBACK); idle()

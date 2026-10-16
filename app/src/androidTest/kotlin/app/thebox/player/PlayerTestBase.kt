@@ -301,14 +301,19 @@ abstract class PlayerTestBase : GuideTestBase() {
 
     protected fun ArchiveStatus.active(): Boolean = phase != ArchivePhase.IDLE && phase != ArchivePhase.FAILED
 
-    /** True on the Android emulator (timing criteria that §5.9 leaves to hardware get an emulator ceiling). */
+    /**
+     * True on the Android emulator (timing criteria that §5.9 leaves to hardware get an emulator ceiling). U-S8 (f): by
+     * `Build.HARDWARE` only; no-name AOSP TV boxes carry a `generic` fingerprint and must get the hardware criteria.
+     */
     protected fun isEmulator(): Boolean =
-        android.os.Build.HARDWARE.contains("ranchu") || android.os.Build.HARDWARE.contains("goldfish") || android.os.Build.FINGERPRINT.contains("generic")
+        (android.os.Build.HARDWARE in EMULATOR_HARDWARE).also { log("isEmulator: HARDWARE=${android.os.Build.HARDWARE} → $it") }
 
     companion object {
         /** Deterministic player settings for every test (§2.2 defaults spelled out), then default padding 60/300. */
         const val PLAYER_DEFAULTS = "infobar=5000&numwait=1500&updown=quick&invert=0&back=guide&padding=60,300"
         const val SUBTITLE_VIEW = "androidx.media3.ui.SubtitleView"
+        /** U-S8 (f): the emulator's `Build.HARDWARE` values. */
+        val EMULATOR_HARDWARE = setOf("ranchu", "goldfish")
         const val K_UP = KeyEvent.KEYCODE_DPAD_UP
         const val K_DOWN = KeyEvent.KEYCODE_DPAD_DOWN
         const val K_LEFT = KeyEvent.KEYCODE_DPAD_LEFT

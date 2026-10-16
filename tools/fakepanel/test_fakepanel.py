@@ -1095,6 +1095,64 @@ class TestTimeshiftDuration(LoopCase):
         self.assertEqual(post(self, "/admin/config", {"timeshift_mode": "minutes"})[0], 400)
 
 
+class TestTimeshiftFutureAndLength(LoopCase):
+    """U-S9 (code review 2026-10-16): duration mode serves only what is written (`timeshift_future: clamp`, default),
+    the whole duration with `serve`, and a close-delimited body without Content-Length with `timeshift_chunked`."""
+
+    def expected_len(self, secs):
+        return int(secs * self.clip.rate) // 188 * 188
+
+    def path_sec(self, minutes, back, ch=1):
+        return f"/timeshift/test/test/{minutes}/{xc_start(time.time() - back, secs=True)}/{ch}.ts"
+
+    def test_clamp_is_the_default_and_ends_at_the_panels_now(self):
+        self.assertEqual(self.panel.cfg["timeshift_future"], "clamp")
+        st, h, body = full_get(self.port, self.path_sec(2, back=30))
+        self.assertEqual(st, 200)
+        n = int(h["content-length"])
+        self.assertEqual(len(body), n)
+        self.assertLess(n, self.expected_len(60), "2 minutes requested 30 s back: about 30 s are written")
+        self.assertTrue(self.expected_len(27) <= n <= self.expected_len(33), (n, self.expected_len(30)))
+
+    def test_clamped_length_is_stable_across_reopens(self):
+        path = self.path_sec(2, back=30)
+        _, h1, _ = full_get(self.port, path)
+        time.sleep(1.2)
+        st, h2, _ = full_get(self.port, path, {"Range": "bytes=0-187"})
+        self.assertEqual(st, 206)
+        self.assertEqual(h2["content-range"].split("/")[1], h1["content-length"], "one length for every reopen of the request")
+
+    def test_clamp_honours_the_archive_lag(self):
+        self.admin({"archive_lag_sec": 20, "timeshift_window": False})
+        st, h, _ = full_get(self.port, self.path_sec(2, back=50))
+        self.assertEqual(st, 200)
+        self.assertTrue(self.expected_len(27) <= int(h["content-length"]) <= self.expected_len(33))
+
+    def test_old_starts_are_not_clamped(self):
+        st, h, _ = full_get(self.port, self.path(1))  # an hour back, 1 minute
+        self.assertEqual(int(h["content-length"]), self.expected_len(60))
+
+    def test_serve_sends_the_whole_duration(self):
+        self.admin({"timeshift_future": "serve"})
+        st, h, body = full_get(self.port, self.path_sec(2, back=30))
+        self.assertEqual((st, int(h["content-length"]), len(body)), (200, self.expected_len(120), self.expected_len(120)))
+
+    def test_chunked_has_no_length_and_no_ranges(self):
+        self.admin({"timeshift_chunked": True})
+        st, h, body = full_get(self.port, self.path(1))
+        self.assertEqual(st, 200)
+        self.assertNotIn("content-length", h)
+        self.assertNotIn("accept-ranges", h)
+        self.assertEqual(len(body), self.expected_len(60))
+        st, h, part = full_get(self.port, self.path(1), {"Range": "bytes=5000-"})
+        self.assertEqual(st, 200, "a Range is ignored: no seeking inside a length-less body")
+        self.assertEqual(part[:188], body[:188])
+
+    def test_validation(self):
+        self.assertEqual(post(self, "/admin/config", {"timeshift_future": "later"})[0], 400)
+        self.assertEqual(post(self, "/admin/config", {"timeshift_chunked": "yes"})[0], 400)
+
+
 class TestLiveShiftedAndEvent(LoopCase):
     """§5.6 items 1 and 7: open-ended forms are length-less live-paced streams; -now/timeshift_abs/rel .m3u8 are EVENT."""
 

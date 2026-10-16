@@ -23,7 +23,10 @@ class NumberEntryFullTest : PlayerTestBase() {
         fullOn(1)
         awaitController("playing") { it is PlaybackState.Playing }
         toBareVideo()
-        digits("123", intervalMs = 200)
+        digits("12", intervalMs = 200)
+        // Code review fix pass 2026-10-16 (test fix): time the last digit when it is sent; `digits` sleeps its interval
+        // after every key, so the old `tLast` was 200 ms late (hidden while the commit itself ran ~340 ms late).
+        press(android.view.KeyEvent.KEYCODE_3, intervalMs = 0)
         val tLast = SystemClock.elapsedRealtime()
         // Integration 2026-10-15 (test fix): each digit keeps the previous preview until its own lookup lands
         // (NUMBER_PREVIEW_MS after the digit, M3 §3.9.4), so "123" briefly shows the preview of "12"; await the one for 123.

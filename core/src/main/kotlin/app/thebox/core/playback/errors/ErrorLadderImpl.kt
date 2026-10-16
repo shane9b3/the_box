@@ -149,8 +149,16 @@ class ErrorLadderImpl(
         val status: Int? = (s as? FailureSignal.Http)?.status
 
         fun fail(code: PlaybackErrorCode): LadderDecision.Fail = LadderDecision.Fail(
-            PlaybackError(code, detail(code), code.defaultSteps.filter { it != NextStep.TRY_BACKUP || ctx.backupAvailable }),
+            PlaybackError(code, detail(code), code.defaultSteps.filter { step -> keepStep(step) }),
         )
+
+        private fun keepStep(step: NextStep): Boolean = when (step) {
+            NextStep.TRY_BACKUP -> ctx.backupAvailable
+            // P-S3: no "Software decoder" button when software already runs (setting, override or the L29 switch:
+            // `videoDecoderMode` is the effective mode) or no software decoder exists for the MIME; it would loop.
+            NextStep.TRY_SOFTWARE_DECODER -> ctx.videoDecoderMode != VideoDecoderMode.SOFTWARE_PREFERRED && ctx.softwareVideoAvailable
+            else -> true
+        }
 
         fun detail(code: PlaybackErrorCode): ErrorDetail {
             val o = original

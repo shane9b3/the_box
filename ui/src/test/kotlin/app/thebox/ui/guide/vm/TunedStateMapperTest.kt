@@ -90,4 +90,15 @@ class TunedStateMapperTest {
         assertTrue(t.still)
         assertFalse(TunedStateMapper.map(PlaybackState.Playing(live), 7, still = false).isArchive)
     }
+
+    /** P-S4 = U-B3: the 10 s live-pause release is still the user's pause; every other stop is STOPPED. */
+    @Test
+    fun livePauseTimeoutIsPaused() {
+        assertEquals(MiniPhase.PAUSED, TunedStateMapper.map(PlaybackState.Stopped(live, StopReason.LIVE_PAUSE_TIMEOUT, resumable = true), 7, false).phase)
+        assertEquals(MiniPhase.PAUSED, TunedStateMapper.map(PlaybackState.Stopped(archive, StopReason.LIVE_PAUSE_TIMEOUT, resumable = true), 7, false).phase)
+        assertEquals(MiniPhase.STOPPED, TunedStateMapper.map(PlaybackState.Stopped(live, StopReason.LIVE_PAUSE_TIMEOUT, resumable = false), 7, false).phase)
+        for (r in StopReason.entries - StopReason.LIVE_PAUSE_TIMEOUT) {
+            assertEquals("$r", MiniPhase.STOPPED, TunedStateMapper.map(PlaybackState.Stopped(live, r, resumable = true), 7, false).phase)
+        }
+    }
 }

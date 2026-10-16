@@ -47,7 +47,9 @@ class ArchivePlannerImpl : ArchivePlanner {
     override fun seek(targetMs: Long, wallMs: Long, req: ActiveRequest, pos: PositionView, live: LiveWindow): SeekPlan {
         val t = targetMs.coerceIn(live.archiveFromMs, maxOf(live.archiveFromMs, live.liveEdgeMs))
         if (abs(t - wallMs) < SEEK_NOOP_MS) return SeekPlan.None
-        if (t >= live.liveEdgeMs - LIVE_SNAP_MS) return SeekPlan.Live
+        // P-S1 = U-L3 (L-6): the snap is direction-aware. Only a target later than the playhead snaps to live; a backward
+        // step inside the 30 s zone requests the archive (it used to jump forward to live).
+        if (t > wallMs && t >= live.liveEdgeMs - LIVE_SNAP_MS) return SeekPlan.Live
         val window = nativeWindow(req, pos)
         if (window != null && t >= window.first && t <= window.last) return SeekPlan.Native(t - req.originMs)
         return SeekPlan.Rerequest(RequestPlan(startMs = t, stopMs = null, padBefore = false, targetMs = t))
