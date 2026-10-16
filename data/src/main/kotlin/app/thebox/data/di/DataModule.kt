@@ -24,11 +24,9 @@ import app.thebox.data.security.TinkCredentialStore
 import app.thebox.data.xtream.XtreamClient
 import android.content.Context
 import androidx.work.WorkManager
-import app.thebox.data.repo.DataSettings
 import app.thebox.data.repo.EpgImporter
 import app.thebox.data.repo.EpgRepository
 import app.thebox.data.repo.EpgWorkRequester
-import app.thebox.data.repo.InMemoryDataSettings
 import app.thebox.data.repo.PlaylistRefresher
 import app.thebox.data.repo.RefreshRepository
 import app.thebox.data.security.AeadProvider
@@ -70,7 +68,7 @@ abstract class DataModule {
     // M5 commit 0 (docs/design/m5-setup-settings.md §2.12 item 8): the same store holds the PIN verifier and passphrase.
     @Binds @Singleton abstract fun secureBlobStore(impl: TinkCredentialStore): app.thebox.data.contracts.SecureBlobStore
     @Binds @Singleton abstract fun keyResetFlag(impl: app.thebox.data.security.PrefsKeyResetFlag): app.thebox.data.security.KeyResetFlag
-    @Binds @Singleton abstract fun dataSettings(impl: InMemoryDataSettings): DataSettings
+    // (M5, WP-A) DataSettings → PersistedDataSettings, bound in data/.../settings/SettingsDataModule.
     @Binds abstract fun playlistRefresher(impl: RefreshRepository): PlaylistRefresher
     @Binds abstract fun epgImporter(impl: EpgRepository): EpgImporter
     @Binds abstract fun epgWorkRequester(impl: RefreshScheduler): EpgWorkRequester

@@ -3,6 +3,7 @@ package app.thebox.ui.root
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -56,6 +57,8 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
 
 const val KEY_SINK_TAG = "key_sink"
+/** The opaque SETTINGS layer (the settings screen, or an empty canvas while the settings machine is not attached, S11). */
+const val SETTINGS_TAG = app.thebox.ui.settings.SETTINGS_SCREEN_TAG
 const val VIDEO_LAYER_TAG = "video_layer"
 /** U-S5: debug composition counter of the root body. */
 const val COMPOSITIONS_ROOT = "AppRoot"
@@ -121,7 +124,7 @@ fun reminderEndFor(shown: ScreenMode, player: PlayerUiState): Float = reminderEn
  *   HoleChrome                 // corners, ring, letterbox, still, scrim; drawn after the surface
  *   SubtitleLayer              // (M4, FULL only) AndroidView(SubtitleView) on the video rect; a direct child (N11)
  *   Box(key sink) {            // the one key sink (WP-D's KeyRouter.sinkModifier), survives every mode change
- *     GUIDE | FULL | SEARCH | SETTINGS screen; reminder card; toast
+ *     GUIDE | FULL | SEARCH | SETTINGS screen (M5: SettingsScreen, in-tree overlays only); reminder card; toast
  *   }
  * }
  * ```
@@ -261,6 +264,28 @@ fun AppRoot(
         }
     }
     LaunchedEffect(host) { host.events.collect { onEvent(it) } }
+    // (M5, docs/design/m5-setup-settings.md §3.2) The settings machine the guide composes for SETTINGS. AppRoot is the one
+    // place that sees both, so it links the guide's dispatch (FULL → Settings on a route) and shows the settings layer's
+    // shell events (toast slot, announcements, exit).
+    val settingsMachine = host.machine.settings
+    val settingsLink = settingsMachine as? app.thebox.core.settings.state.SettingsShellLink
+    DisposableEffect(host.machine, settingsLink) {
+        settingsLink?.attachGuide(host.machine::dispatch)
+        onDispose { settingsLink?.attachGuide(null) }
+    }
+    LaunchedEffect(settingsLink) {
+        settingsLink?.shellEvents?.collect { e ->
+            when (e) {
+                is app.thebox.core.settings.state.SettingsShellEvent.Toast -> onEvent(ShellEvent.Message(e.text))
+                is app.thebox.core.settings.state.SettingsShellEvent.Announce -> announce(view, e.text)
+                app.thebox.core.settings.state.SettingsShellEvent.Exit -> exit()
+            }
+        }
+    }
+    // The editor overlay owned Compose focus (S3); when it closes the root key sink takes focus back, as after SEARCH.
+    val settingsUiFlow = remember(settingsMachine) { settingsMachine?.ui }
+    val editorOpen = settingsUiFlow?.collectAsState()?.value?.editor != null
+    LaunchedEffect(editorOpen) { if (!editorOpen) requestSinkFocus(requester) }
     LaunchedEffect(player) { player?.events?.collect { onEvent(it) } }
     LaunchedEffect(toast) {
         if (toast != null) {
@@ -307,7 +332,12 @@ fun AppRoot(
                         )
                         ScreenMode.FULL -> FullScreenHost(ui, player = player, clock24 = settings.clock24, lowEnd = lowEnd)
                         ScreenMode.SEARCH -> search()
-                        ScreenMode.SETTINGS -> app.thebox.ui.settings.SettingsScreen(host.versionName)
+                        ScreenMode.SETTINGS -> if (settingsMachine != null) {
+                            app.thebox.ui.settings.SettingsScreen(settingsMachine, settings.clock24)
+                        } else {
+                            // S11: the settings machine is not attached yet; the guide machine waits. Opaque, covers the hole.
+                            Box(Modifier.fillMaxSize().background(app.thebox.ui.theme.DesignTokens.Colors.Canvas).testTag(SETTINGS_TAG))
+                        }
                     }
                     if (shown == ScreenMode.GUIDE || shown == ScreenMode.FULL) {
                         ui.reminder?.let { ReminderCard(it, Modifier.align(Alignment.BottomEnd).padding(end = reminderEnd.dp, bottom = toastBottom.dp)) }

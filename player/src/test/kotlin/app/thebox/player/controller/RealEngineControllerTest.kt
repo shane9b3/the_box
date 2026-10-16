@@ -112,7 +112,7 @@ class RealEngineControllerTest {
             context, provider, FakeMemory(), settings, resolver, StreamBrokerRegistryImpl(mono), transport, factory, MediaSourceBuilder(),
             events, mono, ErrorLadderImpl({ settings.current.streamSwitchTimeoutMs }), ReResolveLimiterImpl(), ZapDebouncerImpl(),
             BufferProfileFsmImpl(), DefaultEngineEnvironment(context, DeviceCapabilities(context), settings, mono),
-            ZapImportGate({ SystemClock.elapsedRealtime() }, 200), MediaSessionFactory.None, FakeDeviceState(),
+            ZapImportGate({ SystemClock.elapsedRealtime() }, 200), MediaSessionFactory.None, FakeDeviceState(), app.thebox.core.playback.TuneGuard.ALLOW_ALL,
         ).also { it.ioDispatcher = kotlinx.coroutines.Dispatchers.Main.immediate }
     }
 

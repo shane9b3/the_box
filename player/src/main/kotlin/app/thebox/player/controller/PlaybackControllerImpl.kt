@@ -59,6 +59,8 @@ import app.thebox.core.playback.RetryInfo
 import app.thebox.core.playback.StallKind
 import app.thebox.core.playback.StallVerdict
 import app.thebox.core.playback.StreamFormat
+import app.thebox.core.playback.TuneGuard
+import app.thebox.core.playback.TuneVerdict
 import app.thebox.core.playback.VideoDecoderMode
 import app.thebox.core.playback.Viewport
 import app.thebox.core.playback.XtreamOutput
@@ -80,7 +82,9 @@ import app.thebox.player.api.BufferingCause
 import app.thebox.player.api.ChannelMemory
 import app.thebox.player.api.ChannelPlaybackMemory
 import app.thebox.player.api.ConnectPhase
+import app.thebox.player.api.ExternalHandOff
 import app.thebox.player.api.NowPlaying
+import app.thebox.player.api.PreviousResult
 import app.thebox.player.api.PlaybackController
 import app.thebox.player.api.PlaybackDiagnostics
 import app.thebox.player.api.PlaybackNotice
@@ -170,6 +174,11 @@ internal class PlaybackControllerImpl @Inject constructor(
     private val importGate: ZapImportGate,
     private val sessionFactory: MediaSessionFactory,
     deviceState: LifecycleCoordinator.DeviceState,
+    /**
+     * (M5, docs/design/m5-setup-settings.md §3.9.2, B1) Checked before every channel cycle starts (tune, catch-up, zap,
+     * previous channel, retry, resume after a lifecycle stop). Called on main; WP-C's implementation must be main-safe.
+     */
+    private val tuneGuard: TuneGuard,
 ) : PlaybackController, LifecycleCoordinator.Target {
 
     // ------------------------------------------------------------------ public flows
@@ -359,13 +368,43 @@ internal class PlaybackControllerImpl @Inject constructor(
     override fun tune(target: TuneTarget, zapList: ZapList?) {
         if (zapList != null) this.zapList = zapList
         cancelPendingZap()
+        val identity = (target as? TuneTarget.Channel)?.identity
+        if (identity != null && refused(identity, isArchive = false)) return
         startCycle(Spec.Live(target))
     }
 
     override fun tuneArchive(tune: ArchiveTune) {
         cancelPendingZap()
+        if (refused(tune.identity, isArchive = true)) return
         startCycle(Spec.Archive(tune))
     }
+
+    /**
+     * (M5, docs/design/m5-setup-settings.md §3.9.2, B1) The [TuneGuard] backstop for a direct request (tune, catch-up,
+     * retry). A refused target never starts: the current stream stops (its connection is released) and the state
+     * becomes `Stopped(target = the refused channel, reason = LOCKED, resumable = false)`, from which the guide/player
+     * machines open the PIN prompt (`Tune(channel, owner)`) or, for NOT_PROTECTED, the "not protected" card. True when
+     * refused.
+     */
+    private fun refused(identity: ChannelIdentity, isArchive: Boolean): Boolean {
+        val verdict = guard(identity)
+        if (verdict == TuneVerdict.ALLOWED) return false
+        BoxLog.i(TAG) { "tune refused by the guard: ${verdict.name}" }
+        stop(StopReason.LOCKED)
+        setState(PlaybackState.Stopped(lockedTarget(identity, isArchive), StopReason.LOCKED, resumable = false))
+        return true
+    }
+
+    /** One guard call; a failing guard refuses (fail closed, §3.9.6). */
+    private fun guard(identity: ChannelIdentity): TuneVerdict = try {
+        tuneGuard.check(identity)
+    } catch (e: Exception) {
+        BoxLog.w(TAG, "tune guard failed: ${e.javaClass.simpleName}")
+        TuneVerdict.NEEDS_PIN
+    }
+
+    private fun lockedTarget(identity: ChannelIdentity, isArchive: Boolean) =
+        NowPlaying(tuneId = cycle?.currentTuneId ?: 0, identity = identity, title = null, isArchive = isArchive, format = StreamFormat.UNKNOWN)
 
     override fun setZapList(list: ZapList) {
         zapList = list
@@ -380,7 +419,7 @@ internal class PlaybackControllerImpl @Inject constructor(
                 if (generation != zapGeneration) return@withLock
                 val from = _pendingZap.value ?: cycle?.identity ?: return@withLock
                 val next = try {
-                    list.neighbour(from, delta)
+                    allowedNeighbour(list, from, delta)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -411,14 +450,75 @@ internal class PlaybackControllerImpl @Inject constructor(
         job.start()
     }
 
-    override fun previousChannel(): Boolean {
-        val prev = previousIdentity ?: return false
+    /**
+     * (M5, §3.9.2, B1) The zap neighbour the [TuneGuard] allows: a refused channel is skipped like the lineups skip
+     * hidden ones, at most [MAX_ZAP_GUARD_SKIPS] steps, and never past [from] again (a list of locked channels only
+     * yields null: no zap).
+     */
+    private suspend fun allowedNeighbour(list: ZapList, from: ChannelIdentity, delta: Int): ChannelIdentity? {
+        var at = from
+        repeat(MAX_ZAP_GUARD_SKIPS) {
+            val next = list.neighbour(at, delta) ?: return null
+            if (guard(next) == TuneVerdict.ALLOWED) return next
+            if (next == from) return null
+            at = next
+        }
+        return null
+    }
+
+    /** The M2 Boolean form; a guard refusal counts as "nothing tuned" (the PIN-aware form is [previousChannelResult]). */
+    override fun previousChannel(): Boolean = previousChannelResult() == PreviousResult.Started
+
+    /**
+     * (M5, §2.12 item 6, §3.9.2, B1) [PreviousResult.Locked] when the guard refuses the previous channel: nothing is
+     * tuned and the state is unchanged; the caller opens the PIN prompt (or the "not protected" card) and tunes it after
+     * the PIN.
+     */
+    override fun previousChannelResult(): PreviousResult {
+        val prev = previousIdentity ?: return PreviousResult.NoPrevious
+        if (guard(prev) != TuneVerdict.ALLOWED) return PreviousResult.Locked(prev)
         tune(TuneTarget.Channel(prev))
-        return true
+        return PreviousResult.Started
+    }
+
+    /**
+     * (M5, docs/design/m5-setup-settings.md §0.6, §2.12 item 6, S9) Settings closed with a REPREPARE-class change: one new
+     * session of the current **live** cycle at the live edge (fresh open; the resolved URL is reused), so
+     * `applySwitches` reads the new buffer, decoder, tunneling and audio-output values. Same engine, same cycle (ladder
+     * counters and per-channel memory kept), logged as one `DECISION reapply_settings`. No-op when nothing live is
+     * active: idle, stopped (the next start reads the settings anyway), archive (the `:app` applier resumes the archive
+     * at its playhead), or the error card (Retry applies the settings).
+     */
+    override fun reapplySettings() {
+        val c = cycle ?: return
+        if (c.isArchive || c.cardShown) return
+        val st = _state.value
+        if (st !is PlaybackState.Playing && st !is PlaybackState.Buffering && st !is PlaybackState.Connecting && st !is PlaybackState.Stalled) return
+        if (st is PlaybackState.Playing && st.paused) return // a paused live tune resumes with a fresh tune anyway
+        eventLog.add(PlaybackEventType.DECISION, c.currentTuneId, "reapply_settings", "")
+        BoxLog.i(TAG) { "settings changed: re-preparing the live tune" }
+        val waiting: ((NowPlaying) -> PlaybackState)? =
+            if (c.firstMediaReached) ({ np -> PlaybackState.Buffering(np, BufferingCause.RECOVERING, null) }) else null
+        launchSession(c, Plan(reuseResolved = c.resolved != null), waiting)
+    }
+
+    /**
+     * (M5, §2.12 item 6, §3.3.4) The external-player hand-off: the resolved address and headers of the current tune, then
+     * our stream stops first (the provider's connection limit). Null when nothing is resolved (nothing tuned, a direct
+     * tune still resolving). Never logged with its URL ([ExternalHandOff.toString] keeps the host only).
+     */
+    override fun handOffExternal(): ExternalHandOff? {
+        val c = cycle ?: return null
+        val resolved = c.resolved ?: return null
+        val handOff = ExternalHandOff(url = resolved.url, headers = resolved.headers, title = c.title)
+        stop(StopReason.USER)
+        BoxLog.i(TAG) { "handed off to an external player: $handOff" }
+        return handOff
     }
 
     override fun retry() {
         val c = cycle ?: return
+        if (c.identity != null && refused(c.identity, c.isArchive)) return
         // §4.3 "Retry from the card": fresh counters (new cycle) and a fresh re-resolve window for the channel.
         limiter.reset(limiterKey(c))
         startCycle(c.specForRestart())
@@ -1586,6 +1686,15 @@ internal class PlaybackControllerImpl @Inject constructor(
             BoxLog.i(TAG) { "back after ${away / 1000} s: not resuming (setting)" }
             return
         }
+        // (M5, docs/design/m5-setup-settings.md §3.9.2, §3.9.5, B1) A relock on ON_STOP is never "mid-programme": a locked
+        // channel does not resume; the guide machine opens the PIN prompt from Stopped(LOCKED).
+        val identity = c.identity
+        if (identity != null && guard(identity) != TuneVerdict.ALLOWED) {
+            eventLog.add(PlaybackEventType.LIFECYCLE, c.currentTuneId, "resume", "locked")
+            BoxLog.i(TAG) { "back after ${away / 1000} s: locked channel, not resuming" }
+            setState(PlaybackState.Stopped(nowPlaying(c), StopReason.LOCKED, resumable = false))
+            return
+        }
         eventLog.add(PlaybackEventType.LIFECYCLE, c.currentTuneId, "resume", if (reauth) "reauth" else "")
         // Always a fresh resolve and session at the live edge (never a stale TS connection).
         startCycle(c.specForRestart(), refreshAccount = reauth)
@@ -1955,6 +2064,9 @@ internal class PlaybackControllerImpl @Inject constructor(
             else -> false
         }
         const val PREVIOUS_CHANNEL_MIN_PLAY_MS = 1_000L
+
+        /** (M5, B1) At most this many guard-refused neighbours are skipped by one zap step. */
+        const val MAX_ZAP_GUARD_SKIPS = 64
 
         // Owners' constants (Appendix B), pointed at at integration.
         const val SEEK_GRACE_MS = StallConstants.SEEK_GRACE_MS
