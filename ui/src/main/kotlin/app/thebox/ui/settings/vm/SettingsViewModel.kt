@@ -86,10 +86,19 @@ class SettingsViewModel internal constructor(
         // Routes that leave the open path (popped, replaced, Settings closed) let their source stop observing.
         s.launch(main) {
             var live = emptySet<app.thebox.core.settings.SettingsRoute>()
+            // U-S2 (code review 2026-10-16): routes this collector closed while the machine may still cache their page.
+            val closedHere = HashSet<app.thebox.core.settings.SettingsRoute>()
             machine.ui.collect { u ->
                 built?.phone?.onRoute(u.route)
                 val now = (u.stack + u.route + listOfNotNull(u.page?.route)).toSet()
-                for (gone in live - now) ordered.firstOrNull { it.handles(gone) }?.closed(gone)
+                for (gone in live - now) {
+                    ordered.firstOrNull { it.handles(gone) }?.closed(gone)
+                    closedHere += gone
+                }
+                // U-S2: a displayed route that re-enters the open set (the cursor came back to a section the machine shows
+                // from its cache) is rebuilt, which reopens its source; otherwise the page stays frozen at its old data.
+                val displayed = u.page?.route
+                if (displayed != null && displayed !in live && displayed in now && closedHere.remove(displayed)) effects.loadPage(displayed)
                 live = now
             }
         }
@@ -98,9 +107,17 @@ class SettingsViewModel internal constructor(
             store.flow(GuideDomain).map { it.advancedSettings }.distinctUntilChanged().collect { machine.dispatch(SettingsEvent.Advanced(it)) }
         }
         s.launch(main) {
+            // U-S1 (code review 2026-10-16): a leading-edge throttle. The first change after REBUILD_MIN_GAP_MS of quiet
+            // rebuilds at once (a page's first data no longer waits out a window its placeholder opened, §6.7 "Settings
+            // open → first page"); only bursts are spaced. The wait is clamped so a wall-clock jump cannot stall it.
+            var last = Long.MIN_VALUE
             merge(*ordered.map { it.changes }.toTypedArray()).conflate().collect {
+                if (last != Long.MIN_VALUE) {
+                    val wait = (last + REBUILD_MIN_GAP_MS - nowMs()).coerceIn(0L, REBUILD_MIN_GAP_MS)
+                    if (wait > 0) delay(wait)
+                }
+                last = nowMs()
                 effects.rebuildDisplayed()
-                delay(REBUILD_MIN_GAP_MS)
             }
         }
         s.launch(main) { merge(*ordered.map { it.notices }.toTypedArray()).collect { machine.dispatch(SettingsEvent.Notice(it)) } }
@@ -117,7 +134,7 @@ class SettingsViewModel internal constructor(
     }
 
     private companion object {
-        /** Page rebuilds triggered by data changes are spaced (a refresh can write many rows). */
+        /** Page rebuilds triggered by data changes are spaced (a refresh can write many rows); U-S1: leading edge. */
         const val REBUILD_MIN_GAP_MS = 250L
     }
 }

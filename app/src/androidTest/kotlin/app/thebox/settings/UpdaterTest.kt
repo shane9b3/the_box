@@ -34,9 +34,10 @@ import java.io.File
  *   → the session reaches `STATUS_PENDING_USER_ACTION`, the test cancels;
  * - a replayed manifest with a lower `sequence` → REPLAYED.
  *
- * Fixtures from `tools/fakepanel/run-instrumented.sh --update-fixtures` (pushed to /data/local/tmp): `thebox-update-v2.apk`
- * (versionCode 2) and `thebox-update-other.apk` (versionCode 2, another signing key). The installed APK serves as the
- * not-newer/wrong-hash payload. Runs on commit 0 + WP-E (no settings UI involved).
+ * Fixtures from `tools/fakepanel/run-instrumented.sh --update-fixtures`: `thebox-update-v2.apk` (versionCode 2),
+ * `thebox-update-other.apk` (versionCode 2, another signing key) and `thebox-update-installed.apk` (the installed APK, the
+ * not-newer/wrong-hash payload). U-S14 (code review 2026-10-16): the panel loads them on the host (`--update-apk-dir`) and
+ * each case selects one by name (`update_apk`); the copies pushed to /data/local/tmp are the upload fallback. Runs on commit 0 + WP-E (no settings UI involved).
  */
 class UpdaterTest : SettingsTestBase() {
     private val updater get() = probe.updater
@@ -84,7 +85,7 @@ class UpdaterTest : SettingsTestBase() {
 
     @Test
     fun badSignatureIsIgnoredAutomaticallyAndExplainedManually() {
-        panel.uploadApk("app", installedApk())
+        assertTrue(panel.offerApk("installed") { installedApk() }) // U-S14
         manifest(versionCode = 99, sequence = 1)
         panel.updateMode("bad_signature")
         assertEquals("automatic check stays silent", UpdateState.Idle, check(manual = false))
@@ -95,7 +96,7 @@ class UpdaterTest : SettingsTestBase() {
 
     @Test
     fun shaMismatchIsRefusedAndTheFileDeleted() {
-        panel.uploadApk("app", installedApk())
+        assertTrue(panel.offerApk("installed") { installedApk() }) // U-S14
         manifest(versionCode = 99, sequence = 1)
         panel.updateMode("wrong_hash")
         val offer = check(manual = true)
@@ -108,9 +109,8 @@ class UpdaterTest : SettingsTestBase() {
 
     @Test
     fun apkNotSignedWithTheManifestsCertificateIsWrongCert() {
-        val v2 = readFixture(v2Path)
-        assumeTrue("fixture $v2Path missing: run tools/fakepanel/run-instrumented.sh --update-fixtures", v2 != null)
-        panel.uploadApk("app", v2!!)
+        // U-S14 (code review 2026-10-16): the panel serves the host's fixture by name; reading it here is the fallback.
+        assumeTrue("fixture v2 missing: run tools/fakepanel/run-instrumented.sh --update-fixtures", panel.offerApk("v2") { readFixture(v2Path) })
         manifest(versionCode = 2, sequence = 1)
         panel.updateMode("wrong_cert") // the manifest lists another certificate digest
         assertTrue(check(manual = true) is UpdateState.Available)
@@ -122,9 +122,7 @@ class UpdaterTest : SettingsTestBase() {
 
     @Test
     fun apkSignedWithAnotherKeyIsWrongCert() {
-        val other = readFixture(otherPath)
-        assumeTrue("fixture $otherPath missing: run tools/fakepanel/run-instrumented.sh --update-fixtures", other != null)
-        panel.uploadApk("app", other!!)
+        assumeTrue("fixture other missing: run tools/fakepanel/run-instrumented.sh --update-fixtures", panel.offerApk("other") { readFixture(otherPath) }) // U-S14
         manifest(versionCode = 2, sequence = 1) // the genuine certificate digest
         assertTrue(check(manual = true) is UpdateState.Available)
         updater.download()
@@ -134,7 +132,7 @@ class UpdaterTest : SettingsTestBase() {
 
     @Test
     fun notNewerAndWrongPackage() {
-        panel.uploadApk("app", installedApk())
+        assertTrue(panel.offerApk("installed") { installedApk() }) // U-S14
         manifest(versionCode = 1, sequence = 1)
         assertTrue("same versionCode → up to date", check(manual = true) is UpdateState.UpToDate)
         updater.resetSession()
@@ -148,7 +146,7 @@ class UpdaterTest : SettingsTestBase() {
 
     @Test
     fun replayedLowerSequenceIsRefused() {
-        panel.uploadApk("app", installedApk())
+        assertTrue(panel.offerApk("installed") { installedApk() }) // U-S14
         manifest(versionCode = 99, sequence = 5)
         assertTrue(check(manual = true) is UpdateState.Available)
         updater.resetSession()
@@ -159,9 +157,8 @@ class UpdaterTest : SettingsTestBase() {
 
     @Test
     fun validUpdateReachesThePendingUserActionAndTheTestCancels() {
-        val v2 = readFixture(v2Path)
-        assumeTrue("fixture $v2Path missing: run tools/fakepanel/run-instrumented.sh --update-fixtures", v2 != null)
-        panel.uploadApk("app", v2!!)
+        // U-S14 (code review 2026-10-16): the panel serves the host's fixture by name; reading it here is the fallback.
+        assumeTrue("fixture v2 missing: run tools/fakepanel/run-instrumented.sh --update-fixtures", panel.offerApk("v2") { readFixture(v2Path) })
         manifest(versionCode = 2, sequence = 1)
         // "Install unknown apps" is granted by run-instrumented.sh --update-fixtures before the app starts (changing the
         // app-op kills the app process, and with it this instrumentation). Without it the verified download must stop at
@@ -188,5 +185,36 @@ class UpdaterTest : SettingsTestBase() {
         // starts again (no activity runs in this class, so the test does what that observer does).
         onMain { updater.cancelPendingInstall() }
         awaitState("cancelled → ready again", 30_000) { it is UpdateState.ReadyToInstall }
+    }
+
+    /**
+     * D-B4 device check (code review 2026-10-16), run alone with `-e update_confirm 1`: with the app in front, the
+     * pending install session is not abandoned while the system confirmation is up, and confirming it installs the
+     * update. The package is replaced, which kills this process: the runner reports a crash, and the check is the
+     * installed versionCode afterwards (`adb shell dumpsys package app.thebox.debug | grep versionCode` → 2).
+     */
+    @Test
+    fun confirmInstallsTheUpdate() {
+        assumeTrue("device check: -e update_confirm 1", args.getString("update_confirm") == "1")
+        assumeTrue("fixture v2 missing: run tools/fakepanel/run-instrumented.sh --update-fixtures", panel.offerApk("v2") { readFixture(v2Path) })
+        assumeTrue("REQUEST_INSTALL_PACKAGES not granted", context.packageManager.canRequestPackageInstalls())
+        manifest(versionCode = 2, sequence = 1)
+        launch() // the app in front, as when the user presses Install on the About page
+        assertTrue(check(manual = true) is UpdateState.Available)
+        updater.download()
+        assertTrue(awaitState("verified download", 120_000) { it is UpdateState.ReadyToInstall || it is UpdateState.Failed } is UpdateState.ReadyToInstall)
+        val before = probe.installer.statusesSeen.size
+        updater.install()
+        val deadline = android.os.SystemClock.elapsedRealtime() + 30_000
+        while (android.os.SystemClock.elapsedRealtime() < deadline && probe.installer.statusesSeen.drop(before).none { it == PackageInstaller.STATUS_PENDING_USER_ACTION }) Thread.sleep(200)
+        assertTrue("STATUS_PENDING_USER_ACTION reached", probe.installer.statusesSeen.drop(before).contains(PackageInstaller.STATUS_PENDING_USER_ACTION))
+        Thread.sleep(5_000)
+        log("D-B4: state with the confirmation up for 5 s: ${updater.state.value}")
+        assertEquals("the pending session survives while the app is in front", UpdateState.Installing, updater.state.value)
+        val device = androidx.test.uiautomator.UiDevice.getInstance(instrumentation)
+        val button = device.wait(androidx.test.uiautomator.Until.findObject(androidx.test.uiautomator.By.text(java.util.regex.Pattern.compile("(?i)^(update|install)$"))), 15_000)
+        log("D-B4: confirmation button: ${button?.text} (package ${device.currentPackageName})")
+        if (button != null) button.click() else { device.pressDPadRight(); device.pressEnter() }
+        Thread.sleep(60_000) // the package is replaced here; this process ends
     }
 }

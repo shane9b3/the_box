@@ -69,8 +69,12 @@ import javax.inject.Singleton
 sealed interface DiagOutcome {
     /** Show [text] in the page's notice line (`SettingsEvent.Notice`). */
     data class Notice(val text: String) : DiagOutcome
-    /** Push [route] (the phone page for a log download). */
-    data class Open(val route: SettingsRoute) : DiagOutcome
+    /**
+     * Push [route] (the phone page for a log download, Sync status → Edit). [needsPin] (U-S6, code review 2026-10-16):
+     * the route is gated (a playlist's login with "Lock settings" on), so the shell asks for the PIN first (S2: the sync
+     * chip's Sync status is PIN-free, "Edit in its menu asks").
+     */
+    data class Open(val route: SettingsRoute, val needsPin: Boolean = false) : DiagOutcome
 }
 
 /**
@@ -480,7 +484,8 @@ class DiagPages @Inject constructor(
                             out(DiagOutcome.Notice(s(R.string.sync_retry_started)))
                         }
                         MENU_DISMISS -> row?.failureLogId?.let { sources.acknowledge(it) }
-                        MENU_EDIT -> pid?.let { out(DiagOutcome.Open(SettingsRoute.PlaylistSource(it))) }
+                        // U-S6: Edit opens the login form; with "Lock settings" on it asks for the PIN like the row does.
+                        MENU_EDIT -> pid?.let { out(DiagOutcome.Open(SettingsRoute.PlaylistSource(it), needsPin = parental.state.value.policy.lockSettings)) }
                     }
                 }
             }

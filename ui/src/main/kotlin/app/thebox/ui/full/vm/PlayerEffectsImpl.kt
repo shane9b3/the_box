@@ -75,6 +75,19 @@ class PlayerEffectsImpl(
 
     override fun setChannelLocked(channel: GuideChannel, locked: Boolean) = delegates.parental.setChannelLocked(channel, locked)
 
+    /**
+     * (U-S12, code review 2026-10-16) The AUDIO picker's "Back to Auto": the same path as the AUDIO_OUTPUT_FAILED card's
+     * button (`ErrorRouteActions` BACK_TO_AUTO: `playback.audioOutput = AUTO`, one re-prepare, the toast). The card
+     * argument is not read for this button.
+     */
+    override fun audioOutputAuto() = delegates.errors.run(
+        app.thebox.core.full.ErrorButton.BACK_TO_AUTO,
+        app.thebox.core.full.ErrorCardState(
+            app.thebox.core.playback.PlaybackError(app.thebox.core.playback.PlaybackErrorCode.AUDIO_OUTPUT_FAILED), null,
+            listOf(app.thebox.core.full.ErrorButton.BACK_TO_AUTO), 0, null, archiveFailed = false,
+        ),
+    )
+
     /** (M5 integration, §3.6.2) The Sources picker. */
     override fun selectServer(index: Int) = controller.selectServer(index)
     override fun pausePlain() = controller.pause()

@@ -31,6 +31,8 @@ import app.thebox.core.settings.SettingsRow
 import app.thebox.core.settings.SettingsUiState
 import app.thebox.core.settings.TextHint
 import app.thebox.core.settings.Tone
+import androidx.compose.ui.graphics.compositeOver
+import androidx.compose.ui.graphics.luminance
 import app.thebox.ui.theme.BoxTheme
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -226,5 +228,40 @@ class SettingsScreenTest {
         assertEquals(SettingsUi.ITEM_ROW_H, rowHeight(SettingsRow(RowId("i"), "Item", kind = RowKind.Item())))
         assertTrue(SettingsUi.isMonoValue("14:02"))
         assertTrue(SettingsUi.isMonoValue("panel.example.com:8080"))
+    }
+
+    /** U-S9 (M5 code review 2026-10-16): an Off toggle stays visible on a focused (light) row; On keeps its colours. */
+    @Test
+    fun offToggleIsVisibleOnAFocusedRow() {
+        val row = SettingsUi.Fg.luminance()
+        val (fill, knob) = togglePillColors(on = false, onLight = true)
+        assertTrue("the knob vanishes into the focused row", kotlin.math.abs(knob.luminance() - row) > 0.5f)
+        val blended = fill.compositeOver(SettingsUi.Fg).luminance()
+        assertTrue("the Off fill is not visible on the focused row", kotlin.math.abs(blended - row) > 0.05f)
+        assertEquals(togglePillColors(on = true, onLight = false), togglePillColors(on = true, onLight = true))
+    }
+
+    /** U-L8 (M5 code review 2026-10-16): "Set up from phone" inside a first-run form keeps the first-run review. */
+    @Test
+    fun phoneSetupFromAFirstRunFormKeepsFirstRun() {
+        val editor = EditorState(RowId("setup.xtream.server"), "Server", "", TextHint.URL, masked = false, chips = emptyList())
+        val form = SettingsRoute.AddSource(app.thebox.core.settings.SourceKind.XTREAM, firstRun = true)
+        val machine = FakeSettingsUiMachine(state().copy(route = form, editor = editor))
+        rule.setContent {
+            androidx.compose.runtime.CompositionLocalProvider(LocalKeyboardCheck provides { false }) {
+                BoxTheme { SettingsScreen(machine, clock24 = true) }
+            }
+        }
+        rule.onNodeWithTag(EDITOR_PHONE_TAG).performClick()
+        rule.runOnIdle { assertEquals(listOf<SettingsRoute>(SettingsRoute.PhoneSetup(firstRun = true)), machine.pushed) }
+    }
+
+    /** U-L9 (M5 code review 2026-10-16): a context menu opened on a low row stays inside the pane (it ran past y 1080). */
+    @Test
+    fun contextMenuIsClampedToThePane() {
+        val low = SettingsUi.PANE_H - 80
+        val top = menuTop(low, options = 4)
+        assertTrue("menu bottom ${top + 4 * SettingsUi.MENU_ROW_H + 24} past the pane", top + 4 * SettingsUi.MENU_ROW_H + 24 <= SettingsUi.PANE_Y + SettingsUi.PANE_H)
+        assertEquals(SettingsUi.PANE_Y + 200, menuTop(200, options = 2))
     }
 }

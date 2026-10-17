@@ -11,7 +11,7 @@ sealed interface PhoneSubmission {
         override fun toString() = "M3u(name=${form.name}, url=${form.url?.let(app.thebox.core.common.Redact::host)}, file=${form.fileUri != null}, epg=${form.epgUrls.size})"
     }
     /** Any pasted link: the TV normalises it (get.php → Xtream). */
-    data class Link(val url: String, val name: String?) : PhoneSubmission
+    data class Link(val url: String, val name: String?) : PhoneSubmission { override fun toString() = "Link(name=$name, url=${app.thebox.core.common.Redact.host(url)})" } // Phase 1 flag 7 (code review 2026-10-16): a get.php link carries a login.
     /** A backup file was uploaded and spooled to [path] (app cache); passphrase follows separately. */
     data class BackupUploaded(val path: String, val bytes: Long) : PhoneSubmission
     data class Passphrase(val value: CharArray) : PhoneSubmission { override fun toString() = "Passphrase(****)" }

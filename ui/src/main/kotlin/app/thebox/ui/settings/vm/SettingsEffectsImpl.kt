@@ -23,6 +23,8 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicLong
 
@@ -55,12 +57,18 @@ class SettingsEffectsImpl(
 
     private fun sourceFor(route: SettingsRoute): SettingsPageSource? = sources.firstOrNull { it.handles(route) }
 
+    /** U-S1 (code review 2026-10-16): routes whose data changed while their build was in flight (main thread). */
+    private val staleWhileBuilding = HashSet<SettingsRoute>()
+
     override fun loadPage(route: SettingsRoute) {
         builds[route]?.cancel()
+        staleWhileBuilding.remove(route)
         val ctx = ctx()
         builds[route] = scope.launch(main) {
             val page = withContext(work) { build(route, ctx) }
             machine.dispatch(SettingsEvent.Page(page))
+            // U-S1: a change that arrived before this page was shown had nothing to rebuild; build it once more now.
+            if (staleWhileBuilding.remove(route) && page.placeholder != null) loadPage(route)
         }
     }
 
@@ -104,35 +112,52 @@ class SettingsEffectsImpl(
         }
     }
 
+    /** U-L1 (code review 2026-10-16): intents run one at a time, in the order the user gave them. */
+    private val intents = Mutex()
+
     override fun onIntent(intent: RowIntent) {
         val route = machine.ui.value.page?.route ?: machine.ui.value.route
         val ctx = ctx()
         scope.launch(main) {
-            withContext(work) {
-                try {
-                    val owner = sourceFor(route)
-                    val handled = owner?.onIntent(route, intent, ctx) == true
-                    // The advanced toggle (sections pane) and rows a source shows on another's route.
-                    if (!handled) for (s in sources) if (s !== owner && s.onIntent(route, intent, ctx)) break
-                } catch (e: CancellationException) {
-                    throw e
-                } catch (e: Exception) {
-                    BoxLog.e(TAG, "intent failed: ${intent.row.key}", e)
-                }
-            }
+            // U-L1: OK twice on a toggle of a suspending source must store the second value, not whichever ends last.
+            intents.withLock { runIntent(route, intent, ctx) }
             rebuildDisplayed()
+        }
+    }
+
+    private suspend fun runIntent(route: SettingsRoute, intent: RowIntent, ctx: PageContext) {
+        withContext(work) {
+            try {
+                val owner = sourceFor(route)
+                val handled = owner?.onIntent(route, intent, ctx) == true
+                // The advanced toggle (sections pane) and rows a source shows on another's route.
+                if (!handled) for (s in sources) if (s !== owner && s.onIntent(route, intent, ctx)) break
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                BoxLog.e(TAG, "intent failed: ${intent.row.key}", e)
+            }
         }
     }
 
     /** Rebuilds the open page (after an intent, or when its source's data changed). */
     fun rebuildDisplayed() {
-        val route = machine.ui.value.page?.route ?: return
-        loadPage(route)
+        val route = machine.ui.value.page?.route
+        // U-S1: builds still in flight (the page not shown yet) are marked, so a placeholder they bring is rebuilt.
+        for ((r, job) in builds) if (r != route && job.isActive) staleWhileBuilding += r
+        if (route != null) loadPage(route)
     }
 
     override fun onClosed(changedTimings: Set<EffectTiming>) {
         val u = machine.ui.value
-        for (r in (u.stack + u.route + listOfNotNull(u.page?.route)).toSet()) sourceFor(r)?.closed(r)
+        // U-S3 (code review 2026-10-16): a page still loading when Settings closes (on Root the displayed section is in
+        // none of stack/route/page until it arrives) is cancelled and its source closed, so no provider page keeps
+        // observing after the visit and no page lands after onLeave.
+        val loading = builds.keys.toList()
+        for (job in builds.values) job.cancel()
+        builds.clear()
+        staleWhileBuilding.clear()
+        for (r in (u.stack + u.route + listOfNotNull(u.page?.route) + loading).toSet()) sourceFor(r)?.closed(r)
         if (EffectTiming.REPREPARE in changedTimings) {
             try {
                 applier.apply()

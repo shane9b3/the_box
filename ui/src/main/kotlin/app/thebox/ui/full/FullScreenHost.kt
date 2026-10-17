@@ -79,6 +79,8 @@ fun FullScreenHost(
     val detail by detailFlow.collectAsState()
     val failureFlow = remember(player) { extras?.archiveFailure ?: MutableStateFlow(null) }
     val archiveFailure by failureFlow.collectAsState()
+    val forcedFlow = remember(player) { extras?.audioOutputForced ?: MutableStateFlow(false) }
+    val audioForced by forcedFlow.collectAsState() // U-S12
     // U-S5: a per-minute clock (past / now / future, list progress); never read in composition per recomposition, so
     // the bars and the list skip when only the stats (2 Hz) change. Sub-minute time is read in the draw lambdas.
     val nowMs by produceState(System.currentTimeMillis()) {
@@ -110,7 +112,7 @@ fun FullScreenHost(
         }
         Fade(ui.quick, lowEnd) { q -> QuickBar(q, Modifier.offset(PlayerUi.QUICK_L.dp, PlayerUi.QUICK_T.dp)) }
         // U-S3 (V2): the stats share the top-left corner with the channel list and the group card; hidden while either shows.
-        if (ui.channels == null && state.groupCard == null) ui.stats?.let { StatsOverlay(it, Modifier.offset(PlayerUi.STATS_L.dp, PlayerUi.STATS_T.dp)) }
+        if (ui.channels == null && state.groupCard == null) ui.stats?.let { StatsOverlay(it, Modifier.offset(PlayerUi.STATS_L.dp, PlayerUi.STATS_T.dp), audioOutputForced = audioForced) }
         if (player != null) {
             Fade(ui.channels, lowEnd) { c -> ChannelListPanel(c, player, Modifier.offset(PlayerUi.LIST_L.dp, PlayerUi.LIST_T.dp), nowMs) }
         }

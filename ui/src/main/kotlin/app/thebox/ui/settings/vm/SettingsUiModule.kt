@@ -16,6 +16,7 @@ import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import dagger.multibindings.Multibinds
+import kotlinx.coroutines.flow.map
 import javax.inject.Singleton
 
 /**
@@ -33,6 +34,13 @@ abstract class SettingsUiModule {
     companion object {
         @Provides @Singleton
         fun settingsTexts(@ApplicationContext context: Context): SettingsTexts = ResourceSettingsTexts(context.resources)
+
+        /** U-S12 (code review 2026-10-16): the player's "Always passthrough" flag, from the stored playback prefs. */
+        @Provides
+        fun audioOutputForced(store: app.thebox.core.settings.SettingsStore): app.thebox.ui.full.vm.AudioOutputForced =
+            app.thebox.ui.full.vm.AudioOutputForced {
+                store.flow(app.thebox.core.settings.state.PlaybackDomain).map { it.audioOutput == app.thebox.core.playback.AudioOutputMode.FORCE_PASSTHROUGH }
+            }
 
         @Provides
         fun settingsMachineFactory(texts: SettingsTexts, keyMap: EffectiveKeyMap): SettingsMachineFactory = SettingsMachineFactory { effects, nowMs ->

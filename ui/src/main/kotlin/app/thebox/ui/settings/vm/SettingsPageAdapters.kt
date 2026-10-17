@@ -35,6 +35,7 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -46,6 +47,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import javax.inject.Inject
@@ -78,6 +80,7 @@ class SettingsPageAdapters @Inject constructor(
     private val sourceSetup: app.thebox.core.setup.SourceSetup,
     private val normalizer: app.thebox.core.setup.SourceInputNormalizer,
     private val setupStrings: app.thebox.core.setup.SetupStrings,
+    private val drafts: app.thebox.core.setup.SetupDraftStore,
 ) {
     class Built(val sources: List<SettingsPageSource>, val setup: SetupPagesSource, val mapping: MappingPagesSource, val phone: PhoneSetupBridge)
 
@@ -92,12 +95,33 @@ class SettingsPageAdapters @Inject constructor(
         val mapping = MappingPagesSource(bindings, keyMap, mappingHost, ResourceMappingNames(res), ParentalStrings.mapping(res), link, main)
         sources += mapping
         sources += DiagPagesSource(diag, link, scope, main, work)
-        val bridge = PhoneSetupBridge(context, phone, sourceSetup, normalizer, setupStrings, link, scope, main, kotlinx.coroutines.Dispatchers.IO)
+        // U-S4 (code review 2026-10-16): the bridge fills WP-B's Xtream draft and runs the form's Connect on a rejected login.
+        val bridge = PhoneSetupBridge(
+            context, phone, sourceSetup, normalizer, setupStrings, link, scope, main, kotlinx.coroutines.Dispatchers.IO, drafts,
+            connect = { r -> setup.onIntent(r, RowIntent.Run(app.thebox.core.settings.RowId(app.thebox.core.setup.pages.XtreamFormPage.ROW_CONNECT)), PageContext(false, System.currentTimeMillis())) },
+        )
         return Built(sources, setup, mapping, bridge)
     }
 }
 
 private fun signal() = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+/**
+ * U-L2 (code review 2026-10-16): true while [origin] is what the user sees (the open route, or the page the sections
+ * pane shows). Navigation a page asks for after a suspend (a save, an export, an import stage) is dropped once the user
+ * has moved on or left Settings, instead of landing on whatever page is open then. A link that is not a machine (test
+ * doubles without state) counts as current.
+ */
+internal fun SettingsShellLink.shows(origin: SettingsRoute): Boolean {
+    val u = (this as? app.thebox.core.settings.SettingsMachine)?.ui?.value ?: return true
+    return u.route == origin || u.page?.route == origin
+}
+
+/** U-L2: [SettingsShellLink.push] from a page of [origin], dropped unless [origin] is still shown. */
+internal fun SettingsShellLink.pushFrom(origin: SettingsRoute, route: SettingsRoute, gated: Boolean = false) {
+    if (!shows(origin)) return
+    if (gated) pushGated(route) else push(route)
+}
 private fun noticeFlow() = MutableSharedFlow<String>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
 /** WP-B's push-model pages (`SetupPageProvider`, main thread only) as a [SettingsPageSource]. */
@@ -107,8 +131,14 @@ class SetupPagesSource(
     private val scope: CoroutineScope,
     private val main: CoroutineDispatcher,
 ) : SettingsPageSource {
-    /** The last page each open route published (null until its first publish). */
-    private val open = ConcurrentHashMap<SettingsRoute, MutableStateFlow<PageModel?>>()
+    /** An open route: the last page it published (null until its first publish). */
+    private class Slot {
+        val page = MutableStateFlow<PageModel?>(null)
+        /** U-S3: closed while a [page] call waited; the waiter gets a placeholder instead of waiting forever. */
+        @Volatile var closed = false
+    }
+
+    private val open = ConcurrentHashMap<SettingsRoute, Slot>()
     private val _changes = signal()
     private val _notices = noticeFlow()
     private val _pickRequests = MutableSharedFlow<SettingsRoute>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)
@@ -123,12 +153,18 @@ class SetupPagesSource(
 
     override suspend fun page(route: SettingsRoute, ctx: PageContext): PageModel {
         val slot = open[route] ?: withContext(main) {
-            open[route] ?: MutableStateFlow<PageModel?>(null).also { s ->
+            open[route] ?: Slot().also { s ->
                 open[route] = s
                 provider.open(route, HostFor(route))
             }
         }
-        return slot.filterNotNull().first()
+        val first = slot.page.filterNotNull().first()
+        if (first.placeholder == null || slot.closed) return first
+        // U-S1 (code review 2026-10-16): a push-model page publishes a placeholder at once and its data a few ms later
+        // (WP-B's Playlists page: Room + sync status). Wait briefly for the data so the first page shown is the real one
+        // and "Loading…" does not flash; a slower page is shown as its placeholder and rebuilt on its next publish.
+        return withTimeoutOrNull(FIRST_DATA_WAIT_MS) { slot.page.filterNotNull().first { it.placeholder == null || slot.closed } }
+            ?: slot.page.value ?: first
     }
 
     override suspend fun items(route: SettingsRoute, from: Int, to: Int, ctx: PageContext): List<SettingsRow> = withContext(main) {
@@ -141,8 +177,14 @@ class SetupPagesSource(
 
     override suspend fun onIntent(route: SettingsRoute, intent: RowIntent, ctx: PageContext): Boolean {
         if (!provider.handles(route)) return false
-        // A page the provider no longer holds (closed while the machine still showed it) is reopened first.
-        if (open[route] == null) page(route, ctx)
+        if (open[route] == null) {
+            // A page the provider no longer holds (closed while the machine still showed it) is reopened first (X1).
+            // U-L2 (code review 2026-10-16): only when it is the page shown; an intent for a page the user has left is
+            // dropped (nothing would ever close a page reopened for it). Bounded: a provider that never publishes
+            // cannot hold the intent queue (U-L1).
+            if (link()?.shows(route) == false) return true
+            withTimeoutOrNull(REOPEN_WAIT_MS) { page(route, ctx) } ?: return true
+        }
         withContext(main) { provider.onIntent(route, intent, HostFor(route)) }
         return true
     }
@@ -150,7 +192,11 @@ class SetupPagesSource(
     override fun onBack(route: SettingsRoute): Boolean = provider.onBack(route, HostFor(route))
 
     override fun closed(route: SettingsRoute) {
-        if (open.remove(route) != null) provider.close(route)
+        val slot = open.remove(route) ?: return
+        provider.close(route)
+        // U-S3 (code review 2026-10-16): wake a page() call still waiting on this slot with a placeholder.
+        slot.closed = true
+        slot.page.value = PageModel(route, "", rows = emptyList(), version = CLOSED_VERSION, placeholder = "")
     }
 
     /** The document picker answered for [route] (main thread); [uri] null = cancelled. */
@@ -160,9 +206,12 @@ class SetupPagesSource(
 
     private inner class HostFor(private val route: SettingsRoute) : PageHost {
         override fun publish(page: PageModel) {
-            val slot = open[page.route] ?: open[route] ?: return
-            slot.value = page
-            _changes.tryEmit(Unit)
+            val slot = open[page.route] ?: open[route] ?: run { BoxLog.i("SetupPagesSource") { "publish after close: ${route::class.simpleName}" }; return }
+            val first = slot.page.value == null
+            slot.page.value = page
+            // U-S1 (code review 2026-10-16): a route's first publish answers the pending page() call; signalling a change
+            // as well only made the shell rebuild (and, with the old throttle, delay the data publish behind it).
+            if (!first) _changes.tryEmit(Unit)
         }
 
         override fun act(action: PageAction) {
@@ -172,19 +221,30 @@ class SetupPagesSource(
 
         private fun run(action: PageAction) {
             val l = link()
+            // U-L2 (code review 2026-10-16): navigation from a page the user has left (a save or an import stage that
+            // finished later) is dropped instead of acting on whatever page is open now.
+            val current = l?.shows(route) ?: false
             when (action) {
-                is PageAction.Push -> l?.push(action.route)
-                is PageAction.Replace -> l?.replace(action.route)
-                PageAction.Pop -> l?.pop()
-                is PageAction.PopTo -> l?.popTo(action.route)
-                PageAction.LeaveToGuide -> l?.leaveToGuide()
+                is PageAction.Push -> if (current) l?.push(action.route)
+                is PageAction.Replace -> if (current) l?.replace(action.route)
+                PageAction.Pop -> if (current) l?.pop()
+                is PageAction.PopTo -> if (current) l?.popTo(action.route)
+                PageAction.LeaveToGuide -> if (current) l?.leaveToGuide()
                 is PageAction.Notice -> _notices.tryEmit(action.text)
-                is PageAction.Confirm -> l?.confirm(action.spec, action.intent)
+                is PageAction.Confirm -> if (current) l?.confirm(action.spec, action.intent)
                 PageAction.PickM3uFile -> _pickRequests.tryEmit(route)
-                PageAction.CreatePin -> l?.requestPinSetup(change = false)
+                PageAction.CreatePin -> if (current) l?.requestPinSetup(change = false)
                 PageAction.Reload -> _changes.tryEmit(Unit)
             }
         }
+    }
+
+    private companion object {
+        /** U-S1: how long page() waits for a push-model page's data after its placeholder. */
+        const val FIRST_DATA_WAIT_MS = 100L
+        /** U-L2: the bound on reopening a page to deliver an intent. */
+        const val REOPEN_WAIT_MS = 1_000L
+        const val CLOSED_VERSION = Long.MIN_VALUE
     }
 }
 
@@ -206,10 +266,12 @@ class SectionPagesSource(
         if (!pages.handles(route)) return false
         val a = pages.onIntent(route, intent)
         a.notice?.let { _notices.tryEmit(it) }
-        a.open?.let { r -> withContext(main) { link()?.push(r) } }
+        // U-S6 audit (code review 2026-10-16): WP-D opens FavouriteLists and RestorePreview, neither gated (the restore
+        // itself asks at `restore.go`, C-B2); U-L2: dropped when the user has left the page while the intent ran.
+        a.open?.let { r -> withContext(main) { link()?.pushFrom(route, r) } }
         // C-S8 (code review 2026-10-16): "Start watching" after a restore, and its PIN offer.
-        if (a.leaveToGuide) withContext(main) { link()?.leaveToGuide() }
-        if (a.setPin) withContext(main) { link()?.requestPinSetup(change = false) }
+        if (a.leaveToGuide) withContext(main) { link()?.takeIf { it.shows(route) }?.leaveToGuide() }
+        if (a.setPin) withContext(main) { link()?.takeIf { it.shows(route) }?.requestPinSetup(change = false) }
         return true
     }
 }
@@ -327,7 +389,9 @@ class DiagPagesSource(
         return diag.onIntent(intent, scope) { out ->
             when (out) {
                 is DiagOutcome.Notice -> _notices.tryEmit(out.text)
-                is DiagOutcome.Open -> scope.launch(main) { link()?.push(out.route) }
+                // U-S6 (code review 2026-10-16): a gated target asks for the PIN (`pushGated`); U-L2: an export that
+                // finishes after the user moved on does not push the phone page onto whatever is open.
+                is DiagOutcome.Open -> scope.launch(main) { link()?.pushFrom(route, out.route, gated = out.needsPin) }
             }
         }
     }
@@ -346,6 +410,11 @@ class DiagPagesSource(
  * link or an uploaded M3U file the phone sent is saved like the TV forms would save it, and the shell moves on to the
  * import progress. WP-D's server spools uploads in `cacheDir/phone/` and deletes the spool when it stops, so an uploaded
  * M3U file is moved to `filesDir/playlists/` first (WP-D §1.7a item 5). Failures go back to the phone page as text.
+ *
+ * Code review 2026-10-16: an Xtream login (or a link that normalises to one) runs Connect first (U-S4): a rejected login
+ * creates no playlist; the phone gets the reason and the next step (U-S5) with `done = false`, and the TV opens the
+ * Xtream form filled from the phone and runs Connect there, so its result card offers the choices. `done = true` only
+ * after the save succeeded. A save in flight finishes and is reported even when the user leaves the phone page (U-S15).
  */
 class PhoneSetupBridge(
     private val context: Context,
@@ -357,61 +426,133 @@ class PhoneSetupBridge(
     private val scope: CoroutineScope,
     private val main: CoroutineDispatcher,
     private val io: CoroutineDispatcher,
+    /** U-S4: WP-B's drafts (the Xtream form is filled from the phone). Null in tests that do not open the form. */
+    private val drafts: app.thebox.core.setup.SetupDraftStore? = null,
+    /** U-S4: runs the Xtream form's Connect on [SettingsRoute] (the setup page source's intent path). */
+    private val connect: (suspend (SettingsRoute) -> Unit)? = null,
+    private val nowMs: () -> Long = System::currentTimeMillis,
+    /** U-S4: how long the phone page stays up after a failure so its 1 s poll reads the reason before the TV moves on. */
+    private val failureGraceMs: Long = PHONE_READ_GRACE_MS,
 ) {
     private val mapper = app.thebox.core.setup.SetupResultMapper(strings)
     private var job: Job? = null
     private var firstRun = false
+    private var route: SettingsRoute? = null
 
     /** The open route changed (main thread): collect submissions while the setup phone page is open. */
     fun onRoute(route: SettingsRoute) {
         val setupPage = route is SettingsRoute.PhoneSetup && route.purpose == app.thebox.core.settings.PhonePurpose.SETUP
-        if (!setupPage) { job?.cancel(); job = null; return }
+        // U-S15: leaving only stops *collecting*; a save already running finishes in its own NonCancellable block.
+        if (!setupPage) { job?.cancel(); job = null; this.route = null; return }
         firstRun = (route as SettingsRoute.PhoneSetup).firstRun
+        this.route = route
         if (job?.isActive == true) return
         job = scope.launch(main) { phone.submissions.collect { onSubmission(it) } }
     }
 
+    private fun text(card: app.thebox.core.setup.SetupCard): String =
+        // U-S5: the reason and its next step, as the TV's result card shows them.
+        card.lines.firstOrNull()?.let { "${card.headline} $it" } ?: card.headline
+
+    private fun xtreamContext(server: String): app.thebox.core.setup.SetupResultMapper.Context {
+        val u = runCatching { java.net.URI(server) }.getOrNull()
+        return app.thebox.core.setup.SetupResultMapper.Context(app.thebox.core.settings.SourceKind.XTREAM, u?.host, u?.port?.takeIf { it > 0 })
+    }
+
     private suspend fun onSubmission(s: app.thebox.core.setup.lan.PhoneSubmission) {
-        val r: app.thebox.core.common.Outcome<Long> = when (s) {
-            is app.thebox.core.setup.lan.PhoneSubmission.Xtream -> setup.saveXtream(s.form)
-            is app.thebox.core.setup.lan.PhoneSubmission.M3u -> setup.saveM3u(s.form)
+        val origin = route ?: return
+        when (s) {
+            is app.thebox.core.setup.lan.PhoneSubmission.Xtream -> xtream(s.form, origin)
+            is app.thebox.core.setup.lan.PhoneSubmission.M3u -> save(origin) { setup.saveM3u(s.form) }
             is app.thebox.core.setup.lan.PhoneSubmission.Link -> when (val n = normalizer.m3uUrl(s.url)) {
-                is app.thebox.core.setup.NormalizedInput.M3u -> setup.saveM3u(app.thebox.core.setup.M3uForm(s.name, n.url, null, emptyList()))
-                is app.thebox.core.setup.NormalizedInput.Xtream -> {
-                    val user = n.username
-                    val pass = n.password
-                    if (user.isNullOrEmpty() || pass.isNullOrEmpty()) {
-                        phone.reportStatus(mapper.input(app.thebox.core.setup.InputProblem.NOT_A_URL).headline, done = false)
-                        return
+                is app.thebox.core.setup.NormalizedInput.M3u -> {
+                    val x = n.looksLikeXtream
+                    val user = x?.username
+                    val pass = x?.password
+                    when {
+                        // U-S4: a link that carries an Xtream login (get.php, a stream URL) is that login: Connect first.
+                        x != null && !user.isNullOrEmpty() && pass != null ->
+                            xtream(app.thebox.core.setup.XtreamForm(s.name, x.server, user, pass, x.output ?: "AUTO"), origin)
+                        // U-S5: an Xtream-shaped link without its login gets a text that says so and what to do.
+                        XTREAM_PHP.containsMatchIn(n.url) ->
+                            phone.reportStatus(context.getString(app.thebox.ui.R.string.phone_status_link_no_login), done = false)
+                        else -> save(origin) { setup.saveM3u(app.thebox.core.setup.M3uForm(s.name, n.url, null, emptyList())) }
                     }
-                    setup.saveXtream(app.thebox.core.setup.XtreamForm(s.name, n.server, user, pass, n.output ?: "AUTO"))
                 }
-                is app.thebox.core.setup.NormalizedInput.Invalid -> {
-                    phone.reportStatus(mapper.input(n.reason).headline, done = false)
-                    return
-                }
+                // `m3uUrl` answers M3u or Invalid; a bare server is not a playlist link.
+                is app.thebox.core.setup.NormalizedInput.Xtream ->
+                    phone.reportStatus(context.getString(app.thebox.ui.R.string.phone_status_link_no_login), done = false)
+                is app.thebox.core.setup.NormalizedInput.Invalid -> phone.reportStatus(text(mapper.input(n.reason)), done = false)
             }
             is app.thebox.core.setup.lan.PhoneSubmission.M3uFileUploaded -> {
                 val kept = withContext(io) { keep(java.io.File(s.path)) }
                 if (kept == null) {
-                    phone.reportStatus(mapper.error(app.thebox.core.common.SourceError.Internal("spool")).headline, done = false)
+                    // U-S5: a step for the spool failure.
+                    phone.reportStatus(context.getString(app.thebox.ui.R.string.phone_status_spool_failed), done = false)
                     return
                 }
                 val name = s.name?.takeIf { it.isNotBlank() }
-                setup.saveM3u(app.thebox.core.setup.M3uForm(name?.substringBeforeLast('.'), null, "file://" + kept.absolutePath, emptyList(), fileName = name))
+                // U-S15: the kept copy is deleted when the save fails (nothing else would ever read it).
+                save(origin, onFail = { withContext(io) { kept.delete() } }) {
+                    setup.saveM3u(app.thebox.core.setup.M3uForm(name?.substringBeforeLast('.'), null, "file://" + kept.absolutePath, emptyList(), fileName = name))
+                }
             }
             // Backups and passphrases are WP-D's (`PhoneBackupFlow`).
             else -> return
         }
-        when (r) {
-            is app.thebox.core.common.Outcome.Ok -> {
-                phone.reportStatus(context.getString(app.thebox.ui.R.string.backup_phone_received), done = true)
-                val l = link()
-                l?.replace(SettingsRoute.ImportProgress(r.value, firstRun))
-                (l as? app.thebox.core.settings.SettingsMachine)?.dispatch(app.thebox.core.settings.SettingsEvent.Notice(context.getString(app.thebox.ui.R.string.backup_phone_received_tv)))
+    }
+
+    /** U-S4: Connect (the login test) before anything is saved, as the TV form does (§3.4.4). */
+    private suspend fun xtream(form: app.thebox.core.setup.XtreamForm, origin: SettingsRoute) {
+        phone.reportStatus(context.getString(app.thebox.ui.R.string.backup_phone_received), done = false)
+        val card = withContext(kotlinx.coroutines.NonCancellable) {
+            when (val t = setup.testXtream(form)) {
+                is app.thebox.core.common.Outcome.Ok -> mapper.login(t.value, nowMs())
+                is app.thebox.core.common.Outcome.Err -> mapper.error(t.error, xtreamContext(form.server))
             }
-            is app.thebox.core.common.Outcome.Err -> phone.reportStatus(mapper.error(r.error).headline, done = false)
         }
+        if (card.primary == app.thebox.core.setup.SetupAction.CONTINUE) {
+            save(origin) { setup.saveXtream(form) }
+            return
+        }
+        // Rejected, expired, disabled, unreachable: no playlist. The phone gets the reason and the step; the TV shows the
+        // form filled from the phone with Connect's result card (Edit / Phone setup / Use secure DNS).
+        phone.reportStatus(text(card), done = false)
+        drafts?.let { d ->
+            d.xtream = app.thebox.core.setup.XtreamDraft(
+                name = form.name.orEmpty(), server = form.server, username = form.username, password = form.password,
+                output = form.output, userAgent = form.userAgent.orEmpty(), backups = form.backups.joinToString(", "),
+            )
+        }
+        val target = SettingsRoute.AddSource(app.thebox.core.settings.SourceKind.XTREAM, firstRun)
+        scope.launch(main) {
+            delay(failureGraceMs)
+            val l = link() ?: return@launch
+            if (!l.shows(origin)) return@launch // U-L2: the user has moved on
+            l.replace(target)
+            (l as? app.thebox.core.settings.SettingsMachine)?.dispatch(app.thebox.core.settings.SettingsEvent.Notice(context.getString(app.thebox.ui.R.string.backup_phone_received_tv)))
+            connect?.invoke(target)
+        }
+    }
+
+    /**
+     * U-S15: [op] and its report run to the end even when the collector is cancelled (BACK during the save); the shell
+     * moves to the import progress only while the phone page is still the open route.
+     */
+    private suspend fun save(origin: SettingsRoute, onFail: suspend () -> Unit = {}, op: suspend () -> app.thebox.core.common.Outcome<Long>) {
+        val r = withContext(kotlinx.coroutines.NonCancellable) {
+            val r = op()
+            when (r) {
+                is app.thebox.core.common.Outcome.Ok -> phone.reportStatus(context.getString(app.thebox.ui.R.string.backup_phone_received), done = true)
+                is app.thebox.core.common.Outcome.Err -> { onFail(); phone.reportStatus(text(mapper.error(r.error)), done = false) }
+            }
+            r
+        }
+        if (r !is app.thebox.core.common.Outcome.Ok) return
+        val l = link() ?: return
+        if (!l.shows(origin)) return
+        l.replace(SettingsRoute.ImportProgress(r.value, firstRun))
+        (l as? app.thebox.core.settings.SettingsMachine)?.dispatch(app.thebox.core.settings.SettingsEvent.Notice(context.getString(app.thebox.ui.R.string.backup_phone_received_tv)))
     }
 
     /** Moves the spooled upload out of `cacheDir/phone/` (copy when a rename across directories fails). */
@@ -423,5 +564,11 @@ class PhoneSetupBridge(
     } catch (e: Exception) {
         BoxLog.w("PhoneSetupBridge", "upload not kept: ${e.javaClass.simpleName}")
         null
+    }
+
+    private companion object {
+        const val PHONE_READ_GRACE_MS = 1_500L
+        /** An Xtream panel's playlist or API path (`get.php`, `player_api.php`). */
+        val XTREAM_PHP = Regex("""/(get|player_api)\.php(\?|$)""", RegexOption.IGNORE_CASE)
     }
 }

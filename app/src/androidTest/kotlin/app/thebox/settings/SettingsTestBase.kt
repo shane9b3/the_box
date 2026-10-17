@@ -226,10 +226,56 @@ abstract class SettingsTestBase {
         fail("could not focus row $id; ${brief(sui())}")
     }
 
-    /** Focus row [id] and press OK. */
-    protected fun activate(id: String) {
+    /**
+     * Focus row [id] and press OK. U-S13 (code review 2026-10-16): with [verify] the OK must change something (the
+     * settings state, the page's version, the guide's mode or PIN prompt) within 2 s, else it is pressed once more: an
+     * IME window still hiding after [editText] eats the first key (the `OnboardingTest#m3uAndGuide` flake).
+     */
+    protected fun activate(id: String, verify: Boolean = true) {
         moveTo(id)
+        val before = effectSnapshot()
         press(KeyEvent.KEYCODE_DPAD_CENTER)
+        if (!verify) return
+        val deadline = SystemClock.elapsedRealtime() + 2_000
+        while (SystemClock.elapsedRealtime() < deadline) {
+            if (effectSnapshot() != before) return
+            Thread.sleep(50)
+        }
+        log("OK on $id changed nothing in 2 s; pressing it once more (U-S13)")
+        press(KeyEvent.KEYCODE_DPAD_CENTER)
+    }
+
+    /** U-S13: what an OK can change (state identity, page version, overlays, guide mode, PIN prompt). */
+    private fun effectSnapshot(): List<Any?> {
+        val s = probe.settings?.ui?.value
+        val g = ep.probe().current?.ui?.value
+        return listOf(
+            s?.route, s?.stack, s?.page?.route, s?.page?.version, s?.page?.list?.loaded?.size, s?.choice, s?.menu, s?.confirm, s?.editor?.row,
+            s?.numberPad?.row, s?.capture != null, s?.notice, s?.cursor, g?.mode, g?.pin != null, g?.overlay?.javaClass,
+        )
+    }
+
+    /** U-S13: waits (≤ [timeoutMs]) until no input method window is shown over the activity, then for the main thread. */
+    protected fun awaitImeHidden(timeoutMs: Long = 3_000) {
+        val start = SystemClock.elapsedRealtime()
+        var asked = false
+        while (SystemClock.elapsedRealtime() < start + timeoutMs) {
+            var shown = false
+            scenario?.onActivity { a ->
+                val decor = a.window.decorView
+                shown = androidx.core.view.ViewCompat.getRootWindowInsets(decor)?.isVisible(androidx.core.view.WindowInsetsCompat.Type.ime()) == true
+                // Device pass: the overlay's own hide (X15) does not always reach the IME; after 300 ms ask it directly.
+                if (shown && !asked && SystemClock.elapsedRealtime() - start > 300) {
+                    asked = true
+                    (a.getSystemService(android.content.Context.INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                        .hideSoftInputFromWindow(decor.windowToken, 0)
+                }
+            }
+            if (!shown) break
+            Thread.sleep(50)
+        }
+        log("IME hidden after ${SystemClock.elapsedRealtime() - start} ms (asked=$asked)")
+        instrumentation.waitForIdleSync()
     }
 
     /** Opens the inline choice of row [id] and selects the option with [optionId]. */
@@ -268,6 +314,34 @@ abstract class SettingsTestBase {
         // validator refused the address. IME behaviour itself stays manual (§6.8); §6.3 asked for performTextInput.
         onMain { settingsMachine().dispatch(app.thebox.core.settings.SettingsEvent.EditorClosed(r.id, text, committed = true)) }
         awaitSettings("editor of ${r.id.key} closed (error: ${sui().editor?.error})", 5_000) { it.editor == null }
+        // U-S13 (code review 2026-10-16): the IME hides asynchronously after the overlay leaves; while it is shown the
+        // next key goes to it, not to the app.
+        awaitImeHidden()
+    }
+
+    /** Sets [pin] through Settings → Parental controls (the session stays unlocked until the app closes). */
+    protected fun setPin(pin: String = "1234") {
+        openSettings("parental")
+        activate("parental.pin")
+        createPin(pin)
+        awaitSettings("PIN set") { s -> s.page?.rows?.any { it.id.key == "parental.remove_pin" || it.label.contains("Change", true) } == true }
+        org.junit.Assert.assertTrue(probe.parental().pinSet)
+        leaveSettings()
+    }
+
+    /**
+     * Enter [pin] twice on the create pad. (M5 integration) WP-C's pad asks "Easy to guess. Use it anyway?" after the
+     * first entry of a PIN like 1234 (§3.9.3); OK on its focused "Use it" goes on to the confirmation.
+     */
+    protected fun createPin(pin: String) {
+        awaitGui("PIN pad (create)") { it.pin != null }
+        digits(pin)
+        Thread.sleep(300)
+        // The soft confirm focuses "Choose another" (the safe button): ← then OK picks "Use it".
+        if (gui().pin?.message == app.thebox.core.parental.PinMessage.EASY) { press(KeyEvent.KEYCODE_DPAD_LEFT); press(KeyEvent.KEYCODE_DPAD_CENTER) }
+        awaitGui("PIN pad (confirm)") { it.pin != null && it.pin?.mode == app.thebox.core.parental.PinPadMode.CREATE_CONFIRM }
+        digits(pin)
+        awaitGui("PIN pad closed", 10_000) { it.pin == null }
     }
 
     /** Every user-visible text of the current page (title, subtitle, notice, labels, values, descriptions, Info lines). */

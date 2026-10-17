@@ -16,7 +16,9 @@ import java.util.concurrent.TimeUnit
  */
 class SettingsPanel(val base: String) {
     val admin = FakePanelAdmin(base)
-    private val http = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
+    // U-S14 (code review 2026-10-16): a 120 s write timeout for the APK upload fallback (OkHttp's default 10 s per write
+    // timed out over the emulator's slirp NAT on a busy host); the suite normally selects host-side APKs by name.
+    private val http = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).writeTimeout(120, TimeUnit.SECONDS).build()
 
     fun reachable() = admin.reachable()
     fun reset() = admin.reset()
@@ -39,6 +41,22 @@ class SettingsPanel(val base: String) {
     fun updateManifest(overrides: JSONObject) = patch(JSONObject().put("update_manifest", overrides))
     fun updateApk(name: String) = patch(JSONObject().put("update_apk", name))
     fun updatePublicKey(): String = get("/admin/update_key").getString("public_key")
+
+    /** U-S14: the update APKs the panel holds by name (`--update-apk-dir` on the host, or uploaded). */
+    fun updateApkNames(): Set<String> = get("/admin/update_apks").optJSONArray("names")?.let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }.orEmpty()
+
+    /**
+     * U-S14: offers the host-side APK [name] (`tools/fakepanel/run-instrumented.sh --update-fixtures` loads `installed`,
+     * `v2`, `other`); without it, uploads [bytes] (null = the fixture is missing) as [name]. False when neither exists.
+     */
+    fun offerApk(name: String, bytes: () -> ByteArray?): Boolean {
+        if (name !in updateApkNames()) {
+            val b = bytes() ?: return false
+            uploadApk(name, b)
+        }
+        updateApk(name)
+        return true
+    }
 
     /** Uploads [bytes] as `/update/[name].apk`; returns the panel's SHA-256 (upper-case hex). */
     fun uploadApk(name: String, bytes: ByteArray): String =

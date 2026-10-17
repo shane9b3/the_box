@@ -93,7 +93,7 @@ fun GroupsPanel(state: GuideUiState, modifier: Modifier = Modifier) {
                             label = stringResource(if (r.shortcut == GroupsShortcut.SEARCH) R.string.guide_groups_search else R.string.guide_groups_settings),
                             count = null, focused = o.focused == r.index, current = false,
                         )
-                        is GroupsRow.Entry -> GroupRow(r.entry.label, r.entry.count, o.focused == r.index, o.current == r.entryIndex, r.entry.locked)
+                        is GroupsRow.Entry -> GroupRow(r.entry.label, r.entry.count, o.focused == r.index, o.current == r.entryIndex, r.entry.locked, r.entry.notProtected)
                     }
                 }
             }
@@ -119,7 +119,7 @@ internal suspend fun keepVisible(list: LazyListState, index: Int) {
 }
 
 @Composable
-private fun GroupRow(label: String, count: Int?, focused: Boolean, current: Boolean, locked: Boolean = false) {
+private fun GroupRow(label: String, count: Int?, focused: Boolean, current: Boolean, locked: Boolean = false, notProtected: Boolean = false) {
     Chip(
         focused = focused,
         modifier = Modifier.fillMaxWidth().height(52.dp),
@@ -130,7 +130,9 @@ private fun GroupRow(label: String, count: Int?, focused: Boolean, current: Bool
         if (current) Dot(GuideUi.Accent, 7.dp) else Box(Modifier.width(7.dp))
         Line(label, GuideUi.sans(19, FontWeight.SemiBold, color), Modifier.weight(1f))
         // M5 (§3.9.1 "Show with a lock"): a locked group keeps its count; OK asks for the PIN first.
-        if (locked) app.thebox.ui.parental.LockGlyph(if (focused) color else GuideUi.Fg50, Modifier.padding(end = 8.dp))
+        // U-S11 (code review 2026-10-16): no PIN protects it (FILTERED_NO_PIN): the amber 18+ chip, not the padlock.
+        if (notProtected) app.thebox.ui.parental.NotProtectedChip(Modifier.padding(end = 8.dp), if (focused) color else null)
+        else if (locked) app.thebox.ui.parental.LockGlyph(if (focused) color else GuideUi.Fg50, Modifier.padding(end = 8.dp))
         count?.let { Line(it.toString(), GuideUi.mono(15, color = if (focused) color else GuideUi.Fg50)) }
     }
 }

@@ -746,6 +746,32 @@ class TestAudioOnlyContinuity(PanelCase):
             exp = (cc + 1) & 15
 
 
+class TestUpdateApkDir(PanelCase):
+    """U-S14 (M5 code review 2026-10-16): --update-apk-dir registers the updater fixtures by name on the host."""
+
+    def test_directory_loader_registers_names_and_serves_them(self):
+        tmp = tempfile.mkdtemp(prefix="fakepanel-apks-")
+        self.addCleanup(shutil.rmtree, tmp, True)
+        for name, body in (("thebox-update-v2.apk", b"PK-v2" * 300), ("thebox-update-installed.apk", b"PK-inst" * 300),
+                           ("notes.txt", b"ignored")):
+            with open(os.path.join(tmp, name), "wb") as fh:
+                fh.write(body)
+        self.assertEqual(self.panel.load_update_apks(tmp), ["installed", "v2"])
+        st, _, body = self.get("/admin/update_apks")
+        self.assertEqual(st, 200)
+        listed = json.loads(body)
+        self.assertEqual(listed["names"], ["installed", "v2"])
+        self.assertEqual(listed["sha256"]["v2"], fakepanel.hashlib_sha256(b"PK-v2" * 300))
+        self.admin({"update_apk": "v2"})
+        st, _, body = self.get("/update/update.json")
+        self.assertEqual(st, 200)
+        apk = json.loads(body)["apks"][0]
+        self.assertTrue(apk["url"].endswith("/update/v2.apk"), apk)
+        self.assertEqual(apk["sizeBytes"], len(b"PK-v2" * 300))
+        st, _, data = self.get("/update/v2.apk")
+        self.assertEqual((st, data), (200, b"PK-v2" * 300))
+
+
 class TestRadioChannel(unittest.TestCase):
     """Channel 13 with the null fallback, and with real ffmpeg media (skipped without ffmpeg)."""
 

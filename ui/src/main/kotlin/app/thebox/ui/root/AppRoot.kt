@@ -53,7 +53,9 @@ import app.thebox.ui.reminder.ReminderCard
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withTimeoutOrNull
 
 const val KEY_SINK_TAG = "key_sink"
@@ -286,7 +288,11 @@ fun AppRoot(
     }
     // The editor overlay owned Compose focus (S3); when it closes the root key sink takes focus back, as after SEARCH.
     val settingsUiFlow = remember(settingsMachine) { settingsMachine?.ui }
-    val editorOpen = settingsUiFlow?.collectAsState()?.value?.editor != null
+    // U-L6 (code review 2026-10-16): only "is the editor open" recomposes the root, not every settings key.
+    val editorOpenFlow = remember(settingsUiFlow) {
+        settingsUiFlow?.map { it.editor != null }?.distinctUntilChanged() ?: kotlinx.coroutines.flow.flowOf(false)
+    }
+    val editorOpen by editorOpenFlow.collectAsState(initial = false)
     LaunchedEffect(editorOpen) { if (!editorOpen) requestSinkFocus(requester) }
     LaunchedEffect(player) { player?.events?.collect { onEvent(it) } }
     LaunchedEffect(toast) {
@@ -347,7 +353,8 @@ fun AppRoot(
                     // M5 commit 0 (docs/design/m5-setup-settings.md §1.3a): the update card in the guide only (S17), the
                     // PIN prompt above every mode (§0.9). Bodies: WP-E, WP-C.
                     if (shown == ScreenMode.GUIDE) ui.update?.let { app.thebox.ui.update.UpdateCard(it) }
-                    ui.pin?.let { app.thebox.ui.parental.PinPadView(it) }
+                    // U-L5 (code review 2026-10-16): the countdown reads the clock `lockedUntilMs` came from (DebugOverrides).
+                    ui.pin?.let { app.thebox.ui.parental.PinPadView(it, nowMs = app.thebox.core.diag.DebugOverrides::nowMs) }
                     toast?.let { (_, text) -> ToastView(text, Modifier.align(Alignment.BottomStart).padding(start = PlayerUi.TOAST_L.dp, bottom = toastBottom.dp)) }
                 }
             }

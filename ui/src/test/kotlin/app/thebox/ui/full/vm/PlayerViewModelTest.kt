@@ -90,13 +90,17 @@ class PlayerViewModelTest {
     }
     private val base = 1_760_000_000_000L
 
-    private fun vm(): PlayerViewModel {
+    private fun vm(
+        delegates: app.thebox.ui.root.EffectDelegates = app.thebox.ui.root.EffectDelegates.NONE,
+        audioForced: AudioOutputForced = AudioOutputForced.NONE,
+    ): PlayerViewModel {
         val store = ViewModelStore()
         val factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T = PlayerViewModel(
                 context, controller, archive, feed, library, GuideRowsCacheFactory { lib, scope -> GuideRowsCacheImpl(lib, scope) },
                 playerSettings, guideSettings, FakeDeviceClassSource(), FakePlayerStateMachine.factory(machine), probe, reminders,
+                delegates = delegates, audioForced = audioForced,
             ) as T
         }
         val vm = ViewModelProvider(store, factory)[PlayerViewModel::class.java]
@@ -274,6 +278,24 @@ class PlayerViewModelTest {
         // WP-B's archive notice: reason + next step.
         archive.mutableNotices.tryEmit(app.thebox.core.catchup.archive.ArchiveNotice.LiveNotReady(ch.identity)); idle()
         assertEquals("The last minute isn't in the archive yet. Back to live; try again in a minute.", out.last())
+    }
+
+    /**
+     * U-S12 (M5 code review 2026-10-16, B2): with "Always passthrough" stored, the track menu says so (the AUDIO picker
+     * then offers Back to Auto) and the picker's Back to Auto runs the AUDIO_OUTPUT_FAILED card's BACK_TO_AUTO path.
+     */
+    @Test
+    fun audioPickerBackToAutoIsFedAndRunsTheCardPath() {
+        val ran = ArrayList<app.thebox.core.full.ErrorButton>()
+        val d = app.thebox.ui.root.EffectDelegates.NONE.let { n ->
+            app.thebox.ui.root.EffectDelegates(n.settings, n.parental, app.thebox.core.full.ErrorRouteActions { b, _ -> ran += b }, n.updates)
+        }
+        val vm = vm(delegates = d, audioForced = AudioOutputForced { kotlinx.coroutines.flow.flowOf(true) })
+        idle()
+        assertTrue("the track menu carries audioOutputForced", machine.events.filterIsInstance<PlayerEvent.Tracks>().last().menu.audioOutputForced)
+        assertTrue(vm.audioOutputForced.value)
+        vm.effects.audioOutputAuto()
+        assertEquals(listOf(app.thebox.core.full.ErrorButton.BACK_TO_AUTO), ran)
     }
 
     @Test

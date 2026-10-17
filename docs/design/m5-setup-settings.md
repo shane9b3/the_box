@@ -401,6 +401,27 @@ Phase 1 of the M5 code-review fix pass (`:core`, `:data`, `:player`, `:app`; the
 **Left open by phase 1.** §3.15 (d): reordering favourite lists is only in a list's menu (its OK opens the list) — `SettingsReachabilityTest.KNOWN_D_GAPS`. WP-E's About page is outside `:core`'s coverage tests (built in `:ui`).
 
 
+**Phase 2 (2026-10-16): `:ui`, androidTest, fake panel, the device pass.** On `main` from `bf60cee`, uncommitted. Record: `docs/review/m5-code-review.md`.
+
+| Item | File | Reason |
+|---|---|---|
+| `PhoneSetupHost` runs the server only between ON_START and ON_STOP (`LifecycleStartEffect`); a return to the app opens it with a fresh code | `ui/.../backup/PhoneSetupViewModel.kt` | U-S7 (§3.5.2 lifetime) |
+| Rebuilds are leading-edge (≤ 250 ms spacing only for bursts); a push-model page's first publish signals no change; `SetupPagesSource.page()` waits ≤ 100 ms for a non-placeholder publish; a change that lands while a build is in flight rebuilds that page once it arrives as a placeholder (`staleWhileBuilding`) | `SettingsViewModel`, `SettingsPageAdapters`, `SettingsEffectsImpl` | U-S1 and its device follow-up |
+| A displayed route that re-enters the open set after the collector closed it is rebuilt | `SettingsViewModel` | U-S2 |
+| `onClosed` cancels every build and closes the routes still loading; a closed slot wakes its `page()` waiter with a placeholder | `SettingsEffectsImpl`, `SetupPagesSource` | U-S3 |
+| Intents of one effects instance run one at a time (`Mutex`) | `SettingsEffectsImpl` | U-L1 |
+| `:ui` helpers `SettingsShellLink.shows(origin)` / `pushFrom(origin, route, gated)`: a page's navigation after a suspend is dropped once its route is not shown; a closed page is reopened for an intent only while shown (bounded 1 s) | `SettingsPageAdapters` | U-L2 |
+| `DiagOutcome.Open.needsPin` (`:ui`, additive; Sync status → Edit with Lock settings) → `pushGated` | `ui/.../diag/DiagPages.kt` | U-S6 |
+| Phone bridge: Xtream submissions and links carrying an Xtream login run Connect first; on failure the phone gets reason + step (`done = false`), the TV shows the Xtream form filled from the phone 1.5 s later and runs its Connect; saves are `NonCancellable`; a failed upload's kept file is deleted; new texts `phone_status_link_no_login`, `phone_status_spool_failed` | `PhoneSetupBridge`, `strings_backup.xml` | U-S4, U-S5, U-S15 |
+| §3.1 toggle row amended: Off on a focused row is a `.18` canvas fill with a canvas knob | `SettingsRowViews.kt` (`togglePillColors`) | U-S9 |
+| `NotProtectedChip` (amber `18+`) in the Groups panel and the player's group column for `GuideSourceEntry.notProtected` | `parental/LockGlyph.kt`, `GroupsPanel`, `ChannelListPanel` | U-S11 |
+| `AudioOutputForced` seam (bound from `PlaybackDomain`); `PlayerExtras.audioOutputForced`; the stats line appends "Always passthrough · Back to Auto in the Audio menu" (the overlay takes no keys, so not "OK: Back to Auto"); `PlayerEffectsImpl.audioOutputAuto()` → `ErrorRouteActions` BACK_TO_AUTO | `ui/.../full/**`, `SettingsUiModule` | U-S12 |
+| Async trace section `settings-open` (first composition of `SettingsScreen` → first frame with a real page; API 29+) and `benchmark/.../SettingsOpenBenchmark` | `SettingsScreen.kt`, `benchmark/` | measurement item (§6.7) |
+| `fakepanel.py --update-apk-dir` and `GET /admin/update_apks`; `run-instrumented.sh --update-fixtures` loads `installed`/`v2`/`other` there; it also selects the Leanback IME and force-stops Gboard before each class | `tools/fakepanel/` | U-S14, U-S13 = D-L16 |
+| `PhoneSubmission.Link.toString` prints the host only | `LanContracts.kt` | phase 1 flag 7 |
+
+Later items taken: U-L1, U-L2, U-L3, U-L5, U-L6, U-L7, U-L8, U-L9, U-L15, U-L16. Fails-before (phase 2): 35 reversions in three batches, 26 tests fail before (`:ui` 24, `:core` 1, fake panel 1). Device: every I-M5 class and the §1.11 regression set green on the emulator; `OnboardingTest` 9/10, `UpdaterTest` 5/5; D-B4 confirm → install observed (`PACKAGE_REPLACED`); settings open → first page met on the emulator (§6.7).
+
 ## 2. Contracts
 
 All contract files carry the header `// Contract (M5 commit 0): docs/design/m5-setup-settings.md §2.n. Verbatim; changes go through the lead.` Everything in `:core` is pure Kotlin (no Android types).
@@ -1309,7 +1330,7 @@ Same language as the guide (`01-design-reference.md`): canvas `#0A0D13`, glass p
 | Section row states | | focused: FG fill, dark text, accent ring; **current** (focus in the page): `.08` fill + 4 × 32 accent bar at x + 8; normal: transparent, text `.85` |
 | Page pane | x 516, y 144, w 1340, h 872 | glass, radius 24, padding 24 × 32; page title 30/600, subtitle 18 `.6` (one line), rows start 96 below the pane top |
 | Row | w 1276, h 76 (one line) or 104 (with description) | gap 8, radius 14, padding 0 × 24; label 22/500 `.92`; value right-aligned 20 `.65` (mono for numbers, times, hosts); description 17 `.55` under the label (one line, ellipsis); link chevron `›` 22 `.45` at the right edge |
-| Toggle | 56 × 30 pill at the right edge | on: accent fill, knob 24 `#EEF1F6` right; off: `.16` fill, knob left; on a focused row the pill keeps its colours, the row turns FG |
+| Toggle | 56 × 30 pill at the right edge | on: accent fill, knob 24 `#EEF1F6` right; off: `.16` fill, knob left; on a focused row On keeps its colours, the row turns FG, and Off draws a `.18` canvas-colour fill with a canvas-colour knob (U-S9, code review 2026-10-16: the white `.16` fill and the FG knob vanished into the FG row) |
 | Inline choice list | under its row, indent 48, rows 60 | radio dot 18 (selected: accent fill; else 2 px `.45` ring); option label 21; detail 17 `.55`; the list pushes the rows below down (no overlay) |
 | Disabled row | as a row | text `.4`; still focusable; description shows `disabledReason` |
 | Notice line | pane bottom, height 40 | 18 `.7`, fades after `NOTICE_MS` (3,000) |
@@ -2153,8 +2174,8 @@ Catalog: `okhttp-dnsoverhttps = { module = "com.squareup.okhttp3:okhttp-dnsoverh
 
 | Gate | Target | Where |
 |---|---|---|
-| Settings load before first tune | ≤ 50 ms | I-M5-10 log |
-| Settings open → first page drawn | ≤ 150 ms | `SettingsOpenBenchmark` (Macrobenchmark, emulator CPU time) |
+| Settings load before first tune | ≤ 50 ms | I-M5-10 log (45 ms on the emulator, code-review pass) |
+| Settings open → first page drawn | ≤ 150 ms | `SettingsOpenBenchmark` (Macrobenchmark, trace `settings-open`) and `GatesTest`. Emulator after U-S1: key → first real page median 10–19 ms (first open after launch 78–199 ms), `settings-open` median 18.5 ms: met; cold first open → M6 |
 | Paged list scroll | no frame over 33 ms CPU during 100 × DOWN at 20 Hz on a 2,000-row list | same benchmark |
 | No player rebuild on LIVE rows | 0 re-prepares | I-M5-11 |
 | Five-key reachability | 100 % of rows | `SettingsReachabilityTest`, I-M5-20 |

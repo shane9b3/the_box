@@ -11,7 +11,9 @@
 # panel. The emulator reaches the Mac at 10.0.2.2; for a device on the LAN pass --host-url http://<mac-ip>:<port>.
 # --class limits the run to one test class (or Class#method). ffmpeg media are generated on the first panel start.
 # --update-fixtures (M5 I-M5-19, app.thebox.settings.UpdaterTest): builds the debug APK, derives versionCode-2 copies
-# signed with the debug key and with a throwaway key (make_update_apk.py) and pushes them to /data/local/tmp.
+# signed with the debug key and with a throwaway key (make_update_apk.py), loads them into the panel by name
+# (--update-apk-dir: installed, v2, other) and pushes v2/other to /data/local/tmp as the upload fallback.
+# Before each run the Leanback IME is selected and Gboard force-stopped when present (U-S13 / D-L16).
 # Needs ANDROID_HOME and JAVA_HOME (docs/m0-toolchain.md) and one connected device/emulator (adb devices).
 set -euo pipefail
 
@@ -35,6 +37,41 @@ while [[ $# -gt 0 ]]; do
 done
 HOST_URL="${HOST_URL:-http://10.0.2.2:${PORT}}"
 LOG="${TMPDIR:-/tmp}/fakepanel-${PORT}.log"
+cd "$ROOT"
+
+# U-S13 / D-L16 (code review 2026-10-16): the TV keyboard, not a stale Gboard input view, before each class. The Leanback
+# IME (`com.android.inputmethod.leanback/.service.LeanbackImeService` on the API 30 TV image) is selected when the image
+# has one; Gboard is force-stopped when installed. Both are guarded (other images).
+LEANBACK_IME="$(adb shell ime list -s 2>/dev/null | tr -d '\r' | grep -i 'leanback' | head -n 1 || true)"
+if [[ -n "$LEANBACK_IME" ]]; then
+  adb shell ime set "$LEANBACK_IME" >/dev/null 2>&1 || true
+fi
+if adb shell pm path com.google.android.inputmethod.latin >/dev/null 2>&1; then
+  adb shell am force-stop com.google.android.inputmethod.latin >/dev/null 2>&1 || true
+fi
+
+if [[ "$UPDATE_FIXTURES" == 1 ]]; then
+  ./gradlew :app:assembleDebug
+  FIX="${TMPDIR:-/tmp}/thebox-update-fixtures"
+  rm -rf "$FIX"; mkdir -p "$FIX"
+  APK="$ROOT/app/build/outputs/apk/debug/app-universal-debug.apk"
+  python3 "$ROOT/tools/fakepanel/make_update_apk.py" "$APK" "$FIX/thebox-update-v2.apk" --version-code 2
+  python3 "$ROOT/tools/fakepanel/make_update_apk.py" "$APK" "$FIX/thebox-update-other.apk" --version-code 2 --new-key
+  # U-S14 (code review 2026-10-16): the panel loads the fixtures on the host (--update-apk-dir) and the suite selects
+  # them by name; nothing moves 36 MB through the emulator per case. The pushed copies stay as the upload fallback.
+  cp "$APK" "$FIX/thebox-update-installed.apk"
+  PANEL_ARGS+=(--update-apk-dir "$FIX")
+  for f in thebox-update-v2.apk thebox-update-other.apk; do
+    adb push "$FIX/$f" "/data/local/tmp/$f" >/dev/null
+    adb shell chmod 644 "/data/local/tmp/$f"
+  done
+  echo "update fixtures in $FIX (panel) and /data/local/tmp (fallback)"
+  # "Install unknown apps" must be granted before the app process starts: the platform kills the app when the
+  # REQUEST_INSTALL_PACKAGES app-op changes. Install now and grant; Gradle's `install -r` keeps the app-op.
+  adb install -r -t "$APK" >/dev/null
+  adb shell appops set app.thebox.debug REQUEST_INSTALL_PACKAGES allow
+  echo "REQUEST_INSTALL_PACKAGES granted to app.thebox.debug"
+fi
 
 python3 "$ROOT/tools/fakepanel/fakepanel.py" --host 0.0.0.0 --port "$PORT" ${PANEL_ARGS[@]+"${PANEL_ARGS[@]}"} >"$LOG" 2>&1 &
 PANEL_PID=$!
@@ -52,23 +89,4 @@ echo "fake panel up on :$PORT (log $LOG); device URL $HOST_URL"
 ARGS=(":app:connectedDebugAndroidTest" "-Pandroid.testInstrumentationRunnerArguments.fakepanel=${HOST_URL}")
 if [[ -n "$CLASS" ]]; then ARGS+=("-Pandroid.testInstrumentationRunnerArguments.class=${CLASS}"); fi
 
-cd "$ROOT"
-if [[ "$UPDATE_FIXTURES" == 1 ]]; then
-  ./gradlew :app:assembleDebug
-  FIX="${TMPDIR:-/tmp}/thebox-update-fixtures"
-  mkdir -p "$FIX"
-  APK="$ROOT/app/build/outputs/apk/debug/app-universal-debug.apk"
-  python3 "$ROOT/tools/fakepanel/make_update_apk.py" "$APK" "$FIX/thebox-update-v2.apk" --version-code 2
-  python3 "$ROOT/tools/fakepanel/make_update_apk.py" "$APK" "$FIX/thebox-update-other.apk" --version-code 2 --new-key
-  for f in thebox-update-v2.apk thebox-update-other.apk; do
-    adb push "$FIX/$f" "/data/local/tmp/$f" >/dev/null
-    adb shell chmod 644 "/data/local/tmp/$f"
-  done
-  echo "update fixtures pushed to /data/local/tmp"
-  # "Install unknown apps" must be granted before the app process starts: the platform kills the app when the
-  # REQUEST_INSTALL_PACKAGES app-op changes. Install now and grant; Gradle's `install -r` keeps the app-op.
-  adb install -r -t "$APK" >/dev/null
-  adb shell appops set app.thebox.debug REQUEST_INSTALL_PACKAGES allow
-  echo "REQUEST_INSTALL_PACKAGES granted to app.thebox.debug"
-fi
 ./gradlew "${ARGS[@]}" ${EXTRA[@]+"${EXTRA[@]}"}

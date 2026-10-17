@@ -51,7 +51,8 @@
     <string name="settings_err_header">Use the form Name: value, for example Referer: http://example.com.</string>
     <string name="settings_err_passphrase">Use at least %1$d characters.</string>
     <string name="settings_err_number">Enter digits only.</string>
-    <string name="settings_page_not_available">This page is not available in this version yet.</string>
+    <!-- U-L15 (code review 2026-10-16): next step added; "Settings →" unified -->
+    <string name="settings_page_not_available">This page is not available in this version yet. Press Back to return.</string>
     <string name="settings_sep">\u0020·\u0020</string>
     <string name="settings_on">On</string>
     <string name="settings_off">Off</string>
@@ -217,8 +218,8 @@
     <string name="settings_ch_not_remembered">Not remembered</string>
     <string name="settings_ch_forgotten">Forgotten</string>
     <string name="settings_ch_external">Open in external player</string>
-    <string name="settings_ch_external_none">Choose an external player in Settings › Playback first.</string>
-    <string name="settings_ch_external_failed">The other app could not be opened. Choose another player in Settings › Playback.</string>
+    <string name="settings_ch_external_none">Choose an external player in Settings → Playback first.</string>
+    <string name="settings_ch_external_failed">The other app could not be opened. Choose another player in Settings → Playback.</string>
     <string name="settings_ch_external_nothing">Nothing is playing to hand over. Tune the channel first.</string>
     <string name="settings_ch_external_confirm_title">Open in another app?</string>
     <string name="settings_ch_external_confirm_body">The other app receives the stream address, which includes your login.</string>

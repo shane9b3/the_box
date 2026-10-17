@@ -34,13 +34,15 @@ class ReapplyOnExitTest {
     private class Rig(phase: ArchivePhase = ArchivePhase.IDLE) {
         var reapplies = 0
         val seeks = ArrayList<Pair<Long, Long>>()
+        /** U-L16 (code review 2026-10-16): `ArchivePlayback.reapply(playhead)` recorded apart from a seek. */
+        val reapplied = ArrayList<Long>()
         val status = MutableStateFlow(ArchiveStatus(phase = phase, wallMs = 50_000, atMs = 1_000, advancing = true))
         val controller: PlaybackController = proxy { name, _ -> if (name == "reapplySettings") reapplies++; null }
         val archive: ArchivePlayback = proxy { name, args ->
             when (name) {
                 "getStatus" -> status
                 "seekTo" -> { seeks += (args!![0] as Long) to (args[1] as Long); null }
-                "reapply" -> { seeks += (args!![0] as Long) to 0L; null }
+                "reapply" -> { reapplied += args!![0] as Long; null }
                 else -> null
             }
         }
@@ -126,7 +128,9 @@ class ReapplyOnExitTest {
         r.chooseNext(PlaybackRows.AUDIO_OUTPUT)
         r.machine.onLeave()
         assertEquals(0, r.reapplies)
-        assertEquals(listOf(52_000L to 0L), r.seeks)
+        // U-L16: the exact re-apply at the playhead, not the old `seekTo`.
+        assertEquals(listOf(52_000L), r.reapplied)
+        assertEquals(emptyList<Pair<Long, Long>>(), r.seeks)
     }
 
     @Test fun pausedArchiveStaysPaused() {
@@ -136,6 +140,7 @@ class ReapplyOnExitTest {
         r.machine.onLeave()
         assertEquals(0, r.reapplies)
         assertEquals(emptyList<Pair<Long, Long>>(), r.seeks)
+        assertEquals(emptyList<Long>(), r.reapplied)
     }
 
     private companion object {

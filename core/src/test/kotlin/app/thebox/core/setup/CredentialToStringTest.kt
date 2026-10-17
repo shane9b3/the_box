@@ -23,4 +23,14 @@ class CredentialToStringTest {
             assertTrue("panel.example.com" in p, p)
         }
     }
+
+    /** Phase 1 flag 7 (M5 code review 2026-10-16): a link pasted on the phone can be a `get.php` URL with a login. */
+    @Test
+    fun phoneLinkSubmissionNeverPrintsItsLogin() {
+        val user = "fake-user-3"
+        val pass = "fake-pass-4"
+        val p = PhoneSubmission.Link("http://panel.example.com:8080/get.php?username=$user&password=$pass&type=m3u_plus", "Main").toString()
+        assertFalse(user in p || pass in p, p)
+        assertTrue("panel.example.com" in p, p)
+    }
 }

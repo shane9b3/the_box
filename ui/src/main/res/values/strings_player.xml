@@ -89,6 +89,8 @@
     <string name="player_stat_frame_rate">Frame rate</string>
     <string name="player_stat_video_decoder">Video decoder</string>
     <string name="player_stat_audio">Audio</string>
+    <!-- U-S12 (code review 2026-10-16, B2): appended to the stats overlay's audio line while "Always passthrough" is on -->
+    <string name="player_stat_audio_forced">Always passthrough · Back to Auto in the Audio menu</string>
     <string name="player_stat_audio_decoder">Audio decoder</string>
     <string name="player_stat_bitrate">Bitrate</string>
     <string name="player_stat_buffer">Buffer</string>

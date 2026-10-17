@@ -11,6 +11,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalView
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.thebox.core.input.BoxAction
 import app.thebox.core.settings.PhonePurpose
@@ -81,19 +82,23 @@ class PhoneSetupViewModel @Inject constructor(
 }
 
 /**
- * Draws [PhoneSetupScreen] for [purpose] while composed: starts/stops the session, keeps the screen on (S4) and ticks
+ * Draws [PhoneSetupScreen] for [purpose] while composed: starts the session on ON_START and stops it on ON_STOP or
+ * when the screen leaves (U-S7), keeps the screen on (S4) and ticks
  * a 1 s clock for the isolation hint. WP-A's settings screen places it for `SettingsRoute.PhoneSetup`.
  */
 @Composable
 fun PhoneSetupHost(vm: PhoneSetupViewModel, purpose: PhonePurpose, modifier: Modifier = Modifier, clock: () -> Long = System::currentTimeMillis) {
     val view: View = LocalView.current
     DisposableEffect(vm, purpose) {
-        vm.open(purpose, clock())
         view.keepScreenOn = true
-        onDispose {
-            view.keepScreenOn = false
-            vm.close()
-        }
+        onDispose { view.keepScreenOn = false }
+    }
+    // U-S7 (code review 2026-10-16, Blocker): §3.5.2 lifetime: the LAN server runs only while the screen is shown and
+    // the app is started. ON_STOP (Home, standby, HDMI off) or leaving the screen stops it; ON_START opens it again,
+    // which shows a fresh pairing code (no socket stays bound on the LAN while the app is in the background).
+    LifecycleStartEffect(vm, purpose) {
+        vm.open(purpose, clock())
+        onStopOrDispose { vm.close() }
     }
     var now by remember { mutableLongStateOf(clock()) }
     LaunchedEffect(vm) {

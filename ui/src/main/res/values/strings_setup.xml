@@ -55,7 +55,7 @@
     <string name="setup_ua_browser">Browser</string>
     <string name="setup_ua_custom">Custom</string>
     <string name="setup_ua_vlc_note">Your provider only answers VLC</string>
-    <string name="setup_ua_fallback_note">Your provider only answers apps that identify as VLC, so The Box does too (Settings › Playlists › User agent)</string>
+    <string name="setup_ua_fallback_note">Your provider only answers apps that identify as VLC, so The Box does too (Settings → Playlists → User agent)</string>
     <string name="setup_ua_probe_limit_note">Another device is using your connection; the stream test was skipped</string>
     <string name="setup_notice_filled_from_link">Filled from the link</string>
     <string name="setup_notice_secure_dns_on">Secure DNS is on. Trying again…</string>

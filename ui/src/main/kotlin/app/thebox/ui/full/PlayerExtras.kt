@@ -16,4 +16,11 @@ interface PlayerExtras {
      * (the `around` rows are title-only); null while loading or for another programme.
      */
     val focusedDetail: StateFlow<ProgrammeInfo?>
+    /**
+     * (U-S12, code review 2026-10-16) `playback.audioOutput` is "Always passthrough": the stats overlay's audio line says
+     * so and where Back to Auto is (B2). Hosts without settings answer false.
+     */
+    val audioOutputForced: StateFlow<Boolean> get() = NOT_FORCED
 }
+
+private val NOT_FORCED: StateFlow<Boolean> = kotlinx.coroutines.flow.MutableStateFlow(false)

@@ -23,30 +23,6 @@ import org.junit.Test
  */
 class ParentalTest : SettingsTestBase() {
 
-    private fun setPin(pin: String = "1234") {
-        openSettings("parental")
-        activate("parental.pin")
-        createPin(pin)
-        awaitSettings("PIN set") { s -> s.page?.rows?.any { it.id.key == "parental.remove_pin" || it.label.contains("Change", true) } == true }
-        assertTrue(probe.parental().pinSet)
-        leaveSettings()
-    }
-
-    /**
-     * Enter [pin] twice on the create pad. (M5 integration) WP-C's pad asks "Easy to guess. Use it anyway?" after the
-     * first entry of a PIN like 1234 (§3.9.3); OK on its focused "Use it" goes on to the confirmation.
-     */
-    private fun createPin(pin: String) {
-        awaitGui("PIN pad (create)") { it.pin != null }
-        digits(pin)
-        Thread.sleep(300)
-        // The soft confirm focuses "Choose another" (the safe button): ← then OK picks "Use it".
-        if (gui().pin?.message == app.thebox.core.parental.PinMessage.EASY) { press(KeyEvent.KEYCODE_DPAD_LEFT); press(KeyEvent.KEYCODE_DPAD_CENTER) }
-        awaitGui("PIN pad (confirm)") { it.pin != null && it.pin?.mode == app.thebox.core.parental.PinPadMode.CREATE_CONFIRM }
-        digits(pin)
-        awaitGui("PIN pad closed", 10_000) { it.pin == null }
-    }
-
     /** I-M5-8 */
     @Test
     fun groupsReviewAndPinOffer() {

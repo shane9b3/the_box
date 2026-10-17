@@ -22,7 +22,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalConfiguration
@@ -81,8 +83,16 @@ fun SettingsScreen(
         return
     }
     val page = ui.page
+    // U-S1 measurement item (code review 2026-10-16, §6.7): an async trace section `settings-open` from the screen's
+    // first composition (the frame after the Settings key) to the first frame that draws a real (non-placeholder) page;
+    // `SettingsOpenBenchmark` reads it with `TraceSectionMetric`. One section per visit; no layer, nothing allocated per draw.
+    val openTrace = remember { OpenTrace().also { it.begin() } }
+    DisposableEffect(openTrace) { onDispose { openTrace.end() } }
+    val traced = if (openTrace.open && page != null && page.placeholder == null) {
+        Modifier.drawWithContent { drawContent(); openTrace.end() }
+    } else Modifier
     if (route == SettingsRoute.FirstRun && page != null && page.route == SettingsRoute.FirstRun && page.placeholder == null) {
-        Box(modifier.fillMaxSize().testTag(SETTINGS_SCREEN_TAG)) {
+        Box(modifier.then(traced).fillMaxSize().testTag(SETTINGS_SCREEN_TAG)) {
             app.thebox.ui.setup.WelcomeScreen(page, ui.cursor)
             ui.notice?.let { Line(it, SettingsUi.Notice, Modifier.offset(64.dp, 960.dp).testTag(SETTINGS_NOTICE_TAG)) }
             ui.confirm?.let { ConfirmCard(it, Modifier.fillMaxSize()) }
@@ -92,14 +102,15 @@ fun SettingsScreen(
     SettingsContent(
         ui = ui,
         clock24 = clock24,
-        modifier = modifier,
+        modifier = modifier.then(traced),
         editor = { e ->
             TextEditorOverlay(
                 editor = e,
                 onDone = { text -> machine.dispatch(SettingsEvent.EditorClosed(e.row, text, committed = true)) },
                 onCancel = { machine.dispatch(SettingsEvent.EditorClosed(e.row, null, committed = false)) },
                 editorBacks = remember(link) { link?.editorBacks ?: emptyFlow() },
-                onPhoneSetup = { link?.push(SettingsRoute.PhoneSetup()) },
+                // U-L8 (code review 2026-10-16): inside the first-run forms the phone import keeps the first-run review.
+                onPhoneSetup = { link?.push(SettingsRoute.PhoneSetup(firstRun = firstRunOf(machine.ui.value.route))) },
             )
         },
     )
@@ -125,7 +136,7 @@ fun SettingsContent(
         // ---- overlays (in-tree; the machine closes them; §3.2.4 back ladder)
         ui.menu?.let { m ->
             val y = focusedRowY(list, ui.cursor) ?: SettingsUi.ROWS_TOP
-            SettingsMenu(m, Modifier.offset((pageX + pageW - SettingsUi.MENU_W - 24).dp, (SettingsUi.PANE_Y + y).dp))
+            SettingsMenu(m, Modifier.offset((pageX + pageW - SettingsUi.MENU_W - 24).dp, menuTop(y, m.options.size).dp))
         }
         ui.confirm?.let { ConfirmCard(it, Modifier.fillMaxSize()) }
         ui.numberPad?.let { NumberPad(it, Modifier.fillMaxSize()) }
@@ -197,7 +208,7 @@ private fun SectionsPane(ui: SettingsUiState, current: SectionId?, modifier: Mod
         if (focused) m = m.border(SettingsUi.FOCUS_RING.dp, SettingsUi.Accent, rs).background(SettingsUi.Fg, rs)
         Row(m.padding(start = SettingsUi.SECTION_LABEL_X.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Line(stringResource(R.string.settings_ui_show_advanced), SettingsUi.RowValue.copy(color = if (focused) SettingsUi.Canvas else SettingsUi.Fg85), Modifier.weight(1f))
-            TogglePill(ui.advanced)
+            TogglePill(ui.advanced, onLight = focused) // U-S9
         }
     }
 }
@@ -305,4 +316,47 @@ private fun Rows(ui: SettingsUiState, page: PageModel, list: LazyListState, modi
             }
         }
     }
+}
+
+/** U-L8 (code review 2026-10-16): whether [route] is part of the first-run flow (its phone setup keeps the review). */
+internal fun firstRunOf(route: SettingsRoute): Boolean = when (route) {
+    SettingsRoute.FirstRun -> true
+    is SettingsRoute.AddSource -> route.firstRun
+    is SettingsRoute.PhoneSetup -> route.firstRun
+    is SettingsRoute.ImportProgress -> route.firstRun
+    else -> false
+}
+
+/**
+ * U-L9 (code review 2026-10-16): the context menu's top (design px) for a focused row at [rowY] within the pane,
+ * clamped so a menu of [options] rows opened low on the page stays inside the pane (it ran past y 1080).
+ */
+internal fun menuTop(rowY: Int, options: Int): Int {
+    val height = options * SettingsUi.MENU_ROW_H + 2 * MENU_PAD
+    return minOf(SettingsUi.PANE_Y + rowY, SettingsUi.PANE_Y + SettingsUi.PANE_H - height).coerceAtLeast(SettingsUi.PANE_Y)
+}
+
+private const val MENU_PAD = 12
+
+/** U-S1 measurement item: the trace section name `SettingsOpenBenchmark` measures. */
+const val TRACE_SETTINGS_OPEN = "settings-open"
+
+/** The open → first real page async trace of one Settings visit (main thread). */
+private class OpenTrace {
+    var open = false
+        private set
+    private val cookie = nextCookie++
+
+    fun begin() {
+        open = true
+        if (android.os.Build.VERSION.SDK_INT >= 29) android.os.Trace.beginAsyncSection(TRACE_SETTINGS_OPEN, cookie)
+    }
+
+    fun end() {
+        if (!open) return
+        open = false
+        if (android.os.Build.VERSION.SDK_INT >= 29) android.os.Trace.endAsyncSection(TRACE_SETTINGS_OPEN, cookie)
+    }
+
+    private companion object { var nextCookie = 1 }
 }

@@ -1,5 +1,6 @@
 package app.thebox.settings
 
+import app.thebox.core.guide.ScreenMode
 import app.thebox.core.settings.SettingsRoute
 import app.thebox.core.setup.lan.LanFailure
 import app.thebox.core.setup.lan.ServerPhase
@@ -89,6 +90,61 @@ class PhoneSetupTest : SettingsTestBase() {
 
     private fun base(p: SettingsPanel) = p.base
 
+    /**
+     * I-M5-9 with `auth_mode auth0` (U-S4 / U-S5, code review 2026-10-16): a login the panel rejects, sent from the phone,
+     * runs Connect first: no playlist row; the phone page reads the reason and the next step; the TV shows the Xtream
+     * form filled from the phone with Connect's result card.
+     */
+    @Test
+    fun phoneLoginRejectedCreatesNoPlaylist() {
+        wipe()
+        debugLink("phone_port=47100")
+        val base = startPhoneSetup()
+        val cookie = pairWithToken(base)
+        panel.authMode("auth0")
+        val body = JSONObject().put("name", "Phone").put("server", base(panel)).put("username", "test").put("password", "test").put("output", "ts")
+        req(base, "/api/xtream", cookie, json = body).use { assertEquals(202, it.code) }
+        // The phone polls /api/state every second; the TV keeps the page up ~1.5 s after a failure for that read.
+        var message = ""
+        val deadline = android.os.SystemClock.elapsedRealtime() + 15_000
+        while (android.os.SystemClock.elapsedRealtime() < deadline) {
+            val m = runCatching { req(base, "/api/state", cookie).use { r -> JSONObject(r.body.string()).optString("message") } }.getOrNull().orEmpty()
+            if (m.isNotBlank() && !m.contains("Checking", ignoreCase = true)) { message = m; break }
+            Thread.sleep(250)
+        }
+        log("phone message: $message")
+        // The reason (`setup_card_bad_login`) and its next step (`setup_card_bad_login_next`).
+        assertTrue("the phone reads the reason: '$message'", message.contains("rejected", ignoreCase = true))
+        assertTrue("the phone reads the next step: '$message'", message.contains("Check", ignoreCase = true))
+        awaitSettings("the TV opens the Xtream form", 20_000) { it.route is SettingsRoute.AddSource }
+        awaitText("Connect's result card on the TV", 20_000) { it.contains("rejected", ignoreCase = true) }
+        Thread.sleep(2_000)
+        assertTrue("no playlist row on a rejected login", runBlocking { ep.playlists().all() }.isEmpty())
+        panel.authMode("ok")
+    }
+
+    /**
+     * U-S7 (code review 2026-10-16, Blocker): §3.5.2 lifetime. HOME (the activity reaches CREATED) stops the LAN server:
+     * a GET is refused at the socket. Back in front (STARTED) the page opens again with a fresh code.
+     */
+    @Test
+    fun serverStopsWhenTheAppStopsAndReopensWithANewCode() {
+        debugLink("phone_port=47100")
+        val base = startPhoneSetup()
+        val code0 = probe.lan().code
+        req(base, "/").use { r -> assertTrue("served while in front: ${r.code}", r.code in 200..499) }
+        scenario!!.moveToState(androidx.lifecycle.Lifecycle.State.CREATED)
+        val d = android.os.SystemClock.elapsedRealtime() + 10_000
+        while (android.os.SystemClock.elapsedRealtime() < d && probe.lan().phase != ServerPhase.CLOSED) Thread.sleep(100)
+        assertEquals("server closed on ON_STOP", ServerPhase.CLOSED, probe.lan().phase)
+        val refused = runCatching { req(base, "/").use { it.code } }
+        assertTrue("a GET after ON_STOP is refused: $refused", refused.isFailure && refused.exceptionOrNull() is java.io.IOException)
+        scenario!!.moveToState(androidx.lifecycle.Lifecycle.State.RESUMED)
+        val again = startPhoneSetupFromCurrent()
+        assertNotNull(again)
+        assertTrue("a fresh code after ON_START (${probe.lan().code} vs $code0)", probe.lan().code != null && probe.lan().code != code0)
+    }
+
     @Test
     fun idleExpiryWithTheDebugClock() {
         startPhoneSetup()
@@ -135,6 +191,59 @@ class PhoneSetupTest : SettingsTestBase() {
         if (sui().confirm != null) { press(android.view.KeyEvent.KEYCODE_DPAD_LEFT); press(android.view.KeyEvent.KEYCODE_DPAD_CENTER) }
         awaitText("restored", 60_000) { it.contains("Restored", ignoreCase = true) }
         assertNotNull(pid)
+    }
+
+    /**
+     * I-M5-16 variant (C-S8, code review 2026-10-16): from a fresh install's Welcome, a restore through the phone page
+     * ends with **Start watching** (→ the guide) and, because the backup carried a group lock and no PIN exists, the
+     * §3.4.6 PIN offer.
+     */
+    @Test
+    fun restoreFromAFreshWelcomeStartsWatchingAndOffersThePin() {
+        wipe()
+        val pid = seedXtream()
+        launch()
+        // An explicit group lock without a PIN (a filter, B3): Settings → Channels → Groups → a group's menu → Lock.
+        openSettings("groups:$pid")
+        val g = rowWhere("a group row", 20_000) { it.id.key.startsWith(app.thebox.core.settings.tree.ChannelsRows.GROUP_PREFIX) && it.kind is app.thebox.core.settings.RowKind.Item }
+        activate(g.id.key)
+        awaitSettings("the group's menu") { it.menu != null }
+        val lockAt = sui().menu!!.options.indexOfFirst { it.id == app.thebox.core.settings.tree.ChannelsRows.M_LOCK }
+        assertTrue("Lock in the group's menu", lockAt >= 0)
+        var guard = 0
+        while (sui().menu?.focused != lockAt && guard++ < 10) press(android.view.KeyEvent.KEYCODE_DPAD_DOWN)
+        press(android.view.KeyEvent.KEYCODE_DPAD_CENTER)
+        awaitSettings("the group is locked", 10_000) { st ->
+            rows(st).firstOrNull { it.id == g.id }?.let { (it.kind as? app.thebox.core.settings.RowKind.Item)?.badges?.contains(app.thebox.core.settings.Badge.LOCKED) } == true
+        }
+        leaveSettings()
+        val file = java.io.File(context.filesDir, "m5-welcome.thebox")
+        val exported = runBlocking { file.outputStream().use { probe.backup.export(it, "correct horse 42".toCharArray()) } }
+        assertTrue("export: $exported", exported is app.thebox.core.common.Outcome.Ok)
+        val bytes = file.readBytes()
+        // Fresh install: Welcome.
+        wipe()
+        launch()
+        awaitGui("first run (Welcome)", 15_000) { it.mode == ScreenMode.SETTINGS }
+        awaitSettings("Welcome") { it.route == SettingsRoute.FirstRun }
+        debugLink("phone_port=47100")
+        debugLink("settings=phone&open=0")
+        awaitSettings("PhoneSetup route") { it.route is SettingsRoute.PhoneSetup }
+        val b = startPhoneSetupFromCurrent()
+        val c = pairWithToken(b)
+        http.newCall(Request.Builder().url("$b/api/upload?kind=backup&name=m5-welcome.thebox").header("Cookie", c).header("X-TheBox", "1")
+            .post(bytes.toRequestBody("application/octet-stream".toMediaType())).build()).execute().use { assertEquals(202, it.code) }
+        req(b, "/api/passphrase", c, json = JSONObject().put("passphrase", "correct horse 42")).use { assertEquals(202, it.code) }
+        awaitSettings("restore preview", 60_000) { it.route is SettingsRoute.RestorePreview }
+        val go = rowWhere("Restore now", 15_000) { it.kind is app.thebox.core.settings.RowKind.Action && it.label.contains("Restore now", ignoreCase = true) }
+        activate(go.id.key)
+        if (sui().confirm != null) { press(android.view.KeyEvent.KEYCODE_DPAD_LEFT); press(android.view.KeyEvent.KEYCODE_DPAD_CENTER) }
+        awaitText("restored", 60_000) { it.contains("Restored", ignoreCase = true) }
+        assertNotNull("the PIN offer after a restore that carried a lock", rowWhere("PIN offer", 15_000) { it.id == app.thebox.core.settings.tree.BackupRows.PREVIEW_PIN_OFFER || it.id == app.thebox.core.settings.tree.BackupRows.PREVIEW_PIN_SET })
+        assertNotNull(rowWhere("Start watching") { it.id == app.thebox.core.settings.tree.BackupRows.PREVIEW_START })
+        activate(app.thebox.core.settings.tree.BackupRows.PREVIEW_START.key)
+        awaitGui("Start watching → the guide", 20_000) { it.mode == ScreenMode.GUIDE }
+        assertTrue(runBlocking { ep.playlists().all() }.isNotEmpty())
     }
 
     private fun startPhoneSetupFromCurrent(): String {

@@ -15,6 +15,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import app.thebox.core.full.StatLine
+import app.thebox.ui.R
 import app.thebox.ui.guide.screen.GuideUi
 import app.thebox.ui.guide.screen.Line
 
@@ -26,7 +27,7 @@ const val STATS_OVERLAY_TAG = "player_stats"
  * localised here. It never takes keys and redraws at the M2 stats cadence (≤ 2 Hz) only while on.
  */
 @Composable
-fun StatsOverlay(lines: List<StatLine>, modifier: Modifier = Modifier) {
+fun StatsOverlay(lines: List<StatLine>, modifier: Modifier = Modifier, audioOutputForced: Boolean = false) {
     Column(
         modifier
             .testTag(STATS_OVERLAY_TAG)
@@ -37,7 +38,11 @@ fun StatsOverlay(lines: List<StatLine>, modifier: Modifier = Modifier) {
         for (l in lines) {
             Row(Modifier.height(PlayerUi.STATS_LINE_H.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Line(stringResource(PlayerText.statLabelRes(l.label)), GuideUi.mono(16, color = GuideUi.Fg55), Modifier.width(LABEL_W.dp))
-                Line(l.value, GuideUi.mono(16), Modifier.weight(1f))
+                // U-S12 (code review 2026-10-16, B2): the audio line says "Always passthrough" and where Back to Auto is.
+                val value = if (audioOutputForced && l.label == app.thebox.core.full.StatLabel.AUDIO) {
+                    l.value + " · " + stringResource(R.string.player_stat_audio_forced)
+                } else l.value
+                Line(value, GuideUi.mono(16), Modifier.weight(1f))
             }
         }
     }

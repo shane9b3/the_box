@@ -18,7 +18,8 @@
     <string name="about_update_value_ready">%1$s ready to install</string>
     <string name="about_update_value_installing">Installing…</string>
     <string name="about_update_value_permission">Allow The Box to install updates</string>
-    <string name="about_update_value_failed">Last check failed</string>
+    <!-- U-L15 (code review 2026-10-16): a next step on the failed check; every Apache-2.0 dependency credited -->
+    <string name="about_update_value_failed">Last check failed · OK to try again</string>
     <string name="about_update_value_disabled">Updates are not set up for this build</string>
     <string name="about_update_value_idle">Version %1$s</string>
     <string name="about_update_desc">Asks GitHub for a newer version of The Box. Nothing about you is sent.</string>
@@ -163,7 +164,7 @@
     <!-- Licences (N16) -->
     <string name="licences_title">Licences</string>
     <string name="licences_ffmpeg">FFmpeg 6.0.2 (audio decoders)</string>
-    <string name="licences_apache">Tink, OkHttp and Media3</string>
+    <string name="licences_apache">Media3, AndroidX and Jetpack Compose, Kotlin and kotlinx, Dagger and Hilt, OkHttp, Tink and ACRA</string>
     <string name="licences_qrcodegen">QR Code generator (Project Nayuki)</string>
     <string name="licences_instrument">Instrument Sans font</string>
     <string name="licences_jetbrains">JetBrains Mono font</string>

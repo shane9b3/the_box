@@ -11,6 +11,7 @@ import app.thebox.data.parental.PinVerifier
 import app.thebox.player.api.PlaybackState
 import app.thebox.player.api.TuneTarget
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertArrayEquals
@@ -88,26 +89,43 @@ class GatesTest : SettingsTestBase() {
         Thread.sleep(2_000)
         openSettings("playback")
         choose("playback.audio_output", "STEREO")
-        // The re-prepare keeps the surface (no new "first frame" count): time BACK → Playing again after it left Playing.
-        val t0 = SystemClock.elapsedRealtime()
+        // The re-prepare keeps the surface (no new "first frame" count): time Settings closed → Playing again after it
+        // left Playing. U-L3 (code review 2026-10-16): the clock starts when the guide machine leaves SETTINGS, not before
+        // `leaveSettings()` (its 250 ms per BACK overstated the figure by ~0.5 s).
+        val closedAt = java.util.concurrent.atomic.AtomicLong(0)
         val left = java.util.concurrent.atomic.AtomicLong(0)
+        val playingAt = java.util.concurrent.atomic.AtomicLong(0)
+        val g = guide
         val watcher = Thread {
             runBlocking {
                 withTimeoutOrNull(15_000) {
-                    controller.state.first { it !is PlaybackState.Playing }
-                    left.set(SystemClock.elapsedRealtime())
-                    controller.state.first { it is PlaybackState.Playing }
+                    kotlinx.coroutines.coroutineScope {
+                        launch { g.ui.first { it.mode != ScreenMode.SETTINGS }; closedAt.set(SystemClock.elapsedRealtime()) }
+                        controller.state.first { it !is PlaybackState.Playing }
+                        left.set(SystemClock.elapsedRealtime())
+                        controller.state.first { it is PlaybackState.Playing }
+                        playingAt.set(SystemClock.elapsedRealtime())
+                    }
                 }
             }
         }.also { it.start() }
         leaveSettings()
         watcher.join(16_000)
-        val ms = SystemClock.elapsedRealtime() - t0
-        log("gate first frame after a settings change: Settings closed → playing again ms=$ms (left playing at +${if (left.get() > 0) left.get() - t0 else -1} ms)")
+        val ms = if (playingAt.get() > 0 && closedAt.get() > 0) playingAt.get() - closedAt.get() else -1
+        log("gate first frame after a settings change: Settings closed → playing again ms=$ms (left playing at ${if (left.get() > 0) left.get() - closedAt.get() else -1} ms after the close)")
         assertTrue("left Playing for the re-prepare", left.get() > 0)
         assertTrue("playing again", controller.state.value is PlaybackState.Playing)
         openSettings("playback")
         choose("playback.audio_output", "AUTO")
         leaveSettings()
+        // U-L3 (code review 2026-10-16): asserted once U-S1 (leading-edge rebuild, no change signal on a first publish,
+        // a 100 ms wait for a push-model page's data) landed; the median, as for the PIN gate (a busy host adds outliers).
+        // Asserted last so the first-frame figure above is always recorded.
+        assertTrue("Settings open → first page ≤ $SETTINGS_OPEN_GATE_MS ms (median): $opens", opens.sorted()[opens.size / 2] <= SETTINGS_OPEN_GATE_MS)
+    }
+
+    private companion object {
+        /** §6.7 "Settings open → first page" (U-L3). */
+        const val SETTINGS_OPEN_GATE_MS = 150L
     }
 }

@@ -122,6 +122,8 @@ class PlayerViewModel @Inject constructor(
     // M5 WP-C (docs/design/m5-setup-settings.md §3.9; S10, B1)
     private val parental: ParentalSession = NoPinSession,
     tuneGuard: TuneGuard = TuneGuard.ALLOW_ALL,
+    // U-S12 (code review 2026-10-16): "Always passthrough" (the AUDIO picker's Back to Auto, the stats line).
+    audioForced: AudioOutputForced = AudioOutputForced.NONE,
 ) : ViewModel(), PlayerHost, PlayerGuideBridge, app.thebox.ui.full.PlayerExtras {
 
     /**
@@ -177,6 +179,9 @@ class PlayerViewModel @Inject constructor(
             .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     private val detail = MutableStateFlow<ProgrammeInfo?>(null)
     override val focusedDetail: StateFlow<ProgrammeInfo?> get() = detail
+    /** U-S12 (code review 2026-10-16): "Always passthrough" is the audio output. */
+    override val audioOutputForced: StateFlow<Boolean> = audioForced.flow().distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     /** Row lookups (N10 / M3 H-L12: only hits are cached); cleared when row content changes. */
     private val channelCache = object : LinkedHashMap<ChannelIdentity, GuideChannel>(16, 0.75f, true) {
@@ -277,8 +282,9 @@ class PlayerViewModel @Inject constructor(
         scope.launch { controller.pendingZap.collect { id -> machine.dispatch(PlayerEvent.PendingZap(id?.let { channelOf(it) })) } }
         // (M5 integration, E23) The servers of the tune ride with the track menu (the Sources picker).
         scope.launch {
-            kotlinx.coroutines.flow.combine(controller.tracks, controller.servers) { t, s ->
-                PlayerMappers.trackMenu(t).copy(servers = s.labels, server = s.current)
+            // U-S12 (code review 2026-10-16): the track menu says whether "Always passthrough" is on (Back to Auto).
+            kotlinx.coroutines.flow.combine(controller.tracks, controller.servers, audioOutputForced) { t, s, forced ->
+                PlayerMappers.trackMenu(t).copy(servers = s.labels, server = s.current, audioOutputForced = forced)
             }.collect { machine.dispatch(PlayerEvent.Tracks(it)) }
         }
         scope.launch { controller.video.collect { machine.dispatch(PlayerEvent.Video(PlayerMappers.videoFacts(it))) } }

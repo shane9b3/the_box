@@ -124,7 +124,8 @@ fun TextEditorOverlay(
     editorBacks: Flow<Unit>,
     onPhoneSetup: () -> Unit,
     modifier: Modifier = Modifier,
-    keyboardAvailable: Boolean = LocalKeyboardCheck.current(LocalContext.current),
+    // U-L7 (code review 2026-10-16): the IME list is a binder call; asked once per context, not on every keystroke.
+    keyboardAvailable: Boolean = LocalContext.current.let { c -> val check = LocalKeyboardCheck.current; androidx.compose.runtime.remember(c, check) { check(c) } },
 ) {
     var value by remember(editor.row) { mutableStateOf(TextFieldValue(editor.initial, TextRange(editor.initial.length))) }
     var fieldFocused by remember(editor.row) { mutableStateOf(false) }

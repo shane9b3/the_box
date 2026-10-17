@@ -156,7 +156,7 @@ private fun Trailing(row: SettingsRow, focused: Boolean, text: Color) {
             )
         }
         when (val k = row.kind) {
-            is RowKind.Toggle -> TogglePill(k.on, Modifier.semantics { stateDescription = if (k.on) "on" else "off" })
+            is RowKind.Toggle -> TogglePill(k.on, Modifier.semantics { stateDescription = if (k.on) "on" else "off" }, onLight = focused) // U-S9
             is RowKind.Link -> Line(stringResource(R.string.settings_ui_chevron), SettingsUi.RowLabel.copy(color = text.copy(alpha = text.alpha * 0.45f)))
             is RowKind.Item -> if (k.route != null) Line(stringResource(R.string.settings_ui_chevron), SettingsUi.RowLabel.copy(color = text.copy(alpha = text.alpha * 0.45f)))
             is RowKind.Action -> if (k.destructive) Dot(SettingsUi.Bad.copy(alpha = text.alpha), 10)
@@ -174,17 +174,29 @@ private fun Dot(color: Color, size: Int) {
     Box(Modifier.size(size.dp).background(color, CircleShape))
 }
 
-/** The kit's toggle (§3.1): a 56 × 30 pill; on = accent fill, knob right; off = `.16` fill, knob left. Colours stay on a focused row. */
+/**
+ * The kit's toggle (§3.1): a 56 × 30 pill; on = accent fill, knob right; off = `.16` fill, knob left. On keeps its
+ * colours on a focused row. U-S9 (code review 2026-10-16): Off on a focused (light, [onLight]) row draws a `.18` dark
+ * fill with a dark knob; the `.16` white fill and the `#EEF1F6` knob vanished into the `#EEF1F6` row.
+ */
 @Composable
-fun TogglePill(on: Boolean, modifier: Modifier = Modifier) {
+fun TogglePill(on: Boolean, modifier: Modifier = Modifier, onLight: Boolean = false) {
     val pill = RoundedCornerShape(SettingsUi.TOGGLE_H.dp)
+    val (fill, knob) = togglePillColors(on, onLight)
     Box(
         modifier
             .size(SettingsUi.TOGGLE_W.dp, SettingsUi.TOGGLE_H.dp)
-            .background(if (on) SettingsUi.Accent else SettingsUi.White16, pill)
+            .background(fill, pill)
             .padding(3.dp),
         contentAlignment = if (on) Alignment.CenterEnd else Alignment.CenterStart,
-    ) { Box(Modifier.size(SettingsUi.TOGGLE_KNOB.dp).background(SettingsUi.Fg, CircleShape)) }
+    ) { Box(Modifier.size(SettingsUi.TOGGLE_KNOB.dp).background(knob, CircleShape)) }
+}
+
+/** U-S9: the pill's fill and knob colours; [onLight] = drawn on a focused (`Fg`) row. */
+internal fun togglePillColors(on: Boolean, onLight: Boolean): Pair<Color, Color> = when {
+    on -> SettingsUi.Accent to SettingsUi.Fg
+    onLight -> SettingsUi.Canvas.copy(alpha = 0.18f) to SettingsUi.Canvas
+    else -> SettingsUi.White16 to SettingsUi.Fg
 }
 
 @Composable

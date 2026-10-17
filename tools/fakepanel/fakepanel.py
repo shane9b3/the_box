@@ -685,7 +685,7 @@ class Panel:
         self.event_anchor = {}  # timeshift_rel EVENT playlists: (sid, path) -> fixed start (unix s)
         self.subs = load_srt(os.path.join(HERE, "multi_subs.srt"))
         self.holds = []        # M5: /admin/hold_connection slots (I-M5-6)
-        self.update_apks = {}  # M5: name -> APK bytes (POST /admin/update_apk)
+        self.update_apks = {}  # M5: name -> APK bytes (POST /admin/update_apk, or --update-apk-dir)
         self.update_seed = load_update_key(update_key)
         self.reset_stats()
         self.clips, self.vod_data, self.vod_ctype = build_media(
@@ -786,6 +786,27 @@ class Panel:
                     deep_merge_faults(self.cfg[k], v)
                 else:
                     self.cfg[k] = copy.deepcopy(v)
+
+    def load_update_apks(self, directory):
+        """U-S14 (M5 code review 2026-10-16): registers every `*.apk` in [directory] by name, so the updater suite selects
+        an APK with the `update_apk` config key instead of uploading 36 MB through the emulator per case. The name is the
+        file stem without a `thebox-update-` prefix (`thebox-update-v2.apk` -> `v2`). Returns the names loaded."""
+        names = []
+        for f in sorted(os.listdir(directory)):
+            if not f.endswith(".apk"):
+                continue
+            name = f[:-4]
+            if name.startswith("thebox-update-"):
+                name = name[len("thebox-update-"):]
+            if not re.match(r"^[A-Za-z0-9_.-]+$", name):
+                continue
+            with open(os.path.join(directory, f), "rb") as fh:
+                data = fh.read()
+            with self.lock:
+                self.update_apks[name] = data
+            names.append(name)
+        self.log(f"update APKs from {directory}: {', '.join(names) or 'none'}")
+        return names
 
     def reset(self):
         with self.lock:
@@ -1209,6 +1230,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with p.lock:
                 p.update_apks[name] = body
             return self.json({"name": name, "bytes": len(body), "sha256": hashlib_sha256(body)})
+        if path == "/admin/update_apks":
+            # U-S14: the names the updater suite can select with the `update_apk` key (uploaded or from --update-apk-dir).
+            with p.lock:
+                return self.json({"names": sorted(p.update_apks), "sha256": {k: hashlib_sha256(v) for k, v in p.update_apks.items()}})
         if path == "/admin/update_key":
             return self.json({"public_key": p.update_public_hex()})
         if path == "/admin/faults":
@@ -1957,6 +1982,8 @@ def main(argv=None):
     ap.add_argument("--no-ffmpeg", action="store_true")
     ap.add_argument("--no-pace", action="store_true", help="send live TS as fast as possible")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--update-apk-dir", help="U-S14: load every *.apk in this directory as an update APK by name "
+                                             "(thebox-update-v2.apk -> v2); select one with the update_apk config key")
     ap.add_argument("--update-key", help="file with the 32-byte Ed25519 seed (hex) the update manifest is signed with "
                                          "(default tools/fakepanel/update_test_key if present, else a fresh key per run)")
     a = ap.parse_args(argv)
@@ -1996,6 +2023,8 @@ def main(argv=None):
         cfg["stream_faults"].setdefault(sid, {})[k] = v
 
     panel = Panel(cfg, a.media_dir, not a.no_ffmpeg, a.verbose, update_key=a.update_key)
+    if a.update_apk_dir:
+        panel.load_update_apks(a.update_apk_dir)
     main_srv, lb = start_servers(panel, a.host, a.port, a.redirect_port)
     panel.log(f"fakepanel up: http://{a.host}:{panel.main_port}  (token/redirect target port {panel.lb_port})  "
               f"user={cfg['username']} pass={cfg['password']} tz={cfg['timezone']} quirks={cfg['quirks']}")

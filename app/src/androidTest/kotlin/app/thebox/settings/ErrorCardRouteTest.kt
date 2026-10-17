@@ -11,6 +11,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -24,6 +25,40 @@ class ErrorCardRouteTest : SettingsTestBase() {
     fun editLoginFromTheCardAndRetry() {
         val pid = seedXtream()
         launch()
+        cardToTheLoginRows(pid)
+        // Fix the "password" (the panel accepts again) and Retry → plays.
+        panel.authMode("ok")
+        val retry = ep.playerProbe().current!!.ui.value.error!!.buttons.indexOf(ErrorButton.RETRY)
+        repeat(6) { press(KeyEvent.KEYCODE_DPAD_LEFT, intervalMs = 80) }
+        repeat(retry) { press(KeyEvent.KEYCODE_DPAD_RIGHT, intervalMs = 80) }
+        press(KeyEvent.KEYCODE_DPAD_CENTER)
+        assertNotNull("plays after Retry", runBlocking { withTimeoutOrNull(30_000) { controller.state.first { it is PlaybackState.Playing } } })
+    }
+
+    /**
+     * I-M5-21 with "Lock settings" on (C-S1 = U-S8, code review 2026-10-16): the card's route enters Settings detached and
+     * PIN-free (S2) on the login rows, not the PIN prompt and Root; BACK returns to FULL with the card.
+     */
+    @Test
+    fun errorCardRouteIsDetachedAndPinFreeWithLockSettingsOn() {
+        wipe()
+        val pid = seedXtream()
+        launch()
+        setPin()
+        openSettings("parental")
+        activate("parental.lock_settings")
+        awaitSettings("Lock settings on") { probe.parental().policy.lockSettings }
+        leaveSettings()
+        relaunch() // the session is locked again
+        awaitGui("guide after the relaunch", 15_000) { it.mode == ScreenMode.GUIDE }
+        assertTrue("the session is locked", !probe.parental().unlocked)
+        cardToTheLoginRows(pid)
+        assertNull("no PIN prompt for an error-card route", gui().pin)
+        panel.authMode("ok")
+    }
+
+    /** `auth_mode 401` in FULL → the card's "Edit login" → Settings on the login rows (detached) → BACK → FULL with the card. */
+    private fun cardToTheLoginRows(pid: Long) {
         awaitGui("guide lineup", 30_000) { it.empty == null && it.panel != null }
         Thread.sleep(1_000)
         panel.authMode("401")
@@ -43,18 +78,12 @@ class ErrorCardRouteTest : SettingsTestBase() {
         assertTrue("an Edit login button", idx >= 0)
         repeat(idx) { press(KeyEvent.KEYCODE_DPAD_RIGHT) }
         press(KeyEvent.KEYCODE_DPAD_CENTER)
+        assertNull("the card's route asks no PIN", run { Thread.sleep(500); gui().pin })
         awaitSettings("Settings on the login rows (detached)") { it.route == SettingsRoute.PlaylistSource(pid) && it.stack.none { r -> r == SettingsRoute.Root } }
         // (M5 integration) WP-B's page loads the stored source first (a placeholder), then the form rows.
         assertNotNull(rowWhere("the password row", 15_000) { (it.kind as? app.thebox.core.settings.RowKind.Text)?.hint == TextHint.PASSWORD })
         press(KeyEvent.KEYCODE_BACK)
         awaitGui("BACK → FULL with the card") { it.mode == ScreenMode.FULL }
         assertNotNull(ep.playerProbe().current?.ui?.value?.error)
-        // Fix the "password" (the panel accepts again) and Retry → plays.
-        panel.authMode("ok")
-        val retry = ep.playerProbe().current!!.ui.value.error!!.buttons.indexOf(ErrorButton.RETRY)
-        repeat(6) { press(KeyEvent.KEYCODE_DPAD_LEFT, intervalMs = 80) }
-        repeat(retry) { press(KeyEvent.KEYCODE_DPAD_RIGHT, intervalMs = 80) }
-        press(KeyEvent.KEYCODE_DPAD_CENTER)
-        assertNotNull("plays after Retry", runBlocking { withTimeoutOrNull(30_000) { controller.state.first { it is PlaybackState.Playing } } })
     }
 }

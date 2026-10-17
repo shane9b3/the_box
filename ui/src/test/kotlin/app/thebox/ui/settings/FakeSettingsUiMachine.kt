@@ -35,11 +35,18 @@ class FakeSettingsUiMachine(initial: SettingsUiState = SettingsUiState()) : Sett
     override fun attachGuide(dispatch: ((GuideEvent) -> Unit)?) { guide = dispatch }
     override fun openFromFull(route: SettingsRoute, detached: Boolean) = Unit
     override fun push(route: SettingsRoute) { pushed += route }
+    /** U-S6: routes pushed through the PIN gate (asked through [pinGate] when one is set; pushed when it answers false). */
+    val gatedPushed = ArrayList<SettingsRoute>()
+    override fun pushGated(route: SettingsRoute) {
+        gatedPushed += route
+        if (pinGate?.request(app.thebox.core.parental.PinPurpose.SettingsAction(gatedPushed.size.toLong())) != true) pushed += route
+    }
+    val replaced = ArrayList<SettingsRoute>()
     override val shellEvents: SharedFlow<SettingsShellEvent> = shell
     override fun post(event: SettingsShellEvent) { shell.tryEmit(event) }
     override val editorBacks: SharedFlow<Unit> = backs
     override var backHandler: ((SettingsRoute) -> Boolean)? = null
-    override fun replace(route: SettingsRoute) = Unit
+    override fun replace(route: SettingsRoute) { replaced += route; state.value = state.value.copy(route = route) }
     override fun pop() = Unit
     override fun popTo(route: SettingsRoute) = Unit
     override fun leaveToGuide() = Unit
