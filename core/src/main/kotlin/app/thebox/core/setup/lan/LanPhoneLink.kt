@@ -52,8 +52,15 @@ class LanPhoneLink(
     private var baseUrl: String? = null
     private var purpose: PhonePurpose = PhonePurpose.SETUP
     private var received = false
+    /**
+     * D-B3: files offered while no server runs (an export that finishes before the phone screen starts the server);
+     * handed to the next session's [PhoneApi], deleted by [stop] when no session takes them.
+     */
+    private val pendingOffers = LinkedHashMap<String, Pair<File, String>>()
 
     override fun start(purpose: PhonePurpose) {
+        // D-B3: offers made before this start survive the stop of the previous session and go to the new one.
+        val carried = synchronized(lock) { LinkedHashMap(pendingOffers).also { pendingOffers.clear() } }
         stop()
         synchronized(lock) {
             this.purpose = purpose
@@ -61,6 +68,7 @@ class LanPhoneLink(
             _state.value = LanServerState(ServerPhase.STARTING)
             val address = finder.find()
             if (address == null || !LanAddressPolicy.isUsable(address)) {
+                pendingOffers.putAll(carried) // kept for a retry of the screen; stop() deletes them
                 _state.value = LanServerState(ServerPhase.FAILED, failure = LanFailure.NO_LAN_ADDRESS)
                 return
             }
@@ -76,12 +84,15 @@ class LanPhoneLink(
                 srv.start(LanBind(address, portOverride ?: app.thebox.core.diag.DebugOverrides.phonePort ?: LanLimits.PHONE_PORT_PREFERRED, LanLimits.HTTP_MAX_SOCKETS), lazyHandler)
             } catch (e: IOException) {
                 BoxLog.w(TAG, "bind failed: ${e.javaClass.simpleName}")
+                pendingOffers.putAll(carried)
                 _state.value = LanServerState(ServerPhase.FAILED, failure = LanFailure.BIND_FAILED)
                 return
             }
             val hostPort = "$address:${srv.port}"
             spoolDir.mkdirs()
-            val a = PhoneApi(s, purpose, hostPort, assets, spoolDir, freeBytes, onSubmission = ::submitted)
+            // D-L4: a submission nobody collects is refused (503) instead of being dropped after a 202.
+            val a = PhoneApi(s, purpose, hostPort, assets, spoolDir, freeBytes, onSubmission = ::submitted, canAccept = { _submissions.subscriptionCount.value > 0 })
+            for ((name, offer) in carried) a.offerDownload(name, offer.first, offer.second)
             handler = a
             server = srv
             session = s
@@ -105,7 +116,11 @@ class LanPhoneLink(
             server = null
             session?.end(null)
             session = null
+            // D-S2: files still on offer go with the session (and offers that never reached one).
+            api?.dropOffers()
             api = null
+            pendingOffers.values.forEach { it.first.delete() }
+            pendingOffers.clear()
             ticker?.cancel()
             ticker = null
         }
@@ -115,7 +130,11 @@ class LanPhoneLink(
     }
 
     override fun offerDownload(name: String, path: String, contentType: String) {
-        api?.offerDownload(name, File(path), contentType)
+        synchronized(lock) {
+            val a = api
+            // D-B3: no server yet (the export finished before the screen started it): kept for the next start.
+            if (a != null) a.offerDownload(name, File(path), contentType) else pendingOffers[name] = File(path) to contentType
+        }
     }
 
     override fun reportStatus(text: String, done: Boolean) {
@@ -139,6 +158,7 @@ class LanPhoneLink(
     private fun fail(s: PairingSession, failure: LanFailure) {
         val srv = synchronized(lock) {
             if (session !== s) return
+            api?.dropOffers() // D-S2
             server.also { server = null; session = null; api = null; ticker?.cancel(); ticker = null }
         }
         srv?.stop()

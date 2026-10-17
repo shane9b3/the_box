@@ -187,6 +187,8 @@ class LanHttpServerImpl(
             a.responding = true
             val sent = writeResponse(conn.output, if (method == "HEAD") response.copy(body = null, file = null) else response)
             BoxLog.i(TAG) { "$method $pathForLog ${response.status} $sent" }
+            // D-S2: a single-use download is gone once it was written in full.
+            if (method != "HEAD") response.onSent?.let { runCatching(it) }
         } catch (e: IOException) {
             BoxLog.i(TAG) { "$method $pathForLog connection ended: ${e.javaClass.simpleName}" }
         } finally {

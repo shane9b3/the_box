@@ -120,10 +120,17 @@ object ParentalRules {
      * are left out, except in FILTERED_NO_PIN (otherwise nothing could reach them without a PIN, the M3 trap).
      */
     fun visibleEntries(entries: List<GuideSourceEntry>, state: ParentalState): List<GuideSourceEntry> {
-        if (state.policy.lockedInGuide != LockedInGuide.HIDE || state.access == ParentalAccess.FILTERED_NO_PIN) return entries
-        if (entries.none { it.locked }) return entries
-        return entries.filterNot { it.locked && it.section == SourceSection.GROUP }
+        // U-S11: in FILTERED_NO_PIN a locked group is listed as "not protected" (the amber 18+), never hidden.
+        if (state.access == ParentalAccess.FILTERED_NO_PIN) {
+            return if (entries.none { it.locked != it.notProtected }) entries else entries.map { it.copy(notProtected = it.locked) }
+        }
+        if (state.policy.lockedInGuide != LockedInGuide.HIDE) return entries.clearNotProtected()
+        if (entries.none { it.locked }) return entries.clearNotProtected()
+        return entries.filterNot { it.locked && it.section == SourceSection.GROUP }.clearNotProtected()
     }
+
+    private fun List<GuideSourceEntry>.clearNotProtected(): List<GuideSourceEntry> =
+        if (none { it.notProtected }) this else map { it.copy(notProtected = false) }
 
     /** True when OK on [entry] needs the PIN or the not-protected card first. */
     fun needsDoor(entry: GuideSourceEntry, state: ParentalState): Boolean =

@@ -54,7 +54,11 @@ enum class Visibility { SIMPLE, ADVANCED }
 /** When a change takes effect (decision §0.6). The row's description states every value other than LIVE. */
 enum class EffectTiming { LIVE, NEXT_TUNE, REPREPARE, NEXT_REFRESH, NEXT_EPG_IMPORT, NEXT_LAUNCH, RESTART, NONE }
 
-data class ChoiceOption(val id: String, val label: String, val detail: String? = null, val enabled: Boolean = true)
+/**
+ * [needsPin] (C-B2, code review 2026-10-16; additive): as a menu option, choosing it asks for the PIN first when one is
+ * set (`PinPurpose.SettingsAction`), like `RowKind.Action.needsPin`; the intent is emitted only once the PIN is granted.
+ */
+data class ChoiceOption(val id: String, val label: String, val detail: String? = null, val enabled: Boolean = true, val needsPin: Boolean = false)
 
 sealed interface RowKind {
     data class Toggle(val on: Boolean) : RowKind
@@ -62,7 +66,10 @@ sealed interface RowKind {
     data class Choice(val options: List<ChoiceOption>, val selected: Int) : RowKind
     /** Several of [options] (favourite lists of a channel, enabled EPG sources). */
     data class MultiChoice(val options: List<ChoiceOption>, val selected: Set<Int>) : RowKind
-    data class Text(val value: String, val hint: TextHint, val masked: Boolean = false, val chips: List<String> = emptyList()) : RowKind
+    data class Text(val value: String, val hint: TextHint, val masked: Boolean = false, val chips: List<String> = emptyList()) : RowKind {
+        // U-L10 / C-L14: a masked value never prints (assertion messages, state dumps).
+        override fun toString(): String = "Text(value=${if (masked) maskForLog(value) else value}, hint=$hint, masked=$masked, chips=$chips)"
+    }
     data class Number(val value: Int, val min: Int, val max: Int, val unit: String? = null) : RowKind
     data class Action(val destructive: Boolean = false, val confirm: ConfirmSpec? = null, val needsPin: Boolean = false) : RowKind
     data class Link(val route: SettingsRoute, val needsPin: Boolean = false) : RowKind
@@ -120,9 +127,15 @@ sealed interface RowIntent {
     data class Toggle(override val row: RowId, val on: Boolean) : RowIntent
     data class Choose(override val row: RowId, val optionId: String) : RowIntent
     data class ChooseMany(override val row: RowId, val optionIds: Set<String>) : RowIntent
-    data class Edit(override val row: RowId, val text: String) : RowIntent
+    data class Edit(override val row: RowId, val text: String) : RowIntent {
+        // U-L10: the intent does not know whether the row is masked, so the text never prints.
+        override fun toString(): String = "Edit(row=$row, text=${maskForLog(text)})"
+    }
     data class SetNumber(override val row: RowId, val value: Int) : RowIntent
     data class Run(override val row: RowId) : RowIntent
     data class Menu(override val row: RowId, val optionId: String) : RowIntent
     data class Move(override val row: RowId, val toIndex: Int) : RowIntent
 }
+
+/** (U-L10) How masked text prints in `toString`: its length only. */
+internal fun maskForLog(text: String?): String = if (text == null) "null" else "<${text.length} chars>"

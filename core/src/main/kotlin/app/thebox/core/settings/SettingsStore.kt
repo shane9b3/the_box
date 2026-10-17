@@ -41,8 +41,21 @@ interface SettingsStore {
     suspend fun flush()
     /** Backup: every [SettingsDomain.backedUp] domain as stored JSON. */
     suspend fun export(): Map<String, JsonElement>
-    /** Restore inside the caller's library.db transaction (§3.10.4). Unknown domains are ignored. */
+    /**
+     * Restore inside the caller's library.db transaction (§3.10.4). Unknown domains are ignored, and so are the
+     * device-bound ones (`backedUp = false`). With [replace], every backed-up domain the file does not carry is reset to
+     * its default (its row deleted): e.g. a backup without a `parental` document turns a local "Lock settings" off,
+     * which is why a restore needs the PIN while one is set (C-B2, §3.9.2). (D-S4, code review 2026-10-16) The rows are
+     * written here; the in-memory documents are published only by [commitImport] once the transaction committed.
+     */
     suspend fun importInTransaction(documents: Map<String, JsonElement>, replace: Boolean)
+
+    /**
+     * (D-S4, code review 2026-10-16; additive) After the caller's transaction around [importInTransaction]: [committed]
+     * publishes the imported documents (§3.10.4 step 5 "after commit"); false (the transaction rolled back) drops them, and
+     * memory keeps the values the database still holds. A store that publishes inside the import ignores it.
+     */
+    fun commitImport(committed: Boolean = true) = Unit
 }
 
 /** (M5 commit 0) Named constants of Appendix B that commit-0 code reads. */

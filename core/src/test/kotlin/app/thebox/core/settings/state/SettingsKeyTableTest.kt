@@ -136,7 +136,7 @@ class SettingsKeyTableTest {
             "PAGE_LISTS_PIN_SET" to { listsAt("fx.pin", pinSet = true) },
             "PAGE_LISTS_INFO" to { listsAt("fx.info") },
             "PAGE_LISTS_DISABLED" to { listsAt("fx.disabled") },
-            "PAGE_LISTS_CAPTURE" to { listsAt(SettingsMachineImpl.CAPTURE_PREFIX + "open_search:SHORT") },
+            "PAGE_LISTS_CAPTURE" to { listsAt(FixturePages.CAPTURE_ROW.key) },
             "PAGE_LISTS_ITEM" to { listsAt("fx.list.1") },
             "PAGE_LISTS_PRIMARY" to { listsAt("fx.list.move") },
             "CHOICE_OPEN" to { root().apply { enter(SectionId.PLAYBACK); act(BoxAction.SELECT) } },
@@ -155,7 +155,7 @@ class SettingsKeyTableTest {
             "MOVE" to { listsAt("fx.list.1").apply { act(BoxAction.CONTEXT_MENU); act(BoxAction.DOWN); act(BoxAction.SELECT) } },
             "MOVE_DOWN1" to { listsAt("fx.list.1").apply { act(BoxAction.CONTEXT_MENU); act(BoxAction.DOWN); act(BoxAction.SELECT); act(BoxAction.DOWN) } },
             "EDITOR" to { listsAt("fx.text").apply { act(BoxAction.SELECT) } },
-            "CAPTURE" to { listsAt(SettingsMachineImpl.CAPTURE_PREFIX + "open_search:SHORT").apply { act(BoxAction.SELECT) } },
+            "CAPTURE" to { listsAt(FixturePages.CAPTURE_ROW.key).apply { act(BoxAction.SELECT) } },
             "FIRSTRUN" to { SettingsWorld().open(SettingsRoute.FirstRun) },
             "DETACHED" to { SettingsWorld().open(SettingsRoute.SyncStatus, detached = true) },
         )
@@ -163,19 +163,20 @@ class SettingsKeyTableTest {
 
     @Test
     fun captureDeliversTheKeyAndOkBindsIt() {
-        val w = listsAt(SettingsMachineImpl.CAPTURE_PREFIX + "open_search:SHORT")
+        val w = listsAt(FixturePages.CAPTURE_ROW.key)
         w.act(BoxAction.SELECT)
         w.machine.dispatch(SettingsEvent.Captured(CapturedKey(183, "KEYCODE_PROG_RED", "Remote", 3, false)))
         assertEquals(false, w.effects.armed)
         assertEquals(183, w.ui.capture?.captured?.keyCode)
         w.act(BoxAction.SELECT)
-        assertTrue(w.effects.intents.last().toString().contains("bind:183"))
+        // C-L2: the one save path is the shell link's captureSaved (WP-C's mapping source binds the key).
+        assertEquals(183, w.saved.single().second.keyCode)
         assertEquals(null, w.ui.capture)
     }
 
     @Test
     fun captureTimesOutAfterTenSeconds() {
-        val w = listsAt(SettingsMachineImpl.CAPTURE_PREFIX + "open_search:SHORT")
+        val w = listsAt(FixturePages.CAPTURE_ROW.key)
         w.act(BoxAction.SELECT)
         assertEquals(w.now + SettingsMachineImpl.CAPTURE_TIMEOUT_MS, w.machine.nextDeadlineMs.value)
         w.now += SettingsMachineImpl.CAPTURE_TIMEOUT_MS

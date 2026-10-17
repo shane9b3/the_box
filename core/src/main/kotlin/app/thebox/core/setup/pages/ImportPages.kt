@@ -176,7 +176,8 @@ class ImportProgressPage(
     private fun stop() {
         launch { d.setup.cancelImport(r.playlistId) }
         tracker.stop()
-        act(PageAction.Replace(if (r.firstRun) editRoute(type) else SettingsRoute.Section(SectionId.PLAYLISTS)))
+        // C-L4 (N12): outside first run, back to the Playlists page already on the path (BACK must not show the chooser).
+        act(if (r.firstRun) PageAction.Replace(editRoute(type)) else PageAction.PopTo(SettingsRoute.Section(SectionId.PLAYLISTS)))
     }
 
     private fun startWatching() {

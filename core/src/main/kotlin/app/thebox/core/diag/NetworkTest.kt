@@ -23,6 +23,8 @@ class TestTarget(
     val url: String,
     val username: String? = null,
     val password: String? = null,
+    /** (D-L9, code review 2026-10-16; additive) The playlist's own User-Agent (a VLC-only panel refuses others); null = default. */
+    val userAgent: String? = null,
 ) {
     override fun toString(): String = "TestTarget(playlist=$playlistId, ${if (xtream) "xtream" else "m3u"}, $host:$port)"
 }

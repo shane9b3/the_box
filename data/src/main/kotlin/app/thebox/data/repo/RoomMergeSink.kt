@@ -162,16 +162,6 @@ class RoomMergeSink(
 
             updateGroups(this, finish.groupKeysSeen, now)
 
-            // M5 (docs/design/m5-setup-settings.md §3.7.3): the hide-rule pass after every merge, inside this
-            // transaction and under the merge's ImportMutex. New rows arrive with rule_hidden = 0 (column default);
-            // the UPDATE and ON CONFLICT paths above never list rule_hidden, so existing flags survive until the pass
-            // recomputes them. A failing pass must not undo the merge.
-            try {
-                RuleHiddenPass.run(this, playlistId)
-            } catch (e: RuntimeException) {
-                BoxLog.w(TAG, "hide-rule pass failed for playlist $playlistId: ${e.javaClass.simpleName}")
-            }
-
             val removedSample = ArrayList<String>()
             if (finish.newlyMissingIds.isNotEmpty()) {
                 usePrepared("SELECT name FROM channel WHERE id = ?") { st ->
@@ -204,6 +194,18 @@ class RoomMergeSink(
             // keep display names from whatever rule computed them, so stamping RULE_VERSION when the stored value is
             // older would make the startup backfill skip this playlist forever. Only DisplayNames.recompute raises it.
             FinishStats(finish.purgeIds.size, favKept.toInt(), (favTotal - favKept).toInt(), removedSample)
+        }
+        // M5 (docs/design/m5-setup-settings.md §3.7.3): the hide-rule pass after every merge. D-S5 (code review
+        // 2026-10-16): in its own short transaction after the merge committed, never inside the merge's transaction, so a
+        // slow rule (ICU cannot be interrupted on Android) never holds the merge. New rows arrive with rule_hidden = 0
+        // (column default); the UPDATE and ON CONFLICT paths above never list rule_hidden, so existing flags survive until
+        // the pass recomputes them. A failing pass does not undo the merge.
+        try {
+            db.writeTransaction { RuleHiddenPass.run(this, playlistId) }
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: RuntimeException) {
+            BoxLog.w(TAG, "hide-rule pass failed for playlist $playlistId: ${e.javaClass.simpleName}")
         }
         BoxLog.i(TAG) {
             "finish playlist=$playlistId batches=$batches newlyMissing=${finish.newlyMissingIds.size} purged=${finish.purgeIds.size} " +

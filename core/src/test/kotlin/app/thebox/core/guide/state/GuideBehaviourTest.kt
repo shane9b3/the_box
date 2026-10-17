@@ -854,4 +854,16 @@ class GuideBehaviourTest {
             assertIs<Overlay.Groups>(w.ui.overlay)
         }
     }
+
+    /** C-S6 (adopted from the core reviewer; §1.1, M3 H-L3): EXIT stops the stream before the app closes. */
+    @Test
+    fun exitStopsPlaybackBeforeTheAppCloses() {
+        val w = GuideWorld()
+        w.press(app.thebox.core.input.BoxAction.EXIT) // "Press Back again to exit"
+        w.press(app.thebox.core.input.BoxAction.BACK)
+        assertTrue(w.exited)
+        val names = w.calls.names()
+        assertTrue("stopPlayback" in names, "EXIT closed the app with the stream still open: ${names.takeLast(5)}")
+        assertTrue(names.lastIndexOf("stopPlayback") < names.lastIndexOf("exitApp"), "the stream stops first")
+    }
 }

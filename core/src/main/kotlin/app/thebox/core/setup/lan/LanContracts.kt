@@ -5,8 +5,11 @@ import kotlinx.coroutines.flow.StateFlow
 
 /** What the phone sent (validated by the server before it reaches the TV UI). */
 sealed interface PhoneSubmission {
-    data class Xtream(val form: app.thebox.core.setup.XtreamForm) : PhoneSubmission
-    data class M3u(val form: app.thebox.core.setup.M3uForm) : PhoneSubmission
+    // C-L14 / D-L2 (code review 2026-10-16): submissions print hosts only (a playlist URL can carry a login).
+    data class Xtream(val form: app.thebox.core.setup.XtreamForm) : PhoneSubmission { override fun toString() = "Xtream($form)" }
+    data class M3u(val form: app.thebox.core.setup.M3uForm) : PhoneSubmission {
+        override fun toString() = "M3u(name=${form.name}, url=${form.url?.let(app.thebox.core.common.Redact::host)}, file=${form.fileUri != null}, epg=${form.epgUrls.size})"
+    }
     /** Any pasted link: the TV normalises it (get.php → Xtream). */
     data class Link(val url: String, val name: String?) : PhoneSubmission
     /** A backup file was uploaded and spooled to [path] (app cache); passphrase follows separately. */
@@ -54,4 +57,8 @@ data class LanBind(val address: String, val preferredPort: Int, val maxConnectio
 fun interface LanHandler { fun handle(request: HttpRequest): HttpResponse }
 data class HttpRequest(val method: String, val path: String, val query: Map<String, String>, val headers: Map<String, String>, val remoteAddress: String, val body: BodySource?)
 interface BodySource { val length: Long; fun copyTo(sink: java.io.OutputStream, max: Long): Long }
-data class HttpResponse(val status: Int, val headers: Map<String, String>, val body: ByteArray? = null, val file: java.io.File? = null)
+/**
+ * [onSent] (D-S2, code review 2026-10-16; additive): runs once the whole response was written (not for HEAD, not when
+ * the connection broke), e.g. to delete a file offered for a single download.
+ */
+data class HttpResponse(val status: Int, val headers: Map<String, String>, val body: ByteArray? = null, val file: java.io.File? = null, val onSent: (() -> Unit)? = null)

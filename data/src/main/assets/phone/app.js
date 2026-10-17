@@ -144,6 +144,7 @@
     else if (r.status === 409) say('The TV is not expecting this right now. Look at the TV.', 'err');
     else if (r.status === 413) say('That is too long.', 'err');
     else if (r.status === 507) say('The TV does not have enough free space for this file.', 'err');
+    else if (r.status === 503) say('The TV is not ready for this yet. Wait a moment, then send it again.', 'err'); // D-L4
     else say(MSG_GENERIC, 'err');
     return false;
   }

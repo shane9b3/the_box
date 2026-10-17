@@ -157,7 +157,7 @@ class GuideStateMachineImpl(
             if (field === value) return
             field = value
             value?.pinGate = this
-            if (value != null && _ui.value.mode == ScreenMode.SETTINGS) value.open(settingsRoute, settingsFromFull)
+            if (value != null && _ui.value.mode == ScreenMode.SETTINGS) value.open(settingsRoute, settingsFromFull, settingsDetached)
         }
 
     /** (M5, WP-C) What the PIN layer asks the host for beyond `GuideEffects.verifyPin` (PIN creation, Open anyway). */
@@ -196,6 +196,8 @@ class GuideStateMachineImpl(
     private var pendingFullReason = EnterReason.USER
     /** (M4, owner ruling 2026-10-15) SETTINGS was opened from the quick bar: BACK returns to FULL. */
     private var settingsFromFull = false
+    /** (C-S1) The open Settings visit is a detached route (an error card's); a late-attached machine opens it so. */
+    private var settingsDetached = false
     /** (M5 commit 0) The route SETTINGS was opened on (FirstRun: BACK exits while the settings machine is missing, S11). */
     private var settingsRoute: SettingsRoute = SettingsRoute.Root
     private var archive: ArchiveStatus? = null
@@ -369,11 +371,18 @@ class GuideStateMachineImpl(
             // M5 commit 0 (docs/design/m5-setup-settings.md §1.9 item 5): OpenSetup opens SETTINGS on its route (the
             // first-run decision sends FirstRun, §3.4.1); setup routes never ask for the PIN.
             is GuideEvent.OpenSetup -> openSettings(event.route)
+            // C-S1: an error card's route opens detached and PIN-free (§3.2.5, S2); BACK returns to FULL.
+            is GuideEvent.OpenSettingsDetached -> openSettings(event.route, detached = true)
             // M5 WP-C (§3.9)
             is GuideEvent.Parental -> onParental(event.state)
             is GuideEvent.PinChecked -> onPinChecked(event.token, event.check)
             is GuideEvent.KeyHints -> { keyHints = event.hints; refreshFooter() }
-            is GuideEvent.Update -> updateCard = event.card?.let { c -> u.update?.let { c.copy(focused = it.focused) } ?: c }
+            is GuideEvent.Update -> {
+                // C-S2: a card that arrives is not focused; it takes keys only after UPDATE_CARD_IDLE_MS without a key.
+                if (updateCard == null && event.card != null) { updateFocused = false; updateIdleFromMs = curMs }
+                updateCard = event.card?.let { c -> updateCard?.let { c.copy(focused = it.focused) } ?: c }
+                if (updateCard == null) updateFocused = false
+            }
         }
     }
 
@@ -381,19 +390,29 @@ class GuideStateMachineImpl(
 
     /** The updater's latest card; shown as [GuideUiState.update] in GUIDE only, never over the PIN prompt or a reminder. */
     private var updateCard: app.thebox.core.update.UpdateCardState? = null
+    /**
+     * C-S2 (§3.12.3): the card takes keys only while focused, and it is focused only once the guide has been idle for
+     * [UPDATE_CARD_IDLE_MS] (no key since [updateIdleFromMs]); a key before then leaves it shown and unfocused, and the
+     * next idle stretch focuses it. While unfocused the card is published with `focused = -1` (no button highlighted).
+     */
+    private var updateFocused = false
+    private var updateIdleFromMs = 0L
 
     private fun refreshUpdate() {
-        val shown = updateCard?.takeIf { u.mode == ScreenMode.GUIDE && u.pin == null && u.reminder == null }
+        val card = updateCard?.takeIf { u.mode == ScreenMode.GUIDE && u.pin == null && u.reminder == null }
+        if (card != null && !updateFocused && curMs - updateIdleFromMs >= UPDATE_CARD_IDLE_MS) updateFocused = true
+        val shown = card?.let { if (updateFocused) it else it.copy(focused = -1) }
         if (u.update != shown) u = u.copy(update = shown)
     }
 
-    /** Keys while the card shows ([app.thebox.core.update.UpdateCardModel]); the guide keeps its focus. */
+    /** Keys while the card shows and is focused ([app.thebox.core.update.UpdateCardModel]); the guide keeps its focus. */
     private fun updateKey(a: GuideEvent.Act): Boolean {
-        val card = u.update ?: return false
+        if (!updateFocused) return false
+        val card = updateCard ?: return false
         return when (val r = app.thebox.core.update.UpdateCardModel.onAction(card, a.action)) {
             is app.thebox.core.update.UpdateCardModel.KeyResult.Moved -> { updateCard = r.card; u = u.copy(update = r.card); true }
             is app.thebox.core.update.UpdateCardModel.KeyResult.Pressed -> {
-                if (r.action != app.thebox.core.update.UpdateAction.UPDATE) { updateCard = null; u = u.copy(update = null) }
+                if (r.action != app.thebox.core.update.UpdateAction.UPDATE) { updateCard = null; updateFocused = false; u = u.copy(update = null) }
                 effects.updateAction(r.action)
                 true
             }
@@ -410,6 +429,8 @@ class GuideStateMachineImpl(
         // H-B2: the card is modal only where it is drawn (GUIDE, FULL); in SEARCH/SETTINGS it waits for the mode to return.
         if (u.reminder != null && cardShown()) { cardKey(a); return }
         if (u.update != null && u.mode == ScreenMode.GUIDE && updateKey(a)) return
+        // C-S2: any other key restarts the update card's idle wait (it stays unfocused while the user browses).
+        updateIdleFromMs = curMs
         if (action != BoxAction.BACK) returnedFromFull = false
         startupFocusPending = false
         pendingReminderHash = 0L
@@ -784,14 +805,16 @@ class GuideStateMachineImpl(
      * (M5 commit 0) [route] Root keeps M4's `effects.openSettings()`; other routes use the overload (§2.12 item 2). The
      * settings machine, when attached, opens on the route (else the `settings` setter opens it on attach, S11).
      */
-    private fun openSettings(route: SettingsRoute = SettingsRoute.Root) {
-        val fromFull = u.mode == ScreenMode.FULL
+    private fun openSettings(route: SettingsRoute = SettingsRoute.Root, detached: Boolean = false) {
+        // C-S1: a detached route is an error card's from FULL; BACK returns there (settingsFromFull) whatever the mode.
+        val fromFull = u.mode == ScreenMode.FULL || detached
         u = u.copy(overlay = null)
         settingsRoute = route
+        settingsDetached = detached
         setMode(ScreenMode.SETTINGS)
         settingsFromFull = fromFull
         if (route == SettingsRoute.Root) effects.openSettings() else effects.openSettings(route)
-        settings?.open(route, fromFull)
+        settings?.open(route, fromFull, detached)
     }
 
     /**
@@ -1181,6 +1204,8 @@ class GuideStateMachineImpl(
     private fun exitApp() {
         u = u.copy(overlay = null)
         exitHintUntil = Long.MAX_VALUE
+        // C-S6 (§1.1, M3 H-L3): EXIT stops the stream and frees its connection slot before the activity finishes.
+        effects.stopPlayback()
         effects.exitApp()
     }
 
@@ -1956,6 +1981,8 @@ class GuideStateMachineImpl(
         }
         if (o is Overlay.Exit && !o.dialog) d = minOf(d, exitHintUntil)
         if (u.groupCard != null) d = minOf(d, groupCardUntil)
+        // C-S2: the update card's focus arrives after the idle wait.
+        if (u.update != null && !updateFocused) d = minOf(d, updateIdleFromMs + UPDATE_CARD_IDLE_MS)
         // (M5) The lockout countdown ticks once a second while the prompt shows it.
         pinLockedUntil?.let { until -> if (u.pin != null) d = minOf(d, minOf(until, (curMs / 1000 + 1) * 1000)) }
         val c = u.reminder
@@ -2306,6 +2333,8 @@ class GuideStateMachineImpl(
 
         val SHORTCUTS = listOf(GroupsShortcut.SEARCH, GroupsShortcut.SETTINGS)
         val GROUP_MENU = listOf(GroupMenuItem.HIDE, GroupMenuItem.MOVE_UP, GroupMenuItem.MOVE_DOWN)
+        /** C-S2 (§3.12.3): the update card takes the focus after this long without a key. */
+        const val UPDATE_CARD_IDLE_MS = 3_000L
         /** (M5) Base for the guide's own SettingsAction tokens (negative: the settings machine counts up from 0). */
         const val GUIDE_ACTION_TOKEN_BASE = -1L
         /** (M5) The player machine's SettingsAction tokens start here; the guide routes their answers to the player. */

@@ -38,6 +38,8 @@ class UpdateCheckSchedulerImpl @Inject constructor(
     private val store: SettingsStore,
     private val gate: StartupGate,
     @ApplicationScope private val scope: CoroutineScope,
+    /** D-L14: no daily worker while the build has no update endpoint (release until §8 Q8). */
+    private val endpoints: UpdateEndpoints,
 ) : UpdateCheckScheduler {
 
     override fun scheduleCheck() {
@@ -45,7 +47,7 @@ class UpdateCheckSchedulerImpl @Inject constructor(
             gate.awaitOpen()
             store.awaitReady()
             val prefs = store.flow(UpdateDomain).value
-            val delay = UpdatePolicy.firstCheckDelayMs(prefs, System.currentTimeMillis())
+            val delay = firstRunDelay(UpdatePolicy.firstCheckDelayMs(prefs, System.currentTimeMillis()), endpoints.current().enabled)
             val wm = WorkManager.getInstance(context)
             if (delay == null) {
                 wm.cancelUniqueWork(WORK)
@@ -68,6 +70,9 @@ class UpdateCheckSchedulerImpl @Inject constructor(
     companion object {
         const val WORK = "update-check"
         const val TAG = "Updater"
+
+        /** D-L14: the worker's first delay, or null (cancel) when checks are off or the endpoint is disabled. */
+        fun firstRunDelay(policyDelayMs: Long?, endpointEnabled: Boolean): Long? = policyDelayMs?.takeIf { endpointEnabled }
     }
 }
 

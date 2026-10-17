@@ -19,7 +19,11 @@ import app.thebox.player.api.PlaybackController
 import app.thebox.player.api.PreviousResult
 import app.thebox.player.api.TuneTarget
 import app.thebox.player.api.ZapList
+import app.thebox.core.settings.SettingsTimings.SETTINGS_LOAD_TIMEOUT_MS
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -75,8 +79,27 @@ class ParentalGuideLibrary(
 class GuardedPlaybackController(
     private val inner: PlaybackController,
     private val guard: TuneGuard,
+    /**
+     * (D-S1, code review 2026-10-16) Where a tune waits for the guard's first load ([TuneGuard.awaitReady], bounded by
+     * `SETTINGS_LOAD_TIMEOUT_MS`) instead of being refused by the fail-closed answer; null = check at once.
+     */
+    private val scope: CoroutineScope? = null,
     private val refused: (ChannelIdentity, TuneVerdict) -> Unit,
 ) : PlaybackController by inner {
+    private var waiting: Job? = null
+
+    /** D-S1: runs [start] once the guard is ready (or the wait timed out); a newer request replaces a waiting one. */
+    private fun whenReady(start: () -> Unit) {
+        waiting?.cancel()
+        waiting = null
+        val s = scope
+        if (guard.ready || s == null) { start(); return }
+        waiting = s.launch {
+            guard.awaitReady(SETTINGS_LOAD_TIMEOUT_MS)
+            waiting = null
+            start()
+        }
+    }
 
     private fun blocked(identity: ChannelIdentity): Boolean {
         val v = guard.check(identity)
@@ -85,8 +108,8 @@ class GuardedPlaybackController(
         return true
     }
 
-    override fun tune(target: TuneTarget, zapList: ZapList?) {
-        if (target is TuneTarget.Channel && blocked(target.identity)) return
+    override fun tune(target: TuneTarget, zapList: ZapList?) = whenReady {
+        if (target is TuneTarget.Channel && blocked(target.identity)) return@whenReady
         inner.tune(target, zapList)
     }
 
@@ -103,8 +126,8 @@ class GuardedPlaybackController(
         return inner.previousChannelResult()
     }
 
-    override fun tuneArchive(tune: ArchiveTune) {
-        if (blocked(tune.identity)) return
+    override fun tuneArchive(tune: ArchiveTune) = whenReady {
+        if (blocked(tune.identity)) return@whenReady
         inner.tuneArchive(tune)
     }
 }

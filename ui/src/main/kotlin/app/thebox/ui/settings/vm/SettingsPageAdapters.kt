@@ -207,6 +207,9 @@ class SectionPagesSource(
         val a = pages.onIntent(route, intent)
         a.notice?.let { _notices.tryEmit(it) }
         a.open?.let { r -> withContext(main) { link()?.push(r) } }
+        // C-S8 (code review 2026-10-16): "Start watching" after a restore, and its PIN offer.
+        if (a.leaveToGuide) withContext(main) { link()?.leaveToGuide() }
+        if (a.setPin) withContext(main) { link()?.requestPinSetup(change = false) }
         return true
     }
 }

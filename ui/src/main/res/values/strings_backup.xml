@@ -114,9 +114,21 @@
     <string name="backup_passphrase_auto">Passphrase for automatic backups</string>
     <string name="backup_passphrase_auto_set">Set</string>
     <string name="backup_passphrase_auto_not_set">Not set</string>
-    <string name="backup_passphrase_auto_desc">With one, weekly backups include logins. Leave the field empty to remove it.</string>
+    <string name="backup_passphrase_auto_desc">With one, weekly backups include logins.</string>
     <string name="backup_passphrase_saved">Passphrase saved. Weekly backups now include logins.</string>
     <string name="backup_passphrase_removed">Passphrase removed. Weekly backups no longer include logins.</string>
+    <!-- C-S7 (code review 2026-10-16) -->
+    <string name="backup_passphrase_remove">Remove the passphrase</string>
+    <string name="backup_passphrase_remove_desc">Weekly backups then leave out your logins.</string>
+    <string name="backup_passphrase_remove_confirm_body">Weekly backups will no longer include logins. You can set a passphrase again at any time.</string>
+    <string name="backup_remove">Remove</string>
+    <!-- C-S8 (code review 2026-10-16) -->
+    <string name="backup_restore_start_watching">Start watching</string>
+    <string name="backup_restore_pin_offer">Set a 4-digit PIN to protect %1$s locked groups</string>
+    <string name="backup_restore_pin_offer_channels">Set a 4-digit PIN to protect the locked channels</string>
+    <string name="backup_restore_pin_offer_body">The backup brought back locks. Without a PIN they only keep content out of the lists; anyone can open it.</string>
+    <string name="backup_restore_pin_set">Set PIN</string>
+    <string name="backup_restore_pin_later">Not now</string>
     <string name="backup_nudge">Keep a copy on your phone</string>
     <string name="backup_nudge_desc">Your last copy off this TV is more than a month old.</string>
     <string name="backup_phone_route_desc">Your phone must be on the same Wi-Fi.</string>

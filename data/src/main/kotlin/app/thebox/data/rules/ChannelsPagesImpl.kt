@@ -205,6 +205,9 @@ class ChannelsPagesImpl @Inject constructor(
         }
     }
 
+    /** C-B2: a PIN is set and the session is not unlocked (Unlock and Reset refuse then, §3.9.2). */
+    private fun lockedSession(): Boolean = parental.state.value.let { it.pinSet && it.access != app.thebox.core.parental.ParentalAccess.OPEN }
+
     /** Live groups (kind 0) lock through `ParentalControls.setGroupLocked` (WP-C); other kinds keep the direct write. */
     private suspend fun lockGroup(pid: Long, kind: Int, groupKey: String, locked: Boolean, now: Long) {
         if (kind == 0 && controls !== app.thebox.core.parental.ParentalControls.NONE) {
@@ -231,8 +234,9 @@ class ChannelsPagesImpl @Inject constructor(
                 ChannelsRows.M_HIDE -> { dao.upsertGroupHidden(pid, kind, groupKey, true, now); PageAction() }
                 ChannelsRows.M_SHOW -> { dao.upsertGroupHidden(pid, kind, groupKey, false, now); PageAction() }
                 ChannelsRows.M_LOCK -> { lockGroup(pid, kind, groupKey, true, now); PageAction() }
-                ChannelsRows.M_UNLOCK -> { lockGroup(pid, kind, groupKey, false, now); PageAction() }
-                ChannelsRows.M_RESET -> { dao.deletePrefs(pid, kind, groupKey); PageAction() }
+                // C-B2 (defence in depth): the menu asks for the PIN first; a locked session never lowers protection here.
+                ChannelsRows.M_UNLOCK -> if (lockedSession()) PageAction.NONE else { lockGroup(pid, kind, groupKey, false, now); PageAction() }
+                ChannelsRows.M_RESET -> if (lockedSession()) PageAction.NONE else { dao.deletePrefs(pid, kind, groupKey); PageAction() }
                 else -> PageAction.NONE // M_MOVE: the machine enters move mode itself (§3.2.2)
             }
             is RowIntent.Move -> {

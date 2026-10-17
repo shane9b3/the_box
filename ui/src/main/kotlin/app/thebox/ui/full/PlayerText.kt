@@ -43,6 +43,8 @@ object PlayerText {
         PlayerToast.ADDED_FAVOURITE -> toastText(res, GuideToast.ADDED_FAVOURITE, arg)
         PlayerToast.REMOVED_FAVOURITE -> toastText(res, GuideToast.REMOVED_FAVOURITE, arg)
         PlayerToast.CHANNEL_HIDDEN -> toastText(res, GuideToast.CHANNEL_HIDDEN, arg)
+        PlayerToast.CHANNEL_LOCKED -> toastText(res, GuideToast.CHANNEL_LOCKED, arg) // U-S10
+        PlayerToast.LOCKED_NOT_PROTECTED -> toastText(res, GuideToast.LOCKED_NOT_PROTECTED, arg) // U-S10
         PlayerToast.CATCHUP_FAILED -> {
             val f = ArchiveFailure.entries.firstOrNull { it.name == arg } ?: ArchiveFailure.NO_ARCHIVE
             res.getString(R.string.toast_reason_step, res.getString(ErrorText.archiveHeadline(f)), res.getString(ErrorText.archiveStep(f)))
@@ -253,6 +255,7 @@ object PlayerText {
         is PickerChoice.Aspect -> res.getString(aspect(c.mode))
         is PickerChoice.Decoder -> res.getString(decoder(c.mode))
         is PickerChoice.Server -> res.getString(R.string.player_picker_server_row, c.index + 1, c.label) // M5 integration
+        PickerChoice.AudioOutputAuto -> res.getString(R.string.error_button_back_to_auto) // U-S12 (row label; phase 2 styles it)
     }
 
     @StringRes fun menuItem(item: ChannelMenuItem): Int = when (item) {

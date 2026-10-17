@@ -18,7 +18,9 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -139,10 +141,22 @@ class TuneGuardImpl @Inject constructor(
 
     override fun check(identity: ChannelIdentity): TuneVerdict = verdict(index, session.state.value, identity)
 
+    override val ready: Boolean get() = index.loaded
+
+    override suspend fun awaitReady(timeoutMs: Long) {
+        index.start()
+        if (index.loaded) return
+        withTimeoutOrNull(timeoutMs) { index.version.first { index.loaded } }
+    }
+
     companion object {
         fun verdict(index: LockedChannelIndex, state: ParentalState, identity: ChannelIdentity): TuneVerdict {
             val access = state.access
-            if (access == ParentalAccess.OPEN || !index.locked(identity, access)) return TuneVerdict.ALLOWED
+            if (access == ParentalAccess.OPEN) return TuneVerdict.ALLOWED
+            // D-S1 (§3.9.6 fail closed): before the lock data loaded once nothing is known to be unlocked.
+            index.start()
+            if (!index.loaded) return TuneVerdict.NEEDS_PIN
+            if (!index.locked(identity, access)) return TuneVerdict.ALLOWED
             if (access == ParentalAccess.FILTERED_NO_PIN) {
                 val g = index.groupOf(identity)
                 return if (g != null && g in state.openedAnyway) TuneVerdict.ALLOWED else TuneVerdict.NOT_PROTECTED

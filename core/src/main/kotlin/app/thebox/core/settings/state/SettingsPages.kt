@@ -87,13 +87,23 @@ interface SettingsShellLink : SettingsPageNavigation {
     fun attachGuide(dispatch: ((GuideEvent) -> Unit)?)
 
     /**
-     * FULL → Settings on [route] (error-card routes, §3.14): the guide enters SETTINGS through its M4 quick-bar path (so
-     * BACK returns to FULL), then the machine opens [route] (detached by default, S2).
+     * FULL → Settings on [route] (error-card routes, §3.14), detached by default (S2). (C-S1, code review 2026-10-16) A
+     * detached route goes through the guide's ungated `GuideEvent.OpenSettingsDetached(route)`, which enters SETTINGS
+     * (BACK returns to FULL) and opens this machine on the route; otherwise the guide's M4 quick-bar path (PIN-gated with
+     * "Lock settings") enters SETTINGS and the machine then opens [route].
      */
     fun openFromFull(route: SettingsRoute, detached: Boolean = true)
 
     /** Pushes [route] on top of the current page (the editor's "Set up from phone", the no-keyboard fallback). */
     override fun push(route: SettingsRoute)
+
+    /**
+     * (U-S6, code review 2026-10-16; additive) As [push], but asks for the PIN first when one is set, like a
+     * `RowKind.Link(needsPin = true)` row: for a page source's own navigation into a gated route (Sync status → Edit
+     * opens `PlaylistSource`, S2). The caller decides when the target is gated (e.g. "Lock settings" on for playlist
+     * edits). The default (test doubles) pushes ungated.
+     */
+    fun pushGated(route: SettingsRoute) = push(route)
 
     /** Shell events for `AppRoot` (toast, announcement, exit). */
     val shellEvents: SharedFlow<SettingsShellEvent>

@@ -28,6 +28,11 @@ data class GuideSourceEntry(
      * OPEN; [count] is then the group's channel count.
      */
     val locked: Boolean = false,
+    /**
+     * (U-S11, code review 2026-10-16; additive) A [locked] entry while access is FILTERED_NO_PIN: no PIN protects it, so
+     * the panels draw the amber `18+` chip instead of the padlock (§3.9.1). Set by `ParentalRules.visibleEntries`.
+     */
+    val notProtected: Boolean = false,
 )
 
 /** Ordered rows of one source. [version] changes whenever the order or membership changes. */

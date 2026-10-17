@@ -32,6 +32,7 @@ import app.thebox.core.settings.SettingsMachineFactory
 import app.thebox.core.settings.SettingsRoute
 import app.thebox.core.settings.SettingsRow
 import app.thebox.core.settings.SettingsUiState
+import app.thebox.core.settings.Visibility
 import app.thebox.core.settings.ChoiceState
 import app.thebox.core.settings.tree.CaptureFlow
 import app.thebox.core.settings.tree.SettingsTree
@@ -103,7 +104,6 @@ class SettingsMachineImpl(
     private var numberPad: NumberPadState? = null
     private var move: MoveState? = null
     private val capture: CaptureState? get() = captureFlow.state
-    private var captureRow: RowId? = null
     private var captureUntilMs = Long.MAX_VALUE
     private var notice: String? = null
     private var noticeUntilMs = Long.MAX_VALUE
@@ -212,9 +212,22 @@ class SettingsMachineImpl(
     override fun attachGuide(dispatch: ((GuideEvent) -> Unit)?) { guideDispatch = dispatch }
 
     override fun openFromFull(route: SettingsRoute, detached: Boolean) {
+        val guide = guideDispatch
+        // C-S1 / U-S8: a detached route (an error card's) enters SETTINGS through the guide's ungated event, which opens
+        // this machine on the route itself (detached, BACK → FULL). The quick-bar event (`OpenSettings`) is PIN-gated
+        // with "Lock settings" on and would open Root instead; opening here as well would open the route twice.
+        if (detached && guide != null) { guide(GuideEvent.OpenSettingsDetached(route)); return }
         // The guide's M4 quick-bar path enters SETTINGS and remembers FULL for BACK; it opens us on Root first.
-        guideDispatch?.invoke(GuideEvent.OpenSettings)
+        guide?.invoke(GuideEvent.OpenSettings)
         open(route, fromFull = true, detached = detached)
+    }
+
+    // U-S6: a navigation from a page source into a gated route (Sync status → Edit) asks for the PIN first, as a
+    // `RowKind.Link(needsPin = true)` row would.
+    override fun pushGated(route: SettingsRoute) {
+        closeOverlays()
+        gated { pushRoute(route) }
+        publish()
     }
 
     override fun push(route: SettingsRoute) {
@@ -253,7 +266,7 @@ class SettingsMachineImpl(
         val dropped = path.subList(i + 1, path.size).toList()
         path = path.subList(0, i + 1)
         for (r in dropped) if (r !in path) forget(r)
-        if (route == SettingsRoute.Root) pane = Pane.SECTIONS else restoreCursor(route)
+        if (route == SettingsRoute.Root) pane = Pane.SECTIONS else restoreCursor(route, entering = false)
         requestDisplayed()
         publish()
     }
@@ -271,7 +284,6 @@ class SettingsMachineImpl(
 
     override fun startCapture(action: BoxAction, press: Press, test: Boolean) {
         closeOverlays()
-        captureRow = null
         armCapture(action, press, test)
         publish()
     }
@@ -400,6 +412,8 @@ class SettingsMachineImpl(
             is RowKind.Item -> when {
                 k.route != null -> pushRoute(k.route)
                 k.primary != null -> emit(RowIntent.Run(row.id), row)
+                // C-S4 (§3.15 d): an item whose actions are all in its menu opens the menu on OK; long OK is an accelerator.
+                k.menu.isNotEmpty() -> menu = MenuState(row.id, k.menu, firstEnabled(k.menu))
                 else -> Unit
             }
         }
@@ -407,11 +421,8 @@ class SettingsMachineImpl(
 
     private fun runAction(row: SettingsRow, k: RowKind.Action) {
         val run = {
-            when {
-                row.id.key.startsWith(CAPTURE_PREFIX) -> startCapture(row.id)
-                k.confirm != null -> confirm = ConfirmState(k.confirm, RowIntent.Run(row.id))
-                else -> emit(RowIntent.Run(row.id), row)
-            }
+            // C-L2: no `capture:` rows any more; a mapping page's Run goes to its source, which calls [startCapture].
+            if (k.confirm != null) confirm = ConfirmState(k.confirm, RowIntent.Run(row.id)) else emit(RowIntent.Run(row.id), row)
         }
         if (k.needsPin) gated(run) else run()
     }
@@ -492,7 +503,13 @@ class SettingsMachineImpl(
                 val opt = m.options.getOrNull(m.focused) ?: return true
                 if (!opt.enabled) return true
                 val row = findRow(m.row) ?: return true
-                if (opt.id == MOVE_OPTION) startMove(row) else emit(RowIntent.Menu(row.id, opt.id), row)
+                val intent = RowIntent.Menu(row.id, opt.id)
+                when {
+                    opt.id == MOVE_OPTION -> startMove(row)
+                    // C-B2 (§3.9.2): a menu option that lowers protection (Unlock, Reset, Edit, Remove) asks for the PIN.
+                    opt.needsPin -> gated { emit(intent, findRow(row.id) ?: row) }
+                    else -> emit(intent, row)
+                }
             }
             BoxAction.BACK -> menu = null
             else -> Unit
@@ -582,7 +599,12 @@ class SettingsMachineImpl(
                     fixTop(page)
                 }
             }
-            BoxAction.BACK -> move = null
+            BoxAction.BACK -> {
+                move = null
+                // C-L5: the lifted row goes back to where it was, and so does the cursor.
+                cursor = m.fromIndex
+                fixTop(page)
+            }
             else -> Unit
         }
         if (act.action == BoxAction.UP || act.action == BoxAction.DOWN) move?.let { cursor = it.index; fixTop(page) }
@@ -604,15 +626,6 @@ class SettingsMachineImpl(
             val k = row?.kind as? RowKind.Text
             if (k != null) replaceRow(ed.row) { it.copy(kind = k.copy(value = e.text)) }
         }
-    }
-
-    /** `capture:<actionId>:<SHORT|LONG>` Action rows start a capture (§3.8.3); OK on Save emits `Menu(row, "bind:<keyCode>")`. */
-    private fun startCapture(row: RowId) {
-        val parts = row.key.removePrefix(CAPTURE_PREFIX).split(':')
-        val action = BoxAction.entries.firstOrNull { it.id == parts.getOrNull(0) } ?: return
-        val press = Press.entries.firstOrNull { it.name == parts.getOrNull(1) } ?: Press.entries.first()
-        captureRow = row
-        armCapture(action, press, test = false)
     }
 
     private fun armCapture(action: BoxAction, press: Press, test: Boolean) {
@@ -641,17 +654,11 @@ class SettingsMachineImpl(
                 captureUntilMs = if (r.on) nowMs() + CAPTURE_TIMEOUT_MS else Long.MAX_VALUE
             }
             is CaptureFlow.Result.Save -> {
-                val row = captureRow
-                captureRow = null
                 captureUntilMs = Long.MAX_VALUE
-                val saved = captureSaved
-                when {
-                    row != null -> emit(RowIntent.Menu(row, BIND_PREFIX + r.key.keyCode), findRow(row))
-                    saved != null -> { changed += EffectTiming.LIVE; saved(r.action, r.key, r.press) }
-                }
+                // C-L2: the one save path (WP-C's mapping source writes `KeyBindingStore.bind`).
+                captureSaved?.let { saved -> changed += EffectTiming.LIVE; saved(r.action, r.key, r.press) }
             }
             is CaptureFlow.Result.Closed -> {
-                captureRow = null
                 if (captureUntilMs != Long.MAX_VALUE) effects.armCapture(false)
                 captureUntilMs = Long.MAX_VALUE
                 if (r.timedOut) showNotice(texts[SettingsText.CAPTURE_TIMED_OUT])
@@ -697,7 +704,7 @@ class SettingsMachineImpl(
             pane = Pane.SECTIONS
             (route as? SettingsRoute.Section)?.let { s -> sections().indexOf(s.id).takeIf { it >= 0 }?.let { sectionCursor = it } }
         } else {
-            restoreCursor(parent)
+            restoreCursor(parent, entering = false)
         }
         requestDisplayed()
         return true
@@ -745,12 +752,15 @@ class SettingsMachineImpl(
         memory[currentRoute()] = rowAt(page, cursor)?.id to cursor
     }
 
-    private fun restoreCursor(route: SettingsRoute) {
+    /** [entering]: the route is being opened (not returned to by BACK), so its own focus row wins (C-L6). */
+    private fun restoreCursor(route: SettingsRoute, entering: Boolean = true) {
         val m = memory[route]
         val page = pages[route]
-        val focus = (route as? SettingsRoute.Playlist)?.focus
+        val focus = (route as? SettingsRoute.Playlist)?.focus?.takeIf { entering || m == null }
+        val focusIndex = if (page != null && focus != null) indexOf(page, focus) else null
         cursor = when {
-            page != null && focus != null && m == null -> indexOf(page, focus) ?: 0
+            focusIndex != null -> focusIndex
+            page != null && focus != null && m == null -> 0
             page != null && m != null -> m.first?.let { indexOf(page, it) } ?: m.second
             m != null -> m.second
             else -> 0
@@ -762,7 +772,10 @@ class SettingsMachineImpl(
 
     // ---------------------------------------------------------------- pages
 
-    private fun onPage(page: PageModel) {
+    private fun onPage(incoming: PageModel) {
+        // U-S3: a page that lands after Settings closed (a slow build) is dropped; the next visit asks again.
+        if (!visitOpen) return
+        val page = if (advanced) incoming else simpleView(incoming)
         val old = pages[page.route]
         if (old != null && old.version > page.version) return
         val keepRows = listRows[page.route]
@@ -775,9 +788,10 @@ class SettingsMachineImpl(
         val prevFocus = if (displayed == page.route && old != null) rowAt(old, cursor)?.id else null
         pages[page.route] = page
         while (pages.size > PAGE_CACHE) {
-            val eldest = pages.keys.first { it != displayed && it !in path }
+            // C-B1: the open path's pages are kept (§5 item 6 "plus the open path"); with four or more on the path there
+            // is nothing to evict, which is not an error.
+            val eldest = pages.keys.firstOrNull { it != displayed && it !in path } ?: break
             pages.remove(eldest); listRows.remove(eldest); requested.remove(eldest)
-            if (pages.keys.all { it == displayed || it in path }) break
         }
         if (displayed != page.route) return
         // A MultiChoice list keeps its working selection on top of the rebuilt row.
@@ -787,8 +801,9 @@ class SettingsMachineImpl(
             prevFocus != null -> indexOf(pub, prevFocus) ?: cursor
             old == null && pane == Pane.PAGE -> {
                 val m = memory[page.route]
+                // C-L6: a route that names a row (an error card's) wins over the cursor memory of an earlier visit.
                 val focus = (page.route as? SettingsRoute.Playlist)?.focus
-                m?.first?.let { indexOf(pub, it) } ?: m?.second ?: focus?.let { indexOf(pub, it) } ?: cursor
+                focus?.let { indexOf(pub, it) } ?: m?.first?.let { indexOf(pub, it) } ?: m?.second ?: cursor
             }
             else -> cursor
         }
@@ -802,6 +817,16 @@ class SettingsMachineImpl(
         if (menu != null && findRow(menu!!.row) == null) menu = null
         if (move != null && findRow(move!!.row) == null) move = null
         requestItemsAround(pub)
+    }
+
+    /**
+     * C-S5 (§3.2.3): with "Show advanced settings" off, ADVANCED rows are absent from every page, whoever built it (WP-B's
+     * Playlist page builds them all). The route's own focus row stays: error-card routes target advanced rows (§3.14).
+     */
+    private fun simpleView(page: PageModel): PageModel {
+        if (page.rows.none { it.visibility == Visibility.ADVANCED }) return page
+        val keep = (page.route as? SettingsRoute.Playlist)?.focus
+        return page.copy(rows = page.rows.filter { it.visibility != Visibility.ADVANCED || it.id == keep })
     }
 
     private fun onItems(e: SettingsEvent.Items) {
@@ -983,10 +1008,6 @@ class SettingsMachineImpl(
         val ADVANCED_ROW = RowId("settings.advanced")
         /** A context-menu option with this id enters move mode instead of emitting `RowIntent.Menu` (§3.2.2). */
         const val MOVE_OPTION = "move"
-        /** Action rows whose id is `capture:<BoxAction.id>:<Press.name>` start a key capture (§3.8.3). */
-        const val CAPTURE_PREFIX = "capture:"
-        /** A finished capture emits `RowIntent.Menu(row, "bind:<keyCode>")` on OK. */
-        const val BIND_PREFIX = "bind:"
 
         /** `NOTICE_MS` (Appendix B). */
         const val NOTICE_MS = 3_000L

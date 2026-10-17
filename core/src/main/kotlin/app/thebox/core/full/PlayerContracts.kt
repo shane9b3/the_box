@@ -74,6 +74,11 @@ data class TrackMenu(
     /** (M5 integration 2026-10-16, E23) The tune's servers (`host[:port]` labels; ≥ 2 offers Sources) and the one in use. */
     val servers: List<String> = emptyList(),
     val server: Int = 0,
+    /**
+     * (U-S12, code review 2026-10-16; additive) `playback.audioOutput` is "Always passthrough": the AUDIO picker offers
+     * [PickerChoice.AudioOutputAuto] ("Back to Auto", B2) after the tracks. The host fills it from `PlaybackSettings`.
+     */
+    val audioOutputForced: Boolean = false,
 )
 
 /** What the player machine needs from :player's VideoInfo. */
@@ -257,6 +262,11 @@ sealed interface PickerChoice {
     data class Decoder(val mode: VideoDecoderMode?) : PickerChoice
     /** (M5 integration 2026-10-16, E23 / WP-C amendment) Base URL [index] of the tune, labelled `host[:port]`. */
     data class Server(val index: Int, val label: String) : PickerChoice
+    /**
+     * (U-S12, code review 2026-10-16; additive) "Back to Auto": the last AUDIO row while [TrackMenu.audioOutputForced];
+     * OK runs [PlayerEffects.audioOutputAuto].
+     */
+    data object AudioOutputAuto : PickerChoice
 }
 
 /**
@@ -319,6 +329,11 @@ enum class PlayerToast {
     ADDED_FAVOURITE, REMOVED_FAVOURITE, CHANNEL_HIDDEN,
     /** arg = ArchiveFailure.name. */
     CATCHUP_FAILED,
+    /**
+     * (U-S10, code review 2026-10-16; append-only) Lock from the channel list: "Channel locked" with a PIN, the B3 "not
+     * protected" wording without one (the texts of `GuideToast.CHANNEL_LOCKED` / `LOCKED_NOT_PROTECTED`).
+     */
+    CHANNEL_LOCKED, LOCKED_NOT_PROTECTED,
 }
 
 /** Inputs other than keys. All on main. */
@@ -358,8 +373,7 @@ sealed interface PlayerEvent {
     data class Parental(val state: app.thebox.core.parental.ParentalState) : PlayerEvent
     /** The answer to a PIN the player machine asked for through its [PlayerStateMachine.pinGate]. */
     data class PinResult(val purpose: app.thebox.core.parental.PinPurpose, val granted: Boolean) : PlayerEvent
-    /** Keys bound to each action (EffectiveKeyMap), for hints in the player's bars. */
-    data class KeyHints(val hints: Map<app.thebox.core.input.BoxAction, List<Int>>) : PlayerEvent
+    // (U-L18, code review 2026-10-16) `KeyHints` removed: the player machine stored it and never read it.
 }
 
 /** Side effects; implemented by :ui's PlayerEffectsImpl (WP-D). Main-safe, non-blocking. */
@@ -404,6 +418,11 @@ interface PlayerEffects {
     fun setChannelLocked(channel: GuideChannel, locked: Boolean) = Unit
     /** (M5 integration 2026-10-16, E23 / WP-C amendment) The Sources picker: play the current tune from base [index]. */
     fun selectServer(index: Int) = Unit
+    /**
+     * (U-S12, code review 2026-10-16; additive) The AUDIO picker's "Back to Auto": `playback.audioOutput = AUTO` and a
+     * re-prepare, the same path as the AUDIO_OUTPUT_FAILED card's [ErrorButton.BACK_TO_AUTO].
+     */
+    fun audioOutputAuto() = Unit
     // Data
     fun loadProgrammes(token: Long, channel: GuideChannel, aroundMin: Int, before: Int, after: Int)
     fun loadChannel(token: Long, from: GuideChannel, delta: Int)

@@ -11,7 +11,113 @@ package app.thebox.core.text
  * (`ChannelNamePrefixImpl`, G-L19) and its editor (WP-B's playlist page) apply the same check as WP-D's hide rules.
  */
 object RegexSafety {
-    fun isRisky(pattern: String): Boolean {
+    /**
+     * D-S5 (code review 2026-10-16): more unbounded quantifiers than this in one pattern are refused (each one multiplies
+     * the work of a failing match on Android's uninterruptible ICU).
+     */
+    const val MAX_UNBOUNDED = 4
+
+    fun isRisky(pattern: String): Boolean = isNested(pattern) || isPolynomial(pattern)
+
+    /**
+     * D-S5 (code review 2026-10-16): polynomial backtracking without a quantified group: two unbounded quantifiers
+     * (`*`, `+`, `{n,}`) on overlapping atoms directly in sequence (`.*.*`, `\w+\w*`, `a*a+`, `[a-z]+.*`), or more than
+     * [MAX_UNBOUNDED] unbounded quantifiers in total. Conservative: a character class overlaps everything.
+     */
+    fun isPolynomial(pattern: String): Boolean {
+        var unbounded = 0
+        var prev: Char? = null // the atom of the previous token when it was unbounded-quantified ('.' dot, '[' class, 'w' …)
+        var prevEscaped = false
+        var i = 0
+        while (i < pattern.length) {
+            val c = pattern[i]
+            // One atom: its kind and where it ends.
+            var atom: Char? = null
+            var escaped = false
+            var end = i + 1
+            when (c) {
+                '\\' -> { atom = pattern.getOrNull(i + 1); escaped = true; end = i + 2 }
+                '[' -> {
+                    var j = i + 1
+                    if (pattern.getOrNull(j) == '^') j++
+                    if (pattern.getOrNull(j) == ']') j++
+                    while (j < pattern.length && pattern[j] != ']') { if (pattern[j] == '\\') j++; j++ }
+                    atom = '['; end = j + 1
+                }
+                '(', ')', '|', '^', '$' -> {
+                    // Group edges and anchors break a sequence; a quantified group still counts toward the total.
+                    if (c == ')' && pattern.getOrNull(i + 1)?.let { quantifierAt(pattern, i + 1) } == true) unbounded++
+                    prev = null
+                    i = if (c == ')' ) skipQuantifier(pattern, i + 1) else i + 1
+                    if (c == '(' && pattern.getOrNull(i) == '?') { i++; while (i < pattern.length && pattern[i] != ':' && pattern[i] != '>' && pattern[i] != ')') i++; if (pattern.getOrNull(i) == ':' || pattern.getOrNull(i) == '>') i++ }
+                    continue
+                }
+                '*', '+', '?', '{' -> { i++; continue } // a stray quantifier (already counted with its atom)
+                else -> atom = c
+            }
+            val unboundedHere = quantifierAt(pattern, end)
+            if (unboundedHere) {
+                unbounded++
+                if (unbounded > MAX_UNBOUNDED) return true
+                val p0 = prev
+                if (p0 != null && atom != null && overlaps(p0, prevEscaped, atom, escaped)) return true
+                prev = atom; prevEscaped = escaped
+            } else {
+                prev = null
+            }
+            i = skipQuantifier(pattern, end)
+        }
+        return false
+    }
+
+    /** True when an unbounded quantifier (`*`, `+`, `{n,}`) starts at [at]. */
+    private fun quantifierAt(p: String, at: Int): Boolean = when (p.getOrNull(at)) {
+        '*', '+' -> true
+        '{' -> p.substring(at + 1).substringBefore('}').let { body -> ',' in body && body.substringAfter(',').isBlank() }
+        else -> false
+    }
+
+    /** Index after a quantifier at [at] (and its lazy/possessive suffix), or [at] when none. */
+    private fun skipQuantifier(p: String, at: Int): Int {
+        var i = at
+        when (p.getOrNull(i)) {
+            '*', '+', '?' -> i++
+            '{' -> { val close = p.indexOf('}', i); if (close < 0) return i; i = close + 1 }
+            else -> return i
+        }
+        if (p.getOrNull(i) == '?' || p.getOrNull(i) == '+') i++
+        return i
+    }
+
+    /** Whether two atoms can match the same character (conservative). */
+    private fun overlaps(a: Char, aEsc: Boolean, b: Char, bEsc: Boolean): Boolean {
+        fun kind(c: Char, esc: Boolean): String = when {
+            !esc && c == '.' -> "any"
+            !esc && c == '[' -> "any"
+            esc && c in "wWsSdD" -> c.toString()
+            else -> "lit"
+        }
+        val ka = kind(a, aEsc)
+        val kb = kind(b, bEsc)
+        if (ka == "any" || kb == "any") return true
+        if (ka == "lit" && kb == "lit") return a == b
+        fun litIn(l: Char, cls: String): Boolean = when (cls) {
+            "w" -> l.isLetterOrDigit() || l == '_'
+            "W" -> !(l.isLetterOrDigit() || l == '_')
+            "s" -> l.isWhitespace()
+            "S" -> !l.isWhitespace()
+            "d" -> l.isDigit()
+            "D" -> !l.isDigit()
+            else -> true
+        }
+        if (ka == "lit") return litIn(a, kb)
+        if (kb == "lit") return litIn(b, ka)
+        // Two shorthand classes: only the complementary pairs and \d / \s, \w / \s are disjoint.
+        val disjoint = setOf("wW", "Ww", "sS", "Ss", "dD", "Dd", "ds", "sd", "ws", "sw")
+        return (ka + kb) !in disjoint
+    }
+
+    private fun isNested(pattern: String): Boolean {
         // Per open group: whether it contains a quantifier or an alternation.
         val quant = ArrayList<Boolean>()
         val alt = ArrayList<Boolean>()

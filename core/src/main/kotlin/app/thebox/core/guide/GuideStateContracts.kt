@@ -135,6 +135,12 @@ sealed interface GuideEvent {
     // M5 (docs/design/m5-setup-settings.md §2.12 item 2)
     /** Startup's first-run decision (§3.4.1) and other setup entries: mode SETTINGS on [route] (FirstRun: Back exits). */
     data class OpenSetup(val route: app.thebox.core.settings.SettingsRoute) : GuideEvent
+    /**
+     * (C-S1 / U-S8, code review 2026-10-16; additive) An error card's Settings route from FULL (§3.2.5, S2): mode
+     * SETTINGS with no PIN for the route itself, the settings machine opened on [route] detached, BACK returns to FULL.
+     * `SettingsShellLink.openFromFull` sends it instead of the PIN-gated [OpenSettings].
+     */
+    data class OpenSettingsDetached(val route: app.thebox.core.settings.SettingsRoute) : GuideEvent
     data class Parental(val state: app.thebox.core.parental.ParentalState) : GuideEvent
     /** Answer to [GuideEffects.verifyPin]. */
     data class PinChecked(val token: Long, val check: app.thebox.core.parental.PinCheck) : GuideEvent

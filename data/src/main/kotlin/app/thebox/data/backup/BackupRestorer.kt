@@ -74,6 +74,9 @@ internal class BackupRestorer(
         val carriedLocks: Boolean,
         /** Credential refs replaced by this restore: deleted after the commit. */
         val oldRefs: List<String>,
+        /** C-S8: uids of the backup's playlists that carried a group or channel lock, and the locked groups among them. */
+        val lockedUids: Set<String> = emptySet(),
+        val lockedGroups: Int = 0,
     )
 
     fun scan(file: File): Scan {
@@ -107,9 +110,9 @@ internal class BackupRestorer(
     }
 
     /** Decrypts the logins; throws [BackupCryptoException] (WRONG_PASSPHRASE / CORRUPT_SECRETS). */
-    fun openSecrets(scan: Scan, passphrase: CharArray): Map<String, PlaylistSecret> {
+    fun openSecrets(scan: Scan, passphrase: CharArray, isActive: () -> Boolean = { true }): Map<String, PlaylistSecret> {
         val s = scan.secrets ?: return emptyMap()
-        val plain = BackupCrypto.open(s, passphrase, scan.headerBytes)
+        val plain = BackupCrypto.open(s, passphrase, scan.headerBytes, isActive)
         try {
             return BackupJson.decodeFromString(BackupExporter.SECRETS_SERIALIZER, plain.decodeToString())
         } catch (e: SerializationException) {
@@ -143,7 +146,9 @@ internal class BackupRestorer(
         }
         val secrets: Map<String, PlaylistSecret>? = if (scan.secrets != null && passphrase != null && passphrase.isNotEmpty()) {
             try {
-                openSecrets(scan, passphrase)
+                // C-L9: a cancelled restore stops the key derivation.
+                val ctx = kotlin.coroutines.coroutineContext
+                openSecrets(scan, passphrase) { ctx[kotlinx.coroutines.Job]?.isActive != false }
             } catch (e: BackupCryptoException) {
                 return RestoreResult.Failed(e.failure) to null
             }
@@ -166,10 +171,13 @@ internal class BackupRestorer(
             val applied = importMutex.withLock {
                 db.writeTransaction { apply(this, file, scan, matches, refFor, mode) }
             }
+            // D-S4 (§3.10.4 step 5): the settings documents go live only now that the transaction committed.
+            store.commitImport(committed = true)
             // Old refs of playlists that got a new login go once the transaction committed.
             for (r in applied.oldRefs) creds.delete(r)
             return applied.result to applied
         } catch (e: Exception) {
+            store.commitImport(committed = false) // D-S4: rolled back, so nothing of the backup reaches memory
             if (e is kotlinx.coroutines.CancellationException) {
                 for (r in written) creds.delete(r)
                 throw e
@@ -246,6 +254,8 @@ internal class BackupRestorer(
         // Pass 3: every keyed record, streamed again.
         var rows = 0
         var carriedLocks = false
+        val lockedUids = HashSet<String>()
+        var lockedGroups = 0
         val listIdOf = HashMap<String, Long>()
         val problems = HashSet<String>()
         FileInputStream(file).use { input ->
@@ -265,7 +275,7 @@ internal class BackupRestorer(
                             if (rec.locked == null) bindNull(5) else bindBool(5, rec.locked!!)
                             bindIntOrNull(6, rec.sortIndex); bindTextOrNull(7, rec.customName); bindLong(8, now)
                         }
-                        if (rec.locked == true) carriedLocks = true
+                        if (rec.locked == true) { carriedLocks = true; lockedUids += rec.playlistUid; lockedGroups++ }
                         rows++
                     }
                     is BackupRecord.ChannelPref -> {
@@ -281,7 +291,7 @@ internal class BackupRestorer(
                                 bindLong(names.size + 1, now); bindLong(names.size + 2, pid); bindText(names.size + 3, rec.stableKey)
                             }
                         }
-                        if ((fields["locked"] as? JsonPrimitive)?.let { it.booleanOrNull ?: (it.longOrNull == 1L) } == true) carriedLocks = true
+                        if ((fields["locked"] as? JsonPrimitive)?.let { it.booleanOrNull ?: (it.longOrNull == 1L) } == true) { carriedLocks = true; lockedUids += rec.playlistUid }
                         rows++
                     }
                     is BackupRecord.FavouriteList -> {
@@ -360,7 +370,7 @@ internal class BackupRestorer(
         // Settings last, inside this transaction (§3.10.4; the store cancels pending writes of the domains it replaces).
         store.importInTransaction(scan.settings, replace = mode == RestoreMode.REPLACE)
 
-        return Applied(RestoreResult.Done(added, updated, rows, logins, needsLogin), newIds, relogin, affected, carriedLocks, oldRefs)
+        return Applied(RestoreResult.Done(added, updated, rows, logins, needsLogin), newIds, relogin, affected, carriedLocks, oldRefs, lockedUids, lockedGroups)
     }
 
     private suspend fun clearUserRows(conn: PooledConnection, playlistIds: List<Long>) {

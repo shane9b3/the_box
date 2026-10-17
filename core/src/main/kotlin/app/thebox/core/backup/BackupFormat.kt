@@ -12,8 +12,12 @@ const val AUTO_BACKUP_KEEP = 4
 const val BACKUP_NUDGE_DAYS = 30
 /** The only KDF this version writes; the name and the iteration count travel in the `Secrets` record (S15). */
 const val BACKUP_KDF_NAME = "PBKDF2-HMAC-SHA256"
-/** A file asking for more is refused as CORRUPT_SECRETS (a crafted file must not hang the TV). */
-const val BACKUP_KDF_MAX_ITERATIONS = 5_000_000
+/**
+ * A file asking for more is refused as CORRUPT_SECRETS (a crafted file must not hang the TV). (C-L9 = D-L10, code review
+ * 2026-10-16) 10 × [BACKUP_KDF_ITERATIONS]: about 4–8 s on the emulator instead of a minute; the M6 pure-Java HMAC may
+ * raise both together.
+ */
+const val BACKUP_KDF_MAX_ITERATIONS = 500_000
 
 /**
  * The `backup` settings domain (§2.2: device-bound, never backed up). WP-A's domain registry should reference this

@@ -1,14 +1,11 @@
 package app.thebox.ui.full.vm
 
 import app.thebox.core.parental.legacyParentalAccess
-import app.thebox.core.input.KeyBindingStore
-import app.thebox.core.input.KeyContext
 import app.thebox.core.parental.ParentalSession
 import app.thebox.core.parental.PinOwner
 import app.thebox.core.parental.PinPurpose
 import app.thebox.core.playback.TuneGuard
 import app.thebox.ui.parental.GuardedPlaybackController
-import app.thebox.ui.parental.NoKeyBindings
 import app.thebox.ui.parental.NoPinSession
 import app.thebox.ui.parental.ParentalGuideLibrary
 import android.content.Context
@@ -125,14 +122,13 @@ class PlayerViewModel @Inject constructor(
     // M5 WP-C (docs/design/m5-setup-settings.md §3.9; S10, B1)
     private val parental: ParentalSession = NoPinSession,
     tuneGuard: TuneGuard = TuneGuard.ALLOW_ALL,
-    private val keyBindings: KeyBindingStore = NoKeyBindings,
 ) : ViewModel(), PlayerHost, PlayerGuideBridge, app.thebox.ui.full.PlayerExtras {
 
     /**
      * (M5, B1) The player's effects tune through the guard: a refused channel-list tune or previous channel opens the
      * guide's PIN prompt with `Tune(channel, PLAYER)`; on success the player machine tunes it ([PlayerEvent.PinResult]).
      */
-    internal val controller: PlaybackController = GuardedPlaybackController(rawController, tuneGuard) { id, _ -> onRefused(id) }
+    internal val controller: PlaybackController = GuardedPlaybackController(rawController, tuneGuard, viewModelScope) { id, _ -> onRefused(id) }
 
     /** (M5, S10) The library with the session's access in every query; flows restart when it changes. */
     internal val library: GuideLibrary = ParentalGuideLibrary(rawLibrary, parental)
@@ -312,11 +308,9 @@ class PlayerViewModel @Inject constructor(
             }
         }
         scope.launch { controller.notices.collect(::onNotice) }
-        // M5 (§3.9): the session for the channel list's doors and the lock menu; key hints for the player's bars.
+        // M5 (§3.9): the session for the channel list's doors and the lock menu. (U-L18) No key hints: the player's bars
+        // never read them (the design's hint row follows key availability; nothing in the player draws one yet).
         scope.launch { parental.state.collect { machine.dispatch(PlayerEvent.Parental(it)) } }
-        scope.launch {
-            keyBindings.overrides.collect { o -> machine.dispatch(PlayerEvent.KeyHints(GuideViewModel.keyHints(ALL_KEYS, o, KeyContext.PLAYER))) }
-        }
         scope.launch {
             archive.notices.collect { n ->
                 when (n) {
@@ -508,8 +502,6 @@ class PlayerViewModel @Inject constructor(
         const val CHANNEL_CACHE = 64
         /** A LiveResumed this soon after the archive session was active belongs to it (§3.10.2). */
         const val LIVE_RESUMED_GRACE_MS = 3_000L
-        /** Every key code: the player has no "seen" filter of its own (the bars hint whatever is bound). */
-        private val ALL_KEYS: Set<Int> = (0..300).toSet()
         /** Focus changes in the info bar settle this long before the synopsis is read. */
         const val DETAIL_DEBOUNCE_MS = 150L
     }

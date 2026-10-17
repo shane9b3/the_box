@@ -31,8 +31,14 @@ object BackupCrypto {
 
     private val b64 = Base64.Default
 
-    /** RFC 8018 PBKDF2 with HMAC-SHA256 as the PRF. */
-    fun pbkdf2(password: ByteArray, salt: ByteArray, iterations: Int, dkLen: Int): ByteArray {
+    /** C-L9: [isActive] is asked every this many iterations; false stops the loop (CancellationException). */
+    const val KDF_CHECK_EVERY = 1_000
+
+    /**
+     * RFC 8018 PBKDF2 with HMAC-SHA256 as the PRF. (C-L9) [isActive] is checked every [KDF_CHECK_EVERY] iterations, so a
+     * cancelled restore stops deriving at once instead of finishing a long loop.
+     */
+    fun pbkdf2(password: ByteArray, salt: ByteArray, iterations: Int, dkLen: Int, isActive: () -> Boolean = { true }): ByteArray {
         require(iterations >= 1 && dkLen >= 1)
         val mac = Mac.getInstance("HmacSHA256")
         // An empty password is legal in PBKDF2 but SecretKeySpec refuses an empty key; HMAC pads a short key with zeros.
@@ -48,6 +54,10 @@ object BackupCrypto {
             mac.doFinal(u, 0)
             u.copyInto(t)
             for (j in 1 until iterations) {
+                if (j % KDF_CHECK_EVERY == 0 && !isActive()) {
+                    u.fill(0); t.fill(0); out.fill(0)
+                    throw kotlinx.coroutines.CancellationException("key derivation cancelled")
+                }
                 mac.update(u, 0, hLen)
                 mac.doFinal(u, 0)
                 for (k in 0 until hLen) t[k] = (t[k].toInt() xor u[k].toInt()).toByte()
@@ -68,10 +78,10 @@ object BackupCrypto {
         return out
     }
 
-    fun deriveKey(passphrase: CharArray, salt: ByteArray, iterations: Int): ByteArray {
+    fun deriveKey(passphrase: CharArray, salt: ByteArray, iterations: Int, isActive: () -> Boolean = { true }): ByteArray {
         val pw = utf8(passphrase)
         try {
-            return pbkdf2(pw, salt, iterations, KEY_BYTES)
+            return pbkdf2(pw, salt, iterations, KEY_BYTES, isActive)
         } finally {
             pw.fill(0)
         }
@@ -100,7 +110,7 @@ object BackupCrypto {
     }
 
     /** Decrypts; [RestoreFailure.WRONG_PASSPHRASE] on a tag failure (wrong passphrase or tampering), CORRUPT_SECRETS otherwise. */
-    fun open(secrets: BackupRecord.Secrets, passphrase: CharArray, headerLine: ByteArray): ByteArray {
+    fun open(secrets: BackupRecord.Secrets, passphrase: CharArray, headerLine: ByteArray, isActive: () -> Boolean = { true }): ByteArray {
         if (secrets.kdf != BACKUP_KDF_NAME) throw BackupCryptoException(RestoreFailure.CORRUPT_SECRETS, "unknown kdf")
         if (secrets.iterations !in 1..BACKUP_KDF_MAX_ITERATIONS) throw BackupCryptoException(RestoreFailure.CORRUPT_SECRETS, "iterations out of range")
         val salt: ByteArray
@@ -116,7 +126,7 @@ object BackupCrypto {
         if (salt.size != SALT_BYTES || nonce.size != NONCE_BYTES || ct.size < TAG_BITS / 8) {
             throw BackupCryptoException(RestoreFailure.CORRUPT_SECRETS, "bad sizes")
         }
-        val key = deriveKey(passphrase, salt, secrets.iterations)
+        val key = deriveKey(passphrase, salt, secrets.iterations, isActive)
         try {
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
             cipher.init(Cipher.DECRYPT_MODE, SecretKeySpec(key, "AES"), GCMParameterSpec(TAG_BITS, nonce))

@@ -81,4 +81,24 @@ class BackupCryptoTest {
             assertFailsWith<BackupCryptoException> { BackupCrypto.open(s.copy(iterations = BACKUP_KDF_MAX_ITERATIONS + 1), pass, header) }.failure,
         )
     }
+
+    /** C-L9 = D-L10 (M5 code review 2026-10-16): a file asking for more than 10 × the default iterations is refused. */
+    @Test
+    fun kdfIterationsAreCappedAtTenTimesTheDefault() {
+        assertEquals(10 * BACKUP_KDF_ITERATIONS, BACKUP_KDF_MAX_ITERATIONS)
+        val header = "h".encodeToByteArray()
+        val sealed = BackupCrypto.seal("x".encodeToByteArray(), "fake-passphrase".toCharArray(), header, iterations = 10)
+        val e = assertFailsWith<BackupCryptoException> { BackupCrypto.open(sealed.copy(iterations = BACKUP_KDF_MAX_ITERATIONS + 1), "fake-passphrase".toCharArray(), header) }
+        assertEquals(RestoreFailure.CORRUPT_SECRETS, e.failure)
+    }
+
+    /** C-L9: a cancelled derivation stops inside the loop (checked every KDF_CHECK_EVERY iterations). */
+    @Test
+    fun derivationStopsWhenCancelled() {
+        var asked = 0
+        assertFailsWith<kotlinx.coroutines.CancellationException> {
+            BackupCrypto.pbkdf2("p".encodeToByteArray(), ByteArray(16), 1_000_000, 32) { asked++; asked < 3 }
+        }
+        assertEquals(3, asked, "stopped at the third check, not after a million iterations")
+    }
 }

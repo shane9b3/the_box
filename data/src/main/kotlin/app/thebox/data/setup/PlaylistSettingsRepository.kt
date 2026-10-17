@@ -361,6 +361,16 @@ class PlaylistSettingsRepository @Inject constructor(
         const val SINGLE_DIR = "playlists"
         private const val NAME_MAX = 80
 
-        fun isSecretHeader(name: String): Boolean = name.equals("Authorization", true) || name.equals("Cookie", true) || name.equals("Proxy-Authorization", true)
+        /**
+         * Headers kept with the login (sealed in backups, never in `extra_headers_json`). (D-L1, code review 2026-10-16)
+         * Any name that mentions auth, token, key or session counts (`X-Api-Key`, `X-Auth-Token`, `Session-Id`), beside
+         * Cookie; a false positive only keeps a harmless header out of a backup without a passphrase.
+         */
+        fun isSecretHeader(name: String): Boolean {
+            val n = name.lowercase()
+            return n == "cookie" || SECRET_HEADER_WORDS.any { it in n }
+        }
+
+        private val SECRET_HEADER_WORDS = listOf("auth", "token", "key", "session")
     }
 }

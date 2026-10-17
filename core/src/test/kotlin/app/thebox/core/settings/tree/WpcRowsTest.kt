@@ -60,7 +60,8 @@ class WpcRowsTest {
         val p = ParentalRows.page(state(pin = true, unlocked = true), texts, 1, advanced = true)
         val rows = p.rows.associateBy { it.id }
         assertEquals(ParentalRows.T.CHANGE_PIN, rows.getValue(ParentalRows.PIN).label)
-        assertTrue((rows.getValue(ParentalRows.PIN).kind as RowKind.Action).needsPin)
+        // C-S3: Change PIN is a plain action; the CreatePin(change) flow verifies once.
+        assertTrue(!(rows.getValue(ParentalRows.PIN).kind as RowKind.Action).needsPin)
         assertEquals(ParentalRows.T.ON, rows.getValue(ParentalRows.AUTO_LOCK).value)
         assertTrue(rows.getValue(ParentalRows.LOCK_SETTINGS).enabled)
         assertNotNull(rows[ParentalRows.LOCK_NOW])

@@ -38,7 +38,8 @@ import javax.inject.Singleton
 /**
  * The parental session (docs/design/m5-setup-settings.md §2.6, §3.9.1, §3.9.5, §3.9.6; reviewed B1, B3, S8).
  *
- * [state] = the PIN's presence ([ParentalPinStoreImpl.pinSet]; unknown counts as none, which filters), the policy (the
+ * [state] = the PIN's presence ([ParentalPinStoreImpl.pinSet]; D-S1: while unknown it is published as set and locked,
+ * so access is LOCKED_* and every lock holds until the first read lands), the policy (the
  * `parental` settings domain), `unlocked`, `pinLostToKeyReset` ([KeyResetFlag]) and `openedAnyway`.
  *
  * Stay unlocked: **Until The Box closes** relocks on app stop; **1 hour** at unlock + 60 min or app stop; **Ask every
@@ -64,11 +65,14 @@ class ParentalSessionImpl @Inject constructor(
     @IoDispatcher private val io: CoroutineDispatcher,
 ) : ParentalSession, ParentalControls {
 
-    private val _state = MutableStateFlow(ParentalState(pinSet = false, unlocked = false, policy = ParentalPolicy()))
+    // D-S1: the PIN's presence is unknown until the first read; fail closed (a PIN, locked) until then.
+    private val _state = MutableStateFlow(ParentalState(pinSet = true, unlocked = false, policy = ParentalPolicy()))
     override val state: StateFlow<ParentalState> = _state.asStateFlow()
 
     private val lock = Any()
     private var pinSet = false
+    /** D-S1: false until [ParentalPinStoreImpl.pinSet] reported a definite answer. */
+    private var pinKnown = false
     private var policy = ParentalPolicy()
     private var pinLost = false
     private var unlocked = false
@@ -89,6 +93,7 @@ class ParentalSessionImpl @Inject constructor(
                 synchronized(lock) {
                     if (pinSet && !now) unlocked = false // the PIN went away (removed, or lost to a key reset)
                     pinSet = now
+                    pinKnown = set != null
                 }
                 publish()
             }
@@ -132,10 +137,11 @@ class ParentalSessionImpl @Inject constructor(
     private fun publish() {
         val s = synchronized(lock) {
             ParentalState(
-                pinSet = pinSet,
-                unlocked = unlocked && pinSet,
+                // D-S1: an unknown PIN is published as set and locked (LOCKED_*), never as OPEN.
+                pinSet = pinSet || !pinKnown,
+                unlocked = unlocked && pinSet && pinKnown,
                 policy = policy,
-                pinLostToKeyReset = pinLost && !pinSet,
+                pinLostToKeyReset = pinLost && !pinSet && pinKnown,
                 openedAnyway = openedAnyway,
             )
         }
@@ -215,10 +221,24 @@ class ParentalSessionImpl @Inject constructor(
         }
     }
 
-    /** Group menu Lock / Unlock (§3.9.1): an explicit `group_prefs.locked` (an explicit unlock wins over detection, S5). */
+    /**
+     * Group menu Lock / Unlock (§3.9.1): an explicit `group_prefs.locked` (an explicit unlock wins over detection, S5).
+     * C-B2 (defence in depth): an unlock is refused while a PIN is set and the session is not unlocked; every UI path asks
+     * for the PIN first (a granted PIN unlocks the session), so only a path that skipped it lands here.
+     */
     override suspend fun setGroupLocked(source: GuideSource.Group, locked: Boolean) = withContext(io) {
+        if (!locked && refusesLowering()) {
+            BoxLog.w(TAG, "group unlock refused: the session is locked")
+            return@withContext
+        }
         groupDao.upsertGroupLocked(source.playlistId, 0, source.groupKey, locked, wall.now())
     }
+
+    /**
+     * C-B2 / D-B1 (§3.9.2): true while a PIN is set (or not yet known, D-S1) and the session is not unlocked; writes that
+     * lower protection (group unlock, a group-prefs reset, a restore) refuse then.
+     */
+    fun refusesLowering(): Boolean = _state.value.let { it.pinSet && it.access != app.thebox.core.parental.ParentalAccess.OPEN }
 
     companion object {
         private const val TAG = "ParentalSession"

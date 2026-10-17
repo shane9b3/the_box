@@ -465,4 +465,36 @@ class SetupPagesTest {
         run(p, SettingsRoute.ImportProgress(6, false), "setup.card.primary")
         assertEquals(PageAction.Replace(SettingsRoute.PlaylistSource(6)), host.actions.last())
     }
+
+    // ------------------------------------------------------------------ M5 code review (2026-10-16)
+
+    /** C-L4 (N12): stopping an import opened from Settings returns to the Playlists page already on the path. */
+    @Test
+    fun stopFromSettingsPopsToThePlaylistsPage() = runTest(UnconfinedTestDispatcher()) {
+        admin.put(detail(summary(6, type = PlaylistType.M3U_URL)))
+        val p = pages(backgroundScope)
+        val r = SettingsRoute.ImportProgress(6, firstRun = false)
+        progress(6).emit(SetupProgress.Stage(app.thebox.core.setup.ImportStage.DOWNLOADING_PLAYLIST, false, null))
+        p.open(r, host)
+        assertTrue(p.onBack(r, host))
+        val confirm = assertIs<PageAction.Confirm>(host.actions.last())
+        p.onIntent(r, confirm.intent, host)
+        assertEquals(PageAction.PopTo(SettingsRoute.Section(SectionId.PLAYLISTS)), host.actions.last())
+    }
+
+    /** C-B2 (§3.9.2): with "Lock settings" on, the Playlists menu's Edit and Remove ask for the PIN as the Playlist page does. */
+    @Test
+    fun playlistMenuEditAndRemoveAskWithLockSettings() = runTest(UnconfinedTestDispatcher()) {
+        admin.put(detail(summary(1, "Main")))
+        parental.value = ParentalState(pinSet = true, unlocked = false, policy = ParentalPolicy(lockSettings = true))
+        pages(backgroundScope).open(SettingsRoute.Section(SectionId.PLAYLISTS), host)
+        val gated = (host.row("playlists.p.1").kind as RowKind.Item).menu.associate { it.id to it.needsPin }
+        assertEquals(
+            mapOf(PlaylistsSectionPage.MENU_REFRESH to false, PlaylistsSectionPage.MENU_EDIT to true, PlaylistsSectionPage.MENU_TEST to false, PlaylistsSectionPage.MENU_REMOVE to true),
+            gated,
+        )
+        parental.value = parental.value.copy(policy = ParentalPolicy(lockSettings = false))
+        pages(backgroundScope).open(SettingsRoute.Section(SectionId.PLAYLISTS), host)
+        assertTrue((host.row("playlists.p.1").kind as RowKind.Item).menu.none { it.needsPin }, "Lock settings off: no PIN")
+    }
 }

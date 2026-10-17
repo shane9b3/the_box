@@ -184,17 +184,19 @@ object ChannelsPages {
             if (g.locked) add(Badge.LOCKED)
             if (g.adult) add(Badge.ADULT)
         }
+        // C-B2 (§3.9.2): Unlock and Reset lower protection, so they ask for the PIN when one is set; Lock stays ungated.
         val menu = listOf(
             if (g.hidden) ChoiceOption(ChannelsRows.M_SHOW, t.get(BackupText.GROUP_SHOW)) else ChoiceOption(ChannelsRows.M_HIDE, t.get(BackupText.GROUP_HIDE)),
-            if (g.locked) ChoiceOption(ChannelsRows.M_UNLOCK, t.get(BackupText.GROUP_UNLOCK))
+            if (g.locked) ChoiceOption(ChannelsRows.M_UNLOCK, t.get(BackupText.GROUP_UNLOCK), needsPin = pinSet)
             else ChoiceOption(ChannelsRows.M_LOCK, t.get(BackupText.GROUP_LOCK), if (pinSet) null else t.get(BackupText.GROUP_LOCK_NEEDS_PIN)),
             ChoiceOption(ChannelsRows.M_MOVE, t.get(BackupText.GROUP_MOVE)),
-            ChoiceOption(ChannelsRows.M_RESET, t.get(BackupText.GROUP_RESET)),
+            ChoiceOption(ChannelsRows.M_RESET, t.get(BackupText.GROUP_RESET), needsPin = pinSet),
         )
         return SettingsRow(
             groupId(g), g.name, value = t.get(BackupText.GROUP_VALUE, g.channels),
             description = if (g.locked && !pinSet) t.get(BackupText.GROUP_LOCK_NEEDS_PIN) else null,
-            kind = RowKind.Item(primary = ChannelsRows.P_TOGGLE, menu = menu, movable = true, badges = badges),
+            // C-S4 (§3.15 d): OK opens the menu (Show/Hide first), so Lock, Move and Reset are reachable without long OK.
+            kind = RowKind.Item(menu = menu, movable = true, badges = badges),
         )
     }
 

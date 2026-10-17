@@ -128,10 +128,10 @@ class SettingsContractsTest {
         assertNull(SettingsTree.sectionOf(SettingsRoute.FirstRun))
         assertEquals(SectionId.NETWORK, SettingsTree.sectionOf(SettingsRoute.Section(SectionId.NETWORK)))
         assertEquals(SectionId.PLAYLISTS, SettingsTree.sectionOf(SettingsRoute.AddSource(firstRun = true)))
-        assertEquals(SectionId.PLAYLISTS, SettingsTree.sectionOf(SettingsRoute.FixGuide()))
+        assertEquals(SectionId.GUIDE, SettingsTree.sectionOf(SettingsRoute.FixGuide())) // C-L1: a TV guide row (§3.3.2)
         assertEquals(SectionId.CHANNELS, SettingsTree.sectionOf(SettingsRoute.HideRules(1)))
         assertEquals(SectionId.REMOTE, SettingsTree.sectionOf(SettingsRoute.ActionBindings(BoxAction.AUDIO)))
-        assertEquals(SectionId.ABOUT, SettingsTree.sectionOf(SettingsRoute.SyncStatus))
+        assertEquals(SectionId.GUIDE, SettingsTree.sectionOf(SettingsRoute.SyncStatus)) // C-L1: parent TV guide
         assertEquals(SectionId.BACKUP, SettingsTree.sectionOf(SettingsRoute.RestorePreview(3)))
     }
 

@@ -153,9 +153,11 @@ class TinkCredentialStore @Inject constructor(
     }
 
     private suspend fun wipe() {
+        // D-S3: "PIN lost" only when a PIN existed (read before the rows go); a household without one keeps its access.
+        val hadPin = runCatching { credentialDao.get(SecureBlobStore.REF_PARENTAL_PIN) != null }.getOrDefault(true)
         runCatching { provider.reset() }.onFailure { BoxLog.w(TAG, "keyset reset failed", it) }
         // (M5, S8) Flag first: the content stays filtered even if the process dies before the rows are gone.
-        runCatching { keyResetFlag.markPinLost() }.onFailure { BoxLog.w(TAG, "key-reset flag not written", it) }
+        if (hadPin) runCatching { keyResetFlag.markPinLost() }.onFailure { BoxLog.w(TAG, "key-reset flag not written", it) }
         credentialDao.deleteAll()
         playlistDao.setNeedsReauthAll()
     }

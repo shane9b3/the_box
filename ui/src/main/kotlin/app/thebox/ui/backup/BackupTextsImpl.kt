@@ -132,6 +132,10 @@ class BackupTextsImpl @Inject constructor(@ApplicationContext private val contex
             BackupText.NUDGE -> R.string.backup_nudge
             BackupText.NUDGE_DESC -> R.string.backup_nudge_desc
             BackupText.PHONE_ROUTE_DESC -> R.string.backup_phone_route_desc
+            BackupText.PASSPHRASE_REMOVE -> R.string.backup_passphrase_remove // C-S7
+            BackupText.PASSPHRASE_REMOVE_DESC -> R.string.backup_passphrase_remove_desc
+            BackupText.PASSPHRASE_REMOVE_CONFIRM_BODY -> R.string.backup_passphrase_remove_confirm_body
+            BackupText.REMOVE -> R.string.backup_remove
             BackupText.PREVIEW_TITLE -> R.string.backup_preview_title
             BackupText.PREVIEW_SUMMARY -> R.string.backup_preview_summary
             BackupText.PREVIEW_WILL_UPDATE -> R.string.backup_preview_will_update
@@ -149,6 +153,12 @@ class BackupTextsImpl @Inject constructor(@ApplicationContext private val contex
             BackupText.RESTORE_DONE -> R.string.backup_restore_done
             BackupText.RESTORE_NEEDS_LOGIN -> R.string.backup_restore_needs_login
             BackupText.PREVIEW_PROBLEMS -> R.string.backup_preview_problems
+            BackupText.RESTORE_START_WATCHING -> R.string.backup_restore_start_watching // C-S8
+            BackupText.RESTORE_PIN_OFFER -> R.string.backup_restore_pin_offer
+            BackupText.RESTORE_PIN_OFFER_CHANNELS -> R.string.backup_restore_pin_offer_channels
+            BackupText.RESTORE_PIN_OFFER_BODY -> R.string.backup_restore_pin_offer_body
+            BackupText.RESTORE_PIN_SET -> R.string.backup_restore_pin_set
+            BackupText.RESTORE_PIN_LATER -> R.string.backup_restore_pin_later
             BackupText.FAIL_NOT_A_BACKUP -> R.string.backup_fail_not_a_backup
             BackupText.FAIL_NEWER_SCHEMA -> R.string.backup_fail_newer_schema
             BackupText.FAIL_TRUNCATED -> R.string.backup_fail_truncated

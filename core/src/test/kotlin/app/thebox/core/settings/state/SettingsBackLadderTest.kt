@@ -28,15 +28,21 @@ import kotlin.test.assertTrue
 class SettingsBackLadderTest {
     private enum class Overlay { NONE, CHOICE, MULTI, MENU, CONFIRM, PAD, MOVE, CAPTURE }
 
-    /** Depth 2: Section(CHANNELS) → FavouriteLists; depth 3: … → Channel options (via the fixture link chain). */
+    /**
+     * Depth 2: Section(CHANNELS) → FavouriteLists; depth 3: … → Channel options (via the fixture link chain); (C-B1, C-S9)
+     * depth 4: … → Fix guide data (its link on Channel options); depth 5: … → the picker's parent list pushed on top.
+     */
     private fun at(depth: Int, overlay: Overlay): SettingsWorld {
         val w = SettingsWorld().open()
         w.enter(SectionId.CHANNELS)
         if (depth >= 2) { w.focus(RowId("fx.lists")); w.act(BoxAction.RIGHT) }
         if (depth >= 3) { w.act(BoxAction.LEFT); w.focus(RowId("fx.channel")); w.act(BoxAction.RIGHT) }
+        if (depth >= 4) { w.focus(ChannelOptionsRows.FIX_GUIDE); w.act(BoxAction.SELECT) }
+        if (depth >= 5) { w.machine.push(SettingsRoute.HiddenChannels(1)); w.pump() }
+        check(w.ui.stack.size == mapOf(1 to 1, 2 to 2, 3 to 2, 4 to 3, 5 to 4).getValue(depth)) { "depth $depth: ${w.ui.stack} → ${w.ui.route}" }
         when (overlay) {
             Overlay.NONE -> Unit
-            Overlay.CHOICE -> if (depth >= 3) { w.focus(ChannelOptionsRows.ASPECT); w.act(BoxAction.SELECT) } else w.overlayOnLists(overlay)
+            Overlay.CHOICE -> if (depth == 3) { w.focus(ChannelOptionsRows.ASPECT); w.act(BoxAction.SELECT) } else w.overlayOnLists(overlay)
             else -> w.overlayOnLists(overlay)
         }
         return w
@@ -50,7 +56,7 @@ class SettingsBackLadderTest {
             Overlay.CONFIRM -> { focus(RowId("fx.confirm")); act(BoxAction.SELECT) }
             Overlay.PAD -> { focus(RowId("fx.number")); act(BoxAction.DIGIT, digit = 4) }
             Overlay.MOVE -> { focus(RowId("fx.list.1")); act(BoxAction.CONTEXT_MENU); act(BoxAction.DOWN); act(BoxAction.SELECT) }
-            Overlay.CAPTURE -> { focus(RowId(SettingsMachineImpl.CAPTURE_PREFIX + "open_search:SHORT")); act(BoxAction.SELECT) }
+            Overlay.CAPTURE -> { focus(FixturePages.CAPTURE_ROW); act(BoxAction.SELECT) }
             Overlay.NONE -> Unit
         }
     }
@@ -58,7 +64,7 @@ class SettingsBackLadderTest {
     private fun overlayOpen(w: SettingsWorld) = with(w.ui) { choice != null || menu != null || confirm != null || numberPad != null || move != null || capture != null }
 
     @TestFactory
-    fun everyOverlayAndDepth(): List<DynamicTest> = (1..3).flatMap { depth ->
+    fun everyOverlayAndDepth(): List<DynamicTest> = (1..5).flatMap { depth -> // C-B1 / C-S9: to depth 5
         Overlay.entries.map { o ->
             DynamicTest.dynamicTest("depth $depth, $o") {
                 val w = at(depth, o)

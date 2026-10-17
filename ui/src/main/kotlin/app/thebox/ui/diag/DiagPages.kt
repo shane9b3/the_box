@@ -279,7 +279,9 @@ class DiagPages @Inject constructor(
             when (v.key) {
                 VerdictKey.DNS_BLOCKED_TRY_SECURE -> rows += SettingsRow(NETTEST_SECURE_DNS, s(R.string.nettest_action_secure_dns), kind = RowKind.Action(), effect = EffectTiming.LIVE)
                 VerdictKey.IPV6_BROKEN -> rows += SettingsRow(NETTEST_IPV4, s(R.string.nettest_action_ipv4), kind = RowKind.Action(), effect = EffectTiming.LIVE)
-                VerdictKey.AUTH_PROBLEM -> rows += SettingsRow(NETTEST_EDIT_LOGIN, s(R.string.nettest_action_edit_login), kind = RowKind.Link(SettingsRoute.PlaylistSource(route.playlistId), needsPin = true), effect = EffectTiming.NONE)
+                // C-B2 hand-over (code review 2026-10-16): as the Playlist page's Edit source row, the PIN only with "Lock settings" on.
+                VerdictKey.AUTH_PROBLEM -> rows += SettingsRow(NETTEST_EDIT_LOGIN, s(R.string.nettest_action_edit_login),
+                    kind = RowKind.Link(SettingsRoute.PlaylistSource(route.playlistId), needsPin = parental.state.value.let { it.pinSet && it.policy.lockSettings }), effect = EffectTiming.NONE)
                 else -> Unit
             }
         }

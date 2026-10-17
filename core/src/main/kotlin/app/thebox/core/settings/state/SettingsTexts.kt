@@ -264,11 +264,13 @@ class HintValidator(
         val t = text.trim()
         return when (hint) {
             TextHint.URL -> if (isHttpUrl(t)) null else texts[SettingsText.ERR_URL]
-            TextHint.PATTERN -> if (t.isEmpty()) texts[SettingsText.ERR_EMPTY] else try {
-                Regex(t); null
+            // C-L7: a pattern is a regex only in its `/regex/` form (the custom prefix); literals, Contains rules and ""
+            // (clears the prefix) are valid here. A hide rule in Regex mode is checked by its live preview (§3.7.3).
+            TextHint.PATTERN -> if (t.length >= 2 && t.startsWith("/") && t.endsWith("/")) try {
+                Regex(t.substring(1, t.length - 1)); null
             } catch (e: IllegalArgumentException) {
                 texts[SettingsText.ERR_PATTERN]
-            }
+            } else null
             TextHint.HEADER -> if (HEADER.matches(t)) null else texts[SettingsText.ERR_HEADER]
             TextHint.PASSPHRASE -> if (text.length >= PASSPHRASE_MIN) null else texts[SettingsText.ERR_PASSPHRASE, PASSPHRASE_MIN]
             TextHint.NUMBER -> if (t.isNotEmpty() && t.all { it.isDigit() }) null else texts[SettingsText.ERR_NUMBER]

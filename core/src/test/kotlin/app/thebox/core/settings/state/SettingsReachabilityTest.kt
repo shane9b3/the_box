@@ -6,6 +6,7 @@ import app.thebox.core.net.DnsChoice
 import app.thebox.core.settings.RowId
 import app.thebox.core.settings.RowIntent
 import app.thebox.core.settings.RowKind
+import app.thebox.core.settings.SectionId
 import app.thebox.core.settings.SettingsRoute
 import app.thebox.core.settings.SettingsUiState
 import app.thebox.core.settings.fakes.FakeSettingsStore
@@ -28,7 +29,11 @@ import kotlin.test.fail
 class SettingsReachabilityTest {
     private val actions = listOf(BoxAction.UP, BoxAction.DOWN, BoxAction.LEFT, BoxAction.RIGHT, BoxAction.SELECT, BoxAction.BACK, BoxAction.CONTEXT_MENU)
 
-    private class Seed(val name: String, val pinSet: Boolean, val configure: (FakeSettingsStore, FakePageEnv) -> Unit, val advanced: Boolean)
+    private class Seed(
+        val name: String, val pinSet: Boolean, val configure: (FakeSettingsStore, FakePageEnv) -> Unit, val advanced: Boolean,
+        /** C-S9: the other WPs' real builders with this many playlists (null: [FixturePages]). */
+        val playlists: Int? = null,
+    )
 
     private val seeds = listOf(
         Seed("simple", pinSet = false, configure = { _, _ -> }, advanced = false),
@@ -45,7 +50,8 @@ class SettingsReachabilityTest {
         val env = FakePageEnv()
         seed.configure(store, env)
         if (seed.advanced) store.update(GuideDomain) { it.copy(advancedSettings = true) }
-        return SettingsWorld(store, env, pinSet = seed.pinSet, applyIntents = false, reloadAfterIntent = false).also { w ->
+        val real = seed.playlists?.let { RealPages(it, seed.pinSet) }
+        return SettingsWorld(store, env, pinSet = seed.pinSet, applyIntents = false, reloadAfterIntent = false, real = real).also { w ->
             w.advanced = seed.advanced
             w.machine.dispatch(app.thebox.core.settings.SettingsEvent.Advanced(seed.advanced))
         }
@@ -92,7 +98,8 @@ class SettingsReachabilityTest {
         return w to alive
     }
 
-    private fun explore(seed: Seed, start: SettingsRoute, cov: Coverage) {
+    /** [expand]: states on routes it refuses are recorded and checked but not expanded (C-S9 bounds the real pages). */
+    private fun explore(seed: Seed, start: SettingsRoute, cov: Coverage, expand: (SettingsRoute) -> Boolean = { true }) {
         val seen = HashSet<Key>()
         val queue = ArrayDeque<List<BoxAction>>()
         queue.addLast(emptyList())
@@ -116,6 +123,7 @@ class SettingsReachabilityTest {
                 if (w.gate.requests.isNotEmpty()) cov.opened += "pin"
                 if (!stay || w.effects.exits > 0) continue
                 if (w.ui.editor != null) continue // Compose owns the editor's keys; its exits are tested on their own
+                if (!expand(w.ui.route)) continue
                 val k = key(w.ui)
                 if (seen.add(k)) queue.addLast(path + a)
             }
@@ -131,14 +139,26 @@ class SettingsReachabilityTest {
         if (u.pane == app.thebox.core.settings.Pane.PAGE && u.route == page.route) {
             SettingsMachineImpl.rowAt(page, u.cursor)?.let { cov.focused.getOrPut(page.route) { HashSet() } += it.id }
         }
-        // (d) every item-menu option is reachable with the four keys
-        for (r in page.rows) {
+        // (d) every item-menu option is reachable with the four keys: (C-S4) OK opens the menu of an item that has no route
+        // and no primary; otherwise an option needs a row of its own (the item's page, or a `primary` row).
+        for (r in page.rows + page.list?.loaded?.values?.flatten().orEmpty()) {
             val k = r.kind as? RowKind.Item ?: continue
             for (o in k.menu) {
-                val ok = (o.id == "open" && k.route != null) || page.rows.any { (it.kind as? RowKind.Item)?.primary == o.id }
-                assertTrue(ok, "menu option ${o.id} of ${r.id.key} has no five-key path on ${page.route}")
+                val ok = (k.route == null && k.primary == null) || (o.id == "open" && k.route != null) || o.id == k.primary ||
+                    page.rows.any { (it.kind as? RowKind.Item)?.primary == o.id } || (k.route != null && optionRowOnItsPage(w, k.route, o.id))
+                if (!ok) dGaps += "menu option ${o.id} of ${r.id.key} has no five-key path on ${page.route}"
             }
         }
+    }
+
+    /** (d) gaps found; the M5 code review's known one is listed in [KNOWN_D_GAPS]. */
+    private val dGaps = LinkedHashSet<String>()
+
+    /** An item's menu option that is also a row of the page its route opens (Playlists: Edit is the Source row, §3.3.1). */
+    private fun optionRowOnItsPage(w: SettingsWorld, route: SettingsRoute, option: String): Boolean {
+        val target = runCatching { w.page(route) }.getOrNull() ?: return false
+        val alias = mapOf("edit" to "source", "test" to "network_test")[option] ?: option
+        return target.rows.any { it.id.key.substringAfterLast('.') == alias }
     }
 
     private fun assertLeavesWithin12Backs(seed: Seed, start: SettingsRoute, path: List<BoxAction>) {
@@ -160,6 +180,40 @@ class SettingsReachabilityTest {
         is RowIntent.Run -> "run:${i.row.key}"
         is RowIntent.Menu -> "menu:${i.row.key}:${i.optionId}"
         is RowIntent.Move -> "move:${i.row.key}"
+    }
+
+    /**
+     * C-S9 (M5 code review 2026-10-16): §3.15 (a), (c) and (d) on the other WPs' real page builders (WP-B's setup pages,
+     * WP-C's Parental and button-mapping pages, WP-D's Channels and Backup pages) for 0, 1 and 2 playlists. Each WP's
+     * section is explored from its page; routes of other sections are reached but not expanded.
+     */
+    @Test
+    fun everyWpsRealPagesAreReachableWithFiveKeys() {
+        val cov = Coverage()
+        val sections = listOf(SectionId.PLAYLISTS, SectionId.CHANNELS, SectionId.PARENTAL, SectionId.BACKUP, SectionId.REMOTE)
+        for (n in 0..2) {
+            val seed = Seed("real-$n", pinSet = n == 2, configure = { _, _ -> }, advanced = n == 1, playlists = n)
+            for (s in sections) {
+                val start = if (s == SectionId.REMOTE) SettingsRoute.ButtonMapping else SettingsRoute.Section(s)
+                explore(seed, start, cov) { r -> r != SettingsRoute.Root && SettingsTree.sectionOf(r) == s && r !is SettingsRoute.ActionBindings || r == SettingsRoute.ActionBindings(BoxAction.ZAP_UP) }
+            }
+            explore(seed, SettingsRoute.FirstRun, cov) { r -> r == SettingsRoute.FirstRun || r is SettingsRoute.AddSource }
+        }
+        val problems = ArrayList<String>()
+        for ((route, rows) in cov.rows) for (id in rows) {
+            // X3 (integration): Welcome's footer note is not a card; the cursor moves between the cards only.
+            if (id.key == "setup.welcome.note") continue
+            if (cov.focused[route]?.contains(id) != true) problems += "never focused: ${id.key} on $route"
+        }
+        val expected = listOf(
+            SettingsRoute.Playlist(1), SettingsRoute.PlaylistSource(1), SettingsRoute.AddSource(), SettingsRoute.Groups(1), SettingsRoute.HiddenChannels(1),
+            SettingsRoute.HideRules(1), SettingsRoute.FavouriteList(1), SettingsRoute.Section(SectionId.BACKUP), SettingsRoute.Section(SectionId.PARENTAL),
+            SettingsRoute.ButtonMapping, SettingsRoute.ActionBindings(BoxAction.ZAP_UP),
+        )
+        for (r in expected) if (r !in cov.routes) problems += "never reached: $r"
+        assertTrue(problems.isEmpty(), problems.distinct().sorted().joinToString("\n"))
+        val gaps = dGaps.filter { g -> KNOWN_D_GAPS.none { it in g } }
+        assertTrue(gaps.isEmpty(), "(d) " + gaps.joinToString("\n"))
     }
 
     @Test
@@ -194,8 +248,17 @@ class SettingsReachabilityTest {
                 }
             }
         }
+        assertTrue(dGaps.isEmpty(), "(d) " + dGaps.joinToString("\n"))
         // Channel options' confirm-guarded hand-off still runs from the confirm card.
         if ("run:${ChannelOptionsRows.EXTERNAL.key}" !in cov.intents) problems += "run ${ChannelOptionsRows.EXTERNAL.key} (confirm)"
         assertTrue(problems.isEmpty(), problems.distinct().sorted().joinToString("\n"))
+    }
+
+    private companion object {
+        /**
+         * (d) gaps the M5 code review leaves open (reported, not fixed in this pass): reordering favourite lists is a menu
+         * option of a list whose OK opens the list, and no row of the list's page moves it (long OK only).
+         */
+        val KNOWN_D_GAPS = listOf("menu option move of favlist/")
     }
 }

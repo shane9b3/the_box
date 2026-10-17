@@ -49,6 +49,11 @@ class FakePageEnv(
  * enumerated too). Rows ids are prefixed `fx.` and are not in [SettingsTree].
  */
 class FixturePages : SettingsPageSource {
+    companion object {
+        /** C-L2: a mapping-page stand-in; its Run starts the capture through the shell link, as WP-C's source does. */
+        val CAPTURE_ROW = RowId("fx.capture")
+    }
+
     val channel = SettingsFixtures.channels.first().identity
     override fun handles(route: SettingsRoute) = true
 
@@ -68,7 +73,7 @@ class FixturePages : SettingsPageSource {
             SettingsRow(RowId("fx.pin"), "Reset", kind = RowKind.Action(needsPin = true)),
             SettingsRow(RowId("fx.info"), "Info", kind = RowKind.Info(listOf("line"))),
             SettingsRow(RowId("fx.disabled"), "Disabled", kind = RowKind.Toggle(false), enabled = false, disabledReason = "why"),
-            SettingsRow(RowId(SettingsMachineImpl.CAPTURE_PREFIX + "open_search:SHORT"), "Bind a key", kind = RowKind.Action()),
+            SettingsRow(CAPTURE_ROW, "Bind a key", kind = RowKind.Action()),
         ) +SettingsFixtures.favouriteLists.map { l ->
             SettingsRow(RowId("fx.list.${l.id}"), l.name, kind = RowKind.Item(
                 route = SettingsRoute.FavouriteList(l.id),
@@ -126,6 +131,8 @@ class SettingsWorld(
     var now: Long = 1_000_000L,
     /** False: an intent does not rebuild the page, so the machine's optimistic row changes stay (reachability). */
     val reloadAfterIntent: Boolean = true,
+    /** C-S9: the other WPs' real builders (else [FixturePages] stands in for them). */
+    val real: RealPages? = null,
 ) {
     val effects = QueueEffects()
     val wpa = WpaPages(store, SettingsTexts.KEYS, env)
@@ -135,10 +142,16 @@ class SettingsWorld(
     var advanced = false
     private var version = 1000L
 
-    init { machine.pinGate = gate }
+    /** C-L2: what the capture overlay's Save handed to the mapping source (`SettingsShellLink.captureSaved`). */
+    val saved = ArrayList<Triple<BoxAction, app.thebox.core.input.CapturedKey, app.thebox.core.input.Press>>()
+
+    init {
+        machine.pinGate = gate
+        machine.captureSaved = { a, k, p -> saved += Triple(a, k, p) }
+    }
 
     fun page(route: SettingsRoute): PageModel {
-        val p = if (wpa.handles(route)) wpa.build(route, advanced) else fixtures.build(route)
+        val p = if (wpa.handles(route)) wpa.build(route, advanced) else real?.build(route, advanced) ?: fixtures.build(route)
         return p.copy(version = ++version)
     }
 
@@ -147,6 +160,8 @@ class SettingsWorld(
         while ((effects.loads.isNotEmpty() || effects.itemLoads.isNotEmpty() || pendingIntents < effects.intents.size) && guard++ < 50) {
             while (pendingIntents < effects.intents.size) {
                 val i = effects.intents[pendingIntents++]
+                // C-L2: the fixture's capture row behaves like WP-C's mapping source (Run → startCapture).
+                if (i.row == FixturePages.CAPTURE_ROW && i is RowIntent.Run) { machine.startCapture(BoxAction.OPEN_SEARCH, app.thebox.core.input.Press.SHORT); continue }
                 if (i.row == SettingsMachineImpl.ADVANCED_ROW) advanced = (i as RowIntent.Toggle).on
                 if (applyIntents) runBlocking { wpa.onIntent(machine.ui.value.route, i, PageContext(advanced, now)) }
                 if (reloadAfterIntent || i.row == SettingsMachineImpl.ADVANCED_ROW) machine.ui.value.page?.route?.let { effects.loads += it }
@@ -156,7 +171,8 @@ class SettingsWorld(
             val items = effects.itemLoads.toList(); effects.itemLoads.clear()
             for ((r, from, to) in items) {
                 val v = machine.ui.value.page?.takeIf { it.route == r }?.version ?: continue
-                machine.dispatch(SettingsEvent.Items(r, v, from, fixtures.items(r, from, to)))
+                val rows = if (real?.build(r, advanced) != null) real.items(r, from, to) else fixtures.items(r, from, to)
+                machine.dispatch(SettingsEvent.Items(r, v, from, rows))
             }
         }
     }

@@ -48,6 +48,10 @@ interface Updater {
     fun skip(versionCode: Long)
 }
 
-/** The S17 card in the guide (never in FULL). Buttons: Update / Later / Skip this version. */
+/**
+ * The S17 card in the guide (never in FULL). Buttons: Update / Later / Skip this version. [focused] is the focused button;
+ * (C-S2, code review 2026-10-16) −1 while the card is shown but does not hold the focus (it takes it after 3 s with no
+ * key, §3.12.3): no button is highlighted and the guide keeps every key.
+ */
 data class UpdateCardState(val versionName: String, val notes: String, val progress: Float? = null, val failed: String? = null, val focused: Int = 0)
 enum class UpdateAction { UPDATE, LATER, SKIP }

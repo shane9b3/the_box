@@ -45,11 +45,12 @@ class PlaylistsSectionPage(d: SetupPageDeps) : SetupPage(SettingsRoute.Section(S
                 itemRow(p.id), p.name,
                 RowKind.Item(
                     route = SettingsRoute.Playlist(p.id),
+                    // C-B2 (§3.9.2): Edit and Remove ask for the PIN with "Lock settings" on, as the Playlist page's rows do.
                     menu = listOf(
                         ChoiceOption(MENU_REFRESH, t(SetupText.PLAYLIST_MENU_REFRESH)),
-                        ChoiceOption(MENU_EDIT, t(SetupText.PLAYLIST_MENU_EDIT)),
+                        ChoiceOption(MENU_EDIT, t(SetupText.PLAYLIST_MENU_EDIT), needsPin = lockSettings()),
                         ChoiceOption(MENU_TEST, t(SetupText.PLAYLIST_MENU_TEST)),
-                        ChoiceOption(MENU_REMOVE, t(SetupText.PLAYLIST_MENU_REMOVE)),
+                        ChoiceOption(MENU_REMOVE, t(SetupText.PLAYLIST_MENU_REMOVE), needsPin = lockSettings()),
                     ),
                     badges = badges,
                 ),
@@ -61,6 +62,8 @@ class PlaylistsSectionPage(d: SetupPageDeps) : SetupPage(SettingsRoute.Section(S
         rows += action(ROW_REFRESH_ALL, t(SetupText.PLAYLISTS_REFRESH_ALL), enabled = !list.isNullOrEmpty(), disabledReason = t(SetupText.PLAYLISTS_NONE))
         return page(t(SetupText.PLAYLISTS_TITLE), rows, placeholder = if (list == null) t(SetupText.LOADING) else null)
     }
+
+    private fun lockSettings(): Boolean = d.parental.value.let { it.pinSet && it.policy.lockSettings }
 
     /** "Xtream · 2,140 channels · updated 14:02", or the refresh progress, or the failure "reason · next step". */
     internal fun summaryLine(p: PlaylistSummary): String {
@@ -244,6 +247,8 @@ class PlaylistPage(private val r: SettingsRoute.Playlist, d: SetupPageDeps) : Se
             ROW_CATCHUP_MODE, t(SetupText.ROW_CATCHUP_MODE),
             listOf("AUTO", "XC", "DEFAULT", "APPEND", "SHIFT", "FLUSSONIC", "OFF").map { ChoiceOption(it, t(catchupLabel(it))) },
             p.catchupModeSetting.uppercase(),
+            // C-S9 (§6.1, found by the extended EffectTimingCoverageTest): a NEXT_TUNE row states its effect.
+            description = t(SetupText.EFFECT_NEXT_TUNE),
         )
         rows += row(ROW_CATCHUP_DAYS, t(SetupText.ROW_CATCHUP_DAYS), RowKind.Number(p.catchupDaysOverride ?: 0, 0, 30), value = (p.catchupDaysOverride ?: 0).let { if (it == 0) t(SetupText.CATCHUP_DAYS_PROVIDER) else t(SetupText.DAYS_N, it) }, description = t(SetupText.CATCHUP_DAYS_HINT))
         val zoneId = when (p.tokenZoneSetting.uppercase()) { "AUTO", "UTC", "DEVICE", "SERVER" -> p.tokenZoneSetting.uppercase(); else -> ZONE_OTHER }
@@ -251,15 +256,16 @@ class PlaylistPage(private val r: SettingsRoute.Playlist, d: SetupPageDeps) : Se
             ROW_CATCHUP_ZONE, t(SetupText.ROW_CATCHUP_ZONE),
             listOf(ChoiceOption("AUTO", t(SetupText.ZONE_AUTO)), ChoiceOption("UTC", t(SetupText.ZONE_UTC)), ChoiceOption("DEVICE", t(SetupText.ZONE_DEVICE)), ChoiceOption("SERVER", t(SetupText.ZONE_SERVER)), ChoiceOption(ZONE_OTHER, t(SetupText.ZONE_OTHER))),
             if (otherZone) ZONE_OTHER else zoneId,
+            description = t(SetupText.EFFECT_NEXT_TUNE), // C-S9
         )
         if (otherZone || zoneId == ZONE_OTHER) rows += text(ROW_CATCHUP_ZONE_OTHER, t(SetupText.ROW_CATCHUP_ZONE_OTHER), if (zoneId == ZONE_OTHER) p.tokenZoneSetting else "", TextHint.NAME, description = t(SetupText.ZONE_OTHER_HINT))
-        rows += choice(ROW_PADDING_BEFORE, t(SetupText.ROW_PADDING_BEFORE), listOf(0, 1, 2, 5).map { ChoiceOption((it * 60).toString(), t(SetupText.MINUTES_N, it)) }, p.paddingBeforeSec.toString())
-        rows += choice(ROW_PADDING_AFTER, t(SetupText.ROW_PADDING_AFTER), listOf(0, 2, 5, 10).map { ChoiceOption((it * 60).toString(), t(SetupText.MINUTES_N, it)) }, p.paddingAfterSec.toString())
+        rows += choice(ROW_PADDING_BEFORE, t(SetupText.ROW_PADDING_BEFORE), listOf(0, 1, 2, 5).map { ChoiceOption((it * 60).toString(), t(SetupText.MINUTES_N, it)) }, p.paddingBeforeSec.toString(), description = t(SetupText.EFFECT_NEXT_TUNE)) // C-S9
+        rows += choice(ROW_PADDING_AFTER, t(SetupText.ROW_PADDING_AFTER), listOf(0, 2, 5, 10).map { ChoiceOption((it * 60).toString(), t(SetupText.MINUTES_N, it)) }, p.paddingAfterSec.toString(), description = t(SetupText.EFFECT_NEXT_TUNE)) // C-S9
         rows += if (xtream) {
             info(ROW_MAX_CONNECTIONS, t(SetupText.ROW_MAX_CONNECTIONS), listOf(p.account?.maxConnections?.let { t(SetupText.MAX_CONN_ACCOUNT, it) } ?: t(SetupText.MAX_CONN_UNKNOWN)))
         } else {
             val m = p.maxConnectionsOverride ?: 1
-            row(ROW_MAX_CONNECTIONS, t(SetupText.ROW_MAX_CONNECTIONS), RowKind.Number(m, 1, 10), value = m.toString())
+            row(ROW_MAX_CONNECTIONS, t(SetupText.ROW_MAX_CONNECTIONS), RowKind.Number(m, 1, 10), value = m.toString(), description = t(SetupText.EFFECT_NEXT_TUNE)) // C-S9
         }
         rows += row(
             ROW_IGNORE_TLS, t(SetupText.ROW_IGNORE_TLS), RowKind.Toggle(p.ignoreTlsErrors),

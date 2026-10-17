@@ -83,6 +83,12 @@ class BackupServiceImpl internal constructor(
     private val index = AutoIndex(File(stateDir, "auto-index.txt"))
     private val lostFlag = File(stateDir, "passphrase-lost")
 
+    /** C-S8: what the last successful [restore] carried in locks (the page offers a PIN when none exists). */
+    class RestoreLocks(val uids: Set<String>, val groups: Int)
+
+    @Volatile var lastRestoreLocks: RestoreLocks? = null
+        private set
+
     /** The stored passphrase was wiped by a Keystore reset (the Backup page says weekly backups lost their logins). */
     val passphraseLost: Boolean get() = lostFlag.exists()
 
@@ -91,7 +97,8 @@ class BackupServiceImpl internal constructor(
             exporter.export(sink, passphrase)
         } catch (e: CancellationException) {
             throw e
-        } catch (e: IOException) {
+        } catch (e: Exception) {
+            // D-L3: SQLite and crypto failures too (callers run on appScope, which has no handler).
             BoxLog.w(TAG, "export failed: ${e.javaClass.simpleName}")
             Outcome.Err(SourceError.Internal("write failed"))
         } finally {
@@ -104,7 +111,11 @@ class BackupServiceImpl internal constructor(
             Outcome.Ok(restorer.preview(file))
         } catch (e: BackupFormatException) {
             Outcome.Err(SourceError.Parse(e.failure.name))
-        } catch (e: IOException) {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // D-L3: an IO, SQLite or other failure is an IO failure with its reason and next step.
+            BoxLog.w(TAG, "preview failed: ${e.javaClass.simpleName}")
             Outcome.Err(SourceError.Parse(RestoreFailure.IO.name))
         }
     }
@@ -112,6 +123,7 @@ class BackupServiceImpl internal constructor(
     override suspend fun restore(file: File, passphrase: CharArray?, mode: RestoreMode): RestoreResult = withContext(io) {
         try {
             val (result, applied) = restorer.restore(file, passphrase, mode)
+            lastRestoreLocks = applied?.let { RestoreLocks(it.lockedUids, it.lockedGroups) }
             if (applied != null) {
                 store.update(SetupDomain) { it.copy(completed = true) }
                 try {

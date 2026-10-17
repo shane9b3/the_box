@@ -206,7 +206,9 @@ class WpaPagesTest {
         assertNull(v.validate(RowId("x"), app.thebox.core.settings.TextHint.URL, "http://panel.example.com:8080/get.php?u=1"))
         assertEquals("ERR_URL", v.validate(RowId("x"), app.thebox.core.settings.TextHint.URL, "panel.example.com"))
         assertEquals("ERR_HTTPS", v.validate(NetworkRows.CUSTOM_DOH, app.thebox.core.settings.TextHint.URL, "http://a.example/dns-query"))
-        assertEquals("ERR_PATTERN", v.validate(RowId("x"), app.thebox.core.settings.TextHint.PATTERN, "(unclosed"))
+        // C-L7: only the `/regex/` form is compiled (Contains text with "(" is valid).
+        assertEquals("ERR_PATTERN", v.validate(RowId("x"), app.thebox.core.settings.TextHint.PATTERN, "/(unclosed/"))
+        assertEquals(null, v.validate(RowId("x"), app.thebox.core.settings.TextHint.PATTERN, "(unclosed"))
         assertNull(v.validate(RowId("x"), app.thebox.core.settings.TextHint.HEADER, "Referer: http://a.example"))
         assertEquals("ERR_HEADER", v.validate(RowId("x"), app.thebox.core.settings.TextHint.HEADER, "no separator"))
         assertEquals("ERR_PASSPHRASE(8)", v.validate(RowId("x"), app.thebox.core.settings.TextHint.PASSPHRASE, "short"))

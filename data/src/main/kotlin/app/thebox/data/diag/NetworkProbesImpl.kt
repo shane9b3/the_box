@@ -110,7 +110,7 @@ class NetworkProbesImpl @Inject constructor(
 
     private fun xtreamLogin(t: TestTarget): HttpProbe {
         val url = XtreamUrls(t.url, t.username.orEmpty(), t.password.orEmpty()).playerApi(null)
-        return fetch(url) { status, body ->
+        return fetch(url, t.userAgent) { status, body ->
             when {
                 status == 401 || status == 403 || status == 513 -> HttpOutcome.AUTH_REFUSED to null
                 status !in 200..299 -> HttpOutcome.HTTP_ERROR to null
@@ -129,7 +129,7 @@ class NetworkProbesImpl @Inject constructor(
         }
     }
 
-    private fun m3uHead(t: TestTarget): HttpProbe = fetch(t.url) { status, body ->
+    private fun m3uHead(t: TestTarget): HttpProbe = fetch(t.url, t.userAgent) { status, body ->
         when {
             status == 401 || status == 403 -> HttpOutcome.AUTH_REFUSED to null
             status !in 200..299 -> HttpOutcome.HTTP_ERROR to null
@@ -138,10 +138,11 @@ class NetworkProbesImpl @Inject constructor(
         }
     }
 
-    private inline fun fetch(url: String, classify: (Int, String) -> Pair<HttpOutcome, Boolean?>): HttpProbe {
+    private inline fun fetch(url: String, userAgent: String?, classify: (Int, String) -> Pair<HttpOutcome, Boolean?>): HttpProbe {
         val t0 = System.nanoTime()
         return try {
-            probeClient.newCall(Request.Builder().url(url).build()).execute().use { r ->
+            val request = Request.Builder().url(url).apply { if (userAgent != null) header("User-Agent", userAgent) }.build() // D-L9
+            probeClient.newCall(request).execute().use { r ->
                 val src = r.body.source()
                 src.request(MAX_BODY)
                 val body = src.buffer.snapshot(minOf(src.buffer.size, MAX_BODY).toInt()).utf8()

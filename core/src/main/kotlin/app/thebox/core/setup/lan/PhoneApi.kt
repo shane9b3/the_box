@@ -37,6 +37,8 @@ class PhoneApi(
     private val freeBytes: (File) -> Long = { it.usableSpace },
     private val onSubmission: (PhoneSubmission) -> Unit,
     private val uploadMaxBytes: Long = LanLimits.PHONE_UPLOAD_MAX_BYTES,
+    /** D-L4: false while nothing on the TV collects submissions; they are refused with 503 instead of dropped. */
+    private val canAccept: () -> Boolean = { true },
 ) : LanHandler {
     private class Offer(val file: File, val contentType: String)
 
@@ -47,7 +49,12 @@ class PhoneApi(
 
     /** [PhoneLink.offerDownload]: one GET of `/api/download/{name}` by the paired phone, then it is gone. */
     fun offerDownload(name: String, file: File, contentType: String) {
-        offers[safeName(name)] = Offer(file, contentType)
+        offers.put(safeName(name), Offer(file, contentType))?.let { old -> if (old.file != file) old.file.delete() }
+    }
+
+    /** D-S2: the session ends; every file still on offer is deleted (contract: "removed after download or stop"). */
+    fun dropOffers() {
+        for (key in offers.keys.toList()) offers.remove(key)?.file?.delete()
     }
 
     /** [PhoneLink.reportStatus]. */
@@ -212,10 +219,22 @@ class PhoneApi(
             200,
             securityHeaders() + mapOf("Content-Type" to offer.contentType, "Content-Disposition" to "attachment; filename=\"$name\""),
             file = offer.file,
+            onSent = { offer.file.delete() }, // D-S2: served once, then removed from the TV
         )
     }
 
     private fun accepted(s: PhoneSubmission): HttpResponse {
+        if (!canAccept()) {
+            // D-L4: nothing on the TV would see it; the phone is told to send it again instead of "Received".
+            BoxLog.w(TAG, "submission refused: nothing on the TV is listening")
+            when (s) {
+                is PhoneSubmission.BackupUploaded -> File(s.path).delete()
+                is PhoneSubmission.M3uFileUploaded -> File(s.path).delete()
+                is PhoneSubmission.Passphrase -> s.value.fill('\u0000')
+                else -> Unit
+            }
+            return json(503, error("not ready"))
+        }
         tv = TV_CHECKING
         message = ""
         onSubmission(s)

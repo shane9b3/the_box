@@ -156,8 +156,9 @@ class AndroidBackupStorage @Inject constructor(@ApplicationContext private val c
 
     override fun copyTo(location: String, dest: File): Boolean = try {
         val input = if (location.startsWith("content://")) context.contentResolver.openInputStream(Uri.parse(location)) else File(location).inputStream()
-        input?.use { i -> FileOutputStream(dest).use { o -> i.copyTo(o, 64 * 1024) } } != null
+        input?.use { i -> copyCapped(i, dest) } != null // D-L5: capped at BACKUP_MAX_BYTES
     } catch (e: IOException) {
+        dest.delete()
         BoxLog.w(TAG, "backup not readable: ${e.javaClass.simpleName}")
         false
     } catch (e: SecurityException) {
@@ -178,5 +179,28 @@ class AndroidBackupStorage @Inject constructor(@ApplicationContext private val c
         const val SUBDIR = "TheBox"
         const val EXT = ".thebox"
         const val MIME = "application/octet-stream"
+    }
+}
+
+/**
+ * D-L5 (code review 2026-10-16): copies [input] into [dest], at most [max] bytes (a restore never reads more,
+ * `BackupReader` refuses it as TOO_LARGE); a longer input throws and [dest] is deleted.
+ */
+internal fun copyCapped(input: java.io.InputStream, dest: File, max: Long = app.thebox.core.backup.BACKUP_MAX_BYTES) {
+    try {
+        FileOutputStream(dest).use { o ->
+            val buf = ByteArray(64 * 1024)
+            var total = 0L
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                total += n
+                if (total > max) throw IOException("backup larger than $max bytes")
+                o.write(buf, 0, n)
+            }
+        }
+    } catch (e: IOException) {
+        dest.delete()
+        throw e
     }
 }

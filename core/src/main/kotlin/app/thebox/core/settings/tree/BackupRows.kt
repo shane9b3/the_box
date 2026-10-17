@@ -51,6 +51,8 @@ object BackupRows : RowSource {
     val FROM_FILE = RowId("backup.restore.file")
     val FROM_DOWNLOADS = RowId("backup.restore.downloads")
     val NUDGE = RowId("backup.nudge")
+    /** C-S7 (§3.3.9 "set / change / remove"): removes the stored passphrase (destructive, confirm). */
+    val PASSPHRASE_REMOVE = RowId("backup.passphrase_remove")
     const val DOWNLOAD_FILE_PREFIX = "backup.restore.downloads/"
 
     val PREVIEW_SUMMARY = RowId("restore.summary")
@@ -60,6 +62,12 @@ object BackupRows : RowSource {
     val PREVIEW_GO = RowId("restore.go")
     val PREVIEW_PROBLEMS = RowId("restore.problems")
     val PREVIEW_RESULT = RowId("restore.result")
+    /** C-S8 (§3.4.1 "Restore preview → GUIDE"): leaves Settings to the guide after a successful restore. */
+    val PREVIEW_START = RowId("restore.start_watching")
+    /** C-S8 (§3.4.6, B3): the PIN offer after a restore that carried locks while no PIN exists. */
+    val PREVIEW_PIN_OFFER = RowId("restore.pin_offer")
+    val PREVIEW_PIN_SET = RowId("restore.pin_set")
+    val PREVIEW_PIN_LATER = RowId("restore.pin_later")
 }
 
 /** Every user string of WP-D's pages and screens (`strings_backup.xml`; `:ui` implements [BackupTexts]). */
@@ -90,10 +98,14 @@ enum class BackupText {
     RESTORE_NONE_FOUND, RESTORE_NOT_LISTED, RESTORE_DOWNLOADS_UNREADABLE, WEEKLY, WEEKLY_VALUE, WEEKLY_NEVER, WEEKLY_DURABLE,
     WEEKLY_APP_ONLY, WEEKLY_NO_LOGINS_AFTER_RESET, PASSPHRASE_AUTO, PASSPHRASE_AUTO_SET, PASSPHRASE_AUTO_NOT_SET,
     PASSPHRASE_AUTO_DESC, PASSPHRASE_SAVED, PASSPHRASE_REMOVED, NUDGE, NUDGE_DESC, PHONE_ROUTE_DESC,
+    // C-S7 (code review 2026-10-16)
+    PASSPHRASE_REMOVE, PASSPHRASE_REMOVE_DESC, PASSPHRASE_REMOVE_CONFIRM_BODY, REMOVE,
     // Restore preview (§3.10.4)
     PREVIEW_TITLE, PREVIEW_SUMMARY, PREVIEW_WILL_UPDATE, PREVIEW_WILL_ADD, PREVIEW_PASSPHRASE, PREVIEW_PASSPHRASE_DESC, PREVIEW_MODE,
     PREVIEW_MERGE, PREVIEW_MERGE_DETAIL, PREVIEW_REPLACE, PREVIEW_REPLACE_DETAIL, PREVIEW_GO, PREVIEW_GONE, PREVIEW_RUNNING,
     RESTORE_DONE, RESTORE_NEEDS_LOGIN, PREVIEW_PROBLEMS,
+    // C-S8 (code review 2026-10-16)
+    RESTORE_START_WATCHING, RESTORE_PIN_OFFER, RESTORE_PIN_OFFER_CHANNELS, RESTORE_PIN_OFFER_BODY, RESTORE_PIN_SET, RESTORE_PIN_LATER,
     // Restore failures (reason + next step)
     FAIL_NOT_A_BACKUP, FAIL_NEWER_SCHEMA, FAIL_TRUNCATED, FAIL_WRONG_PASSPHRASE, FAIL_CORRUPT_SECRETS, FAIL_TOO_LARGE, FAIL_IO,
     // Phone setup screen (§3.5.1)
@@ -107,8 +119,18 @@ fun interface BackupTexts {
     fun get(key: BackupText, vararg args: Any): String
 }
 
-/** Where a page action leads after an intent: a notice, a reload of the current page, or another route. */
-data class PageAction(val notice: String? = null, val reload: Boolean = true, val open: SettingsRoute? = null) {
+/**
+ * Where a page action leads after an intent: a notice, a reload of the current page, or another route.
+ * (C-S8, code review 2026-10-16; additive) [leaveToGuide]: leave Settings to the guide ("Start watching",
+ * `SettingsShellLink.leaveToGuide`); [setPin]: start "Set a PIN" (`SettingsShellLink.requestPinSetup(false)`).
+ */
+data class PageAction(
+    val notice: String? = null,
+    val reload: Boolean = true,
+    val open: SettingsRoute? = null,
+    val leaveToGuide: Boolean = false,
+    val setPin: Boolean = false,
+) {
     companion object { val NONE = PageAction(reload = false) }
 }
 
@@ -172,6 +194,8 @@ data class BackupPageState(
     /** Where BACKUP_LOGINS leads ("file" or "downloads"). */
     val target: Target = Target.DOWNLOADS,
     val formatTime: (Long) -> String = { it.toString() },
+    /** C-B2 / D-B1 (code review 2026-10-16; additive): a PIN is set, so Restore asks for it (§3.9.2). */
+    val pinSet: Boolean = false,
 ) {
     enum class Stage { IDLE, CHOOSE_TARGET, LOGINS, RUNNING, CHOOSE_SOURCE, RESTORE_LIST }
     enum class Target { FILE, DOWNLOADS }
@@ -210,7 +234,8 @@ object BackupPages {
         s.error?.let { rows += SettingsRow(BackupRows.STATUS, it, kind = RowKind.Info(emptyList(), Tone.BAD), effect = EffectTiming.NONE) }
             ?: s.status?.let { rows += SettingsRow(BackupRows.STATUS, it, kind = RowKind.Info(emptyList(), Tone.GOOD), effect = EffectTiming.NONE) }
 
-        rows += SettingsRow(BackupRows.RESTORE, t.get(BackupText.RESTORE), description = t.get(BackupText.RESTORE_DESC), kind = RowKind.Action())
+        // C-B2 / D-B1 (§3.9.2): Restore asks for the PIN while one is set (a restore can replace every lock).
+        rows += SettingsRow(BackupRows.RESTORE, t.get(BackupText.RESTORE), description = t.get(BackupText.RESTORE_DESC), kind = RowKind.Action(needsPin = s.pinSet))
         when (s.stage) {
             BackupPageState.Stage.CHOOSE_SOURCE -> {
                 rows += SettingsRow(BackupRows.FROM_PHONE, t.get(BackupText.RESTORE_FROM_PHONE), description = t.get(BackupText.PHONE_ROUTE_DESC),
@@ -243,6 +268,12 @@ object BackupPages {
             rows += SettingsRow(BackupRows.PASSPHRASE, t.get(BackupText.PASSPHRASE_AUTO),
                 value = t.get(if (s.passphraseStored) BackupText.PASSPHRASE_AUTO_SET else BackupText.PASSPHRASE_AUTO_NOT_SET),
                 description = t.get(BackupText.PASSPHRASE_AUTO_DESC), kind = RowKind.Text("", TextHint.PASSPHRASE, masked = true), visibility = Visibility.ADVANCED)
+            // C-S7: the Text row sets and changes; removing is its own destructive row (an empty edit is refused).
+            if (s.passphraseStored) {
+                rows += SettingsRow(BackupRows.PASSPHRASE_REMOVE, t.get(BackupText.PASSPHRASE_REMOVE), description = t.get(BackupText.PASSPHRASE_REMOVE_DESC),
+                    kind = RowKind.Action(destructive = true, confirm = ConfirmSpec(t.get(BackupText.PASSPHRASE_REMOVE), t.get(BackupText.PASSPHRASE_REMOVE_CONFIRM_BODY), t.get(BackupText.REMOVE), t.get(BackupText.CANCEL))),
+                    visibility = Visibility.ADVANCED, effect = EffectTiming.LIVE)
+            }
         }
         return PageModel(route, t.get(BackupText.BACKUP_TITLE), rows = rows, version = version)
     }
@@ -260,6 +291,12 @@ object BackupPages {
         val result: String? = null,
         val resultTone: Tone = Tone.GOOD,
         val error: String? = null,
+        /** C-B2 / D-B1 (additive): a PIN is set, so Restore now asks for it. */
+        val pinSet: Boolean = false,
+        /** C-S8 (additive): the restore succeeded ([result] is its summary): offer Start watching. */
+        val restored: Boolean = false,
+        /** C-S8 (additive): non-null = offer a PIN for the locks the restore carried ([lockedGroups] groups; 0 = channels only). */
+        val pinOfferGroups: Int? = null,
     )
 
     fun preview(route: SettingsRoute.RestorePreview, s: PreviewState, t: BackupTexts, version: Long): PageModel {
@@ -289,14 +326,32 @@ object BackupPages {
             rows += SettingsRow(BackupRows.PREVIEW_MODE, t.get(BackupText.PREVIEW_MODE), value = options[s.mode.ordinal].label,
                 kind = RowKind.Choice(options, s.mode.ordinal), effect = EffectTiming.NONE)
             val replace = s.mode == app.thebox.core.backup.RestoreMode.REPLACE
+            // C-B2 / D-B1 (§3.9.2): every restore path ends here, so Restore now asks for the PIN while one is set.
             rows += SettingsRow(BackupRows.PREVIEW_GO, t.get(BackupText.PREVIEW_GO),
-                kind = RowKind.Action(destructive = replace, confirm = if (replace) replaceConfirm(t) else null), enabled = !s.running,
+                kind = RowKind.Action(destructive = replace, confirm = if (replace) replaceConfirm(t) else null, needsPin = s.pinSet), enabled = !s.running,
                 disabledReason = if (s.running) t.get(BackupText.PREVIEW_RUNNING) else null, effect = EffectTiming.LIVE)
             s.error?.let { rows += SettingsRow(BackupRows.STATUS, it, kind = RowKind.Info(emptyList(), Tone.BAD), effect = EffectTiming.NONE) }
         } else {
             rows += SettingsRow(BackupRows.PREVIEW_RESULT, s.result, kind = RowKind.Info(emptyList(), s.resultTone), effect = EffectTiming.NONE)
+            if (s.restored) {
+                // C-S8 (§3.4.6, B3): the locks came back without a PIN to protect them.
+                s.pinOfferGroups?.let { n ->
+                    val offer = if (n > 0) t.get(BackupText.RESTORE_PIN_OFFER, n) else t.get(BackupText.RESTORE_PIN_OFFER_CHANNELS)
+                    rows += SettingsRow(BackupRows.PREVIEW_PIN_OFFER, offer, kind = RowKind.Info(listOf(t.get(BackupText.RESTORE_PIN_OFFER_BODY)), Tone.WARN), effect = EffectTiming.NONE)
+                    rows += SettingsRow(BackupRows.PREVIEW_PIN_SET, t.get(BackupText.RESTORE_PIN_SET), kind = RowKind.Action(), effect = EffectTiming.NONE)
+                    rows += SettingsRow(BackupRows.PREVIEW_PIN_LATER, t.get(BackupText.RESTORE_PIN_LATER), kind = RowKind.Action(), effect = EffectTiming.NONE)
+                }
+                // C-S8 (§3.4.1 "Restore preview → GUIDE"): a first-run restore must not end on a dead end.
+                rows += SettingsRow(BackupRows.PREVIEW_START, t.get(BackupText.RESTORE_START_WATCHING), kind = RowKind.Action(), effect = EffectTiming.NONE)
+            }
         }
-        return PageModel(route, t.get(BackupText.PREVIEW_TITLE), subtitle = p.header.appVersionName, rows = rows, version = version)
+        // C-S8: the cursor lands on Start watching (or the PIN offer) when the result arrives.
+        val focus = when {
+            !s.restored -> null
+            s.pinOfferGroups != null -> BackupRows.PREVIEW_PIN_SET
+            else -> BackupRows.PREVIEW_START
+        }
+        return PageModel(route, t.get(BackupText.PREVIEW_TITLE), subtitle = p.header.appVersionName, rows = rows, version = version, focus = focus)
     }
 
     /** Reason and next step for a restore failure (no bare "failed"). */

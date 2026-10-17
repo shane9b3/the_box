@@ -10,6 +10,15 @@ package app.thebox.core.playback
 fun interface TuneGuard {
     fun check(identity: app.thebox.core.refresh.ChannelIdentity): TuneVerdict
 
+    /**
+     * (D-S1, code review 2026-10-16; additive) False until the guard's lock data has loaded once; until then [check]
+     * fails closed (NEEDS_PIN whenever the access is not OPEN). Callers that can wait use [awaitReady] first.
+     */
+    val ready: Boolean get() = true
+
+    /** (D-S1; additive) Suspends until [ready] or [timeoutMs] passed (the caller then checks and may be refused). */
+    suspend fun awaitReady(timeoutMs: Long) = Unit
+
     companion object {
         /** (commit 0) The behaviour before WP-C: every target is allowed (the M3 predicate still filters the lists). */
         val ALLOW_ALL: TuneGuard = TuneGuard { TuneVerdict.ALLOWED }

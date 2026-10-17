@@ -15,7 +15,8 @@ import javax.inject.Singleton
  *   the route itself, so there is nothing to do here; (M5 integration) a page source inside a shown Settings (the phone
  *   page's restore → RestorePreview, WP-D) gets the route pushed.
  * - From FULL (error-card routes, `fromFull = true`, detached, S2) the guide must enter SETTINGS first: the settings
- *   machine's [SettingsShellLink.openFromFull] does it through the guide dispatch `AppRoot` linked, then opens the route.
+ *   machine's [SettingsShellLink.openFromFull] sends the guide's ungated `OpenSettingsDetached(route)` through the
+ *   dispatch `AppRoot` linked, which opens the route (C-S1, code review 2026-10-16).
  * The activity's [SettingsViewModel] attaches its machine (weakly: the navigator is a singleton, the machine is not).
  */
 @Singleton

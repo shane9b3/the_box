@@ -181,4 +181,13 @@ class SourceInputNormalizerTest {
             arrayOf("", bad(InputProblem.EMPTY)),
         )
     }
+
+    /** C-L10 (M5 code review 2026-10-16): only the host is lowercased; a login in the authority keeps its case. Fake values. */
+    @Test
+    fun onlyTheHostIsLowercased() {
+        val m = assertIs<NormalizedInput.M3u>(SourceInputNormalizerImpl().m3uUrl("http://User:PaSs@Panel.Example.COM:8080/List.m3u"))
+        assertEquals("http://User:PaSs@panel.example.com:8080/List.m3u", m.url)
+        val x = assertIs<NormalizedInput.Xtream>(SourceInputNormalizerImpl().server("HTTP://Panel.Example.com:8080"))
+        assertEquals("http://panel.example.com:8080", x.server)
+    }
 }

@@ -101,7 +101,8 @@ class DiagnosticsImpl @Inject constructor(
         val host = parsed.host ?: return null
         val https = parsed.scheme.equals("https", ignoreCase = true)
         val port = if (parsed.port > 0) parsed.port else if (https) 443 else 80
-        return TestTarget(playlistId, p.type == PlaylistType.XTREAM, host, port, https, url, secret.username, secret.password)
+        // D-L9: the test asks the panel as playback does, with the playlist's User-Agent.
+        return TestTarget(playlistId, p.type == PlaylistType.XTREAM, host, port, https, url, secret.username, secret.password, p.userAgent?.takeIf { it.isNotBlank() })
     }
 
     override suspend fun exportLogs(sink: OutputStream): Outcome<Long> = withContext(io) {

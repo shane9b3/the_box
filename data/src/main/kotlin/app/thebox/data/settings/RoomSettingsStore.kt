@@ -76,6 +76,13 @@ class RoomSettingsStore @Inject constructor(
 
     private val lock = Any()
     private val slots = LinkedHashMap<String, Slot<*>>()
+    /**
+     * D-S4: what [importInTransaction] will publish once [commitImport] says the transaction committed (the slots it
+     * touches and the closures that set their memory). Null when no import is pending.
+     */
+    private var pendingImport: PendingImport? = null
+
+    private class PendingImport(val touched: List<Slot<*>>, val wasDirty: List<Slot<*>>, val publish: List<() -> Unit>)
     /** The stored rows once the startup read landed; null before. */
     private var stored: MutableMap<String, AppSettingEntity>? = null
     private var loadStarted = false
@@ -176,33 +183,60 @@ class RoomSettingsStore @Inject constructor(
         val now = clock.now()
         val rows = ArrayList<AppSettingEntity>()
         val deletes = ArrayList<String>()
+        // D-S4: rows are written inside the caller's transaction; memory (slots, `stored`) changes only on commitImport.
+        val touched = ArrayList<Slot<*>>()
+        val publish = ArrayList<() -> Unit>()
         synchronized(lock) {
+            pendingImport = null // an import that never committed is dropped
             for ((name, json) in documents) {
                 val slot = slots[name]
                 if (slot != null) {
                     if (!slot.domain.backedUp) continue
-                    rows += importSlotLocked(slot, json, now) ?: continue
+                    val (row, apply) = importSlotLocked(slot, json, now) ?: continue
+                    rows += row; touched += slot; publish += apply
                 } else if (name in KNOWN_DOMAINS && name !in NOT_BACKED_UP_DOMAINS) {
                     val row = AppSettingEntity(name, json.toString(), 1, now)
-                    stored?.put(name, row)
+                    // A slot registered between the import and the commit reads the new row too.
+                    publish += { stored?.put(name, row); slots[name]?.let { republishLocked(it, row) } }
                     rows += row
                 }
             }
             if (replace) {
                 for (slot in slots.values) {
                     if (!slot.domain.backedUp || slot.domain.name in documents) continue
-                    resetSlotLocked(slot)
-                    stored?.remove(slot.domain.name)
+                    touched += slot
+                    publish += resetSlotLocked(slot)
                     deletes += slot.domain.name
                 }
                 stored?.keys?.filter { it !in documents && it !in NOT_BACKED_UP_DOMAINS && !slots.containsKey(it) }?.forEach {
-                    stored?.remove(it); deletes += it
+                    publish += { stored?.remove(it); slots[it]?.let { s -> republishLocked(s, null) } }; deletes += it
                 }
             }
+            // Pending writes of these domains stop now (a debounced write must not overwrite the restored row); a
+            // rolled-back import writes the dirty ones again (commitImport(false)).
+            val wasDirty = touched.filter { it.dirty }
+            for (s in touched) { s.writeJob?.cancel(); s.writeJob = null; s.generation++ }
+            pendingImport = PendingImport(touched, wasDirty, publish)
         }
         rows.forEach { dao.upsert(it) }
         deletes.forEach { dao.delete(it) }
         BoxLog.i(TAG) { "settings import: ${rows.size} documents, ${deletes.size} reset (replace=$replace)" }
+    }
+
+    override fun commitImport(committed: Boolean) {
+        val rewrite = synchronized(lock) {
+            val p = pendingImport ?: return
+            pendingImport = null
+            for (s in p.touched) s.generation++
+            if (committed) {
+                p.publish.forEach { it() }
+                emptyList()
+            } else {
+                p.wasDirty
+            }
+        }
+        rewrite.forEach { schedule(it) }
+        if (!committed) BoxLog.i(TAG) { "settings import rolled back: nothing published" }
     }
 
     // ---------------------------------------------------------------- internals (callers hold [lock])
@@ -236,31 +270,42 @@ class RoomSettingsStore @Inject constructor(
         return s.dirty
     }
 
-    private fun <T> importSlotLocked(s: Slot<T>, json: JsonElement, now: Long): AppSettingEntity? {
+    /** The row to write and (D-S4) what publishes it in memory after the commit; null when unreadable. */
+    private fun <T> importSlotLocked(s: Slot<T>, json: JsonElement, now: Long): Pair<AppSettingEntity, () -> Unit>? {
         val v = try {
             JSON.decodeFromJsonElement(s.domain.serializer, json)
         } catch (e: Exception) {
             BoxLog.w(TAG, "import: ${s.domain.name} unreadable (${e.javaClass.simpleName}); kept")
             return null
         }
+        val row = AppSettingEntity(s.domain.name, JSON.encodeToString(s.domain.serializer, v), s.domain.schema, now)
+        return row to {
+            s.writeJob?.cancel(); s.writeJob = null
+            s.queue.clear()
+            s.read = true
+            s.dirty = false
+            s.state.value = v
+            stored?.put(s.domain.name, row)
+        }
+    }
+
+    /** (D-S4) [s] takes the committed [row] (null: the default), dropping its queue and pending write. */
+    private fun <T> republishLocked(s: Slot<T>, row: AppSettingEntity?) {
         s.writeJob?.cancel(); s.writeJob = null
-        s.generation++
         s.queue.clear()
         s.read = true
         s.dirty = false
-        s.state.value = v
-        val row = AppSettingEntity(s.domain.name, JSON.encodeToString(s.domain.serializer, v), s.domain.schema, now)
-        stored?.put(s.domain.name, row)
-        return row
+        s.state.value = decode(s.domain, row)
     }
 
-    private fun <T> resetSlotLocked(s: Slot<T>) {
+    /** (D-S4) What resets [s] to its default in memory after the commit. */
+    private fun <T> resetSlotLocked(s: Slot<T>): () -> Unit = {
         s.writeJob?.cancel(); s.writeJob = null
-        s.generation++
         s.queue.clear()
         s.read = true
         s.dirty = false
         s.state.value = s.domain.default
+        stored?.remove(s.domain.name)
     }
 
     private fun schedule(s: Slot<*>) {

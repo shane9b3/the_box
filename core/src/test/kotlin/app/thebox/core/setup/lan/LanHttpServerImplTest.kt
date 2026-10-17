@@ -15,6 +15,7 @@ import kotlin.test.BeforeTest
 import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -45,7 +46,8 @@ class LanHttpServerImplTest {
         scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         spool = Files.createTempDirectory("phone").toFile()
         link = newLink()
-        scope.launch { link.submissions.collect { submissions += it } }
+        // UNDISPATCHED: the collector is subscribed before any request (D-L4 refuses submissions nobody collects).
+        scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { link.submissions.collect { submissions += it } }
     }
 
     @AfterTest
@@ -250,13 +252,76 @@ class LanHttpServerImplTest {
             assertTrue("TheBox-backup.thebox" in transport.exchange(get("/api/state", host, cookie)).body)
             // Only the paired phone.
             assertEquals(403, transport.exchange(get("/api/download/TheBox-backup.thebox", host), ip = "192.168.1.77").status)
+            val expected = file.readText()
             val r = transport.exchange(get("/api/download/TheBox-backup.thebox", host, cookie))
             assertEquals(200, r.status)
             assertEquals("attachment; filename=\"TheBox-backup.thebox\"", r.headers["content-disposition"])
-            assertEquals(file.readText(), r.body)
+            assertEquals(expected, r.body)
             assertEquals(404, transport.exchange(get("/api/download/TheBox-backup.thebox", host, cookie)).status)
         } finally {
             file.delete()
+        }
+    }
+
+    /**
+     * D-B3 (adopted from the data reviewer's `M5ReviewDataLanTest`): "Export logs → To your phone" offers the bundle
+     * before the phone screen starts the server; the offer survives the start and the phone sees it. The bundle lives
+     * outside the spool directory (DiagSourcesImpl writes to `cacheDir/phone-out/`).
+     */
+    @Test
+    fun logsOfferedBeforeTheServerStartsReachThePhone() {
+        val out = Files.createTempDirectory("phone-out").toFile()
+        try {
+            val bundle = File(out, "TheBox-logs-2026-10-16-1402.txt").apply { writeText("log bundle") }
+            link.offerDownload(bundle.name, bundle.path, "text/plain")
+            link.start(PhonePurpose.LOGS_DOWNLOAD)
+            val token = link.state.value.qrUrl!!.substringAfter("/s/")
+            val cookie = transport.exchange(get("/s/$token", host)).cookie()!!
+            val state = transport.exchange(get("/api/state", host, cookie)).body
+            assertTrue(bundle.isFile, "the log bundle survives the server start")
+            assertTrue(bundle.name in state, "the phone sees the offered log bundle; /api/state was: $state")
+            assertEquals(200, transport.exchange(get("/api/download/${bundle.name}", host, cookie)).status)
+        } finally {
+            out.deleteRecursively()
+        }
+    }
+
+    /** D-S2 (§2.5 "removed after download or stop"): an offered file is deleted after its one download, and on stop. */
+    @Test
+    fun offeredFileIsDeletedAfterItsDownloadAndOnStop() {
+        val out = Files.createTempDirectory("backup-out").toFile()
+        try {
+            val cookie = started(PhonePurpose.BACKUP_DOWNLOAD).let { pairToken(it) }
+            val served = File(out, "a.thebox").apply { writeText("a") }
+            link.offerDownload(served.name, served.path, "application/octet-stream")
+            assertEquals(200, transport.exchange(get("/api/download/a.thebox", host, cookie)).status)
+            assertFalse(served.exists(), "served once, then deleted")
+            val left = File(out, "b.thebox").apply { writeText("b") }
+            link.offerDownload(left.name, left.path, "application/octet-stream")
+            link.stop()
+            assertFalse(left.exists(), "an offer nobody downloaded goes with the session")
+            val pending = File(out, "c.thebox").apply { writeText("c") }
+            link.offerDownload(pending.name, pending.path, "application/octet-stream") // no server: kept for the next start
+            assertTrue(pending.exists())
+            link.stop()
+            assertFalse(pending.exists(), "an offer that never reached a session goes on stop")
+        } finally {
+            out.deleteRecursively()
+        }
+    }
+
+    /** D-L4: with nothing on the TV collecting submissions the phone gets 503 (send again), never a 202 that is dropped. */
+    @Test
+    fun submissionWithNobodyListeningIsRefused() {
+        val other = newLink()
+        try {
+            other.start(PhonePurpose.SETUP)
+            val cookie = pairToken(other.state.value)
+            val r = transport.exchange(post("/api/link", host, "{\"url\":\"http://x/y.m3u\"}", cookie))
+            assertEquals(503, r.status)
+            assertTrue(submissions.isEmpty())
+        } finally {
+            other.stop()
         }
     }
 

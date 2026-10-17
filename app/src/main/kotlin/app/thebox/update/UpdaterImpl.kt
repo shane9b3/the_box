@@ -385,14 +385,16 @@ class UpdaterImpl @Inject constructor(
      * the user left it unanswered (BACK/Home). The session is abandoned and Update is offered again.
      */
     private fun watchUnansweredConfirmation() {
-        val owner = androidx.lifecycle.ProcessLifecycleOwner.get()
-        owner.lifecycle.addObserver(object : androidx.lifecycle.DefaultLifecycleObserver {
-            override fun onStart(o: androidx.lifecycle.LifecycleOwner) {
-                owner.lifecycle.removeObserver(this)
-                if (_state.value == UpdateState.Installing) cancelPendingInstall()
-            }
-        })
+        // D-B4: the app is still in front when PENDING_USER_ACTION arrives; the watcher acts only on a start that
+        // follows a stop (a real return from the confirmation), never on the synchronous catch-up of addObserver.
+        confirmationWatcher?.disarm()
+        confirmationWatcher = UnansweredConfirmationWatcher(androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle) {
+            confirmationWatcher = null
+            if (_state.value == UpdateState.Installing) cancelPendingInstall()
+        }.also { it.arm() }
     }
+
+    private var confirmationWatcher: UnansweredConfirmationWatcher? = null
 
     /** Abandons a session whose confirmation was not answered; back to ReadyToInstall. Main thread. */
     fun cancelPendingInstall() {
@@ -435,5 +437,33 @@ class UpdaterImpl @Inject constructor(
         const val UPDATE_DIR = "update"
         private const val MAX_REDIRECTS = 5
         private const val PROGRESS_STEP_BYTES = 256L * 1024
+    }
+}
+
+/**
+ * D-B4 (code review 2026-10-16): calls [onReturn] once, on the first ON_START that follows an ON_STOP of [lifecycle]
+ * (the user came back from the system confirmation without answering it). `addObserver` replays ON_START at once
+ * while the app is in front; that replay is not a return and is ignored. Main thread.
+ */
+internal class UnansweredConfirmationWatcher(
+    private val lifecycle: androidx.lifecycle.Lifecycle,
+    private val onReturn: () -> Unit,
+) : androidx.lifecycle.DefaultLifecycleObserver {
+    /** Armed in the background already: the next start is a return. */
+    private var sawStop = false
+
+    fun arm() {
+        sawStop = !lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.STARTED)
+        lifecycle.addObserver(this)
+    }
+
+    fun disarm() = lifecycle.removeObserver(this)
+
+    override fun onStop(owner: androidx.lifecycle.LifecycleOwner) { sawStop = true }
+
+    override fun onStart(owner: androidx.lifecycle.LifecycleOwner) {
+        if (!sawStop) return
+        disarm()
+        onReturn()
     }
 }

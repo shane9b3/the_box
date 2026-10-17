@@ -7,7 +7,12 @@ import kotlinx.coroutines.flow.Flow
 
 /** Result of normalising what the user typed or pasted (§3.4.3). Pure. */
 sealed interface NormalizedInput {
-    data class Xtream(val server: String, val username: String?, val password: String?, val output: String?, val filledFromLink: Boolean) : NormalizedInput
+    data class Xtream(val server: String, val username: String?, val password: String?, val output: String?, val filledFromLink: Boolean) : NormalizedInput {
+        // C-L14 / D-L2 (code review 2026-10-16): never the login in a log line or an assertion message.
+        override fun toString(): String =
+            "Xtream(server=${app.thebox.core.common.Redact.host(server)}, username=${if (username == null) "null" else "****"}, " +
+                "password=${if (password == null) "null" else "****"}, output=$output, filledFromLink=$filledFromLink)"
+    }
     data class M3u(val url: String, val looksLikeXtream: Xtream?) : NormalizedInput
     data class Invalid(val reason: InputProblem) : NormalizedInput
 }
@@ -30,7 +35,12 @@ data class SetupCard(
 )
 enum class SetupAction { CONTINUE, SAVE_ANYWAY, EDIT, RETRY, USE_XTREAM_INSTEAD, ADD_AS_SINGLE_CHANNEL, USE_SECURE_DNS, PHONE_SETUP, CANCEL }
 
-data class XtreamForm(val name: String?, val server: String, val username: String, val password: String, val output: String = "AUTO", val userAgent: String? = null, val backups: List<String> = emptyList())
+data class XtreamForm(val name: String?, val server: String, val username: String, val password: String, val output: String = "AUTO", val userAgent: String? = null, val backups: List<String> = emptyList()) {
+    // C-L14 / D-L2 (code review 2026-10-16): hosts only, no login.
+    override fun toString(): String =
+        "XtreamForm(name=$name, server=${app.thebox.core.common.Redact.host(server)}, username=****, password=****, output=$output, " +
+            "userAgent=$userAgent, backups=${backups.map(app.thebox.core.common.Redact::host)})"
+}
 data class M3uForm(
     val name: String?, val url: String?, val fileUri: String?, val epgUrls: List<String>, val userAgent: String? = null,
     /** (M5 integration 2026-10-16, WP-B amendment) The picked document's display name (the playlist's source label). */

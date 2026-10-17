@@ -139,7 +139,12 @@ class DiagSourcesImpl @Inject constructor(
     override fun resetApp(): Boolean = context.getSystemService(ActivityManager::class.java)?.clearApplicationUserData() ?: false
 
     companion object {
-        const val PHONE_DIR = "phone"
+        /**
+         * D-B3 (code review 2026-10-16): the log bundle for the phone lives in its own directory, never in the LAN
+         * server's spool (`cacheDir/phone/`, emptied whenever a phone session starts or stops). The phone link deletes it
+         * after its one download or when the session ends (D-S2).
+         */
+        const val PHONE_DIR = "phone-out"
         const val DOWNLOAD_DIR = "TheBox"
         private val FILE_TIME: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd-HHmm")
     }

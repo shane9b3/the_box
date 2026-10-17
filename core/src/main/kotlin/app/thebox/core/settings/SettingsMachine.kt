@@ -11,7 +11,11 @@ import kotlinx.coroutines.flow.StateFlow
 
 enum class Pane { SECTIONS, PAGE }
 
-data class EditorState(val row: RowId, val label: String, val initial: String, val hint: TextHint, val masked: Boolean, val chips: List<String>, val error: String? = null)
+data class EditorState(val row: RowId, val label: String, val initial: String, val hint: TextHint, val masked: Boolean, val chips: List<String>, val error: String? = null) {
+    // U-L10: a masked initial value never prints.
+    override fun toString(): String =
+        "EditorState(row=$row, label=$label, initial=${if (masked) maskForLog(initial) else initial}, hint=$hint, masked=$masked, chips=$chips, error=$error)"
+}
 data class NumberPadState(val row: RowId, val label: String, val digits: String, val min: Int, val max: Int, val focusedKey: Int = 4, val error: String? = null)
 data class ConfirmState(val spec: ConfirmSpec, val intent: RowIntent, val focused: Int = 1 /* cancel */)
 data class ChoiceState(val row: RowId, val focused: Int)
@@ -64,7 +68,10 @@ sealed interface SettingsEvent {
     data class Page(val page: PageModel) : SettingsEvent
     data class Items(val route: SettingsRoute, val version: Long, val from: Int, val rows: List<SettingsRow>) : SettingsEvent
     /** The editor overlay closed (Compose owned the keys meanwhile). */
-    data class EditorClosed(val row: RowId, val text: String?, val committed: Boolean) : SettingsEvent
+    data class EditorClosed(val row: RowId, val text: String?, val committed: Boolean) : SettingsEvent {
+        // U-L10: the event does not know whether the editor was masked, so the text never prints.
+        override fun toString(): String = "EditorClosed(row=$row, text=${maskForLog(text)}, committed=$committed)"
+    }
     /** (reviewed 2026-10-16, S3) BACK while the editor is open: the router turns it into this event (Cancel, or chips → field). */
     data object EditorBack : SettingsEvent
     data class Captured(val key: CapturedKey) : SettingsEvent

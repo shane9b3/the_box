@@ -56,17 +56,22 @@ object SettingsTree {
 
     fun rowsOf(section: SectionId): List<RowSpec> = byId.values.filter { it.section == section }
 
-    /** The section the sections pane highlights for [route] (§3.2.1); null for Root and FirstRun. */
+    /**
+     * The section the sections pane highlights for [route] (§3.2.1); null for Root and FirstRun. (C-L1, code review
+     * 2026-10-16) It follows the parent chain BACK walks (`SettingsMachineImpl.parentOf`): FixGuide, EpgSources and
+     * SyncStatus are TV guide rows (§3.3.2), NetworkTest a Playlist page row (§3.3.1).
+     */
     fun sectionOf(route: SettingsRoute): SectionId? = when (route) {
         SettingsRoute.Root, SettingsRoute.FirstRun -> null
         is SettingsRoute.Section -> route.id
         is SettingsRoute.AddSource, is SettingsRoute.PhoneSetup, is SettingsRoute.ImportProgress,
         is SettingsRoute.GroupsReview, is SettingsRoute.MatchingReport, is SettingsRoute.Playlist, is SettingsRoute.PlaylistSource,
-        SettingsRoute.EpgSources, is SettingsRoute.FixGuide -> SectionId.PLAYLISTS
+        is SettingsRoute.NetworkTest -> SectionId.PLAYLISTS
+        SettingsRoute.EpgSources, is SettingsRoute.FixGuide, SettingsRoute.SyncStatus -> SectionId.GUIDE
         is SettingsRoute.Groups, is SettingsRoute.HiddenChannels, is SettingsRoute.HideRules,
         SettingsRoute.FavouriteLists, is SettingsRoute.FavouriteList, is SettingsRoute.Channel -> SectionId.CHANNELS
         SettingsRoute.ButtonMapping, is SettingsRoute.ActionBindings -> SectionId.REMOTE
-        SettingsRoute.Diagnostics, is SettingsRoute.NetworkTest, SettingsRoute.SyncStatus, SettingsRoute.Licences -> SectionId.ABOUT
+        SettingsRoute.Diagnostics, SettingsRoute.Licences -> SectionId.ABOUT
         SettingsRoute.Backup, is SettingsRoute.RestorePreview -> SectionId.BACKUP
     }
 }

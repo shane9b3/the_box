@@ -13,6 +13,9 @@ import app.thebox.core.backup.RestoreResult
 import app.thebox.core.common.BoxLog
 import app.thebox.core.common.Outcome
 import app.thebox.core.common.Redact
+import app.thebox.core.parental.ParentalAccess
+import app.thebox.core.parental.ParentalSession
+import app.thebox.core.settings.state.SetupDomain
 import app.thebox.core.settings.PageModel
 import app.thebox.core.settings.PhonePurpose
 import app.thebox.core.settings.RowIntent
@@ -38,6 +41,7 @@ import app.thebox.data.di.ApplicationScope
 import app.thebox.data.di.IoDispatcher
 import app.thebox.data.di.WallClock
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -78,6 +82,8 @@ class BackupPagesImpl @Inject constructor(
     private val clock: WallClock,
     @ApplicationScope private val scope: CoroutineScope,
     @IoDispatcher private val io: CoroutineDispatcher,
+    /** C-B2 / D-B1: Restore asks for the PIN while one is set, and a locked session never restores (§3.9.2). */
+    private val parental: ParentalSession,
 ) : SectionPages, DocumentPicker, PhoneBackupFlow {
     private val version = AtomicLong()
     private val _invalidations = MutableSharedFlow<SettingsRoute>(extraBufferCapacity = 8)
@@ -108,7 +114,13 @@ class BackupPagesImpl @Inject constructor(
         var result: String? = null
         var tone = Tone.GOOD
         var error: String? = null
+        /** C-S8: the restore succeeded; [pinOffer] = the locked groups to offer a PIN for (null = no offer). */
+        var restored = false
+        var pinOffer: Int? = null
     }
+
+    /** C-B2 / D-B1 (defence in depth): a PIN is set and the session is not unlocked (or the PIN is not known yet). */
+    private fun restoreRefused(): Boolean = parental.state.value.let { it.pinSet && it.access != ParentalAccess.OPEN }
 
     override fun handles(route: SettingsRoute): Boolean =
         route == SettingsRoute.Backup || route is SettingsRoute.RestorePreview || (route is SettingsRoute.Section && route.id == SectionId.BACKUP)
@@ -116,7 +128,10 @@ class BackupPagesImpl @Inject constructor(
     override suspend fun page(route: SettingsRoute, advanced: Boolean): PageModel = when (route) {
         is SettingsRoute.RestorePreview -> {
             val e = synchronized(lock) { previews[route.token] }
-            val s = if (e == null) BackupPages.PreviewState(null) else BackupPages.PreviewState(e.preview, e.passphrase != null, e.mode, e.running, e.result, e.tone, e.error)
+            val pinSet = parental.state.value.pinSet
+            val s = if (e == null) BackupPages.PreviewState(null, pinSet = pinSet) else synchronized(lock) {
+                BackupPages.PreviewState(e.preview, e.passphrase != null, e.mode, e.running, e.result, e.tone, e.error, pinSet, e.restored, e.pinOffer)
+            }
             BackupPages.preview(route, s, texts, version.incrementAndGet())
         }
         else -> BackupPages.backup(snapshot(), texts, advanced, version.incrementAndGet(), route)
@@ -144,6 +159,7 @@ class BackupPagesImpl @Inject constructor(
                 downloads = listed.map { it.name },
                 nudge = nudge,
                 formatTime = { df.format(Date(it)) },
+                pinSet = parental.state.value.pinSet,
             )
         }
     }
@@ -178,13 +194,18 @@ class BackupPagesImpl @Inject constructor(
                 val name = row.key.removePrefix(BackupRows.DOWNLOAD_FILE_PREFIX)
                 val f = synchronized(lock) { listed.firstOrNull { it.name == name } } ?: return PageAction.NONE
                 val dest = File(restoreDir, "downloads-${tokens.incrementAndGet()}.thebox")
-                if (!withContext(io) { storage.copyTo(f.location, dest) }) return PageAction(notice = texts.get(BackupText.FAIL_IO), reload = false)
+                if (!withContext(io) { storage.copyTo(f.location, dest) }) { dest.delete(); return PageAction(notice = texts.get(BackupText.FAIL_IO), reload = false) }
                 openPreview(dest)?.let { PageAction(open = SettingsRoute.RestorePreview(it)) } ?: PageAction(notice = lastPreviewError, reload = false)
             }
             row == BackupRows.WEEKLY && intent is RowIntent.Toggle -> {
                 store.update(BackupDomain) { it.copy(weekly = intent.on) }
                 scheduler.sync(intent.on)
                 PageAction()
+            }
+            // C-S7: the destructive Remove row (the editor refuses an empty passphrase).
+            row == BackupRows.PASSPHRASE_REMOVE && intent is RowIntent.Run -> when (service.setStoredPassphrase(CharArray(0))) {
+                is Outcome.Ok -> PageAction(notice = texts.get(BackupText.PASSPHRASE_REMOVED))
+                is Outcome.Err -> PageAction(notice = texts.get(BackupText.BACKUP_FAILED), reload = false)
             }
             row == BackupRows.PASSPHRASE && intent is RowIntent.Edit -> {
                 val chars = intent.text.toCharArray()
@@ -229,7 +250,11 @@ class BackupPagesImpl @Inject constructor(
                     var err: Outcome.Err? = null
                     val stored = storage.write(name) { out -> (service.export(out, pass) as? Outcome.Err)?.let { err = it; throw IOException("export failed") } }
                     if (err == null) stored else null
-                } catch (e: IOException) {
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    // D-L3: any failure (IO, SQLite, crypto) ends as BACKUP_FAILED, never an uncaught crash on appScope.
+                    BoxLog.w(TAG, "backup to Downloads failed: ${e.javaClass.simpleName}")
                     null
                 } finally {
                     pass?.fill('\u0000')
@@ -283,9 +308,10 @@ class BackupPagesImpl @Inject constructor(
                     val pass = pendingExportPass.also { pendingExportPass = null }
                     val ok = try {
                         context.contentResolver.openOutputStream(Uri.parse(uri), "wt")?.use { service.export(it, pass) is Outcome.Ok } ?: false
-                    } catch (e: IOException) {
-                        false
-                    } catch (e: SecurityException) {
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        BoxLog.w(TAG, "backup to a file failed: ${e.javaClass.simpleName}") // D-L3
                         false
                     } finally {
                         pass?.fill('\u0000')
@@ -295,13 +321,16 @@ class BackupPagesImpl @Inject constructor(
                 DocAction.IMPORT -> {
                     val dest = File(restoreDir, "file-${tokens.incrementAndGet()}.thebox")
                     val copied = try {
-                        context.contentResolver.openInputStream(Uri.parse(uri))?.use { i -> dest.outputStream().use { o -> i.copyTo(o, 64 * 1024) } } != null
-                    } catch (e: IOException) {
-                        false
-                    } catch (e: SecurityException) {
+                        // D-L5: at most BACKUP_MAX_BYTES are copied; a bigger file is refused (and nothing is left behind).
+                        context.contentResolver.openInputStream(Uri.parse(uri))?.use { i -> copyCapped(i, dest) } != null
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        BoxLog.w(TAG, "picked backup not copied: ${e.javaClass.simpleName}") // D-L3
                         false
                     }
-                    val token = if (copied) openPreview(dest) else null
+                    if (!copied) dest.delete()
+                    val token = try { if (copied) openPreview(dest) else null } catch (e: CancellationException) { throw e } catch (e: Exception) { dest.delete(); null }
                     if (token != null) navigate(SettingsRoute.RestorePreview(token))
                     else { set { it.copy(error = lastPreviewError ?: texts.get(BackupText.FAIL_IO)) }; _invalidations.tryEmit(SettingsRoute.Backup) }
                 }
@@ -318,7 +347,12 @@ class BackupPagesImpl @Inject constructor(
     private suspend fun openPreview(file: File, passphrase: CharArray? = null): Long? = when (val p = service.preview(file)) {
         is Outcome.Ok -> {
             val token = tokens.incrementAndGet()
-            synchronized(lock) { previews[token] = PreviewEntry(file, p.value).also { it.passphrase = passphrase } }
+            synchronized(lock) {
+                // D-L5: one preview at a time; older ones (not restoring) are dropped with their copies.
+                val stale = previews.entries.filter { !it.value.running }
+                for (old in stale) { old.value.file.delete(); old.value.passphrase?.fill('\u0000'); previews.remove(old.key) }
+                previews[token] = PreviewEntry(file, p.value).also { it.passphrase = passphrase }
+            }
             token
         }
         is Outcome.Err -> {
@@ -342,10 +376,21 @@ class BackupPagesImpl @Inject constructor(
             }
             intent.row == BackupRows.PREVIEW_GO && intent is RowIntent.Run -> {
                 if (e.running) return PageAction.NONE
+                // C-B2 / D-B1 (defence in depth): the row asks for the PIN; a locked session never gets here through it.
+                if (restoreRefused()) { BoxLog.w(TAG, "restore refused: the session is locked"); return PageAction.NONE }
                 synchronized(lock) { e.running = true; e.error = null }
                 val pass = e.passphrase?.copyOf()
                 scope.launch(io) {
-                    val r = service.restore(e.file, pass, e.mode)
+                    val r = try {
+                        service.restore(e.file, pass, e.mode)
+                    } catch (x: CancellationException) {
+                        throw x
+                    } catch (x: Exception) {
+                        // D-L3: an unexpected failure ends the restore with a reason, never a crash on appScope.
+                        BoxLog.w(TAG, "restore failed: ${x.javaClass.simpleName}")
+                        RestoreResult.Failed(RestoreFailure.IO)
+                    }
+                    val offer = (r as? RestoreResult.Done)?.let { pinOfferFor() }
                     synchronized(lock) {
                         e.running = false
                         when (r) {
@@ -353,13 +398,15 @@ class BackupPagesImpl @Inject constructor(
                                 e.result = texts.get(BackupText.RESTORE_DONE, r.playlistsAdded + r.playlistsUpdated, r.rows) +
                                     if (r.needsLogin > 0) " " + texts.get(BackupText.RESTORE_NEEDS_LOGIN, r.needsLogin) else ""
                                 e.tone = if (r.needsLogin > 0) Tone.WARN else Tone.GOOD
+                                e.restored = true
+                                e.pinOffer = offer
                                 e.passphrase?.fill('\u0000'); e.passphrase = null
                                 e.file.delete()
                             }
                             is RestoreResult.Failed -> {
                                 val text = BackupPages.failureText(r.reason, texts)
-                                // A wrong passphrase can be retyped; other failures end the preview.
-                                if (r.reason == RestoreFailure.WRONG_PASSPHRASE) e.error = text else { e.result = text; e.tone = Tone.BAD }
+                                // A wrong passphrase can be retyped; other failures end the preview (D-L5: and its copy).
+                                if (r.reason == RestoreFailure.WRONG_PASSPHRASE) e.error = text else { e.result = text; e.tone = Tone.BAD; e.file.delete() }
                             }
                         }
                     }
@@ -367,8 +414,26 @@ class BackupPagesImpl @Inject constructor(
                 }
                 PageAction()
             }
+            // C-S8 (§3.4.1): Start watching leaves Settings to the guide (the first-run restore's way out).
+            intent.row == BackupRows.PREVIEW_START && intent is RowIntent.Run -> PageAction(reload = false, leaveToGuide = true)
+            // C-S8 (§3.4.6): Set PIN opens the guide's one PIN entry; either answer drops the offer.
+            intent.row == BackupRows.PREVIEW_PIN_SET && intent is RowIntent.Run -> { synchronized(lock) { e.pinOffer = null }; PageAction(setPin = true) }
+            intent.row == BackupRows.PREVIEW_PIN_LATER && intent is RowIntent.Run -> { synchronized(lock) { e.pinOffer = null }; PageAction() }
             else -> PageAction.NONE
         }
+    }
+
+    /**
+     * C-S8 (§3.4.6, B3): after a restore that carried group or channel locks, with no PIN, offer one, at most once per
+     * playlist (`SetupState.pinOfferedFor`, keyed by the playlist uid as onboarding does). Null = no offer.
+     */
+    private fun pinOfferFor(): Int? {
+        val locks = service.lastRestoreLocks ?: return null
+        if (locks.uids.isEmpty() || parental.state.value.pinSet) return null
+        val offered = store.flow(SetupDomain).value.pinOfferedFor
+        if (locks.uids.all { it in offered }) return null
+        store.update(SetupDomain) { it.copy(pinOfferedFor = it.pinOfferedFor + locks.uids) }
+        return locks.groups
     }
 
     // ---- Phone page (RESTORE, BACKUP_DOWNLOAD, SETUP's Restore tab) ---------------------------------------------
@@ -377,6 +442,8 @@ class BackupPagesImpl @Inject constructor(
 
     override fun attach(purpose: PhonePurpose) {
         detach()
+        // D-S2: a backup offered to an earlier phone session is never left behind in the cache.
+        scope.launch(io) { outDir.listFiles()?.forEach { it.delete() } }
         if (purpose == PhonePurpose.LOGS_DOWNLOAD) return
         phoneJob = scope.launch(io) {
             phone.submissions.collect { s ->
@@ -429,7 +496,10 @@ class BackupPagesImpl @Inject constructor(
         val out = File(outDir, name)
         val ok = try {
             out.outputStream().use { service.export(it, value.takeIf { v -> v.isNotEmpty() }) is Outcome.Ok }
-        } catch (e: IOException) {
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            BoxLog.w(TAG, "backup for the phone failed: ${e.javaClass.simpleName}") // D-L3
             false
         } finally {
             value.fill('\u0000')

@@ -102,7 +102,8 @@ object ParentalRows : RowSource {
         out += SettingsRow(
             id = PIN, label = texts.text(if (state.pinSet) T.CHANGE_PIN else T.SET_PIN),
             value = texts.text(if (state.pinSet) T.PIN_SET else T.PIN_NOT_SET),
-            kind = RowKind.Action(needsPin = state.pinSet),
+            // C-S3 (§3.3.8 "verify, then create twice"): the CreatePin(change) flow verifies once; no row gate on top.
+            kind = RowKind.Action(),
         )
         out += SettingsRow(
             id = AUTO_LOCK, label = texts.text(T.AUTO_LOCK),

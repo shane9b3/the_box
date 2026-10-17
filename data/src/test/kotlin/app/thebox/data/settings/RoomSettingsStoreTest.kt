@@ -163,6 +163,7 @@ class RoomSettingsStoreTest {
         s.update(GuideDomain) { it.copy(clock = ClockMode.H24) }
         runBlocking {
             s.importInTransaction(mapOf(Domains.GUIDE to JsonObject(mapOf("clock" to JsonPrimitive("H12")))), replace = false)
+            s.commitImport() // D-S4: published after the (caller's) commit
             delay(500)
         }
         assertEquals(ClockMode.H12, s.flow(GuideDomain).value.clock)
@@ -181,6 +182,7 @@ class RoomSettingsStoreTest {
         assertTrue("an unregistered backed-up domain is exported as stored", Domains.REMOTE in out)
         assertFalse("setup is device-bound", Domains.SETUP in out)
         s.importInTransaction(mapOf(Domains.GUIDE to JsonObject(mapOf("clock" to JsonPrimitive("H24"))), "nonsense" to JsonObject(emptyMap())), replace = true)
+        s.commitImport() // D-S4: published after the (caller's) commit
         assertEquals(ClockMode.H24, s.flow(GuideDomain).value.clock)
         assertEquals("replace resets backed-up domains not in the backup", 30, s.flow(NetworkDomain).value.readTimeoutSec)
         assertTrue("setup is not touched by a restore", s.flow(SetupDomain).value.completed)

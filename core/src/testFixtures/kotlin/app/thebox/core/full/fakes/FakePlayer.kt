@@ -62,6 +62,8 @@ class RecordingPlayerEffects : PlayerEffects {
     override fun selectText(key: TrackKey?) = rec("selectText", key)
     override fun setAspect(mode: AspectMode, remember: Boolean) = rec("setAspect", mode, remember)
     override fun setDecoder(mode: VideoDecoderMode?) = rec("setDecoder", mode)
+    /** U-S12 (code review 2026-10-16): the AUDIO picker's Back to Auto. */
+    override fun audioOutputAuto() = rec("audioOutputAuto")
     override fun setStatsEnabled(on: Boolean) = rec("setStatsEnabled", on)
     override fun setScreenOff(on: Boolean) = rec("setScreenOff", on)
     override fun toast(kind: PlayerToast, arg: String?) = rec("toast", kind, arg)

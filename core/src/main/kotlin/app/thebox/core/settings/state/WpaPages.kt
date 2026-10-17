@@ -539,7 +539,8 @@ class WpaPages(
 
         /** Validators stricter than the hint's (§3.3.11: the custom DoH address is https:// only). */
         fun rowRules(texts: SettingsTexts): Map<RowId, (String) -> String?> = mapOf(
-            NetworkRows.CUSTOM_DOH to { s: String -> if (s.isBlank() || HintValidator.isHttpsUrl(s) || app.thebox.core.net.BoxDnsPolicy.isValidCustomUrl(s.trim())) null else texts[SettingsText.ERR_HTTPS] },
+            // C-L8: exactly what BoxDnsPolicy will use (a URL it would ignore must not read as "Custom").
+            NetworkRows.CUSTOM_DOH to { s: String -> if (s.isBlank() || app.thebox.core.net.BoxDnsPolicy.isValidCustomUrl(s.trim())) null else texts[SettingsText.ERR_HTTPS] },
         )
 
         inline fun <reified E : Enum<E>> enumOf(name: String): E? = enumValues<E>().firstOrNull { it.name == name }

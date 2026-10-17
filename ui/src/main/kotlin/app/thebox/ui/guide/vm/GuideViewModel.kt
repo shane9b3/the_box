@@ -168,7 +168,7 @@ class GuideViewModel @Inject constructor(
      * (M5, B1) Every tune the guide's effects, Search and the startup make asks the guard first; a refusal opens the
      * PIN prompt (or the not-protected card) instead of a cycle ([onRefused]).
      */
-    private val guarded: PlaybackController = GuardedPlaybackController(controller, tuneGuard) { id, v -> onRefused(id, v) }
+    private val guarded: PlaybackController = GuardedPlaybackController(controller, tuneGuard, viewModelScope) { id, v -> onRefused(id, v) }
 
     /** (M5, S10) The library with the session's access in every query; flows restart when it changes. */
     private val parentalLibrary: GuideLibrary = ParentalGuideLibrary(library, parental)

@@ -31,7 +31,7 @@ class SourceInputNormalizerImpl : SourceInputNormalizer {
         val parts = split(s) ?: return NormalizedInput.Invalid(InputProblem.NOT_A_URL)
         authorityProblem(parts)?.let { return NormalizedInput.Invalid(it) }
         return NormalizedInput.Xtream(
-            server = XtreamUrls.normalizeBase(parts.scheme + "://" + parts.authority.lowercase()),
+            server = XtreamUrls.normalizeBase(parts.scheme + "://" + lowerHost(parts.authority)),
             username = null, password = null, output = null, filledFromLink = false,
         )
     }
@@ -41,12 +41,18 @@ class SourceInputNormalizerImpl : SourceInputNormalizer {
         precheck(s)?.let { return it }
         val parts = split(s) ?: return NormalizedInput.Invalid(InputProblem.NOT_A_URL)
         authorityProblem(parts)?.let { return NormalizedInput.Invalid(it) }
-        val url = parts.scheme + "://" + parts.authority.lowercase() + encodeSpaces(parts.rest)
+        val url = parts.scheme + "://" + lowerHost(parts.authority) + encodeSpaces(parts.rest)
         val login = XtreamLoginUrl.parse(url)?.let { xtream(it.base, it.username, it.password, it.output) }
         return NormalizedInput.M3u(url, login)
     }
 
     // ------------------------------------------------------------------ internals
+
+    /** C-L10: `user:Pass@Host:8080` → `user:Pass@host:8080`; credentials in the authority keep their case. */
+    private fun lowerHost(authority: String): String {
+        val at = authority.lastIndexOf('@')
+        return if (at < 0) authority.lowercase() else authority.substring(0, at + 1) + authority.substring(at + 1).lowercase()
+    }
 
     private fun xtream(base: String, user: String, pass: String, output: String?) = NormalizedInput.Xtream(
         server = base, username = field(user), password = pass, output = outputOf(output), filledFromLink = true,

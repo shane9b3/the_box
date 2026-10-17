@@ -175,4 +175,38 @@ class ParentalBypassTest {
         assertTrue(f.guardChecks.isEmpty())
         assertTrue(f.state is PlaybackState.Connecting)
     }
+
+    /** D-S6 (M5 code review 2026-10-16, B1): a catch-up start of a locked channel never starts (no archive resolve). */
+    @Test
+    fun aRefusedCatchUpNeverStarts() {
+        f.verdicts[CH1] = TuneVerdict.NEEDS_PIN
+        val request = app.thebox.core.catchup.ArchiveRequest(
+            url = "http://panel.example:8080/timeshift/{{u}}/{{p}}/60/2026-10-13:20-00/1.ts",
+            headers = emptyMap(),
+            mode = app.thebox.core.model.CatchupMode.entries.first(),
+            variant = "xc",
+            requestStart = java.time.Instant.parse("2026-10-13T18:00:00Z"),
+            requestEnd = null,
+            nativeSeekRange = null,
+        )
+        f.controller.tuneArchive(app.thebox.player.api.ArchiveTune(CH1, request))
+        f.idle()
+        val st = f.state as PlaybackState.Stopped
+        assertEquals(StopReason.LOCKED, st.reason)
+        assertEquals(CH1, st.target?.identity)
+        assertTrue("no archive resolve", f.resolver.archiveCalls.isEmpty())
+    }
+
+    /** D-S6 (M5 code review 2026-10-16, B1): the Sources picker cannot replay a channel that was relocked while playing. */
+    @Test
+    fun selectServerOfALockedChannelIsRefused() {
+        f.resolver.baseCount = 3
+        watch(CH1)
+        f.verdicts[CH1] = TuneVerdict.NEEDS_PIN
+        val resolves = f.resolver.calls.size
+        f.controller.selectServer(2)
+        f.idle()
+        assertEquals(StopReason.LOCKED, (f.state as PlaybackState.Stopped).reason)
+        assertEquals("no re-resolve on the other base", resolves, f.resolver.calls.size)
+    }
 }

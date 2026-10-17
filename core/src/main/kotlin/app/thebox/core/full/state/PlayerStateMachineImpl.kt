@@ -179,7 +179,6 @@ class PlayerStateMachineImpl(
     /** Lock actions waiting for the PIN, by SettingsAction token (the guide routes tokens ≥ PLAYER_ACTION_TOKEN_BASE here). */
     private val pendingLocks = HashMap<Long, () -> Unit>()
     private var lockToken = 0L
-    @Suppress("unused") private var keyHints: Map<BoxAction, List<Int>> = emptyMap()
 
     private enum class FavPurpose { NONE, QUICK, TOGGLE, LIST_MENU }
     private class ScopeBounds(val programme: ProgrammeInfo?, val from: Long, val to: Long)
@@ -251,7 +250,6 @@ class PlayerStateMachineImpl(
             // M5 (docs/design/m5-setup-settings.md §3.9)
             is PlayerEvent.Parental -> parental = event.state
             is PlayerEvent.PinResult -> onPinResult(event.purpose, event.granted)
-            is PlayerEvent.KeyHints -> keyHints = event.hints
         }
         publish()
     }
@@ -760,7 +758,8 @@ class PlayerStateMachineImpl(
     private fun openPicker(kind: PickerKind, fromQuickBar: Boolean) {
         val choices = choicesFor(kind, menu)
         when (kind) {
-            PickerKind.AUDIO -> if (menu.audio.count { it.supported } < 2 && menu.audio.none { it.selected && !it.supported }) {
+            // U-S12: with "Always passthrough" on the picker always has a choice (Back to Auto).
+            PickerKind.AUDIO -> if (!menu.audioOutputForced && menu.audio.count { it.supported } < 2 && menu.audio.none { it.selected && !it.supported }) {
                 effects.toast(PlayerToast.NO_AUDIO_CHOICE); return
             }
             PickerKind.SUBTITLES -> if (menu.text.isEmpty()) { effects.toast(PlayerToast.NO_SUBTITLES); return }
@@ -772,7 +771,8 @@ class PlayerStateMachineImpl(
     }
 
     private fun choicesFor(kind: PickerKind, m: TrackMenu): List<PickerChoice> = when (kind) {
-        PickerKind.AUDIO -> m.audio.map { PickerChoice.Audio(it) }
+        // U-S12: "Back to Auto" closes the AUDIO list while "Always passthrough" is on (B2).
+        PickerKind.AUDIO -> m.audio.map<app.thebox.core.full.AudioChoice, PickerChoice> { PickerChoice.Audio(it) } + if (m.audioOutputForced) listOf(PickerChoice.AudioOutputAuto) else emptyList()
         PickerKind.SUBTITLES -> buildList {
             add(PickerChoice.TextOff)
             m.text.filter { !it.speculative }.forEach { add(PickerChoice.Text(it)) }
@@ -824,6 +824,7 @@ class PlayerStateMachineImpl(
             is PickerChoice.Aspect -> effects.setAspect(c.mode, remember)
             is PickerChoice.Decoder -> effects.setDecoder(c.mode)
             is PickerChoice.Server -> effects.selectServer(c.index)
+            PickerChoice.AudioOutputAuto -> effects.audioOutputAuto() // U-S12
         }
     }
 
@@ -836,7 +837,8 @@ class PlayerStateMachineImpl(
             val focusKey = keyOf(p.choices.getOrNull(p.focused))
             val choices = choicesFor(p.kind, m)
             val focused = if (p.focused >= p.choices.size) choices.size
-            else choices.indexOfFirst { keyOf(it) == focusKey && (focusKey != null || it == PickerChoice.TextOff) }.let { if (it < 0) 0 else it }
+            // U-S12: a choice without a track key (Off, Back to Auto) keeps the focus by identity.
+            else choices.indexOfFirst { keyOf(it) == focusKey && (focusKey != null || it == p.choices.getOrNull(p.focused)) }.let { if (it < 0) 0 else it }
             picker = p.copy(choices = choices, current = currentChoice(p.kind, choices), focused = focused)
         }
     }
@@ -1380,7 +1382,11 @@ class PlayerStateMachineImpl(
                     ChannelMenuItem.REMOVE_FAVOURITE -> effects.setFavourite(ch, false)
                     ChannelMenuItem.HIDE_CHANNEL -> effects.hideChannel(ch)
                     // M5 (§3.9.1, §3.9.2): with a PIN set (session locked) the PIN comes first.
-                    ChannelMenuItem.LOCK_CHANNEL -> lockAction { effects.setChannelLocked(ch, true) }
+                    ChannelMenuItem.LOCK_CHANNEL -> lockAction {
+                        effects.setChannelLocked(ch, true)
+                        // U-S10: feedback as in the guide's menu; without a PIN the lock only filters (B3 wording).
+                        effects.toast(if (parental.pinSet) PlayerToast.CHANNEL_LOCKED else PlayerToast.LOCKED_NOT_PROTECTED)
+                    }
                     ChannelMenuItem.CHANNEL_OPTIONS -> Unit // WP-A's Channel options page (§3.3.12) offers it
                 }
             }

@@ -57,7 +57,8 @@ class ParentalAccessTest {
         val entries = listOf(GuideSourceEntry(GuideSource.All(1), "All", 9, SourceSection.ALL, null), entry("news", false), entry("adult", true))
         assertEquals(entries, ParentalRules.visibleEntries(entries, st(pin = true, unlocked = false, auto = true)), "Show with a lock")
         assertEquals(listOf("All", "news"), ParentalRules.visibleEntries(entries, st(pin = true, unlocked = false, auto = true, hide = true)).map { it.label })
-        assertEquals(entries, ParentalRules.visibleEntries(entries, st(pin = false, unlocked = false, auto = true, hide = true)), "FILTERED_NO_PIN lists them (the M3 trap)")
+        // U-S11: listed (the M3 trap), the locked one marked "not protected" (the amber 18+).
+        assertEquals(entries.map { it.copy(notProtected = it.locked) }, ParentalRules.visibleEntries(entries, st(pin = false, unlocked = false, auto = true, hide = true)), "FILTERED_NO_PIN lists them (the M3 trap)")
     }
 
     @Test fun doors() {
