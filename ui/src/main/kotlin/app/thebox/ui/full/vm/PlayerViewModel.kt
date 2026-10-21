@@ -179,6 +179,43 @@ class PlayerViewModel @Inject constructor(
             .stateIn(viewModelScope, SharingStarted.Eagerly, null)
     private val detail = MutableStateFlow<ProgrammeInfo?>(null)
     override val focusedDetail: StateFlow<ProgrammeInfo?> get() = detail
+    /**
+     * (M6 time-shift, docs/design/m6-timeshift.md §11.5) The paused lines and the dim card: the machine's paused state
+     * (`PlayerUiState.paused`: media keys, dim; fix pass, UX review §7 — no cast to the implementation), the LOCAL
+     * session's estimate, and the window and the hold from `ArchivePlayback.localBuffer` (A-C1: never the controller's
+     * raw `localBuffer`; fix pass S1, S2).
+     */
+    override val pausedFacts: StateFlow<app.thebox.ui.full.PausedFacts> =
+        combine(
+            machine.ui.map { it.paused }.distinctUntilChanged(),
+            archive.status,
+            archive.localBuffer,
+        ) { p, st, lb ->
+            val local = st.source == app.thebox.core.catchup.archive.TimelineSource.LOCAL && st.phase != ArchivePhase.IDLE
+            app.thebox.ui.full.PausedFacts(
+                mediaKeys = p?.mediaKeys ?: false,
+                dimmed = p?.dimmed ?: false,
+                dimSinceMs = p?.dimSinceMs,
+                pauseRemainingMs = if (local) st.pauseRemainingMs else null,
+                windowMs = lb?.windowMs?.takeIf { it > 0 },
+                holdMs = lb?.holdMs,
+            )
+        }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.Eagerly, app.thebox.ui.full.PausedFacts())
+
+    /** (M6 §13, U-N3) The stats overlay's rewind line, only while stats are on and the cycle is buffered. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override val rewindStat: StateFlow<String?> = statsOn.flatMapLatest { on ->
+        if (!on) kotlinx.coroutines.flow.flowOf(null)
+        else controller.stats.map { s ->
+            if (s.rewindWindowMs <= 0) null
+            else context.resources.getString(
+                app.thebox.ui.R.string.player_stat_rewind,
+                PlayerText.behindText(s.rewindSavedMs), PlayerText.behindText(s.rewindWindowMs),
+                PlayerText.gbArg(context.resources, s.rewindBytes),
+            )
+        }
+    }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
     /** U-S12 (code review 2026-10-16): "Always passthrough" is the audio output. */
     override val audioOutputForced: StateFlow<Boolean> = audioForced.flow().distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
@@ -261,6 +298,9 @@ class PlayerViewModel @Inject constructor(
 
     // ---- feeds (§3.10.1)
 
+    /** The identity of the last Tuned the machine got (main; see the Buffer re-send in [forwardFeeds]). */
+    private var tunedIdentity: ChannelIdentity? = null
+
     @OptIn(ExperimentalCoroutinesApi::class)
     private fun forwardFeeds() {
         val scope = viewModelScope
@@ -271,6 +311,16 @@ class PlayerViewModel @Inject constructor(
         val shown = if (st is app.thebox.player.api.PlaybackState.Stopped && st.reason == app.thebox.player.api.StopReason.LOCKED) app.thebox.player.api.PlaybackState.Idle else st
         val mapped = TunedStateMapper.map(shown, ch?.rowId ?: -1L, still = false)
                 machine.dispatch(PlayerEvent.Tuned(ArchiveVisibility.visible(mapped, status), ch))
+                // (Integration 2026-10-19, I-TS-20a/I-TS-30) The machine drops its buffer when the tuned identity changes.
+                // The new cycle's snapshot can arrive before this Tuned (channelOf suspends), and an unbuffered cycle
+                // publishes its reason once (a StateFlow never repeats it): re-send the snapshot when it is the new
+                // channel's, or the machine pauses an Off channel with no reason toast.
+                val identity = st.target?.identity
+                if (identity != tunedIdentity) {
+                    tunedIdentity = identity
+                    val lb = archive.localBuffer.value
+                    if (identity != null && lb != null && controller.localBuffer.value?.identity == identity) machine.dispatch(PlayerEvent.Buffer(lb))
+                }
             }
         }
         scope.launch {
@@ -280,6 +330,8 @@ class PlayerViewModel @Inject constructor(
             }
         }
         scope.launch { controller.pendingZap.collect { id -> machine.dispatch(PlayerEvent.PendingZap(id?.let { channelOf(it) })) } }
+        // M6 time-shift (docs/design/m6-timeshift.md §11.2, A-C1): the P-frame buffer is the only source of Buffer.
+        scope.launch { archive.localBuffer.collect { machine.dispatch(PlayerEvent.Buffer(it)) } }
         // (M5 integration, E23) The servers of the tune ride with the track menu (the Sources picker).
         scope.launch {
             // U-S12 (code review 2026-10-16): the track menu says whether "Always passthrough" is on (Back to Auto).
@@ -360,11 +412,38 @@ class PlayerViewModel @Inject constructor(
             PlaybackNotice.LiveResumed -> {
                 val active = archive.status.value.phase != ArchivePhase.IDLE
                 if (active || clock() - archiveActiveAtMs < LIVE_RESUMED_GRACE_MS) return
+                // M6 §10, §13 (U-S9): the reason-less "live resumed" becomes BACK_TO_LIVE_UNBUFFERED, with the next step
+                // of the pause's reason once per tune (fix pass S6).
+                toast(PlayerToast.BACK_TO_LIVE_UNBUFFERED, unbufferedStepOnce())
+                return
             }
+            // M6 §13: the toast needs the landing time, which only the timeline knows ("Now at 21:26").
+            is PlaybackNotice.GapSkipped -> {
+                val st = archive.status.value
+                val at = if (st.phase != ArchivePhase.IDLE) st.wallMs + (if (st.advancing) clock() - st.atMs else 0L) + n.gapMs + st.displayShiftMs else clock()
+                // Raw ms, like the machine's GAP_SKIPPED toasts (PlayerToast's argument convention).
+                toast(if (n.stream) PlayerToast.GAP_SKIPPED_STREAM else PlayerToast.GAP_SKIPPED_PAUSED, n.gapMs.toString() + PlayerText.ARG_SEP + at)
+                return
+            }
+            // §11.5: while paused the header line says it; the toast is for a viewer behind live.
+            is PlaybackNotice.SavingStopped -> if (archive.status.value.phase == ArchivePhase.PAUSED &&
+                (n.stop == app.thebox.core.playback.timeshift.RecordStop.SLOT_LOST || n.stop == app.thebox.core.playback.timeshift.RecordStop.PREEMPTED)) return
+            // §8.4 (U-S2): once a day.
+            PlaybackNotice.LimitedToday -> if (!limitedTodayOnce()) return
             else -> Unit
         }
         val text = PlayerText.notice(context.resources, n) ?: return
         shellEvents.trySend(ShellEvent.Message(text))
+    }
+
+    /** The local day REWIND_LIMITED_TODAY was last shown (§8.4: once a day). */
+    private var limitedShownDay = Long.MIN_VALUE
+
+    private fun limitedTodayOnce(): Boolean {
+        val day = java.time.Instant.ofEpochMilli(clock()).atZone(java.time.ZoneId.systemDefault()).toLocalDate().toEpochDay()
+        if (day == limitedShownDay) return false
+        limitedShownDay = day
+        return true
     }
 
     /** WP-B's `ArchiveNotice.LiveNotReady` (archive lag used up near the edge, §3.8.7) → the ARCHIVE_NOT_READY toast. */
@@ -375,7 +454,62 @@ class PlayerViewModel @Inject constructor(
     internal fun dispatch(event: PlayerEvent) = machine.dispatch(event)
 
     internal fun toast(kind: PlayerToast, arg: String?) {
-        shellEvents.trySend(ShellEvent.Message(PlayerText.toast(context.resources, kind, arg)))
+        if (kind == PlayerToast.REWIND_LIMITED_TODAY && !limitedTodayOnce()) return
+        val words = toastArg(kind, arg)
+        PlayerText.noRewindStep(context.resources, kind, words)?.let { step ->
+            val t = controller.state.value.target
+            unbufferedStep = t?.identity?.let { UnbufferedStep(it, t.tuneId, step) }
+        }
+        shellEvents.trySend(ShellEvent.Message(PlayerText.toast(context.resources, kind, words)))
+    }
+
+    /** (Fix pass S6) The next step of the last PAUSE_NO_REWIND_* toast, for the channel and tune it was shown on. */
+    private class UnbufferedStep(val identity: ChannelIdentity, val tuneId: Long, val step: String, var used: Boolean = false)
+    private var unbufferedStep: UnbufferedStep? = null
+
+    /**
+     * §13 BACK_TO_LIVE_UNBUFFERED "with the next step of the reason above, once per tune": the step of the unbuffered
+     * pause on the channel now playing, the first time only (a resume re-tunes, so the tune is the pause's).
+     */
+    private fun unbufferedStepOnce(): String? {
+        val u = unbufferedStep ?: return null
+        if (u.used || controller.state.value.target?.identity != u.identity) return null
+        u.used = true
+        return u.step
+    }
+
+    /**
+     * (M6 time-shift, §13) The machine passes raw values (ms) where a toast shows a time or a length; this turns them into
+     * the words on screen ("21:02", "30 min", "0.6 GB", the playlist).
+     */
+    private fun toastArg(kind: PlayerToast, arg: String?): String? {
+        val res = context.resources
+        return when (kind) {
+            PlayerToast.REWIND_START -> {
+                val at = PlayerText.args(arg, 0).toLongOrNull()?.let { PlayerText.clockArg(it, guideSettings.settings.value.clock24) } ?: PlayerText.args(arg, 0)
+                val window = PlayerText.args(arg, 1).toLongOrNull()?.let { PlayerText.durationArg(res, it) }
+                if (window == null) at else at + PlayerText.ARG_SEP + window
+            }
+            PlayerToast.REWIND_NOTHING_YET -> {
+                val window = archive.localBuffer.value?.windowMs?.takeIf { it > 0 } ?: arg?.toLongOrNull()
+                    ?: app.thebox.core.playback.timeshift.TimeshiftConstants.AUTO_LENGTH_SMALL_MS
+                PlayerText.durationArg(res, window)
+            }
+            PlayerToast.GAP_SKIPPED_PAUSED, PlayerToast.GAP_SKIPPED_STREAM -> {
+                val len = PlayerText.args(arg, 0).toLongOrNull()
+                val at = PlayerText.args(arg, 1).toLongOrNull()
+                if (len == null || at == null) arg
+                else PlayerText.durationArg(res, len) + PlayerText.ARG_SEP + PlayerText.clockArg(at, guideSettings.settings.value.clock24)
+            }
+            PlayerToast.ZAP_CONFIRM, PlayerToast.ZAP_CONFIRM_NUMBER -> arg?.toLongOrNull()?.let { PlayerText.durationArg(res, it) } ?: arg
+            PlayerToast.PAUSE_NO_REWIND_SPACE -> arg ?: try {
+                PlayerText.gbArg(res, android.os.StatFs(context.cacheDir.path).availableBytes)
+            } catch (e: Exception) {
+                null
+            }
+            PlayerToast.PAUSE_NO_REWIND_HLS -> if (arg != null && arg.isEmpty()) res.getString(app.thebox.ui.R.string.player_arg_your_playlist) else arg
+            else -> arg
+        }
     }
 
     internal fun guideToast(kind: GuideToast, arg: String?) {

@@ -1,12 +1,11 @@
 package app.thebox.data.rules
 
 import app.thebox.core.text.RegexSafety
+import app.thebox.core.text.UserRegex
 
 import app.thebox.core.settings.tree.RuleDraft
 import app.thebox.core.settings.tree.RuleProblem
 import app.thebox.core.settings.tree.RuleTarget
-import java.util.regex.Pattern
-import java.util.regex.PatternSyntaxException
 
 /** Appendix B (docs/design/m5-setup-settings.md §3.7.3). */
 const val RULE_REGEX_MAX_CHARS = 200
@@ -18,9 +17,8 @@ class RegexBudgetExceeded : RuntimeException("pattern too slow") {
 }
 
 /**
- * A [CharSequence] that throws [RegexBudgetExceeded] once [deadlineNs] (System.nanoTime) has passed (§3.7.3; fixes M3
- * G-L19 for any regex run over provider text). `java.util.regex` reads its input only through [charAt]/[length], so a
- * catastrophic backtracking pattern cannot outlive the deadline by more than one check interval.
+ * A [CharSequence] that throws [RegexBudgetExceeded] once [deadlineNs] (System.nanoTime) has passed. The pure-Java
+ * [UserRegex] engine reads through this sequence on Android too; no platform ICU conversion bypasses the deadline.
  */
 class TimeBoxedCharSequence(
     private val inner: CharSequence,
@@ -41,15 +39,15 @@ class TimeBoxedCharSequence(
 }
 
 /** One compiled rule. Contains is case-insensitive; a regex is compiled once, case-insensitive, and searched (`find`). */
-class RuleMatcher private constructor(val id: Long, val target: RuleTarget, private val needle: String?, private val regex: Pattern?) {
+class RuleMatcher private constructor(val id: Long, val target: RuleTarget, private val needle: String?, private val regex: UserRegex?) {
     /**
-     * True when [text] matches; a regex is bounded by [deadlineNs] and throws [RegexBudgetExceeded] past it. On the JVM
-     * the bound is enforced inside the match ([TimeBoxedCharSequence]); Android's `Matcher` hands ICU `toString()`, so
-     * there the deadline is checked after each match and [RegexSafety] refuses the exponential shapes up front.
+     * True when [text] matches. Regex matching is input-linear, with a cooperative [deadlineNs] page budget on JVM
+     * and Android. [RegexBudgetExceeded] still disables a rule that consumes too much of a large page's time.
      */
     fun matches(text: String, deadlineNs: Long, nanoTime: () -> Long = System::nanoTime): Boolean {
         if (regex == null) return text.contains(needle!!, ignoreCase = true)
-        val hit = regex.matcher(TimeBoxedCharSequence(text, deadlineNs, nanoTime)).find()
+        if (nanoTime() > deadlineNs) throw RegexBudgetExceeded()
+        val hit = regex.find(TimeBoxedCharSequence(text, deadlineNs, nanoTime))
         if (nanoTime() > deadlineNs) throw RegexBudgetExceeded()
         return hit
     }
@@ -65,8 +63,8 @@ class RuleMatcher private constructor(val id: Long, val target: RuleTarget, priv
             if (!draft.isRegex) return Result.Ok(RuleMatcher(id, draft.target, p, null))
             if (RegexSafety.isRisky(p)) return Result.Problem(RuleProblem.TOO_SLOW)
             return try {
-                Result.Ok(RuleMatcher(id, draft.target, null, Pattern.compile(p, Pattern.CASE_INSENSITIVE or Pattern.UNICODE_CASE)))
-            } catch (e: PatternSyntaxException) {
+                Result.Ok(RuleMatcher(id, draft.target, null, UserRegex.compile(p, ignoreCase = true)))
+            } catch (e: IllegalArgumentException) {
                 Result.Problem(RuleProblem.BAD_REGEX)
             } catch (e: StackOverflowError) {
                 Result.Problem(RuleProblem.BAD_REGEX)

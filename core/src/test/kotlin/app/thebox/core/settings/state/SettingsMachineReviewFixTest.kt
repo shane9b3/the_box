@@ -181,6 +181,9 @@ class SettingsMachineReviewFixTest {
         assertNull(v.validate(row, TextHint.PATTERN, ""))
         assertNull(v.validate(row, TextHint.PATTERN, "/^UK: /"))
         assertEquals(SettingsText.ERR_PATTERN.name, v.validate(row, TextHint.PATTERN, "/(unclosed/"))
+        assertEquals(SettingsText.ERR_PATTERN.name, v.validate(row, TextHint.PATTERN, "/(?<=UK):/"))
+        assertEquals(SettingsText.ERR_PATTERN.name, v.validate(row, TextHint.PATTERN, "/(UK)\\1/"))
+        assertNull(v.validate(row, TextHint.PATTERN, "/(?:UK|US):\\s*/"))
     }
 
     /** C-L8: the custom DoH row accepts exactly what BoxDnsPolicy will use (no userinfo, no bracketed host). */

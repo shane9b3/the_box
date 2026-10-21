@@ -12,6 +12,8 @@ import androidx.sqlite.execSQL
  * design requires exactly five `ALTER TABLE … ADD COLUMN`s and two `CREATE INDEX`es with no table rebuild.
  * 3 → 4 is hand-written too ([MIGRATION_3_4], docs/design/m5-setup-settings.md §4.2): `playlist` gains a unique index
  * and a backfilled `uid`, which an auto-migration would do by rebuilding the table.
+ * 4 → 5 is hand-written ([MIGRATION_4_5], docs/design/m6-channel-editor.md §3.6): `channel_prefs.custom_group_key` and
+ * its index, with no rebuild.
  *
  * Policy:
  * - Every schema change bumps `LibraryDatabase.VERSION`, commits the new exported JSON under
@@ -64,5 +66,21 @@ object Migrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4)
+    /**
+     * v4 → v5 (docs/design/m6-channel-editor.md §3.6, owner ruling Q1): the channel editor's Move to group. One ADD COLUMN
+     * (every existing row gets NULL: no behaviour change) and one CREATE INDEX; no table rebuild. No downgrade path: an
+     * older APK over v5 fails to open, as for v4.
+     */
+    val SQL_4_5: List<String> = listOf(
+        "ALTER TABLE `channel_prefs` ADD COLUMN `custom_group_key` TEXT",
+        "CREATE INDEX IF NOT EXISTS `index_channel_prefs_group` ON `channel_prefs` (`playlist_id`, `custom_group_key`)",
+    )
+
+    val MIGRATION_4_5: Migration = object : Migration(4, 5) {
+        override fun migrate(connection: SQLiteConnection) {
+            for (sql in SQL_4_5) connection.execSQL(sql)
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
 }

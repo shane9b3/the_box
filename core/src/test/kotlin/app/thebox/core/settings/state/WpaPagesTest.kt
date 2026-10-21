@@ -14,7 +14,11 @@ import app.thebox.core.settings.SectionId
 import app.thebox.core.settings.SettingsRoute
 import app.thebox.core.settings.SettingsRow
 import app.thebox.core.settings.Visibility
+import app.thebox.core.art.ArtworkStatus
+import app.thebox.core.art.FakeProgrammeArtwork
 import app.thebox.core.settings.fakes.FakeSettingsStore
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.runTest
 import app.thebox.core.settings.tree.GuideRows
 import app.thebox.core.settings.tree.InterfaceRows
 import app.thebox.core.settings.tree.NetworkRows
@@ -52,7 +56,11 @@ class WpaPagesTest {
         Triple(SectionId.PLAYBACK, PlaybackRows.AFR, "AFR_SEAMLESS") to (EffectTiming.LIVE to Visibility.SIMPLE),
         Triple(SectionId.PLAYBACK, PlaybackRows.AUDIO_OUTPUT, "AO_AUTO") to (EffectTiming.REPREPARE to Visibility.SIMPLE),
         Triple(SectionId.PLAYBACK, PlaybackRows.ASPECT, "ASPECT_FIT") to (EffectTiming.NEXT_TUNE to Visibility.SIMPLE),
-        Triple(SectionId.PLAYBACK, PlaybackRows.ON_LAUNCH, "LAUNCH_GUIDE_LAST") to (EffectTiming.NEXT_LAUNCH to Visibility.SIMPLE),
+        // (M6 time-shift commit 0, lead ruling 1) "On launch" is ADVANCED; "Pause and rewind" takes its simple slot.
+        Triple(SectionId.PLAYBACK, PlaybackRows.TIMESHIFT, "TS_AUTO(TS_MIN(30))") to (EffectTiming.NEXT_TUNE to Visibility.SIMPLE),
+        Triple(SectionId.PLAYBACK, PlaybackRows.TIMESHIFT_HOLD, "AUTO") to (EffectTiming.LIVE to Visibility.ADVANCED),
+        Triple(SectionId.PLAYBACK, PlaybackRows.TIMESHIFT_PROTECT, "AUTO") to (EffectTiming.LIVE to Visibility.ADVANCED),
+        Triple(SectionId.PLAYBACK, PlaybackRows.ON_LAUNCH, "LAUNCH_GUIDE_LAST") to (EffectTiming.NEXT_LAUNCH to Visibility.ADVANCED),
         Triple(SectionId.PLAYBACK, PlaybackRows.AUDIO_LANGUAGE, "LANG_DEVICE") to (EffectTiming.NEXT_TUNE to Visibility.ADVANCED),
         Triple(SectionId.PLAYBACK, PlaybackRows.SUBTITLES, "SUBS_OFF") to (EffectTiming.NEXT_TUNE to Visibility.ADVANCED),
         Triple(SectionId.PLAYBACK, PlaybackRows.DECODER, "DEC_AUTO") to (EffectTiming.REPREPARE to Visibility.ADVANCED),
@@ -88,6 +96,41 @@ class WpaPagesTest {
             assertTrue(r.enabled)
             if (how.first != EffectTiming.LIVE) assertNotNull(r.description, "a non-LIVE row states its effect")
         }
+    }
+
+    // ---------------------------------------------------------------- programme posters (owner rulings 2026-10-18/19)
+
+    @Test
+    fun posterRowIsAToggleAloneOnByDefault() {
+        val r = row(SectionId.GUIDE, GuideRows.POSTERS)
+        assertEquals(Visibility.ADVANCED, r.visibility)
+        assertEquals(EffectTiming.LIVE, r.effect)
+        assertTrue((r.kind as RowKind.Toggle).on, "on by default: the app ships with its own key")
+        assertEquals("GUIDE_POSTERS_DESC_NO_KEY", r.description, "the test env is a keyless build: the description says so")
+        assertNull(page(SectionId.GUIDE, advanced = false).rows.firstOrNull { it.id == GuideRows.POSTERS }, "advanced: the simple budget holds")
+        assertTrue(page(SectionId.GUIDE).rows.none { it.id.key.startsWith("guide.posters") && it.id != GuideRows.POSTERS }, "no user-key row (owner ruling 2026-10-19)")
+    }
+
+    @Test
+    fun theToggleDescriptionFollowsTheLookupAndTheToggleWritesThePref() = runTest {
+        val art = FakeProgrammeArtwork()
+        env.hasTmdbKey = true
+        val p = WpaPages(store, SettingsTexts.KEYS, env, art)
+        fun toggle() = p.build(SettingsRoute.Section(SectionId.GUIDE), true).rows.first { it.id == GuideRows.POSTERS }
+        art.statusFlow.value = ArtworkStatus.ON
+        assertEquals("GUIDE_POSTERS_DESC", toggle().description)
+        art.statusFlow.value = ArtworkStatus.APP_KEY_REJECTED
+        assertEquals("POSTERS_APP_KEY_REJECTED", toggle().description)
+        art.statusFlow.value = ArtworkStatus.OFF
+        assertEquals("GUIDE_POSTERS_DESC", toggle().description, "a keyed build before the lookup is up: the ordinary description, no flicker")
+        env.hasTmdbKey = false
+        assertEquals("GUIDE_POSTERS_DESC_NO_KEY", toggle().description, "a keyless build says so whatever the lookup reports")
+
+        env.hasTmdbKey = true
+        assertTrue(p.onIntent(SettingsRoute.Section(SectionId.GUIDE), RowIntent.Toggle(GuideRows.POSTERS, false), PageContext(advanced = true, nowMs = 0)))
+        assertFalse(store.flow(GuideDomain).value.posters)
+        assertFalse((toggle().kind as RowKind.Toggle).on)
+        assertEquals("GUIDE_POSTERS_DESC", toggle().description, "switched off: the ordinary description")
     }
 
     @Test
@@ -178,6 +221,81 @@ class WpaPagesTest {
         assertEquals(3, store.flow(DataDomain).value.epgPastDays)
         assertEquals("SHIFT_VALUE(−1.5)", row(SectionId.GUIDE, GuideRows.SHIFT).value)
         assertFalse(pages.apply(RowIntent.Run(RowId("playlist.refresh"))), "other WPs' rows are not WP-A's")
+    }
+
+    /** (M6 time-shift commit 0, docs/design/m6-timeshift.md §12) The three rows write PlaybackPrefs; Pause only adds its sentence. */
+    @Test
+    fun timeshiftRowsWriteThePlaybackDomain() {
+        pages.apply(RowIntent.Choose(PlaybackRows.TIMESHIFT, app.thebox.core.settings.TimeshiftLength.PAUSE_ONLY.name))
+        pages.apply(RowIntent.Choose(PlaybackRows.TIMESHIFT_HOLD, app.thebox.core.settings.TimeshiftHold.MIN_10.name))
+        pages.apply(RowIntent.Choose(PlaybackRows.TIMESHIFT_PROTECT, app.thebox.core.settings.StorageProtection.OFF.name))
+        val p = store.flow(PlaybackDomain).value
+        assertEquals(app.thebox.core.settings.TimeshiftLength.PAUSE_ONLY, p.timeshift)
+        assertEquals(app.thebox.core.settings.TimeshiftHold.MIN_10, p.timeshiftHold)
+        assertEquals(app.thebox.core.settings.StorageProtection.OFF, p.storageProtection)
+        val r = row(SectionId.PLAYBACK, PlaybackRows.TIMESHIFT)
+        assertEquals("TS_PAUSE_ONLY", r.value)
+        assertEquals("PB_TIMESHIFT_DESC(TS_MIN(30),TS_GB(1.9)) PB_TIMESHIFT_PAUSE_ONLY_DESCSEPEFFECT_NEXT_TUNE", r.description)
+        assertEquals("TS_MIN(10)", row(SectionId.PLAYBACK, PlaybackRows.TIMESHIFT_HOLD).value)
+        assertEquals("OFF", row(SectionId.PLAYBACK, PlaybackRows.TIMESHIFT_PROTECT).value)
+    }
+
+    /** (M6 WP-C, docs/design/m6-timeshift.md §8.2, §12) A [FakePageEnv] that reports the ring's volume and counts Off. */
+    private class StorageEnv(var storage: TimeshiftStorageFacts?, val base: FakePageEnv = FakePageEnv()) : WpaPageEnv by base {
+        var offs = 0
+        override fun timeshiftStorage() = storage
+        override fun timeshiftOff() { offs++ }
+    }
+
+    private fun timeshiftRow(env: WpaPageEnv, store: FakeSettingsStore = FakeSettingsStore()): SettingsRow =
+        assertNotNull(WpaPages(store, SettingsTexts.KEYS, env).build(SettingsRoute.Section(SectionId.PLAYBACK), true).rows.firstOrNull { it.id == PlaybackRows.TIMESHIFT })
+
+    /** §12, lead ruling 2: Auto = 30 min on ≤ 16 GB storage, 1 hour above, from the device's storage class. */
+    @Test
+    fun timeshiftAutoFollowsTheStorageClass() {
+        val big = timeshiftRow(StorageEnv(TimeshiftStorageFacts(totalBytes = 64_000_000_000L, availableBytes = 30_000_000_000L)))
+        assertEquals("TS_AUTO(TS_HOUR)", big.value)
+        assertEquals("PB_TIMESHIFT_DESC(TS_HOUR,TS_GB(3.9))SEPEFFECT_NEXT_TUNE", big.description)
+        // The Fire TV example (WP-A's TimeshiftPolicyTest): 8 GB storage, 3 GB free → 30 min fits.
+        val fire = timeshiftRow(StorageEnv(TimeshiftStorageFacts(totalBytes = 8_000_000_000L, availableBytes = 3_000_000_000L)))
+        assertEquals("TS_AUTO(TS_MIN(30))", fire.value)
+        assertEquals("PB_TIMESHIFT_DESC(TS_MIN(30),TS_GB(1.8))SEPEFFECT_NEXT_TUNE", fire.description)
+        // Unknown storage (tests, a StatFs failure): the small-storage length.
+        assertEquals("TS_AUTO(TS_MIN(30))", timeshiftRow(StorageEnv(null)).value)
+    }
+
+    /** §8.2: free space caps the ring: "Auto (15 min: storage is limited)", and the description says what is held. */
+    @Test
+    fun timeshiftStorageIsLimited() {
+        val env = StorageEnv(TimeshiftStorageFacts(totalBytes = 8_000_000_000L, availableBytes = 2_000_000_000L))
+        val r = timeshiftRow(env)
+        assertEquals("TS_AUTO_LIMITED(TS_MIN(15))", r.value)
+        assertEquals("PB_TIMESHIFT_DESC(TS_MIN(15),TS_GB(0.9))SEPEFFECT_NEXT_TUNE", r.description)
+        val options = (r.kind as RowKind.Choice).options
+        assertEquals("TS_AUTO_LIMITED(TS_MIN(15))", options.first().label, "the Auto option reads the same")
+        // The ring's own file counts as free (it is reused): 2 GB free + 1 GB file = no limit for 30 min.
+        env.storage = TimeshiftStorageFacts(totalBytes = 8_000_000_000L, availableBytes = 2_000_000_000L, currentFileBytes = 1_000_000_000L)
+        assertEquals("TS_AUTO(TS_MIN(30))", timeshiftRow(env).value)
+    }
+
+    /** §12: Off deletes the file at once (the factory's discard path); the other values only write the store. */
+    @Test
+    fun timeshiftOffDeletesTheFileAtOnce() {
+        val env = StorageEnv(null)
+        val store = FakeSettingsStore()
+        val p = WpaPages(store, SettingsTexts.KEYS, env)
+        p.apply(RowIntent.Choose(PlaybackRows.TIMESHIFT, app.thebox.core.settings.TimeshiftLength.H_1.name))
+        assertEquals(0, env.offs)
+        p.apply(RowIntent.Choose(PlaybackRows.TIMESHIFT, app.thebox.core.settings.TimeshiftLength.OFF.name))
+        assertEquals(1, env.offs)
+        assertEquals(app.thebox.core.settings.TimeshiftLength.OFF, store.flow(PlaybackDomain).value.timeshift)
+        assertEquals("OFF", timeshiftRow(env, store).value)
+    }
+
+    /** §12 (U-N7): the network Buffer row points at Pause and rewind. */
+    @Test
+    fun bufferRowDescription() {
+        assertEquals("PB_BUFFER_DESCSEPEFFECT_REPREPARE", row(SectionId.PLAYBACK, PlaybackRows.BUFFER).description)
     }
 
     @Test

@@ -13,6 +13,12 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class ZapThroughGuideTest : GuideTestBase() {
+    /**
+     * (M6 integration 2026-10-19) `-e timeshift off|auto` sets "Pause and rewind" for the run (persisted), so the §15
+     * zap gate can compare the buffer Off and On on the M3 journey; without the argument the setting is left as it is.
+     */
+    override val switches: String =
+        androidx.test.platform.app.InstrumentationRegistry.getArguments().getString("timeshift")?.let { "ts_clear=1&timeshift=$it" } ?: ""
 
     @Test
     fun zapTimesThroughTheGuide() {

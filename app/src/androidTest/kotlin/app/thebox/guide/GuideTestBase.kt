@@ -260,11 +260,18 @@ abstract class GuideTestBase {
      * would exit), the ASK dialog is cancelled with BACK, FULL/SEARCH/SETTINGS are left with BACK.
      */
     protected fun goHome() {
-        repeat(12) {
+        repeat(16) {
             val s = ui()
             val o = s.overlay
             when {
+                // Decision 2026-10-19: Back from home opens Groups and Back again walks to the top bar, so the reset
+                // closes Groups with Right and leaves the top bar with OK on the Guide tab instead of pressing Back.
+                o is Overlay.Groups && o.menu == null -> press(KeyEvent.KEYCODE_DPAD_RIGHT, intervalMs = 300)
                 o is Overlay.Exit && !o.dialog -> Thread.sleep(2_300)
+                o == null && s.reminder == null && s.mode == ScreenMode.GUIDE && s.zone == Zone.TABS -> {
+                    press(KeyEvent.KEYCODE_DPAD_LEFT, s.tabFocused)
+                    press(KeyEvent.KEYCODE_DPAD_CENTER, intervalMs = 300)
+                }
                 s.reminder != null || o != null || s.mode != ScreenMode.GUIDE || s.zone != Zone.GRID -> press(KeyEvent.KEYCODE_BACK, intervalMs = 300)
                 else -> return
             }
@@ -279,8 +286,8 @@ abstract class GuideTestBase {
             val r = focus()?.row ?: error("no focus")
             when {
                 r == target -> return
-                r - target >= 6 -> press(KeyEvent.KEYCODE_PAGE_UP, intervalMs = 60)
-                target - r >= 6 -> press(KeyEvent.KEYCODE_PAGE_DOWN, intervalMs = 60)
+                r - target >= 5 -> press(KeyEvent.KEYCODE_PAGE_UP, intervalMs = 60)
+                target - r >= 5 -> press(KeyEvent.KEYCODE_PAGE_DOWN, intervalMs = 60)
                 r > target -> press(KeyEvent.KEYCODE_DPAD_UP, intervalMs = 60)
                 else -> press(KeyEvent.KEYCODE_DPAD_DOWN, intervalMs = 60)
             }

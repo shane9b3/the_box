@@ -49,6 +49,8 @@ class MainActivity : ComponentActivity() {
     private val search: SearchViewModel by viewModels()
     private val settings: app.thebox.ui.settings.vm.SettingsViewModel by viewModels()
     private val phone: app.thebox.ui.backup.PhoneSetupViewModel by viewModels()
+    /** (M6, docs/design/m6-channel-editor.md §3.2) The channel editor page; internal for the on-device suite. */
+    internal val channelEditor: app.thebox.ui.editor.ChannelEditorViewModel by viewModels()
 
     /** (M5 integration) WP-D's SAF requests (backup to / restore from a file) and WP-B's M3U file pick. */
     private var backupRequestId = 0L
@@ -100,9 +102,11 @@ class MainActivity : ComponentActivity() {
                 AppRoot(
                     host = host,
                     onExit = ::finish,
+                    onReady = ::reportFullyDrawn,
                     debugHint = BuildConfig.DEBUG,
                     search = { SearchScreen(search, onIdleChanged = { idle -> host.searchFieldIdle = idle }) },
                     settingsPhone = { purpose -> app.thebox.ui.backup.PhoneSetupHost(phone, purpose) },
+                    settingsEditor = { route -> app.thebox.ui.editor.ChannelEditorHost(channelEditor, route) },
                     grid = { modifier -> GuideGridHost(host.machine, renderer, modifier) },
                 )
             }
@@ -120,12 +124,17 @@ class MainActivity : ComponentActivity() {
 
     /**
      * (M5 integration, docs/design/m5-setup-settings.md §1.5a, §1.7a) The activity-owned parts of the settings pages:
-     * the phone page's keys (WP-D `PhoneScreenModel` through [PhoneSetupViewModel]), WP-D's document requests and WP-B's
-     * M3U file picker.
+     * the phone page's keys (WP-D `PhoneScreenModel` through [PhoneSetupViewModel]), the channel editor's keys and shell
+     * seams (M6), WP-D's document requests and WP-B's M3U file picker.
      */
     private fun wireSettingsPages() {
         val link = settings.machine as? app.thebox.core.settings.state.SettingsShellLink
+        // (M6, m6-channel-editor §3.2) The editor uses the settings machine's text editor, number pad and PIN seams.
+        channelEditor.attach(link)
         link?.keyHandler = handler@{ route, act ->
+            // (M6, m6-channel-editor §2.4, §3.2) The editor page's keys go to its machine; false (BACK at the bottom of
+            // its ladder) lets the settings machine pop the page. OPEN_GUIDE and EXIT never get here.
+            if (route is app.thebox.core.settings.SettingsRoute.ChannelEditor) return@handler channelEditor.act(act)
             if (route !is app.thebox.core.settings.SettingsRoute.PhoneSetup) return@handler false
             val now = System.currentTimeMillis()
             val hint = app.thebox.core.setup.lan.PhoneScreenModel.showIsolationHint(phone.server.value, phone.shownAtMs, now)

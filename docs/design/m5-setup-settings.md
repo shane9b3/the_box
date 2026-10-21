@@ -1472,6 +1472,7 @@ PlaylistSource page (edit in place, `playlist_id` and therefore every `(playlist
 | `guide.past_days` | Choice Auto / 1 / 2 / 3 / 7 | Auto (max catch-up days of enabled playlists, minimum 1, maximum 7) | G | A | `data.epgPastDays` (0 = Auto) | importer | NEXT_EPG_IMPORT |
 | `guide.future_days` | Choice 3 / 7 / 14 | 7 | G | A | `data.epgFutureDays` | importer | NEXT_EPG_IMPORT |
 | `guide.descriptions` | Toggle "Store programme descriptions" | On (Off in low-RAM mode) | G | A | `data.storeDescriptions` | importer | NEXT_EPG_IMPORT |
+| `guide.posters` | Toggle "Programme posters" (TMDB, when the guide has no picture; the app's built-in key only, `BuildConfig.TMDB_KEY` from `local.properties`; description: the privacy line, or "Needs a TMDB key: this build has none." when the build has none, or "TMDB rejected the app's key. Update The Box." after a 401; no user-key row) — owner rulings 2026-10-18 and 2026-10-19, `docs/decisions/2026-10-18-tmdb-programme-posters.md` | On | G | A | `guide.posters` | `TmdbProgrammeArtwork` (focused panel) | LIVE |
 
 SyncStatus page (product S15): first row **Update guide now** (Action, `EpgWorkRequester.importEpgNow(MANUAL)`), then one Item per playlist and EPG source with its state (Queued / Downloading 120 MB / Parsing / Done / **Failed: HTTP 403. The URL may have changed or the account expired** with menu Edit · Retry · Dismiss). Dismiss acknowledges (`SyncStatusRepository.acknowledge`).
 
@@ -1506,8 +1507,9 @@ SyncStatus page (product S15): first row **Update guide now** (Action, `EpgWorkR
 | Row | Type | Default | Scope | Vis | Storage | Read by | Effect |
 |---|---|---|---|---|---|---|---|
 | `channels.playlist` | Choice of playlist (only with two or more) | first | – | S* | – | the rows below | – |
+| `channels.editor` | Link → ChannelEditor(pid); value "Hide, sort and move channels" — the dedicated editor, first row (owner request 2026-10-18, `docs/design/m6-channel-editor.md`) | – | P | S | `channel_prefs`, `group_prefs`, `favourite` | lineups, Groups panel | LIVE |
 | `channels.groups` | Link → Groups(pid); value "64 groups · 12 hidden · 2 locked" | all shown, adult locked (applies with a PIN) | P | S | `group_prefs` | lineups, Groups panel | LIVE |
-| `channels.hidden` | Link → HiddenChannels(pid); value count | – | P | S | `channel_prefs.hidden` | lineups | LIVE |
+| `channels.hidden` | Link → HiddenChannels(pid); value count (ADVANCED since 2026-10-18 so the editor row fits the simple budget, `docs/decisions/2026-10-18-channel-editor.md`) | – | P | A | `channel_prefs.hidden` | lineups | LIVE |
 | `channels.favourites` | Link → FavouriteLists; value "3 lists" | one list "Favourites" | G | S | `favourite_list`, `favourite` | Groups panel | LIVE |
 | `channels.open_guide_on` | Choice All channels / Favourites / Last group | Last group | G | S | `guide.openGuideOn` | guide startup | NEXT_LAUNCH |
 | `channels.hide_rules` | Link → HideRules(pid); value "2 rules · 340 channels hidden" | empty | P | A | `hide_rule` | `rule_hidden` pass | LIVE (one pass) |
@@ -1591,7 +1593,7 @@ Route `Channel(identity)`. Rows: Favourite lists (MultiChoice) · Hide channel �
 
 #### 3.3.13 Simple row count
 
-Playlist page 7 (name, source, refresh, update on start, numbering, name prefix, remove) + TV guide 3 + Playback 5 + Channels & groups 4 + Interface 3 + Remote 2 + Parental 4 + Backup 2 + About 5 = **35**. Moved from product §4 S to A to meet the target: Channel order, Preferred audio language, Subtitles, Channel logos in guide, Stay unlocked, Check automatically; Account status became a card; "Include logins" became a flow step; "Forgotten PIN" became an Info line; Language and Send crash reports are deferred (D2, D3). New simple rows: Channel name prefix (owner, 2026-10-14) and Button mapping plus Up/Down in player (owner rulings).
+Playlist page 7 (name, source, refresh, update on start, numbering, name prefix, remove) + TV guide 3 + Playback 5 (from 2026-10-19: "Pause and rewind" added and "On launch" moved to A so the total holds, `docs/design/m6-timeshift.md` U-B4 / lead ruling 1) + Channels & groups 4 (from 2026-10-18: Channel editor, Groups, Favorites, Open guide on; Hidden channels moved to A, `docs/decisions/2026-10-18-channel-editor.md`) + Interface 3 + Remote 2 + Parental 4 + Backup 2 + About 5 = **35**. Moved from product §4 S to A to meet the target: Channel order, Preferred audio language, Subtitles, Channel logos in guide, Stay unlocked, Check automatically; Account status became a card; "Include logins" became a flow step; "Forgotten PIN" became an Info line; Language and Send crash reports are deferred (D2, D3). New simple rows: Channel name prefix (owner, 2026-10-14) and Button mapping plus Up/Down in player (owner rulings).
 
 **Product §4 coverage** (reviewed 2026-10-16; every row appears or is deferred): §4.2 all rows (Account status as the card); §4.3 all rows ("Time zone when the source has no offset" and per-source shift on the EpgSources page; "Daily at a set time" restored, N4; "Logos from" deferred D4); §4.4 all rows (AFR shown below API 30 with a note, N5); §4.5 all rows; §4.6 all rows except Language (D2); §4.7 all rows, "Colour keys: read-only map" superseded by the button-mapping screen; §4.8 all rows ("Forgotten PIN" as the Info line); §4.9 all rows; §4.10 all rows ("Include logins" as a flow step); §4.11 all rows except "Send crash reports" (D3); §4.12 all items on the Channel options page (Rename and Sources order stay v1.1 as the product says).
 

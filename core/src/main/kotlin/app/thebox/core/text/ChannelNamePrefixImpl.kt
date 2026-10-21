@@ -8,8 +8,6 @@ import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
-import java.util.regex.Pattern
-import java.util.regex.PatternSyntaxException
 
 /**
  * The channel-name prefix rule (docs/design/m3-guide.md §3.12; lead sign-off §7 item 10, review S5).
@@ -21,7 +19,7 @@ import java.util.regex.PatternSyntaxException
  * Thread-safe: the only state is the compiled custom regex, published through one volatile reference.
  */
 class ChannelNamePrefixImpl : ChannelNamePrefix {
-    private class CompiledRegex(val source: String, val pattern: Pattern?)
+    private class CompiledRegex(val source: String, val pattern: UserRegex?)
 
     @Volatile private var compiled: CompiledRegex? = null
 
@@ -40,8 +38,8 @@ class ChannelNamePrefixImpl : ChannelNamePrefix {
             val p = pattern(regex) ?: return auto(name, groupName)
             return try {
                 val head = if (name.length > REGEX_MAX_CHARS) name.substring(0, REGEX_MAX_CHARS) else name
-                val m = p.matcher(head)
-                if (!m.lookingAt() || m.end() == 0) null else finish(name.substring(m.end()))
+                val end = p.prefixEnd(head)
+                if (end == null) null else finish(name.substring(end))
             } catch (e: StackOverflowError) {
                 BoxLog.w(TAG, "custom prefix regex overflowed; using Auto")
                 compiled = CompiledRegex(regex, null)
@@ -66,20 +64,14 @@ class ChannelNamePrefixImpl : ChannelNamePrefix {
     private fun sortedLiterals(literals: List<String>): List<String> =
         if (literals.size < 2) literals else literals.sortedByDescending { it.length }
 
-    private fun pattern(regex: String): Pattern? {
+    private fun pattern(regex: String): UserRegex? {
         val c = compiled
         if (c != null && c.source == regex) return c.pattern
-        // (M5 integration, G-L19, WP-D's finding) Android's Matcher hands ICU a copy of the input, so a match cannot be
-        // time-boxed on the device: the exponential shapes are refused up front, as for hide rules (§3.7.3).
-        if (RegexSafety.isRisky(regex)) {
-            BoxLog.w(TAG, "custom prefix regex refused as too slow; using Auto")
-            compiled = CompiledRegex(regex, null)
-            return null
-        }
         val p = try {
-            Pattern.compile(regex)
-        } catch (e: PatternSyntaxException) {
-            BoxLog.w(TAG, "custom prefix regex does not compile; using Auto")
+            UserRegex.compile(regex)
+        } catch (e: IllegalArgumentException) {
+            // Includes saved pre-RE2 syntax and imported patterns: fail safely without a Java/ICU fallback.
+            BoxLog.w(TAG, "custom prefix regex unsupported or over budget; using Auto")
             null
         }
         compiled = CompiledRegex(regex, p)

@@ -31,11 +31,13 @@ interface GroupAdminDao {
     @Query("SELECT COUNT(*) FROM channel_group WHERE playlist_id = :playlistId AND kind = :kind AND missing_since IS NULL")
     suspend fun count(playlistId: Long, kind: Int): Int
 
+    /** v5 (docs/design/m6-channel-editor.md §3.6 row 13): the channel count is effective. */
     @Query(
         "SELECT g.kind, g.group_key, COALESCE(gp.custom_name, g.name) AS name, g.is_adult, g.rule_hidden, " +
             "COALESCE(gp.hidden, 0) AS hidden, gp.locked AS locked, " +
-            "(SELECT COUNT(*) FROM channel c WHERE c.group_id = g.id AND c.missing_since IS NULL) AS channels " +
+            "COALESCE(ec.n, 0) AS channels " +
             "FROM channel_group g LEFT JOIN group_prefs gp ON gp.playlist_id = g.playlist_id AND gp.kind = g.kind AND gp.group_key = g.group_key " +
+            "LEFT JOIN (" + GroupDao.EFFECTIVE_COUNTS + ") ec ON ec.gid = g.id " +
             "WHERE g.playlist_id = :playlistId AND g.kind = :kind AND g.missing_since IS NULL " +
             "ORDER BY COALESCE(gp.custom_sort_index, 2147483647), g.sort_index, g.id LIMIT :limit OFFSET :offset",
     )

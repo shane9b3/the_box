@@ -110,10 +110,33 @@ import app.thebox.player.internal.StreamUrlResolver
 import app.thebox.player.internal.TransportFactory
 import app.thebox.player.internal.TsCompat
 import app.thebox.player.internal.TuneTargetKey
+import app.thebox.core.playback.timeshift.BufferOff
+import app.thebox.core.playback.timeshift.PinOwner
+import app.thebox.core.playback.timeshift.RecordStop
+import app.thebox.core.playback.timeshift.RingBoundaryException
+import app.thebox.core.playback.timeshift.RingEndException
+import app.thebox.core.playback.timeshift.RingException
+import app.thebox.core.playback.timeshift.RingPositionLostException
+import app.thebox.core.playback.timeshift.RingWriterListener
+import app.thebox.core.playback.timeshift.SegmentReason
+import app.thebox.core.playback.timeshift.TimeshiftConstants
+import app.thebox.player.api.LocalBufferState
+import app.thebox.player.api.LocalSeekResult
+import app.thebox.player.datasource.LiveFailureKind
+import app.thebox.player.datasource.LiveStreamException
+import app.thebox.player.internal.RingOpen
+import app.thebox.player.internal.TimeshiftGrant
+import app.thebox.player.internal.TimeshiftPrepared
+import app.thebox.player.internal.TimeshiftSession
+import app.thebox.player.internal.TimeshiftSessionFactory
+import app.thebox.player.timeshift.PendingTimeshiftPreparation
+import app.thebox.player.timeshift.NoTimeshiftFactory
+import app.thebox.player.timeshift.RingReaderTelemetry
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -180,6 +203,17 @@ internal class PlaybackControllerImpl @Inject constructor(
      * previous channel, retry, resume after a lifecycle stop). Called on main; WP-C's implementation must be main-safe.
      */
     private val tuneGuard: TuneGuard,
+    /**
+     * (M6 time-shift, docs/design/m6-timeshift.md §7) The split session factory (A-C1); its three settings come in
+     * [PlaybackSettings] (lead reconciliation R10). The default (tests, an app without the time-shift module) keeps every
+     * cycle unbuffered whatever the setting says: today's pipeline exactly.
+     */
+    private val timeshift: TimeshiftSessionFactory = NoTimeshiftFactory,
+    /**
+     * (M6, §9.1, A-C5) The gap rule's owner. Not consulted yet: the A-C5 rule is coded in [onRingBoundary] until WP-C's
+     * router lands; the switch is one line (design "Lead reconciliation — WP-A/WP-B", R14).
+     */
+    private val timelineRouter: app.thebox.core.catchup.archive.TimelineRouter = app.thebox.core.catchup.archive.TimelineRouterImpl(),
 ) : PlaybackController, LifecycleCoordinator.Target {
 
     // ------------------------------------------------------------------ public flows
@@ -212,6 +246,9 @@ internal class PlaybackControllerImpl @Inject constructor(
     /** (M4, §2.9) Mirrors [previousIdentity]: what [previousChannel] would tune (M2 §3.1.1 rule). */
     private val _previous = MutableStateFlow<ChannelIdentity?>(null)
     override val previous: StateFlow<ChannelIdentity?> = _previous.asStateFlow()
+    /** (M6 time-shift, §16.2) The current live cycle's local buffer, ≤ 1 Hz; null = no live cycle. */
+    private val _localBuffer = MutableStateFlow<LocalBufferState?>(null)
+    override val localBuffer: StateFlow<LocalBufferState?> = _localBuffer.asStateFlow()
 
     override val diagnostics: PlaybackDiagnostics = object : PlaybackDiagnostics {
         override fun events() = eventLog.events()
@@ -276,6 +313,14 @@ internal class PlaybackControllerImpl @Inject constructor(
     private var zapGeneration = 0
     private var pollJob: Job? = null
     private val zapMutex = Mutex()
+    /** (M6 time-shift, §7.4) Writer-scoped ladder work (delay, resolve, restart); never cancelled by a reader re-prepare. */
+    private var writerJob: Job? = null
+    /** (Fix pass UX-B2) Skips a pending LocalGap locally when no archive tune arrived within GAP_HANDOFF_TIMEOUT_MS. */
+    private var gapFallbackJob: Job? = null
+    private var cycleSeq = 0L
+    /** (M6, §7.5) A lifecycle stop ended a paused or behind buffered cycle: the next tune says so once. */
+    private var leftAppPending = false
+    private var lastLocalPublishAtMs = 0L
 
     /** What a cycle plays. */
     private sealed interface Spec {
@@ -297,6 +342,8 @@ internal class PlaybackControllerImpl @Inject constructor(
     private class Cycle(val spec: Spec, val identity: ChannelIdentity?, val startedAtMs: Long) {
         val zap = ZapTimings()
         var firstTuneId = 0L
+        /** (Fix pass UX-S1) `LocalBufferState.cycleId`: unique per cycle, set when the cycle is created. */
+        var cycleId = 0L
         var currentTuneId = 0L
         var title: String? = null
         var counters = LadderCounters()
@@ -333,7 +380,12 @@ internal class PlaybackControllerImpl @Inject constructor(
         val softwareAudioMimes = LinkedHashSet<String>()
         var forceStereo = false
         var tunnelingOff = false
+        /** The stream-switch deadline: tune start + timeout, moved once by [extendSwitchWindow]. */
+        var switchDeadlineAtMs = 0L
+        var switchExtended = false
         var audioDropped = false
+        /** (L33r) The TS guard regenerates the audio timestamps for the sessions of this cycle. */
+        var audioTsRepair = false
         var warning: PlaybackWarning? = null
         var tsCompat = 0
         /**
@@ -345,6 +397,40 @@ internal class PlaybackControllerImpl @Inject constructor(
         var failureCount = 0
         var rebufferCount = 0
         var reconnectNoticeShown = false
+
+        // (M6 time-shift, §7) The cycle's local buffer.
+        /** The cycle's time-shift session (null = unbuffered, or not started yet). */
+        var ts: TimeshiftSession? = null
+        /** Storage granted by `prepare()`; retries restart the existing session instead of reusing a consumed grant. */
+        var tsGrant: TimeshiftGrant? = null
+        var tsPrepare: PendingTimeshiftPreparation? = null
+        /** The buffered/unbuffered decision was taken (once per cycle). */
+        var tsDecided = false
+        var tsOff: BufferOff? = null
+        /** The writer committed its first bytes (A-C2: before it, writer failures take the one first-open route). */
+        var firstByteSeen = false
+        /** PTS mono of the current reader session's position 0 (§6 step 4); < 0 = not known yet. */
+        var readerOrigin = -1L
+        var readerStartOffset = 0L
+        /** An active LOCAL time-shift: paused, or seeked behind live and not yet back at the head (§9.1, A-C5). */
+        var localShift = false
+        var pausedAtMs = 0L
+        /** A cycle-scoped decision deferred until the reader reaches the head (§7.4). */
+        var deferred: Pair<LadderDecision, FailureSignal>? = null
+        /** The backlog of the cycle's first connection (A-C3): newest PTS mono − first-media PTS mono. */
+        var latencyAtTuneMs = 0L
+        /** After a non-failure ring end the writer restarted: jump to its first RAP once the index has one (§7.4). */
+        var liveAfterRestartFrom = -1L
+        /** Set while the current failure came from the recorder (writer path, or detector (a) at the head). */
+        var failureFromWriter = false
+        /** The last SavingStopped notice (one toast per stop). */
+        var stopNotice: RecordStop? = null
+        /** The last reason saving stopped this cycle (writer self-stop or [stopSaving]); the A-C5 `stop` argument (R14). */
+        var lastStop: RecordStop? = null
+        /** (Fix pass S2) The last writer segment storm (mono ms); a repeat within WRITER_STORM_REPEAT_MS is cycle-scoped. */
+        var lastStormAtMs = Long.MIN_VALUE
+        /** (Fix pass UX-B2) A gap handed to the provider (`LocalGap`) that has not been acted on yet. */
+        var pendingGap: RingBoundaryException? = null
 
         // Buffer and video facts.
         var profile: BufferProfile? = null
@@ -362,7 +448,12 @@ internal class PlaybackControllerImpl @Inject constructor(
         val delayMs: Long = 0,
         val reuseResolved: Boolean = false,
         val refreshAccount: Boolean = false,
+        /** (M6, §6, §7.6 `Plan.readerOnly`) Re-prepare the ring reader only: no facts, resolve, broker or writer. */
+        val reader: ReaderStart? = null,
     )
+
+    /** (M6, §6) Where a reader session opens: a RAP's packet and that RAP's PTS mono (< 0 = resolved at first media). */
+    private class ReaderStart(val offset: Long, val originMono: Long)
 
     // ------------------------------------------------------------------ tune API
 
@@ -495,7 +586,9 @@ internal class PlaybackControllerImpl @Inject constructor(
         if (c.isArchive || c.cardShown) return
         val st = _state.value
         if (st !is PlaybackState.Playing && st !is PlaybackState.Buffering && st !is PlaybackState.Connecting && st !is PlaybackState.Stalled) return
-        if (st is PlaybackState.Playing && st.paused) return // a paused live tune resumes with a fresh tune anyway
+        // A paused unbuffered live tune resumes with a fresh tune anyway; (M6, §7.6) a buffered one re-prepares its reader
+        // at the pin and stays paused.
+        if (st is PlaybackState.Playing && st.paused && c.ts == null) return
         eventLog.add(PlaybackEventType.DECISION, c.currentTuneId, "reapply_settings", "")
         BoxLog.i(TAG) { "settings changed: re-preparing the live tune" }
         val waiting: ((NowPlaying) -> PlaybackState)? =
@@ -527,6 +620,13 @@ internal class PlaybackControllerImpl @Inject constructor(
         if (index !in 0 until count || index == c.resolved?.baseIndex) return
         if (c.identity != null && refused(c.identity, c.isArchive)) return
         c.baseIndex = index
+        // (M6, §7.6) Buffered: the recorder restarts on the chosen base; the reader (and a time-shifted viewer) is untouched.
+        // (Fix pass B2) Before the first byte too: the writer restarts in its own session (the reader still waits at the
+        // tail), never a second session on the same grant, which left the generation ended.
+        if (c.ts != null) {
+            restartWriterScoped(c, delayMs = 0, refreshAccount = false, reuseResolved = false, waiting = false)
+            return
+        }
         launchSession(c, Plan(), waiting = null)
     }
 
@@ -571,6 +671,9 @@ internal class PlaybackControllerImpl @Inject constructor(
             is Spec.Archive -> spec.tune.identity
         }
         cycle?.let { old ->
+            // (M6, §7.2, A-S1) The old cycle's recorder: call cancelled and lease released before anything new opens. A
+            // zap keeps the file for a logical reset; a catch-up request ends the ring for good (§8.3).
+            closeTimeshift(old, discardFile = spec is Spec.Archive)
             finishZapRecord(old, "superseded")
             if (old.identity != null && old.identity != identity && old.firstMediaReached &&
                 now - old.firstMediaAtMs >= PREVIOUS_CHANNEL_MIN_PLAY_MS
@@ -580,6 +683,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         }
         cancelCycleJobs()
         val c = Cycle(spec, identity, now)
+        c.cycleId = ++cycleSeq
         cycle = c
         // (follow-up 2026-10-14, half of Later N-L2) Per (playlist, stable key): the same stable key in another playlist
         // is another channel and must not share the 5-min escalation windows.
@@ -588,24 +692,54 @@ internal class PlaybackControllerImpl @Inject constructor(
         // The first-frame counter survives the tune: the shell waits for "the next one" (H-S10).
         _video.value = VideoInfo(aspectMode = settings.current.defaultAspect, renderedFirstFrames = _video.value.renderedFirstFrames)
         _tracks.value = TrackInfo()
+        if (leftAppPending) {
+            leftAppPending = false
+            _notices.tryEmit(PlaybackNotice.LeftAppCleared)
+        }
+        publishLocalBuffer(force = true)
         launchSession(c, Plan(refreshAccount = refreshAccount), waiting = null)
         c.firstTuneId = c.currentTuneId
         eventLog.add(PlaybackEventType.TUNE, c.currentTuneId, if (c.isArchive) "archive" else "live", identity?.stableKey?.value ?: "direct")
         traceBegin(c.firstTuneId)
+        c.switchDeadlineAtMs = c.startedAtMs + settings.current.streamSwitchTimeoutMs
+        armSwitchTimeout(c)
+    }
+
+    private fun armSwitchTimeout(c: Cycle) {
+        switchTimeoutJob?.cancel()
         switchTimeoutJob = scope.launch {
-            delay(settings.current.streamSwitchTimeoutMs)
+            delay((c.switchDeadlineAtMs - clock.nowMs()).coerceAtLeast(0L))
             onSwitchTimeout(c)
         }
+    }
+
+    /**
+     * Device finding 2026-10-17 (Sony Bravia 4K, MediaTek HEVC, tunneling on): the decoder-stuck verdict came at 14.1 s,
+     * the ladder's DisableTunnelingAndReprepare restarted the session, and the 15 s switch deadline failed the cycle
+     * 0.6 s later, so the repair never ran and the user retried into the same tunneled failure. A repair that changes
+     * the decoder pipeline is a new attempt: once per cycle it gets its own switch window. Plain re-prepares, retries
+     * and re-resolves do not (they would loop), so a cycle still ends within two windows.
+     */
+    private fun extendSwitchWindow(c: Cycle) {
+        if (c.firstMediaReached || c.switchExtended) return
+        c.switchExtended = true
+        c.switchDeadlineAtMs = clock.nowMs() + settings.current.streamSwitchTimeoutMs
+        armSwitchTimeout(c)
+        BoxLog.i(TAG) { "switch window extended once for a pipeline repair" }
     }
 
     /**
      * Ends the current session (transport first: the old call is cancelled before anything new opens, §3.5.2), shows
      * [waiting] (default Connecting(RESOLVING)) and runs steps 3–7 of §3.1.1 for a new session.
      */
-    private fun launchSession(c: Cycle, plan: Plan, waiting: ((NowPlaying) -> PlaybackState)?) {
+    private fun launchSession(c: Cycle, planIn: Plan, waiting: ((NowPlaying) -> PlaybackState)?) {
         sessionJob?.cancel()
+        // (M6, §7.6) In a buffered cycle every other re-open is reader-only, at the pin (a time-shifted viewer keeps
+        // their place); writer restarts never come through here.
+        val plan = if (c.ts != null && planIn.reader == null) planIn.copy(reader = pinStart(c)) else planIn
         val reuse = if (plan.reuseResolved) c.resolved else null
-        endSession()
+        // (M6, §6 step 3) A reader-only re-prepare holds the last frame: no player.stop() between the two prepares.
+        endSession(stopPlayer = plan.reader == null || c.ts == null)
         val id = ++lastTuneId
         c.currentTuneId = id
         val np = nowPlaying(c)
@@ -625,6 +759,28 @@ internal class PlaybackControllerImpl @Inject constructor(
     private suspend fun runSession(c: Cycle, id: Long, plan: Plan, reuse: ResolvedStream?) {
         if (plan.delayMs > 0) delay(clipDelay(c, plan.delayMs))
         val e = ensureEngine()
+        val readerStart = plan.reader
+        if (readerStart != null && c.ts != null) {
+            runReaderSession(e, c, id, readerStart)
+            return
+        }
+        // (M6, §7.1, A-C1, A-N5) Storage is prepared on IO in parallel with the facts and the resolve. Setting Off: no
+        // extra work at all (the zap gate).
+        if (!c.tsDecided && c.tsPrepare == null && c.spec is Spec.Live) {
+            val prefs = settings.current
+            if (timeshift === NoTimeshiftFactory || prefs.timeshift == app.thebox.core.settings.TimeshiftLength.OFF) {
+                c.tsDecided = true
+                c.tsOff = BufferOff.SETTING_OFF
+                // (Integration 2026-10-19, I-TS-20a/30) The tune's first publish (in tune()) had no reason yet, and the
+                // post-resolve publish is skipped for a decided cycle: publish the Off reason now, so the machine shows
+                // PAUSE_NO_REWIND_OFF instead of the unknown-state plain pause.
+                publishLocalBuffer(force = true)
+                launchPrepareForOff(prefs)
+            } else {
+                val max = maxConnections(c)
+                c.tsPrepare = PendingTimeshiftPreparation(timeshift, scope, ioDispatcher, prefs, max)
+            }
+        }
         // O-3: a plain first session loads its facts and resolves in one IO hop; the main thread only applies results.
         var early: ResolveOutcome? = null
         if (!c.factsLoaded && reuse == null && !plan.refreshAccount) {
@@ -681,18 +837,37 @@ internal class PlaybackControllerImpl @Inject constructor(
         // Step 5: memory and runtime switches.
         applySwitches(e, c, resolved)
 
+        // (M6, §7.1) A live TS cycle with a storage grant gets its time-shift session now (main, right after the resolve).
+        if (!c.tsDecided || (c.tsGrant != null && c.ts == null)) {
+            decideTimeshift(c, format)
+            if (!current(c, id)) return
+            if (c.tsGrant != null && c.ts == null) startTimeshift(c, resolved) else publishLocalBuffer(force = true)
+        }
+        val ts = c.ts
+        val ring = if (ts != null) {
+            c.readerOrigin = -1L
+            c.readerStartOffset = ts.ring.tail
+            // S7: the cycle's first reader opens at the generation's first RAP (position 0 = the origin's PTS).
+            RingOpen(ts.ring, ts.ring.generation, ts.ring.tail, ts.readerTelemetry { null }, firstRap = true)
+        } else null
+
         // Step 6: session and MediaSource.
         val ctx = StreamSessionContext(
             tuneId = id,
             resolved = resolved,
             broker = brokers.broker(resolved.brokerKey),
             leaseKind = LeaseKind.PLAYBACK,
-            sinkFactory = null,
+            // (diagnosis 2026-10-18) Debug capture of the raw TS; null in release (TsDebugOverrides is debug-set only).
+            sinkFactory = app.thebox.player.engine.TsDebugOverrides.captureDir?.let { dir ->
+                androidx.media3.datasource.DataSink.Factory { app.thebox.player.datasource.FileCaptureSink(dir, id) }
+            },
             onEvent = { type, code, detail -> mainHandler.post { onSessionEvent(id, type, code, detail) } },
+            repairAudioTimestamps = c.audioTsRepair,
         )
         val s = TuneSession(id, resolved, ctx, transport, format, clock.nowMs())
+        s.ringGeneration = ring?.generation ?: -1L
         val built = try {
-            mediaSources.build(ctx, format, if (c.tsCompat > 0) TsCompat.MULTI_PMT else TsCompat.DEFAULT, transport, c.archive?.request)
+            mediaSources.build(ctx, format, if (c.tsCompat > 0) TsCompat.MULTI_PMT else TsCompat.DEFAULT, transport, c.archive?.request, ring)
         } catch (ex: UnsupportedStreamFormatException) {
             val what = ex.scheme?.let { "scheme $it" } ?: ex.format.name
             BoxLog.w(TAG, "media source $id not built: unsupported $what")
@@ -781,6 +956,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         c.accountGate = gateOf(f.account)
         c.memory = f.memory
         c.tsCompat = f.memory.tsCompatLevel
+        if (f.memory.tunnelingOff) c.tunnelingOff = true
         c.backups = f.backups
     }
 
@@ -898,22 +1074,26 @@ internal class PlaybackControllerImpl @Inject constructor(
     /** (M4, §2.9 `VideoInfo.decoderOverride`) The channel's own choice (picker or memory); null = the global setting. */
     private fun channelDecoderOverride(c: Cycle): VideoDecoderMode? = c.decoderOverride ?: c.memory.videoDecoder
 
-    /** Ends the transport of the current session, then stops the player (keeps the last frame; never clears the surface). */
-    private fun endSession() {
+    /**
+     * Ends the transport of the current session, then stops the player (keeps the last frame; never clears the surface).
+     * (M6, §6 step 3) [stopPlayer] = false for a ring reader re-prepare: the next `setMediaSource` + `prepare` replaces the
+     * source with no `stop()` in between, so the last frame stays.
+     */
+    private fun endSession(stopPlayer: Boolean = true) {
         if (_cues.value.isNotEmpty()) _cues.value = emptyList()
         val s = session ?: return
         session = null
         settledSession = null
         eng?.parts?.watchdog?.stop()
         s.end()
-        player?.stop()
+        if (stopPlayer) player?.stop()
     }
 
     private fun clipDelay(c: Cycle, delayMs: Long): Long {
         // (M4) Behind the unlimited-retry card the switch timeout has already passed: clipping to it would turn L19's
         // UNLIMITED_RETRY_INTERVAL_MS into back-to-back reconnects.
         if (c.firstMediaReached || c.cardShown) return delayMs
-        val left = c.startedAtMs + settings.current.streamSwitchTimeoutMs - clock.nowMs()
+        val left = c.switchDeadlineAtMs - clock.nowMs()
         return delayMs.coerceAtMost(left.coerceAtLeast(0))
     }
 
@@ -1093,6 +1273,33 @@ internal class PlaybackControllerImpl @Inject constructor(
     private fun onPlayerFailure(error: PlaybackException) {
         val c = cycle ?: return
         val s = session ?: return
+        // (M6, §5.3, §7.4) A buffered reader's ring exceptions are routed before the classifier's network rows and the
+        // ladder: boundaries, the end of saving, a lost position and disk errors.
+        if (c.ts != null) {
+            val ringEx = FailureClassifier.ringException(error)
+            if (ringEx != null) {
+                if (error.timestampMs < s.startedAtMs) {
+                    eventLog.add(PlaybackEventType.DECISION, s.tuneId, "ring_stale", ringEx.javaClass.simpleName)
+                    return
+                }
+                if (ringEx is RingEndException && ringEx.stop == RecordStop.SESSION_END) {
+                    // (Fix pass S3) Stale only when this reader's generation is not the current session's ring's. On
+                    // the current generation the ring was closed under a live cycle (a discard racing prepare/start):
+                    // a fresh cycle, never an indefinitely frozen picture.
+                    val ts = c.ts
+                    if (ts == null || s.ringGeneration != ts.ring.generation) {
+                        eventLog.add(PlaybackEventType.DECISION, s.tuneId, "ring_stale", ringEx.javaClass.simpleName)
+                        return
+                    }
+                    eventLog.add(PlaybackEventType.DECISION, s.tuneId, "ring_closed", "relaunch")
+                    BoxLog.w(TAG, "time-shift ring closed under the current cycle; relaunching")
+                    startCycle(c.specForRestart())
+                    return
+                }
+                onReaderRingException(c, s, ringEx)
+                return
+            }
+        }
         val stats = safeStats()
         val facts = FailureClassifier.Facts(
             currentTuneId = s.tuneId,
@@ -1102,6 +1309,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             lastLoadDataType = s.lastLoadDataType,
             bytesReceived = s.telemetry?.bytesTotal ?: 0,
             passthroughActive = stats.audioPassthrough,
+            writerTuneId = c.ts?.writerTuneId,
         )
         val signal = classifier.classify(error, facts)
         if (signal == null) {
@@ -1116,7 +1324,9 @@ internal class PlaybackControllerImpl @Inject constructor(
         val c = cycle ?: return
         val s = session ?: return
         eventLog.add(PlaybackEventType.STALL, s.tuneId, verdict.kind.name, verdict.evidence)
-        onFailure(c, FailureSignal.Stall(verdict.kind), null)
+        // (M6, §5.2, §7.4) Detector (a) at the head of a buffered cycle is the recorder's silence: writer-scoped.
+        val fromWriter = c.ts != null && verdict.kind == StallKind.NO_BYTES
+        onFailure(c, FailureSignal.Stall(verdict.kind), null, fromWriter)
     }
 
     private fun onTracks(tracks: Tracks) {
@@ -1161,8 +1371,10 @@ internal class PlaybackControllerImpl @Inject constructor(
             c.firstMediaReached = true
             c.firstMediaAtMs = now
             c.zap.firstMediaMs = now - c.startedAtMs
-            // WP-B emits no FIRST_BYTE event; its telemetry stamps the first byte on the same monotonic clock.
-            val firstByteAt = s.telemetry?.firstByteAtMs ?: 0L
+            // WP-B emits no FIRST_BYTE event; its telemetry stamps the first byte on the same monotonic clock. (M6) A
+            // buffered cycle's first byte is the recorder's (the network), not the reader's.
+            val firstByteAt = c.ts?.writerTelemetry?.firstByteAtMs?.takeIf { it > 0 } ?: s.telemetry?.firstByteAtMs ?: 0L
+            c.ts?.let { ts -> measureLatencyAtTune(c, ts) }
             if (firstByteAt > 0L && firstByteAt >= c.startedAtMs) {
                 val fromTelemetry = firstByteAt - c.startedAtMs
                 c.zap.firstByteMs = c.zap.firstByteMs?.let { minOf(it, fromTelemetry) } ?: fromTelemetry
@@ -1268,6 +1480,11 @@ internal class PlaybackControllerImpl @Inject constructor(
                     setActiveState(c, st.copy(phase = ConnectPhase.BUFFERING_INITIAL))
                 }
             }
+            // (device finding 2026-10-18) The TS guard's stuck-audio verdict is a failure signal for the ladder (L33t).
+            PlaybackEventType.STALL -> if (code == app.thebox.player.engine.MediaSourceBuilder.STUCK_AUDIO_CODE) {
+                BoxLog.i(TAG) { "audio timestamps stuck ($detail): asking the ladder" }
+                onFailure(c, FailureSignal.AudioTimestampsStuck, null)
+            }
             PlaybackEventType.RECONNECT -> {
                 val st = _state.value
                 if ((st is PlaybackState.Playing && !st.paused) || (st is PlaybackState.Buffering && st.cause == BufferingCause.REBUFFER)) {
@@ -1331,8 +1548,9 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     // ------------------------------------------------------------------ ladder (§4.3)
 
-    private fun onFailure(c: Cycle, signal: FailureSignal, error: PlaybackException?) {
+    private fun onFailure(c: Cycle, signal: FailureSignal, error: PlaybackException?, fromWriter: Boolean = false) {
         if (cycle !== c) return
+        c.failureFromWriter = fromWriter
         val now = clock.nowMs()
         val id = c.currentTuneId
         c.lastSignal = signal
@@ -1355,7 +1573,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         c.counters = result.second
         var decision = result.first
         if (decision !is LadderDecision.Fail && !c.firstMediaReached &&
-            now - c.startedAtMs >= settings.current.streamSwitchTimeoutMs &&
+            now >= c.switchDeadlineAtMs &&
             !(settings.current.reconnectAttempts < 0 && isTransient(signal))
         ) {
             decision = LadderDecision.Fail(PlaybackError(eventualCode(signal), ErrorDetail(signal = signal.name)))
@@ -1371,6 +1589,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         return LadderContext(
             nowMs = now,
             msSinceTuneStart = now - c.startedAtMs,
+            msSinceSwitchWindowStart = now - (c.switchDeadlineAtMs - settings.current.streamSwitchTimeoutMs),
             firstFrameRendered = c.firstMediaReached,
             isLive = !c.isArchive,
             isArchive = c.isArchive,
@@ -1412,6 +1631,8 @@ internal class PlaybackControllerImpl @Inject constructor(
         val id = c.currentTuneId
         eventLog.add(PlaybackEventType.DECISION, id, decisionName(d), signal.name)
         BoxLog.i(TAG) { "decision ${decisionName(d)} for ${signal.name}" }
+        // (M6, §7.4) A buffered cycle routes writer-scoped, cycle-scoped and behind-live decisions first.
+        if (c.ts != null && executeBuffered(c, d, signal)) return
         when (d) {
             is LadderDecision.Fail -> fail(c, d.error, signal)
             is LadderDecision.RetrySame -> restart(c, d, signal, Plan(delayMs = d.delayMs, reuseResolved = c.resolved != null))
@@ -1441,12 +1662,17 @@ internal class PlaybackControllerImpl @Inject constructor(
                     c.memory = c.memory.copy(tsCompatLevel = 1)
                     c.compatPending = isDecoderTypeSignal(signal)
                     if (!c.compatPending) BoxLog.i(TAG) { "compat raised for this cycle only (${signal.name})" }
+                    extendSwitchWindow(c)
                 }
                 restart(c, d, signal, Plan(reuseResolved = c.resolved != null))
             }
             LadderDecision.DisableTunnelingAndReprepare -> {
                 c.tunnelingOff = true
+                // Learned for the channel (ChannelPlaybackMemory.tunnelingOff): the next tune starts untunneled.
+                c.memory = c.memory.copy(tunnelingOff = true)
+                c.identity?.let { id -> remember(id) { it.copy(tunnelingOff = true) } }
                 _notices.tryEmit(PlaybackNotice.TunnelingDisabled)
+                extendSwitchWindow(c)
                 restart(c, d, signal, Plan(reuseResolved = c.resolved != null))
             }
             LadderDecision.SoftwareVideoAndReprepare -> {
@@ -1455,6 +1681,7 @@ internal class PlaybackControllerImpl @Inject constructor(
                 // (M5 integration) The event types M2 declared for the fallbacks (diagnostics, I-M5-27).
                 eventLog.add(PlaybackEventType.VIDEO_FALLBACK, c.currentTuneId, "software_video", "")
                 _notices.tryEmit(PlaybackNotice.VideoDecoderSwitchedToSoftware)
+                extendSwitchWindow(c)
                 restart(c, d, signal, Plan(reuseResolved = c.resolved != null))
             }
             is LadderDecision.DisablePassthroughAndReprepare -> {
@@ -1462,12 +1689,19 @@ internal class PlaybackControllerImpl @Inject constructor(
                 c.warning = PlaybackWarning.PASSTHROUGH_DISABLED
                 eventLog.add(PlaybackEventType.AUDIO_FALLBACK, c.currentTuneId, "passthrough_off", d.mimeType ?: "*")
                 _notices.tryEmit(PlaybackNotice.PassthroughDisabled(d.mimeType, forced = settings.current.audioOutput == AudioOutputMode.FORCE_PASSTHROUGH))
+                extendSwitchWindow(c)
                 restart(c, d, signal, Plan(reuseResolved = c.resolved != null))
             }
             is LadderDecision.SoftwareAudioAndReprepare -> {
                 c.softwareAudioMimes += d.mimeType
                 eventLog.add(PlaybackEventType.AUDIO_FALLBACK, c.currentTuneId, "software_audio", d.mimeType)
                 _notices.tryEmit(PlaybackNotice.AudioDecoderSwitched(toSoftware = true, mimeType = d.mimeType))
+                extendSwitchWindow(c)
+                restart(c, d, signal, Plan(reuseResolved = c.resolved != null))
+            }
+            LadderDecision.RepairAudioTimestampsAndReprepare -> {
+                c.audioTsRepair = true
+                eventLog.add(PlaybackEventType.AUDIO_FALLBACK, c.currentTuneId, "audio_ts_repair", "")
                 restart(c, d, signal, Plan(reuseResolved = c.resolved != null))
             }
             LadderDecision.StereoAndReprepare -> {
@@ -1557,6 +1791,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         sessionJob?.cancel()
         switchTimeoutJob?.cancel()
         livePauseJob?.cancel()
+        closeTimeshift(c, discardFile = false)
         endSession()
         stopPolling()
         c.cardShown = false
@@ -1607,12 +1842,17 @@ internal class PlaybackControllerImpl @Inject constructor(
         if (st !is PlaybackState.Connecting && st !is PlaybackState.Stalled) {
             setState(PlaybackState.Playing(nowPlaying(c), paused = true, warning = c.warning))
         }
-        if (!c.isArchive) {
+        if (!c.isArchive && c.ts != null) {
+            // (M6, §7.2) Buffered: the recorder keeps saving; no livePauseJob, no connection release, no re-tune.
+            pauseBuffered(c)
+        } else if (!c.isArchive) {
             livePauseJob?.cancel()
             livePauseJob = scope.launch {
                 delay(LIVE_PAUSE_RELEASE_MS)
                 if (cycle === c && c.paused) {
                     BoxLog.i(TAG) { "live pause: releasing the connection" }
+                    // (Fix pass S5) A recorder that started meanwhile must not outlive the released tune.
+                    closeTimeshift(c, discardFile = false)
                     sessionJob?.cancel()
                     switchTimeoutJob?.cancel()
                     endSession()
@@ -1633,6 +1873,9 @@ internal class PlaybackControllerImpl @Inject constructor(
                     c.paused = false
                     player?.playWhenReady = true
                     setState(PlaybackState.Playing(nowPlaying(c), paused = false, warning = c.warning))
+                } else if (c.ts != null) {
+                    // (M6, §7.2) Continue exactly where it stopped: same session, no new connection, no LiveResumed.
+                    resumeBuffered(c)
                 } else {
                     // Live has no time-shift in v1: resume re-tunes at the live edge with a fresh resolve.
                     startCycle(c.specForRestart())
@@ -1650,6 +1893,7 @@ internal class PlaybackControllerImpl @Inject constructor(
                 if (!c.paused) return
                 c.paused = false
                 livePauseJob?.cancel()
+                c.ts?.onResume()
                 val s = session
                 if (s != null && settledSession === s) player?.playWhenReady = true
             }
@@ -1661,6 +1905,12 @@ internal class PlaybackControllerImpl @Inject constructor(
         val c = cycle
         cancelPendingZap()
         cancelCycleJobs()
+        // (M6, §7.5, §8.3) The saved part and the file are discarded: writer call cancelled, lease released, fd closed,
+        // then unlinked.
+        if (c != null) closeTimeshift(c, discardFile = true)
+        // A terminal error may already have closed the session while retaining its reusable ring. Also remember the
+        // stop if a superseded preparation is still returning its grant on IO.
+        timeshift.discardUnused()
         if (c != null && c.isArchive) c.archiveResumeAtMs = player?.currentPosition ?: 0
         endSession()
         stopPolling()
@@ -1676,6 +1926,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         }
         BoxLog.i(TAG) { "stop ${reason.name}" }
         setState(PlaybackState.Stopped(c?.let { nowPlaying(it) }, reason, resumable = reason != StopReason.USER))
+        publishLocalBuffer(force = true)
     }
 
     private fun cancelCycleJobs() {
@@ -1685,6 +1936,8 @@ internal class PlaybackControllerImpl @Inject constructor(
         healthyJob?.cancel()
         compatPersistJob?.cancel()
         recordWatchedJob?.cancel()
+        writerJob?.cancel()
+        gapFallbackJob?.cancel()
     }
 
     // ------------------------------------------------------------------ lifecycle target (§3.10)
@@ -1697,6 +1950,8 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     override fun stopForLifecycle(reason: StopReason) {
         lifecycleStopAtMs = clock.nowMs()
+        // (M6, §7.5) Home or standby ended a paused or behind buffered cycle: the first tune after says so once.
+        cycle?.let { c -> if (c.ts != null && (c.paused || c.localShift)) leftAppPending = true }
         eventLog.add(PlaybackEventType.LIFECYCLE, cycle?.currentTuneId ?: 0, "stop", reason.name)
         stop(reason)
     }
@@ -1862,6 +2117,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         _video.update { it.copy(decoderOverride = channelDecoderOverride(c)) }
         if (isPlaybackActive() && session != null) {
             eventLog.add(PlaybackEventType.DECISION, c.currentTuneId, "Reprepare", "decoder override")
+            // (M6, §7.6) Buffered: reader-only at the pin (launchSession converts the plan).
             launchSession(c, Plan(reuseResolved = c.resolved != null), waiting = { np -> _state.value.withTarget(np) })
         }
     }
@@ -1886,6 +2142,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             durationMs = p?.duration?.takeIf { it != C.TIME_UNSET && it >= 0 },
             isSeekable = archive != null && p?.isCurrentMediaItemSeekable == true,
             archiveStartUtcMs = archive?.request?.requestStart?.toEpochMilli(),
+            localMonoMs = c?.takeIf { it.ts != null && !it.isArchive }?.let { playheadMono(it) },
         )
     }
 
@@ -1930,6 +2187,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             }
         }
         if (statsEnabled) publishStats()
+        if (c.ts != null) pollTimeshift(c)
         val st = _state.value
         if (st is PlaybackState.Playing && !st.paused && !c.isArchive) {
             if (c.lastStableTickAtMs == 0L) c.lastStableTickAtMs = now
@@ -1968,13 +2226,845 @@ internal class PlaybackControllerImpl @Inject constructor(
             updatedAtElapsedMs = clock.nowMs(),
             serverIndex = s?.resolved?.baseIndex ?: base.serverIndex,
             serverCount = s?.resolved?.baseCount ?: base.serverCount,
-        )
+        ).let { st -> withRewindStats(c, st) }
     }
 
     private fun safeStats(): StreamStats = try {
         eng?.parts?.stats() ?: StreamStats()
     } catch (e: Exception) {
         StreamStats()
+    }
+
+    // ------------------------------------------------------------------ time-shift (M6, docs/design/m6-timeshift.md §6, §7)
+
+    private fun readerTelemetry(): RingReaderTelemetry? = session?.telemetry as? RingReaderTelemetry
+
+    /**
+     * The viewer is at live: playing, and either never time-shifted or the **playhead** is back within the live landing
+     * (§7.4; fix pass S1). The loader cursor is not the test: after a short rewind it reaches the head within seconds
+     * while the viewer is still up to a player buffer behind. The cursor stays the §5.2 telemetry gate only.
+     */
+    private fun readerAtHead(c: Cycle): Boolean = !c.paused && (!c.localShift || !playheadBehind(c))
+
+    /** `newestPtsMono − playheadMono > liveLandingMs() + GAP_MIN_MS` (S1); an unknown playhead counts as behind. */
+    private fun playheadBehind(c: Cycle): Boolean {
+        val ts = c.ts ?: return false
+        val at = playheadMono(c) ?: return true
+        return ts.ring.index.newestPtsMono() - at > liveLandingMs() + TimeshiftConstants.GAP_MIN_MS
+    }
+
+    /** Setting Off: the next `prepare` deletes the ring file (§8.3); asynchronous, never on the zap path. */
+    private fun launchPrepareForOff(prefs: app.thebox.player.api.PlaybackSettings) {
+        if (timeshift === NoTimeshiftFactory) return
+        scope.launch(ioDispatcher) {
+            try {
+                timeshift.prepare(prefs, 0)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                BoxLog.w(TAG, "time-shift release failed: ${e.javaClass.simpleName}")
+            }
+        }
+    }
+
+    /** §7.1: once per cycle, after the resolve: buffered when live TS (or UNKNOWN → TS) and storage was granted. */
+    private suspend fun decideTimeshift(c: Cycle, format: StreamFormat) {
+        if (c.tsDecided) return
+        val pending = c.tsPrepare
+        val bufferable = !c.isArchive && (format == StreamFormat.TS || format == StreamFormat.UNKNOWN)
+        if (!bufferable) {
+            pending?.release(discardFile = true)
+            c.tsDecided = true
+            c.tsPrepare = null
+            c.tsOff = if (c.isArchive) BufferOff.ARCHIVE else BufferOff.NOT_TS
+            return
+        }
+        if (pending == null) {
+            c.tsDecided = true
+            if (c.tsOff == null) c.tsOff = BufferOff.SETTING_OFF
+            return
+        }
+        val prepared = try {
+            pending.take()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            BoxLog.w(TAG, "time-shift prepare failed: ${e.javaClass.simpleName}")
+            TimeshiftPrepared.Off(BufferOff.STORAGE_ERROR)
+        }
+        c.tsPrepare = null
+        c.tsDecided = true
+        when (prepared) {
+            is TimeshiftPrepared.Granted -> c.tsGrant = prepared.grant
+            is TimeshiftPrepared.Off -> c.tsOff = prepared.reason
+        }
+    }
+
+    /** Main, right after the resolve (A-C1): the writer under a tune id reserved from the controller's sequence. */
+    private fun startTimeshift(c: Cycle, resolved: ResolvedStream) {
+        val grant = c.tsGrant ?: return
+        val wid = ++lastTuneId
+        val writerCtx = StreamSessionContext(
+            tuneId = wid,
+            resolved = resolved,
+            broker = brokers.broker(resolved.brokerKey),
+            leaseKind = LeaseKind.PLAYBACK,
+            sinkFactory = app.thebox.player.engine.TsDebugOverrides.captureDir?.let { dir ->
+                androidx.media3.datasource.DataSink.Factory { app.thebox.player.datasource.FileCaptureSink(dir, wid) }
+            },
+            onEvent = { type, code, detail -> mainHandler.post { onWriterEvent(c, wid, type, code, detail) } },
+        )
+        val ts = try {
+            timeshift.start(grant, writerCtx, WriterListener(c, wid))
+        } catch (e: Exception) {
+            BoxLog.w(TAG, "time-shift start failed: ${e.javaClass.simpleName}")
+            scope.launch(ioDispatcher + NonCancellable) { timeshift.abandon(grant, discardFile = true) }
+            c.tsGrant = null
+            c.tsOff = BufferOff.STORAGE_ERROR
+            return
+        }
+        c.ts = ts
+        c.firstByteSeen = false
+        eventLog.add(PlaybackEventType.DECISION, wid, "timeshift_start", "gen=${ts.ring.generation} mode=${grant.mode.name}")
+        if (c.paused) {
+            // (Fix pass S5) Paused while resolving: M2's release job was armed because no session existed yet. The cycle
+            // is buffered now, so the pause is a buffered one: no release job, the writer paused (hold limit, FULL stop).
+            livePauseJob?.cancel()
+            livePauseJob = null
+            pauseBuffered(c)
+        }
+        publishLocalBuffer(force = true)
+    }
+
+    /**
+     * Ends the cycle's time-shift (§7.2 "ts.close() before the next launchSession"): the writer's call is cancelled and
+     * its lease released first (A-S1). [discardFile]: stop and lifecycle also delete the ring file (§8.3). A grant that
+     * no session used yet is handed back (fix pass S3), so the factory's discard can run.
+     */
+    private fun closeTimeshift(c: Cycle, discardFile: Boolean) {
+        c.tsPrepare?.release(discardFile)
+        c.tsPrepare = null
+        gapFallbackJob?.cancel()
+        gapFallbackJob = null
+        c.pendingGap = null
+        val ts = c.ts
+        if (ts == null) {
+            c.tsGrant?.let { g ->
+                c.tsGrant = null
+                try {
+                    timeshift.abandon(g, discardFile)
+                } catch (e: Exception) {
+                    BoxLog.w(TAG, "time-shift grant release failed: ${e.javaClass.simpleName}")
+                }
+            }
+            return
+        }
+        c.ts = null
+        c.firstByteSeen = false
+        c.deferred = null
+        c.liveAfterRestartFrom = -1L
+        c.readerOrigin = -1L
+        c.tsGrant = null
+        writerJob?.cancel()
+        writerJob = null
+        try {
+            ts.close(discardFile)
+        } catch (e: Exception) {
+            BoxLog.w(TAG, "time-shift close failed: ${e.javaClass.simpleName}")
+        }
+        eventLog.add(PlaybackEventType.DECISION, ts.writerTuneId, "timeshift_end", if (discardFile) "discard" else "")
+        publishLocalBuffer(force = true)
+    }
+
+    /**
+     * (Fix pass UX-S7) After a cycle-scoped decision closed the ring, the relaunch decides buffering again (a fresh
+     * prepare, a new generation), so "Rewind saves again from now" holds when the new source is TS; an HLS source then
+     * reports NOT_TS with `hls`, which has its own toast.
+     */
+    private fun redecideTimeshift(c: Cycle) {
+        c.tsDecided = false
+        c.tsOff = null
+    }
+
+    /** §7.6 `Plan.readerOnly`: a reader session at [start]; no facts, resolve, broker or writer; codec policies applied. */
+    private fun runReaderSession(e: Engine, c: Cycle, id: Long, start: ReaderStart) {
+        val ts = c.ts ?: return
+        val resolved = c.resolved ?: return
+        applySwitches(e, c, resolved)
+        c.readerOrigin = start.originMono
+        c.readerStartOffset = start.offset
+        val format = StreamFormat.TS
+        val ctx = StreamSessionContext(
+            tuneId = id,
+            resolved = resolved,
+            broker = brokers.broker(resolved.brokerKey),
+            leaseKind = LeaseKind.PLAYBACK,
+            sinkFactory = null,
+            onEvent = { type, code, detail -> mainHandler.post { onSessionEvent(id, type, code, detail) } },
+            repairAudioTimestamps = c.audioTsRepair,
+        )
+        val s = TuneSession(id, resolved, ctx, transport, format, clock.nowMs())
+        val ring = RingOpen(ts.ring, ts.ring.generation, start.offset, ts.readerTelemetry { null })
+        s.ringGeneration = ring.generation
+        val built = try {
+            mediaSources.build(ctx, format, if (c.tsCompat > 0) TsCompat.MULTI_PMT else TsCompat.DEFAULT, transport, null, ring)
+        } catch (ex: Exception) {
+            BoxLog.w(TAG, "ring source $id not built: ${ex.javaClass.simpleName}")
+            s.end()
+            fail(c, PlaybackError(PlaybackErrorCode.INTERNAL, ErrorDetail(host = resolved.host, signal = ex.javaClass.simpleName)), null)
+            return
+        }
+        s.telemetry = built.telemetry
+        session = s
+        val p = e.bundle.player
+        // No stop() since the previous prepare (endSession(stopPlayer = false)): the last frame stays (§6 step 3).
+        p.setMediaSource(built.source, /* resetPosition = */ true)
+        p.prepare()
+        e.parts.watchdog.bind(built.telemetry)
+        e.parts.watchdog.reset()
+        e.parts.beginSession(built.telemetry, format, isLive = true, isHls = false)
+        e.parts.watchdog.start { verdict -> onStall(verdict) }
+        updateExpectations()
+        eventLog.add(PlaybackEventType.OPEN, id, "RING", "offset=${start.offset}")
+        e.parts.displayMode.awaitSettled {
+            if (session === s) {
+                settledSession = s
+                p.playWhenReady = !c.paused
+            }
+        }
+        startPolling()
+    }
+
+    /** Resolves the current reader's origin (position 0's PTS mono) from the index once it has data (§6 step 4). */
+    private fun resolveOrigin(c: Cycle) {
+        if (c.readerOrigin >= 0) return
+        val index = c.ts?.ring?.index ?: return
+        // R1: every RAP lookup below takes slot + entry in one consistent read (no slot reuse in between).
+        val e = LongArray(2)
+        if (index.oldestRapEntry(e) < 0) return
+        val oldestMono = e[1]
+        c.readerOrigin = if (index.ceilRapEntry(index.monoOfOffset(c.readerStartOffset), e) >= 0) e[1] else oldestMono
+    }
+
+    /** The playhead in mono ms: `originMono + player.currentPosition` (§6 step 4); null while unknown. */
+    private fun playheadMono(c: Cycle): Long? {
+        if (c.ts == null) return null
+        resolveOrigin(c)
+        if (c.readerOrigin < 0) return null
+        return c.readerOrigin + (player?.currentPosition ?: 0L).coerceAtLeast(0L)
+    }
+
+    /** A-C3: the backlog of the cycle's first connection (newest PTS mono − first-media PTS mono). */
+    private fun measureLatencyAtTune(c: Cycle, ts: TimeshiftSession) {
+        if (c.latencyAtTuneMs > 0) return
+        val at = playheadMono(c) ?: return
+        c.latencyAtTuneMs = (ts.ring.index.newestPtsMono() - at).coerceAtLeast(0L)
+    }
+
+    /** `liveLandingMs = max(profile.startMs + LIVE_LANDING_EXTRA_MS, latencyAtTune)` (§6, A-C3). */
+    internal fun liveLandingMs(): Long {
+        val c = cycle ?: return TimeshiftConstants.LIVE_LANDING_EXTRA_MS
+        return maxOf((c.profile?.startMs ?: 0).toLong() + TimeshiftConstants.LIVE_LANDING_EXTRA_MS, c.latencyAtTuneMs)
+    }
+
+    /** The RAP at or before the playhead, never before the oldest RAP (`max(pin, oldestRap)`, §7.4); the tail when empty. */
+    private fun pinStart(c: Cycle): ReaderStart {
+        val ring = c.ts?.ring ?: return ReaderStart(0L, -1L)
+        val index = ring.index
+        val at = playheadMono(c)
+        val e = LongArray(2)
+        if (index.oldestRapEntry(e) < 0) return ReaderStart(ring.tail, -1L)
+        val oldest = ReaderStart(e[0], e[1])
+        return if (at != null && index.floorRapEntry(at, e) >= 0) ReaderStart(e[0], e[1]) else oldest
+    }
+
+    /** §6 step 1 `LIVE`: the RAP at or before `newestPtsMono − liveLandingMs`. */
+    private fun liveStart(c: Cycle): ReaderStart? {
+        val ring = c.ts?.ring ?: return null
+        val index = ring.index
+        val e = LongArray(2)
+        if (index.oldestRapEntry(e) < 0) return ReaderStart(ring.head, -1L)
+        val oldest = ReaderStart(e[0], e[1])
+        return if (index.floorRapEntry(index.newestPtsMono() - liveLandingMs(), e) >= 0) ReaderStart(e[0], e[1]) else oldest
+    }
+
+    /** The PLAYHEAD pin follows the RAP before the playhead (§7.2, the 1 Hz poll). */
+    private fun setPlayheadPin(c: Cycle) {
+        val ring = c.ts?.ring ?: return
+        val index = ring.index
+        val at = playheadMono(c) ?: return
+        val e = LongArray(2)
+        if (index.floorRapEntry(at, e) >= 0 || index.oldestRapEntry(e) >= 0) ring.setPin(PinOwner.PLAYHEAD, e[0])
+    }
+
+    /** §6 steps 2–3: the pin first, then a reader-only re-prepare (last frame held). */
+    private fun launchReader(c: Cycle, start: ReaderStart, waiting: ((NowPlaying) -> PlaybackState)? = null) {
+        val ts = c.ts ?: return
+        ts.ring.setPin(PinOwner.PLAYHEAD, start.offset)
+        val w = waiting ?: { np -> PlaybackState.Connecting(np, ConnectPhase.CONNECTING, c.attempt, clock.nowMs()) }
+        launchSession(c, Plan(reuseResolved = true, reader = start), w)
+    }
+
+    private fun pauseBuffered(c: Cycle) {
+        c.localShift = true
+        c.pausedAtMs = clock.nowMs()
+        setPlayheadPin(c)
+        c.ts?.onPause(c.pausedAtMs)
+        refreshKeepScreenOn()
+        publishLocalBuffer(force = true)
+    }
+
+    private fun resumeBuffered(c: Cycle) {
+        c.paused = false
+        player?.playWhenReady = true
+        setState(PlaybackState.Playing(nowPlaying(c), paused = false, warning = c.warning))
+        c.ts?.onResume()
+        // §7.2: saving stopped while paused (full, hold limit, slot lost) → a fresh resolve and a GAP segment.
+        val stop = c.ts?.stopReason
+        if (stop != null && stop in RESTARTABLE_STOPS && c.ts?.stashed == null && c.deferred == null) {
+            restartWriterScoped(c, delayMs = 0, refreshAccount = false, reuseResolved = false, waiting = false, reason = SegmentReason.GAP)
+        }
+        publishLocalBuffer(force = true)
+    }
+
+    override fun seekLocal(targetMonoMs: Long, direction: Int): LocalSeekResult {
+        val c = cycle ?: return LocalSeekResult.Unavailable
+        val ts = c.ts ?: return LocalSeekResult.Unavailable
+        if (c.isArchive) return LocalSeekResult.Unavailable
+        val index = ts.ring.index
+        val landed = playheadMono(c)
+        // R1: slot and entry from one consistent read each, so a slot reused by a newer entry cannot mix two RAPs.
+        val e = LongArray(2)
+        if (index.oldestRapEntry(e) < 0) return LocalSeekResult.Unavailable
+        val oldestOffset = e[0]
+        val oldestMono = e[1]
+        var clamped = false
+        var slot = if (direction > 0) index.ceilRapEntry(targetMonoMs, e) else index.floorRapEntry(targetMonoMs, e)
+        // A-S4: → is never a no-op on long GOPs or anchor-only streams.
+        if (direction > 0 && slot >= 0 && landed != null && e[1] <= landed) slot = index.ceilRapEntry(landed + 1, e)
+        var offset = e[0]
+        var origin = e[1]
+        if (slot < 0) {
+            if (targetMonoMs < oldestMono) {
+                offset = oldestOffset
+                origin = oldestMono
+                clamped = true
+            } else {
+                jumpToLiveLocal()
+                return LocalSeekResult.Live
+            }
+        }
+        c.localShift = true
+        eventLog.add(PlaybackEventType.DECISION, c.currentTuneId, "seek_local", "dir=$direction${if (clamped) " clamped" else ""}")
+        launchReader(c, ReaderStart(offset, origin))
+        return if (clamped) LocalSeekResult.Clamped(origin) else LocalSeekResult.Started(origin)
+    }
+
+    override fun jumpToLiveLocal(): Boolean {
+        val c = cycle ?: return false
+        val ts = c.ts ?: return false
+        if (c.isArchive) return false
+        c.localShift = false
+        if (c.paused) {
+            c.paused = false
+            ts.onResume()
+        }
+        val stop = c.ts?.stopReason
+        eventLog.add(PlaybackEventType.DECISION, c.currentTuneId, "jump_to_live_local", stop?.name ?: "")
+        if (stop != null && stop in RESTARTABLE_STOPS && ts.stashed == null && c.deferred == null) {
+            // Saving stopped: restart the writer first, then open at the new segment's first RAP (§7.2).
+            restartWriterThenLive(c)
+            return true
+        }
+        val start = liveStart(c) ?: return false
+        launchReader(c, start)
+        return true
+    }
+
+    /** RingWriterListener calls arrive on the pump thread and are only posted to main (A-C1). */
+    private inner class WriterListener(private val c: Cycle, private val wid: Long) : RingWriterListener {
+        private fun post(block: () -> Unit) {
+            mainHandler.post { if (cycle === c && c.ts?.writerTuneId == wid) block() }
+        }
+
+        override fun onFirstBytes() = post { onWriterFirstBytes(c) }
+        override fun onFailure(e: java.io.IOException) = post { onWriterFailure(c, wid, e) }
+        override fun onStopped(reason: RecordStop) = post { onWriterStopped(c, wid, reason) }
+        override fun onSegment(reason: SegmentReason, gapMs: Long) = post {
+            eventLog.add(PlaybackEventType.DECISION, wid, "segment", "${reason.name} gap=$gapMs")
+            publishLocalBuffer(force = true)
+        }
+    }
+
+    /** §7.4 "Writer events": the first connection's zap milestones; reconnect state rules only at the head (B1, B3). */
+    private fun onWriterEvent(c: Cycle, wid: Long, type: PlaybackEventType, code: String, detail: String) {
+        eventLog.add(type, wid, code, detail)
+        if (cycle !== c || c.ts?.writerTuneId != wid) return
+        when (type) {
+            PlaybackEventType.LEASE -> {
+                if (c.zap.leaseMs == null) c.zap.leaseMs = clock.nowMs() - c.startedAtMs
+                val st = _state.value
+                if (st is PlaybackState.Connecting && st.phase == ConnectPhase.WAITING_FOR_SLOT) setActiveState(c, st.copy(phase = ConnectPhase.CONNECTING))
+            }
+            PlaybackEventType.RECONNECT -> if (readerAtHead(c)) {
+                val st = _state.value
+                if ((st is PlaybackState.Playing && !st.paused) || (st is PlaybackState.Buffering && st.cause == BufferingCause.REBUFFER)) {
+                    setState(PlaybackState.Buffering(nowPlaying(c), BufferingCause.RECONNECTING, null))
+                }
+            }
+            PlaybackEventType.RECONNECT_OK -> if (readerAtHead(c)) {
+                val st = _state.value
+                if (st is PlaybackState.Buffering && st.cause == BufferingCause.RECONNECTING && player?.playbackState == Player.STATE_READY && !c.paused) {
+                    setState(PlaybackState.Playing(nowPlaying(c), paused = false, warning = c.warning))
+                }
+            }
+            else -> Unit
+        }
+    }
+
+    private fun onWriterFirstBytes(c: Cycle) {
+        val first = !c.firstByteSeen
+        c.firstByteSeen = true
+        c.stopNotice = null
+        val now = clock.nowMs()
+        if (c.zap.firstByteMs == null) c.zap.firstByteMs = now - c.startedAtMs
+        val st = _state.value
+        if (st is PlaybackState.Connecting && st.phase == ConnectPhase.CONNECTING) setActiveState(c, st.copy(phase = ConnectPhase.BUFFERING_INITIAL))
+        // A writer restart (no new reader session, so onFirstMedia does not run): announce the reconnect's end here.
+        if (!first && c.reconnectNoticeShown && c.firstMediaReached) {
+            c.reconnectNoticeShown = false
+            _notices.tryEmit(PlaybackNotice.Reconnected)
+        }
+        publishLocalBuffer(force = true)
+    }
+
+    /** §7.4: the writer's failure, classified with its own tune id (never "stale"), decided once. */
+    private fun onWriterFailure(c: Cycle, wid: Long, e: java.io.IOException) {
+        val ts = c.ts ?: return
+        val live = FailureClassifier.causeChain(e).firstOrNull { it is LiveStreamException } as LiveStreamException?
+        eventLog.add(PlaybackEventType.ERROR, wid, "writer_failure", live?.kind?.name ?: e.javaClass.simpleName)
+        val head = readerAtHead(c)
+        // A-C4 (R3): a reconnect the cap refused never gets here; the writer stops itself with SLOT_LOST (onStopped).
+        // §3.5, §7.4 (R2): a segment storm is a writer-scoped PcrDiscontinuity. Fix pass S2: handled here, never by the
+        // ladder (whose L25 is a reader re-prepare and whose L27 would downgrade the decoder for a provider problem).
+        classifier.classifyWriter(e)?.let { signal ->
+            if (signal is FailureSignal.PcrDiscontinuity) onWriterStorm(c, wid, signal) else onFailure(c, signal, null, fromWriter = true)
+            return
+        }
+        if (live == null) {
+            onFailure(c, FailureSignal.Network(NetworkFailureKind.RESET, beforeFirstByte = !c.firstByteSeen), null, fromWriter = true)
+            return
+        }
+        if (live.kind == LiveFailureKind.PREEMPTED) {
+            // Another in-app acquire took the lease (A-N6): behind live the saved part stays playable; at the head it is
+            // the stale pre-emption M2 already ignores.
+            if (c.firstByteSeen && !head) stopSaving(c, RecordStop.PREEMPTED)
+            return
+        }
+        val facts = FailureClassifier.Facts(
+            currentTuneId = c.currentTuneId,
+            sessionStartMs = 0L,
+            isArchive = false,
+            bytesReceived = ts.writerTelemetry.bytesTotal,
+            writerTuneId = wid,
+        )
+        val signal = classifier.classifyLive(live, facts)
+        if (signal == null) {
+            eventLog.add(PlaybackEventType.ERROR, wid, "stale", live.kind.name)
+            return
+        }
+        // A-S2, lead ruling 3: a kicked or refused recorder while not at the head stops saving; no reconnect, no ladder.
+        if (c.firstByteSeen && !head && isLimitLike(signal)) {
+            stopSaving(c, RecordStop.SLOT_LOST)
+            return
+        }
+        onFailure(c, signal, null, fromWriter = true)
+    }
+
+    /**
+     * (Fix pass S2; §7.4, §14 "Segment storm") The first storm restarts the recorder with a fresh resolve (writer-scoped,
+     * the reader untouched). A repeat within [TimeshiftConstants.WRITER_STORM_REPEAT_MS] is cycle-scoped: at live the
+     * ring ends and the cycle relaunches (re-resolved); behind live that is deferred until the saved part has played
+     * out. Neither reaches the ladder's counters, L25 or L27.
+     */
+    private fun onWriterStorm(c: Cycle, wid: Long, signal: FailureSignal) {
+        val now = clock.nowMs()
+        val repeat = c.lastStormAtMs != Long.MIN_VALUE && now - c.lastStormAtMs < TimeshiftConstants.WRITER_STORM_REPEAT_MS
+        c.lastStormAtMs = now
+        eventLog.add(PlaybackEventType.DECISION, wid, "segment_storm", if (repeat) "cycle" else "writer")
+        BoxLog.i(TAG) { "time-shift: segment storm (${if (repeat) "repeat: cycle-scoped" else "writer restart"})" }
+        if (!repeat) {
+            restartWriterScoped(c, delayMs = 0, refreshAccount = false, reuseResolved = false, waiting = false)
+            return
+        }
+        val d = LadderDecision.ReResolve(0)
+        if (c.firstByteSeen && !readerAtHead(c)) {
+            c.deferred = d to signal
+            eventLog.add(PlaybackEventType.DECISION, c.currentTuneId, "deferred", decisionName(d))
+            stopSaving(c, RecordStop.UPSTREAM_FAILED)
+            return
+        }
+        closeTimeshift(c, discardFile = false)
+        redecideTimeshift(c)
+        execute(c, d, signal, null)
+    }
+
+    private fun onWriterStopped(c: Cycle, wid: Long, reason: RecordStop) {
+        if (reason != RecordStop.SESSION_END) c.lastStop = reason
+        eventLog.add(PlaybackEventType.DECISION, wid, "saving_stopped", reason.name)
+        notifySavingStopped(c, reason)
+        refreshKeepScreenOn()
+        publishLocalBuffer(force = true)
+    }
+
+    private fun notifySavingStopped(c: Cycle, reason: RecordStop) {
+        if (reason !in TOASTED_STOPS || c.stopNotice == reason) return
+        c.stopNotice = reason
+        _notices.tryEmit(PlaybackNotice.SavingStopped(reason))
+    }
+
+    /** Stops saving (no ladder): SLOT_LOST, PREEMPTED, UPSTREAM_FAILED (§4.4, §7.4). */
+    private fun stopSaving(c: Cycle, reason: RecordStop) {
+        val control = c.ts ?: return
+        eventLog.add(PlaybackEventType.DECISION, control.writerTuneId, "stop_saving", reason.name)
+        BoxLog.i(TAG) { "time-shift: saving stopped (${reason.name})" }
+        c.lastStop = reason
+        control.stopSaving(reason)
+        notifySavingStopped(c, reason)
+        refreshKeepScreenOn()
+        publishLocalBuffer(force = true)
+    }
+
+    /**
+     * §7.4 for a buffered cycle; true when handled. Writer-scoped decisions restart the recorder only (before the first
+     * byte: a recreate, A-C2); cycle-scoped ones end the ring at the head and are deferred behind live; a `Fail` behind
+     * live is stashed until the saved part has played out (decided once, A-B1). Reader-scoped decisions fall through to
+     * the normal path, which re-prepares the reader at the pin (`launchSession` converts the plan).
+     */
+    private fun executeBuffered(c: Cycle, d: LadderDecision, signal: FailureSignal): Boolean {
+        val fromWriter = c.failureFromWriter
+        c.failureFromWriter = false
+        val head = readerAtHead(c)
+        when (d) {
+            is LadderDecision.Fail -> {
+                // (Fix pass S1) Once bytes were saved, always stash: the reader surfaces RingEnd(UPSTREAM_FAILED) only
+                // after the buffered media has played out, so the card comes at the right time at live too.
+                if (!fromWriter || !c.firstByteSeen) return false
+                val ts = c.ts ?: return false
+                if (ts.stashed == null) ts.stashed = d.error to signal
+                eventLog.add(PlaybackEventType.DECISION, ts.writerTuneId, "stash", d.error.code.key)
+                stopSaving(c, RecordStop.UPSTREAM_FAILED)
+                return true
+            }
+            is LadderDecision.RetrySame, is LadderDecision.ReResolve, LadderDecision.UserAgentFallback -> {
+                if (!fromWriter) return false
+                var delayMs = 0L
+                var refresh = false
+                when (d) {
+                    is LadderDecision.RetrySame -> delayMs = d.delayMs
+                    is LadderDecision.ReResolve -> {
+                        delayMs = d.delayMs
+                        refresh = d.refreshAccount
+                        if (d.rotateBase) {
+                            val r = c.resolved
+                            if (r != null && r.baseCount > 1) c.baseIndex = (r.baseIndex + 1) % r.baseCount
+                        }
+                    }
+                    else -> {
+                        c.userAgentOverride = settings.current.userAgentFallbackPreset
+                        c.uaFallbackPending = true
+                    }
+                }
+                val reuse = d is LadderDecision.RetrySame && c.resolved != null
+                // (Fix pass B2) Before the first byte too, the writer restarts in place: its pump terminates, closes and
+                // reopens in order, the empty first segment is reused, and the reader waiting at the tail reads the
+                // new connection's bytes. A second session on the grant would find the generation ended.
+                restartWriterScoped(c, delayMs, refresh, reuse, waiting = head || !c.firstByteSeen, reason = SegmentReason.WRITER_RESTART, d = d, signal = signal)
+                return true
+            }
+            is LadderDecision.SwitchSourceType, is LadderDecision.FlipXtreamOutput, LadderDecision.TryBackupSource -> {
+                if (fromWriter && c.firstByteSeen && !head) {
+                    c.deferred = d to signal
+                    eventLog.add(PlaybackEventType.DECISION, c.currentTuneId, "deferred", decisionName(d))
+                    stopSaving(c, RecordStop.UPSTREAM_FAILED)
+                    return true
+                }
+                // At the head (or before the first byte): end the ring and relaunch; buffering is decided again for the
+                // new source (UX-S7).
+                closeTimeshift(c, discardFile = false)
+                redecideTimeshift(c)
+                return false
+            }
+            LadderDecision.SeekToLiveAndPrepare -> {
+                jumpToLiveLocal()
+                return true
+            }
+            else -> return false
+        }
+    }
+
+    /** A writer-scoped restart on [writerJob] (§7.4): the reader is untouched; waiting state and toast only at the head. */
+    private fun restartWriterScoped(
+        c: Cycle,
+        delayMs: Long,
+        refreshAccount: Boolean,
+        reuseResolved: Boolean,
+        waiting: Boolean,
+        reason: SegmentReason = SegmentReason.WRITER_RESTART,
+        d: LadderDecision? = null,
+        signal: FailureSignal? = null,
+    ) {
+        val control = c.ts ?: return
+        control.markRestartPending()
+        if (waiting && d != null && signal != null && !c.firstMediaReached) {
+            // Before first media the cycle is still connecting (as M2's restart shows, B2); the reader is already open, so
+            // the phase is CONNECTING and the writer's first bytes move it on to BUFFERING_INITIAL.
+            c.attempt++
+            setActiveState(c, PlaybackState.Connecting(nowPlaying(c), ConnectPhase.CONNECTING, c.attempt, clock.nowMs()))
+        } else if (waiting && d != null && signal != null) {
+            val max = settings.current.reconnectAttempts
+            if ((d is LadderDecision.ReResolve || d is LadderDecision.RetrySame) && isTransient(signal)) {
+                val n = c.counters.transientRetries.coerceAtLeast(1)
+                _notices.tryEmit(PlaybackNotice.Reconnecting(n, max))
+                c.reconnectNoticeShown = true
+                setActiveState(c, PlaybackState.Buffering(nowPlaying(c), BufferingCause.RECONNECTING, ReconnectProgress(n, max)))
+            } else {
+                c.attempt++
+                setActiveState(c, PlaybackState.Stalled(nowPlaying(c), (signal as? FailureSignal.Stall)?.kind, decisionName(d), c.attempt, max))
+            }
+        }
+        writerJob?.cancel()
+        writerJob = scope.launch {
+            if (delayMs > 0) delay(delayMs)
+            if (refreshAccount) refreshAccount(c)
+            if (cycle !== c || c.ts !== control) return@launch
+            val resolved = (if (reuseResolved) c.resolved else null) ?: resolveForWriter(c) ?: return@launch
+            if (cycle !== c || c.ts !== control) return@launch
+            c.resolved = resolved
+            _servers.value = if (resolved.baseHosts.size > 1) ServerList(resolved.baseHosts, resolved.baseIndex) else ServerList()
+            eventLog.add(PlaybackEventType.DECISION, control.writerTuneId, "writer_restart", reason.name)
+            control.restartWriter(resolved, reason)
+        }
+    }
+
+    /** A fresh resolve for the recorder; a failure is the writer's (stashed behind live, the card at the head). */
+    private suspend fun resolveForWriter(c: Cycle): ResolvedStream? {
+        return when (val o = withContext(ioDispatcher) { resolveOutcome(resolveRequest(c)) }) {
+            is ResolveOutcome.Ok -> o.stream
+            is ResolveOutcome.Failed -> {
+                if (cycle !== c) return null
+                val signal = when (o.code) {
+                    PlaybackErrorCode.CHANNEL_NOT_FOUND -> FailureSignal.ChannelMissing
+                    PlaybackErrorCode.NEEDS_REAUTH -> FailureSignal.Credentials(permanent = true)
+                    PlaybackErrorCode.CREDENTIALS_UNAVAILABLE -> FailureSignal.Credentials(permanent = false)
+                    else -> null
+                }
+                if (signal != null) {
+                    onFailure(c, signal, null, fromWriter = true)
+                } else if (readerAtHead(c) || !c.firstByteSeen) {
+                    fail(c, PlaybackError(o.code, ErrorDetail(signal = "Resolve")), null)
+                } else {
+                    c.ts?.let { if (it.stashed == null) it.stashed = PlaybackError(o.code, ErrorDetail(signal = "Resolve")) to FailureSignal.Unknown(0) }
+                    stopSaving(c, RecordStop.UPSTREAM_FAILED)
+                }
+                null
+            }
+        }
+    }
+
+    /** §7.4 "Reader RingEndException (non-failure stop)": restart the writer, then live at its first RAP. */
+    private fun restartWriterThenLive(c: Cycle) {
+        val ring = c.ts?.ring ?: return
+        c.localShift = false
+        c.liveAfterRestartFrom = ring.head
+        setActiveState(c, PlaybackState.Buffering(nowPlaying(c), BufferingCause.RECONNECTING, null))
+        restartWriterScoped(c, delayMs = 0, refreshAccount = false, reuseResolved = false, waiting = false, reason = SegmentReason.GAP)
+    }
+
+    /** A deferred cycle-scoped decision runs once the reader reaches the head (§7.4). */
+    private fun runDeferred(c: Cycle) {
+        val (d, signal) = c.deferred ?: return
+        c.deferred = null
+        closeTimeshift(c, discardFile = false)
+        // UX-S7: "Rewind saves again from now" must hold, so the relaunch buffers again when its source is TS.
+        redecideTimeshift(c)
+        _notices.tryEmit(PlaybackNotice.JumpedToLiveRestart)
+        execute(c, d, signal, null)
+    }
+
+    /** §5.3, §7.4: the reader's ring exceptions, before the ladder. */
+    private fun onReaderRingException(c: Cycle, s: TuneSession, e: RingException) {
+        val ts = c.ts ?: return
+        when (e) {
+            is RingBoundaryException -> onRingBoundary(c, s, e)
+            is RingEndException -> {
+                eventLog.add(PlaybackEventType.DECISION, s.tuneId, "ring_end", e.stop.name)
+                val stashed = ts.stashed
+                if (stashed != null) {
+                    // The saved part has played out: the error the ladder decided while behind (decided once, A-B1).
+                    ts.stashed = null
+                    fail(c, stashed.first, stashed.second)
+                    return
+                }
+                if (c.deferred != null) {
+                    runDeferred(c)
+                    return
+                }
+                restartWriterThenLive(c)
+            }
+            is RingPositionLostException -> {
+                eventLog.add(PlaybackEventType.DECISION, s.tuneId, "ring_position_lost", "")
+                val o = LongArray(2)
+                if (ts.ring.index.oldestRapEntry(o) >= 0) launchReader(c, ReaderStart(o[0], o[1])) else jumpToLiveLocal()
+            }
+            else -> {
+                // RingIoException (§4.6): live, with the storage toast.
+                eventLog.add(PlaybackEventType.DECISION, s.tuneId, "ring_io", "")
+                notifySavingStopped(c, RecordStop.DISK_ERROR)
+                c.localShift = false
+                liveStart(c)?.let { launchReader(c, it) }
+            }
+        }
+    }
+
+    /**
+     * §5.3, §9.1 (A-C5): provider at the gap only on a catch-up channel during an active time-shift, and only when the gap
+     * came from saving stopping or is ≥ `GAP_PROVIDER_MIN_MS`; otherwise the next segment's first RAP (GAP_SKIPPED_* for
+     * gaps ≥ 1 s). No counters, no stats error, no event-log ERROR row (A-N2).
+     */
+    private fun onRingBoundary(c: Cycle, s: TuneSession, e: RingBoundaryException) {
+        val ts = c.ts ?: return
+        eventLog.add(PlaybackEventType.DECISION, s.tuneId, "ring_boundary", "${e.reason.name} gap=${e.gapMs}")
+        val hasArchive = c.channelInfo?.catchup?.isAvailable == true
+        val active = c.localShift || c.paused
+        val stopGap = e.reason == SegmentReason.GAP
+        // R14: WP-C's switch replaces this condition with
+        // `if (timelineRouter.onGap(e.gapStartMonoMs, e.gapMs, if (stopGap) c.lastStop ?: RecordStop.SLOT_LOST else null, active, hasArchive, index.newestPtsMono()) is TimelineTarget.Provider) {`
+        val index = ts.ring.index
+        if (timelineRouter.onGap(e.gapStartMonoMs, e.gapMs, if (stopGap) c.lastStop ?: RecordStop.SLOT_LOST else null, active, hasArchive, index.newestPtsMono()) is app.thebox.core.catchup.archive.TimelineTarget.Provider) {
+            // UX-B2: the archive side takes it from here; if no archive tune arrives in time, skip locally (a provider
+            // that refuses catch-up must never leave the picture frozen at the gap).
+            c.pendingGap = e
+            gapFallbackJob?.cancel()
+            gapFallbackJob = scope.launch {
+                delay(TimeshiftConstants.GAP_HANDOFF_TIMEOUT_MS)
+                if (cycle === c && c.pendingGap === e) {
+                    eventLog.add(PlaybackEventType.DECISION, c.currentTuneId, "gap_handoff_timeout", "")
+                    skipGapLocal()
+                }
+            }
+            _notices.tryEmit(PlaybackNotice.LocalGap(e.gapStartMonoMs, e.gapMs, e.reason))
+            return
+        }
+        skipGap(c, e)
+    }
+
+    /** The local side of a boundary (§5.3): the next segment's first RAP, GAP_SKIPPED_* for gaps of 1 s or more. */
+    private fun skipGap(c: Cycle, e: RingBoundaryException) {
+        val ts = c.ts ?: return
+        val index = ts.ring.index
+        val r = LongArray(2)
+        val origin = if (index.ceilRapEntry(e.gapStartMonoMs, r) >= 0 && r[0] == e.nextRapOffset) r[1] else index.monoOfOffset(e.nextRapOffset)
+        launchReader(c, ReaderStart(e.nextRapOffset, origin)) { np -> _state.value.withTarget(np) }
+        if (e.gapMs >= TimeshiftConstants.GAP_MIN_MS) _notices.tryEmit(PlaybackNotice.GapSkipped(e.gapMs, stream = e.reason != SegmentReason.GAP))
+    }
+
+    /** UX-B2: the archive side could not act on the pending [PlaybackNotice.LocalGap]; skip the gap locally. */
+    override fun skipGapLocal(): Boolean {
+        val c = cycle ?: return false
+        val e = c.pendingGap ?: return false
+        c.pendingGap = null
+        gapFallbackJob?.cancel()
+        gapFallbackJob = null
+        if (c.ts == null || c.isArchive) return false
+        eventLog.add(PlaybackEventType.DECISION, c.currentTuneId, "gap_skip_local", "${e.reason.name} gap=${e.gapMs}")
+        skipGap(c, e)
+        return true
+    }
+
+    /** The 1 Hz part of the poll for a buffered cycle (§7.2). */
+    private fun pollTimeshift(c: Cycle) {
+        val ts = c.ts ?: return
+        val st = _state.value
+        val playing = st is PlaybackState.Playing && !st.paused
+        // S1: the time-shift ends when the playhead (not the loader cursor) is back within the live landing.
+        if (playing && c.localShift && !playheadBehind(c)) c.localShift = false
+        // B3 (§4.5, §4.6): the PLAYHEAD pin exists only while paused or time-shifted. At live it would hold the tail a
+        // GOP plus the latency behind the head: RAM-only (after a disk stop) live would stall on FULL, and PAUSE_ONLY
+        // would persist continuously. Cleared once a reader is open (its own pin then holds its place).
+        if (c.paused || c.localShift) {
+            if (playing) setPlayheadPin(c)
+        } else if (readerTelemetry()?.reader != null) {
+            ts.ring.clearPin(PinOwner.PLAYHEAD)
+        }
+        if (c.deferred != null && readerAtHead(c)) {
+            runDeferred(c)
+            return
+        }
+        if (c.liveAfterRestartFrom >= 0) {
+            val n = LongArray(2)
+            if (ts.ring.index.newestRapEntry(n) >= 0 && n[0] >= c.liveAfterRestartFrom) {
+                c.liveAfterRestartFrom = -1L
+                launchReader(c, ReaderStart(n[0], n[1]))
+            }
+        }
+        if (c.paused) refreshKeepScreenOn()
+        publishLocalBuffer(force = false)
+    }
+
+    /** `localBuffer` (≤ 1 Hz unless [force]): mono times, converted to wall once per snapshot by the consumer (A-S9). */
+    private fun publishLocalBuffer(force: Boolean) {
+        val now = clock.nowMs()
+        if (!force && now - lastLocalPublishAtMs < LOCAL_BUFFER_PUBLISH_MS) return
+        lastLocalPublishAtMs = now
+        _localBuffer.value = localBufferState(cycle, now)
+    }
+
+    private fun localBufferState(c: Cycle?, now: Long): LocalBufferState? {
+        if (c == null || c.isArchive) return null
+        val st = _state.value
+        if (st is PlaybackState.Stopped || st is PlaybackState.Idle) return null
+        val ts = c.ts
+        if (ts == null) {
+            val format = session?.format ?: c.format ?: c.resolved?.formatHint
+            return LocalBufferState(identity = c.identity, available = false, off = c.tsOff, hls = format == StreamFormat.HLS, cycleId = c.cycleId)
+        }
+        val snap = try {
+            ts.snapshot(now, System.currentTimeMillis() - now)
+        } catch (e: Exception) {
+            return LocalBufferState(identity = c.identity, available = false, off = BufferOff.STORAGE_ERROR, cycleId = c.cycleId)
+        }
+        // UX-S1: the cycle id lets the consumer tell a new cycle on the same identity from the same one.
+        return snap.copy(identity = c.identity, atMonoMs = playheadMono(c) ?: snap.liveMonoMs, cycleId = c.cycleId)
+    }
+
+    /** "Rewind: 18:20 saved of 30:00 · 1.1 GB" (A-S9, U-N3). */
+    private fun withRewindStats(c: Cycle?, st: StreamStats): StreamStats {
+        if (c?.ts == null) return st
+        val b = _localBuffer.value ?: return st
+        return st.copy(
+            rewindSavedMs = (b.liveMonoMs - b.fromMonoMs).coerceAtLeast(0L),
+            rewindWindowMs = b.windowMs,
+            rewindBytes = b.usedBytes,
+            rewindSaving = b.saving,
+        )
+    }
+
+    /** §11.5: a buffered pause keeps the screen on while saving, and on catch-up channels up to 3 h. */
+    private fun keepAwakePaused(): Boolean {
+        val c = cycle ?: return false
+        val ts = c.ts ?: return false
+        if (!c.paused) return false
+        val control = c.ts
+        val saving = control?.stopReason == null && (ts.ring.saving || !c.firstByteSeen)
+        if (saving) return true
+        val catchUp = c.channelInfo?.catchup?.isAvailable == true
+        return catchUp && clock.nowMs() - c.pausedAtMs < TimeshiftConstants.PAUSE_KEEP_AWAKE_MAX_MS
+    }
+
+    private fun refreshKeepScreenOn() {
+        val st = _state.value
+        if (st is PlaybackState.Playing) _keepScreenOn.value = !st.paused || keepAwakePaused()
     }
 
     // ------------------------------------------------------------------ helpers
@@ -1991,7 +3081,8 @@ internal class PlaybackControllerImpl @Inject constructor(
         _state.value = s
         _keepScreenOn.value = when (s) {
             is PlaybackState.Connecting, is PlaybackState.Buffering, is PlaybackState.Stalled -> true
-            is PlaybackState.Playing -> !s.paused
+            // (M6, §11.5) A buffered pause keeps the screen on while it is still being saved.
+            is PlaybackState.Playing -> !s.paused || keepAwakePaused()
             // (M4, M2 E-L7) The unlimited-retry card (L19) keeps retrying behind it: the screen must stay on.
             is PlaybackState.Error -> cycle?.cardShown == true
             else -> false
@@ -2101,6 +3192,24 @@ internal class PlaybackControllerImpl @Inject constructor(
         const val STABLE_TICK_MS = 60_000L
         const val MAX_CONNECTIONS_CAP = BrokerConstants.MAX_CONNECTIONS_CAP
 
+        /** (M6) `localBuffer` is published at most this often (§7.2 "≤ 1 Hz"). */
+        const val LOCAL_BUFFER_PUBLISH_MS = 1_000L
+
+        /** (M6, §4.4) Stops a resume or Back to live restarts the writer after (not storage, not a decided failure). */
+        private val RESTARTABLE_STOPS = setOf(RecordStop.FULL_WHILE_PAUSED, RecordStop.HOLD_LIMIT, RecordStop.SLOT_LOST, RecordStop.PREEMPTED)
+
+        /** (M6, §13) Stops with a toast (the others show in the paused header line). */
+        private val TOASTED_STOPS = setOf(RecordStop.SLOT_LOST, RecordStop.PREEMPTED, RecordStop.DISK_ERROR, RecordStop.STORAGE_EVICTED, RecordStop.DISK_TOO_SLOW)
+
+        /** (M6, A-S2) Answers that mean another device holds the slot. */
+        fun isLimitLike(s: FailureSignal): Boolean = when (s) {
+            is FailureSignal.Http -> s.status in LIMIT_STATUSES
+            is FailureSignal.TinyBody -> s.bytes == 0
+            is FailureSignal.ReconnectExhausted -> s.lastStatus != null && s.lastStatus in LIMIT_STATUSES
+            else -> false
+        }
+        private val LIMIT_STATUSES = setOf(403, 458, 503, 509)
+
         private val LIFECYCLE_REASONS = setOf(StopReason.BACKGROUND, StopReason.STANDBY, StopReason.HDMI_UNPLUGGED, StopReason.DISPLAY_OFF)
 
         fun decisionName(d: LadderDecision): String = d::class.simpleName ?: "Decision"
@@ -2136,7 +3245,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             is FailureSignal.DecoderInit -> if (s.video) PlaybackErrorCode.CODEC_UNSUPPORTED else PlaybackErrorCode.AUDIO_OUTPUT_FAILED
             is FailureSignal.FormatUnsupported -> if (s.video) PlaybackErrorCode.CODEC_UNSUPPORTED else PlaybackErrorCode.AUDIO_OUTPUT_FAILED
             is FailureSignal.DecodingFailed -> if (s.video) PlaybackErrorCode.STREAM_UNDECODABLE else PlaybackErrorCode.AUDIO_OUTPUT_FAILED
-            is FailureSignal.AudioTrackInit, FailureSignal.AudioWrite -> PlaybackErrorCode.AUDIO_OUTPUT_FAILED
+            is FailureSignal.AudioTrackInit, FailureSignal.AudioWrite, FailureSignal.AudioTimestampsStuck -> PlaybackErrorCode.AUDIO_OUTPUT_FAILED
             is FailureSignal.Parsing, is FailureSignal.PcrDiscontinuity, is FailureSignal.Stuck, FailureSignal.ResourcesReclaimed -> PlaybackErrorCode.STREAM_UNDECODABLE
             is FailureSignal.Credentials -> if (s.permanent) PlaybackErrorCode.NEEDS_REAUTH else PlaybackErrorCode.CREDENTIALS_UNAVAILABLE
             is FailureSignal.LocalConnectionLimit -> PlaybackErrorCode.CONNECTION_LIMIT_LOCAL

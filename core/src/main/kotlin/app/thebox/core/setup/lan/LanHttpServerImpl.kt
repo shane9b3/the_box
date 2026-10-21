@@ -17,7 +17,7 @@ import kotlin.random.Random
 /**
  * The phone page's own HTTP/1.1 server (docs/design/m5-setup-settings.md §0.3, §3.5.2), pure JVM over a [LanTransport].
  * One accept thread (`box-lan`), at most [Config.maxSockets] concurrent connections served by a pool of that size
- * (more are answered 503 and closed), `Connection: close` on every response (no keep-alive state), and a watchdog
+ * (excess connections are closed immediately), `Connection: close` on every response (no keep-alive state), and a watchdog
  * that closes a connection with no progress for [Config.socketTimeoutMs] (a slow sender gets 408). Routing, pairing
  * and the security headers belong to the [LanHandler] ([PhoneApi]). Logs carry the method, a path template, the
  * status and the byte count, never a token, code, cookie or body.
@@ -110,7 +110,9 @@ class LanHttpServerImpl(
             } ?: break
             if (count.incrementAndGet() > max) {
                 count.decrementAndGet()
-                Thread({ refuseBusy(conn) }, "box-lan-busy").apply { isDaemon = true }.start()
+                // Rejection must not allocate another worker or perform socket writes: a non-reading peer must
+                // never turn the overload path into an unbounded pool outside active/watchdog/stop tracking.
+                runCatching { conn.close() }
                 continue
             }
             val a = Active(conn, System.nanoTime(), null)
@@ -118,18 +120,11 @@ class LanHttpServerImpl(
             try {
                 workers.execute { serve(a, handler) }
             } catch (e: java.util.concurrent.RejectedExecutionException) {
+                // stop() may shut down the pool after accept returned but before this connection was tracked.
+                runCatching { conn.close() }
                 finish(a)
                 break
             }
-        }
-    }
-
-    private fun refuseBusy(conn: LanConnection) {
-        try {
-            writeResponse(conn.output, HttpResponse(503, mapOf("Content-Type" to "text/plain; charset=utf-8", "Retry-After" to "2"), "Busy".encodeToByteArray()))
-        } catch (_: IOException) {
-        } finally {
-            runCatching { conn.close() }
         }
     }
 

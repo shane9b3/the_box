@@ -1,5 +1,7 @@
 package app.thebox.core.settings.state
 
+import app.thebox.core.art.ArtworkStatus
+import app.thebox.core.art.ProgrammeArtwork
 import app.thebox.core.full.BackInPlayer
 import app.thebox.core.full.OnLaunch
 import app.thebox.core.full.PlayerSettings
@@ -16,6 +18,7 @@ import app.thebox.core.playback.AudioOutputMode
 import app.thebox.core.playback.BufferMode
 import app.thebox.core.playback.HdrPreviewMode
 import app.thebox.core.playback.VideoDecoderMode
+import app.thebox.core.playback.timeshift.TimeshiftConstants
 import app.thebox.core.settings.ChoiceOption
 import app.thebox.core.settings.ClockMode
 import app.thebox.core.settings.DataPrefs
@@ -30,7 +33,10 @@ import app.thebox.core.settings.SectionId
 import app.thebox.core.settings.SettingsRoute
 import app.thebox.core.settings.SettingsRow
 import app.thebox.core.settings.SettingsStore
+import app.thebox.core.settings.StorageProtection
 import app.thebox.core.settings.SubtitleMode
+import app.thebox.core.settings.TimeshiftHold
+import app.thebox.core.settings.TimeshiftLength
 import app.thebox.core.settings.TextHint
 import app.thebox.core.settings.Visibility
 import app.thebox.core.settings.tree.GuideRows
@@ -41,7 +47,9 @@ import app.thebox.core.settings.tree.RemoteRows
 import app.thebox.core.settings.tree.SettingsTree
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
+import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
@@ -55,6 +63,8 @@ interface WpaPageEnv {
     val sdkInt: Int
     /** The device class says low-end (`DeviceClass.lowEnd`). */
     val deviceLowEnd: Boolean
+    /** (owner ruling 2026-10-19) The build carries the app's TMDB key (`BuiltInKeys.tmdb`); false on a keyless build. */
+    val hasTmdbKey: Boolean
     /** `DateFormat.is24HourFormat` (clock System). */
     fun system24h(): Boolean
     /** Installed external players (a `PackageManager` query, §3.3.4). */
@@ -65,7 +75,24 @@ interface WpaPageEnv {
     fun restartNow()
     /** User key-binding overrides (the `remote.mapping` value). */
     fun keyOverrideCount(): Int
+
+    /**
+     * (M6 time-shift, docs/design/m6-timeshift.md §8.2, §12) The storage the ring file lives on (`cacheDir`): total and
+     * free bytes and the ring file's current size, for "Pause and rewind" Auto and the "storage is limited" value.
+     * Null (default, tests) = unknown: Auto reads as the small-storage length.
+     */
+    fun timeshiftStorage(): TimeshiftStorageFacts? = null
+
+    /**
+     * (M6, §8.3, §12) "Pause and rewind" was set to Off: close and delete the ring file now when no buffered cycle is
+     * using it (the session factory's discard path); a buffered cycle still playing keeps it until its tune ends, when
+     * the next tune's preparation deletes it. Default: nothing (tests).
+     */
+    fun timeshiftOff() = Unit
 }
+
+/** (M6 §8.2) The ring file's volume as `WpaPageEnv.timeshiftStorage` reports it. */
+data class TimeshiftStorageFacts(val totalBytes: Long, val availableBytes: Long, val currentFileBytes: Long = 0L)
 
 /**
  * WP-A's section pages (docs/design/m5-setup-settings.md §3.3.2, §3.3.3, §3.3.6, §3.3.7, §3.3.11): TV guide, Playback,
@@ -78,8 +105,13 @@ class WpaPages(
     private val store: SettingsStore,
     private val texts: SettingsTexts,
     private val env: WpaPageEnv,
+    /** (owner rulings 2026-10-18/19) Programme posters: [ArtworkStatus] drives the toggle's description; `guide.posters` is a pref. */
+    private val artwork: ProgrammeArtwork = ProgrammeArtwork.NONE,
 ) : SettingsPageSource {
     private val version = AtomicLong(0)
+    private val _notices = MutableSharedFlow<String>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
+
+    override val notices: Flow<String> get() = _notices
 
     override fun handles(route: SettingsRoute): Boolean = route is SettingsRoute.Section && route.id in SECTIONS
 
@@ -90,6 +122,7 @@ class WpaPages(
             store.flow(PlaybackDomain).drop(1).map { },
             store.flow(DataDomain).drop(1).map { },
             store.flow(NetworkDomain).drop(1).map { },
+            artwork.status.drop(1).map { },
         )
 
     override suspend fun page(route: SettingsRoute, ctx: PageContext): PageModel = build(route, ctx.advanced)
@@ -139,7 +172,23 @@ class WpaPages(
         )
         out += choice(GuideRows.FUTURE_DAYS, t(SettingsText.GUIDE_FUTURE_DAYS), FUTURE_DAYS.map { ChoiceOption(it.toString(), days(it)) }, d.epgFutureDays.toString())
         out += toggle(GuideRows.DESCRIPTIONS, t(SettingsText.GUIDE_DESCRIPTIONS), d.storeDescriptions, t(SettingsText.GUIDE_DESCRIPTIONS_DESC))
+        out += postersRows()
         return out
+    }
+
+    /**
+     * (owner rulings 2026-10-18/19) Programme posters: the on/off toggle alone (the app's built-in TMDB key only). Its
+     * description says when the build has no key (`WpaPageEnv.hasTmdbKey`, known at build time, so it never flickers
+     * with the lookup's status) and when TMDB rejected the app's key.
+     */
+    private fun postersRows(): List<SettingsRow> {
+        val g = store.flow(GuideDomain).value
+        val description = when {
+            artwork.status.value == ArtworkStatus.APP_KEY_REJECTED -> SettingsText.POSTERS_APP_KEY_REJECTED
+            !env.hasTmdbKey -> SettingsText.GUIDE_POSTERS_DESC_NO_KEY
+            else -> SettingsText.GUIDE_POSTERS_DESC
+        }
+        return listOf(toggle(GuideRows.POSTERS, t(SettingsText.GUIDE_POSTERS), g.posters, t(description)))
     }
 
     private fun shiftOptions(): List<ChoiceOption> = (-SHIFT_STEPS..SHIFT_STEPS).map { s ->
@@ -162,6 +211,7 @@ class WpaPages(
                 BufferMode.MEDIUM to SettingsText.BUF_MEDIUM, BufferMode.LARGE to SettingsText.BUF_LARGE, BufferMode.EXTRA_LARGE to SettingsText.BUF_XL,
             ).map { (m, k) -> ChoiceOption(m.name, t(k)) },
             p.bufferMode.name,
+            t(SettingsText.PB_BUFFER_DESC), // (M6 §12, U-N7) the network buffer is not pause and rewind
         )
         val modern = env.sdkInt >= AFR_SEAMLESS_MIN_SDK
         val afr = buildList {
@@ -186,6 +236,7 @@ class WpaPages(
             PlaybackRows.ASPECT, t(SettingsText.PB_ASPECT),
             ASPECTS.map { (m, k) -> ChoiceOption(m.name, t(k)) }, p.defaultAspect.name,
         )
+        out += timeshiftRows(p)
         out += choice(
             PlaybackRows.ON_LAUNCH, t(SettingsText.PB_ON_LAUNCH),
             listOf(
@@ -238,6 +289,71 @@ class WpaPages(
             p.externalPlayer ?: NO_PLAYER, if (players.isEmpty()) t(SettingsText.PB_EXTERNAL_NONE_INSTALLED) else null,
         )
         return out
+    }
+
+    /**
+     * (M6 time-shift, docs/design/m6-timeshift.md §8.2, §12) The three rows with their values. Auto is the length
+     * `TimeshiftPolicy` gives the device's storage class (30 min on ≤ 16 GB, else 1 hour); when free space caps the
+     * ring the value reads "Auto (22 min: storage is limited)" and the description uses the capped window and size.
+     * Off deletes the file at once ([WpaPageEnv.timeshiftOff]; the row itself is NEXT_TUNE). Unknown storage: Auto reads
+     * as the small-storage length.
+     */
+    private fun timeshiftRows(p: PlaybackPrefs): List<SettingsRow> {
+        val storage = env.timeshiftStorage()
+        val autoMs = storage?.let { POLICY.lengthMs(TimeshiftLength.AUTO, it.totalBytes) } ?: TimeshiftConstants.AUTO_LENGTH_SMALL_MS
+        val autoSized = sized(autoMs, storage)
+        val autoLabel = if (autoSized.limited) t(SettingsText.TS_AUTO_LIMITED, lengthText(autoSized.windowMs)) else t(SettingsText.TS_AUTO, lengthText(autoMs))
+        val lengths = listOf(
+            TimeshiftLength.AUTO to autoLabel,
+            TimeshiftLength.MIN_15 to lengthText(15 * MINUTE_MS), TimeshiftLength.MIN_30 to lengthText(30 * MINUTE_MS),
+            TimeshiftLength.H_1 to lengthText(60 * MINUTE_MS), TimeshiftLength.H_2 to lengthText(120 * MINUTE_MS),
+            TimeshiftLength.PAUSE_ONLY to t(SettingsText.TS_PAUSE_ONLY), TimeshiftLength.OFF to t(SettingsText.OFF),
+        ).map { (m, label) -> ChoiceOption(m.name, label) }
+        val lengthMs = TIMESHIFT_LENGTH_MS[p.timeshift] ?: autoMs
+        val shown = sized(lengthMs, storage)
+        val sizeGb = String.format(Locale.ROOT, "%.1f", shown.bytes / GIB)
+        val desc = t(SettingsText.PB_TIMESHIFT_DESC, lengthText(shown.windowMs), t(SettingsText.TS_GB, sizeGb)).let {
+            if (p.timeshift == TimeshiftLength.PAUSE_ONLY) it + " " + t(SettingsText.PB_TIMESHIFT_PAUSE_ONLY_DESC) else it
+        }
+        val holds = listOf(
+            TimeshiftHold.AUTO to t(SettingsText.AUTO), TimeshiftHold.MIN_10 to lengthText(10 * MINUTE_MS),
+            TimeshiftHold.MIN_30 to lengthText(30 * MINUTE_MS), TimeshiftHold.H_1 to lengthText(60 * MINUTE_MS),
+            TimeshiftHold.UNTIL_FULL to t(SettingsText.HOLD_UNTIL_FULL),
+        ).map { (m, label) -> ChoiceOption(m.name, label) }
+        val protect = listOf(StorageProtection.AUTO to SettingsText.AUTO, StorageProtection.OFF to SettingsText.OFF).map { (m, k) -> ChoiceOption(m.name, t(k)) }
+        return listOf(
+            choice(PlaybackRows.TIMESHIFT, t(SettingsText.PB_TIMESHIFT), lengths, p.timeshift.name, desc),
+            choice(PlaybackRows.TIMESHIFT_HOLD, t(SettingsText.PB_TIMESHIFT_HOLD), holds, p.timeshiftHold.name, t(SettingsText.PB_TIMESHIFT_HOLD_DESC)),
+            choice(PlaybackRows.TIMESHIFT_PROTECT, t(SettingsText.PB_TIMESHIFT_PROTECT), protect, p.storageProtection.name, t(SettingsText.PB_TIMESHIFT_PROTECT_DESC)),
+        )
+    }
+
+    private class Sized(val windowMs: Long, val bytes: Double, val limited: Boolean)
+
+    /**
+     * §8.2 for [lengthMs] at the assumed rate: the ring's size and the window it holds. Unknown storage: the length and
+     * `length × rate × 1.15`. Known: `TimeshiftPolicy.capacityBytes`; the window is `min(length, capacity ÷ rate)`, and
+     * "limited" when that is shorter than the length.
+     */
+    private fun sized(lengthMs: Long, storage: TimeshiftStorageFacts?): Sized {
+        val rate = TimeshiftConstants.ASSUMED_BYTES_PER_SEC
+        val wanted = lengthMs / 1000.0 * rate * TimeshiftConstants.CAPACITY_HEADROOM
+        if (storage == null) return Sized(lengthMs, wanted, limited = false)
+        val capacity = POLICY.capacityBytes(lengthMs, rate, storage.availableBytes, storage.totalBytes, storage.currentFileBytes)
+        val window = POLICY.effectiveWindowMs(lengthMs, capacity, rate)
+        // Whole minutes, as the setting's lengths (a few seconds short of the length is not "limited").
+        val windowMin = window / MINUTE_MS * MINUTE_MS
+        return Sized(windowMin, minOf(wanted, capacity.toDouble()), limited = windowMin < lengthMs)
+    }
+
+    /** "15 min", "1 hour", "2 hours". */
+    private fun lengthText(ms: Long): String {
+        val min = (ms / MINUTE_MS).toInt()
+        return when {
+            min < 60 || min % 60 != 0 -> t(SettingsText.TS_MIN, min)
+            min == 60 -> t(SettingsText.TS_HOUR)
+            else -> t(SettingsText.TS_HOURS, min / 60)
+        }
     }
 
     // ---------------------------------------------------------------- Interface (§3.3.6)
@@ -383,12 +499,21 @@ class WpaPages(
             GuideRows.PAST_DAYS -> choose?.toIntOrNull()?.let { v -> store.update(DataDomain) { it.copy(epgPastDays = v) } }
             GuideRows.FUTURE_DAYS -> choose?.toIntOrNull()?.let { v -> store.update(DataDomain) { it.copy(epgFutureDays = v) } }
             GuideRows.DESCRIPTIONS -> on?.let { v -> store.update(DataDomain) { it.copy(storeDescriptions = v) } }
+            GuideRows.POSTERS -> on?.let { v -> store.update(GuideDomain) { it.copy(posters = v) } }
 
             PlaybackRows.BUFFER -> choose?.let { c -> enumOf<BufferMode>(c)?.let { m -> playback { it.copy(bufferMode = m) } } }
             PlaybackRows.AFR -> choose?.let { c -> enumOf<AfrMode>(c)?.let { m -> playback { it.copy(afrMode = m) } } }
             PlaybackRows.AUDIO_OUTPUT -> choose?.let { c -> enumOf<AudioOutputMode>(c)?.let { m -> playback { it.copy(audioOutput = m) } } }
             PlaybackRows.ASPECT -> choose?.let { c -> enumOf<AspectMode>(c)?.let { m -> playback { it.copy(defaultAspect = m) } } }
             PlaybackRows.ON_LAUNCH -> choose?.let { c -> enumOf<OnLaunch>(c)?.let { m -> player { it.copy(onLaunch = m) } } }
+            PlaybackRows.TIMESHIFT -> choose?.let { c ->
+                enumOf<TimeshiftLength>(c)?.let { m ->
+                    playback { it.copy(timeshift = m) }
+                    if (m == TimeshiftLength.OFF) env.timeshiftOff() // §12: Off deletes the file at once
+                }
+            }
+            PlaybackRows.TIMESHIFT_HOLD -> choose?.let { c -> enumOf<TimeshiftHold>(c)?.let { m -> playback { it.copy(timeshiftHold = m) } } }
+            PlaybackRows.TIMESHIFT_PROTECT -> choose?.let { c -> enumOf<StorageProtection>(c)?.let { m -> playback { it.copy(storageProtection = m) } } }
             PlaybackRows.AUDIO_LANGUAGE -> choose?.let { c ->
                 playback { p ->
                     val rest = p.preferredAudioLanguages.drop(1).filter { it != c }
@@ -514,6 +639,14 @@ class WpaPages(
         const val GUIDE = "guide"
         const val VIDEO = "video"
         const val STILL = "still"
+        private const val MINUTE_MS = 60_000L
+        private const val GIB = 1024.0 * 1024 * 1024
+        /** (M6 commit 0) Fixed lengths of the "Pause and rewind" values; AUTO, PAUSE_ONLY and OFF are not here. */
+        private val POLICY = app.thebox.core.playback.timeshift.TimeshiftPolicyImpl()
+        private val TIMESHIFT_LENGTH_MS = mapOf(
+            TimeshiftLength.MIN_15 to 15 * MINUTE_MS, TimeshiftLength.MIN_30 to 30 * MINUTE_MS,
+            TimeshiftLength.H_1 to 60 * MINUTE_MS, TimeshiftLength.H_2 to 120 * MINUTE_MS,
+        )
 
         /** ISO 639-1 codes offered for the preferred audio language (shown by the platform's display name). */
         val LANGUAGES = listOf(

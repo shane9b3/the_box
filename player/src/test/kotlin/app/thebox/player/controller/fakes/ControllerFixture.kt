@@ -24,7 +24,13 @@ import java.time.Duration
  * `SystemClock.elapsedRealtime()`, which [advance] moves together with the looper (coroutine delays, Handler posts).
  * Records every state and notice.
  */
-internal class ControllerFixture {
+internal class ControllerFixture(
+    /**
+     * (M6 time-shift) The session factory; the default keeps every cycle unbuffered (the Off path). The settings are
+     * [settings]' `timeshift*` fields (lead reconciliation R10).
+     */
+    timeshift: app.thebox.player.internal.TimeshiftSessionFactory = app.thebox.player.timeshift.NoTimeshiftFactory,
+) {
     val context: Context = ApplicationProvider.getApplicationContext()
     val journal = Journal()
     val resolver = FakeResolver(journal)
@@ -52,7 +58,7 @@ internal class ControllerFixture {
 
     val controller = PlaybackControllerImpl(
         context, provider, memory, settings, resolver, brokers, transport, playerFactory, sources, events, clock,
-        ladder, limiter, debouncer, bufferFsm, engine, gate, MediaSessionFactory.None, device, guard,
+        ladder, limiter, debouncer, bufferFsm, engine, gate, MediaSessionFactory.None, device, guard, timeshift,
     ).also { it.ioDispatcher = Dispatchers.Main.immediate } // O-3 hop runs inline on the paused looper
 
     val exo get() = playerFactory.exo

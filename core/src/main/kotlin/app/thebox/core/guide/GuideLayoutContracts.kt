@@ -95,6 +95,12 @@ interface GuideNavigator {
     /** The cell containing [minute] on [row] packed as (start shl 32) or (end and 0xffffffff); kind via [kindAt]. */
     fun cellAt(row: Int, minute: Int, ctx: GridContext): Long
     fun kindAt(row: Int, minute: Int, ctx: GridContext): Byte
+    /**
+     * (decision 2026-10-19) True when a single LEFT from [from] would return [GridMoveResult.LeftEdge] (the next Left opens
+     * Groups). Pure; the real navigator overrides it without allocating. Never call `move(LEFT)` from the state machine to
+     * probe: the recording navigator in tests logs moves.
+     */
+    fun leftEdge(from: GridFocus, ctx: GridContext): Boolean = move(from, GridMove.LEFT, 0, ctx) === GridMoveResult.LeftEdge
 }
 
 /**

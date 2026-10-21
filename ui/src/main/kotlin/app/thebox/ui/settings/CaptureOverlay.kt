@@ -69,22 +69,22 @@ fun CaptureOverlay(
                     Line(
                         if (testMode) stringResource(R.string.capture_test_title)
                         else stringResource(R.string.capture_title, action),
-                        GuideUi.sans(30, FontWeight.SemiBold), maxLines = 2,
+                        GuideUi.sans(36, FontWeight.SemiBold), maxLines = 2,
                     )
                     Countdown(state.startedAtMs, nowMs)
                     Buttons(listOf(stringResource(R.string.capture_cancel)), focused = 0)
                     return@Column
                 }
-                Line(KeyNames.name(res, key.keyCode), GuideUi.sans(34, FontWeight.SemiBold))
+                Line(KeyNames.name(res, key.keyCode), GuideUi.sans(40, FontWeight.SemiBold))
                 val device = key.deviceName?.takeIf { !key.isVirtual && it.isNotBlank() }
                 Line(
                     if (device != null) stringResource(R.string.capture_from, device) else stringResource(R.string.capture_unknown_device),
-                    GuideUi.sans(19, color = GuideUi.Fg70),
+                    GuideUi.sans(24, color = GuideUi.Fg70),
                 )
                 if (testReport != null) {
                     val nothing = stringResource(R.string.capture_test_nothing)
-                    Line(stringResource(R.string.capture_test_guide, testReport.first?.let { res.getString(ParentalStrings.actionLabel(it)) } ?: nothing), GuideUi.sans(21))
-                    Line(stringResource(R.string.capture_test_player, testReport.second?.let { res.getString(ParentalStrings.actionLabel(it)) } ?: nothing), GuideUi.sans(21))
+                    Line(stringResource(R.string.capture_test_guide, testReport.first?.let { res.getString(ParentalStrings.actionLabel(it)) } ?: nothing), GuideUi.sans(26))
+                    Line(stringResource(R.string.capture_test_player, testReport.second?.let { res.getString(ParentalStrings.actionLabel(it)) } ?: nothing), GuideUi.sans(26))
                     Buttons(listOf(stringResource(R.string.capture_try_another), stringResource(R.string.capture_cancel)), focused = focusedButton - 1)
                     return@Column
                 }
@@ -108,14 +108,14 @@ private fun Countdown(startedAtMs: Long, nowMs: () -> Long) {
         }
     }
     val left = ((CaptureFlow.CAPTURE_TIMEOUT_MS - (now - startedAtMs)).coerceAtLeast(0L) + 999L) / 1000L
-    Line(String.format(java.util.Locale.ROOT, "0:%02d", left), GuideUi.mono(22, color = GuideUi.Fg70))
+    Line(String.format(java.util.Locale.ROOT, "0:%02d", left), GuideUi.mono(28, color = GuideUi.Fg70))
 }
 
 @Composable
 private fun VerdictLine(verdict: BindingVerdict?, keyCode: Int) {
     val res = LocalContext.current.resources
     val (text, warn) = verdictText(verdict, keyCode, res) ?: return
-    Line(text, GuideUi.sans(21, color = if (warn) Amber else GuideUi.Fg.copy(alpha = 0.8f)), maxLines = 3)
+    Line(text, GuideUi.sans(26, color = if (warn) Amber else GuideUi.Fg.copy(alpha = 0.8f)), maxLines = 3)
 }
 
 /** The verdict sentence (and whether it is a warning) for [verdict]. Shared with the tests. */

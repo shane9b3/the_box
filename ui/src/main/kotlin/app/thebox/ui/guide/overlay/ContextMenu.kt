@@ -78,7 +78,7 @@ fun ContextMenu(state: GuideUiState, anchor: Rect?, modifier: Modifier = Modifie
     ) {
         o.items.forEachIndexed { i, item ->
             Chip(i == o.focused, Modifier.fillMaxWidth().height(ITEM_H.dp), shape = RoundedCornerShape(DesignTokens.Radii.Row), padding = PaddingValues(horizontal = 16.dp)) { color ->
-                Line(stringResource(menuLabel(item)), GuideUi.sans(19, FontWeight.Medium, color))
+                Line(stringResource(menuLabel(item)), GuideUi.sans(24, FontWeight.Medium, color))
             }
         }
     }

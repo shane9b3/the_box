@@ -34,6 +34,27 @@ class GuideFullAttachTest {
         assertEquals(listOf(EnterReason.LAUNCH), player.entered)
     }
 
+    /** Owner ruling 2026-10-17: the shell is blank until the startup decision, so FULL_LAST never flashes the guide. */
+    @Test
+    fun bootBlankEndsOnTheStartupDecision() {
+        val w = GuideWorld(startTuned = false)
+        assertTrue(w.ui.booting, "blank from creation")
+        w.send(GuideEvent.StartGuide)
+        assertTrue(!w.ui.booting, "StartGuide shows the guide")
+
+        val f = GuideWorld(startTuned = false)
+        f.send(GuideEvent.StartFull)
+        assertTrue(f.ui.booting, "StartFull keeps the blank until the tune lands")
+        f.tuneTo(f.channels[2])
+        f.flush()
+        assertEquals(ScreenMode.FULL, f.ui.mode)
+        assertTrue(!f.ui.booting)
+
+        val k = GuideWorld(startTuned = false)
+        k.press(app.thebox.core.input.BoxAction.BACK)
+        assertTrue(!k.ui.booting, "any key ends the blank")
+    }
+
     /** WP-A gave the commit-0 no-op events their bodies: Archive and Player keep the mode, OpenSettings opens SETTINGS. */
     @Test
     fun newEventsHaveTheirM4Bodies() {

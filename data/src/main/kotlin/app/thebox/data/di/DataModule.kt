@@ -67,6 +67,8 @@ abstract class DataModule {
     @Binds @Singleton abstract fun credentialStore(impl: TinkCredentialStore): CredentialStore
     // M5 commit 0 (docs/design/m5-setup-settings.md §2.12 item 8): the same store holds the PIN verifier and passphrase.
     @Binds @Singleton abstract fun secureBlobStore(impl: TinkCredentialStore): app.thebox.data.contracts.SecureBlobStore
+    /** (owner rulings 2026-10-18/19) Programme posters through the app's built-in TMDB key. */
+    @Binds @Singleton abstract fun programmeArtwork(impl: app.thebox.data.art.TmdbProgrammeArtwork): app.thebox.core.art.ProgrammeArtwork
     @Binds @Singleton abstract fun keyResetFlag(impl: app.thebox.data.security.PrefsKeyResetFlag): app.thebox.data.security.KeyResetFlag
     // (M5, WP-A) DataSettings → PersistedDataSettings, bound in data/.../settings/SettingsDataModule.
     @Binds abstract fun playlistRefresher(impl: RefreshRepository): PlaylistRefresher
@@ -75,6 +77,11 @@ abstract class DataModule {
 
     companion object {
         @Provides fun wallClock(): WallClock = WallClock.SYSTEM
+
+        /** (owner ruling 2026-10-18) The app's own TMDB key, compiled in from local.properties; none in a build without one. */
+        @Provides @Singleton
+        fun builtInKeys(): app.thebox.data.art.BuiltInKeys =
+            app.thebox.data.art.BuiltInKeys(tmdb = app.thebox.data.BuildConfig.TMDB_KEY.trim().ifEmpty { null })
 
         @Provides @Singleton
         fun aeadProvider(@ApplicationContext context: Context): AeadProvider = KeystoreAeadProvider(context)

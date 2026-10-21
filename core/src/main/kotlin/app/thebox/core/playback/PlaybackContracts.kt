@@ -186,7 +186,7 @@ data class PlaybackError(
 )
 
 /** Non-fatal conditions shown while playback continues (a chip/toast in M4). */
-enum class PlaybackWarning { NO_AUDIO, AUDIO_UNSUPPORTED, SOFTWARE_VIDEO, PASSTHROUGH_DISABLED }
+enum class PlaybackWarning { NO_AUDIO, AUDIO_UNSUPPORTED, SOFTWARE_VIDEO, PASSTHROUGH_DISABLED, AUDIO_TIMESTAMPS }
 
 /** Where an HTTP failure happened. */
 enum class LoadOrigin { PROGRESSIVE, HLS_MANIFEST, HLS_SEGMENT, ARCHIVE, UNKNOWN }
@@ -215,6 +215,12 @@ sealed interface FailureSignal {
     data class FormatUnsupported(val video: Boolean, val mimeType: String?) : FailureSignal
     data class AudioTrackInit(val encoded: Boolean, val channelCount: Int, val mimeType: String?) : FailureSignal
     data object AudioWrite : FailureSignal
+    /**
+     * (device finding 2026-10-18, Sony Bravia, "Sky Cinema Thriller") The TS guard saw the audio track's timestamps stand
+     * still while video advanced (the provider's muxer stamps each audio PES a few ticks apart): the player's buffered
+     * position, the minimum over tracks, never grows. Route: drop the audio track (L33t) and say why.
+     */
+    data object AudioTimestampsStuck : FailureSignal
     data object ResourcesReclaimed : FailureSignal
     /** Media3 StuckPlayerException (built-in detector). */
     data class Stuck(val type: Int) : FailureSignal
@@ -227,6 +233,12 @@ sealed interface FailureSignal {
     data class LocalConnectionLimit(val active: Int, val max: Int) : FailureSignal
     data object ChannelMissing : FailureSignal
     data class Unknown(val media3ErrorCode: Int) : FailureSignal
+    /**
+     * (M6 time-shift commit 0, docs/design/m6-timeshift.md §16.3; additive) A ring reader reached a segment boundary
+     * (`RingBoundaryException`). Handled **before** the ladder by `TimelineRouter.onGap` (§7.4): no counters, no stats
+     * error, no event-log ERROR row (A-N2).
+     */
+    data class RingBoundary(val nextRapOffset: Long, val gapMs: Long) : FailureSignal   // handled before the ladder
 }
 
 /** What the controller does next (output of the ladder). §4.3. */
@@ -248,6 +260,11 @@ sealed interface LadderDecision {
     data object StereoAndReprepare : LadderDecision
     /** Continue without audio (warning), e.g. no decoder for the audio codec. */
     data class DropAudioAndReprepare(val warning: PlaybackWarning) : LadderDecision
+    /**
+     * (device finding 2026-10-18) Re-prepare with the TS guard regenerating the audio track's timestamps from the
+     * learned frame spacing, aligned to the video clock (L33r), before the track is given up on (L33t).
+     */
+    data object RepairAudioTimestampsAndReprepare : LadderDecision
     data object UserAgentFallback : LadderDecision
     data object TryBackupSource : LadderDecision
     data class Fail(val error: PlaybackError) : LadderDecision

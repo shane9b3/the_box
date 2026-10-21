@@ -5,7 +5,15 @@ package app.thebox.core.guide
 interface GuideImage { val widthPx: Int; val heightPx: Int }
 
 /** Pre-rendered assets the renderer draws as images (no runtime blur, B1.3/B2.6). */
-enum class GuideAsset { FOCUS_SHADOW, NOW_GLOW, ARCHIVE_GLYPH, ARCHIVE_GLYPH_HOLLOW, LOCK_GLYPH }
+enum class GuideAsset {
+    FOCUS_SHADOW, NOW_GLOW, ARCHIVE_GLYPH, ARCHIVE_GLYPH_HOLLOW, LOCK_GLYPH,
+    /**
+     * (decision 2026-10-19, guide Left and Groups) Left-pointing chevrons, 12 × 24 design px, drawn as masks: EDGE_CHEVRON
+     * in the grid's left gutter while the next single Left opens Groups; CLIP_CHEVRON at the focused cell's left inner
+     * edge while that cell is clipped by the window and an earlier watchable cell exists.
+     */
+    EDGE_CHEVRON, CLIP_CHEVRON,
+}
 
 /**
  * Toolkit-agnostic drawing surface in device px (architecture review B2.9 step 3). Implementations must not
@@ -131,6 +139,13 @@ class GuideFrame {
     var showNumbers: Boolean = true
     var lowEnd: Boolean = false
     var contextLabel: String = ""
+    /**
+     * (decision 2026-10-19) True while the next single Left in the grid opens Groups (no earlier watchable cell): the
+     * renderer draws [GuideAsset.EDGE_CHEVRON] beside the focused row. Kept by the state machine on every publish.
+     */
+    var leftEdgeCue: Boolean = false
+    /** (decision 2026-10-19) True while the focused cell starts before the window and Left will move: [GuideAsset.CLIP_CHEVRON]. */
+    var clipCue: Boolean = false
     /** Channel-number bubble while Up/Down is held (product S7); −1 = hidden. */
     var bubbleNumber: Int = -1
     var labels: TimeLabels? = null

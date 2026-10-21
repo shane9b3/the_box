@@ -3,6 +3,7 @@ package app.thebox.ui.guide.screen
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -36,6 +37,8 @@ import java.util.Date
 import java.util.Locale
 
 const val HEADER_TABS_TAG = "header_tabs"
+internal const val HEADER_CLOCK_TAG = "header_clock"
+internal const val HEADER_DATE_TAG = "header_date"
 
 /** Tabs in their order (§3.4.3): Guide · Search · Settings gear. Recordings is hidden until v2 (plan §2). */
 enum class GuideTab { GUIDE, SEARCH, SETTINGS }
@@ -47,6 +50,12 @@ enum class GuideTab { GUIDE, SEARCH, SETTINGS }
  */
 @Composable
 fun HeaderTabs(zone: Zone, tabFocused: Int, sync: SyncChip?, clock24: Boolean, modifier: Modifier = Modifier) {
+    HeaderTabsRow(zone, tabFocused, sync, modifier) { Clock(clock24) }
+}
+
+/** The status chip uses spare width; navigation and the current time retain their intrinsic sizes. */
+@Composable
+internal fun HeaderTabsRow(zone: Zone, tabFocused: Int, sync: SyncChip?, modifier: Modifier = Modifier, clock: @Composable () -> Unit) {
     Row(modifier.fillMaxWidth().testTag(HEADER_TABS_TAG), verticalAlignment = Alignment.CenterVertically) {
         Wordmark()
         Row(Modifier.padding(start = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -60,8 +69,8 @@ fun HeaderTabs(zone: Zone, tabFocused: Int, sync: SyncChip?, clock24: Boolean, m
                 ) { contentColor ->
                     val color = if (focused) contentColor else if (active) GuideUi.Fg else GuideUi.Fg60
                     when (tab) {
-                        GuideTab.GUIDE -> Line(stringResource(R.string.guide_tab_guide), GuideUi.sans(18, FontWeight.Medium, color))
-                        GuideTab.SEARCH -> Line(stringResource(R.string.guide_tab_search), GuideUi.sans(18, FontWeight.Medium, color))
+                        GuideTab.GUIDE -> Line(stringResource(R.string.guide_tab_guide), GuideUi.sans(24, FontWeight.Medium, color))
+                        GuideTab.SEARCH -> Line(stringResource(R.string.guide_tab_search), GuideUi.sans(24, FontWeight.Medium, color))
                         GuideTab.SETTINGS -> {
                             val desc = stringResource(R.string.guide_tab_settings)
                             Gear(color, Modifier.size(22.dp).semantics { contentDescription = desc })
@@ -70,10 +79,10 @@ fun HeaderTabs(zone: Zone, tabFocused: Int, sync: SyncChip?, clock24: Boolean, m
                 }
             }
         }
-        sync?.let { SyncChipView(it, Modifier.padding(start = 16.dp)) }
-        Row(Modifier.weight(1f), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.Bottom) {
-            Clock(clock24)
+        Box(Modifier.weight(1f).padding(horizontal = 16.dp)) {
+            sync?.let { SyncChipView(it) }
         }
+        clock()
     }
 }
 
@@ -106,9 +115,15 @@ private fun Clock(clock24: Boolean) {
     // H-S9: formatters cached per (locale, zone, clock form), not built on every recomposition.
     val dateText = TimeFormats.format("EEE d MMM", locale, date)
     val timeText = TimeFormats.format(if (clock24) "HH:mm" else "h:mm a", locale, date)
+    HeaderClock(dateText, timeText)
+}
+
+@Composable
+internal fun HeaderClock(dateText: String, timeText: String) {
     Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.Bottom) {
-        Line(dateText, GuideUi.sans(18, color = GuideUi.Fg65), Modifier.padding(bottom = 6.dp))
-        Line(timeText, BoxTextStyles.Clock.copy(color = GuideUi.Fg))
+        // Measure the time first. A long localized date may ellipsize, but it cannot squeeze the time away.
+        Line(dateText, GuideUi.sans(24, color = GuideUi.Fg65), Modifier.weight(1f, fill = false).padding(bottom = 6.dp).testTag(HEADER_DATE_TAG))
+        Line(timeText, BoxTextStyles.Clock.copy(color = GuideUi.Fg), Modifier.testTag(HEADER_CLOCK_TAG))
     }
 }
 

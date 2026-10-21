@@ -81,6 +81,8 @@ class TimeTables(
                 val hour = minuteOfDay(t, mid) / 60
                 when {
                     mid < nowMin - 60 -> EARLIER_TODAY
+                    // Decision 2026-10-19, ruling 9: a window centred between midnight and 05:00 is still "tonight".
+                    hour < 5 -> TONIGHT
                     hour < 12 -> THIS_MORNING
                     hour < 18 -> THIS_AFTERNOON
                     else -> TONIGHT

@@ -199,10 +199,11 @@ internal fun togglePillColors(on: Boolean, onLight: Boolean): Pair<Color, Color>
     else -> SettingsUi.White16 to SettingsUi.Fg
 }
 
+/** A row badge (§3.1): mono 18, radius 7, a `.22` border in the row's text colour. Also the channel editor's badges. */
 @Composable
-private fun BadgeChip(label: String, text: Color) {
+internal fun BadgeChip(label: String, text: Color, modifier: Modifier = Modifier) {
     Box(
-        Modifier
+        modifier
             .border(1.dp, text.copy(alpha = 0.22f), RoundedCornerShape(SettingsUi.BADGE_RADIUS.dp))
             .padding(horizontal = 8.dp, vertical = 2.dp),
     ) { Line(label, SettingsUi.BadgeText.copy(color = text.copy(alpha = 0.8f))) }
@@ -247,15 +248,19 @@ private fun Radio(selected: Boolean, ring: Color) {
     else Box(Modifier.size(d).border(2.dp, ring.copy(alpha = 0.45f), CircleShape))
 }
 
+/**
+ * The kit's check box: accent fill and an FG tick when [checked]; a 2 px `.45` ring of [ring] when not. [side] in design
+ * px (18 in option lists; the channel editor's tick box is 24).
+ */
 @Composable
-private fun CheckBox(checked: Boolean, ring: Color) {
-    val d = SettingsUi.RADIO.dp
+internal fun CheckBox(checked: Boolean, ring: Color, modifier: Modifier = Modifier, side: Int = SettingsUi.RADIO) {
+    val d = side.dp
     val shape = RoundedCornerShape(4.dp)
     if (!checked) {
-        Box(Modifier.size(d).border(2.dp, ring.copy(alpha = 0.45f), shape))
+        Box(modifier.size(d).border(2.dp, ring.copy(alpha = 0.45f), shape))
         return
     }
-    Canvas(Modifier.size(d).background(SettingsUi.Accent, shape)) {
+    Canvas(modifier.size(d).background(SettingsUi.Accent, shape)) {
         val w = size.width
         drawLine(SettingsUi.Fg, Offset(w * 0.22f, w * 0.52f), Offset(w * 0.42f, w * 0.72f), strokeWidth = w * 0.14f, cap = StrokeCap.Round)
         drawLine(SettingsUi.Fg, Offset(w * 0.42f, w * 0.72f), Offset(w * 0.78f, w * 0.30f), strokeWidth = w * 0.14f, cap = StrokeCap.Round)

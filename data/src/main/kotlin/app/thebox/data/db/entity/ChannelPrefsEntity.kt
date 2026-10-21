@@ -9,7 +9,12 @@ import androidx.room.Index
     tableName = "channel_prefs",
     primaryKeys = ["playlist_id", "stable_key"],
     foreignKeys = [ForeignKey(entity = PlaylistEntity::class, parentColumns = ["id"], childColumns = ["playlist_id"], onDelete = ForeignKey.CASCADE)],
-    indices = [Index(value = ["last_watched_at"], name = "index_channel_prefs_recent")],
+    indices = [
+        Index(value = ["last_watched_at"], name = "index_channel_prefs_recent"),
+        // v5 (docs/design/m6-channel-editor.md §3.6): the group lineup's second half drives from it. Name and columns match
+        // Migrations.MIGRATION_4_5 exactly (Room validation).
+        Index(value = ["playlist_id", "custom_group_key"], name = "index_channel_prefs_group"),
+    ],
 )
 data class ChannelPrefsEntity(
     @ColumnInfo(name = "playlist_id") val playlistId: Long,
@@ -39,4 +44,10 @@ data class ChannelPrefsEntity(
     @ColumnInfo(name = "playback_flags", defaultValue = "0") val playbackFlags: Int = 0,
     /** v2. Learned: last snapped fps × 1000. Written only by [ChannelPrefsDao.upsertFpsMilli]. */
     @ColumnInfo(name = "fps_milli") val fpsMilli: Int? = null,
+    /**
+     * v5 (docs/design/m6-channel-editor.md §3.6): the channel editor's Move to group. A LIVE `group_key` of the same
+     * playlist (`xcat:<id>` / `g:<name>`, refresh-stable); null = the provider's group. Readers fall back to the provider
+     * group only when no `channel_group` row has the key ([app.thebox.data.db.dao.ChannelDao.GROUP_TAIL]).
+     */
+    @ColumnInfo(name = "custom_group_key") val customGroupKey: String? = null,
 )

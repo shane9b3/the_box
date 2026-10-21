@@ -1,7 +1,9 @@
 package app.thebox.core.full.state
 
+import app.thebox.core.full.PausedHeader
 import app.thebox.core.guide.ProgrammeInfo
 import app.thebox.core.guide.rawEndMin
+import app.thebox.core.playback.timeshift.RecordStop
 
 /**
  * Pure scrub-bar arithmetic (docs/design/m4-player-ux.md §3.5.2, §3.5.3; review E21, B3). All times are programme-frame
@@ -52,6 +54,18 @@ object ScrubModel {
      * beyond the live edge ("next beyond live → live", §3.5.3).
      */
     fun chipTarget(p: ProgrammeInfo, liveEdgeMs: Long): Long? = startMs(p).takeIf { it < liveEdgeMs }
+
+    /**
+     * (M6 §11.5) The header line of a paused LOCAL time-shift: saving ([stop] null), or why saving stopped. On a catch-up
+     * channel every stop reads CATCHUP_COVERS (the provider fills the rest); storage stops have no header (their toast).
+     */
+    fun pausedHeader(stop: RecordStop?, catchUp: Boolean): PausedHeader? = when (stop) {
+        null -> PausedHeader.SAVING
+        RecordStop.FULL_WHILE_PAUSED -> if (catchUp) PausedHeader.CATCHUP_COVERS else PausedHeader.FULL
+        RecordStop.HOLD_LIMIT -> if (catchUp) PausedHeader.CATCHUP_COVERS else PausedHeader.HOLD_LIMIT
+        RecordStop.SLOT_LOST, RecordStop.PREEMPTED -> if (catchUp) PausedHeader.CATCHUP_COVERS else PausedHeader.SLOT_LOST
+        RecordStop.UPSTREAM_FAILED, RecordStop.DISK_ERROR, RecordStop.STORAGE_EVICTED, RecordStop.DISK_TOO_SLOW, RecordStop.SESSION_END -> null
+    }
 
     /** Merges [more] into [into] by raw start, start order, later answers replacing earlier copies. */
     fun merge(into: List<ProgrammeInfo>, more: List<ProgrammeInfo>): List<ProgrammeInfo> {

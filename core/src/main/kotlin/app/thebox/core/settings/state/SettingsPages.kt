@@ -4,6 +4,7 @@ import app.thebox.core.guide.GuideEvent
 import app.thebox.core.settings.PageModel
 import app.thebox.core.settings.RowIntent
 import app.thebox.core.settings.SettingsRoute
+import app.thebox.core.settings.TextHint
 import app.thebox.core.settings.SettingsRow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharedFlow
@@ -104,6 +105,29 @@ interface SettingsShellLink : SettingsPageNavigation {
      * edits). The default (test doubles) pushes ungated.
      */
     fun pushGated(route: SettingsRoute) = push(route)
+
+    // ---- (docs/design/m6-channel-editor.md §3.2) Seams for a page drawn by another screen. The defaults answer the
+    // callback at once, so test doubles never hang; SettingsMachineImpl implements them (WP-A).
+
+    /**
+     * Opens the settings text editor overlay for a page drawn by another screen. [validate] null = the hint's rule
+     * (HintValidator); the channel editor's Rename passes `{ null }`, so an empty name ("use the provider's name") commits.
+     * [onClosed] is called exactly once: the committed text (even when equal to [initial]), or null on cancel and when
+     * closeOverlays() runs (OPEN_GUIDE, EXIT, push, replace, pop, onLeave).
+     */
+    fun editText(
+        label: String, initial: String, hint: TextHint, chips: List<String> = emptyList(),
+        validate: ((String) -> String?)? = null, onClosed: (String?) -> Unit,
+    ) { onClosed(null) }
+
+    /** Opens the settings number pad; [onClosed] is called exactly once: the number, or null (cancel, closeOverlays). */
+    fun editNumber(label: String, value: Int?, min: Int, max: Int, onClosed: (Int?) -> Unit) { onClosed(null) }
+
+    /**
+     * Asks the guide's one PIN prompt (PinPurpose.SettingsAction(token)). [onResult] is called exactly once: true when
+     * granted or when no PIN is set, false when refused or when closeOverlays() runs first.
+     */
+    fun requestPin(onResult: (Boolean) -> Unit) { onResult(false) }
 
     /** Shell events for `AppRoot` (toast, announcement, exit). */
     val shellEvents: SharedFlow<SettingsShellEvent>

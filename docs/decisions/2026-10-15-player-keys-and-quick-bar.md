@@ -23,3 +23,14 @@ Owner ruling given during the M4 design phase, after the design review raised th
 ## Effect on the M4 design
 
 Folded into `docs/design/m4-player-ux.md` in the review-reconciliation pass of 2026-10-15: §3.1 key tables, §3.4.1 quick menu becomes the quick bar, the `PlayerSettings` enum for Up/Down, the five-key reachability proof, and `player_keys.csv`.
+
+## Amendment 2026-10-19: "Pause" first in the quick bar (M6 time-shift)
+
+Lead ruling 1 of `docs/design/m6-timeshift.md` (from the UX review's U-B3), recorded here as that design's §11.3 asks.
+
+- The quick bar's `TIME_SHIFT` item is labelled **"Pause"** and comes **first on every live channel**: TS, HLS, rewind off, not enough space. OK on it pauses at once and opens the focused scrub bar at the pause point, where ← rewinds. On a channel that cannot be rewound (HLS, rewind off, no space), the same OK freezes the picture as M2 does and shows a toast with the reason and the next step.
+- While behind live (local buffer or provider time-shift, catch-up), **"Back to live"** comes first instead.
+- Live order: Pause · Audio · Picture shape · Subtitles · Favourite · Start over · Previous · Stream info · Decoder · Screen off · (Sources) · Settings. Behind live: Back to live · Audio · Picture shape · Subtitles · Favourite · Previous · Stream info · Decoder · Screen off · (Sources) · Settings.
+- There is no separate "Rewind 30 s" item (design §19 R21).
+
+**Why** (design §11.7, the press journeys): on remotes without media keys (Onn, Chromecast with Google TV), ↑ OK is the only two-press route to pause, and it must work on any live channel. That keeps the five-key rule for pause and rewind. The order in the 2026-10-15 ruling above (audio, aspect, subtitles first) is otherwise unchanged. The rest of this decision stands, including Up = "jump to live" inside the scrub bar.

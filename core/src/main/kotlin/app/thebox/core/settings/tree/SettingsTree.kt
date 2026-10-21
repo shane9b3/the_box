@@ -69,7 +69,7 @@ object SettingsTree {
         is SettingsRoute.NetworkTest -> SectionId.PLAYLISTS
         SettingsRoute.EpgSources, is SettingsRoute.FixGuide, SettingsRoute.SyncStatus -> SectionId.GUIDE
         is SettingsRoute.Groups, is SettingsRoute.HiddenChannels, is SettingsRoute.HideRules,
-        SettingsRoute.FavouriteLists, is SettingsRoute.FavouriteList, is SettingsRoute.Channel -> SectionId.CHANNELS
+        SettingsRoute.FavouriteLists, is SettingsRoute.FavouriteList, is SettingsRoute.Channel, is SettingsRoute.ChannelEditor -> SectionId.CHANNELS
         SettingsRoute.ButtonMapping, is SettingsRoute.ActionBindings -> SectionId.REMOTE
         SettingsRoute.Diagnostics, SettingsRoute.Licences -> SectionId.ABOUT
         SettingsRoute.Backup, is SettingsRoute.RestorePreview -> SectionId.BACKUP

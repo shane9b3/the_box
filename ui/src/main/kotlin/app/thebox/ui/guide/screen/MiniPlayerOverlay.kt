@@ -108,7 +108,7 @@ fun MiniPlayerOverlay(
             // H-B1: the HDR poster shows the still in MINI (the controller keeps the video track off; viewport MINI).
             tuned.still || nothing || poster ->
                 Still(tunedChannel, tunedNow, poster && !nothing, Modifier.align(Alignment.Center))
-            else -> BottomPanel(tunedNow, tunedChannel, now, clock24, Modifier.align(Alignment.BottomStart))
+            else -> BottomPanel(tunedChannel, Modifier.align(Alignment.BottomStart))
         }
         if (!nothing) Pills(tuned, tunedChannel, lowEnd, archivePill(tuned, archive), Modifier.offset(20.dp, 18.dp))
     }
@@ -136,19 +136,19 @@ private fun Pills(tuned: TunedState, tunedChannel: GuideChannel?, lowEnd: Boolea
         } else Row(pill, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             when {
                 tuned.phase == MiniPhase.CONNECTING || tuned.phase == MiniPhase.BUFFERING ->
-                    Line(stringResource(R.string.guide_mini_connecting), GuideUi.sans(15, FontWeight.SemiBold))
+                    Line(stringResource(R.string.guide_mini_connecting), GuideUi.sans(20, FontWeight.SemiBold))
                 tuned.phase == MiniPhase.RECONNECTING ->
-                    Line(stringResource(R.string.guide_mini_reconnecting, tuned.reconnectAttempt, tuned.reconnectMax), GuideUi.sans(15, FontWeight.SemiBold))
+                    Line(stringResource(R.string.guide_mini_reconnecting, tuned.reconnectAttempt, tuned.reconnectMax), GuideUi.sans(20, FontWeight.SemiBold))
                 tuned.isArchive ->
-                    Line(stringResource(R.string.guide_mini_catchup), GuideUi.sans(15, FontWeight.SemiBold, GuideUi.Accent, 0.08f))
+                    Line(stringResource(R.string.guide_mini_catchup), GuideUi.sans(20, FontWeight.SemiBold, GuideUi.Accent, 0.08f))
                 else -> {
                     LiveDot(lowEnd)
-                    Line(stringResource(R.string.guide_mini_live), GuideUi.sans(15, FontWeight.SemiBold, letterSpacingEm = 0.08f))
+                    Line(stringResource(R.string.guide_mini_live), GuideUi.sans(20, FontWeight.SemiBold, letterSpacingEm = 0.08f))
                 }
             }
         }
         tunedChannel?.number?.let { n ->
-            Box(pill) { Line(stringResource(R.string.guide_mini_ch, n.toString()), GuideUi.mono(15)) }
+            Box(pill) { Line(stringResource(R.string.guide_mini_ch, n.toString()), GuideUi.mono(20)) }
         }
     }
 }
@@ -165,7 +165,7 @@ internal fun MiniArchivePill(p: PillState, modifier: Modifier = Modifier) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        if (p.kind == PillKind.PAUSED) Line(stringResource(R.string.player_pill_paused), GuideUi.sans(15, FontWeight.SemiBold, letterSpacingEm = 0.08f))
+        if (p.kind == PillKind.PAUSED) Line(stringResource(R.string.player_pill_paused), GuideUi.sans(20, FontWeight.SemiBold, letterSpacingEm = 0.08f))
         if (p.kind == PillKind.BEHIND || p.behindMs > 0) BehindLabel(p)
     }
 }
@@ -223,35 +223,17 @@ const val COMPOSITIONS_MINI = "MiniPlayerOverlay"
 private val BottomGradient = Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0f), Color.Black.copy(alpha = 0.75f)))
 
 @Composable
-private fun BottomPanel(info: ProgrammeInfo?, channel: GuideChannel?, nowMs: Long, clock24: Boolean, modifier: Modifier) {
-    if (info == null && channel == null) return
+private fun BottomPanel(channel: GuideChannel?, modifier: Modifier) {
+    // Owner ruling 2026-10-17: the mini player names the channel only; the programme and its progress live in the
+    // focused panel and the grid.
+    channel ?: return
     Column(
         modifier
             .fillMaxWidth()
             .background(BottomGradient)
             .padding(start = 24.dp, end = 24.dp, top = 48.dp, bottom = 20.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Bottom) {
-            info?.let { Line(it.title, GuideUi.sans(30, FontWeight.SemiBold, letterSpacingEm = -0.01f), Modifier.weight(1f, fill = false)) }
-            channel?.let { Line(it.displayName, GuideUi.sans(18, color = Color.White.copy(alpha = 0.7f)), Modifier.padding(bottom = 4.dp)) }
-        }
-        if (info != null && info.endMin > info.startMin) {
-            val nowMin = nowMs / 60_000.0
-            val progress = ((nowMin - info.startMin) / (info.endMin - info.startMin)).coerceIn(0.0, 1.0).toFloat()
-            Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
-                val style = GuideUi.mono(14, color = Color.White.copy(alpha = 0.75f))
-                Line(hm(info.startMin, clock24), style)
-                Box(
-                    Modifier
-                        .weight(1f)
-                        .height(4.dp)
-                        .background(Color.White.copy(alpha = 0.2f), RoundedCornerShape(2.dp))
-                        .drawBehind { drawRect(Color.White, size = size.copy(width = size.width * progress)) },
-                )
-                Line(hm(info.endMin, clock24), style)
-            }
-        }
+        Line(channel.displayName, GuideUi.sans(28, FontWeight.SemiBold, Color.White.copy(alpha = 0.9f)))
     }
 }
 
@@ -260,13 +242,13 @@ private fun BottomPanel(info: ProgrammeInfo?, channel: GuideChannel?, nowMs: Lon
 private fun Still(channel: GuideChannel?, info: ProgrammeInfo?, poster: Boolean, modifier: Modifier) {
     Column(modifier.testTag(MINI_STILL_TAG).widthIn(max = 560.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
         Logo(channel, Modifier.size(192.dp, 80.dp))
-        info?.let { Line(it.title, GuideUi.sans(26, FontWeight.SemiBold)) }
+        info?.let { Line(it.title, GuideUi.sans(32, FontWeight.SemiBold)) }
         val prompt = when {
             channel == null -> R.string.guide_mini_nothing
             poster -> R.string.guide_mini_hdr
             else -> R.string.guide_mini_press_ok
         }
-        Line(stringResource(prompt), GuideUi.sans(18, color = GuideUi.Fg70))
+        Line(stringResource(prompt), GuideUi.sans(24, color = GuideUi.Fg70))
     }
 }
 
@@ -288,10 +270,10 @@ fun ErrorCard(code: PlaybackErrorCode, channel: GuideChannel?, modifier: Modifie
         Logo(channel, Modifier.size(144.dp, 60.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
             Dot(GuideUi.Warn, 10.dp)
-            Line(stringResource(ErrorText.headline(code)), GuideUi.sans(22, FontWeight.SemiBold), maxLines = 2)
+            Line(stringResource(ErrorText.headline(code)), GuideUi.sans(28, FontWeight.SemiBold), maxLines = 2)
         }
         val step = if (detail != null && detail.code == code) ErrorText.step(detail) else ErrorText.step(code)
-        Line(stringResource(step), GuideUi.sans(18, color = GuideUi.Fg70), maxLines = 2)
+        Line(stringResource(step), GuideUi.sans(24, color = GuideUi.Fg70), maxLines = 2)
     }
 }
 
@@ -305,7 +287,7 @@ private fun Logo(channel: GuideChannel?, modifier: Modifier) {
         if (loader != null && !url.isNullOrBlank()) {
             AsyncImage(model = url, contentDescription = channel.displayName, imageLoader = loader, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
         } else {
-            Line(channel.displayName, GuideUi.sans(24, FontWeight.SemiBold))
+            Line(channel.displayName, GuideUi.sans(30, FontWeight.SemiBold))
         }
     }
 }

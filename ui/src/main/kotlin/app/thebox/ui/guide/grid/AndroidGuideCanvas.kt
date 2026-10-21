@@ -43,6 +43,7 @@ class AndroidGuideCanvas(context: Context) : GuideCanvas {
     /** Binds [target] for one draw pass at [scale] device px per design px. */
     fun bind(target: Canvas, scale: Float) {
         canvas = target
+        slots.nextFrame()
         if (scale != this.scale) {
             clearRows()
             this.scale = scale
@@ -112,7 +113,8 @@ class AndroidGuideCanvas(context: Context) : GuideCanvas {
 
     // ---- O-2 per-row recordings (API 29+ RenderNode, hardware canvases only; ROW_LAYERS is the flag)
     private val rowNodes = arrayOfNulls<android.graphics.RenderNode>(ROW_SLOTS)
-    private val rowKeys = LongArray(ROW_SLOTS)
+    /** Key → slot with frame-aware eviction: a node recorded this frame is never re-recorded in the same frame. */
+    private val slots = RowSlots(ROW_SLOTS)
     private val rowTops = FloatArray(ROW_SLOTS)
     private var recordingNode: android.graphics.RenderNode? = null
     private var outerCanvas: Canvas? = null
@@ -131,22 +133,27 @@ class AndroidGuideCanvas(context: Context) : GuideCanvas {
 
     @androidx.annotation.RequiresApi(29)
     private fun beginRow29(c: Canvas, key: Long, top: Float): Boolean {
-        val slot = ((key xor (key ushr 29)).toInt()) and (ROW_SLOTS - 1)
-        val existing = rowNodes[slot]
-        if (existing != null && rowKeys[slot] == key && existing.hasDisplayList()) {
-            val sv = c.save()
-            c.translate(0f, top - rowTops[slot])
-            c.drawRenderNode(existing)
-            c.restoreToCount(sv)
-            rowReplays++
-            return true
+        var slot = slots.find(key)
+        if (slot >= 0) {
+            val existing = rowNodes[slot]
+            if (existing != null && existing.hasDisplayList()) {
+                val sv = c.save()
+                c.translate(0f, top - rowTops[slot])
+                c.drawRenderNode(existing)
+                c.restoreToCount(sv)
+                rowReplays++
+                return true
+            }
+            // A trimmed display list: record again into the same slot.
+        } else {
+            slot = slots.allocate(key)
+            if (slot < 0) return false // more rows than slots in one frame: drawn directly
         }
-        val node = existing ?: android.graphics.RenderNode("guide-row").also {
+        val node = rowNodes[slot] ?: android.graphics.RenderNode("guide-row").also {
             it.setPosition(0, 0, ROW_NODE_EXTENT, ROW_NODE_EXTENT)
             it.setClipToBounds(false)
             rowNodes[slot] = it
         }
-        rowKeys[slot] = key
         rowTops[slot] = top
         outerCanvas = c
         recordingNode = node
@@ -172,7 +179,7 @@ class AndroidGuideCanvas(context: Context) : GuideCanvas {
 
     /** Drops every recording (trim, scale change). */
     fun clearRows() {
-        rowKeys.fill(0L)
+        slots.clear()
         if (android.os.Build.VERSION.SDK_INT >= 29) for (n in rowNodes) n?.discardDisplayList()
     }
 
@@ -219,7 +226,8 @@ class AndroidGuideCanvas(context: Context) : GuideCanvas {
          * and on software canvases such as the golden-frame test).
          */
         @Volatile var ROW_LAYERS: Boolean = true
-        private const val ROW_SLOTS = 32
+        /** Two passes × the visible rows (≤ 8) plus the rows a vertical scroll animation leaves behind; power of two not required. */
+        private const val ROW_SLOTS = 48
         /** Recordings are in window px; their bounds only need to cover the window (no clip to bounds). */
         private const val ROW_NODE_EXTENT = 8192
     }

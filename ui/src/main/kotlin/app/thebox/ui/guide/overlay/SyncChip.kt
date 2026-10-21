@@ -36,6 +36,6 @@ fun SyncChipView(chip: SyncChip, modifier: Modifier = Modifier) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Dot(if (chip.failed) GuideUi.Warn else GuideUi.Accent, 8.dp)
-        Line(chip.text, GuideUi.sans(15, color = GuideUi.Fg70))
+        Line(chip.text, GuideUi.sans(20, color = GuideUi.Fg70))
     }
 }

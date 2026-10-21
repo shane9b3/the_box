@@ -30,6 +30,11 @@ object PlayerUi {
     const val BAR_PAD_V = 24f
     const val LOGO = 64f
     const val LOGO_R = 12f
+    /** Owner ruling 2026-10-17: the info bar's logo card fills the bar's inner height on the left; the channel info sits beside it. */
+    const val BAR_LOGO_W = 240f
+    const val BAR_LOGO_H = BAR_H - 2 * BAR_PAD_V
+    const val BAR_LOGO_PAD = 16f
+    const val BAR_GAP = 28f
 
     // ---- scrub track (absolute canvas coordinates)
     const val TRACK_L = 128f
@@ -58,7 +63,8 @@ object PlayerUi {
     const val LIST_ROW_H = 72f
     const val LIST_PITCH = 80f
     const val LIST_VISIBLE = 10
-    const val LIST_LOGO = 56f
+    const val LIST_LOGO = 60f
+    const val LIST_LOGO_W = 104f
     const val GROUPS_W = 260f
     const val TUNED_DOT = 7f
 
@@ -85,7 +91,7 @@ object PlayerUi {
     const val STATS_L = 64f
     const val STATS_T = 56f
     const val STATS_W = 600f
-    const val STATS_LINE_H = 24f
+    const val STATS_LINE_H = 30f
 
     // ---- error card
     const val CARD_W = 720f

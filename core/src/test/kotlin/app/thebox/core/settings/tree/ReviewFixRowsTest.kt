@@ -141,6 +141,7 @@ class ReviewFixRowsTest {
             SettingsRoute.ButtonMapping, SettingsRoute.ActionBindings(BoxAction.ZAP_UP), SettingsRoute.Diagnostics, SettingsRoute.SyncStatus,
             SettingsRoute.Licences, SettingsRoute.Backup, SettingsRoute.RestorePreview(1), SettingsRoute.AddSource(),
             SettingsRoute.PhoneSetup(), SettingsRoute.ImportProgress(1, false), SettingsRoute.GroupsReview(1, false), SettingsRoute.MatchingReport(1, false),
+            SettingsRoute.ChannelEditor(1), SettingsRoute.ChannelEditor(1, "g:Sport"),
         )
         for (r in routes) {
             var p: SettingsRoute? = r

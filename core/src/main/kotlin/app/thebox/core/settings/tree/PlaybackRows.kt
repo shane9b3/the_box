@@ -17,6 +17,7 @@ import app.thebox.core.settings.Visibility.SIMPLE
  * WP-A: the Playback section (docs/design/m5-setup-settings.md §3.3.3). `playback.audio_output` is REPREPARE for every
  * value, Always passthrough included (lead ruling §1.9a, F19); RESTART stays only for `playback.ffmpeg`, whose
  * `playback.restart_now` row (N9) appears while the stored value differs from the running engine's.
+ * (M6 time-shift commit 0) The three time-shift rows of docs/design/m6-timeshift.md §12; "On launch" is ADVANCED.
  */
 object PlaybackRows : RowSource {
     val BUFFER = RowId("playback.buffer")
@@ -37,13 +38,24 @@ object PlaybackRows : RowSource {
     val INFO_BAR = RowId("playback.info_bar")
     val NUMBER_WAIT = RowId("playback.number_wait")
     val EXTERNAL_PLAYER = RowId("playback.external_player")
+    // (M6 time-shift commit 0, docs/design/m6-timeshift.md §12)
+    /** "Pause and rewind": SIMPLE, NEXT_TUNE (Off deletes the file at once). */
+    val TIMESHIFT = RowId("playback.timeshift")
+    /** "Keep recording while paused": ADVANCED, LIVE. */
+    val TIMESHIFT_HOLD = RowId("playback.timeshift_hold")
+    /** "Protect built-in storage": ADVANCED, LIVE. */
+    val TIMESHIFT_PROTECT = RowId("playback.timeshift_protect")
 
     override val rows: List<RowSpec> = listOf(
         a(BUFFER, SIMPLE, REPREPARE),
         a(AFR, SIMPLE, LIVE),
         a(AUDIO_OUTPUT, SIMPLE, REPREPARE),
         a(ASPECT, SIMPLE, NEXT_TUNE),
-        a(ON_LAUNCH, SIMPLE, NEXT_LAUNCH),
+        a(TIMESHIFT, SIMPLE, NEXT_TUNE),
+        a(TIMESHIFT_HOLD, ADVANCED, LIVE),
+        a(TIMESHIFT_PROTECT, ADVANCED, LIVE),
+        // (M6 time-shift, lead ruling 1) demoted to ADVANCED so the simple PLAYBACK rows stay at 5 with "Pause and rewind".
+        a(ON_LAUNCH, ADVANCED, NEXT_LAUNCH),
         a(AUDIO_LANGUAGE, ADVANCED, NEXT_TUNE),
         a(SUBTITLES, ADVANCED, NEXT_TUNE),
         a(DECODER, ADVANCED, REPREPARE),

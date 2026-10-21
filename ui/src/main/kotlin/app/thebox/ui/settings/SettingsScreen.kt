@@ -24,6 +24,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.remember
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -73,6 +74,11 @@ fun SettingsScreen(
     modifier: Modifier = Modifier,
     /** (M5 integration) WP-D's phone page for `SettingsRoute.PhoneSetup` (the activity supplies its view model). */
     phone: (@Composable (app.thebox.core.settings.PhonePurpose) -> Unit)? = null,
+    /**
+     * (m6-channel-editor §2.0) The channel editor for `SettingsRoute.ChannelEditor` (the activity supplies its view
+     * model). Drawn inside [SettingsContent], after the header and before the text editor and number pad overlays.
+     */
+    channelEditor: (@Composable (SettingsRoute.ChannelEditor) -> Unit)? = null,
 ) {
     val ui by machine.ui.collectAsState()
     val link = machine as? SettingsShellLink
@@ -103,6 +109,7 @@ fun SettingsScreen(
         ui = ui,
         clock24 = clock24,
         modifier = modifier.then(traced),
+        channelEditor = channelEditor,
         editor = { e ->
             TextEditorOverlay(
                 editor = e,
@@ -123,12 +130,24 @@ fun SettingsContent(
     clock24: Boolean,
     modifier: Modifier = Modifier,
     editor: @Composable (app.thebox.core.settings.EditorState) -> Unit = {},
+    /** (m6-channel-editor §2.0) The full-canvas channel editor page; replaces the sections and page panes. */
+    channelEditor: (@Composable (SettingsRoute.ChannelEditor) -> Unit)? = null,
 ) {
     val solo = ui.sections.isEmpty()
     val section: SectionId? = SettingsTree.sectionOf(ui.route)
     val list = rememberLazyListState()
+    val route = ui.route
     Box(modifier.fillMaxSize().background(SettingsUi.Canvas).testTag(SETTINGS_SCREEN_TAG)) {
         Header(ui, section, clock24)
+        if (route is SettingsRoute.ChannelEditor && channelEditor != null) {
+            // The editor draws its own panes, notice and footer below the header; the settings machine still owns the
+            // text editor, the number pad and the PIN prompt it opens for the editor (SettingsShellLink seams, §3.2).
+            channelEditor(route)
+            ui.confirm?.let { ConfirmCard(it, Modifier.fillMaxSize()) }
+            ui.numberPad?.let { NumberPad(it, Modifier.fillMaxSize()) }
+            ui.editor?.let { editor(it) }
+            return@Box
+        }
         if (!solo) SectionsPane(ui, section, Modifier.offset(SettingsUi.SECTIONS_X.dp, SettingsUi.PANE_Y.dp))
         val pageX = if (solo) SettingsUi.PAGE_SOLO_X else SettingsUi.PAGE_X
         val pageW = if (solo) SettingsUi.PAGE_SOLO_W else SettingsUi.PAGE_W
@@ -207,7 +226,7 @@ private fun SectionsPane(ui: SettingsUiState, current: SectionId?, modifier: Mod
         var m = Modifier.fillMaxWidth().height(SettingsUi.SECTION_ROW_H.dp).testTag(SETTINGS_ADVANCED_TAG).semantics { selected = focused }
         if (focused) m = m.border(SettingsUi.FOCUS_RING.dp, SettingsUi.Accent, rs).background(SettingsUi.Fg, rs)
         Row(m.padding(start = SettingsUi.SECTION_LABEL_X.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Line(stringResource(R.string.settings_ui_show_advanced), SettingsUi.RowValue.copy(color = if (focused) SettingsUi.Canvas else SettingsUi.Fg85), Modifier.weight(1f))
+            Line(stringResource(R.string.settings_ui_show_advanced), SettingsUi.AdvancedLabel.copy(color = if (focused) SettingsUi.Canvas else SettingsUi.Fg85), Modifier.weight(1f))
             TogglePill(ui.advanced, onLight = focused) // U-S9
         }
     }
@@ -238,12 +257,16 @@ private fun overlayOpen(ui: SettingsUiState) =
 @Composable
 private fun PagePane(ui: SettingsUiState, list: LazyListState, modifier: Modifier) {
     val shape = RoundedCornerShape(SettingsUi.PANE_RADIUS.dp)
+    // Owner finding 2026-10-18: rows used to stop 64 px above the card's edge (notice band + padding), so a cut row
+    // sat over empty space. The list now runs to the card's bottom edge (clipped by the card's shape) and the notice,
+    // when there is one, overlays the bottom on the card's own fill.
     Box(
         modifier
             .testTag(SETTINGS_PAGE_TAG)
             .background(SettingsUi.GlassFill, shape)
             .border(1.dp, SettingsUi.GlassBorder, shape)
-            .padding(horizontal = SettingsUi.PAGE_PAD_H.dp, vertical = SettingsUi.PAGE_PAD_V.dp),
+            .clip(shape)
+            .padding(start = SettingsUi.PAGE_PAD_H.dp, end = SettingsUi.PAGE_PAD_H.dp, top = SettingsUi.PAGE_PAD_V.dp),
     ) {
         val page = ui.page ?: return@Box
         Column {
@@ -251,16 +274,16 @@ private fun PagePane(ui: SettingsUiState, list: LazyListState, modifier: Modifie
             page.subtitle?.let { Line(it, SettingsUi.PageSubtitle, Modifier.padding(top = 6.dp)) }
         }
         val rowsTop = (SettingsUi.ROWS_TOP - SettingsUi.PAGE_PAD_V).dp
-        val bottom = SettingsUi.NOTICE_H.dp
         if (page.placeholder != null) {
             Line(page.placeholder!!, SettingsUi.RowValue.copy(color = SettingsUi.Fg60), Modifier.padding(top = rowsTop).testTag(SETTINGS_PAGE_PLACEHOLDER_TAG), maxLines = 3)
         } else {
-            Rows(ui, page, list, Modifier.padding(top = rowsTop, bottom = bottom))
+            Rows(ui, page, list, Modifier.padding(top = rowsTop))
         }
         ui.notice?.let {
-            Box(Modifier.align(Alignment.BottomStart).height(SettingsUi.NOTICE_H.dp), contentAlignment = Alignment.CenterStart) {
-                Line(it, SettingsUi.Notice, Modifier.testTag(SETTINGS_NOTICE_TAG))
-            }
+            Box(
+                Modifier.align(Alignment.BottomStart).fillMaxWidth().height(SettingsUi.NOTICE_H.dp).background(SettingsUi.CardFill),
+                contentAlignment = Alignment.CenterStart,
+            ) { Line(it, SettingsUi.Notice, Modifier.testTag(SETTINGS_NOTICE_TAG)) }
         }
     }
 }
@@ -277,17 +300,38 @@ fun rowAt(page: PageModel, i: Int): SettingsRow? {
     return l.loaded[j / l.pageSize]?.getOrNull(j % l.pageSize)
 }
 
+/** Validates loaded identities only; unloaded lists can contain millions of rows. */
+internal class SettingsRowKeys(private val page: PageModel) {
+    private val duplicates = HashSet<Int>()
+
+    init {
+        val seen = HashSet<String>()
+        fun accept(index: Int, row: SettingsRow) {
+            if (!seen.add(row.id.key)) duplicates += index
+        }
+        page.rows.forEachIndexed(::accept)
+        page.list?.let { list ->
+            list.loaded.toSortedMap().forEach { (pageIndex, rows) ->
+                if (pageIndex >= 0) rows.take(list.pageSize).forEachIndexed { offset, row ->
+                    val index = pageIndex.toLong() * list.pageSize + offset
+                    if (index in 0L until list.count.toLong()) accept(page.rows.size + index.toInt(), row)
+                }
+            }
+        }
+    }
+
+    fun keyAt(index: Int): String = rowAt(page, index)?.takeUnless { index in duplicates }
+        ?.let { "r:${it.id.key}" } ?: "i:$index"
+}
+
 @Composable
 private fun Rows(ui: SettingsUiState, page: PageModel, list: LazyListState, modifier: Modifier) {
     val count = rowCount(page)
     // Keys: the RowId (rows rebuild without recomposing unchanged ones, §5 item 2); a duplicate id or an unloaded row
     // falls back to its index so a bad page can never crash the LazyColumn.
-    val keys = remember(page) {
-        val seen = HashSet<String>()
-        Array(count) { i -> rowAt(page, i)?.id?.key?.takeIf { seen.add(it) }?.let { "r:$it" } ?: "i:$i" }
-    }
-    LaunchedEffect(page.route, ui.top, count) {
-        if (count > 0) list.scrollToItem(ui.top.coerceIn(0, count - 1))
+    val keys = remember(page) { SettingsRowKeys(page) }
+    LaunchedEffect(page.route, ui.top, ui.cursor, ui.choice, count) {
+        if (count > 0) revealCursor(list, ui.top.coerceIn(0, count - 1), ui.cursor.coerceIn(0, count - 1))
     }
     val pageFocus = ui.pane == Pane.PAGE && !overlayOpen(ui)
     // (M5 integration) Move mode shows the lifted row at its target index; the rows between shift by one (§3.2.2).
@@ -301,7 +345,7 @@ private fun Rows(ui: SettingsUiState, page: PageModel, list: LazyListState, modi
         }
     }
     LazyColumn(modifier.fillMaxSize(), state = list, verticalArrangement = Arrangement.spacedBy(SettingsUi.ROW_GAP.dp), userScrollEnabled = false) {
-        items(count, key = { keys.getOrElse(shown(it)) { "i:$it" } }) { slot ->
+        items(count, key = { keys.keyAt(shown(it)) }) { slot ->
             val i = shown(slot)
             val row = rowAt(page, i)
             if (row == null) {
@@ -315,6 +359,25 @@ private fun Rows(ui: SettingsUiState, page: PageModel, list: LazyListState, modi
                 )
             }
         }
+    }
+}
+
+/**
+ * Scrolls the page so [top] is the first row and the [cursor] row is wholly inside the viewport (device finding
+ * 2026-10-17). The machine keeps `top` by a fixed budget of 8 rows (`SettingsMachineImpl.VISIBLE_ROWS`) of 76 px; rows
+ * with a second line are 104 px and an open option list adds its options, so the focused row could end below the pane,
+ * cut off or not composed at all. When it does not fit under [top], the list scrolls on by whole rows until it does, so
+ * the first row stays whole as the machine's model says. At most [cursor] − [top] remeasures, only on a cursor move.
+ */
+internal suspend fun revealCursor(list: LazyListState, top: Int, cursor: Int) {
+    list.scrollToItem(top)
+    var first = top
+    while (first < cursor) {
+        val info = list.layoutInfo
+        val item = info.visibleItemsInfo.firstOrNull { it.index == cursor }
+        if (item != null && item.offset + item.size <= info.viewportEndOffset) return
+        first++
+        list.scrollToItem(first)
     }
 }
 

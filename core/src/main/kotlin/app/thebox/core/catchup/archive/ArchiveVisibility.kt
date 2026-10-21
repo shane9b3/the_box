@@ -18,7 +18,8 @@ object ArchiveVisibility {
      */
     fun visible(tuned: TunedState, status: ArchiveStatus?): TunedState {
         if (status == null || status.phase == ArchivePhase.IDLE || status.phase == ArchivePhase.FAILED) return tuned
-        if (!tuned.isArchive || tuned.identityHash != status.identityHash) return tuned
+        // (M6 time-shift commit 0, §11.4) A LOCAL session's re-prepares are live tunes: hide their Connecting like a provider hand-off's.
+        if ((!tuned.isArchive && status.source != TimelineSource.LOCAL) || tuned.identityHash != status.identityHash) return tuned
         val waiting = tuned.phase == MiniPhase.ERROR || tuned.phase == MiniPhase.CONNECTING || tuned.phase == MiniPhase.BUFFERING
         if (!waiting) return tuned
         val handoff = status.phase in HANDOFF || (status.phase == ArchivePhase.PLAYING && tuned.phase == MiniPhase.ERROR)

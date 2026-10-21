@@ -35,7 +35,7 @@ class LogoCacheTest {
         pending.getOrPut(url) { CompletableDeferred() }.await()
     }, scope)
 
-    private fun bmp(w: Int = 96, h: Int = 40) = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+    private fun bmp(w: Int = 130, h: Int = 64) = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
 
     @Test
     fun missStartsOneLoadPerUrlAndHitReturnsTheBitmap() {
@@ -44,13 +44,13 @@ class LogoCacheTest {
         c.onLoaded = { loaded++ }
         repeat(60) { assertNull(c.get("http://x/a.png")) }      // 60 frames while loading
         assertEquals(1, requests.size)
-        assertEquals(Triple("http://x/a.png", 96, 40), requests[0])
+        assertEquals(Triple("http://x/a.png", 130, 64), requests[0])
         pending["http://x/a.png"]!!.complete(bmp())
         scope.advanceUntilIdle()
         assertEquals(1, loaded)
         val img = c.get("http://x/a.png")
         assertNotNull(img)
-        assertEquals(96, img!!.widthPx)
+        assertEquals(130, img!!.widthPx)
         assertEquals(1, requests.size)
     }
 
@@ -74,12 +74,13 @@ class LogoCacheTest {
         val c = cache()
         c.scale = 2f
         c.get("u")
-        assertEquals(Triple("u", 192, 80), requests.last())
+        assertEquals(Triple("u", 260, 128), requests.last())
     }
 
     @Test
     fun lruCapsEntriesAndBytesLeastRecentlyDrawnFirst() {
-        val c = LogoCache({ _, _, _ -> bmp() }, scope)
+        // Small bitmaps so the entry cap binds before the byte cap (160 full 130×64 slots are 5.3 MB > 4 MB).
+        val c = LogoCache({ _, _, _ -> bmp(96, 40) }, scope)
         for (i in 0 until GridConstants.LOGO_CACHE + 10) c.get("u$i")
         scope.advanceUntilIdle()
         assertEquals(GridConstants.LOGO_CACHE, c.size)

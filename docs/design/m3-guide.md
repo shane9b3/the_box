@@ -1520,7 +1520,7 @@ Leaving GRID keeps the grid focus (`frame.gridFocused = false`, the focused cell
 
 | Action | Behaviour |
 |---|---|
-| LEFT | `GridMove.LEFT`. (reviewed 2026-10-14, lead §7 item 4) `LeftEdge` → open Groups (decision note accelerator 1) when there is no earlier **watchable** cell: on a row without usable archive (`archiveDays == 0` or suspect), Left from the cell containing `now`; on an archive row, Left at the archive limit (`ctx.watchableFrom`). The non-watchable past stays reachable by holding Left (`STEP_BACK`, §3.4.7), RW and the day strip. A focused cell already in the non-watchable past moves Left normally until `earliest`. |
+| LEFT | `GridMove.LEFT`. (reviewed 2026-10-14, lead §7 item 4) `LeftEdge` → open Groups (decision note accelerator 1) when there is no earlier **watchable** cell: on a row without usable archive (`archiveDays == 0` or suspect), Left from the cell containing `now`; on an archive row, Left at the archive limit (`ctx.watchableFrom`) or at `earliest`. The non-watchable past stays reachable by holding Left (`STEP_BACK`, §3.4.7), RW and the day strip. A focused cell already in the non-watchable past moves Left normally until `earliest`. A held Left (`repeat > 0`) never opens Groups. (decision 2026-10-19 ruling 1) `LeftEdge` is the **only** grid route to Groups by Left: whether the focused cell is clipped by the window's left edge plays no part (the 2026-10-18 "clipped edge opens Groups" rule is withdrawn). The state machine probes "the next single Left opens Groups" once per publish with `GuideNavigator.leftEdge` (same rule, no allocation, never `move(LEFT)`) for the edge cue and the footer. |
 | RIGHT | `GridMove.RIGHT`; `Blocked` at `latest`. |
 | UP | `GridMove.UP`; `TopEdge` on lineup row 0 → zone HEADER, chip GROUP. |
 | DOWN | `GridMove.DOWN`; `Blocked` on the last row. |
@@ -1530,11 +1530,12 @@ Leaving GRID keeps the grid focus (`frame.gridFocused = false`, the focused cell
 | CONTEXT_MENU (long OK, Menu) | Menu overlay (§3.9.3). |
 | BACK | Back ladder §3.4.6. |
 | PLAY_PAUSE | Tuned and not IDLE/STOPPED → FULL. Otherwise no-op. |
-| JUMP_TO_NOW, OPEN_GUIDE | Jump to now (focus row unchanged; window and anchor to now). |
+| JUMP_TO_NOW | Jump to now (focus row unchanged; window and anchor to now). |
+| OPEN_GUIDE (Guide key) | (decision 2026-10-19 ruling 5) At *home* (§3.4.6) → open Groups (closes back to the grid); elsewhere jump to now as JUMP_TO_NOW. From another GUIDE zone: zone GRID, jump to now. Inside Groups (any opener, menu included) → close it to the grid at home (review 2026-10-19 L3). During number entry → commit the entry like OK, nothing else (L4; Yellow likewise). |
 | FAVOURITES (Green) | Toggle the Favourites filter (§3.8.3). |
 | START_OVER (Red) | FROM_START when offered, else REMIND on a future programme, else toast NO_CATCHUP. |
 | REMIND, MEDIA_RECORD | Toggle the reminder on a future PROGRAMME; else no-op. |
-| GROUPS_PANEL | Open Groups. |
+| GROUPS_PANEL (Yellow in the guide, decision 2026-10-19 ruling 4) | Open Groups. |
 | DAY_STRIP | Open Days. |
 | PREVIOUS_CHANNEL (Blue, Last) | `effects.previousChannel()`. |
 | DIGIT, NUMBER_ENTRY | Number entry (§3.9.4). |
@@ -1544,9 +1545,11 @@ Leaving GRID keeps the grid focus (`frame.gridFocused = false`, the focused cell
 
 | Zone | LEFT/RIGHT | SELECT | UP | DOWN | BACK | Other |
 |---|---|---|---|---|---|---|
-| TABS (Guide, Search, Settings) | move, no wrap | Guide → GRID; Search → mode SEARCH; Settings → mode SETTINGS (M3 placeholder: version, "Settings arrive with the next update", Back returns) | no-op | PANEL if it has buttons, else HEADER | GRID | — |
-| PANEL (buttons of `PanelState.buttons`, MORE always last) | move | the button (§3.9.2); MORE → Menu overlay (S11) | TABS | HEADER | GRID | `panelFocused` is clamped when the buttons change under it (N8) |
-| HEADER (GROUP, NOW?, DAY) | move | GROUP → Groups; NOW → jump to now, zone GRID; DAY → Days | PANEL (TABS if no buttons) | GRID | GRID | PLAY_PAUSE → jump to now (product §3.3); ZAP± → page the grid |
+| TABS (Guide, Search, Settings) | move, no wrap (LEFT on Guide is a no-op) | Guide → GRID; Search → mode SEARCH; Settings → mode SETTINGS (M3 placeholder: version, "Settings arrive with the next update", Back returns) | no-op | PANEL if it has buttons, else HEADER (chip GROUP) | (owner ruling 2026-10-18, kept by 2026-10-19 ruling 3) the exit step (§3.4.6 step 5), from any tab | — |
+| PANEL (buttons of `PanelState.buttons`, MORE always last) | move | the button (§3.9.2); MORE → Menu overlay (S11) | TABS, Guide tab | HEADER, **Day chip** (decision 2026-10-19 ruling 6) | GRID | `panelFocused` is clamped when the buttons change under it (N8) |
+| HEADER (GROUP, NOW?, DAY) | move | GROUP → Groups; NOW → jump to now, zone GRID; DAY → Days | PANEL (TABS, Guide tab, if no buttons) | GRID | GRID | PLAY_PAUSE → jump to now (product §3.3); ZAP± → page the grid |
+
+(decision 2026-10-19 ruling 3) Which tab TABS lands on: the Back ladder (Back in Groups opened by Back) lands on **Search**; Up from PANEL or HEADER lands on **Guide**; returning from Settings keeps the gear (Settings' Back returns to TABS without re-entering the zone); every exit from Search lands in the grid with Guide current (I-19). Up from grid row 0 lands on the Group chip; Down from the panel buttons lands on the Day chip (Days from home: Back, Back, Down, Down, OK = 5; from row 0: Up, Right, OK = 3).
 
 The NOW chip exists only while `now ∉ [ws, ws + 180)`; its arrow is `nowDirection`. If it disappears while focused, focus moves to GROUP.
 
@@ -1554,7 +1557,7 @@ The NOW chip exists only while `now ∉ [ws, ws + 180)`; its arrow is `nowDirect
 
 | Overlay | UP/DOWN | LEFT/RIGHT | SELECT | CONTEXT_MENU | BACK | Other |
 |---|---|---|---|---|---|---|
-| Groups | move over the Search and Settings shortcut rows (E22), then the entries (skips section headers) | RIGHT closes; LEFT no-op | shortcut → mode SEARCH / SETTINGS; entry → apply source (§3.8.2); close | GROUP entries: group menu (Hide, Move up, Move down) | close (menu first) | ZAP±/PAGE± → previous/next entry applied at once, panel stays open (accelerator 2) |
+| Groups | move over the Search and Settings shortcut rows (E22), then the entries (skips section headers) | RIGHT closes (to where it was opened from; into the grid when opened by Back); LEFT no-op | shortcut → mode SEARCH / SETTINGS; entry → apply source (§3.8.2); close into the grid | GROUP entries: group menu (Hide, Move up, Move down) | (decision 2026-10-19 ruling 2) menu open → close the menu; opened by the Back ladder (`Overlay.Groups.viaBack`) → close, zone TABS with **Search** focused; opened any other way (Left at the edge, Yellow, the Group chip, the Guide key) → close to where it was opened from | ZAP±/PAGE± → previous/next entry applied at once, panel stays open (accelerator 2) |
 | Groups → group menu | move | — | apply action, close menu | — | close menu | — |
 | Days | — | move over enabled items | jump (§3.5.1), close | — | close | — |
 | Menu | move | — | item (§3.9.3), close | — | close | — |
@@ -1581,13 +1584,16 @@ The `BACK_TWICE` exit hint is not modal: it is a 2 s toast-like overlay; a secon
 
 #### 3.4.6 Back ladder (GUIDE)
 
-1. An overlay is open → close it (reminder card: Dismiss).
+(owner ruling 2026-10-18, amended by decision 2026-10-19 ruling 2; supersedes the 2026-10-14 B2 "home → FULL" step) Back walks outward, one stop per press:
+
+1. An overlay is open → close it (reminder card: Dismiss). Groups opened by Back is the exception: its Back goes on to step 5 (§3.4.4).
 2. Zone ≠ GRID → GRID.
 3. Not at *home* → go home (animated): home = row of the tuned channel if it is in the lineup, else the current row; cell containing `now`; `ws = clampWs(nowWindow)`; `anchor = now`.
-4. (reviewed 2026-10-14, B2/F10) Something is tuned (`phase ∉ {IDLE, STOPPED}`) **and `returnedFromFull` is false** → FULL.
+4. Home → the **Groups panel** on the current source, opened "via Back" (`Overlay.Groups.viaBack = true`; TiviMate's Back = Groups). An empty source (no focus) counts as home.
+5. Groups (opened by Back) → Back → zone TABS with **Search** focused (Search = Back, Back, OK from home; Settings = Back, Back, Right, OK).
+6. TABS → the exit step per `GuideSettings.exitConfirmation`: `BACK_TWICE` → hint, second BACK within 2 s exits; `ASK` → Exit dialog; `NONE` → `exitApp()`.
 
-The ladder from home is therefore: jump to now → FULL → (Back in FULL returns home with `returnedFromFull`) → exit step; Back after leaving full screen never goes back to FULL (B2: otherwise GUIDE ↔ FULL looped forever and exit was unreachable while anything played).
-5. Exit per `GuideSettings.exitConfirmation`: `BACK_TWICE` → hint, second BACK within 2 s exits; `ASK` → Exit dialog; `NONE` → `exitApp()`.
+Hold Back (guide long binding `PLAY`) returns to the full-screen player when something is tuned (owner ruling 2026-10-17); a single Back never goes FULL. From home the exit takes 4 Backs with `BACK_TWICE` (3 with `ASK` + OK, 3 with `NONE`). `noDeadEndsBackAlwaysReachesExit` bounds the walk at 12 Backs: the longest ladder is 8 (group menu → Groups → HEADER → GRID → home → Groups via Back → TABS → exit hint → exit, for Groups opened from the Group chip and scrolled off home), 10 with a reminder card and a PIN prompt (review 2026-10-19 S5). Home is the focus Back's "go home" produces: when now falls in a sliver on the home row it is the next focusable cell, and a "go home" that would not move the focus falls through to Groups, so no stop repeats (review 2026-10-19 B1; `SliverAtNowTest`, real navigator).
 
 #### 3.4.7 Holds and repeats
 
@@ -1597,7 +1603,7 @@ The ladder from home is therefore: jump to now → FULL → (Back in FULL return
 
 #### 3.4.8 Five-key rule
 
-Every v1 guide function is reachable with UP/DOWN/LEFT/RIGHT/SELECT/BACK and CONTEXT_MENU (long OK): tune (OK), full screen (OK on tuned, Back ladder), groups (Up → Group chip, or Left at the edge), favourites (Groups → Favourites entry; menu → Add to favourites), day (Up → Day chip), now (Back), reminders (panel button, sheet, menu), catch-up (OK on an archive cell, panel button, menu), hide channel (menu), group hide/move (Groups → long OK), search (Up to tabs), exit (Back ladder). (reviewed 2026-10-14, S11) Long-press is not universal (many HDMI-CEC remotes send DOWN/UP pairs with no hold and have no Menu), so the panel's **More…** button (`PanelButton.MORE`) opens the same Menu (favourite, hide, reminders, catch-up). The Groups panel's group menu (Hide/Move) stays on long OK; it is also available in M5's group manager and is listed as an exclusion below. WP-D's `FiveKeyReachabilityTest` searches the state graph with UP/DOWN/LEFT/RIGHT/SELECT/BACK (no CONTEXT_MENU) from the initial state, once per `ExitConfirmation`, and asserts every `MenuItem`, `PanelButton`, `HeaderChip`, overlay and `ScreenMode` is reached, with stated exclusions: `Overlay.Number` (an accelerator, product §2.1), `Overlay.Exit(dialog = true)` outside `ASK`, and the group menu (Hide/Move; long OK, also reachable in M5's group manager).
+Every v1 guide function is reachable with UP/DOWN/LEFT/RIGHT/SELECT/BACK and CONTEXT_MENU (long OK): tune (OK), full screen (OK on tuned, Back ladder), groups (Back from home, Up → Group chip, or Left at the edge; decision 2026-10-19), favourites (Groups → Favourites entry; menu → Add to favourites), day (Up → Day chip), now (Back), reminders (panel button, sheet, menu), catch-up (OK on an archive cell, panel button, menu), hide channel (menu), group hide/move (Groups → long OK), search (Back ladder → top bar on Search, or Up to tabs), exit (Back ladder). (reviewed 2026-10-14, S11) Long-press is not universal (many HDMI-CEC remotes send DOWN/UP pairs with no hold and have no Menu), so the panel's **More…** button (`PanelButton.MORE`) opens the same Menu (favourite, hide, reminders, catch-up). The Groups panel's group menu (Hide/Move) stays on long OK; it is also available in M5's group manager and is listed as an exclusion below. WP-D's `FiveKeyReachabilityTest` searches the state graph with UP/DOWN/LEFT/RIGHT/SELECT/BACK (no CONTEXT_MENU) from the initial state, once per `ExitConfirmation`, and asserts every `MenuItem`, `PanelButton`, `HeaderChip`, overlay and `ScreenMode` is reached, with stated exclusions: `Overlay.Number` (an accelerator, product §2.1), `Overlay.Exit(dialog = true)` outside `ASK`, and the group menu (Hide/Move; long OK, also reachable in M5's group manager).
 
 #### 3.4.9 Data events
 
@@ -1628,7 +1634,7 @@ Every v1 guide function is reachable with UP/DOWN/LEFT/RIGHT/SELECT/BACK and CON
 #### 3.5.2 Ruler and header text
 
 - Ticks at every :00/:30 inside the window: 1 px rule + `hm(m)` at `x + 10` (prototype `padding-left:10px`).
-- The first tick label is preceded by the **contextual label** (product §3.10: "moves to the ruler's left edge"), computed from `mid = ws + 90`: `day(mid) == today` → `mid < now − 60` ? "EARLIER TODAY" : hour < 12 ? "THIS MORNING" : hour < 18 ? "THIS AFTERNOON" : "TONIGHT"; tomorrow → "TOMORROW"; yesterday → "YESTERDAY"; else the weekday in capitals. Style `RULER_CONTEXT`, colour `TEXT_LABEL`, 12 px gap before the time.
+- The first tick label is preceded by the **contextual label** (product §3.10: "moves to the ruler's left edge"), computed from `mid = ws + 90`: `day(mid) == today` → `mid < now − 60` ? "EARLIER TODAY" : hour < 5 ? "TONIGHT" (decision 2026-10-19 ruling 9: a window centred between midnight and 05:00 is still tonight) : hour < 12 ? "THIS MORNING" : hour < 18 ? "THIS AFTERNOON" : "TONIGHT"; tomorrow → "TOMORROW"; yesterday → "YESTERDAY"; else the weekday in capitals. Style `RULER_CONTEXT`, colour `TEXT_LABEL`, 12 px gap before the time.
 - Top-right header: date "Tue 13 Oct" (18 px, .65) and clock (34/500, `tnum`), 12 h form "7:47 PM" when `clock24` is false. The clock recomposes once a minute from its own minute-aligned flow, not from `GuideUiState`.
 
 ### 3.6 Rendering (WP-A `GuideRendererImpl`)
@@ -1644,10 +1650,11 @@ Every v1 guide function is reachable with UP/DOWN/LEFT/RIGHT/SELECT/BACK and CON
    3. Archive band (§3.6.2).
    4. Cells overlapping `[scrollMin, scrollMin + 180]` (here and below, `scrollMin` is shorthand for `windowStartMin + scrollOffsetMin`; the renderer compares in Int minutes relative to `windowStartMin`, never an absolute Float), except the focused one (§3.6.4).
    5. `restore`.
-5. Focused cell, drawn last so its ring and shadow overlap neighbours, clipped to the timeline columns of the rows area.
+5. Focused cell, drawn last so its ring and shadow overlap neighbours, clipped to the timeline columns of the rows area. (Decision 2026-10-19) When `frame.clipCue && frame.gridFocused`, the `CLIP_CHEVRON` asset (12 × 24, see item 9) is drawn over the focused fill at x = `round(max(cellLeft, timelineLeft) + 4)` (= `timelineLeft + 4` while the cell is clipped by the window), centred on the row, in the focused title's colour `CANVAS` (an `FG` chevron would vanish on the `FG` fill). The 16 px cell pad would leave the title flush against it (gap < 2 px), so while the cue is on the focused title (and its leading ↺ / ● cue) starts 4 px after the chevron's right edge. The focused cell is never part of a row recording, so no row key carries the cue.
 6. Now line (if `now ∈ [scrollMin, scrollMin + 180]`): `NOW_GLOW` asset 24 px wide centred on x, a 2 px `ACCENT` rect from `rowsTop − 6` to the rows bottom, a radius-5 `ACCENT` dot at `(x, rowsTop − 5)`. Drawn over the cells (B2.6).
 7. Bubble (`bubbleNumber ≥ 0`): a 160×88 pill (`CANVAS` at .9, radius 20) over the label column, vertically centred on the focused row, number in `BUBBLE` style.
 8. `restore`.
+9. (Decision 2026-10-19) Edge cue, when `frame.leftEdgeCue && frame.gridFocused`: in its own `guide-draw-chrome` section after the content clip is restored (the cue sits in the 16 px gutter left of `labelLeft` 81, which that clip cuts away), one `drawAsset(EDGE_CHEVRON, …, ACCENT)`: 12 × 24 at x 67 → 79 (`panelLeft + round(3 s)`, width `round(12 s)`), y = focused row mid ± 12; skipped when that mid is within 12 px of the rows area's top or bottom (row scrolled off). Not inside `drawLabel` (clipped away) and not inside any row pass (the row keys do not carry the cue, so a flip without a focus change would replay a stale recording). The state machine's version bump on a cue change triggers the redraw. Both chevrons are one mask (`GuideAssets`: polyline (9.5, 2.5) → (2.5, 12) → (9.5, 21.5) in a 12 × 24 viewport, stroke 3, round caps and joins), static: no animation, no blur, no `graphicsLayer`.
 
 Rows with `rows.channel(i) == null` draw a skeleton: two `SKELETON` bars in the label (40×12 and 110×16) and `SKELETON` rounded rects every 60 min on the timeline. Rows whose minutes are outside the snapshot draw `LOADING` cells as `SKELETON` rects cut at :00/:30. No shimmer animation.
 
@@ -1661,7 +1668,7 @@ Rows with `rows.channel(i) == null` draw a skeleton: two `SKELETON` bars in the 
 - Focused row (`i == focus.row`): `fillRoundRect(label, 12, ROW_FOCUS_FILL)`.
 - Number (`showNumbers`): `CH_NUMBER`, `TEXT_LABEL`, at `x = 81 + 12`, baseline centred.
 - Then, after a 14 px gap: the logo (§3.7) when loaded, else the name (`CH_NAME`, `FG`, ellipsised to the space left).
-- Right end, inside 12 px padding: the tuned dot (7 px `LIVE` circle) when `identityHash == frame.tunedHash`; left of it the 12 px ↺ glyph when `archiveDays > 0` (product §3.5). The name's available width stops before them.
+- Right end, inside 12 px padding: the tuned dot (7 px `LIVE` circle) when `identityHash == frame.tunedHash`; left of it the 20 px ↺ glyph when `archiveDays > 0` (product §3.5; 12 px until the decision of 2026-10-19, so "this channel has catch-up" reads at 10 feet), hollow (`ARCHIVE_GLYPH_HOLLOW`) when the archive is suspect, 8 px before the name. The in-cell ↺ (§3.6.2) stays 12 px. The name's available width stops before them.
 
 #### 3.6.4 Cells
 
@@ -1729,7 +1736,7 @@ The grid node carries `semantics { contentDescription = text; liveRegion = LiveR
 
 #### 3.8.3 The three accelerators (decision note "Switch sections easily") and Green
 
-1. **Left at the channel column edge** → Groups opens with the current source focused (§3.4.2 LEFT: no earlier watchable cell; lead §7 item 4).
+1. **Left at the edge** → Groups opens with the current source focused (§3.4.2 LEFT: no earlier watchable cell; lead §7 item 4). (decision 2026-10-19) Not when the focused cell is merely clipped by the window: a catch-up row steps back first. The first-class route is **Back from home** (§3.4.6 step 4); Yellow (`GROUPS_PANEL`, guide context) and the Guide key at home also open it.
 2. **CH+/CH− (and Page±) while Groups is open** → the next/previous entry is applied at once; the panel stays open with it focused (§3.4.4).
 3. **Long-press ←/→ in the player** → GROUP_PREV/NEXT in FULL (§3.4.5).
 4. **Green (FAVOURITES)** toggles between `Favourites(default list)` and the last non-favourites source. With no favourites: toast `NO_FAVOURITES` (S13) "No favourites yet. Hold OK on a channel (or use More…) to add it."
@@ -2009,7 +2016,7 @@ Per key code, state `{downAt, longFired, repeats}`.
 | MEDIA_PLAY_PAUSE, MEDIA_PLAY, MEDIA_PAUSE | PLAY_PAUSE | — | PLAY_PAUSE | — |
 | MEDIA_FAST_FORWARD / MEDIA_REWIND | SEEK_FORWARD / SEEK_BACK | — | same | — |
 | 0–9, NUMPAD_0–9 | DIGIT | — | DIGIT | — |
-| PROG_RED / GREEN / YELLOW / BLUE | START_OVER / FAVOURITES / AUDIO / PREVIOUS_CHANNEL (product §2.1) | — | same | — |
+| PROG_RED / GREEN / YELLOW / BLUE | START_OVER / FAVOURITES / **GROUPS_PANEL** / PREVIOUS_CHANNEL (product §2.1; Yellow: decision 2026-10-19 ruling 4) | — | START_OVER / FAVOURITES / AUDIO / PREVIOUS_CHANNEL | — |
 | LAST_CHANNEL | PREVIOUS_CHANNEL | — | same | — |
 | GUIDE | OPEN_GUIDE | — | OPEN_GUIDE | — |
 | INFO | INFO_BAR | — | INFO_BAR | — |
@@ -2021,7 +2028,23 @@ Only DPAD_CENTER-family keys and, in PLAYER, LEFT/RIGHT have long bindings, so e
 
 #### 3.18.3 Footer hints
 
-Built by the state machine from `KeysSeen` (`KeyCapabilities.seen`, persisted, product §2.1: "keys the device has actually reported"): always `← → ↑ ↓ Browse`, `OK Watch`, `Hold OK Options`; plus `Red Remind` when PROG_RED was seen (REMIND context: future programme focused) or `Red From start`; `CH± Page` when CHANNEL_UP was seen; `0–9 Channel` when a digit was seen. The design's `R Record` is gone (product §3.6). `KeyCharacterMap.deviceHasKey` is not used to show hints (TV builds report keys their remotes lack), only for diagnostics.
+Built by the state machine from `KeysSeen` (`KeyCapabilities.seen`, persisted, product §2.1: "keys the device has actually reported") **in priority order**, by zone (decision 2026-10-19, ruling 8). `[…]` = only when that key was seen or bound; the four colour keys count as one family (once any of Red, Green, Yellow or Blue was seen, all four may be named).
+
+| State | Hints |
+|---|---|
+| GRID, home, Left browses | `← → ↑ ↓` Browse · `OK` Watch · `Back` Groups · `Hold OK` Options · `Hold Back` Full screen¹ · [Red] · [CH±] · [0–9] |
+| GRID, home, Left opens Groups | `← → ↑ ↓` Browse · `OK` Watch · `←` Groups · `Back` Groups · `Hold OK` Options · `Hold Back` Full screen¹ · [Red] · [CH±] · [0–9] |
+| GRID, not home, Left browses | `← → ↑ ↓` Browse · `OK` Watch · `Back` Now · [`Yellow` Groups] · `Hold OK` Options · `Hold Back` Full screen¹ · [Red] · [CH±] · [0–9] |
+| GRID, not home, Left opens Groups | `← → ↑ ↓` Browse · `OK` Watch · `←` Groups · `Back` Now · `Hold OK` Options · `Hold Back` Full screen¹ · [Red] · [CH±] · [0–9] |
+| GRID, empty source | `←` Groups · `Back` Groups |
+| Groups panel, opened by Back | `↑ ↓` Choose · `OK` Open · `Back` Search, Settings · `→` Guide |
+| Groups panel, otherwise | `↑ ↓` Choose · `OK` Open · `Back` Guide |
+| TABS | `← →` Choose · `OK` Open · `Back` Exit |
+| PANEL, HEADER, other overlays | unchanged |
+
+¹ Only when something is tuned. [Red] is `Red Remind` (REMIND context: a future programme focused) or `Red From start`; [CH±] is `CH± Page`; [0–9] is `0–9 Channel`. "← Earlier" is not shown: the ↺ glyph, the bright past cells and the clip chevron say it. The design's `R Record` is gone (product §3.6). `KeyCharacterMap.deviceHasKey` is not used to show hints (TV builds report keys their remotes lack), only for diagnostics.
+
+**Layout (UI, `FooterHints`).** Core has no text measurer, so the UI drops: a measuring `Layout` at (64, bottom 40) places the hints left to right in list order, 36 px apart, and stops before the first hint whose right edge would pass the available width (1792 design px, x 64 → 1856, or the parent's width if smaller). That hint and every later one are left out; the row never wraps. Because the list is in priority order, each drop removes the least important hint (on the Sony's widest set: 0–9, then CH±).
 
 ---
 ## 4. Rendering budget
@@ -2109,7 +2132,7 @@ Nothing of the guide: the grid panel starts at y 500 and the hole ends at y 461 
 | `RowCellsBuilderTest` | empty row → NO_EPG hour blocks; gap split at hours (19:47–21:10 → 3 cells); sliver flagged; overlap clipped; nested programme skipped (S10b); continuation merged; programme crossing both edges; DST day (Europe/London, 2026-03-29 and 2026-10-25) hour cuts |
 | `GuideNavigatorTest` | every row of §3.4.2 for LEFT/RIGHT/UP/DOWN/PAGE/TIME/STEP/TO_ROW/TO_TIME/RESOLVE; LeftEdge from the on-now cell on a row without archive and at the archive limit on an archive row (lead §7 item 4), STEP_BACK past it; LeftEdge at `earliest`; TopEdge; Blocked; long programme on Left (window jumps to its start); sliver skip; LOADING cells outside coverage; RESOLVE after a snapshot whose cell boundaries changed; anchor invariants (§3.3.2) checked by a property test over 10,000 random walks on random rows |
 | `TimeLabelsTest` | 24/12 h, DST, contextual labels at each boundary, day labels; zero allocation for `minuteOfDay`/`dayOf`; concurrent `reset` while another thread reads (S12) |
-| `GuideRendererTest` (recording canvas, fake measurer: width = chars × size × 0.5) | op order of §3.6.1; focused cell last; sticky title x; ellipsis cut; past/archive/suspect colours; reminder dot; now line x; skeleton rows; narrow/tiny cells; nothing drawn above `panelTop`; (B4) generation swap with the same `textId` and a shorter title, and a rename to a shorter channel name: no exception, correct cut; (S6) emoji/surrogate pair at the cut, an Arabic title right-aligned with the ellipsis on the left; `now < scrollMin` draws no band (N14) |
+| `GuideRendererTest` (recording canvas, fake measurer: width = chars × size × 0.5) | op order of §3.6.1; focused cell last; sticky title x; ellipsis cut; past/archive/suspect colours; reminder dot; now line x; skeleton rows; narrow/tiny cells; nothing drawn above `panelTop`; (B4) generation swap with the same `textId` and a shorter title, and a rename to a shorter channel name: no exception, correct cut; (S6) emoji/surrogate pair at the cut, an Arabic title right-aligned with the ellipsis on the left; `now < scrollMin` draws no band (N14); (decision 2026-10-19) `EDGE_CHEVRON` exactly once at x 67 × s, centred on the focused row, after the last restore, only when `leftEdgeCue && gridFocused` and the row is on screen; `CLIP_CHEVRON` at `timelineLeft + 4` in `CANVAS` with the title pushed to 4 px after it, only when `clipCue && gridFocused`; label ↺ (solid and hollow) 20 × 20, in-cell ↺ 12 × 12 |
 | `RendererAllocationTest` | §4.2 |
 | `GoldenFrameTest` (Robolectric `@GraphicsMode(NATIVE)`, N10) | the §4.1 reference frame rendered through `AndroidGuideCanvas` into a `Bitmap` with the bundled fonts, compared to one checked-in PNG (no new dependency; API notes §7) |
 | `RendererPerfTest` (`perf`) | 1,000 frames ≤ 0.3 ms each |
@@ -2156,8 +2179,8 @@ Launched through `MainActivity` with the debug seeding route (§5.6); state read
 | I-4 | Key tables on device | 30 scripted key sequences via `UiDevice.pressKeyCode` give the same end state as the JVM table |
 | I-5 | Paging | 200× DOWN at 25 Hz then 60× RIGHT: no PENDING/LOADING visible 300 ms after the last key; window query P50/P90 logged (plan §6 window query, device number) |
 | I-6 | Generation swap | an EPG rebuild (fake panel admin bumps the guide) while scrolling: no crash, new generation drawn, the old `epg-<gen>.db` deleted, reminders unchanged |
-| I-7 | Groups and accelerators | Left at the edge opens Groups; CH± switches groups with the panel open; long ←/→ in FULL cycles with the card |
-| I-8 | Days and Back ladder | day strip jump keeps the clock time; (reviewed 2026-10-14, B2) Back ×1 from a scrolled grid → home; Back → FULL; Back → GUIDE (home); Back → exit hint; Back → exit |
+| I-7 | Groups and accelerators | Left at the edge opens Groups (decision 2026-10-19: Left on a clipped catch-up cell steps back instead); Back from home opens Groups; CH± switches groups with the panel open; long ←/→ in FULL cycles with the card |
+| I-8 | Days and Back ladder | day strip jump keeps the clock time; (decision 2026-10-19 ruling 2, replacing B2) Back ×1 from a scrolled grid → home; Back → Groups; Back → TABS with Search focused; Back → exit hint; Back → exit |
 | I-9 | Catch-up | OK on an archive cell: the fake panel logs a timeshift request whose start matches `timeshift_expect` in the panel zone (`--timezone Asia/Tokyo`) |
 | I-10 | Reminder | reminder on a synthetic programme starting in 2 min: card at T − 60 s ± 2 s; Switch now tunes and goes FULL; after process restart a missed reminder for a running programme shows "started" |
 | I-11 | Search | "news" → channel and programme rows; OK on an archive hit plays catch-up |
@@ -2409,10 +2432,10 @@ All sixteen proposer items and the seven reviewer additions are decided in the *
 
 - Mini player `left:64px;top:56px;width:720px;height:405px;border-radius:20px` with `box-shadow:0 30px 80px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.14)`.
 - Header region `left:832px;top:56px;right:64px;height:405px`.
-- Grid `left:64px;right:64px;top:500px;height:460px;border-radius:24px;…border:1px solid rgba(255,255,255,.09);…padding:0 16px 12px;box-sizing:border-box` → content width 1792 − 2 − 32 = 1758; label column `width:200px` → timeline `flex:1` = **1558 px**.
-- Header row `height:48px`; tick `left:{{ pct(m) }}` for m ∈ {0,30,…,150}, `padding-left:10px;border-left:1px solid rgba(255,255,255,.1)`, mono 15 px .55.
-- Rows `gap:8px`, row `height:60px`; label `gap:14px;padding:0 12px;border-radius:12px`, number mono 15 .5, name 19/600, tuned dot 7 px `#ff4d5e` `margin-left:auto`.
-- Cell wrapper `padding:0 3px`; cell `border-radius:12px;padding:0 16px;gap:3px`, title 18/600 ellipsis, time mono 13 `opacity:.6`; progress `height:3px` at `bottom:0` inside `overflow:hidden`.
+- Grid `left:64px;right:64px;top:500px;height:460px;border-radius:24px;…border:1px solid rgba(255,255,255,.09);…padding:0 16px 12px;box-sizing:border-box` → content width 1792 − 2 − 32 = 1758; label column `width:200px` → timeline `flex:1` = 1558 px in the prototype. **Owner ruling 2026-10-17 (10-foot legibility):** label column 240 → timeline **1518 px for 180 min ≈ 8.433 px/min** (30-min tick 253 px).
+- Header row `height:48px`; tick `left:{{ pct(m) }}` for m ∈ {0,30,…,150}, `padding-left:10px;border-left:1px solid rgba(255,255,255,.1)`, mono 15 px .55 (2026-10-17: ruler mono **20**, contextual label **18**/600 .1em).
+- Rows `gap:8px`, row `height:60px` (pitch 68, 6 rows); label `gap:14px;padding:0 12px;border-radius:12px`, number mono 15 .5, name 19/600, tuned dot 7 px `#ff4d5e` `margin-left:auto`. **2026-10-17:** row **74**, gap 8, pitch **82**, **5 rows** (rows 549…951 ≤ 959); label 240, number mono **20**, name **26**/600, logo slot **130×64**; `PAGE_ROWS` 5.
+- Cell wrapper `padding:0 3px`; cell `border-radius:12px;padding:0 16px;gap:3px`, title 18/600 ellipsis, time mono 13 `opacity:.6` (2026-10-17: title **26**/600, time mono **20**, line gap 4, no-info 22; narrow cell < 150, no text below 30 inner); progress `height:3px` at `bottom:0` inside `overflow:hidden`.
 - Cell states from the script: focused `bg #eef1f6`, `shadow 0 0 0 3px accent, 0 12px 30px rgba(0,0,0,.4)`, `color #0a0d13`, bar accent; on now `.11`; default `.05`, border `.08`; past text `rgba(238,241,246,.45)`.
 - Now line `top:-6px;width:2px;box-shadow:0 0 12px`, dot `top:-4px;left:-4px;10×10`; `nowLeft = calc(200px + (100% - 200px) * NOW/WIN)`.
 - Anchor rule in the script: `anchor = Math.max(p.s, 0) + 1` (start + 1 min), replaced by plan §4's sticky anchor.
@@ -2482,7 +2505,7 @@ All sixteen proposer items and the seven reviewer additions are decided in the *
 | `LEAD_MIN` / `TAIL_MIN` | 30 / 30 min | WP-A | §3.3.2 |
 | `SNAP_AFTER_REPEATS` | 3 | WP-A/WP-D | §3.3.3 |
 | `SCROLL_ANIM_MS` | 200 | WP-A | §3.3.3 |
-| `PAGE_ROWS` | 6 | WP-A | §3.4.2 |
+| `PAGE_ROWS` | 5 (6 until the owner ruling of 2026-10-17) | WP-A | §3.4.2 |
 | `TIME_PAGE_MIN` / `TIME_STEP_MIN` | 180 / 30 | WP-A | §3.3.2 |
 | `HOLD_TIME_STEP_AFTER_MS` | 1,000 | WP-D | §3.4.7 |
 | `PANEL_DESC_DELAY_MS` / low-end | 150 / 600 | WP-D | §3.9.1 |

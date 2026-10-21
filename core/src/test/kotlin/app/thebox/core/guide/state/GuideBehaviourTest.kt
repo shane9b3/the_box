@@ -42,34 +42,105 @@ class GuideBehaviourTest {
 
     // ------------------------------------------------------------------ BackLadderTest (§3.4.6, B2)
     @Nested inner class BackLadder {
-        @Test fun fromScrolledGridHomeThenFullThenHomeThenExitNeverFullAgain() {
+        /**
+         * Decision 2026-10-19 ruling 2: Back walks outward (scrolled → home → Groups → top bar on Search → exit); hold
+         * Back is the way to FULL.
+         */
+        @Test fun fromScrolledGridHomeThenGroupsThenSearchThenExit() {
             val w = GuideWorld()
             w.press(DOWN); w.press(RIGHT); w.press(RIGHT)
             w.press(BACK)
-            assertEquals(ScreenMode.GUIDE, w.ui.mode); assertEquals(0, w.machine.frame.focus!!.row)
+            assertEquals(ScreenMode.GUIDE, w.ui.mode); assertEquals(0, w.machine.frame.focus!!.row); assertEquals(Zone.GRID, w.ui.zone)
+            assertNull(w.ui.overlay)
             w.press(BACK)
-            assertEquals(ScreenMode.FULL, w.ui.mode)
+            assertEquals(ScreenMode.GUIDE, w.ui.mode, "never FULL from a single Back")
+            val o = assertIs<Overlay.Groups>(w.ui.overlay)
+            assertTrue(o.viaBack); assertEquals(o.shortcuts.size + 1, o.focused, "on the current source (All channels)")
             w.press(BACK)
-            assertEquals(ScreenMode.GUIDE, w.ui.mode); assertEquals(0, w.machine.frame.focus!!.row)
+            assertNull(w.ui.overlay); assertEquals(Zone.TABS, w.ui.zone); assertEquals(GuideStateMachineImpl.TAB_SEARCH, w.ui.tabFocused)
             w.press(BACK)
-            assertEquals(ScreenMode.GUIDE, w.ui.mode, "never FULL again (B2)")
             assertEquals("ExitHint", overlayName(w))
             w.press(BACK)
             assertTrue(w.exited)
         }
 
-        @Test fun anotherActionAfterReturningClearsTheFlag() {
+        @Test fun backFromHomeAfterFullOpensGroupsNotFull() {
             val w = GuideWorld()
-            w.press(SELECT); w.press(BACK)              // FULL → home, returnedFromFull
-            w.press(DOWN)                               // any other action clears it
-            w.press(BACK)                               // home
+            w.press(SELECT); w.press(BACK)              // FULL → home
+            w.press(DOWN); w.press(BACK)                // scrolled → home
             w.press(BACK)
-            assertEquals(ScreenMode.FULL, w.ui.mode)
+            assertEquals(ScreenMode.GUIDE, w.ui.mode); assertEquals(Zone.GRID, w.ui.zone)
+            assertTrue(assertIs<Overlay.Groups>(w.ui.overlay).viaBack)
+        }
+
+        /** review-ux S1/B1: "press Back until Groups appears" works from any row and any time, then Search is next. */
+        @Test fun backLadderReachesGroupsThenSearchFromAnyRow() {
+            for (row in 0 until 10) for (scroll in listOf(null, SEEK_FORWARD, SEEK_BACK, RIGHT)) {
+                val w = GuideWorld()
+                repeat(row) { w.press(DOWN) }
+                scroll?.let { w.press(it) }
+                var backs = 0
+                while (w.ui.overlay !is Overlay.Groups && backs < 5) { w.press(BACK); backs++ }
+                val o = assertIs<Overlay.Groups>(w.ui.overlay, "row $row $scroll")
+                assertTrue(o.viaBack, "row $row $scroll: opened by the ladder")
+                assertTrue(backs <= 2, "row $row $scroll: Groups after $backs Backs")
+                assertEquals(if (row == 0 && scroll == null) 1 else 2, backs, "row $row $scroll")
+                w.press(BACK)
+                assertEquals(Zone.TABS, w.ui.zone, "row $row $scroll"); assertEquals(GuideStateMachineImpl.TAB_SEARCH, w.ui.tabFocused)
+                w.press(SELECT)
+                assertEquals(ScreenMode.SEARCH, w.ui.mode, "Back, Back(, Back), OK opens Search")
+            }
+        }
+
+        /** review-ux S1: Groups opened any other way closes on Back to where it was opened from. */
+        @Test fun backAfterLeftOpenedGroupsReturnsToGrid() {
+            val w = GuideWorld()
+            w.press(DOWN); w.press(LEFT) // row 1 has no archive: Left on now opens Groups
+            assertFalse(assertIs<Overlay.Groups>(w.ui.overlay).viaBack)
+            val focus = w.machine.frame.focus
+            w.press(BACK)
+            assertNull(w.ui.overlay); assertEquals(Zone.GRID, w.ui.zone); assertEquals(focus, w.machine.frame.focus)
+            w.press(LEFT); w.press(RIGHT)
+            assertNull(w.ui.overlay); assertEquals(Zone.GRID, w.ui.zone)
+            // Yellow and the Guide key (at home) close back into the grid too; the Group chip closes back to the chip.
+            w.press(BACK) // row 1 → home
+            w.press(GROUPS_PANEL); assertFalse((w.ui.overlay as Overlay.Groups).viaBack); w.press(BACK)
+            assertNull(w.ui.overlay); assertEquals(Zone.GRID, w.ui.zone)
+            w.press(OPEN_GUIDE); assertFalse((w.ui.overlay as Overlay.Groups).viaBack); w.press(BACK)
+            assertNull(w.ui.overlay); assertEquals(Zone.GRID, w.ui.zone)
+            w.press(UP); w.press(SELECT); assertIs<Overlay.Groups>(w.ui.overlay); w.press(BACK)
+            assertNull(w.ui.overlay); assertEquals(Zone.HEADER, w.ui.zone)
+        }
+
+        /** Ruling 2: Right always closes into the grid, Groups opened by Back included. */
+        @Test fun rightClosesGroupsOpenedByBackIntoTheGrid() {
+            val w = GuideWorld()
+            w.press(BACK); w.press(RIGHT)
+            assertNull(w.ui.overlay); assertEquals(Zone.GRID, w.ui.zone)
+            w.press(BACK); assertTrue((w.ui.overlay as Overlay.Groups).viaBack, "home again: Back reopens Groups")
+        }
+
+        /** Ruling 3: the ladder lands on Search; Up from the panel or the header lands on Guide; Settings keeps the gear. */
+        @Test fun topBarLandingTab() {
+            val w = GuideWorld()
+            w.press(BACK); w.press(BACK)
+            assertEquals(GuideStateMachineImpl.TAB_SEARCH, w.ui.tabFocused)
+            w.press(DOWN); w.press(UP) // TABS → PANEL → TABS
+            assertEquals(Zone.TABS, w.ui.zone); assertEquals(GuideStateMachineImpl.TAB_GUIDE, w.ui.tabFocused)
+            w.press(RIGHT); w.press(RIGHT); w.press(SELECT); w.press(BACK) // Settings and back
+            assertEquals(Zone.TABS, w.ui.zone); assertEquals(2, w.ui.tabFocused)
+            // A stale tab from an earlier visit (review S3 grid_home_stale_tab): the ladder still lands on Search.
+            w.press(DOWN); w.press(DOWN); w.press(DOWN) // TABS → PANEL → HEADER → GRID
+            assertEquals(Zone.GRID, w.ui.zone)
+            w.press(BACK); w.press(BACK)
+            assertEquals(Zone.TABS, w.ui.zone); assertEquals(GuideStateMachineImpl.TAB_SEARCH, w.ui.tabFocused)
         }
 
         @Test fun exitHintExpiresAfterTwoSeconds() {
             val w = GuideWorld(startTuned = false)
             w.advance(200) // let the startup description debounce pass
+            w.press(BACK) // home → Groups
+            w.press(BACK) // Groups → top bar
             w.press(BACK)
             assertEquals("ExitHint", overlayName(w))
             assertEquals(w.nowMs + GuideStateMachineImpl.EXIT_CONFIRM_MS, w.machine.nextDeadlineMs.value)
@@ -92,9 +163,132 @@ class GuideBehaviourTest {
 
         @Test fun askAndNone() {
             val ask = GuideWorld(startTuned = false, settings = GuideSettings(exitConfirmation = ExitConfirmation.ASK))
-            ask.press(BACK); assertEquals("ExitDialog", overlayName(ask)); ask.press(SELECT); assertTrue(ask.exited)
+            ask.press(BACK); ask.press(BACK); ask.press(BACK); assertEquals("ExitDialog", overlayName(ask)); ask.press(SELECT); assertTrue(ask.exited)
             val none = GuideWorld(startTuned = false, settings = GuideSettings(exitConfirmation = ExitConfirmation.NONE))
-            none.press(BACK); assertTrue(none.exited)
+            none.press(BACK); none.press(BACK); assertFalse(none.exited); none.press(BACK); assertTrue(none.exited)
+        }
+    }
+
+    // ------------------------------------------------------------------ Left edge cue (decision 2026-10-19, rulings 1 and 7)
+    @Nested inner class LeftEdgeCue {
+        private fun cue(w: GuideWorld) = w.machine.frame.leftEdgeCue
+        private fun clip(w: GuideWorld) = w.machine.frame.clipCue
+
+        /** Review S7 item 2: before every single Left in the grid, the drawn cue says whether that Left opens Groups. */
+        @Test fun cueEqualsTheLeftResultOverARandomWalk() {
+            val rnd = java.util.Random(20261019)
+            val moves = listOf(LEFT, LEFT, LEFT, RIGHT, RIGHT, UP, DOWN, DOWN, SEEK_BACK, SEEK_FORWARD, JUMP_TO_NOW)
+            var lefts = 0; var opened = 0
+            repeat(60) { walk ->
+                val w = GuideWorld(tunedRow = walk % 10)
+                repeat(80) { step ->
+                    if (w.ui.overlay != null || w.ui.zone != Zone.GRID || w.ui.mode != ScreenMode.GUIDE) {
+                        if (w.ui.mode == ScreenMode.FULL) w.press(BACK)
+                        while (w.ui.overlay != null) w.press(BACK)
+                        if (w.ui.zone != Zone.GRID) w.press(BACK)
+                    }
+                    if (rnd.nextInt(15) == 0) { w.advance(rnd.nextInt(40).toLong() * 60_000L); return@repeat }
+                    val a = moves[rnd.nextInt(moves.size)]
+                    if (a == LEFT) {
+                        val before = cue(w)
+                        val clipped = clip(w)
+                        w.press(LEFT)
+                        assertEquals(before, w.ui.overlay is Overlay.Groups, "walk $walk step $step: cue $before")
+                        assertFalse(before && clipped, "walk $walk step $step: both cues")
+                        lefts++; if (before) opened++
+                    } else w.press(a)
+                }
+            }
+            assertTrue(lefts > 500 && opened > 20, "lefts $lefts, opened $opened")
+        }
+
+        /** Review S7 item 3a: an archive failure makes row 0 a non-archive row with no key: the cue turns on. */
+        @Test fun archiveFailureTurnsTheCueOnWithoutAKey() {
+            val w = GuideWorld()
+            assertFalse(cue(w), "row 0 has 7-day catch-up: Left browses")
+            w.send(GuideEvent.Archive(app.thebox.core.catchup.archive.ArchiveStatus(
+                phase = app.thebox.core.catchup.archive.ArchivePhase.FAILED, identityHash = w.channels[0].identityHash,
+                failure = app.thebox.core.catchup.archive.ArchiveFailure.NOT_IN_ARCHIVE,
+            )))
+            assertTrue(cue(w))
+            assertTrue(w.ui.footer.any { it.keys == GuideTexts.KEYS_LEFT && it.label == GuideTexts.HINT_GROUPS })
+            w.press(LEFT)
+            assertIs<Overlay.Groups>(w.ui.overlay)
+        }
+
+        /** Review S7 item 3b: once now passes the focused cell's end, that cell is past and Left browses again. */
+        @Test fun tickPastTheCellEndKeepsTheCueEqualToTheProbe() {
+            val w = GuideWorld()
+            w.press(DOWN) // row 1: no archive, on now
+            assertTrue(cue(w))
+            val end = w.machine.frame.focus!!.cellEnd
+            while (w.nowMin() <= end) w.advance(60_000)
+            assertFalse(cue(w), "the focused cell is in the past now")
+            assertFalse(w.ui.footer.any { it.keys == GuideTexts.KEYS_LEFT })
+            w.press(LEFT)
+            assertNull(w.ui.overlay)
+        }
+
+        /** Review S7 item 3c: a new window snapshot, with no key, re-runs the probe. */
+        @Test fun windowEventRefreshesTheCue() {
+            val w = GuideWorld()
+            w.press(DOWN); w.press(RIGHT) // row 1, the next programme: Left goes back to now
+            assertFalse(cue(w))
+            val noEpg = GuideFixtures.windowData(
+                GuideFixtures.syntheticRows(10, GuideWorld.FROM, GuideWorld.TO, noEpgRows = setOf(1, 3)),
+                fromMin = GuideWorld.FROM, toMin = GuideWorld.TO, seq = 2,
+            )
+            w.send(GuideEvent.Window(noEpg))
+            assertEquals(GuideWorld.FROM, w.machine.frame.focus!!.cellStart, "resolved onto the row's one NO_EPG cell")
+            assertTrue(cue(w), "the cell starts at earliest: Left opens Groups")
+        }
+
+        /** Review S7 item 4: walking Left on an archive longer than the EPG ends at earliest, where Left opens Groups. */
+        @Test fun leftAtTheEarliestCellOpensGroups() {
+            val w = GuideWorld()
+            var presses = 0
+            var lastCue = false
+            while (w.ui.overlay !is Overlay.Groups && presses < 2_000) {
+                lastCue = cue(w)
+                if (!lastCue) assertTrue(w.machine.frame.focus!!.cellStart > w.machine.frame.earliestMin)
+                w.press(LEFT); presses++
+            }
+            assertIs<Overlay.Groups>(w.ui.overlay)
+            assertTrue(presses > 20, "walked back $presses cells")
+            assertTrue(lastCue, "the cue was on before the last Left")
+            assertTrue(w.machine.frame.focus!!.cellStart <= w.machine.frame.earliestMin)
+        }
+
+        /** Ruling 7: the clip cue marks a clipped catch-up cell whose Left moves; ruling 1: that Left never opens Groups. */
+        @Test fun clippedCatchupCellShowsTheClipCueAndLeftMoves() {
+            val w = GuideWorld(startMs = (GuideWorld.NOW_MIN + 100) * 60_000L + 20_000L)
+            val f = w.machine.frame.focus!!
+            assertTrue(f.cellStart < w.machine.frame.windowStartMin, "clipped on-now cell")
+            assertTrue(clip(w)); assertFalse(cue(w))
+            assertEquals(GuideTexts.HINT_GROUPS, w.ui.footer.first { it.keys == GuideTexts.KEYS_BACK }.label, "home: Back · Groups")
+            w.press(LEFT)
+            assertNull(w.ui.overlay); assertTrue(w.machine.frame.focus!!.cellEnd <= f.cellStart, "moved to the previous programme")
+            assertFalse(clip(w), "the window followed the focus")
+        }
+
+        /** The cues are drawn only in the grid with no overlay; the probe itself keeps feeding the footer. */
+        @Test fun cuesOnlyInTheGridWithNoOverlay() {
+            val w = GuideWorld()
+            w.press(DOWN)
+            assertTrue(cue(w))
+            w.press(GROUPS_PANEL); assertFalse(cue(w)); w.press(BACK); assertTrue(cue(w))
+            w.press(UP); w.press(UP); assertEquals(Zone.HEADER, w.ui.zone); assertFalse(cue(w))
+            w.press(DOWN); assertTrue(w.machine.frame.focus!!.row == 0); assertFalse(cue(w), "row 0 is an archive row")
+            w.press(DOWN); assertTrue(cue(w))
+        }
+
+        /** A held Left never opens Groups, even with the cue on. */
+        @Test fun heldLeftWithTheCueOnStillSteps() {
+            val w = GuideWorld()
+            w.press(DOWN)
+            assertTrue(cue(w))
+            w.press(LEFT, repeat = 2, heldMs = 600)
+            assertNull(w.ui.overlay)
         }
     }
 
@@ -116,8 +310,10 @@ class GuideBehaviourTest {
                 }
                 if (w.exited) return@repeat
             }
+            // Decision 2026-10-19 (review S5): the longest ladder is 8 (group menu → Groups → header → grid → home →
+            // Groups via Back → top bar → exit hint → exit), 10 with a reminder card and a PIN prompt; 12 leaves room.
             var backs = 0
-            while (!w.exited && backs < 10) {
+            while (!w.exited && backs < 12) {
                 w.advance(700)
                 if (exit == ExitConfirmation.ASK && w.ui.overlay is Overlay.Exit && (w.ui.overlay as Overlay.Exit).dialog) { w.press(SELECT); continue }
                 w.press(BACK)
@@ -245,6 +441,19 @@ class GuideBehaviourTest {
             assertEquals(0, w.calls.last("ensureWindow")!!.args[2])
         }
 
+        /** Review 2026-10-19 S1: like the panel, the footer is not rebuilt per row during a vertical hold, only on release. */
+        @Test fun verticalHoldDoesNotRebuildTheFooter() {
+            val w = GuideWorld()
+            val footer = w.ui.footer
+            assertTrue(app.thebox.core.guide.FooterHint(GuideTexts.KEYS_BACK, GuideTexts.HINT_GROUPS) in footer, "home: Back · Groups")
+            // Rows 1–6 cross no-archive, no-EPG (3) and archive (5) rows: the Left probe and home both flip mid-hold.
+            for (i in 1..6) w.press(DOWN, repeat = i, heldMs = 450L + 50L * i)
+            assertEquals(6, w.machine.frame.focus!!.row)
+            assertSame(footer, w.ui.footer, "footer not rebuilt while repeat > 0")
+            w.release(DOWN)
+            assertTrue(app.thebox.core.guide.FooterHint(GuideTexts.KEYS_BACK, GuideTexts.HINT_NOW) in w.ui.footer, "rebuilt on release")
+        }
+
         @Test fun horizontalHoldStepsTimeAfterOneSecond() {
             val w = GuideWorld()
             w.press(RIGHT, repeat = 3, heldMs = 900)
@@ -283,6 +492,36 @@ class GuideBehaviourTest {
             w.send(GuideEvent.Info(token, info("Plot")))
             assertEquals("Plot", w.ui.panel!!.description)
             assertEquals("Drama", w.ui.panel!!.genre)
+        }
+
+        @Test fun artworkFillsThePanelForTheCurrentTokenOnlyAndNeverOverEpgArt() {
+            val w = GuideWorld()
+            w.press(DOWN)
+            w.advance(150)
+            val token = w.calls.last("loadInfo")!!.args[0] as Long
+            w.send(GuideEvent.Info(token, info("Plot")))
+            assertNull(w.ui.panel!!.imageUrl)
+            w.send(GuideEvent.Artwork(token - 1, "https://img/stale.jpg"))
+            assertNull(w.ui.panel!!.imageUrl)
+            w.send(GuideEvent.Artwork(token, null))
+            assertNull(w.ui.panel!!.imageUrl)
+            w.send(GuideEvent.Artwork(token, "https://img/poster.jpg"))
+            assertEquals("https://img/poster.jpg", w.ui.panel!!.imageUrl)
+            // (review 2026-10-18) A minute tick and a Tuned rebuild the panel without a new cell: the poster stays.
+            w.advance(60_000)
+            w.tuneTo(w.channels[1])
+            assertEquals("https://img/poster.jpg", w.ui.panel!!.imageUrl)
+            assertEquals("Plot", w.ui.panel!!.description)
+
+            // Another cell: the panel starts without art; the EPG's own icon arrives and a later lookup never replaces it.
+            w.press(DOWN)
+            assertNull(w.ui.panel!!.imageUrl)
+            w.advance(150)
+            val token2 = w.calls.last("loadInfo")!!.args[0] as Long
+            assertTrue(token2 != token)
+            w.send(GuideEvent.Info(token2, info("Plot").copy(iconUrl = "https://epg/icon.png")))
+            w.send(GuideEvent.Artwork(token2, "https://img/other.jpg"))
+            assertEquals("https://epg/icon.png", w.ui.panel!!.imageUrl)
         }
 
         @Test fun lowEndWaits600() {
@@ -342,6 +581,17 @@ class GuideBehaviourTest {
             assertTrue(w.nowMin() in w.machine.frame.focus!!.cellStart until w.machine.frame.focus!!.cellEnd)
             w.press(SELECT)
             assertEquals(w.channels[2], w.calls.last("tune")!!.args[0], "a second OK tunes")
+        }
+
+        /** Review 2026-10-19 L4: Yellow and the Guide key commit the entry like OK and do not open Groups under the jump. */
+        @Test fun yellowAndGuideCommitTheEntryWithoutOpeningGroups() {
+            for (key in listOf(GROUPS_PANEL, OPEN_GUIDE)) {
+                val w = GuideWorld()
+                w.press(DIGIT, digit = 1); w.press(DIGIT, digit = 0); w.press(DIGIT, digit = 3)
+                w.press(key)
+                assertNull(w.ui.overlay, "$key")
+                assertEquals(2, w.machine.frame.focus!!.row, "$key: the entry committed")
+            }
         }
 
         @Test fun notFoundShowsThenCloses() {
@@ -617,11 +867,14 @@ class GuideBehaviourTest {
 
         @Test fun footerFromKeysSeen() {
             val w = GuideWorld()
-            assertEquals(3, w.ui.footer.size)
+            // Decision 2026-10-19 ruling 8: home on an archive row, Left browses: "Back · Groups"; owner ruling 2026-10-17:
+            // "Hold Back · Full screen" while something plays.
+            assertEquals(listOf("Browse", "Watch", "Groups", "Options", "Full screen"), w.ui.footer.map { it.label })
             w.send(GuideEvent.KeysSeen(setOf(Keys.PROG_RED, Keys.CHANNEL_UP, Keys.DIGIT_0 + 5)))
-            assertEquals(listOf("Browse", "Watch", "Options", "From start", "Page", "Channel"), w.ui.footer.map { it.label })
+            assertEquals(listOf("Browse", "Watch", "Groups", "Options", "Full screen", "From start", "Page", "Channel"), w.ui.footer.map { it.label })
             w.press(RIGHT)
-            assertEquals("Remind", w.ui.footer[3].label)
+            // Not home, Left browses: "Back · Now" and, Red having been seen (colour family), "Yellow · Groups".
+            assertEquals(listOf("Browse", "Watch", "Now", "Groups", "Options", "Full screen", "Remind", "Page", "Channel"), w.ui.footer.map { it.label })
         }
 
         @Test fun dayJumpKeepsRowAndUsesToTime() {

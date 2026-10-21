@@ -20,7 +20,7 @@ class GuideMetricsFactoryImpl : GuideMetricsFactory {
 
 /**
  * Pixel-snapped geometry at [scale] device px per design px (§3.1 table). Rows are snapped one by one relative to
- * [rowsTop] (`rowTop(i) = rowsTop + round(i × rowPitch)`, see [rowTopPx]), so six rows never drift; the timeline is
+ * [rowsTop] (`rowTop(i) = rowsTop + round(i × rowPitch)`, see [rowTopPx]), so the visible rows never drift; the timeline is
  * snapped at both ends and [pxPerMin] is derived from the snapped width so 180 minutes span it exactly.
  */
 class GuideMetricsImpl(override val scale: Float) : GuideMetrics {

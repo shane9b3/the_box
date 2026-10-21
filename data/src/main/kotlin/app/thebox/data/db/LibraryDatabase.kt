@@ -59,6 +59,9 @@ import kotlinx.coroutines.CoroutineDispatcher
  * v4 (docs/design/m5-setup-settings.md §4.2): `app_setting` and `hide_rule`, derived `rule_hidden` on `channel` and
  * `channel_group`, `playlist.uid` (backfilled, unique) and `playlist.hide_rules_ver`, by the hand-written
  * [Migrations.MIGRATION_3_4] (no table rebuild).
+ *
+ * v5 (docs/design/m6-channel-editor.md §3.6): `channel_prefs.custom_group_key` (Move to group) and
+ * `index_channel_prefs_group`, by the hand-written [Migrations.MIGRATION_4_5] (no table rebuild).
  */
 @Database(
     version = LibraryDatabase.VERSION,
@@ -107,9 +110,11 @@ abstract class LibraryDatabase : RoomDatabase() {
     abstract fun hideRuleDao(): app.thebox.data.db.dao.HideRuleDao
     abstract fun hiddenChannelsDao(): app.thebox.data.db.dao.HiddenChannelsDao
     abstract fun groupAdminDao(): app.thebox.data.db.dao.GroupAdminDao
+    // M6 (docs/design/m6-channel-editor.md §3.5): the channel editor's column-targeted writes.
+    abstract fun editorDao(): app.thebox.data.db.dao.EditorDao
 
     companion object {
-        const val VERSION = 4
+        const val VERSION = 5
         const val NAME = "library.db"
 
         /** Production builder (§2.1.3). Tests pass `AndroidSQLiteDriver` (Robolectric) instead. */

@@ -140,16 +140,16 @@ class GuideWindowPagerTest {
         assertNotNull(d.cellTimeText[firstProg])
         drain(p)
         val q = p.queries
-        // Inside the margin need (rows [top − 2, top + 8) × [ws − 60, ws + 240)): no query.
+        // Inside the margin need (rows [top − 2, top + 7) × [ws − 60, ws + 240)): no query.
         p.ensure(22, ws + 60)
         p.ensure(16, ws)
         drain(p)
         assertEquals(q, p.queries, "covered moves issue no query")
         // Leaving the margin: one query.
-        p.ensure(25, ws)
+        p.ensure(26, ws)
         drain(p)
         assertEquals(q + 1, p.queries)
-        p.ensure(25, ws + 150)
+        p.ensure(26, ws + 150)
         drain(p)
         assertEquals(q + 2, p.queries)
     }
@@ -311,10 +311,10 @@ class GuideWindowPagerTest {
         assertEquals(26, down.rowCount, "rows [top − 2, top + 24)")
         p.ensure(150, ws, holdDirection = -1)
         val up = await(p, "up hold") { it.firstRow != 48 }
-        assertEquals(150 + 6 - 24, up.firstRow, "mirrored: [top + 6 − 24, top + 6 + 2)")
+        assertEquals(150 + 5 - 24, up.firstRow, "mirrored: [top + 5 − 24, top + 5 + 2)")
         assertEquals(26, up.rowCount)
         drain(p)
-        // A hold keeps a 6-row margin: top + 6 + 6 must stay covered, so 3 rows further down re-queries.
+        // A hold keeps a 6-row margin: top + 5 + 6 must stay covered, so 3 rows further down re-queries.
         val q = p.queries
         p.ensure(51, ws, holdDirection = 1)
         drain(p)
@@ -339,7 +339,7 @@ class GuideWindowPagerTest {
         assertTrue(up <= 2, "up hold re-queried $up times in 20 one-row steps")
         // The hold target still covers what the next steps need.
         val d = p.snapshots.value!!
-        assertTrue(d.firstRow <= 50 - GuideWindowPagerImpl.HOLD_MARGIN_ROWS && d.firstRow + d.rowCount >= 50 + 6, "covers the up margin")
+        assertTrue(d.firstRow <= 50 - GuideWindowPagerImpl.HOLD_MARGIN_ROWS && d.firstRow + d.rowCount >= 50 + GuideWindowPagerImpl.VISIBLE_ROWS, "covers the up margin")
     }
 
     /** Code review 2026-10-14, G-S2: a patch can hand a freed `epg_text` id to another string; widths and flags follow it. */

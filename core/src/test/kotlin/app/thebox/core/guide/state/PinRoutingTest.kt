@@ -371,6 +371,8 @@ class PinRoutingTest {
             w.press(CONTEXT_MENU)
             val menu = (w.ui.overlay as Overlay.Groups).menu!!
             assertEquals(app.thebox.core.guide.GroupMenuItem.LOCK, menu[1])
+            // m6-channel-editor §2.1: "Edit channels…" is appended last; the M5 items keep their positions.
+            assertEquals(app.thebox.core.guide.GroupMenuItem.EDIT, menu.last())
             w.press(DOWN); w.press(SELECT)
             assertEquals(true, w.calls.last("setGroupLocked")!!.args[1], "unlocked session: no prompt")
             // A locked entry offers Unlock (and asks).

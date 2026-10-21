@@ -25,7 +25,7 @@
     <string name="error_undecodable">This stream could not be decoded</string>
     <string name="error_audio_output">The sound output failed</string>
     <string name="error_unsupported_source">This kind of stream isn\'t supported</string>
-    <string name="error_catchup_missing">This programme isn\'t in the catch-up archive</string>
+    <string name="error_catchup_missing">This program isn\'t in the catch-up archive</string>
     <string name="error_channel_missing">This channel is no longer in your playlist</string>
     <string name="error_internal">Something went wrong in the player</string>
 
@@ -52,9 +52,9 @@
     <string name="catchup_channel_gone">This channel is no longer in your playlist</string>
     <string name="catchup_channel_gone_step">Refresh the playlist in Settings</string>
     <string name="catchup_no_archive">This channel has no catch-up</string>
-    <string name="catchup_no_archive_step">Press OK on a programme that is on now to watch live</string>
-    <string name="catchup_outside_archive">This programme is older than the channel\'s catch-up archive</string>
-    <string name="catchup_outside_archive_step">Pick a more recent programme</string>
+    <string name="catchup_no_archive_step">Press OK on a program that is on now to watch live</string>
+    <string name="catchup_outside_archive">This program is older than the channel\'s catch-up archive</string>
+    <string name="catchup_outside_archive_step">Pick a more recent program</string>
     <string name="catchup_unsupported_mode">Couldn\'t build a catch-up link for this channel\'s catch-up mode</string>
     <string name="catchup_unsupported_mode_step">Try another mode in playlist settings</string>
     <string name="catchup_credentials">Your saved login could not be read</string>
@@ -80,9 +80,9 @@
     <!-- After the error card's Stop (review N12). -->
     <string name="error_stopped_hint">Stopped to free the connection. Press OK to play again.</string>
     <!-- Archive session failures that have no CatchupFailure twin (ArchiveFailure, §3.7 last paragraph). -->
-    <string name="archive_no_programme">There is no programme here to play from the archive</string>
-    <string name="archive_no_programme_step">Pick a programme in the guide, or watch the channel live</string>
+    <string name="archive_no_programme">There is no program here to play from the archive</string>
+    <string name="archive_no_programme_step">Pick a program in the guide, or watch the channel live</string>
     <string name="archive_not_in_archive_step">Watch the channel live, or try another catch-up mode in playlist settings</string>
     <string name="archive_playback">Catch-up playback stopped</string>
-    <string name="archive_playback_step">Watch the channel live, or try the programme again from the guide</string>
+    <string name="archive_playback_step">Watch the channel live, or try the program again from the guide</string>
 </resources>

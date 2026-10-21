@@ -272,6 +272,47 @@ class LibraryDatabaseMigrationTest {
         }
     }
 
+    /**
+     * library.db v4 → v5 (docs/design/m6-channel-editor.md §3.6): exactly one column (`channel_prefs.custom_group_key`,
+     * NULL for every existing row) and `index_channel_prefs_group (playlist_id, custom_group_key)`; no table rebuild
+     * (every other table keeps its CREATE statement); the file opens through the production builder.
+     */
+    @Test
+    fun migrate4To5AddsTheMoveColumnAndItsIndex() {
+        val helper = MigrationTestHelper(instrumentation, file, AndroidSQLiteDriver(), LibraryDatabase::class)
+        var v4TableSql: Map<String, String> = emptyMap()
+        helper.createDatabase(4).closing { c ->
+            c.execSQL("INSERT INTO playlist(id, name, type, credential_ref, display_source, sort_index, created_at, uid) VALUES (7, 'P', 'M3U_URL', 'r7', 'h', 0, 1, 'u7')")
+            c.execSQL("INSERT INTO channel_prefs(playlist_id, stable_key, hidden, custom_name, custom_sort_index, watch_count, updated_at, playback_flags) VALUES (7, 'k1', 1, 'Mine', 3, 2, 4, 1)")
+            c.execSQL("INSERT INTO channel_prefs(playlist_id, stable_key, hidden, watch_count, updated_at) VALUES (7, 'k2', 0, 0, 4)")
+            v4TableSql = c.tableSql()
+        }
+        helper.runMigrationsAndValidate(5, Migrations.ALL.toList()).closing { c ->
+            val v5TableSql = c.tableSql()
+            for (t in v4TableSql.keys - "channel_prefs") assertEquals(t, v4TableSql[t], v5TableSql[t])
+            assertEquals(listOf("custom_group_key"), c.columns("channel_prefs") - V1_PREFS_COLUMNS - "playback_flags" - "fps_milli")
+            c.prepare("SELECT COUNT(*) FROM channel_prefs WHERE custom_group_key IS NULL").use { st -> assertTrue(st.step()); assertEquals(2L, st.getLong(0)) }
+            c.prepare("SELECT hidden, custom_name, custom_sort_index, watch_count, playback_flags FROM channel_prefs WHERE stable_key = 'k1'").use { st ->
+                assertTrue(st.step())
+                assertEquals(1L, st.getLong(0)); assertEquals("Mine", st.getText(1)); assertEquals(3L, st.getLong(2)); assertEquals(2L, st.getLong(3)); assertEquals(1L, st.getLong(4))
+            }
+            val idx = c.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'index_channel_prefs_group'").use { st -> assertTrue(st.step()); st.getText(0) }
+            assertTrue(idx, idx.contains("ON `channel_prefs` (`playlist_id`, `custom_group_key`)"))
+            val sql = c.prepare("SELECT sql FROM sqlite_master WHERE name = 'channel_prefs'").use { it.step(); it.getText(0) }
+            assertTrue(sql, sql.contains("PRIMARY KEY(`playlist_id`, `stable_key`)") && sql.contains("ON DELETE CASCADE"))
+        }
+        val db = LibraryDatabase.build(context, Dispatchers.IO, AndroidSQLiteDriver(), file.name)
+        try {
+            runBlocking {
+                assertNull(db.channelPrefsDao().get(7, "k1")!!.customGroupKey)
+                db.channelPrefsDao().upsertCustomGroup(7, "k2", "g:news", 0, 9)
+                assertEquals("g:news", db.channelPrefsDao().get(7, "k2")!!.customGroupKey)
+            }
+        } finally {
+            db.close()
+        }
+    }
+
     private var v2TableSql: Map<String, String> = emptyMap()
 
     private fun SQLiteConnection.tableSql(): Map<String, String> =

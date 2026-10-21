@@ -75,6 +75,9 @@ private class ScriptedController : PlaybackController by unusedController() {
     override val state: StateFlow<PlaybackState> get() = flow
     val videoFlow = MutableStateFlow(VideoInfo())
     override val video: StateFlow<VideoInfo> get() = videoFlow
+    /** (M6) No time-shift buffer: the LOCAL source stays idle and every M4 path runs as before. */
+    override val localBuffer: StateFlow<app.thebox.player.api.LocalBufferState?> = MutableStateFlow(null)
+    override val notices: kotlinx.coroutines.flow.SharedFlow<app.thebox.player.api.PlaybackNotice> = kotlinx.coroutines.flow.MutableSharedFlow()
 
     var nextTuneId = 100L
     val archiveTunes = ArrayList<ArchiveTune>()

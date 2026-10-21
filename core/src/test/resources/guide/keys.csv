@@ -8,15 +8,17 @@ section,pre,action,mode,zone,overlay,effects,check
 # ---- GRID §3.4.2
 grid,grid_row1,LEFT,GUIDE,GRID,Groups,-,same
 grid,grid_home,LEFT,GUIDE,GRID,none,-,moved
+# (decision 2026-10-19 ruling 1) a clipped on-now cell on a catch-up row: Left steps back, it never opens Groups
+grid,grid_home_clipped_archive,LEFT,GUIDE,GRID,none,-,moved
 grid,grid_home,RIGHT,GUIDE,GRID,none,-,moved
 grid,grid_row1,UP,GUIDE,GRID,none,-,row:0
 grid,grid_home,UP,GUIDE,HEADER,none,-,chip:GROUP
 grid,grid_home,DOWN,GUIDE,GRID,none,-,row:1
 grid,grid_last,DOWN,GUIDE,GRID,none,-,row:9
-grid,grid_home,ZAP_DOWN,GUIDE,GRID,none,-,row:6
-grid,grid_home,PAGE_DOWN,GUIDE,GRID,none,-,row:6
-grid,grid_last,ZAP_UP,GUIDE,GRID,none,-,row:3
-grid,grid_last,PAGE_UP,GUIDE,GRID,none,-,row:3
+grid,grid_home,ZAP_DOWN,GUIDE,GRID,none,-,row:5
+grid,grid_home,PAGE_DOWN,GUIDE,GRID,none,-,row:5
+grid,grid_last,ZAP_UP,GUIDE,GRID,none,-,row:4
+grid,grid_last,PAGE_UP,GUIDE,GRID,none,-,row:4
 grid,grid_home,SEEK_FORWARD,GUIDE,GRID,none,-,moved
 grid,grid_home,SEEK_BACK,GUIDE,GRID,none,-,moved
 grid,grid_home,SELECT,FULL,GRID,none,setFullScreen,-
@@ -31,11 +33,14 @@ grid,grid_home,CONTEXT_MENU,GUIDE,GRID,Menu,queryFavourite,same
 # (code review 2026-10-14, H-S6) "Press Left to choose another group" on an empty source
 grid,grid_empty_source,LEFT,GUIDE,GRID,Groups,-,-
 grid,grid_scrolled,BACK,GUIDE,GRID,none,-,home
-grid,grid_home,BACK,FULL,GRID,none,setFullScreen,-
+# (decision 2026-10-19 ruling 2) Back from home opens Groups on the current source (All channels = focused 3)
+grid,grid_home,BACK,GUIDE,GRID,Groups,-,groups:3
 grid,grid_home,PLAY_PAUSE,FULL,GRID,none,setFullScreen,-
 grid,grid_idle_home,PLAY_PAUSE,GUIDE,GRID,none,-,same
 grid,grid_scrolled,JUMP_TO_NOW,GUIDE,GRID,none,-,now
 grid,grid_scrolled,OPEN_GUIDE,GUIDE,GRID,none,-,now
+# (decision 2026-10-19 ruling 5) the Guide key at home opens Groups
+grid,grid_home,OPEN_GUIDE,GUIDE,GRID,Groups,-,same
 grid,grid_home,FAVOURITES,GUIDE,GRID,none,loadLineup;persistSource,-
 grid,grid_home_no_favourites,FAVOURITES,GUIDE,GRID,none,toast,same
 grid,grid_row0_onnow_untuned,START_OVER,FULL,GRID,none,playArchive;setFullScreen,-
@@ -78,21 +83,25 @@ grid,grid_home,OPEN_SETTINGS,SETTINGS,GRID,none,openSettings,-
 # ---- TABS §3.4.3
 tabs,tabs,RIGHT,GUIDE,TABS,none,-,tab:1
 tabs,tabs,LEFT,GUIDE,TABS,none,-,tab:0
+tabs,tabs_search,LEFT,GUIDE,TABS,none,-,tab:0
 tabs,tabs_settings,RIGHT,GUIDE,TABS,none,-,tab:2
 tabs,tabs,SELECT,GUIDE,GRID,none,-,same
 tabs,tabs_search,SELECT,SEARCH,TABS,none,openSearch,-
 tabs,tabs_settings,SELECT,SETTINGS,TABS,none,openSettings,-
 tabs,tabs,UP,GUIDE,TABS,none,-,tab:0
 tabs,tabs,DOWN,GUIDE,PANEL,none,-,panel:0
-tabs,tabs,BACK,GUIDE,GRID,none,-,same
+tabs,tabs,BACK,GUIDE,TABS,ExitHint,-,-
 # ---- PANEL §3.4.3 (home buttons: WATCHING, FROM_START, MORE)
 panel,panel,RIGHT,GUIDE,PANEL,none,-,panel:1
 panel,panel,LEFT,GUIDE,PANEL,none,-,panel:0
 panel,panel,SELECT,FULL,PANEL,none,setFullScreen,-
 panel,panel_from_start,SELECT,FULL,PANEL,none,playArchive;setFullScreen,-
 panel,panel_more,SELECT,GUIDE,PANEL,Menu,queryFavourite,-
-panel,panel,UP,GUIDE,TABS,none,-,-
-panel,panel,DOWN,GUIDE,HEADER,none,-,chip:GROUP
+# (decision 2026-10-19 ruling 3; review S6) Up from the panel or the header lands on Guide, even after a visit to Search
+panel,panel,UP,GUIDE,TABS,none,-,tab:0
+panel,panel_stale_tab,UP,GUIDE,TABS,none,-,tab:0
+# (decision 2026-10-19 ruling 6) Down from the panel buttons lands on the Day chip; Up from grid row 0 keeps Group
+panel,panel,DOWN,GUIDE,HEADER,none,-,chip:DAY
 panel,panel,BACK,GUIDE,GRID,none,-,same
 # ---- HEADER §3.4.3
 header,header,RIGHT,GUIDE,HEADER,none,-,chip:DAY
@@ -101,10 +110,11 @@ header,header,SELECT,GUIDE,HEADER,Groups,-,-
 header,header_day,SELECT,GUIDE,HEADER,Days,-,-
 header,header_now,SELECT,GUIDE,GRID,none,-,now
 header,header,UP,GUIDE,PANEL,none,-,panel:0
+header,header_no_panel,UP,GUIDE,TABS,none,-,tab:0
 header,header,DOWN,GUIDE,GRID,none,-,same
 header,header,BACK,GUIDE,GRID,none,-,same
 header,header_now,PLAY_PAUSE,GUIDE,HEADER,none,-,now
-header,header,ZAP_DOWN,GUIDE,HEADER,none,-,row:6
+header,header,ZAP_DOWN,GUIDE,HEADER,none,-,row:5
 # ---- Groups overlay §3.4.4 (entries: Favourites, All, News, Sport; current All → focused 3)
 groups,groups,DOWN,GUIDE,GRID,Groups,-,groups:4
 groups,groups,UP,GUIDE,GRID,Groups,-,groups:2
@@ -116,6 +126,15 @@ groups,groups_settings,SELECT,SETTINGS,GRID,none,openSettings,-
 groups,groups_news,CONTEXT_MENU,GUIDE,GRID,GroupMenu,-,-
 groups,groups,CONTEXT_MENU,GUIDE,GRID,Groups,-,groups:3
 groups,groups,BACK,GUIDE,GRID,none,-,-
+# (decision 2026-10-19 ruling 2) Groups opened by the Back ladder: Back → the top bar with Search focused; Right → grid
+groups,groups_via_back,BACK,GUIDE,TABS,none,-,tab:1
+groups,groups_via_back,RIGHT,GUIDE,GRID,none,-,home
+# (review S6) viaBack survives CH± inside the panel; Groups opened from the top bar (Yellow) closes back to it; Groups
+# opened by the Guide key is not viaBack (Back → grid) and the Guide key closes it to the grid at home (review L3)
+groups,groups_via_back_zapped,BACK,GUIDE,TABS,none,-,tab:1
+groups,groups_from_tabs,BACK,GUIDE,TABS,none,-,tab:0
+groups,groups_via_guide,BACK,GUIDE,GRID,none,-,same
+groups,groups_via_guide,OPEN_GUIDE,GUIDE,GRID,none,-,home
 groups,groups,ZAP_DOWN,GUIDE,GRID,Groups,loadLineup;persistSource,groups:4
 groups,groups,PAGE_DOWN,GUIDE,GRID,Groups,loadLineup;persistSource,groups:4
 groups,groups,ZAP_UP,GUIDE,GRID,Groups,loadLineup;persistSource,groups:2
@@ -153,12 +172,12 @@ number,number,SELECT,GUIDE,GRID,Number,lookupNumber,-
 number,number,BACK,GUIDE,GRID,none,-,-
 number,number,PLAY_PAUSE,FULL,GRID,Number,lookupNumber;setFullScreen,-
 # ---- Exit
-exit,exit_hint,BACK,GUIDE,GRID,none,exitApp,-
-exit,exit_hint,DOWN,GUIDE,GRID,none,-,row:1
-exit,exit_dialog,RIGHT,GUIDE,GRID,ExitDialog,-,-
-exit,exit_dialog,SELECT,GUIDE,GRID,none,exitApp,-
-exit,exit_dialog_cancel,SELECT,GUIDE,GRID,none,-,-
-exit,exit_dialog,BACK,GUIDE,GRID,none,-,-
+exit,exit_hint,BACK,GUIDE,TABS,none,exitApp,-
+exit,exit_hint,DOWN,GUIDE,PANEL,none,-,-
+exit,exit_dialog,RIGHT,GUIDE,TABS,ExitDialog,-,-
+exit,exit_dialog,SELECT,GUIDE,TABS,none,exitApp,-
+exit,exit_dialog_cancel,SELECT,GUIDE,TABS,none,-,-
+exit,exit_dialog,BACK,GUIDE,TABS,none,-,-
 # ---- Reminder card (modal, S2)
 card,card_guard,SELECT,GUIDE,GRID,Card,-,card:0
 card,card_guard,BACK,GUIDE,GRID,Card,-,card:0
@@ -205,14 +224,16 @@ full,full,PLAY_PAUSE,FULL,GRID,none,-,-
 full,full,SEEK_FORWARD,FULL,GRID,none,-,-
 # ---- Back ladder §3.4.6 (B2)
 back,grid_scrolled,BACK,GUIDE,GRID,none,-,home
-back,full_returned,BACK,GUIDE,GRID,ExitHint,-,home
-back,grid_idle_home,BACK,GUIDE,GRID,ExitHint,-,home
-back,ask_home,BACK,GUIDE,GRID,ExitDialog,-,home
-back,none_home,BACK,GUIDE,GRID,none,exitApp,home
+# (decision 2026-10-19 ruling 2) home → Groups (via Back), whatever the exit setting or a return from FULL
+back,full_returned,BACK,GUIDE,GRID,Groups,-,home
+back,grid_idle_home,BACK,GUIDE,GRID,Groups,-,home
+back,ask_home,BACK,GUIDE,GRID,Groups,-,home
+back,none_home,BACK,GUIDE,GRID,Groups,-,home
+back,grid_empty_source,BACK,GUIDE,GRID,Groups,-,-
 # ---- SEARCH / SETTINGS
 search,search,BACK,GUIDE,GRID,none,-,-
 search,search,DOWN,SEARCH,TABS,none,-,-
-settings,settings,BACK,GUIDE,TABS,none,-,-
+settings,settings,BACK,GUIDE,TABS,none,-,tab:2
 settings,settings,SELECT,SETTINGS,TABS,none,-,-
 # (reviewed 2026-10-16, N11) the Guide key leaves Settings to the grid at now; Exit opens the exit hint there.
 settings,settings,OPEN_GUIDE,GUIDE,GRID,none,-,-

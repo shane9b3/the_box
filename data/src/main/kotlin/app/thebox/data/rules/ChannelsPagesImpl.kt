@@ -29,6 +29,7 @@ import app.thebox.core.settings.tree.RuleTarget
 import app.thebox.core.settings.tree.SectionPages
 import app.thebox.core.source.EntryKind
 import app.thebox.data.db.LibraryDatabase
+import app.thebox.data.db.dao.ChannelDao
 import app.thebox.data.db.entity.FavouriteListEntity
 import app.thebox.data.di.WallClock
 import app.thebox.data.repo.forEachBound
@@ -133,7 +134,7 @@ class ChannelsPagesImpl @Inject constructor(
             lockedGroups = db.groupAdminDao().lockedCount(pid),
             hiddenChannels = db.hiddenChannelsDao().count(pid),
             rules = ruleList.size,
-            ruleHiddenChannels = db.read { usePrepared("SELECT COUNT(*) FROM channel c LEFT JOIN channel_group g ON g.id = c.group_id WHERE c.playlist_id = ? AND c.missing_since IS NULL AND (c.rule_hidden = 1 OR COALESCE(g.rule_hidden, 0) = 1)") { st -> st.bindLong(1, pid); st.step(); st.getLong(0).toInt() } },
+            ruleHiddenChannels = db.read { usePrepared(RULE_HIDDEN_COUNT) { st -> st.bindLong(1, pid); st.step(); st.getLong(0).toInt() } },
             favouriteLists = db.favouriteDao().lists().size,
         )
     }
@@ -349,3 +350,10 @@ class ChannelsPagesImpl @Inject constructor(
         }
     }
 }
+
+/**
+ * "N channels hidden by rules" (§3.7.2): a rule-hidden channel, or one whose **effective** group is rule-hidden
+ * (docs/design/m6-channel-editor.md §3.6 row 14).
+ */
+private const val RULE_HIDDEN_COUNT = "SELECT COUNT(*) FROM channel c " + ChannelDao.EFFECTIVE_GROUP_JOINS +
+    " WHERE c.playlist_id = ? AND c.missing_since IS NULL AND (c.rule_hidden = 1 OR COALESCE(g.rule_hidden, 0) = 1)"

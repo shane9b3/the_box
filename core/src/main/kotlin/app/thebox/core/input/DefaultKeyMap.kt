@@ -28,6 +28,8 @@ class DefaultKeyMap : KeyMap {
         for (c in OK_KEYS) { both(c, SELECT); guideLong[c] = CONTEXT_MENU; playerLong[c] = CONTEXT_MENU }
         both(Keys.MENU, CONTEXT_MENU)
         for (c in intArrayOf(Keys.BACK, Keys.ESCAPE, Keys.BUTTON_B)) both(c, BACK)
+        // Owner ruling 2026-10-17: holding Back in the guide returns to the full-screen player (PLAY = go FULL there).
+        for (c in intArrayOf(Keys.BACK, Keys.BUTTON_B)) guideLong[c] = PLAY
         both(Keys.CHANNEL_UP, ZAP_UP); both(Keys.CHANNEL_DOWN, ZAP_DOWN)
         guideShort[Keys.PAGE_UP] = PAGE_UP; guideShort[Keys.PAGE_DOWN] = PAGE_DOWN
         playerShort[Keys.PAGE_UP] = ZAP_UP; playerShort[Keys.PAGE_DOWN] = ZAP_DOWN
@@ -45,6 +47,8 @@ class DefaultKeyMap : KeyMap {
         playerShort[Keys.MEDIA_STEP_FORWARD] = SEEK_FORWARD; playerShort[Keys.MEDIA_STEP_BACKWARD] = SEEK_BACK
         for (i in 0..9) { both(Keys.DIGIT_0 + i, DIGIT); both(Keys.NUMPAD_0 + i, DIGIT) }
         both(Keys.PROG_RED, START_OVER); both(Keys.PROG_GREEN, FAVOURITES); both(Keys.PROG_YELLOW, AUDIO); both(Keys.PROG_BLUE, PREVIOUS_CHANNEL)
+        // Decision 2026-10-19 ruling 4: Yellow opens Groups in the guide; the player keeps Audio (AUDIO is player-only).
+        guideShort[Keys.PROG_YELLOW] = GROUPS_PANEL
         both(Keys.LAST_CHANNEL, PREVIOUS_CHANNEL)
         both(Keys.GUIDE, OPEN_GUIDE)
         both(Keys.INFO, INFO_BAR)
@@ -75,5 +79,13 @@ class DefaultKeyMap : KeyMap {
 
     companion object {
         val OK_KEYS = intArrayOf(Keys.DPAD_CENTER, Keys.ENTER, Keys.NUMPAD_ENTER, Keys.BUTTON_A)
+        /** Red, Green, Yellow, Blue. */
+        val COLOUR_KEYS: Set<Int> = setOf(Keys.PROG_RED, Keys.PROG_GREEN, Keys.PROG_YELLOW, Keys.PROG_BLUE)
+
+        /**
+         * (decision 2026-10-19 ruling 4) For the footer the four colour keys are one family: once any was seen, all four
+         * count as seen, so a remote whose Yellow was never pressed still learns that Yellow opens Groups.
+         */
+        fun seenWithColourFamily(seen: Set<Int>): Set<Int> = if (seen.any { it in COLOUR_KEYS }) seen + COLOUR_KEYS else seen
     }
 }

@@ -52,12 +52,12 @@ fun UpdateCard(state: UpdateCardState, modifier: Modifier = Modifier) {
                 .padding(horizontal = 24.dp, vertical = 20.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Line(stringResource(R.string.update_card_title, state.versionName), GuideUi.sans(22, FontWeight.SemiBold))
+            Line(stringResource(R.string.update_card_title, state.versionName), GuideUi.sans(28, FontWeight.SemiBold))
             val failed = state.failed
             if (failed != null) {
-                Line(failed, GuideUi.sans(18, color = GuideUi.Warn), maxLines = 3)
+                Line(failed, GuideUi.sans(24, color = GuideUi.Warn), maxLines = 3)
             } else if (state.notes.isNotEmpty()) {
-                Line(state.notes, GuideUi.sans(18, color = GuideUi.Fg50), maxLines = 2)
+                Line(state.notes, GuideUi.sans(24, color = GuideUi.Fg50), maxLines = 2)
             }
             state.progress?.let { p ->
                 Box(Modifier.fillMaxWidth().height(4.dp).background(GuideUi.White10, RoundedCornerShape(2.dp))) {
@@ -65,7 +65,7 @@ fun UpdateCard(state: UpdateCardState, modifier: Modifier = Modifier) {
                 }
                 Line(
                     if (p >= 1f) stringResource(R.string.update_card_ready) else stringResource(R.string.update_card_downloading, (p * 100).toInt()),
-                    GuideUi.mono(15, color = GuideUi.Fg50),
+                    GuideUi.mono(20, color = GuideUi.Fg50),
                 )
             }
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -82,7 +82,7 @@ fun UpdateCard(state: UpdateCardState, modifier: Modifier = Modifier) {
                         border = GuideUi.White16,
                         shape = RoundedCornerShape(DesignTokens.Radii.Button),
                         padding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
-                    ) { c -> Line(stringResource(label), GuideUi.sans(18, FontWeight.SemiBold, c)) }
+                    ) { c -> Line(stringResource(label), GuideUi.sans(24, FontWeight.SemiBold, c)) }
                 }
             }
         }

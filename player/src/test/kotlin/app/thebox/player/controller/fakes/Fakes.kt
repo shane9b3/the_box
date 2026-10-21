@@ -182,6 +182,8 @@ internal class FakeTransport(private val journal: Journal) : TransportFactory {
     val ended = mutableListOf<Long>()
     override fun liveTs(ctx: StreamSessionContext) = error("built by the fake MediaSourceBuilder")
     override fun http(ctx: StreamSessionContext) = error("built by the fake MediaSourceBuilder")
+    override fun ring(ctx: StreamSessionContext, open: app.thebox.player.internal.RingOpen) = error("built by the fake MediaSourceBuilder")
+    override fun writer(ctx: StreamSessionContext, hooks: app.thebox.player.internal.WriterHooks): Pair<app.thebox.core.playback.timeshift.TsUpstream, StreamTelemetry> = error("no time-shift writer in the plain fixture")
     override fun endSession(tuneId: Long) {
         ended += tuneId
         journal("endSession:$tuneId")
@@ -190,18 +192,21 @@ internal class FakeTransport(private val journal: Journal) : TransportFactory {
 
 @OptIn(UnstableApi::class)
 internal class FakeMediaSourceBuilder(private val journal: Journal) : MediaSourceBuilderApi {
-    data class Build(val ctx: StreamSessionContext, val format: StreamFormat, val compat: TsCompat, val archive: ArchiveRequest?)
+    data class Build(val ctx: StreamSessionContext, val format: StreamFormat, val compat: TsCompat, val archive: ArchiveRequest?, val ring: app.thebox.player.internal.RingOpen? = null)
 
     val builds = mutableListOf<Build>()
     val telemetry = HashMap<Long, FakeTelemetry>()
+    val ringTelemetry = HashMap<Long, StreamTelemetry>()
     val last: Build get() = builds.last()
     /** Thrown by the next [build] (then cleared), e.g. the real builder's UnsupportedStreamFormatException. */
     var failNext: Exception? = null
 
-    override fun build(ctx: StreamSessionContext, format: StreamFormat, compat: TsCompat, transport: TransportFactory, archive: ArchiveRequest?): MediaSourceWithTelemetry {
+    override fun build(ctx: StreamSessionContext, format: StreamFormat, compat: TsCompat, transport: TransportFactory, archive: ArchiveRequest?, ring: app.thebox.player.internal.RingOpen?): MediaSourceWithTelemetry {
         failNext?.let { failNext = null; throw it }
-        builds += Build(ctx, format, compat, archive)
-        journal("build:${ctx.tuneId}:$format")
+        builds += Build(ctx, format, compat, archive, ring)
+        journal("build:${ctx.tuneId}:$format${if (ring != null) ":ring@${ring.startOffset}" else ""}")
+        // (M6) A ring reader's telemetry is the one the time-shift session built (§5.2); tests read it through [ringTelemetry].
+        ring?.let { ringTelemetry[ctx.tuneId] = it.telemetry }
         val t = FakeTelemetry().also { telemetry[ctx.tuneId] = it }
         val source = Proxy.newProxyInstance(MediaSource::class.java.classLoader, arrayOf(MediaSource::class.java)) { p, m, a ->
             when (m.name) {
@@ -211,7 +216,7 @@ internal class FakeMediaSourceBuilder(private val journal: Journal) : MediaSourc
                 else -> null
             }
         } as MediaSource
-        return MediaSourceWithTelemetry(source, t)
+        return MediaSourceWithTelemetry(source, ring?.telemetry ?: t)
     }
 }
 
@@ -357,12 +362,14 @@ internal class FakeProvider : PlaybackSourceProvider {
     var playlistInfo = PlaylistPlaybackInfo(1, PlaylistType.XTREAM, userAgent = null)
     var account: XtreamAccountInfo? = account()
     var channelHeaders = emptyMap<String, String>()
+    /** (M6) The channel's catch-up (archive channels route buffer gaps to the provider, §9.1). */
+    var catchup: app.thebox.core.model.Catchup = app.thebox.core.model.Catchup.NONE
     var refreshes = 0
     val savedBase = mutableListOf<Int>()
     val savedOutput = mutableListOf<XtreamOutput?>()
 
     override suspend fun channel(identity: ChannelIdentity) =
-        ChannelStreamInfo(identity, "Channel ${identity.stableKey.value}", "{{base}}/live/{{u}}/{{p}}/1.{{ext}}", channelHeaders)
+        ChannelStreamInfo(identity, "Channel ${identity.stableKey.value}", "{{base}}/live/{{u}}/{{p}}/1.{{ext}}", channelHeaders, catchup = catchup)
     override suspend fun playlist(playlistId: Long) = playlistInfo
     override suspend fun credentials(playlistId: Long): Outcome<StreamCredentials?> = Outcome.Ok(null)
     override suspend fun account(playlistId: Long) = account

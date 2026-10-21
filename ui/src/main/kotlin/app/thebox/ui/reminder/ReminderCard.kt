@@ -78,13 +78,13 @@ fun ReminderCard(state: ReminderCardState, modifier: Modifier = Modifier, clock:
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             Dot(GuideUi.Live, 10.dp)
-            Line(text, GuideUi.sans(20, FontWeight.SemiBold), Modifier.weight(1f), maxLines = 2)
+            Line(text, GuideUi.sans(26, FontWeight.SemiBold), Modifier.weight(1f), maxLines = 2)
         }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             CardButton(R.string.guide_reminder_switch, focused = !guarded && state.focused == 0, guarded = guarded, tag = REMINDER_SWITCH_TAG)
             CardButton(R.string.guide_reminder_dismiss, focused = !guarded && state.focused == 1, guarded = guarded, tag = REMINDER_DISMISS_TAG)
             Spacer(Modifier.weight(1f))
-            Line(stringResource(R.string.guide_reminder_countdown, state.secondsLeft.coerceAtLeast(0)), GuideUi.mono(15, color = GuideUi.Fg50))
+            Line(stringResource(R.string.guide_reminder_countdown, state.secondsLeft.coerceAtLeast(0)), GuideUi.mono(20, color = GuideUi.Fg50))
         }
     }
 }
@@ -101,5 +101,5 @@ private fun CardButton(label: Int, focused: Boolean, guarded: Boolean, tag: Stri
         border = GuideUi.White16,
         shape = RoundedCornerShape(DesignTokens.Radii.Button),
         padding = PaddingValues(horizontal = 22.dp, vertical = 12.dp),
-    ) { c -> Line(stringResource(label), GuideUi.sans(18, FontWeight.SemiBold, c), Modifier.padding(0.dp)) }
+    ) { c -> Line(stringResource(label), GuideUi.sans(24, FontWeight.SemiBold, c), Modifier.padding(0.dp)) }
 }

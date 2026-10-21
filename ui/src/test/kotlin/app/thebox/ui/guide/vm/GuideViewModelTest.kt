@@ -315,14 +315,17 @@ class GuideViewModelTest {
         run(app.thebox.core.full.OnLaunch.GUIDE_WITH_LAST).let { (w, m) ->
             assertTrue("tune" in w.controller.calls)
             assertFalse(m.events.contains(GuideEvent.StartFull))
+            assertTrue("the guide is decided at once", m.events.contains(GuideEvent.StartGuide))
         }
         run(app.thebox.core.full.OnLaunch.FULL_LAST).let { (w, m) ->
             assertTrue("tune" in w.controller.calls)
             assertTrue(m.events.contains(GuideEvent.StartFull))
+            assertFalse("no guide flash before FULL", m.events.contains(GuideEvent.StartGuide))
         }
         run(app.thebox.core.full.OnLaunch.GUIDE_NOTHING).let { (w, m) ->
             assertFalse("tune" in w.controller.calls)
             assertFalse(m.events.contains(GuideEvent.StartFull))
+            assertTrue(m.events.contains(GuideEvent.StartGuide))
         }
         val w = World()
         w.library.lastWatched = null
@@ -330,5 +333,35 @@ class GuideViewModelTest {
         val fake = app.thebox.core.guide.fakes.FakeGuideStateMachine()
         w.viewModel(app.thebox.core.guide.fakes.FakeGuideStateMachine.factory(fake))
         assertFalse("nothing to tune: no pending FULL", fake.events.contains(GuideEvent.StartFull))
+        assertTrue("nothing to tune: the guide shows", fake.events.contains(GuideEvent.StartGuide))
+    }
+
+    /**
+     * Device finding 2026-10-17: Exit leaves the process alive with the controller Stopped, so the warm relaunch found no
+     * Idle player and showed the guide with nothing playing whatever "On launch" said. Stopped and Error are "nothing
+     * playing"; only a live session (an activity recreated over a playing controller) keeps the startup tune away.
+     */
+    @Test fun startupTunesOverAStoppedOrFailedControllerButNotOverALiveSession() {
+        fun run(state: PlaybackState): Pair<World, app.thebox.core.guide.fakes.FakeGuideStateMachine> {
+            val w = World()
+            w.controller.state.value = state
+            w.playerSettings.update { it.copy(onLaunch = app.thebox.core.full.OnLaunch.FULL_LAST) }
+            val fake = app.thebox.core.guide.fakes.FakeGuideStateMachine()
+            w.viewModel(app.thebox.core.guide.fakes.FakeGuideStateMachine.factory(fake))
+            return w to fake
+        }
+        val np = NowPlaying(1, null, "x", false, StreamFormat.TS)
+        run(PlaybackState.Stopped(np, app.thebox.player.api.StopReason.USER, resumable = false)).let { (w, m) ->
+            assertTrue("Stopped: the startup tune runs", "tune" in w.controller.calls)
+            assertTrue(m.events.contains(GuideEvent.StartFull))
+        }
+        run(PlaybackState.Error(np, app.thebox.core.playback.PlaybackError(app.thebox.core.playback.PlaybackErrorCode.STREAM_UNDECODABLE))).let { (w, m) ->
+            assertTrue("Error: the startup tune runs", "tune" in w.controller.calls)
+            assertTrue(m.events.contains(GuideEvent.StartFull))
+        }
+        run(PlaybackState.Playing(np)).let { (w, m) ->
+            assertFalse("a live session is kept", "tune" in w.controller.calls)
+            assertFalse(m.events.contains(GuideEvent.StartFull))
+        }
     }
 }

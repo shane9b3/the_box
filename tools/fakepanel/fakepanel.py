@@ -81,6 +81,14 @@ FAULT_DOC = {
     "timeshift_redirect": False,       # 302 to the LB port with a token, timeshift requests only (token_ttl applies)
     "token_kill": False,               # the LB closes an open body when its token expires (mid-play expiry)
     "timeshift_reject_forms": {},      # per stream: as the config key, overrides it
+    # M6 time-shift buffer (docs/design/m6-timeshift.md §17.5): live-TS shaping, all off by default (then the
+    # output is byte-identical to the unshaped generator). Times are media time: clip bytes sent / clip rate.
+    "strip_rai": False,                # clear the adaptation-field random-access indicator on every packet
+    "pts_offset": None,                # 90 kHz: the clip's lowest PTS starts here (PCR keeps its lead); wraps mod 2^33
+    "inline_jump_after": None,         # [s, ms]: s s into one connection step PTS then PCR by ms, no reconnect
+    "psi_every_s": None,               # PAT/PMT only at connection start and every N s (the clip's own PSI is dropped)
+    "pmt_change_after": None,          # s: PMT version +1 and the audio moves to a new PID (new PMT first)
+    "pad_bps": None,                   # null packets (PID 0x1FFF) added at this many bytes/s on top of the content
 }
 # Timeshift URL forms the panel can tell apart (the request log's `form`, the keys of timeshift_reject_forms).
 API_FAULTS = (None, "html_splash", "timeout", "429", "redirect")
@@ -90,6 +98,8 @@ TS_FORMS = ("path", "path_sec", "php", "shift", "flussonic_range", "flussonic_no
 TS_FORM_ALIASES = {"xc-path": "path", "xc-path-sec": "path_sec", "xc-php": "php", "flussonic-range": "flussonic_range",
                    "flussonic-abs": "timeshift_abs", "flussonic-kodi": "timeshift_rel"}
 TS_LOG_MAX = 50
+CONN_LOG_MAX = 500
+TS_FAULT_KEYS = ("strip_rai", "pts_offset", "inline_jump_after", "psi_every_s", "pmt_change_after", "pad_bps")
 CLAMP_SNAPSHOT_S = 5  # U-S9: the written length is re-read at most every 5 s (a panel writing its archive in chunks)
 EVENT_MAX_SEGMENTS = 5400  # an EVENT playlist lists at most 3 h of 2 s segments
 SPLASH = b"<html><head><title>Subscription</title></head><body><h1>Your subscription has expired</h1></body></html>"
@@ -99,6 +109,85 @@ SPLASH = b"<html><head><title>Subscription</title></head><body><h1>Your subscrip
 
 MOD33 = 1 << 33
 JUMP_90K = 5 * 90000  # reconnect_mode=jump: forward timestamp jump
+NULL_PKT = b"\x47\x1f\xff\x10" + b"\xff" * 184
+AUDIO_STREAM_TYPES = {0x03, 0x04, 0x0F, 0x11, 0x81, 0x87, 0x06, 0x82, 0x83, 0x84, 0x85, 0x86}
+
+
+def crc32_mpeg(data):
+    """CRC-32/MPEG-2 (poly 0x04C11DB7, init 0xFFFFFFFF, no reflection, no final xor) of a PSI section."""
+    crc = 0xFFFFFFFF
+    for byte in data:
+        crc ^= byte << 24
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x04C11DB7) & 0xFFFFFFFF if crc & 0x80000000 else (crc << 1) & 0xFFFFFFFF
+    return crc
+
+
+def psi_section(table_id, id_field, version, body):
+    """A long-form PSI section (section_syntax_indicator 1, one section, current_next 1) with its CRC."""
+    n = 5 + len(body) + 4
+    sec = bytes([table_id, 0xB0 | (n >> 8), n & 0xFF, id_field >> 8, id_field & 0xFF, 0xC1 | ((version & 31) << 1), 0, 0]) + body
+    return sec + crc32_mpeg(sec).to_bytes(4, "big")
+
+
+def psi_packet(pid, cc, section):
+    assert len(section) <= 183
+    return bytes([0x47, 0x40 | (pid >> 8), pid & 0xFF, 0x10 | (cc & 15), 0]) + section + b"\xff" * (183 - len(section))
+
+
+class Psi:
+    """The clip's PAT and PMT (single-packet sections), enough to regenerate them with another version / audio PID."""
+
+    def __init__(self, data):
+        self.ok = False
+        n = len(data) // PKT
+        pat = pmt = None
+        pmt_pid = None
+        for i in range(n):
+            o = i * PKT
+            if data[o] != 0x47 or not data[o + 1] & 0x40:
+                continue
+            pid = ((data[o + 1] & 0x1F) << 8) | data[o + 2]
+            afc = (data[o + 3] >> 4) & 3
+            if not afc & 1:
+                continue
+            p = o + 4 + (1 + data[o + 4] if afc & 2 else 0)
+            sec = data[p + 1 + data[p]:o + PKT]
+            if pid == 0 and pat is None and sec[:1] == b"\x00":
+                pat = sec
+                for k in range(8, 3 + (((sec[1] & 15) << 8) | sec[2]) - 4, 4):
+                    if (sec[k] << 8 | sec[k + 1]) != 0:
+                        self.program, pmt_pid = sec[k] << 8 | sec[k + 1], ((sec[k + 2] & 0x1F) << 8) | sec[k + 3]
+                        break
+                self.ts_id = sec[3] << 8 | sec[4]
+            elif pmt_pid is not None and pid == pmt_pid and pmt is None and sec[:1] == b"\x02":
+                pmt = sec
+            if pat is not None and pmt is not None:
+                break
+        if pat is None or pmt is None or pmt_pid is None:
+            return
+        self.pmt_pid, self.version = pmt_pid, (pmt[5] >> 1) & 31
+        self.pcr_pid = ((pmt[8] & 0x1F) << 8) | pmt[9]
+        pil = ((pmt[10] & 15) << 8) | pmt[11]
+        self.prog_desc = bytes(pmt[12:12 + pil])
+        end, k, self.streams = 3 + (((pmt[1] & 15) << 8) | pmt[2]) - 4, 12 + pil, []
+        while k + 5 <= end:
+            el = ((pmt[k + 3] & 15) << 8) | pmt[k + 4]
+            self.streams.append((pmt[k], ((pmt[k + 1] & 0x1F) << 8) | pmt[k + 2], bytes(pmt[k + 5:k + 5 + el])))
+            k += 5 + el
+        self.audio_pid = next((pid for t, pid, _ in self.streams if t in AUDIO_STREAM_TYPES), None)
+        self.ok = True
+
+    def pat(self):
+        return psi_section(0, self.ts_id, 0, bytes([self.program >> 8, self.program & 0xFF, 0xE0 | (self.pmt_pid >> 8), self.pmt_pid & 0xFF]))
+
+    def pmt(self, version, pidmap=None):
+        pidmap = pidmap or {}
+        body = bytes([0xE0 | (self.pcr_pid >> 8), self.pcr_pid & 0xFF, 0xF0 | (len(self.prog_desc) >> 8), len(self.prog_desc) & 0xFF]) + self.prog_desc
+        for t, pid, desc in self.streams:
+            pid = pidmap.get(pid, pid)
+            body += bytes([t, 0xE0 | (pid >> 8), pid & 0xFF, 0xF0 | (len(desc) >> 8), len(desc) & 0xFF]) + desc
+        return psi_section(2, self.program, version, body)
 
 
 def _get_ts(b, i):
@@ -267,17 +356,34 @@ class LoopedTs:
 
 
 class TsState:
-    """Where a live connection is in the looped clip: byte position, timestamp offset (90 kHz) and per-PID CC."""
+    """Where a live connection is in the looped clip: byte position, timestamp offset (90 kHz) and per-PID CC.
+
+    off is the loop/reconnect offset; shift is the constant pts_offset shift; pts_x / pcr_x are the inline-jump steps
+    (the PCR one lags the PTS one: it starts at the first PCR packet after the first stepped PTS packet)."""
 
     def __init__(self, pos=0, off=0, cc=None):
         self.pos, self.off, self.cc = pos, off, dict(cc or {})
+        self.shift = self.pts_x = self.pcr_x = self.pcr_pend = 0
+        self.pcr_wait = self.pts_seen = False
+        self.psi_cc = {}
+
+    def inherit(self, last):
+        self.shift, self.pts_x, self.pcr_x, self.pcr_pend = last.shift, last.pts_x, last.pcr_x, last.pcr_pend
+        self.pcr_wait, self.pts_seen, self.psi_cc = last.pcr_wait, last.pts_seen, dict(last.psi_cc)
+        return self
+
+    def step(self, ticks):
+        """Inline jump: PTS/DTS step now, PCR after the first stepped PTS packet (PTS before PCR in byte order)."""
+        self.pts_x = (self.pts_x + ticks) % MOD33
+        self.pcr_pend, self.pcr_wait, self.pts_seen = ticks % MOD33, True, False
 
     def emit(self, plan, data, pos, e):
         """Return data[pos:e] (packet aligned) with timestamps and CCs rewritten for this state."""
         if not plan.active:
             return data[pos:e]
         buf = bytearray(data[pos:e])
-        pk, ccs, off = plan.pkts, self.cc, self.off
+        pk, ccs = plan.pkts, self.cc
+        base = (self.off + self.shift) % MOD33
         for k, i in enumerate(range(pos // PKT, e // PKT)):
             ent = pk[i]
             if ent is None:
@@ -294,14 +400,98 @@ class TsState:
             else:
                 cc, ccs[pid] = (nxt - 1) & 15, nxt
             buf[b + 3] = (buf[b + 3] & 0xF0) | cc
-            if off:
-                if pcr >= 0:
-                    _put_pcr_base(buf, b + pcr, (_get_pcr_base(buf, b + pcr) + off) % MOD33)
-                if pts >= 0:
-                    _put_ts(buf, b + pts, (_get_ts(buf, b + pts) + off) % MOD33)
+            if pcr >= 0:
+                if self.pcr_wait and self.pts_seen:
+                    self.pcr_x, self.pcr_wait = (self.pcr_x + self.pcr_pend) % MOD33, False
+                po = (base + self.pcr_x) % MOD33
+                if po:
+                    _put_pcr_base(buf, b + pcr, (_get_pcr_base(buf, b + pcr) + po) % MOD33)
+            if pts >= 0:
+                if self.pcr_wait:
+                    self.pts_seen = True
+                po = (base + self.pts_x) % MOD33
+                if po:
+                    _put_ts(buf, b + pts, (_get_ts(buf, b + pts) + po) % MOD33)
                     if dts >= 0:
-                        _put_ts(buf, b + dts, (_get_ts(buf, b + dts) + off) % MOD33)
+                        _put_ts(buf, b + dts, (_get_ts(buf, b + dts) + po) % MOD33)
         return buf
+
+
+class Shaper:
+    """Per-connection live-TS shaping (M6 §17.5): strip_rai, psi_every_s, pmt_change_after, pad_bps.
+
+    process() runs on each emitted chunk (a whole number of packets). media_t is the media time of the chunk start
+    (clip bytes consumed / rate), so the cadence is the same paced or unpaced. With every key off, active is False and
+    the generator's output is untouched."""
+
+    def __init__(self, f, clip, rate):
+        self.rai = bool(f.get("strip_rai"))
+        self.psi_every = float(f.get("psi_every_s") or 0)
+        pa = f.get("pmt_change_after")
+        self.pmt_after = None if pa is None or pa is False else float(pa)
+        self.pad_bps = float(f.get("pad_bps") or 0)
+        self.rate = rate
+        self.psi = clip.psi() if (self.psi_every or self.pmt_after is not None) else None
+        if self.psi is not None and not self.psi.ok:
+            self.psi = None  # the clip has no PAT/PMT (null fallback): nothing to repeat or change
+        self.version = self.psi.version if self.psi else 0
+        self.pidmap, self.changed, self.next_psi, self.pad_acc = {}, False, 0.0, 0.0
+        self.active = bool(self.rai or self.psi or self.pad_bps)
+        self.new_audio = None
+        if self.psi and self.psi.audio_pid is not None:
+            used = {p for _, p, _ in self.psi.streams} | {self.psi.pmt_pid, 0}
+            cand = self.psi.audio_pid + 0x10
+            while cand in used:
+                cand += 1
+            self.new_audio = cand
+
+    def _emit_psi(self, out, st, with_pat=True):
+        psi = self.psi
+        for pid, sec in ((0, psi.pat() if with_pat else None), (psi.pmt_pid, psi.pmt(self.version, self.pidmap))):
+            if sec is None:
+                continue
+            cc = st.psi_cc.get(pid, 0)
+            st.psi_cc[pid] = (cc + 1) & 15
+            out += psi_packet(pid, cc, sec)
+
+    def process(self, buf, media_t, st, content_bytes):
+        out = bytearray()
+        psi = self.psi
+        if psi:
+            if self.pmt_after is not None and not self.changed and media_t >= self.pmt_after and self.new_audio is not None:
+                self.changed = True
+                self.version = (self.version + 1) & 31
+                self.pidmap = {psi.audio_pid: self.new_audio}
+                self._emit_psi(out, st)  # the new PMT precedes every packet of the new PID
+            due = bool(self.psi_every) and media_t >= self.next_psi
+            if due and not out:
+                self._emit_psi(out, st)
+            if due:
+                while self.next_psi <= media_t:
+                    self.next_psi += self.psi_every
+        drop_psi = bool(psi and self.psi_every)
+        rewrite = bool(psi and self.pidmap)
+        for o in range(0, len(buf), PKT):
+            pid = ((buf[o + 1] & 0x1F) << 8) | buf[o + 2]
+            if psi and (pid == 0 or pid == psi.pmt_pid) and buf[o + 1] & 0x40:
+                if drop_psi:
+                    continue
+                if pid == psi.pmt_pid:  # keep the clip's cadence, but with the current version / PID map
+                    out += psi_packet(pid, buf[o + 3] & 15, psi.pmt(self.version, self.pidmap))
+                    continue
+            pkt = bytearray(buf[o:o + PKT])
+            if rewrite and pid in self.pidmap:
+                np_ = self.pidmap[pid]
+                pkt[1], pkt[2] = (pkt[1] & 0xE0) | (np_ >> 8), np_ & 0xFF
+            if self.rai and (pkt[3] >> 4) & 2 and pkt[4] >= 1:
+                pkt[5] &= ~0x40 & 0xFF
+            out += pkt
+        if self.pad_bps and self.rate:
+            self.pad_acc += content_bytes * self.pad_bps / self.rate
+            n = int(self.pad_acc // PKT)
+            self.pad_acc -= n * PKT
+            out += NULL_PKT * n
+        return out
 
 
 class Clip:
@@ -310,6 +500,12 @@ class Clip:
         self.rate = len(data) / duration  # bytes/sec
         self.plan = TsPlan(data)
         self._seg_plans = {}
+        self._psi = None
+
+    def psi(self):
+        if self._psi is None:
+            self._psi = Psi(self.data)
+        return self._psi
 
     def seg_plan(self, i):
         """TsPlan of HLS segment i (continuous-timestamp segments, /tseg/ and the multi live HLS)."""
@@ -586,8 +782,11 @@ class Slot:
     def __init__(self, user, sid, linger, hls=False):
         self.user, self.sid, self.linger, self.hls = user, sid, linger, hls
         self.closed_at = None
-        self.last_seen = time.monotonic()
+        self.last_seen = self.opened = time.monotonic()
         self.killed = False
+        self.kill_reason = None
+        self.occupier = None   # /admin/occupy: None | "hold" | "kick_oldest" (the latter is evictable by a client open)
+        self.entry = None      # its connection-log row
 
 
 class Registry:
@@ -629,6 +828,38 @@ class Registry:
             self.max_open_seen = max(self.max_open_seen, sum(1 for x in self.slots if not x.hls and x.closed_at is None))
             return s
 
+    def occupy(self, user, sid, maxc, mode, hls_timeout):
+        """Another device takes a slot of [user]. hold: only if one is free. kick_oldest: closes the oldest open
+        connection first when the user is full. Returns (slot|None, kicked slot|None)."""
+        now = time.monotonic()
+        with self.lock:
+            self._purge(now, hls_timeout)
+            mine = [s for s in self.slots if s.user == user]
+            kicked = None
+            if len(mine) >= maxc:
+                if mode != "kick_oldest":
+                    return None, None
+                live = sorted((s for s in mine if s.closed_at is None and not s.hls), key=lambda s: s.opened)
+                victim = live[0] if live else min(mine, key=lambda s: s.opened)
+                victim.killed, victim.kill_reason = True, "kicked_by_occupy"
+                self.slots.remove(victim)  # the slot is free at once; its handler notices `killed` and stops
+                kicked = victim
+            slot = Slot(user, sid, 0)
+            slot.occupier = mode
+            self.slots.append(slot)
+            return slot, kicked
+
+    def evict_occupier(self, user):
+        """A client open found [user] full: an occupier taken in kick_oldest mode loses its slot (ping-pong)."""
+        with self.lock:
+            cand = sorted((s for s in self.slots if s.user == user and s.occupier == "kick_oldest" and s.closed_at is None),
+                          key=lambda s: s.opened)
+            if not cand:
+                return None
+            cand[0].killed, cand[0].kill_reason = True, "kicked_by_client_open"
+            self.slots.remove(cand[0])
+            return cand[0]
+
     def touch(self, user, sid):
         with self.lock:
             for s in self.slots:
@@ -659,6 +890,26 @@ def check_reject_forms(v):
             raise ValueError(f"timeshift_reject_forms[{k!r}]: status must be an HTTP code, '200-html' or '200-empty'")
 
 
+def check_ts_faults(t):
+    """Validate the M6 live-TS shaping faults (null deletes the key)."""
+    def num(k, lo, hi=None, lo_open=False):
+        v = t.get(k)
+        if v is None:
+            return
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v < lo or (lo_open and v == lo) or (hi is not None and v >= hi):
+            raise ValueError(f"{k} must be a number {'>' if lo_open else '>='} {lo}" + (f" and < {hi}" if hi else ""))
+    if t.get("strip_rai") is not None and not isinstance(t["strip_rai"], bool):
+        raise ValueError("strip_rai must be true or false")
+    num("pts_offset", 0, MOD33)
+    num("psi_every_s", 0, lo_open=True)
+    num("pmt_change_after", 0)
+    num("pad_bps", 0)
+    ij = t.get("inline_jump_after")
+    if ij is not None and not (isinstance(ij, (list, tuple)) and len(ij) == 2 and all(
+            isinstance(x, (int, float)) and not isinstance(x, bool) for x in ij) and ij[0] >= 0):
+        raise ValueError("inline_jump_after must be [seconds >= 0, milliseconds]")
+
+
 def deep_merge_faults(dst, src):
     for k, v in src.items():
         if v is None:
@@ -685,6 +936,7 @@ class Panel:
         self.event_anchor = {}  # timeshift_rel EVENT playlists: (sid, path) -> fixed start (unix s)
         self.subs = load_srt(os.path.join(HERE, "multi_subs.srt"))
         self.holds = []        # M5: /admin/hold_connection slots (I-M5-6)
+        self.occupiers = []    # M6: /admin/occupy slots (another device on the account)
         self.update_apks = {}  # M5: name -> APK bytes (POST /admin/update_apk, or --update-apk-dir)
         self.update_seed = load_update_key(update_key)
         self.reset_stats()
@@ -695,8 +947,29 @@ class Panel:
         self.stats = {"dns_queries": 0, "requests": 0, "stream_opens": 0, "rejections": {}, "range_requests_seen": 0,
                       "range_requests": [], "auth_failures": 0, "redirects": 0, "token_expired": 0,
                       "forced_closes": 0, "client_eof": 0, "stalls": 0, "timeshift_tz_warnings": 0, "request_log": [], "stream_requests": 0,
-                      "timeshift_requests": [], "timeshift_request_count": 0}
+                      "timeshift_requests": [], "timeshift_request_count": 0,
+                      "connection_log": [], "connection_seq": 0}
         self.registry.max_open_seen = 0
+
+    def conn_open(self, kind, user, sid, path, rejected=False, reason=None):
+        """Append a row to the connection log (stats.connection_log, last CONN_LOG_MAX rows) and return it."""
+        now = time.time()
+        with self.lock:
+            self.stats["connection_seq"] += 1
+            e = {"id": self.stats["connection_seq"], "kind": kind, "user": user, "stream": str(sid), "path": path,
+                 "open_unix": now, "close_unix": now if rejected else None, "bytes": 0, "close_reason": reason if rejected else None,
+                 "rejected": rejected}
+            self.stats["connection_log"] = (self.stats["connection_log"] + [e])[-CONN_LOG_MAX:]
+        return e
+
+    def conn_close(self, e, reason, nbytes=None):
+        if e is None:
+            return
+        with self.lock:
+            if e["close_unix"] is None:
+                e["close_unix"], e["close_reason"] = time.time(), reason
+                if nbytes is not None:
+                    e["bytes"] = nbytes
 
     def syn(self):
         """The synthetic lineup helper for the current config, or None when synthetic mode is off."""
@@ -750,6 +1023,15 @@ class Panel:
                     return v
         return None
 
+    def release_occupiers(self, user=None):
+        with self.lock:
+            gone = [s for s in self.occupiers if user is None or s.user == user]
+            self.occupiers = [s for s in self.occupiers if s not in gone]
+        for s in gone:
+            self.registry.close(s)
+            self.conn_close(s.entry, "released")
+        return len(gone)
+
     def update_config(self, patch):
         unknown = [k for k in patch if k not in DEFAULTS]
         if unknown:
@@ -780,6 +1062,8 @@ class Panel:
         for table in [patch.get("faults") or {}] + list((patch.get("stream_faults") or {}).values()):
             if isinstance(table, dict) and table.get("timeshift_reject_forms") is not None:
                 check_reject_forms(table["timeshift_reject_forms"])
+            if isinstance(table, dict):
+                check_ts_faults(table)
         with self.lock:
             for k, v in patch.items():
                 if k in ("faults", "stream_faults"):
@@ -817,6 +1101,7 @@ class Panel:
         self.registry.kill_all()
         self.registry.slots = []
         self.holds = []
+        self.occupiers = []
         self.reset_stats()
 
     # ---- M5: update manifest (docs/design/m5-setup-settings.md §3.12.1, §6.4)
@@ -967,6 +1252,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def route(self):
         self._status, self._bytes, self._notes, self._user = 0, 0, [], None
         self._end, self._log_entry, self._ts_entry, self._token_exp = None, None, None, None
+        self._conn = None
         self.panel.bump("requests")
         u = urllib.parse.urlsplit(self.path)
         self.path_only = urllib.parse.unquote(u.path)
@@ -1040,6 +1326,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def out(self, data):
         self.wfile.write(data)
         self._bytes += len(data)
+        if self._conn is not None:
+            self._conn["bytes"] = self._bytes
 
     def mark_end(self, reason):
         """Record why the stream ended (first reason wins); client_eof also bumps the counter."""
@@ -1187,7 +1475,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 p.log(f"ADMIN config updated: {json.dumps(data)}")
             return self.json(p.cfg)
         if path == "/admin/stats":
-            s = copy.deepcopy(p.stats)
+            with p.lock:
+                s = copy.deepcopy(p.stats)
             s["connections"] = p.registry.counts(p.cfg["username"], p.cfg["hls_timeout"])
             s["connections"]["max_open_seen"] = p.registry.max_open_seen
             syn = p.syn()
@@ -1217,6 +1506,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             with p.lock:
                 p.holds.append(slot)
             return self.json({"held": True, "holds": len(p.holds)})
+        if path == "/admin/occupy":
+            return self.admin_occupy()
+        if path == "/admin/release_occupy" and self.command != "GET":
+            return self.json({"released": p.release_occupiers(self.q.get("user"))})
         if path == "/admin/release_holds" and self.command != "GET":
             with p.lock:
                 holds, p.holds = p.holds, []
@@ -1239,6 +1532,34 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/admin/faults":
             return self.json({"documented_fault_keys": FAULT_DOC, "global": p.cfg["faults"], "per_stream": p.cfg["stream_faults"]})
         self.json({"error": "unknown admin endpoint"}, 404)
+
+    def admin_occupy(self):
+        """/admin/occupy?user=&sid=&mode=hold|kick_oldest|release: another device on the account (M6 §17.5).
+
+        hold: takes a free slot of `user` (default: the panel user) and keeps it until released; 409 when none is free.
+        kick_oldest: when `user` is full, closes the oldest open connection and takes its slot; that occupier is in turn
+        evicted by the next client open that finds the panel full (so a ping-pong needs a second occupy call).
+        release: frees every occupier slot of `user` (also POST /admin/release_occupy)."""
+        p, c = self.panel, self.panel.cfg
+        user = self.q.get("user") or c["username"]
+        sid = self.q.get("sid", "0")
+        mode = self.q.get("mode", "hold")
+        if mode == "release":
+            return self.json({"released": p.release_occupiers(user)})
+        if mode not in ("hold", "kick_oldest"):
+            return self.json({"error": "mode must be hold, kick_oldest or release"}, 400)
+        slot, kicked = p.registry.occupy(user, sid, c["max_connections"], mode, c["hls_timeout"])
+        if slot is None:
+            e = p.conn_open("occupier", user, sid, self.path_only, rejected=True, reason="rejected_no_free_slot")
+            return self.json({"occupied": False, "reason": "no free slot"}, 409)
+        slot.entry = p.conn_open("occupier", user, sid, self.path_only)
+        with p.lock:
+            p.occupiers.append(slot)
+        if kicked is not None:
+            p.conn_close(kicked.entry, "kicked_by_occupy")
+            p.log(f"OCCUPY {mode} user={user}: kicked the oldest connection (stream {kicked.sid})")
+        return self.json({"occupied": True, "mode": mode, "kicked": None if kicked is None else {"stream": str(kicked.sid)},
+                          "occupiers": len(p.occupiers)})
 
     def admin_expect(self, data):
         """POST /admin/timeshift_expect {start_unix, channel?, padding_before?, apply_correction?, strict?}: the archive
@@ -1610,8 +1931,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             p.registry.touch(user, sid)
             return self.multi_segment(clip, sid, sub[2], int(sub[3] or 0))
         hls = hls or bool(sub)
-        slot = p.registry.acquire(user, sid, c["max_connections"], float(f.get("linger") or 0), c["hls_timeout"], hls=(kind == "live" and hls))
+        is_hls = kind == "live" and hls
+        slot = p.registry.acquire(user, sid, c["max_connections"], float(f.get("linger") or 0), c["hls_timeout"], hls=is_hls)
+        if slot is None and not is_hls:
+            ev = p.registry.evict_occupier(user)  # a kick_oldest occupier loses its slot to this open (ping-pong)
+            if ev is not None:
+                p.conn_close(ev.entry, "kicked_by_client_open")
+                with p.lock:
+                    p.occupiers = [o for o in p.occupiers if o is not ev]
+                slot = p.registry.acquire(user, sid, c["max_connections"], float(f.get("linger") or 0), c["hls_timeout"])
         if slot is None:
+            if not is_hls:
+                p.conn_open("stream", user, sid, path, rejected=True, reason="rejected_max_connections")
             st = f.get("linger_status", 403)
             if st == "close":  # connect then close immediately
                 self.begin_stream(200, "video/mp2t")
@@ -1620,6 +1951,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             return self.reject(int(st), "max_connections")
         p.bump("stream_opens")
+        if not slot.hls:
+            self._conn = p.conn_open("stream", user, sid, path)
         try:
             if f.get("stall"):
                 p.bump("stalls")
@@ -1687,6 +2020,9 @@ class Handler(http.server.BaseHTTPRequestHandler):
         finally:
             if not slot.hls:
                 p.registry.close(slot)
+                if slot.killed:
+                    self.mark_end(slot.kill_reason or "kicked")
+                p.conn_close(self._conn, self._end or ("server_stop" if p.stopping.is_set() else "server_close"), self._bytes)
 
     def known(self, kind, i):
         if kind in ("live", "timeshift"):
@@ -1760,9 +2096,13 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif mode == "reset":
             st = TsState()                                              # clip start, timestamps back at 0
         elif mode == "jump":
-            st = TsState(last.pos, (last.off + JUMP_90K) % MOD33, last.cc)  # forward timestamp jump
+            st = TsState(last.pos, (last.off + JUMP_90K) % MOD33, last.cc).inherit(last)  # forward timestamp jump
         else:
-            st = TsState(last.pos, last.off, last.cc)                   # as if nothing happened
+            st = TsState(last.pos, last.off, last.cc).inherit(last)     # as if nothing happened
+        po = f.get("pts_offset")
+        st.shift = 0 if po is None else (int(po) - getattr(plan, "first_pts", 0)) % MOD33   # M6: the clip's lowest PTS starts at pts_offset
+        ij = f.get("inline_jump_after")
+        jump_at, jump_ms = (float(ij[0]), float(ij[1])) if isinstance(ij, (list, tuple)) and len(ij) == 2 else (None, 0.0)
         self._notes.append(f"start@{st.pos}+{st.off}/{mode}")
         slow = float(f.get("slow") or 0)
         rate = slow or clip.rate
@@ -1774,6 +2114,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         stall_at, stall_for = (float(sa[0]), float(sa[1])) if isinstance(sa, (list, tuple)) and len(sa) == 2 else (None, 0.0)
         t0, sent = time.monotonic(), 0
         t_pace = t0  # pacing clock; shifted forward by a stall_after window so playback resumes at real-time speed
+        shaper = Shaper(f, clip, rate)
+        consumed = 0  # clip bytes emitted on this connection: media time = consumed / rate
         try:
             while not p.stopping.is_set() and not slot.killed:
                 if self.peer_closed() or self.token_dead(f):
@@ -1798,8 +2140,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     t_pace += time.monotonic() - now
                     continue
                 e = min(st.pos + chunk, n)
-                self.out(st.emit(plan, data, st.pos, e))
+                media_t = consumed / rate
+                if jump_at is not None and media_t >= jump_at:
+                    jump_at = None
+                    st.step(int(round(jump_ms * 90)))
+                    self._notes.append(f"INLINE-JUMP {jump_ms:g}ms at {media_t:.2f}s")
+                buf = st.emit(plan, data, st.pos, e)
+                if shaper.active:
+                    buf = shaper.process(buf, media_t, st, e - st.pos)
+                self.out(buf)
                 sent += e - st.pos
+                consumed += e - st.pos
                 if e == n:
                     st.pos = 0
                     st.off = (st.off + plan.dur90k) % MOD33 if plan.active else 0

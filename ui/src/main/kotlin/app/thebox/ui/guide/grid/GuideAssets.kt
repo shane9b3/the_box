@@ -21,7 +21,11 @@ import kotlin.math.roundToInt
  *   with σ = 15, CSS `0 12px 30px`), drawn as a nine-slice so long cells keep round corners; [shadowInset] is the
  *   slice inset (margin + radius).
  * - [GuideAsset.NOW_GLOW]: a horizontal Gaussian strip (CSS `box-shadow: 0 0 12px`), stretched vertically.
- * - [GuideAsset.ARCHIVE_GLYPH] / [GuideAsset.ARCHIVE_GLYPH_HOLLOW]: ↺ (stroke / outlined stroke), 2× oversampled.
+ * - [GuideAsset.ARCHIVE_GLYPH] / [GuideAsset.ARCHIVE_GLYPH_HOLLOW]: ↺ (stroke / outlined stroke), 2× oversampled at
+ *   the label column's 20 design px (decision 2026-10-19); the in-cell 12 px ↺ is drawn from the same mask.
+ * - [GuideAsset.EDGE_CHEVRON] / [GuideAsset.CLIP_CHEVRON] (decision 2026-10-19): a left-pointing chevron rasterised at
+ *   its drawn size, 12 × 24 design px: polyline (9.5, 2.5) → (2.5, 12) → (9.5, 21.5) in a 12 × 24 viewport, stroke 3,
+ *   round caps and joins. Both entries share one mask; the renderer tints them (accent / the focused title's colour).
  * - [GuideAsset.LOCK_GLYPH]: a padlock, 2× oversampled.
  *
  * Built lazily on first use at [scale]; a scale change needs a new instance. Total < 50 KB at 1080p.
@@ -47,6 +51,8 @@ class GuideAssets(private val scale: Float) {
             GuideAsset.ARCHIVE_GLYPH -> archive(hollow = false)
             GuideAsset.ARCHIVE_GLYPH_HOLLOW -> archive(hollow = true)
             GuideAsset.LOCK_GLYPH -> lock()
+            GuideAsset.EDGE_CHEVRON -> chevron()
+            GuideAsset.CLIP_CHEVRON -> bitmap(GuideAsset.EDGE_CHEVRON)
         }
         bitmaps[asset.ordinal] = b
         return b
@@ -77,7 +83,7 @@ class GuideAssets(private val scale: Float) {
     }
 
     private fun archive(hollow: Boolean): Bitmap {
-        val n = maxOf(8, ceil(GLYPH * scale * 2).toInt())
+        val n = maxOf(8, ceil(ARCHIVE_GLYPH * scale * 2).toInt())
         val bmp = Bitmap.createBitmap(n, n, Bitmap.Config.ALPHA_8)
         val c = Canvas(bmp)
         val k = n / 24f // draw on a 24-unit grid
@@ -94,6 +100,23 @@ class GuideAssets(private val scale: Float) {
             p.xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
             c.drawPath(path, p)
         }
+        return bmp
+    }
+
+    /** Left-pointing chevron mask at its drawn size (1:1, no resampling at the snapped 12 × 24 × scale target). */
+    private fun chevron(): Bitmap {
+        val w = maxOf(3, ceil(CHEVRON_W * scale).toInt())
+        val h = maxOf(6, ceil(CHEVRON_H * scale).toInt())
+        val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8)
+        val c = Canvas(bmp)
+        val kx = w / CHEVRON_W
+        val ky = h / CHEVRON_H
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND; color = -0x1000000
+            strokeWidth = CHEVRON_STROKE * minOf(kx, ky)
+        }
+        val path = Path().apply { moveTo(9.5f * kx, 2.5f * ky); lineTo(2.5f * kx, 12f * ky); lineTo(9.5f * kx, 21.5f * ky) }
+        c.drawPath(path, p)
         return bmp
     }
 
@@ -128,7 +151,13 @@ class GuideAssets(private val scale: Float) {
         const val GLOW_HALF = 12f
         const val GLOW_SIGMA = 5f
         const val GLOW_PEAK = 0.6f
+        /** Lock glyph size (design px). */
         const val GLYPH = 12f
+        /** ↺ mask size: the largest draw, the label column's 20 design px (decision 2026-10-19). */
+        const val ARCHIVE_GLYPH = 20f
+        const val CHEVRON_W = 12f
+        const val CHEVRON_H = 24f
+        const val CHEVRON_STROKE = 3f
 
         private fun roundRectCoverage(x: Float, y: Float, r: RectF, rad: Float): Float {
             if (x < r.left || x > r.right || y < r.top || y > r.bottom) return 0f

@@ -36,7 +36,15 @@ const val SETTINGS_MENU_OPTION_TAG = "settings_menu_option:"
  * never a Dialog.
  */
 @Composable
-fun ConfirmCard(state: ConfirmState, modifier: Modifier = Modifier) {
+fun ConfirmCard(state: ConfirmState, modifier: Modifier = Modifier) =
+    ConfirmCardView(state.spec.title, state.spec.body, listOf(state.spec.confirmLabel, state.spec.cancelLabel), state.focused, modifier)
+
+/**
+ * The confirm card's look without a [ConfirmState] (the channel editor's confirms, docs/design/m6-channel-editor.md
+ * §2.2): [buttons] left to right, [focused] the focused one's index. Centred in [modifier]'s bounds.
+ */
+@Composable
+fun ConfirmCardView(title: String, body: String, buttons: List<String>, focused: Int, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(SettingsUi.CARD_RADIUS.dp)
     Box(modifier, contentAlignment = Alignment.Center) {
         Column(
@@ -48,11 +56,10 @@ fun ConfirmCard(state: ConfirmState, modifier: Modifier = Modifier) {
                 .padding(SettingsUi.CARD_PAD.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Line(state.spec.title, SettingsUi.CardTitle, maxLines = 2)
-            Text(state.spec.body, style = SettingsUi.CardBody)
+            Line(title, SettingsUi.CardTitle, maxLines = 2)
+            Text(body, style = SettingsUi.CardBody)
             Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-                CardButton(state.spec.confirmLabel, state.focused == 0, 0)
-                CardButton(state.spec.cancelLabel, state.focused == 1, 1)
+                buttons.forEachIndexed { i, label -> CardButton(label, focused == i, i) }
             }
         }
     }

@@ -53,7 +53,7 @@ fun WelcomeScreen(page: PageModel, cursor: Int, modifier: Modifier = Modifier) {
         Column(Modifier.offset(832.dp, 160.dp).width(1024.dp)) {
             Line(page.title, GuideUi.sans(64, FontWeight.SemiBold))
             page.subtitle?.let {
-                Line(it, GuideUi.sans(21, color = GuideUi.Fg70).merge(TextStyle(lineHeight = (21 * 1.45f).sp)), Modifier.padding(top = 24.dp), maxLines = 3)
+                Line(it, GuideUi.sans(26, color = GuideUi.Fg70).merge(TextStyle(lineHeight = (21 * 1.45f).sp)), Modifier.padding(top = 24.dp), maxLines = 3)
             }
         }
         cards.forEachIndexed { i, row ->
@@ -67,11 +67,11 @@ fun WelcomeScreen(page: PageModel, cursor: Int, modifier: Modifier = Modifier) {
                     .padding(28.dp),
             ) {
                 val text = if (focused) DesignTokens.Colors.Canvas else DesignTokens.Colors.Fg
-                Line(row.label, GuideUi.sans(30, FontWeight.SemiBold, color = text))
-                row.description?.let { Line(it, GuideUi.sans(19, color = text.copy(alpha = 0.7f)), Modifier.padding(top = 14.dp), maxLines = 2) }
+                Line(row.label, GuideUi.sans(36, FontWeight.SemiBold, color = text))
+                row.description?.let { Line(it, GuideUi.sans(24, color = text.copy(alpha = 0.7f)), Modifier.padding(top = 14.dp), maxLines = 2) }
             }
         }
-        note?.let { Line(it.label, GuideUi.sans(17, color = GuideUi.Fg55), Modifier.offset(64.dp, 860.dp)) }
+        note?.let { Line(it.label, GuideUi.sans(22, color = GuideUi.Fg55), Modifier.offset(64.dp, 860.dp)) }
     }
 }
 

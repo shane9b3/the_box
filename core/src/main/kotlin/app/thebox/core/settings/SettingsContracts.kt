@@ -41,6 +41,8 @@ sealed interface SettingsRoute {
     data object Licences : SettingsRoute
     data object Backup : SettingsRoute
     data class RestorePreview(val token: Long) : SettingsRoute
+    /** (owner request 2026-10-18, docs/design/m6-channel-editor.md) The channel editor; [groupKey] focuses that group's channels. */
+    data class ChannelEditor(val playlistId: Long, val groupKey: String? = null) : SettingsRoute
 }
 
 enum class SourceKind { XTREAM, M3U }
@@ -79,7 +81,9 @@ sealed interface RowKind {
     data class Item(val route: SettingsRoute? = null, val primary: String? = null, val menu: List<ChoiceOption> = emptyList(), val movable: Boolean = false, val badges: Set<Badge> = emptySet()) : RowKind
 }
 
-enum class TextHint { URL, USERNAME, PASSWORD, NAME, PATTERN, PASSPHRASE, HEADER, NUMBER }
+enum class TextHint {
+    URL, USERNAME, PASSWORD, NAME, PATTERN, PASSPHRASE, HEADER, NUMBER,
+}
 enum class Tone { NORMAL, GOOD, WARN, BAD }
 enum class Badge { LOCKED, HIDDEN, ADULT, FAILED, NEW, DEFAULT }
 

@@ -15,6 +15,20 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.CompletableDeferred
+import app.thebox.core.guide.GuideLibrary
+import app.thebox.core.refresh.ChannelIdentity
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import app.thebox.core.guide.GuideSourceEntry
+import app.thebox.core.parental.ParentalAccess
+import app.thebox.core.parental.ParentalState
+import app.thebox.core.parental.ParentalPolicy
+import app.thebox.core.parental.RelockReason
+import app.thebox.core.settings.fakes.FakeParentalSession
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -40,7 +54,12 @@ class SearchViewModelTest {
     @Before fun setUp() { Dispatchers.setMain(dispatcher) }
     @After fun tearDown() { Dispatchers.resetMain() }
 
-    private fun TestScope.vm(search: GuideSearch = FakeGuideSearch(listOf(channel)), reminders: FakeReminderBook = FakeReminderBook()) =
+    private fun TestScope.vm(search: GuideSearch = FakeGuideSearch(listOf(channel), listOf(
+        hit(nowMin - 10, nowMin + 20),
+        hit(nowMin - 120, nowMin - 60, inArchive = true),
+        hit(nowMin - 120, nowMin - 60),
+        hit(nowMin + 60, nowMin + 120),
+    )), reminders: FakeReminderBook = FakeReminderBook()) =
         SearchViewModel(search, reminders, FakeGuideLibrary(listOf(channel)), FakeGuideSettings(), FakeGuideSessionStore()) {
             nowMin * 60_000L
         }
@@ -50,6 +69,14 @@ class SearchViewModelTest {
         backgroundScope.launch(dispatcher) { vm.effects.collect { out += it } }
         runCurrent()
         return out
+    }
+
+    /** Actions use the same published snapshot as the screen, including after reopening Search. */
+    private fun TestScope.snapshot(vm: SearchViewModel): SearchResults {
+        vm.onEntered()
+        if (vm.state.value.query.isEmpty()) vm.onQuery("news") else vm.refresh()
+        advanceUntilIdle()
+        return vm.results.value!!
     }
 
     private fun hit(start: Int, end: Int, inArchive: Boolean = false) =
@@ -125,8 +152,8 @@ class SearchViewModelTest {
     fun tuneFromAChannelOrAnOnNowProgrammeClosesTuned() = runTest(dispatcher) {
         val vm = vm()
         val out = effects(vm)
-        vm.onChannel(channel)
-        vm.onProgramme(hit(nowMin - 10, nowMin + 20))
+        vm.onChannel(channel, snapshot(vm))
+        vm.onProgramme(hit(nowMin - 10, nowMin + 20), snapshot(vm))
         runCurrent()
         val closed = SearchEffect.Close(GuideEvent.SearchClosed(channel, tuned = true))
         assertEquals(listOf(SearchEffect.Tune(channel), closed, SearchEffect.Tune(channel), closed), out)
@@ -138,24 +165,24 @@ class SearchViewModelTest {
         val vm = vm(reminders = reminders)
         val out = effects(vm)
         val past = hit(nowMin - 120, nowMin - 60, inArchive = true)
-        vm.onProgramme(past)
+        vm.onProgramme(past, snapshot(vm))
         runCurrent()
         assertEquals(listOf(SearchEffect.PlayArchive(channel, past.info), SearchEffect.Close(GuideEvent.SearchClosed(channel, tuned = true, archive = true))), out)
         out.clear()
         val future = hit(nowMin + 60, nowMin + 120)
-        vm.onProgramme(future)
+        vm.onProgramme(future, snapshot(vm))
         advanceUntilIdle(); runCurrent() // background collectors run on runCurrent
         assertEquals(listOf<SearchEffect>(SearchEffect.Toast(GuideToast.REMINDER_SET_FIRST_TIME)), out)
         assertTrue(vm.hasReminder(future))
-        vm.onProgramme(future)
+        vm.onProgramme(future, snapshot(vm))
         advanceUntilIdle(); runCurrent() // background collectors run on runCurrent
         assertEquals(SearchEffect.Toast(GuideToast.REMINDER_CANCELLED), out.last())
         assertFalse(vm.hasReminder(future))
-        vm.onProgramme(future)
+        vm.onProgramme(future, snapshot(vm))
         advanceUntilIdle(); runCurrent() // background collectors run on runCurrent
         assertEquals("the first-time toast shows once", SearchEffect.Toast(GuideToast.REMINDER_SET), out.last())
         // Past and not in the archive: nothing to play.
-        vm.onProgramme(hit(nowMin - 120, nowMin - 60))
+        vm.onProgramme(hit(nowMin - 120, nowMin - 60), snapshot(vm))
         runCurrent()
         assertEquals(SearchEffect.Toast(GuideToast.NO_CATCHUP), out.last())
     }
@@ -183,12 +210,172 @@ class SearchViewModelTest {
     fun favouriteToggle() = runTest(dispatcher) {
         val vm = vm()
         val out = effects(vm)
-        vm.toggleFavourite(channel)
+        vm.toggleFavourite(channel, snapshot(vm))
         advanceUntilIdle(); runCurrent()
         assertTrue(vm.isFavourite(channel))
         assertEquals(SearchEffect.Toast(GuideToast.ADDED_FAVOURITE, "BBC News"), out.last())
-        vm.toggleFavourite(channel)
+        vm.toggleFavourite(channel, snapshot(vm))
         advanceUntilIdle(); runCurrent()
         assertFalse(vm.isFavourite(channel))
+    }
+
+    @Test
+    fun relockClearsProtectedResultsAndRequeriesTheUnchangedText() = runTest(dispatcher) {
+        val parental = FakeParentalSession(ParentalState(true, true, ParentalPolicy()))
+        val calls = ArrayList<ParentalAccess>()
+        val search = object : GuideSearch {
+            override suspend fun search(query: String, nowMs: Long, access: ParentalAccess): SearchResults {
+                calls += access
+                return SearchResults(query, if (access == ParentalAccess.OPEN) listOf(channel) else emptyList(), emptyList())
+            }
+        }
+        val vm = SearchViewModel(search, FakeReminderBook(), FakeGuideLibrary(listOf(channel)), FakeGuideSettings(), FakeGuideSessionStore(), parental) { nowMin * 60_000L }
+        runCurrent()
+        vm.onQuery("news")
+        advanceUntilIdle()
+        val old = vm.results.value!!
+        assertTrue(vm.isCurrent(old))
+        parental.relock(RelockReason.APP_STOPPED)
+        assertFalse("actions reject the old access even before its collector runs", vm.isCurrent(old))
+        runCurrent()
+        assertNull(vm.results.value)
+        assertEquals("news", vm.state.value.query)
+        advanceUntilIdle()
+        assertTrue(vm.results.value!!.channels.isEmpty())
+        assertEquals(listOf(ParentalAccess.OPEN, ParentalAccess.LOCKED_AUTO), calls)
+        // Returning to Search re-runs even when the query and access are unchanged.
+        vm.onBack()
+        vm.onEntered()
+        advanceUntilIdle()
+        assertEquals(3, calls.size)
+        assertFalse(vm.isCurrent(old))
+    }
+
+    @Test
+    fun aCancelledOpenSearchCannotRepublishAfterRelock() = runTest(dispatcher) {
+        val parental = FakeParentalSession(ParentalState(true, true, ParentalPolicy()))
+        var oldSearchReturned = false
+        val search = object : GuideSearch {
+            override suspend fun search(query: String, nowMs: Long, access: ParentalAccess): SearchResults {
+                if (access == ParentalAccess.OPEN) withContext(NonCancellable) { delay(1_000) }
+                if (access == ParentalAccess.OPEN) oldSearchReturned = true
+                return SearchResults(query, if (access == ParentalAccess.OPEN) listOf(channel) else emptyList(), emptyList())
+            }
+        }
+        val vm = SearchViewModel(search, FakeReminderBook(), FakeGuideLibrary(listOf(channel)), FakeGuideSettings(), FakeGuideSessionStore(), parental) { nowMin * 60_000L }
+        runCurrent()
+        vm.onQuery("news")
+        advanceTimeBy(350)
+        parental.relock(RelockReason.TIMEOUT)
+        runCurrent()
+        advanceTimeBy(350)
+        runCurrent()
+        assertTrue(vm.results.value!!.channels.isEmpty())
+        advanceUntilIdle() // the cancellation-ignoring OPEN result finally returns
+        assertTrue("the stale provider returned despite cancellation", oldSearchReturned)
+        assertTrue(vm.results.value!!.channels.isEmpty())
+        assertFalse(vm.state.value.searching)
+    }
+
+    @Test
+    fun contentAndDebugAccessChangesInvalidateSnapshotsWithoutChangingQuery() = runTest(dispatcher) {
+        val library = FakeGuideLibrary(listOf(channel))
+        val settings = FakeGuideSettings()
+        val content = MutableStateFlow(0L)
+        val search = FakeGuideSearch(listOf(channel))
+        val vm = SearchViewModel(search, FakeReminderBook(), library, settings, FakeGuideSessionStore(), contentChanges = content) { nowMin * 60_000L }
+        runCurrent()
+        vm.onQuery("news")
+        advanceUntilIdle()
+        val old = vm.results.value!!
+        library.tickRowContent()
+        runCurrent()
+        assertNull(vm.results.value)
+        assertFalse(vm.isCurrent(old))
+        advanceUntilIdle()
+        content.value++
+        runCurrent()
+        assertNull(vm.results.value)
+        advanceUntilIdle()
+        settings.update { it.copy(debugUnlocked = true) }
+        runCurrent()
+        assertNull(vm.results.value)
+        advanceUntilIdle()
+        assertEquals(listOf("news", "news", "news", "news"), search.queries)
+    }
+
+    @Test
+    fun relockingDuringFavouriteLookupPreventsMutationAndProtectedNameToast() = runTest(dispatcher) {
+        val parental = FakeParentalSession(ParentalState(true, true, ParentalPolicy()))
+        val base = FakeGuideLibrary(listOf(channel))
+        val lookup = CompletableDeferred<Boolean>()
+        val library = object : GuideLibrary by base {
+            override suspend fun isFavourite(identity: ChannelIdentity): Boolean = lookup.await()
+        }
+        val vm = SearchViewModel(FakeGuideSearch(listOf(channel)), FakeReminderBook(), library, FakeGuideSettings(), FakeGuideSessionStore(), parental) { nowMin * 60_000L }
+        val out = effects(vm)
+        vm.onQuery("news")
+        advanceUntilIdle()
+        val snapshot = vm.results.value!!
+        vm.toggleFavourite(channel, snapshot)
+        runCurrent() // suspended inside the lookup
+        parental.relock(RelockReason.APP_STOPPED)
+        lookup.complete(false)
+        runCurrent()
+        vm.onChannel(channel, snapshot)
+        advanceUntilIdle()
+        assertTrue(base.favourites.isEmpty())
+        assertTrue("neither tune nor stale protected-name toast is emitted", out.isEmpty())
+    }
+
+    @Test
+    fun actionsRejectItemsThatAreNotMembersOfThePublishedSnapshot() = runTest(dispatcher) {
+        val vm = vm()
+        val out = effects(vm)
+        val results = snapshot(vm)
+        val absent = GuideFixtures.channel(99, name = "Hidden channel")
+        vm.onChannel(absent, results)
+        vm.toggleFavourite(absent, results)
+        vm.onProgramme(hit(nowMin + 200, nowMin + 300), results)
+        advanceUntilIdle()
+        assertTrue(out.isEmpty())
+        assertFalse(vm.isFavourite(absent))
+    }
+
+    @Test
+    fun contentSubscriptionsExistOnlyDuringSearchVisitsAndReopenRefreshes() = runTest(dispatcher) {
+        val base = FakeGuideLibrary(listOf(channel))
+        var subscriptions = 0
+        val library = object : GuideLibrary by base {
+            override fun sources(access: ParentalAccess): Flow<List<GuideSourceEntry>> = flow {
+                subscriptions++
+                try { base.sources(access).collect { emit(it) } } finally { subscriptions-- }
+            }
+        }
+        val search = FakeGuideSearch(listOf(channel))
+        val vm = SearchViewModel(search, FakeReminderBook(), library, FakeGuideSettings(), FakeGuideSessionStore()) { nowMin * 60_000L }
+        runCurrent()
+        assertEquals(0, subscriptions)
+        vm.onQuery("news") // typing can activate, as well as composition entry
+        advanceUntilIdle()
+        assertEquals(1, subscriptions)
+        assertEquals(1, search.queries.size)
+        vm.onEntered() // does not restart the already active visit
+        advanceUntilIdle()
+        assertEquals(1, search.queries.size)
+        vm.onLeft()
+        runCurrent()
+        assertEquals(0, subscriptions)
+        assertNull(vm.results.value)
+        base.tickRowContent()
+        advanceUntilIdle()
+        assertEquals(1, search.queries.size)
+        vm.onEntered()
+        advanceUntilIdle()
+        assertEquals(1, subscriptions)
+        assertEquals(listOf("news", "news"), search.queries)
+        vm.onLeft()
+        runCurrent()
+        assertEquals(0, subscriptions)
     }
 }

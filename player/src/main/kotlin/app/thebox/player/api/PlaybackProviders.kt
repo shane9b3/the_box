@@ -45,6 +45,11 @@ data class ChannelPlaybackMemory(
     val knownHdr: Boolean = false,
     /** Last snapped fps × 1000 (AFR pre-switch, §3.9.3). */
     val fpsMilli: Int? = null,
+    /**
+     * Device finding 2026-10-17 (Sony Bravia, MediaTek HEVC): the ladder turned tunneling off for a channel whose tunneled
+     * decoder produced nothing, and the user's next retry tunneled again. Learned bit: this channel plays untunneled.
+     */
+    val tunnelingOff: Boolean = false,
 )
 
 interface ChannelMemory {
@@ -87,6 +92,13 @@ data class PlaybackSettings(
     val resumeAfterStandby: Boolean = true,
     /** Test hook: compresses lifecycle timers in instrumented tests. 1.0 in production. */
     val lifecycleTimeScale: Float = 1.0f,
+    /**
+     * (M6 time-shift, docs/design/m6-timeshift.md §12, lead reconciliation R10) "Pause and rewind", "Keep recording"
+     * and "Protect storage". Read once per live cycle (NEXT_TUNE / LIVE). Defaults mirror `PlaybackPrefs`.
+     */
+    val timeshift: app.thebox.core.settings.TimeshiftLength = app.thebox.core.settings.TimeshiftLength.AUTO,
+    val timeshiftHold: app.thebox.core.settings.TimeshiftHold = app.thebox.core.settings.TimeshiftHold.AUTO,
+    val storageProtection: app.thebox.core.settings.StorageProtection = app.thebox.core.settings.StorageProtection.AUTO,
 )
 
 interface PlaybackSettingsSource {

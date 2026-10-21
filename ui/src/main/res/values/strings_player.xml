@@ -13,12 +13,12 @@
 
     <!-- Info bar (§3.2, §3.9) -->
     <string name="player_info_no_info">No information</string>
-    <string name="player_info_loading">Loading programmes…</string>
+    <string name="player_info_loading">Loading programs…</string>
     <string name="player_info_catchup_ok">Catch-up · press OK</string>
     <string name="player_info_not_in_catchup">Not in catch-up</string>
     <string name="player_info_starts">Starts %1$s</string>
     <string name="player_info_next">Next %1$s · %2$s</string>
-    <string name="player_info_browse_hint">← → channels · ↑ ↓ programmes</string>
+    <string name="player_info_browse_hint">← → channels · ↑ ↓ programs</string>
     <string name="player_glyph_catchup">↺ %1$dd</string>
     <string name="player_glyph_cc">CC</string>
     <string name="player_hdr_hdr10">HDR10</string>
@@ -134,10 +134,79 @@
     <string name="player_notice_buffer">Buffer increased to %1$s s for smoother playback</string>
     <string name="player_notice_buffer_generic">Buffer increased for smoother playback</string>
     <string name="player_notice_live_resumed">Back to live</string>
+    <string name="player_notice_audio_timestamps">No sound: this channel\'s audio timestamps are broken at the provider. Playing the picture only.</string>
     <string name="player_notice_no_audio">No sound: this channel\'s audio can\'t be played here. Press OK, then Audio, to try another track.</string>
 
     <!-- Number entry (§3.10.4, M3 H-L7) -->
     <string name="number_entry_not_found">No channel %1$s</string>
     <string name="number_entry_cd">Channel %1$s</string>
     <string name="number_entry_cd_named">Channel %1$s, %2$s</string>
+    <!-- M6 time-shift commit 0 (docs/design/m6-timeshift.md §13, lead ruling 5): the UX review's strings, verbatim. The
+         viewer never reads "buffer", "segment", "ring" or "live edge". Values (times, sizes, "N min") are arguments. -->
+    <!-- Toasts (PlayerToast); arg order as PlayerText documents. -->
+    <!-- (Fix pass, product, 2026-10-19: UX review S5, S6, S7) A PAUSE_NO_REWIND_* toast is its reason, a space, then its
+         next step (player_toast_two_parts); BACK_TO_LIVE_UNBUFFERED appends the same step once per tune. Settings paths
+         name "Show advanced settings" first when the row is advanced: it is the sections pane's toggle, not a row. -->
+    <string name="player_toast_two_parts">%1$s %2$s</string>
+    <string name="player_reason_cant_rewind">This channel can\'t be rewound, so Play returns to live.</string>
+    <string name="player_step_hls_xtream">It streams as HLS; TS can fix it: Settings → Show advanced settings, then Playlists → %1$s → Stream format.</string>
+    <string name="player_step_hls_m3u">It streams as HLS; ask your provider for TS links.</string>
+    <string name="player_step_format">Its stream isn\'t TS, the format The Box can save; ask your provider for TS links.</string>
+    <string name="player_reason_rewind_off">Rewind is turned off, so Play returns to live.</string>
+    <string name="player_step_rewind_off">To keep your place: Settings → Playback → Pause and rewind.</string>
+    <string name="player_reason_no_space">Not enough free storage to save this channel (%1$s free), so Play returns to live.</string>
+    <string name="player_step_no_space">Free up space or choose a shorter rewind in Settings → Playback.</string>
+    <string name="player_reason_storage">Saving for rewind failed on this device\'s storage, so Play returns to live.</string>
+    <string name="player_step_storage">Change channel and back to try again.</string>
+    <string name="player_toast_back_to_live_unbuffered">Back to live: this channel can\'t be rewound, so the paused part was skipped.</string>
+    <string name="player_toast_rewind_nothing_yet">Nothing to rewind yet: The Box saves this channel from when you tune in, up to %1$s.</string>
+    <string name="player_toast_rewind_start">That\'s as far back as you can go (%1$s, when you tuned in). This channel has no catch-up for earlier.</string>
+    <!-- (Fix pass S8) The oldest saved point is no longer when the viewer tuned in (the window is full, or saving restarted). -->
+    <string name="player_toast_rewind_start_window">That\'s as far back as you can go (%1$s: rewind holds %2$s). This channel has no catch-up for earlier.</string>
+    <string name="player_toast_gap_skipped_paused">Skipped %1$s that weren\'t saved while paused. Now at %2$s.</string>
+    <string name="player_toast_gap_skipped_stream">Skipped %1$s the provider didn\'t send. Now at %2$s.</string>
+    <string name="player_toast_rewind_stopped_storage">Rewind stopped: saving to storage failed. Live TV continues; change channel and back to try again.</string>
+    <string name="player_toast_rewind_stopped_slow">Rewind stopped: this device\'s storage can\'t keep up with this channel. Live TV continues. Try Pause only in Settings → Playback → Pause and rewind.</string>
+    <string name="player_toast_rewind_limited_today">Rewind is shorter for the rest of today to protect this device\'s storage. Pause still works. Change it in Settings → Show advanced settings, then Playback → Protect built-in storage.</string>
+    <string name="player_toast_left_app_cleared">Back to live: leaving The Box clears what was paused. Stay in The Box to keep your place.</string>
+    <string name="player_toast_zap_confirm">Changing channel ends your pause (%1$s saved). Press again to change.</string>
+    <string name="player_toast_zap_confirm_number">Changing channel ends your pause (%1$s saved). Press OK to change.</string>
+    <string name="player_toast_saving_stopped_connection">Saving for rewind stopped: another device is using your provider connection. What was saved still plays; then you\'re back at live.</string>
+    <string name="player_toast_jumped_to_live_restart">The stream had to restart, so you\'re back at live. Rewind saves again from now.</string>
+    <string name="player_toast_pause_tip">Tip: ↑ then OK pauses live TV.</string>
+    <!-- Paused header lines (§11.5). %n$s "Press OK" / "Press OK or ▶" chosen by whether the remote has media keys. -->
+    <string name="player_paused_press_ok">Press OK</string>
+    <string name="player_paused_press_ok_play">Press OK or ▶</string>
+    <string name="player_paused_header_saving">Can stay paused %1$d more min</string>
+    <string name="player_paused_header_full">Saving stopped: rewind holds %1$s. %2$s to continue from where you paused.</string>
+    <string name="player_paused_header_hold_limit">Saving stopped after %1$s to free your provider connection. %2$s to continue from where you paused.</string>
+    <string name="player_paused_header_slot_lost">Saving stopped: another device is using your provider connection. %1$s to continue from where you paused.</string>
+    <string name="player_paused_header_catchup_covers">Can stay paused up to %1$s: catch-up covers the rest.</string>
+    <!-- Dim card (§11.5) -->
+    <string name="player_paused_card_title">Paused · %1$s behind live</string>
+    <string name="player_paused_card_body">Can stay paused %1$d more min · %2$s to continue</string>
+    <string name="player_paused_ok">OK</string>
+    <string name="player_paused_ok_play">OK or ▶</string>
+    <!-- Pills (§11.4) -->
+    <string name="player_pill_paused_behind">PAUSED · %1$s behind</string>
+    <string name="player_pill_behind">%1$s BEHIND</string>
+    <!-- Focused scrub bar hint row (§11.6); the media suffix on devices that reported ⏪/⏩. -->
+    <string name="player_scrub_hint">"◀ ▶ Rewind / forward    OK Pause / play    ▲ Live"</string>
+    <string name="player_scrub_hint_media">" ⏪ ⏩"</string>
+    <!-- Scrub end labels (§11.4) -->
+    <string name="player_scrub_rewind_from">Rewind from %1$s</string>
+    <string name="player_scrub_live_end">LIVE</string>
+    <string name="player_scrub_not_saved">Not saved</string>
+    <!-- Quick bar (§11.3): TIME_SHIFT is labelled "Pause" by WP-C; "Back to live" is player_quick_jump_to_live. -->
+    <string name="player_quick_pause">Pause</string>
+    <!-- (M6 WP-C) Values inside the time-shift toasts and lines (§13). -->
+    <string name="player_arg_minutes">%1$d min</string>
+    <string name="player_arg_seconds">%1$d s</string>
+    <string name="player_arg_hours">%1$d h</string>
+    <string name="player_arg_gb">%1$s GB</string>
+    <string name="player_arg_your_playlist">your playlist</string>
+    <!-- Stats overlay (U-N3) -->
+    <string name="player_stat_rewind">Rewind: %1$s saved of %2$s · %3$s</string>
+    <!-- Error card detail after the saved part played out (§13) -->
+    <string name="player_error_saved_played_out">You\'ve watched everything that was saved before the stream failed.</string>
 </resources>

@@ -46,26 +46,26 @@ fun GridHeaderChips(
     Box(modifier) {
         Chip(
             focused = focusedChip == HeaderChip.GROUP,
-            modifier = Modifier.offset(93.dp, 507.dp).widthIn(max = 184.dp).height(36.dp).testTag(GROUP_CHIP_TAG),
+            modifier = Modifier.offset(93.dp, 507.dp).widthIn(max = 222.dp).height(36.dp).testTag(GROUP_CHIP_TAG),
             fill = ChipFill,
             border = ChipBorder,
             padding = PaddingValues(horizontal = 14.dp, vertical = 0.dp),
         ) { color ->
-            Line(sourceLabel, GuideUi.sans(16, FontWeight.SemiBold, color), Modifier.weight(1f, fill = false))
-            Line("▾", GuideUi.sans(14, color = color))
+            Line(sourceLabel, GuideUi.sans(24, FontWeight.SemiBold, color), Modifier.weight(1f, fill = false))
+            Line("▾", GuideUi.sans(20, color = color))
         }
         Box(Modifier.offset(0.dp, 507.dp).width(1827.dp).height(36.dp), contentAlignment = Alignment.CenterEnd) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (HeaderChip.NOW in chips && nowDirection != 0) {
                     Chip(focusedChip == HeaderChip.NOW, Modifier.height(36.dp), ChipFillOpaque, ChipBorder, padding = PaddingValues(horizontal = 14.dp)) { color ->
                         val label = if (nowDirection < 0) R.string.guide_chip_now_left else R.string.guide_chip_now_right
-                        Line(stringResource(label), GuideUi.sans(16, FontWeight.SemiBold, color))
+                        Line(stringResource(label), GuideUi.sans(22, FontWeight.SemiBold, color))
                     }
                 }
                 if (HeaderChip.DAY in chips) {
                     Chip(focusedChip == HeaderChip.DAY, Modifier.height(36.dp).testTag(DAY_CHIP_TAG), ChipFillOpaque, ChipBorder, padding = PaddingValues(horizontal = 14.dp)) { color ->
-                        Line(dayLabel, GuideUi.sans(16, FontWeight.SemiBold, color))
-                        Line("▾", GuideUi.sans(14, color = color))
+                        Line(dayLabel, GuideUi.sans(22, FontWeight.SemiBold, color))
+                        Line("▾", GuideUi.sans(18, color = color))
                     }
                 }
             }

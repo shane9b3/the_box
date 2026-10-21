@@ -312,10 +312,10 @@
     <string name="setup_fix_title">Fix unmatched channels</string>
     <string name="setup_fix_subtitle">%1$s channels without guide data · most watched first</string>
     <string name="setup_fix_none">Every channel has guide data</string>
-    <string name="setup_fix_divider">Matched, but the guide has no programmes</string>
+    <string name="setup_fix_divider">Matched, but the guide has no programs</string>
     <string name="setup_fix_no_data">No guide data</string>
     <string name="setup_fix_no_data_suggested">No guide data · suggestion %1$s %%</string>
-    <string name="setup_fix_no_programmes">Matched, but the guide has no programmes</string>
+    <string name="setup_fix_no_programmes">Matched, but the guide has no programs</string>
     <string name="setup_fix_picker_subtitle">Choose the guide channel for this channel</string>
     <string name="setup_fix_search">Search guide channels</string>
     <string name="setup_fix_search_hint">A name or id, for example BBC One</string>

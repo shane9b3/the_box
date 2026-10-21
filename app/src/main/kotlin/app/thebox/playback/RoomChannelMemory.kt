@@ -50,6 +50,7 @@ class RoomChannelMemory @Inject constructor(private val prefs: ChannelPrefsRepos
     companion object {
         const val TS_COMPAT_MASK = 0b011
         const val KNOWN_HDR_BIT = 0b100
+        const val TUNNELING_OFF_BIT = 0b1000
 
         fun toMemory(e: ChannelPrefsEntity?): ChannelPlaybackMemory {
             if (e == null) return ChannelPlaybackMemory()
@@ -62,10 +63,12 @@ class RoomChannelMemory @Inject constructor(private val prefs: ChannelPrefsRepos
                 tsCompatLevel = e.playbackFlags and TS_COMPAT_MASK,
                 knownHdr = e.playbackFlags and KNOWN_HDR_BIT != 0,
                 fpsMilli = e.fpsMilli,
+                tunnelingOff = e.playbackFlags and TUNNELING_OFF_BIT != 0,
             )
         }
 
         fun flagsOf(m: ChannelPlaybackMemory): Int =
-            (m.tsCompatLevel.coerceIn(0, TS_COMPAT_MASK) and TS_COMPAT_MASK) or (if (m.knownHdr) KNOWN_HDR_BIT else 0)
+            (m.tsCompatLevel.coerceIn(0, TS_COMPAT_MASK) and TS_COMPAT_MASK) or (if (m.knownHdr) KNOWN_HDR_BIT else 0) or
+                (if (m.tunnelingOff) TUNNELING_OFF_BIT else 0)
     }
 }

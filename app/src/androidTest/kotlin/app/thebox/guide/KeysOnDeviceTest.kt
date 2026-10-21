@@ -29,8 +29,8 @@ import org.junit.runner.RunWith
  * I-4: 30 scripted key sequences through the real key path (KeyEvent → KeyRouter → GuideStateMachine) end in the
  * states the §3.4 tables give (the same tables the JVM `GuideStateMachine` tests are generated from).
  *
- * Every sequence starts at GUIDE/GRID, no overlay, nothing tuned (so the back ladder's "something is tuned" step is
- * out of the way), on row [start] at its on-now cell. Row 0 is synthetic channel 1 (7-day archive); [plainRow] is the
+ * Every sequence starts at GUIDE/GRID, no overlay, nothing tuned (so home is the start row), on row [start] at its
+ * on-now cell. Row 0 is synthetic channel 1 (7-day archive); [plainRow] is the
  * first row whose channel has no archive. Expectations are written against `GuideUiState` (mode/zone/overlay/header)
  * and `GuideFrame.focus` only.
  */
@@ -39,7 +39,11 @@ class KeysOnDeviceTest : GuideTestBase() {
 
     private class Ctx(val ui: GuideUiState, val focus: GridFocus?, val start: GridFocus, val now: Int)
 
-    private class Seq(val name: String, val fromPlainRow: Boolean = false, val keys: GuideTestBase.() -> Unit, val expect: Ctx.() -> String?)
+    /** [fromClippedRow]: start on a catch-up row whose on-now cell begins before the window (decision 2026-10-19). */
+    private class Seq(
+        val name: String, val fromPlainRow: Boolean = false, val fromClippedRow: Boolean = false,
+        val keys: GuideTestBase.() -> Unit, val expect: Ctx.() -> String?,
+    )
 
     private fun ok(cond: Boolean, msg: () -> String): String? = if (cond) null else msg()
 
@@ -65,12 +69,13 @@ class KeysOnDeviceTest : GuideTestBase() {
         },
         Seq("Day chip OK → Days", keys = { press(KEYCODE_DPAD_UP); press(KEYCODE_DPAD_RIGHT); press(KEYCODE_DPAD_CENTER) }) { ok(ui.overlay is Overlay.Days) { "overlay ${ui.overlay}" } },
         Seq("Days BACK closes", keys = { press(KEYCODE_DPAD_UP); press(KEYCODE_DPAD_RIGHT); press(KEYCODE_DPAD_CENTER); press(KEYCODE_BACK) }) { ok(ui.overlay == null) { "overlay ${ui.overlay}" } },
-        Seq("PAGE_DOWN → +6 rows", keys = { press(KEYCODE_PAGE_DOWN) }) {
-            // §3.3.2: the focus stays at visible index 1…4, so topRow = clamp(start.topRow + 6, row − 4, row − 1).
-            ok(focus?.row == start.row + 6 && focus.topRow == (start.topRow + 6).coerceIn(focus.row - 4, focus.row - 1)) { "focus $focus from $start" }
+        Seq("PAGE_DOWN → +5 rows", keys = { press(KEYCODE_PAGE_DOWN) }) {
+            // §3.3.2: 5 visible rows (owner ruling 2026-10-17); the focus stays at visible index 1…3, so
+            // topRow = clamp(start.topRow + 5, row − 3, row − 1).
+            ok(focus?.row == start.row + 5 && focus.topRow == (start.topRow + 5).coerceIn(focus.row - 3, focus.row - 1)) { "focus $focus from $start" }
         },
         // CH− = ZAP_DOWN = PAGE_DOWN in the grid (§3.4.2, §3.18.2); CH+ = ZAP_UP = PAGE_UP.
-        Seq("CH− CH− → +12 rows", keys = { press(KEYCODE_CHANNEL_DOWN, 2) }) { ok(focus?.row == start.row + 12) { "row ${focus?.row}" } },
+        Seq("CH− CH− → +10 rows", keys = { press(KEYCODE_CHANNEL_DOWN, 2) }) { ok(focus?.row == start.row + 10) { "row ${focus?.row}" } },
         Seq("CH− CH+ → back", keys = { press(KEYCODE_CHANNEL_DOWN); press(KEYCODE_CHANNEL_UP) }) { ok(focus?.row == start.row) { "row ${focus?.row}" } },
         Seq("RIGHT → next cell", keys = { press(KEYCODE_DPAD_RIGHT) }) { ok(focus?.row == start.row && focus.cellStart >= start.cellEnd) { "focus $focus" } },
         Seq("RIGHT LEFT → same cell", keys = { press(KEYCODE_DPAD_RIGHT); press(KEYCODE_DPAD_LEFT) }) {
@@ -78,6 +83,10 @@ class KeysOnDeviceTest : GuideTestBase() {
         },
         Seq("LEFT on an archive row → earlier cell", keys = { press(KEYCODE_DPAD_LEFT) }) {
             ok(ui.overlay == null && focus != null && focus.cellEnd <= start.cellStart) { "overlay ${ui.overlay} focus $focus" }
+        },
+        // Decision 2026-10-19 ruling 1: a clipped on-now cell on a catch-up row steps back; it never opens Groups.
+        Seq("LEFT on a clipped catch-up cell → moved", fromClippedRow = true, keys = { press(KEYCODE_DPAD_LEFT) }) {
+            ok(ui.overlay == null && focus != null && focus.cellEnd <= start.cellStart && start.cellStart < start.windowStartMin) { "overlay ${ui.overlay} focus $focus from $start" }
         },
         Seq("LEFT on a row without archive → Groups", fromPlainRow = true, keys = { press(KEYCODE_DPAD_LEFT) }) { ok(ui.overlay is Overlay.Groups) { "overlay ${ui.overlay}" } },
         Seq("Groups CH− applies the next entry, stays open", fromPlainRow = true, keys = { press(KEYCODE_DPAD_LEFT); press(KEYCODE_CHANNEL_DOWN) }) {
@@ -97,8 +106,12 @@ class KeysOnDeviceTest : GuideTestBase() {
         Seq("MENU → Menu", keys = { press(KEYCODE_MENU) }) { ok(ui.overlay is Overlay.Menu) { "overlay ${ui.overlay}" } },
         Seq("digit 5 → Number(5)", keys = { press(KEYCODE_5) }) { ok((ui.overlay as? Overlay.Number)?.digits == "5") { "overlay ${ui.overlay}" } },
         Seq("digits 1 0 BACK → closed", keys = { press(KEYCODE_0 + 1); press(KEYCODE_0); press(KEYCODE_BACK) }) { ok(ui.overlay == null) { "overlay ${ui.overlay}" } },
-        Seq("BACK at home, nothing tuned → exit hint", keys = { press(KEYCODE_BACK) }) {
-            ok((ui.overlay as? Overlay.Exit)?.dialog == false) { "overlay ${ui.overlay} (BACK_TWICE expected)" }
+        // Decision 2026-10-19 ruling 2: home → Groups (opened by Back) → the top bar with Search focused → the exit step.
+        Seq("BACK from home → Groups", keys = { press(KEYCODE_BACK) }) {
+            ok((ui.overlay as? Overlay.Groups)?.viaBack == true && ui.zone == Zone.GRID) { "overlay ${ui.overlay} zone ${ui.zone}" }
+        },
+        Seq("BACK, BACK → TABS with Search focused", keys = { press(KEYCODE_BACK, 2, intervalMs = 300) }) {
+            ok(ui.overlay == null && ui.zone == Zone.TABS && ui.tabFocused == 1) { "overlay ${ui.overlay} zone ${ui.zone} tab ${ui.tabFocused}" }
         },
         Seq("RIGHT×4 BACK → home at now", keys = { press(KEYCODE_DPAD_RIGHT, 4); press(KEYCODE_BACK) }) {
             ok(ui.overlay == null && ui.mode == ScreenMode.GUIDE && focus != null && now in focus.cellStart until focus.cellEnd && focus.row == start.row) { "focus $focus" }
@@ -116,11 +129,22 @@ class KeysOnDeviceTest : GuideTestBase() {
         val plainRow = findRow { it.archiveDays == 0 }
         val failures = mutableListOf<String>()
         for ((i, s) in sequences.withIndex()) {
-            goHome()
-            toRow(if (s.fromPlainRow) plainRow else 0)
-            press(KEYCODE_BACK, intervalMs = 300) // not home? → home (now); at home this shows the exit hint …
-            goHome() // … which goHome lets time out
+            // (review 2026-10-19, S4) Found when the sequence runs, not once up front: a :00/:30 boundary or the end of
+            // the on-now programme moves the home window in between.
+            val clippedRow = if (s.fromClippedRow) findClippedArchiveRow() else -1
+            if (s.fromClippedRow && clippedRow < 0) {
+                log("I-4 #${i + 1} ${s.name}: skipped (no catch-up row has a clipped on-now cell at this time of day)")
+                continue
+            }
+            backToGrid()
+            toRow(if (s.fromPlainRow) plainRow else if (s.fromClippedRow) clippedRow else 0)
+            press(KEYCODE_BACK, intervalMs = 300) // not home? → home (now); at home this opens Groups …
+            backToGrid() // … which Right closes into the grid
             val start = focus()!!
+            if (s.fromClippedRow && !isClippedCatchUpStart(start, clippedRow)) {
+                log("I-4 #${i + 1} ${s.name}: skipped (row $clippedRow no longer starts on a clipped catch-up cell: $start)")
+                continue
+            }
             s.keys(this)
             Thread.sleep(500)
             val ctx = Ctx(ui(), focus(), start, nowMin())
@@ -128,7 +152,60 @@ class KeysOnDeviceTest : GuideTestBase() {
             log("I-4 #${i + 1} ${s.name}: ${err ?: "ok"}")
             if (err != null) failures += "#${i + 1} ${s.name}: $err (ui=${ctx.ui.brief()})"
         }
-        goHome()
+        backToGrid()
         if (failures.isNotEmpty()) fail("${failures.size}/${sequences.size} sequences differ from the §3.4 tables:\n" + failures.joinToString("\n"))
     }
+
+    /**
+     * Back to GUIDE/GRID with no overlay without walking the Back ladder outward (decision 2026-10-19): Back at home
+     * opens Groups and Back there goes on to the top bar and the exit step, so Groups closes with Right and the top bar
+     * with OK on the Guide tab.
+     */
+    private fun backToGrid() {
+        repeat(16) {
+            val s = ui()
+            val o = s.overlay
+            when {
+                o is Overlay.Groups && o.menu == null -> press(KEYCODE_DPAD_RIGHT, intervalMs = 300)
+                o is Overlay.Exit && !o.dialog -> Thread.sleep(2_300)
+                o == null && s.reminder == null && s.mode == ScreenMode.GUIDE && s.zone == Zone.TABS -> {
+                    press(KEYCODE_DPAD_LEFT, s.tabFocused)
+                    press(KEYCODE_DPAD_CENTER, intervalMs = 300)
+                }
+                s.reminder != null || o != null || s.mode != ScreenMode.GUIDE || s.zone != Zone.GRID -> press(KEYCODE_BACK, intervalMs = 300)
+                else -> return
+            }
+        }
+        fail("could not return to GUIDE/GRID: ${ui().brief()}")
+    }
+
+    /**
+     * The first catch-up row (of the first 60) whose on-now cell starts before the home window and whose previous cell is
+     * watchable, or −1. Suspect channels (a failed catch-up, hollow ↺) are skipped: there Left opens Groups by design.
+     */
+    private fun findClippedArchiveRow(): Int {
+        for (r in 0 until minOf(rowCount(), 60)) {
+            val c = channelAt(r) ?: continue
+            if (c.archiveDays <= 0 || isSuspect(c.identityHash)) continue
+            backToGrid()
+            toRow(r)
+            press(KEYCODE_BACK, intervalMs = 300) // home on this row (nothing tuned): the cell at now, the window for now
+            backToGrid()
+            val f = focus() ?: continue
+            if (isClippedCatchUpStart(f, r)) return r
+        }
+        return -1
+    }
+
+    /**
+     * [f] is on row [row], contains now, starts before the window, and Left moves (the machine's clip cue is on only while
+     * an earlier watchable cell exists, decision 2026-10-19 ruling 7), on a channel that is not suspect.
+     */
+    private fun isClippedCatchUpStart(f: app.thebox.core.guide.GridFocus, row: Int): Boolean {
+        if (f.row != row || nowMin() !in f.cellStart until f.cellEnd || f.cellStart >= f.windowStartMin) return false
+        val c = channelAt(row) ?: return false
+        return c.archiveDays > 0 && !isSuspect(c.identityHash) && onFrame { it.clipCue }
+    }
+
+    private fun isSuspect(identityHash: Long): Boolean = onFrame { java.util.Arrays.binarySearch(it.suspectArchive, identityHash) >= 0 }
 }

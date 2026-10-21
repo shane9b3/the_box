@@ -21,6 +21,28 @@ interface PlayerExtras {
      * so and where Back to Auto is (B2). Hosts without settings answer false.
      */
     val audioOutputForced: StateFlow<Boolean> get() = NOT_FORCED
+
+    /** (M6 time-shift, docs/design/m6-timeshift.md §11.5) The paused lines' and the dim card's values; default: none. */
+    val pausedFacts: StateFlow<PausedFacts> get() = NO_PAUSED_FACTS
+
+    /** (M6 §13, U-N3) The stats overlay's rewind line ("Rewind: 18:20 saved of 30:00 · 1.1 GB"); null = none. */
+    val rewindStat: StateFlow<String?> get() = NO_REWIND_STAT
 }
 
+/**
+ * (M6 §11.5) What the paused header line and the dim card read beyond `PlayerUiState`: [mediaKeys] picks "Press OK or ▶"
+ * over "Press OK" (product line 94); [dimmed] since [dimSinceMs] draws the dim layer and the drifting card;
+ * [pauseRemainingMs] is "Can stay paused N more min"; [windowMs] "rewind holds 30 min"; [holdMs] "after 10 min".
+ */
+data class PausedFacts(
+    val mediaKeys: Boolean = false,
+    val dimmed: Boolean = false,
+    val dimSinceMs: Long? = null,
+    val pauseRemainingMs: Long? = null,
+    val windowMs: Long? = null,
+    val holdMs: Long? = null,
+)
+
 private val NOT_FORCED: StateFlow<Boolean> = kotlinx.coroutines.flow.MutableStateFlow(false)
+private val NO_PAUSED_FACTS: StateFlow<PausedFacts> = kotlinx.coroutines.flow.MutableStateFlow(PausedFacts())
+private val NO_REWIND_STAT: StateFlow<String?> = kotlinx.coroutines.flow.MutableStateFlow(null)

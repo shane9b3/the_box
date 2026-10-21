@@ -319,6 +319,72 @@ class LadderExecutionTest {
         assertEquals(PlaybackErrorCode.NO_DATA_TIMEOUT, (f.state as PlaybackState.Error).error.code)
     }
 
+    /**
+     * Device finding 2026-10-17 (Sony Bravia, HEVC, tunneling on): the decoder-stuck verdict at 14 s led to
+     * DisableTunnelingAndReprepare, and the 15 s switch deadline failed the cycle 0.6 s into the repair. A pipeline
+     * repair gets one fresh window; a second repair does not, so the cycle still ends within two windows.
+     */
+    @Test
+    fun aPipelineRepairNearTheSwitchDeadlineGetsOneFreshWindow() {
+        f.settings.update { it.copy(tunneling = true) }
+        var n = 0
+        f.ladder.script = { _, _ -> if (n++ == 0) LadderDecision.DisableTunnelingAndReprepare else LadderDecision.SoftwareVideoAndReprepare }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.advance(14_000)
+        f.engine.watchdog.onStall!!(StallVerdict(StallKind.DECODER_STUCK, "test"))
+        f.idle()
+        f.advance(2_000) // 16 s: past the original deadline, inside the repair's window
+        assertFalse("the repair's session is connecting", f.state is PlaybackState.Error)
+        assertTrue(f.state is PlaybackState.Connecting)
+        f.advance(12_000) // 28 s: a second repair does not extend again
+        f.engine.watchdog.onStall!!(StallVerdict(StallKind.DECODER_STUCK, "test"))
+        f.idle()
+        f.advance(1_500) // 29.5 s: the extended deadline
+        f.idle()
+        assertTrue("failed at the extended deadline: ${f.state}", f.state is PlaybackState.Error)
+    }
+
+    /** Device finding 2026-10-18: the TS guard's stuck-audio event becomes AudioTimestampsStuck; the drop disables the audio track. */
+    @Test
+    fun stuckAudioTimestampsFromTheGuardDropTheAudioTrack() {
+        f.ladder.script = { s, _ -> if (s == FailureSignal.AudioTimestampsStuck) LadderDecision.DropAudioAndReprepare(app.thebox.core.playback.PlaybackWarning.AUDIO_TIMESTAMPS) else LadderDecision.Fail(PlaybackError(PlaybackErrorCode.INTERNAL)) }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle(); f.play(); f.advance(5_000)
+        f.sources.builds.last().ctx.onEvent(app.thebox.core.playback.PlaybackEventType.STALL, app.thebox.player.engine.MediaSourceBuilder.STUCK_AUDIO_CODE, "pid=257")
+        f.idle()
+        assertTrue(f.ladder.seen.any { it.signal == FailureSignal.AudioTimestampsStuck })
+        // The live player keeps playing; the audio track is disabled in place and the warning names the cause.
+        assertTrue("audio disabled on the player", f.exo.params.disabledTrackTypes.contains(androidx.media3.common.C.TRACK_TYPE_AUDIO))
+        assertEquals(app.thebox.core.playback.PlaybackWarning.AUDIO_TIMESTAMPS, (f.state as PlaybackState.Playing).warning)
+    }
+
+    /** L33r: the repair re-prepares with the session context asking the TS guard to regenerate audio timestamps. */
+    @Test
+    fun repairAudioTimestampsRestartsWithTheGuardRepairing() {
+        f.ladder.script = { s, _ -> if (s == FailureSignal.AudioTimestampsStuck) LadderDecision.RepairAudioTimestampsAndReprepare else LadderDecision.Fail(PlaybackError(PlaybackErrorCode.INTERNAL)) }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle(); f.play(); f.advance(5_000)
+        assertFalse(f.sources.builds.last().ctx.repairAudioTimestamps)
+        f.sources.builds.last().ctx.onEvent(app.thebox.core.playback.PlaybackEventType.STALL, app.thebox.player.engine.MediaSourceBuilder.STUCK_AUDIO_CODE, "pid=257")
+        f.idle()
+        assertTrue("a new session with the repair on", f.sources.builds.last().ctx.repairAudioTimestamps)
+        assertEquals("RepairAudioTimestampsAndReprepare", (f.state as PlaybackState.Stalled).step)
+    }
+
+    @Test
+    fun tunnelingOffIsRememberedForTheChannelAndAppliedOnTheNextTune() {
+        f.settings.update { it.copy(tunneling = true) }
+        tuneAndFail(LadderDecision.DisableTunnelingAndReprepare)
+        assertEquals(true, f.memory.rows[CH1]?.tunnelingOff)
+        f.controller.stop(app.thebox.player.api.StopReason.USER)
+        f.idle()
+        f.ladder.script = { _, _ -> LadderDecision.Fail(PlaybackError(PlaybackErrorCode.INTERNAL)) }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        assertFalse("the remembered channel tunes untunneled", f.playerFactory.bundle!!.trackSelector.parameters.tunnelingEnabled)
+    }
+
     @Test
     fun ladderContextCarriesCycleFacts() {
         tuneAndFail(LadderDecision.Fail(PlaybackError(PlaybackErrorCode.INTERNAL)))

@@ -5,6 +5,8 @@ import app.thebox.core.playback.FailureSignal
 import app.thebox.core.playback.LadderContext
 import app.thebox.core.playback.LadderCounters
 import app.thebox.core.playback.LadderDecision
+import app.thebox.core.playback.PlaybackErrorCode
+import app.thebox.core.playback.PlaybackWarning
 import app.thebox.core.playback.NextStep
 import app.thebox.core.playback.LoadOrigin
 import app.thebox.core.playback.NetworkFailureKind
@@ -57,6 +59,21 @@ class ErrorLadderTableTest {
     }
 
     /** P-S3: L30 after software (setting, override or the L29 switch) or without a software decoder offers no software button. */
+    /** Device finding 2026-10-18 (Sky Cinema Thriller): stuck audio timestamps are repaired, then dropped, then fail. */
+    @Test
+    fun l33rRepairsThenL33tDropsTheAudioTrackForStuckTimestampsThenFails() {
+        val ladder = ErrorLadderImpl(random = { 0.5 })
+        val first = ladder.trace(signal("AudioStuck"), ctx())
+        assertEquals("L33r", first.row)
+        assertEquals(LadderDecision.RepairAudioTimestampsAndReprepare, first.decision)
+        val second = ladder.trace(signal("AudioStuck"), ctx().copy(counters = first.counters))
+        assertEquals("L33t", second.row)
+        assertEquals(LadderDecision.DropAudioAndReprepare(PlaybackWarning.AUDIO_TIMESTAMPS), second.decision)
+        val again = ladder.trace(signal("AudioStuck"), ctx().copy(counters = second.counters))
+        assertEquals("L33u", again.row)
+        assertEquals(PlaybackErrorCode.AUDIO_OUTPUT_FAILED, (again.decision as LadderDecision.Fail).error.code)
+    }
+
     @Test
     fun l30OffersTheSoftwareDecoderOnlyWhenItCanHelp() {
         fun actions(context: String, sig: String = "DecoderInit video video/hevc c2.hevc.decoder"): List<NextStep> {
@@ -115,6 +132,7 @@ class ErrorLadderTableTest {
                 "FormatUnrecognized" -> FailureSignal.FormatUnrecognized
                 "Pcr" -> FailureSignal.PcrDiscontinuity(t[1].toLong())
                 "BehindLive" -> FailureSignal.BehindLiveWindow
+                "AudioStuck" -> FailureSignal.AudioTimestampsStuck
                 "Parsing" -> FailureSignal.Parsing(t[1] == "manifest")
                 "DecoderInit" -> FailureSignal.DecoderInit(video(), t[2], t.getOrNull(3))
                 "DecodingFailed" -> FailureSignal.DecodingFailed(video(), t[2])

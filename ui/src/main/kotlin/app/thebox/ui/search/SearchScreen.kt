@@ -3,7 +3,6 @@ package app.thebox.ui.search
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -25,6 +24,9 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,13 +45,13 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.thebox.core.guide.GuideChannel
 import app.thebox.core.guide.ProgrammeHit
+import app.thebox.core.guide.SearchResults
 import app.thebox.ui.R
 import app.thebox.ui.theme.BoxTextStyles
 import app.thebox.ui.theme.DesignTokens
@@ -69,6 +71,8 @@ import java.util.Locale
  * Sizes are design px (`.dp` inside `BoxDesignScale`, 1 dp = 1 design px).
  */
 const val SEARCH_FIELD_TAG = "search_field"
+const val SEARCH_MENU_TAG = "search_menu"
+internal const val SEARCH_CARD_TAG = "search_card:"
 
 @Composable
 fun SearchScreen(viewModel: SearchViewModel, modifier: Modifier = Modifier, onIdleChanged: (Boolean) -> Unit = {}) {
@@ -76,74 +80,99 @@ fun SearchScreen(viewModel: SearchViewModel, modifier: Modifier = Modifier, onId
     val field = remember { FocusRequester() }
     var fieldFocused by remember { mutableStateOf(false) }
     var menu by remember { mutableStateOf<MenuTarget?>(null) }
+    var menuResults by remember { mutableStateOf<SearchResults?>(null) }
+    var returnFocus by remember { mutableStateOf<FocusRequester?>(null) }
+    fun dismissMenu() { menu = null; menuResults = null }
+    fun openMenu(target: MenuTarget, results: SearchResults, focus: FocusRequester) {
+        if (viewModel.isCurrent(results)) { returnFocus = focus; menuResults = results; menu = target }
+    }
+    DisposableEffect(viewModel) {
+        viewModel.onEntered()
+        onDispose { viewModel.onLeft() }
+    }
     LaunchedEffect(Unit) { runCatching { field.requestFocus() } }
+    LaunchedEffect(menu) {
+        if (menu == null && returnFocus != null) {
+            val restored = runCatching { returnFocus!!.requestFocus() }.getOrDefault(false)
+            if (!restored) runCatching { field.requestFocus() }
+            returnFocus = null
+        }
+    }
+    LaunchedEffect(state.results) {
+        if (menu != null && (menuResults == null || !viewModel.isCurrent(menuResults!!))) dismissMenu()
+    }
     // §2.13 item 7: the root key sink may take BACK only while the field is empty and no menu is open (B1). The IME
     // consumes BACK while it shows, so an empty field that still gets BACK means "leave Search".
     val idle = state.query.isEmpty() && menu == null
     LaunchedEffect(idle) { onIdleChanged(idle) }
 
-    Column(
-        modifier
-            .fillMaxSize()
-            .padding(start = 64.dp, end = 64.dp, top = 56.dp, bottom = 40.dp)
-            .onPreviewKeyEvent { e ->
-                if (e.key != Key.Back || e.type != KeyEventType.KeyUp) return@onPreviewKeyEvent e.key == Key.Back
+    Box(
+        modifier.fillMaxSize().onPreviewKeyEvent { e ->
+            if (e.key != Key.Back && e.key != Key.Escape && e.key != Key.ButtonB) return@onPreviewKeyEvent false
+            if (e.type == KeyEventType.KeyUp && !e.nativeKeyEvent.isCanceled) {
                 when {
-                    menu != null -> menu = null
+                    menu != null -> dismissMenu()
                     !fieldFocused -> runCatching { field.requestFocus() }
                     else -> viewModel.onBack()
                 }
-                true
-            },
-    ) {
-        Tabs()
-        Spacer(Modifier.height(32.dp))
-        SearchField(state.query, field, onFocus = { fieldFocused = it }, onChange = viewModel::onQuery)
-        Spacer(Modifier.height(40.dp))
-        val results = state.results
-        when {
-            results == null -> Hint(stringResource(if (state.searching) R.string.search_searching else R.string.search_min_chars))
-            results.channels.isEmpty() && results.programmes.isEmpty() && !state.guideDataMissing -> {
-                Hint(stringResource(R.string.search_nothing_found, results.query))
-                Hint(stringResource(R.string.search_nothing_next))
             }
-            else -> {
-                if (results.channels.isNotEmpty()) {
-                    RowTitle(stringResource(R.string.search_channels))
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
-                        items(results.channels, key = { it.rowId }) { ch ->
-                            ChannelCard(ch, onClick = { viewModel.onChannel(ch) }, onLongClick = { menu = MenuTarget.Channel(ch) })
-                        }
-                    }
-                    Spacer(Modifier.height(32.dp))
+            true
+        },
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(start = 96.dp, end = 96.dp, top = 56.dp, bottom = 56.dp),
+        ) {
+            Tabs()
+            Spacer(Modifier.height(32.dp))
+            SearchField(state.query, field, onFocus = { fieldFocused = it }, onChange = viewModel::onQuery)
+            Spacer(Modifier.height(40.dp))
+            val results = state.results
+            when {
+                results == null -> Hint(stringResource(if (state.searching) R.string.search_searching else R.string.search_min_chars))
+                results.channels.isEmpty() && results.programmes.isEmpty() && !state.guideDataMissing -> {
+                    Hint(stringResource(R.string.search_nothing_found, results.query))
+                    Hint(stringResource(R.string.search_nothing_next))
                 }
-                RowTitle(stringResource(R.string.search_programmes))
-                when {
-                    state.guideDataMissing -> Hint(stringResource(R.string.search_needs_guide))
-                    results.programmes.isEmpty() -> Hint(stringResource(R.string.search_no_programmes))
-                    else -> LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
-                        items(results.programmes, key = { "${it.channel.identityHash}:${it.info.rawStartMin}" }) { hit ->
-                            ProgrammeCard(
-                                hit,
-                                reminder = state.reminders.contains(hit.channel.identityHash, hit.info.rawStartMin),
-                                onClick = { viewModel.onProgramme(hit) },
-                                onLongClick = { menu = MenuTarget.Programme(hit) },
-                            )
+                else -> {
+                    if (results.channels.isNotEmpty()) {
+                        RowTitle(stringResource(R.string.search_channels))
+                        LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
+                            items(results.channels, key = { it.rowId }) { ch ->
+                                ChannelCard(ch, onClick = { if (viewModel.isCurrent(results)) viewModel.onChannel(ch, results) }, onLongClick = { focus -> openMenu(MenuTarget.Channel(ch), results, focus) })
+                            }
+                        }
+                        Spacer(Modifier.height(32.dp))
+                    }
+                    RowTitle(stringResource(R.string.search_programmes))
+                    when {
+                        state.guideDataMissing -> Hint(stringResource(R.string.search_needs_guide))
+                        results.programmes.isEmpty() -> Hint(stringResource(R.string.search_no_programmes))
+                        else -> LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
+                            items(results.programmes, key = { "${it.channel.identityHash}:${it.info.rawStartMin}" }) { hit ->
+                                ProgrammeCard(
+                                    hit,
+                                    reminder = state.reminders.contains(hit.channel.identityHash, hit.info.rawStartMin),
+                                    onClick = { if (viewModel.isCurrent(results)) viewModel.onProgramme(hit, results) },
+                                    onLongClick = { focus -> openMenu(MenuTarget.Programme(hit), results, focus) },
+                                )
+                            }
                         }
                     }
                 }
             }
         }
-    }
-    menu?.let { target ->
-        ResultMenu(
-            target = target,
-            hasReminder = (target as? MenuTarget.Programme)?.let { viewModel.hasReminder(it.hit) } ?: false,
-            isFavourite = { ch -> viewModel.isFavourite(ch) },
-            onReminder = { hit -> viewModel.toggleReminder(hit); menu = null },
-            onFavourite = { ch -> viewModel.toggleFavourite(ch); menu = null },
-            onDismiss = { menu = null },
-        )
+        menu?.let { target ->
+            ResultMenu(
+                target = target,
+                hasReminder = (target as? MenuTarget.Programme)?.let { viewModel.hasReminder(it.hit) } ?: false,
+                isFavourite = { ch -> viewModel.isFavourite(ch) },
+                onReminder = { hit -> menuResults?.let { if (viewModel.isCurrent(it)) viewModel.toggleReminder(hit, it) }; dismissMenu() },
+                onFavourite = { ch -> menuResults?.let { if (viewModel.isCurrent(it)) viewModel.toggleFavourite(ch, it) }; dismissMenu() },
+                onDismiss = ::dismissMenu,
+            )
+        }
     }
 }
 
@@ -156,7 +185,7 @@ private sealed interface MenuTarget {
 private val Fg = DesignTokens.Colors.Fg
 private val Dim = Fg.copy(alpha = 0.6f)
 private val Body = BoxTextStyles.Body.copy(color = Fg)
-private val Small = TextStyle(color = Dim, fontSize = 17.sp)
+private val Small = BoxTextStyles.Body.copy(color = Dim, fontSize = 24.sp)
 
 @Composable
 private fun Tabs() {
@@ -175,7 +204,7 @@ private fun SearchField(text: String, focus: FocusRequester, onFocus: (Boolean) 
     Box(
         Modifier
             .fillMaxWidth()
-            .height(72.dp)
+            .height(80.dp)
             .background(DesignTokens.Colors.GlassFill, RoundedCornerShape(DesignTokens.Radii.Button))
             .border(if (focused) 3.dp else 1.dp, if (focused) DesignTokens.Colors.Accent else DesignTokens.Colors.GlassBorder, RoundedCornerShape(DesignTokens.Radii.Button))
             .padding(horizontal = 24.dp),
@@ -214,7 +243,7 @@ private fun SearchField(text: String, focus: FocusRequester, onFocus: (Boolean) 
 
 @Composable
 private fun RowTitle(text: String) {
-    BasicText(text, style = Small.copy(color = Dim, fontSize = 15.sp, letterSpacing = 1.5.sp))
+    BasicText(text, style = Small.copy(color = Dim, fontSize = 26.sp, letterSpacing = 1.5.sp))
 }
 
 @Composable
@@ -224,26 +253,31 @@ private fun Hint(text: String) {
 
 /** A focusable card: OK = click, long OK (key repeat or long press) = [onLongClick]. Draws its own ring (no tv-material scaling). */
 @Composable
-private fun ResultCard(width: Int, height: Int, onClick: () -> Unit, onLongClick: () -> Unit, content: @Composable () -> Unit) {
+private fun ResultCard(tag: String, width: Int, height: Int, onClick: () -> Unit, onLongClick: (FocusRequester) -> Unit, content: @Composable () -> Unit) {
     val source = remember { MutableInteractionSource() }
     val focused by source.collectIsFocusedAsState()
-    var longFired by remember { mutableStateOf(false) }
+    val focus = remember { FocusRequester() }
+    val scope = rememberCoroutineScope()
+    val click by rememberUpdatedState(onClick)
+    val longClick by rememberUpdatedState(onLongClick)
+    val gesture = remember(scope, focus) { SearchOkGesture(scope, { click() }, { longClick(focus) }) }
+    DisposableEffect(gesture) { onDispose { gesture.cancel() } }
     Box(
         Modifier
             .size(width.dp, height.dp)
+            .testTag(SEARCH_CARD_TAG + tag)
+            .focusRequester(focus)
+            .onFocusChanged { if (!it.hasFocus) gesture.cancel() }
             .onPreviewKeyEvent { e ->
-                val ok = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
+                val ok = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter || e.key == Key.ButtonA
                 if (!ok) return@onPreviewKeyEvent false
                 when (e.type) {
                     KeyEventType.KeyDown -> {
-                        if (e.nativeKeyEvent.repeatCount > 0 || e.nativeKeyEvent.isLongPress) {
-                            if (!longFired) { longFired = true; onLongClick() }
-                        }
+                        gesture.down(e.nativeKeyEvent.repeatCount > 0, e.nativeKeyEvent.isCanceled)
                         true
                     }
                     KeyEventType.KeyUp -> {
-                        if (!longFired) onClick()
-                        longFired = false
+                        gesture.up(e.nativeKeyEvent.isCanceled)
                         true
                     }
                     else -> false
@@ -251,7 +285,6 @@ private fun ResultCard(width: Int, height: Int, onClick: () -> Unit, onLongClick
             }
             .background(if (focused) Fg else DesignTokens.Colors.GlassFill, RoundedCornerShape(DesignTokens.Radii.Cell))
             .border(if (focused) 3.dp else 1.dp, if (focused) DesignTokens.Colors.Accent else DesignTokens.Colors.GlassBorder, RoundedCornerShape(DesignTokens.Radii.Cell))
-            .focusable(interactionSource = source)
             .clickable(interactionSource = source, indication = null, onClick = onClick)
             .padding(16.dp),
     ) {
@@ -265,32 +298,32 @@ private val LocalCardFocused = androidx.compose.runtime.staticCompositionLocalOf
 private fun cardText(): Color = if (LocalCardFocused.current) DesignTokens.Colors.Canvas else Fg
 
 @Composable
-private fun ChannelCard(ch: GuideChannel, onClick: () -> Unit, onLongClick: () -> Unit) {
-    ResultCard(220, 124, onClick, onLongClick) {
+private fun ChannelCard(ch: GuideChannel, onClick: () -> Unit, onLongClick: (FocusRequester) -> Unit) {
+    ResultCard(ch.rowId.toString(), 340, 170, onClick, onLongClick) {
         val color = cardText()
         Column(verticalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxSize()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                if (ch.logoUrl != null) AsyncImage(model = ch.logoUrl, contentDescription = null, modifier = Modifier.size(56.dp, 40.dp))
+                if (ch.logoUrl != null) AsyncImage(model = ch.logoUrl, contentDescription = null, modifier = Modifier.size(84.dp, 60.dp))
                 Spacer(Modifier.width(8.dp))
-                ch.number?.let { BasicText(it.toString(), style = Small.copy(color = color.copy(alpha = 0.6f), fontSize = 15.sp)) }
+                ch.number?.let { BasicText(it.toString(), style = Small.copy(color = color.copy(alpha = 0.7f))) }
             }
-            BasicText(ch.displayName, style = Body.copy(color = color, fontSize = 19.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            BasicText(ch.displayName, style = Body.copy(color = color, fontSize = 30.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
 
 @Composable
-private fun ProgrammeCard(hit: ProgrammeHit, reminder: Boolean, onClick: () -> Unit, onLongClick: () -> Unit) {
-    ResultCard(360, 124, onClick, onLongClick) {
+private fun ProgrammeCard(hit: ProgrammeHit, reminder: Boolean, onClick: () -> Unit, onLongClick: (FocusRequester) -> Unit) {
+    ResultCard("${hit.channel.identityHash}:${hit.info.rawStartMin}", 520, 190, onClick, onLongClick) {
         val color = cardText()
         Column(verticalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxSize()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                BasicText(hit.info.title, style = Body.copy(color = color, fontSize = 19.sp), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                if (hit.inArchive) BasicText("  ↺", style = Body.copy(color = color, fontSize = 19.sp))
-                if (reminder) BasicText("  ●", style = Body.copy(color = DesignTokens.Colors.Live, fontSize = 15.sp))
+                BasicText(hit.info.title, style = Body.copy(color = color, fontSize = 30.sp), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                if (hit.inArchive) BasicText("  ↺", style = Body.copy(color = color, fontSize = 28.sp))
+                if (reminder) BasicText("  ●", style = Body.copy(color = DesignTokens.Colors.Live, fontSize = 24.sp))
             }
             BasicText(hit.channel.displayName, style = Small.copy(color = color.copy(alpha = 0.7f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            BasicText(timeText(hit), style = Small.copy(color = color.copy(alpha = 0.6f), fontSize = 15.sp))
+            BasicText(timeText(hit), style = Small.copy(color = color.copy(alpha = 0.7f)))
         }
     }
 }
@@ -318,30 +351,39 @@ private fun ResultMenu(
 ) {
     var favourite by remember(target) { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(target) { favourite = isFavourite(target.channel) }
-    val first = remember { FocusRequester() }
-    LaunchedEffect(favourite) { if (favourite != null) runCatching { first.requestFocus() } }
-    Box(Modifier.fillMaxSize().background(Color(0x99000000)), contentAlignment = Alignment.Center) {
+    val options = buildList<Pair<String, () -> Unit>> {
+        if (target is MenuTarget.Programme) add(stringResource(if (hasReminder) R.string.search_menu_cancel_reminder else R.string.search_menu_remind) to { onReminder(target.hit) })
+        favourite?.let { fav -> add(stringResource(if (fav) R.string.search_menu_remove_favourite else R.string.search_menu_add_favourite) to { onFavourite(target.channel) }) }
+        add(stringResource(R.string.search_menu_close) to onDismiss)
+    }
+    val focusers = remember(target, options.size) { List(options.size) { FocusRequester() } }
+    var cursor by remember(target, options.size) { mutableStateOf(0) }
+    LaunchedEffect(focusers) { runCatching { focusers[0].requestFocus() } }
+    Box(Modifier.fillMaxSize().background(Color(0x99000000)).testTag(SEARCH_MENU_TAG), contentAlignment = Alignment.Center) {
         Column(
             Modifier
-                .width(520.dp)
+                .width(640.dp)
+                .onPreviewKeyEvent { e ->
+                    when (e.key) {
+                        Key.DirectionUp, Key.DirectionDown -> {
+                            if (e.type == KeyEventType.KeyDown) {
+                                cursor = (cursor + if (e.key == Key.DirectionDown) 1 else -1).coerceIn(0, options.lastIndex)
+                                runCatching { focusers[cursor].requestFocus() }
+                            }
+                            true
+                        }
+                        Key.DirectionLeft, Key.DirectionRight, Key.Tab -> true
+                        else -> false
+                    }
+                }
                 .background(DesignTokens.Colors.Canvas, RoundedCornerShape(DesignTokens.Radii.Panel))
                 .border(1.dp, DesignTokens.Colors.GlassBorder, RoundedCornerShape(DesignTokens.Radii.Panel))
                 .padding(24.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            var firstUsed = false
-            fun Modifier.firstItem(): Modifier = if (!firstUsed) { firstUsed = true; focusRequester(first) } else this
-            if (target is MenuTarget.Programme) {
-                MenuItem(stringResource(if (hasReminder) R.string.search_menu_cancel_reminder else R.string.search_menu_remind), Modifier.firstItem()) {
-                    onReminder(target.hit)
-                }
+            options.forEachIndexed { i, (label, action) ->
+                MenuItem(label, Modifier.focusRequester(focusers[i]).onFocusChanged { if (it.hasFocus) cursor = i }, action)
             }
-            favourite?.let { fav ->
-                MenuItem(stringResource(if (fav) R.string.search_menu_remove_favourite else R.string.search_menu_add_favourite), Modifier.firstItem()) {
-                    onFavourite(target.channel)
-                }
-            }
-            MenuItem(stringResource(R.string.search_menu_close), Modifier.firstItem(), onDismiss)
         }
     }
 }
@@ -353,9 +395,8 @@ private fun MenuItem(label: String, modifier: Modifier, onClick: () -> Unit) {
     Box(
         modifier
             .fillMaxWidth()
-            .height(56.dp)
+            .height(72.dp)
             .background(if (focused) Fg else Color.Transparent, RoundedCornerShape(DesignTokens.Radii.Button))
-            .focusable(interactionSource = source)
             .clickable(interactionSource = source, indication = null, onClick = onClick)
             .padding(horizontal = 16.dp),
         contentAlignment = Alignment.CenterStart,

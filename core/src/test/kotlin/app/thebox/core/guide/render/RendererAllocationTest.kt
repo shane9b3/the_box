@@ -33,9 +33,17 @@ class RendererAllocationTest {
     private fun referenceFrame() = GuideReferenceFrame.build(measurer, images = StaticGuideImages(FakeGuideImage(160, 90, "logo")))
 
     @Test
-    fun referenceFrameAllocatesNothing() {
+    fun referenceFrameAllocatesNothing() = assertAllocatesNothing(cues = false)
+
+    /** Decision 2026-10-19: the edge and clip chevrons are one `drawAsset` each and allocate nothing either. */
+    @Test
+    fun referenceFrameWithTheLeftCuesAllocatesNothing() = assertAllocatesNothing(cues = true)
+
+    private fun assertAllocatesNothing(cues: Boolean) {
         val renderer = GuideRendererImpl(measurer)
         val frame = referenceFrame()
+        frame.leftEdgeCue = cues
+        frame.clipCue = cues
         val canvas = CountingGuideCanvas()
         val out = FloatArray(4)
         val ws = frame.windowStartMin

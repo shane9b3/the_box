@@ -13,7 +13,7 @@
 #   scrub:BAR|CHIPS|unfocused | chip:N | atLive | preview:Δms|none | stats:on|off | button:N
 section,pre,updown,action,repeat,held,layer,consumed,effects,toast,check
 # ---- bare live video §3.1.2 (live column)
-bare,live,D,UP,0,0,QUICK_BAR,T,-,-,quick:AUDIO
+bare,live,D,UP,0,0,QUICK_BAR,T,-,-,quick:TIME_SHIFT
 bare,live,D,DOWN,0,0,INFO,T,-,-,info:now
 bare,live,Z,UP,0,0,NONE,T,zap=1,-,passive;infoNum:102
 bare,live,Z,DOWN,0,0,NONE,T,zap=-1,-,passive;infoNum:106
@@ -33,8 +33,8 @@ bare,live,D,GROUP_PREV,0,0,NONE,F,-,-,-
 bare,live,D,GROUP_NEXT,0,0,NONE,F,-,-,-
 bare,live,D,SELECT,0,0,CHANNELS,T,loadListLineup,-,column:CHANNELS;listFocus:0
 bare,stopped,D,SELECT,0,0,NONE,T,retry,-,-
-bare,live,D,CONTEXT_MENU,0,0,QUICK_BAR,T,-,-,quick:AUDIO
-bare,live,D,QUICK_MENU,0,0,QUICK_BAR,T,-,-,quick:AUDIO
+bare,live,D,CONTEXT_MENU,0,0,QUICK_BAR,T,-,-,quick:TIME_SHIFT
+bare,live,D,QUICK_MENU,0,0,QUICK_BAR,T,-,-,quick:TIME_SHIFT
 bare,live,D,INFO_BAR,0,0,INFO,T,-,-,info:now
 bare,live,D,CHANNEL_LIST,0,0,CHANNELS,T,loadListLineup,-,column:CHANNELS
 bare,live,D,GROUPS_PANEL,0,0,CHANNELS,T,loadListLineup,-,column:GROUPS
@@ -49,14 +49,15 @@ bare,live,D,PAUSE,0,0,NONE,T,pauseLive,-,-
 bare,plain,D,PAUSE,0,0,NONE,T,pausePlain,-,-
 bare,plain_paused,D,PAUSE,0,0,NONE,T,-,-,-
 bare,live,D,SEEK_BACK,0,0,SCRUB,T,rewindLive,-,scrub:BAR
-bare,plain,D,SEEK_BACK,0,0,NONE,T,-,NO_CATCHUP,-
-bare,plain,D,SEEK_FORWARD,0,0,NONE,T,-,NO_CATCHUP,-
+# (fix pass S7) the buffer state is not known yet: RW says there is nothing to rewind yet; FF has nothing to say
+bare,plain,D,SEEK_BACK,0,0,NONE,T,-,REWIND_NOTHING_YET,-
+bare,plain,D,SEEK_FORWARD,0,0,NONE,T,-,-,-
 bare,live,D,SEEK_FORWARD,0,0,NONE,T,-,-,-
 bare,live,D,JUMP_TO_LIVE,0,0,NONE,T,-,-,-
 bare,live,D,START_OVER,0,0,NONE,T,startOver,-,scrub:unfocused
 bare,plain,D,START_OVER,0,0,NONE,T,-,NO_CATCHUP,-
 bare,live,D,TIME_SHIFT,0,0,SCRUB,T,-,-,scrub:BAR;atLive
-bare,plain,D,TIME_SHIFT,0,0,NONE,T,-,NO_CATCHUP,-
+bare,plain,D,TIME_SHIFT,0,0,NONE,T,-,REWIND_NOTHING_YET,-
 bare,live,D,PREV_PROGRAMME,0,0,INFO,T,-,-,info:past
 bare,live,D,NEXT_PROGRAMME,0,0,INFO,T,-,-,info:future
 bare,live,D,AUDIO,0,0,PICKER,T,-,-,picker:AUDIO
@@ -85,7 +86,7 @@ bare,live,D,PAGE_DOWN,0,0,NONE,T,-,-,-
 bare,live,D,JUMP_TO_NOW,0,0,NONE,T,-,-,-
 bare,live,D,DAY_STRIP,0,0,NONE,T,-,-,-
 # ---- bare archive / time-shift video §3.1.2 (archive column)
-archive,archive,D,UP,0,0,QUICK_BAR,T,-,-,quick:AUDIO
+archive,archive,D,UP,0,0,QUICK_BAR,T,-,-,quick:JUMP_TO_LIVE
 archive,archive,D,DOWN,0,0,SCRUB,T,-,-,scrub:BAR
 archive,archive,Z,UP,0,0,NONE,T,zap=1,-,passive
 archive,archive,ZI,UP,0,0,NONE,T,zap=-1,-,passive
@@ -121,23 +122,25 @@ archive,archive,D,STATS_OVERLAY,0,0,NONE,T,setStatsEnabled=true,-,stats:on
 archive,archive,D,SCREEN_OFF,0,0,SCREEN_OFF,T,setScreenOff=true,-,-
 archive,archive,D,BACK,0,0,NONE,F,-,-,-
 archive,archive,D,DIGIT,0,0,NONE,F,-,-,-
-archive,tshift,D,UP,0,0,QUICK_BAR,T,-,-,quick:AUDIO
+archive,tshift,D,UP,0,0,QUICK_BAR,T,-,-,quick:JUMP_TO_LIVE
 archive,tshift,D,LEFT,0,0,SCRUB,T,-,-,preview:-10000
 archive,tshift,D,DOWN,0,0,SCRUB,T,-,-,scrub:BAR
 # ---- QUICK_BAR §3.1.3, §3.4.1
-quick,quick,D,UP,0,0,QUICK_BAR,T,-,-,quick:AUDIO
+quick,quick,D,UP,0,0,QUICK_BAR,T,-,-,quick:TIME_SHIFT
 quick,quick,D,DOWN,0,0,NONE,T,-,-,-
 quick,quick,D,BACK,0,0,NONE,T,-,-,-
-quick,quick,D,RIGHT,0,0,QUICK_BAR,T,-,-,quick:ASPECT
-quick,quick,D,LEFT,0,0,QUICK_BAR,T,-,-,quick:AUDIO
+quick,quick,D,RIGHT,0,0,QUICK_BAR,T,-,-,quick:AUDIO
+quick,quick,D,LEFT,0,0,QUICK_BAR,T,-,-,quick:TIME_SHIFT
 quick,quick@SETTINGS,D,RIGHT,0,0,QUICK_BAR,T,-,-,quick:SETTINGS
 quick,quick,D,ZAP_UP,0,0,QUICK_BAR,T,zap=1,-,-
-quick,quick,D,SELECT,0,0,PICKER,T,-,-,picker:AUDIO;fromQuick
+# M6 (m6-timeshift §11.3): Pause first; OK pauses at once and focuses the scrub bar at the pause point
+quick,quick,D,SELECT,0,0,SCRUB,T,pauseLive,-,scrub:BAR
+quick,quick@AUDIO,D,SELECT,0,0,PICKER,T,-,-,picker:AUDIO;fromQuick
 quick,quick@ASPECT,D,SELECT,0,0,PICKER,T,-,-,picker:ASPECT;fromQuick
 quick,quick@SUBTITLES,D,SELECT,0,0,PICKER,T,-,-,picker:SUBTITLES;fromQuick
 quick,quick@FAVOURITE_ADD,D,SELECT,0,0,QUICK_BAR,T,setFavourite,-,quick:FAVOURITE_REMOVE
 quick,quick@START_OVER,D,SELECT,0,0,NONE,T,startOver,-,-
-quick,quick@TIME_SHIFT,D,SELECT,0,0,SCRUB,T,-,-,scrub:BAR;atLive
+quick,quick@TIME_SHIFT,D,SELECT,0,0,SCRUB,T,pauseLive,-,scrub:BAR
 quick,quick@PREVIOUS_CHANNEL,D,SELECT,0,0,NONE,T,previousChannel,-,passive
 quick,quick@STREAM_INFO,D,SELECT,0,0,QUICK_BAR,T,setStatsEnabled=true,-,stats:on
 quick,quick@VIDEO_DECODER,D,SELECT,0,0,PICKER,T,-,-,picker:VIDEO_DECODER;fromQuick
@@ -182,7 +185,7 @@ scrub,scrub,D,RIGHT,8,3500,SCRUB,T,-,-,preview:120000
 scrub,scrub_preview,D,SELECT,0,0,SCRUB,T,archiveSeek,-,-
 scrub,scrub,D,SELECT,0,0,SCRUB,T,archivePause,-,-
 scrub,scrub_paused,D,SELECT,0,0,SCRUB,T,archiveResume,-,-
-scrub,scrub_live,D,SELECT,0,0,SCRUB,T,pauseLive,-,-
+scrub,scrub_live,D,SELECT,0,0,SCRUB,T,pauseLive,PAUSE_TIP,-
 scrub,scrub_live,D,LEFT,0,0,SCRUB,T,-,-,atLive;preview:-10000
 scrub,scrub_live_preview,D,SELECT,0,0,SCRUB,T,rewindLive,-,-
 scrub,scrub_preview,D,BACK,0,0,SCRUB,T,-,-,preview:none
@@ -268,3 +271,82 @@ back,live,D,BACK,0,0,NONE,F,-,-,-
 back,live_backlist,D,BACK,0,0,CHANNELS,T,loadListLineup,-,byBack
 back,backlist_closed,D,BACK,0,0,NONE,F,-,-,-
 back,error_backlist,D,BACK,0,0,CHANNELS,T,loadListLineup,-,byBack
+# ---- M6 time-shift buffer (docs/design/m6-timeshift.md §11.1): the bufferCapable axis (buffered without archive "buf",
+# buffered with archive "buf_arch", HLS without archive "hls", buffer Off "buf_off", no space "buf_space"), the LOCAL
+# session ("buf_paused", "buf_tshift"), the dim card and the zap confirm (lead ruling 6)
+bare,buf,D,PLAY_PAUSE,0,0,NONE,T,pauseLive,-,scrub:unfocused
+bare,buf,D,PAUSE,0,0,NONE,T,pauseLive,-,-
+bare,buf_arch,D,PLAY_PAUSE,0,0,NONE,T,pauseLive,-,scrub:unfocused
+bare,hls,D,PLAY_PAUSE,0,0,NONE,T,pausePlain,PAUSE_NO_REWIND_HLS,-
+bare,buf_off,D,PLAY_PAUSE,0,0,NONE,T,pausePlain,PAUSE_NO_REWIND_OFF,-
+bare,buf_space,D,PLAY_PAUSE,0,0,NONE,T,pausePlain,PAUSE_NO_REWIND_SPACE,-
+bare,buf,D,SEEK_BACK,0,0,SCRUB,T,rewindLive,-,scrub:BAR
+bare,hls,D,SEEK_BACK,0,0,NONE,T,-,PAUSE_NO_REWIND_HLS,-
+bare,buf_off,D,SEEK_BACK,0,0,NONE,T,-,PAUSE_NO_REWIND_OFF,-
+bare,buf,D,TIME_SHIFT,0,0,SCRUB,T,-,-,scrub:BAR;atLive
+bare,hls,D,TIME_SHIFT,0,0,NONE,T,-,PAUSE_NO_REWIND_HLS,-
+bare,buf,D,UP,0,0,QUICK_BAR,T,-,-,quick:TIME_SHIFT
+bare,hls,D,UP,0,0,QUICK_BAR,T,-,-,quick:TIME_SHIFT
+bare,buf,D,START_OVER,0,0,NONE,T,startOver,-,-
+bare,buf_young,D,START_OVER,0,0,NONE,T,-,NO_CATCHUP,-
+bare,buf_young,D,SEEK_BACK,0,0,SCRUB,T,rewindLive,REWIND_START,scrub:BAR
+bare,buf_new,D,SEEK_BACK,0,0,SCRUB,T,rewindLive,REWIND_NOTHING_YET,scrub:BAR
+quick,buf_quick,D,SELECT,0,0,SCRUB,T,pauseLive,-,scrub:BAR
+quick,hls_quick,D,SELECT,0,0,NONE,T,pausePlain,PAUSE_NO_REWIND_HLS,-
+quick,hls_paused_quick,D,SELECT,0,0,NONE,T,resumePlain,-,-
+archive,buf_paused,D,PLAY_PAUSE,0,0,NONE,T,archiveResume,-,-
+archive,buf_paused,D,PLAY,0,0,NONE,T,archiveResume,-,-
+archive,buf_paused,D,LEFT,0,0,SCRUB,T,-,-,scrub:BAR;preview:-10000
+archive,buf_paused,D,SEEK_BACK,0,0,SCRUB,T,-,-,scrub:BAR;preview:-30000
+archive,buf_paused,D,UP,0,0,QUICK_BAR,T,-,-,quick:JUMP_TO_LIVE
+archive,buf_paused,D,ZAP_UP,0,0,NONE,T,zap=1,-,passive
+archive,buf_tshift,D,PLAY_PAUSE,0,0,NONE,T,archivePause,-,scrub:unfocused
+archive,buf_tshift,D,JUMP_TO_LIVE,0,0,NONE,T,jumpToLive,-,-
+archive,buf_tshift,D,UP,0,0,QUICK_BAR,T,-,-,quick:JUMP_TO_LIVE
+scrub,buf_scrub,D,UP,0,0,NONE,T,jumpToLive,-,-
+scrub,buf_scrub,D,SELECT,0,0,SCRUB,T,archiveResume,-,-
+scrub,buf_scrub_live,D,SELECT,0,0,SCRUB,T,pauseLive,PAUSE_TIP,-
+scrub,buf_scrub_live,D,LEFT,0,0,SCRUB,T,-,-,atLive;preview:-10000
+# the dimmed paused frame (§11.5): any key only restores the picture
+screen,buf_dim,D,SELECT,0,0,NONE,T,-,-,-
+# (fix pass, WP-D question) the zap key that wakes the picture also asks the zap confirm: the next press zaps
+screen,buf_dim,D,ZAP_UP,0,0,NONE,T,-,ZAP_CONFIRM,-
+screen,buf_dim,D,BACK,0,0,NONE,T,-,-,-
+screen,buf_dim,D,DIGIT,0,0,NONE,T,-,-,-
+screen,buf_dim,D,PLAY_PAUSE,0,0,NONE,T,-,-,-
+# zap confirm after a pause of 2 min (lead ruling 6): the first single-key zap only asks; the second within 3 s zaps
+archive,buf_paused_long,D,ZAP_UP,0,0,NONE,T,-,ZAP_CONFIRM,-
+archive,buf_paused_long,D,ZAP_DOWN,0,0,NONE,T,-,ZAP_CONFIRM,-
+archive,buf_paused_long,D,PREVIOUS_CHANNEL,0,0,NONE,T,-,ZAP_CONFIRM,-
+archive,buf_paused_long,Z,UP,0,0,NONE,T,-,ZAP_CONFIRM,-
+archive,buf_confirm,D,ZAP_UP,0,0,NONE,T,zap=1,-,passive
+archive,buf_confirm,D,PREVIOUS_CHANNEL,0,0,NONE,T,previousChannel,-,-
+archive,buf_confirm_late,D,ZAP_UP,0,0,NONE,T,-,ZAP_CONFIRM,-
+list,buf_paused_long_list,D,SELECT,0,0,NONE,T,-,-,-
+list,buf_paused_long_list1,D,SELECT,0,0,CHANNELS,T,tune,-,-
+# ---- fix pass, product (2026-10-19; docs/review/2026-10-19-timeshift-review-ux.md)
+# B1: OK on a paused time-shift with the bar unfocused or closed continues ("Press OK to continue"); playing behind: the list
+archive,buf_paused,D,SELECT,0,0,NONE,T,archiveResume,-,-
+archive,buf_paused_closed,D,SELECT,0,0,NONE,T,archiveResume,-,-
+archive,archive_paused,D,SELECT,0,0,NONE,T,archiveResume,-,-
+archive,live_paused,D,SELECT,0,0,NONE,T,archiveResume,-,-
+archive,buf_tshift,D,SELECT,0,0,CHANNELS,T,loadListLineup,-,column:CHANNELS
+bare,plain_paused,D,SELECT,0,0,CHANNELS,T,loadListLineup,-,column:CHANNELS
+# buffered with catch-up: RW and the quick bar's Pause
+bare,buf_arch,D,SEEK_BACK,0,0,SCRUB,T,rewindLive,-,scrub:BAR
+quick,buf_arch_quick,D,SELECT,0,0,SCRUB,T,pauseLive,-,scrub:BAR
+# the other Up/Down settings on a buffered channel, live and paused (a short pause: no confirm)
+bare,buf,Z,UP,0,0,NONE,T,zap=1,-,passive
+bare,buf,ZI,UP,0,0,NONE,T,zap=-1,-,passive
+bare,buf,L,DOWN,0,0,CHANNELS,T,loadListLineup,-,column:CHANNELS
+archive,buf_paused,Z,DOWN,0,0,NONE,T,zap=-1,-,passive
+archive,buf_paused,ZI,UP,0,0,NONE,T,zap=-1,-,passive
+archive,buf_paused,L,UP,0,0,CHANNELS,T,loadListLineup,-,column:CHANNELS
+# S7: every buffer state has its reason; NO_CATCHUP never answers a pause or a rewind
+bare,buf_notts,D,PLAY_PAUSE,0,0,NONE,T,pausePlain,PAUSE_NO_REWIND_FORMAT,-
+bare,buf_notts,D,SEEK_BACK,0,0,NONE,T,-,PAUSE_NO_REWIND_FORMAT,-
+bare,buf_storage,D,PLAY_PAUSE,0,0,NONE,T,pausePlain,PAUSE_NO_REWIND_STORAGE,-
+bare,buf_storage,D,SEEK_BACK,0,0,NONE,T,-,REWIND_STOPPED_STORAGE,-
+bare,plain,D,PLAY_PAUSE,0,0,NONE,T,pausePlain,-,-
+# MEDIA_STOP (JUMP_TO_LIVE) while paused LOCAL
+archive,buf_paused,D,JUMP_TO_LIVE,0,0,NONE,T,jumpToLive,-,-

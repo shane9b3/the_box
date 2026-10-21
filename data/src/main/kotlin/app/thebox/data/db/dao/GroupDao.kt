@@ -29,13 +29,17 @@ data class PanelGroupRow(
 /** `channel_group` (refresh-owned, read here) and `group_prefs` (user data). */
 @Dao
 interface GroupDao {
-    /** Visible groups of a playlist and kind, with the parental predicate on the group level. */
+    /**
+     * Visible groups of a playlist and kind, with the parental predicate on the group level. v5 (docs/design/m6-channel-
+     * editor.md §3.6 row 11): the count is effective (native channels not moved away, plus channels moved in).
+     */
     @Query(
         """
         SELECT g.*, gp.custom_name, gp.custom_sort_index,
-               (SELECT COUNT(*) FROM channel c WHERE c.group_id = g.id AND c.missing_since IS NULL) AS channel_count
+               COALESCE(ec.n, 0) AS channel_count
         FROM channel_group g
         LEFT JOIN group_prefs gp ON gp.playlist_id = g.playlist_id AND gp.kind = g.kind AND gp.group_key = g.group_key
+        LEFT JOIN (""" + EFFECTIVE_COUNTS + """) ec ON ec.gid = g.id
         WHERE g.playlist_id = :playlistId AND g.kind = :kind AND g.missing_since IS NULL
           AND COALESCE(gp.hidden, 0) = 0
           AND g.rule_hidden = 0
@@ -53,11 +57,12 @@ interface GroupDao {
     @Query(
         """
         SELECT g.*, gp.custom_name, gp.custom_sort_index,
-               (SELECT COUNT(*) FROM channel c WHERE c.group_id = g.id AND c.missing_since IS NULL) AS channel_count,
+               COALESCE(ec.n, 0) AS channel_count,
                CASE WHEN :access != 0 AND COALESCE(gp.locked, CASE WHEN :access IN (1, 3) THEN g.is_adult ELSE 0 END, 0) = 1
                     THEN 1 ELSE 0 END AS locked
         FROM channel_group g
         LEFT JOIN group_prefs gp ON gp.playlist_id = g.playlist_id AND gp.kind = g.kind AND gp.group_key = g.group_key
+        LEFT JOIN (""" + EFFECTIVE_COUNTS + """) ec ON ec.gid = g.id
         WHERE g.playlist_id = :playlistId AND g.kind = :kind AND g.missing_since IS NULL
           AND COALESCE(gp.hidden, 0) = 0
           AND g.rule_hidden = 0
@@ -104,9 +109,30 @@ interface GroupDao {
     )
     suspend fun upsertGroupSortIndex(playlistId: Long, kind: Int, groupKey: String, index: Int, now: Long)
 
+    /**
+     * (docs/design/m6-channel-editor.md §3.5) Column-targeted rename for the channel editor (not the full-row [upsertPrefs],
+     * which would clobber hidden/lock/order in a read-modify-write race); null = the provider's name.
+     */
+    @Query(UPSERT_GROUP_CUSTOM_NAME)
+    suspend fun upsertGroupCustomName(playlistId: Long, kind: Int, groupKey: String, name: String?, now: Long)
+
     /** Reorder: rewrites a dense `custom_sort_index` (0, 1, …) for [orderedKeys] of one playlist/kind in one transaction. */
     @Transaction
     suspend fun setGroupOrder(playlistId: Long, kind: Int, orderedKeys: List<String>, now: Long) {
         orderedKeys.forEachIndexed { i, key -> upsertGroupSortIndex(playlistId, kind, key, i, now) }
+    }
+
+    companion object {
+        /**
+         * The effective channel count per group of `:playlistId` (§3.6 rows 11–13): one grouped pass over the playlist,
+         * joined back by `gid`. Missing channels are left out.
+         */
+        const val EFFECTIVE_COUNTS = "SELECT g.id AS gid, COUNT(*) AS n FROM channel c " + ChannelDao.EFFECTIVE_GROUP_JOINS +
+            " WHERE c.playlist_id = :playlistId AND c.missing_since IS NULL GROUP BY g.id"
+
+        const val UPSERT_GROUP_CUSTOM_NAME = """
+        INSERT INTO group_prefs(playlist_id, kind, group_key, hidden, custom_name, updated_at)
+        VALUES (:playlistId, :kind, :groupKey, 0, :name, :now)
+        ON CONFLICT(playlist_id, kind, group_key) DO UPDATE SET custom_name = :name, updated_at = :now"""
     }
 }

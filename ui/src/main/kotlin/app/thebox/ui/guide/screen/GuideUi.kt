@@ -108,7 +108,7 @@ fun KeyCap(keys: String, modifier: Modifier = Modifier) {
         modifier
             .border(1.dp, GuideUi.White22, RoundedCornerShape(DesignTokens.Radii.KeyCap))
             .padding(horizontal = 10.dp, vertical = 3.dp),
-    ) { Line(keys, GuideUi.mono(14, color = GuideUi.Fg55)) }
+    ) { Line(keys, GuideUi.mono(18, color = GuideUi.Fg55)) }
 }
 
 /**

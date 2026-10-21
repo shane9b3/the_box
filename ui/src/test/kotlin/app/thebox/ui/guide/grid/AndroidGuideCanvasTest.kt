@@ -110,6 +110,29 @@ class AndroidGuideCanvasTest {
     }
 
     @Test
+    fun chevronsAreLeftPointingTintedMasksAtTheirSize() {
+        // Decision 2026-10-19: 12 × 24 design px, polyline (9.5, 2.5) → (2.5, 12) → (9.5, 21.5), stroke 3.
+        for ((asset, argb) in listOf(GuideAsset.EDGE_CHEVRON to 0xFF5CA8F2.toInt(), GuideAsset.CLIP_CHEVRON to 0xFFFF0000.toInt())) {
+            val (bmp, gc) = surface()
+            gc.drawAsset(asset, 20f, 20f, 32f, 44f, argb)
+            assertTrue("$asset tip of the point is inked", close(argb, bmp.getPixel(20 + 3, 20 + 12), 40))
+            assertTrue("$asset top arm end is inked", close(argb, bmp.getPixel(20 + 9, 20 + 3), 60))
+            assertTrue("$asset bottom arm end is inked", close(argb, bmp.getPixel(20 + 9, 20 + 21), 60))
+            assertTrue("$asset open on the right at mid height", close(Color.BLACK, bmp.getPixel(20 + 10, 20 + 12)))
+            assertTrue("$asset nothing outside the box", close(Color.BLACK, bmp.getPixel(35, 32)) && close(Color.BLACK, bmp.getPixel(17, 32)))
+            var lit = 0
+            for (y in 20 until 44) for (x in 20 until 32) if (!close(Color.BLACK, bmp.getPixel(x, y), 40)) lit++
+            assertTrue("$asset stroke ink ($lit px)", lit in 40..160)
+        }
+        // At 2× the mask is rasterised at 24 × 48, not stretched from 12 × 24.
+        val big = GuideAssets(2f)
+        val m = big.bitmap(GuideAsset.EDGE_CHEVRON)
+        assertEquals(24, m.width); assertEquals(48, m.height)
+        assertTrue("both chevrons share one mask", big.bitmap(GuideAsset.CLIP_CHEVRON) === m)
+        assertEquals("the ↺ mask is 2× the 20 px label glyph", 80, big.bitmap(GuideAsset.ARCHIVE_GLYPH).width)
+    }
+
+    @Test
     fun drawsImagesWithAlpha() {
         val (bmp, gc) = surface()
         val logo = Bitmap.createBitmap(10, 10, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.WHITE) }

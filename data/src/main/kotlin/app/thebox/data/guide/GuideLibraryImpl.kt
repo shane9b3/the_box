@@ -167,11 +167,18 @@ class GuideLibraryImpl @Inject constructor(
         when (action) {
             GroupAction.HIDE -> groupDao.upsertGroupHidden(src.playlistId, 0, src.groupKey, true, clock.now())
             GroupAction.MOVE_UP, GroupAction.MOVE_DOWN -> {
-                // The panel's order is the visible order; locked groups count as visible here so a later unlock keeps it.
-                val keys = groupDao.groups(src.playlistId, 0, true).first().map { it.group.groupKey }.toMutableList()
+                // (docs/design/m6-channel-editor.md §3.5 rule d) Swap with the nearest *visible* group inside the full
+                // ordered key list (hidden and rule-hidden groups included, GroupAdminDao.orderedKeys), then rewrite that
+                // whole list: hidden groups keep their slots and no index collides. The editor and the Groups page
+                // rewrite the same key set. Locked groups count as visible here so a later unlock keeps the order.
+                val visible = groupDao.groups(src.playlistId, 0, true).first().filter { it.channelCount > 0 }.mapTo(HashSet()) { it.group.groupKey }
+                val keys = db.groupAdminDao().orderedKeys(src.playlistId, 0).toMutableList()
                 val i = keys.indexOf(src.groupKey)
-                val j = if (action == GroupAction.MOVE_UP) i - 1 else i + 1
-                if (i < 0 || j < 0 || j >= keys.size) return@withContext
+                if (i < 0) return@withContext
+                val step = if (action == GroupAction.MOVE_UP) -1 else 1
+                var j = i + step
+                while (j in keys.indices && keys[j] !in visible) j += step
+                if (j !in keys.indices) return@withContext
                 keys[i] = keys[j].also { keys[j] = keys[i] }
                 groupDao.setGroupOrder(src.playlistId, 0, keys, clock.now())
             }

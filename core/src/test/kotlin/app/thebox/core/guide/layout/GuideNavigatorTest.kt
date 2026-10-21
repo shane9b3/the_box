@@ -58,7 +58,7 @@ class GuideNavigatorTest {
         assertEquals(at(19, 30) to at(20), f.cellStart to f.cellEnd)
         assertEquals(3, f.topRow)
         assertEquals(0, nav.focusAt(0, now, c).topRow)
-        assertEquals(4, nav.focusAt(9, now, c).topRow, "clamped to size − 6")
+        assertEquals(5, nav.focusAt(9, now, c).topRow, "clamped to size − 5")
     }
 
     @Test
@@ -157,33 +157,33 @@ class GuideNavigatorTest {
     }
 
     @Test
-    fun verticalScrollKeepsFocusAtIndexOneToFour() {
+    fun verticalScrollKeepsFocusAtIndexOneToThree() {
         val c = ctx(null, size = 40)
         var f = nav.focusAt(0, now, c)
         val tops = ArrayList<Int>()
-        repeat(20) { f = moved(nav.move(f, GridMove.DOWN, 0, c)); tops += f.topRow; assertTrue(f.row - f.topRow in 1..4 || f.topRow == 0) }
-        assertEquals(listOf(0, 0, 0, 0, 1, 2), tops.take(6))
-        repeat(20) { f = moved(nav.move(f, GridMove.UP, 0, c)); assertTrue(f.row - f.topRow in 1..4 || f.topRow == 0) }
+        repeat(20) { f = moved(nav.move(f, GridMove.DOWN, 0, c)); tops += f.topRow; assertTrue(f.row - f.topRow in 1..3 || f.topRow == 0) }
+        assertEquals(listOf(0, 0, 0, 1, 2, 3), tops.take(6))
+        repeat(20) { f = moved(nav.move(f, GridMove.UP, 0, c)); assertTrue(f.row - f.topRow in 1..3 || f.topRow == 0) }
         assertEquals(0, f.row)
-        // At the end of the list focus reaches index 5.
+        // At the end of the list focus reaches index 4 (5 visible rows, owner ruling 2026-10-17).
         var g = nav.focusAt(39, now, c)
-        assertEquals(34, g.topRow)
+        assertEquals(35, g.topRow)
         g = moved(nav.move(g, GridMove.UP, 0, c))
-        assertEquals(34, g.topRow)
+        assertEquals(35, g.topRow)
     }
 
     @Test
-    fun pageMovesSixRowsAndSixTopRows() {
+    fun pageMovesFiveRowsAndFiveTopRows() {
         val c = ctx(halfHours(30), size = 30)
         val f = moved(nav.move(focus(8, at(19, 30), at(20), now, top = 6), GridMove.PAGE_DOWN, 0, c))
-        assertEquals(14, f.row); assertEquals(12, f.topRow); assertEquals(now, f.anchorMin)
+        assertEquals(13, f.row); assertEquals(11, f.topRow); assertEquals(now, f.anchorMin)
         val b = moved(nav.move(f, GridMove.PAGE_UP, 0, c))
         assertEquals(8, b.row); assertEquals(6, b.topRow)
         val top = moved(nav.move(focus(3, at(19, 30), at(20), now, top = 2), GridMove.PAGE_UP, 0, c))
         assertEquals(0, top.row); assertEquals(0, top.topRow)
         assertEquals(GridMoveResult.Blocked, nav.move(top, GridMove.PAGE_UP, 0, c))
         val end = moved(nav.move(focus(27, at(19, 30), at(20), now, top = 24), GridMove.PAGE_DOWN, 0, c))
-        assertEquals(29, end.row); assertEquals(24, end.topRow)
+        assertEquals(29, end.row); assertEquals(25, end.topRow)
         assertEquals(GridMoveResult.Blocked, nav.move(end, GridMove.PAGE_DOWN, 0, c))
     }
 
@@ -315,6 +315,7 @@ class GuideNavigatorTest {
         val rnd = Random(20261014)
         val moves = GridMove.entries
         var steps = 0
+        var probes = 0
         repeat(10_000) { walk ->
             val size = 1 + rnd.nextInt(30)
             val earliest = now - 2 * 1440 - rnd.nextInt(60)
@@ -336,6 +337,10 @@ class GuideNavigatorTest {
                     else -> 0
                 }
                 val ctx = c()
+                // (decision 2026-10-19, review S7 item 1) the probe is the Left rule: leftEdge first (both use scratch).
+                val probe = nav.leftEdge(f, ctx)
+                assertEquals(nav.move(f, GridMove.LEFT, 0, ctx) === GridMoveResult.LeftEdge, probe, "walk $walk step $it: leftEdge probe vs LEFT ($f)")
+                probes++
                 when (val r = nav.move(f, mv, arg, ctx)) {
                     is GridMoveResult.Moved -> { f = r.focus; check(f, ctx, "walk $walk step $it $mv"); steps++ }
                     GridMoveResult.TopEdge -> assertEquals(0, f.row)
@@ -345,6 +350,7 @@ class GuideNavigatorTest {
             }
         }
         assertTrue(steps > 50_000, "walks exercised $steps moves")
+        assertTrue(probes > 50_000, "walks probed Left $probes times")
     }
 
     private fun check(f: GridFocus, c: GridContext, where: String) {
@@ -357,8 +363,8 @@ class GuideNavigatorTest {
         ok(f.anchorMin in c.earliestMin until c.latestMin, "anchor within limits")
         ok(f.anchorMin >= f.windowStartMin && f.anchorMin < f.windowStartMin + 180, "anchor visible")
         ok(f.row in 0 until c.lineupSize, "row in lineup")
-        ok(f.topRow in 0..maxOf(0, c.lineupSize - 6), "top row clamped")
-        ok(f.row - f.topRow in 0..5, "focus row visible")
+        ok(f.topRow in 0..maxOf(0, c.lineupSize - 5), "top row clamped")
+        ok(f.row - f.topRow in 0..4, "focus row visible")
         val packed = nav.cellAt(f.row, f.cellStart, c)
         ok((packed shr 32).toInt() == f.cellStart && packed.toInt() == f.cellEnd, "focus is a real cell")
         ok(nav.kindAt(f.row, f.cellStart, c) == f.cellKind, "kind matches")

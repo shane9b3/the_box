@@ -556,7 +556,7 @@ class GuideWindowPagerImpl(
     companion object {
         private const val TAG = "GuidePager"
         const val THREAD_NAME = "box-guide-epg"
-        const val VISIBLE_ROWS = 6
+        const val VISIBLE_ROWS = app.thebox.core.guide.GuideGeometry.VISIBLE_ROWS
         const val VISIBLE_MIN = 180
         const val MARGIN_ROWS = 2
         const val MARGIN_MIN = 60

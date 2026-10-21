@@ -71,18 +71,18 @@ object DesignTokens {
         val Title = TypeToken(64.sp, FontWeight.SemiBold, lineHeight = 1.02.em, letterSpacing = (-0.025).em)
 
         /** type.miniTitle 30/600. */
-        val MiniTitle = TypeToken(30.sp, FontWeight.SemiBold)
+        val MiniTitle = TypeToken(36.sp, FontWeight.SemiBold)
 
         /** type.clock 34/500 tabular. */
-        val Clock = TypeToken(34.sp, FontWeight.Medium, tabularNums = true)
+        val Clock = TypeToken(40.sp, FontWeight.Medium, tabularNums = true)
 
         /** type.body 21 lh 1.45. */
-        val Body = TypeToken(21.sp, lineHeight = 1.45.em)
+        val Body = TypeToken(26.sp, lineHeight = 1.4.em)
 
-        /** type.cellTitle 18/600. */
-        val CellTitle = TypeToken(18.sp, FontWeight.SemiBold)
+        /** type.cellTitle 26/600. */
+        val CellTitle = TypeToken(26.sp, FontWeight.SemiBold)
 
-        /** type.cellTime 13 mono. */
-        val CellTime = TypeToken(13.sp, mono = true)
+        /** type.cellTime 20 mono. */
+        val CellTime = TypeToken(20.sp, mono = true)
     }
 }

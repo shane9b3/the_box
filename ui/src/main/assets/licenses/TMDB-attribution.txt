@@ -1,0 +1,7 @@
+This product uses the TMDB API but is not endorsed or certified by TMDB.
+
+Program posters are fetched from The Movie Database (https://www.themoviedb.org) with the API key you entered
+under Settings > TV guide > Program posters. Only the program title is sent. Poster images are served from
+image.tmdb.org and cached on this device.
+
+Use of the TMDB API is subject to the TMDB API terms of use: https://www.themoviedb.org/api-terms-of-use

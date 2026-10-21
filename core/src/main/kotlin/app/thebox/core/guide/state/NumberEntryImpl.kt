@@ -77,6 +77,15 @@ class NumberEntryImpl : NumberEntry {
         commitAfterMs = maxOf(ms, NUMBER_PREVIEW_MS + 1)
     }
 
+    /**
+     * (M6 time-shift, docs/design/m6-timeshift.md §11.1, lead ruling 6) A commit was held back for the zap confirm: the
+     * digits stay, the auto-commit and the preview are disarmed, so only OK (or a new digit) commits again.
+     */
+    fun holdForConfirm() {
+        cursor = -1
+        lastDigitMs = NO_DEADLINE
+    }
+
     override fun clear() {
         sb.setLength(0)
         cursor = -1

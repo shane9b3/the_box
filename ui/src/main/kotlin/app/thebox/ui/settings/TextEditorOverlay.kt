@@ -165,11 +165,11 @@ fun TextEditorOverlay(
                 .padding(SettingsUi.CARD_PAD.dp),
             verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            Line(editor.label, GuideUi.sans(22, FontWeight.SemiBold))
+            Line(editor.label, GuideUi.sans(28, FontWeight.SemiBold))
             if (!keyboardAvailable) {
                 Column(Modifier.testTag(EDITOR_NO_KEYBOARD_TAG), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Line(stringResource(R.string.settings_ui_no_keyboard), GuideUi.sans(26, FontWeight.SemiBold), maxLines = 2)
-                    Line(stringResource(R.string.settings_ui_no_keyboard_body), GuideUi.sans(20, color = SettingsUi.Fg70), maxLines = 2)
+                    Line(stringResource(R.string.settings_ui_no_keyboard), GuideUi.sans(32, FontWeight.SemiBold), maxLines = 2)
+                    Line(stringResource(R.string.settings_ui_no_keyboard_body), GuideUi.sans(26, color = SettingsUi.Fg70), maxLines = 2)
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                     EditorButton(stringResource(R.string.settings_ui_phone_setup), EDITOR_PHONE_TAG, Modifier.focusRequester(phone), onFocus = { islandFocused = it }) { onPhoneSetup() }
@@ -189,7 +189,7 @@ fun TextEditorOverlay(
                     value = value,
                     onValueChange = { value = it },
                     singleLine = true,
-                    textStyle = GuideUi.mono(26),
+                    textStyle = GuideUi.mono(32),
                     cursorBrush = SolidColor(SettingsUi.Accent),
                     visualTransformation = if (masked && !reveal) PasswordVisualTransformation() else VisualTransformation.None,
                     keyboardOptions = KeyboardOptions(keyboardType = keyboardTypeFor(editor.hint, masked), imeAction = ImeAction.Done, autoCorrectEnabled = false),
@@ -213,7 +213,7 @@ fun TextEditorOverlay(
             }
             // The 2 px accent underline while the field is focused.
             Box(Modifier.fillMaxWidth().height(2.dp).background(if (fieldFocused) SettingsUi.Accent else SettingsUi.White12))
-            editor.error?.let { Line(it, GuideUi.sans(18, color = SettingsUi.Amber), Modifier.testTag(EDITOR_ERROR_TAG), maxLines = 2) }
+            editor.error?.let { Line(it, GuideUi.sans(24, color = SettingsUi.Amber), Modifier.testTag(EDITOR_ERROR_TAG), maxLines = 2) }
             if (editor.chips.isNotEmpty()) {
                 Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     editor.chips.forEachIndexed { i, chip ->
@@ -274,7 +274,7 @@ private fun EditorChip(label: String, index: Int, modifier: Modifier, onFocus: (
         fill = SettingsUi.White08,
         border = SettingsUi.White16,
         padding = PaddingValues(horizontal = 18.dp, vertical = 10.dp),
-    ) { c -> Line(label, GuideUi.mono(18, color = c)) }
+    ) { c -> Line(label, GuideUi.mono(24, color = c)) }
 }
 
 @Composable

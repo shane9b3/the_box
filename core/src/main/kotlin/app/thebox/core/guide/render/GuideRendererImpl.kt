@@ -28,7 +28,9 @@ import kotlin.math.floor
  * 1. panel fill + border; 2. save, clip to the content box; 3. ruler (ticks, labels, the contextual label);
  * 4. clip to the rows area; per visible row: label cell, then save/clip to the row's timeline, archive band, cells
  * except the focused one, restore; 5. the focused cell (shadow, fill, ring, text, progress); 6. the now line
- * (glow, line, dot); 7. the channel-number bubble; 8. restore.
+ * (glow, line, dot); 7. the channel-number bubble; 8. restore; 9. (decision 2026-10-19) the left-edge cue
+ * ([GuideAsset.EDGE_CHEVRON]) in the grid's left gutter, outside the content clip and outside every row recording.
+ * The clip cue ([GuideAsset.CLIP_CHEVRON]) is part of step 5: it sits inside the focused cell, which is never recorded.
  *
  * (code review 2026-10-14, O-2) Step 4 runs in two passes over the visible rows, backgrounds then text (cells do not
  * overlap, so the image is the same), each in its own trace section: `guide-draw-cells` and `guide-draw-text`; steps
@@ -72,6 +74,8 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
     private var now = 0
     private var contentRight = 0f
     private var labels: TimeLabels? = null
+    /** Right edge (device px) of the clip chevron while the focused cell is drawn with it, else −1 (decision 2026-10-19). */
+    private var clipCueRight = -1f
 
     /** Text-fit cache counters (hand-off measurements). */
     val textFitHits: Long get() = titleFit.hits + nameFit.hits
@@ -139,6 +143,26 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
 
         canvas.endSection()
         canvas.restoreToCount(outer)
+
+        // 9. Left-edge cue (decision 2026-10-19): in the 16 px gutter left of labelLeft, which the content clip cuts
+        // away, so it is drawn after that clip is restored. One asset op; no row key depends on it.
+        if (frame.leftEdgeCue && frame.gridFocused) {
+            canvas.beginSection(SECTION_CHROME)
+            drawEdgeCue(canvas, frame, m, scrollRow)
+            canvas.endSection()
+        }
+    }
+
+    /** [GuideAsset.EDGE_CHEVRON]: 12 × 24 at design x 67, centred on the focused row; skipped when that row is off the rows area. */
+    private fun drawEdgeCue(canvas: GuideCanvas, frame: GuideFrame, m: GuideMetrics, scrollRow: Float) {
+        val f = frame.focus ?: return
+        if (f.row < 0 || f.row >= frame.rows.size) return
+        val mid = m.rowTopPx(f.row - scrollRow) + m.rowHeight / 2
+        val h = s * CHEVRON_H / 2
+        if (mid < m.rowsTop + h || mid > m.rowsBottom - h) return
+        val l = m.panelLeft + Math.round(s * EDGE_CUE_DX)
+        val r = l + Math.round(s * CHEVRON_W)
+        canvas.drawAsset(GuideAsset.EDGE_CHEVRON, l, mid - h, r, mid + h, C.ACCENT)
     }
 
     private fun drawRows(canvas: GuideCanvas, frame: GuideFrame, m: GuideMetrics, scrollRow: Float) {
@@ -340,7 +364,7 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
             right -= s * (TUNED_DOT + LABEL_ICON_GAP)
         }
         if (ch.archiveDays > 0) {
-            val g = s * GLYPH
+            val g = s * LABEL_GLYPH
             val asset = if (isSuspect(frame, ch)) GuideAsset.ARCHIVE_GLYPH_HOLLOW else GuideAsset.ARCHIVE_GLYPH
             if (bg) canvas.drawAsset(asset, right - g, mid - g / 2, right, mid + g / 2, C.TEXT_LABEL)
             right -= g + s * LABEL_ICON_GAP
@@ -490,21 +514,21 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
         val narrow = x1 - x0 < s * G.NARROW_CELL_W
         val pad = s * if (narrow) G.CELL_PAD_X_NARROW else G.CELL_PAD_X
         var textX = maxOf(x0, m.timelineLeft) + pad
+        // Decision 2026-10-19: the clip chevron leads the focused cell; the title starts after it when the pad is too
+        // small to clear it (only while the cue is on; the focused cell is drawn outside every row recording).
+        if (focused && clipCueRight >= 0f && textX - clipCueRight < s * CLIP_CUE_MIN_GAP) textX = clipCueRight + s * CLIP_CUE_TEXT_GAP
         val rightEdge = x1 - pad
         if (pass != PASS_BG && rightEdge - textX >= s * G.MIN_TEXT_W) {
-            val twoLines = programme && !narrow
+            // Owner ruling 2026-10-17: cells draw the title only (no time line); the ruler carries the times.
             val tStyle = if (programme) GuideTextStyle.CELL_TITLE else GuideTextStyle.NO_INFO
             val ti = tStyle.ordinal
-            val hi = GuideTextStyle.CELL_TIME.ordinal
-            val titleBase: Float
-            val timeBase: Float
-            if (twoLines) {
-                val block = asc[ti] + desc[ti] + s * G.CELL_LINE_GAP + asc[hi] + desc[hi]
-                titleBase = top + (bottom - top - block) / 2 + asc[ti]
-                timeBase = titleBase + desc[ti] + s * G.CELL_LINE_GAP + asc[hi]
-            } else {
-                titleBase = centredBaseline(top, bottom, tStyle)
-                timeBase = 0f
+            val titleBase = centredBaseline(top, bottom, tStyle)
+            if (archived) {
+                // The catch-up cue (↺, hollow when suspect) now leads the title instead of the removed time line.
+                val g = s * CELL_GLYPH
+                canvas.drawAsset(if (suspect) GuideAsset.ARCHIVE_GLYPH_HOLLOW else GuideAsset.ARCHIVE_GLYPH,
+                    textX, titleBase - g * 0.9f, textX + g, titleBase + g * 0.1f, textColor)
+                textX += g + s * GLYPH_GAP
             }
             if (programme && start > now && frame.reminders.contains(ch.identityHash, d.cellRawStart[c])) {
                 val rd = s * REMINDER_DOT / 2
@@ -519,7 +543,6 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
                     rtlFlag = (flags and CellFlags.RTL) != 0, complex = (flags and CellFlags.COMPLEX) != 0,
                     baseline = titleBase, argb = textColor, alignRight = true)
             }
-            if (twoLines) drawTimeLine(canvas, d, c, textX, rightEdge, timeBase, textColor, archived, suspect)
         }
 
         if (onNow && pass != PASS_TEXT) {
@@ -531,40 +554,6 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
             if (bx1 > bx0) canvas.fillRect(bx0, pb - ph, bx0 + (bx1 - bx0) * frac, pb, if (focused) C.ACCENT else C.CELL_PROGRESS)
         }
     }
-
-    private fun drawTimeLine(canvas: GuideCanvas, d: GuideWindowData, c: Int, x: Float, rightEdge: Float, baseline: Float, textColor: Int, archived: Boolean, suspect: Boolean) {
-        val color = alpha(textColor, C.TEXT_TIME_ALPHA)
-        var tx = x
-        if (archived) {
-            val g = s * GLYPH
-            canvas.drawAsset(if (suspect) GuideAsset.ARCHIVE_GLYPH_HOLLOW else GuideAsset.ARCHIVE_GLYPH,
-                tx, baseline - g * 0.9f, tx + g, baseline + g * 0.1f, textColor)
-            tx += g + s * GLYPH_GAP
-        }
-        val avail = rightEdge - tx
-        if (avail <= 0f) return
-        val text = d.cellTimeText[c]
-        if (text != null) {
-            val w = scaledWidth(d.cellTimeWidth[c], d.metricsScale).let { if (it < 0f) width(text, GuideTextStyle.CELL_TIME) else it }
-            if (w <= avail) canvas.drawText(text, 0, text.length, tx, baseline, GuideTextStyle.CELL_TIME, color)
-            return
-        }
-        // No pre-built time text (snapshot built without one): three pre-built pieces, drawn whole or not at all.
-        val l = labels ?: return
-        val a = l.hm(d.cellStart[c])
-        val b = l.hm(d.cellEnd[c])
-        val wa = width(a, GuideTextStyle.CELL_TIME)
-        val wd = width(TIME_DASH, GuideTextStyle.CELL_TIME)
-        val wb = width(b, GuideTextStyle.CELL_TIME)
-        if (wa + wd + wb > avail) return
-        canvas.drawText(a, 0, a.length, tx, baseline, GuideTextStyle.CELL_TIME, color)
-        canvas.drawText(TIME_DASH, 0, TIME_DASH.length, tx + wa, baseline, GuideTextStyle.CELL_TIME, color)
-        canvas.drawText(b, 0, b.length, tx + wa + wd, baseline, GuideTextStyle.CELL_TIME, color)
-    }
-
-    // ------------------------------------------------------------------------------------------------------------
-    // Focused cell, bubble
-    // ------------------------------------------------------------------------------------------------------------
 
     private fun drawFocused(canvas: GuideCanvas, frame: GuideFrame, m: GuideMetrics, scrollRow: Float) {
         val f = frame.focus ?: return
@@ -589,7 +578,16 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
             canvas.drawAsset(GuideAsset.FOCUS_SHADOW, x0 - sh, top - sh + dy, x1 + sh, bottom + sh + dy, C.SHADOW)
             canvas.fillRoundRect(x0, top, x1, bottom, rr, C.FG)
             canvas.strokeRoundRect(x0 - ring / 2, top - ring / 2, x1 + ring / 2, bottom + ring / 2, rr + ring / 2, ring, C.ACCENT)
+            // Clip cue (decision 2026-10-19): at the cell's visible left inner edge, in the focused title's colour.
+            val cueL = if (frame.clipCue) Math.round(maxOf(x0, m.timelineLeft) + s * CLIP_CUE_DX).toFloat() else 0f
+            if (frame.clipCue) clipCueRight = cueL + Math.round(s * CHEVRON_W)
             if (ch != null && c >= 0) drawCell(canvas, frame, m, ch, d!!, c, top, bottom, focused = true)
+            if (frame.clipCue) {
+                val mid = (top + bottom) / 2
+                val h = s * CHEVRON_H / 2
+                canvas.drawAsset(GuideAsset.CLIP_CHEVRON, cueL, mid - h, clipCueRight, mid + h, C.CANVAS)
+                clipCueRight = -1f
+            }
         } else {
             if (ch != null && c >= 0) drawCell(canvas, frame, m, ch, d!!, c, top, bottom, focused = false)
             else canvas.fillRoundRect(x0, top, x1, bottom, rr, C.SKELETON)
@@ -730,7 +728,20 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
 
         // Design px not in GuideGeometry (prototype / §3.6.3–§3.6.4).
         private const val TUNED_DOT = 7f
-        private const val GLYPH = 12f
+        /** In-cell ↺ (leads a catch-up title). */
+        private const val CELL_GLYPH = 12f
+        /** Label-column ↺ (decision 2026-10-19: 12 → 20 so "this channel has catch-up" reads at 10 feet). */
+        private const val LABEL_GLYPH = 20f
+        /** Decision 2026-10-19 chevrons (EDGE_CHEVRON, CLIP_CHEVRON): 12 × 24 design px. */
+        private const val CHEVRON_W = 12f
+        private const val CHEVRON_H = 24f
+        /** Edge chevron left = panel left (x 64) + 3 = design x 67 (2 px clear of the 1 px border; ends at 79, 2 px before labelLeft 81). */
+        private const val EDGE_CUE_DX = 3f
+        /** Clip chevron left = the focused cell's visible left + 4. */
+        private const val CLIP_CUE_DX = 4f
+        /** The title moves right of the clip chevron when less than this gap is left, and then starts this far after it. */
+        private const val CLIP_CUE_MIN_GAP = 2f
+        private const val CLIP_CUE_TEXT_GAP = 4f
         private const val GLYPH_GAP = 6f
         private const val LABEL_ICON_GAP = 8f
         private const val REMINDER_DOT = 8f

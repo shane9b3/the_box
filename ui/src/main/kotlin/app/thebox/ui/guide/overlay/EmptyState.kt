@@ -42,18 +42,18 @@ fun EmptyState(empty: EmptyKind?, modifier: Modifier = Modifier, debugHint: Bool
             contentAlignment = Alignment.Center,
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                Line(stringResource(title), GuideUi.sans(20, FontWeight.SemiBold))
-                Line(stringResource(step), GuideUi.sans(18, color = GuideUi.Fg70))
+                Line(stringResource(title), GuideUi.sans(26, FontWeight.SemiBold))
+                Line(stringResource(step), GuideUi.sans(24, color = GuideUi.Fg70))
             }
         }
         return
     }
     Box(modifier.offset(64.dp, 549.dp).width(1792.dp).height(400.dp).testTag(EMPTY_STATE_TAG), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            Line(stringResource(title), GuideUi.sans(30, FontWeight.SemiBold))
-            Line(stringResource(step), GuideUi.sans(20, color = GuideUi.Fg70))
+            Line(stringResource(title), GuideUi.sans(36, FontWeight.SemiBold))
+            Line(stringResource(step), GuideUi.sans(26, color = GuideUi.Fg70))
             if (debugHint && kind == EmptyKind.NO_PLAYLIST) {
-                Line(stringResource(R.string.guide_empty_no_playlist_debug), GuideUi.mono(15, color = GuideUi.Fg50))
+                Line(stringResource(R.string.guide_empty_no_playlist_debug), GuideUi.mono(20, color = GuideUi.Fg50))
             }
         }
     }

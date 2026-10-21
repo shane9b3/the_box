@@ -92,6 +92,22 @@ class TimeLabelsTest {
     }
 
     @Test
+    fun windowsCentredAfterMidnightReadTonight() {
+        // Decision 2026-10-19, ruling 9 (owner's screenshot: "12:22 AM" beside "THIS MORNING 11:30").
+        val zone = ZoneOffset.UTC
+        val late = min(zone, 2026, 10, 15, 0, 22)
+        val t = tables(zone, nowMin = late)
+        val ws = min(zone, 2026, 10, 14, 23, 30) // window 23:30 → 02:30, mid 01:00 on now's day
+        assertEquals("TONIGHT", t.contextLabel(ws, late))
+        assertEquals("TONIGHT", t.contextLabel(min(zone, 2026, 10, 15, 4, 59) - 90, late)) // mid 04:59
+        assertEquals("THIS MORNING", t.contextLabel(min(zone, 2026, 10, 15, 5, 0) - 90, late)) // mid 05:00
+        // An early-hours window seen later in the day is still "earlier today".
+        val nine = min(zone, 2026, 10, 15, 9, 0)
+        val t9 = tables(zone, nowMin = nine)
+        assertEquals("EARLIER TODAY", t9.contextLabel(min(zone, 2026, 10, 15, 0, 30), nine))
+    }
+
+    @Test
     fun dayLabelsAndDurations() {
         val t = tables(ZoneOffset.UTC)
         val day = t.dayOf(min(ZoneOffset.UTC, 2026, 10, 13, 12, 0))

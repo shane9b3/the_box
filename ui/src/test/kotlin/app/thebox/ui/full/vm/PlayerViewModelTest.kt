@@ -274,7 +274,7 @@ class PlayerViewModelTest {
         assertEquals("suppressed during an archive resume", before, out.size)
         shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(5))
         controller.notices.tryEmit(PlaybackNotice.LiveResumed); idle()
-        assertEquals("Back to live", out.last())
+        assertEquals("M6 U-S9: the reason-less toast is replaced", "Back to live: this channel can't be rewound, so the paused part was skipped.", out.last())
         // WP-B's archive notice: reason + next step.
         archive.mutableNotices.tryEmit(app.thebox.core.catchup.archive.ArchiveNotice.LiveNotReady(ch.identity)); idle()
         assertEquals("The last minute isn't in the archive yet. Back to live; try again in a minute.", out.last())
@@ -343,7 +343,7 @@ class PlayerViewModelTest {
         vm.effects.startOver(ch); idle()
         assertTrue(archive.names().contains("startOver"))
         val failed = (events.last() as ShellEvent.Message).text
-        assertTrue(failed, failed.startsWith("This programme is older than the channel's catch-up archive."))
+        assertTrue(failed, failed.startsWith("This program is older than the channel's catch-up archive."))
         // U-S7 = N17: the machine hears about the synchronous failure (it returns the bar's focus to now).
         assertEquals(PlayerEvent.ArchiveStartFailed(ArchiveFailure.OUTSIDE_ARCHIVE), machine.events.filterIsInstance<PlayerEvent.ArchiveStartFailed>().last())
 

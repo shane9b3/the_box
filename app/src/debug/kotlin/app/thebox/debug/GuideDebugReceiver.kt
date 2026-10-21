@@ -71,6 +71,23 @@ import javax.inject.Inject
  * (`<seed>/get.php?username=…&password=…&type=m3u_plus&output=ts`, idempotent by host like the Xtream form) instead of
  * an Xtream login: the M4 suite needs it because `catchup-correction` exists only in the M3U (I-M4-13b).
  *
+ * Time-shift switches (docs/design/m6-timeshift.md §17.4, §18; owner WP-D), applied before the seed and read by the
+ * time-shift factory at the **next tune** (`TimeshiftDebugOverrides`, `PlaybackPrefs`); last occurrence wins:
+ * - `ts_clear=1` clears every override below first (the suite sends it before each case);
+ * - `ts_ring_bytes=N` ring capacity in bytes (the "1-min ring" of I-TS-5/15, the 2-min ring of I-TS-24, the 15-min ring
+ *   of I-TS-21; not floored to `MIN_RING_BYTES`); `ts_hold_ms=N` the "Keep recording while paused" limit (I-TS-4);
+ *   `ts_cap_bytes=N` the daily write cap (I-TS-20, 50 MB); `ts_free_bytes=N` the free space the sizing rule sees
+ *   (I-TS-12). `0`, `none` or empty clears one override (`ts_cap_bytes=0`: the policy's cap again).
+ * - `timeshift=auto|off|pause_only|15|30|60|120` → `PlaybackPrefs.timeshift` (the persisted "Pause and rewind" row; `off`
+ *   also deletes an idle ring file at once, as the row does); `ts_hold=auto|10|30|60|full` → `timeshiftHold`;
+ *   `ts_protect=auto|off` → `storageProtection`. These are **persisted**: a suite that changes them restores `auto`.
+ * - `emmc=1` reads the eMMC wear estimate (A-N4, §8.4): `life_time`, `pre_eol_info`, `name`, `manfid`, `date` of every
+ *   card directory under `/sys/class/mmc_host` (`mmcN:XXXX`) and every `device` directory of `/sys/block/mmcblkN`, logged as `emmc: <path> = <value>` and published on
+ *   [emmcReport]. `life_time` is two JEDEC bytes (type A, type B), each in 10 % steps of the rated life used (0x01 =
+ *   0–10 %, 0x0B = exceeded); `pre_eol_info` 0x01 normal, 0x02 warning (80 % of reserved blocks), 0x03 urgent. Usually
+ *   readable only on some firmware (SELinux); an unreadable path says why. Example:
+ *   `adb shell am start -a android.intent.action.VIEW -d 'thebox-debug://guide?emmc=1&open=0' && adb logcat -s GuideDebug`.
+ *
  * The outcome is published on [status] (same process as the instrumented suite) and logged under [TAG].
  */
 @AndroidEntryPoint
@@ -85,6 +102,8 @@ class GuideDebugReceiver : ComponentActivity() {
     @Inject @ApplicationScope lateinit var appScope: CoroutineScope
     /** M5 (WP-E): the settings/updater/diagnostics harness. */
     @Inject lateinit var settingsProbe: SettingsDebugProbe
+    /** M6 time-shift (WP-D): the "Off deletes the file at once" hook of the settings row. */
+    @Inject lateinit var timeshiftStartup: app.thebox.player.timeshift.TimeshiftStartup
 
     private lateinit var text: TextView
 
@@ -171,6 +190,10 @@ class GuideDebugReceiver : ComponentActivity() {
         (uri.lastParam("phone_port") ?: if (uri.host == "phone") uri.lastParam("port") else null)?.toIntOrNull()?.let { app.thebox.core.diag.DebugOverrides.phonePort = it }
         // (M5 integration, I-M5-25) a plain-http custom DoH endpoint (the fake panel) is accepted in debug builds only.
         uri.lastParam("doh_http")?.let { app.thebox.core.diag.DebugOverrides.allowHttpDoh = it == "1" }
+        // (diagnosis 2026-10-18) `capture_ts=1|0`: raw TS of every following live session into files/capture/.
+        uri.lastParam("capture_ts")?.let { on ->
+            app.thebox.player.debug.PlayerDebugHooks.captureDir = if (on == "1") java.io.File(filesDir, "capture").apply { mkdirs() } else null
+        }
         (uri.lastParam("update_manifest") ?: uri.lastParam("manifest"))?.let { probe.updateEndpoint.manifestUrl = it.ifBlank { null } }
         (uri.lastParam("update_key") ?: if (uri.host == "update") uri.lastParam("key") else null)?.let { probe.updateEndpoint.runtimeKeyHex = it.ifBlank { null } }
         val check = uri.lastParam("update_check")
@@ -204,6 +227,14 @@ class GuideDebugReceiver : ComponentActivity() {
     private fun applySettings(uri: Uri): String? {
         val names = uri.queryParameterNames
         val errors = ArrayList<String>(2)
+        if (TIMESHIFT_KEYS.any { it in names }) {
+            try {
+                applyTimeshift(uri, settingsProbe.store) { timeshiftStartup.onTrimMemoryComplete() }
+            } catch (t: Throwable) {
+                Log.w(TAG, "time-shift switches not applied: $t")
+                errors += "timeshift: $t"
+            }
+        }
         if (SETTING_KEYS.any { it in names }) {
             try {
                 guideSettings.update { applySwitches(it, uri) }
@@ -298,6 +329,111 @@ class GuideDebugReceiver : ComponentActivity() {
         const val HOST = "guide"
         private val SETTING_KEYS = listOf("lowend", "perf", "still", "clock24", "exit", "unlocked")
         private val PLAYER_KEYS = listOf("infobar", "numwait", "updown", "invert", "back")
+        private val TIMESHIFT_KEYS = listOf("ts_clear", "ts_ring_bytes", "ts_hold_ms", "ts_cap_bytes", "ts_free_bytes", "timeshift", "ts_hold", "ts_protect", "emmc")
+        private val emmcFlow = MutableStateFlow<Map<String, String>?>(null)
+
+        /** The last `emmc=1` read (path → value or the reason it was unreadable); null before the first. */
+        val emmcReport: StateFlow<Map<String, String>?> get() = emmcFlow
+
+        /**
+         * The M6 time-shift switches (documented on the class). Public so the instrumented suite (same process) applies
+         * exactly this mapping without starting the receiver over a playing MainActivity (which would stop it as Home).
+         * [onOff] runs after `timeshift=off` (the settings row's idle-file deletion).
+         */
+        fun applyTimeshift(uri: Uri, store: app.thebox.core.settings.SettingsStore, onOff: () -> Unit = {}) {
+            val o = app.thebox.player.timeshift.TimeshiftDebugOverrides
+            if (uri.lastParam("ts_clear") == "1") o.clear()
+            fun bytes(key: String, set: (Long?) -> Unit) {
+                val v = uri.lastParam(key) ?: return
+                set(v.trim().toLongOrNull()?.takeIf { it > 0 })
+            }
+            bytes("ts_ring_bytes") { o.ringBytes = it }
+            bytes("ts_hold_ms") { o.holdMs = it }
+            bytes("ts_cap_bytes") { o.dailyLimitBytes = it }
+            uri.lastParam("ts_free_bytes")?.let { v -> o.freeSpaceBytes = v.trim().toLongOrNull()?.takeIf { it >= 0 } }
+            val length = uri.lastParam("timeshift")?.let { parseLength(it) }
+            val hold = uri.lastParam("ts_hold")?.let { parseHold(it) }
+            val protect = uri.lastParam("ts_protect")?.let { parseProtect(it) }
+            if (length != null || hold != null || protect != null) {
+                store.update(app.thebox.core.settings.state.PlaybackDomain) { p ->
+                    p.copy(
+                        timeshift = length ?: p.timeshift,
+                        timeshiftHold = hold ?: p.timeshiftHold,
+                        storageProtection = protect ?: p.storageProtection,
+                    )
+                }
+                // The settings row's Off deletes an idle ring file at once (§12; the factory keeps it while a cycle is open).
+                if (length == app.thebox.core.settings.TimeshiftLength.OFF) onOff()
+            }
+            Log.i(TAG, "time-shift switches: ring=${o.ringBytes} holdMs=${o.holdMs} cap=${o.dailyLimitBytes} free=${o.freeSpaceBytes} length=$length hold=$hold protect=$protect")
+            if (uri.lastParam("emmc") == "1") {
+                val report = readEmmc()
+                report.forEach { (k, v) -> Log.i(TAG, "emmc: $k = $v") }
+                emmcFlow.value = report
+            }
+        }
+
+        /** `timeshift=` values: auto, off, pause_only, 15, 30, 60, 120 (minutes). */
+        fun parseLength(v: String): app.thebox.core.settings.TimeshiftLength? = when (v.trim().lowercase()) {
+            "auto" -> app.thebox.core.settings.TimeshiftLength.AUTO
+            "off" -> app.thebox.core.settings.TimeshiftLength.OFF
+            "pause_only", "pauseonly" -> app.thebox.core.settings.TimeshiftLength.PAUSE_ONLY
+            "15" -> app.thebox.core.settings.TimeshiftLength.MIN_15
+            "30" -> app.thebox.core.settings.TimeshiftLength.MIN_30
+            "60" -> app.thebox.core.settings.TimeshiftLength.H_1
+            "120" -> app.thebox.core.settings.TimeshiftLength.H_2
+            else -> null
+        }
+
+        /** `ts_hold=` values: auto, 10, 30, 60 (minutes), full. */
+        fun parseHold(v: String): app.thebox.core.settings.TimeshiftHold? = when (v.trim().lowercase()) {
+            "auto" -> app.thebox.core.settings.TimeshiftHold.AUTO
+            "10" -> app.thebox.core.settings.TimeshiftHold.MIN_10
+            "30" -> app.thebox.core.settings.TimeshiftHold.MIN_30
+            "60" -> app.thebox.core.settings.TimeshiftHold.H_1
+            "full" -> app.thebox.core.settings.TimeshiftHold.UNTIL_FULL
+            else -> null
+        }
+
+        /** `ts_protect=` values: auto, off. */
+        fun parseProtect(v: String): app.thebox.core.settings.StorageProtection? = when (v.trim().lowercase()) {
+            "auto" -> app.thebox.core.settings.StorageProtection.AUTO
+            "off" -> app.thebox.core.settings.StorageProtection.OFF
+            else -> null
+        }
+
+        /**
+         * (A-N4, §8.4) The eMMC wear registers the kernel exposes: every `mmcN:XXXX` card under `/sys/class/mmc_host` and
+         * every `device` directory of `/sys/block/mmcblkN`. Never throws; an unreadable file maps to the exception's class name.
+         */
+        fun readEmmc(): Map<String, String> {
+            val out = LinkedHashMap<String, String>()
+            val files = listOf("life_time", "pre_eol_info", "name", "manfid", "date", "type")
+            val dirs = ArrayList<java.io.File>()
+            try {
+                java.io.File("/sys/class/mmc_host").listFiles()?.forEach { host ->
+                    host.listFiles()?.filter { it.name.contains(':') }?.let { dirs += it }
+                }
+            } catch (t: Throwable) {
+                out["/sys/class/mmc_host"] = "unreadable: ${t.javaClass.simpleName}"
+            }
+            try {
+                java.io.File("/sys/block").listFiles()?.filter { it.name.startsWith("mmcblk") && !it.name.contains("boot") && !it.name.contains("rpmb") }
+                    ?.forEach { dirs += java.io.File(it, "device") }
+            } catch (t: Throwable) {
+                out["/sys/block"] = "unreadable: ${t.javaClass.simpleName}"
+            }
+            if (dirs.isEmpty() && out.isEmpty()) out["/sys/class/mmc_host"] = "no mmc card listed (not eMMC, or the directory is not readable)"
+            for (d in dirs) for (f in files) {
+                val file = java.io.File(d, f)
+                out[file.path] = try {
+                    if (!file.exists()) "absent" else file.readText().trim()
+                } catch (t: Throwable) {
+                    "unreadable: ${t.javaClass.simpleName}"
+                }
+            }
+            return out
+        }
         private val seedMutex = Mutex()
         @Volatile private var requestSeq = 0
         private val statusFlow = MutableStateFlow(SeedStatus())

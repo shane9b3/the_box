@@ -81,6 +81,14 @@ fun FullScreenHost(
     val archiveFailure by failureFlow.collectAsState()
     val forcedFlow = remember(player) { extras?.audioOutputForced ?: MutableStateFlow(false) }
     val audioForced by forcedFlow.collectAsState() // U-S12
+    val pausedFlow = remember(player) { extras?.pausedFacts ?: MutableStateFlow(PausedFacts()) }
+    val pausedValues by pausedFlow.collectAsState() // M6 §11.5
+    // (Fix pass, UX review §7, S4) The machine's own paused state wins: the dim, the media keys and the header line come
+    // from PlayerUiState.paused, whichever host draws this and whether or not the bar is shown.
+    val paused = ui.paused?.let { p -> pausedValues.copy(mediaKeys = p.mediaKeys, dimmed = p.dimmed, dimSinceMs = p.dimSinceMs) }
+        ?: pausedValues.copy(dimmed = false, dimSinceMs = null)
+    val rewindFlow = remember(player) { extras?.rewindStat ?: MutableStateFlow(null) }
+    val rewindStat by rewindFlow.collectAsState() // M6 §13 (U-N3)
     // U-S5: a per-minute clock (past / now / future, list progress); never read in composition per recomposition, so
     // the bars and the list skip when only the stats (2 Hz) change. Sub-minute time is read in the draw lambdas.
     val nowMs by produceState(System.currentTimeMillis()) {
@@ -102,7 +110,7 @@ fun FullScreenHost(
             )
         }
         Fade(ui.scrub, lowEnd) { s ->
-            ScrubBar(s, nowMs, Modifier.offset(PlayerUi.BAR_L.dp, PlayerUi.BAR_T.dp), channel = state.tunedChannel, clock24 = clock24)
+            ScrubBar(s, nowMs, Modifier.offset(PlayerUi.BAR_L.dp, PlayerUi.BAR_T.dp), channel = state.tunedChannel, clock24 = clock24, facts = paused)
         }
         Fade(if (ui.scrub == null) ui.info else null, lowEnd) { info ->
             InfoBar(
@@ -112,11 +120,14 @@ fun FullScreenHost(
         }
         Fade(ui.quick, lowEnd) { q -> QuickBar(q, Modifier.offset(PlayerUi.QUICK_L.dp, PlayerUi.QUICK_T.dp)) }
         // U-S3 (V2): the stats share the top-left corner with the channel list and the group card; hidden while either shows.
-        if (ui.channels == null && state.groupCard == null) ui.stats?.let { StatsOverlay(it, Modifier.offset(PlayerUi.STATS_L.dp, PlayerUi.STATS_T.dp), audioOutputForced = audioForced) }
+        if (ui.channels == null && state.groupCard == null) ui.stats?.let { StatsOverlay(it, Modifier.offset(PlayerUi.STATS_L.dp, PlayerUi.STATS_T.dp), audioOutputForced = audioForced, rewind = rewindStat) }
         if (player != null) {
             Fade(ui.channels, lowEnd) { c -> ChannelListPanel(c, player, Modifier.offset(PlayerUi.LIST_L.dp, PlayerUi.LIST_T.dp), nowMs) }
         }
         Fade(ui.picker, lowEnd) { p -> PickerSheet(p, Modifier.offset(PlayerUi.PICKER_L.dp, PlayerUi.PICKER_T.dp)) }
+
+        // (M6 §11.5) The dimmed paused frame and its drifting card: over the bars, under the error card.
+        PausedCard(ui.pill, ui.paused?.header, paused)
 
         val card = ui.error
         if (card != null) {
@@ -127,7 +138,7 @@ fun FullScreenHost(
         ui.probing?.let { (n, m) ->
             Line(
                 stringResource(R.string.player_probing, n, m),
-                GuideUi.sans(19, FontWeight.Medium),
+                GuideUi.sans(24, FontWeight.Medium),
                 Modifier
                     .align(Alignment.TopCenter)
                     .padding(top = 72.dp)
@@ -139,7 +150,7 @@ fun FullScreenHost(
         if (state.tuned.phase == MiniPhase.STOPPED && state.tuned.identity != null && ui.layer == PlayerLayer.NONE && ui.error == null) {
             Line(
                 stringResource(ErrorText.stoppedHint()),
-                GuideUi.sans(22, FontWeight.Medium),
+                GuideUi.sans(28, FontWeight.Medium),
                 Modifier
                     .align(Alignment.Center)
                     .testTag(STOPPED_HINT_TAG)
@@ -153,7 +164,7 @@ fun FullScreenHost(
         state.groupCard?.let { label ->
             Line(
                 label,
-                GuideUi.sans(24, FontWeight.SemiBold),
+                GuideUi.sans(30, FontWeight.SemiBold),
                 Modifier
                     .offset(64.dp, 56.dp)
                     .testTag(GROUP_CARD_TAG)

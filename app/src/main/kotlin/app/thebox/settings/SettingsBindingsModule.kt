@@ -1,5 +1,6 @@
 package app.thebox.settings
 
+import app.thebox.core.art.ProgrammeArtwork
 import app.thebox.core.catchup.archive.LiveSettingsApplier
 import app.thebox.core.settings.SettingsStore
 import app.thebox.core.settings.state.SettingsPageSource
@@ -30,7 +31,7 @@ abstract class SettingsBindingsModule {
     @Binds @IntoSet abstract fun channelOptions(impl: ChannelOptionsPageSource): SettingsPageSource
 
     companion object {
-        @Provides @Singleton fun wpaPages(store: SettingsStore, texts: SettingsTexts, env: WpaPageEnv): WpaPages = WpaPages(store, texts, env)
+        @Provides @Singleton fun wpaPages(store: SettingsStore, texts: SettingsTexts, env: WpaPageEnv, artwork: ProgrammeArtwork): WpaPages = WpaPages(store, texts, env, artwork)
 
         @Provides @IntoSet fun wpaPagesSource(pages: WpaPages): SettingsPageSource = pages
     }

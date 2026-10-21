@@ -70,10 +70,22 @@ internal class MediaSourceBuilder(
         compat: TsCompat,
         transport: TransportFactory,
         archive: ArchiveRequest?,
+        // (M6 time-shift, §5.1, §16.4) Non-null: a buffered live tune; the player reads the ring, never the network.
+        ring: app.thebox.player.internal.RingOpen?,
     ): MediaSourceWithTelemetry {
         val scheme = schemeOf(ctx.resolved.url)
         if (scheme !in SUPPORTED_SCHEMES) throw UnsupportedStreamFormatException(format, scheme.ifEmpty { "none" })
         val isArchive = archive != null
+        if (ring != null && !isArchive && (format == StreamFormat.TS || format == StreamFormat.UNKNOWN)) {
+            // The same progressive TS source and extractor guards (repairs run after the ring, on every read, §4.3), over
+            // a RingDataSource: live data type, unseekable, position 0 = the start RAP's PTS (facts §1.3).
+            val (factory, telemetry) = transport.ring(ctx, ring)
+            val source = ProgressiveMediaSource.Factory(factory, tsExtractors(ctx, compat))
+                .setLoadErrorHandlingPolicy(policyFor(LoadOrigin.PROGRESSIVE))
+                .setContinueLoadingCheckIntervalBytes(ProgressiveMediaSource.DEFAULT_LOADING_CHECK_INTERVAL_BYTES)
+                .createMediaSource(sessionItem(ctx.tuneId))
+            return MediaSourceWithTelemetry(source, telemetry)
+        }
         return when (format) {
             StreamFormat.TS, StreamFormat.UNKNOWN -> {
                 val (factory, telemetry) = if (isArchive) transport.http(ctx) else transport.liveTs(ctx)
@@ -124,13 +136,18 @@ internal class MediaSourceBuilder(
 
     /** The session's TS extractor list: compat level and the dead-track guard reporting to the event log. */
     internal fun tsExtractors(ctx: StreamSessionContext, compat: TsCompat): TsExtractorsFactory =
-        TsExtractorsFactory(compat, onDeadTrack = { pid, type ->
-            ctx.onEvent(PlaybackEventType.SNIFF, DEAD_TRACK_CODE, "pid=$pid type=${trackTypeName(type)}")
-        })
+        TsExtractorsFactory(
+            compat,
+            onDeadTrack = { pid, type -> ctx.onEvent(PlaybackEventType.SNIFF, DEAD_TRACK_CODE, "pid=$pid type=${trackTypeName(type)}") },
+            // (device finding 2026-10-18) The controller turns this into FailureSignal.AudioTimestampsStuck.
+            onStuckAudio = { pid -> ctx.onEvent(PlaybackEventType.STALL, STUCK_AUDIO_CODE, "pid=$pid") },
+            repairAudioTimestamps = ctx.repairAudioTimestamps,
+        )
 
     companion object {
         const val SESSION_SCHEME = "thebox-session"
         const val DEAD_TRACK_CODE = "DEAD_TRACK"
+        const val STUCK_AUDIO_CODE = "STUCK_AUDIO_PTS"
 
         /** HLS live speed band (§3.1.3). */
         const val HLS_LIVE_MIN_SPEED = 0.97f

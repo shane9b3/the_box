@@ -50,10 +50,20 @@ class GuideQueries @Inject constructor(
 
     suspend fun lineup(source: GuideSource, access: ParentalAccess): LineupRows = db.read {
         lineupQueries++
-        val q = lineupClause(source)
-        val ids = longs("SELECT c.id ${q.from} WHERE ${q.where} $PARENTAL_RAW ${q.order}") { st -> st.bindAccess(access); q.bind(st) }
-        val archive = int("SELECT $ARCHIVE_DAYS ${q.from} WHERE ${q.where} $PARENTAL_RAW") { st -> st.bindAccess(access); q.bind(st) }
-        LineupRows(ids, archive)
+        when (val q = lineupClause(source)) {
+            is Clause.Parts -> if (q.twoPass) {
+                val ids = longs("SELECT c.id ${q.from} WHERE ${q.where} $PARENTAL_RAW ${q.order}") { st -> st.bindAccess(access); q.bind(st) }
+                val archive = int("SELECT $ARCHIVE_DAYS ${q.from} WHERE ${q.where} $PARENTAL_RAW") { st -> st.bindAccess(access); q.bind(st) }
+                LineupRows(ids, archive)
+            } else {
+                // (docs/design/m6-channel-editor.md §4 item 8) One pass: the ids with each row's archive days, the bound
+                // is their maximum (the same value as ARCHIVE_DAYS over the same rows). All's Q2 order joins and sorts the
+                // whole playlist, so a second statement over the same joins would double its cost.
+                idsAndArchive("SELECT c.id, $ARCHIVE_ROW ${q.from} WHERE ${q.where} $PARENTAL_RAW ${q.order}") { st -> st.bindAccess(access); q.bind(st) }
+            }
+            // The group union in one pass too (data review 2026-10-18): each half carries the row's archive days.
+            is Clause.Sql -> idsAndArchive(q.idsSql) { st -> st.bindAccess(access); q.bind(st) }
+        }
     }
 
     /** Upper bound of archive days over every lineup-visible channel (search look-back, §3.10.2). */
@@ -150,26 +160,7 @@ class GuideQueries @Inject constructor(
      * watched channels. A tune's watch-history and learned-playback writes leave it unchanged, so they no longer
      * re-run the lineup, the Groups panel or the row blocks.
      */
-    suspend fun prefsSignature(withRecentCount: Boolean): Long = db.read {
-        var h = Hash64.of(null)
-        usePrepared(PREFS_SIGNATURE_SELECT) { st ->
-            while (st.step()) {
-                h = Hash64.long(h, st.getLong(0))
-                h = Hash64.str(h, st.getText(1))
-                h = Hash64.long(h, st.getLong(2))
-                h = Hash64.long(h, if (st.isNull(3)) -1L else st.getLong(3))
-                h = Hash64.str(h, if (st.isNull(4)) null else st.getText(4))
-                h = Hash64.long(h, if (st.isNull(5)) Long.MIN_VALUE else st.getLong(5))
-                h = Hash64.str(h, if (st.isNull(6)) null else st.getText(6))
-                h = Hash64.long(h, if (st.isNull(7)) Long.MIN_VALUE else st.getLong(7))
-                h = Hash64.long(h, if (st.isNull(8)) Long.MIN_VALUE else st.getLong(8))
-            }
-        }
-        if (withRecentCount) {
-            h = Hash64.long(h, usePrepared("SELECT COUNT(*) FROM channel_prefs WHERE last_watched_at IS NOT NULL") { st -> if (st.step()) st.getLong(0) else 0L })
-        }
-        h
-    }
+    suspend fun prefsSignature(withRecentCount: Boolean): Long = prefsSignature(db, withRecentCount)
 
     suspend fun rowIdOf(identity: ChannelIdentity): Long? = db.read {
         usePrepared("SELECT id FROM channel WHERE playlist_id = ? AND stable_key = ?") { st ->
@@ -254,30 +245,59 @@ class GuideQueries @Inject constructor(
     // ---------------------------------------------------------------------------------------------- helpers
 
     /** The statement [lineup] runs for [source] (hand-off `EXPLAIN QUERY PLAN`; binds ?1 access, ?2/?3 as in [lineupClause]). */
-    internal fun lineupSql(source: GuideSource): String = lineupClause(source).let { "SELECT c.id ${it.from} WHERE ${it.where} $PARENTAL_RAW ${it.order}" }
+    internal fun lineupSql(source: GuideSource): String = when (val q = lineupClause(source)) {
+        is Clause.Parts -> "SELECT c.id ${q.from} WHERE ${q.where} $PARENTAL_RAW ${q.order}"
+        is Clause.Sql -> q.idsSql
+    }
 
     internal fun blockSql(ids: Int): String = "$BLOCK_SELECT WHERE c.id IN (${List(ids) { "?" }.joinToString(",")})"
 
-    private class Clause(val from: String, val where: String, val order: String, val bind: (SQLiteStatement) -> Unit)
+    /**
+     * A lineup statement: the `from` / `where` / `order` form, or (docs/design/m6-channel-editor.md §3.6, review C17c) a
+     * full-SQL form for the group lineup's `UNION ALL` (ids and archive days in one pass). [Parts.twoPass]: the archive
+     * bound needs its own statement because the ids are limited (Recent: the bound covers every recent row).
+     */
+    private sealed interface Clause {
+        val bind: (SQLiteStatement) -> Unit
+        class Parts(val from: String, val where: String, val order: String, val twoPass: Boolean = false, override val bind: (SQLiteStatement) -> Unit) : Clause
+        class Sql(val idsSql: String, override val bind: (SQLiteStatement) -> Unit) : Clause
+    }
 
-    /** Same order as the M1 reads they replace (§3.2.1): browseAll, browseGroup, FavouriteDao.channels, recents. */
+    /**
+     * Favourites and Recent keep the order of the M1 reads they replace (§3.2.1). v5 (docs/design/m6-channel-editor.md
+     * §3.6, §3.7, owner ruling Q2): All follows the user's group order, then the channel order inside each group
+     * ([ALL_ORDER]); a group is the effective group's members ([GROUP_LINEUP_SQL]).
+     */
     private fun lineupClause(source: GuideSource): Clause = when (source) {
-        is GuideSource.All -> Clause(LINEUP_FROM, "$LINEUP_BASE AND c.playlist_id = ?2", "ORDER BY c.sort_index") { st ->
+        is GuideSource.All -> Clause.Parts(LINEUP_FROM, "$LINEUP_BASE AND c.playlist_id = ?2", "ORDER BY $ALL_ORDER") { st ->
             st.bindLong(2, source.playlistId)
         }
-        is GuideSource.Group -> Clause(
-            LINEUP_FROM,
-            "$LINEUP_BASE AND c.playlist_id = ?2 AND g.playlist_id = ?2 AND g.kind = 0 AND g.group_key = ?3",
-            "ORDER BY cp.custom_sort_index IS NULL, cp.custom_sort_index, c.sort_index",
-        ) { st -> st.bindLong(2, source.playlistId); st.bindText(3, source.groupKey) }
-        is GuideSource.Favourites -> Clause(FAV_FROM, "$LINEUP_BASE AND f.list_id = ?2", "ORDER BY f.sort_index") { st ->
+        is GuideSource.Group -> Clause.Sql(GROUP_LINEUP_SQL) { st ->
+            st.bindLong(2, source.playlistId); st.bindText(3, source.groupKey)
+        }
+        is GuideSource.Favourites -> Clause.Parts(FAV_FROM, "$LINEUP_BASE AND f.list_id = ?2", "ORDER BY f.sort_index") { st ->
             st.bindLong(2, source.listId)
         }
-        GuideSource.Recent -> Clause(
+        GuideSource.Recent -> Clause.Parts(
             RECENT_FROM,
             "$LINEUP_BASE AND cp.last_watched_at IS NOT NULL",
             "ORDER BY cp.last_watched_at DESC LIMIT $RECENT_LIMIT",
+            twoPass = true,
         ) { }
+    }
+
+    /** Column 0 the ids in order, column 1 each row's archive days; the bound is their maximum (0 when none). */
+    private suspend fun PooledConnection.idsAndArchive(sql: String, bind: (SQLiteStatement) -> Unit): LineupRows = usePrepared(sql) { st ->
+        bind(st)
+        var archive = 0
+        var out = LongArray(256)
+        var n = 0
+        while (st.step()) {
+            if (n == out.size) out = out.copyOf(n * 2)
+            out[n++] = st.getLong(0)
+            if (!st.isNull(1)) archive = maxOf(archive, st.getLong(1).toInt())
+        }
+        LineupRows(out.copyOf(n), archive)
     }
 
     private suspend fun PooledConnection.longs(sql: String, bind: (SQLiteStatement) -> Unit): LongArray = usePrepared(sql) { st ->
@@ -326,11 +346,42 @@ class GuideQueries @Inject constructor(
     }
 
     companion object {
-        /** G-S6: the guide-relevant `channel_prefs` rows (any non-default user preference). */
+        /**
+         * G-S6: the guide-relevant `channel_prefs` rows (any non-default user preference). v5 (docs/design/m6-channel-
+         * editor.md §3.6 "Guide signature"): `custom_group_key` is in the select list **and** the WHERE, so a channel whose
+         * only pref is a move is hashed and the guide re-runs its lineups.
+         */
         const val PREFS_SIGNATURE_SELECT =
-            "SELECT playlist_id, stable_key, hidden, locked, custom_name, custom_number, custom_logo, custom_sort_index, epg_shift_min " +
+            "SELECT playlist_id, stable_key, hidden, locked, custom_name, custom_number, custom_logo, custom_sort_index, epg_shift_min, custom_group_key " +
                 "FROM channel_prefs WHERE hidden != 0 OR locked IS NOT NULL OR custom_name IS NOT NULL OR custom_number IS NOT NULL " +
-                "OR custom_logo IS NOT NULL OR custom_sort_index IS NOT NULL OR epg_shift_min IS NOT NULL ORDER BY playlist_id, stable_key"
+                "OR custom_logo IS NOT NULL OR custom_sort_index IS NOT NULL OR epg_shift_min IS NOT NULL OR custom_group_key IS NOT NULL " +
+                "ORDER BY playlist_id, stable_key"
+
+        /**
+         * The hash of [PREFS_SIGNATURE_SELECT] (and with [withRecentCount] the watched-channel count) on a reader
+         * connection. Shared by the guide's trigger and the channel editor's `changes()` (§3.7).
+         */
+        suspend fun prefsSignature(db: LibraryDatabase, withRecentCount: Boolean): Long = db.read {
+            var h = Hash64.of(null)
+            usePrepared(PREFS_SIGNATURE_SELECT) { st ->
+                while (st.step()) {
+                    h = Hash64.long(h, st.getLong(0))
+                    h = Hash64.str(h, st.getText(1))
+                    h = Hash64.long(h, st.getLong(2))
+                    h = Hash64.long(h, if (st.isNull(3)) -1L else st.getLong(3))
+                    h = Hash64.str(h, if (st.isNull(4)) null else st.getText(4))
+                    h = Hash64.long(h, if (st.isNull(5)) Long.MIN_VALUE else st.getLong(5))
+                    h = Hash64.str(h, if (st.isNull(6)) null else st.getText(6))
+                    h = Hash64.long(h, if (st.isNull(7)) Long.MIN_VALUE else st.getLong(7))
+                    h = Hash64.long(h, if (st.isNull(8)) Long.MIN_VALUE else st.getLong(8))
+                    h = Hash64.str(h, if (st.isNull(9)) null else st.getText(9))
+                }
+            }
+            if (withRecentCount) {
+                h = Hash64.long(h, usePrepared("SELECT COUNT(*) FROM channel_prefs WHERE last_watched_at IS NOT NULL") { st -> if (st.step()) st.getLong(0) else 0L })
+            }
+            h
+        }
         private const val TAG = "GuideQueries"
         const val RECENT_LIMIT = 50
         const val REF_BATCH = 50
@@ -339,32 +390,78 @@ class GuideQueries @Inject constructor(
         /** `ChannelDao.PARENTAL_ACCESS` with the access ordinal as `?1` (every guide statement binds it first, §4.3). */
         val PARENTAL_RAW: String = ChannelDao.PARENTAL_ACCESS.replace(":access", "?1")
 
-        const val LINEUP_JOINS = """
-        JOIN playlist p            ON p.id = c.playlist_id AND p.enabled = 1
-        LEFT JOIN channel_group g  ON g.id = c.group_id
-        LEFT JOIN channel_prefs cp ON cp.playlist_id = c.playlist_id AND cp.stable_key = c.stable_key
-        LEFT JOIN group_prefs gp   ON gp.playlist_id = c.playlist_id AND gp.kind = g.kind AND gp.group_key = g.group_key
-        """
+        /** v5 (docs/design/m6-channel-editor.md §3.6 row 6): the playlist plus the effective-group joins. */
+        const val LINEUP_JOINS = "\n        JOIN playlist p            ON p.id = c.playlist_id AND p.enabled = 1\n" + ChannelDao.EFFECTIVE_GROUP_JOINS
 
         const val LINEUP_FROM = "FROM channel c $LINEUP_JOINS"
 
-        /** Recent is driven from `channel_prefs` (its `last_watched_at` index), not by scanning `channel`. */
+        /**
+         * Recent is driven from `channel_prefs` (its `last_watched_at` index), not by scanning `channel`. v5 (§3.6 row 7,
+         * review 2 item 1): `cp` is already in scope, so it takes [ChannelDao.PROVIDER_GROUP_JOIN] + [ChannelDao.GROUP_TAIL]
+         * without a second `channel_prefs cp` join.
+         */
         private const val RECENT_FROM = """FROM channel_prefs cp
         JOIN channel c             ON c.playlist_id = cp.playlist_id AND c.stable_key = cp.stable_key
         JOIN playlist p            ON p.id = c.playlist_id AND p.enabled = 1
-        LEFT JOIN channel_group g  ON g.id = c.group_id
-        LEFT JOIN group_prefs gp   ON gp.playlist_id = c.playlist_id AND gp.kind = g.kind AND gp.group_key = g.group_key
-        """
+        """ + ChannelDao.PROVIDER_GROUP_JOIN + ChannelDao.GROUP_TAIL
+
+        /**
+         * (owner ruling Q2, docs/design/m6-channel-editor.md §3.7) All follows the user's order: the effective group's
+         * position (user order, then provider order; ungrouped last), then the channel's position inside it.
+         */
+        const val ALL_ORDER = "g.id IS NULL, gp.custom_sort_index IS NULL, gp.custom_sort_index, g.sort_index, g.id, " +
+            "cp.custom_sort_index IS NULL, cp.custom_sort_index, c.sort_index"
+
+        /** The playlist join of the guide's lineups (enabled playlists only). */
+        const val ENABLED_PLAYLIST_JOIN = "JOIN playlist p ON p.id = c.playlist_id AND p.enabled = 1\n"
+
+        /**
+         * The members of one effective group (docs/design/m6-channel-editor.md §3.6 "Group lineup"), as a compound select
+         * without ORDER BY: half 1 drives from the provider group's identity index (`g0`, inner join) and keeps channels
+         * not moved away (or whose target row is gone); half 2 drives from `index_channel_prefs_group` (`cpm`) for the
+         * channels moved in. Both use `CROSS JOIN` (an inner join that fixes the loop order in SQLite): without
+         * statistics the planner otherwise drives half 2 from `index_channel_missing` and reads every channel of the
+         * playlist (seen on the framework driver, 2026-10-18). Binds `?2` playlist id, `?3` group key; [select] (with `AS` aliases) and [where] are used in
+         * both halves, so `?1` in [where] is bound once. The guide and the channel editor share it.
+         */
+        fun groupMembersSql(select: String, where: String, playlistJoin: String = ENABLED_PLAYLIST_JOIN): String =
+            "SELECT $select FROM channel_group g0\n" +
+                "CROSS JOIN channel c ON c.group_id = g0.id\n" + // ProviderGroupJoinGuardTest allowlist: half 1 drives from g0.
+                playlistJoin + ChannelDao.EFFECTIVE_GROUP_TAIL +
+                "WHERE g0.playlist_id = ?2 AND g0.kind = 0 AND g0.group_key = ?3\n" +
+                "  AND (cp.custom_group_key IS NULL OR gt.id IS NULL)\n" +
+                "  AND $where\n" +
+                "UNION ALL\n" +
+                "SELECT $select FROM channel_prefs cpm\n" +
+                "CROSS JOIN channel c ON c.playlist_id = cpm.playlist_id AND c.stable_key = cpm.stable_key\n" +
+                playlistJoin + ChannelDao.PROVIDER_GROUP_JOIN + ChannelDao.EFFECTIVE_GROUP_TAIL +
+                "WHERE cpm.playlist_id = ?2 AND cpm.custom_group_key = ?3 AND gt.id IS NOT NULL\n" +
+                "  AND $where\n"
+
+        /**
+         * The channel order inside a group, as result columns `o1 … o4` (a compound ORDER BY needs result columns); `c.id`
+         * breaks a tie left by a hand-edited or restored order (data review 2026-10-18).
+         */
+        const val GROUP_ORDER_COLUMNS = "(cp.custom_sort_index IS NULL) AS o1, cp.custom_sort_index AS o2, c.sort_index AS o3, c.id AS o4"
+        const val GROUP_ORDER_BY = "ORDER BY o1, o2, o3, o4"
+
+        /** The group lineup: ids and each row's archive days; binds `?1` access, `?2` playlist id, `?3` group key (§3.6). */
+        val GROUP_LINEUP_SQL: String =
+            "SELECT id, archive FROM (\n" + groupMembersSql("c.id AS id, $ARCHIVE_ROW AS archive, $GROUP_ORDER_COLUMNS", "$LINEUP_BASE $PARENTAL_RAW") +
+                ") $GROUP_ORDER_BY"
 
         private const val FAV_FROM = "FROM favourite f JOIN channel c ON c.playlist_id = f.playlist_id AND c.stable_key = f.stable_key $LINEUP_JOINS"
 
         const val LINEUP_BASE = "c.missing_since IS NULL AND c.kind IN (0, 1)"
 
-        /** §3.2.1 archive upper bound: the largest raw archive attribute, 3 days for a bare catch-up marker, the override. */
-        const val ARCHIVE_DAYS =
-            "COALESCE(MAX(max(COALESCE(c.catchup_days, 0), COALESCE(c.timeshift_days, 0), COALESCE(c.tv_archive_days, 0), " +
+        /** One row's archive days ([ARCHIVE_DAYS] is their maximum over a lineup). */
+        const val ARCHIVE_ROW =
+            "max(COALESCE(c.catchup_days, 0), COALESCE(c.timeshift_days, 0), COALESCE(c.tv_archive_days, 0), " +
                 "COALESCE(c.tvg_rec_days, 0), CASE WHEN c.catchup_type IS NOT NULL OR c.catchup_source IS NOT NULL OR c.tv_archive = 1 " +
-                "THEN 3 ELSE 0 END, COALESCE(p.catchup_days_override, 0))), 0)"
+                "THEN 3 ELSE 0 END, COALESCE(p.catchup_days_override, 0))"
+
+        /** §3.2.1 archive upper bound: the largest raw archive attribute, 3 days for a bare catch-up marker, the override. */
+        const val ARCHIVE_DAYS = "COALESCE(MAX($ARCHIVE_ROW), 0)"
 
         private const val BLOCK_SELECT =
             "SELECT c.id, c.playlist_id, c.stable_key, COALESCE(cp.custom_name, c.display_name, c.name), cp.custom_number, c.number, " +

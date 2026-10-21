@@ -62,7 +62,21 @@ data class ArchiveStatus(
     val ownedTuneId: Long = 0,
     /** The last seek sequence number whose seek has settled (native: playing again; re-request: first media). */
     val settledSeq: Long = 0,
+    // (M6 time-shift commit 0, docs/design/m6-timeshift.md §16.3, A-C1; additive) The LOCAL source (§11.2).
+    /** PROVIDER: the panel's archive (M4). LOCAL: the device's time-shift buffer (`LocalTimelineBackend`). */
+    val source: TimelineSource = TimelineSource.PROVIDER,
+    /** LOCAL: the oldest saved instant (P frame, §9.2); null otherwise. */
+    val bufferFromMs: Long? = null,
+    /** LOCAL: the parts of the window that were not saved (P frame; content equality, A-C1). */
+    val notSaved: app.thebox.core.playback.timeshift.TimeRanges = app.thebox.core.playback.timeshift.TimeRanges.EMPTY,
+    /** LOCAL, paused and saving: "Can stay paused N more min" (§11.5). */
+    val pauseRemainingMs: Long? = null,
+    /** LOCAL: why saving stopped, if it did (§4.4). */
+    val savingStop: app.thebox.core.playback.timeshift.RecordStop? = null,
 )
+
+/** (M6 time-shift commit 0, §16.3) Who serves the time-shift timeline of [ArchiveStatus]. */
+enum class TimelineSource { PROVIDER, LOCAL }
 
 sealed interface ArchiveStart {
     data object Started : ArchiveStart
@@ -102,7 +116,17 @@ interface ArchivePlayback {
      * Default: [seekTo] with seq 0 (fakes).
      */
     fun reapply(playheadMs: Long) = seekTo(playheadMs, 0)
+
+    /**
+     * (M6 time-shift commit 0, docs/design/m6-timeshift.md §11.2, §16.3, A-C1) The local buffer of the tuned live channel
+     * in the **programme frame**, published by `LocalTimelineBackend` (the only mono → P converter). The player VM's only
+     * source for `PlayerEvent.Buffer`. Default: always null (fakes; no buffer).
+     */
+    val localBuffer: StateFlow<app.thebox.core.full.LocalBufferInfo?> get() = NO_LOCAL_BUFFER_INFO
 }
+
+/** (M6 commit 0) Default of [ArchivePlayback.localBuffer]. */
+internal val NO_LOCAL_BUFFER_INFO: StateFlow<app.thebox.core.full.LocalBufferInfo?> = kotlinx.coroutines.flow.MutableStateFlow(null)
 
 /** playlist.catchup_probe_winner (M1 §2.1.2). Main-safe. */
 interface CatchupProbeStore {

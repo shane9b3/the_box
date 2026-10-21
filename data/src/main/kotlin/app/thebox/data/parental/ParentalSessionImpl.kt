@@ -5,7 +5,9 @@ import android.app.Application
 import android.content.Context
 import android.os.Bundle
 import app.thebox.core.common.BoxLog
+import app.thebox.core.editor.ChannelTarget
 import app.thebox.core.guide.GuideSource
+import app.thebox.core.parental.ParentalAccess
 import app.thebox.core.parental.ParentalControls
 import app.thebox.core.parental.ParentalDomain
 import app.thebox.core.parental.ParentalPolicy
@@ -20,7 +22,9 @@ import app.thebox.data.db.dao.GroupDao
 import app.thebox.data.di.ApplicationScope
 import app.thebox.data.di.IoDispatcher
 import app.thebox.data.di.WallClock
+import app.thebox.data.editor.EditorQueries
 import app.thebox.data.repo.exec
+import app.thebox.data.repo.forEachBound
 import app.thebox.data.repo.writeTransaction
 import app.thebox.data.security.KeyResetFlag
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -235,10 +239,50 @@ class ParentalSessionImpl @Inject constructor(
     }
 
     /**
+     * (docs/design/m6-channel-editor.md §3.5) The channel editor's bulk Lock / Unlock: explicit `channel_prefs.locked` for
+     * every target channel in **one** write transaction. An AllOf target is resolved inside that transaction under
+     * [access] (`EditorQueries.resolveKeys`, the editor's own list statement), so its keys cannot go stale during a merge
+     * (review 2 NIT 3). C-B2: an unlock is refused under [refusesLowering].
+     */
+    override suspend fun setChannelsLocked(playlistId: Long, target: ChannelTarget, access: ParentalAccess, locked: Boolean) {
+        lockChannels(playlistId, target, access, locked)
+    }
+
+    /** [setChannelsLocked] with its outcome: the number of channels written, or -1 when refused. */
+    suspend fun lockChannels(playlistId: Long, target: ChannelTarget, access: ParentalAccess, locked: Boolean): Int = withContext(io) {
+        if (!locked && refusesLowering()) {
+            BoxLog.w(TAG, "channel unlock refused: the session is locked")
+            return@withContext -1
+        }
+        val now = wall.now()
+        db.writeTransaction {
+            val keys = EditorQueries.resolveKeys(this, playlistId, target, access)
+            forEachBound(EditorQueries.UPSERT_CHANNEL_LOCKED, keys) { k ->
+                bindLong(1, playlistId); bindText(2, k); bindLong(3, if (locked) 1L else 0L); bindLong(4, now)
+            }
+        }
+    }
+
+    /** (docs/design/m6-channel-editor.md §3.5) Bulk group Lock / Unlock in one transaction, refused like [setGroupLocked]. */
+    override suspend fun setGroupsLocked(playlistId: Long, groupKeys: Collection<String>, locked: Boolean) = withContext(io) {
+        if (!locked && refusesLowering()) {
+            BoxLog.w(TAG, "group unlock refused: the session is locked")
+            return@withContext
+        }
+        val now = wall.now()
+        db.writeTransaction {
+            forEachBound(EditorQueries.UPSERT_GROUP_LOCKED, groupKeys) { k ->
+                bindLong(1, playlistId); bindText(2, k); bindLong(3, if (locked) 1L else 0L); bindLong(4, now)
+            }
+        }
+        Unit
+    }
+
+    /**
      * C-B2 / D-B1 (§3.9.2): true while a PIN is set (or not yet known, D-S1) and the session is not unlocked; writes that
      * lower protection (group unlock, a group-prefs reset, a restore) refuse then.
      */
-    fun refusesLowering(): Boolean = _state.value.let { it.pinSet && it.access != app.thebox.core.parental.ParentalAccess.OPEN }
+    override fun refusesLowering(): Boolean = _state.value.let { it.pinSet && it.access != app.thebox.core.parental.ParentalAccess.OPEN }
 
     companion object {
         private const val TAG = "ParentalSession"

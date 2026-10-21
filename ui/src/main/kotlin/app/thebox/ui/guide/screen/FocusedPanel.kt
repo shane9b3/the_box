@@ -9,6 +9,8 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -44,24 +46,53 @@ const val COMPOSITIONS_PANEL = "FocusedPanel"
 fun FocusedPanel(panel: PanelState?, focusedButton: Int, modifier: Modifier = Modifier) {
     if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) androidx.compose.runtime.SideEffect { app.thebox.ui.guide.GuideDebugCounters.bump(COMPOSITIONS_PANEL) } // I-12
     if (panel == null) return
-    Column(modifier.testTag(FOCUSED_PANEL_TAG), verticalArrangement = Arrangement.spacedBy(16.dp)) {
-        MetaRow(panel)
-        val titleStyle = remember { BoxTextStyles.Title.copy(color = GuideUi.Fg, lineBreak = LineBreak.Heading) }
-        Line(panel.title, titleStyle, maxLines = 2)
-        Line(panel.timeLine, GuideUi.mono(18, color = GuideUi.Fg.copy(alpha = 0.75f)))
-        panel.description?.let { desc ->
-            val bodyStyle = remember { BoxTextStyles.Body.copy(color = GuideUi.Fg.copy(alpha = 0.78f)) }
-            Line(desc, bodyStyle, Modifier.widthIn(max = 860.dp), maxLines = 3)
-        }
-        if (panel.buttons.isNotEmpty()) {
-            Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                panel.buttons.forEachIndexed { i, b ->
-                    PanelButtonView(b, primary = i == 0, focused = focusedButton == i)
+    // Owner request 2026-10-18: poster art (the programme's EPG icon) on the right, the text column beside it.
+    Row(modifier.testTag(FOCUSED_PANEL_TAG), horizontalArrangement = Arrangement.spacedBy(32.dp), verticalAlignment = Alignment.Bottom) {
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+            MetaRow(panel)
+            val titleStyle = remember { BoxTextStyles.Title.copy(color = GuideUi.Fg, lineBreak = LineBreak.Heading) }
+            Line(panel.title, titleStyle, maxLines = 2)
+            Line(panel.timeLine, GuideUi.mono(24, color = GuideUi.Fg.copy(alpha = 0.75f)))
+            panel.description?.let { desc ->
+                val bodyStyle = remember { BoxTextStyles.Body.copy(color = GuideUi.Fg.copy(alpha = 0.78f)) }
+                Line(desc, bodyStyle, Modifier.widthIn(max = 980.dp), maxLines = 2)
+            }
+            if (panel.buttons.isNotEmpty()) {
+                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    panel.buttons.forEachIndexed { i, b ->
+                        PanelButtonView(b, primary = i == 0, focused = focusedButton == i)
+                    }
                 }
             }
         }
+        panel.imageUrl?.let { Poster(it, panel.title) }
     }
 }
+
+/** The programme's artwork: a 2:3 card, 200 × 300 design px, fitted (posters and 16:9 stills both read). */
+@Composable
+private fun Poster(url: String, title: String) {
+    val loader = LocalShellImageLoader.current ?: return
+    Box(
+        Modifier
+            .size(PANEL_POSTER_W.dp, PANEL_POSTER_H.dp)
+            .background(GuideUi.White08, RoundedCornerShape(DesignTokens.Radii.Chip))
+            .testTag(PANEL_POSTER_TAG),
+        contentAlignment = Alignment.Center,
+    ) {
+        coil3.compose.AsyncImage(
+            model = url,
+            contentDescription = title,
+            imageLoader = loader,
+            contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+            modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(DesignTokens.Radii.Chip)),
+        )
+    }
+}
+
+const val PANEL_POSTER_TAG = "focused_panel_poster"
+private const val PANEL_POSTER_W = 200
+private const val PANEL_POSTER_H = 300
 
 @Composable
 private fun MetaRow(panel: PanelState) {
@@ -72,23 +103,23 @@ private fun MetaRow(panel: PanelState) {
                     .border(1.dp, GuideUi.White12, RoundedCornerShape(DesignTokens.Radii.Chip))
                     .background(GuideUi.White08, RoundedCornerShape(DesignTokens.Radii.Chip))
                     .padding(horizontal = 10.dp, vertical = 4.dp),
-            ) { Line(n.toString(), GuideUi.mono(16, color = GuideUi.Fg70)) }
+            ) { Line(n.toString(), GuideUi.mono(22, color = GuideUi.Fg70)) }
         }
-        Line(panel.channelName, GuideUi.sans(18, color = GuideUi.Fg70))
+        Line(panel.channelName, GuideUi.sans(24, color = GuideUi.Fg70))
         panel.genre?.takeIf { it.isNotBlank() }?.let { g ->
             Dot(GuideUi.Fg.copy(alpha = 0.4f), 4.dp)
-            Line(g, GuideUi.sans(18, color = GuideUi.Fg70))
+            Line(g, GuideUi.sans(24, color = GuideUi.Fg70))
         }
         if (panel.onNow) {
             Box(
                 Modifier
                     .background(DesignTokens.Colors.OnNowFill, RoundedCornerShape(DesignTokens.Radii.Pill))
                     .padding(horizontal = 10.dp, vertical = 3.dp),
-            ) { Line(stringResource(R.string.guide_on_now), GuideUi.sans(15, FontWeight.SemiBold, DesignTokens.Colors.AccentText, 0.06f)) }
+            ) { Line(stringResource(R.string.guide_on_now), GuideUi.sans(20, FontWeight.SemiBold, DesignTokens.Colors.AccentText, 0.06f)) }
         }
         if (panel.catchupDays > 0) {
             Dot(GuideUi.Fg.copy(alpha = 0.4f), 4.dp)
-            Line(pluralStringResource(R.plurals.guide_catchup_days, panel.catchupDays, panel.catchupDays), GuideUi.sans(18, color = GuideUi.Fg70))
+            Line(pluralStringResource(R.plurals.guide_catchup_days, panel.catchupDays, panel.catchupDays), GuideUi.sans(24, color = GuideUi.Fg70))
         }
     }
 }
@@ -121,7 +152,7 @@ private fun PanelButtonView(button: PanelButton, primary: Boolean, focused: Bool
         }
         Text(
             stringResource(panelButtonLabel(button)),
-            style = GuideUi.sans(19, if (primary) FontWeight.SemiBold else FontWeight.Medium, textColor),
+            style = GuideUi.sans(24, if (primary) FontWeight.SemiBold else FontWeight.Medium, textColor),
             maxLines = 1,
         )
     }

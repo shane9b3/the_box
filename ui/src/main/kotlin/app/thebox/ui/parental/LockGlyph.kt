@@ -55,7 +55,7 @@ fun NotProtectedChip(modifier: Modifier = Modifier, color: Color? = null) {
     ) {
         app.thebox.ui.guide.screen.Line(
             androidx.compose.ui.res.stringResource(app.thebox.ui.R.string.settings_ui_badge_adult),
-            app.thebox.ui.guide.screen.GuideUi.mono(14, color = c),
+            app.thebox.ui.guide.screen.GuideUi.mono(18, color = c),
         )
     }
 }

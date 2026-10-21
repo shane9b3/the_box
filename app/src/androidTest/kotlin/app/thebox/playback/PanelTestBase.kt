@@ -86,7 +86,10 @@ abstract class PanelTestBase {
         panel = FakePanelAdmin(base)
         assumeTrue("fake panel at $base not reachable", panel.reachable())
         panel.reset()
-        ep.settings().update { PlaybackSettings(defaultUserAgent = it.defaultUserAgent, lifecycleTimeScale = 0.1f) }
+        // (M6 integration 2026-10-19) `-e timeshift off` runs the M2 suite with the time-shift buffer Off, the baseline
+        // of the §15 zap gate (Off unchanged); the default is the product default, Auto.
+        val ts = if (InstrumentationRegistry.getArguments().getString("timeshift") == "off") app.thebox.core.settings.TimeshiftLength.OFF else app.thebox.core.settings.TimeshiftLength.AUTO
+        ep.settings().update { PlaybackSettings(defaultUserAgent = it.defaultUserAgent, lifecycleTimeScale = 0.1f, timeshift = ts) }
         playlistId = addXtreamPlaylist()
         channelsByStream = channelsOf(playlistId) { it.xtreamStreamId?.toInt() }
         startElapsedMs = SystemClock.elapsedRealtime()

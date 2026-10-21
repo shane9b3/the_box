@@ -105,7 +105,7 @@ fun ChannelListPanel(state: ChannelListState, host: PlayerHost, modifier: Modifi
             ) {
                 items.forEachIndexed { i, item ->
                     Chip(i == state.menuFocused, Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { c ->
-                        Line(stringResource(PlayerText.menuItem(item)), GuideUi.sans(19, FontWeight.Medium, c))
+                        Line(stringResource(PlayerText.menuItem(item)), GuideUi.sans(24, FontWeight.Medium, c))
                     }
                 }
             }
@@ -117,8 +117,8 @@ fun ChannelListPanel(state: ChannelListState, host: PlayerHost, modifier: Modifi
 private fun Header(state: ChannelListState) {
     val entry = state.groups.getOrNull(state.groupCurrent) ?: state.groups.firstOrNull { it.source == state.source }
     Row(Modifier.height(PlayerUi.LIST_HEADER_H.dp).fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Line(entry?.label ?: "", GuideUi.sans(22, FontWeight.SemiBold), Modifier.weight(1f, fill = false))
-        Line(pluralStringResource(R.plurals.player_list_count, state.size, state.size), GuideUi.sans(17, color = GuideUi.Fg50))
+        Line(entry?.label ?: "", GuideUi.sans(28, FontWeight.SemiBold), Modifier.weight(1f, fill = false))
+        Line(pluralStringResource(R.plurals.player_list_count, state.size, state.size), GuideUi.sans(22, color = GuideUi.Fg50))
     }
 }
 
@@ -126,8 +126,8 @@ private fun Header(state: ChannelListState) {
 private fun PreviousRow(prev: GuideChannel, focused: Boolean, alpha: Float) {
     RowFrame(focused, alpha) { text ->
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Line(stringResource(R.string.player_list_previous), GuideUi.sans(15, FontWeight.SemiBold, if (focused) text else GuideUi.Accent))
-            Line(prev.displayName, GuideUi.sans(20, FontWeight.SemiBold, text))
+            Line(stringResource(R.string.player_list_previous), GuideUi.sans(20, FontWeight.SemiBold, if (focused) text else GuideUi.Accent))
+            Line(prev.displayName, GuideUi.sans(26, FontWeight.SemiBold, text))
         }
     }
 }
@@ -136,12 +136,12 @@ private fun PreviousRow(prev: GuideChannel, focused: Boolean, alpha: Float) {
 private fun ChannelRow(channel: GuideChannel?, now: ProgrammeInfo?, focused: Boolean, tuned: Boolean, nowMs: Long, alpha: Float) {
     if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) androidx.compose.runtime.SideEffect { app.thebox.ui.guide.GuideDebugCounters.bump(COMPOSITIONS_LIST_ROW) } // U-S5
     RowFrame(focused, alpha, Modifier.testTag(CHANNEL_ROW_TAG)) { text ->
-        Line(channel?.number?.toString() ?: "", GuideUi.mono(18, color = text.copy(alpha = 0.5f)), Modifier.width(56.dp))
-        ChannelLogo(channel, PlayerUi.LIST_LOGO.dp, 8.dp)
-        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-            Line(channel?.displayName ?: "", GuideUi.sans(20, FontWeight.SemiBold, text))
+        Line(channel?.number?.toString() ?: "", GuideUi.mono(24, color = text.copy(alpha = 0.5f)), Modifier.width(56.dp))
+        ChannelLogo(channel, PlayerUi.LIST_LOGO_W.dp, PlayerUi.LIST_LOGO.dp, 8.dp) // owner ruling 2026-10-17: a wide slot so broadcaster marks read at list size
+        // Owner ruling 2026-10-17: the logo names the channel; the row carries the programme (the name when none).
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Line(now?.title ?: channel?.displayName ?: "", GuideUi.sans(28, FontWeight.SemiBold, text))
             if (now != null) {
-                Line(now.title, GuideUi.sans(17, color = text.copy(alpha = 0.7f)))
                 if (now.endMin > now.startMin) {
                     val f = ((nowMs / 60_000.0 - now.startMin) / (now.endMin - now.startMin)).coerceIn(0.0, 1.0).toFloat()
                     Box(
@@ -185,14 +185,14 @@ private fun GroupsColumn(state: ChannelListState) {
             .padding(horizontal = 12.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Line(stringResource(R.string.player_list_groups), GuideUi.sans(22, FontWeight.SemiBold), Modifier.padding(start = 8.dp, top = 8.dp, bottom = 12.dp))
+        Line(stringResource(R.string.player_list_groups), GuideUi.sans(28, FontWeight.SemiBold), Modifier.padding(start = 8.dp, top = 8.dp, bottom = 12.dp))
         val visible = GROUPS_VISIBLE
         val top = (state.groupFocused - visible / 2).coerceIn(0, (state.groups.size - visible).coerceAtLeast(0))
         for (i in top until minOf(state.groups.size, top + visible)) {
             val e = state.groups[i]
             val focused = i == state.groupFocused
             Chip(focused, Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { c ->
-                Line(e.label, GuideUi.sans(19, if (i == state.groupCurrent) FontWeight.SemiBold else FontWeight.Normal, if (i == state.groupCurrent && !focused) DesignTokens.Colors.AccentText else c), Modifier.weight(1f))
+                Line(e.label, GuideUi.sans(28, if (i == state.groupCurrent) FontWeight.SemiBold else FontWeight.Normal, if (i == state.groupCurrent && !focused) DesignTokens.Colors.AccentText else c), Modifier.weight(1f))
                 // M5 (§3.9.1 "Show with a lock"): OK asks for the PIN (or shows the not-protected card) first.
                 // U-S11 (code review 2026-10-16): FILTERED_NO_PIN draws the amber 18+ chip instead of the padlock.
                 if (e.notProtected) app.thebox.ui.parental.NotProtectedChip(color = if (focused) c else null)

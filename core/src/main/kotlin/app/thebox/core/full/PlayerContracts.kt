@@ -187,6 +187,60 @@ data class ScrubState(
     val seeking: Boolean,
     /** Live channel with archive, time-shift not started yet: the playhead sits on the live edge. */
     val atLive: Boolean,
+    // (M6 time-shift commit 0, docs/design/m6-timeshift.md §11.4, §16.3; additive, WP-C fills them)
+    /** PROGRAMME: M4's bar; REWIND_WINDOW: a channel without catch-up, the bar spans the rewind window. */
+    val scope: ScrubScope = ScrubScope.PROGRAMME,
+    /** REWIND_WINDOW: `edge − rewindLength` (P frame). */
+    val windowFromMs: Long? = null,
+    /** REWIND_WINDOW: the oldest saved instant (P frame); the saved part grows from the right. */
+    val savedFromMs: Long? = null,
+    /** "Not saved" ranges (P frame, ≤ MAX_SEGMENTS; content equality, A-C1). */
+    val notSaved: app.thebox.core.playback.timeshift.TimeRanges = app.thebox.core.playback.timeshift.TimeRanges.EMPTY,
+    /** The header line under the pill while paused (§11.5); null = none. */
+    val header: PausedHeader? = null,
+    /** Show the hint row (focused bar, first HINT_SHOW_COUNT times, §11.6). */
+    val hint: Boolean = false,
+)
+
+/** (M6 commit 0, §11.4) What the scrub bar spans. */
+enum class ScrubScope { PROGRAMME, REWIND_WINDOW }
+
+/** (M6 commit 0, §11.5) The paused header line: saving, full, hold limit, slot lost, catch-up covers the rest. */
+enum class PausedHeader { SAVING, FULL, HOLD_LIMIT, SLOT_LOST, CATCHUP_COVERS }
+
+/**
+ * (M6 time-shift commit 0, docs/design/m6-timeshift.md §11.1, §16.3) The local buffer of the tuned live channel, in the
+ * **programme frame** (P), from `LocalTimelineBackend` (A-C1). [fromMs] is the oldest saved instant, [atMs] the
+ * snapshot's live edge; [notSaved] the parts that were not saved. [off] says why it is not [available].
+ */
+data class LocalBufferInfo(
+    val available: Boolean, val fromMs: Long, val atMs: Long, val saving: Boolean, val notSaved: app.thebox.core.playback.timeshift.TimeRanges,   // P frame, from LocalTimelineBackend (A-C1)
+    val pauseRemainingMs: Long?, val stop: app.thebox.core.playback.timeshift.RecordStop?,
+    val off: app.thebox.core.playback.timeshift.BufferOff?, val hls: Boolean, val limitedToday: Boolean,
+    // (Fix pass, product, 2026-10-19: UX review S1, S2, S8, S9; additive, defaults keep callers compiling)
+    /** The rewind window's width (a length, ms), stable for the cycle: the REWIND_WINDOW bar never rescales. 0 = unknown. */
+    val windowMs: Long = 0,
+    /** The "Keep recording while paused" limit in force (a length, ms); null = until full. "Saving stopped after N min". */
+    val holdMs: Long? = null,
+    /** When saving stopped (P frame); null while saving. */
+    val stoppedAtMs: Long? = null,
+    /** The controller's buffered cycle this snapshot belongs to; a new value is a new cycle (REWIND_NOTHING_YET resets). */
+    val cycleId: Long = 0,
+)
+
+/**
+ * (Fix pass, product, 2026-10-19: UX review §7, S4) A LOCAL time-shift of the tuned channel is paused: what the paused
+ * header line and the dim card need, independent of whether the scrub bar is shown. [pausedSinceMs] is when the pause
+ * began (device wall ms; a seek while paused keeps it, S2); [dimmed] since [dimSinceMs] draws the dim layer and its
+ * card (the next key only restores the picture, §11.5); [mediaKeys]: the remote has sent a media key this process
+ * ("Press OK or ▶", product line 94); [header] is the §11.5 line (null for a storage stop, which toasts instead).
+ */
+data class PausedUi(
+    val pausedSinceMs: Long,
+    val dimmed: Boolean = false,
+    val dimSinceMs: Long? = null,
+    val mediaKeys: Boolean = false,
+    val header: PausedHeader? = null,
 )
 
 enum class ListColumn { GROUPS, CHANNELS }
@@ -318,12 +372,22 @@ data class PlayerUiState(
     val pill: PillState = PillState(),
     /** A transient "Trying another catch-up format (2/3)" line while probing; null otherwise. */
     val probing: Pair<Int, Int>? = null,
+    /** (Fix pass, product, 2026-10-19: UX review §7, S4; additive) Non-null while a LOCAL time-shift is paused. */
+    val paused: PausedUi? = null,
 )
 
 /** Why FULL was entered (decides the auto-shown bar, §3.2.1). */
 enum class EnterReason { USER, ARCHIVE, REMINDER, SEARCH, LAUNCH }
 
-/** Toasts the machine raises synchronously; effects toast what they learn asynchronously (M3 §2.13 item 9). */
+/**
+ * Toasts the machine raises synchronously; effects toast what they learn asynchronously (M3 §2.13 item 9).
+ *
+ * **Argument convention** (`PlayerEffects.toast(kind, arg)`; fix pass, product, 2026-10-19, UX review §7): the machine
+ * passes raw values and the host turns them into words. Times (a clock time) and lengths ("N min") are decimal **ms**
+ * (a time in the display frame, i.e. with the EPG shift added); a playlist name is passed as is and "" means unnamed
+ * ("your playlist"); several values are joined by `PlayerText.ARG_SEP` (U+001F) in the order the kind's KDoc gives.
+ * A kind without values gets null. A typed `ToastArg` may replace this later.
+ */
 enum class PlayerToast {
     NO_CATCHUP, NO_PREVIOUS, NO_FAVOURITES, NO_AUDIO_CHOICE, NO_SUBTITLES, ARCHIVE_NOT_READY, BACK_TO_LIVE,
     ADDED_FAVOURITE, REMOVED_FAVOURITE, CHANNEL_HIDDEN,
@@ -334,7 +398,26 @@ enum class PlayerToast {
      * protected" wording without one (the texts of `GuideToast.CHANNEL_LOCKED` / `LOCKED_NOT_PROTECTED`).
      */
     CHANNEL_LOCKED, LOCKED_NOT_PROTECTED,
+    // (M6 time-shift commit 0, docs/design/m6-timeshift.md §13, §16.3; append-only). Texts are §13's; where a text has
+    // values (a time, a size, "N min") the effects pass them in `arg` (several joined by PlayerText.ARG_SEP).
+    PAUSE_NO_REWIND_HLS, PAUSE_NO_REWIND_OFF, PAUSE_NO_REWIND_SPACE, BACK_TO_LIVE_UNBUFFERED,
+    REWIND_NOTHING_YET, REWIND_START, GAP_SKIPPED_PAUSED, GAP_SKIPPED_STREAM, REWIND_STOPPED_STORAGE, REWIND_STOPPED_SLOW,
+    REWIND_LIMITED_TODAY, LEFT_APP_CLEARED, ZAP_CONFIRM, ZAP_CONFIRM_NUMBER, SAVING_STOPPED_CONNECTION, JUMPED_TO_LIVE_RESTART, PAUSE_TIP,
+    // Values per kind (ms unless said): PAUSE_NO_REWIND_HLS the playlist name (null = M3U); PAUSE_NO_REWIND_SPACE the free
+    // bytes (null = the host measures); REWIND_NOTHING_YET the window length; REWIND_START the oldest saved time, then
+    // (optional) the window length when that time is not when the viewer tuned in (S8); GAP_SKIPPED_* the gap length,
+    // then the landing time; ZAP_CONFIRM / ZAP_CONFIRM_NUMBER the saved length.
+    /**
+     * (Fix pass, product, 2026-10-19, UX review S7; append-only) Pause or RW on a live stream that is not TS (and not
+     * HLS): it cannot be saved, so Play returns to live.
+     */
+    PAUSE_NO_REWIND_FORMAT,
+    /** (Fix pass, product, UX review S7; append-only) Pause while the buffer is off after a storage failure. */
+    PAUSE_NO_REWIND_STORAGE,
 }
+
+/** (Fix pass, product, 2026-10-19) Joins the values of one toast's `arg` (see [PlayerToast]); `PlayerText.ARG_SEP`. */
+const val PLAYER_TOAST_ARG_SEP: Char = '\u001F'
 
 /** Inputs other than keys. All on main. */
 sealed interface PlayerEvent {
@@ -374,6 +457,10 @@ sealed interface PlayerEvent {
     /** The answer to a PIN the player machine asked for through its [PlayerStateMachine.pinGate]. */
     data class PinResult(val purpose: app.thebox.core.parental.PinPurpose, val granted: Boolean) : PlayerEvent
     // (U-L18, code review 2026-10-16) `KeyHints` removed: the player machine stored it and never read it.
+
+    // M6 time-shift commit 0 (docs/design/m6-timeshift.md §11.1, §16.3; additive, WP-C fills the machine's branches)
+    /** `ArchivePlayback.localBuffer` (P frame, ≤ 1 Hz); null = no buffer for the tuned channel. */
+    data class Buffer(val info: LocalBufferInfo?) : PlayerEvent
 }
 
 /** Side effects; implemented by :ui's PlayerEffectsImpl (WP-D). Main-safe, non-blocking. */
@@ -474,6 +561,13 @@ interface PlayerStateMachine {
     var pinGate: app.thebox.core.parental.PinGate?
         get() = null
         set(@Suppress("UNUSED_PARAMETER") value) = Unit
+
+    /**
+     * (M6 time-shift commit 0, docs/design/m6-timeshift.md §11.1, lead ruling 6) True when a single-key zap now (CH±,
+     * Last, a digit commit) needs a second press because the viewer has been paused ≥ ZAP_CONFIRM_AFTER_PAUSE_MS. The
+     * guide machine's number entry asks it before committing a digit zap in FULL. Default: never.
+     */
+    fun zapNeedsConfirm(nowMs: Long): Boolean = false
 }
 
 fun interface PlayerStateMachineFactory {

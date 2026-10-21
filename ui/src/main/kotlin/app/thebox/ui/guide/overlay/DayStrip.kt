@@ -59,7 +59,7 @@ fun DayStrip(state: GuideUiState, modifier: Modifier = Modifier) {
                         item.primeTime -> DesignTokens.Colors.AccentText
                         else -> GuideUi.Fg70
                     }
-                    Line(item.label, GuideUi.sans(16, if (focused) FontWeight.SemiBold else FontWeight.Medium, c))
+                    Line(item.label, GuideUi.sans(22, if (focused) FontWeight.SemiBold else FontWeight.Medium, c))
                 }
             }
         }

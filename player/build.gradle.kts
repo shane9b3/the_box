@@ -37,6 +37,8 @@ dependencies {
     implementation(libs.androidx.lifecycle.process)
 
     testImplementation(libs.junit4)
+    // WP-A's time-shift fakes (MemoryRingStorage, FakeTsUpstream, SyntheticTs, …), as :app/:data/:ui use :core's fixtures.
+    testImplementation(testFixtures(project(":core")))
     testImplementation(libs.robolectric)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.okhttp.mockwebserver)          // mockwebserver3 5.5.0

@@ -45,7 +45,11 @@ import kotlin.test.assertTrue
 class PlayerFiveKeyReachabilityTest {
     private val keys = listOf(UP, DOWN, LEFT, RIGHT, SELECT, BACK)
 
-    enum class Start { LIVE_WITH_ARCHIVE, LIVE_WITHOUT_ARCHIVE, ARCHIVE, TIME_SHIFT }
+    /**
+     * The four §3.1.6 start states, plus (M6 time-shift, docs/design/m6-timeshift.md §11.1) a live channel without
+     * catch-up that the device's buffer can pause and rewind, and that channel's LOCAL time-shift (pause + resume).
+     */
+    enum class Start { LIVE_WITH_ARCHIVE, LIVE_WITHOUT_ARCHIVE, ARCHIVE, TIME_SHIFT, LIVE_BUFFERED, LOCAL_TIME_SHIFT, PAUSED_LOCAL }
 
     /** (M5 integration) Two servers, so the Sources item and the SERVER picker are offered (§3.6.2). */
     private val tracks = PlayerFixtures.trackMenu().copy(servers = listOf("panel.example:8080", "backup.example:8080"))
@@ -55,6 +59,21 @@ class PlayerFiveKeyReachabilityTest {
         Start.LIVE_WITHOUT_ARCHIVE -> liveWithoutArchive(s, tracks)
         Start.ARCHIVE -> archive(s, tracks)
         Start.TIME_SHIFT -> timeShift(s, tracks)
+        Start.LIVE_BUFFERED -> liveWithoutArchive(s, tracks).buffer()
+        Start.LOCAL_TIME_SHIFT -> liveWithoutArchive(s, tracks).buffer().also { w ->
+            w.press(BoxAction.PLAY_PAUSE)
+            w.advance(5_000)
+            w.press(BoxAction.PLAY_PAUSE)
+            check(w.status.phase == ArchivePhase.PLAYING && w.status.source == app.thebox.core.catchup.archive.TimelineSource.LOCAL) { "LOCAL time-shift: ${w.status}" }
+        }
+        // (Fix pass, UX review S10) Paused with the bar closed, where B1 lived: the quick bar's Pause (QUICK_MENU opens
+        // it under every Up/Down setting; under the default it is ↑), OK, then Back.
+        Start.PAUSED_LOCAL -> liveWithoutArchive(s, tracks).buffer().also { w ->
+            w.press(BoxAction.QUICK_MENU)
+            w.press(SELECT)
+            w.press(BACK)
+            check(w.status.phase == ArchivePhase.PAUSED && w.status.source == app.thebox.core.catchup.archive.TimelineSource.LOCAL && w.ui.layer == PlayerLayer.NONE && w.ui.scrub == null) { "paused, bar closed: ${w.status} ${w.ui.layer}" }
+        }
     }
 
     private class Reached {
@@ -114,16 +133,61 @@ class PlayerFiveKeyReachabilityTest {
     @ParameterizedTest
     @EnumSource(UpDownInPlayer::class)
     fun liveWithArchive(u: UpDownInPlayer) = assertReach(Start.LIVE_WITH_ARCHIVE, u,
-        layers = PlayerLayer.entries - PlayerLayer.ERROR,
-        items = listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, START_OVER, TIME_SHIFT, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, SETTINGS),
-        scrub = ScrubFocus.entries, effects = listOf("startOver", "pauseLive", "playProgramme", "rewindLive"))
+        // M6 §11.3: the quick bar's Pause pauses at once (the scrub bar then belongs to the time-shift start state), so
+        // the at-live scrub bar is reached by TIME_SHIFT / SEEK_BACK only, which are not among the five keys.
+        layers = PlayerLayer.entries - PlayerLayer.ERROR - PlayerLayer.SCRUB,
+        items = listOf(TIME_SHIFT, AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, START_OVER, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, SETTINGS),
+        scrub = emptyList(), effects = listOf("startOver", "pauseLive", "playProgramme"))
 
     @ParameterizedTest
     @EnumSource(UpDownInPlayer::class)
     fun liveWithoutArchive(u: UpDownInPlayer) = assertReach(Start.LIVE_WITHOUT_ARCHIVE, u,
         layers = PlayerLayer.entries - PlayerLayer.ERROR - PlayerLayer.SCRUB,
-        items = listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, SETTINGS),
-        scrub = emptyList(), effects = emptyList())
+        // M6 §11.3 (U-B3): Pause on every live channel; without catch-up or a buffer it freezes (M2) with the reason.
+        items = listOf(TIME_SHIFT, AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, SETTINGS),
+        scrub = emptyList(), effects = listOf("pausePlain", "resumePlain"))
+
+    /** M6 §11.1: a buffered live channel without catch-up: Pause (LOCAL) and Start over (the buffer covers it). */
+    @ParameterizedTest
+    @EnumSource(UpDownInPlayer::class)
+    fun liveBuffered(u: UpDownInPlayer) {
+        // (Fix pass S10) The Pause reached with five keys lands in a LOCAL state, not a plain freeze.
+        val w = liveWithoutArchive(PlayerSettings(upDown = u), tracks).buffer()
+        w.press(BoxAction.QUICK_MENU) // the quick bar under every setting; the five-key route to it is checked below
+        w.press(SELECT)
+        assertTrue(w.status.source == app.thebox.core.catchup.archive.TimelineSource.LOCAL && w.status.phase == ArchivePhase.PAUSED, "pauseLive from LIVE_BUFFERED is LOCAL: ${w.status}")
+        liveBufferedReach(u)
+    }
+
+    private fun liveBufferedReach(u: UpDownInPlayer) = assertReach(Start.LIVE_BUFFERED, u,
+        layers = PlayerLayer.entries - PlayerLayer.ERROR - PlayerLayer.SCRUB,
+        items = listOf(TIME_SHIFT, AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, START_OVER, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, SETTINGS),
+        scrub = emptyList(), effects = listOf("pauseLive", "startOver"))
+
+    /** M6 §11.1: the LOCAL time-shift of that channel: the scrub bar over the rewind window, Back to live, pause. */
+    @ParameterizedTest
+    @EnumSource(UpDownInPlayer::class)
+    fun localTimeShift(u: UpDownInPlayer) = assertReach(Start.LOCAL_TIME_SHIFT, u,
+        layers = PlayerLayer.entries - PlayerLayer.ERROR - PlayerLayer.INFO,
+        items = listOf(JUMP_TO_LIVE, AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, SETTINGS),
+        scrub = ScrubFocus.entries, effects = listOf("jumpToLive", "archiveSeek", "archivePause"))
+
+    /**
+     * (Fix pass, UX review S10) Paused LOCAL with the bar closed: OK continues (B1) and Back to live is reachable, under
+     * every Up/Down setting (↑ quick bar, or ← scrub bar then ↑).
+     */
+    @ParameterizedTest
+    @EnumSource(UpDownInPlayer::class)
+    fun pausedLocal(u: UpDownInPlayer) {
+        val r = search(Start.PAUSED_LOCAL, PlayerSettings(upDown = u))
+        val missing = listOf("archiveResume", "jumpToLive").filter { it !in r.effects }
+        assertTrue(missing.isEmpty(), "PAUSED_LOCAL/$u: not reachable with five keys: $missing")
+        // The very first OK resumes.
+        val w = world(Start.PAUSED_LOCAL, PlayerSettings(upDown = u))
+        val mark = w.mark()
+        w.press(SELECT)
+        assertTrue(w.effectsSince(mark) == listOf("archiveResume"), "OK resumes: ${w.effectsSince(mark)}")
+    }
 
     @ParameterizedTest
     @EnumSource(UpDownInPlayer::class)

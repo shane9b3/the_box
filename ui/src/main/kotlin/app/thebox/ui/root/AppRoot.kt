@@ -59,6 +59,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withTimeoutOrNull
 
 const val KEY_SINK_TAG = "key_sink"
+/** The blank canvas drawn while `GuideUiState.booting` (owner ruling 2026-10-17). */
+const val BOOT_TAG = "boot_blank"
 /** The opaque SETTINGS layer (the settings screen, or an empty canvas while the settings machine is not attached, S11). */
 const val SETTINGS_TAG = app.thebox.ui.settings.SETTINGS_SCREEN_TAG
 const val VIDEO_LAYER_TAG = "video_layer"
@@ -67,6 +69,8 @@ const val COMPOSITIONS_ROOT = "AppRoot"
 
 /** `SCRIM_MS` (Appendix B): the black scrim over the hole fades in/out in 120 ms (§3.13.5). */
 const val SCRIM_MS = 120
+/** The boot blank's hard cap: a slow first tune shows the player's own chrome after this rather than a blank. */
+const val BOOT_BLANK_MAX_MS = 8_000L
 /**
  * Coming from a still (or the HDR poster), the FULL scrim lifts on the re-enabled video track's first rendered frame
  * (`VideoInfo.renderedFirstFrames`, code review 2026-10-14, H-S10), waiting at most this long (N6).
@@ -151,11 +155,15 @@ fun AppRoot(
     host: ShellHost,
     modifier: Modifier = Modifier,
     onExit: () -> Unit = {},
+    /** Selected startup destination is visible and usable, rather than the initial blank frame. */
+    onReady: () -> Unit = {},
     debugHint: Boolean = false,
     videoLayer: @Composable (RectPx?) -> Unit = { rect -> VideoLayer(host.surfacePlayer, rect, Modifier.testTag(VIDEO_LAYER_TAG)) },
     search: @Composable () -> Unit = {},
     /** (M5 integration) WP-D's phone page for `SettingsRoute.PhoneSetup` (the activity owns its view model). */
     settingsPhone: (@Composable (app.thebox.core.settings.PhonePurpose) -> Unit)? = null,
+    /** (M6, docs/design/m6-channel-editor.md §2.0) The channel editor page for `SettingsRoute.ChannelEditor`. */
+    settingsEditor: (@Composable (app.thebox.core.settings.SettingsRoute.ChannelEditor) -> Unit)? = null,
     grid: @Composable (Modifier) -> Unit,
 ) {
     if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) androidx.compose.runtime.SideEffect { app.thebox.ui.guide.GuideDebugCounters.bump(COMPOSITIONS_ROOT) } // U-S5
@@ -188,6 +196,22 @@ fun AppRoot(
 
     // ---- displayed mode and the scrim (§3.13.5)
     var shown by remember { mutableStateOf(ui.mode) }
+    // Owner ruling 2026-10-17: the boot blank outlives `GuideUiState.booting` until the displayed mode has caught up
+    // with the machine's (the GUIDE → FULL crossing below animates the scrim before `shown` moves), so a launch into
+    // FULL never shows the guide, not even for the crossing.
+    var bootBlank by remember { mutableStateOf(ui.booting) }
+    LaunchedEffect(ui.booting, ui.mode, shown) { if (!ui.booting && shown == ui.mode) bootBlank = false }
+    // Safety net (2026-10-18): whatever the machine and the crossing do, the blank never outlives BOOT_BLANK_MAX_MS.
+    LaunchedEffect(Unit) { if (bootBlank) { kotlinx.coroutines.delay(BOOT_BLANK_MAX_MS); bootBlank = false } }
+    val onReadyNow by rememberUpdatedState(onReady)
+    var reportedReady by remember { mutableStateOf(false) }
+    LaunchedEffect(bootBlank, ui.booting, shown, ui.mode) {
+        if (!reportedReady && !bootBlank && !ui.booting && shown == ui.mode) {
+            withFrameNanos { }
+            onReadyNow()
+            reportedReady = true
+        }
+    }
     val scrim = remember { Animatable(0f) }
     val tunedNow by rememberUpdatedState(ui.tuned)
     val posterNow by rememberUpdatedState(video.posterMode)
@@ -315,8 +339,8 @@ fun AppRoot(
                 // would erase anything drawn before it in the frame (see AmbientBackground). The background then paints
                 // everything except the video rect.
                 videoLayer(rects.video)
-                AmbientBackground(host.ambient, rects.video, ambientShadowHole, black = holeMode == HoleMode.FULL || screenOff)
-                HoleChrome(rects, holeMode, host.ambient, scrim = { scrim.value }, poster = holeMode == HoleMode.MINI && video.posterMode)
+                AmbientBackground(host.ambient, rects.video, ambientShadowHole, black = holeMode == HoleMode.FULL || screenOff || bootBlank)
+                if (!bootBlank) HoleChrome(rects, holeMode, host.ambient, scrim = { scrim.value }, poster = holeMode == HoleMode.MINI && video.posterMode)
                 val videoRect = rects.video
                 if (shown == ScreenMode.FULL && !screenOff && player != null && videoRect != null) {
                     val barTop = when (playerBar) {
@@ -327,7 +351,9 @@ fun AppRoot(
                     SubtitleLayer(cues, videoRect, subtitleLiftPx(videoRect, barTop, density)) // U-B2
                 }
                 Box(Modifier.fillMaxSize().testTag(KEY_SINK_TAG).then(sink)) {
-                    when (shown) {
+                    // Owner ruling 2026-10-17: nothing but the canvas until the startup decision (no guide flash before FULL).
+                    if (bootBlank) Box(Modifier.fillMaxSize().background(app.thebox.ui.theme.DesignTokens.Colors.Canvas).testTag(BOOT_TAG))
+                    else when (shown) {
                         ScreenMode.GUIDE -> GuideScreen(
                             state = ui,
                             clock24 = settings.clock24,
@@ -341,7 +367,7 @@ fun AppRoot(
                         ScreenMode.FULL -> FullScreenHost(ui, player = player, clock24 = settings.clock24, lowEnd = lowEnd)
                         ScreenMode.SEARCH -> search()
                         ScreenMode.SETTINGS -> if (settingsMachine != null) {
-                            app.thebox.ui.settings.SettingsScreen(settingsMachine, settings.clock24, phone = settingsPhone)
+                            app.thebox.ui.settings.SettingsScreen(settingsMachine, settings.clock24, phone = settingsPhone, channelEditor = settingsEditor)
                         } else {
                             // S11: the settings machine is not attached yet; the guide machine waits. Opaque, covers the hole.
                             Box(Modifier.fillMaxSize().background(app.thebox.ui.theme.DesignTokens.Colors.Canvas).testTag(SETTINGS_TAG))

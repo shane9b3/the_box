@@ -14,4 +14,9 @@ object PlayerDebugHooks {
     var detectAccessUnitsOff: Boolean
         get() = TsDebugOverrides.detectAccessUnitsOff
         set(value) { TsDebugOverrides.detectAccessUnitsOff = value }
+
+    /** (diagnosis 2026-10-18) Directory for raw TS captures of every following live session; null stops capturing. */
+    var captureDir: java.io.File?
+        get() = TsDebugOverrides.captureDir
+        set(value) { TsDebugOverrides.captureDir = value }
 }

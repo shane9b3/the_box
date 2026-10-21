@@ -7,7 +7,7 @@ object GridConstants {
     const val TAIL_MIN = 30
     const val SNAP_AFTER_REPEATS = 3
     const val SCROLL_ANIM_MS = 200
-    const val PAGE_ROWS = 6
+    const val PAGE_ROWS = 5
     const val TIME_PAGE_MIN = 180
     const val TIME_STEP_MIN = 30
     const val A11Y_DEBOUNCE_MS = 300L
@@ -18,6 +18,6 @@ object GridConstants {
     const val LOGO_CACHE_BYTES = 4L * 1024 * 1024
     const val LOGO_CACHE_BYTES_LOW_END = 2L * 1024 * 1024
     /** Logo slot (§3.7), design px. */
-    const val LOGO_W = 96f
-    const val LOGO_H = 40f
+    const val LOGO_W = 130f
+    const val LOGO_H = 64f
 }

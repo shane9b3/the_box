@@ -66,27 +66,27 @@ fun PhoneSetupScreen(ui: PhoneSetupUi, modifier: Modifier = Modifier) {
     val hint = PhoneScreenModel.showIsolationHint(s, ui.shownAtMs, ui.nowMs)
     val typeOnTv = PhoneScreenModel.showTypeOnTv(hint, ui.vpn, ui.purpose)
     Box(modifier.fillMaxSize().background(DesignTokens.Colors.Canvas).testTag(PHONE_SCREEN_TAG)) {
-        Line(stringResource(titleOf(ui.purpose)), GuideUi.sans(40, FontWeight.SemiBold), Modifier.offset(64.dp, 48.dp))
+        Line(stringResource(titleOf(ui.purpose)), GuideUi.sans(44, FontWeight.SemiBold), Modifier.offset(64.dp, 48.dp))
         val failure = s.failure
         if (s.phase == ServerPhase.FAILED && failure != null) {
             Column(Modifier.offset(160.dp, 260.dp).width(1600.dp)) {
-                Line(stringResource(failureOf(failure)), GuideUi.sans(30, FontWeight.SemiBold, GuideUi.Warn), maxLines = 3)
+                Line(stringResource(failureOf(failure)), GuideUi.sans(36, FontWeight.SemiBold, GuideUi.Warn), maxLines = 3)
                 Spacer(Modifier.height(24.dp))
-                Line(stringResource(R.string.backup_phone_back_hint), GuideUi.sans(21, color = GuideUi.Fg60))
+                Line(stringResource(R.string.backup_phone_back_hint), GuideUi.sans(26, color = GuideUi.Fg60))
             }
             return@Box
         }
         val base = s.baseUrl
         val code = s.code?.let(PairingSession::displayCode)
         if (base == null || s.qrUrl == null || code == null) {
-            Line(stringResource(R.string.backup_phone_starting), GuideUi.sans(30), Modifier.offset(160.dp, 260.dp))
+            Line(stringResource(R.string.backup_phone_starting), GuideUi.sans(36), Modifier.offset(160.dp, 260.dp))
             return@Box
         }
         if (ui.screen.large) {
             Column(Modifier.offset(160.dp, 240.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-                Line(stringResource(R.string.backup_phone_or_open), GuideUi.sans(30, color = GuideUi.Fg70))
+                Line(stringResource(R.string.backup_phone_or_open), GuideUi.sans(36, color = GuideUi.Fg70))
                 Line(base, GuideUi.mono(72, FontWeight.Medium))
-                Line(stringResource(R.string.backup_phone_and_code), GuideUi.sans(30, color = GuideUi.Fg70))
+                Line(stringResource(R.string.backup_phone_and_code), GuideUi.sans(36, color = GuideUi.Fg70))
                 Line(code, GuideUi.mono(120, FontWeight.Medium).copy(letterSpacing = 0.2.em), Modifier.testTag(PHONE_CODE_TAG))
             }
         } else {
@@ -94,19 +94,19 @@ fun PhoneSetupScreen(ui: PhoneSetupUi, modifier: Modifier = Modifier) {
                 QrImage(s.qrUrl!!, 400.dp, stringResource(R.string.backup_phone_scan))
             }
             Column(Modifier.offset(680.dp, 260.dp).width(1176.dp)) {
-                Line(stringResource(R.string.backup_phone_scan), GuideUi.sans(30, FontWeight.SemiBold))
+                Line(stringResource(R.string.backup_phone_scan), GuideUi.sans(36, FontWeight.SemiBold))
                 Spacer(Modifier.height(28.dp))
-                Line(stringResource(R.string.backup_phone_or_open), GuideUi.sans(21, color = GuideUi.Fg65))
-                Line(base, GuideUi.mono(34, FontWeight.Medium))
+                Line(stringResource(R.string.backup_phone_or_open), GuideUi.sans(26, color = GuideUi.Fg65))
+                Line(base, GuideUi.mono(40, FontWeight.Medium))
                 Spacer(Modifier.height(20.dp))
-                Line(stringResource(R.string.backup_phone_and_code), GuideUi.sans(21, color = GuideUi.Fg65))
+                Line(stringResource(R.string.backup_phone_and_code), GuideUi.sans(26, color = GuideUi.Fg65))
                 Line(code, GuideUi.mono(64, FontWeight.Medium).copy(letterSpacing = 0.2.em), Modifier.testTag(PHONE_CODE_TAG))
-                if (s.wrongCodes >= LanLimits.PAIR_MAX_WRONG) Line(stringResource(R.string.backup_phone_new_code), GuideUi.sans(19, color = GuideUi.Warn))
+                if (s.wrongCodes >= LanLimits.PAIR_MAX_WRONG) Line(stringResource(R.string.backup_phone_new_code), GuideUi.sans(24, color = GuideUi.Warn))
                 Spacer(Modifier.height(28.dp))
-                Line(statusText(s), GuideUi.sans(21))
-                if (ui.vpn) Line(stringResource(R.string.backup_phone_vpn), GuideUi.sans(19, color = GuideUi.Warn), maxLines = 2)
+                Line(statusText(s), GuideUi.sans(26))
+                if (ui.vpn) Line(stringResource(R.string.backup_phone_vpn), GuideUi.sans(24, color = GuideUi.Warn), maxLines = 2)
                 Spacer(Modifier.height(16.dp))
-                Line(stringResource(R.string.backup_phone_cant_scan), GuideUi.sans(17, color = GuideUi.Fg55))
+                Line(stringResource(R.string.backup_phone_cant_scan), GuideUi.sans(22, color = GuideUi.Fg55))
             }
         }
         Column(Modifier.align(Alignment.BottomStart).padding(start = 64.dp, end = 64.dp, bottom = 40.dp)) {
@@ -118,14 +118,14 @@ fun PhoneSetupScreen(ui: PhoneSetupUi, modifier: Modifier = Modifier) {
                         .then(if (focused) Modifier.border(GuideUi.FocusRing, GuideUi.Accent, RoundedCornerShape(14.dp)) else Modifier)
                         .padding(horizontal = 26.dp, vertical = 14.dp),
                 ) {
-                    Line(stringResource(R.string.backup_phone_type_on_tv), GuideUi.sans(19, FontWeight.SemiBold, if (focused) GuideUi.Canvas else GuideUi.Fg))
+                    Line(stringResource(R.string.backup_phone_type_on_tv), GuideUi.sans(24, FontWeight.SemiBold, if (focused) GuideUi.Canvas else GuideUi.Fg))
                 }
                 Spacer(Modifier.height(16.dp))
             }
             if (hint) {
-                Line(stringResource(R.string.backup_phone_isolation_hint), GuideUi.sans(17, color = GuideUi.Warn), Modifier.width(1792.dp).testTag(PHONE_HINT_TAG), maxLines = 3)
+                Line(stringResource(R.string.backup_phone_isolation_hint), GuideUi.sans(22, color = GuideUi.Warn), Modifier.width(1792.dp).testTag(PHONE_HINT_TAG), maxLines = 3)
             } else {
-                Line(stringResource(R.string.backup_phone_footer), GuideUi.sans(17, color = GuideUi.Fg55), Modifier.testTag(PHONE_FOOTER_TAG), maxLines = 2)
+                Line(stringResource(R.string.backup_phone_footer), GuideUi.sans(22, color = GuideUi.Fg55), Modifier.testTag(PHONE_FOOTER_TAG), maxLines = 2)
             }
         }
     }

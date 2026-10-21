@@ -5,6 +5,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.onAllNodesWithText
@@ -139,6 +140,25 @@ class SettingsScreenTest {
         rule.onNodeWithTag(SETTINGS_OPTION_TAG + "playback.audio_output:2").assert(isSelected(true)).assertIsDisplayed()
         // The option list replaces the row's own focus style.
         rule.onNodeWithTag(SETTINGS_ROW_TAG + "playback.audio_output").assert(isSelected(false))
+    }
+
+    /**
+     * Device finding 2026-10-17: with the machine's `top` at 0 and the cursor on the 8th row, eight 104 px rows ran the
+     * focused row past the page pane (the machine budgets 8 rows of 76 px). The page scrolls on until it is whole.
+     */
+    @Test
+    fun focusedTallRowBeyondTheEightRowBudgetIsScrolledIntoThePane() {
+        val tall = (0 until 9).map { i ->
+            SettingsRow(RowId("x.tall$i"), "Row $i", description = "Second line $i", kind = RowKind.Toggle(on = i % 2 == 0))
+        }
+        show(state(cursor = 7, page = PageModel(route, "Playback", rows = tall, version = 1)))
+        rule.waitForIdle()
+        val pane = rule.onNodeWithTag(SETTINGS_PAGE_TAG).getBoundsInRoot()
+        val row = rule.onNodeWithTag(SETTINGS_ROW_TAG + "x.tall7").assertIsDisplayed().getBoundsInRoot()
+        assertTrue("row bottom ${row.bottom} inside the pane ${pane.bottom}", row.bottom <= pane.bottom)
+        assertTrue("row top ${row.top} inside the pane ${pane.top}", row.top >= pane.top)
+        // The row below is cut, the rows above are whole: the first row shown is still a whole row.
+        rule.onNodeWithTag(SETTINGS_ROW_TAG + "x.tall0").assertDoesNotExist()
     }
 
     @Test

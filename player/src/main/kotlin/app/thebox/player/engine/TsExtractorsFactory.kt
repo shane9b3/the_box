@@ -44,6 +44,10 @@ internal class TsExtractorsFactory(
     private val compat: TsCompat,
     private val onDeadTrack: ((pid: Int, trackType: Int) -> Unit)? = null,
     private val graceBytes: Long = DEAD_TRACK_GRACE_BYTES,
+    /** (device finding 2026-10-18) An audio PID whose timestamps stand still while video advances; once per session. */
+    private val onStuckAudio: ((pid: Int) -> Unit)? = null,
+    /** (L33r) Regenerate every audio track's timestamps from the learned frame spacing, aligned to the video clock. */
+    private val repairAudioTimestamps: Boolean = false,
 ) : ExtractorsFactory {
 
     override fun createExtractors(): Array<Extractor> {
@@ -52,7 +56,7 @@ internal class TsExtractorsFactory(
             .setTsSubtitleFormats(SPECULATIVE_CC_FORMATS) // V8
         return defaults.createExtractors()
             .filterIsInstance<TsExtractor>()
-            .map { GuardedTsExtractor(it, graceBytes, onDeadTrack) }
+            .map { GuardedTsExtractor(it, graceBytes, onDeadTrack, onStuckAudio, repairAudioTimestamps) }
             .toTypedArray()
     }
 
@@ -86,6 +90,22 @@ internal class TsExtractorsFactory(
 
         /** `DEAD_TRACK_GRACE_BYTES` (App. B). */
         const val DEAD_TRACK_GRACE_BYTES: Long = 1_048_576L
+
+        /**
+         * Stuck audio timestamps (device finding 2026-10-18, capture `tune-2.ts` of xc 538850): video advanced
+         * [STUCK_VIDEO_SPAN_US] while the audio track, with at least [STUCK_AUDIO_MIN_SAMPLES] samples, advanced less
+         * than [STUCK_AUDIO_SPAN_US]. A healthy E-AC3 track advances 32 ms per sample.
+         */
+        const val STUCK_VIDEO_SPAN_US = 4_000_000L
+        const val STUCK_AUDIO_SPAN_US = 500_000L
+        const val STUCK_AUDIO_MIN_SAMPLES = 60
+
+        /** Repair: frame spacing learned from deltas in this range (E-AC3 32 ms, AAC 21 ms, MP2 24 ms); default before any. */
+        const val REPAIR_DEFAULT_FRAME_US = 32_000L
+        const val REPAIR_MIN_FRAME_US = 1_000L
+        const val REPAIR_MAX_FRAME_US = 200_000L
+        /** Repair: an audio clock this far from the video clock snaps back onto it (a real gap or drift). */
+        const val REPAIR_RESYNC_US = 1_500_000L
     }
 }
 
@@ -95,13 +115,15 @@ internal class GuardedTsExtractor(
     private val delegate: TsExtractor,
     private val graceBytes: Long,
     private val onDeadTrack: ((Int, Int) -> Unit)?,
+    private val onStuckAudio: ((Int) -> Unit)? = null,
+    private val repairAudioTimestamps: Boolean = false,
 ) : Extractor {
     private var guard: DeadTrackGuard? = null
 
     override fun sniff(input: ExtractorInput): Boolean = delegate.sniff(input)
 
     override fun init(output: ExtractorOutput) {
-        val g = DeadTrackGuard(output, graceBytes, onDeadTrack)
+        val g = DeadTrackGuard(output, graceBytes, onDeadTrack, onStuckAudio, repairAudioTimestamps)
         guard = g
         delegate.init(g)
     }
@@ -130,10 +152,35 @@ internal class DeadTrackGuard(
     private val output: ExtractorOutput,
     private val graceBytes: Long,
     private val onDeadTrack: ((Int, Int) -> Unit)?,
+    private val onStuckAudio: ((Int) -> Unit)? = null,
+    private val repairAudio: Boolean = false,
 ) : ExtractorOutput {
     private val tracks = LinkedHashMap<Int, LazyTrackOutput>()
     private val discard = DiscardingTrackOutput()
     private var endRequested = false
+    /** Stuck-audio verdict given (once per guard). */
+    private var stuckReported = false
+    /** Largest video timestamp committed so far (the audio repair's clock); MIN_VALUE before the first. */
+    private var videoMaxUs = Long.MIN_VALUE
+
+    /**
+     * (device finding 2026-10-18) After a video sample: an audio track whose last full window of
+     * STUCK_AUDIO_MIN_SAMPLES samples spanned < STUCK_AUDIO_SPAN_US while this video track spanned ≥ STUCK_VIDEO_SPAN_US
+     * is stuck. A window, not "since the first sample", so one odd first timestamp cannot fake a verdict.
+     */
+    private fun checkStuckAudio(video: LazyTrackOutput) {
+        if (stuckReported || onStuckAudio == null) return
+        if (video.spanUs < TsExtractorsFactory.STUCK_VIDEO_SPAN_US) return
+        for (t in tracks.values) {
+            if (t.type != C.TRACK_TYPE_AUDIO || t.real == null) continue
+            val w = t.lastWindowSpanUs
+            if (w >= 0L && w < TsExtractorsFactory.STUCK_AUDIO_SPAN_US) {
+                stuckReported = true
+                onStuckAudio.invoke(t.id)
+                return
+            }
+        }
+    }
     /** TS bytes consumed since `endTracks()` was requested (seeks do not count). */
     private var readSinceEnd = 0L
 
@@ -195,6 +242,38 @@ internal class DeadTrackGuard(
 
         /** Bytes written to [real] so far; metadata spanning more than this refers to discarded bytes and is dropped. */
         private var realBytes = 0L
+
+        /** Timestamp progress of the committed samples (stuck-audio check). */
+        var samples = 0
+            private set
+        private var firstTimeUs = Long.MIN_VALUE
+        private var maxTimeUs = Long.MIN_VALUE
+        val spanUs: Long get() = if (samples == 0) 0L else maxTimeUs - firstTimeUs
+        /** The last full window of STUCK_AUDIO_MIN_SAMPLES original timestamps: max − min; −1 before the first window. */
+        var lastWindowSpanUs = -1L
+            private set
+        private var winCount = 0
+        private var winMin = Long.MAX_VALUE
+        private var winMax = Long.MIN_VALUE
+
+        // Audio timestamp repair (L33r): the stream's own spacing within a PES, the guard's video clock as the base.
+        private var repairPrevOrigUs = Long.MIN_VALUE
+        private var repairPrevOutUs = Long.MIN_VALUE
+        private var repairFrameUs = TsExtractorsFactory.REPAIR_DEFAULT_FRAME_US
+
+        /** Regenerated timestamp for an audio sample whose original is [origUs] (repair mode). */
+        private fun repaired(origUs: Long): Long {
+            if (repairPrevOrigUs != Long.MIN_VALUE) {
+                val d = origUs - repairPrevOrigUs
+                if (d in TsExtractorsFactory.REPAIR_MIN_FRAME_US..TsExtractorsFactory.REPAIR_MAX_FRAME_US) repairFrameUs = d
+            }
+            repairPrevOrigUs = origUs
+            val clock = videoMaxUs
+            var out = if (repairPrevOutUs == Long.MIN_VALUE) (if (clock != Long.MIN_VALUE) clock else origUs) else repairPrevOutUs + repairFrameUs
+            if (clock != Long.MIN_VALUE && kotlin.math.abs(out - clock) > TsExtractorsFactory.REPAIR_RESYNC_US) out = clock
+            repairPrevOutUs = out
+            return out
+        }
 
         fun markDead() {
             dead = true
@@ -281,7 +360,21 @@ internal class DeadTrackGuard(
 
         private fun commit(target: TrackOutput, timeUs: Long, flags: Int, size: Int, offset: Int) {
             if (size.toLong() + offset > realBytes) return // its bytes were discarded before the format arrived
-            target.sampleMetadata(timeUs, flags, size, offset, null)
+            val outUs = if (repairAudio && type == C.TRACK_TYPE_AUDIO) repaired(timeUs) else timeUs
+            target.sampleMetadata(outUs, flags, size, offset, null)
+            if (samples == 0) { firstTimeUs = timeUs; maxTimeUs = timeUs } else if (timeUs > maxTimeUs) maxTimeUs = timeUs
+            samples++
+            // The window judges what the player sees: repaired audio spans normally and is never reported again.
+            if (outUs < winMin) winMin = outUs
+            if (outUs > winMax) winMax = outUs
+            if (++winCount >= TsExtractorsFactory.STUCK_AUDIO_MIN_SAMPLES) {
+                lastWindowSpanUs = winMax - winMin
+                winCount = 0; winMin = Long.MAX_VALUE; winMax = Long.MIN_VALUE
+            }
+            if (type == C.TRACK_TYPE_VIDEO) {
+                if (timeUs > videoMaxUs) videoMaxUs = timeUs
+                checkStuckAudio(this)
+            }
         }
 
         private fun reserve(length: Int): Boolean {
@@ -315,4 +408,6 @@ internal class DeadTrackGuard(
  */
 internal object TsDebugOverrides {
     @Volatile var detectAccessUnitsOff: Boolean = false
+    /** (diagnosis 2026-10-18) When set, every live TS session's bytes are also written to `<dir>/tune-<id>.ts`. */
+    @Volatile var captureDir: java.io.File? = null
 }

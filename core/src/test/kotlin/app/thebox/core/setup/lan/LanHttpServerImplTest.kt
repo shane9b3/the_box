@@ -406,13 +406,13 @@ class LanHttpServerImplTest {
     }
 
     @Test
-    fun moreThanFourSocketsAreRefusedWith503() {
+    fun moreThanFourSocketsAreClosedWithoutAResponse() {
         link.stop()
         link = newLink(config = LanHttpServerImpl.Config(socketTimeoutMs = 2_000))
         started()
         val holders = (1..LanLimits.HTTP_MAX_SOCKETS).map { transport.connect().also { it.output.write("GET".toByteArray()); it.output.flush() } }
         Thread.sleep(50)
-        assertEquals(503, transport.exchange(get("/", host)).status)
+        transport.connect().use { excess -> assertTrue(excess.input.readBytes().isEmpty()) }
         holders.forEach { it.close() }
     }
 

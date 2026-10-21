@@ -73,6 +73,10 @@ class PersistedPlaybackSettings internal constructor(
             reconnectAttempts = p.reconnectAttempts,
             failoverToBackup = p.failoverToBackup,
             resumeAfterStandby = p.resumeAfterStandby,
+            // (M6 time-shift, lead reconciliation R10) The controller reads these here, not from the store.
+            timeshift = p.timeshift,
+            timeshiftHold = p.timeshiftHold,
+            storageProtection = p.storageProtection,
         )
 
         /** The stored form after an update changed [before] into [after] (changed fields only). */
@@ -92,6 +96,9 @@ class PersistedPlaybackSettings internal constructor(
             reconnectAttempts = pick(old.reconnectAttempts, before.reconnectAttempts, after.reconnectAttempts),
             failoverToBackup = pick(old.failoverToBackup, before.failoverToBackup, after.failoverToBackup),
             resumeAfterStandby = pick(old.resumeAfterStandby, before.resumeAfterStandby, after.resumeAfterStandby),
+            timeshift = pick(old.timeshift, before.timeshift, after.timeshift),
+            timeshiftHold = pick(old.timeshiftHold, before.timeshiftHold, after.timeshiftHold),
+            storageProtection = pick(old.storageProtection, before.storageProtection, after.storageProtection),
         )
     }
 }

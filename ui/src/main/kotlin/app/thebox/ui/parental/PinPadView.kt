@@ -92,7 +92,7 @@ private fun Pad(state: PinPromptState, nowMs: () -> Long) {
                 PinPadMode.CREATE_FIRST -> R.string.pin_title_create
                 PinPadMode.CREATE_CONFIRM -> R.string.pin_title_confirm
             }
-            Line(stringResource(title), GuideUi.sans(28, FontWeight.SemiBold))
+            Line(stringResource(title), GuideUi.sans(34, FontWeight.SemiBold))
             val dotsDescription = stringResource(R.string.pin_digits_entered, state.filled)
             Row(
                 Modifier.testTag(PIN_DOTS_TAG).clearAndSetSemantics { contentDescription = dotsDescription; liveRegion = LiveRegionMode.Polite },
@@ -104,7 +104,7 @@ private fun Pad(state: PinPromptState, nowMs: () -> Long) {
             }
             MessageLine(state, nowMs)
             KeyGrid(state)
-            Line(stringResource(R.string.pin_forgot), GuideUi.sans(17, color = GuideUi.Fg55))
+            Line(stringResource(R.string.pin_forgot), GuideUi.sans(22, color = GuideUi.Fg55))
         }
     }
 }
@@ -122,7 +122,7 @@ private fun MessageLine(state: PinPromptState, nowMs: () -> Long) {
         }
         val left = ((until - now).coerceAtLeast(0L) + 999L) / 1000L
         val clock = String.format(java.util.Locale.ROOT, "%d:%02d", left / 60, left % 60)
-        Line(stringResource(R.string.pin_locked_out, clock), GuideUi.mono(19, color = Amber), maxLines = 2)
+        Line(stringResource(R.string.pin_locked_out, clock), GuideUi.mono(24, color = Amber), maxLines = 2)
         return
     }
     val text = when {
@@ -138,7 +138,7 @@ private fun MessageLine(state: PinPromptState, nowMs: () -> Long) {
         else -> null
     }
     Box(Modifier.height(28.dp)) {
-        if (text != null) Line(text, GuideUi.sans(19, color = if (state.wrong || state.message != null) Amber else GuideUi.Fg70), maxLines = 2)
+        if (text != null) Line(text, GuideUi.sans(24, color = if (state.wrong || state.message != null) Amber else GuideUi.Fg70), maxLines = 2)
     }
 }
 
@@ -178,7 +178,7 @@ private fun PadKey(label: String, focused: Boolean, dim: Boolean) {
             dim -> GuideUi.Fg.copy(alpha = 0.35f)
             else -> GuideUi.Fg
         }
-        Line(label, GuideUi.mono(30, FontWeight.Medium, color))
+        Line(label, GuideUi.mono(36, FontWeight.Medium, color))
     }
 }
 
@@ -189,8 +189,8 @@ fun NotProtectedCard(state: PinPromptState) {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
             val channel = state.purpose is PinPurpose.Tune ||
                 (state.purpose as? PinPurpose.OpenSource)?.entry?.section?.let { it != SourceSection.GROUP } == true
-            Line(stringResource(if (channel) R.string.pin_np_title_channel else R.string.pin_np_title), GuideUi.sans(30, FontWeight.SemiBold), maxLines = 2)
-            Line(stringResource(R.string.pin_np_body), GuideUi.sans(21, color = GuideUi.Fg.copy(alpha = 0.8f)), maxLines = 4)
+            Line(stringResource(if (channel) R.string.pin_np_title_channel else R.string.pin_np_title), GuideUi.sans(36, FontWeight.SemiBold), maxLines = 2)
+            Line(stringResource(R.string.pin_np_body), GuideUi.sans(26, color = GuideUi.Fg.copy(alpha = 0.8f)), maxLines = 4)
             Buttons(listOf(stringResource(R.string.pin_np_set), stringResource(R.string.pin_np_open)), state.focusedKey)
         }
     }
@@ -200,7 +200,7 @@ fun NotProtectedCard(state: PinPromptState) {
 private fun EasyConfirmCard(state: PinPromptState) {
     Card {
         Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-            Line(stringResource(R.string.pin_easy_title), GuideUi.sans(30, FontWeight.SemiBold), maxLines = 2)
+            Line(stringResource(R.string.pin_easy_title), GuideUi.sans(36, FontWeight.SemiBold), maxLines = 2)
             Buttons(listOf(stringResource(R.string.pin_easy_use), stringResource(R.string.pin_easy_another)), state.focusedKey)
         }
     }
@@ -217,7 +217,7 @@ internal fun Buttons(labels: List<String>, focused: Int) {
                 border = Color.White.copy(alpha = 0.16f),
                 shape = RoundedCornerShape(14.dp),
                 padding = PaddingValues(horizontal = 26.dp, vertical = 14.dp),
-            ) { color -> Line(label, GuideUi.sans(19, FontWeight.SemiBold, color)) }
+            ) { color -> Line(label, GuideUi.sans(24, FontWeight.SemiBold, color)) }
         }
     }
 }

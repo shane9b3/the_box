@@ -22,6 +22,7 @@ import app.thebox.core.playback.SniffResult
 import app.thebox.core.playback.StreamFormat
 import app.thebox.core.playback.ts.PcrTrackerImpl
 import app.thebox.core.playback.ts.StreamSnifferImpl
+import app.thebox.core.playback.timeshift.ReconnectCause
 import app.thebox.core.playback.ts.TsPacketAlignerImpl
 import app.thebox.player.internal.StreamSessionContext
 import okhttp3.Call
@@ -54,6 +55,19 @@ internal class LiveTsDataSource(
     private val clock: MonoClock = DEFAULT_CLOCK,
     private val timing: Timing = Timing(),
     private val scope: SessionScope = StandaloneScope(),
+    /**
+     * (M6 time-shift, docs/design/m6-timeshift.md §4.2, A-N1) Writer-only: with the hook set, a post-splice PCR jump
+     * **releases** the held packets and reports the jump here instead of throwing `PCR_DISCONTINUITY` (the ring's indexer
+     * places the segment boundary). Called on the reading thread. null (every other caller) = M2's behaviour.
+     */
+    private val onPcrJump: ((deltaMs: Long) -> Unit)? = null,
+    /**
+     * (M6 time-shift, §4.2, A-C4; fix pass B1) Writer-only: asked before every in-source reconnect attempt with the
+     * [ReconnectCause] of the failure being recovered and whether this attempt opens the loss (the first of a burst).
+     * false ends the read with `LiveStreamException(RECONNECT_EXHAUSTED)` at once (the recorder's reconnect cap while
+     * paused or behind live). Called on the reading thread; must not block. null = M2's behaviour.
+     */
+    private val reconnectAllowed: ((cause: ReconnectCause, firstOfLoss: Boolean) -> Boolean)? = null,
 ) : BaseDataSource(/* isNetwork = */ true), Terminable {
 
     /** The §3.3.4/§3.3.6 numbers (Appendix B defaults) and the sleep used between reconnects; tests shrink them. */
@@ -67,7 +81,7 @@ internal class LiveTsDataSource(
         val limitStatusDelayMs: Long = RECONNECT_LIMIT_STATUS_DELAY_MS,
         val pcrHoldMaxBytes: Int = PCR_HOLD_MAX_BYTES,
         val pcrHoldMaxMs: Long = PCR_HOLD_MAX_MS,
-        val sleeper: Sleeper = Sleeper { Thread.sleep(it) },
+        val sleeper: Sleeper = DEFAULT_SLEEPER,
     )
 
     fun interface Sleeper {
@@ -117,6 +131,11 @@ internal class LiveTsDataSource(
     @Volatile private var lastByteAtMs = 0L
     /** Non-zero while a Media3 call (open/read) is blocked in this source. */
     @Volatile private var blockedSinceMs = 0L
+    /** (S9) The silence that made the watchdog cancel the current connection, and the connection's age then (ms). */
+    @Volatile private var watchdogGapMs = 0L
+    @Volatile private var watchdogConnAgeMs = 0L
+    /** (S8) The reconnect sleep waits on this, so [terminate] ends it at once instead of after up to a second. */
+    private val sleepLock = Object()
 
     // Reconnect budget and post-splice hold (loader thread only).
     private var attempt = 0
@@ -196,6 +215,7 @@ internal class LiveTsDataSource(
     override fun terminate() {
         terminated = true
         connActive = false
+        synchronized(sleepLock) { sleepLock.notifyAll() }
         watchdogRegistration?.close()
         calls?.let {
             it.cancelAll()
@@ -305,6 +325,12 @@ internal class LiveTsDataSource(
                 return ioFailure(e, afterHeaders = true)
             }
             val eos = r == C.RESULT_END_OF_INPUT
+            if (eos && cancelledByWatchdog) {
+                // (B1) Our own cancel can end the body with −1 instead of throwing: a silence, not a TINY refusal.
+                closeInner()
+                sniffBuf.fill(0, 0, n)
+                return Failure(Fail.NO_BYTES, net = NetworkFailureKind.TIMEOUT)
+            }
             if (!eos) {
                 n += r
                 onBytes(r, clock.nowMs())
@@ -336,7 +362,7 @@ internal class LiveTsDataSource(
     private fun pump() {
         val ds = inner
         if (ds == null) {
-            reconnectLoop(Failure(Fail.EOF))
+            reconnectLoop(if (cancelledByWatchdog) Failure(Fail.NO_BYTES, net = NetworkFailureKind.TIMEOUT) else Failure(Fail.EOF))
             return
         }
         val r = try {
@@ -351,7 +377,8 @@ internal class LiveTsDataSource(
         if (r == C.RESULT_END_OF_INPUT) {
             closeInner()
             if (isPreempted()) throw failure(LiveFailureKind.PREEMPTED, FailureInfo.Phase.READ)
-            reconnectLoop(Failure(Fail.EOF))
+            // (B1) A body our watchdog cancelled may end with −1 instead of throwing: that is our silence, not a close.
+            reconnectLoop(if (cancelledByWatchdog) Failure(Fail.NO_BYTES, net = NetworkFailureKind.TIMEOUT) else Failure(Fail.EOF))
             return
         }
         val now = clock.nowMs()
@@ -370,6 +397,15 @@ internal class LiveTsDataSource(
     /** (reviewed S1) Post-splice hold: release on a clean PCR, drop and fail on a jump, release when bounded out. */
     private fun checkHold(nowMs: Long) {
         val jump = pcr.pendingJumpMs()
+        if (jump != null && onPcrJump != null) {
+            // (M6 time-shift, A-N1) The recorder keeps every byte: the indexer turns the jump into a segment boundary.
+            aligner.releaseHeld()
+            holdActive = false
+            ctx.onEvent(PlaybackEventType.PCR_JUMP, "jump_kept", "$jump ms")
+            BoxLog.i(TAG) { "tune ${ctx.tuneId}: PCR jump of $jump ms after a reconnect (kept for the ring)" }
+            onPcrJump.invoke(jump)
+            return
+        }
         if (jump != null) {
             aligner.dropHeld()
             holdActive = false
@@ -395,6 +431,7 @@ internal class LiveTsDataSource(
      */
     private fun reconnectLoop(first: Failure) {
         var f = first
+        var firstOfLoss = true
         val start = clock.nowMs()
         if (attempt == 0 || start - windowStartMs > timing.reconnectWindowMs) {
             attempt = 0
@@ -408,12 +445,21 @@ internal class LiveTsDataSource(
             }
             if (f.kind == Fail.NO_BYTES) {
                 telemetry.noBytesCount.incrementAndGet()
-                ctx.onEvent(PlaybackEventType.NO_BYTES, "no_bytes", "attempt $attempt")
+                // (S9) The silence and the connection's age, so a provider's periodic gaps can be read from the log.
+                ctx.onEvent(PlaybackEventType.NO_BYTES, "no_bytes", "attempt $attempt gap=${watchdogGapMs} ms age=${watchdogConnAgeMs} ms")
             }
             if (f.kind == Fail.STATUS) burstLastStatus = f.status
             val now = clock.nowMs()
             if (attempt >= timing.reconnectMaxAttempts || (attempt > 0 && now - windowStartMs > timing.reconnectWindowMs)) {
                 telemetry.inReconnect = false
+                throw failure(LiveFailureKind.RECONNECT_EXHAUSTED, FailureInfo.Phase.RECONNECT, status = burstLastStatus, net = exhaustedKind(f))
+            }
+            val loss = firstOfLoss
+            firstOfLoss = false
+            if (reconnectAllowed != null && !reconnectAllowed.invoke(reconnectCause(f), loss)) {
+                // (M6 time-shift, A-C4) The recorder's reconnect cap while paused or behind live: no further attempt.
+                telemetry.inReconnect = false
+                BoxLog.i(TAG) { "tune ${ctx.tuneId}: reconnect refused by the recorder's cap" }
                 throw failure(LiveFailureKind.RECONNECT_EXHAUSTED, FailureInfo.Phase.RECONNECT, status = burstLastStatus, net = exhaustedKind(f))
             }
             val delays = timing.reconnectDelaysMs
@@ -471,7 +517,19 @@ internal class LiveTsDataSource(
 
     private fun sleep(ms: Long) {
         try {
-            timing.sleeper.sleep(ms)
+            if (timing.sleeper === DEFAULT_SLEEPER) {
+                // (S8) Terminable: a zap ends the old recorder's reconnect wait at once (terminate() notifies).
+                synchronized(sleepLock) {
+                    val end = System.nanoTime() + ms * 1_000_000L
+                    while (!terminated) {
+                        val left = (end - System.nanoTime()) / 1_000_000L
+                        if (left <= 0) break
+                        sleepLock.wait(left)
+                    }
+                }
+            } else {
+                timing.sleeper.sleep(ms)
+            }
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
             telemetry.inReconnect = false
@@ -491,6 +549,19 @@ internal class LiveTsDataSource(
         }
         val kind = networkKindOf(e)
         return Failure(if (afterHeaders) Fail.READ_ERROR else Fail.NETWORK, net = kind, cause = safeCause(e))
+    }
+
+    /**
+     * (B1) The recorder's reconnect cause: only a server close, a reset and a refusal can be a slot fight; our own
+     * watchdog cancel and network trouble (timeouts, 5xx/408/429, and 503, more often overload than a slot) never are.
+     */
+    private fun reconnectCause(f: Failure): ReconnectCause = when (f.kind) {
+        Fail.NO_BYTES -> ReconnectCause.WATCHDOG
+        Fail.EOF -> ReconnectCause.SERVER_CLOSED
+        Fail.READ_ERROR -> if (f.net == NetworkFailureKind.RESET) ReconnectCause.RESET else ReconnectCause.NETWORK
+        Fail.STATUS -> if (f.status in CAP_REFUSAL_STATUSES) ReconnectCause.REFUSED else ReconnectCause.NETWORK
+        Fail.TINY -> if (f.bytes == 0) ReconnectCause.REFUSED else ReconnectCause.NETWORK
+        else -> ReconnectCause.NETWORK
     }
 
     private fun isPreempted(): Boolean = terminated || lease?.isPreempted == true
@@ -564,7 +635,15 @@ internal class LiveTsDataSource(
         }
         if (!expired) return
         cancelledByWatchdog = true
-        BoxLog.i(TAG) { "tune ${ctx.tuneId}: no bytes, cancelling the connection" }
+        // (S9) Redacted diagnostics: tune id and numbers only (no URL, host or header).
+        val gap = now - (if (connHasBytes) maxOf(lastByteAtMs, since) else connStartedAtMs)
+        val age = now - connStartedAtMs
+        watchdogGapMs = gap
+        watchdogConnAgeMs = age
+        BoxLog.i(TAG) {
+            "tune ${ctx.tuneId}: no bytes for $gap ms (connection $age ms old, ${telemetry.bytesTotal} bytes, " +
+                "${telemetry.bitrateBps / 1000} kbit/s${if (connIsReconnect) ", a reconnect" else ""}), cancelling the connection"
+        }
         calls?.cancelAll()
     }
 
@@ -606,6 +685,10 @@ internal class LiveTsDataSource(
 
         /** Answers on a reconnect that mean "the panel still counts our previous socket" (§3.3.6). */
         private val LIMIT_STATUSES = intArrayOf(403, 458, 503, 509)
+        /** (B1) The statuses the recorder's reconnect cap counts as a refusal: the owner's list, without 503. */
+        private val CAP_REFUSAL_STATUSES = intArrayOf(403, 458, 509)
+        /** The production sleep: replaced by the terminable wait in [sleep] (S8); tests pass their own [Sleeper]. */
+        internal val DEFAULT_SLEEPER = Sleeper { Thread.sleep(it) }
         private const val RANGE_HEADER = "Range"
         private const val TAG = "LiveTs"
         private val DEFAULT_CLOCK = MonoClock { SystemClock.elapsedRealtime() }

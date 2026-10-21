@@ -17,22 +17,22 @@ object GuideGeometry {
     const val PANEL_L = 64f; const val PANEL_T = 500f; const val PANEL_W = 1792f; const val PANEL_H = 460f; const val PANEL_R = 24f
     const val PANEL_PAD_X = 16f; const val PANEL_PAD_B = 12f; const val PANEL_BORDER = 1f
     const val HEADER_H = 48f
-    const val LABEL_W = 200f
+    const val LABEL_W = 240f
     const val LABEL_PAD_X = 12f; const val LABEL_GAP = 14f
-    const val ROW_H = 60f; const val ROW_GAP = 8f; const val ROW_PITCH = 68f
-    const val VISIBLE_ROWS = 6
+    const val ROW_H = 74f; const val ROW_GAP = 8f; const val ROW_PITCH = 82f
+    const val VISIBLE_ROWS = 5
     const val WINDOW_MIN = 180
     const val TICK_MIN = 30
-    const val TIMELINE_W = 1558f                        // 1792 − 2×1 border − 2×16 padding − 200 (Appendix A.1)
-    const val PX_PER_MIN = TIMELINE_W / WINDOW_MIN      // 8.6556
+    const val TIMELINE_W = 1518f                        // 1792 − 2×1 border − 2×16 padding − 240 (Appendix A.1; owner ruling 2026-10-17)
+    const val PX_PER_MIN = TIMELINE_W / WINDOW_MIN      // 8.4333
     const val TICK_LABEL_PAD = 10f
     // Cells
     const val CELL_INSET_X = 3f; const val CELL_R = 12f; const val CELL_PAD_X = 16f; const val CELL_PAD_X_NARROW = 8f
-    const val CELL_LINE_GAP = 3f; const val CELL_BORDER = 1f; const val PROGRESS_H = 3f; const val FOCUS_RING = 3f
+    const val CELL_LINE_GAP = 4f; const val CELL_BORDER = 1f; const val PROGRESS_H = 3f; const val FOCUS_RING = 3f
     /** Below this outer width a cell draws its title only (no time line) with [CELL_PAD_X_NARROW]. */
-    const val NARROW_CELL_W = 120f
+    const val NARROW_CELL_W = 150f
     /** Below this inner width a cell draws no text at all. */
-    const val MIN_TEXT_W = 24f
+    const val MIN_TEXT_W = 30f
     // Now line
     const val NOW_W = 2f; const val NOW_DOT = 10f; const val NOW_OVERHANG = 6f; const val NOW_GLOW = 12f
     // Footer
@@ -67,13 +67,13 @@ object GuideColors {
 
 /** Single-line styles drawn by the renderer. Sizes in design px; weights as in docs/01-design-reference.md. */
 enum class GuideTextStyle(val sizePx: Float, val weight: Int, val mono: Boolean, val letterSpacingEm: Float = 0f) {
-    CELL_TITLE(18f, 600, false),
-    CELL_TIME(13f, 400, true),
-    RULER(15f, 400, true),
-    RULER_CONTEXT(15f, 600, false, 0.1f),
-    CH_NUMBER(15f, 400, true),
-    CH_NAME(19f, 600, false),
-    NO_INFO(16f, 500, false),
+    CELL_TITLE(30f, 600, false),
+    CELL_TIME(20f, 400, true),
+    RULER(20f, 400, true),
+    RULER_CONTEXT(18f, 600, false, 0.1f),
+    CH_NUMBER(20f, 400, true),
+    CH_NAME(26f, 600, false),
+    NO_INFO(22f, 500, false),
     BUBBLE(64f, 500, true),
 }
 
@@ -229,6 +229,8 @@ data class ProgrammeInfo(
     val episodeLabel: String?,
     val flags: Int,
     val titleHash: Long,
+    /** XMLTV `<icon src>` of the programme (poster art), when the EPG carries one (owner request 2026-10-18). */
+    val iconUrl: String? = null,
 )
 
 /** (M4, reviewed 2026-10-15, N6) The one definition of a programme's raw (unshifted) end minute (§3.5, §3.8). */

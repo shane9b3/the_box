@@ -26,6 +26,10 @@ class MigrationCheck @Inject constructor(@ApplicationContext private val context
         val uidsDistinct: Int,
         val channels: Int,
         val ruleHiddenNonZero: Int,
+        /** M6: the seeded v3 `channel_prefs` row's custom name after 3 → 4 → 5 (null = lost). */
+        val prefsCustomName: String? = null,
+        /** M6: `channel_prefs` rows with a non-NULL `custom_group_key` after the migration (0 expected). */
+        val prefsWithMove: Int = 0,
     )
 
     suspend fun run(v3Statements: List<String>, name: String = "library-m5-migration-test.db"): Result = withContext(io) {
@@ -43,6 +47,8 @@ class MigrationCheck @Inject constructor(@ApplicationContext private val context
                         "VALUES (1, 'xc:$i', 'XTREAM', 0, 'Ch $i', 'ch $i', $i, 'u$i', $i, 1, 1)",
                 )
             }
+            // M6 (docs/design/m6-channel-editor.md §3.6): a user prefs row travels through 3 → 4 → 5.
+            c.execSQL("INSERT INTO channel_prefs (playlist_id, stable_key, hidden, custom_name, custom_sort_index, watch_count, updated_at) VALUES (1, 'xc:2', 1, 'Mine', 0, 3, 1)")
         }
         val db = LibraryDatabase.build(context, io, BundledSQLiteDriver(), name)
         db.openHelperFreeTouch()
@@ -56,6 +62,8 @@ class MigrationCheck @Inject constructor(@ApplicationContext private val context
                 uidsDistinct = c.long("SELECT COUNT(DISTINCT uid) FROM playlist").toInt(),
                 channels = c.long("SELECT COUNT(*) FROM channel").toInt(),
                 ruleHiddenNonZero = c.long("SELECT COUNT(*) FROM channel WHERE rule_hidden != 0").toInt(),
+                prefsCustomName = c.strings("SELECT custom_name FROM channel_prefs WHERE playlist_id = 1 AND stable_key = 'xc:2'").firstOrNull(),
+                prefsWithMove = c.long("SELECT COUNT(*) FROM channel_prefs WHERE custom_group_key IS NOT NULL").toInt(),
             )
         }
         context.deleteDatabase(name)

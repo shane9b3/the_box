@@ -78,10 +78,14 @@ object MergePlanner {
         "name_prefix_mode", "name_prefix_custom",
     )
 
-    /** User columns of `channel_prefs` (never `playback_flags`, `fps_milli`: learned, M2 §2.10). */
+    /**
+     * User columns of `channel_prefs` (never `playback_flags`, `fps_milli`: learned, M2 §2.10). v5: `custom_group_key`, the
+     * channel editor's Move to group (docs/design/m6-channel-editor.md §3.6 "Backup"); an older backup has no field (merge
+     * keeps the device's value, replace nulls it), and an older build filters the field out.
+     */
     val CHANNEL_PREF_COLUMNS: Set<String> = linkedSetOf(
         "hidden", "locked", "custom_name", "custom_number", "custom_logo", "custom_sort_index", "epg_shift_min", "aspect_mode",
-        "audio_lang", "subtitle_lang", "video_decoder", "buffer_profile", "last_watched_at", "watch_count",
+        "audio_lang", "subtitle_lang", "video_decoder", "buffer_profile", "last_watched_at", "watch_count", "custom_group_key",
     )
 
     /** Pending reminders whose start is after [nowMs] travel; fired, dismissed, orphaned and past ones do not. */

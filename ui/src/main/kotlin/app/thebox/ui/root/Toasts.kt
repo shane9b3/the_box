@@ -63,7 +63,7 @@ fun ToastView(text: String, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(DesignTokens.Radii.Button)
     Line(
         text,
-        GuideUi.sans(19, FontWeight.Medium),
+        GuideUi.sans(24, FontWeight.Medium),
         modifier
             .testTag(TOAST_TAG)
             .widthIn(max = 900.dp)

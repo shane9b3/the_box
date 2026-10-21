@@ -67,6 +67,75 @@ class TsExtractorsFactoryTest {
         return TsExtractor::class.java.getDeclaredField("mode").apply { isAccessible = true }.getInt(ts)
     }
 
+    /**
+     * Device finding 2026-10-18 (capture of xc 538850): the audio PES timestamps advanced 3 ticks per packet while video
+     * ran normally, so the player's buffered position (the minimum over tracks) never grew. The guard reports the PID
+     * once; a healthy track (32 ms per sample) is never reported.
+     */
+    /**
+     * Device finding 2026-10-18 (capture of xc 538850): the audio PES timestamps advanced 3 ticks per packet while video
+     * ran normally, so the player's buffered position (the minimum over tracks) never grew. The guard reports the PID
+     * once; a healthy track (32 ms per sample) is never reported, nor after one odd first timestamp (window check).
+     */
+    @Test
+    fun stuckAudioTimestampsAreReportedOnceHealthyAudioNever() {
+        assertEquals(listOf(0x101), feed(audioStepUs = 33L).stuck)
+        assertEquals(emptyList<Int>(), feed(audioStepUs = 32_000L).stuck)
+        assertEquals(emptyList<Int>(), feed(audioStepUs = 32_000L, firstAudioUs = 15_000_000L).stuck)
+    }
+
+    /** L33r: the stuck track's timestamps are regenerated at the learned spacing from the video clock. */
+    @Test
+    fun repairRegeneratesStuckAudioTimestampsOnTheVideoClock() {
+        val r = feed(audioStepUs = 33L, repair = true)
+        assertEquals("no verdict while repairing", emptyList<Int>(), r.stuck)
+        val audio = r.output.getTrackOutputsForType(C.TRACK_TYPE_AUDIO).single()
+        val n = audio.sampleCount
+        assertTrue(n > 100)
+        assertEquals("first audio sample on the video clock", 1_000_000L, audio.getSampleTimeUs(0))
+        for (i in 1 until n) assertEquals("step $i", audio.getSampleTimeUs(i - 1) + 32_000L, audio.getSampleTimeUs(i))
+    }
+
+    private class Feed(val output: FakeExtractorOutput, val stuck: List<Int>)
+
+    /**
+     * 6 s of 50 fps video with two audio samples per three video samples. Stuck audio = [audioStepUs] of 33 µs per
+     * sample (the capture's 3 ticks); healthy = 32 ms. The stuck pattern's intra-PES spacing is what the repair learns,
+     * so stuck feeds carry the capture's shape: three samples 32 ms apart, then back by 96 ms − 33 µs.
+     */
+    private fun feed(audioStepUs: Long, firstAudioUs: Long = 5_000_000L, repair: Boolean = false): Feed {
+        val stuck = mutableListOf<Int>()
+        val output = FakeExtractorOutput()
+        val guard = DeadTrackGuard(output, TsExtractorsFactory.DEAD_TRACK_GRACE_BYTES, null, onStuckAudio = { stuck += it }, repairAudio = repair)
+        val video = guard.track(0x100, C.TRACK_TYPE_VIDEO)
+        val audio = guard.track(0x101, C.TRACK_TYPE_AUDIO)
+        video.format(androidx.media3.common.Format.Builder().setSampleMimeType(androidx.media3.common.MimeTypes.VIDEO_H265).build())
+        audio.format(androidx.media3.common.Format.Builder().setSampleMimeType(androidx.media3.common.MimeTypes.AUDIO_E_AC3).build())
+        guard.endTracks()
+        val payload = androidx.media3.common.util.ParsableByteArray(ByteArray(64))
+        var videoUs = 1_000_000L
+        var pesBaseUs = firstAudioUs
+        var audioIndex = 0
+        repeat(300) { i ->
+            payload.position = 0; video.sampleData(payload, 64, androidx.media3.extractor.TrackOutput.SAMPLE_DATA_PART_MAIN)
+            video.sampleMetadata(videoUs, C.BUFFER_FLAG_KEY_FRAME, 64, 0, null)
+            videoUs += 20_000
+            if (i % 3 != 2) {
+                val stuckShape = audioStepUs < 1_000L
+                val inPes = audioIndex % 3
+                val t = if (stuckShape) pesBaseUs + inPes * 32_000L else pesBaseUs
+                payload.position = 0; audio.sampleData(payload, 64, androidx.media3.extractor.TrackOutput.SAMPLE_DATA_PART_MAIN)
+                audio.sampleMetadata(t, C.BUFFER_FLAG_KEY_FRAME, 64, 0, null)
+                audioIndex++
+                if (stuckShape) { if (inPes == 2) pesBaseUs += audioStepUs } else {
+                    // After an odd first stamp, healthy audio continues from a sane base.
+                    pesBaseUs = if (audioIndex == 1 && firstAudioUs != 5_000_000L) 5_000_000L else pesBaseUs + audioStepUs
+                }
+            }
+        }
+        return Feed(output, stuck)
+    }
+
     private class Run(val output: FakeExtractorOutput, val dead: MutableList<Pair<Int, Int>>, val endedAtBytes: Long)
 
     private fun extract(bytes: ByteArray, guarded: Boolean, grace: Long = TsExtractorsFactory.DEAD_TRACK_GRACE_BYTES): Run {

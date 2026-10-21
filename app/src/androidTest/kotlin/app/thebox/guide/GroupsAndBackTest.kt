@@ -5,6 +5,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import app.thebox.core.guide.Overlay
 import app.thebox.core.guide.ScreenMode
+import app.thebox.core.guide.Zone
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -53,7 +54,7 @@ class GroupsAndBackTest : GuideTestBase() {
         awaitUi("GUIDE") { it.mode == ScreenMode.GUIDE }
     }
 
-    /** I-8: the day strip keeps the clock time; Back ladder: home → FULL → GUIDE (home) → exit hint → exit. */
+    /** I-8: the day strip keeps the clock time; Back ladder (2026-10-19): scrolled → home → Groups → top bar → exit hint → exit. */
     @Test
     fun dayStripAndBackLadder() {
         launchGuide()
@@ -76,7 +77,7 @@ class GroupsAndBackTest : GuideTestBase() {
         val delta = jumped.anchorMin - start.anchorMin
         assertTrue("next day keeps the clock time (Δ $delta min)", delta in 1440 - 30..1440 + 30)
 
-        // Back ladder (B2): scrolled → home → FULL → GUIDE home → exit hint → exit.
+        // Back ladder: scrolled → home → Groups → top bar (Search) → exit hint → exit.
         goHome()
         // The day jump left the focus on tomorrow: one Back is "scrolled → home" (focus at now), then OK tunes.
         if (!focusContainsNow()) {
@@ -88,12 +89,13 @@ class GroupsAndBackTest : GuideTestBase() {
         press(KeyEvent.KEYCODE_BACK)
         awaitUi("Back → home") { it.mode == ScreenMode.GUIDE && it.overlay == null }
         awaitFrame("home: tuned row at now") { f -> f.focus?.let { f.rows.channel(it.row)?.identity == ch.identity && nowMin() in it.cellStart until it.cellEnd } == true }
+        // Decision 2026-10-19: home → Groups (opened by Back) → top bar with Search focused → exit hint → exit.
         press(KeyEvent.KEYCODE_BACK)
-        awaitUi("Back → FULL") { it.mode == ScreenMode.FULL }
+        awaitUi("Back → Groups") { (it.overlay as? Overlay.Groups)?.viaBack == true }
         press(KeyEvent.KEYCODE_BACK)
-        awaitUi("Back → GUIDE (home)") { it.mode == ScreenMode.GUIDE }
+        awaitUi("Back → top bar, Search focused") { it.overlay == null && it.zone == Zone.TABS && it.tabFocused == 1 }
         press(KeyEvent.KEYCODE_BACK)
-        awaitUi("Back → exit hint, not FULL again") { (it.overlay as? Overlay.Exit)?.dialog == false && it.mode == ScreenMode.GUIDE }
+        awaitUi("Back → exit hint, never FULL") { (it.overlay as? Overlay.Exit)?.dialog == false && it.mode == ScreenMode.GUIDE }
         press(KeyEvent.KEYCODE_BACK)
         val deadline = System.currentTimeMillis() + 5_000
         while (scenario!!.state != Lifecycle.State.DESTROYED && System.currentTimeMillis() < deadline) Thread.sleep(100)

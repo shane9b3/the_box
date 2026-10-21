@@ -34,11 +34,10 @@ interface HiddenChannelsDao {
     )
     suspend fun page(playlistId: Long, offset: Int, limit: Int): List<String>
 
+    /** v5 (docs/design/m6-channel-editor.md §3.6 row 10): the group a channel is shown in (its effective group). */
     @Query(
         "SELECT c.stable_key, COALESCE(cp.custom_name, c.display_name, c.name) AS name, g.name AS group_name, " +
-            "COALESCE(cp.hidden, 0) AS by_user, c.rule_hidden FROM channel c " +
-            "LEFT JOIN channel_prefs cp ON cp.playlist_id = c.playlist_id AND cp.stable_key = c.stable_key " +
-            "LEFT JOIN channel_group g ON g.id = c.group_id " +
+            "COALESCE(cp.hidden, 0) AS by_user, c.rule_hidden FROM channel c " + ChannelDao.EFFECTIVE_GROUP_JOINS +
             "WHERE c.playlist_id = :playlistId AND c.missing_since IS NULL AND (COALESCE(cp.hidden, 0) = 1 OR c.rule_hidden = 1) " +
             "ORDER BY c.norm_name, c.id LIMIT :limit OFFSET :offset",
     )

@@ -60,6 +60,7 @@ class PlayerWorld(
     tracks: TrackMenu = PlayerFixtures.trackMenu(),
     enter: Boolean = true,
     favouritesEntry: Boolean = true,
+    recentEntry: Boolean = false,
 ) {
     var nowMs = startMs
     /** U-S7: archive starts record the call and start nothing (a synchronous `ArchiveStart.Failed`). */
@@ -96,6 +97,7 @@ class PlayerWorld(
     val favSource = GuideSource.Favourites(7)
     val entries: List<GuideSourceEntry> = listOfNotNull(
         GuideSourceEntry(favSource, "Favourites", 2, SourceSection.FAVOURITES, null).takeIf { favouritesEntry },
+        GuideSourceEntry(GuideSource.Recent, "Recently watched", channels.size, SourceSection.RECENT, null).takeIf { recentEntry },
         GuideSourceEntry(allSource, "All channels", channels.size, SourceSection.ALL, null),
         GuideSourceEntry(newsSource, "News", channels.size, SourceSection.GROUP, null),
     )
@@ -138,6 +140,51 @@ class PlayerWorld(
     // ---------------------------------------------------------------- driving
 
     fun send(e: PlayerEvent) { player.dispatch(e); flush() }
+
+    // ---------------------------------------------------------------- M6 time-shift buffer (docs/design/m6-timeshift.md §11)
+
+    /** The `ArchivePlayback.localBuffer` the host last sent (P frame); null = none. */
+    var bufferInfo: app.thebox.core.full.LocalBufferInfo? = null
+        private set
+
+    /**
+     * Sends a buffer for the tuned channel: available with [savedMs] saved behind the edge, or unavailable with [off] /
+     * [hls]. While [bufferInfo] is available the host's pause, rewind, seek and live are LOCAL (no archive tune).
+     */
+    fun buffer(
+        available: Boolean = true, savedMs: Long = 20 * 60_000L, off: app.thebox.core.playback.timeshift.BufferOff? = null, hls: Boolean = false,
+        stop: app.thebox.core.playback.timeshift.RecordStop? = null, limitedToday: Boolean = false,
+        windowMs: Long = 30 * 60_000L, cycleId: Long = 0, notSaved: app.thebox.core.playback.timeshift.TimeRanges = app.thebox.core.playback.timeshift.TimeRanges.EMPTY,
+        fromMs: Long? = null, holdMs: Long? = null,
+    ): PlayerWorld {
+        val info = app.thebox.core.full.LocalBufferInfo(
+            available = available, fromMs = if (available) fromMs ?: (nowMs - savedMs) else 0, atMs = if (available) nowMs else 0, saving = available && stop == null,
+            notSaved = notSaved, pauseRemainingMs = if (available) 17 * 60_000L else null, stop = stop,
+            off = off, hls = hls, limitedToday = limitedToday, windowMs = if (available) windowMs else 0, holdMs = holdMs, cycleId = cycleId,
+        )
+        bufferInfo = info
+        send(PlayerEvent.Buffer(info))
+        return this
+    }
+
+    private val buffered: Boolean get() = bufferInfo?.available == true
+
+    /** A LOCAL status of [ch] (§11.2): the playhead [wallMs], the edge at now, the buffer's oldest instant. */
+    fun localStatus(ch: GuideChannel, phase: ArchivePhase, wallMs: Long, settledSeq: Long = status.settledSeq): ArchiveStatus {
+        val from = bufferInfo?.fromMs ?: wallMs
+        return ArchiveStatus(
+            phase = phase, channel = ch, identityHash = ch.identityHash,
+            programme = programmeAt(ch, (wallMs / 60_000L).toInt() + ch.epgShiftMin),
+            wallMs = wallMs, atMs = nowMs, advancing = phase == ArchivePhase.PLAYING, liveEdgeMs = nowMs,
+            archiveFromMs = if (ch.archiveDays > 0) nowMs - ch.archiveDays * 86_400_000L + 60_000L else from,
+            displayShiftMs = ch.epgShiftMin * 60_000L, timeShift = true, ownedTuneId = tuneId, settledSeq = settledSeq,
+            source = app.thebox.core.catchup.archive.TimelineSource.LOCAL, bufferFromMs = from,
+            notSaved = bufferInfo?.notSaved ?: app.thebox.core.playback.timeshift.TimeRanges.EMPTY,
+            pauseRemainingMs = bufferInfo?.pauseRemainingMs, savingStop = bufferInfo?.stop,
+        )
+    }
+
+    private val localActive: Boolean get() = status.source == app.thebox.core.catchup.archive.TimelineSource.LOCAL && status.phase != ArchivePhase.IDLE
     fun sendGuide(e: GuideEvent) { guide!!.dispatch(e); flush() }
 
     fun flush() {
@@ -211,6 +258,7 @@ class PlayerWorld(
     fun doTune(ch: GuideChannel, setPrevious: Boolean = true) {
         val old = tunedCh
         if (status.phase != ArchivePhase.IDLE) setStatus(ArchiveStatus())
+        if (old != null && old.identityHash != ch.identityHash) bufferInfo = null // M6: the buffer is the tuned channel's
         if (setPrevious && old != null && old.identityHash != ch.identityHash) {
             previousCh = old
             queue += PlayerEvent.Previous(old)
@@ -283,18 +331,33 @@ class PlayerWorld(
         override fun resumePlain() { fx.resumePlain(); tunedCh?.let { setTuned(tunedState(it, MiniPhase.PLAYING, false), it) } }
         override fun pauseLive(channel: GuideChannel) {
             fx.pauseLive(channel)
+            if (buffered) {
+                setStatus(localStatus(channel, ArchivePhase.PAUSED, nowMs))
+                setTuned(tunedState(channel, MiniPhase.PAUSED, archive = false), channel)
+                return
+            }
             setStatus(archive(channel, ArchivePhase.PAUSED_LIVE, nowMs, timeShift = true))
             setTuned(tunedState(channel, MiniPhase.PAUSED, archive = false), channel)
         }
         override fun archivePause() {
             fx.archivePause()
             val ch = status.channel ?: return
+            if (localActive) {
+                setStatus(localStatus(ch, ArchivePhase.PAUSED, wallNow()))
+                setTuned(tunedState(ch, MiniPhase.PAUSED, archive = false), ch)
+                return
+            }
             setStatus(status.copy(phase = ArchivePhase.PAUSED, advancing = false, atMs = nowMs, wallMs = wallNow(), liveEdgeMs = nowMs))
             setTuned(tunedState(ch, MiniPhase.PAUSED, archive = true), ch)
         }
         override fun archiveResume() {
             fx.archiveResume()
             val ch = status.channel ?: return
+            if (localActive) {
+                setStatus(localStatus(ch, ArchivePhase.PLAYING, status.wallMs))
+                setTuned(tunedState(ch, MiniPhase.PLAYING, archive = false), ch)
+                return
+            }
             when (status.phase) {
                 ArchivePhase.PAUSED_LIVE -> startArchive(ch, status.wallMs, timeShift = true)
                 ArchivePhase.PAUSED -> {
@@ -307,6 +370,12 @@ class PlayerWorld(
         override fun archiveSeek(programmeMs: Long, seq: Long) {
             fx.archiveSeek(programmeMs, seq)
             val ch = status.channel ?: return
+            if (localActive) {
+                val paused = status.phase == ArchivePhase.PAUSED
+                setStatus(localStatus(ch, ArchivePhase.SEEKING, wallNow()))
+                if (settleSeeks) setStatus(localStatus(ch, if (paused) ArchivePhase.PAUSED else ArchivePhase.PLAYING, maxOf(programmeMs, bufferInfo?.fromMs ?: programmeMs), settledSeq = seq))
+                return
+            }
             setStatus(archive(ch, ArchivePhase.SEEKING, wallNow(), status.timeShift))
             if (settleSeeks) setStatus(archive(ch, ArchivePhase.PLAYING, programmeMs, status.timeShift, settledSeq = seq))
         }
@@ -322,7 +391,18 @@ class PlayerWorld(
             val p = programmeAt(channel, nowMin()) ?: return
             startArchive(channel, p.rawStartMin * 60_000L, timeShift = true)
         }
-        override fun rewindLive(channel: GuideChannel, backMs: Long) { fx.rewindLive(channel, backMs); startArchive(channel, nowMs - backMs, timeShift = true) }
+        override fun rewindLive(channel: GuideChannel, backMs: Long) {
+            fx.rewindLive(channel, backMs)
+            if (buffered) {
+                // §9.1 local first: the buffer's oldest instant at most.
+                tuneId++
+                setStatus(localStatus(channel, ArchivePhase.SEEKING, nowMs))
+                setStatus(localStatus(channel, ArchivePhase.PLAYING, maxOf(nowMs - backMs, bufferInfo!!.fromMs)))
+                setTuned(tunedState(channel, MiniPhase.PLAYING, archive = false), channel)
+                return
+            }
+            startArchive(channel, nowMs - backMs, timeShift = true)
+        }
         override fun playProgramme(channel: GuideChannel, info: ProgrammeInfo, timeShift: Boolean) {
             fx.playProgramme(channel, info, timeShift)
             if (failArchiveStarts) return // U-S7: the start failed synchronously; the test sends ArchiveStartFailed

@@ -29,6 +29,7 @@ import kotlinx.coroutines.runBlocking
 class FakePageEnv(
     override var sdkInt: Int = 30,
     override var deviceLowEnd: Boolean = false,
+    override var hasTmdbKey: Boolean = false,
     var is24h: Boolean = true,
     var players: List<ExternalPlayerApp> = listOf(ExternalPlayerApp("org.videolan.vlc", "VLC")),
     var running: Boolean? = true,

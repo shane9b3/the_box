@@ -83,8 +83,8 @@ class FakeRowCellsBuilder : RowCellsBuilder {
 
 /**
  * Simplified navigator (not the §3.4.2 rules): moves cell by cell over [GridContext.data], 30-minute LOADING blocks
- * outside it, rows clamp to the lineup, Up on row 0 is [GridMoveResult.TopEdge], Left before
- * [GridContext.watchableFrom] is [GridMoveResult.LeftEdge]. The state machine's tests start on it and switch to
+ * outside it, rows clamp to the lineup, Up on row 0 is [GridMoveResult.TopEdge], Left follows the real
+ * watchable rule ([leftEdge]). The state machine's tests start on it and switch to
  * `GuideNavigatorImpl` after WP-A merges (§1.7).
  */
 class FakeNavigator : GuideNavigator {
@@ -94,11 +94,8 @@ class FakeNavigator : GuideNavigator {
         moves += move
         val last = ctx.lineupSize - 1
         return when (move) {
-            GridMove.LEFT -> {
-                val m = from.cellStart - 1
-                if (m < ctx.watchableFrom.earliestWatchableMin(from.row) || m < ctx.earliestMin) GridMoveResult.LeftEdge
-                else moved(focusOn(from.row, m, from, ctx, anchorToStart = true), ctx)
-            }
+            GridMove.LEFT -> if (leftEdge(from, ctx)) GridMoveResult.LeftEdge
+                else moved(focusOn(from.row, from.cellStart - 1, from, ctx, anchorToStart = true), ctx)
             GridMove.RIGHT -> if (from.cellEnd >= ctx.latestMin) GridMoveResult.Blocked else moved(focusOn(from.row, from.cellEnd, from, ctx, anchorToStart = true), ctx)
             GridMove.UP -> if (from.row == 0) GridMoveResult.TopEdge else moved(focusOn(from.row - 1, from.anchorMin, from, ctx), ctx)
             GridMove.DOWN -> if (from.row >= last) GridMoveResult.Blocked else moved(focusOn(from.row + 1, from.anchorMin, from, ctx), ctx)
@@ -114,8 +111,23 @@ class FakeNavigator : GuideNavigator {
             }
             GridMove.TO_ROW -> moved(focusOn(arg.coerceIn(0, maxOf(0, last)), from.anchorMin, from, ctx), ctx)
             GridMove.TO_TIME -> moved(focusOn(from.row, arg, from, ctx), ctx)
-            GridMove.RESOLVE -> moved(focusOn(from.row, from.anchorMin, from, ctx), ctx)
+            // Like the real navigator, RESOLVE keeps the window (a clipped on-now cell stays clipped; decision 2026-10-19).
+            GridMove.RESOLVE -> moved(focusOn(from.row, from.anchorMin, from, ctx, keepWindow = true), ctx)
         }
+    }
+
+    /**
+     * The real navigator's Left rule without its sliver skip (decision 2026-10-19, review S4): LeftEdge at `earliest`, or
+     * when the focused cell is watchable and the previous one is not. A cell already in the non-watchable past moves.
+     * Not recorded in [moves] (the state machine probes it once per publish).
+     */
+    override fun leftEdge(from: GridFocus, ctx: GridContext): Boolean {
+        if (from.cellStart <= ctx.earliestMin) return true
+        val watchFrom = ctx.watchableFrom.earliestWatchableMin(from.row)
+        val curWatchable = from.cellStart >= watchFrom || from.cellEnd > ctx.nowMin
+        val prev = cellAt(from.row, from.cellStart - 1, ctx)
+        val targetWatchable = (prev shr 32).toInt() >= watchFrom || prev.toInt() > ctx.nowMin
+        return curWatchable && !targetWatchable
     }
 
     override fun focusAt(row: Int, atMin: Int, ctx: GridContext): GridFocus {
@@ -146,13 +158,13 @@ class FakeNavigator : GuideNavigator {
         return CellKind.LOADING
     }
 
-    private fun focusOn(row: Int, minute: Int, from: GridFocus, ctx: GridContext, anchorToStart: Boolean = false): GridFocus {
+    private fun focusOn(row: Int, minute: Int, from: GridFocus, ctx: GridContext, anchorToStart: Boolean = false, keepWindow: Boolean = false): GridFocus {
         val cell = cellAt(row, minute, ctx)
         val s = (cell shr 32).toInt()
         val e = cell.toInt()
         val anchor = if (anchorToStart) maxOf(s, ctx.earliestMin) else minute
         var ws = from.windowStartMin
-        if (s < ws || s >= ws + G.WINDOW_MIN) ws = GuideFixtures.floor30(s) - 30
+        if (!keepWindow && (s < ws || s >= ws + G.WINDOW_MIN)) ws = GuideFixtures.floor30(s) - 30
         var top = from.topRow
         if (row < top) top = row
         if (row >= top + G.VISIBLE_ROWS) top = row - G.VISIBLE_ROWS + 1
@@ -163,7 +175,7 @@ class FakeNavigator : GuideNavigator {
 
     private fun pack(start: Int, end: Int): Long = (start.toLong() shl 32) or (end.toLong() and 0xffffffffL)
 
-    private companion object { const val PAGE = 6 }
+    private companion object { const val PAGE = app.thebox.core.guide.layout.GridConstants.PAGE_ROWS }
 }
 
 /** UTC, 24 h, no tables: "19:30", "D20375" day labels, prototype-style durations. */

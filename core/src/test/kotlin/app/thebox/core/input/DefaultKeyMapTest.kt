@@ -23,6 +23,7 @@ class DefaultKeyMapTest {
         }
         both(Keys.MENU, CONTEXT_MENU)
         both(Keys.BACK, BACK); both(Keys.ESCAPE, BACK); both(Keys.BUTTON_B, BACK)
+        assertEquals(PLAY, m.long(GUIDE, Keys.BACK)); assertEquals(PLAY, m.long(GUIDE, Keys.BUTTON_B)); assertNull(m.long(PLAYER, Keys.BACK))
         both(Keys.CHANNEL_UP, ZAP_UP); both(Keys.CHANNEL_DOWN, ZAP_DOWN)
         assertEquals(PAGE_UP, m.short(GUIDE, Keys.PAGE_UP)); assertEquals(PAGE_DOWN, m.short(GUIDE, Keys.PAGE_DOWN))
         assertEquals(ZAP_UP, m.short(PLAYER, Keys.PAGE_UP)); assertEquals(ZAP_DOWN, m.short(PLAYER, Keys.PAGE_DOWN))
@@ -32,7 +33,9 @@ class DefaultKeyMapTest {
         assertEquals(PLAY, m.short(PLAYER, Keys.MEDIA_PLAY)); assertEquals(PAUSE, m.short(PLAYER, Keys.MEDIA_PAUSE))
         both(Keys.MEDIA_FAST_FORWARD, SEEK_FORWARD); both(Keys.MEDIA_REWIND, SEEK_BACK)
         for (i in 0..9) { both(Keys.DIGIT_0 + i, DIGIT); both(Keys.NUMPAD_0 + i, DIGIT) }
-        both(Keys.PROG_RED, START_OVER); both(Keys.PROG_GREEN, FAVOURITES); both(Keys.PROG_YELLOW, AUDIO); both(Keys.PROG_BLUE, PREVIOUS_CHANNEL)
+        both(Keys.PROG_RED, START_OVER); both(Keys.PROG_GREEN, FAVOURITES); both(Keys.PROG_BLUE, PREVIOUS_CHANNEL)
+        // Decision 2026-10-19 ruling 4: Yellow opens Groups in the guide; the player keeps Audio.
+        assertEquals(GROUPS_PANEL, m.short(GUIDE, Keys.PROG_YELLOW)); assertEquals(AUDIO, m.short(PLAYER, Keys.PROG_YELLOW))
         both(Keys.LAST_CHANNEL, PREVIOUS_CHANNEL); both(Keys.GUIDE, OPEN_GUIDE); both(Keys.INFO, INFO_BAR)
         both(Keys.CAPTIONS, SUBTITLES); both(Keys.MEDIA_AUDIO_TRACK, AUDIO); both(Keys.TV_ZOOM_MODE, ASPECT)
         assertEquals(REMIND, m.short(GUIDE, Keys.MEDIA_RECORD)); assertNull(m.short(PLAYER, Keys.MEDIA_RECORD))
@@ -74,11 +77,12 @@ class DefaultKeyMapTest {
         }
     }
 
-    @Test fun onlyOkFamilyAndPlayerLeftRightHaveLongBindings() {
+    @Test fun onlyOkFamilyGuideBackAndPlayerLeftRightHaveLongBindings() {
+        val ok = setOf(Keys.DPAD_CENTER, Keys.ENTER, Keys.NUMPAD_ENTER, Keys.BUTTON_A)
         val guideLong = m.bindings(GUIDE).filter { it.long != null }.map { it.keyCode }.toSet()
-        assertEquals(setOf(Keys.DPAD_CENTER, Keys.ENTER, Keys.NUMPAD_ENTER, Keys.BUTTON_A), guideLong)
+        assertEquals(ok + setOf(Keys.BACK, Keys.BUTTON_B), guideLong) // owner ruling 2026-10-17: hold Back = full screen
         val playerLong = m.bindings(PLAYER).filter { it.long != null }.map { it.keyCode }.toSet()
-        assertEquals(guideLong + setOf(Keys.DPAD_LEFT, Keys.DPAD_RIGHT), playerLong)
+        assertEquals(ok + setOf(Keys.DPAD_LEFT, Keys.DPAD_RIGHT), playerLong)
     }
 
     @Test fun digits() {
@@ -92,5 +96,12 @@ class DefaultKeyMapTest {
         for (id in listOf("zap_up", "zap_down", "previous_channel", "guide", "channel_list", "groups_panel", "quick_menu", "audio",
             "subtitles", "aspect", "start_over", "favourites", "info_bar", "number_entry", "play_pause", "seek_back",
             "seek_forward", "jump_to_live", "stats_overlay", "screen_off", "exit")) assertTrue(id in ids, id)
+    }
+
+    /** Decision 2026-10-19 ruling 4: for the footer the four colour keys are one family. */
+    @Test fun colourKeysCountAsOneFamily() {
+        val colours = setOf(Keys.PROG_RED, Keys.PROG_GREEN, Keys.PROG_YELLOW, Keys.PROG_BLUE)
+        for (c in colours) assertEquals(colours + Keys.DPAD_UP, DefaultKeyMap.seenWithColourFamily(setOf(c, Keys.DPAD_UP)))
+        assertEquals(setOf(Keys.CHANNEL_UP), DefaultKeyMap.seenWithColourFamily(setOf(Keys.CHANNEL_UP)))
     }
 }

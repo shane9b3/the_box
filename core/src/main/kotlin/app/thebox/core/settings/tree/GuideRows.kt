@@ -25,6 +25,8 @@ object GuideRows : RowSource {
     val PAST_DAYS = RowId("guide.past_days")
     val FUTURE_DAYS = RowId("guide.future_days")
     val DESCRIPTIONS = RowId("guide.descriptions")
+    /** (owner rulings 2026-10-18/19) Programme posters on/off (the app's built-in TMDB key only); advanced, so the simple-row budget (§3.3.13) holds. */
+    val POSTERS = RowId("guide.posters")
 
     override val rows: List<RowSpec> = listOf(
         a(SOURCES, SIMPLE, NEXT_EPG_IMPORT),
@@ -37,6 +39,7 @@ object GuideRows : RowSource {
         a(PAST_DAYS, ADVANCED, NEXT_EPG_IMPORT),
         a(FUTURE_DAYS, ADVANCED, NEXT_EPG_IMPORT),
         a(DESCRIPTIONS, ADVANCED, NEXT_EPG_IMPORT),
+        a(POSTERS, ADVANCED, LIVE),
     )
 
     private fun a(id: RowId, v: Visibility, e: EffectTiming) = RowSpec(id, SectionId.GUIDE, v, e, "A")

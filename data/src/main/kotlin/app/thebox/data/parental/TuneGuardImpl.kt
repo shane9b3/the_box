@@ -9,6 +9,7 @@ import app.thebox.core.playback.TuneGuard
 import app.thebox.core.playback.TuneVerdict
 import app.thebox.core.refresh.ChannelIdentity
 import app.thebox.data.db.LibraryDatabase
+import app.thebox.data.db.dao.ChannelDao
 import app.thebox.data.di.ApplicationScope
 import app.thebox.data.di.IoDispatcher
 import app.thebox.data.repo.read
@@ -109,16 +110,19 @@ class LockedChannelIndex @Inject constructor(
         private const val TAG = "LockedChannels"
         val TABLES = arrayOf("channel", "channel_prefs", "group_prefs", "channel_group")
 
-        /** The §4.3 lock clauses evaluated per channel (hidden and rule_hidden do not matter to a tune). */
+        /**
+         * The §4.3 lock clauses evaluated per channel (hidden and rule_hidden do not matter to a tune). v5
+         * (docs/design/m6-channel-editor.md §3.6 row 8): `g` is the **effective** group, so a channel moved into a locked
+         * group is locked (also while that group is in its grace period, ruling a) and one moved out is not; `group_key`
+         * is the effective key ([groupOf], Open anyway).
+         */
         const val SQL = """
         SELECT c.playlist_id, c.stable_key, g.group_key,
                CASE WHEN COALESCE(cp.locked, CASE WHEN gp.locked IS NULL THEN c.is_adult ELSE 0 END) != 0
                       OR COALESCE(gp.locked, g.is_adult, 0) != 0 THEN 1 ELSE 0 END AS auto_locked,
                CASE WHEN COALESCE(cp.locked, 0) != 0 OR COALESCE(gp.locked, 0) != 0 THEN 1 ELSE 0 END AS manual_locked
         FROM channel c
-        LEFT JOIN channel_group g  ON g.id = c.group_id
-        LEFT JOIN channel_prefs cp ON cp.playlist_id = c.playlist_id AND cp.stable_key = c.stable_key
-        LEFT JOIN group_prefs gp   ON gp.playlist_id = c.playlist_id AND gp.kind = g.kind AND gp.group_key = g.group_key
+        """ + ChannelDao.EFFECTIVE_GROUP_JOINS + """
         WHERE c.missing_since IS NULL AND c.kind IN (0, 1)
           AND (cp.locked = 1 OR gp.locked = 1 OR c.is_adult = 1 OR g.is_adult = 1)
         """

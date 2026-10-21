@@ -41,6 +41,31 @@ interface ParentalControls {
     /** Group menu Lock / Unlock: an explicit `group_prefs.locked`. Runs on IO. */
     suspend fun setGroupLocked(source: GuideSource.Group, locked: Boolean) = Unit
 
+    // ---- (docs/design/m6-channel-editor.md §3.5) Bulk locks for the channel editor: one transaction per call in the
+    // implementation (`ParentalSessionImpl`, WP-B); the defaults loop the single calls.
+
+    /**
+     * Lock / Unlock many channels of [playlistId] at once (explicit `channel_prefs.locked`), one transaction. The
+     * implementation resolves a [app.thebox.core.editor.ChannelTarget.AllOf] inside that transaction (under [access]) so
+     * the keys cannot go stale during a merge, and refuses an unlock under [refusesLowering]. The default handles
+     * [app.thebox.core.editor.ChannelTarget.Keys] only. Runs on IO.
+     */
+    suspend fun setChannelsLocked(playlistId: Long, target: app.thebox.core.editor.ChannelTarget, access: ParentalAccess, locked: Boolean) {
+        val keys = (target as? app.thebox.core.editor.ChannelTarget.Keys)?.keys ?: return
+        for (k in keys) setChannelLocked(ChannelIdentity(playlistId, app.thebox.core.model.StableKey(k)), locked)
+    }
+
+    /** Lock / Unlock many LIVE groups of [playlistId] at once (explicit `group_prefs.locked`). Runs on IO. */
+    suspend fun setGroupsLocked(playlistId: Long, groupKeys: Collection<String>, locked: Boolean) {
+        for (k in groupKeys) setGroupLocked(GuideSource.Group(playlistId, k), locked)
+    }
+
+    /**
+     * True while lowering protection must be refused (a PIN is set and the session is locked, M5 §3.9.1 C-B2): the
+     * editor's Unlock, Reset and "move out of a locked group" then ask for the PIN first (`WriteFailure.REFUSED`).
+     */
+    fun refusesLowering(): Boolean = false
+
     companion object {
         val NONE: ParentalControls = object : ParentalControls {
             override fun openAnyway(source: GuideSource) = Unit

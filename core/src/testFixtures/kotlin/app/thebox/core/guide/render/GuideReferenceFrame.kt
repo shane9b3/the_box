@@ -16,7 +16,7 @@ import app.thebox.core.guide.layout.TimeTables
 import java.time.ZoneId
 
 /**
- * The §4.1 reference frame (WP-A, docs/design/m3-guide.md §4.1, §5.1): 6 full rows + 1 partial (scrollRow = 0.5,
+ * The §4.1 reference frame (WP-A, docs/design/m3-guide.md §4.1, §5.1): 5 full rows + 1 partial (scrollRow = 0.5,
  * mid-animation), a 180-min window at 19:00 with now = 19:47 UTC, 30-min programmes (≈ 7 visible per row), logos
  * on (every row has a URL), one tuned row, a reminder, an archive row every 5th, the now line visible. Titles and
  * time texts are measured with [measurer] the way the pager does it off-main, so the renderer runs its real path.

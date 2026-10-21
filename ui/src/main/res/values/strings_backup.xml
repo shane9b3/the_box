@@ -17,6 +17,8 @@
     <string name="backup_open_guide_on_effect">Takes effect the next time The Box starts.</string>
     <string name="backup_channels_hide_rules">Hide rules</string>
     <string name="backup_channels_hide_rules_value">Rules: %1$d · channels hidden: %2$d</string>
+    <string name="backup_channels_editor">Channel editor</string>
+    <string name="backup_channels_editor_value">Hide, sort and move channels</string>
     <string name="backup_no_playlist">No playlist yet. Add one in Playlists first.</string>
     <string name="backup_groups_title">Groups</string>
     <string name="backup_groups_show_all">Show all groups</string>

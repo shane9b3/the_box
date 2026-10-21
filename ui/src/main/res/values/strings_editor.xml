@@ -1,0 +1,210 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Channel editor (docs/design/m6-channel-editor.md §5; owner request 2026-10-18). American English. -->
+<resources>
+    <string name="editor_title">Channel editor</string>
+    <string name="editor_groups_title">Groups</string>
+    <plurals name="editor_groups_count">
+        <item quantity="one">%1$d group · %2$d hidden</item>
+        <item quantity="other">%1$d groups · %2$d hidden</item>
+    </plurals>
+    <string name="editor_all_channels">All channels</string>
+    <string name="editor_find_results">Results for “%1$s”</string>
+    <plurals name="editor_channels_count">
+        <item quantity="one">%1$d channel · %2$d hidden</item>
+        <item quantity="other">%1$d channels · %2$d hidden</item>
+    </plurals>
+    <plurals name="editor_selected_count">
+        <item quantity="one">%1$d selected</item>
+        <item quantity="other">%1$d selected</item>
+    </plurals>
+    <string name="editor_saving">Saving…</string>
+    <string name="editor_detail_moved">from %1$s</string>
+    <string name="editor_detail_renamed">was %1$s</string>
+    <string name="editor_detail_rule">Hidden by the rule “%1$s”</string>
+    <string name="editor_locked_note">Locked channels are not shown. Press OK to enter your PIN.</string>
+    <string name="editor_tb_actions">Actions</string>
+    <string name="editor_tb_sort">Sort…</string>
+    <string name="editor_tb_find">Find…</string>
+    <string name="editor_tb_show">Show: %1$s</string>
+    <string name="editor_tb_hidden_groups_on">Hidden groups: Shown</string>
+    <string name="editor_tb_hidden_groups_off">Hidden groups: Not shown</string>
+    <string name="editor_filter_all">All</string>
+    <string name="editor_filter_shown">Shown only</string>
+    <string name="editor_filter_hidden">Hidden only</string>
+    <string name="editor_sort_name_az">Name A–Z</string>
+    <string name="editor_sort_name_za">Name Z–A</string>
+    <string name="editor_sort_number">Number</string>
+    <string name="editor_sort_provider">Provider order</string>
+    <plurals name="editor_menu_title_channels">
+        <item quantity="one">%1$d channel selected</item>
+        <item quantity="other">%1$d channels selected</item>
+    </plurals>
+    <plurals name="editor_menu_title_groups">
+        <item quantity="one">%1$d group selected</item>
+        <item quantity="other">%1$d groups selected</item>
+    </plurals>
+    <string name="editor_a_hide">Hide</string>
+    <string name="editor_a_show">Show</string>
+    <string name="editor_a_move_to_group">Move to group…</string>
+    <string name="editor_a_reorder">Reorder</string>
+    <string name="editor_a_add_favorite">Add to Favorites</string>
+    <string name="editor_a_remove_favorite">Remove from Favorites</string>
+    <string name="editor_a_lock">Lock</string>
+    <string name="editor_a_unlock">Unlock</string>
+    <string name="editor_a_rename">Rename…</string>
+    <string name="editor_a_set_number">Set number…</string>
+    <string name="editor_a_clear_number">Use the provider\'s number</string>
+    <string name="editor_a_select_all">Select all in this list</string>
+    <string name="editor_a_find">Find…</string>
+    <string name="editor_a_show_filter">Show…</string>
+    <string name="editor_a_sort">Sort…</string>
+    <string name="editor_a_sort_groups">Sort groups…</string>
+    <string name="editor_a_edit_channels">Edit channels</string>
+    <string name="editor_a_drop_results">Drop results</string>
+    <string name="editor_a_reset">Reset to provider settings…</string>
+    <plurals name="editor_picker_title">
+        <item quantity="one">Move %1$d channel to</item>
+        <item quantity="other">Move %1$d channels to</item>
+    </plurals>
+    <string name="editor_picker_here">Already here</string>
+    <string name="editor_picker_hidden_detail">Hidden: the channels won\'t show until you show the group</string>
+    <string name="editor_move_header">Moving %1$d · position %2$d of %3$d</string>
+    <string name="editor_edit_rename_channel">Channel name (leave empty for the provider\'s name)</string>
+    <string name="editor_edit_rename_group">Group name (leave empty for the provider\'s name)</string>
+    <string name="editor_edit_number">Channel number</string>
+    <string name="editor_edit_find">Find channels</string>
+    <plurals name="editor_n_hidden">
+        <item quantity="one">%1$d channel hidden</item>
+        <item quantity="other">%1$d channels hidden</item>
+    </plurals>
+    <plurals name="editor_n_shown">
+        <item quantity="one">%1$d channel shown</item>
+        <item quantity="other">%1$d channels shown</item>
+    </plurals>
+    <plurals name="editor_n_groups_hidden">
+        <item quantity="one">%1$d group hidden</item>
+        <item quantity="other">%1$d groups hidden</item>
+    </plurals>
+    <plurals name="editor_n_groups_shown">
+        <item quantity="one">%1$d group shown</item>
+        <item quantity="other">%1$d groups shown</item>
+    </plurals>
+    <plurals name="editor_n_skipped_rule">
+        <item quantity="one">%1$d stays hidden by a rule. Change it in Hide rules.</item>
+        <item quantity="other">%1$d stay hidden by a rule. Change it in Hide rules.</item>
+    </plurals>
+    <plurals name="editor_n_moved">
+        <item quantity="one">Moved %1$d channel to %2$s</item>
+        <item quantity="other">Moved %1$d channels to %2$s</item>
+    </plurals>
+    <string name="editor_n_order_saved">Order saved</string>
+    <string name="editor_n_sorted">Sorted by %1$s</string>
+    <string name="editor_n_renamed">Renamed</string>
+    <string name="editor_n_name_reset">Name reset to %1$s</string>
+    <string name="editor_n_number_set">Number %1$d set</string>
+    <string name="editor_n_number_cleared">Back to the provider\'s number</string>
+    <string name="editor_n_number_clash">Number %1$d is also on %2$s. Number entry opens the first one.</string>
+    <plurals name="editor_n_favorite_added">
+        <item quantity="one">Added %1$d to Favorites</item>
+        <item quantity="other">Added %1$d to Favorites</item>
+    </plurals>
+    <plurals name="editor_n_favorite_removed">
+        <item quantity="one">Removed %1$d from Favorites</item>
+        <item quantity="other">Removed %1$d from Favorites</item>
+    </plurals>
+    <plurals name="editor_n_locked">
+        <item quantity="one">Locked %1$d</item>
+        <item quantity="other">Locked %1$d</item>
+    </plurals>
+    <string name="editor_n_locked_no_pin">Locked. Set a PIN in Parental controls to protect it.</string>
+    <plurals name="editor_n_unlocked">
+        <item quantity="one">Unlocked %1$d</item>
+        <item quantity="other">Unlocked %1$d</item>
+    </plurals>
+    <plurals name="editor_n_reset">
+        <item quantity="one">Reset %1$d channel</item>
+        <item quantity="other">Reset %1$d channels</item>
+    </plurals>
+    <plurals name="editor_n_groups_reset">
+        <item quantity="one">Reset %1$d group</item>
+        <item quantity="other">Reset %1$d groups</item>
+    </plurals>
+    <plurals name="editor_n_unselected">
+        <item quantity="one">%1$d channel unselected</item>
+        <item quantity="other">%1$d channels unselected</item>
+    </plurals>
+    <string name="editor_n_queue_full">Still saving. Try again in a moment.</string>
+    <string name="editor_n_no_number">No channel %1$d in this list</string>
+    <string name="editor_c_sort_title">Sort %1$s?</string>
+    <string name="editor_c_sort_body">Your own order for this group is replaced. You can reorder again at any time.</string>
+    <string name="editor_c_provider_title">Go back to the provider\'s order?</string>
+    <string name="editor_c_provider_body">Your own order for %1$s is removed.</string>
+    <plurals name="editor_c_reset_title">
+        <item quantity="one">Reset %1$d channel?</item>
+        <item quantity="other">Reset %1$d channels?</item>
+    </plurals>
+    <string name="editor_c_reset_body">Names, numbers, group moves, hiding and locks go back to the provider\'s. Your order, Favorites and playback settings stay.</string>
+    <plurals name="editor_c_reset_groups_title">
+        <item quantity="one">Reset %1$d group?</item>
+        <item quantity="other">Reset %1$d groups?</item>
+    </plurals>
+    <string name="editor_c_reset_groups_body">Names, order, hiding and locks go back to the provider\'s. Channels you moved in or out stay where they are.</string>
+    <string name="editor_c_confirm_sort">Sort</string>
+    <string name="editor_c_confirm_reset">Reset</string>
+    <string name="editor_cancel">Cancel</string>
+    <string name="editor_foot_browse">Browse</string>
+    <string name="editor_foot_select">Select</string>
+    <string name="editor_foot_channels">Channels</string>
+    <string name="editor_foot_groups">Groups</string>
+    <string name="editor_foot_actions">Actions</string>
+    <string name="editor_foot_done">Done</string>
+    <string name="editor_foot_clear">Clear selection</string>
+    <string name="editor_foot_move">Move</string>
+    <string name="editor_foot_drop">Drop</string>
+    <string name="editor_foot_cancel">Cancel</string>
+    <string name="editor_foot_guide">Back to the guide</string>
+    <string name="editor_e_no_channels">This playlist has no channels yet. Refresh it in Settings › Playlists.</string>
+    <string name="editor_e_playlist_gone">This playlist was removed. Press Back to pick another one.</string>
+    <string name="editor_e_empty_hidden">No hidden channels in %1$s. Set Show to All to see every channel.</string>
+    <string name="editor_e_empty_shown">Every channel in %1$s is hidden. Set Show to All or Hidden only.</string>
+    <string name="editor_e_empty_group">%1$s has no channels in the latest update. They come back with the next refresh, or you can hide the group.</string>
+    <string name="editor_e_find_none">No channel matches “%1$s”. Check the spelling or try part of the name.</string>
+    <string name="editor_e_locked">%1$s is locked. Press OK to enter your PIN.</string>
+    <string name="editor_e_pin_unlock">Unlocking needs the PIN. Nothing was changed. Choose Unlock again and enter the PIN.</string>
+    <string name="editor_e_pin_reset">Reset clears locks, so it needs the PIN. Nothing was changed. Choose Reset again and enter the PIN.</string>
+    <string name="editor_e_pin_move">Moving channels out of a locked group needs the PIN. Nothing was changed. Choose Move to group again and enter the PIN.</string>
+    <string name="editor_e_gone">These channels were removed by the last playlist update. The list has been refreshed.</string>
+    <string name="editor_e_load">Couldn\'t read the channel list (storage error). Press OK to try again; if it keeps failing, restart the app.</string>
+    <string name="editor_e_write">Couldn\'t save the change (storage full or an error). Your list is unchanged. Free some space and try again.</string>
+    <string name="editor_e_write_busy">The library was busy and the change wasn\'t saved. Try again.</string>
+    <string name="editor_d_reorder_list">Open a group on the left to reorder it.</string>
+    <string name="editor_d_reorder_filter">Set Show to All to reorder.</string>
+    <string name="editor_d_reorder_all">Too many to move by hand. Use Sort, or tick fewer channels.</string>
+    <string name="editor_d_single">Pick one channel to rename or number it.</string>
+    <string name="editor_d_rule">Hidden by a rule. Change it in Hide rules (advanced settings).</string>
+    <string name="editor_d_locked_by_group">Locked by its group, %1$s. Unlock the group to unlock this channel.</string>
+    <string name="editor_d_no_groups">Move needs a second group. Refresh the playlist if one is missing.</string>
+    <string name="editor_d_group_tick_first">Tick groups with OK first.</string>
+    <!-- WP-C view-only marks (no EditorText key: badge and separator glyphs of the screen, §2.2, §2.6). -->
+    <string name="editor_ui_badge_rule">RULE</string>
+    <string name="editor_ui_loading">…</string>
+    <!-- Code review 2026-10-18 (S4, S7, S8, N1, N2) -->
+    <string name="editor_d_reorder_hidden_groups">Show hidden groups to reorder.</string>
+    <string name="editor_d_reorder_locked">Enter the PIN to see every channel before reordering.</string>
+    <string name="editor_c_sort_groups_title">Sort groups?</string>
+    <string name="editor_c_sort_groups_body">Your own group order is replaced. You can reorder again at any time.</string>
+    <string name="editor_c_provider_groups_body">Your own group order is removed.</string>
+    <plurals name="editor_group_value_hidden">
+        <item quantity="one">%1$d · %2$d hidden</item>
+        <item quantity="other">%1$d · %2$d hidden</item>
+    </plurals>
+    <plurals name="editor_groups_count_none">
+        <item quantity="one">%1$d group</item>
+        <item quantity="other">%1$d groups</item>
+    </plurals>
+    <plurals name="editor_channels_count_none">
+        <item quantity="one">%1$d channel</item>
+        <item quantity="other">%1$d channels</item>
+    </plurals>
+    <string name="editor_e_summary">Couldn\'t count the selection (storage error). Open the menu again; if it keeps failing, restart the app.</string>
+</resources>

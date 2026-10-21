@@ -120,11 +120,11 @@ class HideRulesTest {
     }
 
     @Test
-    fun catastrophicRegexIsRefusedInPreviewAndSwitchedOffByThePass() = runBlocking {
+    fun unsupportedSavedRegexIsRefusedInPreviewAndSwitchedOffByThePass() = runBlocking {
         val g = db.newGroup(p, "g:x", "X")
         repeat(20) { db.newChannel(p, "c$it", "a".repeat(30) + "!", groupId = g) }
-        val evil = """^(a+)+\1b""" // a backreference defeats the JDK's loop memoisation
-        assertEquals(RulePreview.Invalid(RuleProblem.TOO_SLOW), rules.preview(p, RuleDraft(RuleTarget.CHANNEL_NAME, evil, isRegex = true)))
+        val evil = """^(a+)+\1b""" // Backreferences are outside the supported regular-language subset.
+        assertEquals(RulePreview.Invalid(RuleProblem.BAD_REGEX), rules.preview(p, RuleDraft(RuleTarget.CHANNEL_NAME, evil, isRegex = true)))
         // A rule that got in anyway (restored from a backup, or slow only on new channels) is switched off with a reason.
         val id = db.hideRuleDao().insert(HideRuleEntity(playlistId = p, target = RuleTarget.CHANNEL_NAME.ordinal, pattern = evil, isRegex = true, createdAt = 1))
         db.hideRuleDao().insert(HideRuleEntity(playlistId = p, target = RuleTarget.GROUP_NAME.ordinal, pattern = "x", isRegex = false, createdAt = 1))
@@ -132,7 +132,7 @@ class HideRulesTest {
         assertEquals(listOf(id), r.disabled)
         val row = rules.rules(p).first { it.id == id }
         assertFalse(row.enabled)
-        assertEquals(RuleDisabledReason.TOO_SLOW, row.disabledReason)
+        assertEquals(RuleDisabledReason.BAD_REGEX, row.disabledReason)
         // The other rule still applied.
         assertEquals(1L, groupRuleHidden("g:x"))
     }
@@ -185,11 +185,11 @@ class HideRulesTest {
     }
 
     @Test
-    fun regexSafetyRefusesExponentialShapes() {
-        for (p in listOf("(a+)+", "(.*a){20}", "^(\\w+\\s?)*$", "(a|aa)+", "^(a+)+\\1b", "(\\d+)*x", "((ab)*)+", "(?:x+)+", "(a)\\1")) {
+    fun regexSafetyBoundsCompilationAndAllowsLinearEngineShapes() {
+        for (p in listOf("(a{1000}){1000}", "a{1000000000}", "x".repeat(201))) {
             assertTrue(p, RegexSafety.isRisky(p))
         }
-        for (p in listOf("^(sport|news) \\d$", "xxx", "[a-z]+ hd$", "^(uk|us):", "(a+)?b", "(ab){2}", "\\(1\\)+", "^[(]+")) {
+        for (p in listOf("^(sport|news) \\d$", "xxx", "[a-z]+ hd$", "^(uk|us):", "(a+)?b", "(ab){2}", "\\(1\\)+", "^[(]+", "^(a+)+$", "^(a+)(a+)(a+)(a+)$")) {
             assertFalse(p, RegexSafety.isRisky(p))
         }
     }

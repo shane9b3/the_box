@@ -29,6 +29,9 @@ internal class TuneSession(
     /** Set once the `MediaSource` is built. */
     var telemetry: StreamTelemetry? = null
 
+    /** (M6 fix pass, S3) The ring generation this session's reader reads; −1 = not a ring reader. */
+    var ringGeneration: Long = -1L
+
     /** Last prepare / seek / track change (rebuffers within SEEK_GRACE_MS of it are not counted). */
     var lastDisruptionAtMs: Long = startedAtMs
 

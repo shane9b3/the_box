@@ -69,6 +69,23 @@ class RoomMergeSink(
         this@RoomMergeSink.detected = detected
         if (detected != null) onDetected(detected)
         db.writeTransaction {
+            // (docs/design/m6-channel-editor.md §3.5 rule e, amended by the data review 2026-10-18) A group that comes back
+            // from missing keeps its user position unless another group of the playlist now holds the same index
+            // (GroupAdminDao.orderedKeys skipped it while missing, so an order rewrite meanwhile can reuse its slot). Only
+            // on such a tie is its index cleared, and it rejoins after the custom-ordered groups; a one-refresh category
+            // blip leaves the user's order alone. Same transaction as the upsert that clears missing_since.
+            forEachBound(
+                """
+                UPDATE group_prefs SET custom_sort_index = NULL
+                WHERE playlist_id = ? AND kind = ? AND group_key = ? AND custom_sort_index IS NOT NULL
+                  AND EXISTS (SELECT 1 FROM channel_group g WHERE g.playlist_id = group_prefs.playlist_id AND g.kind = group_prefs.kind
+                                AND g.group_key = group_prefs.group_key AND g.missing_since IS NOT NULL)
+                  AND EXISTS (SELECT 1 FROM group_prefs o WHERE o.playlist_id = group_prefs.playlist_id AND o.kind = group_prefs.kind
+                                AND o.group_key <> group_prefs.group_key AND o.custom_sort_index = group_prefs.custom_sort_index)""",
+                groups,
+            ) {
+                bindLong(1, playlistId); bindLong(2, groupKind(it.kind).toLong()); bindText(3, it.groupKey)
+            }
             forEachBound(
                 """
                 INSERT INTO channel_group(playlist_id, kind, group_key, name, sort_index, is_adult, missing_since)
@@ -227,6 +244,16 @@ class RoomMergeSink(
         conn.forEachBound("UPDATE channel_group SET missing_since = COALESCE(missing_since, ?) WHERE id = ?", unseen) {
             bindLong(1, now); bindLong(2, it)
         }
+        // (docs/design/m6-channel-editor.md §3.6 a) Before the purge, in the same batch: channels moved into a group that is
+        // about to be deleted go home (custom_group_key and the target's custom_sort_index cleared, §3.5 rule b). The
+        // delete predicate is unchanged, so a group left with only moved-in channels is purged too.
+        conn.exec(
+            """
+            UPDATE channel_prefs SET custom_group_key = NULL, custom_sort_index = NULL
+            WHERE playlist_id = ? AND custom_group_key IN (
+              SELECT group_key FROM channel_group WHERE playlist_id = ? AND kind = 0 AND missing_since IS NOT NULL AND missing_since <= ?
+                AND NOT EXISTS (SELECT 1 FROM channel c WHERE c.group_id = channel_group.id))""",
+        ) { bindLong(1, playlistId); bindLong(2, playlistId); bindLong(3, now - graceMs) }
         conn.exec(
             """
             DELETE FROM channel_group WHERE playlist_id = ? AND missing_since IS NOT NULL AND missing_since <= ?

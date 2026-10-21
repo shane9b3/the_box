@@ -17,6 +17,8 @@ import app.thebox.core.full.state.PlayerWorld.Companion.timeShift
 import app.thebox.core.input.BoxAction
 import app.thebox.core.input.BoxAction.*
 import app.thebox.core.playback.PlaybackErrorCode
+import app.thebox.core.catchup.archive.TimelineSource
+import app.thebox.core.playback.timeshift.BufferOff
 import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.TestFactory
 import kotlin.test.Test
@@ -180,8 +182,9 @@ class PlayerKeysTableTest {
             "quick_error" to { failed(liveWithoutArchive(), PlaybackErrorCode.STREAM_INTERRUPTED).k(UP) },
             "picker" to { liveWithArchive().k(ASPECT) },
             "picker_remember" to { liveWithArchive().k(ASPECT, DOWN, DOWN, DOWN, DOWN, DOWN) },
-            "picker_q" to { liveWithArchive().k(UP, SELECT) },
-            "picker_q2" to { liveWithArchive().k(UP, SELECT, DOWN) },
+            // M6 §11.3: Pause is first; Audio is the second item.
+            "picker_q" to { liveWithArchive().k(UP, RIGHT, SELECT) },
+            "picker_q2" to { liveWithArchive().k(UP, RIGHT, SELECT, DOWN) },
             "info" to { liveWithArchive().k(DOWN) },
             "info_plain" to { liveWithoutArchive().k(DOWN) },
             "info_past" to { liveWithArchive().k(DOWN, UP) },
@@ -213,6 +216,42 @@ class PlayerKeysTableTest {
             "screen_off" to { liveWithArchive().k(SCREEN_OFF) },
             "stats" to { liveWithArchive().k(STATS_OVERLAY) },
             "stats_info" to { liveWithArchive().k(STATS_OVERLAY, DOWN) },
+            // M6 time-shift (docs/design/m6-timeshift.md §11.1): the bufferCapable axis and the LOCAL session
+            "buf" to { liveWithoutArchive().buffer() },
+            "buf_arch" to { liveWithArchive().buffer() },
+            "hls" to { liveWithoutArchive().buffer(available = false, hls = true, off = BufferOff.NOT_TS) },
+            "buf_off" to { liveWithoutArchive().buffer(available = false, off = BufferOff.SETTING_OFF) },
+            "buf_space" to { liveWithoutArchive().buffer(available = false, off = BufferOff.NO_SPACE) },
+            /** 20 s saved: a 30 s rewind lands on the oldest point (REWIND_START); no programme start is covered. */
+            "buf_young" to { liveWithoutArchive().also { it.advance(10_000) }.buffer(savedMs = 20_000) },
+            /** Just tuned: within REWIND_NOTHING_YET_MS. */
+            "buf_new" to { liveWithoutArchive().buffer(savedMs = 2_000) },
+            "buf_quick" to { liveWithoutArchive().buffer().k(UP) },
+            "hls_quick" to { liveWithoutArchive().buffer(available = false, hls = true, off = BufferOff.NOT_TS).k(UP) },
+            "hls_paused_quick" to { liveWithoutArchive().buffer(available = false, hls = true, off = BufferOff.NOT_TS).k(PLAY_PAUSE, UP) },
+            "buf_paused" to { liveWithoutArchive().buffer().k(PLAY_PAUSE).also { check(it.status.source == TimelineSource.LOCAL && it.status.phase == ArchivePhase.PAUSED) } },
+            "buf_tshift" to { liveWithoutArchive().buffer().k(PLAY_PAUSE).also { it.advance(5_000) }.k(PLAY_PAUSE).also { check(it.status.phase == ArchivePhase.PLAYING) } },
+            "buf_scrub" to { liveWithoutArchive().buffer().k(PLAY_PAUSE, INFO_BAR) },
+            "buf_scrub_live" to { liveWithoutArchive().buffer().k(TIME_SHIFT) },
+            "buf_dim" to { liveWithoutArchive().buffer().k(PLAY_PAUSE).also { it.advance(130_000) } },
+            "buf_paused_long" to { pausedLong() },
+            "buf_confirm" to { pausedLong().k(ZAP_UP) },
+            "buf_confirm_late" to { pausedLong().k(ZAP_UP).also { it.advance(3_500) } },
+            // (Fix pass B1) OK on a paused time-shift continues, so the list opens with the channel-list key.
+            "buf_paused_long_list" to { pausedLong().k(CHANNEL_LIST) },
+            "buf_paused_long_list1" to { pausedLong().k(CHANNEL_LIST, DOWN) },
+            // Fix pass (UX review B1, S7, missing key-table columns)
+            "buf_paused_closed" to { liveWithoutArchive().buffer().k(UP, SELECT, BACK).also { check(it.ui.layer == PlayerLayer.NONE && it.ui.scrub == null && it.status.phase == ArchivePhase.PAUSED) } },
+            "buf_arch_quick" to { liveWithArchive().buffer().k(UP) },
+            "buf_notts" to { liveWithoutArchive().buffer(available = false, off = BufferOff.NOT_TS) },
+            "buf_storage" to { liveWithoutArchive().buffer(available = false, off = BufferOff.STORAGE_ERROR) },
         )
+
+        /** A LOCAL pause of 130 s with a key 30 s ago (so the frame is not dimmed): the zap confirm applies. */
+        private fun pausedLong(): PlayerWorld = liveWithoutArchive().buffer().k(PLAY_PAUSE).also { w ->
+            w.advance(100_000)
+            w.press(REMIND)
+            w.advance(30_000)
+        }
     }
 }

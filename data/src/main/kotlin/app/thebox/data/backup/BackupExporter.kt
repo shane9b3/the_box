@@ -161,11 +161,14 @@ internal class BackupExporter(
     companion object {
         private const val TAG = "BackupExporter"
 
-        /** A channel_prefs row carries something the user chose (rows holding only learned columns stay home). */
+        /**
+         * A channel_prefs row carries something the user chose (rows holding only learned columns stay home). v5: a move
+         * (`custom_group_key`, docs/design/m6-channel-editor.md §3.6 "Backup") counts.
+         */
         const val USER_PREF_PREDICATE = "(hidden = 1 OR locked IS NOT NULL OR custom_name IS NOT NULL OR custom_number IS NOT NULL OR " +
             "custom_logo IS NOT NULL OR custom_sort_index IS NOT NULL OR epg_shift_min IS NOT NULL OR aspect_mode IS NOT NULL OR " +
             "audio_lang IS NOT NULL OR subtitle_lang IS NOT NULL OR video_decoder IS NOT NULL OR buffer_profile IS NOT NULL OR " +
-            "last_watched_at IS NOT NULL OR watch_count > 0)"
+            "last_watched_at IS NOT NULL OR watch_count > 0 OR custom_group_key IS NOT NULL)"
 
         val SECRETS_SERIALIZER = MapSerializer(String.serializer(), PlaylistSecret.serializer())
 

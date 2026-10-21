@@ -22,12 +22,18 @@ import app.thebox.core.guide.ReminderBook
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
@@ -70,6 +76,8 @@ class SearchViewModel internal constructor(
     private val session: GuideSessionStore,
     /** (M5, S10) Search filters locked content with the session's access (OPEN while unlocked). */
     private val parental: ParentalSession = NoPinSession,
+    /** EPG generations invalidate programme hits even if the library did not change. */
+    private val contentChanges: Flow<*> = emptyFlow<Any>(),
     private val clock: () -> Long,
 ) : ViewModel() {
     @Inject constructor(
@@ -79,7 +87,8 @@ class SearchViewModel internal constructor(
         settings: GuideSettingsSource,
         session: GuideSessionStore,
         parental: ParentalSession,
-    ) : this(search, reminders, library, settings, session, parental, System::currentTimeMillis)
+        epg: app.thebox.core.epg.EpgStore,
+    ) : this(search, reminders, library, settings, session, parental, epg.info, System::currentTimeMillis)
 
     /** The debug unlock switch forces OPEN; otherwise the session's access (§4.3, S10). */
     private fun access(): ParentalAccess {
@@ -97,6 +106,12 @@ class SearchViewModel internal constructor(
     val effects: SharedFlow<SearchEffect> = effectsFlow.asSharedFlow()
 
     private var job: Job? = null
+    private var contentJob: Job? = null
+    private var active = false
+    private var epoch = 0L
+    private data class AccessKey(val access: ParentalAccess, val parentalQueryKey: Int)
+    private fun accessKey() = AccessKey(access(), parental.state.value.queryKey)
+    private var publishedAccess: AccessKey? = null
 
     /** Searches actually started (test hook). */
     @Volatile var started: Int = 0
@@ -104,31 +119,87 @@ class SearchViewModel internal constructor(
 
     init {
         viewModelScope.launch { reminders.index.collect { idx -> mutable.update { it.copy(reminders = idx) } } }
+        val initialAccess = accessKey()
+        viewModelScope.launch {
+            var previous = initialAccess
+            combine(parental.state, settings.settings) { _, _ -> accessKey() }.distinctUntilChanged().collect { key ->
+                if (key != previous) { previous = key; refresh() }
+            }
+        }
+    }
+
+    /** Subscribe only while Search is visited; an Activity-owned VM must not duplicate guide queries offscreen. */
+    private fun activate(): Boolean {
+        if (active) return false
+        active = true
+        contentJob = viewModelScope.launch {
+            coroutineScope {
+                launch { library.rowContent.distinctUntilChanged().collect { refresh() } }
+                launch { library.sources(ParentalAccess.OPEN).distinctUntilChanged().drop(1).collect { refresh() } }
+                launch { contentChanges.drop(1).collect { refresh() } }
+            }
+        }
+        return true
+    }
+
+    fun onEntered() {
+        if (activate()) refresh()
+    }
+
+    fun onLeft() {
+        active = false
+        refresh() // revoke the snapshot and cancel IO before disposing the content observers
+        contentJob?.cancel()
+        contentJob = null
     }
 
     fun onQuery(text: String) {
         if (text == mutable.value.query) return
+        activate()
         mutable.update { it.copy(query = text) }
+        refresh()
+    }
+
+    /** Clear first, including modal targets; an old IO result must never republish after relocking. */
+    fun refresh() {
+        val requestEpoch = ++epoch
         job?.cancel()
-        if (text.count { it.isLetterOrDigit() } < MIN_CHARS) {
-            publish(null, searching = false)
+        publishedAccess = null
+        val text = mutable.value.query
+        publish(null, searching = false)
+        if (!active || text.count { it.isLetterOrDigit() } < MIN_CHARS) {
             return
         }
+        val key = accessKey()
         mutable.update { it.copy(searching = true) }
         job = viewModelScope.launch {
             delay(DEBOUNCE_MS)
             started++
             try {
                 // (M5 commit 0, S10) explicit access; WP-C feeds it from ParentalSession.state.
-                val r = search.search(text, clock(), access = access())
+                val r = search.search(text, clock(), access = key.access)
+                if (requestEpoch != epoch || key != accessKey()) return@launch
+                publishedAccess = key
                 publish(r, searching = false)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                publish(SearchResults(text, emptyList(), emptyList()), searching = false)
+                if (requestEpoch == epoch && key == accessKey()) {
+                    publishedAccess = key
+                    publish(SearchResults(text, emptyList(), emptyList()), searching = false)
+                }
             }
         }
     }
+
+    /** UI actions carry the exact published snapshot, not just a channel that might now be protected. */
+    fun isCurrent(results: SearchResults): Boolean = mutable.value.results === results && publishedAccess == accessKey()
+
+    private fun allowed(channel: GuideChannel, snapshot: SearchResults): Boolean =
+        (isCurrent(snapshot) && (channel in snapshot.channels || snapshot.programmes.any { it.channel == channel }))
+
+    private fun allowed(hit: ProgrammeHit, snapshot: SearchResults): Boolean =
+        (isCurrent(snapshot) && hit in snapshot.programmes)
 
     private fun publish(r: SearchResults?, searching: Boolean) {
         resultsFlow.value = r
@@ -136,33 +207,39 @@ class SearchViewModel internal constructor(
     }
 
     /** OK on a channel: tune it and go FULL. */
-    fun onChannel(channel: GuideChannel) {
+    fun onChannel(channel: GuideChannel, snapshot: SearchResults) {
+        if (!allowed(channel, snapshot)) return
         emit(SearchEffect.Tune(channel))
         close(channel, tuned = true)
     }
 
     /** OK on a programme: on now → tune; in archive → catch-up; future → toggle its reminder (toast). */
-    fun onProgramme(hit: ProgrammeHit) {
+    fun onProgramme(hit: ProgrammeHit, snapshot: SearchResults) {
+        if (!allowed(hit, snapshot)) return
         val now = (clock() / 60_000L).toInt()
         when {
-            hit.info.startMin <= now && hit.info.endMin > now -> onChannel(hit.channel)
+            hit.info.startMin <= now && hit.info.endMin > now -> onChannel(hit.channel, snapshot)
             hit.inArchive -> {
                 emit(SearchEffect.PlayArchive(hit.channel, hit.info))
                 close(hit.channel, tuned = true, archive = true)
             }
-            hit.info.startMin > now -> toggleReminder(hit)
+            hit.info.startMin > now -> toggleReminder(hit, snapshot)
             else -> emit(SearchEffect.Toast(GuideToast.NO_CATCHUP))
         }
     }
 
     fun hasReminder(hit: ProgrammeHit): Boolean = mutable.value.reminders.contains(hit.channel.identityHash, hit.info.rawStartMin)
 
-    fun toggleReminder(hit: ProgrammeHit) {
+    fun toggleReminder(hit: ProgrammeHit, snapshot: SearchResults) {
+        if (!allowed(hit, snapshot)) return
         viewModelScope.launch {
+            if (!allowed(hit, snapshot)) return@launch
             if (hasReminder(hit)) {
                 reminders.cancel(hit.channel.identity, hit.info.rawStartMin)
+                if (!allowed(hit, snapshot)) return@launch
                 emit(SearchEffect.Toast(GuideToast.REMINDER_CANCELLED))
             } else if (reminders.set(hit.channel, hit.info, settings.settings.value.reminderLeadSec)) {
+                if (!allowed(hit, snapshot)) return@launch
                 val first = !session.flag(FLAG_REMINDER_SEEN)
                 if (first) session.setFlag(FLAG_REMINDER_SEEN)
                 emit(SearchEffect.Toast(if (first) GuideToast.REMINDER_SET_FIRST_TIME else GuideToast.REMINDER_SET))
@@ -170,10 +247,14 @@ class SearchViewModel internal constructor(
         }
     }
 
-    fun toggleFavourite(channel: GuideChannel) {
+    fun toggleFavourite(channel: GuideChannel, snapshot: SearchResults) {
+        if (!allowed(channel, snapshot)) return
         viewModelScope.launch {
+            if (!allowed(channel, snapshot)) return@launch
             val on = !library.isFavourite(channel.identity)
+            if (!allowed(channel, snapshot)) return@launch
             library.setFavourite(channel.identity, on)
+            if (!allowed(channel, snapshot)) return@launch
             emit(SearchEffect.Toast(if (on) GuideToast.ADDED_FAVOURITE else GuideToast.REMOVED_FAVOURITE, channel.displayName))
         }
     }
@@ -184,7 +265,7 @@ class SearchViewModel internal constructor(
     fun onBack() = close(null, tuned = false)
 
     private fun close(channel: GuideChannel?, tuned: Boolean, archive: Boolean = false) {
-        job?.cancel()
+        onLeft()
         emit(SearchEffect.Close(GuideEvent.SearchClosed(channel, tuned, archive)))
     }
 

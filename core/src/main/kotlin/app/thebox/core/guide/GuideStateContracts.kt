@@ -20,6 +20,8 @@ enum class GroupMenuItem {
     HIDE, MOVE_UP, MOVE_DOWN,
     // M5 (§2.12 item 2; append-only)
     LOCK, UNLOCK,
+    /** Opens the channel editor on this group (docs/design/m6-channel-editor.md §2.1; append-only, last in the menu). */
+    EDIT,
 }
 
 data class PanelState(
@@ -36,13 +38,19 @@ data class PanelState(
     val description: String?,
     val buttons: List<PanelButton>,
     val noInfo: Boolean,
+    /** Poster art beside the text (owner request 2026-10-18): the programme's XMLTV icon, with the description. */
+    val imageUrl: String? = null,
 )
 
 data class DayItem(val day: Int, val label: String, val enabled: Boolean, val primeTime: Boolean = false)
 
 sealed interface Overlay {
     /** [focused] indexes [shortcuts] first, then [entries]. */
-    data class Groups(val shortcuts: List<GroupsShortcut>, val entries: List<GuideSourceEntry>, val focused: Int, val current: Int, val menu: List<GroupMenuItem>?, val menuFocused: Int) : Overlay
+    /**
+     * [viaBack] (decision 2026-10-19): opened by the Back ladder from home, so the next Back continues outward to the top
+     * bar (Search focused); otherwise Back closes the panel to where it was opened from.
+     */
+    data class Groups(val shortcuts: List<GroupsShortcut>, val entries: List<GuideSourceEntry>, val focused: Int, val current: Int, val menu: List<GroupMenuItem>?, val menuFocused: Int, val viaBack: Boolean = false) : Overlay
     data class Days(val items: List<DayItem>, val focused: Int) : Overlay
     data class Menu(val items: List<MenuItem>, val focused: Int) : Overlay
     /** Programme sheet for a future cell (product S7b). */
@@ -63,6 +71,8 @@ enum class EmptyKind { NO_PLAYLIST, EMPTY_SOURCE, NO_GUIDE_DATA }
 
 data class GuideUiState(
     val mode: ScreenMode = ScreenMode.GUIDE,
+    /** True from creation until the startup decision (StartGuide, StartFull's first Tuned, setup, or any key): the shell draws a blank canvas instead of the guide. */
+    val booting: Boolean = false,
     val zone: Zone = Zone.GRID,
     val tabFocused: Int = 0,
     val headerChips: List<HeaderChip> = listOf(HeaderChip.GROUP, HeaderChip.DAY),
@@ -104,6 +114,8 @@ sealed interface GuideEvent {
     data class Window(val data: GuideWindowData) : GuideEvent
     data class Generation(val info: app.thebox.core.epg.EpgGenerationInfo?) : GuideEvent
     data class Info(val token: Long, val info: ProgrammeInfo?) : GuideEvent
+    /** (owner ruling 2026-10-18) A looked-up poster for the panel of [token]; ignored once the panel moved on. */
+    data class Artwork(val token: Long, val url: String?) : GuideEvent
     data class TunedNow(val info: ProgrammeInfo?) : GuideEvent
     data class Tuned(val state: TunedState, val channel: GuideChannel?) : GuideEvent
     data class Reminders(val index: ReminderIndex) : GuideEvent
@@ -129,6 +141,12 @@ sealed interface GuideEvent {
     data class Player(val settings: app.thebox.core.full.PlayerSettings) : GuideEvent
     /** (M4) "On launch: Full screen last channel": go FULL on the first active Tuned (the existing pendingFull path). */
     data object StartFull : GuideEvent
+    /**
+     * Owner ruling 2026-10-17: the startup decided on the guide (On launch = guide, or nothing to tune). Ends the boot
+     * blank ([GuideUiState.booting]); StartFull ends it on the first active Tuned instead, so the guide never flashes
+     * before the full-screen player.
+     */
+    data object StartGuide : GuideEvent
     /** (M4, owner ruling 2026-10-15) Quick bar → Settings: mode SETTINGS; BACK from SETTINGS returns to FULL when opened from it. */
     data object OpenSettings : GuideEvent
 

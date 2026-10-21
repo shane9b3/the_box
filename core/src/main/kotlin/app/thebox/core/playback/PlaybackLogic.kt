@@ -100,6 +100,12 @@ data class LadderContext(
     val accountMax: Int?,
     val accountStatus: AccountGate,
     val lastHost: String?,
+    /**
+     * Ms since the current stream-switch window began: the tune, or the one pipeline repair per cycle (tunneling off,
+     * software video/audio, passthrough off, TS compat raise) that restarts the 15 s window (device finding 2026-10-17:
+     * a repair decided at 14 s was failed by the deadline 0.6 s later). Defaults to [msSinceTuneStart].
+     */
+    val msSinceSwitchWindowStart: Long = msSinceTuneStart,
 )
 
 enum class AccountGate { UNKNOWN, ACTIVE, EXPIRED, DISABLED, AUTH_FAILED }

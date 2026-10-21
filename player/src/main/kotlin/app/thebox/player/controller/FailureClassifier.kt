@@ -19,6 +19,11 @@ import app.thebox.core.playback.FailureSignal
 import app.thebox.core.playback.LoadOrigin
 import app.thebox.core.playback.NetworkFailureKind
 import app.thebox.core.playback.StallKind
+import app.thebox.core.playback.timeshift.RecordStop
+import app.thebox.core.playback.timeshift.RingBoundaryException
+import app.thebox.core.playback.timeshift.RingEndException
+import app.thebox.core.playback.timeshift.RingException
+import app.thebox.core.playback.timeshift.SegmentStormException
 import app.thebox.player.datasource.LiveFailureKind
 import app.thebox.player.datasource.LiveStreamException
 import java.net.ConnectException
@@ -49,11 +54,20 @@ internal class FailureClassifier {
         /** Bytes received by this session so far (telemetry). */
         val bytesReceived: Long = 0,
         val passthroughActive: Boolean = false,
+        /**
+         * (M6 time-shift commit 0, docs/design/m6-timeshift.md §7.4, §16.4) The buffered cycle's writer tune id: a live TS
+         * failure carrying it is the recorder's, not stale. null = no time-shift writer.
+         */
+        val writerTuneId: Long? = null,
     )
 
     fun classify(error: PlaybackException, facts: Facts): FailureSignal? {
         if (error.timestampMs < facts.sessionStartMs) return null
         val chain = causeChain(error)
+
+        // (M6 time-shift, §7.4, §16.4) Ring rows first: a RingEndException carries the writer's LiveStreamException in
+        // its cause chain, which must not be read as this reader's network failure.
+        chain.firstOrNull { it is RingException }?.let { return ring(it as RingException, error) }
 
         // Row 1–5: typed live TS failures (WP-B).
         chain.firstOrNull { it is LiveStreamException }?.let { return live(it as LiveStreamException, facts, chain) }
@@ -128,9 +142,35 @@ internal class FailureClassifier {
         }
     }
 
+    /**
+     * (M6 time-shift commit 0, §7.4) The writer path, which has no `PlaybackException`: the same live rows as [classify],
+     * accepting either [Facts.currentTuneId] or [Facts.writerTuneId]. null = stale. WP-B adds the ring rows ahead of it.
+     */
+    fun classifyLive(e: LiveStreamException, facts: Facts): FailureSignal? = live(e, facts, causeChain(e))
+
+    /**
+     * (M6 time-shift, docs/design/m6-timeshift.md §3.5, §7.4; lead reconciliation R2) A recorder failure that is not a
+     * `LiveStreamException`: a `SegmentStormException` is `PcrDiscontinuity` on the writer-scoped ladder (writer
+     * `ReResolve`; a repeat within 5 min is M2's L25, cycle-scoped). null for anything else.
+     */
+    fun classifyWriter(e: Throwable): FailureSignal? =
+        causeChain(e).firstOrNull { it is SegmentStormException }?.let { FailureSignal.PcrDiscontinuity(0L) }
+
+    /**
+     * (M6 time-shift, §5.3, §7.4) The reader's ring exceptions. A boundary is [FailureSignal.RingBoundary] (handled before
+     * the ladder, A-N2); the end of a reader whose tune or generation ended (`SESSION_END`) is stale. Every other ring
+     * exception (saving stopped, position lost, disk) is routed by the controller before the ladder too
+     * ([ringException]); should one reach the ladder, it is an unknown source failure, never a network row.
+     */
+    private fun ring(e: RingException, error: PlaybackException): FailureSignal? = when (e) {
+        is RingBoundaryException -> FailureSignal.RingBoundary(e.nextRapOffset, e.gapMs)
+        is RingEndException -> if (e.stop == RecordStop.SESSION_END) null else FailureSignal.Unknown(error.errorCode)
+        else -> FailureSignal.Unknown(error.errorCode)
+    }
+
     private fun live(e: LiveStreamException, facts: Facts, chain: List<Throwable>): FailureSignal? {
         val sessionId = tuneIdOf(e)
-        if (e.kind == LiveFailureKind.PREEMPTED || (sessionId != null && sessionId != facts.currentTuneId)) return null
+        if (e.kind == LiveFailureKind.PREEMPTED || (sessionId != null && sessionId != facts.currentTuneId && sessionId != facts.writerTuneId)) return null
         val info = e.info
         return when (e.kind) {
             LiveFailureKind.HTTP_STATUS -> FailureSignal.Http(info.status ?: 0, if (facts.isArchive) LoadOrigin.ARCHIVE else LoadOrigin.PROGRESSIVE)
@@ -197,6 +237,9 @@ internal class FailureClassifier {
             }
             return out
         }
+
+        /** (M6 time-shift) The first ring exception in [error]'s cause chain, or null. */
+        fun ringException(error: Throwable): RingException? = causeChain(error).firstOrNull { it is RingException } as RingException?
 
         /** The tune id carried by a live TS exception's placeholder `DataSpec`, or null (HLS, archive). */
         fun tuneIdOf(e: HttpDataSource.HttpDataSourceException): Long? {

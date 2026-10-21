@@ -38,7 +38,7 @@ fun ExitHint(state: GuideUiState, modifier: Modifier = Modifier) {
     if (!o.dialog) {
         Line(
             stringResource(R.string.guide_exit_hint),
-            GuideUi.sans(19, FontWeight.Medium),
+            GuideUi.sans(24, FontWeight.Medium),
             modifier
                 .testTag(EXIT_HINT_TAG)
                 .background(GuideUi.OverlayFill, RoundedCornerShape(DesignTokens.Radii.Button))
@@ -58,14 +58,14 @@ fun ExitHint(state: GuideUiState, modifier: Modifier = Modifier) {
             .padding(28.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
-        Line(stringResource(R.string.guide_exit_title), GuideUi.sans(28, FontWeight.SemiBold))
-        Line(stringResource(R.string.guide_exit_body), GuideUi.sans(19, color = GuideUi.Fg70), maxLines = 2)
+        Line(stringResource(R.string.guide_exit_title), GuideUi.sans(34, FontWeight.SemiBold))
+        Line(stringResource(R.string.guide_exit_body), GuideUi.sans(24, color = GuideUi.Fg70), maxLines = 2)
         Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Chip(o.focused == 0, fill = GuideUi.White10, border = GuideUi.White16, shape = RoundedCornerShape(DesignTokens.Radii.Button), padding = PaddingValues(horizontal = 26.dp, vertical = 12.dp)) { c ->
-                Line(stringResource(R.string.guide_exit_confirm), GuideUi.sans(19, FontWeight.SemiBold, c))
+                Line(stringResource(R.string.guide_exit_confirm), GuideUi.sans(24, FontWeight.SemiBold, c))
             }
             Chip(o.focused == 1, fill = GuideUi.White10, border = GuideUi.White16, shape = RoundedCornerShape(DesignTokens.Radii.Button), padding = PaddingValues(horizontal = 26.dp, vertical = 12.dp)) { c ->
-                Line(stringResource(R.string.guide_exit_cancel), GuideUi.sans(19, FontWeight.SemiBold, c))
+                Line(stringResource(R.string.guide_exit_cancel), GuideUi.sans(24, FontWeight.SemiBold, c))
             }
         }
     }

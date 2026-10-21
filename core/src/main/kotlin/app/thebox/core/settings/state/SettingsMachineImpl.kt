@@ -124,6 +124,17 @@ class SettingsMachineImpl(
     private var pinToken = 0L
     private var pinPending: (() -> Unit)? = null
 
+    /*
+     * (m6-channel-editor §3.2) Callbacks of a page drawn by another screen (the channel editor). Each is called exactly
+     * once: on its outcome, on cancel, or when [closeOverlays] (or a newer request) drops it. They are cleared before
+     * they run, so a callback may open the next overlay.
+     */
+    private var extTextCallback: ((String?) -> Unit)? = null
+    private var extTextValidate: ((String) -> String?)? = null
+    private var extNumberCallback: ((Int?) -> Unit)? = null
+    private var extPinCallback: ((Boolean) -> Unit)? = null
+    private var extPinToken = 0L
+
     // ---------------------------------------------------------------- SettingsMachine
 
     override fun open(route: SettingsRoute, fromFull: Boolean, detached: Boolean) {
@@ -166,12 +177,14 @@ class SettingsMachineImpl(
         if (editor != null) return true // the router hands the editor's keys to Compose; BACK arrives as EditorBack
         val consumed = when {
             capture != null -> captureKey(a)
-            keyHandler?.invoke(currentRoute(), action) == true -> true
             numberPad != null -> padKey(action)
             confirm != null -> confirmKey(a)
             menu != null -> menuKey(a)
             move != null -> moveKey(a, action)
             choice != null -> choiceKey(a)
+            // (m6-channel-editor §3.2) After the overlays, as the interface says: a page drawn by another screen never
+            // sees keys meant for the settings pad, confirm card, menu, move mode or choice list.
+            keyHandler?.invoke(currentRoute(), action) == true -> true
             pane == Pane.SECTIONS -> sectionsKey(a)
             else -> pageKey(action)
         }
@@ -296,6 +309,51 @@ class SettingsMachineImpl(
         confirm = ConfirmState(spec, intent)
         publish()
     }
+
+    override fun editText(
+        label: String, initial: String, hint: app.thebox.core.settings.TextHint, chips: List<String>,
+        validate: ((String) -> String?)?, onClosed: (String?) -> Unit,
+    ) {
+        dropExtEditors()
+        editor = EditorState(EXT_EDIT_ROW, label, initial, hint, masked = false, chips = chips)
+        extTextCallback = onClosed
+        extTextValidate = validate
+        publish()
+    }
+
+    override fun editNumber(label: String, value: Int?, min: Int, max: Int, onClosed: (Int?) -> Unit) {
+        dropExtEditors()
+        numberPad = NumberPadState(EXT_NUMBER_ROW, label, value?.toString() ?: "", min, max)
+        extNumberCallback = onClosed
+        publish()
+    }
+
+    override fun requestPin(onResult: (Boolean) -> Unit) {
+        val gate = pinGate
+        val token = ++pinToken
+        // A newer request makes any pending one stale: it hears false (once).
+        pinPending = null
+        takeExtPin()?.invoke(false)
+        when {
+            // (review N7) No gate wired: fail safe; this request lowers protection, so it is not granted.
+            gate == null -> onResult(false)
+            gate.request(PinPurpose.SettingsAction(token)) -> { extPinCallback = onResult; extPinToken = token }
+            else -> onResult(true) // no PIN set: proceed at once
+        }
+        publish()
+    }
+
+    /** A new ext editor or pad replaces an open one: the old one's caller hears null. */
+    private fun dropExtEditors() {
+        if (editor?.row == EXT_EDIT_ROW) { editor = null; takeExtText()?.invoke(null) }
+        else if (editor != null) editor = null
+        if (numberPad?.row == EXT_NUMBER_ROW) { numberPad = null; takeExtNumber()?.invoke(null) }
+        else if (numberPad != null) numberPad = null
+    }
+
+    private fun takeExtText(): ((String?) -> Unit)? = extTextCallback.also { extTextCallback = null; extTextValidate = null }
+    private fun takeExtNumber(): ((Int?) -> Unit)? = extNumberCallback.also { extNumberCallback = null }
+    private fun takeExtPin(): ((Boolean) -> Unit)? = extPinCallback.also { extPinCallback = null }
 
     // ---------------------------------------------------------------- key tables (§3.2.2)
 
@@ -435,12 +493,18 @@ class SettingsMachineImpl(
     private fun gated(step: () -> Unit) {
         val gate = pinGate
         val token = ++pinToken
+        takeExtPin()?.invoke(false) // its token is stale now
         if (gate != null && gate.request(PinPurpose.SettingsAction(token))) pinPending = step else step()
     }
 
     private fun onPinResult(e: SettingsEvent.PinResult) {
         val p = e.purpose as? PinPurpose.SettingsAction ?: return
         if (p.token != pinToken) return
+        if (extPinCallback != null && p.token == extPinToken) {
+            // (m6-channel-editor §3.2) Both outcomes are reported, not only a grant.
+            takeExtPin()?.invoke(e.granted)
+            return
+        }
         val step = pinPending ?: return
         pinPending = null
         if (e.granted) step()
@@ -548,7 +612,10 @@ class SettingsMachineImpl(
                 PAD_ZERO -> numberPad = appendDigit(p, 0)
                 PAD_OK -> commitPad(p)
             }
-            BoxAction.BACK -> numberPad = if (p.digits.isNotEmpty()) p.copy(digits = p.digits.dropLast(1), error = null) else null
+            BoxAction.BACK -> if (p.digits.isNotEmpty()) numberPad = p.copy(digits = p.digits.dropLast(1), error = null) else {
+                numberPad = null
+                if (p.row == EXT_NUMBER_ROW) takeExtNumber()?.invoke(null)
+            }
             else -> Unit
         }
         return true
@@ -568,6 +635,7 @@ class SettingsMachineImpl(
             return
         }
         numberPad = null
+        if (p.row == EXT_NUMBER_ROW) { takeExtNumber()?.invoke(v); return }
         val row = findRow(p.row)
         val k = row?.kind as? RowKind.Number
         if (k == null || k.value != v) {
@@ -616,6 +684,7 @@ class SettingsMachineImpl(
     private fun onEditorClosed(e: SettingsEvent.EditorClosed) {
         val ed = editor ?: return
         if (ed.row != e.row) return
+        if (ed.row == EXT_EDIT_ROW) { onExtEditorClosed(ed, e); return }
         if (!e.committed || e.text == null) { editor = null; return }
         val error = validator.validate(ed.row, ed.hint, e.text)
         if (error != null) { editor = ed.copy(error = error); return }
@@ -626,6 +695,15 @@ class SettingsMachineImpl(
             val k = row?.kind as? RowKind.Text
             if (k != null) replaceRow(ed.row) { it.copy(kind = k.copy(value = e.text)) }
         }
+    }
+
+    /** (m6-channel-editor §3.2) The caller's validator (else the hint's rule); the text is reported even when unchanged. */
+    private fun onExtEditorClosed(ed: EditorState, e: SettingsEvent.EditorClosed) {
+        if (!e.committed || e.text == null) { editor = null; takeExtText()?.invoke(null); return }
+        val error = extTextValidate?.invoke(e.text) ?: if (extTextValidate == null) validator.validate(ed.row, ed.hint, e.text) else null
+        if (error != null) { editor = ed.copy(error = error); return }
+        editor = null
+        takeExtText()?.invoke(e.text)
     }
 
     private fun armCapture(action: BoxAction, press: Press, test: Boolean) {
@@ -920,6 +998,14 @@ class SettingsMachineImpl(
         menu = null; confirm = null; numberPad = null; move = null
         if (editor != null) editor = null
         if (capture != null) cancelCapture(null)
+        // (m6-channel-editor §3.2) Pending ext callbacks hear null / false, once. All three are taken before any runs
+        // (review N8), so a callback that opens another overlay keeps it and its new callback.
+        val text = takeExtText()
+        val number = takeExtNumber()
+        val pin = takeExtPin()
+        text?.invoke(null)
+        number?.invoke(null)
+        pin?.invoke(false)
     }
 
     private fun sections(): List<SectionId> = SectionId.entries.filter { advanced || it != SectionId.NETWORK }
@@ -1006,6 +1092,9 @@ class SettingsMachineImpl(
 
         /** The pinned "Show advanced settings" toggle of the sections pane (§3.2.3); `GuidePrefs.advancedSettings`. */
         val ADVANCED_ROW = RowId("settings.advanced")
+        /** (m6-channel-editor §3.2) The editor / pad rows of a page drawn by another screen ([editText], [editNumber]). */
+        val EXT_EDIT_ROW = RowId("ext.edit")
+        val EXT_NUMBER_ROW = RowId("ext.number")
         /** A context-menu option with this id enters move mode instead of emitting `RowIntent.Menu` (§3.2.2). */
         const val MOVE_OPTION = "move"
 

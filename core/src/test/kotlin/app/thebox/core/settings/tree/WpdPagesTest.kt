@@ -52,6 +52,9 @@ class WpdPagesTest {
         assertEquals(setOf(SectionId.BACKUP), BackupRows.rows.map { it.section }.toSet())
         assertTrue((ChannelsRows.rows + BackupRows.rows).all { it.owner == "D" })
         assertEquals(Visibility.ADVANCED, SettingsTree.spec(ChannelsRows.HIDE_RULES)!!.visibility)
+        // m6-channel-editor §3.1 (owner ruling Q3): the editor is SIMPLE, the hidden-channels page moves to ADVANCED.
+        assertEquals(Visibility.SIMPLE, SettingsTree.spec(ChannelsRows.EDITOR)!!.visibility)
+        assertEquals(Visibility.ADVANCED, SettingsTree.spec(ChannelsRows.HIDDEN)!!.visibility)
         assertEquals(EffectTiming.NEXT_LAUNCH, SettingsTree.spec(ChannelsRows.OPEN_GUIDE_ON)!!.effect)
         // channels.playlist is a context control (§3.3.5 footnote): 4 counted simple rows here, 2 in Backup.
         assertEquals(4, ChannelsRows.rows.count { it.visibility == Visibility.SIMPLE && it.id !in ChannelsRows.NOT_COUNTED })
@@ -63,15 +66,21 @@ class WpdPagesTest {
     @Test
     fun channelsSection() {
         val one = ChannelsPages.section(t, advanced = false, version = 1, listOf(PlaylistChoice(7, "A")), 7, summary, OpenGuideOn.LAST)
-        assertEquals(listOf("channels.groups", "channels.hidden", "channels.favourites", "channels.open_guide_on"), one.ids())
-        assertEquals("CHANNELS_GROUPS_VALUE(64,12,2)", one.rows[0].value)
-        assertEquals(SettingsRoute.Groups(7), (one.rows[0].kind as RowKind.Link).route)
+        assertEquals(listOf("channels.editor", "channels.groups", "channels.favourites", "channels.open_guide_on"), one.ids())
+        assertEquals("CHANNELS_EDITOR", one.rows[0].label)
+        assertEquals("CHANNELS_EDITOR_VALUE", one.rows[0].value)
+        assertEquals(SettingsRoute.ChannelEditor(7), (one.rows[0].kind as RowKind.Link).route)
+        assertEquals("CHANNELS_GROUPS_VALUE(64,12,2)", one.rows[1].value)
+        assertEquals(SettingsRoute.Groups(7), (one.rows[1].kind as RowKind.Link).route)
         assertEquals(2, (one.rows[3].kind as RowKind.Choice).selected)
         assertMatchesRegistry(one)
 
         val two = ChannelsPages.section(t, advanced = true, version = 2, listOf(PlaylistChoice(7, "A"), PlaylistChoice(9, "B")), 9, summary, OpenGuideOn.ALL)
-        assertEquals(listOf("channels.playlist", "channels.groups", "channels.hidden", "channels.favourites", "channels.open_guide_on", "channels.hide_rules"), two.ids())
-        assertEquals(1, (two.rows[0].kind as RowKind.Choice).selected)
+        assertEquals(listOf("channels.editor", "channels.playlist", "channels.groups", "channels.hidden", "channels.favourites", "channels.open_guide_on", "channels.hide_rules"), two.ids())
+        assertEquals(SettingsRoute.ChannelEditor(9), (two.rows[0].kind as RowKind.Link).route)
+        assertEquals(1, (two.rows[1].kind as RowKind.Choice).selected)
+        assertEquals(SettingsRoute.HiddenChannels(9), (two.rows[3].kind as RowKind.Link).route)
+        assertEquals(Visibility.ADVANCED, two.rows[3].visibility)
         assertEquals(SettingsRoute.HideRules(9), (two.rows.last().kind as RowKind.Link).route)
         assertMatchesRegistry(two)
 

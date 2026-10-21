@@ -84,11 +84,11 @@ fun GroupsPanel(state: GuideUiState, modifier: Modifier = Modifier) {
                 .border(1.dp, GuideUi.OverlayBorder, shape)
                 .padding(vertical = 14.dp),
         ) {
-            Line(stringResource(R.string.guide_groups_title), GuideUi.sans(15, FontWeight.SemiBold, GuideUi.Fg50, 0.1f), Modifier.padding(start = 24.dp, bottom = 8.dp))
+            Line(stringResource(R.string.guide_groups_title), GuideUi.sans(24, FontWeight.SemiBold, GuideUi.Fg50, 0.1f), Modifier.padding(start = 24.dp, bottom = 8.dp))
             LazyColumn(state = list, contentPadding = PaddingValues(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 items(rows.size) { i ->
                     when (val r = rows[i]) {
-                        is GroupsRow.Header -> Line(r.title.uppercase(), GuideUi.sans(13, FontWeight.SemiBold, GuideUi.Fg50, 0.1f), Modifier.padding(start = 12.dp, top = 12.dp, bottom = 4.dp))
+                        is GroupsRow.Header -> Line(r.title.uppercase(), GuideUi.sans(22, FontWeight.SemiBold, GuideUi.Fg50, 0.1f), Modifier.padding(start = 12.dp, top = 12.dp, bottom = 4.dp))
                         is GroupsRow.Shortcut -> GroupRow(
                             label = stringResource(if (r.shortcut == GroupsShortcut.SEARCH) R.string.guide_groups_search else R.string.guide_groups_settings),
                             count = null, focused = o.focused == r.index, current = false,
@@ -122,18 +122,18 @@ internal suspend fun keepVisible(list: LazyListState, index: Int) {
 private fun GroupRow(label: String, count: Int?, focused: Boolean, current: Boolean, locked: Boolean = false, notProtected: Boolean = false) {
     Chip(
         focused = focused,
-        modifier = Modifier.fillMaxWidth().height(52.dp),
+        modifier = Modifier.fillMaxWidth().height(56.dp),
         fill = Color.Transparent,
         shape = RoundedCornerShape(DesignTokens.Radii.Row),
         padding = PaddingValues(horizontal = 12.dp),
     ) { color ->
         if (current) Dot(GuideUi.Accent, 7.dp) else Box(Modifier.width(7.dp))
-        Line(label, GuideUi.sans(19, FontWeight.SemiBold, color), Modifier.weight(1f))
+        Line(label, GuideUi.sans(28, FontWeight.SemiBold, color), Modifier.weight(1f))
         // M5 (§3.9.1 "Show with a lock"): a locked group keeps its count; OK asks for the PIN first.
         // U-S11 (code review 2026-10-16): no PIN protects it (FILTERED_NO_PIN): the amber 18+ chip, not the padlock.
         if (notProtected) app.thebox.ui.parental.NotProtectedChip(Modifier.padding(end = 8.dp), if (focused) color else null)
         else if (locked) app.thebox.ui.parental.LockGlyph(if (focused) color else GuideUi.Fg50, Modifier.padding(end = 8.dp))
-        count?.let { Line(it.toString(), GuideUi.mono(15, color = if (focused) color else GuideUi.Fg50)) }
+        count?.let { Line(it.toString(), GuideUi.mono(24, color = if (focused) color else GuideUi.Fg50)) }
     }
 }
 
@@ -156,8 +156,9 @@ private fun GroupMenu(items: List<GroupMenuItem>, focused: Int, modifier: Modifi
                     GroupMenuItem.MOVE_DOWN -> R.string.guide_group_down
                     GroupMenuItem.LOCK -> R.string.guide_group_lock // M5
                     GroupMenuItem.UNLOCK -> R.string.guide_group_unlock
+                    GroupMenuItem.EDIT -> R.string.guide_group_edit
                 }
-                Line(stringResource(label), GuideUi.sans(18, FontWeight.Medium, color))
+                Line(stringResource(label), GuideUi.sans(26, FontWeight.Medium, color))
             }
         }
     }

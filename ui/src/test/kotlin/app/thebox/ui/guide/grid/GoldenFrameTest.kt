@@ -96,8 +96,8 @@ class GoldenFrameTest {
         val bmp = render()
         // Above the panel: untouched canvas.
         assertTrue(bmp.getPixel(960, 400) == GuideColors.CANVAS)
-        // Now line at x ≈ 687.8 below the header.
-        val now = bmp.getPixel(688, 700)
+        // Now line at x ≈ 717.4 below the header (label 240, owner ruling 2026-10-17).
+        val now = bmp.getPixel(717, 700)
         assertTrue("now line accent (${Integer.toHexString(now)})", Color.blue(now) > 180 && Color.red(now) < 150)
         // The focused cell is filled with FG (left padding, clear of text).
         val fp = bmp.getPixel(focusX, focusY)
@@ -124,10 +124,10 @@ class GoldenFrameTest {
     }
 
     @Test
-    fun goldenCatchesLostTimeLines() = assertMutationFails("cell time lines") { inner ->
+    fun goldenCatchesLostCellTitles() = assertMutationFails("cell titles") { inner ->
         object : GuideCanvas by inner {
             override fun drawText(text: String, start: Int, end: Int, x: Float, baseline: Float, style: GuideTextStyle, argb: Int) {
-                if (style != GuideTextStyle.CELL_TIME) inner.drawText(text, start, end, x, baseline, style, argb)
+                if (style != GuideTextStyle.CELL_TITLE) inner.drawText(text, start, end, x, baseline, style, argb)
             }
         }
     }

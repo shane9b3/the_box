@@ -376,10 +376,14 @@ class SynthCase(PanelCase):
     overrides = {"pace": True}
 
     @classmethod
+    def build_src(cls):
+        return synth_clip(cls.base)
+
+    @classmethod
     def setUpClass(cls):
         super().setUpClass()
         cls.saved = dict(cls.panel.clips)
-        cls.src = synth_clip(cls.base)
+        cls.src = cls.build_src()
         # nominal duration 1.0 s => about one loop per second of paced output
         clip = fakepanel.Clip(cls.src, 1.0, [(cls.src, 1.0)])
         for k in cls.panel.clips:
@@ -1691,6 +1695,516 @@ class TestAdultSynthetic(PanelCase):
         self.assertTrue(last and all(s["is_adult"] == "1" for s in last))
         first = self.api("get_live_streams", f"&category_id={cats[0]['category_id']}")
         self.assertTrue(all(s["is_adult"] == "0" for s in first))
+
+
+# ------------------------------------------------------------------ M6 time-shift buffer additions (design §17.5)
+
+PMT_PID = 0x1000
+
+
+def hangup(c, r):
+    r.close()
+    c.close()
+
+
+def t_crc(data):
+    """CRC-32/MPEG-2, bitwise (independent of fakepanel's). A section followed by its CRC gives 0."""
+    crc = 0xFFFFFFFF
+    for b in data:
+        for i in range(7, -1, -1):
+            top = (crc >> 31) & 1
+            crc = (crc << 1) & 0xFFFFFFFF
+            if top ^ ((b >> i) & 1):
+                crc ^= 0x04C11DB7
+    return crc
+
+
+def t_section(table_id, ident, version, body):
+    n = 5 + len(body) + 4
+    sec = bytes([table_id, 0xB0 | (n >> 8), n & 0xFF, ident >> 8, ident & 0xFF, 0xC1 | (version << 1), 0, 0]) + body
+    return sec + t_crc(sec).to_bytes(4, "big")
+
+
+def t_psi_pkt(pid, cc, sec):
+    return bytes([0x47, 0x40 | (pid >> 8), pid & 0xFF, 0x10 | cc, 0]) + sec + b"\xff" * (183 - len(sec))
+
+
+def psi_pair(cc):
+    pat = t_section(0, 1, 0, bytes([0, 1, 0xE0 | (PMT_PID >> 8), PMT_PID & 0xFF]))
+    pmt = t_section(2, 1, 0, bytes([0xE0 | (VPID >> 8), VPID & 0xFF, 0xF0, 0,
+                                    0x1B, 0xE0 | (VPID >> 8), VPID & 0xFF, 0xF0, 0,
+                                    0x0F, 0xE0 | (APID >> 8), APID & 0xFF, 0xF0, 0]))
+    return t_psi_pkt(0, cc, pat) + t_psi_pkt(PMT_PID, cc, pmt)
+
+
+def with_psi(raw, every=60):
+    out, cc = [], 0
+    for i, o in enumerate(range(0, len(raw), 188)):
+        if i % every == 0:
+            out.append(psi_pair(cc))
+            cc = (cc + 1) & 15
+        out.append(raw[o:o + 188])
+    return b"".join(out)
+
+
+def walk(data):
+    for i, o in enumerate(range(0, len(data) // 188 * 188, 188)):
+        p = data[o:o + 188]
+        assert p[0] == 0x47
+        yield i, ((p[1] & 0x1F) << 8) | p[2], p
+
+
+def psi_events(data):
+    """[(packet index, 'PAT'|'PMT', version, pmt_pid | {pid: stream_type})] with each section's CRC verified."""
+    out = []
+    for i, pid, p in walk(data):
+        if not (p[1] & 0x40) or not (pid == 0 or pid == PMT_PID):
+            continue
+        sec = p[5 + p[4]:]
+        n = 3 + (((sec[1] & 15) << 8) | sec[2])
+        assert t_crc(sec[:n]) == 0, "bad section CRC"
+        ver = (sec[5] >> 1) & 31
+        if sec[0] == 0:
+            out.append((i, "PAT", ver, ((sec[10] & 0x1F) << 8) | sec[11]))
+        else:
+            streams, k = {}, 12 + (((sec[10] & 15) << 8) | sec[11])
+            while k + 5 <= n - 4:
+                streams[((sec[k + 1] & 0x1F) << 8) | sec[k + 2]] = sec[k]
+                k += 5 + (((sec[k + 3] & 15) << 8) | sec[k + 4])
+            out.append((i, "PMT", ver, streams))
+    return out
+
+
+class ShapeCase(SynthCase):
+    """Unpaced: the shaping runs on media time (clip bytes sent / clip rate), so reading N bytes is deterministic and fast."""
+    overrides = {"pace": False}
+    withpsi = True
+
+    @classmethod
+    def build_src(cls):
+        raw = synth_clip(cls.base)
+        return with_psi(raw) if cls.withpsi else raw
+
+    def grab(self, faults, nbytes, path="/live/test/test/1.ts"):
+        self.admin({"faults": faults})
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=15)
+        c.request("GET", path)
+        r = c.getresponse()
+        self.assertEqual(r.status, 200)
+        buf = b""
+        while len(buf) < nbytes:
+            chunk = r.read(65536)
+            if not chunk:
+                break
+            buf += chunk
+        r.close()  # (a close-delimited response owns the socket: closing the connection object alone does not hang up)
+        c.close()
+        end = time.monotonic() + 5  # the handler saves the connection's position when it ends: wait, or the next test inherits it
+        while time.monotonic() < end and self.panel.registry.counts("test")["open"]:
+            time.sleep(0.01)
+        return buf[:len(buf) // 188 * 188]
+
+    def secs(self, s):
+        return int(s * self.clip.rate) // 188 * 188
+
+
+class TestStripRai(ShapeCase):
+    withpsi = False
+
+    @classmethod
+    def build_src(cls):
+        raw = bytearray(synth_clip(cls.base))
+        for o in range(0, len(raw), 188):
+            if (raw[o + 3] >> 4) & 2 and raw[o + 4] >= 1:
+                raw[o + 5] |= 0x40  # random access on every PCR packet
+        return bytes(raw)
+
+    def af_flags(self, data):
+        return [p[5] for _, _, p in walk(data) if (p[3] >> 4) & 2 and p[4] >= 1]
+
+    def test_rai_present_without_the_key(self):
+        data = self.grab({}, self.secs(1.2))
+        fl = self.af_flags(data)
+        self.assertTrue(fl and all(f & 0x40 for f in fl))
+        self.assertEqual(data[:len(self.src)], self.src)  # key off: byte-identical first loop
+
+    def test_rai_cleared_everywhere_pcr_kept(self):
+        data = self.grab({"strip_rai": True}, self.secs(1.5))
+        fl = self.af_flags(data)
+        self.assertGreater(len(fl), 40)
+        self.assertTrue(all(not f & 0x40 for f in fl))
+        self.assertTrue(any(f & 0x10 for f in fl))  # PCR flag untouched
+        want = bytearray(self.src)
+        for o in range(0, len(want), 188):
+            if (want[o + 3] >> 4) & 2 and want[o + 4] >= 1:
+                want[o + 5] &= ~0x40 & 0xFF
+        self.assertEqual(data[:len(self.src)], bytes(want))  # nothing else changed
+        pcrs = scan(data)[0]
+        for a, b in zip(pcrs, pcrs[1:]):
+            self.assertEqual((b[0] - a[0]) & MASK33, FRAME)
+
+    def test_validation(self):
+        with self.assertRaises(ValueError):
+            self.panel.update_config({"faults": {"strip_rai": "yes"}})
+
+
+class TestPtsOffset(ShapeCase):
+    withpsi = False
+
+    def test_off_keeps_the_clip_timestamps(self):
+        data = self.grab({}, self.secs(0.4))
+        self.assertEqual(scan(data)[1][VPID][0], self.base)
+
+    def test_starts_at_the_offset_and_stays_continuous(self):
+        off = 123456789
+        data = self.grab({"pts_offset": off}, self.secs(2.5))  # more than two loops
+        pcrs, pts, dts, _ = scan(data)
+        self.assertEqual(pts[VPID][0], off)
+        self.assertEqual(pts[APID][0], off)
+        self.assertEqual((pcrs[0][0] - off) & MASK33, (-2 * FRAME) & MASK33)  # the PCR keeps its lead
+        for a, b in zip(pts[VPID], pts[VPID][1:]):
+            self.assertEqual((b - a) & MASK33, FRAME)
+        for a, b in zip(pcrs, pcrs[1:]):
+            self.assertEqual((b[0] - a[0]) & MASK33, FRAME)
+
+    def test_wraps_mod_2_33_during_the_run(self):
+        off = (1 << 33) - 10 * FRAME
+        data = self.grab({"pts_offset": off}, self.secs(2.5))
+        pcrs, pts, dts, _ = scan(data)
+        self.assertEqual(pts[VPID][0], off)
+        self.assertTrue(any(b < a for a, b in zip(pts[VPID], pts[VPID][1:])), "PTS did not wrap")
+        self.assertTrue(any(b[0] < a[0] for a, b in zip(pcrs, pcrs[1:])), "PCR did not wrap")
+        for series in (pts[VPID], dts[VPID]):
+            for a, b in zip(series, series[1:]):
+                self.assertEqual((b - a) & MASK33, FRAME)
+        for a, b in zip(pts[APID], pts[APID][1:]):
+            self.assertEqual((b - a) & MASK33, FRAME // 2)
+        for a, b in zip(pcrs, pcrs[1:]):
+            self.assertEqual((b[0] - a[0]) & MASK33, FRAME)
+
+    def test_validation(self):
+        for bad in (-1, 1 << 33, "5", True):
+            with self.assertRaises(ValueError):
+                self.panel.update_config({"faults": {"pts_offset": bad}})
+
+
+class TestInlineJump(ShapeCase):
+    withpsi = False
+    JUMP_MS = 2000
+
+    def events(self, data):
+        """Byte-order events: ('pts', packet index, pid, value) and ('pcr', packet index, value)."""
+        ev = []
+        for i, pid, p in walk(data):
+            j = 4
+            if (p[3] >> 4) & 2:
+                if p[5] & 0x10:
+                    ev.append(("pcr", i, int.from_bytes(p[6:12], "big") >> 15))
+                j = 5 + p[4]
+            if (p[3] >> 4) & 1 and p[1] & 0x40 and p[j:j + 3] == b"\x00\x00\x01":
+                ev.append(("pts", i, pid, dec_ts(p[j + 9:j + 14])))
+        return ev
+
+    def steps(self, data, step_ms=None):
+        step = (self.JUMP_MS if step_ms is None else step_ms) * 90
+        pts_steps, pcr_steps, last, prev_pcr = [], [], {}, None
+        for e in self.events(data):
+            if e[0] == "pts":
+                _, i, pid, v = e
+                if pid in last:
+                    d, nominal = (v - last[pid]) & MASK33, FRAME if pid == VPID else FRAME // 2
+                    if d != nominal:
+                        self.assertEqual(d, (nominal + step) & MASK33, f"unexpected PTS discontinuity at packet {i}")
+                        pts_steps.append(i)
+                last[pid] = v
+            else:
+                _, i, v = e
+                if prev_pcr is not None:
+                    d = (v - prev_pcr) & MASK33
+                    if d != FRAME:
+                        self.assertEqual(d, (FRAME + step) & MASK33, f"unexpected PCR discontinuity at packet {i}")
+                        pcr_steps.append(i)
+                prev_pcr = v
+        return pts_steps, pcr_steps
+
+    def test_pts_steps_before_pcr_in_one_connection(self):
+        n_before = self.panel.stats["stream_opens"]
+        data = self.grab({"inline_jump_after": [0.5, self.JUMP_MS]}, self.secs(1.6))
+        self.assertEqual(self.panel.stats["stream_opens"] - n_before, 1, "no reconnect")
+        pts_steps, pcr_steps = self.steps(data)
+        self.assertEqual(len(pcr_steps), 1)
+        self.assertEqual(len(pts_steps), 2)  # video and audio PTS both step
+        self.assertLess(min(pts_steps), pcr_steps[0])  # a stepped PTS packet precedes the first stepped PCR packet
+        at = min(pts_steps) * 188
+        self.assertGreaterEqual(at, 0.5 * self.clip.rate - 8000)
+        self.assertLess(at, 0.5 * self.clip.rate + 3 * 28 * 188)
+        for lst in scan(data)[3].values():  # the continuity counters stay unbroken across the step
+            exp = lst[0][0]
+            for cc, payload in lst:
+                self.assertEqual(cc, exp if payload else (exp - 1) & 15)
+                exp = (cc + 1) & 15 if payload else exp
+
+    def test_dts_follows_pts(self):
+        data = self.grab({"inline_jump_after": [0.5, self.JUMP_MS]}, self.secs(1.2))
+        _, pts, dts, _ = scan(data)
+        for p, d in zip(pts[VPID], dts[VPID]):
+            self.assertEqual((p - d) & MASK33, FRAME)
+
+    def test_negative_step(self):
+        data = self.grab({"inline_jump_after": [0.3, -1000]}, self.secs(1.0))
+        pts_steps, pcr_steps = self.steps(data, -1000)
+        self.assertEqual((len(pts_steps), len(pcr_steps)), (2, 1))
+        self.assertLess(min(pts_steps), pcr_steps[0])
+
+    def test_off_is_continuous(self):
+        data = self.grab({"inline_jump_after": None}, self.secs(1.0))
+        self.assertEqual(self.steps(data), ([], []))
+
+    def test_validation(self):
+        for bad in ([1], "x", [1, "a"], [-1, 5], 5):
+            with self.assertRaises(ValueError):
+                self.panel.update_config({"faults": {"inline_jump_after": bad}})
+
+
+class TestPsiCadence(ShapeCase):
+    def content_time(self, data, idx):
+        """Media time of packet [idx]: content (non-PSI) packets before it / rate."""
+        n = sum(1 for i, pid, _ in walk(data) if i < idx and pid not in (0, PMT_PID))
+        return n * 188 / self.clip.rate
+
+    def test_clip_cadence_without_the_key(self):
+        data = self.grab({}, self.secs(2.0))
+        self.assertGreaterEqual(len([e for e in psi_events(data) if e[1] == "PAT"]), 6)  # the fixture repeats PSI every 60 packets
+
+    def test_sparse_repetition(self):
+        data = self.grab({"psi_every_s": 0.5}, self.secs(3.3))
+        ev = psi_events(data)
+        pats = [e for e in ev if e[1] == "PAT"]
+        pmts = [e for e in ev if e[1] == "PMT"]
+        self.assertEqual(len(pats), len(pmts))
+        self.assertEqual(pats[0][0], 0)  # PSI at connection start
+        times = [self.content_time(data, e[0]) for e in pats]
+        self.assertGreaterEqual(len(times), 6)
+        self.assertLessEqual(len(times), 8)
+        for a, b in zip(times, times[1:]):
+            self.assertAlmostEqual(b - a, 0.5, delta=0.12)
+        self.assertEqual({e[2] for e in pmts}, {0})
+        self.assertEqual(pmts[0][3], {VPID: 0x1B, APID: 0x0F})
+        self.assertEqual(pats[0][3], PMT_PID)
+
+    def test_psi_continuity_counters(self):
+        data = self.grab({"psi_every_s": 0.3}, self.secs(2.0))
+        for pid in (0, PMT_PID):
+            ccs = [p[3] & 15 for _, q, p in walk(data) if q == pid]
+            self.assertGreater(len(ccs), 3)
+            for a, b in zip(ccs, ccs[1:]):
+                self.assertEqual(b, (a + 1) & 15)
+
+    def test_validation(self):
+        for bad in (0, -1, "1", True):
+            with self.assertRaises(ValueError):
+                self.panel.update_config({"faults": {"psi_every_s": bad}})
+
+
+class TestPmtChange(ShapeCase):
+    def test_version_bump_and_audio_pid_move(self):
+        data = self.grab({"pmt_change_after": 0.6}, self.secs(2.0))
+        pmts = [e for e in psi_events(data) if e[1] == "PMT"]
+        self.assertEqual(pmts[0][2], 0)
+        self.assertIn(APID, pmts[0][3])
+        newer = [e for e in pmts if e[2] == 1]
+        self.assertTrue(newer, "no PMT with version 1")
+        self.assertNotIn(APID, newer[0][3])
+        new_pids = set(newer[0][3]) - {VPID}
+        self.assertEqual(len(new_pids), 1)
+        new_audio = new_pids.pop()
+        self.assertEqual(newer[0][3][new_audio], 0x0F)
+        first_new = next(i for i, pid, _ in walk(data) if pid == new_audio)
+        self.assertLess(newer[0][0], first_new, "the new PMT must precede the first packet of the new PID")
+        self.assertLess(max(i for i, pid, _ in walk(data) if pid == APID), first_new)
+        self.assertTrue(all(e[2] == 1 for e in pmts if e[0] >= newer[0][0]))  # no version-0 PMT after the change
+        pts = pid_pts(data, APID) + pid_pts(data, new_audio)  # the audio PES stream is continuous across the PID change
+        self.assertGreater(len(pid_pts(data, new_audio)), 10)
+        for a, b in zip(pts, pts[1:]):
+            self.assertEqual((b - a) & MASK33, FRAME // 2)
+        at = sum(1 for i, pid, _ in walk(data) if i < newer[0][0] and pid not in (0, PMT_PID)) * 188
+        self.assertGreaterEqual(at, 0.6 * self.clip.rate - 8000)  # at about 0.6 s of media time
+        self.assertLess(at, 0.6 * self.clip.rate + 3 * 28 * 188)
+
+    def test_no_change_without_the_key(self):
+        data = self.grab({}, self.secs(2.0))
+        self.assertEqual({e[2] for e in psi_events(data) if e[1] == "PMT"}, {0})
+        self.assertFalse(any(pid not in (0, PMT_PID, VPID, APID) for _, pid, _ in walk(data)))
+
+    def test_combines_with_sparse_psi(self):
+        data = self.grab({"psi_every_s": 0.5, "pmt_change_after": 1.0}, self.secs(2.5))
+        pmts = [e for e in psi_events(data) if e[1] == "PMT"]
+        self.assertEqual(pmts[0][2], 0)
+        self.assertEqual({e[2] for e in pmts}, {0, 1})
+        self.assertTrue(all(APID not in e[3] for e in pmts if e[2] == 1))
+
+    def test_clip_without_psi_is_left_alone(self):
+        raw = synth_clip(self.base)
+        self.assertFalse(fakepanel.Clip(raw, 1.0, [(raw, 1.0)]).psi().ok)
+
+    def test_validation(self):
+        for bad in (-1, "1", True):
+            with self.assertRaises(ValueError):
+                self.panel.update_config({"faults": {"pmt_change_after": bad}})
+
+
+class TestPadBps(ShapeCase):
+    withpsi = False
+
+    def test_null_packet_padding_rate(self):
+        want = 0.5 * self.clip.rate  # bytes per second of media
+        data = self.grab({"pad_bps": want}, self.secs(3.0))
+        nulls = sum(1 for _, pid, _ in walk(data) if pid == 0x1FFF)
+        content = sum(1 for _, pid, _ in walk(data) if pid != 0x1FFF)
+        self.assertGreater(nulls, 0)
+        self.assertAlmostEqual(nulls * 188 / (content * 188 / self.clip.rate), want, delta=want * 0.08)
+        stripped = b"".join(p for _, pid, p in walk(data) if pid != 0x1FFF)
+        self.assertEqual(stripped[:len(self.src)], self.src)  # the content is untouched
+
+    def test_off_has_no_nulls(self):
+        data = self.grab({}, self.secs(1.0))
+        self.assertFalse(any(pid == 0x1FFF for _, pid, _ in walk(data)))
+
+    def test_validation(self):
+        for bad in (-5, "9", True):
+            with self.assertRaises(ValueError):
+                self.panel.update_config({"faults": {"pad_bps": bad}})
+
+
+class TestOccupyAndConnectionLog(PanelCase):
+    overrides = {"pace": True, "max_connections": 1}
+
+    def stats(self):
+        return json.loads(self.get("/admin/stats")[2])
+
+    def log(self):
+        return self.stats()["connection_log"]
+
+    def occupy(self, **q):
+        st, _, body = self.get("/admin/occupy?" + "&".join(f"{k}={v}" for k, v in q.items()))
+        return st, json.loads(body)
+
+    def open_client(self, path="/live/test/test/1.ts"):
+        c = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
+        c.request("GET", path)
+        r = c.getresponse()
+        self.addCleanup(r.close)
+        return c, r
+
+    def wait(self, pred, timeout=5.0):
+        end = time.monotonic() + timeout
+        while time.monotonic() < end:
+            if pred():
+                return True
+            time.sleep(0.05)
+        return False
+
+    def row(self, **want):
+        return next((r for r in reversed(self.log()) if all(r.get(k) == v for k, v in want.items())), None)
+
+    def test_hold_refuses_streams_until_released(self):
+        st, j = self.occupy(user="test", sid=9, mode="hold")
+        self.assertEqual((st, j["occupied"]), (200, True))
+        self.assertEqual(self.stats()["connections"]["open"], 1)
+        self.assertEqual(self.read_stream("/live/test/test/1.ts")[0], 403)
+        self.assertEqual(self.row(kind="stream", rejected=True)["close_reason"], "rejected_max_connections")
+        st, j = self.occupy(user="test", mode="release")
+        self.assertEqual(j["released"], 1)
+        self.assertEqual(self.read_stream("/live/test/test/1.ts")[0], 200)
+        occ = self.row(kind="occupier", rejected=False)
+        self.assertEqual(occ["close_reason"], "released")
+        self.assertIsNotNone(occ["close_unix"])
+
+    def test_hold_refused_while_a_client_holds_the_slot(self):
+        c, r = self.open_client()
+        r.read(188)
+        self.assertEqual(self.occupy(mode="hold")[0], 409)
+        self.assertEqual(self.row(kind="occupier", rejected=True)["close_reason"], "rejected_no_free_slot")
+        hangup(c, r)
+        self.assertTrue(self.wait(lambda: self.stats()["connections"]["open"] == 0))
+        st, j = self.occupy(mode="hold")  # accepted once the client is gone
+        self.assertEqual((st, j["occupied"]), (200, True))
+
+    def test_hold_is_not_evictable(self):
+        self.occupy(mode="hold")
+        self.assertEqual(self.read_stream("/live/test/test/1.ts")[0], 403)
+        self.assertEqual(self.stats()["connections"]["open"], 1)
+
+    def test_kick_oldest_ping_pong(self):
+        c, r = self.open_client()
+        self.assertEqual(r.status, 200)
+        r.read(188)
+        st, j = self.occupy(mode="kick_oldest")
+        self.assertEqual((st, j["occupied"], j["kicked"]), (200, True, {"stream": "1"}))
+
+        def eof():
+            try:
+                return r.read(65536) == b""
+            except (OSError, http.client.HTTPException):
+                return True
+        self.assertTrue(self.wait(eof), "the kicked connection was not closed")
+        hangup(c, r)
+        self.assertTrue(self.wait(lambda: self.row(kind="stream", rejected=False)["close_unix"] is not None))
+        self.assertEqual(self.row(kind="stream", rejected=False)["close_reason"], "kicked_by_occupy")
+        # the client's reconnect succeeds in kick_oldest mode and kicks the occupier in turn ...
+        c2, r2 = self.open_client()
+        self.assertEqual(r2.status, 200)
+        r2.read(188)
+        self.assertEqual(self.row(kind="occupier", rejected=False)["close_reason"], "kicked_by_client_open")
+        self.assertEqual(self.stats()["connections"]["open"], 1)
+        # ... and the other device takes it back: a ping-pong
+        st, j = self.occupy(mode="kick_oldest")
+        self.assertEqual((st, j["occupied"], j["kicked"]), (200, True, {"stream": "1"}))
+        self.assertTrue(self.wait(lambda: self.row(kind="stream", rejected=False)["close_reason"] == "kicked_by_occupy"))
+        hangup(c2, r2)
+        self.assertTrue(self.wait(lambda: self.stats()["connections"]["open"] == 1))  # only the occupier
+
+    def test_kick_oldest_on_a_free_slot_just_occupies(self):
+        st, j = self.occupy(mode="kick_oldest")
+        self.assertEqual((st, j["occupied"], j["kicked"]), (200, True, None))
+
+    def test_bad_mode(self):
+        self.assertEqual(self.occupy(mode="steal")[0], 400)
+
+    def test_connection_log_fields(self):
+        c, r = self.open_client()
+        r.read(1880)
+        self.assertTrue(self.wait(lambda: (self.row(kind="stream") or {}).get("bytes", 0) >= 1880))
+        row = self.row(kind="stream")
+        self.assertIsNone(row["close_unix"])  # still open: a live view
+        self.assertEqual((row["stream"], row["user"], row["rejected"]), ("1", "test", False))
+        hangup(c, r)
+        self.assertTrue(self.wait(lambda: self.row(kind="stream")["close_unix"] is not None))
+        row = self.row(kind="stream")
+        self.assertEqual(row["close_reason"], "client_eof")
+        self.assertGreaterEqual(row["bytes"], 1880)
+        self.assertGreaterEqual(row["close_unix"], row["open_unix"])
+
+    def test_forced_close_reason(self):
+        self.admin({"faults": {"close_every": 0.3}})
+        c, r = self.open_client()
+        r.read()
+        hangup(c, r)
+        self.assertTrue(self.wait(lambda: (self.row(kind="stream") or {}).get("close_unix") is not None))
+        self.assertEqual(self.row(kind="stream")["close_reason"], "forced_close")
+
+    def test_admin_kick_reason(self):
+        c, r = self.open_client()
+        r.read(188)
+        urllib.request.urlopen(urllib.request.Request(f"http://127.0.0.1:{self.port}/admin/kick", b"{}", method="POST"), timeout=5).read()
+        self.assertTrue(self.wait(lambda: (self.row(kind="stream") or {}).get("close_reason") == "kicked"))
+        hangup(c, r)
+
+    def test_reset_clears_the_log(self):
+        self.read_stream("/live/test/test/1.ts")
+        self.assertTrue(self.log())
+        self.panel.reset()
+        self.assertEqual(self.log(), [])
 
 
 if __name__ == "__main__":

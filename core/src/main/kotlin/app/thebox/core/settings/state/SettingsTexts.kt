@@ -77,7 +77,14 @@ enum class SettingsText {
     GUIDE_FUTURE_DAYS,
     GUIDE_DESCRIPTIONS,
     GUIDE_DESCRIPTIONS_DESC,
+    // (owner rulings 2026-10-18/19) Programme posters through the app's built-in TMDB key.
+    GUIDE_POSTERS,
+    GUIDE_POSTERS_DESC,
+    GUIDE_POSTERS_DESC_NO_KEY,
+    POSTERS_APP_KEY_REJECTED,
     PB_BUFFER,
+    /** (M6 time-shift, docs/design/m6-timeshift.md §12, U-N7) */
+    PB_BUFFER_DESC,
     BUF_AUTO,
     BUF_NONE,
     BUF_SMALL,
@@ -105,6 +112,22 @@ enum class SettingsText {
     LAUNCH_GUIDE_LAST,
     LAUNCH_FULL_LAST,
     LAUNCH_GUIDE_NOTHING,
+    // (M6 time-shift commit 0, docs/design/m6-timeshift.md §12) Pause and rewind, Keep recording while paused, Protect built-in storage.
+    PB_TIMESHIFT,
+    PB_TIMESHIFT_DESC,
+    PB_TIMESHIFT_PAUSE_ONLY_DESC,
+    TS_AUTO,
+    TS_AUTO_LIMITED,
+    TS_MIN,
+    TS_HOUR,
+    TS_HOURS,
+    TS_GB,
+    TS_PAUSE_ONLY,
+    PB_TIMESHIFT_HOLD,
+    PB_TIMESHIFT_HOLD_DESC,
+    HOLD_UNTIL_FULL,
+    PB_TIMESHIFT_PROTECT,
+    PB_TIMESHIFT_PROTECT_DESC,
     PB_AUDIO_LANGUAGE,
     LANG_DEVICE,
     PB_SUBTITLES,
@@ -267,7 +290,7 @@ class HintValidator(
             // C-L7: a pattern is a regex only in its `/regex/` form (the custom prefix); literals, Contains rules and ""
             // (clears the prefix) are valid here. A hide rule in Regex mode is checked by its live preview (§3.7.3).
             TextHint.PATTERN -> if (t.length >= 2 && t.startsWith("/") && t.endsWith("/")) try {
-                Regex(t.substring(1, t.length - 1)); null
+                app.thebox.core.text.UserRegex.compile(t.substring(1, t.length - 1)); null
             } catch (e: IllegalArgumentException) {
                 texts[SettingsText.ERR_PATTERN]
             } else null

@@ -94,17 +94,30 @@ class GuideNavigatorImpl(private val labels: TimeLabels? = null) : GuideNavigato
 
     // --- moves ---------------------------------------------------------------------------------------------------
 
-    private fun left(from: GridFocus, row: Int, ctx: GridContext): GridMoveResult {
-        if (from.cellStart <= ctx.earliestMin) return GridMoveResult.LeftEdge
+    private fun left(from: GridFocus, row: Int, ctx: GridContext): GridMoveResult =
+        // The probe leaves the target cell in the scratch fields when it returns false (decision 2026-10-19).
+        if (leftEdgeAt(from, row, ctx)) GridMoveResult.LeftEdge else horizontal(from, row, ctx)
+
+    /**
+     * (decision 2026-10-19, ruling 7) The "next Left opens Groups" probe, with the exact rule of [left] (which calls it, so
+     * the two cannot drift). Allocates nothing: it uses the scratch fields only.
+     */
+    override fun leftEdge(from: GridFocus, ctx: GridContext): Boolean {
+        if (ctx.lineupSize <= 0) return false
+        return leftEdgeAt(from, from.row.coerceIn(0, ctx.lineupSize - 1), ctx)
+    }
+
+    /** True for LeftEdge; false leaves the previous focusable cell in the scratch fields. */
+    private fun leftEdgeAt(from: GridFocus, row: Int, ctx: GridContext): Boolean {
+        if (from.cellStart <= ctx.earliestMin) return true
         val watchFrom = ctx.watchableFrom.earliestWatchableMin(row)
         val curWatchable = from.cellStart >= watchFrom || from.cellEnd > ctx.nowMin
         locate(row, from.cellStart - 1, ctx)
         var guard = 0
         while (isSliver() && cS > ctx.earliestMin && guard++ < MAX_SKIP) locate(row, cS - 1, ctx)
-        if (isSliver()) return GridMoveResult.LeftEdge
+        if (isSliver()) return true
         val targetWatchable = cS >= watchFrom || cE > ctx.nowMin
-        if (curWatchable && !targetWatchable) return GridMoveResult.LeftEdge
-        return horizontal(from, row, ctx)
+        return curWatchable && !targetWatchable
     }
 
     private fun right(from: GridFocus, row: Int, ctx: GridContext): GridMoveResult {
@@ -143,7 +156,7 @@ class GuideNavigatorImpl(private val labels: TimeLabels? = null) : GuideNavigato
 
     /** Edge scrolling with one row of lookahead (§3.3.2 "Vertical scroll"). */
     private fun topFor(row: Int, top: Int, size: Int): Int =
-        clamp(clamp(top, row - 4, row - 1), 0, maxOf(0, size - GuideGeometry.VISIBLE_ROWS))
+        clamp(clamp(top, row - (GuideGeometry.VISIBLE_ROWS - 2), row - 1), 0, maxOf(0, size - GuideGeometry.VISIBLE_ROWS))
 
     /** Cell containing [anchor]; a sliver resolves to the next focusable cell, else the previous one. */
     private fun resolveAt(row: Int, anchor: Int, ctx: GridContext) {

@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.thebox.android.library)
     alias(libs.plugins.thebox.hilt)
@@ -5,11 +7,25 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
 }
 
+// The app's own TMDB key for programme posters (owner ruling 2026-10-18, docs/decisions/2026-10-18-tmdb-programme-posters.md):
+// `thebox.tmdbKey=…` in the root local.properties (gitignored) or the THEBOX_TMDB_KEY environment variable (CI). Empty =
+// the build has no key and posters need the user's own.
+val localProperties = Properties().apply {
+    val f = rootProject.file("local.properties")
+    if (f.exists()) f.inputStream().use(::load)
+}
+val tmdbKey = (localProperties.getProperty("thebox.tmdbKey") ?: System.getenv("THEBOX_TMDB_KEY") ?: "").trim()
+    .replace("\\", "\\\\").replace("\"", "\\\"")
+
 android {
     namespace = "app.thebox.data"
+    buildFeatures {
+        buildConfig = true // BuildConfig.TMDB_KEY
+    }
     defaultConfig {
         // M0 L7. The runner class lands with WP-D's androidTest sources.
         testInstrumentationRunner = "app.thebox.data.HiltTestRunner"
+        buildConfigField("String", "TMDB_KEY", "\"$tmdbKey\"")
     }
     testOptions {
         unitTests {

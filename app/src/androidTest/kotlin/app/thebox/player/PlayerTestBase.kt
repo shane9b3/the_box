@@ -310,7 +310,8 @@ abstract class PlayerTestBase : GuideTestBase() {
 
     companion object {
         /** Deterministic player settings for every test (§2.2 defaults spelled out), then default padding 60/300. */
-        const val PLAYER_DEFAULTS = "infobar=5000&numwait=1500&updown=quick&invert=0&back=guide&padding=60,300"
+        // (time-shift, docs/design/m6-timeshift.md §17.4) every class starts from a cleared ring and the Auto setting.
+        const val PLAYER_DEFAULTS = "infobar=5000&numwait=1500&updown=quick&invert=0&back=guide&padding=60,300&ts_clear=1&timeshift=auto"
         const val SUBTITLE_VIEW = "androidx.media3.ui.SubtitleView"
         /** U-S8 (f): the emulator's `Build.HARDWARE` values. */
         val EMULATOR_HARDWARE = setOf("ranchu", "goldfish")

@@ -90,12 +90,7 @@ interface ChannelPrefsDao {
     suspend fun upsertBufferProfile(playlistId: Long, stableKey: String, bufferProfile: String?, now: Long)
 
     /** M3 "Hide channel" (docs/design/m3-guide.md §2.9.3): column-targeted, fixes N-L13 for hide. */
-    @Query(
-        """
-        INSERT INTO channel_prefs(playlist_id, stable_key, hidden, watch_count, updated_at)
-        VALUES (:playlistId, :stableKey, :hidden, 0, :now)
-        ON CONFLICT(playlist_id, stable_key) DO UPDATE SET hidden = :hidden, updated_at = :now""",
-    )
+    @Query(UPSERT_HIDDEN)
     suspend fun upsertHidden(playlistId: Long, stableKey: String, hidden: Boolean, now: Long)
 
     @Query(
@@ -105,4 +100,44 @@ interface ChannelPrefsDao {
         WHERE cp.last_watched_at IS NOT NULL ORDER BY cp.last_watched_at DESC LIMIT :limit""",
     )
     fun recent(limit: Int): Flow<List<ChannelPrefsEntity>>
+
+    // ---- (docs/design/m6-channel-editor.md §3.5) Column-targeted editor writes. The SQL is shared with the editor's
+    // batched writes (`forEachBound` binds the named parameters by first appearance, 1…n).
+
+    /** Rename: null (or empty, normalised by the caller) = the provider's name. */
+    @Query(UPSERT_CUSTOM_NAME)
+    suspend fun upsertCustomName(playlistId: Long, stableKey: String, name: String?, now: Long)
+
+    /** Set number / Use the provider's number (null). */
+    @Query(UPSERT_CUSTOM_NUMBER)
+    suspend fun upsertCustomNumber(playlistId: Long, stableKey: String, number: Int?, now: Long)
+
+    /**
+     * Move to group (§3.6): [groupKey] null = back to the provider group; [sortIndex] is the position in the new group
+     * (null = none, §3.5 rule b). Both columns in one statement.
+     */
+    @Query(UPSERT_CUSTOM_GROUP)
+    suspend fun upsertCustomGroup(playlistId: Long, stableKey: String, groupKey: String?, sortIndex: Int?, now: Long)
+
+    companion object {
+        const val UPSERT_CUSTOM_NAME = """
+        INSERT INTO channel_prefs(playlist_id, stable_key, hidden, watch_count, updated_at, custom_name)
+        VALUES (:playlistId, :stableKey, 0, 0, :now, :name)
+        ON CONFLICT(playlist_id, stable_key) DO UPDATE SET custom_name = :name, updated_at = :now"""
+
+        const val UPSERT_CUSTOM_NUMBER = """
+        INSERT INTO channel_prefs(playlist_id, stable_key, hidden, watch_count, updated_at, custom_number)
+        VALUES (:playlistId, :stableKey, 0, 0, :now, :number)
+        ON CONFLICT(playlist_id, stable_key) DO UPDATE SET custom_number = :number, updated_at = :now"""
+
+        const val UPSERT_CUSTOM_GROUP = """
+        INSERT INTO channel_prefs(playlist_id, stable_key, hidden, watch_count, updated_at, custom_group_key, custom_sort_index)
+        VALUES (:playlistId, :stableKey, 0, 0, :now, :groupKey, :sortIndex)
+        ON CONFLICT(playlist_id, stable_key) DO UPDATE SET custom_group_key = :groupKey, custom_sort_index = :sortIndex, updated_at = :now"""
+
+        const val UPSERT_HIDDEN = """
+        INSERT INTO channel_prefs(playlist_id, stable_key, hidden, watch_count, updated_at)
+        VALUES (:playlistId, :stableKey, :hidden, 0, :now)
+        ON CONFLICT(playlist_id, stable_key) DO UPDATE SET hidden = :hidden, updated_at = :now"""
+    }
 }

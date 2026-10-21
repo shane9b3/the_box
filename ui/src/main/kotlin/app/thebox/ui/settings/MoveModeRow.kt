@@ -42,11 +42,11 @@ fun MoveModeRow(label: String, value: String?, modifier: Modifier = Modifier) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Start,
     ) {
-        Line("↕", GuideUi.sans(22, FontWeight.SemiBold, GuideUi.Accent))
+        Line("↕", GuideUi.sans(28, FontWeight.SemiBold, GuideUi.Accent))
         Spacer(Modifier.width(16.dp))
-        Line(label, GuideUi.sans(22, FontWeight.Medium), Modifier.weight(1f))
-        if (value != null) Line(value, GuideUi.sans(20, color = GuideUi.Fg65))
+        Line(label, GuideUi.sans(28, FontWeight.Medium), Modifier.weight(1f))
+        if (value != null) Line(value, GuideUi.sans(26, color = GuideUi.Fg65))
         Spacer(Modifier.width(24.dp))
-        Line(hint, GuideUi.mono(16, color = GuideUi.Fg55))
+        Line(hint, GuideUi.mono(22, color = GuideUi.Fg55))
     }
 }

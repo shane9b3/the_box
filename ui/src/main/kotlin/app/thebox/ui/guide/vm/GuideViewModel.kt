@@ -162,6 +162,8 @@ class GuideViewModel @Inject constructor(
     private val keyBindings: KeyBindingStore = NoKeyBindings,
     // (M5 integration, WP-E §1.8a item 2) The S17 update card and the "Updated to …" notice.
     private val updateCards: app.thebox.core.update.UpdateCardSource = NoUpdateCards,
+    /** (owner ruling 2026-10-18) Programme posters for the focused panel (`:data`'s TMDB lookup; NONE in tests). */
+    artwork: app.thebox.core.art.ProgrammeArtwork = app.thebox.core.art.ProgrammeArtwork.NONE,
 ) : ViewModel(), ShellHost, ShellEffects {
 
     /**
@@ -235,6 +237,7 @@ class GuideViewModel @Inject constructor(
         shell = this,
         onLineup = ::onLineup,
         delegates = delegates,
+        artwork = artwork,
     )
 
     override val machine: GuideStateMachine = stateMachineFactory.create(effects, navigator, labels, renderer, System::currentTimeMillis)
@@ -549,19 +552,27 @@ class GuideViewModel @Inject constructor(
                     return@launch
                 }
                 val onLaunch = playerSettings.settings.value.onLaunch
-                if (onLaunch != OnLaunch.GUIDE_NOTHING && controller.state.value is PlaybackState.Idle) {
-                    library.lastWatched()?.let {
-                        if (onLaunch == OnLaunch.FULL_LAST) machine.dispatch(GuideEvent.StartFull)
-                        guarded.tune(TuneTarget.Channel(it.identity)) // N13: never a locked channel (the guard too)
-                    }
-                }
+                // Device finding 2026-10-17: after Exit the process stays alive with the controller Stopped (or Error),
+                // so a warm relaunch found no Idle player and showed the guide with nothing playing, whatever "On launch"
+                // said. Nothing is playing in those states either; only a live session (a recreated activity over a
+                // playing controller) keeps the startup tune away.
+                val last = if (onLaunch != OnLaunch.GUIDE_NOTHING && nothingPlaying(controller.state.value)) library.lastWatched() else null
+                // Owner ruling 2026-10-17: the shell stays blank until this decision, so "Full screen, last channel"
+                // never flashes the guide first (StartFull ends the blank on the first Tuned, StartGuide at once).
+                if (onLaunch == OnLaunch.FULL_LAST && last != null) machine.dispatch(GuideEvent.StartFull) else machine.dispatch(GuideEvent.StartGuide)
+                last?.let { guarded.tune(TuneTarget.Channel(it.identity)) } // N13: never a locked channel (the guard too)
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
                 BoxLog.w(TAG, "startup tune failed: ${e.javaClass.simpleName}")
+                machine.dispatch(GuideEvent.StartGuide)
             }
         }
     }
+
+    /** No session to keep: the startup tune may replace these. */
+    private fun nothingPlaying(state: PlaybackState): Boolean =
+        state is PlaybackState.Idle || state is PlaybackState.Stopped || state is PlaybackState.Error
 
     /**
      * (M5 commit 0, docs/design/m5-setup-settings.md §3.4.1) The first-run decision, made once after the waits above:
@@ -692,12 +703,14 @@ class GuideViewModel @Inject constructor(
             maxOf(nowMs + MIN_TICK_GAP_MS, minOf(deadlineMs, nowMs - Math.floorMod(nowMs, MINUTE_MS) + MINUTE_MS))
 
         /** The actions the footer hints name (§3.8.4). */
-        private val HINTED = listOf(BoxAction.START_OVER, BoxAction.REMIND, BoxAction.ZAP_UP, BoxAction.PAGE_UP)
+        private val HINTED = listOf(BoxAction.START_OVER, BoxAction.REMIND, BoxAction.ZAP_UP, BoxAction.PAGE_UP, BoxAction.GROUPS_PANEL)
 
         /** For each hinted action, the seen keys bound to it (short presses) in [context]: EffectiveKeyMap ∩ seen. */
         fun keyHints(seen: Set<Int>, overrides: app.thebox.core.input.KeyBindingOverrides, context: KeyContext): Map<BoxAction, List<Int>> {
             val map = RemappedKeyMap(DefaultKeyMap(), null, null).also { it.apply(overrides) }
-            return HINTED.associateWith { a -> map.keysFor(context, a).filter { it.second == Press.SHORT && it.first in seen }.map { it.first } }
+            // (decision 2026-10-19 ruling 4) the colour keys count as one family for the footer.
+            val seenAll = DefaultKeyMap.seenWithColourFamily(seen)
+            return HINTED.associateWith { a -> map.keysFor(context, a).filter { it.second == Press.SHORT && it.first in seenAll }.map { it.first } }
         }
 
         fun lowEndFor(s: GuideSettings, device: DeviceClass): Boolean = when (s.performance) {

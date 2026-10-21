@@ -147,14 +147,15 @@ class SettingsBackLadderTest {
     fun cursorMemoryFollowsTheRowIdAcrossRebuilds() {
         val w = SettingsWorld().open()
         w.enter(SectionId.PLAYBACK)
-        w.focus(PlaybackRows.ON_LAUNCH)
+        // (M6 time-shift commit 0) "Pause and rewind" is the fifth simple row now that "On launch" is ADVANCED.
+        w.focus(PlaybackRows.TIMESHIFT)
         w.act(BoxAction.LEFT)
         w.enter(SectionId.PLAYBACK)
-        assertEquals(PlaybackRows.ON_LAUNCH, w.focusedRow()?.id)
+        assertEquals(PlaybackRows.TIMESHIFT, w.focusedRow()?.id)
         // A rebuild that inserts rows above keeps the focus on the same row.
         w.advanced = true
         w.machine.dispatch(SettingsEvent.Page(w.page(SettingsRoute.Section(SectionId.PLAYBACK))))
-        assertEquals(PlaybackRows.ON_LAUNCH, w.focusedRow()?.id)
+        assertEquals(PlaybackRows.TIMESHIFT, w.focusedRow()?.id)
     }
 
     @Test

@@ -20,6 +20,8 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class FiveKeyJourneyTest : PlayerTestBase() {
+    // These journeys assert M4's provider-archive pause; with the local buffer on they would pause in place (m6-timeshift.md §17.4).
+    override val playerSwitches: String = "timeshift=off"
 
     @Test
     fun everyPlayerFunctionWithFiveKeys() {
@@ -27,15 +29,14 @@ class FiveKeyJourneyTest : PlayerTestBase() {
         awaitController("live playing") { it is PlaybackState.Playing && !it.target.isArchive }
         val steps = ArrayList<String>()
 
-        // 1. Quick bar by Up → Pause / rewind: the scrub bar focused at the live edge.
+        // 1–2. Quick bar by Up → Pause. (Integration 2026-10-19, M6 §11.3, U-B3: the TIME_SHIFT item is "Pause" and OK on
+        // it pauses at once, opening the focused scrub bar at the pause point; before M6 it opened the bar at live and a
+        // second OK paused.) With the buffer Off this catch-up channel pauses through the provider (PAUSED_LIVE).
         openQuickBar()
-        quickSelect(QuickItem.TIME_SHIFT) // WP-A behaviour (§7 item 16a)
-        awaitPlayer("scrub focused at live") { it.layer == PlayerLayer.SCRUB && it.scrub?.atLive == true && it.scrub?.focus == ScrubFocus.BAR }
-        steps += "quick bar → Pause/rewind: ${pui().brief()}"
-        // 2. OK pauses live (pauseLive).
-        press(K_OK)
-        awaitArchive("PAUSED_LIVE by OK", 5_000) { it.phase == ArchivePhase.PAUSED_LIVE } // WP-A/WP-B behaviour
-        steps += "OK → ${archive().phase}"
+        quickSelect(QuickItem.TIME_SHIFT) // WP-A behaviour (§7 item 16a), M6 §11.3
+        awaitArchive("PAUSED_LIVE by Pause", 5_000) { it.phase == ArchivePhase.PAUSED_LIVE } // WP-A/WP-B behaviour
+        awaitPlayer("scrub focused at the pause point") { it.layer == PlayerLayer.SCRUB && it.scrub?.focused == true && it.scrub?.focus == ScrubFocus.BAR }
+        steps += "quick bar → Pause: ${archive().phase} ${pui().brief()}"
         Thread.sleep(5_000)
         // 3. LEFT rewinds and commits: time-shift. (Code review 2026-10-16, P-S1: the live snap is direction-aware, so
         // the one step back (−10 s) from a 5 s pause requests the archive; the integration pass needed four, T9/L-6.)

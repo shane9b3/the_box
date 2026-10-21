@@ -145,6 +145,9 @@ class RealEngineControllerTest {
 
         override fun http(ctx: StreamSessionContext) = liveTs(ctx)
 
+        override fun ring(ctx: StreamSessionContext, open: app.thebox.player.internal.RingOpen): Pair<DataSource.Factory, StreamTelemetry> = error("no ring before WP-B")
+        override fun writer(ctx: StreamSessionContext, hooks: app.thebox.player.internal.WriterHooks): Pair<app.thebox.core.playback.timeshift.TsUpstream, StreamTelemetry> = error("no time-shift writer here")
+
         override fun endSession(tuneId: Long) {
             ended += tuneId
             synchronized(blocking) { blocking.remove(tuneId) }?.forEach { it.close() }

@@ -73,8 +73,10 @@ fun rememberDebouncedPill(pill: PillState): PillState {
 
 /**
  * The state pill of the info and scrub bars (§3.2.3, prototype pill style): LIVE (red dot, stepped at 1 Hz: no
- * infinite transition in FULL, §3.9), CATCH-UP (accent), PAUSED (white 12 %), `−MM:SS` (BEHIND, drawn into a reused
- * `CharArray` at 1 Hz only while it grows, §4.1), Connecting, Reconnecting n/m (unlimited when m = 0).
+ * infinite transition in FULL, §3.9), CATCH-UP (accent), PAUSED (white 12 %), Connecting, Reconnecting n/m (unlimited
+ * when m = 0). (M6 time-shift, docs/design/m6-timeshift.md §11.4, U-S7) A time-shift reads "PAUSED · 4:12 behind"
+ * (grows) and "4:12 BEHIND" (constant), drawn at 1 Hz in the draw phase only while it grows (§4.1); every pill text is
+ * at least `PILL_MIN_TEXT_PX` (24) design px. The mini player keeps its own "PAUSED −4:12" ([BehindLabel]).
  */
 @Composable
 fun PlayerPill(pill: PillState, modifier: Modifier = Modifier) {
@@ -94,13 +96,90 @@ fun PlayerPill(pill: PillState, modifier: Modifier = Modifier) {
         when (p.kind) {
             PillKind.LIVE -> {
                 LiveDot(lowEnd = true)
-                Line(stringResource(R.string.player_pill_live), GuideUi.sans(15, FontWeight.SemiBold, letterSpacingEm = 0.08f))
+                Line(stringResource(R.string.player_pill_live), GuideUi.sans(PILL_TEXT, FontWeight.SemiBold, letterSpacingEm = 0.08f))
             }
-            PillKind.CATCH_UP -> Line(stringResource(R.string.player_pill_catchup), GuideUi.sans(15, FontWeight.SemiBold, GuideUi.Accent, 0.08f))
-            PillKind.BEHIND -> BehindLabel(p)
-            else -> Line(PlayerText.pill(androidx.compose.ui.platform.LocalResources.current, p), GuideUi.sans(15, FontWeight.SemiBold, letterSpacingEm = if (p.kind == PillKind.PAUSED) 0.08f else 0f))
+            PillKind.CATCH_UP -> Line(stringResource(R.string.player_pill_catchup), GuideUi.sans(PILL_TEXT, FontWeight.SemiBold, GuideUi.Accent, 0.08f))
+            PillKind.BEHIND -> TimedPillLabel(p, R.string.player_pill_behind)
+            PillKind.PAUSED -> if (p.behindGrows || p.behindMs > 0) TimedPillLabel(p, R.string.player_pill_paused_behind)
+                else Line(stringResource(R.string.player_pill_paused), GuideUi.sans(PILL_TEXT, FontWeight.SemiBold, letterSpacingEm = 0.08f))
+            else -> Line(PlayerText.pill(androidx.compose.ui.platform.LocalResources.current, p), GuideUi.sans(PILL_TEXT, FontWeight.SemiBold))
         }
     }
+}
+
+/** Pill text size (design px), `TimeshiftConstants.PILL_MIN_TEXT_PX` (M6 §11.4, U-S7). */
+private const val PILL_TEXT = app.thebox.core.playback.timeshift.TimeshiftConstants.PILL_MIN_TEXT_PX
+
+/**
+ * (M6 §11.4) "PAUSED · 4:12 behind" / "4:12 BEHIND": the template [res] split around its `%1$s` once, the time written
+ * into a reused buffer without a leading zero ("1:04:12"), drawn in the draw phase; ticks at 1 Hz only while it grows.
+ * The width fits the longest time (`9:59:59`), so the pill does not jump.
+ */
+@Composable
+internal fun TimedPillLabel(p: PillState, @androidx.annotation.StringRes res: Int) {
+    val density = LocalDensity.current.density
+    val template = stringResource(res, "\u0000")
+    val parts = remember(template) { template.split('\u0000').let { (it.getOrNull(0) ?: "") to (it.getOrNull(1) ?: "") } }
+    val paint = remember(density) {
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            textSize = PILL_TEXT * density
+            color = GuideUi.Fg.toArgb()
+            typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+            letterSpacing = 0.04f
+        }
+    }
+    val buf = remember { CharArray(16) }
+    val width = remember(parts, paint) { paint.measureText(parts.first + "9:59:59" + parts.second) / density }
+    val tick = remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(p.behindGrows, p.atMs) {
+        tick.longValue = System.currentTimeMillis()
+        while (p.behindGrows) {
+            delay(1_000L - Math.floorMod(System.currentTimeMillis() - p.atMs, 1_000L))
+            tick.longValue = System.currentTimeMillis()
+        }
+    }
+    Spacer(
+        Modifier
+            .size(width.dp, (PILL_TEXT * 1.25f).dp)
+            .drawBehind {
+                val now = tick.longValue
+                val ms = p.behindMs + if (p.behindGrows) (now - p.atMs).coerceAtLeast(0) else 0L
+                val n = pillTime(buf, ms)
+                val y = size.height * 0.8f
+                drawIntoCanvas {
+                    val c = it.nativeCanvas
+                    var x = 0f
+                    c.drawText(parts.first, x, y, paint)
+                    x += paint.measureText(parts.first)
+                    c.drawText(buf, 0, n, x, y, paint)
+                    x += paint.measureText(buf, 0, n)
+                    c.drawText(parts.second, x, y, paint)
+                }
+            },
+    )
+}
+
+/** `4:12`, `1:04:12` into [buf] (no sign, no leading zero on the first field); returns the length. */
+internal fun pillTime(buf: CharArray, ms: Long): Int {
+    val total = ms.coerceAtLeast(0) / 1000L
+    val h = total / 3600
+    val m = (total / 60 % 60).toInt()
+    val s = (total % 60).toInt()
+    var i = 0
+    if (h > 0) {
+        val hs = h.coerceAtMost(9_999).toString() // at most once a second, only while a pause grows past an hour
+        for (ch in hs) buf[i++] = ch
+        buf[i++] = ':'
+        buf[i++] = ('0'.code + m / 10).toChar()
+        buf[i++] = ('0'.code + m % 10).toChar()
+    } else {
+        if (m >= 10) buf[i++] = ('0'.code + m / 10).toChar()
+        buf[i++] = ('0'.code + m % 10).toChar()
+    }
+    buf[i++] = ':'
+    buf[i++] = ('0'.code + s / 10).toChar()
+    buf[i++] = ('0'.code + s % 10).toChar()
+    return i
 }
 
 /** `−MM:SS` / `−H:MM:SS` drawn in the draw phase from a reused buffer; ticks at 1 Hz only while [PillState.behindGrows]. */
@@ -145,15 +224,28 @@ fun monoTypeface(context: android.content.Context): Typeface? = try {
 
 /** The channel logo (Coil, the shell's loader) or its name when there is none; [radius] rounds the image only. */
 @Composable
-fun ChannelLogo(channel: GuideChannel?, size: Dp, radius: Dp, modifier: Modifier = Modifier) {
+fun ChannelLogo(channel: GuideChannel?, size: Dp, radius: Dp, modifier: Modifier = Modifier) =
+    ChannelLogo(channel, size, size, radius, modifier)
+
+/** [ChannelLogo] in a [width] × [height] slot (the image keeps its aspect inside it). */
+@Composable
+fun ChannelLogo(channel: GuideChannel?, width: Dp, height: Dp, radius: Dp, modifier: Modifier = Modifier) {
     channel ?: return
+    ChannelLogo(channel.logoUrl, channel.displayName, width, height, radius, modifier)
+}
+
+/**
+ * [ChannelLogo] from a logo [url] and the channel's [name] (its content description), for rows that carry no
+ * `GuideChannel` (the channel editor, docs/design/m6-channel-editor.md §2.2). The slot is drawn even without a logo.
+ */
+@Composable
+fun ChannelLogo(url: String?, name: String, width: Dp, height: Dp, radius: Dp, modifier: Modifier = Modifier) {
     val loader = LocalShellImageLoader.current
-    val url = channel.logoUrl
-    Box(modifier.size(size), contentAlignment = Alignment.Center) {
+    Box(modifier.size(width, height), contentAlignment = Alignment.Center) {
         if (loader != null && !url.isNullOrBlank()) {
             AsyncImage(
                 model = url,
-                contentDescription = channel.displayName,
+                contentDescription = name,
                 imageLoader = loader,
                 contentScale = ContentScale.Fit,
                 modifier = Modifier.fillMaxSize().clip(RoundedCornerShape(radius)),
@@ -167,7 +259,7 @@ fun ChannelLogo(channel: GuideChannel?, size: Dp, radius: Dp, modifier: Modifier
 fun NumberChip(number: Int?, modifier: Modifier = Modifier) {
     number ?: return
     Box(modifier.background(PlayerUi.ChipFill, RoundedCornerShape(8.dp)).padding(horizontal = 10.dp, vertical = 4.dp)) {
-        Line(number.toString(), GuideUi.mono(16))
+        Line(number.toString(), GuideUi.mono(22))
     }
 }
 

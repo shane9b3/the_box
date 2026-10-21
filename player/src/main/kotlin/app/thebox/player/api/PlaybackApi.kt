@@ -85,6 +85,57 @@ interface PlaybackController {
     val servers: StateFlow<ServerList> get() = NO_SERVERS
     /** (M5 integration) Re-resolves the current tune on base URL [index] (the Sources picker); kept as the active one once it plays. */
     fun selectServer(index: Int) = Unit
+
+    // M6 time-shift commit 0 (docs/design/m6-timeshift.md §16.2): members with defaults (WP-B overrides them)
+    /** (Time-shift) The local buffer of the current live cycle (≤ 1 Hz); null = no live cycle. Default: always null. */
+    val localBuffer: StateFlow<LocalBufferState?> get() = NO_LOCAL_BUFFER
+    /** [direction] < 0 floor, > 0 ceil, 0 floor (A-S4). Main thread. */
+    fun seekLocal(targetMonoMs: Long, direction: Int): LocalSeekResult = LocalSeekResult.Unavailable
+    /** Re-prepares the reader at the live landing point (§6 step 1 `LIVE`); false when the cycle is not buffered. */
+    fun jumpToLiveLocal(): Boolean = false
+    /**
+     * (Fix pass, UX-B2) After a [PlaybackNotice.LocalGap] hand-off that the archive side could not act on, skip the gap
+     * locally: the reader re-prepares at the next segment's first RAP and [PlaybackNotice.GapSkipped] is emitted. Main
+     * thread. False when no hand-off is pending. The controller also does this by itself when no archive tune arrives
+     * within `GAP_HANDOFF_TIMEOUT_MS`.
+     */
+    fun skipGapLocal(): Boolean = false
+}
+
+/** (Time-shift) The local buffer of the current live cycle. Wall times converted once per snapshot from mono. */
+data class LocalBufferState(
+    val identity: ChannelIdentity?,
+    val available: Boolean,
+    val off: app.thebox.core.playback.timeshift.BufferOff? = null,
+    val fromMonoMs: Long = 0,           // oldest RAP's PTS
+    val liveMonoMs: Long = 0,           // newest PTS
+    val atMonoMs: Long = 0,
+    val wallMinusMonoMs: Long = 0,      // snapshot conversion (A-S9)
+    val saving: Boolean = false,
+    val stop: app.thebox.core.playback.timeshift.RecordStop? = null,
+    val stoppedAtMonoMs: Long? = null,
+    val notSavedMono: app.thebox.core.playback.timeshift.TimeRanges = app.thebox.core.playback.timeshift.TimeRanges.EMPTY,
+    val mode: app.thebox.core.playback.timeshift.BufferMode = app.thebox.core.playback.timeshift.BufferMode.PERSIST,
+    /** The rewind window's width, stable for the session (fix pass UX-S1: the scrub bar never rescales). */
+    val windowMs: Long = 0,
+    val pauseRemainingMs: Long? = null,
+    val usedBytes: Long = 0,
+    val capacityBytes: Long = 0,
+    val limitedToday: Boolean = false,
+    val hls: Boolean = false,
+    /** (Fix pass UX-S1) The pause hold limit in force (null = until full). */
+    val holdMs: Long? = null,
+    /** (Fix pass UX-S1) The controller cycle this snapshot belongs to (its first tune id); changes on every new cycle. */
+    val cycleId: Long = 0,
+)
+
+/** (Time-shift) Result of [PlaybackController.seekLocal] (§6): where the playhead landed, in mono ms. */
+sealed interface LocalSeekResult {
+    data class Started(val landedMonoMs: Long) : LocalSeekResult
+    /** The target was older than the buffer: landed on the oldest RAP. */
+    data class Clamped(val landedMonoMs: Long) : LocalSeekResult
+    data object Live : LocalSeekResult
+    data object Unavailable : LocalSeekResult
 }
 
 /** (M5 integration, E23) [labels] are `host[:port]` (no credentials); [current] indexes them. */
@@ -140,7 +191,15 @@ interface ArchiveTargets {
     suspend fun catchupTarget(identity: app.thebox.core.refresh.ChannelIdentity): CatchupTargetResult
 }
 
-data class PositionSnapshot(val positionMs: Long, val bufferedMs: Long, val durationMs: Long?, val isSeekable: Boolean, val archiveStartUtcMs: Long?)
+data class PositionSnapshot(
+    val positionMs: Long,
+    val bufferedMs: Long,
+    val durationMs: Long?,
+    val isSeekable: Boolean,
+    val archiveStartUtcMs: Long?,
+    /** (M6 time-shift commit 0, §6 step 4) Buffered live cycle: the playhead in mono ms (`originMono + position`); else null. */
+    val localMonoMs: Long? = null,
+)
 
 enum class StopReason {
     USER, BACKGROUND, STANDBY, HDMI_UNPLUGGED, DISPLAY_OFF, LIVE_PAUSE_TIMEOUT, ERROR, RELEASE,
@@ -256,6 +315,11 @@ data class StreamStats(
     /** 0-based base URL in use (ResolvedStream.baseIndex) and the number of bases. */
     val serverIndex: Int = 0,
     val serverCount: Int = 1,
+    // (M6 time-shift commit 0, §16.2, A-S9, U-N3) "Rewind: 18:20 saved of 30:00 · 1.1 GB"
+    val rewindSavedMs: Long = 0,
+    val rewindWindowMs: Long = 0,
+    val rewindBytes: Long = 0,
+    val rewindSaving: Boolean = false,
 )
 
 sealed interface PlaybackNotice {
@@ -273,6 +337,19 @@ sealed interface PlaybackNotice {
     /** Live resumed after pause (no time-shift on this channel). */
     data object LiveResumed : PlaybackNotice
     data class Warning(val warning: PlaybackWarning) : PlaybackNotice
+    // M6 time-shift commit 0 (docs/design/m6-timeshift.md §16.2; additive)
+    /** A reader reached a gap on an archive channel during a LOCAL time-shift: `LocalTimelineBackend` hands off to the provider (§9.1). No toast. */
+    data class LocalGap(val gapStartMonoMs: Long, val gapMs: Long, val reason: app.thebox.core.playback.timeshift.SegmentReason) : PlaybackNotice
+    /** A reader skipped a gap of [gapMs] ([stream] = the provider dropped it, else saving stopped while paused). */
+    data class GapSkipped(val gapMs: Long, val stream: Boolean) : PlaybackNotice
+    /** Saving for rewind stopped for [stop] (§4.4, §4.6). */
+    data class SavingStopped(val stop: app.thebox.core.playback.timeshift.RecordStop) : PlaybackNotice
+    /** A rewind reached the start of the window the daily cap shortened (§8.4, once a day). */
+    data object LimitedToday : PlaybackNotice
+    /** A deferred cycle-scoped decision ran after the saved part played out (A-B1): back at live. */
+    data object JumpedToLiveRestart : PlaybackNotice
+    /** The first tune after Home or standby ended a paused or behind cycle (§7.5). */
+    data object LeftAppCleared : PlaybackNotice
 }
 
 interface PlaybackDiagnostics {
@@ -286,3 +363,5 @@ interface PlaybackDiagnostics {
 internal val NO_CUES: StateFlow<List<androidx.media3.common.text.Cue>> = kotlinx.coroutines.flow.MutableStateFlow(emptyList())
 internal val NO_PREVIOUS: StateFlow<ChannelIdentity?> = kotlinx.coroutines.flow.MutableStateFlow(null)
 internal val NO_SERVERS: StateFlow<ServerList> = kotlinx.coroutines.flow.MutableStateFlow(ServerList())
+// Declared next to NO_SERVERS (M6 time-shift commit 0, reviewed 2026-10-19, A-C1):
+internal val NO_LOCAL_BUFFER: StateFlow<LocalBufferState?> = kotlinx.coroutines.flow.MutableStateFlow(null)

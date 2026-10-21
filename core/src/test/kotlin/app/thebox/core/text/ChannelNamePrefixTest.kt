@@ -89,14 +89,24 @@ class ChannelNamePrefixTest {
         assertNull(p.strip("TV: Live", null, rule), "literals replace Auto: nothing else is stripped")
     }
 
-    /** (M5 integration, G-L19) An exponential shape is refused up front (RegexSafety) and the rule falls back to Auto. */
+    /** Unsupported saved/imported syntax and over-budget patterns fall back to Auto, never to Java/ICU. */
     @Test
     fun riskyCustomRegexFallsBackToAuto() {
-        val rule = NamePrefixRule.Custom(regex = "(\\w+\\s?)*:")
-        assertEquals(auto("UK: BBC One"), p.strip("UK: BBC One", null, rule))
-        assertEquals(auto("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!"), p.strip("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa!", null, rule))
-        assertTrue(app.thebox.core.setup.pages.PrefixRuleText.risky("/(a+)+/"))
+        for (source in listOf("(?<=UK):", "(UK)\\1", "(a{1000}){1000}")) {
+            val rule = NamePrefixRule.Custom(regex = source)
+            assertEquals(auto("UK: BBC One"), p.strip("UK: BBC One", null, rule), source)
+            assertEquals(auto("a".repeat(255) + "!"), p.strip("a".repeat(255) + "!", null, rule), source)
+        }
+        assertTrue(app.thebox.core.setup.pages.PrefixRuleText.risky("/(a{1000}){1000}/"))
         assertTrue(!app.thebox.core.setup.pages.PrefixRuleText.risky("/\\[[A-Z]+\\]/"))
+    }
+
+    @Test
+    fun groupedPrefixVariantsMatchWithoutBacktracking() {
+        for (source in listOf("^(a+)(a+)(a+)(a+)$", "^((a+)?)(a+)(a+)$", "^(a|aa)+$", "^(a+)+$")) {
+            assertNull(p.strip("a".repeat(255) + "!", null, NamePrefixRule.Custom(regex = source)), source)
+        }
+        assertEquals("BBC", p.strip("UK: BBC", null, NamePrefixRule.Custom(regex = "(?:UK|US):\\s*")))
     }
 
     @Test

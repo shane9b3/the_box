@@ -19,6 +19,8 @@ import app.thebox.core.guide.GuideSource
 import app.thebox.core.guide.GuideSourceEntry
 import app.thebox.core.guide.GuideToast
 import app.thebox.core.guide.GuideWindowPager
+import app.thebox.core.art.ArtworkHint
+import app.thebox.core.art.ProgrammeArtwork
 import app.thebox.core.guide.ProgrammeInfo
 import app.thebox.core.guide.ReminderAlert
 import app.thebox.core.guide.ReminderAlerts
@@ -71,6 +73,8 @@ class GuideEffectsImpl(
     private val onLineup: (GuideLineup) -> Unit = {},
     /** (M5 commit 0, docs/design/m5-setup-settings.md §1.3a) What the M5 effects delegate to. */
     private val delegates: EffectDelegates = EffectDelegates.NONE,
+    /** (owner ruling 2026-10-18) Poster lookup for a panel whose programme has no EPG icon; NONE = off. */
+    private val artwork: ProgrammeArtwork = ProgrammeArtwork.NONE,
 ) : GuideEffects {
 
     private var lineupJob: Job? = null
@@ -107,9 +111,34 @@ class GuideEffectsImpl(
         pager()?.ensure(topRow, windowStartMin, holdDirection)
     }
 
+    private var artworkJob: Job? = null
+    private var artworkGen = 0L
+
     override fun loadInfo(token: Long, channel: GuideChannel, rawStartMin: Int) {
         val p = pager() ?: return
-        launchSafely("info") { dispatch(GuideEvent.Info(token, p.info(channel, rawStartMin))) }
+        // (review 2026-10-18) One poster lookup at a time: the previous one is cancelled (its HTTP call with it) so a
+        // slow network never queues a lookup per cell behind the lookup's mutex.
+        val gen = ++artworkGen
+        artworkJob?.cancel()
+        artworkJob = null
+        launchSafely("info") {
+            val info = p.info(channel, rawStartMin)
+            dispatch(GuideEvent.Info(token, info))
+            // The EPG's own icon wins; otherwise the lookup (cache first, then the service) answers for the same token,
+            // which the machine ignores once the panel moved on.
+            if (info != null && info.iconUrl == null && info.title.isNotBlank() && gen == artworkGen) {
+                artworkJob = scope.launch {
+                    try {
+                        val url = artwork.poster(info.title, artworkHint(info))
+                        if (url != null) dispatch(GuideEvent.Artwork(token, url))
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        BoxLog.w(TAG, "artwork failed: ${e.javaClass.simpleName}")
+                    }
+                }
+            }
+        }
     }
 
     override fun loadTunedNow(channel: GuideChannel, atMin: Int) {
@@ -263,6 +292,12 @@ class GuideEffectsImpl(
     fun close() {
         lineupJob?.cancel()
         lineupJob = null
+    }
+
+    private fun artworkHint(info: ProgrammeInfo): ArtworkHint = when {
+        info.episodeLabel != null -> ArtworkHint.SERIES
+        info.genre?.let { g -> g.contains("movie", ignoreCase = true) || g.contains("film", ignoreCase = true) } == true -> ArtworkHint.MOVIE
+        else -> ArtworkHint.ANY
     }
 
     private inline fun launchSafely(what: String, crossinline block: suspend () -> Unit) {

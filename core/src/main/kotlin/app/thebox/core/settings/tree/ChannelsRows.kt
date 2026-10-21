@@ -22,6 +22,8 @@ import app.thebox.core.settings.Visibility
  * emit it, and **not counted** by `SimpleRowCountTest`.
  */
 object ChannelsRows : RowSource {
+    /** m6-channel-editor §3.1: the dedicated editor, the section's first row (SIMPLE). */
+    val EDITOR = RowId("channels.editor")
     val PLAYLIST = RowId("channels.playlist")
     val GROUPS = RowId("channels.groups")
     val HIDDEN = RowId("channels.hidden")
@@ -33,9 +35,11 @@ object ChannelsRows : RowSource {
     val NOT_COUNTED: Set<RowId> = setOf(PLAYLIST)
 
     override val rows: List<RowSpec> = listOf(
+        RowSpec(EDITOR, SectionId.CHANNELS, Visibility.SIMPLE, EffectTiming.LIVE, "D"),
         RowSpec(PLAYLIST, SectionId.CHANNELS, Visibility.SIMPLE, EffectTiming.NONE, "D"),
         RowSpec(GROUPS, SectionId.CHANNELS, Visibility.SIMPLE, EffectTiming.LIVE, "D"),
-        RowSpec(HIDDEN, SectionId.CHANNELS, Visibility.SIMPLE, EffectTiming.LIVE, "D"),
+        // Owner ruling Q3 (m6-channel-editor §3.1): advanced; the editor's "Show: Hidden only" does the job in simple view.
+        RowSpec(HIDDEN, SectionId.CHANNELS, Visibility.ADVANCED, EffectTiming.LIVE, "D"),
         RowSpec(FAVOURITES, SectionId.CHANNELS, Visibility.SIMPLE, EffectTiming.LIVE, "D"),
         RowSpec(OPEN_GUIDE_ON, SectionId.CHANNELS, Visibility.SIMPLE, EffectTiming.NEXT_LAUNCH, "D"),
         RowSpec(HIDE_RULES, SectionId.CHANNELS, Visibility.ADVANCED, EffectTiming.LIVE, "D"),
@@ -144,6 +148,9 @@ object ChannelsPages {
         val route = SettingsRoute.Section(SectionId.CHANNELS)
         val pid = selected ?: return PageModel(route, t.get(BackupText.CHANNELS_TITLE), rows = emptyList(), version = version, placeholder = t.get(BackupText.NO_PLAYLIST))
         val rows = ArrayList<SettingsRow>()
+        // m6-channel-editor §2.1, §3.1: the editor is the first row (for the playlist the chooser below selects).
+        rows += SettingsRow(ChannelsRows.EDITOR, t.get(BackupText.CHANNELS_EDITOR), value = t.get(BackupText.CHANNELS_EDITOR_VALUE),
+            kind = RowKind.Link(SettingsRoute.ChannelEditor(pid)))
         if (playlists.size >= 2) {
             val idx = playlists.indexOfFirst { it.id == pid }.coerceAtLeast(0)
             rows += SettingsRow(ChannelsRows.PLAYLIST, t.get(BackupText.CHANNELS_PLAYLIST), value = playlists[idx].name,
@@ -151,7 +158,10 @@ object ChannelsPages {
         }
         rows += SettingsRow(ChannelsRows.GROUPS, t.get(BackupText.CHANNELS_GROUPS),
             value = t.get(BackupText.CHANNELS_GROUPS_VALUE, summary.groups, summary.hiddenGroups, summary.lockedGroups), kind = RowKind.Link(SettingsRoute.Groups(pid)))
-        rows += SettingsRow(ChannelsRows.HIDDEN, t.get(BackupText.CHANNELS_HIDDEN), value = summary.hiddenChannels.toString(), kind = RowKind.Link(SettingsRoute.HiddenChannels(pid)))
+        if (advanced) {
+            rows += SettingsRow(ChannelsRows.HIDDEN, t.get(BackupText.CHANNELS_HIDDEN), value = summary.hiddenChannels.toString(),
+                kind = RowKind.Link(SettingsRoute.HiddenChannels(pid)), visibility = Visibility.ADVANCED)
+        }
         rows += SettingsRow(ChannelsRows.FAVOURITES, t.get(BackupText.CHANNELS_FAVOURITES),
             value = t.get(BackupText.CHANNELS_FAVOURITES_VALUE, summary.favouriteLists), kind = RowKind.Link(SettingsRoute.FavouriteLists))
         val open = listOf(

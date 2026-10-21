@@ -12,6 +12,7 @@ dependencies {
     api(libs.kotlinx.serialization.json)         // @Serializable contract types
     implementation(libs.sqlite.bundled)          // KMP: JVM jar here, the Android AAR in :data/:app (per-consumer variant selection)
     implementation(libs.xz)
+    implementation(libs.re2j)                    // User patterns must not execute through Android's backtracking ICU matcher.
     implementation(libs.androidx.collection)     // MutableLongIntMap etc. (KMP JVM variant)
     compileOnly(libs.kxml2)                      // org.xmlpull API; the platform provides it on Android
     testImplementation(libs.kxml2)

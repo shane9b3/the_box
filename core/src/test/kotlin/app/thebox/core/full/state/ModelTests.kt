@@ -388,42 +388,59 @@ class PillRulesTest {
     }
 }
 
-/** §3.4.1 item order and hiding (owner ruling 2026-10-15). */
+/** §3.4.1 item order and hiding (owner ruling 2026-10-15), with M6's Pause / Back to live first (m6-timeshift §11.3). */
 class QuickBarModelTest {
     private val menu = PlayerFixtures.trackMenu()
     private val prev = GuideFixtures.channel(9)
 
     @Test fun liveWithArchiveFullOrder() {
         assertEquals(
-            listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, START_OVER, TIME_SHIFT, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, SCREEN_OFF, SETTINGS),
-            QuickBarModel.items(menu, archiveCapable = true, inArchive = false, nowProgramme = true, favourite = false, previous = prev),
+            listOf(TIME_SHIFT, AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, START_OVER, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, SCREEN_OFF, SETTINGS),
+            QuickBarModel.items(menu, startOverCapable = true, inArchive = false, nowProgramme = true, favourite = false, previous = prev),
         )
+    }
+
+    /** M6 §11.3 (U-B3): Pause first on every live channel, whatever it can do (HLS, buffer off, no space). */
+    @Test fun pauseFirstOnEveryLiveChannel() {
+        for (capable in listOf(true, false)) {
+            val items = QuickBarModel.items(menu, startOverCapable = capable, inArchive = false, nowProgramme = true, favourite = null, previous = null)
+            assertEquals(TIME_SHIFT, items.first(), "capable=$capable")
+            assertFalse(JUMP_TO_LIVE in items)
+        }
+        assertFalse(TIME_SHIFT in QuickBarModel.items(menu, false, false, false, null, null, live = false), "nothing tuned: no Pause")
+    }
+
+    /** M6 §11.3: Start over is offered when the buffer covers the programme's start (the caller's startOverCapable). */
+    @Test fun startOverWithBufferCoverage() {
+        assertTrue(START_OVER in QuickBarModel.items(menu, startOverCapable = true, inArchive = false, nowProgramme = true, favourite = null, previous = null))
+        assertFalse(START_OVER in QuickBarModel.items(menu, startOverCapable = false, inArchive = false, nowProgramme = true, favourite = null, previous = null))
     }
 
     /** (M5 integration, §3.6.2) Sources shows only with two or more servers, just before Settings. */
     @Test fun sourcesWithBackupServers() {
-        val one = QuickBarModel.items(menu.copy(servers = listOf("a:80")), archiveCapable = false, inArchive = false, nowProgramme = false, favourite = null, previous = null)
+        val one = QuickBarModel.items(menu.copy(servers = listOf("a:80")), startOverCapable = false, inArchive = false, nowProgramme = false, favourite = null, previous = null)
         assertTrue(app.thebox.core.full.QuickItem.SOURCES !in one)
-        val two = QuickBarModel.items(menu.copy(servers = listOf("a:80", "b:80")), archiveCapable = false, inArchive = false, nowProgramme = false, favourite = null, previous = null)
+        val two = QuickBarModel.items(menu.copy(servers = listOf("a:80", "b:80")), startOverCapable = false, inArchive = false, nowProgramme = false, favourite = null, previous = null)
         assertEquals(listOf(app.thebox.core.full.QuickItem.SOURCES, SETTINGS), two.takeLast(2))
     }
 
-    @Test fun archiveSwapsStartOverForJumpToLive() {
-        val items = QuickBarModel.items(menu, archiveCapable = true, inArchive = true, nowProgramme = true, favourite = true, previous = prev)
-        assertEquals(listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_REMOVE, JUMP_TO_LIVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, SCREEN_OFF, SETTINGS), items)
+    /** M6 §11.3: behind live (time-shift or catch-up) Back to live comes first; no Start over, no Pause. */
+    @Test fun behindLiveBackToLiveFirst() {
+        val items = QuickBarModel.items(menu, startOverCapable = true, inArchive = true, nowProgramme = true, favourite = true, previous = prev)
+        assertEquals(listOf(JUMP_TO_LIVE, AUDIO, ASPECT, SUBTITLES, FAVOURITE_REMOVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, SCREEN_OFF, SETTINGS), items)
     }
 
     @Test fun hiding() {
-        val bare = QuickBarModel.items(TrackMenu(), archiveCapable = false, inArchive = false, nowProgramme = true, favourite = null, previous = null)
-        assertEquals(listOf(ASPECT, STREAM_INFO, VIDEO_DECODER, SCREEN_OFF, SETTINGS), bare, "favourite hidden until the answer; no audio/subtitles")
+        val bare = QuickBarModel.items(TrackMenu(), startOverCapable = false, inArchive = false, nowProgramme = true, favourite = null, previous = null)
+        assertEquals(listOf(TIME_SHIFT, ASPECT, STREAM_INFO, VIDEO_DECODER, SCREEN_OFF, SETTINGS), bare, "favourite hidden until the answer; no audio/subtitles")
         val oneUnsupported = TrackMenu(audio = listOf(PlayerFixtures.audio(0, "en", selected = true, supported = false)))
         assertTrue(AUDIO in QuickBarModel.items(oneUnsupported, false, false, false, null, null), "a single unsupported track still offers Audio")
         assertFalse(START_OVER in QuickBarModel.items(menu, true, false, nowProgramme = false, favourite = null, previous = null), "no programme on now")
-        assertTrue(TIME_SHIFT in QuickBarModel.items(menu, true, false, nowProgramme = false, favourite = null, previous = null))
         for (s in listOf(true, false)) for (a in listOf(true, false)) {
             val items = QuickBarModel.items(menu, a, s, true, null, prev)
             assertEquals(SETTINGS, items.last(), "Settings always last")
-            assertEquals(items.sortedBy { it.ordinal }, items, "display order is the enum order")
+            assertEquals(if (s) JUMP_TO_LIVE else TIME_SHIFT, items.first(), "Back to live / Pause first")
+            assertEquals(items.drop(1).sortedBy { it.ordinal }, items.drop(1), "after the first item, the enum order")
         }
     }
 

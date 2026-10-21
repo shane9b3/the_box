@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -33,6 +34,7 @@ import app.thebox.ui.guide.screen.Line
 
 const val INFO_BAR_TAG = "player_info_bar"
 const val BAR_GLYPHS_TAG = "player_bar_glyphs"
+const val BAR_LOGO_TAG = "player_bar_logo"
 /** U-S6: trace sections for §5.9 "Overlay draw ≤ 1 ms P90" (benchmark journeys (b) and (d)). */
 const val TRACE_INFO = "player-info"
 const val TRACE_SCRUB = "player-scrub"
@@ -57,7 +59,9 @@ fun InfoBar(
 ) {
     val res = androidx.compose.ui.platform.LocalResources.current
     val shape = RoundedCornerShape(PlayerUi.BAR_R.dp)
-    Column(
+    // Owner ruling 2026-10-17: the logo card fills the bar's inner height on the left; the channel and programme
+    // lines sit beside it (the old 64 px logo in the header row left two thirds of the bar empty).
+    Row(
         modifier
             .testTag(INFO_BAR_TAG)
             // U-S6 (L-14): the §5.9 overlay-draw gate's trace section; no layer, allocation-free.
@@ -68,48 +72,67 @@ fun InfoBar(
             .background(PlayerUi.BarFill, shape)
             .border(1.dp, PlayerUi.Border09, shape)
             .padding(horizontal = PlayerUi.BAR_PAD_H.dp, vertical = PlayerUi.BAR_PAD_V.dp),
-        verticalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(PlayerUi.BAR_GAP.dp),
     ) {
-        BarHeader(state.channel, state.pill.takeIf { showPill }, glyphsText(res, state.glyphs, state.channel), title = null)
-        val focused = state.programmes.getOrNull(state.focused)
-        val nowMin = (nowMs / 60_000L).toInt()
-        when {
-            focused != null -> {
-                Line(focused.title, GuideUi.sans(30, FontWeight.SemiBold, letterSpacingEm = -0.01f))
-                TimeRow(focused, nowMin, state.channel, clock24, onNow = state.focused == state.nowIndex)
+        BarLogo(state.channel)
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            BarHeader(state.channel, state.pill.takeIf { showPill }, glyphsText(res, state.glyphs, state.channel), title = null, logo = false)
+            val focused = state.programmes.getOrNull(state.focused)
+            val nowMin = (nowMs / 60_000L).toInt()
+            when {
+                focused != null -> {
+                    Line(focused.title, GuideUi.sans(38, FontWeight.SemiBold, letterSpacingEm = -0.01f))
+                    TimeRow(focused, nowMin, state.channel, clock24, onNow = state.focused == state.nowIndex)
+                }
+                state.loading -> Line(stringResource(R.string.player_info_loading), GuideUi.sans(38, FontWeight.SemiBold, GuideUi.Fg60))
+                else -> Line(stringResource(R.string.player_info_no_info), GuideUi.sans(38, FontWeight.SemiBold, GuideUi.Fg60))
             }
-            state.loading -> Line(stringResource(R.string.player_info_loading), GuideUi.sans(30, FontWeight.SemiBold, GuideUi.Fg60))
-            else -> Line(stringResource(R.string.player_info_no_info), GuideUi.sans(30, FontWeight.SemiBold, GuideUi.Fg60))
+            val next = if (state.focused >= 0) state.programmes.getOrNull(state.focused + 1) else null
+            // The focused programme's synopsis (`ProgrammeFeed.at`, matched by raw start), in the active bar only.
+            val synopsis = detail?.takeIf { state.active && focused != null && it.rawStartMin == focused.rawStartMin }
+                ?.let { d -> listOfNotNull(d.episodeLabel, d.subtitle, d.description).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { null } }
+            when {
+                synopsis != null && !state.browsing -> Line(synopsis, GuideUi.sans(24, color = GuideUi.Fg65))
+                state.active && (state.browsing || (state.focused != state.nowIndex && state.focused >= 0)) ->
+                    Line(stringResource(R.string.player_info_browse_hint), GuideUi.sans(22, color = GuideUi.Fg50))
+                next != null -> Line(stringResource(R.string.player_info_next, clockOfMin(next.startMin, clock24), next.title), GuideUi.sans(24, color = GuideUi.Fg65))
+            }
         }
-        val next = if (state.focused >= 0) state.programmes.getOrNull(state.focused + 1) else null
-        // The focused programme's synopsis (`ProgrammeFeed.at`, matched by raw start), in the active bar only.
-        val synopsis = detail?.takeIf { state.active && focused != null && it.rawStartMin == focused.rawStartMin }
-            ?.let { d -> listOfNotNull(d.episodeLabel, d.subtitle, d.description).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { null } }
-        when {
-            synopsis != null && !state.browsing -> Line(synopsis, GuideUi.sans(17, color = GuideUi.Fg65))
-            state.active && (state.browsing || (state.focused != state.nowIndex && state.focused >= 0)) ->
-                Line(stringResource(R.string.player_info_browse_hint), GuideUi.sans(15, color = GuideUi.Fg50))
-            next != null -> Line(stringResource(R.string.player_info_next, clockOfMin(next.startMin, clock24), next.title), GuideUi.sans(19, color = GuideUi.Fg65))
-        }
+    }
+}
+
+/** The info bar's logo card: the bar's inner height, 8 % fill, the logo fitted inside with a [PlayerUi.BAR_LOGO_PAD] inset. */
+@Composable
+private fun BarLogo(channel: GuideChannel?) {
+    if (channel?.logoUrl.isNullOrBlank()) return
+    Box(
+        Modifier
+            .size(PlayerUi.BAR_LOGO_W.dp, PlayerUi.BAR_LOGO_H.dp)
+            .background(PlayerUi.ChipFill, RoundedCornerShape(PlayerUi.LOGO_R.dp))
+            .padding(PlayerUi.BAR_LOGO_PAD.dp)
+            .testTag(BAR_LOGO_TAG),
+        contentAlignment = Alignment.Center,
+    ) {
+        ChannelLogo(channel, (PlayerUi.BAR_LOGO_W - 2 * PlayerUi.BAR_LOGO_PAD).dp, (PlayerUi.BAR_LOGO_H - 2 * PlayerUi.BAR_LOGO_PAD).dp, 0.dp)
     }
 }
 
 /** Header row shared with the scrub bar: number chip, logo, name (+ [title] under it), pill, glyphs on the right. */
 @Composable
-internal fun BarHeader(channel: GuideChannel?, pill: PillState?, glyphs: String?, title: String?) {
+internal fun BarHeader(channel: GuideChannel?, pill: PillState?, glyphs: String?, title: String?, logo: Boolean = true) {
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         NumberChip(channel?.number)
-        ChannelLogo(channel, PlayerUi.LOGO.dp, PlayerUi.LOGO_R.dp)
+        if (logo) ChannelLogo(channel, PlayerUi.LOGO.dp, PlayerUi.LOGO_R.dp)
         // U-S1 (V3): name and pill share one weighted row and the glyphs end at the bar's inner right. Two weights in one
         // row split the free width, so the glyphs used to land mid-bar.
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             Column(Modifier.weight(1f, fill = false), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                if (title != null) Line(title, GuideUi.sans(26, FontWeight.SemiBold))
-                channel?.let { Line(it.displayName, if (title != null) GuideUi.sans(17, color = GuideUi.Fg70) else GuideUi.sans(24, FontWeight.SemiBold)) }
+                if (title != null) Line(title, GuideUi.sans(32, FontWeight.SemiBold))
+                channel?.let { Line(it.displayName, if (title != null) GuideUi.sans(22, color = GuideUi.Fg70) else GuideUi.sans(32, FontWeight.SemiBold)) }
             }
             pill?.let { PlayerPill(it) }
         }
-        glyphs?.let { Line(it, GuideUi.mono(15, color = GuideUi.Fg70), Modifier.testTag(BAR_GLYPHS_TAG)) }
+        glyphs?.let { Line(it, GuideUi.mono(20, color = GuideUi.Fg70), Modifier.testTag(BAR_GLYPHS_TAG)) }
     }
 }
 
@@ -120,7 +143,7 @@ private fun TimeRow(p: ProgrammeInfo, nowMin: Int, channel: GuideChannel?, clock
         // 2 draw ops (track + fill), redrawn every 15 s (M3 mini cadence) without recomposition (§4.1).
         val tick = rememberTicker(PROGRESS_TICK_MS)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            val style = GuideUi.mono(15, color = GuideUi.Fg70)
+            val style = GuideUi.mono(20, color = GuideUi.Fg70)
             Line(clockOfMin(p.startMin, clock24), style)
             Box(
                 Modifier
@@ -141,7 +164,7 @@ private fun TimeRow(p: ProgrammeInfo, nowMin: Int, channel: GuideChannel?, clock
         p.endMin <= nowMin -> if (inArchive(p, nowMin, channel)) stringResource(R.string.player_info_catchup_ok) else stringResource(R.string.player_info_not_in_catchup)
         else -> stringResource(R.string.player_info_starts, clockOfMin(p.startMin, clock24))
     }
-    Line(text, GuideUi.sans(19, color = GuideUi.Fg70))
+    Line(text, GuideUi.sans(24, color = GuideUi.Fg70))
 }
 
 private fun inArchive(p: ProgrammeInfo, nowMin: Int, channel: GuideChannel?): Boolean {
@@ -162,4 +185,4 @@ internal fun glyphsText(res: Resources, g: InfoGlyphs?, channel: GuideChannel?):
 }
 
 private const val PROGRESS_TICK_MS = 15_000L
-private const val PROGRESS_W = 420f
+private const val PROGRESS_W = 520f

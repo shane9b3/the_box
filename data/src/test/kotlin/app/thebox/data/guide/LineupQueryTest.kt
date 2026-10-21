@@ -79,8 +79,9 @@ class LineupQueryTest {
     @Test
     fun eachSourceMatchesTheM1BrowseOrder() = runBlocking {
         val all = lineup(GuideSource.All(p))
-        assertEquals(db.channelDao().browseAll(p, false).first().map { it.channel.id }.filter { it != ids["movie"] }, all.rowIds.toList())
-        assertEquals(listOf("n1", "n2", "n3", "radio", "loose"), keysOf(all))
+        // v5 (docs/design/m6-channel-editor.md §3.7, owner ruling Q2): All follows the user's order, group by group (News
+        // in its own order, n2 first), ungrouped channels last; no longer browseAll's provider order.
+        assertEquals(listOf("n2", "n1", "n3", "radio", "loose"), keysOf(all))
         val group = lineup(GuideSource.Group(p, "g:news"))
         assertEquals(db.channelDao().browseGroup(p, news, false).first().map { it.channel.id }.filter { it != ids["movie"] }, group.rowIds.toList())
         assertEquals(listOf("n2", "n1", "n3", "radio"), keysOf(group))

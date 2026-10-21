@@ -31,6 +31,13 @@ import app.thebox.core.catchup.archive.PositionView
 import app.thebox.core.catchup.archive.ProbePlan
 import app.thebox.core.catchup.archive.RequestPlan
 import app.thebox.core.catchup.archive.SeekPlan
+import app.thebox.core.catchup.archive.TimelineRouter
+import app.thebox.core.catchup.archive.TimelineRouterImpl
+import app.thebox.core.catchup.archive.TimelineSource
+import app.thebox.core.catchup.archive.TimelineTarget
+import app.thebox.core.full.LocalBufferInfo
+import app.thebox.player.api.LocalSeekResult
+import app.thebox.player.api.PlaybackNotice
 import app.thebox.core.common.BoxLog
 import app.thebox.core.full.ProgrammeFeed
 import app.thebox.core.guide.GuideChannel
@@ -96,7 +103,18 @@ class ArchivePlaybackImpl(
     private val scope: CoroutineScope,
     private val io: CoroutineDispatcher,
     private val clock: () -> Long,
+    /** (M6 time-shift, docs/design/m6-timeshift.md §9.1) Local buffer first, the provider beyond it and for gaps. */
+    private val router: TimelineRouter = TimelineRouterImpl(),
 ) : ArchivePlayback {
+
+    /**
+     * (M6 time-shift, §11.2) The LOCAL source: the device's time-shift buffer of the tuned live channel, in the programme
+     * frame. Sessions with [Session.local] delegate to it while `controller.localBuffer` is available for their identity.
+     */
+    private val local = LocalTimelineBackend(controller, ::localFrames, scope, clock)
+
+    /** (M6, A-C1) The P-frame buffer; the player VM's only source for `PlayerEvent.Buffer`. */
+    override val localBuffer: StateFlow<LocalBufferInfo?> get() = local.localBuffer
 
     private val _status = MutableStateFlow(ArchiveStatus())
     override val status: StateFlow<ArchiveStatus> = _status.asStateFlow()
@@ -110,6 +128,25 @@ class ArchivePlaybackImpl(
     override val notices: SharedFlow<ArchiveNotice> = _liveNotReady.asSharedFlow()
 
     private val mainContext = scope.coroutineContext[ContinuationInterceptor] ?: io
+
+    init {
+        local.start()
+        // §11.2: a LOCAL session republishes with every buffer snapshot (oldest saved instant, not-saved ranges, the
+        // "Can stay paused" estimate); a buffer that went away for its channel ends it (§4.6: the controller went live).
+        scope.launch {
+            local.localBuffer.collect {
+                val s = session ?: return@collect
+                if (!s.local || s.phase == IDLE) return@collect
+                val st = local.state
+                if (st == null || st.identity != s.channel.identity || !st.available) { end(s); return@collect }
+                publish(s)
+            }
+        }
+        // §9.1 (U-B2, A-C5): a gap the controller routed to the provider (the router's verdict, R14).
+        scope.launch {
+            controller.notices.collect { n -> if (n is PlaybackNotice.LocalGap) onLocalGap(n) }
+        }
+    }
 
     // ------------------------------------------------------------------ session state (main only)
 
@@ -188,6 +225,11 @@ class ArchivePlaybackImpl(
         var rerequestSeekPending = false
 
         val pausedAtMs: Long get() = frames.liveEdge(livePauseDeviceMs).coerceAtLeast(0)
+
+        // (M6 §11.2) LOCAL: the device's buffer serves this time-shift (no request, no variant).
+        var local = false
+        /** LOCAL: the reader in flight goes to live; the session ends (IDLE) at its first media. */
+        var goingLive = false
     }
 
     private var session: Session? = null
@@ -211,6 +253,21 @@ class ArchivePlaybackImpl(
 
     override suspend fun startOver(channel: GuideChannel): ArchiveStart = withContext(mainContext) {
         val gen = ++startGen
+        if (local.availableFor(channel.identity)) {
+            // M6 §9.1: Start over goes local when the buffer covers the programme's start, else to the provider.
+            val window = local.window()
+            val nowDisplayMin = Math.floorDiv(local.liveEdgeMs() + channel.epgShiftMin * MINUTE_MS, MINUTE_MS).toInt()
+            val info = try { feed.at(channel, nowDisplayMin) } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
+            if (gen != startGen) return@withContext ArchiveStart.Started
+            val start = info?.let { it.rawStartMin * MINUTE_MS }
+            if (window != null && info != null && start != null && start >= window.fromMs) {
+                val ctx = if (channel.archiveDays > 0) (loadContext(channel) as? CtxResult.Ok)?.ctx else null
+                if (gen != startGen) return@withContext ArchiveStart.Started
+                startLocal(channel, ctx, start, -1)
+                session?.let { it.programme = info; it.rescopeMin = info.startMin; publish(it) }
+                return@withContext ArchiveStart.Started
+            }
+        }
         val ctx = when (val r = loadContext(channel)) {
             is CtxResult.Failed -> return@withContext ArchiveStart.Failed(r.reason)
             is CtxResult.Ok -> r.ctx
@@ -231,6 +288,22 @@ class ArchivePlaybackImpl(
 
     override suspend fun rewindLive(channel: GuideChannel, backMs: Long): ArchiveStart = withContext(mainContext) {
         val gen = ++startGen
+        var providerBackMs = backMs
+        if (local.availableFor(channel.identity)) {
+            // M6 §9.1: local first; older than the buffer → the provider (catch-up channels) or a clamp.
+            val ctx = if (channel.archiveDays > 0) (loadContext(channel) as? CtxResult.Ok)?.ctx else null
+            if (gen != startGen) return@withContext ArchiveStart.Started
+            val now = clock()
+            val edge = local.liveEdgeMs(now)
+            val t = edge - backMs.coerceAtLeast(0)
+            val providerFrom = ctx?.let { liveWindow(it, now).archiveFromMs }
+            when (val r = router.route(t, edge, local.window(now), providerFrom, edge, local.sinceTuneMs(now), local.state?.limitedToday == true)) {
+                TimelineTarget.Live -> return@withContext ArchiveStart.Started
+                is TimelineTarget.Local -> { startLocal(channel, ctx, r.programmeMs, -1); return@withContext ArchiveStart.Started }
+                is TimelineTarget.Clamp -> { startLocal(channel, ctx, r.programmeMs, -1); return@withContext ArchiveStart.Started }
+                is TimelineTarget.Provider -> providerBackMs = r.backMs
+            }
+        }
         val ctx = when (val r = loadContext(channel)) {
             is CtxResult.Failed -> return@withContext ArchiveStart.Failed(r.reason)
             is CtxResult.Ok -> r.ctx
@@ -238,7 +311,7 @@ class ArchivePlaybackImpl(
         val now = clock()
         val live = liveWindow(ctx, now)
         // Live-anchored: taken from the panel's now (B2); the builder subtracts the correction again.
-        val t = (live.liveEdgeMs - backMs.coerceAtLeast(0)).coerceAtLeast(live.archiveFromMs)
+        val t = (live.liveEdgeMs - providerBackMs.coerceAtLeast(0)).coerceAtLeast(live.archiveFromMs)
         val plan = RequestPlan(startMs = t, stopMs = null, padBefore = false, targetMs = t)
         val built = withContext(io) { buildFrom(ctx, plan, 0, walk = true, now = now) }
             ?: return@withContext ArchiveStart.Failed(ArchiveFailure.UNSUPPORTED_MODE)
@@ -249,6 +322,8 @@ class ArchivePlaybackImpl(
     }
 
     override fun pauseLive(channel: GuideChannel) {
+        // M6 §11.2: a buffered channel pauses in place (LOCAL): no archive request, now or on resume.
+        if (local.availableFor(channel.identity)) { pauseLocal(channel); return }
         val now = clock()
         val buffered = controller.position().bufferedMs.coerceAtLeast(0)
         startGen++
@@ -289,6 +364,7 @@ class ArchivePlaybackImpl(
 
     override fun pause() {
         val s = session ?: return
+        if (s.local) { localPause(s); return }
         when (s.phase) {
             PLAYING -> {
                 snapshotWall(s)
@@ -313,6 +389,7 @@ class ArchivePlaybackImpl(
 
     override fun resume() {
         val s = session ?: return
+        if (s.local) { localResume(s); return }
         when (s.phase) {
             PAUSED_LIVE -> resumeLivePause(s)
             PAUSED -> {
@@ -356,6 +433,7 @@ class ArchivePlaybackImpl(
      */
     override fun reapply(playheadMs: Long) {
         val s = session ?: return
+        if (s.local) return // §7.6: the controller re-prepares a buffered cycle reader-only at the pin itself
         if (s.phase == IDLE || s.phase == FAILED || s.phase == PAUSED || s.phase == PAUSED_LIVE) return
         if (s.ctx == null || s.request == null || !s.requestFirstMedia) { seekTo(playheadMs, 0); return }
         seekRerequest(s, RequestPlan(playheadMs, null, padBefore = false, targetMs = playheadMs), wasPaused = false)
@@ -368,6 +446,7 @@ class ArchivePlaybackImpl(
             settle(null)
             return
         }
+        if (s.local) { localSeekTo(s, programmeMs); return }
         val ctx = s.ctx
         if (s.phase == PAUSED_LIVE) {
             if (ctx == null) { settle(s); publish(s); return }
@@ -408,13 +487,14 @@ class ArchivePlaybackImpl(
     override fun jumpToLive() {
         val s = session ?: return
         if (s.phase == IDLE) return
+        if (s.local) { localJumpToLive(s); return }
         goLive(s, notReady = false)
     }
 
     override fun tryNextVariant(): Boolean {
         val s = session ?: return false
         val ctx = s.ctx ?: return false
-        if (s.phase == IDLE || s.phase == PAUSED_LIVE) return false
+        if (s.phase == IDLE || s.phase == PAUSED_LIVE || s.local) return false
         if (s.variantIndex + 1 >= ctx.variants.size) return false
         val plan = if (s.firstMediaSeen) {
             val wall = currentWall(s, clock())
@@ -634,6 +714,15 @@ class ArchivePlaybackImpl(
             return
         }
         if (s.phase == PAUSED_LIVE) return
+        if (s.local) {
+            when (st) {
+                is PlaybackState.Playing -> onLocalPlaying(s, st)
+                // The cycle failed (the ladder's card): live again, no time-shift (§4.6, §7.4 stashed card).
+                is PlaybackState.Error -> end(s)
+                else -> Unit // Connecting / Buffering / Stalled of a reader re-prepare: hidden by ArchiveVisibility
+            }
+            return
+        }
         when (st) {
             is PlaybackState.Playing -> onPlaying(s, st)
             is PlaybackState.Error -> onError(s, st.error)
@@ -646,6 +735,9 @@ class ArchivePlaybackImpl(
     private fun owns(s: Session, st: PlaybackState): Boolean {
         val t = st.target ?: return false
         if (t.identity != s.channel.identity) return false
+        // M6 §11.2: LOCAL owns the live cycle's reader sessions (tuneId ≥ ownedTuneId); a stop (lifecycle, user) or an
+        // archive tune ends it: the saved part is discarded with the cycle (§7.5).
+        if (s.local) return !t.isArchive && t.tuneId >= s.ownedTuneId && st !is PlaybackState.Stopped && st !is PlaybackState.Idle
         if (s.phase == PAUSED_LIVE) {
             if (t.isArchive) return false
             return when (st) {
@@ -893,6 +985,7 @@ class ArchivePlaybackImpl(
     }
 
     private fun poll(s: Session) {
+        if (s.local) { localPoll(s); return }
         if (s.phase != PLAYING && s.phase != SEEKING && s.phase != CONTINUING) return
         if (!s.requestFirstMedia) return
         val ctx = s.ctx ?: return
@@ -1097,6 +1190,7 @@ class ArchivePlaybackImpl(
 
     private fun publish(s: Session) {
         if (session !== s) return
+        if (s.local) { publishLocal(s); return }
         val now = clock()
         val ctx = s.ctx
         val frames = s.frames
@@ -1131,6 +1225,283 @@ class ArchivePlaybackImpl(
             error = s.error,
             ownedTuneId = s.ownedTuneId,
             settledSeq = settledSeq,
+        )
+    }
+
+    // ------------------------------------------------------------------ LOCAL source (M6, docs/design/m6-timeshift.md §11.2)
+
+    /** The frames of [identity] for the buffer (§9.2): the catch-up's, or correction 0 with the playlist's skew. */
+    private suspend fun localFrames(identity: ChannelIdentity): ArchiveFrames? {
+        val target = (targets.catchupTarget(identity) as? CatchupTargetResult.Found)?.target
+        val timeBase = timeBases.timeBase(identity.playlistId) ?: return null
+        val catchup = target?.catchup?.takeIf { it.isAvailable }
+        val f = planner.frames(timeBase, catchup?.correctionHours, 0)
+        return if (catchup != null) f else f.copy(correctionMs = 0)
+    }
+
+    /** A new LOCAL session of [channel] (not yet issued); [ctx] for catch-up channels (provider hand-offs). */
+    private fun newLocalSession(channel: GuideChannel, ctx: Ctx?): Session {
+        startGen++
+        val s = Session(channel, timeShift = true)
+        s.local = true
+        if (ctx != null) adopt(s, ctx)
+        s.frames = ArchiveFrames(0, 0, channel.epgShiftMin * MINUTE_MS)
+        replaceSession(s)
+        if (ctx == null && channel.archiveDays > 0) {
+            // A catch-up channel: the context for a later provider hand-off (older than the buffer, a gap).
+            val job = scope.async {
+                try { loadContext(channel) } catch (e: CancellationException) { throw e } catch (e: Exception) { CtxResult.Failed(ArchiveFailure.NO_ARCHIVE) }
+            }
+            s.ctxJob = job
+            scope.launch {
+                val r = try { job.await() } catch (e: CancellationException) { return@launch }
+                if (r is CtxResult.Ok && session === s && s.ctx == null) { s.ctx = r.ctx; publish(s) }
+            }
+        }
+        return s
+    }
+
+    /** §11.2 `pauseLive`: `controller.pause()`, PAUSED at the P playhead; the recorder keeps saving. */
+    private fun pauseLocal(channel: GuideChannel) {
+        val s = newLocalSession(channel, null)
+        s.phase = PAUSED
+        s.pauseRequested = true
+        s.ownedTuneId = controller.state.value.target?.tuneId ?: 0L
+        controller.pause()
+        // After the pause (Playing(paused) is already the state) so the collector reads it as ours.
+        ensureCollecting()
+        s.wallMs = local.playheadMs() ?: local.liveEdgeMs()
+        s.wallAtMs = clock()
+        s.archivePausedSinceMs = clock()
+        publish(s)
+        rescope(s, s.wallMs)
+    }
+
+    /** A LOCAL time-shift from live landing at [programmeMs] (RW, start over, a scrub commit at live). */
+    private fun startLocal(channel: GuideChannel, ctx: Ctx?, programmeMs: Long, direction: Int) {
+        val s = newLocalSession(channel, ctx)
+        s.ownedTuneId = controller.state.value.target?.tuneId ?: 0L
+        val st = controller.state.value
+        s.pauseAtFirstMedia = st is PlaybackState.Playing && st.paused
+        ensureCollecting()
+        localSeek(s, programmeMs, direction)
+        rescope(s, s.wallMs)
+    }
+
+    private fun localPause(s: Session) {
+        when (s.phase) {
+            PLAYING -> {
+                s.wallMs = local.playheadMs() ?: currentWall(s, clock())
+                s.wallAtMs = clock()
+                s.pauseRequested = true
+                s.phase = PAUSED
+                s.archivePausedSinceMs = clock()
+                stopPolling()
+                controller.pause()
+                publish(s)
+            }
+            SEEKING -> { s.pauseAtFirstMedia = true; s.pauseRequested = true; controller.pause() }
+            else -> Unit
+        }
+    }
+
+    /** §11.2 `resume`: `controller.resume()` continues where it stopped (no re-tune; a stopped recorder restarts). */
+    private fun localResume(s: Session) {
+        when (s.phase) {
+            PAUSED -> {
+                s.pauseRequested = false
+                s.phase = PLAYING
+                s.playingSinceMs = clock()
+                s.wallAtMs = clock()
+                controller.resume()
+                startPolling(s)
+                publish(s)
+            }
+            SEEKING -> { s.pauseAtFirstMedia = false; s.pauseRequested = false; controller.resume() }
+            else -> Unit
+        }
+    }
+
+    /** §11.2 `seekTo`: through [TimelineRouter] (§9.1): local seek, live, a clamp, or the provider beyond the buffer. */
+    private fun localSeekTo(s: Session, programmeMs: Long) {
+        val now = clock()
+        val edge = local.liveEdgeMs(now)
+        val providerFrom = s.ctx?.let { liveWindow(it, now).archiveFromMs }
+        val playhead = currentWall(s, now)
+        when (val r = router.route(programmeMs, playhead, local.window(now), providerFrom, edge, local.sinceTuneMs(now), local.state?.limitedToday == true)) {
+            TimelineTarget.Live -> { settle(s); localJumpToLive(s) }
+            is TimelineTarget.Local -> localSeek(s, r.programmeMs, r.direction)
+            is TimelineTarget.Clamp -> localSeek(s, r.programmeMs, -1)
+            // (Fix pass, UX review S3) A target in a not-saved range routes here too; if the provider cannot take it, the
+            // local fallback is the range's end, never the RAP before it.
+            is TimelineTarget.Provider -> {
+                val fallback = gapEndAt(programmeMs)
+                providerFromLocal(s, r.backMs, wasPaused = s.phase == PAUSED || s.pauseAtFirstMedia, onFail = fallback?.let { end -> { localSeek(s, end, 1) } })
+            }
+        }
+    }
+
+    /** The end (P frame) of the not-saved range holding [programmeMs], or null. */
+    private fun gapEndAt(programmeMs: Long): Long? {
+        val g = local.notSaved()
+        for (i in 0 until g.count) if (programmeMs >= g.startAt(i) && programmeMs < g.endAt(i)) return g.endAt(i)
+        return null
+    }
+
+    /** §6 through the controller: SEEKING until the new reader's first media (B3 settle at its tuneId). */
+    private fun localSeek(s: Session, programmeMs: Long, direction: Int) {
+        if (s.phase == PAUSED) s.pauseAtFirstMedia = true
+        s.goingLive = false
+        s.phase = SEEKING
+        s.wallMs = programmeMs
+        s.wallAtMs = clock()
+        stopPolling()
+        when (val r = controller.seekLocal(local.toMono(programmeMs), direction)) {
+            is LocalSeekResult.Started -> s.wallMs = local.toProgramme(r.landedMonoMs)
+            is LocalSeekResult.Clamped -> s.wallMs = local.toProgramme(r.landedMonoMs)
+            LocalSeekResult.Live -> s.goingLive = true
+            LocalSeekResult.Unavailable -> { settle(s); end(s); return }
+        }
+        controller.state.value.target?.let { t -> if (!t.isArchive && t.identity == s.channel.identity && t.tuneId > s.ownedTuneId) s.ownedTuneId = t.tuneId }
+        publish(s)
+    }
+
+    /** §11.2 `jumpToLive`: `controller.jumpToLiveLocal()`; SEEKING, then IDLE at the live reader's first media. */
+    private fun localJumpToLive(s: Session) {
+        s.phase = SEEKING
+        s.goingLive = true
+        s.pauseAtFirstMedia = false
+        stopPolling()
+        if (!controller.jumpToLiveLocal()) { goLive(s, notReady = false); return }
+        controller.state.value.target?.let { t -> if (!t.isArchive && t.identity == s.channel.identity && t.tuneId > s.ownedTuneId) s.ownedTuneId = t.tuneId }
+        publish(s)
+    }
+
+    /** First media of an owned reader session (or a pause/resume reported by the controller). */
+    private fun onLocalPlaying(s: Session, st: PlaybackState.Playing) {
+        val now = clock()
+        when (s.phase) {
+            SEEKING -> {
+                if (s.goingLive) { settle(s); end(s); return }
+                settle(s)
+                s.wallMs = local.playheadMs() ?: s.wallMs
+                s.wallAtMs = now
+                if (s.pauseAtFirstMedia || st.paused) {
+                    s.pauseAtFirstMedia = false
+                    s.pauseRequested = true
+                    s.phase = PAUSED
+                    s.archivePausedSinceMs = now
+                    if (!st.paused) controller.pause()
+                } else {
+                    s.phase = PLAYING
+                    s.playingSinceMs = now
+                    startPolling(s)
+                }
+                publish(s)
+                rescope(s, s.wallMs)
+            }
+            PLAYING -> if (st.paused) {
+                // Paused from elsewhere (media session): follow it.
+                s.wallMs = local.playheadMs() ?: currentWall(s, now)
+                s.wallAtMs = now
+                s.phase = PAUSED
+                s.archivePausedSinceMs = now
+                stopPolling()
+                publish(s)
+            }
+            PAUSED -> if (!st.paused) {
+                s.pauseRequested = false
+                s.phase = PLAYING
+                s.playingSinceMs = now
+                s.wallAtMs = now
+                startPolling(s)
+                publish(s)
+            }
+            else -> Unit
+        }
+    }
+
+    private fun localPoll(s: Session) {
+        if (s.phase != PLAYING) return
+        if (!owns(s, controller.state.value)) return
+        val now = clock()
+        local.playheadMs()?.let { s.wallMs = it }
+        s.wallAtMs = now
+        rescope(s, s.wallMs)
+        publish(s)
+    }
+
+    /**
+     * §9.1: older than the buffer, or a gap the buffer lost, on a catch-up channel: M4's live-anchored request
+     * (`backMs` from the P live edge); the controller ends the ring with the archive tune. A pause carries over (E26).
+     */
+    private fun providerFromLocal(s: Session, backMs: Long, wasPaused: Boolean, onFail: (() -> Unit)? = null) {
+        val channel = s.channel
+        val gen = ++startGen
+        scope.launch {
+            val ctx = s.ctx ?: when (val r = s.ctxJob?.await() ?: loadContext(channel)) {
+                is CtxResult.Ok -> r.ctx
+                is CtxResult.Failed -> { if (session === s) { settle(s); publish(s); onFail?.invoke() }; return@launch }
+            }
+            if (gen != startGen || session !== s) return@launch
+            val now = clock()
+            val live = liveWindow(ctx, now)
+            val t = (live.liveEdgeMs - backMs.coerceAtLeast(0)).coerceAtLeast(live.archiveFromMs)
+            val plan = RequestPlan(startMs = t, stopMs = null, padBefore = false, targetMs = t)
+            val built = buildFrom(ctx, plan, 0, walk = true, now = now)
+            if (built == null) { settle(s); publish(s); onFail?.invoke(); return@launch }
+            val p = newSession(ctx, timeShift = true)
+            p.programme = s.programme
+            p.rescopeMin = s.rescopeMin
+            p.rerequestSeekPending = true
+            p.pauseAtFirstMedia = wasPaused
+            issue(p, plan, SEEKING, built)
+        }
+    }
+
+    /**
+     * The controller's gap hand-off (`LocalGap`, R14): the provider from the gap's start, no toast (§9.1). (Fix pass,
+     * UX review B2) The controller does not move the reader after a `LocalGap`, so every way this cannot hand off (no
+     * LOCAL session, e.g. after a plain pause on a buffered cycle; the catch-up context failed; no request could be
+     * built) asks the controller to skip the gap locally (`skipGapLocal`, which emits `GapSkipped`) instead of leaving
+     * the picture stuck at the gap.
+     */
+    private fun onLocalGap(n: PlaybackNotice.LocalGap) {
+        val s = session?.takeIf { it.local && it.phase != IDLE }
+        if (s == null || local.identity != s.channel.identity) { controller.skipGapLocal(); return }
+        val back = local.liveEdgeMs() - local.toProgramme(n.gapStartMonoMs)
+        providerFromLocal(s, back, wasPaused = s.phase == PAUSED, onFail = { controller.skipGapLocal() })
+    }
+
+    private fun publishLocal(s: Session) {
+        val now = clock()
+        val st = local.state
+        val wall = when (s.phase) {
+            PLAYING -> s.wallMs + (now - s.wallAtMs)
+            else -> s.wallMs
+        }
+        val bufferFrom = local.fromMs()
+        val providerFrom = s.ctx?.let { liveWindow(it, now).archiveFromMs }
+        _status.value = ArchiveStatus(
+            phase = s.phase,
+            channel = s.channel,
+            identityHash = s.channel.identityHash,
+            programme = s.programme,
+            wallMs = wall,
+            atMs = now,
+            advancing = s.phase == PLAYING,
+            liveEdgeMs = local.liveEdgeMs(now),
+            archiveFromMs = providerFrom ?: bufferFrom ?: wall,
+            displayShiftMs = s.frames.displayShiftMs,
+            seekable = false,
+            timeShift = true,
+            ownedTuneId = s.ownedTuneId,
+            settledSeq = settledSeq,
+            source = TimelineSource.LOCAL,
+            bufferFromMs = bufferFrom,
+            notSaved = local.notSaved(),
+            pauseRemainingMs = st?.pauseRemainingMs,
+            savingStop = st?.stop,
         )
     }
 

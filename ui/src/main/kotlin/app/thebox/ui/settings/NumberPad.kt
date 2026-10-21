@@ -52,9 +52,9 @@ fun NumberPad(state: NumberPadState, modifier: Modifier = Modifier) {
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(SettingsUi.PAD_GAP.dp),
         ) {
-            Line(state.label, GuideUi.sans(28, FontWeight.SemiBold))
+            Line(state.label, GuideUi.sans(34, FontWeight.SemiBold))
             Line(state.digits.ifEmpty { " " }, GuideUi.mono(44), Modifier.testTag(NUMBER_PAD_VALUE_TAG))
-            state.error?.let { Line(it, GuideUi.sans(18, color = SettingsUi.Amber), maxLines = 2) }
+            state.error?.let { Line(it, GuideUi.sans(24, color = SettingsUi.Amber), maxLines = 2) }
             for (r in 0 until 4) {
                 Row(horizontalArrangement = Arrangement.spacedBy(SettingsUi.PAD_GAP.dp)) {
                     for (c in 0 until 3) {
@@ -82,6 +82,6 @@ private fun PadKey(label: String, focused: Boolean, index: Int) {
     m = if (focused) m.border(SettingsUi.FOCUS_RING.dp, SettingsUi.Accent, shape).background(SettingsUi.Fg, shape)
     else m.background(SettingsUi.White08, shape)
     Box(m, contentAlignment = Alignment.Center) {
-        Line(label, GuideUi.mono(30, color = if (focused) SettingsUi.Canvas else SettingsUi.Fg))
+        Line(label, GuideUi.mono(36, color = if (focused) SettingsUi.Canvas else SettingsUi.Fg))
     }
 }

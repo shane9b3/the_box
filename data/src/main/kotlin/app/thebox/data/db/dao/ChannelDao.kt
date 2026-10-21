@@ -77,10 +77,14 @@ interface ChannelDao {
     @Query("SELECT * FROM channel WHERE playlist_id = :playlistId ORDER BY sort_index")
     suspend fun allForPlaylist(playlistId: Long): List<ChannelEntity>
 
-    /** Guide rows for one group (M3): user order first, then provider order (§2.1.4). */
+    /**
+     * Guide rows for one group (M3): user order first, then provider order (§2.1.4). M1-only (no production caller outside
+     * `ChannelRepository`); v5 (docs/design/m6-channel-editor.md §3.6 row 1): [groupId] is the **effective** group's id,
+     * which cannot use the `group_id` index (accepted for an M1-only reader).
+     */
     @Query(
         SELECT_ROW + """
-        WHERE c.playlist_id = :playlistId AND c.kind IN (0, 1) AND c.group_id = :groupId AND c.missing_since IS NULL
+        WHERE c.playlist_id = :playlistId AND c.kind IN (0, 1) AND g.id = :groupId AND c.missing_since IS NULL
         """ + PARENTAL + """
         ORDER BY cp.custom_sort_index IS NULL, cp.custom_sort_index, c.sort_index""",
     )
@@ -159,9 +163,7 @@ interface ChannelDao {
         FROM channel_fts
         JOIN channel c             ON c.id = channel_fts.rowid
         JOIN playlist p            ON p.id = c.playlist_id AND p.enabled = 1
-        LEFT JOIN channel_group g  ON g.id = c.group_id
-        LEFT JOIN channel_prefs cp ON cp.playlist_id = c.playlist_id AND cp.stable_key = c.stable_key
-        LEFT JOIN group_prefs gp   ON gp.playlist_id = c.playlist_id AND gp.kind = g.kind AND gp.group_key = g.group_key
+        """ + EFFECTIVE_GROUP_JOINS + """
         WHERE channel_fts MATCH :match AND c.missing_since IS NULL
         """ + PARENTAL + """
         ORDER BY c.playlist_id, c.sort_index LIMIT :limit""",
@@ -183,9 +185,7 @@ interface ChannelDao {
                COALESCE(cp.watch_count, 0) AS watch_count, NULL AS best_suggestion
         FROM channel c
         JOIN playlist p            ON p.id = c.playlist_id AND p.enabled = 1
-        LEFT JOIN channel_group g  ON g.id = c.group_id
-        LEFT JOIN channel_prefs cp ON cp.playlist_id = c.playlist_id AND cp.stable_key = c.stable_key
-        LEFT JOIN group_prefs gp   ON gp.playlist_id = c.playlist_id AND gp.kind = 0 AND gp.group_key = g.group_key
+        """ + EFFECTIVE_GROUP_JOINS + """
         LEFT JOIN epg_mapping m    ON m.playlist_id = c.playlist_id AND m.stable_key = c.stable_key
         WHERE c.kind IN (0, 1)
           AND c.missing_since IS NULL
@@ -227,6 +227,31 @@ interface ChannelDao {
     suspend fun tvgIds(playlistId: Long?): List<String>
 
     companion object {
+        // ---- v5 effective group (docs/design/m6-channel-editor.md §3.6, review 2 ruling a and item 1). Every reader of a
+        // channel's group joins through these pieces; ProviderGroupJoinGuardTest fails on any other provider-group join.
+
+        /** The provider's group (refresh-owned membership). Only the allowlisted readers use it alone (§3.6 rows 16–20). */
+        const val PROVIDER_GROUP_JOIN = "LEFT JOIN channel_group g0 ON g0.id = c.group_id\n"
+
+        /** The channel's prefs (for queries that do not already drive from `channel_prefs cp`). */
+        const val CP_JOIN = "LEFT JOIN channel_prefs cp ON cp.playlist_id = c.playlist_id AND cp.stable_key = c.stable_key\n"
+
+        /**
+         * Needs `g0` and `cp` in scope: the move target `gt` (any existing row, missing or not: a target in its grace period
+         * keeps its lock and hidden state, ruling a), the effective group `g` (the target, else the provider group) and its
+         * prefs `gp`. A dangling `custom_group_key` (no row) falls back to the provider group.
+         */
+        const val GROUP_TAIL = """
+        LEFT JOIN channel_group gt ON gt.playlist_id = c.playlist_id AND gt.kind = 0 AND gt.group_key = cp.custom_group_key
+        LEFT JOIN channel_group g  ON g.id = COALESCE(gt.id, g0.id)
+        LEFT JOIN group_prefs gp   ON gp.playlist_id = c.playlist_id AND gp.kind = g.kind AND gp.group_key = g.group_key
+        """
+
+        const val EFFECTIVE_GROUP_TAIL = CP_JOIN + GROUP_TAIL
+
+        /** `FROM channel c` + this = the channel with its prefs, its provider group `g0` and its effective group `g`/`gp`. */
+        const val EFFECTIVE_GROUP_JOINS = PROVIDER_GROUP_JOIN + EFFECTIVE_GROUP_TAIL
+
         const val UNMATCHED_HEAD = """
         SELECT c.playlist_id, c.stable_key, c.name, c.tvg_id, c.tvg_name, g.name AS group_name,
                COALESCE(cp.watch_count, 0) AS watch_count,
@@ -236,9 +261,7 @@ interface ChannelDao {
                  ORDER BY em.score DESC LIMIT 1) AS best_suggestion
         FROM channel c
         JOIN playlist p            ON p.id = c.playlist_id AND p.enabled = 1
-        LEFT JOIN channel_group g  ON g.id = c.group_id
-        LEFT JOIN channel_prefs cp ON cp.playlist_id = c.playlist_id AND cp.stable_key = c.stable_key
-        LEFT JOIN group_prefs gp   ON gp.playlist_id = c.playlist_id AND gp.kind = 0 AND gp.group_key = g.group_key
+        """ + EFFECTIVE_GROUP_JOINS + """
         LEFT JOIN epg_mapping m    ON m.playlist_id = c.playlist_id AND m.stable_key = c.stable_key
         WHERE c.kind IN (0, 1)
           AND c.missing_since IS NULL
@@ -253,10 +276,7 @@ interface ChannelDao {
         SELECT c.*, cp.custom_name, cp.custom_number, cp.custom_logo, cp.epg_shift_min AS pref_shift,
                cp.custom_sort_index AS pref_sort, g.name AS group_name, g.group_key AS group_key
         FROM channel c
-        LEFT JOIN channel_group g  ON g.id = c.group_id
-        LEFT JOIN channel_prefs cp ON cp.playlist_id = c.playlist_id AND cp.stable_key = c.stable_key
-        LEFT JOIN group_prefs gp   ON gp.playlist_id = c.playlist_id AND gp.kind = g.kind AND gp.group_key = g.group_key
-        """
+        """ + EFFECTIVE_GROUP_JOINS
 
         /** Hidden channels and groups (by the user or by a hide rule) never show (§4.3). */
         private const val HIDDEN = """

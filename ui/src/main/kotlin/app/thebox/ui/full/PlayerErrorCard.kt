@@ -62,16 +62,16 @@ fun PlayerErrorCard(state: ErrorCardState, modifier: Modifier = Modifier, archiv
         state.channel?.let { ch ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
                 ChannelLogo(ch, 48.dp, 8.dp)
-                Line(ch.displayName, GuideUi.sans(19, color = GuideUi.Fg70))
+                Line(ch.displayName, GuideUi.sans(24, color = GuideUi.Fg70))
             }
         }
         if (buildFailure != null) {
-            Line(stringResource(ErrorText.archiveHeadline(buildFailure)), GuideUi.sans(30, FontWeight.SemiBold), maxLines = 2)
-            Line(stringResource(ErrorText.archiveStep(buildFailure)), GuideUi.sans(19, color = GuideUi.Fg.copy(alpha = 0.75f)), maxLines = 2)
+            Line(stringResource(ErrorText.archiveHeadline(buildFailure)), GuideUi.sans(36, FontWeight.SemiBold), maxLines = 2)
+            Line(stringResource(ErrorText.archiveStep(buildFailure)), GuideUi.sans(24, color = GuideUi.Fg.copy(alpha = 0.75f)), maxLines = 2)
         } else {
             val e = state.error
-            Line(stringResource(ErrorText.headline(e.code)), GuideUi.sans(30, FontWeight.SemiBold), maxLines = 2)
-            Line(ErrorText.detailLine(res, e.code, e.detail), GuideUi.mono(15, color = GuideUi.Fg55), maxLines = 2)
+            Line(stringResource(ErrorText.headline(e.code)), GuideUi.sans(36, FontWeight.SemiBold), maxLines = 2)
+            Line(ErrorText.detailLine(res, e.code, e.detail), GuideUi.mono(20, color = GuideUi.Fg55), maxLines = 2)
             e.retry?.let { retry ->
                 val shownAt = remember(retry) { System.currentTimeMillis() }
                 var elapsed by remember(retry) { mutableLongStateOf(0L) }
@@ -81,13 +81,13 @@ fun PlayerErrorCard(state: ErrorCardState, modifier: Modifier = Modifier, archiv
                         elapsed = System.currentTimeMillis() - shownAt
                     }
                 }
-                ErrorText.retryLine(res, retry, elapsed)?.let { Line(it, GuideUi.sans(19, color = GuideUi.Fg70)) }
+                ErrorText.retryLine(res, retry, elapsed)?.let { Line(it, GuideUi.sans(24, color = GuideUi.Fg70)) }
             }
             // P-S2 = U-S4: the core model always fills the next step (from the buttons when every step became one), so
             // this line is always drawn; the fallback covers a hand-built state without one.
             Line(
                 stringResource(ErrorText.step(state.textStep ?: NextStep.RETRY)),
-                GuideUi.sans(19, color = GuideUi.Fg.copy(alpha = 0.75f)),
+                GuideUi.sans(24, color = GuideUi.Fg.copy(alpha = 0.75f)),
                 Modifier.testTag(PLAYER_ERROR_STEP_TAG),
                 maxLines = 2,
             )
@@ -101,7 +101,7 @@ fun PlayerErrorCard(state: ErrorCardState, modifier: Modifier = Modifier, archiv
                         fill = PlayerUi.ChipFill,
                         shape = RoundedCornerShape(DesignTokens.Radii.Button),
                         padding = PaddingValues(horizontal = 26.dp, vertical = 14.dp),
-                    ) { c -> Line(stringResource(ErrorText.button(b, state.route)), GuideUi.sans(19, FontWeight.SemiBold, c)) }
+                    ) { c -> Line(stringResource(ErrorText.button(b, state.route)), GuideUi.sans(24, FontWeight.SemiBold, c)) }
                 }
             }
         }

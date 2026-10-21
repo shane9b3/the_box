@@ -43,7 +43,7 @@ interface FavouriteDao {
     @Query("SELECT * FROM favourite WHERE playlist_id = :playlistId AND stable_key = :stableKey")
     suspend fun listsOf(playlistId: Long, stableKey: String): List<FavouriteEntity>
 
-    /** Favourite channels of a list that are present (not missing) and pass the parental predicate. */
+    /** Favourite channels of a list that are present (not missing) and pass the parental predicate (effective group, v5). */
     @Query(
         """
         SELECT c.*, cp.custom_name, cp.custom_number, cp.custom_logo, cp.epg_shift_min AS pref_shift,
@@ -51,9 +51,7 @@ interface FavouriteDao {
         FROM favourite f
         JOIN channel c             ON c.playlist_id = f.playlist_id AND c.stable_key = f.stable_key AND c.missing_since IS NULL
         JOIN playlist p            ON p.id = c.playlist_id AND p.enabled = 1
-        LEFT JOIN channel_group g  ON g.id = c.group_id
-        LEFT JOIN channel_prefs cp ON cp.playlist_id = c.playlist_id AND cp.stable_key = c.stable_key
-        LEFT JOIN group_prefs gp   ON gp.playlist_id = c.playlist_id AND gp.kind = g.kind AND gp.group_key = g.group_key
+        """ + ChannelDao.EFFECTIVE_GROUP_JOINS + """
         WHERE f.list_id = :listId
         """ + ChannelDao.PARENTAL + """
         ORDER BY f.sort_index""",

@@ -20,6 +20,7 @@ import app.thebox.core.playback.HdrKind
 import app.thebox.core.playback.PlaybackWarning
 import app.thebox.core.playback.StreamFormat
 import app.thebox.core.playback.VideoDecoderMode
+import app.thebox.core.playback.timeshift.RecordStop
 import app.thebox.player.api.PlaybackNotice
 import app.thebox.ui.R
 import app.thebox.ui.playback.ErrorText
@@ -49,6 +50,123 @@ object PlayerText {
             val f = ArchiveFailure.entries.firstOrNull { it.name == arg } ?: ArchiveFailure.NO_ARCHIVE
             res.getString(R.string.toast_reason_step, res.getString(ErrorText.archiveHeadline(f)), res.getString(ErrorText.archiveStep(f)))
         }
+        // M6 time-shift commit 0 (docs/design/m6-timeshift.md §13). WP-C owns these bodies and the args the effects pass.
+        /** arg = the playlist name (Xtream: "TS can fix it" path); null = the M3U variant. */
+        PlayerToast.PAUSE_NO_REWIND_HLS, PlayerToast.PAUSE_NO_REWIND_OFF, PlayerToast.PAUSE_NO_REWIND_SPACE,
+        PlayerToast.PAUSE_NO_REWIND_FORMAT, PlayerToast.PAUSE_NO_REWIND_STORAGE ->
+            res.getString(R.string.player_toast_two_parts, noRewindReason(res, kind, arg), noRewindStep(res, kind, arg)!!)
+        /** arg = the next step of the unbuffered pause's reason (once per tune, fix pass S6); null = the reason alone. */
+        PlayerToast.BACK_TO_LIVE_UNBUFFERED -> res.getString(R.string.player_toast_back_to_live_unbuffered).let { if (arg.isNullOrEmpty()) it else res.getString(R.string.player_toast_two_parts, it, arg) }
+        PlayerToast.REWIND_NOTHING_YET -> res.getString(R.string.player_toast_rewind_nothing_yet, args(arg, 0)) // "30 min"
+        // (Fix pass S8) "21:02", then the window ("30 min") when 21:02 is not when the viewer tuned in.
+        PlayerToast.REWIND_START -> if (args(arg, 1).isEmpty()) res.getString(R.string.player_toast_rewind_start, args(arg, 0))
+            else res.getString(R.string.player_toast_rewind_start_window, args(arg, 0), args(arg, 1))
+        PlayerToast.GAP_SKIPPED_PAUSED -> res.getString(R.string.player_toast_gap_skipped_paused, args(arg, 0), args(arg, 1)) // "12 min", "21:26"
+        PlayerToast.GAP_SKIPPED_STREAM -> res.getString(R.string.player_toast_gap_skipped_stream, args(arg, 0), args(arg, 1)) // "40 s", "21:26"
+        PlayerToast.REWIND_STOPPED_STORAGE -> res.getString(R.string.player_toast_rewind_stopped_storage)
+        PlayerToast.REWIND_STOPPED_SLOW -> res.getString(R.string.player_toast_rewind_stopped_slow)
+        PlayerToast.REWIND_LIMITED_TODAY -> res.getString(R.string.player_toast_rewind_limited_today)
+        PlayerToast.LEFT_APP_CLEARED -> res.getString(R.string.player_toast_left_app_cleared)
+        PlayerToast.ZAP_CONFIRM -> res.getString(R.string.player_toast_zap_confirm, args(arg, 0)) // "20 min"
+        PlayerToast.ZAP_CONFIRM_NUMBER -> res.getString(R.string.player_toast_zap_confirm_number, args(arg, 0))
+        PlayerToast.SAVING_STOPPED_CONNECTION -> res.getString(R.string.player_toast_saving_stopped_connection)
+        PlayerToast.JUMPED_TO_LIVE_RESTART -> res.getString(R.string.player_toast_jumped_to_live_restart)
+        PlayerToast.PAUSE_TIP -> res.getString(R.string.player_toast_pause_tip)
+    }
+
+    /** (M6 commit 0) Separates the values of a toast that has several ("12 min" + ARG_SEP + "21:26"). */
+    const val ARG_SEP = app.thebox.core.full.PLAYER_TOAST_ARG_SEP
+
+    /**
+     * (Fix pass, product, 2026-10-19: UX review S6, S7) The reason half of a PAUSE_NO_REWIND_* toast ([arg] as for the
+     * toast: the free size for SPACE).
+     */
+    fun noRewindReason(res: Resources, kind: PlayerToast, arg: String?): String = when (kind) {
+        PlayerToast.PAUSE_NO_REWIND_OFF -> res.getString(R.string.player_reason_rewind_off)
+        PlayerToast.PAUSE_NO_REWIND_SPACE -> res.getString(R.string.player_reason_no_space, args(arg, 0))
+        PlayerToast.PAUSE_NO_REWIND_STORAGE -> res.getString(R.string.player_reason_storage)
+        else -> res.getString(R.string.player_reason_cant_rewind)
+    }
+
+    /**
+     * The next-step half of a PAUSE_NO_REWIND_* toast, which BACK_TO_LIVE_UNBUFFERED repeats once per tune (§13, S6);
+     * null for other kinds. HLS: [arg] is the playlist name (Xtream), null for M3U.
+     */
+    fun noRewindStep(res: Resources, kind: PlayerToast, arg: String?): String? = when (kind) {
+        PlayerToast.PAUSE_NO_REWIND_HLS -> if (arg != null) res.getString(R.string.player_step_hls_xtream, arg) else res.getString(R.string.player_step_hls_m3u)
+        PlayerToast.PAUSE_NO_REWIND_OFF -> res.getString(R.string.player_step_rewind_off)
+        PlayerToast.PAUSE_NO_REWIND_SPACE -> res.getString(R.string.player_step_no_space)
+        PlayerToast.PAUSE_NO_REWIND_FORMAT -> res.getString(R.string.player_step_format)
+        PlayerToast.PAUSE_NO_REWIND_STORAGE -> res.getString(R.string.player_step_storage)
+        else -> null
+    }
+
+    /** The [index]th value of a toast arg ("" when missing). */
+    fun args(arg: String?, index: Int): String = arg?.split(ARG_SEP)?.getOrNull(index).orEmpty()
+
+    // ---- (M6 time-shift, §13) the values inside the time-shift toasts and lines
+
+    /** "40 s" below a minute, else whole minutes rounded ("12 min"). */
+    fun durationArg(res: Resources, ms: Long): String {
+        val sec = (ms.coerceAtLeast(0L) + 500) / 1000
+        return if (sec < 60) res.getString(R.string.player_arg_seconds, sec.toInt())
+        else res.getString(R.string.player_arg_minutes, ((sec + 30) / 60).toInt())
+    }
+
+    /** Whole minutes rounded down ("17 more min": never more than is left). */
+    fun minutesDown(ms: Long): Int = (ms.coerceAtLeast(0L) / 60_000L).toInt()
+
+    /** "21:02" / "9:02" of a display-frame epoch ms in the device zone. */
+    fun clockArg(ms: Long, clock24: Boolean): String = clockOfMs(ms, clock24)
+
+    /** "0.6 GB" (one decimal, GiB like the settings row). */
+    fun gbArg(res: Resources, bytes: Long): String =
+        res.getString(R.string.player_arg_gb, String.format(Locale.getDefault(), "%.1f", bytes / (1024.0 * 1024 * 1024)))
+
+    /**
+     * (M6 §11.4, U-S7) The full-screen pill text: "PAUSED · 4:12 behind" (grows), "4:12 BEHIND", no leading zero
+     * ("1:04:12"); null for the other kinds and for a plain pause without a time-shift ("PAUSED").
+     */
+    fun pillTime(res: Resources, kind: PillKind, behindMs: Long): String? {
+        val t = behindText(behindMs)
+        return when (kind) {
+            PillKind.PAUSED -> if (behindMs >= 1_000) res.getString(R.string.player_pill_paused_behind, t) else null
+            PillKind.BEHIND -> res.getString(R.string.player_pill_behind, t)
+            else -> null
+        }
+    }
+
+    /**
+     * (M6 §11.5) The paused header line: "Can stay paused 17 more min", or why saving stopped and "Press OK" /
+     * "Press OK or ▶" (by whether the remote has sent a media key).
+     */
+    fun pausedHeader(res: Resources, header: app.thebox.core.full.PausedHeader, facts: PausedFacts): String {
+        val press = res.getString(if (facts.mediaKeys) R.string.player_paused_press_ok_play else R.string.player_paused_press_ok)
+        return when (header) {
+            app.thebox.core.full.PausedHeader.SAVING -> res.getString(R.string.player_paused_header_saving, minutesDown(facts.pauseRemainingMs ?: 0L))
+            app.thebox.core.full.PausedHeader.FULL ->
+                res.getString(R.string.player_paused_header_full, durationArg(res, facts.windowMs ?: app.thebox.core.playback.timeshift.TimeshiftConstants.AUTO_LENGTH_SMALL_MS), press)
+            app.thebox.core.full.PausedHeader.HOLD_LIMIT ->
+                res.getString(R.string.player_paused_header_hold_limit, durationArg(res, facts.holdMs ?: 0L), press)
+            app.thebox.core.full.PausedHeader.SLOT_LOST -> res.getString(R.string.player_paused_header_slot_lost, press)
+            app.thebox.core.full.PausedHeader.CATCHUP_COVERS ->
+                res.getString(R.string.player_paused_header_catchup_covers, durationArg(res, app.thebox.core.playback.timeshift.TimeshiftConstants.PAUSE_KEEP_AWAKE_MAX_MS).let { hoursArg(res, it) })
+        }
+    }
+
+    /** "3 h" for whole hours (the catch-up line), else the duration as is. */
+    private fun hoursArg(res: Resources, fallback: String): String {
+        val h = app.thebox.core.playback.timeshift.TimeshiftConstants.PAUSE_KEEP_AWAKE_MAX_MS / 3_600_000L
+        return if (h * 3_600_000L == app.thebox.core.playback.timeshift.TimeshiftConstants.PAUSE_KEEP_AWAKE_MAX_MS) res.getString(R.string.player_arg_hours, h.toInt()) else fallback
+    }
+
+    /** "4:12", "1:04:12", "0:05" (§11.4: no leading zero on the first field). */
+    fun behindText(ms: Long): String {
+        val total = ms.coerceAtLeast(0L) / 1000
+        val h = total / 3600
+        val m = (total % 3600) / 60
+        val s = total % 60
+        return if (h > 0) String.format(Locale.ROOT, "%d:%02d:%02d", h, m, s) else String.format(Locale.ROOT, "%d:%02d", m, s)
     }
 
     fun statLabel(res: Resources, label: StatLabel): String = res.getString(statLabelRes(label))
@@ -98,8 +216,24 @@ object PlayerText {
         is PlaybackNotice.BufferIncreased -> bufferSecondsOf(notice.level)?.let { res.getString(R.string.player_notice_buffer, it) }
             ?: res.getString(R.string.player_notice_buffer_generic)
         PlaybackNotice.LiveResumed -> res.getString(R.string.player_notice_live_resumed)
+        // M6 time-shift commit 0 (docs/design/m6-timeshift.md §13, §16.2); WP-C owns the bodies.
+        /** No toast: `LocalTimelineBackend` hands the gap to the provider (§9.1). */
+        is PlaybackNotice.LocalGap -> null
+        /** The VM toasts GAP_SKIPPED_* with the landing time ("Now at 21:26"), which only the timeline knows. */
+        is PlaybackNotice.GapSkipped -> null
+        is PlaybackNotice.SavingStopped -> when (notice.stop) {
+            RecordStop.SLOT_LOST, RecordStop.PREEMPTED -> res.getString(R.string.player_toast_saving_stopped_connection)
+            RecordStop.DISK_ERROR, RecordStop.STORAGE_EVICTED -> res.getString(R.string.player_toast_rewind_stopped_storage)
+            RecordStop.DISK_TOO_SLOW -> res.getString(R.string.player_toast_rewind_stopped_slow)
+            // Paused header lines or the stashed card say these (§4.4, §11.5); SESSION_END is silent.
+            RecordStop.FULL_WHILE_PAUSED, RecordStop.HOLD_LIMIT, RecordStop.UPSTREAM_FAILED, RecordStop.SESSION_END -> null
+        }
+        PlaybackNotice.LimitedToday -> res.getString(R.string.player_toast_rewind_limited_today)
+        PlaybackNotice.JumpedToLiveRestart -> res.getString(R.string.player_toast_jumped_to_live_restart)
+        PlaybackNotice.LeftAppCleared -> res.getString(R.string.player_toast_left_app_cleared)
         is PlaybackNotice.Warning -> when (notice.warning) {
             PlaybackWarning.NO_AUDIO, PlaybackWarning.AUDIO_UNSUPPORTED -> res.getString(R.string.player_notice_no_audio)
+            PlaybackWarning.AUDIO_TIMESTAMPS -> res.getString(R.string.player_notice_audio_timestamps)
             PlaybackWarning.SOFTWARE_VIDEO -> res.getString(R.string.player_notice_video_software)
             PlaybackWarning.PASSTHROUGH_DISABLED -> passthrough(res, null)
         }
@@ -218,7 +352,7 @@ object PlayerText {
         QuickItem.FAVOURITE_REMOVE -> R.string.player_quick_favourite_remove
         QuickItem.START_OVER -> R.string.player_quick_start_over
         QuickItem.JUMP_TO_LIVE -> R.string.player_quick_jump_to_live
-        QuickItem.TIME_SHIFT -> R.string.player_quick_time_shift
+        QuickItem.TIME_SHIFT -> R.string.player_quick_pause // M6 §11.3: labelled Pause
         QuickItem.PREVIOUS_CHANNEL -> R.string.player_quick_previous
         QuickItem.STREAM_INFO -> R.string.player_quick_stream_info
         QuickItem.VIDEO_DECODER -> R.string.player_quick_decoder

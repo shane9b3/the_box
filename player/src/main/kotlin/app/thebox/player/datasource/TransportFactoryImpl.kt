@@ -8,7 +8,15 @@ import app.thebox.core.playback.CoreLease
 import app.thebox.core.playback.MonoClock
 import app.thebox.core.playback.PlaybackEventType
 import app.thebox.core.playback.StreamFormat
+import app.thebox.player.internal.RingOpen
 import app.thebox.player.internal.StreamSessionContext
+import androidx.media3.datasource.TeeDataSource
+import app.thebox.core.playback.timeshift.TsUpstream
+import app.thebox.player.engine.MediaSourceBuilder
+import app.thebox.player.timeshift.LiveTsUpstream
+import app.thebox.player.timeshift.RingDataSource
+import app.thebox.player.timeshift.RingReaderTelemetry
+import app.thebox.player.internal.WriterHooks
 import app.thebox.player.internal.StreamTelemetry
 import app.thebox.player.internal.TransportFactory
 import okhttp3.Call
@@ -61,6 +69,51 @@ internal class TransportFactoryImpl @Inject constructor(
 
     override fun endSession(tuneId: Long) {
         sessions.remove(tuneId)?.end()
+    }
+
+    /**
+     * (M6 time-shift, docs/design/m6-timeshift.md §5.1, A-S9) A ring reader for the player session [ctx]: every
+     * `RingDataSource` registers itself as a [Terminable] of `ctx.tuneId`'s transport session, so
+     * `endSession(readerTuneId)` (`TuneSession.end()`) cancels a read blocked at the head. The telemetry is the one the
+     * time-shift session built for this reader ([RingOpen.telemetry], §5.2).
+     */
+    override fun ring(ctx: StreamSessionContext, open: RingOpen): Pair<DataSource.Factory, StreamTelemetry> {
+        val session = session(ctx)
+        val telemetry = open.telemetry
+        return DataSource.Factory { RingDataSource(ctx.tuneId, open, telemetry as? RingReaderTelemetry, session) } to telemetry
+    }
+
+    /**
+     * (M6 time-shift, §4.2) The recorder's upstream under the cycle's writer tune id: a `LiveTsDataSource` with the
+     * writer-only hooks, sharing the writer session's telemetry and scope (so `endSession(writerTuneId)` cancels it and
+     * releases the lease). A debug capture sink, when set, still tees the bytes (§2).
+     */
+    override fun writer(ctx: StreamSessionContext, hooks: WriterHooks): Pair<TsUpstream, StreamTelemetry> {
+        val session = session(ctx)
+        val writerCtx = StreamSessionContext(
+            tuneId = ctx.tuneId,
+            resolved = ctx.resolved,
+            broker = ctx.broker,
+            leaseKind = ctx.leaseKind,
+            sinkFactory = ctx.sinkFactory,
+            onEvent = { type, code, detail ->
+                if (type == PlaybackEventType.RECONNECT_OK) hooks.onSplice()
+                ctx.onEvent(type, code, detail)
+            },
+            repairAudioTimestamps = ctx.repairAudioTimestamps,
+        )
+        val live = LiveTsDataSource(
+            ctx = writerCtx,
+            callFactory = clients.live(ctx.resolved.ignoreTlsErrors),
+            telemetry = session.telemetry,
+            watchdog = watchdog,
+            clock = clock,
+            scope = session,
+            onPcrJump = hooks.onPcrJump,
+            reconnectAllowed = hooks.reconnectAllowed,
+        )
+        val source: DataSource = ctx.sinkFactory?.let { TeeDataSource(live, it.createDataSink()) } ?: live
+        return LiveTsUpstream(source, live, MediaSourceBuilder.sessionUri(ctx.tuneId)) to session.telemetry
     }
 
     internal fun openSessions(): Int = sessions.size

@@ -31,6 +31,8 @@ import org.junit.runner.RunWith
  */
 @RunWith(AndroidJUnit4::class)
 class TimeShiftTest : PlayerTestBase() {
+    // These journeys assert M4's provider-archive pause; with the local buffer on they would pause in place (m6-timeshift.md §17.4).
+    override val playerSwitches: String = "timeshift=off"
 
     /** [bufferedMs]: the live buffer at the pause; N3 resumes at the pause point minus it, so the pill reads pause + it. */
     private class Paused(val channel: GuideChannel, val pauseUnix: Double, val resumeUnix: Double, val bufferedMs: Long)

@@ -23,9 +23,15 @@ object GuideTexts {
     const val KEYS_ARROWS = "← → ↑ ↓"; const val HINT_BROWSE = "Browse"
     const val KEYS_OK = "OK"; const val HINT_WATCH = "Watch"
     const val KEYS_HOLD_OK = "Hold OK"; const val HINT_OPTIONS = "Options"
+    const val KEYS_HOLD_BACK = "Hold Back"; const val HINT_FULL_SCREEN = "Full screen"
     const val KEYS_RED = "Red"; const val HINT_REMIND = "Remind"; const val HINT_FROM_START = "From start"
     const val KEYS_CH = "CH±"; const val HINT_PAGE = "Page"
     const val KEYS_DIGITS = "0–9"; const val HINT_CHANNEL = "Channel"
+    // (decision 2026-10-19, guide Left and Groups) The footer names the next Left and the next Back stop.
+    const val KEYS_LEFT = "←"; const val KEYS_RIGHT = "→"; const val KEYS_LR = "← →"; const val KEYS_UD = "↑ ↓"
+    const val KEYS_BACK = "Back"; const val KEYS_YELLOW = "Yellow"
+    const val HINT_GROUPS = "Groups"; const val HINT_TOP = "Search, Settings"; const val HINT_NOW = "Now"
+    const val HINT_EXIT = "Exit"; const val HINT_GUIDE = "Guide"; const val HINT_CHOOSE = "Choose"; const val HINT_OPEN = "Open"
 
     // Announcements (§3.6.6: other zones announce the focused element's label)
     fun tab(i: Int): String = when (i) { 0 -> "Guide"; 1 -> "Search"; else -> "Settings" } + ", tab"

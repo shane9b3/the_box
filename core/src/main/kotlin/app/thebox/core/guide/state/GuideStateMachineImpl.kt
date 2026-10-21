@@ -1,5 +1,7 @@
 package app.thebox.core.guide.state
 
+import app.thebox.core.playback.timeshift.TimeshiftConstants
+import app.thebox.core.common.Hash64
 import app.thebox.core.epg.EpgGenerationInfo
 import app.thebox.core.guide.CellKind
 import app.thebox.core.guide.DayItem
@@ -62,6 +64,7 @@ import app.thebox.core.settings.SettingsEvent
 import app.thebox.core.settings.SettingsMachine
 import app.thebox.core.settings.SettingsRoute
 import app.thebox.core.full.PlayerEvent
+import app.thebox.core.input.DefaultKeyMap
 import app.thebox.core.input.FooterKeyNames
 import app.thebox.core.parental.ParentalAccess
 import app.thebox.core.parental.ParentalActions
@@ -105,7 +108,7 @@ class GuideStateMachineImpl(
     private val nowMs: () -> Long,
 ) : GuideStateMachine, ParentalHost {
 
-    private val _ui = MutableStateFlow(GuideUiState())
+    private val _ui = MutableStateFlow(GuideUiState(booting = true))
     override val ui: StateFlow<GuideUiState> = _ui.asStateFlow()
     override val frame: GuideFrame = GuideFrame().also { it.labels = labels }
     private val _frameVersion = MutableStateFlow(0L)
@@ -171,7 +174,7 @@ class GuideStateMachineImpl(
     private val number = NumberEntryImpl()
 
     // ---------------------------------------------------------------- state
-    private var u = GuideUiState()
+    private var u = GuideUiState(booting = true)
     private var frameDirty = false
     private var curMs = nowMs()
     private var nowMin = (curMs / 60_000L).toInt()
@@ -222,7 +225,6 @@ class GuideStateMachineImpl(
     private var tunedIndex = -1
     private var tunedNowRequestedFor = Int.MIN_VALUE
     private var pendingArchiveHash = 0L
-    private var returnedFromFull = false
     private val suspect = HashSet<Long>()
 
     private var holdingVertical = false
@@ -245,7 +247,28 @@ class GuideStateMachineImpl(
     private var numberCommitting = false
     private var numberPreviewFor: String? = null
     private var numberNotFoundUntil = Long.MAX_VALUE
+    /**
+     * (M6 time-shift, docs/design/m6-timeshift.md §11.1, lead ruling 6) A digit zap in FULL held back by
+     * `PlayerStateMachine.zapNeedsConfirm`: the number stays on screen until this time; OK before it zaps.
+     */
+    private var numberConfirmUntil = Long.MAX_VALUE
     private var numberMode = ScreenMode.GUIDE
+
+    /** Window start of home (the cell containing now): refreshed by [recomputeLimits], which [tick] runs every minute. */
+    private var homeWs = Int.MIN_VALUE
+    /**
+     * (review 2026-10-19, B1) The cell [goHome] focuses, which is not the cell containing now when now falls in a sliver
+     * (the navigator resolves a sliver to the next focusable cell). Cached behind [homeCellKey]; recomputed only when the
+     * home row, now, the limits or the window data change, so [isHome] stays allocation-free between those changes.
+     */
+    private var homeCellStart = Int.MIN_VALUE
+    private var homeCellEnd = Int.MIN_VALUE
+    private var homeCellKey = Long.MIN_VALUE
+    /** (decision 2026-10-19, ruling 7) The raw "next single Left opens Groups" probe and the key over its inputs. */
+    private var leftEdge = false
+    private var edgeKey = Long.MIN_VALUE
+    /** Footer inputs that change without a focus move (zone, overlay, tab, home, probe): [refreshFooter] on change. */
+    private var footerKey = Long.MIN_VALUE
 
     private var exitHintUntil = Long.MAX_VALUE
     private var groupCardUntil = Long.MAX_VALUE
@@ -317,6 +340,7 @@ class GuideStateMachineImpl(
     /** Publishes [u], the frame version and the deadline (the end of every dispatch, and of an outside [request]). */
     private fun publish() {
         refreshUpdate()
+        refreshLeftEdge()
         frame.gridFocused = u.zone == Zone.GRID
         rearmDeferredCard()
         if (u !== _ui.value) _ui.value = u
@@ -349,6 +373,7 @@ class GuideStateMachineImpl(
             is GuideEvent.Window -> onWindow(event.data)
             is GuideEvent.Generation -> onGeneration(event.info)
             is GuideEvent.Info -> onInfo(event.token, event.info)
+            is GuideEvent.Artwork -> onArtwork(event.token, event.url)
             is GuideEvent.TunedNow -> if (event.info != u.tunedNow) u = u.copy(tunedNow = event.info)
             is GuideEvent.Tuned -> onTuned(event.state, event.channel)
             is GuideEvent.Reminders -> onReminders(event)
@@ -366,11 +391,12 @@ class GuideStateMachineImpl(
             is GuideEvent.Archive -> onArchive(event.status)
             is GuideEvent.Player -> number.setCommitAfterMs(event.settings.numberEntryWaitMs)
             GuideEvent.StartFull -> if (somethingTuned()) goFull(EnterReason.LAUNCH) else { pendingFull = true; pendingFullReason = EnterReason.LAUNCH }
+            GuideEvent.StartGuide -> endBoot()
             // (M5, §3.2.5) Quick bar → Settings asks for the PIN first when "Lock settings" is on.
             GuideEvent.OpenSettings -> openSettingsGated(SettingsRoute.Root)
             // M5 commit 0 (docs/design/m5-setup-settings.md §1.9 item 5): OpenSetup opens SETTINGS on its route (the
             // first-run decision sends FirstRun, §3.4.1); setup routes never ask for the PIN.
-            is GuideEvent.OpenSetup -> openSettings(event.route)
+            is GuideEvent.OpenSetup -> { endBoot(); openSettings(event.route) }
             // C-S1: an error card's route opens detached and PIN-free (§3.2.5, S2); BACK returns to FULL.
             is GuideEvent.OpenSettingsDetached -> openSettings(event.route, detached = true)
             // M5 WP-C (§3.9)
@@ -431,11 +457,11 @@ class GuideStateMachineImpl(
         if (u.update != null && u.mode == ScreenMode.GUIDE && updateKey(a)) return
         // C-S2: any other key restarts the update card's idle wait (it stays unfocused while the user browses).
         updateIdleFromMs = curMs
-        if (action != BoxAction.BACK) returnedFromFull = false
         startupFocusPending = false
         pendingReminderHash = 0L
         // H-S11: a fresh press (repeat 0) of any key ends every hold, so a lost key-up cannot leave a hold stuck.
         if (a.repeat == 0) clearHolds(action)
+        endBoot() // a key always ends the boot blank (a cancelled startup PIN, a refused tune)
         if (u.overlay != null && overlayKey(a)) return
         // M4 §3.1.1 step 3: in FULL the player machine takes the action first; false falls through to the guide.
         if (u.mode == ScreenMode.FULL) { val f = full; if (f != null && f.act(a)) return }
@@ -535,7 +561,12 @@ class GuideStateMachineImpl(
             BoxAction.NUMBER_ENTRY -> openNumber(-1)
             BoxAction.PREVIOUS_CHANNEL -> effects.previousChannel()
             BoxAction.EXIT -> exitStep()
-            BoxAction.OPEN_GUIDE -> if (u.mode == ScreenMode.FULL) returnToGuide() else { u = u.copy(zone = Zone.GRID); jumpToNow() }
+            // Decision 2026-10-19 ruling 5: in the guide the Guide key at home opens Groups; elsewhere it jumps to now.
+            BoxAction.OPEN_GUIDE -> when {
+                u.mode == ScreenMode.FULL -> returnToGuide()
+                u.zone == Zone.GRID && isHome() -> openGroups()
+                else -> { u = u.copy(zone = Zone.GRID); jumpToNow() }
+            }
             // M5 (§2.12 item 1, §3.2.5): the bindable Search and Settings keys, from the guide and from FULL.
             BoxAction.OPEN_SEARCH -> openSearch()
             BoxAction.OPEN_SETTINGS -> openSettingsGated(SettingsRoute.Root)
@@ -553,6 +584,8 @@ class GuideStateMachineImpl(
                 // H-S6: an empty source's next step reads "Press Left to choose another group".
                 if (f == null) { if (a.action == BoxAction.LEFT && a.repeat == 0 && lineupSize() == 0) openGroups(); return }
                 val left = a.action == BoxAction.LEFT
+                // Decision 2026-10-19 ruling 1: the navigator's LeftEdge (no earlier watchable cell) is the only grid route
+                // to Groups; whether the focused cell is clipped by the window plays no part. A hold never opens it.
                 if (a.repeat > 0) holdingHorizontal = true
                 val step = a.repeat > 0 && a.heldMs >= HOLD_TIME_STEP_AFTER_MS
                 val move = when {
@@ -656,15 +689,15 @@ class GuideStateMachineImpl(
 
     private fun tabsKey(a: GuideEvent.Act) {
         when (a.action) {
-            BoxAction.LEFT -> if (u.tabFocused > 0) { u = u.copy(tabFocused = u.tabFocused - 1); announceZone() }
-            BoxAction.RIGHT -> if (u.tabFocused < TAB_COUNT - 1) { u = u.copy(tabFocused = u.tabFocused + 1); announceZone() }
+            BoxAction.LEFT -> if (u.tabFocused > 0) { u = u.copy(tabFocused = u.tabFocused - 1); announceZone(); refreshFooter() }
+            BoxAction.RIGHT -> if (u.tabFocused < TAB_COUNT - 1) { u = u.copy(tabFocused = u.tabFocused + 1); announceZone(); refreshFooter() }
             BoxAction.SELECT -> when (u.tabFocused) {
                 TAB_GUIDE -> enterZone(Zone.GRID)
                 TAB_SEARCH -> openSearch()
                 else -> openSettingsGated(SettingsRoute.Root)
             }
             BoxAction.DOWN -> enterZone(if (panelButtons().isNotEmpty()) Zone.PANEL else Zone.HEADER)
-            BoxAction.BACK -> enterZone(Zone.GRID)
+            BoxAction.BACK -> exitStep() // owner ruling 2026-10-18: the top bar is the last stop before the exit step
             BoxAction.UP -> Unit
             else -> commonGuideKey(a.action)
         }
@@ -676,8 +709,8 @@ class GuideStateMachineImpl(
             BoxAction.LEFT -> if (u.panelFocused > 0) { u = u.copy(panelFocused = u.panelFocused - 1); announceZone() }
             BoxAction.RIGHT -> if (u.panelFocused < buttons.size - 1) { u = u.copy(panelFocused = u.panelFocused + 1); announceZone() }
             BoxAction.SELECT -> buttons.getOrNull(u.panelFocused)?.let { panelButton(it) }
-            BoxAction.UP -> enterZone(Zone.TABS)
-            BoxAction.DOWN -> enterZone(Zone.HEADER)
+            BoxAction.UP -> enterZone(Zone.TABS) // lands on Guide (decision 2026-10-19 ruling 3)
+            BoxAction.DOWN -> enterZone(Zone.HEADER, chip = HeaderChip.DAY) // ruling 6: the Day chip, below the buttons
             BoxAction.BACK -> enterZone(Zone.GRID)
             else -> commonGuideKey(a.action)
         }
@@ -716,10 +749,15 @@ class GuideStateMachineImpl(
         }
     }
 
-    private fun enterZone(z: Zone) {
+    /**
+     * (decision 2026-10-19 rulings 3 and 6) [tab]: the tab TABS lands on (Guide from Up; Search from the Back ladder).
+     * [chip]: the chip HEADER lands on (Group from grid row 0 and from the tabs; Day from the panel buttons).
+     */
+    private fun enterZone(z: Zone, tab: Int = TAB_GUIDE, chip: HeaderChip = HeaderChip.GROUP) {
         u = when (z) {
             Zone.PANEL -> u.copy(zone = z, panelFocused = 0)
-            Zone.HEADER -> u.copy(zone = z, headerFocused = 0)
+            Zone.HEADER -> u.copy(zone = z, headerFocused = u.headerChips.indexOf(chip).coerceAtLeast(0))
+            Zone.TABS -> u.copy(zone = z, tabFocused = tab)
             else -> u.copy(zone = z)
         }
         frame.gridFocused = z == Zone.GRID
@@ -757,6 +795,7 @@ class GuideStateMachineImpl(
 
     /** [reason] decides the player's auto-shown bar (§3.1.1): ARCHIVE, REMINDER, SEARCH, LAUNCH, else USER. */
     private fun goFull(reason: EnterReason = EnterReason.USER) {
+        endBoot()
         if (u.mode == ScreenMode.FULL) return
         leavingSettings(ScreenMode.FULL)
         u = u.copy(mode = ScreenMode.FULL, overlay = null, groupCard = null)
@@ -767,7 +806,7 @@ class GuideStateMachineImpl(
         full?.enterFull(curMs, reason)
     }
 
-    /** BACK/OPEN_GUIDE in FULL (B2/F10): GUIDE, viewport MINI, focus home, `returnedFromFull`. */
+    /** BACK/OPEN_GUIDE in FULL (B2/F10): GUIDE, viewport MINI, focus home. */
     private fun returnToGuide() {
         val wasFull = u.mode == ScreenMode.FULL
         u = u.copy(mode = ScreenMode.GUIDE, zone = Zone.GRID, overlay = null, groupCard = null)
@@ -775,7 +814,6 @@ class GuideStateMachineImpl(
         effects.setFullScreen(false)
         if (wasFull) full?.leaveFull()
         goHome()
-        returnedFromFull = true
         frameDirty = true
         refreshFooter()
     }
@@ -796,6 +834,7 @@ class GuideStateMachineImpl(
     }
 
     private fun openSearch() {
+        endBoot()
         u = u.copy(overlay = null)
         setMode(ScreenMode.SEARCH)
         effects.openSearch()
@@ -808,6 +847,7 @@ class GuideStateMachineImpl(
     private fun openSettings(route: SettingsRoute = SettingsRoute.Root, detached: Boolean = false) {
         // C-S1: a detached route is an error card's from FULL; BACK returns there (settingsFromFull) whatever the mode.
         val fromFull = u.mode == ScreenMode.FULL || detached
+        endBoot() // Settings opened during the boot blank (an error card, the debug route): the blank must not outlive it.
         u = u.copy(overlay = null)
         settingsRoute = route
         settingsDetached = detached
@@ -1142,7 +1182,8 @@ class GuideStateMachineImpl(
 
     private fun groupMenu(entry: GuideSourceEntry): List<GroupMenuItem> {
         val lock = if (entry.locked) GroupMenuItem.UNLOCK else GroupMenuItem.LOCK
-        return listOf(GroupMenuItem.HIDE, lock, GroupMenuItem.MOVE_UP, GroupMenuItem.MOVE_DOWN)
+        // m6-channel-editor §2.1: "Edit channels…" is appended last (the M5 items keep their positions).
+        return listOf(GroupMenuItem.HIDE, lock, GroupMenuItem.MOVE_UP, GroupMenuItem.MOVE_DOWN, GroupMenuItem.EDIT)
     }
 
     /**
@@ -1181,12 +1222,18 @@ class GuideStateMachineImpl(
 
     // ---------------------------------------------------------------- Back ladder and exit (§3.4.6)
 
+    /**
+     * Back walks outward (decision 2026-10-19 ruling 2, amending the 2026-10-18 ladder): zone → grid, scrolled or
+     * non-home grid → home, home → the Groups panel (opened "via Back"), whose Back → the top bar with Search focused
+     * ([groupsKey]), top bar → the exit step. Hold Back is the way back to the full-screen player.
+     */
     private fun backLadder() {
         when {
             u.zone != Zone.GRID -> enterZone(Zone.GRID)
-            frame.focus != null && !isHome() -> goHome()
-            somethingTuned() && !returnedFromFull -> goFull()
-            else -> exitStep()
+            // (review 2026-10-19, B1) A goHome() that would not move the focus falls through to the next stop, so the
+            // ladder can never repeat a stop.
+            frame.focus != null && !isHome() -> if (!goHome(onlyIfMoved = true)) openGroups(viaBack = true)
+            else -> openGroups(viaBack = true)
         }
     }
 
@@ -1214,18 +1261,50 @@ class GuideStateMachineImpl(
         return if (tunedIndex >= 0) tunedIndex else f.row
     }
 
-    /** Home = the tuned row (else the current row), the cell containing now, the window placed for now (§3.4.6). */
+    /**
+     * Home = the focus [goHome] produces: the tuned row (else the current row), the window placed for now, and the cell
+     * containing now, or the cell a sliver at now resolves to (review 2026-10-19, B1) (§3.4.6).
+     */
     private fun isHome(): Boolean {
         val f = frame.focus ?: return true
         val row = homeRow()
         if (f.row != row) return false
-        if (nowMin < f.cellStart || nowMin >= f.cellEnd) return false
-        return f.windowStartMin == navigator.focusAt(row, nowMin, ctx(0)).windowStartMin
+        // (review 2026-10-19, S6) The home window start does not depend on the row: cached in recomputeLimits, so the
+        // footer and the edge probe can ask on every publish without allocating.
+        if (f.windowStartMin != homeWs) return false
+        if (nowMin >= f.cellStart && nowMin < f.cellEnd) return true
+        refreshHomeCell(row)
+        return f.cellStart == homeCellStart && f.cellEnd == homeCellEnd
     }
 
-    private fun goHome() {
-        if (frame.focus == null || lineupSize() == 0) return
-        setFocus(navigator.focusAt(homeRow().coerceIn(0, lineupSize() - 1), nowMin, ctx(0)), animate = !lowEnd)
+    /** (review 2026-10-19, B1) Re-resolves the home cell only when one of its inputs changed (see [homeCellStart]). */
+    private fun refreshHomeCell(row: Int) {
+        val size = lineupSize()
+        if (size == 0) return
+        val d = frame.data
+        var k = Hash64.long(Hash64.OFFSET, row.toLong())
+        k = Hash64.long(k, nowMin.toLong()); k = Hash64.long(k, earliest.toLong()); k = Hash64.long(k, latest.toLong())
+        k = Hash64.long(k, d?.seq ?: -1L); k = Hash64.long(k, System.identityHashCode(d).toLong())
+        k = Hash64.long(k, size.toLong())
+        if (k == homeCellKey) return
+        homeCellKey = k
+        val h = navigator.focusAt(row.coerceIn(0, size - 1), nowMin, ctx(0))
+        homeCellStart = h.cellStart
+        homeCellEnd = h.cellEnd
+    }
+
+    /**
+     * Focuses home. With [onlyIfMoved] (the Back ladder) it does nothing and returns false when home is the focus already
+     * (same row, cell and window), so the caller moves on to the next stop (review 2026-10-19, B1).
+     */
+    private fun goHome(onlyIfMoved: Boolean = false): Boolean {
+        val cur = frame.focus ?: return false
+        if (lineupSize() == 0) return false
+        val h = navigator.focusAt(homeRow().coerceIn(0, lineupSize() - 1), nowMin, ctx(0))
+        if (onlyIfMoved && h.row == cur.row && h.cellStart == cur.cellStart && h.cellEnd == cur.cellEnd &&
+            h.windowStartMin == cur.windowStartMin) return false
+        setFocus(h, animate = !lowEnd)
+        return true
     }
 
     private fun jumpToNow() {
@@ -1294,6 +1373,14 @@ class GuideStateMachineImpl(
     }
 
     private fun groupsKey(o: Overlay.Groups, a: GuideEvent.Act) {
+        // (review 2026-10-19, L3) The Guide key toggles Groups: inside the panel (menu included, however it was opened)
+        // it closes it to the grid at home, so a remote whose Guide key opened Groups can close it with the same key.
+        if (a.action == BoxAction.OPEN_GUIDE && u.mode == ScreenMode.GUIDE) {
+            closeOverlay()
+            enterZone(Zone.GRID)
+            if (!isHome()) goHome()
+            return
+        }
         val total = o.shortcuts.size + o.entries.size
         val menu = o.menu
         if (menu != null) {
@@ -1309,6 +1396,10 @@ class GuideStateMachineImpl(
                             // M5 (§3.9.1, §3.9.2): Lock / Unlock ask for the PIN when one is set (SettingsAction).
                             GroupMenuItem.LOCK -> lockAction(locking = true) { effects.setGroupLocked(entry, true); lockToast(GuideToast.GROUP_LOCKED) }
                             GroupMenuItem.UNLOCK -> lockAction(locking = false) { effects.setGroupLocked(entry, false); lockToast(GuideToast.GROUP_UNLOCKED) }
+                            // m6-channel-editor §2.1, §3.1: the editor on this group, through the same gate as Channel options.
+                            GroupMenuItem.EDIT -> (entry.source as? app.thebox.core.guide.GuideSource.Group)?.let { src ->
+                                openSettingsGated(SettingsRoute.ChannelEditor(src.playlistId, src.groupKey))
+                            }
                             else -> item.toAction()?.let { effects.groupAction(entry, it) }
                         }
                     }
@@ -1321,7 +1412,10 @@ class GuideStateMachineImpl(
         when (a.action) {
             BoxAction.UP -> if (o.focused > 0) { u = u.copy(overlay = o.copy(focused = o.focused - 1)); announceOverlay() }
             BoxAction.DOWN -> if (o.focused < total - 1) { u = u.copy(overlay = o.copy(focused = o.focused + 1)); announceOverlay() }
-            BoxAction.RIGHT, BoxAction.BACK -> closeOverlay()
+            BoxAction.RIGHT -> closeOverlay()
+            // Decision 2026-10-19 ruling 2: opened by the Back ladder, Back continues outward to the top bar on Search;
+            // opened any other way (Left at the edge, Yellow, the Group chip, the Guide key), it closes to where it was.
+            BoxAction.BACK -> if (o.viaBack) { closeOverlay(); enterZone(Zone.TABS, tab = TAB_SEARCH) } else closeOverlay()
             BoxAction.SELECT -> {
                 if (o.focused < o.shortcuts.size) {
                     when (o.shortcuts[o.focused]) {
@@ -1355,13 +1449,14 @@ class GuideStateMachineImpl(
         }
     }
 
-    private fun openGroups() {
+    /** [viaBack]: opened by the Back ladder from home (decision 2026-10-19 ruling 2). */
+    private fun openGroups(viaBack: Boolean = false) {
         val cur = currentEntryIndex()
         u = u.copy(
             overlay = Overlay.Groups(
                 shortcuts = SHORTCUTS, entries = sources,
                 focused = SHORTCUTS.size + maxOf(cur, 0).coerceAtMost(maxOf(sources.size - 1, 0)).let { if (sources.isEmpty()) -SHORTCUTS.size else it },
-                current = cur, menu = null, menuFocused = 0,
+                current = cur, menu = null, menuFocused = 0, viaBack = viaBack,
             ),
         )
         announceOverlay()
@@ -1560,13 +1655,16 @@ class GuideStateMachineImpl(
         }
         when (a.action) {
             BoxAction.DIGIT -> if (a.digit in 0..9) {
-                if (number.digit(a.digit, curMs)) { numberCommitting = false; u = u.copy(overlay = numberOverlay(o.preview)) }
+                if (number.digit(a.digit, curMs)) { numberCommitting = false; numberConfirmUntil = Long.MAX_VALUE; u = u.copy(overlay = numberOverlay(o.preview)) }
             }
             BoxAction.UP -> { number.adjust(1); u = u.copy(overlay = numberOverlay(o.preview)) }
             BoxAction.DOWN -> { number.adjust(-1); u = u.copy(overlay = numberOverlay(o.preview)) }
             BoxAction.RIGHT -> { number.advance(); u = u.copy(overlay = numberOverlay(o.preview)) }
             BoxAction.SELECT -> commitNumber()
             BoxAction.BACK -> closeOverlay()
+            // (review 2026-10-19, L4) In the guide, Yellow (Groups) and the Guide key commit the entry like OK and stop
+            // there: run, they would open Groups under the jump the lookup answer is about to make.
+            BoxAction.GROUPS_PANEL, BoxAction.OPEN_GUIDE -> if (u.mode == ScreenMode.GUIDE) commitNumber() else { commitNumber(); return false }
             else -> { commitNumber(); return false }
         }
         return true
@@ -1585,6 +1683,7 @@ class GuideStateMachineImpl(
         numberCommitting = false
         numberPreviewFor = null
         numberNotFoundUntil = Long.MAX_VALUE
+        numberConfirmUntil = Long.MAX_VALUE
         numberToken++
     }
 
@@ -1601,8 +1700,18 @@ class GuideStateMachineImpl(
             numberNotFoundUntil = curMs + NUMBER_NOT_FOUND_MS
             return
         }
+        val inFull = numberMode == ScreenMode.FULL || u.mode == ScreenMode.FULL
+        // (M6, lead ruling 6) Paused ≥ 2 min in a LOCAL time-shift: the first commit only asks (ZAP_CONFIRM_NUMBER, the
+        // number stays on screen); OK within ZAP_CONFIRM_WINDOW_MS commits again and zaps.
+        if (inFull && o != null && numberConfirmUntil == Long.MAX_VALUE && full?.zapNeedsConfirm(curMs) == true) {
+            number.holdForConfirm()
+            numberConfirmUntil = curMs + TimeshiftConstants.ZAP_CONFIRM_WINDOW_MS
+            u = u.copy(overlay = o.copy(preview = channel))
+            return
+        }
+        if (inFull && numberConfirmUntil != Long.MAX_VALUE) full?.zapNeedsConfirm(curMs) // the confirming commit
         if (o != null) closeOverlay() else resetNumber()
-        if (numberMode == ScreenMode.FULL || u.mode == ScreenMode.FULL) { tune(channel); return }
+        if (inFull) { tune(channel); return }
         if (lineupIndex >= 0 && lineupIndex < lineupSize()) {
             u = u.copy(zone = Zone.GRID)
             setFocus(navigator.focusAt(lineupIndex, nowMin, ctx(0)))
@@ -1781,10 +1890,23 @@ class GuideStateMachineImpl(
         val p = u.panel ?: return
         info = loaded
         infoHash = target()?.channel?.identityHash ?: 0L
-        u = u.copy(panel = p.copy(description = loaded?.description ?: "", genre = loaded?.genre))
+        u = u.copy(panel = p.copy(description = loaded?.description ?: "", genre = loaded?.genre, imageUrl = loaded?.iconUrl))
+    }
+
+    /** A looked-up poster (ProgrammeArtwork) for the panel that asked: the EPG's own icon, when there is one, wins. */
+    private fun onArtwork(token: Long, url: String?) {
+        if (token != panelToken || url == null) return
+        val p = u.panel ?: return
+        if (p.imageUrl == null) u = u.copy(panel = p.copy(imageUrl = url))
+    }
+
+    /** Owner ruling 2026-10-17: ends the boot blank ([GuideUiState.booting]). */
+    private fun endBoot() {
+        if (u.booting) u = u.copy(booting = false)
     }
 
     private fun onTuned(state: TunedState, channel: GuideChannel?) {
+        if (state.phase != MiniPhase.IDLE) endBoot()
         val identityChanged = state.identity != tuned.identity
         tuned = state
         tunedChannel = channel
@@ -1948,6 +2070,8 @@ class GuideStateMachineImpl(
         if (o is Overlay.Number) {
             if (o.notFound) {
                 if (curMs >= numberNotFoundUntil) closeOverlay()
+            } else if (numberConfirmUntil != Long.MAX_VALUE) {
+                if (curMs >= numberConfirmUntil) closeOverlay() // (M6) the confirm window passed: no zap
             } else if (!numberCommitting) {
                 if (number.due(curMs)) commitNumber()
                 else if (number.previewDue(curMs) && numberPreviewFor != number.digits) {
@@ -1977,6 +2101,7 @@ class GuideStateMachineImpl(
         val o = u.overlay
         if (o is Overlay.Number) {
             d = if (o.notFound) minOf(d, numberNotFoundUntil)
+            else if (numberConfirmUntil != Long.MAX_VALUE) minOf(d, numberConfirmUntil)
             else if (!numberCommitting) minOf(d, number.commitAtMs(), if (numberPreviewFor != number.digits) number.previewAtMs() else Long.MAX_VALUE) else d
         }
         if (o is Overlay.Exit && !o.dialog) d = minOf(d, exitHintUntil)
@@ -2053,7 +2178,7 @@ class GuideStateMachineImpl(
             return
         }
         val old = u.panel
-        if (newCell) { panelToken++; info = null; armDescription() }
+        if (newCell) { panelToken++; info = null }
         val noInfo = t.kind == CellKind.GAP || t.kind == CellKind.NO_EPG
         val title = when {
             t.kind == CellKind.PROGRAMME -> t.title ?: GuideTexts.NO_INFORMATION
@@ -2076,11 +2201,13 @@ class GuideStateMachineImpl(
             else -> old?.description
         }
         val genre = if (newCell || noInfo) null else old?.genre
+        // (review 2026-10-18) Carried like the description: a tick or a Tuned rebuild must not drop the poster.
+        val imageUrl = if (newCell || noInfo) null else old?.imageUrl
         val buttons = buttonsFor(t)
         val p = PanelState(
             channelNumber = ch.number, channelName = ch.displayName, genre = genre, onNow = t.cls == CellClass.ON_NOW,
             catchupDays = archiveDays(ch), title = title, timeLine = timeLine, description = description,
-            buttons = buttons, noInfo = noInfo,
+            buttons = buttons, noInfo = noInfo, imageUrl = imageUrl,
         )
         var pf = u.panelFocused
         if (old != null && old.buttons != buttons) {
@@ -2091,6 +2218,9 @@ class GuideStateMachineImpl(
         var zone = u.zone
         if (zone == Zone.PANEL && buttons.isEmpty()) zone = Zone.HEADER
         if (p != old || pf != u.panelFocused || zone != u.zone) u = u.copy(panel = p, panelFocused = pf, zone = zone)
+        // (2026-10-18) Armed on the new panel, not the old one: a description already loaded for the previous cell
+        // used to leave the timer unarmed, so the next cell's description never arrived until a further move.
+        if (newCell) armDescription()
         refreshFooter()
     }
 
@@ -2141,15 +2271,116 @@ class GuideStateMachineImpl(
     }
 
     /**
+     * (decision 2026-10-19 ruling 7; review B1) Once per publish: the "next single Left opens Groups" probe
+     * ([GuideNavigator.leftEdge], never `move(LEFT)`) behind a cheap key over every input it reads (focus, window data,
+     * rows, now, earliest, suspect channels, lineup size), so a tick, an archive failure, a row or window arrival or a
+     * reclamp refreshes the cue without a key press. Sets the drawn cues ([GuideFrame.leftEdgeCue] and
+     * [GuideFrame.clipCue], GRID with no overlay only) and refreshes the footer when one of its inputs changed.
+     */
+    private fun refreshLeftEdge() {
+        val f = frame.focus
+        val size = lineupSize()
+        var k = Hash64.OFFSET
+        if (f == null) k = Hash64.long(k, -1L)
+        else { k = Hash64.long(k, f.row.toLong()); k = Hash64.long(k, f.cellStart.toLong()); k = Hash64.long(k, f.cellEnd.toLong()) }
+        val d = frame.data
+        k = Hash64.long(k, d?.seq ?: -1L); k = Hash64.long(k, System.identityHashCode(d).toLong())
+        k = Hash64.long(k, frame.rows.version); k = Hash64.long(k, System.identityHashCode(frame.rows).toLong())
+        k = Hash64.long(k, nowMin.toLong()); k = Hash64.long(k, earliest.toLong())
+        k = Hash64.long(k, suspect.size.toLong()); k = Hash64.long(k, size.toLong())
+        if (k != edgeKey) {
+            edgeKey = k
+            leftEdge = if (f == null) size == 0 else navigator.leftEdge(f, ctx(0))
+        }
+        val active = u.mode == ScreenMode.GUIDE && u.overlay == null && u.zone == Zone.GRID && f != null
+        val edgeCue = active && leftEdge
+        val clipCue = active && !leftEdge && f!!.cellStart < frame.windowStartMin
+        if (edgeCue != frame.leftEdgeCue || clipCue != frame.clipCue) {
+            frame.leftEdgeCue = edgeCue
+            frame.clipCue = clipCue
+            frameDirty = true
+        }
+        // (review 2026-10-19, S1) Like the panel, the footer waits for the end of a vertical hold: release() rebuilds the
+        // panel and the footer, and the next publish re-keys it. A 25 Hz hold does no per-row footer work.
+        if (holdingVertical) return
+        val o = u.overlay
+        var fk = Hash64.long(Hash64.OFFSET, u.mode.ordinal.toLong())
+        fk = Hash64.long(fk, u.zone.ordinal.toLong()); fk = Hash64.long(fk, u.tabFocused.toLong())
+        fk = Hash64.long(fk, when (o) { null -> 0L; is Overlay.Groups -> if (o.menu != null) 1L else if (o.viaBack) 2L else 3L; else -> 4L })
+        fk = Hash64.bool(fk, leftEdge); fk = Hash64.bool(fk, f == null); fk = Hash64.bool(fk, isHome())
+        if (fk != footerKey) { footerKey = fk; refreshFooter() }
+    }
+
+    /**
      * §3.18.3: from KeysSeen (keys the device has actually reported), never from deviceHasKey. (M5, §3.8.4) Once the
      * host sends [GuideEvent.KeyHints] (EffectiveKeyMap.keysFor ∩ seen), the hints follow the user's mapping: a
      * remapped Red stops advertising Remind and the key that now carries Start over / Remind / Page is named instead.
+     *
+     * (decision 2026-10-19 ruling 8) The list is in priority order; the UI measures it and drops hints from the end,
+     * never wrapping. GRID names the next Left (when it opens Groups) and the next Back stop; the Groups panel and the
+     * top bar have their own sets; PANEL, HEADER and the other overlays keep the M3 set.
      */
     private fun footer(t: Target?): List<FooterHint> {
-        val out = ArrayList<FooterHint>(6)
+        val out = ArrayList<FooterHint>(10)
+        val o = u.overlay
+        if (u.mode == ScreenMode.GUIDE) {
+            if (o is Overlay.Groups && o.menu == null) {
+                out += FooterHint(GuideTexts.KEYS_UD, GuideTexts.HINT_CHOOSE)
+                out += FooterHint(GuideTexts.KEYS_OK, GuideTexts.HINT_OPEN)
+                if (o.viaBack) {
+                    out += FooterHint(GuideTexts.KEYS_BACK, GuideTexts.HINT_TOP)
+                    out += FooterHint(GuideTexts.KEYS_RIGHT, GuideTexts.HINT_GUIDE)
+                } else {
+                    out += FooterHint(GuideTexts.KEYS_BACK, GuideTexts.HINT_GUIDE)
+                }
+                return out
+            }
+            if (o == null && u.zone == Zone.TABS) {
+                out += FooterHint(GuideTexts.KEYS_LR, GuideTexts.HINT_CHOOSE)
+                out += FooterHint(GuideTexts.KEYS_OK, GuideTexts.HINT_OPEN)
+                out += FooterHint(GuideTexts.KEYS_BACK, GuideTexts.HINT_EXIT)
+                return out
+            }
+            if (o == null && u.zone == Zone.GRID) {
+                if (frame.focus == null) {
+                    // Empty source (or nothing placed yet): Left opens Groups only on an empty lineup; Back always does.
+                    if (leftEdge) out += FooterHint(GuideTexts.KEYS_LEFT, GuideTexts.HINT_GROUPS)
+                    out += FooterHint(GuideTexts.KEYS_BACK, GuideTexts.HINT_GROUPS)
+                    return out
+                }
+                val home = isHome()
+                out += FooterHint(GuideTexts.KEYS_ARROWS, GuideTexts.HINT_BROWSE)
+                out += FooterHint(GuideTexts.KEYS_OK, GuideTexts.HINT_WATCH)
+                if (leftEdge) out += FooterHint(GuideTexts.KEYS_LEFT, GuideTexts.HINT_GROUPS)
+                out += FooterHint(GuideTexts.KEYS_BACK, if (home) GuideTexts.HINT_GROUPS else GuideTexts.HINT_NOW)
+                // The Groups key is named only where neither Left nor Back already opens Groups.
+                if (!home && !leftEdge) groupsKeyName()?.let { out += FooterHint(it, GuideTexts.HINT_GROUPS) }
+                out += FooterHint(GuideTexts.KEYS_HOLD_OK, GuideTexts.HINT_OPTIONS)
+                if (somethingTuned()) out += FooterHint(GuideTexts.KEYS_HOLD_BACK, GuideTexts.HINT_FULL_SCREEN)
+                keyHintsTail(t, out)
+                return out
+            }
+        }
         out += FooterHint(GuideTexts.KEYS_ARROWS, GuideTexts.HINT_BROWSE)
         out += FooterHint(GuideTexts.KEYS_OK, GuideTexts.HINT_WATCH)
         out += FooterHint(GuideTexts.KEYS_HOLD_OK, GuideTexts.HINT_OPTIONS)
+        if (somethingTuned()) out += FooterHint(GuideTexts.KEYS_HOLD_BACK, GuideTexts.HINT_FULL_SCREEN)
+        keyHintsTail(t, out)
+        return out
+    }
+
+    /**
+     * The key that opens Groups, or null when none was seen. (decision 2026-10-19 ruling 4) The four colour keys count as
+     * one family: once any was seen, Yellow may be named (the host applies the same rule to [GuideEvent.KeyHints]).
+     */
+    private fun groupsKeyName(): String? {
+        val hints = keyHints
+        if (hints != null) return hints[BoxAction.GROUPS_PANEL].orEmpty().firstOrNull()?.let { FooterKeyNames.of(it) }
+        return if (Keys.PROG_YELLOW in DefaultKeyMap.seenWithColourFamily(keysSeen)) GuideTexts.KEYS_YELLOW else null
+    }
+
+    /** [Red] · [CH±] · [0–9], from the key map when the host sent it, else from the keys seen (M3 rule). */
+    private fun keyHintsTail(t: Target?, out: MutableList<FooterHint>) {
         val hints = keyHints
         if (hints != null) {
             val future = t?.cls == CellClass.FUTURE
@@ -2165,16 +2396,16 @@ class GuideStateMachineImpl(
             if (keysSeen.any { it in Keys.DIGIT_0..Keys.DIGIT_0 + 9 || it in Keys.NUMPAD_0..Keys.NUMPAD_0 + 9 }) {
                 out += FooterHint(GuideTexts.KEYS_DIGITS, GuideTexts.HINT_CHANNEL)
             }
-            return out
+            return
         }
-        if (Keys.PROG_RED in keysSeen) {
+        // (review 2026-10-19, L2) The fallback applies the colour family to Red too, as GuideViewModel.keyHints does.
+        if (Keys.PROG_RED in DefaultKeyMap.seenWithColourFamily(keysSeen)) {
             out += FooterHint(GuideTexts.KEYS_RED, if (t?.cls == CellClass.FUTURE) GuideTexts.HINT_REMIND else GuideTexts.HINT_FROM_START)
         }
         if (Keys.CHANNEL_UP in keysSeen) out += FooterHint(GuideTexts.KEYS_CH, GuideTexts.HINT_PAGE)
         if (keysSeen.any { it in Keys.DIGIT_0..Keys.DIGIT_0 + 9 || it in Keys.NUMPAD_0..Keys.NUMPAD_0 + 9 }) {
             out += FooterHint(GuideTexts.KEYS_DIGITS, GuideTexts.HINT_CHANNEL)
         }
-        return out
     }
 
     private fun refreshSourceLabel() {
@@ -2217,6 +2448,8 @@ class GuideStateMachineImpl(
         earliest = limits.earliestMin(nowMin, days, dataWindow, generation?.windowFromMin)
         latest = limits.latestMin(nowMin, dataWindow, generation?.windowToMin)
         if (frame.earliestMin != earliest) { frame.earliestMin = earliest; frameDirty = true }
+        // (review 2026-10-19, S6) Home's window start, for an allocation-free isHome(); row-independent (§3.3.2).
+        homeWs = navigator.focusAt(0, nowMin, ctx(0)).windowStartMin
         if (!reclamp) return
         val f = frame.focus ?: return
         val ws = limits.clampWs(f.windowStartMin, earliest, latest)
@@ -2303,6 +2536,7 @@ class GuideStateMachineImpl(
         GroupMenuItem.MOVE_UP -> app.thebox.core.guide.GroupAction.MOVE_UP
         GroupMenuItem.MOVE_DOWN -> app.thebox.core.guide.GroupAction.MOVE_DOWN
         GroupMenuItem.LOCK, GroupMenuItem.UNLOCK -> null // handled by lockAction (§3.9.1), not a library GroupAction
+        GroupMenuItem.EDIT -> null // opens Settings (m6-channel-editor §2.1; WP-A wires it)
     }
 
     companion object {
@@ -2323,7 +2557,7 @@ class GuideStateMachineImpl(
         const val REMINDER_CARD_GUARD_MS = 600L
         const val NUMBER_NOT_FOUND_MS = 1_500L
         const val SNAP_AFTER_REPEATS = 3
-        const val VISIBLE_ROWS = 6
+        const val VISIBLE_ROWS = GuideGeometry.VISIBLE_ROWS
         /** Rows around the top the rows cache should hold (§0.5: `[top − 6, top + 12)`). */
         const val ROWS_BEHIND = 6
         const val ROWS_AHEAD = 12

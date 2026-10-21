@@ -131,13 +131,29 @@ class GuideKeyTableTest {
             "grid_row3_noepg" to { home().keys(DOWN, DOWN, DOWN) },
             "grid_last" to { home().also { w -> repeat(9) { w.press(DOWN) } } },
             "grid_scrolled" to { home().keys(DOWN, RIGHT, RIGHT) },
+            // (decision 2026-10-19; review S3) 100 min later row 0's on-now cell (FROM+2905…3025) starts before the window
+            // (FROM+2940); the previous cell (FROM+2895…2905) is in the 7-day archive.
+            "grid_home_clipped_archive" to {
+                GuideWorld(startMs = (GuideWorld.NOW_MIN + 100) * 60_000L + 20_000L).also {
+                    val f = it.machine.frame.focus!!
+                    check(f.row == 0 && f.cellStart < it.machine.frame.windowStartMin) { "focused cell not clipped: $f" }
+                }
+            },
             "tabs" to { home().keys(UP, UP, UP) },
             "tabs_search" to { home().keys(UP, UP, UP, RIGHT) },
             "tabs_settings" to { home().keys(UP, UP, UP, RIGHT, RIGHT) },
             "panel" to { home().keys(UP, UP) },
+            // (review S6) The top bar was left on Search (tab 1), then Down to the panel.
+            "panel_stale_tab" to { home().keys(UP, UP, UP, RIGHT, DOWN).also { check(it.ui.zone == Zone.PANEL && it.ui.tabFocused == 1) } },
             "panel_from_start" to { home().keys(UP, UP, RIGHT) },
             "panel_more" to { home().keys(UP, UP, RIGHT, RIGHT) },
             "header" to { home().keys(UP) },
+            // (review S6) An empty source has no panel buttons: Up from the header goes straight to the top bar.
+            "header_no_panel" to {
+                home().keys(UP, UP, UP, RIGHT, DOWN, DOWN, DOWN, FAVOURITES, UP).also {
+                    check(it.ui.zone == Zone.HEADER && it.ui.panel?.buttons.isNullOrEmpty() && it.ui.tabFocused == 1) { "not header without panel: ${it.ui}" }
+                }
+            },
             "header_day" to { home().keys(UP, RIGHT) },
             "header_now" to { home().keys(SEEK_FORWARD, UP, RIGHT).also { check(it.ui.headerChips[it.ui.headerFocused] == HeaderChip.NOW) } },
             "groups" to { home().keys(GROUPS_PANEL) },
@@ -145,6 +161,10 @@ class GuideKeyTableTest {
             "groups_settings" to { home().keys(GROUPS_PANEL, UP, UP) },
             "groups_news" to { home().keys(GROUPS_PANEL, DOWN) },
             "groups_menu" to { home().keys(GROUPS_PANEL, DOWN, CONTEXT_MENU) },
+            "groups_via_back" to { home().keys(BACK).also { check((it.ui.overlay as Overlay.Groups).viaBack) } },
+            "groups_via_back_zapped" to { home().keys(BACK, ZAP_DOWN).also { check((it.ui.overlay as Overlay.Groups).viaBack) } },
+            "groups_from_tabs" to { home().keys(UP, UP, UP, GROUPS_PANEL).also { check(it.ui.zone == Zone.TABS && it.ui.overlay is Overlay.Groups) } },
+            "groups_via_guide" to { home().keys(OPEN_GUIDE).also { check(!(it.ui.overlay as Overlay.Groups).viaBack) } },
             "days" to { home().keys(UP, RIGHT, SELECT) },
             "menu" to { home().keys(CONTEXT_MENU) },
             "menu_favourite" to { home().keys(CONTEXT_MENU, DOWN) },
@@ -152,9 +172,10 @@ class GuideKeyTableTest {
             "sheet" to { home().keys(DOWN, RIGHT, SELECT) },
             "sheet_watch" to { home().keys(DOWN, RIGHT, SELECT, RIGHT) },
             "number" to { home().also { it.press(DIGIT, digit = 1) } },
-            "exit_hint" to { idle().keys(BACK) },
-            "exit_dialog" to { GuideWorld(startTuned = false, settings = GuideSettings(exitConfirmation = ExitConfirmation.ASK)).keys(BACK) },
-            "exit_dialog_cancel" to { GuideWorld(startTuned = false, settings = GuideSettings(exitConfirmation = ExitConfirmation.ASK)).keys(BACK, RIGHT) },
+            // Decision 2026-10-19 ruling 2: home → Groups → top bar (Search) → exit step.
+            "exit_hint" to { idle().keys(BACK, BACK, BACK) },
+            "exit_dialog" to { GuideWorld(startTuned = false, settings = GuideSettings(exitConfirmation = ExitConfirmation.ASK)).keys(BACK, BACK, BACK) },
+            "exit_dialog_cancel" to { GuideWorld(startTuned = false, settings = GuideSettings(exitConfirmation = ExitConfirmation.ASK)).keys(BACK, BACK, BACK, RIGHT) },
             "card_guard" to ::alerted,
             "card" to { alerted().also { it.advance(600) } },
             "card_dismiss" to { alerted().also { it.advance(600); it.press(RIGHT) } },

@@ -66,6 +66,7 @@ on 2026-10-13.
 export JAVA_HOME=/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home   # Homebrew JDK 21
 export ANDROID_HOME=$HOME/Library/Android/sdk
 # local.properties (gitignored): sdk.dir=/Users/<you>/Library/Android/sdk
+#   thebox.tmdbKey=<TMDB v3 API key>   # optional: the app's own key for programme posters (or env THEBOX_TMDB_KEY)
 # One-time: sdkmanager "platforms;android-37.0"
 
 ./gradlew --no-daemon :core:test :data:testDebugUnitTest :app:assembleDebug   # CI smoke build (M1 onwards)

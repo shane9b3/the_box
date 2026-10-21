@@ -50,7 +50,7 @@ fun PickerSheet(state: PickerState, modifier: Modifier = Modifier) {
             .padding(horizontal = 16.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        Line(stringResource(PlayerText.pickerTitle(state.kind)), GuideUi.sans(24, FontWeight.SemiBold), Modifier.padding(start = 12.dp, bottom = 12.dp))
+        Line(stringResource(PlayerText.pickerTitle(state.kind)), GuideUi.sans(30, FontWeight.SemiBold), Modifier.padding(start = 12.dp, bottom = 12.dp))
         val rows = state.choices.size + if (state.remember != null) 1 else 0
         val top = (state.focused - VISIBLE / 2).coerceIn(0, (rows - VISIBLE).coerceAtLeast(0))
         for (i in top until minOf(rows, top + VISIBLE)) {
@@ -89,10 +89,10 @@ private fun PickerRow(text: String, note: String?, checked: Boolean, focused: Bo
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Box(Modifier.width(24.dp)) { if (checked) Line("✓", GuideUi.sans(21, FontWeight.SemiBold, if (focused) fg else GuideUi.Accent)) }
+        Box(Modifier.width(24.dp)) { if (checked) Line("✓", GuideUi.sans(26, FontWeight.SemiBold, if (focused) fg else GuideUi.Accent)) }
         Column(Modifier.weight(1f)) {
-            Line(text, GuideUi.sans(21, FontWeight.Medium, fg))
-            note?.let { Line(it, GuideUi.sans(15, color = fg.copy(alpha = 0.7f))) }
+            Line(text, GuideUi.sans(26, FontWeight.Medium, fg))
+            note?.let { Line(it, GuideUi.sans(20, color = fg.copy(alpha = 0.7f))) }
         }
     }
 }
@@ -112,9 +112,9 @@ private fun RememberRow(checked: Boolean, focused: Boolean) {
         horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         Box(Modifier.size(22.dp).border(2.dp, fg, RoundedCornerShape(5.dp)), contentAlignment = Alignment.Center) {
-            if (checked) Line("✓", GuideUi.sans(17, FontWeight.Bold, fg))
+            if (checked) Line("✓", GuideUi.sans(22, FontWeight.Bold, fg))
         }
-        Line(stringResource(R.string.player_picker_remember), GuideUi.sans(19, FontWeight.Medium, fg))
+        Line(stringResource(R.string.player_picker_remember), GuideUi.sans(24, FontWeight.Medium, fg))
     }
 }
 

@@ -55,6 +55,24 @@ class RowRecordingTest {
     }
 
     @Test
+    fun theLeftCuesChangeNoRowKey() {
+        // Decision 2026-10-19: both chevrons are drawn outside every row recording (the edge cue after the content clip,
+        // the clip cue inside the never-recorded focused cell), so toggling them re-records nothing.
+        val c = Replaying()
+        frame.gridFocused = true
+        renderer.draw(c, frame, frame.windowStartMin, 0f, GuideReferenceFrame.SCROLL_ROW)
+        val rowPasses = c.recorded
+        c.recorded = 0
+        for ((edge, clip) in listOf(true to false, false to true, true to true, false to false)) {
+            frame.leftEdgeCue = edge; frame.clipCue = clip
+            c.replayed = 0
+            renderer.draw(c, frame, frame.windowStartMin, 0f, GuideReferenceFrame.SCROLL_ROW)
+            assertEquals(0, c.recorded, "edge=$edge clip=$clip: nothing re-recorded")
+            assertEquals(rowPasses, c.replayed, "edge=$edge clip=$clip: every row pass replays")
+        }
+    }
+
+    @Test
     fun timeAndHorizontalScrollChangeEveryKey() {
         val c = Replaying()
         renderer.draw(c, frame, frame.windowStartMin, 0f, GuideReferenceFrame.SCROLL_ROW)

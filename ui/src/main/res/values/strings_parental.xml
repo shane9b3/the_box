@@ -96,8 +96,8 @@
     <string name="mapping_action_start_over">Start over</string>
     <string name="mapping_action_jump_to_live">Jump to live</string>
     <string name="mapping_action_time_shift">Time shift</string>
-    <string name="mapping_action_prev_programme">Previous programme</string>
-    <string name="mapping_action_next_programme">Next programme</string>
+    <string name="mapping_action_prev_programme">Previous program</string>
+    <string name="mapping_action_next_programme">Next program</string>
     <string name="mapping_action_zap_up">Channel up</string>
     <string name="mapping_action_zap_down">Channel down</string>
     <string name="mapping_action_previous_channel">Previous channel</string>

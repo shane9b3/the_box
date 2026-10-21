@@ -51,16 +51,16 @@ fun ProgrammeSheet(state: GuideUiState, anchor: Rect?, modifier: Modifier = Modi
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         state.panel?.let { p ->
-            Line(p.title, GuideUi.sans(24, FontWeight.SemiBold))
-            Line(p.timeLine, GuideUi.mono(16, color = GuideUi.Fg70))
+            Line(p.title, GuideUi.sans(30, FontWeight.SemiBold))
+            Line(p.timeLine, GuideUi.mono(22, color = GuideUi.Fg70))
         }
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Chip(o.focused == 0, fill = GuideUi.White10, border = GuideUi.White16, shape = RoundedCornerShape(DesignTokens.Radii.Button), padding = PaddingValues(horizontal = 22.dp, vertical = 12.dp)) { color ->
                 Dot(if (o.reminderSet) GuideUi.Live else if (o.focused == 0) color.copy(alpha = 0.5f) else GuideUi.Fg50, 10.dp)
-                Line(stringResource(if (o.reminderSet) R.string.guide_btn_reminder_set else R.string.guide_btn_remind), GuideUi.sans(18, FontWeight.Medium, color))
+                Line(stringResource(if (o.reminderSet) R.string.guide_btn_reminder_set else R.string.guide_btn_remind), GuideUi.sans(24, FontWeight.Medium, color))
             }
             Chip(o.focused == 1, fill = GuideUi.White10, border = GuideUi.White16, shape = RoundedCornerShape(DesignTokens.Radii.Button), padding = PaddingValues(horizontal = 22.dp, vertical = 12.dp)) { color ->
-                Line(stringResource(R.string.guide_btn_watch_channel_now), GuideUi.sans(18, FontWeight.Medium, color))
+                Line(stringResource(R.string.guide_btn_watch_channel_now), GuideUi.sans(24, FontWeight.Medium, color))
             }
         }
     }

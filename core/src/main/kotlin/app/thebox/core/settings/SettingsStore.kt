@@ -101,6 +101,13 @@ data class GuidePrefs(
     val reminderLeadSec: Int = 60,
     /** "Show advanced settings" (product S11). */
     val advancedSettings: Boolean = false,
+    /**
+     * (owner ruling 2026-10-18) Programme posters from TMDB when the EPG has none. On by default: the app ships with its
+     * own key (`local.properties` → `BuildConfig.TMDB_KEY`), so this works out of the box; only the programme title
+     * leaves the device. There is no user key (owner ruling 2026-10-19); the former user-key flag in older
+     * documents and backups is ignored on read (`ignoreUnknownKeys`).
+     */
+    val posters: Boolean = true,
 )
 
 enum class SubtitleMode { OFF, ON, FORCED_ONLY }
@@ -126,7 +133,26 @@ data class PlaybackPrefs(
     val resumeAfterStandby: Boolean = true,
     /** Package name of the external player, null = none (product §4.4). */
     val externalPlayer: String? = null,
+    // (M6 time-shift commit 0, docs/design/m6-timeshift.md §12; additive, defaults keep old documents valid)
+    /** "Pause and rewind" (SIMPLE): the local buffer length. */
+    val timeshift: TimeshiftLength = TimeshiftLength.AUTO,
+    /** "Keep recording while paused" (ADVANCED): how long a paused tune keeps its provider connection. */
+    val timeshiftHold: TimeshiftHold = TimeshiftHold.AUTO,
+    /** "Protect built-in storage" (ADVANCED): the internal daily write cap (§8.4). */
+    val storageProtection: StorageProtection = StorageProtection.AUTO,
 )
+
+/**
+ * (M6 time-shift commit 0, §12) "Pause and rewind". AUTO = 30 min on ≤ 16 GB storage, else 1 hour (lead ruling 2);
+ * PAUSE_ONLY saves only while paused (§4.5); OFF = no buffer. Persisted by name; append-only.
+ */
+@kotlinx.serialization.Serializable enum class TimeshiftLength { AUTO, MIN_15, MIN_30, H_1, H_2, PAUSE_ONLY, OFF }
+
+/** (M6 commit 0, §7.3, §12) "Keep recording while paused". AUTO = until the buffer is full, on every account (lead ruling 3). */
+@kotlinx.serialization.Serializable enum class TimeshiftHold { AUTO, MIN_10, MIN_30, H_1, UNTIL_FULL }
+
+/** (M6 commit 0, §8.4, §12) "Protect built-in storage". AUTO = the 12 GB/day cap on ≤ 16 GB storage, none above. */
+@kotlinx.serialization.Serializable enum class StorageProtection { AUTO, OFF }
 
 /** User-settable part of :data's DataSettingsSnapshot. */
 @kotlinx.serialization.Serializable

@@ -38,6 +38,7 @@ coil = "3.6.3"
 coroutines = "1.11.0"
 serialization = "1.11.0"
 tink = "1.23.0"
+re2j = "1.8"
 acra = "5.14.2"
 # M5 (docs/design/m5-setup-settings.md §6.6, §9 F9): QR for the phone page. MIT; latest on Maven Central (2022-04-17).
 qrcodegen = "1.8.0"
@@ -137,6 +138,7 @@ kxml2 = { module = "net.sf.kxml:kxml2", version.ref = "kxml2" }
 
 # Security / crash reporting
 tink-android = { module = "com.google.crypto.tink:tink-android", version.ref = "tink" }
+re2j = { module = "com.google.re2j:re2j", version.ref = "re2j" }
 acra-core = { module = "ch.acra:acra-core", version.ref = "acra" }
 qrcodegen = { module = "io.nayuki:qrcodegen", version.ref = "qrcodegen" }
 

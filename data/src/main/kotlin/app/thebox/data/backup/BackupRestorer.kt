@@ -280,7 +280,7 @@ internal class BackupRestorer(
                     }
                     is BackupRecord.ChannelPref -> {
                         val pid = idOf[rec.playlistUid] ?: run { problems += rec.playlistUid; null } ?: continue
-                        val fields = rec.fields.filterKeys { it in MergePlanner.CHANNEL_PREF_COLUMNS }
+                        val fields = rec.fields.filterKeys { it in MergePlanner.CHANNEL_PREF_COLUMNS }.let { f -> dropDanglingGroup(conn, pid, f) }
                         conn.exec("INSERT OR IGNORE INTO channel_prefs(playlist_id, stable_key, updated_at) VALUES (?, ?, ?)") {
                             bindLong(1, pid); bindText(2, rec.stableKey); bindLong(3, now)
                         }
@@ -373,6 +373,24 @@ internal class BackupRestorer(
         return Applied(RestoreResult.Done(added, updated, rows, logins, needsLogin), newIds, relogin, affected, carriedLocks, oldRefs, lockedUids, lockedGroups)
     }
 
+    /**
+     * (docs/design/m6-channel-editor.md §3.6 c, amended by the data review 2026-10-18) A restored `custom_group_key` is
+     * kept unless this device's playlist already has LIVE groups and none of them has the key. A playlist the restore has
+     * just added has no `channel_group` rows until its first refresh, so its moves are kept: readers fall back to the
+     * provider group while the target is absent (`ChannelDao.GROUP_TAIL`), and the move applies once the group arrives.
+     * When the key is dropped, the record's `custom_sort_index` goes with it (it indexed the target's order, rule b);
+     * merge then keeps the device's values, replace leaves the cleared NULLs.
+     */
+    private suspend fun dropDanglingGroup(conn: PooledConnection, pid: Long, fields: Map<String, JsonElement>): Map<String, JsonElement> {
+        val key = (fields[CUSTOM_GROUP_KEY] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return fields
+        val groups = conn.queryLong("SELECT COUNT(*) FROM channel_group WHERE playlist_id = ? AND kind = 0") { bindLong(1, pid) }
+        if (groups == 0L) return fields
+        val exists = conn.queryLong("SELECT COUNT(*) FROM channel_group WHERE playlist_id = ? AND kind = 0 AND group_key = ?") {
+            bindLong(1, pid); bindText(2, key)
+        } > 0
+        return if (exists) fields else fields - CUSTOM_GROUP_KEY - CUSTOM_SORT_INDEX
+    }
+
     private suspend fun clearUserRows(conn: PooledConnection, playlistIds: List<Long>) {
         val user = MergePlanner.CHANNEL_PREF_COLUMNS.filter { it != "hidden" && it != "watch_count" }
         for (pid in playlistIds) {
@@ -445,3 +463,7 @@ internal class BackupRestorer(
 
     private companion object { const val TAG = "BackupRestorer" }
 }
+
+/** The v5 move column (docs/design/m6-channel-editor.md §3.6). */
+private const val CUSTOM_GROUP_KEY = "custom_group_key"
+private const val CUSTOM_SORT_INDEX = "custom_sort_index"

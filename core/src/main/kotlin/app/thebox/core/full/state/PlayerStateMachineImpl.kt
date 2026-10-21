@@ -3,6 +3,11 @@ package app.thebox.core.full.state
 import app.thebox.core.catchup.archive.ArchiveFailure
 import app.thebox.core.catchup.archive.ArchivePhase
 import app.thebox.core.catchup.archive.ArchiveStatus
+import app.thebox.core.catchup.archive.ClampReason
+import app.thebox.core.catchup.archive.LocalWindow
+import app.thebox.core.catchup.archive.TimelineRouterImpl
+import app.thebox.core.catchup.archive.TimelineSource
+import app.thebox.core.catchup.archive.TimelineTarget
 import app.thebox.core.full.BackInPlayer
 import app.thebox.core.full.ChannelListState
 import app.thebox.core.full.ChannelMenuItem
@@ -12,6 +17,10 @@ import app.thebox.core.full.ErrorButton
 import app.thebox.core.full.ErrorCardState
 import app.thebox.core.full.InfoBarState
 import app.thebox.core.full.InfoGlyphs
+import app.thebox.core.full.LocalBufferInfo
+import app.thebox.core.full.PausedHeader
+import app.thebox.core.full.PausedUi
+import app.thebox.core.full.PLAYER_TOAST_ARG_SEP
 import app.thebox.core.full.ListColumn
 import app.thebox.core.full.PickerChoice
 import app.thebox.core.full.PickerKind
@@ -26,6 +35,7 @@ import app.thebox.core.full.PlayerUiState
 import app.thebox.core.full.QuickBarState
 import app.thebox.core.full.QuickItem
 import app.thebox.core.full.ScrubFocus
+import app.thebox.core.full.ScrubScope
 import app.thebox.core.full.ScrubState
 import app.thebox.core.full.StatsFacts
 import app.thebox.core.full.TrackKey
@@ -39,6 +49,10 @@ import app.thebox.core.guide.GuideLineup
 import app.thebox.core.guide.GuideRows
 import app.thebox.core.guide.GuideSource
 import app.thebox.core.guide.GuideSourceEntry
+import app.thebox.core.refresh.KeyRule
+import app.thebox.core.playback.timeshift.BufferOff
+import app.thebox.core.playback.timeshift.RecordStop
+import app.thebox.core.playback.timeshift.TimeshiftConstants
 import app.thebox.core.guide.MiniPhase
 import app.thebox.core.guide.ProgrammeInfo
 import app.thebox.core.guide.SourceSection
@@ -180,6 +194,33 @@ class PlayerStateMachineImpl(
     private val pendingLocks = HashMap<Long, () -> Unit>()
     private var lockToken = 0L
 
+    // Time-shift buffer (M6, docs/design/m6-timeshift.md §11)
+    private val router = TimelineRouterImpl()
+    /** `ArchivePlayback.localBuffer` of the tuned channel (P frame), received at [bufferAtMs]; null = unknown/none. */
+    private var buffer: LocalBufferInfo? = null
+    private var bufferAtMs = 0L
+    /** When the tuned identity last changed (REWIND_NOTHING_YET within REWIND_NOTHING_YET_MS of tuning). */
+    private var tunedSinceMs = curMs
+    /** Since when the tuned channel is paused in a LOCAL time-shift (zap confirm, dim card); MIN = not paused. */
+    private var localPausedSinceMs = Long.MIN_VALUE
+    /** The last key while paused (the dim card's timer restarts on every key). */
+    private var lastKeyAtMs = Long.MIN_VALUE
+    /** Lead ruling 6: a held-back single-key zap is confirmed by another one before this. */
+    private var zapConfirmUntil = Long.MIN_VALUE
+    /** (Fix pass S9) The buffered cycle [buffer] belongs to; a new one restarts [tunedSinceMs] (REWIND_NOTHING_YET). */
+    private var cycleId = 0L
+    /** (Fix pass S8) The oldest saved instant first seen this cycle (P frame): REWIND_START says "when you tuned in" near it. */
+    private var cycleFirstFromMs: Long? = null
+    /** §11.5: the remote has sent a media key this process ("Press OK or ▶"). */
+    private var mediaKeys = false
+    /** §11.6: the focused bar's hint row, the first HINT_SHOW_COUNT openings (per machine). */
+    private var hintOpenings = 0
+    private var hintThisOpening = false
+    /** U-N6: the one-time pause tip. */
+    private var pauseTipShown = false
+    /** §11.6: after a SELECT that resumed, the focused bar unfocuses and hides at this time. */
+    private var scrubIdleAt = Long.MAX_VALUE
+
     private enum class FavPurpose { NONE, QUICK, TOGGLE, LIST_MENU }
     private class ScopeBounds(val programme: ProgrammeInfo?, val from: Long, val to: Long)
 
@@ -189,6 +230,18 @@ class PlayerStateMachineImpl(
 
     override fun act(a: GuideEvent.Act): Boolean {
         curMs = nowMs()
+        if (a.action in MEDIA_KEYS) mediaKeys = true
+        // §11.5: while the paused frame is dimmed, any key only restores the picture (consumed, like SCREEN_OFF).
+        val dimmed = dimmed()
+        lastKeyAtMs = curMs
+        if (dimmed && layer != PlayerLayer.SCREEN_OFF) {
+            // (Fix pass, WP-D question) The dim and the zap confirm both start at 2 min: a single-key zap that wakes the
+            // picture also asks the confirm in the same press, so the next press zaps (two presses, never three).
+            if (singleKeyZap(a)) zapHeldBack(curMs, number = false)
+            publish()
+            return true
+        }
+        scrubIdleAt = Long.MAX_VALUE // §11.6: any key cancels the idle hide (the resuming SELECT re-arms it)
         val justClosed = listJustClosedByBack
         listJustClosedByBack = false
         barLaunchPending = false // U-S7: a key after the launch means the user moved on
@@ -250,6 +303,8 @@ class PlayerStateMachineImpl(
             // M5 (docs/design/m5-setup-settings.md §3.9)
             is PlayerEvent.Parental -> parental = event.state
             is PlayerEvent.PinResult -> onPinResult(event.purpose, event.granted)
+            // M6 time-shift (docs/design/m6-timeshift.md §11.1): bufferCapable, timeShiftCapable, the rewind window.
+            is PlayerEvent.Buffer -> onBuffer(event.info)
         }
         publish()
     }
@@ -282,10 +337,18 @@ class PlayerStateMachineImpl(
             BoxAction.ZAP_UP -> zap(+1, a.repeat)
             BoxAction.ZAP_DOWN -> zap(-1, a.repeat)
             BoxAction.LEFT -> if (archive) scrubStep(-ScrubModel.stepMs(a.heldMs), openFocused = true) else openList(ListColumn.GROUPS, byBack = false, offset = 0)
-            BoxAction.RIGHT -> if (archive) scrubStep(ScrubModel.stepMs(a.heldMs), openFocused = true) else openInfo()
+            // Owner ruling 2026-10-18: Right opens the recently watched channels with what is on them (the info bar
+            // stays on Down / the Info key); without a recents source it still opens the info bar.
+            BoxAction.RIGHT -> if (archive) scrubStep(ScrubModel.stepMs(a.heldMs), openFocused = true) else openRecentList()
             BoxAction.GROUP_PREV, BoxAction.GROUP_NEXT -> return archive // live: the guide's cycleGroup; archive: never fires (horizontalRepeat)
             // N12: SELECT on stopped video plays again (after the card's Stop, or any stop the controller reported).
-            BoxAction.SELECT -> if (!archive && tuned.phase == MiniPhase.STOPPED) effects.retry() else openList(ListColumn.CHANNELS, byBack = false, offset = 0)
+            // (Fix pass, UX review B1) A paused time-shift (LOCAL or provider) with the bar closed or unfocused: OK
+            // continues, as the header line and the dim card say ("Press OK to continue"). Playing: the channel list.
+            BoxAction.SELECT -> when {
+                archivePaused() -> effects.archiveResume()
+                !archive && tuned.phase == MiniPhase.STOPPED -> effects.retry()
+                else -> openList(ListColumn.CHANNELS, byBack = false, offset = 0)
+            }
             BoxAction.CONTEXT_MENU, BoxAction.QUICK_MENU -> openQuick()
             BoxAction.INFO_BAR -> if (archive) openScrubFocused() else openInfo()
             BoxAction.CHANNEL_LIST -> openList(ListColumn.CHANNELS, byBack = false, offset = 0)
@@ -300,8 +363,8 @@ class PlayerStateMachineImpl(
             BoxAction.START_OVER -> startOverKey()
             BoxAction.TIME_SHIFT -> when {
                 archive -> openScrubFocused()
-                archiveCapable() -> openScrubAtLive()
-                else -> effects.toast(PlayerToast.NO_CATCHUP)
+                timeShiftCapable() -> openScrubAtLive()
+                else -> noRewindToast(forPause = false)
             }
             BoxAction.PREV_PROGRAMME -> if (archive) seekProgramme(-1) else { openInfo(); moveInfo(-1) }
             BoxAction.NEXT_PROGRAMME -> if (archive) seekProgramme(+1) else { openInfo(); moveInfo(+1) }
@@ -351,6 +414,7 @@ class PlayerStateMachineImpl(
     }
 
     private fun zap(delta: Int, repeat: Int) {
+        if (zapHeldBack(curMs, number = false)) return
         effects.zap(delta, repeat > 0)
         when (layer) {
             PlayerLayer.NONE, PlayerLayer.ERROR -> showPassive(requireChangeFrom = tuned.identityHash.takeIf { it != 0L } ?: ANY_CHANGE)
@@ -360,6 +424,7 @@ class PlayerStateMachineImpl(
 
     private fun previousChannel() {
         if (previous == null) { effects.toast(PlayerToast.NO_PREVIOUS); return }
+        if (zapHeldBack(curMs, number = false)) return
         effects.previousChannel()
         if (layer == PlayerLayer.NONE || layer == PlayerLayer.ERROR) showPassive(requireChangeFrom = tuned.identityHash.takeIf { it != 0L } ?: ANY_CHANGE)
     }
@@ -373,9 +438,16 @@ class PlayerStateMachineImpl(
                 scrubHideAt = curMs + SCRUB_AUTO_SHOW_MS
             }
             tuned.phase == MiniPhase.PAUSED -> effects.resumePlain()
-            archiveCapable() && ch != null -> { effects.pauseLive(ch); showScrubAuto(atLive = true) }
-            else -> effects.pausePlain()
+            // M6 §11.1: archive or buffer; the scrub bar opens unfocused at the pause point for a media key.
+            timeShiftCapable() && ch != null -> { effects.pauseLive(ch); showScrubAuto(atLive = true) }
+            else -> pausePlain()
         }
+    }
+
+    /** M6 §11.1, §10: not time-shift capable: M2's freeze, and the reason at once (HLS / Off / no space). */
+    private fun pausePlain() {
+        effects.pausePlain()
+        noRewindToast(forPause = true)
     }
 
     private fun play() {
@@ -395,12 +467,16 @@ class PlayerStateMachineImpl(
     private fun seekKey(dir: Int, a: GuideEvent.Act) {
         when {
             inArchive() -> scrubStep(dir * ScrubModel.ffRwStepMs(a.repeat, a.heldMs), openFocused = true)
-            !archiveCapable() -> effects.toast(PlayerToast.NO_CATCHUP)
+            // (Fix pass S7) FF on live has nothing to skip: only a known reason is worth a toast.
+            !timeShiftCapable() -> if (dir < 0 || buffer != null) noRewindToast(forPause = false)
             dir < 0 -> {
                 val ch = tunedChannel ?: return
                 openScrubAtLive()
+                val edge = liveEdgeNow()
+                val target = maxOf(edge - RW_ON_LIVE_BACK_MS, minOf(archiveFromNow(), edge))
+                routeToast(target, edge) // §9.1: a buffer younger than 30 s on a channel without catch-up
                 effects.rewindLive(ch, RW_ON_LIVE_BACK_MS)
-                preview = liveEdgeNow() - RW_ON_LIVE_BACK_MS
+                preview = target
                 atLiveCommitPending = true
             }
             else -> Unit // FF on live: already live
@@ -415,7 +491,8 @@ class PlayerStateMachineImpl(
         }
         val ch = tunedChannel
         val knownNoProgramme = progLoaded && progHash == tuned.identityHash && nowIndex(progs) < 0
-        if (!archiveCapable() || ch == null || knownNoProgramme) { effects.toast(PlayerToast.NO_CATCHUP); return }
+        // M6 §11.1, §9.1: catch-up, or the buffer covers the start of the programme on now (local), else NO_CATCHUP.
+        if (!(archiveCapable() || bufferCoversNow()) || ch == null || knownNoProgramme) { effects.toast(PlayerToast.NO_CATCHUP); return }
         effects.startOver(ch)
         showScrubAuto(atLive = true)
     }
@@ -667,7 +744,7 @@ class PlayerStateMachineImpl(
 
     private fun quickItems(): List<QuickItem> {
         val nowProg = progLoaded && progHash == tuned.identityHash && nowIndex(progs) >= 0
-        return QuickBarModel.items(menu, archiveCapable(), inArchive(), nowProg, favourite, previous)
+        return QuickBarModel.items(menu, archiveCapable() || bufferCoversNow(), inArchive(), nowProg, favourite, previous, live = tunedChannel != null)
     }
 
     private fun quickIndex(items: List<QuickItem>): Int {
@@ -717,12 +794,25 @@ class PlayerStateMachineImpl(
             }
             QuickItem.START_OVER -> { closeLayer(); startOverKey() }
             QuickItem.JUMP_TO_LIVE -> { closeLayer(); jumpToLive() }
-            QuickItem.TIME_SHIFT -> openScrubAtLive()
+            QuickItem.TIME_SHIFT -> quickPause()
             QuickItem.PREVIOUS_CHANNEL -> { closeLayer(); previousChannel() }
             QuickItem.STREAM_INFO -> toggleStats()
             QuickItem.SCREEN_OFF -> screenOff()
             QuickItem.SETTINGS -> { closeLayer(); effects.openSettings() }
             QuickItem.SOURCES -> openPicker(PickerKind.SERVER, fromQuickBar = true) // M5 integration (§3.6.2, E23)
+        }
+    }
+
+    /**
+     * M6 §11.3 (U-B3): OK on Pause pauses at once and opens the focused scrub bar at the pause point (← in it rewinds).
+     * Not time-shift capable: M2's freeze with the reason; a plain pause already on resumes.
+     */
+    private fun quickPause() {
+        val ch = tunedChannel
+        when {
+            tuned.phase == MiniPhase.PAUSED -> { closeLayer(); effects.resumePlain() }
+            timeShiftCapable() && ch != null -> { effects.pauseLive(ch); openScrubAtLive() }
+            else -> { closeLayer(); pausePlain() }
         }
     }
 
@@ -946,6 +1036,11 @@ class PlayerStateMachineImpl(
     // ================================================================= scrub bar (§3.5)
 
     private fun openScrubFocused() {
+        if (layer != PlayerLayer.SCRUB || !scrubFocused) {
+            // §11.6: the hint row the first HINT_SHOW_COUNT times the bar takes focus.
+            hintOpenings++
+            hintThisOpening = hintOpenings <= TimeshiftConstants.HINT_SHOW_COUNT
+        }
         if (layer != PlayerLayer.SCRUB) openLayer(PlayerLayer.SCRUB)
         scrubShown = true
         scrubFocused = true
@@ -990,8 +1085,15 @@ class PlayerStateMachineImpl(
             BoxAction.RIGHT -> scrubStep(ScrubModel.stepMs(a.heldMs), openFocused = false)
             BoxAction.SELECT -> when {
                 commitAt != Long.MAX_VALUE -> commit()
-                scrubAtLive -> tunedChannel?.let { effects.pauseLive(it) }
-                archivePaused() -> effects.archiveResume()
+                scrubAtLive -> tunedChannel?.let {
+                    effects.pauseLive(it)
+                    // U-N6: a pause found through the bar learns the two-key way once.
+                    if (!pauseTipShown) { pauseTipShown = true; effects.toast(PlayerToast.PAUSE_TIP) }
+                }
+                archivePaused() -> {
+                    effects.archiveResume()
+                    if (preview == null) scrubIdleAt = curMs + TimeshiftConstants.SCRUB_FOCUSED_IDLE_MS // §11.6
+                }
                 else -> effects.archivePause()
             }
             BoxAction.BACK -> if (commitAt != Long.MAX_VALUE) cancelPreview() else closeLayer()
@@ -1051,11 +1153,13 @@ class PlayerStateMachineImpl(
         previewAtEdge = false
         if (scrubAtLive) {
             if (live) { preview = null; return }
+            routeToast(t, edge)
             effects.rewindLive(ch, edge - t)
             atLiveCommitPending = true
             return
         }
         if (live) { preview = null; jumpToLive(); return }
+        if (localSession()) routeToast(t, playheadNow())
         seekSeq++
         awaitSeq = seekSeq
         effects.archiveSeek(t, seekSeq)
@@ -1156,7 +1260,10 @@ class PlayerStateMachineImpl(
         val scope = scopeAt(shownMs())
         val (prev, next) = chips()
         val st = statusForTuned()
-        return ScrubState(
+        // M6 §11.4 (U-S3): a channel without catch-up spans the rewind window, the saved part growing from the right.
+        val window = rewindWindowScope()
+        val savedFrom = st?.bufferFromMs ?: buffer?.takeIf { it.available }?.fromMs
+        val base = ScrubState(
             focused = scrubFocused && layer == PlayerLayer.SCRUB,
             focus = scrubFocus,
             programme = scope.programme,
@@ -1175,6 +1282,20 @@ class PlayerStateMachineImpl(
             pill = PillRules.pill(tuned, st, curMs),
             seeking = awaitSeq != 0L || atLiveCommitPending || tuned.handoff,
             atLive = atLive,
+            header = pausedHeader(),
+            hint = hintThisOpening && scrubFocused && layer == PlayerLayer.SCRUB && timeShiftBar(),
+        )
+        if (!window) return base
+        // The window is anchored at the snapshot's live edge ([ScrubState.atMs]); the renderer moves it with the edge.
+        val windowFrom = base.liveEdgeMs - rewindWindowMs()
+        return base.copy(
+            scope = ScrubScope.REWIND_WINDOW,
+            barFromMs = windowFrom,
+            barToMs = base.liveEdgeMs,
+            archiveFromMs = savedFrom ?: base.liveEdgeMs,
+            windowFromMs = windowFrom,
+            savedFromMs = savedFrom ?: base.liveEdgeMs,
+            notSaved = st?.notSaved ?: buffer?.notSaved ?: app.thebox.core.playback.timeshift.TimeRanges.EMPTY,
         )
     }
 
@@ -1201,6 +1322,20 @@ class PlayerStateMachineImpl(
             if (inFull && (layer == PlayerLayer.NONE) && !scrubShown) showScrubAuto()
         }
         if (now != null && scrubShown) scrubAtLive = false
+        syncLocalPause()
+    }
+
+    /**
+     * Since when a LOCAL time-shift of the tuned channel is paused (zap confirm, dim card); MIN when it is not. (Fix pass,
+     * UX review S2) A seek while paused goes PAUSED → SEEKING → PAUSED: the SEEKING in between keeps the original pause
+     * start, so a ← nudge never re-arms the zap confirm's 2 min or the dim timer's base.
+     */
+    private fun syncLocalPause() {
+        val s = statusForTuned()
+        val local = s != null && s.source == TimelineSource.LOCAL
+        val paused = local && (s!!.phase == ArchivePhase.PAUSED || (s.phase == ArchivePhase.SEEKING && localPausedSinceMs != Long.MIN_VALUE))
+        if (!paused) { localPausedSinceMs = Long.MIN_VALUE; return }
+        if (localPausedSinceMs == Long.MIN_VALUE) { localPausedSinceMs = curMs; lastKeyAtMs = Long.MIN_VALUE }
     }
 
     private fun statusForTuned(): ArchiveStatus? =
@@ -1215,14 +1350,187 @@ class PlayerStateMachineImpl(
 
     private fun archiveCapable(): Boolean = (tunedChannel?.archiveDays ?: 0) > 0 && !tuned.isArchive
 
+    // ================================================================= time-shift buffer (M6, docs/design/m6-timeshift.md §11)
+
+    private fun archiveCapableChannel(): Boolean = (tunedChannel?.archiveDays ?: 0) > 0
+
+    /** §11.1: the device's buffer can pause and rewind the tuned live channel. */
+    private fun bufferCapable(): Boolean = buffer?.available == true && !tuned.isArchive && tunedChannel != null
+
+    /** §11.1: `archiveCapable() || bufferCapable()`; Play/Pause, RW, the scrub bar and Back to live take M4's paths. */
+    private fun timeShiftCapable(): Boolean = archiveCapable() || bufferCapable()
+
+    /** The tuned channel's time-shift is served by the device's buffer (`TimelineSource.LOCAL`). */
+    private fun localSession(): Boolean = statusForTuned()?.source == TimelineSource.LOCAL
+
+    /** The buffer's live edge now (programme frame), or null without an available buffer. */
+    private fun bufferEdgeNow(): Long? = buffer?.takeIf { it.available }?.let { it.atMs + (curMs - bufferAtMs) }
+
+    /** §11.3: the buffer covers the start of the programme on now (Start over goes local). */
+    private fun bufferCoversNow(): Boolean {
+        val b = buffer?.takeIf { bufferCapable() } ?: return false
+        if (!progLoaded || progHash != tuned.identityHash) return false
+        val p = progs.getOrNull(nowIndex(progs)) ?: return false
+        return ScrubModel.startMs(p) >= b.fromMs
+    }
+
+    /** §11.4: the bar spans the rewind window: a channel without catch-up in a LOCAL time-shift or buffered at live. */
+    private fun rewindWindowScope(): Boolean =
+        !archiveCapableChannel() && (localSession() || (scrubAtLive && bufferCapable()))
+
+    /** The bar belongs to the time-shift buffer (hint row, §11.6). */
+    private fun timeShiftBar(): Boolean = localSession() || (scrubAtLive && bufferCapable())
+
+    /**
+     * (Fix pass, UX review S1) The rewind window's width: the cycle's own, from [LocalBufferInfo.windowMs] (stable for the
+     * cycle, so the bar never rescales); before the first snapshot that has it, the saved span (at least a minute).
+     */
+    private fun rewindWindowMs(): Long = buffer?.windowMs?.takeIf { it > 0 } ?: maxOf(savedMs(), MIN_WINDOW_MS)
+
+    /** "20 min saved" (ZAP_CONFIRM): the live edge minus the oldest saved instant. */
+    private fun savedMs(): Long {
+        val from = statusForTuned()?.bufferFromMs ?: buffer?.takeIf { it.available }?.fromMs ?: return 0L
+        return (liveEdgeNow() - from).coerceAtLeast(0L)
+    }
+
+    /** §11.5 header line while a LOCAL time-shift is paused. */
+    private fun pausedHeader(): PausedHeader? {
+        if (localPausedSinceMs == Long.MIN_VALUE) return null
+        val s = statusForTuned()?.takeIf { it.source == TimelineSource.LOCAL } ?: return null
+        return ScrubModel.pausedHeader(s.savingStop, archiveCapableChannel())
+    }
+
+    /** (Fix pass, UX review §7, S4) The paused screen's state, whether or not the bar is shown; null when not paused. */
+    private fun pausedUi(): PausedUi? {
+        if (localPausedSinceMs == Long.MIN_VALUE) return null
+        val dim = dimmed()
+        return PausedUi(pausedSinceMs = localPausedSinceMs, dimmed = dim, dimSinceMs = dimAtMs().takeIf { dim }, mediaKeys = mediaKeys, header = pausedHeader())
+    }
+
+    /** (Fix pass S8, S9) A buffer snapshot: a new cycle restarts the tune clock and forgets the first saved instant. */
+    private fun onBuffer(info: LocalBufferInfo?) {
+        if (info != null && info.cycleId != 0L && info.cycleId != cycleId) {
+            cycleId = info.cycleId
+            tunedSinceMs = curMs
+            cycleFirstFromMs = null
+        }
+        if (info != null && info.available && cycleFirstFromMs == null) cycleFirstFromMs = info.fromMs
+        buffer = info
+        bufferAtMs = curMs
+    }
+
+    /** (Fix pass, WP-D question) A key that zaps at once from here: CH±, Last, or Up/Down under "Change channel". */
+    private fun singleKeyZap(a: GuideEvent.Act): Boolean = when (a.action) {
+        BoxAction.ZAP_UP, BoxAction.ZAP_DOWN -> layer != PlayerLayer.CHANNELS
+        BoxAction.PREVIOUS_CHANNEL -> previous != null
+        BoxAction.UP, BoxAction.DOWN -> (layer == PlayerLayer.NONE || layer == PlayerLayer.ERROR) && settings.upDown == UpDownInPlayer.ZAP
+        else -> false
+    }
+
+    /**
+     * §13: why a live channel cannot pause or rewind (HLS / Off / no space / storage / not TS). (Fix pass, UX review S7)
+     * NO_CATCHUP never answers a pause or a rewind (§13). Unknown (no buffer state yet, or no reason given): a pause is
+     * M2's freeze without a toast (the controller pauses a buffered cycle in place); a rewind is REWIND_NOTHING_YET,
+     * which is what an unknown state means in the first seconds of a tune. A storage failure on a pause says that Play
+     * returns to live (the picture is frozen, so "Live TV continues" would be wrong).
+     */
+    private fun noRewindToast(forPause: Boolean) {
+        val b = buffer
+        when {
+            b != null && b.hls -> effects.toast(PlayerToast.PAUSE_NO_REWIND_HLS, hlsArg())
+            b?.off == BufferOff.SETTING_OFF -> effects.toast(PlayerToast.PAUSE_NO_REWIND_OFF)
+            b?.off == BufferOff.NO_SPACE -> effects.toast(PlayerToast.PAUSE_NO_REWIND_SPACE)
+            b?.off == BufferOff.STORAGE_ERROR -> effects.toast(if (forPause) PlayerToast.PAUSE_NO_REWIND_STORAGE else PlayerToast.REWIND_STOPPED_STORAGE)
+            b?.off == BufferOff.NOT_TS -> effects.toast(PlayerToast.PAUSE_NO_REWIND_FORMAT)
+            !forPause -> effects.toast(PlayerToast.REWIND_NOTHING_YET, buffer?.windowMs?.takeIf { it > 0 }?.toString())
+        }
+    }
+
+    /** PAUSE_NO_REWIND_HLS: the playlist name for an Xtream channel ("" when unnamed), null for M3U (§13). */
+    private fun hlsArg(): String? {
+        val ch = tunedChannel ?: return null
+        if (!ch.identity.stableKey.value.startsWith(KeyRule.XTREAM.prefix)) return null
+        return sources.firstOrNull { it.source == app.thebox.core.guide.GuideSource.All(ch.identity.playlistId) }?.playlistName ?: ""
+    }
+
+    /**
+     * §9.1 on a channel without catch-up, through the same pure router the archive session uses: a target the buffer
+     * cannot reach lands on its oldest point with REWIND_START, REWIND_NOTHING_YET (within 5 s of tuning or of a new
+     * cycle, S9) or REWIND_LIMITED_TODAY; (fix pass S3) a target in a not-saved range lands at the range's end with
+     * GAP_SKIPPED_* (PAUSED when the range is at least GAP_PROVIDER_MIN_MS, the §9.1 split between a stop and a
+     * hiccup). The archive session moves the playhead itself. (S8) REWIND_START names the window when the oldest point
+     * is no longer where this cycle began (the ring wrapped, or saving restarted).
+     */
+    private fun routeToast(targetMs: Long, playheadMs: Long) {
+        if (archiveCapableChannel()) return
+        val st = statusForTuned()
+        val from = st?.bufferFromMs ?: buffer?.takeIf { it.available }?.fromMs ?: return
+        val edge = liveEdgeNow()
+        val gaps = st?.notSaved ?: buffer?.notSaved ?: app.thebox.core.playback.timeshift.TimeRanges.EMPTY
+        val r = router.route(targetMs, playheadMs, LocalWindow(from, edge, gaps), null, edge, curMs - tunedSinceMs, buffer?.limitedToday == true)
+        if (r is TimelineTarget.Clamp) {
+            when (r.reason) {
+                ClampReason.START -> {
+                    val first = cycleFirstFromMs
+                    val tunedIn = first == null || from - first <= TimeshiftConstants.LOCAL_MARGIN_MS
+                    val at = (from + displayShiftMs()).toString()
+                    effects.toast(PlayerToast.REWIND_START, if (tunedIn) at else at + PLAYER_TOAST_ARG_SEP + rewindWindowMs())
+                }
+                ClampReason.NOTHING_YET -> effects.toast(PlayerToast.REWIND_NOTHING_YET, rewindWindowMs().toString())
+                ClampReason.LIMITED_TODAY -> effects.toast(PlayerToast.REWIND_LIMITED_TODAY)
+            }
+            return
+        }
+        for (i in 0 until gaps.count) {
+            val a = gaps.startAt(i)
+            val b = gaps.endAt(i)
+            if (targetMs < a || targetMs >= b || b >= edge) continue
+            val len = b - a
+            val kind = if (len >= TimeshiftConstants.GAP_PROVIDER_MIN_MS) PlayerToast.GAP_SKIPPED_PAUSED else PlayerToast.GAP_SKIPPED_STREAM
+            effects.toast(kind, len.toString() + PLAYER_TOAST_ARG_SEP + (b + displayShiftMs()))
+            return
+        }
+    }
+
+    private fun displayShiftMs(): Long = statusForTuned()?.displayShiftMs ?: ((tunedChannel?.epgShiftMin ?: 0) * 60_000L)
+
+    /**
+     * Lead ruling 6: after a LOCAL pause of at least ZAP_CONFIRM_AFTER_PAUSE_MS a single-key zap (CH±, Last, a digit
+     * commit) is held back once with a toast; another within ZAP_CONFIRM_WINDOW_MS zaps. True = held back.
+     */
+    private fun zapHeldBack(now: Long, number: Boolean): Boolean {
+        if (localPausedSinceMs == Long.MIN_VALUE || now - localPausedSinceMs < TimeshiftConstants.ZAP_CONFIRM_AFTER_PAUSE_MS) return false
+        if (now <= zapConfirmUntil) { zapConfirmUntil = Long.MIN_VALUE; return false }
+        zapConfirmUntil = now + TimeshiftConstants.ZAP_CONFIRM_WINDOW_MS
+        effects.toast(if (number) PlayerToast.ZAP_CONFIRM_NUMBER else PlayerToast.ZAP_CONFIRM, savedMs().toString())
+        return true
+    }
+
+    override fun zapNeedsConfirm(nowMs: Long): Boolean {
+        curMs = nowMs
+        return zapHeldBack(nowMs, number = true)
+    }
+
+    /** §11.5: when the paused frame dims (PAUSED_DIM_AFTER_MS after the pause or the last key); MAX when not paused. */
+    private fun dimAtMs(): Long {
+        if (localPausedSinceMs == Long.MIN_VALUE || !inFull) return Long.MAX_VALUE
+        return maxOf(localPausedSinceMs, lastKeyAtMs) + TimeshiftConstants.PAUSED_DIM_AFTER_MS
+    }
+
+    private fun dimmed(): Boolean = curMs >= dimAtMs()
+
     private fun liveEdgeNow(): Long {
         val s = statusForTuned()
-        return if (s != null && s.liveEdgeMs > 0) s.liveEdgeMs + (curMs - s.atMs) else curMs
+        // M6: before a session, a buffered channel's edge is the buffer's (programme frame, §9.2), not the device clock.
+        return if (s != null && s.liveEdgeMs > 0) s.liveEdgeMs + (curMs - s.atMs) else bufferEdgeNow() ?: curMs
     }
 
     private fun archiveFromNow(): Long {
         val s = statusForTuned()
+        // A LOCAL session without catch-up publishes the buffer's oldest saved instant, which does not move with time.
+        if (s != null && s.source == TimelineSource.LOCAL && s.bufferFromMs != null && !archiveCapableChannel()) return s.bufferFromMs!!
         if (s != null && s.archiveFromMs > 0) return s.archiveFromMs + (curMs - s.atMs)
+        if (!archiveCapable() && bufferCapable()) return buffer!!.fromMs
         val days = tunedChannel?.archiveDays ?: 0
         return curMs - days * 86_400_000L + EDGE_MARGIN_MS
     }
@@ -1260,6 +1568,16 @@ class PlayerStateMachineImpl(
         list.open(listSize(), if (tunedIdx >= 0) tunedIdx + offset else 0, previous != null)
         listGroupFocused = currentGroupIndex().coerceAtLeast(0)
         ensureList()
+    }
+
+    private fun openRecentList() {
+        val recent = sources.firstOrNull { it.section == SourceSection.RECENT }
+        if (recent == null) { openInfo(); return }
+        openLayer(PlayerLayer.CHANNELS)
+        listOpenedByBack = false
+        listColumn = ListColumn.CHANNELS
+        listMenu = null
+        applyListSource(recent.source)
     }
 
     private fun openFavouritesList() {
@@ -1459,6 +1777,11 @@ class PlayerStateMachineImpl(
         tunedChannel = channel ?: if (identityChanged) null else tunedChannel
         if (state.phase == MiniPhase.CONNECTING || state.phase == MiniPhase.BUFFERING) passiveSawConnecting = true
         if (identityChanged) {
+            // M6: the buffer, the window width and the zap confirm belong to the channel that was tuned.
+            buffer = null
+            cycleFirstFromMs = null
+            tunedSinceMs = curMs
+            zapConfirmUntil = Long.MIN_VALUE
             syncScrubValidity() // leaving archive by a zap closes the scrub bar before the passive bar decision
             if (layer == PlayerLayer.PICKER) closeLayer() // §3.4.3: a picker closes when the tuned identity changes
             favourite = null
@@ -1497,6 +1820,8 @@ class PlayerStateMachineImpl(
         if (layer == PlayerLayer.QUICK_BAR && curMs >= quickHideAt) closeLayer()
         if (commitAt != Long.MAX_VALUE && curMs >= commitAt) commit()
         if (scrubShown && !scrubFocused && curMs >= scrubHideAt) { scrubShown = false; scrubHideAt = Long.MAX_VALUE; cancelPreview() }
+        // §11.6: a focused bar left idle after a resume unfocuses and hides; the next OK opens the channel list.
+        if (layer == PlayerLayer.SCRUB && curMs >= scrubIdleAt) { scrubIdleAt = Long.MAX_VALUE; closeLayer() }
     }
 
     /** The unfocused bar stays while paused, and hides SCRUB_AUTO_SHOW_MS after first media (§3.2.1). */
@@ -1516,7 +1841,7 @@ class PlayerStateMachineImpl(
     /** The scrub bar exists only on archive/time-shift video, or at the live edge of an archive-capable channel. */
     private fun syncScrubValidity() {
         if (!scrubShown) return
-        val ok = if (scrubAtLive) archiveCapable() || inArchive() else inArchive()
+        val ok = if (scrubAtLive) timeShiftCapable() || inArchive() else inArchive()
         if (!ok) {
             scrubShown = false
             scrubFocused = false
@@ -1533,12 +1858,15 @@ class PlayerStateMachineImpl(
         if (layer == PlayerLayer.QUICK_BAR) d = minOf(d, quickHideAt)
         d = minOf(d, commitAt)
         if (scrubShown && !scrubFocused) d = minOf(d, scrubHideAt)
+        if (layer == PlayerLayer.SCRUB) d = minOf(d, scrubIdleAt)
+        dimAtMs().takeIf { it > curMs }?.let { d = minOf(d, it) } // §11.5: publish when the paused frame dims
         return d
     }
 
     // ================================================================= UI
 
     private fun publish() {
+        syncLocalPause()
         syncError()
         syncScrubValidity()
         syncScrubAutoHide()
@@ -1558,6 +1886,7 @@ class PlayerStateMachineImpl(
             stats = if (statsOn) statsFacts?.let { StatsFormatter.lines(it) } ?: emptyList() else null,
             pill = pill,
             probing = status.takeIf { it.phase == ArchivePhase.PROBING && it.identityHash == tuned.identityHash }?.let { it.attempt to it.attempts },
+            paused = pausedUi(),
         )
         if (s != _ui.value) _ui.value = s
         _deadline.value = nextDeadline()
@@ -1632,6 +1961,10 @@ class PlayerStateMachineImpl(
         /** The builder's edge margin (`EDGE_MARGIN_SEC`), for the live-edge bar before a session exists (§3.8.1). */
         const val EDGE_MARGIN_MS = 60_000L
         private const val MIN_PER_DAY = 1_440
+        /** (M6 §11.5) Keys that only remotes with media keys send: the paused lines then say "OK or ▶". */
+        private val MEDIA_KEYS = setOf(BoxAction.PLAY_PAUSE, BoxAction.PLAY, BoxAction.PAUSE, BoxAction.SEEK_BACK, BoxAction.SEEK_FORWARD)
+        /** The rewind window before the cycle's own width is known (fix pass S1): at least this. */
+        private const val MIN_WINDOW_MS = 60_000L
         /** showPassive: arm on the first settled state after a CONNECTING (the zap may land on the same identity). */
         private const val ANY_CHANGE = Long.MIN_VALUE
 

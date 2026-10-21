@@ -2,19 +2,21 @@ package app.thebox.data.rules
 
 import app.thebox.core.settings.tree.RuleDraft
 import app.thebox.core.settings.tree.RuleTarget
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** D-S5 (M5 code review 2026-10-16, adopted from the data reviewer): §3.7.3 refuses polynomial shapes up front. */
+/** Former Java/ICU polynomial shapes now run safely through the input-linear UserRegex engine. */
 class HideRulesReviewFixTest {
-    /** Twelve `.*` before a literal is O(n^12): the JVM time box catches it, Android's ICU would not. */
-    @Test
-    fun polynomialRegexIsRefusedAsTooSlow() {
+    /** Keep ordinary regex semantics on a long failing input, rather than depending on the retired shape blacklist. */
+    @Test(timeout = 10_000)
+    fun repeatedWildcardsMatchLongNamesWithoutBacktracking() {
         val draft = RuleDraft(RuleTarget.CHANNEL_NAME, (1..12).joinToString("") { ".*" } + "!", isRegex = true)
         val r = RuleMatcher.compile(1, draft)
-        val slowOnJvm = (r as? RuleMatcher.Result.Ok)?.matcher?.let { m ->
-            runCatching { m.matches("UK | Some Channel Name HD Backup Feed 1080p", System.nanoTime() + 50_000_000) }.isFailure
-        }
-        assertTrue("compile accepted it (catastrophic on the JVM time box: $slowOnJvm)", r is RuleMatcher.Result.Problem)
+        assertTrue("regular-language patterns are supported by the bounded engine", r is RuleMatcher.Result.Ok)
+        val matcher = (r as RuleMatcher.Result.Ok).matcher
+        val name = "UK | Some Channel Name HD Backup Feed 1080p ".repeat(500)
+        assertFalse(matcher.matches(name, Long.MAX_VALUE))
+        assertTrue(matcher.matches(name + "!", Long.MAX_VALUE))
     }
 }

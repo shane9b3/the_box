@@ -1,4 +1,8 @@
 import java.util.Properties
+import org.gradle.api.DefaultTask
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.TaskAction
 
 plugins {
     alias(libs.plugins.thebox.android.application)
@@ -8,11 +12,14 @@ plugins {
 }
 
 // Release signing: keystore.properties (gitignored) with storeFile, storePassword, keyAlias,
-// keyPassword. Without it, release/benchmark builds are signed with the debug key.
+// keyPassword. Production packaging requires it; benchmark remains explicitly debug-signed.
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val keystoreProperties = Properties().apply {
     if (keystorePropertiesFile.exists()) keystorePropertiesFile.inputStream().use(::load)
 }
+val releaseSigningReady = keystorePropertiesFile.exists() &&
+    listOf("storeFile", "storePassword", "keyAlias", "keyPassword").all { !keystoreProperties.getProperty(it).isNullOrBlank() } &&
+    rootProject.file(keystoreProperties.getProperty("storeFile", "")).isFile
 
 android {
     namespace = "app.thebox"
@@ -29,7 +36,7 @@ android {
     }
 
     signingConfigs {
-        if (keystorePropertiesFile.exists()) {
+        if (releaseSigningReady) {
             create("release") {
                 storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
                 storePassword = keystoreProperties.getProperty("storePassword")
@@ -47,7 +54,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release")
         }
         // Release-like build used by :benchmark (macrobenchmarks need a non-debuggable app).
         create("benchmark") {
@@ -72,6 +79,28 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+}
+
+// Check only production packaging: debug, sync and profile-generation builds need no production key.
+abstract class ValidateReleaseSigningTask : DefaultTask() {
+    @get:Input
+    abstract val signingReady: Property<Boolean>
+
+    @TaskAction
+    fun validate() {
+        check(signingReady.get()) {
+            "Release packaging requires keystore.properties with storeFile, storePassword, keyAlias and keyPassword, and an existing keystore."
+        }
+    }
+}
+
+val validateReleaseSigning = tasks.register<ValidateReleaseSigningTask>("validateReleaseSigning") {
+    group = "verification"
+    description = "Require an explicit production signing configuration before release packaging."
+    signingReady.set(releaseSigningReady)
+}
+tasks.configureEach {
+    if (name == "packageRelease" || name == "packageReleaseBundle") dependsOn(validateReleaseSigning)
 }
 
 // Ship ARM only (master plan §3). The non-shipping build types keep x86/x86_64 native libs (from sqlite-bundled

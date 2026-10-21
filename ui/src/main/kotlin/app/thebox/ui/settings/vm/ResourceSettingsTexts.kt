@@ -80,7 +80,12 @@ class ResourceSettingsTexts(private val resources: Resources) : SettingsTexts {
         SettingsText.GUIDE_FUTURE_DAYS -> R.string.settings_guide_future_days
         SettingsText.GUIDE_DESCRIPTIONS -> R.string.settings_guide_descriptions
         SettingsText.GUIDE_DESCRIPTIONS_DESC -> R.string.settings_guide_descriptions_desc
+        SettingsText.GUIDE_POSTERS -> R.string.settings_guide_posters
+        SettingsText.GUIDE_POSTERS_DESC -> R.string.settings_guide_posters_desc
+        SettingsText.GUIDE_POSTERS_DESC_NO_KEY -> R.string.settings_guide_posters_desc_no_key
+        SettingsText.POSTERS_APP_KEY_REJECTED -> R.string.settings_posters_app_key_rejected
         SettingsText.PB_BUFFER -> R.string.settings_pb_buffer
+        SettingsText.PB_BUFFER_DESC -> R.string.settings_pb_buffer_desc
         SettingsText.BUF_AUTO -> R.string.settings_buf_auto
         SettingsText.BUF_NONE -> R.string.settings_buf_none
         SettingsText.BUF_SMALL -> R.string.settings_buf_small
@@ -108,6 +113,21 @@ class ResourceSettingsTexts(private val resources: Resources) : SettingsTexts {
         SettingsText.LAUNCH_GUIDE_LAST -> R.string.settings_launch_guide_last
         SettingsText.LAUNCH_FULL_LAST -> R.string.settings_launch_full_last
         SettingsText.LAUNCH_GUIDE_NOTHING -> R.string.settings_launch_guide_nothing
+        SettingsText.PB_TIMESHIFT -> R.string.settings_pb_timeshift
+        SettingsText.PB_TIMESHIFT_DESC -> R.string.settings_pb_timeshift_desc
+        SettingsText.PB_TIMESHIFT_PAUSE_ONLY_DESC -> R.string.settings_pb_timeshift_pause_only_desc
+        SettingsText.TS_AUTO -> R.string.settings_ts_auto
+        SettingsText.TS_AUTO_LIMITED -> R.string.settings_ts_auto_limited
+        SettingsText.TS_MIN -> R.string.settings_ts_min
+        SettingsText.TS_HOUR -> R.string.settings_ts_hour
+        SettingsText.TS_HOURS -> R.string.settings_ts_hours
+        SettingsText.TS_GB -> R.string.settings_ts_gb
+        SettingsText.TS_PAUSE_ONLY -> R.string.settings_ts_pause_only
+        SettingsText.PB_TIMESHIFT_HOLD -> R.string.settings_pb_timeshift_hold
+        SettingsText.PB_TIMESHIFT_HOLD_DESC -> R.string.settings_pb_timeshift_hold_desc
+        SettingsText.HOLD_UNTIL_FULL -> R.string.settings_hold_until_full
+        SettingsText.PB_TIMESHIFT_PROTECT -> R.string.settings_pb_timeshift_protect
+        SettingsText.PB_TIMESHIFT_PROTECT_DESC -> R.string.settings_pb_timeshift_protect_desc
         SettingsText.PB_AUDIO_LANGUAGE -> R.string.settings_pb_audio_language
         SettingsText.LANG_DEVICE -> R.string.settings_lang_device
         SettingsText.PB_SUBTITLES -> R.string.settings_pb_subtitles

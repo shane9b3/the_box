@@ -88,6 +88,7 @@ class ErrorLadderImpl(
         const val STEREO = 4
         const val DROPPED = 8
         const val WRITE_RETRY = 16
+        const val TS_REPAIRED = 32
     }
 
     private var windowKey: String? = null
@@ -119,7 +120,7 @@ class ErrorLadderImpl(
         var id = (if (e.viaL22a) "L22a/" else "") + (row?.id ?: GATE_ROW)
         var decision = step.decision
         if (decision !is LadderDecision.Fail && !step.timeoutExempt && !ctx.firstFrameRendered &&
-            ctx.msSinceTuneStart >= streamSwitchTimeoutMs()
+            ctx.msSinceSwitchWindowStart >= streamSwitchTimeoutMs()
         ) {
             decision = e.fail(step.eventual ?: PlaybackErrorCode.NO_DATA_TIMEOUT)
             id = "$TIMEOUT_ROW/$id"
@@ -494,6 +495,15 @@ class ErrorLadderImpl(
         }) { e ->
             Step(LadderDecision.DisablePassthroughAndReprepare(e.ctx.passthroughMime ?: audioMime(e)), with(e.c, AudioStep.PASSTHROUGH_OFF), PlaybackErrorCode.AUDIO_OUTPUT_FAILED)
         },
+        // (device finding 2026-10-18) Broken audio timestamps: first regenerate them from the frame spacing (L33r), then
+        // play the picture without the track (L33t); no decoder can help.
+        Row("L33r", { it.s == FailureSignal.AudioTimestampsStuck && !has(it.c, AudioStep.TS_REPAIRED) }) {
+            Step(LadderDecision.RepairAudioTimestampsAndReprepare, with(it.c, AudioStep.TS_REPAIRED), PlaybackErrorCode.AUDIO_OUTPUT_FAILED)
+        },
+        Row("L33t", { it.s == FailureSignal.AudioTimestampsStuck && !has(it.c, AudioStep.DROPPED) }) {
+            Step(LadderDecision.DropAudioAndReprepare(PlaybackWarning.AUDIO_TIMESTAMPS), with(it.c, AudioStep.DROPPED), PlaybackErrorCode.AUDIO_OUTPUT_FAILED)
+        },
+        Row("L33u", { it.s == FailureSignal.AudioTimestampsStuck }) { Step(it.fail(PlaybackErrorCode.AUDIO_OUTPUT_FAILED), it.c, PlaybackErrorCode.AUDIO_OUTPUT_FAILED) },
         Row("L32", { e -> audioSignal(e.s) && !has(e.c, AudioStep.SOFTWARE) && audioMime(e)?.let { e.ctx.ffmpegSupportsMime(it) } == true }) { e ->
             Step(LadderDecision.SoftwareAudioAndReprepare(audioMime(e)!!), with(e.c, AudioStep.SOFTWARE), PlaybackErrorCode.AUDIO_OUTPUT_FAILED)
         },

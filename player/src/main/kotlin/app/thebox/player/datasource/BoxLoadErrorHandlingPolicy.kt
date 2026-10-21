@@ -21,6 +21,7 @@ import java.util.concurrent.ThreadLocalRandom
  *
  * The policy only classifies; the numbers come from WP-A's [LoadRetryRules]:
  * - any [LiveStreamException] → fatal (the source already retried, or the ladder must decide at once);
+ * - (M6 time-shift) any `RingException` → fatal (the controller re-prepares the reader, §5.1);
  * - Media3's non-retriable causes (`ParserException`, `FileNotFoundException`, `CleartextNotPermittedException`,
  *   `Loader.UnexpectedLoaderException`, a position-out-of-range 416) → fatal;
  * - 401, 403, 405, 406, 410, 416, 451, 458, 509 → fatal on every origin (§4.2 "surface fast; the ladder decides");
@@ -48,6 +49,9 @@ internal class BoxLoadErrorHandlingPolicy(
     override fun getRetryDelayMsFor(loadErrorInfo: LoadErrorHandlingPolicy.LoadErrorInfo): Long {
         val e = loadErrorInfo.exception
         if (findInChain<LiveStreamException>(e) != null) return C.TIME_UNSET
+        // (M6 time-shift, §5.1, A-S9) A ring reader is never retried in place: a deferred retry would reset the sample
+        // queues and re-anchor the TimestampAdjuster; the controller re-prepares at the pin instead.
+        if (findInChain<app.thebox.core.playback.timeshift.RingException>(e) != null) return C.TIME_UNSET
         if (isNonRetriable(e)) return C.TIME_UNSET
         val status = findInChain<HttpDataSource.InvalidResponseCodeException>(e)?.responseCode
         if (status != null && status in SURFACE_FAST_STATUSES) return C.TIME_UNSET

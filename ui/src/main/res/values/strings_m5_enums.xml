@@ -14,6 +14,7 @@
     <string name="guide_menu_channel_options">Channel options</string>
     <string name="guide_group_lock">Lock group</string>
     <string name="guide_group_unlock">Unlock group</string>
+    <string name="guide_group_edit">Edit channels…</string>
     <string name="error_button_open_settings">Open settings</string>
     <string name="error_button_secure_dns">Use secure DNS</string>
     <string name="error_button_refresh_playlist">Refresh playlist</string>

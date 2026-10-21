@@ -51,6 +51,7 @@ class ReapplyOnExitTest {
         val env = object : WpaPageEnv {
             override val sdkInt = 30
             override val deviceLowEnd = false
+            override val hasTmdbKey = false
             override fun system24h() = true
             override fun externalPlayers() = emptyList<ExternalPlayerApp>()
             override fun runningSoftwareAudioFallback() = true

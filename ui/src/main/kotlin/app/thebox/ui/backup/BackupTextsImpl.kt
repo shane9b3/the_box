@@ -30,6 +30,8 @@ class BackupTextsImpl @Inject constructor(@ApplicationContext private val contex
             BackupText.CHANNELS_HIDE_RULES -> R.string.backup_channels_hide_rules
             BackupText.CHANNELS_HIDE_RULES_VALUE -> R.string.backup_channels_hide_rules_value
             BackupText.NO_PLAYLIST -> R.string.backup_no_playlist
+            BackupText.CHANNELS_EDITOR -> R.string.backup_channels_editor
+            BackupText.CHANNELS_EDITOR_VALUE -> R.string.backup_channels_editor_value
             BackupText.GROUPS_TITLE -> R.string.backup_groups_title
             BackupText.GROUPS_SHOW_ALL -> R.string.backup_groups_show_all
             BackupText.GROUP_VALUE -> R.string.backup_group_value

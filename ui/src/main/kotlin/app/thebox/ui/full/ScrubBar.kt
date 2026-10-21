@@ -35,6 +35,10 @@ import java.util.TimeZone
 const val SCRUB_BAR_TAG = "player_scrub_bar"
 const val SCRUB_TRACK_TAG = "player_scrub_track"
 const val SCRUB_CHIPS_TAG = "player_scrub_chips"
+/** (M6 §11.5) The paused header line under the pill. */
+const val SCRUB_HEADER_TAG = "player_scrub_header"
+/** (M6 §11.6) The focused bar's hint row. */
+const val SCRUB_HINT_TAG = "player_scrub_hint"
 
 /**
  * The archive / time-shift bar (docs/design/m4-player-ux.md §3.5, §3.9): the info bar's header (with the scoped
@@ -44,17 +48,32 @@ const val SCRUB_CHIPS_TAG = "player_scrub_chips"
  *
  * Redraws (§4.1): the node reads a 1 Hz tick **only in its draw lambda** while the playhead advances or the pill grows,
  * so composition is untouched between status events; [nowMs] seeds the tick.
+ *
+ * (M6 time-shift, docs/design/m6-timeshift.md §11.4–§11.6) A REWIND_WINDOW bar is drawn by the renderer's window mode;
+ * while a LOCAL time-shift is paused the header line ([ScrubState.header], 24 px) sits under the header row, with the
+ * values of [facts]; the focused bar's hint row ([ScrubState.hint], 22 px, white 60 %) takes the chips' place.
  */
 @Composable
-fun ScrubBar(state: ScrubState, nowMs: Long, modifier: Modifier = Modifier, channel: GuideChannel? = null, clock24: Boolean = true) {
+fun ScrubBar(
+    state: ScrubState,
+    nowMs: Long,
+    modifier: Modifier = Modifier,
+    channel: GuideChannel? = null,
+    clock24: Boolean = true,
+    facts: PausedFacts = PausedFacts(),
+) {
     val context = LocalContext.current
     val scale = LocalDensity.current.density
     val catchup = stringResource(R.string.player_scrub_catchup)
     val live = stringResource(R.string.player_scrub_live)
+    val rewindFrom = stringResource(R.string.player_scrub_rewind_from)
+    val liveEnd = stringResource(R.string.player_scrub_live_end)
+    val notSaved = stringResource(R.string.player_scrub_not_saved)
     val renderer = remember(scale) { ScrubBarRenderer(scale).apply { setTypeface(monoTypeface(context)) } }
     renderer.clock24 = clock24
     renderer.zone = remember { TimeZone.getDefault() }
     renderer.setLabels(catchup, live)
+    renderer.setWindowLabels(rewindFrom, liveEnd, notSaved)
     val moving = state.advancing || state.pill.behindGrows || state.atLive
     val tick = rememberTicker(1_000L, enabled = moving)
     val shape = RoundedCornerShape(PlayerUi.BAR_R.dp)
@@ -67,6 +86,14 @@ fun ScrubBar(state: ScrubState, nowMs: Long, modifier: Modifier = Modifier, chan
     ) {
         Column(Modifier.padding(horizontal = PlayerUi.BAR_PAD_H.dp, vertical = PlayerUi.BAR_PAD_V.dp)) {
             BarHeader(channel, state.pill, glyphs = null, title = state.programme?.title)
+            val res = androidx.compose.ui.platform.LocalResources.current
+            state.header?.let { h ->
+                Line(
+                    PlayerText.pausedHeader(res, h, facts),
+                    GuideUi.sans(24, FontWeight.Medium, GuideUi.Fg.copy(alpha = 0.85f)),
+                    Modifier.padding(top = 4.dp).testTag(SCRUB_HEADER_TAG),
+                )
+            }
         }
         Spacer(
             Modifier
@@ -82,6 +109,14 @@ fun ScrubBar(state: ScrubState, nowMs: Long, modifier: Modifier = Modifier, chan
                     }
                 },
         )
+        if (state.hint && state.focus == ScrubFocus.BAR) {
+            val hint = stringResource(R.string.player_scrub_hint) + if (facts.mediaKeys) stringResource(R.string.player_scrub_hint_media) else ""
+            Line(
+                hint,
+                GuideUi.sans(22, color = GuideUi.Fg.copy(alpha = 0.6f)),
+                Modifier.offset(PlayerUi.TRACK_L.dp - PlayerUi.BAR_L.dp, (CHIPS_T - PlayerUi.BAR_T).dp).testTag(SCRUB_HINT_TAG),
+            )
+        }
         if (state.focus == ScrubFocus.CHIPS) {
             Row(
                 Modifier
@@ -103,7 +138,7 @@ fun ScrubBar(state: ScrubState, nowMs: Long, modifier: Modifier = Modifier, chan
 @Composable
 private fun ScrubChip(text: String, focused: Boolean) {
     Chip(focused, fill = PlayerUi.ChipFill, padding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp, vertical = 5.dp)) { c ->
-        Line(text, GuideUi.sans(17, FontWeight.Medium, c))
+        Line(text, GuideUi.sans(22, FontWeight.Medium, c))
     }
 }
 

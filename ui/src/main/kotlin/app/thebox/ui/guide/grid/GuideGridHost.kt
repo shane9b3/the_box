@@ -12,6 +12,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -26,15 +27,24 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.semantics
 import app.thebox.core.guide.GuideFrame
+import app.thebox.core.guide.GuideEvent
 import app.thebox.core.guide.GuideRenderer
 import app.thebox.core.guide.GuideStateMachine
+import app.thebox.core.guide.ScreenMode
+import app.thebox.core.guide.Zone
+import app.thebox.core.input.BoxAction
+import app.thebox.ui.R
 import app.thebox.core.guide.layout.GridConstants
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -83,16 +93,32 @@ fun GuideGridHost(machine: GuideStateMachine, renderer: GuideRenderer, modifier:
     }
 
     if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) androidx.compose.runtime.SideEffect { app.thebox.ui.guide.GuideDebugCounters.bump(COMPOSITIONS_GRID) } // I-12
-    val a11y = remember { touchExplorationOn(context) }
-    var description by remember { mutableStateOf("") }
-    if (a11y) {
-        LaunchedEffect(machine, renderer) {
+    val a11y = rememberTouchExploration(context)
+    val uiState = machine.ui.collectAsState()
+    val gridActive by remember(uiState, version, frame, a11y) { derivedStateOf {
+        val ui = uiState.value
+        val hasFocus = if (a11y) { version.value; frame.focus != null } else false
+        hasFocus && ui.mode == ScreenMode.GUIDE && ui.zone == Zone.GRID && !ui.booting &&
+            ui.overlay == null && ui.pin == null && ui.reminder == null && ui.update == null
+    } }
+    var description by remember(a11y, gridActive) { mutableStateOf("") }
+    if (a11y && gridActive) {
+        LaunchedEffect(machine, renderer, gridActive) {
             machine.frameVersion.collectLatest {
                 delay(GridConstants.A11Y_DEBOUNCE_MS)
                 description = renderer.describeFocus(frame)
             }
         }
     }
+    val activate = stringResource(R.string.guide_a11y_select)
+    val actions = if (a11y && gridActive) listOf(
+        R.string.guide_a11y_previous_channel to BoxAction.UP,
+        R.string.guide_a11y_next_channel to BoxAction.DOWN,
+        R.string.guide_a11y_previous_programme to BoxAction.LEFT,
+        R.string.guide_a11y_next_programme to BoxAction.RIGHT,
+    ).map { (label, action) ->
+        CustomAccessibilityAction(stringResource(label)) { dispatchGridAction(machine, action) }
+    } else emptyList()
 
     Spacer(
         modifier
@@ -103,9 +129,13 @@ fun GuideGridHost(machine: GuideStateMachine, renderer: GuideRenderer, modifier:
             }
             .graphicsLayer()
             .semantics {
-                if (a11y) contentDescription = description
-                liveRegion = LiveRegionMode.Polite
-                role = Role.Button
+                if (a11y && gridActive) {
+                    contentDescription = description
+                    liveRegion = LiveRegionMode.Polite
+                    role = Role.Button
+                    onClick(label = activate) { dispatchGridAction(machine, BoxAction.SELECT) }
+                    customActions = actions
+                }
             }
             .drawWithCache {
                 onDrawBehind {
@@ -144,9 +174,32 @@ const val COMPOSITIONS_GRID = "GuideGridHost"
 /** Trace section around the renderer pass (`guide-draw`, §4.1). */
 const val TRACE_SECTION = "guide-draw"
 
-private fun touchExplorationOn(context: Context): Boolean {
-    val am = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager ?: return false
-    return am.isEnabled && am.isTouchExplorationEnabled
+@Composable
+private fun rememberTouchExploration(context: Context): Boolean {
+    val manager = remember(context) { context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager }
+    var enabled by remember(manager) { mutableStateOf(manager?.let { it.isEnabled && it.isTouchExplorationEnabled } == true) }
+    DisposableEffect(manager) {
+        fun refresh() { enabled = manager?.let { it.isEnabled && it.isTouchExplorationEnabled } == true }
+        val accessibility = AccessibilityManager.AccessibilityStateChangeListener { refresh() }
+        val exploration = AccessibilityManager.TouchExplorationStateChangeListener { refresh() }
+        manager?.addAccessibilityStateChangeListener(accessibility)
+        manager?.addTouchExplorationStateChangeListener(exploration)
+        refresh()
+        onDispose {
+            manager?.removeAccessibilityStateChangeListener(accessibility)
+            manager?.removeTouchExplorationStateChangeListener(exploration)
+        }
+    }
+    return enabled
+}
+
+/** Recheck current state at activation time, including a modal opened since semantics were published. */
+private fun dispatchGridAction(machine: GuideStateMachine, action: BoxAction): Boolean {
+    val ui = machine.ui.value
+    if (ui.mode != ScreenMode.GUIDE || ui.zone != Zone.GRID || ui.booting || ui.overlay != null ||
+        ui.pin != null || ui.reminder != null || ui.update != null || machine.frame.focus == null) return false
+    machine.dispatch(GuideEvent.Act(action))
+    return true
 }
 
 /**

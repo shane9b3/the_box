@@ -528,8 +528,11 @@ class DiagPages @Inject constructor(
             Licence("FFmpeg-LGPL-2.1.txt", R.string.licences_ffmpeg, R.string.licences_lgpl),
             Licence("Apache-2.0.txt", R.string.licences_apache, R.string.licences_apache2),
             Licence("qrcodegen-MIT.txt", R.string.licences_qrcodegen, R.string.licences_mit),
+            Licence("RE2J-BSD.txt", R.string.licences_re2j, R.string.licences_bsd),
             Licence("InstrumentSans-OFL.txt", R.string.licences_instrument, R.string.licences_ofl),
             Licence("JetBrainsMono-OFL.txt", R.string.licences_jetbrains, R.string.licences_ofl),
+            // (owner ruling 2026-10-18) The TMDB API terms ask for this attribution wherever posters are shown.
+            Licence("TMDB-attribution.txt", R.string.licences_tmdb, R.string.licences_tmdb_terms),
         )
 
         /** The `network` domain: WP-A's object (M5 integration). */

@@ -10,4 +10,5 @@ import app.thebox.core.guide.ProgrammeInfo
 fun ProgrammeDetail.toProgrammeInfo(): ProgrammeInfo = ProgrammeInfo(
     rawStartMin = rawStartMin, startMin = startMin, endMin = endMin, title = title, subtitle = subtitle,
     description = description, genre = categories.firstOrNull(), episodeLabel = episodeLabel, flags = flags, titleHash = titleHash,
+    iconUrl = iconUrl,
 )

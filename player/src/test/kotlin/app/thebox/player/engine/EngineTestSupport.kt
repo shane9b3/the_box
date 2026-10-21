@@ -114,6 +114,14 @@ internal object EngineTestSupport {
         }
 
         override fun endSession(tuneId: Long) = Unit
+
+        override fun ring(ctx: StreamSessionContext, open: app.thebox.player.internal.RingOpen): Pair<DataSource.Factory, StreamTelemetry> {
+            calls += "ring"
+            return factory to telemetry
+        }
+
+        override fun writer(ctx: StreamSessionContext, hooks: app.thebox.player.internal.WriterHooks): Pair<app.thebox.core.playback.timeshift.TsUpstream, StreamTelemetry> =
+            error("no time-shift writer in the engine tests")
     }
 
     class FakeTelemetry : StreamTelemetry {

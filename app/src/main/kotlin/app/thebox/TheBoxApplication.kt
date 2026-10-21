@@ -55,6 +55,8 @@ class TheBoxApplication : Application(), Configuration.Provider {
     @Inject lateinit var updates: app.thebox.core.update.UpdateCheckScheduler
     /** (M5 integration, WP-D §1.7a item 2) The weekly automatic backup is scheduled from the stored choice once per start. */
     @Inject lateinit var autoBackup: Lazy<app.thebox.data.backup.AutoBackupScheduler>
+    /** (M6 time-shift, docs/design/m6-timeshift.md §8.3) The ring-file sweep at start and the trim-memory discard. */
+    @Inject lateinit var timeshift: Lazy<app.thebox.player.timeshift.TimeshiftStartup>
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -79,6 +81,9 @@ class TheBoxApplication : Application(), Configuration.Provider {
         CrashConfig.installLocalOnly(this)
         updates.scheduleCheck()
         importMutex.gate = zapImportGate // M2 §3.5.5: importers pause while a zap is in progress
+        // (M6 time-shift, §8.3, A-S7) Other processes' ring files go on a background thread; the first buffered tune's
+        // prepare() waits for it, so a launch-time auto-tune never loses its own file.
+        timeshift.get().onAppStart()
         appScope.launch(Dispatchers.Main) {
             startupGate.awaitOpen()
             reminderScheduler.get()
@@ -121,7 +126,11 @@ class TheBoxApplication : Application(), Configuration.Provider {
     @Suppress("DEPRECATION")
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE) playlists.get().clearSecretCache()
+        if (level >= ComponentCallbacks2.TRIM_MEMORY_COMPLETE) {
+            playlists.get().clearSecretCache()
+            // (M6, §8.3) The ring file goes unless a buffered cycle uses it.
+            timeshift.get().onTrimMemoryComplete()
+        }
     }
 
     companion object {

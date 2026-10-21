@@ -5,6 +5,7 @@ import app.thebox.core.common.BoxLog
 import app.thebox.core.settings.tree.RuleDisabledReason
 import app.thebox.core.settings.tree.RuleDraft
 import app.thebox.core.settings.tree.RuleTarget
+import app.thebox.data.db.dao.GroupDao
 import app.thebox.data.repo.exec
 import app.thebox.data.repo.forEachBound
 
@@ -66,11 +67,15 @@ object RuleHiddenPass {
                     true
                 }
                 if (slow.isNotEmpty()) return null
+                // v5 (docs/design/m6-channel-editor.md §3.6 row 15): channels whose effective group is matched, from one
+                // grouped count over the playlist (GroupDao.EFFECTIVE_COUNTS), summed for the matched groups.
+                val matched = ids.toHashSet()
                 var channels = 0
-                for (chunk in ids.chunked(PAGE)) {
-                    channels += conn.usePrepared(
-                        "SELECT COUNT(*) FROM channel WHERE missing_since IS NULL AND group_id IN (${chunk.joinToString { "?" }})",
-                    ) { st -> chunk.forEachIndexed { i, id -> st.bindLong(i + 1, id) }; st.step(); st.getLong(0).toInt() }
+                if (matched.isNotEmpty()) {
+                    conn.usePrepared(GroupDao.EFFECTIVE_COUNTS) { st ->
+                        st.bindLong(1, playlistId)
+                        while (st.step()) if (!st.isNull(0) && st.getLong(0) in matched) channels += st.getLong(1).toInt()
+                    }
                 }
                 ids.size to channels
             }

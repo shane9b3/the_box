@@ -22,6 +22,7 @@ import app.thebox.ui.shelltest.FakePlaybackController
 import app.thebox.ui.shelltest.RecordingShellEffects
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -34,7 +35,7 @@ class GuideEffectsImplTest {
     private val ch = channels[3]
     private val info = GuideFixtures.info(GuideFixtures.NOW_MIN + 30, GuideFixtures.NOW_MIN + 90, "Late Edition", shiftMin = 60)
 
-    private class Rig(scope: TestScope, channels: List<app.thebox.core.guide.GuideChannel>) {
+    private class Rig(scope: TestScope, channels: List<app.thebox.core.guide.GuideChannel>, val artwork: app.thebox.core.art.FakeProgrammeArtwork = app.thebox.core.art.FakeProgrammeArtwork()) {
         val dispatcher = StandardTestDispatcher(scope.testScheduler)
         val controller = FakePlaybackController()
         val library = FakeGuideLibrary(channels)
@@ -51,7 +52,7 @@ class GuideEffectsImplTest {
         val effects = GuideEffectsImpl(
             scope = scope, io = dispatcher, controller = controller, library = library, rows = { rows }, pager = { pager },
             reminders = book, alerts = alerts, catchup = catchup, session = session, settings = settings,
-            dispatch = { events += it }, shell = shell, onLineup = { lineups += it },
+            dispatch = { events += it }, shell = shell, onLineup = { lineups += it }, artwork = artwork,
         )
     }
 
@@ -91,6 +92,49 @@ class GuideEffectsImplTest {
         advanceUntilIdle()
         assertEquals(GuideEvent.Info(7L, info), r.events[0])
         assertEquals(GuideEvent.TunedNow(info), r.events[1])
+    }
+
+    /** Owner ruling 2026-10-18: a programme without an EPG icon asks the lookup; the EPG's own icon skips it. */
+    @Test
+    fun infoWithoutEpgArtAsksTheLookupAndAnswersWithTheSameToken() = runTest {
+        val r = Rig(this, channels)
+        val series = info.copy(episodeLabel = "S2 E4")
+        r.artwork.posters[series.title] = "https://img/poster.jpg"
+        r.pager.infos[ch.rowId to info.rawStartMin] = series
+        r.effects.loadInfo(7L, ch, info.rawStartMin)
+        advanceUntilIdle()
+        assertEquals(listOf(GuideEvent.Info(7L, series), GuideEvent.Artwork(7L, "https://img/poster.jpg")), r.events)
+        assertEquals(listOf(series.title to app.thebox.core.art.ArtworkHint.SERIES), r.artwork.lookups)
+
+        r.events.clear(); r.artwork.lookups.clear(); r.artwork.posters.clear()
+        val film = info.copy(genre = "Movie")
+        r.pager.infos[ch.rowId to info.rawStartMin] = film
+        r.effects.loadInfo(8L, ch, info.rawStartMin)
+        advanceUntilIdle()
+        assertEquals("no poster known: no Artwork event", listOf(GuideEvent.Info(8L, film)), r.events)
+        assertEquals(listOf(film.title to app.thebox.core.art.ArtworkHint.MOVIE), r.artwork.lookups)
+
+        r.events.clear(); r.artwork.lookups.clear()
+        val withIcon = info.copy(iconUrl = "https://epg/icon.png")
+        r.pager.infos[ch.rowId to info.rawStartMin] = withIcon
+        r.effects.loadInfo(9L, ch, info.rawStartMin)
+        advanceUntilIdle()
+        assertEquals(listOf(GuideEvent.Info(9L, withIcon)), r.events)
+        assertTrue("the EPG's icon wins: no lookup", r.artwork.lookups.isEmpty())
+    }
+
+    /** Review 2026-10-18: a newer focus cancels the lookup in flight; only the latest cell gets a poster. */
+    @Test
+    fun aNewerInfoCancelsTheLookupInFlight() = runTest {
+        val r = Rig(this, channels)
+        r.artwork.delayMs = 1_000
+        r.artwork.posters[info.title] = "https://img/poster.jpg"
+        r.pager.infos[ch.rowId to info.rawStartMin] = info
+        r.effects.loadInfo(1L, ch, info.rawStartMin)
+        advanceTimeBy(100)
+        r.effects.loadInfo(2L, ch, info.rawStartMin)
+        advanceUntilIdle()
+        assertEquals(listOf(GuideEvent.Info(1L, info), GuideEvent.Info(2L, info), GuideEvent.Artwork(2L, "https://img/poster.jpg")), r.events)
     }
 
     @Test
