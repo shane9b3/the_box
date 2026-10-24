@@ -198,11 +198,11 @@ class TimeshiftViewModelTest {
         vm.effects.toast(PlayerToast.PAUSE_NO_REWIND_STORAGE, null); idle()
         assertEquals("Saving for rewind failed on this device's storage, so Play returns to live. Change channel and back to try again.", out.last())
         vm.effects.toast(PlayerToast.PAUSE_NO_REWIND_OFF, null); idle()
-        assertEquals("Rewind is turned off, so Play returns to live. To keep your place: Settings → Playback → Pause and rewind.", out.last())
+        assertEquals("Rewind is turned off, so Play returns to live. To keep your place: Settings → Playback → Pause and rewind → Rewind length.", out.last())
         vm.effects.toast(PlayerToast.PAUSE_NO_REWIND_SPACE, "0.6 GB"); idle()
-        assertEquals("Not enough free storage to save this channel (0.6 GB free), so Play returns to live. Free up space or choose a shorter rewind in Settings → Playback.", out.last())
+        assertEquals("Not enough free storage to save this channel (0.6 GB free), so Play returns to live. Free up space, choose a shorter rewind in Settings → Playback → Pause and rewind → Rewind length, or save to a USB drive or network folder there.", out.last())
         vm.effects.toast(PlayerToast.REWIND_LIMITED_TODAY, null); idle()
-        assertTrue(out.last(), out.last().endsWith("Change it in Settings → Show advanced settings, then Playback → Protect built-in storage."))
+        assertTrue(out.last(), out.last().endsWith("Change it in Settings → Show advanced settings, then Playback → Pause and rewind → Protect built-in storage."))
     }
 
     /** Fix pass S6: BACK_TO_LIVE_UNBUFFERED carries the pause reason's next step, once per tune. */

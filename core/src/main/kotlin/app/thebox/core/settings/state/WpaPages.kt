@@ -46,6 +46,9 @@ import app.thebox.core.settings.tree.PauseRewindRows
 import app.thebox.core.settings.tree.PlaybackRows
 import app.thebox.core.settings.tree.RemoteRows
 import app.thebox.core.settings.tree.SettingsTree
+import app.thebox.core.storage.StorageKind
+import app.thebox.core.storage.StorageLimits
+import app.thebox.core.storage.LocationState
 import java.util.Locale
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.channels.BufferOverflow
@@ -96,6 +99,31 @@ interface WpaPageEnv {
 data class TimeshiftStorageFacts(val totalBytes: Long, val availableBytes: Long, val currentFileBytes: Long = 0L)
 
 /**
+ * (WP-S4, docs/design/m6-storage-locations.md §9.1) Where rewind is saved, as the Pause and rewind rows read it. [DEVICE]
+ * (the default, kind INTERNAL, blank label) is today's behaviour, so every pre-existing caller and test is unchanged.
+ * [label] is the value's form ("This device", "NAS", "USB drive"), [sentence] the form after "on" ("this device",
+ * "NAS", "the USB drive"). [facts] are a non-internal place's free bytes (null = unknown). [offlineName] is the chosen
+ * place's name while the cycle saves on this device instead ("NAS offline", amber); [problem] is why (the Save to
+ * description). A blank [label] adds no place to the link's value.
+ */
+data class TimeshiftPlace(
+    val kind: StorageKind = StorageKind.INTERNAL,
+    val label: String = "",
+    val sentence: String = "",
+    val facts: TimeshiftStorageFacts? = null,
+    val offlineName: String? = null,
+    val problem: LocationState? = null,
+) {
+    companion object { val DEVICE = TimeshiftPlace() }
+}
+
+/** (WP-S4) The current place; `StoragePages`' `TimeshiftPlaces` answers it from the stored locations. Main-safe, no I/O. */
+fun interface TimeshiftPlaceSource {
+    fun current(): TimeshiftPlace
+    companion object { val DEVICE = TimeshiftPlaceSource { TimeshiftPlace.DEVICE } }
+}
+
+/**
  * WP-A's section pages (docs/design/m5-setup-settings.md §3.3.2, §3.3.3, §3.3.6, §3.3.7, §3.3.11): TV guide, Playback,
  * Interface, Remote control and Network. Every value comes from [store]; every intent writes it (main-safe: the store
  * applies in memory at once and persists on IO). Rows carry the [SettingsTree] spec's visibility and [EffectTiming];
@@ -108,6 +136,8 @@ class WpaPages(
     private val env: WpaPageEnv,
     /** (owner rulings 2026-10-18/19) Programme posters: [ArtworkStatus] drives the toggle's description; `guide.posters` is a pref. */
     private val artwork: ProgrammeArtwork = ProgrammeArtwork.NONE,
+    /** (WP-S4) The place rewind saves to: the Playback link's value ("1 hour · NAS"). */
+    private val places: TimeshiftPlaceSource = TimeshiftPlaceSource.DEVICE,
 ) : SettingsPageSource {
     private val version = AtomicLong(0)
     private val _notices = MutableSharedFlow<String>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
@@ -115,7 +145,8 @@ class WpaPages(
     override val notices: Flow<String> get() = _notices
 
     override fun handles(route: SettingsRoute): Boolean =
-        (route is SettingsRoute.Section && route.id in SECTIONS) || route == SettingsRoute.PauseRewind // storage locations commit 0
+        // (WP-S4) PauseRewind is StoragePages' page now; [build] still builds it (device place) for the contract tests.
+        route is SettingsRoute.Section && route.id in SECTIONS
 
     override val changes: Flow<Unit>
         get() = merge(
@@ -300,36 +331,70 @@ class WpaPages(
     }
 
     /**
-     * (M6 time-shift, docs/design/m6-timeshift.md §8.2, §12) The three rows with their values. Auto is the length
-     * `TimeshiftPolicy` gives the device's storage class (30 min on ≤ 16 GB, else 1 hour); when free space caps the
-     * ring the value reads "Auto (22 min: storage is limited)" and the description uses the capped window and size.
-     * Off deletes the file at once ([WpaPageEnv.timeshiftOff]; the row itself is NEXT_TUNE). Unknown storage: Auto reads
-     * as the small-storage length.
-     */
-    /**
-     * (Storage locations commit 0, §9.1) The Playback page's "Pause and rewind" Link to [SettingsRoute.PauseRewind]; its
-     * value is the length's. WP-S4 adds the place ("1 hour · NAS") and the description.
+     * (WP-S4, docs/design/m6-storage-locations.md §9.1) The Playback page's "Pause and rewind" Link to
+     * [SettingsRoute.PauseRewind]: SIMPLE, effect NONE. Value `<length> · <place>` ("1 hour · NAS", "Auto (1 h 11 min) ·
+     * USB drive"), just "Off" when rewind is Off; while the cycle falls back: amber "1 hour · This device (NAS offline)".
      */
     private fun pauseRewindLink(p: PlaybackPrefs): SettingsRow {
-        val length = timeshiftRows(p).first { it.id == PauseRewindRows.TIMESHIFT }
-        return link(PlaybackRows.PAUSE_REWIND, SettingsRoute.PauseRewind, t(SettingsText.PB_TIMESHIFT)).copy(value = length.value)
+        val place = places.current()
+        val length = timeshiftRows(p, place).first { it.id == PauseRewindRows.TIMESHIFT }.value.orEmpty()
+        val value = when {
+            p.timeshift == TimeshiftLength.OFF || place.label.isBlank() -> length
+            place.offlineName != null -> StorageMarks.warn(t(SettingsText.PB_PAUSE_REWIND_VALUE_FALLBACK, length, place.offlineName))
+            else -> t(SettingsText.PB_PAUSE_REWIND_VALUE, length, place.label)
+        }
+        return link(PlaybackRows.PAUSE_REWIND, SettingsRoute.PauseRewind, t(SettingsText.PB_TIMESHIFT), t(SettingsText.PB_PAUSE_REWIND_DESC)).copy(value = value)
     }
 
-    private fun timeshiftRows(p: PlaybackPrefs): List<SettingsRow> {
-        val storage = env.timeshiftStorage()
-        val autoMs = storage?.let { POLICY.lengthMs(TimeshiftLength.AUTO, it.totalBytes) } ?: TimeshiftConstants.AUTO_LENGTH_SMALL_MS
-        val autoSized = sized(autoMs, storage)
-        val autoLabel = if (autoSized.limited) t(SettingsText.TS_AUTO_LIMITED, lengthText(autoSized.windowMs)) else t(SettingsText.TS_AUTO, lengthText(autoMs))
+    /**
+     * (M6 time-shift, docs/design/m6-timeshift.md §8.2, §12) The three rows with their values. Auto is the length
+     * `TimeshiftPolicy` gives the place's storage class (30 min on ≤ 16 GB, else 1 hour; 1 hour on a USB drive or a network
+     * folder); when free space caps the ring the value reads "Auto (22 min: storage is limited)" and the description uses
+     * the capped window and size. Off deletes the file at once ([WpaPageEnv.timeshiftOff]; the row itself is NEXT_TUNE).
+     * Unknown storage: Auto reads as the small-storage length.
+     *
+     * (WP-S4, storage locations §3.2, §9.1) For a USB drive the 2-hour option carries "Up to 1 h 11 min on this drive"
+     * (the FAT32 file cap) and Auto reads "Auto (1 h 11 min: USB drive is limited)"; the sizes follow the place ("Uses up
+     * to 1.9 GB on NAS ..."); "Protect built-in storage" says it is not used while saving elsewhere. [place] defaults to
+     * this device, where nothing changes. `StoragePages` builds the page; the rows keep their ids, so
+     * [apply] still writes them (owner "A").
+     */
+    fun timeshiftRows(p: PlaybackPrefs, place: TimeshiftPlace = TimeshiftPlace.DEVICE): List<SettingsRow> {
+        val internal = place.kind == StorageKind.INTERNAL
+        val storage = if (internal) env.timeshiftStorage() else place.facts
+        val limits = when (place.kind) {
+            StorageKind.VOLUME, StorageKind.SAF_TREE -> StorageLimits.VOLUME
+            StorageKind.SMB -> StorageLimits.SMB
+            StorageKind.INTERNAL -> null
+        }
+        val autoMs = if (limits != null) POLICY.lengthMs(TimeshiftLength.AUTO, 0L, limits)!!
+        else storage?.let { POLICY.lengthMs(TimeshiftLength.AUTO, it.totalBytes) } ?: TimeshiftConstants.AUTO_LENGTH_SMALL_MS
+        val autoSized = sized(autoMs, storage, limits)
+        val autoLabel = when {
+            !autoSized.limited -> t(SettingsText.TS_AUTO, lengthText(autoMs))
+            place.kind == StorageKind.VOLUME -> t(SettingsText.TS_AUTO_LIMITED_USB, lengthText(autoSized.windowMs))
+            else -> t(SettingsText.TS_AUTO_LIMITED, lengthText(autoSized.windowMs))
+        }
+        // The USB drive's file cap shortens the longest option; it says so up front (§3.2).
+        fun detail(lengthMs: Long): String? {
+            if (place.kind != StorageKind.VOLUME) return null
+            val w = sized(lengthMs, storage, limits)
+            return if (w.windowMs < lengthMs) t(SettingsText.TS_UP_TO_ON_DRIVE, lengthText(w.windowMs)) else null
+        }
         val lengths = listOf(
-            TimeshiftLength.AUTO to autoLabel,
-            TimeshiftLength.MIN_15 to lengthText(15 * MINUTE_MS), TimeshiftLength.MIN_30 to lengthText(30 * MINUTE_MS),
-            TimeshiftLength.H_1 to lengthText(60 * MINUTE_MS), TimeshiftLength.H_2 to lengthText(120 * MINUTE_MS),
-            TimeshiftLength.PAUSE_ONLY to t(SettingsText.TS_PAUSE_ONLY), TimeshiftLength.OFF to t(SettingsText.OFF),
-        ).map { (m, label) -> ChoiceOption(m.name, label) }
+            TimeshiftLength.AUTO to (autoLabel to null),
+            TimeshiftLength.MIN_15 to (lengthText(15 * MINUTE_MS) to detail(15 * MINUTE_MS)),
+            TimeshiftLength.MIN_30 to (lengthText(30 * MINUTE_MS) to detail(30 * MINUTE_MS)),
+            TimeshiftLength.H_1 to (lengthText(60 * MINUTE_MS) to detail(60 * MINUTE_MS)),
+            TimeshiftLength.H_2 to (lengthText(120 * MINUTE_MS) to detail(120 * MINUTE_MS)),
+            TimeshiftLength.PAUSE_ONLY to (t(SettingsText.TS_PAUSE_ONLY) to null),
+            TimeshiftLength.OFF to (t(SettingsText.OFF) to null),
+        ).map { (m, ld) -> ChoiceOption(m.name, ld.first, detail = ld.second) }
         val lengthMs = TIMESHIFT_LENGTH_MS[p.timeshift] ?: autoMs
-        val shown = sized(lengthMs, storage)
+        val shown = sized(lengthMs, storage, limits)
         val sizeGb = String.format(Locale.ROOT, "%.1f", shown.bytes / GIB)
-        val desc = t(SettingsText.PB_TIMESHIFT_DESC, lengthText(shown.windowMs), t(SettingsText.TS_GB, sizeGb)).let {
+        val desc = (if (internal) t(SettingsText.PB_TIMESHIFT_DESC, lengthText(shown.windowMs), t(SettingsText.TS_GB, sizeGb))
+        else t(SettingsText.PB_TIMESHIFT_DESC_AT, lengthText(shown.windowMs), t(SettingsText.TS_GB, sizeGb), place.sentence)).let {
             if (p.timeshift == TimeshiftLength.PAUSE_ONLY) it + " " + t(SettingsText.PB_TIMESHIFT_PAUSE_ONLY_DESC) else it
         }
         val holds = listOf(
@@ -338,10 +403,11 @@ class WpaPages(
             TimeshiftHold.UNTIL_FULL to t(SettingsText.HOLD_UNTIL_FULL),
         ).map { (m, label) -> ChoiceOption(m.name, label) }
         val protect = listOf(StorageProtection.AUTO to SettingsText.AUTO, StorageProtection.OFF to SettingsText.OFF).map { (m, k) -> ChoiceOption(m.name, t(k)) }
+        val protectDesc = t(SettingsText.PB_TIMESHIFT_PROTECT_DESC).let { if (internal) it else it + " " + t(SettingsText.PB_TIMESHIFT_PROTECT_ELSEWHERE, place.sentence) }
         return listOf(
-            choice(PauseRewindRows.TIMESHIFT, t(SettingsText.PB_TIMESHIFT), lengths, p.timeshift.name, desc),
+            choice(PauseRewindRows.TIMESHIFT, t(SettingsText.PB_TIMESHIFT_LENGTH), lengths, p.timeshift.name, desc),
             choice(PauseRewindRows.TIMESHIFT_HOLD, t(SettingsText.PB_TIMESHIFT_HOLD), holds, p.timeshiftHold.name, t(SettingsText.PB_TIMESHIFT_HOLD_DESC)),
-            choice(PauseRewindRows.TIMESHIFT_PROTECT, t(SettingsText.PB_TIMESHIFT_PROTECT), protect, p.storageProtection.name, t(SettingsText.PB_TIMESHIFT_PROTECT_DESC)),
+            choice(PauseRewindRows.TIMESHIFT_PROTECT, t(SettingsText.PB_TIMESHIFT_PROTECT), protect, p.storageProtection.name, protectDesc),
         )
     }
 
@@ -352,9 +418,15 @@ class WpaPages(
      * `length × rate × 1.15`. Known: `TimeshiftPolicy.capacityBytes`; the window is `min(length, capacity ÷ rate)`, and
      * "limited" when that is shorter than the length.
      */
-    private fun sized(lengthMs: Long, storage: TimeshiftStorageFacts?): Sized {
+    private fun sized(lengthMs: Long, storage: TimeshiftStorageFacts?, limits: StorageLimits? = null): Sized {
         val rate = TimeshiftConstants.ASSUMED_BYTES_PER_SEC
         val wanted = lengthMs / 1000.0 * rate * TimeshiftConstants.CAPACITY_HEADROOM
+        if (limits != null) {
+            // (WP-S4) A USB drive or a network folder: the kind's cap and reserve; unknown free space = no limit from space.
+            val capacity = POLICY.capacityBytes(lengthMs, rate, storage?.availableBytes ?: UNKNOWN_FREE, limits, storage?.currentFileBytes ?: 0L)
+            val window = POLICY.effectiveWindowMs(lengthMs, capacity, rate) / MINUTE_MS * MINUTE_MS
+            return Sized(window, minOf(wanted, capacity.toDouble()), limited = window < lengthMs)
+        }
         if (storage == null) return Sized(lengthMs, wanted, limited = false)
         val capacity = POLICY.capacityBytes(lengthMs, rate, storage.availableBytes, storage.totalBytes, storage.currentFileBytes)
         val window = POLICY.effectiveWindowMs(lengthMs, capacity, rate)
@@ -367,7 +439,8 @@ class WpaPages(
     private fun lengthText(ms: Long): String {
         val min = (ms / MINUTE_MS).toInt()
         return when {
-            min < 60 || min % 60 != 0 -> t(SettingsText.TS_MIN, min)
+            min < 60 -> t(SettingsText.TS_MIN, min)
+            min % 60 != 0 -> t(SettingsText.TS_HOURS_MIN, min / 60, min % 60) // (WP-S4) "1 h 11 min": a USB drive's cap
             min == 60 -> t(SettingsText.TS_HOUR)
             else -> t(SettingsText.TS_HOURS, min / 60)
         }
@@ -658,6 +731,8 @@ class WpaPages(
         const val STILL = "still"
         private const val MINUTE_MS = 60_000L
         private const val GIB = 1024.0 * 1024 * 1024
+        /** (WP-S4) A network folder's free space is unknown until the keeper reports it: no limit from space. */
+        private const val UNKNOWN_FREE = Long.MAX_VALUE / 4
         /** (M6 commit 0) Fixed lengths of the "Pause and rewind" values; AUTO, PAUSE_ONLY and OFF are not here. */
         private val POLICY = app.thebox.core.playback.timeshift.TimeshiftPolicyImpl()
         private val TIMESHIFT_LENGTH_MS = mapOf(
@@ -691,6 +766,8 @@ class WpaPages(
         fun rowRules(texts: SettingsTexts): Map<RowId, (String) -> String?> = mapOf(
             // C-L8: exactly what BoxDnsPolicy will use (a URL it would ignore must not read as "Custom").
             NetworkRows.CUSTOM_DOH to { s: String -> if (s.isBlank() || app.thebox.core.net.BoxDnsPolicy.isValidCustomUrl(s.trim())) null else texts[SettingsText.ERR_HTTPS] },
+            // (WP-S4, storage locations §7.2) "Computer name or address" takes the forms ManualAddressParser accepts.
+            StoragePages.ROW_ENTER to { s: String -> if (StoragePages.validHost(s)) null else texts[SettingsText.ERR_HOST] },
         )
 
         inline fun <reified E : Enum<E>> enumOf(name: String): E? = enumValues<E>().firstOrNull { it.name == name }

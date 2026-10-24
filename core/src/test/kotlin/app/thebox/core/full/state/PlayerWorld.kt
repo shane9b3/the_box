@@ -156,11 +156,16 @@ class PlayerWorld(
         stop: app.thebox.core.playback.timeshift.RecordStop? = null, limitedToday: Boolean = false,
         windowMs: Long = 30 * 60_000L, cycleId: Long = 0, notSaved: app.thebox.core.playback.timeshift.TimeRanges = app.thebox.core.playback.timeshift.TimeRanges.EMPTY,
         fromMs: Long? = null, holdMs: Long? = null,
+        // (Storage locations §10, WP-S4) Where the cycle saves and why it does not save where it was told to.
+        storage: app.thebox.core.storage.StorageKind = app.thebox.core.storage.StorageKind.INTERNAL,
+        storageFailure: app.thebox.core.storage.StorageFailure? = null, fallback: app.thebox.core.storage.LocationFallback? = null,
+        storageName: String? = null, locationId: String = app.thebox.core.storage.StorageConstants.INTERNAL_ID,
     ): PlayerWorld {
         val info = app.thebox.core.full.LocalBufferInfo(
             available = available, fromMs = if (available) fromMs ?: (nowMs - savedMs) else 0, atMs = if (available) nowMs else 0, saving = available && stop == null,
             notSaved = notSaved, pauseRemainingMs = if (available) 17 * 60_000L else null, stop = stop,
             off = off, hls = hls, limitedToday = limitedToday, windowMs = if (available) windowMs else 0, holdMs = holdMs, cycleId = cycleId,
+            storage = storage, storageFailure = storageFailure, fallback = fallback, storageName = storageName, locationId = locationId,
         )
         bufferInfo = info
         send(PlayerEvent.Buffer(info))
@@ -168,6 +173,10 @@ class PlayerWorld(
     }
 
     private val buffered: Boolean get() = bufferInfo?.available == true
+
+    /** (WP-S4) What `PlayerEffects.fallbackToastDue` answers, and what it was asked, in order. */
+    var fallbackDue: (String, app.thebox.core.storage.LocationFallback) -> Boolean = { _, _ -> true }
+    val fallbackAsked = ArrayList<Pair<String, app.thebox.core.storage.LocationFallback>>()
 
     /** A LOCAL status of [ch] (§11.2): the playhead [wallMs], the edge at now, the buffer's oldest instant. */
     fun localStatus(ch: GuideChannel, phase: ArchivePhase, wallMs: Long, settledSeq: Long = status.settledSeq): ArchiveStatus {
@@ -318,6 +327,10 @@ class PlayerWorld(
     // ---------------------------------------------------------------- the player host (PlayerEffectsImpl's role)
 
     private inner class Host : PlayerEffects by fx {
+        override fun fallbackToastDue(locationId: String, reason: app.thebox.core.storage.LocationFallback): Boolean {
+            fallbackAsked += locationId to reason
+            return fallbackDue(locationId, reason)
+        }
         override fun zap(delta: Int, isRepeat: Boolean) {
             fx.zap(delta, isRepeat)
             val cur = channels.indexOfFirst { it.identityHash == tunedRaw.identityHash }.coerceAtLeast(0)

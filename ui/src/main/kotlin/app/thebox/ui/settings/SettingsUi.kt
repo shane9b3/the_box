@@ -1,6 +1,29 @@
 package app.thebox.ui.settings
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import app.thebox.core.settings.Badge
@@ -90,10 +113,42 @@ object SettingsUi {
     val Button: TextStyle get() = GuideUi.sans(24, FontWeight.SemiBold)
     val BadgeText: TextStyle get() = GuideUi.mono(18)
 
-    /** Values in mono when they are numbers, times or hosts (§3.1 "Row"): digits-only, a clock time, or a host/URL. */
-    fun isMonoValue(v: String): Boolean = v.isNotEmpty() && (MONO.matches(v) || v.contains("://") || HOST.matches(v))
+    /**
+     * Values in mono when they are numbers, times or hosts (§3.1 "Row"): digits-only, a clock time, or a host/URL.
+     * (WP-S4, storage locations §9.2, §9.4) Also a network path (`\\NAS\TV\Rewind`), a Test's "9 of 16 MB" and its
+     * "10.5 MB/s · 4 ms · Wi-Fi" details.
+     */
+    fun isMonoValue(v: String): Boolean =
+        v.isNotEmpty() && (MONO.matches(v) || v.contains("://") || HOST.matches(v) || v.startsWith("\\\\") || PROGRESS.matches(v) || DETAILS.matches(v))
     private val MONO = Regex("^[0-9 :.,/+−\\-–%]+[a-z]{0,3}$")
+    private val PROGRESS = Regex("^[0-9]+ \\S+ [0-9]+ MB$")
+    private val DETAILS = Regex("^[0-9.]+ MB/s · [0-9]+ ms · .+$")
     private val HOST = Regex("^[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+(:[0-9]+)?$")
+
+    // ---- (WP-S4, storage locations §9.4) badges, the Test's progress row and the searching dots
+    /** `Badge.IN_USE` and `Badge.SAVED`: a 1 px accent border; text FG .9 on a row, the canvas colour on a focused (FG-filled) row. */
+    fun isAccentBadge(b: Badge): Boolean = b == Badge.IN_USE || b == Badge.SAVED
+    fun accentBadgeText(focused: Boolean): Color = if (focused) Canvas else Fg.copy(alpha = 0.9f)
+    const val ACCENT_BADGE_BORDER = 1
+
+    const val PROGRESS_TRACK_W = 1228; const val PROGRESS_TRACK_H = 8
+    const val PROGRESS_ROW_H = 104
+    /** Three dots (6 px, 3 px apart: 24 px wide) at the row's right, alpha .3 → 1, 400 ms per dot. */
+    const val DOT_SIZE = 6; const val DOT_GAP = 3; const val DOT_MS = 400
+    const val DOTS_RIGHT_X = 1220
+    /** An Info row of `storage.*` with next-step lines: one line each under the label (§7.7, §9.4: no clipped next step). */
+    const val STORAGE_INFO_LINE_H = 28
+
+    /** "9 of 16 MB" → 0.5625; null when it is not a progress value. */
+    fun progressFraction(value: String?): Float? {
+        val m = value?.let { Regex("^([0-9]+) \\S+ ([0-9]+) MB$").matchEntire(it) } ?: return null
+        val done = m.groupValues[1].toFloat()
+        val total = m.groupValues[2].toFloat()
+        return if (total > 0f) (done / total).coerceIn(0f, 1f) else null
+    }
+
+    /** True for a value or description a page marked amber (the fallback value "NAS offline", §9.1). */
+    fun isWarnText(text: String?): Boolean = app.thebox.core.settings.state.StorageMarks.isWarn(text)
 
     fun toneColor(t: Tone): Color = when (t) {
         Tone.NORMAL -> Fg80
@@ -125,5 +180,52 @@ object SettingsUi {
         // (Storage locations commit 0, docs/design/m6-storage-locations.md §9.2, §9.4) WP-S4 draws them (accent border).
         Badge.IN_USE -> R.string.settings_ui_badge_in_use
         Badge.SAVED -> R.string.settings_ui_badge_saved
+    }
+}
+
+/**
+ * (WP-S4, §9.4) The Test's progress track: 1,228 x 8 px, `#FFFFFF` at 18 % with the done part in the accent. The row's
+ * `contentDescription` ("Testing, 9 of 16 MB") is set by the caller.
+ */
+@Composable
+fun ProgressTrack(fraction: Float, modifier: Modifier = Modifier) {
+    val shape = RoundedCornerShape((SettingsUi.PROGRESS_TRACK_H / 2).dp)
+    Box(
+        modifier.width(SettingsUi.PROGRESS_TRACK_W.dp).height(SettingsUi.PROGRESS_TRACK_H.dp).background(Color.White.copy(alpha = 0.18f), shape),
+    ) {
+        Box(Modifier.fillMaxWidth(fraction.coerceIn(0f, 1f)).height(SettingsUi.PROGRESS_TRACK_H.dp).background(SettingsUi.Accent, shape))
+    }
+}
+
+/** True when the system animations are off (`ANIMATOR_DURATION_SCALE` == 0): the dots then stay still (U-N5). */
+@Composable
+private fun animationsOff(): Boolean {
+    val context = LocalContext.current
+    return remember(context) {
+        try {
+            android.provider.Settings.Global.getFloat(context.contentResolver, android.provider.Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
+        } catch (e: Exception) {
+            false
+        }
+    }
+}
+
+/**
+ * (WP-S4, §9.4) The searching row's three dots, alpha .3 → 1 one after another (400 ms each); static at full alpha when the
+ * system animations are off. `contentDescription` "Searching" is the caller's string.
+ */
+@Composable
+fun SearchingDots(description: String, modifier: Modifier = Modifier) {
+    val off = animationsOff()
+    val transition = rememberInfiniteTransition(label = "searching")
+    val phase = if (off) 0f else transition.animateFloat(
+        initialValue = 0f, targetValue = 3f,
+        animationSpec = infiniteRepeatable(tween(SettingsUi.DOT_MS * 3, easing = LinearEasing), RepeatMode.Restart), label = "dots",
+    ).value
+    Row(modifier.semantics { contentDescription = description }, horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(SettingsUi.DOT_GAP.dp)) {
+        for (i in 0 until 3) {
+            val a = if (off) 1f else if (phase.toInt() == i) 1f else 0.3f
+            Box(Modifier.size(SettingsUi.DOT_SIZE.dp).alpha(a).background(SettingsUi.Fg, CircleShape))
+        }
     }
 }

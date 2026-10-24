@@ -57,7 +57,8 @@ class WpaPagesTest {
         assertEquals("TS_AUTO(TS_MIN(30))", link.value, "the link shows the length")
         assertEquals(Visibility.SIMPLE, link.visibility)
         assertEquals(EffectTiming.NONE, link.effect)
-        assertTrue(pages.handles(SettingsRoute.PauseRewind))
+        // (WP-S4) StoragePages builds the page in production (Save to joins its rows); WpaPages still builds the three length rows.
+        assertFalse(pages.handles(SettingsRoute.PauseRewind))
         for ((id, how) in listOf(
             Triple(PauseRewindRows.TIMESHIFT, "TS_AUTO(TS_MIN(30))", EffectTiming.NEXT_TUNE to Visibility.SIMPLE),
             Triple(PauseRewindRows.TIMESHIFT_HOLD, "AUTO", EffectTiming.LIVE to Visibility.ADVANCED),

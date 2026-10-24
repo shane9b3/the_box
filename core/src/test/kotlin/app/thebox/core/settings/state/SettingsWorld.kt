@@ -23,6 +23,12 @@ import app.thebox.core.settings.fakes.FakePinGate
 import app.thebox.core.settings.fakes.FakeSettingsStore
 import app.thebox.core.settings.fakes.SettingsFixtures
 import app.thebox.core.settings.tree.SettingsTree
+import app.thebox.core.setup.fakes.FakePhoneLink
+import app.thebox.core.storage.fakes.FakeNetworkFolders
+import app.thebox.core.storage.fakes.FakeStorageLocations
+import app.thebox.core.storage.fakes.FakeVolumeCatalog
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
 
 /** A fixed [WpaPageEnv] for JVM tests. */
@@ -134,9 +140,22 @@ class SettingsWorld(
     val reloadAfterIntent: Boolean = true,
     /** C-S9: the other WPs' real builders (else [FixturePages] stands in for them). */
     val real: RealPages? = null,
+    /** (WP-S4) Wraps the fake `NetworkFolders` the storage pages see (a gated Test, a never-ending finder). */
+    foldersWrap: (app.thebox.core.storage.fakes.FakeNetworkFolders) -> app.thebox.core.storage.NetworkFolders = { it },
 ) {
     val effects = QueueEffects()
-    val wpa = WpaPages(store, SettingsTexts.KEYS, env)
+    // (WP-S4) Fakes for the storage contracts; Unconfined makes StoragePages' own jobs run to their first real suspension.
+    val locations = FakeStorageLocations()
+    val folders = FakeNetworkFolders()
+    val volumes = FakeVolumeCatalog()
+    val phoneLink = FakePhoneLink()
+    val storageEnv = FakeStoragePageEnv()
+    private val places = TimeshiftPlaces(locations, volumes, StorageTexts.KEYS)
+    val wpa = WpaPages(store, SettingsTexts.KEYS, env, places = places)
+    val storage = StoragePages(
+        store, SettingsTexts.KEYS, StorageTexts.KEYS, wpa, env, places, locations, foldersWrap(folders), volumes, phoneLink, storageEnv,
+        CoroutineScope(Dispatchers.Unconfined), parse = ::stubParse, reapGraceMs = 0L,
+    )
     val fixtures = FixturePages()
     val machine = SettingsMachineImpl(effects, { now }, SettingsTexts.KEYS, HintValidator(SettingsTexts.KEYS, WpaPages.rowRules(SettingsTexts.KEYS)))
     val gate = FakePinGate(pinSet)
@@ -148,11 +167,17 @@ class SettingsWorld(
 
     init {
         machine.pinGate = gate
+        storage.attachNavigation { machine }
+        machine.backHandler = { storage.onBack(it) }
         machine.captureSaved = { a, k, p -> saved += Triple(a, k, p) }
     }
 
     fun page(route: SettingsRoute): PageModel {
-        val p = if (wpa.handles(route)) wpa.build(route, advanced) else real?.build(route, advanced) ?: fixtures.build(route)
+        val p = when {
+            storage.handles(route) -> storage.build(route, PageContext(advanced, now))
+            wpa.handles(route) -> wpa.build(route, advanced)
+            else -> real?.build(route, advanced) ?: fixtures.build(route)
+        }
         return p.copy(version = ++version)
     }
 
@@ -164,7 +189,12 @@ class SettingsWorld(
                 // C-L2: the fixture's capture row behaves like WP-C's mapping source (Run → startCapture).
                 if (i.row == FixturePages.CAPTURE_ROW && i is RowIntent.Run) { machine.startCapture(BoxAction.OPEN_SEARCH, app.thebox.core.input.Press.SHORT); continue }
                 if (i.row == SettingsMachineImpl.ADVANCED_ROW) advanced = (i as RowIntent.Toggle).on
-                if (applyIntents) runBlocking { wpa.onIntent(machine.ui.value.route, i, PageContext(advanced, now)) }
+                if (applyIntents) runBlocking {
+                    val ctx = PageContext(advanced, now)
+                    val at = machine.ui.value.page?.route ?: machine.ui.value.route
+                    // The page's own source first, then the rest (as SettingsEffectsImpl does).
+                    if (!(storage.handles(at) && storage.onIntent(at, i, ctx))) wpa.onIntent(at, i, ctx)
+                }
                 if (reloadAfterIntent || i.row == SettingsMachineImpl.ADVANCED_ROW) machine.ui.value.page?.route?.let { effects.loads += it }
             }
             val loads = effects.loads.toList(); effects.loads.clear()

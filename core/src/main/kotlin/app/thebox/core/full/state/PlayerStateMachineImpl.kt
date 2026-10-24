@@ -209,6 +209,9 @@ class PlayerStateMachineImpl(
     private var zapConfirmUntil = Long.MIN_VALUE
     /** (Fix pass S9) The buffered cycle [buffer] belongs to; a new one restarts [tunedSinceMs] (REWIND_NOTHING_YET). */
     private var cycleId = 0L
+    /** (Storage locations §5.1, §10) The cycle and reason SAVE_LOCATION_FALLBACK was last asked about (once per pair). */
+    private var fallbackAskedCycle = Long.MIN_VALUE
+    private var fallbackAskedReason: app.thebox.core.storage.LocationFallback? = null
     /** (Fix pass S8) The oldest saved instant first seen this cycle (P frame): REWIND_START says "when you tuned in" near it. */
     private var cycleFirstFromMs: Long? = null
     /** §11.5: the remote has sent a media key this process ("Press OK or ▶"). */
@@ -1417,7 +1420,44 @@ class PlayerStateMachineImpl(
         if (info != null && info.available && cycleFirstFromMs == null) cycleFirstFromMs = info.fromMs
         buffer = info
         bufferAtMs = curMs
+        onFallback(info)
     }
+
+    /**
+     * (Storage locations §5.1, §10, §16.2) SAVE_LOCATION_FALLBACK when a cycle's [LocalBufferInfo.fallback] first becomes
+     * non-null (at the first Buffer event, or at the §5.2 switch). The host decides whether this one is due (once per
+     * process per place and reason; the sign-in reason for three processes only; never for NOT_READY_YET) through
+     * [PlayerEffects.fallbackToastDue]. Asked once per (cycle, reason): later snapshots of the same cycle do not ask again.
+     */
+    private fun onFallback(info: LocalBufferInfo?) {
+        val reason = info?.fallback
+        if (info == null || reason == null) return
+        if (info.cycleId == fallbackAskedCycle && reason == fallbackAskedReason) return
+        fallbackAskedCycle = info.cycleId
+        fallbackAskedReason = reason
+        if (effects.fallbackToastDue(info.locationId, reason)) {
+            effects.toast(PlayerToast.SAVE_LOCATION_FALLBACK, storageToastArg(kindOfLocation(info.locationId), reason.name, info.storageName, jumped = false))
+        }
+    }
+
+    /** The kind of a location id (`vol-…` USB drive, `smb-…` network folder, else this device). */
+    private fun kindOfLocation(id: String): app.thebox.core.storage.StorageKind = when {
+        id.startsWith(app.thebox.core.storage.StorageConstants.VOLUME_ID_PREFIX) -> app.thebox.core.storage.StorageKind.VOLUME
+        id.startsWith(app.thebox.core.storage.StorageConstants.SMB_ID_PREFIX) -> app.thebox.core.storage.StorageKind.SMB
+        else -> app.thebox.core.storage.StorageKind.INTERNAL
+    }
+
+    /**
+     * (§10) `"<StorageKind>␟<second>␟<name>␟<jumped 1|>"`: [second] is the LocationFallback name for
+     * SAVE_LOCATION_FALLBACK and the StorageFailure name (or "") for the REWIND_STOPPED_* / PAUSE_NO_REWIND_STORAGE kinds.
+     */
+    private fun storageToastArg(kind: app.thebox.core.storage.StorageKind, second: String?, name: String?, jumped: Boolean): String =
+        listOf(kind.name, second.orEmpty(), name.orEmpty(), if (jumped) "1" else "").joinToString(PLAYER_TOAST_ARG_SEP.toString())
+
+    /** (§10) The arg of a storage-stop toast: null (today's internal text) when this cycle saved on this device. */
+    private fun storageStopArg(b: LocalBufferInfo?): String? =
+        if (b == null || b.storage == app.thebox.core.storage.StorageKind.INTERNAL) null
+        else storageToastArg(b.storage, b.storageFailure?.name, b.storageName, jumped = false)
 
     /** (Fix pass, WP-D question) A key that zaps at once from here: CH±, Last, or Up/Down under "Change channel". */
     private fun singleKeyZap(a: GuideEvent.Act): Boolean = when (a.action) {
@@ -1440,7 +1480,7 @@ class PlayerStateMachineImpl(
             b != null && b.hls -> effects.toast(PlayerToast.PAUSE_NO_REWIND_HLS, hlsArg())
             b?.off == BufferOff.SETTING_OFF -> effects.toast(PlayerToast.PAUSE_NO_REWIND_OFF)
             b?.off == BufferOff.NO_SPACE -> effects.toast(PlayerToast.PAUSE_NO_REWIND_SPACE)
-            b?.off == BufferOff.STORAGE_ERROR -> effects.toast(if (forPause) PlayerToast.PAUSE_NO_REWIND_STORAGE else PlayerToast.REWIND_STOPPED_STORAGE)
+            b?.off == BufferOff.STORAGE_ERROR -> effects.toast(if (forPause) PlayerToast.PAUSE_NO_REWIND_STORAGE else PlayerToast.REWIND_STOPPED_STORAGE, storageStopArg(b))
             b?.off == BufferOff.NOT_TS -> effects.toast(PlayerToast.PAUSE_NO_REWIND_FORMAT)
             !forPause -> effects.toast(PlayerToast.REWIND_NOTHING_YET, buffer?.windowMs?.takeIf { it > 0 }?.toString())
         }

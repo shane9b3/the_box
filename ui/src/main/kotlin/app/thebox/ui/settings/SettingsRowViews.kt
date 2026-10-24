@@ -50,10 +50,22 @@ const val SETTINGS_PLACEHOLDER_ROW_TAG = "settings_row_placeholder:"
 
 /** Height of [row] (§3.1): 76 one line, 104 with a description (or a disabled reason), 72 for list items. */
 fun rowHeight(row: SettingsRow): Int = when {
+    // (WP-S4, storage locations §7.7, §9.4) The Test's progress row has its track; an Info row of the storage pages shows each
+    // next-step line whole, one per line.
+    row.id == PROGRESS_ROW -> SettingsUi.PROGRESS_ROW_H
+    isStorageInfo(row) -> maxOf(SettingsUi.ROW_H_DESC, 56 + SettingsUi.STORAGE_INFO_LINE_H * (row.kind as RowKind.Info).lines.size)
     secondLine(row) != null -> SettingsUi.ROW_H_DESC
     row.kind is RowKind.Item -> SettingsUi.ITEM_ROW_H
     else -> SettingsUi.ROW_H
 }
+
+/** (WP-S4) The Test's progress Info row (`StoragePages.ROW_T_PROGRESS`) and the Find page's searching row. */
+internal val PROGRESS_ROW = app.thebox.core.settings.RowId("storage.test.progress")
+internal val SEARCHING_ROW = app.thebox.core.settings.RowId("storage.find.searching")
+
+/** An Info row of the storage pages with lines under its label. */
+internal fun isStorageInfo(row: SettingsRow): Boolean =
+    row.id.key.startsWith("storage.") && (row.kind as? RowKind.Info)?.lines?.isNotEmpty() == true
 
 /** The line under the label: the disabled reason replaces the description while the row is disabled. */
 fun secondLine(row: SettingsRow): String? =
@@ -62,7 +74,7 @@ fun secondLine(row: SettingsRow): String? =
 /** The value text on the right (§3.1: `.65`; the Choice/MultiChoice selection; masked text as dots). */
 @Composable
 fun valueText(row: SettingsRow): String? {
-    row.value?.let { return it }
+    row.value?.let { return app.thebox.core.settings.state.StorageMarks.plain(it) }
     return when (val k = row.kind) {
         is RowKind.Choice -> k.options.getOrNull(k.selected)?.label
         is RowKind.MultiChoice -> k.selected.sorted().mapNotNull { k.options.getOrNull(it)?.label }.joinToString(", ").ifEmpty { null }
@@ -127,12 +139,24 @@ private fun RowBody(row: SettingsRow, focused: Boolean, moving: Boolean) {
         }
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
             Line(row.label, SettingsUi.RowLabel.copy(color = if (focused) text else SettingsUi.Fg92.copy(alpha = 0.92f * alpha)))
-            secondLine(row)?.let { Line(it, SettingsUi.RowDesc.copy(color = text.copy(alpha = 0.55f * alpha)), Modifier.padding(top = 4.dp)) }
+            secondLine(row)?.let { d ->
+                // (WP-S4, §9.1) An amber description ("Can't reach NAS: saving on this device for now.").
+                val amber = SettingsUi.isWarnText(d) && !focused
+                val color = if (amber) SettingsUi.Amber.copy(alpha = alpha) else text.copy(alpha = 0.55f * alpha)
+                Line(app.thebox.core.settings.state.StorageMarks.plain(d), SettingsUi.RowDesc.copy(color = color), Modifier.padding(top = 4.dp))
+            }
             (row.kind as? RowKind.Info)?.let { info ->
                 if (info.lines.isNotEmpty()) {
                     val tone = if (focused) text else SettingsUi.toneColor(info.tone).copy(alpha = alpha)
-                    Line(info.lines.joinToString("  ·  "), SettingsUi.RowDesc.copy(color = tone), Modifier.padding(top = 4.dp))
+                    // (WP-S4) The storage pages' next steps: one line each, never joined and clipped.
+                    if (isStorageInfo(row)) info.lines.forEach { Line(it, SettingsUi.RowDesc.copy(color = tone), Modifier.padding(top = 4.dp)) }
+                    else Line(info.lines.joinToString("  ·  "), SettingsUi.RowDesc.copy(color = tone), Modifier.padding(top = 4.dp))
                 }
+            }
+            // (WP-S4, §9.4) The Test's progress track under its label.
+            if (row.id == PROGRESS_ROW) {
+                val fraction = SettingsUi.progressFraction(row.value) ?: 0f
+                ProgressTrack(fraction, Modifier.padding(top = 10.dp).semantics { contentDescription = row.value?.let { "Testing, $it" } ?: "Testing" })
             }
         }
         Trailing(row, focused, text)
@@ -143,12 +167,21 @@ private fun RowBody(row: SettingsRow, focused: Boolean, moving: Boolean) {
 private fun Trailing(row: SettingsRow, focused: Boolean, text: Color) {
     val value = valueText(row)
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        (row.kind as? RowKind.Item)?.let { item -> item.badges.sortedBy { it.ordinal }.forEach { BadgeChip(stringResource(SettingsUi.badgeLabel(it)), text) } }
+        // (WP-S4, §9.4) The searching row's three dots.
+        if (row.id == SEARCHING_ROW) SearchingDots(stringResource(R.string.settings_ui_searching), Modifier.padding(end = 8.dp))
+        (row.kind as? RowKind.Item)?.let { item ->
+            item.badges.sortedBy { it.ordinal }.forEach { b ->
+                if (SettingsUi.isAccentBadge(b)) AccentBadgeChip(stringResource(SettingsUi.badgeLabel(b)), focused)
+                else BadgeChip(stringResource(SettingsUi.badgeLabel(b)), text)
+            }
+        }
         if (value != null && row.kind !is RowKind.Toggle) {
             val style = if (SettingsUi.isMonoValue(value)) SettingsUi.RowValueMono else SettingsUi.RowValue
+            // (WP-S4, §9.1) An amber value while the cycle falls back to this device ("1 hour · This device (NAS offline)").
+            val amber = SettingsUi.isWarnText(row.value) && !focused
             Text(
                 value,
-                style = style.copy(color = text.copy(alpha = text.alpha * 0.65f)),
+                style = style.copy(color = if (amber) SettingsUi.Amber.copy(alpha = text.alpha) else text.copy(alpha = text.alpha * 0.65f)),
                 maxLines = 1,
                 overflow = if (value.contains("://") || value.contains('.')) TextOverflow.MiddleEllipsis else TextOverflow.Ellipsis,
                 modifier = Modifier.width(VALUE_MAX_W.dp).padding(start = 16.dp),
@@ -207,6 +240,19 @@ internal fun BadgeChip(label: String, text: Color, modifier: Modifier = Modifier
             .border(1.dp, text.copy(alpha = 0.22f), RoundedCornerShape(SettingsUi.BADGE_RADIUS.dp))
             .padding(horizontal = 8.dp, vertical = 2.dp),
     ) { Line(label, SettingsUi.BadgeText.copy(color = text.copy(alpha = 0.8f))) }
+}
+
+/**
+ * (WP-S4, §9.4) `Badge.IN_USE` / `Badge.SAVED`: the M5 badge with a 1 px accent border; the text is FG .9 on a normal row and
+ * the canvas colour on a focused (FG-filled) row.
+ */
+@Composable
+internal fun AccentBadgeChip(label: String, focused: Boolean, modifier: Modifier = Modifier) {
+    Box(
+        modifier
+            .border(SettingsUi.ACCENT_BADGE_BORDER.dp, SettingsUi.Accent, RoundedCornerShape(SettingsUi.BADGE_RADIUS.dp))
+            .padding(horizontal = 8.dp, vertical = 2.dp),
+    ) { Line(label, SettingsUi.BadgeText.copy(color = SettingsUi.accentBadgeText(focused))) }
 }
 
 /** The inline option list (§3.1): indent 48, rows 60, radio dot 18 (or a check box for MultiChoice). */

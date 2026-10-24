@@ -234,4 +234,44 @@ class SettingsBackLadderTest {
         w.machine.dispatch(SettingsEvent.PinResult(purpose, granted = true)); w.pump()
         assertEquals("Run", w.effects.intents.single()::class.simpleName)
     }
+    /** (WP-S4, docs/design/m6-storage-locations.md section 9.3) Playback → Pause and rewind → Save to → detail: one page per BACK. */
+    @Test
+    fun theSaveToChainPopsOnePagePerBack() {
+        val w = SettingsWorld().open()
+        w.enter(SectionId.PLAYBACK)
+        w.focus(PlaybackRows.PAUSE_REWIND); w.act(BoxAction.SELECT)
+        assertEquals(SettingsRoute.PauseRewind, w.ui.route)
+        w.focus(app.thebox.core.settings.tree.PauseRewindRows.TIMESHIFT_LOCATION); w.act(BoxAction.SELECT)
+        assertEquals(SettingsRoute.SaveLocation(), w.ui.route)
+        w.act(BoxAction.BACK)
+        assertEquals(SettingsRoute.PauseRewind, w.ui.route)
+        w.act(BoxAction.BACK)
+        assertEquals(SettingsRoute.Section(SectionId.PLAYBACK), w.ui.route)
+        w.act(BoxAction.BACK)
+        assertEquals(Pane.SECTIONS, w.ui.pane)
+        assertFalse(w.act(BoxAction.BACK), "the guide takes the last BACK")
+    }
+
+    /**
+     * (WP-S4, U-B3) BACK anywhere in the browse leaves it for Save to (the session ends); LEFT pops one page. BACK on a
+     * running Test is Stop test first.
+     */
+    @Test
+    fun backInTheBrowseLeavesItForSaveToAndStopsARunningTestFirst() {
+        val w = SettingsWorld().open(SettingsRoute.FindComputers)
+        w.folders.findStates = listOf(
+            app.thebox.core.storage.FindState(listOf(app.thebox.core.storage.FoundComputer("NAS", "192.168.1.20", app.thebox.core.storage.NameSource.NSD)), false, "192.168.1.x", false),
+        )
+        w.machine.dispatch(SettingsEvent.Page(w.page(SettingsRoute.FindComputers))); w.pump()
+        w.focus(RowId("storage.find.pc.192.168.1.20")); w.act(BoxAction.SELECT)
+        assertTrue(w.ui.route is SettingsRoute.ComputerShares)
+        w.focus(RowId("storage.share.TV")); w.act(BoxAction.SELECT)
+        assertTrue(w.ui.route is SettingsRoute.NetworkFolder)
+        assertTrue(w.act(BoxAction.BACK))
+        assertEquals(SettingsRoute.SaveLocation(), w.ui.route)
+        assertEquals(0, w.storage.openSessionCount())
+        // LEFT pops exactly one page (the key table's rule: the source is asked on BACK only).
+        w.act(BoxAction.LEFT)
+        assertEquals(SettingsRoute.PauseRewind, w.ui.route)
+    }
 }
