@@ -1659,3 +1659,97 @@ In worktree `agent-a40749d8cc21805b1` (branch `worktree-agent-a40749d8cc21805b1`
 3. **Mapping ACCESS → SIGN_IN_NEEDED** for the early switch's `fallbackReason`. A folder-permission refusal then reads as "needs you to sign in again". Accept, or add a reason (append-only enum, a contract change)?
 4. **The grace with no write yet.** A stop before the cycle's first successful write reports `sinceFirstWriteMs = 0` (inside the grace, no demotion). Confirm that this is the intent of §5.4.
 5. **Owned flusher exit (WP-S1).** Until it lands, every SMB/USB ring leaves one `box-ts-flush-net`/`-ext` thread behind after it closes.
+
+---
+
+## Implementation record — WP-S1 (2026-10-24)
+
+In worktree `agent-a08ef6c93e6603f3c` (branch `worktree-agent-a08ef6c93e6603f3c`), fast-forwarded to `main` dcf95cc (WP-S2 and WP-S6 merged) before the final gate. Uncommitted (the lead commits). No emulator and no real SMB server: every Must is tested through `FakeRemoteLink`; the real-server tests are opt-in.
+
+**Builds.**
+- `:core:test :data:testDebugUnitTest :app:assembleDebug`: core 3,521 green; data 388 run, 3 skipped (opt-in), 1 failure in `EditorPerfTest.budgets`, a timing budget unrelated to this WP that failed while several worktrees were building on the machine. Re-run alone, it passes (2/2). The universal debug APK was built.
+- `:player:testDebugUnitTest` alone: 499 green, including WP-S2's `SmbPrepareNoIoTest` and `FactoryTargetTest` (13), now driving the real `SmbRingStorage`.
+- `:app:minifyReleaseWithR8`: **green** with smbj reachable. The release dex holds the `com.hierynomus`, `net.engio` and `com.rapid7` classes (186 type references), so the keep rules are exercised. Whether they are sufficient at runtime remains S-2's check (U-13).
+
+**New tests** (74; all pass; 3 opt-in skipped):
+
+| Module | Test | Count | Covers |
+|---|---|---|---|
+| `:core` | `SmbRingStorageTest` | 10 | no I/O in construction, `writeHeader`, `allocate`, `close`, `delete` (`ioCalls` = 0, A-B1); create once with CREATE_OVERWRITE; header before data; `pread` loops and direct-buffer staging; a reader never opens; posted close/delete; close during an in-flight create; the reserve offset; a failed space query answers 0 |
+| | `SmbReconnectTest` (incl. the `ReopenNeverTruncatesTest` case) | 8 | single flight across a flusher and a reader; same offset; OPEN_EXISTING keeps every byte (A-S2); the budget; `needsFreshFile` after a reconnect and after a write timeout; SLOW never reconnects; REMOVED on the reopen; a closed storage stops retrying |
+| | `SmbFaultTest` | 3 | interrupt → CANCEL first; an interrupted reader with a concurrent writer: epoch unchanged, no reconnect, the write completes (A-B3); FULL/ACCESS/REMOVED |
+| | `TsRingOverSmbTest` | 3 | the real ring with its real dedicated flusher in real time (A-S9): a 3 s stall absorbed by a 64-block pool; the same stall with 8 blocks → DISK_TOO_SLOW; a transport loss past the budget → DISK_ERROR (UNREACHABLE), RAM-only, then the pinned saved part reads back once the server returns |
+| | `DedicatedFlusherTest` | 2 | an SMB ring stuck in `pwrite` does not delay a new internal ring; the owned `box-ts-flush-net` thread exits after close; an owned flusher restarts on a new registration (A-B2) |
+| | `ManualAddressParserTest` | 2 | 35 vectors in `VECTORS`, for WP-S6's `app.js` mirror |
+| `:data` | `RingTargetSourceTest` | 9 | §5.1 rows: internal; USB mounted/missing/full; SMB READY; last-known-good; a failure seen → UNREACHABLE; AUTH and restored-without-password → SIGN_IN_NEEDED; NO_SPACE_THERE; rewind Off keeps the keeper IDLE. Also: `current()` and `open` make 0 link calls; file names; the grace; demotion doubling; the fallback name |
+| | `SmbSessionKeeperTest` | 6 | the wake write before the first-READY sweep; last-known-good; AUTH_FAILED until the sign-in changes; a missing password; BACKOFF and a trigger retry; choosing this device disconnects; a storage-side reconnect goes through the keeper's link and re-writes `.wake` |
+| | `SmbjRemoteLinkTest` | 8 | `SmbConfig` timeouts, buffers and socket factory equal the constants; two `SMBClient`s; `close(true)`; `share()` waits and asks the keeper, and never waits on box-smb; reconnect single flight + min gap; interrupt → InterruptedIOException; `post` runs on box-smb |
+| | `SmbFaultsTest` | 7 | the §4.3 order over real smbj exception shapes (an interrupt wrapped by `Futures.get`, EOF/reset, "transport is disconnected", a timeout on a live vs a dead transport, statuses, guest signing); log names carry no path or user; §7.7 browse errors; share and folder filters |
+| | `SmbSweepTest` | 4 | own other-pid files; foreign files by server time against our `.wake`; without our `.wake` nothing foreign is touched; failures ignored |
+| | `StorageLocationsImplTest` | 6 | password only in `SecureBlobStore`; the caller's and the UTF-8 arrays zeroed; not in the domain export or any `toString`; the audit gets user, domain and password; update/rename/remove (blob first); restore → SIGN_IN_NEEDED; unknown USB → internal (A-N7) |
+| | `LocationTesterTest` | 5 | the grading table; phases; the test file deleted on close; the time bound; a refused write; no space; Stop test |
+| | `SmbIntegrationTest` (2), `SmbConcurrencyTest` (1) | 3 | opt-in: `THEBOX_SMB_URL=smb://host:port/share/path`, `THEBOX_SMB_USER`, `THEBOX_SMB_PASSWORD` (never printed), `THEBOX_SMB_SOAK_S` (default 60) |
+
+### What was done
+
+`:core`
+- `storage/smb/SmbRingStorage.kt`: §4.1–§4.5 as specified.
+  - `pwrite`/`pread` copy through a scratch array only when the buffer has none (one per flusher, one `ThreadLocal` per loader thread).
+  - The reopen lock is a `ReentrantLock` taken with `tryLock(deadline)`, so a waiting reader stays interruptible (A-B3).
+  - `ratesBps()` is a 10-bucket per-second counter, allocation-free.
+- `storage/ManualAddressParser.kt`: the §7.2 rules (listed in its KDoc).
+- `RingFlusher.kt`: an owned flusher's thread ends once no ring is registered. The check runs under the `ensureThread` monitor, so a racing `register` starts a new thread. `TsRingImpl.kt`: only an `internal val ringFlusher` for the tests.
+
+`:data`
+- `smb/SmbFaults.kt`: the §4.3 classifier; `SmbIoException` (its message is the fault name only); `LinkUnavailableException`; the §7.7 `browseError`; a log-safe `faultName`.
+- `smb/SmbjRemoteLink.kt`:
+  - `SmbExecutor`: a named single thread; a throw is logged by fault name.
+  - `SmbjClients`: the §4.3 config, the ring and browse clients, `forceClose` = `close(true)`, and smbj's password copy zeroed after `authenticate`.
+  - The `ShareOpener`/`OpenedShare` seam, and `SmbjShareOpener` (its SMBClient is made lazily on box-smb, A-N6).
+  - `SmbjShare`/`SmbjFile`: the §4.1 open flags with full sharing.
+  - `SmbjRemoteLink`: the epoch, the refcount, the free-space cache, the `share` wait, and a single-flight `reconnect` with the min gap (inline on box-smb).
+- `smb/SmbSessionKeeper.kt`:
+  - the §5.3 states, triggers and backoff;
+  - the wake write on every (re)connect and on ON_START / preview start;
+  - the first-READY sweep, after the wake;
+  - the keepalive (SLOW keeps the connection);
+  - the background disconnect, unless a file is open;
+  - the demotion window (§5.4) and a connect watchdog (`box-smb-watch`);
+  - `LastGoodStore`;
+  - `KeeperTriggers`: the lifecycle, the default network callback, and `StartupGate` or 2 s.
+- `smb/SmbSweeper.kt`, `smb/SmbShareLister.kt` (dcerpc `getShares1`), `smb/LocationTester.kt` (§7.8).
+- `StorageLocationsImpl.kt`, `StorageTargetsImpl.kt` and `DeviceIdentity.kt`.
+- `NetworkFoldersImpl.kt`: browsing on `box-smb-browse`; every call is `runInterruptible`, so BACK or Stop test cancels.
+- `StorageModule.kt`: binds `RingTargetSource`, which turns the feature on. The `storage` domain registers on first use, through `StorageLocationsImpl`.
+- `diag/DiagnosticsImpl.kt`: network-folder user names, domains and passwords join the audit's secrets.
+
+`:app`
+- `proguard-rules.pro`, the smbj/mbassador/dcerpc block:
+  - mbassador kept whole, plus every `@Handler` method;
+  - smbj's event classes, enums, file-information classes and NTLM authenticator;
+  - dcerpc's enums;
+  - `-dontwarn` for `javax.security.auth` and the slf4j 1.x binder, beside commit 0's two lines.
+
+### Lead rulings applied (message of 2026-10-24, after WP-S2)
+1. A tune-time fallback carries the chosen location's name in the INTERNAL target's `name` (tested).
+2. USB: `RingTarget.Local.dir = Volume.dir` (tested).
+3. ACCESS → SIGN_IN_NEEDED as the fallback reason: WP-S2's mapping, unchanged here.
+4. A stop before the cycle's first write (`sinceFirstWriteMs < 0`) is inside the grace (tested).
+5. The owned flusher exits after its ring closes (`DedicatedFlusherTest`).
+
+### Deviations
+1. **`SmbRingStorage.pwrite` creates on first use** (with a deadline of one I/O timeout) when nobody called `create` first. `FallbackRingStorage` always calls `create`, so this only serves tests and tools. A failed create is still never retried.
+2. **Read failures leave `lastFailure` alone.** Only writes and the create set it, so a reader's SLOW never decides the ring's wording.
+3. **The sweep keeps every `ring-<deviceId>-<pid>-*` file of the current process**, not only the open file, because an older file's posted delete may still be queued. The Test file is `test-<deviceId>-<pid>-<nanoTime>.bin` (pid added) for the same reason.
+4. **`SmbRingStorage` retries a failed reconnect** every 250 ms within the budget. The link spaces the real attempts by `SMB_RECONNECT_MIN_GAP_MS`.
+5. **Last-known-good is written at most every 10 min per location** (`LastGoodStore.WRITE_EVERY_MS`). A keepalive every 20 s would otherwise write the file every 20 s. The in-memory value is always current.
+6. **`StorageLocationsImpl` exposes keeper-side members** beyond the contract: `keptLocation`, `readPassword`, `publishKeeper`, `signInNeeded`, `signInVersion`, `auditSecrets`, `addChangeListener`. They are for `:data` only.
+7. **`ref(id)` = `"smb-" + locationId`**, and location ids already start with `smb-`, so refs read `smb-smb-<uuid>` (§8 taken literally). Harmless; it is noted in case the lead prefers `ref = locationId`.
+8. **The keeper starts from its `@Provides`**, on the first injection of `StorageTargetsImpl` or the keeper, not from an app-start hook: `TheBoxApplication` is in no WP-S1 file.
+
+### Questions for the lead
+1. **An app-start hook for the keeper** (deviation 8). Add `storageKeeper.get()` to `TheBoxApplication`'s start, or rely on the factory's injection of `Optional<RingTargetSource>`?
+2. **The time base.** `SmbRingStorage`'s deadlines use `SystemClock.elapsedRealtime` (`StorageModule.MONO`), as `PlaybackModule`'s `MonoClock` does. `FallbackRingStorage` must keep computing `create(deadline)` from that clock.
+3. **`LocationState.DEMOTED`** is published only while the keeper is READY. When the folder is also unreachable, the status says UNREACHABLE. Acceptable for the Save to page?
+4. **`SIGN_IN_TOAST_PROCESSES`** (the 3-process counter) belongs to WP-S4's `FallbackToastPolicy`, so `RingTargetSourceTest` does not cover the "toast counters" of §16.2.
+5. **`EditorPerfTest.budgets`** failed once under load during the gate and passed when re-run alone. It is unrelated to this WP, but it is load-sensitive when worktrees build in parallel.

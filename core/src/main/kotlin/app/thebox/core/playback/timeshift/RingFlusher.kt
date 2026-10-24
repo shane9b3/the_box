@@ -19,7 +19,9 @@ internal class RingFlusher(
      * (Storage locations commit 0, docs/design/m6-storage-locations.md §4.2, §12.4; A-B2) True for the dedicated flusher
      * of one [RingStorage.blocking] ring (`box-ts-flush-net` / `-ext`): its thread exits once that ring unregistered and
      * closed, so an SMB stall never shares a thread with another ring. False = [shared] (lives for the process).
-     * WP-S1 implements the exit; until then an owned flusher behaves like a shared one.
+     * (WP-S1) The exit: once no ring is registered, the loop ends after its current step (an in-flight `pwrite` of the
+     * closed ring returns within one I/O timeout, since the storage checks `closed` before every retry). A later
+     * [register] starts a new thread.
      */
     val owned: Boolean = false,
 ) {
@@ -43,6 +45,9 @@ internal class RingFlusher(
     /** The flusher thread's id (allocation tests). */
     val threadId: Long get() = thread?.id ?: -1L
 
+    /** (WP-S1, tests) The live flusher thread, null once an owned flusher exited (or before the first [register]). */
+    internal val liveThread: Thread? get() = thread
+
     @Synchronized private fun ensureThread() {
         if (thread != null) return
         val t = Thread(::loop, threadName)
@@ -53,6 +58,7 @@ internal class RingFlusher(
 
     private fun loop() {
         while (true) {
+            if (owned && rings.isEmpty() && exitIfIdle()) return
             var worked = false
             val n = rings.size
             for (i in 0 until n) {
@@ -64,6 +70,13 @@ internal class RingFlusher(
                 signalled = false
             }
         }
+    }
+
+    /** An owned flusher with no ring left ends its thread (A-B2). Under the [ensureThread] monitor, so a racing [register] restarts it. */
+    @Synchronized private fun exitIfIdle(): Boolean {
+        if (rings.isNotEmpty()) return false
+        thread = null
+        return true
     }
 
     companion object {
