@@ -76,6 +76,8 @@ class DiagnosticsImpl @Inject constructor(
     private val store: SettingsStore,
     private val probes: NetworkProbesImpl,
     @IoDispatcher private val io: CoroutineDispatcher,
+    /** (Storage locations WP-S1, §8, A-S11) Network-folder user names and passwords join the audit's secrets. */
+    private val storageLocations: app.thebox.data.storage.StorageLocationsImpl,
 ) : Diagnostics, NetworkTests {
 
     override suspend fun deviceFacts(): DeviceFacts = withContext(io) { DeviceFactsReader(context).read(credentials.usingKeystore, guideSettings.settings.value.performance.name) }
@@ -128,6 +130,8 @@ class DiagnosticsImpl @Inject constructor(
             val last = refreshLog.latest(TARGET_PLAYLIST, p.id, 1).firstOrNull()
             ExportPlaylist(p.id, p.type.name, p.displaySource, channelDao.activeCount(p.id), last?.let { "${it.outcome} ${it.errorCode ?: ""}".trim() }, p.needsReauth, p.enabled)
         }
+        // Storage locations (§8, A-S11): each network folder's user name, domain and password, read once on IO.
+        runCatching { storageLocations.auditSecrets() }.getOrDefault(emptyList()).forEach(secrets::add)
         val reports = (all.flatMap { refreshLog.latest(TARGET_PLAYLIST, it.id, REPORTS) } + refreshLog.latest(TARGET_EPG, null, REPORTS))
             .sortedBy { it.startedAt }.takeLast(REPORTS).map(::reportLine)
         val s = sync.status.value
