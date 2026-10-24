@@ -1511,3 +1511,90 @@ Build, `:app`, `:ui`, docs
 1. **Deviation 5** changes Settings behaviour in commit 0 (the sub-page appears with today's three rows). The alternative was a red `SimpleRowCountTest` until WP-S4. Accept, or prefer the old layout plus a temporary test exception?
 2. **Deviation 9** edits two files no WP owns (`EffectDelegates`, `PlayerEffectsImpl`) to give WP-S4 a seam. Accept the seam, or assign those files to WP-S4?
 3. **`RemoteLink.post` (deviation 2) is the only change to §12.2's signatures.** Please confirm, since WP-S1 and the fake both implement it.
+
+---
+
+## Implementation record — WP-S2 (2026-10-24)
+
+In worktree `agent-a40749d8cc21805b1` (branch `worktree-agent-a40749d8cc21805b1`, fast-forwarded to `main` 502804f), uncommitted. No emulator. WP-S1 ran in parallel, so `SmbRingStorage` was still the stub; every remote test drives `FakeRemoteLink`.
+
+**Builds.**
+- `./gradlew :core:test :app:assembleDebug :app:testDebugUnitTest`: **green**. `:core:test` ran 3,474 tests (3,464 before, plus 10 new) and `:app` ran 69; the debug APKs were built.
+- `:player:testDebugUnitTest` on its own: **green, 499 tests** (480 before, 19 new).
+- The existing time-shift tests (`TimeshiftSessionTest`, `TimeshiftStorageTest`, `ControllerTimeshiftTest`, `ControllerRealRingTest`, the ring tests) pass unchanged.
+
+### What was done (§17 row WP-S2; only those files)
+
+- **`core/.../storage/FallbackRingStorage.kt`** (§5.2). It decides once, at the first `pwrite` on the flusher, through `primary.create(now + deadlineMs)`.
+  - On true, everything goes to the primary.
+  - On false, it checks that `remoteBytesWritten == 0` (otherwise `IOException`: no hot switch, §18 R2) and closes the primary, which posts its own work. It then builds the secondary on the flusher, replays the `allocate` high-water mark and the last header, and delegates to the secondary. `switchedTo = INTERNAL`. `fallbackReason` comes from `lastFailure`: ACCESS → SIGN_IN_NEEDED, FULL → NO_SPACE_THERE, anything else → UNREACHABLE.
+  - Before the decision nothing touches the network. `writeHeader` goes to the primary (which only records it, §3.6). `allocate` returns the bound. `availableBytes` returns `Long.MAX_VALUE` (the cycle was sized at prepare). `isUnlinked` returns false. `pread` throws.
+  - `close`/`delete` never wait. The primary posts its own work, and the secondary's close or delete runs on `background`.
+- **`TimeshiftPolicyImpl`**: commit 0's two overloads are kept unchanged.
+- **`TimeshiftSessionFactoryImpl`** (§5.1, §5.4, §5.5).
+  - **Wiring.** `@Inject` takes `Optional<RingTargetSource>` and `InternalRingTargets` (`orElse`), plus `memoryClass`. The primary constructor gains `targets` and `memoryClassMb` with defaults, so the existing tests compile untouched.
+  - **Sizing per target.**
+    - INTERNAL: as today.
+    - VOLUME: `StatFs` on `<dir>/timeshift` with `StorageLimits.VOLUME`.
+    - SMB: the target's cached free space. The capacity is `min(SMB, internal)` when the target is not `ready` (last-known-good).
+    - A non-internal target under `MIN_RING_BYTES` becomes this device with `NO_SPACE_THERE`.
+  - **Pool and length** come from `StorageLimits.of(chosenKind)`: 160/96 by `memoryClass` for remote, 64/32 by `isLowRamDevice` for internal. They are kept across a fallback. The open deadline follows the pool (6 s for 160, 3 s for 96).
+  - **Daily cap.** It sets the mode only when the target counts wear. `limitedToday` holds for a counting target or a switched SMB cycle.
+  - **Reuse** also needs the same location, the same pool and a usable storage. A `FallbackRingStorage` is usable when it has not switched, is not gone and does not need a fresh file.
+  - **Rebuilds.** A blocking (USB/SMB) storage is always deleted on a rebuild, and so is this device's file when the cycle moves elsewhere.
+  - **No network I/O on prepare.** SMB gets `FallbackRingStorage(target.open(targets.nextRemoteFileName(id), cap), secondary = { openLocal(internal, asFallback = true) })`. Nothing is allocated, created or written in `prepare`.
+  - **Failure report.** A non-internal cycle's writer is wrapped (`ReportingWriter`, delegation). Its listener calls `targets.onStorageFailure(locationId, stop, failure, sinceFirstWriteMs)` on the pump thread, once per cycle, **before** the session records the stop and before the controller posts it (A-N5). `sinceFirstWriteMs` is 0 when the cycle has not written yet, which counts as inside the grace. A cycle already switched to this device does not report.
+  - **`storageFields(grant, snap)`** fills `storage`, `storageFailure`, `fallback`, `storageName`, `locationId` and `storageRatesBps`. Failure mapping:
+    - SMB: DISK_TOO_SLOW → SLOW, else `lastFailure`, else EVICTED → REMOVED, else UNREACHABLE.
+    - USB: SLOW, or REMOVED.
+    - This device: null.
+  - **`onVolumeGone(uuid, mountPath)`** calls `ring.stopRecording(STORAGE_EVICTED)`, then `VolumeStorage.eject()` (gone at once, fd close posted). It reads a volatile, so it takes no factory lock on main.
+- **`TimeshiftStorageImpl`.**
+  - `openLocal(target, capacity, preallocate, countsWear, asFallback, closer)`.
+    - For this device it is today's `openStorage`.
+    - The fallback secondary is `ring-<pid>-fb<n>.bin`. It is preallocated, counts wear, and its `availableBytes = StorageLimits.internal(total).reportedAvailableBytes(free)` (the internal reserve, §5.2).
+    - VOLUME is a `VolumeStorage` on `ring-<pid>-<n>.bin`, with no wear counter.
+  - Also `spaceOf(dir)` and `volumeRingDir(target)`.
+- **`AndroidRingStorage`** gains three parameters:
+  - `preallocate`: when false, `allocate` records the bound with no I/O;
+  - `blocking`;
+  - `closer`: a posted fd close, and a posted unlink after it.
+
+  It also gains `nlinkNow()`.
+- **New `VolumeStorage`.** `blocking`, so the ring gets `box-ts-flush-ext`. `availableBytes` keeps the volume reserve. `isUnlinked` = ejected, or nlink when `nlinkReliable`, which is set when nlink reads 1 right after create (A-S8). `firstWriteMonoMs` drives the grace.
+- **`VolumeWatcher`** (real body).
+  - Listing: `getExternalFilesDirs(null)` entries with i > 0 that are mounted and removable. uuid and label come from `getStorageVolume(dir)`, falling back to the `/storage/<uuid>/` path segment. `StorageFlags.VOLUME_ENABLED` is honoured.
+  - A runtime receiver (scheme `file`, `RECEIVER_NOT_EXPORTED` on 33+) handles EJECT, UNMOUNTED, BAD_REMOVAL and REMOVED. On main it only calls `onVolumeGone`; the re-list runs on `box-ts-sweep`.
+  - `MEDIA_MOUNTED` re-lists and runs the sweep, which deletes every file in `<vol>/timeshift/` not starting with `ring-<this pid>-`.
+- **`TimeshiftStartup.onAppStart`** also starts `VolumeWatcher` (lazy).
+- **`PlaybackControllerImpl`**: one line in `localBufferState`, which runs the snapshot through `storageFields`.
+- **`LocalTimelineBackend`**: the five `LocalBufferInfo` fields are copied in both branches.
+
+### Tests (new)
+
+| Test | Checks |
+|---|---|
+| `core/.../storage/FallbackRingStorageTest` (10) | create ok → primary, create once, deadline = now + deadlineMs; deadline/failure → secondary with the header first and the allocate high-water replayed; `fallbackReason` per `lastFailure`; no switch once `remoteBytesWritten > 0`; no hot switch after create; the wear counter sees only the secondary; close/delete never wait (secondary on background); `pread` before the first write fails; the first write per cycle; a real `TsRingImpl` (manual flusher) switches before its first flush and stays readable |
+| `SmbPrepareNoIoTest` (Must, A-B1) | the **real** factory and the real `TsRingImpl` (dedicated flusher) over a `FakeRemoteLink` that is unreachable and stalled with posts queued. First build, reuse, rebuild, SMB → internal, internal → SMB, `needsFreshFile`, a broken ring, a tune-time fallback, last-known-good, and discard: **0** link calls (`calls` and `ioCalls`), each prepare < 2 s |
+| `FactoryTargetTest` (11) | pool 160/96/64/32 and the open deadline; a tune-time fallback keeps 160 and reports INTERNAL + UNREACHABLE + name; reuse rules (location, pool, `needsFreshFile`, fresh names); a switched cycle is rebuilt, its secondary counts wear, `ring-<pid>-fb1.bin`; the secondary keeps the internal reserve; NO_SPACE_THERE for SMB and USB; last-known-good capacity ≤ this device; the daily cap only on this device; `onStorageFailure` before the session holds the stop, once per cycle, with the grace input (0 with no write; 25 s after a write); an internal cycle reports nothing; USB: no preallocation, no wear, `onVolumeGone` → STORAGE_EVICTED, close posted, REMOVED |
+| `VolumeWatcherTest` (5, Robolectric) | an EJECT broadcast reaches `onGone` on main with the uuid and path, then re-lists; every removal action; MOUNTED sweeps other processes' files only; uuid from the path; `eject()` closes the fd on `box-ts-discard`, not on the caller's thread |
+
+### Deviations
+
+1. **`SmbPrepareNoIoTest` runs against `NoIoRemoteStorage`** (test-only, `SaveLocationFakes.kt`) while `SmbRingStorage` is a stub. `remoteStorage()` switches to the real `SmbRingStorage` as soon as its members stop throwing `NotImplementedError`, so the same test then drives WP-S1's class. **The lead must re-run it after merging WP-S1.** The factory itself, the ring and the flusher are the real ones (A-B1).
+2. **File names.**
+   - USB rings are `ring-<pid>-<n>.bin` (not `ring-<pid>.bin`, §3.5).
+   - The fallback secondary is `ring-<pid>-fb<n>.bin` in the internal folder.
+
+   With distinct names, a posted delete of the old file can never unlink a newer file at the same path. The internal ring keeps `ring-<pid>.bin`. The volume sweep keeps `ring-<this pid>-*`.
+3. **`FallbackRingStorage` additions** beyond the commit-0 stub: an optional `background` constructor parameter, a public `deadlineMs`, `secondaryStorage`, `firstWriteMonoMs` and `beginCycle()`. The stub's constructor is unchanged otherwise.
+4. **Controller seam.** `PlaybackControllerImpl` reaches `storageFields` by `(timeshift as? TimeshiftSessionFactoryImpl)`, because `TimeshiftSessionFactory` (`Seams.kt`) is not a WP-S2 file. The report to `onStorageFailure` is done by wrapping the writer in the factory, so the controller's stop path is untouched.
+5. **NO_SPACE_THERE is also decided in the factory**, from the sized capacity. The source may decide it too; the factory's check is the backstop.
+
+### Questions for the lead
+
+1. **The name for a tune-time fallback.** `RingTargetChoice` has no chosen-location name. The factory takes the name from `target.name`. WP-S1's `StorageTargetsImpl` should therefore put the chosen location's name ("NAS") in the INTERNAL target's `name` when it falls back, or the §10 wording loses the name.
+2. **`RingTarget.Local.dir` for VOLUME.** The factory treats it as the volume's app files dir (`VolumeCatalog.Volume.dir`) and appends `timeshift/`, unless it is already named `timeshift`. WP-S1 should pass `Volume.dir`.
+3. **Mapping ACCESS → SIGN_IN_NEEDED** for the early switch's `fallbackReason`. A folder-permission refusal then reads as "needs you to sign in again". Accept, or add a reason (append-only enum, a contract change)?
+4. **The grace with no write yet.** A stop before the cycle's first successful write reports `sinceFirstWriteMs = 0` (inside the grace, no demotion). Confirm that this is the intent of §5.4.
+5. **Owned flusher exit (WP-S1).** Until it lands, every SMB/USB ring leaves one `box-ts-flush-net`/`-ext` thread behind after it closes.

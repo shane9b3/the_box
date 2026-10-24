@@ -3035,7 +3035,9 @@ internal class PlaybackControllerImpl @Inject constructor(
             return LocalBufferState(identity = c.identity, available = false, off = BufferOff.STORAGE_ERROR, cycleId = c.cycleId)
         }
         // UX-S1: the cycle id lets the consumer tell a new cycle on the same identity from the same one.
-        return snap.copy(identity = c.identity, atMonoMs = playheadMono(c) ?: snap.liveMonoMs, cycleId = c.cycleId)
+        val out = snap.copy(identity = c.identity, atMonoMs = playheadMono(c) ?: snap.liveMonoMs, cycleId = c.cycleId)
+        // (Storage locations WP-S2, §5.5) where this cycle saves, its fallback and failure, the folder's rates.
+        return (timeshift as? app.thebox.player.timeshift.TimeshiftSessionFactoryImpl)?.storageFields(ts.grant, out) ?: out
     }
 
     /** "Rewind: 18:20 saved of 30:00 · 1.1 GB" (A-S9, U-N3). */

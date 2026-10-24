@@ -73,6 +73,14 @@ internal object AndroidRingPosix : RingPosix {
  * - [delete] closes the fd first, then unlinks, so the space is really freed (§7.5, §8.3).
  *
  * [onWritten] sees every byte written (the daily flash-wear counter, §8.4), on the flusher thread.
+ *
+ * (Storage locations WP-S2, docs/design/m6-storage-locations.md §3.2, §3.4, §4.2)
+ * - [preallocate] false (USB): [allocate] records and returns the bound with no I/O; the file grows only by sequential
+ *   writes (FAT zero-fills a grown file, so no holes and no zero-fill pass), ENOSPC surfaces at write → DISK_ERROR.
+ * - [blocking] true (USB): the ring gets its own `box-ts-flush-ext` flusher (A-B2).
+ * - [closer] non-null (USB): [close] and [delete] mark the storage closed at once and run the fd close (then the
+ *   unlink) on that executor, never on the caller's thread: a close racing a `pread` stuck on a vanishing device can
+ *   block in the kernel (§3.2 "Removal").
  */
 internal class AndroidRingStorage(
     val file: File,
@@ -82,6 +90,9 @@ internal class AndroidRingStorage(
     private val onWritten: (Long) -> Unit = {},
     private val createdMonoMs: Long = 0L,
     private val pid: Int = android.os.Process.myPid(),
+    private val preallocate: Boolean = true,
+    override val blocking: Boolean = false,
+    private val closer: ((Runnable) -> Unit)? = null,
 ) : RingStorage {
     private val raf: RandomAccessFile
     private val channel: FileChannel
@@ -112,6 +123,11 @@ internal class AndroidRingStorage(
         ensureOpen()
         val fileLength = upToBytes.coerceAtMost(HEADER + capacity)
         if (fileLength <= allocated) return allocated
+        if (!preallocate) {
+            // §3.2: no preallocation (FAT zero-fills); sequential writes extend the file, readers never pass `flushed`.
+            allocated = fileLength
+            return allocated
+        }
         val ok = posix.fallocate(raf.fd, 0L, fileLength)
         if (!ok) {
             if (!sparse) BoxLog.i(TAG) { "fallocate unavailable: sparse ring file" }
@@ -173,14 +189,36 @@ internal class AndroidRingStorage(
         while (b.hasRemaining()) pos += channel.write(b, pos)
     }
 
+    /** `fstat(fd).st_nlink` now (−1 when unreadable): `VolumeStorage` checks it once after create (A-S8). */
+    fun nlinkNow(): Long = if (closed) -1L else try { posix.nlink(raf.fd) } catch (e: IOException) { -1L }
+
     override fun delete() {
+        val post = closer
+        if (post != null) {
+            if (!markClosed()) { post { unlink() }; return }
+            post { closeFd(); unlink() }
+            return
+        }
         close()
+        unlink()
+    }
+
+    private fun unlink() {
         if (file.exists() && !file.delete()) BoxLog.w(TAG, "ring file not deleted")
     }
 
     override fun close() {
-        if (closed) return
-        closed = true
+        if (!markClosed()) return
+        val post = closer
+        if (post != null) post { closeFd() } else closeFd()
+    }
+
+    /** True when this call closed the storage (it was open). */
+    private fun markClosed(): Boolean = synchronized(this) {
+        if (closed) false else { closed = true; true }
+    }
+
+    private fun closeFd() {
         try {
             channel.close()
         } catch (e: IOException) {

@@ -127,6 +127,9 @@ class LocalTimelineBackend(
                 available = false, fromMs = 0, atMs = 0, saving = false, notSaved = TimeRanges.EMPTY,
                 pauseRemainingMs = null, stop = s.stop, off = s.off, hls = s.hls, limitedToday = s.limitedToday,
                 cycleId = s.cycleId,
+                // (Storage locations WP-S2, §5.5, §10) where the cycle saves, and why it fell back or stopped.
+                storage = s.storage, storageFailure = s.storageFailure, fallback = s.fallback, storageName = s.storageName,
+                locationId = s.locationId,
             )
             f == null -> null // §7.1 (A-B4 confirmation): held back until the frames are known
             else -> LocalBufferInfo(
@@ -145,6 +148,8 @@ class LocalTimelineBackend(
                 holdMs = s.holdMs,
                 stoppedAtMs = s.stoppedAtMonoMs?.let { p(it, s, f) },
                 cycleId = s.cycleId,
+                storage = s.storage, storageFailure = s.storageFailure, fallback = s.fallback, storageName = s.storageName,
+                locationId = s.locationId,
             )
         }
     }
