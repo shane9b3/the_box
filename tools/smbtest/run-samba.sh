@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # Usage: run-samba.sh start|stop|status|fg
-# Env: SMB_TEST_PASSWORD (default "boxtest-pw", TEST ONLY), SMBD (path to Homebrew smbd).
+# Env: SMB_TEST_PASSWORD (default "boxtest-pw", TEST ONLY), SMBD, SMBPASSWD (default: MacPorts samba4 under /opt/local).
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 WORK="$HERE/work"
 PASS="${SMB_TEST_PASSWORD:-boxtest-pw}"
-PREFIX="$(brew --prefix samba 2>/dev/null || true)"
-SMBD="${SMBD:-$PREFIX/sbin/smbd}"
-SMBPASSWD="${SMBPASSWD:-$PREFIX/bin/smbpasswd}"
-[ -x "$SMBD" ] && [ "$SMBD" != /usr/sbin/smbd ] || { echo "Homebrew smbd not found (not Apple's /usr/sbin/smbd). See README." >&2; exit 2; }
+# MacPorts (sudo port install samba4) is the default; Homebrew cannot build Samba on Intel macOS.
+SMBD="${SMBD:-/opt/local/sbin/smbd}"
+SMBPASSWD="${SMBPASSWD:-/opt/local/bin/smbpasswd}"
+[ -x "$SMBD" ] && [ "$SMBD" != /usr/sbin/smbd ] || { echo "Samba smbd not found at $SMBD (not Apple's /usr/sbin/smbd). Install MacPorts samba4 or set SMBD. See README." >&2; exit 2; }
+[ -x "$SMBPASSWD" ] || { echo "smbpasswd not found at $SMBPASSWD; set SMBPASSWD. See README." >&2; exit 2; }
 PIDF="$WORK/run/smbd.pid"
 
 prepare() {

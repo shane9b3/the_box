@@ -7,15 +7,15 @@ Unprivileged Samba on port 4445 for the save-location tests. State lives in `wor
 
 - Shares: `rewind` (user `testuser`, password `$SMB_TEST_PASSWORD`, default `boxtest-pw`, tests only) and `guest` (no password, writable).
 - Emulator: host `10.0.2.2`, port `4445`, share `rewind` or `guest` (manual entry with a port). JVM tests: `127.0.0.1:4445`.
-- Needs Homebrew `samba` (`smbd`, `smbpasswd`, `smbclient`). Apple's `/usr/sbin/smbd` is not used.
+- Needs MacPorts `samba4` (`sudo port install samba4`): `/opt/local/sbin/smbd`, `/opt/local/bin/smbpasswd`, `/opt/local/bin/smbclient`. Override with the `SMBD`, `SMBPASSWD`, `SMBCLIENT` env vars. Apple's `/usr/sbin/smbd` is not used.
 
 ## Status: U-18 NOT verified on this Mac (2026-10-24)
 
 `brew install samba` fails here: Homebrew has no Intel bottles for samba 4.25.1 (macOS Intel is unsupported)
 and the source build is refused because Xcode 15.2 is "too outdated" (needs 26.3). It would also upgrade 15 existing
 formulae. So the config and scripts here are written but untested. Options: update Xcode and retry; or
-MacPorts (`sudo port install samba4`, needs admin) and point `SMBD`/`SMBPASSWD` at `/opt/local/sbin/smbd` and
-`/opt/local/bin/smbpasswd`; or use the fallback below.
+MacPorts (`sudo port install samba4`, needs admin), which is now the scripts' default (owner's choice; not yet
+installed or run here); or use the fallback below.
 
 ## Fallback: macOS File Sharing (port 445, no guest)
 
