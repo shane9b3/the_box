@@ -72,6 +72,8 @@ class TsRingImpl internal constructor(
         this(storage, clock, ramBlocks, indexEntries, RingFlusher.forStorage(storage), lengthMs)
 
     internal val pool = BlockPool(ramBlocks.coerceAtLeast(2))
+    /** (Storage locations WP-S1, tests) This ring's flusher: [RingFlusher.shared], or its own for a blocking storage. */
+    internal val ringFlusher: RingFlusher? get() = flusher
     private val nBlocks = pool.blocks
     private val lock = ReentrantLock()
     override val index = RingIndexImpl(indexEntries)
