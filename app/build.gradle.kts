@@ -78,6 +78,9 @@ android {
 
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        // Storage locations (docs/design/m6-storage-locations.md §12.4; smbj issue #865): bcprov's multi-release OSGi
+        // manifests collide with jspecify's under Hilt.
+        resources.excludes += "META-INF/versions/**/OSGI-INF/MANIFEST.MF"
     }
 }
 

@@ -288,7 +288,7 @@ class PlayerViewModelTest {
     fun audioPickerBackToAutoIsFedAndRunsTheCardPath() {
         val ran = ArrayList<app.thebox.core.full.ErrorButton>()
         val d = app.thebox.ui.root.EffectDelegates.NONE.let { n ->
-            app.thebox.ui.root.EffectDelegates(n.settings, n.parental, app.thebox.core.full.ErrorRouteActions { b, _ -> ran += b }, n.updates)
+            app.thebox.ui.root.EffectDelegates(n.settings, n.parental, app.thebox.core.full.ErrorRouteActions { b, _ -> ran += b }, n.updates, n.fallbackToasts)
         }
         val vm = vm(delegates = d, audioForced = AudioOutputForced { kotlinx.coroutines.flow.flowOf(true) })
         idle()

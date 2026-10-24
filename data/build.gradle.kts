@@ -72,6 +72,14 @@ dependencies {
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.tink.android)
 
+    // Storage locations (docs/design/m6-storage-locations.md §3.3, §5.3, §7.5, §12.4). smbj's slf4j stays unbound (no
+    // binding = no-op logging in every build, §8: smbj messages carry host, share and path). bcprov is declared to pin the
+    // version smbj's BCSecurityProvider uses. lifecycle-process: the keeper's ON_START trigger (A-S13).
+    implementation(libs.smbj)
+    implementation(libs.dcerpc)
+    implementation(libs.bcprov.jdk18on)
+    implementation(libs.androidx.lifecycle.process)
+
     testImplementation(testFixtures(project(":core")))   // XmltvGenerator, EpgTestDb (WP-B)
     testImplementation(libs.junit4)
     testImplementation(libs.robolectric)

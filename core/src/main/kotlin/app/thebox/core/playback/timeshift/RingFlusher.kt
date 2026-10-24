@@ -1,4 +1,5 @@
-// WP-A (docs/design/m6-timeshift.md §4.1, §4.4, A-S7, A-S8).
+// WP-A (docs/design/m6-timeshift.md §4.1, §4.4, A-S7, A-S8). Storage locations commit 0: the owned-flusher signature
+// and the choice (docs/design/m6-storage-locations.md §4.2, §12.4); WP-S1 fills the owned flusher's exit.
 package app.thebox.core.playback.timeshift
 
 import java.util.concurrent.CopyOnWriteArrayList
@@ -12,7 +13,16 @@ import java.util.concurrent.locks.LockSupport
  *
  * Waits are `LockSupport.parkNanos` with a [TICK_MS] tick, so the loop allocates nothing per block (§15).
  */
-internal class RingFlusher(private val threadName: String = "box-ts-flush") {
+internal class RingFlusher(
+    private val threadName: String = "box-ts-flush",
+    /**
+     * (Storage locations commit 0, docs/design/m6-storage-locations.md §4.2, §12.4; A-B2) True for the dedicated flusher
+     * of one [RingStorage.blocking] ring (`box-ts-flush-net` / `-ext`): its thread exits once that ring unregistered and
+     * closed, so an SMB stall never shares a thread with another ring. False = [shared] (lives for the process).
+     * WP-S1 implements the exit; until then an owned flusher behaves like a shared one.
+     */
+    val owned: Boolean = false,
+) {
     private val rings = CopyOnWriteArrayList<TsRingImpl>()
     @Volatile private var thread: Thread? = null
     @Volatile private var signalled = false
@@ -62,5 +72,21 @@ internal class RingFlusher(private val threadName: String = "box-ts-flush") {
 
         /** The process's flusher. */
         val shared: RingFlusher by lazy { RingFlusher() }
+
+        /** (Storage locations §4.2) The dedicated flusher thread of a ring on a network folder. */
+        const val NET_THREAD = "box-ts-flush-net"
+        /** (Storage locations §4.2) The dedicated flusher thread of a ring on a USB drive. */
+        const val EXT_THREAD = "box-ts-flush-ext"
+
+        /**
+         * (Storage locations commit 0, §12.4) The production flusher choice: a [RingStorage.blocking] storage gets its own
+         * owned flusher ([NET_THREAD] for a remote storage or the fallback storage, [EXT_THREAD] otherwise); every other
+         * storage shares [shared].
+         */
+        fun forStorage(storage: RingStorage): RingFlusher = when {
+            !storage.blocking -> shared
+            storage is RemoteRingStorage || storage is app.thebox.core.storage.FallbackRingStorage -> RingFlusher(NET_THREAD, owned = true)
+            else -> RingFlusher(EXT_THREAD, owned = true)
+        }
     }
 }

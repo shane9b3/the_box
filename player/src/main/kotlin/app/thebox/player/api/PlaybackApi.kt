@@ -127,7 +127,29 @@ data class LocalBufferState(
     val holdMs: Long? = null,
     /** (Fix pass UX-S1) The controller cycle this snapshot belongs to (its first tune id); changes on every new cycle. */
     val cycleId: Long = 0,
+    // (Storage locations commit 0, docs/design/m6-storage-locations.md §5.5, §10, §12.4; defaults = this device)
+    /** Where this cycle saves (after a §5.2 switch: INTERNAL). */
+    val storage: app.thebox.core.storage.StorageKind = app.thebox.core.storage.StorageKind.INTERNAL,
+    val storageFailure: app.thebox.core.storage.StorageFailure? = null,
+    val fallback: app.thebox.core.storage.LocationFallback? = null,
+    /** The chosen location's name; null = this device. */
+    val storageName: String? = null,
+    val locationId: String = app.thebox.core.storage.StorageConstants.INTERNAL_ID,
+    /** The remote storage's [write, read] rates for the stats line; excluded from equality ([StorageRates]). */
+    val storageRatesBps: StorageRates = StorageRates.NONE,
 )
+
+/**
+ * (Storage locations commit 0, §12.4) The folder's write/read rates (bytes/s over the last 10 s) carried by
+ * [LocalBufferState.storageRatesBps]. **Excluded from equality**: every instance equals every other, so a rate change
+ * alone never makes the ≤ 1 Hz snapshot a new value; the stats line reads the rates of the latest snapshot.
+ */
+class StorageRates(val writeBps: Long, val readBps: Long) {
+    override fun equals(other: Any?): Boolean = other is StorageRates
+    override fun hashCode(): Int = 0
+    override fun toString(): String = "StorageRates(write=$writeBps, read=$readBps)"
+    companion object { val NONE = StorageRates(0L, 0L) }
+}
 
 /** (Time-shift) Result of [PlaybackController.seekLocal] (§6): where the playhead landed, in mono ms. */
 sealed interface LocalSeekResult {

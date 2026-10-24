@@ -370,6 +370,8 @@ class RoomSettingsStore @Inject constructor(
         val KNOWN_DOMAINS: Set<String> = setOf(
             Domains.GUIDE, Domains.PLAYER, Domains.PLAYBACK, Domains.DATA, Domains.NETWORK, Domains.PARENTAL, Domains.REMOTE,
             Domains.BACKUP, Domains.UPDATE, Domains.SETUP,
+            // (Storage locations commit 0, docs/design/m6-storage-locations.md §8) restored even before WP-S1 registers it.
+            Domains.STORAGE,
         )
     }
 }

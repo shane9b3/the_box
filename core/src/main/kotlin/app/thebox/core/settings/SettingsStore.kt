@@ -80,6 +80,8 @@ object Domains {
     const val BACKUP = "backup"        // BackupPrefs (not backed up: device-bound)
     const val UPDATE = "update"        // core.update.UpdatePrefs (not backed up)
     const val SETUP = "setup"          // SetupState (not backed up)
+    /** (Storage locations commit 0, docs/design/m6-storage-locations.md §8, §12.4) core.storage.StoragePrefs (backed up). */
+    const val STORAGE = "storage"
 }
 
 enum class ClockMode { SYSTEM, H12, H24 }

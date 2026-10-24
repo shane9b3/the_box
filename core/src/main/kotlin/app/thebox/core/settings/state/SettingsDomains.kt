@@ -7,6 +7,7 @@ import app.thebox.core.settings.Domains
 import app.thebox.core.settings.GuidePrefs
 import app.thebox.core.settings.PlaybackPrefs
 import app.thebox.core.settings.SettingsDomain
+import app.thebox.core.storage.StoragePrefs
 
 /**
  * WP-A's settings domains (docs/design/m5-setup-settings.md §2.2, §4.1): one `app_setting` document each. The store keys
@@ -26,6 +27,13 @@ val DataDomain: SettingsDomain<DataPrefs> = SettingsDomain(Domains.DATA, DataPre
 
 /** Secure DNS, IPv4 preference and timeouts (§2.11, §3.13); read by `BoxDns` at lookup time. */
 val NetworkDomain: SettingsDomain<NetworkSettings> = SettingsDomain(Domains.NETWORK, NetworkSettings.serializer(), NetworkSettings())
+
+/**
+ * (Storage locations commit 0, docs/design/m6-storage-locations.md §8, §12.4) Locations, the per-purpose choice and names;
+ * **backed up**, never a password (`SecureBlobStore` "smb-<id>"). The default (no locations, rewind on this device) is
+ * today's behaviour, so every existing install reads it unchanged. Registered by WP-S1's `StorageModule` (first use).
+ */
+val StorageDomain: SettingsDomain<StoragePrefs> = SettingsDomain(Domains.STORAGE, StoragePrefs.serializer(), StoragePrefs())
 
 /** Every domain WP-A defines, in load order (the store decodes them first; other WPs' domains register on first use). */
 val WP_A_DOMAINS: List<SettingsDomain<*>> = listOf(GuideDomain, PlayerDomain, PlaybackDomain, DataDomain, NetworkDomain, SetupDomain)

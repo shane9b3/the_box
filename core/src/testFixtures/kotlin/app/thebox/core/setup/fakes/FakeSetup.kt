@@ -62,8 +62,11 @@ class FakePhoneLink : PhoneLink {
     var stops = 0
 
     fun submit(s: PhoneSubmission) { channel.trySend(s) }
-    override fun start(purpose: PhonePurpose) {
+    /** (Storage locations commit 0) The context of each start, in order (null for the M5 purposes). */
+    val contexts = ArrayList<app.thebox.core.setup.lan.PhoneContext?>()
+    override fun start(purpose: PhonePurpose, context: app.thebox.core.setup.lan.PhoneContext?) {
         started += purpose
+        contexts += context
         state.value = LanServerState(ServerPhase.WAITING, baseUrl = "http://192.168.1.20:47100", qrUrl = "http://192.168.1.20:47100/s/token", code = "123456")
     }
     override fun stop() { stops++; state.value = LanServerState(ServerPhase.CLOSED) }

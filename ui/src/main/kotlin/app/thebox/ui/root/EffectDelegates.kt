@@ -18,6 +18,8 @@ class EffectDelegates @Inject constructor(
     val parental: ParentalEffects,
     val errors: ErrorRouteActions,
     val updates: UpdateActions,
+    /** (Storage locations commit 0, docs/design/m6-storage-locations.md §10) `PlayerEffects.fallbackToastDue` (WP-S4). */
+    val fallbackToasts: app.thebox.core.storage.FallbackToastGate,
 ) {
     companion object {
         /** Does nothing (view-model tests that predate M5; the PIN check answers Unavailable and zeroes the digits). */
@@ -35,6 +37,7 @@ class EffectDelegates @Inject constructor(
             },
             errors = ErrorRouteActions { _, _ -> },
             updates = UpdateActions { },
+            fallbackToasts = app.thebox.core.storage.FallbackToastGate { _, _ -> false },
         )
     }
 }

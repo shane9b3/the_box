@@ -1,4 +1,5 @@
-// WP-A (docs/design/m6-timeshift.md §7.3, §8.2, §8.4, §11.5; lead rulings 2 and 3).
+// WP-A (docs/design/m6-timeshift.md §7.3, §8.2, §8.4, §11.5; lead rulings 2 and 3). Storage locations commit 0
+// (docs/design/m6-storage-locations.md §12.3): the per-kind overloads; the old ones are the internal kind.
 package app.thebox.core.playback.timeshift
 
 import app.thebox.core.playback.timeshift.TimeshiftConstants.ASSUMED_BYTES_PER_SEC
@@ -6,15 +7,13 @@ import app.thebox.core.playback.timeshift.TimeshiftConstants.AUTO_LENGTH_LARGE_M
 import app.thebox.core.playback.timeshift.TimeshiftConstants.AUTO_LENGTH_SMALL_MS
 import app.thebox.core.playback.timeshift.TimeshiftConstants.CAPACITY_HEADROOM
 import app.thebox.core.playback.timeshift.TimeshiftConstants.DAILY_LIMIT_SMALL
-import app.thebox.core.playback.timeshift.TimeshiftConstants.FREE_SPACE_RESERVE_FRACTION
-import app.thebox.core.playback.timeshift.TimeshiftConstants.FREE_SPACE_RESERVE_MIN
-import app.thebox.core.playback.timeshift.TimeshiftConstants.MAX_RING_BYTES
 import app.thebox.core.playback.timeshift.TimeshiftConstants.MIN_RING_BYTES
 import app.thebox.core.playback.timeshift.TimeshiftConstants.RING_BLOCK_BYTES
 import app.thebox.core.playback.timeshift.TimeshiftConstants.SMALL_STORAGE_BYTES
 import app.thebox.core.settings.StorageProtection
 import app.thebox.core.settings.TimeshiftHold
 import app.thebox.core.settings.TimeshiftLength
+import app.thebox.core.storage.StorageLimits
 
 /**
  * Pure sizing and policy (§8).
@@ -29,19 +28,29 @@ import app.thebox.core.settings.TimeshiftLength
  *   behind live: a running time-shift is never cut, §8.4).
  */
 class TimeshiftPolicyImpl : TimeshiftPolicy {
-    override fun lengthMs(setting: TimeshiftLength, totalStorageBytes: Long): Long? = when (setting) {
+    override fun lengthMs(setting: TimeshiftLength, totalStorageBytes: Long): Long? =
+        lengthMs(setting, totalStorageBytes, StorageLimits.internal(totalStorageBytes))
+
+    /** (Storage locations commit 0, §3.4, §12.3) Auto = 1 h when [StorageLimits.autoLengthLarge], else 30 min. */
+    override fun lengthMs(setting: TimeshiftLength, totalStorageBytes: Long, limits: StorageLimits): Long? = when (setting) {
         TimeshiftLength.OFF -> null
         TimeshiftLength.MIN_15 -> 15 * MINUTE
         TimeshiftLength.MIN_30 -> 30 * MINUTE
         TimeshiftLength.H_1 -> 60 * MINUTE
         TimeshiftLength.H_2 -> 120 * MINUTE
-        TimeshiftLength.AUTO, TimeshiftLength.PAUSE_ONLY -> autoLength(totalStorageBytes)
+        TimeshiftLength.AUTO, TimeshiftLength.PAUSE_ONLY -> if (limits.autoLengthLarge) AUTO_LENGTH_LARGE_MS else AUTO_LENGTH_SMALL_MS
     }
 
-    override fun capacityBytes(lengthMs: Long, bytesPerSec: Long, availableBytes: Long, totalBytes: Long, currentFileBytes: Long): Long {
+    override fun capacityBytes(lengthMs: Long, bytesPerSec: Long, availableBytes: Long, totalBytes: Long, currentFileBytes: Long): Long =
+        capacityBytes(lengthMs, bytesPerSec, availableBytes, StorageLimits.internal(totalBytes), currentFileBytes)
+
+    /**
+     * (Storage locations commit 0, §3.4, §12.3) The same rule with the kind's cap and reserve:
+     * `floorToBlocks(clamp(lengthSec × rate × 1.15, 64 MiB, min(maxRingBytes, available + currentFile − reserve)))`.
+     */
+    override fun capacityBytes(lengthMs: Long, bytesPerSec: Long, availableBytes: Long, limits: StorageLimits, currentFileBytes: Long): Long {
         val rate = if (bytesPerSec > 0) bytesPerSec else ASSUMED_BYTES_PER_SEC
-        val reserve = maxOf(FREE_SPACE_RESERVE_MIN, (totalBytes * FREE_SPACE_RESERVE_FRACTION).toLong())
-        val upper = minOf(MAX_RING_BYTES, availableBytes + currentFileBytes - reserve)
+        val upper = minOf(limits.maxRingBytes, availableBytes + currentFileBytes - limits.reserveBytes)
         if (upper < MIN_RING_BYTES) return 0L
         val wanted = (lengthMs / 1000.0 * rate * CAPACITY_HEADROOM).toLong()
         val bytes = wanted.coerceIn(MIN_RING_BYTES, upper)
@@ -79,8 +88,6 @@ class TimeshiftPolicyImpl : TimeshiftPolicy {
         val rate = if (bytesPerSec > 0) bytesPerSec else ASSUMED_BYTES_PER_SEC
         return minOf(lengthMs, capacityBytes * 1000 / rate)
     }
-
-    private fun autoLength(total: Long): Long = if (total <= SMALL_STORAGE_BYTES) AUTO_LENGTH_SMALL_MS else AUTO_LENGTH_LARGE_MS
 
     private companion object { const val MINUTE = 60_000L }
 }

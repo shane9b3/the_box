@@ -25,6 +25,9 @@
     <string name="settings_ui_badge_failed">FAILED</string>
     <string name="settings_ui_badge_new">NEW</string>
     <string name="settings_ui_badge_default">DEFAULT</string>
+    <!-- Storage locations commit 0 (docs/design/m6-storage-locations.md §9.2, §7.1) -->
+    <string name="settings_ui_badge_in_use">IN USE</string>
+    <string name="settings_ui_badge_saved">SAVED</string>
 
     <!-- Section labels (one per SectionId) -->
     <string name="settings_section_playlists">Playlists</string>

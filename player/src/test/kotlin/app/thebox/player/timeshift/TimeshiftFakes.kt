@@ -323,6 +323,9 @@ class FakePolicy(
 ) : TimeshiftPolicy {
     override fun lengthMs(setting: TimeshiftLength, totalStorageBytes: Long): Long? = if (setting == TimeshiftLength.OFF) null else 1_800_000L
     override fun capacityBytes(lengthMs: Long, bytesPerSec: Long, availableBytes: Long, totalBytes: Long, currentFileBytes: Long): Long = capacity
+    // (Storage locations commit 0, §12.3) the per-kind overloads answer the same.
+    override fun capacityBytes(lengthMs: Long, bytesPerSec: Long, availableBytes: Long, limits: app.thebox.core.storage.StorageLimits, currentFileBytes: Long): Long = capacity
+    override fun lengthMs(setting: TimeshiftLength, totalStorageBytes: Long, limits: app.thebox.core.storage.StorageLimits): Long? = lengthMs(setting, totalStorageBytes)
     override fun holdLimitMs(setting: TimeshiftHold): Long? = hold
     override fun dailyLimitBytes(setting: StorageProtection, totalStorageBytes: Long): Long? = daily
     override fun mode(setting: TimeshiftLength, writtenTodayBytes: Long, dailyLimitBytes: Long?, needsPersist: Boolean): BufferMode = modeAnswer

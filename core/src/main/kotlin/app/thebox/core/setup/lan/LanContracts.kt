@@ -17,7 +17,28 @@ sealed interface PhoneSubmission {
     data class Passphrase(val value: CharArray) : PhoneSubmission { override fun toString() = "Passphrase(****)" }
     /** An M3U file uploaded and spooled to [path] (for devices without a file picker). */
     data class M3uFileUploaded(val path: String, val bytes: Long, val name: String?) : PhoneSubmission
+    /**
+     * (Storage locations commit 0, docs/design/m6-storage-locations.md §7.4, §12.4) `POST /api/network-folder`, accepted
+     * only for `PhonePurpose.NETWORK_FOLDER`. [password] is the only copy; the receiver zeroes it once the sign-in is done.
+     * Prints the host and share only: `user=<set>`, `password=****`. Not a data class: a CharArray has identity equality
+     * and a generated `copy` would duplicate the password.
+     */
+    class NetworkFolder(
+        val host: String, val share: String?, val path: String?, val user: String?, val domain: String?,
+        val password: CharArray?, val guest: Boolean,
+    ) : PhoneSubmission {
+        override fun toString() = "NetworkFolder(host=$host, share=$share, user=${if (user == null) "null" else "<set>"}, password=****, guest=$guest)"
+    }
 }
+
+/**
+ * (Storage locations commit 0, §7.4) What the TV already knows when a NETWORK_FOLDER phone page starts: the host, the
+ * share and the listed shares (the page's `<select>`). **Never a credential.**
+ */
+data class PhoneContext(val host: String?, val share: String?, val shares: List<String>)
+
+/** (Storage locations commit 0, §7.4) `StoragePages` answers it for a browse token (WP-S4); null = nothing known. */
+fun interface PhoneContextProvider { fun context(browse: Long): PhoneContext? }
 
 enum class ServerPhase { STARTING, WAITING, PAIRED, RECEIVED, CLOSED, FAILED }
 
@@ -40,7 +61,8 @@ enum class LanFailure { NO_LAN_ADDRESS, BIND_FAILED, TOO_MANY_WRONG_CODES, EXPIR
 interface PhoneLink {
     val state: StateFlow<LanServerState>
     val submissions: kotlinx.coroutines.flow.Flow<PhoneSubmission>
-    fun start(purpose: app.thebox.core.settings.PhonePurpose)
+    /** (Storage locations commit 0, §7.4) [context] is shown on a NETWORK_FOLDER page; ignored for the other purposes. */
+    fun start(purpose: app.thebox.core.settings.PhonePurpose, context: PhoneContext? = null)
     fun stop()
     /** Offers a file for one download (backup, logs) to the paired phone; removed after download or stop. */
     fun offerDownload(name: String, path: String, contentType: String)

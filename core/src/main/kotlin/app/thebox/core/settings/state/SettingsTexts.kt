@@ -299,6 +299,8 @@ class HintValidator(
             TextHint.NUMBER -> if (t.isNotEmpty() && t.all { it.isDigit() }) null else texts[SettingsText.ERR_NUMBER]
             TextHint.NAME, TextHint.USERNAME -> if (t.isEmpty()) texts[SettingsText.ERR_EMPTY] else null
             TextHint.PASSWORD -> null
+            // (Storage locations commit 0, §7.2) not empty; WP-S4 checks the form with ManualAddressParser (a row rule).
+            TextHint.HOST -> if (t.isEmpty()) texts[SettingsText.ERR_EMPTY] else null
         }
     }
 

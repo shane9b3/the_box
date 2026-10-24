@@ -34,5 +34,12 @@ abstract class SettingsBindingsModule {
         @Provides @Singleton fun wpaPages(store: SettingsStore, texts: SettingsTexts, env: WpaPageEnv, artwork: ProgrammeArtwork): WpaPages = WpaPages(store, texts, env, artwork)
 
         @Provides @IntoSet fun wpaPagesSource(pages: WpaPages): SettingsPageSource = pages
+        /**
+         * (Storage locations commit 0, docs/design/m6-storage-locations.md §7.4) What a NETWORK_FOLDER phone page knows;
+         * nothing until WP-S4 binds StoragePages here.
+         */
+        @Provides fun phoneContext(): app.thebox.core.setup.lan.PhoneContextProvider = app.thebox.core.setup.lan.PhoneContextProvider { null }
+        /** (Storage locations commit 0, §10) No fallback toast is due until WP-S4 binds FallbackToastPolicy here. */
+        @Provides fun fallbackToasts(): app.thebox.core.storage.FallbackToastGate = app.thebox.core.storage.FallbackToastGate { _, _ -> false }
     }
 }

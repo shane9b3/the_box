@@ -1358,3 +1358,156 @@ Rules as TS §18: commit 0 first and green; no WP edits another WP's file, a con
 | `SMB_ALLOC_BPS_MAX` | 3,000,000 | §14 |
 | `SMBJ_APK_BUDGET` / `SHARE_LISTER_APK_BUDGET` | 2,500,000 / 1,500,000 (S-2 records the measured values in §7.5) | §7.5, §14 |
 | `StorageFlags.VOLUME_ENABLED` | true (false if S-1 fails) | §0a, §3.2 |
+
+
+---
+
+## Implementation record — commit 0 (2026-10-24)
+
+In worktree `agent-a368be74533143090` (branch `worktree-agent-a368be74533143090`, base `e8b1f7d`), uncommitted (the lead commits). No emulator run. `ffmpeg/libs/*.aar` and `local.properties` were copied in and are gitignored.
+
+**Builds.** `./gradlew :core:test :app:assembleDebug` plus `:data`, `:ui`, `:app` unit tests and `:app:compileDebugAndroidTestKotlin`: **green**. `:player:testDebugUnitTest` was run on its own: **green** (no hang this time). `:app:minifyReleaseWithR8`: **green** after two `-dontwarn` lines (below). `:app:assembleRelease` stops at `validateReleaseSigning`, because this worktree has no `keystore.properties`. That is expected; R8 itself was run through `minifyReleaseWithR8`.
+
+**Tests** (all pass, none skipped):
+
+| Task | Count |
+|---|---|
+| `:core:test` | 3,464 |
+| `:core:stateOnRealNavigator` | 358 |
+| `:data:testDebugUnitTest` | 340 |
+| `:player:testDebugUnitTest` | 480 |
+| `:ui:testDebugUnitTest` | 380 |
+| `:app:testDebugUnitTest` | 69 |
+
+New tests:
+- `core/.../storage/StorageLimitsTest` (§16.1, the commit-0 part): caps, reserves, the `availableBytes` offset, pools by `memoryClass`, Auto length per kind, and the policy overloads against the old ones.
+- `core/.../storage/StorageContractsTest`: the `storage` domain's defaults (`{}` reads as today), a location round trip with no password, no credential in any `toString`, `RemoteFault.failure`, `blocking` defaults to false, the Appendix A values, and the new routes' section and parents.
+- `core/.../storage/smb/FakeRemoteLinkTest`: the fake does what §16.1 says.
+
+**Dependencies (U-21, answered).** In `releaseRuntimeClasspath`:
+- Guava resolves to `33.4.0-jre` by conflict resolution with Media3's `33.3.1-android`. `dependencyInsight` shows that Gradle picks the **`androidRuntimeElements` variant** (`org.gradle.jvm.environment = android`), so the jar is the Android flavour, one minor version up. U-21 holds.
+- Also on the classpath: smbj 0.15.0 (dcerpc asks for 0.12.2), bcprov-jdk18on 1.85.2 (another module asks for 1.78.1), asn-one 0.6.0, mbassador 1.3.2, slf4j-api 2.0.18 (no binding), commons-io 2.7, commons-lang3 3.4, and lifecycle-process 2.10.0.
+
+**R8 (early read for S-2).** With nothing calling smbj yet, R8 failed on missing classes:
+- `javax.el.*`, from mbassador's optional EL filters;
+- `org.ietf.jgss.*`, from smbj's Kerberos `SpnegoAuthenticator`.
+
+`-dontwarn javax.el.**` and `-dontwarn org.ietf.jgss.**` in the placeholder block fix it; both paths are unused on Android (NTLM only). This does **not** test the keep rules: no code reaches smbj yet, so R8 strips it all. The APK delta and the `@Handler` rules stay S-2's and WP-S1's.
+
+### What was done (§12.4, item by item)
+
+`:core`
+- **New `storage/StorageContracts.kt`.** §12.1, plus the browse types §12.1 leaves to commit 0:
+  - `NameSource`, `FoundComputer` (with `apple` for the §7.7 Mac hint, and `port`), `FindState`;
+  - `BrowseErrorKind` + `BrowseError` (kinds `STORAGE` + `StorageFailure`, `AUTH`, `GUEST_REFUSED`, `SMB1`, `NO_NETWORK`, `NOT_FOUND`, `LIST_FAILED`, `WRITE_REFUSED`, `DATA_MISMATCH`; with `deepestPath`, `vpnUp`, `freeBytes`/`needBytes`);
+  - `SignInMode`, `BrowseHandle`, `BrowseResult` (`Opened` / `NeedsSignIn` / `Failed`), `ShareListing`, `FolderListing`, `TestPhase`, `TestProgress`.
+- **New `storage/smb/RemoteContracts.kt`.** §12.2, plus one addition (deviation 2).
+- **New `storage/StorageConstants.kt`.** Appendix A, plus `StorageFlags.VOLUME_ENABLED`. `SMB_BACKOFF_MS` is a `List<Long>` and `SMB_SKIP_FOLDERS` a `Set<String>`.
+- **`TimeshiftContracts.kt`.** §12.3 verbatim: `RingStorage` KDoc and `blocking`; `RemoteRingStorage`, `RingTarget`, `RingTargetChoice`, `RingTargetSource`. The `TimeshiftPolicy` overloads are abstract.
+- **`TimeshiftConstants.kt`.** The three pool constants.
+- **`RingFlusher.kt` / `TsRingImpl.kt`.**
+  - The owned-flusher signature (deviation 1).
+  - `RingFlusher.forStorage(storage)` makes the production choice: shared unless `blocking`; then `box-ts-flush-net` for a `RemoteRingStorage` or a `FallbackRingStorage`, else `box-ts-flush-ext`.
+  - The production `TsRingImpl` constructor calls it. Nothing is `blocking` yet, so every ring still uses the shared flusher.
+- **`TimeshiftPolicyImpl.kt`.** The overloads are implemented (deviation 4), and the old ones delegate with `StorageLimits.internal(total)`. The existing `TimeshiftPolicyTest` passes unchanged.
+- **Stubs:**
+  - `storage/FallbackRingStorage.kt` (WP-S2): the constructor of §5.2, `switchedTo`, `fallbackReason`, `primary`, `blocking = true`; bodies `TODO("WP-S2")`.
+  - `storage/smb/SmbRingStorage.kt` (WP-S1): the constructor of §4.1, `blocking = true`; bodies `TODO("WP-S1")`.
+  - `storage/ManualAddressParser.kt` (WP-S1): `Result.Parsed(host, port, share?, path)` / `Result.Invalid(Reason)`; `parse` is `TODO`. WP-S4 and WP-S6 compile against it.
+- **Settings.**
+  - `Domains.STORAGE`, and `StorageDomain` (backed up; default `StoragePrefs()` = today).
+  - `SettingsContracts`: the §9.2 routes (`LocationTest(browse: Long? = null, locationId: String? = null)` serves both forms), `PhoneSetup.browse`, `PhonePurpose.NETWORK_FOLDER`, `TextHint.HOST`, `Badge.IN_USE` / `SAVED`.
+  - `PlaybackRows.PAUSE_REWIND` (SIMPLE, NONE).
+  - New `PauseRewindRows`: TIMESHIFT and TIMESHIFT_LOCATION SIMPLE NEXT_TUNE; HOLD and PROTECT ADVANCED LIVE; the ids are unchanged.
+  - `SettingsTree`: the source, plus `sectionOf` (new routes → PLAYBACK; `PhoneSetup` with NETWORK_FOLDER → PLAYBACK).
+  - `SimpleRowCountTest.SUB_PAGE_SOURCES` gains `PauseRewindRows`. Playback stays at 5 and the total at 35.
+- **`LanContracts.kt`.** `PhoneSubmission.NetworkFolder`, `PhoneContext`, `PhoneLink.start(purpose, context = null)`, `PhoneContextProvider`. The three implementers (`LanPhoneLink`, `PhoneLinkImpl`, `FakePhoneLink`) take the parameter and ignore it. `FakePhoneLink` records `contexts`.
+- **`PlayerContracts.kt`.** The five `LocalBufferInfo` fields (defaults = this device), `SAVE_LOCATION_FALLBACK` and `PAUSE_RESUME_LOST_STORAGE` (KDoc carries the §10 arg format), and `PlayerEffects.fallbackToastDue(…) = false`.
+- **testFixtures.**
+  - `storage/smb/FakeRemoteLink.kt`: `FakeRemoteLink`, with its inner classes `FakeRemoteShare` and `FakeRemoteFile`. It provides every §16.1 knob: latency, `stallUntil`, `dropTransport`, `timeoutNext`, `reconnectLatencyMs`/`reconnectFails`, `deleteFile`, `fullAt`, `denyWrites`, epoch, `calls`/`ioCalls`/`log`, `opens`, `refs`, `ready`, and `queuePosted` + `runPosted`. It also has the fault exceptions `FakeTransportException`, `FakeTimeoutException` and `FakeStatusException(FakeStatus)`, and a server clock for `lastWriteMs`.
+  - `storage/fakes/StorageFakes.kt`: `FakeStorageLocations`, `FakeNetworkFolders`, `FakeVolumeCatalog` and `FakeRingTargetSource` (records `onStorageFailure`; names files `ring-<device>-<pid>-<n>.bin`).
+
+`:player`
+- `PlaybackApi.kt`: the `LocalBufferState` fields. `storageRatesBps` is a `StorageRates(writeBps, readBps)` whose `equals` is always true, so it is excluded from equality.
+- `Seams.kt`: `TimeshiftGrant.choice` (default `InternalRingTargets.UNSIZED`).
+- `TimeshiftModule.kt`: `@BindsOptionalOf RingTargetSource`, and `@Binds VolumeCatalog` → `VolumeWatcher` (deviation 6).
+- New `InternalRingTargets.kt`: always this device, with StatFs figures from `TimeshiftStorageImpl`.
+- New `VolumeWatcher.kt` (WP-S2 stub): lists no volume.
+- `TimeshiftSessionFactoryImpl` is **not** touched. It does not consult a target yet, so playback is byte-for-byte as before. WP-S2 injects `Optional<RingTargetSource>` and falls back to `InternalRingTargets`.
+
+`:data`
+- `SecureBlobStore.REF_SMB_PREFIX`.
+- `RoomSettingsStore.KNOWN_DOMAINS` gains `storage`, so a restore keeps the document before WP-S1 registers the domain.
+- **Stubs:**
+  - `storage/StorageLocationsImpl.kt` (no locations, `chosen` = internal, writes `TODO`);
+  - `storage/NetworkFoldersImpl.kt` (`find()` delegates to `ComputerFinder`, the rest `TODO`);
+  - `storage/discovery/ComputerFinderImpl.kt` (WP-S3; holds the `ComputerFinder` interface and emits one empty, finished `FindState`);
+  - `storage/StorageModule.kt` (binds those three; **no** `RingTargetSource`).
+
+Build, `:app`, `:ui`, docs
+- `libs.versions.toml`: `smbj`, `dcerpc`, `bouncycastle` (1.85.2) and the three libraries.
+- `data/build.gradle.kts`: smbj, dcerpc, `bcprov-jdk18on` (declared to pin smbj's provider version), lifecycle-process. slf4j stays unbound.
+- `app/build.gradle.kts`: the OSGi `MANIFEST.MF` exclude.
+- `app/proguard-rules.pro`: the placeholder block, marked `--- smbj/mbassador/dcerpc rules (WP-S1) ---`, with the two `-dontwarn` lines.
+- Manifest: `ACCESS_WIFI_STATE`, `CHANGE_WIFI_MULTICAST_STATE`.
+- `SettingsBindingsModule`: `PhoneContextProvider { null }` and `FallbackToastGate { false }`. WP-S4 replaces both.
+- `PlayerText`: the two new toasts map to the existing storage text, marked "WP-S4 replaces".
+- `PhoneSetupScreen.titleOf(NETWORK_FOLDER)`: the setup title for now, marked "WP-S6 replaces".
+- `SettingsUi.badgeLabel` and `strings_settings.xml`: "IN USE", "SAVED".
+- `00-master-plan.md` §3 Platform: smbj is now v1 (with dcerpc and bcprov in `:data`), and a note that targetSdk 37 must add `ACCESS_LOCAL_NETWORK`. The §2 pointer line was already there.
+
+### Deviations from §12 (each needed to compile, be green, or unblock a WP)
+
+1. **`RingFlusher(threadName, owned: Boolean = false)`, not `ownedBy: TsRingImpl?`.**
+   - Kotlin cannot pass `this` to a delegating constructor call, which is where §12.4's `RingFlusher("box-ts-flush-net", this)` would have to go.
+   - The choice moved to `RingFlusher.forStorage(storage)`, which also picks `-ext` for a USB storage (§2's thread table).
+   - WP-S1 implements the exit: an owned flusher's thread ends after its one ring unregistered and closed. Until then an owned flusher behaves like a shared one, and nothing creates one.
+2. **`RemoteLink.post(work: Runnable)` (added).**
+   - §4.1 has `close()`/`delete()` post the CLOSE, the reference release and `rm` to `box-smb`, but neither §12.2 nor `SmbRingStorage`'s constructor gave the storage an executor.
+   - `RemoteShare.freeBytes()` KDoc now says the link may answer from the keeper's cache (§4.1 `availableBytes`). That is not a signature change.
+3. **`LocationTestResult.error: BrowseError? = null` (added).** A FAILED verdict needs its cause for "the cause | its next step" (§7.8). `BrowseError` and `BrowseErrorKind` are therefore `@Serializable`.
+4. **`TimeshiftPolicyImpl` overloads implemented in commit 0** (they are WP-S2's body in §17).
+   - They are 15 lines, the old methods had to delegate to them, and `StorageLimitsTest` (commit 0) checks Auto length per kind.
+   - `player/src/test/.../TimeshiftFakes.FakePolicy` got the two overrides.
+   - WP-S2 may revise both.
+5. **The Pause and rewind sub-page is live in commit 0.** Moving the ids and listing `PauseRewindRows` in `SUB_PAGE_SOURCES` (both commit 0 per §9.5) made `SimpleRowCountTest`'s "published" check fail, because Playback would publish only 4 counted rows. Commit 0 therefore made these edits in WP-S4's files:
+   - `WpaPages`: the `PAUSE_REWIND` Link (label `PB_TIMESHIFT`, value = the length) and `handles(PauseRewind)`, which builds today's three rows there. `apply` is unchanged (owner "A").
+   - `WpaPagesTest`: the timeshift rows are read from `PauseRewind`, and a new `pauseRewindSubPage` test.
+   - `SettingsBackLadderTest`: focuses `PAUSE_REWIND`.
+   - `EffectTimingCoverageTest`: builds `PauseRewind` too.
+   - `SettingsContractsTest`: 15 sources.
+
+   `TIMESHIFT_LOCATION` is registered with owner **"S4"**: no page builds it yet, and an owner-"A" row nobody builds fails `EffectTimingCoverageTest`. Viewer-visible effect: Playback → "Pause and rewind" now opens a sub-page with the same three rows. "Rewind length", "Save to" and the texts are still WP-S4's.
+6. **`VolumeCatalog` is bound in `:player`'s `TimeshiftModule`, not in `:app`.** It is the same graph, and `VolumeWatcher` is `internal` to `:player`.
+7. **`PhoneSubmission.NetworkFolder` is a plain class, not a data class.** A generated `copy` would duplicate the password array, and `equals` would compare by identity anyway.
+8. **Small additions:**
+   - `StorageConstants.VOLUME_ID_PREFIX`, `SMB_ID_PREFIX` and `LABEL_LINK_MAX_CHARS` (16, from the `LABEL_MAX_CHARS` row);
+   - `StorageLimits.reportedAvailableBytes(free)`: the §3.4 offset, shared by `VolumeStorage` (WP-S2) and `SmbRingStorage` (WP-S1);
+   - `StorageLimits.of(kind, total)`;
+   - `SettingsMachineImpl.parentOf` for the new routes (Pause and rewind → Playback; Save to → Pause and rewind; Find / LocationDetail → Save to; `LocationSignIn` / `LocationTest(locationId)` → LocationDetail; browse routes and the NETWORK_FOLDER `PhoneSetup` → FindComputers). This file is in no WP's list.
+   - `HintValidator`: `TextHint.HOST` = not empty (WP-S4 adds the parser as a row rule).
+9. **`FallbackToastGate` (added to `StorageContracts.kt`).** `PlayerEffects.fallbackToastDue` is implemented by `:ui`'s `PlayerEffectsImpl`, which cannot see `:app`'s FallbackToastPolicy, and `PlayerEffectsImpl` is in no WP's list. Commit 0 adds:
+   - `fun interface FallbackToastGate`;
+   - `EffectDelegates.fallbackToasts` (test call site updated);
+   - `PlayerEffectsImpl.fallbackToastDue` delegating to it;
+   - the `{ false }` binding in `SettingsBindingsModule`.
+
+   WP-S4's `FallbackToastPolicy` implements the gate and replaces the binding.
+
+### What each WP must know
+
+- **WP-S1.**
+  - Fill `SmbRingStorage`, `ManualAddressParser` and the owned-flusher exit (`RingFlusher.owned`).
+  - Implement `RemoteLink.post` in `SmbjRemoteLink` on `box-smb`.
+  - In `StorageModule`, add `@Binds RingTargetSource` (StorageTargetsImpl) and register `StorageDomain`. Binding `RingTargetSource` is the switch that turns the feature on in the factory once WP-S2 consults it.
+  - Replace the placeholder R8 block. Keep or extend the two `-dontwarn` lines.
+- **WP-S2.** Inject `Optional<RingTargetSource>` and `InternalRingTargets` into the factory (`targets.orElse(internal)`). `AndroidRingStorage.blocking` and `preallocate` are yours. `FakeRemoteLink.ioCalls` is the counter for `SmbPrepareNoIoTest`.
+- **WP-S3.** `ComputerFinder` (interface) and `ComputerFinderImpl` are in your file `data/.../storage/discovery/ComputerFinderImpl.kt`; the interface can move to its own file of yours.
+- **WP-S4.** Take over `PauseRewind` from `WpaPages` (`timeshiftRows` + `pauseRewindLink`) and change `PauseRewindRows`' owner from "A" when `StoragePages` builds them. `TIMESHIFT_LOCATION` is already owner "S4". Replace the `PhoneContextProvider` and `FallbackToastGate` bindings, and the two `PlayerText` bodies.
+- **WP-S6.** `PhoneLink.start(purpose, context)` is in place; `titleOf(NETWORK_FOLDER)` is a placeholder.
+
+### Questions for the lead
+
+1. **Deviation 5** changes Settings behaviour in commit 0 (the sub-page appears with today's three rows). The alternative was a red `SimpleRowCountTest` until WP-S4. Accept, or prefer the old layout plus a temporary test exception?
+2. **Deviation 9** edits two files no WP owns (`EffectDelegates`, `PlayerEffectsImpl`) to give WP-S4 a seam. Accept the seam, or assign those files to WP-S4?
+3. **`RemoteLink.post` (deviation 2) is the only change to §12.2's signatures.** Please confirm, since WP-S1 and the fake both implement it.

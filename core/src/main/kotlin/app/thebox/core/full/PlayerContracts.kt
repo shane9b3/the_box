@@ -226,6 +226,17 @@ data class LocalBufferInfo(
     val stoppedAtMs: Long? = null,
     /** The controller's buffered cycle this snapshot belongs to; a new value is a new cycle (REWIND_NOTHING_YET resets). */
     val cycleId: Long = 0,
+    // (Storage locations commit 0, docs/design/m6-storage-locations.md §10, §12.4; additive, defaults = this device)
+    /** Where this cycle saves (after a §5.2 switch: INTERNAL). */
+    val storage: app.thebox.core.storage.StorageKind = app.thebox.core.storage.StorageKind.INTERNAL,
+    /** Why a remote/USB ring stopped saving (the §10 wording of REWIND_STOPPED_*); null = none or internal. */
+    val storageFailure: app.thebox.core.storage.StorageFailure? = null,
+    /** Why the cycle saves on this device instead of the chosen place; the machine toasts SAVE_LOCATION_FALLBACK once. */
+    val fallback: app.thebox.core.storage.LocationFallback? = null,
+    /** The chosen location's name ("NAS"), for the toasts and the stats line; null = this device. */
+    val storageName: String? = null,
+    /** The chosen location's id ("internal", "vol-…", "smb-…"): the key of `PlayerEffects.fallbackToastDue`. */
+    val locationId: String = app.thebox.core.storage.StorageConstants.INTERNAL_ID,
 )
 
 /**
@@ -414,6 +425,15 @@ enum class PlayerToast {
     PAUSE_NO_REWIND_FORMAT,
     /** (Fix pass, product, UX review S7; append-only) Pause while the buffer is off after a storage failure. */
     PAUSE_NO_REWIND_STORAGE,
+    /**
+     * (Storage locations commit 0, docs/design/m6-storage-locations.md §10; append-only) The cycle saves on this device
+     * instead of the chosen place. arg = `"<StorageKind>␟<LocationFallback>␟<name>"` (U+001F).
+     */
+    SAVE_LOCATION_FALLBACK,
+    /** (Storage locations commit 0, §4.6, §10; append-only) Resume after a pause: the saved file could not be read. */
+    PAUSE_RESUME_LOST_STORAGE,
+    // (Storage locations §10) REWIND_STOPPED_STORAGE, REWIND_STOPPED_SLOW, PAUSE_NO_REWIND_STORAGE and the two kinds above
+    // take arg = "<StorageKind>␟<StorageFailure|>␟<name>␟<jumped 1|>"; a null arg means today's internal text.
 }
 
 /** (Fix pass, product, 2026-10-19) Joins the values of one toast's `arg` (see [PlayerToast]); `PlayerText.ARG_SEP`. */
@@ -510,6 +530,12 @@ interface PlayerEffects {
      * re-prepare, the same path as the AUDIO_OUTPUT_FAILED card's [ErrorButton.BACK_TO_AUTO].
      */
     fun audioOutputAuto() = Unit
+    /**
+     * (Storage locations commit 0, docs/design/m6-storage-locations.md §5.1, §10; additive) Whether SAVE_LOCATION_FALLBACK
+     * for ([locationId], [reason]) is due now: once per process per (location, reason); SIGN_IN_NEEDED in the first
+     * SIGN_IN_TOAST_PROCESSES processes only; never NOT_READY_YET. `:app`'s FallbackToastPolicy answers (WP-S4).
+     */
+    fun fallbackToastDue(locationId: String, reason: app.thebox.core.storage.LocationFallback): Boolean = false
     // Data
     fun loadProgrammes(token: Long, channel: GuideChannel, aroundMin: Int, before: Int, after: Int)
     fun loadChannel(token: Long, from: GuideChannel, delta: Int)

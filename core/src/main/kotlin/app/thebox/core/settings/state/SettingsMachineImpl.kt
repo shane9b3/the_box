@@ -24,6 +24,7 @@ import app.thebox.core.settings.Pane
 import app.thebox.core.settings.RowId
 import app.thebox.core.settings.RowIntent
 import app.thebox.core.settings.RowKind
+import app.thebox.core.settings.PhonePurpose
 import app.thebox.core.settings.SectionId
 import app.thebox.core.settings.SettingsEffects
 import app.thebox.core.settings.SettingsEvent
@@ -1127,7 +1128,12 @@ class SettingsMachineImpl(
             SettingsRoute.Root, SettingsRoute.FirstRun -> null
             is SettingsRoute.Section -> SettingsRoute.Root
             is SettingsRoute.AddSource -> if (route.firstRun) SettingsRoute.FirstRun else SettingsRoute.Section(SectionId.PLAYLISTS)
-            is SettingsRoute.PhoneSetup -> if (route.firstRun) SettingsRoute.FirstRun else SettingsRoute.Section(SectionId.PLAYLISTS)
+            is SettingsRoute.PhoneSetup -> when {
+                route.firstRun -> SettingsRoute.FirstRun
+                // (Storage locations commit 0) a network-folder sign-in from the phone is part of "Save to".
+                route.purpose == PhonePurpose.NETWORK_FOLDER -> SettingsRoute.FindComputers
+                else -> SettingsRoute.Section(SectionId.PLAYLISTS)
+            }
             is SettingsRoute.ImportProgress -> if (route.firstRun) SettingsRoute.FirstRun else SettingsRoute.Section(SectionId.PLAYLISTS)
             is SettingsRoute.GroupsReview -> if (route.firstRun) SettingsRoute.FirstRun else SettingsRoute.Playlist(route.playlistId)
             is SettingsRoute.MatchingReport -> if (route.firstRun) SettingsRoute.FirstRun else SettingsRoute.Playlist(route.playlistId)
@@ -1138,6 +1144,13 @@ class SettingsMachineImpl(
             is SettingsRoute.RestorePreview -> SettingsRoute.Backup
             is SettingsRoute.FixGuide -> if (route.channel != null) SettingsRoute.FixGuide(null) else SettingsRoute.Section(SectionId.GUIDE)
             SettingsRoute.EpgSources, SettingsRoute.SyncStatus -> SettingsRoute.Section(SectionId.GUIDE)
+            // (Storage locations commit 0, docs/design/m6-storage-locations.md §9.2, §9.3) the chain BACK walks from a deep open.
+            SettingsRoute.PauseRewind -> SettingsRoute.Section(SectionId.PLAYBACK)
+            is SettingsRoute.SaveLocation -> SettingsRoute.PauseRewind
+            is SettingsRoute.LocationDetail, SettingsRoute.FindComputers -> SettingsRoute.SaveLocation()
+            is SettingsRoute.LocationSignIn -> SettingsRoute.LocationDetail(route.locationId)
+            is SettingsRoute.LocationTest -> route.locationId?.let { SettingsRoute.LocationDetail(it) } ?: SettingsRoute.FindComputers
+            is SettingsRoute.ComputerShares, is SettingsRoute.ComputerSignIn, is SettingsRoute.NetworkFolder -> SettingsRoute.FindComputers
             else -> SettingsTree.sectionOf(route)?.let { SettingsRoute.Section(it) } ?: SettingsRoute.Root
         }
 

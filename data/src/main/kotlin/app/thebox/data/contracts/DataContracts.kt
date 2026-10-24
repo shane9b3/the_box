@@ -100,5 +100,10 @@ interface SecureBlobStore {
         /** Reserved refs (never "cred-…", so they cannot collide with playlist secrets). */
         const val REF_PARENTAL_PIN = "parental-pin"
         const val REF_BACKUP_PASSPHRASE = "backup-passphrase"
+        /**
+         * (Storage locations commit 0, docs/design/m6-storage-locations.md §8, §12.4) A network folder's password:
+         * "smb-<locationId>" (UTF-8, zeroed after put/get). Never in backups.
+         */
+        const val REF_SMB_PREFIX = "smb-"
     }
 }
