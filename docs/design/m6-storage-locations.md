@@ -1511,3 +1511,66 @@ Build, `:app`, `:ui`, docs
 1. **Deviation 5** changes Settings behaviour in commit 0 (the sub-page appears with today's three rows). The alternative was a red `SimpleRowCountTest` until WP-S4. Accept, or prefer the old layout plus a temporary test exception?
 2. **Deviation 9** edits two files no WP owns (`EffectDelegates`, `PlayerEffectsImpl`) to give WP-S4 a seam. Accept the seam, or assign those files to WP-S4?
 3. **`RemoteLink.post` (deviation 2) is the only change to §12.2's signatures.** Please confirm, since WP-S1 and the fake both implement it.
+
+---
+
+## Implementation record — WP-S6 (2026-10-24)
+
+In worktree `agent-a190412bb6bf58a4b` (branch `worktree-agent-a190412bb6bf58a4b`, fast-forwarded to `main` at `502804f`), uncommitted (the lead commits). No emulator run. Only the files of the WP-S6 row in §17 were edited, plus the new test.
+
+**Gate.** `PhoneApiNetworkFolderTest` (19 tests) and `./gradlew :core:test :data:testDebugUnitTest :ui:testDebugUnitTest :app:assembleDebug`: **green**. `LanHttpServerImplTest` (25) passes unchanged. `app.js`'s `splitFolder` was run through the test's 28 shared vectors with node (a scratch script that reads both files): 0 mismatches.
+
+### What was done
+
+- **`PhoneApi`**
+  - `POST /api/network-folder`: only for NETWORK_FOLDER (`onlyFor`, 409 otherwise), behind the M5 gate (pairing cookie from the paired IP, `X-TheBox`, Host, Origin).
+  - The body is read into **one fixed `ByteArray`** of exactly Content-Length (a `FixedSink`, never a `ByteArrayOutputStream`), parsed, and zeroed in a `finally`. A test hook (`bodyBufferProbe`, internal) proves every buffer is all zeros afterwards, on success and on 400.
+  - The password goes into the submission's `CharArray` only. On a 503 (nothing on the TV collects), that array is zeroed. User and password are `Redact.registerTransient`ed.
+  - **One at a time:** a second POST while the TV signs in gets 409.
+  - **`reportStatus` is the sign-in result** for NETWORK_FOLDER: `done = true` means signed in; `done = false` means one failed sign-in. After a success, or after `PAIR_MAX_WRONG` failures, the endpoint answers 410.
+  - `/api/state` gains `folder` (the `PhoneContext`: host, share, up to 200 shares), `received` (`{user: "sh***", host}` or `{guest: true, host}`), `failures`, `maxFailures` and `ended` (`signed_in` / `too_many_sign_ins`). It **never** carries the password, the full user name or the domain (tested). The new `tv` values are `Retry` and `Ended`. Other purposes' state is unchanged.
+  - `PhoneApi.splitFolder(host, share, path)` re-splits a pasted `\\host\share\path`, `//…` or `smb://…` (in either field), or `TV\Rewind`, on the server too. It rejects `..`, bad hosts and ports, a path without a share, and over-long parts.
+  - Nothing of the body is logged. The M5 code has no received-JSON debug dump to exclude; a test with a capturing `BoxLog` sink shows no user, password or path in any line.
+- **`LanPhoneLink`**
+  - The context goes to `PhoneApi`, for NETWORK_FOLDER only. Each `start` is a new server and a new pairing, so a session is bound to one browse context.
+  - After a success it stops after `doneGraceMs` (new constructor parameter, default `DONE_GRACE_MS`).
+  - After the last failed sign-in it ends the session as `TOO_MANY_WRONG_CODES` after the same grace.
+  - After an earlier failure the phase goes back to PAIRED.
+  - **`stop()` lingers once a NETWORK_FOLDER result is final.** The TV replaces the QR page at once, but the phone should still read "Signed in to NAS…", so the server stays up (accepting nothing, 410) until the scheduled grace stop. `start()` always stops at once.
+  - `FAILED` states now keep `pairedFrom`.
+- **`PhoneScreenModel.tooManySignIns(state, purpose)`**: NETWORK_FOLDER + FAILED + `TOO_MANY_WRONG_CODES` + a paired phone. Wrong pairing codes can only happen before pairing, so the existing `LanFailure` tells the two apart without a contract change.
+- **`PhoneLinkImpl`**: passes the context through.
+- **Phone page** (`app.html` / `app.js` / `app.css`, same style as M5):
+  - A "Network folder" tab, shown alone, with fields top to bottom: Computer (read-only with **Change** when the TV knows it), Shared folder (a `<select>` of the listed shares plus "Another shared folder (type or paste it)", else text; paste accepted), Folder inside it, User name (`autocomplete="username"`), Password (`autocomplete="current-password"`, Show), the §7.3 Windows/Mac line (neutral wording), "More: Workgroup or domain" (`<details>`), "This folder allows guests (no password)", and **Send to TV**.
+  - The fields sit in a `<form>` (submit is intercepted), so phone password managers offer to fill them.
+  - The password field is cleared once the TV has the request (202).
+  - It shows "Received from your phone: user sh***", each TV result, "Tries left: n", and on the last failure "Too many failed sign-ins. Start again on the TV.". The final text stays on screen after the session ends.
+  - The footer adds "Your password crosses your home Wi-Fi once, unencrypted, to the TV. The TV keeps it encrypted."
+- **TV screen** (`PhoneSetupScreen`, `strings_storage_phone.xml`):
+  - The title is "Add a network folder from your phone", with the plain-HTTP line below it (22 px; the existing footer stays).
+  - PAIRED gets a hint line (22 px); RECEIVED shows "Received from your phone. Signing in…".
+  - The FAILED page says "Too many failed sign-ins…" when `tooManySignIns`.
+  - The new sizes are 22 and 26. Nothing is under 18.
+- **`PhoneSetupViewModel` / `PhoneSetupHost`**:
+  - `open(purpose, nowMs, browse)` asks `PhoneContextProvider` for the browse's context and calls `phone.start(purpose, context)`. A different browse token restarts the session.
+  - `PhoneSetupHost(…, browse = null)` is a new trailing parameter.
+  - The provider is a defaulted constructor parameter, so existing tests compile.
+
+### For WP-S4 (the contract as built)
+
+- Collect `PhoneSubmission.NetworkFolder` while `PhoneSetup(NETWORK_FOLDER, browse)` is open. **Zero `password` when done.** `host` may carry `:port`; `path` is `/`-separated or null.
+- Answer **every** submission with exactly one `PhoneLink.reportStatus(text, done)`: `done = true` for signed in, `false` for failed. Do not report progress, because each `done = false` counts as a failed sign-in.
+- Texts for the results are in `strings_storage_phone.xml`: `storage_phone_result_signed_in`, `_auth`, `_unreachable`, `_no_guests`, `_no_access`.
+- After a success, replace the route. The server lingers for the phone by itself.
+
+### Deviations
+
+1. `LanPhoneLink` gained a `doneGraceMs` constructor parameter (defaulted), so the tests run in about 1 s instead of 5 s.
+2. Too many failed sign-ins reuse `LanFailure.TOO_MANY_WRONG_CODES`, told apart by `pairedFrom` (no contract change).
+3. A failed sign-in is not shown as text on the TV's QR page, only on the phone. `LanServerState` has no message field, and the result text is the phone's. The TV shows the phase.
+
+### Questions for the lead
+
+1. **Wiring.** `SettingsScreen.kt:88` calls `phone(route.purpose)`, and `MainActivity.kt:108` builds `PhoneSetupHost(phone, purpose)`. Neither passes `SettingsRoute.PhoneSetup.browse`, and neither file is WP-S6's. Until one of them passes `route.browse` to `PhoneSetupHost(…, browse = …)`, the phone page gets no context: it still works, with every field typed. Assign this one-line change to WP-S4, or make it during integration?
+2. **Residue in `StreamBody.copyTo`** (`HttpParser.kt`, not WP-S6's): its 64 KB chunk buffer holds the request body, password included, and is never zeroed. A `buf.fill(0)` in a `finally` there would close it. That residue is in the same class as §19 N-3.
+3. `stop()` lingering up to `DONE_GRACE_MS` (5 s) after a final NETWORK_FOLDER result means the socket can stay bound for those seconds after ON_STOP. It accepts no submission in that time. Acceptable against M5 U-S7?

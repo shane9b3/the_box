@@ -39,6 +39,11 @@ class PhoneApi(
     private val uploadMaxBytes: Long = LanLimits.PHONE_UPLOAD_MAX_BYTES,
     /** D-L4: false while nothing on the TV collects submissions; they are refused with 503 instead of dropped. */
     private val canAccept: () -> Boolean = { true },
+    /**
+     * (WP-S6, docs/design/m6-storage-locations.md §7.4) What the TV knows for a NETWORK_FOLDER page (host, share, the
+     * listed shares), shown on the phone. Never a credential. Ignored for every other purpose.
+     */
+    private val folderContext: PhoneContext? = null,
 ) : LanHandler {
     private class Offer(val file: File, val contentType: String)
 
@@ -46,6 +51,27 @@ class PhoneApi(
     @Volatile private var tv: String = TV_WAITING
     @Volatile private var message: String = ""
     private var uploadSeq = 0
+
+    // (WP-S6, §7.4) The NETWORK_FOLDER sign-in: one submission at a time, each answered by one [reportStatus].
+    private val folderLock = Any()
+    /** A `/api/network-folder` submission reached the TV and waits for its sign-in result. */
+    private var folderChecking = false
+    /** Failed sign-ins in this session; [LanLimits.PAIR_MAX_WRONG] of them end it. */
+    @Volatile var folderFailures: Int = 0
+        private set
+    @Volatile private var folderOutcome: FolderOutcome? = null
+    /** "Received from your phone": the masked user name or guest, never the password or the full user name. */
+    @Volatile private var folderReceived: JsonObject? = null
+
+    /** The NETWORK_FOLDER session is over: a sign-in succeeded, or too many failed. No submission is accepted any more. */
+    val folderFinished: Boolean get() = folderOutcome != null
+    val folderSignedIn: Boolean get() = folderOutcome == FolderOutcome.SIGNED_IN
+    val folderExhausted: Boolean get() = folderOutcome == FolderOutcome.TOO_MANY
+
+    private enum class FolderOutcome(val wire: String) { SIGNED_IN("signed_in"), TOO_MANY("too_many_sign_ins") }
+
+    /** Test hook: sees the fixed body buffer of `/api/network-folder` (it must be all zeros once the call returns). */
+    internal var bodyBufferProbe: ((ByteArray) -> Unit)? = null
 
     /** [PhoneLink.offerDownload]: one GET of `/api/download/{name}` by the paired phone, then it is gone. */
     fun offerDownload(name: String, file: File, contentType: String) {
@@ -57,8 +83,16 @@ class PhoneApi(
         for (key in offers.keys.toList()) offers.remove(key)?.file?.delete()
     }
 
-    /** [PhoneLink.reportStatus]. */
+    /**
+     * [PhoneLink.reportStatus]. For NETWORK_FOLDER it is the **sign-in result** of the pending submission (WP-S6, §7.4):
+     * `done = true` = signed in (the session accepts nothing more), `done = false` = the sign-in failed (one of
+     * [LanLimits.PAIR_MAX_WRONG]). The TV reports no progress: the page shows "checking" by itself.
+     */
     fun reportStatus(text: String, done: Boolean) {
+        if (purpose == PhonePurpose.NETWORK_FOLDER) {
+            reportSignIn(text, done)
+            return
+        }
         message = text
         tv = if (done) TV_DONE else TV_CHECKING
     }
@@ -88,6 +122,8 @@ class PhoneApi(
             path == "/api/passphrase" && request.method == "POST" ->
                 gated(request) { onlyFor(PhonePurpose.SETUP, PhonePurpose.RESTORE, PhonePurpose.BACKUP_DOWNLOAD) { passphrase(request) } }
             path.startsWith("/api/download/") && request.isGet -> gated(request) { download(path.removePrefix("/api/download/")) }
+            path == "/api/network-folder" && request.method == "POST" ->
+                gated(request) { onlyFor(PhonePurpose.NETWORK_FOLDER) { networkFolder(request) } }
             else -> text(404, "Not found")
         }
     }
@@ -140,6 +176,131 @@ class PhoneApi(
             },
         )
         put("uploadMaxBytes", uploadMaxBytes)
+        if (purpose == PhonePurpose.NETWORK_FOLDER) {
+            // §7.4 mirroring: what the TV knows and the outcome; never the password, never the full user name.
+            val c = folderContext
+            put(
+                "folder",
+                buildJsonObject {
+                    put("host", c?.host)
+                    put("share", c?.share)
+                    put("shares", JsonArray(c?.shares.orEmpty().take(FOLDER_SHARES_MAX).map(::JsonPrimitive)))
+                },
+            )
+            put("received", folderReceived ?: JsonNull)
+            put("failures", folderFailures)
+            put("maxFailures", LanLimits.PAIR_MAX_WRONG)
+            put("ended", folderOutcome?.wire)
+        }
+    }
+
+    /**
+     * `POST /api/network-folder` (WP-S6, §7.4): `{host, share?, path?, user?, domain?, password?, guest}`. The body is
+     * read into one fixed array that is zeroed before this returns; the password goes into the submission's `CharArray`
+     * only. One submission is checked at a time (409 while the TV signs in); after a success or the last allowed
+     * failure the endpoint answers 410. Nothing of the body is logged.
+     */
+    private fun networkFolder(request: HttpRequest): HttpResponse {
+        synchronized(folderLock) {
+            if (folderOutcome != null) return json(410, error("ended"))
+            if (folderChecking) return json(409, error("checking"))
+            folderChecking = true
+        }
+        var handedOver = false
+        try {
+            val o = readJsonFixed(request) ?: return json(400, error("bad json"))
+            val guest = (o["guest"] as? JsonPrimitive)?.takeIf { it !is JsonNull }?.content == "true"
+            val folder = splitFolder(o.str("host"), o.str("share"), o.str("path")) ?: return json(400, error("bad folder"))
+            val user = if (guest) null else o.str("user")?.trim()?.ifEmpty { null }
+            val domain = if (guest) null else o.str("domain")?.trim()?.ifEmpty { null }
+            val password = if (guest) null else o.str("password")?.ifEmpty { null }
+            if (!guest && user == null) return json(400, error("missing user"))
+            if ((user?.length ?: 0) > FOLDER_USER_MAX || (domain?.length ?: 0) > FOLDER_DOMAIN_MAX ||
+                (password?.length ?: 0) > FOLDER_PASSWORD_MAX
+            ) {
+                return json(400, error("too long"))
+            }
+            Redact.registerTransient(user)
+            Redact.registerTransient(password)
+            folderReceived = buildJsonObject {
+                if (user == null) put("guest", true) else put("user", maskUser(user))
+                put("host", folder.host)
+            }
+            val submission = PhoneSubmission.NetworkFolder(folder.host, folder.share, folder.path, user, domain, password?.toCharArray(), guest)
+            val response = accepted(submission)
+            handedOver = response.status == 202
+            return response
+        } finally {
+            if (!handedOver) {
+                synchronized(folderLock) {
+                    folderChecking = false
+                    folderReceived = null
+                }
+            }
+        }
+    }
+
+    private fun reportSignIn(text: String, done: Boolean) = synchronized(folderLock) {
+        if (folderOutcome != null) return
+        message = text
+        when {
+            done -> {
+                folderChecking = false
+                folderOutcome = FolderOutcome.SIGNED_IN
+                tv = TV_DONE
+            }
+            !folderChecking -> Unit // no submission is waiting: only the text changes
+            else -> {
+                folderChecking = false
+                folderFailures++
+                if (folderFailures >= LanLimits.PAIR_MAX_WRONG) {
+                    folderOutcome = FolderOutcome.TOO_MANY
+                    tv = TV_ENDED
+                } else {
+                    tv = TV_RETRY
+                }
+            }
+        }
+    }
+
+    /**
+     * A JSON body read into one fixed array (not a `ByteArrayOutputStream`, whose internal buffer cannot be zeroed),
+     * parsed, then zeroed (§7.4). The parser's `String`s cannot be zeroed (§19 N-3).
+     */
+    private fun readJsonFixed(request: HttpRequest): JsonObject? {
+        val body = request.body ?: return null
+        if (body.length > LanLimits.HTTP_MAX_JSON_BYTES) throw HttpParseException(413, "json too large")
+        val buf = ByteArray(body.length.toInt())
+        bodyBufferProbe?.invoke(buf)
+        try {
+            val sink = FixedSink(buf)
+            body.copyTo(sink, LanLimits.HTTP_MAX_JSON_BYTES.toLong())
+            if (sink.pos != buf.size) return null
+            return Json.parseToJsonElement(buf.decodeToString()) as? JsonObject
+        } catch (e: kotlinx.serialization.SerializationException) {
+            return null
+        } catch (e: IllegalArgumentException) {
+            return null
+        } finally {
+            buf.fill(0)
+        }
+    }
+
+    /** Writes into a fixed array; more bytes than it holds is an error, never a reallocation. */
+    private class FixedSink(private val buf: ByteArray) : java.io.OutputStream() {
+        var pos = 0
+            private set
+
+        override fun write(b: Int) {
+            if (pos >= buf.size) throw HttpParseException(400, "body longer than its length")
+            buf[pos++] = b.toByte()
+        }
+
+        override fun write(b: ByteArray, off: Int, len: Int) {
+            if (len > buf.size - pos) throw HttpParseException(400, "body longer than its length")
+            System.arraycopy(b, off, buf, pos, len)
+            pos += len
+        }
     }
 
     private fun xtream(request: HttpRequest): HttpResponse {
@@ -231,6 +392,7 @@ class PhoneApi(
                 is PhoneSubmission.BackupUploaded -> File(s.path).delete()
                 is PhoneSubmission.M3uFileUploaded -> File(s.path).delete()
                 is PhoneSubmission.Passphrase -> s.value.fill('\u0000')
+                is PhoneSubmission.NetworkFolder -> s.password?.fill('\u0000') // WP-S6: the only copy
                 else -> Unit
             }
             return json(503, error("not ready"))
@@ -285,12 +447,83 @@ class PhoneApi(
 
     private fun error(code: String) = buildJsonObject { put("error", code) }
 
+    /** (WP-S6) A computer, a shared folder and a folder inside it, as [splitFolder] reads the phone page's fields. */
+    data class Folder(val host: String, val share: String?, val path: String?)
+
     companion object {
         private const val TAG = "PhoneApi"
         const val COOKIE = "tb"
         const val TV_WAITING = "Waiting"
         const val TV_CHECKING = "Checking"
         const val TV_DONE = "Done"
+        /** (WP-S6) NETWORK_FOLDER: the sign-in failed; the phone may send again. */
+        const val TV_RETRY = "Retry"
+        /** (WP-S6) NETWORK_FOLDER: too many failed sign-ins; the session is about to end. */
+        const val TV_ENDED = "Ended"
+
+        const val FOLDER_SHARES_MAX = 200
+        const val FOLDER_HOST_MAX = 255
+        const val FOLDER_SHARE_MAX = 80
+        const val FOLDER_PATH_MAX = 1_024
+        const val FOLDER_USER_MAX = 256
+        const val FOLDER_DOMAIN_MAX = 255
+        const val FOLDER_PASSWORD_MAX = 256
+
+        /** "shawn" → "sh***" (§7.4: the state never carries the full user name). */
+        fun maskUser(user: String): String = if (user.length <= 2) "***" else user.take(2) + "***"
+
+        /**
+         * The phone page's three fields to one folder (§7.4 item 2; mirrored by `splitFolder` in `app.js`, the same
+         * vectors in `PhoneApiNetworkFolderTest`). A `\\host\share\path`, `//host/share/path` or `smb://host/share/path`
+         * pasted into Computer or Shared folder replaces the computer and the shared folder, and its rest goes before
+         * Folder inside it; a share typed as `TV\Rewind` is split the same way. Separators become `/`; empty and `.`
+         * segments go. Null when the computer is missing or not a plain `name[:port]`, a path is given without a share,
+         * a segment is `..`, or a part is too long. [Folder.host] keeps its `:port`.
+         */
+        fun splitFolder(host: String?, share: String?, path: String?): Folder? {
+            var h = host?.trim().orEmpty()
+            var shareParts = emptyList<String>()
+            uncParts(h)?.let { u ->
+                h = u.first()
+                shareParts = u.drop(1)
+            }
+            val s = share?.trim().orEmpty()
+            val us = uncParts(s)
+            if (us != null) {
+                h = us.first()
+                shareParts = us.drop(1)
+            } else if (s.isNotEmpty()) {
+                shareParts = segments(s)
+            }
+            val sh = shareParts.firstOrNull()
+            val pathParts = shareParts.drop(1) + segments(path)
+            if (h.isEmpty() || h.length > FOLDER_HOST_MAX || !HOST_OK.matches(h)) return null
+            val port = PORT.find(h)?.groupValues?.get(1)
+            if (port != null && (port.toIntOrNull() ?: 0) !in 1..65535) return null
+            if (sh == null && pathParts.isNotEmpty()) return null
+            if (sh == ".." || ".." in pathParts) return null
+            if (sh != null && sh.length > FOLDER_SHARE_MAX) return null
+            val p = pathParts.joinToString("/").ifEmpty { null }
+            if (p != null && p.length > FOLDER_PATH_MAX) return null
+            return Folder(h, sh, p)
+        }
+
+        /** `\\a\b\c`, `//a/b/c` or `smb://a/b/c` → [a, b, c]; null when [s] is none of these. */
+        private fun uncParts(s: String): List<String>? {
+            val rest = when {
+                s.startsWith("\\\\") || s.startsWith("//") -> s.substring(2)
+                s.startsWith("smb://", ignoreCase = true) -> s.substring(6)
+                else -> return null
+            }
+            return segments(rest).takeIf { it.isNotEmpty() }
+        }
+
+        private fun segments(s: String?): List<String> =
+            s.orEmpty().split('/', '\\').map { it.trim() }.filter { it.isNotEmpty() && it != "." }
+
+        /** A name or an IPv4 address, or a bracketed IPv6 address, with an optional port. */
+        private val HOST_OK = Regex("""^(?:[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+])(?::[0-9]{1,5})?$""")
+        private val PORT = Regex(""":([0-9]{1,5})$""")
 
         const val CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; " +
             "form-action 'self'; frame-ancestors 'none'"

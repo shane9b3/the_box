@@ -31,4 +31,11 @@ a.btn.big{display:block;width:100%;margin-top:12px;padding:18px;font-size:18px}
 .hint,.note{color:var(--muted);font-size:14px;margin:6px 0 0}
 .status{font-weight:600;margin:0}
 .section{margin-top:20px;padding-top:12px;border-top:1px solid var(--line)}
+input[readonly]{background:#eef0f3;color:var(--muted)}
+input:disabled{opacity:.5}
+select+input{margin-top:8px}
+label.check{display:flex;gap:10px;align-items:center;min-height:48px;margin:16px 0 0;font-weight:600}
+label.check input{width:24px;height:24px;flex:none;margin:0}
+details.more{margin-top:12px}
+details.more summary{min-height:48px;padding:12px 0;font-weight:600;color:var(--accent);cursor:pointer}
 #code{font-size:28px;letter-spacing:4px;text-align:center}

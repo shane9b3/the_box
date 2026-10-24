@@ -33,4 +33,13 @@ object PhoneScreenModel {
     /** "Type on the TV instead" is offered with the hint, and at once while a VPN is on (S4). */
     fun showTypeOnTv(hint: Boolean, vpn: Boolean, purpose: app.thebox.core.settings.PhonePurpose): Boolean =
         purpose == app.thebox.core.settings.PhonePurpose.SETUP && (hint || vpn)
+
+    /**
+     * (WP-S6, docs/design/m6-storage-locations.md §7.4) A NETWORK_FOLDER session that ended after
+     * [LanLimits.PAIR_MAX_WRONG] failed sign-ins: `TOO_MANY_WRONG_CODES` with a paired phone (wrong pairing codes can
+     * only happen before a phone paired).
+     */
+    fun tooManySignIns(state: LanServerState, purpose: app.thebox.core.settings.PhonePurpose): Boolean =
+        purpose == app.thebox.core.settings.PhonePurpose.NETWORK_FOLDER && state.phase == ServerPhase.FAILED &&
+            state.failure == LanFailure.TOO_MANY_WRONG_CODES && state.pairedFrom != null
 }

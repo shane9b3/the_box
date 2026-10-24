@@ -35,6 +35,8 @@ class LanPhoneLink(
     private val randomBytes: ((ByteArray) -> Unit)? = null,
     private val tickMs: Long = 1_000L,
     private val freeBytes: (File) -> Long = { it.usableSpace },
+    /** WP-S6: how long a finished NETWORK_FOLDER session stays readable ([LanLimits.DONE_GRACE_MS]; shorter in tests). */
+    private val doneGraceMs: Long = LanLimits.DONE_GRACE_MS,
 ) : PhoneLink {
     private val _state = MutableStateFlow(LanServerState(ServerPhase.CLOSED))
     override val state: StateFlow<LanServerState> = _state.asStateFlow()
@@ -58,10 +60,10 @@ class LanPhoneLink(
      */
     private val pendingOffers = LinkedHashMap<String, Pair<File, String>>()
 
-    override fun start(purpose: PhonePurpose, context: app.thebox.core.setup.lan.PhoneContext?) {
+    override fun start(purpose: PhonePurpose, context: PhoneContext?) {
         // D-B3: offers made before this start survive the stop of the previous session and go to the new one.
         val carried = synchronized(lock) { LinkedHashMap(pendingOffers).also { pendingOffers.clear() } }
-        stop()
+        stopNow()
         synchronized(lock) {
             this.purpose = purpose
             received = false
@@ -91,7 +93,12 @@ class LanPhoneLink(
             val hostPort = "$address:${srv.port}"
             spoolDir.mkdirs()
             // D-L4: a submission nobody collects is refused (503) instead of being dropped after a 202.
-            val a = PhoneApi(s, purpose, hostPort, assets, spoolDir, freeBytes, onSubmission = ::submitted, canAccept = { _submissions.subscriptionCount.value > 0 })
+            // WP-S6 (§7.4): one session = one browse context; a new context is a new start (new server, new code).
+            val a = PhoneApi(
+                s, purpose, hostPort, assets, spoolDir, freeBytes, onSubmission = ::submitted,
+                canAccept = { _submissions.subscriptionCount.value > 0 },
+                folderContext = if (purpose == PhonePurpose.NETWORK_FOLDER) context else null,
+            )
             for ((name, offer) in carried) a.offerDownload(name, offer.first, offer.second)
             handler = a
             server = srv
@@ -109,7 +116,17 @@ class LanPhoneLink(
         publish()
     }
 
+    /**
+     * WP-S6 (§7.4): once a NETWORK_FOLDER sign-in succeeded (or failed for the last time) the TV leaves this screen at
+     * once, but the phone should still read the result: the server then stays up until the grace that [reportStatus]
+     * scheduled ends ([LanLimits.DONE_GRACE_MS]). It accepts no submission in that time (410).
+     */
     override fun stop() {
+        val linger = synchronized(lock) { server != null && purpose == PhonePurpose.NETWORK_FOLDER && api?.folderFinished == true }
+        if (!linger) stopNow()
+    }
+
+    private fun stopNow() {
         val srv: LanHttpServerImpl?
         synchronized(lock) {
             srv = server
@@ -139,12 +156,41 @@ class LanPhoneLink(
 
     override fun reportStatus(text: String, done: Boolean) {
         val a = api ?: return
+        if (purpose == PhonePurpose.NETWORK_FOLDER) {
+            reportSignIn(a, text, done)
+            return
+        }
         a.reportStatus(text, done)
         if (done && purpose == PhonePurpose.SETUP) {
             val s = session
             scope.launch {
                 delay(LanLimits.DONE_GRACE_MS)
-                if (session === s) stop()
+                if (session === s) stopNow()
+            }
+        }
+    }
+
+    /**
+     * WP-S6 (§7.4): for NETWORK_FOLDER, [reportStatus] is the sign-in result. Success ends the session after the grace
+     * (one shot); a failure lets the phone send again, up to [LanLimits.PAIR_MAX_WRONG], after which the session ends as
+     * [LanFailure.TOO_MANY_WRONG_CODES] with [LanServerState.pairedFrom] kept (which tells it from wrong pairing codes).
+     */
+    private fun reportSignIn(a: PhoneApi, text: String, done: Boolean) {
+        if (a.folderFinished) return
+        a.reportStatus(text, done)
+        val s = session ?: return
+        when {
+            a.folderSignedIn -> scope.launch {
+                delay(doneGraceMs)
+                if (session === s) stopNow()
+            }
+            a.folderExhausted -> scope.launch {
+                delay(doneGraceMs)
+                if (session === s) s.end(LanFailure.TOO_MANY_WRONG_CODES)
+            }
+            else -> {
+                received = false // back to "connected": the phone may send again
+                publish()
             }
         }
     }
@@ -163,7 +209,8 @@ class LanPhoneLink(
         }
         srv?.stop()
         spoolDir.listFiles()?.forEach { it.delete() }
-        _state.value = LanServerState(ServerPhase.FAILED, failure = failure)
+        // WP-S6: pairedFrom stays, so a NETWORK_FOLDER page can say "too many failed sign-ins" (PhoneScreenModel).
+        _state.value = LanServerState(ServerPhase.FAILED, pairedFrom = s.pairedFrom, failure = failure)
     }
 
     private fun publish() {

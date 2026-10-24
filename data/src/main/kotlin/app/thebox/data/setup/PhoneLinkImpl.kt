@@ -60,7 +60,8 @@ class PhoneLinkImpl @Inject constructor(
     override val submissions: Flow<PhoneSubmission> get() = link.submissions
     /** Address lookup and bind happen off main, in call order (start/stop on one serial lane). */
     override fun start(purpose: PhonePurpose, context: app.thebox.core.setup.lan.PhoneContext?) {
-        scope.launch(lane) { link.start(purpose) }
+        // WP-S6 (docs/design/m6-storage-locations.md §7.4): the NETWORK_FOLDER context (never a credential) goes with it.
+        scope.launch(lane) { link.start(purpose, context) }
     }
     override fun stop() {
         scope.launch(lane) { link.stop() }
