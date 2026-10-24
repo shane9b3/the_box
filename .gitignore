@@ -38,3 +38,6 @@ ffmpeg/libs/*.aar
 
 # Claude Code worktrees and local state
 .claude/worktrees/
+
+# Local SMB test server state (tools/smbtest)
+tools/smbtest/work/
