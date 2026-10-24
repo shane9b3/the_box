@@ -265,7 +265,7 @@ class SettingsBackLadderTest {
         w.machine.dispatch(SettingsEvent.Page(w.page(SettingsRoute.FindComputers))); w.pump()
         w.focus(RowId("storage.find.pc.192.168.1.20")); w.act(BoxAction.SELECT)
         assertTrue(w.ui.route is SettingsRoute.ComputerShares)
-        w.focus(RowId("storage.share.TV")); w.act(BoxAction.SELECT)
+        w.focus(RowId("storage.share.item.TV")); w.act(BoxAction.SELECT)
         assertTrue(w.ui.route is SettingsRoute.NetworkFolder)
         assertTrue(w.act(BoxAction.BACK))
         assertEquals(SettingsRoute.SaveLocation(), w.ui.route)

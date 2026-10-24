@@ -313,8 +313,8 @@ class SettingsReachabilityTest {
             )
             w.open(SettingsRoute.FindComputers)
             w.focus(RowId("storage.find.pc.192.168.1.20")); w.act(BoxAction.SELECT)
-            w.focus(RowId("storage.share.TV")); w.act(BoxAction.SELECT)
-            repeat(depth) { w.focus(RowId("storage.folder.d")); w.act(BoxAction.SELECT) }
+            w.focus(RowId("storage.share.item.TV")); w.act(BoxAction.SELECT)
+            repeat(depth) { w.focus(RowId("storage.folder.item.d")); w.act(BoxAction.SELECT) }
             val before = w.ui.stack.size
             var backs = 0
             while (backs < 12) {

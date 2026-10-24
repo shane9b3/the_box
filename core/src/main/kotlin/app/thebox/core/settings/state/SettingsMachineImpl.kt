@@ -256,6 +256,11 @@ class SettingsMachineImpl(
 
     override var leftHandler: ((SettingsRoute) -> Boolean)? = null
 
+    // U-S8 / U-S2 (save-location review 2026-10-24): the page source's → and its key observer.
+    override var rightHandler: ((SettingsRoute, SettingsRow) -> Boolean)? = null
+
+    override var keyObserver: ((SettingsRoute) -> Unit)? = null
+
     override fun replace(route: SettingsRoute) {
         closeOverlays()
         val old = currentRoute()
@@ -404,6 +409,7 @@ class SettingsMachineImpl(
     private fun pageKey(act: GuideEvent.Act): Boolean {
         val page = displayedPage()
         val row = page?.let { rowAt(it, cursor) }
+        keyObserver?.invoke(currentRoute()) // U-S2: Find computers stops asking for focus once a key was pressed
         // (M5 integration) Welcome's cards are its Link rows; the footer note (an Info row) is not a card. ←/→ (and ↑/↓)
         // move between the cards only: the device pass left the focus on the note, with no card highlighted.
         if (currentRoute() == SettingsRoute.FirstRun && page != null && act.action in WELCOME_MOVES) {
@@ -426,6 +432,7 @@ class SettingsMachineImpl(
             BoxAction.LEFT, BoxAction.RIGHT -> if (currentRoute() == SettingsRoute.FirstRun) {
                 moveCursor(cursor + if (act.action == BoxAction.RIGHT) 1 else -1)
             } else if (act.action == BoxAction.LEFT) popPage(fromBack = false)
+            else if (row != null && row.enabled && rightHandler?.invoke(currentRoute(), row) == true) Unit // U-S8
             else if (row != null && row.enabled) when (val k = row.kind) {
                 is RowKind.Link -> openLink(row, k)
                 is RowKind.Item -> k.route?.let { r -> pushRoute(r) }

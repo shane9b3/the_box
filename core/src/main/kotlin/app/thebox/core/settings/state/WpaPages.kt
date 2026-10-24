@@ -340,6 +340,9 @@ class WpaPages(
         val length = timeshiftRows(p, place).first { it.id == PauseRewindRows.TIMESHIFT }.value.orEmpty()
         val value = when {
             p.timeshift == TimeshiftLength.OFF || place.label.isBlank() -> length
+            // U-N2: a sign-in is not "offline"; the value says what is needed.
+            place.offlineName != null && place.problem == app.thebox.core.storage.LocationState.SIGN_IN_NEEDED ->
+                StorageMarks.warn(t(SettingsText.PB_PAUSE_REWIND_VALUE_SIGN_IN, length, place.offlineName))
             place.offlineName != null -> StorageMarks.warn(t(SettingsText.PB_PAUSE_REWIND_VALUE_FALLBACK, length, place.offlineName))
             else -> t(SettingsText.PB_PAUSE_REWIND_VALUE, length, place.label)
         }

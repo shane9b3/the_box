@@ -158,6 +158,8 @@
     <string name="settings_pb_pause_rewind_desc">Pause live TV and rewind. Choose how long and where it\'s saved.</string>
     <string name="settings_pb_pause_rewind_value">%1$s · %2$s</string>
     <string name="settings_pb_pause_rewind_value_fallback">%1$s · This device (%2$s offline)</string>
+    <!-- U-N2 (save-location review 2026-10-24) -->
+    <string name="settings_pb_pause_rewind_value_sign_in">%1$s · This device (sign in to %2$s)</string>
     <string name="settings_ts_hours_min">%1$d h %2$d min</string>
     <string name="settings_ts_up_to_on_drive">Up to %1$s on this drive</string>
     <string name="settings_ts_auto_limited_usb">Auto (%1$s: USB drive is limited)</string>

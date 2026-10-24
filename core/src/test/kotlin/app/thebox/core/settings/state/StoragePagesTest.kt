@@ -377,7 +377,7 @@ class StoragePagesTest {
         w.open(SettingsRoute.FindComputers)
         w.press(RowId("storage.find.pc.$computer"))
         val shares = assertIs<SettingsRoute.ComputerShares>(w.ui.route)
-        w.press(RowId("storage.share.TV"))
+        w.press(RowId("storage.share.item.TV"))
         assertIs<SettingsRoute.NetworkFolder>(w.ui.route)
         return shares.browse
     }
@@ -390,30 +390,32 @@ class StoragePagesTest {
         walkToFolder(w)
         assertEquals("\\\\NAS\\TV", w.ui.page!!.title)
         assertEquals(
-            listOf("storage.folder.use", "storage.folder.Recordings", "storage.folder.Photos"),
+            listOf("storage.folder.use", "storage.folder.item.Recordings", "storage.folder.item.Photos"),
             w.rows().map { it.id.key }, "no Up row at the share root",
         )
         // Into a folder pushes nothing: the same route, the path changes.
         val route = w.ui.route
         val depth = w.ui.stack.size
-        w.press(RowId("storage.folder.Recordings"))
+        w.press(RowId("storage.folder.item.Recordings"))
         assertEquals(route, w.ui.route)
         assertEquals(depth, w.ui.stack.size)
         assertEquals("\\\\NAS\\TV\\Recordings", w.ui.page!!.subtitle)
-        assertEquals(listOf("storage.folder.use", "storage.folder.up", "storage.folder.Rewind"), w.rows().map { it.id.key })
-        w.press(RowId("storage.folder.Rewind"))
+        assertEquals(listOf("storage.folder.use", "storage.folder.up", "storage.folder.item.Rewind"), w.rows().map { it.id.key })
+        w.press(RowId("storage.folder.item.Rewind"))
         assertEquals("\\\\NAS\\TV\\Recordings\\Rewind", w.row(StoragePages.ROW_F_USE).value)
         // Up one folder.
         w.press(StoragePages.ROW_F_UP)
         assertEquals("\\\\NAS\\TV\\Recordings", w.ui.page!!.subtitle)
-        w.press(RowId("storage.folder.Rewind"))
+        w.press(RowId("storage.folder.item.Rewind"))
         // Use this folder: the Test runs and ends GOOD, with "Use this folder" focused.
         w.press(StoragePages.ROW_F_USE)
         assertIs<SettingsRoute.LocationTest>(w.ui.route)
         assertEquals(StoragePages.ROW_T_USE, w.focusedRow()?.id)
         val verdict = w.row(StoragePages.ROW_T_VERDICT)
         assertEquals("STATUS_GOOD_4K", verdict.label)
-        assertEquals("VERDICT_DETAILS(10.5,4,WIFI)", verdict.value)
+        // U-S6: the details are the row's last line (the value column cut the next step).
+        assertNull(verdict.value)
+        assertEquals(listOf("VERDICT_STEP_GOOD_4K(SIZE_TB(1.0),NAS)", "VERDICT_DETAILS(10.5,4,WIFI)"), (verdict.kind as RowKind.Info).lines)
         assertEquals(Tone.GOOD, (verdict.kind as RowKind.Info).tone)
         w.act(BoxAction.SELECT)
         val saved = w.locations.status.value.single().location
@@ -439,7 +441,7 @@ class StoragePagesTest {
         val w = world()
         w.folders.foldersAnswer = { _, share, path -> FolderListing(share, path, if (path.isEmpty()) listOf("A") else emptyList()) }
         walkToFolder(w)
-        w.press(RowId("storage.folder.A"))
+        w.press(RowId("storage.folder.item.A"))
         assertNotNull(w.rows().firstOrNull { it.id == StoragePages.ROW_F_UP }, "the Up row is the in-page way up")
         assertEquals("FOLDER_NONE_BELOW", (w.row(StoragePages.ROW_F_STATUS).label))
         // (Save-location integration, S4-Q2) ← = up one folder in place (§7.6); at the share root ← pops one page.
@@ -461,7 +463,7 @@ class StoragePagesTest {
         val w = world()
         w.folders.foldersAnswer = { _, share, path -> FolderListing(share, path, if (path.split('/').size < 8) listOf("d") else emptyList()) }
         walkToFolder(w)
-        repeat(7) { w.press(RowId("storage.folder.d")) }
+        repeat(7) { w.press(RowId("storage.folder.item.d")) }
         assertEquals("d/d/d/d/d/d/d", (w.storage.build(w.ui.route, PageContext(false, 0L)).subtitle?.let { it.removePrefix("\\\\NAS\\TV\\").replace('\\', '/') }))
         var backs = 0
         while (w.ui.route != SettingsRoute.SaveLocation() && backs < 12) { w.act(BoxAction.BACK); backs++ }
@@ -547,6 +549,7 @@ class StoragePagesTest {
         w.open(SettingsRoute.FindComputers)
         w.press(RowId("storage.find.pc.192.168.1.20"))
         assertEquals("SIGN_IN_NO_KEYBOARD", w.row(StoragePages.ROW_SI_NOKEYS).label)
+        assertEquals(listOf("SIGN_IN_NO_KEYBOARD_STEP"), (w.row(StoragePages.ROW_SI_NOKEYS).kind as RowKind.Info).lines) // U-S6
         assertEquals(StoragePages.ROW_SI_PHONE, w.focusedRow()?.id)
         assertEquals("SIGN_IN_PHONE", w.row(StoragePages.ROW_SI_PHONE).label)
         assertEquals("SIGN_IN_PHONE_DESC", w.row(StoragePages.ROW_SI_PHONE).description)
@@ -575,7 +578,7 @@ class StoragePagesTest {
         w.open(SettingsRoute.FindComputers)
         w.press(RowId("storage.find.pc.192.168.1.20"))
         assertEquals(
-            listOf("storage.share.TV", "storage.share.Music", "storage.shares.type", "storage.shares.signin"),
+            listOf("storage.share.item.TV", "storage.share.item.Music", "storage.shares.type", "storage.shares.signin"),
             w.rows().map { it.id.key },
         )
         assertEquals("SIGN_IN", w.row(StoragePages.ROW_S_SIGNIN).label, "signed in as a guest: Sign in")
@@ -602,7 +605,12 @@ class StoragePagesTest {
         assertEquals("TV", r.share)
         assertEquals("\\\\NAS\\TV\\Rewind", w.row(StoragePages.ROW_F_USE).value)
         assertEquals(StoragePages.ROW_F_USE, w.focusedRow()?.id)
-        assertEquals(listOf(SettingsRoute.FindComputers), w.ui.stack.takeLast(1), "the share list was replaced")
+        // U-N6: the shares page sits under the typed folder, so ← at the share root goes to the shares (§7.6).
+        assertEquals(listOf(SettingsRoute.FindComputers, SettingsRoute.ComputerShares(r.browse)), w.ui.stack.takeLast(2))
+        w.act(BoxAction.LEFT) // up to the share root, in place
+        w.refresh()
+        w.act(BoxAction.LEFT)
+        assertEquals(SettingsRoute.ComputerShares(r.browse), w.ui.route)
     }
 
     @Test fun aHostOnlyLandsOnTheShares() {
@@ -625,7 +633,9 @@ class StoragePagesTest {
         w.type(StoragePages.ROW_ENTER, "nas/TV/Recordings/Rewind")
         assertIs<SettingsRoute.NetworkFolder>(w.ui.route)
         assertEquals("\\\\nas\\TV\\Recordings", w.row(StoragePages.ROW_F_USE).value)
-        assertEquals("FOLDER_MISSING(Rewind,\\\\nas\\TV\\Recordings)", w.row(StoragePages.ROW_F_NOTE).label)
+        // U-S6: a short reason label (the path is the subtitle) and the next step as its line.
+        assertEquals("FOLDER_MISSING(Rewind)", w.row(StoragePages.ROW_F_NOTE).label)
+        assertEquals(listOf("FOLDER_MISSING_STEP"), (w.row(StoragePages.ROW_F_NOTE).kind as RowKind.Info).lines)
         assertEquals(Tone.WARN, (w.row(StoragePages.ROW_F_NOTE).kind as RowKind.Info).tone)
     }
 
@@ -645,6 +655,7 @@ class StoragePagesTest {
         assertEquals(StoragePages.ROW_T_CHOOSE, w.focusedRow()?.id)
         assertEquals("STATUS_SLOW", w.row(StoragePages.ROW_T_VERDICT).label)
         assertEquals("TEST_WAKE_NOTE(9)", w.row(StoragePages.ROW_T_WAKE).label)
+        assertEquals(listOf("TEST_WAKE_NOTE_STEP"), (w.row(StoragePages.ROW_T_WAKE).kind as RowKind.Info).lines) // U-S6
         assertEquals("TEST_USE_ANYWAY", w.row(StoragePages.ROW_T_ANYWAY).label)
         w.press(StoragePages.ROW_T_ANYWAY)
         assertEquals(SettingsRoute.SaveLocation(), w.ui.route)

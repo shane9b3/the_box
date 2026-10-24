@@ -62,7 +62,8 @@ abstract class SettingsBindingsModule {
         @Provides @Singleton fun storagePages(
             store: SettingsStore, texts: SettingsTexts, storageTexts: StorageTexts, wpa: WpaPages, wpaEnv: WpaPageEnv, places: TimeshiftPlaceSource,
             locations: StorageLocations, folders: NetworkFolders, volumes: VolumeCatalog, phone: PhoneLink, env: StoragePageEnv,
-        ): StoragePages = StoragePages(store, texts, storageTexts, wpa, wpaEnv, places, locations, folders, volumes, phone, env)
+            toastGate: FallbackToastGate,
+        ): StoragePages = StoragePages(store, texts, storageTexts, wpa, wpaEnv, places, locations, folders, volumes, phone, env, toastGate = toastGate) // U-S9
 
         @Provides @IntoSet fun storagePagesSource(pages: StoragePages): SettingsPageSource = pages
 

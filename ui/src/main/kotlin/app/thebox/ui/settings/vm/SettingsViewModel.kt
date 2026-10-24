@@ -87,6 +87,9 @@ class SettingsViewModel internal constructor(
         // BACK asks the page's source first (WP-B's import page confirms before it is left, §3.4.5).
         (machine as? SettingsShellLink)?.backHandler = { r -> ordered.firstOrNull { it.handles(r) }?.onBack(r) == true }
         (machine as? SettingsShellLink)?.leftHandler = { r -> ordered.firstOrNull { it.handles(r) }?.onLeft(r) == true }
+        // U-S8 / U-S2 (save-location review 2026-10-24): → on a folder opens it; Find computers hears the keys.
+        (machine as? SettingsShellLink)?.rightHandler = { r, row -> ordered.firstOrNull { it.handles(r) }?.onRight(r, row) == true }
+        (machine as? SettingsShellLink)?.keyObserver = { r -> ordered.firstOrNull { it.handles(r) }?.keyPressed(r) }
         // Routes that leave the open path (popped, replaced, Settings closed) let their source stop observing.
         s.launch(main) {
             var live = emptySet<app.thebox.core.settings.SettingsRoute>()

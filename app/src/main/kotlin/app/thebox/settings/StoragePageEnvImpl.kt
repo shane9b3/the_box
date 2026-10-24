@@ -118,6 +118,10 @@ class ResourceStorageTexts(private val res: Resources) : StorageTexts {
         StorageText.SHARE_TYPE_NAME -> R.string.storage_share_type_name
         StorageText.SHARE_TYPE_NAME_DESC -> R.string.storage_share_type_name_desc
         StorageText.SHARE_NOT_FOUND -> R.string.storage_share_not_found
+        StorageText.SHARE_NOT_FOUND_STEP -> R.string.storage_share_not_found_step
+        StorageText.SHARE_LIST_FAILED -> R.string.storage_share_list_failed
+        StorageText.SHARE_LIST_FAILED_STEP -> R.string.storage_share_list_failed_step
+        StorageText.SHARES_LIST_FAILED_STEP -> R.string.storage_shares_list_failed_step
         StorageText.SIGN_IN -> R.string.storage_sign_in
         StorageText.SIGN_IN_AS_SOMEONE -> R.string.storage_sign_in_as_someone
         StorageText.TRY_AGAIN -> R.string.storage_try_again
@@ -136,6 +140,7 @@ class ResourceStorageTexts(private val res: Resources) : StorageTexts {
         StorageText.SIGN_IN_INFO_TITLE -> R.string.storage_sign_in_info_title
         StorageText.SIGN_IN_INFO -> R.string.storage_sign_in_info
         StorageText.SIGN_IN_NO_KEYBOARD -> R.string.storage_sign_in_no_keyboard
+        StorageText.SIGN_IN_NO_KEYBOARD_STEP -> R.string.storage_sign_in_no_keyboard_step
         StorageText.NOT_SET -> R.string.storage_not_set
         StorageText.PHONE_SIGNED_IN -> R.string.storage_phone_signed_in
         StorageText.PHONE_REFUSED -> R.string.storage_phone_refused
@@ -147,6 +152,7 @@ class ResourceStorageTexts(private val res: Resources) : StorageTexts {
         StorageText.FOLDER_LOADING -> R.string.storage_folder_loading
         StorageText.FOLDER_TRUNCATED -> R.string.storage_folder_truncated
         StorageText.FOLDER_MISSING -> R.string.storage_folder_missing
+        StorageText.FOLDER_MISSING_STEP -> R.string.storage_folder_missing_step
         StorageText.FOLDER_NONE_BELOW -> R.string.storage_folder_none_below
         StorageText.FOLDER_SUBTITLE_ROOT -> R.string.storage_folder_subtitle_root
         StorageText.TEST_TITLE -> R.string.storage_test_title
@@ -165,6 +171,7 @@ class ResourceStorageTexts(private val res: Resources) : StorageTexts {
         StorageText.VERDICT_STEP_TOO_SLOW -> R.string.storage_verdict_step_too_slow
         StorageText.VERDICT_DETAILS -> R.string.storage_verdict_details
         StorageText.TEST_WAKE_NOTE -> R.string.storage_test_wake_note
+        StorageText.TEST_WAKE_NOTE_STEP -> R.string.storage_test_wake_note_step
         StorageText.TEST_SMALL_POOL_NOTE -> R.string.storage_test_small_pool_note
         StorageText.TEST_USE_THIS -> R.string.storage_test_use_this
         StorageText.TEST_USE_FOR_REWIND -> R.string.storage_test_use_for_rewind
@@ -196,7 +203,5 @@ class ResourceStorageTexts(private val res: Resources) : StorageTexts {
         StorageText.ERR_DATA_STEP -> R.string.storage_err_data_step
         StorageText.ERR_FULL -> R.string.storage_err_full
         StorageText.ERR_FULL_STEP -> R.string.storage_err_full_step
-        StorageText.ERR_GENERIC -> R.string.storage_err_generic
-        StorageText.ERR_GENERIC_STEP -> R.string.storage_err_generic_step
     }
 }
