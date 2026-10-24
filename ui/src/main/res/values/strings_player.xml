@@ -153,9 +153,9 @@
     <string name="player_step_hls_m3u">It streams as HLS; ask your provider for TS links.</string>
     <string name="player_step_format">Its stream isn\'t TS, the format The Box can save; ask your provider for TS links.</string>
     <string name="player_reason_rewind_off">Rewind is turned off, so Play returns to live.</string>
-    <string name="player_step_rewind_off">To keep your place: Settings → Playback → Pause and rewind.</string>
+    <string name="player_step_rewind_off">To keep your place: Settings → Playback → Pause and rewind → Rewind length.</string>
     <string name="player_reason_no_space">Not enough free storage to save this channel (%1$s free), so Play returns to live.</string>
-    <string name="player_step_no_space">Free up space or choose a shorter rewind in Settings → Playback.</string>
+    <string name="player_step_no_space">Free up space, choose a shorter rewind in Settings → Playback → Pause and rewind → Rewind length, or save to a USB drive or network folder there.</string>
     <string name="player_reason_storage">Saving for rewind failed on this device\'s storage, so Play returns to live.</string>
     <string name="player_step_storage">Change channel and back to try again.</string>
     <string name="player_toast_back_to_live_unbuffered">Back to live: this channel can\'t be rewound, so the paused part was skipped.</string>
@@ -166,8 +166,8 @@
     <string name="player_toast_gap_skipped_paused">Skipped %1$s that weren\'t saved while paused. Now at %2$s.</string>
     <string name="player_toast_gap_skipped_stream">Skipped %1$s the provider didn\'t send. Now at %2$s.</string>
     <string name="player_toast_rewind_stopped_storage">Rewind stopped: saving to storage failed. Live TV continues; change channel and back to try again.</string>
-    <string name="player_toast_rewind_stopped_slow">Rewind stopped: this device\'s storage can\'t keep up with this channel. Live TV continues. Try Pause only in Settings → Playback → Pause and rewind.</string>
-    <string name="player_toast_rewind_limited_today">Rewind is shorter for the rest of today to protect this device\'s storage. Pause still works. Change it in Settings → Show advanced settings, then Playback → Protect built-in storage.</string>
+    <string name="player_toast_rewind_stopped_slow">Rewind stopped: this device\'s storage can\'t keep up with this channel. Live TV continues. Try Pause only in Settings → Playback → Pause and rewind → Rewind length.</string>
+    <string name="player_toast_rewind_limited_today">Rewind is shorter for the rest of today to protect this device\'s storage. Pause still works. Change it in Settings → Show advanced settings, then Playback → Pause and rewind → Protect built-in storage.</string>
     <string name="player_toast_left_app_cleared">Back to live: leaving The Box clears what was paused. Stay in The Box to keep your place.</string>
     <string name="player_toast_zap_confirm">Changing channel ends your pause (%1$s saved). Press again to change.</string>
     <string name="player_toast_zap_confirm_number">Changing channel ends your pause (%1$s saved). Press OK to change.</string>

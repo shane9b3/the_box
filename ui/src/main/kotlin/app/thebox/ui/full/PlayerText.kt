@@ -63,8 +63,8 @@ object PlayerText {
             else res.getString(R.string.player_toast_rewind_start_window, args(arg, 0), args(arg, 1))
         PlayerToast.GAP_SKIPPED_PAUSED -> res.getString(R.string.player_toast_gap_skipped_paused, args(arg, 0), args(arg, 1)) // "12 min", "21:26"
         PlayerToast.GAP_SKIPPED_STREAM -> res.getString(R.string.player_toast_gap_skipped_stream, args(arg, 0), args(arg, 1)) // "40 s", "21:26"
-        PlayerToast.REWIND_STOPPED_STORAGE -> res.getString(R.string.player_toast_rewind_stopped_storage)
-        PlayerToast.REWIND_STOPPED_SLOW -> res.getString(R.string.player_toast_rewind_stopped_slow)
+        PlayerToast.REWIND_STOPPED_STORAGE -> storageStopped(res, arg) ?: res.getString(R.string.player_toast_rewind_stopped_storage)
+        PlayerToast.REWIND_STOPPED_SLOW -> storageSlow(res, arg) ?: res.getString(R.string.player_toast_rewind_stopped_slow)
         PlayerToast.REWIND_LIMITED_TODAY -> res.getString(R.string.player_toast_rewind_limited_today)
         PlayerToast.LEFT_APP_CLEARED -> res.getString(R.string.player_toast_left_app_cleared)
         PlayerToast.ZAP_CONFIRM -> res.getString(R.string.player_toast_zap_confirm, args(arg, 0)) // "20 min"
@@ -72,10 +72,93 @@ object PlayerText {
         PlayerToast.SAVING_STOPPED_CONNECTION -> res.getString(R.string.player_toast_saving_stopped_connection)
         PlayerToast.JUMPED_TO_LIVE_RESTART -> res.getString(R.string.player_toast_jumped_to_live_restart)
         PlayerToast.PAUSE_TIP -> res.getString(R.string.player_toast_pause_tip)
-        // (Storage locations commit 0, docs/design/m6-storage-locations.md §10) WP-S4 replaces these bodies with the §10
-        // texts (strings_storage.xml) and the arg decoding; the machine raises neither kind before WP-S4.
-        PlayerToast.SAVE_LOCATION_FALLBACK -> res.getString(R.string.player_toast_rewind_stopped_storage)
-        PlayerToast.PAUSE_RESUME_LOST_STORAGE -> res.getString(R.string.player_toast_rewind_stopped_storage)
+        // (Storage locations §10, WP-S4) The texts are strings_storage.xml's; [arg] is "<StorageKind>␟<second>␟<name>␟<jumped 1|>".
+        PlayerToast.SAVE_LOCATION_FALLBACK -> storageFallback(res, arg)
+        PlayerToast.PAUSE_RESUME_LOST_STORAGE -> storageArg(arg)?.let { a -> res.getString(R.string.storage_toast_resume_lost, capital(place(res, a))) }
+            ?: res.getString(R.string.player_toast_rewind_stopped_storage)
+    }
+
+    // ---- (Storage locations §10, WP-S4) the storage toasts of a USB drive or a network folder
+
+    /** The decoded `arg` of a storage toast: [second] is the StorageFailure (stops) or LocationFallback (fallback) name or "". */
+    data class StorageArg(val kind: app.thebox.core.storage.StorageKind, val second: String, val name: String, val jumped: Boolean)
+
+    /** `"<StorageKind>␟<second>␟<name>␟<jumped 1|>"`; null for a null arg, a blank one, or this device (today's text). */
+    fun storageArg(arg: String?): StorageArg? {
+        if (arg.isNullOrEmpty()) return null
+        val kind = app.thebox.core.storage.StorageKind.entries.firstOrNull { it.name == args(arg, 0) } ?: return null
+        if (kind == app.thebox.core.storage.StorageKind.INTERNAL) return null
+        return StorageArg(kind, args(arg, 1), args(arg, 2), args(arg, 3) == "1")
+    }
+
+    /** "NAS" (middle-ellipsised to `LABEL_MAX_CHARS`), or "the USB drive", or "the network folder" when unnamed. */
+    fun place(res: Resources, a: StorageArg): String = when {
+        a.kind == app.thebox.core.storage.StorageKind.VOLUME -> res.getString(R.string.storage_place_usb_drive)
+        a.name.isBlank() -> res.getString(R.string.storage_place_network_folder)
+        else -> ellipsize(a.name, app.thebox.core.storage.StorageConstants.LABEL_MAX_CHARS)
+    }
+
+    private fun capital(s: String): String = s.replaceFirstChar { it.uppercase() }
+
+    /** Middle ellipsis of a long location name. */
+    fun ellipsize(s: String, max: Int): String =
+        if (s.length <= max) s else s.take(max / 2 - 1) + "\u2026" + s.takeLast(max - max / 2)
+
+    private fun storageFallback(res: Resources, arg: String?): String {
+        val a = storageArg(arg) ?: return res.getString(R.string.player_toast_rewind_stopped_storage)
+        val usb = a.kind == app.thebox.core.storage.StorageKind.VOLUME
+        val p = place(res, a)
+        return when (app.thebox.core.storage.LocationFallback.entries.firstOrNull { it.name == a.second }) {
+            app.thebox.core.storage.LocationFallback.SIGN_IN_NEEDED -> res.getString(R.string.storage_toast_fb_sign_in, p)
+            app.thebox.core.storage.LocationFallback.UNSTABLE -> res.getString(R.string.storage_toast_fb_unstable, p)
+            app.thebox.core.storage.LocationFallback.NOT_CONNECTED -> res.getString(R.string.storage_toast_fb_not_connected)
+            app.thebox.core.storage.LocationFallback.NO_SPACE_THERE ->
+                res.getString(if (usb) R.string.storage_toast_fb_no_space_usb else R.string.storage_toast_fb_no_space, p)
+            // UNREACHABLE; NOT_READY_YET is never toasted (§5.1) and reads as the unreachable text if it ever is.
+            else -> res.getString(R.string.storage_toast_fb_unreachable, p)
+        }
+    }
+
+    /** REWIND_STOPPED_STORAGE of a remote/USB cycle (§10); null = this device's text. */
+    private fun storageStopped(res: Resources, arg: String?): String? {
+        val a = storageArg(arg) ?: return null
+        val p = place(res, a)
+        return when (app.thebox.core.storage.StorageFailure.entries.firstOrNull { it.name == a.second }) {
+            app.thebox.core.storage.StorageFailure.FULL -> res.getString(R.string.storage_toast_stopped_full, p)
+            app.thebox.core.storage.StorageFailure.ACCESS -> res.getString(R.string.storage_toast_stopped_access, p)
+            app.thebox.core.storage.StorageFailure.REMOVED ->
+                if (a.kind == app.thebox.core.storage.StorageKind.VOLUME) res.getString(R.string.storage_toast_stopped_usb_removed)
+                else res.getString(R.string.storage_toast_stopped_removed, p)
+            app.thebox.core.storage.StorageFailure.SLOW -> storageSlow(res, arg)
+            // UNREACHABLE, or no cause given: "back at live" when the viewer was behind live.
+            else -> if (a.jumped) res.getString(R.string.storage_toast_stopped_unreachable_jumped, capital(p))
+            else res.getString(R.string.storage_toast_stopped_unreachable, p)
+        }
+    }
+
+    /** REWIND_STOPPED_SLOW of a remote/USB cycle (§10); null = this device's text. */
+    private fun storageSlow(res: Resources, arg: String?): String? {
+        val a = storageArg(arg) ?: return null
+        return if (a.kind == app.thebox.core.storage.StorageKind.VOLUME) res.getString(R.string.storage_toast_slow_usb)
+        else res.getString(R.string.storage_toast_slow, place(res, a))
+    }
+
+    /**
+     * (§10 stats line, U-N4) The place suffix of "Rewind: 18:20 saved of 30:00 · 1.1 GB": "NAS 3.4 MB/s" while saving
+     * there, "this device (NAS offline)" or "(NAS connecting)" while the cycle falls back; null = this device (no suffix).
+     */
+    fun rewindPlaceStat(
+        res: Resources, kind: app.thebox.core.storage.StorageKind, name: String?, writeBps: Long?,
+        fallback: app.thebox.core.storage.LocationFallback?,
+    ): String? {
+        if (kind == app.thebox.core.storage.StorageKind.INTERNAL && fallback == null) return null
+        val shown = ellipsize(name?.takeIf { it.isNotBlank() } ?: res.getString(R.string.storage_place_usb), app.thebox.core.storage.StorageConstants.LABEL_MAX_CHARS)
+        return when {
+            fallback == app.thebox.core.storage.LocationFallback.NOT_READY_YET -> res.getString(R.string.storage_stat_place_connecting, shown)
+            fallback != null -> res.getString(R.string.storage_stat_place_fallback, shown)
+            writeBps != null && writeBps > 0 -> res.getString(R.string.storage_stat_place_rate, shown, String.format(Locale.getDefault(), "%.1f", writeBps / 1_000_000.0))
+            else -> shown
+        }
     }
 
     /** (M6 commit 0) Separates the values of a toast that has several ("12 min" + ARG_SEP + "21:26"). */
@@ -88,7 +171,9 @@ object PlayerText {
     fun noRewindReason(res: Resources, kind: PlayerToast, arg: String?): String = when (kind) {
         PlayerToast.PAUSE_NO_REWIND_OFF -> res.getString(R.string.player_reason_rewind_off)
         PlayerToast.PAUSE_NO_REWIND_SPACE -> res.getString(R.string.player_reason_no_space, args(arg, 0))
-        PlayerToast.PAUSE_NO_REWIND_STORAGE -> res.getString(R.string.player_reason_storage)
+        // (WP-S4, §10) A USB drive or a network folder names itself: "Saving for rewind failed on NAS, so Play returns to live."
+        PlayerToast.PAUSE_NO_REWIND_STORAGE -> storageArg(arg)?.let { a -> res.getString(R.string.storage_toast_pause_failed, place(res, a)) }
+            ?: res.getString(R.string.player_reason_storage)
         else -> res.getString(R.string.player_reason_cant_rewind)
     }
 

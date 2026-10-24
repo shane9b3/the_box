@@ -128,6 +128,17 @@ class ResourceSettingsTexts(private val resources: Resources) : SettingsTexts {
         SettingsText.HOLD_UNTIL_FULL -> R.string.settings_hold_until_full
         SettingsText.PB_TIMESHIFT_PROTECT -> R.string.settings_pb_timeshift_protect
         SettingsText.PB_TIMESHIFT_PROTECT_DESC -> R.string.settings_pb_timeshift_protect_desc
+        // (WP-S4, storage locations §9.1)
+        SettingsText.PB_TIMESHIFT_LENGTH -> R.string.settings_pb_timeshift_length
+        SettingsText.PB_TIMESHIFT_DESC_AT -> R.string.settings_pb_timeshift_desc_at
+        SettingsText.PB_TIMESHIFT_PROTECT_ELSEWHERE -> R.string.settings_pb_timeshift_protect_elsewhere
+        SettingsText.PB_PAUSE_REWIND_DESC -> R.string.settings_pb_pause_rewind_desc
+        SettingsText.PB_PAUSE_REWIND_VALUE -> R.string.settings_pb_pause_rewind_value
+        SettingsText.PB_PAUSE_REWIND_VALUE_FALLBACK -> R.string.settings_pb_pause_rewind_value_fallback
+        SettingsText.TS_HOURS_MIN -> R.string.settings_ts_hours_min
+        SettingsText.TS_UP_TO_ON_DRIVE -> R.string.settings_ts_up_to_on_drive
+        SettingsText.TS_AUTO_LIMITED_USB -> R.string.settings_ts_auto_limited_usb
+        SettingsText.ERR_HOST -> R.string.settings_err_host
         SettingsText.PB_AUDIO_LANGUAGE -> R.string.settings_pb_audio_language
         SettingsText.LANG_DEVICE -> R.string.settings_lang_device
         SettingsText.PB_SUBTITLES -> R.string.settings_pb_subtitles

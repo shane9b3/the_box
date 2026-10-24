@@ -27,6 +27,7 @@
     <string name="settings_ui_badge_default">DEFAULT</string>
     <!-- Storage locations commit 0 (docs/design/m6-storage-locations.md §9.2, §7.1) -->
     <string name="settings_ui_badge_in_use">IN USE</string>
+    <string name="settings_ui_searching">Searching</string>
     <string name="settings_ui_badge_saved">SAVED</string>
 
     <!-- Section labels (one per SectionId) -->
@@ -48,6 +49,7 @@
     <string name="settings_capture_timed_out">No key arrived. Press Select to try again.</string>
     <string name="settings_err_number_range">Enter a number from %1$d to %2$d.</string>
     <string name="settings_err_empty">This can\'t be empty. Type a value or choose Cancel.</string>
+    <string name="settings_err_host">Enter a computer name or address, like nas, 192.168.1.20 or \\\\NAS\\TV\\Rewind.</string>
     <string name="settings_err_url">Enter a full address starting with http:// or https://.</string>
     <string name="settings_err_https">Secure DNS needs an address starting with https://.</string>
     <string name="settings_err_pattern">This pattern is not valid. Check the brackets and special characters.</string>
@@ -135,7 +137,7 @@
     <string name="settings_launch_guide_nothing">Guide, nothing playing</string>
     <!-- M6 time-shift commit 0 (docs/design/m6-timeshift.md §12). The viewer never reads "buffer" (lead ruling 5). -->
     <string name="settings_pb_timeshift">Pause and rewind</string>
-    <string name="settings_pb_timeshift_desc">Saves the channel you\'re watching so you can pause and rewind up to %1$s. Uses up to %2$s of storage while you watch; cleared when you change channel.</string>
+    <string name="settings_pb_timeshift_desc">Saves the channel you\'re watching so you can pause and rewind up to %1$s. Uses up to %2$s on this device while you watch; cleared when you change channel.</string>
     <string name="settings_pb_timeshift_pause_only_desc">Pause only saves while you\'re paused, so after you continue you can rewind only to about where you paused.</string>
     <string name="settings_ts_auto">Auto (%1$s)</string>
     <string name="settings_ts_auto_limited">Auto (%1$s: storage is limited)</string>
@@ -149,6 +151,16 @@
     <string name="settings_hold_until_full">Until full</string>
     <string name="settings_pb_timeshift_protect">Protect built-in storage</string>
     <string name="settings_pb_timeshift_protect_desc">On small devices, The Box stops saving for rewind after about 3 hours of TV a day, to spare the storage chip. Pause still works.</string>
+    <!-- WP-S4 (docs/design/m6-storage-locations.md §9.1): Pause and rewind is a sub-page (Rewind length, Save to, two advanced rows). -->
+    <string name="settings_pb_timeshift_length">Rewind length</string>
+    <string name="settings_pb_timeshift_desc_at">Saves the channel you\'re watching so you can pause and rewind up to %1$s. Uses up to %2$s on %3$s while you watch; cleared when you change channel.</string>
+    <string name="settings_pb_timeshift_protect_elsewhere">Not used while saving to %1$s.</string>
+    <string name="settings_pb_pause_rewind_desc">Pause live TV and rewind. Choose how long and where it\'s saved.</string>
+    <string name="settings_pb_pause_rewind_value">%1$s · %2$s</string>
+    <string name="settings_pb_pause_rewind_value_fallback">%1$s · This device (%2$s offline)</string>
+    <string name="settings_ts_hours_min">%1$d h %2$d min</string>
+    <string name="settings_ts_up_to_on_drive">Up to %1$s on this drive</string>
+    <string name="settings_ts_auto_limited_usb">Auto (%1$s: USB drive is limited)</string>
     <string name="settings_pb_audio_language">Preferred audio language</string>
     <string name="settings_lang_device">Device language</string>
     <string name="settings_pb_subtitles">Subtitles</string>
