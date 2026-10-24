@@ -21,6 +21,7 @@ import dagger.hilt.android.EntryPointAccessors
 import kotlinx.coroutines.runBlocking
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -245,6 +246,12 @@ class SaveLocationTest : TimeShiftBufferBase() {
      * I-SL-3 (emulator form): 15 CH+ zaps with a blackholed folder chosen (last-known-good) against 15 with This device:
      * the tune never waits on the network (§5.1, A-B1). First-frame P50/P90 logged; on the emulator the blackholed P50
      * must stay within 25 % + 250 ms of This device's (the 5 % zap gate is a hardware gate).
+     *
+     * (Zap-1h investigation, 2026-10-24) The legs run with the panel's `reconnect_mode: reset`. With `continue` each
+     * channel resumes where its previous connection stopped, so whether the first IDR falls inside the 1-s connect burst
+     * (≈ 0.35 s to first frame) or after it (≈ 1.3 s: the RAP wait plus real-time bytes) was decided by the block's place
+     * in the sequence, which read as "1 h is slow". `reset` starts every connection on the clip's first IDR, so the legs
+     * compare the app, not the panel's phase; the 1-h leg is then held to the same bound as the folder.
      */
     @Test
     fun sl03_zapWithABlackholedFolderDoesNotWait() {
@@ -269,23 +276,29 @@ class SaveLocationTest : TimeShiftBufferBase() {
             log("I-SL-3 $label: first frame P50 ${percentile(out, 0.5)} P90 ${percentile(out, 0.9)} ms over ${out.size} zaps; ${keeperBrief()} buffer ${lb()?.let { "${it.storage}/${it.fallback}" }}")
             return out
         }
-        val internal = zaps("this device")
-        // The folder's Auto length is 1 h (§3.4) against 30 min here: the same length on this device separates the two.
-        applyTs("timeshift=60")
-        val internalHour = zaps("this device, 1 h")
-        applyTs("timeshift=auto")
-        log("I-SL-3 this device 30 min vs 1 h P50 ${percentile(internal, 0.5)} / ${percentile(internalHour, 0.5)} ms")
-        proxy("mode=blackhole")
-        chooseFolder(PROXY_PORT, "NAS3", lastKnownGood = true)
-        val black = zaps("blackholed folder")
-        dumpSmbThreads()
-        val p50 = percentile(black, 0.5)!! to percentile(internal, 0.5)!!
-        log("I-SL-3 P50 blackholed/this device ${p50.first}/${p50.second} ms")
-        // Integration 2026-10-24: on the emulator, first media is bimodal by 15-zap block (≈ 0.35 s or ≈ 1.3 s) whatever
-        // the target, seen with this device at 1 h too; the bound is against the slower of the two this-device legs.
-        val ref = maxOf(p50.second, percentile(internalHour, 0.5)!!)
-        assertTrue("I-SL-3 the tune does not wait on the folder: $p50 (this device 1 h ${percentile(internalHour, 0.5)})", p50.first <= ref * 1.25 + 250)
-        pass("I-SL-3", "P50 $p50")
+        pp.faults(JSONObject().put("reconnect_mode", "reset"))
+        try {
+            val internal = zaps("this device")
+            // The folder's Auto length is 1 h (§3.4) against 30 min here: the same length on this device separates the two.
+            applyTs("timeshift=60")
+            val internalHour = zaps("this device, 1 h")
+            applyTs("timeshift=auto")
+            log("I-SL-3 this device 30 min vs 1 h P50 ${percentile(internal, 0.5)} / ${percentile(internalHour, 0.5)} ms")
+            proxy("mode=blackhole")
+            chooseFolder(PROXY_PORT, "NAS3", lastKnownGood = true)
+            val black = zaps("blackholed folder")
+            dumpSmbThreads()
+            val p50 = percentile(black, 0.5)!! to percentile(internal, 0.5)!!
+            log("I-SL-3 P50 blackholed/this device ${p50.first}/${p50.second} ms")
+            // Zap-1h investigation: with the panel phase fixed (reset), first media is no longer bimodal by block; the ring
+            // length does not change the tune path (ZapLengthIndependenceTest), so 1 h is held to the same bound.
+            val hour = percentile(internalHour, 0.5)!!
+            assertTrue("I-SL-3 the tune does not wait on the folder: $p50 (this device 1 h $hour)", p50.first <= p50.second * 1.25 + 250)
+            assertTrue("I-SL-3 a 1-h ring zaps as fast as a 30-min one: ${p50.second} / $hour ms", hour <= p50.second * 1.25 + 250)
+            pass("I-SL-3", "P50 $p50, this device 1 h $hour")
+        } finally {
+            pp.faults(JSONObject().put("reconnect_mode", "continue"))
+        }
     }
 
     /**
