@@ -18,6 +18,8 @@ import app.thebox.core.settings.PhonePurpose
 import app.thebox.core.settings.tree.PhoneBackupFlow
 import app.thebox.core.setup.lan.LanAddressFinder
 import app.thebox.core.setup.lan.LanServerState
+import app.thebox.core.setup.lan.PhoneContext
+import app.thebox.core.setup.lan.PhoneContextProvider
 import app.thebox.core.setup.lan.PhoneLink
 import app.thebox.core.setup.lan.PhoneScreenEffect
 import app.thebox.core.setup.lan.PhoneScreenModel
@@ -42,11 +44,14 @@ class PhoneSetupViewModel @Inject constructor(
     private val phone: PhoneLink,
     private val backupFlow: PhoneBackupFlow,
     private val finder: LanAddressFinder,
+    /** WP-S6 (docs/design/m6-storage-locations.md §7.4): what a NETWORK_FOLDER page knows for its browse token. */
+    private val folderContext: PhoneContextProvider = PhoneContextProvider { null },
 ) : ViewModel() {
     val server: StateFlow<LanServerState> get() = phone.state
     private val _screen = MutableStateFlow(PhoneScreenState())
     val screen: StateFlow<PhoneScreenState> = _screen.asStateFlow()
     private var purpose: PhonePurpose? = null
+    private var browse: Long? = null
 
     /** Shown at (the isolation hint's clock) and whether a VPN is on, read once per opening. */
     var shownAtMs: Long = 0L
@@ -54,19 +59,30 @@ class PhoneSetupViewModel @Inject constructor(
     var vpn: Boolean = false
         private set
 
-    fun open(purpose: PhonePurpose, nowMs: Long) {
-        if (this.purpose == purpose) return
+    /**
+     * [browse] (WP-S6, §7.4): the `StoragePages` browse token of a NETWORK_FOLDER sign-in. The session is bound to it:
+     * the page shows that browse's [PhoneContext] (never a credential), and another token starts a new session.
+     */
+    fun open(purpose: PhonePurpose, nowMs: Long, browse: Long? = null) {
+        if (this.purpose == purpose && this.browse == browse) return
         this.purpose = purpose
+        this.browse = browse
         shownAtMs = nowMs
         vpn = runCatching { finder.vpnActive() }.getOrDefault(false)
         _screen.value = PhoneScreenState()
         backupFlow.attach(purpose)
-        phone.start(purpose)
+        val context = if (purpose == PhonePurpose.NETWORK_FOLDER && browse != null) {
+            runCatching { folderContext.context(browse) }.getOrNull()
+        } else {
+            null
+        }
+        phone.start(purpose, context)
     }
 
     fun close() {
         if (purpose == null) return
         purpose = null
+        browse = null
         backupFlow.detach()
         phone.stop()
     }
@@ -87,17 +103,24 @@ class PhoneSetupViewModel @Inject constructor(
  * a 1 s clock for the isolation hint. WP-A's settings screen places it for `SettingsRoute.PhoneSetup`.
  */
 @Composable
-fun PhoneSetupHost(vm: PhoneSetupViewModel, purpose: PhonePurpose, modifier: Modifier = Modifier, clock: () -> Long = System::currentTimeMillis) {
+fun PhoneSetupHost(
+    vm: PhoneSetupViewModel,
+    purpose: PhonePurpose,
+    modifier: Modifier = Modifier,
+    clock: () -> Long = System::currentTimeMillis,
+    /** WP-S6: `SettingsRoute.PhoneSetup.browse` (NETWORK_FOLDER); null for every other purpose. */
+    browse: Long? = null,
+) {
     val view: View = LocalView.current
-    DisposableEffect(vm, purpose) {
+    DisposableEffect(vm, purpose, browse) {
         view.keepScreenOn = true
         onDispose { view.keepScreenOn = false }
     }
     // U-S7 (code review 2026-10-16, Blocker): §3.5.2 lifetime: the LAN server runs only while the screen is shown and
     // the app is started. ON_STOP (Home, standby, HDMI off) or leaving the screen stops it; ON_START opens it again,
     // which shows a fresh pairing code (no socket stays bound on the LAN while the app is in the background).
-    LifecycleStartEffect(vm, purpose) {
-        vm.open(purpose, clock())
+    LifecycleStartEffect(vm, purpose, browse) {
+        vm.open(purpose, clock(), browse)
         onStopOrDispose { vm.close() }
     }
     var now by remember { mutableLongStateOf(clock()) }

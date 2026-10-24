@@ -5,7 +5,8 @@
     SETUP: [['xtream', 'Xtream'], ['m3u', 'M3U'], ['link', 'Paste a link'], ['restore', 'Restore']],
     RESTORE: [['restore', 'Restore']],
     BACKUP_DOWNLOAD: [['backup', 'Download backup']],
-    LOGS_DOWNLOAD: [['logs', 'Download logs']]
+    LOGS_DOWNLOAD: [['logs', 'Download logs']],
+    NETWORK_FOLDER: [['netfolder', 'Network folder']]
   };
   var MSG_ENDED = 'This session has ended. Open phone setup on the TV again.';
   var MSG_GENERIC = 'Something went wrong. Check that the TV still shows the setup screen, then try again.';
@@ -18,6 +19,12 @@
   var inFlight = false;
   var selected = null;
   var lastDownload = null;
+  // NETWORK_FOLDER (docs/design/m6-storage-locations.md §7.4): the final result stays on screen after the session ends.
+  var MSG_TOO_MANY = 'Too many failed sign-ins. Start again on the TV.';
+  var finalText = null;
+  var finalOk = false;
+  var folderWait = false;
+  var lastFailures = 0;
 
   function show(el, on) { el.classList.toggle('hidden', !on); }
 
@@ -38,20 +45,26 @@
     inFlight = on;
     var b = document.querySelectorAll('button.send');
     for (var i = 0; i < b.length; i++) b[i].disabled = on;
+    if (folderWait || finalText) $('n-send').disabled = true; // the TV is signing in, or the session is over
   }
 
   function endSession() {
     ended = true;
     if (timer) { clearTimeout(timer); timer = null; }
-    $('status').textContent = MSG_ENDED;
+    $('status').textContent = finalText || MSG_ENDED;
     show($('statusmsg'), false);
-    say(MSG_ENDED, 'err');
+    say(finalText || MSG_ENDED, finalOk ? 'ok' : 'err');
     setBusy(true);
   }
 
   // ---- state polling ----
   function renderState(s) {
     if (s.uploadMaxBytes > 0 && s.uploadMaxBytes !== maxBytes) { maxBytes = s.uploadMaxBytes; updateLimits(); }
+    if (s.purpose === 'NETWORK_FOLDER') {
+      if (purpose === null) { buildTabs(s.purpose); initFolder(s.folder); }
+      renderFolder(s);
+      return;
+    }
     var st = $('status'), sm = $('statusmsg'), text = s.message || '';
     if (s.tv === 'Checking') {
       st.textContent = 'The TV is checking…';
@@ -130,7 +143,7 @@
       tabs[i].classList.toggle('active', on);
       tabs[i].setAttribute('aria-selected', on ? 'true' : 'false');
     }
-    ['xtream', 'm3u', 'link', 'restore', 'backup', 'logs'].forEach(function (k) {
+    ['xtream', 'm3u', 'link', 'restore', 'backup', 'logs', 'netfolder'].forEach(function (k) {
       show($('p-' + k), k === key);
     });
     say('');
@@ -141,6 +154,7 @@
     if (r.status === 202) { say(okText || 'Sent. The TV is checking…', 'ok'); return true; }
     if (r.status === 401 || r.status === 403 || r.status === 410) endSession();
     else if (r.status === 400) say('The TV could not read that. Check the fields and try again.', 'err');
+    else if (r.status === 409 && purpose === 'NETWORK_FOLDER') say('The TV is still signing in. Wait for its answer.', 'err');
     else if (r.status === 409) say('The TV is not expecting this right now. Look at the TV.', 'err');
     else if (r.status === 413) say('That is too long.', 'err');
     else if (r.status === 507) say('The TV does not have enough free space for this file.', 'err');
@@ -232,6 +246,173 @@
   });
 
   $('b-link').addEventListener('click', function () { show($('b-saved'), true); });
+
+  // ---- network folder (docs/design/m6-storage-locations.md §7.4) ----
+  // splitFolder mirrors PhoneApi.splitFolder (Kotlin); PhoneApiNetworkFolderTest holds the shared vectors.
+  var HOST_OK = /^(?:[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?$/;
+  var PORT = /:([0-9]{1,5})$/;
+
+  function segments(s) {
+    return (s || '').split(/[\/\\]/).map(function (x) { return x.trim(); })
+      .filter(function (x) { return x !== '' && x !== '.'; });
+  }
+
+  function uncParts(s) {
+    var rest;
+    if (s.indexOf('\\\\') === 0 || s.indexOf('//') === 0) rest = s.substring(2);
+    else if (/^smb:\/\//i.test(s)) rest = s.substring(6);
+    else return null;
+    var p = segments(rest);
+    return p.length ? p : null;
+  }
+
+  function splitFolder(host, share, path) {
+    var h = (host || '').trim(), shareParts = [], u;
+    if ((u = uncParts(h))) { h = u[0]; shareParts = u.slice(1); }
+    var s = (share || '').trim(), us = uncParts(s);
+    if (us) { h = us[0]; shareParts = us.slice(1); } else if (s) shareParts = segments(s);
+    var sh = shareParts.length ? shareParts[0] : null;
+    var pathParts = shareParts.slice(1).concat(segments(path));
+    if (!h || h.length > 255 || !HOST_OK.test(h)) return null;
+    var port = PORT.exec(h);
+    if (port && !(+port[1] >= 1 && +port[1] <= 65535)) return null;
+    if (sh === null && pathParts.length) return null;
+    if (sh === '..' || pathParts.indexOf('..') >= 0) return null;
+    if (sh !== null && sh.length > 80) return null;
+    var p = pathParts.join('/');
+    if (p.length > 1024) return null;
+    return { host: h, share: sh, path: p || null };
+  }
+  // ---- end splitFolder ----
+
+  function initFolder(f) {
+    show($('f-netfolder'), true);
+    if (!f) return;
+    if (f.host) {
+      $('n-host').value = f.host;
+      $('n-host').readOnly = true;
+      show($('n-change'), true);
+    }
+    var list = $('n-share-list');
+    if (f.shares && f.shares.length) {
+      f.shares.forEach(function (name) {
+        var o = document.createElement('option');
+        o.value = name;
+        o.textContent = name;
+        list.appendChild(o);
+      });
+      var other = document.createElement('option');
+      other.value = '';
+      other.textContent = 'Another shared folder (type or paste it)';
+      list.appendChild(other);
+      list.value = f.shares.indexOf(f.share) >= 0 ? f.share : f.shares[0];
+      show(list, true);
+      show($('n-share'), false);
+    } else if (f.share) {
+      $('n-share').value = f.share;
+    }
+  }
+
+  function shareListShown() { return !$('n-share-list').classList.contains('hidden'); }
+
+  function shareValue() {
+    if (shareListShown() && $('n-share-list').value) return $('n-share-list').value;
+    return $('n-share').value;
+  }
+
+  function renderFolder(s) {
+    var st = $('status'), sm = $('statusmsg'), text = s.message || '', rec = s.received;
+    var recText = rec ? (rec.guest ? 'Received from your phone: as a guest.' : 'Received from your phone: user ' + rec.user + '.') : '';
+    if (s.ended === 'too_many_sign_ins' || s.tv === 'Ended') {
+      finalText = (text ? text + ' ' : '') + MSG_TOO_MANY;
+      st.textContent = MSG_TOO_MANY;
+      sm.textContent = text;
+      show(sm, !!text);
+      say(finalText, 'err');
+      setBusy(true);
+      return;
+    }
+    if (s.ended === 'signed_in' || s.tv === 'Done') {
+      finalText = text || 'Signed in. Choose the folder on the TV.';
+      finalOk = true;
+      st.textContent = finalText;
+      show(sm, false);
+      say(finalText, 'ok');
+      setBusy(true);
+      return;
+    }
+    folderWait = s.tv === 'Checking';
+    if (!inFlight) $('n-send').disabled = folderWait;
+    if (folderWait) {
+      st.textContent = 'The TV is signing in…';
+      sm.textContent = recText;
+      show(sm, !!recText);
+    } else if (s.tv === 'Retry') {
+      st.textContent = 'Not signed in yet. Check the details and send again.';
+      sm.textContent = recText;
+      show(sm, !!recText);
+      if (s.failures !== lastFailures) {
+        lastFailures = s.failures;
+        var left = (s.maxFailures || 0) - s.failures;
+        say(text + (left > 0 ? ' Tries left: ' + left + '.' : ''), 'err');
+        $('n-pass').focus();
+      }
+    } else {
+      st.textContent = 'Connected to your TV.';
+      sm.textContent = text;
+      show(sm, !!text);
+    }
+  }
+
+  bind('n-change', function () {
+    var h = $('n-host');
+    h.readOnly = false;
+    h.focus();
+    h.select();
+    show($('n-change'), false);
+    // The listed shared folders belong to the old computer.
+    show($('n-share-list'), false);
+    show($('n-share'), true);
+  });
+
+  $('n-share-list').addEventListener('change', function () {
+    var typed = !$('n-share-list').value;
+    show($('n-share'), typed);
+    if (typed) $('n-share').focus();
+  });
+
+  $('n-guest').addEventListener('change', function () {
+    var guest = $('n-guest').checked;
+    ['n-user', 'n-pass', 'n-domain'].forEach(function (id) { $(id).disabled = guest; });
+  });
+
+  $('n-form').addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (finalText) return;
+    if (folderWait) { say('The TV is still signing in. Wait for its answer.', 'err'); return; }
+    var host = $('n-host').value;
+    if (!host.trim() && !uncParts(shareValue().trim())) { say('Enter the computer\'s name or address.', 'err'); return; }
+    var f = splitFolder(host, shareValue(), $('n-path').value);
+    if (!f) {
+      say('Check the computer and the shared folder, for example nas and TV, or paste \\\\NAS\\TV\\Rewind.', 'err');
+      return;
+    }
+    var guest = $('n-guest').checked, user = val('n-user');
+    if (!guest && !user) { say('Enter the user name, or tick "This folder allows guests".', 'err'); return; }
+    var body = { host: f.host, share: f.share, path: f.path, guest: guest };
+    if (!guest) {
+      body.user = user;
+      body.domain = val('n-domain');
+      body.password = $('n-pass').value;
+    }
+    postJson('/api/network-folder', body, 'Sent. The TV is signing in…', function () {
+      // The TV has it now; the page keeps no copy.
+      $('n-pass').value = '';
+      folderWait = true;
+      $('n-send').disabled = true;
+    });
+    body.password = null;
+  });
 
   // Show/Hide toggles for password fields
   var shows = document.querySelectorAll('button.show');

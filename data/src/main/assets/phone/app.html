@@ -93,8 +93,36 @@
 </div>
 </section>
 
+<section id="p-netfolder" class="card hidden">
+<p>Sign in to a shared folder on a computer or NAS at home. The TV saves pause and rewind there.</p>
+<form id="n-form" action="/api/network-folder" method="post" novalidate>
+<label for="n-host">Computer (name or address)</label>
+<div class="row"><input id="n-host" type="text" placeholder="nas or 192.168.1.20" autocomplete="off" autocapitalize="none" spellcheck="false"><button type="button" id="n-change" class="secondary hidden">Change</button></div>
+<label for="n-share">Shared folder</label>
+<select id="n-share-list" class="hidden" aria-label="Shared folder"></select>
+<input id="n-share" type="text" placeholder="TV, or paste \\NAS\TV\Rewind" autocomplete="off" autocapitalize="none" spellcheck="false">
+<label for="n-path">Folder inside it (optional)</label>
+<input id="n-path" type="text" placeholder="Rewind" autocomplete="off" autocapitalize="none" spellcheck="false">
+<div id="n-login">
+<label for="n-user">User name</label>
+<input id="n-user" name="username" type="text" autocomplete="username" autocapitalize="none" spellcheck="false">
+<label for="n-pass">Password</label>
+<div class="row"><input id="n-pass" name="password" type="password" autocomplete="current-password" autocapitalize="none" spellcheck="false"><button type="button" class="secondary show" data-for="n-pass">Show</button></div>
+<p class="hint">On Windows, use the user name and password of an account on that PC. A separate local account for The Box is a safer choice than your main sign-in. On a Mac, use the Mac's user name and password.</p>
+<details class="more">
+<summary>More: Workgroup or domain</summary>
+<label for="n-domain">Workgroup or domain</label>
+<input id="n-domain" type="text" autocomplete="off" autocapitalize="none" spellcheck="false">
+<p class="hint">Leave empty unless you know you need it.</p>
+</details>
+</div>
+<label class="check"><input id="n-guest" type="checkbox"> This folder allows guests (no password)</label>
+<button type="submit" id="n-send" class="send">Send to TV</button>
+</form>
+</section>
+
 <div id="msg" class="msg hidden" role="status" aria-live="polite"></div>
 </main>
-<footer>This page is not encrypted (plain HTTP on your home network). Use it on your own Wi-Fi only.</footer>
+<footer>This page is not encrypted (plain HTTP on your home network). Use it on your own Wi-Fi only.<span id="f-netfolder" class="hidden"> Your password crosses your home Wi-Fi once, unencrypted, to the TV. The TV keeps it encrypted.</span></footer>
 </body>
 </html>

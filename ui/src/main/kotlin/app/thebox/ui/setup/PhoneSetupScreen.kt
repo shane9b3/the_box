@@ -40,6 +40,7 @@ const val PHONE_HINT_TAG = "phone_isolation_hint"
 const val PHONE_FOOTER_TAG = "phone_footer"
 const val PHONE_TYPE_ON_TV_TAG = "phone_type_on_tv"
 const val PHONE_CODE_TAG = "phone_code"
+const val PHONE_PLAIN_HTTP_TAG = "phone_plain_http"
 
 /** Everything the phone screen draws (docs/design/m5-setup-settings.md §3.5.1). */
 data class PhoneSetupUi(
@@ -67,10 +68,19 @@ fun PhoneSetupScreen(ui: PhoneSetupUi, modifier: Modifier = Modifier) {
     val typeOnTv = PhoneScreenModel.showTypeOnTv(hint, ui.vpn, ui.purpose)
     Box(modifier.fillMaxSize().background(DesignTokens.Colors.Canvas).testTag(PHONE_SCREEN_TAG)) {
         Line(stringResource(titleOf(ui.purpose)), GuideUi.sans(44, FontWeight.SemiBold), Modifier.offset(64.dp, 48.dp))
+        val folder = ui.purpose == PhonePurpose.NETWORK_FOLDER
+        if (folder) {
+            // WP-S6 (docs/design/m6-storage-locations.md §7.4): the plain-HTTP line below the title, on the TV too.
+            Line(
+                stringResource(R.string.storage_phone_plain_http), GuideUi.sans(22, color = GuideUi.Fg65),
+                Modifier.offset(64.dp, 124.dp).width(1792.dp).testTag(PHONE_PLAIN_HTTP_TAG), maxLines = 2,
+            )
+        }
         val failure = s.failure
         if (s.phase == ServerPhase.FAILED && failure != null) {
             Column(Modifier.offset(160.dp, 260.dp).width(1600.dp)) {
-                Line(stringResource(failureOf(failure)), GuideUi.sans(36, FontWeight.SemiBold, GuideUi.Warn), maxLines = 3)
+                val reason = if (PhoneScreenModel.tooManySignIns(s, ui.purpose)) R.string.storage_phone_fail_sign_ins else failureOf(failure)
+                Line(stringResource(reason), GuideUi.sans(36, FontWeight.SemiBold, GuideUi.Warn), maxLines = 3)
                 Spacer(Modifier.height(24.dp))
                 Line(stringResource(R.string.backup_phone_back_hint), GuideUi.sans(26, color = GuideUi.Fg60))
             }
@@ -103,7 +113,10 @@ fun PhoneSetupScreen(ui: PhoneSetupUi, modifier: Modifier = Modifier) {
                 Line(code, GuideUi.mono(64, FontWeight.Medium).copy(letterSpacing = 0.2.em), Modifier.testTag(PHONE_CODE_TAG))
                 if (s.wrongCodes >= LanLimits.PAIR_MAX_WRONG) Line(stringResource(R.string.backup_phone_new_code), GuideUi.sans(24, color = GuideUi.Warn))
                 Spacer(Modifier.height(28.dp))
-                Line(statusText(s), GuideUi.sans(26))
+                Line(statusText(s, ui.purpose), GuideUi.sans(26))
+                if (folder && s.phase == ServerPhase.PAIRED) {
+                    Line(stringResource(R.string.storage_phone_paired_hint), GuideUi.sans(22, color = GuideUi.Fg65), maxLines = 2)
+                }
                 if (ui.vpn) Line(stringResource(R.string.backup_phone_vpn), GuideUi.sans(24, color = GuideUi.Warn), maxLines = 2)
                 Spacer(Modifier.height(16.dp))
                 Line(stringResource(R.string.backup_phone_cant_scan), GuideUi.sans(22, color = GuideUi.Fg55))
@@ -132,9 +145,10 @@ fun PhoneSetupScreen(ui: PhoneSetupUi, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun statusText(s: LanServerState): String = when (s.phase) {
+private fun statusText(s: LanServerState, purpose: PhonePurpose): String = when (s.phase) {
     ServerPhase.PAIRED -> stringResource(R.string.backup_phone_connected, s.pairedFrom ?: "")
-    ServerPhase.RECEIVED -> stringResource(R.string.backup_phone_received)
+    ServerPhase.RECEIVED ->
+        stringResource(if (purpose == PhonePurpose.NETWORK_FOLDER) R.string.storage_phone_received else R.string.backup_phone_received)
     else -> stringResource(R.string.backup_phone_waiting)
 }
 
@@ -143,8 +157,7 @@ private fun titleOf(p: PhonePurpose): Int = when (p) {
     PhonePurpose.RESTORE -> R.string.backup_phone_title_restore
     PhonePurpose.BACKUP_DOWNLOAD -> R.string.backup_phone_title_backup
     PhonePurpose.LOGS_DOWNLOAD -> R.string.backup_phone_title_logs
-    // (Storage locations commit 0, §7.4) WP-S6 replaces it with "Add a network folder from your phone" (strings_storage_phone.xml).
-    PhonePurpose.NETWORK_FOLDER -> R.string.backup_phone_title_setup
+    PhonePurpose.NETWORK_FOLDER -> R.string.storage_phone_title // WP-S6, docs/design/m6-storage-locations.md §7.4
 }
 
 private fun failureOf(f: LanFailure): Int = when (f) {
