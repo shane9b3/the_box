@@ -1511,3 +1511,62 @@ Build, `:app`, `:ui`, docs
 1. **Deviation 5** changes Settings behaviour in commit 0 (the sub-page appears with today's three rows). The alternative was a red `SimpleRowCountTest` until WP-S4. Accept, or prefer the old layout plus a temporary test exception?
 2. **Deviation 9** edits two files no WP owns (`EffectDelegates`, `PlayerEffectsImpl`) to give WP-S4 a seam. Accept the seam, or assign those files to WP-S4?
 3. **`RemoteLink.post` (deviation 2) is the only change to §12.2's signatures.** Please confirm, since WP-S1 and the fake both implement it.
+
+---
+
+## Implementation record — WP-S3 (2026-10-24)
+
+In worktree `agent-a9f2f5ea0e4918560` (branch `worktree-agent-a9f2f5ea0e4918560`, fast-forwarded to main `502804f`), uncommitted (the lead commits). No emulator or device run: discovery cases are device-only (§16.3), so I-SL-15 is still open.
+
+**Files** (only WP-S3's list in §17, plus new test files):
+- `core/.../storage/discovery/NbnsCodec.kt`: the RFC 1002 node-status request and response.
+- `core/.../storage/discovery/DiscoveryMerge.kt`: `DiscoveryMerge`, `Sighting`, `SavedHosts`, `LanSubnet`, `Ipv4`.
+- `data/.../storage/discovery/ComputerFinderImpl.kt`: `ComputerFinder`, `ComputerFinderImpl`, `FinderEnvironment`, `AndroidFinderEnvironment`.
+- `data/.../storage/discovery/NsdFinder.kt`: `NsdApi`, `AndroidNsdApi`, `NsdFinder`.
+- `data/.../storage/discovery/Port445Sweep.kt`: `Port445Sweep`, `LanSockets`, `NetworkLanSockets`, and the close-on-cancel helper.
+- `data/.../storage/discovery/NameLookup.kt`: `NameLookup`, `NetworkNameLookup`.
+- Tests:
+  - `core/src/test/.../storage/discovery/NbnsCodecTest.kt` (22 tests);
+  - `DiscoveryMergeTest.kt` (13 tests in `DiscoveryMergeTest`, 5 in `LanSubnetTest`);
+  - `data/src/test/.../storage/discovery/ComputerFinderTest.kt` (28 tests in four classes: `NsdFinderQuirksTest`, `Port445SweepTest`, `ComputerFinderTest`, `NetworkNameLookupTest`).
+
+**How it works:**
+- **Lifetime.** `search()` is a cold `channelFlow`, conflated and run on IO. Collecting it takes the `MulticastLock` (application context, not reference-counted). The finders run for at most `DISCOVERY_TOTAL_MS`. `searching` turns false when the sweep ends; with no sweep, when the finders stop. A final state is emitted at the total time. The flow then **stays open, holding the lock, until the collector cancels** (lead ruling 3, A-S10: the lock covers the whole page). It never completes on its own. A NO_NETWORK state is emitted at once, and the lock is still held until the page closes.
+- **Sweep** (owner ruling 2):
+  - **Address and targets.** It starts from `LanAddressFinder.find()` (Wi-Fi/Ethernet, never VPN, RFC 1918) and runs only when `LanSubnet.of(own)` accepts the address. Targets are .1–.254 of that /24, minus our own address, capped at `SWEEP_MAX_HOSTS`. Each worker re-checks `host in subnet` before it connects. Addresses are literal (`InetAddress.getByAddress`), so no DNS is used.
+  - **Limits.** At most `SWEEP_PARALLEL` (32) connects at once, each with a `SWEEP_CONNECT_TIMEOUT_MS` (400) timeout. The worst case is about 3.2 s.
+  - **Sockets.** They come from the non-VPN `Network` that owns the address (`network.socketFactory`, `bindSocket`). If the VPN refuses the bypass, the socket is left unbound. Each connect is closed at once and no bytes are sent.
+  - **Stop.** A watcher coroutine on `Dispatchers.Unconfined` closes every pending socket from the cancelling thread. A cancel therefore ends a sweep blocked in `connect` in under 500 ms (tested with sockets that hang for 30 s).
+- **NSD:**
+  - **Listeners.** Each search creates new listeners. `stopServiceDiscovery` runs only after `onDiscoveryStarted`. A stop that comes first is applied when the late start arrives. A failed or refused start is never stopped.
+  - **Callback thread.** All callbacks are posted to a per-search `box-find` thread. That thread exits when idle and is never shut down, so a late `onDiscoveryStarted` still runs.
+  - **Resolves.** Below API 34 they run one at a time, SMB first, with at most 2 retries on `FAILURE_ALREADY_ACTIVE`. From API 34, `registerServiceInfoCallback` is used, and every callback is unregistered on stop.
+  - **Results.** Only IPv4 addresses are kept, and the NSD port is kept with them.
+- **Names.** These run only for computers NSD did not name, at most 8 at a time:
+  1. NBNS `NBSTAT *` unicast to UDP 137, accepted only from that address and only with our transaction id, within `NBNS_TIMEOUT_MS`. The socket is closed at once on cancel. The name is the first unique, non-conflicting `<00>` name.
+  2. Reverse DNS on a bounded pool (4 threads, queue of 32, then dropped) behind `REVERSE_DNS_TIMEOUT_MS`. A late answer is dropped, and an answer that only echoes the address counts as no name.
+- **Merge and order:** as §7.1 and U-S9.
+  - Computers are merged by IPv4 address. The name comes from NSD first, then NetBIOS, then reverse DNS. The port is 445 when seen, else the advertised one.
+  - The list is saved computers first, then named ones A–Z (case-insensitive, ties by address), then unnamed ones by numeric address.
+  - `saved` matches a stored location's host or `lastAddress`, as an address or as a name (`.local` and case ignored).
+- **Logs.** At INFO, only "start (lan=…, vpn=…)" and "done in N ms, K computers (nsd a, sweep b open of c)". No address or host list is logged at any level.
+
+**Gate:** `./gradlew :core:test :data:testDebugUnitTest :app:assembleDebug --rerun-tasks` is green: `:core` 3,504 tests, `:data` 368, and the APKs build.
+- The first Robolectric test in each JVM takes 20–30 s to start the sandbox. The discovery tests themselves take under 2 s each.
+- One earlier run failed only on `EditorPerfTest.budgets` (an M5 timing budget, not WP-S3 code). The machine's load average was about 200 then, with other agents building. The test passes on its own, and the full re-run passed.
+
+### Deviations and additions
+
+1. **`_device-info._tcp` is discovered as well.** This is what sets `FoundComputer.apple` for the §7.7 Mac hint: `_smb._tcp` carries no model. A device-info sighting is hint-only. It never creates a row; it only marks a row the sweep or NSD found. Its resolves queue behind the SMB ones.
+   - Samba's default "MacSamba" is excluded.
+   - A NAS that poses as a Mac model (TrueNAS) still gets the hint, which adds one sentence and gives no wrong next step.
+2. **`ComputerFinder.recentAddress(name)` (added to my own interface).** It returns the IPv4 that an NSD instance named `name` had in this process, for WP-S1's §7.2 `.local` fallback (U-8). It holds instance names only, not mDNS host names.
+3. **`ComputerFinderImpl` injects `Provider<StorageLocations>`**, to avoid a construction cycle if WP-S1's `StorageLocationsImpl` ever needs `NetworkFolders`. It reads `status.value` once per search.
+4. **The fact sheet's "33-byte" NBSTAT request** (facts §4.4) is wrong. RFC 1002 gives 50 bytes (12 + 34 + 4); that is the golden in `NbnsCodecTest`. The golden response packets were built by an independent Python `struct` script, and the RFC 1001 §14.1 "FRED" vector is checked.
+5. **Saved hosts that were not found are not added to the list.** `Badge.SAVED` only marks found rows, since the saved ones are already on `SaveLocation`.
+
+### Questions for the lead
+
+1. **The flow does not complete after `DISCOVERY_TOTAL_MS`.** The commit-0 stub's KDoc said it "ends by itself", but the lock must cover the whole page (lead ruling 3). WP-S4 must collect it in the page's scope and must not wait for completion. "Search again" cancels and collects again. Confirm.
+2. **NSD is not bound to the LAN `Network`.** The per-network `discoverServices` overloads are API 33+. With a VPN up, NSD relies on the platform. Acceptable for v1?
+3. **NO_NETWORK** is reported only when there is no usable LAN address **and** no active network with INTERNET. A VPN-only state shows the VPN row with no error, and NSD still runs. Matches §7.7?
