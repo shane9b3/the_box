@@ -1,4 +1,5 @@
 // WP-S1 (docs/design/m6-storage-locations.md §7.3, §7.5–§7.8; lead ruling 6). find() is WP-S3's ComputerFinder.
+// Fix pass, core half (2026-10-24): C-B2 (each browse session owns its connection), C-S6 (cancel and password copy).
 package app.thebox.data.storage
 
 import android.content.Context
@@ -31,11 +32,13 @@ import app.thebox.data.storage.smb.SmbShareLister
 import app.thebox.data.storage.smb.SmbjClients
 import app.thebox.data.storage.smb.SmbjShare
 import com.hierynomus.smbj.SMBClient
+import com.hierynomus.smbj.SmbConfig
 import com.hierynomus.smbj.auth.AuthenticationContext
 import com.hierynomus.smbj.connection.Connection
 import com.hierynomus.smbj.session.Session
 import com.hierynomus.smbj.share.DiskShare
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.runInterruptible
@@ -43,39 +46,115 @@ import java.io.IOException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 
+// ==================================================================== the browse connection seam (C-B2)
+
 /**
- * Browse, sign-in, shares, folders and the Test on `box-smb-browse`, over the browse `SMBClient` (never the ring's,
+ * (C-B2) One browse session's **own** connection. smbj caches connections per `host:port` inside one `SMBClient` and
+ * `close(true)` disconnects the transport for every lease of it, so two sessions to one computer (a re-sign-in after an
+ * anonymous share listing, a stored location's Test while a browse is open) must never share one: closing the old
+ * session would kill the new one ("Can't reach NAS"). [closeForce] releases only this session's transport.
+ */
+interface BrowseConnection {
+    val isConnected: Boolean
+    @Throws(Exception::class) fun authenticate(ctx: AuthenticationContext): BrowseSession
+    /** `close(true)` of this session's transport (and its client); never throws. */
+    fun closeForce()
+}
+
+/** One authenticated session on a [BrowseConnection]. */
+interface BrowseSession {
+    /** §7.5: the disk shares (srvsvc); an interrupt is rethrown as a cancel (C-S6). */
+    fun shares(signedInAsUser: Boolean): ShareListing
+    @Throws(Exception::class) fun disk(share: String): DiskShare
+}
+
+/** (C-B2) Opens a [BrowseConnection]: a fresh one per call, never a lease of another session's. */
+fun interface BrowseConnections {
+    @Throws(Exception::class) fun connect(host: String, port: Int): BrowseConnection
+}
+
+/**
+ * (C-B2) The production [BrowseConnections]: a new `SMBClient` per connect (cheap: the config, with its static
+ * BC provider, is shared), so each browse session has its own connection table and transport.
+ */
+class SmbjBrowseConnections(private val config: () -> SmbConfig = { SHARED_CONFIG }) : BrowseConnections {
+    override fun connect(host: String, port: Int): BrowseConnection {
+        val client = SMBClient(config())
+        val conn = try { client.connect(host, port) } catch (e: Exception) {
+            try { client.close() } catch (_: Exception) { }
+            throw e
+        }
+        return SmbjBrowseConnection(client, conn)
+    }
+
+    private class SmbjBrowseConnection(private val client: SMBClient, private val conn: Connection) : BrowseConnection {
+        override val isConnected: Boolean get() = try { conn.isConnected } catch (_: Exception) { false }
+        override fun authenticate(ctx: AuthenticationContext): BrowseSession = SmbjBrowseSession(conn.authenticate(ctx))
+        override fun closeForce() {
+            SmbjClients.forceClose(conn)
+            try { client.close() } catch (_: Exception) { /* already gone */ }
+        }
+    }
+
+    private class SmbjBrowseSession(private val session: Session) : BrowseSession {
+        override fun shares(signedInAsUser: Boolean): ShareListing = SmbShareLister().list(session, signedInAsUser)
+        override fun disk(share: String): DiskShare = session.connectShare(share) as? DiskShare ?: throw IOException("not a disk share")
+    }
+
+    private companion object {
+        val SHARED_CONFIG: SmbConfig by lazy { SmbjClients.config(StorageConstants.SMB_IO_TIMEOUT_MS) }
+    }
+}
+
+/**
+ * Browse, sign-in, shares, folders and the Test on `box-smb-browse`, over browse connections (never the ring's `SMBClient`,
  * lead ruling 6). Finding computers is [finder]'s (WP-S3).
  *
  * - **Sign-in order** (§7.3): a user name or password given → that user only; a guest address → guest; otherwise
  *   anonymous, then guest. A logon refusal, guests refused or signing required for guests → [BrowseResult.NeedsSignIn].
- * - **Password** (§7.3, §8): the session keeps its own copy (a `CharArray`), zeroed by [close]; smbj's copy is zeroed after
- *   `authenticate`. The caller's array stays the caller's.
- * - **Cancel**: every call is `runInterruptible`, so leaving the page (BACK, Stop test) interrupts the smbj wait.
+ * - **Connections** (C-B2): each [open] gets its own connection ([connections]); [close] and every failure path close
+ *   only that one, so a re-sign-in never kills the session that replaced it.
+ * - **Password** (§7.3, §8; C-S6): no copy is kept. smbj's copy is zeroed after `authenticate`; the caller's array stays
+ *   the caller's.
+ * - **Cancel**: every call is `runInterruptible`, so leaving the page (BACK, Stop test) interrupts the smbj wait. (C-S6) A
+ *   cancel that lands after a successful sign-in closes the session it made, so nothing outlives the caller.
  * - Errors are §7.7's [BrowseError]s; logs carry fault names only (§8).
  */
 @Singleton
-class NetworkFoldersImpl @Inject constructor(
+class NetworkFoldersImpl internal constructor(
     private val finder: ComputerFinder,
     private val lan: LanAddressFinder,
-    @ApplicationContext private val context: Context,
+    private val context: Context,
     private val deviceId: DeviceIdentity,
     /** (Save-location integration, S4-Q3) The stored sign-in of a saved location; a Provider, so no construction cycle. */
     private val stored: javax.inject.Provider<StorageLocationsImpl>,
+    private val connections: BrowseConnections,
 ) : NetworkFolders {
+    @Inject constructor(
+        finder: ComputerFinder,
+        lan: LanAddressFinder,
+        @ApplicationContext context: Context,
+        deviceId: DeviceIdentity,
+        stored: javax.inject.Provider<StorageLocationsImpl>,
+    ) : this(finder, lan, context, deviceId, stored, SmbjBrowseConnections())
+
     private val browse = Executors.newSingleThreadExecutor { r -> Thread(r, "box-smb-browse").also { it.isDaemon = true } }
     private val dispatcher = browse.asCoroutineDispatcher()
-    private val client: SMBClient by lazy { SmbjClients.browseClient() }
     private val ids = AtomicLong()
     private val sessions = ConcurrentHashMap<Long, Browse>()
     private val clock = MonoClock { System.nanoTime() / 1_000_000L }
 
-    private class Browse(val handle: BrowseHandle, val connection: Connection, val session: Session, var password: CharArray?) {
+    /** C-S6: no password copy; C-B2: [connection] is this session's alone. */
+    private class Browse(val handle: BrowseHandle, val connection: BrowseConnection, val session: BrowseSession) {
         val shares = HashMap<String, DiskShare>()
     }
+
+    /** Browse sessions open now (tests). */
+    internal val openSessions: Int get() = sessions.size
 
     override fun find(): Flow<FindState> = finder.search()
 
@@ -102,12 +181,24 @@ class NetworkFoldersImpl @Inject constructor(
         }
     }
 
-    private suspend fun openWith(address: SmbAddress, password: CharArray?): BrowseResult = runInterruptible(dispatcher) {
+    private suspend fun openWith(address: SmbAddress, password: CharArray?): BrowseResult {
+        // C-S6: the session this call registered, seen by the caller's side; a cancel after the block returned
+        // (BACK just as the server answers) would otherwise discard the handle and leak the session.
+        val made = AtomicReference<BrowseHandle?>()
+        try {
+            return runInterruptible(dispatcher) { openBlocking(address, password, made) }
+        } catch (c: CancellationException) {
+            made.get()?.let { close(it) }
+            throw c
+        }
+    }
+
+    private fun openBlocking(address: SmbAddress, password: CharArray?, made: AtomicReference<BrowseHandle?>): BrowseResult {
         val vpn = runCatching { lan.vpnActive() }.getOrDefault(false)
-        val conn = try { client.connect(address.host, address.port) } catch (e: Exception) {
+        val conn = try { connections.connect(address.host, address.port) } catch (e: Exception) {
             if (cancelled(e)) throw e
             BoxLog.i(TAG) { "connect failed: ${SmbFaults.faultName(e)}" }
-            return@runInterruptible BrowseResult.Failed(SmbFaults.browseError(e, vpn))
+            return BrowseResult.Failed(SmbFaults.browseError(e, vpn))
         }
         val tries = when {
             password != null || !address.user.isNullOrEmpty() -> listOf(SignInMode.USER)
@@ -125,28 +216,30 @@ class NetworkFoldersImpl @Inject constructor(
                 val session = conn.authenticate(ctx)
                 val id = ids.incrementAndGet()
                 val handle = BrowseHandle(id, address.copy(guest = mode == SignInMode.GUEST, user = if (mode == SignInMode.USER) address.user else null), mode)
-                sessions[id] = Browse(handle, conn, session, password?.copyOf())
+                sessions[id] = Browse(handle, conn, session)
+                made.set(handle)
                 BoxLog.i(TAG) { "browse session $id open ($mode)" }
-                return@runInterruptible BrowseResult.Opened(handle)
+                return BrowseResult.Opened(handle)
             } catch (e: Exception) {
-                if (cancelled(e)) { SmbjClients.forceClose(conn); throw e }
+                // C-B2: every close below is this call's own connection; no other session leases it.
+                if (cancelled(e)) { conn.closeForce(); throw e }
                 BoxLog.i(TAG) { "sign-in $mode refused: ${SmbFaults.faultName(e)}" }
                 refused = when {
-                    SmbFaults.isSmb1Only(e) -> { SmbjClients.forceClose(conn); return@runInterruptible BrowseResult.Failed(BrowseError(BrowseErrorKind.SMB1)) }
+                    SmbFaults.isSmb1Only(e) -> { conn.closeForce(); return BrowseResult.Failed(BrowseError(BrowseErrorKind.SMB1)) }
                     SmbFaults.isGuestRefused(e) -> BrowseError(BrowseErrorKind.GUEST_REFUSED)
                     SmbFaults.isLogonFailure(e) -> if (mode == SignInMode.USER) BrowseError(BrowseErrorKind.AUTH) else BrowseError(BrowseErrorKind.GUEST_REFUSED)
                     SmbFaults.classify(e, false, conn.isConnected) == FaultClass.ACCESS -> BrowseError(BrowseErrorKind.GUEST_REFUSED)
-                    else -> { SmbjClients.forceClose(conn); return@runInterruptible BrowseResult.Failed(SmbFaults.browseError(e, vpn)) }
+                    else -> { conn.closeForce(); return BrowseResult.Failed(SmbFaults.browseError(e, vpn)) }
                 }
             } finally { SmbjClients.zero(ctx) }
         }
-        SmbjClients.forceClose(conn)
-        BrowseResult.NeedsSignIn(refused)
+        conn.closeForce()
+        return BrowseResult.NeedsSignIn(refused)
     }
 
     override suspend fun shares(session: BrowseHandle): ShareListing = runInterruptible(dispatcher) {
         val b = sessions[session.id] ?: return@runInterruptible ShareListing(emptyList(), BrowseError(BrowseErrorKind.STORAGE, StorageFailure.UNREACHABLE))
-        SmbShareLister().list(b.session, signedInAsUser = b.handle.mode == SignInMode.USER)
+        b.session.shares(signedInAsUser = b.handle.mode == SignInMode.USER)
     }
 
     override suspend fun folders(session: BrowseHandle, share: String, path: String): FolderListing = runInterruptible(dispatcher) {
@@ -196,17 +289,16 @@ class NetworkFoldersImpl @Inject constructor(
         r
     }
 
+    /** Closes [session]'s own connection only (C-B2). Never waits. */
     override fun close(session: BrowseHandle) {
         val b = sessions.remove(session.id) ?: return
-        b.password?.fill('\u0000'); b.password = null
-        browse.execute { SmbjClients.forceClose(b.connection) }
+        browse.execute { b.connection.closeForce() }
         BoxLog.i(TAG) { "browse session ${session.id} closed" }
     }
 
     // ================================================================ internals
 
-    private fun disk(b: Browse, share: String): DiskShare =
-        b.shares.getOrPut(share) { b.session.connectShare(share) as? DiskShare ?: throw IOException("not a disk share") }
+    private fun disk(b: Browse, share: String): DiskShare = b.shares.getOrPut(share) { b.session.disk(share) }
 
     private fun shareError(e: Throwable, vpn: Boolean): BrowseError = when (SmbFaults.classify(e, false, null)) {
         FaultClass.ACCESS -> BrowseError(BrowseErrorKind.STORAGE, StorageFailure.ACCESS)

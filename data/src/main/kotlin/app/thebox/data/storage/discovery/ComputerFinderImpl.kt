@@ -73,8 +73,11 @@ internal interface FinderEnvironment {
     fun networkUp(): Boolean
     /** Takes the multicast lock; closing the handle releases it. */
     fun acquireMulticastLock(): AutoCloseable
-    /** Sockets bound to the network that owns [lanAddress]. */
-    fun sockets(lanAddress: String): LanSockets
+    /**
+     * Sockets bound to the network that owns [lanAddress]. (C-S5) Null when a VPN is up and no non-VPN network owns it:
+     * the sweep and the NetBIOS lookups then do not run (NSD and manual entry still do; the VPN Info row explains).
+     */
+    fun sockets(lanAddress: String): LanSockets?
     fun nsd(): Flow<Sighting>
 }
 
@@ -143,8 +146,13 @@ class ComputerFinderImpl internal constructor(
                         add(s)
                     }
                 }
-                if (subnet != null && own != null) {
-                    val sockets = env.sockets(own)
+                // C-S5: no sockets = a VPN is up and nothing bindable owns our address; never sweep through the tunnel.
+                val sockets = if (subnet != null && own != null) env.sockets(own) else null
+                if (subnet != null && own != null && sockets == null) {
+                    BoxLog.i(TAG) { "find: VPN up and no bindable LAN network; no sweep" }
+                    mutex.withLock { searching = false; publishLocked() }
+                }
+                if (subnet != null && sockets != null) {
                     val lookup = names(sockets)
                     val permits = Semaphore(NAME_LOOKUPS_PARALLEL)
                     stats = sweeps(sockets).sweep(subnet) { address ->
@@ -205,7 +213,12 @@ internal class AndroidFinderEnvironment(private val context: Context, private va
         }
     }
 
-    override fun sockets(lanAddress: String): LanSockets = NetworkLanSockets(networkOf(lanAddress))
+    override fun sockets(lanAddress: String): LanSockets? {
+        val vpn = vpnUp()
+        val n = networkOf(lanAddress)
+        // C-S5: with a VPN up only a bound socket keeps the sweep on the LAN; without one there is nothing to sweep with.
+        return if (n != null) NetworkLanSockets(n, strict = vpn) else if (vpn) null else NetworkLanSockets(null)
+    }
 
     override fun nsd(): Flow<Sighting> {
         val nsd = context.getSystemService(NsdManager::class.java) ?: return emptyFlow()

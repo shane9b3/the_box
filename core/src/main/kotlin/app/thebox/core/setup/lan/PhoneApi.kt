@@ -502,6 +502,8 @@ class PhoneApi(
             if (port != null && (port.toIntOrNull() ?: 0) !in 1..65535) return null
             if (sh == null && pathParts.isNotEmpty()) return null
             if (sh == ".." || ".." in pathParts) return null
+            // C-N4: a control character (a decoded %00, a newline) is never part of a share or folder name.
+            if ((listOfNotNull(sh) + pathParts).any { part -> part.any { it < ' ' || it == '\u007F' } }) return null
             if (sh != null && sh.length > FOLDER_SHARE_MAX) return null
             val p = pathParts.joinToString("/").ifEmpty { null }
             if (p != null && p.length > FOLDER_PATH_MAX) return null

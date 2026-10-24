@@ -297,6 +297,11 @@ internal class TimeshiftSessionFactoryImpl(
         val target = choice.target
         synchronized(ringLock) {
             val existing = ring
+            if (existing != null && reusableAfterSwitch(existing, target, capacity, indexEntries, lengthMs, pool)) {
+                existing.reset()
+                beginCycle(ringStorage)
+                return existing
+            }
             // S4: a ring made RAM-only by a disk stop, or whose file was unlinked, is rebuilt instead of reused.
             // §5.1: also a storage that is gone, needs a fresh file (A-B4) or switched to this device.
             val broken = existing != null && ((existing as? TsRingImpl)?.storageUsable == false || storageUnusable(ringStorage))
@@ -336,6 +341,21 @@ internal class TimeshiftSessionFactoryImpl(
         }
     }
 
+    /**
+     * C-S3: the previous cycle switched to this device (the folder refused the file or did not answer) and this cycle
+     * saves on this device (the folder is demoted, or not ready): keep that ring and its local file rather than a new
+     * 10 MiB pool and a new file on every zap. Same pool, length and index; its capacity must fit this cycle's sizing
+     * (which did not count the file it already occupies). Under [ringLock]; no I/O but a local `length()`.
+     */
+    private fun reusableAfterSwitch(existing: TsRing, target: RingTarget, capacity: Long, indexEntries: Int, lengthMs: Long, pool: Int): Boolean {
+        if (target.kind != StorageKind.INTERNAL) return false
+        val fb = ringStorage as? FallbackRingStorage ?: return false
+        if (fb.switchedTo != StorageKind.INTERNAL || fb.isUnlinked() || (existing as? TsRingImpl)?.storageUsable == false) return false
+        if (ringIndexEntries != indexEntries || ringLengthMs != lengthMs || ringPool != pool) return false
+        val occupied = (fb.secondaryStorage as? AndroidRingStorage)?.file?.length() ?: 0L
+        return ringCapacity <= capacity + occupied
+    }
+
     /** §5.1 reuse: a storage that is gone, needs a fresh file (A-B4) or switched to this device is never reused. No I/O. */
     private fun storageUnusable(st: RingStorage?): Boolean = when (st) {
         null -> false
@@ -373,7 +393,15 @@ internal class TimeshiftSessionFactoryImpl(
                 deadlineMs = deadline,
                 clock = clock,
                 background = background,
-            )
+            ).also { fb ->
+                // C-S3: a switch reaches the target source (the keeper demotes a folder that refused the file).
+                val locationId = target.locationId
+                fb.onSwitched = { failure ->
+                    try { targets.onCreateFailed(locationId, failure) } catch (e: Exception) {
+                        BoxLog.w(TAG, "create failure report failed: ${e.javaClass.simpleName}")
+                    }
+                }
+            }
         }
     }
 
@@ -606,6 +634,12 @@ internal class TimeshiftSessionFactoryImpl(
             val st = cur.storage
             // A cycle already switched to this device is not the folder's failure (§5.2).
             if (st is FallbackRingStorage && st.switchedTo != null) return
+            // C-B1: a stop before the decision is not reported, and the decision then ends without a fallback announcement:
+            // the viewer gets this stop's one toast, never a second "saving on this device" for a cycle that saves nowhere.
+            if (st is FallbackRingStorage && st.abandonUndecided()) {
+                BoxLog.i(TAG) { "$reason before the network folder answered: not the folder's failure" }
+                return
+            }
             val first = when (st) {
                 is FallbackRingStorage -> st.firstWriteMonoMs
                 is VolumeStorage -> st.firstWriteMonoMs

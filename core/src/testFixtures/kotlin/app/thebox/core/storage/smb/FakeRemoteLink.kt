@@ -28,6 +28,12 @@ enum class FakeStatus(val cls: FaultClass) {
     DISK_FULL(FaultClass.FULL), QUOTA_EXCEEDED(FaultClass.FULL),
     ACCESS_DENIED(FaultClass.ACCESS), LOGON_FAILURE(FaultClass.ACCESS),
     OBJECT_NAME_NOT_FOUND(FaultClass.REMOVED), DELETE_PENDING(FaultClass.REMOVED), FILE_DELETED(FaultClass.REMOVED),
+    /**
+     * (C-S2) A server refusal on a live transport (INVALID_PARAMETER, INSUFFICIENT_RESOURCES, a lock conflict): SLOW —
+     * fail the operation, never reconnect. (C-S7) SHARING_VIOLATION is one too: an exclusive open of a file another
+     * client holds.
+     */
+    REFUSED(FaultClass.SLOW), SHARING_VIOLATION(FaultClass.SLOW),
 }
 
 /** A server status: classified by [FakeStatus.cls]. */
@@ -72,6 +78,9 @@ class FakeRemoteLink(
     @Volatile var transportUp: Boolean = true; private set
     @Volatile private var stallUntilMs: Long = Long.MIN_VALUE
     @Volatile private var timeoutPending: Boolean = false
+    @Volatile private var statusPending: Pair<FakeStatus, String>? = null
+    @Volatile private var stallPrefix: String? = null
+    @Volatile private var stallPrefixUntil: Long = Long.MIN_VALUE
     @Volatile private var capacityLimit: Long = Long.MAX_VALUE
     private val reconnectLock = Any()
 
@@ -100,6 +109,10 @@ class FakeRemoteLink(
     fun dropTransport() { transportUp = false }
     /** The next I/O call throws [FakeTimeoutException] once. */
     fun timeoutNext() { timeoutPending = true }
+    /** (C-S2) The next I/O call whose name starts with [prefix] throws [status] once, on a live transport. */
+    fun statusNext(status: FakeStatus, prefix: String = "") { statusPending = status to prefix }
+    /** (C-B1) Every call whose name starts with [prefix] blocks until [clock] reaches [monoMs] (a hung CREATE, say). */
+    fun stallCallsUntil(prefix: String, monoMs: Long) { stallPrefix = prefix; stallPrefixUntil = monoMs }
     /** Deletes [path] on the "server": open handles get FILE_DELETED, a reopen OBJECT_NAME_NOT_FOUND. */
     fun deleteFile(path: String) { files.remove(path)?.deleted = true }
     /** The share holds at most [bytes] in all: a write past it throws DISK_FULL; [RemoteShare.freeBytes] follows. */
@@ -177,7 +190,8 @@ class FakeRemoteLink(
     private fun io(name: String, shareEpoch: Long) {
         count(name)
         val start = clock.nowMs()
-        val until = maxOf(stallUntilMs, start + latencyMs)
+        val prefixStall = if (stallPrefix?.let { name.startsWith(it) } == true) stallPrefixUntil else Long.MIN_VALUE
+        val until = maxOf(stallUntilMs, start + latencyMs, prefixStall)
         while (clock.nowMs() < until) {
             if (clock.nowMs() - start >= ioTimeoutMs) throw FakeTimeoutException()
             sleepSlice()
@@ -185,20 +199,26 @@ class FakeRemoteLink(
         if (Thread.currentThread().isInterrupted) throw InterruptedIOException("interrupted")
         if (!transportUp || shareEpoch != epoch) throw FakeTransportException()
         if (timeoutPending) { timeoutPending = false; throw FakeTimeoutException() }
+        statusPending?.let { (s, prefix) -> if (name.startsWith(prefix)) { statusPending = null; throw FakeStatusException(s) } }
     }
 
     inner class FakeRemoteShare(override val epoch: Long) : RemoteShare {
-        override fun open(path: String, mode: OpenMode, deleteOnClose: Boolean): RemoteFile {
+        override fun open(path: String, mode: OpenMode, deleteOnClose: Boolean, exclusive: Boolean): RemoteFile {
             io("open:$path:$mode", epoch)
             opens += path to mode
             val parent = path.substringBeforeLast('/', "")
             if (parent !in dirs) throw FakeStatusException(FakeStatus.OBJECT_NAME_NOT_FOUND)
+            // C-S7: share modes. An exclusive open fails while any handle is open; any open fails while an exclusive one is.
+            val existing = files[path]
+            if (existing != null && (existing.exclusive || (exclusive && existing.openHandles.get() > 0))) throw FakeStatusException(FakeStatus.SHARING_VIOLATION)
             val data = when (mode) {
                 OpenMode.CREATE_OVERWRITE -> FakeFileData().also { files[path] = it }
-                OpenMode.OPEN_EXISTING -> files[path] ?: throw FakeStatusException(FakeStatus.OBJECT_NAME_NOT_FOUND)
+                OpenMode.OPEN_EXISTING -> existing ?: throw FakeStatusException(FakeStatus.OBJECT_NAME_NOT_FOUND)
             }
-            data.lastWriteMs = serverNowMs()
-            return FakeRemoteFile(path, data, epoch, deleteOnClose)
+            if (!exclusive) data.lastWriteMs = serverNowMs()
+            data.openHandles.incrementAndGet()
+            if (exclusive) data.exclusive = true
+            return FakeRemoteFile(path, data, epoch, deleteOnClose, exclusive)
         }
 
         override fun mkdirs(path: String) {
@@ -234,7 +254,7 @@ class FakeRemoteLink(
         }
     }
 
-    inner class FakeRemoteFile(val path: String, val data: FakeFileData, val epoch: Long, val deleteOnClose: Boolean) : RemoteFile {
+    inner class FakeRemoteFile(val path: String, val data: FakeFileData, val epoch: Long, val deleteOnClose: Boolean, val exclusive: Boolean = false) : RemoteFile {
         @Volatile var closed = false; private set
 
         override fun write(src: ByteArray, off: Int, len: Int, fileOffset: Long) {
@@ -257,7 +277,11 @@ class FakeRemoteLink(
 
         override fun closeAsync() {
             calls.incrementAndGet(); log += "close:$path"
-            post { closed = true; if (deleteOnClose) files.remove(path, data) }
+            post {
+                if (!closed) { data.openHandles.decrementAndGet(); if (exclusive) data.exclusive = false }
+                closed = true
+                if (deleteOnClose && files.remove(path, data)) data.deleted = true
+            }
         }
 
         override fun close() = closeAsync()
@@ -272,6 +296,9 @@ class FakeFileData {
     private var length = 0L
     @Volatile var deleted = false
     @Volatile var lastWriteMs = 0L
+    /** (C-S7) Handles open on this file now, and whether one of them is exclusive (no sharing). */
+    val openHandles = java.util.concurrent.atomic.AtomicInteger()
+    @Volatile var exclusive = false
 
     @Synchronized fun size(): Long = length
 

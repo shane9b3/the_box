@@ -75,6 +75,20 @@ class SmbFaultsTest {
         assertEquals(FaultClass.LINK_LOST, cls(IllegalStateException()))
     }
 
+    /** C-S2 (the review probe): A-B4 / lead ruling 1 — a live server's refusal is not a link loss; never a reconnect. */
+    @Test fun aServerStatusOnALiveTransportIsNotALinkLoss() {
+        for (s in listOf(NtStatus.STATUS_INVALID_PARAMETER, NtStatus.STATUS_SHARING_VIOLATION, NtStatus.STATUS_INSUFFICIENT_RESOURCES,
+            NtStatus.STATUS_FILE_LOCK_CONFLICT, NtStatus.STATUS_NOT_SUPPORTED)) {
+            val e = SMBApiException(s.value, SMB2MessageCommandCode.SMB2_WRITE, null)
+            assertEquals(s.name, FaultClass.SLOW, SmbFaults.classify(e, interrupted = false, transportAlive = true))
+            assertEquals(s.name, FaultClass.SLOW, SmbFaults.classify(e, interrupted = false, transportAlive = null))
+            assertEquals("on a dead transport: ${s.name}", FaultClass.LINK_LOST, SmbFaults.classify(e, interrupted = false, transportAlive = false))
+        }
+        assertEquals(FaultClass.SLOW, cls(status(NtStatus.STATUS_IO_TIMEOUT)))
+        assertTrue(SmbFaults.isSharingViolation(status(NtStatus.STATUS_SHARING_VIOLATION)))
+        assertFalse(SmbFaults.isSharingViolation(status(NtStatus.STATUS_ACCESS_DENIED)))
+    }
+
     @Test fun logNamesAndMessagesCarryNoPathOrUser() {
         val e = status(NtStatus.STATUS_ACCESS_DENIED)
         assertTrue(e.message!!.contains("shawn")) // smbj's own message does

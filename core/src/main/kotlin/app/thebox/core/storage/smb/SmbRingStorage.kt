@@ -1,4 +1,5 @@
-// WP-S1 (docs/design/m6-storage-locations.md §4.1–§4.5; A-B1, A-B3, A-B4, A-S2, A-S6, A-N3).
+// WP-S1 (docs/design/m6-storage-locations.md §4.1–§4.5; A-B1, A-B3, A-B4, A-S2, A-S6, A-N3). Fix pass, core half
+// (2026-10-24): C-B1, C-S3, C-S4, C-N1, C-N2, C-N3.
 package app.thebox.core.storage.smb
 
 import app.thebox.core.playback.MonoClock
@@ -22,14 +23,16 @@ import java.util.concurrent.locks.ReentrantLock
  * flusher (called by `FallbackRingStorage` before the first `pwrite`), reopens use `OPEN_EXISTING` (A-S2), interrupts are
  * cancels (A-B3) and only transport errors reconnect (A-B4). [relativePath] is relative to the share, `/`-separated.
  *
- * **Threads.** [create], [pwrite], [availableBytes] and [isUnlinked] run on the ring's dedicated flusher; [pread] on Media3
- * loader threads, concurrently with writes on the same handle (§4.2); [close]/[delete] on any thread, and they only post.
+ * **Threads.** [create] runs on `FallbackRingStorage`'s create thread (C-B1) or the flusher; [pwrite], [availableBytes]
+ * and [isUnlinked] on the ring's dedicated flusher; [pread] on Media3 loader threads, concurrently with writes on the
+ * same handle (§4.2); [close]/[delete] on any thread, and they only post.
  *
  * **Failures (§4.3).** Every IOException goes through [RemoteLink.classify], interrupt first:
  * - CANCEL → `InterruptedIOException`; nothing else changes (no reconnect, no [lastFailure], epoch unchanged).
  * - LINK_LOST → one single-flight `link.reconnect(epoch)` (shared by the flusher and the readers), a reopen with
  *   `OPEN_EXISTING` and a retry at the same offset, until `SMB_RECONNECT_BUDGET_MS` after the operation's first failure
- *   (never past [RemoteLink.ioTimeoutMs]); then UNREACHABLE. Any reconnect sets [needsFreshFile] (§4.5).
+ *   (never past [RemoteLink.ioTimeoutMs]); then UNREACHABLE. Any reconnect sets [needsFreshFile] (§4.5). (C-S3) A
+ *   LINK_LOST inside [create] reconnects once, within the create's deadline, then starts the create again.
  * - SLOW → fail at once; on a write also [needsFreshFile] (a timed-out WRITE may land later, §4.5).
  * - FULL / ACCESS → fail; REMOVED → [gone] (`isUnlinked()` → `STORAGE_EVICTED`).
  * A write failure sets [lastFailure]; read failures surface as the ring's `RingIoException` and leave it alone.
@@ -54,14 +57,23 @@ class SmbRingStorage(
     @Volatile private var goneV = false
     @Volatile private var lastFailureV: StorageFailure? = null
     @Volatile private var freshV = false
+    /** C-N1: the header generation when [freshV] was first set; a later generation must not write into this file. */
+    @Volatile private var freshGeneration = Long.MIN_VALUE
+    /** C-N1: the generation of the header last written to the file; data writes belong to it. Flusher only. */
+    @Volatile private var writtenGeneration = Long.MIN_VALUE
     private val written = AtomicLong()
     @Volatile private var createAttempted = false
     @Volatile private var created = false
+    /** C-N2: a CREATE went to the server, so a delete has a file to remove. */
+    @Volatile private var createSent = false
+    /** C-B1: a delete came while (or before) the create ran: a late handle's file is removed too. */
+    @Volatile private var deleteRequested = false
+    /** C-S4: the last free space the server answered (−1 = never), the answer when a later query fails. */
+    @Volatile private var lastFreeV = -1L
 
-    /** The handle and the share it was opened on; replaced only under [stateLock] (reopen, close). */
-    @Volatile private var file: RemoteFile? = null
-    @Volatile private var share: RemoteShare? = null
-    @Volatile private var fileEpoch = -1L
+    /** C-N3: the handle, the share it was opened on and its epoch, swapped as one; replaced only under [stateLock]. */
+    private class Handle(val file: RemoteFile, val share: RemoteShare) { val epoch: Long get() = share.epoch }
+    @Volatile private var handle: Handle? = null
     private var retained = false
     private val stateLock = Any()
     private val createLock = Any()
@@ -85,38 +97,65 @@ class SmbRingStorage(
     override val needsFreshFile: Boolean get() = freshV
     override val remoteBytesWritten: Long get() = written.get()
 
-    override fun create(deadlineMonoMs: Long): Boolean = synchronized(createLock) {
+    override fun create(deadlineMonoMs: Long): Boolean = synchronized(createLock) { createLocked(deadlineMonoMs) }
+
+    private fun createLocked(deadlineMonoMs: Long): Boolean {
         if (created) return true
         if (createAttempted || closed) return false
         createAttempted = true
-        try {
-            val sh = link.share(deadlineMonoMs)
-            checkDeadline(deadlineMonoMs)
-            if (parentDir.isNotEmpty()) sh.mkdirs(parentDir)
-            checkDeadline(deadlineMonoMs)
-            val f = sh.open(relativePath, OpenMode.CREATE_OVERWRITE)
-            var discard = false
-            synchronized(stateLock) {
-                if (closed) discard = true
-                else { file = f; share = sh; fileEpoch = sh.epoch; link.retain(); retained = true }
-            }
-            if (discard) { f.closeAsync(); return false }
-            if (clock.nowMs() > deadlineMonoMs) { lastFailureV = StorageFailure.UNREACHABLE; return false }
-            writeHeaderNow(f)
-            created = true
-            true
-        } catch (e: DeadlineException) {
-            lastFailureV = StorageFailure.UNREACHABLE
-            false
-        } catch (e: IOException) {
-            val fault = link.classify(e)
-            if (fault.cls == FaultClass.CANCEL) {
-                Thread.currentThread().interrupt() // keep the cancel visible to the caller
-            } else {
+        var reconnected = false
+        var sh: RemoteShare? = null
+        while (true) {
+            try {
+                val s = sh ?: link.share(deadlineMonoMs)
+                sh = s
+                checkDeadline(deadlineMonoMs)
+                if (parentDir.isNotEmpty()) s.mkdirs(parentDir)
+                checkDeadline(deadlineMonoMs)
+                createSent = true // C-N2
+                val f = s.open(relativePath, OpenMode.CREATE_OVERWRITE)
+                var discard = false
+                synchronized(stateLock) {
+                    if (closed) discard = true
+                    else { handle = Handle(f, s); link.retain(); retained = true }
+                }
+                if (discard) {
+                    // C-B1: closed while the CREATE was in flight (the switch came first): close the late handle and,
+                    // when a delete was asked for, remove its file. Both posted, never on this thread's caller.
+                    f.closeAsync()
+                    if (deleteRequested) postRm()
+                    return false
+                }
+                if (clock.nowMs() > deadlineMonoMs) { lastFailureV = StorageFailure.UNREACHABLE; return false }
+                writeHeaderNow(f)
+                created = true
+                return true
+            } catch (e: DeadlineException) {
+                lastFailureV = StorageFailure.UNREACHABLE
+                return false
+            } catch (e: IOException) {
+                if (closed) return false
+                val fault = link.classify(e)
+                if (fault.cls == FaultClass.CANCEL) {
+                    Thread.currentThread().interrupt() // keep the cancel visible to the caller
+                    return false
+                }
+                // C-S3: a connection that died since the keeper's last keepalive (a standby, a router reboot) is one
+                // ~100 ms reconnect away; never switch to this device for it. Once, inside the create's deadline.
+                if (fault.cls == FaultClass.LINK_LOST && !reconnected && clock.nowMs() < deadlineMonoMs) {
+                    reconnected = true
+                    val failedEpoch = sh?.epoch ?: link.epoch
+                    sh = try { link.reconnect(failedEpoch, deadlineMonoMs) } catch (re: IOException) {
+                        if (link.classify(re).cls == FaultClass.CANCEL) Thread.currentThread().interrupt()
+                        else lastFailureV = StorageFailure.UNREACHABLE
+                        return false
+                    }
+                    continue
+                }
                 if (fault.cls == FaultClass.REMOVED) goneV = true
                 lastFailureV = fault.failure
+                return false
             }
-            false
         }
     }
 
@@ -135,7 +174,13 @@ class SmbRingStorage(
                 throw IOException("ring file not created")
             }
         }
-        if (headerDirty) file?.let { writeHeaderNow(it) }
+        // C-N1: a reconnect (or a timed-out WRITE) of an earlier generation may still land in this file; a new
+        // generation never writes into it (the zap's reuse check ran before that flag was set). RAM-only, inside the grace.
+        if (freshV && freshGeneration != hdrGen) {
+            lastFailureV = lastFailureV ?: StorageFailure.UNREACHABLE
+            throw IOException("network folder file needs replacing after a reconnect")
+        }
+        if (headerDirty) handle?.let { writeHeaderNow(it.file) }
         val len = src.remaining()
         if (len == 0) return 0
         val arr: ByteArray
@@ -155,7 +200,7 @@ class SmbRingStorage(
 
     override fun pread(dst: ByteBuffer, filePosition: Long): Int {
         if (closed || goneV) throw IOException("ring storage closed")
-        if (file == null) throw IOException("ring file not open") // a reader never opens or creates (A-S2)
+        if (handle == null) throw IOException("ring file not open") // a reader never opens or creates (A-S2)
         val len = dst.remaining()
         if (len == 0) return 0
         val arr: ByteArray
@@ -182,12 +227,21 @@ class SmbRingStorage(
 
     override fun isUnlinked(): Boolean = goneV
 
+    /**
+     * C-S4: the free space, minus the reserve offset (§3.4). Only a FULL answer halts growth (0); a timeout, a lost link
+     * or a cancel answers the last value the server gave, else "unknown, never halts" — a busy NAS must not shrink the
+     * cycle's ring for good (`TsRingImpl.maybeShrink`). A real FULL also fails the next `pwrite` (`DISK_ERROR (FULL)`).
+     */
     override fun availableBytes(): Long {
-        val sh = share ?: return limits.reportedAvailableBytes(Long.MAX_VALUE / 4) // not created yet: unknown, never halts growth
+        val sh = handle?.share ?: return limits.reportedAvailableBytes(Long.MAX_VALUE / 4) // not created yet: unknown, never halts growth
         val free = try { sh.freeBytes() } catch (e: IOException) {
-            if (link.classify(e).cls == FaultClass.CANCEL) Thread.currentThread().interrupt()
-            return 0L // §4.1: a failure answers 0 (growth halts)
+            val cls = link.classify(e).cls
+            if (cls == FaultClass.CANCEL) Thread.currentThread().interrupt()
+            if (cls == FaultClass.FULL) return 0L
+            val last = lastFreeV
+            return limits.reportedAvailableBytes(if (last >= 0) last else Long.MAX_VALUE / 4)
         }
+        lastFreeV = free
         return limits.reportedAvailableBytes(free)
     }
 
@@ -195,11 +249,11 @@ class SmbRingStorage(
         hdrGen = generation; hdrCap = capacity; headerDirty = true
     }
 
+    /** Never waits (A-B1). C-N2: the `rm` is posted only when a CREATE was sent; nothing else exists on the server. */
     override fun delete() {
+        deleteRequested = true
         close()
-        link.post {
-            try { link.share(clock.nowMs()).delete(relativePath) } catch (_: IOException) { /* left to the sweep (§3.5) */ }
-        }
+        if (createSent) postRm()
     }
 
     override fun close() {
@@ -208,7 +262,7 @@ class SmbRingStorage(
         synchronized(stateLock) {
             if (closed) return
             closed = true; goneV = true
-            f = file; file = null; share = null
+            f = handle?.file; handle = null
             release = retained; retained = false
         }
         if (f != null || release) link.post {
@@ -226,23 +280,38 @@ class SmbRingStorage(
         const val RECONNECT_RETRY_PAUSE_MS = 250L
     }
 
-    private fun checkDeadline(deadlineMonoMs: Long) { if (clock.nowMs() > deadlineMonoMs) throw DeadlineException() }
+    private fun postRm() = link.post {
+        try { link.share(clock.nowMs()).delete(relativePath) } catch (_: IOException) { /* left to the sweep (§3.5) */ }
+    }
+
+    /** C-B1: a create step past its deadline, or for a storage closed meanwhile (the switch came first), stops here. */
+    private fun checkDeadline(deadlineMonoMs: Long) { if (closed || clock.nowMs() > deadlineMonoMs) throw DeadlineException() }
+
+    /** C-N1: [opGeneration] is the generation of the operation that may still land (a header's, or the data's). */
+    private fun markFresh(opGeneration: Long) {
+        if (!freshV) { freshGeneration = opGeneration; freshV = true }
+    }
 
     /** Writes the header at file position 0 (flusher), clearing [headerDirty] first so a concurrent `writeHeader` wins. */
     private fun writeHeaderNow(f: RemoteFile) {
         headerDirty = false
-        val b = RingHeaderCodec.encode(hdrGen, hdrCap, createdMonoMs, 0)
-        retrying(write = true, start = f) { h -> h.write(b.array(), b.arrayOffset(), b.remaining(), 0L) }
+        val g = hdrGen
+        val b = RingHeaderCodec.encode(g, hdrCap, createdMonoMs, 0)
+        retrying(write = true, start = f, opGeneration = g) { h -> h.write(b.array(), b.arrayOffset(), b.remaining(), 0L) }
+        writtenGeneration = g
     }
 
     /**
      * Runs [op] on the current handle with the §4.3 rules. LINK_LOST reconnects (single flight) and retries at the same
      * offset within the budget; every other class fails at once.
      */
-    private inline fun <T> retrying(write: Boolean, start: RemoteFile? = null, op: (RemoteFile) -> T): T {
+    private inline fun <T> retrying(write: Boolean, start: RemoteFile? = null, opGeneration: Long = writtenGeneration, op: (RemoteFile) -> T): T {
         var firstFailAt = Long.MIN_VALUE
-        var f: RemoteFile = start ?: file ?: throw IOException("ring file not open")
-        var epochOfF = fileEpoch
+        // C-N3: the handle and its epoch are read once, together; a reopen between two reads can no longer pair the old
+        // handle with the new epoch (and then tear down the healthy new connection).
+        val h0 = handle
+        var f: RemoteFile = start ?: h0?.file ?: throw IOException("ring file not open")
+        var epochOfF = if (start == null || h0?.file === start) h0?.epoch ?: link.epoch else link.epoch
         while (true) {
             if (closed) throw IOException("ring storage closed")
             try {
@@ -254,17 +323,18 @@ class SmbRingStorage(
                     FaultClass.LINK_LOST -> {
                         val now = clock.nowMs()
                         if (firstFailAt == Long.MIN_VALUE) firstFailAt = now
-                        freshV = true // a reconnect is coming; an in-flight WRITE may still land later (§4.5)
+                        markFresh(opGeneration) // a reconnect is coming; an in-flight WRITE may still land later (§4.5)
                         val deadline = firstFailAt + minOf(StorageConstants.SMB_RECONNECT_BUDGET_MS, link.ioTimeoutMs)
                         if (closed || now >= deadline || !reopen(epochOfF, deadline)) {
                             if (write) lastFailureV = if (goneV) StorageFailure.REMOVED else StorageFailure.UNREACHABLE
                             throw IOException("network folder unreachable", e)
                         }
-                        f = file ?: throw IOException("ring storage closed")
-                        epochOfF = fileEpoch
+                        val h = handle ?: throw IOException("ring storage closed")
+                        f = h.file
+                        epochOfF = h.epoch
                     }
                     FaultClass.SLOW -> {
-                        if (write) { freshV = true; lastFailureV = StorageFailure.SLOW }
+                        if (write) { markFresh(opGeneration); lastFailureV = StorageFailure.SLOW }
                         throw e
                     }
                     FaultClass.REMOVED -> {
@@ -298,11 +368,11 @@ class SmbRingStorage(
             var failed = failedEpoch
             while (true) {
                 if (closed) return false
-                if (fileEpoch > failed && file != null) return true // another thread already reopened
+                handle?.let { if (it.epoch > failed) return true } // another thread already reopened
                 if (clock.nowMs() >= deadlineMonoMs) return false
                 val sh = try { link.reconnect(failed, deadlineMonoMs) } catch (e: IOException) {
                     if (link.classify(e).cls == FaultClass.CANCEL) throw (e as? InterruptedIOException ?: InterruptedIOException("ring reconnect cancelled"))
-                    // The server is not back yet: try again until the budget passes (the link spaces its attempts).
+                    // The server is not back yet (or the link was retired, C-S1): try again until the budget passes.
                     val left = deadlineMonoMs - clock.nowMs()
                     if (left <= 0 || closed) return false
                     try { Thread.sleep(minOf(left, RECONNECT_RETRY_PAUSE_MS)) } catch (ie: InterruptedException) {
@@ -323,7 +393,7 @@ class SmbRingStorage(
                 var discard = false
                 synchronized(stateLock) {
                     if (closed) { discard = true; old = null }
-                    else { old = file; file = nf; share = sh; fileEpoch = sh.epoch }
+                    else { old = handle?.file; handle = Handle(nf, sh) }
                 }
                 if (discard) { nf.closeAsync(); return false }
                 old?.closeAsync() // dead with its connection; the server drops it at its own timeout (§4.1 full sharing)

@@ -67,6 +67,7 @@ class LanPhoneLink(
         synchronized(lock) {
             this.purpose = purpose
             received = false
+            signInStatus = null; signInOk = null
             _state.value = LanServerState(ServerPhase.STARTING)
             val address = finder.find()
             if (address == null || !LanAddressPolicy.isUsable(address)) {
@@ -178,6 +179,7 @@ class LanPhoneLink(
     private fun reportSignIn(a: PhoneApi, text: String, done: Boolean) {
         if (a.folderFinished) return
         a.reportStatus(text, done)
+        signInStatus = text; signInOk = done // U-N1: the TV can show it too
         val s = session ?: return
         when {
             a.folderSignedIn -> scope.launch {
@@ -195,6 +197,10 @@ class LanPhoneLink(
         }
     }
 
+    /** (U-N1) The last NETWORK_FOLDER sign-in result of this session; reset with each session. */
+    @Volatile private var signInStatus: String? = null
+    @Volatile private var signInOk: Boolean? = null
+
     private fun submitted(s: PhoneSubmission) {
         received = true
         publish()
@@ -210,7 +216,7 @@ class LanPhoneLink(
         srv?.stop()
         spoolDir.listFiles()?.forEach { it.delete() }
         // WP-S6: pairedFrom stays, so a NETWORK_FOLDER page can say "too many failed sign-ins" (PhoneScreenModel).
-        _state.value = LanServerState(ServerPhase.FAILED, pairedFrom = s.pairedFrom, failure = failure)
+        _state.value = LanServerState(ServerPhase.FAILED, pairedFrom = s.pairedFrom, failure = failure, lastSignInStatus = signInStatus, lastSignInOk = signInOk)
     }
 
     private fun publish() {
@@ -234,6 +240,8 @@ class LanPhoneLink(
             pairedFrom = s.pairedFrom,
             lastRequestAtMs = s.lastRequestAtMs,
             wrongCodes = s.wrongCodes + if (s.rotated) LanLimits.PAIR_MAX_WRONG else 0,
+            lastSignInStatus = signInStatus,
+            lastSignInOk = signInOk,
         )
     }
 

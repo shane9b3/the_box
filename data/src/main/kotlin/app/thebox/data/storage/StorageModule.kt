@@ -37,6 +37,8 @@ abstract class StorageModule {
     @Binds abstract fun folders(impl: NetworkFoldersImpl): NetworkFolders
     @Binds abstract fun finder(impl: ComputerFinderImpl): ComputerFinder
     @Binds abstract fun ringTargets(impl: StorageTargetsImpl): RingTargetSource
+    /** (Lead, fix pass 2026-10-24) `:app` binds the gate; graphs without it (tests) get none. */
+    @dagger.BindsOptionalOf abstract fun toastGate(): app.thebox.core.storage.FallbackToastGate
 
     companion object {
         private val MONO = MonoClock { android.os.SystemClock.elapsedRealtime() }
@@ -59,6 +61,7 @@ abstract class StorageModule {
             dirs: StorageDirs,
             gate: StartupGate,
             @ApplicationScope scope: CoroutineScope,
+            toastGate: java.util.Optional<javax.inject.Provider<app.thebox.core.storage.FallbackToastGate>>,
         ): SmbSessionKeeper {
             val memoryClass = runCatching { context.getSystemService(ActivityManager::class.java)?.memoryClass ?: 0 }.getOrDefault(0)
             val io = if (memoryClass >= TimeshiftConstants.REMOTE_POOL_MEMORY_CLASS_MB) StorageConstants.SMB_IO_TIMEOUT_MS else StorageConstants.SMB_IO_TIMEOUT_SMALL_POOL_MS
@@ -66,6 +69,8 @@ abstract class StorageModule {
                 locations = locations, deviceId = deviceId, lastGood = LastGoodStore(File(dirs.noBackup, LastGoodStore.FILE_NAME)),
                 exec = SmbExecutor("box-smb", MONO), clock = MONO, wallMs = System::currentTimeMillis,
                 pid = android.os.Process.myPid(), ioTimeoutMs = io,
+                // A folder that needed a sign-in is READY again: the sign-in toast's counter starts over.
+                onSignedInAgain = { id -> toastGate.ifPresent { it.get().signedIn(id) } },
             )
             KeeperTriggers.install(context, keeper) { onFirstFrame -> scope.launch { gate.awaitOpen(); onFirstFrame() } }
             return keeper

@@ -1997,3 +1997,124 @@ Not done: U-N1 (the TV saying a phone sign-in failed): the reason lives in `LanP
 - **U-N1:** to show a failed phone sign-in on the TV, `LanServerState` (or the phone page's UI state) needs the last `reportStatus` text of a NETWORK_FOLDER session; `PhoneSetupScreen` would then draw it in Warn under the status line.
 - **Device check:** the 132-px rows top on every page with a subtitle (Channel options, Restore preview, the setup pages), the verdict row's mono details line, and the full breadcrumb's middle ellipsis on a deep browse.
 - `StorageContracts.kt` gained two default methods (above); the core half may be editing the same file.
+
+---
+
+## Implementation record — fix pass, core half (2026-10-24)
+
+This pass applies `docs/review/2026-10-24-storage-locations-review-core.md` C-B1…C-B3 and C-S1…C-S7, plus C-N1, C-N2, C-N3 and part of C-N4, and the lead's two follow-ups (the keeper's `signedIn` hook and the U-N1 state field). It was done in a worktree, uncommitted, and merged with `main` at `b67f5e4` (the UI half). No emulator was used. Every fix has a `// C-xx` comment and a regression test. The two review probe files are gone: each probe is now a named test (listed below).
+
+**Gate:** `./gradlew :core:test :data:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug :app:minifyReleaseWithR8` green, then `:player:testDebugUnitTest` alone green.
+
+### Blockers
+
+- **C-B1, the early switch now holds its deadline** (`FallbackRingStorage`, `RingPoolWatcher`, `TsRingImpl` init):
+  - `primary.create` runs on its own short-lived daemon thread (`box-smb-create`, never `box-smb`). The flusher waits in 10 ms slices.
+  - It switches at the first of three limits:
+    - `deadlineMs` (unchanged);
+    - the time the pool lasts at the measured rate (never below `ASSUMED_BYTES_PER_SEC`), × `POOL_MARGIN` 0.6;
+    - the pool 75 % full.
+
+    At 3.5 MB/s with 160 blocks that is ≈ 1.8 s, before `PUMP_BLOCK_MAX_MS` can fire.
+  - The ring attaches its pool through `RingPoolWatcher.attachPool(poolBytes, head − flushed)`. This is additive, and `TsRingImpl` only gains one line in `init`.
+  - At the switch the primary is **deleted**, not only closed. A late CREATE then closes its own handle, off the flusher. Its file is removed, because `SmbRingStorage.create` checks `closed` between steps and posts an `rm` when a delete was asked for.
+  - **One toast.** A storage stop that arrives while the cycle is undecided calls `abandonUndecided()`. `ReportingWriter` does not report it, and the late decision announces no fallback.
+  - Tests:
+    - `FallbackRingStorageTest`: `switchLandsByTheDeadlineWhateverEachStepTakes` (the probe), `aCreateBlockedInsideOneCallStillSwitchesOnTime`, `aFillingPoolSwitchesBeforeTheDeadline`, `theMeasuredRateCapsTheDeadline`, `aStopBeforeTheDecisionAnnouncesNoFallback`;
+    - `TsRingOverSmbTest.aFourKRateWithABlackholedFolderStillSavesOnThisDevice`;
+    - `FactoryTargetTest.aStopBeforeTheDecisionIsNotTheFoldersFailure`.
+  - **Not taken:** starting the create at the first `writeHeader`. The ring constructor runs on `prepare`, a thread started there makes link calls during `SmbPrepareNoIoTest`'s window, and the pool bound makes the 1 s it would gain unnecessary.
+- **C-B2, one connection per browse session** (`NetworkFoldersImpl`):
+  - A new seam: `BrowseConnections` / `BrowseConnection` / `BrowseSession`.
+  - Production uses `SmbjBrowseConnections`, which makes a **fresh `SMBClient` per connect** with one shared config. Each session's `closeForce` is `close(true)` of its own transport plus `client.close()`.
+  - Tests: `NetworkFoldersImplTest.reSignInInsideABrowseKeepsTheNewSessionsConnection` and `aRefusedSignInClosesOnlyItsOwnConnection`.
+  - **Not run:** the opt-in Samba case. Samba is still not installed.
+- **C-B3, the ring file has no interruptible channel left:**
+  - `AndroidRingStorage` does its positional I/O with `Os.pwrite`/`Os.pread` on the fd, through new `RingPosix` methods. The interface has defaults, so `FakePosix` still compiles.
+  - When `RingPosix.positional(fd)` says there is no native `Os` (Robolectric), it uses the new `UninterruptibleFileIo`: `RandomAccessFile` seek + read/write, one handle for the writer and one for readers, each under its own lock.
+  - `FileRingStorage` uses `UninterruptibleFileIo` too.
+  - Tests:
+    - `RingFileInterruptTest`: the probe `anInterruptedReaderDoesNotCloseTheRingFile`, `aReaderInterruptedMidReadLeavesTheWriterWriting`, `anInterruptedThreadStillReadsAndWrites`;
+    - `AndroidRingStorageInterruptTest`: `anInterruptedPreadLeavesTheFileUsable` for this device and the USB shape, and `aReaderInterruptedMidReadNeverStopsTheWriter`.
+  - **Not written:** the instrumented `AndroidRingStorageTest`. `:player` has no androidTest source set, and the class is internal, so `:app`'s suite cannot reach it. I-TS-x (20 seeks behind live, no `DISK_ERROR`) is for the device pass.
+  - The TS slow-zap investigator: the only timeshift edits are `TsRingImpl.init` (one line), `FileRingStorage`, the new `UninterruptibleFileIo`/`RingPoolWatcher` and `AndroidRingStorage`'s I/O calls.
+
+### Should-fix
+
+- **C-S1** (`SmbSessionKeeper`, `SmbjRemoteLink`):
+  - The link key is now `(id, host, port, share, user, domain, guest, signInVersion)`. A rename, a Test result or a path change keeps the link and only updates the kept location; `onLinkUp` uses the kept location's folder.
+  - A relink `retire()`s the old link:
+    - `share`, `reconnect` and `connectBlocking` refuse (`LinkUnavailableException`), so the ring fails over as UNREACHABLE;
+    - the connection drops now when no ring file is open, else at the last `release()`.
+  - Tests: `SmbSessionKeeperTest.aRenameDoesNotRelink` and `aRetiredLinkNeverKeepsAConnection` (the probe, driven by a sign-in change, since a rename no longer relinks).
+- **C-S2** (`SmbFaults`):
+  - An NT status that is in no table, on a transport not known dead, is SLOW: fail the operation, no reconnect, `needsFreshFile` on a write.
+  - `STATUS_INSUFFICIENT_RESOURCES` is SLOW explicitly, like `IO_TIMEOUT`.
+  - A status on a dead transport stays LINK_LOST. An exception with no status at all also stays LINK_LOST.
+  - The fake gains `FakeStatus.REFUSED` and `SHARING_VIOLATION` (SLOW), `statusNext(status, prefix)` and `stallCallsUntil(prefix, ms)`.
+  - Tests: `SmbFaultsTest.aServerStatusOnALiveTransportIsNotALinkLoss` (the probe) and `SmbReconnectTest.aServerRefusalNeverReconnects`.
+- **C-S3:**
+  - New contract default `RingTargetSource.onCreateFailed(locationId, failure)`. The factory wires `FallbackRingStorage.onSwitched` to it.
+  - `StorageTargetsImpl` hands it to `SmbSessionKeeper.onCreateFailed`:
+    - ACCESS, FULL or REMOVED demote at once (no grace: nothing was written) and keep the failure (`KeeperSnapshot.demotedFailure`). `current()` then falls back with the matching reason (SIGN_IN_NEEDED, NO_SPACE_THERE, UNREACHABLE), not UNSTABLE, so the toast gate does not toast twice. The `LocationStatus` carries the failure for the page.
+    - Anything else marks a failure seen and runs the keepalive now.
+  - `SmbRingStorage.create` reconnects once on LINK_LOST inside its deadline.
+  - The factory **reuses a switched ring** when the next cycle's target is this device, with the same pool, length and index, and a capacity that fits. The optional "same SMB location and switched" reuse was **not taken**: it would keep saving on this device after the folder recovers.
+  - Tests:
+    - `FactoryTargetTest.aCreateRefusedOnAReadyFolderDemotesItAndTheNextZapIsInternalWithoutRebuild`;
+    - `RingTargetSourceTest.aCreateRefusedOnAReadyFolderDemotesItWithThatReason`;
+    - `SmbRingStorageTest.createReconnectsOnceWithinItsDeadline`;
+    - `FallbackRingStorageTest.theSwitchIsReportedWithThePrimarysFailure`.
+- **C-S4** (`SmbRingStorage.availableBytes`):
+  - Only FULL answers 0.
+  - SLOW, LINK_LOST or CANCEL answer the last value the server gave, or "unknown, never halts".
+  - Tests: `SmbRingStorageTest.aFailedSpaceQueryNeverHaltsGrowthUnlessTheFolderIsFull` and `TsRingOverSmbTest.aTimedOutSpaceQueryDoesNotShrinkTheRing`. The old `…AFailureAnswersZero` test now asserts the last value.
+- **C-S5** (`ComputerFinderImpl`, `Port445Sweep`):
+  - `FinderEnvironment.sockets` answers null when a VPN is up and no non-VPN network owns our address. The sweep and the NBNS lookups are then skipped.
+  - With a VPN up, `NetworkLanSockets(strict = true)` closes and refuses a socket it cannot bind. It never falls back to an unbound one.
+  - Test: `ComputerFinderTest.withAVpnAndNoBindableNetworkTheSweepDoesNotRun`.
+- **C-S6** (`NetworkFoldersImpl`, `SmbShareLister`):
+  - `Browse` keeps no password copy.
+  - A cancel that lands after a successful sign-in closes the session it registered.
+  - The lister rethrows a cancel.
+  - The srvsvc pipe has no public close in dcerpc 0.12.13. It now ends with the session's own connection (C-B2), and a transport that is `AutoCloseable` is closed.
+  - Test: `NetworkFoldersImplTest.cancelAfterSignInClosesTheSession`.
+- **C-S7** (`SmbSweeper`, `RemoteShare.open(…, exclusive)`):
+  - A foreign file is deleted only through an exclusive open (no sharing, DELETE access) with delete-on-close. A sharing violation keeps the file.
+  - The sweep stops at its first SLOW, LINK_LOST or CANCEL. It takes the link's classifier.
+  - `RemoteShare.open` gains `exclusive = false` (additive). The fake models share modes.
+  - Tests: `SmbSweepTest.aForeignFileHeldOpenIsKept` and `aTimeoutEndsTheSweep`.
+  - **For §21 / S-2:** check the LastWriteTime freshness of a held-open file on Windows and macOS smbd.
+
+### Nice-to-haves
+
+- **C-N1, taken:** each write records the generation it belongs to. After a reconnect or timeout, a later generation's `pwrite` throws (`DISK_ERROR`, inside the grace), so it never writes into the old file. Test: `SmbReconnectTest.aReconnectDuringTheZapNeverWritesTheNewGenerationIntoTheOldFile`.
+- **C-N2, taken:** the `rm` is posted only when a CREATE was sent. Test: `SmbRingStorageTest.deletingANeverCreatedStorageSendsNothing` (the probe). `SmbPrepareNoIoTest`'s last assertion changed to match.
+- **C-N3, taken:** the handle, its share and its epoch are swapped as one immutable `Handle`.
+- **C-N4, part:** `PhoneApi.splitFolder` refuses control characters. Test: `PhoneApiNetworkFolderTest.aControlCharacterInAFolderIsRefused`.
+  - **Not taken:** the `ManualAddressParser` side. Refusing `..` or control characters there needs a new `Reason` and its viewer string (UI half) and the `app.js` mirror, and the server already refuses an escape from the share.
+- **Not taken:**
+  - C-N5: the per-purpose `canAccept` needs `StoragePages` to register a NETWORK_FOLDER collector (UI half).
+  - C-N6: a release-variant device smoke.
+  - C-N7: bounding the whole Test needs the "Stopped: NAS took too long" string (UI).
+  - C-N8: wording only. The reads are local and happen on the prepare thread (IO).
+
+### Lead follow-ups
+
+- **`FallbackToastGate.signedIn`:**
+  - The keeper remembers which locations went AUTH_FAILED in this process, and calls `onSignedInAgain(id)` once when one of them is READY again, wherever the sign-in came from.
+  - `StorageModule` binds it through `@BindsOptionalOf FallbackToastGate`, used as `Optional<Provider<…>>`. Graphs without `:app`'s binding still build.
+  - Test: `SmbSessionKeeperTest.aLogonRefusalIsAuthFailedUntilTheSignInChanges`, extended.
+- **U-N1:**
+  - `LanServerState` gains `lastSignInStatus: String?` and `lastSignInOk: Boolean?` (additive).
+  - `LanPhoneLink` fills them from each NETWORK_FOLDER `reportStatus`, in the live state and in the final FAILED state, and resets them per session.
+  - Test: `PhoneApiNetworkFolderTest.endToEndTooManyFailedSignInsStopTheSession`, extended.
+  - The TV display is the UI half's.
+
+### For the UI half / lead
+
+- U-N1 display: `PhoneSetupScreen` can draw `LanServerState.lastSignInStatus` (when `lastSignInOk == false`) in Warn.
+- C-N4: a `ManualAddressParser.Reason` for `..` and control characters, with its string and the `app.js` mirror.
+- C-N5: a NETWORK_FOLDER-scoped collector registration in `StoragePages`.
+- C-N7: the "Stopped: NAS took too long" string.
+- C-B1: a `FallbackRingStorage` that switched on the pool bound, not the deadline, reports UNREACHABLE (the wording "Can't reach …"). A sleeping disk at 4K reads the same as a blackhole. A SLOW wording would need a `LocationFallback` value (enum is append-only; UI strings).

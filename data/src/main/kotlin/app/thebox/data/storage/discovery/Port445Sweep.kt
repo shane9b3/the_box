@@ -31,16 +31,23 @@ internal interface LanSockets {
 }
 
 /**
- * Binds to [network] where the platform allows it; if a VPN refuses the bypass (or there is no network handle) the
- * socket is left unbound and the system routes it, which still only ever targets addresses in our own /24.
+ * Binds to [network] where the platform allows it. With no VPN up, a failed bind (or no network handle) leaves the socket
+ * unbound and the system routes it to our own /24. (C-S5) With [strict] (a VPN is up) a socket that cannot be bound is
+ * closed and refused (IOException): a full-tunnel VPN would carry its SYNs and NBNS packets to the provider's network,
+ * where an RFC 1918 /24 may well exist (§7.1, U-S2: never `TRANSPORT_VPN`).
  */
-internal class NetworkLanSockets(private val network: Network?) : LanSockets {
+internal class NetworkLanSockets(private val network: Network?, private val strict: Boolean = false) : LanSockets {
+    init { require(network != null || !strict) { "a strict socket source needs a network" } }
+
     override fun stream(): Socket = network?.let { n ->
-        try { n.socketFactory.createSocket() } catch (e: IOException) { null }
+        try { n.socketFactory.createSocket() } catch (e: IOException) { if (strict) throw e else null }
     } ?: Socket()
 
     override fun datagram(): DatagramSocket = DatagramSocket().also { s ->
-        try { network?.bindSocket(s) } catch (e: IOException) { /* routed by the system */ }
+        try { network?.bindSocket(s) } catch (e: IOException) {
+            if (strict) { s.close(); throw e } // C-S5: never an unbound socket while a VPN is up
+            /* routed by the system */
+        }
     }
 }
 

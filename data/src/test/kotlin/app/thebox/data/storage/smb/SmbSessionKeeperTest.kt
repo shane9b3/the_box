@@ -10,6 +10,9 @@ import app.thebox.data.storage.eventually
 import app.thebox.data.storage.mkdirsDirect
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertThrows
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -52,6 +55,10 @@ class SmbSessionKeeperTest {
         runBlocking { w.locations.updateSignIn(id, "shawn", null, "right".toCharArray(), guest = false) }
         eventually("READY after the new sign-in") { w.keeper.snapshot.state == KeeperState.READY }
         assertEquals("right", w.opener.lastPassword)
+        // (Lead, fix pass) READY again after AUTH_FAILED: the sign-in toast's counter is reset, once.
+        eventually("signed in") { w.signedIn.toList() == listOf(id) }
+        w.keeper.onNetwork(true); Thread.sleep(150)
+        assertEquals(listOf(id), w.signedIn.toList())
     }
 
     @Test fun aMissingPasswordIsAuthFailed() {
@@ -100,5 +107,50 @@ class SmbSessionKeeperTest {
         eventually("READY again") { w.keeper.snapshot.state == KeeperState.READY }
         // The reconnect wrote the wake file again (on every (re)connect, A-B4).
         eventually("second wake") { w.server.log.count { it.startsWith("open:Rewind/TheBox-rewind/.wake-") } >= 2 }
+    }
+
+    /** C-S1: a rename (or a Test result) keeps the link: the ring's connection is never cut mid-cycle. */
+    @Test fun aRenameDoesNotRelink() {
+        val w = StorageWorld()
+        val id = w.addSmb()
+        w.keeper.startNow()
+        eventually("READY") { w.keeper.snapshot.state == KeeperState.READY }
+        val link = w.keeper.linkIfCurrent(id)!!
+        val opens = w.opener.opens.get()
+        runBlocking { w.locations.rename(id, "Office NAS") }
+        eventually("renamed") { w.locations.status.value.single().location.name == "Office NAS" }
+        Thread.sleep(300)
+        assertSame("same link object", link, w.keeper.linkIfCurrent(id))
+        assertTrue(link.isReady)
+        assertEquals("no extra connect", opens, w.opener.opens.get())
+        assertEquals(1, link.connects.get())
+    }
+
+    /**
+     * C-S1 (the review probe): a sign-in change relinks; the old link is retired. A ring still holding it cannot
+     * reconnect it (it fails over, UNREACHABLE), and nothing keeps its connection once the location goes.
+     */
+    @Test fun aRetiredLinkNeverKeepsAConnection() {
+        val w = StorageWorld()
+        val id = w.addSmb()
+        w.keeper.startNow()
+        eventually("READY") { w.keeper.snapshot.state == KeeperState.READY }
+        val old = w.keeper.linkIfCurrent(id)!!
+        old.retain() // a ring file is open on it
+        runBlocking { w.locations.updateSignIn(id, "shawn", null, "n3w!".toCharArray(), guest = false) }
+        eventually("relinked") { w.keeper.linkIfCurrent(id) !== old }
+        assertTrue(old.isRetired)
+        eventually("old link dropped") { !old.isReady }
+        // The ring's SmbRingStorage saw its WRITE fail and asks its own link to reconnect: refused.
+        assertThrows(java.io.IOException::class.java) { old.reconnect(old.epoch, w.clock.nowMs() + 2_000) }
+        assertThrows(java.io.IOException::class.java) { old.share(w.clock.nowMs() + 100) }
+        assertFalse(old.isReady)
+        old.release() // the ring closes; still nothing connects
+        Thread.sleep(200)
+        assertFalse("the retired link holds no connection", old.isReady)
+        eventually("new link READY") { w.keeper.linkIfCurrent(id)?.isReady == true }
+        runBlocking { w.locations.choose(StoragePurpose.TIMESHIFT, StorageWorld.INTERNAL) }
+        eventually("IDLE") { w.keeper.snapshot.state == KeeperState.IDLE && w.keeper.snapshot.locationId == null }
+        assertFalse(old.isReady)
     }
 }

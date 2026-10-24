@@ -12,8 +12,8 @@ import java.io.FileDescriptor
 import java.io.IOException
 import java.io.RandomAccessFile
 import app.thebox.core.playback.timeshift.RingHeaderCodec
+import app.thebox.core.playback.timeshift.UninterruptibleFileIo
 import java.nio.ByteBuffer
-import java.nio.channels.FileChannel
 
 /**
  * The two POSIX calls the ring file needs beyond positional I/O, behind a seam so the fallbacks are testable (Robolectric
@@ -29,6 +29,20 @@ internal interface RingPosix {
 
     /** `fstat(fd).st_nlink`, or −1 when it cannot be read (the caller then re-stats the path). */
     fun nlink(fd: FileDescriptor): Long
+
+    /**
+     * (C-B3) Whether [pwrite]/[pread] work on [fd] (a native `Os`). False (the default, Robolectric's case): the storage
+     * then uses [UninterruptibleFileIo], which is not interruptible either.
+     */
+    fun positional(fd: FileDescriptor): Boolean = false
+
+    /** (C-B3) `Os.pwrite`: not interruptible, so a cancelled reader can never close the fd. Advances [src]'s position. */
+    @Throws(IOException::class)
+    fun pwrite(fd: FileDescriptor, src: ByteBuffer, offset: Long): Int = throw IOException("no positional I/O")
+
+    /** (C-B3) `Os.pread`: 0 at EOF (POSIX). Advances [dst]'s position. */
+    @Throws(IOException::class)
+    fun pread(fd: FileDescriptor, dst: ByteBuffer, offset: Long): Int = throw IOException("no positional I/O")
 }
 
 /** `Os.posix_fallocate` and `Os.fstat` (API 21) with the fallbacks of §3.1 and A-S7. */
@@ -53,6 +67,30 @@ internal object AndroidRingPosix : RingPosix {
     } catch (t: Throwable) {
         -1L
     }
+
+    override fun positional(fd: FileDescriptor): Boolean = try {
+        Os.pread(fd, ByteArray(1), 0, 0, 0L) // a zero-length read: proves the native call exists
+        true
+    } catch (e: ErrnoException) {
+        true // the call exists; an fd problem surfaces on real I/O
+    } catch (e: LinkageError) {
+        false
+    } catch (e: RuntimeException) {
+        false
+    }
+
+    // C-B3: Os.pwrite/Os.pread are not interruptible (libcore retries EINTR; Thread.interrupt sends no signal).
+    override fun pwrite(fd: FileDescriptor, src: ByteBuffer, offset: Long): Int = try {
+        Os.pwrite(fd, src, offset)
+    } catch (e: ErrnoException) {
+        throw IOException("ring pwrite failed (errno ${e.errno})", e)
+    }
+
+    override fun pread(fd: FileDescriptor, dst: ByteBuffer, offset: Long): Int = try {
+        Os.pread(fd, dst, offset)
+    } catch (e: ErrnoException) {
+        throw IOException("ring pread failed (errno ${e.errno})", e)
+    }
 }
 
 /**
@@ -65,8 +103,11 @@ internal object AndroidRingPosix : RingPosix {
  * extent, never past `HEADER + capacity`.
  *
  * - Pre-allocation: `Os.posix_fallocate`, else a sparse `setLength` (ENOSPC then surfaces at write) (§3.1).
- * - Positional writes from the block's **direct** `ByteBuffer` through `FileChannel` (`pwrite`, no user-space copy, A-S8)
- *   and positional reads (`pread`) are thread-safe against each other (flusher vs readers).
+ * - Positional writes from the block's **direct** `ByteBuffer` (`pwrite`, no user-space copy, A-S8) and positional reads
+ *   (`pread`) are thread-safe against each other (flusher vs readers). (C-B3) They are `Os.pwrite`/`Os.pread` on the fd,
+ *   never `FileChannel`: Media3 interrupts a loader on cancel, and an interrupt inside `FileChannel.read` closes the
+ *   channel, the ring's only fd, for the flusher too. Without a native `Os` (Robolectric) the path is
+ *   [UninterruptibleFileIo], which is not interruptible either.
  * - [isUnlinked]: `fstat(fd).st_nlink == 0` (the OS reclaimed the cache under us, A-S7); without a native `fstat`, a
  *   re-stat of the path.
  * - No `fsync`/`force` (§3.1 "Durability").
@@ -95,7 +136,8 @@ internal class AndroidRingStorage(
     private val closer: ((Runnable) -> Unit)? = null,
 ) : RingStorage {
     private val raf: RandomAccessFile
-    private val channel: FileChannel
+    /** (C-B3) Null on a device (`Os.pread`/`Os.pwrite` on [raf]'s fd); the JVM path without a native `Os`. */
+    private val jvmIo: UninterruptibleFileIo?
     @Volatile private var closed = false
     @Volatile private var capacity: Long = capacityBytes
     /** File bytes allocated (header included). */
@@ -108,7 +150,7 @@ internal class AndroidRingStorage(
     init {
         file.parentFile?.mkdirs()
         raf = RandomAccessFile(file, "rw")
-        channel = raf.channel
+        jvmIo = if (posix.positional(raf.fd)) null else try { UninterruptibleFileIo(file) } catch (e: IOException) { raf.close(); throw e }
         allocated = raf.length().coerceAtMost(HEADER + capacity)
     }
 
@@ -143,7 +185,7 @@ internal class AndroidRingStorage(
         var written = 0
         var pos = filePosition
         while (src.hasRemaining()) {
-            val n = channel.write(src, pos)
+            val n = writeAt(src, pos) // C-B3: never FileChannel
             if (n <= 0) break
             written += n
             pos += n
@@ -157,9 +199,8 @@ internal class AndroidRingStorage(
         var read = 0
         var pos = filePosition
         while (dst.hasRemaining()) {
-            val n = channel.read(dst, pos)
-            if (n < 0) break
-            if (n == 0) continue
+            val n = readAt(dst, pos) // C-B3: never FileChannel; an interrupt here is a cancel, not a storage failure
+            if (n <= 0) break // EOF: Os.pread answers 0, the JVM path −1
             read += n
             pos += n
         }
@@ -186,8 +227,16 @@ internal class AndroidRingStorage(
         ensureOpen()
         val b = RingHeaderCodec.encode(generation, capacity, createdMonoMs, pid)
         var pos = 0L
-        while (b.hasRemaining()) pos += channel.write(b, pos)
+        while (b.hasRemaining()) {
+            val n = writeAt(b, pos)
+            if (n <= 0) throw IOException("ring header write returned $n")
+            pos += n
+        }
     }
+
+    private fun writeAt(src: ByteBuffer, pos: Long): Int = jvmIo?.pwrite(src, pos) ?: posix.pwrite(raf.fd, src, pos)
+
+    private fun readAt(dst: ByteBuffer, pos: Long): Int = jvmIo?.pread(dst, pos) ?: posix.pread(raf.fd, dst, pos)
 
     /** `fstat(fd).st_nlink` now (−1 when unreadable): `VolumeStorage` checks it once after create (A-S8). */
     fun nlinkNow(): Long = if (closed) -1L else try { posix.nlink(raf.fd) } catch (e: IOException) { -1L }
@@ -219,11 +268,7 @@ internal class AndroidRingStorage(
     }
 
     private fun closeFd() {
-        try {
-            channel.close()
-        } catch (e: IOException) {
-            BoxLog.w(TAG, "ring channel close failed", e)
-        }
+        jvmIo?.close()
         try {
             raf.close()
         } catch (e: IOException) {

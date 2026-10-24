@@ -137,7 +137,8 @@ class SmbPrepareNoIoTest {
         val calls = link.calls.get()
         factory.discardNow()
         assertEquals("discard", calls, link.calls.get())
-        assertTrue("close and rm were posted, not run", link.posted.get() > 0)
+        // C-N2: none of these storages ever sent a CREATE, so there is no CLOSE or rm to post at all.
+        assertEquals("nothing on the server to remove", 0, link.log.count { it.startsWith("delete:") })
     }
 
     private fun markNeedsFreshFile(st: RemoteRingStorage) {

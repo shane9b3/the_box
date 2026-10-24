@@ -42,7 +42,58 @@ class SmbRingStorageTest {
         assertEquals(0, link.ioCalls.get(), "no link call on the zap path (A-B1): ${link.log}")
         assertTrue(s.isUnlinked() && s.gone, "close sets gone at once")
         link.runPosted()
-        assertEquals(listOf("share", "delete:$path"), link.log, "the posted delete runs on box-smb")
+        assertEquals(emptyList(), link.log, "C-N2: never created, so the delete posts no rm either")
+    }
+
+    /** C-N2 (the review probe): a storage whose file was never created posts no rm (a round trip on box-smb for nothing). */
+    @Test
+    fun deletingANeverCreatedStorageSendsNothing() {
+        val link = FakeRemoteLink().apply { queuePosted = true }
+        val s = storage(link)
+        val before = link.ioCalls.get()
+        s.delete()
+        link.runPosted()
+        assertEquals(0, link.ioCalls.get() - before, "calls: ${link.log}")
+    }
+
+    /** C-S3: a connection that died since the last keepalive costs one reconnect inside the create, never a switch. */
+    @Test
+    fun createReconnectsOnceWithinItsDeadline() {
+        val link = FakeRemoteLink()
+        val s = storage(link)
+        s.writeHeader(3, s.capacityBytes)
+        link.statusNext(FakeStatus.NETWORK_NAME_DELETED, prefix = "mkdirs") // the server dropped our tree since the keepalive
+        assertTrue(s.create(link.clock.nowMs() + 5_000), "calls: ${link.log}")
+        assertEquals(1, link.reconnects.get())
+        assertNull(s.lastFailure)
+        assertFalse(s.needsFreshFile, "nothing was written before the reconnect")
+        // Only once: a second loss inside the same create fails it (UNREACHABLE), it does not loop.
+        val t = storage(link).also { it.writeHeader(1, it.capacityBytes) }
+        link.reconnectFails = true
+        link.dropTransport()
+        assertFalse(t.create(link.clock.nowMs() + 2_000))
+        assertEquals(StorageFailure.UNREACHABLE, t.lastFailure)
+    }
+
+    /** C-S4: a timed-out space query answers the last known space (or unknown), never 0; only FULL answers 0. */
+    @Test
+    fun aFailedSpaceQueryNeverHaltsGrowthUnlessTheFolderIsFull() {
+        val link = FakeRemoteLink()
+        val s = storage(link)
+        s.writeHeader(1, s.capacityBytes)
+        assertTrue(s.create(far))
+        link.fullAt(10L shl 30)
+        val known = s.availableBytes()
+        assertTrue(known > 0)
+        link.timeoutNext()
+        assertEquals(known, s.availableBytes(), "a slow NAS answers the last value")
+        link.statusNext(FakeStatus.NETWORK_NAME_DELETED, prefix = "freeBytes")
+        assertEquals(known, s.availableBytes(), "a lost link too")
+        link.statusNext(FakeStatus.DISK_FULL, prefix = "freeBytes")
+        assertEquals(0L, s.availableBytes(), "only FULL halts growth")
+        val fresh = storage(link).also { it.writeHeader(1, it.capacityBytes); assertTrue(it.create(far)) }
+        link.timeoutNext()
+        assertTrue(fresh.availableBytes() > (1L shl 40), "never measured: unknown, never halts")
     }
 
     @Test
@@ -172,7 +223,7 @@ class SmbRingStorageTest {
     }
 
     @Test
-    fun availableBytesKeepsTheNetworkReserveAndAFailureAnswersZero() {
+    fun availableBytesKeepsTheNetworkReserveAndAFailureAnswersTheLastValue() {
         val link = FakeRemoteLink()
         val s = storage(link)
         s.writeHeader(1, s.capacityBytes)
@@ -181,7 +232,8 @@ class SmbRingStorageTest {
         val free = 10L * 1024 * 1024 * 1024 - link.usedBytes()
         assertEquals(StorageLimits.SMB.reportedAvailableBytes(free), s.availableBytes())
         link.timeoutNext()
-        assertEquals(0L, s.availableBytes())
+        // C-S4: a timeout answers the last known value (it used to answer 0 and shrink the ring for the cycle).
+        assertEquals(StorageLimits.SMB.reportedAvailableBytes(free), s.availableBytes())
         assertNull(s.lastFailure, "a space query never sets the write failure")
     }
 }

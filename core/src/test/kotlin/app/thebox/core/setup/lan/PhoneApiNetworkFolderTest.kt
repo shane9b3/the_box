@@ -284,6 +284,15 @@ class PhoneApiNetworkFolderTest {
 
     // ---- the folder split (shared with app.js: scratch check runs the same vectors through node) ----
 
+    /** C-N4: a control character in a share or folder name (a decoded `%00`, a newline) is refused server-side. */
+    @Test
+    fun aControlCharacterInAFolderIsRefused() {
+        assertNull(PhoneApi.splitFolder("nas", "TV\u0000", null))
+        assertNull(PhoneApi.splitFolder("nas", "TV", "Rewind\nx"))
+        assertNull(PhoneApi.splitFolder("\\\\nas\\TV\\a\u007Fb", null, null))
+        assertTrue(PhoneApi.splitFolder("nas", "TV", "Rewind") != null)
+    }
+
     @Test
     fun splitFolderVectors() {
         val vectors = Json.parseToJsonElement(SPLIT_VECTORS).jsonArray
@@ -381,12 +390,18 @@ class PhoneApiNetworkFolderTest {
             repeat(LanLimits.PAIR_MAX_WRONG) { i ->
                 assertEquals(202, l.send(cookie, signIn(pw = "nope-$i")), "try ${i + 1}")
                 l.link.reportStatus("NAS didn't accept that user name or password. Check them and send again.", done = false)
-                if (i < LanLimits.PAIR_MAX_WRONG - 1) assertEquals(ServerPhase.PAIRED, l.link.state.value.phase)
+                if (i < LanLimits.PAIR_MAX_WRONG - 1) {
+                    assertEquals(ServerPhase.PAIRED, l.link.state.value.phase)
+                    // U-N1 (fix pass): the TV's state carries the failed phone sign-in's text.
+                    assertEquals("NAS didn't accept that user name or password. Check them and send again.", l.link.state.value.lastSignInStatus)
+                    assertEquals(false, l.link.state.value.lastSignInOk)
+                }
             }
             assertEquals(410, l.send(cookie))
             val failed = awaitValue { l.link.state.value.takeIf { it.phase == ServerPhase.FAILED } }
             assertEquals(LanFailure.TOO_MANY_WRONG_CODES, failed.failure)
             assertEquals(phoneIp, failed.pairedFrom)
+            assertEquals(false, failed.lastSignInOk)
             assertTrue(PhoneScreenModel.tooManySignIns(failed, PhonePurpose.NETWORK_FOLDER))
             assertFalse(PhoneScreenModel.tooManySignIns(failed, PhonePurpose.SETUP))
             assertFalse(PhoneScreenModel.tooManySignIns(LanServerState(ServerPhase.FAILED, failure = LanFailure.TOO_MANY_WRONG_CODES), PhonePurpose.NETWORK_FOLDER))

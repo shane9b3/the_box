@@ -204,6 +204,115 @@ class FallbackRingStorageTest {
         assertEquals(-1L, f.firstWriteMonoMs)
     }
 
+    // ------------------------------------------------------------------ C-B1 (fix pass, core half, 2026-10-24)
+
+    private val realClock = app.thebox.core.playback.MonoClock { System.nanoTime() / 1_000_000L }
+
+    /** C-B1 (the review probe): each create step just under the deadline, far under the I/O timeout; the switch holds it. */
+    @Test
+    fun switchLandsByTheDeadlineWhateverEachStepTakes() {
+        val link = app.thebox.core.storage.smb.FakeRemoteLink(realClock)
+        link.latencyMs = 900 // a NAS disk waking: every round trip just under the deadline
+        val primary = app.thebox.core.storage.smb.SmbRingStorage(link, "TheBox-rewind/ring-x-1-1.bin", cap, StorageLimits.SMB, realClock)
+        val deadline = 1_000L
+        val fb = FallbackRingStorage(primary, { MemoryRingStorage(cap) }, deadline, realClock)
+        val t0 = realClock.nowMs()
+        fb.pwrite(ByteBuffer.wrap(ByteArray(TimeshiftConstants.RING_BLOCK_BYTES)), TimeshiftConstants.RING_HEADER_BYTES.toLong())
+        val took = realClock.nowMs() - t0
+        assertEquals(StorageKind.INTERNAL, fb.switchedTo)
+        assertTrue(took <= deadline + 250, "the first write waited $took ms for a $deadline ms deadline")
+        // The create was still in flight: it ends off the flusher, and its late handle is closed and its file removed.
+        waitFor("late create closed") { link.refs.get() == 0 && !link.exists(primary.relativePath) && link.log.any { it.startsWith("open:") } }
+    }
+
+    /** C-B1: a create blocked inside one I/O call (a hung CREATE) cannot hold the switch either. */
+    @Test
+    fun aCreateBlockedInsideOneCallStillSwitchesOnTime() {
+        val link = app.thebox.core.storage.smb.FakeRemoteLink(realClock)
+        link.stallCallsUntil("open:", realClock.nowMs() + 60_000) // ends as an 8 s I/O timeout
+        val primary = app.thebox.core.storage.smb.SmbRingStorage(link, "TheBox-rewind/ring-x-1-3.bin", cap, StorageLimits.SMB, realClock)
+        val fb = FallbackRingStorage(primary, { MemoryRingStorage(cap) }, 500L, realClock)
+        val t0 = realClock.nowMs()
+        fb.pwrite(buf(100), 4_096L)
+        assertTrue(realClock.nowMs() - t0 <= 750, "switched after ${realClock.nowMs() - t0} ms")
+        assertEquals(StorageKind.INTERNAL, fb.switchedTo)
+        assertEquals(LocationFallback.UNREACHABLE, fb.fallbackReason)
+    }
+
+    /** C-B1: the pool bounds the wait, whatever the deadline: at 25 % free the cycle switches. */
+    @Test
+    fun aFillingPoolSwitchesBeforeTheDeadline() {
+        val p = ScriptedRemote(createAnswer = { Thread.sleep(30_000); true })
+        val pool = 100L * TimeshiftConstants.RING_BLOCK_BYTES
+        val used = java.util.concurrent.atomic.AtomicLong()
+        val fb = FallbackRingStorage(p, { MemoryRingStorage(cap) }, 6_000L, realClock)
+        fb.attachPool(pool) { used.get() }
+        val filler = Thread { while (used.get() < pool) { used.addAndGet(pool / 50); Thread.sleep(10) } }.apply { isDaemon = true; start() }
+        val t0 = realClock.nowMs()
+        fb.pwrite(buf(100), 4_096L)
+        val took = realClock.nowMs() - t0
+        val atSwitch = used.get()
+        filler.interrupt()
+        assertEquals(StorageKind.INTERNAL, fb.switchedTo)
+        assertTrue(took < 1_500, "switched after $took ms (the pool fills in ≈ 0.5 s)")
+        assertTrue(atSwitch < pool, "switched before the pool was full ($atSwitch of $pool)")
+    }
+
+    /** C-B1: the pool's time at the measured rate (× the margin) caps the deadline, so a 4K rate switches early. */
+    @Test
+    fun theMeasuredRateCapsTheDeadline() {
+        val p = ScriptedRemote(createAnswer = { Thread.sleep(30_000); true })
+        val pool = 160L * TimeshiftConstants.RING_BLOCK_BYTES // 10.47 MB: ≈ 3 s at 3.5 MB/s
+        val t0 = realClock.nowMs()
+        val fb = FallbackRingStorage(p, { MemoryRingStorage(cap) }, 6_000L, realClock)
+        fb.attachPool(pool) { (realClock.nowMs() - t0) * 3_500L } // 3.5 MB/s
+        fb.pwrite(buf(100), 4_096L)
+        val took = realClock.nowMs() - t0
+        assertTrue(took in 1_200..2_400, "switched after $took ms; the pool lasts ≈ 3 s, × ${FallbackRingStorage.POOL_MARGIN}")
+    }
+
+    /** C-S3: every switch is reported once, with the primary's failure. */
+    @Test
+    fun theSwitchIsReportedWithThePrimarysFailure() {
+        val reports = mutableListOf<StorageFailure?>()
+        val p = ScriptedRemote(createAnswer = { false }).apply { lastFailure = StorageFailure.ACCESS }
+        val f = FallbackRingStorage(p, { MemoryRingStorage(cap) }, 6_000L, clock).apply { onSwitched = { reports += it } }
+        f.pwrite(buf(10), 4_096L)
+        f.pwrite(buf(10), 4_106L)
+        assertEquals(listOf<StorageFailure?>(StorageFailure.ACCESS), reports)
+        val ok = FallbackRingStorage(ScriptedRemote(), { MemoryRingStorage(cap) }, 6_000L, clock).apply { onSwitched = { reports += it } }
+        ok.pwrite(buf(10), 4_096L)
+        assertEquals(1, reports.size, "no report when the folder took the file")
+    }
+
+    /** C-B1: a ring stop before the decision ends it with no fallback announcement (one toast), and no secondary. */
+    @Test
+    fun aStopBeforeTheDecisionAnnouncesNoFallback() {
+        val gate = java.util.concurrent.CountDownLatch(1)
+        val p = ScriptedRemote(createAnswer = { gate.await(); false })
+        val sec = CountingSecondary(cap)
+        val reports = mutableListOf<StorageFailure?>()
+        val f = FallbackRingStorage(p, { sec.builds.incrementAndGet(); sec.storage }, 6_000L, realClock).apply { onSwitched = { reports += it } }
+        val flusher = Thread { try { f.pwrite(buf(10), 4_096L) } catch (_: IOException) { } }.apply { start() }
+        Thread.sleep(100)
+        assertTrue(f.undecided)
+        assertTrue(f.abandonUndecided())
+        flusher.join(2_000)
+        gate.countDown()
+        assertFalse(flusher.isAlive)
+        assertNull(f.switchedTo)
+        assertNull(f.fallbackReason)
+        assertEquals(0, sec.builds.get())
+        assertTrue(reports.isEmpty())
+        assertTrue(p.deleted, "the primary is removed (a late CREATE is closed off the flusher)")
+        assertFalse(FallbackRingStorage(ScriptedRemote(), { sec.storage }, 6_000L, clock).also { it.pwrite(buf(1), 4_096L) }.abandonUndecided())
+    }
+
+    private fun waitFor(what: String, ms: Long = 5_000, cond: () -> Boolean) {
+        val end = System.nanoTime() + ms * 1_000_000
+        while (!cond()) { check(System.nanoTime() < end) { "timed out waiting for $what" }; Thread.sleep(5) }
+    }
+
     @Test
     fun aRealRingSwitchesBeforeItsFirstFlushAndStaysReadable() {
         val p = ScriptedRemote(createAnswer = { false }).apply { lastFailure = StorageFailure.UNREACHABLE }
