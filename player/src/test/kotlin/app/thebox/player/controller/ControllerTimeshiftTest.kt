@@ -398,6 +398,31 @@ class ControllerTimeshiftTest {
     }
 
     /**
+     * (Save-location integration, S4-Q5; storage §4.6, §10) A read of the saved file that fails on the resume after a
+     * pause is "lost on resume" and back at live: one SavingStopped(DISK_ERROR) carrying both flags, which the host words
+     * as PAUSE_RESUME_LOST_STORAGE for a network folder. A read failure at live keeps today's plain notice.
+     */
+    @Test
+    fun aReadFailureOnTheResumeSaysLostOnResumeAndBackAtLive() {
+        playBuffered()
+        c.pause()
+        f.idle()
+        c.resume()
+        f.idle()
+        readerError(app.thebox.core.playback.timeshift.RingIoException(java.io.IOException("EIO")))
+        val n = f.notices.filterIsInstance<PlaybackNotice.SavingStopped>()
+        assertEquals(listOf(PlaybackNotice.SavingStopped(RecordStop.DISK_ERROR, jumpedToLive = true, resumeLost = true)), n)
+    }
+
+    @Test
+    fun aReadFailureAtLiveKeepsThePlainNotice() {
+        playBuffered()
+        readerError(app.thebox.core.playback.timeshift.RingIoException(java.io.IOException("EIO")))
+        val n = f.notices.filterIsInstance<PlaybackNotice.SavingStopped>()
+        assertEquals(listOf(PlaybackNotice.SavingStopped(RecordStop.DISK_ERROR)), n)
+    }
+
+    /**
      * A-C4 (lead reconciliation R3): the hook is the writer's `reconnectAllowed`; a refusal makes the writer stop itself
      * with SLOT_LOST (`onStopped`, as `RingWriterImpl` does; `RingWriterTest` covers the cap), never the ladder.
      */

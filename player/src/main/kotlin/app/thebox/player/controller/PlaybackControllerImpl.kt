@@ -414,6 +414,10 @@ internal class PlaybackControllerImpl @Inject constructor(
         var readerStartOffset = 0L
         /** An active LOCAL time-shift: paused, or seeked behind live and not yet back at the head (§9.1, A-C5). */
         var localShift = false
+        /** (Save-location integration, S4-Q5) MonoClock ms of the last buffered resume; MIN_VALUE = none. */
+        var resumedAtMonoMs = Long.MIN_VALUE
+        /** (S4-Q5) The read-failure notice (back at live / resume lost) was sent for this cycle. */
+        var readLostNotified = false
         var pausedAtMs = 0L
         /** A cycle-scoped decision deferred until the reader reaches the head (§7.4). */
         var deferred: Pair<LadderDecision, FailureSignal>? = null
@@ -2516,6 +2520,7 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     private fun resumeBuffered(c: Cycle) {
         c.paused = false
+        c.resumedAtMonoMs = clock.nowMs()
         player?.playWhenReady = true
         setState(PlaybackState.Playing(nowPlaying(c), paused = false, warning = c.warning))
         c.ts?.onResume()
@@ -2920,7 +2925,16 @@ internal class PlaybackControllerImpl @Inject constructor(
             else -> {
                 // RingIoException (§4.6): live, with the storage toast.
                 eventLog.add(PlaybackEventType.DECISION, s.tuneId, "ring_io", "")
-                notifySavingStopped(c, RecordStop.DISK_ERROR)
+                // (Save-location integration, S4-Q5; storage §4.6, §10) The read side names what happened: a resume after
+                // a pause that found the file unreadable (PAUSE_RESUME_LOST_STORAGE), or a viewer behind live who is
+                // back at live. Once per cycle each; the host words it for the place the cycle saved on.
+                val resumeLost = c.paused || (c.resumedAtMonoMs != Long.MIN_VALUE && clock.nowMs() - c.resumedAtMonoMs <= RESUME_READ_WINDOW_MS)
+                val jumped = c.localShift || c.paused
+                if ((resumeLost || jumped) && !c.readLostNotified) {
+                    c.readLostNotified = true
+                    c.stopNotice = RecordStop.DISK_ERROR
+                    _notices.tryEmit(PlaybackNotice.SavingStopped(RecordStop.DISK_ERROR, jumpedToLive = jumped, resumeLost = resumeLost))
+                } else notifySavingStopped(c, RecordStop.DISK_ERROR)
                 c.localShift = false
                 liveStart(c)?.let { launchReader(c, it) }
             }
@@ -3201,6 +3215,9 @@ internal class PlaybackControllerImpl @Inject constructor(
         private val RESTARTABLE_STOPS = setOf(RecordStop.FULL_WHILE_PAUSED, RecordStop.HOLD_LIMIT, RecordStop.SLOT_LOST, RecordStop.PREEMPTED)
 
         /** (M6, §13) Stops with a toast (the others show in the paused header line). */
+        /** (Save-location integration, S4-Q5) A read failure this soon after a resume counts as "lost on resume". */
+        private const val RESUME_READ_WINDOW_MS = 10_000L
+
         private val TOASTED_STOPS = setOf(RecordStop.SLOT_LOST, RecordStop.PREEMPTED, RecordStop.DISK_ERROR, RecordStop.STORAGE_EVICTED, RecordStop.DISK_TOO_SLOW)
 
         /** (M6, A-S2) Answers that mean another device holds the slot. */

@@ -169,6 +169,7 @@ class SettingsWorld(
         machine.pinGate = gate
         storage.attachNavigation { machine }
         machine.backHandler = { storage.onBack(it) }
+        machine.leftHandler = { storage.onLeft(it) }
         machine.captureSaved = { a, k, p -> saved += Triple(a, k, p) }
     }
 

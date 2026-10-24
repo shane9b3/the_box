@@ -1866,3 +1866,78 @@ In worktree `agent-a08ef6c93e6603f3c` (branch `worktree-agent-a08ef6c93e6603f3c`
 3. **`LocationState.DEMOTED`** is published only while the keeper is READY. When the folder is also unreachable, the status says UNREACHABLE. Acceptable for the Save to page?
 4. **`SIGN_IN_TOAST_PROCESSES`** (the 3-process counter) belongs to WP-S4's `FallbackToastPolicy`, so `RingTargetSourceTest` does not cover the "toast counters" of §16.2.
 5. **`EditorPerfTest.budgets`** failed once under load during the gate and passed when re-run alone. It is unrelated to this WP, but it is load-sensitive when worktrees build in parallel.
+
+---
+
+## Integration pass (2026-10-24)
+
+On `main` at `a7f5543` (commit 0 + WP-S1…S6), the main working tree, uncommitted (the lead commits). Emulator `TheBox_TV_API30` (emulator-5554), cold-booted first (its clock had drifted 8 h). **Every instrumented run uninstalls the app, so the owner's playlist and Keystore key on the emulator are gone**; it now carries the debug build with the synthetic panel playlist. Logs, JUnit XML and screenshots: session scratchpad `integ/device/<run>/` and `integ/shots/`. MacPorts Samba was **not** installed during the pass (`/opt/local/sbin/smbd` absent), so no case ran against a real share.
+
+### Lead rulings applied
+
+| # | Ruling | What was done |
+|---|---|---|
+| 1 | S6-Q1 | `SettingsScreen(phone: (PhonePurpose, Long?) -> Unit)`, `AppRoot.settingsPhone` likewise; `MainActivity` passes `browse` to `PhoneSetupHost(…, browse =)`, so the phone page gets the browse's `PhoneContext`. |
+| 2 | S6-Q2 | `StreamBody.copyTo` zeroes its 64 KB chunk in a `finally`; `LanHttpServerImpl` reads through a `WipingBufferedInputStream` whose 8 KB read-ahead (it also holds body bytes) is zeroed when the connection ends. `PhoneApi`'s `FixedSink` was already zeroed (WP-S6). Test: `HttpParserTest.theChunkBufferIsZeroedAfterTheCopy` (success and truncated body, and the read-ahead wipe). |
+| 3 | S6-Q3 | Accepted as built (5 s linger, accepting nothing). |
+| 4 | S1-Q1 | `TheBoxApplication` builds `RingTargetSource` (and so the keeper) on `Dispatchers.IO` after the settings read, only when the TIMESHIFT choice is `smb-…`. The factory now takes `Optional<Provider<RingTargetSource>>` and resolves it on the first `prepare` (IO), so constructing the controller on main never builds the storage graph. The keeper's own first connect still waits for the first frame (A-N6), and it idles/disconnects in the background as §5.3 says (unchanged). |
+| 5 | S1-Q2 | Verified, no change: `PlaybackModule.monoClock`, `StorageModule.MONO`, the factory's clock (→ `FallbackRingStorage`, `VolumeStorage`) and `SmbRingStorage`/the keeper are all `SystemClock.elapsedRealtime`. (`NetworkFoldersImpl` uses `nanoTime` for browse timing only, never compared with the ring's.) |
+| 6 | S1-Q3 | Accepted: §5.4 sets the target choice, which honours DEMOTED whatever the keeper state (`StorageTargetsImpl.demoted`); the page shows UNREACHABLE while the folder is also unreachable, which is the more useful reason. |
+| 7 | S4-Q1 | `SettingsViewModel` calls `attachNavigation` on every `SettingsNavigationAware` source. |
+| 8 | S4-Q2 | `SettingsPageSource.onLeft(route)` (default false) and `SettingsShellLink.leftHandler` (default no-op); `SettingsMachineImpl.popPage(fromBack = false)` asks it; `StoragePages.onLeft` goes up one folder below the share root, else ← pops. `SettingsBackLadderTest`, `SettingsReachabilityTest` and the M5 settings tests are green; `StoragePagesTest.leftOnAFolderPageGoesBackOneLevelAndTheRowOffersUp` covers ←. |
+| 9 | S4-Q3 | (a) holds: `choose(TIMESHIFT, "vol-<uuid>")` creates the VOLUME location (name from `VolumeCatalog`). (b) was **not** true: `open(location.smb, null)` signed in with an empty password. `NetworkFoldersImpl.open` now, when no password is given and the address has a user, reads the matching stored location's password from `SecureBlobStore` (zeroed after use); a missing or unreadable one answers `NeedsSignIn`. |
+| 10 | S4-Q4 | `PlayerViewModel.rewindStat` appends `PlayerText.rewindPlaceStat` (kind, name, fallback from `LocalBufferState`, write rate read per stats tick, since the rates are outside its equality). `StatsOverlay.rewindPlace` stays unused (the suffix is already in the line). |
+| 11 | S4-Q5 | `PlaybackNotice.SavingStopped` gains `jumpedToLive` and `resumeLost` (defaulted). The controller's `RingIoException` branch sets them (paused, or a read failure ≤ 10 s after a buffered resume = `resumeLost`; behind live or paused = `jumpedToLive`), once per cycle. `PlayerViewModel` turns a disk stop of a USB/SMB cycle into `PAUSE_RESUME_LOST_STORAGE` / `REWIND_STOPPED_STORAGE` / `REWIND_STOPPED_SLOW` with the §10 arg (place named; "back at live" variant); this device keeps today's text. Tests: `ControllerTimeshiftTest.aReadFailureOnTheResume…`, `…AtLiveKeepsThePlainNotice`, `TimeshiftViewModelTest.storageStopsOnANetworkFolderNameIt`. |
+| 12 | S4-Q6 | Accepted. |
+
+**Other open questions, decided here:**
+- Commit 0 Q1–Q3: accepted as built (sub-page live in commit 0; the `FallbackToastGate` seam; `RemoteLink.post`).
+- S3-Q1: accepted; `StoragePages` collects `find()` in the page scope and cancels on `closed(FindComputers)`. S3-Q2 (NSD not network-bound below API 33) and S3-Q3 (NO_NETWORK semantics): accepted for v1.
+- S1-Q4: accepted (the 3-process counter is `FallbackToastPolicyTest`'s). S1 deviation 7 (`smb-smb-<uuid>` refs): kept; renaming would orphan stored passwords.
+- S4 deviation 7 ("NAS is almost full" without a size): accepted for v1.
+- **Not done, fix-pass item:** → (RIGHT) on an Item with `primary` (a folder, a share) does nothing; OK works. §9.3 says "OK (or →)". Changing the machine's RIGHT for every Item is an M5-wide behaviour change; it wants a source hook like `onLeft`.
+
+**Found and fixed in the pass:**
+- `:app:minifyReleaseWithR8` failed: dcerpc references `java.rmi.UnmarshalException` (absent on Android). Added `-dontwarn java.rmi.**`; `SmbShareLister` now also catches `LinkageError` (that path is a `NoClassDefFoundError` at runtime) and answers LIST_FAILED. R8 is green.
+- Debug aids: `TimeshiftFactory` logs one DEBUG line per prepare (target, chosen, fallback, pool, capacity, reuse/build, ms); the keeper logs (DEBUG) when it skips a connect in the background; `StorageDebugEntryPoint` (debug source set); `thebox-debug://settings?route=pauserewind|saveto|findcomputers`.
+
+### Unit gate
+
+`./gradlew :core:test :data:testDebugUnitTest :ui:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug`: green. `:core` 3,617, `:data` 416 (3 opt-in skipped), `:ui` 392, `:app` 72. `:player:testDebugUnitTest` alone: 501, green. `EditorPerfTest.budgets` and `GuideViewModelTest.hidingTheFocusedChannelKeepsTheIndex` did not flake this time. `:app:minifyReleaseWithR8`: green after the fix above.
+
+### Device suite `SaveLocationTest` (new; WP-S5 had not written it)
+
+`app/src/androidTest/kotlin/app/thebox/player/SaveLocationTest.kt`. Run with the fake panel as for `TimeShiftBufferTest`, plus `python3 tools/smbproxy/smbproxy.py --listen 0.0.0.0:4446 --upstream 127.0.0.1:4445 --control 0.0.0.0:4447` (the emulator drives faults over `10.0.2.2:4447`). Nothing listens on 4445 without Samba, so `10.0.2.2:4445` is "unreachable" (refused); the proxy's `blackhole` is "accepts TCP, never answers SMB". A missing precondition logs "not run" and returns (AGP counts an assumption failure as a failure).
+
+Final class run: **8/8 pass, 2 of them "not run" (Samba)**.
+
+| Case | Result | Numbers |
+|---|---|---|
+| I-SL-19 (part) Save to by keys from Playback, Find computers ends, BACK | pass | 2 OKs from Playback; Find ended in 3.0 s with "1 computer found" (the Mac at 10.0.2.2, port 445 open: macOS File Sharing), not the empty state |
+| I-SL-4 refused folder, failure seen → this device, one toast, no second toast on the next tune, rewind works | pass | failure seen 0.2 s after choosing; 10 s pause → BEHIND 11.2 s |
+| I-SL-4b last-known-good + blackholed → SMB chosen without waiting, switch at the deadline, one toast, rewind works | pass | switched 8.7–11.7 s after choosing (tune ~3–5 s + the 6 s deadline); toast 0.2–0.4 s after; BEHIND 11.3 s after a 10 s pause |
+| I-SL-3 (emulator form) 15 CH+ zaps, blackholed folder vs this device | pass | blackholed P50 301 / 334 / 346 ms vs this device 358 / 369 / 401 ms (three runs); prepare reuse 0 ms, no link calls |
+| keeper switch: a hanging connect to A does not keep the keeper from B | pass | B's failure seen 6.0 s after choosing B (A's 8 s I/O timeout ends the hang first) |
+| I-SL-8a demotion (simulated: `onStorageFailure` 30 s after the first write) → next tune UNSTABLE + toast; inside the grace no demotion | pass | toast at once |
+| I-SL-1 (Samba), I-SL-8 (Samba + proxy, real mid-cycle drop) | not run | need `-e samba 1` and Samba on 4445 |
+
+**Emulator finding for the TS owner (not the folder):** first media on a zap is bimodal on the emulator, ≈ 0.35 s or ≈ 1.3 s per 15-zap block. **This device with a 1-h ring (pool 64) was slow in 3 of 3 runs** (P50 1,277–1,362 ms vs 358–401 ms at 30 min); the journal puts the extra ≈ 800 ms between SNIFF and FIRST_FRAME (bytes in, reader/extractor slow), not in prepare. The folder's 1-h cycles (pool 160) were slow in 2 runs and fast in 1. Auto is 1 h on devices > 16 GB and on every SMB cycle, so this wants the hardware zap gate at 1 h.
+
+**Seen once, not reproduced:** in the first class run the keeper never tried a newly chosen folder (no log for 30 s) right after a blackholed connect; two later class runs and the dedicated keeper-switch case pass. The likeliest reading is `foreground = false` (the keeper then stays IDLE silently); the new DEBUG line will say so if it recurs.
+
+### Regression classes (each alone)
+
+All green: `TimeShiftBufferTest` I-TS-1, 2, 3, 9, 14, 20a, 28; `TimeShiftTest` 5/5; `StatsOverlayTest` 1/1; `FiveKeyJourneyTest` 1/1; `FiveKeySettingsTest` 1/1; `PhoneSetupTest` 6/6; `SmokeAndZapTest` 7/7. The whole ~90-min `TimeShiftBufferTest` class was not rerun.
+
+### Manual smoke (adb, screenshots)
+
+- Settings › Playback › Pause and rewind › Save to: This device (IN USE, 8.5 GB free), "USB drive · SDCARD" (the emulator's SD card is listed through `getExternalFilesDirs`, 0.5 GB free), Add a network folder. **UI defect:** the page subtitle ("Where rewind is saved while you watch.") is overlapped by the first row. The breadcrumb skips "Pause and rewind" when the page is opened by route.
+- Find computers: the sweep found 10.0.2.2 ("No name"); manual entry, Search again and Add from your phone listed.
+- Manual entry `\\10.0.2.2\rewind` (chips shown): reached the Mac's own smbd on 445, which refuses guests → "Sign in to 10.0.2.2" with the reason/next step. The "Which account?" info line is cut with an ellipsis (the §9.4 rule draws next-step lines whole).
+- Sign in from your phone: the QR page "Add a network folder from your phone" with the plain-HTTP note, URL and code.
+
+### Still open
+
+- Hardware: S-1 (USB on Fire TV / Onn), S-2 (release build on Fire OS 6 against a real server, APK delta, flusher CPU), I-SL-15 (discovery on a real LAN), the zap gate (now also at 1 h), I-SL-11 CPU.
+- Samba: I-SL-1, 2, 5, 6, 7, 8 (real drop), 9, 10, 12, 13, 14, 16, 21–24 once `sudo port install samba4` is done (`tools/smbtest/run-samba.sh` + `check.sh`, then `-e samba 1`).
+- Fix pass: → on folder/share Items; the Save to subtitle overlap; the cut "Which account?" line; "Use as guest" still offered after the server refused guests; the 1-h first-media finding (TS owner).

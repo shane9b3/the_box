@@ -263,6 +263,7 @@ class SmbSessionKeeper(
             KeeperState.CONNECTING, KeeperState.AUTH_FAILED -> return
             KeeperState.READY -> if (link.isReady) { scheduleKeepalive(); return } else connect(loc, link)
             KeeperState.IDLE -> if (foreground || link.openFiles > 0) connect(loc, link)
+                else BoxLog.d(TAG) { "${loc.id}: in the background, not connecting" } // (integration 2026-10-24) diagnosis
             KeeperState.BACKOFF -> if (reset) connect(loc, link)
         }
     }

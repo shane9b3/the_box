@@ -161,6 +161,31 @@ class TimeshiftViewModelTest {
         assertEquals("Back to live: leaving The Box clears what was paused. Stay in The Box to keep your place.", out.last())
     }
 
+    /**
+     * (Save-location integration, S4-Q5; storage §10) A cycle saving on a network folder names it: a read failure on the
+     * resume is PAUSE_RESUME_LOST_STORAGE, behind live the "back at live" variant; this device keeps today's text.
+     */
+    @Test
+    fun storageStopsOnANetworkFolderNameIt() {
+        val vm = vm()
+        val out = messages(vm)
+        localState.value = LocalBufferState(
+            identity = ch.identity, available = true, storage = app.thebox.core.storage.StorageKind.SMB,
+            storageFailure = app.thebox.core.storage.StorageFailure.UNREACHABLE, storageName = "NAS", locationId = "smb-1",
+        ); idle()
+        rawController.notices.tryEmit(PlaybackNotice.SavingStopped(RecordStop.DISK_ERROR, jumpedToLive = true, resumeLost = true)); idle()
+        assertEquals("NAS stopped answering while you were paused, so you're back at live. Rewind saves on this device from your next channel change.", out.last())
+        rawController.notices.tryEmit(PlaybackNotice.SavingStopped(RecordStop.DISK_ERROR, jumpedToLive = true)); idle()
+        assertTrue(out.last(), out.last().startsWith("NAS stopped answering, so you're back at live."))
+        rawController.notices.tryEmit(PlaybackNotice.SavingStopped(RecordStop.DISK_ERROR)); idle()
+        assertTrue(out.last(), out.last().startsWith("Rewind stopped: NAS stopped answering."))
+        localState.value = LocalBufferState(identity = ch.identity, available = true); idle()
+        val before = out.size
+        rawController.notices.tryEmit(PlaybackNotice.SavingStopped(RecordStop.DISK_ERROR)); idle()
+        assertEquals(before + 1, out.size)
+        assertTrue("this device: today's text, no place: ${out.last()}", !out.last().contains("NAS"))
+    }
+
     /** §13: the machine passes raw values; the VM writes "20 min", the clock, "your playlist". */
     @Test
     fun toastValuesBecomeWords() {

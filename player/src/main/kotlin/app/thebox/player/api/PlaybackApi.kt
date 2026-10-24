@@ -365,7 +365,16 @@ sealed interface PlaybackNotice {
     /** A reader skipped a gap of [gapMs] ([stream] = the provider dropped it, else saving stopped while paused). */
     data class GapSkipped(val gapMs: Long, val stream: Boolean) : PlaybackNotice
     /** Saving for rewind stopped for [stop] (§4.4, §4.6). */
-    data class SavingStopped(val stop: app.thebox.core.playback.timeshift.RecordStop) : PlaybackNotice
+    data class SavingStopped(
+        val stop: app.thebox.core.playback.timeshift.RecordStop,
+        /**
+         * (Save-location integration, S4-Q5; storage §4.6, §10) A read of the saved file failed and the viewer, who was
+         * behind live, is back at live ("…so you're back at live").
+         */
+        val jumpedToLive: Boolean = false,
+        /** (S4-Q5) The read failed on the resume after a pause (PAUSE_RESUME_LOST_STORAGE). */
+        val resumeLost: Boolean = false,
+    ) : PlaybackNotice
     /** A rewind reached the start of the window the daily cap shortened (§8.4, once a day). */
     data object LimitedToday : PlaybackNotice
     /** A deferred cycle-scoped decision ran after the saved part played out (A-B1): back at live. */

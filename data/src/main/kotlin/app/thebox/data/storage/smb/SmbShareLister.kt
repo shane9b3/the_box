@@ -24,6 +24,11 @@ class SmbShareLister {
     } catch (e: Exception) {
         BoxLog.i(TAG) { "share listing failed: ${SmbFaults.faultName(e)}" }
         ShareListing(emptyList(), errorFor(e, signedInAsUser))
+    } catch (e: LinkageError) {
+        // (Integration 2026-10-24) dcerpc's malformed-response path names java.rmi.UnmarshalException, which Android
+        // lacks: that is a NoClassDefFoundError here. The typed share name is still offered.
+        BoxLog.i(TAG) { "share listing failed: ${e.javaClass.simpleName}" }
+        ShareListing(emptyList(), BrowseError(BrowseErrorKind.LIST_FAILED))
     }
 
     companion object {

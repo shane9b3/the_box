@@ -105,7 +105,7 @@ class MainActivity : ComponentActivity() {
                     onReady = ::reportFullyDrawn,
                     debugHint = BuildConfig.DEBUG,
                     search = { SearchScreen(search, onIdleChanged = { idle -> host.searchFieldIdle = idle }) },
-                    settingsPhone = { purpose -> app.thebox.ui.backup.PhoneSetupHost(phone, purpose) },
+                    settingsPhone = { purpose, browse -> app.thebox.ui.backup.PhoneSetupHost(phone, purpose, browse = browse) },
                     settingsEditor = { route -> app.thebox.ui.editor.ChannelEditorHost(channelEditor, route) },
                     grid = { modifier -> GuideGridHost(host.machine, renderer, modifier) },
                 )

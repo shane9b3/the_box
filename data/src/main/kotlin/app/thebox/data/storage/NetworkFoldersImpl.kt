@@ -63,6 +63,8 @@ class NetworkFoldersImpl @Inject constructor(
     private val lan: LanAddressFinder,
     @ApplicationContext private val context: Context,
     private val deviceId: DeviceIdentity,
+    /** (Save-location integration, S4-Q3) The stored sign-in of a saved location; a Provider, so no construction cycle. */
+    private val stored: javax.inject.Provider<StorageLocationsImpl>,
 ) : NetworkFolders {
     private val browse = Executors.newSingleThreadExecutor { r -> Thread(r, "box-smb-browse").also { it.isDaemon = true } }
     private val dispatcher = browse.asCoroutineDispatcher()
@@ -77,7 +79,30 @@ class NetworkFoldersImpl @Inject constructor(
 
     override fun find(): Flow<FindState> = finder.search()
 
-    override suspend fun open(address: SmbAddress, password: CharArray?): BrowseResult = runInterruptible(dispatcher) {
+    /**
+     * (Save-location integration, S4-Q3) A stored location's Test and sign-in check call `open(location.smb, null)`: with
+     * no password given and a user name in [address], the saved password of the matching stored location
+     * (`SecureBlobStore`) is used. None stored (restored backup, Keystore reset) → [BrowseResult.NeedsSignIn]. The pages
+     * never see it; this copy is zeroed here.
+     */
+    override suspend fun open(address: SmbAddress, password: CharArray?): BrowseResult {
+        if (password != null || address.guest || address.user.isNullOrEmpty()) return openWith(address, password)
+        val loc = stored.get().status.value.map { it.location }.firstOrNull { l ->
+            val a = l.smb
+            a != null && a.host.equals(address.host, ignoreCase = true) && a.port == address.port &&
+                a.user == address.user && (a.domain.orEmpty()).equals(address.domain.orEmpty(), ignoreCase = true)
+        } ?: return openWith(address, null)
+        return when (val r = stored.get().readPassword(loc.id)) {
+            is app.thebox.data.storage.smb.PasswordRead.Ok -> {
+                val chars = r.chars
+                try { openWith(address, chars) } finally { chars?.fill('\u0000') }
+            }
+            // Missing (restore) or unreadable (Keystore): ask for the sign-in, which stores it again.
+            app.thebox.data.storage.smb.PasswordRead.NeedsSignIn, app.thebox.data.storage.smb.PasswordRead.Unavailable -> BrowseResult.NeedsSignIn()
+        }
+    }
+
+    private suspend fun openWith(address: SmbAddress, password: CharArray?): BrowseResult = runInterruptible(dispatcher) {
         val vpn = runCatching { lan.vpnActive() }.getOrDefault(false)
         val conn = try { client.connect(address.host, address.port) } catch (e: Exception) {
             if (cancelled(e)) throw e

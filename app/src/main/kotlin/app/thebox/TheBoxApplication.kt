@@ -57,6 +57,12 @@ class TheBoxApplication : Application(), Configuration.Provider {
     @Inject lateinit var autoBackup: Lazy<app.thebox.data.backup.AutoBackupScheduler>
     /** (M6 time-shift, docs/design/m6-timeshift.md §8.3) The ring-file sweep at start and the trim-memory discard. */
     @Inject lateinit var timeshift: Lazy<app.thebox.player.timeshift.TimeshiftStartup>
+    /**
+     * (Save-location integration, S1-Q1; docs/design/m6-storage-locations.md §5.3) The ring-target source, and with it
+     * the SMB keeper, built off main at start when a network folder is chosen for rewind, so the first tune can find it
+     * READY. The keeper's own first connect still waits for the first frame (A-N6) and idles in the background.
+     */
+    @Inject lateinit var ringTargets: Lazy<app.thebox.core.playback.timeshift.RingTargetSource>
 
     override val workManagerConfiguration: Configuration
         get() = Configuration.Builder()
@@ -87,6 +93,17 @@ class TheBoxApplication : Application(), Configuration.Provider {
         appScope.launch(Dispatchers.Main) {
             startupGate.awaitOpen()
             reminderScheduler.get()
+        }
+        appScope.launch(Dispatchers.IO) {
+            try {
+                settingsStore.awaitReady()
+                val chosen = settingsStore.flow(app.thebox.core.settings.state.StorageDomain).value.timeshiftLocationId
+                if (chosen.startsWith(app.thebox.core.storage.StorageConstants.SMB_ID_PREFIX)) ringTargets.get()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                BoxLog.e("TheBoxApplication", "save-location keeper start failed", e)
+            }
         }
         // (M5 integration) After the settings read and the first frame, off the startup path: the weekly backup's
         // WorkManager entry follows the stored "weekly" choice (on by default), not only a toggle of the row.

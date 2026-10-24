@@ -29,4 +29,7 @@
 -keepclassmembers enum com.rapid7.client.dcerpc.** { *; }
 # slf4j stays unbound (no-op) in every build (§8 "Logs"): nothing to keep; the 1.x binder lookup is optional.
 -dontwarn org.slf4j.impl.**
+# (Save-location integration 2026-10-24, R8 missing class) dcerpc throws java.rmi.UnmarshalException on a malformed
+# response; Android has no java.rmi, so that path is a NoClassDefFoundError at runtime, which SmbShareLister catches.
+-dontwarn java.rmi.**
 # --- end smbj/mbassador/dcerpc rules ---

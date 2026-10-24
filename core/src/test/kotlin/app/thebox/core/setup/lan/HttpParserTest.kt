@@ -7,6 +7,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
 
 /** docs/design/m5-setup-settings.md §3.5.2 parser limits, §6.1 WP-D `HttpParserTest`. */
 class HttpParserTest {
@@ -86,6 +87,29 @@ class HttpParserTest {
         assertEquals("hello", out.toString())
         assertEquals(413, assertFailsWith<HttpParseException> { StreamBody(ByteArrayInputStream(ByteArray(20)), 20).copyTo(ByteArrayOutputStream(), 10) }.status)
         assertEquals(400, assertFailsWith<HttpParseException> { StreamBody(ByteArrayInputStream(ByteArray(3)), 5).copyTo(ByteArrayOutputStream(), 10) }.status)
+    }
+
+    /** Save-location integration (S6-Q2): the chunk buffer that held the body is all zeros afterwards, also on a 400. */
+    @Test
+    fun theChunkBufferIsZeroedAfterTheCopy() {
+        for (truncated in listOf(false, true)) {
+            val seen = mutableListOf<ByteArray>()
+            val source = ByteArrayInputStream("user=a&password=secret".toByteArray())
+            val recording = object : InputStream() {
+                override fun read(): Int = source.read()
+                override fun read(b: ByteArray, off: Int, len: Int): Int { seen += b; return source.read(b, off, len) }
+            }
+            val len = if (truncated) 64L else 22L
+            runCatching { StreamBody(recording, len).copyTo(ByteArrayOutputStream(), 1_000) }
+            assertTrue(seen.isNotEmpty())
+            seen.forEach { buf -> assertTrue(buf.all { it == 0.toByte() }, "buffer not zeroed (truncated=$truncated)") }
+        }
+        val wiping = WipingBufferedInputStream(ByteArrayInputStream("secret".toByteArray()), 64)
+        wiping.read(ByteArray(2))
+        wiping.wipe()
+        // The rest of "secret" was already read ahead; after the wipe the buffer hands back zeros, never the bytes.
+        val rest = ByteArray(4).also { assertEquals(4, wiping.read(it)) }
+        assertTrue(rest.all { it == 0.toByte() })
     }
 
     @Test

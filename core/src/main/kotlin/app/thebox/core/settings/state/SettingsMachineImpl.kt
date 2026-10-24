@@ -254,6 +254,8 @@ class SettingsMachineImpl(
 
     override var backHandler: ((SettingsRoute) -> Boolean)? = null
 
+    override var leftHandler: ((SettingsRoute) -> Boolean)? = null
+
     override fun replace(route: SettingsRoute) {
         closeOverlays()
         val old = currentRoute()
@@ -766,6 +768,8 @@ class SettingsMachineImpl(
     private fun popPage(fromBack: Boolean): Boolean {
         val route = currentRoute()
         if (fromBack && backHandler?.invoke(route) == true) return true
+        // (Save-location integration, S4-Q2) ← asks the page's source too: the folder browser goes up one folder.
+        if (!fromBack && leftHandler?.invoke(route) == true) return true
         if (path.size <= 1) {
             if (route == SettingsRoute.FirstRun) {
                 if (fromBack) effects.exitApp() // product S1: no confirmation

@@ -169,14 +169,19 @@ class StreamBody(
         consumed = true
         if (length > max) throw HttpParseException(413, "body too large")
         val buf = ByteArray(LanLimits.UPLOAD_CHUNK_BYTES)
-        var left = length
-        while (left > 0) {
-            val n = input.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
-            if (n < 0) throw HttpParseException(400, "truncated body")
-            sink.write(buf, 0, n)
-            left -= n
-            onProgress()
+        try {
+            var left = length
+            while (left > 0) {
+                val n = input.read(buf, 0, minOf(buf.size.toLong(), left).toInt())
+                if (n < 0) throw HttpParseException(400, "truncated body")
+                sink.write(buf, 0, n)
+                left -= n
+                onProgress()
+            }
+            return length
+        } finally {
+            // Save-location integration (S6-Q2): the chunk held the request body (a network-folder password); zero it.
+            buf.fill(0)
         }
-        return length
     }
 }

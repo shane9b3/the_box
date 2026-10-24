@@ -161,7 +161,7 @@ fun AppRoot(
     videoLayer: @Composable (RectPx?) -> Unit = { rect -> VideoLayer(host.surfacePlayer, rect, Modifier.testTag(VIDEO_LAYER_TAG)) },
     search: @Composable () -> Unit = {},
     /** (M5 integration) WP-D's phone page for `SettingsRoute.PhoneSetup` (the activity owns its view model). */
-    settingsPhone: (@Composable (app.thebox.core.settings.PhonePurpose) -> Unit)? = null,
+    settingsPhone: (@Composable (app.thebox.core.settings.PhonePurpose, Long?) -> Unit)? = null,
     /** (M6, docs/design/m6-channel-editor.md §2.0) The channel editor page for `SettingsRoute.ChannelEditor`. */
     settingsEditor: (@Composable (app.thebox.core.settings.SettingsRoute.ChannelEditor) -> Unit)? = null,
     grid: @Composable (Modifier) -> Unit,

@@ -80,9 +80,13 @@ class SettingsViewModel internal constructor(
         effects.machine = machine
         built?.mapping?.let { m -> (machine as? SettingsShellLink)?.captureSaved = m::save }
         navigator?.attach(machine)
+        // (Save-location integration, S4-Q1) Sources that move on after a suspend (the save-location pages: shares after a
+        // connect, popTo(Save to) after a save, BACK out of the browse) get the machine's shell link.
+        ordered.filterIsInstance<app.thebox.core.settings.state.SettingsNavigationAware>().forEach { it.attachNavigation { machineRef as? SettingsShellLink } }
         val s = this.scope
         // BACK asks the page's source first (WP-B's import page confirms before it is left, §3.4.5).
         (machine as? SettingsShellLink)?.backHandler = { r -> ordered.firstOrNull { it.handles(r) }?.onBack(r) == true }
+        (machine as? SettingsShellLink)?.leftHandler = { r -> ordered.firstOrNull { it.handles(r) }?.onLeft(r) == true }
         // Routes that leave the open path (popped, replaced, Settings closed) let their source stop observing.
         s.launch(main) {
             var live = emptySet<app.thebox.core.settings.SettingsRoute>()

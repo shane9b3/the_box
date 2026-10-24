@@ -143,7 +143,8 @@ class SettingsDebugProbe @Inject constructor(
 
         /**
          * `route=` values of §6.5 (plus the others the suite needs): playback, playlist:{id}, mapping, parental, backup,
-         * diag, about, licences, sync, nettest:{id}, network, root, firstrun, add, phone, logs-phone.
+         * diag, about, licences, sync, nettest:{id}, network, root, firstrun, add, phone, logs-phone, pauserewind, saveto,
+         * findcomputers.
          */
         fun parseRoute(spec: String?): SettingsRoute? {
             val s = spec?.trim()?.lowercase() ?: return null
@@ -175,6 +176,10 @@ class SettingsDebugProbe @Inject constructor(
                 "rules" -> arg?.let { SettingsRoute.HideRules(it) }
                 "groups" -> arg?.let { SettingsRoute.Groups(it) }
                 "fixguide" -> SettingsRoute.FixGuide()
+                // (Save-location integration, 2026-10-24) the storage pages (m6-storage-locations §9.2).
+                "pauserewind" -> SettingsRoute.PauseRewind
+                "saveto" -> SettingsRoute.SaveLocation()
+                "findcomputers" -> SettingsRoute.FindComputers
                 else -> null
             }
         }

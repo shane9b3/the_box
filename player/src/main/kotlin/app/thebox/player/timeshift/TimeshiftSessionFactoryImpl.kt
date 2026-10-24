@@ -98,6 +98,12 @@ internal class TimeshiftSessionFactoryImpl(
     targets: RingTargetSource? = null,
     /** `ActivityManager.memoryClass` in MiB: the remote pool size (lead ruling 5). */
     private val memoryClassMb: Int = 0,
+    /**
+     * (Save-location integration, S1-Q1) Production: the bound source, resolved on the first [prepare] (IO), so building
+     * the controller on main never constructs the storage graph (keeper, locations). `TheBoxApplication` builds it off
+     * main at start. Used only when [targets] is null.
+     */
+    targetsLater: (() -> RingTargetSource)? = null,
 ) : TimeshiftSessionFactory {
 
     @Inject constructor(
@@ -109,16 +115,18 @@ internal class TimeshiftSessionFactoryImpl(
         indexers: Provider<TsIndexer>,
         transport: TransportFactory,
         clock: MonoClock,
-        targets: java.util.Optional<RingTargetSource>,
+        targets: java.util.Optional<Provider<RingTargetSource>>,
         internalTargets: InternalRingTargets,
     ) : this(
         storage, policy, ringFactory, writerFactory, indexers, transport, clock,
         lowRam = context.getSystemService(ActivityManager::class.java)?.isLowRamDevice == true,
-        targets = targets.orElse(internalTargets),
         memoryClassMb = context.getSystemService(ActivityManager::class.java)?.memoryClass ?: 0,
+        targetsLater = { targets.map { it.get() }.orElse(internalTargets) },
     )
 
-    private val targets: RingTargetSource = targets ?: InternalRingTargets(storage)
+    private val targets: RingTargetSource by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        targets ?: targetsLater?.invoke() ?: InternalRingTargets(storage)
+    }
 
     private val lock = Mutex()
     private val ringLock = Any()
@@ -205,8 +213,15 @@ internal class TimeshiftSessionFactoryImpl(
             val mode = policy.mode(settings.timeshift, storage.writtenToday(), if (countsWear) dailyLimit else null, needsPersist = false)
             val hold = TimeshiftDebugOverrides.holdMs ?: policy.holdLimitMs(settings.timeshiftHold)
             if (!needed()) return TimeshiftPrepared.Off(BufferOff.SETTING_OFF)
+            val ringT0 = System.nanoTime()
+            val before = synchronized(ringLock) { ring }
             val r = ringFor(choice, capacity, indexEntries, lengthMs, pool, total)
             r.mode = mode
+            // (Save-location integration, 2026-10-24) one line per prepare: what the zap got and what the ring cost.
+            BoxLog.d(TAG) {
+                "prepare: ${choice.target.kind} chosen=${choice.chosenId.take(12)} fb=${choice.fallback} pool=$pool cap=${capacity shr 20}MiB " +
+                    "${if (r === before) "reuse" else "build"} ${(System.nanoTime() - ringT0) / 1_000_000} ms"
+            }
             val grant = TimeshiftGrant(r, capacity, mode, hold, choice)
             synchronized(ringLock) {
                 lengths[grant] = lengthMs

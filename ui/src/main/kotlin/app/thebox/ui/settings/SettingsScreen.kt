@@ -73,7 +73,8 @@ fun SettingsScreen(
     clock24: Boolean,
     modifier: Modifier = Modifier,
     /** (M5 integration) WP-D's phone page for `SettingsRoute.PhoneSetup` (the activity supplies its view model). */
-    phone: (@Composable (app.thebox.core.settings.PhonePurpose) -> Unit)? = null,
+    /** (save-location integration, S6-Q1) The second argument is `SettingsRoute.PhoneSetup.browse` (NETWORK_FOLDER). */
+    phone: (@Composable (app.thebox.core.settings.PhonePurpose, Long?) -> Unit)? = null,
     /**
      * (m6-channel-editor §2.0) The channel editor for `SettingsRoute.ChannelEditor` (the activity supplies its view
      * model). Drawn inside [SettingsContent], after the header and before the text editor and number pad overlays.
@@ -85,7 +86,7 @@ fun SettingsScreen(
     val route = ui.route
     // (M5 integration) Full-screen pages other WPs draw: WP-D's phone page, WP-B's Welcome cards (first run).
     if (route is SettingsRoute.PhoneSetup && phone != null) {
-        phone(route.purpose)
+        phone(route.purpose, route.browse)
         return
     }
     val page = ui.page

@@ -208,11 +208,18 @@ class PlayerViewModel @Inject constructor(
         if (!on) kotlinx.coroutines.flow.flowOf(null)
         else controller.stats.map { s ->
             if (s.rewindWindowMs <= 0) null
-            else context.resources.getString(
-                app.thebox.ui.R.string.player_stat_rewind,
-                PlayerText.behindText(s.rewindSavedMs), PlayerText.behindText(s.rewindWindowMs),
-                PlayerText.gbArg(context.resources, s.rewindBytes),
-            )
+            else {
+                val line = context.resources.getString(
+                    app.thebox.ui.R.string.player_stat_rewind,
+                    PlayerText.behindText(s.rewindSavedMs), PlayerText.behindText(s.rewindWindowMs),
+                    PlayerText.gbArg(context.resources, s.rewindBytes),
+                )
+                // (Save-location integration, S4-Q4; §10, U-N4) Where this cycle saves: "· NAS 3.4 MB/s", "· this device
+                // (NAS offline)". Read per stats tick: the write rate is excluded from LocalBufferState's equality.
+                val lb = controller.localBuffer.value
+                val place = lb?.let { PlayerText.rewindPlaceStat(context.resources, it.storage, it.storageName, it.storageRatesBps.writeBps, it.fallback) }
+                if (place != null) "$line · $place" else line
+            }
         }
     }.distinctUntilChanged().stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
@@ -426,14 +433,39 @@ class PlayerViewModel @Inject constructor(
                 return
             }
             // §11.5: while paused the header line says it; the toast is for a viewer behind live.
-            is PlaybackNotice.SavingStopped -> if (archive.status.value.phase == ArchivePhase.PAUSED &&
-                (n.stop == app.thebox.core.playback.timeshift.RecordStop.SLOT_LOST || n.stop == app.thebox.core.playback.timeshift.RecordStop.PREEMPTED)) return
+            is PlaybackNotice.SavingStopped -> {
+                if (archive.status.value.phase == ArchivePhase.PAUSED &&
+                    (n.stop == app.thebox.core.playback.timeshift.RecordStop.SLOT_LOST || n.stop == app.thebox.core.playback.timeshift.RecordStop.PREEMPTED)) return
+                // (Save-location integration, S4-Q5; storage §10) A cycle saving on a USB drive or a network folder names
+                // the place, and a read failure says "back at live" / "while you were paused". This device: today's text.
+                storageStopToast(n)?.let { (kind, arg) -> toast(kind, arg); return }
+            }
             // §8.4 (U-S2): once a day.
             PlaybackNotice.LimitedToday -> if (!limitedTodayOnce()) return
             else -> Unit
         }
         val text = PlayerText.notice(context.resources, n) ?: return
         shellEvents.trySend(ShellEvent.Message(text))
+    }
+
+    /**
+     * (S4-Q5, §10) The PlayerToast and its `"<StorageKind>␟<StorageFailure|>␟<name>␟<jumped 1|>"` arg for a storage stop
+     * of a cycle that saves on a USB drive or a network folder; null = this device (today's notice text) or not a disk stop.
+     */
+    private fun storageStopToast(n: PlaybackNotice.SavingStopped): Pair<PlayerToast, String>? {
+        val lb = controller.localBuffer.value ?: return null
+        if (lb.storage == app.thebox.core.storage.StorageKind.INTERNAL) return null
+        val kind = when {
+            n.resumeLost -> PlayerToast.PAUSE_RESUME_LOST_STORAGE
+            n.stop == app.thebox.core.playback.timeshift.RecordStop.DISK_TOO_SLOW -> PlayerToast.REWIND_STOPPED_SLOW
+            n.stop == app.thebox.core.playback.timeshift.RecordStop.DISK_ERROR ||
+                n.stop == app.thebox.core.playback.timeshift.RecordStop.STORAGE_EVICTED -> PlayerToast.REWIND_STOPPED_STORAGE
+            else -> return null
+        }
+        val failure = if (n.stop == app.thebox.core.playback.timeshift.RecordStop.DISK_TOO_SLOW) app.thebox.core.storage.StorageFailure.SLOW else lb.storageFailure
+        val arg = listOf(lb.storage.name, failure?.name.orEmpty(), lb.storageName.orEmpty(), if (n.jumpedToLive) "1" else "")
+            .joinToString(PlayerText.ARG_SEP.toString())
+        return kind to arg
     }
 
     /** The local day REWIND_LIMITED_TODAY was last shown (§8.4: once a day). */

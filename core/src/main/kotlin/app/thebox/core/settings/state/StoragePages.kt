@@ -1088,6 +1088,17 @@ class StoragePages(
         else -> false
     }
 
+    /** ← in the folder browser below the share root = up one folder, in place (§7.6, U-B3); at the root it pops. */
+    override fun onLeft(route: SettingsRoute): Boolean {
+        if (route !is SettingsRoute.NetworkFolder) return false
+        val s = sessions[route.browse] ?: return false
+        if (s.path.isEmpty()) return false
+        up(s)
+        s.note = null
+        _changes.tryEmit(Unit)
+        return true
+    }
+
     override fun closed(route: SettingsRoute) {
         when (route) {
             SettingsRoute.FindComputers -> { findJob?.cancel(); findJob = null; find = null }

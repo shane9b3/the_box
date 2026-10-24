@@ -442,6 +442,19 @@ class StoragePagesTest {
         w.press(RowId("storage.folder.A"))
         assertNotNull(w.rows().firstOrNull { it.id == StoragePages.ROW_F_UP }, "the Up row is the in-page way up")
         assertEquals("FOLDER_NONE_BELOW", (w.row(StoragePages.ROW_F_STATUS).label))
+        // (Save-location integration, S4-Q2) ← = up one folder in place (§7.6); at the share root ← pops one page.
+        val route = w.ui.route
+        val depth = w.ui.stack.size
+        w.act(BoxAction.LEFT)
+        // The source emits `changes` (the view model rebuilds the open page); the world rebuilds it by hand.
+        w.machine.dispatch(SettingsEvent.Page(w.page(w.ui.route)))
+        assertEquals(route, w.ui.route, "← below the share root stays on the folder route")
+        assertEquals(depth, w.ui.stack.size)
+        assertEquals("FOLDER_SUBTITLE_ROOT", w.ui.page!!.subtitle, "back at the share root")
+        assertNull(w.rows().firstOrNull { it.id == StoragePages.ROW_F_UP }, "at the share root there is no Up row")
+        w.act(BoxAction.LEFT)
+        assertTrue(w.ui.route !is SettingsRoute.NetworkFolder, "← at the share root pops the folder page")
+        assertEquals(depth - 1, w.ui.stack.size)
     }
 
     @Test fun backOnAFolderPageFromADeepWalkLeavesWithinTwelveBacks() {

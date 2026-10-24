@@ -45,6 +45,12 @@ interface SettingsPageSource {
     /** BACK on [route] before the shell pops it (main thread). True = consumed (WP-B's import page asks first, §3.4.5). */
     fun onBack(route: SettingsRoute): Boolean = false
 
+    /**
+     * (Save-location integration, S4-Q2) ← on [route] before the shell pops it (main thread). True = consumed: the folder
+     * browser goes up one folder in place (§7.6, U-B3).
+     */
+    fun onLeft(route: SettingsRoute): Boolean = false
+
     /** [route] left the open path (popped, replaced, Settings closed): stop observing its data. Main thread. */
     fun closed(route: SettingsRoute) = Unit
 }
@@ -83,6 +89,11 @@ sealed interface SettingsShellEvent {
 interface SettingsShellLink : SettingsPageNavigation {
     /** Consulted on BACK at a page (no overlay open) before it pops; true = consumed. The effects route it to the page's source. */
     var backHandler: ((SettingsRoute) -> Boolean)?
+
+    /** (Save-location integration, S4-Q2) Consulted on ← at a page before it pops; true = consumed. Default: none. */
+    var leftHandler: ((SettingsRoute) -> Boolean)?
+        get() = null
+        set(@Suppress("UNUSED_PARAMETER") value) = Unit
 
     /** `AppRoot` passes the guide machine's `dispatch` (null when its composition leaves). */
     fun attachGuide(dispatch: ((GuideEvent) -> Unit)?)

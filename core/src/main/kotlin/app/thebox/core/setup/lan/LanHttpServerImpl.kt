@@ -152,9 +152,10 @@ class LanHttpServerImpl(
         val conn = a.conn
         var method = "?"
         var pathForLog = "?"
+        var wiping: WipingBufferedInputStream? = null
         try {
             runCatching { conn.setReadTimeout(config.socketTimeoutMs) }
-            val input = BufferedInputStream(conn.input, 8_192)
+            val input = WipingBufferedInputStream(conn.input, 8_192).also { wiping = it }
             val response = try {
                 val head = HttpParser.readHead(input, config.maxHeaderBytes, config.maxHeaders)
                 method = head.method
@@ -187,6 +188,9 @@ class LanHttpServerImpl(
         } catch (e: IOException) {
             BoxLog.i(TAG) { "$method $pathForLog connection ended: ${e.javaClass.simpleName}" }
         } finally {
+            // Save-location integration (S6-Q2): the read-ahead buffer holds request-body bytes (a network-folder
+            // password); zero it before the connection goes.
+            wiping?.wipe()
             runCatching { conn.close() }
             finish(a)
             a.thread = null
@@ -234,5 +238,12 @@ class LanHttpServerImpl(
             out.flush()
             return length
         }
+    }
+}
+
+/** A [BufferedInputStream] whose read-ahead buffer can be zeroed (S6-Q2: it may hold a POSTed password). */
+internal class WipingBufferedInputStream(input: java.io.InputStream, size: Int) : BufferedInputStream(input, size) {
+    fun wipe() {
+        buf?.fill(0)
     }
 }
