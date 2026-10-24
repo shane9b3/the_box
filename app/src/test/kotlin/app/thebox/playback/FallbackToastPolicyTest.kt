@@ -40,4 +40,16 @@ class FallbackToastPolicyTest {
         assertTrue(p.due("smb-3", LocationFallback.SIGN_IN_NEEDED))
         assertFalse(p.due("smb-3", LocationFallback.SIGN_IN_NEEDED))
     }
+
+    /** U-S9 (save-location review 2026-10-24): a new sign-in starts a fresh three, in this process and the next. */
+    @Test fun aNewSignInStartsAFreshThree() {
+        val counters = Counters()
+        repeat(3) { assertTrue(FallbackToastPolicy(counters).due("smb-1", LocationFallback.SIGN_IN_NEEDED)) }
+        val p = FallbackToastPolicy(counters)
+        assertFalse(p.due("smb-1", LocationFallback.SIGN_IN_NEEDED))
+        p.signedIn("smb-1")
+        assertTrue("the same process may toast the new episode", p.due("smb-1", LocationFallback.SIGN_IN_NEEDED))
+        assertTrue("a new process counts from one again", FallbackToastPolicy(counters).due("smb-1", LocationFallback.SIGN_IN_NEEDED))
+        assertFalse("other reasons keep the once-per-process rule", p.due("smb-1", LocationFallback.UNREACHABLE).let { p.due("smb-1", LocationFallback.UNREACHABLE) })
+    }
 }

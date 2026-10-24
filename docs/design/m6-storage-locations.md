@@ -1941,3 +1941,59 @@ All green: `TimeShiftBufferTest` I-TS-1, 2, 3, 9, 14, 20a, 28; `TimeShiftTest` 5
 - Hardware: S-1 (USB on Fire TV / Onn), S-2 (release build on Fire OS 6 against a real server, APK delta, flusher CPU), I-SL-15 (discovery on a real LAN), the zap gate (now also at 1 h), I-SL-11 CPU.
 - Samba: I-SL-1, 2, 5, 6, 7, 8 (real drop), 9, 10, 12, 13, 14, 16, 21–24 once `sudo port install samba4` is done (`tools/smbtest/run-samba.sh` + `check.sh`, then `-e samba 1`).
 - Fix pass: → on folder/share Items; the Save to subtitle overlap; the cut "Which account?" line; "Use as guest" still offered after the server refused guests; the 1-h first-media finding (TS owner).
+
+---
+
+## Implementation record — fix pass, UI half (2026-10-24)
+
+This pass applies review U (`docs/review/2026-10-24-storage-locations-review-ui.md`): the blocker U-B1, every should-fix U-S1…U-S10, and the cheap nice-to-haves (U-N2, U-N3, U-N4, U-N6, U-N9, U-N10), which also closes the integration pass's UI defect list (→ on folders, the subtitle overlap, the cut "Which account?" line, "Use as guest" after a refusal, the breadcrumb). Worktree `agent-ab0382afc4e730cf0`, base `8235d70`, uncommitted (the lead commits). No emulator was used. Every fix carries a `// U-xx` comment.
+
+**Gate:** `./gradlew :core:test :ui:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug` is **green**: `:core` 3,635 (`SimpleRowCountTest`, `SettingsBackLadderTest`, `SettingsReachabilityTest`, `WpaPagesTest` included), `:ui` 401, `:app` 73. Also green: `:data:testDebugUnitTest` 417 (3 opt-in skipped) and `:app:compileDebugAndroidTestKotlin`.
+
+**Regression tests.** The review's proof test `StorageReviewUiProofTest` is now the regression class, one or more cases per finding (`uB1_`…`uB1d_`, `uS1_`, `uS2_`, `uS2b_`, `uS2c_`, `uS3_`, `uS3b_`, `uS4_`, `uS5_`, `uS5b_`, `uS8_`, `uS8b_`, `uN2_`, `uN9_`, `uN10_`). Two of the original cases were rewritten as the review asked: `uS2_` drives a live finder (`LiveFinder`, a `MutableStateFlow`) instead of `closed()`; `uS2b_` expects the cursor on Sign in. UI: `StorageRowsUiTest` (`:ui`, U-S6, U-S7, U-S10, U-N3), `StorageTextTest.uS6_everyStorageLineFitsARow`. `:app`: `FallbackToastPolicyTest.aNewSignInStartsAFreshThree`. `:data`: `StorageLocationsImplTest.recordTestStoresTheLastTest`.
+
+### What was done, by finding
+
+| Finding | Fix |
+|---|---|
+| U-B1 | A typed share's failure is the shares page's own WARN Info row `storage.shares.note` (reason label, next-step line) above the Type row; it never goes into `s.error`. Another share (`networkFolder` with a new share) clears `note` and the share note. The typed job is `BrowseSession.typedJob`: cancelled before the next name and in `endSession`; a late answer is ignored unless the session still exists, and the push happens on the main thread only while the route is still `ComputerShares(token)`. NOT_FOUND reads "There's no shared folder "%1$s" on %2$s." / "Check the spelling, or choose one from the list."; LIST_FAILED "%1$s didn't answer the folder list." / "Try again, or type the shared folder's name below.". `storage_err_generic` and its step are gone. A share list that fails now carries the line "Type the shared folder's name below." |
+| U-S1 | Data rows have their own namespaces: `storage.folder.item.<name>` and `storage.share.item.<name>` (`StoragePages.FOLDER_ITEM`, `SHARE_ITEM`). `storage.find.pc.<address>` is unchanged: an address cannot equal a fixed Find row (they are `storage.find.status`, `.enter`…), and the ids are in the device suite's vocabulary. |
+| U-S2 | Find: the focus request is "Enter a name or address", then the first computer **once per visit and only while no key has been pressed**; afterwards it stays the same value, so the machine never re-applies it. Reset when Find closes. The key signal is a new seam (below). Sign in: `BrowseSession.signInFocus` is sticky: AUTH → Password; a typed password with a user name → Sign in; a submit → Sign in (so a second AUTH re-applies Password); GUEST_REFUSED → User name (Phone without a keyboard). |
+| U-S3 | "Use as guest" stays in its §7.3 place, disabled with `disabledReason` "%1$s doesn't allow guests." (`ERR_GUEST`) while the error is GUEST_REFUSED. |
+| U-S4 | The domain row is `TextHint.PATTERN` (accepts ""); clearing it reads "Not set". |
+| U-S5 | `StorageLocations.recordTest` (contract, below). `ensureTest` records a stored folder's result when it is not FAILED; a new walk that matches a stored folder records the walk's result after `updateSignIn`. |
+| U-S6 | Strings: the review's rewrites (wake note, folder missing, no keyboard, `storage_sign_in_info`, `storage_find_none_step`), plus SMB1 ("%1$s only speaks SMB1, which The Box doesn't support."), the Mac hint ("…tick this user in File Sharing…"), the VPN step's first line ("also called"), and the SLOW / TOO_SLOW steps split in two lines. Rule (tested over every `StorageText` except the phone's results and the notices): each line ≤ 80 characters, each Info label ≤ 60. Kit: the value column is `widthIn(max = 560)`, not a fixed 560; the verdict row has no value, its details are its last line, drawn mono at 22 (`SettingsUi.RowDescMono`); a storage Info row is `heightIn(min = rowHeight)`, so a line is never cut by the row's height. |
+| U-S7 | `SettingsUi.ROWS_TOP_SUBTITLE = 132` for any page with a subtitle (`PagePane` and the menu anchor `focusedRowY`). Pages without a subtitle keep 96 (tested). With 36 px less pane, `revealCursor` still brings the focused row inside it (tested on a 10-row Find page at cursor 7). |
+| U-S8 | `SettingsPageSource.onRight(route, row)` and `SettingsShellLink.rightHandler`, asked by the machine before its own Link/Item RIGHT. `StoragePages.onRight` enters a folder row and goes up on ".. Up one folder"; RIGHT on Save to's "This device" still chooses nothing. |
+| U-S9 | `FallbackToastGate.signedIn(locationId)` (contract, below); `FallbackToastPolicy.signedIn` forgets the in-process SIGN_IN_NEEDED toast and resets the counter (`SignInToastCounters.reset`, the file drops the entry). `StoragePages` calls it after a stored folder's sign-in, after a walk that re-signs a stored folder, and on Remove; it takes the gate as a constructor argument (bound in `SettingsBindingsModule`). |
+| U-S10 | The breadcrumb is "Settings › section › each page on the path › this page": titles of the stack's pages this Settings visit has shown (a `SideEffect`-fed map in `SettingsContent`), skipping Root, section pages, FirstRun and the phone page; one line, `TextOverflow.MiddleEllipsis` at 1,792 px. One level deep it is M5's three-part form. |
+| U-N2 | The Playback link reads "1 hour · This device (sign in to NAS)" (`PB_PAUSE_REWIND_VALUE_SIGN_IN`) for SIGN_IN_NEEDED; Save to's description for DEMOTED is `STATUS_DEMOTED`'s text. |
+| U-N3 | A row's `contentDescription` is label, second line, Info lines and value. The progress track's description is `storage_ui_testing` / `storage_ui_testing_progress`. |
+| U-N4 | `storage_phone_result_*` deleted (unused). |
+| U-N6 | A typed path (or the phone's) lands on the folder with `ComputerShares` under it: pushed over the shares, or `popTo`/`replace` the shares and then push. ← at the share root goes to the shares (§7.6). |
+| U-N9 | The NeedsSignIn replace and `afterSignedIn`'s choice read the route and stack inside `runOnMain`. Tested with a deferring `FakeStoragePageEnv`. |
+| U-N10 | The finders are paused (job cancelled, results kept) whenever a browse page is built, and resume when Find is built again. `closed(FindComputers)` and "Search again" start fresh. Page scope only. |
+
+Not done: U-N1 (the TV saying a phone sign-in failed): the reason lives in `LanPhoneLink`/`PhoneSetupScreen` state (`setup/lan`, the core half's), see below. U-N5, U-N7, U-N8: not in the lead's list.
+
+### Contract changes (additive; defaults keep every caller compiling)
+
+- `core/.../storage/StorageContracts.kt`: `StorageLocations.recordTest(locationId, result)` (default no-op; `StorageLocationsImpl` stores it in `StorageDomain`, `FakeStorageLocations` too); `FallbackToastGate.signedIn(locationId)` (default no-op).
+- `core/.../settings/state/SettingsPages.kt`: `SettingsPageSource.onRight(route, row)` and `keyPressed(route)`; `SettingsShellLink.rightHandler` and `keyObserver` (defaults: none). `SettingsMachineImpl` implements both; `SettingsViewModel` and `SettingsWorld` wire them like `leftHandler`.
+- `StorageText`: + `SHARE_NOT_FOUND_STEP`, `SHARE_LIST_FAILED`, `SHARE_LIST_FAILED_STEP`, `SHARES_LIST_FAILED_STEP`, `SIGN_IN_NO_KEYBOARD_STEP`, `FOLDER_MISSING_STEP`, `TEST_WAKE_NOTE_STEP`; − `ERR_GENERIC`, `ERR_GENERIC_STEP`. `FOLDER_MISSING` takes one argument now. `SettingsText`: + `PB_PAUSE_REWIND_VALUE_SIGN_IN`.
+
+### Deviations
+
+1. **A FAILED Test is not written to `lastTest`** (the review says "a non-stopped result"). FAILED reads "Not tested yet" in Status and would erase the last real verdict; the keeper's state already says why the folder fails.
+2. **`storage_find_none_step`** is the review's text with one more line break ("…Private.\nOn a guest Wi-Fi…"): the review's middle line is 94 characters, against its own 80-character rule.
+3. **`storage.find.pc.` keeps its prefix** (U-S1 above).
+4. **Find's focus** uses both the once-per-visit rule and the key signal (the review's "better still"), so a key pressed before the first computer also holds the cursor.
+5. **The overflow test is vertical only.** Robolectric's font is 1 px per character, so `StorageRowsUiTest` proves no line is cut by the row's height, and the width is held by the 80/60-character test.
+6. **The breadcrumb's middle is learnt from pages shown in this visit.** A route opened directly (the debug deep link `saveto`) has no title for a parent it never showed, so that part is left out until the viewer goes back through it. `SettingsUiState` has no titles of the stack; adding them is a contract change outside this pass.
+
+### For the core half / lead
+
+- **U-S9, the keeper side:** a folder that goes from SIGN_IN_NEEDED back to READY without the pages (a restore whose stored password works again, the keeper's own retry) should also call `FallbackToastGate.signedIn(id)`; the pages cover every sign-in they make.
+- **U-N1:** to show a failed phone sign-in on the TV, `LanServerState` (or the phone page's UI state) needs the last `reportStatus` text of a NETWORK_FOLDER session; `PhoneSetupScreen` would then draw it in Warn under the status line.
+- **Device check:** the 132-px rows top on every page with a subtitle (Channel options, Restore preview, the setup pages), the verdict row's mono details line, and the full breadcrumb's middle ellipsis on a deep browse.
+- `StorageContracts.kt` gained two default methods (above); the core half may be editing the same file.

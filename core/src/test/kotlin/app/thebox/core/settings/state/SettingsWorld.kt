@@ -170,6 +170,8 @@ class SettingsWorld(
         storage.attachNavigation { machine }
         machine.backHandler = { storage.onBack(it) }
         machine.leftHandler = { storage.onLeft(it) }
+        machine.rightHandler = { r, row -> storage.handles(r) && storage.onRight(r, row) }
+        machine.keyObserver = { r -> if (storage.handles(r)) storage.keyPressed(r) }
         machine.captureSaved = { a, k, p -> saved += Triple(a, k, p) }
     }
 

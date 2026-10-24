@@ -66,6 +66,9 @@ class FakeStorageLocations(initial: List<StorageLocation> = emptyList()) : Stora
 
     override suspend fun rename(locationId: String, name: String) = edit(locationId) { it.copy(name = name.take(StorageConstants.LABEL_MAX_CHARS)) }
 
+    /** U-S5: the Test's result becomes `lastTest`, as `StorageLocationsImpl` stores it. */
+    override suspend fun recordTest(locationId: String, result: LocationTestResult) = edit(locationId) { it.copy(lastTest = result) }
+
     override suspend fun remove(locationId: String) {
         passwords.remove(locationId)
         _status.value = _status.value.filter { it.location.id != locationId }

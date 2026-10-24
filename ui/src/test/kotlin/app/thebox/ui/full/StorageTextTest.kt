@@ -128,7 +128,29 @@ class StorageTextTest {
             val id = app.thebox.ui.R.string::class.java.getField(name).getInt(null)
             val lines = res.getString(id).split('\n')
             assertTrue("$name has several lines", lines.size >= 2)
-            for (l in lines) assertTrue("$name: a line of ${l.length} characters", l.length <= 150)
+            for (l in lines) assertTrue("$name: a line of ${l.length} characters", l.length <= 80) // U-S6
+        }
+    }
+
+    /**
+     * U-S6 (save-location review 2026-10-24): every line a storage page draws (split on line breaks) is at most 80
+     * characters, and every Info row label at most 60, so a host name or a 1.3x translation still fits one line.
+     * The phone's results (sent to the phone) and the notices (the notice line) are not row lines.
+     */
+    @Test fun uS6_everyStorageLineFitsARow() {
+        val labels = setOf(
+            "FIND_NONE_TITLE", "FIND_VPN_TITLE", "SIGN_IN_INFO_TITLE", "SIGN_IN_NO_KEYBOARD", "TEST_WAKE_NOTE", "TEST_SMALL_POOL_NOTE",
+            "FOLDER_MISSING", "SHARE_NOT_FOUND", "SHARE_LIST_FAILED", "SHARES_LIST_FAILED", "SHARES_NONE", "TEST_STOPPED", "FOLDER_TRUNCATED",
+            "FOLDER_NONE_BELOW", "FOLDER_LOADING", "CONNECTING", "FIND_SEARCHING", "FIND_DONE", "STATUS_GOOD_4K", "STATUS_GOOD_HD", "STATUS_SLOW",
+            "STATUS_TOO_SLOW", "ERR_UNREACHABLE", "ERR_UNREACHABLE_NOADDR", "ERR_SMB1", "ERR_AUTH", "ERR_GUEST", "ERR_ACCESS", "ERR_WRITE_USER",
+            "ERR_WRITE_GUEST", "ERR_NO_NETWORK", "ERR_DATA", "ERR_FULL",
+        )
+        for (k in app.thebox.core.settings.state.StorageText.entries) {
+            if (k.name.startsWith("PHONE_") || k.name.startsWith("NOTICE_")) continue
+            val id = app.thebox.ui.R.string::class.java.getField("storage_" + k.name.lowercase()).getInt(null)
+            val raw = res.getText(id).toString()
+            for (l in raw.split('\n')) assertTrue("${k.name}: a line of ${l.length} characters: $l", l.length <= 80)
+            if (k.name in labels) assertTrue("${k.name}: a label of ${raw.length} characters", raw.length <= 60 && !raw.contains('\n'))
         }
     }
 

@@ -31,12 +31,24 @@ class FallbackToastPolicy(private val counters: SignInToastCounters) : FallbackT
         counters.setProcesses(locationId, n + 1)
         return true
     }
+
+    /**
+     * U-S9 (save-location review 2026-10-24): a sign-in that worked (or a removal) ends the episode, so the next
+     * "sign in again" starts a fresh three processes (§5.1 "after it starts"), and may toast again in this process.
+     */
+    @Synchronized
+    override fun signedIn(locationId: String) {
+        seen.remove(locationId to LocationFallback.SIGN_IN_NEEDED)
+        counters.reset(locationId)
+    }
 }
 
 /** How many processes toasted "sign in again" for a location. Device state, not backed up. */
 interface SignInToastCounters {
     fun processes(locationId: String): Int
     fun setProcesses(locationId: String, count: Int)
+    /** U-S9: forgets [locationId]'s count (a new sign-in episode). */
+    fun reset(locationId: String) = setProcesses(locationId, 0)
 }
 
 /** A tiny text file (`<locationId> <count>` per line) in `noBackupFilesDir`; read once, written on change. */
@@ -48,7 +60,7 @@ class FileSignInToastCounters @Inject constructor(@ApplicationContext context: C
     @Synchronized override fun processes(locationId: String): Int = counts[locationId] ?: 0
 
     @Synchronized override fun setProcesses(locationId: String, count: Int) {
-        counts[locationId] = count
+        if (count == 0) { if (counts.remove(locationId) == null) return } else counts[locationId] = count
         try {
             file.writeText(counts.entries.joinToString("\n") { "${it.key} ${it.value}" })
         } catch (e: Exception) {

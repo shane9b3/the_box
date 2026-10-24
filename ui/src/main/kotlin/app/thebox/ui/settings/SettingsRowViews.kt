@@ -10,9 +10,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.relocation.BringIntoViewRequester
@@ -116,11 +118,14 @@ private fun RowBody(row: SettingsRow, focused: Boolean, moving: Boolean) {
     val alpha = if (row.enabled) 1f else SettingsUi.DISABLED_ALPHA
     val base = if (focused) SettingsUi.Canvas else SettingsUi.Fg
     val text = base.copy(alpha = alpha)
+    // U-S6: a storage Info row grows with its lines (at least rowHeight), so no next-step line is cut by the row's height.
+    val sized = if (isStorageInfo(row)) Modifier.heightIn(min = rowHeight(row).dp) else Modifier.height(rowHeight(row).dp)
     var m = Modifier
         .fillMaxWidth()
-        .height(rowHeight(row).dp)
+        .then(sized)
         .testTag(SETTINGS_ROW_TAG + row.id.key)
-        .semantics { selected = focused; contentDescription = row.label }
+        // U-N3 (save-location review 2026-10-24): TalkBack hears the next steps, the value and the details, not the label only.
+        .semantics { selected = focused; contentDescription = rowDescription(row) }
     m = when {
         focused -> m.border(SettingsUi.FOCUS_RING.dp, SettingsUi.Accent, shape).background(SettingsUi.Fg, shape)
         moving -> m.border(1.dp, SettingsUi.Accent, shape).background(SettingsUi.White12, shape)
@@ -148,15 +153,21 @@ private fun RowBody(row: SettingsRow, focused: Boolean, moving: Boolean) {
             (row.kind as? RowKind.Info)?.let { info ->
                 if (info.lines.isNotEmpty()) {
                     val tone = if (focused) text else SettingsUi.toneColor(info.tone).copy(alpha = alpha)
-                    // (WP-S4) The storage pages' next steps: one line each, never joined and clipped.
-                    if (isStorageInfo(row)) info.lines.forEach { Line(it, SettingsUi.RowDesc.copy(color = tone), Modifier.padding(top = 4.dp)) }
+                    // (WP-S4) The storage pages' next steps: one line each, never joined and clipped. U-S6: the Test's details
+                    // ("10.5 MB/s · 4 ms · Wi-Fi") are a line too, in mono at the line size.
+                    if (isStorageInfo(row)) info.lines.forEach {
+                        val style = if (SettingsUi.isMonoValue(it)) SettingsUi.RowDescMono else SettingsUi.RowDesc
+                        Line(it, style.copy(color = tone), Modifier.padding(top = 4.dp))
+                    }
                     else Line(info.lines.joinToString("  ·  "), SettingsUi.RowDesc.copy(color = tone), Modifier.padding(top = 4.dp))
                 }
             }
             // (WP-S4, §9.4) The Test's progress track under its label.
             if (row.id == PROGRESS_ROW) {
                 val fraction = SettingsUi.progressFraction(row.value) ?: 0f
-                ProgressTrack(fraction, Modifier.padding(top = 10.dp).semantics { contentDescription = row.value?.let { "Testing, $it" } ?: "Testing" })
+                // U-N3: the description is a string resource, not hard-coded English.
+                val testing = row.value?.let { stringResource(R.string.storage_ui_testing_progress, it) } ?: stringResource(R.string.storage_ui_testing)
+                ProgressTrack(fraction, Modifier.padding(top = 10.dp).semantics { contentDescription = testing })
             }
         }
         Trailing(row, focused, text)
@@ -184,7 +195,8 @@ private fun Trailing(row: SettingsRow, focused: Boolean, text: Color) {
                 style = style.copy(color = if (amber) SettingsUi.Amber.copy(alpha = text.alpha) else text.copy(alpha = text.alpha * 0.65f)),
                 maxLines = 1,
                 overflow = if (value.contains("://") || value.contains('.')) TextOverflow.MiddleEllipsis else TextOverflow.Ellipsis,
-                modifier = Modifier.width(VALUE_MAX_W.dp).padding(start = 16.dp),
+                // U-S6: at most 560 px, no longer always 560: a short value leaves the label column (and its lines) the room.
+                modifier = Modifier.widthIn(max = VALUE_MAX_W.dp).padding(start = 16.dp),
                 textAlign = androidx.compose.ui.text.style.TextAlign.End,
             )
         }
@@ -199,6 +211,14 @@ private fun Trailing(row: SettingsRow, focused: Boolean, text: Color) {
 }
 
 private const val VALUE_MAX_W = 560
+
+/** U-N3: the row as TalkBack reads it: label, the line under it, the Info lines (next steps, details) and the value. */
+internal fun rowDescription(row: SettingsRow): String = buildList {
+    add(row.label)
+    secondLine(row)?.let { add(app.thebox.core.settings.state.StorageMarks.plain(it)) }
+    (row.kind as? RowKind.Info)?.lines?.let { addAll(it) }
+    row.value?.let { add(app.thebox.core.settings.state.StorageMarks.plain(it)) }
+}.filter { it.isNotBlank() }.joinToString(", ")
 /** The wordmark on the About header row (design px). */
 private const val WORDMARK_W = 200
 

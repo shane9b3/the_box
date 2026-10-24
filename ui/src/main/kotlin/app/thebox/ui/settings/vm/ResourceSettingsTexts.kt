@@ -135,6 +135,7 @@ class ResourceSettingsTexts(private val resources: Resources) : SettingsTexts {
         SettingsText.PB_PAUSE_REWIND_DESC -> R.string.settings_pb_pause_rewind_desc
         SettingsText.PB_PAUSE_REWIND_VALUE -> R.string.settings_pb_pause_rewind_value
         SettingsText.PB_PAUSE_REWIND_VALUE_FALLBACK -> R.string.settings_pb_pause_rewind_value_fallback
+        SettingsText.PB_PAUSE_REWIND_VALUE_SIGN_IN -> R.string.settings_pb_pause_rewind_value_sign_in
         SettingsText.TS_HOURS_MIN -> R.string.settings_ts_hours_min
         SettingsText.TS_UP_TO_ON_DRIVE -> R.string.settings_ts_up_to_on_drive
         SettingsText.TS_AUTO_LIMITED_USB -> R.string.settings_ts_auto_limited_usb

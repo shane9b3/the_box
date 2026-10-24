@@ -68,9 +68,10 @@
     <string name="storage_find_done">%1$d computers found</string>
     <string name="storage_find_done_one">1 computer found</string>
     <string name="storage_find_none_title">No computers found.</string>
-    <string name="storage_find_none_step">Check the computer is on and file sharing is turned on (on Windows: set this network to Private).\nIf The Box is on a guest Wi-Fi, connect it to your main Wi-Fi. Or enter the computer\'s name or address.</string>
+    <!-- U-S6 (review 2026-10-24): every line of a next step is at most 80 characters, every Info label at most 60 (StorageTextTest). -->
+    <string name="storage_find_none_step">Check the computer is on and file sharing is turned on.\nOn Windows, set this network to Private.\nOn a guest Wi-Fi, connect The Box to your main Wi-Fi.\nOr enter the computer\'s name or address.</string>
     <string name="storage_find_vpn_title">A VPN app is on.</string>
-    <string name="storage_find_vpn_step">Allow local network access in it (sometimes called LAN access or split tunnelling),\nor pause it, so The Box can see computers at home.</string>
+    <string name="storage_find_vpn_step">Allow local network access in it (also called LAN access or split tunnelling),\nor pause it, so The Box can see computers at home.</string>
     <string name="storage_find_enter">Enter a name or address</string>
     <string name="storage_find_enter_desc">For example: nas, 192.168.1.20, or \\\\NAS\\TV\\Rewind</string>
     <string name="storage_find_phone">Add from your phone</string>
@@ -82,10 +83,15 @@
     <string name="storage_shares_subtitle">Shared folders</string>
     <string name="storage_connecting">Connecting to %1$s…</string>
     <string name="storage_shares_list_failed">This computer didn\'t list its shared folders.</string>
+    <string name="storage_shares_list_failed_step">Type the shared folder\'s name below.</string>
     <string name="storage_shares_none">%1$s has no shared folders to show.</string>
     <string name="storage_share_type_name">Type the shared folder\'s name</string>
     <string name="storage_share_type_name_desc">Use this if the shared folder isn\'t listed above.</string>
-    <string name="storage_share_not_found">There\'s no shared folder \"%1$s\" on %2$s. Check the name and try again.</string>
+    <!-- U-B1: the typed share name that did not open, and a folder list that failed: the reason, then its next step. -->
+    <string name="storage_share_not_found">There\'s no shared folder \"%1$s\" on %2$s.</string>
+    <string name="storage_share_not_found_step">Check the spelling, or choose one from the list.</string>
+    <string name="storage_share_list_failed">%1$s didn\'t answer the folder list.</string>
+    <string name="storage_share_list_failed_step">Try again, or type the shared folder\'s name below.</string>
     <string name="storage_sign_in">Sign in</string>
     <string name="storage_sign_in_as_someone">Sign in as someone else</string>
     <string name="storage_try_again">Try again</string>
@@ -103,8 +109,9 @@
     <string name="storage_sign_in_domain">Workgroup or domain</string>
     <string name="storage_sign_in_domain_desc">Leave empty unless you know you need it.</string>
     <string name="storage_sign_in_info_title">Which account?</string>
-    <string name="storage_sign_in_info">On Windows, use the user name and password of an account on that PC. A separate local account for The Box is a safer choice than your main sign-in.\nOn a Mac, use the Mac\'s user name and password.</string>
-    <string name="storage_sign_in_no_keyboard">No keyboard on this TV: sign in from your phone, or use a folder that allows guests.</string>
+    <string name="storage_sign_in_info">On Windows, use an account on that PC.\nA separate local account for The Box is safer than your main sign-in.\nOn a Mac, use the Mac\'s user name and password.</string>
+    <string name="storage_sign_in_no_keyboard">No keyboard on this TV.</string>
+    <string name="storage_sign_in_no_keyboard_step">Sign in from your phone, or use a folder that allows guests.</string>
     <string name="storage_not_set">Not set</string>
     <string name="storage_phone_signed_in">Signed in to %1$s. Choose the folder on the TV.</string>
     <string name="storage_phone_refused">%1$s didn\'t accept that user name or password. Check them and send again.</string>
@@ -116,7 +123,8 @@
     <string name="storage_folder_up">.. Up one folder</string>
     <string name="storage_folder_loading">Opening the folder…</string>
     <string name="storage_folder_truncated">Showing the first %1$,d folders.</string>
-    <string name="storage_folder_missing">There\'s no folder \"%1$s\" in %2$s. Choose one below.</string>
+    <string name="storage_folder_missing">There\'s no folder \"%1$s\" here.</string>
+    <string name="storage_folder_missing_step">Choose one below.</string>
     <string name="storage_folder_none_below">No folders in here. Use this folder, or go up.</string>
     <string name="storage_folder_subtitle_root">The top of the shared folder</string>
     <!-- Test (7.8) -->
@@ -132,10 +140,11 @@
     <string name="storage_test_again">Test again</string>
     <string name="storage_verdict_step_good_4k">%1$s free on %2$s.</string>
     <string name="storage_verdict_step_good_hd">4K channels may stop saving now and then. A wired connection to %1$s helps.</string>
-    <string name="storage_verdict_step_slow">A wired connection, or a Wi-Fi router closer to this TV, helps. You can still use it.</string>
-    <string name="storage_verdict_step_too_slow">Rewind would often stop. Use this device instead, or improve the connection to %1$s.</string>
+    <string name="storage_verdict_step_slow">A wired connection, or a Wi-Fi router closer to this TV, helps.\nYou can still use it.</string>
+    <string name="storage_verdict_step_too_slow">Rewind would often stop.\nUse this device instead, or improve the connection to %1$s.</string>
     <string name="storage_verdict_details">%1$s MB/s · %2$d ms · %3$s</string>
-    <string name="storage_test_wake_note">The drive took %1$s s to wake up. The Box wakes it when you open the TV, so rewind isn\'t affected.</string>
+    <string name="storage_test_wake_note">The drive took %1$s s to wake up.</string>
+    <string name="storage_test_wake_note_step">The Box wakes it when you open the TV, so rewind isn\'t affected.</string>
     <string name="storage_test_small_pool_note">On this TV, short network drops stop rewind for the channel.</string>
     <string name="storage_test_use_this">Use this folder</string>
     <string name="storage_test_use_for_rewind">Use for rewind</string>
@@ -149,11 +158,11 @@
     <string name="storage_err_unreachable_noaddr">Can\'t reach %1$s.</string>
     <string name="storage_err_unreachable_step">Check it\'s on and on the same network, then try again.</string>
     <string name="storage_err_vpn_append">A VPN app is on: allow local network access in it.</string>
-    <string name="storage_err_smb1">%1$s only speaks an old file-sharing version (SMB1), which The Box doesn\'t support.</string>
+    <string name="storage_err_smb1">%1$s only speaks SMB1, which The Box doesn\'t support.</string>
     <string name="storage_err_smb1_step">Turn on SMB2 or SMB3 in its settings.</string>
     <string name="storage_err_auth">%1$s didn\'t accept that user name or password.</string>
     <string name="storage_err_auth_step">Check them and try again.</string>
-    <string name="storage_err_auth_mac_append">On a Mac, also tick this user under File Sharing → Options → Windows File Sharing.</string>
+    <string name="storage_err_auth_mac_append">On a Mac, also tick this user in File Sharing → Options → Windows File Sharing.</string>
     <string name="storage_err_guest">%1$s doesn\'t allow guests.</string>
     <string name="storage_err_guest_step">Sign in with a user name and password.</string>
     <string name="storage_err_access">Your account can\'t open this folder on %1$s.</string>
@@ -168,8 +177,6 @@
     <string name="storage_err_data_step">Choose another folder.</string>
     <string name="storage_err_full">%1$s has only %2$s free; rewind needs %3$s.</string>
     <string name="storage_err_full_step">Free up space or choose another folder.</string>
-    <string name="storage_err_generic">Something went wrong with %1$s.</string>
-    <string name="storage_err_generic_step">Try again, or choose another folder.</string>
     <!-- Toasts and the stats line (section 10, U-N4) -->
     <string name="storage_toast_fb_unreachable">Rewind is saving on this device: %1$s isn\'t answering. Check it\'s on, or change Settings → Playback → Pause and rewind → Save to.</string>
     <string name="storage_toast_fb_sign_in">Rewind is saving on this device: %1$s needs you to sign in again. Sign in at Settings → Playback → Pause and rewind → Save to → %1$s.</string>
@@ -191,4 +198,7 @@
     <string name="storage_stat_place_rate">%1$s %2$s MB/s</string>
     <string name="storage_stat_place_fallback">this device (%1$s offline)</string>
     <string name="storage_stat_place_connecting">this device (%1$s connecting)</string>
+    <!-- U-N3: the Test's progress track for TalkBack (UI only, not a StorageText). -->
+    <string name="storage_ui_testing">Testing</string>
+    <string name="storage_ui_testing_progress">Testing, %1$s</string>
 </resources>

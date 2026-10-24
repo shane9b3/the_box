@@ -135,6 +135,8 @@ enum class SettingsText {
     PB_PAUSE_REWIND_DESC,
     PB_PAUSE_REWIND_VALUE,
     PB_PAUSE_REWIND_VALUE_FALLBACK,
+    /** U-N2 (save-location review 2026-10-24): the chosen folder needs a sign-in, which is not "offline". */
+    PB_PAUSE_REWIND_VALUE_SIGN_IN,
     TS_HOURS_MIN,
     TS_UP_TO_ON_DRIVE,
     TS_AUTO_LIMITED_USB,

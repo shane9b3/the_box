@@ -8,11 +8,4 @@
     <string name="storage_phone_received">Received from your phone. Signing in…</string>
     <string name="storage_phone_fail_sign_ins">Too many failed sign-ins, so the phone page was closed. Go back and start again on the TV.</string>
 
-    <!-- The sign-in results the TV mirrors to the phone (PhoneLink.reportStatus; WP-S4 sends them). %1$s = the computer's name. -->
-    <string name="storage_phone_result_signed_in">Signed in to %1$s. Choose the folder on the TV.</string>
-    <string name="storage_phone_result_auth">%1$s didn\'t accept that user name or password. Check them and send again.</string>
-    <!-- %2$s = the computer's address. -->
-    <string name="storage_phone_result_unreachable">Can\'t reach %1$s (%2$s). Check it\'s on and on the same network, then send again.</string>
-    <string name="storage_phone_result_no_guests">%1$s doesn\'t allow guests. Enter a user name and password, then send again.</string>
-    <string name="storage_phone_result_no_access">Your account can\'t open this shared folder on %1$s. Choose another one, or give your account access on %1$s, then send again.</string>
 </resources>

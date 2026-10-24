@@ -136,6 +136,11 @@ interface StorageLocations {
     suspend fun updateSignIn(locationId: String, user: String?, domain: String?, password: CharArray?, guest: Boolean)
     suspend fun rename(locationId: String, name: String)
     suspend fun remove(locationId: String)
+    /**
+     * (U-S5, save-location review 2026-10-24; additive) Stores [result] as [locationId]'s `lastTest` (§7.8: the verdict,
+     * rates, RTT, `wakeMs` and the time), so Status and "Use for rewind" read the latest Test. Default: a no-op (fakes).
+     */
+    suspend fun recordTest(locationId: String, result: LocationTestResult) = Unit
 }
 
 /**
@@ -143,7 +148,15 @@ interface StorageLocations {
  * `:ui`'s PlayerEffectsImpl delegates to it through `EffectDelegates`; WP-S4's FallbackToastPolicy binds it. The
  * commit-0 binding answers false (no fallback ever happens before the WPs land).
  */
-fun interface FallbackToastGate { fun due(locationId: String, reason: LocationFallback): Boolean }
+fun interface FallbackToastGate {
+    fun due(locationId: String, reason: LocationFallback): Boolean
+
+    /**
+     * (U-S9, save-location review 2026-10-24; additive) [locationId] signed in again, or was removed: its "sign in again"
+     * toast starts a fresh episode (§5.1 "the first 3 processes after it starts"). Default: a no-op.
+     */
+    fun signedIn(locationId: String) = Unit
+}
 
 /** USB volumes (§6). :player (VolumeWatcher) implements; :app binds it for :data. */
 interface VolumeCatalog {

@@ -29,6 +29,7 @@ import app.thebox.core.storage.BrowseError
 import app.thebox.core.storage.BrowseErrorKind
 import app.thebox.core.storage.BrowseHandle
 import app.thebox.core.storage.BrowseResult
+import app.thebox.core.storage.FallbackToastGate
 import app.thebox.core.storage.FindState
 import app.thebox.core.storage.FolderListing
 import app.thebox.core.storage.FoundComputer
@@ -65,6 +66,7 @@ import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -91,7 +93,12 @@ class BrowseSession internal constructor(val token: Long, /** Non-null: a stored
     @Volatile var loadingShares: Boolean = false
     @Volatile var folderList: FolderListing? = null
     @Volatile var folderKey: String? = null
-    @Volatile var note: String? = null
+    /** A note above the folder list (§7.2 missing folder): the reason label and its next-step lines. */
+    @Volatile var note: Pair<String, List<String>>? = null
+    /** U-B1: why a typed share name did not open (reason, next-step lines); drawn on the shares page, never on a folder. */
+    @Volatile var shareNote: Pair<String, List<String>>? = null
+    /** U-S2: the sign-in page's focus request, sticky across rebuilds (null = the page's first row). */
+    @Volatile var signInFocus: RowId? = null
     @Volatile var test: TestUi? = null
     @Volatile var fromPhone: Boolean = false
     @Volatile var received: String? = null
@@ -103,6 +110,8 @@ class BrowseSession internal constructor(val token: Long, /** Non-null: a stored
     internal var sharesJob: Job? = null
     internal var testJob: Job? = null
     internal var phoneJob: Job? = null
+    /** U-B1: the typed share's listing, cancelled before the next one and when the walk ends. */
+    internal var typedJob: Job? = null
     internal val routes: MutableSet<SettingsRoute> = ConcurrentHashMap.newKeySet()
     private var password: CharArray? = null
     private val lock = Any()
@@ -151,6 +160,8 @@ class StoragePages(
     private val parse: (String) -> ManualAddressParser.Result = { ManualAddressParser.parse(it) },
     /** A session whose last route closed is ended after this grace (a replace closes one route before the next builds). */
     private val reapGraceMs: Long = REAP_GRACE_MS,
+    /** U-S9: told when a stored folder signs in again or is removed (a fresh "sign in again" toast episode, §5.1). */
+    private val toastGate: FallbackToastGate = FallbackToastGate { _, _ -> false },
 ) : SettingsPageSource, PhoneContextProvider, SettingsNavigationAware {
     private val version = AtomicLong(0)
     private val tokens = AtomicLong(1)
@@ -161,7 +172,11 @@ class StoragePages(
     @Volatile private var link: (() -> SettingsShellLink?)? = null
     @Volatile private var find: FindState? = null
     @Volatile private var findJob: Job? = null
-    @Volatile private var findFocused: Boolean = false
+    /** U-S2: Find's focus request: "Enter a name or address", then the first computer once, while no key was pressed. */
+    @Volatile private var findFocus: RowId = ROW_ENTER
+    @Volatile private var findKeyPressed: Boolean = false
+    /** U-N10: the finders are paused while a browse page is shown over Find; the last results stay for the way back. */
+    @Volatile private var findPaused: Boolean = false
 
     override val notices: Flow<String> get() = _notices
 
@@ -205,7 +220,7 @@ class StoragePages(
             is SettingsRoute.LocationTest -> locationTest(route, v)
             is SettingsRoute.PhoneSetup -> {
                 val s = route.browse?.let { sessions[it] }
-                if (s != null) { attach(s, route); ensurePhone(s, route) }
+                if (s != null) { attach(s, route); pauseFind(); ensurePhone(s, route) } // U-N10
                 PageModel(route = route, title = st[StorageText.SIGN_IN_PHONE_TITLE], rows = emptyList(), version = v)
             }
             else -> PageModel(route = route, title = "", rows = emptyList(), version = v)
@@ -222,8 +237,8 @@ class StoragePages(
         row(id, label, RowKind.Info(lines, tone), value = value)
 
     /** A §7.7 error as a row: the reason as the label, the next step under it, in the tone. */
-    private fun errorRow(id: RowId, e: BrowseError, host: String, address: String?, apple: Boolean, tone: Tone = Tone.BAD, guest: Boolean = false): SettingsRow {
-        val (title, step) = errorTexts(e, host, address, apple, guest)
+    private fun errorRow(id: RowId, e: BrowseError, host: String, address: String?, apple: Boolean, tone: Tone = Tone.BAD, guest: Boolean = false, share: String? = null): SettingsRow {
+        val (title, step) = errorTexts(e, host, address, apple, guest, share)
         return info(id, title, step.split('\n'), tone)
     }
 
@@ -233,6 +248,7 @@ class StoragePages(
     private inline fun withSession(route: SettingsRoute, token: Long, build: (BrowseSession) -> PageModel): PageModel {
         val s = sessions[token] ?: return gone(route, version.incrementAndGet())
         attach(s, route)
+        pauseFind() // U-N10: a browse page is shown, so Find is not
         return build(s)
     }
 
@@ -247,6 +263,8 @@ class StoragePages(
         val off = p.timeshift == TimeshiftLength.OFF
         val desc = when {
             place.offlineName != null && place.problem == LocationState.SIGN_IN_NEEDED -> StorageMarks.warn(st[StorageText.SAVE_TO_DESC_SIGN_IN, place.sentence])
+            // U-N2: a demoted folder answers, it kept dropping out; "Can't reach" would send the viewer to the wrong fix.
+            place.offlineName != null && place.problem == LocationState.DEMOTED -> StorageMarks.warn(st[StorageText.STATUS_DEMOTED, place.sentence])
             place.offlineName != null -> StorageMarks.warn(st[StorageText.SAVE_TO_DESC_UNREACHABLE, place.sentence])
             else -> st[StorageText.SAVE_TO_DESC]
         }
@@ -405,9 +423,11 @@ class StoragePages(
         rows += row(ROW_ENTER, st[StorageText.FIND_ENTER], RowKind.Text("", TextHint.HOST, chips = HOST_CHIPS), description = st[StorageText.FIND_ENTER_DESC])
         rows += row(ROW_PHONE_FIND, st[StorageText.FIND_PHONE], RowKind.Action(), description = st[StorageText.FIND_PHONE_DESC])
         rows += row(ROW_AGAIN, st[StorageText.FIND_AGAIN], RowKind.Action())
-        // Focus (U-S9): "Enter a name or address" until the first computer arrives, then that computer.
-        val focus = if (computers.isNotEmpty()) RowId("storage.find.pc.${computers.first().address}") else ROW_ENTER
-        return PageModel(route = route, title = st[StorageText.FIND_TITLE], subtitle = st[StorageText.FIND_SUBTITLE], rows = rows, version = v, focus = focus)
+        // Focus (U-S9; U-S2, review 2026-10-24): "Enter a name or address" until the first computer arrives, then that
+        // computer, once per visit and only while no key has been pressed. The request then stays as it was, so the
+        // machine (which applies a changed request) never takes the cursor from the row the viewer chose.
+        if (findFocus == ROW_ENTER && !findKeyPressed && computers.isNotEmpty()) findFocus = RowId("storage.find.pc.${computers.first().address}")
+        return PageModel(route = route, title = st[StorageText.FIND_TITLE], subtitle = st[StorageText.FIND_SUBTITLE], rows = rows, version = v, focus = findFocus)
     }
 
     private fun addressKey(a: String): String = a.split('.').joinToString(".") { it.padStart(3, '0') }
@@ -415,7 +435,8 @@ class StoragePages(
     /** Starts the finders when the page is first built; they stop with the page ([closed]) or on "Search again". */
     private fun ensureFind() {
         if (findJob?.isActive == true) return
-        find = null
+        if (!findPaused) find = null // U-N10: back from a browse page, the last results stay until the new search answers
+        findPaused = false
         findJob = scope.launch {
             try {
                 // The flow lives as long as the page does (NetworkFolders.find KDoc: sockets and the multicast lock are held
@@ -429,6 +450,14 @@ class StoragePages(
                 _changes.tryEmit(Unit)
             }
         }
+    }
+
+    /** U-N10: stops the finders (and so the multicast lock and NSD) while Find is not on screen; Find resumes them. */
+    private fun pauseFind() {
+        val j = findJob ?: return
+        findPaused = true
+        j.cancel()
+        findJob = null
     }
 
     // ---------------------------------------------------------------- shares (§7.5)
@@ -445,11 +474,15 @@ class StoragePages(
                 rows += row(ROW_S_RETRY, st[StorageText.TRY_AGAIN], RowKind.Action())
             }
             shares != null -> {
-                if (shares.error != null) rows += info(ROW_S_STATUS, st[StorageText.SHARES_LIST_FAILED], tone = Tone.WARN)
+                // U-B1: the typed name is the way through when the list fails (§7.5): the line says so.
+                if (shares.error != null) rows += info(ROW_S_STATUS, st[StorageText.SHARES_LIST_FAILED], listOf(st[StorageText.SHARES_LIST_FAILED_STEP]), Tone.WARN)
                 else if (shares.shares.isEmpty()) rows += info(ROW_S_STATUS, st[StorageText.SHARES_NONE, display(s)], tone = Tone.WARN)
-                for (name in shares.shares) rows += row(RowId("storage.share.$name"), name, RowKind.Item(route = SettingsRoute.NetworkFolder(s.token, name)))
+                // U-S1: data rows have their own namespace, so a share named like a fixed row never shares its id.
+                for (name in shares.shares) rows += row(RowId(SHARE_ITEM + name), name, RowKind.Item(route = SettingsRoute.NetworkFolder(s.token, name)))
             }
         }
+        // U-B1: why the typed name did not open, above the row to type it again.
+        s.shareNote?.takeIf { s.handle != null }?.let { (label, lines) -> rows += info(ROW_S_NOTE, label, lines, Tone.WARN) }
         if (s.handle != null) rows += row(ROW_S_TYPE, st[StorageText.SHARE_TYPE_NAME], RowKind.Text("", TextHint.NAME), description = st[StorageText.SHARE_TYPE_NAME_DESC])
         val signedIn = s.handle?.mode == SignInMode.USER
         rows += row(ROW_S_SIGNIN, st[if (signedIn) StorageText.SIGN_IN_AS_SOMEONE else StorageText.SIGN_IN], RowKind.Link(SettingsRoute.ComputerSignIn(s.token)))
@@ -477,7 +510,8 @@ class StoragePages(
         val keyboard = env.hasKeyboard()
         val err = s.error
         if (err != null && !s.connecting) rows += errorRow(ROW_SI_ERROR, err, display(s), s.lastAddress, s.apple)
-        if (!keyboard) rows += info(ROW_SI_NOKEYS, st[StorageText.SIGN_IN_NO_KEYBOARD], tone = Tone.WARN)
+        // U-S6: a short reason label, the next step as its line.
+        if (!keyboard) rows += info(ROW_SI_NOKEYS, st[StorageText.SIGN_IN_NO_KEYBOARD], listOf(st[StorageText.SIGN_IN_NO_KEYBOARD_STEP]), Tone.WARN)
         rows += row(ROW_SI_PHONE, st[StorageText.SIGN_IN_PHONE], RowKind.Action(), description = st[StorageText.SIGN_IN_PHONE_DESC])
         rows += row(ROW_SI_USER, st[StorageText.SIGN_IN_USER], RowKind.Text(s.user.orEmpty(), TextHint.USERNAME), value = s.user?.ifEmpty { null } ?: st[StorageText.NOT_SET])
         // The editor starts empty: the password never sits in the page model (the masked value is a mask only).
@@ -490,29 +524,34 @@ class StoragePages(
             ROW_SI_GO, st[StorageText.SIGN_IN_GO], RowKind.Action(), enabled = canGo,
             disabledReason = if (s.connecting) st[StorageText.CONNECTING, display(s)] else st[StorageText.SIGN_IN_GO_NEEDS_USER],
         )
-        rows += row(ROW_SI_GUEST, st[StorageText.SIGN_IN_GUEST], RowKind.Action(), enabled = !s.connecting)
+        // U-S3: kept in its §7.3 place, but disabled with the reason once the computer refused guests.
+        val guestRefused = err?.kind == BrowseErrorKind.GUEST_REFUSED
         rows += row(
-            ROW_SI_DOMAIN, st[StorageText.SIGN_IN_DOMAIN], RowKind.Text(s.domain.orEmpty(), TextHint.NAME),
+            ROW_SI_GUEST, st[StorageText.SIGN_IN_GUEST], RowKind.Action(), enabled = !s.connecting && !guestRefused,
+            disabledReason = if (guestRefused) st[StorageText.ERR_GUEST, display(s)] else st[StorageText.CONNECTING, display(s)],
+        )
+        // U-S4: optional ("Leave empty unless you know you need it"): PATTERN accepts "" (NAME refuses it).
+        rows += row(
+            ROW_SI_DOMAIN, st[StorageText.SIGN_IN_DOMAIN], RowKind.Text(s.domain.orEmpty(), TextHint.PATTERN),
             value = s.domain?.ifEmpty { null } ?: st[StorageText.NOT_SET], description = st[StorageText.SIGN_IN_DOMAIN_DESC],
         )
         rows += info(ROW_SI_INFO, st[StorageText.SIGN_IN_INFO_TITLE], st[StorageText.SIGN_IN_INFO].split('\n'))
-        val focus = when {
-            s.wrongPassword -> ROW_SI_PASSWORD
-            keyboard -> ROW_SI_USER
-            else -> ROW_SI_PHONE
-        }
+        // U-S2: sticky. A wrong password focuses Password until a submit; a typed password (with a user name) moves on to
+        // Sign in; nothing falls back to User name on a rebuild (the machine applies a changed request).
+        val focus = s.signInFocus ?: if (keyboard) ROW_SI_USER else ROW_SI_PHONE
         return PageModel(route = route, title = title, subtitle = st[StorageText.SIGN_IN_SUBTITLE], rows = rows, version = v, focus = focus)
     }
 
     // ---------------------------------------------------------------- folders (§7.6)
 
     private fun networkFolder(route: SettingsRoute.NetworkFolder, s: BrowseSession, v: Long): PageModel {
-        if (s.share != route.share) { s.share = route.share; s.path = ""; s.folderList = null; s.folderKey = null }
+        // U-B1: another share starts clean: no note or typed-share reason from the one before.
+        if (s.share != route.share) { s.share = route.share; s.path = ""; s.folderList = null; s.folderKey = null; s.note = null; s.shareNote = null }
         ensureFolders(s)
         val rows = ArrayList<SettingsRow>()
         val host = display(s)
         val here = unc(host, route.share, s.path)
-        s.note?.let { rows += info(ROW_F_NOTE, it, tone = Tone.WARN) }
+        s.note?.let { (label, lines) -> rows += info(ROW_F_NOTE, label, lines, Tone.WARN) }
         val list = s.folderList
         val err = list?.error?.takeIf { it.kind != BrowseErrorKind.NOT_FOUND } ?: s.error
         rows += row(ROW_F_USE, st[StorageText.FOLDER_USE], RowKind.Action(), value = here, enabled = list != null && err == null)
@@ -520,11 +559,12 @@ class StoragePages(
         when {
             list == null && err == null -> rows += info(ROW_F_STATUS, st[StorageText.FOLDER_LOADING])
             err != null -> {
-                rows += errorRow(ROW_F_ERROR, err, host, s.lastAddress, s.apple)
+                rows += errorRow(ROW_F_ERROR, err, host, s.lastAddress, s.apple, share = route.share)
                 rows += row(ROW_S_RETRY, st[StorageText.TRY_AGAIN], RowKind.Action())
             }
             else -> {
-                for (f in list!!.folders) rows += row(RowId("storage.folder.$f"), f, RowKind.Item(primary = "enter:$f"))
+                // U-S1: "storage.folder.item.<name>": a folder called "use" or "up" is a folder, not the fixed row.
+                for (f in list!!.folders) rows += row(RowId(FOLDER_ITEM + f), f, RowKind.Item(primary = "enter:$f"))
                 if (list.truncated) rows += info(ROW_F_STATUS, st[StorageText.FOLDER_TRUNCATED, StorageConstants.SMB_LIST_MAX_ENTRIES])
                 else if (list.folders.isEmpty()) rows += info(ROW_F_STATUS, st[StorageText.FOLDER_NONE_BELOW])
             }
@@ -553,7 +593,8 @@ class StoragePages(
                 // §7.2: land on the deepest folder that exists and say what was missing.
                 val deepest = miss.deepestPath.orEmpty().trim('/')
                 val missing = path.removePrefix(deepest).trim('/').substringBefore('/')
-                s.note = st[StorageText.FOLDER_MISSING, missing.ifEmpty { path.substringAfterLast('/') }, unc(display(s), share, deepest)]
+                // U-S6: a short reason label (the path is in the subtitle) and the next step as its line.
+                s.note = st[StorageText.FOLDER_MISSING, missing.ifEmpty { path.substringAfterLast('/') }] to listOf(st[StorageText.FOLDER_MISSING_STEP])
                 s.path = deepest
                 s.folderKey = null
                 s.folderList = null
@@ -603,7 +644,7 @@ class StoragePages(
                 val good = result.verdict == TestVerdict.GOOD_4K || result.verdict == TestVerdict.GOOD_HD
                 rows += verdictRow(result, host)
                 result.takeIf { it.wakeMs >= StorageConstants.TEST_WAKE_NOTE_MS }?.let {
-                    rows += info(ROW_T_WAKE, st[StorageText.TEST_WAKE_NOTE, secondsText(it.wakeMs)])
+                    rows += info(ROW_T_WAKE, st[StorageText.TEST_WAKE_NOTE, secondsText(it.wakeMs)], listOf(st[StorageText.TEST_WAKE_NOTE_STEP])) // U-S6
                 }
                 if (env.smallRemotePool()) rows += info(ROW_T_POOL, st[StorageText.TEST_SMALL_POOL_NOTE])
                 if (good) {
@@ -662,7 +703,9 @@ class StoragePages(
             TestVerdict.GOOD_4K, TestVerdict.GOOD_HD -> Tone.GOOD
             else -> Tone.WARN
         }
-        return info(ROW_T_VERDICT, verdictLabel(r.verdict), listOf(step), tone, value = details)
+        // U-S6: the details are the last line (mono in the UI), not the value column: the 560-px value column left the
+        // next step ~650 px and cut it on exactly the verdicts that need it.
+        return info(ROW_T_VERDICT, verdictLabel(r.verdict), step.split('\n').filter { it.isNotEmpty() } + details, tone)
     }
 
     private fun secondsText(ms: Int): String = ((ms + 500) / 1000).toString()
@@ -697,6 +740,14 @@ class StoragePages(
                 failed(BrowseError(BrowseErrorKind.STORAGE, StorageFailure.UNREACHABLE))
             }
             s.test = TestUi(result = result)
+            // U-S5: a stored folder's Test is its new lastTest (§7.8), so Status and "Use for rewind" read it. A FAILED
+            // Test keeps the last verdict (Status shows the keeper's reason, and FAILED would read "Not tested yet").
+            val id = s.locationId
+            if (id != null && result.verdict != TestVerdict.FAILED) {
+                try { locations.recordTest(id, result) } catch (e: CancellationException) { throw e } catch (e: Exception) {
+                    BoxLog.w(TAG, "test not stored: ${e.javaClass.simpleName}")
+                }
+            }
             _changes.tryEmit(Unit)
         }
     }
@@ -804,6 +855,7 @@ class StoragePages(
     private suspend fun remove(locationId: String) {
         val wasChosen = locations.chosen(StoragePurpose.TIMESHIFT) == locationId
         locations.remove(locationId)
+        toastGate.signedIn(locationId) // U-S9: its toast counters go with it
         storedSessions.remove(locationId)?.let { endSession(it) }
         nav()?.let { n -> env.runOnMain { n.popTo(SettingsRoute.SaveLocation()) } }
         if (wasChosen) _notices.tryEmit(st[StorageText.NOTICE_WILL_SAVE, st[StorageText.PLACE_THIS_DEVICE]])
@@ -817,7 +869,7 @@ class StoragePages(
                 s.fromPhone = true
                 nav()?.let { n -> env.runOnMain { n.push(SettingsRoute.PhoneSetup(purpose = PhonePurpose.NETWORK_FOLDER, browse = s.token)) } }
             }
-            id == ROW_AGAIN && intent is RowIntent.Run -> { findJob?.cancel(); find = null; ensureFind(); _changes.tryEmit(Unit) }
+            id == ROW_AGAIN && intent is RowIntent.Run -> { findJob?.cancel(); find = null; findPaused = false; ensureFind(); _changes.tryEmit(Unit) }
             id.key.startsWith("storage.find.pc.") && (intent is RowIntent.Run || intent is RowIntent.Menu) -> {
                 val address = id.key.removePrefix("storage.find.pc.")
                 val c = find?.computers?.firstOrNull { it.address == address } ?: return true
@@ -843,29 +895,41 @@ class StoragePages(
 
     private fun sharesIntent(s: BrowseSession, id: RowId, intent: RowIntent): Boolean {
         when {
-            id == ROW_S_RETRY && intent is RowIntent.Run -> startConnect(s)
+            id == ROW_S_RETRY && intent is RowIntent.Run -> { s.shareNote = null; startConnect(s) }
             id == ROW_S_TYPE && intent is RowIntent.Edit -> typedShare(s, intent.text.trim())
             else -> return false
         }
         return true
     }
 
+    /**
+     * U-B1 (review 2026-10-24): the typed share. A failure is the shares page's own WARN row (reason + next step), never
+     * the session's error (which the next folder page would show). The job is tracked: a new name cancels the old one,
+     * BACK ends it, and a late answer moves on only while the walk and its shares page are still open.
+     */
     private fun typedShare(s: BrowseSession, name: String) {
         if (name.isEmpty()) return
         val h = s.handle ?: return
-        scope.launch {
+        s.typedJob?.cancel()
+        s.shareNote = null
+        s.typedJob = scope.launch {
             val r = try { folders.folders(h, name, "") } catch (e: CancellationException) { throw e } catch (e: Exception) {
                 FolderListing(name, "", emptyList(), error = BrowseError(BrowseErrorKind.STORAGE, StorageFailure.UNREACHABLE))
             }
+            if (!isActive || sessions[s.token] !== s) return@launch
             val err = r.error
             if (err != null) {
-                s.error = if (err.kind == BrowseErrorKind.NOT_FOUND) BrowseError(BrowseErrorKind.NOT_FOUND) else err
-                s.note = st[StorageText.SHARE_NOT_FOUND, name, display(s)]
+                val (label, step) = errorTexts(err, display(s), s.lastAddress, s.apple, share = name)
+                s.shareNote = label to step.split('\n')
                 _changes.tryEmit(Unit)
             } else {
-                s.error = null; s.note = null
-                s.share = name; s.path = ""; s.folderList = r; s.folderKey = "$name\u0000"
-                nav()?.let { n -> env.runOnMain { n.push(SettingsRoute.NetworkFolder(s.token, name)) } }
+                val n = nav() ?: return@launch
+                env.runOnMain {
+                    if (sessions[s.token] !== s || currentRoute() != SettingsRoute.ComputerShares(s.token)) return@runOnMain
+                    s.shareNote = null; s.note = null
+                    s.share = name; s.path = ""; s.folderList = r; s.folderKey = "$name\u0000"
+                    n.push(SettingsRoute.NetworkFolder(s.token, name))
+                }
             }
         }
     }
@@ -873,10 +937,14 @@ class StoragePages(
     private fun signInIntent(route: SettingsRoute, s: BrowseSession, id: RowId, intent: RowIntent): Boolean {
         when {
             id == ROW_SI_USER && intent is RowIntent.Edit -> s.user = intent.text.trim()
-            id == ROW_SI_PASSWORD && intent is RowIntent.Edit -> { s.setPassword(intent.text.toCharArray()); s.wrongPassword = false }
+            id == ROW_SI_PASSWORD && intent is RowIntent.Edit -> {
+                s.setPassword(intent.text.toCharArray()); s.wrongPassword = false
+                // U-S2: with a user name, the next step is Sign in; without one, stay (the reason row says what is missing).
+                s.signInFocus = if (!s.user.isNullOrBlank()) ROW_SI_GO else ROW_SI_PASSWORD
+            }
             id == ROW_SI_DOMAIN && intent is RowIntent.Edit -> s.domain = intent.text.trim().ifEmpty { null }
-            id == ROW_SI_GO && intent is RowIntent.Run -> { s.guest = false; startConnect(s) }
-            id == ROW_SI_GUEST && intent is RowIntent.Run -> { s.guest = true; s.setPassword(null); startConnect(s) }
+            id == ROW_SI_GO && intent is RowIntent.Run -> { s.guest = false; s.signInFocus = ROW_SI_GO; startConnect(s) } // U-S2: a submit ends the Password request
+            id == ROW_SI_GUEST && intent is RowIntent.Run -> { s.guest = true; s.signInFocus = ROW_SI_GUEST; s.setPassword(null); startConnect(s) }
             id == ROW_SI_PHONE && intent is RowIntent.Run -> nav()?.let { n -> env.runOnMain { n.push(SettingsRoute.PhoneSetup(purpose = PhonePurpose.NETWORK_FOLDER, browse = s.token)) } }
             else -> return false
         }
@@ -891,7 +959,7 @@ class StoragePages(
                 nav()?.let { n -> env.runOnMain { n.push(SettingsRoute.LocationTest(browse = s.token)) } }
             }
             id == ROW_F_UP && intent is RowIntent.Run -> up(s)
-            id.key.startsWith("storage.folder.") && intent is RowIntent.Run -> enter(s, id.key.removePrefix("storage.folder."))
+            id.key.startsWith(FOLDER_ITEM) && intent is RowIntent.Run -> enter(s, id.key.removePrefix(FOLDER_ITEM)) // U-S1
             id == ROW_S_RETRY && intent is RowIntent.Run -> { s.error = null; s.folderKey = null; s.folderList = null }
             else -> return false
         }
@@ -937,6 +1005,7 @@ class StoragePages(
         val result = s.test?.result ?: return
         val loc: app.thebox.core.storage.StorageLocation
         if (s.locationId != null) {
+            // U-S5: ensureTest stored the result already (this is "Use for rewind" on its Test page).
             locations.choose(StoragePurpose.TIMESHIFT, s.locationId)
             loc = locations.status.value.firstOrNull { it.location.id == s.locationId }?.location ?: return
         } else {
@@ -946,6 +1015,8 @@ class StoragePages(
             }?.location
             loc = if (same != null) {
                 locations.updateSignIn(same.id, a.user, a.domain, s.passwordCopy(), a.guest)
+                toastGate.signedIn(same.id) // U-S9
+                if (result.verdict != TestVerdict.FAILED) locations.recordTest(same.id, result) // U-S5: the walk's Test is its Test
                 same
             } else {
                 locations.saveSmb(a, defaultName(s), s.passwordCopy(), result)
@@ -1008,27 +1079,40 @@ class StoragePages(
                 s.error = r.error
                 s.wrongPassword = r.error?.kind == BrowseErrorKind.AUTH
                 if (s.wrongPassword) s.setPassword(null)
+                signInFocusAfter(s, r.error)
                 reportPhone(s, phoneProblem(r.error, s), done = false)
-                val here = currentRoute()
-                if (s.locationId == null && here == SettingsRoute.ComputerShares(s.token)) nav()?.let { n -> env.runOnMain { n.replace(SettingsRoute.ComputerSignIn(s.token)) } }
+                // U-N9: decided on the main thread, after the push of the shares page (posted there) has run.
+                if (s.locationId == null) nav()?.let { n ->
+                    env.runOnMain { if (sessions[s.token] === s && currentRoute() == SettingsRoute.ComputerShares(s.token)) n.replace(SettingsRoute.ComputerSignIn(s.token)) }
+                }
                 _changes.tryEmit(Unit)
             }
             is BrowseResult.Failed -> {
                 s.error = r.error
                 s.wrongPassword = r.error.kind == BrowseErrorKind.AUTH
                 if (s.wrongPassword) s.setPassword(null)
+                signInFocusAfter(s, r.error)
                 reportPhone(s, phoneProblem(r.error, s), done = false)
                 _changes.tryEmit(Unit)
             }
         }
     }
 
+    /** U-S2: where the sign-in page's cursor goes after a refused try (null error: unchanged). */
+    private fun signInFocusAfter(s: BrowseSession, e: BrowseError?) {
+        when (e?.kind) {
+            BrowseErrorKind.AUTH -> s.signInFocus = ROW_SI_PASSWORD
+            BrowseErrorKind.GUEST_REFUSED -> s.signInFocus = if (env.hasKeyboard()) ROW_SI_USER else ROW_SI_PHONE // the guest row is now disabled
+            else -> Unit
+        }
+    }
+
     /** Where a sign-in that worked leads (§9.3): shares, the typed folder, or back to the stored location. */
     private suspend fun afterSignedIn(s: BrowseSession) {
         val nav = nav()
-        val here = currentRoute()
         if (s.locationId != null) {
             locations.updateSignIn(s.locationId, s.user, s.domain, s.passwordCopy(), s.guest)
+            toastGate.signedIn(s.locationId) // U-S9: a fresh "sign in again" episode from here
             s.zero()
             _notices.tryEmit(st[StorageText.NOTICE_SIGNED_IN, s.computerName ?: s.host.orEmpty()])
             nav?.let { n -> env.runOnMain { n.popTo(SettingsRoute.LocationDetail(s.locationId)) } }
@@ -1036,15 +1120,25 @@ class StoragePages(
             return
         }
         val share = s.share
-        val target: SettingsRoute = if (share != null) SettingsRoute.NetworkFolder(s.token, share) else SettingsRoute.ComputerShares(s.token)
+        val shares = SettingsRoute.ComputerShares(s.token)
+        val target: SettingsRoute = if (share != null) SettingsRoute.NetworkFolder(s.token, share) else shares
         if (share != null) s.folderKey = null
-        if (here != target) nav?.let { n ->
-            val stack = (n as? SettingsMachine)?.ui?.value?.stack.orEmpty()
+        nav?.let { n ->
+            // U-N9: the route and the stack are read on the main thread, where the earlier pushes have already run.
             env.runOnMain {
+                if (sessions[s.token] !== s) return@runOnMain
+                val here = currentRoute()
+                val stack = (n as? SettingsMachine)?.ui?.value?.stack.orEmpty()
                 when {
+                    here == target -> Unit
                     // A sign-in pushed from the share list: pop back to it. One that replaced it (or the QR page): replace.
-                    target in stack -> n.popTo(target)
-                    else -> n.replace(target)
+                    target == shares && shares in stack -> n.popTo(shares)
+                    target == shares -> n.replace(shares)
+                    // U-N6: a typed path (or the phone's) lands on the folder with the shares page under it, so ← at the
+                    // share root goes to the shares (§7.6), not to Find.
+                    here == shares -> n.push(target)
+                    shares in stack -> { n.popTo(shares); n.push(target) }
+                    else -> { n.replace(shares); n.push(target) }
                 }
             }
         }
@@ -1061,7 +1155,7 @@ class StoragePages(
     private fun endSession(s: BrowseSession) {
         sessions.remove(s.token)
         s.locationId?.let { storedSessions.remove(it) }
-        s.connectJob?.cancel(); s.sharesJob?.cancel(); s.listJob?.cancel(); s.testJob?.cancel(); s.phoneJob?.cancel()
+        s.connectJob?.cancel(); s.sharesJob?.cancel(); s.listJob?.cancel(); s.testJob?.cancel(); s.phoneJob?.cancel(); s.typedJob?.cancel() // U-B1
         s.handle?.let { h -> s.handle = null; try { folders.close(h) } catch (e: Exception) { BoxLog.w(TAG, "close failed: ${e.javaClass.simpleName}") } }
         s.zero()
     }
@@ -1099,9 +1193,31 @@ class StoragePages(
         return true
     }
 
+    /** U-S8 (review 2026-10-24): → on a folder opens it and → on ".. Up one folder" goes up, as OK does (§9.3 "OK (or →)"). */
+    override fun onRight(route: SettingsRoute, row: SettingsRow): Boolean {
+        if (route !is SettingsRoute.NetworkFolder) return false
+        val s = sessions[route.browse] ?: return false
+        when {
+            row.id.key.startsWith(FOLDER_ITEM) -> enter(s, row.id.key.removePrefix(FOLDER_ITEM))
+            row.id == ROW_F_UP -> up(s)
+            else -> return false
+        }
+        s.note = null
+        _changes.tryEmit(Unit)
+        return true
+    }
+
+    /** U-S2: once a key is pressed on Find, its focus request never moves again (§9.2 "as long as no key has been pressed"). */
+    override fun keyPressed(route: SettingsRoute) {
+        if (route == SettingsRoute.FindComputers) findKeyPressed = true
+    }
+
     override fun closed(route: SettingsRoute) {
         when (route) {
-            SettingsRoute.FindComputers -> { findJob?.cancel(); findJob = null; find = null }
+            SettingsRoute.FindComputers -> {
+                findJob?.cancel(); findJob = null; find = null
+                findPaused = false; findFocus = ROW_ENTER; findKeyPressed = false // U-S2, U-N10: the next visit starts fresh
+            }
             is SettingsRoute.PhoneSetup -> route.browse?.let { sessions[it] }?.let { it.phoneJob?.cancel(); it.phoneJob = null; it.routes -= route; reapLater(it) }
             is SettingsRoute.LocationTest -> {
                 val s = route.browse?.let { sessions[it] } ?: route.locationId?.let { storedSessions[it] }
@@ -1206,7 +1322,7 @@ class StoragePages(
     }
 
     /** §7.7: the reason (headline) and its next step; a VPN or Mac hint is appended where the cause says so. */
-    internal fun errorTexts(e: BrowseError, host: String, address: String?, apple: Boolean, guest: Boolean = false): Pair<String, String> {
+    internal fun errorTexts(e: BrowseError, host: String, address: String?, apple: Boolean, guest: Boolean = false, share: String? = null): Pair<String, String> {
         val shown = address?.takeIf { it.isNotEmpty() && !host.equals(it, true) }
         return when (e.kind) {
             BrowseErrorKind.STORAGE -> when (e.failure) {
@@ -1226,7 +1342,11 @@ class StoragePages(
                 if (guest) st[StorageText.ERR_WRITE_GUEST, host] to st[StorageText.ERR_WRITE_GUEST_STEP, host]
                 else st[StorageText.ERR_WRITE_USER] to st[StorageText.ERR_WRITE_USER_STEP, host]
             BrowseErrorKind.DATA_MISMATCH -> st[StorageText.ERR_DATA, host] to st[StorageText.ERR_DATA_STEP]
-            BrowseErrorKind.NOT_FOUND, BrowseErrorKind.LIST_FAILED -> st[StorageText.ERR_GENERIC, host] to st[StorageText.ERR_GENERIC_STEP]
+            // U-B1: a reason and a next step, not "Something went wrong".
+            BrowseErrorKind.NOT_FOUND ->
+                if (share != null) st[StorageText.SHARE_NOT_FOUND, share, host] to st[StorageText.SHARE_NOT_FOUND_STEP]
+                else st[StorageText.SHARE_LIST_FAILED, host] to st[StorageText.SHARE_LIST_FAILED_STEP]
+            BrowseErrorKind.LIST_FAILED -> st[StorageText.SHARE_LIST_FAILED, host] to st[StorageText.SHARE_LIST_FAILED_STEP]
         }
     }
 
@@ -1263,6 +1383,8 @@ class StoragePages(
         val ROW_S_ERROR = RowId("storage.shares.error")
         val ROW_S_RETRY = RowId("storage.shares.retry")
         val ROW_S_TYPE = RowId("storage.shares.type")
+        /** U-B1: why a typed share name did not open. */
+        val ROW_S_NOTE = RowId("storage.shares.note")
         val ROW_S_SIGNIN = RowId("storage.shares.signin")
         val ROW_SI_ERROR = RowId("storage.signin.error")
         val ROW_SI_NOKEYS = RowId("storage.signin.nokeys")
@@ -1278,6 +1400,9 @@ class StoragePages(
         val ROW_F_UP = RowId("storage.folder.up")
         val ROW_F_STATUS = RowId("storage.folder.status")
         val ROW_F_ERROR = RowId("storage.folder.error")
+        /** U-S1: the data rows' namespaces (a folder or share named "use", "up", "note"… never takes a fixed row's id). */
+        const val FOLDER_ITEM = "storage.folder.item."
+        const val SHARE_ITEM = "storage.share.item."
         val ROW_T_PROGRESS = RowId("storage.test.progress")
         val ROW_T_STOP = RowId("storage.test.stop")
         val ROW_T_VERDICT = RowId("storage.test.verdict")

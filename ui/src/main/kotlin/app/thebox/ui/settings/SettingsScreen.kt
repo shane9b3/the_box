@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -60,6 +61,8 @@ const val SETTINGS_PAGE_TAG = "settings_page"
 const val SETTINGS_BREADCRUMB_TAG = "settings_breadcrumb"
 const val SETTINGS_NOTICE_TAG = "settings_notice"
 const val SETTINGS_PAGE_PLACEHOLDER_TAG = "settings_page_placeholder"
+/** U-S7: the page subtitle (its bounds are checked against the first row's). */
+const val SETTINGS_SUBTITLE_TAG = "settings_subtitle"
 
 /**
  * Mode SETTINGS (docs/design/m5-setup-settings.md §3.1, §3.2): the two-pane shell drawn from [SettingsMachine.ui]. The
@@ -138,8 +141,11 @@ fun SettingsContent(
     val section: SectionId? = SettingsTree.sectionOf(ui.route)
     val list = rememberLazyListState()
     val route = ui.route
+    // U-S10 (save-location review 2026-10-24): the titles of the pages this visit has shown, for the breadcrumb's middle.
+    val titles = remember { androidx.compose.runtime.mutableStateMapOf<SettingsRoute, String>() }
+    ui.page?.let { p -> androidx.compose.runtime.SideEffect { if (p.title.isNotBlank()) titles[p.route] = p.title } }
     Box(modifier.fillMaxSize().background(SettingsUi.Canvas).testTag(SETTINGS_SCREEN_TAG)) {
-        Header(ui, section, clock24)
+        Header(ui, section, clock24, titles)
         if (route is SettingsRoute.ChannelEditor && channelEditor != null) {
             // The editor draws its own panes, notice and footer below the header; the settings machine still owns the
             // text editor, the number pad and the PIN prompt it opens for the editor (SettingsShellLink seams, §3.2).
@@ -155,7 +161,7 @@ fun SettingsContent(
         PagePane(ui, list, Modifier.offset(pageX.dp, SettingsUi.PANE_Y.dp).size(pageW.dp, SettingsUi.PANE_H.dp))
         // ---- overlays (in-tree; the machine closes them; §3.2.4 back ladder)
         ui.menu?.let { m ->
-            val y = focusedRowY(list, ui.cursor) ?: SettingsUi.ROWS_TOP
+            val y = focusedRowY(list, ui.cursor, ui.page?.subtitle != null) ?: SettingsUi.rowsTop(ui.page?.subtitle != null)
             SettingsMenu(m, Modifier.offset((pageX + pageW - SettingsUi.MENU_W - 24).dp, menuTop(y, m.options.size).dp))
         }
         ui.confirm?.let { ConfirmCard(it, Modifier.fillMaxSize()) }
@@ -166,25 +172,46 @@ fun SettingsContent(
     }
 }
 
+/** U-S10: the breadcrumb's width (1,920 − 2 × 64). */
+private const val BREADCRUMB_W = 1792
+
+/**
+ * U-S10 (save-location review 2026-10-24): "Settings › <section> › <each page on the path> › <this page>". The middle comes
+ * from the titles of the pages on [stack] that this visit has shown ([titles]); the root, section pages, the first-run
+ * page and the full-screen phone page are not parts. With the stack two deep this is M5's three-part form.
+ */
+internal fun breadcrumbParts(settings: String, section: String?, stack: List<SettingsRoute>, titles: Map<SettingsRoute, String>, title: String?): List<String> {
+    val parts = ArrayList<String>()
+    parts += settings
+    section?.let { parts += it }
+    for (r in stack) {
+        if (r == SettingsRoute.Root || r is SettingsRoute.Section || r == SettingsRoute.FirstRun || r is SettingsRoute.PhoneSetup) continue
+        val t = titles[r]?.takeIf { it.isNotBlank() && it != section } ?: continue
+        if (parts.last() != t) parts += t
+    }
+    if (title != null && title.isNotBlank() && title != section && parts.last() != title) parts += title
+    return parts
+}
+
 /** The focused row's top inside the page pane (design px), when it is laid out; anchors the context menu. */
-private fun focusedRowY(list: LazyListState, cursor: Int): Int? {
+private fun focusedRowY(list: LazyListState, cursor: Int, subtitle: Boolean): Int? {
     val info = list.layoutInfo.visibleItemsInfo.firstOrNull { it.index == cursor } ?: return null
-    return SettingsUi.ROWS_TOP + info.offset
+    return SettingsUi.rowsTop(subtitle) + info.offset // U-S7
 }
 
 @Composable
-private fun Header(ui: SettingsUiState, section: SectionId?, clock24: Boolean) {
+private fun Header(ui: SettingsUiState, section: SectionId?, clock24: Boolean, titles: Map<SettingsRoute, String>) {
     Line(stringResource(R.string.settings_ui_title), SettingsUi.Title, Modifier.offset(SettingsUi.HEADER_X.dp, SettingsUi.HEADER_Y.dp))
-    val parts = buildList {
-        add(stringResource(R.string.settings_ui_title))
-        section?.let { add(stringResource(SettingsUi.sectionLabel(it))) }
-        val title = ui.page?.title
-        if (title != null && (section == null || title != stringResource(SettingsUi.sectionLabel(section)))) add(title)
-    }
-    Line(
+    val parts = breadcrumbParts(
+        stringResource(R.string.settings_ui_title), section?.let { stringResource(SettingsUi.sectionLabel(it)) }, ui.stack, titles, ui.page?.title,
+    )
+    // U-S10: elided in the middle when it does not fit the 1,792 px header (the section and the current page stay).
+    androidx.tv.material3.Text(
         parts.joinToString(stringResource(R.string.settings_ui_breadcrumb_sep)),
-        SettingsUi.Breadcrumb,
-        Modifier.offset(SettingsUi.HEADER_X.dp, SettingsUi.BREADCRUMB_Y.dp).testTag(SETTINGS_BREADCRUMB_TAG),
+        style = SettingsUi.Breadcrumb,
+        maxLines = 1,
+        overflow = androidx.compose.ui.text.style.TextOverflow.MiddleEllipsis,
+        modifier = Modifier.offset(SettingsUi.HEADER_X.dp, SettingsUi.BREADCRUMB_Y.dp).width(BREADCRUMB_W.dp).testTag(SETTINGS_BREADCRUMB_TAG),
     )
     Box(Modifier.fillMaxWidth().padding(end = SettingsUi.CLOCK_RIGHT.dp, top = SettingsUi.HEADER_Y.dp), contentAlignment = Alignment.TopEnd) {
         SettingsClock(clock24)
@@ -272,9 +299,10 @@ private fun PagePane(ui: SettingsUiState, list: LazyListState, modifier: Modifie
         val page = ui.page ?: return@Box
         Column {
             Line(page.title, SettingsUi.PageTitle)
-            page.subtitle?.let { Line(it, SettingsUi.PageSubtitle, Modifier.padding(top = 6.dp)) }
+            page.subtitle?.let { Line(it, SettingsUi.PageSubtitle, Modifier.padding(top = 6.dp).testTag(SETTINGS_SUBTITLE_TAG)) }
         }
-        val rowsTop = (SettingsUi.ROWS_TOP - SettingsUi.PAGE_PAD_V).dp
+        // U-S7: a page with a subtitle starts its rows below it (every page, not only the storage ones).
+        val rowsTop = (SettingsUi.rowsTop(page.subtitle != null) - SettingsUi.PAGE_PAD_V).dp
         if (page.placeholder != null) {
             Line(page.placeholder!!, SettingsUi.RowValue.copy(color = SettingsUi.Fg60), Modifier.padding(top = rowsTop).testTag(SETTINGS_PAGE_PLACEHOLDER_TAG), maxLines = 3)
         } else {

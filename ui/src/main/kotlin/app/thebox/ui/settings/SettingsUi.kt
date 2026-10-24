@@ -81,6 +81,12 @@ object SettingsUi {
     const val SECTION_ROW_H = 64; const val SECTION_ROW_GAP = 6; const val SECTION_LABEL_X = 24
     const val PAGE_PAD_H = 32; const val PAGE_PAD_V = 24
     const val ROWS_TOP = 96
+    /**
+     * U-S7 (save-location review 2026-10-24): the rows' top on a page with a subtitle. Title 36 px + 6 + subtitle 24 px is
+     * about 85 px of line height from the pane's padding, so the rows at 96 (72 below the padding) overlapped it.
+     */
+    const val ROWS_TOP_SUBTITLE = 132
+    fun rowsTop(hasSubtitle: Boolean): Int = if (hasSubtitle) ROWS_TOP_SUBTITLE else ROWS_TOP
     const val ROW_H = 76; const val ROW_H_DESC = 104; const val ROW_GAP = 8; const val ROW_RADIUS = 14; const val ROW_PAD_H = 24
     const val ITEM_ROW_H = 72
     const val TOGGLE_W = 56; const val TOGGLE_H = 30; const val TOGGLE_KNOB = 24
@@ -105,6 +111,8 @@ object SettingsUi {
     val AdvancedLabel: TextStyle get() = GuideUi.sans(22)
     val RowValueMono: TextStyle get() = GuideUi.mono(26)
     val RowDesc: TextStyle get() = GuideUi.sans(22)
+    /** U-S6: a mono line at the line size (the Test's details under its verdict). */
+    val RowDescMono: TextStyle get() = GuideUi.mono(22)
     val OptionLabel: TextStyle get() = GuideUi.sans(26)
     val OptionDetail: TextStyle get() = GuideUi.sans(22)
     val Notice: TextStyle get() = GuideUi.sans(24, color = Fg70)

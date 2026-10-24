@@ -149,6 +149,12 @@ class StorageLocationsImpl @Inject constructor(
         store.update(StorageDomain) { p -> p.copy(locations = p.locations.map { if (it.id == locationId) it.copy(name = n) else it }) }
     }
 
+    // U-S5 (save-location review 2026-10-24): a stored folder's Test is its new lastTest (§7.8); Status reads it through onPrefs.
+    override suspend fun recordTest(locationId: String, result: LocationTestResult) = withContext(io) {
+        store.update(StorageDomain) { p -> p.copy(locations = p.locations.map { if (it.id == locationId) it.copy(lastTest = result) else it }) }
+        Unit
+    }
+
     override suspend fun remove(locationId: String) = withContext(io) {
         blobs.deleteBlob(ref(locationId)) // the password goes first (§8)
         store.update(StorageDomain) { p ->

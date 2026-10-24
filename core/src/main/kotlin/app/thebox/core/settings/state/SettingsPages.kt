@@ -51,6 +51,18 @@ interface SettingsPageSource {
      */
     fun onLeft(route: SettingsRoute): Boolean = false
 
+    /**
+     * (U-S8, save-location review 2026-10-24) → on [row] of [route] before the shell's own RIGHT (a Link or an Item's
+     * route) (main thread). True = consumed: a folder of the folder browser opens on →, as on OK (§9.3 "OK (or →)").
+     */
+    fun onRight(route: SettingsRoute, row: SettingsRow): Boolean = false
+
+    /**
+     * (U-S2, save-location review 2026-10-24) A key was pressed on [route]'s page pane (main thread). Find computers drops
+     * its focus request then (§9.2: "the first computer, as long as no key has been pressed").
+     */
+    fun keyPressed(route: SettingsRoute) = Unit
+
     /** [route] left the open path (popped, replaced, Settings closed): stop observing its data. Main thread. */
     fun closed(route: SettingsRoute) = Unit
 }
@@ -92,6 +104,16 @@ interface SettingsShellLink : SettingsPageNavigation {
 
     /** (Save-location integration, S4-Q2) Consulted on ← at a page before it pops; true = consumed. Default: none. */
     var leftHandler: ((SettingsRoute) -> Boolean)?
+        get() = null
+        set(@Suppress("UNUSED_PARAMETER") value) = Unit
+
+    /** (U-S8) Consulted on → at a page row before the shell opens a Link or an Item's route; true = consumed. Default: none. */
+    var rightHandler: ((SettingsRoute, SettingsRow) -> Boolean)?
+        get() = null
+        set(@Suppress("UNUSED_PARAMETER") value) = Unit
+
+    /** (U-S2) Told of every key on the page pane (after overlays), before the page acts on it. Default: none. */
+    var keyObserver: ((SettingsRoute) -> Unit)?
         get() = null
         set(@Suppress("UNUSED_PARAMETER") value) = Unit
 

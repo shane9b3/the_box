@@ -72,6 +72,16 @@ class StorageLocationsImplTest {
         assertTrue(w.store.flow(StorageDomain).value.locations.isEmpty())
     }
 
+    /** U-S5 (save-location review 2026-10-24): a stored folder's Test is written as its lastTest. */
+    @Test fun recordTestStoresTheLastTest() = runBlocking {
+        val w = StorageWorld()
+        val loc = w.locations.saveSmb(address, "NAS", null, null)
+        val t = app.thebox.core.storage.LocationTestResult(app.thebox.core.storage.TestVerdict.TOO_SLOW, 900_000, 900_000, 35, 0, 1L shl 40, true, 5_000L)
+        w.locations.recordTest(loc.id, t)
+        assertEquals(t, w.locations.location(loc.id)!!.lastTest)
+        assertEquals(t, w.store.flow(StorageDomain).value.locations.single().lastTest)
+    }
+
     @Test fun aRestoreReadsAsSignInNeeded() {
         val w = StorageWorld()
         val loc = StorageLocation("smb-r", StorageKind.SMB, "NAS", smb = address)

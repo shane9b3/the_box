@@ -129,6 +129,11 @@ enum class StorageText {
     SHARE_TYPE_NAME,
     SHARE_TYPE_NAME_DESC,
     SHARE_NOT_FOUND,
+    /** U-B1 (review 2026-10-24): the typed share's next step, and the folder list that failed (reason, next step). */
+    SHARE_NOT_FOUND_STEP,
+    SHARE_LIST_FAILED,
+    SHARE_LIST_FAILED_STEP,
+    SHARES_LIST_FAILED_STEP,
     SIGN_IN,
     SIGN_IN_AS_SOMEONE,
     TRY_AGAIN,
@@ -148,6 +153,8 @@ enum class StorageText {
     SIGN_IN_INFO_TITLE,
     SIGN_IN_INFO,
     SIGN_IN_NO_KEYBOARD,
+    /** U-S6: the no-keyboard note's next step (its own line). */
+    SIGN_IN_NO_KEYBOARD_STEP,
     NOT_SET,
     PHONE_SIGNED_IN,
     PHONE_REFUSED,
@@ -160,6 +167,8 @@ enum class StorageText {
     FOLDER_LOADING,
     FOLDER_TRUNCATED,
     FOLDER_MISSING,
+    /** U-S6 */
+    FOLDER_MISSING_STEP,
     FOLDER_NONE_BELOW,
     FOLDER_SUBTITLE_ROOT,
     // ---- Test (7.8)
@@ -179,6 +188,8 @@ enum class StorageText {
     VERDICT_STEP_TOO_SLOW,
     VERDICT_DETAILS,
     TEST_WAKE_NOTE,
+    /** U-S6 */
+    TEST_WAKE_NOTE_STEP,
     TEST_SMALL_POOL_NOTE,
     TEST_USE_THIS,
     TEST_USE_FOR_REWIND,
@@ -211,9 +222,7 @@ enum class StorageText {
     ERR_DATA_STEP,
     ERR_FULL,
     ERR_FULL_STEP,
-    ERR_GENERIC,
-    ERR_GENERIC_STEP,
-
+    // U-B1: ERR_GENERIC ("Something went wrong with NAS.") is gone; NOT_FOUND and LIST_FAILED have their own texts.
 }
 
 fun interface StorageTexts {
