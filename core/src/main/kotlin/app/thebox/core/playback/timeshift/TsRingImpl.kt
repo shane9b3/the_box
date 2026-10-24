@@ -64,9 +64,12 @@ class TsRingImpl internal constructor(
     /** The rewind window (§3.2, R5); 0 = no time limit. */
     private val lengthMs: Long = 0L,
 ) : TsRing {
-    /** Production shape ([TsRingFactory]): the process's shared `box-ts-flush` thread. */
+    /**
+     * Production shape ([TsRingFactory]): the process's shared `box-ts-flush` thread, or, for a [RingStorage.blocking]
+     * storage, a dedicated flusher owned by this ring (storage locations §4.2, A-B2: [RingFlusher.forStorage]).
+     */
     constructor(storage: RingStorage, clock: MonoClock, ramBlocks: Int, indexEntries: Int, lengthMs: Long = 0L) :
-        this(storage, clock, ramBlocks, indexEntries, RingFlusher.shared, lengthMs)
+        this(storage, clock, ramBlocks, indexEntries, RingFlusher.forStorage(storage), lengthMs)
 
     internal val pool = BlockPool(ramBlocks.coerceAtLeast(2))
     private val nBlocks = pool.blocks

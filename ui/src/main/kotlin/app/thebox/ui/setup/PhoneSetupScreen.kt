@@ -143,6 +143,8 @@ private fun titleOf(p: PhonePurpose): Int = when (p) {
     PhonePurpose.RESTORE -> R.string.backup_phone_title_restore
     PhonePurpose.BACKUP_DOWNLOAD -> R.string.backup_phone_title_backup
     PhonePurpose.LOGS_DOWNLOAD -> R.string.backup_phone_title_logs
+    // (Storage locations commit 0, §7.4) WP-S6 replaces it with "Add a network folder from your phone" (strings_storage_phone.xml).
+    PhonePurpose.NETWORK_FOLDER -> R.string.backup_phone_title_setup
 }
 
 private fun failureOf(f: LanFailure): Int = when (f) {

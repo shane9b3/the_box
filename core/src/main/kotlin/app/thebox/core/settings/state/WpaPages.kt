@@ -42,6 +42,7 @@ import app.thebox.core.settings.Visibility
 import app.thebox.core.settings.tree.GuideRows
 import app.thebox.core.settings.tree.InterfaceRows
 import app.thebox.core.settings.tree.NetworkRows
+import app.thebox.core.settings.tree.PauseRewindRows
 import app.thebox.core.settings.tree.PlaybackRows
 import app.thebox.core.settings.tree.RemoteRows
 import app.thebox.core.settings.tree.SettingsTree
@@ -113,7 +114,8 @@ class WpaPages(
 
     override val notices: Flow<String> get() = _notices
 
-    override fun handles(route: SettingsRoute): Boolean = route is SettingsRoute.Section && route.id in SECTIONS
+    override fun handles(route: SettingsRoute): Boolean =
+        (route is SettingsRoute.Section && route.id in SECTIONS) || route == SettingsRoute.PauseRewind // storage locations commit 0
 
     override val changes: Flow<Unit>
         get() = merge(
@@ -129,6 +131,12 @@ class WpaPages(
 
     /** Builds [route]'s page synchronously (tests and [page]). */
     fun build(route: SettingsRoute, advanced: Boolean): PageModel {
+        // (Storage locations commit 0, docs/design/m6-storage-locations.md §9.1) The time-shift rows' sub-page, until
+        // WP-S4 moves it to StoragePages (Rewind length, Save to and the texts are WP-S4's).
+        if (route == SettingsRoute.PauseRewind) {
+            val rows = timeshiftRows(store.flow(PlaybackDomain).value).filter { advanced || it.visibility == Visibility.SIMPLE }
+            return PageModel(route = route, title = t(SettingsText.PB_TIMESHIFT), rows = rows, version = version.incrementAndGet())
+        }
         val id = (route as SettingsRoute.Section).id
         val rows = when (id) {
             SectionId.GUIDE -> guideRows()
@@ -236,7 +244,7 @@ class WpaPages(
             PlaybackRows.ASPECT, t(SettingsText.PB_ASPECT),
             ASPECTS.map { (m, k) -> ChoiceOption(m.name, t(k)) }, p.defaultAspect.name,
         )
-        out += timeshiftRows(p)
+        out += pauseRewindLink(p)
         out += choice(
             PlaybackRows.ON_LAUNCH, t(SettingsText.PB_ON_LAUNCH),
             listOf(
@@ -298,6 +306,15 @@ class WpaPages(
      * Off deletes the file at once ([WpaPageEnv.timeshiftOff]; the row itself is NEXT_TUNE). Unknown storage: Auto reads
      * as the small-storage length.
      */
+    /**
+     * (Storage locations commit 0, §9.1) The Playback page's "Pause and rewind" Link to [SettingsRoute.PauseRewind]; its
+     * value is the length's. WP-S4 adds the place ("1 hour · NAS") and the description.
+     */
+    private fun pauseRewindLink(p: PlaybackPrefs): SettingsRow {
+        val length = timeshiftRows(p).first { it.id == PauseRewindRows.TIMESHIFT }
+        return link(PlaybackRows.PAUSE_REWIND, SettingsRoute.PauseRewind, t(SettingsText.PB_TIMESHIFT)).copy(value = length.value)
+    }
+
     private fun timeshiftRows(p: PlaybackPrefs): List<SettingsRow> {
         val storage = env.timeshiftStorage()
         val autoMs = storage?.let { POLICY.lengthMs(TimeshiftLength.AUTO, it.totalBytes) } ?: TimeshiftConstants.AUTO_LENGTH_SMALL_MS
@@ -322,9 +339,9 @@ class WpaPages(
         ).map { (m, label) -> ChoiceOption(m.name, label) }
         val protect = listOf(StorageProtection.AUTO to SettingsText.AUTO, StorageProtection.OFF to SettingsText.OFF).map { (m, k) -> ChoiceOption(m.name, t(k)) }
         return listOf(
-            choice(PlaybackRows.TIMESHIFT, t(SettingsText.PB_TIMESHIFT), lengths, p.timeshift.name, desc),
-            choice(PlaybackRows.TIMESHIFT_HOLD, t(SettingsText.PB_TIMESHIFT_HOLD), holds, p.timeshiftHold.name, t(SettingsText.PB_TIMESHIFT_HOLD_DESC)),
-            choice(PlaybackRows.TIMESHIFT_PROTECT, t(SettingsText.PB_TIMESHIFT_PROTECT), protect, p.storageProtection.name, t(SettingsText.PB_TIMESHIFT_PROTECT_DESC)),
+            choice(PauseRewindRows.TIMESHIFT, t(SettingsText.PB_TIMESHIFT), lengths, p.timeshift.name, desc),
+            choice(PauseRewindRows.TIMESHIFT_HOLD, t(SettingsText.PB_TIMESHIFT_HOLD), holds, p.timeshiftHold.name, t(SettingsText.PB_TIMESHIFT_HOLD_DESC)),
+            choice(PauseRewindRows.TIMESHIFT_PROTECT, t(SettingsText.PB_TIMESHIFT_PROTECT), protect, p.storageProtection.name, t(SettingsText.PB_TIMESHIFT_PROTECT_DESC)),
         )
     }
 
@@ -506,14 +523,14 @@ class WpaPages(
             PlaybackRows.AUDIO_OUTPUT -> choose?.let { c -> enumOf<AudioOutputMode>(c)?.let { m -> playback { it.copy(audioOutput = m) } } }
             PlaybackRows.ASPECT -> choose?.let { c -> enumOf<AspectMode>(c)?.let { m -> playback { it.copy(defaultAspect = m) } } }
             PlaybackRows.ON_LAUNCH -> choose?.let { c -> enumOf<OnLaunch>(c)?.let { m -> player { it.copy(onLaunch = m) } } }
-            PlaybackRows.TIMESHIFT -> choose?.let { c ->
+            PauseRewindRows.TIMESHIFT -> choose?.let { c ->
                 enumOf<TimeshiftLength>(c)?.let { m ->
                     playback { it.copy(timeshift = m) }
                     if (m == TimeshiftLength.OFF) env.timeshiftOff() // §12: Off deletes the file at once
                 }
             }
-            PlaybackRows.TIMESHIFT_HOLD -> choose?.let { c -> enumOf<TimeshiftHold>(c)?.let { m -> playback { it.copy(timeshiftHold = m) } } }
-            PlaybackRows.TIMESHIFT_PROTECT -> choose?.let { c -> enumOf<StorageProtection>(c)?.let { m -> playback { it.copy(storageProtection = m) } } }
+            PauseRewindRows.TIMESHIFT_HOLD -> choose?.let { c -> enumOf<TimeshiftHold>(c)?.let { m -> playback { it.copy(timeshiftHold = m) } } }
+            PauseRewindRows.TIMESHIFT_PROTECT -> choose?.let { c -> enumOf<StorageProtection>(c)?.let { m -> playback { it.copy(storageProtection = m) } } }
             PlaybackRows.AUDIO_LANGUAGE -> choose?.let { c ->
                 playback { p ->
                     val rest = p.preferredAudioLanguages.drop(1).filter { it != c }

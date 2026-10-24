@@ -72,6 +72,10 @@ object PlayerText {
         PlayerToast.SAVING_STOPPED_CONNECTION -> res.getString(R.string.player_toast_saving_stopped_connection)
         PlayerToast.JUMPED_TO_LIVE_RESTART -> res.getString(R.string.player_toast_jumped_to_live_restart)
         PlayerToast.PAUSE_TIP -> res.getString(R.string.player_toast_pause_tip)
+        // (Storage locations commit 0, docs/design/m6-storage-locations.md §10) WP-S4 replaces these bodies with the §10
+        // texts (strings_storage.xml) and the arg decoding; the machine raises neither kind before WP-S4.
+        PlayerToast.SAVE_LOCATION_FALLBACK -> res.getString(R.string.player_toast_rewind_stopped_storage)
+        PlayerToast.PAUSE_RESUME_LOST_STORAGE -> res.getString(R.string.player_toast_rewind_stopped_storage)
     }
 
     /** (M6 commit 0) Separates the values of a toast that has several ("12 min" + ARG_SEP + "21:26"). */

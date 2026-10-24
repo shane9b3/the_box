@@ -137,7 +137,8 @@ class SettingsContractsTest {
 
     @Test
     fun registryListsEverySourceOnceAndNoRowTwice() {
-        assertEquals(14, SettingsTree.sources.size, "one source per *Rows.kt of §1.3a")
+        // (Storage locations commit 0) + PauseRewindRows, the Pause and rewind sub-page (m6-storage-locations §9.5).
+        assertEquals(15, SettingsTree.sources.size, "one source per *Rows.kt of §1.3a")
         assertEquals(SettingsTree.sources.size, SettingsTree.sources.toSet().size)
         assertEquals(SettingsTree.all.size, SettingsTree.all.map { it.id }.toSet().size)
     }

@@ -14,7 +14,11 @@ sealed interface SettingsRoute {
     data class Section(val id: SectionId) : SettingsRoute
     /** Add a source; [firstRun] decides where Back and "Start watching" go. */
     data class AddSource(val kind: SourceKind? = null, val firstRun: Boolean = false) : SettingsRoute
-    data class PhoneSetup(val firstRun: Boolean = false, val purpose: PhonePurpose = PhonePurpose.SETUP) : SettingsRoute
+    /**
+     * (Storage locations commit 0, docs/design/m6-storage-locations.md §7.4, §12.4) [browse] is the `StoragePages` browse
+     * token of a NETWORK_FOLDER sign-in (null for every other purpose, and for "Add from your phone" before a session).
+     */
+    data class PhoneSetup(val firstRun: Boolean = false, val purpose: PhonePurpose = PhonePurpose.SETUP, val browse: Long? = null) : SettingsRoute
     data class ImportProgress(val playlistId: Long, val firstRun: Boolean) : SettingsRoute
     data class GroupsReview(val playlistId: Long, val firstRun: Boolean) : SettingsRoute
     /**
@@ -43,10 +47,27 @@ sealed interface SettingsRoute {
     data class RestorePreview(val token: Long) : SettingsRoute
     /** (owner request 2026-10-18, docs/design/m6-channel-editor.md) The channel editor; [groupKey] focuses that group's channels. */
     data class ChannelEditor(val playlistId: Long, val groupKey: String? = null) : SettingsRoute
+    // (Storage locations commit 0, docs/design/m6-storage-locations.md §9.2; section PLAYBACK, additive). Routes never
+    // carry a credential (Must): [browse] is a token into StoragePages' in-memory BrowseSession map.
+    /** "Pause and rewind": Rewind length, Save to, and the two advanced rows (§9.1). */
+    data object PauseRewind : SettingsRoute
+    /** "Save to": this device, USB drives, network folders, "Add a network folder". */
+    data class SaveLocation(val purpose: app.thebox.core.storage.StoragePurpose = app.thebox.core.storage.StoragePurpose.TIMESHIFT) : SettingsRoute
+    /** One stored location (U-B2): status, address, use, test, name, sign-in, remove. */
+    data class LocationDetail(val locationId: String) : SettingsRoute
+    data object FindComputers : SettingsRoute
+    data class ComputerShares(val browse: Long) : SettingsRoute
+    data class ComputerSignIn(val browse: Long) : SettingsRoute
+    data class LocationSignIn(val locationId: String) : SettingsRoute
+    /** One route for the whole folder walk (U-B3): the path is browse-session state. */
+    data class NetworkFolder(val browse: Long, val share: String) : SettingsRoute
+    /** The Test of a folder being added ([browse]) or of a stored location ([locationId]); exactly one is set. */
+    data class LocationTest(val browse: Long? = null, val locationId: String? = null) : SettingsRoute
 }
 
 enum class SourceKind { XTREAM, M3U }
-enum class PhonePurpose { SETUP, RESTORE, BACKUP_DOWNLOAD, LOGS_DOWNLOAD }
+/** (Storage locations commit 0, §7.4) NETWORK_FOLDER: sign in to, or add, a network folder from the phone. Append-only. */
+enum class PhonePurpose { SETUP, RESTORE, BACKUP_DOWNLOAD, LOGS_DOWNLOAD, NETWORK_FOLDER }
 
 /** Stable row id, e.g. "playback.audio_output". Persisted nowhere; used for routes, tests and focus restore. */
 @JvmInline value class RowId(val key: String)
@@ -81,11 +102,13 @@ sealed interface RowKind {
     data class Item(val route: SettingsRoute? = null, val primary: String? = null, val menu: List<ChoiceOption> = emptyList(), val movable: Boolean = false, val badges: Set<Badge> = emptySet()) : RowKind
 }
 
+/** (Storage locations commit 0, §7.2) HOST: "Computer name or address". Append-only. */
 enum class TextHint {
-    URL, USERNAME, PASSWORD, NAME, PATTERN, PASSPHRASE, HEADER, NUMBER,
+    URL, USERNAME, PASSWORD, NAME, PATTERN, PASSPHRASE, HEADER, NUMBER, HOST,
 }
 enum class Tone { NORMAL, GOOD, WARN, BAD }
-enum class Badge { LOCKED, HIDDEN, ADULT, FAILED, NEW, DEFAULT }
+/** (Storage locations commit 0, §9.2, §7.1) IN_USE: the chosen place; SAVED: a found computer already stored. Append-only. */
+enum class Badge { LOCKED, HIDDEN, ADULT, FAILED, NEW, DEFAULT, IN_USE, SAVED }
 
 data class ConfirmSpec(val title: String, val body: String, val confirmLabel: String, val cancelLabel: String)
 

@@ -25,6 +25,16 @@ object TimeshiftConstants {
     const val RING_RAM_BLOCKS = 64
     /** RAM block pool on low-RAM devices: 32 blocks (2.0 MiB). */
     const val RING_RAM_BLOCKS_LOW_RAM = 32
+    /**
+     * (Storage locations commit 0, docs/design/m6-storage-locations.md §3.4, §4.4, lead ruling 5) The pool of a ring on a
+     * USB drive or network folder: 160 blocks (10.0 MiB, ≈ 10 s at 1 MB/s; the stall budget) when `memoryClass` ≥
+     * [REMOTE_POOL_MEMORY_CLASS_MB], else [RING_RAM_BLOCKS_EXTERNAL_SMALL] (96 blocks, 6.0 MiB). Also the pool of an
+     * internal fallback of such a choice (one pool size per cycle).
+     */
+    const val RING_RAM_BLOCKS_EXTERNAL = 160
+    const val RING_RAM_BLOCKS_EXTERNAL_SMALL = 96
+    /** `ActivityManager.memoryClass` (MiB) from which the remote pool is [RING_RAM_BLOCKS_EXTERNAL]. */
+    const val REMOTE_POOL_MEMORY_CLASS_MB = 192
     /** Per-reader direct staging buffer for `pread`. */
     const val READER_STAGING_BYTES = 65_536
     /** A blocked reader rechecks its cancel flag this often. */

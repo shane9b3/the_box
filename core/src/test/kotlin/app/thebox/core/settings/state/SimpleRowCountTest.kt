@@ -22,9 +22,15 @@ class SimpleRowCountTest {
 
     /**
      * Section pages only (§3.3.13; WP-C's rule at integration): Channel options are per channel and the button-mapping
-     * pages (ButtonMapping, ActionBindings) are sub-pages of Remote control, so their registered rows are not counted.
+     * pages (ButtonMapping, ActionBindings) are sub-pages of Remote control, so their registered rows are not counted;
+     * nor are the rows of Playback's "Pause and rewind" sub-page.
      */
-    private val SUB_PAGE_SOURCES = listOf(ChannelOptionsRows, app.thebox.core.settings.tree.ButtonMappingRows)
+    private val SUB_PAGE_SOURCES = listOf(
+        ChannelOptionsRows, app.thebox.core.settings.tree.ButtonMappingRows,
+        // (Storage locations commit 0, docs/design/m6-storage-locations.md §9.1, the M5 §3.3.13 amendment) "Pause and
+        // rewind" is one simple Link on Playback; its sub-page's rows are not counted.
+        app.thebox.core.settings.tree.PauseRewindRows,
+    )
 
     private fun simple(section: SectionId) =
         SettingsTree.rowsOf(section).count {

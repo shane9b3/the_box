@@ -122,5 +122,8 @@ object SettingsUi {
         Badge.FAILED -> R.string.settings_ui_badge_failed
         Badge.NEW -> R.string.settings_ui_badge_new
         Badge.DEFAULT -> R.string.settings_ui_badge_default
+        // (Storage locations commit 0, docs/design/m6-storage-locations.md §9.2, §9.4) WP-S4 draws them (accent border).
+        Badge.IN_USE -> R.string.settings_ui_badge_in_use
+        Badge.SAVED -> R.string.settings_ui_badge_saved
     }
 }

@@ -2,6 +2,8 @@
 // Amended by the lead reconciliation of WP-A/WP-B (2026-10-19, design "Lead reconciliation — WP-A/WP-B"): R1 index
 // entry snapshots, R2 SegmentStormException, R3 RingWriter.reconnectAllowed, R4 daily counter, R5 window length,
 // R11 allocate units, R12 `var mode`, R13 restart after a self-stop. Fix pass — playback (2026-10-19): B1 reconnect cause.
+// Storage locations commit 0 (2026-10-24, docs/design/m6-storage-locations.md §12.3, additive): RingStorage KDoc and
+// `blocking`; RemoteRingStorage, RingTarget, RingTargetChoice, RingTargetSource; the TimeshiftPolicy overloads.
 package app.thebox.core.playback.timeshift
 
 import app.thebox.core.playback.MonoClock
@@ -46,6 +48,14 @@ class RingSlot { var array: ByteArray = EMPTY; var offset = 0; var length = 0; v
 /**
  * File I/O behind the ring (§3.1). WP-A uses it; WP-B implements it over `Os`/FileChannel and StatFs. Positional
  * calls are thread-safe against each other (pwrite on the flusher, pread on readers). Never called on main.
+ *
+ * (Storage locations commit 0, docs/design/m6-storage-locations.md §3.4, §4.1, §4.2; A-S4, A-B1, A-B2)
+ * - [availableBytes]: a non-internal storage (USB drive, network folder) reports
+ *   `free − (its reserve − FREE_SPACE_RESERVE_MIN / 2)`, never below 0 (`StorageLimits.reportedAvailableBytes`), so
+ *   the flusher's fixed halt at `FREE_SPACE_RESERVE_MIN / 2` keeps that kind's reserve. The internal storage reports
+ *   its free space as is.
+ * - [close]/[delete]: a [blocking] storage returns at once and finishes on its own thread (never waits on the network
+ *   or a vanishing device; the factory calls them under its lock on the zap path).
  */
 interface RingStorage : AutoCloseable {
     val capacityBytes: Long
@@ -62,6 +72,55 @@ interface RingStorage : AutoCloseable {
     @Throws(IOException::class) fun writeHeader(generation: Long, capacity: Long)
     /** Closes the fd first, then deletes (space is freed on close). */
     fun delete()
+    /** True when pwrite/pread may block on a network or removable device: the ring then gets its own flusher (A-B2). */
+    val blocking: Boolean get() = false
+}
+
+/** A remote ring storage (docs/design/m6-storage-locations.md §4): `SmbRingStorage`. */
+interface RemoteRingStorage : RingStorage {
+    /** The file is gone (deleted on the server, or the storage closed): `isUnlinked()` answers this. */
+    val gone: Boolean
+    val lastFailure: app.thebox.core.storage.StorageFailure?
+    /** A reconnect or a write timeout happened: never reuse this file across reset() (A-B4). */
+    val needsFreshFile: Boolean
+    /** Bytes ever written to the remote file (0 = nothing reached the folder; FallbackRingStorage may switch). */
+    val remoteBytesWritten: Long
+    /** Once per storage, on the flusher; false on failure or when [deadlineMonoMs] passes (§5.2). */
+    fun create(deadlineMonoMs: Long): Boolean
+    fun ratesBps(): LongArray                              // [write, read] over the last 10 s (stats)
+}
+
+/** Where one cycle's ring lives (storage locations §5.1). Chosen by [RingTargetSource.current]; never does I/O. */
+sealed interface RingTarget {
+    val locationId: String; val kind: app.thebox.core.storage.StorageKind; val limits: app.thebox.core.storage.StorageLimits; val name: String
+    /** This device or a USB drive: a local directory (StatFs figures as of [RingTargetSource.current]). */
+    data class Local(override val locationId: String, override val kind: app.thebox.core.storage.StorageKind,
+                     override val limits: app.thebox.core.storage.StorageLimits, override val name: String,
+                     val dir: java.io.File, val totalBytes: Long, val availableBytes: Long) : RingTarget
+    /** A network folder. [availableBytes] is the keeper's cached free space (`Long.MAX_VALUE` when stale, §5.1). */
+    class Remote(override val locationId: String, override val kind: app.thebox.core.storage.StorageKind,
+                 override val limits: app.thebox.core.storage.StorageLimits, override val name: String,
+                 val availableBytes: Long, val ready: Boolean,
+                 /** No I/O (Must, A-B1). */
+                 val open: (fileName: String, capacityBytes: Long) -> RemoteRingStorage) : RingTarget
+}
+
+/**
+ * One cycle's choice (§5.1): the [target] to build, the location the viewer chose ([chosenId], [chosenKind]: the pool
+ * size follows the chosen kind, lead ruling 5), why the target is not the chosen place ([fallback]), and whether SMB
+ * was selected on last-known-good without READY ([lastKnownGood]: capacity is then `min(SMB, internal)`).
+ */
+data class RingTargetChoice(val target: RingTarget, val chosenId: String, val chosenKind: app.thebox.core.storage.StorageKind,
+                            val fallback: app.thebox.core.storage.LocationFallback?, val lastKnownGood: Boolean)
+
+/** :data (StorageTargetsImpl). [current] never blocks and does no I/O (Must, §5.1). No awaiting variant (A-N4). */
+interface RingTargetSource {
+    fun current(purpose: app.thebox.core.storage.StoragePurpose): RingTargetChoice
+    fun warm()
+    /** Synchronous, before the stop is published (A-N5); [sinceFirstWriteMs] drives the grace (§5.4). */
+    fun onStorageFailure(locationId: String, stop: RecordStop, failure: app.thebox.core.storage.StorageFailure?, sinceFirstWriteMs: Long)
+    /** The file named for a target in this process: "ring-<deviceId>-<pid>-<n>.bin" for SMB (§3.5). */
+    fun nextRemoteFileName(locationId: String): String
 }
 
 /**
@@ -257,10 +316,18 @@ interface IndexSink {
     fun onPsi(packets: ByteArray, count: Int)
 }
 
-/** Pure sizing and policy (§8). */
+/**
+ * Pure sizing and policy (§8). (Storage locations commit 0, §12.3, A-S13) The overloads with
+ * [app.thebox.core.storage.StorageLimits] size a ring for any kind; the old ones are the internal kind
+ * (`StorageLimits.internal(total)`).
+ */
 interface TimeshiftPolicy {
     fun lengthMs(setting: app.thebox.core.settings.TimeshiftLength, totalStorageBytes: Long): Long?
     fun capacityBytes(lengthMs: Long, bytesPerSec: Long, availableBytes: Long, totalBytes: Long, currentFileBytes: Long): Long
+    /** Capacity per kind: the kind's `maxRingBytes` and `reserveBytes` replace 8 GiB and `max(1 GiB, total × 0.10)`. */
+    fun capacityBytes(lengthMs: Long, bytesPerSec: Long, availableBytes: Long, limits: app.thebox.core.storage.StorageLimits, currentFileBytes: Long): Long
+    /** Length per kind: Auto is 1 h when `limits.autoLengthLarge`, else 30 min. */
+    fun lengthMs(setting: app.thebox.core.settings.TimeshiftLength, totalStorageBytes: Long, limits: app.thebox.core.storage.StorageLimits): Long?
     fun holdLimitMs(setting: app.thebox.core.settings.TimeshiftHold): Long?
     fun dailyLimitBytes(setting: app.thebox.core.settings.StorageProtection, totalStorageBytes: Long): Long?
     fun mode(setting: app.thebox.core.settings.TimeshiftLength, writtenTodayBytes: Long, dailyLimitBytes: Long?, needsPersist: Boolean): BufferMode

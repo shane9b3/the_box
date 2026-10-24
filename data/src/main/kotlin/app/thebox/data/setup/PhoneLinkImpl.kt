@@ -59,7 +59,7 @@ class PhoneLinkImpl @Inject constructor(
     override val state: StateFlow<LanServerState> get() = link.state
     override val submissions: Flow<PhoneSubmission> get() = link.submissions
     /** Address lookup and bind happen off main, in call order (start/stop on one serial lane). */
-    override fun start(purpose: PhonePurpose) {
+    override fun start(purpose: PhonePurpose, context: app.thebox.core.setup.lan.PhoneContext?) {
         scope.launch(lane) { link.start(purpose) }
     }
     override fun stop() {

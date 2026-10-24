@@ -12,6 +12,11 @@
          backup writes Download/TheBox below API 29 (§3.10.5). -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
+    <!-- Storage locations (docs/design/m6-storage-locations.md §7.1, §12.4): "Find computers" holds a Wi-Fi
+         MulticastLock for NsdManager while the page is open. Both are normal permissions (no prompt). Android 17's
+         local-network protection (ACCESS_LOCAL_NETWORK) applies once targetSdk ≥ 37 (master plan §3). -->
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
 
     <!-- M5 (§6.6, §9 F24): list external players (ACTION_VIEW video/* over http/https) on API 30+. -->
     <queries>

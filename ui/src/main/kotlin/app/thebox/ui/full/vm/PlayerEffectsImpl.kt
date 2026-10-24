@@ -90,6 +90,10 @@ class PlayerEffectsImpl(
 
     /** (M5 integration, §3.6.2) The Sources picker. */
     override fun selectServer(index: Int) = controller.selectServer(index)
+
+    /** (Storage locations commit 0, docs/design/m6-storage-locations.md §5.1, §10) The host's once/3-process rules. */
+    override fun fallbackToastDue(locationId: String, reason: app.thebox.core.storage.LocationFallback): Boolean =
+        delegates.fallbackToasts.due(locationId, reason)
     override fun pausePlain() = controller.pause()
     override fun resumePlain() = controller.resume()
 

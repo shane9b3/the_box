@@ -148,14 +148,15 @@ class SettingsBackLadderTest {
         val w = SettingsWorld().open()
         w.enter(SectionId.PLAYBACK)
         // (M6 time-shift commit 0) "Pause and rewind" is the fifth simple row now that "On launch" is ADVANCED.
-        w.focus(PlaybackRows.TIMESHIFT)
+        // (Storage locations commit 0) It is the PAUSE_REWIND link to the sub-page.
+        w.focus(PlaybackRows.PAUSE_REWIND)
         w.act(BoxAction.LEFT)
         w.enter(SectionId.PLAYBACK)
-        assertEquals(PlaybackRows.TIMESHIFT, w.focusedRow()?.id)
+        assertEquals(PlaybackRows.PAUSE_REWIND, w.focusedRow()?.id)
         // A rebuild that inserts rows above keeps the focus on the same row.
         w.advanced = true
         w.machine.dispatch(SettingsEvent.Page(w.page(SettingsRoute.Section(SectionId.PLAYBACK))))
-        assertEquals(PlaybackRows.TIMESHIFT, w.focusedRow()?.id)
+        assertEquals(PlaybackRows.PAUSE_REWIND, w.focusedRow()?.id)
     }
 
     @Test

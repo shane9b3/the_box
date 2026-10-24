@@ -220,7 +220,11 @@ internal interface TimeshiftSessionFactory {
 internal sealed interface TimeshiftPrepared { class Granted(val grant: TimeshiftGrant) : TimeshiftPrepared; class Off(val reason: BufferOff) : TimeshiftPrepared }
 
 /** Storage reserved for one cycle (a pre-first-byte retry restarts the writer instead, fix pass B2). */
-internal class TimeshiftGrant(val ring: TsRing, val capacityBytes: Long, val mode: BufferMode, val holdLimitMs: Long?)
+internal class TimeshiftGrant(
+    val ring: TsRing, val capacityBytes: Long, val mode: BufferMode, val holdLimitMs: Long?,
+    /** (Storage locations commit 0, docs/design/m6-storage-locations.md §5.1, §12.4) The cycle's target choice. */
+    val choice: app.thebox.core.playback.timeshift.RingTargetChoice = app.thebox.player.timeshift.InternalRingTargets.UNSIZED,
+)
 
 /**
  * One controller cycle's time-shift (§2 "Ownership"): the writer under its own [writerTuneId], the ring generation and

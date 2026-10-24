@@ -1,8 +1,10 @@
 // Commit-0 skeleton (M5): docs/design/m5-setup-settings.md §1.3a, §3.2.3, §3.3. Nobody edits this file after commit 0:
-// each WP fills its own `*Rows.kt` object, which this registry already lists.
+// each WP fills its own `*Rows.kt` object, which this registry already lists. (Storage locations commit 0 adds
+// PauseRewindRows and the new routes' section, docs/design/m6-storage-locations.md §9.5.)
 package app.thebox.core.settings.tree
 
 import app.thebox.core.settings.EffectTiming
+import app.thebox.core.settings.PhonePurpose
 import app.thebox.core.settings.RowId
 import app.thebox.core.settings.SectionId
 import app.thebox.core.settings.SettingsRoute
@@ -36,6 +38,7 @@ object SettingsTree {
     val sources: List<RowSource> = listOf(
         PlaylistRows, SetupRows, MatchingRows, // B
         GuideRows, PlaybackRows, InterfaceRows, RemoteRows, NetworkRows, ChannelOptionsRows, // A
+        PauseRewindRows, // storage locations commit 0 (the Pause and rewind sub-page of Playback)
         ChannelsRows, BackupRows, // D
         ParentalRows, ButtonMappingRows, // C
         AboutRows, // E
@@ -64,7 +67,9 @@ object SettingsTree {
     fun sectionOf(route: SettingsRoute): SectionId? = when (route) {
         SettingsRoute.Root, SettingsRoute.FirstRun -> null
         is SettingsRoute.Section -> route.id
-        is SettingsRoute.AddSource, is SettingsRoute.PhoneSetup, is SettingsRoute.ImportProgress,
+        // (Storage locations commit 0) a NETWORK_FOLDER phone sign-in belongs to Playback → Pause and rewind → Save to.
+        is SettingsRoute.PhoneSetup -> if (route.purpose == PhonePurpose.NETWORK_FOLDER) SectionId.PLAYBACK else SectionId.PLAYLISTS
+        is SettingsRoute.AddSource, is SettingsRoute.ImportProgress,
         is SettingsRoute.GroupsReview, is SettingsRoute.MatchingReport, is SettingsRoute.Playlist, is SettingsRoute.PlaylistSource,
         is SettingsRoute.NetworkTest -> SectionId.PLAYLISTS
         SettingsRoute.EpgSources, is SettingsRoute.FixGuide, SettingsRoute.SyncStatus -> SectionId.GUIDE
@@ -73,5 +78,9 @@ object SettingsTree {
         SettingsRoute.ButtonMapping, is SettingsRoute.ActionBindings -> SectionId.REMOTE
         SettingsRoute.Diagnostics, SettingsRoute.Licences -> SectionId.ABOUT
         SettingsRoute.Backup, is SettingsRoute.RestorePreview -> SectionId.BACKUP
+        // (Storage locations commit 0, docs/design/m6-storage-locations.md §9.2: every new route is section PLAYBACK)
+        SettingsRoute.PauseRewind, is SettingsRoute.SaveLocation, is SettingsRoute.LocationDetail, SettingsRoute.FindComputers,
+        is SettingsRoute.ComputerShares, is SettingsRoute.ComputerSignIn, is SettingsRoute.LocationSignIn,
+        is SettingsRoute.NetworkFolder, is SettingsRoute.LocationTest -> SectionId.PLAYBACK
     }
 }

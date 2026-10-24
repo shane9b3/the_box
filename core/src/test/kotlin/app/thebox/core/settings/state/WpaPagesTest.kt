@@ -22,6 +22,7 @@ import kotlinx.coroutines.test.runTest
 import app.thebox.core.settings.tree.GuideRows
 import app.thebox.core.settings.tree.InterfaceRows
 import app.thebox.core.settings.tree.NetworkRows
+import app.thebox.core.settings.tree.PauseRewindRows
 import app.thebox.core.settings.tree.PlaybackRows
 import app.thebox.core.settings.tree.RemoteRows
 import org.junit.jupiter.api.DynamicTest
@@ -44,6 +45,32 @@ class WpaPagesTest {
 
     private fun page(id: SectionId, advanced: Boolean = true) = pages.build(SettingsRoute.Section(id), advanced)
     private fun row(id: SectionId, row: RowId, advanced: Boolean = true): SettingsRow = assertNotNull(page(id, advanced).rows.firstOrNull { it.id == row }, row.key)
+    /** (Storage locations commit 0, docs/design/m6-storage-locations.md §9.1) A row of the Pause and rewind sub-page. */
+    private fun prRow(row: RowId, advanced: Boolean = true): SettingsRow =
+        assertNotNull(pages.build(SettingsRoute.PauseRewind, advanced).rows.firstOrNull { it.id == row }, row.key)
+
+    /** (Storage locations commit 0, §9.1) Playback links to the sub-page; the three time-shift rows live there. */
+    @Test
+    fun pauseRewindSubPage() {
+        val link = row(SectionId.PLAYBACK, PlaybackRows.PAUSE_REWIND, advanced = false)
+        assertEquals(RowKind.Link(SettingsRoute.PauseRewind), link.kind)
+        assertEquals("TS_AUTO(TS_MIN(30))", link.value, "the link shows the length")
+        assertEquals(Visibility.SIMPLE, link.visibility)
+        assertEquals(EffectTiming.NONE, link.effect)
+        assertTrue(pages.handles(SettingsRoute.PauseRewind))
+        for ((id, how) in listOf(
+            Triple(PauseRewindRows.TIMESHIFT, "TS_AUTO(TS_MIN(30))", EffectTiming.NEXT_TUNE to Visibility.SIMPLE),
+            Triple(PauseRewindRows.TIMESHIFT_HOLD, "AUTO", EffectTiming.LIVE to Visibility.ADVANCED),
+            Triple(PauseRewindRows.TIMESHIFT_PROTECT, "AUTO", EffectTiming.LIVE to Visibility.ADVANCED),
+        ).map { it.first to (it.second to it.third) }) {
+            val r = prRow(id)
+            assertEquals(how.first, r.value, id.key)
+            assertEquals(how.second.first, r.effect, id.key)
+            assertEquals(how.second.second, r.visibility, id.key)
+        }
+        assertEquals(listOf(PauseRewindRows.TIMESHIFT), pages.build(SettingsRoute.PauseRewind, false).rows.map { it.id }, "advanced rows hidden")
+        assertNull(page(SectionId.PLAYBACK).rows.firstOrNull { it.id == PauseRewindRows.TIMESHIFT }, "moved off the Playback page")
+    }
 
     /** (section, row id, value shown with defaults, effect, visibility) */
     private val table = listOf(
@@ -57,9 +84,7 @@ class WpaPagesTest {
         Triple(SectionId.PLAYBACK, PlaybackRows.AUDIO_OUTPUT, "AO_AUTO") to (EffectTiming.REPREPARE to Visibility.SIMPLE),
         Triple(SectionId.PLAYBACK, PlaybackRows.ASPECT, "ASPECT_FIT") to (EffectTiming.NEXT_TUNE to Visibility.SIMPLE),
         // (M6 time-shift commit 0, lead ruling 1) "On launch" is ADVANCED; "Pause and rewind" takes its simple slot.
-        Triple(SectionId.PLAYBACK, PlaybackRows.TIMESHIFT, "TS_AUTO(TS_MIN(30))") to (EffectTiming.NEXT_TUNE to Visibility.SIMPLE),
-        Triple(SectionId.PLAYBACK, PlaybackRows.TIMESHIFT_HOLD, "AUTO") to (EffectTiming.LIVE to Visibility.ADVANCED),
-        Triple(SectionId.PLAYBACK, PlaybackRows.TIMESHIFT_PROTECT, "AUTO") to (EffectTiming.LIVE to Visibility.ADVANCED),
+        // (Storage locations commit 0) the time-shift rows are on the Pause and rewind sub-page: pauseRewindSubPage().
         Triple(SectionId.PLAYBACK, PlaybackRows.ON_LAUNCH, "LAUNCH_GUIDE_LAST") to (EffectTiming.NEXT_LAUNCH to Visibility.ADVANCED),
         Triple(SectionId.PLAYBACK, PlaybackRows.AUDIO_LANGUAGE, "LANG_DEVICE") to (EffectTiming.NEXT_TUNE to Visibility.ADVANCED),
         Triple(SectionId.PLAYBACK, PlaybackRows.SUBTITLES, "SUBS_OFF") to (EffectTiming.NEXT_TUNE to Visibility.ADVANCED),
@@ -226,18 +251,18 @@ class WpaPagesTest {
     /** (M6 time-shift commit 0, docs/design/m6-timeshift.md §12) The three rows write PlaybackPrefs; Pause only adds its sentence. */
     @Test
     fun timeshiftRowsWriteThePlaybackDomain() {
-        pages.apply(RowIntent.Choose(PlaybackRows.TIMESHIFT, app.thebox.core.settings.TimeshiftLength.PAUSE_ONLY.name))
-        pages.apply(RowIntent.Choose(PlaybackRows.TIMESHIFT_HOLD, app.thebox.core.settings.TimeshiftHold.MIN_10.name))
-        pages.apply(RowIntent.Choose(PlaybackRows.TIMESHIFT_PROTECT, app.thebox.core.settings.StorageProtection.OFF.name))
+        pages.apply(RowIntent.Choose(PauseRewindRows.TIMESHIFT, app.thebox.core.settings.TimeshiftLength.PAUSE_ONLY.name))
+        pages.apply(RowIntent.Choose(PauseRewindRows.TIMESHIFT_HOLD, app.thebox.core.settings.TimeshiftHold.MIN_10.name))
+        pages.apply(RowIntent.Choose(PauseRewindRows.TIMESHIFT_PROTECT, app.thebox.core.settings.StorageProtection.OFF.name))
         val p = store.flow(PlaybackDomain).value
         assertEquals(app.thebox.core.settings.TimeshiftLength.PAUSE_ONLY, p.timeshift)
         assertEquals(app.thebox.core.settings.TimeshiftHold.MIN_10, p.timeshiftHold)
         assertEquals(app.thebox.core.settings.StorageProtection.OFF, p.storageProtection)
-        val r = row(SectionId.PLAYBACK, PlaybackRows.TIMESHIFT)
+        val r = prRow(PauseRewindRows.TIMESHIFT)
         assertEquals("TS_PAUSE_ONLY", r.value)
         assertEquals("PB_TIMESHIFT_DESC(TS_MIN(30),TS_GB(1.9)) PB_TIMESHIFT_PAUSE_ONLY_DESCSEPEFFECT_NEXT_TUNE", r.description)
-        assertEquals("TS_MIN(10)", row(SectionId.PLAYBACK, PlaybackRows.TIMESHIFT_HOLD).value)
-        assertEquals("OFF", row(SectionId.PLAYBACK, PlaybackRows.TIMESHIFT_PROTECT).value)
+        assertEquals("TS_MIN(10)", prRow(PauseRewindRows.TIMESHIFT_HOLD).value)
+        assertEquals("OFF", prRow(PauseRewindRows.TIMESHIFT_PROTECT).value)
     }
 
     /** (M6 WP-C, docs/design/m6-timeshift.md §8.2, §12) A [FakePageEnv] that reports the ring's volume and counts Off. */
@@ -248,7 +273,7 @@ class WpaPagesTest {
     }
 
     private fun timeshiftRow(env: WpaPageEnv, store: FakeSettingsStore = FakeSettingsStore()): SettingsRow =
-        assertNotNull(WpaPages(store, SettingsTexts.KEYS, env).build(SettingsRoute.Section(SectionId.PLAYBACK), true).rows.firstOrNull { it.id == PlaybackRows.TIMESHIFT })
+        assertNotNull(WpaPages(store, SettingsTexts.KEYS, env).build(SettingsRoute.PauseRewind, true).rows.firstOrNull { it.id == PauseRewindRows.TIMESHIFT })
 
     /** §12, lead ruling 2: Auto = 30 min on ≤ 16 GB storage, 1 hour above, from the device's storage class. */
     @Test
@@ -284,9 +309,9 @@ class WpaPagesTest {
         val env = StorageEnv(null)
         val store = FakeSettingsStore()
         val p = WpaPages(store, SettingsTexts.KEYS, env)
-        p.apply(RowIntent.Choose(PlaybackRows.TIMESHIFT, app.thebox.core.settings.TimeshiftLength.H_1.name))
+        p.apply(RowIntent.Choose(PauseRewindRows.TIMESHIFT, app.thebox.core.settings.TimeshiftLength.H_1.name))
         assertEquals(0, env.offs)
-        p.apply(RowIntent.Choose(PlaybackRows.TIMESHIFT, app.thebox.core.settings.TimeshiftLength.OFF.name))
+        p.apply(RowIntent.Choose(PauseRewindRows.TIMESHIFT, app.thebox.core.settings.TimeshiftLength.OFF.name))
         assertEquals(1, env.offs)
         assertEquals(app.thebox.core.settings.TimeshiftLength.OFF, store.flow(PlaybackDomain).value.timeshift)
         assertEquals("OFF", timeshiftRow(env, store).value)

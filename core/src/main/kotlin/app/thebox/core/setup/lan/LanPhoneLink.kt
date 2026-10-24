@@ -58,7 +58,7 @@ class LanPhoneLink(
      */
     private val pendingOffers = LinkedHashMap<String, Pair<File, String>>()
 
-    override fun start(purpose: PhonePurpose) {
+    override fun start(purpose: PhonePurpose, context: app.thebox.core.setup.lan.PhoneContext?) {
         // D-B3: offers made before this start survive the stop of the previous session and go to the new one.
         val carried = synchronized(lock) { LinkedHashMap(pendingOffers).also { pendingOffers.clear() } }
         stop()

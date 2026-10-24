@@ -27,6 +27,7 @@ class EffectTimingCoverageTest {
         val env = FakePageEnv(running = false)
         val pages = WpaPages(store, SettingsTexts.KEYS, env)
         val built = WpaPages.SECTIONS.flatMap { pages.build(SettingsRoute.Section(it), advanced = true).rows } +
+            pages.build(SettingsRoute.PauseRewind, advanced = true).rows + // storage locations commit 0 (§9.1)
             FixturePages().build(SettingsRoute.Channel(SettingsWorld.ID)).rows
         for (r in built) {
             if (r.id == app.thebox.core.settings.tree.GuideRows.FIX_UNMATCHED && SettingsTree.spec(r.id) == null) continue // WP-B's spec
