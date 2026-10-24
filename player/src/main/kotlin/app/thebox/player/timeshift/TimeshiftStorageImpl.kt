@@ -5,7 +5,11 @@ import android.content.Context
 import android.os.StatFs
 import app.thebox.core.common.BoxLog
 import app.thebox.core.playback.MonoClock
+import app.thebox.core.playback.timeshift.RingStorage
+import app.thebox.core.playback.timeshift.RingTarget
 import app.thebox.core.playback.timeshift.TimeshiftConstants
+import app.thebox.core.storage.StorageKind
+import app.thebox.core.storage.StorageLimits
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CompletableDeferred
 import java.io.File
@@ -130,6 +134,70 @@ internal class TimeshiftStorageImpl(
             createdMonoMs = clock.nowMs(),
             pid = pid,
         )
+    }
+
+    // ------------------------------------------------------------------ save locations (storage locations WP-S2, §5.5)
+
+    private val localSerial = java.util.concurrent.atomic.AtomicInteger()
+
+    /** StatFs of the filesystem holding [dir] (its nearest existing ancestor); zeros when it cannot be read. */
+    fun spaceOf(dir: File): Space {
+        val probe = generateSequence(dir) { it.parentFile }.firstOrNull { it.exists() } ?: dir
+        return try {
+            statFs(probe)
+        } catch (e: Exception) {
+            BoxLog.w(TAG, "StatFs failed: ${e.javaClass.simpleName}")
+            Space(0L, 0L)
+        }
+    }
+
+    /** The ring folder of a VOLUME target: `<volume files dir>/timeshift` (§3.2, §6). */
+    fun volumeRingDir(target: RingTarget.Local): File =
+        if (target.dir.name == DIR_NAME) target.dir else File(target.dir, DIR_NAME)
+
+    /**
+     * (§5.5) A local ring storage for [target]. IO thread (or the flusher, for a fallback secondary).
+     * - INTERNAL, not [asFallback]: today's [openStorage] (`ring-<pid>.bin`, preallocated, wear counted).
+     * - INTERNAL [asFallback] (the §5.2 secondary of an SMB cycle): `ring-<pid>-fb<n>.bin` in [dir], preallocated, wear
+     *   counted when [countsWear]; `availableBytes()` keeps the internal reserve (§3.4, §5.2 "Capacity after a switch").
+     *   A distinct name, so a posted delete of it can never remove a later internal ring file.
+     * - VOLUME: [VolumeStorage] on `<vol>/…/files/timeshift/ring-<pid>-<n>.bin`, [preallocate] false, no wear counter,
+     *   the volume reserve, close and delete on [closer] (§3.2). nlink is trusted only if it reads 1 after create (A-S8).
+     */
+    @Throws(IOException::class)
+    fun openLocal(
+        target: RingTarget.Local, capacityBytes: Long, preallocate: Boolean, countsWear: Boolean,
+        asFallback: Boolean = false, closer: ((Runnable) -> Unit)? = null,
+    ): RingStorage {
+        val written: (Long) -> Unit = if (countsWear) ::addWritten else NO_COUNT
+        return when (target.kind) {
+            StorageKind.INTERNAL -> if (!asFallback && countsWear && preallocate) openStorage(capacityBytes) else {
+                if (!dir.exists() && !dir.mkdirs() && !dir.exists()) throw IOException("time-shift directory not created")
+                val internal = StorageLimits.internal(totalBytes())
+                AndroidRingStorage(
+                    file = File(dir, "$RING_PREFIX$pid-fb${localSerial.incrementAndGet()}$RING_SUFFIX"),
+                    capacityBytes = capacityBytes, posix = posix,
+                    space = { internal.reportedAvailableBytes(availableBytes()) },
+                    onWritten = written, createdMonoMs = clock.nowMs(), pid = pid,
+                    preallocate = preallocate, closer = closer,
+                )
+            }
+            else -> {
+                val vdir = volumeRingDir(target)
+                if (!vdir.exists() && !vdir.mkdirs() && !vdir.exists()) throw IOException("volume ring directory not created")
+                val uuid = target.locationId.removePrefix(app.thebox.core.storage.StorageConstants.VOLUME_ID_PREFIX)
+                val raw = AndroidRingStorage(
+                    file = File(vdir, "$RING_PREFIX$pid-${localSerial.incrementAndGet()}$RING_SUFFIX"),
+                    capacityBytes = capacityBytes, posix = posix,
+                    space = { 0L }, onWritten = written, createdMonoMs = clock.nowMs(), pid = pid,
+                    preallocate = preallocate, blocking = true, closer = closer,
+                )
+                VolumeStorage(
+                    uuid = uuid, delegate = raw, space = { spaceOf(vdir).availableBytes },
+                    nlinkReliable = raw.nlinkNow() == 1L, limits = target.limits, clock = clock,
+                )
+            }
+        }
     }
 
     /** Deletes this process's ring file (after its storage was closed). */
@@ -258,6 +326,7 @@ internal class TimeshiftStorageImpl(
     }
 
     companion object {
+        private val NO_COUNT: (Long) -> Unit = {}
         private val COUNTER_IO = Executors.newSingleThreadExecutor { task -> Thread(task, "box-ts-counter").apply { isDaemon = true } }
         private const val TAG = "TimeshiftStorage"
         const val DIR_NAME = "timeshift"
