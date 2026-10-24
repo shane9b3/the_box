@@ -359,6 +359,8 @@ internal class FakeFinderEnvironment(
     var network: Boolean = true,
     val sockets: FakeLanSockets = FakeLanSockets(),
     val nsdFlow: Flow<Sighting> = emptyFlow(),
+    /** C-S5: false = the platform has no bindable non-VPN network for our address (`sockets` answers null). */
+    var bindable: Boolean = true,
 ) : FinderEnvironment {
     val lockAcquired = AtomicInteger()
     val lockReleased = AtomicInteger()
@@ -367,7 +369,7 @@ internal class FakeFinderEnvironment(
     override fun vpnUp() = vpn
     override fun networkUp() = network
     override fun acquireMulticastLock(): AutoCloseable { lockAcquired.incrementAndGet(); return AutoCloseable { lockReleased.incrementAndGet() } }
-    override fun sockets(lanAddress: String): LanSockets { socketsFor += lanAddress; return sockets }
+    override fun sockets(lanAddress: String): LanSockets? { socketsFor += lanAddress; return if (bindable) sockets else null }
     override fun nsd(): Flow<Sighting> = nsdFlow
 }
 
@@ -432,6 +434,19 @@ class ComputerFinderTest {
         assertTrue(sweeps.isEmpty())
         assertTrue(env.socketsFor.isEmpty())
         assertEquals(0, env.sockets.created.get())
+        page.job.cancel()
+    }
+
+    /** C-S5: with a VPN up and no bindable LAN network, no SYN or NBNS packet may go out (it would ride the tunnel). */
+    @Test fun withAVpnAndNoBindableNetworkTheSweepDoesNotRun() = pageTest {
+        val env = FakeFinderEnvironment(lan = "192.168.1.37", vpn = true, bindable = false, sockets = FakeLanSockets(open = setOf("192.168.1.20")))
+        val sweeps = ArrayList<Port445Sweep>()
+        val page = open(finder(env, totalMs = 300, sweepsMade = sweeps))
+        val s = page.until { !it.searching }
+        assertTrue(s.vpnUp)
+        assertTrue(sweeps.isEmpty())
+        assertEquals(0, env.sockets.created.get())
+        assertTrue(s.computers.isEmpty())
         page.job.cancel()
     }
 

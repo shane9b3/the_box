@@ -154,6 +154,8 @@ class TsRingImpl internal constructor(
             try { storage.writeHeader(gen, cap) } catch (e: IOException) { markBroken() }
         }
         flusher?.register(this)
+        // C-B1: a remote storage switches to this device before the pool (the stall budget) runs out.
+        (storage as? RingPoolWatcher)?.attachPool(nBlocks * BLOCK) { (headV - flushed).coerceAtLeast(0L) }
     }
 
     // ================================================================ TsRing

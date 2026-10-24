@@ -54,6 +54,13 @@ data class LanServerState(
     val lastRequestAtMs: Long? = null,
     val wrongCodes: Int = 0,
     val failure: LanFailure? = null,
+    /**
+     * (U-N1, fix pass 2026-10-24; additive) NETWORK_FOLDER: the text of the last phone sign-in result the TV reported
+     * (the reason + next step the phone shows), so the TV can show a failed phone sign-in too. Null before any.
+     */
+    val lastSignInStatus: String? = null,
+    /** Whether [lastSignInStatus] was a success; null before any. */
+    val lastSignInOk: Boolean? = null,
 )
 enum class LanFailure { NO_LAN_ADDRESS, BIND_FAILED, TOO_MANY_WRONG_CODES, EXPIRED }
 

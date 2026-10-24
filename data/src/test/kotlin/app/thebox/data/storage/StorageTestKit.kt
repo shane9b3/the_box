@@ -59,7 +59,7 @@ class RecordingBlobs : SecureBlobStore {
 
 /** A share whose [epoch] is the link's (the fake link counts its own epochs). */
 class EpochShare(override val epoch: Long, private val d: RemoteShare) : RemoteShare {
-    override fun open(path: String, mode: OpenMode, deleteOnClose: Boolean): RemoteFile = d.open(path, mode, deleteOnClose)
+    override fun open(path: String, mode: OpenMode, deleteOnClose: Boolean, exclusive: Boolean): RemoteFile = d.open(path, mode, deleteOnClose, exclusive)
     override fun mkdirs(path: String) = d.mkdirs(path)
     override fun list(path: String, max: Int): List<RemoteEntry> = d.list(path, max)
     override fun delete(path: String) = d.delete(path)
@@ -114,11 +114,14 @@ class StorageWorld(
     var wall = 1_800_000_000_000L
     val opener = FakeOpener(server)
     val exec = SmbExecutor("test-box-smb", clock)
+    /** Every `onSignedInAgain` (the FallbackToastGate.signedIn hook). */
+    val signedIn: MutableList<String> = CopyOnWriteArrayList()
     val keeper = SmbSessionKeeper(
         locations = locations, deviceId = deviceId, lastGood = lastGood, exec = exec, clock = clock, wallMs = { wall },
         pid = pid, ioTimeoutMs = server.ioTimeoutMs, openerFor = { opener },
         classifier = { t, _, _ -> server.classify(t).cls },
         isAuthFailure = { it is SignInNeededException || (it as? FakeStatusException)?.status == FakeStatus.LOGON_FAILURE },
+        onSignedInAgain = { signedIn += it },
     )
     val targets = StorageTargetsImpl(
         locations, keeper, volumes, deviceId, File(dir, "timeshift"), clock, { wall }, pid,

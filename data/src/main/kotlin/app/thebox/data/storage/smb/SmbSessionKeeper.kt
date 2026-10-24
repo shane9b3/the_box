@@ -13,6 +13,7 @@ import app.thebox.core.common.BoxLog
 import app.thebox.core.playback.MonoClock
 import app.thebox.core.storage.LocationState
 import app.thebox.core.storage.StorageConstants
+import app.thebox.core.storage.StorageFailure
 import app.thebox.core.storage.StorageLocation
 import app.thebox.core.storage.smb.FaultClass
 import app.thebox.core.storage.smb.OpenMode
@@ -41,6 +42,11 @@ data class KeeperSnapshot(
     val failureSeen: Boolean,
     val networkUp: Boolean,
     val demotedUntilMono: Long = NEVER,
+    /**
+     * (C-S3) Why the demotion: the folder refused the ring file (ACCESS, FULL, REMOVED) while the keepalive still
+     * succeeds. Null for a §5.4 stop demotion. `current()` then falls back with the matching reason, not UNSTABLE.
+     */
+    val demotedFailure: StorageFailure? = null,
 ) { companion object { const val NEVER = Long.MIN_VALUE } }
 
 /**
@@ -111,11 +117,24 @@ class SmbSessionKeeper(
     private val sweeper: SmbSweeper = SmbSweeper(),
     private val classifier: (Throwable, Boolean, Boolean?) -> FaultClass = SmbFaults::classify,
     private val isAuthFailure: (Throwable) -> Boolean = { it is SignInNeededException || SmbFaults.isLogonFailure(it) },
+    /**
+     * (Lead, fix pass 2026-10-24) A location that needed a sign-in is READY again (wherever the sign-in came from): the
+     * `FallbackToastGate.signedIn` hook, so the "sign in again" toast's 3-launch counter starts over. Must not block.
+     */
+    private val onSignedInAgain: (String) -> Unit = {},
 ) {
     @Volatile var snapshot = KeeperSnapshot(null, KeeperState.IDLE, KeeperSnapshot.NEVER, failureSeen = false, networkUp = true)
         private set
 
-    private class Kept(val key: Pair<StorageLocation, Long>, val location: StorageLocation, val link: SmbjRemoteLink, val opener: ShareOpener)
+    /**
+     * C-S1: what the connection needs, and only that. A rename, a Test result or a path change must never relink (the
+     * ring's connection would be cut mid-cycle and a second session left on the server).
+     */
+    private data class LinkKey(
+        val id: String, val host: String, val port: Int, val share: String, val user: String?, val domain: String?,
+        val guest: Boolean, val signInVersion: Long,
+    )
+    private class Kept(val key: LinkKey, val location: StorageLocation, val link: SmbjRemoteLink, val opener: ShareOpener)
     @Volatile private var kept: Kept? = null
     private val keptLock = Any()
 
@@ -129,6 +148,8 @@ class SmbSessionKeeper(
     private var background: ScheduledFuture<*>? = null
     private val failures: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     private val swept: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    /** Locations seen AUTH_FAILED in this process and not READY since ([onSignedInAgain]). */
+    private val signInPending: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     /** A new link was made and its [resetFor] is queued: [evaluate] waits for it. */
     @Volatile private var pendingReset = false
     @Volatile private var lastWarmMono = Long.MIN_VALUE
@@ -137,6 +158,7 @@ class SmbSessionKeeper(
     @Volatile private var lastDemoteAt = KeeperSnapshot.NEVER
     @Volatile private var lastDemoteLen = 0L
     @Volatile private var demotedId: String? = null
+    @Volatile private var demotedFailure: StorageFailure? = null
 
     init { locations.addChangeListener { post { evaluate(reset = true) } } }
 
@@ -183,22 +205,50 @@ class SmbSessionKeeper(
      * §5.4, synchronous (A-N5): [locationId] is demoted for `SMB_DEMOTE_MS`, doubled for a repeat within
      * `SMB_DEMOTE_REPEAT_WINDOW_MS`, capped at `SMB_DEMOTE_MAX_MS`. Preferred again after a READY plus one keepalive.
      */
-    fun demote(locationId: String) {
+    fun demote(locationId: String, failure: StorageFailure? = null) {
         val now = clock.nowMs()
         val repeat = demotedId == locationId && lastDemoteAt != KeeperSnapshot.NEVER && now - lastDemoteAt <= StorageConstants.SMB_DEMOTE_REPEAT_WINDOW_MS
         val len = if (repeat) minOf(lastDemoteLen * 2, StorageConstants.SMB_DEMOTE_MAX_MS) else StorageConstants.SMB_DEMOTE_MS
-        demotedId = locationId; lastDemoteAt = now; lastDemoteLen = len; demotedUntil = now + len
+        demotedId = locationId; lastDemoteAt = now; lastDemoteLen = len; demotedUntil = now + len; demotedFailure = failure
         BoxLog.i(TAG) { "demoted $locationId for ${len / 1000} s" }
         publishSnapshot()
         post { publish() }
     }
 
+    /**
+     * C-S3: the ring's file could not be created on [locationId] (`FallbackRingStorage` switched to this device). Called on
+     * the flusher; never blocks. ACCESS, FULL and REMOVED demote the folder at once (nothing was written, so no grace)
+     * with that failure, so the next `current()` saves on this device with the matching reason and the page says why;
+     * anything else marks a failure seen and checks the link now (the keepalive path).
+     */
+    fun onCreateFailed(locationId: String, failure: StorageFailure?) {
+        when (failure) {
+            StorageFailure.ACCESS, StorageFailure.FULL, StorageFailure.REMOVED -> {
+                BoxLog.i(TAG) { "$locationId refused the ring file ($failure): demoted" }
+                demote(locationId, failure)
+            }
+            else -> {
+                failures += locationId
+                publishSnapshot()
+                post { keepaliveTick() }
+            }
+        }
+    }
+
     /** The one link for [location] (no I/O: smbj objects are made on box-smb at the first connect). */
     fun linkFor(location: StorageLocation): SmbjRemoteLink {
-        val key = location to locations.signInVersion.value
+        val a = location.smb
+        val key = LinkKey(location.id, a?.host.orEmpty(), a?.port ?: 0, a?.share.orEmpty(), a?.user, a?.domain, a?.guest == true, locations.signInVersion.value)
         synchronized(keptLock) {
-            kept?.let { if (it.key == key) return it.link }
+            kept?.let {
+                if (it.key == key) {
+                    // C-S1: same connection; only the name, the path or the Test changed. Keep the link, note the location.
+                    if (it.location != location) kept = Kept(it.key, location, it.link, it.opener)
+                    return it.link
+                }
+            }
             val old = kept
+            old?.link?.retire() // C-S1: never reconnects again, even for a ring still holding it
             val opener = openerFor(location)
             val link = SmbjRemoteLink(
                 opener = opener, exec = exec, clock = clock, ioTimeoutMs = ioTimeoutMs,
@@ -250,7 +300,7 @@ class SmbSessionKeeper(
         val loc = locations.keptLocation()
         if (loc == null) {
             val k = synchronized(keptLock) { kept.also { kept = null } }
-            if (k != null) { k.link.disconnect(); locations.clearKeeper(k.location.id) }
+            if (k != null) { k.link.retire(); k.link.disconnect(); locations.clearKeeper(k.location.id) } // C-S1
             retry?.cancel(false); keepalive?.cancel(false)
             setState(KeeperState.IDLE, null)
             return
@@ -292,14 +342,16 @@ class SmbSessionKeeper(
     }
 
     /** Box-smb, after every successful connect or reconnect of [location]'s link (the link's onConnected). */
-    private fun onLinkUp(location: StorageLocation, share: RemoteShare) {
-        if (kept?.location?.id != location.id) return
+    private fun onLinkUp(linked: StorageLocation, share: RemoteShare) {
+        // C-S1: the kept location may be newer (a rename or a path change keeps the link); its folder is the one to use.
+        val location = kept?.location?.takeIf { it.id == linked.id } ?: return
         backoffStep = 0
         markGood(location.id)
         setState(KeeperState.READY, location.id)
         wake(share)
         if (swept.add(location.id)) {
-            try { sweeper.sweep(share, ringDir(location), deviceId.id, pid) } catch (e: Exception) { BoxLog.i(TAG) { "sweep failed: ${SmbFaults.faultName(e)}" } }
+            // C-S7: the sweep stops at the first slow or lost answer (it holds box-smb while it runs).
+            try { sweeper.sweep(share, ringDir(location), deviceId.id, pid) { classifier(it, Thread.currentThread().isInterrupted, null) } } catch (e: Exception) { BoxLog.i(TAG) { "sweep failed: ${SmbFaults.faultName(e)}" } }
         }
         try { kept?.link?.probe() } catch (_: IOException) { }
         publish()
@@ -369,6 +421,10 @@ class SmbSessionKeeper(
     }
 
     private fun setState(state: KeeperState, id: String?) {
+        if (id != null && state == KeeperState.AUTH_FAILED) signInPending += id
+        if (id != null && state == KeeperState.READY && signInPending.remove(id)) {
+            try { onSignedInAgain(id) } catch (t: Throwable) { BoxLog.w(TAG, "signed-in hook failed: ${t.javaClass.simpleName}") }
+        }
         snapshot = snapshot.copy(
             locationId = id, state = state,
             lastGoodMonoMs = if (id != snapshot.locationId) KeeperSnapshot.NEVER else snapshot.lastGoodMonoMs,
@@ -382,6 +438,7 @@ class SmbSessionKeeper(
     private fun publishSnapshot() {
         val s = snapshot
         snapshot = s.copy(networkUp = networkUp, demotedUntilMono = if (demotedId == s.locationId) demotedUntil else KeeperSnapshot.NEVER,
+            demotedFailure = if (demotedId == s.locationId) demotedFailure else null,
             failureSeen = s.locationId != null && s.locationId in failures)
     }
 
@@ -398,7 +455,7 @@ class SmbSessionKeeper(
             KeeperState.BACKOFF -> LocationState.UNREACHABLE
             KeeperState.AUTH_FAILED -> LocationState.SIGN_IN_NEEDED
         }
-        locations.publishKeeper(id, state, free, null)
+        locations.publishKeeper(id, state, free, if (demoted) s.demotedFailure else null) // C-S3: the page says why
     }
 
     /** Known last-good wall time of [locationId] (this or an earlier process); null when none. */

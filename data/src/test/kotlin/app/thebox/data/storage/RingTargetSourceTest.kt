@@ -183,4 +183,34 @@ class RingTargetSourceTest {
         assertEquals(KeeperState.IDLE, w.keeper.snapshot.state)
         assertEquals(0, w.opener.opens.get())
     }
+
+    /**
+     * C-S3: the folder refuses the ring file (write access removed) while its keepalive still succeeds. The switch is
+     * reported: the folder is demoted at once (nothing was written: no grace), the next tune saves on this device with
+     * the matching reason, and the page says why.
+     */
+    @Test fun aCreateRefusedOnAReadyFolderDemotesItWithThatReason() {
+        val w = StorageWorld()
+        val id = w.addSmb()
+        ready(w)
+        assertEquals(StorageKind.SMB, w.targets.current(StoragePurpose.TIMESHIFT).target.kind)
+        w.targets.onCreateFailed(id, StorageFailure.ACCESS)
+        val c = w.targets.current(StoragePurpose.TIMESHIFT)
+        assertEquals(StorageKind.INTERNAL, c.target.kind)
+        assertEquals(LocationFallback.SIGN_IN_NEEDED, c.fallback)
+        eventually("the page says why") { w.locations.status.value.single().failure == StorageFailure.ACCESS }
+        // FULL names the space; an unreachable create only marks a failure and re-checks the link.
+        val w2 = StorageWorld()
+        val id2 = w2.addSmb()
+        ready(w2)
+        w2.targets.onCreateFailed(id2, StorageFailure.FULL)
+        assertEquals(LocationFallback.NO_SPACE_THERE, w2.targets.current(StoragePurpose.TIMESHIFT).fallback)
+        val w3 = StorageWorld()
+        val id3 = w3.addSmb()
+        ready(w3)
+        w3.targets.onCreateFailed(id3, StorageFailure.UNREACHABLE)
+        assertTrue(w3.keeper.snapshot.failureSeen)
+        assertEquals("READY and fresh: the next zap still tries the folder", StorageKind.SMB, w3.targets.current(StoragePurpose.TIMESHIFT).target.kind)
+        eventually("the link was checked now") { w3.server.log.count { it == "freeBytes" } >= 2 }
+    }
 }

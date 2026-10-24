@@ -22,7 +22,11 @@ enum class OpenMode { CREATE_OVERWRITE, OPEN_EXISTING }   // CREATE once per sto
 /** A connected share at one link [epoch] (§4.3). Paths are `/`-separated, relative to the share. */
 interface RemoteShare {
     val epoch: Long
-    @Throws(java.io.IOException::class) fun open(path: String, mode: OpenMode, deleteOnClose: Boolean = false): RemoteFile
+    /**
+     * (C-S7, fix pass 2026-10-24) [exclusive]: no sharing at all, so the open fails with a sharing violation while any
+     * other client holds the file open (the sweep's delete of another box's file). The ring's own opens share fully (§4.1).
+     */
+    @Throws(java.io.IOException::class) fun open(path: String, mode: OpenMode, deleteOnClose: Boolean = false, exclusive: Boolean = false): RemoteFile
     @Throws(java.io.IOException::class) fun mkdirs(path: String)
     @Throws(java.io.IOException::class) fun list(path: String, max: Int): List<RemoteEntry>
     @Throws(java.io.IOException::class) fun delete(path: String)

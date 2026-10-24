@@ -28,6 +28,47 @@ class SmbSweepTest {
         return link to share
     }
 
+    /** The sweep as the keeper runs it: the link's classification; the fake's sharing violation is "held open" (C-S7). */
+    private fun sweep(link: FakeRemoteLink, share: RemoteShare) =
+        SmbSweeper(isSharingViolation = { (it as? FakeStatusException)?.status == FakeStatus.SHARING_VIOLATION })
+            .sweep(share, dir, me, 100) { link.classify(it).cls }
+
+    /** C-S7: another box's stale-looking file that it still holds open (NTFS defers LastWriteTime) is kept. */
+    @Test fun aForeignFileHeldOpenIsKept() {
+        val (link, share) = server()
+        val wake = 10_000 * day
+        link.putFile("$dir/.wake-$me", ByteArray(4), wake)
+        link.putFile("$dir/ring-$other-7-1.bin", lastWriteMs = wake - 3 * day)
+        link.putFile("$dir/ring-$other-7-2.bin", lastWriteMs = wake - 3 * day)
+        val held = share.open("$dir/ring-$other-7-1.bin", OpenMode.OPEN_EXISTING) as FakeRemoteLink.FakeRemoteFile // the other box's live handle
+        held.data.lastWriteMs = wake - 3 * day // NTFS: the time of a file held open may lag
+        val r = sweep(link, share)
+        assertEquals(listOf("ring-$other-7-2.bin"), r.deleted)
+        held.close()
+        assertTrue("the held-open file is still there", link.exists("$dir/ring-$other-7-1.bin"))
+        val gone = System.nanoTime() + 2_000_000_000L
+        while (link.exists("$dir/ring-$other-7-2.bin") && System.nanoTime() < gone) Thread.sleep(5)
+        assertFalse("the closed one went (delete-on-close)", link.exists("$dir/ring-$other-7-2.bin"))
+    }
+
+    /** C-S7: a slow (or lost) server ends the sweep at its first such answer; the next start retries. */
+    @Test fun aTimeoutEndsTheSweep() {
+        val (link, share) = server()
+        link.putFile("$dir/.wake-$me", ByteArray(4), link.serverNowMs())
+        for (n in 1..5) link.putFile("$dir/ring-$me-$n-1.bin")
+        val slowShare = object : RemoteShare by share {
+            // Armed after the .wake query: the sweep's first delete times out (a hung NAS answers nothing for 8 s).
+            override fun lastWriteMs(path: String): Long = share.lastWriteMs(path).also { link.timeoutNext() }
+            override fun open(path: String, mode: OpenMode, deleteOnClose: Boolean, exclusive: Boolean): RemoteFile = share.open(path, mode, deleteOnClose, exclusive)
+        }
+        val before = link.log.count { it.startsWith("delete:") }
+        val r = sweep(link, slowShare)
+        assertTrue(r.stoppedEarly)
+        assertTrue(r.deleted.isEmpty())
+        assertEquals("one round trip, then the sweep stopped", 1, link.log.count { it.startsWith("delete:") } - before)
+        assertEquals(5, (1..5).count { link.exists("$dir/ring-$me-$it-1.bin") })
+    }
+
     @Test fun ownFilesOfOtherProcessesGoAndThisProcessesStay() {
         val (link, share) = server()
         val now = link.serverNowMs()
@@ -37,7 +78,7 @@ class SmbSweepTest {
         link.putFile("$dir/ring-$me-55-1.bin", lastWriteMs = now)         // a dead process of this box
         link.putFile("$dir/test-$me-55-123.bin", lastWriteMs = now)       // a dead Test of this box
         link.putFile("$dir/notes.txt", lastWriteMs = now - 30 * day)      // never ours to touch
-        val r = SmbSweeper().sweep(share, dir, me, 100)
+        val r = sweep(link, share)
         assertEquals(setOf("ring-$me-55-1.bin", "test-$me-55-123.bin"), r.deleted.toSet())
         assertTrue(link.exists("$dir/ring-$me-100-1.bin") && link.exists("$dir/ring-$me-100-2.bin"))
         assertTrue(link.exists("$dir/notes.txt") && link.exists("$dir/.wake-$me"))
@@ -52,7 +93,7 @@ class SmbSweepTest {
         link.putFile("$dir/test-$other-8-9.bin", lastWriteMs = wake - 3 * day)
         link.putFile("$dir/.wake-$other", ByteArray(4), wake - day)          // younger than 48 h: kept
         link.putFile("$dir/.wake-0000aaaabbbb", ByteArray(4), wake - 5 * day) // a box gone for days
-        val r = SmbSweeper().sweep(share, dir, me, 100)
+        val r = sweep(link, share)
         assertEquals(setOf("ring-$other-7-1.bin", "test-$other-8-9.bin", ".wake-0000aaaabbbb"), r.deleted.toSet())
         assertTrue(link.exists("$dir/ring-$other-8-1.bin"))
         assertTrue(link.exists("$dir/.wake-$other"))
@@ -61,7 +102,7 @@ class SmbSweepTest {
     @Test fun withoutOurWakeFileForeignFilesAreNeverTouched() {
         val (link, share) = server()
         link.putFile("$dir/ring-$other-7-1.bin", lastWriteMs = 0L)
-        val r = SmbSweeper().sweep(share, dir, me, 100)
+        val r = sweep(link, share)
         assertTrue(r.deleted.isEmpty())
         assertTrue(link.exists("$dir/ring-$other-7-1.bin"))
     }
@@ -77,15 +118,15 @@ class SmbSweepTest {
                 share.delete(path)
             }
         }
-        val r = SmbSweeper().sweep(flaky, dir, me, 100)
+        val r = sweep(link, flaky)
         assertEquals(listOf("ring-$me-2-1.bin"), r.deleted)
         assertEquals(1, r.failures)
         assertTrue(link.exists("$dir/ring-$me-1-1.bin"))
         // A failed listing is a no-op.
         val dead = object : RemoteShare by share {
             override fun list(path: String, max: Int): List<RemoteEntry> = throw FakeStatusException(FakeStatus.NETWORK_NAME_DELETED)
-            override fun open(path: String, mode: OpenMode, deleteOnClose: Boolean): RemoteFile = share.open(path, mode, deleteOnClose)
+            override fun open(path: String, mode: OpenMode, deleteOnClose: Boolean, exclusive: Boolean): RemoteFile = share.open(path, mode, deleteOnClose, exclusive)
         }
-        assertFalse(SmbSweeper().sweep(dead, dir, me, 100).deleted.isNotEmpty())
+        assertFalse(sweep(link, dead).deleted.isNotEmpty())
     }
 }

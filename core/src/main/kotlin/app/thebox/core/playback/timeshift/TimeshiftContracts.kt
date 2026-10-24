@@ -119,6 +119,11 @@ interface RingTargetSource {
     fun warm()
     /** Synchronous, before the stop is published (A-N5); [sinceFirstWriteMs] drives the grace (§5.4). */
     fun onStorageFailure(locationId: String, stop: RecordStop, failure: app.thebox.core.storage.StorageFailure?, sinceFirstWriteMs: Long)
+    /**
+     * (C-S3, fix pass 2026-10-24) A cycle on [locationId] switched to this device before its first write (§5.2): the
+     * folder did not take the ring file. Called on the flusher; must not block. Default: nothing.
+     */
+    fun onCreateFailed(locationId: String, failure: app.thebox.core.storage.StorageFailure?) {}
     /** The file named for a target in this process: "ring-<deviceId>-<pid>-<n>.bin" for SMB (§3.5). */
     fun nextRemoteFileName(locationId: String): String
 }

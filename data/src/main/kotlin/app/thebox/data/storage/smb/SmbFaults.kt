@@ -38,11 +38,16 @@ class LinkUnavailableException(what: String = "unavailable") : IOException("smb 
  *    [LinkUnavailableException]), or the statuses NETWORK_NAME_DELETED, USER_SESSION_DELETED, NETWORK_SESSION_EXPIRED,
  *    FILE_CLOSED (and CONNECTION_DISCONNECTED/RESET).
  * 3. SLOW: an I/O wait timeout on a live transport (`TimeoutException` in the chain, `SocketTimeoutException`,
- *    STATUS_IO_TIMEOUT). Never a reconnect (A-B4).
+ *    STATUS_IO_TIMEOUT, STATUS_INSUFFICIENT_RESOURCES). Never a reconnect (A-B4).
  * 4. FULL: DISK_FULL, QUOTA_EXCEEDED.
  * 5. ACCESS: ACCESS_DENIED, LOGON_FAILURE, ACCOUNT_*, PASSWORD_EXPIRED (and guest signing required).
  * 6. REMOVED: OBJECT_NAME_NOT_FOUND, OBJECT_PATH_NOT_FOUND, DELETE_PENDING, FILE_DELETED.
- * Anything else is LINK_LOST: the safe default is one bounded reconnect, never a silent success.
+ * 7. (C-S2) Any other NT status on a transport that is not known dead is a **server refusal**: SLOW (fail the operation,
+ *    no reconnect; a write also needs a fresh file). INVALID_PARAMETER, SHARING_VIOLATION, FILE_LOCK_CONFLICT,
+ *    NOT_SUPPORTED and the like come from a live server: reconnecting would `close(true)` a healthy connection for the
+ *    readers and the keeper, again every `SMB_RECONNECT_MIN_GAP_MS` (lead ruling 1, A-B4: reconnect only on real
+ *    transport errors). On a dead transport the status is LINK_LOST.
+ * Anything else (no status at all) is LINK_LOST: the safe default is one bounded reconnect, never a silent success.
  */
 object SmbFaults {
     // NTSTATUS codes the 0.15.0 enum does not name.
@@ -64,7 +69,8 @@ object SmbFaults {
         val status = statusOf(all)
         if (status != null && status in LINK_STATUSES) return FaultClass.LINK_LOST
         if (all.any { isDeadTransport(it) }) return FaultClass.LINK_LOST
-        val timeout = all.any { it is TimeoutException || it is SocketTimeoutException } || status == NtStatus.STATUS_IO_TIMEOUT.value
+        val timeout = all.any { it is TimeoutException || it is SocketTimeoutException } ||
+            status == NtStatus.STATUS_IO_TIMEOUT.value || status == NtStatus.STATUS_INSUFFICIENT_RESOURCES.value // C-S2
         // A timeout on a transport that is already gone is a loss, not a slow server.
         if (timeout) return if (transportAlive == false) FaultClass.LINK_LOST else FaultClass.SLOW
         if (status != null) {
@@ -75,8 +81,13 @@ object SmbFaults {
             }
         }
         if (all.any { it is SMB2GuestSigningRequiredException }) return FaultClass.ACCESS
+        // C-S2: a status from a server whose transport is not known dead is a refusal, not a link loss.
+        if (status != null) return if (transportAlive == false) FaultClass.LINK_LOST else FaultClass.SLOW
         return FaultClass.LINK_LOST
     }
+
+    /** C-S7: an open refused because another client holds the file (the sweep keeps it). */
+    fun isSharingViolation(t: Throwable): Boolean = statusOf(chain(t).toList()) == NtStatus.STATUS_SHARING_VIOLATION.value
 
     /** A logon status (wrong password, account problems): the keeper goes to AUTH_FAILED (§4.3 row 5). */
     fun isLogonFailure(t: Throwable): Boolean {

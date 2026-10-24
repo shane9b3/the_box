@@ -153,6 +153,10 @@ class FakeRingTargetSource(
         failures += Failure(locationId, stop, failure, sinceFirstWriteMs)
     }
 
+    /** (C-S3) Every `onCreateFailed`, in order. */
+    val createFailures: MutableList<Pair<String, StorageFailure?>> = CopyOnWriteArrayList()
+    override fun onCreateFailed(locationId: String, failure: StorageFailure?) { createFailures += locationId to failure }
+
     @Synchronized override fun nextRemoteFileName(locationId: String): String {
         val n = (counters[locationId] ?: 0) + 1
         counters[locationId] = n

@@ -8,11 +8,9 @@ import app.thebox.core.playback.timeshift.TimeshiftConstants.RING_MAGIC
 import app.thebox.core.playback.timeshift.TimeshiftConstants.TS_PACKET
 import java.io.File
 import java.io.IOException
-import java.io.RandomAccessFile
 import java.nio.Buffer
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import java.nio.channels.FileChannel
 import java.util.zip.CRC32
 
 /**
@@ -57,9 +55,12 @@ object RingHeaderCodec {
 }
 
 /**
- * A pure-JVM [RingStorage] over a [FileChannel] (§18 WP-A): for tests and as the fallback. Opened lazily, so constructing
- * it touches no disk. `allocate` extends the file sparsely (`setLength`); `isUnlinked` is "the path no longer exists"
- * (the JVM cannot `fstat` an fd); `availableBytes` is the partition's usable space.
+ * A pure-JVM [RingStorage] (§18 WP-A): for tests and as the fallback. Opened lazily, so constructing it touches no disk.
+ * `allocate` extends the file sparsely (`setLength`); `isUnlinked` is "the path no longer exists" (the JVM cannot `fstat`
+ * an fd); `availableBytes` is the partition's usable space.
+ *
+ * (C-B3) Positional I/O goes through [UninterruptibleFileIo], not a `FileChannel`: an interrupted reader (a Media3 load
+ * cancel) must never close the file for the flusher. Mirrors `AndroidRingStorage`'s `Os.pread`/`Os.pwrite`.
  *
  * [capacityBytes] 0 (the default, the commit-0 shape) means "no space": a ring over it runs RAM-only.
  */
@@ -69,49 +70,44 @@ class FileRingStorage(
     private val pid: Int = 0,
     private val createdMonoMs: Long = 0L,
 ) : RingStorage {
-    @Volatile private var raf: RandomAccessFile? = null
-    @Volatile private var channel: FileChannel? = null
+    @Volatile private var io: UninterruptibleFileIo? = null
     @Volatile private var closed = false
 
     @Throws(IOException::class)
-    private fun ch(): FileChannel {
-        channel?.let { return it }
+    private fun io(): UninterruptibleFileIo {
+        io?.let { return it }
         synchronized(this) {
-            channel?.let { return it }
+            io?.let { return it }
             if (closed) throw IOException("ring storage closed")
             file.parentFile?.mkdirs()
-            val r = RandomAccessFile(file, "rw")
-            raf = r
-            return r.channel.also { channel = it }
+            return UninterruptibleFileIo(file).also { io = it }
         }
     }
 
     @Throws(IOException::class)
     override fun allocate(upToBytes: Long): Long {
-        val c = ch()
+        val f = io()
         synchronized(this) {
-            val r = raf ?: throw IOException("ring storage closed")
-            if (r.length() < upToBytes) r.setLength(upToBytes)
-            return c.size()
+            if (closed) throw IOException("ring storage closed")
+            if (f.writer.length() < upToBytes) f.writer.setLength(upToBytes)
+            return f.writer.length()
         }
     }
 
     @Throws(IOException::class)
-    override fun pwrite(src: ByteBuffer, filePosition: Long): Int = ch().write(src, filePosition)
+    override fun pwrite(src: ByteBuffer, filePosition: Long): Int = io().pwrite(src, filePosition)
 
     @Throws(IOException::class)
-    override fun pread(dst: ByteBuffer, filePosition: Long): Int = ch().read(dst, filePosition)
+    override fun pread(dst: ByteBuffer, filePosition: Long): Int = io().pread(dst, filePosition)
 
-    override fun isUnlinked(): Boolean = channel != null && !file.exists()
+    override fun isUnlinked(): Boolean = io != null && !file.exists()
 
     override fun availableBytes(): Long = (file.parentFile ?: file.absoluteFile.parentFile)?.usableSpace ?: 0L
 
     @Throws(IOException::class)
     override fun writeHeader(generation: Long, capacity: Long) {
         val b = RingHeaderCodec.encode(generation, capacity, createdMonoMs, pid)
-        val c = ch()
-        var pos = 0L
-        while (b.hasRemaining()) pos += c.write(b, pos)
+        io().pwrite(b, 0L)
     }
 
     override fun delete() {
@@ -122,9 +118,8 @@ class FileRingStorage(
     override fun close() {
         synchronized(this) {
             closed = true
-            try { channel?.close() } catch (_: IOException) {}
-            try { raf?.close() } catch (_: IOException) {}
-            channel = null; raf = null
+            io?.close()
+            io = null
         }
     }
 }

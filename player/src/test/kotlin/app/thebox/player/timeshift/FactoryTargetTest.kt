@@ -267,8 +267,11 @@ class FactoryTargetTest {
             }
         }
         val f = factory(source = source)
-        targets.choice = smb()
+        targets.choice = smbChoice(link, clock, opened) // the storage on the factory clock (deadlines compare)
         val g = grant(f)
+        // C-B1: only a decided cycle reports (the folder took the file); see aStopBeforeTheDecisionIsNotTheFoldersFailure.
+        link.queuePosted = false
+        (f.currentStorage() as FallbackRingStorage).pwrite(ByteBuffer.wrap(ByteArray(100)), 4096L)
         val events = mutableListOf<String>()
         val outer = object : RingWriterListener {
             override fun onFirstBytes() = Unit
@@ -285,11 +288,65 @@ class FactoryTargetTest {
         assertEquals("smb-1", fail.locationId)
         assertEquals(RecordStop.DISK_TOO_SLOW, fail.stop)
         assertEquals(StorageFailure.SLOW, fail.failure)
-        assertEquals("no write yet: inside the grace", 0L, fail.sinceFirstWriteMs)
+        assertEquals("the stop came with the first write: inside the grace", 0L, fail.sinceFirstWriteMs)
         w.listener!!.onStopped(RecordStop.DISK_ERROR)
         assertEquals("once per cycle", 1, targets.failures.size)
         assertEquals(StorageFailure.SLOW, f.storageFields(g, snap(RecordStop.DISK_TOO_SLOW)).storageFailure)
         session.close()
+    }
+
+    /**
+     * C-B1: a disk stop while the folder has not answered yet (4K, a sleeping disk) is not the folder's failure: nothing
+     * is reported, and the late decision announces no fallback, so the viewer gets one toast (the stop's), not two.
+     */
+    @Test
+    fun aStopBeforeTheDecisionIsNotTheFoldersFailure() {
+        val f = factory()
+        targets.choice = smbChoice(link, clock, opened)
+        val g = grant(f)
+        val fb = f.currentStorage() as FallbackRingStorage
+        assertTrue(fb.undecided)
+        val s = f.start(g, EngineTestSupport.context(tuneId = 10), RecordingListener())
+        writers.last.listener!!.onStopped(RecordStop.DISK_TOO_SLOW)
+        assertTrue("not reported", targets.failures.isEmpty())
+        link.queuePosted = false
+        try { fb.pwrite(ByteBuffer.wrap(ByteArray(100)), 4096L) } catch (_: IOException) { }
+        assertNull("no switch announced", fb.fallbackReason)
+        assertNull(f.storageFields(g, snap(RecordStop.DISK_TOO_SLOW)).fallback)
+        assertEquals(StorageFailure.SLOW, f.storageFields(g, snap(RecordStop.DISK_TOO_SLOW)).storageFailure)
+        s.close()
+    }
+
+    /**
+     * C-S3: the folder is READY but refuses the ring file (write access removed). The switch reaches the target source
+     * (which demotes the folder: the next `current()` is this device with SIGN_IN_NEEDED), and that next zap keeps the
+     * switched ring and its local file: no new 10 MiB pool, no new file.
+     */
+    @Test
+    fun aCreateRefusedOnAReadyFolderDemotesItAndTheNextZapIsInternalWithoutRebuild() {
+        val f = factory()
+        targets.choice = smbChoice(link, clock, opened)
+        val g1 = grant(f)
+        val fb = f.currentStorage() as FallbackRingStorage
+        link.queuePosted = false
+        link.denyWrites()
+        fb.pwrite(ByteBuffer.wrap(ByteArray(100)), 4096L)
+        assertEquals(StorageKind.INTERNAL, fb.switchedTo)
+        assertEquals(listOf("smb-1" to StorageFailure.ACCESS), targets.createFailures)
+        val ringsBuilt = blocks.size
+        // What the demoted keeper answers now (StorageTargetsImpl; RingTargetSourceTest covers that side).
+        targets.choice = smbFellBackChoice(storage.dir, LocationFallback.SIGN_IN_NEEDED)
+        val g2 = grant(f)
+        assertSame("the switched ring is kept", g1.ring, g2.ring)
+        assertEquals(ringsBuilt, blocks.size)
+        assertSame(fb, f.currentStorage())
+        val s = f.storageFields(g2, snap())
+        assertEquals(StorageKind.INTERNAL, s.storage)
+        assertEquals(LocationFallback.SIGN_IN_NEEDED, s.fallback)
+        // Back on the folder (it took sign-in again): a rebuild on it.
+        link.denyWrites(false)
+        targets.choice = smb()
+        assertNotSame(g1.ring, grant(f).ring)
     }
 
     @Test

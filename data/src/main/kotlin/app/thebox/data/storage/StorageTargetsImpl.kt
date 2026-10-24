@@ -99,6 +99,12 @@ class StorageTargetsImpl(
         keeper.demote(locationId)
     }
 
+    /** C-S3: the flusher switched a cycle on [locationId] to this device; the keeper demotes or re-checks (never blocks). */
+    override fun onCreateFailed(locationId: String, failure: StorageFailure?) {
+        if (!locationId.startsWith(StorageConstants.SMB_ID_PREFIX)) return
+        keeper.onCreateFailed(locationId, failure)
+    }
+
     override fun nextRemoteFileName(locationId: String): String {
         val n = counters.getOrPut(locationId) { AtomicInteger() }.incrementAndGet()
         return SmbSweeper.ringName(deviceId.id, pid, n)
@@ -135,7 +141,13 @@ class StorageTargetsImpl(
         if (state != KeeperState.READY || !link.isReady) keeper.warm()
 
         if (state == KeeperState.AUTH_FAILED || locations.signInNeeded(loc.id)) return fallback(loc, LocationFallback.SIGN_IN_NEEDED)
-        if (s != null && demoted(s, now)) return fallback(loc, LocationFallback.UNSTABLE)
+        // C-S3: a folder that refused the ring file falls back with that reason (the switch's toast already said it).
+        if (s != null && demoted(s, now)) return fallback(loc, when (s.demotedFailure) {
+            StorageFailure.ACCESS -> LocationFallback.SIGN_IN_NEEDED
+            StorageFailure.FULL -> LocationFallback.NO_SPACE_THERE
+            StorageFailure.REMOVED -> LocationFallback.UNREACHABLE
+            else -> LocationFallback.UNSTABLE
+        })
 
         val ready = state == KeeperState.READY && link.isReady && s != null &&
             s.lastGoodMonoMs != KeeperSnapshot.NEVER && now - s.lastGoodMonoMs <= StorageConstants.SMB_FRESH_MS

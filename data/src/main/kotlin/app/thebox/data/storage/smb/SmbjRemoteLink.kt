@@ -179,14 +179,18 @@ internal inline fun <T> smb(f: () -> T): T = try { f() } catch (e: SmbIoExceptio
 
 /** [RemoteShare] over smbj's [DiskShare] (§4.1 mapping). Paths are `/`-separated and relative to the share. */
 class SmbjShare(override val epoch: Long, private val disk: DiskShare, private val link: SmbjRemoteLink?) : RemoteShare {
-    override fun open(path: String, mode: OpenMode, deleteOnClose: Boolean): RemoteFile = smb {
+    override fun open(path: String, mode: OpenMode, deleteOnClose: Boolean, exclusive: Boolean): RemoteFile = smb {
         val options = EnumSet.of(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE, SMB2CreateOptions.FILE_RANDOM_ACCESS)
         if (deleteOnClose) options += SMB2CreateOptions.FILE_DELETE_ON_CLOSE
         val f = disk.openFile(
             SmbjClients.win(path),
-            EnumSet.of(AccessMask.GENERIC_READ, AccessMask.GENERIC_WRITE, AccessMask.DELETE),
+            // C-S7: an exclusive (sweep) open asks only what a delete needs.
+            if (exclusive) EnumSet.of(AccessMask.DELETE, AccessMask.FILE_READ_ATTRIBUTES)
+            else EnumSet.of(AccessMask.GENERIC_READ, AccessMask.GENERIC_WRITE, AccessMask.DELETE),
             EnumSet.of(FileAttributes.FILE_ATTRIBUTE_NORMAL),
-            SMB2ShareAccess.ALL, // full sharing (facts §1.8): a lingering old handle never blocks the reopen
+            // Full sharing (facts §1.8): a lingering old handle never blocks the reopen. C-S7: none for an exclusive open,
+            // so a file another box holds open answers STATUS_SHARING_VIOLATION and is kept.
+            if (exclusive) EnumSet.noneOf(SMB2ShareAccess::class.java) else SMB2ShareAccess.ALL,
             if (mode == OpenMode.CREATE_OVERWRITE) SMB2CreateDisposition.FILE_OVERWRITE_IF else SMB2CreateDisposition.FILE_OPEN,
             options,
         )
@@ -290,6 +294,8 @@ class SmbjRemoteLink(
     private var inflight: Future<*>? = null
     private val refs = AtomicInteger()
     @Volatile private var freeBytes = -1L
+    /** C-S1: superseded by a new link; never connects again. */
+    @Volatile private var retired = false
     @Volatile private var freeAtMono = Long.MIN_VALUE
     /** Connects done (tests, stats). */
     val connects = AtomicInteger()
@@ -302,6 +308,7 @@ class SmbjRemoteLink(
     // ---------------------------------------------------------------- RemoteLink
 
     override fun share(deadlineMonoMs: Long): RemoteShare {
+        if (retired) throw LinkUnavailableException("retired") // C-S1
         current?.let { return it }
         if (exec.isCurrent()) throw LinkUnavailableException("not ready") // never wait on our own thread
         onDemand()
@@ -309,6 +316,8 @@ class SmbjRemoteLink(
     }
 
     override fun reconnect(failedEpoch: Long, deadlineMonoMs: Long): RemoteShare {
+        // C-S1: a retired link never connects again; its ring fails over (UNREACHABLE) and the next zap uses the new link.
+        if (retired) throw LinkUnavailableException("retired")
         if (epoch > failedEpoch) current?.let { return it }
         if (exec.isCurrent()) {
             reconnectNow(failedEpoch)
@@ -325,7 +334,22 @@ class SmbjRemoteLink(
         RemoteFault(classifier(t, Thread.currentThread().isInterrupted, opened?.alive))
 
     override fun retain() { refs.incrementAndGet() }
-    override fun release() { refs.updateAndGet { maxOf(0, it - 1) } }
+    override fun release() {
+        val left = refs.updateAndGet { maxOf(0, it - 1) }
+        if (left == 0 && retired) exec.post { dropCurrent() } // C-S1: the last ring file of a retired link closed
+    }
+
+    /**
+     * C-S1: the keeper made a new link for this location (a sign-in or address change); this one is retired. It never
+     * connects again ([share], [reconnect] and [connectBlocking] refuse), and its connection is dropped now when no ring
+     * file is open, else when the last one is released. Any thread; never waits.
+     */
+    fun retire() {
+        retired = true
+        if (refs.get() == 0) exec.post { dropCurrent() }
+    }
+
+    val isRetired: Boolean get() = retired
 
     override fun post(work: Runnable) = exec.post(work)
 
@@ -339,6 +363,7 @@ class SmbjRemoteLink(
     fun connectBlocking(): Throwable? {
         check(exec.isCurrent()) { "connect runs on ${exec.name}" }
         dropCurrent()
+        if (retired) return LinkUnavailableException("retired").also { lastConnectError = it } // C-S1
         lastAttemptMono = clock.nowMs()
         val pw = password()
         val chars = when (pw) {

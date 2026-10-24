@@ -117,6 +117,55 @@ class SmbReconnectTest {
         assertEquals(1L, link.epoch)
     }
 
+    /** C-S2: a live server's refusal (an unknown status) fails the write once; it never reconnects or tears down. */
+    @Test
+    fun aServerRefusalNeverReconnects() {
+        val link = FakeRemoteLink()
+        val s = created(link)
+        s.pwrite(block(1), RING_HEADER_BYTES.toLong())
+        link.statusNext(FakeStatus.REFUSED, prefix = "write")
+        assertFailsWith<IOException> { s.pwrite(block(2), RING_HEADER_BYTES + RING_BLOCK_BYTES.toLong()) }
+        assertEquals(0, link.reconnects.get(), "a refusal is not a link loss (A-B4)")
+        assertEquals(1L, link.epoch, "the connection was kept")
+        assertEquals(StorageFailure.SLOW, s.lastFailure)
+        assertTrue(s.needsFreshFile, "the refused WRITE's fate is unknown: the next cycle takes a fresh file")
+        assertEquals(1, link.log.count { it.startsWith("write") } - 2, "the refused write was tried once")
+    }
+
+    /**
+     * C-N1: a reconnect during the zap (the old generation's in-flight WRITE retried on the new connection) sets
+     * needsFreshFile after the factory's reuse check; the new generation must not write into that file.
+     */
+    @Test
+    fun aReconnectDuringTheZapNeverWritesTheNewGenerationIntoTheOldFile() {
+        val link = FakeRemoteLink()
+        val s = created(link)
+        s.pwrite(block(1), RING_HEADER_BYTES.toLong())
+        // Generation 1's next WRITE is in flight (the server is slow to answer it) …
+        link.stallCallsUntil("write", link.clock.nowMs() + 300)
+        val inFlight = Thread { s.pwrite(block(2), RING_HEADER_BYTES + RING_BLOCK_BYTES.toLong()) }.also { it.start() }
+        Thread.sleep(50)
+        assertFalse(s.needsFreshFile) // … so the factory's reuse check passes …
+        s.writeHeader(2, s.capacityBytes) // … and reset() starts generation 2 on the same file.
+        link.dropTransport()              // Then the transport dies under the in-flight WRITE: reconnect, retried.
+        inFlight.join(5_000)
+        assertTrue(s.needsFreshFile)
+        assertEquals(1, link.reconnects.get())
+        val writesBefore = link.log.count { it.startsWith("write") }
+        assertFailsWith<IOException> { s.pwrite(block(3), RING_HEADER_BYTES.toLong()) }
+        assertEquals(writesBefore, link.log.count { it.startsWith("write") }, "nothing of generation 2 reached the old file")
+        assertEquals(StorageFailure.UNREACHABLE, s.lastFailure)
+        // A reconnect inside one generation is still invisible (§4.4): that cycle keeps writing.
+        val link2 = FakeRemoteLink()
+        val t = created(link2)
+        t.pwrite(block(1), RING_HEADER_BYTES.toLong())
+        link2.dropTransport()
+        t.pwrite(block(2), RING_HEADER_BYTES + RING_BLOCK_BYTES.toLong())
+        t.pwrite(block(3), RING_HEADER_BYTES + 2L * RING_BLOCK_BYTES)
+        assertTrue(t.needsFreshFile, "the next zap takes a fresh file (§4.5)")
+        assertNull(t.lastFailure)
+    }
+
     @Test
     fun aReadTimeoutFailsTheReadOnly() {
         val link = FakeRemoteLink()
