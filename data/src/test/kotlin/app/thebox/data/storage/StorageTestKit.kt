@@ -44,17 +44,28 @@ class RecordingBlobs : SecureBlobStore {
     val given = CopyOnWriteArrayList<ByteArray>()
     val handedOut = CopyOnWriteArrayList<ByteArray>()
     @Volatile var failure: CredentialFailure? = null
+    /** Q-E2: decrypts (getBlob) so far. */
+    val gets = AtomicInteger()
+    /** Q-E2: stored rows that do not decrypt (CORRUPT) while [hasBlob] still sees them. */
+    @Volatile var undecryptable = false
     override suspend fun putBlob(ref: String, bytes: ByteArray): Outcome<Unit> {
         failure?.let { return Outcome.Err(SourceError.Credentials(it)) }
         given += bytes; map[ref] = bytes.copyOf(); return Outcome.Ok(Unit)
     }
     override suspend fun getBlob(ref: String): Outcome<ByteArray> {
+        gets.incrementAndGet()
         failure?.let { return Outcome.Err(SourceError.Credentials(it)) }
+        if (undecryptable && map.containsKey(ref)) return Outcome.Err(SourceError.Credentials(CredentialFailure.CORRUPT))
         val b = map[ref]?.copyOf() ?: return Outcome.Err(SourceError.Credentials(CredentialFailure.MISSING))
         handedOut += b
         return Outcome.Ok(b)
     }
     override suspend fun deleteBlob(ref: String) { map.remove(ref) }
+    /** Like `TinkCredentialStore`: the row only, no decrypt. */
+    override suspend fun hasBlob(ref: String): Boolean {
+        failure?.let { return it == CredentialFailure.UNAVAILABLE }
+        return map.containsKey(ref)
+    }
 }
 
 /** A share whose [epoch] is the link's (the fake link counts its own epochs). */
@@ -124,7 +135,7 @@ class StorageWorld(
         onSignedInAgain = { signedIn += it },
     )
     val targets = StorageTargetsImpl(
-        locations, keeper, volumes, deviceId, File(dir, "timeshift"), clock, { wall }, pid,
+        locations, { keeper }, volumes, deviceId, File(dir, "timeshift"), clock, { wall }, pid,
         space = LocalSpace { 32L * 1024 * 1024 * 1024 to 20L * 1024 * 1024 * 1024 },
     )
 

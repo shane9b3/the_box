@@ -46,10 +46,9 @@ class SmbjRemoteLinkTest {
         assertEquals(StorageConstants.SMB_CONNECT_TIMEOUT_MS.toInt(), f.getInt(SmbjClients.config(8_000).socketFactory))
     }
 
-    @Test fun theRingAndTheBrowserHaveTheirOwnClients() {
+    /** Each ring link has its own client (browse sessions make theirs per connect, C-B2; Q-D2 removed `browseClient`). */
+    @Test fun eachRingLinkHasItsOwnClient() {
         val ring = SmbjClients.ringClient(StorageConstants.SMB_IO_TIMEOUT_MS)
-        val browse = SmbjClients.browseClient()
-        assertNotSame(ring, browse)
         assertNotSame(SmbjClients.ringClient(StorageConstants.SMB_IO_TIMEOUT_MS), ring) // one per link
     }
 

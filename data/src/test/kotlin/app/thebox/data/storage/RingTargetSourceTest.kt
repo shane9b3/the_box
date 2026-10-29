@@ -41,6 +41,53 @@ class RingTargetSourceTest {
         }
     }
 
+    /**
+     * Q-E1 (closure fix pass 2026-10-28, lead ruling R4): a viewer with no network folder never builds the keeper (no
+     * `box-smb`, no watchdog, no callbacks); choosing one builds it, once.
+     */
+    @Test fun noNetworkFolderBuildsNoKeeper() {
+        val w = StorageWorld()
+        var built = 0
+        val t = StorageTargetsImpl(
+            w.locations, { built++; w.keeper }, w.volumes, w.deviceId, File(w.dir, "timeshift"), w.clock, { w.wall }, w.pid,
+            space = LocalSpace { 32L * 1024 * 1024 * 1024 to 20L * 1024 * 1024 * 1024 },
+        )
+        assertEquals(StorageKind.INTERNAL, t.current(StoragePurpose.TIMESHIFT).target.kind)
+        t.warm()
+        t.onStorageFailure(StorageConstants.INTERNAL_ID, RecordStop.DISK_ERROR, null, 60_000)
+        t.onCreateFailed(StorageConstants.INTERNAL_ID, StorageFailure.ACCESS)
+        val vol = VolumeCatalog.Volume("1234-ABCD", "SanDisk", File(w.dir, "usb"), 64L shl 30, 40L shl 30)
+        w.volumes.volumes.value = listOf(vol)
+        runBlocking { w.locations.choose(StoragePurpose.TIMESHIFT, "vol-1234-ABCD") }
+        assertEquals(StorageKind.VOLUME, t.current(StoragePurpose.TIMESHIFT).target.kind)
+        t.warm()
+        assertEquals(0, built)
+        assertFalse(t.keeperBuilt)
+        val names = Thread.getAllStackTraces().keys.map { it.name }
+        assertFalse(names.toString(), names.any { it == "box-smb" || it == "box-smb-watch" })
+        // A network folder chosen for rewind: built at once (its triggers then run), and only once.
+        w.addSmb()
+        eventually("keeper built") { built == 1 }
+        t.current(StoragePurpose.TIMESHIFT)
+        t.warm()
+        assertEquals(1, built)
+        assertTrue(t.keeperBuilt)
+    }
+
+    /** Q-D1 (lead ruling R2): the guide's preview start warms the kept folder and writes its `.wake` (rate-limited). */
+    @Test fun thePreviewStartWritesTheWakeFile() {
+        val w = StorageWorld()
+        w.addSmb()
+        ready(w)
+        val wakes = { w.server.log.count { it.startsWith("open:Rewind/TheBox-rewind/.wake-") } }
+        val before = wakes()
+        w.targets.warm()
+        eventually("wake written") { wakes() == before + 1 }
+        w.targets.warm() // a second preview at once: within SMB_RECONNECT_MIN_GAP_MS, no second write
+        Thread.sleep(150)
+        assertEquals(before + 1, wakes())
+    }
+
     @Test fun internalIsTodaysDirectory() {
         val w = StorageWorld()
         val c = w.targets.current(StoragePurpose.TIMESHIFT)

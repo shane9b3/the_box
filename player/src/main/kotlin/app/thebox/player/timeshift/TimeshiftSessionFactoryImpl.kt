@@ -13,6 +13,8 @@ import app.thebox.core.playback.timeshift.RingStorage
 import app.thebox.core.playback.timeshift.RingTarget
 import app.thebox.core.playback.timeshift.RingTargetChoice
 import app.thebox.core.playback.timeshift.RingTargetSource
+import app.thebox.core.playback.timeshift.CycleWriteTracking
+import app.thebox.core.playback.timeshift.isStorageStop
 import app.thebox.core.playback.timeshift.RingWriter
 import app.thebox.core.playback.timeshift.RingWriterFactory
 import app.thebox.core.playback.timeshift.RingWriterListener
@@ -106,6 +108,11 @@ internal class TimeshiftSessionFactoryImpl(
     targetsLater: (() -> RingTargetSource)? = null,
 ) : TimeshiftSessionFactory {
 
+    /**
+     * Q-D10 (closure fix pass 2026-10-28): `:data`'s `StorageModule` always binds [RingTargetSource] in the one Hilt graph
+     * that has this module (the app's; `:player` has no androidTest and `:data`'s test graph has no `:player`), so the
+     * source is injected directly; [InternalRingTargets] stays the primary constructor's default for the JVM tests.
+     */
     @Inject constructor(
         @ApplicationContext context: Context,
         storage: TimeshiftStorageImpl,
@@ -115,13 +122,12 @@ internal class TimeshiftSessionFactoryImpl(
         indexers: Provider<TsIndexer>,
         transport: TransportFactory,
         clock: MonoClock,
-        targets: java.util.Optional<Provider<RingTargetSource>>,
-        internalTargets: InternalRingTargets,
+        targets: Provider<RingTargetSource>,
     ) : this(
         storage, policy, ringFactory, writerFactory, indexers, transport, clock,
         lowRam = context.getSystemService(ActivityManager::class.java)?.isLowRamDevice == true,
         memoryClassMb = context.getSystemService(ActivityManager::class.java)?.memoryClass ?: 0,
-        targetsLater = { targets.map { it.get() }.orElse(internalTargets) },
+        targetsLater = { targets.get() },
     )
 
     private val targets: RingTargetSource by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
@@ -367,13 +373,7 @@ internal class TimeshiftSessionFactoryImpl(
         else -> st.isUnlinked()
     }
 
-    private fun beginCycle(st: RingStorage?) {
-        when (st) {
-            is FallbackRingStorage -> st.beginCycle()
-            is VolumeStorage -> st.beginCycle()
-            else -> Unit
-        }
-    }
+    private fun beginCycle(st: RingStorage?) { (st as? CycleWriteTracking)?.beginCycle() } // Q-U10
 
     /** The storage for [target], under [ringLock]. SMB: a [FallbackRingStorage] whose flusher creates the file (A-B1). */
     @Throws(IOException::class)
@@ -384,7 +384,8 @@ internal class TimeshiftSessionFactoryImpl(
         is RingTarget.Remote -> {
             val name = targets.nextRemoteFileName(target.locationId)
             val primary = target.open(name, capacity)
-            val deadline = if (pool >= TimeshiftConstants.RING_RAM_BLOCKS_EXTERNAL) StorageConstants.SMB_OPEN_DEADLINE_MS else StorageConstants.SMB_OPEN_DEADLINE_SMALL_POOL_MS
+            // Q-U5: the same decision as the pool and the keeper's I/O timeout.
+            val deadline = if (TimeshiftConstants.smallRemotePool(memoryClassMb)) StorageConstants.SMB_OPEN_DEADLINE_SMALL_POOL_MS else StorageConstants.SMB_OPEN_DEADLINE_MS
             val local = internalTarget(total)
             FallbackRingStorage(
                 primary = primary,
@@ -547,6 +548,12 @@ internal class TimeshiftSessionFactoryImpl(
         }
     }
 
+    /**
+     * Q-D1 (lead ruling R2): the guide's preview start → the target source's §5.3 trigger (the keeper's connect and the
+     * `.wake` write when a network folder is kept). IO (the first call may resolve the source); never blocks on the network.
+     */
+    override fun warmSaveLocation() = targets.warm()
+
     private fun switchedToInternal(grant: TimeshiftGrant): Boolean =
         (current?.takeIf { it.ring === grant.ring }?.storage as? FallbackRingStorage)?.switchedTo == StorageKind.INTERNAL
 
@@ -554,13 +561,13 @@ internal class TimeshiftSessionFactoryImpl(
      * (§5.5, §10) [snap] with the cycle's storage fields: where it saves (after a §5.2 switch: INTERNAL), why it falls
      * back, why a remote/USB ring stopped, the chosen location's id and name, the folder's rates. Main, ≤ 1 Hz; no I/O.
      */
-    internal fun storageFields(grant: TimeshiftGrant, snap: LocalBufferState): LocalBufferState {
+    override fun storageFields(grant: TimeshiftGrant, snap: LocalBufferState): LocalBufferState {
         val choice = grant.choice
         val st = current?.takeIf { it.ring === grant.ring }?.storage
         val fb = st as? FallbackRingStorage
         val kind = if (fb != null) fb.switchedTo ?: StorageKind.SMB else choice.target.kind
         val stop = snap.stop
-        val failure = if (stop != null && stop in STORAGE_STOPS) failureOf(st, stop) else null
+        val failure = if (stop != null && stop.isStorageStop) failureOf(st, stop) else null
         val rates = if (fb != null && fb.switchedTo == null) {
             try {
                 fb.primary.ratesBps().let { StorageRates(it.getOrElse(0) { 0L }, it.getOrElse(1) { 0L }) }
@@ -622,7 +629,7 @@ internal class TimeshiftSessionFactoryImpl(
 
         override fun start(upstream: TsUpstream, listener: RingWriterListener) = inner.start(upstream, object : RingWriterListener by listener {
             override fun onStopped(reason: RecordStop) {
-                if (reason in STORAGE_STOPS && !reported) {
+                if (reason.isStorageStop && !reported) {
                     reported = true
                     report(reason)
                 }
@@ -640,11 +647,7 @@ internal class TimeshiftSessionFactoryImpl(
                 BoxLog.i(TAG) { "$reason before the network folder answered: not the folder's failure" }
                 return
             }
-            val first = when (st) {
-                is FallbackRingStorage -> st.firstWriteMonoMs
-                is VolumeStorage -> st.firstWriteMonoMs
-                else -> -1L
-            }
+            val first = (st as? CycleWriteTracking)?.firstWriteMonoMs ?: -1L // Q-U10
             // No write yet in this cycle: the stop started inside the grace (§5.4).
             val since = if (first >= 0) (clock.nowMs() - first).coerceAtLeast(0L) else 0L
             try {
@@ -665,7 +668,6 @@ internal class TimeshiftSessionFactoryImpl(
 
     private companion object {
         const val TAG = "TimeshiftFactory"
-        val STORAGE_STOPS = setOf(RecordStop.DISK_ERROR, RecordStop.STORAGE_EVICTED, RecordStop.DISK_TOO_SLOW)
     }
 }
 

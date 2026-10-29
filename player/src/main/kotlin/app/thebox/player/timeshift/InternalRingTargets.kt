@@ -1,4 +1,5 @@
-// Storage locations commit 0 only (docs/design/m6-storage-locations.md §2 "Module placement", §12.4, A-S5).
+// Storage locations commit 0 (docs/design/m6-storage-locations.md §2 "Module placement", §12.4, A-S5); since the closure fix
+// pass (Q-D10, 2026-10-28) only the factory's primary-constructor default and the grant's [UNSIZED] default.
 package app.thebox.player.timeshift
 
 import app.thebox.core.playback.timeshift.RecordStop
@@ -11,17 +12,13 @@ import app.thebox.core.storage.StorageKind
 import app.thebox.core.storage.StorageLimits
 import app.thebox.core.storage.StoragePurpose
 import java.io.File
-import javax.inject.Inject
-import javax.inject.Singleton
 
 /**
- * The [RingTargetSource] `:player` uses while `:data` binds none (`@BindsOptionalOf` in [TimeshiftModule]): always this
- * device, today's directory and sizing, never a fallback. With it the app behaves exactly as before the storage-locations
- * feature. [current] does no network I/O and never waits (§5.1 Must); the StatFs figures are the same local syscall the
- * factory's sizing makes today.
+ * A [RingTargetSource] that is always this device, today's directory and sizing, never a fallback: the default of
+ * `TimeshiftSessionFactoryImpl`'s primary constructor (JVM tests). Production injects `:data`'s source. [current] does no
+ * network I/O and never waits (§5.1 Must); the StatFs figures are the same local syscall the factory's sizing makes.
  */
-@Singleton
-internal class InternalRingTargets @Inject constructor(private val storage: TimeshiftStorageImpl) : RingTargetSource {
+internal class InternalRingTargets(private val storage: TimeshiftStorageImpl) : RingTargetSource {
     override fun current(purpose: StoragePurpose): RingTargetChoice {
         val total = storage.totalBytes()
         return RingTargetChoice(
@@ -42,7 +39,7 @@ internal class InternalRingTargets @Inject constructor(private val storage: Time
 
     companion object {
         /**
-         * The default of `TimeshiftGrant.choice` (a grant built before WP-S2 copies the real choice in): this device, sizes
+         * The default of `TimeshiftGrant.choice` (a grant built without a choice: the session tests): this device, sizes
          * unknown (0). Only the location id and kind are meaningful.
          */
         val UNSIZED: RingTargetChoice = RingTargetChoice(

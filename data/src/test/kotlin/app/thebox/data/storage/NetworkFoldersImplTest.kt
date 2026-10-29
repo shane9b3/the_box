@@ -65,7 +65,6 @@ class NetworkFoldersImplTest {
     private val folders = NetworkFoldersImpl(
         finder = object : ComputerFinder {
             override fun search(): Flow<FindState> = emptyFlow()
-            override fun recentAddress(name: String): String? = null
         },
         lan = object : LanAddressFinder { override fun find(): String? = "192.168.1.37"; override fun vpnActive() = false },
         context = ApplicationProvider.getApplicationContext(),

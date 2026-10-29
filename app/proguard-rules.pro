@@ -10,8 +10,8 @@
 # (GSS-API) authenticator reference classes Android lacks. Neither path is used (NTLM only, no EL filters).
 -dontwarn javax.el.**
 -dontwarn org.ietf.jgss.**
-# smbj's Kerberos/SPNEGO side also names javax.security.auth (absent on Android; SmbConfig never registers it there).
--dontwarn javax.security.auth.**
+# SEC-N6 (closure fix pass 2026-10-28): the app-wide `-dontwarn javax.security.auth.**` is gone. Measured with it removed:
+# R8 reports no missing javax.security.auth class (Android ships the ones smbj's SPNEGO side names), so it hid nothing.
 # mbassador finds @Handler methods by reflection (Connection, Session, SMBClient.connectionClosed: smbj issue #538) and
 # instantiates its subscription/invocation classes reflectively (SubscriptionFactory, MetadataReader). Keep it whole
 # (98 KB) and every @Handler method with its annotation.
@@ -31,5 +31,6 @@
 -dontwarn org.slf4j.impl.**
 # (Save-location integration 2026-10-24, R8 missing class) dcerpc throws java.rmi.UnmarshalException on a malformed
 # response; Android has no java.rmi, so that path is a NoClassDefFoundError at runtime, which SmbShareLister catches.
--dontwarn java.rmi.**
+# SEC-N6: only that class (R8's missing_rules.txt lists no other java.rmi class), not the whole package for every library.
+-dontwarn java.rmi.UnmarshalException
 # --- end smbj/mbassador/dcerpc rules ---

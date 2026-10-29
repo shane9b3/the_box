@@ -20,14 +20,30 @@ import com.rapid7.client.dcerpc.transport.SMBTransportFactories
  * (C-S6) An interrupt (BACK while the srvsvc call waits) is rethrown, so the caller sees a cancel, never LIST_FAILED.
  * dcerpc 0.12.13 gives the pipe no public close; its IPC$ tree ends with the browse session's own connection
  * (`NetworkFolders.close`, C-B2), and a transport that does offer `close` is closed on the way out.
+ *
+ * (SEC-S1, closure fix pass 2026-10-28) dcerpc sizes the share array from the server's `EntriesRead` before it reads one
+ * entry (`ShareInfoContainer.unmarshalEntity` → `new ShareInfo1[n]`), so one hostile answer is an `OutOfMemoryError`.
+ * Only that one huge allocation failed (the heap is intact), so it is LIST_FAILED like any malformed answer: the typed
+ * share name is still offered and the process lives.
  */
 class SmbShareLister {
     fun list(session: Session, signedInAsUser: Boolean): ShareListing {
         var transport: Any? = null
         try {
-            val t = SMBTransportFactories.SRVSVC.getTransport(session)
-            transport = t
-            return ShareListing(filter(ServerService(t).getShares1().map { it.netName to it.type }))
+            return guarded(signedInAsUser) {
+                val t = SMBTransportFactories.SRVSVC.getTransport(session)
+                transport = t
+                ServerService(t).getShares1().map { it.netName to it.type }
+            }
+        } finally {
+            (transport as? AutoCloseable)?.let { runCatching { it.close() } }
+        }
+    }
+
+    /** The listing's failure policy around [fetch] (the srvsvc call); a seam for the JVM tests. */
+    internal fun guarded(signedInAsUser: Boolean, fetch: () -> List<Pair<String?, Int>>): ShareListing {
+        try {
+            return ShareListing(filter(fetch()))
         } catch (e: Exception) {
             if (isCancel(e)) throw e // C-S6
             BoxLog.i(TAG) { "share listing failed: ${SmbFaults.faultName(e)}" }
@@ -37,8 +53,10 @@ class SmbShareLister {
             // lacks: that is a NoClassDefFoundError here. The typed share name is still offered.
             BoxLog.i(TAG) { "share listing failed: ${e.javaClass.simpleName}" }
             return ShareListing(emptyList(), BrowseError(BrowseErrorKind.LIST_FAILED))
-        } finally {
-            (transport as? AutoCloseable)?.let { runCatching { it.close() } }
+        } catch (e: OutOfMemoryError) {
+            // SEC-S1: a server-sized array (EntriesRead) too large to allocate; nothing else was allocated for it.
+            BoxLog.w(TAG, "share listing refused: the server announced too many shares (${e.javaClass.simpleName})")
+            return ShareListing(emptyList(), BrowseError(BrowseErrorKind.LIST_FAILED))
         }
     }
 

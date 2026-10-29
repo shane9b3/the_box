@@ -113,9 +113,32 @@ sealed interface RingTarget {
 data class RingTargetChoice(val target: RingTarget, val chosenId: String, val chosenKind: app.thebox.core.storage.StorageKind,
                             val fallback: app.thebox.core.storage.LocationFallback?, val lastKnownGood: Boolean)
 
+/**
+ * (Q-U10, closure fix pass 2026-10-28) The disk stops of a ring's storage (§5.4): the ones a non-internal cycle reports
+ * to its [RingTargetSource] and the §10 storage toasts name.
+ */
+val RecordStop.isStorageStop: Boolean
+    get() = this == RecordStop.DISK_ERROR || this == RecordStop.STORAGE_EVICTED || this == RecordStop.DISK_TOO_SLOW
+
+/**
+ * (Q-U10, closure fix pass 2026-10-28; additive) A non-internal ring storage that knows when its cycle first wrote
+ * (§5.4 start-of-cycle grace): `FallbackRingStorage` (SMB) and `VolumeStorage` (USB).
+ */
+interface CycleWriteTracking {
+    /** Mono ms of the current cycle's first successful write; −1 until then. */
+    val firstWriteMonoMs: Long
+    /** A new cycle starts on this storage (a zap reuse): the grace counts from that cycle's first write. */
+    fun beginCycle()
+}
+
 /** :data (StorageTargetsImpl). [current] never blocks and does no I/O (Must, §5.1). No awaiting variant (A-N4). */
 interface RingTargetSource {
     fun current(purpose: app.thebox.core.storage.StoragePurpose): RingTargetChoice
+    /**
+     * A §5.3 keeper trigger: the guide's preview started (Q-D1, closure fix pass 2026-10-28). Any thread except main
+     * (the first call may build the source); never blocks on the network. `:data` warms the network folder chosen for
+     * rewind and writes its `.wake` file; nothing when no folder is chosen.
+     */
     fun warm()
     /** Synchronous, before the stop is published (A-N5); [sinceFirstWriteMs] drives the grace (§5.4). */
     fun onStorageFailure(locationId: String, stop: RecordStop, failure: app.thebox.core.storage.StorageFailure?, sinceFirstWriteMs: Long)

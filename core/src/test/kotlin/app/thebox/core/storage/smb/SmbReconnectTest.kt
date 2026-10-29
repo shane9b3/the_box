@@ -52,6 +52,25 @@ class SmbReconnectTest {
         assertNull(s.lastFailure, "an invisible reconnect is no failure")
     }
 
+    /**
+     * Q-E3 (closure fix pass 2026-10-28): a retired link (the keeper relinked after a sign-in change) never reconnects;
+     * the ring fails over at once (UNREACHABLE) instead of retrying for the whole reconnect budget.
+     */
+    @Test
+    fun aRetiredLinkFailsOverAtOnce() {
+        val link = FakeRemoteLink()
+        val s = created(link)
+        s.pwrite(block(1), RING_HEADER_BYTES.toLong())
+        link.retired = true
+        link.dropTransport()
+        val t0 = System.nanoTime()
+        assertFailsWith<IOException> { s.pwrite(block(2), RING_HEADER_BYTES + RING_BLOCK_BYTES.toLong()) }
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        assertTrue(ms < 1_000, "failed over in $ms ms, not after the ${StorageConstants.SMB_RECONNECT_BUDGET_MS} ms budget")
+        assertEquals(StorageFailure.UNREACHABLE, s.lastFailure)
+        assertEquals(0, link.reconnects.get())
+    }
+
     @Test
     fun reopenNeverTruncatesTheSavedPart() {
         val link = FakeRemoteLink()

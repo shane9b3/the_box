@@ -41,13 +41,14 @@ internal class NetworkNameLookup(
     private val reverse: (ByteArray) -> String? = { b -> InetAddress.getByAddress(b).hostName },
 ) : NameLookup {
     override suspend fun lookup(address: String): Pair<String, NameSource>? {
-        val bytes = bytesOf(address) ?: return null
+        val bytes = ipv4Bytes(address) ?: return null
         netbios(address, bytes)?.let { return it to NameSource.NETBIOS }
         reverseDns(address, bytes)?.let { return it to NameSource.REVERSE_DNS }
         return null
     }
 
-    suspend fun netbios(address: String, bytes: ByteArray = bytesOf(address)!!): String? {
+    suspend fun netbios(address: String, bytes: ByteArray? = ipv4Bytes(address)): String? {
+        if (bytes == null) return null // Q-U8: not an IPv4 literal
         val socket = try { sockets.datagram() } catch (e: IOException) { return null }
         return try {
             blockingClosingOnCancel(socket, io) { query(socket, InetAddress.getByAddress(bytes)) }
@@ -60,7 +61,8 @@ internal class NetworkNameLookup(
         }
     }
 
-    suspend fun reverseDns(address: String, bytes: ByteArray = bytesOf(address)!!): String? {
+    suspend fun reverseDns(address: String, bytes: ByteArray? = ipv4Bytes(address)): String? {
+        if (bytes == null) return null // Q-U8: not an IPv4 literal
         val answer = CompletableDeferred<String?>()
         try {
             dnsExecutor.execute { answer.complete(try { reverse(bytes) } catch (e: Exception) { null }) }
@@ -93,9 +95,6 @@ internal class NetworkNameLookup(
         }
     }
 
-    private fun bytesOf(address: String): ByteArray? =
-        Ipv4.parse(address)?.let { v -> byteArrayOf((v ushr 24).toByte(), (v ushr 16).toByte(), (v ushr 8).toByte(), v.toByte()) }
-
     companion object {
         /** 4 threads, 32 queued, idle threads exit: an abandoned `getnameinfo` costs a thread for its own timeout only. */
         val sharedDnsExecutor: Executor by lazy {
@@ -104,3 +103,10 @@ internal class NetworkNameLookup(
         }
     }
 }
+
+/**
+ * Q-U8 (save-location closure fix pass, 2026-10-28): the four bytes of a dotted IPv4 literal ([Ipv4.parse]'s grammar),
+ * for `InetAddress.getByAddress` (no DNS); null when [address] is not one. The one copy for the sweep and the lookups.
+ */
+internal fun ipv4Bytes(address: String): ByteArray? =
+    Ipv4.parse(address)?.let { v -> byteArrayOf((v ushr 24).toByte(), (v ushr 16).toByte(), (v ushr 8).toByte(), v.toByte()) }

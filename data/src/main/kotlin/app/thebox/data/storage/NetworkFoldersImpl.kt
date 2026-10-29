@@ -85,7 +85,7 @@ class SmbjBrowseConnections(private val config: () -> SmbConfig = { SHARED_CONFI
     override fun connect(host: String, port: Int): BrowseConnection {
         val client = SMBClient(config())
         val conn = try { client.connect(host, port) } catch (e: Exception) {
-            try { client.close() } catch (_: Exception) { }
+            try { client.close() } catch (_: Exception) { /* Q-H5: nothing connected; the connect failure is what counts */ }
             throw e
         }
         return SmbjBrowseConnection(client, conn)
@@ -252,7 +252,7 @@ class NetworkFoldersImpl internal constructor(
         }
         val view = SmbjShare(0L, disk, null)
         try {
-            val (names, truncated) = folderNames(view.list(p, Int.MAX_VALUE))
+            val (names, truncated) = folderNames(view.list(p, BROWSE_SCAN_MAX))
             FolderListing(share, p, names, truncated)
         } catch (e: IOException) {
             if (cancelled(e)) throw e
@@ -264,9 +264,9 @@ class NetworkFoldersImpl internal constructor(
             var deepest = ""
             for (n in parts.size - 1 downTo 1) {
                 val cand = parts.take(n).joinToString("/")
-                if (runCatching { disk.folderExists(SmbjClients.win(cand)) }.getOrDefault(false)) { deepest = cand; break }
+                if (probe(false) { disk.folderExists(SmbjClients.win(cand)) }) { deepest = cand; break }
             }
-            val (names, truncated) = runCatching { folderNames(view.list(deepest, Int.MAX_VALUE)) }.getOrDefault(emptyList<String>() to false)
+            val (names, truncated) = probe(emptyList<String>() to false) { folderNames(view.list(deepest, BROWSE_SCAN_MAX)) }
             FolderListing(share, deepest, names, truncated, BrowseError(BrowseErrorKind.NOT_FOUND, deepestPath = deepest))
         }
     }
@@ -313,6 +313,15 @@ class NetworkFoldersImpl internal constructor(
     private fun cancelled(e: Throwable): Boolean =
         Thread.currentThread().isInterrupted || SmbFaults.classify(e, false, null) == FaultClass.CANCEL
 
+    /**
+     * Q-H4 (closure fix pass, 2026-10-28): one step of the NOT_FOUND recovery walk; a failure answers [otherwise], but a
+     * cancel (BACK during the walk) is rethrown so the walk stops instead of probing on for a listing nobody wants.
+     */
+    private inline fun <T> probe(otherwise: T, f: () -> T): T = try { f() } catch (e: Exception) {
+        if (cancelled(e)) throw e
+        otherwise
+    }
+
     private fun failed(error: BrowseError) = LocationTestResult(TestVerdict.FAILED, 0, 0, 0, 0, -1, onWifi(), System.currentTimeMillis(), error)
 
     private fun onWifi(): Boolean = try {
@@ -322,19 +331,25 @@ class NetworkFoldersImpl internal constructor(
 
     companion object {
         private const val TAG = "SmbBrowse"
+        /**
+         * SEC-S2: at most this many raw entries (files included) are read for one folder page, so a hostile or broken
+         * server cannot list without end. Far above `SMB_LIST_MAX_ENTRIES` folders; a page that hits it shows truncated.
+         */
+        const val BROWSE_SCAN_MAX = 16_384
 
         /**
          * §7.6: directories only; `.`, `..`, hidden/system entries and `SMB_SKIP_FOLDERS` skipped (case-insensitive);
          * case-insensitive order; at most `SMB_LIST_MAX_ENTRIES` (second = truncated).
          */
         fun folderNames(entries: List<RemoteEntry>): Pair<List<String>, Boolean> {
+            val scanCut = entries.size >= BROWSE_SCAN_MAX // SEC-S2: the listing stopped at its cap
             val skip = StorageConstants.SMB_SKIP_FOLDERS.map { it.lowercase() }.toSet()
             val all = entries.asSequence()
                 .filter { it.directory && !it.hidden && it.name != "." && it.name != ".." && it.name.lowercase() !in skip }
                 .map { it.name }
                 .sortedWith(String.CASE_INSENSITIVE_ORDER)
                 .toList()
-            return if (all.size > StorageConstants.SMB_LIST_MAX_ENTRIES) all.take(StorageConstants.SMB_LIST_MAX_ENTRIES) to true else all to false
+            return if (all.size > StorageConstants.SMB_LIST_MAX_ENTRIES) all.take(StorageConstants.SMB_LIST_MAX_ENTRIES) to true else all to scanCut
         }
     }
 }

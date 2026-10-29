@@ -2,6 +2,7 @@
 package app.thebox.data.storage
 
 import app.thebox.core.common.BoxLog
+import app.thebox.core.common.Redact
 import app.thebox.core.common.CredentialFailure
 import app.thebox.core.common.Outcome
 import app.thebox.core.common.SourceError
@@ -74,6 +75,11 @@ class StorageLocationsImpl @Inject constructor(
     private val keeper = ConcurrentHashMap<String, LocationStatus>()
     /** SMB locations whose stored password is missing or unreadable for good (§8 `getBlob` outcomes). */
     @Volatile private var needsSignIn: Set<String> = emptySet()
+    /**
+     * Q-E2: locations whose stored password failed to decrypt at a [readPassword] (CORRUPT, KEY_INVALIDATED). [onPrefs]
+     * only checks that a password exists (no decrypt), so this keeps them SIGN_IN_NEEDED until the sign-in changes.
+     */
+    @Volatile private var unreadable: Set<String> = emptySet()
     private val listeners = CopyOnWriteArrayList<() -> Unit>()
     private val _signInVersion = MutableStateFlow(0L)
     /** Bumped on every sign-in change (the keeper reconnects with the new one). */
@@ -138,6 +144,7 @@ class StorageLocationsImpl @Inject constructor(
             val addr = loc.smb!!.copy(user = if (guest) null else user?.takeIf { it.isNotBlank() }, domain = if (guest) null else domain?.takeIf { it.isNotBlank() }, guest = guest)
             store.update(StorageDomain) { p -> p.copy(locations = p.locations.map { if (it.id == locationId) it.copy(smb = addr) else it }) }
             needsSignIn = needsSignIn - locationId
+            unreadable = unreadable - locationId
             _signInVersion.value++
             recompute(); notifyListeners()
         } finally { password?.fill('\u0000') }
@@ -194,7 +201,10 @@ class StorageLocationsImpl @Inject constructor(
             }
             is Outcome.Err -> when ((r.error as? SourceError.Credentials)?.reason) {
                 CredentialFailure.UNAVAILABLE -> PasswordRead.Unavailable
-                else -> { needsSignIn = needsSignIn + locationId; recompute(); PasswordRead.NeedsSignIn }
+                else -> {
+                    unreadable = unreadable + locationId
+                    needsSignIn = needsSignIn + locationId; recompute(); PasswordRead.NeedsSignIn
+                }
             }
         }
     }
@@ -237,17 +247,21 @@ class StorageLocationsImpl @Inject constructor(
                 store.update(StorageDomain) { it.copy(timeshiftLocationId = StorageConstants.INTERNAL_ID) }
                 BoxLog.i(TAG) { "unknown USB drive chosen after a restore: rewind back on this device" }
             }
-            // §8 restore: SMB locations with a user and no stored password need a sign-in.
+            // §8 restore: SMB locations with a user and no stored password need a sign-in. Q-E2: existence only, no
+            // decrypt per settings write; a password that does not decrypt is caught by the keeper's readPassword.
             val missing = HashSet<String>()
+            val ids = HashSet<String>()
             for (loc in p.locations) {
                 val smb = loc.smb ?: continue
+                ids += loc.id
+                // SEC-N1: an SMB user name or domain (smbj puts the user in its auth failure message) is never logged.
+                Redact.registerSecret(smb.user)
+                Redact.registerSecret(smb.domain)
                 if (smb.guest || smb.user.isNullOrEmpty()) continue
-                when (val r = blobs.getBlob(ref(loc.id))) {
-                    is Outcome.Ok -> r.value.fill(0)
-                    is Outcome.Err -> if ((r.error as? SourceError.Credentials)?.reason != CredentialFailure.UNAVAILABLE) missing += loc.id
-                }
+                if (!blobs.hasBlob(ref(loc.id))) missing += loc.id
             }
-            needsSignIn = missing
+            unreadable = unreadable.filterTo(HashSet()) { it in ids }
+            needsSignIn = missing + unreadable
         }
         recompute()
         notifyListeners()
@@ -276,7 +290,10 @@ class StorageLocationsImpl @Inject constructor(
         }
     }
 
-    private fun notifyListeners() { for (l in listeners) try { l() } catch (_: RuntimeException) { } }
+    // Q-H5: a listener is the keeper's evaluate trigger; a bug there must show in the log, and must not stop the others.
+    private fun notifyListeners() {
+        for (l in listeners) try { l() } catch (e: RuntimeException) { BoxLog.w(TAG, "change listener failed: ${e.javaClass.simpleName}") }
+    }
 
     private suspend fun putPassword(id: String, password: CharArray) {
         val bytes = encode(password)
@@ -289,7 +306,10 @@ class StorageLocationsImpl @Inject constructor(
     private fun markSeen(uuid: String) {
         val s = (seen ?: loadSeen()) + uuid
         seen = s
-        try { dirs.noBackup.mkdirs(); seenFile.writeText(s.joinToString("\n")) } catch (_: Exception) { }
+        // Q-U7: atomic like the other device-state files. Q-H5: A-N7 depends on this file, so a failure is logged.
+        try { writeTextAtomically(seenFile, s.joinToString("\n")) } catch (e: Exception) {
+            BoxLog.w(TAG, "seen USB drives not saved: ${e.javaClass.simpleName}")
+        }
     }
 
     private fun loadSeen(): Set<String> = try {

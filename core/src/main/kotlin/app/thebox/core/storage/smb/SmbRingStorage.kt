@@ -233,13 +233,13 @@ class SmbRingStorage(
      * cycle's ring for good (`TsRingImpl.maybeShrink`). A real FULL also fails the next `pwrite` (`DISK_ERROR (FULL)`).
      */
     override fun availableBytes(): Long {
-        val sh = handle?.share ?: return limits.reportedAvailableBytes(Long.MAX_VALUE / 4) // not created yet: unknown, never halts growth
+        val sh = handle?.share ?: return limits.reportedAvailableBytes(UNKNOWN_FREE_BYTES) // not created yet: unknown, never halts growth
         val free = try { sh.freeBytes() } catch (e: IOException) {
             val cls = link.classify(e).cls
             if (cls == FaultClass.CANCEL) Thread.currentThread().interrupt()
             if (cls == FaultClass.FULL) return 0L
             val last = lastFreeV
-            return limits.reportedAvailableBytes(if (last >= 0) last else Long.MAX_VALUE / 4)
+            return limits.reportedAvailableBytes(if (last >= 0) last else UNKNOWN_FREE_BYTES)
         }
         lastFreeV = free
         return limits.reportedAvailableBytes(free)
@@ -325,7 +325,8 @@ class SmbRingStorage(
                         if (firstFailAt == Long.MIN_VALUE) firstFailAt = now
                         markFresh(opGeneration) // a reconnect is coming; an in-flight WRITE may still land later (§4.5)
                         val deadline = firstFailAt + minOf(StorageConstants.SMB_RECONNECT_BUDGET_MS, link.ioTimeoutMs)
-                        if (closed || now >= deadline || !reopen(epochOfF, deadline)) {
+                        // Q-E3: a retired link never reconnects; fail over now, not after the whole budget.
+                        if (closed || now >= deadline || link.retired || !reopen(epochOfF, deadline)) {
                             if (write) lastFailureV = if (goneV) StorageFailure.REMOVED else StorageFailure.UNREACHABLE
                             throw IOException("network folder unreachable", e)
                         }
@@ -372,7 +373,9 @@ class SmbRingStorage(
                 if (clock.nowMs() >= deadlineMonoMs) return false
                 val sh = try { link.reconnect(failed, deadlineMonoMs) } catch (e: IOException) {
                     if (link.classify(e).cls == FaultClass.CANCEL) throw (e as? InterruptedIOException ?: InterruptedIOException("ring reconnect cancelled"))
-                    // The server is not back yet (or the link was retired, C-S1): try again until the budget passes.
+                    // Q-E3: a retired link (C-S1) never comes back: give up at once.
+                    if (link.retired) return false
+                    // The server is not back yet: try again until the budget passes.
                     val left = deadlineMonoMs - clock.nowMs()
                     if (left <= 0 || closed) return false
                     try { Thread.sleep(minOf(left, RECONNECT_RETRY_PAUSE_MS)) } catch (ie: InterruptedException) {

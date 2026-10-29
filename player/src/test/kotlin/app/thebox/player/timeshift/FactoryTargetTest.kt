@@ -20,6 +20,7 @@ import app.thebox.core.storage.StorageFailure
 import app.thebox.core.storage.StorageKind
 import app.thebox.core.storage.fakes.FakeRingTargetSource
 import app.thebox.core.storage.smb.FakeRemoteLink
+import app.thebox.core.storage.smb.SmbRingStorage
 import app.thebox.player.api.LocalBufferState
 import app.thebox.player.api.PlaybackSettings
 import app.thebox.player.engine.EngineTestSupport
@@ -163,40 +164,53 @@ class FactoryTargetTest {
 
         targets.choice = smb()
         val g6 = grant(f)
-        (opened.last() as? NoIoRemoteStorage)?.needsFreshFile = true
-        if (opened.last() !is NoIoRemoteStorage) opened.last().close()
+        // Q-D9: the real storage sets needsFreshFile only after a reconnect or a timeout on the flusher; a storage that is
+        // gone is the same "never reuse" case for the factory (storageUnusable) and needs no I/O here.
+        opened.last().close()
+        assertTrue(opened.last().gone)
         val g7 = grant(f)
-        assertNotSame("needsFreshFile (A-B4)", g6.ring, g7.ring)
+        assertNotSame("a gone storage (A-B4)", g6.ring, g7.ring)
         // A fresh name on every rebuild at one location (§4.5): smb-1's files were n = 1, 2, 3.
-        val names = (opened.take(1) + opened.takeLast(2)).mapNotNull { (it as? NoIoRemoteStorage)?.relativePath }
+        val names = (opened.take(1) + opened.takeLast(2)).map { (it as SmbRingStorage).relativePath }
+        assertEquals(3, names.size)
         assertEquals(names.size, names.toSet().size)
     }
 
     @Test
     fun aSwitchedCycleIsNeverReusedAndSavesOnThisDeviceWithTheWearCounter() {
         val f = factory()
-        targets.choice = smb()
+        targets.choice = smbChoice(link, clock, opened) // the storage on the factory clock (deadlines compare)
         val g = grant(f)
         val fb = f.currentStorage() as FallbackRingStorage
-        // The folder fails before its first write: the §5.2 early switch, as the flusher would trigger it.
+        assertTrue("the real storage (Q-D9)", fb.primary is SmbRingStorage)
+        // The folder fails before its first write: the §5.2 early switch, as the flusher triggers it. The real create sees
+        // the dead transport, reconnects once (refused) and answers false at once, so the switch is synchronous.
         link.dropTransport()
         link.reconnectFails = true
-        if (fb.primary is NoIoRemoteStorage) {
-            val before = storage.writtenToday()
-            fb.pwrite(ByteBuffer.wrap(ByteArray(1000)), TimeshiftConstants.RING_HEADER_BYTES.toLong())
-            assertEquals(StorageKind.INTERNAL, fb.switchedTo)
-            assertEquals(LocationFallback.UNREACHABLE, fb.fallbackReason)
-            assertEquals("the secondary counts wear", before + 1000, storage.writtenToday())
-            val fbFile = File(storage.dir, "ring-3-fb1.bin")
-            assertTrue(fbFile.exists())
-            val s = f.storageFields(g, snap())
-            assertEquals(StorageKind.INTERNAL, s.storage)
-            assertEquals(LocationFallback.UNREACHABLE, s.fallback)
-            assertEquals(StorageFailure.UNREACHABLE, f.storageFields(g, snap(RecordStop.DISK_ERROR)).storageFailure.let { if (it == null) StorageFailure.UNREACHABLE else it })
-            link.reconnectFails = false
-            val g2 = grant(f)
-            assertNotSame(g.ring, g2.ring)
-        }
+        val before = storage.writtenToday()
+        fb.pwrite(ByteBuffer.wrap(ByteArray(1000)), TimeshiftConstants.RING_HEADER_BYTES.toLong())
+        assertEquals(StorageKind.INTERNAL, fb.switchedTo)
+        assertEquals(LocationFallback.UNREACHABLE, fb.fallbackReason)
+        assertEquals("§5.5: the secondary counts wear", before + 1000, storage.writtenToday())
+        assertEquals("nothing reached the folder", 0L, fb.primary.remoteBytesWritten)
+        val fbFile = File(storage.dir, "ring-3-fb1.bin")
+        assertTrue(fbFile.exists())
+        val s = f.storageFields(g, snap())
+        assertEquals(StorageKind.INTERNAL, s.storage)
+        assertEquals(LocationFallback.UNREACHABLE, s.fallback)
+        assertNull("a switched cycle's stop is this device's (today's wording)", f.storageFields(g, snap(RecordStop.DISK_ERROR)).storageFailure)
+        link.reconnectFails = false
+        val g2 = grant(f)
+        assertNotSame("a switched cycle is never reused for the folder", g.ring, g2.ring)
+    }
+
+    /** Q-D1 (lead ruling R2): the preview start reaches the target source's warm(), and asks for no target (no prepare). */
+    @Test
+    fun thePreviewStartWarmsTheTargetSource() {
+        val f = factory()
+        f.warmSaveLocation()
+        assertEquals(1L, targets.warms.get())
+        assertEquals(0L, targets.currentCalls.get())
     }
 
     @Test
@@ -365,13 +379,15 @@ class FactoryTargetTest {
     @Test
     fun theFirstWriteOfTheCycleDrivesTheGrace() {
         val f = factory()
-        targets.choice = smb()
+        targets.choice = smbChoice(link, clock, opened) // the storage on the factory clock (deadlines compare)
         val g = grant(f)
         val fb = f.currentStorage() as FallbackRingStorage
-        if (fb.primary !is NoIoRemoteStorage) return
+        assertTrue("the real storage (Q-D9)", fb.primary is SmbRingStorage)
         link.queuePosted = false
-        fb.pwrite(ByteBuffer.wrap(ByteArray(100)), 4096L) // create + first write at `now`
+        fb.pwrite(ByteBuffer.wrap(ByteArray(100)), 4096L) // the real create + the first remote write, at `now`
         assertNull(fb.switchedTo)
+        assertTrue("the write reached the folder", fb.primary.remoteBytesWritten > 0)
+        assertEquals(now, fb.firstWriteMonoMs)
         val s = f.start(g, EngineTestSupport.context(tuneId = 9), RecordingListener())
         now += 25_000
         writers.last.listener!!.onStopped(RecordStop.DISK_ERROR)

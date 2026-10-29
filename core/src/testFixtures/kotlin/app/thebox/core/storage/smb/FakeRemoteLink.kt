@@ -71,6 +71,8 @@ class FakeRemoteLink(
     @Volatile var writesDenied: Boolean = false
     /** Queue [post]ed work for [runPosted] instead of running it on the fake box-smb thread. */
     @Volatile var queuePosted: Boolean = false
+    /** (Q-E3) The keeper replaced this link: [share] and [reconnect] refuse at once (LINK_LOST), as `SmbjRemoteLink` does. */
+    @Volatile override var retired: Boolean = false
 
     // ---------------------------------------------------------------- state
     private val epochV = AtomicLong(1L)
@@ -133,6 +135,7 @@ class FakeRemoteLink(
     // ---------------------------------------------------------------- RemoteLink
     override fun share(deadlineMonoMs: Long): RemoteShare {
         count("share")
+        if (retired) throw FakeTransportException("retired")
         while (!ready) {
             if (clock.nowMs() >= deadlineMonoMs) throw IOException("UNREACHABLE")
             sleepSlice()
@@ -143,6 +146,7 @@ class FakeRemoteLink(
 
     override fun reconnect(failedEpoch: Long, deadlineMonoMs: Long): RemoteShare {
         count("reconnect")
+        if (retired) throw FakeTransportException("retired")
         synchronized(reconnectLock) {
             if (epoch > failedEpoch && transportUp) return FakeRemoteShare(epoch) // single flight: someone already reconnected
             val until = clock.nowMs() + reconnectLatencyMs
@@ -245,7 +249,7 @@ class FakeRemoteLink(
 
         override fun freeBytes(): Long {
             io("freeBytes", epoch)
-            return if (capacityLimit == Long.MAX_VALUE) Long.MAX_VALUE / 4 else (capacityLimit - usedBytes()).coerceAtLeast(0L)
+            return if (capacityLimit == Long.MAX_VALUE) UNKNOWN_FREE_BYTES else (capacityLimit - usedBytes()).coerceAtLeast(0L)
         }
 
         override fun lastWriteMs(path: String): Long {

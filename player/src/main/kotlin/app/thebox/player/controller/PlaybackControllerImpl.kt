@@ -466,6 +466,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         cancelPendingZap()
         val identity = (target as? TuneTarget.Channel)?.identity
         if (identity != null && refused(identity, isArchive = false)) return
+        if (viewport == Viewport.MINI) previewStarted()
         startCycle(Spec.Live(target))
     }
 
@@ -2008,6 +2009,7 @@ internal class PlaybackControllerImpl @Inject constructor(
     override fun setViewport(viewport: Viewport) {
         if (this.viewport == viewport) return
         this.viewport = viewport
+        if (viewport == Viewport.MINI && cycle != null) previewStarted()
         eng?.parts?.displayMode?.onViewport(viewport)
         applyVideoTrackState()
     }
@@ -2240,6 +2242,24 @@ internal class PlaybackControllerImpl @Inject constructor(
     }
 
     // ------------------------------------------------------------------ time-shift (M6, docs/design/m6-timeshift.md §6, §7)
+
+    /**
+     * (Storage locations §5.3; Q-D1 / lead ruling R2, closure fix pass 2026-10-28) The guide's preview started (a live tune
+     * in MINI, or MINI over a running cycle): the save location's keeper trigger and `.wake` write, so a NAS disk spins up
+     * before the viewer pauses. On IO, never the zap path: the factory may resolve its target source there.
+     */
+    private fun previewStarted() {
+        if (timeshift === NoTimeshiftFactory) return
+        scope.launch(ioDispatcher) {
+            try {
+                timeshift.warmSaveLocation()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                BoxLog.w(TAG, "save-location warm failed: ${e.javaClass.simpleName}")
+            }
+        }
+    }
 
     private fun readerTelemetry(): RingReaderTelemetry? = session?.telemetry as? RingReaderTelemetry
 
@@ -3051,7 +3071,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         // UX-S1: the cycle id lets the consumer tell a new cycle on the same identity from the same one.
         val out = snap.copy(identity = c.identity, atMonoMs = playheadMono(c) ?: snap.liveMonoMs, cycleId = c.cycleId)
         // (Storage locations WP-S2, §5.5) where this cycle saves, its fallback and failure, the folder's rates.
-        return (timeshift as? app.thebox.player.timeshift.TimeshiftSessionFactoryImpl)?.storageFields(ts.grant, out) ?: out
+        return timeshift.storageFields(ts.grant, out) // Q-H3 / R10: the seam's default keeps `out` as is
     }
 
     /** "Rewind: 18:20 saved of 30:00 · 1.1 GB" (A-S9, U-N3). */

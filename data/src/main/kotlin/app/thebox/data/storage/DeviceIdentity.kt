@@ -22,12 +22,7 @@ class DeviceIdentity(private val dir: File) {
             }
         } catch (_: Exception) { /* unreadable: make a new one */ }
         val fresh = generate()
-        try {
-            dir.mkdirs()
-            val tmp = File(dir, "$FILE_NAME.tmp")
-            tmp.writeText(fresh, Charsets.US_ASCII)
-            if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f) }
-        } catch (_: Exception) { /* not persisted: this process keeps the id */ }
+        try { writeTextAtomically(f, fresh) } catch (_: Exception) { /* not persisted: this process keeps the id */ } // Q-U7
         return fresh
     }
 

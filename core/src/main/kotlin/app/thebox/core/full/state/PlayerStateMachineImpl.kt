@@ -1436,28 +1436,15 @@ class PlayerStateMachineImpl(
         fallbackAskedCycle = info.cycleId
         fallbackAskedReason = reason
         if (effects.fallbackToastDue(info.locationId, reason)) {
-            effects.toast(PlayerToast.SAVE_LOCATION_FALLBACK, storageToastArg(kindOfLocation(info.locationId), reason.name, info.storageName, jumped = false))
+            // Q-U3: the one kind derivation and the one encoder.
+            effects.toast(PlayerToast.SAVE_LOCATION_FALLBACK, app.thebox.core.full.StorageToastArg(app.thebox.core.storage.storageKindOf(info.locationId), reason.name, info.storageName.orEmpty()).encode())
         }
     }
-
-    /** The kind of a location id (`vol-…` USB drive, `smb-…` network folder, else this device). */
-    private fun kindOfLocation(id: String): app.thebox.core.storage.StorageKind = when {
-        id.startsWith(app.thebox.core.storage.StorageConstants.VOLUME_ID_PREFIX) -> app.thebox.core.storage.StorageKind.VOLUME
-        id.startsWith(app.thebox.core.storage.StorageConstants.SMB_ID_PREFIX) -> app.thebox.core.storage.StorageKind.SMB
-        else -> app.thebox.core.storage.StorageKind.INTERNAL
-    }
-
-    /**
-     * (§10) `"<StorageKind>␟<second>␟<name>␟<jumped 1|>"`: [second] is the LocationFallback name for
-     * SAVE_LOCATION_FALLBACK and the StorageFailure name (or "") for the REWIND_STOPPED_* / PAUSE_NO_REWIND_STORAGE kinds.
-     */
-    private fun storageToastArg(kind: app.thebox.core.storage.StorageKind, second: String?, name: String?, jumped: Boolean): String =
-        listOf(kind.name, second.orEmpty(), name.orEmpty(), if (jumped) "1" else "").joinToString(PLAYER_TOAST_ARG_SEP.toString())
 
     /** (§10) The arg of a storage-stop toast: null (today's internal text) when this cycle saved on this device. */
     private fun storageStopArg(b: LocalBufferInfo?): String? =
         if (b == null || b.storage == app.thebox.core.storage.StorageKind.INTERNAL) null
-        else storageToastArg(b.storage, b.storageFailure?.name, b.storageName, jumped = false)
+        else app.thebox.core.full.StorageToastArg(b.storage, b.storageFailure?.name.orEmpty(), b.storageName.orEmpty()).encode()
 
     /** (Fix pass, WP-D question) A key that zaps at once from here: CH±, Last, or Up/Down under "Change channel". */
     private fun singleKeyZap(a: GuideEvent.Act): Boolean = when (a.action) {

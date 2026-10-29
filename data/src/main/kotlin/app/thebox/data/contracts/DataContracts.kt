@@ -1,6 +1,8 @@
 package app.thebox.data.contracts
 
+import app.thebox.core.common.CredentialFailure
 import app.thebox.core.common.Outcome
+import app.thebox.core.common.SourceError
 import app.thebox.core.model.TimeBase
 import app.thebox.core.xtream.XtreamAccountInfo
 import app.thebox.core.xtream.XtreamEpgListing
@@ -95,6 +97,16 @@ interface SecureBlobStore {
     suspend fun putBlob(ref: String, bytes: ByteArray): Outcome<Unit>
     suspend fun getBlob(ref: String): Outcome<ByteArray>
     suspend fun deleteBlob(ref: String)
+
+    /**
+     * (Save-location closure fix pass 2026-10-28, Q-E2; additive) Whether a blob is stored under [ref], **without
+     * decrypting it** where the store can tell (`TinkCredentialStore` reads the row only). The default decrypts through
+     * [getBlob] and zeroes the copy; a transient failure (UNAVAILABLE) counts as present, as nothing was deleted.
+     */
+    suspend fun hasBlob(ref: String): Boolean = when (val r = getBlob(ref)) {
+        is Outcome.Ok -> { r.value.fill(0); true }
+        is Outcome.Err -> (r.error as? SourceError.Credentials)?.reason == CredentialFailure.UNAVAILABLE
+    }
 
     companion object {
         /** Reserved refs (never "cred-…", so they cannot collide with playlist secrets). */
