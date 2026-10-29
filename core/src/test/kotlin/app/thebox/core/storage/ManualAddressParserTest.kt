@@ -6,10 +6,13 @@ import app.thebox.core.storage.ManualAddressParser.Result.Parsed
 import kotlin.test.Test
 import kotlin.test.assertEquals
 
-/** §16.1 `ManualAddressParserTest` (WP-S1): every §7.2 form and the errors. WP-S6's app.js runs the same [VECTORS]. */
+/**
+ * §16.1 `ManualAddressParserTest` (WP-S1): every §7.2 form and the errors. The phone page's mirror in app.js is checked
+ * through `PhoneApiNetworkFolderTest.SPLIT_VECTORS` (its three fields, [ManualAddressParser.parseFields]).
+ */
 class ManualAddressParserTest {
     companion object {
-        /** input → expected result. Shared with the phone page's mirror (PhoneApiTest fixtures, WP-S6). */
+        /** input → expected result. */
         val VECTORS: List<Pair<String, ManualAddressParser.Result>> = listOf(
             "nas" to Parsed("nas"),
             "  nas  " to Parsed("nas"),
@@ -46,12 +49,45 @@ class ManualAddressParserTest {
             "nas..local" to Invalid(Reason.BAD_HOST),
             "fe80::1" to Invalid(Reason.BAD_HOST),
             "smb://nas/%zz" to Invalid(Reason.BAD_HOST),
+            // C-N4 (closure fix pass, R3): `.` dropped, `..` and control characters refused, IPv6 refused, names
+            // start and end with a letter or digit, strict `%XX`.
+            "\\\\nas\\TV\\.\\Rewind" to Parsed("nas", share = "TV", path = "Rewind"),
+            "\\\\nas\\.\\TV" to Parsed("nas", share = "TV"),
+            "smb://nas/Caf%C3%A9/./Live" to Parsed("nas", share = "Café", path = "Live"),
+            "\\\\nas\\TV\\..\\x" to Invalid(Reason.BAD_PATH),
+            "nas/.." to Invalid(Reason.BAD_PATH),
+            "smb://nas/TV/%2e%2e" to Invalid(Reason.BAD_PATH),
+            "smb://nas/TV/%00" to Invalid(Reason.BAD_PATH),
+            "smb://nas/TV/a%0Ab" to Invalid(Reason.BAD_PATH),
+            "nas/TV/a\u0001b" to Invalid(Reason.BAD_PATH),
+            "nas/TV/Re\twind" to Invalid(Reason.BAD_PATH),
+            "nas/TV/a\u007Fb" to Invalid(Reason.BAD_PATH),
+            "[fe80::1]" to Invalid(Reason.BAD_HOST),
+            "[fe80::1]:445/TV" to Invalid(Reason.BAD_HOST),
+            "-nas" to Invalid(Reason.BAD_HOST),
+            "nas-" to Invalid(Reason.BAD_HOST),
+            "smb://nas/%+1" to Invalid(Reason.BAD_HOST),
+            "smb://nas/%4" to Invalid(Reason.BAD_HOST),
+            "bad host/../x" to Invalid(Reason.BAD_HOST),
         )
     }
 
     @Test
     fun everyVector() {
         for ((input, expected) in VECTORS) assertEquals(expected, ManualAddressParser.parse(input), "input \"$input\"")
+    }
+
+    /** The phone page's three fields (§7.4): the same grammar, a folder without a share refused. */
+    @Test
+    fun theThreeFieldsFollowTheSameRules() {
+        assertEquals(Parsed("nas", share = "TV", path = "Rewind/Box"), ManualAddressParser.parseFields("nas", "TV\\Rewind", "Box"))
+        assertEquals(Parsed("NAS2", share = "TV", path = "Rewind/Box"), ManualAddressParser.parseFields("nas", "\\\\NAS2\\TV\\Rewind", "Box"))
+        assertEquals(Parsed("nas", 4445, share = "TV"), ManualAddressParser.parseFields("smb://nas:4445/Old/x", "TV", null))
+        assertEquals(Invalid(Reason.BAD_PATH), ManualAddressParser.parseFields("nas", null, "Rewind"))
+        assertEquals(Invalid(Reason.BAD_PATH), ManualAddressParser.parseFields("nas", "TV", "a/../b"))
+        assertEquals(Invalid(Reason.BAD_PATH), ManualAddressParser.parseFields("nas", "TV\u0000", null))
+        assertEquals(Invalid(Reason.BAD_HOST), ManualAddressParser.parseFields("[fe80::1]:445", "TV", null))
+        assertEquals(Invalid(Reason.EMPTY), ManualAddressParser.parseFields("", "TV", null))
     }
 
     @Test

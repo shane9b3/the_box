@@ -137,6 +137,9 @@
     <string name="storage_test_progress_mb">%1$s of %2$s MB</string>
     <string name="storage_test_stop">Stop test</string>
     <string name="storage_test_stopped">Test stopped. Nothing was saved.</string>
+    <!-- C-N7 (closure fix pass): the Test hit its whole-run deadline. -->
+    <string name="storage_test_took_too_long">Stopped: %1$s took too long.</string>
+    <string name="storage_test_took_too_long_step">Try again, or choose another folder. A wired connection to %1$s helps.</string>
     <string name="storage_test_again">Test again</string>
     <string name="storage_verdict_step_good_4k">%1$s free on %2$s.</string>
     <string name="storage_verdict_step_good_hd">4K channels may stop saving now and then. A wired connection to %1$s helps.</string>

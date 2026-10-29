@@ -104,7 +104,9 @@ data class TimeshiftStorageFacts(val totalBytes: Long, val availableBytes: Long,
  * [label] is the value's form ("This device", "NAS", "USB drive"), [sentence] the form after "on" ("this device",
  * "NAS", "the USB drive"). [facts] are a non-internal place's free bytes (null = unknown). [offlineName] is the chosen
  * place's name while the cycle saves on this device instead ("NAS offline", amber); [problem] is why (the Save to
- * description). A blank [label] adds no place to the link's value.
+ * description). A blank [label] adds no place to the link's value. [failure] (O-6, closure fix pass; additive) is why a
+ * DEMOTED folder was demoted when the keeper knows it (`LocationStatus.failure`: a ring file refused as ACCESS, FULL or
+ * REMOVED), so the page names that reason instead of "kept dropping out".
  */
 data class TimeshiftPlace(
     val kind: StorageKind = StorageKind.INTERNAL,
@@ -113,6 +115,7 @@ data class TimeshiftPlace(
     val facts: TimeshiftStorageFacts? = null,
     val offlineName: String? = null,
     val problem: LocationState? = null,
+    val failure: app.thebox.core.storage.StorageFailure? = null,
 ) {
     companion object { val DEVICE = TimeshiftPlace() }
 }
@@ -145,7 +148,7 @@ class WpaPages(
     override val notices: Flow<String> get() = _notices
 
     override fun handles(route: SettingsRoute): Boolean =
-        // (WP-S4) PauseRewind is StoragePages' page now; [build] still builds it (device place) for the contract tests.
+        // (WP-S4) PauseRewind is StoragePages' page (Q-D8, closure fix pass: the only route to it).
         route is SettingsRoute.Section && route.id in SECTIONS
 
     override val changes: Flow<Unit>
@@ -162,12 +165,6 @@ class WpaPages(
 
     /** Builds [route]'s page synchronously (tests and [page]). */
     fun build(route: SettingsRoute, advanced: Boolean): PageModel {
-        // (Storage locations commit 0, docs/design/m6-storage-locations.md §9.1) The time-shift rows' sub-page, until
-        // WP-S4 moves it to StoragePages (Rewind length, Save to and the texts are WP-S4's).
-        if (route == SettingsRoute.PauseRewind) {
-            val rows = timeshiftRows(store.flow(PlaybackDomain).value).filter { advanced || it.visibility == Visibility.SIMPLE }
-            return PageModel(route = route, title = t(SettingsText.PB_TIMESHIFT), rows = rows, version = version.incrementAndGet())
-        }
         val id = (route as SettingsRoute.Section).id
         val rows = when (id) {
             SectionId.GUIDE -> guideRows()
@@ -338,15 +335,25 @@ class WpaPages(
     private fun pauseRewindLink(p: PlaybackPrefs): SettingsRow {
         val place = places.current()
         val length = timeshiftRows(p, place).first { it.id == PauseRewindRows.TIMESHIFT }.value.orEmpty()
+        val offline = place.offlineName?.let(::linkName)
+        // O-6 (closure fix pass): a folder demoted because it refused the ring file (ACCESS) falls back as "sign in"
+        // (StorageTargetsImpl: ACCESS → SIGN_IN_NEEDED), so the link says the same as the toast.
+        val signIn = place.problem == app.thebox.core.storage.LocationState.SIGN_IN_NEEDED ||
+            (place.problem == app.thebox.core.storage.LocationState.DEMOTED && place.failure == app.thebox.core.storage.StorageFailure.ACCESS)
         val value = when {
             p.timeshift == TimeshiftLength.OFF || place.label.isBlank() -> length
             // U-N2: a sign-in is not "offline"; the value says what is needed.
-            place.offlineName != null && place.problem == app.thebox.core.storage.LocationState.SIGN_IN_NEEDED ->
-                StorageMarks.warn(t(SettingsText.PB_PAUSE_REWIND_VALUE_SIGN_IN, length, place.offlineName))
-            place.offlineName != null -> StorageMarks.warn(t(SettingsText.PB_PAUSE_REWIND_VALUE_FALLBACK, length, place.offlineName))
-            else -> t(SettingsText.PB_PAUSE_REWIND_VALUE, length, place.label)
+            offline != null && signIn -> StorageMarks.warn(t(SettingsText.PB_PAUSE_REWIND_VALUE_SIGN_IN, length, offline))
+            offline != null -> StorageMarks.warn(t(SettingsText.PB_PAUSE_REWIND_VALUE_FALLBACK, length, offline))
+            else -> t(SettingsText.PB_PAUSE_REWIND_VALUE, length, linkName(place.label))
         }
         return link(PlaybackRows.PAUSE_REWIND, SettingsRoute.PauseRewind, t(SettingsText.PB_TIMESHIFT), t(SettingsText.PB_PAUSE_REWIND_DESC)).copy(value = value)
+    }
+
+    /** Q-D7 (closure fix pass): the place's name in the link's value is at most [StorageConstants.LABEL_LINK_MAX_CHARS], "…" last. */
+    private fun linkName(name: String): String {
+        val max = app.thebox.core.storage.StorageConstants.LABEL_LINK_MAX_CHARS
+        return if (name.length <= max) name else name.take(max - 1).trimEnd() + "…"
     }
 
     /**
@@ -365,11 +372,7 @@ class WpaPages(
     fun timeshiftRows(p: PlaybackPrefs, place: TimeshiftPlace = TimeshiftPlace.DEVICE): List<SettingsRow> {
         val internal = place.kind == StorageKind.INTERNAL
         val storage = if (internal) env.timeshiftStorage() else place.facts
-        val limits = when (place.kind) {
-            StorageKind.VOLUME, StorageKind.SAF_TREE -> StorageLimits.VOLUME
-            StorageKind.SMB -> StorageLimits.SMB
-            StorageKind.INTERNAL -> null
-        }
+        val limits = if (internal) null else StorageLimits.of(place.kind, 0L) // Q-U10: the contract's kind → limits
         val autoMs = if (limits != null) POLICY.lengthMs(TimeshiftLength.AUTO, 0L, limits)!!
         else storage?.let { POLICY.lengthMs(TimeshiftLength.AUTO, it.totalBytes) } ?: TimeshiftConstants.AUTO_LENGTH_SMALL_MS
         val autoSized = sized(autoMs, storage, limits)
@@ -770,7 +773,14 @@ class WpaPages(
             // C-L8: exactly what BoxDnsPolicy will use (a URL it would ignore must not read as "Custom").
             NetworkRows.CUSTOM_DOH to { s: String -> if (s.isBlank() || app.thebox.core.net.BoxDnsPolicy.isValidCustomUrl(s.trim())) null else texts[SettingsText.ERR_HTTPS] },
             // (WP-S4, storage locations §7.2) "Computer name or address" takes the forms ManualAddressParser accepts.
-            StoragePages.ROW_ENTER to { s: String -> if (StoragePages.validHost(s)) null else texts[SettingsText.ERR_HOST] },
+            // C-N4 (closure fix pass): a ".." folder or a control character has its own reason and next step.
+            StoragePages.ROW_ENTER to { s: String ->
+                when (StoragePages.hostProblem(s)) {
+                    null -> null
+                    app.thebox.core.storage.ManualAddressParser.Reason.BAD_PATH -> texts[SettingsText.ERR_HOST_PATH]
+                    else -> texts[SettingsText.ERR_HOST]
+                }
+            },
         )
 
         inline fun <reified E : Enum<E>> enumOf(name: String): E? = enumValues<E>().firstOrNull { it.name == name }

@@ -50,6 +50,8 @@
     <string name="settings_err_number_range">Enter a number from %1$d to %2$d.</string>
     <string name="settings_err_empty">This can\'t be empty. Type a value or choose Cancel.</string>
     <string name="settings_err_host">Enter a computer name or address, like nas, 192.168.1.20 or \\\\NAS\\TV\\Rewind.</string>
+    <!-- C-N4 (closure fix pass): the reason, then the next step. -->
+    <string name="settings_err_host_path">A folder in it is \"..\" or has a hidden character. Type the folder names only, like \\\\NAS\\TV\\Rewind.</string>
     <string name="settings_err_url">Enter a full address starting with http:// or https://.</string>
     <string name="settings_err_https">Secure DNS needs an address starting with https://.</string>
     <string name="settings_err_pattern">This pattern is not valid. Check the brackets and special characters.</string>

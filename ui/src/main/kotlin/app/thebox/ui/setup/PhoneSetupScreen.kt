@@ -41,6 +41,8 @@ const val PHONE_FOOTER_TAG = "phone_footer"
 const val PHONE_TYPE_ON_TV_TAG = "phone_type_on_tv"
 const val PHONE_CODE_TAG = "phone_code"
 const val PHONE_PLAIN_HTTP_TAG = "phone_plain_http"
+/** U-N1 (closure fix pass): the failed phone sign-in line of a NETWORK_FOLDER page. */
+const val PHONE_SIGN_IN_FAILED_TAG = "phone_sign_in_failed"
 
 /** Everything the phone screen draws (docs/design/m5-setup-settings.md §3.5.1). */
 data class PhoneSetupUi(
@@ -81,6 +83,11 @@ fun PhoneSetupScreen(ui: PhoneSetupUi, modifier: Modifier = Modifier) {
             Column(Modifier.offset(160.dp, 260.dp).width(1600.dp)) {
                 val reason = if (PhoneScreenModel.tooManySignIns(s, ui.purpose)) R.string.storage_phone_fail_sign_ins else failureOf(failure)
                 Line(stringResource(reason), GuideUi.sans(36, FontWeight.SemiBold, GuideUi.Warn), maxLines = 3)
+                // U-N1: after too many failed sign-ins, the last one's reason too.
+                PhoneScreenModel.failedSignIn(s, ui.purpose)?.let { text ->
+                    Spacer(Modifier.height(16.dp))
+                    Line(text, GuideUi.sans(26, color = GuideUi.Warn), Modifier.testTag(PHONE_SIGN_IN_FAILED_TAG), maxLines = 3)
+                }
                 Spacer(Modifier.height(24.dp))
                 Line(stringResource(R.string.backup_phone_back_hint), GuideUi.sans(26, color = GuideUi.Fg60))
             }
@@ -114,6 +121,10 @@ fun PhoneSetupScreen(ui: PhoneSetupUi, modifier: Modifier = Modifier) {
                 if (s.wrongCodes >= LanLimits.PAIR_MAX_WRONG) Line(stringResource(R.string.backup_phone_new_code), GuideUi.sans(24, color = GuideUi.Warn))
                 Spacer(Modifier.height(28.dp))
                 Line(statusText(s, ui.purpose), GuideUi.sans(26))
+                // U-N1 (closure fix pass): a failed phone sign-in shows on the TV too, in amber (reason + next step).
+                PhoneScreenModel.failedSignIn(s, ui.purpose)?.let { text ->
+                    Line(text, GuideUi.sans(24, color = GuideUi.Warn), Modifier.testTag(PHONE_SIGN_IN_FAILED_TAG), maxLines = 3)
+                }
                 if (folder && s.phase == ServerPhase.PAIRED) {
                     Line(stringResource(R.string.storage_phone_paired_hint), GuideUi.sans(22, color = GuideUi.Fg65), maxLines = 2)
                 }

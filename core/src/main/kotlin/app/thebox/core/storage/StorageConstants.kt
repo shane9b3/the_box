@@ -1,5 +1,6 @@
-// Contract (M6 storage locations commit 0): docs/design/m6-storage-locations.md Appendix A. Every number of the design is
-// a default that lives in one named constant here; tests assert against the names.
+// Contract (M6 storage locations commit 0): docs/design/m6-storage-locations.md Appendix A. Every number the code uses
+// is a default that lives in one named constant here. The §14 gate numbers (seek, allocation, APK budgets) live in the
+// design's gate table, not here (closure fix pass, R7: nothing read them).
 package app.thebox.core.storage
 
 import app.thebox.core.playback.timeshift.TimeshiftConstants
@@ -104,6 +105,13 @@ object StorageConstants {
     /** GOOD_* need rate ≥ this × the class rate; SLOW needs ≥ [TEST_SLOW_FACTOR] × [HD_BPS]. */
     const val TEST_GOOD_FACTOR = 3.0
     const val TEST_SLOW_FACTOR = 1.5
+    /**
+     * C-N7 (closure fix pass): the whole Test, from `TheBox-rewind/` to the free-space query, the first wake write
+     * excluded (it is timed as `wakeMs`). Checked between round trips, so one round trip may overrun it by its I/O
+     * timeout. The two rate phases take up to [TEST_WRITE_MS] + [TEST_READ_MS]; the rest leaves one I/O timeout for the
+     * folder, the create, the RTT samples and the close. Past it: "Stopped: NAS took too long."
+     */
+    const val TEST_RUN_MAX_MS = TEST_WRITE_MS + TEST_READ_MS + SMB_IO_TIMEOUT_MS
     /** "Use for rewind" re-runs the Test when `lastTest` is older than this (30 days; §9.2). */
     const val TEST_FRESH_MS = 2_592_000_000L
 
@@ -116,14 +124,6 @@ object StorageConstants {
     const val NBNS_TIMEOUT_MS = 600L
     const val REVERSE_DNS_TIMEOUT_MS = 800L
 
-    // ---------------------------------------------------------------- gates (§14)
-    const val SEEK_NETWORK_P50_MS = 800L
-    const val SEEK_NETWORK_P90_MS = 1_500L
-    /** Allocation rate, SMB steady at 1 MB/s. */
-    const val SMB_ALLOC_BPS_MAX = 3_000_000L
-    /** Release-APK deltas (S-2 records the measured values in §7.5). */
-    const val SMBJ_APK_BUDGET = 2_500_000L
-    const val SHARE_LISTER_APK_BUDGET = 1_500_000L
 }
 
 /** Feature switches decided by the spikes (§0a). */

@@ -265,6 +265,7 @@ class ResourceSettingsTexts(private val resources: Resources) : SettingsTexts {
         SettingsText.DOH_FALLBACK -> R.string.settings_doh_fallback
         SettingsText.EPG_MANUAL -> R.string.settings_epg_manual
         SettingsText.EPG_TVG_ID -> R.string.settings_epg_tvg_id
+        SettingsText.ERR_HOST_PATH -> R.string.settings_err_host_path // C-N4
         }
     }
 }

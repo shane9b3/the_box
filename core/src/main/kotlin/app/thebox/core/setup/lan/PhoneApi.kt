@@ -5,6 +5,8 @@ import app.thebox.core.common.Redact
 import app.thebox.core.settings.PhonePurpose
 import app.thebox.core.setup.M3uForm
 import app.thebox.core.setup.XtreamForm
+import app.thebox.core.storage.ManualAddressParser
+import app.thebox.core.storage.StorageConstants
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
@@ -183,6 +185,8 @@ class PhoneApi(
                 "folder",
                 buildJsonObject {
                     put("host", c?.host)
+                    // SEC-S3: the computer's name, for display only; the page sends [PhoneContext.host] back.
+                    put("name", c?.name)
                     put("share", c?.share)
                     put("shares", JsonArray(c?.shares.orEmpty().take(FOLDER_SHARES_MAX).map(::JsonPrimitive)))
                 },
@@ -473,59 +477,20 @@ class PhoneApi(
         fun maskUser(user: String): String = if (user.length <= 2) "***" else user.take(2) + "***"
 
         /**
-         * The phone page's three fields to one folder (§7.4 item 2; mirrored by `splitFolder` in `app.js`, the same
-         * vectors in `PhoneApiNetworkFolderTest`). A `\\host\share\path`, `//host/share/path` or `smb://host/share/path`
-         * pasted into Computer or Shared folder replaces the computer and the shared folder, and its rest goes before
-         * Folder inside it; a share typed as `TV\Rewind` is split the same way. Separators become `/`; empty and `.`
-         * segments go. Null when the computer is missing or not a plain `name[:port]`, a path is given without a share,
-         * a segment is `..`, or a part is too long. [Folder.host] keeps its `:port`.
+         * The phone page's three fields to one folder (§7.4 item 2). The grammar is [ManualAddressParser]'s (its
+         * `parseFields`; closure fix pass, R3: one owner), mirrored by `parseFields`/`splitFolder` in `app.js` and checked
+         * with the same vectors in `PhoneApiNetworkFolderTest`. This adds only the length caps. Null when the parser
+         * refuses the fields (no computer, IPv6, a `..` or a control character, a path without a share) or a part is
+         * too long. [Folder.host] carries `:port` when it is not 445.
          */
         fun splitFolder(host: String?, share: String?, path: String?): Folder? {
-            var h = host?.trim().orEmpty()
-            var shareParts = emptyList<String>()
-            uncParts(h)?.let { u ->
-                h = u.first()
-                shareParts = u.drop(1)
-            }
-            val s = share?.trim().orEmpty()
-            val us = uncParts(s)
-            if (us != null) {
-                h = us.first()
-                shareParts = us.drop(1)
-            } else if (s.isNotEmpty()) {
-                shareParts = segments(s)
-            }
-            val sh = shareParts.firstOrNull()
-            val pathParts = shareParts.drop(1) + segments(path)
-            if (h.isEmpty() || h.length > FOLDER_HOST_MAX || !HOST_OK.matches(h)) return null
-            val port = PORT.find(h)?.groupValues?.get(1)
-            if (port != null && (port.toIntOrNull() ?: 0) !in 1..65535) return null
-            if (sh == null && pathParts.isNotEmpty()) return null
-            if (sh == ".." || ".." in pathParts) return null
-            // C-N4: a control character (a decoded %00, a newline) is never part of a share or folder name.
-            if ((listOfNotNull(sh) + pathParts).any { part -> part.any { it < ' ' || it == '\u007F' } }) return null
-            if (sh != null && sh.length > FOLDER_SHARE_MAX) return null
-            val p = pathParts.joinToString("/").ifEmpty { null }
-            if (p != null && p.length > FOLDER_PATH_MAX) return null
-            return Folder(h, sh, p)
+            val p = ManualAddressParser.parseFields(host, share, path) as? ManualAddressParser.Result.Parsed ?: return null
+            val h = if (p.port == StorageConstants.SMB_DEFAULT_PORT) p.host else "${p.host}:${p.port}"
+            if (h.length > FOLDER_HOST_MAX) return null
+            if (p.share != null && p.share.length > FOLDER_SHARE_MAX) return null
+            if (p.path.length > FOLDER_PATH_MAX) return null
+            return Folder(h, p.share, p.path.ifEmpty { null })
         }
-
-        /** `\\a\b\c`, `//a/b/c` or `smb://a/b/c` → [a, b, c]; null when [s] is none of these. */
-        private fun uncParts(s: String): List<String>? {
-            val rest = when {
-                s.startsWith("\\\\") || s.startsWith("//") -> s.substring(2)
-                s.startsWith("smb://", ignoreCase = true) -> s.substring(6)
-                else -> return null
-            }
-            return segments(rest).takeIf { it.isNotEmpty() }
-        }
-
-        private fun segments(s: String?): List<String> =
-            s.orEmpty().split('/', '\\').map { it.trim() }.filter { it.isNotEmpty() && it != "." }
-
-        /** A name or an IPv4 address, or a bracketed IPv6 address, with an optional port. */
-        private val HOST_OK = Regex("""^(?:[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+])(?::[0-9]{1,5})?$""")
-        private val PORT = Regex(""":([0-9]{1,5})$""")
 
         const val CSP = "default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'self'; " +
             "form-action 'self'; frame-ancestors 'none'"

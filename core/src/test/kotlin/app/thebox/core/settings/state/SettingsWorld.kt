@@ -154,7 +154,7 @@ class SettingsWorld(
     val wpa = WpaPages(store, SettingsTexts.KEYS, env, places = places)
     val storage = StoragePages(
         store, SettingsTexts.KEYS, StorageTexts.KEYS, wpa, env, places, locations, foldersWrap(folders), volumes, phoneLink, storageEnv,
-        CoroutineScope(Dispatchers.Unconfined), parse = ::stubParse, reapGraceMs = 0L,
+        CoroutineScope(Dispatchers.Unconfined), reapGraceMs = 0L,
     )
     val fixtures = FixturePages()
     val machine = SettingsMachineImpl(effects, { now }, SettingsTexts.KEYS, HintValidator(SettingsTexts.KEYS, WpaPages.rowRules(SettingsTexts.KEYS)))

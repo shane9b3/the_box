@@ -42,4 +42,15 @@ object PhoneScreenModel {
     fun tooManySignIns(state: LanServerState, purpose: app.thebox.core.settings.PhonePurpose): Boolean =
         purpose == app.thebox.core.settings.PhonePurpose.NETWORK_FOLDER && state.phase == ServerPhase.FAILED &&
             state.failure == LanFailure.TOO_MANY_WRONG_CODES && state.pairedFrom != null
+
+    /**
+     * (U-N1 display, closure fix pass) The text of the last failed phone sign-in of a NETWORK_FOLDER session (the reason
+     * and next step the phone shows), for the TV to draw in amber under its status line; null when the last one worked,
+     * none was reported, or the phone just sent again (the TV is signing in).
+     */
+    fun failedSignIn(state: LanServerState, purpose: app.thebox.core.settings.PhonePurpose): String? =
+        state.lastSignInStatus?.takeIf {
+            purpose == app.thebox.core.settings.PhonePurpose.NETWORK_FOLDER && state.lastSignInOk == false &&
+                state.phase != ServerPhase.RECEIVED && it.isNotBlank()
+        }
 }

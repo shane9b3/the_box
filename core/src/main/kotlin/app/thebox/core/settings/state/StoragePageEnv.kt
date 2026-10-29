@@ -223,6 +223,9 @@ enum class StorageText {
     ERR_FULL,
     ERR_FULL_STEP,
     // U-B1: ERR_GENERIC ("Something went wrong with NAS.") is gone; NOT_FOUND and LIST_FAILED have their own texts.
+    // ---- C-N7 (closure fix pass): the Test hit its whole-run deadline (TestStopReason.TOOK_TOO_LONG)
+    TEST_TOOK_TOO_LONG,
+    TEST_TOOK_TOO_LONG_STEP,
 }
 
 fun interface StorageTexts {
@@ -272,6 +275,7 @@ class TimeshiftPlaces(
             kind = kind, label = name, sentence = sentence,
             facts = free?.let { TimeshiftStorageFacts(totalBytes = it, availableBytes = it) },
             offlineName = if (offline) name else null, problem = state.takeIf { offline },
+            failure = status?.failure?.takeIf { state == app.thebox.core.storage.LocationState.DEMOTED }, // O-6
         )
     }
 }

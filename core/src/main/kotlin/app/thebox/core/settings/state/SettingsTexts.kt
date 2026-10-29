@@ -266,6 +266,8 @@ enum class SettingsText {
     DOH_FALLBACK,
     EPG_MANUAL,
     EPG_TVG_ID,
+    /** C-N4 (closure fix pass): "Enter a name or address" with a `..` folder or a control character. */
+    ERR_HOST_PATH,
 }
 
 fun interface SettingsTexts {

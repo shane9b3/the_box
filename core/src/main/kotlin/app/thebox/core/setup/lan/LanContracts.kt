@@ -2,6 +2,7 @@
 package app.thebox.core.setup.lan
 
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.filterIsInstance
 
 /** What the phone sent (validated by the server before it reaches the TV UI). */
 sealed interface PhoneSubmission {
@@ -34,8 +35,12 @@ sealed interface PhoneSubmission {
 /**
  * (Storage locations commit 0, §7.4) What the TV already knows when a NETWORK_FOLDER phone page starts: the host, the
  * share and the listed shares (the page's `<select>`). **Never a credential.**
+ *
+ * SEC-S3 (closure fix pass): [host] is the address the TV will sign in to (`host[:port]`, the picked IP for a found
+ * computer); the page sends it back unchanged unless the viewer edits it. [name] (additive) is the computer's name or the
+ * location's label, for display only: it is never sent back as the host.
  */
-data class PhoneContext(val host: String?, val share: String?, val shares: List<String>)
+data class PhoneContext(val host: String?, val share: String?, val shares: List<String>, val name: String? = null)
 
 /** (Storage locations commit 0, §7.4) `StoragePages` answers it for a browse token (WP-S4); null = nothing known. */
 fun interface PhoneContextProvider { fun context(browse: Long): PhoneContext? }
@@ -75,6 +80,22 @@ interface PhoneLink {
     fun offerDownload(name: String, path: String, contentType: String)
     /** The TV's answer shown on the phone page ("Checking…", "Added 2,140 channels", or the failure card text). */
     fun reportStatus(text: String, done: Boolean)
+
+    /**
+     * (C-N5, closure fix pass; additive) The NETWORK_FOLDER submissions. While this flow is collected, a NETWORK_FOLDER
+     * session accepts the phone's submission; with no such collector it answers 503 (another collector of [submissions]
+     * no longer counts). A submission that no collector of this flow took is zeroed when the session stops. The default
+     * asks [submissions] when it is a [NetworkFolderSubmissions] (`LanPhoneLink`'s, also behind `:data`'s wrapper), else
+     * it filters it (fakes).
+     */
+    fun networkFolderSubmissions(): kotlinx.coroutines.flow.Flow<PhoneSubmission.NetworkFolder> =
+        (submissions as? NetworkFolderSubmissions)?.networkFolders() ?: submissions.filterIsInstance()
+}
+
+/** (C-N5) A submissions flow that knows its NETWORK_FOLDER collectors ([PhoneLink.networkFolderSubmissions]). */
+interface NetworkFolderSubmissions : kotlinx.coroutines.flow.Flow<PhoneSubmission> {
+    /** Collecting it registers a NETWORK_FOLDER receiver until the collection ends; each item is marked taken. */
+    fun networkFolders(): kotlinx.coroutines.flow.Flow<PhoneSubmission.NetworkFolder>
 }
 
 /** Pure server core (`LanHttpServerImpl`), testable with FakeLanTransport. */

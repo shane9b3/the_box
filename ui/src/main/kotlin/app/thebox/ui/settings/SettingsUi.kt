@@ -129,7 +129,8 @@ object SettingsUi {
     fun isMonoValue(v: String): Boolean =
         v.isNotEmpty() && (MONO.matches(v) || v.contains("://") || HOST.matches(v) || v.startsWith("\\\\") || PROGRESS.matches(v) || DETAILS.matches(v))
     private val MONO = Regex("^[0-9 :.,/+−\\-–%]+[a-z]{0,3}$")
-    private val PROGRESS = Regex("^[0-9]+ \\S+ [0-9]+ MB$")
+    /** "9 of 16 MB" (the two numbers are groups 1 and 2, [progressFraction]). */
+    private val PROGRESS = Regex("^([0-9]+) \\S+ ([0-9]+) MB$")
     private val DETAILS = Regex("^[0-9.]+ MB/s · [0-9]+ ms · .+$")
     private val HOST = Regex("^[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)+(:[0-9]+)?$")
 
@@ -143,13 +144,12 @@ object SettingsUi {
     const val PROGRESS_ROW_H = 104
     /** Three dots (6 px, 3 px apart: 24 px wide) at the row's right, alpha .3 → 1, 400 ms per dot. */
     const val DOT_SIZE = 6; const val DOT_GAP = 3; const val DOT_MS = 400
-    const val DOTS_RIGHT_X = 1220
     /** An Info row of `storage.*` with next-step lines: one line each under the label (§7.7, §9.4: no clipped next step). */
     const val STORAGE_INFO_LINE_H = 28
 
     /** "9 of 16 MB" → 0.5625; null when it is not a progress value. */
     fun progressFraction(value: String?): Float? {
-        val m = value?.let { Regex("^([0-9]+) \\S+ ([0-9]+) MB$").matchEntire(it) } ?: return null
+        val m = value?.let { PROGRESS.matchEntire(it) } ?: return null // Q-U9, Q-E4: compiled once
         val done = m.groupValues[1].toFloat()
         val total = m.groupValues[2].toFloat()
         return if (total > 0f) (done / total).coerceIn(0f, 1f) else null

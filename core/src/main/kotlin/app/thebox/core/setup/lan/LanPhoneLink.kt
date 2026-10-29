@@ -11,10 +11,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterIsInstance
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.onSubscription
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import java.io.File
 import java.io.IOException
+import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * [PhoneLink] over [LanHttpServerImpl] + [PairingSession] + [PhoneApi] (docs/design/m5-setup-settings.md §3.5), pure
@@ -41,7 +45,35 @@ class LanPhoneLink(
     private val _state = MutableStateFlow(LanServerState(ServerPhase.CLOSED))
     override val state: StateFlow<LanServerState> = _state.asStateFlow()
     private val _submissions = MutableSharedFlow<PhoneSubmission>(extraBufferCapacity = 16)
-    override val submissions: Flow<PhoneSubmission> = _submissions.asSharedFlow()
+    override val submissions: Flow<PhoneSubmission> = Submissions()
+
+    /** C-N5: collectors of [networkFolderSubmissions] (StoragePages' `phoneJob`); a NETWORK_FOLDER session accepts only with one. */
+    private val folderReceivers = AtomicInteger(0)
+    /** C-N5: NETWORK_FOLDER submissions handed to the flow that no receiver took yet; [stop] zeroes their passwords. */
+    private val untaken: MutableSet<PhoneSubmission.NetworkFolder> = java.util.Collections.newSetFromMap(java.util.IdentityHashMap())
+
+    private inner class Submissions : NetworkFolderSubmissions, Flow<PhoneSubmission> by _submissions.asSharedFlow() {
+        override fun networkFolders(): Flow<PhoneSubmission.NetworkFolder> = flow {
+            var registered = false
+            try {
+                // Registered once the subscription exists, so nothing accepted in between can be missed.
+                _submissions.onSubscription { folderReceivers.incrementAndGet(); registered = true }
+                    .filterIsInstance<PhoneSubmission.NetworkFolder>()
+                    .collect { sub -> if (take(sub)) emit(sub) }
+            } finally {
+                if (registered) folderReceivers.decrementAndGet()
+            }
+        }
+    }
+
+    /** True for the first receiver of [sub] (it now owns the password); false when another one took it. */
+    private fun take(sub: PhoneSubmission.NetworkFolder): Boolean = synchronized(lock) { untaken.remove(sub) }
+
+    /** C-N5: a NETWORK_FOLDER submission nobody took still holds the only copy of its password: zero it. */
+    private fun zeroUntaken() = synchronized(lock) {
+        untaken.forEach { it.password?.fill('\u0000') }
+        untaken.clear()
+    }
 
     /** Fixed port for tests and the debug route (`thebox-debug://phone?port=N`); null = [LanLimits.PHONE_PORT_PREFERRED]. */
     @Volatile var portOverride: Int? = null
@@ -95,9 +127,15 @@ class LanPhoneLink(
             spoolDir.mkdirs()
             // D-L4: a submission nobody collects is refused (503) instead of being dropped after a 202.
             // WP-S6 (§7.4): one session = one browse context; a new context is a new start (new server, new code).
+            // C-N5 (closure fix pass): a NETWORK_FOLDER session counts only its own receivers, not any collector.
+            val canAccept: () -> Boolean = if (purpose == PhonePurpose.NETWORK_FOLDER) {
+                { folderReceivers.get() > 0 }
+            } else {
+                { _submissions.subscriptionCount.value > 0 }
+            }
             val a = PhoneApi(
                 s, purpose, hostPort, assets, spoolDir, freeBytes, onSubmission = ::submitted,
-                canAccept = { _submissions.subscriptionCount.value > 0 },
+                canAccept = canAccept,
                 folderContext = if (purpose == PhonePurpose.NETWORK_FOLDER) context else null,
             )
             for ((name, offer) in carried) a.offerDownload(name, offer.first, offer.second)
@@ -123,11 +161,13 @@ class LanPhoneLink(
      * scheduled ends ([LanLimits.DONE_GRACE_MS]). It accepts no submission in that time (410).
      */
     override fun stop() {
+        zeroUntaken() // C-N5: the screen is gone, so nobody will take it now
         val linger = synchronized(lock) { server != null && purpose == PhonePurpose.NETWORK_FOLDER && api?.folderFinished == true }
         if (!linger) stopNow()
     }
 
     private fun stopNow() {
+        zeroUntaken()
         val srv: LanHttpServerImpl?
         synchronized(lock) {
             srv = server
@@ -203,6 +243,7 @@ class LanPhoneLink(
 
     private fun submitted(s: PhoneSubmission) {
         received = true
+        if (s is PhoneSubmission.NetworkFolder) synchronized(lock) { untaken += s } // C-N5: until a receiver takes it
         publish()
         if (!_submissions.tryEmit(s)) BoxLog.w(TAG, "submission dropped: no collector kept up")
     }

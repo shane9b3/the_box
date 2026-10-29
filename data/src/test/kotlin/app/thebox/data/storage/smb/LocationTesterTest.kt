@@ -5,6 +5,7 @@ import app.thebox.core.storage.StorageConstants
 import app.thebox.core.storage.StorageFailure
 import app.thebox.core.storage.TestPhase
 import app.thebox.core.storage.TestProgress
+import app.thebox.core.storage.TestStopReason
 import app.thebox.core.storage.TestVerdict
 import app.thebox.core.storage.smb.FakeRemoteLink
 import org.junit.Assert.assertEquals
@@ -80,6 +81,35 @@ class LocationTesterTest {
             assertEquals(StorageFailure.FULL, r.error!!.failure)
             assertNotNull(r.error!!.needBytes)
         }
+    }
+
+    /** C-N7 (closure fix pass): past the whole-run deadline the Test stops itself, says why, and leaves no test file. */
+    @Test fun aTestPastItsDeadlineStopsItselfAsTookTooLong() {
+        val link = FakeRemoteLink()
+        val share = link.share(far); share.mkdirs("Rewind")
+        link.latencyMs = 40
+        val t = LocationTester(link.clock, "abcdef012345", 77, { link.classify(it).cls }, wifi = true, nowWallMs = { 42L }, runMaxMs = 300)
+        val t0 = System.nanoTime()
+        val r = t.run(share, "Rewind") {}
+        val ms = (System.nanoTime() - t0) / 1_000_000
+        assertEquals(TestVerdict.FAILED, r.verdict)
+        assertEquals(TestStopReason.TOOK_TOO_LONG, r.stop)
+        assertEquals(null, r.error)
+        assertTrue("bounded by the deadline, not by the 6 s phases: $ms ms", ms < 2_000)
+        Thread.sleep(100) // the posted close
+        assertFalse("the test file went with the close", share.list("Rewind/TheBox-rewind", 100).any { it.name.startsWith("test-") })
+    }
+
+    /** C-N7: the wake write is timed on its own and never counts against the deadline. */
+    @Test fun theDeadlineLeavesTheWakeOut() {
+        val link = FakeRemoteLink()
+        val share = link.share(far); share.mkdirs("Rewind")
+        // A disk that takes 1.5 s to wake, against a 1 s run: the wake alone would pass the deadline.
+        link.stallCallsUntil("open:Rewind/TheBox-rewind/.wake", link.clock.nowMs() + 1_500)
+        val r = LocationTester(link.clock, "abcdef012345", 77, { link.classify(it).cls }, wifi = true, nowWallMs = { 42L }, runMaxMs = 1_000).run(share, "Rewind") {}
+        assertEquals(null, r.stop)
+        assertEquals(TestVerdict.GOOD_4K, r.verdict)
+        assertTrue("wake ${r.wakeMs} ms", r.wakeMs >= 1_400)
     }
 
     @Test fun stopTestInterrupts() {
