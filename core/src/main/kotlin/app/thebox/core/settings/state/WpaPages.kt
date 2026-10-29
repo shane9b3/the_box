@@ -429,7 +429,7 @@ class WpaPages(
         val wanted = lengthMs / 1000.0 * rate * TimeshiftConstants.CAPACITY_HEADROOM
         if (limits != null) {
             // (WP-S4) A USB drive or a network folder: the kind's cap and reserve; unknown free space = no limit from space.
-            val capacity = POLICY.capacityBytes(lengthMs, rate, storage?.availableBytes ?: UNKNOWN_FREE, limits, storage?.currentFileBytes ?: 0L)
+            val capacity = POLICY.capacityBytes(lengthMs, rate, storage?.availableBytes ?: app.thebox.core.storage.smb.UNKNOWN_FREE_BYTES, limits, storage?.currentFileBytes ?: 0L)
             val window = POLICY.effectiveWindowMs(lengthMs, capacity, rate) / MINUTE_MS * MINUTE_MS
             return Sized(window, minOf(wanted, capacity.toDouble()), limited = window < lengthMs)
         }
@@ -738,8 +738,7 @@ class WpaPages(
         private const val MINUTE_MS = 60_000L
         private const val GIB = 1024.0 * 1024 * 1024
         /** (WP-S4) A network folder's free space is unknown until the keeper reports it: no limit from space. */
-        private const val UNKNOWN_FREE = Long.MAX_VALUE / 4
-        /** (M6 commit 0) Fixed lengths of the "Pause and rewind" values; AUTO, PAUSE_ONLY and OFF are not here. */
+                /** (M6 commit 0) Fixed lengths of the "Pause and rewind" values; AUTO, PAUSE_ONLY and OFF are not here. */
         private val POLICY = app.thebox.core.playback.timeshift.TimeshiftPolicyImpl()
         private val TIMESHIFT_LENGTH_MS = mapOf(
             TimeshiftLength.MIN_15 to 15 * MINUTE_MS, TimeshiftLength.MIN_30 to 30 * MINUTE_MS,

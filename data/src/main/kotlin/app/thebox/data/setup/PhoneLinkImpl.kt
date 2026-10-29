@@ -58,6 +58,7 @@ class PhoneLinkImpl @Inject constructor(
 
     override val state: StateFlow<LanServerState> get() = link.state
     override val submissions: Flow<PhoneSubmission> get() = link.submissions
+    override fun networkFolderSubmissions() = link.networkFolderSubmissions()
     /** Address lookup and bind happen off main, in call order (start/stop on one serial lane). */
     override fun start(purpose: PhonePurpose, context: app.thebox.core.setup.lan.PhoneContext?) {
         // WP-S6 (docs/design/m6-storage-locations.md §7.4): the NETWORK_FOLDER context (never a credential) goes with it.

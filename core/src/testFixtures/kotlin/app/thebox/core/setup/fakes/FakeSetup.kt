@@ -62,6 +62,10 @@ class FakePhoneLink : PhoneLink {
     var stops = 0
 
     fun submit(s: PhoneSubmission) { channel.trySend(s) }
+    /** SEC-S1 test: when set, the NETWORK_FOLDER collector throws this as soon as it collects. */
+    var collectFailure: Throwable? = null
+    override fun networkFolderSubmissions(): Flow<PhoneSubmission.NetworkFolder> =
+        collectFailure?.let { f -> kotlinx.coroutines.flow.flow { throw f } } ?: super.networkFolderSubmissions()
     /** (Storage locations commit 0) The context of each start, in order (null for the M5 purposes). */
     val contexts = ArrayList<app.thebox.core.setup.lan.PhoneContext?>()
     override fun start(purpose: PhonePurpose, context: app.thebox.core.setup.lan.PhoneContext?) {

@@ -54,6 +54,7 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -165,14 +166,24 @@ class StoragePages(
     private val volumes: VolumeCatalog,
     private val phone: PhoneLink,
     private val env: StoragePageEnv,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
+    parentScope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
     private val parse: (String) -> ManualAddressParser.Result = { ManualAddressParser.parse(it) },
     /** A session whose last route closed is ended after this grace (a replace closes one route before the next builds). */
     private val reapGraceMs: Long = REAP_GRACE_MS,
     /** U-S9: told when a stored folder signs in again or is removed (a fresh "sign in again" toast episode, §5.1). */
     private val toastGate: FallbackToastGate = FallbackToastGate { _, _ -> false },
 ) : SettingsPageSource, PhoneContextProvider, SettingsNavigationAware {
+    /**
+     * SEC-S1 (closure fix pass): no job of a page can end the process or the other jobs. An uncaught fault is logged by
+     * class name only (never the message, which may carry an address) and the machine goes on; the SupervisorJob keeps
+     * one failed collector from cancelling the scope.
+     */
+    private val scope = CoroutineScope(
+        parentScope.coroutineContext + SupervisorJob(parentScope.coroutineContext[Job]) +
+            CoroutineExceptionHandler { _, e -> BoxLog.w(TAG, "page job failed: ${e.javaClass.simpleName}") },
+    )
     private val version = AtomicLong(0)
+    @Volatile private var saveWarmed = false
     private val tokens = AtomicLong(1)
     private val sessions = ConcurrentHashMap<Long, BrowseSession>()
     private val storedSessions = ConcurrentHashMap<String, BrowseSession>()
@@ -214,6 +225,10 @@ class StoragePages(
     /** Builds [route]'s page synchronously (tests and [page]). Starts the work a page shows (finders, listings, Test). */
     fun build(route: SettingsRoute, ctx: PageContext): PageModel {
         val v = version.incrementAndGet()
+        // §5.3: opening Save to warms the network folder chosen for rewind once per visit (off the main thread, never blocks).
+        if (route is SettingsRoute.SaveLocation) {
+            if (!saveWarmed) { saveWarmed = true; scope.launch { env.warmSaveLocation() } }
+        } else saveWarmed = false
         return when (route) {
             SettingsRoute.PauseRewind -> pauseRewind(route, ctx, v)
             is SettingsRoute.SaveLocation -> saveLocation(route, ctx, v)
@@ -792,7 +807,7 @@ class StoragePages(
         }
     }
 
-    private fun failed(e: BrowseError) = LocationTestResult(TestVerdict.FAILED, 0, 0, 0, 0, 0L, true, 0L, error = e)
+    private fun failed(e: BrowseError) = LocationTestResult.failed(e, true, 0L)
 
     private fun fillFromStored(s: BrowseSession, a: SmbAddress) {
         if (s.host == null) {

@@ -125,9 +125,3 @@ object StorageConstants {
     const val REVERSE_DNS_TIMEOUT_MS = 800L
 
 }
-
-/** Feature switches decided by the spikes (§0a). */
-object StorageFlags {
-    /** USB drives through `getExternalFilesDirs` (S-1; false if no target TV lists a stick). */
-    const val VOLUME_ENABLED = true
-}

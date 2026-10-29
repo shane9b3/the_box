@@ -80,19 +80,12 @@ object PlayerText {
 
     // ---- (Storage locations §10, WP-S4) the storage toasts of a USB drive or a network folder
 
-    /** The decoded `arg` of a storage toast: [second] is the StorageFailure (stops) or LocationFallback (fallback) name or "". */
-    data class StorageArg(val kind: app.thebox.core.storage.StorageKind, val second: String, val name: String, val jumped: Boolean)
-
     /** `"<StorageKind>␟<second>␟<name>␟<jumped 1|>"`; null for a null arg, a blank one, or this device (today's text). */
-    fun storageArg(arg: String?): StorageArg? {
-        if (arg.isNullOrEmpty()) return null
-        val kind = app.thebox.core.storage.StorageKind.entries.firstOrNull { it.name == args(arg, 0) } ?: return null
-        if (kind == app.thebox.core.storage.StorageKind.INTERNAL) return null
-        return StorageArg(kind, args(arg, 1), args(arg, 2), args(arg, 3) == "1")
-    }
+    fun storageArg(arg: String?): app.thebox.core.full.StorageToastArg? =
+        app.thebox.core.full.StorageToastArg.decode(arg)?.takeIf { it.kind != app.thebox.core.storage.StorageKind.INTERNAL }
 
     /** "NAS" (middle-ellipsised to `LABEL_MAX_CHARS`), or "the USB drive", or "the network folder" when unnamed. */
-    fun place(res: Resources, a: StorageArg): String = when {
+    fun place(res: Resources, a: app.thebox.core.full.StorageToastArg): String = when {
         a.kind == app.thebox.core.storage.StorageKind.VOLUME -> res.getString(R.string.storage_place_usb_drive)
         a.name.isBlank() -> res.getString(R.string.storage_place_network_folder)
         else -> ellipsize(a.name, app.thebox.core.storage.StorageConstants.LABEL_MAX_CHARS)

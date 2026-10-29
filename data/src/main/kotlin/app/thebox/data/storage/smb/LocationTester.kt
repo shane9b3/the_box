@@ -164,7 +164,7 @@ class LocationTester(
     private fun rateTimeout(e: IOException): Boolean = classify(e) == FaultClass.SLOW
 
     private fun failed(error: BrowseError, w: Long, r: Long, wakeMs: Int, free: Long = -1L) =
-        LocationTestResult(TestVerdict.FAILED, w, r, 0, wakeMs, free, wifi, nowWallMs(), error)
+        LocationTestResult.failed(error, wifi, nowWallMs()).copy(writeBps = w, readBps = r, wakeMs = wakeMs, freeBytes = free)
 
     private fun crc(b: ByteArray, off: Int, len: Int): Long = CRC32().also { it.update(b, off, len) }.value
 

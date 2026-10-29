@@ -58,7 +58,7 @@ Units:
 4. Share listing: keep rapid7 dcerpc if the dependency report confirms Guava is already on the runtime classpath through Media3; otherwise keep it anyway and record the measured APK delta. **Confirmed (§7.5).** A typed share name is always offered. bcprov stays.
 5. Memory (A-S7): the remote (SMB/USB) pool is 160 blocks when `memoryClass` ≥ 192 MiB. Below that it is 96 blocks, the hiccup gate is waived on those devices, and the Test verdict says so. One pool size per cycle, fallback included (no reallocation on fallback). Internal stays 64/32.
 6. A separate `SMBClient` instance for the ring, always `close(true)` (A-S1). The keeper owns liveness; the storage reports transport errors to it; one owner.
-7. Test verdict per U-S3: time-bounded at 6 s, graded against HD and 4K rates, an RTT cap, a Stop test row, "Use anyway", and the plain-words table from the review.
+7. Test verdict per U-S3: time-bounded (6 s per rate phase, 20 s for the whole run since the closure pass), graded against HD and 4K rates, an RTT cap, a Stop test row, "Use anyway", and the plain-words table from the review.
 8. Take U-S2…U-S10 and A-S2…A-S14 as written unless they conflict with these rulings.
    - Take the cheap nice-to-haves: rename a location (U-N1), the server-time sweep (A-N2), drop the 100 ms ready wait (A-N4), the multicast lock span (A-S10), "Looking on 192.168.1.x" (U-N2), and the FAT32 cap shown up front (U-N6).
    - Phone sign-in per A-S12 + U-B1: a one-shot POST; the password is never mirrored or logged; the buffer is zeroed; a plain-HTTP note; a separate local account recommended on Windows, worded neutrally.
@@ -110,7 +110,7 @@ Units:
     - The first successful sign-in ends the session.
     - Plain-HTTP note on both screens.
 12. **Credentials:** user name and domain in the location; the password only in `SecureBlobStore` (`smb-<id>`), never in backups. They are registered with the export audit (A-S11).
-13. **Test:** time-bounded (6 s write, then read back), graded against HD (1 MB/s) and 4K (3.5 MB/s), with an RTT cap. The verdict is in plain words, there is a Stop test row and "Use anyway" (lead ruling 7), and the disk wake-up time is reported separately (A-B4).
+13. **Test:** time-bounded (6 s write, then read back; 20 s for the whole run), graded against HD (1 MB/s) and 4K (3.5 MB/s), with an RTT cap. The verdict is in plain words, there is a Stop test row and "Use anyway" (lead ruling 7), and the disk wake-up time is reported separately (A-B4).
 14. **Settings: the simple-row total stays at 35.** "Pause and rewind" becomes a Link to a sub-page (Rewind length, Save to, two advanced rows). Locations get a detail page (U-B2), the folder browser is one route (U-B3), and every size is the current kit's (U-B4).
 
 ---
@@ -460,6 +460,7 @@ IDLE ──(chosen = smb, network)──► CONNECTING ──ok──► READY �
   - `current()` while not READY;
   - the Save to page opening.
 - **Backoff:** 5 s, 15 s, 60 s, then every 300 s, reset by any trigger.
+- *(Closure pass 2026-10-28, Q-E1, lead ruling 4)* the keeper, its `box-smb` thread, watchdog, network callback and lifecycle observer are **built only once an SMB location is chosen for TIMESHIFT** (at construction when one already is, on the change that chooses one, or when a cycle needs it); a viewer with no network folder never gets them. The preview-start trigger (Q-D1) is `RingTargetSource.warm()` from the mini player, off main: `keeper.warm()` plus `wakeNow()`, each rate-limited to one per `SMB_RECONNECT_MIN_GAP_MS` (2 s), because the guide starts a preview per focused channel.
 - **On every (re)connect and on ON_START / preview start:** write 4 KiB to `TheBox-rewind/.wake-<deviceId>` (reviewed 2026-10-24, A-B4). A sleeping NAS disk then spins up before the viewer pauses. Its LastWriteTime is the sweep's server clock (§3.5).
 - **Keepalive** while READY in the foreground: `getShareInformation()` every `SMB_KEEPALIVE_MS` (smbj has no echo). It refreshes free space and last-known-good, and detects a dead link before a tune.
 - **Background:** disconnect after `SMB_BACKGROUND_DISCONNECT_MS` unless the link's open-file count is > 0 (A-S1).
@@ -530,7 +531,7 @@ IDLE ──(chosen = smb, network)──► CONNECTING ──ok──► READY �
 ### 7.2 Manual entry and paste (reviewed 2026-10-24, U-S4)
 
 - **Editor:** "Computer name or address" (`TextHint.HOST`, new), helper line "For example: nas, 192.168.1.20, or \\NAS\TV\Rewind", chips `\\` · `\` · `.local` · `smb://`.
-- **Accepted forms:** `nas`, `nas.local`, `192.168.1.20`, `192.168.1.20:4445`, `\\NAS\TV\Rewind`, `smb://nas/TV/Rewind` (`ManualAddressParser`, `:core`).
+- **Accepted forms:** `nas`, `nas.local`, `192.168.1.20`, `192.168.1.20:4445`, `\\NAS\TV\Rewind`, `smb://nas/TV/Rewind` (`ManualAddressParser`, `:core`). *(Closure pass 2026-10-28, C-N4 / Q-U1, lead ruling 3)* the parser is the single owner of the grammar: `PhoneApi.splitFolder` delegates to it and `app.js` mirrors it line for line. `Reason.BAD_PATH` refuses `..` and control characters (string `settings_err_host_path`); `.` segments are dropped; percent-escapes are strict; IPv6 is refused on both sides.
 - **Landing** (each step goes through sign-in when needed):
   - host only → `ComputerShares`;
   - host + share → `NetworkFolder` at the share root;
@@ -566,7 +567,7 @@ IDLE ──(chosen = smb, network)──► CONNECTING ──ok──► READY �
 Both push `PhoneSetup(purpose = NETWORK_FOLDER, browse = token)`. The M5 §3.5.1 QR screen is reused, with the title "Add a network folder from your phone" and the plain-HTTP line below. The page starts with `PhoneLink.start(NETWORK_FOLDER, PhoneContext(host, share, shares))`. The context is what the TV knows, **never a credential**, provided by `StoragePages` through `PhoneContextProvider` (§12.3).
 
 **Phone page** (a new tab in `app.html`, shown alone for this purpose, same theme), top to bottom:
-1. "Computer (name or address)": read-only when the context has a host, with a "Change" link;
+1. "Computer (name or address)": read-only when the context has a host, with a "Change" link. *(Closure pass 2026-10-28, SEC-S3)* the TV sends the **address** the viewer picked (`lastAddress ?: host`, plus the port when it is not 445); the discovered name travels in the display-only `PhoneContext.name`, shown as "name (address)". A name never replaces the picked address, and a stored location's re-sign-in sends its host, not its label;
 2. "Shared folder": a `<select>` of `shares` when known, else text. It accepts a pasted `\\NAS\TV\Rewind` or `smb://…` and splits it with the same rules as `ManualAddressParser` (mirrored in `app.js`, with test vectors shared through `PhoneApiTest` fixtures);
 3. "Folder inside it (optional)";
 4. "User name" (`autocomplete="username"`);
@@ -639,6 +640,7 @@ The other fields keep M5's `autocomplete="off"`. Under the password: the §7.3 i
 
 - A timeout during a rate phase grades the rate measured so far (TOO_SLOW at worst). **FAILED** only for §7.7 causes, a CRC mismatch ("NAS changed the test data. Choose another folder.") or no space ("NAS has only 1.1 GB free; rewind needs 2.1 GB. Free up space or choose another folder.").
 - `rate = min(write, read)`.
+- *(Closure pass 2026-10-28, C-N7)* **Whole-run deadline** `TEST_RUN_MAX_MS` (20 s = write 6 s + read 6 s + one I/O timeout; the wake write's own time is excluded), checked between round trips. Past it the result is FAILED with `stop = TOOK_TOO_LONG`: "Stopped: NAS took too long." / "Try again, or choose another folder. A wired connection to NAS helps.", focus **Test again**; nothing is recorded.
 
 | Verdict | Rule | Label (`RowLabel`) | Next step (`RowDesc`) | Details (mono value) |
 |---|---|---|---|---|
@@ -660,6 +662,8 @@ Rows and buttons:
 ---
 
 ## 8. Credentials, logs, audit, backup (reviewed 2026-10-24, A-S11)
+
+*(Closure pass 2026-10-28, Q-E2)* `SecureBlobStore.hasBlob(ref)` (additive; `TinkCredentialStore` reads the row without decrypting) replaces the per-settings-write decrypt of every stored password; a password that fails to decrypt is remembered as unreadable and stays SIGN_IN_NEEDED until the next sign-in.
 
 - **The location** holds `user` and `domain`. **The password:** `SecureBlobStore.putBlob("smb-<locationId>", utf8)` (reserved prefix `REF_SMB_PREFIX`). The UTF-8 array is **zeroed** after `putBlob`, and after `getBlob` once it has been copied into the `CharArray`. Remove deletes the blob first.
 - **The keeper** reads the blob on `box-smb` at connect, builds `AuthenticationContext` from a `CharArray`, and zeroes it after `authenticate`.
@@ -1099,13 +1103,13 @@ fun lengthMs(setting: app.thebox.core.settings.TimeshiftLength, totalStorageByte
 | Cold start with SMB chosen | first frame ≤ internal; first connect after the first frame | I-SL-2 |
 | Extra heap, remote pool 160 | ≤ 10.7 MiB (pool 10.0 + index ≤ 0.51 + staging) + smbj ≤ 1.5 MiB; pool 96: ≤ 6.6 + 1.5 | heap dump I-SL-10 |
 | Heap on a target switch | ≤ steady + 1 pool (the pool size is unchanged across fallback; old and new pools coexist only until GC) | I-SL-22 (A-S7) |
-| Allocation rate, SMB steady at 1 MB/s | ≤ `SMB_ALLOC_BPS_MAX` (3 MB/s); 0 GC pauses > 50 ms in 30 min | I-SL-10 |
+| Allocation rate, SMB steady at 1 MB/s | ≤ 3 MB/s; 0 GC pauses > 50 ms in 30 min | I-SL-10 |
 | Flusher CPU, SMB at 1 MB/s, signing on | ≤ 8 % of one core, Fire TV Stick 4K | I-SL-11 |
-| Seek → first frame, reading from SMB | P50 ≤ `SEEK_NETWORK_P50_MS` (800), P90 ≤ `SEEK_NETWORK_P90_MS` (1,500); 5 GHz, NAS wired | I-SL-6 |
+| Seek → first frame, reading from SMB | P50 ≤ 800 ms, P90 ≤ 1,500 ms; 5 GHz, NAS wired | I-SL-6 |
 | Hiccup absorbed (pool 160 devices only) | a 6 s outage at 1 MB/s: no stop, nothing visible | I-SL-7 |
 | Live rebuffers caused by saving to SMB | ≤ an Off session's, 30 min | I-SL-12 |
 | Discovery | NSD result ≤ 2 s; sweep ≤ 4 s; 0 sockets and lock released ≤ 500 ms after the page closes | I-SL-15, `ComputerFinderTest` |
-| APK delta (release, R8) | smbj + bcprov + asn-one + mbassador ≤ `SMBJ_APK_BUDGET`; dcerpc + commons-lang3 + commons-io (+ any Guava bump) ≤ `SHARE_LISTER_APK_BUDGET`; measured values written into §7.5 | S-2 |
+| APK delta (release, R8) | smbj + bcprov + asn-one + mbassador ≤ 2,500,000 bytes; dcerpc + commons-lang3 + commons-io (+ any Guava bump) ≤ 1,500,000 bytes (budgets held here, not as constants, since the closure pass); measured values written into §7.5 | S-2 |
 
 ---
 
@@ -1131,7 +1135,7 @@ S-1 and S-2 are specified in §0a and run before commit 0. Their results go into
 | `DedicatedFlusherTest` | WP-S1 | an SMB ring stalled in `pwrite` does not delay a new internal ring's flushes; the owned flusher thread exits after close (A-B2) |
 | `FallbackRingStorageTest` | WP-S2 | create ok → primary; deadline passes → secondary, header first, `fallbackReason`; no switch once `remoteBytesWritten > 0`; capacity respects the internal reserve; the wear counter counts the secondary |
 | `StorageLimitsTest` | commit 0 / WP-S2 | caps, reserves, `availableBytes` offset, pool sizes by `memoryClass`, Auto length per kind |
-| `ManualAddressParserTest` | WP-S1 | every §7.2 form and the errors; the same vectors as `app.js` |
+| `ManualAddressParserTest` | WP-S1 | every §7.2 form and the errors; the same vectors as `app.js`. The `app.js` mirror is checked by hand: `SPLIT_VECTORS` run through `app.js` with node (47 vectors on 2026-10-28, 0 failures; the harness is a scratch script, not in the repo or the gate) |
 | `NbnsCodecTest`, `DiscoveryMergeTest` | WP-S3 | |
 
 ### 16.2 `:player`, `:data`, `:ui`
@@ -1343,6 +1347,7 @@ Rules as TS §18: commit 0 first and green; no WP edits another WP's file, a con
 | `SMB_TEST_MAX_BYTES` | 16,777,216 (whole blocks) | §7.8 |
 | `TEST_WRITE_MS` / `TEST_READ_MS` | 6,000 / 6,000 | §7.8 |
 | `TEST_RTT_SAMPLES` | 5 | §7.8 |
+| `TEST_RUN_MAX_MS` | 20,000 (`TEST_WRITE_MS + TEST_READ_MS + SMB_IO_TIMEOUT_MS`; closure pass 2026-10-28) | §7.8 |
 | `TEST_RTT_SLOW_MS` | 40 | §7.8 |
 | `TEST_WAKE_NOTE_MS` | 3,000 | §7.8 |
 | `HD_BPS` / `UHD_BPS` | 1,000,000 (= `ASSUMED_BYTES_PER_SEC`) / 3,500,000 | §7.8 |
@@ -1354,9 +1359,7 @@ Rules as TS §18: commit 0 first and green; no WP edits another WP's file, a con
 | `SWEEP_CONNECT_TIMEOUT_MS` | 400 | §7.1 |
 | `NBNS_PORT` / `NBNS_TIMEOUT_MS` | 137 / 600 | §7.1 |
 | `REVERSE_DNS_TIMEOUT_MS` | 800 | §7.1 |
-| `SEEK_NETWORK_P50_MS` / `SEEK_NETWORK_P90_MS` | 800 / 1,500 | §14 |
-| `SMB_ALLOC_BPS_MAX` | 3,000,000 | §14 |
-| `SMBJ_APK_BUDGET` / `SHARE_LISTER_APK_BUDGET` | 2,500,000 / 1,500,000 (S-2 records the measured values in §7.5) | §7.5, §14 |
+| *(deleted 2026-10-28, Q-D7)* `SEEK_NETWORK_P50_MS`, `SEEK_NETWORK_P90_MS`, `SMB_ALLOC_BPS_MAX`, `SMBJ_APK_BUDGET`, `SHARE_LISTER_APK_BUDGET` | the values live in the §14 table (800 / 1,500 ms; 3 MB/s; 2,500,000 / 1,500,000 bytes); nothing read them | §14 |
 | `StorageFlags.VOLUME_ENABLED` | true (false if S-1 fails) | §0a, §3.2 |
 
 
@@ -2143,3 +2146,299 @@ The merged fix pass (`5d99f57`) was verified as one tree: core 4,011 / data 427 
 
 The fix pass ran as two Opus worktrees split by file (A: settings machine, LAN sign-in, UI, strings, `LocationTester`; B: storage, SMB, keeper, playback, Hilt, R8 rules). Their records follow.
 
+## Implementation record — closure fix pass, half A (2026-10-28)
+
+This pass applies half A of the lead's closure rulings (the "Lead rulings" above): O-1, O-2/Q-U1/C-N4 (R3), O-3 (C-N5), O-4 (C-N7), O-6 (C-S3 page side), SEC-S3, SEC-S4, Q-D4…Q-D8 (R5, R7), Q-U2, Q-U9, Q-U10 (the WpaPages part), Q-E4, Q-H1 and the Q-H6 comments in half A's files. Worktree `agent-a25f02ea325039f53`, base `5d99f57`, uncommitted (the lead commits). No emulator. Only half A's files were touched (the split in the rulings).
+
+**Gate:** `./gradlew :core:test :data:testDebugUnitTest :ui:testDebugUnitTest :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:assembleDebug` is **green** in one run. Counts from the JUnit XML: `:core` 3,666, `:data` 429 (3 opt-in skipped), `:ui` 402, `:app` 73. `:player:testDebugUnitTest` (alone, because the shared contracts gained fields) is green: 505. The XML count for `:core` is lower than the 4,011 in the lead's note: that note counts another way. The UI-half record counted 3,635 the same way as here.
+
+**Regression tests.** A new class, `StorageClosureRegressionTest` (`:core`), one or more cases per finding (`secS3_`…`secS3d_`, `secS4_`, `o6_`, `o6b_`, `cN7_`, `cN4_`, `qD7_`). Also: `ManualAddressParserTest` (16 new vectors, `theThreeFieldsFollowTheSameRules`), `PhoneApiNetworkFolderTest` (20 new `SPLIT_VECTORS`, `endToEndAnotherCollectorIsNotAFolderReceiver`, `endToEndStopZeroesASubmissionNobodyTook`), `LocationTesterTest` (`aTestPastItsDeadlineStopsItselfAsTookTooLong`, `theDeadlineLeavesTheWakeOut`), `PhoneSetupScreenTest.aFailedPhoneSignInShowsOnTheTv` (`:ui`). The JS half of `SPLIT_VECTORS` was run with node (47 vectors, 0 failed) through a scratch harness that extracts `app.js`'s parser block and the test's vector block (`scratchpad/split_vectors_node.js`); it is not in the repo or the Gradle gate.
+
+### What was done, by finding
+
+| Finding | Fix |
+|---|---|
+| O-1 (U-N1 display) | `PhoneScreenModel.failedSignIn(state, purpose)`: `lastSignInStatus` of a NETWORK_FOLDER session when `lastSignInOk == false`, not while the phone has just sent again (RECEIVED). `PhoneSetupScreen` draws it in Warn (24, three lines) under the status line, and under the "too many failed sign-ins" reason on the FAILED page (tag `phone_sign_in_failed`). The view model needed no change: the server state already reaches the screen. |
+| O-2, Q-U1, C-N4 (R3) | `ManualAddressParser` is the one grammar. New `parseFields(host, share, path)` (the phone's three fields), `isWholeAddress`, `segments`. `Reason.BAD_PATH` (appended): a `..` part or a control character (U+0000–001F, U+007F, also a decoded `%00`) in the share or a folder; `.` parts are dropped. Control characters are checked before the trim, so `Rewind\n` is refused, not trimmed. Host names start and end with a letter or digit (as `HOST_OK` required); IPv6, bracketed or not, is BAD_HOST on both sides. `%XX` is strict (two ASCII hex digits; `%+1` was accepted by `toIntOrNull(16)`), and the decode refuses bytes that are not UTF-8, as the phone's `decodeURIComponent` does. Both sides trim the same characters (`isWebSpace`: Kotlin's whitespace minus U+001C–001F, plus U+FEFF, = JS `trim`). `PhoneApi.splitFolder` is now `parseFields` + the length caps; `HOST_OK`, `PORT`, `uncParts`, `segments` are gone. A smb:// share pasted on the phone is now percent-decoded like the TV's (`My%20Videos` → `My Videos`). `app.js` mirrors `parse`/`parseFields`/`splitFolder` line for line. The editor (`WpaPages.rowRules`) shows the one new string, `settings_err_host_path`, for BAD_PATH (`StoragePages.hostProblem`). The stale "mirrors / runs VECTORS" comments in `ManualAddressParser.kt` and `ManualAddressParserTest.kt` now say what is true. |
+| O-3 (C-N5) | `PhoneLink.networkFolderSubmissions()` (default method). `LanPhoneLink.submissions` is a `NetworkFolderSubmissions` flow: collecting `networkFolders()` registers a NETWORK_FOLDER receiver once its subscription exists (`onSubscription`) and marks each item taken. A NETWORK_FOLDER session's `canAccept` counts only those receivers; other purposes keep `subscriptionCount > 0`. A NETWORK_FOLDER submission is "untaken" from `submitted` until a receiver takes it; `stop()` (also on the linger path) and `stopNow()` zero the password of every untaken one. `StoragePages.ensurePhone` collects `phone.networkFolderSubmissions()` in `phoneJob`, so the registration lives exactly as long as the phone page. |
+| O-4 (C-N7) | `LocationTester(runMaxMs = StorageConstants.TEST_RUN_MAX_MS)`: a deadline from the start, moved on by the wake write's own time, checked after `mkdirs`, before and after the create, in both rate loops, before each RTT sample and before the free-space query. Past it: `FAILED` with `LocationTestResult.stop = TOOK_TOO_LONG`, no error, the test file closed (so deleted). The Test page shows "Stopped: NAS took too long." / "Try again, or choose another folder. A wired connection to NAS helps." (Warn), focus **Test again**, then **Choose another folder**; nothing is recorded (FAILED is never `lastTest`). |
+| O-6 (C-S3 page side) | `TimeshiftPlace.failure` (additive) from `LocationStatus.failure` when DEMOTED. `StoragePages.failureText`: ACCESS → `ERR_ACCESS` / `ERR_ACCESS_STEP`; FULL → `ERR_FULL` (free from the status, need = `MIN_RING_BYTES + NETWORK_FREE_SPACE_RESERVE`, as the Test) / `ERR_FULL_STEP`; REMOVED → `FOLDER_MISSING(<last folder>)` / `ERR_DATA_STEP` ("Choose another folder."); anything else → `STATUS_DEMOTED` as before. The Save to row shows the reason, the location's Status row the reason and the step, the Pause and rewind page's Save to description the reason. The Playback link (`WpaPages`) reads "(sign in to NAS)" for a DEMOTED ACCESS, as the toast does (ACCESS falls back as SIGN_IN_NEEDED). |
+| SEC-S3 | `context(browse)` sends `(lastAddress ?: host)[:port]` as `PhoneContext.host` (port only when not 445) and the computer name or label in the new display-only `PhoneContext.name`; `/api/state` carries `name` too. `app.js` shows "name (address)" in the read-only Computer field and posts the address (`contextHost`); **Change** puts the address in the field to edit. `onPhone` treats a host equal to the session's host, last address or name as the same computer: the picked address stays and only the port follows. A stored location's phone context is its host, never its label, so `splitFolder` no longer refuses an unchanged page. |
+| SEC-S4 | `BrowseSession.withPasswordCopy { … }` zeroes the copy in `finally`; `openStored` and `startConnect` use it. The `passwordCopy` KDoc says which callees zero (`saveSmb`, `updateSignIn`) and which do not (`open`). |
+| Q-D4 | `StoragePages.endAll()` deleted (no caller, no test). |
+| Q-D5 | `StoragePages.mask()` deleted. |
+| Q-D6 | `SettingsUi.DOTS_RIGHT_X` deleted. |
+| Q-D7 (R7) | `WpaPages.linkName`: the Playback link's place is at most `LABEL_LINK_MAX_CHARS` (16) with "…", for the place and the offline name. The five gate/APK constants are deleted; `RECORDINGS_DIR_SMB` stays. The `StorageConstants` header no longer says tests assert the names. |
+| Q-D8 (R5) | `WpaPages.build(PauseRewind)` deleted. |
+| Q-U2 | The Find page shows `FindState.computers` in the finder's order with `c.saved` as is: the page's comparator, its weaker saved match and `addressKey` are gone (`DiscoveryMerge.ORDER` and `SavedHosts` are the one rule). |
+| Q-U9 | `:ui`'s `PROGRESS_ROW` / `SEARCHING_ROW` are `StoragePages.ROW_T_PROGRESS` / `ROW_SEARCHING`; `progressFraction` uses the `PROGRESS` regex, now with groups, compiled once. |
+| Q-U10 (WpaPages part) | `timeshiftRows` uses `StorageLimits.of(kind, 0)` for a non-internal place. |
+| Q-E4 | `ManualAddressParser`'s scheme regex is a `private val`. |
+| Q-H1 | `StoragePages.validHost` calls the parser directly (no `catch (Throwable) → true`). |
+| Q-H6 (half A) | `ManualAddressParser.kt`, `ManualAddressParserTest.kt`, `StorageConstants.kt` header, `WpaPages.handles` comment. The tests' `stubParse` ("WP-S1's body is a stub") is deleted: `SettingsWorld` and the one `StoragePagesTest` page builder use the real parser. |
+
+### Contract changes (additive; defaults keep every caller compiling)
+
+- `core/.../storage/ManualAddressParser.kt`: `Reason.BAD_PATH` (appended); `parseFields`, `isWholeAddress`, `segments`.
+- `core/.../storage/StorageContracts.kt`: `LocationTestResult.stop: TestStopReason? = null`; `enum TestStopReason { TOOK_TOO_LONG }` (append-only, `@Serializable`). FAILED results are never stored, so no stored JSON carries the field.
+- `core/.../storage/StorageConstants.kt`: + `TEST_RUN_MAX_MS` (= `TEST_WRITE_MS + TEST_READ_MS + SMB_IO_TIMEOUT_MS`, 20 s); − `SEEK_NETWORK_P50_MS`, `SEEK_NETWORK_P90_MS`, `SMB_ALLOC_BPS_MAX`, `SMBJ_APK_BUDGET`, `SHARE_LISTER_APK_BUDGET` (unread; their numbers are in the design's §14 table).
+- `core/.../setup/lan/LanContracts.kt`: `PhoneContext.name: String? = null`; `PhoneLink.networkFolderSubmissions()` (default: asks `submissions` when it is a `NetworkFolderSubmissions`, else filters it); new `interface NetworkFolderSubmissions`.
+- `core/.../settings/state/WpaPages.kt`: `TimeshiftPlace.failure: StorageFailure? = null`.
+- `StorageText` + `TEST_TOOK_TOO_LONG`, `TEST_TOOK_TOO_LONG_STEP` (appended); `SettingsText` + `ERR_HOST_PATH` (appended). Strings: `storage_test_took_too_long`, `storage_test_took_too_long_step`, `settings_err_host_path`.
+- `/api/state`'s `folder` object gains `name`.
+
+### Deviations
+
+1. **The Test's deadline is 20 s, not "about 6 s".** §7.8 gives the write and the read phase 6 s each, so a whole run cannot end in 6 s; the deadline is both phases plus one I/O timeout for the rest, with the wake excluded (it is timed as `wakeMs`). C-N7's worst case (≈ 40 s) drops to 20 s plus at most one round trip.
+2. **Q-D8: the tests were repointed, not deleted.** `WpaPagesTest.pauseRewindSubPage` / `timeshiftRowsWriteThePlaybackDomain` / `timeshiftAutoFollowsTheStorageClass` and `EffectTimingCoverageTest` pinned the *rows* (values, effects, visibility), which `StoragePages` still takes from `WpaPages.timeshiftRows`. They now read `timeshiftRows` directly; only the "advanced rows hidden" line went (the page's filter is `StoragePagesTest.pauseRewindPageIsLengthSaveToAndTheTwoAdvancedRows`).
+3. **Q-U2: `addressKey` was deleted, not rewritten over `Ipv4.compareIpv4`.** With the page using the finder's order there is nothing left for it to sort. Two tests now feed the fake finder its real order and `saved` flag (`StoragePagesTest.findComputersOrdersAndLabelsTheResults` sorts its input with `DiscoveryMerge.ORDER`; `StorageReviewUiProofTest.uS2_` lists the named computer first). A folder saved while a search is open badges on the next search (the review's own trade-off).
+4. **O-3 needs no `:data` edit.** `PhoneLinkImpl` (half B's file) forwards `submissions` as `link.submissions`, the same object, so the contract's default `networkFolderSubmissions()` finds `LanPhoneLink`'s registering flow through it. An explicit forward in `PhoneLinkImpl` would be clearer (For the lead).
+5. **O-6: FULL with no known free space reads "0.0 GB free".** The keeper publishes its cached free space with the demotion, so this should be rare; no new string was added (the ruling asks for the existing texts).
+6. **O-6: the Playback link changes only for ACCESS.** FULL and REMOVED keep "(NAS offline)": there is no settings string for them, and the toast for those falls back as NO_SPACE_THERE / UNREACHABLE.
+7. **C-N4 is stricter than the review asked in four small places,** all needed to make one grammar: a host must start and end with a letter or digit (as `HOST_OK` did), `%XX` must be ASCII hex, bad UTF-8 after `%`-decoding is BAD_HOST, and the host field of the phone page accepts a whole `nas/TV` (the TV editor always did).
+8. **The phone page keeps its one generic message for any refused folder** ("Check the computer and the shared folder…"): the new string is the TV editor's only (R3: one new string).
+
+### For the lead
+
+- **Q-U10 `isBadShareName`** is in `NetworkFoldersImpl.kt` (half B's) and the target `SmbFaults` is half B's too: not done here. The change: move `isBadShareName(e)` into `SmbFaults` next to `isSharingViolation`, and call it from `NetworkFoldersImpl.browseError`.
+- **`PhoneLinkImpl` (half B's, optional):** `override fun networkFolderSubmissions() = link.networkFolderSubmissions()`, so the forward does not depend on `submissions` being the same object (Deviation 4).
+- **R6 `StorageFlags.VOLUME_ENABLED`** lives in `StorageConstants.kt` (half A's file), but its only reader is `VolumeWatcher.kt` (half B's). I left both; whoever takes R6 deletes the reader first, then the `StorageFlags` object at the end of `StorageConstants.kt`.
+- **Design doc:** §7.8 "time-bounded at 6 s" → the 20 s whole-run deadline (Deviation 1) and the "Stopped" row; §7.4 the phone page's Computer field shows "name (address)" and sends the address; §7.2 add BAD_PATH and its string; §16.1 note that `SPLIT_VECTORS` are run through `app.js` by hand with node; Appendix A: + `TEST_RUN_MAX_MS`, − the five gate constants. §14 still names them: write the values in their place (`SEEK_NETWORK_P50_MS` 800, `SEEK_NETWORK_P90_MS` 1,500, `SMB_ALLOC_BPS_MAX` 3 MB/s are already beside the names; `SMBJ_APK_BUDGET` = 2,500,000 bytes and `SHARE_LISTER_APK_BUDGET` = 1,500,000 bytes are not).
+- **Not taken:** carrying the Test's progress as a fraction in the row (Q-U9's "better still"; a `SettingsRow` contract change); R8 (Q-U6), R9 and R11 items as ruled.
+
+---
+
+## Implementation record — closure fix pass, half B (2026-10-28)
+
+This pass applies the half-B items of the lead's rulings of 2026-10-28 (the "Lead rulings" above): SEC-S1, SEC-S2, SEC-N1 and SEC-N6 from the security review; X-1 from the closure audit; and Q-D1, Q-D2, Q-D3, Q-D9, Q-D10, Q-U3, Q-U4, Q-U5, Q-U7, Q-U8, part of Q-U10, Q-E1, Q-E2, Q-E3 and Q-H2 to Q-H6 from the quality review.
+
+- **Where:** worktree `agent-a80d39e705fc93803`, branch `worktree-agent-a80d39e705fc93803`, base `5d99f57`. Nothing is committed (the lead commits).
+- **Scope:** no file of half A was touched. No emulator was used.
+- **Comments:** every fix carries a comment naming its finding (`// SEC-S2`, `Q-E1`, …).
+
+**Gate:** `./gradlew :core:test :data:testDebugUnitTest :player:testDebugUnitTest :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:assembleDebug` is green. The per-module counts are under "Gate" at the end. `:app:minifyReleaseWithR8` is green with the narrowed R8 rules (SEC-N6). `:app:assembleRelease` cannot run in a worktree: `validateReleaseSigning` requires `keystore.properties`.
+
+### What was done, by finding
+
+**Security**
+
+- **SEC-S1: a share count too large to allocate.**
+  - `SmbShareLister` now catches `OutOfMemoryError` and answers LIST_FAILED, like any malformed reply. The typed share name is still offered.
+  - Only dcerpc's single `new ShareInfo1[EntriesRead]` allocation failed, so the heap is intact.
+  - The failure policy moved into `guarded(signedInAsUser, fetch)`, which is the test seam.
+  - Test: `SmbListingBoundsTest.aShareCountTooLargeToAllocateIsAFailedListingNotACrash`.
+- **SEC-S2: unbounded directory listings.**
+  - `SmbjShare.list` makes the same `openDirectory` call as smbj's `DiskShare.list` (checked with `javap`). It then reads `Directory.iterator()` lazily through `boundedList`:
+    - it stops after `max` entries;
+    - past `SMB_LIST_BUDGET_IO_TIMEOUTS` (2) × the link's I/O timeout it throws a `TimeoutException`, which `SmbFaults` classifies as SLOW;
+    - the directory handle is closed in `finally`.
+  - Browse `folders()` now asks for at most `BROWSE_SCAN_MAX` = 16,384 raw entries, not `Int.MAX_VALUE`. The cap counts files as well as folders, so it sits far above the 2,000-folder cap. A page that hits it is marked truncated.
+  - The keeper's sweep is bounded as a whole. `SmbSweeper.sweep` takes a deadline: the keeper allows `SWEEP_BUDGET_IO_TIMEOUTS` (4) × `ioTimeoutMs`, measured on its own clock. The sweep stops like a SLOW answer, and the next start finishes the job.
+  - Tests:
+    - `SmbListingBoundsTest`: `anEndlessListingStopsAtItsCap`, `aTricklingListingEndsAtItsBudget`, `dotEntriesAreSkippedNotCounted`;
+    - `SmbSweepTest.aTricklingServerCannotHoldTheSweep`, over the fake link: 200 deletes at 20 ms each stop at a 200 ms deadline.
+- **SEC-N1: SMB user names in logs.**
+  - `StorageLocationsImpl.onPrefs` registers every SMB location's user and domain with `Redact.registerSecret`.
+  - Test: `StorageLocationsImplTest.theSmbUserAndDomainAreRedacted`, which uses smbj's auth-failure wording.
+- **SEC-N6: app-wide `-dontwarn` rules.**
+  - With both broad rules removed, R8's `missing_rules.txt` lists exactly one class, `java.rmi.UnmarshalException`. No `javax.security.auth` class is missing (Android ships the ones smbj names).
+  - Rule diff:
+    - `-dontwarn javax.security.auth.**` is deleted (it hid nothing);
+    - `-dontwarn java.rmi.**` becomes `-dontwarn java.rmi.UnmarshalException`.
+  - Proof: `:app:minifyReleaseWithR8` fails without the rules, naming only that class, and passes with the narrowed rules. `assembleRelease` stops earlier, at `validateReleaseSigning` (no keystore in a worktree); R8 is the step these rules affect.
+
+**Closure audit**
+
+- **X-1: the keeper side of U-S9 across processes.**
+  - The first READY of a location in each process now calls `onSignedInAgain`, the `FallbackToastGate.signedIn` hook. So does the existing READY-after-AUTH_FAILED in the same process.
+  - A folder that works again in a new process therefore restarts its "sign in again" counter. See Deviation 1 for why this is not "seed from `signInNeeded(id)`".
+  - Test: `SmbSessionKeeperTest.aFolderBackInANewProcessResetsItsSignInCounter`. It checks that the hook fires once per process, and not on a reconnect.
+
+**Dead code (Q-D)**
+
+- **Q-D1: the guide's preview start, under R2.**
+  - Contract (additive): `TimeshiftSessionFactory.warmSaveLocation()`, default no-op.
+  - `PlaybackControllerImpl` calls it on IO, never on the zap path, in two cases:
+    - a live `tune()` while the viewport is MINI;
+    - `setViewport(MINI)` over a running cycle.
+  - `TimeshiftSessionFactoryImpl.warmSaveLocation()` calls `RingTargetSource.warm()`.
+  - `StorageTargetsImpl.warm()` calls `keeper.warm()` plus `keeper.wakeNow()`, but only when a network folder is kept for rewind. Otherwise it does nothing and builds no keeper.
+  - `wakeNow()` is rate-limited like `warm()`, to one per `SMB_RECONNECT_MIN_GAP_MS` (Deviation 2).
+  - Tests:
+    - `ControllerPreviewWarmTest.aPreviewTuneWarmsTheSaveLocation`;
+    - `FactoryTargetTest.thePreviewStartWarmsTheTargetSource`, which reads the fake's `warms` and `currentCalls` counters, so both counters now have a reader;
+    - `RingTargetSourceTest.thePreviewStartWritesTheWakeFile`.
+- **Q-D2.** `SmbjClients.browseClient()` is deleted and the `SmbjClients` KDoc is rewritten.
+  - Correction to the review: two tests did use it (`SmbjRemoteLinkTest.theRingAndTheBrowserHaveTheirOwnClients`, `SmbIntegrationTest`). The first is now `eachRingLinkHasItsOwnClient`. The second builds `SMBClient(SmbjClients.config(SMB_IO_TIMEOUT_MS))` the way `SmbjBrowseConnections` does.
+- **Q-D3.** `ComputerFinder.recentAddress`, `nsdNames` and `norm` are deleted; `nsdCount` stays for the log line.
+  - Correction to the review: `ComputerFinderTest` did assert on `recentAddress`. Those two lines are gone, along with the override in `NetworkFoldersImplTest`.
+- **Q-D9: the vacuous factory tests.** `NoIoRemoteStorage`, `smbRingStorageImplemented()` and `remoteStorage()` are deleted. `smbChoice` builds the real `SmbRingStorage`.
+  - `FactoryTargetTest.aSwitchedCycleIsNeverReusedAndSavesOnThisDeviceWithTheWearCounter` now asserts the §5.5 wear counting live:
+    - the real create sees the dead transport, reconnects once (refused) and switches synchronously;
+    - the secondary counts the 1,000 bytes;
+    - `remoteBytesWritten == 0`;
+    - a switched cycle's stop has no storage failure.
+  - `theFirstWriteOfTheCycleDrivesTheGrace` now asserts live: the real create and the first remote write, `firstWriteMonoMs == now`, and `sinceFirstWriteMs == 25_000`.
+  - Both tests now use the factory clock for the storage, because the deadlines compare against it. Unguarded on the old nanoTime clock, the grace test failed: the create missed a deadline measured on another clock. That was a setup issue the guard had been hiding.
+  - The reuse test now asserts three distinct `relativePath`s. Its "fresh file" case closes the storage, which is the same never-reuse case for the factory and needs no I/O. `SmbPrepareNoIoTest.markNeedsFreshFile` does the same.
+- **Q-D10, under R6.**
+  - `TimeshiftModule`'s `@BindsOptionalOf RingTargetSource` is gone, and the factory's `@Inject` constructor takes `Provider<RingTargetSource>`. Proof that nothing needs the optional binding:
+    - the only `@HiltAndroidApp` is `TheBoxApplication`, whose graph includes `:data`'s `StorageModule`, which binds it;
+    - `app/src/androidTest` has no `@UninstallModules` or `@TestInstallIn`;
+    - `:player` has no androidTest;
+    - `:data`'s androidTest graph (`WorkerDeviceTests`) cannot contain `TimeshiftModule`, because `:data` does not depend on `:player`.
+  - `InternalRingTargets` is now a plain class, the primary constructor's default for the JVM tests, with `@Inject`/`@Singleton` removed.
+  - `VolumeWatcher` no longer reads `StorageFlags.VOLUME_ENABLED`. The constant itself is in `StorageConstants.kt` (half A; see "For the lead").
+
+**Duplication (Q-U)**
+
+- **Q-U3.**
+  - `StorageToastArg(kind, second, name, jumped)` with `encode()` and `decode()` is added to `PlayerContracts.kt`, next to `PLAYER_TOAST_ARG_SEP`.
+  - `storageKindOf(locationId)` is added in the new `core/.../storage/StorageIds.kt`.
+  - `PlayerStateMachineImpl` uses both; its private `kindOfLocation` and `storageToastArg` are gone. The encoded string is byte-for-byte the same, and `StorageToastMachineTest` is unchanged and green.
+  - The other three sites are half A's (see "For the lead").
+- **Q-U4.** `StorageFailure?.asFallback(otherwise)` is the one mapping, in `FallbackRingStorage.kt`:
+  - ACCESS → SIGN_IN_NEEDED;
+  - FULL → NO_SPACE_THERE;
+  - REMOVED → UNREACHABLE;
+  - anything else → `otherwise`.
+
+  `FallbackRingStorage` passes UNREACHABLE (REMOVED gave UNREACHABLE there before too). `StorageTargetsImpl` passes UNSTABLE.
+- **Q-U5.** `TimeshiftConstants.smallRemotePool(memoryClassMb)` is the one decision. `StorageModule` (the keeper's I/O timeout) and the factory (the open deadline) read it. The factory no longer re-derives the decision from `pool`.
+- **Q-U7.** `writeTextAtomically(file, text)` in `data/storage/AtomicFiles.kt` writes `<file>.tmp`, renames it, and on failure deletes the target and renames again. It is used by:
+  - `DeviceIdentity`;
+  - `LastGoodStore`;
+  - `StorageLocationsImpl.markSeen` (non-atomic before);
+  - `FileSignInToastCounters` in `:app` (non-atomic before).
+- **Q-U8.** `ipv4Bytes(address)` in `discovery/NameLookup.kt` is used by `Port445Sweep` and `NameLookup`. The `bytesOf(address)!!` defaults are gone: `netbios` and `reverseDns` answer null for a non-IPv4 string.
+- **Q-U10, the parts in half B's files.**
+  - `UNKNOWN_FREE_BYTES` is added to `RemoteContracts.kt`. `SmbRingStorage` and the fake use it.
+  - `RecordStop.isStorageStop` is added to `TimeshiftContracts.kt` and replaces the factory's `STORAGE_STOPS` and `StorageTargetsImpl`'s inline check.
+  - `CycleWriteTracking { firstWriteMonoMs; beginCycle() }` is added to `TimeshiftContracts.kt`. `FallbackRingStorage` and `VolumeStorage` implement it, so the factory's two `when` type switches are now one cast each.
+  - The FAILED-result factory is not done: two of its three sites, and `LocationTestResult` itself, are half A's.
+
+**Efficiency (Q-E)**
+
+- **Q-E1, under R4: the keeper is built lazily.**
+  - `StorageTargetsImpl` takes `keeperSource: () -> SmbSessionKeeper`; `StorageModule` passes a `dagger.Lazy`.
+  - The keeper, and with it `box-smb`, the watchdog, the network callback and the lifecycle observer, is built at one of three moments:
+    - at construction, when an SMB location is already chosen for TIMESHIFT;
+    - on the first change that chooses one (a `StorageLocations` change listener);
+    - when a cycle's `current()` needs it.
+  - `warm()`, `onStorageFailure` and `onCreateFailed` never build it for a non-SMB location.
+  - Every §5.3 trigger works once the keeper exists. `KeeperTriggers.install` runs at that moment:
+    - an already-open first-frame gate calls `startNow` at once;
+    - `ProcessLifecycleOwner` replays ON_START to a late observer;
+    - `registerDefaultNetworkCallback` calls `onAvailable` at once.
+  - `TheBoxApplication`'s start-time `ringTargets.get()` still builds the keeper when a folder is chosen.
+  - Test: `RingTargetSourceTest.noNetworkFolderBuildsNoKeeper`. With this device and then a USB drive chosen, the keeper source is never called, and no `box-smb` or `box-smb-watch` thread exists. Choosing a folder builds the keeper exactly once.
+- **Q-E2: no decrypt per settings write.**
+  - `SecureBlobStore.hasBlob(ref)` is new (additive). Its default decrypts through `getBlob` and zeroes the copy; UNAVAILABLE counts as present. `TinkCredentialStore` overrides it to read the row only, with no decrypt.
+  - `onPrefs` uses `hasBlob`.
+  - A password that fails to decrypt at `readPassword` (CORRUPT, KEY_INVALIDATED) is remembered in `unreadable`, which keeps it SIGN_IN_NEEDED across later settings writes until `updateSignIn`. That is what the per-write decrypt used to catch.
+  - Tests: `StorageLocationsImplTest.aSettingsWriteDecryptsNoPassword` and `anUndecryptablePasswordStaysSignInNeededUntilANewSignIn`. `RecordingBlobs` gains `gets`, `undecryptable` and a row-only `hasBlob`.
+- **Q-E3: a retired link fails over at once.**
+  - `RemoteLink.retired` is new (additive, default false). `SmbjRemoteLink` overrides it.
+  - `SmbRingStorage.retrying` fails over at once on a retired link, and `reopen` gives up without the 250 ms retry loop.
+  - The pause-and-retry branch stays for a non-retired early throw. The fake's `reconnectFails` uses it.
+  - `FakeRemoteLink` gains `retired`; `share` and `reconnect` then refuse.
+  - Test: `SmbReconnectTest.aRetiredLinkFailsOverAtOnce`: under 1 s, UNREACHABLE, 0 reconnects. Before the fix it took the full 6 s budget.
+
+**Hygiene (Q-H)**
+
+- **Q-H2, `SmbjRemoteLink`:**
+  - `onConnected` gets the share captured under the lock;
+  - `SmbjOpenedShare` no longer takes a `session`;
+  - `closeNow` is a single `closeSilently()`;
+  - `lastFree()` returns `Long?`.
+- **Q-H3, under R10.** `storageFields(grant, snap)` is a default method on the `TimeshiftSessionFactory` seam (default: `snap`). The factory overrides it, and the controller calls it without the cast.
+- **Q-H4.** The NOT_FOUND recovery walk in `NetworkFoldersImpl.folders` goes through `probe(otherwise) { … }`, which rethrows a cancel. No JVM test: there is no `DiskShare` seam in `NetworkFoldersImplTest` (its fake `disk()` throws). The change is two call sites onto the file's existing `cancelled(e)` rule.
+- **Q-H5.**
+  - `FallbackRingStorage`'s two empty `catch` blocks now carry their reason.
+  - `StorageLocationsImpl.notifyListeners` and `markSeen` log the class name with `BoxLog.w`.
+  - The keeper's post-connect `probe()` catch and `SmbjBrowseConnections`' `client.close()` catch carry their reason.
+  - No changed catch can swallow a coroutine `CancellationException`: they are in blocking code, or catch `IOException` or `RuntimeException` around non-suspend calls.
+- **Q-H6.** Stale comments are rewritten in:
+  - `SmbjClients`;
+  - `StorageModule` (header);
+  - `TimeshiftModule`;
+  - `InternalRingTargets` (header, KDoc, `UNSIZED`);
+  - `SaveLocationFakes`.
+
+  The `ManualAddressParser` and `StorageConstants` comments are half A's.
+
+### Contract changes (additive; defaults keep every caller compiling)
+
+- `core/.../storage/smb/RemoteContracts.kt`:
+  - `RemoteLink.retired: Boolean`, default `false`;
+  - top-level `const val UNKNOWN_FREE_BYTES = Long.MAX_VALUE / 4`.
+- `core/.../playback/timeshift/TimeshiftContracts.kt`:
+  - `val RecordStop.isStorageStop`;
+  - `interface CycleWriteTracking`;
+  - KDoc only on `RingTargetSource.warm()`: it is the preview-start trigger, called off main.
+- `core/.../playback/timeshift/TimeshiftConstants.kt`: `fun smallRemotePool(memoryClassMb): Boolean`.
+- `core/.../full/PlayerContracts.kt`: `data class StorageToastArg` with `encode()` and `decode()`.
+- `core/.../storage/StorageIds.kt` (new): `storageKindOf(locationId)`.
+- `core/.../storage/FallbackRingStorage.kt`: `StorageFailure?.asFallback(otherwise)`.
+- `data/.../contracts/DataContracts.kt`: `SecureBlobStore.hasBlob(ref)` (default decrypts and zeroes).
+- `player/.../internal/Seams.kt`: `TimeshiftSessionFactory.storageFields(grant, snap)` (default `snap`) and `warmSaveLocation()` (default no-op).
+- Not additive, but internal to the module:
+  - `TimeshiftSessionFactoryImpl`'s `@Inject` constructor takes `Provider<RingTargetSource>`, and the `InternalRingTargets` parameter is gone;
+  - `StorageTargetsImpl(locations, keeperSource: () -> SmbSessionKeeper, …)`;
+  - `SmbSweeper.sweep(…, deadlineMonoMs, clock, classify)`: the new parameters come before `classify`, so trailing-lambda callers are unchanged.
+
+### Deviations
+
+1. **X-1 is "the first READY per process", not "seed from `signInNeeded(id)`".**
+   - `signInNeeded(id)` is persisted only for a missing or unreadable password, which is the restore case. In that case READY can only follow a new sign-in, and the pages already call `signedIn` for it.
+   - The audit's case is different: AUTH_FAILED in an earlier process, then the server is fixed. That case has nothing persisted for the keeper to read, so seeding would never fire for it.
+   - Calling the hook at the first READY of each location in each process covers both cases. Its cost is one call per location per process; `FileSignInToastCounters.reset` writes only when a count exists.
+2. **`wakeNow()` is rate-limited** to one per `SMB_RECONNECT_MIN_GAP_MS` (2 s), the same gap as `warm()`. Browsing the guide starts a preview per focused channel, and design §5.3 does not ask for a 4 KiB write per zap.
+3. **SEC-S2's listing budget throws (SLOW); it does not return a partial list.** `RemoteShare.list` has no truncation flag. A listing presented as complete when it is not would mislead both the browse page and the sweep. The browse page shows the "isn't answering" error, and the sweep stops (the next start retries).
+4. **SEC-S2's browse cap is `BROWSE_SCAN_MAX` (16,384) raw entries, not `SMB_LIST_MAX_ENTRIES + 1`.** The review's `+ 1` counts raw entries, files included, so a folder with 2,001 files and one subfolder would lose that subfolder. 16,384 small `RemoteEntry`s are a few MB at most.
+5. **Two "unreferenced" claims in the quality review were wrong about tests:**
+   - `browseClient()` (Q-D2) had two test uses;
+   - `recentAddress` (Q-D3) had a `ComputerFinderTest` assertion.
+
+   Both were still dead in `src/main`, so the deletions stand and the tests were adjusted (above).
+6. **Q-D9:** the review suggested a `FakeMonoClock` or a reachable deadline. Neither was needed. The real create fails synchronously on the dead transport, and the tests pass the factory clock to the storage.
+7. **Q-H4 has no regression test**; the reason is above.
+
+### For the lead
+
+- **SEC-S1, belt and braces (half A):** give `StoragePages.scope` a `CoroutineExceptionHandler` that logs the class name, so no browse job can kill the process. The lister no longer lets the dcerpc OOM out, so this is defence in depth only.
+- **Q-U3 (half A).**
+  - `ui/.../full/PlayerText.storageArg(arg)` can become `app.thebox.core.full.StorageToastArg.decode(arg)?.takeIf { it.kind != StorageKind.INTERNAL }`, and its `StorageArg` class can go (or become a typealias).
+  - `ui/.../full/vm/PlayerViewModel.storageStopToast` (`:466-467`) can use `StorageToastArg(lb.storage, failure?.name.orEmpty(), lb.storageName.orEmpty(), n.jumpedToLive).encode()`.
+  - `core/.../settings/state/StoragePageEnv.kt` `TimeshiftPlaces.current` (`:256`): `if (id.startsWith(VOLUME_ID_PREFIX)) VOLUME` can be `app.thebox.core.storage.storageKindOf(id).takeIf { it == StorageKind.VOLUME }`.
+- **Q-U5 (half A).**
+  - `app/.../settings/StoragePageEnvImpl.kt:30` can be `TimeshiftConstants.smallRemotePool(am.memoryClass)`.
+  - `StorageLimits.ramBlocks` (`StorageContracts.kt:82`) can be `else if (!TimeshiftConstants.smallRemotePool(memoryClassMb)) ramBlocks else ramBlocksSmall`.
+- **Q-U10 (half A).**
+  - `WpaPages.UNKNOWN_FREE` (`:738`) can be `app.thebox.core.storage.smb.UNKNOWN_FREE_BYTES`.
+  - One FAILED factory: add `companion object { fun failed(error: BrowseError, wifi: Boolean, atWallMs: Long) = LocationTestResult(TestVerdict.FAILED, 0, 0, 0, 0, -1, wifi, atWallMs, error) }` to `LocationTestResult` in `StorageContracts.kt`. Then switch `StoragePages.failed`, `LocationTester.failed` and `NetworkFoldersImpl.failed` (half B, a one-liner after the merge). Note that the sentinels differ today: `freeBytes` 0 vs −1, and `wifi` true vs the real value.
+- **R6 (half A):** `StorageFlags`/`VOLUME_ENABLED` in `StorageConstants.kt` now has no reader and can be deleted. If half A deletes it, nothing in half B breaks.
+- **Q-U6 is deferred per R8.** The wake path and the ring directory are still built in both the keeper and `LocationTester`.
+- **Design §5.3's "the Save to page opening" trigger** is not wired either; no caller exists. The one-line change would be in half A's `StoragePages`, when Save to is built: `ringTargets.warm()`, or a `StoragePageEnv` hook to it. `warm()` is now safe to call for any choice: it does nothing and builds nothing without a kept folder.
+- **Design doc, when this record is appended:**
+  - §5.3 could note the `wakeNow` rate limit (Deviation 2) and the lazy keeper (Q-E1);
+  - §8 could note the `hasBlob` existence check (Q-E2).
+- **Merge with half A:**
+  - `StorageTestKit.kt`'s `StorageTargetsImpl(locations, { keeper }, …)` call changed.
+  - If half A's tests build `StorageTargetsImpl` or `SecureBlobStore` fakes, the defaults keep them compiling.
+  - `FakeRingTargetSource` (`StorageFakes.kt`) is untouched.
+
+### Gate (worktree, 2026-10-28)
+
+`./gradlew :core:test :data:testDebugUnitTest :player:testDebugUnitTest :app:testDebugUnitTest :app:compileDebugAndroidTestKotlin :app:assembleDebug --continue`: BUILD SUCCESSFUL in one run (9 min 36 s). `PlaybackWatchdogTest` did not hang.
+
+| Module | Tests | Skipped | Failed |
+|---|---|---|---|
+| `:core` | 3,654 | 0 | 0 |
+| `:data` | 438 | 3 (the opt-in Samba cases) | 0 |
+| `:player` | 507 | 0 | 0 |
+| `:app` | 73 | 0 | 0 |
+
+Counts are summed from the JUnit XML `tests=` attributes. The lead's `:core` baseline of 4,011 was probably counted another way; this run's report has no failures.
+
+`:app:compileDebugAndroidTestKotlin` and `:app:assembleDebug` are OK, and so is `:app:minifyReleaseWithR8` (run separately).

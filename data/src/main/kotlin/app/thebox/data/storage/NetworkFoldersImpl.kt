@@ -303,11 +303,7 @@ class NetworkFoldersImpl internal constructor(
     private fun shareError(e: Throwable, vpn: Boolean): BrowseError = when (SmbFaults.classify(e, false, null)) {
         FaultClass.ACCESS -> BrowseError(BrowseErrorKind.STORAGE, StorageFailure.ACCESS)
         FaultClass.REMOVED -> BrowseError(BrowseErrorKind.NOT_FOUND)
-        else -> if (isBadShareName(e)) BrowseError(BrowseErrorKind.NOT_FOUND) else SmbFaults.browseError(e, vpn)
-    }
-
-    private fun isBadShareName(e: Throwable): Boolean = SmbFaults.chain(e).any {
-        (it as? com.hierynomus.mssmb2.SMBApiException)?.status == com.hierynomus.mserref.NtStatus.STATUS_BAD_NETWORK_NAME
+        else -> if (SmbFaults.isBadShareName(e)) BrowseError(BrowseErrorKind.NOT_FOUND) else SmbFaults.browseError(e, vpn)
     }
 
     private fun cancelled(e: Throwable): Boolean =
@@ -322,7 +318,7 @@ class NetworkFoldersImpl internal constructor(
         otherwise
     }
 
-    private fun failed(error: BrowseError) = LocationTestResult(TestVerdict.FAILED, 0, 0, 0, 0, -1, onWifi(), System.currentTimeMillis(), error)
+    private fun failed(error: BrowseError) = LocationTestResult.failed(error, onWifi(), System.currentTimeMillis())
 
     private fun onWifi(): Boolean = try {
         val cm = context.getSystemService(ConnectivityManager::class.java)

@@ -89,6 +89,11 @@ object SmbFaults {
     /** C-S7: an open refused because another client holds the file (the sweep keeps it). */
     fun isSharingViolation(t: Throwable): Boolean = statusOf(chain(t).toList()) == NtStatus.STATUS_SHARING_VIOLATION.value
 
+    /** (Q-U10) The share name does not exist on that computer. */
+    fun isBadShareName(t: Throwable): Boolean = chain(t).any {
+        (it as? com.hierynomus.mssmb2.SMBApiException)?.status == NtStatus.STATUS_BAD_NETWORK_NAME
+    }
+
     /** A logon status (wrong password, account problems): the keeper goes to AUTH_FAILED (§4.3 row 5). */
     fun isLogonFailure(t: Throwable): Boolean {
         val s = statusOf(chain(t).toList()) ?: return false

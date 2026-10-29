@@ -15,6 +15,12 @@ interface StoragePageEnv {
      */
     fun smallRemotePool(): Boolean = false
 
+    /**
+     * (§5.3, closure fix pass; additive) The Save to page opened: warm the network folder chosen for rewind
+     * (`RingTargetSource.warm()`). Called off the main thread; never blocks. Default: nothing.
+     */
+    fun warmSaveLocation() = Unit
+
     /** Runs [block] on the main thread (the settings machine and its shell link are main-thread only). Tests run it inline. */
     fun runOnMain(block: () -> Unit) = block()
 }
@@ -256,7 +262,7 @@ class TimeshiftPlaces(
         if (id == app.thebox.core.storage.StorageConstants.INTERNAL_ID) return device
         val status = locations.status.value.firstOrNull { it.location.id == id }
         val loc = status?.location
-        val kind = loc?.kind ?: if (id.startsWith(app.thebox.core.storage.StorageConstants.VOLUME_ID_PREFIX)) app.thebox.core.storage.StorageKind.VOLUME else return device
+        val kind = loc?.kind ?: app.thebox.core.storage.storageKindOf(id).takeIf { it == app.thebox.core.storage.StorageKind.VOLUME } ?: return device
         val usb = kind == app.thebox.core.storage.StorageKind.VOLUME
         val name = if (usb) texts[StorageText.PLACE_USB] else loc?.name.orEmpty().ifBlank { return device }
         val sentence = if (usb) texts[StorageText.PLACE_USB_DRIVE] else name

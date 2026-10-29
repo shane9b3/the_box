@@ -9,6 +9,8 @@ class FakeStoragePageEnv(var keyboard: Boolean = true, var smallPool: Boolean = 
     private val mainQueue = ArrayDeque<() -> Unit>()
     override fun hasKeyboard() = keyboard
     override fun smallRemotePool() = smallPool
+    val warms = java.util.concurrent.atomic.AtomicInteger()
+    override fun warmSaveLocation() { warms.incrementAndGet() }
     override fun runOnMain(block: () -> Unit) { if (deferMain) mainQueue.addLast(block) else block() }
     fun runMain() { while (mainQueue.isNotEmpty()) mainQueue.removeFirst().invoke() }
 }

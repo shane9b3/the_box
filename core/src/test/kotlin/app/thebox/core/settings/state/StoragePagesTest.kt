@@ -769,6 +769,31 @@ class StoragePagesTest {
         assertFalse(w.phoneLink.statuses.joinToString().contains("from-phone"))
     }
 
+    @Test fun aThrowingPhoneCollectorDoesNotKillThePageMachine() {
+        val w = world()
+        w.phoneLink.collectFailure = IllegalStateException("boom 192.168.1.20")
+        w.folders.openAnswer = { a, hasPw -> if (hasPw) opened(a, SignInMode.USER) else BrowseResult.NeedsSignIn() }
+        w.folders.findStates = listOf(findState(FoundComputer("NAS", "192.168.1.20", NameSource.NSD)))
+        w.open(SettingsRoute.FindComputers)
+        w.press(RowId("storage.find.pc.192.168.1.20"))
+        w.press(StoragePages.ROW_SI_PHONE) // the phone collector throws at once; the scope must survive
+        w.pump()
+        w.phoneLink.collectFailure = null
+        w.open(SettingsRoute.FindComputers)
+        assertNotNull(w.rows().firstOrNull { it.id == RowId("storage.find.pc.192.168.1.20") }, "Find still works after the fault")
+    }
+
+    @Test fun openingSaveToWarmsTheRingTargetOncePerVisit() {
+        val w = world()
+        w.open(SettingsRoute.SaveLocation())
+        w.refresh() // a rebuild of the same page is not a new visit
+        assertEquals(1, w.storageEnv.warms.get())
+        w.storage.build(SettingsRoute.PauseRewind, PageContext(false, 1_000_000L))
+        assertEquals(1, w.storageEnv.warms.get(), "other pages do not warm")
+        w.storage.build(SettingsRoute.SaveLocation(), PageContext(false, 1_000_000L))
+        assertEquals(2, w.storageEnv.warms.get(), "a new visit warms again")
+    }
+
     @Test fun aWrongPasswordFromThePhoneIsMirroredAndTheTvStaysOnTheQrPage() {
         val w = world()
         w.folders.openAnswer = { a, hasPw -> if (hasPw) BrowseResult.NeedsSignIn(BrowseError(BrowseErrorKind.AUTH)) else BrowseResult.NeedsSignIn() }

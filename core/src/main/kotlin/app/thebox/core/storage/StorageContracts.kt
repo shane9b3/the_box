@@ -41,7 +41,13 @@ data class SmbAddress(
 @Serializable
 data class LocationTestResult(val verdict: TestVerdict, val writeBps: Long, val readBps: Long, val rttMs: Int,
                               val wakeMs: Int, val freeBytes: Long, val wifi: Boolean, val atWallMs: Long,
-                              val error: BrowseError? = null, val stop: TestStopReason? = null)
+                              val error: BrowseError? = null, val stop: TestStopReason? = null) {
+    companion object {
+        /** (Q-U10) A Test that failed before or without measuring: nothing measured, free space unknown. */
+        fun failed(error: BrowseError, wifi: Boolean, atWallMs: Long) =
+            LocationTestResult(TestVerdict.FAILED, 0, 0, 0, 0, -1, wifi, atWallMs, error)
+    }
+}
 
 /** (C-N7, closure fix pass) Why a Test stopped itself ("Stopped: NAS took too long."). Append-only. */
 @Serializable enum class TestStopReason { TOOK_TOO_LONG }
@@ -86,7 +92,7 @@ data class StorageLimits(
      */
     fun ramBlocks(memoryClassMb: Int, lowRamDevice: Boolean): Int =
         if (countsWear) { if (lowRamDevice) ramBlocksSmall else ramBlocks }
-        else if (memoryClassMb >= TimeshiftConstants.REMOTE_POOL_MEMORY_CLASS_MB) ramBlocks else ramBlocksSmall
+        else if (!TimeshiftConstants.smallRemotePool(memoryClassMb)) ramBlocks else ramBlocksSmall
 
     /**
      * (Commit 0 helper, §3.4 "Reserve enforcement", A-S4) What a **non-internal** storage reports from `availableBytes()`

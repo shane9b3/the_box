@@ -463,8 +463,7 @@ class PlayerViewModel @Inject constructor(
             else -> return null
         }
         val failure = if (n.stop == app.thebox.core.playback.timeshift.RecordStop.DISK_TOO_SLOW) app.thebox.core.storage.StorageFailure.SLOW else lb.storageFailure
-        val arg = listOf(lb.storage.name, failure?.name.orEmpty(), lb.storageName.orEmpty(), if (n.jumpedToLive) "1" else "")
-            .joinToString(PlayerText.ARG_SEP.toString())
+        val arg = app.thebox.core.full.StorageToastArg(lb.storage, failure?.name.orEmpty(), lb.storageName.orEmpty(), n.jumpedToLive).encode()
         return kind to arg
     }
 

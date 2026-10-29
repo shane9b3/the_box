@@ -20,15 +20,20 @@ import javax.inject.Singleton
  * ruling 5), and the main thread (the settings machine's).
  */
 @Singleton
-class StoragePageEnvImpl @Inject constructor(@ApplicationContext private val context: Context) : StoragePageEnv {
+class StoragePageEnvImpl @Inject constructor(
+    @ApplicationContext private val context: Context,
+    private val ringTargets: dagger.Lazy<app.thebox.core.playback.timeshift.RingTargetSource>,
+) : StoragePageEnv {
     private val main = Handler(Looper.getMainLooper())
 
     override fun hasKeyboard(): Boolean = keyboardAvailable(context)
 
     override fun smallRemotePool(): Boolean {
         val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager ?: return false
-        return am.memoryClass < app.thebox.core.playback.timeshift.TimeshiftConstants.REMOTE_POOL_MEMORY_CLASS_MB
+        return app.thebox.core.playback.timeshift.TimeshiftConstants.smallRemotePool(am.memoryClass)
     }
+
+    override fun warmSaveLocation() = ringTargets.get().warm()
 
     override fun runOnMain(block: () -> Unit) {
         if (Looper.myLooper() == Looper.getMainLooper()) block() else main.post(block)
