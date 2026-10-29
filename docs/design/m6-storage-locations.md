@@ -1,6 +1,6 @@
 # Save location for pause and rewind (this device, USB drive, network folder): design
 
-Status: **proposed 2026-10-24; reviewed 2026-10-24.** Two reviews:
+Status: **proposed 2026-10-24; reviewed 2026-10-24; implemented, integrated and fix-passed 2026-10-24; closure pass 2026-10-28** (security review `docs/review/2026-10-28-storage-locations-review-security.md`, dead-code/efficiency review `…-review-quality.md`, closure audit `…-closure-audit.md`, rulings and records in "Closure pass (2026-10-28)" at the end). Two design reviews:
 - an architecture/playback review (A, `scratchpad/storage/review-arch.md`): blockers A-B1…A-B4, should-fix A-S1…A-S14, nice-to-have A-N1…A-N7;
 - a product/UX review (U, `scratchpad/storage/review-ux.md`): blockers U-B1…U-B4, should-fix U-S1…U-S10, nice-to-have U-N1…U-N6.
 
@@ -1560,7 +1560,7 @@ In worktree `agent-a190412bb6bf58a4b` (branch `worktree-agent-a190412bb6bf58a4b`
 
 - Collect `PhoneSubmission.NetworkFolder` while `PhoneSetup(NETWORK_FOLDER, browse)` is open. **Zero `password` when done.** `host` may carry `:port`; `path` is `/`-separated or null.
 - Answer **every** submission with exactly one `PhoneLink.reportStatus(text, done)`: `done = true` for signed in, `false` for failed. Do not report progress, because each `done = false` counts as a failed sign-in.
-- Texts for the results are in `strings_storage_phone.xml`: `storage_phone_result_signed_in`, `_auth`, `_unreachable`, `_no_guests`, `_no_access`.
+- Texts for the results are the `storage_phone_*` strings in `strings_storage.xml` (the `storage_phone_result_*` duplicates were deleted in the UI fix pass, U-N4).
 - After a success, replace the route. The server lingers for the phone by itself.
 
 ### Deviations
@@ -2118,3 +2118,28 @@ This pass applies `docs/review/2026-10-24-storage-locations-review-core.md` C-B1
 - C-N5: a NETWORK_FOLDER-scoped collector registration in `StoragePages`.
 - C-N7: the "Stopped: NAS took too long" string.
 - C-B1: a `FallbackRingStorage` that switched on the pool bound, not the deadline, reports UNREACHABLE (the wording "Can't reach …"). A sleeping disk at 4K reads the same as a blackhole. A SLOW wording would need a `LocationFallback` value (enum is append-only; UI strings).
+
+---
+
+## Closure pass (2026-10-28)
+
+The merged fix pass (`5d99f57`) was verified as one tree: core 4,011 / data 427 / player 505 / ui 401 / app 73 unit tests green, `assembleDebug` OK (`EditorPerfTest.budgets` fails only under the full parallel run and passes alone; it is a channel-editor budget test). Three reviews then ran on the whole feature diff (`e8b1f7d^..5d99f57`):
+
+- **Closure audit** (`docs/review/2026-10-28-storage-locations-closure-audit.md`): every blocker and should-fix of both 2026-10-24 reviews is on main with its test; the parallel merge is clean; the probe tests are gone. Open: the items each fix-pass half left for the other (O-1 U-N1 display, O-2 C-N4, O-3 C-N5, O-4 C-N7, O-5 C-B1 wording, O-6 C-S3 page side) and X-1 (U-S9 keeper side across processes).
+- **Security review** (`…-review-security.md`): no blockers; the credential path, log redaction, LAN-server checks, 445 sweep bounds and R8 scope hold. Should-fix SEC-S1 (a small srvsvc reply can OOM the process), SEC-S2 (unbounded directory listings; a hung listing holds `box-smb`), SEC-S3 (the phone sign-in replaces the picked IP with the discovered name), SEC-S4 (password copies passed to `open` are never zeroed). Nice-to-have SEC-N1…N7.
+- **Dead-code / efficiency review** (`…-review-quality.md`): strings and `StorageText` keys all referenced; the ring hot path allocates nothing per call; `prepare` does no network I/O. Dead code Q-D1…D10, duplication Q-U1…U10, efficiency Q-E1…E4, hygiene Q-H1…H6.
+
+### Lead rulings
+
+1. **O-5 / C-B1 wording.** A folder that cannot take the first write before the RAM pool runs out is, to the viewer, unreachable. `UNREACHABLE` and "isn't answering" stay; no `LocationFallback.SLOW`.
+2. **Q-D1.** §5.3 lists the guide's preview start as a keeper trigger with a `.wake` write. It is wired, not deleted.
+3. **Q-U1 + C-N4.** `ManualAddressParser` is the single owner of the address grammar; `PhoneApi.splitFolder` delegates to it and `app.js` mirrors it. IPv6 is refused everywhere. New `Reason.BAD_PATH` for `..` and control characters; `.` segments dropped.
+4. **Q-E1.** The keeper (its threads, watchdog and network callback) is built only once an SMB location is chosen for `TIMESHIFT`. Every §5.3 trigger still works once it exists.
+5. **Q-D8.** `WpaPages.build(PauseRewind)` and the tests pinning it are deleted; the sub-page is the only route.
+6. **Q-D10.** `StorageFlags.VOLUME_ENABLED` goes; the `@BindsOptionalOf RingTargetSource` stays only if a test graph needs it.
+7. **Q-D7.** The `LABEL_LINK_MAX_CHARS` truncation is implemented; the unread gate and APK-budget constants are deleted (this document is their home); `RECORDINGS_DIR_SMB` stays (v2).
+8. **Deferred.** Q-U6 (the wake path in the keeper and `LocationTester`; it crosses both halves); SEC-N2 (the M5 passphrase pattern), SEC-N3 (needs a device with a full-tunnel VPN), SEC-N4 (a restored backup may point rewind at any host: owner question, see §21), SEC-N5, SEC-N7 (threat model only); U-N5, U-N7, U-N8, C-N6, C-N8, the 1-h first-media finding; the device and Samba checks.
+9. SEC-N1, SEC-N6 and Q-H3 are taken.
+
+The fix pass ran as two Opus worktrees split by file (A: settings machine, LAN sign-in, UI, strings, `LocationTester`; B: storage, SMB, keeper, playback, Hilt, R8 rules). Their records follow.
+
