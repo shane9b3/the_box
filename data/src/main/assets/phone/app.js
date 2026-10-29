@@ -248,48 +248,128 @@
   $('b-link').addEventListener('click', function () { show($('b-saved'), true); });
 
   // ---- network folder (docs/design/m6-storage-locations.md §7.4) ----
-  // splitFolder mirrors PhoneApi.splitFolder (Kotlin); PhoneApiNetworkFolderTest holds the shared vectors.
-  var HOST_OK = /^(?:[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?$/;
-  var PORT = /:([0-9]{1,5})$/;
+  // parse/parseFields mirror ManualAddressParser (Kotlin, :core), the single owner of the address grammar (closure fix
+  // pass, R3); splitFolder mirrors PhoneApi.splitFolder (the parser plus the length caps). PhoneApiNetworkFolderTest's
+  // SPLIT_VECTORS run through both (the JS side with node, see the test's KDoc).
+  var SCHEME = /^([A-Za-z][A-Za-z0-9+.-]*):\/\//;
+  var SMB_PORT = 445;
 
-  function segments(s) {
-    return (s || '').split(/[\/\\]/).map(function (x) { return x.trim(); })
-      .filter(function (x) { return x !== '' && x !== '.'; });
+  function folderParts(raw) {
+    var out = [];
+    for (var i = 0; i < raw.length; i++) {
+      if (/[\u0000-\u001F\u007F]/.test(raw[i])) return null; // C-N4: a control character, before any trim
+      var t = raw[i].trim();
+      if (t === '' || t === '.') continue;
+      if (t === '..') return null;
+      out.push(t);
+    }
+    return out;
   }
 
-  function uncParts(s) {
-    var rest;
-    if (s.indexOf('\\\\') === 0 || s.indexOf('//') === 0) rest = s.substring(2);
-    else if (/^smb:\/\//i.test(s)) rest = s.substring(6);
-    else return null;
-    var p = segments(rest);
-    return p.length ? p : null;
+  function segments(s) { return folderParts((s || '').split(/[\/\\]/)); }
+
+  function isWholeAddress(s) {
+    var t = (s || '').trim();
+    return t.indexOf('\\\\') === 0 || t.indexOf('//') === 0 || SCHEME.test(t);
+  }
+
+  function percentDecode(s) {
+    if (s.indexOf('%') < 0) return s;
+    var out = '';
+    for (var i = 0; i < s.length;) {
+      if (s.charAt(i) === '%') {
+        if (!/^[0-9A-Fa-f]{2}$/.test(s.substr(i + 1, 2))) return null;
+        out += s.substr(i, 3);
+        i += 3;
+      } else {
+        var end = s.indexOf('%', i);
+        if (end < 0) end = s.length;
+        try { out += encodeURIComponent(s.substring(i, end)); } catch (e) { return null; }
+        i = end;
+      }
+    }
+    try { return decodeURIComponent(out); } catch (e) { return null; } // malformed UTF-8, as the TV refuses it
+  }
+
+  function validHost(h) {
+    if (!h || h.length > 253) return false;
+    if (!/^[A-Za-z0-9]/.test(h) || !/[A-Za-z0-9]$/.test(h) || h.indexOf('..') >= 0) return false;
+    if (!/^[A-Za-z0-9._-]+$/.test(h)) return false;
+    var labels = h.split('.');
+    for (var i = 0; i < labels.length; i++) if (labels[i].length > 63) return false;
+    if (labels.every(function (l) { return /^[0-9]*$/.test(l); })) {
+      if (labels.length !== 4) return false;
+      return labels.every(function (l) { return l.length >= 1 && l.length <= 3 && +l <= 255; });
+    }
+    return true;
+  }
+
+  // {host, port, share, path} or {reason: 'EMPTY' | 'BAD_HOST' | 'BAD_PORT' | 'UNSUPPORTED_SCHEME' | 'BAD_PATH'}
+  function parse(input) {
+    var s = (input || '').trim();
+    if (!s) return { reason: 'EMPTY' };
+    var m = SCHEME.exec(s);
+    if (m) {
+      if (m[1].toLowerCase() !== 'smb') return { reason: 'UNSUPPORTED_SCHEME' };
+      s = percentDecode(s.substring(m[0].length));
+      if (s === null) return { reason: 'BAD_HOST' };
+    } else if (s.indexOf('\\\\') === 0 || s.indexOf('//') === 0) {
+      s = s.substring(2);
+    }
+    var all = s.split(/[\/\\]/), first = -1;
+    for (var i = 0; i < all.length; i++) if (/\S/.test(all[i])) { first = i; break; }
+    if (first < 0) return { reason: 'EMPTY' };
+    var hostPort = all[first].trim(), host = hostPort, port = SMB_PORT, colon = hostPort.indexOf(':');
+    if (colon >= 0) {
+      if (hostPort.indexOf(':', colon + 1) >= 0) return { reason: 'BAD_HOST' }; // IPv6 is not supported
+      host = hostPort.substring(0, colon);
+      var p = hostPort.substring(colon + 1);
+      if (!/^[0-9]{1,5}$/.test(p)) return { reason: 'BAD_PORT' };
+      port = +p;
+      if (port < 1 || port > 65535) return { reason: 'BAD_PORT' };
+    }
+    if (!validHost(host)) return { reason: 'BAD_HOST' };
+    var parts = folderParts(all.slice(first + 1));
+    if (!parts) return { reason: 'BAD_PATH' };
+    return { host: host, port: port, share: parts.length ? parts[0] : null, path: parts.slice(1).join('/') };
+  }
+
+  function parseFields(host, share, path) {
+    var h = (host || '').trim(), s = (share || '').trim(), whole = isWholeAddress(s);
+    var base = parse(whole ? s : h);
+    if (base.reason) return base;
+    var shareParts = (base.share !== null ? [base.share] : []).concat(base.path ? base.path.split('/') : []);
+    if (!whole && s) {
+      shareParts = segments(s);
+      if (!shareParts) return { reason: 'BAD_PATH' };
+    }
+    var more = segments(path);
+    if (!more) return { reason: 'BAD_PATH' };
+    var sh = shareParts.length ? shareParts[0] : null, rest = shareParts.slice(1).concat(more);
+    if (sh === null && rest.length) return { reason: 'BAD_PATH' };
+    return { host: base.host, port: base.port, share: sh, path: rest.join('/') };
   }
 
   function splitFolder(host, share, path) {
-    var h = (host || '').trim(), shareParts = [], u;
-    if ((u = uncParts(h))) { h = u[0]; shareParts = u.slice(1); }
-    var s = (share || '').trim(), us = uncParts(s);
-    if (us) { h = us[0]; shareParts = us.slice(1); } else if (s) shareParts = segments(s);
-    var sh = shareParts.length ? shareParts[0] : null;
-    var pathParts = shareParts.slice(1).concat(segments(path));
-    if (!h || h.length > 255 || !HOST_OK.test(h)) return null;
-    var port = PORT.exec(h);
-    if (port && !(+port[1] >= 1 && +port[1] <= 65535)) return null;
-    if (sh === null && pathParts.length) return null;
-    if (sh === '..' || pathParts.indexOf('..') >= 0) return null;
-    if (sh !== null && sh.length > 80) return null;
-    var p = pathParts.join('/');
-    if (p.length > 1024) return null;
-    return { host: h, share: sh, path: p || null };
+    var f = parseFields(host, share, path);
+    if (f.reason) return null;
+    var h = f.port === SMB_PORT ? f.host : f.host + ':' + f.port;
+    if (h.length > 255) return null;
+    if (f.share !== null && f.share.length > 80) return null;
+    if (f.path.length > 1024) return null;
+    return { host: h, share: f.share, path: f.path || null };
   }
   // ---- end splitFolder ----
+
+  // SEC-S3: the address the TV signs in to; while the field is read-only it is what the page sends, never the name.
+  var contextHost = null;
 
   function initFolder(f) {
     show($('f-netfolder'), true);
     if (!f) return;
     if (f.host) {
-      $('n-host').value = f.host;
+      contextHost = f.host;
+      $('n-host').value = f.name && f.name !== f.host ? f.name + ' (' + f.host + ')' : f.host;
       $('n-host').readOnly = true;
       show($('n-change'), true);
     }
@@ -366,6 +446,8 @@
 
   bind('n-change', function () {
     var h = $('n-host');
+    if (contextHost) h.value = contextHost; // edit the address, not the shown name
+    contextHost = null;
     h.readOnly = false;
     h.focus();
     h.select();
@@ -390,8 +472,8 @@
     e.preventDefault();
     if (finalText) return;
     if (folderWait) { say('The TV is still signing in. Wait for its answer.', 'err'); return; }
-    var host = $('n-host').value;
-    if (!host.trim() && !uncParts(shareValue().trim())) { say('Enter the computer\'s name or address.', 'err'); return; }
+    var host = contextHost && $('n-host').readOnly ? contextHost : $('n-host').value;
+    if (!host.trim() && !isWholeAddress(shareValue())) { say('Enter the computer\'s name or address.', 'err'); return; }
     var f = splitFolder(host, shareValue(), $('n-path').value);
     if (!f) {
       say('Check the computer and the shared folder, for example nas and TV, or paste \\\\NAS\\TV\\Rewind.', 'err');

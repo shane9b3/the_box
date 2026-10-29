@@ -6,6 +6,7 @@ import app.thebox.core.settings.PhonePurpose
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.asCoroutineDispatcher
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.serialization.encodeToString
@@ -328,7 +329,7 @@ class PhoneApiNetworkFolderTest {
 
     // ---- end to end: LanPhoneLink ----
 
-    private inner class Link(grace: Long = 1_000) {
+    private inner class Link(grace: Long = 1_000, receiver: Boolean = true) {
         val transport = FakeTransportAdapter()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val link = LanPhoneLink(
@@ -341,7 +342,8 @@ class PhoneApiNetworkFolderTest {
         )
 
         init {
-            scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { link.submissions.collect { submissions += it } }
+            // C-N5: the NETWORK_FOLDER receiver, as StoragePages' phoneJob collects it.
+            if (receiver) scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { link.networkFolderSubmissions().collect { submissions += it } }
         }
 
         fun pair(context: PhoneContext? = PhoneContext("NAS", "TV", listOf("TV"))): String {
@@ -428,6 +430,59 @@ class PhoneApiNetworkFolderTest {
         }
     }
 
+    /**
+     * C-N5 (closure fix pass): another collector of `submissions` (the setup flow, a retained view model) is not a
+     * NETWORK_FOLDER receiver: the phone gets 503, nothing is handed over, and the next try is not stuck on 409.
+     */
+    @Test
+    fun endToEndAnotherCollectorIsNotAFolderReceiver() {
+        val l = Link(receiver = false)
+        val other = Collections.synchronizedList(ArrayList<PhoneSubmission>())
+        l.scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { l.link.submissions.collect { other += it } }
+        try {
+            val cookie = l.pair()
+            assertEquals(503, l.send(cookie))
+            assertEquals(503, l.send(cookie), "refused, not left checking (409)")
+            assertTrue(other.isEmpty())
+            // Once the TV's folder page collects, the same phone goes through.
+            l.scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { l.link.networkFolderSubmissions().collect { submissions += it } }
+            assertEquals(202, l.send(cookie))
+            awaitValue { submissions.singleOrNull() }
+        } finally {
+            l.close()
+        }
+    }
+
+    /** C-N5: a NETWORK_FOLDER submission accepted but never taken (its receiver went) is zeroed when the session stops. */
+    @Test
+    fun endToEndStopZeroesASubmissionNobodyTook() {
+        val l = Link(receiver = false)
+        val seen = Collections.synchronizedList(ArrayList<PhoneSubmission>())
+        l.scope.launch(start = kotlinx.coroutines.CoroutineStart.UNDISPATCHED) { l.link.submissions.collect { seen += it } }
+        val exec = java.util.concurrent.Executors.newSingleThreadExecutor()
+        val gate = java.util.concurrent.CountDownLatch(1)
+        val taken = Collections.synchronizedList(ArrayList<PhoneSubmission>())
+        try {
+            val receiver = CoroutineScope(exec.asCoroutineDispatcher()).launch { l.link.networkFolderSubmissions().collect { taken += it } }
+            // The receiver subscribes first (FIFO on its one thread), then its thread is held, so it cannot take anything.
+            exec.execute { gate.await() }
+            val cookie = l.pair()
+            assertEquals(202, l.send(cookie, signIn(pw = "never-taken-pw")))
+            val sub = assertIs<PhoneSubmission.NetworkFolder>(awaitValue { seen.singleOrNull() })
+            receiver.cancel() // the folder page went before it took the submission
+            gate.countDown()
+            kotlinx.coroutines.runBlocking { receiver.join() }
+            assertTrue(taken.isEmpty())
+            assertFalse(sub.password!!.all { it == '\u0000' }, "still the only copy before the stop")
+            l.link.stop()
+            assertTrue(sub.password!!.all { it == '\u0000' }, "zeroed by stop()")
+        } finally {
+            gate.countDown()
+            exec.shutdownNow()
+            l.close()
+        }
+    }
+
     @Test
     fun endToEndStopBeforeAnyResultStopsAtOnce() {
         val l = Link()
@@ -460,7 +515,26 @@ class PhoneApiNetworkFolderTest {
 {"in":["smb://nas",null,null],"out":["nas",null,null]},
 {"in":["nas","TV\\Rewind","Box\\Sub"],"out":["nas","TV","Rewind/Box/Sub"]},
 {"in":["nas","/TV/","/Rewind//./Box/"],"out":["nas","TV","Rewind/Box"]},
-{"in":["[fe80::1]:445","TV",null],"out":["[fe80::1]:445","TV",null]},
+{"in":["[fe80::1]:445","TV",null],"out":null},
+{"in":["fe80::1","TV",null],"out":null},
+{"in":["nas","TV\u0000",null],"out":null},
+{"in":["nas","TV","Rewind\nx"],"out":null},
+{"in":["nas","TV","Rewind\n"],"out":null},
+{"in":["\\\\nas\\TV\\a\u007Fb",null,null],"out":null},
+{"in":["","\\\\nas\\TV\\Re\twind",null],"out":null},
+{"in":["","smb://nas/TV/%2e%2e",null],"out":null},
+{"in":["","smb://nas/TV/%00",null],"out":null},
+{"in":["","smb://nas/TV/%C3",null],"out":null},
+{"in":["","smb://nas/%zz",null],"out":null},
+{"in":["nas","TV","./a/./b"],"out":["nas","TV","a/b"]},
+{"in":["","smb://nas/My%20Videos/Live",null],"out":["nas","My Videos","Live"]},
+{"in":["","smb://nas/Caf%C3%A9",null],"out":["nas","Café",null]},
+{"in":["nas:445","TV",null],"out":["nas","TV",null]},
+{"in":["nas/TV","",null],"out":["nas","TV",null]},
+{"in":["\\\\NAS\\TV\\Rewind","Media",null],"out":["NAS","Media",null]},
+{"in":["nas","http://x/TV",null],"out":null},
+{"in":["nas-","TV",null],"out":null},
+{"in":["﻿nas ","TV",null],"out":["nas","TV",null]},
 {"in":["","TV",null],"out":null},
 {"in":[null,null,null],"out":null},
 {"in":["nas",null,"Rewind"],"out":null},

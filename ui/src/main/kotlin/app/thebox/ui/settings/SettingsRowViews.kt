@@ -61,9 +61,9 @@ fun rowHeight(row: SettingsRow): Int = when {
     else -> SettingsUi.ROW_H
 }
 
-/** (WP-S4) The Test's progress Info row (`StoragePages.ROW_T_PROGRESS`) and the Find page's searching row. */
-internal val PROGRESS_ROW = app.thebox.core.settings.RowId("storage.test.progress")
-internal val SEARCHING_ROW = app.thebox.core.settings.RowId("storage.find.searching")
+/** (WP-S4) The Test's progress Info row and the Find page's searching row: `:core`'s ids (Q-U9, closure fix pass). */
+internal val PROGRESS_ROW = app.thebox.core.settings.state.StoragePages.ROW_T_PROGRESS
+internal val SEARCHING_ROW = app.thebox.core.settings.state.StoragePages.ROW_SEARCHING
 
 /** An Info row of the storage pages with lines under its label. */
 internal fun isStorageInfo(row: SettingsRow): Boolean =

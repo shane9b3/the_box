@@ -199,7 +199,7 @@ class StoragePagesTest {
         val locs = app.thebox.core.storage.fakes.FakeStorageLocations(listOf(usb))
         val pages = StoragePages(
             w2.store, SettingsTexts.KEYS, StorageTexts.KEYS, w2.wpa, w2.env, TimeshiftPlaces(locs, w2.volumes, StorageTexts.KEYS), locs, w2.folders, w2.volumes,
-            w2.phoneLink, w2.storageEnv, kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined), parse = ::stubParse, reapGraceMs = 0L,
+            w2.phoneLink, w2.storageEnv, kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined), reapGraceMs = 0L,
         )
         locs.setState("vol-U9", LocationState.NOT_CONNECTED)
         val detail = pages.build(SettingsRoute.LocationDetail("vol-U9"), PageContext(false, 1_000_000L))
@@ -304,19 +304,19 @@ class StoragePagesTest {
 
     @Test fun findComputersOrdersAndLabelsTheResults() {
         val w = world(listOf(nas))
-        w.folders.findStates = listOf(
-            findState(
-                FoundComputer(null, "192.168.1.50", NameSource.NONE),
-                FoundComputer("DESKTOP-7F3K2LQ", "192.168.1.30", NameSource.NETBIOS),
-                FoundComputer("NAS", "192.168.1.20", NameSource.NSD),
-                FoundComputer("mac", "192.168.1.9", NameSource.NSD),
-            ),
-        )
+        // Q-U2 (closure fix pass): the finder's merge orders and marks saved (DiscoveryMergeTest); the page keeps both.
+        val found = listOf(
+            FoundComputer(null, "192.168.1.50", NameSource.NONE),
+            FoundComputer("DESKTOP-7F3K2LQ", "192.168.1.30", NameSource.NETBIOS),
+            FoundComputer("NAS", "192.168.1.20", NameSource.NSD, saved = true),
+            FoundComputer("mac", "192.168.1.9", NameSource.NSD),
+        ).sortedWith(app.thebox.core.storage.discovery.DiscoveryMerge.ORDER)
+        w.folders.findStates = listOf(findState(*found.toTypedArray()))
         w.open(SettingsRoute.FindComputers)
         val ids = w.rows().map { it.id.key }
         assertEquals(
             listOf("storage.find.status", "storage.find.pc.192.168.1.20", "storage.find.pc.192.168.1.30", "storage.find.pc.192.168.1.9", "storage.find.pc.192.168.1.50", "storage.find.enter", "storage.find.phone", "storage.find.again"),
-            ids, "saved first, then named A-Z (DESKTOP before mac), then unnamed by address; Enter, Phone, Search again last",
+            ids, "the finder's order (saved first, then named A-Z, then unnamed by address); Enter, Phone, Search again last",
         )
         assertEquals("FIND_DONE(4)", w.row(StoragePages.ROW_STATUS).label)
         assertEquals(setOf(Badge.SAVED), (w.row(RowId("storage.find.pc.192.168.1.20")).kind as RowKind.Item).badges)
@@ -752,9 +752,11 @@ class StoragePagesTest {
         val phone = assertIs<SettingsRoute.PhoneSetup>(w.ui.route)
         assertEquals(PhonePurpose.NETWORK_FOLDER, phone.purpose)
         assertEquals(signIn.browse, phone.browse)
-        // What the phone page is told: the host and the shares, never a credential.
+        // What the phone page is told: the host and the shares, never a credential. SEC-S3: the host is the address the
+        // viewer picked; the name is for display only.
         val ctx = assertNotNull(w.storage.context(phone.browse!!))
-        assertEquals("NAS", ctx.host)
+        assertEquals("192.168.1.20", ctx.host)
+        assertEquals("NAS", ctx.name)
         // The phone sends (the password is the only copy; it is zeroed once used).
         val pw = "from-phone".toCharArray()
         w.phoneLink.submit(PhoneSubmission.NetworkFolder("192.168.1.20", "TV", "Rewind", "shawn", null, pw, false))

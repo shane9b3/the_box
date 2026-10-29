@@ -178,8 +178,8 @@ class StorageReviewUiProofTest {
         w.open(SettingsRoute.FindComputers)
         assertEquals("storage.find.pc.192.168.1.50", w.focusedRow()?.id?.key)
         w.focus(StoragePages.ROW_ENTER) // the viewer heads for "Enter a name or address"
-        // The NetBIOS name of another computer arrives; it sorts first.
-        f.state.value = found(FoundComputer(null, "192.168.1.50", NameSource.NONE), FoundComputer("DESKTOP-1", "192.168.1.30", NameSource.NETBIOS))
+        // The NetBIOS name of another computer arrives; it sorts first (the finder's order, Q-U2).
+        f.state.value = found(FoundComputer("DESKTOP-1", "192.168.1.30", NameSource.NETBIOS), FoundComputer(null, "192.168.1.50", NameSource.NONE))
         w.refresh()
         assertEquals("storage.find.pc.192.168.1.30", w.rows()[1].id.key)
         assertEquals(StoragePages.ROW_ENTER, w.focusedRow()?.id, "focus was taken from the row the viewer chose")

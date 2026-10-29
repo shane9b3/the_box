@@ -45,9 +45,13 @@ class WpaPagesTest {
 
     private fun page(id: SectionId, advanced: Boolean = true) = pages.build(SettingsRoute.Section(id), advanced)
     private fun row(id: SectionId, row: RowId, advanced: Boolean = true): SettingsRow = assertNotNull(page(id, advanced).rows.firstOrNull { it.id == row }, row.key)
-    /** (Storage locations commit 0, docs/design/m6-storage-locations.md §9.1) A row of the Pause and rewind sub-page. */
-    private fun prRow(row: RowId, advanced: Boolean = true): SettingsRow =
-        assertNotNull(pages.build(SettingsRoute.PauseRewind, advanced).rows.firstOrNull { it.id == row }, row.key)
+    /**
+     * (Storage locations commit 0, docs/design/m6-storage-locations.md §9.1) A time-shift row as WpaPages builds it for
+     * the Pause and rewind page. Q-D8 (closure fix pass, R5): StoragePages builds that page (the only route), so this
+     * reads [WpaPages.timeshiftRows] directly.
+     */
+    private fun prRow(row: RowId): SettingsRow =
+        assertNotNull(pages.timeshiftRows(store.flow(PlaybackDomain).value).firstOrNull { it.id == row }, row.key)
 
     /** (Storage locations commit 0, §9.1) Playback links to the sub-page; the three time-shift rows live there. */
     @Test
@@ -69,7 +73,6 @@ class WpaPagesTest {
             assertEquals(how.second.first, r.effect, id.key)
             assertEquals(how.second.second, r.visibility, id.key)
         }
-        assertEquals(listOf(PauseRewindRows.TIMESHIFT), pages.build(SettingsRoute.PauseRewind, false).rows.map { it.id }, "advanced rows hidden")
         assertNull(page(SectionId.PLAYBACK).rows.firstOrNull { it.id == PauseRewindRows.TIMESHIFT }, "moved off the Playback page")
     }
 
@@ -274,7 +277,7 @@ class WpaPagesTest {
     }
 
     private fun timeshiftRow(env: WpaPageEnv, store: FakeSettingsStore = FakeSettingsStore()): SettingsRow =
-        assertNotNull(WpaPages(store, SettingsTexts.KEYS, env).build(SettingsRoute.PauseRewind, true).rows.firstOrNull { it.id == PauseRewindRows.TIMESHIFT })
+        assertNotNull(WpaPages(store, SettingsTexts.KEYS, env).timeshiftRows(store.flow(PlaybackDomain).value).firstOrNull { it.id == PauseRewindRows.TIMESHIFT })
 
     /** §12, lead ruling 2: Auto = 30 min on ≤ 16 GB storage, 1 hour above, from the device's storage class. */
     @Test

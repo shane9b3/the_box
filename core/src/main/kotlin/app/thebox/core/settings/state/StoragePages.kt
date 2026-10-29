@@ -32,7 +32,6 @@ import app.thebox.core.storage.BrowseResult
 import app.thebox.core.storage.FallbackToastGate
 import app.thebox.core.storage.FindState
 import app.thebox.core.storage.FolderListing
-import app.thebox.core.storage.FoundComputer
 import app.thebox.core.storage.LocationState
 import app.thebox.core.storage.LocationStatus
 import app.thebox.core.storage.LocationTestResult
@@ -48,6 +47,7 @@ import app.thebox.core.storage.StorageLocations
 import app.thebox.core.storage.StoragePurpose
 import app.thebox.core.storage.TestPhase
 import app.thebox.core.storage.TestProgress
+import app.thebox.core.storage.TestStopReason
 import app.thebox.core.storage.TestVerdict
 import app.thebox.core.storage.VolumeCatalog
 import java.util.Locale
@@ -63,7 +63,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.drop
-import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.isActive
@@ -118,8 +117,18 @@ class BrowseSession internal constructor(val token: Long, /** Non-null: a stored
 
     fun setPassword(chars: CharArray?) = synchronized(lock) { password?.fill('\u0000'); password = chars }
     fun hasPassword(): Boolean = synchronized(lock) { password?.isNotEmpty() == true }
-    /** A copy for one `open`/`saveSmb` call (those zero what they are given). */
+    /**
+     * A copy for one call. SEC-S4 (closure fix pass): `StorageLocations.saveSmb` and `updateSignIn` zero what they are
+     * given; `NetworkFolders.open` does **not** (the caller's array stays the caller's), so every `open` caller zeroes its
+     * copy in `finally` ([withPasswordCopy]).
+     */
     fun passwordCopy(): CharArray? = synchronized(lock) { password?.copyOf() }
+
+    /** SEC-S4: runs [block] with a copy of the password and zeroes the copy afterwards, whatever [block] did. */
+    internal inline fun <T> withPasswordCopy(block: (CharArray?) -> T): T {
+        val pw = passwordCopy()
+        try { return block(pw) } finally { pw?.fill('\u0000') }
+    }
     fun zero() = synchronized(lock) { password?.fill('\u0000'); password = null }
 
     /** What this walk would save: the host/share/path and the sign-in (never the password). */
@@ -263,6 +272,11 @@ class StoragePages(
         val off = p.timeshift == TimeshiftLength.OFF
         val desc = when {
             place.offlineName != null && place.problem == LocationState.SIGN_IN_NEEDED -> StorageMarks.warn(st[StorageText.SAVE_TO_DESC_SIGN_IN, place.sentence])
+            // O-6 (closure fix pass): demoted because the ring file was refused: that reason, as the Test words it.
+            place.offlineName != null && place.problem == LocationState.DEMOTED && place.failure != null -> {
+                val chosen = locations.status.value.firstOrNull { it.location.id == locations.chosen(StoragePurpose.TIMESHIFT) }
+                StorageMarks.warn(failureText(place.failure, place.sentence, chosen?.location?.smb, chosen?.freeBytes).first)
+            }
             // U-N2: a demoted folder answers, it kept dropping out; "Can't reach" would send the viewer to the wrong fix.
             place.offlineName != null && place.problem == LocationState.DEMOTED -> StorageMarks.warn(st[StorageText.STATUS_DEMOTED, place.sentence])
             place.offlineName != null -> StorageMarks.warn(st[StorageText.SAVE_TO_DESC_UNREACHABLE, place.sentence])
@@ -305,7 +319,7 @@ class StoragePages(
             val loc = s.location
             if (loc.kind == StorageKind.VOLUME && mounted.any { StorageConstants.VOLUME_ID_PREFIX + it.uuid == loc.id }) continue
             val (line, tone) = statusLine(s, chosen == loc.id, ctx.nowMs)
-            val d = if (tone == Tone.WARN) StorageMarks.warn(line) else line
+            val d = if (tone == Tone.WARN) StorageMarks.warn(line.substringBefore('\n')) else line
             rows += row(
                 RowId("storage.loc.${loc.id}"), loc.name.ifBlank { st[StorageText.USB_DRIVE] },
                 RowKind.Item(route = SettingsRoute.LocationDetail(loc.id), menu = locationMenu(loc.kind), badges = if (chosen == loc.id) setOf(Badge.IN_USE) else emptySet()),
@@ -323,14 +337,20 @@ class StoragePages(
             ChoiceOption(MENU_REMOVE, st[StorageText.MENU_REMOVE]),
         ) else listOf(ChoiceOption(MENU_REMOVE, st[StorageText.MENU_REMOVE]))
 
-    /** The status text and tone of a stored location (§9.2 Status, U-N7). */
+    /**
+     * The status text and tone of a stored location (§9.2 Status, U-N7). O-6 (closure fix pass): a folder DEMOTED for a
+     * known [LocationStatus.failure] (the ring file refused) reads that reason, then its next step after a `\n` (Save to
+     * shows the reason line, the location's Status row both).
+     */
     private fun statusLine(s: LocationStatus, inUse: Boolean, nowMs: Long): Pair<String, Tone> {
         val name = s.location.name.ifBlank { st[StorageText.USB_DRIVE] }
+        val failure = s.failure
         return when (s.state) {
             LocationState.UNREACHABLE -> st[StorageText.STATUS_CANT_REACH, name] to Tone.WARN
             LocationState.SIGN_IN_NEEDED -> st[StorageText.STATUS_SIGN_IN_NEEDED, name] to Tone.WARN
             LocationState.NOT_CONNECTED -> st[StorageText.STATUS_NOT_CONNECTED] to Tone.WARN
-            LocationState.DEMOTED -> st[StorageText.STATUS_DEMOTED, name] to Tone.WARN
+            LocationState.DEMOTED -> failureText(failure, name, s.location.smb, s.freeBytes)
+                .let { (reason, step) -> if (step != null) "$reason\n$step" else reason } to Tone.WARN
             LocationState.CONNECTING, LocationState.READY, LocationState.UNTESTED -> {
                 val t = s.location.lastTest
                 when {
@@ -341,6 +361,24 @@ class StoragePages(
                 }
             }
         }
+    }
+
+    /**
+     * O-6 (closure fix pass): why a DEMOTED folder was demoted, worded as the §7.7 / Test texts word that cause (reason,
+     * next step). ACCESS, FULL and REMOVED are the ring-file refusals the keeper keeps (C-S3); anything else, or no
+     * failure, is "kept dropping out" (no step: the Box retries by itself).
+     */
+    private fun failureText(failure: StorageFailure?, name: String, smb: SmbAddress?, freeBytes: Long?): Pair<String, String?> = when (failure) {
+        StorageFailure.ACCESS -> st[StorageText.ERR_ACCESS, name] to st[StorageText.ERR_ACCESS_STEP, name]
+        StorageFailure.FULL -> {
+            val need = app.thebox.core.playback.timeshift.TimeshiftConstants.MIN_RING_BYTES + StorageConstants.NETWORK_FREE_SPACE_RESERVE
+            st[StorageText.ERR_FULL, name, sizeText((freeBytes ?: 0L).coerceAtLeast(0L)), sizeText(need)] to st[StorageText.ERR_FULL_STEP]
+        }
+        StorageFailure.REMOVED -> {
+            val folder = smb?.let { a -> a.path.split('/').lastOrNull { it.isNotEmpty() } ?: a.share }?.ifEmpty { null } ?: name
+            st[StorageText.FOLDER_MISSING, folder] to st[StorageText.ERR_DATA_STEP]
+        }
+        else -> st[StorageText.STATUS_DEMOTED, name] to null
     }
 
     private fun ago(thenMs: Long, nowMs: Long): String {
@@ -362,7 +400,7 @@ class StoragePages(
         val name = loc.name.ifBlank { st[StorageText.USB_DRIVE] }
         val (statusText, tone) = statusLine(s, chosen, ctx.nowMs)
         val rows = ArrayList<SettingsRow>()
-        rows += info(ROW_D_STATUS, st[StorageText.DETAIL_STATUS], listOf(statusText), tone)
+        rows += info(ROW_D_STATUS, st[StorageText.DETAIL_STATUS], statusText.split('\n'), tone)
         if (smb != null) rows += info(ROW_D_ADDRESS, st[StorageText.DETAIL_ADDRESS], value = unc(smb.host, smb.share, smb.path))
         if (loc.kind == StorageKind.SMB) {
             if (!chosen) rows += row(ROW_D_USE, st[StorageText.DETAIL_USE], RowKind.Action(), description = st[StorageText.DETAIL_USE_DESC], effect = EffectTiming.NEXT_TUNE)
@@ -394,11 +432,9 @@ class StoragePages(
         ensureFind()
         val f = find
         val rows = ArrayList<SettingsRow>()
-        val saved = locations.status.value.mapNotNull { it.location.smb?.host?.lowercase(Locale.ROOT) }.toSet()
-        val computers = (f?.computers.orEmpty()).sortedWith(
-            compareByDescending<FoundComputer> { it.saved || it.address.lowercase(Locale.ROOT) in saved || it.name?.lowercase(Locale.ROOT) in saved }
-                .thenBy { it.name == null }.thenBy { it.name?.lowercase(Locale.ROOT).orEmpty() }.thenBy { addressKey(it.address) },
-        )
+        // Q-U2 (closure fix pass): the finder's merge (DiscoveryMerge) owns the order and the "saved" match; the page
+        // shows them as given (one rule: saved first, named A-Z, unnamed by address; saved by address, last address or name).
+        val computers = f?.computers.orEmpty()
         val searching = f == null || f.searching
         val findError = f?.error
         val net = f?.scannedNetwork
@@ -413,10 +449,9 @@ class StoragePages(
         }
         if (f?.vpnUp == true) rows += info(ROW_VPN, st[StorageText.FIND_VPN_TITLE], st[StorageText.FIND_VPN_STEP].split('\n'), Tone.WARN)
         for (c in computers) {
-            val isSaved = c.saved || c.address.lowercase(Locale.ROOT) in saved || c.name?.lowercase(Locale.ROOT) in saved
             rows += row(
                 RowId("storage.find.pc.${c.address}"), c.name ?: c.address,
-                RowKind.Item(primary = "pick:${c.address}", badges = if (isSaved) setOf(Badge.SAVED) else emptySet(), menu = listOf(ChoiceOption(MENU_SIGN_IN, st[StorageText.COMPUTER_MENU_SIGN_IN]))),
+                RowKind.Item(primary = "pick:${c.address}", badges = if (c.saved) setOf(Badge.SAVED) else emptySet(), menu = listOf(ChoiceOption(MENU_SIGN_IN, st[StorageText.COMPUTER_MENU_SIGN_IN]))),
                 value = if (c.name != null) c.address else st[StorageText.COMPUTER_NO_NAME],
             )
         }
@@ -429,8 +464,6 @@ class StoragePages(
         if (findFocus == ROW_ENTER && !findKeyPressed && computers.isNotEmpty()) findFocus = RowId("storage.find.pc.${computers.first().address}")
         return PageModel(route = route, title = st[StorageText.FIND_TITLE], subtitle = st[StorageText.FIND_SUBTITLE], rows = rows, version = v, focus = findFocus)
     }
-
-    private fun addressKey(a: String): String = a.split('.').joinToString(".") { it.padStart(3, '0') }
 
     /** Starts the finders when the page is first built; they stop with the page ([closed]) or on "Search again". */
     private fun ensureFind() {
@@ -633,6 +666,13 @@ class StoragePages(
                 rows += row(ROW_T_CHOOSE, chooseLabel(stored, name), RowKind.Action())
                 focus = ROW_T_AGAIN
             }
+            // C-N7 (closure fix pass): the Test stopped itself at its deadline: why, and what to do (nothing is saved).
+            result != null && result.stop == TestStopReason.TOOK_TOO_LONG -> {
+                rows += info(ROW_T_VERDICT, st[StorageText.TEST_TOOK_TOO_LONG, host], listOf(st[StorageText.TEST_TOOK_TOO_LONG_STEP, host]), Tone.WARN)
+                rows += row(ROW_T_AGAIN, st[StorageText.TEST_AGAIN], RowKind.Action())
+                rows += row(ROW_T_CHOOSE, chooseLabel(stored, name), RowKind.Action())
+                focus = ROW_T_AGAIN
+            }
             result != null && result.verdict == TestVerdict.FAILED -> {
                 val e = result.error ?: BrowseError(BrowseErrorKind.STORAGE, StorageFailure.UNREACHABLE)
                 rows += errorRow(ROW_T_VERDICT, e, host, s.lastAddress, s.apple, guest = s.guest)
@@ -764,7 +804,7 @@ class StoragePages(
     /** A stored location's session: its saved sign-in is resolved by `NetworkFolders.open` (the password never comes here). */
     private suspend fun openStored(s: BrowseSession): BrowseHandle? {
         val a = s.address(share = "", path = "")
-        return when (val r = folders.open(a, s.passwordCopy())) {
+        return when (val r = s.withPasswordCopy { folders.open(a, it) }) { // SEC-S4
             is BrowseResult.Opened -> { s.handle = r.handle; r.handle }
             is BrowseResult.NeedsSignIn -> { s.error = r.error ?: BrowseError(BrowseErrorKind.AUTH); null }
             is BrowseResult.Failed -> { s.error = r.error; null }
@@ -1055,7 +1095,7 @@ class StoragePages(
         _changes.tryEmit(Unit)
         s.connectJob = scope.launch {
             val r = try {
-                folders.open(s.address(share = "", path = ""), s.passwordCopy())
+                s.withPasswordCopy { folders.open(s.address(share = "", path = ""), it) } // SEC-S4
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -1241,32 +1281,46 @@ class StoragePages(
         }
     }
 
-    /** Ends every open walk now (tests, and a process that is going away). */
-    fun endAll() { sessions.values.toList().forEach { endSession(it) } }
-
     fun openSessionCount(): Int = sessions.size
 
     // ---------------------------------------------------------------- the phone's sign-in (§7.4)
 
+    /**
+     * SEC-S3 (closure fix pass): the phone gets the address the TV signs in to (the picked IP, or the stored host, with a
+     * port other than 445), never the discovered name or a location's label in its place; [PhoneContext.name] carries
+     * that for display only.
+     */
     override fun context(browse: Long): PhoneContext? =
-        sessions[browse]?.let { s -> PhoneContext(s.computerName ?: s.host, s.share, s.shares?.shares.orEmpty()) }
+        sessions[browse]?.let { s -> PhoneContext(phoneHost(s), s.share, s.shares?.shares.orEmpty(), name = s.computerName) }
 
-    /** Collects the phone's submission while its page is open: `PhoneApi` refuses them with 503 when nobody collects. */
+    private fun phoneHost(s: BrowseSession): String? {
+        val h = s.lastAddress ?: s.host ?: return null
+        return if (s.port == StorageConstants.SMB_DEFAULT_PORT) h else "$h:${s.port}"
+    }
+
+    /**
+     * Collects the phone's submission while its page is open. C-N5 (closure fix pass): through
+     * [PhoneLink.networkFolderSubmissions], so the server accepts a NETWORK_FOLDER submission only while this `phoneJob`
+     * runs (503 otherwise), and one nobody took is zeroed when the phone page stops.
+     */
     private fun ensurePhone(s: BrowseSession, route: SettingsRoute.PhoneSetup) {
         if (s.phoneJob?.isActive == true) return
         s.phoneJob = scope.launch {
-            phone.submissions.filterIsInstance<PhoneSubmission.NetworkFolder>().collect { sub -> onPhone(s, sub) }
+            phone.networkFolderSubmissions().collect { sub -> onPhone(s, sub) }
         }
     }
 
     private fun onPhone(s: BrowseSession, sub: PhoneSubmission.NetworkFolder) {
         s.fromPhone = true
         if (s.locationId == null) {
-            // The phone page's computer field may have been changed ("Change"): the host it sends wins.
+            // The phone page's computer field may have been changed ("Change"): a different host it sends wins.
+            // SEC-S3: the address the viewer picked (or its discovered name, from an older page) is the same computer:
+            // the host, the name and the last address stay; a name never replaces the picked address.
             val parsed = parse(sub.host.trim()) as? ManualAddressParser.Result.Parsed
             if (parsed != null) {
-                if (!parsed.host.equals(s.host, true)) { s.computerName = null; s.lastAddress = null }
-                s.host = parsed.host; s.port = parsed.port
+                val same = listOfNotNull(s.host, s.lastAddress, s.computerName).any { it.equals(parsed.host, ignoreCase = true) }
+                if (!same) { s.computerName = null; s.lastAddress = null; s.host = parsed.host }
+                s.port = parsed.port
                 if (parsed.share != null) { s.share = parsed.share; s.path = parsed.path }
             }
             val share = sub.share?.trim()?.trim('/', '\\')?.takeIf { it.isNotEmpty() }
@@ -1294,13 +1348,6 @@ class StoragePages(
         BrowseErrorKind.STORAGE -> if (e.failure == StorageFailure.ACCESS) st[StorageText.PHONE_NO_ACCESS, display(s)]
             else st[StorageText.PHONE_UNREACHABLE, display(s), s.lastAddress ?: s.host.orEmpty()]
         else -> st[StorageText.PHONE_UNREACHABLE, display(s), s.lastAddress ?: s.host.orEmpty()]
-    }
-
-    /** "sh***": the TV's mirror of what it received never carries the whole user name (§7.4). */
-    private fun mask(user: String?): String = when {
-        user.isNullOrEmpty() -> ""
-        user.length <= 2 -> user.take(1) + "***"
-        else -> user.take(2) + "***"
     }
 
     // ================================================================================== texts
@@ -1413,12 +1460,12 @@ class StoragePages(
         val ROW_T_CHOOSE = RowId("storage.test.choose")
         val ROW_T_AGAIN = RowId("storage.test.again")
 
-        /** The form check of the "Enter a name or address" editor: ManualAddressParser's, or non-blank while it is a stub. */
-        fun validHost(text: String): Boolean {
-            if (text.isBlank()) return false
-            val r = try { ManualAddressParser.parse(text.trim()) } catch (e: Throwable) { return true }
-            return r is ManualAddressParser.Result.Parsed
-        }
+        /** The form check of the "Enter a name or address" editor: ManualAddressParser's (Q-H1: no stub fallback). */
+        fun validHost(text: String): Boolean = hostProblem(text) == null
+
+        /** Why [text] is not an address the editor takes; null when it is (C-N4: BAD_PATH has its own text). */
+        fun hostProblem(text: String): ManualAddressParser.Reason? =
+            (ManualAddressParser.parse(text.trim()) as? ManualAddressParser.Result.Invalid)?.reason
 
     }
 }

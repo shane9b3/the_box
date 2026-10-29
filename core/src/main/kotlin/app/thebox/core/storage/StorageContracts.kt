@@ -33,11 +33,18 @@ data class SmbAddress(
  *
  * (Commit 0 addition, see the implementation record) [error] is the cause of a [TestVerdict.FAILED] run (§7.7 / CRC /
  * space), so the page can show "the cause | its next step"; null otherwise.
+ *
+ * (C-N7, closure fix pass; additive) [stop] is set when the Test ended itself before a verdict: [TestStopReason.TOOK_TOO_LONG]
+ * when the whole run passed its deadline (`StorageConstants.TEST_RUN_MAX_MS`). Such a run is FAILED with no [error]; it
+ * is never stored as `lastTest`.
  */
 @Serializable
 data class LocationTestResult(val verdict: TestVerdict, val writeBps: Long, val readBps: Long, val rttMs: Int,
                               val wakeMs: Int, val freeBytes: Long, val wifi: Boolean, val atWallMs: Long,
-                              val error: BrowseError? = null)
+                              val error: BrowseError? = null, val stop: TestStopReason? = null)
+
+/** (C-N7, closure fix pass) Why a Test stopped itself ("Stopped: NAS took too long."). Append-only. */
+@Serializable enum class TestStopReason { TOOK_TOO_LONG }
 
 /** A stored location (§3.1). `INTERNAL` is implicit ([StorageConstants.INTERNAL_ID]) and never in the list. */
 @Serializable

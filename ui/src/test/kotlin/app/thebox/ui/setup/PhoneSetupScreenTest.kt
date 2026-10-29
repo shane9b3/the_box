@@ -85,6 +85,31 @@ class PhoneSetupScreenTest {
         rule.onNodeWithTag(PHONE_QR_TAG).assertDoesNotExist()
     }
 
+    /** U-N1 (closure fix pass): a failed phone sign-in is drawn on the TV under the status line; a success is not. */
+    @Test
+    fun aFailedPhoneSignInShowsOnTheTv() {
+        val refused = "NAS didn't accept that user name or password. Check them and send again."
+        val paired = waiting.copy(phase = ServerPhase.PAIRED, pairedFrom = "192.168.1.34", lastRequestAtMs = t0)
+        var state by mutableStateOf(ui(server = paired.copy(lastSignInStatus = refused, lastSignInOk = false), purpose = PhonePurpose.NETWORK_FOLDER))
+        rule.setContent { BoxTheme { BoxDesignScale { PhoneSetupScreen(state) } } }
+        rule.onNodeWithTag(PHONE_SIGN_IN_FAILED_TAG).assertExists()
+        rule.onNodeWithText(refused).assertExists()
+        // The phone sent again: the TV is signing in, the old reason goes.
+        state = ui(server = paired.copy(phase = ServerPhase.RECEIVED, lastSignInStatus = refused, lastSignInOk = false), purpose = PhonePurpose.NETWORK_FOLDER)
+        rule.onNodeWithTag(PHONE_SIGN_IN_FAILED_TAG).assertDoesNotExist()
+        state = ui(server = paired.copy(lastSignInStatus = "Signed in to NAS.", lastSignInOk = true), purpose = PhonePurpose.NETWORK_FOLDER)
+        rule.onNodeWithTag(PHONE_SIGN_IN_FAILED_TAG).assertDoesNotExist()
+        // Too many failed sign-ins: the reason stays under the ending.
+        state = ui(
+            server = LanServerState(ServerPhase.FAILED, pairedFrom = "192.168.1.34", failure = LanFailure.TOO_MANY_WRONG_CODES, lastSignInStatus = refused, lastSignInOk = false),
+            purpose = PhonePurpose.NETWORK_FOLDER,
+        )
+        rule.onNodeWithText(refused).assertExists()
+        // Other purposes never show it.
+        state = ui(server = paired.copy(lastSignInStatus = refused, lastSignInOk = false), purpose = PhonePurpose.SETUP)
+        rule.onNodeWithTag(PHONE_SIGN_IN_FAILED_TAG).assertDoesNotExist()
+    }
+
     @Test
     fun cantScanDrawsTheUrlAndCodeLargeInsteadOfTheQr() {
         rule.setContent { BoxTheme { BoxDesignScale { PhoneSetupScreen(ui(screen = PhoneScreenState(large = true))) } } }

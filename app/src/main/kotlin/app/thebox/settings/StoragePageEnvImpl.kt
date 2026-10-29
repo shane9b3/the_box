@@ -203,5 +203,7 @@ class ResourceStorageTexts(private val res: Resources) : StorageTexts {
         StorageText.ERR_DATA_STEP -> R.string.storage_err_data_step
         StorageText.ERR_FULL -> R.string.storage_err_full
         StorageText.ERR_FULL_STEP -> R.string.storage_err_full_step
+        StorageText.TEST_TOOK_TOO_LONG -> R.string.storage_test_took_too_long // C-N7
+        StorageText.TEST_TOOK_TOO_LONG_STEP -> R.string.storage_test_took_too_long_step
     }
 }
