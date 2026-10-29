@@ -127,6 +127,9 @@ class TinkCredentialStore @Inject constructor(
 
     override suspend fun deleteBlob(ref: String) = withContext(io) { credentialDao.delete(ref) }
 
+    /** Q-E2: the row's presence only; nothing is decrypted (a row that does not decrypt shows at the next [getBlob]). */
+    override suspend fun hasBlob(ref: String): Boolean = withContext(io) { credentialDao.get(ref) != null }
+
     /** Diagnostics: false when the keyset is not Keystore-wrapped. */
     val usingKeystore: Boolean get() = provider.usingKeystore
 

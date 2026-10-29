@@ -11,10 +11,8 @@ import app.thebox.core.playback.timeshift.TimeshiftPolicyImpl
 import app.thebox.core.playback.timeshift.TsRingFactory
 import app.thebox.core.playback.timeshift.TsRingImpl
 import app.thebox.player.internal.TimeshiftSessionFactory
-import app.thebox.core.playback.timeshift.RingTargetSource
 import app.thebox.core.storage.VolumeCatalog
 import dagger.Binds
-import dagger.BindsOptionalOf
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -29,11 +27,8 @@ import dagger.hilt.components.SingletonComponent
 internal abstract class TimeshiftModule {
     @Binds abstract fun sessions(impl: TimeshiftSessionFactoryImpl): TimeshiftSessionFactory
 
-    /**
-     * (Storage locations commit 0, docs/design/m6-storage-locations.md §2 "Module placement", A-S5) `:data`'s
-     * StorageModule binds the real source (WP-S1); while nothing is bound the factory uses [InternalRingTargets].
-     */
-    @BindsOptionalOf abstract fun ringTargets(): RingTargetSource
+    // (Q-D10, closure fix pass 2026-10-28) `RingTargetSource` is bound by `:data`'s StorageModule in the app graph, the only
+    // graph with this module; the `@BindsOptionalOf` switch of commit 0 is gone.
 
     /** (Storage locations commit 0, §6) USB volumes for `:data` (the app graph); WP-S2 fills [VolumeWatcher]. */
     @Binds abstract fun volumes(impl: VolumeWatcher): VolumeCatalog

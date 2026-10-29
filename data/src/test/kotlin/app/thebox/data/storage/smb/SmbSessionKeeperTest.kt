@@ -61,6 +61,24 @@ class SmbSessionKeeperTest {
         assertEquals(listOf(id), w.signedIn.toList())
     }
 
+    /**
+     * X-1 (closure fix pass 2026-10-28): the sign-in episode began in an earlier process (AUTH_FAILED is not persisted)
+     * and the folder works again in this one: its first READY resets the "sign in again" counter, once per process.
+     */
+    @Test fun aFolderBackInANewProcessResetsItsSignInCounter() {
+        val w = StorageWorld()
+        val id = w.addSmb()
+        w.keeper.startNow()
+        eventually("READY") { w.keeper.snapshot.state == KeeperState.READY }
+        eventually("signed in") { w.signedIn.toList() == listOf(id) }
+        val link = w.keeper.linkIfCurrent(id)!!
+        w.server.dropTransport()
+        link.reconnect(link.epoch, w.clock.nowMs() + 5_000)
+        eventually("READY again") { w.keeper.snapshot.state == KeeperState.READY && link.connects.get() == 2 }
+        Thread.sleep(100)
+        assertEquals("only the first READY of the process", listOf(id), w.signedIn.toList())
+    }
+
     @Test fun aMissingPasswordIsAuthFailed() {
         val w = StorageWorld()
         w.addSmb()

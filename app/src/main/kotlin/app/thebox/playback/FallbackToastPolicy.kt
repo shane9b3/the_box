@@ -5,6 +5,7 @@ import app.thebox.core.common.BoxLog
 import app.thebox.core.storage.FallbackToastGate
 import app.thebox.core.storage.LocationFallback
 import app.thebox.core.storage.StorageConstants
+import app.thebox.data.storage.writeTextAtomically
 import dagger.hilt.android.qualifiers.ApplicationContext
 import java.io.File
 import javax.inject.Inject
@@ -62,7 +63,7 @@ class FileSignInToastCounters @Inject constructor(@ApplicationContext context: C
     @Synchronized override fun setProcesses(locationId: String, count: Int) {
         if (count == 0) { if (counts.remove(locationId) == null) return } else counts[locationId] = count
         try {
-            file.writeText(counts.entries.joinToString("\n") { "${it.key} ${it.value}" })
+            writeTextAtomically(file, counts.entries.joinToString("\n") { "${it.key} ${it.value}" }) // Q-U7: atomic
         } catch (e: Exception) {
             BoxLog.w("FallbackToastPolicy", "counter not saved: ${e.javaClass.simpleName}")
         }

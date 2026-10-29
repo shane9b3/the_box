@@ -3,6 +3,7 @@
 package app.thebox.core.storage
 
 import app.thebox.core.playback.MonoClock
+import app.thebox.core.playback.timeshift.CycleWriteTracking
 import app.thebox.core.playback.timeshift.RemoteRingStorage
 import app.thebox.core.playback.timeshift.RingPoolWatcher
 import app.thebox.core.playback.timeshift.RingStorage
@@ -56,7 +57,7 @@ class FallbackRingStorage(
     private val background: (Runnable) -> Unit = { it.run() },
     /** C-B1: where `primary.create` runs (a new daemon thread per storage in production; tests may run it inline). */
     private val creator: (Runnable) -> Unit = { r -> Thread(r, "box-smb-create").apply { isDaemon = true }.start() },
-) : RingStorage, RingPoolWatcher {
+) : RingStorage, RingPoolWatcher, CycleWriteTracking {
     /** Null until the switch; then the kind written to ([StorageKind.INTERNAL]). */
     @Volatile var switchedTo: StorageKind? = null; private set
     /** Why the cycle switched (UNREACHABLE, SIGN_IN_NEEDED, NO_SPACE_THERE); null while not switched. */
@@ -66,7 +67,7 @@ class FallbackRingStorage(
     @Volatile var secondaryStorage: RingStorage? = null; private set
 
     /** Mono ms of the current cycle's first successful `pwrite`; −1 until then (§5.4 grace). */
-    @Volatile var firstWriteMonoMs: Long = -1L; private set
+    @Volatile override var firstWriteMonoMs: Long = -1L; private set
 
     /** C-S3: told (on the flusher; must not block) when the cycle switched, with the primary's failure. */
     @Volatile var onSwitched: ((StorageFailure?) -> Unit)? = null
@@ -95,7 +96,7 @@ class FallbackRingStorage(
     val undecided: Boolean get() = target == null
 
     /** The factory starts a new cycle on this storage (a zap reuse): the grace counts from that cycle's first write. */
-    fun beginCycle() { firstWriteMonoMs = -1L }
+    override fun beginCycle() { firstWriteMonoMs = -1L }
 
     /**
      * C-B1: the ring stopped saving (a disk stop) while the decision was still open. Returns true when it was open: the
@@ -184,11 +185,7 @@ class FallbackRingStorage(
         // anyway: a primary that wrote bytes cannot be abandoned under the ring's [fileValidFrom, flushed) range (§18 R2).
         if (primary.remoteBytesWritten > 0) throw IOException("network folder failed after its first write")
         val failure = primary.lastFailure
-        val reason = when (failure) {
-            StorageFailure.ACCESS -> LocationFallback.SIGN_IN_NEEDED
-            StorageFailure.FULL -> LocationFallback.NO_SPACE_THERE
-            else -> LocationFallback.UNREACHABLE
-        }
+        val reason = failure.asFallback(otherwise = LocationFallback.UNREACHABLE) // Q-U4
         // Deleted, not only closed: a late CREATE is then closed and its file removed off the flusher (C-B1).
         try { primary.delete() } catch (t: Throwable) { /* posted; best effort */ }
         if (abandoned) throw IOException("ring stopped saving before the network folder answered")
@@ -198,7 +195,7 @@ class FallbackRingStorage(
             if (allocatedHigh > 0) sec.allocate(allocatedHigh)
             if (headerGeneration != Long.MIN_VALUE) sec.writeHeader(headerGeneration, headerCapacity)
         } catch (e: IOException) {
-            background(Runnable { try { sec.delete() } catch (t: Throwable) { } })
+            background(Runnable { try { sec.delete() } catch (t: Throwable) { /* best effort: a local file in the swept dir */ } })
             throw e
         }
         val closedMeanwhile: Boolean
@@ -212,7 +209,7 @@ class FallbackRingStorage(
             }
         }
         if (closedMeanwhile) {
-            background(Runnable { try { sec.delete() } catch (t: Throwable) { } })
+            background(Runnable { try { sec.delete() } catch (t: Throwable) { /* best effort: a local file in the swept dir */ } })
             throw IOException("ring storage closed")
         }
         return sec
@@ -268,4 +265,17 @@ class FallbackRingStorage(
         /** C-B1: the rate is measured only after this long (the first blocks come in bursts). */
         const val RATE_MIN_MS = 200L
     }
+}
+
+/**
+ * (Q-U4, save-location closure fix pass 2026-10-28) The one `StorageFailure` → [LocationFallback] mapping: why a cycle
+ * saves on this device when the chosen folder refused or failed it. ACCESS → SIGN_IN_NEEDED, FULL → NO_SPACE_THERE,
+ * REMOVED → UNREACHABLE; anything else (or none) → [otherwise]: UNREACHABLE for the §5.2 switch, UNSTABLE for a §5.4
+ * demotion.
+ */
+fun StorageFailure?.asFallback(otherwise: LocationFallback): LocationFallback = when (this) {
+    StorageFailure.ACCESS -> LocationFallback.SIGN_IN_NEEDED
+    StorageFailure.FULL -> LocationFallback.NO_SPACE_THERE
+    StorageFailure.REMOVED -> LocationFallback.UNREACHABLE
+    else -> otherwise
 }

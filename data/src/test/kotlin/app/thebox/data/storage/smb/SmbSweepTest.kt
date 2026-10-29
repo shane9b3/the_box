@@ -107,6 +107,24 @@ class SmbSweepTest {
         assertTrue(link.exists("$dir/ring-$other-7-1.bin"))
     }
 
+    /**
+     * SEC-S2 (closure fix pass 2026-10-28): a server that answers every round trip slowly (each inside the I/O timeout)
+     * cannot hold box-smb for the whole folder: the sweep stops at its deadline, and the next start sweeps the rest.
+     */
+    @Test fun aTricklingServerCannotHoldTheSweep() {
+        val (link, share) = server()
+        link.putFile("$dir/.wake-$me", ByteArray(4), link.serverNowMs())
+        for (n in 1..200) link.putFile("$dir/ring-$me-$n-1.bin")
+        link.latencyMs = 20 // 200 deletes would take ≥ 4 s
+        val start = link.clock.nowMs()
+        val r = SmbSweeper(isSharingViolation = { false })
+            .sweep(share, dir, me, 100, deadlineMonoMs = start + 200, clock = link.clock) { link.classify(it).cls }
+        val took = link.clock.nowMs() - start
+        assertTrue(r.stoppedEarly)
+        assertTrue("took $took ms", took < 1_500)
+        assertTrue("some were left for the next start", (1..200).count { link.exists("$dir/ring-$me-$it-1.bin") } > 100)
+    }
+
     @Test fun failuresAreIgnored() {
         val (link, share) = server()
         link.putFile("$dir/.wake-$me", ByteArray(4), link.serverNowMs())

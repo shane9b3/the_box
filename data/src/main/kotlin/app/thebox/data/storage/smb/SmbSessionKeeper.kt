@@ -20,6 +20,7 @@ import app.thebox.core.storage.smb.OpenMode
 import app.thebox.core.storage.smb.RemoteShare
 import app.thebox.data.storage.DeviceIdentity
 import app.thebox.data.storage.StorageLocationsImpl
+import app.thebox.data.storage.writeTextAtomically
 import kotlinx.coroutines.runBlocking
 import java.io.File
 import java.io.IOException
@@ -76,12 +77,8 @@ class LastGoodStore(private val file: File) {
         cache = locationId to wallMs; loaded = true
         if (prev?.first == locationId && lastWrite != Long.MIN_VALUE && wallMs - lastWrite < WRITE_EVERY_MS) return
         lastWrite = wallMs
-        try {
-            file.parentFile?.mkdirs()
-            val tmp = File(file.path + ".tmp")
-            tmp.writeText("$locationId $wallMs")
-            if (!tmp.renameTo(file)) { file.delete(); tmp.renameTo(file) }
-        } catch (_: Exception) { /* best effort: the in-memory value still counts for this process */ }
+        // Q-U7: the shared atomic writer.
+        try { writeTextAtomically(file, "$locationId $wallMs") } catch (_: Exception) { /* best effort: the in-memory value still counts for this process */ }
     }
 
     companion object { const val FILE_NAME = "smb-last-good"; const val WRITE_EVERY_MS = 600_000L }
@@ -92,7 +89,10 @@ class LastGoodStore(private val file: File) {
  * chosen for TIMESHIFT, on its own `SMBClient`. Everything runs on [exec] (`box-smb`), never main.
  *
  * - **Triggers**: [start] (the first frame, or `SMB_FIRST_CONNECT_DELAY_MS` after launch, A-N6), a location or sign-in
- *   change, the network callback, ON_START, the guide's preview start ([wakeNow]), [warm] from `current()`.
+ *   change, the network callback, ON_START, the guide's preview start (`RingTargetSource.warm()` → [warm] + [wakeNow],
+ *   Q-D1), [warm] from `current()`.
+ * - **Built lazily** (Q-E1, closure fix pass 2026-10-28): `StorageTargetsImpl` builds the keeper (and with it
+ *   `box-smb`, the watchdog and the platform callbacks) only once an SMB location is chosen for TIMESHIFT.
  * - **Backoff** 5 s, 15 s, 60 s, then 300 s, reset by any trigger. A logon status or a missing password → AUTH_FAILED
  *   until the sign-in changes.
  * - **On every (re)connect**: write 4 KiB to `TheBox-rewind/.wake-<deviceId>` (A-B4; a sleeping NAS disk spins up), record
@@ -150,6 +150,13 @@ class SmbSessionKeeper(
     private val swept: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
     /** Locations seen AUTH_FAILED in this process and not READY since ([onSignedInAgain]). */
     private val signInPending: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    /**
+     * X-1 (closure fix pass 2026-10-28): locations READY at least once in this process. The first READY of a location in
+     * a process also calls [onSignedInAgain]: the sign-in episode may have started in an earlier process (AUTH_FAILED is
+     * not persisted), and a folder that works again must start the "sign in again" toast's counter over.
+     */
+    private val readyThisProcess: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    @Volatile private var lastWakeNowMono = Long.MIN_VALUE
     /** A new link was made and its [resetFor] is queued: [evaluate] waits for it. */
     @Volatile private var pendingReset = false
     @Volatile private var lastWarmMono = Long.MIN_VALUE
@@ -195,8 +202,16 @@ class SmbSessionKeeper(
         if (up) evaluate(reset = true)
     }
 
-    /** The guide's preview start (§5.3): the wake write, so the disk is spinning before a pause. */
-    fun wakeNow() = post { kept?.link?.currentShare()?.let { wake(it) } }
+    /**
+     * The guide's preview start (§5.3): the wake write, so the disk is spinning before a pause. Q-D1: rate-limited like
+     * [warm] (one per `SMB_RECONNECT_MIN_GAP_MS`), since browsing the guide starts a preview per focused channel.
+     */
+    fun wakeNow() {
+        val now = clock.nowMs()
+        if (lastWakeNowMono != Long.MIN_VALUE && now - lastWakeNowMono < StorageConstants.SMB_RECONNECT_MIN_GAP_MS) return
+        lastWakeNowMono = now
+        post { kept?.link?.currentShare()?.let { wake(it) } }
+    }
 
     /** A ring stopped with a disk failure: check the link now (the keepalive path). */
     fun onRingFailure() = post { keepaliveTick() }
@@ -351,8 +366,13 @@ class SmbSessionKeeper(
         wake(share)
         if (swept.add(location.id)) {
             // C-S7: the sweep stops at the first slow or lost answer (it holds box-smb while it runs).
-            try { sweeper.sweep(share, ringDir(location), deviceId.id, pid) { classifier(it, Thread.currentThread().isInterrupted, null) } } catch (e: Exception) { BoxLog.i(TAG) { "sweep failed: ${SmbFaults.faultName(e)}" } }
+            // SEC-S2: and it is bounded in all, so a trickling server cannot hold box-smb.
+            val deadline = clock.nowMs() + SmbSweeper.SWEEP_BUDGET_IO_TIMEOUTS * ioTimeoutMs
+            try {
+                sweeper.sweep(share, ringDir(location), deviceId.id, pid, deadline, clock) { classifier(it, Thread.currentThread().isInterrupted, null) }
+            } catch (e: Exception) { BoxLog.i(TAG) { "sweep failed: ${SmbFaults.faultName(e)}" } }
         }
+        // Q-H5: the first free-space figure only; a failure here is the keepalive's to judge (it runs next).
         try { kept?.link?.probe() } catch (_: IOException) { }
         publish()
         scheduleKeepalive()
@@ -422,8 +442,12 @@ class SmbSessionKeeper(
 
     private fun setState(state: KeeperState, id: String?) {
         if (id != null && state == KeeperState.AUTH_FAILED) signInPending += id
-        if (id != null && state == KeeperState.READY && signInPending.remove(id)) {
-            try { onSignedInAgain(id) } catch (t: Throwable) { BoxLog.w(TAG, "signed-in hook failed: ${t.javaClass.simpleName}") }
+        if (id != null && state == KeeperState.READY) {
+            val again = signInPending.remove(id)
+            val first = readyThisProcess.add(id) // X-1: a sign-in episode of an earlier process ends here too
+            if (again || first) {
+                try { onSignedInAgain(id) } catch (t: Throwable) { BoxLog.w(TAG, "signed-in hook failed: ${t.javaClass.simpleName}") }
+            }
         }
         snapshot = snapshot.copy(
             locationId = id, state = state,
@@ -446,7 +470,7 @@ class SmbSessionKeeper(
         val s = snapshot
         val id = s.locationId ?: return
         val link = linkIfCurrent(id)
-        val free = link?.lastFree()?.first
+        val free = link?.lastFree()
         val demoted = s.demotedUntilMono != KeeperSnapshot.NEVER && (clock.nowMs() < s.demotedUntilMono || s.lastGoodMonoMs < s.demotedUntilMono)
         val state = when (s.state) {
             KeeperState.IDLE -> { locations.clearKeeper(id); return }

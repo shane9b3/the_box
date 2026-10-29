@@ -439,6 +439,31 @@ enum class PlayerToast {
 /** (Fix pass, product, 2026-10-19) Joins the values of one toast's `arg` (see [PlayerToast]); `PlayerText.ARG_SEP`. */
 const val PLAYER_TOAST_ARG_SEP: Char = '\u001F'
 
+/**
+ * (Q-U3, save-location closure fix pass 2026-10-28) The `arg` of a storage toast (§10), encoded in one place:
+ * `"<StorageKind>␟<second>␟<name>␟<jumped 1|>"` (U+001F, [PLAYER_TOAST_ARG_SEP]). [second] is the LocationFallback name
+ * for SAVE_LOCATION_FALLBACK and the StorageFailure name (or "") for the REWIND_STOPPED_*, PAUSE_NO_REWIND_STORAGE and
+ * PAUSE_RESUME_LOST_STORAGE kinds; [name] is the chosen place's name ("" = unnamed).
+ */
+data class StorageToastArg(
+    val kind: app.thebox.core.storage.StorageKind,
+    val second: String = "",
+    val name: String = "",
+    val jumped: Boolean = false,
+) {
+    fun encode(): String = listOf(kind.name, second, name, if (jumped) "1" else "").joinToString(PLAYER_TOAST_ARG_SEP.toString())
+
+    companion object {
+        /** The arg of [encode]; null for a null or blank arg or an unknown kind. INTERNAL decodes (callers decide). */
+        fun decode(arg: String?): StorageToastArg? {
+            if (arg.isNullOrEmpty()) return null
+            val parts = arg.split(PLAYER_TOAST_ARG_SEP)
+            val kind = app.thebox.core.storage.StorageKind.entries.firstOrNull { it.name == parts[0] } ?: return null
+            return StorageToastArg(kind, parts.getOrElse(1) { "" }, parts.getOrElse(2) { "" }, parts.getOrElse(3) { "" } == "1")
+        }
+    }
+}
+
 /** Inputs other than keys. All on main. */
 sealed interface PlayerEvent {
     data class Tick(val nowMs: Long) : PlayerEvent

@@ -37,7 +37,6 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withTimeoutOrNull
 import java.net.Inet4Address
-import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Provider
 import javax.inject.Singleton
@@ -59,9 +58,7 @@ import javax.inject.Singleton
  */
 interface ComputerFinder {
     fun search(): Flow<FindState>
-
-    /** The IPv4 an NSD instance named [name] had in this process (§7.2 `.local` fallback, U-8); null if never seen. */
-    fun recentAddress(name: String): String?
+    // Q-D3 (closure fix pass, 2026-10-28): `recentAddress` (the §7.2 `.local` fallback) had no caller; removed with its cache.
 }
 
 /** What the finder needs from the platform; a seam for `ComputerFinderTest`. */
@@ -98,10 +95,6 @@ class ComputerFinderImpl internal constructor(
         AndroidFinderEnvironment(context, lan),
         { locations.get().status.value.mapNotNull { it.location.smb } },
     )
-
-    private val nsdNames = ConcurrentHashMap<String, String>()
-
-    override fun recentAddress(name: String): String? = nsdNames[norm(name)]
 
     override fun search(): Flow<FindState> = channelFlow {
         val lock = env.acquireMulticastLock()
@@ -142,7 +135,7 @@ class ComputerFinderImpl internal constructor(
             coroutineScope {
                 launch {
                     env.nsd().collect { s ->
-                        if (s.source == NameSource.NSD && s.name != null) { nsdNames[norm(s.name!!)] = s.address; nsdCount++ }
+                        if (s.source == NameSource.NSD && s.name != null) nsdCount++
                         add(s)
                     }
                 }
@@ -176,8 +169,6 @@ class ComputerFinderImpl internal constructor(
         val ms = (System.nanoTime() - startedAt) / 1_000_000
         BoxLog.i(TAG) { "find: done in $ms ms, ${merge.size} computers (nsd $nsdCount, sweep ${stats?.open ?: 0} open of ${stats?.probed ?: 0})" }
     }
-
-    private fun norm(n: String) = n.trim().trimEnd('.').lowercase().removeSuffix(".local")
 
     private companion object {
         const val TAG = "ComputerFinder"

@@ -130,7 +130,7 @@ internal class Port445Sweep(
 
     private fun probe(host: String): Boolean {
         if (stopped.get()) return false
-        val bytes = Ipv4.parse(host)?.let { v -> byteArrayOf((v ushr 24).toByte(), (v ushr 16).toByte(), (v ushr 8).toByte(), v.toByte()) } ?: return false
+        val bytes = ipv4Bytes(host) ?: return false // Q-U8
         val s = try { sockets.stream() } catch (e: IOException) { return false }
         pending += s
         try {

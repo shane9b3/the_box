@@ -2,6 +2,7 @@
 package app.thebox.data.storage.smb
 
 import app.thebox.core.common.BoxLog
+import app.thebox.core.playback.MonoClock
 import app.thebox.core.storage.StorageConstants
 import app.thebox.core.storage.smb.FaultClass
 import app.thebox.core.storage.smb.OpenMode
@@ -22,6 +23,10 @@ import java.io.IOException
  * server, and the sweep holds `box-smb` (the ring's reconnects, posted CLOSEs, keepalives) while it runs.
  * Any other failed delete or time query is ignored (retried at the next start). Never blocks a tune.
  *
+ * (SEC-S2, closure fix pass 2026-10-28) The whole sweep is bounded too: past its deadline (the keeper gives it
+ * [SWEEP_BUDGET_IO_TIMEOUTS] I/O timeouts) it stops like a SLOW answer, so a server that answers every round trip just
+ * inside the I/O timeout cannot hold `box-smb` for 4,096 of them. The listing itself is bounded by `SmbjShare.list`.
+ *
  * [classify] is the link's (`RemoteLink.classify`); [isSharingViolation] recognises the "held open" answer.
  */
 class SmbSweeper(
@@ -31,9 +36,11 @@ class SmbSweeper(
 
     private class Stop : Exception()
 
-    /** [dir] is the share-relative `…/TheBox-rewind` folder. */
+    /** [dir] is the share-relative `…/TheBox-rewind` folder; nothing starts after [deadlineMonoMs] by [clock] (SEC-S2). */
     fun sweep(
         share: RemoteShare, dir: String, deviceId: String, pid: Int,
+        deadlineMonoMs: Long = Long.MAX_VALUE,
+        clock: MonoClock = MonoClock { System.nanoTime() / 1_000_000L },
         classify: (Throwable) -> FaultClass = { SmbFaults.classify(it, Thread.currentThread().isInterrupted, null) },
     ): Result {
         val wakeName = "$WAKE_PREFIX$deviceId"
@@ -53,6 +60,7 @@ class SmbSweeper(
         var stopped = false
         try {
             for (e in entries) {
+                if (clock.nowMs() > deadlineMonoMs) throw Stop() // SEC-S2: the next start sweeps the rest
                 if (e.directory) continue
                 val n = e.name
                 val own = ownPrefixes.any { n.startsWith(it) }
@@ -99,6 +107,8 @@ class SmbSweeper(
         const val TEST_PREFIX = "test-"
         const val WAKE_PREFIX = ".wake-"
         const val LIST_MAX = 4_096
+        /** SEC-S2: the whole sweep may take this many I/O timeouts of the link (the listing alone takes at most two). */
+        const val SWEEP_BUDGET_IO_TIMEOUTS = 4L
 
         /** `ring-<deviceId>-<pid>-<n>.bin` (§3.5). */
         fun ringName(deviceId: String, pid: Int, n: Int): String = "$RING_PREFIX$deviceId-$pid-$n.bin"

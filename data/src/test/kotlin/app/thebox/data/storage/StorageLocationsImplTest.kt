@@ -72,6 +72,48 @@ class StorageLocationsImplTest {
         assertTrue(w.store.flow(StorageDomain).value.locations.isEmpty())
     }
 
+    /** Q-E2 (closure fix pass 2026-10-28): a `storage` settings write decrypts no stored password. */
+    @Test fun aSettingsWriteDecryptsNoPassword() = runBlocking {
+        val w = StorageWorld()
+        val loc = w.locations.saveSmb(address, "NAS", "s3cret!".toCharArray(), null)
+        eventually("listed") { w.locations.status.value.any { it.location.id == loc.id } }
+        val gets = w.blobs.gets.get()
+        for (n in 1..3) w.locations.rename(loc.id, "NAS $n")
+        w.locations.choose(StoragePurpose.TIMESHIFT, loc.id)
+        eventually("renamed") { w.locations.status.value.single().location.name == "NAS 3" }
+        assertEquals("no decrypt per write", gets, w.blobs.gets.get())
+        assertFalse(w.locations.signInNeeded(loc.id))
+        // A missing password (a restore) still reads as a sign-in needed.
+        w.blobs.map.clear()
+        w.locations.rename(loc.id, "NAS 4")
+        eventually("sign-in needed") { w.locations.status.value.single().state == LocationState.SIGN_IN_NEEDED }
+    }
+
+    /** Q-E2: a password that does not decrypt stays SIGN_IN_NEEDED across settings writes until the sign-in changes. */
+    @Test fun anUndecryptablePasswordStaysSignInNeededUntilANewSignIn() = runBlocking {
+        val w = StorageWorld()
+        val loc = w.locations.saveSmb(address, "NAS", "s3cret!".toCharArray(), null)
+        w.blobs.undecryptable = true
+        assertEquals(PasswordRead.NeedsSignIn, w.locations.readPassword(loc.id))
+        w.locations.rename(loc.id, "Office NAS")
+        eventually("renamed") { w.locations.status.value.single().location.name == "Office NAS" }
+        assertEquals(LocationState.SIGN_IN_NEEDED, w.locations.status.value.single().state)
+        w.blobs.undecryptable = false
+        w.locations.updateSignIn(loc.id, "shawn", "HOME", "n3w!".toCharArray(), guest = false)
+        w.locations.rename(loc.id, "NAS")
+        eventually("signed in") { w.locations.status.value.single().let { it.location.name == "NAS" && it.state != LocationState.SIGN_IN_NEEDED } }
+    }
+
+    /** SEC-N1 (closure fix pass 2026-10-28): an SMB user name and domain are masked in every log line (smbj's auth message). */
+    @Test fun theSmbUserAndDomainAreRedacted() = runBlocking {
+        val w = StorageWorld()
+        val loc = w.locations.saveSmb(SmbAddress("nas", share = "TV", user = "kitchen-tv", domain = "WORKGRP"), "NAS", "pw!".toCharArray(), null)
+        eventually("listed") { w.locations.status.value.any { it.location.id == loc.id } }
+        val line = app.thebox.core.common.Redact.text("Authentication failed for 'kitchen-tv' using WORKGRP\\kitchen-tv")
+        assertFalse(line, line.contains("kitchen-tv"))
+        assertFalse(line, line.contains("WORKGRP"))
+    }
+
     /** U-S5 (save-location review 2026-10-24): a stored folder's Test is written as its lastTest. */
     @Test fun recordTestStoresTheLastTest() = runBlocking {
         val w = StorageWorld()

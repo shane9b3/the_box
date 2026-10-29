@@ -490,8 +490,6 @@ class ComputerFinderTest {
         assertEquals(NameSource.NONE, s.computers[0].source)
         assertNull(s.computers[0].name)
         assertEquals(NameSource.NSD, s.computers[2].source)
-        assertEquals("192.168.1.20", f.recentAddress("nas.local"))
-        assertNull(f.recentAddress("desktop-7f3k2lq"))              // only NSD names are remembered
         page.job.cancel()
     }
 

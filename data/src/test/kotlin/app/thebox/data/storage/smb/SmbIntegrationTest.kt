@@ -10,6 +10,7 @@ import app.thebox.core.storage.StorageLimits
 import app.thebox.core.storage.TestVerdict
 import app.thebox.core.storage.smb.OpenMode
 import app.thebox.core.storage.smb.SmbRingStorage
+import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.auth.AuthenticationContext
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -56,7 +57,7 @@ class SmbIntegrationTest {
     @Test fun listSharesWriteReadRemoveAndServerTime() {
         val (address, pw) = target().also { assumeTrue("THEBOX_SMB_URL not set", it != null) }!!
         // Shares through dcerpc srvsvc (U-15), on the browse client.
-        val client = SmbjClients.browseClient()
+        val client = SMBClient(SmbjClients.config(StorageConstants.SMB_IO_TIMEOUT_MS)) // as SmbjBrowseConnections makes it
         val conn = client.connect(address.host, address.port)
         try {
             val ctx = if (address.user != null) AuthenticationContext(address.user, pw ?: CharArray(0), null) else AuthenticationContext.guest()

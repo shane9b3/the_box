@@ -25,7 +25,6 @@ import com.hierynomus.smbj.SMBClient
 import com.hierynomus.smbj.SmbConfig
 import com.hierynomus.smbj.auth.AuthenticationContext
 import com.hierynomus.smbj.connection.Connection
-import com.hierynomus.smbj.session.Session
 import com.hierynomus.smbj.share.DiskShare
 import java.io.IOException
 import java.io.InterruptedIOException
@@ -71,7 +70,11 @@ class SmbExecutor(val name: String, private val clock: MonoClock = MonoClock { S
 
 // ==================================================================== smbj configuration (§4.3, Must)
 
-/** The two `SMBClient` instances (lead ruling 6, A-S1): the ring's and the browser/Test's, never shared. */
+/**
+ * smbj configuration and helpers (lead ruling 6, A-S1). The ring's link has its own `SMBClient` ([ringClient]); each
+ * browse/Test session makes its own client per connect (`SmbjBrowseConnections`, C-B2), so the two never share a
+ * connection table. (Q-D2/Q-H6, closure fix pass 2026-10-28: the unused `browseClient()` is gone.)
+ */
 object SmbjClients {
     /** §4.3: connect timeout via the socket factory, SO timeout > keepalive, I/O timeouts per pool, BC provider. */
     fun config(ioTimeoutMs: Long): SmbConfig = SmbConfig.builder()
@@ -87,9 +90,6 @@ object SmbjClients {
 
     /** A new client for one ring link (its own connection table: a Test never shares or closes the ring's TCP). */
     fun ringClient(ioTimeoutMs: Long): SMBClient = SMBClient(config(ioTimeoutMs))
-
-    /** The browse/Test client (`box-smb-browse`). */
-    fun browseClient(): SMBClient = SMBClient(config(StorageConstants.SMB_IO_TIMEOUT_MS))
 
     /** Teardown is always `close(true)`: `close(false)` only drops a lease (`Connection.java:177-180`). */
     fun forceClose(connection: Connection?) {
@@ -155,7 +155,7 @@ class SmbjShareOpener(private val address: SmbAddress, private val ioTimeoutMs: 
             val session = try { conn.authenticate(ctx) } finally { SmbjClients.zero(ctx) }
             val share = session.connectShare(address.share) as? DiskShare
                 ?: throw SmbIoException(IllegalStateException("not a disk share"))
-            return SmbjOpenedShare(conn, session, share)
+            return SmbjOpenedShare(conn, share)
         } catch (e: Exception) {
             SmbjClients.forceClose(conn)
             throw if (e is SmbIoException) e else SmbIoException(e)
@@ -166,8 +166,8 @@ class SmbjShareOpener(private val address: SmbAddress, private val ioTimeoutMs: 
     fun abortInFlight() { SmbjClients.forceClose(inFlight.get()) }
 }
 
-/** smbj's objects for one epoch. */
-class SmbjOpenedShare(val connection: Connection, val session: Session?, val disk: DiskShare) : OpenedShare {
+/** smbj's objects for one epoch. (Q-H2: the session is not kept; nothing read it.) */
+class SmbjOpenedShare(val connection: Connection, val disk: DiskShare) : OpenedShare {
     override fun share(epoch: Long, link: SmbjRemoteLink): RemoteShare = SmbjShare(epoch, disk, link)
     override val alive: Boolean get() = try { connection.isConnected } catch (_: Exception) { false }
     override fun probeFreeBytes(): Long = smb { disk.shareInformation.callerFreeSpace }
@@ -177,8 +177,20 @@ class SmbjOpenedShare(val connection: Connection, val session: Session?, val dis
 /** Runs an smbj call; every failure becomes an [SmbIoException] (path-free message), the cause kept for classification. */
 internal inline fun <T> smb(f: () -> T): T = try { f() } catch (e: SmbIoException) { throw e } catch (e: Exception) { throw SmbIoException(e) }
 
-/** [RemoteShare] over smbj's [DiskShare] (§4.1 mapping). Paths are `/`-separated and relative to the share. */
-class SmbjShare(override val epoch: Long, private val disk: DiskShare, private val link: SmbjRemoteLink?) : RemoteShare {
+/**
+ * [RemoteShare] over smbj's [DiskShare] (§4.1 mapping). Paths are `/`-separated and relative to the share.
+ *
+ * SEC-S2 (closure fix pass, 2026-10-28): [list] reads the directory through smbj's lazy iterator, stops after `max`
+ * entries and gives up after [listBudgetMs] in all (each `QUERY_DIRECTORY` is already bounded by the I/O timeout), so a
+ * server that never answers NO_MORE_FILES can neither fill the heap nor hold `box-smb` / `box-smb-browse`.
+ */
+class SmbjShare(
+    override val epoch: Long,
+    private val disk: DiskShare,
+    private val link: SmbjRemoteLink?,
+    private val clock: MonoClock = SYSTEM_CLOCK,
+    private val listBudgetMs: Long = SMB_LIST_BUDGET_IO_TIMEOUTS * (link?.ioTimeoutMs ?: StorageConstants.SMB_IO_TIMEOUT_MS),
+) : RemoteShare {
     override fun open(path: String, mode: OpenMode, deleteOnClose: Boolean, exclusive: Boolean): RemoteFile = smb {
         val options = EnumSet.of(SMB2CreateOptions.FILE_NON_DIRECTORY_FILE, SMB2CreateOptions.FILE_RANDOM_ACCESS)
         if (deleteOnClose) options += SMB2CreateOptions.FILE_DELETE_ON_CLOSE
@@ -208,18 +220,26 @@ class SmbjShare(override val epoch: Long, private val disk: DiskShare, private v
     }
 
     override fun list(path: String, max: Int): List<RemoteEntry> = smb {
-        disk.list(SmbjClients.win(path)).asSequence()
-            .filter { it.fileName != "." && it.fileName != ".." }
-            .map {
-                val a = it.fileAttributes
-                RemoteEntry(
-                    name = it.fileName,
-                    directory = a and FileAttributes.FILE_ATTRIBUTE_DIRECTORY.value != 0L,
-                    hidden = a and (FileAttributes.FILE_ATTRIBUTE_HIDDEN.value or FileAttributes.FILE_ATTRIBUTE_SYSTEM.value) != 0L,
-                    sizeBytes = it.endOfFile,
-                )
+        // SEC-S2: what `DiskShare.list` opens, but iterated lazily and bounded (it kept every entry until NO_MORE_FILES).
+        val dir = disk.openDirectory(
+            SmbjClients.win(path),
+            EnumSet.of(AccessMask.FILE_LIST_DIRECTORY, AccessMask.FILE_READ_ATTRIBUTES, AccessMask.FILE_READ_EA),
+            null, SMB2ShareAccess.ALL, SMB2CreateDisposition.FILE_OPEN, null,
+        )
+        try {
+            boundedList(dir.iterator(), max, clock.nowMs() + listBudgetMs, clock) {
+                if (it.fileName == "." || it.fileName == "..") null
+                else {
+                    val a = it.fileAttributes
+                    RemoteEntry(
+                        name = it.fileName,
+                        directory = a and FileAttributes.FILE_ATTRIBUTE_DIRECTORY.value != 0L,
+                        hidden = a and (FileAttributes.FILE_ATTRIBUTE_HIDDEN.value or FileAttributes.FILE_ATTRIBUTE_SYSTEM.value) != 0L,
+                        sizeBytes = it.endOfFile,
+                    )
+                }
             }
-            .take(max).toList()
+        } finally { dir.closeSilently() }
     }
 
     override fun delete(path: String) = smb { disk.rm(SmbjClients.win(path)) }
@@ -253,7 +273,8 @@ class SmbjFile(private val file: com.hierynomus.smbj.share.File, private val lin
 
     override fun close() = closeAsync()
 
-    private fun closeNow() { try { file.closeSilently() } catch (_: Exception) { } }
+    /** Q-H2: `closeSilently` already swallows smbj's close failure (the handle dies with its connection anyway). */
+    private fun closeNow() = file.closeSilently()
 }
 
 // ==================================================================== the link
@@ -295,7 +316,9 @@ class SmbjRemoteLink(
     private val refs = AtomicInteger()
     @Volatile private var freeBytes = -1L
     /** C-S1: superseded by a new link; never connects again. */
-    @Volatile private var retired = false
+    @Volatile private var retiredV = false
+    /** Q-E3: a retired link never comes back; its ring fails over at once instead of waiting out its reconnect budget. */
+    override val retired: Boolean get() = retiredV
     @Volatile private var freeAtMono = Long.MIN_VALUE
     /** Connects done (tests, stats). */
     val connects = AtomicInteger()
@@ -308,7 +331,7 @@ class SmbjRemoteLink(
     // ---------------------------------------------------------------- RemoteLink
 
     override fun share(deadlineMonoMs: Long): RemoteShare {
-        if (retired) throw LinkUnavailableException("retired") // C-S1
+        if (retiredV) throw LinkUnavailableException("retired") // C-S1
         current?.let { return it }
         if (exec.isCurrent()) throw LinkUnavailableException("not ready") // never wait on our own thread
         onDemand()
@@ -317,7 +340,7 @@ class SmbjRemoteLink(
 
     override fun reconnect(failedEpoch: Long, deadlineMonoMs: Long): RemoteShare {
         // C-S1: a retired link never connects again; its ring fails over (UNREACHABLE) and the next zap uses the new link.
-        if (retired) throw LinkUnavailableException("retired")
+        if (retiredV) throw LinkUnavailableException("retired")
         if (epoch > failedEpoch) current?.let { return it }
         if (exec.isCurrent()) {
             reconnectNow(failedEpoch)
@@ -336,7 +359,7 @@ class SmbjRemoteLink(
     override fun retain() { refs.incrementAndGet() }
     override fun release() {
         val left = refs.updateAndGet { maxOf(0, it - 1) }
-        if (left == 0 && retired) exec.post { dropCurrent() } // C-S1: the last ring file of a retired link closed
+        if (left == 0 && retiredV) exec.post { dropCurrent() } // C-S1: the last ring file of a retired link closed
     }
 
     /**
@@ -345,11 +368,11 @@ class SmbjRemoteLink(
      * file is open, else when the last one is released. Any thread; never waits.
      */
     fun retire() {
-        retired = true
+        retiredV = true
         if (refs.get() == 0) exec.post { dropCurrent() }
     }
 
-    val isRetired: Boolean get() = retired
+    val isRetired: Boolean get() = retiredV
 
     override fun post(work: Runnable) = exec.post(work)
 
@@ -363,7 +386,7 @@ class SmbjRemoteLink(
     fun connectBlocking(): Throwable? {
         check(exec.isCurrent()) { "connect runs on ${exec.name}" }
         dropCurrent()
-        if (retired) return LinkUnavailableException("retired").also { lastConnectError = it } // C-S1
+        if (retiredV) return LinkUnavailableException("retired").also { lastConnectError = it } // C-S1
         lastAttemptMono = clock.nowMs()
         val pw = password()
         val chars = when (pw) {
@@ -376,14 +399,17 @@ class SmbjRemoteLink(
             return e
         } finally { chars?.fill('\u0000') }
         connects.incrementAndGet()
-        lock.withLock {
+        // Q-H2: the share this connect made, captured under the lock (never re-read from the volatile afterwards).
+        val made = lock.withLock {
             opened = o
             val e = epochV.incrementAndGet()
-            current = o.share(e, this)
+            val sh = o.share(e, this)
+            current = sh
             lastConnectError = null
             readyCond.signalAll()
+            sh
         }
-        try { onConnected(current!!) } catch (t: Throwable) { BoxLog.w(TAG, "after-connect failed: ${SmbFaults.faultName(t)}") }
+        try { onConnected(made) } catch (t: Throwable) { BoxLog.w(TAG, "after-connect failed: ${SmbFaults.faultName(t)}") }
         return null
     }
 
@@ -401,8 +427,8 @@ class SmbjRemoteLink(
         return if (freeBytes >= 0 && at != Long.MIN_VALUE && clock.nowMs() - at <= maxAgeMs) freeBytes else null
     }
 
-    /** The last known free space and when (mono), for sizing (§5.1); null when never measured. */
-    fun lastFree(): Pair<Long, Long>? = if (freeBytes >= 0) freeBytes to freeAtMono else null
+    /** The last known free space, for the page's Status (§9.2); null when never measured. (Q-H2: no unread time.) */
+    fun lastFree(): Long? = freeBytes.takeIf { it >= 0 }
 
     fun putFree(bytes: Long) { freeBytes = bytes; freeAtMono = clock.nowMs() }
 
@@ -445,4 +471,26 @@ class SmbjRemoteLink(
     }
 
     private companion object { const val WAIT_SLICE_MS = 50L }
+}
+
+// ==================================================================== SEC-S2: bounded directory listing
+
+private val SYSTEM_CLOCK = MonoClock { System.nanoTime() / 1_000_000L }
+
+/** SEC-S2: a whole directory listing may take this many I/O timeouts (the security review's 2 × `ioTimeoutMs`). */
+const val SMB_LIST_BUDGET_IO_TIMEOUTS = 2L
+
+/**
+ * SEC-S2: the first [max] entries [map] keeps from [entries] (null = skip), read lazily. Past [deadlineMonoMs] it throws a
+ * [java.util.concurrent.TimeoutException] (classified SLOW), so a server that trickles an endless listing ends here
+ * instead of holding the thread or the heap.
+ */
+internal fun <T> boundedList(entries: Iterator<T>, max: Int, deadlineMonoMs: Long, clock: MonoClock, map: (T) -> RemoteEntry?): List<RemoteEntry> {
+    val out = ArrayList<RemoteEntry>(max.coerceIn(0, 256))
+    while (out.size < max) {
+        if (clock.nowMs() > deadlineMonoMs) throw java.util.concurrent.TimeoutException("listing budget passed")
+        if (!entries.hasNext()) break
+        map(entries.next())?.let(out::add)
+    }
+    return out
 }

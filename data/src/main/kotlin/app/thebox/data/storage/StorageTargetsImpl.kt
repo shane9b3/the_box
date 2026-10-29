@@ -9,6 +9,8 @@ import app.thebox.core.playback.timeshift.RingTarget
 import app.thebox.core.playback.timeshift.RingTargetChoice
 import app.thebox.core.playback.timeshift.RingTargetSource
 import app.thebox.core.playback.timeshift.TimeshiftConstants
+import app.thebox.core.playback.timeshift.isStorageStop
+import app.thebox.core.storage.asFallback
 import app.thebox.core.storage.LocationFallback
 import app.thebox.core.storage.StorageConstants
 import app.thebox.core.storage.StorageFailure
@@ -60,10 +62,15 @@ fun interface LocalSpace {
  *
  * [onStorageFailure] is synchronous (A-N5): outside the start-of-cycle grace it demotes the folder before the stop is
  * published, so the next [current] already sees it.
+ *
+ * **Q-E1 (closure fix pass 2026-10-28, lead ruling R4):** the keeper (its `box-smb` thread, watchdog, network callback
+ * and lifecycle observer) is built through [keeperSource] only once an SMB location is chosen for TIMESHIFT: at
+ * construction when one already is, on the first change that chooses one, or when a cycle needs it. A viewer with no
+ * network folder never gets it. Every §5.3 trigger works from then on (the keeper installs them when it is built).
  */
 class StorageTargetsImpl(
     private val locations: StorageLocationsImpl,
-    private val keeper: SmbSessionKeeper,
+    keeperSource: () -> SmbSessionKeeper,
     private val volumes: VolumeCatalog,
     private val deviceId: DeviceIdentity,
     private val internalDir: File,
@@ -73,6 +80,22 @@ class StorageTargetsImpl(
     private val space: LocalSpace = LocalSpace.STATFS,
 ) : RingTargetSource {
     private val counters = ConcurrentHashMap<String, AtomicInteger>()
+    private val keeperLazy = lazy(LazyThreadSafetyMode.SYNCHRONIZED) { keeperSource() }
+    /** Q-E1: built on first use; touched only for an SMB location. */
+    private val keeper: SmbSessionKeeper get() = keeperLazy.value
+
+    /** Whether the keeper exists (tests: no SMB location, no keeper). */
+    val keeperBuilt: Boolean get() = keeperLazy.isInitialized()
+
+    init {
+        // Q-E1: a location chosen for rewind now (or later) is an SMB one → the keeper, so its triggers run.
+        locations.addChangeListener { ensureKeeperIfChosen() }
+        ensureKeeperIfChosen()
+    }
+
+    private fun ensureKeeperIfChosen() {
+        if (locations.chosen(StoragePurpose.TIMESHIFT).startsWith(StorageConstants.SMB_ID_PREFIX)) keeper
+    }
 
     override fun current(purpose: StoragePurpose): RingTargetChoice {
         val chosenId = locations.chosen(purpose)
@@ -85,11 +108,21 @@ class StorageTargetsImpl(
         }
     }
 
-    override fun warm() = keeper.warm()
+    /**
+     * Q-D1 (lead ruling R2): the guide's preview start (§5.3). With a network folder kept for rewind: the keeper's
+     * trigger (connect when not READY) and the `.wake` write (a sleeping NAS disk spins up before the viewer pauses).
+     * Nothing otherwise (Q-E1: no keeper is built for it). Never blocks.
+     */
+    override fun warm() {
+        if (locations.keptLocation() == null) return
+        val k = keeper
+        k.warm()
+        k.wakeNow()
+    }
 
     override fun onStorageFailure(locationId: String, stop: RecordStop, failure: StorageFailure?, sinceFirstWriteMs: Long) {
         if (!locationId.startsWith(StorageConstants.SMB_ID_PREFIX)) return
-        if (stop != RecordStop.DISK_ERROR && stop != RecordStop.DISK_TOO_SLOW && stop != RecordStop.STORAGE_EVICTED) return
+        if (!stop.isStorageStop) return // Q-U10: the factory's set
         keeper.onRingFailure()
         // §5.4 grace: a stop within SMB_FIRST_WRITE_GRACE_MS of the cycle's first successful write (or before any) does not demote.
         if (sinceFirstWriteMs < StorageConstants.SMB_FIRST_WRITE_GRACE_MS) {
@@ -142,12 +175,8 @@ class StorageTargetsImpl(
 
         if (state == KeeperState.AUTH_FAILED || locations.signInNeeded(loc.id)) return fallback(loc, LocationFallback.SIGN_IN_NEEDED)
         // C-S3: a folder that refused the ring file falls back with that reason (the switch's toast already said it).
-        if (s != null && demoted(s, now)) return fallback(loc, when (s.demotedFailure) {
-            StorageFailure.ACCESS -> LocationFallback.SIGN_IN_NEEDED
-            StorageFailure.FULL -> LocationFallback.NO_SPACE_THERE
-            StorageFailure.REMOVED -> LocationFallback.UNREACHABLE
-            else -> LocationFallback.UNSTABLE
-        })
+        // Q-U4: the one mapping; a §5.4 stop demotion (no failure) is UNSTABLE.
+        if (s != null && demoted(s, now)) return fallback(loc, s.demotedFailure.asFallback(otherwise = LocationFallback.UNSTABLE))
 
         val ready = state == KeeperState.READY && link.isReady && s != null &&
             s.lastGoodMonoMs != KeeperSnapshot.NEVER && now - s.lastGoodMonoMs <= StorageConstants.SMB_FRESH_MS

@@ -141,12 +141,9 @@ class SmbPrepareNoIoTest {
         assertEquals("nothing on the server to remove", 0, link.log.count { it.startsWith("delete:") })
     }
 
-    private fun markNeedsFreshFile(st: RemoteRingStorage) {
-        when (st) {
-            is NoIoRemoteStorage -> st.needsFreshFile = true
-            // WP-S1's real storage sets it after a reconnect or a write timeout; make one happen on the flusher's path
-            // only when the real class is present (its own tests cover the flag).
-            else -> st.close()
-        }
-    }
+    /**
+     * The real storage sets needsFreshFile only after a reconnect or a write timeout (its own tests cover the flag); a
+     * closed (gone) storage is the same "rebuild" case for the factory and needs no I/O. (Q-D9: the stand-in is gone.)
+     */
+    private fun markNeedsFreshFile(st: RemoteRingStorage) = st.close()
 }

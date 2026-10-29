@@ -1,5 +1,5 @@
-// WP-S1 (docs/design/m6-storage-locations.md §2, §5, §17): the storage-location bindings. Binding RingTargetSource is the
-// switch that turns the feature on in :player's factory (which falls back to InternalRingTargets when it is absent).
+// WP-S1 (docs/design/m6-storage-locations.md §2, §5, §17): the storage-location bindings, including the RingTargetSource
+// :player's factory uses. (Q-E1, closure fix pass 2026-10-28) The SMB keeper is built only when a network folder is chosen.
 package app.thebox.data.storage
 
 import android.app.ActivityManager
@@ -64,7 +64,8 @@ abstract class StorageModule {
             toastGate: java.util.Optional<javax.inject.Provider<app.thebox.core.storage.FallbackToastGate>>,
         ): SmbSessionKeeper {
             val memoryClass = runCatching { context.getSystemService(ActivityManager::class.java)?.memoryClass ?: 0 }.getOrDefault(0)
-            val io = if (memoryClass >= TimeshiftConstants.REMOTE_POOL_MEMORY_CLASS_MB) StorageConstants.SMB_IO_TIMEOUT_MS else StorageConstants.SMB_IO_TIMEOUT_SMALL_POOL_MS
+            // Q-U5: the one small-pool decision (the factory's pool and open deadline read the same).
+            val io = if (TimeshiftConstants.smallRemotePool(memoryClass)) StorageConstants.SMB_IO_TIMEOUT_SMALL_POOL_MS else StorageConstants.SMB_IO_TIMEOUT_MS
             val keeper = SmbSessionKeeper(
                 locations = locations, deviceId = deviceId, lastGood = LastGoodStore(File(dirs.noBackup, LastGoodStore.FILE_NAME)),
                 exec = SmbExecutor("box-smb", MONO), clock = MONO, wallMs = System::currentTimeMillis,
@@ -76,15 +77,16 @@ abstract class StorageModule {
             return keeper
         }
 
+        /** Q-E1: the keeper is a [dagger.Lazy]: [StorageTargetsImpl] builds it only for a network folder chosen for rewind. */
         @Provides @Singleton
         fun targets(
             @ApplicationContext context: Context,
             locations: StorageLocationsImpl,
-            keeper: SmbSessionKeeper,
+            keeper: dagger.Lazy<SmbSessionKeeper>,
             volumes: VolumeCatalog,
             deviceId: DeviceIdentity,
         ): StorageTargetsImpl = StorageTargetsImpl(
-            locations = locations, keeper = keeper, volumes = volumes, deviceId = deviceId,
+            locations = locations, keeperSource = { keeper.get() }, volumes = volumes, deviceId = deviceId,
             internalDir = File(context.cacheDir, INTERNAL_DIR), clock = MONO, wallMs = System::currentTimeMillis,
             pid = android.os.Process.myPid(),
         )

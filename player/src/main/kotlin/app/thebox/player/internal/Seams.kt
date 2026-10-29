@@ -214,6 +214,17 @@ internal interface TimeshiftSessionFactory {
     fun abandon(grant: TimeshiftGrant, discardFile: Boolean) = Unit
     /** A rejected preparation may have no grant, but an earlier cycle can still have left an idle reusable ring. */
     fun discardUnused() = Unit
+    /**
+     * (Storage locations §5.5, §10; Q-H3 / lead ruling R10, closure fix pass 2026-10-28) [snap] with the cycle's storage
+     * fields (where it saves, why it falls back, why it stopped, the location, the folder's rates). Main, ≤ 1 Hz; no I/O.
+     * Default: [snap] as is (a factory without storage locations).
+     */
+    fun storageFields(grant: TimeshiftGrant, snap: LocalBufferState): LocalBufferState = snap
+    /**
+     * (Storage locations §5.3; Q-D1 / lead ruling R2) The guide's preview started: warm the save location (the keeper's
+     * connect and the `.wake` write). Called off main (IO); never blocks on the network. Default: nothing.
+     */
+    fun warmSaveLocation() = Unit
 }
 
 /** Answer of [TimeshiftSessionFactory.prepare]: storage granted, or why the cycle is not buffered. */

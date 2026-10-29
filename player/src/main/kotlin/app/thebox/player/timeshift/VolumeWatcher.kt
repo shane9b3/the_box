@@ -10,7 +10,6 @@ import android.os.Environment
 import android.os.StatFs
 import android.os.storage.StorageManager
 import app.thebox.core.common.BoxLog
-import app.thebox.core.storage.StorageFlags
 import app.thebox.core.storage.VolumeCatalog
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -28,7 +27,7 @@ import javax.inject.Singleton
  * on the receiver, `storage.close()` posted to `box-ts-discard`). Started by `TimeshiftStartup.onAppStart`.
  *
  * - **Listing** (§3.2): no permission, no SAF. The uuid and label come from `StorageManager.getStorageVolume(dir)`; a
- *   device that lists no drive shows no USB option (owner ruling 3). [StorageFlags.VOLUME_ENABLED] false lists none.
+ *   device that lists no drive shows no USB option (owner ruling 3). (Q-D10/R6: the S-1 spike switch is gone.)
  * - **Removal** (§3.2, A-S8): a runtime receiver (scheme `file`) for `MEDIA_EJECT`, `_UNMOUNTED`, `_BAD_REMOVAL` and
  *   `_REMOVED`. On main it only asks the factory to stop the ring and post the fd close ([onGone], never waits); the
  *   listing is refreshed on [executor].
@@ -62,7 +61,6 @@ internal class VolumeWatcher internal constructor(
     /** Registers the receiver and lists and sweeps the volumes once (main; the I/O runs on [executor]). Idempotent. */
     fun start() {
         if (!started.compareAndSet(false, true)) return
-        if (!StorageFlags.VOLUME_ENABLED) return
         val filter = IntentFilter().apply {
             for (a in GONE_ACTIONS) addAction(a)
             addAction(Intent.ACTION_MEDIA_MOUNTED)

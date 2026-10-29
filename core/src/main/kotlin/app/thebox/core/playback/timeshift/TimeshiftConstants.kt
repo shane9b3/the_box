@@ -35,6 +35,13 @@ object TimeshiftConstants {
     const val RING_RAM_BLOCKS_EXTERNAL_SMALL = 96
     /** `ActivityManager.memoryClass` (MiB) from which the remote pool is [RING_RAM_BLOCKS_EXTERNAL]. */
     const val REMOTE_POOL_MEMORY_CLASS_MB = 192
+
+    /**
+     * (Q-U5, save-location closure fix pass 2026-10-28) The one "is the remote pool small?" decision (lead ruling 5): below
+     * [REMOTE_POOL_MEMORY_CLASS_MB] a network folder gets [RING_RAM_BLOCKS_EXTERNAL_SMALL], and with it the shorter SMB
+     * I/O timeout and open deadline. Every derivation (pool, I/O timeout, open deadline, the Test's note) reads this.
+     */
+    fun smallRemotePool(memoryClassMb: Int): Boolean = memoryClassMb < REMOTE_POOL_MEMORY_CLASS_MB
     /** Per-reader direct staging buffer for `pread`. */
     const val READER_STAGING_BYTES = 65_536
     /** A blocked reader rechecks its cancel flag this often. */

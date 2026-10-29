@@ -2,6 +2,7 @@
 package app.thebox.player.timeshift
 
 import app.thebox.core.playback.MonoClock
+import app.thebox.core.playback.timeshift.CycleWriteTracking
 import app.thebox.core.playback.timeshift.RingStorage
 import app.thebox.core.storage.StorageLimits
 import java.io.File
@@ -27,15 +28,15 @@ internal class VolumeStorage(
     val nlinkReliable: Boolean,
     private val limits: StorageLimits = StorageLimits.VOLUME,
     private val clock: MonoClock = MonoClock { System.nanoTime() / 1_000_000L },
-) : RingStorage {
+) : RingStorage, CycleWriteTracking {
     val file: File get() = delegate.file
 
     @Volatile var ejected = false; private set
 
     /** Mono ms of the current cycle's first successful write, −1 until then (the factory's §5.4 report). */
-    @Volatile var firstWriteMonoMs: Long = -1L; private set
+    @Volatile override var firstWriteMonoMs: Long = -1L; private set
 
-    fun beginCycle() { firstWriteMonoMs = -1L }
+    override fun beginCycle() { firstWriteMonoMs = -1L }
 
     override val capacityBytes: Long get() = delegate.capacityBytes
     override val blocking: Boolean get() = true

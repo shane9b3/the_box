@@ -72,4 +72,17 @@ interface RemoteLink {
      * logged by fault name and left to the sweep.
      */
     fun post(work: Runnable)
+
+    /**
+     * (Q-E3, closure fix pass 2026-10-28; additive) True once the keeper replaced this link (a sign-in or address
+     * change, C-S1). A retired link never connects again, so a storage on it fails over at once instead of retrying
+     * until its reconnect budget runs out. Default false (links that are never retired).
+     */
+    val retired: Boolean get() = false
 }
+
+/**
+ * (Q-U10, closure fix pass 2026-10-28) "Free space unknown": large enough never to halt the ring's growth, small enough
+ * that adding a reserve or a capacity to it cannot overflow. The one sentinel for an unmeasured remote share.
+ */
+const val UNKNOWN_FREE_BYTES: Long = Long.MAX_VALUE / 4
