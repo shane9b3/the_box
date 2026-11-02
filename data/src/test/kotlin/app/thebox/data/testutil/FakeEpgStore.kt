@@ -92,10 +92,10 @@ class FakeEpgStore(
     override fun clear() { state.value = null; imported.clear() }
 
     /** Publishes a generation without a build (all catalogue channels, [importedIds] imported). */
-    fun publish(importedIds: Map<Long, Set<String>> = emptyMap()) {
+    fun publish(importedIds: Map<Long, Set<String>> = emptyMap(), builtAtMs: Long = 0) {
         imported.clear()
         importedIds.forEach { (k, v) -> imported[k] = v.toMutableSet() }
-        state.value = EpgGenerationInfo(1, 0, 0, 0, 0, 0, 0, 0, "fts4")
+        state.value = EpgGenerationInfo(1, 0, builtAtMs, 0, 0, 0, 0, 0, "fts4")
     }
 
     private inner class Reader(override val info: EpgGenerationInfo) : EpgReader {

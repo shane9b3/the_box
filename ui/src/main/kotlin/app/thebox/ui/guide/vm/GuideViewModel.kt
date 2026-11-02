@@ -69,8 +69,10 @@ import app.thebox.core.guide.ReminderBook
 import app.thebox.core.guide.RowCellsBuilder
 import app.thebox.core.guide.ScreenMode
 import app.thebox.core.guide.SyncChip
+import app.thebox.core.guide.SyncChipReason
 import app.thebox.core.guide.SyncFeedState
 import app.thebox.core.guide.SyncFeed
+import app.thebox.core.guide.syncChipReason
 import app.thebox.core.guide.TimeLabels
 import app.thebox.core.input.KeyCapabilities
 import app.thebox.core.playback.Viewport
@@ -428,7 +430,11 @@ class GuideViewModel @Inject constructor(
             }
         }
         scope.launch { alerts.missed.collect { machine.dispatch(GuideEvent.MissedReminders(it)) } }
-        scope.launch { syncFeed.state.collect { machine.dispatch(GuideEvent.Sync(syncChip(it))) } }
+        // (owner finding 2026-11-01) The chip's "guide from …" time follows the 12/24 h setting and the device zone.
+        scope.launch {
+            combine(syncFeed.state, settingsSource.settings.map { it.clock24 }.distinctUntilChanged(), zone) { s, c24, z -> syncChip(s, c24, z) }
+                .collect { machine.dispatch(GuideEvent.Sync(it)) }
+        }
         scope.launch { dataWindow.window.collect { machine.dispatch(GuideEvent.DataWindow(it)) } }
         pager?.let { p ->
             scope.launch { p.snapshots.filterNotNull().collect { machine.dispatch(GuideEvent.Window(it)) } }
@@ -484,10 +490,39 @@ class GuideViewModel @Inject constructor(
         return ch
     }
 
-    private fun syncChip(s: SyncFeedState): SyncChip? = when {
-        s.busy -> SyncChip(s.progress ?: context.getString(R.string.guide_sync_updating), failed = false)
-        s.unacknowledgedFailures > 0 -> SyncChip(context.getString(R.string.guide_sync_failed), failed = true)
-        else -> null
+    /**
+     * (owner finding 2026-11-01, docs/decisions/2026-11-01-guide-sync-chip.md) The selection is `syncChipReason` in
+     * :core; this only maps it to strings. The chip is one line of at most 420 design px, so the reason comes first
+     * and the text stays short.
+     */
+    private fun syncChip(s: SyncFeedState, clock24: Boolean, zone: ZoneId): SyncChip? = when (val r = syncChipReason(s)) {
+        null -> null
+        is SyncChipReason.Busy -> SyncChip(r.progress ?: context.getString(R.string.guide_sync_updating), failed = false)
+        is SyncChipReason.Stale -> {
+            val at = builtAtLabel(r.builtAtMs, clock24, zone)
+            val text = r.httpStatus?.let { context.getString(R.string.guide_sync_stale_http, it, at) }
+                ?: context.getString(R.string.guide_sync_stale_network, at)
+            SyncChip(text, failed = true)
+        }
+        is SyncChipReason.Refused -> SyncChip(context.getString(R.string.guide_sync_refused, r.httpStatus), failed = true)
+        SyncChipReason.SignIn -> SyncChip(context.getString(R.string.guide_sync_sign_in), failed = true)
+        SyncChipReason.Unreadable -> SyncChip(context.getString(R.string.guide_sync_unreadable), failed = true)
+        SyncChipReason.NoSpace -> SyncChip(context.getString(R.string.guide_sync_no_space), failed = true)
+        SyncChipReason.Failed -> SyncChip(context.getString(R.string.guide_sync_failed), failed = true)
+    }
+
+    /** "18:40" today, "Sat 18:40" within the last week, "13 Oct 18:40" before that (12 h form: "6:40 PM"). */
+    private fun builtAtLabel(ms: Long, clock24: Boolean, zone: ZoneId): String {
+        val locale = context.resources.configuration.locales[0]
+        val at = java.time.Instant.ofEpochMilli(ms).atZone(zone)
+        val days = java.time.temporal.ChronoUnit.DAYS.between(at.toLocalDate(), java.time.LocalDate.now(zone))
+        val time = if (clock24) "HH:mm" else "h:mm a"
+        val pattern = when {
+            days <= 0L -> time
+            days < 7L -> "EEE $time"
+            else -> "d MMM $time"
+        }
+        return java.time.format.DateTimeFormatter.ofPattern(pattern, locale).format(at)
     }
 
     /** §3.7: logos for rows `[top − 6, top + 12)` are requested when a block arrives, before they scroll in. */
