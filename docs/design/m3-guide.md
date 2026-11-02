@@ -811,6 +811,9 @@ interface GuideDataWindowSource { val window: StateFlow<GuideDataWindow> }
 
 /** Sync chip input (SyncStatusRepository in :data maps to this; bound in GuideDataModule). */
 data class SyncFeedState(val busy: Boolean, val progress: String?, val unacknowledgedFailures: Int)
+// (amended 2026-11-01, owner finding; docs/decisions/2026-11-01-guide-sync-chip.md) additive fields with null
+// defaults: lastFailureCode, lastFailureTarget, lastFailureAtMs, guideBuiltAtMs; plus SyncChipReason and the pure
+// syncChipReason(SyncFeedState) next to it.
 interface SyncFeed { val state: StateFlow<SyncFeedState> }
 
 /** Bound in :ui (InputModule, WP-D) from ActivityManager; computed once. */
@@ -1943,7 +1946,7 @@ GUIDE → FULL: `HoleChrome` fades a black scrim over the hole in `SCRIM_MS` (12
 |---|---|---|
 | Wordmark | (832, 56), height 28 | white on dark, vector (§3.17) |
 | Tabs | from x = 832 + wordmark + 24, top 56 | pills 18 px, padding 8 × 18, active = 12 % fill + 16 % border; focused (TABS zone) = solid `FG` with dark text + accent ring |
-| Sync chip | after the tabs, gap 16 | `SyncFeed.state` (B7; `:data` maps `SyncStatusRepository.status`, `SyncStatusRepository.kt:15-58`): "Updating guide…"/progress line while busy; "Guide update failed. Details arrive with Settings." when failures are unacknowledged (N11: the chip is not focusable and there is no details screen in M3) |
+| Sync chip | after the tabs, gap 16 | `SyncFeed.state` (B7; `:data` maps `SyncStatusRepository.status`, `SyncStatusRepository.kt:15-58`): "Updating guide…"/progress line while busy; "Guide update failed. Details arrive with Settings." when failures are unacknowledged (N11: the chip is not focusable and there is no details screen in M3). (amended 2026-11-01, owner finding: a guide refresh ended in a bare "500 error" chip while the guide was full) The chip names the reason for the newest unacknowledged failure, chosen by the pure `syncChipReason` in `GuideEnvironment.kt`: a guide build (`EPG_BUILD`) with a transient code (`http.5xx`, `http.408`, `http.429`, `net.*`) while a generation built before the failure exists reads "HTTP 500 · guide from Sat 18:40" (`net.*`: "Offline · guide from …"; time "18:40" today, "Sat 18:40" within a week, "13 Oct 18:40" before; 12 h form "6:40 PM"); a non-transient guide-build code keeps a reason ("Refused (HTTP 403) · see Settings", "Sign-in rejected · see Settings", "Unreadable guide · see Settings", "Storage full · free up space"); anything else (no generation, playlist or patch failures, other codes) keeps "Guide update failed. Check Settings → TV guide." The chip is one line of about 335 px of 20 px text between the tabs and the clock, so the reason comes first and only the HTTP status number appears as a code. Styling (`failed = true`, amber dot) and acknowledgement are unchanged. See `docs/decisions/2026-11-01-guide-sync-chip.md`. |
 | Date + clock | right-aligned at 1856, top 56 | §3.5.2 |
 | Panel meta row … buttons | bottom-aligned in (832, 56) – (1856, 461), gap 16 | prototype; buttons padding 14 × 26, radius 14; focused button = `FG` fill + accent ring; the secondary uses `rgba(255,255,255,.1)` with no blur (B1.3) |
 | Grid | §3.1 | the host |

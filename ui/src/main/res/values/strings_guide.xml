@@ -102,4 +102,14 @@
     <string name="guide_a11y_next_channel">Next channel</string>
     <string name="guide_a11y_previous_programme">Previous programme</string>
     <string name="guide_a11y_next_programme">Next programme</string>
+
+    <!-- Sync chip reasons (owner finding 2026-11-01, docs/decisions/2026-11-01-guide-sync-chip.md). One line of
+         about 335 design px of 20 px text between the tabs and the clock: reason first, then what the viewer sees or
+         does. The stale forms' time = when the guide on screen was built ("18:40", "Sat 18:40", "13 Oct 6:40 PM"). -->
+    <string name="guide_sync_stale_http">HTTP %1$d · guide from %2$s</string>
+    <string name="guide_sync_stale_network">Offline · guide from %1$s</string>
+    <string name="guide_sync_refused">Refused (HTTP %1$d) · see Settings</string>
+    <string name="guide_sync_sign_in">Sign-in rejected · see Settings</string>
+    <string name="guide_sync_unreadable">Unreadable guide · see Settings</string>
+    <string name="guide_sync_no_space">Storage full · free up space</string>
 </resources>

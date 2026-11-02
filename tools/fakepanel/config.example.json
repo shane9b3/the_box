@@ -26,6 +26,7 @@
   "synthetic_days_back": 3,
   "synthetic_days_ahead": 7,
   "epg_version": 0,
+  "epg_status": 0,
   "faults": {
     "linger": 10,
     "linger_status": 458,

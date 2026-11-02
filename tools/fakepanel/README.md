@@ -49,8 +49,13 @@ All are changeable at runtime through `/admin`. See `config.example.json` for ev
 
 `username password timezone quirks series_episodes_array epg_plain auth_mode bad_creds_mode status max_connections
 active_cons_override exp_days allowed_output_formats epg_offset epg_gzip strict_timeshift_tz timeshift_expect timeshift_ranges
-hls_timeout hls_window token_ttl token_single_use pace faults stream_faults media_override synthetic synthetic_days_back synthetic_days_ahead epg_version
+hls_timeout hls_window token_ttl token_single_use pace faults stream_faults media_override synthetic synthetic_days_back synthetic_days_ahead epg_version epg_status
 timeshift_mode timeshift_window archive_lag_sec timeshift_future timeshift_chunked timeshift_reject_forms timeshift_range_ignored player_fixtures`
+
+`epg_status` (int, default 0): when ≥ 400, `xmltv.php` answers that status with a short text body (after the auth checks;
+counted as rejection `epg_status`), in both catalog and synthetic mode. `POST /admin/config {"epg_status":500}` reproduces a
+provider whose guide server fails (owner finding 2026-11-01: the guide chip's "HTTP 500 · guide from …"); `0` restores normal
+answers.
 
 `media_override`: `{"<stream id>": "std|mp2|50fps|radio|hdr|multi"}` serves another clip for that stream, live and archive
 (Q-1: `{"1": "hdr"}` makes ch1 HDR10 for the HDR-poster test). `multi` on a live `.m3u8` serves the master playlist with

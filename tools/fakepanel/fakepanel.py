@@ -50,6 +50,7 @@ DEFAULTS = {
     "media_override": {},       # {"<stream id>": "std|mp2|50fps|radio|hdr"}: serve another clip for that live stream
     "synthetic": 0, "synthetic_days_back": 3, "synthetic_days_ahead": 7,  # --synthetic N: N generated live channels
     "epg_version": 0,           # bump (via /admin/config) to change synthetic programme titles (" v2", ...)
+    "epg_status": 0,            # >= 400: xmltv.php answers this status with a short body (owner finding 2026-11-01)
     # M4 (docs/design/m4-player-ux.md §5.6): archive behaviour for the player suite
     "timeshift_mode": "clip3",  # clip3 = clip x 3 (M2/M3); duration = body sized to the requested duration, continuous PCR/PTS
     "timeshift_window": True,   # 404 for a start outside the channel's archive (older than archive_days, in the future, no archive)
@@ -1036,7 +1037,7 @@ class Panel:
         unknown = [k for k in patch if k not in DEFAULTS]
         if unknown:
             raise ValueError("unknown config keys: " + ", ".join(unknown))
-        for k, hi in (("synthetic", 20000), ("synthetic_days_back", 400), ("synthetic_days_ahead", 400), ("epg_version", 10**6)):
+        for k, hi in (("synthetic", 20000), ("synthetic_days_back", 400), ("synthetic_days_ahead", 400), ("epg_version", 10**6), ("epg_status", 599)):
             if k in patch and (isinstance(patch[k], bool) or not isinstance(patch[k], int) or not 0 <= patch[k] <= hi):
                 raise ValueError(f"{k} must be an integer 0..{hi}")
         if "timeshift_mode" in patch and patch["timeshift_mode"] not in ("clip3", "duration"):
@@ -1716,6 +1717,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self.auth_fail(c["auth_mode"])
         if not self.creds_ok(q.get("username"), q.get("password")):
             return self.auth_fail("403" if c["bad_creds_mode"] == "auth0" else c["bad_creds_mode"])
+        if c.get("epg_status", 0) >= 400:  # the provider's guide server failing (owner finding 2026-11-01)
+            return self.reject(int(c["epg_status"]), "epg_status", f"xmltv.php: HTTP {c['epg_status']}\n".encode())
         syn = self.panel.syn()
         if syn:  # streamed: the document is generated while writing, never held in memory
             return self.xmltv_stream(syn, c)

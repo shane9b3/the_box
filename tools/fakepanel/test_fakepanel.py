@@ -140,6 +140,21 @@ class TestM3uXmltv(PanelCase):
         self.assertGreater(txt.count("<programme "), 13 * 280)
         self.assertIn(" +0100\"", txt)
 
+    def test_xmltv_epg_status(self):
+        # owner finding 2026-11-01: the provider's guide server answering HTTP 500
+        self.admin({"epg_status": 500})
+        try:
+            st, _, body = self.get("/xmltv.php?username=test&password=test")
+            self.assertEqual(st, 500)
+            self.assertNotIn(b"<tv", body)
+            st, _, _ = self.get("/xmltv.php?username=x&password=y")
+            self.assertNotEqual(st, 500)  # the auth checks still come first
+        finally:
+            self.admin({"epg_status": 0})
+        st, _, body = self.get("/xmltv.php?username=test&password=test")
+        self.assertEqual(st, 200)
+        self.assertIn(b"<programme ", body)
+
     def test_xmltv_gzip(self):
         self.admin({"epg_gzip": True})
         _, _, body = self.get("/xmltv.php?username=test&password=test")
