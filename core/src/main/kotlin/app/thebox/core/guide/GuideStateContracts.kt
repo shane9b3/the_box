@@ -5,8 +5,13 @@ import app.thebox.core.input.BoxAction
 import kotlinx.coroutines.flow.StateFlow
 
 enum class ScreenMode { GUIDE, FULL, SEARCH, SETTINGS }
+/** (owner ruling 2026-11-01) PANEL is kept for the append-only contract but never entered: the panel has no buttons. */
 enum class Zone { TABS, PANEL, HEADER, GRID }
-/** (reviewed 2026-10-14, S11/E21) MORE opens the context menu, for remotes without long-press or Menu; always last. */
+/**
+ * (reviewed 2026-10-14, S11/E21) MORE opens the context menu, for remotes without long-press or Menu; always last.
+ * (owner ruling 2026-11-01) Retired: the panel draws no buttons and [PanelState.buttons] is always empty; kept for the
+ * append-only contract (docs/decisions/2026-11-01-guide-panel-and-mini-player.md).
+ */
 enum class PanelButton { WATCHING, WATCH_NOW, WATCH, FROM_START, REMIND, REMINDER_SET, WATCH_CHANNEL_NOW, MORE }
 /** (reviewed 2026-10-14, E22) Rows at the top of the Groups panel. */
 enum class GroupsShortcut { SEARCH, SETTINGS }
@@ -36,6 +41,7 @@ data class PanelState(
     val timeLine: String,
     /** null until 150 ms without a focus change (B2.8). */
     val description: String?,
+    /** (owner ruling 2026-11-01) Always empty: the panel has no buttons; OK and the context menu carry the actions. */
     val buttons: List<PanelButton>,
     val noInfo: Boolean,
     /** Poster art beside the text (owner request 2026-10-18): the programme's XMLTV icon, with the description. */
@@ -77,6 +83,7 @@ data class GuideUiState(
     val tabFocused: Int = 0,
     val headerChips: List<HeaderChip> = listOf(HeaderChip.GROUP, HeaderChip.DAY),
     val headerFocused: Int = 0,
+    /** (owner ruling 2026-11-01) Always 0: PANEL is never entered. */
     val panelFocused: Int = 0,
     val sourceLabel: String = "",
     val dayLabel: String = "",
@@ -93,7 +100,7 @@ data class GuideUiState(
     val empty: EmptyKind? = null,
     /** Group-name card in FULL after a group cycle (decision note accelerator 3). */
     val groupCard: String? = null,
-    /** (M4) The archive session, for the mini player's PAUSED / −MM:SS pills (PillRules, §3.2.3). */
+    /** (M4) The archive session (PillRules, §3.2.3). (owner ruling 2026-11-01) The mini player no longer draws its pills. */
     val archive: app.thebox.core.catchup.archive.ArchiveStatus? = null,
     /** (M5, §2.12 item 2, decision §0.9) The PIN prompt: one modal layer drawn above every mode. */
     val pin: app.thebox.core.parental.PinPromptState? = null,

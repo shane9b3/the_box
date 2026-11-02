@@ -13,7 +13,6 @@ import app.thebox.core.guide.GuideToast
 import app.thebox.core.guide.MiniPhase
 import app.thebox.core.guide.OpenGuideOn
 import app.thebox.core.guide.Overlay
-import app.thebox.core.guide.PanelButton
 import app.thebox.core.guide.PerformanceMode
 import app.thebox.core.guide.ProgrammeInfo
 import app.thebox.core.guide.ScreenMode
@@ -120,17 +119,17 @@ class GuideBehaviourTest {
             w.press(BACK); assertTrue((w.ui.overlay as Overlay.Groups).viaBack, "home again: Back reopens Groups")
         }
 
-        /** Ruling 3: the ladder lands on Search; Up from the panel or the header lands on Guide; Settings keeps the gear. */
+        /** Ruling 3: the ladder lands on Search; Up from the header lands on Guide; Settings keeps the gear. */
         @Test fun topBarLandingTab() {
             val w = GuideWorld()
             w.press(BACK); w.press(BACK)
             assertEquals(GuideStateMachineImpl.TAB_SEARCH, w.ui.tabFocused)
-            w.press(DOWN); w.press(UP) // TABS → PANEL → TABS
+            w.press(DOWN); w.press(UP) // TABS → HEADER → TABS (owner ruling 2026-11-01: no PANEL)
             assertEquals(Zone.TABS, w.ui.zone); assertEquals(GuideStateMachineImpl.TAB_GUIDE, w.ui.tabFocused)
             w.press(RIGHT); w.press(RIGHT); w.press(SELECT); w.press(BACK) // Settings and back
             assertEquals(Zone.TABS, w.ui.zone); assertEquals(2, w.ui.tabFocused)
             // A stale tab from an earlier visit (review S3 grid_home_stale_tab): the ladder still lands on Search.
-            w.press(DOWN); w.press(DOWN); w.press(DOWN) // TABS → PANEL → HEADER → GRID
+            w.press(DOWN); w.press(DOWN) // TABS → HEADER → GRID (owner ruling 2026-11-01: no PANEL)
             assertEquals(Zone.GRID, w.ui.zone)
             w.press(BACK); w.press(BACK)
             assertEquals(Zone.TABS, w.ui.zone); assertEquals(GuideStateMachineImpl.TAB_SEARCH, w.ui.tabFocused)
@@ -153,8 +152,10 @@ class GuideBehaviourTest {
 
         @Test fun nonGridZoneGoesToGridFirstAndOverlaysCloseFirst() {
             val w = GuideWorld()
-            w.press(UP); w.press(UP)
-            assertEquals(Zone.PANEL, w.ui.zone)
+            w.press(UP); w.press(UP) // header chips, then the tabs (owner ruling 2026-11-01: no panel buttons)
+            assertEquals(Zone.TABS, w.ui.zone)
+            w.press(DOWN)
+            assertEquals(Zone.HEADER, w.ui.zone)
             w.press(BACK)
             assertEquals(Zone.GRID, w.ui.zone)
             w.press(GROUPS_PANEL); w.press(BACK)
@@ -548,20 +549,22 @@ class GuideBehaviourTest {
             assertNull(w.calls.calls.lastOrNull { it.name == "loadInfo" && (it.args[1] as app.thebox.core.guide.GuideChannel).rowId == w.channels[3].rowId })
         }
 
-        @Test fun buttonsPerCellClass() {
+        /** (owner ruling 2026-11-01) The panel has no buttons on any cell class; PANEL is never entered. */
+        @Test fun noButtonsOnAnyCellClass() {
             val w = GuideWorld()
-            assertEquals(listOf(PanelButton.WATCHING, PanelButton.FROM_START, PanelButton.MORE), w.ui.panel!!.buttons)
+            assertTrue(w.ui.panel!!.buttons.isEmpty())
             w.press(LEFT)
-            assertEquals(listOf(PanelButton.WATCH, PanelButton.MORE), w.ui.panel!!.buttons)
+            assertTrue(w.ui.panel!!.buttons.isEmpty())
             w.press(DOWN) // row 1 past, no archive
-            assertEquals(listOf(PanelButton.WATCH_NOW, PanelButton.MORE), w.ui.panel!!.buttons)
+            assertTrue(w.ui.panel!!.buttons.isEmpty())
             assertTrue(w.ui.panel!!.timeLine.endsWith(GuideTexts.NOT_IN_CATCHUP) || w.ui.panel!!.onNow)
             val f = GuideWorld(); f.press(RIGHT)
-            assertEquals(listOf(PanelButton.REMIND, PanelButton.WATCH_CHANNEL_NOW, PanelButton.MORE), f.ui.panel!!.buttons)
+            assertTrue(f.ui.panel!!.buttons.isEmpty())
             f.press(REMIND)
-            assertEquals(PanelButton.REMINDER_SET, f.ui.panel!!.buttons[0])
+            assertTrue(f.ui.panel!!.buttons.isEmpty())
             val e = GuideWorld(); e.tuneTo(e.channels[0], MiniPhase.ERROR, error = PlaybackErrorCode.SERVER_ERROR); e.flush()
-            assertEquals(listOf(PanelButton.WATCH_NOW, PanelButton.MORE), e.ui.panel!!.buttons)
+            assertTrue(e.ui.panel!!.buttons.isEmpty())
+            for (g in listOf(w, f, e)) for (k in listOf(UP, UP, DOWN, UP, DOWN, DOWN)) { g.press(k); assertFalse(g.ui.zone == Zone.PANEL, "PANEL entered") }
         }
 
         private fun info(d: String) = ProgrammeInfo(0, 0, 1, "t", null, d, "Drama", null, 0, 0)
@@ -806,7 +809,9 @@ class GuideBehaviourTest {
             )))
             assertTrue(w.channels[0].identityHash in w.machine.frame.suspectArchive.toList())
             assertEquals(0, w.ui.panel!!.catchupDays)
-            assertFalse(PanelButton.FROM_START in w.ui.panel!!.buttons)
+            w.press(CONTEXT_MENU) // (owner ruling 2026-11-01) From start now lives in the context menu only
+            val menu = assertIs<Overlay.Menu>(w.ui.overlay)
+            assertFalse(app.thebox.core.guide.MenuItem.WATCH_FROM_START in menu.items, "no From start on a suspect archive")
         }
 
         /** U-S5 / P-L1: the session's 1 s status polls leave GuideUiState.archive identical; a phase change publishes. */

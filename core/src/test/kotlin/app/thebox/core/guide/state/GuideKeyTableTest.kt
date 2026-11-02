@@ -49,7 +49,7 @@ class GuideKeyTableTest {
         val all = rows()
         assertEquals(PRE.keys, all.map { it.pre }.toSet(), "unused or missing preconditions")
         val sections = all.map { it.section }.toSet()
-        for (s in listOf("grid", "tabs", "panel", "header", "groups", "groupmenu", "days", "menu", "sheet", "number", "exit", "card", "full", "back", "search", "settings")) {
+        for (s in listOf("grid", "tabs", "header", "groups", "groupmenu", "days", "menu", "sheet", "number", "exit", "card", "full", "back", "search", "settings")) {
             assertTrue(s in sections, "section $s")
         }
         // Every BoxAction appears in the GRID and FULL tables (or is an explicit no-op row).
@@ -83,7 +83,6 @@ class GuideKeyTableTest {
             "row" -> assertEquals(v!!.toInt(), f?.row, "row")
             "tab" -> assertEquals(v!!.toInt(), ui.tabFocused, "tab")
             "chip" -> assertEquals(HeaderChip.valueOf(v!!), ui.headerChips[ui.headerFocused], "chip")
-            "panel" -> assertEquals(v!!.toInt(), ui.panelFocused, "panel button")
             "groups" -> assertEquals(v!!.toInt(), (ui.overlay as Overlay.Groups).focused, "groups focus")
             "days" -> assertEquals(v!!.toInt(), (ui.overlay as Overlay.Days).focused, "days focus")
             "menu" -> assertEquals(v!!.toInt(), (ui.overlay as Overlay.Menu).focused, "menu focus")
@@ -142,13 +141,10 @@ class GuideKeyTableTest {
             "tabs" to { home().keys(UP, UP, UP) },
             "tabs_search" to { home().keys(UP, UP, UP, RIGHT) },
             "tabs_settings" to { home().keys(UP, UP, UP, RIGHT, RIGHT) },
-            "panel" to { home().keys(UP, UP) },
-            // (review S6) The top bar was left on Search (tab 1), then Down to the panel.
-            "panel_stale_tab" to { home().keys(UP, UP, UP, RIGHT, DOWN).also { check(it.ui.zone == Zone.PANEL && it.ui.tabFocused == 1) } },
-            "panel_from_start" to { home().keys(UP, UP, RIGHT) },
-            "panel_more" to { home().keys(UP, UP, RIGHT, RIGHT) },
             "header" to { home().keys(UP) },
-            // (review S6) An empty source has no panel buttons: Up from the header goes straight to the top bar.
+            // (review S6; owner ruling 2026-11-01) The top bar was left on Search (tab 1), then Down to the chips.
+            "header_stale_tab" to { home().keys(UP, UP, RIGHT, DOWN).also { check(it.ui.zone == Zone.HEADER && it.ui.tabFocused == 1) } },
+            // (review S6) An empty source (no panel at all): Up from the header goes straight to the top bar.
             "header_no_panel" to {
                 home().keys(UP, UP, UP, RIGHT, DOWN, DOWN, DOWN, FAVOURITES, UP).also {
                     check(it.ui.zone == Zone.HEADER && it.ui.panel?.buttons.isNullOrEmpty() && it.ui.tabFocused == 1) { "not header without panel: ${it.ui}" }

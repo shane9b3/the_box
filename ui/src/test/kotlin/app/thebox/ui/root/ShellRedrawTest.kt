@@ -7,7 +7,6 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import app.thebox.core.guide.FooterHint
 import app.thebox.core.guide.GuideUiState
 import app.thebox.core.guide.MiniPhase
-import app.thebox.core.guide.PanelButton
 import app.thebox.core.guide.PanelState
 import app.thebox.core.guide.TunedState
 import app.thebox.core.guide.fakes.FakeGuideStateMachine
@@ -15,7 +14,8 @@ import app.thebox.core.guide.fakes.GuideFixtures
 import app.thebox.ui.guide.GuideDebugCounters
 import app.thebox.ui.guide.screen.COMPOSITIONS_MINI
 import app.thebox.ui.guide.screen.COMPOSITIONS_PANEL
-import app.thebox.ui.guide.screen.LIVE_DOT_DRAWS
+import app.thebox.ui.full.LIVE_DOT_DRAWS
+import app.thebox.ui.full.LiveDot
 import app.thebox.ui.shelltest.FakeShellHost
 import app.thebox.ui.theme.BoxTheme
 import org.junit.Assert.assertEquals
@@ -29,7 +29,8 @@ import org.robolectric.annotation.Config
 /**
  * Code review 2026-10-14: what the shell redraws when nothing it shows changed.
  * - H-S9: a grid move (a new panel, the same mini-player slice) recomposes the panel only, never the mini overlay;
- * - H-S8: in low-end mode the LIVE dot updates its layer once a second, not every frame.
+ * - H-S8: the LIVE dot (full-screen pill; the mini player draws none since the owner ruling of 2026-11-01) updates its
+ *   layer once a second, not every frame.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w960dp-h540dp-xhdpi")
@@ -40,7 +41,7 @@ class ShellRedrawTest {
     private val tuned = TunedState(identity = GuideFixtures.identity(1), rowId = 1, phase = MiniPhase.PLAYING)
     private val footer = listOf(FooterHint("↑↓←→", "Browse"))
 
-    private fun panel(i: Int) = PanelState(101 + i, "Channel $i", null, true, 0, "Show $i", "19:30 – 20:00 · 30 min", null, listOf(PanelButton.WATCH_NOW, PanelButton.MORE), false)
+    private fun panel(i: Int) = PanelState(101 + i, "Channel $i", null, true, 0, "Show $i", "19:30 – 20:00 · 30 min", null, emptyList(), false)
 
     @Test
     fun aGridMoveRecomposesThePanelNotTheMiniPlayer() {
@@ -62,23 +63,24 @@ class ShellRedrawTest {
     }
 
     @Test
-    fun lowEndLiveDotStepsOncePerSecond() {
-        val machine = FakeGuideStateMachine(GuideUiState(tuned = tuned))
-        val host = FakeShellHost(machine).also { it.lowEndFlow.value = true }
+    fun liveDotStepsOncePerSecond() {
         rule.mainClock.autoAdvance = false
-        rule.setContent { BoxTheme { AppRoot(host, grid = { m -> Spacer(m.graphicsLayer()) }) } }
+        rule.setContent { BoxTheme { LiveDot() } }
         rule.mainClock.advanceTimeBy(500)
         val d0 = GuideDebugCounters.count(LIVE_DOT_DRAWS)
         rule.mainClock.advanceTimeBy(3_000)
         val draws = GuideDebugCounters.count(LIVE_DOT_DRAWS) - d0
-        assertTrue("LIVE dot layer updates in 3 s of low-end MINI: $draws (a per-frame animation gives ~180)", draws in 1..6)
+        assertTrue("LIVE dot layer updates in 3 s: $draws (a per-frame animation gives ~180)", draws in 1..6)
     }
 
     // ---------------------------------------------------------------- M4 code review, U-S5
 
-    /** U-S5 (L-4): ten archive statuses in GUIDE recompose the mini player only (the static local recomposed the root). */
+    /**
+     * U-S5 (L-4): ten archive statuses in GUIDE recompose neither the mini player nor the panel (the static local
+     * recomposed the root). (owner ruling 2026-11-01) The mini player no longer takes the archive status at all.
+     */
     @Test
-    fun archiveStatusesInGuideRecomposeTheMiniPlayerOnly() {
+    fun archiveStatusesInGuideRecomposeNeitherTheMiniPlayerNorThePanel() {
         val ch = GuideFixtures.channel(1, archiveDays = 7)
         val t = TunedState(identity = ch.identity, rowId = ch.rowId, identityHash = ch.identityHash, phase = MiniPhase.PLAYING, isArchive = true)
         val machine = FakeGuideStateMachine(GuideUiState(tuned = t, tunedChannel = ch, footer = footer, panel = panel(0)))
@@ -96,7 +98,7 @@ class ShellRedrawTest {
             rule.waitForIdle()
         }
         val minis = GuideDebugCounters.count(COMPOSITIONS_MINI) - mini0
-        assertTrue("the mini player follows the status ($minis)", minis >= 1)
+        assertEquals("the mini player draws no archive pill, so it never recomposes", 0, minis)
         assertEquals("the focused panel never recomposes", 0, GuideDebugCounters.count(COMPOSITIONS_PANEL) - panel0)
     }
 

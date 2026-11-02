@@ -118,12 +118,11 @@ class FooterHintsFromKeyMapTest {
         w.press(RIGHT); assertEquals(tabs, w.ui.footer); w.press(LEFT); w.press(LEFT); assertEquals(tabs, w.ui.footer)
     }
 
-    @Test fun panelAndHeaderKeepTheM3Set() {
+    /** (owner ruling 2026-11-01) The panel has no buttons and no zone of its own; the header keeps the M3 set. */
+    @Test fun headerKeepsTheM3Set() {
         val w = GuideWorld()
         w.press(UP)
-        assertEquals(listOf(browse, watch, options, full), w.ui.footer)
-        w.press(UP)
-        assertEquals(Zone.PANEL, w.ui.zone)
+        assertEquals(Zone.HEADER, w.ui.zone)
         assertEquals(listOf(browse, watch, options, full), w.ui.footer)
     }
 

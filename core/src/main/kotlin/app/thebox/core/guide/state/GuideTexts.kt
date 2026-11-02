@@ -3,7 +3,6 @@ package app.thebox.core.guide.state
 import app.thebox.core.guide.GroupsShortcut
 import app.thebox.core.guide.HeaderChip
 import app.thebox.core.guide.MenuItem
-import app.thebox.core.guide.PanelButton
 
 /**
  * English texts the state machine puts into [app.thebox.core.guide.GuideUiState] (§3.9.1, §3.18.3). One place, so
@@ -40,16 +39,6 @@ object GuideTexts {
         HeaderChip.NOW -> "Now, button"
         HeaderChip.DAY -> "Day: $day, button"
     }
-    fun button(b: PanelButton): String = when (b) {
-        PanelButton.WATCHING -> "Watching"
-        PanelButton.WATCH_NOW -> "Watch now"
-        PanelButton.WATCH -> "Watch"
-        PanelButton.FROM_START -> "From start"
-        PanelButton.REMIND -> "Remind me"
-        PanelButton.REMINDER_SET -> "Reminder set"
-        PanelButton.WATCH_CHANNEL_NOW -> "Watch channel now"
-        PanelButton.MORE -> "More"
-    } + ", button"
     fun menu(m: MenuItem): String = when (m) {
         MenuItem.WATCH -> "Watch"
         MenuItem.WATCH_FROM_START -> "Watch from start"

@@ -58,7 +58,6 @@ const val TRACE_PANEL = "guide-panel"
 fun GuideScreen(
     state: GuideUiState,
     clock24: Boolean,
-    lowEnd: Boolean,
     poster: Boolean,
     anchor: Rect?,
     onHoleMeasured: (RectPx) -> Unit,
@@ -76,7 +75,7 @@ fun GuideScreen(
                     val b = c.boundsInWindow(clipBounds = false)
                     onHoleMeasured(HoleGeometry.round(b.left, b.top, b.right, b.bottom))
                 },
-        ) { MiniPlayerOverlay(state.tuned, state.tunedNow, state.tunedChannel, clock24, lowEnd, poster, archive = state.archive) } // U-S5/L-4
+        ) { MiniPlayerOverlay(state.tuned, state.tunedChannel, poster) } // owner ruling 2026-11-01: video only
 
         Column(
             Modifier
@@ -92,7 +91,7 @@ fun GuideScreen(
         ) {
             HeaderTabs(state.zone, state.tabFocused, state.sync, clock24)
             Spacer(Modifier.weight(1f))
-            FocusedPanel(state.panel, if (state.zone == Zone.PANEL) state.panelFocused else -1)
+            FocusedPanel(state.panel)
         }
 
         grid(

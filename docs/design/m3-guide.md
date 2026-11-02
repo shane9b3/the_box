@@ -1512,6 +1512,8 @@ Every placement says `animate = !ctx.snap`. `ctx.snap` is true in low-end mode a
 
 #### 3.4.1 Zones
 
+> **(owner ruling 2026-11-01)** The panel has no buttons, and the state machine never enters PANEL. The zones in use are TABS → HEADER → GRID. `Zone.PANEL` stays in the append-only contract. See `docs/decisions/2026-11-01-guide-panel-and-mini-player.md`.
+
 Screen `GUIDE`, from top to bottom: **TABS** (Guide · Search · Settings gear) → **PANEL** (the focused programme's buttons) → **HEADER** (Group chip · Now chip when shown · Day chip) → **GRID**. Overlays (Groups, Days, Menu, Sheet, NumberEntry, Exit) sit above any zone and take every key while open. (reviewed 2026-10-14, S2) The reminder card is **modal**: it takes every key, and ignores all input for `REMINDER_CARD_GUARD_MS` (600) after it appears so an in-flight OK cannot accept; Back = Dismiss. Dispatch order per action: reminder card → overlay → global actions (DIGIT, PREVIOUS_CHANNEL, EXIT, OPEN_GUIDE) → mode (`FULL`) → zone.
 
 Leaving GRID keeps the grid focus (`frame.gridFocused = false`, the focused cell draws as a ring only); returning restores it.
@@ -1542,6 +1544,13 @@ Leaving GRID keeps the grid focus (`frame.gridFocused = false`, the focused cell
 | AUDIO, SUBTITLES, ASPECT, QUICK_MENU, INFO_BAR, CHANNEL_LIST, STATS_OVERLAY, JUMP_TO_LIVE, SCREEN_OFF, GROUP_NEXT/PREV | No-op in the guide (player actions, M4). |
 
 #### 3.4.3 TABS, PANEL, HEADER
+
+> **(owner ruling 2026-11-01)** The PANEL row below is retired, and focus never lands on the panel.
+> - TABS + DOWN → HEADER (Group chip).
+> - HEADER + UP → TABS (Guide tab, even after a visit to Search).
+> - Ruling 6 (Down from the panel buttons to the Day chip) has nothing left to act on. Days from home is Back, Back, Down, Right, OK (5).
+>
+> The table is kept as history. See `docs/decisions/2026-11-01-guide-panel-and-mini-player.md`.
 
 | Zone | LEFT/RIGHT | SELECT | UP | DOWN | BACK | Other |
 |---|---|---|---|---|---|---|
@@ -1602,6 +1611,13 @@ Hold Back (guide long binding `PLAY`) returns to the full-screen player when som
 - Every move calls `effects.ensureRows` and `effects.ensureWindow`; both are cheap and coalesced downstream.
 
 #### 3.4.8 Five-key rule
+
+> **(owner ruling 2026-11-01)** **More…** is gone with the other panel buttons, so the channel menu (§3.9.3) needs CONTEXT_MENU (long OK or Menu).
+> - From the guide, the six keys no longer reach favourite add/remove, hide and lock.
+> - The Settings → Channels channel editor still offers them with five keys.
+> - From start on the programme on now needs long OK, Menu or Red.
+>
+> `FiveKeyReachabilityTest` now asserts chips, overlays except Menu, modes and exit with six keys. A second search with CONTEXT_MENU asserts every `MenuItem`. Both assert that no panel button is offered and that PANEL is never entered. This is an accepted regression of S11; the lead decides on any replacement route. See `docs/decisions/2026-11-01-guide-panel-and-mini-player.md`.
 
 Every v1 guide function is reachable with UP/DOWN/LEFT/RIGHT/SELECT/BACK and CONTEXT_MENU (long OK): tune (OK), full screen (OK on tuned, Back ladder), groups (Back from home, Up → Group chip, or Left at the edge; decision 2026-10-19), favourites (Groups → Favourites entry; menu → Add to favourites), day (Up → Day chip), now (Back), reminders (panel button, sheet, menu), catch-up (OK on an archive cell, panel button, menu), hide channel (menu), group hide/move (Groups → long OK), search (Back ladder → top bar on Search, or Up to tabs), exit (Back ladder). (reviewed 2026-10-14, S11) Long-press is not universal (many HDMI-CEC remotes send DOWN/UP pairs with no hold and have no Menu), so the panel's **More…** button (`PanelButton.MORE`) opens the same Menu (favourite, hide, reminders, catch-up). The Groups panel's group menu (Hide/Move) stays on long OK; it is also available in M5's group manager and is listed as an exclusion below. WP-D's `FiveKeyReachabilityTest` searches the state graph with UP/DOWN/LEFT/RIGHT/SELECT/BACK (no CONTEXT_MENU) from the initial state, once per `ExitConfirmation`, and asserts every `MenuItem`, `PanelButton`, `HeaderChip`, overlay and `ScreenMode` is reached, with stated exclusions: `Overlay.Number` (an accelerator, product §2.1), `Overlay.Exit(dialog = true)` outside `ASK`, and the group menu (Hide/Move; long OK, also reachable in M5's group manager).
 
@@ -1750,9 +1766,18 @@ Initial source from `GuideSettings.openGuideOn`: LAST → `GuideSessionStore.las
 
 #### 3.9.1 Focused-programme panel (B2.8)
 
+> **(owner ruling 2026-11-01)** The panel shows the meta row (channel number and name, genre, ON NOW, catch-up days), the title, the time line, the description and the artwork. It has **no buttons**: `PanelState.buttons` is always empty and stays in the contract only because it is append-only. See `docs/decisions/2026-11-01-guide-panel-and-mini-player.md`.
+
 On every focus change the state machine builds `PanelState` at once from the snapshot (title, time line, ON NOW, channel number/name, catch-up days, buttons) and sets `description = null`, `genre = null`. If focus then stays `PANEL_DESC_DELAY_MS` (150) and no key is held, it calls `loadInfo(token)`; the `Info` event fills description and genre only if its token is still current. Low-end mode skips the description (title and time only) unless the panel stays 600 ms. The composable caches text layouts per `title`/`description` (`remember(key)`) and limits the description to 3 lines (B2.8). Cells without data: title "No information", time line `hm(start) – hm(end)`, description "No guide data for this channel." for `NO_EPG` and "No guide data for this time." for `GAP`.
 
 #### 3.9.2 OK and the panel buttons
+
+> **(owner ruling 2026-11-01)** The "Primary", "Secondary" and MORE columns are no longer drawn or focusable. The "OK in GRID" column is unchanged and is now the only OK behaviour.
+> - FROM_START is in the context menu (Watch from start) and on Red.
+> - REMIND / REMINDER_SET and WATCH_CHANNEL_NOW are in the programme sheet (OK on a future cell) and in the context menu.
+> - MORE's menu opens with long OK or Menu.
+>
+> See `docs/decisions/2026-11-01-guide-panel-and-mini-player.md`.
 
 | Focused cell | Primary button (= OK) | Secondary | OK in GRID |
 |---|---|---|---|
@@ -1912,6 +1937,15 @@ Drawn after the surface, so it composites over the video:
 The shadow `0 30 80 rgba(0,0,0,.55)` is outside the hole: `AmbientBackground` draws a pre-rendered shadow bitmap (made once at startup with a software `BlurMaskFilter` into an offscreen bitmap, never per frame) under where the hole will be; the `SurfaceView` clears only its own rect, so the shadow survives.
 
 #### 3.13.4 Mini player overlays (prototype `previewEl` block; product §3.8, §2.4)
+
+> **(owner ruling 2026-11-01)** The mini player is **video only**.
+> - The top-left pills are removed: LIVE with its dot, CATCH-UP, Connecting, Reconnecting, `CH n`, and M4's PAUSED / −MM:SS.
+> - The bottom panel is removed.
+> - The still keeps the channel logo alone: no title, no "Press OK…" prompt, and no name fallback when there is no logo.
+> - The compact error card stays: a playback error still shows its reason and next step.
+> - The bullets below are history for what was removed. The still and error-card mechanics (viewport HIDDEN, HDR poster in MINI) are unchanged.
+>
+> See `docs/decisions/2026-11-01-guide-panel-and-mini-player.md`.
 
 - Top-left pills (20, 18): state pill and `CH {number}` pill (`rgba(0,0,0,.45)`, no blur). State pill: **LIVE** (pulsing `LIVE` dot, 1.6 s; the pulse is a 1 Hz alpha step, not a per-frame animation, in low-end mode), **CATCH-UP** (accent) when `isArchive`, "Connecting…" while CONNECTING, "Reconnecting {n}/{max}" while RECONNECTING. PAUSED and "−MM:SS" are M4.
 - Bottom panel: gradient (`0 → .75` black), now title (30/600, `tunedNow`; while `isArchive`, the archived programme's `ProgrammeInfo`, not `at(channel, now)`, N17), channel name (18, .7), time row `start — progress — end` (mono 14, 4 px bar). Updated on `Tick` and on `TunedNow`.

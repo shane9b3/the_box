@@ -3,7 +3,7 @@
 # section, pre, action (BoxAction name; DIGITn = DIGIT with digit n), mode, zone, overlay, effects, check
 # overlay: none | Groups | GroupMenu | Days | Menu | Sheet | Number | ExitHint | ExitDialog | Card
 # effects: '-' = no effect besides ensureRows/ensureWindow/announce/loadInfo/loadTunedNow; else ';'-separated names that must occur
-# check: '-' | same | moved | home | now | row:N | tab:N | chip:X | panel:N | groups:N | days:N | menu:N | sheet:N | digits:S | card:N
+# check: '-' | same | moved | home | now | row:N | tab:N | chip:X | groups:N | days:N | menu:N | sheet:N | digits:S | card:N
 section,pre,action,mode,zone,overlay,effects,check
 # ---- GRID §3.4.2
 grid,grid_row1,LEFT,GUIDE,GRID,Groups,-,same
@@ -89,27 +89,20 @@ tabs,tabs,SELECT,GUIDE,GRID,none,-,same
 tabs,tabs_search,SELECT,SEARCH,TABS,none,openSearch,-
 tabs,tabs_settings,SELECT,SETTINGS,TABS,none,openSettings,-
 tabs,tabs,UP,GUIDE,TABS,none,-,tab:0
-tabs,tabs,DOWN,GUIDE,PANEL,none,-,panel:0
+# (owner ruling 2026-11-01) The panel has no buttons: Down from the tabs lands on the Group chip
+tabs,tabs,DOWN,GUIDE,HEADER,none,-,chip:GROUP
 tabs,tabs,BACK,GUIDE,TABS,ExitHint,-,-
-# ---- PANEL §3.4.3 (home buttons: WATCHING, FROM_START, MORE)
-panel,panel,RIGHT,GUIDE,PANEL,none,-,panel:1
-panel,panel,LEFT,GUIDE,PANEL,none,-,panel:0
-panel,panel,SELECT,FULL,PANEL,none,setFullScreen,-
-panel,panel_from_start,SELECT,FULL,PANEL,none,playArchive;setFullScreen,-
-panel,panel_more,SELECT,GUIDE,PANEL,Menu,queryFavourite,-
-# (decision 2026-10-19 ruling 3; review S6) Up from the panel or the header lands on Guide, even after a visit to Search
-panel,panel,UP,GUIDE,TABS,none,-,tab:0
-panel,panel_stale_tab,UP,GUIDE,TABS,none,-,tab:0
-# (decision 2026-10-19 ruling 6) Down from the panel buttons lands on the Day chip; Up from grid row 0 keeps Group
-panel,panel,DOWN,GUIDE,HEADER,none,-,chip:DAY
-panel,panel,BACK,GUIDE,GRID,none,-,same
+# ---- PANEL §3.4.3: retired by the owner ruling of 2026-11-01 (no panel buttons; PANEL is never entered). OK in the grid
+# and the context menu carry the old buttons' actions (GRID and Menu rows; docs/decisions/2026-11-01-guide-panel-and-mini-player.md).
 # ---- HEADER §3.4.3
 header,header,RIGHT,GUIDE,HEADER,none,-,chip:DAY
 header,header,LEFT,GUIDE,HEADER,none,-,chip:GROUP
 header,header,SELECT,GUIDE,HEADER,Groups,-,-
 header,header_day,SELECT,GUIDE,HEADER,Days,-,-
 header,header_now,SELECT,GUIDE,GRID,none,-,now
-header,header,UP,GUIDE,PANEL,none,-,panel:0
+# (decision 2026-10-19 ruling 3; review S6; owner ruling 2026-11-01) Up from the header lands on Guide, even after a visit to Search
+header,header,UP,GUIDE,TABS,none,-,tab:0
+header,header_stale_tab,UP,GUIDE,TABS,none,-,tab:0
 header,header_no_panel,UP,GUIDE,TABS,none,-,tab:0
 header,header,DOWN,GUIDE,GRID,none,-,same
 header,header,BACK,GUIDE,GRID,none,-,same
@@ -173,7 +166,7 @@ number,number,BACK,GUIDE,GRID,none,-,-
 number,number,PLAY_PAUSE,FULL,GRID,Number,lookupNumber;setFullScreen,-
 # ---- Exit
 exit,exit_hint,BACK,GUIDE,TABS,none,exitApp,-
-exit,exit_hint,DOWN,GUIDE,PANEL,none,-,-
+exit,exit_hint,DOWN,GUIDE,HEADER,none,-,chip:GROUP
 exit,exit_dialog,RIGHT,GUIDE,TABS,ExitDialog,-,-
 exit,exit_dialog,SELECT,GUIDE,TABS,none,exitApp,-
 exit,exit_dialog_cancel,SELECT,GUIDE,TABS,none,-,-

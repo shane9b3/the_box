@@ -10,10 +10,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -23,11 +25,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -41,7 +44,6 @@ import app.thebox.core.full.state.PillRules
 import app.thebox.core.guide.GuideChannel
 import app.thebox.ui.R
 import app.thebox.ui.guide.screen.GuideUi
-import app.thebox.ui.guide.screen.LiveDot
 import app.thebox.ui.guide.screen.Line
 import app.thebox.ui.guide.screen.LocalShellImageLoader
 import app.thebox.ui.guide.screen.TimeFormats
@@ -76,7 +78,7 @@ fun rememberDebouncedPill(pill: PillState): PillState {
  * infinite transition in FULL, §3.9), CATCH-UP (accent), PAUSED (white 12 %), Connecting, Reconnecting n/m (unlimited
  * when m = 0). (M6 time-shift, docs/design/m6-timeshift.md §11.4, U-S7) A time-shift reads "PAUSED · 4:12 behind"
  * (grows) and "4:12 BEHIND" (constant), drawn at 1 Hz in the draw phase only while it grows (§4.1); every pill text is
- * at least `PILL_MIN_TEXT_PX` (24) design px. The mini player keeps its own "PAUSED −4:12" ([BehindLabel]).
+ * at least `PILL_MIN_TEXT_PX` (24) design px. (owner ruling 2026-11-01) The mini player draws no pill.
  */
 @Composable
 fun PlayerPill(pill: PillState, modifier: Modifier = Modifier) {
@@ -95,7 +97,7 @@ fun PlayerPill(pill: PillState, modifier: Modifier = Modifier) {
     ) {
         when (p.kind) {
             PillKind.LIVE -> {
-                LiveDot(lowEnd = true)
+                LiveDot()
                 Line(stringResource(R.string.player_pill_live), GuideUi.sans(PILL_TEXT, FontWeight.SemiBold, letterSpacingEm = 0.08f))
             }
             PillKind.CATCH_UP -> Line(stringResource(R.string.player_pill_catchup), GuideUi.sans(PILL_TEXT, FontWeight.SemiBold, GuideUi.Accent, 0.08f))
@@ -106,6 +108,40 @@ fun PlayerPill(pill: PillState, modifier: Modifier = Modifier) {
         }
     }
 }
+
+/**
+ * The LIVE dot of the full-screen pill: a 1 Hz alpha step 1 ↔ .35 (§3.13.4; code review 2026-10-14, H-S8): a coroutine
+ * toggles the alpha once a second, so the window draws two frames a second, not one per vsync as a keyframed infinite
+ * transition does; no infinite transition runs in FULL (docs/design/m4-player-ux.md §3.9, §4.1). The alpha is applied
+ * in the dot's own layer (draw phase only; ModulateAlpha, no offscreen buffer). (owner ruling 2026-11-01) Moved here
+ * from the mini player, which no longer draws a LIVE pill; the mini's pulsing variant went with it.
+ */
+@Composable
+internal fun LiveDot() {
+    val step = remember { mutableFloatStateOf(1f) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            delay(LIVE_STEP_MS)
+            step.floatValue = if (step.floatValue == 1f) 0.35f else 1f
+        }
+    }
+    Box(
+        Modifier
+            .size(8.dp)
+            .testTag(LIVE_DOT_TAG)
+            .graphicsLayer {
+                if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) app.thebox.ui.guide.GuideDebugCounters.bump(LIVE_DOT_DRAWS) // H-S8
+                this.alpha = step.floatValue; compositingStrategy = CompositingStrategy.ModulateAlpha
+            }
+            .background(GuideUi.Live, CircleShape),
+    )
+}
+
+/** H-S8: the LIVE dot's alpha step period. */
+const val LIVE_STEP_MS = 1_000L
+const val LIVE_DOT_TAG = "live_dot"
+/** Debug counter key: LIVE dot layer updates (H-S8). */
+const val LIVE_DOT_DRAWS = "LiveDotLayer"
 
 /** Pill text size (design px), `TimeshiftConstants.PILL_MIN_TEXT_PX` (M6 §11.4, U-S7). */
 private const val PILL_TEXT = app.thebox.core.playback.timeshift.TimeshiftConstants.PILL_MIN_TEXT_PX
@@ -180,39 +216,6 @@ internal fun pillTime(buf: CharArray, ms: Long): Int {
     buf[i++] = ('0'.code + s / 10).toChar()
     buf[i++] = ('0'.code + s % 10).toChar()
     return i
-}
-
-/** `−MM:SS` / `−H:MM:SS` drawn in the draw phase from a reused buffer; ticks at 1 Hz only while [PillState.behindGrows]. */
-@Composable
-internal fun BehindLabel(p: PillState) {
-    val context = LocalContext.current
-    val density = LocalDensity.current.density
-    val paint = remember(density) {
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = 15f * density
-            color = GuideUi.Fg.toArgb()
-            typeface = monoTypeface(context)
-        }
-    }
-    val buf = remember { CharArray(16) }
-    val tick = remember { mutableLongStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(p.behindGrows, p.atMs) {
-        tick.longValue = System.currentTimeMillis()
-        while (p.behindGrows) {
-            delay(1_000L - Math.floorMod(System.currentTimeMillis() - p.atMs, 1_000L))
-            tick.longValue = System.currentTimeMillis()
-        }
-    }
-    Spacer(
-        Modifier
-            .size(84.dp, 20.dp)
-            .drawBehind {
-                val now = tick.longValue
-                val ms = p.behindMs + if (p.behindGrows) (now - p.atMs).coerceAtLeast(0) else 0L
-                val n = TimeChars.behind(buf, 0, ms)
-                drawIntoCanvas { it.nativeCanvas.drawText(buf, 0, n, 0f, size.height * 0.8f, paint) }
-            },
-    )
 }
 
 /** JetBrains Mono for native-canvas text, or the platform default when the font cannot be loaded (tests). */

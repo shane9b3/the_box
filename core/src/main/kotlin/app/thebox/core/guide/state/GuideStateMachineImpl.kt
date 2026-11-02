@@ -38,7 +38,6 @@ import app.thebox.core.guide.MenuItem
 import app.thebox.core.guide.MiniPhase
 import app.thebox.core.guide.OpenGuideOn
 import app.thebox.core.guide.Overlay
-import app.thebox.core.guide.PanelButton
 import app.thebox.core.guide.PanelState
 import app.thebox.core.guide.PerformanceMode
 import app.thebox.core.guide.ProgrammeInfo
@@ -483,7 +482,8 @@ class GuideStateMachineImpl(
             ScreenMode.GUIDE -> when (u.zone) {
                 Zone.GRID -> gridKey(a)
                 Zone.TABS -> tabsKey(a)
-                Zone.PANEL -> panelKey(a)
+                // (owner ruling 2026-11-01) The panel has no buttons and PANEL is never entered; a stale PANEL returns to the grid.
+                Zone.PANEL -> enterZone(Zone.GRID)
                 Zone.HEADER -> headerKey(a)
             }
         }
@@ -696,22 +696,9 @@ class GuideStateMachineImpl(
                 TAB_SEARCH -> openSearch()
                 else -> openSettingsGated(SettingsRoute.Root)
             }
-            BoxAction.DOWN -> enterZone(if (panelButtons().isNotEmpty()) Zone.PANEL else Zone.HEADER)
+            BoxAction.DOWN -> enterZone(Zone.HEADER) // owner ruling 2026-11-01: no panel buttons between the tabs and the chips
             BoxAction.BACK -> exitStep() // owner ruling 2026-10-18: the top bar is the last stop before the exit step
             BoxAction.UP -> Unit
-            else -> commonGuideKey(a.action)
-        }
-    }
-
-    private fun panelKey(a: GuideEvent.Act) {
-        val buttons = panelButtons()
-        when (a.action) {
-            BoxAction.LEFT -> if (u.panelFocused > 0) { u = u.copy(panelFocused = u.panelFocused - 1); announceZone() }
-            BoxAction.RIGHT -> if (u.panelFocused < buttons.size - 1) { u = u.copy(panelFocused = u.panelFocused + 1); announceZone() }
-            BoxAction.SELECT -> buttons.getOrNull(u.panelFocused)?.let { panelButton(it) }
-            BoxAction.UP -> enterZone(Zone.TABS) // lands on Guide (decision 2026-10-19 ruling 3)
-            BoxAction.DOWN -> enterZone(Zone.HEADER, chip = HeaderChip.DAY) // ruling 6: the Day chip, below the buttons
-            BoxAction.BACK -> enterZone(Zone.GRID)
             else -> commonGuideKey(a.action)
         }
     }
@@ -727,7 +714,7 @@ class GuideStateMachineImpl(
                 HeaderChip.DAY -> openDays()
                 null -> Unit
             }
-            BoxAction.UP -> enterZone(if (panelButtons().isNotEmpty()) Zone.PANEL else Zone.TABS)
+            BoxAction.UP -> enterZone(Zone.TABS) // owner ruling 2026-11-01: no panel buttons above the chips
             BoxAction.DOWN, BoxAction.BACK -> enterZone(Zone.GRID)
             BoxAction.PLAY_PAUSE -> jumpToNow()
             BoxAction.ZAP_UP, BoxAction.PAGE_UP -> page(-1, a.repeat)
@@ -736,26 +723,13 @@ class GuideStateMachineImpl(
         }
     }
 
-    private fun panelButton(b: PanelButton) {
-        val t = target() ?: return
-        val ch = t.channel ?: return
-        when (b) {
-            PanelButton.WATCHING -> goFull()
-            PanelButton.WATCH_NOW -> okOnNow(ch)
-            PanelButton.WATCH, PanelButton.FROM_START -> playArchive(ch, t.info())
-            PanelButton.REMIND, PanelButton.REMINDER_SET -> toggleReminder(t)
-            PanelButton.WATCH_CHANNEL_NOW -> tune(ch)
-            PanelButton.MORE -> openMenu()
-        }
-    }
-
     /**
      * (decision 2026-10-19 rulings 3 and 6) [tab]: the tab TABS lands on (Guide from Up; Search from the Back ladder).
-     * [chip]: the chip HEADER lands on (Group from grid row 0 and from the tabs; Day from the panel buttons).
+     * [chip]: the chip HEADER lands on (Group from grid row 0 and from the tabs). (owner ruling 2026-11-01) PANEL is never
+     * entered: the panel has no buttons (ruling 6's "Day chip from the panel buttons" went with them).
      */
     private fun enterZone(z: Zone, tab: Int = TAB_GUIDE, chip: HeaderChip = HeaderChip.GROUP) {
         u = when (z) {
-            Zone.PANEL -> u.copy(zone = z, panelFocused = 0)
             Zone.HEADER -> u.copy(zone = z, headerFocused = u.headerChips.indexOf(chip).coerceAtLeast(0))
             Zone.TABS -> u.copy(zone = z, tabFocused = tab)
             else -> u.copy(zone = z)
@@ -2203,21 +2177,12 @@ class GuideStateMachineImpl(
         val genre = if (newCell || noInfo) null else old?.genre
         // (review 2026-10-18) Carried like the description: a tick or a Tuned rebuild must not drop the poster.
         val imageUrl = if (newCell || noInfo) null else old?.imageUrl
-        val buttons = buttonsFor(t)
         val p = PanelState(
             channelNumber = ch.number, channelName = ch.displayName, genre = genre, onNow = t.cls == CellClass.ON_NOW,
             catchupDays = archiveDays(ch), title = title, timeLine = timeLine, description = description,
-            buttons = buttons, noInfo = noInfo, imageUrl = imageUrl,
+            buttons = emptyList(), noInfo = noInfo, imageUrl = imageUrl, // owner ruling 2026-11-01: no panel buttons
         )
-        var pf = u.panelFocused
-        if (old != null && old.buttons != buttons) {
-            val prevButton = old.buttons.getOrNull(pf)
-            pf = buttons.indexOf(prevButton).let { if (it < 0) 0 else it }
-        }
-        pf = pf.coerceIn(0, maxOf(0, buttons.size - 1))
-        var zone = u.zone
-        if (zone == Zone.PANEL && buttons.isEmpty()) zone = Zone.HEADER
-        if (p != old || pf != u.panelFocused || zone != u.zone) u = u.copy(panel = p, panelFocused = pf, zone = zone)
+        if (p != old) u = u.copy(panel = p)
         // (2026-10-18) Armed on the new panel, not the old one: a description already loaded for the previous cell
         // used to leave the timer unarmed, so the next cell's description never arrived until a further move.
         if (newCell) armDescription()
@@ -2238,32 +2203,6 @@ class GuideStateMachineImpl(
         if (t.kind != CellKind.PROGRAMME) return
         effects.loadInfo(panelToken, ch, t.rawStart)
     }
-
-    /** §3.9.2 primary/secondary buttons, MORE always last (S11/E21). LOADING rows have none. */
-    private fun buttonsFor(t: Target): List<PanelButton> {
-        val ch = t.channel ?: return emptyList()
-        val live = tunedLive(ch)
-        val out = ArrayList<PanelButton>(3)
-        when (t.cls) {
-            CellClass.LOADING -> return emptyList()
-            CellClass.ON_NOW -> {
-                when {
-                    live && tuned.phase == MiniPhase.ERROR -> out += PanelButton.WATCH_NOW
-                    live -> { out += PanelButton.WATCHING; if (t.covered) out += PanelButton.FROM_START }
-                    else -> { out += PanelButton.WATCH_NOW; if (t.covered) out += PanelButton.FROM_START }
-                }
-            }
-            CellClass.PAST_ARCHIVE -> out += PanelButton.WATCH
-            CellClass.PAST -> out += PanelButton.WATCH_NOW
-            CellClass.FUTURE -> { out += if (reminderSet(t)) PanelButton.REMINDER_SET else PanelButton.REMIND; out += PanelButton.WATCH_CHANNEL_NOW }
-            CellClass.NOW_GAP -> out += if (live && tuned.phase != MiniPhase.ERROR) PanelButton.WATCHING else PanelButton.WATCH_NOW
-            CellClass.FUTURE_GAP -> out += PanelButton.WATCH_CHANNEL_NOW
-        }
-        out += PanelButton.MORE
-        return out
-    }
-
-    private fun panelButtons(): List<PanelButton> = u.panel?.buttons ?: emptyList()
 
     private fun refreshFooter() {
         val f = footer(target())
@@ -2318,7 +2257,7 @@ class GuideStateMachineImpl(
      *
      * (decision 2026-10-19 ruling 8) The list is in priority order; the UI measures it and drops hints from the end,
      * never wrapping. GRID names the next Left (when it opens Groups) and the next Back stop; the Groups panel and the
-     * top bar have their own sets; PANEL, HEADER and the other overlays keep the M3 set.
+     * top bar have their own sets; HEADER and the other overlays keep the M3 set.
      */
     private fun footer(t: Target?): List<FooterHint> {
         val out = ArrayList<FooterHint>(10)
@@ -2427,7 +2366,7 @@ class GuideStateMachineImpl(
     private fun announceZone() {
         val text = when (u.zone) {
             Zone.TABS -> GuideTexts.tab(u.tabFocused)
-            Zone.PANEL -> panelButtons().getOrNull(u.panelFocused)?.let { GuideTexts.button(it) }
+            Zone.PANEL -> null // never entered (owner ruling 2026-11-01)
             Zone.HEADER -> u.headerChips.getOrNull(u.headerFocused)?.let { GuideTexts.chip(it, u.sourceLabel, u.dayLabel) }
             Zone.GRID -> null // the grid node's own semantics (§3.6.6)
         }
