@@ -53,9 +53,12 @@ class KeysOnDeviceTest : GuideTestBase() {
         Seq("UP on row 0 → HEADER/GROUP", keys = { press(KEYCODE_DPAD_UP) }) {
             ok(ui.zone == Zone.HEADER && ui.headerChips.getOrNull(ui.headerFocused) == HeaderChip.GROUP) { "zone ${ui.zone} chip ${ui.headerFocused}" }
         },
-        Seq("UP UP → PANEL", keys = { press(KEYCODE_DPAD_UP, 2) }) { ok(ui.zone == Zone.PANEL) { "zone ${ui.zone}" } },
+        // (owner ruling 2026-11-01) No panel buttons: the header chips sit right below the tabs.
+        Seq("UP UP → TABS", keys = { press(KEYCODE_DPAD_UP, 2) }) { ok(ui.zone == Zone.TABS) { "zone ${ui.zone}" } },
         Seq("UP×3 → TABS", keys = { press(KEYCODE_DPAD_UP, 3) }) { ok(ui.zone == Zone.TABS) { "zone ${ui.zone}" } },
-        Seq("UP×3 DOWN → PANEL", keys = { press(KEYCODE_DPAD_UP, 3); press(KEYCODE_DPAD_DOWN) }) { ok(ui.zone == Zone.PANEL) { "zone ${ui.zone}" } },
+        Seq("UP×3 DOWN → HEADER/GROUP", keys = { press(KEYCODE_DPAD_UP, 3); press(KEYCODE_DPAD_DOWN) }) {
+            ok(ui.zone == Zone.HEADER && ui.headerChips.getOrNull(ui.headerFocused) == HeaderChip.GROUP) { "zone ${ui.zone} chip ${ui.headerFocused}" }
+        },
         Seq("UP×3 OK on Guide tab → GRID", keys = { press(KEYCODE_DPAD_UP, 3); press(KEYCODE_DPAD_CENTER) }) {
             ok(ui.zone == Zone.GRID && ui.mode == ScreenMode.GUIDE && focus?.row == start.row) { "zone ${ui.zone} mode ${ui.mode}" }
         },

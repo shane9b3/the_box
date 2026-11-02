@@ -180,8 +180,9 @@ class TimeShiftTest : PlayerTestBase() {
 
     /**
      * I-M4-13 extension (code review 2026-10-16, P-S4 = U-B3, V7): 12 s into a live pause (after M2's 10 s release) the
-     * visible phase stays PAUSED: no FULL stopped hint at any time, Back to the guide shows the mini player's PAUSED /
-     * −MM:SS pill (not "Press OK to watch"), OK returns to FULL without a re-tune, and PLAY_PAUSE resumes from the archive.
+     * visible phase stays PAUSED: no FULL stopped hint at any time, Back to the guide keeps the PAUSED / −MM:SS state (the
+     * mini player draws no pill or text since the owner ruling of 2026-11-01; FULL shows the pill), OK returns to FULL
+     * without a re-tune, and PLAY_PAUSE resumes from the archive.
      * Logs (and screenshots) what the GUIDE hole shows after the release: the frozen frame or black.
      */
     @Test
@@ -205,8 +206,8 @@ class TimeShiftTest : PlayerTestBase() {
             val g = ui()
             assertEquals("the mini player's tuned phase", MiniPhase.PAUSED, g.tuned.phase)
             val pill = PillRules.pill(g.tuned, g.archive, System.currentTimeMillis())
-            log("mini pill after the release: $pill archive=${g.archive?.phase}")
-            assertEquals("the mini player draws PAUSED / −MM:SS", PillKind.PAUSED, pill.kind)
+            log("guide pill state after the release: $pill archive=${g.archive?.phase}")
+            assertEquals("the guide state stays PAUSED / −MM:SS", PillKind.PAUSED, pill.kind)
             assertTrue("−MM:SS grows (${pill.behindMs} ms)", pill.behindGrows && pill.behindMs >= 10_000)
             val shot = screenshot("v7-guide-mini-paused")
             val hole = holeRect()

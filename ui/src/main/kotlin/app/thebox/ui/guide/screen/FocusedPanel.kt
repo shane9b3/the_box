@@ -5,14 +5,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.GenericShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
@@ -24,8 +22,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.unit.dp
-import androidx.tv.material3.Text
-import app.thebox.core.guide.PanelButton
 import app.thebox.core.guide.PanelState
 import app.thebox.ui.R
 import app.thebox.ui.theme.BoxTextStyles
@@ -36,14 +32,15 @@ const val FOCUSED_PANEL_TAG = "focused_panel"
 /**
  * The focused-programme panel, bottom-aligned in the header region (docs/design/m3-guide.md §3.9.1, §3.15; prototype
  * header block). Drawn from [GuideUiState.panel]; text layouts are cached by Compose per string (`remember` keys), the
- * description is at most 3 lines and only arrives after the 150 ms debounce (B2.8). The secondary button is a flat
- * 10 % fill, no blur (B1.3).
+ * description is at most 3 lines and only arrives after the 150 ms debounce (B2.8). (owner ruling 2026-11-01) No
+ * buttons: meta row, title, time line, description and artwork only; OK and the context menu carry the actions
+ * (docs/decisions/2026-11-01-guide-panel-and-mini-player.md).
  */
 /** Debug composition counter key (I-12, §2.13 item 20). */
 const val COMPOSITIONS_PANEL = "FocusedPanel"
 
 @Composable
-fun FocusedPanel(panel: PanelState?, focusedButton: Int, modifier: Modifier = Modifier) {
+fun FocusedPanel(panel: PanelState?, modifier: Modifier = Modifier) {
     if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) androidx.compose.runtime.SideEffect { app.thebox.ui.guide.GuideDebugCounters.bump(COMPOSITIONS_PANEL) } // I-12
     if (panel == null) return
     // Owner request 2026-10-18: poster art (the programme's EPG icon) on the right, the text column beside it.
@@ -56,13 +53,6 @@ fun FocusedPanel(panel: PanelState?, focusedButton: Int, modifier: Modifier = Mo
             panel.description?.let { desc ->
                 val bodyStyle = remember { BoxTextStyles.Body.copy(color = GuideUi.Fg.copy(alpha = 0.78f)) }
                 Line(desc, bodyStyle, Modifier.widthIn(max = 980.dp), maxLines = 2)
-            }
-            if (panel.buttons.isNotEmpty()) {
-                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    panel.buttons.forEachIndexed { i, b ->
-                        PanelButtonView(b, primary = i == 0, focused = focusedButton == i)
-                    }
-                }
             }
         }
         panel.imageUrl?.let { Poster(it, panel.title) }
@@ -122,49 +112,4 @@ private fun MetaRow(panel: PanelState) {
             Line(pluralStringResource(R.plurals.guide_catchup_days, panel.catchupDays, panel.catchupDays), GuideUi.sans(24, color = GuideUi.Fg70))
         }
     }
-}
-
-/** Play triangle of the primary button (prototype: border-left 11, top/bottom 7). */
-private val PlayTriangle = GenericShape { size, _ ->
-    moveTo(0f, 0f)
-    lineTo(size.width, size.height / 2f)
-    lineTo(0f, size.height)
-    close()
-}
-
-@Composable
-private fun PanelButtonView(button: PanelButton, primary: Boolean, focused: Boolean) {
-    val shape = RoundedCornerShape(DesignTokens.Radii.Button)
-    Chip(
-        focused = focused,
-        fill = if (primary) GuideUi.Fg else GuideUi.White10,
-        border = if (primary) null else GuideUi.White16,
-        shape = shape,
-        padding = PaddingValues(horizontal = if (primary) 26.dp else 24.dp, vertical = 14.dp),
-    ) { contentColor ->
-        val textColor = if (primary || focused) GuideUi.Canvas else contentColor
-        when (button) {
-            PanelButton.WATCHING, PanelButton.WATCH_NOW, PanelButton.WATCH, PanelButton.FROM_START, PanelButton.WATCH_CHANNEL_NOW ->
-                Box(Modifier.size(11.dp, 14.dp).background(textColor, PlayTriangle))
-            PanelButton.REMIND -> Dot(if (focused || primary) GuideUi.Canvas.copy(alpha = 0.5f) else GuideUi.Fg50, 10.dp)
-            PanelButton.REMINDER_SET -> Dot(GuideUi.Live, 10.dp)
-            PanelButton.MORE -> Unit
-        }
-        Text(
-            stringResource(panelButtonLabel(button)),
-            style = GuideUi.sans(24, if (primary) FontWeight.SemiBold else FontWeight.Medium, textColor),
-            maxLines = 1,
-        )
-    }
-}
-
-fun panelButtonLabel(button: PanelButton): Int = when (button) {
-    PanelButton.WATCHING -> R.string.guide_btn_watching
-    PanelButton.WATCH_NOW -> R.string.guide_btn_watch_now
-    PanelButton.WATCH -> R.string.guide_btn_watch
-    PanelButton.FROM_START -> R.string.guide_btn_from_start
-    PanelButton.REMIND -> R.string.guide_btn_remind
-    PanelButton.REMINDER_SET -> R.string.guide_btn_reminder_set
-    PanelButton.WATCH_CHANNEL_NOW -> R.string.guide_btn_watch_channel_now
-    PanelButton.MORE -> R.string.guide_btn_more
 }

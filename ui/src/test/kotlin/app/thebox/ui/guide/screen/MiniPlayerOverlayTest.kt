@@ -1,15 +1,17 @@
 package app.thebox.ui.guide.screen
 
 import androidx.activity.ComponentActivity
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
-import androidx.compose.ui.test.onAllNodesWithText
-import androidx.compose.ui.test.onNodeWithText
-import app.thebox.core.catchup.archive.ArchivePhase
-import app.thebox.core.catchup.archive.ArchiveStatus
+import androidx.compose.ui.test.onNodeWithTag
+import app.thebox.core.guide.GuideChannel
 import app.thebox.core.guide.MiniPhase
+import app.thebox.core.guide.TunedState
 import app.thebox.core.guide.fakes.GuideFixtures
+import app.thebox.core.playback.PlaybackErrorCode
 import app.thebox.core.playback.StreamFormat
 import app.thebox.player.api.NowPlaying
 import app.thebox.player.api.PlaybackState
@@ -24,8 +26,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 
 /**
- * U-B3 = P-S4 (V7): the mini player fed through the real [TunedStateMapper]. A live pause past M2's 10 s release keeps
- * the PAUSED pill (with or without an archive session) and never shows the stopped still; a real stop still does.
+ * (owner ruling 2026-11-01, docs/decisions/2026-11-01-guide-panel-and-mini-player.md) The mini player is video only:
+ * no text over the hole while playing, paused (with or without an archive session), connecting or reconnecting; the
+ * still (a real stop, the Still setting, the HDR poster) is the logo alone; a playback error still shows the compact
+ * error card with its reason and next step. Fed through the real [TunedStateMapper] where a [PlaybackState] applies.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w960dp-h540dp-xhdpi")
@@ -35,54 +39,64 @@ class MiniPlayerOverlayTest {
 
     private val ch = GuideFixtures.channel(1, archiveDays = 7)
     private val live = NowPlaying(tuneId = 4, identity = ch.identity, title = "News", isArchive = false, format = StreamFormat.TS)
-    private val pressOk = "Press OK to watch"
+    private val anyText = SemanticsMatcher.keyIsDefined(SemanticsProperties.Text)
 
-    private var current: androidx.compose.runtime.MutableState<Pair<PlaybackState, ArchiveStatus?>>? = null
+    private var current: androidx.compose.runtime.MutableState<Triple<TunedState, GuideChannel?, Boolean>>? = null
 
-    private fun show(state: PlaybackState, archive: ArchiveStatus?) {
+    private fun show(tuned: TunedState, channel: GuideChannel? = ch, poster: Boolean = false) {
         val holder = current
         if (holder != null) {
-            holder.value = state to archive
+            holder.value = Triple(tuned, channel, poster)
         } else {
-            val h = androidx.compose.runtime.mutableStateOf(state to archive)
+            val h = androidx.compose.runtime.mutableStateOf(Triple(tuned, channel, poster))
             current = h
             rule.setContent {
-                val (s, a) = h.value
-                val tuned = TunedStateMapper.map(s, ch.rowId, still = false)
-                BoxTheme { MiniPlayerOverlay(tuned, null, ch, clock24 = true, lowEnd = true, poster = false, archive = a) }
+                val (t, c, p) = h.value
+                BoxTheme { MiniPlayerOverlay(t, c, p) }
             }
         }
         rule.waitForIdle()
     }
 
+    private fun show(state: PlaybackState) = show(TunedStateMapper.map(state, ch.rowId, still = false))
+
+    private fun assertNoText() = rule.onAllNodes(anyText, useUnmergedTree = true).assertCountEquals(0)
+
     @Test
-    fun livePauseTimeoutWithASessionShowsThePausedPill() {
-        val now = System.currentTimeMillis()
-        val status = ArchiveStatus(
-            ArchivePhase.PAUSED_LIVE, channel = ch, identityHash = ch.identityHash, wallMs = now - 12_000, atMs = now,
-            liveEdgeMs = now, timeShift = true,
-        )
-        show(PlaybackState.Stopped(live, StopReason.LIVE_PAUSE_TIMEOUT, resumable = true), status)
-        rule.onAllNodesWithTag(MINI_ARCHIVE_PILL_TAG, useUnmergedTree = true).assertCountEquals(1)
-        rule.onNodeWithText("PAUSED", substring = true, useUnmergedTree = true).assertExists()
-        rule.onAllNodesWithText(pressOk, useUnmergedTree = true).assertCountEquals(0)
+    fun playingPausedAndReconnectingDrawNoText() {
+        show(PlaybackState.Playing(live))
+        assertNoText()
+        show(PlaybackState.Playing(live, paused = true))
+        assertNoText()
+        show(PlaybackState.Stopped(live, StopReason.LIVE_PAUSE_TIMEOUT, resumable = true))
+        assertNoText()
+        rule.onAllNodesWithTag(MINI_STILL_TAG, useUnmergedTree = true).assertCountEquals(0) // a live-pause release is no still
+        show(TunedState(identity = ch.identity, rowId = ch.rowId, phase = MiniPhase.CONNECTING))
+        assertNoText()
+        show(TunedState(identity = ch.identity, rowId = ch.rowId, phase = MiniPhase.RECONNECTING, reconnectAttempt = 2, reconnectMax = 5))
+        assertNoText()
+        show(TunedState(identity = ch.identity, rowId = ch.rowId, phase = MiniPhase.PLAYING, isArchive = true))
+        assertNoText()
     }
 
     @Test
-    fun plainPauseWithoutASessionShowsThePausedPill() {
-        show(PlaybackState.Playing(live, paused = true), null)
-        rule.onAllNodesWithTag(MINI_ARCHIVE_PILL_TAG, useUnmergedTree = true).assertCountEquals(1)
-        rule.onAllNodesWithText(pressOk, useUnmergedTree = true).assertCountEquals(0)
-        show(PlaybackState.Stopped(live, StopReason.LIVE_PAUSE_TIMEOUT, resumable = true), null)
-        rule.onAllNodesWithTag(MINI_ARCHIVE_PILL_TAG, useUnmergedTree = true).assertCountEquals(1)
-        rule.onAllNodesWithText(pressOk, useUnmergedTree = true).assertCountEquals(0)
-    }
-
-    @Test
-    fun aRealStopStillShowsTheStoppedStill() {
-        show(PlaybackState.Stopped(live, StopReason.USER, resumable = false), null)
+    fun theStillIsTheLogoAloneWithNoPrompt() {
+        show(PlaybackState.Stopped(live, StopReason.USER, resumable = false))
         assertEquals(MiniPhase.STOPPED, TunedStateMapper.map(PlaybackState.Stopped(live, StopReason.USER, false), 1, false).phase)
-        rule.onAllNodesWithTag(MINI_ARCHIVE_PILL_TAG, useUnmergedTree = true).assertCountEquals(0)
-        rule.onNodeWithText(pressOk, useUnmergedTree = true).assertExists()
+        rule.onNodeWithTag(MINI_STILL_TAG, useUnmergedTree = true).assertExists()
+        assertNoText() // no title, no "Press OK to watch"; no logo loader in tests, and the still never falls back to the name
+        show(TunedState(identity = ch.identity, rowId = ch.rowId, phase = MiniPhase.PLAYING), poster = true)
+        rule.onNodeWithTag(MINI_STILL_TAG, useUnmergedTree = true).assertExists()
+        assertNoText() // no "HDR · Press OK for full screen"
+        show(TunedState(), channel = null)
+        assertNoText() // nothing tuned: no "Nothing playing" line
+    }
+
+    @Test
+    fun aPlaybackErrorKeepsTheErrorCard() {
+        show(TunedState(identity = ch.identity, rowId = ch.rowId, phase = MiniPhase.ERROR, error = PlaybackErrorCode.SERVER_ERROR))
+        rule.onNodeWithTag(ERROR_CARD_TAG, useUnmergedTree = true).assertExists()
+        // The reason and the next step (and the channel name when there is no logo) are the only text left.
+        rule.onAllNodes(anyText, useUnmergedTree = true).fetchSemanticsNodes().let { assertEquals(3, it.size) }
     }
 }

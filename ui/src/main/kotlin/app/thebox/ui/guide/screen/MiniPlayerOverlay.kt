@@ -1,65 +1,34 @@
 package app.thebox.ui.guide.screen
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.drawBehind
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.CompositingStrategy
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import app.thebox.core.catchup.archive.ArchivePhase
-import app.thebox.core.catchup.archive.ArchiveStatus
-import app.thebox.core.full.PillKind
-import app.thebox.core.full.PillState
-import app.thebox.core.full.state.PillRules
 import app.thebox.core.guide.GuideChannel
 import app.thebox.core.guide.MiniPhase
-import app.thebox.core.guide.ProgrammeInfo
 import app.thebox.core.guide.TunedState
 import app.thebox.core.playback.PlaybackError
 import app.thebox.core.playback.PlaybackErrorCode
-import app.thebox.ui.R
-import app.thebox.ui.full.BehindLabel
-import app.thebox.ui.full.rememberDebouncedPill
 import app.thebox.ui.playback.ErrorText
 import coil3.ImageLoader
 import coil3.compose.AsyncImage
-import kotlinx.coroutines.delay
-import java.util.Date
-import java.util.Locale
 
 const val MINI_OVERLAY_TAG = "mini_overlay"
 const val MINI_STILL_TAG = "mini_still"
@@ -73,182 +42,39 @@ fun ProvideShellImageLoader(loader: ImageLoader?, content: @Composable () -> Uni
     CompositionLocalProvider(LocalShellImageLoader provides loader, content = content)
 
 /**
- * What the mini player shows over (or instead of) the video (docs/design/m3-guide.md §3.13.4; prototype `previewEl`
- * block). Sized to the hole (720 × 405 design px). Nothing here is opaque over live video except the pills and the
- * bottom gradient panel; the still and the error card replace the picture.
+ * What the mini player shows over (or instead of) the video (docs/design/m3-guide.md §3.13.4). Sized to the hole
+ * (720 × 405 design px). (owner ruling 2026-11-01, docs/decisions/2026-11-01-guide-panel-and-mini-player.md) Video
+ * only: no pills, no channel name, no live dot, no archive pill and no prompt text over the hole. Two things remain:
+ * the still (nothing tuned, Still setting / low memory, HDR poster) shows the channel logo alone, and a playback error
+ * shows the compact [ErrorCard] (its reason and next step, an engineering rule).
  */
 @Composable
 fun MiniPlayerOverlay(
     tuned: TunedState,
-    tunedNow: ProgrammeInfo?,
     tunedChannel: GuideChannel?,
-    clock24: Boolean,
-    lowEnd: Boolean,
     poster: Boolean,
     modifier: Modifier = Modifier,
-    /**
-     * (M4, docs/design/m4-player-ux.md §3.2.3) The archive session (`GuideUiState.archive`), for the PAUSED and
-     * −MM:SS pills. (U-S5, L-4) Passed explicitly by `GuideScreen`: the root's static composition local invalidated the
-     * whole root content on every status.
-     */
-    archive: ArchiveStatus? = null,
 ) {
     if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) androidx.compose.runtime.SideEffect { app.thebox.ui.guide.GuideDebugCounters.bump(COMPOSITIONS_MINI) } // H-S9
-    val now by produceState(System.currentTimeMillis()) {
-        while (true) {
-            value = System.currentTimeMillis()
-            delay(15_000L)
-        }
-    }
     Box(modifier.fillMaxSize().testTag(MINI_OVERLAY_TAG)) {
         val nothing = tuned.identity == null || tuned.phase == MiniPhase.IDLE || tuned.phase == MiniPhase.STOPPED
         when {
             tuned.phase == MiniPhase.ERROR && tuned.error != null ->
                 ErrorCard(tuned.error!!, tunedChannel, Modifier.align(Alignment.Center), tuned.errorDetail)
             // H-B1: the HDR poster shows the still in MINI (the controller keeps the video track off; viewport MINI).
-            tuned.still || nothing || poster ->
-                Still(tunedChannel, tunedNow, poster && !nothing, Modifier.align(Alignment.Center))
-            else -> BottomPanel(tunedChannel, Modifier.align(Alignment.BottomStart))
-        }
-        if (!nothing) Pills(tuned, tunedChannel, lowEnd, archivePill(tuned, archive), Modifier.offset(20.dp, 18.dp))
-    }
-}
-
-/**
- * The shared pill rule (`PillRules`, §3.2.3) while an archive session exists; null otherwise (M3's pills: the
- * visible tuned state alone decides). [tuned] is already the visible state (`ArchiveVisibility`, B1).
- */
-@Composable
-private fun archivePill(tuned: TunedState, archive: ArchiveStatus?): PillState? {
-    val session = archive != null && archive.phase != ArchivePhase.IDLE && archive.phase != ArchivePhase.FAILED
-    // U-B3: a plain pause (no session, or the 10 s live-pause release mapped to PAUSED) draws the PAUSED pill too (§3.2.3).
-    if (!session && tuned.phase != MiniPhase.PAUSED) return null
-    val pill = remember(tuned, archive) { PillRules.pill(tuned, archive.takeIf { session }, System.currentTimeMillis()) }
-    return rememberDebouncedPill(pill)
-}
-
-@Composable
-private fun Pills(tuned: TunedState, tunedChannel: GuideChannel?, lowEnd: Boolean, archivePill: PillState?, modifier: Modifier) {
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-        val pill = Modifier.background(GuideUi.PillDark, RoundedCornerShape(999.dp)).padding(horizontal = 12.dp, vertical = 6.dp)
-        if (archivePill != null && (archivePill.kind == PillKind.PAUSED || archivePill.kind == PillKind.BEHIND)) {
-            MiniArchivePill(archivePill)
-        } else Row(pill, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-            when {
-                tuned.phase == MiniPhase.CONNECTING || tuned.phase == MiniPhase.BUFFERING ->
-                    Line(stringResource(R.string.guide_mini_connecting), GuideUi.sans(20, FontWeight.SemiBold))
-                tuned.phase == MiniPhase.RECONNECTING ->
-                    Line(stringResource(R.string.guide_mini_reconnecting, tuned.reconnectAttempt, tuned.reconnectMax), GuideUi.sans(20, FontWeight.SemiBold))
-                tuned.isArchive ->
-                    Line(stringResource(R.string.guide_mini_catchup), GuideUi.sans(20, FontWeight.SemiBold, GuideUi.Accent, 0.08f))
-                else -> {
-                    LiveDot(lowEnd)
-                    Line(stringResource(R.string.guide_mini_live), GuideUi.sans(20, FontWeight.SemiBold, letterSpacingEm = 0.08f))
-                }
-            }
-        }
-        tunedChannel?.number?.let { n ->
-            Box(pill) { Line(stringResource(R.string.guide_mini_ch, n.toString()), GuideUi.mono(20)) }
+            tuned.still || nothing || poster -> Still(tunedChannel, Modifier.align(Alignment.Center))
         }
     }
 }
 
-/**
- * (M4, §3.2.3) PAUSED (white 12 %) and `−MM:SS` / `−H:MM:SS` (BEHIND, or PAUSED with a growing distance to live) in
- * the M3 pill style; the label is drawn from a reused buffer and ticks at 1 Hz only while it grows (§4.1).
- */
-@Composable
-internal fun MiniArchivePill(p: PillState, modifier: Modifier = Modifier) {
-    val fill = if (p.kind == PillKind.PAUSED) Color.White.copy(alpha = 0.12f) else GuideUi.PillDark
-    Row(
-        modifier.testTag(MINI_ARCHIVE_PILL_TAG).background(fill, RoundedCornerShape(999.dp)).padding(horizontal = 12.dp, vertical = 6.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        if (p.kind == PillKind.PAUSED) Line(stringResource(R.string.player_pill_paused), GuideUi.sans(20, FontWeight.SemiBold, letterSpacingEm = 0.08f))
-        if (p.kind == PillKind.BEHIND || p.behindMs > 0) BehindLabel(p)
-    }
-}
-
-const val MINI_ARCHIVE_PILL_TAG = "mini_archive_pill"
-
-/**
- * The LIVE dot pulses 1 → .35 over 1.6 s (prototype `tvPulse`); in low-end mode it is a 1 Hz alpha step (§3.13.4):
- * (code review 2026-10-14, H-S8) a coroutine toggles the alpha once a second, so the window draws two frames a second,
- * not one per vsync as a keyframed infinite transition does. The alpha is applied in the dot's own layer (draw phase
- * only; ModulateAlpha, no offscreen buffer). This node is inside the mini-player overlay, a sibling subtree of
- * `VideoLayer`, never its ancestor. (M4) The full-screen pills always pass `lowEnd = true`: no infinite transition runs
- * in FULL (docs/design/m4-player-ux.md §3.9, §4.1).
- */
-@Composable
-internal fun LiveDot(lowEnd: Boolean) {
-    if (lowEnd) {
-        val step = remember { mutableFloatStateOf(1f) }
-        LaunchedEffect(Unit) {
-            while (true) {
-                delay(LIVE_STEP_MS)
-                step.floatValue = if (step.floatValue == 1f) 0.35f else 1f
-            }
-        }
-        LiveDotView(alpha = { step.floatValue })
-    } else {
-        val t = rememberInfiniteTransition(label = "live")
-        val pulse = t.animateFloat(1f, 0.35f, infiniteRepeatable(tween(800, easing = LinearEasing), RepeatMode.Reverse), label = "pulse")
-        LiveDotView(alpha = { pulse.value })
-    }
-}
-
-@Composable
-private fun LiveDotView(alpha: () -> Float) {
-    Box(
-        Modifier
-            .size(8.dp)
-            .testTag(LIVE_DOT_TAG)
-            .graphicsLayer {
-                if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) app.thebox.ui.guide.GuideDebugCounters.bump(LIVE_DOT_DRAWS) // H-S8
-                this.alpha = alpha(); compositingStrategy = CompositingStrategy.ModulateAlpha
-            }
-            .background(GuideUi.Live, CircleShape),
-    )
-}
-
-/** H-S8: the low-end LIVE dot's alpha step period. */
-const val LIVE_STEP_MS = 1_000L
-const val LIVE_DOT_TAG = "live_dot"
-/** Debug counter key: LIVE dot layer updates (H-S8). */
-const val LIVE_DOT_DRAWS = "LiveDotLayer"
 /** Debug composition counter key (H-S9). */
 const val COMPOSITIONS_MINI = "MiniPlayerOverlay"
 
-private val BottomGradient = Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0f), Color.Black.copy(alpha = 0.75f)))
-
+/** The still (§3.13.4, owner ruling 2026-11-01): the channel logo over the ambient hue, no text; empty without a logo. */
 @Composable
-private fun BottomPanel(channel: GuideChannel?, modifier: Modifier) {
-    // Owner ruling 2026-10-17: the mini player names the channel only; the programme and its progress live in the
-    // focused panel and the grid.
-    channel ?: return
-    Column(
-        modifier
-            .fillMaxWidth()
-            .background(BottomGradient)
-            .padding(start = 24.dp, end = 24.dp, top = 48.dp, bottom = 20.dp),
-    ) {
-        Line(channel.displayName, GuideUi.sans(28, FontWeight.SemiBold, Color.White.copy(alpha = 0.9f)))
-    }
-}
-
-/** Nothing tuned, Still setting / low memory, or HDR poster (§3.13.4): logo over the ambient hue, the title, a prompt. */
-@Composable
-private fun Still(channel: GuideChannel?, info: ProgrammeInfo?, poster: Boolean, modifier: Modifier) {
-    Column(modifier.testTag(MINI_STILL_TAG).widthIn(max = 560.dp), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Logo(channel, Modifier.size(192.dp, 80.dp))
-        info?.let { Line(it.title, GuideUi.sans(32, FontWeight.SemiBold)) }
-        val prompt = when {
-            channel == null -> R.string.guide_mini_nothing
-            poster -> R.string.guide_mini_hdr
-            else -> R.string.guide_mini_press_ok
-        }
-        Line(stringResource(prompt), GuideUi.sans(24, color = GuideUi.Fg70))
+private fun Still(channel: GuideChannel?, modifier: Modifier) {
+    Box(modifier.testTag(MINI_STILL_TAG), contentAlignment = Alignment.Center) {
+        Logo(channel, Modifier.size(192.dp, 80.dp), nameFallback = false)
     }
 }
 
@@ -277,20 +103,22 @@ fun ErrorCard(code: PlaybackErrorCode, channel: GuideChannel?, modifier: Modifie
     }
 }
 
-/** The channel logo when one loads, else its name (§0.8: every surface outside the grid column shows the name on failure). */
+/**
+ * The channel logo when one loads, else its name when [nameFallback] (§0.8: every surface outside the grid column shows
+ * the name on failure; the still is the exception, owner ruling 2026-11-01: it draws no text).
+ */
 @Composable
-private fun Logo(channel: GuideChannel?, modifier: Modifier) {
+private fun Logo(channel: GuideChannel?, modifier: Modifier, nameFallback: Boolean = true) {
     channel ?: return
     val loader = LocalShellImageLoader.current
     val url = channel.logoUrl
+    val image = loader != null && !url.isNullOrBlank()
+    if (!image && !nameFallback) return
     Box(modifier, contentAlignment = Alignment.Center) {
-        if (loader != null && !url.isNullOrBlank()) {
+        if (image) {
             AsyncImage(model = url, contentDescription = channel.displayName, imageLoader = loader, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
         } else {
             Line(channel.displayName, GuideUi.sans(30, FontWeight.SemiBold))
         }
     }
 }
-
-private fun hm(min: Int, clock24: Boolean): String =
-    TimeFormats.format(if (clock24) "HH:mm" else "h:mm", Locale.getDefault(), Date(min * 60_000L))

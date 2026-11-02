@@ -357,7 +357,6 @@ fun AppRoot(
                         ScreenMode.GUIDE -> GuideScreen(
                             state = ui,
                             clock24 = settings.clock24,
-                            lowEnd = lowEnd,
                             poster = video.posterMode,
                             anchor = anchor,
                             onHoleMeasured = onHoleMeasured,
