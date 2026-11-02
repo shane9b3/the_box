@@ -155,7 +155,7 @@ class LanHttpServerImplTest {
         val first = transport.exchange(get("/s/$token", host))
         assertEquals(303, first.status)
         val setCookie = first.headers["set-cookie"]!!
-        assertTrue("HttpOnly" in setCookie && "SameSite=Strict" in setCookie && "Path=/" in setCookie)
+        assertTrue("HttpOnly" in setCookie && "SameSite=Lax" in setCookie && "Path=/" in setCookie)
         assertNotEquals(token, first.cookie())
         // The token is dead: another phone using it is refused, and so is the code.
         assertEquals(403, transport.exchange(get("/s/$token", host), ip = "192.168.1.99").status)
@@ -213,6 +213,96 @@ class LanHttpServerImplTest {
         assertEquals(403, transport.exchange(get("/api/state", host), ip = "192.168.1.77").status)
         assertEquals(403, transport.exchange(post("/api/link", host, """{"url":"http://a"}""", cookie), ip = "192.168.1.77").status)
         assertTrue(submissions.isEmpty())
+    }
+
+    /**
+     * Owner finding 2026-11-01, the exact sequence: the QR link was fetched (the phone's scanner) before the browser,
+     * so the browser reached /app without the cookie, and the right code from the same phone then said "another phone".
+     */
+    @Test
+    fun samePhoneRePairsWithTheCodeAfterTheTokenWasUsedWithoutItsCookie() {
+        val first = pairByToken()
+        val app = transport.exchange(get("/app", host))
+        assertEquals(303, app.status)
+        assertEquals("/", app.headers["location"])
+        val code = link.state.value.code!!
+        val r = transport.exchange(post("/pair", host, """{"code":"${PairingSession.displayCode(code)}"}"""))
+        assertEquals(204, r.status)
+        val second = assertNotNull(r.cookie())
+        assertNotEquals(first, second)
+        assertEquals(401, transport.exchange(get("/api/state", host, first)).status)
+        assertEquals("/", transport.exchange(get("/app", host, first)).headers["location"])
+        assertEquals(200, transport.exchange(get("/api/state", host, second)).status)
+        assertEquals(ServerPhase.PAIRED, link.state.value.phase)
+        assertEquals(FakeTransportAdapter.PHONE_IP, link.state.value.pairedFrom)
+    }
+
+    @Test
+    fun samePhoneOpeningTheQrLinkAgainWithoutTheCookieRePairs() {
+        val token = started().qrUrl!!.substringAfter("/s/")
+        val first = assertNotNull(transport.exchange(get("/s/$token", host)).cookie())
+        // With the valid cookie: straight to /app, no new cookie.
+        val again = transport.exchange(get("/s/$token", host, first))
+        assertEquals(303, again.status)
+        assertNull(again.headers["set-cookie"])
+        // Without it (the scanner took the first one): a new cookie, the old one is refused.
+        val re = transport.exchange(get("/s/$token", host))
+        assertEquals(303, re.status)
+        assertEquals("/app", re.headers["location"])
+        val second = assertNotNull(re.cookie())
+        assertNotEquals(first, second)
+        assertEquals(401, transport.exchange(get("/api/state", host, first)).status)
+        assertEquals(200, transport.exchange(get("/api/state", host, second)).status)
+    }
+
+    @Test
+    fun anotherPhoneIsStillRefusedOnBothPathsAfterAPairing() {
+        val token = started().qrUrl!!.substringAfter("/s/")
+        val cookie = assertNotNull(transport.exchange(get("/s/$token", host)).cookie())
+        val other = "192.168.1.99"
+        val viaToken = transport.exchange(get("/s/$token", host), ip = other)
+        assertEquals(403, viaToken.status)
+        assertEquals("Another phone is already connected", viaToken.body)
+        assertNull(viaToken.headers["set-cookie"])
+        val viaCode = transport.exchange(post("/pair", host, """{"code":"${link.state.value.code!!}"}"""), ip = other)
+        assertEquals(403, viaCode.status)
+        assertEquals("""{"error":"busy"}""", viaCode.body)
+        assertNull(viaCode.headers["set-cookie"])
+        assertEquals(200, transport.exchange(get("/api/state", host, cookie)).status)
+        assertEquals(FakeTransportAdapter.PHONE_IP, link.state.value.pairedFrom)
+    }
+
+    @Test
+    fun headAndPrefetchesOfTheQrLinkNeverPair() {
+        val token = started().qrUrl!!.substringAfter("/s/")
+        val head = transport.exchange("HEAD /s/$token HTTP/1.1\r\nHost: $host\r\n\r\n")
+        assertEquals(204, head.status)
+        assertNull(head.headers["set-cookie"])
+        for (h in listOf("Sec-Purpose: prefetch", "Sec-Purpose: prefetch;prerender", "Purpose: prefetch", "X-Purpose: preview", "X-Moz: prefetch")) {
+            val r = transport.exchange("GET /s/$token HTTP/1.1\r\nHost: $host\r\n$h\r\n\r\n")
+            assertEquals(204, r.status, h)
+            assertNull(r.headers["set-cookie"], h)
+        }
+        assertNull(link.state.value.pairedFrom)
+        assertEquals(ServerPhase.WAITING, link.state.value.phase)
+        // The real navigation from the same phone then pairs normally.
+        val r = transport.exchange(get("/s/$token", host))
+        assertEquals(303, r.status)
+        val cookie = assertNotNull(r.cookie())
+        assertEquals(200, transport.exchange(get("/api/state", host, cookie)).status)
+    }
+
+    /** N8 (review 2026-11-01): prefetch header values match whatever their case. */
+    @Test
+    fun prefetchHeaderValuesMatchCaseInsensitively() {
+        val token = started().qrUrl!!.substringAfter("/s/")
+        for (h in listOf("Sec-Purpose: Prefetch;Prerender", "SEC-PURPOSE: PRERENDER", "Purpose: PREFETCH", "X-Purpose: Preview", "x-moz: Prefetch")) {
+            val r = transport.exchange("GET /s/$token HTTP/1.1\r\nHost: $host\r\n$h\r\n\r\n")
+            assertEquals(204, r.status, h)
+            assertNull(r.headers["set-cookie"], h)
+        }
+        assertNull(link.state.value.pairedFrom)
+        assertEquals(303, transport.exchange(get("/s/$token", host)).status)
     }
 
     @Test

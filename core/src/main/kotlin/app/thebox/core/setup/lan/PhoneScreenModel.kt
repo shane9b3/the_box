@@ -36,12 +36,12 @@ object PhoneScreenModel {
 
     /**
      * (WP-S6, docs/design/m6-storage-locations.md §7.4) A NETWORK_FOLDER session that ended after
-     * [LanLimits.PAIR_MAX_WRONG] failed sign-ins: `TOO_MANY_WRONG_CODES` with a paired phone (wrong pairing codes can
-     * only happen before a phone paired).
+     * [LanLimits.PAIR_MAX_WRONG] failed sign-ins: `TOO_MANY_WRONG_CODES` with [LanServerState.signInsExhausted]. Since the
+     * same-IP re-pair (2026-11-01) a paired phone can also exhaust the pairing code, which keeps the wrong-code reason.
      */
     fun tooManySignIns(state: LanServerState, purpose: app.thebox.core.settings.PhonePurpose): Boolean =
         purpose == app.thebox.core.settings.PhonePurpose.NETWORK_FOLDER && state.phase == ServerPhase.FAILED &&
-            state.failure == LanFailure.TOO_MANY_WRONG_CODES && state.pairedFrom != null
+            state.failure == LanFailure.TOO_MANY_WRONG_CODES && state.signInsExhausted
 
     /**
      * (U-N1 display, closure fix pass) The text of the last failed phone sign-in of a NETWORK_FOLDER session (the reason

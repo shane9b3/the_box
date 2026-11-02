@@ -1541,7 +1541,7 @@ In worktree `agent-a190412bb6bf58a4b` (branch `worktree-agent-a190412bb6bf58a4b`
   - After an earlier failure the phase goes back to PAIRED.
   - **`stop()` lingers once a NETWORK_FOLDER result is final.** The TV replaces the QR page at once, but the phone should still read "Signed in to NAS…", so the server stays up (accepting nothing, 410) until the scheduled grace stop. `start()` always stops at once.
   - `FAILED` states now keep `pairedFrom`.
-- **`PhoneScreenModel.tooManySignIns(state, purpose)`**: NETWORK_FOLDER + FAILED + `TOO_MANY_WRONG_CODES` + a paired phone. Wrong pairing codes can only happen before pairing, so the existing `LanFailure` tells the two apart without a contract change.
+- **`PhoneScreenModel.tooManySignIns(state, purpose)`**: NETWORK_FOLDER + FAILED + `TOO_MANY_WRONG_CODES` + `LanServerState.signInsExhausted`. (Amended 2026-11-01: this used to be "+ a paired phone", on the grounds that wrong pairing codes could only happen before pairing. The same-IP re-pair of docs/design/m5-setup-settings.md §3.5.5 lets a paired phone enter wrong codes too, so `LanPhoneLink` now sets the additive `signInsExhausted` flag when the sign-ins ran out, and a paired phone that exhausts the pairing code keeps the wrong-code reason.)
 - **`PhoneLinkImpl`**: passes the context through.
 - **Phone page** (`app.html` / `app.js` / `app.css`, same style as M5):
   - A "Network folder" tab, shown alone, with fields top to bottom: Computer (read-only with **Change** when the TV knows it), Shared folder (a `<select>` of the listed shares plus "Another shared folder (type or paste it)", else text; paste accepted), Folder inside it, User name (`autocomplete="username"`), Password (`autocomplete="current-password"`, Show), the §7.3 Windows/Mac line (neutral wording), "More: Workgroup or domain" (`<details>`), "This folder allows guests (no password)", and **Send to TV**.
@@ -1569,7 +1569,7 @@ In worktree `agent-a190412bb6bf58a4b` (branch `worktree-agent-a190412bb6bf58a4b`
 ### Deviations
 
 1. `LanPhoneLink` gained a `doneGraceMs` constructor parameter (defaulted), so the tests run in about 1 s instead of 5 s.
-2. Too many failed sign-ins reuse `LanFailure.TOO_MANY_WRONG_CODES`, told apart by `pairedFrom` (no contract change).
+2. Too many failed sign-ins reuse `LanFailure.TOO_MANY_WRONG_CODES`, told apart by `pairedFrom` (no contract change). (Amended 2026-11-01: told apart by the additive `LanServerState.signInsExhausted` instead, since a paired phone can now enter wrong pairing codes; see m5 §3.5.5.)
 3. A failed sign-in is not shown as text on the TV's QR page, only on the phone. `LanServerState` has no message field, and the result text is the phone's. The TV shows the phase.
 
 ### Questions for the lead

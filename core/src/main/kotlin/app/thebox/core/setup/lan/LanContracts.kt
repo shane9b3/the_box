@@ -66,6 +66,12 @@ data class LanServerState(
     val lastSignInStatus: String? = null,
     /** Whether [lastSignInStatus] was a success; null before any. */
     val lastSignInOk: Boolean? = null,
+    /**
+     * (2026-11-01, additive) FAILED with [LanFailure.TOO_MANY_WRONG_CODES] because a NETWORK_FOLDER session used up its
+     * [LanLimits.PAIR_MAX_WRONG] phone sign-ins, not because of wrong pairing codes. Since the same-IP re-pair, wrong
+     * pairing codes can come from a paired phone too, so [pairedFrom] no longer tells the two apart.
+     */
+    val signInsExhausted: Boolean = false,
 )
 enum class LanFailure { NO_LAN_ADDRESS, BIND_FAILED, TOO_MANY_WRONG_CODES, EXPIRED }
 

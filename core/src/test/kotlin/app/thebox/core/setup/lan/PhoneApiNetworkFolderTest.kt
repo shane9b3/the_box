@@ -404,10 +404,38 @@ class PhoneApiNetworkFolderTest {
             assertEquals(LanFailure.TOO_MANY_WRONG_CODES, failed.failure)
             assertEquals(phoneIp, failed.pairedFrom)
             assertEquals(false, failed.lastSignInOk)
+            assertTrue(failed.signInsExhausted, "the sign-ins ran out, not the pairing code")
             assertTrue(PhoneScreenModel.tooManySignIns(failed, PhonePurpose.NETWORK_FOLDER))
             assertFalse(PhoneScreenModel.tooManySignIns(failed, PhonePurpose.SETUP))
             assertFalse(PhoneScreenModel.tooManySignIns(LanServerState(ServerPhase.FAILED, failure = LanFailure.TOO_MANY_WRONG_CODES), PhonePurpose.NETWORK_FOLDER))
             assertEquals(LanLimits.PAIR_MAX_WRONG, submissions.size)
+        } finally {
+            l.close()
+        }
+    }
+
+    /**
+     * S1 (review 2026-11-01): since the same-IP re-pair a paired phone can enter wrong pairing codes. Exhausting them on a
+     * NETWORK_FOLDER session keeps the wrong-code reason, never "too many failed sign-ins".
+     */
+    @Test
+    fun pairedPhoneExhaustingThePairingCodeIsNotTooManySignIns() {
+        val l = Link()
+        try {
+            l.pair()
+            var last = 0
+            repeat(2 * LanLimits.PAIR_MAX_WRONG) {
+                val code = l.link.state.value.code!!
+                val wrong = if (code == "000000") "111111" else "000000"
+                last = l.transport.exchange(post("/pair", hostPort, "{\"code\":\"$wrong\"}")).status
+            }
+            assertEquals(410, last)
+            val failed = awaitValue { l.link.state.value.takeIf { it.phase == ServerPhase.FAILED } }
+            assertEquals(LanFailure.TOO_MANY_WRONG_CODES, failed.failure)
+            assertEquals(phoneIp, failed.pairedFrom, "the phone was paired when the codes ran out")
+            assertFalse(failed.signInsExhausted)
+            assertFalse(PhoneScreenModel.tooManySignIns(failed, PhonePurpose.NETWORK_FOLDER))
+            assertTrue(submissions.isEmpty())
         } finally {
             l.close()
         }

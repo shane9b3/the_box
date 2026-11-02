@@ -120,6 +120,12 @@ class GuideViewModelTest {
 
     private fun idle() = shadowOf(Looper.getMainLooper()).idle()
 
+    /** Idles the main looper until the frame has a focus (the first lineup landed), for at most 5 s. */
+    private fun awaitFocus(vm: GuideViewModel) {
+        val deadline = System.nanoTime() + 5_000_000_000L
+        while (vm.machine.frame.focus == null && System.nanoTime() < deadline) { idle(); Thread.sleep(5) }
+    }
+
     private fun playing(ch: GuideChannel) = PlaybackState.Playing(NowPlaying(1, ch.identity, ch.displayName, false, StreamFormat.TS))
 
     /** H-B1: an HDR poster keeps the mini viewport; only the Still setting (or low memory) is a still. */
@@ -178,6 +184,9 @@ class GuideViewModelTest {
         val w = World()
         w.library.lastWatched = channels[7]
         val vm = w.viewModel()
+        // The first lineup hops through the real IO dispatcher: wait for it instead of reading the focus at once
+        // (2026-11-01: the bare read was null under a loaded combined gate).
+        awaitFocus(vm)
         assertEquals("lineup first: row 0", 0, vm.machine.frame.focus!!.row)
         assertTrue("the startup tune was asked for", "tune" in w.controller.calls)
         w.controller.state.value = playing(channels[7])

@@ -7,10 +7,14 @@ import kotlin.io.encoding.Base64
 
 /**
  * The pairing rules of one server lifetime (docs/design/m5-setup-settings.md §3.5.2), pure and clock-driven:
- * a 128-bit [token] (QR path `/s/{token}`) or the 6-digit [code] pairs **one** phone; both are single use. Pairing
- * issues a second 128-bit session cookie bound to the phone's IP. [LanLimits.PAIR_MAX_WRONG] wrong codes rotate the
- * code once; the second exhaustion stops the session ([LanFailure.TOO_MANY_WRONG_CODES]). Idle
- * [LanLimits.PAIR_IDLE_MS] and absolute [LanLimits.PAIR_MAX_MS] lifetimes end it with [LanFailure.EXPIRED].
+ * a 128-bit [token] (QR path `/s/{token}`) or the 6-digit [code] pairs **one** phone; once paired, neither works from
+ * any other IP ([PairResult.Busy]). Pairing issues a second 128-bit session cookie bound to the phone's IP.
+ * Same-IP re-pair (owner finding 2026-11-01: the phone's QR scanner fetched the link before the browser, so the
+ * browser arrived without the cookie and the code then answered "another phone"): the right token or code presented
+ * again **from the paired IP** pairs again with a new cookie, and the previous cookie is refused from then on. A wrong
+ * token after pairing stays [PairResult.Busy]; a wrong code from the paired IP still counts. [PhoneApi] never pairs
+ * on a HEAD or prefetch of the token path. [LanLimits.PAIR_MAX_WRONG] wrong codes rotate the code once; the second
+ * exhaustion stops the session ([LanFailure.TOO_MANY_WRONG_CODES]). Idle [LanLimits.PAIR_IDLE_MS] and absolute [LanLimits.PAIR_MAX_MS] lifetimes end it with [LanFailure.EXPIRED].
  * Thread-safe (the server's workers call it concurrently). Token, code and cookie are registered for redaction.
  */
 class PairingSession(
@@ -26,7 +30,7 @@ class PairingSession(
         data class Paired(val cookie: String) : PairResult
         /** Wrong code; [left] tries before the code rotates (0 = it just rotated). */
         data class Wrong(val left: Int) : PairResult
-        /** Another phone already paired. */
+        /** Another phone (another IP) already paired. */
         data object Busy : PairResult
         /** The session ended ([failure] says why). */
         data class Stopped(val failure: LanFailure?) : PairResult
@@ -61,15 +65,18 @@ class PairingSession(
     fun pairWithToken(candidate: String, ip: String): PairResult = synchronized(lock) {
         noteRequest()
         if (ended) return PairResult.Stopped(failure)
-        if (pairedFrom != null) return PairResult.Busy
-        if (!equalSecret(candidate, token)) return PairResult.Stopped(null)
-        pair(ip)
+        val paired = pairedFrom
+        val right = equalSecret(candidate, token)
+        if (paired != null && (paired != ip || !right)) return PairResult.Busy
+        if (!right) return PairResult.Stopped(null)
+        pair(ip) // first pairing, or a same-IP re-pair (2026-11-01): a new cookie replaces the old one
     }
 
     fun pairWithCode(candidate: String, ip: String): PairResult = synchronized(lock) {
         noteRequest()
         if (ended) return PairResult.Stopped(failure)
-        if (pairedFrom != null) return PairResult.Busy
+        // Another IP is refused uncounted; from the paired IP the right code re-pairs and a wrong one counts (2026-11-01).
+        if (pairedFrom != null && pairedFrom != ip) return PairResult.Busy
         val digits = candidate.filter { it in '0'..'9' }
         if (digits.length == CODE_DIGITS && equalSecret(digits, code)) return pair(ip)
         wrongCodes++
@@ -98,9 +105,6 @@ class PairingSession(
         if (ip != pairedFrom) return Auth.OTHER_PHONE
         Auth.OK
     }
-
-    /** True when a request on [ip] comes from someone other than the paired phone (403 "Another phone…"). */
-    fun isOtherPhone(ip: String): Boolean = pairedFrom != null && pairedFrom != ip
 
     /** Checks the lifetimes; returns the failure that ended the session now, if any. */
     fun checkExpiry(): LanFailure? = synchronized(lock) {

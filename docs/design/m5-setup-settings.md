@@ -892,6 +892,11 @@ data class LanServerState(
     val lastRequestAtMs: Long? = null,
     val wrongCodes: Int = 0,
     val failure: LanFailure? = null,
+    // Additive since 2026-10-24/28 (save location, U-N1): the last NETWORK_FOLDER sign-in report, for the TV screen.
+    val lastSignInStatus: String? = null,
+    val lastSignInOk: Boolean? = null,
+    // Additive 2026-11-01: TOO_MANY_WRONG_CODES came from a paired phone's failed folder sign-ins, not from pairing codes.
+    val signInsExhausted: Boolean = false,
 )
 enum class LanFailure { NO_LAN_ADDRESS, BIND_FAILED, TOO_MANY_WRONG_CODES, EXPIRED }
 
@@ -1714,8 +1719,8 @@ After `NO_REQUEST_HINT_MS` (90,000) without any request, an amber hint replaces 
 |---|---|
 | Bind | The LAN IPv4 from `LanAddressFinder`: the active network's `LinkProperties` if it is Wi-Fi or Ethernet, else the first Wi-Fi/Ethernet network with a site-local IPv4 (10/8, 172.16/12, 192.168/16, or 100.64/10 CGNAT is **refused**); never `0.0.0.0`, loopback, a VPN (`TRANSPORT_VPN`) or IPv6. None found → `LanFailure.NO_LAN_ADDRESS`: "This TV is not on a home network (Wi-Fi or Ethernet)." |
 | Port | `PHONE_PORT_PREFERRED` (47100), else up to 10 random ports in 49152–65535 |
-| Pairing | QR path `/s/{token}` (128-bit `SecureRandom`, base64url) **or** `POST /pair` with the 6-digit code. Either sets `Set-Cookie: tb={session}; HttpOnly; SameSite=Strict; Path=/` (a second 128-bit value) and redirects to `/app`. The token and code are single-use: after the first successful pairing both are dead |
-| One phone | The session is bound to the pairing client's IP; requests from any other IP get 403 "Another phone is already connected". The TV shows the paired IP |
+| Pairing | QR path `/s/{token}` (128-bit `SecureRandom`, base64url) **or** `POST /pair` with the 6-digit code. Either sets `Set-Cookie: tb={session}; HttpOnly; SameSite=Lax; Path=/` (a second 128-bit value; Lax since 2026-11-01, was Strict: a QR link opened from inside a web page, such as a Lens result or an in-app browser, is a cross-site navigation and Chromium withholds a Strict cookie on the 303 hop to `/app`; POSTs stay protected by `X-TheBox` and the `Origin` check) and redirects to `/app`. The token and code are single-use against other phones: after the first successful pairing neither works from any other IP. (2026-11-01) From the paired IP the right token or code pairs again: a new cookie, the old one refused from then on (§3.5.5). A HEAD or a prefetch of `/s/{token}` (`Sec-Purpose` with `prefetch`/`prerender`, `Purpose: prefetch`, `X-Purpose: preview`, `X-Moz: prefetch`) never pairs: 204, no cookie |
+| One phone | The session is bound to the pairing client's IP; requests from any other IP get 403 "Another phone is already connected" (on `/s/{token}` and `POST /pair` too, a wrong code from another IP is not counted). The TV shows the paired IP. (2026-11-01, owner finding §3.5.5) The **same** IP presenting the right token or code again re-pairs (new cookie, old cookie → 401 / redirect to `/`); a wrong code from the paired IP still counts. Reason: the phone's QR scanner fetched the link before the browser, so the browser had no cookie and the code then said "another phone" |
 | Wrong codes | `PAIR_MAX_WRONG` (5) per server lifetime → the code rotates, the TV shows "Too many wrong codes; here is a new one", counter resets once; a second exhaustion stops the server (`TOO_MANY_WRONG_CODES`) |
 | Lifetime | idle `PAIR_IDLE_MS` (600,000), absolute `PAIR_MAX_MS` (1,800,000); stops on success of a SETUP submission, on leaving the screen, on app stop (ON_STOP) |
 | DNS rebinding | `Host` must equal `{ip}:{port}` exactly, else 421 |
@@ -1729,7 +1734,7 @@ After `NO_REQUEST_HINT_MS` (90,000) without any request, an amber hint replaces 
 | Method, path | Needs | Body / result |
 |---|---|---|
 | `GET /` | – | `pair.html` (code entry) |
-| `GET /s/{token}` | valid token | 303 → `/app` + cookie |
+| `GET /s/{token}` | valid token | 303 → `/app` + cookie (from the paired IP without a valid cookie: re-pairs with a new cookie, 2026-11-01); HEAD or a prefetch → 204, no cookie, no pairing |
 | `POST /pair` | `X-TheBox` | `{"code":"482913"}` → 204 + cookie, or 403 `{"left":3}` |
 | `GET /app`, `/app.js`, `/app.css` | cookie | the page (assets, no external resources; a light theme so it is readable on phones; the black-on-white wordmark per the branding decision) |
 | `GET /api/state` | cookie | `{"purpose":"SETUP","tv":"Waiting"|"Checking"|"Done"|"Failed","message":"…"}` (polled every 1 s) |
@@ -1750,6 +1755,10 @@ The phone page offers four tabs matching the TV's purpose: **Xtream**, **M3U**, 
 - The same server serves downloads (backup, logs) only of files the TV offered in this session, only to the paired phone, once.
 - (reviewed 2026-10-16, S4) For BACKUP_DOWNLOAD and RESTORE the passphrase **and** the encrypted backup cross the same plain-HTTP LAN, so a LAN sniffer gets both: the passphrase protects a backup file at rest (on the phone, in a cloud drive), not its transfer. The page says so next to the passphrase field.
 - (N10) Denial of service from the LAN is accepted: any device on the network can burn the wrong-code attempts (the server rotates the code once, then stops) or hold the four sockets for 15 s each. The user sees it on the TV and can restart the screen.
+
+#### 3.5.5 Owner finding 2026-11-01 (pairing said "another phone" for the only phone)
+
+Report: scanning the QR and then typing the code on the phone said "Another phone is already connected"; leaving the screen on the TV and typing the new code into the page already open on the phone connected. Cause: the phone's QR scanner (link preview / prefetch) fetched `/s/{token}` before the browser did, so that fetch took the pairing and the cookie; the browser reached `/app` without a cookie, was sent to `/`, and the code was refused because `PairingSession` answered `Busy` to anyone once paired, the same phone included. Fix (lead ruling, contracts unchanged): `PairingSession` re-pairs the paired IP on the right token or code (new cookie, old one refused; `Busy` only for another IP); `PhoneApi` answers a HEAD or prefetch of `/s/{token}` with 204 and never pairs on it, and a GET of `/s/{token}` from the paired IP without a valid cookie re-pairs straight to `/app`. Tests: `PairingSessionTest`, `LanHttpServerImplTest` (`samePhoneRePairsWithTheCodeAfterTheTokenWasUsedWithoutItsCookie`, `samePhoneOpeningTheQrLinkAgainWithoutTheCookieRePairs`, `anotherPhoneIsStillRefusedOnBothPathsAfterAPairing`, `headAndPrefetchesOfTheQrLinkNeverPair`). Accepted trade-off: another device behind the same IP (NAT, a shared hotspot) with the token or the code could take over the session; that needs the secret shown on the TV, the same bar as the first pairing. (Lead ruling: accepted.) Review follow-ups, same day: the cookie is now `SameSite=Lax` (§3.5.2 "Pairing" row); because a paired phone can now enter wrong pairing codes, a NETWORK_FOLDER session that ran out of sign-ins is marked by the additive `LanServerState.signInsExhausted` (set by `LanPhoneLink`) and `PhoneScreenModel.tooManySignIns` reads that flag instead of `pairedFrom` (docs/design/m6-storage-locations.md amended); the unused `PairingSession.isOtherPhone` is gone.
 
 ### 3.6 Playlists pages and guide-data matching (WP-B)
 

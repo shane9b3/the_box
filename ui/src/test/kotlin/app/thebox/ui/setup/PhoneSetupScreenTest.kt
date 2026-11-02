@@ -101,10 +101,21 @@ class PhoneSetupScreenTest {
         rule.onNodeWithTag(PHONE_SIGN_IN_FAILED_TAG).assertDoesNotExist()
         // Too many failed sign-ins: the reason stays under the ending.
         state = ui(
-            server = LanServerState(ServerPhase.FAILED, pairedFrom = "192.168.1.34", failure = LanFailure.TOO_MANY_WRONG_CODES, lastSignInStatus = refused, lastSignInOk = false),
+            server = LanServerState(
+                ServerPhase.FAILED, pairedFrom = "192.168.1.34", failure = LanFailure.TOO_MANY_WRONG_CODES, lastSignInStatus = refused, lastSignInOk = false,
+                signInsExhausted = true,
+            ),
             purpose = PhonePurpose.NETWORK_FOLDER,
         )
         rule.onNodeWithText(refused).assertExists()
+        rule.onNodeWithText("Too many failed sign-ins", substring = true).assertExists()
+        // S1 (review 2026-11-01): a paired phone that used up the pairing code keeps the wrong-code reason.
+        state = ui(
+            server = LanServerState(ServerPhase.FAILED, pairedFrom = "192.168.1.34", failure = LanFailure.TOO_MANY_WRONG_CODES),
+            purpose = PhonePurpose.NETWORK_FOLDER,
+        )
+        rule.onNodeWithText("Too many wrong codes", substring = true).assertExists()
+        rule.onNodeWithText("Too many failed sign-ins", substring = true).assertDoesNotExist()
         // Other purposes never show it.
         state = ui(server = paired.copy(lastSignInStatus = refused, lastSignInOk = false), purpose = PhonePurpose.SETUP)
         rule.onNodeWithTag(PHONE_SIGN_IN_FAILED_TAG).assertDoesNotExist()

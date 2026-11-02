@@ -132,7 +132,13 @@ class PhoneApi(
 
     private val HttpRequest.isGet get() = method == "GET" || method == "HEAD"
 
+    /**
+     * `GET /s/{token}`. A HEAD or a prefetch / link preview ([isPrefetch]) never pairs: 204, no cookie, the session is
+     * not touched (owner finding 2026-11-01: the phone's QR scanner fetched the link before the browser opened it). A
+     * GET from the paired IP without a valid cookie re-pairs ([PairingSession.pairWithToken]) and sets the new cookie.
+     */
     private fun pairWithToken(request: HttpRequest, token: String): HttpResponse {
+        if (request.method == "HEAD" || isPrefetch(request)) return HttpResponse(204, securityHeaders())
         if (session.authorize(cookieOf(request), request.remoteAddress) == PairingSession.Auth.OK) return redirect("/app", null)
         return when (val r = session.pairWithToken(token, request.remoteAddress)) {
             is PairingSession.PairResult.Paired -> redirect("/app", r.cookie)
@@ -503,7 +509,26 @@ class PhoneApi(
             "Content-Security-Policy" to CSP,
         )
 
-        fun cookieHeader(value: String) = "$COOKIE=$value; HttpOnly; SameSite=Strict; Path=/"
+        /**
+         * `SameSite=Lax` (2026-11-01, was Strict): a QR link opened from inside a web page (a Lens result, an in-app
+         * browser) is a cross-site navigation, and Chromium withholds a Strict cookie on the 303 hop to `/app`. POSTs stay
+         * protected by `X-TheBox` and the `Origin` check.
+         */
+        fun cookieHeader(value: String) = "$COOKIE=$value; HttpOnly; SameSite=Lax; Path=/"
+
+        /**
+         * A speculative fetch rather than a navigation (2026-11-01): `Sec-Purpose: prefetch|prerender`, `Purpose: prefetch`,
+         * `X-Purpose: preview`, `X-Moz: prefetch`. Header names arrive lowercased ([HttpParser]); values are matched
+         * case-insensitively.
+         */
+        fun isPrefetch(request: HttpRequest): Boolean {
+            fun has(name: String, vararg words: String): Boolean {
+                val v = request.headers[name]?.lowercase() ?: return false
+                return words.any { it in v }
+            }
+            return has("sec-purpose", "prefetch", "prerender") || has("purpose", "prefetch") ||
+                has("x-purpose", "preview") || has("x-moz", "prefetch")
+        }
 
         fun cookieOf(request: HttpRequest): String? {
             val header = request.headers["cookie"] ?: return null

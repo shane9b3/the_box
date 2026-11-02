@@ -214,7 +214,8 @@ class LanPhoneLink(
     /**
      * WP-S6 (§7.4): for NETWORK_FOLDER, [reportStatus] is the sign-in result. Success ends the session after the grace
      * (one shot); a failure lets the phone send again, up to [LanLimits.PAIR_MAX_WRONG], after which the session ends as
-     * [LanFailure.TOO_MANY_WRONG_CODES] with [LanServerState.pairedFrom] kept (which tells it from wrong pairing codes).
+     * [LanFailure.TOO_MANY_WRONG_CODES] with [LanServerState.signInsExhausted] set (2026-11-01: that flag, not
+     * [LanServerState.pairedFrom], tells it from wrong pairing codes, which a paired phone can now enter too).
      */
     private fun reportSignIn(a: PhoneApi, text: String, done: Boolean) {
         if (a.folderFinished) return
@@ -249,15 +250,21 @@ class LanPhoneLink(
     }
 
     private fun fail(s: PairingSession, failure: LanFailure) {
+        var signInsExhausted = false
         val srv = synchronized(lock) {
             if (session !== s) return
+            signInsExhausted = failure == LanFailure.TOO_MANY_WRONG_CODES && api?.folderExhausted == true
             api?.dropOffers() // D-S2
             server.also { server = null; session = null; api = null; ticker?.cancel(); ticker = null }
         }
         srv?.stop()
         spoolDir.listFiles()?.forEach { it.delete() }
-        // WP-S6: pairedFrom stays, so a NETWORK_FOLDER page can say "too many failed sign-ins" (PhoneScreenModel).
-        _state.value = LanServerState(ServerPhase.FAILED, pairedFrom = s.pairedFrom, failure = failure, lastSignInStatus = signInStatus, lastSignInOk = signInOk)
+        // WP-S6: pairedFrom stays (the TV shows who was connected); signInsExhausted (2026-11-01) tells a NETWORK_FOLDER
+        // page's "too many failed sign-ins" from too many wrong pairing codes (PhoneScreenModel.tooManySignIns).
+        _state.value = LanServerState(
+            ServerPhase.FAILED, pairedFrom = s.pairedFrom, failure = failure, lastSignInStatus = signInStatus, lastSignInOk = signInOk,
+            signInsExhausted = signInsExhausted,
+        )
     }
 
     private fun publish() {
