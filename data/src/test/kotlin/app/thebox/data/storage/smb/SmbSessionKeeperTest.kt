@@ -29,7 +29,8 @@ class SmbSessionKeeperTest {
         w.server.putFile("$dir/ring-0123456789ab-9-1.bin", ByteArray(10))
         w.keeper.startNow()
         eventually("READY") { w.keeper.snapshot.state == KeeperState.READY }
-        assertTrue(w.server.exists("$dir/.wake-${w.deviceId.id}"))
+        // READY is published before the wake write (SmbSessionKeeper.onLinkUp), so wait for the file (load race, 2026-11-02).
+        eventually("wake written") { w.server.exists("$dir/.wake-${w.deviceId.id}") }
         assertEquals(4_096, w.server.contents("$dir/.wake-${w.deviceId.id}")!!.size)
         eventually("swept") { !w.server.exists("$dir/ring-${w.deviceId.id}-1-1.bin") }
         assertTrue("another box's live file is kept", w.server.exists("$dir/ring-0123456789ab-9-1.bin"))
