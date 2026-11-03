@@ -28,7 +28,7 @@ data class RefreshLogEntity(
     val bytes: Long? = null,
     /** RefreshReport | EpgImportReport JSON. */
     @ColumnInfo(name = "report_json") val reportJson: String? = null,
-    /** S15: failures persist until acknowledged. */
+    /** S15: failures persist until acknowledged or until a later run of the same target succeeds (2026-11-02). */
     @ColumnInfo(defaultValue = "0") val acknowledged: Boolean = false,
 ) {
     companion object {

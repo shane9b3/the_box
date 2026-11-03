@@ -49,6 +49,8 @@ class SyncChipReasonTest {
 
     @Test
     fun aGenerationBuiltAfterTheFailureIsNotCalledStale() {
+        // Since 2026-11-02 reached when a build swapped the generation but logged no row (cancelled, a throw after the
+        // swap, process death), or when the wall clock was wrong at failure time.
         assertEquals(SyncChipReason.Failed, syncChipReason(failed("http.500", builtAt = failedAt + 1)))
     }
 

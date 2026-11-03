@@ -2041,7 +2041,7 @@ CREATE TABLE refresh_log (
   error_detail TEXT,                                      -- Redact.text(...)
   bytes        INTEGER,
   report_json  TEXT,                                      -- RefreshReport | EpgImportReport
-  acknowledged INTEGER NOT NULL DEFAULT 0                 -- S15: failures persist until acknowledged
+  acknowledged INTEGER NOT NULL DEFAULT 0                 -- S15: failures persist until acknowledged or until a later run of the same target succeeds (2026-11-02)
 );
 CREATE INDEX index_refresh_log_target ON refresh_log(target_type, target_id, started_at);
 
@@ -2056,7 +2056,7 @@ CREATE TABLE purged_key (
 CREATE INDEX index_purged_key_age ON purged_key(purged_at);
 ```
 
-Retention: `refresh_log` keeps the newest 30 rows per `(target_type, target_id)`. The trim runs in the same transaction as the insert. Orphaned user data (prefs, favourites, EPG mappings, reminders) whose channel row was purged more than 180 days ago is removed by a weekly maintenance step in `PlaylistRefreshWorker`. (reviewed 2026-10-13, S8) The orphan age is `purged_key.purged_at`, **not** `favourite.added_at`/`channel_prefs.updated_at`: with those, an old favourite would be deleted the day its channel was purged. Only keys with a tombstone older than 180 days and no `channel` row count. Their tombstone is deleted with them.
+Retention: `refresh_log` keeps the newest 30 rows per `(target_type, target_id)`. The trim runs in the same transaction as the insert. (amended 2026-11-02, owner finding: 18 `http.500` build failures stayed on screen for days after eight successful builds) In the same transaction, a `SUCCESS` or `NOT_MODIFIED` row sets `acknowledged = 1` on the `FAILED` rows of the same `(target_type, target_id IS ?)` with a smaller `id` (insertion order, not `started_at`: the device clock can move back); an `EPG_BUILD` success also does so for `EPG_PATCH` failures (a rebuild supersedes any patch), never the reverse. Failures with no later success still wait for Dismiss. Orphaned user data (prefs, favourites, EPG mappings, reminders) whose channel row was purged more than 180 days ago is removed by a weekly maintenance step in `PlaylistRefreshWorker`. (reviewed 2026-10-13, S8) The orphan age is `purged_key.purged_at`, **not** `favourite.added_at`/`channel_prefs.updated_at`: with those, an old favourite would be deleted the day its channel was purged. Only keys with a tombstone older than 180 days and no `channel` row count. Their tombstone is deleted with them.
 
 Example entity, which fixes the conventions for the rest (camelCase properties, explicit `@ColumnInfo(name, defaultValue)`, `String` keys rather than value classes):
 

@@ -55,8 +55,11 @@ sealed interface SyncChipReason {
 /**
  * (owner finding 2026-11-01) Pure chip selection: busy wins; then the newest unacknowledged failure. Only guide builds
  * ([SyncFeedState.TARGET_EPG_BUILD]) get a specific reason. A transient one reads as [SyncChipReason.Stale] only when
- * a generation exists and was not built after the failure (a later successful build makes the failure old news, so
- * the generic wording stays until the viewer acknowledges it).
+ * a generation exists and was not built after the failure. Since 2026-11-02 a successful build's log row acknowledges
+ * the earlier build failures, so a newer generation with the failure still open means either a build swapped the
+ * generation but logged no row (worker cancelled after the swap, a throw in `setImported`, `enforceCachePolicy` or
+ * `afterBuild` outside the build's try, or process death), or the wall clock was wrong when the failure started.
+ * "Stale" would then misdate the guide on screen, so the generic wording stays until the next run or Dismiss.
  */
 fun syncChipReason(s: SyncFeedState): SyncChipReason? {
     if (s.busy) return SyncChipReason.Busy(s.progress)

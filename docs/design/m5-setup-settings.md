@@ -1479,7 +1479,7 @@ PlaylistSource page (edit in place, `playlist_id` and therefore every `(playlist
 | `guide.descriptions` | Toggle "Store programme descriptions" | On (Off in low-RAM mode) | G | A | `data.storeDescriptions` | importer | NEXT_EPG_IMPORT |
 | `guide.posters` | Toggle "Programme posters" (TMDB, when the guide has no picture; the app's built-in key only, `BuildConfig.TMDB_KEY` from `local.properties`; description: the privacy line, or "Needs a TMDB key: this build has none." when the build has none, or "TMDB rejected the app's key. Update The Box." after a 401; no user-key row) — owner rulings 2026-10-18 and 2026-10-19, `docs/decisions/2026-10-18-tmdb-programme-posters.md` | On | G | A | `guide.posters` | `TmdbProgrammeArtwork` (focused panel) | LIVE |
 
-SyncStatus page (product S15): first row **Update guide now** (Action, `EpgWorkRequester.importEpgNow(MANUAL)`), then one Item per playlist and EPG source with its state (Queued / Downloading 120 MB / Parsing / Done / **Failed: HTTP 403. The URL may have changed or the account expired** with menu Edit · Retry · Dismiss). Dismiss acknowledges (`SyncStatusRepository.acknowledge`).
+SyncStatus page (product S15): first row **Update guide now** (Action, `EpgWorkRequester.importEpgNow(MANUAL)`), then one Item per playlist and EPG source with its state (Queued / Downloading 120 MB / Parsing / Done / **Failed: HTTP 403. The URL may have changed or the account expired** with menu Edit · Retry · Dismiss). Dismiss acknowledges (`SyncStatusRepository.acknowledge`). (amended 2026-11-02) A later successful run of the same playlist or guide acknowledges its earlier failures by itself (`RefreshLogDao.insert`), so Dismiss is only needed for a failure that has not been followed by a success.
 
 #### 3.3.3 Playback
 
