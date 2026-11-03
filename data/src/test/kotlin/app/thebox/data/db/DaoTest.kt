@@ -182,6 +182,45 @@ class DaoTest {
     }
 
     @Test
+    fun aSuccessAcknowledgesEarlierFailuresOfTheSameTargetOnly() = runBlocking {
+        // Owner finding 2026-11-02: http.500 build failures stayed on screen for days after successful builds.
+        val dao = db.refreshLogDao()
+        fun row(type: String, target: Long?, at: Long, outcome: String) =
+            RefreshLogEntity(targetType = type, targetId = target, trigger = "PERIODIC", startedAt = at, finishedAt = at, outcome = outcome, errorCode = if (outcome == "FAILED") "http.500" else null)
+        suspend fun unacked() = dao.observeUnacknowledgedFailures().first().map { it.targetType to it.targetId }.sortedBy { it.toString() }
+
+        repeat(3) { i -> dao.insert(row("EPG_BUILD", null, 100L + i, "FAILED")) }
+        dao.insert(row("EPG_PATCH", null, 103, "FAILED"))
+        dao.insert(row("PLAYLIST", 1, 100, "FAILED"))
+        // started_at earlier than the failures (the clock moved back): the insertion order still resolves them.
+        // A build success also resolves the earlier patch failure (a rebuild supersedes any patch).
+        dao.insert(row("EPG_BUILD", null, 50, "SUCCESS"))
+        // target_id IS NULL matched only the guide rows; the playlist failure is untouched.
+        assertEquals(listOf("PLAYLIST" to 1L), unacked())
+
+        // A failure after the success stays until the next success or the viewer's Dismiss.
+        dao.insert(row("EPG_BUILD", null, 200, "FAILED"))
+        assertEquals(listOf("EPG_BUILD" to null, "PLAYLIST" to 1L), unacked())
+        // A patch success does not resolve a build failure.
+        dao.insert(row("EPG_PATCH", null, 250, "SUCCESS"))
+        assertEquals(listOf("EPG_BUILD" to null, "PLAYLIST" to 1L), unacked())
+
+        // Another playlist's success does not resolve playlist 1, nor does a cancelled run; its own success does.
+        dao.insert(row("PLAYLIST", 2, 300, "SUCCESS"))
+        assertEquals(listOf("EPG_BUILD" to null, "PLAYLIST" to 1L), unacked())
+        dao.insert(row("PLAYLIST", 1, 300, "CANCELLED"))
+        assertEquals(listOf("EPG_BUILD" to null, "PLAYLIST" to 1L), unacked())
+        // A 304 is a success for this purpose (RefreshRepository stamps last_success_at for it).
+        dao.insert(row("PLAYLIST", 1, 400, "NOT_MODIFIED"))
+        assertEquals(listOf("EPG_BUILD" to null), unacked())
+        // Logged after that success but with an earlier started_at (clock moved back): still open, ordering is by id.
+        dao.insert(row("PLAYLIST", 1, 10, "FAILED"))
+        assertEquals(listOf("EPG_BUILD" to null, "PLAYLIST" to 1L), unacked())
+        dao.insert(row("EPG_BUILD", null, 500, "SUCCESS"))
+        assertEquals(listOf("PLAYLIST" to 1L), unacked())
+    }
+
+    @Test
     fun orphanTrimUsesTombstoneAgeNotFavouriteAge() = runBlocking {
         // S8: a 2-year-old favourite survives a purge for 180 days.
         val clock = FakeClock(start = 1_000L * 24 * 3600 * 1000)

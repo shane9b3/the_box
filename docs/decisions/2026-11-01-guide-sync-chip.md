@@ -57,3 +57,31 @@ untrue.
 Fake panel: `POST /admin/config {"epg_status":500}` (or `"epg_status": 500` in the config file) makes `xmltv.php`
 answer 500. Set "Keep cached XMLTV" to Never (or have the cache dropped), import the guide once with `epg_status` 0,
 then set 500 and refresh the playlist.
+
+## Follow-up 2026-11-02
+
+Owner finding (Sony Bravia log): the device held 18 `FAILED` `EPG_BUILD` rows with `http.500` from 2026-10-29, when
+the provider's `xmltv.php` answered 500 for an evening. Eight guide builds since then succeeded (generation 41 on
+screen), yet Settings › TV guide said "Failed: HTTP 500" and the chip showed a failure for days. Nothing but the
+row menu's Dismiss, one row at a time, ever acknowledged a failure, and the 30-rows-per-target retention kept them.
+
+Ruling: a successful run resolves the earlier failures of the same target. `RefreshLogDao.insert` (one transaction
+with the insert and trim) marks `acknowledged = 1` on the target's `FAILED` rows with a smaller `id` when the new
+row is `SUCCESS` or `NOT_MODIFIED` (a playlist 304 is recorded as `last_success_at`, and after a failure the stored
+ETag usually makes the next refresh a 304, so without it the failure would never clear). The match is
+`target_type = ? AND target_id IS ?`, so `EPG_BUILD` (null id) and each playlist are separate. An `EPG_BUILD` success
+also acknowledges earlier `EPG_PATCH` failures (a full rebuild supersedes any patch, and the Settings guide row shows
+only build failures, so a stuck patch failure kept the chip amber with no Dismiss anywhere); a patch success does not
+clear a build failure. The order is by `id`, not `started_at`, because the device clock can move back. Dismiss stays
+for failures with no later success.
+
+`syncChipReason` keeps its "generation built after the failure → generic wording" guard: the generation swaps inside
+`store.build`, and `finishBuild` logs only after `setImported`, cache policy and `matches.afterBuild`. The worker is
+busy in between (the chip says "Updating guide…"). The guard is reached when a build swapped the generation but
+logged no row (worker cancelled after the swap, a throw in `setImported`/`enforceCachePolicy`/`afterBuild` outside the
+build's try, process death), or when the wall clock was wrong at failure time.
+
+Known gaps (from the review, open): with several guide sources, a source that failed without a cached copy is
+dropped from a build that still logs SUCCESS, so its earlier failure is cleared while its data is missing (narrow,
+predates this change). A playlist refresh that fails after the merge saved the new ETag gets a 304 next time, and that
+NOT_MODIFIED clears the failure although the post-merge steps did not re-run (rare).
