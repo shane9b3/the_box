@@ -22,7 +22,7 @@ const val SYNC_CHIP_TAG = "sync_chip"
 /**
  * Sync chip after the tabs (docs/design/m3-guide.md §3.15, B7, N11): "Updating guide…" or the progress line while busy;
  * the newest unacknowledged failure's reason (amber dot; `syncChipReason` in :core, amended 2026-11-01:
- * "HTTP 500 · guide from Sat 18:40", or "Guide update failed. Check Settings → TV guide."). One line, so the texts are
+ * "HTTP 500 · guide from Sat 18:40", or "Guide update failed · see Settings"). One line, so the texts are
  * kept to about 335 px. Not focusable: there is no details screen in M3.
  */
 @Composable

@@ -7,7 +7,7 @@
     <string name="guide_tab_search">Search</string>
     <string name="guide_tab_settings">Settings</string>
     <string name="guide_sync_updating">Updating guide…</string>
-    <string name="guide_sync_failed">Guide update failed. Check Settings → TV guide.</string>
+    <string name="guide_sync_failed">Guide update failed · see Settings</string>
 
     <!-- Focused-programme panel (§3.9.1). The guide_btn_ strings left are the programme sheet's (S7b); the panel has no buttons (owner ruling 2026-11-01). -->
     <string name="guide_on_now">ON NOW</string>

@@ -39,7 +39,7 @@ Wording rule:
    "Sign-in rejected · see Settings" (`auth.*`), "Unreadable guide · see Settings" (`format.*`, `parse`),
    "Storage full · free up space" (`disk`).
 4. Anything else (no generation, playlist and patch failures, other codes, a generation built after the failure)
-   keeps "Guide update failed. Check Settings → TV guide."
+   keeps "Guide update failed · see Settings" (shortened 2026-11-02; the longer text clipped at 443 px).
 
 No raw codes except the HTTP status number. Styling (`failed = true`, amber dot) and acknowledgement (Diagnostics,
 Menu → dismiss) are unchanged; Settings › TV guide keeps its "HTTP 500. The server refused the request" line.
