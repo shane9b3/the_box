@@ -30,6 +30,7 @@ from zoneinfo import ZoneInfo
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import catalog as cat  # noqa: E402
 import ed25519  # noqa: E402
+import sports  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PKT = 188
@@ -72,6 +73,8 @@ DEFAULTS = {
     "update_mode": "valid",
     "update_manifest": {},      # overrides of the generated manifest (versionCode, versionName, packageName, sequence, ...)
     "update_apk": "app",        # which uploaded APK (POST /admin/update_apk?name=...) the manifest offers
+    # M6 score bug (docs/design/m6-score-bug.md §8): the fake NHL API under /v1/ and /logos/nhl/ (sports.py)
+    **sports.DEFAULTS,
 }
 FAULT_DOC = {
     "redirect": False, "token_ttl": None, "linger": 0, "linger_status": 403, "close_every": 0,
@@ -941,6 +944,7 @@ class Panel:
         self.update_apks = {}  # M5: name -> APK bytes (POST /admin/update_apk, or --update-apk-dir)
         self.update_seed = load_update_key(update_key)
         self.reset_stats()
+        self.sports = sports.Sports(self)
         self.clips, self.vod_data, self.vod_ctype = build_media(
             media_dir or os.path.join(HERE, "media"), use_ffmpeg, self.log)
 
@@ -1058,6 +1062,7 @@ class Panel:
         sl = patch.get("sleep_login", 0)
         if isinstance(sl, bool) or not isinstance(sl, (int, float)) or sl < 0:
             raise ValueError("sleep_login must be a number >= 0")
+        sports.check_config(patch)
         if "dns_records" in patch and not isinstance(patch["dns_records"], dict):
             raise ValueError("dns_records must be an object {name: ipv4}")
         for table in [patch.get("faults") or {}] + list((patch.get("stream_faults") or {}).values()):
@@ -1104,6 +1109,7 @@ class Panel:
         self.holds = []
         self.occupiers = []
         self.reset_stats()
+        self.sports.reset()
 
     # ---- M5: update manifest (docs/design/m5-setup-settings.md §3.12.1, §6.4)
     def update_public_hex(self):
@@ -1388,6 +1394,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         # The redirect port also serves the archive playlists' absolute segment paths (/vodseg/, /tseg/).
         if self.server.is_lb and not re.match(r"^/(live|movie|series|timeshift|vodseg|tseg)/|^/streaming/timeshift\.php$", path):
             return self.send(404, b"lb: stream paths only", "text/plain")
+        if sports.handle(self, path):
+            return None
         if path == "/player_api.php":
             return self.player_api()
         if path.startswith("/update/"):
@@ -1483,7 +1491,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
             syn = p.syn()
             if syn:
                 s["synthetic"] = syn.info()
+            s["sports"] = p.sports.stats()
             return self.json(s)
+        if path == "/admin/sports":
+            return sports.admin(self, path, data)
         if path == "/admin/now":
             now = time.time()
             return self.json({"unix": now, "panel_wall": dt.datetime.fromtimestamp(now, p.tz()).strftime("%Y-%m-%d %H:%M:%S"),
@@ -2336,6 +2347,8 @@ def main(argv=None):
     ap.add_argument("--no-ffmpeg", action="store_true")
     ap.add_argument("--no-pace", action="store_true", help="send live TS as fast as possible")
     ap.add_argument("--verbose", action="store_true")
+    ap.add_argument("--sports", action="store_true", help="serve the fake NHL score API (/v1/score, /v1/gamecenter, logos)")
+    ap.add_argument("--sports-timeline", type=float, metavar="S", help="the featured game's timeline length (default 360 s)")
     ap.add_argument("--update-apk-dir", help="U-S14: load every *.apk in this directory as an update APK by name "
                                              "(thebox-update-v2.apk -> v2); select one with the update_apk config key")
     ap.add_argument("--update-key", help="file with the 32-byte Ed25519 seed (hex) the update manifest is signed with "
@@ -2362,6 +2375,10 @@ def main(argv=None):
             cfg[flag] = True
     if a.no_pace:
         cfg["pace"] = False
+    if a.sports:
+        cfg["sports"] = True
+    if a.sports_timeline is not None:
+        cfg["sports_timeline_s"] = a.sports_timeline
     for flag in ("synthetic", "synthetic_days_back", "synthetic_days_ahead"):
         if getattr(a, flag) is not None:
             cfg[flag] = getattr(a, flag)
