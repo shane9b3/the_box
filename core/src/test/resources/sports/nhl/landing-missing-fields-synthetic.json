@@ -1,0 +1,41 @@
+{
+ "id": 2026020251,
+ "season": 20262027,
+ "gameType": 2,
+ "limitedScoring": false,
+ "venue": {
+  "default": "Centre Bell"
+ },
+ "venueLocation": {
+  "default": "Montreal",
+  "fr": "Montréal"
+ },
+ "startTimeUTC": "2026-11-06T00:00:00Z",
+ "easternUTCOffset": "-05:00",
+ "venueUTCOffset": "-05:00",
+ "venueTimezone": "America/Montreal",
+ "gameState": "WEIRD",
+ "awayTeam": {
+  "abbrev": "UTA",
+  "futureField": {
+   "x": 1
+  }
+ },
+ "homeTeam": {
+  "abbrev": "MTL",
+  "commonName": {
+   "fr": "Canadiens"
+  },
+  "darkLogo": "https://evil.example/MTL_dark.svg"
+ },
+ "shootoutInUse": true,
+ "maxPeriods": 5,
+ "regPeriods": 3,
+ "otInUse": true,
+ "tiesInUse": false,
+ "brandNewKey": [
+  1,
+  2,
+  3
+ ]
+}
