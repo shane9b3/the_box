@@ -117,6 +117,48 @@ object PlayerUi {
     const val SUB_PAD_MAX = 0.5f
     const val SUB_PAD_GAP = 16f
 
+    // ---- catch-up probing line (FullScreenHost: TopCenter, 72 from the top). Its width follows the text; the score bug
+    // (score bug commit 0, docs/design/m6-score-bug.md §4.4, U-N1) tests against this widest box.
+    const val PROBING_T = 72f
+    const val PROBING_W = 720f
+    const val PROBING_H = 56f
+
+    // ---- score bug (score bug commit 0, docs/design/m6-score-bug.md §4; aliases of SportsConstants, the one source)
+    const val SCORE_W = app.thebox.core.sports.SportsConstants.SCORE_W
+    const val SCORE_H = app.thebox.core.sports.SportsConstants.SCORE_H
+    const val SCORE_RADIUS = app.thebox.core.sports.SportsConstants.SCORE_RADIUS
+    const val SCORE_LARGE_W = app.thebox.core.sports.SportsConstants.SCORE_LARGE_W
+    const val SCORE_LARGE_H = app.thebox.core.sports.SportsConstants.SCORE_LARGE_H
+    const val SCORE_INSET_X = app.thebox.core.sports.SportsConstants.SCORE_INSET_X
+    const val SCORE_INSET_Y = app.thebox.core.sports.SportsConstants.SCORE_INSET_Y
+    const val SCORE_BAR_GAP = app.thebox.core.sports.SportsConstants.SCORE_BAR_GAP
+    const val SCORE_SLIDE_MS = app.thebox.core.sports.SportsConstants.SCORE_SLIDE_MS
+    /** Stats overlay: the bound the score bug avoids (16 lines of [STATS_LINE_H] plus padding; the box grows with its lines). */
+    const val STATS_MAX_H = 16 * STATS_LINE_H + 28f
+    /** Group card at (64, 56): the bound the score bug avoids (30 px text, 24/14 padding, a long group name). */
+    const val GROUP_CARD_L = 64f
+    const val GROUP_CARD_T = 56f
+    const val GROUP_CARD_W = 720f
+    const val GROUP_CARD_H = 70f
+
+    /**
+     * (Score bug commit 0, §4.4, A-B2) The other overlays' boxes for `ScoreBugPlacement` (`:core` never imports this
+     * object). `ScoreBugBoundsTest` checks it equals the `:core` fixture.
+     */
+    fun overlayGeometry(): app.thebox.core.sports.OverlayGeometry = app.thebox.core.sports.OverlayGeometry(
+        channelList = app.thebox.core.sports.Box(LIST_L, LIST_T, LIST_L + LIST_W, LIST_T + LIST_H),
+        stats = app.thebox.core.sports.Box(STATS_L, STATS_T, STATS_L + STATS_W, STATS_T + STATS_MAX_H),
+        groupCard = app.thebox.core.sports.Box(GROUP_CARD_L, GROUP_CARD_T, GROUP_CARD_L + GROUP_CARD_W, GROUP_CARD_T + GROUP_CARD_H),
+        picker = app.thebox.core.sports.Box(PICKER_L, PICKER_T, PICKER_L + PICKER_W, PICKER_T + PICKER_H),
+        numberEntry = app.thebox.core.sports.Box(NUMBER_L, NUMBER_T, NUMBER_L + NUMBER_W, NUMBER_T + NUMBER_H),
+        infoBarTop = BAR_T,
+        quickBarTop = QUICK_T,
+    )
+
+    /** The probing line's widest box (centred at the top). */
+    val probingBox: app.thebox.core.sports.Box =
+        app.thebox.core.sports.Box((1920f - PROBING_W) / 2, PROBING_T, (1920f + PROBING_W) / 2, PROBING_T + PROBING_H)
+
     // ---- colours
     val Panel = DesignTokens.Colors.Canvas
     val BarFill = Panel.copy(alpha = 0.78f)

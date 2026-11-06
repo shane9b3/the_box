@@ -7,6 +7,8 @@ import app.thebox.core.settings.Domains
 import app.thebox.core.settings.GuidePrefs
 import app.thebox.core.settings.PlaybackPrefs
 import app.thebox.core.settings.SettingsDomain
+import app.thebox.core.sports.SportsFollowDoc
+import app.thebox.core.sports.SportsPrefs
 import app.thebox.core.storage.StoragePrefs
 
 /**
@@ -35,8 +37,21 @@ val NetworkDomain: SettingsDomain<NetworkSettings> = SettingsDomain(Domains.NETW
  */
 val StorageDomain: SettingsDomain<StoragePrefs> = SettingsDomain(Domains.STORAGE, StoragePrefs.serializer(), StoragePrefs())
 
+/**
+ * (Score bug commit 0, docs/design/m6-score-bug.md §7) "Show Sports", the corner, the delay and the size; app-wide and
+ * **backed up**. Registered on first use (the repository, the settings rows).
+ */
+val SportsDomain: SettingsDomain<SportsPrefs> = SettingsDomain(Domains.SPORTS, SportsPrefs.serializer(), SportsPrefs())
+
+/**
+ * (Score bug commit 0, §2.6, A-S9) The followed game plus two install facts; device-bound, never backed up. Clearing a
+ * follow is `update { it.copy(game = null) }`.
+ */
+val SportsFollowDomain: SettingsDomain<SportsFollowDoc> =
+    SettingsDomain(Domains.SPORTS_FOLLOW, SportsFollowDoc.serializer(), SportsFollowDoc(), backedUp = false)
+
 /** Every domain WP-A defines, in load order (the store decodes them first; other WPs' domains register on first use). */
 val WP_A_DOMAINS: List<SettingsDomain<*>> = listOf(GuideDomain, PlayerDomain, PlaybackDomain, DataDomain, NetworkDomain, SetupDomain)
 
 /** Domains of §2.2 `Domains` that are device-bound or learned, so never exported even before their owner registers them. */
-val NOT_BACKED_UP_DOMAINS: Set<String> = setOf(Domains.BACKUP, Domains.UPDATE, Domains.SETUP)
+val NOT_BACKED_UP_DOMAINS: Set<String> = setOf(Domains.BACKUP, Domains.UPDATE, Domains.SETUP, Domains.SPORTS_FOLLOW)

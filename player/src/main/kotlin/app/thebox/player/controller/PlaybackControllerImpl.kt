@@ -214,6 +214,8 @@ internal class PlaybackControllerImpl @Inject constructor(
      * router lands; the switch is one line (design "Lead reconciliation — WP-A/WP-B", R14).
      */
     private val timelineRouter: app.thebox.core.catchup.archive.TimelineRouter = app.thebox.core.catchup.archive.TimelineRouterImpl(),
+    /** (Score bug commit 0, docs/design/m6-score-bug.md §2.3, A-S5) Fed by [lifecycle]; read by the score repository. */
+    deviceAwake: DeviceAwakeState = DeviceAwakeState(),
 ) : PlaybackController, LifecycleCoordinator.Target {
 
     // ------------------------------------------------------------------ public flows
@@ -271,7 +273,7 @@ internal class PlaybackControllerImpl @Inject constructor(
     private val classifier = FailureClassifier()
 
     /** Lifecycle wiring (§3.10). Started with the player. Internal for tests. */
-    internal val lifecycle = LifecycleCoordinator(context, this, deviceState, { settings.current.lifecycleTimeScale })
+    internal val lifecycle = LifecycleCoordinator(context, this, deviceState, { settings.current.lifecycleTimeScale }, awakeSink = deviceAwake::set)
 
     private class Engine(val bundle: PlayerBundle, val parts: EngineParts, val surface: SurfacePlayer, val session: SessionHandle?)
 

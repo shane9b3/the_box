@@ -64,6 +64,8 @@ const val BOOT_TAG = "boot_blank"
 /** The opaque SETTINGS layer (the settings screen, or an empty canvas while the settings machine is not attached, S11). */
 const val SETTINGS_TAG = app.thebox.ui.settings.SETTINGS_SCREEN_TAG
 const val VIDEO_LAYER_TAG = "video_layer"
+/** (Score bug commit 0) The SPORTS layer (WP-4a's Sports screen; an opaque canvas until then). */
+const val SPORTS_TAG = "sports_layer"
 /** U-S5: debug composition counter of the root body. */
 const val COMPOSITIONS_ROOT = "AppRoot"
 
@@ -81,7 +83,8 @@ const val STILL_TO_FULL_MAX_WAIT_MS = 2_000L
 fun holeModeFor(mode: ScreenMode, tuned: TunedState): HoleMode = when (mode) {
     ScreenMode.GUIDE -> if (tuned.still || nothingTuned(tuned)) HoleMode.STILL else HoleMode.MINI
     ScreenMode.FULL -> HoleMode.FULL
-    ScreenMode.SEARCH, ScreenMode.SETTINGS -> HoleMode.COVERED
+    // (Score bug commit 0, docs/design/m6-score-bug.md §5.1) Sports covers the hole, as Search does.
+    ScreenMode.SEARCH, ScreenMode.SETTINGS, ScreenMode.SPORTS -> HoleMode.COVERED
 }
 
 /** §3.13.2: GUIDE → MINI (HIDDEN while the mini is a still), FULL → FULL, SEARCH/SETTINGS → HIDDEN. */
@@ -331,6 +334,13 @@ fun AppRoot(
     val ambientShadowHole = if (holeMode == HoleMode.MINI || holeMode == HoleMode.STILL) rects.hole else null
     val toastBottom = toastBottomFor(shown, playerBar)
     val reminderEnd = reminderEndFor(shown, pickerOpen)
+    // (Score bug commit 0, docs/design/m6-score-bug.md §4.4, A-B2) What only the root knows: its toast, the reminder card
+    // and a modal (the PIN pad, the exit dialog).
+    val scoreFacts = app.thebox.core.sports.ScoreBugHostFacts(
+        toast = toast != null,
+        reminder = ui.reminder != null,
+        modal = ui.pin != null || (ui.overlay as? Overlay.Exit)?.dialog == true,
+    )
 
     ProvideShellImageLoader(host.imageLoader) {
         run { // (was the static LocalPlayerArchive provider; U-S5/L-4: GuideScreen passes state.archive itself)
@@ -363,8 +373,10 @@ fun AppRoot(
                             debugHint = debugHint,
                             grid = grid,
                         )
-                        ScreenMode.FULL -> FullScreenHost(ui, player = player, clock24 = settings.clock24, lowEnd = lowEnd)
+                        ScreenMode.FULL -> FullScreenHost(ui, player = player, clock24 = settings.clock24, lowEnd = lowEnd, hostFacts = scoreFacts)
                         ScreenMode.SEARCH -> search()
+                        // (Score bug commit 0, §5.1) Never entered yet: an opaque canvas; WP-4a draws SportsScreen here.
+                        ScreenMode.SPORTS -> Box(Modifier.fillMaxSize().background(app.thebox.ui.theme.DesignTokens.Colors.Canvas).testTag(SPORTS_TAG))
                         ScreenMode.SETTINGS -> if (settingsMachine != null) {
                             app.thebox.ui.settings.SettingsScreen(settingsMachine, settings.clock24, phone = settingsPhone, channelEditor = settingsEditor)
                         } else {

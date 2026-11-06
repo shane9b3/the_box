@@ -124,6 +124,11 @@ class PlayerViewModel @Inject constructor(
     tuneGuard: TuneGuard = TuneGuard.ALLOW_ALL,
     // U-S12 (code review 2026-10-16): "Always passthrough" (the AUDIO picker's Back to Auto, the stats line).
     audioForced: AudioOutputForced = AudioOutputForced.NONE,
+    // (Score bug commit 0, docs/design/m6-score-bug.md §6, A-B2) Present once WP-2's SportsModule binds it (an optional
+    // binding, SportsUiModule); absent = no score feature and no requests.
+    scores: java.util.Optional<app.thebox.core.sports.ScoreRepository> = java.util.Optional.empty(),
+    /** (Score bug commit 0) Where the corner and the delay are saved (`SportsDomain`); null in tests without a store. */
+    private val sportsStore: app.thebox.core.settings.SettingsStore? = null,
 ) : ViewModel(), PlayerHost, PlayerGuideBridge, app.thebox.ui.full.PlayerExtras {
 
     /**
@@ -227,6 +232,15 @@ class PlayerViewModel @Inject constructor(
     override val audioOutputForced: StateFlow<Boolean> = audioForced.flow().distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
+    /** (Score bug commit 0, docs/design/m6-score-bug.md §4.4) A selected, enabled text track (bottom corners go to the top). */
+    override val textTrackOn: StateFlow<Boolean> = controller.tracks
+        .map { t -> PlayerMappers.trackMenu(t).let { m -> m.textEnabled && m.text.any { it.selected } } }
+        .distinctUntilChanged().stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /** (Score bug commit 0, §6, A-B2) The score repository, when bound. */
+    internal val scoreRepo: app.thebox.core.sports.ScoreRepository? = scores.orElse(null)
+    override val scoreBug: app.thebox.core.sports.ScoreBugSource? get() = scoreRepo
+
     /** Row lookups (N10 / M3 H-L12: only hits are cached); cleared when row content changes. */
     private val channelCache = object : LinkedHashMap<ChannelIdentity, GuideChannel>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<ChannelIdentity, GuideChannel>?): Boolean = size > CHANNEL_CACHE
@@ -236,6 +250,7 @@ class PlayerViewModel @Inject constructor(
         probe.register(machine)
         forwardFeeds()
         loadFocusedDetails()
+        forwardScores()
     }
 
     // ---- PlayerHost
@@ -383,6 +398,42 @@ class PlayerViewModel @Inject constructor(
                 }
             }
         }
+    }
+
+    /**
+     * (Score bug commit 0, docs/design/m6-score-bug.md §2.3, §2.6, §6, A-B2) With a score repository bound:
+     * - its bug, followed game, day list and prefs go to the machine as one [app.thebox.core.sports.ScoreFacts] (WP-4b
+     *   reads it; the machine should publish only while the quick bar, the sheet or place mode shows);
+     * - its events become toasts (a reason and a next step), in every mode;
+     * - FULL without the screen-off layer is demand `FULL_WITH_FOLLOW` (the repository adds "a game is followed").
+     * Nothing here makes a request: with nothing followed and no Sports UI open, the repository stays idle.
+     */
+    private fun forwardScores() {
+        val repo = scoreRepo ?: return
+        viewModelScope.launch {
+            combine(repo.bug, repo.followed, repo.day, repo.prefs) { bug, game, day, p ->
+                app.thebox.core.sports.ScoreFacts(bug, game, day, p.corner, p.delaySec, p.enabled)
+            }.distinctUntilChanged().collect { machine.scores(it) }
+        }
+        viewModelScope.launch { repo.events.collect { e -> shellEvents.trySend(ShellEvent.Message(app.thebox.ui.sports.SportsText.toast(context.resources, e))) } }
+        viewModelScope.launch {
+            combine(guideFull, machine.ui.map { it.layer == app.thebox.core.full.PlayerLayer.SCREEN_OFF }.distinctUntilChanged()) { full, off -> full && !off }
+                .distinctUntilChanged()
+                .collect { repo.reportDemand(app.thebox.core.sports.DemandOwner.FULL_WITH_FOLLOW, it) }
+        }
+    }
+
+    /** (Score bug commit 0, §6) Follow [id] from the current day board (null = stop following); unknown ids are ignored. */
+    internal fun followGame(id: app.thebox.core.sports.GameId?) {
+        val repo = scoreRepo ?: return
+        if (id == null) { repo.follow(null); return }
+        val board = (repo.day.value as? app.thebox.core.sports.DayState.Board)?.board ?: return
+        board.games.firstOrNull { it.id == id }?.let { repo.follow(it) }
+    }
+
+    /** (Score bug commit 0, §6) Corner and delay from the quick bar and place mode. */
+    internal fun updateSports(transform: (app.thebox.core.sports.SportsPrefs) -> app.thebox.core.sports.SportsPrefs) {
+        sportsStore?.update(app.thebox.core.settings.state.SportsDomain, transform)
     }
 
     /**

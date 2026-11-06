@@ -268,6 +268,23 @@ enum class SettingsText {
     EPG_TVG_ID,
     /** C-N4 (closure fix pass): "Enter a name or address" with a `..` folder or a control character. */
     ERR_HOST_PATH,
+    // (Score bug commit 0, docs/design/m6-score-bug.md §7; strings in strings_sports.xml) The Sports section and its rows
+    // (WP-4b's SportsRows). SPORTS_DELAY_SECONDS takes the seconds; a 0 s delay reads OFF.
+    SECTION_SPORTS,
+    SPORTS_SHOW,
+    SPORTS_SHOW_DESC,
+    SPORTS_CORNER,
+    SPORTS_CORNER_DESC,
+    SPORTS_DELAY,
+    SPORTS_DELAY_DESC,
+    SPORTS_SIZE,
+    SPORTS_CORNER_TOP_RIGHT,
+    SPORTS_CORNER_TOP_LEFT,
+    SPORTS_CORNER_BOTTOM_RIGHT,
+    SPORTS_CORNER_BOTTOM_LEFT,
+    SPORTS_DELAY_SECONDS,
+    SPORTS_SIZE_STANDARD,
+    SPORTS_SIZE_LARGE,
 }
 
 fun interface SettingsTexts {

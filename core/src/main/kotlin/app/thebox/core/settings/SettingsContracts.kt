@@ -4,7 +4,11 @@ package app.thebox.core.settings
 import app.thebox.core.input.BoxAction
 import app.thebox.core.refresh.ChannelIdentity
 
-enum class SectionId { PLAYLISTS, GUIDE, PLAYBACK, CHANNELS, INTERFACE, REMOTE, PARENTAL, BACKUP, ABOUT, NETWORK }
+/**
+ * (Score bug commit 0, docs/design/m6-score-bug.md §7; append-only) SPORTS is advanced-only (every row ADVANCED, so the
+ * simple budget stays 35). It is left out of the root list until WP-4b registers `SportsRows`.
+ */
+enum class SectionId { PLAYLISTS, GUIDE, PLAYBACK, CHANNELS, INTERFACE, REMOTE, PARENTAL, BACKUP, ABOUT, NETWORK, SPORTS }
 
 /** Where Settings opens, and every page's address. Data classes so a route is a stable key for cursor memory. */
 sealed interface SettingsRoute {

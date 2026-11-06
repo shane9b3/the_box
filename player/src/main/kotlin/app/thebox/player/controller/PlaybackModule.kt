@@ -87,6 +87,8 @@ internal abstract class PlaybackModule {
     @Binds abstract fun engine(impl: DefaultEngineEnvironment): EngineEnvironment
     /** M3 catch-up seam (docs/design/m3-guide.md §2.8). */
     @Binds abstract fun archiveTargets(impl: app.thebox.player.resolve.ArchiveTargetsImpl): app.thebox.player.api.ArchiveTargets
+    /** (Score bug commit 0, docs/design/m6-score-bug.md §2.3, A-S5) What the score repository reads (`:data`, WP-2). */
+    @Binds abstract fun deviceAwake(impl: DeviceAwakeState): app.thebox.core.sports.DeviceAwake
 
     companion object {
         @Provides fun monoClock(): MonoClock = MonoClock { SystemClock.elapsedRealtime() }

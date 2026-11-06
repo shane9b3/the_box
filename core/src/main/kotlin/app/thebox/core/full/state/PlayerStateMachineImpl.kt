@@ -257,6 +257,7 @@ class PlayerStateMachineImpl(
             PlayerLayer.INFO -> infoKey(a)
             PlayerLayer.ERROR -> errorKey(a, justClosed)
             PlayerLayer.NONE -> bareKey(a, justClosed)
+            PlayerLayer.PLACE_SCORE -> true // (score bug commit 0) never entered yet; WP-4b's place mode
         }
         if (layer == PlayerLayer.INFO) infoHideAt = curMs + settings.infoBarMs
         if (layer == PlayerLayer.QUICK_BAR) quickHideAt = curMs + QUICK_BAR_IDLE_MS
@@ -803,6 +804,7 @@ class PlayerStateMachineImpl(
             QuickItem.SCREEN_OFF -> screenOff()
             QuickItem.SETTINGS -> { closeLayer(); effects.openSettings() }
             QuickItem.SOURCES -> openPicker(PickerKind.SERVER, fromQuickBar = true) // M5 integration (§3.6.2, E23)
+            QuickItem.SCORE_BUG -> Unit // (score bug commit 0) never offered yet; WP-4b opens the sheet
         }
     }
 
@@ -874,6 +876,7 @@ class PlayerStateMachineImpl(
         PickerKind.ASPECT -> AspectMode.entries.map { PickerChoice.Aspect(it) }
         PickerKind.VIDEO_DECODER -> DECODER_CHOICES
         PickerKind.SERVER -> m.servers.mapIndexed { i, label -> PickerChoice.Server(i, label) } // M5 integration (§3.6.2)
+        PickerKind.SCORE_BUG, PickerKind.SCORE_DELAY -> emptyList() // (score bug commit 0) WP-4b builds the rows
     }
 
     private fun currentChoice(kind: PickerKind, choices: List<PickerChoice>): Int = when (kind) {
@@ -885,6 +888,7 @@ class PlayerStateMachineImpl(
             choices.indexOfFirst { it is PickerChoice.Decoder && it.mode == d }.coerceAtLeast(0)
         }
         PickerKind.SERVER -> menu.server.coerceIn(0, (choices.size - 1).coerceAtLeast(0))
+        PickerKind.SCORE_BUG, PickerKind.SCORE_DELAY -> 0 // (score bug commit 0) WP-4b
     }
 
     private fun pickerKey(a: GuideEvent.Act): Boolean {
@@ -918,6 +922,9 @@ class PlayerStateMachineImpl(
             is PickerChoice.Decoder -> effects.setDecoder(c.mode)
             is PickerChoice.Server -> effects.selectServer(c.index)
             PickerChoice.AudioOutputAuto -> effects.audioOutputAuto() // U-S12
+            // (Score bug commit 0) The SCORE_BUG / SCORE_DELAY rows; WP-4b acts on them (never offered yet).
+            is PickerChoice.ScoreGame, is PickerChoice.ScoreCornerRow, is PickerChoice.ScoreDelayRow, PickerChoice.ScoreStop,
+            PickerChoice.ScoreTodayDivider, PickerChoice.ScoreLoading, is PickerChoice.ScoreFailed, is PickerChoice.ScoreDelayChoice -> Unit
         }
     }
 

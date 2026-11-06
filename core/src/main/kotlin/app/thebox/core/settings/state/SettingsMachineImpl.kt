@@ -1020,7 +1020,9 @@ class SettingsMachineImpl(
         pin?.invoke(false)
     }
 
-    private fun sections(): List<SectionId> = SectionId.entries.filter { advanced || it != SectionId.NETWORK }
+    // (Score bug commit 0) SPORTS stays out of the root list until WP-4b registers SportsRows; it is then advanced-only,
+    // like NETWORK (docs/design/m6-score-bug.md §7).
+    private fun sections(): List<SectionId> = SectionId.entries.filter { it != SectionId.SPORTS && (advanced || it != SectionId.NETWORK) }
 
     private fun currentRoute(): SettingsRoute = path.last()
 

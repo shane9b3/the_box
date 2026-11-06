@@ -152,6 +152,8 @@ dependencies {
     // M3 ImageModule: the app's Coil ImageLoader (docs/design/m3-guide.md §6.2).
     implementation(libs.coil.compose)
     implementation(libs.coil.network.okhttp)
+    // Score bug (docs/design/m6-score-bug.md §3, A-N8): the NHL team logos are SVG; SvgDecoder is registered in ImageModule.
+    implementation(libs.coil.svg)
 
     baselineProfile(project(":baselineprofile"))
 

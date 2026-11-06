@@ -94,6 +94,9 @@ class FakePlayerStateMachine(initial: PlayerUiState = PlayerUiState()) : PlayerS
     override fun dispatch(event: PlayerEvent) { events += event }
     override fun enterFull(nowMs: Long, reason: EnterReason) { entered += reason }
     override fun leaveFull() { leaveCount++ }
+    /** (Score bug commit 0) Every `scores(...)` the host sent. */
+    val scoreFacts = ArrayList<app.thebox.core.sports.ScoreFacts>()
+    override fun scores(facts: app.thebox.core.sports.ScoreFacts) { scoreFacts += facts }
 
     companion object {
         /** A factory that hands out [machine] and remembers the effects it was given. */

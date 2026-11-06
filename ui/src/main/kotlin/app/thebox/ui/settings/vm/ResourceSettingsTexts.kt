@@ -266,6 +266,21 @@ class ResourceSettingsTexts(private val resources: Resources) : SettingsTexts {
         SettingsText.EPG_MANUAL -> R.string.settings_epg_manual
         SettingsText.EPG_TVG_ID -> R.string.settings_epg_tvg_id
         SettingsText.ERR_HOST_PATH -> R.string.settings_err_host_path // C-N4
+        SettingsText.SECTION_SPORTS -> R.string.settings_section_sports
+        SettingsText.SPORTS_SHOW -> R.string.settings_sports_show
+        SettingsText.SPORTS_SHOW_DESC -> R.string.settings_sports_show_desc
+        SettingsText.SPORTS_CORNER -> R.string.settings_sports_corner
+        SettingsText.SPORTS_CORNER_DESC -> R.string.settings_sports_corner_desc
+        SettingsText.SPORTS_DELAY -> R.string.settings_sports_delay
+        SettingsText.SPORTS_DELAY_DESC -> R.string.settings_sports_delay_desc
+        SettingsText.SPORTS_SIZE -> R.string.settings_sports_size
+        SettingsText.SPORTS_CORNER_TOP_RIGHT -> R.string.settings_sports_corner_top_right
+        SettingsText.SPORTS_CORNER_TOP_LEFT -> R.string.settings_sports_corner_top_left
+        SettingsText.SPORTS_CORNER_BOTTOM_RIGHT -> R.string.settings_sports_corner_bottom_right
+        SettingsText.SPORTS_CORNER_BOTTOM_LEFT -> R.string.settings_sports_corner_bottom_left
+        SettingsText.SPORTS_DELAY_SECONDS -> R.string.settings_sports_delay_seconds
+        SettingsText.SPORTS_SIZE_STANDARD -> R.string.settings_sports_size_standard
+        SettingsText.SPORTS_SIZE_LARGE -> R.string.settings_sports_size_large
         }
     }
 }

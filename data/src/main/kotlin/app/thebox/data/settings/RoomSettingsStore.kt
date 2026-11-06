@@ -372,6 +372,9 @@ class RoomSettingsStore @Inject constructor(
             Domains.BACKUP, Domains.UPDATE, Domains.SETUP,
             // (Storage locations commit 0, docs/design/m6-storage-locations.md §8) restored even before WP-S1 registers it.
             Domains.STORAGE,
+            // (Score bug commit 0, docs/design/m6-score-bug.md §7, A-S9) `sports` is restored before its owner registers it;
+            // `sports_follow` is known but never exported or imported (NOT_BACKED_UP_DOMAINS).
+            Domains.SPORTS, Domains.SPORTS_FOLLOW,
         )
     }
 }

@@ -23,7 +23,14 @@ import app.thebox.core.playback.VideoDecoderMode
 import kotlinx.coroutines.flow.StateFlow
 
 /** Which layer owns the keys in FULL (§3.1). NONE = bare video (a passive info bar may still be drawn). */
-enum class PlayerLayer { NONE, INFO, SCRUB, CHANNELS, QUICK_BAR, PICKER, ERROR, SCREEN_OFF }
+enum class PlayerLayer {
+    NONE, INFO, SCRUB, CHANNELS, QUICK_BAR, PICKER, ERROR, SCREEN_OFF,
+    /**
+     * (Score bug commit 0, docs/design/m6-score-bug.md §6, U-B1; append-only) Place mode: the arrows move the score bug
+     * between corners, OK or Back saves ([PlayerEffects.setScoreCorner]) and returns to the quick bar. WP-4b enters it.
+     */
+    PLACE_SCORE,
+}
 
 /** State pill (product §3.8): LIVE red, CATCH_UP accent, PAUSED white 12 %, BEHIND "−MM:SS". */
 enum class PillKind { LIVE, CATCH_UP, PAUSED, BEHIND, CONNECTING, RECONNECTING }
@@ -297,6 +304,12 @@ enum class QuickItem {
      */
     SOURCES,
     SETTINGS,
+    /**
+     * (Score bug commit 0, docs/design/m6-score-bug.md §6, U-S5; append-only) "Score bug": right after Subtitles (or
+     * Picture shape) while a game is followed, just before Settings otherwise; only while Show Sports is on. Placed by
+     * `QuickBarModel` (the explicit order list), not by this enum's order. Offered from WP-4b on.
+     */
+    SCORE_BUG,
 }
 
 /** The quick bar (D-pad Up on bare video, CONTEXT_MENU, QUICK_MENU). Current values are shown on the items. */
@@ -316,6 +329,13 @@ enum class PickerKind {
     AUDIO, SUBTITLES, ASPECT, VIDEO_DECODER,
     // M5 (§2.12 item 4; append-only)
     SERVER,
+    /** (Score bug commit 0, docs/design/m6-score-bug.md §6; append-only) The "Score bug" sheet. */
+    SCORE_BUG,
+    /**
+     * (Score bug commit 0, §6 row 3; append-only) The sheet's nested delay list (`PickerChoice.ScoreDelayChoice` rows, a
+     * check on the current one); Back returns to the SCORE_BUG sheet.
+     */
+    SCORE_DELAY,
 }
 
 sealed interface PickerChoice {
@@ -332,6 +352,26 @@ sealed interface PickerChoice {
      * OK runs [PlayerEffects.audioOutputAuto].
      */
     data object AudioOutputAuto : PickerChoice
+
+    // (Score bug commit 0, docs/design/m6-score-bug.md §6, U-S4, U-N9; append-only) The SCORE_BUG sheet's rows, in this
+    // order: the followed game, Corner, Delay, Stop following, the Today divider, the other games, then Loading or the
+    // failure row. [selectable] false rows are skipped by focus (WP-4b's PickerSheet).
+    /** A game: "CGY 0–2 EDM · 2nd 10:22" / "CGY – EDM · 7:00 PM"; [followed] draws the ✓ and is the first row. */
+    data class ScoreGame(val game: app.thebox.core.sports.GameSnapshot, val followed: Boolean) : PickerChoice
+    /** "Corner · Top right": OK enters place mode. */
+    data class ScoreCornerRow(val corner: app.thebox.core.sports.ScoreCorner) : PickerChoice
+    /** "Delay · Off": OK opens the SCORE_DELAY list. */
+    data class ScoreDelayRow(val delaySec: Int) : PickerChoice
+    /** "Stop following", while a game is followed. */
+    data object ScoreStop : PickerChoice
+    /** Non-selectable "Today" divider. */
+    data object ScoreTodayDivider : PickerChoice
+    /** Non-selectable "Loading games…". */
+    data object ScoreLoading : PickerChoice
+    /** The §5.4 failure text; OK retries ([PlayerEffects.retryScores]). */
+    data class ScoreFailed(val kind: app.thebox.core.sports.FailKind) : PickerChoice
+    /** A SCORE_DELAY row (one of `SportsConstants.DELAY_STEPS_S`; 0 = "Off"). */
+    data class ScoreDelayChoice(val delaySec: Int) : PickerChoice
 }
 
 /**
@@ -385,6 +425,8 @@ data class PlayerUiState(
     val probing: Pair<Int, Int>? = null,
     /** (Fix pass, product, 2026-10-19: UX review §7, S4; additive) Non-null while a LOCAL time-shift is paused. */
     val paused: PausedUi? = null,
+    /** (Score bug commit 0, docs/design/m6-score-bug.md §6, U-B1; additive) Non-null while [PlayerLayer.PLACE_SCORE]. */
+    val placeScore: app.thebox.core.sports.ScorePlaceState? = null,
 )
 
 /** Why FULL was entered (decides the auto-shown bar, §3.2.1). */
@@ -561,6 +603,17 @@ interface PlayerEffects {
      * SIGN_IN_TOAST_PROCESSES processes only; never NOT_READY_YET. `:app`'s FallbackToastPolicy answers (WP-S4).
      */
     fun fallbackToastDue(locationId: String, reason: app.thebox.core.storage.LocationFallback): Boolean = false
+    // (Score bug commit 0, docs/design/m6-score-bug.md §6, A-B2; additive) PlayerViewModel maps these to the
+    // ScoreRepository and the `sports` settings domain.
+    /** Follow [id] (replacing any current follow; resolved against the day board), or stop following (null). */
+    fun followGame(id: app.thebox.core.sports.GameId?) = Unit
+    /** Place mode's OK / Back: persist the corner. */
+    fun setScoreCorner(c: app.thebox.core.sports.ScoreCorner) = Unit
+    fun setScoreDelay(sec: Int) = Unit
+    /** The SCORE_BUG sheet opened / closed: demand `SCORE_PICKER` (§2.3). */
+    fun scorePicker(open: Boolean) = Unit
+    /** OK on the picker's failure row. */
+    fun retryScores() = Unit
     // Data
     fun loadProgrammes(token: Long, channel: GuideChannel, aroundMin: Int, before: Int, after: Int)
     fun loadChannel(token: Long, from: GuideChannel, delta: Int)
@@ -619,6 +672,12 @@ interface PlayerStateMachine {
      * guide machine's number entry asks it before committing a digit zap in FULL. Default: never.
      */
     fun zapNeedsConfirm(nowMs: Long): Boolean = false
+
+    /**
+     * (Score bug commit 0, docs/design/m6-score-bug.md §6, A-B2; append-only) The followed game, the day list and the
+     * `sports` prefs, from PlayerViewModel whenever one changes (main). Default: ignored (WP-4b's machine reads it).
+     */
+    fun scores(facts: app.thebox.core.sports.ScoreFacts) = Unit
 }
 
 fun interface PlayerStateMachineFactory {
