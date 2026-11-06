@@ -1,6 +1,6 @@
 # NHL score bug and Sports tab (owner request 2026-11-05)
 
-Status: design signed off 2026-11-05; implementation in progress (`docs/design/m6-score-bug.md`).
+Status: done 2026-11-05 (fix pass 7677403); see the design's Integration and Fix pass sections (`docs/design/m6-score-bug.md`).
 
 ## Request
 A small score bug in a corner of the user's choosing: both team logos, both scores,
