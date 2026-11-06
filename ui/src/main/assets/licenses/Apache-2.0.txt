@@ -2,6 +2,8 @@ The Apache License 2.0 applies to:
   Tink (com.google.crypto.tink:tink-android 1.23.0), Copyright Google LLC
   OkHttp (com.squareup.okhttp3:okhttp and okhttp-dnsoverhttps 5.5.0), Copyright Square, Inc.
   AndroidX Media3 1.11.1 (including the decoder_ffmpeg extension's Java code), Copyright The Android Open Source Project
+  Coil (io.coil-kt.coil3:coil-compose, coil-network-okhttp and coil-svg 3.6.3), Copyright Coil Contributors
+  AndroidSVG (com.caverock:androidsvg-aar 1.4), Copyright Paul LeBeau, Cave Rock Software Ltd.
 
 
                                  Apache License

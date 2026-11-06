@@ -926,3 +926,93 @@ No open questions remain.
 | U-N11 | taken | "Show Sports" |
 | U-N12 | taken | logo descriptions, merged semantics |
 | U-N13 | taken | rationale corrected (§4.3) |
+
+---
+
+## Integration pass (2026-11-05)
+
+Tree: `main` at `7b95de8` (commit 0 + WP-1, WP-2, WP-3, WP-4a, WP-4b) plus the uncommitted integration changes below.
+Emulator: `TheBox_TV_API30` (1920 × 1080, cold-booted to fix a 2.5-day clock drift), debug universal APK installed with
+`adb install -r`, fake panel `--sports` (default 360 s timeline) behind the debug `files/debug/sports_base` override.
+Screenshots: `scratchpad/scorebug/emu/` (session scratchpad).
+
+### Gate
+
+`:core:test :data:testDebugUnitTest :player:testDebugUnitTest :ui:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug`
+
+| Run | core | data | player | ui | app | Result |
+|---|---|---|---|---|---|---|
+| Merged tree as found | 3795 / 0 fail | 483 / 2 fail, 3 skip (SMB) | 511 / 0 | 471 / 0 | 73 / 0 | FAILED |
+| After the integration pass | 3795 / 0 | 483 / 0, 3 skip (SMB) | 511 / 0 | 473 / 0 (+2 new) | 73 / 0 | BUILD SUCCESSFUL (universal debug APK built) |
+
+- WP-2's four `realMachine…` sports tests now run (no longer skipped). Three passed at once.
+  `realMachine_aFinalClearsFiveMinutesLaterWithNoInput` failed: a **test-setup** bug, not a machine bug. `realRepo()`
+  starts the repository with a restored follow and UNSEEN demand, so the machine rightly polls at t = 0 and gets the
+  fake's default LIVE answer; the FINAL answer was installed afterwards and only reached the next bucket poll (t = 20 s),
+  so expiry landed 20 s after the test's check. Fixed by letting `realRepo(configure = …)` set the answer before start.
+- `RingTargetSourceTest.graceAndDemotionDoubling` (storage, not sports) failed under load and passes alone: load-flaky,
+  like `EditorPerfTest.budgets` / `PlaybackWatchdogTest` (both passed in these runs).
+- The only skips are the three SMB integration tests (they need a server).
+
+### Integration items
+
+| Item | Outcome |
+|---|---|
+| WP-2: four skipped sports tests run | done; one setup fix (above) |
+| WP-2: `EditorPerfTest.budgets` under load | passed in both full runs |
+| WP-3: real placer in tests | done: `ScoreBugFixtures.placer` removed; `ScoreBugBoundsTest` / `ScoreBugDrawTest` use the default `ScoreBugPlacement::place` |
+| WP-3: clock tick via `ClockAnchor.secsAt` | done: `ClockMath.secsAt` delegates to WP-1's `ClockAnchor.secsAt`; `SportsViewModel.clockSecs` (the cards) builds a `ClockAnchor` with the 40 s cap and uses the same function (one rule for machine, bug and cards) |
+| WP-3: `LocalShellImageLoader` under `FullScreenHost` | verified: `AppRoot` wraps every mode (incl. FULL and SPORTS) in `ProvideShellImageLoader(host.imageLoader)`, the injected app loader with `SvgDecoder`. On the emulator both the fake panel's SVGs and the real NHL `_dark` SVGs render in the bug and on the cards |
+| WP-3: `DRAWS_SCORE_CLOCK` real draw count | **open** (device): needs the debug counters read on a device or an instrumented run, which this pass must not run |
+| WP-3: "Final/OT", "Final/SO" crowd the dividers | done: `FIT_BREATHING` 8 → 16 (8 design px clear each side); the fit test now asserts the 8 px clearance at both sizes. On the emulator "Final/SO" steps down one size and clears both dividers |
+| WP-1/WP-3: duplicated `overlayGeometry` values | done: `OverlayGeometryFixture.DESIGN` in `:core` testFixtures; `ScoreBugPlacementTest` uses it, `ScoreBugBoundsTest` asserts `PlayerUi.overlayGeometry()` equals it |
+| WP-1: Large pill hidden in both top corners while probing shows | accepted: follows U-N1 (hide on actual intersection only); the probing line is transient |
+| WP-1: delay shifts stale/hide/cap baselines | left for the reviewer (design reading; not observable on the emulator at delay 0) |
+| WP-1: server skew not persisted | accepted: expiry before the first `Ok` after a restart uses the device clock (minutes of error at most) |
+| WP-1: `followed()` persisted after every step | verified in code: `ScoreRepositoryImpl.publish()` persists whenever `machine.followed()` changes |
+| WP-1: 8 h expiry silent; Final/SO goal without GOAL line | accepted |
+| Commit 0: licences page | done: Coil 3.6.3 (compose, network-okhttp, svg) and AndroidSVG 1.4 added to `licenses/Apache-2.0.txt` (Coil was missing before this feature too) |
+| Commit 0: `overlayGeometry()` estimates | bounds test passes against the shared fixture; device measurement of stats / group card / probing boxes still open |
+| WP-4a: GameCard logo plate | done: the plate loads through WP-3's `coilLogoFetch` (app loader, SVG raster, `LogoTrim` crop) into a 56 × 36 slot; the abbreviation shows until it arrives. The `_dark` art always sits on the dark plate, so the focused (light) card no longer shows white parts on white |
+| WP-4a: Sports tab with Show Sports off | done, **deviation from §7** ("Off hides the tab"): the tab stays (no tab-index shift in the guide machine) and the body reads "Sports is off. Turn it on in Settings → Show advanced settings, then Sports → Show Sports." The repository makes no request: 0 sports requests over 25 s with the tab open (fake panel `/admin/stats`). The quick-bar item is still hidden while off |
+| WP-4a: postponed games | done: "Postponed" replaces the start time on cards and in picker rows (`sports_postponed`) |
+| WP-4a: header date `widthIn(max=220)` | fits at 1920 on the emulator; the 1024 px header test passes |
+| WP-4a: router BACK gate reuses `searchFieldIdle` | works on the emulator (one Back from Sports returns to the guide) |
+| WP-4a: edits outside its list (`GuideTexts.kt`, `MainActivity.kt`) | noted; merged cleanly |
+| WP-4b: `QuickBar` `clock24` | done: `QuickBar(…, clock24)` passed from `FullScreenHost` |
+| WP-4b: picker "Today" divider vs another day | **open (minor)**: each picker open re-requests `/score/now`, but until that answer lands the shared day state can still hold the Sports tab's Yesterday/Tomorrow board under "Today" |
+| WP-4b: `QuickBarState.score`, recorded effects | accepted (additive) |
+
+### Emulator findings
+
+- **Zero traffic:** 0 sports requests from install through setup, guide and full screen with nothing followed and Sports
+  closed. After the final, the landing polls stopped at once (last request at the FINAL); after the picker closed, the
+  day list stopped. With Show Sports off and the tab open: 0 requests.
+- **Polling:** landing polls 1.7–2.2 s after each 20 s bucket while live, every other bucket in intermission, one per
+  40 s before puck drop; each logo fetched once.
+- **Sports tab:** list order live → intermission → pre → scheduled → final; logos render; live card clock ticks
+  (19:34 → 19:17); Follow shows "✓ Following" and the OK chip flips; follow toasts show in the tab.
+- **Pre-game:** following a FUT game, seven full-screen frames through FUT and PRE show no bug; it appears once the
+  first LIVE answer is in (owner ruling 4).
+- **Bug states:** live clock ticking (0:29 → 0:25 across frames 4.5 s apart), `1st INT`, `GOAL CGY` / `GOAL EDM`, `OT`,
+  `SO` (one line), `Final/SO`; cleared ~5 min after the final with no further requests. The intermission → live switch
+  can lag up to 40 s (intermission cadence; by design).
+- **Quick bar:** "Score bug · CGY 1–2 EDM" right after Subtitles while following; "Score bug · Follow a game" just
+  before Settings otherwise. Sheet, delay list, place mode (ring and hint, all four corners) as §6; a bottom corner
+  slides above the quick bar.
+- **Settings › Sports:** absent in simple mode, present with advanced settings on; the section sits after Network, not
+  after Playback as §7 says (minor deviation, left as merged). Turning Show Sports off with a game followed raises
+  "Sports is off. The score is hidden."
+- **Real api-web.nhle.com** (override removed, ~23:00 ET): eleven games mapped correctly (finals incl. `Final/OT`,
+  `Final/SO`; NSH–COL live). All real `_dark` logos render through AndroidSVG, incl. VGK, PIT and UTA. The followed live
+  game showed "NSH 2 · 5:34 2nd · COL 2"; the clock ticked, held (instead of jumping up) after a stoppage it had
+  extrapolated through, and settled on the API's stopped 5:18 (§11 items 1 and 4 partly confirmed).
+- **Unrelated observations:** the guide grid was empty after the very first import until an app restart; long common
+  names truncate on a card ("Golden Kni…", U-N8).
+
+### Open device items
+
+- §11 items 2–9 beyond what is above (CRIT/2OT/PPD on the real feed, a whole evening of buckets, API 25 SVG, white-ice
+  legibility on a TV, R8 size delta, Coil `Cache-Control`, "End 1st", Fire OS `DeviceAwake`).
+- `DRAWS_SCORE_CLOCK` / `FullIdleFramesTest` ticking-bug budget on a device.
+- Picker "Today" label during a reload after the Sports tab showed another day.

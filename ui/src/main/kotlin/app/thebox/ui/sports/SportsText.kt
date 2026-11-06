@@ -115,7 +115,8 @@ object SportsText {
         val p = periodOf(g)
         val clockSecs = secs ?: g.clock?.secondsRemaining ?: 0
         return when (g.phase) {
-            GamePhase.SCHEDULED, GamePhase.PRE, GamePhase.POSTPONED -> startTime(g.startUtcMs, clock24)
+            GamePhase.SCHEDULED, GamePhase.PRE -> startTime(g.startUtcMs, clock24)
+            GamePhase.POSTPONED -> res.getString(R.string.sports_postponed)
             GamePhase.FINAL -> final(res, g.finalKind)
             GamePhase.INTERMISSION -> if (p != null) res.getString(R.string.sports_intermission, period(res, p)) else clock(clockSecs)
             GamePhase.LIVE -> when {
@@ -129,8 +130,10 @@ object SportsText {
 
     /** A picker game row: "CGY 0–2 EDM · 2nd 10:22" / "CGY – EDM · 7:00 PM" (U-N9). */
     fun pickerGame(res: Resources, g: GameSnapshot, clock24: Boolean): String = when (g.phase) {
-        GamePhase.SCHEDULED, GamePhase.PRE, GamePhase.POSTPONED ->
+        GamePhase.SCHEDULED, GamePhase.PRE ->
             res.getString(R.string.sports_picker_game_upcoming, g.away.abbrev, g.home.abbrev, startTime(g.startUtcMs, clock24))
+        GamePhase.POSTPONED ->
+            res.getString(R.string.sports_picker_game_upcoming, g.away.abbrev, g.home.abbrev, res.getString(R.string.sports_postponed))
         else -> res.getString(R.string.sports_picker_game_live, scoreLine(res, g), state(res, g, clock24))
     }
 

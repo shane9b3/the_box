@@ -132,7 +132,7 @@ fun FullScreenHost(
                 showPill = info.channel != null && info.channel?.identityHash == state.tuned.identityHash, // U-S2 (V6)
             )
         }
-        Fade(ui.quick, lowEnd) { q -> QuickBar(q, Modifier.offset(PlayerUi.QUICK_L.dp, PlayerUi.QUICK_T.dp)) }
+        Fade(ui.quick, lowEnd) { q -> QuickBar(q, Modifier.offset(PlayerUi.QUICK_L.dp, PlayerUi.QUICK_T.dp), clock24 = clock24) }
         // U-S3 (V2): the stats share the top-left corner with the channel list and the group card; hidden while either shows.
         if (ui.channels == null && state.groupCard == null) ui.stats?.let { StatsOverlay(it, Modifier.offset(PlayerUi.STATS_L.dp, PlayerUi.STATS_T.dp), audioOutputForced = audioForced, rewind = rewindStat) }
         // (Score bug commit 0, docs/design/m6-score-bug.md §4.4) After the bars and the stats; before the channel list,

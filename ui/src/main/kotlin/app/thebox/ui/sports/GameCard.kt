@@ -1,5 +1,6 @@
 package app.thebox.ui.sports
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,6 +21,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -29,7 +31,11 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
@@ -46,8 +52,9 @@ import app.thebox.ui.R
 import app.thebox.ui.guide.screen.Dot
 import app.thebox.ui.guide.screen.GuideUi
 import app.thebox.ui.guide.screen.Line
+import app.thebox.ui.guide.screen.LocalShellImageLoader
 import app.thebox.ui.theme.DesignTokens
-import coil3.compose.AsyncImage
+import kotlin.math.roundToInt
 
 internal const val SPORTS_CARD_TAG = "sports_card:"
 internal const val SPORTS_FOLLOWING_TAG = "sports_following:"
@@ -140,25 +147,35 @@ private fun TeamRow(team: TeamLine, ink: Color) {
 
 /**
  * The fixed `#0A0D13` 64 x 44 radius-8 plate: the abbreviation shows until the logo has loaded (never waits on the
- * network). WP-3's `TeamLogo` replaces this at integration.
+ * network). The logo comes through WP-3's path ([coilLogoFetch]: the app loader with the SVG decoder, rasterised and
+ * trimmed to its art by [LogoTrim], fitted to the 56 x 36 inner slot), so the cards and the bug crop logos the same way.
+ * The `_dark` art is drawn on the dark plate in both focus states (§5.2), so its white parts never sit on the light card.
  */
 @Composable
 private fun LogoPlate(team: TeamLine) {
-    var loaded by remember(team.logo) { mutableStateOf(false) }
+    val loader = LocalShellImageLoader.current
+    val context = LocalContext.current
+    val density = LocalDensity.current.density
+    val url = team.logo
+    val logo by produceState<ImageBitmap?>(null, url, loader, density) {
+        value = null
+        if (url == null || loader == null) return@produceState
+        val w = (LOGO_SLOT_W * density).roundToInt().coerceAtLeast(1)
+        val h = (LOGO_SLOT_H * density).roundToInt().coerceAtLeast(1)
+        value = runCatching { coilLogoFetch(loader, context)(url, w, h) }
+            .onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
+            .getOrNull()?.asImageBitmap()
+    }
     Box(Modifier.size(64.dp, 44.dp).background(Plate, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
-        if (!loaded) Line(team.abbrev, GuideUi.sans(18, FontWeight.SemiBold, GuideUi.Fg60))
-        val url = team.logo
-        if (url != null) {
-            AsyncImage(
-                model = url,
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                onSuccess = { loaded = true },
-                modifier = Modifier.fillMaxSize().padding(4.dp),
-            )
-        }
+        val img = logo
+        if (img == null) Line(team.abbrev, GuideUi.sans(18, FontWeight.SemiBold, GuideUi.Fg60))
+        else Image(img, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(LOGO_SLOT_W.dp, LOGO_SLOT_H.dp))
     }
 }
+
+/** The logo's slot inside the 64 x 44 plate (4 px clear on each side). Design px. */
+private const val LOGO_SLOT_W = 56
+private const val LOGO_SLOT_H = 36
 
 /** Live games: the red dot, LIVE, then `2nd · 10:22`. Every other game: its state words (22/500, `.75`). */
 @Composable

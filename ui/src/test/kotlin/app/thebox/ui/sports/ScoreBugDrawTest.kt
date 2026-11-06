@@ -44,7 +44,7 @@ class ScoreBugDrawTest {
         SideEffect { hostCompositions++ }
         ScoreBug(
             repo, ScoreBugFixtures.input(), ScoreBugFixtures.noGeometry, lowEnd,
-            place = ScoreBugFixtures::placer, mono = { rule.mainClock.currentTime },
+            mono = { rule.mainClock.currentTime },
         )
     }
 

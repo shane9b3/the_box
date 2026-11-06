@@ -65,4 +65,11 @@ class SportsTextTest {
         assertEquals("30 s", SportsText.delay(res, 30))
         assertEquals("No internet connection. Check the network, then press OK to try again.", SportsText.failure(res, FailKind.OFFLINE))
     }
+
+    @Test
+    fun aPostponedGameSaysSoInsteadOfItsStartTime() {
+        val ppd = SportsFixtures.game(phase = GamePhase.POSTPONED, period = null, periodKind = null, clock = null)
+        assertEquals("Postponed", SportsText.state(res, ppd, clock24 = true))
+        assertEquals("CGY – EDM · Postponed", SportsText.pickerGame(res, ppd, clock24 = true))
+    }
 }

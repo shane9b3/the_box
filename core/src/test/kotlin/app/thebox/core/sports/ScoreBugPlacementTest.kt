@@ -9,15 +9,7 @@ import kotlin.test.assertTrue
 /** docs/design/m6-score-bug.md §4.3, §4.4, §8: every row × four corners × two sizes. */
 class ScoreBugPlacementTest {
     /** The values of `PlayerUi.overlayGeometry()` (`:ui`'s ScoreBugBoundsTest checks the two agree). */
-    private val geo = OverlayGeometry(
-        channelList = Box(48f, 48f, 668f, 1032f),
-        stats = Box(64f, 56f, 664f, 564f),
-        groupCard = Box(64f, 56f, 784f, 126f),
-        picker = Box(1376f, 48f, 1872f, 928f),
-        numberEntry = Box(1520f, 72f, 1840f, 232f),
-        infoBarTop = 820f,
-        quickBarTop = 952f,
-    )
+    private val geo = OverlayGeometryFixture.DESIGN
     private val probing = Box(600f, 72f, 1320f, 128f)
 
     private fun input(corner: ScoreCorner, size: ScoreBugSize = ScoreBugSize.STANDARD) = PlacementInput(

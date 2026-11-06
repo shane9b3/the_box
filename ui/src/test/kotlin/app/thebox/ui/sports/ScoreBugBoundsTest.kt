@@ -26,7 +26,7 @@ import org.robolectric.annotation.Config
 /**
  * docs/design/m6-score-bug.md §8 `ScoreBugBoundsTest`: the bug lands on the box the placer returns (1920 × 1080 window, so
  * 1 design px = 1 px), at Standard and Large; place mode draws the ring's hint and the sample bug with no followed game; a
- * moved box slides and a null box fades out and leaves no node. The placer is a stand-in ([ScoreBugFixtures.placer]).
+ * moved box slides and a null box fades out and leaves no node. The placer is the real `ScoreBugPlacement.place` (integration pass 2026-11-05).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35], qualifiers = "w960dp-h540dp-xhdpi")
@@ -44,7 +44,7 @@ class ScoreBugBoundsTest {
             BoxDesignScale {
                 ScoreBug(
                     repo, input.value, ScoreBugFixtures.noGeometry, low.value,
-                    place = ScoreBugFixtures::placer, mono = { rule.mainClock.currentTime },
+                    mono = { rule.mainClock.currentTime },
                 )
             }
         }
@@ -181,5 +181,7 @@ class ScoreBugBoundsTest {
         assertEquals(app.thebox.core.sports.Box(48f, 48f, 668f, 1032f), g.channelList)
         assertTrue("the stats box starts at the stats' own corner", g.stats.l == PlayerUi.STATS_L && g.stats.t == PlayerUi.STATS_T)
         assertEquals(app.thebox.core.sports.Box(64f, 56f, 784f, 126f), g.groupCard)
+        // The :core placement test's fixture is the same geometry (one set of numbers, A-B2).
+        assertEquals(app.thebox.core.sports.OverlayGeometryFixture.DESIGN, g)
     }
 }

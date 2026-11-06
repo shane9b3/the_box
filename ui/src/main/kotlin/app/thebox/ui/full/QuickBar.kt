@@ -38,7 +38,7 @@ const val QUICK_ITEM_TAG = "player_quick_item"
  * notes §4). The pills are not focusable: focus is the machine's [QuickBarState.focused].
  */
 @Composable
-fun QuickBar(state: QuickBarState, modifier: Modifier = Modifier) {
+fun QuickBar(state: QuickBarState, modifier: Modifier = Modifier, clock24: Boolean = true) {
     val res = androidx.compose.ui.platform.LocalResources.current
     val shape = RoundedCornerShape(DesignTokens.Radii.Panel)
     val list = rememberLazyListState()
@@ -69,7 +69,7 @@ fun QuickBar(state: QuickBarState, modifier: Modifier = Modifier) {
         userScrollEnabled = false,
     ) {
         itemsIndexed(state.items, key = { _, item -> item.name }) { i, item ->
-            QuickPill(stringResource(PlayerText.quickLabel(item)), PlayerText.quickValue(res, item, state), focused = i == state.focused, checked = item == QuickItem.STREAM_INFO && state.statsOn)
+            QuickPill(stringResource(PlayerText.quickLabel(item)), PlayerText.quickValue(res, item, state, clock24), focused = i == state.focused, checked = item == QuickItem.STREAM_INFO && state.statsOn)
         }
     }
 }

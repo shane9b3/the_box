@@ -579,12 +579,21 @@ class ScoreRepositoryImplTest {
     /** Wall time: 2026-11-06T00:00:00Z (puck drop of [SportsFixtures.game]) at mono 0. */
     private val wallBase = 1_793_923_200_000L
 
-    private fun TestScope.realRepo(doc: SportsFollowDoc, signals: Signals = Signals()): Triple<ScoreRepositoryImpl, FakeSource, FakeSettingsStore> {
+    /**
+     * [configure] runs before the repository starts: a restored follow polls at once (UNSEEN demand, §2.3), so an answer
+     * set after `realRepo` returns would only reach the second poll (integration pass 2026-11-05).
+     */
+    private fun TestScope.realRepo(
+        doc: SportsFollowDoc,
+        signals: Signals = Signals(),
+        configure: (FakeSource) -> Unit = {},
+    ): Triple<ScoreRepositoryImpl, FakeSource, FakeSettingsStore> {
         val mono = MonoClock { testScheduler.currentTime }
         val wall = { wallBase + testScheduler.currentTime }
         val store = FakeSettingsStore()
         store.update(SportsFollowDomain) { doc }
         val source = FakeSource(mono)
+        configure(source)
         val repo = ScoreRepositoryImpl(
             source, store, Awake(), signals, backgroundScope, mono,
             machineFactory = { phase -> FollowMachine.of(ScoreBugMachine(mono, wall, phase)) },
@@ -621,8 +630,9 @@ class ScoreRepositoryImplTest {
     @Test fun realMachine_aFinalClearsFiveMinutesLaterWithNoInput() = runTest {
         assumeTrue("ScoreBugMachine / DayPollPolicy are stubs (WP-1)", wp1Implemented())
         val final = SportsFixtures.game(phase = GamePhase.FINAL, finalKind = PeriodKind.REG, clock = null)
-        val (repo, source, store) = realRepo(SportsFollowDoc(game = SportsFixtures.followedOf(final), pollPhaseMs = 1_500L))
-        source.gameAnswer = { Fetch.Ok(final, testScheduler.currentTime, wallBase + testScheduler.currentTime, 0) }
+        val (repo, source, store) = realRepo(SportsFollowDoc(game = SportsFixtures.followedOf(final), pollPhaseMs = 1_500L)) {
+            it.gameAnswer = { Fetch.Ok(final, testScheduler.currentTime, wallBase + testScheduler.currentTime, 0) }
+        }
         repo.reportDemand(DemandOwner.FULL_WITH_FOLLOW, true)
         runCurrent()
         val polls = source.calls.size

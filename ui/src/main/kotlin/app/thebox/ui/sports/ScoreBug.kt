@@ -49,6 +49,7 @@ import androidx.core.content.res.ResourcesCompat
 import app.thebox.core.sports.Box as DesignBox
 import app.thebox.core.sports.CentreText
 import app.thebox.core.sports.ClockAnchor
+import app.thebox.core.sports.secsAt
 import app.thebox.core.sports.OverlayGeometry
 import app.thebox.core.sports.PlacementInput
 import app.thebox.core.sports.ScoreBugPlacement
@@ -310,16 +311,11 @@ private fun sampleView(res: Resources) = ScoreBugView(
 )
 
 /**
- * The displayed second of a [ClockAnchor] (§2.7, §4.7): `secs` at `atMono`, counting down 1/s while ticking, floored at 0,
- * frozen at `stopAtMono`. Pure.
+ * The displayed second of a [ClockAnchor] (§2.7, §4.7). [secsAt] is WP-1's `ClockAnchor.secsAt` (one rule for the machine,
+ * the bug and the cards: counts down 1/s while ticking, floored at 0, frozen at `stopAtMono`). Pure.
  */
 internal object ClockMath {
-    fun secsAt(a: ClockAnchor, now: Long): Int {
-        if (!a.ticking) return a.secs
-        val until = a.stopAtMono?.let { minOf(now, it) } ?: now
-        val elapsed = (until - a.atMono).coerceAtLeast(0L)
-        return (a.secs - (elapsed / 1000L).toInt()).coerceAtLeast(0)
-    }
+    fun secsAt(a: ClockAnchor, now: Long): Int = a.secsAt(now)
 
     /** The next instant the displayed second changes, or null when it never will (not ticking, at 0, past the cap). */
     fun nextTickAt(a: ClockAnchor, now: Long): Long? {

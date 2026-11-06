@@ -261,6 +261,11 @@ class ScoreBugScreenshotTest {
                 if (px > K.SCORE_TEXT_FLOOR_PX || text != "WWWWWWW") {
                     assertTrue("$text at $px: width $w > ${K.SCORE_CENTRE_W * p.s} (large=$large)", w <= K.SCORE_CENTRE_W * p.s + 0.5f)
                 }
+                if (px > K.SCORE_TEXT_FLOOR_PX) {
+                    // Integration pass 2026-11-05: 8 design px clear of each divider ("Final/OT" read as touching them).
+                    val room = (K.SCORE_CENTRE_W - 16f) * p.s
+                    assertTrue("$text at $px: width $w > $room, closer than 8 px to a divider (large=$large)", w <= room + 0.5f)
+                }
             }
         }
         assertEquals("the clock itself keeps 26", 26f, painter().clockPx, 0f)

@@ -194,6 +194,7 @@ fun SportsScreen(
                     )
                     is SportsBody.Empty -> Message(emptyText(b), retry = false, onRetry = {})
                     is SportsBody.Failed -> Message(SportsText.failure(res, b.kind), retry = true, onRetry = viewModel::onRetry)
+                    SportsBody.Off -> Message(stringResource(R.string.sports_off), retry = false, onRetry = {})
                 }
             }
             Spacer(Modifier.height(GRID_BOTTOM_GAP.dp))

@@ -34,6 +34,8 @@
     <string name="sports_final">Final</string>
     <string name="sports_final_ot">Final/OT</string>
     <string name="sports_final_so">Final/SO</string>
+    <!-- Integration pass 2026-11-05: a postponed game's state on the cards and in the picker (instead of its start time). -->
+    <string name="sports_postponed">Postponed</string>
     <string name="sports_no_update">No update</string>
     <string name="sports_delayed">Delayed</string>
     <string name="sports_live">LIVE</string>
@@ -101,6 +103,8 @@
     <string name="sports_empty_tomorrow">No NHL games tomorrow. Pick another day above.</string>
     <!-- A day that is not yesterday, today or tomorrow. %1$s = the date. -->
     <string name="sports_empty_day">No NHL games on %1$s. Pick another day above.</string>
+    <!-- Integration pass 2026-11-05: the tab stays in the top bar with Show Sports off and says how to turn it back on. -->
+    <string name="sports_off">Sports is off. Turn it on in Settings → Show advanced settings, then Sports → Show Sports.</string>
     <string name="sports_no_network">No internet connection. Check the network, then press OK to try again.</string>
     <string name="sports_failed">NHL.com did not answer. Press OK to try again; scores may be down for a few minutes.</string>
     <string name="sports_retry">Retry</string>

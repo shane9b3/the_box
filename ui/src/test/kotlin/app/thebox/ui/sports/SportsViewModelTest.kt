@@ -183,4 +183,13 @@ class SportsViewModelTest {
         assertEquals(2, SportsViewModel.minutesSince(0, 150_000))
         assertEquals(0, SportsViewModel.minutesSince(10, 0))
     }
+
+    @Test fun showSportsOffKeepsTheTabAndSaysHowToTurnItOn() {
+        val repo = FakeScoreRepository(app.thebox.core.sports.SportsPrefs(enabled = false))
+        val m = vm(repo)
+        repo.board(live)
+        assertEquals(SportsBody.Off, m.state.value.body)
+        repo.prefs.value = app.thebox.core.sports.SportsPrefs(enabled = true)
+        assertEquals(listOf("L1"), m.cards().map { it.game.id.id })
+    }
 }

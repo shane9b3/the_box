@@ -108,7 +108,7 @@ internal class ScoreBugPainter(
 
     // ------------------------------------------------------------------ words and fit (U-N3)
 
-    /** [startPx] stepped down by 2 until [text] fits the 106 column (less [FIT_BREATHING], so no text touches a divider), never below 18; no ellipsis. Design px. */
+    /** [startPx] stepped down by 2 until [text] fits the 106 column (less [FIT_BREATHING], 8 a side, so no text touches a divider), never below 18; no ellipsis. Design px. */
     fun fit(text: String, startPx: Float): Float {
         var px = startPx
         while (px > K.SCORE_TEXT_FLOOR_PX) {
@@ -324,8 +324,11 @@ internal class ScoreBugPainter(
 
     private companion object {
         /** Two-line centre: the clock box is 9..39 and the period box 39..61 of the 70 (§4.1). */
-        /** Design px kept free in the centre column (4 each side) so a full-width string clears the dividers. */
-        const val FIT_BREATHING = 8f
+        /**
+         * Design px kept free in the centre column (8 each side) so a full-width string clears the dividers: at 4 a side,
+         * "Final/OT" and "Final/SO" read as touching them (integration pass 2026-11-05).
+         */
+        const val FIT_BREATHING = 16f
         const val TWO_LINE_TOP_CY = 24f
         const val BOTTOM_CY = 50f
 

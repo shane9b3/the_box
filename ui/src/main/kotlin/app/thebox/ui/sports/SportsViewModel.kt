@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.thebox.core.settings.SettingsStore
 import app.thebox.core.settings.state.SportsDomain
+import app.thebox.core.sports.ClockAnchor
 import app.thebox.core.sports.DayBoard
 import app.thebox.core.sports.DayState
 import app.thebox.core.sports.DemandOwner
@@ -14,6 +15,7 @@ import app.thebox.core.sports.ScoreCorner
 import app.thebox.core.sports.ScoreRepository
 import app.thebox.core.sports.SportsConstants
 import app.thebox.core.sports.SportsPrefs
+import app.thebox.core.sports.secsAt
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.LocalDate
 import java.time.ZoneId
@@ -40,6 +42,11 @@ sealed interface SportsBody {
     data class Empty(val dayKey: String, val day: SportsDay) : SportsBody
     /** [FailKind.OFFLINE] reads "No internet connection…"; everything else "NHL.com did not answer…". */
     data class Failed(val kind: FailKind) : SportsBody
+    /**
+     * Show Sports is off (integration pass 2026-11-05): the tab keeps its place in the top bar (no index shift) and says
+     * how to turn it back on. The repository makes no request while it is off.
+     */
+    data object Off : SportsBody
 }
 
 /**
@@ -84,7 +91,8 @@ class SportsViewModel internal constructor(
         MutableStateFlow(SportsUiState(body = SportsBody.Failed(FailKind.IO)))
     } else {
         combine(repo.day, repo.followed, repo.prefs, selected) { day, followed, prefs, sel ->
-            SportsUiState(sel, bodyOf(day, followed?.id, sel), (day as? DayState.Board)?.takeIf { it.failing }?.fetchedAtMono, prefs)
+            if (!prefs.enabled) SportsUiState(sel, SportsBody.Off, null, prefs)
+            else SportsUiState(sel, bodyOf(day, followed?.id, sel), (day as? DayState.Board)?.takeIf { it.failing }?.fetchedAtMono, prefs)
         }.stateIn(viewModelScope, SharingStarted.Eagerly, SportsUiState())
     }
 
@@ -194,9 +202,9 @@ class SportsViewModel internal constructor(
          */
         fun clockSecs(card: GameCardModel, nowMono: Long): Int? {
             val c = card.game.clock ?: return null
-            if (!c.running) return c.secondsRemaining.coerceAtLeast(0)
-            val elapsed = ((nowMono - card.anchorMono) / 1000L).coerceIn(0L, SportsConstants.EXTRAPOLATE_CAP_S.toLong()).toInt()
-            return (c.secondsRemaining - elapsed).coerceAtLeast(0)
+            // The bug's rule (WP-1's ClockAnchor.secsAt): ticking while running, frozen at the cap, floored at 0.
+            val stop = card.anchorMono + SportsConstants.EXTRAPOLATE_CAP_S * 1000L
+            return ClockAnchor(c.secondsRemaining.coerceAtLeast(0), card.anchorMono, c.running, stop).secsAt(nowMono)
         }
 
         /** Whole minutes since [updatedMono]; 0 reads "Updated just now". */

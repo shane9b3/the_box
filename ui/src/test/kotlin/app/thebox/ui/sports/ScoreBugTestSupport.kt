@@ -1,10 +1,8 @@
 package app.thebox.ui.sports
 
-import app.thebox.core.sports.Box
 import app.thebox.core.sports.BottomBar
 import app.thebox.core.sports.CentreText
 import app.thebox.core.sports.ClockAnchor
-import app.thebox.core.sports.OverlayGeometry
 import app.thebox.core.sports.PeriodKind
 import app.thebox.core.sports.PeriodLabel
 import app.thebox.core.sports.PlacementInput
@@ -12,11 +10,10 @@ import app.thebox.core.sports.ScoreBugSize
 import app.thebox.core.sports.ScoreBugView
 import app.thebox.core.sports.ScoreCorner
 import app.thebox.core.sports.Side
-import app.thebox.core.sports.SportsConstants as K
 import app.thebox.core.sports.TeamLine
 import app.thebox.ui.full.PlayerUi
 
-/** Views, inputs and a stand-in placer for the score bug tests (WP-1's `ScoreBugPlacement` is not in this tree yet). */
+/** Views and inputs for the score bug tests (the placer is the real `ScoreBugPlacement.place`). */
 internal object ScoreBugFixtures {
     fun view(
         top: CentreText = CentreText.Clock,
@@ -66,29 +63,6 @@ internal object ScoreBugFixtures {
         channelList = false, stats = false, groupCard = false, picker = false, numberEntry = false, probing = null,
         toast = false, reminder = false, modal = false, textTrackOn = false, screenOff = false,
     )
-
-    /**
-     * A stand-in for `ScoreBugPlacement.place`: the §4.3 corner rect, a bottom corner lifted to `infoBarTop − 16` for a user
-     * bar (§4.4), nothing for a passive bar on a bottom corner. The real rules are WP-1's `ScoreBugPlacementTest`.
-     */
-    fun placer(i: PlacementInput, g: OverlayGeometry): Box? {
-        val large = i.size == ScoreBugSize.LARGE
-        val w = if (large) K.SCORE_LARGE_W else K.SCORE_W
-        val h = if (large) K.SCORE_LARGE_H else K.SCORE_H
-        val right = i.corner == ScoreCorner.TOP_RIGHT || i.corner == ScoreCorner.BOTTOM_RIGHT
-        val bottom = i.corner == ScoreCorner.BOTTOM_RIGHT || i.corner == ScoreCorner.BOTTOM_LEFT
-        val l = if (right) 1920f - K.SCORE_INSET_X - w else K.SCORE_INSET_X
-        var t = if (bottom) 1080f - K.SCORE_INSET_Y - h else K.SCORE_INSET_Y
-        if (!i.placing && bottom) {
-            when (i.bar) {
-                BottomBar.PASSIVE_INFO -> return null
-                BottomBar.USER_BAR -> t = g.infoBarTop - K.SCORE_BAR_GAP - h
-                BottomBar.QUICK -> t = g.quickBarTop - K.SCORE_BAR_GAP - h
-                BottomBar.NONE -> {}
-            }
-        }
-        return Box(l, t, l + w, t + h)
-    }
 
     fun anchor(secs: Int, atMono: Long = 0L, ticking: Boolean = true, stopAt: Long? = null) = ClockAnchor(secs, atMono, ticking, stopAt)
 }
