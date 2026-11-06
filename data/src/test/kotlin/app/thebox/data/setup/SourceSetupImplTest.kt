@@ -256,6 +256,35 @@ class SourceSetupImplTest {
     }
 
     @Test
+    fun queuedGuideWorkIsWaitedForEvenWhenItIsNotYetVisible() = real {
+        // 2026-11-06 "0 of 13 matched": the refresh queued a guide import, but WorkManager had not surfaced it yet.
+        val id = (setup.saveM3u(M3uForm("L", "http://lists.example.com/a.m3u", null, emptyList())) as Outcome.Ok).value
+        db.epgSourceDao().insert(
+            app.thebox.data.db.entity.EpgSourceEntity(name = "g", origin = "USER", credentialRef = "c", urlHash = 1, displaySource = "g", priority = 0, createdAt = 1),
+        )
+        val got = CopyOnWriteArrayList<SetupProgress>()
+        val job = async { setup.progress(id).collect { got += it } }
+        work.phase.value = WorkPhase(true, "Downloading playlist")
+        waitFor { got.isNotEmpty() }
+        val report = RefreshReport(id, 1, g.clock.now(), g.clock.now(), RefreshOutcome.SUCCESS, entries = 13, live = 13, groupsTotal = 4, guideWorkQueued = true)
+        db.refreshLogDao().insert(
+            RefreshLogEntity(
+                targetType = RefreshLogEntity.TARGET_PLAYLIST, targetId = id, trigger = "ONBOARDING", startedAt = g.clock.now(), finishedAt = g.clock.now(),
+                outcome = "SUCCESS", bytes = 1L, reportJson = Converters.json.encodeToString(RefreshReport.serializer(), report),
+            ),
+        )
+        work.phase.value = WorkPhase(false, null)
+        waitFor { got.any { it is SetupProgress.ReadyToWatch } }
+        delay((SourceSetupImpl.SETTLE_TICKS + 3) * SourceSetupImpl.TICK_MS) // past the old quiet-period guess
+        assertTrue("no guide signal yet: not finished", got.none { it is SetupProgress.Finished })
+        db.refreshLogDao().insert(
+            RefreshLogEntity(targetType = RefreshLogEntity.TARGET_EPG_BUILD, targetId = null, trigger = "PLAYLIST_CHANGED", startedAt = g.clock.now(), finishedAt = g.clock.now(), outcome = "SUCCESS"),
+        )
+        withTimeout(10_000) { job.await() }
+        assertTrue(got.last() is SetupProgress.Finished)
+    }
+
+    @Test
     fun aFailedRefreshEndsTheProgressWithItsCard() = real {
         val id = (setup.saveXtream(form) as Outcome.Ok).value
         db.refreshLogDao().insert(

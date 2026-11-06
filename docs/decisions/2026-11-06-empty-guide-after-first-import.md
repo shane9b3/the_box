@@ -38,7 +38,18 @@ first Sources (`persist = false` as before). Once a source is requested the cond
 Regression test: `GuideBehaviourTest.StartupAndData.firstPlaylistAfterAnEmptyStartLoadsTheStartupSource` (empty
 Sources, then the playlist's Sources → `loadLineup(All(1))`, focus on row 0, no empty state; fails before the fix).
 
-## Not changed
+## Follow-ups (same day)
 
-Removing every playlist and then adding a different one keeps the old requested source (`All(<old id>)`); that is a
-separate path (Settings, not onboarding) and was not part of this finding.
+**Removed playlist keeps the old source.** Removing every playlist and then adding a different one kept the requested
+source `All(<old id>)`, so the guide stayed empty. `onSources` now also checks whether the current All/Group source's
+playlist still has an All channels entry; when it has none (deleted or turned off) and something else is listed, it
+applies the startup source of the new list and persists it. With nothing listed it stays put (the empty state shows).
+Test: `GuideBehaviourTest.StartupAndData.aRemovedPlaylistMovesTheGuideToTheNewOne`.
+
+**Import screen "0 of 13 matched".** The S5 fold treated the guide as done after 1.5 s (3 ticks) without guide work in
+WorkManager. The refresh enqueues the EPG import before writing its log row, but `enqueueUniqueWork` is asynchronous and
+the work-info flow can surface it later than that, so on the emulator the counts were read before the guide build had
+matched anything (the build then matched 13 of 13). `RefreshReport.guideWorkQueued` (additive, default false) now records
+that the refresh queued an import or patch; the fold then waits until that work has been seen running or an
+EPG_BUILD/EPG_PATCH log row started after the import began, with a 60 s fallback. Reports without the flag keep the
+quiet-period rule. Test: `SourceSetupImplTest.queuedGuideWorkIsWaitedForEvenWhenItIsNotYetVisible`.

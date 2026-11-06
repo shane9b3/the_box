@@ -176,18 +176,21 @@ class RefreshRepository @Inject constructor(
 
             // 5. Matching and EPG work.
             progress("Matching guide data")
+            var guideWorkQueued = false
             try {
                 if (sourcesChanged) {
                     requester.importEpgNow(Trigger.PLAYLIST_CHANGED)
+                    guideWorkQueued = true
                 } else if (matches.matchIncremental(playlistId, epgStore)) {
                     requester.patchEpg()
+                    guideWorkQueued = true
                 }
             } catch (e: NotImplementedError) {
                 BoxLog.w(TAG, "EPG store not available; matching deferred to the next build")
             }
 
             // 6. Report.
-            val final = report.copy(finishedAtMs = clock.now())
+            val final = report.copy(finishedAtMs = clock.now(), guideWorkQueued = guideWorkQueued)
             log(playlistId, trigger, started, final, null, dl.bytes)
             BoxLog.i(TAG) { "playlist $playlistId refreshed: +${final.added} −${final.newlyMissing} purged ${final.purged}" }
             return RefreshResult(final, null)

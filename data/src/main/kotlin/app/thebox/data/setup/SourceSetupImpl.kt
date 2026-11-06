@@ -263,6 +263,9 @@ class SourceSetupImpl @Inject constructor(
         var sawActive = false
         var idleFromTick: Long? = null
         var hasGuide: Boolean? = null
+        /** The guide work the refresh queued has been seen running, or logged a run (or the wait timed out). */
+        var guideSeen = false
+        var guideWaitFromTick: Long? = null
         var adultGroups = 0
     }
 
@@ -318,8 +321,21 @@ class SourceSetupImpl @Inject constructor(
         val hasGuide = f.hasGuide ?: sourceDao.active().isNotEmpty().also { f.hasGuide = it }
         if (hasGuide && o.guideBusy) {
             f.idleFromTick = null
+            f.guideSeen = true
             stage(f, out, ImportStage.DOWNLOADING_GUIDE, false, null)
             return out
+        }
+        // (2026-11-06, "0 of 13 matched") The refresh queued guide work: wait until it has been seen running or has
+        // logged a run, not just for a quiet moment. WorkManager can surface the queued work after the log row arrives,
+        // and the counts read before the guide build are all zero. A minute without either signal falls back to done.
+        if (hasGuide && report!!.guideWorkQueued && !f.guideSeen) {
+            val waitFrom = f.guideWaitFromTick ?: o.tick.also { f.guideWaitFromTick = it }
+            val ran = GUIDE_TARGETS.any { t -> logDao.latest(t, null).any { it.startedAt >= f.startAt } }
+            if (!ran && o.tick - waitFrom < GUIDE_WAIT_TICKS) {
+                stage(f, out, ImportStage.DOWNLOADING_GUIDE, false, null)
+                return out
+            }
+            f.guideSeen = true
         }
         // The guide work is enqueued before the refresh writes its log row; still, wait a moment of quiet so a guide
         // import that is about to be enqueued (EPG patch after matching) is not missed.
@@ -432,6 +448,9 @@ class SourceSetupImpl @Inject constructor(
         const val TICK_MS = 500L
         /** Quiet ticks after the refresh before the guide counts as done (no guide work queued). */
         const val SETTLE_TICKS = 3L
+        /** Ticks to wait for queued guide work to show up before the guide stage counts as done anyway (60 s). */
+        const val GUIDE_WAIT_TICKS = 120L
+        private val GUIDE_TARGETS = listOf(RefreshLogEntity.TARGET_EPG_BUILD, RefreshLogEntity.TARGET_EPG_PATCH)
         private const val PROBE_WAIT_SLACK_MS = 2_000L
 
         internal fun fileName(uri: String): String = File(uri.substringBefore('?')).name.ifEmpty { uri.takeLast(40) }

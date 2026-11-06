@@ -201,4 +201,9 @@ data class RefreshReport(
     val removedSample: List<String> = emptyList(),
     /** "<WarningCode>@<line>", at most 50. */
     val warnings: List<String> = emptyList(),
+    /**
+     * (2026-11-06, additive) The refresh queued a guide import or patch. The import screen waits for that work instead
+     * of guessing from a quiet period (WorkManager's queue can surface after the log row; "0 of 13 matched").
+     */
+    val guideWorkQueued: Boolean = false,
 )
