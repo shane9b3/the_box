@@ -103,12 +103,12 @@ fun Dot(color: Color, size: Dp, modifier: Modifier = Modifier) {
 
 /** Key cap of the footer hints: mono 14, 1 px .22 border, radius 7 (prototype). */
 @Composable
-fun KeyCap(keys: String, modifier: Modifier = Modifier) {
+fun KeyCap(keys: String, modifier: Modifier = Modifier, keyPx: Int = 18) {
     Box(
         modifier
             .border(1.dp, GuideUi.White22, RoundedCornerShape(DesignTokens.Radii.KeyCap))
             .padding(horizontal = 10.dp, vertical = 3.dp),
-    ) { Line(keys, GuideUi.mono(18, color = GuideUi.Fg55)) }
+    ) { Line(keys, GuideUi.mono(keyPx, color = GuideUi.Fg55)) }
 }
 
 /**

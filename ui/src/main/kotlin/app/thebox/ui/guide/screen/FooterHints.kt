@@ -33,15 +33,15 @@ const val FOOTER_GAP = 36f
  * ends the row; it and every later hint are left out. Never wraps; dropping from the end drops the least important.
  */
 @Composable
-fun FooterHints(footer: List<FooterHint>, modifier: Modifier = Modifier, maxWidth: Dp = FOOTER_MAX_W.dp) {
+fun FooterHints(footer: List<FooterHint>, modifier: Modifier = Modifier, maxWidth: Dp = FOOTER_MAX_W.dp, textPx: Int = 22) {
     if (footer.isEmpty()) return
     Layout(
         modifier = modifier.testTag(FOOTER_TAG),
         content = {
             footer.forEachIndexed { i, hint ->
                 Row(Modifier.testTag(footerHintTag(i)), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                    KeyCap(hint.keys)
-                    Line(hint.label, GuideUi.sans(22, color = GuideUi.Fg55))
+                    KeyCap(hint.keys, keyPx = textPx - 4)
+                    Line(hint.label, GuideUi.sans(textPx, color = GuideUi.Fg55))
                 }
             }
         },
