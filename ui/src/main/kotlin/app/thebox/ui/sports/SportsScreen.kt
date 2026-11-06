@@ -80,6 +80,9 @@ private enum class ChipMenu { CORNER, DELAY }
 
 /** Design px (1 dp = 1 design px under the root's scale). */
 private const val GRID_BOTTOM_GAP = 16
+/** Corner / Delay chip height and the day chips' height (design px; owner request 2026-11-06). */
+private const val CHIP_H = 52
+private const val DAY_CHIP_H = 60
 private const val SCROLL_MARGIN = 64
 
 /**
@@ -167,7 +170,7 @@ fun SportsScreen(
             CreditRow(ui)
             Spacer(Modifier.height(24.dp))
             // U-N4: with Show Sports off there is nothing to pick: no day chips (and no Corner / Delay chips).
-            if (off) Spacer(Modifier.height(52.dp)) else DayChips(ui.day, dayChips, corner) { day ->
+            if (off) Spacer(Modifier.height(DAY_CHIP_H.dp)) else DayChips(ui.day, dayChips, corner) { day ->
                 settled = true
                 viewModel.onDay(day)
             }
@@ -197,7 +200,7 @@ fun SportsScreen(
                 }
             }
             Spacer(Modifier.height(GRID_BOTTOM_GAP.dp))
-            FooterHints(footerOf(res, focusedCard))
+            FooterHints(footerOf(res, focusedCard), textPx = 24)
         }
         menu?.let { m ->
             ChoiceList(
@@ -241,11 +244,11 @@ private fun footerOf(res: android.content.res.Resources, focused: GameCardModel?
 @Composable
 private fun TitleRow(ui: SportsUiState, corner: FocusRequester, delayChip: FocusRequester, down: FocusRequester, chips: Boolean, onOpen: (ChipMenu) -> Unit) {
     val res = LocalResources.current
-    Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
-        Line(stringResource(R.string.sports_title), GuideUi.sans(34, FontWeight.SemiBold))
+    Row(Modifier.fillMaxWidth().height(60.dp), verticalAlignment = Alignment.CenterVertically) {
+        Line(stringResource(R.string.sports_title), GuideUi.sans(44, FontWeight.SemiBold))
         Spacer(Modifier.width(16.dp))
-        Box(Modifier.background(GuideUi.White08, RoundedCornerShape(DesignTokens.Radii.Chip)).padding(horizontal = 12.dp, vertical = 4.dp)) {
-            Line(stringResource(R.string.sports_league_nhl), GuideUi.sans(18, FontWeight.SemiBold, GuideUi.Fg70))
+        Box(Modifier.background(GuideUi.White08, RoundedCornerShape(DesignTokens.Radii.Chip)).padding(horizontal = 14.dp, vertical = 5.dp)) {
+            Line(stringResource(R.string.sports_league_nhl), GuideUi.sans(22, FontWeight.SemiBold, GuideUi.Fg70))
         }
         Spacer(Modifier.weight(1f))
         if (!chips) return@Row
@@ -267,7 +270,7 @@ private fun TitleRow(ui: SportsUiState, corner: FocusRequester, delayChip: Focus
     }
 }
 
-/** A focusable chip (22/500). Up is consumed: there is nothing above the title row (the top bar is not drawn here). */
+/** A focusable chip ([height] design px, text [textPx]/500). Up is consumed: there is nothing above the title row (the top bar is not drawn here). */
 @Composable
 private fun FocusChip(
     text: String,
@@ -276,6 +279,8 @@ private fun FocusChip(
     down: FocusRequester? = null,
     up: FocusRequester? = null,
     selected: Boolean = false,
+    height: Int = CHIP_H,
+    textPx: Int = 24,
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -293,17 +298,17 @@ private fun FocusChip(
     ) {
         Chip(
             focused = focused,
-            modifier = Modifier.height(52.dp),
+            modifier = Modifier.height(height.dp),
             fill = if (selected) GuideUi.White12 else GuideUi.White08,
             border = if (selected) GuideUi.White16 else null,
-        ) { color -> Line(text, GuideUi.sans(22, FontWeight.Medium, color)) }
+        ) { color -> Line(text, GuideUi.sans(textPx, FontWeight.Medium, color)) }
     }
 }
 
 @Composable
 private fun CreditRow(ui: SportsUiState) {
-    Row(Modifier.fillMaxWidth().height(24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        Line(stringResource(R.string.sports_credit), GuideUi.sans(18, color = GuideUi.Fg55))
+    Row(Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Line(stringResource(R.string.sports_credit), GuideUi.sans(20, color = GuideUi.Fg55))
         val updated = ui.updatedMono
         if (updated != null) UpdatedText(updated)
     }
@@ -323,14 +328,14 @@ private fun UpdatedText(updatedMono: Long) {
     }
     val minutes = SportsViewModel.minutesSince(updatedMono, now.value)
     val text = if (minutes <= 0) stringResource(R.string.sports_updated_now) else pluralStringResource(R.plurals.sports_updated_min_ago, minutes, minutes)
-    Line(text, GuideUi.sans(18, color = GuideUi.Warn), Modifier.testTag(SPORTS_UPDATED_TAG))
+    Line(text, GuideUi.sans(20, color = GuideUi.Warn), Modifier.testTag(SPORTS_UPDATED_TAG))
 }
 
 // ------------------------------------------------------------------ day chips
 
 @Composable
 private fun DayChips(selected: SportsDay, requesters: Map<SportsDay, FocusRequester>, up: FocusRequester, onDay: (SportsDay) -> Unit) {
-    Row(Modifier.height(52.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    Row(Modifier.height(DAY_CHIP_H.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         SportsDay.entries.forEach { day ->
             FocusChip(
                 text = stringResource(
@@ -344,6 +349,8 @@ private fun DayChips(selected: SportsDay, requesters: Map<SportsDay, FocusReques
                 tag = sportsDayTag(day),
                 up = up,
                 selected = day == selected,
+                height = DAY_CHIP_H,
+                textPx = 26,
                 onClick = { onDay(day) },
             )
         }
@@ -417,7 +424,7 @@ private fun Skeletons() {
 
 @Composable
 private fun SkeletonCard() {
-    Box(Modifier.width(564.dp).height(128.dp).background(Color05, RoundedCornerShape(DesignTokens.Radii.Button)))
+    Box(Modifier.width(GameCardMetrics.CARD_W.dp).height(GameCardMetrics.CARD_H.dp).background(Color05, RoundedCornerShape(DesignTokens.Radii.Button)))
 }
 
 private val Color05 = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.05f)
@@ -426,7 +433,7 @@ private val Color05 = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.05
 @Composable
 private fun Message(text: String, retry: Boolean, onRetry: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-        Text(text, style = GuideUi.sans(26, FontWeight.Medium, GuideUi.Fg70), modifier = Modifier.width(1100.dp).testTag(SPORTS_MESSAGE_TAG))
+        Text(text, style = GuideUi.sans(28, FontWeight.Medium, GuideUi.Fg70), modifier = Modifier.width(1200.dp).testTag(SPORTS_MESSAGE_TAG))
         if (retry) {
             var focused by remember { mutableStateOf(false) }
             Box(
@@ -436,7 +443,7 @@ private fun Message(text: String, retry: Boolean, onRetry: () -> Unit) {
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onRetry),
             ) {
                 Chip(focused = focused, modifier = Modifier.height(52.dp), fill = GuideUi.White12, border = GuideUi.White16) { color ->
-                    Line(stringResource(R.string.sports_retry), GuideUi.sans(22, FontWeight.Medium, color))
+                    Line(stringResource(R.string.sports_retry), GuideUi.sans(24, FontWeight.SemiBold, color))
                 }
             }
         }
@@ -469,11 +476,11 @@ private fun ChoiceList(kind: ChipMenu, prefsCorner: ScoreCorner, prefsDelay: Int
     val requesters = remember(kind) { List(items.size) { FocusRequester() } }
     LaunchedEffect(kind) { runCatching { requesters[current].requestFocus() } }
     val shape = RoundedCornerShape(DesignTokens.Radii.Button)
-    Box(Modifier.fillMaxSize().padding(top = 112.dp, end = 96.dp), contentAlignment = Alignment.TopEnd) {
+    Box(Modifier.fillMaxSize().padding(top = 128.dp, end = 96.dp), contentAlignment = Alignment.TopEnd) {
         Column(
             Modifier
                 .testTag(SPORTS_MENU_TAG)
-                .width(280.dp)
+                .width(320.dp)
                 .background(GuideUi.OverlayFill, shape)
                 .border(1.dp, GuideUi.OverlayBorder, shape)
                 .padding(8.dp),
@@ -500,12 +507,12 @@ private fun ChoiceList(kind: ChipMenu, prefsCorner: ScoreCorner, prefsDelay: Int
                 ) {
                     Chip(
                         focused = focused,
-                        modifier = Modifier.fillMaxWidth().height(48.dp),
+                        modifier = Modifier.fillMaxWidth().height(56.dp),
                         shape = RoundedCornerShape(DesignTokens.Radii.Cell),
                         fill = if (isCurrent) GuideUi.White12 else androidx.compose.ui.graphics.Color.Transparent,
                     ) { color ->
-                        Line(label, GuideUi.sans(22, if (isCurrent) FontWeight.SemiBold else FontWeight.Medium, color), Modifier.weight(1f))
-                        if (isCurrent) Line("✓", GuideUi.sans(22, FontWeight.SemiBold, color))
+                        Line(label, GuideUi.sans(24, if (isCurrent) FontWeight.SemiBold else FontWeight.Medium, color), Modifier.weight(1f))
+                        if (isCurrent) Line("✓", GuideUi.sans(24, FontWeight.SemiBold, color))
                     }
                 }
             }

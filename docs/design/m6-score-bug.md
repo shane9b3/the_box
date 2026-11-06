@@ -542,26 +542,32 @@ countdown, 2026-11-05).*
 
 ### 5.2 Layout (design px)
 
+Owner request 2026-11-06: larger for 10-foot readability. Cards and text are bigger; nothing on the screen is below 20 px.
+
 | Region | Geometry |
 |---|---|
-| Title row | (96, 56): "Sports" 34/600, an "NHL" chip (`White08`, r 8, 18/600). Right-aligned to 1824: **Corner · Top right** and **Delay · Off** chips (U-N6), 32 apart from the title |
-| Credit | under the title, 18 px `.55`: "Scores and logos: NHL.com" (U-S9) |
-| Day chips | (96, 156), height 52, gap 12: **Yesterday · Today · Tomorrow** (22/500) |
-| Games grid | top 232, viewport bottom = footer top − 16; 3 columns × 564 (96 → 1824, gap 18); card height 128, row gap 24. The focused row stays 64 inside the viewport while it scrolls. A `LazyVerticalGrid` (≤ 16 items) |
-| Footer | `FooterHints` at 22 (U-S9): `← → ↑ ↓ Browse · OK Follow score` / `OK Stop following` (from the focused card) `· Back Guide` |
+| Title row | (96, 56), height 60: "Sports" 44/600, an "NHL" chip (`White08`, r 8, 22/600). Right-aligned to 1824: **Corner · Top right** and **Delay · Off** chips (U-N6, height 52, text 24/500), 32 apart from the title |
+| Credit | under the title, 20 px `.55`: "Scores and logos: NHL.com" (U-S9) |
+| Day chips | height 60, gap 12: **Yesterday · Today · Tomorrow** (26/500) |
+| Games grid | top 256, viewport bottom = footer top − 16; 3 columns × 564 (96 → 1824, gap 18); card height 208, row gap 24, so about 3 rows show and the rest scroll. The focused row stays 64 inside the viewport while it scrolls. A `LazyVerticalGrid` (≤ 16 items) |
+| Footer | `FooterHints` at 24 (U-S9), key caps 20: `← → ↑ ↓ Browse · OK Follow score` / `OK Stop following` (from the focused card) `· Back Guide` |
 
-**Card** (U-S6, U-N7, U-N8):
-- **Teams:** two rows, away over home. Each row has a logo on a fixed `#0A0D13` 64 × 44 radius-8 plate, the team
-  name (common name, 26/600), and the score at 34/700 tabular.
-- **State column:** right-aligned, 22/500 `.75`.
-  - Live games show the red dot plus **LIVE**, then `2nd · 10:22`: the board snapshot's own clock, with the same rule
-    as the bug (owner ruling 6: no local countdown; it changes when the day list re-polls).
-  - Other games show `1st INT`, `Final/OT` or `7:00 PM`.
-- **Focused:** `#EEF1F6` fill, 3 px accent ring, and a right-aligned action chip reading **OK Follow score** or **OK
-  Stop following**.
-- **Followed:** a **✓ Following** chip. Unfocused: accentText `#B6D4F7` on `White08`. Focused: `#0A0D13` on accent
-  `.22`. Never the red dot.
+**Card** (U-S6, U-N7, U-N8), 564 × 208, padding 18:
+- **Header strip** (height 32), then a 12 gap:
+  - Left: the state at 24/600, `.75` alpha (a live game's text is full white). Live games show the red dot (12 px) plus **LIVE**, then
+    `2nd · 10:22`: the board snapshot's own clock, with the same rule as the bug (owner ruling 6: no local countdown; it
+    changes when the day list re-polls). Other games show `1st INT`, `Final/OT`, `7:00 PM` or `Postponed`.
+  - Right: one chip at a time, 22/600, height 32. Focused card: **OK Follow score** or **OK Stop following**. Unfocused
+    followed card: **✓ Following**.
+- **Teams:** two rows, away over home, each 60 tall with 8 between. Each row has a logo on a fixed `#0A0D13` 80 × 56
+  radius-10 plate (the logo slot is 70 × 45: the old 56 × 36 slot × 1.25), a 16 gap, the team name (common name, 32/600,
+  one line) and the score at 44/700 tabular, right-aligned in a 72 px column. The longest NHL common names ("Golden
+  Knights", "Blue Jackets", "Maple Leafs") fit without an ellipsis (`GameCardFitTest`).
+- **Focused:** `#EEF1F6` fill, 3 px accent ring, and the action chip.
+- **Followed:** a **✓ Following** chip. Unfocused: accentText `#B6D4F7` on `White08`. Focused: the card shows the action
+  chip instead. Never the red dot.
 - **Order:** live, then pre-game, then scheduled by start time, then final.
+- **Messages:** empty / error / off text 28/500; the Retry button text 24/600.
 
 The Corner and Delay chips each open a small choice list (the context-menu pattern). They write the same prefs as the
 quick bar.

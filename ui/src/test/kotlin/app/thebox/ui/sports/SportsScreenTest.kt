@@ -144,12 +144,15 @@ class SportsScreenTest {
         rule.onNodeWithText(str(R.string.sports_footer_follow), useUnmergedTree = true).assertExists()
         press(Key.DirectionCenter)
         assertEquals("L1", repo.followed.value?.gameId)
-        rule.onNodeWithTag(SPORTS_FOLLOWING_TAG + "L1", useUnmergedTree = true).assertTextEquals(str(R.string.sports_card_following))
+        // One chip at a time (owner request 2026-11-06): the focused followed card shows only the Stop chip
+        rule.onNodeWithTag(SPORTS_FOLLOWING_TAG + "L1", useUnmergedTree = true).assertDoesNotExist()
         rule.onNodeWithTag(SPORTS_ACTION_TAG + "L1", useUnmergedTree = true).assertTextEquals(str(R.string.sports_card_action_stop))
         rule.onNodeWithText(str(R.string.sports_footer_stop), useUnmergedTree = true).assertExists()
-        // The followed chip is on that card only; following another game moves it
+        // Moved away, the followed card shows "✓ Following"; it is on that card only, and following another game moves it
+        press(Key.DirectionRight)
+        rule.onNodeWithTag(SPORTS_FOLLOWING_TAG + "L1", useUnmergedTree = true).assertTextEquals(str(R.string.sports_card_following))
         rule.onNodeWithTag(SPORTS_FOLLOWING_TAG + "L2", useUnmergedTree = true).assertDoesNotExist()
-        press(Key.DirectionRight, Key.DirectionCenter)
+        press(Key.DirectionCenter)
         assertEquals("L2", repo.followed.value?.gameId)
         rule.onNodeWithTag(SPORTS_FOLLOWING_TAG + "L1", useUnmergedTree = true).assertDoesNotExist()
         // OK on the followed game stops following

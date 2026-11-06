@@ -67,10 +67,40 @@ private val AccentText = DesignTokens.Colors.AccentText
 private val Accent22 = DesignTokens.Colors.OnNowFill
 
 /**
- * One game card (docs/design/m6-score-bug.md §5.2), 564 x 128 design px (1 dp = 1 design px inside the root's scale).
- * Two team rows (logo plate, common name, score), and the state column on the right: LIVE with the clock as the day list
- * last reported it (owner ruling 6: no local countdown), `1st INT`, `Final/OT` or the start time. Focused: `#EEF1F6` fill, a 3 px accent ring and an action chip. Followed: a
- * "✓ Following" chip, never the red dot.
+ * Design metrics of the card (docs/design/m6-score-bug.md §5.2; owner request 2026-11-06, larger for 10-foot readability).
+ * Internal so the fit test measures the same numbers the card lays out with.
+ */
+internal object GameCardMetrics {
+    const val CARD_W = 564
+    const val CARD_H = 208
+    const val PAD = 18
+    const val HEADER_H = 32
+    const val HEADER_GAP = 12
+    const val ROW_H = 60
+    const val ROW_GAP = 8
+    const val PLATE_W = 80
+    const val PLATE_H = 56
+    const val PLATE_GAP = 16
+    const val NAME_PX = 32
+    const val SCORE_PX = 44
+    const val SCORE_W = 72
+    const val NAME_SCORE_GAP = 8
+    const val STATE_PX = 24
+    const val CHIP_PX = 22
+    const val CHIP_PAD_H = 12
+    const val DOT = 12
+    const val DOT_GAP = 8
+    const val INNER_W = CARD_W - 2 * PAD
+    /** The team name's column: the row minus plate, gap, score column and the gap before it. */
+    const val NAME_W = INNER_W - PLATE_W - PLATE_GAP - SCORE_W - NAME_SCORE_GAP
+}
+
+/**
+ * One game card (docs/design/m6-score-bug.md §5.2), 564 x 208 design px (1 dp = 1 design px inside the root's scale).
+ * A header strip (state on the left: LIVE with the clock as the day list last reported it (owner ruling 6: no local
+ * countdown), `1st INT`, `Final/OT` or the start time; one chip on the right), then two team rows (logo plate, common
+ * name, score). Focused: `#EEF1F6` fill, a 3 px accent ring and the action chip. Followed: a "✓ Following" chip, never
+ * the red dot.
  *
  * Focus is Compose's (the Sports tab is on Compose focus): the card is a `clickable`, OK follows or stops following.
  * Nothing ticks: a card recomposes only when the board brings a new snapshot.
@@ -100,7 +130,7 @@ internal fun GameCard(
     val interaction = remember { MutableInteractionSource() }
     Box(
         modifier
-            .height(128.dp)
+            .height(GameCardMetrics.CARD_H.dp)
             .fillMaxWidth()
             .testTag(sportsCardTag(g.id.id))
             .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
@@ -111,42 +141,39 @@ internal fun GameCard(
             .clickable(interactionSource = interaction, indication = null, onClick = onClick)
             .semantics(mergeDescendants = true) { contentDescription = desc },
     ) {
-        Row(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                TeamRow(g.away, ink)
-                TeamRow(g.home, ink)
+        Column(Modifier.fillMaxSize().padding(GameCardMetrics.PAD.dp)) {
+            Row(Modifier.fillMaxWidth().height(GameCardMetrics.HEADER_H.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.CenterStart) { StateLine(card, clock24, ink) }
+                // One chip at a time: the focused card's action, else the followed card's "✓ Following".
+                if (focused) ActionChip(g.id.id, card.followed) else if (card.followed) FollowingChip(g.id.id, false)
             }
-            Spacer(Modifier.width(12.dp))
-            Column(Modifier.width(STATE_COLUMN_W.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically)) {
-                StateLine(card, clock24, ink)
-                if (card.followed) FollowingChip(g.id.id, focused)
-                if (focused) ActionChip(g.id.id, card.followed)
-            }
+            Spacer(Modifier.height(GameCardMetrics.HEADER_GAP.dp))
+            TeamRow(g.away, ink)
+            Spacer(Modifier.height(GameCardMetrics.ROW_GAP.dp))
+            TeamRow(g.home, ink)
         }
     }
 }
 
-private const val STATE_COLUMN_W = 232
-
 @Composable
 private fun TeamRow(team: TeamLine, ink: Color) {
-    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().height(GameCardMetrics.ROW_H.dp), verticalAlignment = Alignment.CenterVertically) {
         LogoPlate(team)
-        Spacer(Modifier.width(12.dp))
-        Line(team.name, GuideUi.sans(26, FontWeight.SemiBold, ink), Modifier.weight(1f))
-        Spacer(Modifier.width(8.dp))
+        Spacer(Modifier.width(GameCardMetrics.PLATE_GAP.dp))
+        Line(team.name, GuideUi.sans(GameCardMetrics.NAME_PX, FontWeight.SemiBold, ink), Modifier.weight(1f))
+        Spacer(Modifier.width(GameCardMetrics.NAME_SCORE_GAP.dp))
         Line(
             team.score?.toString().orEmpty(),
-            GuideUi.sans(34, FontWeight.Bold, ink).copy(fontFeatureSettings = "tnum", textAlign = TextAlign.End),
-            Modifier.width(44.dp),
+            GuideUi.sans(GameCardMetrics.SCORE_PX, FontWeight.Bold, ink).copy(fontFeatureSettings = "tnum", textAlign = TextAlign.End),
+            Modifier.width(GameCardMetrics.SCORE_W.dp),
         )
     }
 }
 
 /**
- * The fixed `#0A0D13` 64 x 44 radius-8 plate: the abbreviation shows until the logo has loaded (never waits on the
+ * The fixed `#0A0D13` 80 x 56 radius-10 plate: the abbreviation shows until the logo has loaded (never waits on the
  * network). The logo comes through WP-3's path ([coilLogoFetch]: the app loader with the SVG decoder, rasterised and
- * trimmed to its art by [LogoTrim], fitted to the 56 x 36 inner slot), so the cards and the bug crop logos the same way.
+ * trimmed to its art by [LogoTrim], fitted to the 70 x 45 inner slot), so the cards and the bug crop logos the same way.
  * The `_dark` art is drawn on the dark plate in both focus states (§5.2), so its white parts never sit on the light card.
  */
 @Composable
@@ -168,15 +195,15 @@ private fun LogoPlate(team: TeamLine) {
         if (bmp != null) CardLogoCache.put(url, w, h, bmp)
         value = bmp
     }
-    Box(Modifier.size(64.dp, 44.dp).background(Plate, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
+    Box(Modifier.size(GameCardMetrics.PLATE_W.dp, GameCardMetrics.PLATE_H.dp).background(Plate, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
         val img = logo
-        if (img == null) Line(team.abbrev, GuideUi.sans(18, FontWeight.SemiBold, GuideUi.Fg60))
+        if (img == null) Line(team.abbrev, GuideUi.sans(22, FontWeight.SemiBold, GuideUi.Fg60))
         else Image(img, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(LOGO_SLOT_W.dp, LOGO_SLOT_H.dp))
     }
 }
 
 /**
- * (Fix pass, U-S6) Trimmed card logos by URL and slot size: about 64 entries of a few KB each (56 × 36 design px), so the
+ * (Fix pass, U-S6) Trimmed card logos by URL and slot size: about 64 entries of a few KB each (70 × 45 design px), so the
  * whole league for two densities fits. The bug's two logos stay in [FollowLogos] (A-S11).
  */
 internal object CardLogoCache {
@@ -186,16 +213,16 @@ internal object CardLogoCache {
     fun put(url: String, w: Int, h: Int, img: ImageBitmap) { lru.put(key(url, w, h), img) }
 }
 
-/** The logo's slot inside the 64 x 44 plate (4 px clear on each side). Design px. */
-private const val LOGO_SLOT_W = 56
-private const val LOGO_SLOT_H = 36
+/** The logo's slot inside the 80 x 56 plate (5 px clear on each side: the old 56 x 36 slot x 1.25). Design px. */
+private const val LOGO_SLOT_W = 70
+private const val LOGO_SLOT_H = 45
 
-/** Live games: the red dot, LIVE, then `2nd · 10:22`. Every other game: its state words (22/500, `.75`). */
+/** Live games: the red dot, LIVE, then `2nd · 10:22`. Every other game: its state words (24/600, `.75`; live text full ink). */
 @Composable
 private fun StateLine(card: GameCardModel, clock24: Boolean, ink: Color) {
     val res = LocalResources.current
     val g = card.game
-    val style = GuideUi.sans(22, FontWeight.Medium, ink.copy(alpha = 0.75f))
+    val style = GuideUi.sans(GameCardMetrics.STATE_PX, FontWeight.SemiBold, ink.copy(alpha = 0.75f))
     if (g.phase != GamePhase.LIVE) {
         Line(SportsText.state(res, g, clock24), style, Modifier.testTag("sports_state:" + g.id.id))
         return
@@ -211,17 +238,18 @@ private fun StateLine(card: GameCardModel, clock24: Boolean, ink: Color) {
             else res.getString(R.string.sports_card_live_line, SportsText.period(res, p), SportsText.clock(secs))
         }
     }
-    Row(Modifier.testTag("sports_state:" + g.id.id), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        Dot(GuideUi.Live, 10.dp)
-        Line(stringResource(R.string.sports_live), style.copy(fontWeight = FontWeight.SemiBold))
-        if (detail != null) Line(detail, style)
+    Row(Modifier.testTag("sports_state:" + g.id.id), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(GameCardMetrics.DOT_GAP.dp)) {
+        Dot(GuideUi.Live, GameCardMetrics.DOT.dp)
+        val full = style.copy(color = ink)
+        Line(stringResource(R.string.sports_live), full)
+        if (detail != null) Line(detail, full)
     }
 }
 
 /** "✓ Following": accentText on White08; focused `#0A0D13` on accent .22 (the lead's sign-off: never the red dot). */
 @Composable
 private fun FollowingChip(gameId: String, focused: Boolean) {
-    Chip18(
+    Chip22(
         stringResource(R.string.sports_card_following),
         textColor = if (focused) Ink else AccentText,
         fill = if (focused) Accent22 else GuideUi.White08,
@@ -232,7 +260,7 @@ private fun FollowingChip(gameId: String, focused: Boolean) {
 /** The focused card's action: "OK Follow score" or "OK Stop following". */
 @Composable
 private fun ActionChip(gameId: String, followed: Boolean) {
-    Chip18(
+    Chip22(
         stringResource(if (followed) R.string.sports_card_action_stop else R.string.sports_card_action_follow),
         textColor = GuideUi.Fg,
         fill = Ink,
@@ -241,9 +269,12 @@ private fun ActionChip(gameId: String, followed: Boolean) {
 }
 
 @Composable
-private fun Chip18(text: String, textColor: Color, fill: Color, modifier: Modifier) {
-    Box(Modifier.background(fill, RoundedCornerShape(DesignTokens.Radii.Chip)).padding(horizontal = 10.dp, vertical = 3.dp)) {
+private fun Chip22(text: String, textColor: Color, fill: Color, modifier: Modifier) {
+    Box(
+        Modifier.height(GameCardMetrics.HEADER_H.dp).background(fill, RoundedCornerShape(DesignTokens.Radii.Chip)).padding(horizontal = GameCardMetrics.CHIP_PAD_H.dp),
+        contentAlignment = Alignment.Center,
+    ) {
         // The tag sits on the text node, so tests (and TalkBack) read the chip's words.
-        Line(text, TextStyle.Default.merge(GuideUi.sans(18, FontWeight.SemiBold, textColor)), modifier)
+        Line(text, TextStyle.Default.merge(GuideUi.sans(GameCardMetrics.CHIP_PX, FontWeight.SemiBold, textColor)), modifier)
     }
 }
