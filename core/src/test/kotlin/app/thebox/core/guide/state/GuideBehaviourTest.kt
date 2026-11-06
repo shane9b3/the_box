@@ -126,8 +126,8 @@ class GuideBehaviourTest {
             assertEquals(GuideStateMachineImpl.TAB_SEARCH, w.ui.tabFocused)
             w.press(DOWN); w.press(UP) // TABS → HEADER → TABS (owner ruling 2026-11-01: no PANEL)
             assertEquals(Zone.TABS, w.ui.zone); assertEquals(GuideStateMachineImpl.TAB_GUIDE, w.ui.tabFocused)
-            w.press(RIGHT); w.press(RIGHT); w.press(SELECT); w.press(BACK) // Settings and back
-            assertEquals(Zone.TABS, w.ui.zone); assertEquals(2, w.ui.tabFocused)
+            w.press(RIGHT); w.press(RIGHT); w.press(RIGHT); w.press(SELECT); w.press(BACK) // Settings and back
+            assertEquals(Zone.TABS, w.ui.zone); assertEquals(GuideStateMachineImpl.TAB_SETTINGS, w.ui.tabFocused)
             // A stale tab from an earlier visit (review S3 grid_home_stale_tab): the ladder still lands on Search.
             w.press(DOWN); w.press(DOWN) // TABS → HEADER → GRID (owner ruling 2026-11-01: no PANEL)
             assertEquals(Zone.GRID, w.ui.zone)

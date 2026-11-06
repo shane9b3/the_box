@@ -140,7 +140,8 @@ class GuideKeyTableTest {
             },
             "tabs" to { home().keys(UP, UP, UP) },
             "tabs_search" to { home().keys(UP, UP, UP, RIGHT) },
-            "tabs_settings" to { home().keys(UP, UP, UP, RIGHT, RIGHT) },
+            "tabs_sports" to { home().keys(UP, UP, UP, RIGHT, RIGHT) },
+            "tabs_settings" to { home().keys(UP, UP, UP, RIGHT, RIGHT, RIGHT) },
             "header" to { home().keys(UP) },
             // (review S6; owner ruling 2026-11-01) The top bar was left on Search (tab 1), then Down to the chips.
             "header_stale_tab" to { home().keys(UP, UP, RIGHT, DOWN).also { check(it.ui.zone == Zone.HEADER && it.ui.tabFocused == 1) } },
@@ -176,7 +177,7 @@ class GuideKeyTableTest {
             "card" to { alerted().also { it.advance(600) } },
             "card_dismiss" to { alerted().also { it.advance(600); it.press(RIGHT) } },
             "card_channel_gone" to { alerted().also { it.reminderChannelGone = true; it.advance(600) } },
-            "settings_card" to { home().keys(UP, UP, UP, RIGHT, RIGHT, SELECT).also { it.alert(); it.advance(700) } },
+            "settings_card" to { home().keys(UP, UP, UP, RIGHT, RIGHT, RIGHT, SELECT).also { it.alert(); it.advance(700) } },
             "search_card" to { home().keys(UP, UP, UP, RIGHT, SELECT).also { it.alert(); it.advance(700) } },
             "grid_empty_source" to { home().keys(FAVOURITES).also { check(it.machine.frame.focus == null) } },
             "full" to { home().keys(SELECT) },
@@ -186,7 +187,8 @@ class GuideKeyTableTest {
             "ask_home" to { GuideWorld(startTuned = false, settings = GuideSettings(exitConfirmation = ExitConfirmation.ASK)) },
             "none_home" to { GuideWorld(startTuned = false, settings = GuideSettings(exitConfirmation = ExitConfirmation.NONE)) },
             "search" to { home().keys(UP, UP, UP, RIGHT, SELECT) },
-            "settings" to { home().keys(UP, UP, UP, RIGHT, RIGHT, SELECT) },
+            "sports" to { home().keys(UP, UP, UP, RIGHT, RIGHT, SELECT) },
+            "settings" to { home().keys(UP, UP, UP, RIGHT, RIGHT, RIGHT, SELECT) },
         )
     }
 }

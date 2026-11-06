@@ -163,6 +163,8 @@ fun AppRoot(
     debugHint: Boolean = false,
     videoLayer: @Composable (RectPx?) -> Unit = { rect -> VideoLayer(host.surfacePlayer, rect, Modifier.testTag(VIDEO_LAYER_TAG)) },
     search: @Composable () -> Unit = {},
+    /** (docs/design/m6-score-bug.md §5.1) The Sports screen (the activity owns its view model); an opaque canvas by default. */
+    sports: @Composable (clock24: Boolean) -> Unit = {},
     /** (M5 integration) WP-D's phone page for `SettingsRoute.PhoneSetup` (the activity owns its view model). */
     settingsPhone: (@Composable (app.thebox.core.settings.PhonePurpose, Long?) -> Unit)? = null,
     /** (M6, docs/design/m6-channel-editor.md §2.0) The channel editor page for `SettingsRoute.ChannelEditor`. */
@@ -375,8 +377,8 @@ fun AppRoot(
                         )
                         ScreenMode.FULL -> FullScreenHost(ui, player = player, clock24 = settings.clock24, lowEnd = lowEnd, hostFacts = scoreFacts)
                         ScreenMode.SEARCH -> search()
-                        // (Score bug commit 0, §5.1) Never entered yet: an opaque canvas; WP-4a draws SportsScreen here.
-                        ScreenMode.SPORTS -> Box(Modifier.fillMaxSize().background(app.thebox.ui.theme.DesignTokens.Colors.Canvas).testTag(SPORTS_TAG))
+                        // (docs/design/m6-score-bug.md §5.1) The Sports tab: opaque, covers the hole, on Compose focus.
+                        ScreenMode.SPORTS -> Box(Modifier.fillMaxSize().background(app.thebox.ui.theme.DesignTokens.Colors.Canvas).testTag(SPORTS_TAG)) { sports(settings.clock24) }
                         ScreenMode.SETTINGS -> if (settingsMachine != null) {
                             app.thebox.ui.settings.SettingsScreen(settingsMachine, settings.clock24, phone = settingsPhone, channelEditor = settingsEditor)
                         } else {

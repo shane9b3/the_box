@@ -33,7 +33,7 @@ object GuideTexts {
     const val HINT_EXIT = "Exit"; const val HINT_GUIDE = "Guide"; const val HINT_CHOOSE = "Choose"; const val HINT_OPEN = "Open"
 
     // Announcements (§3.6.6: other zones announce the focused element's label)
-    fun tab(i: Int): String = when (i) { 0 -> "Guide"; 1 -> "Search"; else -> "Settings" } + ", tab"
+    fun tab(i: Int): String = when (i) { 0 -> "Guide"; 1 -> "Search"; 2 -> "Sports"; else -> "Settings" } + ", tab"
     fun chip(c: HeaderChip, source: String, day: String): String = when (c) {
         HeaderChip.GROUP -> "Group: $source, button"
         HeaderChip.NOW -> "Now, button"

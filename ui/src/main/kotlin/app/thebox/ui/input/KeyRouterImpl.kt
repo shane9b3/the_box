@@ -34,7 +34,8 @@ import android.view.KeyEvent as AndroidKeyEvent
  * - A key with a long binding arms a [LONG_PRESS_MS] timer on its first DOWN (remotes that never auto-repeat OK);
  *   the UP cancels it.
  * - Returns true for every key it handled including the matching UP; keys with no binding (volume, Home) return
- *   false. In SEARCH every key returns false except BACK while [searchFieldIdle] (empty field, IME hidden).
+ *   false. In SEARCH every key returns false except BACK while [searchFieldIdle] (empty field, IME hidden). SPORTS is
+ *   the same, with the flag meaning "no choice list open" (docs/design/m6-score-bug.md §5.1).
  * - [KeyCapabilities.record] runs for every bound or unbound DOWN with repeat 0 (the impl writes only new codes, N7).
  * - (code review 2026-10-14, H-S4) A key whose action the machine would ignore (`GuideStateMachine.handles` false:
  *   M3 FULL passed Play/Pause and FF/RW; M4 FULL handles them, §7 item 15) returns false, so the framework hands it
@@ -165,7 +166,9 @@ class KeyRouterImpl(
             val dropLong = m.horizontalRepeat && (code == Keys.DPAD_LEFT || code == Keys.DPAD_RIGHT)
             val long = if (dropLong) null else keyMap.long(context, code)
             if (short == null && long == null) return false
-            if (mode == ScreenMode.SEARCH && !(short == BoxAction.BACK && searchFieldIdle())) return false
+            // SPORTS (docs/design/m6-score-bug.md §5.1) is on Compose focus too: every key but BACK passes through, and BACK
+            // goes to the machine unless the screen holds it (its choice list is open: the same "idle" flag as Search).
+            if ((mode == ScreenMode.SEARCH || mode == ScreenMode.SPORTS) && !(short == BoxAction.BACK && searchFieldIdle())) return false
             if (long == null && short != null && !m.handles(short)) return false // H-S4: on to the media session
             consumedDown += code
             heldContext[code] = context

@@ -283,7 +283,7 @@ class PinRoutingTest {
             val (w, _) = world(lockSettings)
             var guard = 0
             while (w.ui.zone != app.thebox.core.guide.Zone.TABS && guard++ < 5) w.press(UP)
-            while (w.ui.tabFocused < 2) w.press(RIGHT)
+            while (w.ui.tabFocused < GuideStateMachineImpl.TAB_SETTINGS) w.press(RIGHT)
             w.press(SELECT)
             assertEquals(ScreenMode.GUIDE, w.ui.mode, "not yet")
             assertEquals(PinPurpose.EnterSettings(SettingsRoute.Root), w.ui.pin!!.purpose)
