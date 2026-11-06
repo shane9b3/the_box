@@ -446,13 +446,14 @@ object PlayerText {
     }
 
     /** The current value shown after the label ("Audio · English 5.1"), or null. */
-    fun quickValue(res: Resources, item: QuickItem, q: QuickBarState): String? = when (item) {
+    fun quickValue(res: Resources, item: QuickItem, q: QuickBarState, clock24: Boolean = true): String? = when (item) {
         QuickItem.AUDIO -> q.audio?.let { audio(res, it) }
         QuickItem.ASPECT -> res.getString(aspect(q.aspect))
         QuickItem.SUBTITLES -> q.subtitle?.let { text(res, it) } ?: res.getString(R.string.player_value_off)
         QuickItem.PREVIOUS_CHANNEL -> q.previous?.displayName
         QuickItem.STREAM_INFO -> if (q.statsOn) res.getString(R.string.player_value_on) else null
         QuickItem.VIDEO_DECODER -> res.getString(decoder(q.decoder))
+        QuickItem.SCORE_BUG -> q.score?.let { SportsText.quickValue(res, it, clock24) } // (score bug WP-4b) "Follow a game" / "CGY 0–2 EDM" / "Starts 7:00 PM"
         else -> null
     }
 

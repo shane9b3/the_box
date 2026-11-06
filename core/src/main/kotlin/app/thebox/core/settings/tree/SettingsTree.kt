@@ -42,6 +42,7 @@ object SettingsTree {
         ChannelsRows, BackupRows, // D
         ParentalRows, ButtonMappingRows, // C
         AboutRows, // E
+        SportsRows, // score bug WP-4b (advanced only)
     )
 
     private val byId: Map<RowId, RowSpec> by lazy {

@@ -1,8 +1,16 @@
 package app.thebox.core.full.state
 
+import app.thebox.core.full.PickerChoice
 import app.thebox.core.full.QuickItem
 import app.thebox.core.full.TrackMenu
 import app.thebox.core.guide.GuideChannel
+
+/**
+ * (Score bug WP-4b, docs/design/m6-score-bug.md §6, U-S5) Where "Score bug" sits: HIDDEN while Show Sports is off;
+ * AFTER_SUBTITLES (after Subtitles, or after Picture shape without subtitles) while a game is followed; BEFORE_SETTINGS
+ * otherwise. Settings stays last.
+ */
+enum class ScoreBugItem { HIDDEN, AFTER_SUBTITLES, BEFORE_SETTINGS }
 
 /**
  * Which `QuickItem`s show, in order (docs/design/m4-player-ux.md §3.4.1; owner ruling 2026-10-15; M6
@@ -31,6 +39,7 @@ object QuickBarModel {
         favourite: Boolean?,
         previous: GuideChannel?,
         live: Boolean = true,
+        scoreBug: ScoreBugItem = ScoreBugItem.HIDDEN,
     ): List<QuickItem> {
         val out = ArrayList<QuickItem>(QuickItem.entries.size)
         if (inArchive) out += QuickItem.JUMP_TO_LIVE else if (live) out += QuickItem.TIME_SHIFT
@@ -38,6 +47,7 @@ object QuickBarModel {
         if (menu.audio.size >= 2 || selectedUnsupported) out += QuickItem.AUDIO
         out += QuickItem.ASPECT
         if (menu.text.isNotEmpty()) out += QuickItem.SUBTITLES
+        if (scoreBug == ScoreBugItem.AFTER_SUBTITLES) out += QuickItem.SCORE_BUG // (score bug U-S5) right after Subtitles / Picture shape
         when (favourite) {
             false -> out += QuickItem.FAVOURITE_ADD
             true -> out += QuickItem.FAVOURITE_REMOVE
@@ -50,7 +60,15 @@ object QuickBarModel {
         out += QuickItem.SCREEN_OFF
         // (M5 integration, §3.6.2, E23) The Sources picker when the playlist has backup servers.
         if (menu.servers.size >= 2) out += QuickItem.SOURCES
+        if (scoreBug == ScoreBugItem.BEFORE_SETTINGS) out += QuickItem.SCORE_BUG // (score bug U-S5) not following: just before Settings
         out += QuickItem.SETTINGS
         return out
     }
 }
+
+/**
+ * (Score bug WP-4b, docs/design/m6-score-bug.md section 6, U-N9) False for the sheet's "Today" divider and "Loading games"
+ * line: focus skips them and OK does nothing. Every other row of every picker can take focus.
+ */
+val PickerChoice.selectable: Boolean
+    get() = this !is PickerChoice.ScoreTodayDivider && this !is PickerChoice.ScoreLoading

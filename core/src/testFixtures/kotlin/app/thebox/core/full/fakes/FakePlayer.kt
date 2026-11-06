@@ -49,6 +49,12 @@ class RecordingPlayerEffects : PlayerEffects {
     override fun tryNextCatchupFormat() = rec("tryNextCatchupFormat")
     override fun toggleReminder(channel: GuideChannel, info: ProgrammeInfo) = rec("toggleReminder", channel, info)
     override fun openSettings() = rec("openSettings")
+    // (Score bug WP-4b) The score effects, recorded.
+    override fun followGame(id: app.thebox.core.sports.GameId?) = rec("followGame", id)
+    override fun setScoreCorner(c: app.thebox.core.sports.ScoreCorner) = rec("setScoreCorner", c)
+    override fun setScoreDelay(sec: Int) = rec("setScoreDelay", sec)
+    override fun scorePicker(open: Boolean) = rec("scorePicker", open)
+    override fun retryScores() = rec("retryScores")
     override fun loadProgrammes(token: Long, channel: GuideChannel, aroundMin: Int, before: Int, after: Int) =
         rec("loadProgrammes", token, channel, aroundMin, before, after)
     override fun loadChannel(token: Long, from: GuideChannel, delta: Int) = rec("loadChannel", token, from, delta)

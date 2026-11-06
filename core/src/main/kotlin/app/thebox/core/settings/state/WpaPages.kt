@@ -46,6 +46,11 @@ import app.thebox.core.settings.tree.PauseRewindRows
 import app.thebox.core.settings.tree.PlaybackRows
 import app.thebox.core.settings.tree.RemoteRows
 import app.thebox.core.settings.tree.SettingsTree
+import app.thebox.core.settings.tree.SportsRows
+import app.thebox.core.sports.ScoreBugSize
+import app.thebox.core.sports.ScoreCorner
+import app.thebox.core.sports.SportsConstants
+import app.thebox.core.sports.SportsPrefs
 import app.thebox.core.storage.StorageKind
 import app.thebox.core.storage.StorageLimits
 import app.thebox.core.storage.LocationState
@@ -149,7 +154,7 @@ class WpaPages(
 
     override fun handles(route: SettingsRoute): Boolean =
         // (WP-S4) PauseRewind is StoragePages' page (Q-D8, closure fix pass: the only route to it).
-        route is SettingsRoute.Section && route.id in SECTIONS
+        route is SettingsRoute.Section && route.id in HANDLED
 
     override val changes: Flow<Unit>
         get() = merge(
@@ -158,6 +163,7 @@ class WpaPages(
             store.flow(PlaybackDomain).drop(1).map { },
             store.flow(DataDomain).drop(1).map { },
             store.flow(NetworkDomain).drop(1).map { },
+            store.flow(SportsDomain).drop(1).map { },
             artwork.status.drop(1).map { },
         )
 
@@ -172,6 +178,7 @@ class WpaPages(
             SectionId.INTERFACE -> interfaceRows()
             SectionId.REMOTE -> remoteRows()
             SectionId.NETWORK -> networkRows()
+            SectionId.SPORTS -> sportsRows()
             else -> emptyList()
         }.filter { advanced || it.visibility == Visibility.SIMPLE }
         return PageModel(route = route, title = texts.section(id), rows = rows, version = version.incrementAndGet())
@@ -566,6 +573,35 @@ class WpaPages(
         return out
     }
 
+    // ---------------------------------------------------------------- Sports (score bug §7)
+
+    private fun sportsRows(): List<SettingsRow> {
+        val p = store.flow(SportsDomain).value
+        val out = ArrayList<SettingsRow>()
+        out += toggle(SportsRows.SHOW, t(SettingsText.SPORTS_SHOW), p.enabled, t(SettingsText.SPORTS_SHOW_DESC))
+        out += choice(
+            SportsRows.CORNER, t(SettingsText.SPORTS_CORNER),
+            listOf(
+                ScoreCorner.TOP_RIGHT to SettingsText.SPORTS_CORNER_TOP_RIGHT, ScoreCorner.TOP_LEFT to SettingsText.SPORTS_CORNER_TOP_LEFT,
+                ScoreCorner.BOTTOM_RIGHT to SettingsText.SPORTS_CORNER_BOTTOM_RIGHT, ScoreCorner.BOTTOM_LEFT to SettingsText.SPORTS_CORNER_BOTTOM_LEFT,
+            ).map { (c, k) -> ChoiceOption(c.name, t(k)) },
+            p.corner.name, t(SettingsText.SPORTS_CORNER_DESC),
+        )
+        out += choice(
+            SportsRows.DELAY, t(SettingsText.SPORTS_DELAY),
+            withCurrent(SportsConstants.DELAY_STEPS_S.map { ChoiceOption(it.toString(), delayLabel(it)) }, p.delaySec.toString()) { delayLabel(it.toIntOrNull() ?: 0) },
+            p.delaySec.toString(), t(SettingsText.SPORTS_DELAY_DESC),
+        )
+        out += choice(
+            SportsRows.SIZE, t(SettingsText.SPORTS_SIZE),
+            listOf(ScoreBugSize.STANDARD to SettingsText.SPORTS_SIZE_STANDARD, ScoreBugSize.LARGE to SettingsText.SPORTS_SIZE_LARGE).map { (s, k) -> ChoiceOption(s.name, t(k)) },
+            p.size.name,
+        )
+        return out
+    }
+
+    private fun delayLabel(sec: Int): String = if (sec <= 0) t(SettingsText.OFF) else t(SettingsText.SPORTS_DELAY_SECONDS, sec)
+
     // ---------------------------------------------------------------- intents
 
     override suspend fun onIntent(route: SettingsRoute, intent: RowIntent, ctx: PageContext): Boolean = apply(intent)
@@ -579,7 +615,7 @@ class WpaPages(
             return true
         }
         val spec = SettingsTree.spec(id) ?: return false
-        if (spec.section !in SECTIONS || spec.owner != "A") return false
+        if (spec.section !in HANDLED || spec.owner != "A" && spec.section != SectionId.SPORTS) return false
         val choose = (intent as? RowIntent.Choose)?.optionId
         val on = (intent as? RowIntent.Toggle)?.on
         when (id) {
@@ -648,6 +684,12 @@ class WpaPages(
             NetworkRows.IPV4 -> choose?.let { c -> enumOf<PreferIpv4>(c)?.let { m -> network { it.copy(preferIpv4 = m) } } }
             NetworkRows.CONNECT_TIMEOUT -> choose?.toIntOrNull()?.let { v -> network { it.copy(connectTimeoutSec = v) } }
             NetworkRows.READ_TIMEOUT -> choose?.toIntOrNull()?.let { v -> network { it.copy(readTimeoutSec = v) } }
+
+            // (Score bug WP-4b, docs/design/m6-score-bug.md §7)
+            SportsRows.SHOW -> on?.let { v -> sports { it.copy(enabled = v) } }
+            SportsRows.CORNER -> choose?.let { c -> enumOf<ScoreCorner>(c)?.let { m -> sports { it.copy(corner = m) } } }
+            SportsRows.DELAY -> choose?.toIntOrNull()?.let { v -> sports { it.copy(delaySec = v) } }
+            SportsRows.SIZE -> choose?.let { c -> enumOf<ScoreBugSize>(c)?.let { m -> sports { it.copy(size = m) } } }
             else -> Unit // links (sources, status, fix, mapping) push routes in the machine
         }
         return true
@@ -657,6 +699,7 @@ class WpaPages(
     private fun player(f: (PlayerSettings) -> PlayerSettings) = store.update(PlayerDomain, f)
     private fun playback(f: (PlaybackPrefs) -> PlaybackPrefs) = store.update(PlaybackDomain, f)
     private fun network(f: (NetworkSettings) -> NetworkSettings) = store.update(NetworkDomain, f)
+    private fun sports(f: (SportsPrefs) -> SportsPrefs) = store.update(SportsDomain, f)
 
     // ---------------------------------------------------------------- row helpers
 
@@ -711,6 +754,8 @@ class WpaPages(
 
     companion object {
         val SECTIONS = setOf(SectionId.GUIDE, SectionId.PLAYBACK, SectionId.INTERFACE, SectionId.REMOTE, SectionId.NETWORK)
+        /** (Score bug WP-4b) [SECTIONS] plus Sports, which is advanced-only and so outside the simple-count sections. */
+        val HANDLED = SECTIONS + SectionId.SPORTS
 
         const val DAILY = "daily"
         /** "Daily at a set time" starts at 03:00 until the user picks an hour. */

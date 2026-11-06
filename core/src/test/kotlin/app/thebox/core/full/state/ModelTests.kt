@@ -424,6 +424,21 @@ class QuickBarModelTest {
         assertEquals(listOf(app.thebox.core.full.QuickItem.SOURCES, SETTINGS), two.takeLast(2))
     }
 
+    /** (Score bug WP-4b, §6, U-S5) After Subtitles while a game is followed; just before Settings otherwise; hidden when Sports is off. */
+    @Test fun scoreBugPosition() {
+        fun items(m: app.thebox.core.full.TrackMenu, s: ScoreBugItem) =
+            QuickBarModel.items(m, startOverCapable = false, inArchive = false, nowProgramme = false, favourite = false, previous = prev, scoreBug = s)
+        val following = items(menu, ScoreBugItem.AFTER_SUBTITLES)
+        assertEquals(SUBTITLES, following[following.indexOf(app.thebox.core.full.QuickItem.SCORE_BUG) - 1])
+        val noSubs = items(menu.copy(text = emptyList()), ScoreBugItem.AFTER_SUBTITLES)
+        assertEquals(ASPECT, noSubs[noSubs.indexOf(app.thebox.core.full.QuickItem.SCORE_BUG) - 1])
+        val idle = items(menu, ScoreBugItem.BEFORE_SETTINGS)
+        assertEquals(listOf(app.thebox.core.full.QuickItem.SCORE_BUG, SETTINGS), idle.takeLast(2))
+        val servers = QuickBarModel.items(menu.copy(servers = listOf("a:80", "b:80")), false, false, false, null, null, scoreBug = ScoreBugItem.BEFORE_SETTINGS)
+        assertEquals(listOf(app.thebox.core.full.QuickItem.SOURCES, app.thebox.core.full.QuickItem.SCORE_BUG, SETTINGS), servers.takeLast(3))
+        assertFalse(app.thebox.core.full.QuickItem.SCORE_BUG in items(menu, ScoreBugItem.HIDDEN))
+    }
+
     /** M6 §11.3: behind live (time-shift or catch-up) Back to live comes first; no Start over, no Pause. */
     @Test fun behindLiveBackToLiveFirst() {
         val items = QuickBarModel.items(menu, startOverCapable = true, inArchive = true, nowProgramme = true, favourite = true, previous = prev)

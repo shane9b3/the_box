@@ -323,6 +323,11 @@ data class QuickBarState(
     val aspect: AspectMode,
     val decoder: VideoDecoderMode?,
     val previous: GuideChannel?,
+    /**
+     * (Score bug WP-4b, docs/design/m6-score-bug.md §6; additive) The facts behind the "Score bug" item's value line
+     * (`SportsText.quickValue`); set only while the quick bar shows, so a score update never recomposes anything else.
+     */
+    val score: app.thebox.core.sports.ScoreFacts? = null,
 )
 
 enum class PickerKind {
