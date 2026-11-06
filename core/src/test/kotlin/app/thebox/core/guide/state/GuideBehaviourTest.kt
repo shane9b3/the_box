@@ -737,6 +737,27 @@ class GuideBehaviourTest {
             assertEquals(EmptyKind.NO_GUIDE_DATA, g.ui.empty)
         }
 
+        /**
+         * (2026-11-06, empty guide after the first import) Fresh install: the guide starts behind Welcome with no
+         * playlist, so its first Sources is empty; the onboarding import then lists All channels. The startup source
+         * comes from that later Sources (it used to be picked only from the first one, leaving the guide empty).
+         */
+        @Test fun firstPlaylistAfterAnEmptyStartLoadsTheStartupSource() {
+            val w = GuideWorld(startTuned = false, sendSources = false)
+            w.send(GuideEvent.Sources(emptyList()))
+            assertEquals(EmptyKind.NO_PLAYLIST, w.ui.empty)
+            assertNull(w.calls.last("loadLineup"))
+            w.send(GuideEvent.Sources(w.entries))
+            assertEquals(GuideSource.All(1), w.calls.calls.first { it.name == "loadLineup" }.args[0])
+            assertNull(w.calls.last("persistSource"), "the startup pick does not persist")
+            assertEquals(0, w.machine.frame.focus!!.row)
+            assertNull(w.ui.empty)
+            // A later Sources (counts change as the import goes on) does not reload or move the source.
+            val loads = w.calls.calls.count { it.name == "loadLineup" }
+            w.send(GuideEvent.Sources(w.entries.reversed()))
+            assertEquals(loads, w.calls.calls.count { it.name == "loadLineup" })
+        }
+
         @Test fun lineupReemissionKeepsTheFocusedRowId() {
             val w = GuideWorld()
             w.press(DOWN); w.press(DOWN) // row 2

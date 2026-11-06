@@ -1740,7 +1740,6 @@ class GuideStateMachineImpl(
 
     private fun onSources(entries: List<GuideSourceEntry>) {
         sources = entries
-        val first = !sourcesKnown
         sourcesKnown = true
         val o = u.overlay
         if (o is Overlay.Groups) {
@@ -1750,7 +1749,10 @@ class GuideStateMachineImpl(
             else SHORTCUTS.size + entries.indexOfFirst { it.source == focusedSource }.let { if (it < 0) maxOf(cur, 0) else it }
             u = u.copy(overlay = o.copy(entries = entries, focused = newFocused.coerceAtLeast(0), current = cur))
         }
-        if (first && lineup == null && requestedSource == null) {
+        // (2026-11-06, empty guide after the first import) Not only on the first Sources: on a fresh install the guide's
+        // view model starts behind the Welcome screen and its first Sources is empty (no playlist yet), so the startup
+        // source must be picked from the first non-empty Sources instead, or the guide stays empty until a restart.
+        if (lineup == null && requestedSource == null) {
             val initial = initialSource(entries)
             if (initial != null) applySource(initial, persist = false)
         }
