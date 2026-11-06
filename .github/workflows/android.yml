@@ -39,6 +39,9 @@ jobs:
       - name: Unit tests and debug APK
         run: ./gradlew --no-daemon :core:test :data:testDebugUnitTest :player:testDebugUnitTest :ui:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug
 
+      - name: Android lint
+        run: ./gradlew --no-daemon lintAll
+
       - uses: actions/upload-artifact@v7
         if: always()
         with:

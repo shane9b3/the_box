@@ -70,8 +70,15 @@ export ANDROID_HOME=$HOME/Library/Android/sdk
 # One-time: sdkmanager "platforms;android-37.0"
 
 ./gradlew --no-daemon :core:test :data:testDebugUnitTest :app:assembleDebug   # CI smoke build (M1 onwards)
+./gradlew --no-daemon lintAll   # Android lint gate (lintDebug in every Android module); also in CI
 ./gradlew --no-daemon :ui:assembleDebug :player:assembleDebug :benchmark:assembleBenchmark :core:perfTest   # extras
 ```
+
+Lint: configured centrally in `build-logic` (`configureLint` in `KotlinAndroid.kt`). `abortOnError`
+is on; NewApi, WrongConstant, Range, ResourceType, MissingPermission and UnsafeOptInUsageError are
+errors; version-freshness checks are disabled because versions are pinned here. Legacy warnings are
+recorded in each module's `lint-baseline.xml` (regenerate by deleting the file and running
+`./gradlew lintAll`; never baseline an error without a written reason).
 
 Also verified: `:app:assembleBenchmark` (R8 minify + resource shrink),
 `:baselineprofile:assemble`, `help --task :benchmark:connectedBenchmarkAndroidTest`.

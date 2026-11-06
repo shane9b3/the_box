@@ -24,6 +24,7 @@ internal fun Project.configureKotlinAndroid(android: CommonExtension) {
         compileOptions.sourceCompatibility = TARGET_JAVA
         compileOptions.targetCompatibility = TARGET_JAVA
         compileOptions.isCoreLibraryDesugaringEnabled = true
+        configureLint()
     }
     configureKotlinCompilerOptions()
     dependencies {
@@ -37,5 +38,29 @@ internal fun Project.configureKotlinCompilerOptions() {
         if (options is KotlinJvmCompilerOptions) {
             options.jvmTarget.set(TARGET_JVM)
         }
+    }
+}
+
+/**
+ * Lint gate (`./gradlew lintAll`). Correctness checks that have shipped bugs are errors; the rest
+ * stays at default severity. Existing warnings live in each module's `lint-baseline.xml`.
+ */
+private fun CommonExtension.configureLint() {
+    lint.apply {
+        abortOnError = true
+        warningsAsErrors = false
+        checkDependencies = false // lintAll lints every module on its own
+        baseline = java.io.File("lint-baseline.xml") // resolved against the module directory
+        error += listOf(
+            "NewApi", "WrongConstant", "Range", "ResourceType", "MissingPermission",
+            "UnsafeOptInUsageError",
+        )
+        // InlinedApi stays at its default (warning): constants are inlined at compile time.
+        disable += listOf(
+            "GradleDependency", // versions are pinned deliberately (docs/m0-toolchain.md)
+            "NewerVersionAvailable", // same: pinned toolchain
+            "AndroidGradlePluginVersion", // same: AGP is pinned
+            "OldTargetApi", // targetSdk is pinned in the catalog
+        )
     }
 }

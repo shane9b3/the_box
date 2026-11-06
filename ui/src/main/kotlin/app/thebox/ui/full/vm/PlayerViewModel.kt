@@ -330,8 +330,8 @@ class PlayerViewModel @Inject constructor(
             combine(controller.state, archive.status) { st, status -> st to status }.collect { (st, status) ->
                 val ch = st.target?.identity?.let { channelOf(it) }
                 // (M5, B1) A tune the guard refused never played.
-        val shown = if (st is app.thebox.player.api.PlaybackState.Stopped && st.reason == app.thebox.player.api.StopReason.LOCKED) app.thebox.player.api.PlaybackState.Idle else st
-        val mapped = TunedStateMapper.map(shown, ch?.rowId ?: -1L, still = false)
+                val shown = if (st is app.thebox.player.api.PlaybackState.Stopped && st.reason == app.thebox.player.api.StopReason.LOCKED) app.thebox.player.api.PlaybackState.Idle else st
+                val mapped = TunedStateMapper.map(shown, ch?.rowId ?: -1L, still = false)
                 machine.dispatch(PlayerEvent.Tuned(ArchiveVisibility.visible(mapped, status), ch))
                 // (Integration 2026-10-19, I-TS-20a/I-TS-30) The machine drops its buffer when the tuned identity changes.
                 // The new cycle's snapshot can arrive before this Tuned (channelOf suspends), and an unbuffered cycle

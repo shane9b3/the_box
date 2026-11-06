@@ -1,5 +1,6 @@
 package app.thebox.data.work
 
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -25,6 +26,8 @@ class WorkNotifications @Inject constructor(@param:ApplicationContext private va
         })
     }
 
+    // The dataSync type is declared on SystemForegroundService in :app's manifest, which lint cannot see from this library.
+    @SuppressLint("SpecifyForegroundServiceType")
     fun foregroundInfo(notificationId: Int, title: String, text: String? = null): ForegroundInfo {
         ensureChannel()
         val builder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
