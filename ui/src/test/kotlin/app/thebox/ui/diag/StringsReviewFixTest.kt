@@ -26,6 +26,6 @@ class StringsReviewFixTest {
             assertFalse(context.getString(id), context.getString(id).contains("Settings ›"))
         }
         val apache = context.getString(R.string.licences_apache)
-        for (lib in listOf("Media3", "AndroidX", "Compose", "Kotlin", "Hilt", "OkHttp", "Tink", "ACRA")) assertTrue(lib, apache.contains(lib))
+        for (lib in listOf("Media3", "AndroidX", "Compose", "Kotlin", "Hilt", "OkHttp", "Tink", "ACRA", "Coil", "AndroidSVG")) assertTrue(lib, apache.contains(lib))
     }
 }

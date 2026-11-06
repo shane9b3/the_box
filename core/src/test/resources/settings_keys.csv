@@ -11,7 +11,7 @@ sections,SECTIONS_ROOT,DOWN,SECTIONS,Root,none,-,sc=1
 sections,SECTIONS_ROOT,UP,SECTIONS,Root,none,-,sc=0
 sections,SECTIONS_LAST,DOWN,SECTIONS,Root,none,-,sc=9
 sections,SECTIONS_TOGGLE,DOWN,SECTIONS,Root,none,-,sc=9
-sections,SECTIONS_TOGGLE,SELECT,SECTIONS,Root,none,intent:Toggle,adv=true;sc=10
+sections,SECTIONS_TOGGLE,SELECT,SECTIONS,Root,none,intent:Toggle,adv=true;sc=11
 sections,SECTIONS_TOGGLE,RIGHT,SECTIONS,Root,none,-,adv=false;sc=9
 sections,SECTIONS_GUIDE,RIGHT,PAGE,S:GUIDE,none,-,cur=0
 sections,SECTIONS_GUIDE,SELECT,PAGE,S:GUIDE,none,-,cur=0

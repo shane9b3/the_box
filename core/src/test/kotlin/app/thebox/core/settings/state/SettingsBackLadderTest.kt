@@ -165,13 +165,32 @@ class SettingsBackLadderTest {
         repeat(9) { w.act(BoxAction.DOWN) }
         w.act(BoxAction.SELECT) // advanced on
         assertTrue(SectionId.NETWORK in w.ui.sections)
+        assertTrue(SectionId.SPORTS in w.ui.sections) // score bug WP-4b: advanced-only like Network
         w.act(BoxAction.UP)
+        w.act(BoxAction.UP) // Sports is last, Network before it
         w.act(BoxAction.RIGHT)
         assertEquals(SettingsRoute.Section(SectionId.NETWORK), w.ui.route)
         assertNotNull(w.ui.page?.rows?.firstOrNull { it.id == NetworkRows.DNS })
         w.machine.dispatch(SettingsEvent.Advanced(false)); w.pump()
         assertEquals(SettingsRoute.Root, w.ui.route)
         assertFalse(SectionId.NETWORK in w.ui.sections)
+        assertFalse(SectionId.SPORTS in w.ui.sections)
+    }
+
+    /** (Score bug WP-4b) Sports: advanced only; its rows are all advanced; Back leaves the page, then the section list. */
+    @Test
+    fun sportsSectionIsAdvancedOnlyAndBackLeavesIt() {
+        val simple = SettingsWorld().open()
+        assertFalse(SectionId.SPORTS in simple.ui.sections)
+        val store = app.thebox.core.settings.fakes.FakeSettingsStore()
+        store.update(GuideDomain) { it.copy(advancedSettings = true) }
+        val w = SettingsWorld(store).also { it.advanced = true; it.machine.dispatch(SettingsEvent.Advanced(true)) }.open()
+        w.enter(SectionId.SPORTS)
+        assertEquals(SettingsRoute.Section(SectionId.SPORTS), w.ui.route)
+        assertEquals(listOf("sports.show", "sports.corner", "sports.delay", "sports.size"), w.ui.page!!.rows.map { it.id.key })
+        assertTrue(w.ui.page!!.rows.all { it.visibility == app.thebox.core.settings.Visibility.ADVANCED })
+        w.act(BoxAction.BACK)
+        assertEquals(SettingsRoute.Root, w.ui.route)
     }
 
     @Test

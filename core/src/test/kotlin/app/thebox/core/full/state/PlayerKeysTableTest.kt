@@ -4,6 +4,13 @@ import app.thebox.core.catchup.archive.ArchiveFailure
 import app.thebox.core.catchup.archive.ArchivePhase
 import app.thebox.core.full.BackInPlayer
 import app.thebox.core.full.PlayerLayer
+import app.thebox.core.sports.DayState
+import app.thebox.core.sports.FailKind
+import app.thebox.core.sports.GamePhase
+import app.thebox.core.sports.PeriodKind
+import app.thebox.core.sports.ScoreCorner
+import app.thebox.core.sports.ScoreFacts
+import app.thebox.core.sports.SportsFixtures
 import app.thebox.core.full.PlayerSettings
 import app.thebox.core.full.QuickItem
 import app.thebox.core.full.ScrubFocus
@@ -62,12 +69,11 @@ class PlayerKeysTableTest {
         val all = rows()
         val used = all.map { it.pre }.filter { !it.contains('@') }.toSet()
         assertEquals(PRE.keys, used, "unused or missing preconditions")
-        // (Score bug commit 0) PLACE_SCORE gets its player_keys.csv rows with WP-4b's place mode.
-        for (l in PlayerLayer.entries - PlayerLayer.PLACE_SCORE) assertTrue(all.any { it.layer == l }, "a row ending in $l")
+        for (l in PlayerLayer.entries) assertTrue(all.any { it.layer == l }, "a row ending in $l")
         val bare = all.filter { it.section == "bare" || it.section == "archive" }.map { it.action }.toSet()
         for (a in BoxAction.entries) assertTrue(a in bare, "a bare-video row for $a")
         for (u in listOf("D", "Z", "ZI", "L")) assertTrue(all.any { it.updown == u }, "Up/Down setting $u")
-        for (s in listOf("bare", "archive", "quick", "picker", "info", "scrub", "list", "error", "screen", "back")) assertTrue(all.any { it.section == s }, "section $s")
+        for (s in listOf("bare", "archive", "quick", "picker", "scorebug", "info", "scrub", "list", "error", "screen", "back")) assertTrue(all.any { it.section == s }, "section $s")
     }
 
     private fun run(r: Row) {
@@ -113,6 +119,10 @@ class PlayerKeysTableTest {
             "byBack" -> assertTrue(ui.channels?.openedByBack == true, "openedByBack")
             "picker" -> assertEquals(v, ui.picker?.kind?.name, "picker")
             "pickerFocus" -> assertEquals(v!!.toInt(), ui.picker?.focused)
+            "quickNot" -> assertTrue(QuickItem.valueOf(v!!) !in assertNotNull(ui.quick, "quick").items, "quick has no $v")
+            "place" -> assertEquals(ScoreCorner.valueOf(v!!), ui.placeScore?.corner, "place corner")
+            "placeSample" -> assertEquals(v!!.toBoolean(), ui.placeScore?.sample, "place sample")
+            "pickerRows" -> assertEquals(v!!.toInt(), ui.picker?.choices?.size, "picker rows")
             "fromQuick" -> assertTrue(ui.picker?.fromQuickBar == true, "fromQuickBar")
             "remember" -> assertEquals(v!!.toBoolean(), ui.picker?.remember)
             "scrub" -> {
@@ -151,6 +161,25 @@ class PlayerKeysTableTest {
             check(w.ui.layer == PlayerLayer.ERROR) { "archive error card" }
         }
 
+        private val G1 = SportsFixtures.game(id = "G1") // CGY @ EDM, LIVE: the followed game
+        private val G2 = SportsFixtures.game(id = "G2", away = SportsFixtures.team("TOR", "Maple Leafs", 1), home = SportsFixtures.team("MTL", "Canadiens", 1), startUtcMs = 1_793_920_000_000L)
+        private val G3 = SportsFixtures.game(id = "G3", phase = GamePhase.SCHEDULED, away = SportsFixtures.team("VAN", "Canucks"), home = SportsFixtures.team("SEA", "Kraken"), period = null, periodKind = null, clock = null)
+        private val G4 = SportsFixtures.game(id = "G4", phase = GamePhase.FINAL, away = SportsFixtures.team("BOS", "Bruins", 3), home = SportsFixtures.team("NYR", "Rangers", 2), period = 3, clock = null, finalKind = PeriodKind.REG)
+
+        /** Following G1 with G2 (live), G3 (upcoming) and G4 (final) also on the board. */
+        private val FOLLOWING = ScoreFacts(followed = SportsFixtures.liveView(G1), game = SportsFixtures.followedOf(G1), day = DayState.Board(SportsFixtures.board(G4, G3, G2, G1), 0L, false))
+        private val NOT_FOLLOWING = ScoreFacts(day = DayState.Board(SportsFixtures.board(G4, G3, G2), 0L, false))
+
+        /** The live world with [facts] sent, the quick bar open on "Score bug", OK pressed (the sheet), then [after]. */
+        private fun scoreSheet(facts: ScoreFacts, vararg after: BoxAction): PlayerWorld {
+            val w = liveWithArchive()
+            w.player.scores(facts)
+            w.k(UP)
+            repeat(QuickItem.entries.size) { if (w.ui.quick!!.let { it.items[it.focused] } != QuickItem.SCORE_BUG) w.press(RIGHT) }
+            check(w.ui.quick!!.let { it.items[it.focused] } == QuickItem.SCORE_BUG) { "Score bug not in ${w.ui.quick!!.items}" }
+            return w.k(SELECT).k(*after)
+        }
+
         /** `quick@ITEM` / `quickA@ITEM`: the quick bar (live / archive) with ITEM focused. */
         fun world(pre: String): PlayerWorld {
             if ('@' in pre) {
@@ -184,6 +213,22 @@ class PlayerKeysTableTest {
             "picker" to { liveWithArchive().k(ASPECT) },
             "picker_remember" to { liveWithArchive().k(ASPECT, DOWN, DOWN, DOWN, DOWN, DOWN) },
             // M6 §11.3: Pause is first; Audio is the second item.
+            // Score bug (WP-4b, docs/design/m6-score-bug.md §6). Rows with a followed game: 0 game, 1 Corner, 2 Delay, 3 Stop,
+            // 4 Today, 5 G2 (live), 6 G3 (upcoming), 7 G4 (final).
+            "score_follow" to { scoreSheet(FOLLOWING) },
+            "score_stop" to { scoreSheet(FOLLOWING, DOWN, DOWN, DOWN) },
+            "score_corner" to { scoreSheet(FOLLOWING, DOWN) },
+            "score_delay_row" to { scoreSheet(FOLLOWING, DOWN, DOWN) },
+            "score_delay" to { scoreSheet(FOLLOWING, DOWN, DOWN, SELECT) },
+            "score_delay1" to { scoreSheet(FOLLOWING, DOWN, DOWN, SELECT, DOWN) },
+            "score_last" to { scoreSheet(FOLLOWING, DOWN, DOWN, DOWN, DOWN, DOWN, DOWN, DOWN) },
+            "score_nofollow" to { scoreSheet(NOT_FOLLOWING) },
+            "score_loading" to { scoreSheet(ScoreFacts()) },
+            "score_failed" to { scoreSheet(ScoreFacts(day = DayState.Failed(FailKind.IO)), DOWN, DOWN) },
+            "score_place" to { scoreSheet(FOLLOWING, DOWN, SELECT) },
+            "score_place_sample" to { scoreSheet(ScoreFacts(), SELECT) },
+            "score_place_bl" to { scoreSheet(ScoreFacts(corner = ScoreCorner.BOTTOM_LEFT), SELECT) },
+            "score_off" to { liveWithArchive().also { it.player.scores(ScoreFacts(enabled = false)) }.k(UP) },
             "picker_q" to { liveWithArchive().k(UP, RIGHT, SELECT) },
             "picker_q2" to { liveWithArchive().k(UP, RIGHT, SELECT, DOWN) },
             "info" to { liveWithArchive().k(DOWN) },

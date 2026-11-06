@@ -22,6 +22,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.thebox.core.full.PickerChoice
 import app.thebox.core.full.PickerState
+import app.thebox.core.full.state.selectable
 import app.thebox.ui.R
 import app.thebox.ui.guide.screen.GuideUi
 import app.thebox.ui.guide.screen.Line
@@ -29,6 +30,7 @@ import app.thebox.ui.theme.DesignTokens
 
 const val PICKER_SHEET_TAG = "player_picker"
 const val PICKER_ROW_TAG = "player_picker_row"
+const val PICKER_DIVIDER_TAG = "player_picker_divider"
 
 /**
  * Audio / subtitles / aspect / decoder picker (docs/design/m4-player-ux.md §3.4.2, §3.9): (1376, 48) 496 × 880 design
@@ -40,6 +42,8 @@ const val PICKER_ROW_TAG = "player_picker_row"
 @Composable
 fun PickerSheet(state: PickerState, modifier: Modifier = Modifier) {
     val res = androidx.compose.ui.platform.LocalResources.current
+    // (Score bug WP-4b) Upcoming games in the score sheet read "7:00 PM" or "19:00" like the device clock.
+    val clock24 = android.text.format.DateFormat.is24HourFormat(androidx.compose.ui.platform.LocalContext.current)
     val shape = RoundedCornerShape(DesignTokens.Radii.Panel)
     Column(
         modifier
@@ -59,15 +63,31 @@ fun PickerSheet(state: PickerState, modifier: Modifier = Modifier) {
                 continue
             }
             val c = state.choices[i]
-            val disabled = c is PickerChoice.Audio && !c.track.supported
+            if (c is PickerChoice.ScoreTodayDivider) { // (Score bug WP-4b, U-N9) the non-selectable "Today" divider
+                DividerRow(PlayerText.choice(res, c, i, clock24))
+                continue
+            }
+            val disabled = (c is PickerChoice.Audio && !c.track.supported) || !c.selectable // "Loading games…" reads greyed
             PickerRow(
-                text = PlayerText.choice(res, c, i),
+                text = PlayerText.choice(res, c, i, clock24),
                 note = if (disabled) stringResource(R.string.player_picker_unsupported) else null,
                 checked = i == state.current,
                 focused = i == state.focused,
                 disabled = disabled,
             )
         }
+    }
+}
+
+/** The score sheet's "Today" divider: a small label over a hairline, never focused (skipped by [selectable]). */
+@Composable
+private fun DividerRow(text: String) {
+    Column(
+        Modifier.testTag(PICKER_DIVIDER_TAG).fillMaxWidth().height(DIVIDER_H.dp).padding(horizontal = 14.dp),
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Line(text, GuideUi.sans(20, FontWeight.SemiBold, GuideUi.Fg50))
+        Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(1.dp).background(PlayerUi.Border09))
     }
 }
 
@@ -117,6 +137,9 @@ private fun RememberRow(checked: Boolean, focused: Boolean) {
         Line(stringResource(R.string.player_picker_remember), GuideUi.sans(24, FontWeight.Medium, fg))
     }
 }
+
+/** The score sheet's divider row height (design px); shorter than a choice row. */
+private const val DIVIDER_H = 40f
 
 /** Rows that fit the 880 px sheet under its title. */
 private const val VISIBLE = 11

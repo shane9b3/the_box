@@ -45,7 +45,12 @@ class ComposedFullBackLadderTest {
             PlayerLayer.PICKER -> w.press(ASPECT)
             PlayerLayer.ERROR -> w.fail(PlayerFixtures.error(PlaybackErrorCode.STREAM_INTERRUPTED), archive = false)
             PlayerLayer.SCREEN_OFF -> w.press(BoxAction.SCREEN_OFF)
-            PlayerLayer.PLACE_SCORE -> return null // (score bug commit 0) not reachable until WP-4b's place mode
+            PlayerLayer.PLACE_SCORE -> { // (score bug WP-4b) quick bar, Score bug, OK (the sheet; Corner has focus), OK (place mode)
+                w.press(UP)
+                repeat(app.thebox.core.full.QuickItem.entries.size) { if (w.ui.quick?.let { it.items[it.focused] } != app.thebox.core.full.QuickItem.SCORE_BUG) w.press(RIGHT) }
+                w.press(SELECT)
+                w.press(SELECT)
+            }
         }
         if (w.ui.layer != layer) return null
         when (o) {

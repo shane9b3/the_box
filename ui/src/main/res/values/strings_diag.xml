@@ -164,7 +164,7 @@
     <!-- Licences (N16) -->
     <string name="licences_title">Licences</string>
     <string name="licences_ffmpeg">FFmpeg 6.0.2 (audio decoders)</string>
-    <string name="licences_apache">Media3, AndroidX and Jetpack Compose, Kotlin and kotlinx, Dagger and Hilt, OkHttp, Tink and ACRA</string>
+    <string name="licences_apache">Media3, AndroidX and Jetpack Compose, Kotlin and kotlinx, Dagger and Hilt, OkHttp, Tink, ACRA, Coil and AndroidSVG</string>
     <string name="licences_qrcodegen">QR Code generator (Project Nayuki)</string>
     <string name="licences_re2j">RE2/J (bounded user regular expressions)</string>
     <string name="licences_bsd">BSD 3-Clause License</string>

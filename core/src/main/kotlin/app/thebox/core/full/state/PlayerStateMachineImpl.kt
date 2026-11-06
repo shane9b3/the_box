@@ -34,6 +34,15 @@ import app.thebox.core.full.PlayerToast
 import app.thebox.core.full.PlayerUiState
 import app.thebox.core.full.QuickBarState
 import app.thebox.core.full.QuickItem
+import app.thebox.core.sports.DayState
+import app.thebox.core.sports.FollowedGame
+import app.thebox.core.sports.GamePhase
+import app.thebox.core.sports.GameSnapshot
+import app.thebox.core.sports.ScoreCorner
+import app.thebox.core.sports.ScoreFacts
+import app.thebox.core.sports.ScorePlaceState
+import app.thebox.core.sports.SportsConstants
+import app.thebox.core.sports.TeamLine
 import app.thebox.core.full.ScrubFocus
 import app.thebox.core.full.ScrubScope
 import app.thebox.core.full.ScrubState
@@ -158,6 +167,13 @@ class PlayerStateMachineImpl(
     // Picker (§3.4.2)
     private var picker: PickerState? = null
 
+    // Score bug (WP-4b, docs/design/m6-score-bug.md §6). [scoreFacts] never reaches the UI state unless the quick bar,
+    // the score sheet or place mode is showing (publish), so a poll never recomposes FullScreenHost on bare video.
+    private var scoreFacts = ScoreFacts()
+    private var place: ScorePlaceState? = null
+    /** The SCORE_PICKER demand last reported to the effects (publish keeps it equal to "a score sheet is open"). */
+    private var scoreDemandOn = false
+
     // Scrub bar (§3.5)
     private var scrubShown = false
     private var scrubFocused = false
@@ -257,7 +273,7 @@ class PlayerStateMachineImpl(
             PlayerLayer.INFO -> infoKey(a)
             PlayerLayer.ERROR -> errorKey(a, justClosed)
             PlayerLayer.NONE -> bareKey(a, justClosed)
-            PlayerLayer.PLACE_SCORE -> true // (score bug commit 0) never entered yet; WP-4b's place mode
+            PlayerLayer.PLACE_SCORE -> placeKey(a)
         }
         if (layer == PlayerLayer.INFO) infoHideAt = curMs + settings.infoBarMs
         if (layer == PlayerLayer.QUICK_BAR) quickHideAt = curMs + QUICK_BAR_IDLE_MS
@@ -525,6 +541,7 @@ class PlayerStateMachineImpl(
     private fun closeLayer() {
         if (layer == PlayerLayer.SCRUB) { scrubFocused = false; scrubShown = false; cancelPreview() }
         if (layer == PlayerLayer.PICKER) picker = null
+        if (layer == PlayerLayer.PLACE_SCORE) place = null
         if (layer == PlayerLayer.CHANNELS) listMenu = null
         layer = base()
     }
@@ -532,6 +549,7 @@ class PlayerStateMachineImpl(
     /** Opening a layer closes the others, except stats (orthogonal) and the passive bar (replaced) (§3.1.3). */
     private fun openLayer(l: PlayerLayer) {
         if (layer == PlayerLayer.PICKER && l != PlayerLayer.PICKER) picker = null
+        if (layer == PlayerLayer.PLACE_SCORE && l != PlayerLayer.PLACE_SCORE) place = null
         if (layer == PlayerLayer.CHANNELS && l != PlayerLayer.CHANNELS) listMenu = null
         if (l != PlayerLayer.SCRUB && scrubShown) { scrubShown = false; scrubFocused = false; cancelPreview() }
         passive = false
@@ -540,6 +558,7 @@ class PlayerStateMachineImpl(
 
     private fun closeAll() {
         picker = null
+        place = null
         listMenu = null
         scrubShown = false
         scrubFocused = false
@@ -748,7 +767,12 @@ class PlayerStateMachineImpl(
 
     private fun quickItems(): List<QuickItem> {
         val nowProg = progLoaded && progHash == tuned.identityHash && nowIndex(progs) >= 0
-        return QuickBarModel.items(menu, archiveCapable() || bufferCoversNow(), inArchive(), nowProg, favourite, previous, live = tunedChannel != null)
+        val score = when {
+            !scoreFacts.enabled -> ScoreBugItem.HIDDEN
+            scoreFacts.game != null -> ScoreBugItem.AFTER_SUBTITLES
+            else -> ScoreBugItem.BEFORE_SETTINGS
+        }
+        return QuickBarModel.items(menu, archiveCapable() || bufferCoversNow(), inArchive(), nowProg, favourite, previous, live = tunedChannel != null, scoreBug = score)
     }
 
     private fun quickIndex(items: List<QuickItem>): Int {
@@ -804,7 +828,7 @@ class PlayerStateMachineImpl(
             QuickItem.SCREEN_OFF -> screenOff()
             QuickItem.SETTINGS -> { closeLayer(); effects.openSettings() }
             QuickItem.SOURCES -> openPicker(PickerKind.SERVER, fromQuickBar = true) // M5 integration (§3.6.2, E23)
-            QuickItem.SCORE_BUG -> Unit // (score bug commit 0) never offered yet; WP-4b opens the sheet
+            QuickItem.SCORE_BUG -> openScoreSheet()
         }
     }
 
@@ -876,7 +900,8 @@ class PlayerStateMachineImpl(
         PickerKind.ASPECT -> AspectMode.entries.map { PickerChoice.Aspect(it) }
         PickerKind.VIDEO_DECODER -> DECODER_CHOICES
         PickerKind.SERVER -> m.servers.mapIndexed { i, label -> PickerChoice.Server(i, label) } // M5 integration (§3.6.2)
-        PickerKind.SCORE_BUG, PickerKind.SCORE_DELAY -> emptyList() // (score bug commit 0) WP-4b builds the rows
+        PickerKind.SCORE_BUG -> scoreChoices()
+        PickerKind.SCORE_DELAY -> delayChoices()
     }
 
     private fun currentChoice(kind: PickerKind, choices: List<PickerChoice>): Int = when (kind) {
@@ -888,20 +913,26 @@ class PlayerStateMachineImpl(
             choices.indexOfFirst { it is PickerChoice.Decoder && it.mode == d }.coerceAtLeast(0)
         }
         PickerKind.SERVER -> menu.server.coerceIn(0, (choices.size - 1).coerceAtLeast(0))
-        PickerKind.SCORE_BUG, PickerKind.SCORE_DELAY -> 0 // (score bug commit 0) WP-4b
+        PickerKind.SCORE_BUG -> choices.indexOfFirst { it is PickerChoice.ScoreGame && it.followed } // -1: nothing ticked
+        PickerKind.SCORE_DELAY -> choices.indexOfFirst { it is PickerChoice.ScoreDelayChoice && it.delaySec == scoreFacts.delaySec }.coerceAtLeast(0)
     }
 
     private fun pickerKey(a: GuideEvent.Act): Boolean {
         val p = picker ?: run { closeLayer(); return true }
         val rows = p.choices.size + if (p.remember != null) 1 else 0
         when (a.action) {
-            BoxAction.UP -> picker = p.copy(focused = (p.focused - 1).coerceAtLeast(0))
-            BoxAction.DOWN -> picker = p.copy(focused = (p.focused + 1).coerceAtMost(rows - 1))
-            BoxAction.LEFT, BoxAction.BACK -> if (p.fromQuickBar) { picker = null; layer = PlayerLayer.QUICK_BAR } else closeLayer()
+            BoxAction.UP -> picker = p.copy(focused = nextFocus(p, -1))
+            BoxAction.DOWN -> picker = p.copy(focused = nextFocus(p, +1))
+            BoxAction.LEFT, BoxAction.BACK -> when {
+                p.kind == PickerKind.SCORE_DELAY -> openScoreSheet(focus = PickerChoice.ScoreDelayRow::class) // Back returns to the sheet
+                p.fromQuickBar -> { picker = null; layer = PlayerLayer.QUICK_BAR }
+                else -> closeLayer()
+            }
             BoxAction.RIGHT -> Unit
             BoxAction.SELECT -> {
                 if (p.focused >= p.choices.size) { picker = p.copy(remember = !(p.remember ?: true)); return true }
                 val c = p.choices[p.focused]
+                if (p.kind == PickerKind.SCORE_BUG || p.kind == PickerKind.SCORE_DELAY) { scoreSelect(c); return true }
                 if (c is PickerChoice.Audio && !c.track.supported) return true
                 apply(c, p.remember ?: true)
                 closeLayer()
@@ -922,7 +953,7 @@ class PlayerStateMachineImpl(
             is PickerChoice.Decoder -> effects.setDecoder(c.mode)
             is PickerChoice.Server -> effects.selectServer(c.index)
             PickerChoice.AudioOutputAuto -> effects.audioOutputAuto() // U-S12
-            // (Score bug commit 0) The SCORE_BUG / SCORE_DELAY rows; WP-4b acts on them (never offered yet).
+            // The SCORE_BUG / SCORE_DELAY rows are handled by scoreSelect, never here.
             is PickerChoice.ScoreGame, is PickerChoice.ScoreCornerRow, is PickerChoice.ScoreDelayRow, PickerChoice.ScoreStop,
             PickerChoice.ScoreTodayDivider, PickerChoice.ScoreLoading, is PickerChoice.ScoreFailed, is PickerChoice.ScoreDelayChoice -> Unit
         }
@@ -1909,6 +1940,9 @@ class PlayerStateMachineImpl(
         val pill = PillRules.pill(tuned, st, curMs)
         val info = infoState(pill)
         val quick = if (layer == PlayerLayer.QUICK_BAR) quickState() else null
+        // Demand SCORE_PICKER exactly while a score sheet (or its delay list) is showing (§6).
+        val wantScoreDemand = layer == PlayerLayer.PICKER && picker?.kind.let { it == PickerKind.SCORE_BUG || it == PickerKind.SCORE_DELAY }
+        if (wantScoreDemand != scoreDemandOn) { scoreDemandOn = wantScoreDemand; effects.scorePicker(wantScoreDemand) }
         val s = PlayerUiState(
             layer = layer,
             info = info,
@@ -1921,6 +1955,7 @@ class PlayerStateMachineImpl(
             pill = pill,
             probing = status.takeIf { it.phase == ArchivePhase.PROBING && it.identityHash == tuned.identityHash }?.let { it.attempt to it.attempts },
             paused = pausedUi(),
+            placeScore = if (layer == PlayerLayer.PLACE_SCORE) place else null,
         )
         if (s != _ui.value) _ui.value = s
         _deadline.value = nextDeadline()
@@ -1974,7 +2009,164 @@ class PlayerStateMachineImpl(
             aspect = video.aspect,
             decoder = video.decoderOverride,
             previous = previous,
+            score = scoreFacts,
         )
+    }
+
+    // ================================================================= score bug (WP-4b, docs/design/m6-score-bug.md §6)
+
+    override fun scores(facts: ScoreFacts) {
+        if (facts == scoreFacts) return
+        curMs = nowMs()
+        scoreFacts = facts
+        val p = picker
+        if (layer == PlayerLayer.PICKER && p != null && (p.kind == PickerKind.SCORE_BUG || p.kind == PickerKind.SCORE_DELAY)) {
+            val choices = choicesFor(p.kind, menu)
+            val old = p.choices.getOrNull(p.focused)
+            val at = old?.let { o -> choices.indexOfFirst { sameRow(it, o) } } ?: -1
+            val focused = if (at >= 0) at else p.focused.coerceIn(0, (choices.size - 1).coerceAtLeast(0))
+            val fixed = if (choices.getOrNull(focused)?.selectable == false) firstSelectable(choices) else focused
+            picker = p.copy(choices = choices, current = currentChoice(p.kind, choices), focused = fixed)
+        } else if (layer != PlayerLayer.QUICK_BAR && layer != PlayerLayer.PLACE_SCORE) {
+            return // bare video and the rest: the UI state carries no scores, so nothing to publish
+        }
+        publish()
+    }
+
+    /** Rows the focus lands on: everything but the divider and the loading line (U-N9). */
+    private fun firstSelectable(choices: List<PickerChoice>): Int = choices.indexOfFirst { it.selectable }.coerceAtLeast(0)
+
+    private fun sameRow(a: PickerChoice, b: PickerChoice): Boolean = when {
+        a is PickerChoice.ScoreGame && b is PickerChoice.ScoreGame -> a.game.id == b.game.id
+        a is PickerChoice.ScoreDelayChoice && b is PickerChoice.ScoreDelayChoice -> a.delaySec == b.delaySec
+        else -> a::class == b::class
+    }
+
+    /** UP/DOWN in a picker: the next row in [dir] that can take focus (the "Remember" row always can). */
+    private fun nextFocus(p: PickerState, dir: Int): Int {
+        val rows = p.choices.size + if (p.remember != null) 1 else 0
+        var i = p.focused + dir
+        while (i in 0 until rows) {
+            if (i >= p.choices.size || p.choices[i].selectable) return i
+            i += dir
+        }
+        return p.focused
+    }
+
+    /** Opens (or re-opens, from the delay list or place mode) the SCORE_BUG sheet; [focus] picks the row to land on. */
+    private fun openScoreSheet(focus: kotlin.reflect.KClass<out PickerChoice>? = null) {
+        val choices = scoreChoices()
+        val first = choices.firstOrNull { it is PickerChoice.ScoreGame && it.followed }
+        val live = choices.firstOrNull { it is PickerChoice.ScoreGame && it.game.phase.isLive() }
+        val back = focus?.let { k -> choices.firstOrNull { k.isInstance(it) } }
+        val target = back ?: first ?: live
+        val focused = if (target != null) choices.indexOf(target) else firstSelectable(choices)
+        if (layer != PlayerLayer.PICKER) openLayer(PlayerLayer.PICKER)
+        picker = PickerState(PickerKind.SCORE_BUG, choices, currentChoice(PickerKind.SCORE_BUG, choices), focused, null, fromQuickBar = true)
+    }
+
+    private fun GamePhase.isLive() = this == GamePhase.LIVE || this == GamePhase.INTERMISSION
+
+    /** §6 rows: the followed game, Corner, Delay, Stop following, the Today divider, the other games, then Loading / failure. */
+    private fun scoreChoices(): List<PickerChoice> {
+        val f = scoreFacts
+        val board = (f.day as? DayState.Board)?.board
+        val out = ArrayList<PickerChoice>()
+        val followed = f.game
+        if (followed != null) out += PickerChoice.ScoreGame(board?.games?.firstOrNull { it.id == followed.id } ?: stubOf(followed), followed = true)
+        out += PickerChoice.ScoreCornerRow(f.corner)
+        out += PickerChoice.ScoreDelayRow(f.delaySec)
+        if (followed != null) out += PickerChoice.ScoreStop
+        val others = board?.games.orEmpty().filter { followed == null || it.id != followed.id }
+            .sortedWith(compareBy({ groupOf(it.phase) }, { it.startUtcMs }))
+        when (val d = f.day) {
+            DayState.Loading -> { out += PickerChoice.ScoreTodayDivider; out += PickerChoice.ScoreLoading }
+            is DayState.Failed -> { out += PickerChoice.ScoreTodayDivider; out += PickerChoice.ScoreFailed(d.kind) }
+            is DayState.Board -> if (others.isNotEmpty()) {
+                out += PickerChoice.ScoreTodayDivider
+                others.forEach { out += PickerChoice.ScoreGame(it, followed = false) }
+            }
+        }
+        return out
+    }
+
+    /** Live first, then upcoming, then final; a postponed game last. */
+    private fun groupOf(p: GamePhase): Int = when (p) {
+        GamePhase.LIVE, GamePhase.INTERMISSION -> 0
+        GamePhase.SCHEDULED, GamePhase.PRE -> 1
+        GamePhase.FINAL -> 2
+        GamePhase.POSTPONED -> 3
+    }
+
+    /** The followed row before the day list has it (loading, failed, another day): its teams and, once LIVE, its score. */
+    private fun stubOf(g: FollowedGame): GameSnapshot {
+        val v = scoreFacts.followed
+        return GameSnapshot(
+            id = g.id, dayKey = "", startUtcMs = g.startUtcMs, phase = if (v != null) GamePhase.LIVE else GamePhase.SCHEDULED,
+            away = v?.away ?: TeamLine(g.away, g.away, null, null), home = v?.home ?: TeamLine(g.home, g.home, null, null),
+            period = null, periodKind = null, otNumber = null, clock = null, finalKind = null,
+        )
+    }
+
+    private fun delayChoices(): List<PickerChoice> {
+        val steps = SportsConstants.DELAY_STEPS_S.let { if (scoreFacts.delaySec in it) it else (it + scoreFacts.delaySec).sorted() }
+        return steps.map { PickerChoice.ScoreDelayChoice(it) }
+    }
+
+    /** OK on a SCORE_BUG / SCORE_DELAY row (§6). */
+    private fun scoreSelect(c: PickerChoice) {
+        when (c) {
+            is PickerChoice.ScoreGame -> { effects.followGame(c.game.id); closeLayer() }
+            is PickerChoice.ScoreCornerRow -> enterPlace()
+            is PickerChoice.ScoreDelayRow -> {
+                val choices = delayChoices()
+                val cur = currentChoice(PickerKind.SCORE_DELAY, choices)
+                picker = PickerState(PickerKind.SCORE_DELAY, choices, cur, cur, null, fromQuickBar = true)
+            }
+            PickerChoice.ScoreStop -> { effects.followGame(null); closeLayer() }
+            is PickerChoice.ScoreFailed -> effects.retryScores()
+            is PickerChoice.ScoreDelayChoice -> {
+                effects.setScoreDelay(c.delaySec)
+                scoreFacts = scoreFacts.copy(delaySec = c.delaySec) // shown at once; the repository's flow confirms it
+                openScoreSheet(focus = PickerChoice.ScoreDelayRow::class)
+            }
+            else -> Unit // the divider and the loading line are not selectable
+        }
+    }
+
+    // ---- place mode (U-B1)
+
+    private fun enterPlace() {
+        openLayer(PlayerLayer.PLACE_SCORE)
+        place = ScorePlaceState(scoreFacts.corner, sample = scoreFacts.followed == null)
+    }
+
+    private fun placeKey(a: GuideEvent.Act): Boolean {
+        val pl = place ?: run { layer = PlayerLayer.QUICK_BAR; return true }
+        val c = pl.corner
+        val top = c == ScoreCorner.TOP_LEFT || c == ScoreCorner.TOP_RIGHT
+        val right = c == ScoreCorner.TOP_RIGHT || c == ScoreCorner.BOTTOM_RIGHT
+        fun at(top: Boolean, right: Boolean) = when {
+            top && right -> ScoreCorner.TOP_RIGHT
+            top -> ScoreCorner.TOP_LEFT
+            right -> ScoreCorner.BOTTOM_RIGHT
+            else -> ScoreCorner.BOTTOM_LEFT
+        }
+        when (a.action) {
+            BoxAction.LEFT -> place = pl.copy(corner = at(top, right = false))
+            BoxAction.RIGHT -> place = pl.copy(corner = at(top, right = true))
+            BoxAction.UP -> place = pl.copy(corner = at(top = true, right = right))
+            BoxAction.DOWN -> place = pl.copy(corner = at(top = false, right = right))
+            BoxAction.SELECT, BoxAction.BACK -> {
+                effects.setScoreCorner(pl.corner)
+                scoreFacts = scoreFacts.copy(corner = pl.corner)
+                place = null
+                layer = PlayerLayer.QUICK_BAR
+                quickFocus = QuickItem.SCORE_BUG
+            }
+            else -> Unit // every other key is ignored while placing
+        }
+        return true
     }
 
     companion object {

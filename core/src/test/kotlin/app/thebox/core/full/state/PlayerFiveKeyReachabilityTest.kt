@@ -23,6 +23,9 @@ import app.thebox.core.input.BoxAction.RIGHT
 import app.thebox.core.input.BoxAction.SELECT
 import app.thebox.core.input.BoxAction.UP
 import app.thebox.core.playback.PlaybackErrorCode
+import app.thebox.core.sports.DayState
+import app.thebox.core.sports.ScoreFacts
+import app.thebox.core.sports.SportsFixtures
 import org.junit.jupiter.params.ParameterizedTest
 import org.junit.jupiter.params.provider.EnumSource
 import kotlin.test.Test
@@ -54,7 +57,13 @@ class PlayerFiveKeyReachabilityTest {
     /** (M5 integration) Two servers, so the Sources item and the SERVER picker are offered (§3.6.2). */
     private val tracks = PlayerFixtures.trackMenu().copy(servers = listOf("panel.example:8080", "backup.example:8080"))
 
-    private fun world(start: Start, s: PlayerSettings): PlayerWorld = when (start) {
+    /** (Score bug WP-4b) Every start state has today's board with one live game, so the score sheet offers a game to follow. */
+    private fun world(start: Start, s: PlayerSettings): PlayerWorld = baseWorld(start, s).also { w ->
+        val g = SportsFixtures.game()
+        w.player.scores(ScoreFacts(day = DayState.Board(SportsFixtures.board(g), fetchedAtMono = 0L, failing = false)))
+    }
+
+    private fun baseWorld(start: Start, s: PlayerSettings): PlayerWorld = when (start) {
         Start.LIVE_WITH_ARCHIVE -> liveWithArchive(s, tracks)
         Start.LIVE_WITHOUT_ARCHIVE -> liveWithoutArchive(s, tracks)
         Start.ARCHIVE -> archive(s, tracks)
@@ -99,7 +108,7 @@ class PlayerFiveKeyReachabilityTest {
         return listOf(
             ui.layer, info, ui.scrub?.let { "${it.focused}${it.focus}${it.chipFocused}${it.previewMs != null}${it.atLive}" },
             ui.channels?.let { "${it.column}${it.focused}${it.groupFocused}${it.source}" }, ui.quick?.let { "${it.items}${it.focused}${it.statsOn}" },
-            ui.picker?.let { "${it.kind}${it.focused}${it.remember}${it.fromQuickBar}" }, ui.stats != null, w.status.phase, w.tunedRaw.phase,
+            ui.picker?.let { "${it.kind}${it.focused}${it.remember}${it.fromQuickBar}" }, ui.placeScore, ui.stats != null, w.status.phase, w.tunedRaw.phase,
             w.favourites.size, w.video, w.tracks.audio.indexOfFirst { it.selected }, w.tracks.textEnabled,
         ).joinToString("|")
     }
@@ -136,15 +145,15 @@ class PlayerFiveKeyReachabilityTest {
         // M6 §11.3: the quick bar's Pause pauses at once (the scrub bar then belongs to the time-shift start state), so
         // the at-live scrub bar is reached by TIME_SHIFT / SEEK_BACK only, which are not among the five keys.
         layers = PlayerLayer.entries - PlayerLayer.ERROR - PlayerLayer.SCRUB,
-        items = listOf(TIME_SHIFT, AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, START_OVER, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, SETTINGS),
-        scrub = emptyList(), effects = listOf("startOver", "pauseLive", "playProgramme"))
+        items = listOf(TIME_SHIFT, AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, START_OVER, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, QuickItem.SCORE_BUG, SETTINGS),
+        scrub = emptyList(), effects = listOf("startOver", "pauseLive", "playProgramme", "followGame", "setScoreCorner", "setScoreDelay", "scorePicker"))
 
     @ParameterizedTest
     @EnumSource(UpDownInPlayer::class)
     fun liveWithoutArchive(u: UpDownInPlayer) = assertReach(Start.LIVE_WITHOUT_ARCHIVE, u,
         layers = PlayerLayer.entries - PlayerLayer.ERROR - PlayerLayer.SCRUB,
         // M6 §11.3 (U-B3): Pause on every live channel; without catch-up or a buffer it freezes (M2) with the reason.
-        items = listOf(TIME_SHIFT, AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, SETTINGS),
+        items = listOf(TIME_SHIFT, AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, QuickItem.SCORE_BUG, SETTINGS),
         scrub = emptyList(), effects = listOf("pausePlain", "resumePlain"))
 
     /** M6 §11.1: a buffered live channel without catch-up: Pause (LOCAL) and Start over (the buffer covers it). */
@@ -161,7 +170,7 @@ class PlayerFiveKeyReachabilityTest {
 
     private fun liveBufferedReach(u: UpDownInPlayer) = assertReach(Start.LIVE_BUFFERED, u,
         layers = PlayerLayer.entries - PlayerLayer.ERROR - PlayerLayer.SCRUB,
-        items = listOf(TIME_SHIFT, AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, START_OVER, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, SETTINGS),
+        items = listOf(TIME_SHIFT, AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, START_OVER, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, QuickItem.SCORE_BUG, SETTINGS),
         scrub = emptyList(), effects = listOf("pauseLive", "startOver"))
 
     /** M6 §11.1: the LOCAL time-shift of that channel: the scrub bar over the rewind window, Back to live, pause. */
@@ -169,7 +178,7 @@ class PlayerFiveKeyReachabilityTest {
     @EnumSource(UpDownInPlayer::class)
     fun localTimeShift(u: UpDownInPlayer) = assertReach(Start.LOCAL_TIME_SHIFT, u,
         layers = PlayerLayer.entries - PlayerLayer.ERROR - PlayerLayer.INFO,
-        items = listOf(JUMP_TO_LIVE, AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, SETTINGS),
+        items = listOf(JUMP_TO_LIVE, AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, QuickItem.SCORE_BUG, SETTINGS),
         scrub = ScrubFocus.entries, effects = listOf("jumpToLive", "archiveSeek", "archivePause"))
 
     /**
@@ -193,23 +202,22 @@ class PlayerFiveKeyReachabilityTest {
     @EnumSource(UpDownInPlayer::class)
     fun archive(u: UpDownInPlayer) = assertReach(Start.ARCHIVE, u,
         layers = PlayerLayer.entries - PlayerLayer.ERROR - PlayerLayer.INFO,
-        items = listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, JUMP_TO_LIVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, SETTINGS),
+        items = listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, JUMP_TO_LIVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, QuickItem.SCORE_BUG, SETTINGS),
         scrub = ScrubFocus.entries, effects = listOf("jumpToLive", "archiveSeek", "archivePause"))
 
     @ParameterizedTest
     @EnumSource(UpDownInPlayer::class)
     fun timeShift(u: UpDownInPlayer) = assertReach(Start.TIME_SHIFT, u,
         layers = PlayerLayer.entries - PlayerLayer.ERROR - PlayerLayer.INFO,
-        items = listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, JUMP_TO_LIVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, SETTINGS),
+        items = listOf(AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, JUMP_TO_LIVE, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, QuickItem.SCORE_BUG, SETTINGS),
         scrub = ScrubFocus.entries, effects = listOf("jumpToLive", "archiveSeek", "archivePause"))
 
     private fun assertReach(start: Start, u: UpDownInPlayer, layers: List<PlayerLayer>, items: List<QuickItem>, scrub: List<ScrubFocus>, effects: List<String>) {
         val r = search(start, PlayerSettings(upDown = u))
         val missing = buildList {
-            // (Score bug commit 0) Place mode and the score sheets are not offered until WP-4b, which adds them here.
-            addAll(layers.filter { it !in r.layers && it != PlayerLayer.PLACE_SCORE })
+            addAll(layers.filter { it !in r.layers })
             addAll(items.filter { it !in r.quickSelected }.map { "quick:$it" })
-            addAll(PickerKind.entries.filter { it !in r.pickers && it != PickerKind.SCORE_BUG && it != PickerKind.SCORE_DELAY }.map { "picker:$it" }) // M5 integration: SERVER is offered (Sources)
+            addAll(PickerKind.entries.filter { it !in r.pickers }.map { "picker:$it" }) // M5 integration: SERVER is offered (Sources)
             addAll(scrub.filter { it !in r.scrub }.map { "scrub:$it" })
             if (!r.previousRow) add("Previous row")
             addAll(effects.filter { it !in r.effects }.map { "effect:$it" })
