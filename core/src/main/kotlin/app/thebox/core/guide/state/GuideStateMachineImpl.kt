@@ -1755,6 +1755,11 @@ class GuideStateMachineImpl(
         if (lineup == null && requestedSource == null) {
             val initial = initialSource(entries)
             if (initial != null) applySource(initial, persist = false)
+        } else if (playlistGone(entries)) {
+            // (2026-11-06) The current source's playlist was deleted or turned off (e.g. every playlist removed, then a
+            // new one added): move to the startup source of what is listed now instead of keeping All(<old id>). With
+            // nothing listed yet, stay put; the empty state shows and the next Sources lands here again.
+            initialSource(entries)?.let { applySource(it) }
         }
         // (M5, §3.9.5) After a relock, a locked current group moves to All channels of its playlist at now. The flag stays
         // until the re-queried entries show the group locked (an answer still in flight from OPEN lists it unlocked).
@@ -1766,6 +1771,16 @@ class GuideStateMachineImpl(
         } else if (parental.access == ParentalAccess.OPEN) relockMovePending = false
         refreshSourceLabel()
         refreshEmpty()
+    }
+
+    /** The current All/Group source belongs to a playlist with no All channels entry in [entries] (deleted or disabled). */
+    private fun playlistGone(entries: List<GuideSourceEntry>): Boolean {
+        val playlistId = when (val src = lineup?.source ?: requestedSource) {
+            is GuideSource.All -> src.playlistId
+            is GuideSource.Group -> src.playlistId
+            else -> return false
+        }
+        return entries.none { it.section == SourceSection.ALL && (it.source as? GuideSource.All)?.playlistId == playlistId }
     }
 
     /** §3.8.4: LAST → the last source if still listed; FAVOURITES → the default list if any; else All(first playlist). */

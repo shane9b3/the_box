@@ -9,6 +9,7 @@ import app.thebox.core.guide.GuideEvent
 import app.thebox.core.guide.GuideLineup
 import app.thebox.core.guide.GuideSettings
 import app.thebox.core.guide.GuideSource
+import app.thebox.core.guide.GuideSourceEntry
 import app.thebox.core.guide.GuideToast
 import app.thebox.core.guide.MiniPhase
 import app.thebox.core.guide.OpenGuideOn
@@ -756,6 +757,24 @@ class GuideBehaviourTest {
             val loads = w.calls.calls.count { it.name == "loadLineup" }
             w.send(GuideEvent.Sources(w.entries.reversed()))
             assertEquals(loads, w.calls.calls.count { it.name == "loadLineup" })
+        }
+
+        @Test fun aRemovedPlaylistMovesTheGuideToTheNewOne() {
+            val w = GuideWorld(startTuned = false)
+            assertEquals(GuideSource.All(1), w.calls.last("loadLineup")!!.args[0])
+            // Every playlist removed: nothing listed, the source stays (nothing to move to).
+            val loads = w.calls.calls.count { it.name == "loadLineup" }
+            w.send(GuideEvent.Sources(emptyList()))
+            assertEquals(loads, w.calls.calls.count { it.name == "loadLineup" })
+            // A new playlist (id 2) arrives: the guide leaves All(1) for All(2) and remembers it.
+            val newAll = GuideSourceEntry(GuideSource.All(2), "All channels", 13, SourceSection.ALL, null)
+            w.send(GuideEvent.Sources(listOf(newAll)))
+            assertEquals(GuideSource.All(2), w.calls.last("loadLineup")!!.args[0])
+            assertEquals(GuideSource.All(2), w.calls.last("persistSource")!!.args[0])
+            // Its later Sources do not reload it.
+            val after = w.calls.calls.count { it.name == "loadLineup" }
+            w.send(GuideEvent.Sources(listOf(newAll.copy(count = 14))))
+            assertEquals(after, w.calls.calls.count { it.name == "loadLineup" })
         }
 
         @Test fun lineupReemissionKeepsTheFocusedRowId() {
