@@ -470,9 +470,9 @@ class GuideStateMachineImpl(
         when (u.mode) {
             ScreenMode.FULL -> fullKey(a)
             ScreenMode.SEARCH -> if (action == BoxAction.BACK) onSearchClosed(null, tunedFromSearch = false, archive = false)
-            // (Score bug commit 0, docs/design/m6-score-bug.md §5.1) Never entered yet; WP-4a routes the tab. Back returns
-            // to the guide so a stray SPORTS can never trap the user.
-            ScreenMode.SPORTS -> if (action == BoxAction.BACK) setMode(ScreenMode.GUIDE)
+            // (docs/design/m6-score-bug.md §5.1) The Sports tab is on Compose focus; the router passes every key but BACK,
+            // and one Back returns to the guide grid with the Guide tab current (no Search-style ladder).
+            ScreenMode.SPORTS -> if (action == BoxAction.BACK) onSportsClosed()
             ScreenMode.SETTINGS -> when (action) {
                 // Owner ruling 2026-10-15: Settings opened from the quick bar returns to FULL.
                 BoxAction.BACK -> if (settingsFromFull) { settingsFromFull = false; goFull(EnterReason.USER) } else setMode(ScreenMode.GUIDE)
@@ -558,7 +558,7 @@ class GuideStateMachineImpl(
 
     /** DIGIT, NUMBER_ENTRY, PREVIOUS_CHANNEL, EXIT, OPEN_GUIDE (§3.4.1). True when handled. */
     private fun globalKey(a: GuideEvent.Act): Boolean {
-        if (u.mode == ScreenMode.SEARCH || u.mode == ScreenMode.SETTINGS) return false
+        if (u.mode == ScreenMode.SEARCH || u.mode == ScreenMode.SETTINGS || u.mode == ScreenMode.SPORTS) return false
         when (a.action) {
             BoxAction.DIGIT -> if (a.digit in 0..9) openNumber(a.digit) else return false
             BoxAction.NUMBER_ENTRY -> openNumber(-1)
@@ -697,6 +697,7 @@ class GuideStateMachineImpl(
             BoxAction.SELECT -> when (u.tabFocused) {
                 TAB_GUIDE -> enterZone(Zone.GRID)
                 TAB_SEARCH -> openSearch()
+                TAB_SPORTS -> openSports()
                 else -> openSettingsGated(SettingsRoute.Root)
             }
             BoxAction.DOWN -> enterZone(Zone.HEADER) // owner ruling 2026-11-01: no panel buttons between the tabs and the chips
@@ -808,6 +809,21 @@ class GuideStateMachineImpl(
         if (wasFull && mode != ScreenMode.FULL) { effects.setFullScreen(false); full?.leaveFull() }
         if (mode == ScreenMode.GUIDE) settingsFromFull = false
         refreshFooter()
+    }
+
+    /** (docs/design/m6-score-bug.md §5.1) OK on the Sports tab: the screen is Compose's; the root swaps it in. */
+    private fun openSports() {
+        endBoot()
+        u = u.copy(overlay = null)
+        setMode(ScreenMode.SPORTS)
+    }
+
+    /** One Back from anywhere in Sports lands in the grid with the Guide tab current (§5.1). */
+    private fun onSportsClosed() {
+        startupFocusPending = false
+        setMode(ScreenMode.GUIDE)
+        u = u.copy(overlay = null, tabFocused = TAB_GUIDE)
+        enterZone(Zone.GRID)
     }
 
     private fun openSearch() {
@@ -2503,9 +2519,12 @@ class GuideStateMachineImpl(
         /** Rows around the top the rows cache should hold (§0.5: `[top − 6, top + 12)`). */
         const val ROWS_BEHIND = 6
         const val ROWS_AHEAD = 12
-        const val TAB_COUNT = 3
+        const val TAB_COUNT = 4
         const val TAB_GUIDE = 0
         const val TAB_SEARCH = 1
+        /** (docs/design/m6-score-bug.md §5.1) Guide · Search · Sports · Settings gear. */
+        const val TAB_SPORTS = 2
+        const val TAB_SETTINGS = 3
 
         val SHORTCUTS = listOf(GroupsShortcut.SEARCH, GroupsShortcut.SETTINGS)
         val GROUP_MENU = listOf(GroupMenuItem.HIDE, GroupMenuItem.MOVE_UP, GroupMenuItem.MOVE_DOWN)

@@ -146,8 +146,7 @@ class FiveKeyReachabilityTest {
         val (r, states) = search(exit, keys, maxDepth = 10)
         val missing = buildList {
             addAll(HeaderChip.entries.filter { it !in r.chips })
-            // (Score bug commit 0) SPORTS becomes reachable with WP-4a's tab, which drops this exception.
-            addAll(ScreenMode.entries.filter { it !in r.modes && it != ScreenMode.SPORTS })
+            addAll(ScreenMode.entries.filter { it !in r.modes })
             for (o in listOf("Groups", "Days", "Sheet")) if (o !in r.overlays) add(o)
             when (exit) {
                 ExitConfirmation.BACK_TWICE -> if ("ExitHint" !in r.overlays) add("ExitHint")

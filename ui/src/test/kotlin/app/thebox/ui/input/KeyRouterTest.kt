@@ -137,6 +137,18 @@ class KeyRouterTest {
         assertEquals(listOf(GuideEvent.Act(BoxAction.BACK, 0, -1, 0)), machine.events)
     }
 
+    @Test fun sportsPassesEverythingThroughExceptBackWhileNoChoiceListIsOpen() {
+        mode(ScreenMode.SPORTS)
+        for (code in listOf(Keys.DPAD_DOWN, Keys.DPAD_CENTER, Keys.DPAD_LEFT, Keys.DIGIT_0 + 1, Keys.CHANNEL_UP)) {
+            assertFalse(down(code)); assertFalse(up(code))
+        }
+        searchIdle = false // a Corner / Delay choice list is open: the screen closes it
+        assertFalse(down(Keys.BACK)); assertFalse(up(Keys.BACK))
+        searchIdle = true
+        assertTrue(down(Keys.BACK)); assertTrue(up(Keys.BACK))
+        assertEquals(listOf(GuideEvent.Act(BoxAction.BACK, 0, -1, 0)), machine.events)
+    }
+
     @Test fun unboundKeysAreNotHandledButRecorded() {
         assertFalse(down(24)) // VOLUME_UP
         assertFalse(up(24))

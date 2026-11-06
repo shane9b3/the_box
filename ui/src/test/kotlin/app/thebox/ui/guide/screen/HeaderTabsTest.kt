@@ -10,6 +10,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
@@ -61,6 +62,19 @@ class HeaderTabsTest {
         val row = rule.onNodeWithTag(HEADER_TABS_TAG).fetchSemanticsNode().boundsInRoot
         assertEquals("clock stays at the header's right edge", row.right, clock.right, 0.5f)
         assertTrue("clock stays inside the header", clock.left >= row.left)
+    }
+
+    /** (docs/design/m6-score-bug.md §5.1, U-N10) Guide · Search · Sports · gear, and the machine's tab count agrees. */
+    @Test fun fourTabsAreDrawnInOrderAndTheClockStillFitsAt1024() {
+        assertEquals(listOf(GuideTab.GUIDE, GuideTab.SEARCH, GuideTab.SPORTS, GuideTab.SETTINGS), SHOWN_TABS)
+        assertEquals(app.thebox.core.guide.state.GuideStateMachineImpl.TAB_COUNT, SHOWN_TABS.size)
+        assertEquals(app.thebox.core.guide.state.GuideStateMachineImpl.TAB_SPORTS, SHOWN_TABS.indexOf(GuideTab.SPORTS))
+        assertEquals(app.thebox.core.guide.state.GuideStateMachineImpl.TAB_SETTINGS, SHOWN_TABS.indexOf(GuideTab.SETTINGS))
+        show("Wednesday 30 September", "11:59 PM", failure) // the longest sync text and the longest date and time
+        rule.onNodeWithText("Sports").assertExists()
+        assertClockIsComplete("11:59 PM")
+        val status = rule.onNodeWithTag(SYNC_CHIP_TAG).fetchSemanticsNode().boundsInRoot
+        assertTrue("the status keeps useful space beside four tabs", status.width > 40f)
     }
 
     @Test fun syncFailureAndLongDateCannotTruncateThe24HourClock() {

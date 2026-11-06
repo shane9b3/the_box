@@ -84,9 +84,14 @@ grid,grid_home,OPEN_SETTINGS,SETTINGS,GRID,none,openSettings,-
 tabs,tabs,RIGHT,GUIDE,TABS,none,-,tab:1
 tabs,tabs,LEFT,GUIDE,TABS,none,-,tab:0
 tabs,tabs_search,LEFT,GUIDE,TABS,none,-,tab:0
-tabs,tabs_settings,RIGHT,GUIDE,TABS,none,-,tab:2
+tabs,tabs_search,RIGHT,GUIDE,TABS,none,-,tab:2
+tabs,tabs_sports,RIGHT,GUIDE,TABS,none,-,tab:3
+tabs,tabs_sports,LEFT,GUIDE,TABS,none,-,tab:1
+tabs,tabs_settings,RIGHT,GUIDE,TABS,none,-,tab:3
+tabs,tabs_settings,LEFT,GUIDE,TABS,none,-,tab:2
 tabs,tabs,SELECT,GUIDE,GRID,none,-,same
 tabs,tabs_search,SELECT,SEARCH,TABS,none,openSearch,-
+tabs,tabs_sports,SELECT,SPORTS,TABS,none,-,-
 tabs,tabs_settings,SELECT,SETTINGS,TABS,none,openSettings,-
 tabs,tabs,UP,GUIDE,TABS,none,-,tab:0
 # (owner ruling 2026-11-01) The panel has no buttons: Down from the tabs lands on the Group chip
@@ -226,7 +231,13 @@ back,grid_empty_source,BACK,GUIDE,GRID,Groups,-,-
 # ---- SEARCH / SETTINGS
 search,search,BACK,GUIDE,GRID,none,-,-
 search,search,DOWN,SEARCH,TABS,none,-,-
-settings,settings,BACK,GUIDE,TABS,none,-,tab:2
+# (docs/design/m6-score-bug.md §5.1) Sports: one Back returns to the grid with the Guide tab current; any other key
+# is Compose's (the router never forwards it), so the machine ignores it.
+sports,sports,BACK,GUIDE,GRID,none,-,tab:0
+sports,sports,DOWN,SPORTS,TABS,none,-,-
+sports,sports,SELECT,SPORTS,TABS,none,-,-
+sports,sports,OPEN_GUIDE,SPORTS,TABS,none,-,-
+settings,settings,BACK,GUIDE,TABS,none,-,tab:3
 settings,settings,SELECT,SETTINGS,TABS,none,-,-
 # (reviewed 2026-10-16, N11) the Guide key leaves Settings to the grid at now; Exit opens the exit hint there.
 settings,settings,OPEN_GUIDE,GUIDE,GRID,none,-,-
