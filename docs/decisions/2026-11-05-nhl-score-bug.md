@@ -41,3 +41,15 @@ corners. Mock-up: away logo · away score | clock over period | home score · ho
 - Every Sports settings row is ADVANCED; the simple-settings budget stays at 35.
 - Reviews: `docs/review/2026-11-05-score-bug-design-review-{arch,ux}.md`; every
   finding's disposition is in the design's "Lead sign-off (2026-11-05)" section.
+
+## Owner ruling after the integration pass (2026-11-05)
+6. **No local countdown.** The bug shows the clock exactly as the latest feed update
+   reports it and changes only when an update arrives (steps of roughly 15–30 s during
+   play, the feed's own cadence). No extrapolation between polls, no 40 s cap, no
+   "never count up" hold. Reason: a local countdown runs on through whistles the
+   client has not heard about yet (seen on the real NSH–COL game: it ran past a
+   stoppage, held, then jumped back up to 5:18). The feed value is never ahead of the
+   real game. Applies to intermission too. The user's delay still applies (the
+   snapshot queue is unchanged). Consequence: no per-second clock redraw, so the
+   ticking-bug frame budget and `DRAWS_SCORE_CLOCK` device item are moot; the bug
+   redraws only on a new snapshot.
