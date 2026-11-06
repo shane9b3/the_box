@@ -18,7 +18,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -69,17 +68,16 @@ private val Accent22 = DesignTokens.Colors.OnNowFill
 
 /**
  * One game card (docs/design/m6-score-bug.md §5.2), 564 x 128 design px (1 dp = 1 design px inside the root's scale).
- * Two team rows (logo plate, common name, score), and the state column on the right: LIVE with the ticking clock, `1st
- * INT`, `Final/OT` or the start time. Focused: `#EEF1F6` fill, a 3 px accent ring and an action chip. Followed: a
+ * Two team rows (logo plate, common name, score), and the state column on the right: LIVE with the clock as the day list
+ * last reported it (owner ruling 6: no local countdown), `1st INT`, `Final/OT` or the start time. Focused: `#EEF1F6` fill, a 3 px accent ring and an action chip. Followed: a
  * "✓ Following" chip, never the red dot.
  *
  * Focus is Compose's (the Sports tab is on Compose focus): the card is a `clickable`, OK follows or stops following.
- * [nowMono] is read only by the state line, so the per-second tick recomposes that line and nothing else.
+ * Nothing ticks: a card recomposes only when the board brings a new snapshot.
  */
 @Composable
 internal fun GameCard(
     card: GameCardModel,
-    nowMono: State<Long>,
     clock24: Boolean,
     onClick: () -> Unit,
     onFocusChange: (Boolean) -> Unit,
@@ -120,7 +118,7 @@ internal fun GameCard(
             }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.width(STATE_COLUMN_W.dp), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically)) {
-                StateLine(card, nowMono, clock24, ink)
+                StateLine(card, clock24, ink)
                 if (card.followed) FollowingChip(g.id.id, focused)
                 if (focused) ActionChip(g.id.id, card.followed)
             }
@@ -157,14 +155,18 @@ private fun LogoPlate(team: TeamLine) {
     val context = LocalContext.current
     val density = LocalDensity.current.density
     val url = team.logo
-    val logo by produceState<ImageBitmap?>(null, url, loader, density) {
-        value = null
-        if (url == null || loader == null) return@produceState
-        val w = (LOGO_SLOT_W * density).roundToInt().coerceAtLeast(1)
-        val h = (LOGO_SLOT_H * density).roundToInt().coerceAtLeast(1)
-        value = runCatching { coilLogoFetch(loader, context)(url, w, h) }
+    val w = (LOGO_SLOT_W * density).roundToInt().coerceAtLeast(1)
+    val h = (LOGO_SLOT_H * density).roundToInt().coerceAtLeast(1)
+    // U-S6: trimmed card logos are held in a small process LRU, so a day change, a re-open or a row scrolled back in
+    // shows the logo at once instead of re-rasterising the SVG.
+    val logo by produceState(url?.let { CardLogoCache.get(it, w, h) }, url, loader, w, h) {
+        value = url?.let { CardLogoCache.get(it, w, h) }
+        if (value != null || url == null || loader == null) return@produceState
+        val bmp = runCatching { coilLogoFetch(loader, context)(url, w, h) }
             .onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
             .getOrNull()?.asImageBitmap()
+        if (bmp != null) CardLogoCache.put(url, w, h, bmp)
+        value = bmp
     }
     Box(Modifier.size(64.dp, 44.dp).background(Plate, RoundedCornerShape(8.dp)), contentAlignment = Alignment.Center) {
         val img = logo
@@ -173,13 +175,24 @@ private fun LogoPlate(team: TeamLine) {
     }
 }
 
+/**
+ * (Fix pass, U-S6) Trimmed card logos by URL and slot size: about 64 entries of a few KB each (56 × 36 design px), so the
+ * whole league for two densities fits. The bug's two logos stay in [FollowLogos] (A-S11).
+ */
+internal object CardLogoCache {
+    private val lru = android.util.LruCache<String, ImageBitmap>(64)
+    private fun key(url: String, w: Int, h: Int) = "$url@${w}x$h"
+    fun get(url: String, w: Int, h: Int): ImageBitmap? = lru.get(key(url, w, h))
+    fun put(url: String, w: Int, h: Int, img: ImageBitmap) { lru.put(key(url, w, h), img) }
+}
+
 /** The logo's slot inside the 64 x 44 plate (4 px clear on each side). Design px. */
 private const val LOGO_SLOT_W = 56
 private const val LOGO_SLOT_H = 36
 
 /** Live games: the red dot, LIVE, then `2nd · 10:22`. Every other game: its state words (22/500, `.75`). */
 @Composable
-private fun StateLine(card: GameCardModel, nowMono: State<Long>, clock24: Boolean, ink: Color) {
+private fun StateLine(card: GameCardModel, clock24: Boolean, ink: Color) {
     val res = LocalResources.current
     val g = card.game
     val style = GuideUi.sans(22, FontWeight.Medium, ink.copy(alpha = 0.75f))
@@ -193,7 +206,7 @@ private fun StateLine(card: GameCardModel, nowMono: State<Long>, clock24: Boolea
         p.kind == PeriodKind.SO -> SportsText.period(res, p)
         g.clock?.inIntermission == true -> res.getString(R.string.sports_intermission, SportsText.period(res, p))
         else -> {
-            val secs = SportsViewModel.clockSecs(card, nowMono.value)
+            val secs = SportsViewModel.clockSecs(card)
             if (secs == null) SportsText.period(res, p)
             else res.getString(R.string.sports_card_live_line, SportsText.period(res, p), SportsText.clock(secs))
         }

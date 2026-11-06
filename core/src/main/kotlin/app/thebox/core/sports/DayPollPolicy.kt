@@ -6,7 +6,7 @@ import kotlin.math.roundToLong
  * When the day list polls (docs/design/m6-score-bug.md §2.3, A-S7; WP-1): 30 s, bucket-aligned from [lastOk]'s
  * `Date − Age`, while any game that day is live or pre-game; 5 min otherwise; once for an all-final day; nothing while
  * [demand] is not SEEN (the tab and the picker closed). After [failures] consecutive `Failed`s since [lastOk] the §2.4
- * back-off runs from [lastFailMono] ([retryAfterS] wins); [jitter] ∈ [-1, 1] scales its ±20 %.
+ * back-off runs from [lastFailMono] ([retryAfterS] is a floor on it, C-S4); [jitter] ∈ [-1, 1] scales its ±20 %.
  *
  * Returns the `MonoClock` instant of the next request, or null for none. [lastOk] null = never loaded: [nowMono].
  *
@@ -67,10 +67,15 @@ internal object SportsTiming {
         return t
     }
 
-    /** §2.4: `20 s × 2^(n−1)`, capped at 300 s, ±20 % by [jitter] ∈ [-1, 1]; `Retry-After` wins. */
+    /**
+     * §2.4: `20 s × 2^(n−1)`, capped at 300 s, ±20 % by [jitter] ∈ [-1, 1]. `Retry-After` is a **floor** on that back-off
+     * (fix pass, C-S4): a longer `Retry-After` wins, but `Retry-After: 0` (or anything under the back-off) never brings
+     * the next request closer than the back-off step.
+     */
     fun backoffAt(failMono: Long, failures: Int, retryAfterS: Int?, jitter: Double): Long {
-        if (retryAfterS != null && retryAfterS >= 0) return failMono + retryAfterS * 1000L
-        return failMono + backoffMs(failures, jitter)
+        val step = backoffMs(failures, jitter)
+        val server = if (retryAfterS != null && retryAfterS > 0) retryAfterS * 1000L else 0L
+        return failMono + maxOf(step, server)
     }
 
     fun backoffMs(failures: Int, jitter: Double): Long {

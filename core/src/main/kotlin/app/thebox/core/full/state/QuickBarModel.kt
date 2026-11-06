@@ -71,4 +71,4 @@ object QuickBarModel {
  * line: focus skips them and OK does nothing. Every other row of every picker can take focus.
  */
 val PickerChoice.selectable: Boolean
-    get() = this !is PickerChoice.ScoreTodayDivider && this !is PickerChoice.ScoreLoading
+    get() = this !is PickerChoice.ScoreTodayDivider && this !is PickerChoice.ScoreDayDivider && this !is PickerChoice.ScoreLoading

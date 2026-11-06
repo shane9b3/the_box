@@ -2,7 +2,6 @@ package app.thebox.ui.sports
 
 import app.thebox.core.sports.BottomBar
 import app.thebox.core.sports.CentreText
-import app.thebox.core.sports.ClockAnchor
 import app.thebox.core.sports.PeriodKind
 import app.thebox.core.sports.PeriodLabel
 import app.thebox.core.sports.PlacementInput
@@ -25,10 +24,11 @@ internal object ScoreBugFixtures {
         goalSide: Side? = null,
         awayAbbrev: String = "CGY",
         homeAbbrev: String = "EDM",
+        clockSecs: Int? = if (top == CentreText.Clock) 622 else null,
     ) = ScoreBugView(
         away = TeamLine(awayAbbrev, "Calgary", away, null),
         home = TeamLine(homeAbbrev, "Edmonton", home, null),
-        top = top, bottom = bottom, dim = dim, goalSeq = goalSeq, goalSide = goalSide,
+        top = top, bottom = bottom, dim = dim, goalSeq = goalSeq, goalSide = goalSide, clockSecs = clockSecs,
     )
 
     val live = view()
@@ -63,6 +63,4 @@ internal object ScoreBugFixtures {
         channelList = false, stats = false, groupCard = false, picker = false, numberEntry = false, probing = null,
         toast = false, reminder = false, modal = false, textTrackOn = false, screenOff = false,
     )
-
-    fun anchor(secs: Int, atMono: Long = 0L, ticking: Boolean = true, stopAt: Long? = null) = ClockAnchor(secs, atMono, ticking, stopAt)
 }

@@ -32,11 +32,7 @@ object SportsConstants {
     /** `Age` is clamped to [0, AGE_MAX_S]. */
     const val AGE_MAX_S = 60
 
-    // ---- clock and queue (§2.5)
-    /** In play, extrapolation stops this long after the last response (A-S3). */
-    const val EXTRAPOLATE_CAP_S = 40
-    /** A higher resync value is held at most this long, then snaps (A-S4). */
-    const val CLOCK_HOLD_MAX_S = 15
+    // ---- clock and queue (§2.5). Owner ruling 6: no local countdown, so no extrapolation cap and no hold.
     /** Stale after max(this, 2 × current cadence) with no Ok while live or in intermission. */
     const val STALE_AFTER_MS = 60_000L
     /** Hidden after this long stale (the follow is kept). */

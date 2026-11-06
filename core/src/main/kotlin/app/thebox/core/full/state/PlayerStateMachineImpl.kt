@@ -549,7 +549,7 @@ class PlayerStateMachineImpl(
     /** Opening a layer closes the others, except stats (orthogonal) and the passive bar (replaced) (§3.1.3). */
     private fun openLayer(l: PlayerLayer) {
         if (layer == PlayerLayer.PICKER && l != PlayerLayer.PICKER) picker = null
-        if (layer == PlayerLayer.PLACE_SCORE && l != PlayerLayer.PLACE_SCORE) place = null
+        if (layer == PlayerLayer.PLACE_SCORE && l != PlayerLayer.PLACE_SCORE) { savePlace(); place = null }
         if (layer == PlayerLayer.CHANNELS && l != PlayerLayer.CHANNELS) listMenu = null
         if (l != PlayerLayer.SCRUB && scrubShown) { scrubShown = false; scrubFocused = false; cancelPreview() }
         passive = false
@@ -558,6 +558,7 @@ class PlayerStateMachineImpl(
 
     private fun closeAll() {
         picker = null
+        if (layer == PlayerLayer.PLACE_SCORE) savePlace()
         place = null
         listMenu = null
         scrubShown = false
@@ -955,7 +956,8 @@ class PlayerStateMachineImpl(
             PickerChoice.AudioOutputAuto -> effects.audioOutputAuto() // U-S12
             // The SCORE_BUG / SCORE_DELAY rows are handled by scoreSelect, never here.
             is PickerChoice.ScoreGame, is PickerChoice.ScoreCornerRow, is PickerChoice.ScoreDelayRow, PickerChoice.ScoreStop,
-            PickerChoice.ScoreTodayDivider, PickerChoice.ScoreLoading, is PickerChoice.ScoreFailed, is PickerChoice.ScoreDelayChoice -> Unit
+            PickerChoice.ScoreTodayDivider, is PickerChoice.ScoreDayDivider, PickerChoice.ScoreLoading, is PickerChoice.ScoreFailed,
+            is PickerChoice.ScoreDelayChoice -> Unit
         }
     }
 
@@ -2083,7 +2085,8 @@ class PlayerStateMachineImpl(
             DayState.Loading -> { out += PickerChoice.ScoreTodayDivider; out += PickerChoice.ScoreLoading }
             is DayState.Failed -> { out += PickerChoice.ScoreTodayDivider; out += PickerChoice.ScoreFailed(d.kind) }
             is DayState.Board -> if (others.isNotEmpty()) {
-                out += PickerChoice.ScoreTodayDivider
+                // U-B1: the divider names the board's own day unless it is today's.
+                out += if (d.isToday) PickerChoice.ScoreTodayDivider else PickerChoice.ScoreDayDivider(d.board.dayKey)
                 others.forEach { out += PickerChoice.ScoreGame(it, followed = false) }
             }
         }
@@ -2098,9 +2101,13 @@ class PlayerStateMachineImpl(
         GamePhase.POSTPONED -> 3
     }
 
-    /** The followed row before the day list has it (loading, failed, another day): its teams and, once LIVE, its score. */
+    /**
+     * The followed row before the day list has it (loading, failed, another day): its teams and, once LIVE, its score.
+     * U-S4: a bug hidden for want of updates still has a last known score ([ScoreFacts.lastScore]), so the row reads as
+     * live with that score, never "7:00 PM".
+     */
     private fun stubOf(g: FollowedGame): GameSnapshot {
-        val v = scoreFacts.followed
+        val v = scoreFacts.followed ?: scoreFacts.lastScore
         return GameSnapshot(
             id = g.id, dayKey = "", startUtcMs = g.startUtcMs, phase = if (v != null) GamePhase.LIVE else GamePhase.SCHEDULED,
             away = v?.away ?: TeamLine(g.away, g.away, null, null), home = v?.home ?: TeamLine(g.home, g.home, null, null),
@@ -2139,6 +2146,18 @@ class PlayerStateMachineImpl(
     private fun enterPlace() {
         openLayer(PlayerLayer.PLACE_SCORE)
         place = ScorePlaceState(scoreFacts.corner, sample = scoreFacts.followed == null)
+    }
+
+    /**
+     * (Fix pass, U-N2) Place mode left by something other than OK / Back (a playback error, leaving FULL, a reminder's
+     * tune): the corner the user moved to is kept, not dropped silently.
+     */
+    private fun savePlace() {
+        val pl = place ?: return
+        if (pl.corner != scoreFacts.corner) {
+            effects.setScoreCorner(pl.corner)
+            scoreFacts = scoreFacts.copy(corner = pl.corner)
+        }
     }
 
     private fun placeKey(a: GuideEvent.Act): Boolean {

@@ -166,16 +166,25 @@ class SportsViewModelTest {
         assertEquals(SportsBody.Failed(FailKind.IO), m.state.value.body)
     }
 
-    @Test fun cardClockTicksFromTheAnchorAndStopsAtTheCapOrWhenNotRunning() {
+    @Test fun cardClockIsTheSnapshotValueAndNeverTicks() {
+        // Owner ruling 6: the card shows the clock exactly as the day list last reported it.
         val running = GameCardModel(SportsFixtures.game(clock = GameClock(622, true, false)), false, anchorMono = 1_000L)
-        assertEquals(622, SportsViewModel.clockSecs(running, 1_000L))
-        assertEquals(612, SportsViewModel.clockSecs(running, 11_000L))
-        assertEquals(622 - 40, SportsViewModel.clockSecs(running, 500_000L)) // EXTRAPOLATE_CAP_S
-        val stopped = running.copy(game = SportsFixtures.game(clock = GameClock(622, false, false)))
-        assertEquals(622, SportsViewModel.clockSecs(stopped, 100_000L))
-        val nearZero = running.copy(game = SportsFixtures.game(clock = GameClock(5, true, false)))
-        assertEquals(0, SportsViewModel.clockSecs(nearZero, 30_000L))
-        assertNull(SportsViewModel.clockSecs(running.copy(game = SportsFixtures.game(clock = null)), 0L))
+        assertEquals(622, SportsViewModel.clockSecs(running))
+        val stopped = running.copy(game = SportsFixtures.game(clock = GameClock(610, false, false)))
+        assertEquals(610, SportsViewModel.clockSecs(stopped))
+        val negative = running.copy(game = SportsFixtures.game(clock = GameClock(-2, false, false)))
+        assertEquals(0, SportsViewModel.clockSecs(negative))
+        assertNull(SportsViewModel.clockSecs(running.copy(game = SportsFixtures.game(clock = null))))
+    }
+
+    @Test fun aBoardThatIsNotTodaysNeverTeachesTheTodayChip() {
+        // U-N5: re-entering with a stale Yesterday board still in the repository must not learn its neighbours.
+        val repo = FakeScoreRepository()
+        val m = vm(repo)
+        repo.day.value = DayState.Board(SportsFixtures.board(live, dayKey = "2026-11-04").copy(prevDay = "2026-11-03", nextDay = "2026-11-05"), 0L, false, isToday = false)
+        assertEquals("not today's: skeletons until today's board lands", SportsBody.Loading, m.state.value.body)
+        repo.day.value = DayState.Board(SportsFixtures.board(live, dayKey = "2026-11-05"), 0L, false, isToday = true)
+        assertEquals(listOf("L1"), m.cards().map { it.game.id.id })
     }
 
     @Test fun minutesSinceFloorsToWholeMinutes() {

@@ -13,6 +13,7 @@ import app.thebox.core.sports.ScoreFacts
 import app.thebox.core.sports.Side
 import app.thebox.core.sports.SportsFixtures
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -60,6 +61,14 @@ class SportsTextTest {
         assertEquals("Follow a game", SportsText.quickValue(res, ScoreFacts(), clock24 = true))
         val f = SportsFixtures.followedOf(live)
         assertEquals("CGY 0–2 EDM", SportsText.quickValue(res, ScoreFacts(followed = SportsFixtures.liveView(live), game = f), clock24 = true))
+        // U-S4: a live game whose bug is hidden for want of updates keeps its last score, never "Starts …".
+        assertEquals("CGY 0–2 EDM", SportsText.quickValue(res, ScoreFacts(lastScore = SportsFixtures.liveView(live), game = f), clock24 = true))
+        assertTrue(SportsText.quickValue(res, ScoreFacts(game = f), clock24 = true).startsWith("Starts "))
+        // U-B1: another day's divider names its date.
+        assertEquals("Wed, Nov 4", SportsText.dayLabel("2026-11-04", java.util.Locale.US))
+        assertEquals("garbage", SportsText.dayLabel("garbage"))
+        assertEquals("Sports is off, so the score is hidden. Turn on Show Sports in Settings → Sports to follow a game again.",
+            SportsText.toast(res, app.thebox.core.sports.ScoreEvent.Removed(app.thebox.core.sports.RemoveReason.SPORTS_OFF, f)))
         assertEquals("Corner · Top right", res.getString(app.thebox.ui.R.string.sports_picker_corner, SportsText.corner(res, ScoreCorner.TOP_RIGHT)))
         assertEquals("Off", SportsText.delay(res, 0))
         assertEquals("30 s", SportsText.delay(res, 30))

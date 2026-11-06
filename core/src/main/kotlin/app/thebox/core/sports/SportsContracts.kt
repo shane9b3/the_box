@@ -135,7 +135,7 @@ data class PeriodLabel(val kind: PeriodKind, val number: Int)
  * One-line states ([Shootout], [Final]) are a `top` with a null `bottom`.
  */
 sealed interface CentreText {
-    /** The ticking clock (`m:ss` below 10:00, `mm:ss` from 10:00), drawn from [ClockAnchor]. */
+    /** The clock (`m:ss` below 10:00, `mm:ss` from 10:00): [ScoreBugView.clockSecs], the snapshot's own value. */
     data object Clock : CentreText
     /** Bottom line: "1st", "OT", "2OT". */
     data class Period(val period: PeriodLabel) : CentreText
@@ -156,12 +156,12 @@ sealed interface CentreText {
 }
 
 /**
- * The displayed clock: [secs] at [atMono] (`MonoClock`, `elapsedRealtime`); while [ticking] it counts down 1/s, floored
- * at 0, until [stopAtMono] (the extrapolation cap; null = no cap, e.g. intermission). Changes per poll only (A-S10).
+ * What the bug draws (§4.5). `ScoreBugMachine.view()` is null before LIVE (owner ruling 2026-11-05).
+ *
+ * [clockSecs] (fix pass, owner ruling 6 "no local countdown"): the clock exactly as the shown snapshot reports it, floored
+ * at 0; it changes only when a new snapshot becomes visible on the (possibly delayed) timeline. Null when [top] is not
+ * [CentreText.Clock] or the snapshot has no clock.
  */
-data class ClockAnchor(val secs: Int, val atMono: Long, val ticking: Boolean, val stopAtMono: Long?)
-
-/** What the bug draws (§4.5). `ScoreBugMachine.view()` is null before LIVE (owner ruling 2026-11-05). */
 data class ScoreBugView(
     val away: TeamLine,
     val home: TeamLine,
@@ -170,34 +170,50 @@ data class ScoreBugView(
     val dim: Boolean,
     val goalSeq: Int,
     val goalSide: Side?,
+    val clockSecs: Int? = null,
 )
 
-/** The day list the Sports tab and the picker show (A-N11). [Board.failing]: the last re-poll failed ("Updated 2 min ago"). */
+/**
+ * The day list the Sports tab and the picker show (A-N11). [Board.failing]: the last re-poll failed ("Updated 2 min ago").
+ * [Board.isToday] (fix pass, U-B1/U-N5): the board is the league's today (learned from `/score/now`), not a day the
+ * Sports tab picked.
+ */
 sealed interface DayState {
     data object Loading : DayState
-    data class Board(val board: DayBoard, val fetchedAtMono: Long, val failing: Boolean) : DayState
+    data class Board(val board: DayBoard, val fetchedAtMono: Long, val failing: Boolean, val isToday: Boolean = true) : DayState
     /** [FailKind.OFFLINE] = no default network (§5.4 "No internet connection"). */
     data class Failed(val kind: FailKind) : DayState
 }
 
 /** What `FullScreenHost`'s `ScoreBug` reads (A-B2). */
 interface ScoreBugSource {
-    /** Re-emitted only when a field other than the clock changes. */
+    /**
+     * What the bug shows, clock included (owner ruling 6): re-emitted only when a new snapshot becomes visible or a state
+     * changes (stale, goal text, hide), never per second.
+     */
     val bug: StateFlow<ScoreBugView?>
-    /** Changes per poll; read only in the draw lambda (A-S10). */
-    val clock: StateFlow<ClockAnchor?>
     /**
      * (Commit 0 addition) The `sports` prefs (corner, size, delay, enabled), so the overlay and the player VM read one
      * flow without a store of their own.
      */
     val prefs: StateFlow<SportsPrefs>
     fun reportDemand(owner: DemandOwner, on: Boolean)
+    /**
+     * (Fix pass, C-S5) The full-screen player's screen-off layer is showing: demand is NONE (zero requests, §2.3) while
+     * it is on, whatever the owners say.
+     */
+    fun reportScreenOff(on: Boolean)
 }
 
 /** `ScoreRepositoryImpl` (`:data`, WP-2) is the one implementation; `FakeScoreRepository` (core testFixtures) for tests. */
 interface ScoreRepository : ScoreBugSource {
     val day: StateFlow<DayState>
     val followed: StateFlow<FollowedGame?>
+    /**
+     * (Fix pass, U-S4) The followed game's last known view, kept while the bug is hidden for want of updates (bottom
+     * "No update"); null before LIVE and with nothing followed. The quick-bar value line and the picker read it.
+     */
+    val lastScore: StateFlow<ScoreBugView?>
     val events: Flow<ScoreEvent>
     /** null = stop following. Following another game replaces the current one. */
     fun follow(game: GameSnapshot?)
@@ -266,6 +282,8 @@ data class ScoreBugHostFacts(val toast: Boolean = false, val reminder: Boolean =
  */
 data class ScoreFacts(
     val followed: ScoreBugView? = null,
+    /** (Fix pass, U-S4) `ScoreRepository.lastScore`: the last known score while [followed] is null after puck drop. */
+    val lastScore: ScoreBugView? = null,
     val game: FollowedGame? = null,
     val day: DayState = DayState.Loading,
     val corner: ScoreCorner = ScoreCorner.TOP_RIGHT,

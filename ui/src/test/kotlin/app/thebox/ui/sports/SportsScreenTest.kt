@@ -250,8 +250,32 @@ class SportsScreenTest {
         rule.onNodeWithTag(SPORTS_RETRY_TAG).assertIsFocused()
         press(Key.DirectionCenter)
         assertEquals(1, repo.retries)
-        press(Key.DirectionUp, Key.DirectionRight, Key.DirectionCenter) // Up lands on Yesterday; Right is Today
+        // U-S3: the Retry chip goes away with the Failed body, so focus is already on the selected day chip.
+        rule.onNodeWithTag(sportsDayTag(SportsDay.TODAY)).assertIsFocused()
+        press(Key.DirectionCenter) // OK on the Today chip retries too
         assertEquals(2, repo.retries)
+    }
+
+    @Test fun afterARetryTheInitialFocusRuleRunsForTheNewBoard() {
+        repo.day.value = DayState.Failed(FailKind.TIMEOUT)
+        show()
+        press(Key.DirectionDown, Key.DirectionCenter)
+        repo.day.value = DayState.Loading
+        rule.waitForIdle()
+        board(pre, live)
+        rule.waitForIdle()
+        rule.onNodeWithTag(sportsCardTag("L1")).assertIsFocused()
+    }
+
+    @Test fun withSportsOffThereAreNoChipsToPick() {
+        store.update(SportsDomain) { it.copy(enabled = false) }
+        repo.prefs.value = repo.prefs.value.copy(enabled = false)
+        board(live)
+        show()
+        rule.onNodeWithTag(SPORTS_MESSAGE_TAG).assertExists()
+        rule.onNodeWithTag(sportsDayTag(SportsDay.TODAY)).assertDoesNotExist()
+        rule.onNodeWithTag(SPORTS_CORNER_TAG).assertDoesNotExist()
+        rule.onNodeWithTag(SPORTS_DELAY_TAG).assertDoesNotExist()
     }
 
     @Test fun aFailingBoardStaysAndSaysHowOldItIs() {

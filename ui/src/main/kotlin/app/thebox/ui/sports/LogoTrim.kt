@@ -39,9 +39,14 @@ class LogoTrim(private val slotW: Int, private val slotH: Int) : Transformation(
             return if (maxX < 0) Rect(0, 0, w, h) else Rect(minX, minY, maxX + 1, maxY + 1)
         }
 
-        /** Crops to the alpha bounds, then scales (up or down, aspect kept) to fit [slotW] × [slotH]. Software bitmap. */
+        /**
+         * Crops to the alpha bounds, then scales (up or down, aspect kept) to fit [slotW] × [slotH]. Software bitmap.
+         * U-B2: `Bitmap.Config.HARDWARE` is API 26; reading it on API 25 (Fire OS 6, minSdk) throws `NoSuchFieldError`,
+         * so the check is guarded (the request also sets `allowHardware(false)`).
+         */
         fun trimAndFit(src: Bitmap, slotW: Int, slotH: Int): Bitmap {
-            val soft = if (src.config == Bitmap.Config.HARDWARE) src.copy(Bitmap.Config.ARGB_8888, false) else src
+            val hardware = android.os.Build.VERSION.SDK_INT >= 26 && src.config == Bitmap.Config.HARDWARE
+            val soft = if (hardware) src.copy(Bitmap.Config.ARGB_8888, false) else src
             val b = alphaBounds(soft)
             val cropped = if (b.left == 0 && b.top == 0 && b.width() == soft.width && b.height() == soft.height) soft
             else Bitmap.createBitmap(soft, b.left, b.top, b.width(), b.height())

@@ -167,7 +167,6 @@ class ScoreBugMachineTest {
         for (t in listOf(1_000L, 29_000L, 30_000L, 45_000L)) {
             r.at(t)
             assertNull(r.m.view(), "pre at $t")
-            assertNull(r.m.anchor())
         }
         r.ok(live(secs = 1200, period = 1, away = 0, home = 0)) // received 45 000, shown from 75 000
         r.at(74_999)
@@ -203,6 +202,55 @@ class ScoreBugMachineTest {
     }
 
     @Test
+    fun riseToSeenWhileOfflineKeepsNoUpdateAndHide() {
+        // C-S2 / C-N6: the rise happens while offline (the Wi-Fi dropped, or Awake(true) before the network is back).
+        val r = Rig()
+        r.follow(demand = Demand.UNSEEN)
+        r.ok(live())
+        r.m.online(false)
+        r.at(250_000)
+        assertEquals(CentreText.NoUpdate, r.m.view()!!.bottom)
+        r.m.demand(Demand.UNSEEN)
+        r.m.demand(Demand.SEEN)
+        assertFalse(r.m.pollDue())
+        assertEquals(CentreText.NoUpdate, r.m.view()!!.bottom, "no poll can answer: still stale")
+        assertTrue(r.m.view()!!.dim)
+        r.at(3_600_000)
+        assertNull(r.m.view(), "and it hides after 5 min stale, offline")
+        assertNotNull(r.m.followed())
+        // Suppression set while online is cleared when the network goes.
+        val o = Rig()
+        o.follow(demand = Demand.UNSEEN)
+        o.ok(live())
+        o.at(250_000)
+        o.m.demand(Demand.SEEN) // online: poll at once, "No update" suppressed
+        assertEquals(CentreText.Period(PeriodLabel(PeriodKind.REG, 2)), o.m.view()!!.bottom)
+        o.m.online(false)
+        assertEquals(CentreText.NoUpdate, o.m.view()!!.bottom)
+    }
+
+    @Test
+    fun riseToSeenNeverPollsAheadOfABackoffOrRetryAfter() {
+        // C-S3 / C-N6: a 429 with Retry-After 300, then the user zaps guide ↔ full screen.
+        val r = Rig()
+        r.follow()
+        r.ok(live())
+        r.at(21_500)
+        assertTrue(r.m.pollDue())
+        r.m.fetched(Fetch.Failed(FailKind.HTTP_429, 300, r.now))
+        for (k in 1..20) {
+            r.at(21_500 + k * 2_000L)
+            r.m.demand(Demand.UNSEEN)
+            r.m.demand(Demand.SEEN)
+            assertFalse(r.m.pollDue(), "edge $k polled inside the Retry-After")
+        }
+        r.at(321_499)
+        assertFalse(r.m.pollDue())
+        r.at(321_500)
+        assertTrue(r.m.pollDue())
+    }
+
+    @Test
     fun demandNoneIsIdle() {
         val r = Rig()
         r.follow(demand = Demand.NONE)
@@ -222,7 +270,7 @@ class ScoreBugMachineTest {
         o.ok(live())
         o.m.online(false)
         assertFalse(o.m.pollDue())
-        assertEquals(40_000, o.m.nextWakeAtMono()) // the extrapolation cap
+        assertEquals(60_000, o.m.nextWakeAtMono()) // stale (no clock wake-ups: owner ruling 6)
     }
 
     // ------------------------------------------------------------------ wake tests with no input (A-B1)
@@ -276,12 +324,11 @@ class ScoreBugMachineTest {
         r.ok(live())
         r.m.online(false)
         val wakes = r.wakeUntil(400_000)
-        assertEquals(listOf(40_000L, 60_000L, 360_000L), wakes.map { it.first })
-        assertEquals(CentreText.Period(PeriodLabel(PeriodKind.REG, 2)), wakes[0].second!!.bottom)
-        assertFalse(wakes[0].second!!.dim)
-        assertEquals(CentreText.NoUpdate, wakes[1].second!!.bottom)
-        assertTrue(wakes[1].second!!.dim)
-        assertNull(wakes[2].second, "hidden")
+        assertEquals(listOf(60_000L, 360_000L), wakes.map { it.first })
+        assertEquals(CentreText.NoUpdate, wakes[0].second!!.bottom)
+        assertTrue(wakes[0].second!!.dim)
+        assertEquals(622, wakes[0].second!!.clockSecs, "stale shows the last snapshot's clock")
+        assertNull(wakes[1].second, "hidden")
         assertNotNull(r.m.followed(), "the follow is kept")
         // The bug returns on the next Ok.
         r.m.online(true)
@@ -290,15 +337,15 @@ class ScoreBugMachineTest {
     }
 
     @Test
-    fun staleFreezesTheClock() {
+    fun staleShowsTheSnapshotClockInIntermissionToo() {
         val r = Rig()
         r.follow()
         r.ok(live(inInt = true, running = false, phase = GamePhase.INTERMISSION, secs = 958, period = 1))
         r.m.online(false)
         r.at(80_000) // intermission: max(60 s, 2 × 40 s)
-        val a = assertNotNull(r.m.anchor())
-        assertFalse(a.ticking)
-        assertEquals(958 - 80, a.secs)
+        val v = assertNotNull(r.m.view())
+        assertEquals(CentreText.NoUpdate, v.bottom)
+        assertEquals(958, v.clockSecs)
     }
 
     @Test
@@ -312,118 +359,79 @@ class ScoreBugMachineTest {
         assertNull(r.m.followed())
     }
 
+    // ------------------------------------------------------------------ the clock (owner ruling 6: no local countdown)
+
     @Test
-    fun clockHoldEndsOnTimeWhenTheExtrapolationCatchesUp() {
+    fun shownClockIsExactlyTheSnapshotValueAndStepsOnlyOnANewSnapshot() {
         val r = Rig()
         r.follow()
         r.ok(live(secs = 622))
-        r.at(20_000) // shown 602
-        r.ok(live(secs = 610)) // higher by 8 s: held at 602 until the new extrapolation reaches it
-        r.m.online(false)
-        val held = assertNotNull(r.m.anchor())
-        assertEquals(ClockAnchor(602, 20_000, ticking = false, stopAtMono = null), held)
-        assertEquals(28_000, r.m.nextWakeAtMono())
-        val wakes = r.wakeUntil(28_000)
-        assertEquals(listOf(28_000L), wakes.map { it.first })
-        val a = assertNotNull(r.m.anchor())
-        assertTrue(a.ticking)
-        assertEquals(602, a.secsAt(28_000))
-        assertEquals(601, a.secsAt(29_000))
-    }
-
-    @Test
-    fun higherResyncIsHeldThenSnappedAfter15s() {
-        val r = Rig()
-        r.follow()
-        r.ok(live(secs = 622))
-        r.at(20_000) // shown 602
-        r.ok(live(secs = 640)) // would need 38 s to come down to 602
-        r.m.online(false)
-        assertEquals(602, r.m.anchor()!!.secs)
-        assertFalse(r.m.anchor()!!.ticking)
-        val wakes = r.wakeUntil(35_000)
-        assertEquals(listOf(35_000L), wakes.map { it.first })
-        assertEquals(640 - 15, r.m.anchor()!!.secsAt(35_000)) // snapped
-        assertTrue(r.m.anchor()!!.ticking)
-    }
-
-    @Test
-    fun periodChangeAndStopStartSnapAtOnce() {
-        val r = Rig()
-        r.follow()
-        r.ok(live(secs = 5, period = 1))
-        r.at(20_000)
-        r.ok(live(secs = 1200, period = 2))
-        assertEquals(ClockAnchor(1200, 20_000, ticking = true, stopAtMono = 60_000), r.m.anchor())
-        r.at(40_000) // shown 1180
-        r.ok(live(secs = 1185, period = 2, running = false)) // stopped and higher: snaps
-        assertEquals(ClockAnchor(1185, 40_000, ticking = false, stopAtMono = null), r.m.anchor())
-    }
-
-    @Test
-    fun displayedClockNeverGoesUpWithinAPeriod() {
-        val r = Rig()
-        r.follow()
-        r.ok(live(secs = 622))
-        var last = Int.MAX_VALUE
-        var t = 0L
-        val rng = Random(3)
-        while (t < 300_000) {
-            t += 20_000
+        for (t in 0L until 20_000L step 1_000L) {
             r.at(t)
-            // The true clock is 622 − t/1000, reported with ±3 s of noise.
-            r.ok(live(secs = 622 - (t / 1000).toInt() + rng.nextInt(-3, 4)))
-            for (s in 0 until 20) {
-                r.at(t + s * 1_000L)
-                val v = r.m.anchor()!!.secsAt(r.now)
-                assertTrue(v <= last, "went up at ${r.now}: $last → $v")
-                last = v
-            }
+            assertEquals(622, r.m.view()!!.clockSecs, "no countdown between snapshots (at $t)")
+        }
+        r.at(20_000)
+        r.ok(live(secs = 610)) // the feed lagged 8 s behind the old extrapolation: shown as reported
+        assertEquals(610, r.m.view()!!.clockSecs)
+        r.at(40_000)
+        r.ok(live(secs = 610, running = false)) // a whistle: unchanged
+        assertEquals(610, r.m.view()!!.clockSecs)
+        r.at(60_000)
+        r.ok(live(secs = 640, running = false)) // a clock correction upward: the feed wins, no hold
+        assertEquals(640, r.m.view()!!.clockSecs)
+        r.at(80_000)
+        r.ok(live(secs = 1200, period = 3))
+        assertEquals(1200, r.m.view()!!.clockSecs)
+        // Intermission: the snapshot value too, never counted down locally.
+        r.at(100_000)
+        r.ok(live(inInt = true, running = false, phase = GamePhase.INTERMISSION, secs = 958, period = 3))
+        r.at(139_000)
+        assertEquals(958, r.m.view()!!.clockSecs)
+        // Negative feed values read 0; one-line states carry no clock.
+        r.at(140_000)
+        r.ok(live(secs = -3, running = false, period = 3))
+        assertEquals(0, r.m.view()!!.clockSecs)
+        assertEquals(CentreText.EndOf(PeriodLabel(PeriodKind.REG, 3)), r.m.view()!!.bottom)
+        r.at(160_000)
+        r.ok(final())
+        assertNull(r.m.view()!!.clockSecs)
+    }
+
+    @Test
+    fun noWakeIsScheduledForClockTicks() {
+        // Running, stopped and intermission: offline, the only wakes are stale and hide; online, the poll comes first.
+        for (snap in listOf(live(secs = 622), live(secs = 622, running = false), live(inInt = true, running = false, phase = GamePhase.INTERMISSION, secs = 958))) {
+            val r = Rig()
+            r.follow()
+            r.ok(snap)
+            r.m.online(false)
+            val wakes = r.wakeUntil(400_000).map { it.first }
+            val stale = if (snap.phase == GamePhase.INTERMISSION) 80_000L else 60_000L
+            assertEquals(listOf(stale, stale + SportsConstants.HIDE_AFTER_MS), wakes, "wakes for ${snap.phase} running=${snap.clock?.running}")
+            val o = Rig()
+            o.follow()
+            o.ok(snap)
+            val next = assertNotNull(o.m.nextWakeAtMono())
+            assertTrue(next >= 20_000, "first wake $next is the poll, not a clock tick")
+            assertTrue(o.m.pollDue().not())
         }
     }
 
     @Test
-    fun age19PollsEvery20sAnd5sRttNeverFreezeARunningClock() {
-        // A-S3: every answer is 19 s old at the CDN and takes 5 s to arrive. A cap measured from the anchor would stop
-        // the clock; measured from the last response it never does.
-        val r = Rig()
-        fun truth(serverT: Long) = ((1_100_000L - serverT) / 1000).toInt()
+    fun withADelayTheClockStepsWhenEachDelayedSnapshotBecomesVisible() {
+        val r = Rig(delaySec = 30)
         r.follow()
-        var prev = Int.MAX_VALUE
-        for (k in 0 until 20) {
-            val sent = 20_000L * k + 1_500
-            val recv = sent + 5_000
-            r.at(recv)
-            r.ok(live(secs = truth(sent - 19_000)), ageS = 19, date = r.server(sent))
-            for (s in 0 until 20) {
-                val t = recv + s * 1_000L
-                r.at(t)
-                val a = assertNotNull(r.m.anchor())
-                assertTrue(a.ticking, "frozen at $t")
-                assertTrue(a.stopAtMono == null || t < a.stopAtMono!!, "capped at $t")
-                val v = a.secsAt(t)
-                assertTrue(v < prev, "did not tick down at $t: $prev → $v")
-                prev = v
-            }
-        }
-    }
-
-    @Test
-    fun intermissionCountsDownWithoutACap() {
-        val r = Rig()
-        r.follow()
-        r.ok(live(inInt = true, running = false, phase = GamePhase.INTERMISSION, secs = 958, period = 1))
+        r.ok(live(secs = 622)) // shown from 30 000
+        r.at(20_000)
+        r.ok(live(secs = 602)) // shown from 50 000
         r.m.online(false)
-        val a = assertNotNull(r.m.anchor())
-        assertTrue(a.ticking)
-        assertNull(a.stopAtMono)
-        r.at(79_000)
-        assertEquals(958 - 79, r.m.anchor()!!.secsAt(79_000))
-        // In play the cap stops it 40 s after the last response.
-        val p = Rig()
-        p.follow()
-        p.ok(live(secs = 622))
-        assertEquals(622 - 40, p.m.anchor()!!.secsAt(59_000))
+        r.at(30_000)
+        assertEquals(622, r.m.view()!!.clockSecs)
+        r.at(49_999)
+        assertEquals(622, r.m.view()!!.clockSecs, "the delayed timeline, not the newest answer")
+        assertEquals(50_000, r.m.nextWakeAtMono())
+        r.at(50_000)
+        assertEquals(602, r.m.view()!!.clockSecs)
     }
 
     // ------------------------------------------------------------------ states (§4.5)
@@ -460,14 +468,21 @@ class ScoreBugMachineTest {
         val v = assertNotNull(r.m.view())
         assertEquals(CentreText.Delayed, v.bottom)
         assertTrue(v.dim)
-        assertEquals(ClockAnchor(622, 0, ticking = false, stopAtMono = null), r.m.anchor())
+        assertEquals(622, v.clockSecs)
         assertEquals(30_000, r.m.nextWakeAtMono())
         r.at(30_000)
         assertFalse(r.m.view()!!.dim)
-        assertEquals(ClockAnchor(622, 30_000, ticking = true, stopAtMono = 70_000), r.m.anchor())
+        assertEquals(CentreText.Period(PeriodLabel(PeriodKind.REG, 2)), r.m.view()!!.bottom)
+        assertEquals(622, r.m.view()!!.clockSecs)
         // Changing the delay takes effect at once.
-        r.m.prefs(0)
-        assertEquals(ClockAnchor(622, 0, ticking = true, stopAtMono = 40_000), r.m.anchor())
+        val c = Rig(delaySec = 30)
+        c.follow()
+        c.ok(live(secs = 622))
+        c.at(5_000)
+        assertTrue(c.m.view()!!.dim)
+        c.m.prefs(0)
+        assertFalse(c.m.view()!!.dim)
+        assertEquals(622, c.m.view()!!.clockSecs)
     }
 
     // ------------------------------------------------------------------ queue and follow
@@ -505,6 +520,28 @@ class ScoreBugMachineTest {
         u.ok(live(away = 1, secs = 502))
         assertEquals(0, u.m.view()!!.goalSeq)
         assertEquals(1, u.m.view()!!.away.score)
+    }
+
+    @Test
+    fun noGoalAgainstAStaleComparisonNorWhenBothSidesRose() {
+        // C-N1: an hour in the background (NONE), then back in FULL: the first answer updates silently.
+        val r = Rig()
+        r.follow()
+        r.ok(live(away = 0, home = 2))
+        r.m.demand(Demand.NONE)
+        r.at(3_600_000)
+        r.m.demand(Demand.SEEN)
+        r.ok(live(away = 1, home = 2, period = 3))
+        assertEquals(0, r.m.view()!!.goalSeq)
+        assertNull(r.m.view()!!.goalSide)
+        assertEquals(1, r.m.view()!!.away.score)
+        // Both scores rose since the last snapshot: no tag, no box.
+        val b = Rig()
+        b.follow()
+        b.ok(live(away = 0, home = 2))
+        b.at(40_000)
+        b.ok(live(away = 1, home = 3))
+        assertEquals(0, b.m.view()!!.goalSeq)
     }
 
     @Test
@@ -572,15 +609,33 @@ class ScoreBugMachineTest {
             assertTrue(gap >= base * 0.8 - 1 && gap <= base * 1.2 + 1, "gap $gap for $base")
             r.at(r.now + gap)
         }
+        // Retry-After is a floor on the back-off (C-S4): at the 7th failure the 300 s step outlasts a 7 s Retry-After.
         r.m.fetched(Fetch.Failed(FailKind.HTTP_429, 7, r.now))
-        assertEquals(r.now + 7_000, r.m.nextWakeAtMono())
-        r.at(r.now + 7_000)
-        r.ok(live(running = false), ageS = 0) // stopped: no cap instant in the wake list
+        val capped = r.m.nextWakeAtMono()!! - r.now
+        assertTrue(capped in 240_000..360_000, "Retry-After 7 under a 300 s step: $capped")
+        r.at(r.now + capped)
+        r.ok(live(running = false), ageS = 0)
         assertEquals(r.now + 21_500, r.m.nextWakeAtMono(), "an Ok resets the back-off")
         r.at(r.now + 21_500)
         r.m.fetched(Fetch.Failed(FailKind.IO, null, r.now))
         val gap = r.m.nextWakeAtMono()!! - r.now
         assertTrue(gap in 16_000..24_000, "first step again: $gap")
+    }
+
+    @Test
+    fun retryAfterZeroNeverPollsAtOneHertzAndALongOneWins() {
+        // C-S4: `Retry-After: 0` from a CDN would otherwise make the next poll due at once.
+        val r = Rig()
+        r.follow()
+        r.at(5_000)
+        r.m.fetched(Fetch.Failed(FailKind.HTTP_5XX, 0, r.now))
+        val gap = r.m.nextWakeAtMono()!! - r.now
+        assertTrue(gap in 16_000..24_000, "Retry-After 0 keeps the 20 s step: $gap")
+        assertFalse(r.m.pollDue())
+        val l = Rig()
+        l.follow()
+        l.m.fetched(Fetch.Failed(FailKind.HTTP_429, 300, l.now))
+        assertEquals(300_000, l.m.nextWakeAtMono())
     }
 
     @Test

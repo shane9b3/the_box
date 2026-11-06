@@ -371,6 +371,11 @@ sealed interface PickerChoice {
     data object ScoreStop : PickerChoice
     /** Non-selectable "Today" divider. */
     data object ScoreTodayDivider : PickerChoice
+    /**
+     * (Fix pass, U-B1) Non-selectable divider for a board that is not today's ([dayKey] "2026-11-04"): its date, never
+     * "Today". Shown only until the picker's own `/score/now` answer replaces that board.
+     */
+    data class ScoreDayDivider(val dayKey: String) : PickerChoice
     /** Non-selectable "Loading games…". */
     data object ScoreLoading : PickerChoice
     /** The §5.4 failure text; OK retries ([PlayerEffects.retryScores]). */

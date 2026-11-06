@@ -3,7 +3,6 @@ package app.thebox.ui.sports
 import android.content.res.Resources
 import android.graphics.Bitmap
 import android.graphics.Typeface
-import android.os.SystemClock
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.VectorConverter
@@ -22,7 +21,6 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -48,8 +46,6 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.res.ResourcesCompat
 import app.thebox.core.sports.Box as DesignBox
 import app.thebox.core.sports.CentreText
-import app.thebox.core.sports.ClockAnchor
-import app.thebox.core.sports.secsAt
 import app.thebox.core.sports.OverlayGeometry
 import app.thebox.core.sports.PlacementInput
 import app.thebox.core.sports.ScoreBugPlacement
@@ -66,30 +62,33 @@ import app.thebox.ui.full.PlayerUi
 import app.thebox.ui.theme.BoxFonts
 import app.thebox.ui.theme.DesignTokens
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.collectLatest
 import kotlin.math.roundToInt
 
 const val SCORE_BUG_TAG = "score_bug"
 /** The place-mode hint pill (§6). */
 const val SCORE_BUG_HINT_TAG = "score_bug_hint"
-/** Debug composition counter of [ScoreBug] (`GuideDebugCounters`; §4.7: zero per tick and per poll). */
+/** Debug composition counter of [ScoreBug] (`GuideDebugCounters`; §4.7: zero per host recomposition, one per snapshot). */
 const val COMPOSITIONS_SCORE_BUG = "ScoreBug"
-/** Debug counter: draws of the clock node's own layer (§4.7, §8: 60 in 60 s). */
-const val DRAWS_SCORE_CLOCK = "ScoreBugClockDraw"
-/** Debug counter: changes of the displayed second, each of which invalidates only the clock layer (§4.7). */
-const val TICKS_SCORE_CLOCK = "ScoreBugClockTick"
+/** Debug counter: builds of the bug's resolved words ([ScoreBugFrame]); one per change of what is shown, never per second. */
+const val FRAMES_SCORE_BUG = "ScoreBugFrame"
+/** Debug counter: draws of the bug's one drawing node (glass, body and clock). */
+const val DRAWS_SCORE_BUG = "ScoreBugDraw"
 
 /**
  * The score bug (docs/design/m6-score-bug.md §4; WP-3): a 404 × 70 fake-glass pill at the box
  * `ScoreBugPlacement.place(placement, geometry)` returns (null = not drawn), sliding 150 ms between boxes (snapped in
  * [lowEnd]). `FullScreenHost` calls it after the bars and the stats, before the channel list, in FULL only, while
- * Show Sports is on. [ScoreBugSource.bug] and [ScoreBugSource.clock] are collected **here**, never in the host; the
- * clock is read only in the clock node's own layer (A-S10). With no followed game and [PlacementInput.placing], it
- * draws the sample bug ("AWY 0 | 0:00 | HME 0").
+ * Show Sports is on. [ScoreBugSource.bug] is collected **here**, never in the host. With no followed game and
+ * [PlacementInput.placing], it draws the sample bug ("AWY 0 | 0:00 | HME 0").
  *
- * Layers, bottom to top inside one pill-sized box: the baked glass bitmap, the static body (logos, scores, dividers, goal
- * box, period line, place ring), and the clock in its own `graphicsLayer` (the one node a tick re-records). [place] and
- * [mono] are test seams (the placement function, and `elapsedRealtime` for the clock anchor).
+ * **No local countdown** (owner ruling 6, fix pass 2026-11-05): the clock is [ScoreBugView.clockSecs], the snapshot's own
+ * value, so the bug recomposes and redraws only when a new snapshot (or state) becomes visible; nothing ticks between
+ * them. One drawing node: the glass bitmap, the body (logos, scores, dividers, goal box, centre lines, clock, place ring).
+ *
+ * Held across hides (U-S1): the painter, the baked glass and the follow's [FollowLogos] stay while this composable is in
+ * the composition (FULL with Show Sports on), so a reappearance after the passive info bar, a list or a toast neither
+ * re-bakes the glass nor re-fetches the logos. The logos are released when the follow's logo URLs change.
+ * [place] is a test seam (the placement function).
  */
 @Composable
 fun ScoreBug(
@@ -99,7 +98,6 @@ fun ScoreBug(
     lowEnd: Boolean,
     modifier: Modifier = Modifier,
     place: (PlacementInput, OverlayGeometry) -> DesignBox? = ScoreBugPlacement::place,
-    mono: () -> Long = SystemClock::elapsedRealtime,
 ) {
     if (GuideDebugCounters.ENABLED) SideEffect { GuideDebugCounters.bump(COMPOSITIONS_SCORE_BUG) }
     val context = LocalContext.current
@@ -107,12 +105,15 @@ fun ScoreBug(
     val d = LocalDensity.current.density // device px per design px (BoxDesignScale)
 
     val bug by source.bug.collectAsState()
-    val view: ScoreBugView? = bug ?: if (placement.placing) sampleView(res) else null
+    val sample = remember(res) { sampleView(res) }
+    val view: ScoreBugView? = bug ?: if (placement.placing) sample else null
     val box = if (view != null) place(placement, geometry) else null
     val large = placement.size == ScoreBugSize.LARGE
 
     val holder = remember { Holder() }
     if (box != null) { holder.box = box; holder.large = large }
+    if (view != null) holder.lastView = view
+    bug?.let { holder.lastFollowed = it }
 
     // ---- visibility: slide between boxes, fade in and out (snapped in low-end mode)
     val fade = remember { Animatable(0f) }
@@ -135,13 +136,9 @@ fun ScoreBug(
             holder.positioned = true
         }
     }
-    val last = holder.box
-    val visible = box != null || (holder.drawn && !fadeDone)
-    if (!visible || last == null) { holder.drawn = false; return }
-    holder.drawn = true
-    val shownLarge = holder.large
 
-    // ---- what is drawn
+    // ---- held across hides (U-S1): above the visibility return, so hiding never drops them
+    val shownLarge = holder.large
     val k = if (shownLarge) K.SCORE_LARGE_SCALE else 1f
     val s = d * k
     val painter = remember(s, shownLarge) {
@@ -150,26 +147,38 @@ fun ScoreBug(
             pillW = (if (shownLarge) K.SCORE_LARGE_W else K.SCORE_W) * d, pillH = (if (shownLarge) K.SCORE_LARGE_H else K.SCORE_H) * d,
         )
     }
-    val glass = remember(painter, lowEnd) { painter.bakeGlass(withShadow = !lowEnd) }
-    val shownView = view ?: holder.lastView ?: return
-    holder.lastView = shownView
-    val frame = remember(shownView, painter) { painter.frame(shownView, res) }
-
-    // ---- logos: held for the life of the follow (keyed by the two URLs)
+    // Baked on the first draw that needs it, then kept (never in a frame where the bug is not drawn).
+    val glass = remember(painter, lowEnd) { GlassCache(painter, withShadow = !lowEnd) }
     val loader = LocalShellImageLoader.current
     val scope = rememberCoroutineScope()
     val logos = remember(loader) { FollowLogos(loader?.let { coilLogoFetch(it, context) }, scope) }
+    DisposableEffect(logos) { onDispose { logos.release() } }
     val logoWaited = remember { mutableStateOf(false) }
-    LaunchedEffect(shownView.away.logo, shownView.home.logo, s) {
+    val followed = holder.lastFollowed
+    LaunchedEffect(followed?.away?.logo, followed?.home?.logo, s) {
+        if (followed == null) return@LaunchedEffect
         logos.start(
-            shownView.away.logo, shownView.home.logo,
+            followed.away.logo, followed.home.logo,
             (K.SCORE_LOGO_W * s).roundToInt().coerceAtLeast(1), (K.SCORE_LOGO_H * s).roundToInt().coerceAtLeast(1),
         )
         logoWaited.value = false
         delay(K.LOGO_WAIT_MS)
         logoWaited.value = true
     }
-    DisposableEffect(logos) { onDispose { logos.release() } }
+
+    val last = holder.box
+    val visible = box != null || (holder.drawn && !fadeDone)
+    if (!visible || last == null) { holder.drawn = false; return }
+    holder.drawn = true
+
+    // ---- what is drawn: rebuilt only when the shown view changes (a new snapshot or state), never per second
+    val shownView = view ?: holder.lastView ?: return
+    val frame = remember(shownView, painter) {
+        if (GuideDebugCounters.ENABLED) GuideDebugCounters.bump(FRAMES_SCORE_BUG)
+        painter.frame(shownView, res)
+    }
+    // The sample bug ("AWY | HME") never borrows the followed game's logos.
+    val shownLogos = if (shownView === sample) null else logos
 
     // ---- goal accent: one Animatable read in draw (no box, and no motion, in low-end mode)
     val goal = remember { Animatable(0f) }
@@ -187,29 +196,12 @@ fun ScoreBug(
         }
     }
 
-    // ---- the clock: collected here, never in the host; the second is state read only in the clock layer's draw
-    val secs = remember { mutableIntStateOf(0) }
-    LaunchedEffect(source) {
-        source.clock.collectLatest { a ->
-            if (a == null) { secs.intValue = 0; return@collectLatest }
-            while (true) {
-                val now = mono()
-                val shown = ClockMath.secsAt(a, now)
-                if (secs.intValue != shown) {
-                    secs.intValue = shown
-                    if (GuideDebugCounters.ENABLED) GuideDebugCounters.bump(TICKS_SCORE_CLOCK)
-                }
-                val next = ClockMath.nextTickAt(a, now) ?: break
-                delay((next - now).coerceAtLeast(1L))
-            }
-        }
-    }
-
     val w = if (shownLarge) K.SCORE_LARGE_W else K.SCORE_W
     val h = if (shownLarge) K.SCORE_LARGE_H else K.SCORE_H
     val placing = placement.placing
     val rightSide = last.l > 960f
-    val desc = remember(shownView, res) { Describe(res, shownView) }
+    // U-S7: a plain string per shown view; semantics read nothing that changes between snapshots.
+    val desc = remember(shownView, res) { Describe(res, shownView).text() }
 
     Box(
         modifier
@@ -217,32 +209,26 @@ fun ScoreBug(
             .graphicsLayer { alpha = fade.value }
             .size(w.dp, h.dp),
     ) {
-        Box(
+        Spacer(
             Modifier
                 .fillMaxSize()
                 .testTag(SCORE_BUG_TAG)
-                .semantics(mergeDescendants = true) { contentDescription = desc.text(secs.intValue) },
-        ) {
-            Spacer(Modifier.fillMaxSize().drawBehind { drawIntoCanvas { painter.drawGlass(it.nativeCanvas, glass) } })
-            Spacer(
-                Modifier.fillMaxSize().drawBehind {
+                .semantics { contentDescription = desc }
+                .drawBehind {
+                    if (GuideDebugCounters.ENABLED) GuideDebugCounters.bump(DRAWS_SCORE_BUG)
                     drawIntoCanvas {
-                        painter.drawBody(it.nativeCanvas, frame, logos, logoWaited.value, goal.value, holder.goalSide, placing)
+                        painter.drawGlass(it.nativeCanvas, glass.bitmap)
+                        painter.drawBody(it.nativeCanvas, frame, shownLogos, logoWaited.value, goal.value, holder.goalSide, placing)
                     }
                 },
-            )
-            if (frame.clockOnTop) {
-                // The one node a tick re-records: its own layer, and the only reader of `secs`.
-                Spacer(
-                    Modifier.fillMaxSize().graphicsLayer { }.drawBehind {
-                        if (GuideDebugCounters.ENABLED) GuideDebugCounters.bump(DRAWS_SCORE_CLOCK)
-                        drawIntoCanvas { painter.drawClock(it.nativeCanvas, secs.intValue, frame) }
-                    },
-                )
-            }
-        }
+        )
         if (placing) PlaceHint(rightSide, w)
     }
+}
+
+/** The baked glass of one painter and mode (U-S1): built on first use, then held. */
+private class GlassCache(private val painter: ScoreBugPainter, private val withShadow: Boolean) {
+    val bitmap: Bitmap by lazy(LazyThreadSafetyMode.NONE) { painter.bakeGlass(withShadow) }
 }
 
 /** Plain holder for what must survive recomposition without being snapshot state (writes happen in composition). */
@@ -252,6 +238,8 @@ private class Holder {
     var positioned = false
     var drawn = false
     var lastView: ScoreBugView? = null
+    /** The last real (not sample) view: its logo URLs key the held [FollowLogos]. */
+    var lastFollowed: ScoreBugView? = null
     var goalSeq = -1
     var goalSide: Side? = null
 }
@@ -308,29 +296,13 @@ private fun sampleView(res: Resources) = ScoreBugView(
     dim = false,
     goalSeq = 0,
     goalSide = null,
+    clockSecs = 0,
 )
-
-/**
- * The displayed second of a [ClockAnchor] (§2.7, §4.7). [secsAt] is WP-1's `ClockAnchor.secsAt` (one rule for the machine,
- * the bug and the cards: counts down 1/s while ticking, floored at 0, frozen at `stopAtMono`). Pure.
- */
-internal object ClockMath {
-    fun secsAt(a: ClockAnchor, now: Long): Int = a.secsAt(now)
-
-    /** The next instant the displayed second changes, or null when it never will (not ticking, at 0, past the cap). */
-    fun nextTickAt(a: ClockAnchor, now: Long): Long? {
-        if (!a.ticking) return null
-        if (secsAt(a, now) <= 0) return null
-        val elapsed = (now - a.atMono).coerceAtLeast(0L)
-        val next = a.atMono + (elapsed / 1000L + 1L) * 1000L
-        val stop = a.stopAtMono
-        return if (stop != null && next > stop) null else next
-    }
-}
 
 /** The merged semantics string of a state (U-N12): "Calgary 0, Edmonton 2, 10:22 left in the 1st". */
 internal class Describe(private val res: Resources, private val v: ScoreBugView) {
-    fun text(secs: Int): String {
+    /** [secs] defaults to the view's own clock (owner ruling 6: the snapshot value). */
+    fun text(secs: Int = v.clockSecs ?: 0): String {
         val a = v.away
         val h = v.home
         fun f(id: Int, vararg extra: Any) = res.getString(id, a.name, a.score ?: 0, h.name, h.score ?: 0, *extra)

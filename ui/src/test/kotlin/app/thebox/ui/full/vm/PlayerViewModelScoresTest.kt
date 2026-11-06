@@ -123,6 +123,10 @@ class PlayerViewModelScoresTest {
         assertTrue(DemandOwner.FULL_WITH_FOLLOW in repo.demandOn)
         machine.mutableUi.value = PlayerUiState(layer = PlayerLayer.SCREEN_OFF); idle()
         assertTrue(DemandOwner.FULL_WITH_FOLLOW !in repo.demandOn)
+        assertEquals("C-S5: the screen-off layer is reported (NONE demand)", true, repo.screenOffCalls.last())
+        machine.mutableUi.value = PlayerUiState(); idle()
+        assertEquals(false, repo.screenOffCalls.last())
+        assertTrue(DemandOwner.FULL_WITH_FOLLOW in repo.demandOn)
 
         val f = SportsFixtures.followedOf(SportsFixtures.game())
         repo.emit(ScoreEvent.Removed(RemoveReason.POSTPONED, f)); idle()

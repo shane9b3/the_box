@@ -42,10 +42,7 @@ class ScoreBugBoundsTest {
         rule.mainClock.autoAdvance = true
         rule.setContent {
             BoxDesignScale {
-                ScoreBug(
-                    repo, input.value, ScoreBugFixtures.noGeometry, low.value,
-                    mono = { rule.mainClock.currentTime },
-                )
+                ScoreBug(repo, input.value, ScoreBugFixtures.noGeometry, low.value)
             }
         }
         rule.waitForIdle()
@@ -165,7 +162,7 @@ class ScoreBugBoundsTest {
         render()
         rule.mainClock.advanceTimeBy(1000)
         rule.onNodeWithTag(SCORE_BUG_TAG, useUnmergedTree = true)
-            .assertContentDescriptionEquals("Calgary 0, Edmonton 2, 0:00 left in the 1st")
+            .assertContentDescriptionEquals("Calgary 0, Edmonton 2, 10:22 left in the 1st") // the snapshot clock (owner ruling 6)
         rule.onNodeWithTag(SCORE_BUG_HINT_TAG, useUnmergedTree = true).assertExists()
     }
 

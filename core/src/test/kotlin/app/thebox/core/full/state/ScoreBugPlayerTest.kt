@@ -78,6 +78,29 @@ class ScoreBugPlayerTest {
         assertTrue(w.ui.picker!!.choices[w.ui.picker!!.focused].selectable)
     }
 
+    @Test fun anotherDaysBoardIsLabelledWithItsDateNeverToday() {
+        // U-B1: until the picker's own /score/now answer lands, a board the Sports tab picked names its day.
+        val w = PlayerWorld()
+        w.player.scores(ScoreFacts(day = DayState.Board(SportsFixtures.board(g2, dayKey = "2026-11-04"), 0L, false, isToday = false)))
+        openSheet(w)
+        val divider = w.ui.picker!!.choices.first { !it.selectable }
+        assertEquals(PickerChoice.ScoreDayDivider("2026-11-04"), divider)
+        w.player.scores(ScoreFacts(day = board(g2)))
+        assertTrue(PickerChoice.ScoreTodayDivider in w.ui.picker!!.choices)
+    }
+
+    @Test fun aHiddenLiveBugKeepsItsScoreInTheFollowedRow() {
+        // U-S4: the bug is hidden (no update for 5 min) and the day list does not have the game: the followed row is
+        // live with the last known score, not "7:00 PM".
+        val w = PlayerWorld()
+        w.player.scores(ScoreFacts(lastScore = SportsFixtures.liveView(g1), game = SportsFixtures.followedOf(g1), day = DayState.Loading))
+        openSheet(w)
+        val row = w.ui.picker!!.choices.first() as PickerChoice.ScoreGame
+        assertTrue(row.followed)
+        assertEquals(GamePhase.LIVE, row.game.phase)
+        assertEquals(2, row.game.home.score)
+    }
+
     @Test fun demandIsOnExactlyWhileASheetIsOpen() {
         val w = PlayerWorld()
         fun demand() = w.fx.calls.filter { it.name == "scorePicker" }.map { it.args[0] as Boolean }

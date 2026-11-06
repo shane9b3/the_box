@@ -11,12 +11,15 @@ import kotlin.random.Random
  *
  * How the rules land (WP-1 reading of the design):
  * - **Delayed timeline.** Each `Ok` enters the queue at `anchor = received − Age`; it is shown from
- *   `max(anchor + delay, received)`. Goals, "Final", the final's expiry, stale/hide and the extrapolation cap all run
- *   on that timeline (stale, hide and the cap are measured from `lastReceived + delay`).
+ *   `max(anchor + delay, received)`. Goals, "Final", the final's expiry and stale/hide all run on that timeline (stale
+ *   and hide are measured from `lastReceived + delay`).
+ * - **Clock** (owner ruling 6, 2026-11-05): the shown clock is exactly the shown snapshot's `secondsRemaining`
+ *   ([ScoreBugView.clockSecs]); it changes only when a new snapshot becomes visible. No extrapolation, no cap, no hold.
  * - **Polls** follow the latest *received* snapshot (not the shown one): live = next bucket end + phase; intermission
  *   and pre-game skip one bucket; pre-game first sleeps until `start − 2 min`; `UNSEEN` adds a floor of
  *   `received + 120 s`; FINAL and POSTPONED never poll. A follow, and a rise to `SEEN` whose last `Ok` is older than
- *   20 s, poll at once (the latter suppresses "No update" until the answer).
+ *   20 s, poll at once (the latter suppresses "No update" until the answer). A rise never polls while offline (C-S2) or
+ *   while a back-off / `Retry-After` is running (C-S3).
  * - **Removal:** POSTPONED (event), two NotFounds ≥ 20 s apart (`NOT_LISTED` event). Expiry (final + 5 min, start +
  *   8 h) is silent; `RemoveReason` has no value for the hard expiry, so it is silent too.
  * - `FollowedFinal` / `Followed` are raised by the repository (it has the snapshot and the first-follow flag), not here.
@@ -30,7 +33,6 @@ class ScoreBugMachine(
     private val random: Random = Random.Default,
 ) {
     private class Entry(val snap: GameSnapshot, val anchorMono: Long, val receivedMono: Long)
-    private class Hold(val secs: Int, val atMono: Long, val untilMono: Long)
 
     private var game: FollowedGame? = null
     private var delayMs = 0L
@@ -40,8 +42,6 @@ class ScoreBugMachine(
     private val queue = ArrayList<Entry>() // ascending anchorMono
     private var shown: Entry? = null
     private var lastOk: Fetch.Ok<GameSnapshot>? = null
-    /** The `Ok` before [lastOk]: the cap the shown clock had until the newest answer arrived. */
-    private var prevOkReceived: Long? = null
     private var skewMs = 0L
 
     private var followAt = 0L
@@ -53,7 +53,6 @@ class ScoreBugMachine(
     private var backoffAt: Long? = null
     private var notFoundFirst: Long? = null
 
-    private var hold: Hold? = null
     private var goalSeq = 0
     private var goalSide: Side? = null
     private var goalUntil: Long? = null
@@ -91,7 +90,10 @@ class ScoreBugMachine(
         if (d == Demand.SEEN && was != Demand.SEEN && game != null) {
             val ok = lastOk
             val old = ok == null || now - ok.receivedMono > SportsConstants.CDN_BUCKET_MS
-            if (old && pollsAtAll(now)) {
+            // C-S2: no rise poll (and so no "No update" suppression) while offline. C-S3: never ahead of a running
+            // back-off or Retry-After.
+            val backingOff = failures > 0 && (backoffAt ?: Long.MIN_VALUE) > now
+            if (old && online && !backingOff && pollsAtAll(now)) {
                 eagerAt = now
                 if (ok != null) suppressStale = true
             }
@@ -102,6 +104,7 @@ class ScoreBugMachine(
     /** (Commit 0 addition) A default network exists (§2.4). Offline: nothing is due, but stale and hide still advance. */
     fun online(on: Boolean) {
         online = on
+        if (!on) suppressStale = false // C-S2: no poll can answer, so stale and hide must run
         step()
     }
 
@@ -114,7 +117,6 @@ class ScoreBugMachine(
         when (f) {
             is Fetch.Ok -> {
                 failures = 0; failAt = null; backoffAt = null; notFoundFirst = null
-                prevOkReceived = lastOk?.receivedMono
                 lastOk = f
                 f.serverDateMs?.let { date -> skewMs = date - (wall() - (now - f.receivedMono)) }
                 if (f.value.startUtcMs != g.startUtcMs) game = g.copy(startUtcMs = f.value.startUtcMs)
@@ -151,7 +153,7 @@ class ScoreBugMachine(
         step()
     }
 
-    /** Advance to `mono.nowMs()`: expiry, stale, hide, the delay queue, the clock hold (A-B1). */
+    /** Advance to `mono.nowMs()`: expiry, stale, hide, the delay queue (A-B1). */
     fun step() {
         val now = mono.nowMs()
         if (game == null) return
@@ -162,7 +164,6 @@ class ScoreBugMachine(
             return
         }
         prune(now)
-        hold?.let { if (now >= it.untilMono) hold = null }
         goalUntil?.let { if (now >= it) { goalUntil = null; goalSide = null } }
     }
 
@@ -172,7 +173,10 @@ class ScoreBugMachine(
         return now >= at
     }
 
-    /** min(next poll, next snapshot due, stale, hide, cap instant, expiry, hold end, goal-text end); null = idle (A-B1). */
+    /**
+     * min(next poll, next snapshot due, stale, hide, expiry, goal-text end); null = idle (A-B1). Nothing is scheduled for
+     * the clock: it changes only with a snapshot (owner ruling 6).
+     */
     fun nextWakeAtMono(): Long? {
         val g = game ?: return null
         if (demand == Demand.NONE) return null
@@ -185,10 +189,8 @@ class ScoreBugMachine(
         val staleAt = staleAt()
         later(staleAt)
         later(staleAt?.plus(SportsConstants.HIDE_AFTER_MS))
-        shown?.let { naturalAnchor(it) }?.stopAtMono?.let(::later)
         g.finalSeenUtcMs?.let { later(monoAtWall(now, it + SportsConstants.EXPIRE_AFTER_FINAL_MS)) }
         later(monoAtWall(now, g.startUtcMs + SportsConstants.HARD_EXPIRY_MS))
-        later(hold?.untilMono)
         later(goalUntil)
         return best
     }
@@ -211,7 +213,7 @@ class ScoreBugMachine(
             s.phase == GamePhase.FINAL -> { top = CentreText.Final(s.finalKind ?: PeriodKind.REG); null }
             s.periodKind == PeriodKind.SO -> { top = CentreText.Shootout; null }
             s.phase == GamePhase.INTERMISSION -> CentreText.Intermission(label)
-            s.clock?.let { it.secondsRemaining == 0 && !it.running && !it.inIntermission } == true -> CentreText.EndOf(label)
+            s.clock?.let { it.secondsRemaining <= 0 && !it.running && !it.inIntermission } == true -> CentreText.EndOf(label)
             else -> CentreText.Period(label)
         }
         val goal = goalSide.takeIf { goalUntil?.let { now < it } == true }
@@ -221,24 +223,24 @@ class ScoreBugMachine(
             // One-line states (Final, SO) stay one line; the goal box still runs off goalSeq/goalSide.
             goal != null && bottom != null -> bottom = CentreText.Goal(goal)
         }
-        return ScoreBugView(s.away, s.home, top, bottom, dim = waiting || stale, goalSeq = goalSeq, goalSide = goal)
+        // Owner ruling 6: the clock is the snapshot's own value, whatever the state (live, stopped, intermission,
+        // stale, waiting on the delay).
+        val clockSecs = if (top == CentreText.Clock) s.clock?.takeIf { clockShown(s) }?.secondsRemaining?.coerceAtLeast(0) else null
+        return ScoreBugView(s.away, s.home, top, bottom, dim = waiting || stale, goalSeq = goalSeq, goalSide = goal, clockSecs = clockSecs)
     }
 
-    fun anchor(): ClockAnchor? {
-        view() ?: return null
-        val now = mono.nowMs()
-        val e = shown
-        if (e == null) {
-            val first = queue.firstOrNull() ?: return null
-            val c = first.snap.clock?.takeIf { clockShown(first.snap) } ?: return null
-            return ClockAnchor(c.secondsRemaining, first.anchorMono, ticking = false, stopAtMono = null)
-        }
-        val staleAt = staleAt()
-        if (staleAt != null && now >= staleAt) {
-            val a = liveAnchor(e, staleAt) ?: return null
-            return ClockAnchor(a.secsAt(staleAt), staleAt, ticking = false, stopAtMono = null)
-        }
-        return liveAnchor(e, now)
+    /**
+     * (Fix pass, U-S4) The bug's view with the stale-hide ignored: the last known score while the bug is hidden for want
+     * of updates. Null before LIVE, like [view].
+     */
+    fun knownView(): ScoreBugView? {
+        view()?.let { return it }
+        game ?: return null
+        val e = shown ?: return null
+        val s = e.snap
+        if (s.phase != GamePhase.LIVE && s.phase != GamePhase.INTERMISSION && s.phase != GamePhase.FINAL) return null
+        val clockSecs = s.clock?.takeIf { clockShown(s) }?.secondsRemaining?.coerceAtLeast(0)
+        return ScoreBugView(s.away, s.home, CentreText.Clock, CentreText.NoUpdate, dim = true, goalSeq = goalSeq, goalSide = null, clockSecs = clockSecs)
     }
 
     /**
@@ -307,26 +309,29 @@ class ScoreBugMachine(
         val q = queue.lastOrNull { it.anchorMono + delayMs <= now }
         val prev = shown
         if (q == null) {
-            if (prev != null) { shown = null; hold = null }
+            if (prev != null) shown = null
             return
         }
         if (q === prev) return
         if (prev != null && q.anchorMono < prev.anchorMono) {
-            // The delay grew: back in time, silently, the clock snaps.
+            // The delay grew: back in time, silently.
             shown = q
-            hold = null
             return
         }
         val at = maxOf(q.anchorMono + delayMs, q.receivedMono)
-        val before = prev?.let { liveAnchor(it, at, prevOkReceived) }
         shown = q
         val s = q.snap
         val p = prev?.snap
 
-        if (p != null && demand == Demand.SEEN) {
+        // C-N1: a goal is flagged only against a recent comparison (not the hours-old snapshot shown before a long NONE
+        // or UNSEEN stretch), and never when both sides rose meanwhile.
+        if (p != null && demand == Demand.SEEN && q.receivedMono - prev.receivedMono <= GOAL_FRESH_MS) {
+            val home = rose(p.home.score, s.home.score)
+            val away = rose(p.away.score, s.away.score)
             val side = when {
-                rose(p.home.score, s.home.score) -> Side.HOME
-                rose(p.away.score, s.away.score) -> Side.AWAY
+                home && away -> null
+                home -> Side.HOME
+                away -> Side.AWAY
                 else -> null
             }
             if (side != null) {
@@ -340,25 +345,9 @@ class ScoreBugMachine(
         if (s.phase == GamePhase.FINAL && g != null && g.finalSeenUtcMs == null) {
             game = g.copy(finalSeenUtcMs = correctedWall() - (now - at))
         }
-
-        hold = null
-        val next = naturalAnchor(q)
-        if (p != null && before != null && next != null && sameRun(p, s)) {
-            val d0 = before.secsAt(at)
-            if (next.secsAt(at) > d0) {
-                val reachAt = next.atMono + (next.secs - d0) * 1000L
-                val reaches = next.ticking && (next.stopAtMono == null || reachAt <= next.stopAtMono)
-                val max = at + SportsConstants.CLOCK_HOLD_MAX_S * 1000L
-                hold = Hold(d0, at, if (reaches) minOf(reachAt, max) else max)
-            }
-        }
     }
 
     private fun rose(was: Int?, now: Int?) = was != null && now != null && now > was
-
-    private fun sameRun(a: GameSnapshot, b: GameSnapshot): Boolean =
-        a.phase == b.phase && a.period == b.period && a.periodKind == b.periodKind &&
-            a.clock?.running == b.clock?.running && a.clock?.inIntermission == b.clock?.inIntermission
 
     private fun prune(now: Long) {
         val keep = shown
@@ -367,25 +356,6 @@ class ScoreBugMachine(
 
     private fun clockShown(s: GameSnapshot): Boolean =
         (s.phase == GamePhase.LIVE || s.phase == GamePhase.INTERMISSION) && s.periodKind != PeriodKind.SO && s.clock != null
-
-    /** The snapshot's own anchor on the delayed timeline, capped 40 s after the last response in play (A-S3). */
-    private fun naturalAnchor(e: Entry, capFrom: Long? = lastOk?.receivedMono): ClockAnchor? {
-        val s = e.snap
-        if (!clockShown(s)) return null
-        val c = s.clock!!
-        val at = e.anchorMono + delayMs
-        val ticking = c.running || c.inIntermission
-        if (!ticking) return ClockAnchor(c.secondsRemaining, at, ticking = false, stopAtMono = null)
-        val stop = if (c.inIntermission) null else (capFrom ?: e.receivedMono) + delayMs + SportsConstants.EXTRAPOLATE_CAP_S * 1000L
-        return ClockAnchor(c.secondsRemaining, at, ticking = true, stopAtMono = stop)
-    }
-
-    /** The shown anchor at [t] ignoring staleness: the hold's frozen value while it lasts, else the natural one. */
-    private fun liveAnchor(e: Entry, t: Long, capFrom: Long? = lastOk?.receivedMono): ClockAnchor? {
-        val h = hold
-        if (h != null && t < h.untilMono && e === shown) return ClockAnchor(h.secs, h.atMono, ticking = false, stopAtMono = null)
-        return naturalAnchor(e, capFrom)
-    }
 
     /** Stale from `lastReceived + delay + max(60 s, 2 × cadence)` while the latest snapshot is live (§2.4, A-S6). */
     private fun staleAt(): Long? {
@@ -423,20 +393,17 @@ class ScoreBugMachine(
     }
 
     private fun reset() {
-        queue.clear(); shown = null; lastOk = null; prevOkReceived = null
+        queue.clear(); shown = null; lastOk = null
         eagerAt = null; suppressStale = false
         failures = 0; failAt = null; backoffAt = null; notFoundFirst = null
-        hold = null; goalSeq = 0; goalSide = null; goalUntil = null
+        goalSeq = 0; goalSide = null; goalUntil = null
     }
-}
 
-/**
- * The displayed whole seconds of this anchor at [nowMono] (§2.5): counts down 1/s from [ClockAnchor.atMono] while
- * ticking, stops at [ClockAnchor.stopAtMono], floored at 0. The UI's per-second tick reads the same function.
- */
-fun ClockAnchor.secsAt(nowMono: Long): Int {
-    if (!ticking || nowMono <= atMono) return secs
-    val t = stopAtMono?.let { minOf(it, nowMono) } ?: nowMono
-    if (t <= atMono) return secs
-    return (secs - (t - atMono) / 1000L).coerceAtLeast(0L).toInt()
+    private companion object {
+        /**
+         * C-N1: a score rise is a "goal" only when the snapshot it is compared with was received at most this long before
+         * (2 × the slowest SEEN cadence plus a failed poll's back-off).
+         */
+        const val GOAL_FRESH_MS = 2 * 40_000L + SportsConstants.BACKOFF_BASE_MS
+    }
 }

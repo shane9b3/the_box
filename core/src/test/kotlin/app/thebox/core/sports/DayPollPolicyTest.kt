@@ -63,7 +63,9 @@ class DayPollPolicyTest {
         assertEquals(f + 24_000, next(ok(GamePhase.LIVE), failures = 1, failAt = f, jitter = 1.0))
         assertEquals(f + 16_000, next(null, failures = 1, failAt = f, jitter = -1.0))
         assertEquals(f + 360_000, next(ok(GamePhase.LIVE), failures = 12, failAt = f, jitter = 1.0))
-        // Retry-After wins
-        assertEquals(f + 7_000, next(ok(GamePhase.LIVE), failures = 3, failAt = f, retry = 7))
+        // Retry-After is a floor on the back-off (C-S4): a longer one wins, a shorter one (or 0) never brings it closer.
+        assertEquals(f + 300_000, next(ok(GamePhase.LIVE), failures = 1, failAt = f, retry = 300))
+        assertEquals(f + 80_000, next(ok(GamePhase.LIVE), failures = 3, failAt = f, retry = 7))
+        assertEquals(f + 20_000, next(ok(GamePhase.LIVE), failures = 1, failAt = f, retry = 0))
     }
 }

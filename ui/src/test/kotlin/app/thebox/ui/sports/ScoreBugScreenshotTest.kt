@@ -83,9 +83,9 @@ class ScoreBugScreenshotTest {
         }
         c.translate(margin.toFloat(), margin.toFloat())
         p.drawGlass(c, p.bakeGlass(withShadow = !lowEnd))
-        val frame = p.frame(view, context.resources)
+        // Owner ruling 6: the clock is the view's own value, drawn by drawBody.
+        val frame = p.frame(if (view.top == app.thebox.core.sports.CentreText.Clock) view.copy(clockSecs = secs) else view, context.resources)
         p.drawBody(c, frame, if (withLogos) logos() else null, logoWaited = true, goalAlpha, view.goalSide, placing)
-        if (frame.clockOnTop) p.drawClock(c, secs, frame)
         return bmp
     }
 

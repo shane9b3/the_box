@@ -56,11 +56,12 @@ reviewer rejects code that does otherwise.
 5. **One pure machine with a wake-up contract.**
    - `ScoreBugMachine` in `:core` exposes `nextWakeAtMono()`.
    - The repository loop sleeps until the next poll *or* the next time-driven change: a delayed snapshot coming due,
-     stale/hide, expiry, or the extrapolation cap (A-B1).
+     stale/hide or expiry (A-B1). (The extrapolation cap wake is gone: owner ruling 6.)
    - Every input is serialised through one actor (A-S8).
-6. **The clock ticks locally and never jumps up within a period.** Extrapolation runs from `anchor = received − Age`.
-   It is capped 40 s after the *last response* (A-S3). The displayed value is monotonic, with a hold of up to 15 s
-   (A-S4).
+6. **The clock is the feed's own value** (owner ruling 6, 2026-11-05, superseding A-S3/A-S4). The bug, the cards, the
+   picker rows and the quick-bar value line show the clock exactly as the latest snapshot on the (possibly delayed)
+   timeline reports it. It changes only when a new snapshot becomes visible: no extrapolation, no 40 s cap, no
+   never-count-up hold.
 7. **Delay is a timestamped snapshot queue.** Default 0 s (owner ruling 1); the user can set 0–120 s. Goals, "Final"
    and expiry run on the delayed timeline, and the machine wakes for each of them.
 8. **The followed game survives a restart.** It expires 5 min after the final (delayed timeline), 8 h after the
@@ -73,7 +74,8 @@ reviewer rejects code that does otherwise.
 10. **The bug** is a 404 × 70 fully rounded pill (5.77 : 1, matching the mock-up's 5.75 : 1; U-S1).
     - Glass at `.86` with an outer dark ring, legible on white ice (U-B3).
     - Inset 96/56, outside overscan (U-S2). Default corner top right.
-    - One redraw per second, on its own layer, with zero recompositions per tick (A-S10).
+    - It redraws only when a new snapshot (or state) becomes visible; nothing ticks between them (owner ruling 6;
+      the per-second clock layer of A-S10 is gone).
 11. **It does not fight other overlays.**
     - Bottom corners hide for the passive post-zap bar, and slide (150 ms) above a bar the user opened (U-S3).
     - A bottom corner flips to the top while subtitles are on.
@@ -201,9 +203,9 @@ the URL is derived from the abbreviation.
 | Phase | Next poll | Clock |
 |---|---|---|
 | `SCHEDULED`, `PRE` | one poll on Follow; then sleep until `start − PRE_WAKE_MS` (2 min); then one poll per 40 s (bucket end + `POLL_PHASE_MS`, every other bucket) until `LIVE`. Its only job is to detect the switch to live. `UNSEEN`: `max(40 s, 120 s)` after the wake | — (nothing drawn) |
-| `LIVE`, running | next bucket end + `POLL_PHASE_MS` | ticks, monotonic (§2.5) |
-| `LIVE`, stopped | same | frozen |
-| `INTERMISSION` | next bucket end + `POLL_PHASE_MS`, skipping one bucket (40 s) | counts down, not capped, floored at 0 |
+| `LIVE`, running | next bucket end + `POLL_PHASE_MS` | the snapshot's value (§2.5) |
+| `LIVE`, stopped | same | the snapshot's value |
+| `INTERMISSION` | next bucket end + `POLL_PHASE_MS`, skipping one bucket (40 s) | the snapshot's value, floored at 0 |
 | `FINAL` | none; own rule in `UNSEEN` | not shown |
 | `POSTPONED` | none; removal event | — |
 
@@ -229,13 +231,15 @@ timer.
 
 ### 2.4 Failures, offline, stale
 
-- **Back-off** after `Failed`: `20 s × 2^n`, capped at 300 s, ±20 % jitter. `Retry-After` wins. An `Ok` resets it.
+- **Back-off** after `Failed`: `20 s × 2^n`, capped at 300 s, ±20 % jitter. `Retry-After` is a **floor** on it (fix
+  pass, C-S4): a longer `Retry-After` wins, a shorter one (or `0`) never brings the next request closer. An `Ok` resets
+  it. A rise to `SEEN` never polls ahead of a running back-off or `Retry-After` (C-S3), nor while offline (C-S2).
 - **NotFound** (A-S12): the follow is removed only after **two** `NotFound`s at least 20 s apart, each with a JSON or
   empty body. A 404 with an HTML body is `Failed(HTTP_OTHER)`.
 - **Online** means a default network exists (`ConnectivityManager` default-network callback, as in `SmbSessionKeeper`).
   `VALIDATED` is not required (A-S12). With no default network, nothing is sent; requests resume when one appears.
 - **Stale:** no `Ok` for `max(STALE_AFTER_MS, 2 × current cadence)` (A-S6) while live or in intermission.
-  - The bug freezes the clock.
+  - The clock stays at the last snapshot's value (it never moves between snapshots anyway).
   - The **whole centre column dims** to `.55` (U-S11), and the bottom line reads **No update**.
 - **Hide:** after `HIDE_AFTER_MS` (5 min) stale, the bug hides. The follow is kept, and the bug returns on the next
   `Ok`.
@@ -248,15 +252,18 @@ timer.
   - `view(now)` takes the newest snapshot with `anchorMono ≤ now − delay`.
   - Before one qualifies, the bug shows the oldest snapshot, dimmed, with the bottom line **Delayed**.
   - Changing the delay takes effect at once.
-- **Value:** `secs = snap.secondsRemaining − (now − delay − anchorMono)/1000`, while `running || inIntermission`;
-  floored at 0.
-- **Cap** (A-S3): in play, extrapolation stops when `now − lastReceivedMono > EXTRAPOLATE_CAP_S` (40 s), measured
-  from the last response, not from the anchor. Intermission is not capped.
-- **Monotonic** (A-S4): while phase, period and the running state are unchanged, the shown value never goes up. A
-  higher resync value is held until the extrapolation reaches it, for at most `CLOCK_HOLD_MAX_S` (15 s), then it
-  snaps. A period change, phase change, or stop/start snaps at once.
-- **Time base** (A-N7): one time base, `MonoClock` = `SystemClock.elapsedRealtime`. The UI's per-second tick uses
-  the same clock, never frame time or wall time.
+- **Value** (owner ruling 6, 2026-11-05; supersedes the extrapolation, the A-S3 cap and the A-S4 hold):
+  `ScoreBugView.clockSecs = shown.snap.secondsRemaining`, floored at 0, in every state (running, stopped,
+  intermission, stale, waiting on the delay). It changes only when a new snapshot becomes visible on the delayed
+  timeline, so it steps at the feed's cadence (about 20 s in play, 40 s in intermission). The feed value is never ahead
+  of the real game; a local countdown ran on through whistles the client had not heard about yet (NSH–COL, integration
+  pass). `EXTRAPOLATE_CAP_S`, `CLOCK_HOLD_MAX_S`, `ClockAnchor` and `ScoreBugSource.clock` are removed.
+- **"End 1st"** still reads when the feed reports 0:00 (or less) and the clock is not running.
+- **Delay shift** (code review C, ruling confirmed): stale and hide are measured from `lastReceived + delay`, so the
+  stale rule means the same on the delayed timeline as at delay 0.
+- **Time base** (A-N7): one time base, `MonoClock` = `SystemClock.elapsedRealtime`. Nothing in the UI ticks the clock.
+- **Restart** (C-N7): the 8 h expiry before the first `Ok` after a restart uses the device clock (the server skew is not
+  persisted); a box that boots with its clock far ahead can drop the follow before any poll. Accepted.
 - **Goal:** `goalSeq` increases once for each score rise on the delayed timeline, and only while demand is `SEEN`. A
   score that dropped (a goal taken back) updates silently.
 
@@ -300,14 +307,14 @@ class ScoreBugMachine(mono: MonoClock, wall: () -> Long) {          // single-th
     fun step()                                         // advance to mono.nowMs(): expiry, stale, queue (A-B1)
     fun pollDue(): Boolean
     fun nextWakeAtMono(): Long?                        // min(next poll, next snapshot due, stale, hide,
-                                                       //     cap instant, expiry, hold end); null = idle (A-B1)
-    fun view(): ScoreBugView?; fun anchor(): ClockAnchor?
+                                                       //     expiry, goal-text end); null = idle (A-B1)
+    fun view(): ScoreBugView?; fun knownView(): ScoreBugView?   // knownView ignores the stale-hide (U-S4)
     fun drainEvents(): List<ScoreEvent>
 }
-data class ClockAnchor(val secs: Int, val atMono: Long, val ticking: Boolean, val stopAtMono: Long?)
 data class ScoreBugView(
     val away: TeamLine, val home: TeamLine, val top: CentreText, val bottom: CentreText?,
     val dim: Boolean, val goalSeq: Int, val goalSide: Side?,                 // view() is null before LIVE
+    val clockSecs: Int? = null,                                              // the snapshot's value (owner ruling 6)
 )
 sealed interface ScoreEvent { data class Removed(val why: RemoveReason, val game: FollowedGame) : ScoreEvent
                               data class FollowedFinal(val game: FollowedGame) : ScoreEvent }
@@ -318,9 +325,9 @@ interface ScoreRepository : ScoreBugSource {
     fun follow(game: GameSnapshot?); fun showDay(dayKey: String?); fun retry()
 }
 interface ScoreBugSource {                // what FullScreenHost's ScoreBug reads (A-B2)
-    val bug: StateFlow<ScoreBugView?>     // re-emitted only when a field other than the clock changes
-    val clock: StateFlow<ClockAnchor?>    // changes per poll; read only in the draw lambda (A-S10)
+    val bug: StateFlow<ScoreBugView?>     // clock included; re-emitted only when a new snapshot or state is visible
     fun reportDemand(owner: DemandOwner, on: Boolean)   // FULL_WITH_FOLLOW, SPORTS_TAB, SCORE_PICKER
+    fun reportScreenOff(on: Boolean)                    // fix pass C-S5: NONE demand while on
 }
 ```
 
@@ -478,9 +485,11 @@ error card, the transient lines, the guide overlays and screen-off. Only in `Scr
 | Clock 0:00, not yet intermission | `0:00` | `End 1st` | shown |
 | Goal (U-S10) | clock as usual | **`GOAL CGY`** for 8 s on the delayed timeline | shown |
 | `FINAL` | `Final` / `Final/OT` / `Final/SO` (one line) | — | shown until expiry |
-| Stale | frozen clock, **dimmed** | `No update` | shown (column `.55`, U-S11) |
-| Delayed, waiting | frozen clock, dimmed | `Delayed` | shown |
+| Stale | last snapshot's clock, **dimmed** | `No update` | shown (column `.55`, U-S11) |
+| Delayed, waiting | oldest snapshot's clock, dimmed | `Delayed` | shown |
 
+- Clock (owner ruling 6): every clock in this table is `ScoreBugView.clockSecs`, the shown snapshot's own value. It
+  never counts down locally; it steps when the next snapshot becomes visible.
 - Clock format: `m:ss` below 10 minutes, `mm:ss` from 10:00.
 - `:core` emits `CentreText` enums; the strings are in `:ui`.
 - Semantics (U-N12): one merged string per state, for example "Calgary 0, Edmonton 2, 10:22 left in the 1st".
@@ -496,22 +505,24 @@ The trigger is `goalSeq` (§2.5).
 - **Low-end mode:** no box, but the "GOAL" text stays.
 - No sound and no motion.
 
-### 4.7 Draw-cost budget (A-S10)
+### 4.7 Draw-cost budget (A-S10, as amended by owner ruling 6)
 
-- **Collection:** `bug` and `clock` are collected **inside `ScoreBug`**, never in `FullScreenHost`.
-  - `bug` re-emits only on a text change.
-  - `clock` is held as `State` and read only in the draw lambda.
-- **Tick:** the per-second tick is a `produceState` aligned to the anchor's second boundary.
-  - It runs only while `ticking` and before `stopAtMono`.
-  - It is read in a **separate** `drawBehind` on the clock text node. That node has **its own `graphicsLayer()`**
-    (not an ancestor of the surface), so a tick re-records only that layer, in low-end mode too.
-  - The glass `drawWithCache` never reads the tick.
-- **Digits:** the clock uses a pre-measured digit table (the `TimeChars` precedent), so a tick allocates nothing.
-- **Budget:**
-  - ≤ 0.3 ms draw per tick on the API 30 emulator.
-  - Zero `FullScreenHost` and `ScoreBug` recompositions per tick or per poll.
-  - Plan §6 and `FullIdleFramesTest` gain a case: "idle FULL, ticking bug: ≤ 1.1 frames/s". The case without the bug
-    stays at ≤ 1 frame in 10 s.
+*The per-second tick, its clock layer and the "ticking bug" frame budget are superseded by owner ruling 6 (no local
+countdown, 2026-11-05).*
+
+- **Collection:** `bug` is collected **inside `ScoreBug`**, never in `FullScreenHost`. It re-emits only when a new
+  snapshot or state becomes visible (clock included), so the bug recomposes at most once per snapshot (≈ every 20 s).
+- **Host:** `FullScreenHost` calls it through `StableScoreBug`, which keeps an equal `PlacementInput` and the constant
+  `OverlayGeometry` by identity (`:core` types are not Compose-stable), so a host recomposition (stats at 2 Hz) never
+  recomposes the bug (U-S2).
+- **Draw:** one `drawBehind` node draws the baked glass and the body, the clock included (from the pre-measured digit
+  table). Nothing reads time; no `produceState` ticker, no per-second layer.
+- **Held across hides** (U-S1): painter, baked glass and the follow's logos sit above the visibility return.
+- **Semantics** (U-S7): one string per shown view, from the snapshot's clock.
+- **Budget:** zero `FullScreenHost` recompositions per snapshot; zero `ScoreBug` recompositions, frame builds and draws
+  between snapshots; one of each per snapshot. Idle FULL with the bug: about one frame per snapshot, so the existing
+  "≤ 1 frame in 10 s" idle budget is the right test shape (a device item); the ticking-bug case and
+  `DRAWS_SCORE_CLOCK` are moot.
 
 ---
 
@@ -543,8 +554,8 @@ The trigger is `goalSeq` (§2.5).
 - **Teams:** two rows, away over home. Each row has a logo on a fixed `#0A0D13` 64 × 44 radius-8 plate, the team
   name (common name, 26/600), and the score at 34/700 tabular.
 - **State column:** right-aligned, 22/500 `.75`.
-  - Live games show the red dot plus **LIVE**, then `2nd · 10:22`. The clock ticks from the board snapshot's anchor,
-    with the same rules as the bug.
+  - Live games show the red dot plus **LIVE**, then `2nd · 10:22`: the board snapshot's own clock, with the same rule
+    as the bug (owner ruling 6: no local countdown; it changes when the day list re-polls).
   - Other games show `1st INT`, `Final/OT` or `7:00 PM`.
 - **Focused:** `#EEF1F6` fill, 3 px accent ring, and a right-aligned action chip reading **OK Follow score** or **OK
   Stop following**.
@@ -636,13 +647,14 @@ place mode.
 
 ## 7. Settings (lead ruling on U-B2: all ADVANCED)
 
-New section **Sports** after Player (`SectionId.SPORTS`, `SportsRows.kt`). **Every row is `Visibility.ADVANCED`**, so
+New section **Sports** (`SectionId.SPORTS`, `SportsRows.kt`); as built it sits after Network, not after Player
+(integration pass; recorded here per U-N7). **Every row is `Visibility.ADVANCED`**, so
 the simple count stays at 35 and `SimpleRowCountTest` is untouched. In simple mode the section is absent, as for
 NETWORK. Day-to-day corner and delay live in the quick bar (§6) and the Sports tab chips (§5.2).
 
 | Row | Values | Default |
 |---|---|---|
-| Show Sports (U-N11) | On / Off. Off hides the tab and the quick-bar item, stops all requests, and ends a follow with the toast "Sports is off. The score is hidden." (U-S12) | On |
+| Show Sports (U-N11) | On / Off. Off hides the quick-bar item (the tab stays and says how to turn it on: integration pass), stops all requests, and ends a follow with the toast "Sports is off, so the score is hidden. Turn on Show Sports in Settings → Sports to follow a game again." (U-S12, U-S8) | On |
 | Score bug corner | Top right · Top left · Bottom right · Bottom left; detail: "A bottom corner moves to the top while subtitles are on." | Top right |
 | Score bug delay | Off · 5 s … 120 s; detail: "Use this if the game on your screen is behind the live score." | Off |
 | Score bug size | Standard · Large | Standard |
@@ -680,11 +692,11 @@ The prefs are app-wide, never per playlist. The app has no profiles yet.
     stopped.
   - Stale fires at its threshold and hide at 5 min.
   - The 8 h hard expiry fires.
-  - The 15 s clock hold ends on time.
-- **Clock tests:**
-  - Age 19, a poll every 20 s and a 5 s RTT never freeze a running clock (A-S3).
-  - A higher resync is held, then snapped after 15 s; a period change snaps at once (A-S4).
-  - Intermission counts down without a cap.
+- **Clock tests** (owner ruling 6; the A-S3 / A-S4 tests were removed):
+  - The shown clock equals the snapshot value at every instant and steps only on a new snapshot (running, stopped,
+    a correction upward, intermission, stale, delayed).
+  - No wake-up is scheduled for clock ticks (running, stopped, intermission).
+  - With a delay, the clock steps when each delayed snapshot becomes visible.
 - **Queue and follow tests:**
   - `goalSeq`: once per rise on the delayed timeline; not on a drop; not while `UNSEEN`.
   - The newest qualifying snapshot is never pruned (A-N6).
@@ -711,9 +723,10 @@ The prefs are app-wide, never per playlist. The app has no profiles yet.
   - Large size; place mode with its ring and hint.
   - `PlayerUi.overlayGeometry()` equals the `:core` fixture (A-B2).
 - **`ScoreBugDrawTest`**:
-  - 60 s with three polls → 0 recompositions of `FullScreenHost` and `ScoreBug`, and 60 clock-layer draws.
+  - (Owner ruling 6) 60 s with no new snapshot → 0 `ScoreBug` recompositions, frame builds and draws, and the
+    semantics clock unchanged; three snapshots → exactly three; an equal re-emission → none.
   - The low-end variant.
-  - A stopped clock → 0 draws.
+  - A host recomposition for an unrelated reason (a fresh, equal `PlacementInput`) → 0 `ScoreBug` recompositions (U-S2).
 - **Bright-background screenshots** (U-B3): a white frame and a 50 % grey frame under the pill. The period line's
   measured contrast is at least 4.5 : 1.
 - **Centre-string fit** at both sizes (U-N3).
@@ -834,10 +847,11 @@ No open questions remain.
 | `PRE_WAKE_MS` / pre-game poll | 120 000 / 40 000 (every other bucket) |
 | `POLL_UNSEEN_MS` | 120 000 |
 | Day list: live / idle | 30 000 (aligned) / 300 000 |
-| `BACKOFF_BASE_MS` / `BACKOFF_MAX_MS` / jitter | 20 000 / 300 000 / ±20 % |
+| `BACKOFF_BASE_MS` / `BACKOFF_MAX_MS` / jitter | 20 000 / 300 000 / ±20 %; `Retry-After` is a floor (C-S4) |
 | `NOT_FOUND_CONFIRM_MS` | 20 000 (two 404s) |
 | `AGE_MAX_S` | 60 (clamp) |
-| `EXTRAPOLATE_CAP_S` / `CLOCK_HOLD_MAX_S` | 40 (since the last response) / 15 |
+| ~~`EXTRAPOLATE_CAP_S` / `CLOCK_HOLD_MAX_S`~~ | removed (owner ruling 6: no local countdown) |
+| Goal freshness (C-N1) | a rise is a goal only if the compared snapshot is ≤ 100 s older |
 | `STALE_AFTER_MS` / `HIDE_AFTER_MS` | max(60 000, 2 × cadence) / 300 000 |
 | `QUEUE_KEEP_MS` | 130 000 (newest qualifying never pruned) |
 | `DELAY_STEPS_S` | 0, 5, 10, 15, 20, 30, 45, 60, 90, 120 |
@@ -1016,3 +1030,103 @@ Screenshots: `scratchpad/scorebug/emu/` (session scratchpad).
   legibility on a TV, R8 size delta, Coil `Cache-Control`, "End 1st", Fire OS `DeviceAwake`).
 - `DRAWS_SCORE_CLOCK` / `FullIdleFramesTest` ticking-bug budget on a device.
 - Picker "Today" label during a reload after the Sports tab showed another day.
+
+---
+
+## Fix pass (2026-11-05)
+
+Tree: `main` at `d39e8ba` plus the uncommitted fix-pass changes. Inputs: owner ruling 6 (decision note), code reviews
+`docs/review/2026-11-05-score-bug-review-core.md` (C) and `docs/review/2026-11-05-score-bug-review-ui.md` (U).
+
+### Owner ruling 6: no local countdown
+
+The bug, the Sports cards, the picker rows and the quick-bar value line show the clock exactly as the latest snapshot on
+the (possibly delayed) timeline reports it; it changes only when a new snapshot becomes visible.
+
+- **Removed:** the extrapolation, `EXTRAPOLATE_CAP_S`, the never-count-up hold and `CLOCK_HOLD_MAX_S`, `ClockAnchor`,
+  `ClockAnchor.secsAt`, `ScoreBugMachine.anchor()`, `ScoreBugSource.clock`, the cap and hold-end wake-ups in
+  `nextWakeAtMono()`, `ClockMath`, the bug's per-second `collectLatest` ticker and its own clock `graphicsLayer`, the
+  `TICKS_SCORE_CLOCK` / `DRAWS_SCORE_CLOCK` counters, the cards' per-second `nowMono` tick (the Sports screen's 1 s
+  `produceState`; the "Updated N min ago" line keeps its own 15 s tick while it shows), `SportsText.state(…, secs)`.
+- **Added:** `ScoreBugView.clockSecs` (the shown snapshot's `secondsRemaining`, floored at 0; null for one-line states).
+  The bug draws it in its one drawing node (`ScoreBugPainter.drawBody` → `drawClock`, same digit table).
+- **Kept:** the delay snapshot queue, goal emphasis, stale ("No update") and hide, FINAL expiry, "End 1st" when the feed
+  reports 0:00 (now ≤ 0) and not running.
+- **Tests:** the A-S3 / A-S4 tests (`clockHold…`, `higherResync…`, `periodChangeAndStopStartSnap…`,
+  `displayedClockNeverGoesUp…`, `age19…`, `intermissionCountsDown…`, `staleFreezesTheClock`, the `ClockMath` and cap
+  tests, the card-ticking test) were deleted. New: `shownClockIsExactlyTheSnapshotValueAndStepsOnlyOnANewSnapshot`,
+  `noWakeIsScheduledForClockTicks`, `withADelayTheClockStepsWhenEachDelayedSnapshotBecomesVisible`,
+  `staleShowsTheSnapshotClockInIntermissionToo`, `cardClockIsTheSnapshotValueAndNeverTicks`. `ScoreBugDrawTest` was
+  rewritten: a minute with no snapshot → 0 recompositions, 0 frame builds, **0 snapshot-state applies** (catches a
+  ticker even if read only in draw) and an unchanged semantics clock; three snapshots → exactly 3; an equal
+  re-emission → 0; ten host recompositions with fresh equal placements → 0 bug recompositions. Robolectric runs no draw
+  pass (checked with legacy and native graphics), so draws are not counted there; `DRAWS_SCORE_BUG` is for a device run.
+- §0 items 5, 6, 10, §2.3, §2.5, §2.7, §4.5, §4.7, §5.2, §8 and Appendix A are amended in place.
+
+### Findings
+
+| ID | Disposition | Note |
+|---|---|---|
+| C-S1 | moot | the delayed cap / hold it was about no longer exists (owner ruling 6) |
+| C-S2 | fixed | a rise to SEEN polls (and suppresses "No update") only while online; `online(false)` clears the suppression; the repository pushes `online` before demand. Test `riseToSeenWhileOfflineKeepsNoUpdateAndHide` |
+| C-S3 | fixed | no rise poll while `failures > 0 && now < backoffAt`. Test `riseToSeenNeverPollsAheadOfABackoffOrRetryAfter` (429 + `Retry-After: 300`, 20 guide ↔ full edges) |
+| C-S4 | fixed | `Retry-After` is a floor on the back-off step (`max(step, Retry-After)`), not a replacement; `Retry-After: 0` keeps 20 s. Machine and `DayPollPolicy` tests; §2.4 amended |
+| C-S5 | fixed | new `ScoreBugSource.reportScreenOff(on)`; `PlayerViewModel` reports FULL ∧ screen-off; the repository's demand is NONE while it is on. Test `theScreenOffLayerSendsNothing` (0 requests in 10 min) |
+| C-S6 | fixed | with U-B1: a new open of the tab or the picker always resets to today (`dayWanted = null`, `/score/now`); another day's board is replaced by Loading. Test `thePickerAsksForTodayAfterTheTabShowedAnotherDay`; the integration-pass row is superseded |
+| C-N1 | fixed | a goal is flagged only against a snapshot received ≤ 100 s before, and never when both sides rose. Test `noGoalAgainstAStaleComparisonNorWhenBothSidesRose` |
+| C-N2 | fixed | `PlayerViewModel` withdraws `FULL_WITH_FOLLOW` and screen-off in `addCloseable` |
+| C-N3 | fixed (doc) | KDoc on `ScoreRepositoryImpl`: inputs wait behind an inline fetch, at most the 10 s call timeout (accepted per A-S8) |
+| C-N4 | deferred | day rollover with the tab open: follows A-N10 as designed |
+| C-N5 | fixed | the `assumeTrue(wp1Implemented())` guards and the helper are removed |
+| C-N6 | fixed | offline and back-off rise tests added (C-S2, C-S3) |
+| C-N7 | fixed (doc) | §2.5 records the delay shift of stale/hide and the device-clock expiry before the first `Ok` |
+| U-B1 | fixed | see C-S6 (repository). Also `DayState.Board.isToday` (from the request: `dayWanted == null`), and the sheet's divider is `ScoreDayDivider(dayKey)` ("Wed, Nov 4") for a board that is not today's. Tests in `ScoreBugPlayerTest`, `SportsTextTest` |
+| U-B2 | fixed | `LogoTrim` reads `Bitmap.Config.HARDWARE` only when `SDK_INT >= 26`. Lint does not run in the gate (no lint baseline exists; `NewApi` is not disabled), which is why it slipped: a lint step in CI is a follow-up |
+| U-S1 | fixed | painter, baked glass (lazily, `GlassCache`) and `FollowLogos` sit above the visibility return; logos are keyed by the followed view's URLs (never released by a hide; the place-mode sample never borrows them) |
+| U-S2 | fixed | `StableScoreBug` (FullScreenHost) holds an equal `PlacementInput` by identity and remembers `OverlayGeometry`; draw-test case added. A Compose stability config for `:core` was not used (build-logic change, wider blast radius) |
+| U-S3 | fixed | Retry moves focus to the selected day chip and resets the initial-focus rule. Tests updated / added in `SportsScreenTest` |
+| U-S4 | fixed | new `ScoreRepository.lastScore` (`ScoreBugMachine.knownView()`: the view with the stale-hide ignored) → `ScoreFacts.lastScore`; the quick-bar value and the sheet's followed row use it, so a hidden live game never reads "Starts …" |
+| U-S5 | fixed | `PickerSheet(clock24)` from FullScreenHost (the app's clock setting) |
+| U-S6 | fixed | `CardLogoCache`: a 64-entry process LRU of trimmed card logos keyed by URL and slot size |
+| U-S7 | fixed | the semantics string is built once per shown view from `clockSecs`; nothing per second |
+| U-S8 | fixed | "Sports is off, so the score is hidden. Turn on Show Sports in Settings → Sports to follow a game again." |
+| U-N1 | fixed | the clock's fit check uses `SCORE_CENTRE_W − FIT_BREATHING` (still 26 px with Instrument Sans) |
+| U-N2 | partly fixed | place mode left by an error, leaving FULL or a tune keeps the moved corner (`savePlace`). Media keys in place mode: deferred (key-table change) |
+| U-N3 | moot | nothing ticks any more; picker rows show the board snapshot's clock like everything else |
+| U-N4 | fixed | with Show Sports off the Corner, Delay and day chips are not drawn. Test `withSportsOffThereAreNoChipsToPick` |
+| U-N5 | fixed | the Today chip learns neighbours only from a board with `isToday`, and accepts only such a board. Test `aBoardThatIsNotTodaysNeverTeachesTheTodayChip` |
+| U-N6 | fixed / deferred | `ScoreBugDrawTest` rewritten (above). `player_keys.csv` rows for AFTER_SUBTITLES and the follow-ends-while-open event: deferred. Guide key in Sports doing nothing: unchanged (matches Search), for the owner to confirm |
+| U-N7 | fixed (doc) | §7 records that the section sits after Network |
+| U-N8 | deferred | Large's 1 px rounding (cosmetic) |
+
+Deviations from the design, per the reviews and ruling 6: §2.4 "`Retry-After` wins" → a floor (C-S4); §2.3 adds the
+screen-off input (C-S5, restoring the design's NONE); `ScoreBugSource` loses `clock` and gains `reportScreenOff`,
+`ScoreRepository` gains `lastScore`, `DayState.Board` gains `isToday`, `PickerChoice` gains `ScoreDayDivider` (contract
+changes made in this pass for the lead to review).
+
+### Gate
+
+`:core:test :data:testDebugUnitTest :player:testDebugUnitTest :ui:testDebugUnitTest :app:testDebugUnitTest :app:assembleDebug`
+(`--max-workers=2`)
+
+| Run | core | data | player | ui | app | Result |
+|---|---|---|---|---|---|---|
+| Full gate | 3798 / 1 fail | 485 / 0, 3 skip (SMB) | 511 / 0 | 476 / 0 | 73 / 0 | the one failure is `PhoneApiNetworkFolderTest.endToEndStopZeroesASubmissionNobodyTook` (setup/LAN, untouched) |
+| Reruns | `PhoneApiNetworkFolderTest` alone: 23 / 0 (load-flaky) | 486 / 0, 3 skip (after the C-S6 wake fix + its test) | | | | `:app:assembleDebug` BUILD SUCCESSFUL (universal debug APK) |
+
+Fake panel: `python3 -m unittest test_sports` 17 / 0.
+
+### Emulator (TheBox_TV_API30, fake panel `--sports`)
+
+Screenshots `scratchpad/scorebug/emu/fix-*.png` (session scratchpad). A live card read `2nd · 19:52` and still read
+19:52 five seconds later (no card tick). Following TOR–BOS in full screen, landing polls at 23:56:41 (rise to SEEN),
+23:57:02 and 23:57:21; the bug read **18:32** from 23:56:44 to 23:56:59 (held, no countdown), **18:12** from 23:57:06 to
+23:57:17, and **17:52** at 23:57:24: it steps only on updates. The follow was then stopped and the `sports_base`
+override removed (the emulator is back on the real feed).
+
+### Open / for the owner
+
+- Device: idle-FULL frame rate with the bug (expect about one frame per snapshot), `DRAWS_SCORE_BUG`, API 25 logos
+  (U-B2 fix), and the §11 items still open from the integration pass.
+- Deferred: C-N4, U-N2 media keys in place mode, U-N6 `player_keys.csv` rows, U-N8; a lint step in CI (U-B2's cause).
+- To confirm: the Guide key doing nothing in the Sports tab (U-N6), and the new contract changes listed above.

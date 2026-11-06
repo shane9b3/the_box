@@ -484,6 +484,7 @@ object PlayerText {
         is PickerChoice.ScoreDelayRow -> res.getString(R.string.sports_picker_delay, SportsText.delay(res, c.delaySec))
         PickerChoice.ScoreStop -> res.getString(R.string.sports_picker_stop)
         PickerChoice.ScoreTodayDivider -> res.getString(R.string.sports_picker_today)
+        is PickerChoice.ScoreDayDivider -> SportsText.dayLabel(c.dayKey)
         PickerChoice.ScoreLoading -> res.getString(R.string.sports_picker_loading)
         is PickerChoice.ScoreFailed -> SportsText.failure(res, c.kind)
         is PickerChoice.ScoreDelayChoice -> SportsText.delay(res, c.delaySec)

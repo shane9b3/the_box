@@ -23,15 +23,17 @@ import kotlin.math.ceil
 
 /**
  * (docs/design/m6-score-bug.md §4.1, §4.2, §4.5) What the bug shows once its words are resolved: built by
- * [ScoreBugPainter.frame] when the view changes (never per tick or per frame). Sizes are design px, already fitted (U-N3).
+ * [ScoreBugPainter.frame] when the view changes (never per frame). Sizes are design px, already fitted (U-N3).
  */
 internal class ScoreBugFrame(
     val awayAbbrev: String,
     val homeAbbrev: String,
     val awayScore: String,
     val homeScore: String,
-    /** The centre's top line is the ticking clock (drawn by [ScoreBugPainter.drawClock], not here). */
+    /** The centre's top line is the clock (drawn by [ScoreBugPainter.drawClock] from the digit table). */
     val clockOnTop: Boolean,
+    /** The clock as the shown snapshot reports it (owner ruling 6); read only when [clockOnTop]. */
+    val clockSecs: Int,
     /** The static top line (one-line states such as "Final", "SO"); null when the clock is the top. */
     val topText: String?,
     val topPx: Float,
@@ -97,7 +99,8 @@ internal class ScoreBugPainter(
             for (d in 0..9) w = maxOf(w, clock.measureText(('0' + d).toString()))
             return 4 * w + clock.measureText(":")
         }
-        while (px > K.SCORE_TEXT_FLOOR_PX && widest() > K.SCORE_CENTRE_W * s) px -= K.SCORE_FIT_STEP_PX
+        // U-N1: the same budget as [fit] (the 8 px clearance each side of the dividers).
+        while (px > K.SCORE_TEXT_FLOOR_PX && widest() > (K.SCORE_CENTRE_W - FIT_BREATHING) * s) px -= K.SCORE_FIT_STEP_PX
         clockPx = px
         clock.textSize = px * s
         for (d in 0..9) digitAdvance[d] = clock.measureText(('0' + d).toString())
@@ -132,6 +135,7 @@ internal class ScoreBugPainter(
             awayScore = (v.away.score ?: 0).toString(),
             homeScore = (v.home.score ?: 0).toString(),
             clockOnTop = clockOnTop,
+            clockSecs = v.clockSecs ?: 0,
             topText = topText,
             topPx = if (topText != null) fit(topText, topStart.toFloat()) else clockPx,
             bottomText = bottomText,
@@ -211,8 +215,8 @@ internal class ScoreBugPainter(
     // ------------------------------------------------------------------ body (§4.1, §4.5, §4.6)
 
     /**
-     * Logos (or discs), scores, dividers, the goal box, the static centre lines and the place-mode ring, in the pill's own
-     * coordinates (0, 0 = its top-left). [goalAlpha] is 0..1 of the goal box ([goalSide] = null: none).
+     * Logos (or discs), scores, dividers, the goal box, the centre lines (the clock included) and the place-mode ring, in
+     * the pill's own coordinates (0, 0 = its top-left). [goalAlpha] is 0..1 of the goal box ([goalSide] = null: none).
      */
     fun drawBody(
         c: Canvas,
@@ -263,6 +267,7 @@ internal class ScoreBugPainter(
             period.color = if (f.bottomGoal) argb(dim, accentText and 0xFFFFFF) else argb(dim * K.SCORE_PERIOD_ALPHA, fg and 0xFFFFFF)
             c.drawText(f.bottomText, centreX, BOTTOM_CY * s - (period.fontMetrics.ascent + period.fontMetrics.descent) / 2f, period)
         }
+        if (f.clockOnTop) drawClock(c, f.clockSecs, f)
 
         if (placing) {
             val w = K.PLACE_RING_W * s
@@ -283,15 +288,15 @@ internal class ScoreBugPainter(
         }
     }
 
-    // ------------------------------------------------------------------ clock (§4.7)
+    // ------------------------------------------------------------------ clock (§4.5; the snapshot's value, owner ruling 6)
 
     /** The clock's box in the pill: the centre column (x from [clockLeft], [clockWidth] wide), the full pill height. */
     val clockLeft: Float = (K.SCORE_PAD + K.SCORE_LOGO_W + K.SCORE_LOGO_GAP + K.SCORE_DIGITS_W + K.SCORE_DIVIDER_GAP + K.SCORE_DIVIDER_W) * s
     val clockWidth: Float = pillW - 2 * clockLeft
 
     /**
-     * `m:ss` / `mm:ss` from [secs], digit by digit from the pre-measured table (tabular: a tick never moves a digit), centred
-     * in the centre column. Coordinates are the clock node's own (0, 0 = the pill's top-left; the node is pill-sized).
+     * `m:ss` / `mm:ss` from [secs], digit by digit from the pre-measured table (tabular: a new value never moves a digit),
+     * centred in the centre column, in the pill's coordinates. [drawBody] calls it with the frame's [ScoreBugFrame.clockSecs].
      */
     fun drawClock(c: Canvas, secs: Int, f: ScoreBugFrame) {
         val v = secs.coerceIn(0, 99 * 60 + 59)

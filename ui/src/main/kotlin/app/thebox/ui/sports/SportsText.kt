@@ -23,7 +23,7 @@ import java.util.Locale
 /**
  * (Score bug commit 0, docs/design/m6-score-bug.md §4.5, §5, §6, §2.6) The words of the score feature, in one place for
  * the overlay (WP-3), the Sports tab (WP-4a), the quick bar and the picker (WP-4b) and the player VM's toasts. Every
- * string is in `strings_sports.xml`; nothing here allocates per frame (the bug's ticking clock uses its own digit table).
+ * string is in `strings_sports.xml`; nothing here allocates per frame (the bug's clock uses its own digit table).
  */
 object SportsText {
     /** `m:ss` below 10:00, `mm:ss` from 10:00 (§4.5); negative values read 0:00. */
@@ -64,8 +64,8 @@ object SportsText {
     }
 
     /**
-     * One centre line of [view]; [secs] is the clock's displayed value (only [CentreText.Clock] reads it). The bug's
-     * per-second clock is drawn from a digit table instead (§4.7); this is for measuring, semantics and tests.
+     * One centre line of [view]; [secs] is the clock's displayed value (only [CentreText.Clock] reads it). The bug draws
+     * its clock from a digit table instead; this is for measuring, semantics and tests.
      */
     fun centre(res: Resources, c: CentreText, view: ScoreBugView, secs: Int): String = when (c) {
         CentreText.Clock -> clock(secs)
@@ -108,12 +108,12 @@ object SportsText {
         res.getString(R.string.sports_quick_score, g.away.abbrev, g.away.score ?: 0, g.home.score ?: 0, g.home.abbrev)
 
     /**
-     * A game's state words for the picker and the cards: "2nd 10:22", "1st INT", "SO", "Final/OT", "7:00 PM". [secs] is
-     * the clock to show for a running game (the caller ticks it); null = the snapshot's own value.
+     * A game's state words for the picker and the cards: "2nd 10:22", "1st INT", "SO", "Final/OT", "7:00 PM". The clock is
+     * the snapshot's own value (owner ruling 6: nothing counts down between updates).
      */
-    fun state(res: Resources, g: GameSnapshot, clock24: Boolean, secs: Int? = null): String {
+    fun state(res: Resources, g: GameSnapshot, clock24: Boolean): String {
         val p = periodOf(g)
-        val clockSecs = secs ?: g.clock?.secondsRemaining ?: 0
+        val clockSecs = g.clock?.secondsRemaining ?: 0
         return when (g.phase) {
             GamePhase.SCHEDULED, GamePhase.PRE -> startTime(g.startUtcMs, clock24)
             GamePhase.POSTPONED -> res.getString(R.string.sports_postponed)
@@ -137,10 +137,19 @@ object SportsText {
         else -> res.getString(R.string.sports_picker_game_live, scoreLine(res, g), state(res, g, clock24))
     }
 
-    /** The quick-bar value line (§6): "Follow a game" / "CGY 0–2 EDM" / "Starts 7:00 PM". */
+    /** A board's date for the picker divider when it is not today's (U-B1): "Wed, Nov 4"; the key itself if unreadable. */
+    fun dayLabel(dayKey: String, locale: Locale = Locale.getDefault()): String =
+        runCatching { java.time.LocalDate.parse(dayKey).format(java.time.format.DateTimeFormatter.ofPattern("EEE, MMM d", locale)) }
+            .getOrDefault(dayKey)
+
+    /**
+     * The quick-bar value line (§6): "Follow a game" / "CGY 0–2 EDM" / "Starts 7:00 PM". U-S4: a game whose bug is hidden
+     * for want of updates (after puck drop) keeps its last known score ([ScoreFacts.lastScore]); "Starts …" is only for a
+     * game that has not gone live.
+     */
     fun quickValue(res: Resources, facts: ScoreFacts, clock24: Boolean): String {
         val game = facts.game ?: return res.getString(R.string.sports_quick_follow)
-        val view = facts.followed
+        val view = facts.followed ?: facts.lastScore
         return if (view != null) {
             res.getString(R.string.sports_quick_score, view.away.abbrev, view.away.score ?: 0, view.home.score ?: 0, view.home.abbrev)
         } else {

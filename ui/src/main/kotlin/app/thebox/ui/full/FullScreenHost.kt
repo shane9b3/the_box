@@ -96,8 +96,8 @@ fun FullScreenHost(
         ?: pausedValues.copy(dimmed = false, dimSinceMs = null)
     val rewindFlow = remember(player) { extras?.rewindStat ?: MutableStateFlow(null) }
     val rewindStat by rewindFlow.collectAsState() // M6 §13 (U-N3)
-    // (Score bug commit 0, §4.4, §4.7) Only the rarely changing facts are read here (prefs, the text track); the bug and
-    // its clock are collected inside ScoreBug, so a poll or a tick never recomposes this host.
+    // (Score bug commit 0, §4.4, §4.7) Only the rarely changing facts are read here (prefs, the text track); the bug is
+    // collected inside ScoreBug, so a new snapshot never recomposes this host (and nothing ticks: owner ruling 6).
     val scoreSource = extras?.scoreBug
     val scorePrefsFlow = remember(scoreSource) { scoreSource?.prefs ?: MutableStateFlow(SportsPrefs(enabled = false)) }
     val scorePrefs by scorePrefsFlow.collectAsState()
@@ -138,12 +138,12 @@ fun FullScreenHost(
         // (Score bug commit 0, docs/design/m6-score-bug.md §4.4) After the bars and the stats; before the channel list,
         // the picker, the paused card, the error card, the transient lines, the guide overlays and screen-off.
         if (scoreSource != null && scorePrefs.enabled) {
-            ScoreBug(scoreSource, scorePlacementInput(ui, state, scorePrefs, hostFacts, textTrackOn), PlayerUi.overlayGeometry(), lowEnd)
+            StableScoreBug(scoreSource, scorePlacementInput(ui, state, scorePrefs, hostFacts, textTrackOn), lowEnd)
         }
         if (player != null) {
             Fade(ui.channels, lowEnd) { c -> ChannelListPanel(c, player, Modifier.offset(PlayerUi.LIST_L.dp, PlayerUi.LIST_T.dp), nowMs) }
         }
-        Fade(ui.picker, lowEnd) { p -> PickerSheet(p, Modifier.offset(PlayerUi.PICKER_L.dp, PlayerUi.PICKER_T.dp)) }
+        Fade(ui.picker, lowEnd) { p -> PickerSheet(p, Modifier.offset(PlayerUi.PICKER_L.dp, PlayerUi.PICKER_T.dp), clock24 = clock24) }
 
         // (M6 §11.5) The dimmed paused frame and its drifting card: over the bars, under the error card.
         PausedCard(ui.pill, ui.paused?.header, paused)
@@ -201,6 +201,20 @@ fun FullScreenHost(
         }
         if (ui.layer == PlayerLayer.SCREEN_OFF) ScreenOffLayer()
     }
+}
+
+/**
+ * (Fix pass, U-S2) [ScoreBug] with inputs that keep their identity while equal: `PlacementInput` and `OverlayGeometry` are
+ * `:core` data classes (no Compose stability), so strong skipping compares them by identity. A fresh but equal
+ * [placement] (every host recomposition builds one, e.g. at the stats' 2 Hz) is swapped for the held instance, and the
+ * geometry is remembered, so the bug recomposes only when its placement or its view really changes.
+ */
+@Composable
+internal fun StableScoreBug(source: app.thebox.core.sports.ScoreBugSource, placement: PlacementInput, lowEnd: Boolean) {
+    val held = remember { LastValue<PlacementInput>() }
+    val stable = held.value?.takeIf { it == placement } ?: placement.also { held.value = it }
+    val geometry = remember { PlayerUi.overlayGeometry() }
+    ScoreBug(source, stable, geometry, lowEnd)
 }
 
 /**

@@ -40,10 +40,10 @@ const val PICKER_DIVIDER_TAG = "player_picker_divider"
  * [PickerState.remember] is non-null (index `choices.size`). Rows scroll as a window around the focus.
  */
 @Composable
-fun PickerSheet(state: PickerState, modifier: Modifier = Modifier) {
+fun PickerSheet(state: PickerState, modifier: Modifier = Modifier, clock24: Boolean = true) {
     val res = androidx.compose.ui.platform.LocalResources.current
-    // (Score bug WP-4b) Upcoming games in the score sheet read "7:00 PM" or "19:00" like the device clock.
-    val clock24 = android.text.format.DateFormat.is24HourFormat(androidx.compose.ui.platform.LocalContext.current)
+    // (Score bug WP-4b; fix pass U-S5) Upcoming games in the score sheet read "7:00 PM" or "19:00" per the app's clock
+    // setting ([clock24], from FullScreenHost like the quick bar), not the device's.
     val shape = RoundedCornerShape(DesignTokens.Radii.Panel)
     Column(
         modifier
@@ -63,7 +63,7 @@ fun PickerSheet(state: PickerState, modifier: Modifier = Modifier) {
                 continue
             }
             val c = state.choices[i]
-            if (c is PickerChoice.ScoreTodayDivider) { // (Score bug WP-4b, U-N9) the non-selectable "Today" divider
+            if (c is PickerChoice.ScoreTodayDivider || c is PickerChoice.ScoreDayDivider) { // (U-N9; U-B1) the non-selectable day divider
                 DividerRow(PlayerText.choice(res, c, i, clock24))
                 continue
             }

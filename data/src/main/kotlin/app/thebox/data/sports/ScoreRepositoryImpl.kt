@@ -5,7 +5,6 @@ import app.thebox.core.playback.MonoClock
 import app.thebox.core.settings.SettingsStore
 import app.thebox.core.settings.state.SportsDomain
 import app.thebox.core.settings.state.SportsFollowDomain
-import app.thebox.core.sports.ClockAnchor
 import app.thebox.core.sports.DayBoard
 import app.thebox.core.sports.DayPollPolicy
 import app.thebox.core.sports.DayState
@@ -72,7 +71,8 @@ internal interface FollowMachine {
     fun pollDue(): Boolean
     fun nextWakeAtMono(): Long?
     fun view(): ScoreBugView?
-    fun anchor(): ClockAnchor?
+    /** The last known view while the bug is hidden for want of updates (U-S4); null before LIVE. */
+    fun knownView(): ScoreBugView?
     fun followed(): FollowedGame?
     fun drainEvents(): List<ScoreEvent>
 
@@ -87,7 +87,7 @@ internal interface FollowMachine {
             override fun pollDue(): Boolean = m.pollDue()
             override fun nextWakeAtMono(): Long? = m.nextWakeAtMono()
             override fun view(): ScoreBugView? = m.view()
-            override fun anchor(): ClockAnchor? = m.anchor()
+            override fun knownView(): ScoreBugView? = m.knownView()
             override fun followed(): FollowedGame? = m.followed()
             override fun drainEvents(): List<ScoreEvent> = m.drainEvents()
         }
@@ -117,9 +117,11 @@ internal fun interface DayPolicy {
  *     machine.step()
  *     if (machine.pollDue()) machine.fetched(source.game(id))
  *     if (day due) fetch the day list
- *     publish(view, anchor, events, followed)
+ *     publish(view, events, followed)
  * }
  * ```
+ * Both fetches run inline in the actor (A-S8), so an input posted during a stalled request (Stop following, Show Sports
+ * off, `Awake(false)`) waits for it: at most `SPORTS_CALL_TIMEOUT_MS` per request (C-N3, accepted).
  * With no wake-up pending it waits on inputs only, so nothing is sent while nothing is followed and no Sports UI is open,
  * while the process is not STARTED, while the device is not awake (A-S5), while offline, and while Show Sports is off.
  *
@@ -165,25 +167,27 @@ class ScoreRepositoryImpl internal constructor(
         data class Foreground(val on: Boolean) : Input
         data class Online(val on: Boolean) : Input
         data class ShowDay(val dayKey: String?) : Input
+        data class ScreenOff(val on: Boolean) : Input
         data object Retry : Input
     }
 
     private val inputs = Channel<Input>(Channel.UNLIMITED)
 
     private val _bug = MutableStateFlow<ScoreBugView?>(null)
-    private val _clock = MutableStateFlow<ClockAnchor?>(null)
+    private val _lastScore = MutableStateFlow<ScoreBugView?>(null)
     private val _day = MutableStateFlow<DayState>(DayState.Loading)
     private val _followed = MutableStateFlow<FollowedGame?>(null)
     private val _events = MutableSharedFlow<ScoreEvent>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
     override val bug: StateFlow<ScoreBugView?> = _bug.asStateFlow()
-    override val clock: StateFlow<ClockAnchor?> = _clock.asStateFlow()
+    override val lastScore: StateFlow<ScoreBugView?> = _lastScore.asStateFlow()
     override val prefs: StateFlow<SportsPrefs> = store.flow(SportsDomain)
     override val day: StateFlow<DayState> = _day.asStateFlow()
     override val followed: StateFlow<FollowedGame?> = _followed.asStateFlow()
     override val events: Flow<ScoreEvent> = _events.asSharedFlow()
 
     override fun reportDemand(owner: DemandOwner, on: Boolean) = post(Input.DemandReport(owner, on))
+    override fun reportScreenOff(on: Boolean) = post(Input.ScreenOff(on))
     override fun follow(game: GameSnapshot?) = post(Input.Follow(game))
     override fun showDay(dayKey: String?) = post(Input.ShowDay(dayKey))
     override fun retry() = post(Input.Retry)
@@ -202,6 +206,8 @@ class ScoreRepositoryImpl internal constructor(
     private var isAwake = true
     private var isForeground = false
     private var isOnline = false
+    /** The player's screen-off layer (C-S5): demand NONE while on. */
+    private var isScreenOff = false
     private var followDemand: Demand? = null
     private var machineOnline: Boolean? = null
 
@@ -216,6 +222,8 @@ class ScoreRepositoryImpl internal constructor(
     private var dayJitter = 0.0
     private var dayForce = false
     private var dayDemand = Demand.NONE
+    /** The tab or the picker is open (whatever the platform facts): its rising edge resets the day to today (C-S6). */
+    private var dayUiOpen = false
 
     /** When the machine was last stepped, so a wake-up that stays in the past never spins the loop. */
     private var lastStepAt: Long? = null
@@ -241,7 +249,7 @@ class ScoreRepositoryImpl internal constructor(
         } catch (t: Throwable) {
             BoxLog.e(TAG, "score loop stopped: ${t.javaClass.simpleName}", t)
             _bug.value = null
-            _clock.value = null
+            _lastScore.value = null
         }
     }
 
@@ -314,6 +322,7 @@ class ScoreRepositoryImpl internal constructor(
             is Input.Awake -> isAwake = i.on
             is Input.Foreground -> isForeground = i.on
             is Input.Online -> isOnline = i.on
+            is Input.ScreenOff -> isScreenOff = i.on
             is Input.ShowDay -> {
                 dayWanted = i.dayKey
                 dayKey = i.dayKey
@@ -361,26 +370,38 @@ class ScoreRepositoryImpl internal constructor(
 
     /** §2.3: the followed game's demand and the day list's, from the owners and the platform facts. */
     private fun pushDemand() {
-        val live = sports.enabled && isForeground && isAwake
+        // C-S5: the screen-off layer is NONE (zero requests), like display off.
+        val live = sports.enabled && isForeground && isAwake && !isScreenOff
         val fd = when {
             doc.game == null || !live -> Demand.NONE
             owners.isNotEmpty() -> Demand.SEEN
             else -> Demand.UNSEEN
         }
-        if (fd != followDemand) {
-            followDemand = fd
-            machine.demand(fd)
-        }
+        // Online first, so a rise to SEEN in the same batch sees the current network (C-S2).
         if (isOnline != machineOnline) {
             machineOnline = isOnline
             machine.online(isOnline)
         }
-        val dd = if (live && (DemandOwner.SPORTS_TAB in owners || DemandOwner.SCORE_PICKER in owners)) Demand.SEEN else Demand.NONE
-        if (dd == Demand.SEEN && dayDemand == Demand.NONE && dayWanted == null) {
-            // A new open of the tab or the picker: `/score/now` again (A-N10); the board stays on screen meanwhile.
+        if (fd != followDemand) {
+            followDemand = fd
+            machine.demand(fd)
+        }
+        val uiOpen = DemandOwner.SPORTS_TAB in owners || DemandOwner.SCORE_PICKER in owners
+        val dd = if (live && uiOpen) Demand.SEEN else Demand.NONE
+        if (uiOpen && !dayUiOpen) {
+            // A new open of the tab or the picker is always today: `/score/now` again (A-N10). A day the Sports tab
+            // picked earlier never sticks (C-S6 / U-B1); today's board stays on screen meanwhile, another day's does not.
+            val wasOtherDay = dayWanted != null || (_day.value as? DayState.Board)?.isToday == false
+            dayWanted = null
+            dayKey = null
+            dayOk = null
+            if (wasOtherDay) resetDay(loading = true)
+        } else if (dd == Demand.SEEN && dayDemand == Demand.NONE && dayWanted == null) {
+            // The same open coming back (awake, foreground): re-resolve today; a day the tab picked stays picked.
             dayKey = null
             dayOk = null
         }
+        dayUiOpen = uiOpen
         dayDemand = dd
     }
 
@@ -420,7 +441,7 @@ class ScoreRepositoryImpl internal constructor(
                 dayLastFailMono = null
                 dayRetryAfterS = null
                 if (dayKey == null) dayKey = f.value.dayKey
-                _day.value = DayState.Board(f.value, f.receivedMono, failing = false)
+                _day.value = DayState.Board(f.value, f.receivedMono, failing = false, isToday = dayWanted == null)
             }
             Fetch.NotFound -> dayFailed(FailKind.HTTP_OTHER, mono.nowMs(), null)
             is Fetch.Failed -> dayFailed(f.kind, f.receivedMono, f.retryAfterS)
@@ -457,7 +478,7 @@ class ScoreRepositoryImpl internal constructor(
         }
         _followed.value = doc.game
         _bug.value = if (sports.enabled && doc.game != null) machine.view() else null
-        _clock.value = if (sports.enabled && doc.game != null) machine.anchor() else null
+        _lastScore.value = if (sports.enabled && doc.game != null) machine.knownView() else null
     }
 
     private fun persist(d: SportsFollowDoc) {

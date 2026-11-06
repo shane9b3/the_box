@@ -4,9 +4,7 @@ import app.thebox.core.playback.MonoClock
 import app.thebox.core.settings.fakes.FakeSettingsStore
 import app.thebox.core.settings.state.SportsDomain
 import app.thebox.core.settings.state.SportsFollowDomain
-import app.thebox.core.sports.ClockAnchor
 import app.thebox.core.sports.DayBoard
-import app.thebox.core.sports.DayPollPolicy
 import app.thebox.core.sports.DayState
 import app.thebox.core.sports.Demand
 import app.thebox.core.sports.DemandOwner
@@ -43,7 +41,6 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Test
 import kotlin.random.Random
 
@@ -96,7 +93,6 @@ class ScoreRepositoryImplTest {
         var extraWake: Long? = null
         var onExtraWake: () -> Unit = {}
         var view: ScoreBugView? = null
-        var anchor: ClockAnchor? = null
         val steps = ArrayList<Long>()
         val fetches = ArrayList<Fetch<GameSnapshot>>()
         val demands = ArrayList<Demand>()
@@ -114,7 +110,7 @@ class ScoreRepositoryImplTest {
             fetches += f
             nextPoll = mono.nowMs() + cadenceMs
             when (f) {
-                is Fetch.Ok -> { notFound = 0; view = SportsFixtures.liveView(f.value); anchor = ClockAnchor(622, f.receivedMono, true, null) }
+                is Fetch.Ok -> { notFound = 0; view = SportsFixtures.liveView(f.value) }
                 Fetch.NotFound -> if (++notFound >= 2) {
                     events += ScoreEvent.Removed(RemoveReason.NOT_LISTED, game!!)
                     game = null
@@ -131,7 +127,7 @@ class ScoreRepositoryImplTest {
         override fun pollDue(): Boolean = active() && (nextPoll ?: Long.MAX_VALUE) <= mono.nowMs()
         override fun nextWakeAtMono(): Long? = listOfNotNull(if (active()) nextPoll else null, extraWake).minOrNull()
         override fun view(): ScoreBugView? = view
-        override fun anchor(): ClockAnchor? = anchor
+        override fun knownView(): ScoreBugView? = view
         override fun followed(): FollowedGame? = game
         override fun drainEvents(): List<ScoreEvent> = events.toList().also { events.clear() }
         fun raise(e: ScoreEvent) { events += e }
@@ -331,7 +327,27 @@ class ScoreRepositoryImplTest {
         assertEquals(listOf(0L, 20_000L, 40_000L), h.source.games().map { it.second })
         assertEquals(3, h.machine.fetches.size)
         assertEquals(SportsFixtures.liveView(SportsFixtures.game()), h.repo.bug.value)
-        assertEquals(ClockAnchor(622, 40_000L, true, null), h.repo.clock.value)
+        assertEquals("the snapshot's own clock (owner ruling 6)", 622, h.repo.bug.value!!.clockSecs)
+        assertEquals(h.repo.bug.value, h.repo.lastScore.value)
+    }
+
+    @Test fun theScreenOffLayerSendsNothing() = runTest {
+        // C-S5: a follow, FULL, then the quick bar's screen-off for audio overnight: zero requests.
+        val h = harness(doc = SportsFollowDoc(game = cgyEdm, pollPhaseMs = 1_500L))
+        h.repo.reportDemand(DemandOwner.FULL_WITH_FOLLOW, true)
+        runCurrent()
+        val before = h.source.calls.size
+        h.repo.reportDemand(DemandOwner.FULL_WITH_FOLLOW, false)
+        h.repo.reportScreenOff(true)
+        runCurrent()
+        assertEquals(Demand.NONE, h.machine.demand)
+        advanceTimeBy(600_000L)
+        runCurrent()
+        assertEquals("0 requests over 10 min with the screen off", before, h.source.calls.size)
+        h.repo.reportScreenOff(false)
+        h.repo.reportDemand(DemandOwner.FULL_WITH_FOLLOW, true)
+        runCurrent()
+        assertEquals(Demand.SEEN, h.machine.demand)
     }
 
     @Test fun demandIsSeenUnseenOrNone() = runTest {
@@ -482,6 +498,48 @@ class ScoreRepositoryImplTest {
         runCurrent()
         assertEquals("a new open asks /score/now again", "today", h.source.days().last().first)
         assertTrue(h.repo.day.value is DayState.Board)
+        assertTrue((h.repo.day.value as DayState.Board).isToday)
+    }
+
+    @Test fun aPickedDayStaysPickedWhenTheDeviceWakesWithTheTabOpen() = runTest {
+        // Only a new open resets the day; the tab on Yesterday through a standby keeps Yesterday.
+        val h = harness()
+        h.repo.reportDemand(DemandOwner.SPORTS_TAB, true)
+        h.repo.showDay(null)
+        runCurrent()
+        h.repo.showDay("2026-11-04")
+        runCurrent()
+        h.awake.flow.value = false
+        runCurrent()
+        h.awake.flow.value = true
+        runCurrent()
+        assertEquals("day:2026-11-04", h.source.days().last().first)
+        assertEquals("2026-11-04", (h.repo.day.value as DayState.Board).board.dayKey)
+    }
+
+    @Test fun thePickerAsksForTodayAfterTheTabShowedAnotherDay() = runTest {
+        // C-S6 / U-B1: Sports tab → Yesterday → leave → full screen → Score bug sheet.
+        val h = harness()
+        h.repo.reportDemand(DemandOwner.SPORTS_TAB, true)
+        h.repo.showDay(null)
+        runCurrent()
+        h.repo.showDay("2026-11-04")
+        runCurrent()
+        val other = h.repo.day.value as DayState.Board
+        assertEquals("2026-11-04", other.board.dayKey)
+        assertFalse("a picked day is not today", other.isToday)
+        h.repo.reportDemand(DemandOwner.SPORTS_TAB, false)
+        runCurrent()
+        h.repo.reportDemand(DemandOwner.SCORE_PICKER, true)
+        runCurrent()
+        assertEquals("the picker opens on /score/now", "today", h.source.days().last().first)
+        val today = h.repo.day.value as DayState.Board
+        assertEquals("2026-11-05", today.board.dayKey)
+        assertTrue(today.isToday)
+        // And it keeps polling today's dated key, not the other day.
+        advanceTimeBy(30_000L)
+        runCurrent()
+        assertEquals("day:2026-11-05", h.source.days().last().first)
     }
 
     @Test fun anotherDayIsLoadingThenItsBoard() = runTest {
@@ -561,20 +619,12 @@ class ScoreRepositoryImplTest {
         override fun pollDue(): Boolean = TODO("WP-1")
         override fun nextWakeAtMono(): Long? = TODO("WP-1")
         override fun view(): ScoreBugView? = TODO("WP-1")
-        override fun anchor(): ClockAnchor? = TODO("WP-1")
+        override fun knownView(): ScoreBugView? = TODO("WP-1")
         override fun followed(): FollowedGame? = TODO("WP-1")
         override fun drainEvents(): List<ScoreEvent> = TODO("WP-1")
     }
 
-    // ---------------------------------------------------------------- against WP-1's code (skipped while it is a stub)
-
-    private fun wp1Implemented(): Boolean = try {
-        ScoreBugMachine(MonoClock { 0L }, { 0L }).nextWakeAtMono()
-        DayPollPolicy.nextAt(null, Demand.NONE, 0, null, null, 1_500L, 0.0, 0L)
-        true
-    } catch (e: NotImplementedError) {
-        false
-    }
+    // ---------------------------------------------------------------- against WP-1's code (C-N5: no skip guards)
 
     /** Wall time: 2026-11-06T00:00:00Z (puck drop of [SportsFixtures.game]) at mono 0. */
     private val wallBase = 1_793_923_200_000L
@@ -603,7 +653,6 @@ class ScoreRepositoryImplTest {
     }
 
     @Test fun realMachine_zeroRequestsWithNothingFollowed() = runTest {
-        assumeTrue("ScoreBugMachine / DayPollPolicy are stubs (WP-1)", wp1Implemented())
         val (repo, source, _) = realRepo(SportsFollowDoc(pollPhaseMs = 1_500L))
         repo.reportDemand(DemandOwner.FULL_WITH_FOLLOW, true)
         advanceTimeBy(3_600_000L)
@@ -612,7 +661,6 @@ class ScoreRepositoryImplTest {
     }
 
     @Test fun realMachine_aLivePollIsPhaseAlignedToTheCdnBucket() = runTest {
-        assumeTrue("ScoreBugMachine / DayPollPolicy are stubs (WP-1)", wp1Implemented())
         val live = SportsFixtures.game(clock = GameClock(622, running = true, inIntermission = false))
         val signals = Signals(fg = false) // SEEN from the first poll on
         val (repo, source, _) = realRepo(SportsFollowDoc(game = SportsFixtures.followedOf(live), pollPhaseMs = 1_500L), signals)
@@ -628,7 +676,6 @@ class ScoreRepositoryImplTest {
     }
 
     @Test fun realMachine_aFinalClearsFiveMinutesLaterWithNoInput() = runTest {
-        assumeTrue("ScoreBugMachine / DayPollPolicy are stubs (WP-1)", wp1Implemented())
         val final = SportsFixtures.game(phase = GamePhase.FINAL, finalKind = PeriodKind.REG, clock = null)
         val (repo, source, store) = realRepo(SportsFollowDoc(game = SportsFixtures.followedOf(final), pollPhaseMs = 1_500L)) {
             it.gameAnswer = { Fetch.Ok(final, testScheduler.currentTime, wallBase + testScheduler.currentTime, 0) }

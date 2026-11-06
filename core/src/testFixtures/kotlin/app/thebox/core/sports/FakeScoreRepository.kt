@@ -16,7 +16,7 @@ class FakeScoreRepository(
     private val raiseFollowEvents: Boolean = false,
 ) : ScoreRepository {
     override val bug = MutableStateFlow<ScoreBugView?>(null)
-    override val clock = MutableStateFlow<ClockAnchor?>(null)
+    override val lastScore = MutableStateFlow<ScoreBugView?>(null)
     override val prefs = MutableStateFlow(prefs)
     override val day = MutableStateFlow<DayState>(DayState.Loading)
     override val followed = MutableStateFlow<FollowedGame?>(null)
@@ -28,6 +28,8 @@ class FakeScoreRepository(
     val demandOn: MutableSet<DemandOwner> = linkedSetOf()
     val followCalls = mutableListOf<GameSnapshot?>()
     val showDayCalls = mutableListOf<String?>()
+    /** `reportScreenOff` calls in order (C-S5). */
+    val screenOffCalls = mutableListOf<Boolean>()
     var retries = 0
         private set
 
@@ -39,12 +41,16 @@ class FakeScoreRepository(
         if (on) demandOn += owner else demandOn -= owner
     }
 
+    override fun reportScreenOff(on: Boolean) {
+        screenOffCalls += on
+    }
+
     override fun follow(game: GameSnapshot?) {
         followCalls += game
         val f = game?.let { SportsFixtures.followedOf(it) }
         val first = followed.value == null && followCalls.count { it != null } == 1
         followed.value = f
-        if (f == null) { bug.value = null; clock.value = null }
+        if (f == null) { bug.value = null; lastScore.value = null }
         if (raiseFollowEvents && game != null && f != null) {
             eventFlow.tryEmit(if (game.phase == GamePhase.FINAL) ScoreEvent.FollowedFinal(f) else ScoreEvent.Followed(f, first))
         }
@@ -105,7 +111,7 @@ object SportsFixtures {
     fun board(vararg games: GameSnapshot, dayKey: String = "2026-11-05"): DayBoard =
         DayBoard(dayKey, prevDay = "2026-11-04", nextDay = "2026-11-06", games = games.toList())
 
-    /** The bug's view of [game] in play: clock over the period. */
+    /** The bug's view of [game] in play: the snapshot's clock (owner ruling 6) over the period. */
     fun liveView(game: GameSnapshot = game()): ScoreBugView = ScoreBugView(
         away = game.away,
         home = game.home,
@@ -114,5 +120,6 @@ object SportsFixtures {
         dim = false,
         goalSeq = 0,
         goalSide = null,
+        clockSecs = game.clock?.secondsRemaining?.coerceAtLeast(0),
     )
 }

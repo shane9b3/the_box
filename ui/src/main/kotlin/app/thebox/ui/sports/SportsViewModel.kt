@@ -4,7 +4,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import app.thebox.core.settings.SettingsStore
 import app.thebox.core.settings.state.SportsDomain
-import app.thebox.core.sports.ClockAnchor
 import app.thebox.core.sports.DayBoard
 import app.thebox.core.sports.DayState
 import app.thebox.core.sports.DemandOwner
@@ -13,9 +12,7 @@ import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.ScoreCorner
 import app.thebox.core.sports.ScoreRepository
-import app.thebox.core.sports.SportsConstants
 import app.thebox.core.sports.SportsPrefs
-import app.thebox.core.sports.secsAt
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.LocalDate
 import java.time.ZoneId
@@ -30,7 +27,7 @@ import kotlinx.coroutines.flow.stateIn
 /** The three day chips (docs/design/m6-score-bug.md §5.2). */
 enum class SportsDay { YESTERDAY, TODAY, TOMORROW }
 
-/** One card: the snapshot, whether it is the followed game, and the mono instant the board was fetched (the clock's anchor). */
+/** One card: the snapshot, whether it is the followed game, and the mono instant the board was fetched. */
 data class GameCardModel(val game: GameSnapshot, val followed: Boolean, val anchorMono: Long)
 
 /** What the games area shows (§5.4). */
@@ -152,8 +149,9 @@ class SportsViewModel internal constructor(
         is DayState.Failed -> SportsBody.Failed(day.kind)
         is DayState.Board -> {
             val b = day.board
-            if (sel == SportsDay.TODAY) learn(b)
-            if (!isFor(b, sel)) SportsBody.Loading
+            // U-N5: only a board the repository says is today's teaches the neighbours, whatever the order of events.
+            if (sel == SportsDay.TODAY && day.isToday) learn(b)
+            if (!isFor(day, sel)) SportsBody.Loading
             else if (b.games.isEmpty()) SportsBody.Empty(b.dayKey, sel)
             else SportsBody.Games(order(b.games).map { GameCardModel(it, it.id == followedId, day.fetchedAtMono) })
         }
@@ -168,10 +166,13 @@ class SportsViewModel internal constructor(
     }
 
     /** A stale board of another chip's day must not pass for the one just chosen while its load is in flight. */
-    private fun isFor(b: DayBoard, sel: SportsDay): Boolean = when (sel) {
-        SportsDay.TODAY -> b.dayKey != yesterdayKey && b.dayKey != tomorrowKey
+    private fun isFor(day: DayState.Board, sel: SportsDay): Boolean {
+        val b = day.board
+        return when (sel) {
+            SportsDay.TODAY -> day.isToday && b.dayKey != yesterdayKey && b.dayKey != tomorrowKey
         SportsDay.YESTERDAY -> b.dayKey == (yesterdayKey ?: easternToday().minusDays(1).toString())
-        SportsDay.TOMORROW -> b.dayKey == (tomorrowKey ?: easternToday().plusDays(1).toString())
+            SportsDay.TOMORROW -> b.dayKey == (tomorrowKey ?: easternToday().plusDays(1).toString())
+        }
     }
 
     companion object {
@@ -197,15 +198,10 @@ class SportsViewModel internal constructor(
         }
 
         /**
-         * The seconds a live card shows: the snapshot's clock, counted down from [GameCardModel.anchorMono] while it was
-         * running, for at most `EXTRAPOLATE_CAP_S` since the response (the bug's rule, §5.2). Null = no clock to show.
+         * The seconds a live card shows: the snapshot's own clock, floored at 0 (owner ruling 6, the bug's rule: no local
+         * countdown; it changes when the day list re-polls). Null = no clock to show.
          */
-        fun clockSecs(card: GameCardModel, nowMono: Long): Int? {
-            val c = card.game.clock ?: return null
-            // The bug's rule (WP-1's ClockAnchor.secsAt): ticking while running, frozen at the cap, floored at 0.
-            val stop = card.anchorMono + SportsConstants.EXTRAPOLATE_CAP_S * 1000L
-            return ClockAnchor(c.secondsRemaining.coerceAtLeast(0), card.anchorMono, c.running, stop).secsAt(nowMono)
-        }
+        fun clockSecs(card: GameCardModel): Int? = card.game.clock?.secondsRemaining?.coerceAtLeast(0)
 
         /** Whole minutes since [updatedMono]; 0 reads "Updated just now". */
         fun minutesSince(updatedMono: Long, nowMono: Long): Int = ((nowMono - updatedMono) / 60_000L).coerceAtLeast(0L).toInt()

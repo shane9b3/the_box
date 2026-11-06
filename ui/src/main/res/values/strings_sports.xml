@@ -122,7 +122,7 @@
     <string name="sports_toast_followed_final">That game is over. Its score shows for 5 minutes.</string>
     <string name="sports_toast_postponed">%1$s – %2$s was postponed. Follow another game in Sports.</string>
     <string name="sports_toast_not_listed">NHL.com no longer lists %1$s – %2$s. Follow another game in Sports.</string>
-    <string name="sports_toast_sports_off">Sports is off. The score is hidden.</string>
+    <string name="sports_toast_sports_off">Sports is off, so the score is hidden. Turn on Show Sports in Settings → Sports to follow a game again.</string>
 
     <!-- ==== Quick bar item and sheet (6) -->
     <string name="sports_quick_label">Score bug</string>

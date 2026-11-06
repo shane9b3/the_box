@@ -405,21 +405,36 @@ class PlayerViewModel @Inject constructor(
      * - its bug, followed game, day list and prefs go to the machine as one [app.thebox.core.sports.ScoreFacts] (WP-4b
      *   reads it; the machine should publish only while the quick bar, the sheet or place mode shows);
      * - its events become toasts (a reason and a next step), in every mode;
-     * - FULL without the screen-off layer is demand `FULL_WITH_FOLLOW` (the repository adds "a game is followed").
+     * - FULL without the screen-off layer is demand `FULL_WITH_FOLLOW` (the repository adds "a game is followed");
+     * - FULL with the screen-off layer is reported as such: the repository's demand is NONE then (C-S5, zero requests).
      * Nothing here makes a request: with nothing followed and no Sports UI open, the repository stays idle.
      */
     private fun forwardScores() {
         val repo = scoreRepo ?: return
         viewModelScope.launch {
-            combine(repo.bug, repo.followed, repo.day, repo.prefs) { bug, game, day, p ->
-                app.thebox.core.sports.ScoreFacts(bug, game, day, p.corner, p.delaySec, p.enabled)
+            combine(combine(repo.bug, repo.lastScore, ::Pair), repo.followed, repo.day, repo.prefs) { (bug, known), game, day, p ->
+                app.thebox.core.sports.ScoreFacts(
+                    followed = bug, lastScore = known, game = game, day = day,
+                    corner = p.corner, delaySec = p.delaySec, enabled = p.enabled,
+                )
             }.distinctUntilChanged().collect { machine.scores(it) }
         }
         viewModelScope.launch { repo.events.collect { e -> shellEvents.trySend(ShellEvent.Message(app.thebox.ui.sports.SportsText.toast(context.resources, e))) } }
+        val screenOff = machine.ui.map { it.layer == app.thebox.core.full.PlayerLayer.SCREEN_OFF }.distinctUntilChanged()
         viewModelScope.launch {
-            combine(guideFull, machine.ui.map { it.layer == app.thebox.core.full.PlayerLayer.SCREEN_OFF }.distinctUntilChanged()) { full, off -> full && !off }
+            combine(guideFull, screenOff) { full, off -> full && !off }
                 .distinctUntilChanged()
                 .collect { repo.reportDemand(app.thebox.core.sports.DemandOwner.FULL_WITH_FOLLOW, it) }
+        }
+        viewModelScope.launch {
+            combine(guideFull, screenOff) { full, off -> full && off }
+                .distinctUntilChanged()
+                .collect { repo.reportScreenOff(it) }
+        }
+        // C-N2: a cleared view model withdraws what it reported, so the repository's demand never stays SEEN for it.
+        addCloseable {
+            repo.reportDemand(app.thebox.core.sports.DemandOwner.FULL_WITH_FOLLOW, false)
+            repo.reportScreenOff(false)
         }
     }
 

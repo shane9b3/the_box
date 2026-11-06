@@ -24,7 +24,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -114,14 +113,6 @@ fun SportsScreen(
             onBackFreeChanged(true)
         }
     }
-    // The one tick: read only by the live cards' state lines and the "Updated" text.
-    val now = produceState(android.os.SystemClock.elapsedRealtime()) {
-        while (true) {
-            delay(1_000L)
-            value = android.os.SystemClock.elapsedRealtime()
-        }
-    }
-
     val corner = remember { FocusRequester() }
     val delayChip = remember { FocusRequester() }
     val dayChips = remember { SportsDay.entries.associateWith { FocusRequester() } }
@@ -148,6 +139,7 @@ fun SportsScreen(
     }
 
     val selectedChip = dayChips.getValue(ui.day)
+    val off = body is SportsBody.Off
     val cardsNow = (body as? SportsBody.Games)?.cards.orEmpty()
     val focusedCard = cardsNow.firstOrNull { it.game.id.id == focusedCardId }
 
@@ -170,11 +162,12 @@ fun SportsScreen(
             },
     ) {
         Column(Modifier.fillMaxSize().padding(start = 96.dp, end = 96.dp, top = 56.dp, bottom = 40.dp)) {
-            TitleRow(ui, corner, delayChip, selectedChip, onOpen = { menu = it })
+            TitleRow(ui, corner, delayChip, selectedChip, chips = !off, onOpen = { menu = it })
             Spacer(Modifier.height(4.dp))
-            CreditRow(ui, now)
+            CreditRow(ui)
             Spacer(Modifier.height(24.dp))
-            DayChips(ui.day, dayChips, corner) { day ->
+            // U-N4: with Show Sports off there is nothing to pick: no day chips (and no Corner / Delay chips).
+            if (off) Spacer(Modifier.height(52.dp)) else DayChips(ui.day, dayChips, corner) { day ->
                 settled = true
                 viewModel.onDay(day)
             }
@@ -183,7 +176,7 @@ fun SportsScreen(
                 when (val b = body) {
                     SportsBody.Loading -> Skeletons()
                     is SportsBody.Games -> GamesGrid(
-                        b.cards, gridState, now, clock24, cardRequesters, selectedChip,
+                        b.cards, gridState, clock24, cardRequesters, selectedChip,
                         onFocus = { id, on, index ->
                             if (on) {
                                 focusedCardId = id
@@ -193,7 +186,13 @@ fun SportsScreen(
                         onCard = viewModel::onCard,
                     )
                     is SportsBody.Empty -> Message(emptyText(b), retry = false, onRetry = {})
-                    is SportsBody.Failed -> Message(SportsText.failure(res, b.kind), retry = true, onRetry = viewModel::onRetry)
+                    is SportsBody.Failed -> Message(SportsText.failure(res, b.kind), retry = true, onRetry = {
+                        // U-S3: the Retry chip leaves with the Failed body, so focus moves to the selected day chip
+                        // first, and the initial-focus rule runs again for the board that answers.
+                        runCatching { selectedChip.requestFocus() }
+                        settled = false
+                        viewModel.onRetry()
+                    })
                     SportsBody.Off -> Message(stringResource(R.string.sports_off), retry = false, onRetry = {})
                 }
             }
@@ -240,7 +239,7 @@ private fun footerOf(res: android.content.res.Resources, focused: GameCardModel?
 // ------------------------------------------------------------------ title row
 
 @Composable
-private fun TitleRow(ui: SportsUiState, corner: FocusRequester, delayChip: FocusRequester, down: FocusRequester, onOpen: (ChipMenu) -> Unit) {
+private fun TitleRow(ui: SportsUiState, corner: FocusRequester, delayChip: FocusRequester, down: FocusRequester, chips: Boolean, onOpen: (ChipMenu) -> Unit) {
     val res = LocalResources.current
     Row(Modifier.fillMaxWidth().height(48.dp), verticalAlignment = Alignment.CenterVertically) {
         Line(stringResource(R.string.sports_title), GuideUi.sans(34, FontWeight.SemiBold))
@@ -249,6 +248,7 @@ private fun TitleRow(ui: SportsUiState, corner: FocusRequester, delayChip: Focus
             Line(stringResource(R.string.sports_league_nhl), GuideUi.sans(18, FontWeight.SemiBold, GuideUi.Fg70))
         }
         Spacer(Modifier.weight(1f))
+        if (!chips) return@Row
         FocusChip(
             text = stringResource(R.string.sports_chip_corner, SportsText.corner(res, ui.prefs.corner)),
             requester = corner,
@@ -301,17 +301,26 @@ private fun FocusChip(
 }
 
 @Composable
-private fun CreditRow(ui: SportsUiState, now: State<Long>) {
+private fun CreditRow(ui: SportsUiState) {
     Row(Modifier.fillMaxWidth().height(24.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         Line(stringResource(R.string.sports_credit), GuideUi.sans(18, color = GuideUi.Fg55))
         val updated = ui.updatedMono
-        if (updated != null) UpdatedText(updated, now)
+        if (updated != null) UpdatedText(updated)
     }
 }
 
-/** "Updated 2 min ago" while a board is shown and its re-poll fails (§5.4). */
+/**
+ * "Updated 2 min ago" while a board is shown and its re-poll fails (§5.4). Its own minute-grained tick runs only while it
+ * shows (the cards no longer tick: owner ruling 6).
+ */
 @Composable
-private fun UpdatedText(updatedMono: Long, now: State<Long>) {
+private fun UpdatedText(updatedMono: Long) {
+    val now = produceState(android.os.SystemClock.elapsedRealtime()) {
+        while (true) {
+            delay(15_000L)
+            value = android.os.SystemClock.elapsedRealtime()
+        }
+    }
     val minutes = SportsViewModel.minutesSince(updatedMono, now.value)
     val text = if (minutes <= 0) stringResource(R.string.sports_updated_now) else pluralStringResource(R.plurals.sports_updated_min_ago, minutes, minutes)
     Line(text, GuideUi.sans(18, color = GuideUi.Warn), Modifier.testTag(SPORTS_UPDATED_TAG))
@@ -347,7 +356,6 @@ private fun DayChips(selected: SportsDay, requesters: Map<SportsDay, FocusReques
 private fun GamesGrid(
     cards: List<GameCardModel>,
     state: LazyGridState,
-    now: State<Long>,
     clock24: Boolean,
     requesters: MutableMap<String, FocusRequester>,
     dayChip: FocusRequester,
@@ -366,7 +374,6 @@ private fun GamesGrid(
             val requester = requesters.getOrPut(id) { FocusRequester() }
             GameCard(
                 card = card,
-                nowMono = now,
                 clock24 = clock24,
                 onClick = { onCard(card) },
                 onFocusChange = { onFocus(id, it, index) },
