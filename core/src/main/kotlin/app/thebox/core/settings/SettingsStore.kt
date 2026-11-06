@@ -82,6 +82,10 @@ object Domains {
     const val SETUP = "setup"          // SetupState (not backed up)
     /** (Storage locations commit 0, docs/design/m6-storage-locations.md §8, §12.4) core.storage.StoragePrefs (backed up). */
     const val STORAGE = "storage"
+    /** (Score bug commit 0, docs/design/m6-score-bug.md §7) core.sports.SportsPrefs (backed up). */
+    const val SPORTS = "sports"
+    /** (Score bug commit 0, §2.6, A-S9) core.sports.SportsFollowDoc (not backed up: the followed game is device-bound). */
+    const val SPORTS_FOLLOW = "sports_follow"
 }
 
 enum class ClockMode { SYSTEM, H12, H24 }

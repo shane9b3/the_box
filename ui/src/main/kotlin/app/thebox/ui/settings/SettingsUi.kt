@@ -176,6 +176,7 @@ object SettingsUi {
         SectionId.BACKUP -> R.string.settings_section_backup
         SectionId.ABOUT -> R.string.settings_section_about
         SectionId.NETWORK -> R.string.settings_section_network
+        SectionId.SPORTS -> R.string.settings_section_sports // score bug commit 0
     }
 
     fun badgeLabel(b: Badge): Int = when (b) {

@@ -44,6 +44,11 @@ internal class LifecycleCoordinator(
     private val device: DeviceState,
     private val timeScale: () -> Float = { 1f },
     private val handler: Handler = Handler(Looper.getMainLooper()),
+    /**
+     * (Score bug commit 0, docs/design/m6-score-bug.md §2.3, A-S5) Told after every power, display and HDMI event whether
+     * the device is awake (interactive, display on, HDMI sink not unplugged since start); `DeviceAwakeState.set`.
+     */
+    private val awakeSink: ((Boolean) -> Unit)? = null,
 ) {
     /** What the coordinator drives (the controller). */
     interface Target {
@@ -74,6 +79,8 @@ internal class LifecycleCoordinator(
 
     private var started = false
     private var hdmiPlugged: Boolean? = null
+    /** An HDMI 1 → 0 transition was seen and no re-plug since (never the initial sticky broadcast). */
+    private var hdmiOff = false
     private val graceExpired = Runnable {
         val reason = graceReason ?: return@Runnable
         graceReason = null
@@ -87,6 +94,7 @@ internal class LifecycleCoordinator(
     // ------------------------------------------------------------------ events
 
     fun onProcessStart() {
+        publishAwake()
         isForeground = true
         target.onForegroundChanged(true)
         cancelGrace("start")
@@ -94,6 +102,7 @@ internal class LifecycleCoordinator(
     }
 
     fun onProcessStop() {
+        publishAwake()
         isForeground = false
         target.onForegroundChanged(false)
         val interactive = device.isInteractive()
@@ -109,19 +118,28 @@ internal class LifecycleCoordinator(
         }
     }
 
-    fun onScreenOff() = startGrace(StopReason.STANDBY)
+    fun onScreenOff() {
+        publishAwake(forceOff = true)
+        startGrace(StopReason.STANDBY)
+    }
 
-    fun onScreenOn() = onWake("screen on")
+    fun onScreenOn() {
+        publishAwake()
+        onWake("screen on")
+    }
 
     /** [initialSticky]: the broadcast replayed at registration (never a transition). */
     fun onHdmiAudioPlug(plugged: Boolean, initialSticky: Boolean) {
         val previous = hdmiPlugged
         hdmiPlugged = plugged
         if (initialSticky || previous == null || previous == plugged) return
+        hdmiOff = !plugged
+        publishAwake()
         if (!plugged) startGrace(StopReason.HDMI_UNPLUGGED) else onWake("hdmi plugged")
     }
 
     fun onDisplayStateChanged(on: Boolean) {
+        publishAwake(forceOff = !on)
         if (!on) startGrace(StopReason.DISPLAY_OFF) else onWake("display on")
     }
 
@@ -137,6 +155,12 @@ internal class LifecycleCoordinator(
             BoxLog.i(TAG) { "$why while not started: stop now" }
             target.stopForLifecycle(StopReason.BACKGROUND)
         }
+    }
+
+    /** (Score bug commit 0, A-S5) [awakeSink] from the current facts; [forceOff] when the event itself means asleep. */
+    private fun publishAwake(forceOff: Boolean = false) {
+        val sink = awakeSink ?: return
+        sink(!forceOff && !hdmiOff && device.isInteractive() && device.isDisplayOn())
     }
 
     private fun startGrace(reason: StopReason) {

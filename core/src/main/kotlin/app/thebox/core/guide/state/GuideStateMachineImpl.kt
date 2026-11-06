@@ -470,6 +470,9 @@ class GuideStateMachineImpl(
         when (u.mode) {
             ScreenMode.FULL -> fullKey(a)
             ScreenMode.SEARCH -> if (action == BoxAction.BACK) onSearchClosed(null, tunedFromSearch = false, archive = false)
+            // (Score bug commit 0, docs/design/m6-score-bug.md §5.1) Never entered yet; WP-4a routes the tab. Back returns
+            // to the guide so a stray SPORTS can never trap the user.
+            ScreenMode.SPORTS -> if (action == BoxAction.BACK) setMode(ScreenMode.GUIDE)
             ScreenMode.SETTINGS -> when (action) {
                 // Owner ruling 2026-10-15: Settings opened from the quick bar returns to FULL.
                 BoxAction.BACK -> if (settingsFromFull) { settingsFromFull = false; goFull(EnterReason.USER) } else setMode(ScreenMode.GUIDE)

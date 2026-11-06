@@ -8,6 +8,7 @@ import coil3.disk.directory
 import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
+import coil3.svg.SvgDecoder
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -38,7 +39,12 @@ object ImageModule {
         return ImageLoader.Builder(context)
             .memoryCache { MemoryCache.Builder().maxSizeBytes(memory).build() }
             .diskCache { DiskCache.Builder().directory(context.cacheDir.resolve("coil_images")).maxSizeBytes(DISK_CACHE_BYTES).build() }
-            .components { add(OkHttpNetworkFetcherFactory(client)) }
+            // (Score bug, docs/design/m6-score-bug.md §3, A-N8) SVG team logos. ServiceLoader registers one too; the
+            // duplicate is harmless and the explicit entry keeps the wiring visible.
+            .components {
+                add(OkHttpNetworkFetcherFactory(client))
+                add(SvgDecoder.Factory())
+            }
             .crossfade(false)
             .build()
     }

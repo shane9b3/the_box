@@ -45,6 +45,7 @@ class ComposedFullBackLadderTest {
             PlayerLayer.PICKER -> w.press(ASPECT)
             PlayerLayer.ERROR -> w.fail(PlayerFixtures.error(PlaybackErrorCode.STREAM_INTERRUPTED), archive = false)
             PlayerLayer.SCREEN_OFF -> w.press(BoxAction.SCREEN_OFF)
+            PlayerLayer.PLACE_SCORE -> return null // (score bug commit 0) not reachable until WP-4b's place mode
         }
         if (w.ui.layer != layer) return null
         when (o) {

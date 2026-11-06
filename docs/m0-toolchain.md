@@ -23,7 +23,7 @@ on 2026-10-13.
 | WorkManager | **2.12.0** | as planned |
 | Hilt / Dagger | **2.60.1** (KSP) | as planned; androidx.hilt (hilt-work) 1.4.0 |
 | OkHttp (+ dnsoverhttps) | **5.5.0** | as planned |
-| Coil 3 (coil-compose, coil-network-okhttp) | 3.6.3 | latest stable |
+| Coil 3 (coil-compose, coil-network-okhttp; coil-svg in :app for the score bug, pulls androidsvg-aar 1.4) | 3.6.3 | latest stable |
 | kotlinx-coroutines | 1.11.0 | latest stable |
 | kotlinx-serialization-json | 1.11.0 | latest stable |
 | Tink (tink-android) | 1.23.0 | latest stable |

@@ -94,6 +94,14 @@ class PlayerEffectsImpl(
     /** (Storage locations commit 0, docs/design/m6-storage-locations.md §5.1, §10) The host's once/3-process rules. */
     override fun fallbackToastDue(locationId: String, reason: app.thebox.core.storage.LocationFallback): Boolean =
         delegates.fallbackToasts.due(locationId, reason)
+
+    // (Score bug commit 0, docs/design/m6-score-bug.md §6, A-B2) The score effects go to the repository and the store.
+    override fun followGame(id: app.thebox.core.sports.GameId?) = vm.followGame(id)
+    override fun setScoreCorner(c: app.thebox.core.sports.ScoreCorner) = vm.updateSports { it.copy(corner = c) }
+    override fun setScoreDelay(sec: Int) = vm.updateSports { it.copy(delaySec = sec) }
+    override fun scorePicker(open: Boolean) { vm.scoreRepo?.reportDemand(app.thebox.core.sports.DemandOwner.SCORE_PICKER, open) }
+    override fun retryScores() { vm.scoreRepo?.retry() }
+
     override fun pausePlain() = controller.pause()
     override fun resumePlain() = controller.resume()
 

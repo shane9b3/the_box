@@ -4,7 +4,11 @@ package app.thebox.core.guide
 import app.thebox.core.input.BoxAction
 import kotlinx.coroutines.flow.StateFlow
 
-enum class ScreenMode { GUIDE, FULL, SEARCH, SETTINGS }
+/**
+ * (Score bug commit 0, docs/design/m6-score-bug.md §5.1; append-only) SPORTS is the Sports tab (`HoleMode.COVERED`, as
+ * SEARCH). Nothing enters it until WP-4a wires the tab.
+ */
+enum class ScreenMode { GUIDE, FULL, SEARCH, SETTINGS, SPORTS }
 /** (owner ruling 2026-11-01) PANEL is kept for the append-only contract but never entered: the panel has no buttons. */
 enum class Zone { TABS, PANEL, HEADER, GRID }
 /**

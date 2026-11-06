@@ -27,6 +27,15 @@ interface PlayerExtras {
 
     /** (M6 §13, U-N3) The stats overlay's rewind line ("Rewind: 18:20 saved of 30:00 · 1.1 GB"); null = none. */
     val rewindStat: StateFlow<String?> get() = NO_REWIND_STAT
+
+    /**
+     * (Score bug commit 0, docs/design/m6-score-bug.md §4.4, A-B2) A text track is selected and enabled: a bottom-corner
+     * score bug shows at the top corner on the same side. Default: none.
+     */
+    val textTrackOn: StateFlow<Boolean> get() = NO_TEXT_TRACK
+
+    /** (Score bug commit 0, §4.4, §4.7, A-B2) What `ScoreBug` reads; null = no score feature in this host. */
+    val scoreBug: app.thebox.core.sports.ScoreBugSource? get() = null
 }
 
 /**
@@ -46,3 +55,4 @@ data class PausedFacts(
 private val NOT_FORCED: StateFlow<Boolean> = kotlinx.coroutines.flow.MutableStateFlow(false)
 private val NO_PAUSED_FACTS: StateFlow<PausedFacts> = kotlinx.coroutines.flow.MutableStateFlow(PausedFacts())
 private val NO_REWIND_STAT: StateFlow<String?> = kotlinx.coroutines.flow.MutableStateFlow(null)
+private val NO_TEXT_TRACK: StateFlow<Boolean> = kotlinx.coroutines.flow.MutableStateFlow(false)

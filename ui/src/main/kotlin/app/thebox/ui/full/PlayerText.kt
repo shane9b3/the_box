@@ -23,6 +23,7 @@ import app.thebox.core.playback.VideoDecoderMode
 import app.thebox.core.playback.timeshift.RecordStop
 import app.thebox.player.api.PlaybackNotice
 import app.thebox.ui.R
+import app.thebox.ui.sports.SportsText
 import app.thebox.ui.playback.ErrorText
 import app.thebox.ui.root.toastText
 import java.util.Locale
@@ -441,6 +442,7 @@ object PlayerText {
         QuickItem.SCREEN_OFF -> R.string.player_quick_screen_off
         QuickItem.SETTINGS -> R.string.player_quick_settings
         QuickItem.SOURCES -> R.string.player_quick_sources // M5
+        QuickItem.SCORE_BUG -> R.string.sports_quick_label // score bug commit 0 (the value line: SportsText.quickValue)
     }
 
     /** The current value shown after the label ("Audio · English 5.1"), or null. */
@@ -462,9 +464,12 @@ object PlayerText {
         PickerKind.ASPECT -> R.string.player_picker_aspect
         PickerKind.VIDEO_DECODER -> R.string.player_picker_decoder
         PickerKind.SERVER -> R.string.player_picker_server // M5
+        PickerKind.SCORE_BUG -> R.string.sports_picker_title // score bug commit 0
+        PickerKind.SCORE_DELAY -> R.string.sports_picker_delay_title
     }
 
-    fun choice(res: Resources, c: PickerChoice, index: Int): String = when (c) {
+    /** [clock24] only matters for the score sheet's upcoming games ("7:00 PM" vs "19:00"). */
+    fun choice(res: Resources, c: PickerChoice, index: Int, clock24: Boolean = true): String = when (c) {
         is PickerChoice.Audio -> audioRow(res, c.track, index)
         is PickerChoice.Text -> text(res, c.track, index)
         PickerChoice.TextOff -> res.getString(R.string.player_value_off)
@@ -472,6 +477,15 @@ object PlayerText {
         is PickerChoice.Decoder -> res.getString(decoder(c.mode))
         is PickerChoice.Server -> res.getString(R.string.player_picker_server_row, c.index + 1, c.label) // M5 integration
         PickerChoice.AudioOutputAuto -> res.getString(R.string.error_button_back_to_auto) // U-S12 (row label; phase 2 styles it)
+        // (Score bug commit 0, docs/design/m6-score-bug.md §6, U-N9) The score sheet's rows.
+        is PickerChoice.ScoreGame -> SportsText.pickerGame(res, c.game, clock24)
+        is PickerChoice.ScoreCornerRow -> res.getString(R.string.sports_picker_corner, SportsText.corner(res, c.corner))
+        is PickerChoice.ScoreDelayRow -> res.getString(R.string.sports_picker_delay, SportsText.delay(res, c.delaySec))
+        PickerChoice.ScoreStop -> res.getString(R.string.sports_picker_stop)
+        PickerChoice.ScoreTodayDivider -> res.getString(R.string.sports_picker_today)
+        PickerChoice.ScoreLoading -> res.getString(R.string.sports_picker_loading)
+        is PickerChoice.ScoreFailed -> SportsText.failure(res, c.kind)
+        is PickerChoice.ScoreDelayChoice -> SportsText.delay(res, c.delaySec)
     }
 
     @StringRes fun menuItem(item: ChannelMenuItem): Int = when (item) {

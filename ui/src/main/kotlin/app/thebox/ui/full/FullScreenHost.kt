@@ -31,6 +31,11 @@ import app.thebox.core.full.PlayerUiState
 import app.thebox.core.guide.GuideUiState
 import app.thebox.core.guide.MiniPhase
 import app.thebox.core.guide.Overlay
+import app.thebox.core.sports.BottomBar
+import app.thebox.core.sports.PlacementInput
+import app.thebox.core.sports.ScoreBugHostFacts
+import app.thebox.core.sports.SportsPrefs
+import app.thebox.ui.sports.ScoreBug
 import app.thebox.ui.R
 import app.thebox.ui.guide.overlay.ExitHint
 import app.thebox.ui.guide.overlay.NumberEntryOverlay
@@ -70,6 +75,8 @@ fun FullScreenHost(
     player: PlayerHost? = null,
     clock24: Boolean = true,
     lowEnd: Boolean = false,
+    /** (Score bug commit 0, docs/design/m6-score-bug.md §4.4, A-B2) The root's toast, reminder card and modal facts. */
+    hostFacts: ScoreBugHostFacts = ScoreBugHostFacts(),
 ) {
     if (app.thebox.ui.guide.GuideDebugCounters.ENABLED) androidx.compose.runtime.SideEffect { app.thebox.ui.guide.GuideDebugCounters.bump(COMPOSITIONS_FULL) } // U-S5
     val flow = remember(player) { player?.machine?.ui ?: MutableStateFlow(PlayerUiState()) }
@@ -89,6 +96,13 @@ fun FullScreenHost(
         ?: pausedValues.copy(dimmed = false, dimSinceMs = null)
     val rewindFlow = remember(player) { extras?.rewindStat ?: MutableStateFlow(null) }
     val rewindStat by rewindFlow.collectAsState() // M6 §13 (U-N3)
+    // (Score bug commit 0, §4.4, §4.7) Only the rarely changing facts are read here (prefs, the text track); the bug and
+    // its clock are collected inside ScoreBug, so a poll or a tick never recomposes this host.
+    val scoreSource = extras?.scoreBug
+    val scorePrefsFlow = remember(scoreSource) { scoreSource?.prefs ?: MutableStateFlow(SportsPrefs(enabled = false)) }
+    val scorePrefs by scorePrefsFlow.collectAsState()
+    val textTrackFlow = remember(player) { extras?.textTrackOn ?: MutableStateFlow(false) }
+    val textTrackOn by textTrackFlow.collectAsState()
     // U-S5: a per-minute clock (past / now / future, list progress); never read in composition per recomposition, so
     // the bars and the list skip when only the stats (2 Hz) change. Sub-minute time is read in the draw lambdas.
     val nowMs by produceState(System.currentTimeMillis()) {
@@ -121,6 +135,11 @@ fun FullScreenHost(
         Fade(ui.quick, lowEnd) { q -> QuickBar(q, Modifier.offset(PlayerUi.QUICK_L.dp, PlayerUi.QUICK_T.dp)) }
         // U-S3 (V2): the stats share the top-left corner with the channel list and the group card; hidden while either shows.
         if (ui.channels == null && state.groupCard == null) ui.stats?.let { StatsOverlay(it, Modifier.offset(PlayerUi.STATS_L.dp, PlayerUi.STATS_T.dp), audioOutputForced = audioForced, rewind = rewindStat) }
+        // (Score bug commit 0, docs/design/m6-score-bug.md §4.4) After the bars and the stats; before the channel list,
+        // the picker, the paused card, the error card, the transient lines, the guide overlays and screen-off.
+        if (scoreSource != null && scorePrefs.enabled) {
+            ScoreBug(scoreSource, scorePlacementInput(ui, state, scorePrefs, hostFacts, textTrackOn), PlayerUi.overlayGeometry(), lowEnd)
+        }
         if (player != null) {
             Fade(ui.channels, lowEnd) { c -> ChannelListPanel(c, player, Modifier.offset(PlayerUi.LIST_L.dp, PlayerUi.LIST_T.dp), nowMs) }
         }
@@ -182,6 +201,45 @@ fun FullScreenHost(
         }
         if (ui.layer == PlayerLayer.SCREEN_OFF) ScreenOffLayer()
     }
+}
+
+/**
+ * (Score bug commit 0, docs/design/m6-score-bug.md §4.4, A-B2) The placement facts FULL knows: the bottom bar (passive
+ * info bar vs a bar the user opened), the overlays the bug avoids, place mode, the text track and screen off, plus the
+ * root's [facts]. In place mode the corner being moved wins over the saved one.
+ */
+fun scorePlacementInput(
+    ui: PlayerUiState,
+    state: GuideUiState,
+    prefs: SportsPrefs,
+    facts: ScoreBugHostFacts,
+    textTrackOn: Boolean,
+): PlacementInput {
+    val info = ui.info
+    val bar = when {
+        ui.quick != null -> BottomBar.QUICK
+        ui.scrub != null -> BottomBar.USER_BAR
+        info != null -> if (info.active) BottomBar.USER_BAR else BottomBar.PASSIVE_INFO
+        else -> BottomBar.NONE
+    }
+    return PlacementInput(
+        corner = ui.placeScore?.corner ?: prefs.corner,
+        size = prefs.size,
+        placing = ui.layer == PlayerLayer.PLACE_SCORE,
+        bar = bar,
+        channelList = ui.channels != null,
+        // U-S3 (V2): the stats are hidden while the channel list or the group card shows.
+        stats = ui.stats != null && ui.channels == null && state.groupCard == null,
+        groupCard = state.groupCard != null,
+        picker = ui.picker != null,
+        numberEntry = state.overlay is Overlay.Number,
+        probing = if (ui.probing != null) PlayerUi.probingBox else null,
+        toast = facts.toast,
+        reminder = facts.reminder,
+        modal = facts.modal,
+        textTrackOn = textTrackOn,
+        screenOff = ui.layer == PlayerLayer.SCREEN_OFF,
+    )
 }
 
 /**

@@ -1,0 +1,11 @@
+HTTP/2 200 
+date: Fri, 06 Nov 2026 00:52:25 GMT
+content-type: application/json
+vary: Accept-Encoding
+cache-control: no-transform, max-age=19, s-maxage=19
+etag: W/"6aed24d8--gzip"
+age: 5
+cf-cache-status: HIT
+server: cloudflare
+cf-ray: a5601d8dca7aab21-YYZ
+

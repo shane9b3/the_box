@@ -1,0 +1,163 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Score bug commit 0 (docs/design/m6-score-bug.md): every text of the score bug, the Sports tab, the quick-bar item and
+     the Sports settings rows. Words (U-B4, U-S10): Sports, Follow, Following, Stop following, Score bug, Corner, Delay,
+     LIVE, GOAL, Final, INT, End, OT, SO, No update, Delayed. Never "subscribe", "poll", "feed", "API" or "On screen".
+     Away team first everywhere ("CGY – EDM"). Errors name the reason, then the next step. -->
+<resources>
+    <!-- ==== Names (section 0) -->
+    <string name="sports_tab">Sports</string>
+    <string name="sports_title">Sports</string>
+    <string name="sports_league_nhl">NHL</string>
+    <string name="sports_follow">Follow</string>
+    <string name="sports_following">Following</string>
+    <string name="sports_stop_following">Stop following</string>
+    <string name="sports_score_bug">Score bug</string>
+    <string name="sports_corner">Corner</string>
+    <string name="sports_delay">Delay</string>
+
+    <!-- ==== The bug's centre column (4.5). Periods: REG 1 to 3, overtime "OT" then "2OT", "3OT"… -->
+    <string name="sports_period_1">1st</string>
+    <string name="sports_period_2">2nd</string>
+    <string name="sports_period_3">3rd</string>
+    <!-- A regular period past the third (never expected in the NHL). %1$d = the period number. -->
+    <string name="sports_period_n">P%1$d</string>
+    <string name="sports_period_ot">OT</string>
+    <!-- %1$d = the overtime number, 2 or more ("2OT"). -->
+    <string name="sports_period_ot_n">%1$dOT</string>
+    <string name="sports_period_so">SO</string>
+    <!-- %1$s = a period ("1st"). -->
+    <string name="sports_intermission">%1$s INT</string>
+    <!-- %1$s = a period ("1st"): the clock reads 0:00 before the intermission starts. -->
+    <string name="sports_end_of">End %1$s</string>
+    <!-- %1$s = the scoring team's abbreviation ("CGY"). -->
+    <string name="sports_goal">GOAL %1$s</string>
+    <string name="sports_final">Final</string>
+    <string name="sports_final_ot">Final/OT</string>
+    <string name="sports_final_so">Final/SO</string>
+    <string name="sports_no_update">No update</string>
+    <string name="sports_delayed">Delayed</string>
+    <string name="sports_live">LIVE</string>
+
+    <!-- ==== Accessibility: one merged string per state (U-N12). %1$s/%3$s team names (away, home), %2$d/%4$d scores. -->
+    <!-- %5$s = the clock ("10:22"), %6$s = the period ("1st", "OT"). -->
+    <string name="sports_desc_live">%1$s %2$d, %3$s %4$d, %5$s left in the %6$s</string>
+    <!-- %5$s = the period ("1st"), %6$s = the intermission clock. -->
+    <string name="sports_desc_intermission">%1$s %2$d, %3$s %4$d, %5$s intermission, %6$s left</string>
+    <!-- %5$s = the period ("1st"). -->
+    <string name="sports_desc_end_of">%1$s %2$d, %3$s %4$d, end of the %5$s</string>
+    <string name="sports_desc_shootout">%1$s %2$d, %3$s %4$d, shootout</string>
+    <!-- %5$s = "Final", "Final/OT" or "Final/SO". -->
+    <string name="sports_desc_final">%1$s %2$d, %3$s %4$d, %5$s</string>
+    <!-- %5$s = the abbreviation of the team that scored. -->
+    <string name="sports_desc_goal">Goal %5$s. %1$s %2$d, %3$s %4$d</string>
+    <string name="sports_desc_no_update">%1$s %2$d, %3$s %4$d, no update for a while</string>
+    <string name="sports_desc_delayed">%1$s %2$d, %3$s %4$d, delayed</string>
+
+    <!-- ==== Place mode (6, U-B1) -->
+    <string name="sports_place_hint">← → ↑ ↓ Move · OK Done</string>
+    <string name="sports_place_hint_desc">Use the arrows to move the score bug to another corner, then press OK.</string>
+    <!-- The sample bug drawn while no game is followed ("AWY 0 | 0:00 | HME 0"). -->
+    <string name="sports_sample_away">AWY</string>
+    <string name="sports_sample_home">HME</string>
+
+    <!-- ==== Corners and sizes (4.3, 7) -->
+    <string name="sports_corner_top_right">Top right</string>
+    <string name="sports_corner_top_left">Top left</string>
+    <string name="sports_corner_bottom_right">Bottom right</string>
+    <string name="sports_corner_bottom_left">Bottom left</string>
+    <string name="sports_size_standard">Standard</string>
+    <string name="sports_size_large">Large</string>
+    <!-- Delay values (2.5): 0 is "Off". %1$d = seconds. -->
+    <string name="sports_delay_off">Off</string>
+    <string name="sports_delay_seconds">%1$d s</string>
+
+    <!-- ==== Sports tab (5) -->
+    <!-- Title-row chips (U-N6). %1$s = a corner ("Top right") / a delay ("Off", "30 s"). -->
+    <string name="sports_chip_corner">Corner · %1$s</string>
+    <string name="sports_chip_delay">Delay · %1$s</string>
+    <string name="sports_credit">Scores and logos: NHL.com</string>
+    <string name="sports_day_yesterday">Yesterday</string>
+    <string name="sports_day_today">Today</string>
+    <string name="sports_day_tomorrow">Tomorrow</string>
+    <!-- Card state column (5.2). %1$s = a period ("2nd"), %2$s = the clock ("10:22"). -->
+    <string name="sports_card_live_line">%1$s · %2$s</string>
+    <string name="sports_card_following">✓ Following</string>
+    <string name="sports_card_action_follow">OK Follow score</string>
+    <string name="sports_card_action_stop">OK Stop following</string>
+    <!-- Accessibility of a card. %1$s/%3$s away/home names, %2$s/%4$s their scores or "", %5$s the state ("LIVE, 2nd 10:22", "7:00 PM"). -->
+    <string name="sports_card_desc">%1$s %2$s at %3$s %4$s, %5$s</string>
+    <string name="sports_card_desc_following">%1$s %2$s at %3$s %4$s, %5$s. Following</string>
+    <!-- Footer (U-S9): key, then label. -->
+    <string name="sports_footer_keys_browse">← → ↑ ↓</string>
+    <string name="sports_footer_browse">Browse</string>
+    <string name="sports_footer_keys_ok">OK</string>
+    <string name="sports_footer_follow">Follow score</string>
+    <string name="sports_footer_stop">Stop following</string>
+    <string name="sports_footer_keys_back">Back</string>
+    <string name="sports_footer_back">Guide</string>
+    <!-- Empty and error states (5.4, U-N5) -->
+    <string name="sports_empty_yesterday">No NHL games yesterday. Pick another day above.</string>
+    <string name="sports_empty_today">No NHL games today. Pick another day above.</string>
+    <string name="sports_empty_tomorrow">No NHL games tomorrow. Pick another day above.</string>
+    <!-- A day that is not yesterday, today or tomorrow. %1$s = the date. -->
+    <string name="sports_empty_day">No NHL games on %1$s. Pick another day above.</string>
+    <string name="sports_no_network">No internet connection. Check the network, then press OK to try again.</string>
+    <string name="sports_failed">NHL.com did not answer. Press OK to try again; scores may be down for a few minutes.</string>
+    <string name="sports_retry">Retry</string>
+    <string name="sports_loading">Loading games…</string>
+    <!-- A board shown while its re-poll fails. -->
+    <string name="sports_updated_now">Updated just now</string>
+    <plurals name="sports_updated_min_ago">
+        <item quantity="one">Updated %1$d min ago</item>
+        <item quantity="other">Updated %1$d min ago</item>
+    </plurals>
+
+    <!-- ==== Toasts (5.3, 2.6, U-S12). %1$s = away abbreviation, %2$s = home abbreviation. -->
+    <string name="sports_toast_following_first">Following %1$s – %2$s. The score shows in a corner while you watch any channel. Change it from the player\'s quick bar.</string>
+    <string name="sports_toast_following">Following %1$s – %2$s.</string>
+    <string name="sports_toast_followed_final">That game is over. Its score shows for 5 minutes.</string>
+    <string name="sports_toast_postponed">%1$s – %2$s was postponed. Follow another game in Sports.</string>
+    <string name="sports_toast_not_listed">NHL.com no longer lists %1$s – %2$s. Follow another game in Sports.</string>
+    <string name="sports_toast_sports_off">Sports is off. The score is hidden.</string>
+
+    <!-- ==== Quick bar item and sheet (6) -->
+    <string name="sports_quick_label">Score bug</string>
+    <!-- Value lines. %1$s/%4$s abbreviations (away, home), %2$d/%3$d scores ("CGY 0–2 EDM"). -->
+    <string name="sports_quick_follow">Follow a game</string>
+    <string name="sports_quick_score">%1$s %2$d–%3$d %4$s</string>
+    <!-- %1$s = a start time ("7:00 PM"). -->
+    <string name="sports_quick_starts">Starts %1$s</string>
+    <string name="sports_picker_title">Score bug</string>
+    <string name="sports_picker_delay_title">Delay</string>
+    <!-- Rows. %1$s = a corner / a delay value. -->
+    <string name="sports_picker_corner">Corner · %1$s</string>
+    <string name="sports_picker_delay">Delay · %1$s</string>
+    <string name="sports_picker_stop">Stop following</string>
+    <string name="sports_picker_today">Today</string>
+    <string name="sports_picker_loading">Loading games…</string>
+    <!-- A game row, live or final. %1$s = "CGY 0–2 EDM", %2$s = its state ("2nd 10:22", "1st INT", "Final/OT"). -->
+    <string name="sports_picker_game_live">%1$s · %2$s</string>
+    <!-- A game row before the start. %1$s/%2$s abbreviations, %3$s the start time ("CGY – EDM · 7:00 PM"). -->
+    <string name="sports_picker_game_upcoming">%1$s – %2$s · %3$s</string>
+    <!-- %1$s = a period ("2nd"), %2$s = the clock ("10:22"). -->
+    <string name="sports_picker_live_state">%1$s %2$s</string>
+    <string name="sports_picker_followed_desc">Following</string>
+
+    <!-- ==== Settings: the Sports section (7). Keys: SettingsText.SECTION_SPORTS, SPORTS_* (ResourceSettingsTexts). -->
+    <string name="settings_section_sports">Sports</string>
+    <string name="settings_sports_show">Show Sports</string>
+    <string name="settings_sports_show_desc">The Sports tab and the score bug. Scores and logos come from NHL.com while you use them.</string>
+    <string name="settings_sports_corner">Score bug corner</string>
+    <string name="settings_sports_corner_desc">A bottom corner moves to the top while subtitles are on.</string>
+    <string name="settings_sports_delay">Score bug delay</string>
+    <string name="settings_sports_delay_desc">Use this if the game on your screen is behind the live score.</string>
+    <string name="settings_sports_size">Score bug size</string>
+    <string name="settings_sports_corner_top_right">Top right</string>
+    <string name="settings_sports_corner_top_left">Top left</string>
+    <string name="settings_sports_corner_bottom_right">Bottom right</string>
+    <string name="settings_sports_corner_bottom_left">Bottom left</string>
+    <!-- %1$d = seconds. 0 uses SettingsText.OFF. -->
+    <string name="settings_sports_delay_seconds">%1$d s</string>
+    <string name="settings_sports_size_standard">Standard</string>
+    <string name="settings_sports_size_large">Large</string>
+</resources>
