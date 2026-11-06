@@ -223,6 +223,35 @@ which must see the fixture M3U).
 (debug key, or a throwaway key for the "another signer" case); `run-instrumented.sh --update-fixtures` builds both fixtures,
 pushes them to `/data/local/tmp`, installs the app and grants it "Install unknown apps" before the run (I-M5-19).
 
+## Sports: the fake NHL score API (docs/design/m6-score-bug.md §8)
+
+`--sports` (config `sports: true`; `--sports-timeline S` = `sports_timeline_s`, default 360) serves the NHL's own paths
+from `sports.py`, so the app only swaps the origin:
+
+- `GET /v1/score/now` → 307 to `/v1/score/{today}` (the panel's Eastern date); `GET /v1/score/{yyyy-MM-dd}`: the day
+  list (yesterday: two finals, one in OT; today: five games; tomorrow: two scheduled; any other day: no games);
+  `GET /v1/gamecenter/{id}/landing` (404 JSON for an unknown id); `GET /logos/nhl/svg/{ABBR}_{dark|light}.svg`: a neutral
+  placeholder badge of ours (paths only, 960 × 640 viewBox; no NHL art in the repo).
+- CDN behaviour: every answer is the state at the start of the current 20 s bucket, `Date` = now, `Age` = seconds since
+  the bucket start, `Cache-Control: max-age=19`, a bucket ETag (the app must ignore it).
+- The featured game (CGY @ EDM, id `{season}020901`) runs FUT → PRE → LIVE 1st (10 s stoppage) → INT → LIVE 2nd (CGY
+  goal) → INT → CRIT 3rd (EDM goal) → OT → SO → OFF → FINAL (EDM wins the shootout) in about 6 min from the server start;
+  clocks run at 1 s/s. `POST /admin/sports {"restart": true}` (or `{"anchor_unix": T}`) re-anchors it; `GET /admin/sports`
+  lists the slate with each game's current state. `/admin/stats` carries `sports: {requests, by_path, log}` (zero-traffic
+  checks on a device).
+- `sports_script`: `{"<game id>": {gameState, period, periodType, secondsRemaining, running, inIntermission, away, home,
+  scheduleState, lastPeriodType, gone}}` overrides a game (`"scheduleState": "PPD"` postpones it; `"gone": true` makes the
+  landing 404 and drops it from the day list).
+- `sports_faults`: `status` (every `/v1` answer), `score_status`, `landing_status`, `html_404` (404s carry HTML),
+  `retry_after`, `pad_bytes` (a filler field; over 524288 trips the app's body cap), `age` (fixed), `no_date`, `stall_s`.
+
+Point a **debug** build at it (the override is read only in debug builds, at app start):
+
+```
+adb shell run-as app.thebox.debug sh -c 'mkdir -p files/debug && echo http://10.0.2.2:8080 > files/debug/sports_base'
+adb shell am force-stop app.thebox.debug   # then start the app; delete the file to go back to api-web.nhle.com
+```
+
 ## Logging
 
 One line per request: timestamp, client, method+path, UA, status, bytes, `cons[user]=active/max`, notes (`REJECT:reason`, `REDIRECT`, `FORCED-CLOSE`, `TZ-WARN`...).
@@ -232,6 +261,7 @@ Streams log when they end. `--verbose` adds request headers.
 
 From the repo root: `python3 -m unittest tools/fakepanel/test_fakepanel.py`.
 With `-I` (which drops the cwd from `sys.path`) use `python3 -I -m unittest discover -s tools/fakepanel -p test_fakepanel.py`.
+The sports routes: `python3 -I -m unittest discover -s tools/fakepanel -p test_sports.py` (about 2 s).
 Tests start the server on ephemeral ports with the null-packet media and need neither ffmpeg nor network.
 
 ## Live TS timestamps
