@@ -2,17 +2,6 @@
 <issues format="6" by="lint 9.4.1" type="baseline" client="gradle" dependencies="false" name="AGP (9.4.1)" variant="all" version="9.4.1">
 
     <issue
-        id="RememberInComposition"
-        message="Calling a @RememberInComposition annotated declaration inside composition without using `remember`"
-        errorLine1="            val requester = requesters.getOrPut(id) { FocusRequester() }"
-        errorLine2="                                                      ~~~~~~~~~~~~~~">
-        <location
-            file="src/main/kotlin/app/thebox/ui/sports/SportsScreen.kt"
-            line="374"
-            column="55"/>
-    </issue>
-
-    <issue
         id="ConfigurationScreenWidthHeight"
         message="Using Configuration.screenWidthDp instead of LocalWindowInfo.current.containerSize"
         errorLine1="    val widthPx = if (container.width > 0) container.width.toFloat() else configuration.screenWidthDp * systemDensity"

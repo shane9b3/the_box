@@ -378,7 +378,8 @@ private fun GamesGrid(
     ) {
         itemsIndexed(cards, key = { _, c -> c.game.id.id }) { index, card ->
             val id = card.game.id.id
-            val requester = requesters.getOrPut(id) { FocusRequester() }
+            // Shared map (focus is restored by game id), but created under remember so it is not rebuilt per composition.
+            val requester = remember(id) { requesters.getOrPut(id) { FocusRequester() } }
             GameCard(
                 card = card,
                 clock24 = clock24,
