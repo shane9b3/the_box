@@ -226,7 +226,7 @@ class XtreamClient internal constructor(
     private fun isEmptyPayload(f: File): Boolean {
         if (!f.exists() || f.length() == 0L) return true
         if (f.length() > 64) return false
-        val s = f.readText().trim().trimStart('﻿').trim()
+        val s = f.readText().trim().trimStart('\uFEFF').trim()
         return s.isEmpty() || s == "[]" || s == "{}" || s == "null"
     }
 

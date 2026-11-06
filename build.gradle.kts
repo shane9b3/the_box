@@ -13,3 +13,13 @@ plugins {
     alias(libs.plugins.room) apply false
     alias(libs.plugins.baselineprofile) apply false
 }
+
+// Aggregate lint gate: `./gradlew lintAll` runs lintDebug in every Android module.
+tasks.register("lintAll") {
+    group = "verification"
+    description = "Runs Android lint (debug variant) on every Android module."
+    subprojects.forEach { sub ->
+        sub.pluginManager.withPlugin("com.android.application") { dependsOn("${sub.path}:lintDebug") }
+        sub.pluginManager.withPlugin("com.android.library") { dependsOn("${sub.path}:lintDebug") }
+    }
+}

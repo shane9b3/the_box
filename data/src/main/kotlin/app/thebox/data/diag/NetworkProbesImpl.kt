@@ -133,7 +133,7 @@ class NetworkProbesImpl @Inject constructor(
         when {
             status == 401 || status == 403 -> HttpOutcome.AUTH_REFUSED to null
             status !in 200..299 -> HttpOutcome.HTTP_ERROR to null
-            body.trimStart('﻿', ' ', '\n', '\r').startsWith("#EXTM3U", ignoreCase = true) -> HttpOutcome.OK to null
+            body.trimStart('\uFEFF', ' ', '\n', '\r').startsWith("#EXTM3U", ignoreCase = true) -> HttpOutcome.OK to null
             else -> HttpOutcome.NOT_A_SOURCE to null
         }
     }

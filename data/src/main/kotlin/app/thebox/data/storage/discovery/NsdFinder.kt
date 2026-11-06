@@ -1,5 +1,6 @@
 package app.thebox.data.storage.discovery
 
+import android.annotation.SuppressLint
 import android.net.nsd.NsdManager
 import android.net.nsd.NsdServiceInfo
 import android.os.Build
@@ -47,6 +48,7 @@ internal class AndroidNsdApi(private val nsd: NsdManager) : NsdApi {
     @Suppress("DEPRECATION") // resolveService: the only resolve below API 34; serialised by the caller
     override fun resolve(info: NsdServiceInfo, listener: NsdManager.ResolveListener) = nsd.resolveService(info, listener)
 
+    @SuppressLint("NewApi") // only called when [watchSupported] (SDK_INT >= 34); Api34 is @RequiresApi(34)
     override fun watch(info: NsdServiceInfo, executor: Executor, onUpdated: (NsdServiceInfo) -> Unit): Any =
         Api34.watch(nsd, info, executor, onUpdated)
 

@@ -29,7 +29,7 @@ Android TV / Fire TV IPTV player (M3U + XMLTV + Xtream Codes). Competes with Tiv
 
 ## Build
 - `export ANDROID_HOME=~/Library/Android/sdk`; `JAVA_HOME` per `docs/m0-toolchain.md`.
-- `./gradlew :core:test :app:assembleDebug` is the smoke build. Universal debug APK lands under `app/build/outputs/apk/`.
+- `./gradlew :core:test :app:assembleDebug` is the smoke build. Universal debug APK lands under `app/build/outputs/apk/`. Also run `./gradlew lintAll` (Android lint, all modules; NewApi etc. are errors, baselines in each `lint-baseline.xml`).
 - Fake Xtream panel for local testing: `python3 tools/fakepanel/fakepanel.py --port 8080` (see `tools/fakepanel/README.md`).
 - FFmpeg audio decoder AAR: `tools/ffmpeg/build-ffmpeg-aar.sh` (CI: `.github/workflows/ffmpeg.yml`). Never pass `--enable-gpl`.
 

@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 9.4.1" type="baseline" client="gradle" dependencies="false" name="AGP (9.4.1)" variant="all" version="9.4.1">
+
+    <issue
+        id="AnnotateVersionCheck"
+        message="This method should be annotated with `@ChecksSdkIntAtLeast(api=android.os.Build.VERSION_CODES.UPSIDE_DOWN_CAKE)`"
+        errorLine1="    override val watchSupported: Boolean get() = Build.VERSION.SDK_INT >= 34"
+        errorLine2="                 ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/storage/discovery/NsdFinder.kt"
+            line="41"
+            column="18"/>
+    </issue>
+
+    <issue
+        id="ApplySharedPref"
+        message="Consider using `apply()` instead; `commit` writes its data to persistent storage immediately, whereas `apply` will handle it in the background"
+        errorLine1="        context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE).edit().remove(KEYSET_NAME).commit()"
+        errorLine2="                                                                                                 ~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/security/AeadProvider.kt"
+            line="63"
+            column="98"/>
+    </issue>
+
+    <issue
+        id="QueryPermissionsNeeded"
+        message="Consider adding a `&lt;queries>` declaration to your manifest when calling this method; see https://g.co/dev/packagevisibility for details"
+        errorLine1="        context.packageManager.queryIntentActivities(intent, PackageManager.MATCH_DEFAULT_ONLY).mapNotNull { it.activityInfo?.packageName }"
+        errorLine2="                               ~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/backup/BackupSupport.kt"
+            line="108"
+            column="32"/>
+    </issue>
+
+    <issue
+        id="UsableSpace"
+        message="Consider also using `StorageManager#getAllocatableBytes` and `allocateBytes` which will consider clearable cached data"
+        errorLine1="            d.usableSpace"
+        errorLine2="              ~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/epg/AndroidFreeSpace.kt"
+            line="16"
+            column="15"/>
+    </issue>
+
+    <issue
+        id="UsableSpace"
+        message="Consider also using `StorageManager#getAllocatableBytes` and `allocateBytes` which will consider clearable cached data"
+        errorLine1="            Outcome.Err(SourceError.DiskSpace(0, context.filesDir.usableSpace))"
+        errorLine2="                                                                  ~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/diag/DiagSourcesImpl.kt"
+            line="99"
+            column="67"/>
+    </issue>
+
+    <issue
+        id="UsableSpace"
+        message="Consider also using `StorageManager#getAllocatableBytes` and `allocateBytes` which will consider clearable cached data"
+        errorLine1="            freeStorageMb = context.filesDir.usableSpace / 1_048_576, network = network(),"
+        errorLine2="                                             ~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/diag/DiagnosticsImpl.kt"
+            line="221"
+            column="46"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE).edit().remove(KEYSET_NAME).commit()"
+        errorLine2="        ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/security/AeadProvider.kt"
+            line="63"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                        context.contentResolver.openOutputStream(Uri.parse(uri), &quot;wt&quot;)?.use { service.export(it, pass) is Outcome.Ok } ?: false"
+        errorLine2="                                                                 ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/backup/BackupPagesImpl.kt"
+            line="310"
+            column="66"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                    finishBackup(if (ok) texts.get(BackupText.BACKUP_DONE, Uri.parse(uri).lastPathSegment ?: &quot;&quot;) else null)"
+        errorLine2="                                                                           ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/backup/BackupPagesImpl.kt"
+            line="319"
+            column="76"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                        context.contentResolver.openInputStream(Uri.parse(uri))?.use { i -> copyCapped(i, dest) } != null"
+        errorLine2="                                                                ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/backup/BackupPagesImpl.kt"
+            line="325"
+            column="65"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        val input = if (location.startsWith(&quot;content://&quot;)) context.contentResolver.openInputStream(Uri.parse(location)) else File(location).inputStream()"
+        errorLine2="                                                                                                   ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/backup/BackupStorage.kt"
+            line="158"
+            column="100"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="            if (location.startsWith(&quot;content://&quot;)) context.contentResolver.delete(Uri.parse(location), null, null) else File(location).delete()"
+        errorLine2="                                                                                  ~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/backup/BackupStorage.kt"
+            line="171"
+            column="83"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        val parsed = Uri.parse(uri)"
+        errorLine2="                     ~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/net/ContentCopier.kt"
+            line="72"
+            column="22"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putString(KEY_SOURCE, encode(source)).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/guide/GuideSessionStoreImpl.kt"
+            line="22"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putBoolean(FLAG_PREFIX + name, true).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/guide/GuideSessionStoreImpl.kt"
+            line="28"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putBoolean(KEY_PIN_LOST, true).commit()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/security/KeyResetFlag.kt"
+            line="28"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().remove(KEY_PIN_LOST).commit()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/security/KeyResetFlag.kt"
+            line="34"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit().putLong(KEY_LAST, now).apply()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/repo/LibraryMaintenance.kt"
+            line="28"
+            column="9"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="        prefs.edit()"
+        errorLine2="        ~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/data/parental/ParentalPinStoreImpl.kt"
+            line="50"
+            column="9"/>
+    </issue>
+
+</issues>

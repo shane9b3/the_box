@@ -1,0 +1,292 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<issues format="6" by="lint 9.4.1" type="baseline" client="gradle" dependencies="false" name="AGP (9.4.1)" variant="all" version="9.4.1">
+
+    <issue
+        id="ApplySharedPref"
+        message="Consider using `apply()` instead; `commit` writes its data to persistent storage immediately, whereas `apply` will handle it in the background"
+        errorLine1="            for (name in listOf(app.thebox.data.security.PrefsKeyResetFlag.PREFS, &quot;guide_session&quot;)) context.getSharedPreferences(name, Context.MODE_PRIVATE).edit().clear().commit()"
+        errorLine2="                                                                                                                                                                            ~~~~~~~~">
+        <location
+            file="src/debug/kotlin/app/thebox/debug/SettingsDebugProbe.kt"
+            line="110"
+            column="173"/>
+    </issue>
+
+    <issue
+        id="IntentFilterUniqueDataAttributes"
+        message="Consider splitting data tag into multiple tags with individual attributes to avoid confusion"
+        errorLine1="                &lt;data android:scheme=&quot;thebox-debug&quot; android:host=&quot;play&quot; />"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/debug/AndroidManifest.xml"
+            line="16"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="IntentFilterUniqueDataAttributes"
+        message="Consider splitting data tag into multiple tags with individual attributes to avoid confusion"
+        errorLine1="                &lt;data android:scheme=&quot;thebox-debug&quot; android:host=&quot;stop&quot; />"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/debug/AndroidManifest.xml"
+            line="17"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="IntentFilterUniqueDataAttributes"
+        message="Consider splitting data tag into multiple tags with individual attributes to avoid confusion"
+        errorLine1="                &lt;data android:scheme=&quot;thebox-debug&quot; android:host=&quot;guide&quot; />"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/debug/AndroidManifest.xml"
+            line="30"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="IntentFilterUniqueDataAttributes"
+        message="Consider splitting data tag into multiple tags with individual attributes to avoid confusion"
+        errorLine1="                &lt;data android:scheme=&quot;thebox-debug&quot; android:host=&quot;settings&quot; />"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/debug/AndroidManifest.xml"
+            line="32"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="IntentFilterUniqueDataAttributes"
+        message="Consider splitting data tag into multiple tags with individual attributes to avoid confusion"
+        errorLine1="                &lt;data android:scheme=&quot;thebox-debug&quot; android:host=&quot;wipe&quot; />"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/debug/AndroidManifest.xml"
+            line="33"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="IntentFilterUniqueDataAttributes"
+        message="Consider splitting data tag into multiple tags with individual attributes to avoid confusion"
+        errorLine1="                &lt;data android:scheme=&quot;thebox-debug&quot; android:host=&quot;clock&quot; />"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/debug/AndroidManifest.xml"
+            line="34"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="IntentFilterUniqueDataAttributes"
+        message="Consider splitting data tag into multiple tags with individual attributes to avoid confusion"
+        errorLine1="                &lt;data android:scheme=&quot;thebox-debug&quot; android:host=&quot;update&quot; />"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/debug/AndroidManifest.xml"
+            line="35"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="IntentFilterUniqueDataAttributes"
+        message="Consider splitting data tag into multiple tags with individual attributes to avoid confusion"
+        errorLine1="                &lt;data android:scheme=&quot;thebox-debug&quot; android:host=&quot;phone&quot; />"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/debug/AndroidManifest.xml"
+            line="36"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="IntentFilterUniqueDataAttributes"
+        message="Consider splitting data tag into multiple tags with individual attributes to avoid confusion"
+        errorLine1="                &lt;data android:scheme=&quot;thebox-debug&quot; android:host=&quot;keystore-reset&quot; />"
+        errorLine2="                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/debug/AndroidManifest.xml"
+            line="37"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="LeanbackUsesWifi"
+        message="Requiring Wifi permissions limits app availability on TVs that support only Ethernet"
+        errorLine1="    &lt;uses-permission android:name=&quot;android.permission.CHANGE_WIFI_MULTICAST_STATE&quot; />"
+        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="19"
+            column="5"/>
+    </issue>
+
+    <issue
+        id="Aligned16KB"
+        message="The native library `arm64-v8a/libffmpegJNI.so` (from `__local_aars__:/Users/shawnjohnson/Projects/The_Box/.claude/worktrees/agent-a18ed39266cfe01c7/ffmpeg/libs/media3-decoder-ffmpeg-1.11.1-x86_armeabi-v7a_arm64-v8a.aar:unspecified`) is not 16 KB aligned">
+        <location
+            file="$GRADLE_USER_HOME/caches/9.8.1/transforms/936597207d5aad682ff2dc5b52c4ca93/transformed/media3-decoder-ffmpeg-1.11.1-x86_armeabi-v7a_arm64-v8a/jni/arm64-v8a/libffmpegJNI.so"/>
+    </issue>
+
+    <issue
+        id="Aligned16KB"
+        message="The native library `arm64-v8a/libffmpegJNI.so` (from `__local_aars__:/Users/shawnjohnson/Projects/The_Box/.claude/worktrees/agent-a18ed39266cfe01c7/ffmpeg/libs/media3-decoder-ffmpeg-1.11.1-x86_armeabi-v7a_arm64-v8a.aar:unspecified`) is not 16 KB aligned">
+        <location
+            file="$GRADLE_USER_HOME/caches/9.8.1/transforms/936597207d5aad682ff2dc5b52c4ca93/transformed/media3-decoder-ffmpeg-1.11.1-x86_armeabi-v7a_arm64-v8a/jni/arm64-v8a/libffmpegJNI.so"/>
+    </issue>
+
+    <issue
+        id="Aligned16KB"
+        message="The native library `arm64-v8a/libffmpegJNI.so` (from `__local_aars__:/Users/shawnjohnson/Projects/The_Box/.claude/worktrees/agent-a18ed39266cfe01c7/ffmpeg/libs/media3-decoder-ffmpeg-1.11.1-x86_armeabi-v7a_arm64-v8a.aar:unspecified`) is not 16 KB aligned">
+        <location
+            file="$GRADLE_USER_HOME/caches/9.8.1/transforms/936597207d5aad682ff2dc5b52c4ca93/transformed/media3-decoder-ffmpeg-1.11.1-x86_armeabi-v7a_arm64-v8a/jni/arm64-v8a/libffmpegJNI.so"/>
+    </issue>
+
+    <issue
+        id="DiscouragedApi"
+        message="Fixed screen orientations will be ignored in most cases, starting from Android 16. Android is moving toward a model where apps are expected to adapt to various orientations, display sizes, and aspect ratios."
+        errorLine1="            android:screenOrientation=&quot;landscape&quot;"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/debug/AndroidManifest.xml"
+            line="11"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="DiscouragedApi"
+        message="Fixed screen orientations will be ignored in most cases, starting from Android 16. Android is moving toward a model where apps are expected to adapt to various orientations, display sizes, and aspect ratios."
+        errorLine1="            android:screenOrientation=&quot;landscape&quot;"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/debug/AndroidManifest.xml"
+            line="25"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="DiscouragedApi"
+        message="Fixed screen orientations will be ignored in most cases, starting from Android 16. Android is moving toward a model where apps are expected to adapt to various orientations, display sizes, and aspect ratios."
+        errorLine1="            android:screenOrientation=&quot;landscape&quot;"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="70"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="TrustAllX509TrustManager"
+        message="`checkClientTrusted` is empty, which could cause insecure network traffic due to trusting arbitrary TLS/SSL certificates presented by peers">
+        <location
+            file="$GRADLE_USER_HOME/caches/9.8.1/transforms/8426f677df597e77cb414ba4a39329a5/transformed/out/jars/classes.jar"/>
+    </issue>
+
+    <issue
+        id="TrustAllX509TrustManager"
+        message="`checkServerTrusted` is empty, which could cause insecure network traffic due to trusting arbitrary TLS/SSL certificates presented by peers">
+        <location
+            file="$GRADLE_USER_HOME/caches/9.8.1/transforms/8426f677df597e77cb414ba4a39329a5/transformed/out/jars/classes.jar"/>
+    </issue>
+
+    <issue
+        id="AcceptsUserCertificates"
+        message="The Network Security Configuration allows the use of user certificates in the release version of your app"
+        errorLine1="            &lt;certificates src=&quot;user&quot; />"
+        errorLine2="            ~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/res/xml/network_security_config.xml"
+            line="7"
+            column="13"/>
+    </issue>
+
+    <issue
+        id="InsecureBaseConfiguration"
+        message="Insecure Base Configuration"
+        errorLine1="    &lt;base-config cleartextTrafficPermitted=&quot;true&quot;>"
+        errorLine2="                                            ~~~~">
+        <location
+            file="src/main/res/xml/network_security_config.xml"
+            line="4"
+            column="45"/>
+    </issue>
+
+    <issue
+        id="DataExtractionRules"
+        message="The attribute `android:allowBackup` is deprecated from Android 12 and higher and may be removed in future versions. Consider adding the attribute `android:dataExtractionRules` specifying an `@xml` resource which configures cloud backups and device transfers on Android 12 and higher."
+        errorLine1="        android:allowBackup=&quot;false&quot;"
+        errorLine2="                             ~~~~~">
+        <location
+            file="src/main/AndroidManifest.xml"
+            line="53"
+            column="30"/>
+    </issue>
+
+    <issue
+        id="UsableSpace"
+        message="Consider also using `StorageManager#getAllocatableBytes` and `allocateBytes` which will consider clearable cached data"
+        errorLine1="        if (dir.usableSpace &lt; UpdateTimings.FREE_SPACE_FACTOR * apk.sizeBytes) return fail(UpdateFailure.NO_SPACE)"
+        errorLine2="                ~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/update/UpdaterImpl.kt"
+            line="283"
+            column="17"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="        val probe = Intent(Intent.ACTION_VIEW).setDataAndType(Uri.parse(PROBE_URL), VIDEO_ANY)"
+        errorLine2="                                                              ~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/external/ExternalPlayerLauncher.kt"
+            line="27"
+            column="63"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                .setDataAndType(Uri.parse(handOff.url), mimeOf(handOff.url))"
+        errorLine2="                                ~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/external/ExternalPlayerLauncher.kt"
+            line="66"
+            column="33"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `SharedPreferences.edit` instead?"
+        errorLine1="            for (name in listOf(app.thebox.data.security.PrefsKeyResetFlag.PREFS, &quot;guide_session&quot;)) context.getSharedPreferences(name, Context.MODE_PRIVATE).edit().clear().commit()"
+        errorLine2="                                                                                                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/debug/kotlin/app/thebox/debug/SettingsDebugProbe.kt"
+            line="110"
+            column="101"/>
+    </issue>
+
+    <issue
+        id="UseKtx"
+        message="Use the KTX extension function `String.toUri` instead?"
+        errorLine1="                context.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse(&quot;package:&quot; + context.packageName)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))"
+        errorLine2="                                                                                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/main/kotlin/app/thebox/update/UpdaterImpl.kt"
+            line="357"
+            column="90"/>
+    </issue>
+
+    <issue
+        id="SetTextI18n"
+        message="String literal in `setText` can not be translated. Use Android resources instead."
+        errorLine1="            text = &quot;The Box debug: preparing the guide…&quot;"
+        errorLine2="                    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
+        <location
+            file="src/debug/kotlin/app/thebox/debug/GuideDebugReceiver.kt"
+            line="115"
+            column="21"/>
+    </issue>
+
+</issues>
