@@ -3,6 +3,8 @@ package thebox.buildlogic
 import com.android.build.api.dsl.CommonExtension
 import org.gradle.api.JavaVersion
 import org.gradle.api.Project
+import org.gradle.api.tasks.testing.Test
+import java.time.Duration
 import org.gradle.kotlin.dsl.dependencies
 import org.gradle.kotlin.dsl.withType
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
@@ -38,6 +40,10 @@ internal fun Project.configureKotlinCompilerOptions() {
         if (options is KotlinJvmCompilerOptions) {
             options.jvmTarget.set(TARGET_JVM)
         }
+    }
+    // A hung test fails the task instead of holding the gate forever (a Robolectric looper spin once ran 5 h).
+    tasks.withType<Test>().configureEach {
+        timeout.set(Duration.ofMinutes(30))
     }
 }
 

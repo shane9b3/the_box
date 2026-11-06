@@ -63,7 +63,9 @@ class PlaybackWatchdogTest {
     private val eventTime = AnalyticsListener.EventTime(0, Timeline.EMPTY, 0, null, 0, Timeline.EMPTY, 0, null, 0, 0)
 
     @Before fun setUp() {
-        bundle = EngineTestSupport.bundle(context, FakeClock(true))
+        // Not auto-advancing: these tests never prepare the player, and an auto-advancing clock can spin the main looper
+        // forever under load (seen 2026-11-06, a 5 h hang in ticksOncePerSecondOnlyWhilePlayWhenReady).
+        bundle = EngineTestSupport.bundle(context, FakeClock(false))
         watchdog = PlaybackWatchdog(bundle.player, detectors, clock)
     }
 
