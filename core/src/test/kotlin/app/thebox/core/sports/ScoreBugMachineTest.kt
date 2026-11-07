@@ -309,8 +309,9 @@ class ScoreBugMachineTest {
         val wakes = r.wakeUntil(Long.MAX_VALUE / 4).toMap()
         assertEquals(1, wakes.getValue(46_000)!!.away.score)
         assertEquals(1, wakes.getValue(46_000)!!.goalSeq)
-        assertEquals(CentreText.Goal(Side.AWAY), wakes.getValue(46_000)!!.bottom)
-        assertEquals(CentreText.Period(PeriodLabel(PeriodKind.REG, 2)), wakes.getValue(54_000)!!.bottom) // GOAL text 8 s
+        assertEquals(Side.AWAY, wakes.getValue(46_000)!!.goalSide)
+        assertEquals(CentreText.Period(PeriodLabel(PeriodKind.REG, 2)), wakes.getValue(46_000)!!.bottom) // never replaced
+        assertNull(wakes.getValue(46_000 + SportsConstants.GOAL_MARK_MS)!!.goalSide) // the 4.5 s mark ends on a wake
         assertEquals(CentreText.Final(PeriodKind.REG), wakes.getValue(70_000)!!.top)
         assertTrue(370_000L in wakes)
         assertNull(wakes.getValue(370_000))
@@ -497,10 +498,10 @@ class ScoreBugMachineTest {
         var v = r.m.view()!!
         assertEquals(1, v.goalSeq)
         assertEquals(Side.AWAY, v.goalSide)
-        assertEquals(CentreText.Goal(Side.AWAY), v.bottom)
-        r.at(27_999)
-        assertEquals(CentreText.Goal(Side.AWAY), r.m.view()!!.bottom)
-        r.at(28_000)
+        assertEquals(CentreText.Period(PeriodLabel(PeriodKind.REG, 2)), v.bottom)
+        r.at(20_000 + SportsConstants.GOAL_MARK_MS - 1)
+        assertEquals(Side.AWAY, r.m.view()!!.goalSide)
+        r.at(20_000 + SportsConstants.GOAL_MARK_MS)
         v = r.m.view()!!
         assertEquals(CentreText.Period(PeriodLabel(PeriodKind.REG, 2)), v.bottom)
         assertNull(v.goalSide)

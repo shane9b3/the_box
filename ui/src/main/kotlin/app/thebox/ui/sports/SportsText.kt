@@ -14,7 +14,6 @@ import app.thebox.core.sports.ScoreBugView
 import app.thebox.core.sports.ScoreCorner
 import app.thebox.core.sports.ScoreEvent
 import app.thebox.core.sports.ScoreFacts
-import app.thebox.core.sports.Side
 import app.thebox.ui.R
 import app.thebox.ui.guide.screen.TimeFormats
 import java.util.Date
@@ -73,7 +72,6 @@ object SportsText {
         is CentreText.Intermission -> res.getString(R.string.sports_intermission, period(res, c.period))
         is CentreText.EndOf -> res.getString(R.string.sports_end_of, period(res, c.period))
         CentreText.Shootout -> res.getString(R.string.sports_period_so)
-        is CentreText.Goal -> res.getString(R.string.sports_goal, (if (c.side == Side.AWAY) view.away else view.home).abbrev)
         is CentreText.Final -> final(res, c.kind)
         CentreText.NoUpdate -> res.getString(R.string.sports_no_update)
         CentreText.Delayed -> res.getString(R.string.sports_delayed)

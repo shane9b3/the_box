@@ -29,8 +29,6 @@
     <string name="sports_intermission">%1$s INT</string>
     <!-- %1$s = a period ("1st"): the clock reads 0:00 before the intermission starts. -->
     <string name="sports_end_of">End %1$s</string>
-    <!-- %1$s = the scoring team's abbreviation ("CGY"). -->
-    <string name="sports_goal">GOAL %1$s</string>
     <string name="sports_final">Final</string>
     <string name="sports_final_ot">Final/OT</string>
     <string name="sports_final_so">Final/SO</string>
@@ -39,6 +37,9 @@
     <string name="sports_no_update">No update</string>
     <string name="sports_delayed">Delayed</string>
     <string name="sports_live">LIVE</string>
+    <!-- (Goal animation §2.3) The takeover's word, drawn in Barlow Condensed Black Italic. Not translated: it is a fixed
+         graphic, like the broadcast bugs it copies. -->
+    <string name="sports_goal_word" translatable="false">GOAL</string>
 
     <!-- ==== Accessibility: one merged string per state (U-N12). %1$s/%3$s team names (away, home), %2$d/%4$d scores. -->
     <!-- %5$s = the clock ("10:22"), %6$s = the period ("1st", "OT"). -->
@@ -50,8 +51,8 @@
     <string name="sports_desc_shootout">%1$s %2$d, %3$s %4$d, shootout</string>
     <!-- %5$s = "Final", "Final/OT" or "Final/SO". -->
     <string name="sports_desc_final">%1$s %2$d, %3$s %4$d, %5$s</string>
-    <!-- %5$s = the abbreviation of the team that scored. -->
-    <string name="sports_desc_goal">Goal %5$s. %1$s %2$d, %3$s %4$d</string>
+    <!-- (Goal animation §5.3) %5$s = the common name of the team that scored ("Flames"). -->
+    <string name="sports_desc_goal">%5$s goal. %1$s %2$d, %3$s %4$d</string>
     <string name="sports_desc_no_update">%1$s %2$d, %3$s %4$d, no update for a while</string>
     <string name="sports_desc_delayed">%1$s %2$d, %3$s %4$d, delayed</string>
 

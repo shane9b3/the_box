@@ -121,5 +121,6 @@ object SportsFixtures {
         goalSeq = 0,
         goalSide = null,
         clockSecs = game.clock?.secondsRemaining?.coerceAtLeast(0),
+        gameId = game.id, // goal animation §5.1: the machine sets it on every view
     )
 }

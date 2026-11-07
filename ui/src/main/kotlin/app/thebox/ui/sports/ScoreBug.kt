@@ -10,7 +10,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -83,7 +83,13 @@ const val DRAWS_SCORE_BUG = "ScoreBugDraw"
  *
  * **No local countdown** (owner ruling 6, fix pass 2026-11-05): the clock is [ScoreBugView.clockSecs], the snapshot's own
  * value, so the bug recomposes and redraws only when a new snapshot (or state) becomes visible; nothing ticks between
- * them. One drawing node: the glass bitmap, the body (logos, scores, dividers, goal box, centre lines, clock, place ring).
+ * them. One drawing node: [ScoreBugPainter.drawFrame] (the glass bitmap, the body: logos, scores, dividers, centre lines,
+ * clock, place ring; and, from the goal animation's WP-2/WP-3, the takeover).
+ *
+ * (Goal animation, docs/design/m6-goal-animation.md §1) The bug's own leaf layer is bounded and clipped: the pill plus the
+ * margin `M` ([K.GOAL_LAYER_MARGIN]) on every side, placed at the pill's box − `M`, so the glass shadow and the glow are
+ * never cut during a fade and a takeover frame damages only that rect. [SCORE_BUG_TAG] stays on the pill-sized node. The
+ * place-mode hint is emitted as a sibling of that layer (in `FullScreenHost`'s box), so the clip never cuts it.
  *
  * Held across hides (U-S1): the painter, the baked glass and the follow's [FollowLogos] stay while this composable is in
  * the composition (FULL with Show Sports on), so a reappearance after the passive info bar, a list or a toast neither
@@ -180,22 +186,6 @@ fun ScoreBug(
     // The sample bug ("AWY | HME") never borrows the followed game's logos.
     val shownLogos = if (shownView === sample) null else logos
 
-    // ---- goal accent: one Animatable read in draw (no box, and no motion, in low-end mode)
-    val goal = remember { Animatable(0f) }
-    if (holder.goalSeq < 0) holder.goalSeq = shownView.goalSeq
-    LaunchedEffect(shownView.goalSeq, lowEnd) {
-        if (shownView.goalSeq != holder.goalSeq) {
-            holder.goalSeq = shownView.goalSeq
-            if (!lowEnd && shownView.goalSide != null) {
-                holder.goalSide = shownView.goalSide
-                goal.snapTo(0f)
-                goal.animateTo(1f, tween(K.GOAL_IN_MS))
-                delay(K.GOAL_HOLD_MS.toLong())
-                goal.animateTo(0f, tween(K.GOAL_OUT_MS))
-            }
-        }
-    }
-
     val w = if (shownLarge) K.SCORE_LARGE_W else K.SCORE_W
     val h = if (shownLarge) K.SCORE_LARGE_H else K.SCORE_H
     val placing = placement.placing
@@ -203,27 +193,33 @@ fun ScoreBug(
     // U-S7: a plain string per shown view; semantics read nothing that changes between snapshots.
     val desc = remember(shownView, res) { Describe(res, shownView).text() }
 
+    val m = if (shownLarge) K.GOAL_LAYER_MARGIN_LARGE else K.GOAL_LAYER_MARGIN
     Box(
         modifier
-            .placeAt(holder, pos, d)
-            .graphicsLayer { alpha = fade.value }
-            .size(w.dp, h.dp),
+            .placeAt(holder, pos, d, m)
+            // A leaf layer (never an ancestor of the SurfaceView): the fade, clipped to the pill + M (goal design §1, S3).
+            .graphicsLayer { alpha = fade.value; clip = true }
+            .size((w + 2 * m).dp, (h + 2 * m).dp),
     ) {
         Spacer(
             Modifier
-                .fillMaxSize()
+                .offset(m.dp, m.dp)
+                .size(w.dp, h.dp)
                 .testTag(SCORE_BUG_TAG)
                 .semantics { contentDescription = desc }
                 .drawBehind {
                     if (GuideDebugCounters.ENABLED) GuideDebugCounters.bump(DRAWS_SCORE_BUG)
                     drawIntoCanvas {
-                        painter.drawGlass(it.nativeCanvas, glass.bitmap)
-                        painter.drawBody(it.nativeCanvas, frame, shownLogos, logoWaited.value, goal.value, holder.goalSide, placing)
+                        painter.drawFrame(
+                            it.nativeCanvas, glass.bitmap, frame, shownLogos, logoWaited.value, placing,
+                            goal = null, g = null, glow = null, glowOn = false, // the takeover: WP-3
+                        )
                     }
                 },
         )
-        if (placing) PlaceHint(rightSide, w)
     }
+    // A sibling of the clipped layer, not inside it (goal design §1): same position source, same look.
+    if (placing) PlaceHint(holder, pos, fade, rightSide, w, h)
 }
 
 /** The baked glass of one painter and mode (U-S1): built on first use, then held. */
@@ -240,33 +236,41 @@ private class Holder {
     var lastView: ScoreBugView? = null
     /** The last real (not sample) view: its logo URLs key the held [FollowLogos]. */
     var lastFollowed: ScoreBugView? = null
-    var goalSeq = -1
-    var goalSide: Side? = null
+
+    /** The pill's top-left in design px: the sliding position once positioned, else the placed box. */
+    fun pillOffset(pos: Animatable<Offset, *>): Offset =
+        if (positioned) pos.value else box?.let { Offset(it.l, it.t) } ?: Offset.Zero
 }
 
-private fun Modifier.placeAt(holder: Holder, pos: Animatable<Offset, *>, d: Float): Modifier = layout { m, c ->
+/** Places the bug's layer so the pill (inset by [margin] design px inside it) lands on the pill's box. */
+private fun Modifier.placeAt(holder: Holder, pos: Animatable<Offset, *>, d: Float, margin: Float): Modifier = layout { m, c ->
     val p = m.measure(c)
     layout(p.width, p.height) {
-        val o = if (holder.positioned) pos.value else holder.box?.let { Offset(it.l, it.t) } ?: Offset.Zero
-        p.place(IntOffset((o.x * d).roundToInt(), (o.y * d).roundToInt()))
+        val o = holder.pillOffset(pos)
+        p.place(IntOffset(((o.x - margin) * d).roundToInt(), ((o.y - margin) * d).roundToInt()))
     }
 }
 
-/** "← → ↑ ↓ Move · OK Done", 22 px on PanelFill, beside the bug toward the screen centre (§6, U-B1). */
+/**
+ * "← → ↑ ↓ Move · OK Done", 22 px on PanelFill, beside the bug toward the screen centre (§6, U-B1). A sibling of the
+ * bug's clipped layer (goal design §1), placed from the same [Holder] box / [pos] and faded with the bug.
+ */
 @Composable
-private fun PlaceHint(bugOnRight: Boolean, bugW: Float) {
+private fun PlaceHint(holder: Holder, pos: Animatable<Offset, *>, fade: Animatable<Float, *>, bugOnRight: Boolean, bugW: Float, bugH: Float) {
     val hintDesc = androidx.compose.ui.res.stringResource(R.string.sports_place_hint_desc)
     Box(
         Modifier
-            .layout { m, c ->
+            .layout { m, _ ->
                 val p = m.measure(Constraints())
-                // The hint is outside the pill's box: place it in the parent's coordinates.
-                layout(0, 0) {
+                layout(p.width, p.height) {
+                    val o = holder.pillOffset(pos)
                     val gap = (K.SCORE_BAR_GAP * density).roundToInt()
-                    val x = if (bugOnRight) -p.width - gap else (bugW * density).roundToInt() + gap
-                    p.place(x, (c.maxHeight - p.height) / 2)
+                    val bx = (o.x * density).roundToInt()
+                    val x = if (bugOnRight) bx - p.width - gap else bx + (bugW * density).roundToInt() + gap
+                    p.place(x, (o.y * density).roundToInt() + ((bugH * density).roundToInt() - p.height) / 2)
                 }
             }
+            .graphicsLayer { alpha = fade.value }
             .testTag(SCORE_BUG_HINT_TAG)
             .semantics { contentDescription = hintDesc }
             .background(PlayerUi.PanelFill, RoundedCornerShape(50))
@@ -308,7 +312,8 @@ internal class Describe(private val res: Resources, private val v: ScoreBugView)
         fun f(id: Int, vararg extra: Any) = res.getString(id, a.name, a.score ?: 0, h.name, h.score ?: 0, *extra)
         val b = v.bottom
         return when {
-            b is CentreText.Goal -> f(R.string.sports_desc_goal, (if (b.side == Side.AWAY) a else h).abbrev)
+            // The goal mark (goal design §5.3): %5 = the scoring team's name.
+            v.goalSide != null -> f(R.string.sports_desc_goal, (if (v.goalSide == Side.AWAY) a else h).name)
             v.top is CentreText.Shootout -> f(R.string.sports_desc_shootout)
             v.top is CentreText.Final -> f(R.string.sports_desc_final, SportsText.final(res, (v.top as CentreText.Final).kind))
             b is CentreText.NoUpdate -> f(R.string.sports_desc_no_update)

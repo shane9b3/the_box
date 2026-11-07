@@ -214,6 +214,8 @@ internal fun StableScoreBug(source: app.thebox.core.sports.ScoreBugSource, place
     val held = remember { LastValue<PlacementInput>() }
     val stable = held.value?.takeIf { it == placement } ?: placement.also { held.value = it }
     val geometry = remember { PlayerUi.overlayGeometry() }
+    // (Goal animation §1) ScoreBug emits two siblings into this host's box: the bug's clipped leaf layer and, in place
+    // mode, the place hint (moved out of the layer so the clip never cuts it), both positioned from the bug's one holder.
     ScoreBug(source, stable, geometry, lowEnd)
 }
 

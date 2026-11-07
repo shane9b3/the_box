@@ -170,6 +170,7 @@
     <string name="licences_bsd">BSD 3-Clause License</string>
     <string name="licences_instrument">Instrument Sans font</string>
     <string name="licences_jetbrains">JetBrains Mono font</string>
+    <string name="licences_barlow">Barlow Condensed font</string>
     <string name="licences_tmdb">TMDB API (program posters, with your own key)</string>
     <string name="licences_tmdb_terms">TMDB API terms of use</string>
     <string name="licences_lgpl">LGPL 2.1 or later</string>

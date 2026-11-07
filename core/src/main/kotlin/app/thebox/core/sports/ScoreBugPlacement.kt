@@ -43,6 +43,14 @@ object ScoreBugPlacement {
         return box.takeIf { b -> active.none { it.intersects(b) } }
     }
 
+    /**
+     * (Goal animation §2.4, S1; WP-1) Whether the takeover's glow may draw around the placed pill [box]: false while the
+     * bug is lifted above a bar ([PlacementInput.bar] `USER_BAR` or `QUICK` with a bottom corner) or an active overlay
+     * box (stats, channel list, group card, picker, number entry) intersects [box] inflated by [margin] (design px).
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun glowAllowed(input: PlacementInput, geo: OverlayGeometry, box: Box, margin: Float): Boolean = TODO("WP-1")
+
     /** The resting box of [corner] at [size] (§4.3). */
     fun cornerBox(corner: ScoreCorner, size: ScoreBugSize): Box {
         val w = width(size)

@@ -578,6 +578,16 @@ exact value Compose applies, it follows the setting live, and it can never disag
 | `ui/src/main/assets/licenses/BarlowCondensed-OFL.txt` | upstream `OFL.txt`, verbatim |
 | `core/src/test/resources/sports/nhl/teams-fixture.json` | the independent team list (S10) |
 
+**Font as shipped (commit 0, 2026-11-07).** Downloaded from `google/fonts` `main` at commit
+`86aced91de05cd4f96a06838124cca45be337b2b` (the file's last change upstream: `89f5431ff0db41bd2fe3f7ba21a723a01622428b`,
+2018-12-05).
+- `BarlowCondensed-BlackItalic.ttf`: 112 592 bytes, SHA-256
+  `e1ed5d7e50c6a4498454d40509ce2362384a2c7870df3418fdbd010f81dffad3`.
+- `OFL.txt`: 4 377 bytes, SHA-256 `186d750eb496a4c17a76385f82be6aea2ac1cf2de074a811d63786cf374ea73f`. It names
+  **no Reserved Font Name** (only "Copyright 2017 The Barlow Project Authors").
+- **Not subset:** `pyftsubset` (fontTools) is not installed on the build machine, so the full file ships (about 110 KB).
+  Subsetting to "GOAL" is allowed by the licence and can follow as a one-file change.
+
 After commit 0, every file below belongs to exactly one WP.
 
 ### WP-1: core (Opus)

@@ -23,8 +23,9 @@ import kotlin.random.Random
  * - **Removal:** POSTPONED (event), two NotFounds ≥ 20 s apart (`NOT_LISTED` event). Expiry (final + 5 min, start +
  *   8 h) is silent; `RemoveReason` has no value for the hard expiry, so it is silent too.
  * - `FollowedFinal` / `Followed` are raised by the repository (it has the snapshot and the first-follow flag), not here.
- * - `goalSide` is non-null for the 8 s after a goal; the UI's 3 s box keys on `goalSeq`. The bottom line reads
- *   "GOAL" then, except in the one-line states (Final, SO), which stay one line.
+ * - `goalSide` is the goal mark: non-null for `GOAL_MARK_MS` (4.5 s) after a goal becomes visible on the delayed
+ *   timeline; the UI's takeover keys on `goalSeq` (docs/design/m6-goal-animation.md §5.1). The bottom line is never
+ *   replaced.
  */
 class ScoreBugMachine(
     private val mono: MonoClock,
@@ -55,7 +56,7 @@ class ScoreBugMachine(
 
     private var goalSeq = 0
     private var goalSide: Side? = null
-    private var goalUntil: Long? = null
+    private var markUntil: Long? = null
 
     private val events = ArrayList<ScoreEvent>()
 
@@ -164,7 +165,7 @@ class ScoreBugMachine(
             return
         }
         prune(now)
-        goalUntil?.let { if (now >= it) { goalUntil = null; goalSide = null } }
+        markUntil?.let { if (now >= it) { markUntil = null; goalSide = null } }
     }
 
     fun pollDue(): Boolean {
@@ -174,7 +175,7 @@ class ScoreBugMachine(
     }
 
     /**
-     * min(next poll, next snapshot due, stale, hide, expiry, goal-text end); null = idle (A-B1). Nothing is scheduled for
+     * min(next poll, next snapshot due, stale, hide, expiry, goal-mark end); null = idle (A-B1). Nothing is scheduled for
      * the clock: it changes only with a snapshot (owner ruling 6).
      */
     fun nextWakeAtMono(): Long? {
@@ -191,7 +192,7 @@ class ScoreBugMachine(
         later(staleAt?.plus(SportsConstants.HIDE_AFTER_MS))
         g.finalSeenUtcMs?.let { later(monoAtWall(now, it + SportsConstants.EXPIRE_AFTER_FINAL_MS)) }
         later(monoAtWall(now, g.startUtcMs + SportsConstants.HARD_EXPIRY_MS))
-        later(goalUntil)
+        later(markUntil)
         return best
     }
 
@@ -216,17 +217,15 @@ class ScoreBugMachine(
             s.clock?.let { it.secondsRemaining <= 0 && !it.running && !it.inIntermission } == true -> CentreText.EndOf(label)
             else -> CentreText.Period(label)
         }
-        val goal = goalSide.takeIf { goalUntil?.let { now < it } == true }
+        val goal = goalSide.takeIf { markUntil?.let { now < it } == true }
         when {
             waiting -> bottom = CentreText.Delayed
             stale -> bottom = CentreText.NoUpdate
-            // One-line states (Final, SO) stay one line; the goal box still runs off goalSeq/goalSide.
-            goal != null && bottom != null -> bottom = CentreText.Goal(goal)
         }
         // Owner ruling 6: the clock is the snapshot's own value, whatever the state (live, stopped, intermission,
         // stale, waiting on the delay).
         val clockSecs = if (top == CentreText.Clock) s.clock?.takeIf { clockShown(s) }?.secondsRemaining?.coerceAtLeast(0) else null
-        return ScoreBugView(s.away, s.home, top, bottom, dim = waiting || stale, goalSeq = goalSeq, goalSide = goal, clockSecs = clockSecs)
+        return ScoreBugView(s.away, s.home, top, bottom, dim = waiting || stale, goalSeq = goalSeq, goalSide = goal, clockSecs = clockSecs, gameId = game?.id)
     }
 
     /**
@@ -240,7 +239,7 @@ class ScoreBugMachine(
         val s = e.snap
         if (s.phase != GamePhase.LIVE && s.phase != GamePhase.INTERMISSION && s.phase != GamePhase.FINAL) return null
         val clockSecs = s.clock?.takeIf { clockShown(s) }?.secondsRemaining?.coerceAtLeast(0)
-        return ScoreBugView(s.away, s.home, CentreText.Clock, CentreText.NoUpdate, dim = true, goalSeq = goalSeq, goalSide = null, clockSecs = clockSecs)
+        return ScoreBugView(s.away, s.home, CentreText.Clock, CentreText.NoUpdate, dim = true, goalSeq = goalSeq, goalSide = null, clockSecs = clockSecs, gameId = game?.id)
     }
 
     /**
@@ -337,7 +336,7 @@ class ScoreBugMachine(
             if (side != null) {
                 goalSeq++
                 goalSide = side
-                goalUntil = at + SportsConstants.GOAL_TEXT_MS
+                markUntil = at + SportsConstants.GOAL_MARK_MS
             }
         }
 
@@ -396,7 +395,7 @@ class ScoreBugMachine(
         queue.clear(); shown = null; lastOk = null
         eagerAt = null; suppressStale = false
         failures = 0; failAt = null; backoffAt = null; notFoundFirst = null
-        goalSeq = 0; goalSide = null; goalUntil = null
+        goalSeq = 0; goalSide = null; markUntil = null
     }
 
     private companion object {

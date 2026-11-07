@@ -14,7 +14,9 @@ import android.graphics.Shader
 import android.graphics.Typeface
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.core.graphics.withScale
 import app.thebox.core.sports.CentreText
+import app.thebox.core.sports.GoalFrame
 import app.thebox.core.sports.ScoreBugView
 import app.thebox.core.sports.Side
 import app.thebox.core.sports.SportsConstants as K
@@ -39,14 +41,14 @@ internal class ScoreBugFrame(
     val topPx: Float,
     val bottomText: String?,
     val bottomPx: Float,
-    val bottomGoal: Boolean,
     /** The whole centre column is dimmed (stale, delayed; U-S11). */
     val dim: Boolean,
 )
 
 /**
  * The bug's whole drawing, in plain `android.graphics` (the guide's toolkit-agnostic precedent): the glass baked once into
- * a bitmap ([bakeGlass]), the static body ([drawBody]) and the clock ([drawClock]). [s] is device px per design px (the
+ * a bitmap ([bakeGlass]), the static body ([drawBody]) and the clock ([drawClock]); [drawFrame] is the one composite the
+ * app and the screenshot tests both call (docs/design/m6-goal-animation.md §2.1). [s] is device px per design px (the
  * Large size folded in). Paints and digit tables are built once; a draw allocates nothing. Used by the composable and,
  * unchanged, by the screenshot tests.
  */
@@ -60,7 +62,6 @@ internal class ScoreBugPainter(
 ) {
     private val fg = DesignTokens.Colors.Fg.toArgb()
     private val accent = DesignTokens.Colors.Accent.toArgb()
-    private val accentText = DesignTokens.Colors.AccentText.toArgb()
 
     private val radius = pillH / 2f
 
@@ -140,7 +141,6 @@ internal class ScoreBugPainter(
             topPx = if (topText != null) fit(topText, topStart.toFloat()) else clockPx,
             bottomText = bottomText,
             bottomPx = if (bottomText != null) fit(bottomText, K.SCORE_PERIOD_PX.toFloat()) else K.SCORE_PERIOD_PX.toFloat(),
-            bottomGoal = bottom is CentreText.Goal,
             dim = v.dim,
         )
     }
@@ -212,20 +212,50 @@ internal class ScoreBugPainter(
         c.drawBitmap(glass, -glassMargin, -glassMargin, null)
     }
 
-    // ------------------------------------------------------------------ body (§4.1, §4.5, §4.6)
+    // ------------------------------------------------------------------ the composite (goal animation §2.1)
 
     /**
-     * Logos (or discs), scores, dividers, the goal box, the centre lines (the clock included) and the place-mode ring, in
-     * the pill's own coordinates (0, 0 = its top-left). [goalAlpha] is 0..1 of the goal box ([goalSide] = null: none).
+     * The bug's whole frame in the pill's own coordinates (the canvas already translated by the layer margin `M`), in the
+     * fixed order of the goal design §2.1: glow (only while [goal] is set and [glowOn], never in low-end mode), glass,
+     * body (with the scorer's pop), then the takeover. [goal] / [g] null = no takeover: the plain bug.
+     *
+     * Commit 0: glass + body only; the glow, the pop and the takeover hooks are WP-2's.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun drawFrame(
+        c: Canvas,
+        glass: Bitmap,
+        f: ScoreBugFrame,
+        logos: FollowLogos?,
+        logoWaited: Boolean,
+        placing: Boolean,
+        goal: GoalPainter?,
+        g: GoalFrame?,
+        glow: GlowMasks?,
+        glowOn: Boolean,
+    ) {
+        // 1. glow: WP-2.
+        drawGlass(c, glass)
+        drawBody(c, f, logos, logoWaited, placing)
+        // 4. takeover: WP-2.
+    }
+
+    // ------------------------------------------------------------------ body (§4.1, §4.5)
+
+    /**
+     * Logos (or discs), scores, dividers, the centre lines (the clock included) and the place-mode ring, in the pill's
+     * own coordinates (0, 0 = its top-left). [popSide] non-null: that side's score is drawn at [popScale] about its
+     * centre in [popColour] (goal animation §2.1, the score pop; [drawFrame] computes the colour, WP-2 the clamp).
      */
     fun drawBody(
         c: Canvas,
         f: ScoreBugFrame,
         logos: FollowLogos?,
         logoWaited: Boolean,
-        goalAlpha: Float,
-        goalSide: Side?,
         placing: Boolean,
+        popSide: Side? = null,
+        popScale: Float = 1f,
+        popColour: Int = fg,
     ) {
         val cy = pillH / 2f
         logo(c, (K.SCORE_PAD + K.SCORE_LOGO_W / 2f) * s, cy, f.awayAbbrev, logos?.away, logos != null, logoWaited)
@@ -233,14 +263,8 @@ internal class ScoreBugPainter(
 
         val awayCx = (K.SCORE_PAD + K.SCORE_LOGO_W + K.SCORE_LOGO_GAP + K.SCORE_DIGITS_W / 2f) * s
         val homeCx = pillW - (K.SCORE_PAD + K.SCORE_LOGO_W + K.SCORE_LOGO_GAP + K.SCORE_DIGITS_W / 2f) * s
-        if (goalAlpha > 0f && goalSide != null) {
-            val gx = if (goalSide == Side.AWAY) awayCx else homeCx
-            fill.color = argb(K.GOAL_BOX_ALPHA * goalAlpha, accent and 0xFFFFFF)
-            rect.set(gx - K.GOAL_BOX_W * s / 2f, cy - K.GOAL_BOX_H * s / 2f, gx + K.GOAL_BOX_W * s / 2f, cy + K.GOAL_BOX_H * s / 2f)
-            c.drawRoundRect(rect, K.GOAL_BOX_RADIUS * s, K.GOAL_BOX_RADIUS * s, fill)
-        }
-        c.drawText(f.awayScore, awayCx, cy + scoreBaselineOffset, score)
-        c.drawText(f.homeScore, homeCx, cy + scoreBaselineOffset, score)
+        scoreDigits(c, f.awayScore, awayCx, cy, popSide == Side.AWAY, popScale, popColour)
+        scoreDigits(c, f.homeScore, homeCx, cy, popSide == Side.HOME, popScale, popColour)
 
         // Dividers 1 × 34, white .18.
         fill.color = argb(K.SCORE_DIVIDER_ALPHA, 0xFFFFFF)
@@ -264,7 +288,7 @@ internal class ScoreBugPainter(
         }
         if (f.bottomText != null) {
             period.textSize = f.bottomPx * s
-            period.color = if (f.bottomGoal) argb(dim, accentText and 0xFFFFFF) else argb(dim * K.SCORE_PERIOD_ALPHA, fg and 0xFFFFFF)
+            period.color = argb(dim * K.SCORE_PERIOD_ALPHA, fg and 0xFFFFFF)
             c.drawText(f.bottomText, centreX, BOTTOM_CY * s - (period.fontMetrics.ascent + period.fontMetrics.descent) / 2f, period)
         }
         if (f.clockOnTop) drawClock(c, f.clockSecs, f)
@@ -276,6 +300,16 @@ internal class ScoreBugPainter(
             rect.set(-w / 2f, -w / 2f, pillW + w / 2f, pillH + w / 2f)
             c.drawRoundRect(rect, radius + w / 2f, radius + w / 2f, ring)
         }
+    }
+
+    private fun scoreDigits(c: Canvas, text: String, cx: Float, cy: Float, pop: Boolean, popScale: Float, popColour: Int) {
+        if (!pop) {
+            c.drawText(text, cx, cy + scoreBaselineOffset, score)
+            return
+        }
+        score.color = popColour
+        c.withScale(popScale, popScale, cx, cy) { drawText(text, cx, cy + scoreBaselineOffset, score) }
+        score.color = fg
     }
 
     private fun logo(c: Canvas, cx: Float, cy: Float, abbrev: String, slot: FollowLogos.Slot?, hasHolder: Boolean, waited: Boolean) {

@@ -42,7 +42,6 @@ class SportsTextTest {
         assertEquals("2OT", SportsText.centre(res, CentreText.Period(PeriodLabel(PeriodKind.OT, 2)), view, 0))
         assertEquals("1st INT", SportsText.centre(res, CentreText.Intermission(PeriodLabel(PeriodKind.REG, 1)), view, 0))
         assertEquals("End 1st", SportsText.centre(res, CentreText.EndOf(PeriodLabel(PeriodKind.REG, 1)), view, 0))
-        assertEquals("GOAL CGY", SportsText.centre(res, CentreText.Goal(Side.AWAY), view, 0))
         assertEquals("Final/SO", SportsText.centre(res, CentreText.Final(PeriodKind.SO), view, 0))
         assertEquals("SO", SportsText.centre(res, CentreText.Shootout, view, 0))
         assertEquals("No update", SportsText.centre(res, CentreText.NoUpdate, view, 0))

@@ -145,8 +145,6 @@ sealed interface CentreText {
     data class EndOf(val period: PeriodLabel) : CentreText
     /** One line: "SO". */
     data object Shootout : CentreText
-    /** Bottom line for GOAL_TEXT_MS: "GOAL CGY" (the abbreviation of [side]'s [TeamLine]). */
-    data class Goal(val side: Side) : CentreText
     /** One line: "Final", "Final/OT", "Final/SO". */
     data class Final(val kind: PeriodKind) : CentreText
     /** Bottom line while stale (the column is dimmed). */
@@ -161,6 +159,11 @@ sealed interface CentreText {
  * [clockSecs] (fix pass, owner ruling 6 "no local countdown"): the clock exactly as the shown snapshot reports it, floored
  * at 0; it changes only when a new snapshot becomes visible on the (possibly delayed) timeline. Null when [top] is not
  * [CentreText.Clock] or the snapshot has no clock.
+ *
+ * (Goal animation, docs/design/m6-goal-animation.md §5.1, N12) [goalSide] is the *goal mark*: non-null for
+ * `GOAL_MARK_MS` after a goal becomes visible on the delayed timeline; the bottom line is never replaced. [goalSeq] bumps
+ * once per goal and is monotonic for the machine's lifetime. [gameId] is the shown game (null for the place-mode
+ * sample), so the UI keys its takeover on the game.
  */
 data class ScoreBugView(
     val away: TeamLine,
@@ -171,6 +174,7 @@ data class ScoreBugView(
     val goalSeq: Int,
     val goalSide: Side?,
     val clockSecs: Int? = null,
+    val gameId: GameId? = null,
 )
 
 /**
@@ -189,7 +193,7 @@ sealed interface DayState {
 interface ScoreBugSource {
     /**
      * What the bug shows, clock included (owner ruling 6): re-emitted only when a new snapshot becomes visible or a state
-     * changes (stale, goal text, hide), never per second.
+     * changes (stale, goal mark, hide), never per second.
      */
     val bug: StateFlow<ScoreBugView?>
     /**

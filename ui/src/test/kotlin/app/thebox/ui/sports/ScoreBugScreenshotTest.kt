@@ -63,7 +63,6 @@ class ScoreBugScreenshotTest {
         background: Int = DARK,
         large: Boolean = false,
         secs: Int = 622,
-        goalAlpha: Float = 0f,
         placing: Boolean = false,
         lowEnd: Boolean = false,
         withLogos: Boolean = false,
@@ -85,7 +84,7 @@ class ScoreBugScreenshotTest {
         p.drawGlass(c, p.bakeGlass(withShadow = !lowEnd))
         // Owner ruling 6: the clock is the view's own value, drawn by drawBody.
         val frame = p.frame(if (view.top == app.thebox.core.sports.CentreText.Clock) view.copy(clockSecs = secs) else view, context.resources)
-        p.drawBody(c, frame, if (withLogos) logos() else null, logoWaited = true, goalAlpha, view.goalSide, placing)
+        p.drawBody(c, frame, if (withLogos) logos() else null, logoWaited = true, placing)
         return bmp
     }
 
@@ -119,7 +118,7 @@ class ScoreBugScreenshotTest {
     @Test
     fun everyStateOverDarkAndWriteTheContactSheet() {
         val shots = ScoreBugFixtures.all.map { (name, v) ->
-            val b = render(v, goalAlpha = if (v.goalSide != null) 1f else 0f, withLogos = name != "ot")
+            val b = render(v, withLogos = name != "ot")
             save("state-$name", b)
             name to b
         }
@@ -198,21 +197,6 @@ class ScoreBugScreenshotTest {
     }
 
     @Test
-    fun theGoalBoxTintsTheScoringSidesScoreAndOnlyThatSide() {
-        val v = ScoreBugFixtures.goalHome
-        val off = render(v, goalAlpha = 0f)
-        val on = render(v, goalAlpha = 1f)
-        save("goal-box-on", on)
-        val homeSpot = 268f + 4f // inside the home score slot, left of the digit
-        val awaySpot = 88f + 4f
-        assertTrue("accent blue rose at the home slot", Color.blue(px(on, homeSpot, 14f)) > Color.blue(px(off, homeSpot, 14f)) + 15)
-        assertEquals("away slot unchanged", px(off, awaySpot, 14f), px(on, awaySpot, 14f))
-        // The tag reads GOAL EDM in the accent text colour (bottom line), not the period grey.
-        val tag = brightest(on, 160f, 42f, 245f, 60f)
-        assertTrue("goal tag ${Integer.toHexString(tag)} is blue-tinted", Color.blue(tag) > Color.red(tag) + 20)
-    }
-
-    @Test
     fun theStaleColumnIsDimmedButTheScoresAreNot() {
         val live = render(ScoreBugFixtures.live)
         val stale = render(ScoreBugFixtures.stale)
@@ -245,7 +229,7 @@ class ScoreBugScreenshotTest {
     @Test
     fun everyCentreStringFitsBothSizesWithoutAnEllipsis() {
         val strings = listOf(
-            "Final", "Final/OT", "Final/SO", "SO", "No update", "Delayed", "GOAL CGY", "GOAL MTL", "GOAL WPG", "GOAL NYR",
+            "Final", "Final/OT", "Final/SO", "SO", "No update", "Delayed",
             "1st", "2nd", "3rd", "OT", "2OT", "3OT", "1st INT", "2nd INT", "3rd INT", "End 1st", "End 3rd", "7:00 PM", "10:22", "19:59",
             "WWWWWWW", // beyond any real label: must step down to the floor, not overflow
         )
