@@ -53,3 +53,28 @@ corners. Mock-up: away logo · away score | clock over period | home score · ho
    snapshot queue is unchanged). Consequence: no per-second clock redraw, so the
    ticking-bug frame budget and `DRAWS_SCORE_CLOCK` device item are moot; the bug
    redraws only on a new snapshot.
+
+## Owner rulings: goal animation (2026-11-07)
+Request: a goal-scoring animation in the scoring team's colours. Mock-up: `design/score-bug-goal-animation.html`
+(bundled page; readable markup and CSS keyframes in `design/score-bug-goal-animation.template.html`). A 3.6 s
+takeover of the whole pill: accent-colour lead wipe, base-colour panel wipe, accent and white streaks, white flash
+pulses, a badge that spins in, "GOAL" letters dropping in then pulsing, the tally sliding in; the bug glows; after it,
+the scorer's score pops (scale 1.55 → 1, accent → white).
+7. **Small lines dropped.** At the real bug size the team-name line and the "10:22 · 1ST" line fall below the 18 px
+   type floor, so the takeover shows only the badge, GOAL and the tally. The bug keeps its size.
+8. **Badge: the team logo on the team colour.** The real NHL logo drawn straight on the base-colour panel, no white
+   disc or ring (owner change 2026-11-07; first answer was "logo on white").
+9. **Replaces ruling 5's highlight and tag.** The takeover plus the score pop replace the 3 s accent box and the 8 s
+   "GOAL CGY" line. Still no sound; still follows the user's delay.
+10. **GOAL font: Barlow Condensed Black Italic**, bundled (SIL OFL 1.1, one weight, used only for GOAL).
+Defaults (lead): team colours from a bundled 32-team table (the feed has none); low-end mode and Android's "remove
+animations" get a still version.
+11. **Shootout winner plays the takeover** (owner, 2026-11-07; the proposer and reviewer recommended no). The winner's
+    +1 at the end of a shootout counts as a goal for the animation.
+12. **Always the team's own colours** (owner, 2026-11-07: "it should always be the teams color not just orange, for
+    all goals"). Every team's takeover uses its two official colours: base = the primary (a gold or light primary goes
+    to the accent slot: NSH, VGK, and similar), accent = the official secondary. No substitute colours for contrast:
+    PHI is orange + black (white GOAL on orange, 3.6 : 1, accepted), NJD red + black, MTL red + blue. Colours verified
+    2026-11-07 (teamcolorcodes.com; Anaheim's own brand guide); `scratchpad` report folded into the design §3.3.
+Lead: the white flash runs 3 cycles of 400 ms (2.5 Hz), below the 3-flashes-per-second limit on frequency alone
+(review B3).

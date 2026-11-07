@@ -1,0 +1,465 @@
+<!DOCTYPE html>
+<html lang="en"><head>
+<meta charset="utf-8">
+<title>Score bug goal animation</title>
+<script src="618b7a92-e7ca-4b7c-8d85-ef0c5c177b53"></script>
+<meta name="hz:slide-selector" content="[data-canvas-width]"><meta name="hz:canvas-width" content="1000"><meta name="hz:canvas-height" content="400"></head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<style>/* vietnamese */
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: italic;
+  font-weight: 800;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/barlowcondensed/v13/HTxyL3I-JCGChYJ8VI-L6OO_au7B6xTrf3fmtIkGQLhEx6A5.woff2) format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: italic;
+  font-weight: 800;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/barlowcondensed/v13/HTxyL3I-JCGChYJ8VI-L6OO_au7B6xTrf3fmtYkGQLhEx6A5.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: italic;
+  font-weight: 800;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/barlowcondensed/v13/HTxyL3I-JCGChYJ8VI-L6OO_au7B6xTrf3fmu4kGQLhExw.woff2) format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: italic;
+  font-weight: 900;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/barlowcondensed/v13/HTxyL3I-JCGChYJ8VI-L6OO_au7B6xTrW3bmtIkGQLhEx6A5.woff2) format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: italic;
+  font-weight: 900;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/barlowcondensed/v13/HTxyL3I-JCGChYJ8VI-L6OO_au7B6xTrW3bmtYkGQLhEx6A5.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Barlow Condensed';
+  font-style: italic;
+  font-weight: 900;
+  font-display: swap;
+  src: url("9229b724-2237-4784-bf78-9d780713484d") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa2JL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa0ZL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek-ext */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa2ZL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+1F00-1FFF;
+}
+/* greek */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1pL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa2pL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("580e325f-00ba-41ef-9ef9-532d39b59a42") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa2JL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa0ZL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek-ext */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa2ZL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+1F00-1FFF;
+}
+/* greek */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1pL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa2pL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("580e325f-00ba-41ef-9ef9-532d39b59a42") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa2JL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa0ZL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek-ext */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa2ZL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+1F00-1FFF;
+}
+/* greek */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1pL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa2pL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("580e325f-00ba-41ef-9ef9-532d39b59a42") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+/* cyrillic-ext */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa2JL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0460-052F, U+1C80-1C8A, U+20B4, U+2DE0-2DFF, U+A640-A69F, U+FE2E-FE2F;
+}
+/* cyrillic */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa0ZL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
+}
+/* greek-ext */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa2ZL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+1F00-1FFF;
+}
+/* greek */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1pL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0370-0377, U+037A-037F, U+0384-038A, U+038C, U+038E-03A1, U+03A3-03FF;
+}
+/* vietnamese */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa2pL7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+/* latin-ext */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url(https://fonts.gstatic.com/s/inter/v20/UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7W0Q5n-wU.woff2) format('woff2');
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+/* latin */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("580e325f-00ba-41ef-9ef9-532d39b59a42") format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+</style>
+<style>
+body{margin:0}
+a{color:#F1BE48}a:hover{color:#ffd77a}
+@keyframes gLead{0%{clip-path:inset(0 100% 0 0)}6%{clip-path:inset(0 0 0 0)}94%{clip-path:inset(0 0 0 0)}100%{clip-path:inset(0 0 0 100%)}}
+@keyframes gWipe{0%,3%{clip-path:inset(0 100% 0 0)}11%{clip-path:inset(0 0 0 0)}88%{clip-path:inset(0 0 0 0)}97%,100%{clip-path:inset(0 0 0 100%)}}
+@keyframes gFlash{0%,100%{opacity:0}50%{opacity:.45}}
+@keyframes gStreak{0%{transform:translateX(-160px) skewX(-24deg)}100%{transform:translateX(980px) skewX(-24deg)}}
+@keyframes gLetter{0%{opacity:0;transform:translateY(46px) scale(1.9)}60%{opacity:1;transform:translateY(-4px) scale(.94)}100%{opacity:1;transform:none}}
+@keyframes gWord{0%,100%{transform:scale(1)}50%{transform:scale(1.07)}}
+@keyframes gSlideL{0%{opacity:0;transform:translateX(-36px)}100%{opacity:1;transform:none}}
+@keyframes gSlideR{0%{opacity:0;transform:translateX(36px)}100%{opacity:1;transform:none}}
+@keyframes gBadge{0%{opacity:0;transform:scale(.3) rotate(-120deg)}70%{opacity:1;transform:scale(1.12) rotate(8deg)}100%{opacity:1;transform:none}}
+@keyframes gGlow{0%,100%{box-shadow:0 0 0 0 rgba(230,30,50,0)}15%,85%{box-shadow:0 0 36px 4px rgba(230,30,50,.55)}50%{box-shadow:0 0 80px 16px rgba(230,30,50,.8)}}
+@keyframes gPopCgy{0%{transform:scale(1.55);color:#F1BE48}40%{transform:scale(.9)}70%{transform:scale(1.06)}100%{transform:scale(1);color:#fff}}
+@keyframes gPopEdm{0%{transform:scale(1.55);color:#FF6A2B}40%{transform:scale(.9)}70%{transform:scale(1.06)}100%{transform:scale(1);color:#fff}}
+.g-lead{animation:gLead 3.6s cubic-bezier(.7,0,.2,1) both}
+.g-wrap{animation:gWipe 3.6s cubic-bezier(.7,0,.2,1) both}
+.g-flash{animation:gFlash .3s ease-in-out .42s 4}
+.g-streak{animation:gStreak 1s cubic-bezier(.4,0,.2,1) .35s both}
+.g-streak2{animation:gStreak .8s cubic-bezier(.4,0,.2,1) 1.75s both}
+.g-letter{display:inline-block;animation:gLetter .42s cubic-bezier(.2,.8,.2,1) both}
+.g-word{animation:gWord .5s ease-in-out 1.15s 3}
+.g-in-l{animation:gSlideL .45s cubic-bezier(.2,.8,.2,1) .72s both}
+.g-in-r{animation:gSlideR .45s cubic-bezier(.2,.8,.2,1) .9s both}
+.g-badge{animation:gBadge .55s cubic-bezier(.2,.8,.2,1) .45s both}
+.bug.glow{animation:gGlow 3.6s ease-in-out both}
+.score.pop-cgy{animation:gPopCgy .9s cubic-bezier(.2,.8,.2,1) both}
+.score.pop-edm{animation:gPopEdm .9s cubic-bezier(.2,.8,.2,1) both}
+button:focus-visible{outline:2px solid #F1BE48;outline-offset:3px}
+@media (prefers-reduced-motion: reduce){.g-flash,.g-streak,.g-streak2,.g-word{animation:none;opacity:0}.g-letter,.g-badge,.g-in-l,.g-in-r{animation-duration:.01s}}
+</style>
+</helmet>
+<div style="width: 1000px; height: 400px; box-sizing: border-box; background: #0e0e10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 44px; font-family: Inter, system-ui, sans-serif; color: #ffffff" data-canvas-width="1000" data-canvas-height="400" data-document-role="page" data-label="Score bug — goal animation">
+<div class="{{bugClass}}" style="position: relative; width: 780px; height: 128px; border-radius: 999px; background: #1c1c1f; border: 1px solid rgba(255,255,255,0.08); overflow: hidden; display: flex; align-items: center; box-sizing: border-box">
+<div style="flex: 1; display: flex; align-items: center; justify-content: flex-end; gap: 36px">
+<div role="img" aria-label="Calgary" style="width: 76px; height: 76px; border-radius: 50%; background: #C8102E; border: 3px solid #F1BE48; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 22px; letter-spacing: 0.02em; color: #ffffff">CGY</div>
+<div class="{{cgyClass}}" style="font-weight: 800; font-size: 68px; line-height: 1; font-variant-numeric: tabular-nums; min-width: 44px; text-align: center">{{cgy}}</div>
+</div>
+<div style="width: 1px; height: 66px; background: rgba(255,255,255,0.18); margin: 0 30px"></div>
+<div style="width: 170px; display: flex; flex-direction: column; align-items: center; gap: 2px">
+<div style="font-weight: 700; font-size: 44px; line-height: 1; font-variant-numeric: tabular-nums">10:22</div>
+<div style="font-weight: 600; font-size: 22px; color: #8e8e93">1st</div>
+</div>
+<div style="width: 1px; height: 66px; background: rgba(255,255,255,0.18); margin: 0 30px"></div>
+<div style="flex: 1; display: flex; align-items: center; justify-content: flex-start; gap: 36px">
+<div class="{{edmClass}}" style="font-weight: 800; font-size: 68px; line-height: 1; font-variant-numeric: tabular-nums; min-width: 44px; text-align: center">{{edm}}</div>
+<div role="img" aria-label="Edmonton" style="width: 76px; height: 76px; border-radius: 50%; background: #041E42; border: 3px solid #FF4C00; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 22px; letter-spacing: 0.02em; color: #ffffff">EDM</div>
+</div>
+<sc-if value="{{showGoal}}" hint-placeholder-val="{{ false }}">
+<div class="g-lead" style="position: absolute; inset: 0; background: {{accent}}"></div>
+<div class="g-wrap" role="status" aria-label="{{teamName}} goal" style="position: absolute; inset: 0; background: {{base}}; overflow: hidden; display: flex; align-items: center; gap: 28px; padding: 0 44px; box-sizing: border-box">
+<div class="g-streak" style="position: absolute; top: -30px; bottom: -30px; left: 0; width: 90px; background: {{accent}}; opacity: 0.6"></div>
+<div class="g-streak2" style="position: absolute; top: -30px; bottom: -30px; left: 0; width: 34px; background: #ffffff; opacity: 0.35"></div>
+<div class="g-flash" style="position: absolute; inset: 0; background: #ffffff; opacity: 0"></div>
+<div class="g-badge" style="position: relative; width: 80px; height: 80px; flex: none; border-radius: 50%; background: #ffffff; border: 3px solid {{accent}}; box-sizing: border-box; display: flex; align-items: center; justify-content: center; font-weight: 800; font-size: 23px; color: {{base}}">{{abbr}}</div>
+<div style="position: relative; flex: 1; display: flex; flex-direction: column; align-items: center">
+<div class="g-in-l" style="font-weight: 700; font-size: 15px; letter-spacing: 0.24em; color: #ffffff">{{teamName}}</div>
+<div class="g-word" style="font-family: 'Barlow Condensed', Inter, sans-serif; font-style: italic; font-weight: 900; font-size: 92px; line-height: 0.86; letter-spacing: 0.04em; color: #ffffff; text-shadow: 0 4px 0 rgba(0,0,0,0.28)">
+<span class="g-letter" style="animation-delay: 0.42s">G</span><span class="g-letter" style="animation-delay: 0.5s">O</span><span class="g-letter" style="animation-delay: 0.58s">A</span><span class="g-letter" style="animation-delay: 0.66s">L</span>
+</div>
+</div>
+<div class="g-in-r" style="position: relative; display: flex; flex-direction: column; align-items: flex-end; gap: 4px">
+<div style="font-weight: 800; font-size: 38px; line-height: 1; font-variant-numeric: tabular-nums; color: #ffffff">{{tally}}</div>
+<div style="font-weight: 600; font-size: 13px; letter-spacing: 0.08em; color: #ffffff">10:22 · 1ST</div>
+</div>
+</div>
+</sc-if>
+</div>
+<div style="display: flex; gap: 12px; flex-wrap: wrap; justify-content: center">
+<button type="button" sc-camel-on-click="{{flamesGoal}}" style="height: 44px; padding: 0 22px; border-radius: 999px; border: none; background: #C8102E; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">Play Flames goal</button>
+<button type="button" sc-camel-on-click="{{oilersGoal}}" style="height: 44px; padding: 0 22px; border-radius: 999px; border: 1px solid #FF4C00; background: #041E42; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">Play Oilers goal</button>
+<button type="button" sc-camel-on-click="{{reset}}" style="height: 44px; padding: 0 22px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">Reset 0–2</button>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script="" data-props="{&quot;autoplay&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true},&quot;$preview&quot;:{&quot;width&quot;:1000,&quot;height&quot;:400}}">
+class Component extends DCLogic {
+  state = { cgy: 0, edm: 2, phase: 'idle', team: 'CGY' };
+  componentDidMount() {
+    this.timers = [];
+    if (this.props.autoplay ?? true) this.loopTimer = setTimeout(() => this.cycle(), 900);
+  }
+  componentWillUnmount() {
+    this.clearTimers();
+    clearTimeout(this.loopTimer);
+  }
+  clearTimers() {
+    (this.timers || []).forEach(clearTimeout);
+    this.timers = [];
+  }
+  cycle() {
+    this.setState({ cgy: 0, edm: 2 });
+    this.goal('CGY');
+    this.loopTimer = setTimeout(() => this.cycle(), 7000);
+  }
+  goal(team) {
+    this.clearTimers();
+    this.setState({ phase: 'idle' });
+    this.timers.push(setTimeout(() => {
+      this.setState((s) => ({
+        phase: 'goal',
+        team: team,
+        cgy: team === 'CGY' ? s.cgy + 1 : s.cgy,
+        edm: team === 'EDM' ? s.edm + 1 : s.edm
+      }));
+      this.timers.push(setTimeout(() => this.setState({ phase: 'after' }), 3600));
+      this.timers.push(setTimeout(() => this.setState({ phase: 'idle' }), 4600));
+    }, 40));
+  }
+  manual(team) {
+    clearTimeout(this.loopTimer);
+    this.goal(team);
+  }
+  reset() {
+    clearTimeout(this.loopTimer);
+    this.clearTimers();
+    this.setState({ cgy: 0, edm: 2, phase: 'idle' });
+  }
+  renderVals() {
+    const s = this.state;
+    const teams = {
+      CGY: { base: '#C8102E', accent: '#F1BE48', name: 'CALGARY FLAMES', abbr: 'CGY' },
+      EDM: { base: '#041E42', accent: '#FF4C00', name: 'EDMONTON OILERS', abbr: 'EDM' }
+    };
+    const t = teams[s.team] || teams.CGY;
+    const after = s.phase === 'after';
+    return {
+      cgy: s.cgy,
+      edm: s.edm,
+      showGoal: s.phase === 'goal',
+      bugClass: s.phase === 'goal' ? 'bug glow' : 'bug',
+      cgyClass: after && s.team === 'CGY' ? 'score pop-cgy' : 'score',
+      edmClass: after && s.team === 'EDM' ? 'score pop-edm' : 'score',
+      base: t.base,
+      accent: t.accent,
+      teamName: t.name,
+      abbr: t.abbr,
+      tally: s.cgy + ' – ' + s.edm,
+      flamesGoal: () => this.manual('CGY'),
+      oilersGoal: () => this.manual('EDM'),
+      reset: () => this.reset()
+    };
+  }
+}
+</script>
+
+
+</body></html>
