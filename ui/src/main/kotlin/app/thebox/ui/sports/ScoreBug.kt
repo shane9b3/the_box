@@ -5,6 +5,7 @@ import android.graphics.Bitmap
 import android.graphics.Typeface
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -19,6 +20,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -30,12 +32,15 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -46,6 +51,10 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.res.ResourcesCompat
 import app.thebox.core.sports.Box as DesignBox
 import app.thebox.core.sports.CentreText
+import app.thebox.core.sports.GameId
+import app.thebox.core.sports.GoalFrame
+import app.thebox.core.sports.GoalTimeline
+import app.thebox.core.sports.NhlTeamColours
 import app.thebox.core.sports.OverlayGeometry
 import app.thebox.core.sports.PlacementInput
 import app.thebox.core.sports.ScoreBugPlacement
@@ -54,6 +63,7 @@ import app.thebox.core.sports.ScoreBugSource
 import app.thebox.core.sports.ScoreBugView
 import app.thebox.core.sports.Side
 import app.thebox.core.sports.SportsConstants as K
+import app.thebox.core.sports.TeamColours
 import app.thebox.core.sports.TeamLine
 import app.thebox.ui.R
 import app.thebox.ui.guide.GuideDebugCounters
@@ -61,7 +71,12 @@ import app.thebox.ui.guide.screen.LocalShellImageLoader
 import app.thebox.ui.full.PlayerUi
 import app.thebox.ui.theme.BoxFonts
 import app.thebox.ui.theme.DesignTokens
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.math.roundToInt
 
 const val SCORE_BUG_TAG = "score_bug"
@@ -73,6 +88,8 @@ const val COMPOSITIONS_SCORE_BUG = "ScoreBug"
 const val FRAMES_SCORE_BUG = "ScoreBugFrame"
 /** Debug counter: draws of the bug's one drawing node (glass, body and clock). */
 const val DRAWS_SCORE_BUG = "ScoreBugDraw"
+/** The persistent pill-sized live region (goal design §5.3, S9): its description is "" except during the goal mark. */
+const val SCORE_BUG_LIVE_TAG = "score_bug_live"
 
 /**
  * The score bug (docs/design/m6-score-bug.md §4; WP-3): a 404 × 70 fake-glass pill at the box
@@ -104,6 +121,70 @@ fun ScoreBug(
     lowEnd: Boolean,
     modifier: Modifier = Modifier,
     place: (PlacementInput, OverlayGeometry) -> DesignBox? = ScoreBugPlacement::place,
+) = ScoreBugWith(source, placement, geometry, lowEnd, modifier, place, GoalHooks.Default)
+
+/**
+ * (Goal animation, WP-3) The goal takeover's seams: what [ScoreBug] calls into WP-1/WP-2 for, so tests can stand in for the
+ * colour table, the timeline, the painter's `begin` / `bakeGlow` and `glowAllowed`. Defaults are the real objects.
+ * [sampler] is a `fun interface` so the per-frame call boxes nothing.
+ */
+internal class GoalHooks(
+    val colours: (String?) -> TeamColours = NhlTeamColours::of,
+    val sampler: GoalSampler = GoalSampler.Real,
+    val begin: (GoalPainter, Side, TeamColours, Bitmap?, String, Int, Int) -> Unit = { p, side, c, badge, abbrev, a, h -> p.begin(side, c, badge, abbrev, a, h) },
+    val bake: (GoalPainter) -> GlowMasks? = { it.bakeGlow() },
+    val glowAllowed: (PlacementInput, OverlayGeometry, DesignBox, Float) -> Boolean = ScoreBugPlacement::glowAllowed,
+    val probe: GoalProbe? = null,
+    /** Added to the takeover effect's coroutine context (tests put a `MotionDurationScale` here); empty in production. */
+    val context: CoroutineContext = EmptyCoroutineContext,
+) {
+    companion object { val Default = GoalHooks() }
+}
+
+/** Samples the timeline into a preallocated frame (draw path; no allocation). */
+internal fun interface GoalSampler {
+    fun sample(tMs: Float, still: Boolean, out: GoalFrame): GoalFrame
+
+    companion object {
+        val Real = GoalSampler { t, still, out -> if (still) GoalTimeline.sampleStill(t, out) else GoalTimeline.sample(t, out) }
+    }
+}
+
+/** What a test can observe of the takeover: the draw-only state, and each `begin` decision. */
+internal class GoalProbe {
+    var takeoverOn: State<Boolean>? = null
+    var driver: Animatable<Float, *>? = null
+    class Begin(val side: Side, val abbrev: String, val away: Int, val home: Int, val still: Boolean)
+    val begins = mutableListOf<Begin>()
+}
+
+/** The state of the takeover trigger (goal design §5.2): a plain holder, written in composition and in the effect. */
+private class GoalRun {
+    var seen = false
+    var gameId: GameId? = null
+    var lastSeq = -1
+    var size: ScoreBugSize? = null
+    /** Bumped to start a takeover and to cancel one; the effect keys on it. [active]: the last bump was a start. */
+    var token = 0
+    var active = false
+    // Captured at start; never re-read (B1.5).
+    var side: Side = Side.AWAY
+    var abbrev = ""
+    var away = 0
+    var home = 0
+    var still = false
+    var glowOn = false
+}
+
+@Composable
+internal fun ScoreBugWith(
+    source: ScoreBugSource,
+    placement: PlacementInput,
+    geometry: OverlayGeometry,
+    lowEnd: Boolean,
+    modifier: Modifier,
+    place: (PlacementInput, OverlayGeometry) -> DesignBox?,
+    hooks: GoalHooks,
 ) {
     if (GuideDebugCounters.ENABLED) SideEffect { GuideDebugCounters.bump(COMPOSITIONS_SCORE_BUG) }
     val context = LocalContext.current
@@ -172,6 +253,91 @@ fun ScoreBug(
         logoWaited.value = true
     }
 
+    // ---- the goal takeover (goal design §5.2). Bookkeeping runs above the visibility return, so a goal while hidden or
+    // placing updates lastSeq and is never replayed on reappearance; takeoverOn is read only in draw.
+    val goalPainter = remember(s, shownLarge) {
+        GoalPainter(
+            s, (if (shownLarge) K.SCORE_LARGE_W else K.SCORE_W) * d, (if (shownLarge) K.SCORE_LARGE_H else K.SCORE_H) * d,
+            sansTypeface(context, R.font.barlow_condensed_black_italic), sansTypeface(context, R.font.instrument_sans_bold),
+        )
+    }
+    val run = remember { GoalRun() }
+    val takeoverOn = remember { mutableStateOf(false) }
+    val driver = remember { Animatable(0f) }
+    val goalFrame = remember { GoalFrame() }
+    val glowMasks = remember(goalPainter) { mutableStateOf<GlowMasks?>(null) }
+    hooks.probe?.let { it.takeoverOn = takeoverOn; it.driver = driver }
+    val margin = if (shownLarge) K.GOAL_LAYER_MARGIN_LARGE else K.GOAL_LAYER_MARGIN
+
+    fun cancelTakeover() {
+        if (run.active) { run.active = false; run.token++ }
+        takeoverOn.value = false // a write, never a read: composition must not subscribe to it
+    }
+    val real = bug
+    if (real == null) {
+        cancelTakeover()
+        run.seen = false // the next snapshot is a "first snapshot" again: nothing replays
+    } else {
+        if (!run.seen || real.gameId != run.gameId) {
+            cancelTakeover()
+            run.seen = true; run.gameId = real.gameId; run.lastSeq = real.goalSeq; run.size = placement.size
+        }
+        if (box == null || placement.placing || placement.size != run.size) {
+            cancelTakeover()
+            run.size = placement.size
+        }
+        if (real.goalSeq != run.lastSeq) {
+            run.lastSeq = real.goalSeq
+            cancelTakeover()
+            val side = real.goalSide
+            if (side != null && box != null && !placement.placing) {
+                val line = if (side == Side.AWAY) real.away else real.home
+                run.side = side; run.abbrev = line.abbrev
+                run.away = real.away.score ?: 0; run.home = real.home.score ?: 0
+                run.active = true; run.token++
+            }
+        }
+        // The glow follows the layout while a takeover is live (a bar opening mid-takeover turns it off); never on the idle path.
+        if (run.active && box != null) run.glowOn = !lowEnd && hooks.glowAllowed(placement, geometry, box, margin)
+    }
+    LaunchedEffect(run.token) {
+        if (!run.active) return@LaunchedEffect
+        val token = run.token
+        val side = run.side
+        val image = (if (side == Side.AWAY) logos.away else logos.home).image
+        withContext(hooks.context) {
+            val still = lowEnd || motionOff() // S8: the exact scale Compose applies to animateTo
+            hooks.begin(goalPainter, side, hooks.colours(run.abbrev), image?.asAndroidBitmap(), run.abbrev, run.away, run.home)
+            hooks.probe?.begins?.add(GoalProbe.Begin(side, run.abbrev, run.away, run.home, still))
+            run.still = still
+            driver.snapTo(0f)
+            takeoverOn.value = true
+            try {
+                if (still) {
+                    delay(K.GOAL_TAKEOVER_MS) // frame A; the delay is not scaled
+                    driver.snapTo(K.GOAL_TAKEOVER_MS.toFloat()) // frame B
+                    delay(K.GOAL_POP_MS)
+                } else {
+                    driver.animateTo(TAKEOVER_TOTAL_MS, tween(TAKEOVER_TOTAL_MS.toInt(), easing = LinearEasing))
+                }
+            } finally {
+                // Only the run that is still current clears: a cancelled run's finally runs before its successor's body.
+                if (run.token == token) { takeoverOn.value = false; run.active = false }
+            }
+        }
+    }
+    // The glow's two masks, baked once per size off the main thread (never in low-end mode). A failed bake just means no glow.
+    LaunchedEffect(goalPainter, lowEnd) {
+        if (lowEnd) return@LaunchedEffect
+        glowMasks.value = try {
+            withContext(Dispatchers.Default) { hooks.bake(goalPainter) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
     val last = holder.box
     val visible = box != null || (holder.drawn && !fadeDone)
     if (!visible || last == null) { holder.drawn = false; return }
@@ -192,6 +358,8 @@ fun ScoreBug(
     val rightSide = last.l > 960f
     // U-S7: a plain string per shown view; semantics read nothing that changes between snapshots.
     val desc = remember(shownView, res) { Describe(res, shownView).text() }
+    // S9: the live region's text changes (goal string while the mark is set, "" otherwise): twice per goal, never per frame.
+    val liveText = if (shownView.goalSide != null) desc else ""
 
     val m = if (shownLarge) K.GOAL_LAYER_MARGIN_LARGE else K.GOAL_LAYER_MARGIN
     Box(
@@ -209,18 +377,35 @@ fun ScoreBug(
                 .semantics { contentDescription = desc }
                 .drawBehind {
                     if (GuideDebugCounters.ENABLED) GuideDebugCounters.bump(DRAWS_SCORE_BUG)
+                    // takeoverOn, the driver and the glow state are read here and nowhere in composition.
+                    var goal: GoalPainter? = null
+                    var g: GoalFrame? = null
+                    if (takeoverOn.value) {
+                        val f = hooks.sampler.sample(driver.value, run.still, goalFrame)
+                        if (!f.done) { goal = goalPainter; g = f }
+                    }
                     drawIntoCanvas {
                         painter.drawFrame(
                             it.nativeCanvas, glass.bitmap, frame, shownLogos, logoWaited.value, placing,
-                            goal = null, g = null, glow = null, glowOn = false, // the takeover: WP-3
+                            goal = goal, g = g, glow = glowMasks.value, glowOn = run.glowOn,
                         )
                     }
                 },
+        )
+        // The persistent live region (S9): pill-sized, always composed while the bug is.
+        Spacer(
+            Modifier
+                .offset(m.dp, m.dp)
+                .size(w.dp, h.dp)
+                .testTag(SCORE_BUG_LIVE_TAG)
+                .semantics { contentDescription = liveText; liveRegion = LiveRegionMode.Polite },
         )
     }
     // A sibling of the clipped layer, not inside it (goal design §1): same position source, same look.
     if (placing) PlaceHint(holder, pos, fade, rightSide, w, h)
 }
+
+private const val TAKEOVER_TOTAL_MS = (K.GOAL_TAKEOVER_MS + K.GOAL_POP_MS).toFloat()
 
 /** The baked glass of one painter and mode (U-S1): built on first use, then held. */
 private class GlassCache(private val painter: ScoreBugPainter, private val withShadow: Boolean) {

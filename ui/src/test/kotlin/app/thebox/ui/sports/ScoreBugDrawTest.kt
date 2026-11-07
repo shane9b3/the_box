@@ -10,7 +10,18 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.MotionDurationScale
 import app.thebox.core.sports.FakeScoreRepository
+import app.thebox.core.sports.GameId
+import app.thebox.core.sports.League
+import app.thebox.core.sports.ScoreBugPlacement
+import app.thebox.core.sports.ScoreBugSize
+import app.thebox.core.sports.Side
+import app.thebox.core.sports.TeamColours
+import kotlin.coroutines.CoroutineContext
+import kotlin.coroutines.EmptyCoroutineContext
 import app.thebox.core.sports.SportsPrefs
 import app.thebox.ui.full.StableScoreBug
 import app.thebox.ui.guide.GuideDebugCounters
@@ -143,4 +154,243 @@ class ScoreBugDrawTest {
         assertEquals("the stand-in host did recompose", 10, hostCompositions - host0)
         assertEquals("ScoreBug skipped every host recomposition (U-S2)", 0, compositions() - comp0)
     }
+
+    // ------------------------------------------------------------------ the goal takeover (goal design §5.2, §5.3, §8.3)
+    //
+    // Robolectric runs no draw pass, so the draw path is observed through its state: `takeoverOn` and the one driver
+    // `Animatable` are read only in draw (the probe hands them out), and the colour table, the painter's begin / bake and
+    // `glowAllowed` are the commit-0 stubs in this package, so every one is injected through [GoalHooks].
+
+    private val probe = GoalProbe()
+    private var placement by mutableStateOf(ScoreBugFixtures.input())
+
+    private fun goalHooks(context: CoroutineContext = EmptyCoroutineContext) = GoalHooks(
+        colours = { TeamColours(0xFF112233.toInt(), 0xFF445566.toInt(), 0xFF778899.toInt(), 0xFFAABBCC.toInt()) },
+        begin = { _, _, _, _, _, _, _ -> },
+        bake = { null },
+        glowAllowed = { _, _, _, _ -> true },
+        probe = probe,
+        context = context,
+    )
+
+    private fun startGoalHost(lowEnd: Boolean = false, context: CoroutineContext = EmptyCoroutineContext) {
+        repo.bug.value = ScoreBugFixtures.view(clockSecs = 1200)
+        rule.mainClock.autoAdvance = false
+        val hooks = goalHooks(context)
+        rule.setContent {
+            BoxDesignScale {
+                ScoreBugWith(repo, placement, ScoreBugFixtures.noGeometry, lowEnd, Modifier, ScoreBugPlacement::place, hooks)
+            }
+        }
+        rule.waitForIdle()
+        rule.mainClock.advanceTimeBy(2000)
+        rule.waitForIdle()
+    }
+
+    private fun advance(ms: Long, step: Long = 100) {
+        var left = ms
+        while (left > 0) { val n = minOf(step, left); rule.mainClock.advanceTimeBy(n); left -= n }
+        rule.waitForIdle()
+    }
+
+    private fun on() = probe.takeoverOn!!.value
+    private fun t() = probe.driver!!.value
+    private fun live() = rule.onNodeWithTag(SCORE_BUG_LIVE_TAG).fetchSemanticsNode().config[SemanticsProperties.ContentDescription].joinToString()
+
+    private fun goal(side: Side = Side.AWAY, seq: Int = 1, team: String = "CGY") =
+        ScoreBugFixtures.goalView(team, side, seq = seq)
+
+    @Test
+    fun aGoalRunsOnceWithTwoRecompositionsAndNoneBetween() {
+        startGoalHost()
+        val comp0 = compositions()
+        repo.bug.value = goal()
+        advance(100)
+        assertTrue("takeover on", on())
+        assertEquals(1, probe.begins.size)
+        assertEquals(Side.AWAY, probe.begins[0].side)
+        assertEquals("CGY", probe.begins[0].abbrev)
+        assertEquals("the tally is captured at the start", 2 to 1, probe.begins[0].away to probe.begins[0].home)
+        val afterMark = compositions() - comp0
+        var applyRecompositionsBase = compositions()
+        advance(3000)
+        assertTrue("the driver advanced (read only in draw): ${t()}", t() > 2000f && t() < 4500f)
+        assertEquals("no recomposition while the takeover animates", applyRecompositionsBase, compositions())
+        // The mark ends (the machine clears goalSide): the UI still owns the timeline.
+        repo.bug.value = goal().copy(goalSide = null)
+        advance(100)
+        applyRecompositionsBase = compositions()
+        advance(2000)
+        assertTrue("takeover over", !on())
+        assertEquals(1, afterMark)
+        assertEquals("mark start and mark end", 2, applyRecompositionsBase - comp0)
+        assertEquals(1, probe.begins.size)
+    }
+
+    @Test
+    fun theLiveRegionGoesEmptyThenTheGoalStringThenEmpty() {
+        startGoalHost()
+        assertEquals("", live())
+        repo.bug.value = goal()
+        advance(100)
+        assertTrue(live(), live().startsWith("Calgary goal."))
+        repo.bug.value = goal().copy(goalSide = null)
+        advance(100)
+        assertEquals("", live())
+    }
+
+    @Test
+    fun aGoalWhileHiddenIsNotReplayedWhenTheBugReturnsInsideTheMark() {
+        startGoalHost()
+        placement = ScoreBugFixtures.input().copy(screenOff = true)
+        advance(1000)
+        repo.bug.value = goal()
+        advance(1000)
+        placement = ScoreBugFixtures.input()
+        advance(1000)
+        assertTrue(probe.begins.isEmpty())
+        assertTrue(!on())
+    }
+
+    @Test
+    fun hidingMidTakeoverClearsToThePlainBugAndNeverResumes() {
+        startGoalHost()
+        repo.bug.value = goal()
+        advance(1000)
+        assertTrue(on())
+        placement = ScoreBugFixtures.input().copy(screenOff = true)
+        advance(100)
+        assertTrue("cleared synchronously with the hide", !on())
+        advance(1000) // the fade is done
+        placement = ScoreBugFixtures.input()
+        advance(1000)
+        assertTrue("no frozen half-wipe, no late replay", !on())
+        assertEquals(1, probe.begins.size)
+    }
+
+    @Test
+    fun aFollowChangedMidTakeoverCancels() {
+        startGoalHost()
+        repo.bug.value = goal()
+        advance(1000)
+        assertTrue(on())
+        repo.bug.value = ScoreBugFixtures.view(goalSeq = 0, gameId = GameId(League.NHL, "2025020999"))
+        advance(100)
+        assertTrue(!on())
+        advance(5000)
+        assertEquals(1, probe.begins.size)
+    }
+
+    @Test
+    fun placeModeMidTakeoverCancelsAndIsNotReplayed() {
+        startGoalHost()
+        repo.bug.value = goal()
+        advance(1000)
+        placement = ScoreBugFixtures.input(placing = true)
+        advance(100)
+        assertTrue(!on())
+        placement = ScoreBugFixtures.input()
+        advance(1000)
+        assertTrue(!on())
+        assertEquals(1, probe.begins.size)
+    }
+
+    @Test
+    fun aGoalInPlaceModeDoesNotPlayLater() {
+        startGoalHost()
+        placement = ScoreBugFixtures.input(placing = true)
+        advance(500)
+        repo.bug.value = goal()
+        advance(500)
+        placement = ScoreBugFixtures.input()
+        advance(1000)
+        assertTrue(probe.begins.isEmpty())
+    }
+
+    @Test
+    fun aSizeChangeMidTakeoverCancels() {
+        startGoalHost()
+        repo.bug.value = goal()
+        advance(1000)
+        assertTrue(on())
+        placement = ScoreBugFixtures.input(size = ScoreBugSize.LARGE)
+        advance(100)
+        assertTrue(!on())
+        assertEquals(1, probe.begins.size)
+    }
+
+    @Test
+    fun aSeqBumpWithoutASideDoesNothing() {
+        startGoalHost()
+        repo.bug.value = ScoreBugFixtures.view(goalSeq = 1, goalSide = null)
+        advance(500)
+        assertTrue(probe.begins.isEmpty())
+        assertTrue(!on())
+    }
+
+    @Test
+    fun aSecondGoalMidTakeoverRestartsWithTheNewSideAndTally() {
+        startGoalHost()
+        repo.bug.value = goal(Side.AWAY, seq = 1)
+        advance(1500)
+        assertTrue(t() > 1000f)
+        repo.bug.value = ScoreBugFixtures.goalView("EDM", Side.HOME, opponent = "CGY", away = 2, home = 3, seq = 2)
+        advance(100)
+        assertEquals(2, probe.begins.size)
+        assertEquals(Side.HOME, probe.begins[1].side)
+        assertEquals("EDM", probe.begins[1].abbrev)
+        assertEquals(2 to 3, probe.begins[1].away to probe.begins[1].home)
+        assertTrue("restarted at t = 0: ${t()}", t() < 600f)
+        assertTrue(on())
+    }
+
+    @Test
+    fun theFirstSnapshotOfAFollowNeverPlays() {
+        repo.bug.value = ScoreBugFixtures.goalView("CGY", Side.AWAY, seq = 7)
+        rule.mainClock.autoAdvance = false
+        val hooks = goalHooks()
+        rule.setContent {
+            BoxDesignScale { ScoreBugWith(repo, placement, ScoreBugFixtures.noGeometry, false, Modifier, ScoreBugPlacement::place, hooks) }
+        }
+        advance(2000)
+        assertTrue(probe.begins.isEmpty())
+    }
+
+    @Test
+    fun withTheAnimatorScaleAtTwoThePopStillCompletesAfterTheMarkEnds() {
+        startGoalHost(context = FixedScale(2f))
+        repo.bug.value = goal()
+        advance(100)
+        assertTrue(!probe.begins[0].still)
+        repo.bug.value = goal().copy(goalSide = null) // the mark ends at 4.5 s on the machine's clock
+        advance(5000)
+        assertTrue("still running at scale 2 (the UI owns the timeline)", on())
+        advance(5000)
+        assertTrue(!on())
+    }
+
+    @Test
+    fun withTheAnimatorScaleAtZeroTheStillPathSnapsThroughThreeDraws() {
+        startGoalHost(context = FixedScale(0f))
+        repo.bug.value = goal()
+        advance(100)
+        assertTrue(probe.begins[0].still)
+        assertTrue(on())
+        assertEquals("frame A", 0f, t(), 0f)
+        advance(3600)
+        assertEquals("frame B", 3600f, t(), 0f)
+        assertTrue(on())
+        advance(1000)
+        assertTrue("then the plain bug", !on())
+    }
+
+    @Test
+    fun lowEndModeUsesTheStillPathToo() {
+        startGoalHost(lowEnd = true)
+        repo.bug.value = goal()
+        advance(100)
+        assertTrue(probe.begins[0].still)
+    }
+
+    private class FixedScale(override val scaleFactor: Float) : MotionDurationScale
 }
