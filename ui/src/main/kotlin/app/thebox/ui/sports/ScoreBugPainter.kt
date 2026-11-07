@@ -217,11 +217,14 @@ internal class ScoreBugPainter(
     /**
      * The bug's whole frame in the pill's own coordinates (the canvas already translated by the layer margin `M`), in the
      * fixed order of the goal design §2.1: glow (only while [goal] is set and [glowOn], never in low-end mode), glass,
-     * body (with the scorer's pop), then the takeover. [goal] / [g] null = no takeover: the plain bug.
+     * body (with the scorer's pop), then the takeover. [goal] / [g] null, a [goal] never begun, or [GoalFrame.done] =
+     * no takeover: the plain bug, pixel for pixel.
      *
-     * Commit 0: glass + body only; the glow, the pop and the takeover hooks are WP-2's.
+     * The pop (§2.1, N5): while [GoalFrame.popOn], the scorer's digits ([GoalPainter.side]) are drawn at
+     * [GoalFrame.popScale], clamped by [clampPop], in the team's `pop` lerped to the body's own white ([fg]) by
+     * [GoalFrame.popMix]; lerping to `Fg` rather than pure white lands exactly on the plain bug at the pop's end.
+     * No allocation: the colour arithmetic is integer, the clamp one `measureText`.
      */
-    @Suppress("UNUSED_PARAMETER")
     fun drawFrame(
         c: Canvas,
         glass: Bitmap,
@@ -234,10 +237,37 @@ internal class ScoreBugPainter(
         glow: GlowMasks?,
         glowOn: Boolean,
     ) {
-        // 1. glow: WP-2.
+        val colours = goal?.colours
+        if (goal == null || g == null || colours == null || g.done) {
+            drawGlass(c, glass)
+            drawBody(c, f, logos, logoWaited, placing)
+            return
+        }
+        // 1. Glow, behind the glass (only while the glow is allowed and baked; never baked in low-end mode).
+        if (glowOn && glow != null) goal.drawGlow(c, g, glow)
+        // 2. Glass.
         drawGlass(c, glass)
-        drawBody(c, f, logos, logoWaited, placing)
-        // 4. takeover: WP-2.
+        // 3. Body, with the scorer's pop.
+        if (g.popOn) {
+            val side = goal.side
+            val text = if (side == Side.AWAY) f.awayScore else f.homeScore
+            drawBody(c, f, logos, logoWaited, placing, side, clampPop(text, g.popScale), lerpColour(colours.pop, fg, g.popMix))
+        } else {
+            drawBody(c, f, logos, logoWaited, placing)
+        }
+        // 4. Takeover: the lead, then the panel and its contents under the panel's wipe.
+        goal.drawTakeover(c, g)
+    }
+
+    /**
+     * N5: [scale] limited so the popped [text] (40 px bold) stays within [K.GOAL_POP_MAX_W] (the 48 px digit column + 2 × 8);
+     * a two-digit score pops less instead of crossing into the logo. Never below 1 from the clamp itself (the
+     * keyframes' own .9 dip passes through).
+     */
+    fun clampPop(text: String, scale: Float): Float {
+        val w = score.measureText(text)
+        if (w <= 0f) return scale
+        return minOf(scale, maxOf(1f, K.GOAL_POP_MAX_W * s / w))
     }
 
     // ------------------------------------------------------------------ body (§4.1, §4.5)
@@ -372,5 +402,16 @@ internal class ScoreBugPainter(
         const val BOTTOM_CY = 50f
 
         fun argb(a: Float, rgb: Int): Int = (Math.round(a.coerceIn(0f, 1f) * 255f) shl 24) or (rgb and 0xFFFFFF)
+
+        /** Opaque [a] → [b] by [t] (0 = a), per channel. */
+        fun lerpColour(a: Int, b: Int, t: Float): Int {
+            val f = t.coerceIn(0f, 1f)
+            fun ch(shift: Int): Int {
+                val x = (a shr shift) and 0xFF
+                val y = (b shr shift) and 0xFF
+                return Math.round(x + (y - x) * f) shl shift
+            }
+            return (0xFF shl 24) or ch(16) or ch(8) or ch(0)
+        }
     }
 }
