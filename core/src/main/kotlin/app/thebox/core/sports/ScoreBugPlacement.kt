@@ -47,9 +47,21 @@ object ScoreBugPlacement {
      * (Goal animation §2.4, S1; WP-1) Whether the takeover's glow may draw around the placed pill [box]: false while the
      * bug is lifted above a bar ([PlacementInput.bar] `USER_BAR` or `QUICK` with a bottom corner) or an active overlay
      * box (stats, channel list, group card, picker, number entry) intersects [box] inflated by [margin] (design px).
+     *
+     * The corner is the effective one, as in [place]: with subtitles on, a bottom corner sits at the top and no bar lifts
+     * it. The probing line is not in the §2.4 list: it is a thin text line, and it already hides a bug it overlaps.
      */
-    @Suppress("UNUSED_PARAMETER")
-    fun glowAllowed(input: PlacementInput, geo: OverlayGeometry, box: Box, margin: Float): Boolean = TODO("WP-1")
+    fun glowAllowed(input: PlacementInput, geo: OverlayGeometry, box: Box, margin: Float): Boolean {
+        val corner = if (input.textTrackOn) toTop(input.corner) else input.corner
+        if (isBottom(corner) && (input.bar == BottomBar.USER_BAR || input.bar == BottomBar.QUICK)) return false
+        val halo = Box(box.l - margin, box.t - margin, box.r + margin, box.b + margin)
+        if (input.stats && geo.stats.intersects(halo)) return false
+        if (input.channelList && geo.channelList.intersects(halo)) return false
+        if (input.groupCard && geo.groupCard.intersects(halo)) return false
+        if (input.picker && geo.picker.intersects(halo)) return false
+        if (input.numberEntry && geo.numberEntry.intersects(halo)) return false
+        return true
+    }
 
     /** The resting box of [corner] at [size] (§4.3). */
     fun cornerBox(corner: ScoreCorner, size: ScoreBugSize): Box {

@@ -54,6 +54,7 @@ class ScoreBugMachine(
     private var backoffAt: Long? = null
     private var notFoundFirst: Long? = null
 
+    /** Bumped once per goal; never reset, not even by a re-follow ([reset]), so the UI can key on it (B1.4). */
     private var goalSeq = 0
     private var goalSide: Side? = null
     private var markUntil: Long? = null
@@ -333,6 +334,9 @@ class ScoreBugMachine(
                 away -> Side.AWAY
                 else -> null
             }
+            // Owner ruling 11: the shootout winner's +1 (usually on the FINAL snapshot, Final/SO) is a rise like any other
+            // and plays the takeover. N9 (accepted miss): a tying goal and the shootout win inside one missed poll can
+            // arrive as both sides rising, which is silent, as above.
             if (side != null) {
                 goalSeq++
                 goalSide = side
@@ -395,7 +399,9 @@ class ScoreBugMachine(
         queue.clear(); shown = null; lastOk = null
         eagerAt = null; suppressStale = false
         failures = 0; failAt = null; backoffAt = null; notFoundFirst = null
-        goalSeq = 0; goalSide = null; markUntil = null
+        // goalSeq is monotonic for the machine's lifetime (goal animation §5.1, B1.4): a re-follow never reuses a seq
+        // the UI has already seen.
+        goalSide = null; markUntil = null
     }
 
     private companion object {

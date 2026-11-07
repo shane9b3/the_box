@@ -684,6 +684,212 @@ class ScoreBugMachineTest {
         assertFalse(r.m.pollDue())
     }
 
+    // ------------------------------------------------------------------ goal mark (goal animation §5.1, §5.2)
+
+    @Test
+    fun markLastsExactly4500OnTheDelayedTimelineAndEndsOnAWake() {
+        val r = Rig(delaySec = 30)
+        r.follow()
+        r.ok(live(away = 0)) // anchor 0 → shown 30 000
+        r.at(20_000)
+        r.ok(live(secs = 602, away = 1)) // anchor 20 000 → shown 50 000
+        r.m.online(false)
+        r.at(49_999)
+        assertNull(r.m.view()!!.goalSide, "not before the delayed snapshot is visible")
+        assertEquals(0, r.m.view()!!.goalSeq)
+        val wakes = r.wakeUntil(60_000).toMap()
+        assertEquals(Side.AWAY, wakes.getValue(50_000)!!.goalSide, "marked at anchor + 30 s")
+        assertEquals(1, wakes.getValue(50_000)!!.goalSeq)
+        assertTrue(50_000L + SportsConstants.GOAL_MARK_MS in wakes, "a wake fires at the mark's end")
+        assertNull(wakes.getValue(50_000L + SportsConstants.GOAL_MARK_MS)!!.goalSide)
+        assertEquals(1, wakes.getValue(50_000L + SportsConstants.GOAL_MARK_MS)!!.goalSeq)
+        // The same, stepped by hand to either side of the end.
+        val s = Rig(delaySec = 30)
+        s.follow()
+        s.ok(live(away = 0))
+        s.at(20_000)
+        s.ok(live(secs = 602, away = 1))
+        s.m.online(false)
+        s.at(30_000) // the first snapshot shows
+        s.at(50_000 + SportsConstants.GOAL_MARK_MS - 1)
+        assertEquals(Side.AWAY, s.m.view()!!.goalSide, "late step: the mark still runs from the visible instant")
+        assertEquals(Side.AWAY, s.m.view()!!.goalSide, "view() is read-only")
+        s.at(50_000 + SportsConstants.GOAL_MARK_MS)
+        assertNull(s.m.view()!!.goalSide)
+        assertEquals(1, s.m.view()!!.goalSeq)
+        assertEquals(CentreText.Period(PeriodLabel(PeriodKind.REG, 2)), s.m.view()!!.bottom, "the bottom line is never replaced")
+    }
+
+    @Test
+    fun secondGoalInsideTheMarkRestartsItWithTheNewSide() {
+        val r = Rig()
+        r.follow()
+        r.ok(live(away = 0, home = 2))
+        r.at(20_000)
+        r.ok(live(secs = 602, away = 1, home = 2))
+        r.at(22_000)
+        r.ok(live(secs = 600, away = 1, home = 3))
+        val v = r.m.view()!!
+        assertEquals(2, v.goalSeq)
+        assertEquals(Side.HOME, v.goalSide)
+        r.at(22_000 + SportsConstants.GOAL_MARK_MS - 1)
+        assertEquals(Side.HOME, r.m.view()!!.goalSide, "the mark runs from the second goal")
+        r.at(22_000 + SportsConstants.GOAL_MARK_MS)
+        assertNull(r.m.view()!!.goalSide)
+    }
+
+    @Test
+    fun overtimeWinnerOnTheFinalSnapshotIsMarked() {
+        val r = Rig()
+        r.follow()
+        r.ok(live(away = 2, home = 2, period = 4, kind = PeriodKind.OT, ot = 1, secs = 140))
+        r.at(20_000)
+        r.ok(final(away = 3, home = 2, kind = PeriodKind.OT))
+        val v = r.m.view()!!
+        assertEquals(CentreText.Final(PeriodKind.OT), v.top)
+        assertEquals(1, v.goalSeq)
+        assertEquals(Side.AWAY, v.goalSide)
+    }
+
+    @Test
+    fun shootoutWinnersPlusOneIsMarked() {
+        // Owner ruling 11: the winner's +1 at the end of a shootout counts as a goal for the animation.
+        val r = Rig()
+        r.follow()
+        r.ok(live(away = 2, home = 2, period = 5, kind = PeriodKind.SO, secs = 0, running = false))
+        assertEquals(CentreText.Shootout, r.m.view()!!.top)
+        r.at(20_000)
+        r.ok(final(away = 2, home = 3, kind = PeriodKind.SO))
+        val v = r.m.view()!!
+        assertEquals(CentreText.Final(PeriodKind.SO), v.top)
+        assertEquals(1, v.goalSeq)
+        assertEquals(Side.HOME, v.goalSide)
+        // Also when the +1 lands while the snapshot still says SO (before the FINAL).
+        val s = Rig()
+        s.follow()
+        s.ok(live(away = 2, home = 2, period = 5, kind = PeriodKind.SO, secs = 0, running = false))
+        s.at(20_000)
+        s.ok(live(away = 3, home = 2, period = 5, kind = PeriodKind.SO, secs = 0, running = false))
+        assertEquals(Side.AWAY, s.m.view()!!.goalSide)
+        assertEquals(1, s.m.view()!!.goalSeq)
+    }
+
+    @Test
+    fun noTakeoverCases() {
+        // The machine's side of §5.2's table: each of these leaves goalSeq alone and sets no mark.
+        fun after(first: GameSnapshot, second: GameSnapshot): ScoreBugView {
+            val r = Rig()
+            r.follow()
+            r.ok(first)
+            r.at(20_000)
+            r.ok(second)
+            return r.m.view()!!
+        }
+        val cases = listOf(
+            "score corrected down" to after(live(away = 1, home = 2), live(secs = 602, away = 0, home = 2)),
+            "both sides rose" to after(live(away = 0, home = 2), live(secs = 602, away = 1, home = 3)),
+            "snapshot only turns FINAL" to after(live(away = 0, home = 2, period = 3, secs = 0, running = false), final(away = 0, home = 2)),
+            "nothing changed" to after(live(), live(secs = 602)),
+            "shootout ends tied in the score (no +1 yet)" to after(
+                live(away = 2, home = 2, period = 5, kind = PeriodKind.SO, secs = 0, running = false),
+                live(away = 2, home = 2, period = 5, kind = PeriodKind.SO, secs = 0, running = false),
+            ),
+        )
+        for ((name, v) in cases) {
+            assertEquals(0, v.goalSeq, name)
+            assertNull(v.goalSide, name)
+        }
+        // The first snapshot of a follow is never a goal, whatever its score.
+        val f = Rig()
+        f.follow()
+        f.ok(live(away = 4, home = 5))
+        assertEquals(0, f.m.view()!!.goalSeq)
+        assertNull(f.m.view()!!.goalSide)
+    }
+
+    @Test
+    fun plusTwoIsOneSeqAndAReassignedGoalMarksTheSideThatRose() {
+        val r = Rig()
+        r.follow()
+        r.ok(live(away = 0, home = 2))
+        r.at(40_000) // one missed poll
+        r.ok(live(secs = 582, away = 2, home = 2))
+        assertEquals(1, r.m.view()!!.goalSeq, "+2 in one update is one goal")
+        assertEquals(Side.AWAY, r.m.view()!!.goalSide)
+        assertEquals(2, r.m.view()!!.away.score, "the view carries the new score")
+        // A goal moved from away to home: −1 / +1.
+        r.at(60_000)
+        r.ok(live(secs = 562, away = 1, home = 3))
+        assertEquals(2, r.m.view()!!.goalSeq)
+        assertEquals(Side.HOME, r.m.view()!!.goalSide)
+    }
+
+    @Test
+    fun goalSeqDoesNotResetAcrossAReFollow() {
+        val r = Rig()
+        r.follow()
+        r.ok(live(away = 0))
+        r.at(20_000)
+        r.ok(live(secs = 602, away = 1))
+        assertEquals(1, r.m.view()!!.goalSeq)
+        // Another game: its first snapshot keeps the seq and is not a goal.
+        val other = live(away = 0, home = 0).copy(id = GameId(League.NHL, "2026020001"))
+        r.m.follow(SportsFixtures.followedOf(other))
+        r.ok(other)
+        assertEquals(1, r.m.view()!!.goalSeq)
+        assertNull(r.m.view()!!.goalSide, "a re-follow clears the mark")
+        assertEquals(other.id, r.m.view()!!.gameId)
+        r.at(40_000)
+        r.ok(other.copy(home = SportsFixtures.team("EDM", "Oilers", 1)))
+        assertEquals(2, r.m.view()!!.goalSeq)
+        assertEquals(Side.HOME, r.m.view()!!.goalSide)
+        // Unfollow, then follow the first game again: still monotonic.
+        r.m.follow(null)
+        r.follow()
+        r.at(60_000)
+        r.ok(live(away = 1))
+        assertEquals(2, r.m.view()!!.goalSeq)
+        r.at(80_000)
+        r.ok(live(secs = 582, away = 2))
+        assertEquals(3, r.m.view()!!.goalSeq)
+        // A removal (two NotFounds) does not reset it either.
+        r.at(100_000)
+        r.m.fetched(Fetch.NotFound)
+        r.at(130_000)
+        r.m.fetched(Fetch.NotFound)
+        assertNull(r.m.followed())
+        r.follow()
+        r.at(140_000)
+        r.ok(live(away = 2))
+        assertEquals(3, r.m.view()!!.goalSeq)
+        assertEquals(3, r.m.knownView()!!.goalSeq)
+    }
+
+    @Test
+    fun gameIdIsSetOnEveryView() {
+        val r = Rig()
+        val g = live()
+        r.follow(g)
+        r.ok(g)
+        assertEquals(g.id, r.m.view()!!.gameId)
+        r.at(20_000)
+        r.ok(final(away = 1))
+        assertEquals(g.id, r.m.view()!!.gameId)
+        // Delayed (waiting) and stale views, and the stale-hide's known view.
+        val d = Rig(delaySec = 30)
+        d.follow(g)
+        d.ok(g)
+        d.m.online(false)
+        assertEquals(CentreText.Delayed, d.m.view()!!.bottom)
+        assertEquals(g.id, d.m.view()!!.gameId)
+        d.at(30_000 + 60_000)
+        assertEquals(CentreText.NoUpdate, d.m.view()!!.bottom)
+        assertEquals(g.id, d.m.view()!!.gameId)
+        d.at(30_000 + 60_000 + SportsConstants.HIDE_AFTER_MS)
+        assertNull(d.m.view())
+        assertEquals(g.id, d.m.knownView()!!.gameId)
+    }
+
     @Test
     fun answersForAnotherGameAreIgnored() {
         val r = Rig()

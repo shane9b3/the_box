@@ -121,6 +121,59 @@ class ScoreBugPlacementTest {
         }
     }
 
+    // ------------------------------------------------------------------ glowAllowed (goal animation §2.4, S1)
+
+    private fun margin(s: ScoreBugSize) =
+        if (s == ScoreBugSize.LARGE) SportsConstants.GOAL_LAYER_MARGIN_LARGE else SportsConstants.GOAL_LAYER_MARGIN
+
+    private fun glow(i: PlacementInput, g: OverlayGeometry = geo): Boolean? =
+        ScoreBugPlacement.place(i, g)?.let { ScoreBugPlacement.glowAllowed(i, g, it, margin(i.size)) }
+
+    @Test
+    fun glowIsAllowedOnABareCorner() {
+        for (c in corners) for (s in sizes) assertEquals(true, glow(input(c, s)), "$c $s")
+    }
+
+    @Test
+    fun glowIsOffWhileABarLiftsABottomCorner() {
+        for (c in corners) for (s in sizes) for (bar in listOf(BottomBar.USER_BAR, BottomBar.QUICK)) {
+            val i = input(c, s).copy(bar = bar)
+            assertEquals(!bottom(c), glow(i), "$c $s $bar")
+            // Subtitles move a bottom corner to the top: no bar lifts it, so the glow stays.
+            assertEquals(true, glow(i.copy(textTrackOn = true)), "$c $s $bar subtitles")
+        }
+        // The passive info bar hides a bottom corner; a top corner keeps its glow.
+        assertEquals(true, glow(input(ScoreCorner.TOP_RIGHT).copy(bar = BottomBar.PASSIVE_INFO)))
+    }
+
+    @Test
+    fun glowIsOffWhenAnActiveOverlayIsInsideTheMargin() {
+        // Top right Standard: 1420..1824 × 56..126; margin 74, so the halo starts at x 1346.
+        val near = Box(1000f, 56f, 1380f, 300f) // 40 px left of the pill: inside the halo, clear of the pill
+        val edge = Box(1000f, 56f, 1346f, 300f) // touching the halo's edge: outside it
+        val i = input(ScoreCorner.TOP_RIGHT)
+        val overlays = listOf<Pair<String, (PlacementInput, Box) -> Pair<PlacementInput, OverlayGeometry>>>(
+            "stats" to { p, b -> p.copy(stats = true) to geo.copy(stats = b) },
+            "channelList" to { p, b -> p.copy(channelList = true) to geo.copy(channelList = b) },
+            "groupCard" to { p, b -> p.copy(groupCard = true) to geo.copy(groupCard = b) },
+            "picker" to { p, b -> p.copy(picker = true) to geo.copy(picker = b) },
+            "numberEntry" to { p, b -> p.copy(numberEntry = true) to geo.copy(numberEntry = b) },
+        )
+        for ((name, put) in overlays) {
+            val (on, g) = put(i, near)
+            assertNotNull(ScoreBugPlacement.place(on, g), "$name does not hide the bug")
+            assertEquals(false, glow(on, g), "$name inside the margin")
+            val (onEdge, gEdge) = put(i, edge)
+            assertEquals(true, glow(onEdge, gEdge), "$name at the margin's edge")
+            assertEquals(true, glow(i, g), "$name inactive")
+        }
+        // Large uses its own margin (76): 2 px further out still turns it off.
+        val large = input(ScoreCorner.TOP_RIGHT, ScoreBugSize.LARGE) // 1318..1824
+        val l = large.copy(stats = true)
+        assertEquals(false, glow(l, geo.copy(stats = Box(1000f, 56f, 1318f - 75f, 300f))))
+        assertEquals(true, glow(l, geo.copy(stats = Box(1000f, 56f, 1318f - 76f, 300f))))
+    }
+
     @Test
     fun placeModeIgnoresTheHideRules() {
         for (c in corners) for (s in sizes) {
