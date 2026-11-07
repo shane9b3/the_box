@@ -36,7 +36,8 @@ class GlowMasks(val low: Bitmap, val peak: Bitmap, val lowMargin: Float, val pea
  * (Goal animation §2.2–§2.5; WP-2) The takeover's drawing for one size: built once per size ([s] device px per design
  * px, the Large factor folded in; [pillW] × [pillH] device px), [begin] once per takeover, [draw] per frame with no
  * allocation. [goalFont] is Barlow Condensed Black Italic (`R.font.barlow_condensed_black_italic`); [sansBold] draws
- * the badge fallback and the tally. [large] picks the Large glow table (§2.4: its peak σ is capped, so it is not
+ * the badge fallback and the tally. [word] is the atlas text (`R.string.sports_goal_word`, not translatable; exactly
+ * [GoalFrame.LETTERS] characters, one timeline track each). [large] picks the Large glow table (§2.4: its peak σ is capped, so it is not
  * Standard × 1.25); by default it is read from the pill (506 / 1.25 = 404.8 against 404).
  *
  * - **Built here, once per size:** the paints, the pill rect and the GOAL letter atlas (S2: the four letters with their
@@ -55,6 +56,7 @@ internal class GoalPainter(
     val pillH: Float,
     private val goalFont: Typeface?,
     private val sansBold: Typeface?,
+    private val word: String,
     val large: Boolean = pillW / s > K.SCORE_W + 0.4f,
 ) {
     /** Device px per design px without the Large factor (the glow table is given per size, §2.4). */
@@ -97,6 +99,7 @@ internal class GoalPainter(
     private val tallyRight = pillW - K.GOAL_PAD * s
 
     init {
+        require(word.length == GoalFrame.LETTERS) { "the GOAL word must have ${GoalFrame.LETTERS} letters: \"$word\"" }
         val b = Rect()
         badgeText.getTextBounds("M", 0, 1, b)
         badgeTextOffset = -(b.top + b.bottom) / 2f
@@ -110,8 +113,8 @@ internal class GoalPainter(
         wordCx = (areaL + areaR) / 2f
 
         val a = K.GOAL_ATLAS_SCALE
-        val word = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = goalFont; textSize = K.GOAL_WORD_PX * s * a; color = Color.WHITE }
-        val shadow = Paint(word).apply { color = argb(K.GOAL_SHADOW_ALPHA, 0x000000) }
+        val wordPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = goalFont; textSize = K.GOAL_WORD_PX * s * a; color = Color.WHITE }
+        val shadow = Paint(wordPaint).apply { color = argb(K.GOAL_SHADOW_ALPHA, 0x000000) }
         val track = K.GOAL_TRACK * s * a
         val dy = K.GOAL_SHADOW_DY * s * a
         val pad = ceil(2f * a).toInt()
@@ -120,8 +123,8 @@ internal class GoalPainter(
         var top = 0
         var bottom = 0
         for (i in 0 until GoalFrame.LETTERS) {
-            word.getTextBounds(WORD, i, i + 1, bounds[i])
-            adv[i] = word.measureText(WORD, i, i + 1)
+            wordPaint.getTextBounds(word, i, i + 1, bounds[i])
+            adv[i] = wordPaint.measureText(word, i, i + 1)
             top = minOf(top, bounds[i].top)
             bottom = maxOf(bottom, bounds[i].bottom)
         }
@@ -138,8 +141,8 @@ internal class GoalPainter(
         for (i in 0 until GoalFrame.LETTERS) {
             val bx = x0 - (bounds[i].left - pad).toFloat()
             val by = -cellTop.toFloat()
-            ac.drawText(WORD, i, i + 1, bx, by + dy, shadow)
-            ac.drawText(WORD, i, i + 1, bx, by, word)
+            ac.drawText(word, i, i + 1, bx, by + dy, shadow)
+            ac.drawText(word, i, i + 1, bx, by, wordPaint)
             letterSrc[i].set(x0, 0, x0 + cellW[i], cellH)
             val box = (adv[i] + track) / a
             letterOx[i] = pen + box / 2f
@@ -319,8 +322,20 @@ internal class GoalPainter(
     /** Test seam: the atlas (S2), for its size check. */
     internal val atlasBitmap: Bitmap get() = atlas
 
+    /**
+     * Hands the atlas to the GPU ahead of the first takeover (`Bitmap.prepareToDraw`: an async texture upload on a
+     * hardware canvas), so the first takeover frame does not pay for it. Main thread, once per painter.
+     */
+    fun prewarm(glow: GlowMasks?) {
+        atlas.prepareToDraw()
+        glow?.low?.prepareToDraw()
+        glow?.peak?.prepareToDraw()
+    }
+
+    /** Test seam: the tally [begin] fixed ("away – home"). Allocates; never called in draw. */
+    internal val tallyText: String get() = String(tally, 0, tallyLen)
+
     private companion object {
-        const val WORD = "GOAL"
         /** The tally's fixed slot (§6.1): the widest two-digit tally. */
         const val TALLY_SLOT = "00 – 00"
         const val OPAQUE = 0xFF shl 24

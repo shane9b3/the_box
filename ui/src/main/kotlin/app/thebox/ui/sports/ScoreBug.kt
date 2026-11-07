@@ -137,6 +137,11 @@ internal class GoalHooks(
     val probe: GoalProbe? = null,
     /** Added to the takeover effect's coroutine context (tests put a `MotionDurationScale` here); empty in production. */
     val context: CoroutineContext = EmptyCoroutineContext,
+    /**
+     * Where the goal painter is built (the Barlow load, the GOAL atlas) and the glow baked: off the main thread in
+     * production; tests pass [EmptyCoroutineContext] so the setup lands deterministically on the test clock.
+     */
+    val background: CoroutineContext = Dispatchers.Default,
 ) {
     companion object { val Default = GoalHooks() }
 }
@@ -150,10 +155,17 @@ internal fun interface GoalSampler {
     }
 }
 
-/** What a test can observe of the takeover: the draw-only state, and each `begin` decision. */
+/**
+ * What a test can observe of the takeover: the draw-only state, each `begin` decision, the painter a takeover draws with,
+ * and the bug's whole draw ([draw]: what the drawing node runs, in the pill's own coordinates), so a native-graphics test
+ * can render the real WP-3 → WP-2 path into a bitmap.
+ */
 internal class GoalProbe {
     var takeoverOn: State<Boolean>? = null
     var driver: Animatable<Float, *>? = null
+    /** The painter the current (or last) takeover was begun on; null until one starts. */
+    var painter: GoalPainter? = null
+    var draw: ((android.graphics.Canvas) -> Unit)? = null
     class Begin(val side: Side, val abbrev: String, val away: Int, val home: Int, val still: Boolean)
     val begins = mutableListOf<Begin>()
 }
@@ -173,7 +185,15 @@ private class GoalRun {
     var away = 0
     var home = 0
     var still = false
+    /** Latched off for the rest of a run once a neighbour closes in (N4): a bar closing never snaps the glow back on. */
     var glowOn = false
+    /** The painter this run was begun on (set in the effect before `takeoverOn`); draw reads it, never [GoalSetup]. */
+    var painter: GoalPainter? = null
+}
+
+/** The goal painter and its glow masks, built once a game is followed (N3), off the main thread; plain fields. */
+private class GoalSetup {
+    var painter: GoalPainter? = null
 }
 
 @Composable
@@ -255,23 +275,56 @@ internal fun ScoreBugWith(
 
     // ---- the goal takeover (goal design §5.2). Bookkeeping runs above the visibility return, so a goal while hidden or
     // placing updates lastSeq and is never replayed on reappearance; takeoverOn is read only in draw.
-    val goalPainter = remember(s, shownLarge) {
-        GoalPainter(
-            s, (if (shownLarge) K.SCORE_LARGE_W else K.SCORE_W) * d, (if (shownLarge) K.SCORE_LARGE_H else K.SCORE_H) * d,
-            sansTypeface(context, R.font.barlow_condensed_black_italic), sansTypeface(context, R.font.instrument_sans_bold),
-        )
-    }
     val run = remember { GoalRun() }
+    val setup = remember { GoalSetup() }
     val takeoverOn = remember { mutableStateOf(false) }
     val driver = remember { Animatable(0f) }
     val goalFrame = remember { GoalFrame() }
-    val glowMasks = remember(goalPainter) { mutableStateOf<GlowMasks?>(null) }
+    val glowMasks = remember { mutableStateOf<GlowMasks?>(null) }
+    /**
+     * The body drawn while a takeover is pending or its lead is still wiping in: the frame shown **before** the goal view
+     * (old score, old centre text), so the new score is never seen on the plain bug ahead of the takeover (fix pass,
+     * emulator finding). Written in composition at the start and in the effect; read only in draw.
+     */
+    val held = remember { mutableStateOf<ScoreBugFrame?>(null) }
     hooks.probe?.let { it.takeoverOn = takeoverOn; it.driver = driver }
+    /** The layer margin `M` (goal design §1), design px: the layer's inset, and the glow's neighbour distance. */
     val margin = if (shownLarge) K.GOAL_LAYER_MARGIN_LARGE else K.GOAL_LAYER_MARGIN
+    // N3: nothing of the takeover is built until a game is followed (the sample bug in place mode never needs it). Then
+    // the Barlow load, the GOAL atlas and (never in low-end mode) the glow bake run once per size, off the main thread.
+    // The first snapshot of a follow never plays (§5.2), so the painter is ready long before a goal can; if it is not,
+    // that goal is skipped (the effect below). A failed bake just means no glow.
+    val hasFollow = followed != null
+    val goalWord = remember(res) { res.getString(R.string.sports_goal_word) }
+    LaunchedEffect(s, shownLarge, hasFollow, lowEnd) {
+        setup.painter = null
+        glowMasks.value = null
+        if (!hasFollow) return@LaunchedEffect
+        val pillW = (if (shownLarge) K.SCORE_LARGE_W else K.SCORE_W) * d
+        val pillH = (if (shownLarge) K.SCORE_LARGE_H else K.SCORE_H) * d
+        val built = try {
+            withContext(hooks.background) {
+                val p = GoalPainter(
+                    s, pillW, pillH,
+                    sansTypeface(context, R.font.barlow_condensed_black_italic), sansTypeface(context, R.font.instrument_sans_bold),
+                    goalWord,
+                )
+                p to (if (lowEnd) null else try { hooks.bake(p) } catch (e: CancellationException) { throw e } catch (_: Throwable) { null })
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Throwable) {
+            null
+        }
+        built?.first?.prewarm(built.second)
+        setup.painter = built?.first
+        glowMasks.value = built?.second
+    }
 
     fun cancelTakeover() {
         if (run.active) { run.active = false; run.token++ }
         takeoverOn.value = false // a write, never a read: composition must not subscribe to it
+        held.value = null
     }
     val real = bug
     if (real == null) {
@@ -294,21 +347,31 @@ internal fun ScoreBugWith(
                 val line = if (side == Side.AWAY) real.away else real.home
                 run.side = side; run.abbrev = line.abbrev
                 run.away = real.away.score ?: 0; run.home = real.home.score ?: 0
+                run.glowOn = !lowEnd
                 run.active = true; run.token++
+                // This composition already shows the goal view; until the effect sets takeoverOn and the lead covers the
+                // pill, the draw keeps the previous body.
+                held.value = holder.lastFrame
             }
         }
-        // The glow follows the layout while a takeover is live (a bar opening mid-takeover turns it off); never on the idle path.
-        if (run.active && box != null) run.glowOn = !lowEnd && hooks.glowAllowed(placement, geometry, box, margin)
+        // The glow follows the layout while a takeover is live (a bar opening mid-takeover turns it off on the next frame);
+        // never on the idle path. Latched (N4): once off, it stays off for the rest of the run instead of snapping back
+        // on at its current timeline alpha when the bar closes.
+        if (run.active && box != null && run.glowOn) run.glowOn = !lowEnd && hooks.glowAllowed(placement, geometry, box, margin)
     }
     LaunchedEffect(run.token) {
         if (!run.active) return@LaunchedEffect
         val token = run.token
+        val goalPainter = setup.painter
+        if (goalPainter == null) { run.active = false; held.value = null; return@LaunchedEffect } // not built: skipped
         val side = run.side
         val image = (if (side == Side.AWAY) logos.away else logos.home).image
         withContext(hooks.context) {
             val still = lowEnd || motionOff() // S8: the exact scale Compose applies to animateTo
             hooks.begin(goalPainter, side, hooks.colours(run.abbrev), image?.asAndroidBitmap(), run.abbrev, run.away, run.home)
             hooks.probe?.begins?.add(GoalProbe.Begin(side, run.abbrev, run.away, run.home, still))
+            hooks.probe?.painter = goalPainter
+            run.painter = goalPainter
             run.still = still
             driver.snapTo(0f)
             takeoverOn.value = true
@@ -322,19 +385,8 @@ internal fun ScoreBugWith(
                 }
             } finally {
                 // Only the run that is still current clears: a cancelled run's finally runs before its successor's body.
-                if (run.token == token) { takeoverOn.value = false; run.active = false }
+                if (run.token == token) { takeoverOn.value = false; run.active = false; held.value = null }
             }
-        }
-    }
-    // The glow's two masks, baked once per size off the main thread (never in low-end mode). A failed bake just means no glow.
-    LaunchedEffect(goalPainter, lowEnd) {
-        if (lowEnd) return@LaunchedEffect
-        glowMasks.value = try {
-            withContext(Dispatchers.Default) { hooks.bake(goalPainter) }
-        } catch (e: CancellationException) {
-            throw e
-        } catch (_: Throwable) {
-            null
         }
     }
 
@@ -349,6 +401,7 @@ internal fun ScoreBugWith(
         if (GuideDebugCounters.ENABLED) GuideDebugCounters.bump(FRAMES_SCORE_BUG)
         painter.frame(shownView, res)
     }
+    holder.lastFrame = frame
     // The sample bug ("AWY | HME") never borrows the followed game's logos.
     val shownLogos = if (shownView === sample) null else logos
 
@@ -361,7 +414,30 @@ internal fun ScoreBugWith(
     // S9: the live region's text changes (goal string while the mark is set, "" otherwise): twice per goal, never per frame.
     val liveText = if (shownView.goalSide != null) desc else ""
 
-    val m = if (shownLarge) K.GOAL_LAYER_MARGIN_LARGE else K.GOAL_LAYER_MARGIN
+    val m = margin
+    // The drawing node's whole draw, in the pill's own coordinates: takeoverOn, the driver and the glow state are read
+    // here (in draw) and nowhere in composition. Handed to the probe so a test can render the real path.
+    fun drawBug(c: android.graphics.Canvas) {
+        if (GuideDebugCounters.ENABLED) GuideDebugCounters.bump(DRAWS_SCORE_BUG)
+        var goal: GoalPainter? = null
+        var g: GoalFrame? = null
+        val on = takeoverOn.value
+        var t = 0f
+        if (on) {
+            t = driver.value
+            val f = hooks.sampler.sample(t, run.still, goalFrame)
+            if (!f.done) { goal = run.painter; g = f }
+        }
+        // Pending (the effect has not started) or the lead still wiping in: the previous body. The still path's frame A
+        // covers the pill from its first draw.
+        val hold = held.value
+        val body = if (hold != null && (!on || (!run.still && t < GoalTimeline.LEAD_COVERED_MS))) hold else frame
+        painter.drawFrame(
+            c, glass.bitmap, body, shownLogos, logoWaited.value, placing,
+            goal = goal, g = g, glow = glowMasks.value, glowOn = run.glowOn,
+        )
+    }
+    hooks.probe?.draw = ::drawBug
     Box(
         modifier
             .placeAt(holder, pos, d, m)
@@ -375,22 +451,7 @@ internal fun ScoreBugWith(
                 .size(w.dp, h.dp)
                 .testTag(SCORE_BUG_TAG)
                 .semantics { contentDescription = desc }
-                .drawBehind {
-                    if (GuideDebugCounters.ENABLED) GuideDebugCounters.bump(DRAWS_SCORE_BUG)
-                    // takeoverOn, the driver and the glow state are read here and nowhere in composition.
-                    var goal: GoalPainter? = null
-                    var g: GoalFrame? = null
-                    if (takeoverOn.value) {
-                        val f = hooks.sampler.sample(driver.value, run.still, goalFrame)
-                        if (!f.done) { goal = goalPainter; g = f }
-                    }
-                    drawIntoCanvas {
-                        painter.drawFrame(
-                            it.nativeCanvas, glass.bitmap, frame, shownLogos, logoWaited.value, placing,
-                            goal = goal, g = g, glow = glowMasks.value, glowOn = run.glowOn,
-                        )
-                    }
-                },
+                .drawBehind { drawIntoCanvas { drawBug(it.nativeCanvas) } },
         )
         // The persistent live region (S9): pill-sized, always composed while the bug is.
         Spacer(
@@ -419,6 +480,8 @@ private class Holder {
     var positioned = false
     var drawn = false
     var lastView: ScoreBugView? = null
+    /** The frame the bug last composed for drawing: what a goal's takeover holds while it starts. */
+    var lastFrame: ScoreBugFrame? = null
     /** The last real (not sample) view: its logo URLs key the held [FollowLogos]. */
     var lastFollowed: ScoreBugView? = null
 

@@ -78,6 +78,8 @@ internal class ScoreBugPainter(
     private val bmpPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val rect = RectF()
     private val bounds = Rect()
+    /** Filled by `getFontMetrics(fm)` in [drawBody] (N2 of the goal review: `Paint.fontMetrics` allocates per call). */
+    private val fm = Paint.FontMetrics()
     private val disc = LogoDisc(s, sansBold)
 
     private val scoreBaselineOffset: Float
@@ -312,14 +314,15 @@ internal class ScoreBugPainter(
             val p = line
             p.textSize = f.topPx * s
             p.color = argb(dim, fg and 0xFFFFFF)
-            val y = if (f.bottomText == null) cy - (p.fontMetrics.ascent + p.fontMetrics.descent) / 2f
-            else TWO_LINE_TOP_CY * s - (p.fontMetrics.ascent + p.fontMetrics.descent) / 2f
+            p.getFontMetrics(fm)
+            val y = (if (f.bottomText == null) cy else TWO_LINE_TOP_CY * s) - (fm.ascent + fm.descent) / 2f
             c.drawText(f.topText, centreX, y, p)
         }
         if (f.bottomText != null) {
             period.textSize = f.bottomPx * s
             period.color = argb(dim * K.SCORE_PERIOD_ALPHA, fg and 0xFFFFFF)
-            c.drawText(f.bottomText, centreX, BOTTOM_CY * s - (period.fontMetrics.ascent + period.fontMetrics.descent) / 2f, period)
+            period.getFontMetrics(fm)
+            c.drawText(f.bottomText, centreX, BOTTOM_CY * s - (fm.ascent + fm.descent) / 2f, period)
         }
         if (f.clockOnTop) drawClock(c, f.clockSecs, f)
 

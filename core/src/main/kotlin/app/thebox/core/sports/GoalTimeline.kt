@@ -131,6 +131,11 @@ object GoalTimeline {
 
     // ---- keyframe instants, ms from the takeover start (CSS percentages of the 3.6 s wipes in the comments)
     internal const val LEAD_IN_END = 216f          // gLead 6 %
+    /**
+     * From here until the lead's exit the lead covers the whole pill (animated path). The UI keeps drawing the bug's
+     * previous body until then, so the new score is never seen on the plain bug before the takeover hides it.
+     */
+    const val LEAD_COVERED_MS = LEAD_IN_END
     internal const val LEAD_OUT_START = 3_384f     // gLead 94 %
     internal const val PANEL_IN_START = 108f       // gWipe 3 %
     internal const val PANEL_IN_END = 396f         // gWipe 11 %

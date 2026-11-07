@@ -10,6 +10,7 @@ import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.test.core.app.ApplicationProvider
 import app.thebox.core.sports.GoalFrame
 import app.thebox.core.sports.GoalTimeline
+import app.thebox.core.sports.NhlTeamColours
 import app.thebox.core.sports.Side
 import app.thebox.core.sports.SportsConstants as K
 import app.thebox.core.sports.TeamColours
@@ -34,8 +35,8 @@ import kotlin.math.pow
  * and PHI (S6) at Standard and Large, at fixed times plus the still frames A and B. Every frame is written under
  * `ui/build/goal-animation/` with contact sheets; they are for review by eye, not goldens. The pixel assertions are §8.2's.
  *
- * Team colours are the §3.3 rows, constructed here (WP-1 owns `NhlTeamColours`). The logos are synthetic stand-ins for
- * the `_dark` art (a team-colour shape with a light outer border), since the tests have no real SVGs.
+ * Team colours come from the real table, `NhlTeamColours.of` (§3.3; `NhlTeamColoursTest` pins the rows). The logos are
+ * synthetic stand-ins for the `_dark` art (a team-colour shape with a light outer border), since the tests have no real SVGs.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -48,15 +49,11 @@ class GoalAnimationScreenshotTest {
     private val barlow = sansTypeface(context, R.font.barlow_condensed_black_italic)
     private val out = File("build/goal-animation").apply { mkdirs() }
 
-    private class Team(val abbrev: String, val side: Side, val colours: TeamColours)
+    private class Team(val abbrev: String, val side: Side) {
+        val colours: TeamColours = NhlTeamColours.of(abbrev)
+    }
 
-    /** §3.3 rows: base, accent, glow, pop. */
-    private val teams = listOf(
-        Team("CGY", Side.AWAY, TeamColours(0xFFD2001C.toInt(), 0xFFFAAF19.toInt(), 0xFFD2001C.toInt(), 0xFFFAAF19.toInt())),
-        Team("EDM", Side.HOME, TeamColours(0xFF041E42.toInt(), 0xFFFF4C00.toInt(), 0xFFFF4C00.toInt(), 0xFFFF6726.toInt())),
-        Team("NSH", Side.AWAY, TeamColours(0xFF041E42.toInt(), 0xFFFFB81C.toInt(), 0xFFFFB81C.toInt(), 0xFFFFB81C.toInt())),
-        Team("PHI", Side.HOME, TeamColours(0xFFF74902.toInt(), 0xFF000000.toInt(), 0xFFF74902.toInt(), 0xFFF96D35.toInt())),
-    )
+    private val teams = listOf(Team("CGY", Side.AWAY), Team("EDM", Side.HOME), Team("NSH", Side.AWAY), Team("PHI", Side.HOME))
     private val opponentColour = mapOf("TOR" to 0xFF00205B.toInt(), "MTL" to 0xFFAF1E2D.toInt())
 
     private val times = listOf(100, 300, 600, 1_000, 1_400, 1_700, 2_000, 3_300, 3_550, 3_700, 4_000)
@@ -68,7 +65,7 @@ class GoalAnimationScreenshotTest {
         val pillH = if (large) K.SCORE_LARGE_H else K.SCORE_H
         val m = if (large) K.GOAL_LAYER_MARGIN_LARGE else K.GOAL_LAYER_MARGIN
         val painter = ScoreBugPainter(s, semi, bold, pillW, pillH)
-        val goal = GoalPainter(s, pillW, pillH, barlow, bold)
+        val goal = GoalPainter(s, pillW, pillH, barlow, bold, res.getString(R.string.sports_goal_word))
         val glow: GlowMasks = goal.bakeGlow()
         val glass: Bitmap = painter.bakeGlass(withShadow = true)
         val glassFlat: Bitmap = painter.bakeGlass(withShadow = false)
@@ -486,6 +483,34 @@ class GoalAnimationScreenshotTest {
         for (f in frames) r.goal.draw(c, f, r.glow, true)
         val after = bean.getThreadAllocatedBytes(id)
         println("GoalPainter.draw × 300: ${after - before} B")
+        assertTrue("allocated ${after - before} B", after - before < 4_096)
+    }
+
+    /**
+     * Code review N2: the whole composite, [ScoreBugPainter.drawFrame], on a live view (clock on top, a period line: the
+     * body's two `getFontMetrics` calls) through a takeover, allocates (next to) nothing.
+     */
+    @Test
+    fun drawFrameAllocatesLittle() {
+        val r = std
+        val team = teams[0]
+        val view = ScoreBugFixtures.goalView(team.abbrev, team.side)
+        val frame = r.painter.frame(view, res)
+        assertTrue("a two-line live frame", frame.clockOnTop && frame.bottomText != null)
+        val logos = logos(view.away.abbrev, view.home.abbrev, r)
+        r.goal.begin(team.side, team.colours, null, team.abbrev, 2, 1)
+        val bmp = Bitmap.createBitmap(Math.round(r.pillW + 2 * r.m), Math.round(r.pillH + 2 * r.m), Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.translate(r.m, r.m)
+        val frames = Array(300) { GoalTimeline.sample(it * 16f, GoalFrame()) }
+        fun pass() { for (g in frames) r.painter.drawFrame(c, r.glass, frame, logos, true, false, r.goal, g, r.glow, true) }
+        repeat(2) { pass() }
+        val bean = ManagementFactory.getThreadMXBean() as com.sun.management.ThreadMXBean
+        val id = Thread.currentThread().id
+        val before = bean.getThreadAllocatedBytes(id)
+        pass()
+        val after = bean.getThreadAllocatedBytes(id)
+        println("ScoreBugPainter.drawFrame × 300: ${after - before} B")
         assertTrue("allocated ${after - before} B", after - before < 4_096)
     }
 

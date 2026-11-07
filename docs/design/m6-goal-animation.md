@@ -145,22 +145,25 @@ fun drawFrame(c: Canvas, glass: Bitmap, f: ScoreBugFrame, logos: FollowLogos?, l
   - The pop digit stays as text: one glyph, 900 ms. Accepted.
 - **Tally:** `"{away} – {home}"`, built into a `CharArray` in `begin()`. It is drawn right-aligned with `translate(dx)`
   and paint alpha.
-- **Pop clamp (N5):** `popScale` is clamped so the digit string's width stays ≤ the 48 px digit column + 2 × 8. A
-  two-digit score therefore pops at about 1.2× instead of crossing into the logo.
+- **Pop clamp (N5):** `popScale` is clamped so the popped digit string's width stays ≤ the 48 px digit column + 2 × 8
+  = 64 px (`GOAL_POP_MAX_W`), and the clamp never pushes it below 1. A one-digit score pops at the full 1.55×; "10"
+  (about 42 px at 40 px bold) pops at about **1.52×** (Standard, measured) / **1.51×** (Large), so it fills the 64 px
+  without crossing into the logo slot.
 
 ### 2.4 Glow without blur
 
 - **Two `ALPHA_8` masks per size**, low and peak. Each is the pill inflated by the spread, run through
   `BlurMaskFilter`, with the pill cut out (`clipPath(DIFFERENCE)` on the software bake canvas; the `bakeGlass`
   precedent).
-- **Baking:** off the main thread (`Dispatchers.Default`) when the painter is created, then held like `GlassCache`.
+- **Baking:** off the main thread (`Dispatchers.Default`), in the same step that builds the painter, once a game is
+  followed (not on FULL entry: fix pass N3), then held for the size like `GlassCache`.
   - Never baked in low-end mode.
   - If the masks are not ready at takeover start, that goal draws without a glow.
 - **Drawing:** the paint colour tints the `ALPHA_8` bitmap. Low mask α = `aLow·(1−m)`, peak mask α = `aPeak·m`.
 
 | Mask | Standard: spread / σ / α | Large: spread / σ / α | Margin (spread + 3σ) |
 |---|---|---|---|
-| Low | 2 / 10 / .55 | 3 / 12 / .55 | 32 / 39 |
+| Low | 2 / 10 / .55 | 2.5 / 12.5 (Standard × 1.25) / .55 | 32 / 40 |
 | Peak | 8 / **22** (= the mock's 40 × .547, N1) / .80 | 10 / **22** (capped; ×1.25 would be 27.5) / .80 | 74 / 76 |
 
 - `BlurMaskFilter` radius = (σ − 0.5) / 0.57735, in device px.
@@ -176,7 +179,8 @@ fun drawFrame(c: Canvas, glass: Bitmap, f: ScoreBugFrame, logos: FollowLogos?, l
 
   This is a pure function `ScoreBugPlacement.glowAllowed(input, geo, box, margin)` in `:core`. The UI reads it in
   composition into a holder field. `drawFrame` reads that field, so a bar opening mid-takeover turns the glow off on
-  the next frame.
+  the next frame. The field is **latched off** for the rest of that takeover (fix pass N4): when the bar closes again,
+  the glow does not snap back on at its current timeline alpha; the next goal starts with it on.
 - **Colour:** the team's `glow` (§3.1). This is a recorded **deviation from the mock (N2)**, which uses a fixed red
   `rgba(230,30,50)` for both teams. Ruling 12 asks for the scoring team's colours, so EDM glows orange.
 - **Memory** at 1080p: Standard 63 + 120 KB, Large 79 + 158 KB. Only the shown size is held.
@@ -347,6 +351,7 @@ The state is a plain `GoalRun` holder, plus one state value read only in draw:
 
 ```kotlin
 private class GoalRun {
+    var seen = false                        // a view has been seen since the last null view (step 1)
     var gameId: GameId? = null; var lastSeq = -1; var size: ScoreBugSize? = null
     var startToken = 0                      // bumped to start; the effect keys on it
     var side: Side? = null; var away = 0; var home = 0   // captured at start; never re-read (B1.5)
@@ -357,8 +362,12 @@ val takeoverOn = remember { mutableStateOf(false) }   // read ONLY in draw; writ
 **In composition, above the visibility return** (it runs for every composition with a real view, whether shown,
 hidden or placing):
 
-1. `v = bug` (the real view). If `v == null`, set `takeoverOn = false` and stop.
-2. **New game.** If `v.gameId != run.gameId`: set `takeoverOn = false`, then `run.gameId = v.gameId`,
+1. `v = bug` (the real view). If `v == null`, set `takeoverOn = false`, set `run.seen = false`, and stop. The reset
+   makes the next non-null view a "first snapshot" again (step 2 adopts its seq and does not start), so an unfollow and
+   re-follow of the same game never replays a mark. It cannot swallow a real goal: every null path of
+   `ScoreBugMachine.view()` (stale hide after 300 s, SCHEDULED/PRE) is far longer than a goal's freshness window, and
+   a re-follow resets the machine's `shown` (code review 2026-11-07, seam checks).
+2. **New game or first snapshot.** If `!run.seen` or `v.gameId != run.gameId`: set `run.seen = true`, set `takeoverOn = false`, then `run.gameId = v.gameId`,
    `run.lastSeq = v.goalSeq`, `run.size = size`. Do not start. *(This covers the first snapshot, a follow change and
    an app restart.)*
 3. **Cancel conditions**, checked every composition: `box == null` (hidden) **or** `placement.placing` **or**
@@ -384,6 +393,14 @@ the machine's mark (`goalSide → null`) changes only the description and the li
 the takeover simply runs 9 s.
 
 **Draw:** `drawFrame(…, goal = if (takeoverOn) goalPainter else null, g = timeline.sample(driver.value))`.
+
+**No spoiler (fix pass, emulator finding).** The composition that receives the goal view already rebuilds the body
+with the new score, but the start effect runs after it, and the lead needs `LEAD_COVERED_MS` (216 ms) to cover the
+pill. So step 4 also holds the **previous** body frame (`held`, state read only in draw). The draw uses it while the
+takeover is pending (`takeoverOn` false) or, on the animated path, while `t < LEAD_COVERED_MS`; the still path's
+frame A covers the pill from its first draw. A cancel, a skipped goal (no painter) or the run's end clears it.
+`GoalSeamTest` asserts that, from the first frame after the goal view, every pill pixel right of the lead equals the
+previous frame until the lead covers it.
 
 | Case | Result |
 |---|---|
@@ -542,7 +559,10 @@ exact value Compose applies, it follows the setting live, and it can never disag
 
 ### 8.4 Instrumented: `GoalFramesTest` (beside `FullIdleFramesTest`)
 
-- **Setup:** FULL with live video and a fake source that emits a goal; `FrameMetrics` over 5 s.
+- **Setup:** FULL with live video and a fake source that emits a goal; `FrameMetrics` over 5 s. The test re-anchors
+  the fake panel's featured game (`POST /admin/sports {"restart": true}`), waits for the takeover to **start** (a burst
+  of `DRAWS_SCORE_BUG`), then opens the 5 s window; the idle window starts 1 s after the takeover's measured end
+  (fix pass S3).
 - **Records:** P90 `TOTAL_DURATION`, GPU duration, and the damage area (`dumpsys gfxinfo` / the debug overlay; S3).
 - **Gates:**
   - emulator: ≥ 200 frames;
@@ -688,3 +708,27 @@ the decision note.
    and does not say which colour each team calls primary or secondary. The table uses red/navy for FLA, green/red for
    MIN and red/yellow for CHI. The owner may flip any of them; it is a one-line table change.
 3. **Every hex except ANA's comes from a secondary source** (teamcolorcodes.com). No NHL.com values were retrievable.
+
+---
+
+## Fix pass (2026-11-07)
+
+Review: `docs/review/2026-11-07-goal-animation-code-review.md`. The doc was changed to match the code (N5, N6), not the
+reverse.
+
+| ID | Change |
+|---|---|
+| S1 | New `GoalSeamTest` (`:ui`, native graphics) drives the real WP-3 → WP-2 path: `ScoreBugWith` with the production hooks (a `begin` wrapper records `takeoverOn` at begin, then calls `GoalHooks.Default.begin`). The drawing node's body moved into a local `drawBug(Canvas)`, which `GoalProbe.draw` hands out; the test renders it. It asserts the painter's `side`, `colours` (= `NhlTeamColours.of`) and tally (`GoalPainter.tallyText`, "2 – 1"), the panel pixel in the team's base, the glow drawn, the pop on the scorer's side only, a second goal begun with the new team, and that `takeoverOn` is false at every `begin`. `ScoreBugDrawTest`'s stale "commit-0 stubs" comment is rewritten. |
+| S2 | `ScoreBugDrawTest` counts `bake` calls: 0 in low-end mode, 1 per size otherwise, 0 before a game is followed. |
+| S3 | `GoalFramesTest` re-anchors the panel, waits for the takeover's draw burst before opening the 5 s window, tracks the last draw during the window and starts the idle window 1 s after the measured end (`-e sportsPanel` names a separate sports panel). Not run here (instrumented). |
+| N2 | `ScoreBugPainter.drawBody` uses one held `Paint.FontMetrics` (`getFontMetrics(fm)`); a `drawFrame` × 300 allocation test is added to `GoalAnimationScreenshotTest`. |
+| N3 | The goal painter (Barlow load, GOAL atlas) and the glow bake are built only once a game is followed, in one step off the main thread (`GoalHooks.background`, `Dispatchers.Default`; tests pass an empty context). A goal that arrives before the painter is ready is skipped (cannot happen in practice: the first snapshot never plays). The font is not subset. |
+| N4 | `GoalRun.glowOn` latches off for the rest of a takeover once a neighbour closes in (§2.4). |
+| N5 | §2.3: the "about 1.2×" estimate replaced by the rule and the measured 1.52× / 1.51×. |
+| N6 | §5.2 documents the `run.seen` reset on a null view; §2.4's Large low glow is 2.5 / 12.5, margin 40. |
+| N7 | `GoalPainter` takes the atlas word from `sports_goal_word` (it must have 4 letters). |
+| N8 | `ScoreBug` computes the layer margin once. |
+| N10 | `ScoreBugDrawTest.aFollowStoppedMidTakeoverCancelsAndIsNotReplayed`. |
+| N11 | `GoalAnimationScreenshotTest` takes its teams' colours from `NhlTeamColours.of`. |
+| N1, N9 | Left as they are (lead's call). |
+| Spoiler (lead, emulator) | The plain bug drew the new score (and, for the shootout winner, "Final/SO") before the lead covered it. Code cause: the goal view's composition rebuilds the body at once, while the takeover starts in an effect after that frame and the lead takes 216 ms to cover the pill. Fix: §5.2 "No spoiler" (the previous body is held until the lead covers the pill; `GoalTimeline.LEAD_COVERED_MS` is now public). The painter, atlas and masks are built when a game is followed (N3), and `GoalPainter.prewarm` hands the atlas and masks to the GPU (`prepareToDraw`) before any goal. The ~1 s seen on the shootout-final snapshot was not reproduced off-device. The start path does no main-thread loading or waiting, the bug's only source is the landing (score and FINAL arrive together), and the machine flags the goal on the same view. A first-use texture upload on the emulator is the remaining suspect, which the prewarm addresses. Either way the hold keeps the old body on screen until the lead covers the pill, however late the start is. Device check: the shootout final on the emulator. |

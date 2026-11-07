@@ -158,19 +158,24 @@ class ScoreBugDrawTest {
     // ------------------------------------------------------------------ the goal takeover (goal design §5.2, §5.3, §8.3)
     //
     // Robolectric runs no draw pass, so the draw path is observed through its state: `takeoverOn` and the one driver
-    // `Animatable` are read only in draw (the probe hands them out), and the colour table, the painter's begin / bake and
-    // `glowAllowed` are the commit-0 stubs in this package, so every one is injected through [GoalHooks].
+    // `Animatable` are read only in draw (the probe hands them out). These tests are about the trigger, so the colour
+    // table, the painter's begin / bake and `glowAllowed` are stand-ins injected through [GoalHooks] (the bake counts its
+    // calls), and the painter setup runs on the test thread. `GoalSeamTest` drives the real hooks and renders the draw.
 
     private val probe = GoalProbe()
     private var placement by mutableStateOf(ScoreBugFixtures.input())
 
+    /** Calls of the `bake` hook (S2 of the code review: never in low-end mode). */
+    private var bakes = 0
+
     private fun goalHooks(context: CoroutineContext = EmptyCoroutineContext) = GoalHooks(
         colours = { TeamColours(0xFF112233.toInt(), 0xFF445566.toInt(), 0xFF778899.toInt(), 0xFFAABBCC.toInt()) },
         begin = { _, _, _, _, _, _, _ -> },
-        bake = { null },
+        bake = { bakes++; null },
         glowAllowed = { _, _, _, _ -> true },
         probe = probe,
         context = context,
+        background = EmptyCoroutineContext,
     )
 
     private fun startGoalHost(lowEnd: Boolean = false, context: CoroutineContext = EmptyCoroutineContext) {
@@ -390,6 +395,65 @@ class ScoreBugDrawTest {
         repo.bug.value = goal()
         advance(100)
         assertTrue(probe.begins[0].still)
+    }
+
+    /** §8.2: in low-end mode `bakeGlow` is never called; otherwise once per size. */
+    @Test
+    fun lowEndModeNeverBakesTheGlow() {
+        startGoalHost(lowEnd = true)
+        repo.bug.value = goal()
+        advance(5000)
+        assertEquals("a goal ran", 1, probe.begins.size)
+        assertEquals("bake calls in low-end mode", 0, bakes)
+    }
+
+    @Test
+    fun theGlowIsBakedOncePerSizeOutsideLowEnd() {
+        startGoalHost()
+        repo.bug.value = goal()
+        advance(5000)
+        assertEquals("one bake for the one size", 1, bakes)
+        placement = ScoreBugFixtures.input(size = ScoreBugSize.LARGE)
+        // With the clock idle (no frame running), a plain test-thread write to [placement] is not applied until the
+        // global snapshot sends its notifications; the clock advance alone does not.
+        Snapshot.sendApplyNotifications()
+        advance(1000)
+        assertEquals("and one more for Large", 2, bakes)
+    }
+
+    /** N3 of the code review: nothing of the takeover is built (no bake) until a game is followed. */
+    @Test
+    fun nothingIsBakedUntilAGameIsFollowed() {
+        repo.bug.value = null
+        placement = ScoreBugFixtures.input(placing = true) // the sample bug is drawn, but no game is followed
+        rule.mainClock.autoAdvance = false
+        val hooks = goalHooks()
+        rule.setContent {
+            BoxDesignScale { ScoreBugWith(repo, placement, ScoreBugFixtures.noGeometry, false, Modifier, ScoreBugPlacement::place, hooks) }
+        }
+        advance(2000)
+        assertEquals("no bake for the sample bug", 0, bakes)
+        repo.bug.value = ScoreBugFixtures.view(clockSecs = 1200)
+        advance(500)
+        assertEquals("baked once the game is followed", 1, bakes)
+    }
+
+    /** N10 of the code review: the follow stopped (view → null) mid-takeover cancels; a re-follow never replays. */
+    @Test
+    fun aFollowStoppedMidTakeoverCancelsAndIsNotReplayed() {
+        startGoalHost()
+        repo.bug.value = goal()
+        advance(1000)
+        assertTrue(on())
+        repo.bug.value = null
+        advance(100)
+        assertTrue("cleared synchronously with the unfollow", !on())
+        advance(1000)
+        // The same game again, still carrying the mark: a first snapshot, so nothing plays.
+        repo.bug.value = goal()
+        advance(5000)
+        assertTrue(!on())
+        assertEquals(1, probe.begins.size)
     }
 
     private class FixedScale(override val scaleFactor: Float) : MotionDurationScale
