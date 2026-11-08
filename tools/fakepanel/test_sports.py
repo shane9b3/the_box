@@ -513,7 +513,7 @@ class TestPowerPlayTimeline(PpCase):
             ("CRIT", 3, False), ("LIVE", 4, False), ("LIVE", 5, False), ("OVER", 5, False), ("OFF", 5, False), ("FINAL", 5, False),
         ], seen)
         self.assertEqual(110, starts[("LIVE", 4, False)] - starts[("CRIT", 3, False)])
-        self.assertEqual(395, starts[("FINAL", 5, False)])
+        self.assertEqual(415, starts[("FINAL", 5, False)])
 
     def test_scales_with_the_timeline(self):
         self.panel.update_config({"sports_timeline_s": 720})

@@ -106,3 +106,17 @@ user's delay; nothing before puck drop.
     overlays keep their low-end snaps. To check on a real Stick: frame time during a takeover.
 Bug fix, same day: the NHL feed's `OVER` game state (just ended, before `FINAL`/`OFF`) was read as "not started", so
 the bug vanished in the closing minutes of the owner's test game. `OVER` now maps to FINAL.
+
+## Owner rulings: NFL bug (2026-11-08)
+Request: "lets add nfl". Mock-up: `design/nfl/Touchdown.dc.html` (assets in `design/nfl/assets/`): a wider pill with
+logo + score each side, quarter + clock, a down-and-distance column ("1st & 10"); a tab under the pill always showing
+possession and field position ("KC BALL | OWN 35", "KC BALL | EXTRA POINT", "KC KICKOFF"); a 3.6 s scoring takeover
+in the team's colours (lead wipe, streaks, a ball run for a touchdown, an arc and goalposts for kicks, letter-by-letter
+word, logo, "+6" and the tally), the pill glow, the tab flashing "TOUCHDOWN | KC +6", then the score pop.
+21. **Data: ESPN's public site API** (site.api.espn.com; free, no key, undocumented). A missing or changed field degrades
+    the bug (e.g. no down column) instead of failing it.
+22. **The possession tab is always on during play**; hidden in breaks (between quarters, halftime) and at Final.
+23. **Scores animated: touchdown +6, extra point +1, field goal +3, plus safety +2 and two-point conversion +2.** A
+    defensive or return touchdown is TOUCHDOWN.
+24. **Game list: a league switch** (NHL / NFL) at the top of the follow list; one league shown at a time; one game
+    followed at a time.

@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Football score bug scoring animations</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600;700;800&amp;family=Barlow+Condensed:ital,wght@1,800;1,900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#FFB81C}a:hover{color:#ffd36b}
+@keyframes tLead{0%{clip-path:inset(0 100% 0 0)}6%{clip-path:inset(0 0 0 0)}94%{clip-path:inset(0 0 0 0)}100%{clip-path:inset(0 0 0 100%)}}
+@keyframes tWipe{0%,3%{clip-path:inset(0 100% 0 0)}11%{clip-path:inset(0 0 0 0)}88%{clip-path:inset(0 0 0 0)}97%,100%{clip-path:inset(0 0 0 100%)}}
+@keyframes tFlash{0%,100%{opacity:0}50%{opacity:.42}}
+@keyframes tStreak{0%{transform:translateX(-160px) skewX(-24deg)}100%{transform:translateX(1160px) skewX(-24deg)}}
+@keyframes tBall{0%{opacity:0;transform:translate(-80px,37px) rotate(0deg)}15%{opacity:.4}85%{opacity:.4}100%{opacity:0;transform:translate(1060px,37px) rotate(900deg)}}
+@keyframes tArc{0%{opacity:0;transform:translate(40px,90px) scale(1) rotate(0deg)}10%{opacity:.55}50%{transform:translate(380px,-14px) scale(.75) rotate(360deg)}85%{opacity:.55}100%{opacity:0;transform:translate(690px,25px) scale(.45) rotate(720deg)}}
+@keyframes tPosts{0%{opacity:0;transform:translateY(16px)}100%{opacity:.4;transform:none}}
+@keyframes tPostsHit{0%,100%{opacity:.4}50%{opacity:.95}}
+@keyframes tLetter{0%{opacity:0;transform:translateY(46px) scale(1.9)}60%{opacity:1;transform:translateY(-4px) scale(.94)}100%{opacity:1;transform:none}}
+@keyframes tWord{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+@keyframes tSlideL{0%{opacity:0;transform:translateX(-36px)}100%{opacity:1;transform:none}}
+@keyframes tSlideR{0%{opacity:0;transform:translateX(36px) scale(.6)}70%{opacity:1;transform:translateX(-3px) scale(1.12)}100%{opacity:1;transform:none}}
+@keyframes tLogo{0%{opacity:0;transform:translateX(-60px) scale(.4) rotate(-25deg)}70%{opacity:1;transform:translateX(4px) scale(1.1) rotate(4deg)}100%{opacity:1;transform:none}}
+@keyframes tGlow{0%,100%{box-shadow:0 10px 30px rgba(0,0,0,.5),0 0 0 0 rgba(227,24,55,0)}15%,85%{box-shadow:0 10px 30px rgba(0,0,0,.5),0 0 40px 6px rgba(227,24,55,.55)}50%{box-shadow:0 10px 30px rgba(0,0,0,.5),0 0 90px 18px rgba(227,24,55,.8)}}
+@keyframes tTab{0%,100%{filter:brightness(1)}50%{filter:brightness(1.45)}}
+@keyframes tPopKc{0%{transform:scale(1.5);color:#FFB81C}40%{transform:scale(.9)}70%{transform:scale(1.06)}100%{transform:scale(1);color:#fff}}
+@keyframes tPopBuf{0%{transform:scale(1.5);color:#4f8bff}40%{transform:scale(.9)}70%{transform:scale(1.06)}100%{transform:scale(1);color:#fff}}
+.t-lead{animation:tLead 3.6s cubic-bezier(.7,0,.2,1) both}
+.t-wrap{animation:tWipe 3.6s cubic-bezier(.7,0,.2,1) both}
+.t-flash{animation:tFlash .3s ease-in-out .42s 4}
+.t-streak{animation:tStreak 1s cubic-bezier(.4,0,.2,1) .35s both}
+.t-streak2{animation:tStreak .8s cubic-bezier(.4,0,.2,1) 1.8s both}
+.t-ball{animation:tBall 1.3s cubic-bezier(.3,0,.3,1) .3s both}
+.t-arc{animation:tArc 1.4s cubic-bezier(.25,.1,.25,1) .3s both}
+.t-posts{animation:tPosts .4s ease-out .2s both,tPostsHit .3s ease-in-out 1.65s 3}
+.t-letter{display:inline-block;animation:tLetter .42s cubic-bezier(.2,.8,.2,1) both}
+.t-word{animation:tWord .5s ease-in-out 1.4s 3}
+.t-in-l{animation:tSlideL .45s cubic-bezier(.2,.8,.2,1) .8s both}
+.t-in-r{animation:tSlideR .5s cubic-bezier(.2,.8,.2,1) 1.1s both}
+.t-logo{animation:tLogo .6s cubic-bezier(.2,.8,.2,1) .45s both}
+.pill.glow{animation:tGlow 3.6s ease-in-out both}
+.tab.flash{animation:tTab .45s ease-in-out 8}
+.score.pop-kc{animation:tPopKc .9s cubic-bezier(.2,.8,.2,1) both}
+.score.pop-buf{animation:tPopBuf .9s cubic-bezier(.2,.8,.2,1) both}
+button{transition:background-color .15s,border-color .15s}
+button:focus-visible{outline:2px solid #FFB81C;outline-offset:3px}
+@media (prefers-reduced-motion: reduce){.t-flash,.t-streak,.t-streak2,.t-ball,.t-arc,.t-word{animation:none;opacity:0}.tab.flash,.t-posts{animation:none}.t-letter,.t-logo,.t-in-l,.t-in-r{animation-duration:.01s}}
+</style>
+</helmet>
+<div style="width: 1100px; height: 480px; box-sizing: border-box; background: #0e0e10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 44px; font-family: Inter, system-ui, sans-serif; color: #ffffff">
+<div style="position: relative; width: 980px; height: 190px">
+<div class="{{tabClass}}" style="position: absolute; left: 70px; right: 70px; top: 110px; height: 80px; border-radius: 0 0 36px 36px; background: {{tabBg}}; box-shadow: 0 8px 28px rgba(0,0,0,0.45); display: flex; align-items: flex-end; justify-content: center; padding-bottom: 10px; box-sizing: border-box">
+<div style="display: flex; align-items: center; gap: 18px; height: 36px">
+<svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 19.5c-1.5-5 1-10.5 5-13s8-2.5 10-2c1.5 5-1 10.5-5 13s-8 2.5-10 2z"></path><path d="M9 15l6-6"></path><path d="M10.5 11.5l2 2"></path><path d="M12 10l2 2"></path><path d="M9 13l2 2"></path></svg>
+<div style="font-weight: 800; font-size: 24px; letter-spacing: 0.02em">{{tabLeft}}</div>
+<div style="width: 2px; height: 26px; background: rgba(255,255,255,0.45)"></div>
+<div style="font-weight: 600; font-size: 24px; letter-spacing: 0.02em; color: #ffffff">{{tabRight}}</div>
+</div>
+</div>
+<div class="{{pillClass}}" style="position: absolute; left: 0; top: 0; width: 980px; height: 144px; border-radius: 999px; background: #1e1e21; border: 1px solid rgba(255,255,255,0.1); box-shadow: 0 10px 30px rgba(0,0,0,0.5); overflow: hidden; display: flex; align-items: center; padding: 0 34px; box-sizing: border-box">
+<div style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 22px">
+<img src="./assets/3bbd50edac45d15e8b4888e874011dbf.png" alt="Kansas City Chiefs" style="height: 78px; width: auto; display: block">
+<div class="{{kcClass}}" style="font-weight: 800; font-size: 74px; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -0.02em">{{kc}}</div>
+</div>
+<div style="width: 1px; height: 72px; background: rgba(255,255,255,0.2); margin: 0 22px"></div>
+<div style="width: 140px; display: flex; flex-direction: column; align-items: center; gap: 2px">
+<div style="font-weight: 600; font-size: 26px; line-height: 1; color: #a1a1a6">4th</div>
+<div style="font-weight: 700; font-size: 54px; line-height: 1; font-variant-numeric: tabular-nums">3:42</div>
+</div>
+<div style="width: 1px; height: 72px; background: rgba(255,255,255,0.2); margin: 0 22px"></div>
+<div style="width: 160px; text-align: center; font-weight: 700; font-size: 30px; white-space: nowrap">{{down}}</div>
+<div style="width: 1px; height: 72px; background: rgba(255,255,255,0.2); margin: 0 22px"></div>
+<div style="flex: 1; display: flex; align-items: center; justify-content: center; gap: 22px">
+<div class="{{bufClass}}" style="font-weight: 800; font-size: 74px; line-height: 1; font-variant-numeric: tabular-nums; letter-spacing: -0.02em">{{buf}}</div>
+<img src="./assets/a93d56206deaee9924dace155c9d15af.png" alt="Buffalo Bills" style="height: 76px; width: auto; display: block">
+</div>
+<sc-if value="{{showPlay}}" hint-placeholder-val="{{ false }}">
+<div class="t-lead" style="position: absolute; inset: 0; background: {{accent}}"></div>
+<div class="t-wrap" role="status" aria-label="{{ariaLabel}}" style="position: absolute; inset: 0; background: {{base}}; overflow: hidden; display: flex; align-items: center; gap: 28px; padding: 0 52px; box-sizing: border-box">
+<div class="t-streak" style="position: absolute; top: -30px; bottom: -30px; left: 0; width: 96px; background: {{accent}}; opacity: 0.6"></div>
+<div class="t-streak2" style="position: absolute; top: -30px; bottom: -30px; left: 0; width: 36px; background: #ffffff; opacity: 0.35"></div>
+<sc-if value="{{isKick}}" hint-placeholder-val="{{ false }}">
+<div class="t-posts" style="position: absolute; left: 669px; top: 18px; width: 81px; height: 108px">
+<svg width="81" height="108" viewBox="0 0 60 80" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M10 6V44"></path><path d="M50 6V44"></path><path d="M10 44H50"></path><path d="M30 44V78"></path></svg>
+</div>
+</sc-if>
+<div class="{{ballClass}}" style="position: absolute; top: 0; left: 0; width: 70px; height: 70px">
+<svg width="70" height="70" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 19.5c-1.5-5 1-10.5 5-13s8-2.5 10-2c1.5 5-1 10.5-5 13s-8 2.5-10 2z"></path><path d="M9 15l6-6"></path><path d="M10.5 11.5l2 2"></path><path d="M12 10l2 2"></path><path d="M9 13l2 2"></path></svg>
+</div>
+<div class="t-flash" style="position: absolute; inset: 0; background: #ffffff; opacity: 0"></div>
+<div class="t-logo" style="position: relative; width: 124px; flex: none; display: flex; justify-content: center">
+<sc-if value="{{isKc}}" hint-placeholder-val="{{ true }}"><img src="./assets/3bbd50edac45d15e8b4888e874011dbf.png" alt="" style="height: 84px; width: auto; display: block; filter: drop-shadow(0 4px 0 rgba(0,0,0,0.25))"></sc-if>
+<sc-if value="{{isBuf}}" hint-placeholder-val="{{ false }}"><img src="./assets/a93d56206deaee9924dace155c9d15af.png" alt="" style="height: 82px; width: auto; display: block; filter: drop-shadow(0 4px 0 rgba(0,0,0,0.25))"></sc-if>
+</div>
+<div style="position: relative; flex: 1; display: flex; flex-direction: column; align-items: center">
+<div class="t-in-l" style="font-weight: 700; font-size: 15px; letter-spacing: 0.26em; color: #ffffff">{{teamName}}</div>
+<div class="t-word" style="font-family: 'Barlow Condensed', Inter, sans-serif; font-style: italic; font-weight: 900; font-size: 86px; line-height: 0.86; letter-spacing: 0.03em; color: #ffffff; text-shadow: 0 4px 0 rgba(0,0,0,0.28); white-space: nowrap">
+<sc-for list="{{letters}}" as="l" hint-placeholder-count="9"><span class="t-letter" style="animation-delay: {{l.delay}}">{{l.c}}</span></sc-for>
+</div>
+</div>
+<div class="t-in-r" style="position: relative; display: flex; flex-direction: column; align-items: flex-end; gap: 4px">
+<div style="font-weight: 800; font-size: 56px; line-height: 1; color: #ffffff">{{pts}}</div>
+<div style="font-weight: 600; font-size: 14px; letter-spacing: 0.08em; color: #ffffff; white-space: nowrap">{{tally}}</div>
+</div>
+</div>
+</sc-if>
+</div>
+</div>
+<div style="display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; align-items: center">
+<div role="group" aria-label="Scoring team" style="display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: #1e1e21; border: 1px solid rgba(255,255,255,0.12)">
+<button type="button" aria-pressed="{{selKc}}" onClick="{{pickKc}}" style="height: 40px; padding: 0 18px; border-radius: 999px; border: none; background: {{kcBtnBg}}; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 700; font-size: 15px; cursor: pointer">Chiefs</button>
+<button type="button" aria-pressed="{{selBuf}}" onClick="{{pickBuf}}" style="height: 40px; padding: 0 18px; border-radius: 999px; border: none; background: {{bufBtnBg}}; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 700; font-size: 15px; cursor: pointer">Bills</button>
+</div>
+<button type="button" onClick="{{playTd}}" style="height: 44px; padding: 0 20px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.25); background: #2a2a2e; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">Touchdown +6</button>
+<button type="button" onClick="{{playXp}}" style="height: 44px; padding: 0 20px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.25); background: #2a2a2e; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">Extra point +1</button>
+<button type="button" onClick="{{playFg}}" style="height: 44px; padding: 0 20px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.25); background: #2a2a2e; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">Field goal +3</button>
+<button type="button" onClick="{{reset}}" style="height: 44px; padding: 0 20px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">Reset 24–17</button>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"autoplay":{"editor":"boolean","default":true},"$preview":{"width":1100,"height":480}}'>
+class Component extends DCLogic {
+  state = { kc: 24, buf: 17, phase: 'idle', kind: 'TD', team: 'KC', sel: 'KC', poss: 'KC', down: '1st & 10', tabL: 'KC BALL', tabR: 'OWN 35' };
+  componentDidMount() {
+    this.timers = [];
+    this.loopTimers = [];
+    if (this.props.autoplay ?? true) this.loopTimers.push(setTimeout(() => this.cycle(), 900));
+  }
+  componentWillUnmount() {
+    this.clearTimers();
+    this.stopLoop();
+  }
+  clearTimers() {
+    (this.timers || []).forEach(clearTimeout);
+    this.timers = [];
+  }
+  stopLoop() {
+    (this.loopTimers || []).forEach(clearTimeout);
+    this.loopTimers = [];
+  }
+  initial() {
+    return { kc: 24, buf: 17, phase: 'idle', poss: 'KC', down: '1st & 10', tabL: 'KC BALL', tabR: 'OWN 35' };
+  }
+  cycle() {
+    this.setState(this.initial());
+    this.play('TD', 'KC');
+    this.loopTimers.push(setTimeout(() => this.play('XP', 'KC'), 5200));
+    this.loopTimers.push(setTimeout(() => this.play('FG', 'BUF'), 10400));
+    this.loopTimers.push(setTimeout(() => this.cycle(), 16200));
+  }
+  play(kind, team) {
+    const pts = { TD: 6, XP: 1, FG: 3 }[kind];
+    this.clearTimers();
+    this.setState({ phase: 'idle' });
+    this.timers.push(setTimeout(() => {
+      this.setState((s) => ({
+        phase: 'play',
+        kind: kind,
+        team: team,
+        poss: team,
+        kc: team === 'KC' ? s.kc + pts : s.kc,
+        buf: team === 'BUF' ? s.buf + pts : s.buf
+      }));
+      const next = kind === 'TD'
+        ? { phase: 'after', down: 'PAT', tabL: team + ' BALL', tabR: 'EXTRA POINT' }
+        : { phase: 'after', down: 'KICKOFF', tabL: team + ' KICKOFF', tabR: 'OWN 35' };
+      this.timers.push(setTimeout(() => this.setState(next), 3600));
+      this.timers.push(setTimeout(() => this.setState({ phase: 'idle' }), 4600));
+    }, 40));
+  }
+  manual(kind) {
+    this.stopLoop();
+    this.play(kind, this.state.sel);
+  }
+  reset() {
+    this.stopLoop();
+    this.clearTimers();
+    this.setState(this.initial());
+  }
+  renderVals() {
+    const s = this.state;
+    const teams = {
+      KC: { base: '#E31837', accent: '#FFB81C', name: 'KANSAS CITY CHIEFS', tab: 'linear-gradient(180deg, #4a0710 0%, #a8122a 55%, #E31837 100%)' },
+      BUF: { base: '#00338D', accent: '#C60C30', name: 'BUFFALO BILLS', tab: 'linear-gradient(180deg, #071533 0%, #00287a 55%, #0040b0 100%)' }
+    };
+    const plays = {
+      TD: { word: 'TOUCHDOWN', pts: 6 },
+      XP: { word: 'EXTRA POINT', pts: 1 },
+      FG: { word: 'FIELD GOAL', pts: 3 }
+    };
+    const t = teams[s.team] || teams.KC;
+    const p = teams[s.poss] || teams.KC;
+    const pl = plays[s.kind] || plays.TD;
+    const inPlay = s.phase === 'play';
+    const after = s.phase === 'after';
+    const letters = pl.word.split('').map((c, i) => ({
+      c: c === ' ' ? ' ' : c,
+      delay: (0.42 + i * 0.055).toFixed(3) + 's'
+    }));
+    return {
+      kc: s.kc,
+      buf: s.buf,
+      down: s.down,
+      showPlay: inPlay,
+      isKc: s.team === 'KC',
+      isBuf: s.team === 'BUF',
+      isKick: s.kind !== 'TD',
+      ballClass: s.kind === 'TD' ? 't-ball' : 't-arc',
+      letters: letters,
+      pts: '+' + pl.pts,
+      ariaLabel: t.name + ' ' + pl.word.toLowerCase(),
+      pillClass: inPlay ? 'pill glow' : 'pill',
+      tabClass: inPlay ? 'tab flash' : 'tab',
+      tabBg: inPlay ? t.tab : p.tab,
+      tabLeft: inPlay ? pl.word : s.tabL,
+      tabRight: inPlay ? s.team + ' +' + pl.pts : s.tabR,
+      kcClass: after && s.team === 'KC' ? 'score pop-kc' : 'score',
+      bufClass: after && s.team === 'BUF' ? 'score pop-buf' : 'score',
+      base: t.base,
+      accent: t.accent,
+      teamName: t.name,
+      tally: 'KC ' + s.kc + '  ·  BUF ' + s.buf,
+      selKc: s.sel === 'KC' ? 'true' : 'false',
+      selBuf: s.sel === 'BUF' ? 'true' : 'false',
+      kcBtnBg: s.sel === 'KC' ? '#E31837' : 'transparent',
+      bufBtnBg: s.sel === 'BUF' ? '#00338D' : 'transparent',
+      pickKc: () => this.setState({ sel: 'KC' }),
+      pickBuf: () => this.setState({ sel: 'BUF' }),
+      playTd: () => this.manual('TD'),
+      playXp: () => this.manual('XP'),
+      playFg: () => this.manual('FG'),
+      reset: () => this.reset()
+    };
+  }
+}
+</script>
+</body>
+</html>

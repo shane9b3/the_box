@@ -258,7 +258,7 @@ off every body is byte-for-byte as before). The featured game then plays `PP_SEG
 landing carries `summary.scoring` (one entry per started period, goals so far with the score after each, `timeInPeriod`
 = the goal's segment second as `MM:SS`, `situationCode` = the code just before the goal, `1551` at even strength; the
 shootout winner is not an entry). Times are segment seconds at 360 (they scale with `sports_timeline_s`); the 3rd period
-runs **110 s** instead of 60 (the timeline is 50 s longer: about 395 s at 360).
+runs **110 s** instead of 60, and a 20 s `OVER` step precedes OFF (the timeline is 70 s longer: about 415 s at 360).
 
 | Segment | Events |
 |---|---|
