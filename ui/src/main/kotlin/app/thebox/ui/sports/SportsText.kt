@@ -6,7 +6,9 @@ import app.thebox.core.sports.FailKind
 import app.thebox.core.sports.FollowedGame
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
+import app.thebox.core.sports.LeagueDetail
 import app.thebox.core.sports.League
+import app.thebox.core.sports.NflBreak
 import app.thebox.core.sports.PeriodKind
 import app.thebox.core.sports.PeriodLabel
 import app.thebox.core.sports.RemoveReason
@@ -26,7 +28,8 @@ import java.util.Locale
  * string is in `strings_sports.xml`; nothing here allocates per frame (the bug's clock uses its own digit table).
  *
  * (NFL commit 0, docs/design/m6-nfl.md §2 S4) The league-dependent functions take a trailing `league` defaulted to the
- * NHL, so every NHL call is unchanged; their NFL bodies are WP-5's (until then the NFL reads the NHL words).
+ * NHL, so every NHL call is unchanged; (NFL WP-5) their NFL bodies: "4th", "Halftime", "End 3rd", "Sun 1:00 PM", the
+ * week label and ESPN's failure and removal texts.
  */
 object SportsText {
     /** `m:ss` below 10:00, `mm:ss` from 10:00 (§4.5); negative values read 0:00. */
@@ -38,12 +41,12 @@ object SportsText {
     }
 
     /** "1st" / "2nd" / "3rd", "OT" / "2OT", "SO". */
-    @Suppress("UNUSED_PARAMETER") // NFL WP-5: REG 4 is sports_period_4
     fun period(res: Resources, p: PeriodLabel, league: League = League.NHL): String = when (p.kind) {
         PeriodKind.REG -> when (p.number) {
             1 -> res.getString(R.string.sports_period_1)
             2 -> res.getString(R.string.sports_period_2)
             3 -> res.getString(R.string.sports_period_3)
+            4 -> if (league == League.NFL) res.getString(R.string.sports_period_4) else res.getString(R.string.sports_period_n, p.number) // NFL: "4th", the NHL keeps "P4"
             else -> res.getString(R.string.sports_period_n, p.number)
         }
         PeriodKind.OT -> if (p.number <= 1) res.getString(R.string.sports_period_ot) else res.getString(R.string.sports_period_ot_n, p.number)
@@ -73,9 +76,9 @@ object SportsText {
      */
     fun centre(res: Resources, c: CentreText, view: ScoreBugView, secs: Int): String = when (c) {
         CentreText.Clock -> clock(secs)
-        is CentreText.Period -> period(res, c.period)
-        is CentreText.Intermission -> res.getString(R.string.sports_intermission, period(res, c.period))
-        is CentreText.EndOf -> res.getString(R.string.sports_end_of, period(res, c.period))
+        is CentreText.Period -> period(res, c.period, view.league)
+        is CentreText.Intermission -> res.getString(R.string.sports_intermission, period(res, c.period, view.league))
+        is CentreText.EndOf -> res.getString(R.string.sports_end_of, period(res, c.period, view.league))
         CentreText.Shootout -> res.getString(R.string.sports_period_so)
         is CentreText.Final -> final(res, c.kind)
         CentreText.NoUpdate -> res.getString(R.string.sports_no_update)
@@ -114,36 +117,91 @@ object SportsText {
     /**
      * A game's state words for the picker and the cards: "2nd 10:22", "1st INT", "SO", "Final/OT", "7:00 PM". The clock is
      * the snapshot's own value (owner ruling 6: nothing counts down between updates).
+     *
+     * (NFL §7.2) For the NFL: "Sun 1:00 PM" (weekday and time in the device zone) when the game is not today, else
+     * "1:00 PM"; "Halftime"; "End 3rd" in a quarter break; "4th 3:42" live. [nowMs] only decides "today" for a start time.
      */
-    @Suppress("UNUSED_PARAMETER") // NFL WP-5: "Halftime", "End 3rd", "Sun 1:00 PM"
-    fun state(res: Resources, g: GameSnapshot, clock24: Boolean, league: League = League.NHL): String {
+    fun state(res: Resources, g: GameSnapshot, clock24: Boolean, league: League = League.NHL, nowMs: Long = System.currentTimeMillis()): String {
+        val nfl = league == League.NFL || g.id.league == League.NFL
+        val lg = if (nfl) League.NFL else League.NHL
         val p = periodOf(g)
         val clockSecs = g.clock?.secondsRemaining ?: 0
         return when (g.phase) {
-            GamePhase.SCHEDULED, GamePhase.PRE -> startTime(g.startUtcMs, clock24)
+            GamePhase.SCHEDULED, GamePhase.PRE -> if (nfl) nflStart(g.startUtcMs, clock24, nowMs) else startTime(g.startUtcMs, clock24)
             GamePhase.POSTPONED -> res.getString(R.string.sports_postponed)
             GamePhase.FINAL -> final(res, g.finalKind)
-            GamePhase.INTERMISSION -> if (p != null) res.getString(R.string.sports_intermission, period(res, p)) else clock(clockSecs)
+            GamePhase.INTERMISSION -> when {
+                nfl -> {
+                    val kind = (g.detail as? LeagueDetail.Nfl)?.breakKind
+                    when {
+                        kind == NflBreak.HALFTIME -> res.getString(R.string.sports_halftime)
+                        p != null -> res.getString(R.string.sports_end_of, period(res, p, lg))
+                        else -> clock(clockSecs)
+                    }
+                }
+                p != null -> res.getString(R.string.sports_intermission, period(res, p))
+                else -> clock(clockSecs)
+            }
             GamePhase.LIVE -> when {
                 p == null -> res.getString(R.string.sports_live)
-                p.kind == PeriodKind.SO -> period(res, p)
-                g.clock?.inIntermission == true -> res.getString(R.string.sports_intermission, period(res, p))
-                else -> res.getString(R.string.sports_picker_live_state, period(res, p), clock(clockSecs))
+                p.kind == PeriodKind.SO -> period(res, p, lg)
+                g.clock?.inIntermission == true -> res.getString(R.string.sports_intermission, period(res, p, lg))
+                else -> res.getString(R.string.sports_picker_live_state, period(res, p, lg), clock(clockSecs))
             }
         }
     }
 
+    /**
+     * (NFL §7.2) A scheduled game's start: "1:00 PM" when it is today in the device zone, else "Sun 1:00 PM" (12 h) /
+     * "Sun 13:00" (24 h).
+     */
+    fun nflStart(startUtcMs: Long, clock24: Boolean, nowMs: Long = System.currentTimeMillis(), locale: Locale = Locale.getDefault()): String {
+        val zone = java.time.ZoneId.systemDefault()
+        val today = java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+        val day = java.time.Instant.ofEpochMilli(startUtcMs).atZone(zone).toLocalDate()
+        val time = if (clock24) "HH:mm" else "h:mm a"
+        return TimeFormats.format(if (day == today) time else "EEE $time", locale, Date(startUtcMs))
+    }
+
+    private val WEEK_KEY = Regex("^w(\\d{4})-(\\d)-(\\d{1,2})$")
+
+    /** True for an NFL week key ("w2026-2-9"; the one grammar is `EspnMapper.weekKey`). */
+    fun isWeekKey(key: String): Boolean = WEEK_KEY.matches(key)
+
+    /**
+     * (NFL §7.2, S4) The label of a week key: "Week 9", "Wild Card", "Divisional Round", "Conference Championship",
+     * "Super Bowl" (postseason weeks 1, 2, 3, 4/5), "Preseason week 2". The board carries no label of its own,
+     * so it is derived from the key; a key that cannot be read says "NFL" and is never drawn raw.
+     */
+    fun weekLabel(res: Resources, key: String): String {
+        val m = WEEK_KEY.matchEntire(key) ?: return res.getString(R.string.sports_week_unknown)
+        val type = m.groupValues[2].toInt()
+        val week = m.groupValues[3].toInt()
+        return when (type) {
+            2 -> res.getString(R.string.sports_week_n, week)
+            1 -> res.getString(R.string.sports_week_preseason, week)
+            3 -> when (week) {
+                1 -> res.getString(R.string.sports_week_wild_card)
+                2 -> res.getString(R.string.sports_week_divisional)
+                3 -> res.getString(R.string.sports_week_conference)
+                4, 5 -> res.getString(R.string.sports_week_super_bowl) // the calendar numbers it 4; ESPN's playoff weeks also use 5
+                else -> res.getString(R.string.sports_week_unknown)
+            }
+            else -> res.getString(R.string.sports_week_unknown)
+        }
+    }
+
     /** A picker game row: "CGY 0–2 EDM · 2nd 10:22" / "CGY – EDM · 7:00 PM" (U-N9). */
-    fun pickerGame(res: Resources, g: GameSnapshot, clock24: Boolean): String = when (g.phase) {
+    fun pickerGame(res: Resources, g: GameSnapshot, clock24: Boolean, nowMs: Long = System.currentTimeMillis()): String = when (g.phase) {
         GamePhase.SCHEDULED, GamePhase.PRE ->
-            res.getString(R.string.sports_picker_game_upcoming, g.away.abbrev, g.home.abbrev, startTime(g.startUtcMs, clock24))
+            res.getString(R.string.sports_picker_game_upcoming, g.away.abbrev, g.home.abbrev, state(res, g, clock24, nowMs = nowMs))
         GamePhase.POSTPONED ->
             res.getString(R.string.sports_picker_game_upcoming, g.away.abbrev, g.home.abbrev, res.getString(R.string.sports_postponed))
-        else -> res.getString(R.string.sports_picker_game_live, scoreLine(res, g), state(res, g, clock24))
+        else -> res.getString(R.string.sports_picker_game_live, scoreLine(res, g), state(res, g, clock24, nowMs = nowMs))
     }
 
     /** A board's date for the picker divider when it is not today's (U-B1): "Wed, Nov 4"; the key itself if unreadable. */
-    @Suppress("UNUSED_PARAMETER") // NFL WP-5: the week label, never a raw week key (S4)
+    @Suppress("UNUSED_PARAMETER") // NFL week keys take [weekLabel] (it needs Resources); a date key reads the same in both leagues
     fun dayLabel(dayKey: String, locale: Locale = Locale.getDefault(), league: League = League.NHL): String =
         runCatching { java.time.LocalDate.parse(dayKey).format(java.time.format.DateTimeFormatter.ofPattern("EEE, MMM d", locale)) }
             .getOrDefault(dayKey)
@@ -164,9 +222,13 @@ object SportsText {
     }
 
     /** §5.4: the day list's failure text (no network vs NHL.com did not answer). */
-    @Suppress("UNUSED_PARAMETER") // NFL WP-5: sports_failed_espn
-    fun failure(res: Resources, kind: FailKind, league: League = League.NHL): String =
-        res.getString(if (kind == FailKind.OFFLINE) R.string.sports_no_network else R.string.sports_failed)
+    fun failure(res: Resources, kind: FailKind, league: League = League.NHL): String = res.getString(
+        when {
+            kind == FailKind.OFFLINE -> R.string.sports_no_network
+            league == League.NFL -> R.string.sports_failed_espn
+            else -> R.string.sports_failed
+        },
+    )
 
     /** The toast of a repository event (§2.6, §5.3, U-S12); always a reason and a next step. */
     fun toast(res: Resources, e: ScoreEvent): String = when (e) {
@@ -176,10 +238,10 @@ object SportsText {
         is ScoreEvent.Removed -> removed(res, e.why, e.game, e.game.league)
     }
 
-    @Suppress("UNUSED_PARAMETER") // NFL WP-5: sports_toast_not_listed_espn
     private fun removed(res: Resources, why: RemoveReason, g: FollowedGame, league: League = League.NHL): String = when (why) {
         RemoveReason.POSTPONED -> res.getString(R.string.sports_toast_postponed, g.away, g.home)
-        RemoveReason.NOT_LISTED -> res.getString(R.string.sports_toast_not_listed, g.away, g.home)
+        RemoveReason.NOT_LISTED ->
+            res.getString(if (league == League.NFL) R.string.sports_toast_not_listed_espn else R.string.sports_toast_not_listed, g.away, g.home)
         RemoveReason.SPORTS_OFF -> res.getString(R.string.sports_toast_sports_off)
     }
 }

@@ -375,11 +375,19 @@ sealed interface PickerChoice {
      * (Fix pass, U-B1) Non-selectable divider for a board that is not today's ([dayKey] "2026-11-04"): its date, never
      * "Today". Shown only until the picker's own `/score/now` answer replaces that board.
      */
-    data class ScoreDayDivider(val dayKey: String) : PickerChoice
+    data class ScoreDayDivider(
+        val dayKey: String,
+        /** (NFL WP-5 amendment, §7.3) The NFL's current week: the divider reads "This week". */
+        val current: Boolean = false,
+    ) : PickerChoice
     /** Non-selectable "Loading games…". */
     data object ScoreLoading : PickerChoice
     /** The §5.4 failure text; OK retries ([PlayerEffects.retryScores]). */
-    data class ScoreFailed(val kind: app.thebox.core.sports.FailKind) : PickerChoice
+    data class ScoreFailed(
+        val kind: app.thebox.core.sports.FailKind,
+        /** (NFL WP-5 amendment, §7.3) The shown league: picks "NHL.com" or "ESPN" in the failure text. */
+        val league: app.thebox.core.sports.League = app.thebox.core.sports.League.NHL,
+    ) : PickerChoice
     /** A SCORE_DELAY row (one of `SportsConstants.DELAY_STEPS_S`; 0 = "Off"). */
     data class ScoreDelayChoice(val delaySec: Int) : PickerChoice
     /**
@@ -625,6 +633,8 @@ interface PlayerEffects {
     /** Place mode's OK / Back: persist the corner. */
     fun setScoreCorner(c: app.thebox.core.sports.ScoreCorner) = Unit
     fun setScoreDelay(sec: Int) = Unit
+    /** (NFL WP-5 amendment, §7.1) The picker's League row: writes `SportsPrefs.league`; the repository reloads that league's board. */
+    fun setScoreLeague(league: app.thebox.core.sports.League) = Unit
     /** The SCORE_BUG sheet opened / closed: demand `SCORE_PICKER` (§2.3). */
     fun scorePicker(open: Boolean) = Unit
     /** OK on the picker's failure row. */

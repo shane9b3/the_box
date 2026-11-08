@@ -1565,6 +1565,14 @@ Review: `docs/review/2026-11-08-nfl-design-review.md`. Owner rulings 25–28 are
 | N10 | taken | the `EspnGameDto` for `game()` skips the calendar | §1.3, §1.5 |
 | Q1–Q3 | owner rulings 25–27 | see §14 | §14 |
 
+## Lead amendment (WP-5)
+Commit 0 lacked what the picker's League row needs. The lead approved these additions, all trailing and defaulted (no
+existing test changes): `ScoreFacts.league: League? = null` (null = no League row); `PlayerEffects.setScoreLeague(League)`
+(no-op default; `PlayerEffectsImpl` writes `updateSports { copy(league = it) }`, `FakePlayer` records it);
+`PlayerViewModel.forwardScores` passes `league = p.league`; `PickerChoice.ScoreFailed(kind, league = NHL)` and
+`PickerChoice.ScoreDayDivider(dayKey, current = false)`, so the NFL texts ("ESPN did not answer", "This week" / the week
+label) reach `PlayerText` without a `PickerSheet` change.
+
 ## Lead sign-off (2026-11-08)
 Accepted as revised, with these rulings on §14:
 1. **Pre-game cadence after the coin toss: overridden.** A body whose ESPN state is `in` but which the S8 rule maps to

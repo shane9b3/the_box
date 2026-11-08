@@ -38,6 +38,7 @@ import app.thebox.core.sports.DayState
 import app.thebox.core.sports.FollowedGame
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
+import app.thebox.core.sports.League
 import app.thebox.core.sports.ScoreCorner
 import app.thebox.core.sports.ScoreFacts
 import app.thebox.core.sports.ScorePlaceState
@@ -2076,22 +2077,36 @@ class PlayerStateMachineImpl(
         val out = ArrayList<PickerChoice>()
         val followed = f.game
         if (followed != null) out += PickerChoice.ScoreGame(board?.games?.firstOrNull { it.id == followed.id } ?: stubOf(followed), followed = true)
+        // (NFL §7.3, ruling 24) The League row is second, after the followed game; absent until the host reports a league.
+        val league = f.league
+        if (league != null) out += PickerChoice.ScoreLeagueRow(league)
         out += PickerChoice.ScoreCornerRow(f.corner)
         out += PickerChoice.ScoreDelayRow(f.delaySec)
         if (followed != null) out += PickerChoice.ScoreStop
+        val nfl = league == League.NFL
         val others = board?.games.orEmpty().filter { followed == null || it.id != followed.id }
             .sortedWith(compareBy({ groupOf(it.phase) }, { it.startUtcMs }))
         when (val d = f.day) {
-            DayState.Loading -> { out += PickerChoice.ScoreTodayDivider; out += PickerChoice.ScoreLoading }
-            is DayState.Failed -> { out += PickerChoice.ScoreTodayDivider; out += PickerChoice.ScoreFailed(d.kind) }
+            DayState.Loading -> { out += todayDivider(nfl); out += PickerChoice.ScoreLoading }
+            is DayState.Failed -> { out += todayDivider(nfl); out += PickerChoice.ScoreFailed(d.kind, league ?: League.NHL) }
             is DayState.Board -> if (others.isNotEmpty()) {
                 // U-B1: the divider names the board's own day unless it is today's.
-                out += if (d.isToday) PickerChoice.ScoreTodayDivider else PickerChoice.ScoreDayDivider(d.board.dayKey)
+                // NFL §7.3 (S4): a week board (key "w2026-2-9") always names its week, never the raw key or "Today".
+                val week = d.board.dayKey.matches(Regex("w\\d{4}-\\d-\\d{1,2}"))
+                out += when {
+                    week -> PickerChoice.ScoreDayDivider(d.board.dayKey, current = d.isToday) // "This week" / its label
+                    d.isToday -> PickerChoice.ScoreTodayDivider
+                    else -> PickerChoice.ScoreDayDivider(d.board.dayKey)
+                }
                 others.forEach { out += PickerChoice.ScoreGame(it, followed = false) }
             }
         }
         return out
     }
+
+    /** "Today", or for the NFL "This week" (a current-week divider with no key yet). */
+    private fun todayDivider(nfl: Boolean): PickerChoice =
+        if (nfl) PickerChoice.ScoreDayDivider("", current = true) else PickerChoice.ScoreTodayDivider
 
     /** Live first, then upcoming, then final; a postponed game last. */
     private fun groupOf(p: GamePhase): Int = when (p) {
@@ -2132,6 +2147,17 @@ class PlayerStateMachineImpl(
             }
             PickerChoice.ScoreStop -> { effects.followGame(null); closeLayer() }
             is PickerChoice.ScoreFailed -> effects.retryScores()
+            is PickerChoice.ScoreLeagueRow -> {
+                // NFL §7.3: OK toggles the shown league; the board reloads under a Loading row and focus stays on this row.
+                val next = if (c.league == League.NHL) League.NFL else League.NHL
+                effects.setScoreLeague(next)
+                scoreFacts = scoreFacts.copy(league = next, day = DayState.Loading) // shown at once; the repository's flow confirms it
+                val p = picker
+                if (p != null) {
+                    val choices = choicesFor(p.kind, menu)
+                    picker = p.copy(choices = choices, current = currentChoice(p.kind, choices), focused = choices.indexOfFirst { it is PickerChoice.ScoreLeagueRow }.coerceAtLeast(0))
+                }
+            }
             is PickerChoice.ScoreDelayChoice -> {
                 effects.setScoreDelay(c.delaySec)
                 scoreFacts = scoreFacts.copy(delaySec = c.delaySec) // shown at once; the repository's flow confirms it

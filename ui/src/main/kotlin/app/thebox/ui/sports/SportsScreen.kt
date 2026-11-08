@@ -52,12 +52,14 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.thebox.core.guide.FooterHint
 import app.thebox.core.sports.FailKind
+import app.thebox.core.sports.League
 import app.thebox.core.sports.ScoreCorner
 import app.thebox.core.sports.SportsConstants
 import app.thebox.ui.R
 import app.thebox.ui.guide.screen.Chip
 import app.thebox.ui.guide.screen.FooterHints
 import app.thebox.ui.guide.screen.GuideUi
+import app.thebox.ui.full.PlayerText
 import app.thebox.ui.guide.screen.Line
 import app.thebox.ui.theme.DesignTokens
 import androidx.tv.material3.Text
@@ -73,6 +75,8 @@ const val SPORTS_MESSAGE_TAG = "sports_message"
 const val SPORTS_UPDATED_TAG = "sports_updated"
 const val SPORTS_SKELETON_TAG = "sports_skeleton"
 const val SPORTS_GRID_TAG = "sports_grid"
+const val SPORTS_WEEK_TAG = "sports_week"
+internal fun sportsLeagueTag(league: League) = "sports_league:" + league.name
 internal fun sportsDayTag(day: SportsDay) = "sports_day:" + day.name
 internal fun sportsMenuItemTag(i: Int) = "sports_menu_item:$i"
 
@@ -95,6 +99,10 @@ private const val SCROLL_MARGIN = 64
  * footer; the footer with a dynamic OK hint from the focused card.
  *
  * Initial focus: the followed game, else the first live card, else the Today chip.
+ *
+ * (NFL WP-5, docs/design/m6-nfl.md §7.3) The title row carries the NHL · NFL league chips (the selected one filled); Corner
+ * and Delay stay right-aligned, and Up from the day chips still lands on Corner, from where Left reaches the league chips.
+ * For the NFL the day chips read Last week · This week · Next week and a neighbour the board did not name is disabled.
  */
 @Composable
 fun SportsScreen(
@@ -126,6 +134,8 @@ fun SportsScreen(
 
     LaunchedEffect(Unit) { runCatching { dayChips.getValue(SportsDay.TODAY).requestFocus() } }
     LaunchedEffect(menu) { onBackFreeChanged(menu == null) }
+    // A league switch lists the new league from its top.
+    LaunchedEffect(ui.prefs.league) { gridState.requestScrollToItem(0) }
 
     // Initial focus (§5.1): once, when the first board arrives. A load that shows nothing leaves the Today chip focused.
     val body = ui.body
@@ -165,12 +175,12 @@ fun SportsScreen(
             },
     ) {
         Column(Modifier.fillMaxSize().padding(start = 96.dp, end = 96.dp, top = 56.dp, bottom = 40.dp)) {
-            TitleRow(ui, corner, delayChip, selectedChip, chips = !off, onOpen = { menu = it })
+            TitleRow(ui, corner, delayChip, selectedChip, chips = !off, onOpen = { menu = it }, onLeague = viewModel::onLeague)
             Spacer(Modifier.height(4.dp))
             CreditRow(ui)
             Spacer(Modifier.height(24.dp))
             // U-N4: with Show Sports off there is nothing to pick: no day chips (and no Corner / Delay chips).
-            if (off) Spacer(Modifier.height(DAY_CHIP_H.dp)) else DayChips(ui.day, dayChips, corner) { day ->
+            if (off) Spacer(Modifier.height(DAY_CHIP_H.dp)) else DayChips(ui, dayChips, corner) { day ->
                 settled = true
                 viewModel.onDay(day)
             }
@@ -188,8 +198,8 @@ fun SportsScreen(
                         },
                         onCard = viewModel::onCard,
                     )
-                    is SportsBody.Empty -> Message(emptyText(b), retry = false, onRetry = {})
-                    is SportsBody.Failed -> Message(SportsText.failure(res, b.kind), retry = true, onRetry = {
+                    is SportsBody.Empty -> Message(emptyText(b, ui), retry = false, onRetry = {})
+                    is SportsBody.Failed -> Message(SportsText.failure(res, b.kind, ui.prefs.league), retry = true, onRetry = {
                         // U-S3: the Retry chip leaves with the Failed body, so focus moves to the selected day chip
                         // first, and the initial-focus rule runs again for the board that answers.
                         runCatching { selectedChip.requestFocus() }
@@ -224,10 +234,14 @@ fun SportsScreen(
 }
 
 @Composable
-private fun emptyText(b: SportsBody.Empty): String = when (b.day) {
-    SportsDay.YESTERDAY -> stringResource(R.string.sports_empty_yesterday)
-    SportsDay.TODAY -> stringResource(R.string.sports_empty_today)
-    SportsDay.TOMORROW -> stringResource(R.string.sports_empty_tomorrow)
+private fun emptyText(b: SportsBody.Empty, ui: SportsUiState): String = when {
+    // NFL §7.2: the off-season has no neighbour either way ("No NFL games this week."); a quiet week points at the chips.
+    ui.prefs.league == League.NFL -> stringResource(if (!ui.canPrev && !ui.canNext) R.string.sports_week_off else R.string.sports_empty_week)
+    else -> when (b.day) {
+        SportsDay.YESTERDAY -> stringResource(R.string.sports_empty_yesterday)
+        SportsDay.TODAY -> stringResource(R.string.sports_empty_today)
+        SportsDay.TOMORROW -> stringResource(R.string.sports_empty_tomorrow)
+    }
 }
 
 /** `← → ↑ ↓ Browse · OK Follow score / OK Stop following (from the focused card) · Back Guide` (U-S9). */
@@ -242,13 +256,41 @@ private fun footerOf(res: android.content.res.Resources, focused: GameCardModel?
 // ------------------------------------------------------------------ title row
 
 @Composable
-private fun TitleRow(ui: SportsUiState, corner: FocusRequester, delayChip: FocusRequester, down: FocusRequester, chips: Boolean, onOpen: (ChipMenu) -> Unit) {
+private fun TitleRow(
+    ui: SportsUiState,
+    corner: FocusRequester,
+    delayChip: FocusRequester,
+    down: FocusRequester,
+    chips: Boolean,
+    onOpen: (ChipMenu) -> Unit,
+    onLeague: (League) -> Unit,
+) {
     val res = LocalResources.current
+    val leagueChips = remember { League.entries.associateWith { FocusRequester() } }
     Row(Modifier.fillMaxWidth().height(60.dp), verticalAlignment = Alignment.CenterVertically) {
         Line(stringResource(R.string.sports_title), GuideUi.sans(44, FontWeight.SemiBold))
         Spacer(Modifier.width(16.dp))
-        Box(Modifier.background(GuideUi.White08, RoundedCornerShape(DesignTokens.Radii.Chip)).padding(horizontal = 14.dp, vertical = 5.dp)) {
-            Line(stringResource(R.string.sports_league_nhl), GuideUi.sans(22, FontWeight.SemiBold, GuideUi.Fg70))
+        if (!chips) {
+            // Show Sports off: nothing to pick, so the league reads as the static pill it was.
+            Box(Modifier.background(GuideUi.White08, RoundedCornerShape(DesignTokens.Radii.Chip)).padding(horizontal = 14.dp, vertical = 5.dp)) {
+                Line(stringResource(R.string.sports_league_nhl), GuideUi.sans(22, FontWeight.SemiBold, GuideUi.Fg70))
+            }
+        } else {
+            // NFL §7.3 (ruling 24): NHL · NFL, the shown one filled, 22/600, height 52. Up is consumed; Down reaches the day chips.
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                League.entries.forEach { league ->
+                    FocusChip(
+                        text = PlayerText.leagueName(res, league),
+                        requester = leagueChips.getValue(league),
+                        tag = sportsLeagueTag(league),
+                        down = down,
+                        selected = league == ui.prefs.league,
+                        textPx = 22,
+                        weight = FontWeight.SemiBold,
+                        onClick = { onLeague(league) },
+                    )
+                }
+            }
         }
         Spacer(Modifier.weight(1f))
         if (!chips) return@Row
@@ -281,6 +323,9 @@ private fun FocusChip(
     selected: Boolean = false,
     height: Int = CHIP_H,
     textPx: Int = 24,
+    weight: FontWeight = FontWeight.Medium,
+    /** (NFL §7.2) False = a week the board did not name: dimmed, not focusable, OK does nothing. */
+    enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -289,26 +334,30 @@ private fun FocusChip(
             .testTag(tag)
             .focusRequester(requester)
             .focusProperties {
+                canFocus = enabled
                 if (down != null) this.down = down
                 if (up != null) this.up = up
             }
             .onPreviewKeyEvent { e -> up == null && e.key == Key.DirectionUp }
             .onFocusChanged { focused = it.isFocused }
-            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
+            .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
     ) {
         Chip(
             focused = focused,
             modifier = Modifier.height(height.dp),
             fill = if (selected) GuideUi.White12 else GuideUi.White08,
             border = if (selected) GuideUi.White16 else null,
-        ) { color -> Line(text, GuideUi.sans(textPx, FontWeight.Medium, color)) }
+        ) { color -> Line(text, GuideUi.sans(textPx, weight, if (enabled) color else color.copy(alpha = 0.35f))) }
     }
 }
 
 @Composable
 private fun CreditRow(ui: SportsUiState) {
     Row(Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        Line(stringResource(R.string.sports_credit), GuideUi.sans(20, color = GuideUi.Fg55))
+        val nfl = ui.prefs.league == League.NFL
+        Line(stringResource(if (nfl) R.string.sports_credit_espn else R.string.sports_credit), GuideUi.sans(20, color = GuideUi.Fg55))
+        // NFL §7.2: the board's week ("Week 9"), once a board is shown.
+        ui.boardKey?.let { key -> Line(SportsText.weekLabel(LocalResources.current, key), GuideUi.sans(20, color = GuideUi.Fg55), Modifier.testTag(SPORTS_WEEK_TAG)) }
         val updated = ui.updatedMono
         if (updated != null) UpdatedText(updated)
     }
@@ -334,23 +383,29 @@ private fun UpdatedText(updatedMono: Long) {
 // ------------------------------------------------------------------ day chips
 
 @Composable
-private fun DayChips(selected: SportsDay, requesters: Map<SportsDay, FocusRequester>, up: FocusRequester, onDay: (SportsDay) -> Unit) {
+private fun DayChips(ui: SportsUiState, requesters: Map<SportsDay, FocusRequester>, up: FocusRequester, onDay: (SportsDay) -> Unit) {
+    val nfl = ui.prefs.league == League.NFL
     Row(Modifier.height(DAY_CHIP_H.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         SportsDay.entries.forEach { day ->
             FocusChip(
                 text = stringResource(
                     when (day) {
-                        SportsDay.YESTERDAY -> R.string.sports_day_yesterday
-                        SportsDay.TODAY -> R.string.sports_day_today
-                        SportsDay.TOMORROW -> R.string.sports_day_tomorrow
+                        SportsDay.YESTERDAY -> if (nfl) R.string.sports_week_last else R.string.sports_day_yesterday
+                        SportsDay.TODAY -> if (nfl) R.string.sports_week_this else R.string.sports_day_today
+                        SportsDay.TOMORROW -> if (nfl) R.string.sports_week_next else R.string.sports_day_tomorrow
                     },
                 ),
                 requester = requesters.getValue(day),
                 tag = sportsDayTag(day),
                 up = up,
-                selected = day == selected,
+                selected = day == ui.day,
                 height = DAY_CHIP_H,
                 textPx = 26,
+                enabled = when (day) {
+                    SportsDay.YESTERDAY -> ui.canPrev
+                    SportsDay.TODAY -> true
+                    SportsDay.TOMORROW -> ui.canNext
+                },
                 onClick = { onDay(day) },
             )
         }

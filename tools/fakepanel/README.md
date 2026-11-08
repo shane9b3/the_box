@@ -279,6 +279,33 @@ adb shell run-as app.thebox.debug sh -c 'mkdir -p files/debug && echo http://10.
 adb shell am force-stop app.thebox.debug   # then start the app; delete the file to go back to api-web.nhle.com
 ```
 
+## Sports: the fake ESPN NFL scoreboard (docs/design/m6-nfl.md §9)
+
+`--sports --sports-nfl` (config `sports_nfl: true`; needs `sports`) adds ESPN's own paths from `sports_nfl.py`, so the same
+debug origin (`files/debug/sports_base`) serves both leagues:
+
+- `GET /apis/site/v2/sports/football/nfl/scoreboard`: this week (week 9 of 2026: a Thursday final NYJ @ NE, the featured game, a
+  Sunday SF @ SEA and a Monday LV @ DEN), with `leagues[0].calendar`. `?seasontype=2&week=N`: a week (8 and 10 carry one game each, any
+  other week none). `?dates=YYYYMMDD`: one Eastern day (the featured game's day has it and SF @ SEA; every other day is empty;
+  a bad value is HTTP 400 `{code, message}`). `GET /combiner/i?img=/i/teamlogos/nfl/500-dark/scoreboard/{abbr}.png&h=&w=`: a
+  generated placeholder PNG. Anything else: 404 HTML. `Date` and `Cache-Control: max-age=5`; no `Age`, no `ETag`.
+- The featured game (KC @ BUF, id `401899001`) plays the §9.2 timeline, about 985 s (`sports_nfl_timeline_s`, 30..86400):
+  coin toss, kick-off (no `possession`), drive, red zone, a TD with the 10 s score-before-play window, try, extra point, FG,
+  a +7 pair in one body, halftime, a safety (BUF receives the free kick), a defensive TD with a two-point try drawn as a real
+  down, a second FG, a KC safety, 16-16, overtime and a walk-off TD on a `post` body (period 5). Every window is 25 s or more
+  except the one 10 s window. Clocks run 1 s/s in running windows and are frozen in breaks, tries and kick-offs.
+  `situation.yardLine` is home-relative (BUF's goal line).
+- `POST /admin/sports-nfl {"restart": true}` (or `{"anchor_unix": T}`) re-anchors the NFL timeline; `POST /admin/sports
+  {"restart": true}` restarts both (N8); `GET /admin/sports-nfl` shows the slate.
+- `sports_nfl_script`: `{"<event id>": {state, name, period, clock, away, home, possession, down, distance, yardLine,
+  possessionText, shortDownDistanceText, isRedZone, lastPlayType, lastPlayScoreValue, lastPlayTeam, situation: null, gone}}`
+  overrides a game. A +8 pair is one body: `POST /admin/config {"sports_nfl_script": {"401899001": {"away": 16}}}` while the
+  timeline shows 8 (script values replace the timeline's). `lastPlayType` is an ESPN play type id ("67" passing TD, "59" FG,
+  "36" interception-return TD, "20" safety, "53" kick-off, "70" coin toss).
+- `sports_nfl_faults`: the NHL keys (`status`, `score_status`, `html_404`, `retry_after`, `pad_bytes`, `age`, `no_date`, `stall_s`).
+- `sample_espn.py --event {id} --out {dir}` records the real ESPN board for one event (§1.6): a JSONL log plus the raw body of
+  every state change.
+
 ## Logging
 
 One line per request: timestamp, client, method+path, UA, status, bytes, `cons[user]=active/max`, notes (`REJECT:reason`, `REDIRECT`, `FORCED-CLOSE`, `TZ-WARN`...).
@@ -288,7 +315,7 @@ Streams log when they end. `--verbose` adds request headers.
 
 From the repo root: `python3 -m unittest tools/fakepanel/test_fakepanel.py`.
 With `-I` (which drops the cwd from `sys.path`) use `python3 -I -m unittest discover -s tools/fakepanel -p test_fakepanel.py`.
-The sports routes: `python3 -I -m unittest discover -s tools/fakepanel -p test_sports.py` (about 2 s).
+The sports routes: `python3 -I -m unittest discover -s tools/fakepanel -p 'test_sports*.py'` (about 10 s; the NHL golden is in it).
 Tests start the server on ephemeral ports with the null-packet media and need neither ffmpeg nor network.
 
 ## Live TS timestamps

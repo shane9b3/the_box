@@ -10,6 +10,7 @@ import app.thebox.core.sports.DemandOwner
 import app.thebox.core.sports.FailKind
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
+import app.thebox.core.sports.League
 import app.thebox.core.sports.ScoreCorner
 import app.thebox.core.sports.ScoreRepository
 import app.thebox.core.sports.SportsPrefs
@@ -24,7 +25,10 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 
-/** The three day chips (docs/design/m6-score-bug.md §5.2). */
+/**
+ * The three day chips (docs/design/m6-score-bug.md §5.2). For the NFL (ruling 28) they are Last week · This week · Next
+ * week: YESTERDAY / TODAY / TOMORROW stand for the previous, current and next ESPN week.
+ */
 enum class SportsDay { YESTERDAY, TODAY, TOMORROW }
 
 /** One card: the snapshot, whether it is the followed game, and the mono instant the board was fetched. */
@@ -55,6 +59,14 @@ data class SportsUiState(
     val body: SportsBody = SportsBody.Loading,
     val updatedMono: Long? = null,
     val prefs: SportsPrefs = SportsPrefs(),
+    /**
+     * (NFL §7.2, S6) Whether the Yesterday / Last week and the Tomorrow / Next week chips can be pressed. The NHL's are
+     * always on (they fall back to the Eastern date); the NFL's are on only when the board named that neighbour.
+     */
+    val canPrev: Boolean = true,
+    val canNext: Boolean = true,
+    /** (NFL §7.2) The shown board's key ("w2026-2-9"): the screen turns it into the week label. Null before a board. */
+    val boardKey: String? = null,
 )
 
 /**
@@ -66,6 +78,10 @@ data class SportsUiState(
  *
  * Day chips: Today is `showDay(null)` (`/score/now`, once per open); Yesterday and Tomorrow are the `prevDay` /
  * `nextDay` of the Today board (falling back to date arithmetic in the NHL's Eastern zone before one has loaded).
+ *
+ * (NFL WP-5, docs/design/m6-nfl.md §7) The league chips write `SportsPrefs.league`. The NFL's chips are weeks, taken only
+ * from the board's `prevDay` / `nextDay` (week keys): **no date fallback** (S6), so before the first board, on an empty
+ * board or at a season edge the chip is disabled, and an NFL request is never a single date.
  */
 @HiltViewModel
 class SportsViewModel internal constructor(
@@ -89,15 +105,27 @@ class SportsViewModel internal constructor(
     } else {
         combine(repo.day, repo.followed, repo.prefs, selected) { day, followed, prefs, sel ->
             if (!prefs.enabled) SportsUiState(sel, SportsBody.Off, null, prefs)
-            else SportsUiState(sel, bodyOf(day, followed?.id, sel), (day as? DayState.Board)?.takeIf { it.failing }?.fetchedAtMono, prefs)
+            else {
+                val body = bodyOf(day, followed?.id, sel, prefs.league)
+                val nfl = prefs.league == League.NFL
+                SportsUiState(
+                    sel, body, (day as? DayState.Board)?.takeIf { it.failing }?.fetchedAtMono, prefs,
+                    canPrev = !nfl || yesterdayKey != null, canNext = !nfl || tomorrowKey != null,
+                    boardKey = (day as? DayState.Board)?.board?.dayKey?.takeIf { nfl },
+                )
+            }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, SportsUiState())
     }
 
     /** The screen came on: today, once per open, and the day list is wanted (`SEEN`). */
     fun onEntered() {
         selected.value = SportsDay.TODAY
-        yesterdayKey = null
-        tomorrowKey = null
+        // The NHL relearns its neighbours from the next Today board. The NFL keeps the week keys it learned (S6: there is no
+        // date to fall back to, and an unchanged board does not re-emit); a Today board overwrites them.
+        if (state.value.prefs.league != League.NFL) {
+            yesterdayKey = null
+            tomorrowKey = null
+        }
         val r = repo ?: return
         r.reportDemand(DemandOwner.SPORTS_TAB, true)
         r.showDay(null)
@@ -107,16 +135,30 @@ class SportsViewModel internal constructor(
         repo?.reportDemand(DemandOwner.SPORTS_TAB, false)
     }
 
+    /**
+     * OK on a league chip (NFL §7.3, ruling 24): writes the shown league, which the repository answers by loading that
+     * league's today. The chip row restarts at This week / Today with nothing learned.
+     */
+    fun onLeague(league: League) {
+        if (state.value.prefs.league == league) return
+        selected.value = SportsDay.TODAY
+        yesterdayKey = null
+        tomorrowKey = null
+        store?.update(SportsDomain) { it.copy(league = league) }
+    }
+
     /** OK on a day chip. */
     fun onDay(day: SportsDay) {
         val r = repo ?: return
+        // S6: an NFL neighbour that the board did not name is not requested (the chip is disabled; this is the guard).
+        if (state.value.prefs.league == League.NFL && day != SportsDay.TODAY && dayKeyFor(day, League.NFL) == null) return
         if (selected.value == day) {
             // Pressing the chip you are on is a refresh request only when nothing is showing (a failure or a skeleton).
             if (state.value.body is SportsBody.Failed || state.value.body is SportsBody.Loading) r.retry()
             return
         }
         selected.value = day
-        r.showDay(dayKeyFor(day))
+        r.showDay(dayKeyFor(day, state.value.prefs.league))
     }
 
     /** OK on a card: Follow, or Stop following when it is the followed game. Following another game replaces the current one. */
@@ -138,40 +180,56 @@ class SportsViewModel internal constructor(
     }
 
     /** The key to ask the repository for; null = today (`/score/now`). */
-    private fun dayKeyFor(day: SportsDay): String? = when (day) {
+    private fun dayKeyFor(day: SportsDay, league: League): String? = when (day) {
         SportsDay.TODAY -> null
-        SportsDay.YESTERDAY -> yesterdayKey ?: easternToday().minusDays(1).toString()
-        SportsDay.TOMORROW -> tomorrowKey ?: easternToday().plusDays(1).toString()
+        SportsDay.YESTERDAY -> yesterdayKey ?: dateFallback(-1, league)
+        SportsDay.TOMORROW -> tomorrowKey ?: dateFallback(1, league)
     }
 
-    private fun bodyOf(day: DayState, followedId: app.thebox.core.sports.GameId?, sel: SportsDay): SportsBody = when (day) {
+    /** The NHL's Eastern-date neighbour; the NFL has none (S6), so its chip is disabled instead. */
+    private fun dateFallback(days: Long, league: League): String? =
+        if (league == League.NFL) null else easternToday().plusDays(days).toString()
+
+    private fun bodyOf(day: DayState, followedId: app.thebox.core.sports.GameId?, sel: SportsDay, league: League): SportsBody = when (day) {
         DayState.Loading -> SportsBody.Loading
         is DayState.Failed -> SportsBody.Failed(day.kind)
         is DayState.Board -> {
             val b = day.board
-            // U-N5: only a board the repository says is today's teaches the neighbours, whatever the order of events.
-            if (sel == SportsDay.TODAY && day.isToday) learn(b)
-            if (!isFor(day, sel)) SportsBody.Loading
-            else if (b.games.isEmpty()) SportsBody.Empty(b.dayKey, sel)
-            else SportsBody.Games(order(b.games).map { GameCardModel(it, it.id == followedId, day.fetchedAtMono) })
+            // A board of the other league (the repository is still switching) never passes for the shown one.
+            if (boardLeague(b) != league) SportsBody.Loading else {
+                // U-N5: only a board the repository says is today's teaches the neighbours, whatever the order of events.
+                if (sel == SportsDay.TODAY && day.isToday) learn(b, league)
+                if (!isFor(day, sel, league)) SportsBody.Loading
+                else if (b.games.isEmpty()) SportsBody.Empty(b.dayKey, sel)
+                else SportsBody.Games(order(b.games, league).map { GameCardModel(it, it.id == followedId, day.fetchedAtMono) })
+            }
         }
     }
 
-    private fun learn(b: DayBoard) {
+    private fun boardLeague(b: DayBoard): League =
+        b.games.firstOrNull()?.id?.league ?: if (SportsText.isWeekKey(b.dayKey)) League.NFL else League.NHL
+
+    private fun learn(b: DayBoard, league: League) {
         // A board shown for Today that is not already known as another day's: remember its neighbours.
         if (b.dayKey != yesterdayKey && b.dayKey != tomorrowKey) {
+            if (league == League.NFL) {
+                // S6: the week keys the board named, or none (an edge, the off-season or an empty board): never a date.
+                yesterdayKey = b.prevDay.takeIf { b.games.isNotEmpty() }
+                tomorrowKey = b.nextDay.takeIf { b.games.isNotEmpty() }
+                return
+            }
             yesterdayKey = b.prevDay ?: runCatching { LocalDate.parse(b.dayKey).minusDays(1).toString() }.getOrNull()
             tomorrowKey = b.nextDay ?: runCatching { LocalDate.parse(b.dayKey).plusDays(1).toString() }.getOrNull()
         }
     }
 
     /** A stale board of another chip's day must not pass for the one just chosen while its load is in flight. */
-    private fun isFor(day: DayState.Board, sel: SportsDay): Boolean {
+    private fun isFor(day: DayState.Board, sel: SportsDay, league: League): Boolean {
         val b = day.board
         return when (sel) {
             SportsDay.TODAY -> day.isToday && b.dayKey != yesterdayKey && b.dayKey != tomorrowKey
-        SportsDay.YESTERDAY -> b.dayKey == (yesterdayKey ?: easternToday().minusDays(1).toString())
-            SportsDay.TOMORROW -> b.dayKey == (tomorrowKey ?: easternToday().plusDays(1).toString())
+            SportsDay.YESTERDAY -> dayKeyFor(sel, league)?.let { b.dayKey == it } ?: false
+            SportsDay.TOMORROW -> dayKeyFor(sel, league)?.let { b.dayKey == it } ?: false
         }
     }
 
@@ -179,8 +237,16 @@ class SportsViewModel internal constructor(
         val EASTERN: ZoneId = ZoneId.of("America/New_York")
 
         /** Live (and intermission), then pre-game, then scheduled (and postponed) by start time, then final (§5.2). */
-        fun order(games: List<GameSnapshot>): List<GameSnapshot> =
-            games.sortedWith(compareBy<GameSnapshot> { rank(it.phase) }.thenBy { it.startUtcMs }.thenBy { it.id.id })
+        fun order(games: List<GameSnapshot>, league: League = League.NHL): List<GameSnapshot> =
+            games.sortedWith(compareBy<GameSnapshot> { if (league == League.NFL) nflRank(it.phase) else rank(it.phase) }.thenBy { it.startUtcMs }.thenBy { it.id.id })
+
+        /** (NFL §7.2) Live, then upcoming by start, then final, then postponed (the picker's `groupOf`). */
+        private fun nflRank(p: GamePhase): Int = when (p) {
+            GamePhase.LIVE, GamePhase.INTERMISSION -> 0
+            GamePhase.PRE, GamePhase.SCHEDULED -> 1
+            GamePhase.FINAL -> 2
+            GamePhase.POSTPONED -> 3
+        }
 
         private fun rank(p: GamePhase): Int = when (p) {
             GamePhase.LIVE, GamePhase.INTERMISSION -> 0
