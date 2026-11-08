@@ -26,6 +26,10 @@ import kotlin.random.Random
  * - `goalSide` is the goal mark: non-null for `GOAL_MARK_MS` (4.5 s) after a goal becomes visible on the delayed
  *   timeline; the UI's takeover keys on `goalSeq` (docs/design/m6-goal-animation.md §5.1). The bottom line is never
  *   replaced.
+ * - **Power play** (docs/design/m6-power-play.md §1.4): `view().powerPlay` is the shown snapshot's while LIVE or
+ *   INTERMISSION, not SO, neither stale nor waiting (`knownView()` never has one). `goalPp` is decided where a goal is
+ *   flagged and lives with the mark; `ppEnded` belongs to the shown snapshot. Polling, stale, hide and the delay queue
+ *   do not look at the power play.
  */
 class ScoreBugMachine(
     private val mono: MonoClock,
@@ -58,6 +62,13 @@ class ScoreBugMachine(
     private var goalSeq = 0
     private var goalSide: Side? = null
     private var markUntil: Long? = null
+    /** (Power play §1.4, N12) The flagged goal was a power-play goal; set and cleared with the mark. */
+    private var goalPp = false
+
+    /** (Power play §1.4) The gated power play of the last snapshot shown going forward (survives a stale stretch). */
+    private var lastShownPp: PowerPlay? = null
+    /** (Power play §1.4, §7) The shown entry whose view carries `ppEnded` (a real end, with no goal flagged by it). */
+    private var ppEndedEntry: Entry? = null
 
     private val events = ArrayList<ScoreEvent>()
 
@@ -166,7 +177,7 @@ class ScoreBugMachine(
             return
         }
         prune(now)
-        markUntil?.let { if (now >= it) { markUntil = null; goalSide = null } }
+        markUntil?.let { if (now >= it) { markUntil = null; goalSide = null; goalPp = false } }
     }
 
     fun pollDue(): Boolean {
@@ -226,7 +237,14 @@ class ScoreBugMachine(
         // Owner ruling 6: the clock is the snapshot's own value, whatever the state (live, stopped, intermission,
         // stale, waiting on the delay).
         val clockSecs = if (top == CentreText.Clock) s.clock?.takeIf { clockShown(s) }?.secondsRemaining?.coerceAtLeast(0) else null
-        return ScoreBugView(s.away, s.home, top, bottom, dim = waiting || stale, goalSeq = goalSeq, goalSide = goal, clockSecs = clockSecs, gameId = game?.id)
+        val fresh = !waiting && !stale
+        return ScoreBugView(
+            s.away, s.home, top, bottom, dim = waiting || stale, goalSeq = goalSeq, goalSide = goal, clockSecs = clockSecs,
+            gameId = game?.id,
+            powerPlay = if (fresh) gatedPp(s) else null,
+            goalPp = goal != null && goalPp,
+            ppEnded = fresh && e === ppEndedEntry,
+        )
     }
 
     /**
@@ -316,12 +334,15 @@ class ScoreBugMachine(
         if (prev != null && q.anchorMono < prev.anchorMono) {
             // The delay grew: back in time, silently.
             shown = q
+            ppEndedEntry = null
+            lastShownPp = gatedPp(q.snap)
             return
         }
         val at = maxOf(q.anchorMono + delayMs, q.receivedMono)
         shown = q
         val s = q.snap
         val p = prev?.snap
+        var flagged = false
 
         // C-N1: a goal is flagged only against a recent comparison (not the hours-old snapshot shown before a long NONE
         // or UNSEEN stretch), and never when both sides rose meanwhile.
@@ -341,8 +362,15 @@ class ScoreBugMachine(
                 goalSeq++
                 goalSide = side
                 markUntil = at + SportsConstants.GOAL_MARK_MS
+                goalPp = goalWasPp(p, s, side)
+                flagged = true
             }
         }
+
+        // Power play §1.4, §7: a real end is "the previous fresh view had one, this one has none, and it flagged no goal".
+        val pp = gatedPp(s)
+        ppEndedEntry = if (lastShownPp != null && pp == null && !flagged) q else null
+        lastShownPp = pp
 
         val g = game
         if (s.phase == GamePhase.FINAL && g != null && g.finalSeenUtcMs == null) {
@@ -351,6 +379,26 @@ class ScoreBugMachine(
     }
 
     private fun rose(was: Int?, now: Int?) = was != null && now != null && now > was
+
+    /** (Power play §1.4) The snapshot's power play when the phase can show one: LIVE or INTERMISSION, not the shootout. */
+    private fun gatedPp(s: GameSnapshot): PowerPlay? =
+        s.powerPlay.takeIf { (s.phase == GamePhase.LIVE || s.phase == GamePhase.INTERMISSION) && s.periodKind != PeriodKind.SO }
+
+    /**
+     * (Power play §1.4, S1) Whether [side]'s goal, flagged going from [p] to [s], was a power-play goal. Only when [p] is
+     * LIVE and not the shootout (so never the shootout winner's +1).
+     * 1. [GameSnapshot.lastGoal] has the scorer's side and equals [s]'s score: its `strength == "pp"`.
+     * 2. Otherwise the summary lags, and the fallback is "[p] had [side] on the power play". Its known misses:
+     *    - a minor that expires inside a poll gap, then an even-strength goal by the same team: a false PP GOAL;
+     *    - a power play that starts and is scored on inside one gap: no PP GOAL;
+     *    - `situation` clearing a bucket before the score rises: no PP GOAL.
+     */
+    private fun goalWasPp(p: GameSnapshot, s: GameSnapshot, side: Side): Boolean {
+        if (p.phase != GamePhase.LIVE || p.periodKind == PeriodKind.SO) return false
+        val g = s.lastGoal
+        if (g != null && g.side == side && g.away == s.away.score && g.home == s.home.score) return g.pp
+        return p.powerPlay?.side == side
+    }
 
     private fun prune(now: Long) {
         val keep = shown
@@ -401,7 +449,8 @@ class ScoreBugMachine(
         failures = 0; failAt = null; backoffAt = null; notFoundFirst = null
         // goalSeq is monotonic for the machine's lifetime (goal animation §5.1, B1.4): a re-follow never reuses a seq
         // the UI has already seen.
-        goalSide = null; markUntil = null
+        goalSide = null; markUntil = null; goalPp = false
+        lastShownPp = null; ppEndedEntry = null
     }
 
     private companion object {

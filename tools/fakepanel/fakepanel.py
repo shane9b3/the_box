@@ -2348,6 +2348,7 @@ def main(argv=None):
     ap.add_argument("--no-pace", action="store_true", help="send live TS as fast as possible")
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--sports", action="store_true", help="serve the fake NHL score API (/v1/score, /v1/gamecenter, logos)")
+    ap.add_argument("--sports-pp", action="store_true", help="with --sports: the featured game plays the power-play timeline (situation + summary.scoring)")
     ap.add_argument("--sports-timeline", type=float, metavar="S", help="the featured game's timeline length (default 360 s)")
     ap.add_argument("--update-apk-dir", help="U-S14: load every *.apk in this directory as an update APK by name "
                                              "(thebox-update-v2.apk -> v2); select one with the update_apk config key")
@@ -2377,6 +2378,8 @@ def main(argv=None):
         cfg["pace"] = False
     if a.sports:
         cfg["sports"] = True
+    if a.sports_pp:
+        cfg["sports_pp"] = True
     if a.sports_timeline is not None:
         cfg["sports_timeline_s"] = a.sports_timeline
     for flag in ("synthetic", "synthetic_days_back", "synthetic_days_ahead"):

@@ -1,5 +1,7 @@
 package app.thebox.core.sports
 
+import kotlin.math.round
+
 /**
  * Where the bug sits given the other overlays (docs/design/m6-score-bug.md §4.3, §4.4; WP-1). Pure. Returns the pill's
  * box in design px, or null when it is hidden. In place mode ([PlacementInput.placing]) only `modal` and `screenOff`
@@ -68,14 +70,46 @@ object ScoreBugPlacement {
      * placed pill [box]: below the pill for an effective top corner, above it for a bottom one (after
      * [PlacementInput.textTrackOn]), at [input]'s size.
      */
-    fun tabBox(input: PlacementInput, box: Box): Box = TODO("WP-1: power-play design §4.4")
+    fun tabBox(input: PlacementInput, box: Box): Box {
+        // Place mode puts the pill at the chosen corner itself (subtitles ignored, as in [place]).
+        val corner = if (input.textTrackOn && !input.placing) toTop(input.corner) else input.corner
+        val inset = tabInset(input.size)
+        val depth = tabDepth(input.size)
+        return if (isBottom(corner)) {
+            Box(box.l + inset, box.t - depth, box.r - inset, box.t)
+        } else {
+            Box(box.l + inset, box.b, box.r - inset, box.b + depth)
+        }
+    }
 
     /**
      * (Power play §4.4; WP-1) Whether the tab may show for the placed pill [box]: false in place mode, or when an active
      * overlay (channel list, stats, group card, picker, number entry, probing line) intersects [tabBox] inflated by
      * [SportsConstants.PP_TAB_NEIGHBOUR]. False closes only the tab track; the pill track stays (S3).
      */
-    fun tabAllowed(input: PlacementInput, geo: OverlayGeometry, box: Box): Boolean = TODO("WP-1: power-play design §4.4")
+    fun tabAllowed(input: PlacementInput, geo: OverlayGeometry, box: Box): Boolean {
+        if (input.placing) return false
+        val t = tabBox(input, box)
+        val n = SportsConstants.PP_TAB_NEIGHBOUR
+        val reach = Box(t.l - n, t.t - n, t.r + n, t.b + n)
+        if (input.channelList && geo.channelList.intersects(reach)) return false
+        if (input.stats && geo.stats.intersects(reach)) return false
+        if (input.groupCard && geo.groupCard.intersects(reach)) return false
+        if (input.picker && geo.picker.intersects(reach)) return false
+        if (input.numberEntry && geo.numberEntry.intersects(reach)) return false
+        if (input.probing?.intersects(reach) == true) return false
+        return true
+    }
+
+    /**
+     * (Power play §4.1) The tab's side inset: Standard 31, Large 39 (31 × 1.25 rounded, so the Large tab is 428 wide).
+     */
+    fun tabInset(size: ScoreBugSize): Float =
+        if (size == ScoreBugSize.LARGE) round(SportsConstants.PP_TAB_INSET * SportsConstants.SCORE_LARGE_SCALE) else SportsConstants.PP_TAB_INSET
+
+    /** (Power play §4.1) The tab's visible depth below (or above) the pill: Standard 36, Large 45. */
+    fun tabDepth(size: ScoreBugSize): Float =
+        if (size == ScoreBugSize.LARGE) SportsConstants.PP_TAB_DEPTH * SportsConstants.SCORE_LARGE_SCALE else SportsConstants.PP_TAB_DEPTH
 
     /** The resting box of [corner] at [size] (§4.3). */
     fun cornerBox(corner: ScoreCorner, size: ScoreBugSize): Box {

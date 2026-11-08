@@ -898,4 +898,292 @@ class ScoreBugMachineTest {
         assertNull(r.m.view())
         assertTrue(r.m.pollDue())
     }
+
+    // ------------------------------------------------------------------ power play (docs/design/m6-power-play.md §1.4)
+
+    private fun pp(side: Side, kind: PowerPlayKind = PowerPlayKind.ONE_MAN, secs: Int? = 79) = PowerPlay(side, kind, secs)
+
+    /** The first snapshot [a], then [b] 20 s later (a fresh comparison, SEEN): the view after [b]. */
+    private fun after(a: GameSnapshot, b: GameSnapshot): ScoreBugView {
+        val r = Rig()
+        r.follow()
+        r.ok(a)
+        r.at(20_000)
+        r.ok(b)
+        return r.m.view()!!
+    }
+
+    @Test
+    fun powerPlayIsShownWhileLiveOrInIntermissionOnly() {
+        fun viewOf(s: GameSnapshot): ScoreBugView {
+            val r = Rig()
+            r.follow()
+            r.ok(s)
+            return assertNotNull(r.m.view())
+        }
+        val home = pp(Side.HOME, secs = 34)
+        assertEquals(home, viewOf(live().copy(powerPlay = home)).powerPlay)
+        assertEquals(SportsFixtures.liveView(live().copy(powerPlay = home)), viewOf(live().copy(powerPlay = home)))
+        // Ruling 19: it stays through intermission, frozen at the snapshot's seconds.
+        val int = live(inInt = true, running = false, phase = GamePhase.INTERMISSION, secs = 958, period = 1)
+        assertEquals(home, viewOf(int.copy(powerPlay = home)).powerPlay)
+        assertEquals(pp(Side.AWAY, PowerPlayKind.TWO_MAN), viewOf(live().copy(powerPlay = pp(Side.AWAY, PowerPlayKind.TWO_MAN))).powerPlay)
+        assertEquals(pp(Side.AWAY), viewOf(live(period = 4, kind = PeriodKind.OT, ot = 1).copy(powerPlay = pp(Side.AWAY))).powerPlay)
+        // Never in the shootout or a final.
+        assertNull(viewOf(live(period = 5, kind = PeriodKind.SO, secs = 0, running = false).copy(powerPlay = home)).powerPlay)
+        assertNull(viewOf(final().copy(powerPlay = home)).powerPlay)
+        assertNull(viewOf(final(kind = PeriodKind.OT).copy(powerPlay = home)).powerPlay)
+        assertNull(viewOf(live()).powerPlay)
+    }
+
+    @Test
+    fun powerPlayHidesWhileStaleOrWaitingAndKnownViewNeverHasOne() {
+        val home = pp(Side.HOME)
+        val r = Rig()
+        r.follow()
+        r.ok(live().copy(powerPlay = home))
+        assertEquals(home, r.m.view()!!.powerPlay)
+        r.m.online(false)
+        r.at(60_000)
+        assertEquals(CentreText.NoUpdate, r.m.view()!!.bottom)
+        assertNull(r.m.view()!!.powerPlay, "a stale time is wrong")
+        r.at(60_000 + SportsConstants.HIDE_AFTER_MS)
+        assertNull(r.m.view())
+        val known = assertNotNull(r.m.knownView())
+        assertNull(known.powerPlay)
+        r.m.online(true)
+        r.ok(live(secs = 300).copy(powerPlay = pp(Side.HOME, secs = 20)))
+        assertEquals(pp(Side.HOME, secs = 20), r.m.view()!!.powerPlay, "fresh again")
+
+        // Waiting on the delay: none, then the snapshot's own once it is visible (the delay is automatic).
+        val d = Rig(delaySec = 30)
+        d.follow()
+        d.ok(live().copy(powerPlay = home))
+        d.m.online(false)
+        assertEquals(CentreText.Delayed, d.m.view()!!.bottom)
+        assertNull(d.m.view()!!.powerPlay)
+        d.at(30_000)
+        assertEquals(home, d.m.view()!!.powerPlay)
+    }
+
+    @Test
+    fun powerPlayRidesTheDelayedTimeline() {
+        val r = Rig(delaySec = 30)
+        r.follow()
+        r.ok(live()) // anchor 0 → shown 30 000
+        r.at(20_000)
+        r.ok(live(secs = 602).copy(powerPlay = pp(Side.AWAY, secs = 100))) // anchor 20 000 → shown 50 000
+        r.m.online(false)
+        r.at(49_999)
+        assertNull(r.m.view()!!.powerPlay, "not before the delayed snapshot is visible")
+        r.at(50_000)
+        assertEquals(pp(Side.AWAY, secs = 100), r.m.view()!!.powerPlay)
+    }
+
+    @Test
+    fun goalPpFromTheScoringSummary() {
+        val base = live(away = 0, home = 2)
+        val goal = live(secs = 602, away = 1, home = 2)
+        // `pp` matched to the score: true, whatever the previous snapshot said.
+        assertTrue(after(base, goal.copy(lastGoal = GoalFact(Side.AWAY, 1, 2, pp = true))).goalPp)
+        // A shorthanded goal against the home power play: false.
+        assertFalse(after(base.copy(powerPlay = pp(Side.HOME)), goal.copy(powerPlay = pp(Side.HOME), lastGoal = GoalFact(Side.AWAY, 1, 2, pp = false))).goalPp)
+        // `ev` while the scorer had a power play (it ended inside the gap): the summary wins, false.
+        val ev = after(base.copy(powerPlay = pp(Side.AWAY)), goal.copy(lastGoal = GoalFact(Side.AWAY, 1, 2, pp = false)))
+        assertEquals(Side.AWAY, ev.goalSide)
+        assertFalse(ev.goalPp)
+        // The view carries goalPp only with the goal mark.
+        val v = after(base, goal.copy(lastGoal = GoalFact(Side.AWAY, 1, 2, pp = true)))
+        assertEquals(Side.AWAY, v.goalSide)
+        assertEquals(1, v.goalSeq)
+        // No goal: never.
+        assertFalse(after(base.copy(powerPlay = pp(Side.AWAY)), base.copy(lastGoal = GoalFact(Side.HOME, 0, 2, pp = true))).goalPp)
+    }
+
+    @Test
+    fun goalPpFallsBackToThePreviousSnapshotWhenTheSummaryLags() {
+        val base = live(away = 0, home = 2)
+        val goal = live(secs = 602, away = 1, home = 2)
+        val lagging = GoalFact(Side.HOME, 0, 2, pp = false) // the previous goal: not the new score
+        assertTrue(after(base.copy(powerPlay = pp(Side.AWAY)), goal.copy(lastGoal = lagging)).goalPp, "p had the scorer on the PP")
+        assertTrue(after(base.copy(powerPlay = pp(Side.AWAY)), goal).goalPp, "no summary at all (the day list)")
+        assertFalse(after(base.copy(powerPlay = pp(Side.HOME)), goal).goalPp, "p had the other side on the PP")
+        assertFalse(after(base, goal.copy(lastGoal = lagging)).goalPp)
+        // A summary entry for the other side at the same score is not this goal: fallback.
+        assertTrue(after(base.copy(powerPlay = pp(Side.AWAY)), goal.copy(lastGoal = GoalFact(Side.HOME, 1, 2, pp = false))).goalPp)
+        assertTrue(after(base.copy(powerPlay = pp(Side.AWAY, PowerPlayKind.TWO_MAN)), goal).goalPp, "5-on-3 too")
+    }
+
+    @Test
+    fun goalPpFallbacksDocumentedMisses() {
+        val base = live(away = 0, home = 2)
+        val goal = live(secs = 582, away = 1, home = 2)
+        // 1. A minor expires inside the poll gap, then an even-strength goal by the same team: a false PP GOAL.
+        assertTrue(after(base.copy(powerPlay = pp(Side.AWAY, secs = 10)), goal).goalPp)
+        // 2. A power play starts and is scored on inside one gap: no PP GOAL.
+        assertFalse(after(base, goal).goalPp)
+        // 3. `situation` clears a bucket before the score rises: no PP GOAL.
+        val r = Rig()
+        r.follow()
+        r.ok(base.copy(powerPlay = pp(Side.AWAY, secs = 30)))
+        r.at(20_000)
+        r.ok(live(secs = 602, away = 0, home = 2)) // cleared, score not yet
+        r.at(40_000)
+        r.ok(goal)
+        assertEquals(Side.AWAY, r.m.view()!!.goalSide)
+        assertFalse(r.m.view()!!.goalPp)
+    }
+
+    @Test
+    fun goalPpOnlyWhenThePreviousSnapshotIsLiveAndNotTheShootout() {
+        val so = live(away = 2, home = 2, period = 5, kind = PeriodKind.SO, secs = 0, running = false)
+        val win = final(away = 2, home = 3, kind = PeriodKind.SO)
+        assertFalse(after(so.copy(powerPlay = pp(Side.HOME)), win.copy(lastGoal = GoalFact(Side.HOME, 2, 3, pp = true))).goalPp)
+        val soPlusOne = after(so.copy(powerPlay = pp(Side.AWAY)), so.copy(away = so.away.copy(score = 3)))
+        assertEquals(Side.AWAY, soPlusOne.goalSide)
+        assertFalse(soPlusOne.goalPp)
+        // An overtime power-play winner on the FINAL snapshot: the previous snapshot is LIVE OT.
+        val ot = live(away = 2, home = 2, period = 4, kind = PeriodKind.OT, ot = 1, secs = 140)
+        val otWin = final(away = 3, home = 2, kind = PeriodKind.OT)
+        assertTrue(after(ot.copy(powerPlay = pp(Side.AWAY)), otWin).goalPp)
+        assertTrue(after(ot, otWin.copy(lastGoal = GoalFact(Side.AWAY, 3, 2, pp = true))).goalPp)
+    }
+
+    @Test
+    fun goalPpIsClearedWithTheMarkAndByReset() {
+        val r = Rig()
+        r.follow()
+        r.ok(live(away = 0, home = 2).copy(powerPlay = pp(Side.AWAY)))
+        r.at(20_000)
+        r.ok(live(secs = 602, away = 1, home = 2).copy(lastGoal = GoalFact(Side.AWAY, 1, 2, pp = true)))
+        assertTrue(r.m.view()!!.goalPp)
+        r.at(20_000 + SportsConstants.GOAL_MARK_MS - 1)
+        assertTrue(r.m.view()!!.goalPp)
+        r.at(20_000 + SportsConstants.GOAL_MARK_MS)
+        assertNull(r.m.view()!!.goalSide)
+        assertFalse(r.m.view()!!.goalPp, "cleared with the mark")
+        // A second, even-strength goal inside a PP goal's mark replaces it.
+        val s = Rig()
+        s.follow()
+        s.ok(live(away = 0, home = 2).copy(powerPlay = pp(Side.AWAY)))
+        s.at(20_000)
+        s.ok(live(secs = 602, away = 1, home = 2).copy(lastGoal = GoalFact(Side.AWAY, 1, 2, pp = true)))
+        s.at(22_000)
+        s.ok(live(secs = 600, away = 1, home = 3).copy(lastGoal = GoalFact(Side.HOME, 1, 3, pp = false)))
+        assertEquals(Side.HOME, s.m.view()!!.goalSide)
+        assertFalse(s.m.view()!!.goalPp)
+        // reset() (a re-follow) inside the mark: the new follow's views carry no goalPp (N12).
+        val t = Rig()
+        t.follow()
+        t.ok(live(away = 0, home = 2).copy(powerPlay = pp(Side.AWAY)))
+        t.at(20_000)
+        t.ok(live(secs = 602, away = 1, home = 2).copy(lastGoal = GoalFact(Side.AWAY, 1, 2, pp = true)))
+        assertTrue(t.m.view()!!.goalPp)
+        val other = live().copy(id = GameId(League.NHL, "2026020002"))
+        t.follow(other)
+        t.ok(other.copy(powerPlay = pp(Side.AWAY)))
+        assertNull(t.m.view()!!.goalSide)
+        assertFalse(t.m.view()!!.goalPp)
+        assertFalse(t.m.view()!!.ppEnded)
+    }
+
+    @Test
+    fun ppEndedOnlyOnAFreshEndWithNoGoal() {
+        val r = Rig()
+        r.follow()
+        r.ok(live().copy(powerPlay = pp(Side.HOME)))
+        assertFalse(r.m.view()!!.ppEnded, "a start is not an end")
+        r.at(20_000)
+        r.ok(live(secs = 602))
+        assertTrue(r.m.view()!!.ppEnded, "the power play is over")
+        assertNull(r.m.view()!!.powerPlay)
+        r.at(40_000)
+        r.ok(live(secs = 582))
+        assertFalse(r.m.view()!!.ppEnded, "said once")
+        // A side change is not an end; neither is a kind change.
+        r.at(60_000)
+        r.ok(live(secs = 562).copy(powerPlay = pp(Side.HOME)))
+        r.at(80_000)
+        r.ok(live(secs = 542).copy(powerPlay = pp(Side.HOME, PowerPlayKind.TWO_MAN)))
+        assertFalse(r.m.view()!!.ppEnded)
+        r.at(100_000)
+        r.ok(live(secs = 522).copy(powerPlay = pp(Side.AWAY)))
+        assertFalse(r.m.view()!!.ppEnded)
+
+        // A goal that ends the power play: no "over", not even after the mark clears.
+        val g = Rig()
+        g.follow()
+        g.ok(live(away = 0, home = 2).copy(powerPlay = pp(Side.HOME)))
+        g.at(20_000)
+        g.ok(live(secs = 602, away = 0, home = 3).copy(lastGoal = GoalFact(Side.HOME, 0, 3, pp = true)))
+        assertEquals(Side.HOME, g.m.view()!!.goalSide)
+        assertTrue(g.m.view()!!.goalPp)
+        assertFalse(g.m.view()!!.ppEnded)
+        g.at(20_000 + SportsConstants.GOAL_MARK_MS)
+        assertNull(g.m.view()!!.goalSide)
+        assertFalse(g.m.view()!!.ppEnded)
+
+        // Going stale is never an end; a fresh view without one after the stale stretch is.
+        val s = Rig()
+        s.follow()
+        s.ok(live().copy(powerPlay = pp(Side.HOME)))
+        s.m.online(false)
+        s.at(60_000)
+        assertNull(s.m.view()!!.powerPlay)
+        assertFalse(s.m.view()!!.ppEnded, "never said on going stale")
+        s.m.online(true)
+        s.ok(live(secs = 300))
+        assertTrue(s.m.view()!!.ppEnded)
+        // Stale again while that end is shown: not said.
+        s.m.online(false)
+        s.at(60_000 + 60_000)
+        assertEquals(CentreText.NoUpdate, s.m.view()!!.bottom)
+        assertFalse(s.m.view()!!.ppEnded)
+
+        // A power play that ends with the game going to the shootout: the shootout shows none, so it is over.
+        assertTrue(
+            after(
+                live(away = 2, home = 2, period = 4, kind = PeriodKind.OT, ot = 1, secs = 0, running = false).copy(powerPlay = pp(Side.AWAY)),
+                live(away = 2, home = 2, period = 5, kind = PeriodKind.SO, secs = 0, running = false).copy(powerPlay = pp(Side.AWAY)),
+            ).ppEnded,
+        )
+        // On the delayed timeline: said when the end becomes visible.
+        val d = Rig(delaySec = 30)
+        d.follow()
+        d.ok(live().copy(powerPlay = pp(Side.HOME)))
+        d.at(20_000)
+        d.ok(live(secs = 602))
+        d.m.online(false)
+        d.at(30_000)
+        assertFalse(d.m.view()!!.ppEnded, "the power play is still on screen")
+        d.at(50_000)
+        assertTrue(d.m.view()!!.ppEnded, "on the delayed timeline")
+    }
+
+    @Test
+    fun pollsAreIdenticalWithAndWithoutAPowerPlay() {
+        fun trace(withPp: Boolean): List<Any?> {
+            val r = Rig()
+            val out = ArrayList<Any?>()
+            r.follow()
+            out += r.m.pollDue()
+            val snaps = listOf(
+                live(secs = 622), live(secs = 602), live(secs = 582, away = 1),
+                live(secs = 958, phase = GamePhase.INTERMISSION, inInt = true, running = false), live(secs = 562),
+            )
+            var t = 1_000L
+            for ((i, s) in snaps.withIndex()) {
+                r.at(t)
+                r.ok(if (withPp) s.copy(powerPlay = pp(if (i % 2 == 0) Side.HOME else Side.AWAY, secs = 60 - i)) else s, ageS = 3)
+                out += r.m.pollDue()
+                out += r.m.nextWakeAtMono()
+                t = r.m.nextWakeAtMono()!!
+                out += r.m.view()?.let { it.copy(powerPlay = null, goalPp = false, ppEnded = false) }
+            }
+            r.m.online(false)
+            out.add(r.wakeUntil(t + 400_000).map { (w, v) -> w to v?.copy(powerPlay = null, goalPp = false, ppEnded = false) })
+            return out
+        }
+        assertEquals(trace(false), trace(true))
+    }
 }
