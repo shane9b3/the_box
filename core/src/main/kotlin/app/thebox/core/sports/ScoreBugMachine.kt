@@ -72,6 +72,28 @@ class ScoreBugMachine(
 
     private val events = ArrayList<ScoreEvent>()
 
+    // ---- NFL (docs/design/m6-nfl.md §3.2–§3.6). Written only in advanceDisplay (and cleared by reset()), never in view().
+    /** (§3.2, ruling 25) The flagged score's takeovers (one, or a +7/+8 pair); set and cleared with the mark. */
+    private var nflScores: List<NflScore> = emptyList()
+    /** (§3.3, B2) The side whose try is pending, and the (period, clock) of the snapshot that set it. */
+    private var pendingTry: Side? = null
+    private var tryAt: Pair<Int?, Int?>? = null
+    /** (§3.3) The TD `lastPlay` whose try is over: a later `Dead` body still naming it never sets the try again. */
+    private var tryDoneId: String? = null
+    /** (§3.4) Inference memory: the kicker of the previously shown play when it was a `Kickoff`; the last shown `Down`. */
+    private var lastKicker: Side? = null
+    private var lastDown: NflPlay.Down? = null
+    private var lastDownPoss: Side? = null
+    /** (§3.4) The last shown tab in its plain form (never RED ZONE): held through a `Dead` with no try pending. */
+    private var heldTab: NflTab? = null
+    /** The rendering of [nflEntry] (§3.4), gated in [view]. [nflTry]: rendered as the try (kept through a break). */
+    private var nflEntry: Entry? = null
+    private var nflDown: DownText? = null
+    private var nflTab: NflTab? = null
+    private var nflTry = false
+    /** (N5) The scores of the snapshots shown going forward, (receivedMono, away, home), kept [SportsConstants.QUEUE_KEEP_MS]. */
+    private val nflShown = ArrayList<Triple<Long, Int?, Int?>>()
+
     // ------------------------------------------------------------------ inputs
 
     fun follow(game: FollowedGame?) {
@@ -177,7 +199,7 @@ class ScoreBugMachine(
             return
         }
         prune(now)
-        markUntil?.let { if (now >= it) { markUntil = null; goalSide = null; goalPp = false } }
+        markUntil?.let { if (now >= it) { markUntil = null; goalSide = null; goalPp = false; nflScores = emptyList() } }
     }
 
     fun pollDue(): Boolean {
@@ -219,6 +241,7 @@ class ScoreBugMachine(
         val staleAt = staleAt()
         val stale = !waiting && staleAt != null && now >= staleAt
         if (stale && now >= staleAt!! + SportsConstants.HIDE_AFTER_MS) return null
+        if (s.id.league == League.NFL) return nflView(e, waiting, stale, now)
 
         val label = label(s)
         var top: CentreText = CentreText.Clock
@@ -257,6 +280,17 @@ class ScoreBugMachine(
         val e = shown ?: return null
         val s = e.snap
         if (s.phase != GamePhase.LIVE && s.phase != GamePhase.INTERMISSION && s.phase != GamePhase.FINAL) return null
+        if (s.id.league == League.NFL) {
+            // (NFL §3.1, S3) The NFL line order: "No update" over the clock in play; one line in a break, never a frozen 0:00.
+            val live = s.phase == GamePhase.LIVE
+            val top = if (s.phase == GamePhase.FINAL) CentreText.Final(s.finalKind ?: PeriodKind.REG) else CentreText.NoUpdate
+            val bottom = if (live) CentreText.Clock else null
+            val secs = if (live) s.clock?.takeIf { clockShown(s) }?.secondsRemaining?.coerceAtLeast(0) else null
+            return ScoreBugView(
+                s.away, s.home, top, bottom, dim = s.phase != GamePhase.FINAL, goalSeq = goalSeq, goalSide = null,
+                clockSecs = secs, gameId = game?.id, league = League.NFL,
+            )
+        }
         val clockSecs = s.clock?.takeIf { clockShown(s) }?.secondsRemaining?.coerceAtLeast(0)
         return ScoreBugView(s.away, s.home, CentreText.Clock, CentreText.NoUpdate, dim = true, goalSeq = goalSeq, goalSide = null, clockSecs = clockSecs, gameId = game?.id)
     }
@@ -284,15 +318,19 @@ class ScoreBugMachine(
         if (failures > 0) {
             var t = backoffAt ?: now
             if (demand == Demand.UNSEEN) failAt?.let { t = maxOf(t, it + SportsConstants.POLL_UNSEEN_MS) }
-            if (ok != null && isPreGame(ok.value.phase)) t = maxOf(t, preWakeMono(now))
+            if (ok != null && isPreGame(ok.value.phase) && !kickoffDue(ok.value)) t = maxOf(t, preWakeMono(now))
             return t
         }
         ok ?: return followAt
         val floor = if (demand == Demand.UNSEEN) ok.receivedMono + SportsConstants.POLL_UNSEEN_MS else Long.MIN_VALUE
         return when (ok.value.phase) {
             GamePhase.FINAL, GamePhase.POSTPONED -> null
-            GamePhase.SCHEDULED, GamePhase.PRE ->
+            // (NFL lead sign-off 1) An ESPN `in` body still at the coin toss (S8, PRE) polls at the LIVE cadence.
+            GamePhase.SCHEDULED, GamePhase.PRE -> if (kickoffDue(ok.value)) {
+                SportsTiming.nextAligned(ok, pollPhaseMs, 0, floor)
+            } else {
                 SportsTiming.nextAligned(ok, pollPhaseMs, SportsConstants.INTERMISSION_BUCKET_SKIP, maxOf(floor, preWakeMono(now)))
+            }
             GamePhase.LIVE -> SportsTiming.nextAligned(ok, pollPhaseMs, 0, floor)
             GamePhase.INTERMISSION ->
                 SportsTiming.nextAligned(ok, pollPhaseMs, SportsConstants.INTERMISSION_BUCKET_SKIP, floor)
@@ -301,15 +339,23 @@ class ScoreBugMachine(
 
     /** Whether a rise to SEEN may poll now: not for a finished game, nor for a pre-game one still asleep. */
     private fun pollsAtAll(now: Long): Boolean {
-        val phase = lastOk?.value?.phase ?: return true
-        return when (phase) {
+        val snap = lastOk?.value ?: return true
+        return when (snap.phase) {
             GamePhase.FINAL, GamePhase.POSTPONED -> false
-            GamePhase.SCHEDULED, GamePhase.PRE -> now >= preWakeMono(now)
+            GamePhase.SCHEDULED, GamePhase.PRE -> kickoffDue(snap) || now >= preWakeMono(now)
             else -> true
         }
     }
 
     private fun isPreGame(p: GamePhase) = p == GamePhase.SCHEDULED || p == GamePhase.PRE
+
+    /**
+     * (NFL §1.3 S8, lead sign-off 1) An NFL PRE snapshot from an ESPN `in` body (the coin toss, before the opening
+     * kick-off): the one PRE with both scores set (`EspnMapper` leaves them null before `in`). It polls at the LIVE
+     * cadence, so the bug appears within one poll of the first logged play.
+     */
+    private fun kickoffDue(s: GameSnapshot): Boolean =
+        s.id.league == League.NFL && s.phase == GamePhase.PRE && s.away.score != null && s.home.score != null
 
     private fun preWakeMono(now: Long): Long =
         monoAtWall(now, (game?.startUtcMs ?: 0L) - SportsConstants.PRE_WAKE_MS)
@@ -336,6 +382,11 @@ class ScoreBugMachine(
             shown = q
             ppEndedEntry = null
             lastShownPp = gatedPp(q.snap)
+            if (q.snap.id.league == League.NFL) {
+                // (NFL §3.3, §3.6) The try, the inference memory and the held tab restart from the earlier snapshot.
+                resetNflPlay()
+                nflAdvance(null, q)
+            }
             return
         }
         val at = maxOf(q.anchorMono + delayMs, q.receivedMono)
@@ -358,7 +409,18 @@ class ScoreBugMachine(
             // Owner ruling 11: the shootout winner's +1 (usually on the FINAL snapshot, Final/SO) is a rise like any other
             // and plays the takeover. N9 (accepted miss): a tying goal and the shootout win inside one missed poll can
             // arrive as both sides rising, which is silent, as above.
-            if (side != null) {
+            if (side != null && s.id.league == League.NFL) {
+                // (NFL §3.2) The kind from the point rise; 4, 5, ≥ 9 and a correction (N5) flag nothing.
+                val scores = nflScoresFor(p, s, side, q.receivedMono)
+                if (scores != null) {
+                    goalSeq++
+                    goalSide = side
+                    markUntil = at + if (scores.size == 2) SportsConstants.NFL_DOUBLE_MARK_MS else SportsConstants.GOAL_MARK_MS
+                    goalPp = false
+                    nflScores = scores
+                    flagged = true
+                }
+            } else if (side != null) {
                 goalSeq++
                 goalSide = side
                 markUntil = at + SportsConstants.GOAL_MARK_MS
@@ -366,6 +428,7 @@ class ScoreBugMachine(
                 flagged = true
             }
         }
+        if (s.id.league == League.NFL) nflAdvance(p, q)
 
         // Power play §1.4, §7: a real end is "the previous fresh view had one, this one has none, and it flagged no goal".
         val pp = gatedPp(s)
@@ -384,6 +447,222 @@ class ScoreBugMachine(
     }
 
     private fun rose(was: Int?, now: Int?) = was != null && now != null && now > was
+
+    // ------------------------------------------------------------------ NFL (docs/design/m6-nfl.md §3)
+
+    /**
+     * (NFL §3.1, §3.4) The NFL view of [e]: the quarter over the clock in play, one line in breaks and at Final, no
+     * shootout or "0:00 → EndOf" rule (ESPN shows 0:00 during untimed downs). The down column and the tab only when
+     * fresh and LIVE, or for a pending try's PAT through a break (§3.4).
+     */
+    private fun nflView(e: Entry, waiting: Boolean, stale: Boolean, now: Long): ScoreBugView {
+        val s = e.snap
+        val label = label(s)
+        val d = s.detail as? LeagueDetail.Nfl
+        val oneLine = s.phase != GamePhase.LIVE
+        var top: CentreText = when {
+            s.phase == GamePhase.FINAL -> CentreText.Final(s.finalKind ?: PeriodKind.REG)
+            s.phase == GamePhase.INTERMISSION && d?.breakKind == NflBreak.HALFTIME -> CentreText.Halftime
+            s.phase == GamePhase.INTERMISSION -> CentreText.EndOf(label)
+            else -> CentreText.Period(label)
+        }
+        when {
+            waiting -> top = CentreText.Delayed
+            stale -> top = CentreText.NoUpdate
+        }
+        val bottom: CentreText? = if (oneLine) null else CentreText.Clock
+        val clockSecs = if (top == CentreText.Clock || bottom == CentreText.Clock) {
+            s.clock?.takeIf { clockShown(s) }?.secondsRemaining?.coerceAtLeast(0)
+        } else {
+            null
+        }
+        val goal = goalSide.takeIf { markUntil?.let { now < it } == true }
+        val fresh = !waiting && !stale
+        val drawn = fresh && e === nflEntry &&
+            (s.phase == GamePhase.LIVE || (s.phase == GamePhase.INTERMISSION && nflTry))
+        return ScoreBugView(
+            s.away, s.home, top, bottom, dim = waiting || stale, goalSeq = goalSeq, goalSide = goal, clockSecs = clockSecs,
+            gameId = game?.id,
+            league = League.NFL,
+            nfl = NflView(
+                down = if (drawn) nflDown else null,
+                tab = if (drawn) nflTab else null,
+                scores = if (goal != null) nflScores else emptyList(),
+            ),
+        )
+    }
+
+    /**
+     * (NFL §3.2, ruling 25) The takeovers for [side]'s rise from [p] to [s], or null for no flag:
+     * 6 → TOUCHDOWN; 7 → TOUCHDOWN +6 then EXTRA POINT +1; 8 → TOUCHDOWN +6 then TWO-POINT +2; 3 → FIELD GOAL;
+     * 1 → EXTRA POINT; 2 → TWO-POINT with a try pending for [side], else the `lastPlay` tie-break, else SAFETY;
+     * anything else (4, 5, ≥ 9) → null.
+     *
+     * **The correction guard (N5):** a rise back to a score [side] showed in a snapshot received within
+     * `QUEUE_KEEP_MS` is not flagged (a reversed TD restored never replays its takeover).
+     *
+     * Known misses (§3.2): a defensive two-point return during the other side's try reads SAFETY; a TD and a missed try
+     * followed by a safety inside one gap is a two-sided rise (silent); a field goal plus a safety inside one gap (+5)
+     * is silent.
+     */
+    private fun nflScoresFor(p: GameSnapshot, s: GameSnapshot, side: Side, receivedMono: Long): List<NflScore>? {
+        val was = scoreOf(p, side) ?: return null
+        val now = scoreOf(s, side) ?: return null
+        val keep = SportsConstants.QUEUE_KEEP_MS
+        if (nflShown.any { receivedMono - it.first <= keep && (if (side == Side.AWAY) it.second else it.third) == now }) return null
+        val other = scoreOf(s, if (side == Side.AWAY) Side.HOME else Side.AWAY) ?: 0
+        fun score(kind: NflScoreKind, points: Int, total: Int) =
+            if (side == Side.AWAY) NflScore(kind, points, total, other) else NflScore(kind, points, other, total)
+        return when (now - was) {
+            6 -> listOf(score(NflScoreKind.TOUCHDOWN, 6, now))
+            7 -> listOf(score(NflScoreKind.TOUCHDOWN, 6, was + 6), score(NflScoreKind.EXTRA_POINT, 1, now))
+            8 -> listOf(score(NflScoreKind.TOUCHDOWN, 6, was + 6), score(NflScoreKind.TWO_POINT, 2, now))
+            3 -> listOf(score(NflScoreKind.FIELD_GOAL, 3, now))
+            1 -> listOf(score(NflScoreKind.EXTRA_POINT, 1, now))
+            2 -> listOf(score(twoPointKind(p, s, side), 2, now))
+            else -> null
+        }
+    }
+
+    /**
+     * (NFL §3.2) A +2: TWO-POINT when [side] has a try pending; else a `lastPlay` new since [p] and belonging to [side]
+     * decides ("two-point" / "2pt" → TWO-POINT, "safety" → SAFETY); else SAFETY.
+     */
+    private fun twoPointKind(p: GameSnapshot, s: GameSnapshot, side: Side): NflScoreKind {
+        if (pendingTry == side) return NflScoreKind.TWO_POINT
+        val lp = (s.detail as? LeagueDetail.Nfl)?.lastPlay
+        val before = (p.detail as? LeagueDetail.Nfl)?.lastPlay
+        if (lp != null && lp.side == side && lp.id != before?.id) {
+            val text = lp.typeText?.lowercase().orEmpty()
+            if ("two-point" in text || "2pt" in text) return NflScoreKind.TWO_POINT
+        }
+        return NflScoreKind.SAFETY
+    }
+
+    private fun scoreOf(s: GameSnapshot, side: Side): Int? = if (side == Side.AWAY) s.away.score else s.home.score
+
+    /**
+     * (NFL §3.3, §3.4) The bookkeeping for the newly shown [q] (previous shown snapshot [p]), then its rendering:
+     * 1. **clear** the try on any score change, a shown `Kickoff`, or a shown `Down` whose (period, clock) differs from
+     *    `tryAt` (never on a phase change alone: a try after 0:00 may already be in a break);
+     * 2. **set** it on any rise of exactly 6 (flagged or not), or on a shown `Dead` whose `lastPlay` is a TD when nothing
+     *    is pending (the app started during the try). The TD `lastPlay` seen with a score change is remembered as done,
+     *    so a `Dead` body still naming it after the try never sets the try again (WP-1 reading);
+     * 3. **render**: a `Dead`, a `Down` equal to the previous shown `Down` (the stale body that carries the score), or a
+     *    `Down` at `tryAt` renders as the try ("PAT", "X BALL | EXTRA POINT").
+     */
+    private fun nflAdvance(p: GameSnapshot?, q: Entry) {
+        val s = q.snap
+        val d = s.detail as? LeagueDetail.Nfl
+        val play = d?.play ?: NflPlay.None
+        val at = s.period to s.clock?.secondsRemaining
+        val changed = p != null && (p.away.score != s.away.score || p.home.score != s.home.score)
+        val six: Side? = when {
+            p == null -> null
+            delta(p.away.score, s.away.score) == 6 -> Side.AWAY
+            delta(p.home.score, s.home.score) == 6 -> Side.HOME
+            else -> null
+        }
+        // 1. Clear, against the state before this snapshot's set.
+        if (changed || play is NflPlay.Kickoff || (play is NflPlay.Down && at != tryAt)) {
+            pendingTry = null
+            tryAt = null
+        }
+        val lp = d?.lastPlay
+        if (changed && lp != null && lp.scoreValue == TD_POINTS) tryDoneId = lp.id
+        // 2. Set.
+        if (six != null) {
+            pendingTry = six
+            tryAt = at
+        } else if (play is NflPlay.Dead && pendingTry == null && play.scoreValue == TD_POINTS && play.scorer != null &&
+            lp != null && lp.id != tryDoneId
+        ) {
+            pendingTry = play.scorer
+            tryAt = at
+        }
+        // 3. Render.
+        val pending = pendingTry
+        val asTry = pending != null &&
+            (play is NflPlay.Dead || (play is NflPlay.Down && (play == lastDown || at == tryAt)))
+        var down: DownText? = null
+        var tab: NflTab? = null
+        var plain: NflTab? = null
+        when {
+            asTry -> {
+                down = DownText.Pat
+                tab = NflTab(pending!!, TabLead.BALL, TabTail.ExtraPoint)
+                plain = tab
+            }
+            play is NflPlay.Down -> {
+                down = DownText.Down(play.down, play.distance, play.goalToGo)
+                val poss = d?.possession ?: inferPossession(lp)
+                if (poss != null) {
+                    plain = NflTab(poss, TabLead.BALL, tail(play.field, poss))
+                    tab = if (redZone(d, play, poss)) plain.copy(tail = TabTail.RedZone) else plain
+                }
+            }
+            play is NflPlay.Dead -> {
+                tab = heldTab // after a FG or a safety: no close/open before the kick-off body
+                plain = heldTab
+            }
+            play is NflPlay.Kickoff -> {
+                down = DownText.Kickoff
+                plain = play.kicker?.let { NflTab(it, TabLead.KICKOFF, tail(play.field, it)) }
+                tab = plain
+            }
+            else -> Unit // None: no column, no tab
+        }
+        nflEntry = q
+        nflDown = down
+        nflTab = tab
+        nflTry = asTry
+        heldTab = plain
+        // The inference memory: the previous shown play.
+        when (play) {
+            is NflPlay.Kickoff -> lastKicker = play.kicker
+            is NflPlay.Down -> {
+                lastDown = play
+                lastDownPoss = tab?.side
+                lastKicker = null
+            }
+            else -> Unit
+        }
+        nflShown += Triple(q.receivedMono, s.away.score, s.home.score)
+        nflShown.removeAll { q.receivedMono - it.first > SportsConstants.QUEUE_KEEP_MS }
+    }
+
+    private fun delta(was: Int?, now: Int?): Int? = if (was != null && now != null) now - was else null
+
+    /**
+     * (NFL §3.4, N6) The possession of a `Down` that has none: the shown `lastPlay`'s team when it is a kick-off (the
+     * receiver), else the other side of the previously shown `Kickoff`, else the previously shown `Down`'s; else null.
+     */
+    private fun inferPossession(lp: NflLastPlay?): Side? {
+        if (lp != null && lp.side != null && (lp.typeId == SportsConstants.NFL_KICKOFF_TYPE || isKickReturn(lp.typeText))) return lp.side
+        lastKicker?.let { return if (it == Side.AWAY) Side.HOME else Side.AWAY }
+        return lastDownPoss
+    }
+
+    /** ESPN's "Kickoff Return (Offense)": its team is the receiver, as for type 53. */
+    private fun isKickReturn(text: String?): Boolean = text != null && KICK_RETURN.containsMatchIn(text)
+
+    /** (B1) OWN / OPP / MIDFIELD from whose half the ball is in, relative to [side]; null with no field. */
+    private fun tail(field: FieldPos?, side: Side): TabTail? = when {
+        field == null -> null
+        field.territory == null -> TabTail.Field(FieldZone.MIDFIELD, 50)
+        field.territory == side -> TabTail.Field(FieldZone.OWN, field.yard)
+        else -> TabTail.Field(FieldZone.OPP, field.yard)
+    }
+
+    /**
+     * (NFL §3.5, ruling 26) RED ZONE only on a real down not rendered as the try, with the tab's side known, `isRedZone`
+     * set, and the field (when known) the opponent's half at yard ≤ 20.
+     */
+    private fun redZone(d: LeagueDetail.Nfl?, play: NflPlay.Down, side: Side): Boolean {
+        if (d?.redZone != true || play.down !in 1..4) return false
+        val f = play.field ?: return true
+        return f.territory != null && f.territory != side && f.yard <= RED_ZONE_YARDS
+    }
 
     /** (Power play §1.4) The snapshot's power play when the phase can show one: LIVE or INTERMISSION, not the shootout. */
     private fun gatedPp(s: GameSnapshot): PowerPlay? =
@@ -458,6 +737,15 @@ class ScoreBugMachine(
         // the UI has already seen.
         goalSide = null; markUntil = null; goalPp = false
         lastShownPp = null; ppEndedEntry = null
+        nflScores = emptyList(); nflShown.clear()
+        resetNflPlay()
+    }
+
+    /** (NFL §3.6) The try, the inference memory, the held tab and the current rendering. */
+    private fun resetNflPlay() {
+        pendingTry = null; tryAt = null; tryDoneId = null
+        lastKicker = null; lastDown = null; lastDownPoss = null; heldTab = null
+        nflEntry = null; nflDown = null; nflTab = null; nflTry = false
     }
 
     private companion object {
@@ -466,5 +754,11 @@ class ScoreBugMachine(
          * (2 × the slowest SEEN cadence plus a failed poll's back-off).
          */
         const val GOAL_FRESH_MS = 2 * 40_000L + SportsConstants.BACKOFF_BASE_MS
+
+        /** (NFL §3.3) A touchdown's points: the rise (and the `lastPlay.scoreValue`) that sets the try. */
+        const val TD_POINTS = 6
+        /** (NFL §3.5) The red zone: the opponent's half at this yard or closer. */
+        const val RED_ZONE_YARDS = 20
+        val KICK_RETURN = Regex("(?i)kickoff return \\(offense\\)")
     }
 }
