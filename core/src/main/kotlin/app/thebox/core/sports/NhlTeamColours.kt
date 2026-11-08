@@ -14,10 +14,13 @@ data class TeamColours(
     val pop: Int,
     /**
      * (Power play, docs/design/m6-power-play.md §6.1) The power-play tab's colour: [glow] when white text passes C5 on
-     * it, else the team's other colour. Commit 0 default: [base] (WP-1 derives it).
+     * it, else the team's other colour (derived in `NhlTeamColours.derive`).
      */
     val tab: Int = base,
-    /** (Power play §6.3) The pill tint's and the halo's strength, 1 down in 5 % steps until C6 passes. WP-1 derives it. */
+    /**
+     * (Power play §6.3) The pill tint's and the halo's strength: 1, down in 5 % steps until C6 passes (derived in
+     * `NhlTeamColours.derive`).
+     */
     val tintScale: Float = 1f,
 )
 
@@ -36,6 +39,11 @@ data class TeamColours(
  * - [TeamColours.pop]: whichever of accent and base contrasts more with `GLASS_WHITE_ICE`, mixed toward white in 5 %
  *   steps (each channel rounded half to even) until it reaches `GOAL_C4_MIN` (4.5) there. Because the source can be
  *   the base, a black accent (PHI, NJD) still pops in team colour, not grey.
+ * - (Power play §6) [TeamColours.tab] = glow when C5 passes on it, else the other team colour. C5 is white against
+ *   [mixBlack]`(tab, k)` at the tab gradient's `PP_C5_POINT` (k = .172 with the stops `PP_GRADIENT_BLACK`).
+ * - [TeamColours.tintScale]: 1, dropped in `PP_TINT_SCALE_STEP` steps until C6 passes: white against glow at the tint
+ *   alpha at `PP_C6_X` × the scale, over `GLASS_WHITE_ICE` (channels rounded half to even, as the painter's 8-bit
+ *   blend).
  */
 object NhlTeamColours {
     /** Trimmed and upper-cased; an unknown or null abbreviation gives [FALLBACK]. */
@@ -103,8 +111,59 @@ object NhlTeamColours {
             step++
             pop = towardWhite(src, step / POP_STEPS.toDouble())
         }
-        return TeamColours(base, accent, glow, pop)
+        val other = if (glow == base) accent else base
+        val tab = if (c5(glow) >= SportsConstants.PP_C5_MIN) glow else other
+        var scaleSteps = 0
+        while (c6(glow, tintScaleOf(scaleSteps)) < SportsConstants.PP_C6_MIN && tintScaleOf(scaleSteps + 1) > 0f) scaleSteps++
+        return TeamColours(base, accent, glow, pop, tab, tintScaleOf(scaleSteps))
     }
+
+    /** 1 − n × `PP_TINT_SCALE_STEP`, computed without accumulating float error. */
+    private fun tintScaleOf(n: Int): Float = 1f - n * SportsConstants.PP_TINT_SCALE_STEP
+
+    /** (Power play §6.1) [argb] mixed toward black by [k] (0 = itself, 1 = black), each channel rounded half to even. */
+    internal fun mixBlack(argb: Int, k: Double): Int {
+        fun mix(shift: Int): Int = round(((argb shr shift) and 0xFF) * (1 - k)).toInt() shl shift
+        return (0xFF shl 24) or mix(16) or mix(8) or mix(0)
+    }
+
+    /** (Power play §6.1) The gradient's black amount at [pos] (0 = the pill side, 1 = the far edge), from `PP_GRADIENT_*`. */
+    internal fun gradientBlackAt(pos: Float): Double =
+        lerpStops(SportsConstants.PP_GRADIENT_STOPS, SportsConstants.PP_GRADIENT_BLACK, pos)
+
+    /** (Power play §6.3) The pill tint's alpha at [x] design px from the power-play end of a Standard pill (unscaled). */
+    internal fun tintAlphaAt(x: Float): Double =
+        lerpStops(SportsConstants.PP_TINT_STOPS, SportsConstants.PP_TINT_ALPHAS, x / SportsConstants.SCORE_W)
+
+    /** (Power play §6.2) C5: white tab text at the far cap edge of the tab gradient. */
+    internal fun c5(tab: Int): Double = Contrast.ratio(WHITE, mixBlack(tab, gradientBlackAt(SportsConstants.PP_C5_POINT)))
+
+    /** (Power play §6.3) C6: white digits on [glow] tinted at `tintAlphaAt(PP_C6_X)` × [scale] over white ice. */
+    internal fun c6(glow: Int, scale: Float): Double =
+        Contrast.ratio(WHITE, over(glow, tintAlphaAt(SportsConstants.PP_C6_X) * scale, SportsConstants.GLASS_WHITE_ICE))
+
+    /** [fg] at [alpha] over the opaque [bg], each channel rounded half to even. */
+    private fun over(fg: Int, alpha: Double, bg: Int): Int {
+        fun mix(shift: Int): Int {
+            val f = (fg shr shift) and 0xFF
+            val b = (bg shr shift) and 0xFF
+            return round(b + (f - b) * alpha).toInt() shl shift
+        }
+        return (0xFF shl 24) or mix(16) or mix(8) or mix(0)
+    }
+
+    private fun lerpStops(stops: List<Float>, values: List<Float>, pos: Float): Double {
+        if (pos <= stops.first()) return values.first().toDouble()
+        for (i in 1 until stops.size) {
+            if (pos <= stops[i]) {
+                val t = (pos - stops[i - 1]).toDouble() / (stops[i] - stops[i - 1])
+                return values[i - 1] + (values[i] - values[i - 1]) * t
+            }
+        }
+        return values.last().toDouble()
+    }
+
+    private const val WHITE = 0xFFFFFFFF.toInt()
 
     /** 20 steps of 5 %: the last one is white, which always passes. */
     private const val POP_STEPS = 20

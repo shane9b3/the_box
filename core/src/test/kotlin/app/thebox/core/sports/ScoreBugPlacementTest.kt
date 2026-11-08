@@ -2,6 +2,7 @@ package app.thebox.core.sports
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -172,6 +173,114 @@ class ScoreBugPlacementTest {
         val l = large.copy(stats = true)
         assertEquals(false, glow(l, geo.copy(stats = Box(1000f, 56f, 1318f - 75f, 300f))))
         assertEquals(true, glow(l, geo.copy(stats = Box(1000f, 56f, 1318f - 76f, 300f))))
+    }
+
+    // ------------------------------------------------------------------ the power-play tab (docs/design/m6-power-play.md §4)
+
+    @Test
+    fun tabBoxFourCornersBothSizes() {
+        for (c in corners) for (s in sizes) {
+            val i = input(c, s)
+            val pill = assertNotNull(ScoreBugPlacement.place(i, geo))
+            val inset = if (s == ScoreBugSize.LARGE) 39f else 31f
+            val depth = if (s == ScoreBugSize.LARGE) 45f else 36f
+            // Top corners drop the tab below the pill; bottom corners open it upward (ruling 16).
+            val want = if (bottom(c)) {
+                Box(pill.l + inset, pill.t - depth, pill.r - inset, pill.t)
+            } else {
+                Box(pill.l + inset, pill.b, pill.r - inset, pill.b + depth)
+            }
+            val tab = ScoreBugPlacement.tabBox(i, pill)
+            assertEquals(want, tab, "$c $s")
+            assertEquals(if (s == ScoreBugSize.LARGE) 428f else 342f, tab.r - tab.l, "§4.1 width $c $s")
+        }
+        // §4.4: at rest the Standard tab's edge is at y 162 (top corners) and 918 (bottom corners).
+        assertEquals(162f, ScoreBugPlacement.tabBox(input(ScoreCorner.TOP_RIGHT), ScoreBugPlacement.cornerBox(ScoreCorner.TOP_RIGHT, ScoreBugSize.STANDARD)).b)
+        assertEquals(918f, ScoreBugPlacement.tabBox(input(ScoreCorner.BOTTOM_LEFT), ScoreBugPlacement.cornerBox(ScoreCorner.BOTTOM_LEFT, ScoreBugSize.STANDARD)).t)
+    }
+
+    @Test
+    fun tabFollowsTheEffectiveCorner() {
+        for (c in corners) for (s in sizes) {
+            // Subtitles move a bottom corner to the top: its tab drops below the pill.
+            val i = input(c, s).copy(textTrackOn = true)
+            val pill = assertNotNull(ScoreBugPlacement.place(i, geo))
+            val tab = ScoreBugPlacement.tabBox(i, pill)
+            assertEquals(pill.b, tab.t, "$c $s subtitles")
+            // A bar lifts a bottom bug; its tab still opens upward, clear of the bar.
+            val lifted = input(c, s).copy(bar = BottomBar.USER_BAR)
+            val lp = assertNotNull(ScoreBugPlacement.place(lifted, geo))
+            val lt = ScoreBugPlacement.tabBox(lifted, lp)
+            if (bottom(c)) {
+                assertEquals(lp.t, lt.b, "$c $s bar")
+                assertTrue(lt.b <= geo.infoBarTop, "$c $s: no bar meets a tab")
+            } else {
+                assertEquals(lp.b, lt.t)
+            }
+        }
+    }
+
+    @Test
+    fun tabReachFitsTheLayerMargin() {
+        // §4.3: depth + shadow dy + 3σ (σ × d at both sizes, N1) ≤ M.
+        val std = ScoreBugPlacement.tabDepth(ScoreBugSize.STANDARD) + SportsConstants.PP_SHADOW_DY + 3 * SportsConstants.PP_SHADOW_SIGMA
+        val large = ScoreBugPlacement.tabDepth(ScoreBugSize.LARGE) + SportsConstants.PP_SHADOW_DY_LARGE + 3 * SportsConstants.PP_SHADOW_SIGMA
+        assertEquals(65f, std)
+        assertEquals(75f, large)
+        assertTrue(std <= SportsConstants.GOAL_LAYER_MARGIN)
+        assertTrue(large <= SportsConstants.GOAL_LAYER_MARGIN_LARGE)
+        // The neighbour inflation is the shadow's reach past the tab (N8).
+        assertEquals(SportsConstants.PP_SHADOW_DY + 3 * SportsConstants.PP_SHADOW_SIGMA, SportsConstants.PP_TAB_NEIGHBOUR)
+    }
+
+    @Test
+    fun tabAllowedOnABareCornerAndNeverInPlaceMode() {
+        for (c in corners) for (s in sizes) {
+            val i = input(c, s)
+            val pill = assertNotNull(ScoreBugPlacement.place(i, geo))
+            assertTrue(ScoreBugPlacement.tabAllowed(i, geo, pill), "$c $s")
+            for (bar in listOf(BottomBar.USER_BAR, BottomBar.QUICK)) {
+                val b = i.copy(bar = bar)
+                assertTrue(ScoreBugPlacement.tabAllowed(b, geo, assertNotNull(ScoreBugPlacement.place(b, geo))), "$c $s $bar")
+            }
+            val placing = i.copy(placing = true)
+            assertFalse(ScoreBugPlacement.tabAllowed(placing, geo, assertNotNull(ScoreBugPlacement.place(placing, geo))), "$c $s placing")
+        }
+    }
+
+    @Test
+    fun tabAllowedWithEachOverlayAt28And30Px() {
+        // Top right Standard: pill 1420..1824 × 56..126, tab 1451..1793 × 126..162. An overlay below the tab: 28 px away
+        // is inside the 29 px neighbour band, 30 px is clear. Neither touches the pill itself.
+        val i = input(ScoreCorner.TOP_RIGHT)
+        val pill = assertNotNull(ScoreBugPlacement.place(i, geo))
+        val tab = ScoreBugPlacement.tabBox(i, pill)
+        fun below(gap: Float) = Box(1000f, tab.b + gap, 1900f, tab.b + gap + 200f)
+        fun left(gap: Float) = Box(1000f, 130f, tab.l - gap, 300f) // beside the tab, clear of the pill (b 126)
+        val overlays = listOf<Pair<String, (PlacementInput, Box) -> Pair<PlacementInput, OverlayGeometry>>>(
+            "channelList" to { p, b -> p.copy(channelList = true) to geo.copy(channelList = b) },
+            "stats" to { p, b -> p.copy(stats = true) to geo.copy(stats = b) },
+            "groupCard" to { p, b -> p.copy(groupCard = true) to geo.copy(groupCard = b) },
+            "picker" to { p, b -> p.copy(picker = true) to geo.copy(picker = b) },
+            "numberEntry" to { p, b -> p.copy(numberEntry = true) to geo.copy(numberEntry = b) },
+            "probing" to { p, b -> p.copy(probing = b) to geo },
+        )
+        for ((name, put) in overlays) for ((where, at) in listOf("below" to ::below, "left" to ::left)) {
+            val (near, gNear) = put(i, at(28f))
+            assertNotNull(ScoreBugPlacement.place(near, gNear), "$name $where 28 does not hide the bug")
+            assertFalse(ScoreBugPlacement.tabAllowed(near, gNear, pill), "$name $where 28 px")
+            val (far, gFar) = put(i, at(30f))
+            assertTrue(ScoreBugPlacement.tabAllowed(far, gFar, pill), "$name $where 30 px")
+            if (name != "probing") assertTrue(ScoreBugPlacement.tabAllowed(i, gNear, pill), "$name inactive")
+        }
+        // Bottom left Large opens upward: pill 96..602 × 936..1024, tab 135..563 × 891..936.
+        val bl = input(ScoreCorner.BOTTOM_LEFT, ScoreBugSize.LARGE)
+        val blPill = assertNotNull(ScoreBugPlacement.place(bl, geo))
+        val blTab = ScoreBugPlacement.tabBox(bl, blPill)
+        assertEquals(Box(135f, 891f, 563f, 936f), blTab)
+        val on = bl.copy(stats = true)
+        assertFalse(ScoreBugPlacement.tabAllowed(on, geo.copy(stats = Box(0f, 0f, 1920f, blTab.t - 28f)), blPill))
+        assertTrue(ScoreBugPlacement.tabAllowed(on, geo.copy(stats = Box(0f, 0f, 1920f, blTab.t - 30f)), blPill))
     }
 
     @Test

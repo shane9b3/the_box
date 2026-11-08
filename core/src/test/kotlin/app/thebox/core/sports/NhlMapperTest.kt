@@ -2,14 +2,16 @@ package app.thebox.core.sports
 
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
-/** docs/design/m6-score-bug.md §2.1, §8: recorded and synthetic NHL bodies. */
+/** docs/design/m6-score-bug.md §2.1, §8; docs/design/m6-power-play.md §1.2, §9.1: recorded and synthetic NHL bodies. */
 class NhlMapperTest {
     private val base = "https://assets.nhle.com/logos/nhl/svg/"
 
@@ -153,6 +155,165 @@ class NhlMapperTest {
         assertNull(g.away.logo) // not an abbreviation: no URL spliced from it
         assertEquals("Oilers", g.home.name)
         assertEquals(0, NhlMapper.day(Json.parseToJsonElement("""{"currentDate":"2026-12-25"}""").jsonObject, base)!!.games.size)
+    }
+
+    // ------------------------------------------------------------------ power play (docs/design/m6-power-play.md §1.2)
+
+    private fun gameJson(situation: String?) = """{"id":2026020251,"startTimeUTC":"2026-11-06T00:00:00Z","gameState":"LIVE",
+        "awayTeam":{"abbrev":"UTA"},"homeTeam":{"abbrev":"MTL"}${situation?.let { ",\"situation\":$it" } ?: ""}}"""
+
+    private fun ppOf(situation: String?): PowerPlay? =
+        assertNotNull(NhlMapper.landing(Json.parseToJsonElement(gameJson(situation)).jsonObject, base)).powerPlay
+
+    /** A situation with [code] (raw JSON) and 79 s left. */
+    private fun pp(code: String): PowerPlay? = ppOf("""{"situationCode":$code,"secondsRemaining":79}""")
+
+    @Test
+    fun recordedPowerPlaysInTheDayListAndTheLanding() {
+        val day = assertNotNull(NhlMapper.day(body(SportsFixtures.SCORE_2026_11_05), base))
+        val uta = day.games.single { it.away.abbrev == "UTA" }
+        assertEquals(PowerPlay(Side.AWAY, PowerPlayKind.ONE_MAN, 79), uta.powerPlay) // 1541, 01:19
+        val van = day.games.single { it.away.abbrev == "VAN" }
+        assertEquals(PowerPlay(Side.HOME, PowerPlayKind.ONE_MAN, 34), van.powerPlay) // 1451, 00:34
+        assertEquals(9, day.games.count { it.powerPlay == null }, "no situation at even strength")
+        assertTrue(day.games.all { it.lastGoal == null }, "the day list has no summary")
+
+        val g = assertNotNull(NhlMapper.landing(body(SportsFixtures.LANDING_LIVE_INT), base))
+        assertEquals(PowerPlay(Side.AWAY, PowerPlayKind.ONE_MAN, 79), g.powerPlay, "still reported in intermission")
+    }
+
+    @Test
+    fun lastGoalIsTheLatestScoringEntry() {
+        // landing-live-int.json: UTA 09:24 is `pp` at 2-0, but the latest entry (MTL 17:10, 2-2) is `ev`.
+        val root = body(SportsFixtures.LANDING_LIVE_INT)
+        val goals = root.getValue("summary").jsonObject.getValue("scoring").jsonArray
+            .flatMap { it.jsonObject.getValue("goals").jsonArray }
+            .map { it.jsonObject }
+        val utaPp = goals.single { it.getValue("timeInPeriod").jsonPrimitive.content == "09:24" }
+        assertEquals(listOf("pp", "2", "0"), listOf("strength", "awayScore", "homeScore").map { utaPp.getValue(it).jsonPrimitive.content })
+        val g = assertNotNull(NhlMapper.landing(root, base))
+        assertEquals(GoalFact(Side.HOME, away = 2, home = 2, pp = false), g.lastGoal)
+    }
+
+    @Test
+    fun lastGoalFromThePpSynthetics() {
+        val goal = assertNotNull(landing("landing-pp-goal-synthetic.json"))
+        assertEquals(GoalFact(Side.HOME, 2, 2, pp = true), goal.lastGoal)
+        assertNull(goal.powerPlay, "the situation is gone with the goal")
+        val sh = assertNotNull(landing("landing-pp-sh-goal-synthetic.json"))
+        assertEquals(GoalFact(Side.HOME, 2, 2, pp = false), sh.lastGoal, "`sh` is not a power-play goal")
+        assertEquals(PowerPlay(Side.AWAY, PowerPlayKind.ONE_MAN, 50), sh.powerPlay, "the opponent's power play goes on")
+        assertNull(assertNotNull(landing("landing-running-synthetic.json")).lastGoal, "no summary: null")
+        // Odd entries are skipped; a later total wins, and a tie goes to the later entry.
+        fun last(scoring: String) = NhlMapper.landing(
+            Json.parseToJsonElement(gameJson(null).dropLast(1) + ""","summary":{"scoring":$scoring}}""").jsonObject, base,
+        )!!.lastGoal
+        val ev = """{"strength":"ev","isHome":false,"awayScore":1,"homeScore":0}"""
+        assertEquals(GoalFact(Side.AWAY, 1, 0, false), last("""[{"goals":[$ev,{"isHome":true,"awayScore":1,"homeScore":1}]}]"""))
+        assertEquals(GoalFact(Side.HOME, 1, 1, true), last("""[{"goals":[$ev]},"odd",{"goals":[null,{"strength":"pp","isHome":true,"awayScore":1,"homeScore":1}]}]"""))
+        assertEquals(GoalFact(Side.HOME, 1, 0, false), last("""[{"goals":[$ev,{"strength":"ev","isHome":true,"awayScore":1,"homeScore":0}]}]"""))
+        assertNull(last("""[{"goals":[{"strength":"pp","isHome":"maybe","awayScore":1,"homeScore":0},{"strength":"pp","isHome":true,"awayScore":-1,"homeScore":0}]}]"""))
+        assertNull(last("""{"goals":[]}"""))
+        assertNull(last("[]"))
+    }
+
+    @Test
+    fun everyDecodingRow() {
+        val one = PowerPlayKind.ONE_MAN
+        val two = PowerPlayKind.TWO_MAN
+        val rows = listOf(
+            "\"1541\"" to PowerPlay(Side.AWAY, one, 79),
+            "\"1451\"" to PowerPlay(Side.HOME, one, 79),
+            "\"1351\"" to PowerPlay(Side.HOME, two, 79), // 5-on-3
+            "\"1531\"" to PowerPlay(Side.AWAY, two, 79),
+            "\"1431\"" to PowerPlay(Side.AWAY, one, 79), // 4-on-3 in overtime
+            "\"0641\"" to PowerPlay(Side.AWAY, one, 79), // 6-on-4 with a pulled goalie: ruling 18
+            "\"1550\"" to PowerPlay(Side.AWAY, one, 79), // review checks
+            "\"0551\"" to PowerPlay(Side.HOME, one, 79),
+            "\"1460\"" to PowerPlay(Side.HOME, one, 79),
+            "\"1441\"" to null, // 4-on-4
+            "\"1331\"" to null, // 3-on-3
+            "\"0651\"" to null, // a delayed penalty
+            "\"1560\"" to null, // an empty net at even strength
+            "\"1551\"" to null,
+            "\"15x1\"" to null, "\"1571\"" to null, "\"0331\"" to null, "\"0101\"" to null, "\"1010\"" to null,
+            "\"1361\"" to null, // effective 6: out of range
+            "\"0441\"" to PowerPlay(Side.HOME, one, 79), // away 4 skaters, net empty → effective 3 vs 4
+            "\"651\"" to null, // a 3-character string is not padded
+            "\"15410\"" to null,
+            // JSON integers of 3–4 digits are left-padded.
+            "651" to null, // → 0651
+            "641" to PowerPlay(Side.AWAY, one, 79), // → 0641
+            "1541" to PowerPlay(Side.AWAY, one, 79),
+            "51" to null, "15410" to null, "-541" to null, "1541.0" to null, "true" to null, "null" to null, "{}" to null,
+            "[]" to null,
+        )
+        for ((code, want) in rows) assertEquals(want, pp(code), "situationCode $code")
+        assertNull(ppOf(null), "no situation")
+        assertNull(ppOf("\"1541\""), "situation not an object")
+        assertNull(ppOf("""{"secondsRemaining":79}"""), "no code: no strength fallback (S9)")
+    }
+
+    @Test
+    fun theCrossCheckCancelsTheDecode() {
+        fun with(away: String, home: String) =
+            ppOf("""{"situationCode":"1541","secondsRemaining":79,"awayTeam":$away,"homeTeam":$home}""")
+        val utaPp = PowerPlay(Side.AWAY, PowerPlayKind.ONE_MAN, 79)
+        assertEquals(utaPp, with("""{"situationDescriptions":["PP"]}""", """{}"""))
+        assertEquals(utaPp, with("""{}""", """{"situationDescriptions":["EN"]}"""))
+        assertEquals(utaPp, with("""{}""", """{"situationDescriptions":"PP"}"""), "not an array: ignored")
+        assertNull(with("""{}""", """{"situationDescriptions":["EN","PP"]}"""))
+        assertNull(with("""{"situationDescriptions":["PP"]}""", """{"situationDescriptions":["PP"]}"""))
+    }
+
+    @Test
+    fun secondsAreTheFeedsOwnWithinRange() {
+        fun secs(fields: String) = assertNotNull(ppOf("""{"situationCode":"1451"$fields}""")).secondsRemaining
+        assertEquals(79, secs(""","secondsRemaining":79,"timeRemaining":"00:10""""), "secondsRemaining wins")
+        assertEquals(0, secs(""","secondsRemaining":0"""), "a reported 0:00 is kept")
+        assertEquals(599, secs(""","secondsRemaining":599"""))
+        assertNull(secs(""","secondsRemaining":600"""))
+        assertNull(secs(""","secondsRemaining":-1"""))
+        assertEquals(65, secs(""","timeRemaining":"01:05""""), "timeRemaining when there are no seconds")
+        assertEquals(65, secs(""","secondsRemaining":"soon","timeRemaining":"01:05""""))
+        assertNull(secs(""), "neither: no seconds, still a power play")
+        assertNull(secs(""","timeRemaining":"soon""""))
+        assertNull(secs(""","timeRemaining":"11:40""""))
+    }
+
+    @Test
+    fun ppSynthetics() {
+        assertEquals(PowerPlay(Side.HOME, PowerPlayKind.ONE_MAN, 34), assertNotNull(landing("landing-pp-home-synthetic.json")).powerPlay)
+        assertEquals(PowerPlay(Side.AWAY, PowerPlayKind.TWO_MAN, 41), assertNotNull(landing("landing-pp-two-man-synthetic.json")).powerPlay)
+        // 641 (a JSON integer) → 0641: UTA's 6-on-4 keeps its power play (ruling 18); seconds from timeRemaining 01:05.
+        assertEquals(PowerPlay(Side.AWAY, PowerPlayKind.ONE_MAN, 65), assertNotNull(landing("landing-pp-numeric-code-synthetic.json")).powerPlay)
+        // 1451 with secondsRemaining 700: the power play stands, its seconds are dropped.
+        assertEquals(PowerPlay(Side.HOME, PowerPlayKind.ONE_MAN, null), assertNotNull(landing("landing-pp-secs-out-of-range-synthetic.json")).powerPlay)
+        // The cross-check: 1541 says UTA, but MTL carries "PP".
+        assertNull(assertNotNull(landing("landing-pp-cross-check-synthetic.json")).powerPlay)
+    }
+
+    @Test
+    fun aBrokenSituationStillMapsTheScore() {
+        val g = assertNotNull(landing("landing-pp-broken-synthetic.json"))
+        assertNull(g.powerPlay)
+        assertNull(g.lastGoal, "odd scoring entries are skipped")
+        assertEquals(2 to 2, g.away.score to g.home.score)
+        assertEquals(GamePhase.LIVE, g.phase)
+        assertEquals(GameClock(622, running = true, inIntermission = false), g.clock)
+    }
+
+    @Test
+    fun theOlderSyntheticsCarryAnAwayPowerPlay() {
+        // Their `situation` is 1541 (UTA), which now decodes. FINAL and SO keep the field; the machine gates it.
+        for (name in listOf(
+            "landing-running-synthetic.json", "landing-crit-synthetic.json", "landing-2ot-synthetic.json",
+            "landing-so-synthetic.json", "landing-final-so-synthetic.json", "landing-final-ot-synthetic.json",
+            "landing-end-of-period-synthetic.json",
+        )) {
+            assertEquals(PowerPlay(Side.AWAY, PowerPlayKind.ONE_MAN, 79), assertNotNull(landing(name)).powerPlay, name)
+        }
+        assertNull(assertNotNull(landing("landing-missing-fields-synthetic.json")).powerPlay)
     }
 
     @Test

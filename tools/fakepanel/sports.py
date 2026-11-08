@@ -18,7 +18,15 @@ app's local extrapolation matches; the 1st period has a 10 s stoppage (clock sto
 Scripting (config keys, also through `POST /admin/config`):
 - `sports_script`: {"<game id>": {state overrides}}; keys of `state()` below (gameState, period, periodType,
   secondsRemaining, running, inIntermission, away, home, scheduleState, lastPeriodType), plus `"gone": true` (the
-  landing answers 404 and the day list leaves the game out).
+  landing answers 404 and the day list leaves the game out), plus the power-play keys: `situationCode` (a string of exactly 4
+  digits: away goalie, away skaters, home skaters, home goalie; undecodable ones such as "1571" or "0331" are allowed, that is
+  how a bad code is scripted; `null` clears the timeline's situation), `situationSeconds` (int 0..599; default: the
+  timeline's, else 60 with a scripted code) and `goalStrength` ("ev"/"pp"/"sh": the latest `summary.scoring` entry's
+  strength; only with `sports_pp`). A situation adds `situation` to the landing and the day-list game.
+- `sports_pp` (`--sports-pp`, default off): the featured game uses PP_SEGMENTS (docs/design/m6-power-play.md section 8) instead
+  of SEGMENTS: CGY goals at 1st 15 s (ev) and 2nd 30 s (pp), EDM goals at 3rd 40 s (pp) and 100 s (ev), situations 1451 / 1541 /
+  1351 / 1431 in set windows (seconds count down 1 s/s, frozen in an intermission), and the landing carries
+  `summary.scoring`. The 3rd period runs 110 s (the timeline is 50 s longer at 360). Off, every body is as before.
 - `sports_faults`: {"status": N (every /v1 answer), "score_status": N, "landing_status": N, "html_404": true (404s carry
   an HTML body), "retry_after": S, "pad_bytes": N (a filler field, for the 512 KB cap), "age": S (a fixed Age),
   "no_date": true (no Date header), "stall_s": S (wait before answering)}.
@@ -44,10 +52,11 @@ DEFAULTS = {
     "sports_timeline_s": TIMELINE_DEFAULT_S,
     "sports_script": {},
     "sports_faults": {},
+    "sports_pp": False,           # --sports-pp: the power-play timeline, `situation` and `summary.scoring` (needs sports)
 }
 FAULT_KEYS = ("status", "score_status", "landing_status", "html_404", "retry_after", "pad_bytes", "age", "no_date", "stall_s")
 STATE_KEYS = ("gameState", "period", "periodType", "secondsRemaining", "running", "inIntermission", "away", "home",
-              "scheduleState", "lastPeriodType", "gone")
+              "scheduleState", "lastPeriodType", "gone", "situationCode", "situationSeconds", "goalStrength")
 
 # abbrev -> (team id, place name, common name, colour)
 TEAMS = {
@@ -81,11 +90,39 @@ SEGMENTS = [
 ]
 PRE_PUCK_S = SEGMENTS[0][0] + SEGMENTS[1][0]
 
+# The power-play timeline (config `sports_pp`; docs/design/m6-power-play.md section 8). Times are segment-relative seconds at
+# TIMELINE_DEFAULT_S; goals and windows scale by k like the segments. "goals": (side, t, strength). "sit": (situationCode,
+# start, end, secs at end, frozen): a window [start, end) whose seconds run 1 s/s down to "secs at end" (or stay at it when
+# frozen, in an intermission). Code digits: away goalie, away skaters, home skaters, home goalie.
+# Seconds: secs(t) = clamp(ceil(s_end*k + (end*k - t)), 0, 599). The OT window 1431 5-25 runs 60 -> 40 (our pick).
+PP_SEGMENTS = [
+    (30, {"gameState": "FUT"}),
+    (15, {"gameState": "PRE"}),
+    (60, {"gameState": "LIVE", "period": 1, "periodType": "REG", "clock": "run", "stoppage": (20, 30),
+          "goals": [("away", 15, "ev")], "sit": [("1451", 35, 60, 5, False)]}),
+    (30, {"gameState": "LIVE", "period": 1, "periodType": "REG", "clock": "int", "sit": [("1451", 0, 30, 5, True)]}),
+    (60, {"gameState": "LIVE", "period": 2, "periodType": "REG", "clock": "run", "goals": [("away", 30, "pp")],
+          "sit": [("1451", 0, 5, 0, False), ("1541", 8, 30, 78, False)]}),
+    (20, {"gameState": "LIVE", "period": 2, "periodType": "REG", "clock": "int"}),
+    (110, {"gameState": "CRIT", "period": 3, "periodType": "REG", "clock": "run",
+           "goals": [("home", 40, "pp"), ("home", 100, "ev")],
+           "sit": [("1451", 0, 20, 100, False), ("1351", 20, 40, 20, False), ("1451", 40, 85, 35, False)]}),
+    (30, {"gameState": "LIVE", "period": 4, "periodType": "OT", "clock": "run", "sit": [("1431", 5, 25, 40, False)]}),
+    (20, {"gameState": "LIVE", "period": 5, "periodType": "SO", "clock": "zero"}),
+    (20, {"gameState": "OFF", "period": 5, "periodType": "SO", "clock": "zero", "winner": "home"}),
+    (None, {"gameState": "FINAL", "period": 5, "periodType": "SO", "clock": "zero", "winner": "home"}),
+]
+PP_AWAY, PP_HOME = "CGY", "EDM"
+SIT_CODE_RE = re.compile(r"[0-9]{4}")
+SIT_DEFAULT_S = 60  # a scripted situationCode with no situationSeconds and no timeline situation
+
 
 def check_config(patch):
     """Raises ValueError for a bad sports key in a config patch."""
     if "sports" in patch and not isinstance(patch["sports"], bool):
         raise ValueError("sports must be true or false")
+    if "sports_pp" in patch and not isinstance(patch["sports_pp"], bool):
+        raise ValueError("sports_pp must be true or false")
     if "sports_timeline_s" in patch:
         v = patch["sports_timeline_s"]
         if isinstance(v, bool) or not isinstance(v, (int, float)) or not 30 <= v <= 86400:
@@ -98,6 +135,15 @@ def check_config(patch):
             bad = [k for k in v if k not in STATE_KEYS]
             if bad:
                 raise ValueError("unknown sports_script keys: " + ", ".join(bad))
+            if "situationCode" in v and v["situationCode"] is not None and not (
+                    isinstance(v["situationCode"], str) and SIT_CODE_RE.fullmatch(v["situationCode"])):
+                raise ValueError("situationCode must be a string of exactly 4 digits, or null")
+            if "situationSeconds" in v:
+                n = v["situationSeconds"]
+                if isinstance(n, bool) or not isinstance(n, int) or not 0 <= n <= 599:
+                    raise ValueError("situationSeconds must be an integer 0..599")
+            if "goalStrength" in v and v["goalStrength"] not in ("ev", "pp", "sh"):
+                raise ValueError('goalStrength must be "ev", "pp" or "sh"')
     if "sports_faults" in patch:
         f = patch["sports_faults"]
         if not isinstance(f, dict):
@@ -214,6 +260,8 @@ class Sports:
 
     def featured(self, at):
         """The compressed timeline: the state of the featured game at unix [at]."""
+        if self.panel.cfg.get("sports_pp"):
+            return self.featured_pp(at)
         t = at - self.anchor
         k = self.scale()
         away = home = 0
@@ -253,6 +301,66 @@ class Sports:
             return s
         return {"gameState": "FINAL"}
 
+    @staticmethod
+    def pp_situation(seg, t, k, ln):
+        """(code, seconds) of the segment's situation window containing segment time [t], else (None, None)."""
+        for code, start, end, s_end, frozen in seg.get("sit", ()):
+            if start * k <= t < end * k:
+                secs = s_end * k if frozen else s_end * k + (end * k - t)
+                return code, max(0, min(599, int(math.ceil(secs))))
+        return None, None
+
+    def featured_pp(self, at):
+        """PP_SEGMENTS: the same shape as `featured`, plus situationCode/situationSeconds and the `scoring` periods."""
+        t = at - self.anchor
+        k = self.scale()
+        away = home = 0
+        periods = []  # [{"number", "periodType", "goals"}] of the periods started so far (no shootout)
+        for length, seg in PP_SEGMENTS:
+            ln = None if length is None else length * k
+            if seg["gameState"] not in ("FUT", "PRE") and seg["periodType"] != "SO" \
+                    and (not periods or periods[-1]["number"] != seg["period"]):
+                periods.append({"number": seg["period"], "periodType": seg["periodType"], "goals": []})
+            for side, gt, strength in seg.get("goals", ()):
+                if ln is not None and t >= ln or t >= gt * k:
+                    before = self.pp_situation(seg, gt * k - 1e-6, k, ln)[0] or "1551"
+                    away, home = (away + 1, home) if side == "away" else (away, home + 1)
+                    periods[-1]["goals"].append({
+                        "situationCode": before, "strength": strength,
+                        "teamAbbrev": {"default": PP_AWAY if side == "away" else PP_HOME},
+                        "awayScore": away, "homeScore": home, "timeInPeriod": mmss(gt), "isHome": side == "home"})
+            if ln is not None and t >= ln:
+                t -= ln
+                continue
+            s = {"gameState": seg["gameState"]}
+            if seg["gameState"] in ("FUT", "PRE"):
+                return s
+            s.update({"period": seg["period"], "periodType": seg["periodType"], "away": away, "home": home})
+            clock = seg.get("clock")
+            if clock == "run":
+                stop = seg.get("stoppage")
+                s0, s1 = (stop[0] * k, stop[1] * k) if stop else (0.0, 0.0)
+                paused = max(0.0, min(t, s1) - s0) if stop else 0.0
+                left = (ln - (s1 - s0)) - (t - paused)
+                s.update(secondsRemaining=max(0, int(math.ceil(left))), running=not (stop and s0 <= t < s1),
+                         inIntermission=False)
+            elif clock == "int":
+                s.update(secondsRemaining=max(0, int(math.ceil(ln - t))), running=False, inIntermission=True)
+            else:
+                s.update(secondsRemaining=0, running=False, inIntermission=False)
+            code, secs = self.pp_situation(seg, t, k, ln)
+            if code:
+                s.update(situationCode=code, situationSeconds=secs)
+            if seg.get("winner"):
+                if seg["winner"] == "home":
+                    s["home"] = home + 1
+                else:
+                    s["away"] = away + 1
+                s["lastPeriodType"] = seg["periodType"]
+            s["scoring"] = periods
+            return s
+        return {"gameState": "FINAL"}
+
     def featured_id(self):
         return self.slate(self.today(self.anchor), self.anchor)[0][0]
 
@@ -264,6 +372,16 @@ class Sports:
     def state(self, g, at):
         s = dict(g[4](at))
         s.update(self.panel.cfg.get("sports_script", {}).get(g[0], {}))
+        if s.get("situationCode") is None:  # a scripted null clears the timeline's situation
+            s.pop("situationCode", None)
+            s.pop("situationSeconds", None)
+        strength = s.pop("goalStrength", None)
+        if strength and s.get("scoring"):
+            # The latest scoring entry is the one with the highest total score.
+            goals = [x for p in s["scoring"] for x in p["goals"]]
+            if goals:
+                latest = max(goals, key=lambda x: x["awayScore"] + x["homeScore"])
+                latest["strength"] = strength
         return s
 
     # ---- bodies
@@ -281,6 +399,20 @@ class Sports:
         if landing:
             t["darkLogo"] = f"{base}/logos/nhl/svg/{abbrev}_dark.svg"
         return t
+
+    @staticmethod
+    def situation(s, away, home):
+        """The feed's `situation` object for state [s]: strength = that side's skaters, "PP" on the side with more."""
+        code = s["situationCode"]
+        a, h = int(code[1]), int(code[2])
+        secs = s.get("situationSeconds")
+        secs = SIT_DEFAULT_S if secs is None else int(secs)
+        ht, at_ = {"abbrev": home, "strength": h}, {"abbrev": away, "strength": a}
+        if h > a:
+            ht["situationDescriptions"] = ["PP"]
+        elif a > h:
+            at_["situationDescriptions"] = ["PP"]
+        return {"homeTeam": ht, "awayTeam": at_, "situationCode": code, "timeRemaining": mmss(secs), "secondsRemaining": secs}
 
     def game(self, day, g, at, base, landing):
         gid, away, home, start, _ = g
@@ -306,6 +438,11 @@ class Sports:
             if state in ("OFF", "FINAL"):
                 last = s.get("lastPeriodType") or s.get("periodType", "REG")
                 o["gameOutcome"] = {"lastPeriodType": last} | ({"otPeriods": 1} if last == "OT" else {})
+        if started and s.get("situationCode"):
+            o["situation"] = self.situation(s, away, home)
+        if landing and started and s.get("scoring") is not None:
+            o["summary"] = {"scoring": [{"periodDescriptor": {"number": p["number"], "periodType": p["periodType"], "maxRegulationPeriods": 3},
+                                         "goals": p["goals"]} for p in s["scoring"]]}
         if landing:
             o.update({"shootoutInUse": True, "maxPeriods": 5, "regPeriods": 3, "otInUse": True, "tiesInUse": False})
         return o

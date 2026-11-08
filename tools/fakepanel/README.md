@@ -225,7 +225,8 @@ pushes them to `/data/local/tmp`, installs the app and grants it "Install unknow
 
 ## Sports: the fake NHL score API (docs/design/m6-score-bug.md §8)
 
-`--sports` (config `sports: true`; `--sports-timeline S` = `sports_timeline_s`, default 360) serves the NHL's own paths
+`--sports` (config `sports: true`; `--sports-timeline S` = `sports_timeline_s`, default 360; `--sports-pp` = `sports_pp`, see
+below) serves the NHL's own paths
 from `sports.py`, so the app only swaps the origin:
 
 - `GET /v1/score/now` → 307 to `/v1/score/{today}` (the panel's Eastern date); `GET /v1/score/{yyyy-MM-dd}`: the day
@@ -241,9 +242,35 @@ from `sports.py`, so the app only swaps the origin:
   checks on a device).
 - `sports_script`: `{"<game id>": {gameState, period, periodType, secondsRemaining, running, inIntermission, away, home,
   scheduleState, lastPeriodType, gone}}` overrides a game (`"scheduleState": "PPD"` postpones it; `"gone": true` makes the
-  landing 404 and drops it from the day list).
+  landing 404 and drops it from the day list). Power-play keys (docs/design/m6-power-play.md §8): `situationCode` (a
+  string of exactly 4 digits: away goalie, away skaters, home skaters, home goalie; `"1571"` or `"0331"` are allowed, that
+  is how a bad code is scripted; `null` clears the timeline's situation; it works with `sports_pp` on or off),
+  `situationSeconds` (int 0..599; default the timeline's, else 60 when a code is scripted) and `goalStrength`
+  (`"ev"`/`"pp"`/`"sh"`: overrides the latest `summary.scoring` entry, `sports_pp` only). `GET /admin/sports` shows the
+  derived `situationCode`/`situationSeconds` in each game's state.
 - `sports_faults`: `status` (every `/v1` answer), `score_status`, `landing_status`, `html_404` (404s carry HTML),
   `retry_after`, `pad_bytes` (a filler field; over 524288 trips the app's body cap), `age` (fixed), `no_date`, `stall_s`.
+
+**Power-play timeline** (`--sports-pp`, config `sports_pp: true`, also through `POST /admin/config`; default off, and
+off every body is byte-for-byte as before). The featured game then plays `PP_SEGMENTS`, the landing and the day list carry
+`situation` (the feed's shape: `homeTeam`/`awayTeam` with `abbrev` and `strength` = skaters, `situationDescriptions:
+["PP"]` on the side with more skaters, `situationCode`, `timeRemaining`, `secondsRemaining`; no key when none), and the
+landing carries `summary.scoring` (one entry per started period, goals so far with the score after each, `timeInPeriod`
+= the goal's segment second as `MM:SS`, `situationCode` = the code just before the goal, `1551` at even strength; the
+shootout winner is not an entry). Times are segment seconds at 360 (they scale with `sports_timeline_s`); the 3rd period
+runs **110 s** instead of 60 (the timeline is 50 s longer: about 395 s at 360).
+
+| Segment | Events |
+|---|---|
+| 1st LIVE (60) | CGY goal at 15 (`ev`); EDM `1451` 35–60, secs 30 → 5 |
+| 1st INT (30) | EDM `1451`, secs frozen at 5 |
+| 2nd LIVE (60) | EDM `1451` 0–5 (5 → 0); CGY `1541` 8–30 (100 → 78); CGY goal at 30 (`pp`), the situation gone from that instant |
+| 2nd INT (20) | none |
+| 3rd CRIT (110) | EDM `1451` 0–20 (120 → 100); EDM `1351` 20–40 (40 → 20); EDM goal at 40 (`pp`); EDM `1451` 40–85 (80 → 35); EDM goal at 100 (`ev`) |
+| OT (30) | CGY `1431` 5–25 (60 → 40) |
+| SO, OFF, FINAL | as before (EDM wins the shootout; 2–2 into it, final 2–3) |
+
+Seconds count down 1 s/s with the clock (`ceil`) and freeze in an intermission.
 
 Point a **debug** build at it (the override is read only in debug builds, at app start):
 
