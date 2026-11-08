@@ -32,8 +32,11 @@ import app.thebox.core.guide.GuideUiState
 import app.thebox.core.guide.MiniPhase
 import app.thebox.core.guide.Overlay
 import app.thebox.core.sports.BottomBar
+import app.thebox.core.sports.FollowedGame
+import app.thebox.core.sports.League
 import app.thebox.core.sports.PlacementInput
 import app.thebox.core.sports.ScoreBugHostFacts
+import app.thebox.core.sports.ScoreRepository
 import app.thebox.core.sports.SportsPrefs
 import app.thebox.ui.sports.ScoreBug
 import app.thebox.ui.R
@@ -101,6 +104,12 @@ fun FullScreenHost(
     val scoreSource = extras?.scoreBug
     val scorePrefsFlow = remember(scoreSource) { scoreSource?.prefs ?: MutableStateFlow(SportsPrefs(enabled = false)) }
     val scorePrefs by scorePrefsFlow.collectAsState()
+    // (NFL §4.6, B4) The followed game's league (the repository's `followed`, which `ScoreFacts.game` also carries): it
+    // picks the bug's league branch before any view, and the placement's pill width. Changes only on a follow action.
+    val followedFlow = remember(scoreSource) {
+        (scoreSource as? ScoreRepository)?.followed ?: MutableStateFlow<FollowedGame?>(null)
+    }
+    val followedLeague = followedFlow.collectAsState().value?.league
     val textTrackFlow = remember(player) { extras?.textTrackOn ?: MutableStateFlow(false) }
     val textTrackOn by textTrackFlow.collectAsState()
     // U-S5: a per-minute clock (past / now / future, list progress); never read in composition per recomposition, so
@@ -140,7 +149,10 @@ fun FullScreenHost(
         if (scoreSource != null && scorePrefs.enabled) {
             // Owner ruling 20 (2026-11-08): every box gets the full score-bug animation; only "Reduce animations" gives
             // the still version. The other overlays keep the low-end snaps.
-            StableScoreBug(scoreSource, scorePlacementInput(ui, state, scorePrefs, hostFacts, textTrackOn), lowEnd = false)
+            StableScoreBug(
+                scoreSource, scorePlacementInput(ui, state, scorePrefs, hostFacts, textTrackOn, followedLeague), lowEnd = false,
+                followedLeague = followedLeague,
+            )
         }
         if (player != null) {
             Fade(ui.channels, lowEnd) { c -> ChannelListPanel(c, player, Modifier.offset(PlayerUi.LIST_L.dp, PlayerUi.LIST_T.dp), nowMs) }
@@ -212,19 +224,26 @@ fun FullScreenHost(
  * geometry is remembered, so the bug recomposes only when its placement or its view really changes.
  */
 @Composable
-internal fun StableScoreBug(source: app.thebox.core.sports.ScoreBugSource, placement: PlacementInput, lowEnd: Boolean) {
+internal fun StableScoreBug(
+    source: app.thebox.core.sports.ScoreBugSource,
+    placement: PlacementInput,
+    lowEnd: Boolean,
+    followedLeague: League? = null,
+) {
     val held = remember { LastValue<PlacementInput>() }
     val stable = held.value?.takeIf { it == placement } ?: placement.also { held.value = it }
     val geometry = remember { PlayerUi.overlayGeometry() }
     // (Goal animation §1) ScoreBug emits two siblings into this host's box: the bug's clipped leaf layer and, in place
     // mode, the place hint (moved out of the layer so the clip never cuts it), both positioned from the bug's one holder.
-    ScoreBug(source, stable, geometry, lowEnd)
+    ScoreBug(source, stable, geometry, lowEnd, followedLeague = followedLeague)
 }
 
 /**
  * (Score bug commit 0, docs/design/m6-score-bug.md §4.4, A-B2) The placement facts FULL knows: the bottom bar (passive
  * info bar vs a bar the user opened), the overlays the bug avoids, place mode, the text track and screen off, plus the
  * root's [facts]. In place mode the corner being moved wins over the saved one.
+ *
+ * (NFL §4.4, §4.6) [PlacementInput.league] is the followed game's league ([followedLeague]), else the prefs' shown league.
  */
 fun scorePlacementInput(
     ui: PlayerUiState,
@@ -232,6 +251,7 @@ fun scorePlacementInput(
     prefs: SportsPrefs,
     facts: ScoreBugHostFacts,
     textTrackOn: Boolean,
+    followedLeague: League? = null,
 ): PlacementInput {
     val info = ui.info
     val bar = when {
@@ -257,6 +277,7 @@ fun scorePlacementInput(
         modal = facts.modal,
         textTrackOn = textTrackOn,
         screenOff = ui.layer == PlayerLayer.SCREEN_OFF,
+        league = followedLeague ?: prefs.league,
     )
 }
 

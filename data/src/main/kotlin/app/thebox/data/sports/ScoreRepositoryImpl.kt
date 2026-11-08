@@ -16,6 +16,7 @@ import app.thebox.core.sports.Fetch
 import app.thebox.core.sports.FollowedGame
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
+import app.thebox.core.sports.League
 import app.thebox.core.sports.RemoveReason
 import app.thebox.core.sports.ScoreBugMachine
 import app.thebox.core.sports.ScoreBugView
@@ -137,7 +138,8 @@ internal fun interface DayPolicy {
  */
 @Singleton
 class ScoreRepositoryImpl internal constructor(
-    private val source: ScoreSource,
+    /** (NFL §7.1, S7) One source per league; the day list uses `prefs.league`'s, the follow its own league's. */
+    private val sources: Map<League, ScoreSource>,
     private val store: SettingsStore,
     private val awake: DeviceAwake,
     private val signals: SportsSignals,
@@ -148,16 +150,35 @@ class ScoreRepositoryImpl internal constructor(
     private val random: Random = Random.Default,
 ) : ScoreRepository {
     @Inject constructor(
-        source: ScoreSource,
+        sources: Map<League, @JvmSuppressWildcards ScoreSource>,
         store: SettingsStore,
         awake: Optional<DeviceAwake>,
         signals: SportsSignals,
         @ApplicationScope scope: CoroutineScope,
         wall: WallClock,
     ) : this(
-        source, store, awake.orElse(DeviceAwake.ALWAYS), signals, scope, ELAPSED,
+        sources, store, awake.orElse(DeviceAwake.ALWAYS), signals, scope, ELAPSED,
         machineFactory = { phase -> FollowMachine.of(ScoreBugMachine(ELAPSED, wall::now, phase)) },
     )
+
+    /** (NFL §2, S7) One source: `mapOf(source.league to source)`, so the single-league call sites compile unchanged. */
+    internal constructor(
+        source: ScoreSource,
+        store: SettingsStore,
+        awake: DeviceAwake,
+        signals: SportsSignals,
+        scope: CoroutineScope,
+        mono: MonoClock,
+        machineFactory: (pollPhaseMs: Long) -> FollowMachine,
+        dayPolicy: DayPolicy = DayPolicy.REAL,
+        random: Random = Random.Default,
+    ) : this(mapOf(source.league to source), store, awake, signals, scope, mono, machineFactory, dayPolicy, random)
+
+    /**
+     * [league]'s source. A league with no source (a test built with one source) falls back to the first one, so the
+     * NHL-only graphs behave as before.
+     */
+    private fun sourceOf(league: League): ScoreSource = sources[league] ?: sources.values.first()
 
     private sealed interface Input {
         data class Follow(val game: GameSnapshot?) : Input
@@ -302,7 +323,7 @@ class ScoreRepositoryImpl internal constructor(
             lastStepAt = mono.nowMs()
             val game = doc.game
             if (machine.pollDue() && game != null && followDemand != Demand.NONE && isOnline) {
-                machine.fetched(source.game(game.id))
+                machine.fetched(sourceOf(game.league).game(game.id))
                 // The answer took time: advance the machine to now, so what the answer made due is applied at once.
                 machine.step()
                 lastStepAt = mono.nowMs()
@@ -433,6 +454,7 @@ class ScoreRepositoryImpl internal constructor(
     private suspend fun fetchDay() {
         dayForce = false
         val key = dayKey
+        val source = sourceOf(sports.league)
         val f = if (key == null) source.today() else source.day(key)
         when (f) {
             is Fetch.Ok -> {

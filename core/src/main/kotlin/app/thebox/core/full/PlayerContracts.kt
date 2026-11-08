@@ -382,6 +382,11 @@ sealed interface PickerChoice {
     data class ScoreFailed(val kind: app.thebox.core.sports.FailKind) : PickerChoice
     /** A SCORE_DELAY row (one of `SportsConstants.DELAY_STEPS_S`; 0 = "Off"). */
     data class ScoreDelayChoice(val delaySec: Int) : PickerChoice
+    /**
+     * (NFL commit 0, docs/design/m6-nfl.md §7.3; append-only) "League · NFL", the second row (after the followed game):
+     * OK toggles the shown league ([league] is the current one); the board reloads under a Loading row.
+     */
+    data class ScoreLeagueRow(val league: app.thebox.core.sports.League) : PickerChoice
 }
 
 /**

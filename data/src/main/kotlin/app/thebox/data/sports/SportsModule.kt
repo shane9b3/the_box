@@ -10,16 +10,19 @@ import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import app.thebox.core.common.BoxLog
 import app.thebox.core.sports.DeviceAwake
+import app.thebox.core.sports.League
 import app.thebox.core.sports.ScoreRepository
 import app.thebox.core.sports.ScoreSource
 import app.thebox.data.di.ApiClient
 import dagger.Binds
 import dagger.BindsOptionalOf
+import dagger.MapKey
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
+import dagger.multibindings.IntoMap
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,14 +44,28 @@ abstract class SportsModule {
     companion object {
         @Provides
         @Singleton
-        fun scoreSource(@ApiClient client: OkHttpClient, @ApplicationContext context: Context): ScoreSource =
+        @IntoMap
+        @LeagueKey(League.NHL)
+        fun nhlScoreSource(@ApiClient client: OkHttpClient, @ApplicationContext context: Context): ScoreSource =
             NhlScoreSource(client, ScoreRepositoryImpl.ELAPSED, endpoints = { SportsEndpoints.resolve(context) })
+
+        /** (NFL §1.5, §7.1) ESPN's site scoreboard. */
+        @Provides
+        @Singleton
+        @IntoMap
+        @LeagueKey(League.NFL)
+        fun nflScoreSource(@ApiClient client: OkHttpClient, @ApplicationContext context: Context): ScoreSource =
+            EspnScoreSource(client, ScoreRepositoryImpl.ELAPSED, endpoints = { EspnEndpoints.resolve(context) })
 
         @Provides
         @Singleton
         fun signals(@ApplicationContext context: Context): SportsSignals = AndroidSportsSignals(context)
     }
 }
+
+/** (NFL §7.1) The map key of the per-league [ScoreSource]s (`ScoreRepositoryImpl` takes `Map<League, ScoreSource>`). */
+@MapKey
+annotation class LeagueKey(val value: League)
 
 /**
  * [SportsSignals] from the platform (§2.3, §2.4): `ProcessLifecycleOwner` STARTED, and the default-network callback

@@ -164,7 +164,7 @@
     <!-- ==== Settings: the Sports section (7). Keys: SettingsText.SECTION_SPORTS, SPORTS_* (ResourceSettingsTexts). -->
     <string name="settings_section_sports">Sports</string>
     <string name="settings_sports_show">Show Sports</string>
-    <string name="settings_sports_show_desc">The Sports tab and the score bug. Scores and logos come from NHL.com while you use them.</string>
+    <string name="settings_sports_show_desc">The Sports tab and the score bug. Scores and logos come from NHL.com and ESPN while you use them.</string>
     <string name="settings_sports_corner">Score bug corner</string>
     <string name="settings_sports_corner_desc">A bottom corner moves to the top while subtitles are on.</string>
     <string name="settings_sports_delay">Score bug delay</string>
@@ -178,4 +178,62 @@
     <string name="settings_sports_delay_seconds">%1$d s</string>
     <string name="settings_sports_size_standard">Standard</string>
     <string name="settings_sports_size_large">Large</string>
+
+    <!-- ==== NFL (docs/design/m6-nfl.md §4.2, §4.3, §5.2, §7.3, §8). Away team first everywhere ("KC – BUF"). -->
+    <string name="sports_league_nfl">NFL</string>
+    <!-- The fourth quarter (the NHL keeps sports_period_n "P4"). -->
+    <string name="sports_period_4">4th</string>
+    <!-- One line across the centre and down columns. -->
+    <string name="sports_halftime">Halftime</string>
+    <!-- The down column: the down, then "& distance" or "& Goal"; %1$s = a down ("1st"), %2$d = the yards to go. -->
+    <string name="sports_down_1">1st</string>
+    <string name="sports_down_2">2nd</string>
+    <string name="sports_down_3">3rd</string>
+    <string name="sports_down_4">4th</string>
+    <string name="sports_down_and">%1$s &amp; %2$d</string>
+    <string name="sports_down_goal">%1$s &amp; Goal</string>
+    <string name="sports_down_pat">PAT</string>
+    <string name="sports_down_kickoff">KICKOFF</string>
+    <!-- The possession tab. %1$s = a team abbreviation ("KC"); %1$d = a yard line, 1 to 49. -->
+    <string name="sports_tab_ball">%1$s BALL</string>
+    <string name="sports_tab_kickoff">%1$s KICKOFF</string>
+    <string name="sports_tab_own">OWN %1$d</string>
+    <string name="sports_tab_opp">OPP %1$d</string>
+    <string name="sports_tab_mid">MIDFIELD</string>
+    <string name="sports_tab_xp">EXTRA POINT</string>
+    <string name="sports_tab_red_zone">RED ZONE</string>
+    <!-- The scoring takeover's words (§5.2), drawn in Barlow Condensed Black Italic. Not translated: fixed graphics, like
+         sports_goal_word. -->
+    <string name="sports_nfl_td" translatable="false">TOUCHDOWN</string>
+    <string name="sports_nfl_xp" translatable="false">EXTRA POINT</string>
+    <string name="sports_nfl_fg" translatable="false">FIELD GOAL</string>
+    <string name="sports_nfl_safety" translatable="false">SAFETY</string>
+    <string name="sports_nfl_2pt" translatable="false">TWO-POINT</string>
+    <!-- The pinned tab's tail during a takeover. %1$s = the scorer's abbreviation ("KC"), %2$d = the points (6). -->
+    <string name="sports_nfl_points">%1$s +%2$d</string>
+    <!-- The picker's League row (§7.3). %1$s = the shown league ("NFL"). -->
+    <string name="sports_picker_league">League · %1$s</string>
+    <!-- The Sports tab's week chips and the picker divider (§7.2, ruling 28). -->
+    <string name="sports_week_last">Last week</string>
+    <string name="sports_week_this">This week</string>
+    <string name="sports_week_next">Next week</string>
+    <string name="sports_empty_week">No NFL games this week. Pick another week above.</string>
+    <!-- The off-season board: both neighbour chips are disabled. -->
+    <string name="sports_week_off">No NFL games this week.</string>
+    <string name="sports_failed_espn">ESPN did not answer. Press OK to try again; scores may be down for a few minutes.</string>
+    <string name="sports_credit_espn">Scores and logos: ESPN</string>
+    <!-- %1$s = away abbreviation, %2$s = home abbreviation. -->
+    <string name="sports_toast_not_listed_espn">ESPN no longer lists %1$s – %2$s. Follow another game in Sports.</string>
+    <!-- The live region (§8). %1$s/%3$s the short names (away, home: "Chiefs"), %2$d/%4$d the scores, %5$s the scorer's
+         full name ("Kansas City Chiefs"), %6$s the lower-case kind word ("touchdown"); a +7/+8 pair (§5.7) adds %7$s, the
+         second kind word ("extra point"). -->
+    <string name="sports_live_nfl_score">%5$s %6$s. %1$s %2$d, %3$s %4$d</string>
+    <string name="sports_live_nfl_pair">%5$s %6$s and %7$s. %1$s %2$d, %3$s %4$d</string>
+    <!-- Describe (§4.2), joined to the state's description with ". " in code. %1$s = the short name ("Falcons"); %1$s/%2$s
+         of the down = the down ("1st") and the distance ("10", "goal"). -->
+    <string name="sports_desc_nfl_ball">%1$s ball</string>
+    <string name="sports_desc_nfl_down">%1$s and %2$s</string>
+    <string name="sports_desc_nfl_red_zone">in the red zone</string>
+    <!-- The one-line Halftime state's description. -->
+    <string name="sports_desc_halftime">%1$s %2$d, %3$s %4$d, halftime</string>
 </resources>

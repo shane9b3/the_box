@@ -21,6 +21,7 @@ import app.thebox.core.playback.PlaybackWarning
 import app.thebox.core.playback.StreamFormat
 import app.thebox.core.playback.VideoDecoderMode
 import app.thebox.core.playback.timeshift.RecordStop
+import app.thebox.core.sports.League
 import app.thebox.player.api.PlaybackNotice
 import app.thebox.ui.R
 import app.thebox.ui.sports.SportsText
@@ -470,7 +471,11 @@ object PlayerText {
     }
 
     /** [clock24] only matters for the score sheet's upcoming games ("7:00 PM" vs "19:00"). */
-    fun choice(res: Resources, c: PickerChoice, index: Int, clock24: Boolean = true): String = when (c) {
+    /**
+     * A picker row's label. (NFL commit 0, docs/design/m6-nfl.md §7.3, S4) [league] is the shown league: the NFL divider
+     * (the week label) and the failure text hang off it (WP-5); defaulted to the NHL, so the NHL calls are unchanged.
+     */
+    fun choice(res: Resources, c: PickerChoice, index: Int, clock24: Boolean = true, league: League = League.NHL): String = when (c) {
         is PickerChoice.Audio -> audioRow(res, c.track, index)
         is PickerChoice.Text -> text(res, c.track, index)
         PickerChoice.TextOff -> res.getString(R.string.player_value_off)
@@ -484,11 +489,24 @@ object PlayerText {
         is PickerChoice.ScoreDelayRow -> res.getString(R.string.sports_picker_delay, SportsText.delay(res, c.delaySec))
         PickerChoice.ScoreStop -> res.getString(R.string.sports_picker_stop)
         PickerChoice.ScoreTodayDivider -> res.getString(R.string.sports_picker_today)
-        is PickerChoice.ScoreDayDivider -> SportsText.dayLabel(c.dayKey)
+        is PickerChoice.ScoreDayDivider -> SportsText.dayLabel(c.dayKey, league = league)
         PickerChoice.ScoreLoading -> res.getString(R.string.sports_picker_loading)
-        is PickerChoice.ScoreFailed -> SportsText.failure(res, c.kind)
+        is PickerChoice.ScoreFailed -> SportsText.failure(res, c.kind, league)
         is PickerChoice.ScoreDelayChoice -> SportsText.delay(res, c.delaySec)
+        is PickerChoice.ScoreLeagueRow -> scoreLeagueRow(res, c.league)
     }
+
+    /** (NFL §7.3, S4) The picker's League row: "League · NFL" ([league] is the shown one; OK toggles it). */
+    fun scoreLeagueRow(res: Resources, league: League): String =
+        res.getString(R.string.sports_picker_league, leagueName(res, league))
+
+    /** (NFL §7.3) "NHL" / "NFL". */
+    fun leagueName(res: Resources, league: League): String = res.getString(
+        when (league) {
+            League.NHL -> R.string.sports_league_nhl
+            League.NFL -> R.string.sports_league_nfl
+        },
+    )
 
     @StringRes fun menuItem(item: ChannelMenuItem): Int = when (item) {
         ChannelMenuItem.WATCH_FROM_START -> R.string.player_menu_watch_from_start

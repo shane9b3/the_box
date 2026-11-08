@@ -13,4 +13,6 @@ data class SportsPrefs(
     val corner: ScoreCorner = ScoreCorner.TOP_RIGHT,
     val delaySec: Int = 0,
     val size: ScoreBugSize = ScoreBugSize.STANDARD,
+    /** (NFL §7.1, ruling 24) The league the Sports tab and the picker list; remembered and backed up. */
+    val league: League = League.NHL,
 )
