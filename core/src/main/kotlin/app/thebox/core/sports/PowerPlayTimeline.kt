@@ -2,6 +2,8 @@
 // for WP-2 (the timeline body) and WP-3 (the runner); changes go through the lead. Every enum here is append-only.
 package app.thebox.core.sports
 
+import app.thebox.core.sports.SportsConstants as K
+
 /** (Power play §3.1) The two animated tracks: [TAB] (slide, shadow, text, shine, pulse) and [PILL] (tint, logo halo). */
 enum class PpTrack { TAB, PILL }
 
@@ -99,6 +101,103 @@ object PowerPlayTimeline {
      * (the interrupted transition's sample), and returns [out]. [to]: [PpTransition.STILL]'s rest state (true = open,
      * false = closed); ignored by the others. [from] and [out] may not be the same instance.
      */
-    fun sample(track: PpTrack, kind: PpTransition, tMs: Float, from: PpFrame, to: Boolean, out: PpFrame): PpFrame =
-        TODO("WP-2: power-play design §3.3")
+    fun sample(track: PpTrack, kind: PpTransition, tMs: Float, from: PpFrame, to: Boolean, out: PpFrame): PpFrame {
+        val t = if (tMs.isNaN() || tMs < 0f) 0f else tMs
+        when (track) {
+            PpTrack.TAB -> when (kind) {
+                PpTransition.OPEN -> tabOpen(t, from, out)
+                PpTransition.CLOSE -> tabClose(t, from, out)
+                PpTransition.PULSE -> { tabRest(true, out); out.labelScale = pulse(t) }
+                PpTransition.STILL -> tabRest(to, out)
+            }
+            PpTrack.PILL -> when (kind) {
+                PpTransition.OPEN -> pill(t, from, 1f, out)
+                PpTransition.CLOSE -> pill(t, from, 0f, out)
+                // The pill has no pulse: a PULSE holds it at the open rest state.
+                PpTransition.PULSE -> pillRest(true, out)
+                PpTransition.STILL -> pillRest(to, out)
+            }
+        }
+        return out
+    }
+
+    // ---- easings (CSS timing functions, applied per keyframe segment)
+    /** CSS `ease` = `cubic-bezier(.25,.1,.25,1)`: the shadow, the text, the tint and the halo. */
+    internal val EASE = CubicBezier(0.25f, 0.1f, 0.25f, 1f)
+    /** CSS `ease-in-out`: each half of the label pulse. */
+    internal val EASE_IN_OUT = CubicBezier(0.42f, 0f, 0.58f, 1f)
+    /** `snap` = `cubic-bezier(.2,.8,.2,1)`: the slide. */
+    internal val SNAP = CubicBezier(0.2f, 0.8f, 0.2f, 1f)
+    /** `std` = `cubic-bezier(.4,0,.2,1)`: the shine. */
+    internal val STD = CubicBezier(0.4f, 0f, 0.2f, 1f)
+
+    /** The open's pulse: two `ppPulse` iterations. */
+    private const val PULSE_TOTAL_MS = 2 * K.PP_PULSE_MS
+
+    /** [a] → [b] over [start] .. [start] + [dur] through [e]; holds [a] before (a transition's delay) and [b] after. */
+    private fun seg(t: Float, start: Float, dur: Float, a: Float, b: Float, e: CubicBezier): Float {
+        if (t <= start) return a
+        if (t >= start + dur) return b
+        return a + (b - a) * e.ease((t - start) / dur)
+    }
+
+    /** One `ppPulse` iteration [t] ms in: ×1 → [K.PP_PULSE_SCALE] at 50 % → ×1, ease-in-out per half; 1 outside it. */
+    private fun pulse(t: Float): Float {
+        if (t <= 0f || t >= K.PP_PULSE_MS) return 1f
+        val half = K.PP_PULSE_MS / 2f
+        return if (t < half) seg(t, 0f, half, 1f, K.PP_PULSE_SCALE, EASE_IN_OUT)
+        else seg(t, half, half, K.PP_PULSE_SCALE, 1f, EASE_IN_OUT)
+    }
+
+    private fun tabOpen(t: Float, from: PpFrame, out: PpFrame) {
+        // The shine and the pulse are CSS animations of the `.on` state: they play only on an open from (near) closed.
+        val fresh = from.slide <= K.PP_REVERSE_SLIDE_MAX
+        out.slide = seg(t, 0f, K.PP_SLIDE_MS.toFloat(), from.slide, 1f, SNAP)
+        out.shadowAlpha = seg(t, 0f, K.PP_SHADOW_MS.toFloat(), from.shadowAlpha, K.PP_SHADOW_ALPHA, EASE)
+        val delay = K.PP_TEXT_DELAY_MS.toFloat()
+        out.textAlpha = seg(t, delay, K.PP_TEXT_ALPHA_MS.toFloat(), from.textAlpha, 1f, EASE)
+        out.textDy = seg(t, delay, K.PP_TEXT_MOVE_MS.toFloat(), from.textDy, 0f, EASE)
+        val shineStart = K.PP_SHINE_DELAY_MS.toFloat()
+        out.shineOn = fresh && t >= shineStart && t <= shineStart + K.PP_SHINE_MS
+        out.shineX = if (out.shineOn) seg(t, shineStart, K.PP_SHINE_MS.toFloat(), K.PP_SHINE_FROM, K.PP_SHINE_TO, STD) else K.PP_SHINE_FROM
+        val p = t - K.PP_PULSE_DELAY_MS
+        out.labelScale = if (fresh && p > 0f && p < PULSE_TOTAL_MS) pulse(p % K.PP_PULSE_MS) else 1f
+        out.tabClosed = false
+    }
+
+    private fun tabClose(t: Float, from: PpFrame, out: PpFrame) {
+        out.slide = seg(t, 0f, K.PP_SLIDE_MS.toFloat(), from.slide, 0f, SNAP)
+        out.shadowAlpha = seg(t, 0f, K.PP_SHADOW_MS.toFloat(), from.shadowAlpha, 0f, EASE)
+        // Lead Q4: the CSS close; the text's fade and move start with the slide.
+        out.textAlpha = seg(t, 0f, K.PP_TEXT_OUT_MS.toFloat(), from.textAlpha, 0f, EASE)
+        out.textDy = seg(t, 0f, K.PP_TEXT_OUT_MS.toFloat(), from.textDy, -K.PP_TEXT_DY, EASE)
+        out.shineOn = false
+        out.shineX = K.PP_SHINE_FROM
+        out.labelScale = 1f
+        out.tabClosed = t >= K.PP_CLOSE_MS
+    }
+
+    private fun tabRest(open: Boolean, out: PpFrame) {
+        out.slide = if (open) 1f else 0f
+        out.shadowAlpha = if (open) K.PP_SHADOW_ALPHA else 0f
+        out.textAlpha = if (open) 1f else 0f
+        out.textDy = if (open) 0f else -K.PP_TEXT_DY
+        out.shineOn = false
+        out.shineX = K.PP_SHINE_FROM
+        out.labelScale = 1f
+        out.tabClosed = !open
+    }
+
+    private fun pill(t: Float, from: PpFrame, target: Float, out: PpFrame) {
+        val dur = K.PP_TINT_MS.toFloat()
+        out.tint = seg(t, 0f, dur, from.tint, target, EASE)
+        out.halo = seg(t, 0f, dur, from.halo, target, EASE)
+        out.pillClosed = target == 0f && t >= dur
+    }
+
+    private fun pillRest(open: Boolean, out: PpFrame) {
+        out.tint = if (open) 1f else 0f
+        out.halo = if (open) 1f else 0f
+        out.pillClosed = !open
+    }
 }

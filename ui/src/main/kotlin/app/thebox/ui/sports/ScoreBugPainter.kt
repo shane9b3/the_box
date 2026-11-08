@@ -220,7 +220,7 @@ internal class ScoreBugPainter(
 
     /**
      * The bug's whole frame in the pill's own coordinates (the canvas already translated by the layer margin `M`), in the
-     * fixed order of the goal design §2.1: glow (only while [goal] is set and [glowOn], never in low-end mode), glass,
+     * fixed order of the goal design §2.1 and the power-play design §3.5: glow (only while [goal] is set and [glowOn], never in low-end mode), glass,
      * body (with the scorer's pop), then the takeover. [goal] / [g] null, a [goal] never begun, or [GoalFrame.done] =
      * no takeover: the plain bug, pixel for pixel.
      *
@@ -253,6 +253,7 @@ internal class ScoreBugPainter(
     ) {
         val colours = goal?.colours
         if (goal == null || g == null || colours == null || g.done) {
+            // Power play §3.5 without a takeover: glass, tab, tint, halo, body.
             drawGlass(c, glass)
             if (pp != null && p != null) pp.draw(c, p, content, pillSide, up)
             drawBody(c, f, logos, logoWaited, placing)
@@ -262,9 +263,10 @@ internal class ScoreBugPainter(
         if (glowOn && glow != null) goal.drawGlow(c, g, glow)
         // 2. Glass.
         drawGlass(c, glass)
-        // 2b. Power play (§3.5 steps 3–5): the tab, the tint, the halo.
+        // 3–5. Power play (§3.5): the tab under its outside clip, the tint, the halo; after the glass, so the glass's
+        // transparency never shows the tab, and before the body, so the logos sit on their halo.
         if (pp != null && p != null) pp.draw(c, p, content, pillSide, up)
-        // 3. Body, with the scorer's pop.
+        // 6. Body, with the scorer's pop.
         if (g.popOn) {
             val side = goal.side
             val text = if (side == Side.AWAY) f.awayScore else f.homeScore
@@ -272,7 +274,7 @@ internal class ScoreBugPainter(
         } else {
             drawBody(c, f, logos, logoWaited, placing)
         }
-        // 4. Takeover: the lead, then the panel and its contents under the panel's wipe.
+        // 7. Takeover: the lead, then the panel and its contents under the panel's wipe.
         goal.drawTakeover(c, g)
     }
 
