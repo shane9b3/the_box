@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- NFL WP-5 (docs/design/m6-nfl.md §7.2, §7.3): the week labels, drawn from the week key because the board carries no
+     label of its own. The calendar's own label is "Week 9", "Wild Card", ...; a key that cannot be read says "NFL". -->
+<resources>
+    <string name="sports_week_n">Week %1$d</string>
+    <string name="sports_week_preseason">Preseason week %1$d</string>
+    <string name="sports_week_wild_card">Wild Card</string>
+    <string name="sports_week_divisional">Divisional Round</string>
+    <string name="sports_week_conference">Conference Championship</string>
+    <string name="sports_week_super_bowl">Super Bowl</string>
+    <string name="sports_week_unknown">NFL</string>
+</resources>

@@ -417,6 +417,8 @@ data class ScoreFacts(
     val corner: ScoreCorner = ScoreCorner.TOP_RIGHT,
     val delaySec: Int = 0,
     val enabled: Boolean = true,
+    /** (NFL WP-5 amendment, §7.1) The shown league (`SportsPrefs.league`); null = not reported, and the picker has no League row. */
+    val league: League? = null,
 )
 
 /** `PlayerUiState.placeScore` while `PlayerLayer.PLACE_SCORE` (§6, U-B1). [sample]: no followed game, draw the sample bug. */

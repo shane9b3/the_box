@@ -155,12 +155,16 @@ internal fun GameCard(
     }
 }
 
+/** The name a card draws for [team]: the NFL short name when the feed gave one, else the common name. */
+internal fun cardName(team: TeamLine): String = team.shortName ?: team.name
+
 @Composable
 private fun TeamRow(team: TeamLine, ink: Color) {
     Row(Modifier.fillMaxWidth().height(GameCardMetrics.ROW_H.dp), verticalAlignment = Alignment.CenterVertically) {
         LogoPlate(team)
         Spacer(Modifier.width(GameCardMetrics.PLATE_GAP.dp))
-        Line(team.name, GuideUi.sans(GameCardMetrics.NAME_PX, FontWeight.SemiBold, ink), Modifier.weight(1f))
+        // (NFL §7.2, S5) The NFL shows the short name ("Commanders"); the NHL's `name` is already the common name.
+        Line(cardName(team), GuideUi.sans(GameCardMetrics.NAME_PX, FontWeight.SemiBold, ink), Modifier.weight(1f))
         Spacer(Modifier.width(GameCardMetrics.NAME_SCORE_GAP.dp))
         Line(
             team.score?.toString().orEmpty(),
@@ -230,12 +234,12 @@ private fun StateLine(card: GameCardModel, clock24: Boolean, ink: Color) {
     val p = SportsText.periodOf(g)
     val detail = when {
         p == null -> null
-        p.kind == PeriodKind.SO -> SportsText.period(res, p)
-        g.clock?.inIntermission == true -> res.getString(R.string.sports_intermission, SportsText.period(res, p))
+        p.kind == PeriodKind.SO -> SportsText.period(res, p, g.id.league)
+        g.clock?.inIntermission == true -> res.getString(R.string.sports_intermission, SportsText.period(res, p, g.id.league))
         else -> {
             val secs = SportsViewModel.clockSecs(card)
-            if (secs == null) SportsText.period(res, p)
-            else res.getString(R.string.sports_card_live_line, SportsText.period(res, p), SportsText.clock(secs))
+            if (secs == null) SportsText.period(res, p, g.id.league)
+            else res.getString(R.string.sports_card_live_line, SportsText.period(res, p, g.id.league), SportsText.clock(secs))
         }
     }
     Row(Modifier.testTag("sports_state:" + g.id.id), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(GameCardMetrics.DOT_GAP.dp)) {

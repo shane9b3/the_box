@@ -489,9 +489,14 @@ object PlayerText {
         is PickerChoice.ScoreDelayRow -> res.getString(R.string.sports_picker_delay, SportsText.delay(res, c.delaySec))
         PickerChoice.ScoreStop -> res.getString(R.string.sports_picker_stop)
         PickerChoice.ScoreTodayDivider -> res.getString(R.string.sports_picker_today)
-        is PickerChoice.ScoreDayDivider -> SportsText.dayLabel(c.dayKey, league = league)
+        is PickerChoice.ScoreDayDivider -> when {
+            // (NFL §7.3, S4) A week key reads as its label; never a raw "w2026-2-9".
+            c.current -> res.getString(R.string.sports_week_this)
+            SportsText.isWeekKey(c.dayKey) -> SportsText.weekLabel(res, c.dayKey)
+            else -> SportsText.dayLabel(c.dayKey, league = league)
+        }
         PickerChoice.ScoreLoading -> res.getString(R.string.sports_picker_loading)
-        is PickerChoice.ScoreFailed -> SportsText.failure(res, c.kind, league)
+        is PickerChoice.ScoreFailed -> SportsText.failure(res, c.kind, if (league != League.NHL) league else c.league)
         is PickerChoice.ScoreDelayChoice -> SportsText.delay(res, c.delaySec)
         is PickerChoice.ScoreLeagueRow -> scoreLeagueRow(res, c.league)
     }

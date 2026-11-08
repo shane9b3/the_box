@@ -53,6 +53,7 @@ class RecordingPlayerEffects : PlayerEffects {
     override fun followGame(id: app.thebox.core.sports.GameId?) = rec("followGame", id)
     override fun setScoreCorner(c: app.thebox.core.sports.ScoreCorner) = rec("setScoreCorner", c)
     override fun setScoreDelay(sec: Int) = rec("setScoreDelay", sec)
+    override fun setScoreLeague(league: app.thebox.core.sports.League) = rec("setScoreLeague", league)
     override fun scorePicker(open: Boolean) = rec("scorePicker", open)
     override fun retryScores() = rec("retryScores")
     override fun loadProgrammes(token: Long, channel: GuideChannel, aroundMin: Int, before: Int, after: Int) =
