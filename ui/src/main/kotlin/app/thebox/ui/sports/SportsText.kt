@@ -6,6 +6,7 @@ import app.thebox.core.sports.FailKind
 import app.thebox.core.sports.FollowedGame
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
+import app.thebox.core.sports.League
 import app.thebox.core.sports.PeriodKind
 import app.thebox.core.sports.PeriodLabel
 import app.thebox.core.sports.RemoveReason
@@ -23,6 +24,9 @@ import java.util.Locale
  * (Score bug commit 0, docs/design/m6-score-bug.md §4.5, §5, §6, §2.6) The words of the score feature, in one place for
  * the overlay (WP-3), the Sports tab (WP-4a), the quick bar and the picker (WP-4b) and the player VM's toasts. Every
  * string is in `strings_sports.xml`; nothing here allocates per frame (the bug's clock uses its own digit table).
+ *
+ * (NFL commit 0, docs/design/m6-nfl.md §2 S4) The league-dependent functions take a trailing `league` defaulted to the
+ * NHL, so every NHL call is unchanged; their NFL bodies are WP-5's (until then the NFL reads the NHL words).
  */
 object SportsText {
     /** `m:ss` below 10:00, `mm:ss` from 10:00 (§4.5); negative values read 0:00. */
@@ -34,7 +38,8 @@ object SportsText {
     }
 
     /** "1st" / "2nd" / "3rd", "OT" / "2OT", "SO". */
-    fun period(res: Resources, p: PeriodLabel): String = when (p.kind) {
+    @Suppress("UNUSED_PARAMETER") // NFL WP-5: REG 4 is sports_period_4
+    fun period(res: Resources, p: PeriodLabel, league: League = League.NHL): String = when (p.kind) {
         PeriodKind.REG -> when (p.number) {
             1 -> res.getString(R.string.sports_period_1)
             2 -> res.getString(R.string.sports_period_2)
@@ -75,6 +80,7 @@ object SportsText {
         is CentreText.Final -> final(res, c.kind)
         CentreText.NoUpdate -> res.getString(R.string.sports_no_update)
         CentreText.Delayed -> res.getString(R.string.sports_delayed)
+        CentreText.Halftime -> res.getString(R.string.sports_halftime) // NFL §2 (S4)
     }
 
     fun corner(res: Resources, c: ScoreCorner): String = res.getString(
@@ -109,7 +115,8 @@ object SportsText {
      * A game's state words for the picker and the cards: "2nd 10:22", "1st INT", "SO", "Final/OT", "7:00 PM". The clock is
      * the snapshot's own value (owner ruling 6: nothing counts down between updates).
      */
-    fun state(res: Resources, g: GameSnapshot, clock24: Boolean): String {
+    @Suppress("UNUSED_PARAMETER") // NFL WP-5: "Halftime", "End 3rd", "Sun 1:00 PM"
+    fun state(res: Resources, g: GameSnapshot, clock24: Boolean, league: League = League.NHL): String {
         val p = periodOf(g)
         val clockSecs = g.clock?.secondsRemaining ?: 0
         return when (g.phase) {
@@ -136,7 +143,8 @@ object SportsText {
     }
 
     /** A board's date for the picker divider when it is not today's (U-B1): "Wed, Nov 4"; the key itself if unreadable. */
-    fun dayLabel(dayKey: String, locale: Locale = Locale.getDefault()): String =
+    @Suppress("UNUSED_PARAMETER") // NFL WP-5: the week label, never a raw week key (S4)
+    fun dayLabel(dayKey: String, locale: Locale = Locale.getDefault(), league: League = League.NHL): String =
         runCatching { java.time.LocalDate.parse(dayKey).format(java.time.format.DateTimeFormatter.ofPattern("EEE, MMM d", locale)) }
             .getOrDefault(dayKey)
 
@@ -156,7 +164,8 @@ object SportsText {
     }
 
     /** §5.4: the day list's failure text (no network vs NHL.com did not answer). */
-    fun failure(res: Resources, kind: FailKind): String =
+    @Suppress("UNUSED_PARAMETER") // NFL WP-5: sports_failed_espn
+    fun failure(res: Resources, kind: FailKind, league: League = League.NHL): String =
         res.getString(if (kind == FailKind.OFFLINE) R.string.sports_no_network else R.string.sports_failed)
 
     /** The toast of a repository event (§2.6, §5.3, U-S12); always a reason and a next step. */
@@ -164,10 +173,11 @@ object SportsText {
         is ScoreEvent.Followed -> if (e.first) res.getString(R.string.sports_toast_following_first, e.game.away, e.game.home)
             else res.getString(R.string.sports_toast_following, e.game.away, e.game.home)
         is ScoreEvent.FollowedFinal -> res.getString(R.string.sports_toast_followed_final)
-        is ScoreEvent.Removed -> removed(res, e.why, e.game)
+        is ScoreEvent.Removed -> removed(res, e.why, e.game, e.game.league)
     }
 
-    private fun removed(res: Resources, why: RemoveReason, g: FollowedGame): String = when (why) {
+    @Suppress("UNUSED_PARAMETER") // NFL WP-5: sports_toast_not_listed_espn
+    private fun removed(res: Resources, why: RemoveReason, g: FollowedGame, league: League = League.NHL): String = when (why) {
         RemoveReason.POSTPONED -> res.getString(R.string.sports_toast_postponed, g.away, g.home)
         RemoveReason.NOT_LISTED -> res.getString(R.string.sports_toast_not_listed, g.away, g.home)
         RemoveReason.SPORTS_OFF -> res.getString(R.string.sports_toast_sports_off)

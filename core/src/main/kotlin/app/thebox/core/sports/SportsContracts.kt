@@ -1,5 +1,6 @@
 // Contract (score bug commit 0): docs/design/m6-score-bug.md §1.1, §2.3, §2.6, §2.7, §4.4, §4.5, §6; power-play commit 0:
-// docs/design/m6-power-play.md §1.3. Changes go through the lead; every enum here is append-only.
+// docs/design/m6-power-play.md §1.3; NFL commit 0: docs/design/m6-nfl.md §2. Changes go through the lead; every enum
+// here is append-only.
 package app.thebox.core.sports
 
 import kotlinx.coroutines.flow.Flow
@@ -8,9 +9,9 @@ import kotlinx.serialization.Serializable
 
 // ------------------------------------------------------------------ §1.1 the league seam
 
-/** Persisted by name ([FollowedGame]); append-only. */
+/** Persisted by name ([FollowedGame], [SportsPrefs.league]); append-only. */
 @Serializable
-enum class League { NHL }
+enum class League { NHL, NFL }
 
 /** [id] is the league's own game id (NHL "2026020251"). */
 data class GameId(val league: League, val id: String)
@@ -24,7 +25,14 @@ enum class PeriodKind { REG, OT, SO }
  * name (power-play design N4); the spoken strings use it as is. [score] is null before the game; [logo] the validated
  * dark logo URL.
  */
-data class TeamLine(val abbrev: String, val name: String, val score: Int?, val logo: String?)
+data class TeamLine(
+    val abbrev: String,
+    val name: String,
+    val score: Int?,
+    val logo: String?,
+    /** (NFL §1.3, S5) The short name ("Chiefs", "Commanders") for the cards, the live region and `Describe`; always null for the NHL. */
+    val shortName: String? = null,
+)
 
 /** [secondsRemaining] in the period; it counts down in intermission too (facts §4). */
 data class GameClock(val secondsRemaining: Int, val running: Boolean, val inIntermission: Boolean)
@@ -53,7 +61,47 @@ data class GameSnapshot(
     val powerPlay: PowerPlay? = null,
     /** (Power play §1.2) The latest entry of the landing's `summary.scoring` (landing only; null from the day list). */
     val lastGoal: GoalFact? = null,
+    /** (NFL §1.3, §2) The league-specific detail; null for the NHL, which keeps its own fields ([powerPlay], [lastGoal]). */
+    val detail: LeagueDetail? = null,
 )
+
+// ------------------------------------------------------------------ NFL §2 the league detail
+
+/** (NFL §1.3) League-specific snapshot detail. The NHL keeps its own fields (powerPlay, lastGoal). */
+sealed interface LeagueDetail {
+    /**
+     * [possession] is the competitor whose id equals `situation.possession` (ESPN omits it after every kick-off);
+     * [redZone] is `isRedZone && play is Down` (the machine adds its own checks, §3.5); [breakKind] is set in
+     * INTERMISSION.
+     */
+    data class Nfl(
+        val play: NflPlay,
+        val possession: Side?,
+        val redZone: Boolean,
+        val breakKind: NflBreak?,
+        val lastPlay: NflLastPlay?,
+    ) : LeagueDetail
+}
+
+/** (NFL §1.3) The kind of an NFL INTERMISSION. Append-only. */
+enum class NflBreak { END_PERIOD, HALFTIME }
+
+/** (NFL §1.3) The shown play, from `situation`. */
+sealed interface NflPlay {
+    /** A real down (1..4); [distance] 1..99 or null. */
+    data class Down(val down: Int, val distance: Int?, val goalToGo: Boolean, val field: FieldPos?) : NflPlay
+    /** The dead ball after a TD (the try) or a FG: the same shape, so the mapper does not call it a try (§3.3). */
+    data class Dead(val scorer: Side?, val scoreValue: Int?) : NflPlay
+    data class Kickoff(val kicker: Side?, val field: FieldPos?) : NflPlay
+    /** No situation, or before the opening kick-off. */
+    data object None : NflPlay
+}
+
+/** (B1) Whose half the ball is in ([territory] null = midfield, yard 50); [yard] 1..50. Never OWN/OPP. */
+data class FieldPos(val territory: Side?, val yard: Int)
+
+/** (NFL §1.3) `situation.lastPlay`: [side] from `team.id`. */
+data class NflLastPlay(val id: String, val typeId: String?, val typeText: String?, val side: Side?, val scoreValue: Int?)
 
 /** (Power play §1.2) [TWO_MAN] is always 5-on-3. Append-only. */
 enum class PowerPlayKind { ONE_MAN, TWO_MAN }
@@ -174,7 +222,45 @@ sealed interface CentreText {
     data object NoUpdate : CentreText
     /** Bottom line while the delay has no snapshot yet (dimmed). */
     data object Delayed : CentreText
+    /** (NFL §2) One line: "Halftime". */
+    data object Halftime : CentreText
 }
+
+// ------------------------------------------------------------------ NFL §2 what the bug draws
+
+/** (NFL §3.2) The kind of an NFL score takeover. Append-only. */
+enum class NflScoreKind { TOUCHDOWN, EXTRA_POINT, FIELD_GOAL, SAFETY, TWO_POINT }
+
+/** One takeover: its kind, its points (6, 1, 3, 2) and the score after it (the takeover's tally). */
+data class NflScore(val kind: NflScoreKind, val points: Int, val away: Int, val home: Int)
+
+/** (NFL §4.2) The down column: "1st & 10", "4th & Goal", "3rd" (no distance), "PAT", "KICKOFF". */
+sealed interface DownText {
+    data class Down(val down: Int, val distance: Int?, val goal: Boolean) : DownText
+    data object Pat : DownText
+    data object Kickoff : DownText
+}
+
+/** (NFL §4.3) The tab's lead: "KC BALL" or "KC KICKOFF". */
+enum class TabLead { BALL, KICKOFF }
+
+/** (NFL §3.4, B1) The field relative to the tab's side. */
+enum class FieldZone { OWN, OPP, MIDFIELD }
+
+/** (NFL §4.3) The tab's tail. */
+sealed interface TabTail {
+    /** "OWN 35", "OPP 12", "MIDFIELD". */
+    data class Field(val zone: FieldZone, val yard: Int) : TabTail
+    data object ExtraPoint : TabTail
+    /** (Ruling 26) "RED ZONE" on red. */
+    data object RedZone : TabTail
+}
+
+/** (NFL §4.3) The possession tab; a null [tail] shows the lead alone, centred. */
+data class NflTab(val side: Side, val lead: TabLead, val tail: TabTail?)
+
+/** [scores]: empty, one score, or two for a +7/+8 update (ruling 25), in play order; set with the goal mark. */
+data class NflView(val down: DownText?, val tab: NflTab?, val scores: List<NflScore> = emptyList())
 
 /**
  * What the bug draws (§4.5). `ScoreBugMachine.view()` is null before LIVE (owner ruling 2026-11-05).
@@ -207,6 +293,10 @@ data class ScoreBugView(
     val goalPp: Boolean = false,
     /** (Power play §1.4, §7) The previous fresh view had a power play, this fresh view has none, and it flagged no goal. */
     val ppEnded: Boolean = false,
+    /** (NFL §2, §4.6) The shown game's league; the `ScoreBug(...)` branch keys on it. */
+    val league: League = League.NHL,
+    /** (NFL §3.1) Set on `view()` only, and only for an NFL game; its fields are gated by NFL §3.4. */
+    val nfl: NflView? = null,
 )
 
 /**
@@ -305,6 +395,8 @@ data class PlacementInput(
     val modal: Boolean,
     val textTrackOn: Boolean,
     val screenOff: Boolean,
+    /** (NFL §4.4, §4.6) The followed (or shown) league; set by `FullScreenHost` from the follow, else the prefs. */
+    val league: League = League.NHL,
 )
 
 /** What `AppRoot` knows and `FullScreenHost` does not (A-B2): a toast, the reminder card, a modal (exit dialog, PIN pad). */

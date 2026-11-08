@@ -23,6 +23,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -54,11 +55,18 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.res.ResourcesCompat
 import app.thebox.core.sports.Box as DesignBox
 import app.thebox.core.sports.CentreText
+import app.thebox.core.sports.DownText
+import app.thebox.core.sports.FieldZone
 import app.thebox.core.sports.GameId
 import app.thebox.core.sports.GoalFrame
 import app.thebox.core.sports.GoalTimeline
+import app.thebox.core.sports.League
+import app.thebox.core.sports.NflTab
+import app.thebox.core.sports.NflView
 import app.thebox.core.sports.NhlTeamColours
 import app.thebox.core.sports.OverlayGeometry
+import app.thebox.core.sports.PeriodKind
+import app.thebox.core.sports.PeriodLabel
 import app.thebox.core.sports.PlacementInput
 import app.thebox.core.sports.PowerPlay
 import app.thebox.core.sports.PowerPlayKind
@@ -74,6 +82,8 @@ import app.thebox.core.sports.ScoreBugSource
 import app.thebox.core.sports.ScoreBugView
 import app.thebox.core.sports.Side
 import app.thebox.core.sports.SportsConstants as K
+import app.thebox.core.sports.TabLead
+import app.thebox.core.sports.TabTail
 import app.thebox.core.sports.TeamColours
 import app.thebox.core.sports.TeamLine
 import app.thebox.ui.R
@@ -129,6 +139,12 @@ const val SCORE_BUG_LIVE_TAG = "score_bug_live"
  * the composition (FULL with Show Sports on), so a reappearance after the passive info bar, a list or a toast neither
  * re-bakes the glass nor re-fetches the logos. The logos are released when the follow's logo URLs change.
  * [place] is a test seam (the placement function).
+ *
+ * (NFL, docs/design/m6-nfl.md §4.6, B4) The league seam: one branch at the top, before any `remember` of [ScoreBugWith],
+ * keyed on the league so the NHL composable is byte-unchanged and an NFL view never reaches the NHL painters. The league
+ * is the shown view's; while the bug is hidden or fading, the last shown one (so it never flips mid-fade); before any
+ * view, [followedLeague] (`FullScreenHost` passes the followed game's), else the prefs' shown league. A league change of
+ * the follow swaps the bug with no fade (accepted in the NFL sign-off).
  */
 @Composable
 fun ScoreBug(
@@ -138,7 +154,19 @@ fun ScoreBug(
     lowEnd: Boolean,
     modifier: Modifier = Modifier,
     place: (PlacementInput, OverlayGeometry) -> DesignBox? = ScoreBugPlacement::place,
-) = ScoreBugWith(source, placement, geometry, lowEnd, modifier, place, GoalHooks.Default)
+    followedLeague: League? = null,
+) {
+    val lastLeague = remember { mutableStateOf<League?>(null) }
+    val shown = source.bug.collectAsState().value?.league
+    // The prefs are collected (not read with `.value`, StateFlowValueCalledInComposition); they change only on a setting.
+    val prefsLeague = source.prefs.collectAsState().value.league
+    val league = shown ?: lastLeague.value ?: followedLeague ?: prefsLeague
+    SideEffect { if (shown != null) lastLeague.value = shown }
+    key(league) {
+        if (league == League.NFL) NflBug(source, placement, geometry, modifier, place, NflHooks.Default)
+        else ScoreBugWith(source, placement, geometry, lowEnd, modifier, place, GoalHooks.Default)
+    }
+}
 
 /**
  * (Goal animation, WP-3) The goal takeover's seams: what [ScoreBug] calls into WP-1/WP-2 for, so tests can stand in for the
@@ -1214,6 +1242,26 @@ private fun sampleView(res: Resources) = ScoreBugView(
     goalSeq = 0,
     goalSide = null,
     clockSecs = 0,
+)
+
+/**
+ * (NFL §4.6) The place-mode sample while the league rule gives NFL and no game is followed: KC 24 – BUF 17, "4th" over
+ * "3:42", "1st & 10", the tab "KC BALL | OWN 35". The abbreviations are drawn as the feed would send them.
+ */
+internal fun nflSampleView(@Suppress("UNUSED_PARAMETER") res: Resources) = ScoreBugView(
+    away = TeamLine("KC", "Kansas City Chiefs", 24, null, shortName = "Chiefs"),
+    home = TeamLine("BUF", "Buffalo Bills", 17, null, shortName = "Bills"),
+    top = CentreText.Period(PeriodLabel(PeriodKind.REG, 4)),
+    bottom = CentreText.Clock,
+    dim = false,
+    goalSeq = 0,
+    goalSide = null,
+    clockSecs = 222,
+    league = League.NFL,
+    nfl = NflView(
+        down = DownText.Down(1, 10, goal = false),
+        tab = NflTab(Side.AWAY, TabLead.BALL, TabTail.Field(FieldZone.OWN, 35)),
+    ),
 )
 
 /** The merged semantics string of a state (U-N12): "Calgary 0, Edmonton 2, 10:22 left in the 1st". */

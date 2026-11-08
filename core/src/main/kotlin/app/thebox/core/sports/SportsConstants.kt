@@ -258,4 +258,178 @@ object SportsConstants {
     const val CARD_LOGO_W = 64f
     const val CARD_LOGO_H = 44f
     const val CARD_LOGO_RADIUS = 8f
+
+    // ------------------------------------------------------------------ NFL (docs/design/m6-nfl.md §12)
+    // Standard design px; Large × [SCORE_LARGE_SCALE] unless stated. Height and radius are the NHL's.
+
+    // ---- the pill (§4.1, §4.2)
+    const val NFL_SCORE_W = 520f
+    const val NFL_SCORE_LARGE_W = 650f
+    const val NFL_SCORE_DIGITS_W = 50f
+    const val NFL_DOWN_W = 111f
+    /** The clock (700, tabular), the quarter (600, α [NFL_QUARTER_ALPHA]), the down column (700), the one-line state (600). */
+    const val NFL_CLOCK_PX = 26f
+    const val NFL_QUARTER_PX = 20f
+    const val NFL_QUARTER_ALPHA = 0.70f
+    const val NFL_DOWN_PX = 22f
+    const val NFL_ONE_LINE_PX = 24f
+    /** The down text steps 2 px down (to 18) while wider than [NFL_DOWN_W] − this. */
+    const val NFL_DOWN_FIT_AIR = 6f
+
+    // ---- mapping (§1.3)
+    /** `pre` within this of the start (by the body's server `Date`) is PRE. */
+    const val NFL_PRE_WINDOW_MS = 3_600_000L
+    /** (S8) `lastPlay.type.id` of the coin toss: an `in` body still at it is PRE. */
+    const val NFL_COIN_TOSS_TYPE = "70"
+    /** (N6) `lastPlay.type.id` of a kick-off: its team is the receiver. */
+    const val NFL_KICKOFF_TYPE = "53"
+
+    // ---- HTTP (§1.5)
+    const val ESPN_MAX_BODY_BYTES = 1_048_576L
+    /** The combiner logo's edge in px (4 × the 46 px slot height, rounded). */
+    const val ESPN_LOGO_PX = 200
+
+    // ---- the tab (§4.3, §4.5). Depth, hidden overlap, radius, shadow and divider: the PP_* values.
+    const val NFL_TAB_INSET = 37f
+    const val NFL_TAB_INSET_LARGE = 46f
+    const val NFL_TAB_ICON = 20f
+    const val NFL_TAB_ICON_STROKE = 1.4f
+    const val NFL_TAB_ICON_GAP = 10f
+    const val NFL_TAB_LEAD_WEIGHT = 700
+    const val NFL_TAB_TAIL_WEIGHT = 600
+    const val NFL_TAB_TRACK_EM = 0.05f
+    /** (Ruling 26) The red-zone tail's red (ARGB) and its cross-fade. */
+    const val NFL_RED_ZONE = 0xFFC8102E.toInt()
+    const val NFL_RED_ZONE_FADE_MS = 250L
+
+    // ---- the takeover (§5.1, §5.7)
+    const val NFL_TAKEOVER_MS = 3_600L
+    const val NFL_POP_MS = 900L
+    /** The goal mark of a +7/+8 pair (ruling 25); one score uses [GOAL_MARK_MS]. */
+    const val NFL_DOUBLE_MARK_MS = 9_000L
+    const val NFL_PAIR_SECOND_START_MS = 4_500L
+
+    // ---- the flash grid (§5.3)
+    const val NFL_FLASH_GRID_MS = 450L
+    const val NFL_FLASH_START_MS = 450L
+    const val NFL_FLASH_CYCLES = 3
+    const val NFL_FLASH_ALPHA = 0.42f
+
+    // ---- the goalposts (§5.1)
+    const val NFL_POSTS_IN_MS = 400L
+    const val NFL_POSTS_IN_DELAY_MS = 200L
+    const val NFL_POSTS_HIT_START_MS = 1_800L
+    const val NFL_POSTS_HIT_CYCLES = 3
+    const val NFL_POSTS_ALPHA = 0.4f
+    const val NFL_POSTS_HIT_ALPHA = 0.95f
+    const val NFL_POSTS_X = 355f
+    const val NFL_POSTS_Y = 9f
+    const val NFL_POSTS_W = 43f
+    const val NFL_POSTS_H = 52f
+    const val NFL_POSTS_DY = 8f
+
+    // ---- the pinned tab's pulse (§5.1, §5.3)
+    const val NFL_TAB_PULSE_CYCLES = 8
+    const val NFL_TAB_PULSE_GAIN = 0.45f
+
+    // ---- the streaks (§5.1)
+    const val NFL_STREAK1_W = 51f
+    const val NFL_STREAK2_W = 19f
+    const val NFL_STREAK_FROM = -85f
+    const val NFL_STREAK_TO = 616f
+    const val NFL_STREAK2_START_MS = 1_800L
+
+    // ---- the ball (§5.1, B5)
+    const val NFL_BALL_PX = 34f
+    /** The ball sprite's ink lies within this of its centre at any rotation. */
+    const val NFL_BALL_INK_R = 15f
+
+    // ---- the run (TD, two-point, safety)
+    const val NFL_RUN_FROM = -42f
+    const val NFL_RUN_TO = 562f
+    const val NFL_RUN_Y = 18f
+    const val NFL_RUN_ROT = 900f
+    const val NFL_RUN_ALPHA = 0.4f
+    const val NFL_RUN_ALPHA_IN = 0.15f
+    const val NFL_RUN_ALPHA_OUT = 0.85f
+    const val NFL_RUN_START_MS = 300L
+    const val NFL_RUN_MS = 1_300L
+    /** The run's inner band: `clipRect(this, 0, W − this, H)`. */
+    const val NFL_RUN_BAND = 4.4f
+
+    // ---- the arc (XP, FG; D8)
+    const val NFL_ARC_P0_X = 33f
+    const val NFL_ARC_P0_Y = 44f
+    const val NFL_ARC_P1_X = 202f
+    const val NFL_ARC_P1_Y = -7f
+    const val NFL_ARC_P2_X = 366f
+    const val NFL_ARC_P2_Y = 12f
+    /** The ball's scale and rotation (degrees) at P0, P1, P2. */
+    val NFL_ARC_SCALES: List<Float> = listOf(1f, 0.75f, 0.45f)
+    val NFL_ARC_ROTATIONS: List<Float> = listOf(0f, 360f, 720f)
+    const val NFL_ARC_ALPHA = 0.55f
+    const val NFL_ARC_ALPHA_IN = 0.10f
+    const val NFL_ARC_ALPHA_OUT = 0.85f
+    const val NFL_ARC_START_MS = 300L
+    const val NFL_ARC_MS = 1_400L
+    /** The arc's and the posts' straight-section band: `clipRect(this, 0, W − this, H)`. */
+    const val NFL_ARC_BAND = 35f
+
+    // ---- the word (§5.2)
+    const val NFL_WORD_PX = 48f
+    const val NFL_WORD_TRACK_EM = 0.03f
+    const val NFL_WORD_SHADOW_DY = 2f
+    const val NFL_WORD_SHADOW_ALPHA = 0.28f
+    const val NFL_LETTER_START_MS = 420L
+    const val NFL_LETTER_MS = 420L
+    const val NFL_LETTER_STAGGER_MS = 55L
+    const val NFL_LETTER_DROP = 22f
+    const val NFL_LETTER_MID = 0.6f
+    const val NFL_LETTER_FROM_SCALE = 1.9f
+    const val NFL_LETTER_MID_SCALE = 0.94f
+    const val NFL_LETTER_OVERSHOOT = -2f
+    const val NFL_WORD_PULSE_START_MS = 1_400L
+    const val NFL_WORD_PULSE_CYCLE_MS = 500L
+    const val NFL_WORD_PULSE_CYCLES = 3
+    const val NFL_WORD_PULSE = 1.05f
+
+    // ---- the logo badge (§5.1)
+    const val NFL_LOGO_START_MS = 450L
+    const val NFL_LOGO_MS = 600L
+    const val NFL_LOGO_DX = -32f
+    const val NFL_LOGO_FROM_SCALE = 0.4f
+    const val NFL_LOGO_FROM_DEG = -25f
+    const val NFL_LOGO_MID = 0.7f
+    const val NFL_LOGO_MID_DX = 2f
+    const val NFL_LOGO_MID_SCALE = 1.1f
+    const val NFL_LOGO_MID_DEG = 4f
+    const val NFL_LOGO_SHADOW_DY = 2f
+    const val NFL_LOGO_SHADOW_ALPHA = 0.25f
+
+    // ---- the layout and the score block (§5.2)
+    const val NFL_TAKEOVER_PAD = 24f
+    const val NFL_TAKEOVER_GAP = 14f
+    const val NFL_POINTS_PX = 32f
+    const val NFL_TALLY_PX = 20f
+    const val NFL_BLOCK_W = 74f
+    const val NFL_BLOCK_GAP = 2f
+    const val NFL_POINTS_START_MS = 1_100L
+    const val NFL_POINTS_MS = 500L
+    const val NFL_POINTS_DX = 19f
+    const val NFL_POINTS_FROM_SCALE = 0.6f
+    const val NFL_POINTS_MID = 0.7f
+    const val NFL_POINTS_MID_DX = -1.6f
+    const val NFL_POINTS_MID_SCALE = 1.12f
+
+    // ---- the score pop (§5.1)
+    const val NFL_POP_FROM_SCALE = 1.5f
+    const val NFL_POP_K1 = 0.4f
+    const val NFL_POP_K1_SCALE = 0.9f
+    const val NFL_POP_K2 = 0.7f
+    const val NFL_POP_K2_SCALE = 1.06f
+
+    // ---- the atlas (§5.2, N2)
+    /** The longest word ("EXTRA POINT", 11 with the space) fits; the frame's letter arrays are this long. */
+    const val NFL_LETTERS_MAX = 12
+    const val NFL_ATLAS_SCALE = 1.5f
 }

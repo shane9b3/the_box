@@ -957,7 +957,7 @@ class PlayerStateMachineImpl(
             // The SCORE_BUG / SCORE_DELAY rows are handled by scoreSelect, never here.
             is PickerChoice.ScoreGame, is PickerChoice.ScoreCornerRow, is PickerChoice.ScoreDelayRow, PickerChoice.ScoreStop,
             PickerChoice.ScoreTodayDivider, is PickerChoice.ScoreDayDivider, PickerChoice.ScoreLoading, is PickerChoice.ScoreFailed,
-            is PickerChoice.ScoreDelayChoice -> Unit
+            is PickerChoice.ScoreDelayChoice, is PickerChoice.ScoreLeagueRow -> Unit
         }
     }
 
