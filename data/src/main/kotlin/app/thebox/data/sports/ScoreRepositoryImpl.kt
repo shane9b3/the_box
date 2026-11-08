@@ -381,6 +381,13 @@ class ScoreRepositoryImpl internal constructor(
         val was = sports
         sports = p
         if (p.delaySec != was.delaySec) machine.prefs(p.delaySec)
+        if (p.league != was.league) {
+            // (NFL §7.1) The switch: the day list goes back to the new league's today (Loading, then its board). A day
+            // key of the old league is never sent to the new source. The follow is untouched: it polls its own league.
+            dayWanted = null
+            dayKey = null
+            resetDay(loading = true)
+        }
         val game = doc.game
         if (!p.enabled && game != null) {
             machine.follow(null)
