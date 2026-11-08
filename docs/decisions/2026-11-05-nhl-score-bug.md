@@ -78,3 +78,23 @@ animations" get a still version.
     2026-11-07 (teamcolorcodes.com; Anaheim's own brand guide); `scratchpad` report folded into the design §3.3.
 Lead: the white flash runs 3 cycles of 400 ms (2.5 Hz), below the 3-flashes-per-second limit on frequency alone
 (review B3).
+
+## Owner rulings: power play (2026-11-07)
+Request: a power-play tab on the bug with a reveal and a close animation. Mock-up: `design/score-bug-power-play.html`
+(readable markup and CSS in `design/score-bug-power-play.template.html`): the tab slides out from under the pill
+(.55 s), team-colour gradient, "EDM POWER PLAY | 1:32", text fades in, a shine sweeps, the label pulses twice; the
+pill tints from the power-play team's side and that team's logo glows; the close reverses it.
+13. **Power-play time only from the feed.** The tab's clock shows exactly what the latest update reports and changes
+    only when an update arrives; no local countdown (as ruling 6 for the game clock).
+14. **Situations: power plays only, 5-on-3 noted.** A two-man advantage reads "EDM 5-ON-3"; empty net and 4-on-4 show
+    no tab.
+15. **Power-play goal: the tab says "PP GOAL".** During the goal takeover the tab stays open with "PP GOAL", then
+    closes when the takeover ends. No label in the takeover (ruling 7 stands).
+16. **Bottom corners: the tab opens upward** out of the top of the pill (a mirror image); top corners drop down.
+Lead defaults: team colours per ruling 12; the logo glow is baked (no real-time blur); type ≥ 18 px; follows the
+user's delay; nothing before puck drop.
+17. **Orange tabs as in the mock-up** (owner, 2026-11-07): EDM, ANA and PHI keep an orange tab. Met without a contrast
+    exception by darkening the gradient's far stop 10 % for every team (review Q1: EDM 4.69, ANA 4.91, PHI 4.95 : 1).
+18. **6-on-4 keeps the tab**: the power-play team pulling its goalie is still a power play. Only an empty net at even
+    strength shows nothing.
+19. **Intermission keeps the tab** with the frozen time the feed reports.
