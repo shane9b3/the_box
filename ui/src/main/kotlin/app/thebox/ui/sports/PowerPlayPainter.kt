@@ -38,10 +38,13 @@ import kotlin.math.sin
  *
  * - **Built here:** the paints, the tab geometry and the `m:ss` digit table (the label fit needs the slot width).
  * - **[bakeSize]**, once per size, off the main thread: the tab shadow mask (never in low-end mode) and the shine shader.
- * - **[bakeLabels]**, per size and teams (keyed on `(s, shownLarge, away, home)`, S8), off the main thread: the five
- *   label masks, `ALPHA_8` at [K.PP_LABEL_ATLAS_SCALE], each fitted (§4.1: 2 px steps to the 18 px floor, then no
+ * - **[buildLabels]**, per size and teams (keyed on `(s, shownLarge, away, home)`, S8), off the main thread, then
+ *   [publishLabels] on the drawing thread (fix pass N1: a stale bake that finishes last is never published): the five
+ *   label masks, tagged with the abbreviations they were baked for ([labelsFor]), `ALPHA_8` at [K.PP_LABEL_ATLAS_SCALE], each fitted (§4.1: 2 px steps to the 18 px floor, then no
  *   tracking). Drawn twice: black .35 at the hard offset, then white, so the pulse never re-rasterises a glyph.
- * - **[bakeHalo]**, per logo bitmap identity, never in low-end mode: the halo mask under [Side]'s logo, cut to the pill.
+ * - **[buildHalo]**, per logo bitmap identity, never in low-end mode, off the main thread, then [publishHalo] on the
+ *   drawing thread: the halo mask under [Side]'s logo, cut to the pill. A halo is drawn only while the logo [draw] is
+ *   handed is the very bitmap it was baked from (fix pass S3), and [clearHalos] drops them on a game or logo change.
  * - **[begin]**, once per transition start, in the runner: the tab's two vertical gradients (below / above) and the
  *   tint's horizontal gradient, for one side. Each side keeps its own, so a closing tab keeps its colour while the pill
  *   track has already begun the other side.
@@ -49,7 +52,9 @@ import kotlin.math.sin
  *   `drawRoundRect` / `drawRect` / `drawBitmap` / `drawText(char[])`: no `clipPath`, no `saveLayer`, no
  *   `Shader.setLocalMatrix` (the shine moves by `translate` and a counter-offset rect, N10).
  *
- * The bakes publish through `@Volatile` fields; [draw] reads each once and skips what is not ready.
+ * [bakeSize] publishes through `@Volatile` fields (it runs off the main thread). The labels and the halos are built off the
+ * main thread and published on the drawing thread ([publishLabels], [publishHalo]), so their fields are plain; [draw]
+ * reads each once and skips what is not ready. [bakeLabels] and [bakeHalo] build and publish on the calling thread.
  */
 internal class PowerPlayPainter(
     val s: Float,
@@ -172,8 +177,8 @@ internal class PowerPlayPainter(
         )
     }
 
-    /** One size's five label masks for one pair of teams, with their fitted placement (device px, rest scale). */
-    private class Labels {
+    /** One size's five label masks for [away] and [home], with their fitted placement (device px, rest scale). */
+    internal class Labels(val away: String, val home: String) {
         val masks = arrayOfNulls<Bitmap>(LABELS)
         /** The label's advance (its layout width). */
         val w = FloatArray(LABELS)
@@ -187,13 +192,24 @@ internal class PowerPlayPainter(
         val tracked = BooleanArray(LABELS)
     }
 
-    @Volatile private var labels: Labels? = null
+    /** Published on the drawing thread ([publishLabels]); read once per [draw]. */
+    private var labels: Labels? = null
+
+    /** Builds and publishes the labels on the calling thread (tests and single-threaded callers). */
+    fun bakeLabels(away: String, home: String, res: Resources) = publishLabels(buildLabels(away, home, res))
+
+    /** Makes [l] the labels [draw] uses. On the drawing thread. */
+    fun publishLabels(l: Labels) { labels = l }
+
+    /** The published labels were baked for [away] and [home]: the runner's readiness (fix pass N1). */
+    fun labelsFor(away: String, home: String): Boolean = labels.let { it != null && it.away == away && it.home == home }
 
     /**
      * The five label masks for [away] and [home] (abbreviations): `{away|home} POWER PLAY`, `{away|home} 5-ON-3` and
-     * `PP GOAL`, from [res] (`R.string.sports_pp_label`, `sports_pp_two_man`, `sports_pp_goal`). Off the main thread.
+     * `PP GOAL`, from [res] (`R.string.sports_pp_label`, `sports_pp_two_man`, `sports_pp_goal`). Off the main thread; touches
+     * no field [draw] reads, so a stale bake running beside a newer one is harmless until (never) published.
      */
-    fun bakeLabels(away: String, home: String, res: Resources) {
+    fun buildLabels(away: String, home: String, res: Resources): Labels {
         val texts = arrayOf(
             res.getString(R.string.sports_pp_label, away),
             res.getString(R.string.sports_pp_label, home),
@@ -201,7 +217,7 @@ internal class PowerPlayPainter(
             res.getString(R.string.sports_pp_two_man, home),
             res.getString(R.string.sports_pp_goal),
         )
-        val l = Labels()
+        val l = Labels(away, home)
         val a = K.PP_LABEL_ATLAS_SCALE
         val measure = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = sansBold }
         val fm = Paint.FontMetrics()
@@ -238,7 +254,7 @@ internal class PowerPlayPainter(
             l.dw[i] = bw / a
             l.dh[i] = bh / a
         }
-        labels = l
+        return l
     }
 
     /** [text]'s advance at [px] design px and [track] em (bake only). */
@@ -248,14 +264,40 @@ internal class PowerPlayPainter(
         return p.measureText(text)
     }
 
-    // ---- per side (index 0 = away, 1 = home)
+    // ---- per side (index 0 = away, 1 = home); published and read on the drawing thread
     private val haloMask = arrayOfNulls<Bitmap>(2)
     private val haloSource = arrayOfNulls<Bitmap>(2)
 
-    /** The halo mask for [side]'s [logo] (the bug's held `_dark` logo bitmap): alpha → blur → cut to the pill. */
+    /** Builds and publishes [side]'s halo on the calling thread, unless it is already baked from [logo]. */
     fun bakeHalo(side: Side, logo: Bitmap) {
+        if (haloBakedFor(side, logo)) return
+        publishHalo(side, logo, buildHalo(side, logo))
+    }
+
+    /** [side]'s halo is the one baked from this very [logo] bitmap. */
+    fun haloBakedFor(side: Side, logo: Bitmap): Boolean {
         val i = index(side)
-        if (haloSource[i] === logo && haloMask[i] != null) return
+        return haloSource[i] === logo && haloMask[i] != null
+    }
+
+    /** Makes [mask] (built from [logo]) [side]'s halo. On the drawing thread. */
+    fun publishHalo(side: Side, logo: Bitmap, mask: Bitmap) {
+        val i = index(side)
+        haloMask[i] = mask
+        haloSource[i] = logo
+    }
+
+    /** Drops both halos (a game or logo change, fix pass S3): no mask of the previous game's logos is kept or drawn. */
+    fun clearHalos() {
+        haloMask.fill(null)
+        haloSource.fill(null)
+    }
+
+    /**
+     * The halo mask for [side]'s [logo] (the bug's held `_dark` logo bitmap): alpha → blur → cut to the pill. Off the main
+     * thread; touches no field [draw] reads.
+     */
+    fun buildHalo(side: Side, logo: Bitmap): Bitmap {
         val sigma = (if (large) K.PP_HALO_SIGMA_LARGE else K.PP_HALO_SIGMA) * d
         val blur = Paint().apply { maskFilter = BlurMaskFilter(blurRadius(sigma), BlurMaskFilter.Blur.NORMAL) }
         val offset = IntArray(2)
@@ -274,8 +316,7 @@ internal class PowerPlayPainter(
         Canvas(pill).drawRoundRect(0f, 0f, pillW, pillH, pillRadius, pillRadius, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK })
         c.drawBitmap(pill, 0f, 0f, Paint().apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN) })
         pill.recycle()
-        haloMask[i] = bmp
-        haloSource[i] = logo
+        return bmp
     }
 
     private val tabDown = arrayOfNulls<Shader>(2)
@@ -308,13 +349,14 @@ internal class PowerPlayPainter(
     /**
      * Draws [p] in the pill's own coordinates, after the glass and before the body (§3.5 steps 3–5): the tab with
      * [content] (skipped when [PpFrame.tabClosed] or [content] is null, or its side was never begun), then the tint and
-     * the halo on [pillSide] (skipped when [PpFrame.pillClosed] or [pillSide] is null). [up]: the tab opens above the
+     * the halo on [pillSide] (skipped when [PpFrame.pillClosed] or [pillSide] is null; the halo only when [logo], the
+     * logo bitmap the body draws on that side now, is the one it was baked from, fix pass S3). [up]: the tab opens above the
      * pill (bottom corners); it mirrors position, slide, text offset and gradient, never the text, the shine's lean or
      * the shadow's dy (N7).
      */
-    fun draw(c: Canvas, p: PpFrame, content: PpContent?, pillSide: Side?, up: Boolean) {
+    fun draw(c: Canvas, p: PpFrame, content: PpContent?, pillSide: Side?, up: Boolean, logo: Bitmap? = null) {
         if (!p.tabClosed && content != null) drawTab(c, p, content, up)
-        if (!p.pillClosed && pillSide != null) drawPill(c, p, pillSide)
+        if (!p.pillClosed && pillSide != null) drawPill(c, p, pillSide, logo)
     }
 
     private fun drawTab(c: Canvas, p: PpFrame, content: PpContent, up: Boolean) {
@@ -407,7 +449,7 @@ internal class PowerPlayPainter(
     }
 
     /** §3.5 steps 4–5: the tint (× `tintScale`), then the halo under [side]'s logo (× .95 × `tintScale`). */
-    private fun drawPill(c: Canvas, p: PpFrame, side: Side) {
+    private fun drawPill(c: Canvas, p: PpFrame, side: Side, logo: Bitmap?) {
         val i = index(side)
         val shader = tint[i] ?: return
         val ta = alpha255(p.tint * tintScale[i])
@@ -417,6 +459,7 @@ internal class PowerPlayPainter(
             c.drawRoundRect(0f, 0f, pillW, pillH, pillRadius, pillRadius, tintPaint)
         }
         val halo = haloMask[i] ?: return
+        if (logo == null || haloSource[i] !== logo) return
         val ha = alpha255(K.PP_HALO_ALPHA * p.halo * tintScale[i])
         if (ha > 0) {
             haloPaint.color = (glow[i] and 0xFFFFFF) or (ha shl 24)

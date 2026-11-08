@@ -29,6 +29,10 @@ import app.thebox.core.sports.GoalTimeline
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.math.abs
+import app.thebox.core.sports.GameId
+import app.thebox.core.sports.League
+import app.thebox.core.sports.ScoreBugView
+import kotlinx.coroutines.awaitCancellation
 
 /**
  * Code review 2026-11-07 S1: the real WP-3 → WP-2 path, end to end. [ScoreBugWith] runs with the production hooks
@@ -63,13 +67,26 @@ class GoalSeamTest {
         // Power play: the real timeline (PowerPlayTimeline) and the real painter.
         ppSampler = PpSampler.Real,
         tabAllowed = { _, _, _ -> true },
+        // Logos: a filled disc per URL, so the real halo bake runs; a "slow" URL never loads (S3).
+        logoFetch = { url, w, h -> if (url.contains("slow")) awaitCancellation() else disc(w, h) },
         context = context,
         background = EmptyCoroutineContext,
     )
 
+    private fun disc(w: Int, h: Int): Bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).also {
+        Canvas(it).drawOval(1f, 1f, w - 1f, h - 1f, android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE })
+    }
+
+    private fun withLogos(v: ScoreBugView, tag: String) =
+        v.copy(away = v.away.copy(logo = "logo/${v.away.abbrev}$tag"), home = v.home.copy(logo = "logo/${v.home.abbrev}$tag"))
+
     /** [context] = a `MotionDurationScale` of 0 for the still path. */
-    private fun start(context: CoroutineContext = EmptyCoroutineContext, glow: Boolean = true) {
-        repo.bug.value = ScoreBugFixtures.view(clockSecs = 1200)
+    private fun start(
+        context: CoroutineContext = EmptyCoroutineContext,
+        glow: Boolean = true,
+        first: ScoreBugView = ScoreBugFixtures.view(clockSecs = 1200),
+    ) {
+        repo.bug.value = first
         rule.mainClock.autoAdvance = false
         val hooks = hooks(context, glow)
         rule.setContent {
@@ -249,6 +266,7 @@ class GoalSeamTest {
      */
     private fun aPowerPlayGoalHoldsTheTabThenSaysPpGoal(still: Boolean) {
         start(if (still) FixedScale(0f) else EmptyCoroutineContext, glow = false)
+        val plain = shot() // no power play yet: no tint
         repo.bug.value = ScoreBugFixtures.ppView("EDM", Side.HOME, opponent = "CGY", secs = 79)
         rule.mainClock.advanceTimeBy(2500)
         rule.waitForIdle()
@@ -267,7 +285,13 @@ class GoalSeamTest {
             }
         }
         assertTrue("the tab region holds drawn tab pixels ($inked)", inked > 1_000)
-        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY")
+        // S2 (fix pass): the pill right of the lead, the tint's end (EDM is home, the right) included; first shown to be
+        // tinted, so the hold below is not vacuous.
+        val py = K.SCORE_H / 2f
+        val tintX = K.SCORE_W - 40f
+        assertTrue("the pill's home end is tinted", diff(before, plain, tintX, py, 24f, 12f) > 200)
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY") // the minor ends in the goal
+        val g = GoalFrame()
         var frames = 0
         while (true) {
             rule.mainClock.advanceTimeByFrame()
@@ -280,6 +304,17 @@ class GoalSeamTest {
             }
             assertEquals("frame $frames: the held words (t = ${if (on()) t() else -1f})", PpLabel.ONE_MAN, probe.pp.lastDrawContent!!.label)
             assertEquals("frame $frames: the tab region is the previous frame's", 0, diff(shot, before, cx, cy, 160f, 14f))
+            // S2: every pixel of the pill right of the lead (tint, halo and body) is the previous frame's.
+            val leadTo = if (on()) GoalTimeline.sample(t(), g).leadTo else 0f
+            val x0 = maxOf(12f, leadTo * K.SCORE_W + 3f)
+            var bad = 0
+            var y = py - 12f
+            while (y <= py + 12f) {
+                var x = x0
+                while (x <= K.SCORE_W - 12f) { if (shot.px(x, y) != before.px(x, y)) bad++; x += 1f }
+                y += 1f
+            }
+            assertEquals("frame $frames: the pill (tint included) right of the lead is the previous frame's", 0, bad)
             check(++frames < 100) { "the takeover never covered the pill" }
         }
         // And it stays PP GOAL until the release at 3 600.
@@ -293,6 +328,28 @@ class GoalSeamTest {
 
     @Test
     fun theStillPathSwapsTheTabToPpGoalAtFrameA() = aPowerPlayGoalHoldsTheTabThenSaysPpGoal(still = true)
+
+    /**
+     * S3/S5 (fix pass): with a logo loader, the real halo bake runs per logo bitmap; a game change clears the halos, and
+     * a side whose new logo has not loaded draws none (never the previous game's shape).
+     */
+    @Test
+    fun theHaloIsBakedFromTheLogoAndClearedOnAGameChange() {
+        start(glow = false, first = withLogos(ScoreBugFixtures.view(clockSecs = 1200), ""))
+        repo.bug.value = withLogos(ScoreBugFixtures.ppView("EDM", Side.HOME, opponent = "CGY", secs = 79), "")
+        rule.mainClock.advanceTimeBy(2500)
+        rule.waitForIdle()
+        val pp = checkNotNull(probe.pp.painter!!()) { "no power-play painter" }
+        assertTrue("the real halo bake ran for the home logo", pp.haloBaked(Side.HOME))
+        assertEquals(Side.HOME, run { shot(); probe.pp.lastDrawSide })
+        // A new game whose logos never load: the old halos are dropped at once.
+        val next = GameId(League.NHL, "2025020999")
+        repo.bug.value = withLogos(ScoreBugFixtures.ppView("EDM", Side.HOME, opponent = "CGY", secs = 79).copy(gameId = next), "-slow")
+        rule.mainClock.advanceTimeBy(500)
+        rule.waitForIdle()
+        val pp2 = checkNotNull(probe.pp.painter!!())
+        assertFalse("cleared on the game change", pp2.haloBaked(Side.HOME) || pp2.haloBaked(Side.AWAY))
+    }
 
     private class FixedScale(override val scaleFactor: Float) : MotionDurationScale
 }

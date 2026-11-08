@@ -234,6 +234,10 @@ internal class ScoreBugPainter(
      * above the pill. [pp] or [p] null = no power-play drawing. The power-play state lives in the run, never in
      * [ScoreBugFrame] (B2).
      */
+    /** The logo bitmap the body draws on [side] now (no allocation): what a halo must have been baked from (S3). */
+    private fun logoOf(logos: FollowLogos?, side: Side?): Bitmap? =
+        if (logos == null || side == null) null else (if (side == Side.AWAY) logos.away else logos.home).image?.asAndroidBitmap()
+
     fun drawFrame(
         c: Canvas,
         glass: Bitmap,
@@ -255,7 +259,7 @@ internal class ScoreBugPainter(
         if (goal == null || g == null || colours == null || g.done) {
             // Power play §3.5 without a takeover: glass, tab, tint, halo, body.
             drawGlass(c, glass)
-            if (pp != null && p != null) pp.draw(c, p, content, pillSide, up)
+            if (pp != null && p != null) pp.draw(c, p, content, pillSide, up, logoOf(logos, pillSide))
             drawBody(c, f, logos, logoWaited, placing)
             return
         }
@@ -265,7 +269,7 @@ internal class ScoreBugPainter(
         drawGlass(c, glass)
         // 3–5. Power play (§3.5): the tab under its outside clip, the tint, the halo; after the glass, so the glass's
         // transparency never shows the tab, and before the body, so the logos sit on their halo.
-        if (pp != null && p != null) pp.draw(c, p, content, pillSide, up)
+        if (pp != null && p != null) pp.draw(c, p, content, pillSide, up, logoOf(logos, pillSide))
         // 6. Body, with the scorer's pop.
         if (g.popOn) {
             val side = goal.side

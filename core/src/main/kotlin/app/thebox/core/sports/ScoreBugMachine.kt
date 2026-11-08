@@ -371,7 +371,10 @@ class ScoreBugMachine(
         val pp = gatedPp(s)
         // It ended in play: the snapshot is LIVE or INTERMISSION and not the shootout (a FINAL/OFF or SO is not an "over").
         val inPlay = (s.phase == GamePhase.LIVE || s.phase == GamePhase.INTERMISSION) && s.periodKind != PeriodKind.SO
-        ppEndedEntry = if (lastShownPp != null && pp == null && !flagged && inPlay) q else null
+        // Fix pass N5: any score change counts as a goal here, flagged or not (UNSEEN demand, a long gap), so an unflagged
+        // goal that ends the power play is never announced as "Power play over.".
+        val scored = p != null && (p.away.score != s.away.score || p.home.score != s.home.score)
+        ppEndedEntry = if (lastShownPp != null && pp == null && !flagged && !scored && inPlay) q else null
         lastShownPp = pp
 
         val g = game
@@ -387,8 +390,9 @@ class ScoreBugMachine(
         s.powerPlay.takeIf { (s.phase == GamePhase.LIVE || s.phase == GamePhase.INTERMISSION) && s.periodKind != PeriodKind.SO }
 
     /**
-     * (Power play §1.4, S1) Whether [side]'s goal, flagged going from [p] to [s], was a power-play goal. Only when [p] is
-     * LIVE and not the shootout (so never the shootout winner's +1).
+     * (Power play §1.4, S1; fix pass S4) Whether [side]'s goal, flagged going from [p] to [s], was a power-play goal. Only
+     * when [p] is LIVE or INTERMISSION (a power play carried over the break, scored on early in the next period, is compared
+     * against the intermission poll) and neither [p] nor [s] is the shootout (so never the shootout winner's +1).
      * 1. [GameSnapshot.lastGoal] has the scorer's side and equals [s]'s score: its `strength == "pp"`.
      * 2. Otherwise the summary lags, and the fallback is "[p] had [side] on the power play". Its known misses:
      *    - a minor that expires inside a poll gap, then an even-strength goal by the same team: a false PP GOAL;
@@ -396,7 +400,8 @@ class ScoreBugMachine(
      *    - `situation` clearing a bucket before the score rises: no PP GOAL.
      */
     private fun goalWasPp(p: GameSnapshot, s: GameSnapshot, side: Side): Boolean {
-        if (p.phase != GamePhase.LIVE || p.periodKind == PeriodKind.SO) return false
+        if (p.phase != GamePhase.LIVE && p.phase != GamePhase.INTERMISSION) return false
+        if (p.periodKind == PeriodKind.SO || s.periodKind == PeriodKind.SO || s.finalKind == PeriodKind.SO) return false
         val g = s.lastGoal
         if (g != null && g.side == side && g.away == s.away.score && g.home == s.home.score) return g.pp
         return p.powerPlay?.side == side

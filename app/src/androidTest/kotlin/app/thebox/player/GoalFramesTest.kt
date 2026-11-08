@@ -118,8 +118,10 @@ class GoalFramesTest : PlayerTestBase() {
         assertTrue("idle after the takeover drew ${idle.size} frames in 10 s (gate ≤ 1)", idle.size <= 1)
     }
 
+    /** One client for the panel's admin calls (code review N7): `featuredScore` polls every 500 ms for minutes. */
+    private val http = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).build()
+
     private fun restartSports(base: String): JSONObject {
-        val http = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).build()
         val body = JSONObject().put("restart", true).toString().toRequestBody("application/json".toMediaType())
         return http.newCall(Request.Builder().url("$base/admin/sports").post(body).build()).execute().use { r ->
             val text = r.body.string()
@@ -132,7 +134,6 @@ class GoalFramesTest : PlayerTestBase() {
 
     /** The featured game's score total (`away + home`) from `GET /admin/sports`, as the panel serves it for this CDN bucket. */
     private fun featuredScore(base: String): Int {
-        val http = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).build()
         return http.newCall(Request.Builder().url("$base/admin/sports").get().build()).execute().use { r ->
             val text = r.body.string()
             check(r.isSuccessful) { "panel /admin/sports -> ${r.code}: $text" }

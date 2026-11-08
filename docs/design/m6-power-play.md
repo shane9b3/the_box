@@ -128,7 +128,9 @@ ScoreBugView(…, val powerPlay: PowerPlay? = null, val goalPp: Boolean = false,
   - the view is neither stale nor waiting.
 
   Otherwise it is null. `knownView()` always has null.
-- **`goalPp`**, set where a goal is flagged, only if the previous snapshot `p` is LIVE and not SO:
+- **`goalPp`**, set where a goal is flagged, only if the previous snapshot `p` is LIVE or INTERMISSION, and neither `p`
+  nor the goal snapshot is SO (fix pass S4: a power play carried over an intermission and scored on early in the next
+  period is compared against the intermission poll; the shootout winner never gets PP GOAL):
   1. If `s.lastGoal` has the scorer's side and equals the new score, use `lastGoal.pp`.
   2. Otherwise (the summary lags) use the fallback, `p.powerPlay?.side == side`.
 
@@ -138,7 +140,8 @@ ScoreBugView(…, val powerPlay: PowerPlay? = null, val goalPp: Boolean = false,
   - a power play that starts and is scored on inside one gap gives no PP GOAL;
   - if `situation` clears a bucket before the score, there is no PP GOAL.
 - **`ppEnded`** (for §7): set on the view when the previous fresh view had a power play, this fresh view has none, and
-  this view flagged no goal.
+  this view flagged no goal **and changed no score** (fix pass N5: an unflagged goal, under UNSEEN demand or after a
+  long gap, is never "Power play over."). It is the only source of "Power play over.".
 - Polling, stale, hide and the delay queue are unchanged.
 
 ---
@@ -193,6 +196,15 @@ animation.
 | tab: X → X′, same side, kind changed | the label switches, plus one **PULSE** (450 ms); no slide |
 | tab: X → Y, other side | CLOSE with X's content, then OPEN with Y's; `begin(side)` before each |
 | pill: off → side / side → off / A → B | tint and halo in / out / out, then in |
+
+**Hiding (fix pass N4).** In place mode both tracks park at once (the sample bug shows). When the bug hides
+(`box == null`), nothing kicks: the tab and the tint stay as they are and fade with the bug's 300 ms fade, and the tracks
+park once the fade is done.
+
+**Interrupts (fix pass S1).** A new transition samples the interrupted one into its own `next` frame, snaps the driver
+to 0 and only then assigns `from`, `kind` and `to`. The snap can suspend while the cancelled `animateTo` still holds the
+driver's mutex; until it lands, draw keeps sampling the old transition at its frozen time, so no frame ever draws the
+new transition at the old elapsed time.
 
 **Snaps** (no animation, straight to rest), in these cases:
 - the first **non-waiting** view of a follow, or a new game (N5);
@@ -378,14 +390,27 @@ probing line) intersects `tabBox` inflated by `PP_TAB_NEIGHBOUR` = 29, the shado
 - When `GoalRun` starts a takeover (GA §5.2 step 4), `PpRun` captures:
   - `pinned = true`;
   - `pinContent` = a copy of what the tab is drawing now. On a second goal mid-pin, that is the current content,
-    `PP GOAL` included (review B2.4);
+    `PP GOAL` included, held only until that goal's lead covers the pill (the B2.4 override below);
   - `pinTabOn` = the tab is open **and** `tabAllowed` at goal time;
-  - `ppGoal = v.goalPp && pinTabOn`.
+  - `ppGoal = v.goalPp && pinTabOn && goalSide == pinContent.side` (PP GOAL only on the scorer's own tab);
+  - `ppGoalContent.side = pinContent.side`, set here (fix pass N3), so a release always slides PP GOAL out in the
+    right colours.
 - **While pinned, the tab track is frozen.**
   - The kick keys see `pinned` and stay unchanged until release.
   - `tabOn` changes are deferred. **Lead (S3):** the pin may keep the tab over an overlay that opens mid-takeover,
     until 3 600, only because `tabAllowed` was true at goal time. If `pinTabOn` was false, the tab stays closed.
-  - The pill track is under the takeover and may follow `target`.
+  - **The pill track holds until covered (fix pass S2, amending "may follow `target`").** While the takeover is pending,
+    or at t < `LEAD_COVERED_MS`, the pill is not kicked: the tint and the halo keep the previous frame's values, like
+    the tab and the body. When the lead covers the pill (a child of the takeover watching `driver.value`, or frame A on
+    the still path) the pill follows `target`. Every end of the takeover (cancel, skip, release, `finally`) also ends
+    the hold.
+- **A second goal during a PP GOAL takeover gets its own label (lead override of review B2.4).** Until its lead covers
+  the pill, the tab holds what was drawn (PP GOAL). Then:
+  - if the new goal's `goalPp` is true for the tab's side, the tab says PP GOAL;
+  - otherwise, if the power play goes on for the tab's side, the tab cuts to its current words and seconds (no pulse,
+    no slide);
+  - otherwise (it is over, or it is the other side's), the tab CLOSEs, sliding PP GOAL out, and stays closed until the
+    release, which then opens the other side's power play if there is one.
 
 **Draw**, from the takeover's `t`:
 
@@ -420,7 +445,8 @@ Then `pinned = false` and both keys are re-evaluated:
 | Even-strength goal, PP starts in the goal snapshot | tab closed through the takeover; OPEN at 3 600 |
 | Tab not allowed at goal time | no PP GOAL, and the tab stays closed |
 | Overlay opens mid-takeover | the tab stays until 3 600, then CLOSEs |
-| A second goal mid-pin | the pin continues; `pinContent` = what is drawn; `ppGoal` recomputed |
+| A second goal mid-pin | the pin continues; `pinContent` = what is drawn until the new lead covers; `ppGoal` recomputed |
+| A second, non-PP goal during PP GOAL | held, then the current power play's words, or a CLOSE if it is over (B2.4 override) |
 
 ---
 
@@ -735,7 +761,7 @@ Review: `docs/review/2026-11-07-power-play-design-review.md`. Owner rulings 17�
 | B1 | **accepted:** kicks only on a transition-identity change (null/non-null, side, kind, pin, tab allowed); seconds only redraw; a same-target kick never cancels; the 700 ms recomposition test | §3.1, §9.3 |
 | B2 | **accepted:** the run owns `PpContent`, captured at kick; a close slides its opening content; a side change closes then opens, each with its own content; the pin holds what is drawn. Commit 0 fixes `PpFrame` (with `copyFrom`), `PpContent`, the `drawFrame` signature with `up`, and one typed `PowerPlayTimeline.sample(track, kind, t, from, to, out)` including PULSE; no PP fields in `ScoreBugFrame` | §3.1, §3.2, §3.5, §5, §10 |
 | B3 | **accepted:** featured power plays opt-in (`sports_pp` / `--sports-pp`); the default timeline is unchanged; `GoalFramesTest` arms on the score change | §8, §9.5 |
-| S1 | **accepted:** PP GOAL from `summary.scoring` `strength == "pp"` matched to the score; the previous-snapshot rule only as a fallback, its misses documented; gated on `p` LIVE and not SO | §1.2, §1.4 |
+| S1 | **accepted:** PP GOAL from `summary.scoring` `strength == "pp"` matched to the score; the previous-snapshot rule only as a fallback, its misses documented; gated on `p` LIVE and not SO (amended by the fix pass S4: LIVE or INTERMISSION, never SO) | §1.2, §1.4 |
 | S2 | **accepted:** C6 with a per-team `tintScale` (TBL and TOR .60, SEA .85, five golds .90); the halo scaled the same way | §6.3, §6.4 |
 | S3 | **accepted, modified by the lead:** separate pill (`target`) and tab (`tabOn`) tracks. The pin keeps the tab over a mid-takeover overlay until 3 600 only if `tabAllowed` was true at goal time; otherwise it stays closed | §3.1, §4.4, §5 |
 | S4 | **accepted:** one tween; release from a child watching `driver.value`; release sites listed; no release on a new-goal restart | §5 |
@@ -771,3 +797,24 @@ Review: `docs/review/2026-11-07-power-play-design-review.md`. Owner rulings 17�
    not depend on the first two, and the S1 fallback covers the third.
 2. **The fake panel's sports_pp 3rd period runs 110 s, not 60.** That is opt-in only, but it lengthens the timeline by
    50 s at `sports_timeline_s` 360.
+
+## Fix pass (2026-11-08)
+
+Review: `docs/review/2026-11-08-power-play-code-review.md`. All items taken; the lead overrides B2.4.
+
+| ID | Disposition | Where |
+|---|---|---|
+| S1 | `PpRun.play` snaps the driver before assigning `from`/`kind`/`to`; a runner test with the real timeline interrupts an open with a close at 700 ms and draws in the kick's own frame (a probe hook after `step()`); the slide never jumps (it fails on the old order) | §3.1 |
+| S2 | spec amended: the pill holds until covered; `GoalSeamTest` checks every pill pixel right of the lead (tint included, first shown to be tinted) | §5 |
+| S3 | halos cleared on a logo-URL change and on a game change (then re-baked); a halo is drawn only under the very bitmap it was baked from (`drawFrame` passes the side's current logo); built off the main thread, published on it | §3.4 |
+| S4 | spec amended: `p` LIVE or INTERMISSION, never SO (`p` or the goal snapshot); a machine test for a PP carried over intermission | §1.4 |
+| S5 | the fake sampler honours `from`; a fake logo loader makes the halo watch run (so low-end's zero halos means something); `GoalSeamTest` and `PowerPlayScreenshotTest` run the real halo bake; the pin checks read what the draw passed (`lastDrawContent`), and the re-derived `drawnContent` probe is gone | §9 |
+| B2.4 | lead override: a second goal's own label (PP GOAL only for its own `goalPp`), else the data, after its lead covers | §5 |
+| N1 | labels built off the main thread and published on it only while the painter and teams still match the bake | §3.4 |
+| N3 | `ppGoalContent.side` set in `pin()` | §5 |
+| N4 | hiding fades the tab and tint with the bug, then parks | §3.1 |
+| N5 | `ppEnded` also requires no score change; it is the only "Power play over." path | §1.4 |
+| N6 | left as is (the label fit reserves the seconds slot) | — |
+| N7 | `GoalFramesTest` reuses one HTTP client | §9.5 |
+| N8 | `test_sports.py` compares every default body at every second 0–420 (and three full instants) to a golden captured from the pre-power-play `sports.py`, byte for byte | §8 |
+| N9 | the KDoc now says what is `@Volatile` (the size bake) and what is published on the drawing thread (labels, halos) | §3.4 |

@@ -1035,7 +1035,7 @@ class ScoreBugMachineTest {
     }
 
     @Test
-    fun goalPpOnlyWhenThePreviousSnapshotIsLiveAndNotTheShootout() {
+    fun goalPpNeverInTheShootout() {
         val so = live(away = 2, home = 2, period = 5, kind = PeriodKind.SO, secs = 0, running = false)
         val win = final(away = 2, home = 3, kind = PeriodKind.SO)
         assertFalse(after(so.copy(powerPlay = pp(Side.HOME)), win.copy(lastGoal = GoalFact(Side.HOME, 2, 3, pp = true))).goalPp)
@@ -1047,6 +1047,29 @@ class ScoreBugMachineTest {
         val otWin = final(away = 3, home = 2, kind = PeriodKind.OT)
         assertTrue(after(ot.copy(powerPlay = pp(Side.AWAY)), otWin).goalPp)
         assertTrue(after(ot, otWin.copy(lastGoal = GoalFact(Side.AWAY, 3, 2, pp = true))).goalPp)
+    }
+
+    @Test
+    fun goalPpAfterAPowerPlayCarriedOverTheIntermission() {
+        // Fix pass S4: a minor late in the 2nd carries over the break; the intermission polls every other bucket, so a goal
+        // early in the 3rd is flagged against an INTERMISSION snapshot. The summary says `pp`: PP GOAL.
+        val int = live(away = 0, home = 2, period = 2, phase = GamePhase.INTERMISSION, inInt = true, running = false, secs = 958)
+            .copy(powerPlay = pp(Side.AWAY, secs = 90))
+        val goal = live(away = 1, home = 2, period = 3, secs = 1185).copy(lastGoal = GoalFact(Side.AWAY, 1, 2, pp = true))
+        val v = after(int, goal)
+        assertEquals(Side.AWAY, v.goalSide)
+        assertTrue(v.goalPp)
+        // The fallback (no summary yet) uses the intermission's power play too.
+        assertTrue(after(int, goal.copy(lastGoal = null)).goalPp)
+        // A summary saying `ev` wins.
+        assertFalse(after(int, goal.copy(lastGoal = GoalFact(Side.AWAY, 1, 2, pp = false))).goalPp)
+        // Never the shootout: an intermission before the shootout, then the FINAL/SO winner's +1.
+        val preSo = live(away = 2, home = 2, period = 4, kind = PeriodKind.OT, ot = 1, phase = GamePhase.INTERMISSION, inInt = true, running = false, secs = 0)
+            .copy(powerPlay = pp(Side.AWAY, secs = 40))
+        val soWin = final(away = 3, home = 2, kind = PeriodKind.SO).copy(lastGoal = GoalFact(Side.AWAY, 3, 2, pp = true))
+        val w = after(preSo, soWin)
+        assertEquals(Side.AWAY, w.goalSide)
+        assertFalse(w.goalPp)
     }
 
     @Test
@@ -1146,6 +1169,15 @@ class ScoreBugMachineTest {
         g.at(20_000 + SportsConstants.GOAL_MARK_MS)
         assertNull(g.m.view()!!.goalSide)
         assertFalse(g.m.view()!!.ppEnded)
+
+        // Fix pass N5: an unflagged goal (UNSEEN demand) that ends the power play is not an "over" either.
+        val u = Rig()
+        u.follow(demand = Demand.UNSEEN)
+        u.ok(live(away = 0, home = 2).copy(powerPlay = pp(Side.HOME)))
+        u.at(20_000)
+        u.ok(live(secs = 602, away = 0, home = 3))
+        assertNull(u.m.view()!!.goalSide, "not flagged while unseen")
+        assertFalse(u.m.view()!!.ppEnded)
 
         // Going stale is never an end; a fresh view without one after the stale stretch is.
         val s = Rig()

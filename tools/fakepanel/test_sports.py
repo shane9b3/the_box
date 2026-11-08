@@ -5,6 +5,7 @@
 import copy
 import datetime as dt
 import email.utils
+import hashlib
 import http.client
 import json
 import os
@@ -17,6 +18,49 @@ import urllib.request
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import fakepanel  # noqa: E402
 import sports  # noqa: E402
+
+
+# The default-timeline golden (power play section 8, code review N8): every body the default (sports_pp off) timeline
+# serves, at a fixed anchor, captured from the pre-power-play sports.py (`git show b30ef7a:tools/fakepanel/sports.py`)
+# with `default_bodies` below. Full bodies at GOLDEN_FULL instants, a SHA-256 over all of them at each second 0..420.
+GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata", "sports_default_golden.json")
+GOLDEN_ANCHOR = 1762632000.0  # 2025-11-08 15:00 Eastern
+GOLDEN_BASE = "http://golden"
+GOLDEN_FULL = (45, 250, 346)
+
+
+def default_bodies(sp, at):
+    """[(name, body)] for the day lists of yesterday, today and tomorrow and every game's landing and list entry, as
+    `json.dumps` serialises them for the wire (sports.handle's `answer`)."""
+    today = sp.today(sp.anchor)
+    out = []
+    for d in (-1, 0, 1):
+        day = today + dt.timedelta(days=d)
+        out.append(("day %+d" % d, json.dumps(sp.day_body(day, at, GOLDEN_BASE))))
+        for g in sp.slate(day, at):
+            for landing in (True, False):
+                out.append((f"{g[0]} {'landing' if landing else 'list'}", json.dumps(sp.game(day, g, at, GOLDEN_BASE, landing))))
+    return out
+
+
+def bodies_digest(bodies):
+    h = hashlib.sha256()
+    for k, b in bodies:
+        h.update(k.encode()); h.update(b"\0"); h.update(b.encode()); h.update(b"\0")  # noqa: E702
+    return h.hexdigest()
+
+
+def capture_golden(sp, path):
+    """Writes the golden for Sports [sp] (its anchor is set to GOLDEN_ANCHOR)."""
+    sp.anchor = GOLDEN_ANCHOR
+    digests, full = [], {}
+    for t in range(0, 421):
+        b = default_bodies(sp, GOLDEN_ANCHOR + t)
+        digests.append(bodies_digest(b))
+        if t in GOLDEN_FULL:
+            full[str(t)] = dict(b)
+    with open(path, "w") as f:
+        json.dump({"anchor": GOLDEN_ANCHOR, "base": GOLDEN_BASE, "full": full, "sha256": digests}, f, indent=0, sort_keys=True)
 
 
 class SportsCase(unittest.TestCase):
@@ -298,6 +342,23 @@ class TestPowerPlayOff(SportsCase):
                 self.assertNotIn("situation", sp.game(day, g, at, "http://x", landing), t)
                 self.assertNotIn("summary", sp.game(day, g, at, "http://x", landing), t)
             self.assertNotIn("situation", sp.day_body(day, at, "http://x")["games"][0])
+
+    def test_the_default_bodies_match_the_pre_power_play_golden_byte_for_byte(self):
+        with open(GOLDEN) as f:
+            golden = json.load(f)
+        sp = self.panel.sports
+        self.assertFalse(self.panel.cfg["sports_pp"])
+        sp.anchor = golden["anchor"]
+        try:
+            for t, bodies in golden["full"].items():
+                now = dict(default_bodies(sp, golden["anchor"] + int(t)))
+                self.assertEqual(sorted(bodies), sorted(now), t)
+                for k, b in bodies.items():
+                    self.assertEqual(b.encode(), now[k].encode(), (t, k))
+            for t, digest in enumerate(golden["sha256"]):
+                self.assertEqual(digest, bodies_digest(default_bodies(sp, golden["anchor"] + t)), t)
+        finally:
+            sp.reset()
 
     def test_the_default_timeline_is_not_longer(self):
         self.assertEqual("OFF", self.panel.sports.featured(self.panel.sports.anchor + 344)["gameState"])

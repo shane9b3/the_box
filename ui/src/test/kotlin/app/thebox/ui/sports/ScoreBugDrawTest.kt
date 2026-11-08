@@ -1,5 +1,7 @@
 package app.thebox.ui.sports
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.SideEffect
@@ -15,9 +17,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
 import app.thebox.core.sports.FakeScoreRepository
 import app.thebox.core.sports.GameId
+import app.thebox.core.sports.GoalTimeline
+import app.thebox.core.sports.SportsConstants as K
 import app.thebox.core.sports.PowerPlay
 import app.thebox.core.sports.PowerPlayKind
 import app.thebox.core.sports.PowerPlayTimeline
+import app.thebox.core.sports.PpContent
 import app.thebox.core.sports.PpFrame
 import app.thebox.core.sports.PpLabel
 import app.thebox.core.sports.PpTrack
@@ -181,26 +186,35 @@ class ScoreBugDrawTest {
     private val labelBakes = mutableListOf<Pair<String, String>>()
     private var halos = 0
     private val sizeBakes = mutableListOf<Boolean>()
+    /** Logo loads the fake loader served (S3/S5: so `FollowLogos` really sets images and the halo watch really runs). */
+    private val logoLoads = mutableListOf<String>()
 
-    private fun goalHooks(context: CoroutineContext = EmptyCoroutineContext) = GoalHooks(
+    private fun goalHooks(context: CoroutineContext = EmptyCoroutineContext, ppSampler: PpSampler = PpTestSamplers.Fake) = GoalHooks(
         colours = { TeamColours(0xFF112233.toInt(), 0xFF445566.toInt(), 0xFF778899.toInt(), 0xFFAABBCC.toInt()) },
         begin = { _, _, _, _, _, _, _ -> },
         bake = { bakes++; null },
         glowAllowed = { _, _, _, _ -> true },
         probe = probe,
-        ppSampler = PpTestSamplers.Fake,
+        ppSampler = ppSampler,
         tabAllowed = { _, _, _ -> tabAllowedFlag },
         bakeSize = { _, withShadow -> sizeBakes += withShadow },
-        bakeHalo = { _, _, _ -> halos++ },
-        bakeLabels = { _, away, home, _ -> labelBakes += away to home },
+        // A stand-in mask, so the runner publishes it and the watch dedupes per bitmap as in production.
+        bakeHalo = { _, _, _ -> halos++; Bitmap.createBitmap(1, 1, Bitmap.Config.ALPHA_8) },
+        bakeLabels = { _, away, home, _ -> labelBakes += away to home; null },
+        logoFetch = { url, w, h -> logoLoads += url; Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) },
         context = context,
         background = EmptyCoroutineContext,
     )
 
-    private fun startGoalHost(lowEnd: Boolean = false, context: CoroutineContext = EmptyCoroutineContext) {
-        repo.bug.value = ScoreBugFixtures.view(clockSecs = 1200)
+    private fun startGoalHost(
+        lowEnd: Boolean = false,
+        context: CoroutineContext = EmptyCoroutineContext,
+        ppSampler: PpSampler = PpTestSamplers.Fake,
+        first: app.thebox.core.sports.ScoreBugView = ScoreBugFixtures.view(clockSecs = 1200),
+    ) {
+        repo.bug.value = first
         rule.mainClock.autoAdvance = false
-        val hooks = goalHooks(context)
+        val hooks = goalHooks(context, ppSampler)
         rule.setContent {
             BoxDesignScale {
                 ScoreBugWith(repo, placement, ScoreBugFixtures.noGeometry, lowEnd, Modifier, ScoreBugPlacement::place, hooks)
@@ -478,9 +492,10 @@ class ScoreBugDrawTest {
 
     // ------------------------------------------------------------------ the power-play tab (power play design §3.1, §5, §7, §9.3)
     //
-    // `PowerPlayTimeline.sample` (WP-2) is a stub in this tree, so the runner is driven through its seams: a stand-in
-    // sampler, `tabAllowed`, and the label / halo bakes. The probe shows each transition a track plays, the content it was
-    // started with, the pin and its releases, and what a draw at this instant would show.
+    // The runner is driven through its seams: a stand-in sampler that honours `from` (or the real timeline where a test says
+    // so), `tabAllowed`, a fake logo loader, and the label / halo bakes. The probe shows each transition a track plays, the
+    // content it was started with, the pin and its releases; [drawn] runs the bug's own draw and reads what it handed the
+    // painter (Robolectric runs no draw pass of its own).
 
     private fun ppEdm(secs: Int? = 79, kind: PowerPlayKind = PowerPlayKind.ONE_MAN, side: Side = Side.HOME) =
         ScoreBugFixtures.ppView(
@@ -491,8 +506,27 @@ class ScoreBugDrawTest {
     private fun pillRecs() = probe.pp.transitions.filter { it.track == PpTrack.PILL }
     private fun tabDriver() = probe.pp.tabDriver!!.value
     private fun pinned() = probe.pp.pinned!!()
-    private fun drawn() = probe.pp.drawnContent!!()
     private fun frame() = probe.pp.frame!!()
+
+    /** Runs the bug's own draw once and returns a copy of the content it passed to `drawFrame` (S5: not a re-derivation). */
+    private fun drawn(): PpContent {
+        drawOnce()
+        val c = checkNotNull(probe.pp.lastDrawContent) { "the draw passed no power-play content" }
+        return PpContent().also { it.copyFrom(c) }
+    }
+
+    /** Runs the bug's own draw once (into a throwaway bitmap); the probe's `lastDraw*` fields then hold what it passed. */
+    private fun drawOnce() {
+        probe.pp.lastDrawContent = null; probe.pp.lastDrawFrame = null; probe.pp.lastDrawSide = null
+        val bmp = Bitmap.createBitmap(600, 300, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.translate(60f, 60f)
+        probe.draw!!(c)
+    }
+
+    /** [v] with logo URLs, so the fake loader serves both logos. */
+    private fun withLogos(v: app.thebox.core.sports.ScoreBugView, tag: String = "") =
+        v.copy(away = v.away.copy(logo = "logo/${v.away.abbrev}$tag"), home = v.home.copy(logo = "logo/${v.home.abbrev}$tag"))
 
     private fun setAllowed(v: Boolean) {
         tabAllowedFlag = v
@@ -649,8 +683,11 @@ class ScoreBugDrawTest {
         assertFalse("the tab is drawn at rest", frame().tabClosed)
         applyPlacement(ScoreBugFixtures.input().copy(screenOff = true))
         advance(100)
-        assertTrue("parked at once", frame().tabClosed && frame().pillClosed)
-        advance(1000)
+        assertFalse("N4: the tab and the tint fade with the bug instead of vanishing", frame().tabClosed || frame().pillClosed)
+        assertEquals("nothing is kicked while hiding", listOf(PpTransition.OPEN), tabRecs().map { it.kind })
+        advance(400)
+        assertTrue("parked once the fade is done", frame().tabClosed && frame().pillClosed)
+        advance(600)
         applyPlacement(ScoreBugFixtures.input())
         advance(100)
         assertEquals(listOf(PpTransition.OPEN, PpTransition.STILL), tabRecs().map { it.kind })
@@ -741,27 +778,164 @@ class ScoreBugDrawTest {
         assertEquals(40, probe.pp.tabContent!!().secs)
     }
 
+    /**
+     * Lead override of review B2.4 (fix pass): a second goal during a PP GOAL takeover gets its own words. Not a power-play
+     * goal and the power play is over: PP GOAL is held until the new lead covers the pill, then the tab closes (sliding
+     * PP GOAL out) and stays closed through the release.
+     */
     @Test
-    fun aNewGoalMidPinKeepsPpGoalAndDoesNotRelease() {
+    fun aNonPpGoalMidPinEndsPpGoalOnceItsLeadCovers() {
         openEdmTab()
         repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY")
         advanceTakeoverTo(1_000f)
         assertEquals(PpLabel.PP_GOAL, drawn().label)
         // CGY scores at even strength mid-takeover: the takeover restarts, the pin continues.
         repo.bug.value = ScoreBugFixtures.goalView("CGY", Side.AWAY, opponent = "EDM", away = 2, home = 2, seq = 2)
-        advance(100)
+        rule.mainClock.advanceTimeByFrame()
+        rule.waitForIdle()
         assertEquals("restarted", 2, probe.begins.size)
-        assertTrue(t() < 600f)
+        assertTrue(t() < GoalTimeline.LEAD_COVERED_MS)
         assertTrue("no release on a restart", probe.pp.releases.isEmpty())
         assertTrue(pinned())
-        assertEquals("held PP GOAL through the restart", PpLabel.PP_GOAL, drawn().label)
+        assertEquals("PP GOAL is held until the new lead covers the pill", PpLabel.PP_GOAL, drawn().label)
+        assertEquals("nothing moved yet", 1, tabRecs().size)
         advanceTakeoverTo(400f)
-        assertEquals("and after the lead covers the pill again", PpLabel.PP_GOAL, drawn().label)
+        assertEquals("then the tab closes, sliding PP GOAL out", listOf(PpTransition.OPEN, PpTransition.CLOSE), tabRecs().map { it.kind })
+        assertEquals(PpLabel.PP_GOAL, tabRecs().last().label)
+        assertTrue("still pinned", pinned())
         advanceTakeoverTo(3_700f)
         assertEquals("one release, at the second run's 3 600", 1, probe.pp.releases.size)
         assertFalse(pinned())
+        assertEquals("and nothing opens: there is no power play", 2, tabRecs().size)
+    }
+
+    /** B2.4 override: a second goal that is not a power-play goal while the same power play goes on shows its words. */
+    @Test
+    fun aNonPpGoalMidPinWithThePowerPlayStillOnShowsItsWords() {
+        startGoalHost()
+        repo.bug.value = ppEdm(kind = PowerPlayKind.TWO_MAN, secs = 40)
+        advance(2500)
+        val left = PowerPlay(Side.HOME, PowerPlayKind.ONE_MAN, 45)
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, after = left, opponent = "CGY")
+        advanceTakeoverTo(1_000f)
+        assertEquals(PpLabel.PP_GOAL, drawn().label)
+        // CGY scores shorthanded: not a PP goal; EDM's 5-on-4 goes on.
+        repo.bug.value = ScoreBugFixtures.goalView("CGY", Side.AWAY, opponent = "EDM", away = 1, home = 2, seq = 2)
+            .copy(powerPlay = PowerPlay(Side.HOME, PowerPlayKind.ONE_MAN, 30))
+        rule.mainClock.advanceTimeByFrame()
+        rule.waitForIdle()
+        assertEquals("held first", PpLabel.PP_GOAL, drawn().label)
+        advanceTakeoverTo(400f)
+        val c = drawn()
+        assertEquals("the current power play's words once covered", PpLabel.ONE_MAN, c.label)
+        assertEquals(Side.HOME, c.side)
+        assertEquals(30, c.secs)
+        assertEquals("a cut: no slide, no pulse", 1, tabRecs().size)
+        advanceTakeoverTo(3_700f)
+        assertFalse(pinned())
+        assertEquals(1, tabRecs().size)
+        assertEquals(PpLabel.ONE_MAN, probe.pp.tabContent!!().label)
+    }
+
+    /** B2.4 override: a second goal that is itself a PP goal for the tab's side keeps PP GOAL. */
+    @Test
+    fun aSecondPpGoalMidPinKeepsPpGoal() {
+        startGoalHost()
+        repo.bug.value = ppEdm(kind = PowerPlayKind.TWO_MAN, secs = 40)
+        advance(2500)
+        val left = PowerPlay(Side.HOME, PowerPlayKind.ONE_MAN, 45)
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, after = left, opponent = "CGY")
+        advanceTakeoverTo(1_000f)
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY", home = 4, seq = 2)
+        advanceTakeoverTo(400f)
+        assertEquals(PpLabel.PP_GOAL, drawn().label)
+        assertEquals(Side.HOME, drawn().side)
+        assertEquals(1, tabRecs().size)
+        advanceTakeoverTo(3_700f)
         assertEquals("the close slides PP GOAL out", PpLabel.PP_GOAL, tabRecs().last().label)
         assertEquals(PpTransition.CLOSE, tabRecs().last().kind)
+    }
+
+    /** S2 (fix pass): the pill track holds while the takeover is pending and until the lead covers the pill. */
+    @Test
+    fun thePillHoldsUntilTheLeadCoversThePill() {
+        openEdmTab()
+        assertEquals(listOf(PpTransition.OPEN), pillRecs().map { it.kind })
+        val before = frame()
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY") // the minor ends in the goal
+        var frames = 0
+        while (true) {
+            rule.mainClock.advanceTimeByFrame()
+            rule.waitForIdle()
+            if (on() && t() >= GoalTimeline.LEAD_COVERED_MS) break
+            assertEquals("frame $frames: no pill kick before the lead covers", 1, pillRecs().size)
+            drawOnce()
+            val f = checkNotNull(probe.pp.lastDrawFrame)
+            assertEquals("frame $frames: the tint", before.tint, f.tint, 0f)
+            assertEquals("frame $frames: the halo", before.halo, f.halo, 0f)
+            assertEquals(Side.HOME, probe.pp.lastDrawSide)
+            check(++frames < 100)
+        }
+        advance(100)
+        assertEquals("then the pill follows the data", listOf(PpTransition.OPEN, PpTransition.CLOSE), pillRecs().map { it.kind })
+    }
+
+    /**
+     * S1 (fix pass), through the runner with the real timeline: a view that ends the power play 700 ms into the open. The
+     * drawn slide never jumps: it rises to the interrupt, then falls monotonically from where it was, and the tab is never
+     * drawn closed before the close has run its course.
+     */
+    @Test
+    fun anOpenInterruptedByACloseNeverJumps() {
+        startGoalHost(ppSampler = PpSampler.Real)
+        repo.bug.value = ppEdm()
+        val slides = mutableListOf<Float>()
+        fun sample() {
+            drawOnce()
+            val f = probe.pp.lastDrawFrame
+            slides += if (f == null || f.tabClosed) -1f else f.slide
+        }
+        while (tabDriver() < 700f) { rule.mainClock.advanceTimeByFrame(); rule.waitForIdle(); sample() }
+        val atInterrupt = slides.last()
+        val idx = slides.size - 1
+        assertTrue("open by 700 ms: $atInterrupt", atInterrupt > 0f)
+        // Draw right after the kick, before the cancelled open's continuation is dispatched: the frame the same Choreographer
+        // frame as the recomposition would draw.
+        var kicked = 0
+        probe.pp.afterStep = { if (kicked++ == 0) sample() }
+        repo.bug.value = ScoreBugFixtures.view(away = 0, home = 2, clockSecs = 1100) // the power play is over
+        var guard = 0
+        while (tabRecs().last().kind != PpTransition.CLOSE || tabDriver() < K.PP_CLOSE_MS.toFloat()) {
+            rule.mainClock.advanceTimeByFrame(); rule.waitForIdle(); sample()
+            check(++guard < 200)
+        }
+        val after = slides.drop(idx + 1).dropLast(1)
+        assertTrue("frames after the interrupt", after.size > 5)
+        var prev = atInterrupt
+        for ((i, v) in after.withIndex()) {
+            assertTrue("frame $i after the interrupt: the tab is never drawn closed mid-close ($after)", v >= 0f)
+            assertTrue("frame $i after the interrupt: $v rose above $prev ($after)", v <= prev + 1e-4f)
+            prev = v
+        }
+        assertEquals(listOf(PpTransition.OPEN, PpTransition.CLOSE), tabRecs().map { it.kind })
+        assertTrue("the same-frame draw ran", kicked > 0)
+    }
+
+    /** S3/S5 (fix pass): the halo watch bakes per logo bitmap, re-bakes after a game change, and never in low-end mode. */
+    @Test
+    fun theHaloIsBakedPerLogoAndAgainForANewGame() {
+        startGoalHost(first = withLogos(ScoreBugFixtures.view(clockSecs = 1200)))
+        assertEquals("both logos loaded", 2, logoLoads.size)
+        assertEquals("one halo bake per logo (size bakes $sizeBakes)", 2, halos)
+        repo.bug.value = withLogos(ppEdm())
+        advance(500)
+        assertEquals("a new snapshot of the same game bakes nothing", 2, halos)
+        repo.bug.value = withLogos(ScoreBugFixtures.view(gameId = GameId(League.NHL, "2025020999"), clockSecs = 1200), tag = "-2")
+        advance(500)
+        assertEquals("new logos load", 4, logoLoads.size)
+        assertTrue("and bake again: $halos", halos >= 4)
+        val pp = checkNotNull(probe.pp.painter!!())
+        assertTrue(pp.haloBaked(Side.AWAY) && pp.haloBaked(Side.HOME))
     }
 
     @Test
@@ -812,8 +986,10 @@ class ScoreBugDrawTest {
         assertFalse(on())
         assertFalse(pinned())
         assertEquals(listOf(true), probe.pp.releases.map { it.snap })
+        assertFalse("the tab fades with the bug (N4)", frame().tabClosed)
+        advance(400)
         assertTrue(frame().tabClosed)
-        advance(1000)
+        advance(600)
         applyPlacement(ScoreBugFixtures.input())
         advance(3000)
         assertEquals("no replay, and no tab: the power play ended in the goal", listOf(PpTransition.OPEN), tabRecs().map { it.kind })
@@ -850,8 +1026,9 @@ class ScoreBugDrawTest {
 
     @Test
     fun lowEndModeUsesTheStillVersionAndBakesNoHalo() {
-        startGoalHost(lowEnd = true)
-        repo.bug.value = ppEdm()
+        startGoalHost(lowEnd = true, first = withLogos(ScoreBugFixtures.view(clockSecs = 1200)))
+        assertEquals("the logos did load (so the zero below is meaningful)", 2, logoLoads.size)
+        repo.bug.value = withLogos(ppEdm())
         advance(300)
         assertEquals(listOf(PpTransition.STILL), tabRecs().map { it.kind })
         assertTrue(tabRecs()[0].to)
@@ -967,13 +1144,20 @@ class ScoreBugDrawTest {
 
 /**
  * Stand-in for `PowerPlayTimeline.sample`: the wiring tests drive the runner, not the curves. [Fake] is a plain linear
- * timeline with the shadow and halo "on". Tests that need the real curves use `PpSampler.Real`.
+ * timeline with the shadow and halo "on" that, like the real one, starts every transition from `from` (CSS semantics; S5
+ * of the code review): an interrupted transition continues from where it was. Tests that need the real curves use
+ * `PpSampler.Real`.
  */
 internal object PpTestSamplers {
-    val Fake = PpSampler { track, kind, t, _, to, out ->
+    val Fake = PpSampler { track, kind, t, from, to, out ->
+        val u = (t / 550f).coerceIn(0f, 1f)
+        val start = when (track) {
+            PpTrack.TAB -> if (from.tabClosed) 0f else from.slide
+            PpTrack.PILL -> if (from.pillClosed) 0f else from.tint
+        }
         val open = when (kind) {
-            PpTransition.OPEN -> (t / 550f).coerceIn(0f, 1f)
-            PpTransition.CLOSE -> 1f - (t / 550f).coerceIn(0f, 1f)
+            PpTransition.OPEN -> start + (1f - start) * u
+            PpTransition.CLOSE -> start * (1f - u)
             PpTransition.PULSE -> 1f
             PpTransition.STILL -> if (to) 1f else 0f
         }

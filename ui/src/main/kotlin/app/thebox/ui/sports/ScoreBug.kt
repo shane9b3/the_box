@@ -23,6 +23,7 @@ import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -157,10 +158,18 @@ internal class GoalHooks(
     val tabAllowed: (PlacementInput, OverlayGeometry, DesignBox) -> Boolean = ScoreBugPlacement::tabAllowed,
     /** (Power play §3.4, §3.6) The per-size bake; `withShadow` is false in low-end mode (the shadow is never baked there). */
     val bakeSize: (PowerPlayPainter, Boolean) -> Unit = { p, withShadow -> p.bakeSize(withShadow) },
-    /** (Power play §3.4) The halo bake for one logo bitmap (never called in low-end mode), off the main thread. */
-    val bakeHalo: (PowerPlayPainter, Side, Bitmap) -> Unit = { p, side, logo -> p.bakeHalo(side, logo) },
-    /** (Power play §3.4) The five label masks for the followed teams' abbreviations, off the main thread. */
-    val bakeLabels: (PowerPlayPainter, String, String, Resources) -> Unit = { p, away, home, res -> p.bakeLabels(away, home, res) },
+    /**
+     * (Power play §3.4) The halo mask for one logo bitmap (never called in low-end mode), off the main thread; the runner
+     * publishes it on the main thread (null: none).
+     */
+    val bakeHalo: (PowerPlayPainter, Side, Bitmap) -> Bitmap? = { p, side, logo -> p.buildHalo(side, logo) },
+    /**
+     * (Power play §3.4) The five label masks for the followed teams' abbreviations, off the main thread; the runner publishes
+     * them on the main thread only while those are still the followed teams (fix pass N1; null: nothing to publish).
+     */
+    val bakeLabels: (PowerPlayPainter, String, String, Resources) -> PowerPlayPainter.Labels? = { p, away, home, res -> p.buildLabels(away, home, res) },
+    /** The followed game's logo loader; null = the shell's image loader (tests pass a fake so logos and halos really load). */
+    val logoFetch: LogoFetch? = null,
     /** Added to the takeover effect's coroutine context (tests put a `MotionDurationScale` here); empty in production. */
     val context: CoroutineContext = EmptyCoroutineContext,
     /**
@@ -217,16 +226,22 @@ internal class PpProbe {
     val releases = mutableListOf<Release>()
     var tabDriver: Animatable<Float, *>? = null
     var pillDriver: Animatable<Float, *>? = null
-    /** The tab track's content, and what a draw at the current takeover instant would show (the pin rules, §5). */
+    /** The tab track's content (what a close slides out, or an open brought in). What a draw shows is [lastDrawContent]. */
     var tabContent: (() -> PpContent)? = null
-    var drawnContent: (() -> PpContent)? = null
     var pinned: (() -> Boolean)? = null
+    /** The power-play painter of the current size (null until built). */
+    var painter: (() -> PowerPlayPainter?)? = null
     /** Samples both tracks at their current driver values into a fresh frame: what the next draw would hand the painter. */
     var frame: (() -> PpFrame)? = null
     /** The last `PowerPlayPainter.draw` arguments the bug's draw made (updated per draw; null until one). */
     var lastDrawContent: PpContent? = null
     var lastDrawSide: Side? = null
     var lastDrawFrame: PpFrame? = null
+    /**
+     * Called right after the composition's kick ([PpRun.step] in its `SideEffect`), before anything it launched is
+     * dispatched: a test draws here to see the frame the same Choreographer frame would draw (S1).
+     */
+    var afterStep: (() -> Unit)? = null
     /** Draws that passed a power-play frame to the composite. */
     var ppDraws = 0
     /** Label bakes and halo bakes the wiring made. */
@@ -322,12 +337,18 @@ internal fun ScoreBugWith(
     val glass = remember(painter, lowEnd) { GlassCache(painter, withShadow = !lowEnd) }
     val loader = LocalShellImageLoader.current
     val scope = rememberCoroutineScope()
-    val logos = remember(loader) { FollowLogos(loader?.let { coilLogoFetch(it, context) }, scope) }
+    val logos = remember(loader) { FollowLogos(hooks.logoFetch ?: loader?.let { coilLogoFetch(it, context) }, scope) }
     DisposableEffect(logos) { onDispose { logos.release() } }
     val logoWaited = remember { mutableStateOf(false) }
+    // ---- the power-play runner (power play §3.1): plain holders; the drivers are read only in draw
+    val pr = remember { PpRun(scope, hooks) }
+    /** Bumped on a game change (S3): the halo watchers re-bake from the slots' current logos after the halos are cleared. */
+    val haloEpoch = remember { mutableIntStateOf(0) }
     val followed = holder.lastFollowed
     LaunchedEffect(followed?.away?.logo, followed?.home?.logo, s) {
         if (followed == null) return@LaunchedEffect
+        // S3 (fix pass): new logos, so no halo of the previous ones is kept (draw also checks the bitmap's identity).
+        pr.painter?.clearHalos()
         logos.start(
             followed.away.logo, followed.home.logo,
             (K.SCORE_LOGO_W * s).roundToInt().coerceAtLeast(1), (K.SCORE_LOGO_H * s).roundToInt().coerceAtLeast(1),
@@ -352,8 +373,6 @@ internal fun ScoreBugWith(
      */
     val held = remember { mutableStateOf<ScoreBugFrame?>(null) }
     hooks.probe?.let { it.takeoverOn = takeoverOn; it.driver = driver }
-    // ---- the power-play runner (power play §3.1): plain holders; the drivers are read only in draw
-    val pr = remember { PpRun(scope, hooks) }
     val liveTexts = remember { LiveText() }
     val awayAbbrev = bug?.away?.abbrev ?: ""
     val homeAbbrev = bug?.home?.abbrev ?: ""
@@ -367,9 +386,14 @@ internal fun ScoreBugWith(
         if (pr.labelKey == key || pr.bakingKey == key) return
         pr.bakingKey = key
         try {
-            withContext(hooks.background) { hooks.bakeLabels(p, a, h, res) }
+            val labels = withContext(hooks.background) { hooks.bakeLabels(p, a, h, res) }
             hooks.probe?.pp?.let { it.labelBakes++ }
-            if (pr.painter === p) { pr.labelKey = key; pr.readyChanged() }
+            // N1 (fix pass): published here, on the main thread, and only while the painter and the teams are still the ones
+            // this bake was for. A stale bake that finishes after a newer one is dropped, so the masks always match the key.
+            if (pr.painter === p && pr.away == a && pr.home == h) {
+                if (labels != null) p.publishLabels(labels)
+                pr.labelKey = key; pr.readyChanged()
+            }
         } catch (e: CancellationException) {
             throw e
         } catch (_: Throwable) { // no labels: no tab
@@ -381,9 +405,7 @@ internal fun ScoreBugWith(
         it.tabDriver = pr.tab.driver; it.pillDriver = pr.pill.driver
         it.tabContent = { pr.tab.content }
         it.pinned = { pr.pinned }
-        it.drawnContent = {
-            pr.drawContent(takeoverOn.value && (run.still || driver.value >= GoalTimeline.LEAD_COVERED_MS))
-        }
+        it.painter = { pr.painter }
         it.frame = { PpFrame().also { f -> pr.sampleInto(f) } }
     }
     /** The layer margin `M` (goal design §1), design px: the layer's inset, and the glow's neighbour distance. */
@@ -435,15 +457,16 @@ internal fun ScoreBugWith(
         bakeLabels()
         if (lowEnd) return@LaunchedEffect
         // The halo mask, per logo bitmap identity, never in low-end mode (§3.4). The logos are read through snapshotFlow, so
-        // an arriving logo never recomposes the bug.
+        // an arriving logo never recomposes the bug. S3 (fix pass): built off the main thread, published here only while
+        // that bitmap is still the slot's logo; a game change clears the halos and bumps [haloEpoch], so this re-bakes.
         suspend fun watch(side: Side, slot: FollowLogos.Slot) {
-            var last: Any? = null
-            snapshotFlow { slot.image }.collect { img ->
-                if (img == null || img === last) return@collect
-                last = img
+            snapshotFlow { slot.image to haloEpoch.intValue }.collect { (img, _) ->
+                val bmp = img?.asAndroidBitmap() ?: return@collect
+                if (pp.haloBakedFor(side, bmp)) return@collect
                 try {
-                    withContext(hooks.background) { hooks.bakeHalo(pp, side, img.asAndroidBitmap()) }
+                    val mask = withContext(hooks.background) { hooks.bakeHalo(pp, side, bmp) }
                     hooks.probe?.pp?.let { it.haloBakes++ }
+                    if (mask != null && slot.image === img && pr.painter === pp) pp.publishHalo(side, bmp, mask)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Throwable) {
@@ -458,6 +481,17 @@ internal fun ScoreBugWith(
     // The label masks, per painter (size) and followed teams (S8): the tab stays closed until they are ready. A change of
     // teams re-bakes here; a new painter bakes at the end of the setup effect above.
     LaunchedEffect(awayAbbrev, homeAbbrev) { bakeLabels() }
+    // S3 (fix pass): a new game never draws the previous game's halos, even with the same logo URLs (then the watchers
+    // re-bake from the same bitmaps).
+    val gameKey = bug?.gameId
+    LaunchedEffect(gameKey) {
+        if (gameKey == null) return@LaunchedEffect
+        val was = pr.haloGame
+        pr.haloGame = gameKey
+        if (was == null || was == gameKey) return@LaunchedEffect // the first game of the bug: nothing to clear
+        pr.painter?.clearHalos()
+        haloEpoch.intValue++
+    }
 
     // ---- power play (§3.1): what the runner is told this composition. The tab needs the placement to allow it, the labels
     // baked for this size and these teams, and a power play; the pill track needs only the painter and a power play. The
@@ -478,6 +512,7 @@ internal fun ScoreBugWith(
         if (run.active) { run.active = false; run.token++ }
         takeoverOn.value = false // a write, never a read: composition must not subscribe to it
         held.value = null
+        pr.releasePillHold() // the next SideEffect step lets the pill follow the data
         if (releaseThePin) releasePin(snap = true)
     }
     if (real == null) {
@@ -490,9 +525,13 @@ internal fun ScoreBugWith(
             pr.reset()
             run.seen = true; run.gameId = real.gameId; run.lastSeq = real.goalSeq; run.size = placement.size
         }
-        // Hidden, or in place mode: both power-play tracks park at once; the reappearance snaps (§3.1).
-        if (box == null || placement.placing) {
+        // Place mode: both power-play tracks park at once (the sample bug is shown). Hidden: they are frozen where they are
+        // and fade with the bug (fix pass N4), then park once the fade is done. The reappearance snaps (§3.1).
+        if (placement.placing) {
             pr.park(); pr.hidden = true
+        } else if (box == null) {
+            pr.hidden = true
+            if (fadeDone) pr.park()
         } else if (pr.hidden) {
             pr.hidden = false; pr.snapAll()
         }
@@ -519,7 +558,7 @@ internal fun ScoreBugWith(
                 // This composition already shows the goal view; until the effect sets takeoverOn and the lead covers the
                 // pill, the draw keeps the previous body.
                 held.value = holder.lastFrame
-                pr.pin(real.goalPp, tabAllowedNow, coveredNow)
+                pr.pin(real.goalPp, side, tabAllowedNow, coveredNow)
             } else {
                 releasePin(snap = true)
             }
@@ -543,7 +582,10 @@ internal fun ScoreBugWith(
     val targetKind = target?.kind ?: PowerPlayKind.ONE_MAN
     val targetSecs = pr.targetSecs
     pr.setInputs(tabWant, pillWant, targetSide, targetKind, targetSecs)
-    SideEffect { pr.step() }
+    SideEffect {
+        pr.step()
+        hooks.probe?.pp?.afterStep?.invoke()
+    }
 
     LaunchedEffect(run.token) {
         if (!run.active) return@LaunchedEffect
@@ -552,6 +594,7 @@ internal fun ScoreBugWith(
         if (goalPainter == null) { // not built: skipped
             run.active = false; held.value = null
             releasePin(snap = false)
+            pr.releasePillHold(); pr.step()
             return@LaunchedEffect
         }
         val side = run.side
@@ -567,6 +610,7 @@ internal fun ScoreBugWith(
             takeoverOn.value = true
             try {
                 if (still) {
+                    pr.covered() // frame A covers the pill from its first draw (S2, B2.4 override)
                     delay(K.GOAL_TAKEOVER_MS) // frame A; the delay is not scaled
                     driver.snapTo(K.GOAL_TAKEOVER_MS.toFloat()) // frame B
                     if (run.token == token) releasePin(snap = false, goalShown = true) // the pin's release (§5, S4)
@@ -578,6 +622,12 @@ internal fun ScoreBugWith(
                         snapshotFlow { driver.value >= K.GOAL_TAKEOVER_MS.toFloat() }.first { it }
                         if (run.token == token) releasePin(snap = false, goalShown = true)
                     }
+                    // S2 / the B2.4 override (fix pass): once the lead covers the pill, the pill follows the data and a PP GOAL
+                    // left from an earlier goal gives way to this goal's words. A child, like the release.
+                    launch {
+                        snapshotFlow { driver.value >= GoalTimeline.LEAD_COVERED_MS }.first { it }
+                        if (run.token == token) pr.covered()
+                    }
                     driver.animateTo(TAKEOVER_TOTAL_MS, tween(TAKEOVER_TOTAL_MS.toInt(), easing = LinearEasing))
                 }
             } finally {
@@ -585,6 +635,7 @@ internal fun ScoreBugWith(
                 if (run.token == token) {
                     takeoverOn.value = false; run.active = false; held.value = null
                     releasePin(snap = false)
+                    pr.releasePillHold(); pr.step()
                 }
             }
         }
@@ -691,6 +742,8 @@ private data class PpLabelKey(val painter: PowerPlayPainter, val away: String, v
 private class PpTrackRun(val track: PpTrack) {
     val driver = Animatable(0f)
     val from = PpFrame()
+    /** Where the interrupted transition is, sampled before the driver snaps; becomes [from] once it has (S1). */
+    val next = PpFrame()
     var kind = PpTransition.STILL
     var to = false
     /** Where the track is heading (or rests): 0 = closed, else the encoded target (the tab: side and kind; the pill: side). */
@@ -722,13 +775,14 @@ private class PpRun(private val scope: CoroutineScope, private val hooks: GoalHo
     val pill = PpTrackRun(PpTrack.PILL)
     /** The frame draw fills (both tracks write their own channels). */
     private val out = PpFrame()
-    private val scratch = PpFrame()
 
     /** The power-play painter of this size (built off the main thread) and the label bake that is done / under way. */
     var painter: PowerPlayPainter? = null
     var labelKey: PpLabelKey? = null
     var bakingKey: PpLabelKey? = null
     var lowEnd = false
+    /** The game the halos were last cleared for (S3): a different one clears them. */
+    var haloGame: GameId? = null
     var away = ""
     var home = ""
     /** The painter has baked the labels of the followed teams: the tab may open (S8). */
@@ -765,6 +819,11 @@ private class PpRun(private val scope: CoroutineScope, private val hooks: GoalHo
     private val pinContent = PpContent()
     private val ppGoalContent = PpContent(label = PpLabel.PP_GOAL)
     private val live = PpContent()
+    /**
+     * S2 (fix pass): a goal's takeover is pending or its lead has not covered the pill yet, so the pill track keeps what
+     * it shows (no kick), like the tab and the body. Released by [covered] and on every end of the takeover.
+     */
+    private var pillHeld = false
 
     fun snapAll() { snapTab = true; snapPill = true }
 
@@ -798,8 +857,12 @@ private class PpRun(private val scope: CoroutineScope, private val hooks: GoalHo
         step()
     }
 
-    /** `SideEffect`: starts a track's transition only when its key changed (or a snap was requested). */
+    /**
+     * `SideEffect`: starts a track's transition only when its key changed (or a snap was requested). Nothing moves while
+     * the bug is hidden: the tracks fade with it as they are (N4), and the reappearance snaps.
+     */
     fun step() {
+        if (hidden) return
         val tabWant = effTab()
         val pillWant = effPill()
         val side = inSide; val kind = inKind; val secs = inSecs
@@ -818,7 +881,7 @@ private class PpRun(private val scope: CoroutineScope, private val hooks: GoalHo
             lastTabKey = tabKey
             evaluateTab(tabWant, side, kind, secs, snap, cut = false)
         }
-        if (snapPill || pillWant != lastPillKey) {
+        if (!pillHeld && (snapPill || pillWant != lastPillKey)) {
             val snap = snapPill
             snapPill = false
             lastPillKey = pillWant
@@ -829,10 +892,13 @@ private class PpRun(private val scope: CoroutineScope, private val hooks: GoalHo
     // ---- the pin
 
     /**
-     * A takeover starts (§5). A fresh pin captures what the tab is drawing; a second goal mid-pin keeps the pin and takes
-     * what is drawn right now ([coveredNow]), `PP GOAL` included (B2.4). [goalPp] and [allowed] decide `PP GOAL`.
+     * A takeover starts (§5). A fresh pin captures what the tab is drawing; a second goal mid-pin keeps the pin and holds
+     * what is drawn right now ([coveredNow]), `PP GOAL` included, until its own lead covers the pill (the B2.4 override:
+     * then [covered] gives that goal its own words). [goalPp], [goalSide] and [allowed] decide `PP GOAL`: only for the
+     * pinned tab's own side. The pill is held until [covered] (S2).
      */
-    fun pin(goalPp: Boolean, allowed: Boolean, coveredNow: Boolean) {
+    fun pin(goalPp: Boolean, goalSide: Side, allowed: Boolean, coveredNow: Boolean) {
+        pillHeld = true
         if (!pinned) {
             pinned = true
             pinContent.copyFrom(tab.content)
@@ -842,8 +908,33 @@ private class PpRun(private val scope: CoroutineScope, private val hooks: GoalHo
             live.copyFrom(drawContent(coveredNow))
             pinContent.copyFrom(live)
         }
-        ppGoal = goalPp && pinTabOn
+        ppGoalContent.side = pinContent.side // N3: set here, so a release that drew no covered frame slides the right colours
+        ppGoal = goalPp && pinTabOn && goalSide == pinContent.side
     }
+
+    /**
+     * The current takeover's lead covers the pill (the still path: frame A). S2: the pill follows the data again. The B2.4
+     * override: if the tab still says an earlier goal's `PP GOAL` and this goal is not a power-play goal for it, the tab
+     * takes the current power play's words (same side, a plain cut) or closes, sliding `PP GOAL` out, and stays closed
+     * until the release. Called from the takeover effect (never in composition).
+     */
+    fun covered() {
+        if (pinned && !ppGoal && pinContent.label == PpLabel.PP_GOAL) {
+            if (targetSide == pinContent.side) {
+                pinContent.label = labelOf(inKind); pinContent.secs = inSecs
+                tab.content.copyFrom(pinContent)
+            } else if (tab.want != 0) {
+                tab.content.copyFrom(pinContent)
+                pinTabOn = false
+                evaluateTab(0, inSide, inKind, inSecs, snap = false, cut = false)
+            }
+        }
+        releasePillHold()
+        step()
+    }
+
+    /** Ends the pill hold (S2); the caller steps, or the next composition's `SideEffect` does. */
+    fun releasePillHold() { pillHeld = false }
 
     /**
      * Ends the pin (the release sites, §5). [snap]: a cancel; the next composition's kick snaps the tab. Otherwise (the
@@ -856,7 +947,7 @@ private class PpRun(private val scope: CoroutineScope, private val hooks: GoalHo
         pinned = false
         // What the tab drew at the end of the takeover is what a close slides out, or what the cut replaces.
         if (goalShown) tab.content.copyFrom(if (ppGoal) ppGoalContent else pinContent)
-        ppGoal = false; pinEdge = false
+        ppGoal = false; pinEdge = false; pillHeld = false
         if (snap) { snapTab = true; lastTabKey = -1; return }
         val want = effTab()
         lastTabKey = want
@@ -867,7 +958,7 @@ private class PpRun(private val scope: CoroutineScope, private val hooks: GoalHo
     fun drawContent(covered: Boolean): PpContent {
         if (!pinned) return tab.content
         if (!covered) return pinContent
-        if (ppGoal) return ppGoalContent.also { it.side = pinContent.side }
+        if (ppGoal) return ppGoalContent
         live.copyFrom(pinContent)
         if (live.label != PpLabel.PP_GOAL && targetSide == pinContent.side) live.secs = targetSecs
         return live
@@ -958,13 +1049,20 @@ private class PpRun(private val scope: CoroutineScope, private val hooks: GoalHo
         }
     }
 
-    /** Starts [kind] on [t] from where the interrupted transition is now (CSS transition semantics), then runs it. */
+    /**
+     * Starts [kind] on [t] from where the interrupted transition is now (CSS transition semantics), then runs it.
+     *
+     * S1 (fix pass): the driver snaps **before** the new kind and `from` are assigned. A cancelled `animateTo` can hold the
+     * driver's mutex until its continuation is dispatched, so `snapTo` may suspend; until it lands, draw keeps sampling the
+     * old transition at its (frozen) old time, which is exactly [PpTrackRun.next]. No frame ever draws the new transition
+     * at the old elapsed time.
+     */
     private suspend fun play(t: PpTrackRun, kind: PpTransition, to: Boolean) {
-        hooks.ppSampler.sample(t.track, t.kind, t.driver.value, t.from, t.to, scratch)
-        t.from.copyFrom(scratch)
+        hooks.ppSampler.sample(t.track, t.kind, t.driver.value, t.from, t.to, t.next)
+        t.driver.snapTo(0f)
+        t.from.copyFrom(t.next)
         t.kind = kind; t.to = to
         hooks.probe?.pp?.transitions?.add(PpProbe.Rec(t.track, kind, to, t.content.side, t.content.label, t.content.secs))
-        t.driver.snapTo(0f)
         val ms = when (kind) {
             PpTransition.OPEN -> K.PP_OPEN_MS
             PpTransition.CLOSE -> K.PP_CLOSE_MS

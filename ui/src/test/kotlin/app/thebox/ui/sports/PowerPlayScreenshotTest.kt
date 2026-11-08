@@ -616,6 +616,38 @@ class PowerPlayScreenshotTest {
         }
     }
 
+    /**
+     * Fix pass S3: a halo is drawn only under the very logo bitmap it was baked from. Another bitmap on that side (the next
+     * game's, or none yet) draws no halo, and [PowerPlayPainter.clearHalos] drops it.
+     */
+    @Test
+    fun aHaloIsDrawnOnlyForTheLogoItWasBakedFrom() {
+        val r = std
+        val team = teams.first { it.side == Side.HOME }
+        val pp = PowerPlayPainter(r.s, r.d, r.pillW, r.pillH, bold).apply { bakeSize() }
+        pp.begin(Side.HOME, team.colours)
+        val a = logoBitmap(team.colours.base, r.logoW, r.logoH)
+        val b = logoBitmap(team.colours.base, r.logoW, r.logoH)
+        pp.bakeHalo(Side.HOME, a)
+        assertTrue(pp.haloBakedFor(Side.HOME, a))
+        assertFalse(pp.haloBakedFor(Side.HOME, b))
+        val f = PpFrame()
+        PowerPlayTimeline.sample(PpTrack.PILL, PpTransition.STILL, 0f, PpFrame(), true, f)
+        f.tabClosed = true
+        fun draw(logo: Bitmap?): IntArray {
+            val bmp = Bitmap.createBitmap(Math.round(r.pillW), Math.round(r.pillH), Bitmap.Config.ARGB_8888)
+            pp.draw(Canvas(bmp), f, null, Side.HOME, false, logo)
+            return IntArray(bmp.width * bmp.height).also { bmp.getPixels(it, 0, bmp.width, 0, 0, bmp.width, bmp.height) }
+        }
+        val none = draw(null)
+        val withA = draw(a)
+        assertFalse("the halo is drawn under its own logo", none.contentEquals(withA))
+        assertTrue("never under another bitmap", none.contentEquals(draw(b)))
+        pp.clearHalos()
+        assertFalse(pp.haloBaked(Side.HOME))
+        assertTrue("and not after clearHalos", none.contentEquals(draw(a)))
+    }
+
     /** §9.2: 300 `drawFrame` calls with the tab open and pulsing allocate (next to) nothing. */
     @Test
     fun drawFrameWithTheTabAllocatesLittle() {
