@@ -1,0 +1,152 @@
+{
+ "header": {
+  "id": "401873038",
+  "competitions": [
+   {
+    "id": "401873038",
+    "date": "2026-11-08T14:30Z",
+    "competitors": [
+     {
+      "id": "1",
+      "uid": "s:20~l:28~t:1",
+      "order": 0,
+      "homeAway": "home",
+      "team": {
+       "id": "1",
+       "abbreviation": "ATL",
+       "displayName": "Atlanta Falcons",
+       "color": "a71930",
+       "alternateColor": "000000"
+      },
+      "score": "6",
+      "timeoutsUsed": 0,
+      "possession": false
+     },
+     {
+      "id": "4",
+      "uid": "s:20~l:28~t:4",
+      "order": 1,
+      "homeAway": "away",
+      "team": {
+       "id": "4",
+       "abbreviation": "CIN",
+       "displayName": "Cincinnati Bengals",
+       "color": "fb4f14",
+       "alternateColor": "000000"
+      },
+      "score": "0",
+      "timeoutsUsed": 0,
+      "possession": false
+     }
+    ],
+    "status": {
+     "displayClock": "11:12",
+     "period": 1,
+     "type": {
+      "id": "2",
+      "name": "STATUS_IN_PROGRESS",
+      "state": "in",
+      "completed": false,
+      "description": "In Progress",
+      "detail": "11:12 - 1st Quarter",
+      "shortDetail": "11:12 - 1st",
+      "statusPrimary": "11:12",
+      "statusSecondary": "1st"
+     },
+     "isTBDFlex": false,
+     "displayPeriod": "1st"
+    }
+   }
+  ]
+ },
+ "scoringPlays": [
+  {
+   "id": "401873038261",
+   "type": {
+    "id": "67",
+    "text": "Passing Touchdown",
+    "abbreviation": "TD"
+   },
+   "text": "Charlie Woerner 1 Yd pass from Michael Penix Jr. ",
+   "awayScore": 0,
+   "homeScore": 6,
+   "period": {
+    "number": 1
+   },
+   "clock": {
+    "value": 672.0,
+    "displayValue": "11:12"
+   },
+   "team": {
+    "id": "1",
+    "uid": "s:20~l:28~t:1",
+    "displayName": "Atlanta Falcons",
+    "abbreviation": "ATL",
+    "links": [
+     {
+      "href": "https://www.espn.com/nfl/team/_/name/atl/atlanta-falcons",
+      "text": "Clubhouse"
+     },
+     {
+      "href": "https://www.espn.com/nfl/team/schedule/_/name/atl",
+      "text": "Schedule"
+     }
+    ],
+    "logo": "https://a.espncdn.com/i/teamlogos/nfl/500/atl.png",
+    "logos": [
+     {
+      "href": "https://a.espncdn.com/i/teamlogos/nfl/500/atl.png",
+      "width": 500,
+      "height": 500,
+      "alt": "",
+      "rel": [
+       "full",
+       "default"
+      ],
+      "lastUpdated": "2024-06-25T18:44Z"
+     },
+     {
+      "href": "https://a.espncdn.com/i/teamlogos/nfl/500-dark/atl.png",
+      "width": 500,
+      "height": 500,
+      "alt": "",
+      "rel": [
+       "full",
+       "dark"
+      ],
+      "lastUpdated": "2024-06-25T18:44Z"
+     },
+     {
+      "href": "https://a.espncdn.com/i/teamlogos/nfl/500/scoreboard/atl.png",
+      "width": 500,
+      "height": 500,
+      "alt": "",
+      "rel": [
+       "full",
+       "scoreboard"
+      ],
+      "lastUpdated": "2024-06-25T18:44Z"
+     },
+     {
+      "href": "https://a.espncdn.com/i/teamlogos/nfl/500-dark/scoreboard/atl.png",
+      "width": 500,
+      "height": 500,
+      "alt": "",
+      "rel": [
+       "full",
+       "scoreboard",
+       "dark"
+      ],
+      "lastUpdated": "2024-06-25T18:44Z"
+     }
+    ]
+   },
+   "scoringType": {
+    "name": "touchdown",
+    "displayName": "Touchdown",
+    "abbreviation": "TD"
+   }
+  }
+ ],
+ "_note": "Excerpt of /summary?event=401873038 (154124 bytes raw)."
+}

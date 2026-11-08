@@ -120,3 +120,11 @@ word, logo, "+6" and the tally), the pill glow, the tab flashing "TOUCHDOWN | KC
     defensive or return touchdown is TOUCHDOWN.
 24. **Game list: a league switch** (NHL / NFL) at the top of the follow list; one league shown at a time; one game
     followed at a time.
+Owner answers to the design's open questions (2026-11-08):
+25. **Touchdown and extra point in one update (+7 / +8): two takeovers**, TOUCHDOWN +6 then EXTRA POINT +1 (or
+    TWO-POINT +2), back to back, as if the updates had arrived separately.
+26. **Red zone on the tab**: while the offence is inside the opponent's 20, the tab's right half turns red and reads
+    RED ZONE.
+27. **Colour picks**: BAL purple + gold, DAL navy + silver, JAX teal + gold, TB red + pewter.
+28. **The NFL list is the ESPN week** (Thursday, Sunday and Monday games together), with Last week · This week · Next
+    week chips.
