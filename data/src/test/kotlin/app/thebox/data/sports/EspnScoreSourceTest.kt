@@ -30,7 +30,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Before
 import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList
@@ -421,11 +420,13 @@ class EspnScoreSourceTest {
         assertNull(EspnScoreSource.etDate(null))
     }
 
-    // ---------------------------------------------------------------- with WP-1's mapper (skipped while it is a stub)
+    // ---------------------------------------------------------------- with WP-1's mapper
 
     @Test fun recordedFixturesThroughTheRealMapper() {
-        assumeTrue("EspnMapper is still a stub (WP-1)", mapperImplemented())
         answers[""] = { json(SportsFixtures.text("sports/nfl/scoreboard-week9-pre-2026-11-08.json")) }
+        // The week query answers the same recorded week (an empty `{"events":[]}` with no calendar and no `Date` is not a
+        // board the real mapper can key, so it is BAD_BODY by design).
+        answers["seasontype=2&week=9"] = answers.getValue("")
         val s = source(mapBoard = EspnMapper::board, mapGame = EspnMapper::game, parseWeek = EspnMapper::parseWeekKey)
         val d = runBlocking { s.today() } as Fetch.Ok
         assertEquals("w2026-2-9", d.value.dayKey)
@@ -435,13 +436,6 @@ class EspnScoreSourceTest {
         assertTrue(runBlocking { s.day("w2026-2-9") } is Fetch.Ok)
         assertEquals("seasontype=2&week=9", queries().last())
         assertEquals(FailKind.HTTP_OTHER, (runBlocking { s.day("x2026") } as Fetch.Failed).kind)
-    }
-
-    private fun mapperImplemented(): Boolean = try {
-        EspnMapper.weekKey(2026, 2, 9)
-        true
-    } catch (e: NotImplementedError) {
-        false
     }
 
     /** The trimmed week fixture padded back to about [target] bytes, as ESPN's `leaders`/`odds`/`broadcasts` make it. */

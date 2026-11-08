@@ -18,14 +18,12 @@ import app.thebox.core.sports.PlacementInput
 import app.thebox.core.sports.ScoreBugPlacement
 import app.thebox.core.sports.ScoreBugSize
 import app.thebox.core.sports.ScoreCorner
-import app.thebox.core.sports.SportsConstants as K
 import app.thebox.core.sports.SportsFixtures
 import app.thebox.core.sports.SportsPrefs
 import app.thebox.ui.theme.BoxDesignScale
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -83,9 +81,6 @@ class NflBoundsTest {
         }
     }
 
-    /** WP-1's NFL widths (520 / 650) are in: until then the placer still answers the NHL's (commit-0 stub). */
-    private fun nflWidths() = ScoreBugPlacement.width(ScoreBugSize.STANDARD, app.thebox.core.sports.League.NFL) == K.NFL_SCORE_W
-
     @Test
     fun fourCornersAtStandardSize() = cornersAt(ScoreBugSize.STANDARD, null)
 
@@ -93,8 +88,7 @@ class NflBoundsTest {
     fun fourCornersAtLargeSize() = cornersAt(ScoreBugSize.LARGE, null)
 
     @Test
-    fun theDesignedRestBoxesOnceTheNflWidthsAreIn() {
-        assumeTrue("WP-1's NFL widths", nflWidths())
+    fun theDesignedRestBoxes() {
         cornersAt(
             ScoreBugSize.STANDARD,
             mapOf(
@@ -107,8 +101,7 @@ class NflBoundsTest {
     }
 
     @Test
-    fun theDesignedLargeRestBoxesOnceTheNflWidthsAreIn() {
-        assumeTrue("WP-1's NFL widths", nflWidths())
+    fun theDesignedLargeRestBoxes() {
         cornersAt(
             ScoreBugSize.LARGE,
             mapOf(

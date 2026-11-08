@@ -2,6 +2,7 @@ package app.thebox.ui.sports
 
 import android.content.res.Resources
 import app.thebox.core.sports.CentreText
+import app.thebox.core.sports.EspnMapper
 import app.thebox.core.sports.FailKind
 import app.thebox.core.sports.FollowedGame
 import app.thebox.core.sports.GamePhase
@@ -163,10 +164,8 @@ object SportsText {
         return TimeFormats.format(if (day == today) time else "EEE $time", locale, Date(startUtcMs))
     }
 
-    private val WEEK_KEY = Regex("^w(\\d{4})-(\\d)-(\\d{1,2})$")
-
-    /** True for an NFL week key ("w2026-2-9"; the one grammar is `EspnMapper.weekKey`). */
-    fun isWeekKey(key: String): Boolean = WEEK_KEY.matches(key)
+    /** True for an NFL week key ("w2026-2-9"; the one grammar and parser are `EspnMapper.weekKey` / `parseWeekKey`). */
+    fun isWeekKey(key: String): Boolean = EspnMapper.parseWeekKey(key) != null
 
     /**
      * (NFL §7.2, S4) The label of a week key: "Week 9", "Wild Card", "Divisional Round", "Conference Championship",
@@ -174,9 +173,7 @@ object SportsText {
      * so it is derived from the key; a key that cannot be read says "NFL" and is never drawn raw.
      */
     fun weekLabel(res: Resources, key: String): String {
-        val m = WEEK_KEY.matchEntire(key) ?: return res.getString(R.string.sports_week_unknown)
-        val type = m.groupValues[2].toInt()
-        val week = m.groupValues[3].toInt()
+        val (_, type, week) = EspnMapper.parseWeekKey(key) ?: return res.getString(R.string.sports_week_unknown)
         return when (type) {
             2 -> res.getString(R.string.sports_week_n, week)
             1 -> res.getString(R.string.sports_week_preseason, week)

@@ -6,10 +6,13 @@ import app.thebox.core.input.BoxAction.DOWN
 import app.thebox.core.input.BoxAction.RIGHT
 import app.thebox.core.input.BoxAction.SELECT
 import app.thebox.core.input.BoxAction.UP
+import app.thebox.core.sports.CentreText
 import app.thebox.core.sports.DayBoard
 import app.thebox.core.sports.DayState
 import app.thebox.core.sports.FailKind
+import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.League
+import app.thebox.core.sports.PeriodKind
 import app.thebox.core.sports.ScoreFacts
 import app.thebox.core.sports.SportsFixtures
 import kotlin.test.Test
@@ -52,6 +55,20 @@ class NflScoreDividerTest {
         // the host's confirmation keeps the row
         w.player.scores(ScoreFacts(league = League.NFL, day = DayState.Failed(FailKind.TIMEOUT)))
         assertEquals(PickerChoice.ScoreFailed(FailKind.TIMEOUT, League.NFL), w.ui.picker!!.choices.last())
+    }
+
+    /** Integration pass: the followed NFL game, off the NHL board after a League switch, keeps its Final from the bug. */
+    @Test fun aFollowedFinalOffTheShownBoardReadsFinal() {
+        val w = PlayerWorld()
+        val nfl = SportsFixtures.nflGame()
+        val view = SportsFixtures.nflView(game = nfl).copy(top = CentreText.Final(PeriodKind.OT), bottom = null)
+        val nhl = SportsFixtures.game(id = "H1")
+        w.player.scores(ScoreFacts(league = League.NHL, followed = view, game = SportsFixtures.followedOf(nfl), day = DayState.Board(SportsFixtures.board(nhl), 0L, false)))
+        openSheet(w)
+        val row = w.ui.picker!!.choices.first() as PickerChoice.ScoreGame
+        assertTrue(row.followed)
+        assertEquals(GamePhase.FINAL, row.game.phase)
+        assertEquals(PeriodKind.OT, row.game.finalKind)
     }
 
     @Test fun withoutAReportedLeagueThereIsNoLeagueRow() {

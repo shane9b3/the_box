@@ -142,8 +142,8 @@ const val SCORE_BUG_LIVE_TAG = "score_bug_live"
  *
  * (NFL, docs/design/m6-nfl.md §4.6, B4) The league seam: one branch at the top, before any `remember` of [ScoreBugWith],
  * keyed on the league so the NHL composable is byte-unchanged and an NFL view never reaches the NHL painters. The league
- * is the shown view's; while the bug is hidden or fading, the last shown one (so it never flips mid-fade); before any
- * view, [followedLeague] (`FullScreenHost` passes the followed game's), else the prefs' shown league. A league change of
+ * is the shown view's; with no view, [followedLeague] (`FullScreenHost` passes the followed game's); with no follow (a
+ * fade after the follow ends), the last shown one, else the prefs' shown league. A league change of
  * the follow swaps the bug with no fade (accepted in the NFL sign-off).
  */
 @Composable
@@ -160,7 +160,10 @@ fun ScoreBug(
     val shown = source.bug.collectAsState().value?.league
     // The prefs are collected (not read with `.value`, StateFlowValueCalledInComposition); they change only on a setting.
     val prefsLeague = source.prefs.collectAsState().value.league
-    val league = shown ?: lastLeague.value ?: followedLeague ?: prefsLeague
+    // (NFL integration pass) The follow's league comes before the held one: after an NHL follow is replaced by an NFL
+    // game still in PRE (no view yet), place mode and the first view must take the NFL branch, not the NHL one held from
+    // the last shown view. The held league still covers a fade after the follow ends (followedLeague null).
+    val league = shown ?: followedLeague ?: lastLeague.value ?: prefsLeague
     SideEffect { if (shown != null) lastLeague.value = shown }
     key(league) {
         if (league == League.NFL) NflBug(source, placement, geometry, modifier, place, NflHooks.Default)

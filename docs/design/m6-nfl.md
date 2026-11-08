@@ -1588,3 +1588,99 @@ Owner question (red zone beside KC/ATL/ARI/SF/TB's own red): lead default = acce
 owner with the build.
 Process: commit 0 by an Opus agent in a worktree to the table in §11, merged by the lead; then WP-1…WP-5 in parallel
 worktrees; integration pass on main (emulator owner); code review; fix pass.
+
+## Integration pass (2026-11-08)
+On `main` after WP-1…WP-5 (`b3481e0`), one agent, emulator `TheBox_TV_API30` (1920 × 1080, Performance "High quality").
+
+**Fixed or wired (the eight reported items):**
+1. **Skips removed.** `NflBugDrawTest.theVisibleSeamWithTheRealPainters` (the `wp3Landed` helper deleted),
+   `NflBoundsTest.theDesignedRestBoxes` / `theDesignedLargeRestBoxes` (renamed from `…OnceTheNflWidthsAreIn`) and
+   `EspnScoreSourceTest.recordedFixturesThroughTheRealMapper` run unconditionally and pass. The last one needed its week
+   query answered with the recorded week: an empty `{"events":[]}` with no calendar and no `Date` header is not a board the
+   real mapper can key, so `day("w2026-2-9")` was `BAD_BODY` by design (test fixture change only).
+2. **Red-zone convention: they agree; no code change.** `NflTabRun.cut` keeps the last field tail under a cross-fade
+   (`rz` 0→1, so the painter draws "OPP 12" at 1 − rz and "RED ZONE" at rz). `openWith` → `setContent` sets the
+   `RedZone` tail and `snapRed` puts `rz` at 1 on the open, so a tab that opens straight into the red zone reads RED
+   ZONE; a release cuts `rz` to match. New case `NflBugDrawTest.aTabOpeningStraightIntoTheRedZoneReadsRedZone`. Seen on
+   the device: "KC BALL | OPP 38" → "KC BALL | RED ZONE", and "BUF BALL | RED ZONE" with the red half beside BUF blue.
+3. **Verified.** `NflTabPainter` bakes one gradient per side (`tabDown[side]` / `tabUp[side]`, set by `begin(side, …)`);
+   `NflScoreTimeline.sample`/`sampleStill` report `done` at 4 500 and `samplePair` at 9 000 (`NFL_DOUBLE_MARK_MS`),
+   matching `NflRun.totalMs`.
+4. **Week keys parsed in one place.** `SportsText.isWeekKey` / `weekLabel` now call `EspnMapper.parseWeekKey` (the
+   local regex is gone); so does the score sheet's divider in `PlayerStateMachineImpl.scoreChoices` (a second local
+   regex). The quarter label is "4th" for the NFL (`SportsText.period(…, League.NFL)`, from WP-5; seen on the device).
+5. **`sports_desc_nfl_goal`** ("goal") added to `strings_sports.xml`; `NflDescribe` uses it (the `DESC_GOAL` constant
+   is gone).
+6. **Verified.** `EspnMapper.team` sets a score only when the state is not `pre`; `scorePlacementInput` sets
+   `PlacementInput.league = followedLeague ?: prefs.league`; `:ui` places through `ScoreBugPlacement.place`, which uses
+   `cornerBox(corner, size, league)` (`NflBug` sizes the pill with `width(size, NFL)`).
+7. **Verified.** `NflFramesTest`'s shape matches `sports_nfl.admin`: `GET /admin/sports-nfl` returns `featured` and
+   `games[]` with `id` and `state.away` / `state.home` (null before kick-off, read as 0 by `optInt`); `POST {"restart":
+   true}` re-anchors. (Compile only; not run.)
+8. **Root tree with an NFL bug.** New `ui/src/test/kotlin/app/thebox/ui/root/NflRootTreeRuleTest.kt`: `AppRoot` in
+   FULL with a player host that offers a `FakeScoreRepository` following KC @ BUF. The NFL branch is taken (pill 520 px),
+   the bug is inside the key sink and not an ancestor of `VideoLayer`, no video ancestor carries a layer, and the bug's
+   own layer is a leaf beside the video. `RootTreeRuleTest` is unchanged.
+
+**Found on the device and fixed:**
+- **Place mode drew the NHL sample for an NFL follow** (`ScoreBug.kt`). The league was `shown ?: lastLeague ?:
+  followedLeague ?: prefs`, so after an NHL follow was replaced by an NFL game still in PRE (no view), the held NHL
+  league won: place mode showed the NHL sample, and the NFL pill's first view would have composed after a branch swap.
+  Now `shown ?: followedLeague ?: lastLeague ?: prefs`: the held league still covers a fade after the follow ends.
+  Test `NflBugDrawTest.aNewNflFollowWithNoViewYetTakesTheNflBranch`; re-checked on the device (screenshot 21 vs 21a).
+- **The picker's followed row read "KC 22–16 BUF · LIVE" at Final/OT** after a League switch to NHL
+  (`PlayerStateMachineImpl.stubOf`). A followed game off the shown board is stubbed from the bug view, always as LIVE;
+  this is now common (the other league's board). The stub now takes FINAL and its `finalKind` from a
+  `CentreText.Final` view. Test `NflScoreDividerTest.aFollowedFinalOffTheShownBoardReadsFinal`. (An NHL follow off an
+  NFL board still reads "LIVE" without its period while live: unchanged NHL stub behaviour.)
+
+**Existing tests modified:** only NFL test files from the WPs (`NflBugDrawTest`, `NflBoundsTest`, `EspnScoreSourceTest`:
+the skips and the one fixture answer above; `NflScoreDividerTest`: one new case). No NHL test changed.
+
+**Gate** (`lintAll :core:test :data:testDebugUnitTest :player:testDebugUnitTest :ui:testDebugUnitTest
+:app:testDebugUnitTest :app:assembleDebug :app:compileDebugAndroidTestKotlin`): green on the first full run and again
+after the device fixes, with no flaky reruns needed. Core 3 955, data 517 (3 skipped: the SMB tests without
+`THEBOX_SMB_URL`), player 511, ui 642, app 73; 0 failures. Lint: no new issues. Fake panel: `test_sports*.py` 61 OK,
+`test_fakepanel.py` 145 OK.
+
+**§13 checklist** (fake panel `--no-pace --sports --sports-nfl`; frames captured about every 1.4 s against the panel's
+NFL anchor):
+
+| # | Result | Notes |
+|---|---|---|
+| 1 | **pass** | NHL / NFL chips; NFL kept across a force-stop; Week 9 board with the Thursday final, the featured game, "Mon 3:55 PM"; Last week (Week 8) and Next week (Week 10) load. The edge-disabled chip was not reached (the fake calendar has 18 weeks); unit-tested |
+| 2 | **pass** | toast "Following KC – BUF."; no bug in PRE. The coin-toss window was not polled (the PRE cadence skipped from t 23 s to 64 s, and t 64.9 s already served the kick-off window) |
+| 3 | **pass** | the bug at t ≈ 65 s with "KC BALL \| OWN 25" (inferred from `lastPlay` 53), steady over the next polls |
+| 4 | **pass** | "3rd & 2", "KC BALL \| OPP 38", then "1st & Goal" and "KC BALL \| RED ZONE"; the clock steps per poll only |
+| 5 | **pass** | TOUCHDOWN takeover (letters, +6, "6 – 0", tab "TOUCHDOWN \| KC +6"), then "PAT" and "KC BALL \| EXTRA POINT", no RED ZONE |
+| 6 | **pass** | EXTRA POINT (posts), then "KC KICKOFF \| OWN 35" and "KICKOFF" |
+| 7 | **pass** | "BUF BALL \| OWN 25" in BUF blue, then "BUF BALL \| OWN 28"; no KC flicker in the frames |
+| 8 | **pass** | "End 1st" one line, tab closed; FIELD GOAL (no PAT; the release cut to the held "BUF BALL \| OPP 30", then "BUF KICKOFF \| OWN 35"); the +7 pair: TOUCHDOWN "+6" "13 – 3", then EXTRA POINT "+1" "14 – 3", then "KC KICKOFF \| OWN 35"; "Halftime" |
+| 9 | **partial** | Q3 safety, defensive TD and two-point were missed on screen (the bug was off while the corner was changed); Q4 seen: "4th", "BUF BALL \| RED ZONE" (turnover), FIELD GOAL "14 – 16", SAFETY "KC +2", "End 4th" 16 – 16 |
+| 10 | **pass, one note** | "OT 9:35", "1st & Goal", "KC BALL \| RED ZONE"; the walk-off TOUCHDOWN "22 – 16" on the Final body (tab pinned), then "Final/OT"; the follow ended about 5 min later (picker showed no followed game). Note: the "OT KC 1st" window (910–935 s) was never drawn, because the End 4th break polled at the slower break cadence (41 s gap); expected with the reused machine timing |
+| 11 | **partial** | bottom right: the tab opens upward ("KC BALL \| OWN 25", "BUF KICKOFF \| OWN 35"); the passive info bar hides a bottom bug (the SB rule, `PASSIVE_INFO` → none); the picker does not cover a bottom-right pill (geometry rule; the sheet ends above it). Place mode shows the NFL sample at the NFL width **after the fix above**. Top left, bottom left, Large and subtitles not run (covered by `NflBoundsTest`) |
+| 12 | **pass** (after the stub fix for the label) | the League row toggles NHL/NFL; the followed NFL game stays on top while NHL is listed; following TOR – BOS replaced the NFL bug with the NHL bug at once |
+| 13 | **pass** (one score) | animator duration scale 0: EXTRA POINT frame A (panel at rest, the word, "+1", "7 – 0", faint posts, no wipe), then "KC KICKOFF"; the TD's frames fell between captures; scale restored to the default afterwards |
+| 14 | not run | user delay 30 s |
+| 15 | **pass** | `--sports` alone: the NFL tab reads "ESPN did not answer. Press OK to try again; …" with Retry; the NHL board and bug as before |
+| 16 | **pass** | `POST /admin/sports {"restart": true}` moved the NFL anchor too (1794171618 → 1794172850) |
+
+**Screenshots** (`/private/tmp/claude-501/-Users-shawnjohnson-Projects-The-Box/e446e45a-e691-488f-a693-1f5ccf5078f2/scratchpad/nfl-int/`,
+960 px wide): `01-sports-tab-nfl-week`, `02-plain-bug-possession-tab`, `03-red-zone`, `04-touchdown-takeover`,
+`05-extra-point-takeover`, `06-buf-ball-blue-tab`, `07-end-1st`, `08-field-goal-takeover`, `09a-pair-touchdown-13-3`,
+`09b-pair-extra-point-14-3`, `10-bottom-right-tab-up`, `10b-bottom-right-buf-kickoff`, `11-halftime`,
+`12-q4-buf-red-zone-bottom`, `13-q4-field-goal-bottom`, `14-q4-safety-kc`, `15-ot-red-zone`,
+`16-ot-walk-off-touchdown`, `17-final-ot`, `18-picker-nfl-league-row`, `19-picker-nhl-listed-nfl-followed`,
+`20-nhl-follow-after-nfl`, `21-place-mode-nfl-sample-after-fix`, `21a-place-mode-before-fix-nhl-sample`,
+`22-still-version-extra-point-frame-A`, `23-sports-only-nfl-espn-did-not-answer`.
+
+**Open:**
+- The owner question of §14 stands, and the device confirms it: KC's red zone half sits beside KC red and reads only by
+  its words (screenshot 03); beside BUF blue it is clear (12).
+- §13 items 9 (Q3 safety, defensive TD, two-point on screen), 11 (other corners, Large, subtitles) and 14 (delay) still
+  to run by hand; the unit tests cover them.
+- With the board failed ("ESPN did not answer"), the Last / Next week chips stay enabled (no neighbours are known). Minor;
+  a Retry or a chip press refetches.
+- Focus: UP from the week chips lands on the Corner chip, not on the league chips (the same as the NHL day chips).
+- The emulator's test stream froze on one frame during the long run (fake panel `--no-pace`); unrelated to the bug.
+- Device items of §13 (Fire TV frame time, VoiceView, real-TV colours, the §1.6 live samples) are unchanged.

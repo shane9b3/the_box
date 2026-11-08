@@ -1081,7 +1081,7 @@ internal class NflDescribe(private val res: Resources, private val v: ScoreBugVi
             val word = downWord(down.down)
             if (word != null) {
                 parts += when {
-                    down.goal -> res.getString(R.string.sports_desc_nfl_down, word, DESC_GOAL)
+                    down.goal -> res.getString(R.string.sports_desc_nfl_down, word, res.getString(R.string.sports_desc_nfl_goal))
                     down.distance != null -> res.getString(R.string.sports_desc_nfl_down, word, down.distance.toString())
                     else -> word
                 }
@@ -1116,11 +1116,6 @@ internal class NflDescribe(private val res: Resources, private val v: ScoreBugVi
                 f(R.string.sports_desc_live, SportsText.clock(v.clockSecs ?: 0), SportsText.period(res, top.period, League.NFL))
             else -> res.getString(R.string.sports_quick_score, a.abbrev, a.score ?: 0, h.score ?: 0, h.abbrev)
         }
-    }
-
-    private companion object {
-        /** "1st and goal": `sports_down_goal` is the column's "& Goal" form; the spoken word has no string of its own yet. */
-        const val DESC_GOAL = "goal"
     }
 }
 

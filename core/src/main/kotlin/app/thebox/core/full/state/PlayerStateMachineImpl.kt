@@ -2092,7 +2092,7 @@ class PlayerStateMachineImpl(
             is DayState.Board -> if (others.isNotEmpty()) {
                 // U-B1: the divider names the board's own day unless it is today's.
                 // NFL §7.3 (S4): a week board (key "w2026-2-9") always names its week, never the raw key or "Today".
-                val week = d.board.dayKey.matches(Regex("w\\d{4}-\\d-\\d{1,2}"))
+                val week = app.thebox.core.sports.EspnMapper.parseWeekKey(d.board.dayKey) != null
                 out += when {
                     week -> PickerChoice.ScoreDayDivider(d.board.dayKey, current = d.isToday) // "This week" / its label
                     d.isToday -> PickerChoice.ScoreTodayDivider
@@ -2123,10 +2123,14 @@ class PlayerStateMachineImpl(
      */
     private fun stubOf(g: FollowedGame): GameSnapshot {
         val v = scoreFacts.followed ?: scoreFacts.lastScore
+        // (NFL integration pass) A followed game off the shown board (the other league's, after a League switch) that the
+        // bug shows as Final reads "Final/OT", not "LIVE".
+        val final = v?.top as? app.thebox.core.sports.CentreText.Final
         return GameSnapshot(
-            id = g.id, dayKey = "", startUtcMs = g.startUtcMs, phase = if (v != null) GamePhase.LIVE else GamePhase.SCHEDULED,
+            id = g.id, dayKey = "", startUtcMs = g.startUtcMs,
+            phase = when { final != null -> GamePhase.FINAL; v != null -> GamePhase.LIVE; else -> GamePhase.SCHEDULED },
             away = v?.away ?: TeamLine(g.away, g.away, null, null), home = v?.home ?: TeamLine(g.home, g.home, null, null),
-            period = null, periodKind = null, otNumber = null, clock = null, finalKind = null,
+            period = null, periodKind = null, otNumber = null, clock = null, finalKind = final?.kind,
         )
     }
 

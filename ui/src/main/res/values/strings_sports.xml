@@ -234,6 +234,8 @@
     <string name="sports_desc_nfl_ball">%1$s ball</string>
     <string name="sports_desc_nfl_down">%1$s and %2$s</string>
     <string name="sports_desc_nfl_red_zone">in the red zone</string>
+    <!-- The spoken "goal" of "1st and goal" (the column draws "1st & Goal" from sports_down_goal). -->
+    <string name="sports_desc_nfl_goal">goal</string>
     <!-- The one-line Halftime state's description. -->
     <string name="sports_desc_halftime">%1$s %2$d, %3$s %4$d, halftime</string>
 </resources>

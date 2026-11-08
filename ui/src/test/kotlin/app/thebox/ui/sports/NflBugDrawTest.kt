@@ -17,9 +17,7 @@ import app.thebox.core.sports.FieldZone
 import app.thebox.core.sports.GameClock
 import app.thebox.core.sports.League
 import app.thebox.core.sports.NflScore
-import app.thebox.core.sports.NflScoreFrame
 import app.thebox.core.sports.NflScoreKind
-import app.thebox.core.sports.NflScoreTimeline
 import app.thebox.core.sports.NflTab
 import app.thebox.core.sports.NflView
 import app.thebox.core.sports.PeriodKind
@@ -41,7 +39,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Assume.assumeTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -93,12 +90,6 @@ internal object NflTestSupport {
         size: ScoreBugSize = ScoreBugSize.STANDARD,
         placing: Boolean = false,
     ): PlacementInput = ScoreBugFixtures.input(size = size, placing = placing).copy(league = League.NFL)
-
-    /** True once WP-3 has replaced the commit-0 `TODO()` bodies (the real painters and timeline can run). */
-    fun wp3Landed(res: android.content.res.Resources): Boolean = runCatching {
-        NflScoreTimeline.sample(NflScoreKind.TOUCHDOWN, 0f, NflScoreFrame())
-        NflBugPainter(1f, null, null).frame(SportsFixtures.nflView(), res)
-    }.isSuccess
 }
 
 /**
@@ -263,10 +254,29 @@ class NflBugDrawTest {
         assertEquals("and the NHL bug left", nhl1, nhlCount())
     }
 
-    /** The same seam visible, with the real painters: runs once WP-3 has landed (skipped while its bodies are `TODO()`). */
+    /**
+     * Integration pass: an NHL follow replaced by an NFL game still in PRE (no view) takes the NFL branch at once (place
+     * mode draws the NFL sample), rather than holding the NHL league of the last shown view.
+     */
+    @Test
+    fun aNewNflFollowWithNoViewYetTakesTheNflBranch() {
+        var followed by mutableStateOf<League?>(League.NHL)
+        repo.bug.value = ScoreBugFixtures.live // an NHL follow, shown
+        rule.mainClock.autoAdvance = false
+        placement = NflTestSupport.input().copy(screenOff = true)
+        rule.setContent { BoxDesignScale { ScoreBug(repo, placement, ScoreBugFixtures.noGeometry, lowEnd = false, followedLeague = followed) } }
+        advance(1000)
+        val nfl0 = nflCount()
+        repo.bug.value = null // the NFL game is PRE: no view
+        followed = League.NFL
+        Snapshot.sendApplyNotifications()
+        advance(500)
+        assertTrue("the NFL branch composed with no view", nflCount() > nfl0)
+    }
+
+    /** The same seam visible, with the real painters and timeline (WP-3). */
     @Test
     fun theVisibleSeamWithTheRealPainters() {
-        assumeTrue("WP-3 painters and timeline", NflTestSupport.wp3Landed(rule.activity.resources))
         repo.bug.value = nfl()
         val nhl0 = nhlCount()
         rule.mainClock.autoAdvance = false
@@ -374,6 +384,19 @@ class NflBugDrawTest {
         advance(400)
         assertEquals("out again", 0f, args().redZone, 0f)
         assertEquals(listOf(PpTransition.OPEN), recs())
+    }
+
+    /** Integration pass (item 2): a tab that opens straight into the red zone carries the `RedZone` tail at layer 1. */
+    @Test
+    fun aTabOpeningStraightIntoTheRedZoneReadsRedZone() {
+        start(nfl(tab = null))
+        repo.bug.value = nfl(tab = NflTab(Side.AWAY, TabLead.BALL, TabTail.RedZone), down = DownText.Down(1, null, goal = true))
+        advance(100)
+        assertEquals(listOf(PpTransition.OPEN), recs())
+        assertEquals(TabTail.RedZone, tab().tail)
+        assertEquals("the painter draws no tail of its own for RedZone, so the layer is full from the open", 1f, args().redZone, 0f)
+        advance(2500)
+        assertEquals(1f, args().redZone, 0f)
     }
 
     @Test
