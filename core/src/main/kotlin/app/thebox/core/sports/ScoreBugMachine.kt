@@ -369,7 +369,9 @@ class ScoreBugMachine(
 
         // Power play §1.4, §7: a real end is "the previous fresh view had one, this one has none, and it flagged no goal".
         val pp = gatedPp(s)
-        ppEndedEntry = if (lastShownPp != null && pp == null && !flagged) q else null
+        // It ended in play: the snapshot is LIVE or INTERMISSION and not the shootout (a FINAL/OFF or SO is not an "over").
+        val inPlay = (s.phase == GamePhase.LIVE || s.phase == GamePhase.INTERMISSION) && s.periodKind != PeriodKind.SO
+        ppEndedEntry = if (lastShownPp != null && pp == null && !flagged && inPlay) q else null
         lastShownPp = pp
 
         val g = game

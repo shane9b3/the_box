@@ -1088,6 +1088,30 @@ class ScoreBugMachineTest {
     }
 
     @Test
+    fun ppEndedNotWhenTheGameEndsTheAdvantage() {
+        val f = Rig()
+        f.follow()
+        f.ok(live(away = 0, home = 2).copy(powerPlay = pp(Side.HOME)))
+        f.at(20_000)
+        f.ok(final(away = 0, home = 2))
+        assertFalse(f.m.view()!!.ppEnded, "PP then FINAL")
+
+        val so = Rig()
+        so.follow()
+        so.ok(live(away = 2, home = 2, period = 4, secs = 30).copy(powerPlay = pp(Side.HOME)))
+        so.at(20_000)
+        so.ok(live(away = 2, home = 2, period = 5, kind = PeriodKind.SO, secs = 0, running = false))
+        assertFalse(so.m.view()!!.ppEnded, "PP then SO")
+
+        val ev = Rig()
+        ev.follow()
+        ev.ok(live().copy(powerPlay = pp(Side.HOME)))
+        ev.at(20_000)
+        ev.ok(live(secs = 602))
+        assertTrue(ev.m.view()!!.ppEnded, "PP then even strength LIVE")
+    }
+
+    @Test
     fun ppEndedOnlyOnAFreshEndWithNoGoal() {
         val r = Rig()
         r.follow()
@@ -1140,8 +1164,8 @@ class ScoreBugMachineTest {
         assertEquals(CentreText.NoUpdate, s.m.view()!!.bottom)
         assertFalse(s.m.view()!!.ppEnded)
 
-        // A power play that ends with the game going to the shootout: the shootout shows none, so it is over.
-        assertTrue(
+        // A power play that ends with the game going to the shootout: not an end in play, so not said.
+        assertFalse(
             after(
                 live(away = 2, home = 2, period = 4, kind = PeriodKind.OT, ot = 1, secs = 0, running = false).copy(powerPlay = pp(Side.AWAY)),
                 live(away = 2, home = 2, period = 5, kind = PeriodKind.SO, secs = 0, running = false).copy(powerPlay = pp(Side.AWAY)),

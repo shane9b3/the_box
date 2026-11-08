@@ -17,6 +17,8 @@ import androidx.core.graphics.createBitmap
 import app.thebox.core.sports.PpContent
 import app.thebox.core.sports.PpFrame
 import app.thebox.core.sports.PpLabel
+import app.thebox.core.sports.ScoreBugPlacement
+import app.thebox.core.sports.ScoreBugSize
 import app.thebox.core.sports.Side
 import app.thebox.core.sports.SportsConstants as K
 import app.thebox.core.sports.TeamColours
@@ -61,14 +63,11 @@ internal class PowerPlayPainter(
     private val pillRadius = pillH / 2f
 
     // ---- the tab's geometry (§4.1), device px; tab-local = the tab's top-left at rest offset
-    /**
-     * The side inset, rounded to a whole design px per size (31 / 39, width 342 / 428, §4.1), as WP-1's
-     * `ScoreBugPlacement.tabInset(size)` does, so the drawn tab matches `tabBox` exactly (integration may switch to it).
-     */
-    private val tabL = round(K.PP_TAB_INSET * (s / d)) * d
+    /** The side inset, from WP-1's [ScoreBugPlacement.tabInset] so drawing and placement cannot drift (31 / 39 design px). */
+    private val tabL = ScoreBugPlacement.tabInset(if (large) ScoreBugSize.LARGE else ScoreBugSize.STANDARD) * d
     private val tabW = pillW - 2 * tabL
     private val hidden = K.PP_TAB_HIDDEN * s
-    private val depth = K.PP_TAB_DEPTH * s
+    private val depth = ScoreBugPlacement.tabDepth(if (large) ScoreBugSize.LARGE else ScoreBugSize.STANDARD) * d
     private val tabH = hidden + depth
     private val tabR = K.PP_TAB_RADIUS * s
     private val travel = K.PP_TRAVEL * s

@@ -60,8 +60,8 @@ class GoalSeamTest {
         },
         probe = probe,
         glowAllowed = { p, g, b, m -> glow && ScoreBugPlacement.glowAllowed(p, g, b, m) },
-        // Power play: the real timeline once WP-2 lands (the commit-0 TODO() falls back to a stand-in), the real painter.
-        ppSampler = PpTestSamplers.RealOrFake,
+        // Power play: the real timeline (PowerPlayTimeline) and the real painter.
+        ppSampler = PpSampler.Real,
         tabAllowed = { _, _, _ -> true },
         context = context,
         background = EmptyCoroutineContext,
@@ -244,8 +244,8 @@ class GoalSeamTest {
     /**
      * Power play §9.4: a real power-play goal through [ScoreBugWith]. From the goal view's first frame until the lead covers
      * the pill, every pixel of the tab region equals the frame before (the tab shows the words it had, pinned); then the
-     * tab says PP GOAL. The painter is the real [PowerPlayPainter]; the pixel check is only strong once WP-2's painter draws
-     * a tab, and the content check (what the composite was handed) is strong already.
+     * tab says PP GOAL. The painter is the real [PowerPlayPainter] and the sampler the real timeline; the region is first
+     * asserted to hold drawn tab pixels, so the equality below is not vacuous.
      */
     private fun aPowerPlayGoalHoldsTheTabThenSaysPpGoal(still: Boolean) {
         start(if (still) FixedScale(0f) else EmptyCoroutineContext, glow = false)
@@ -257,6 +257,16 @@ class GoalSeamTest {
         // The tab below the pill (top right): x 31..373, y pillH .. pillH + 36.
         val cx = K.SCORE_W / 2f
         val cy = K.SCORE_H + 18f
+        var inked = 0
+        run {
+            var y = cy - 14f
+            while (y <= cy + 14f) {
+                var x = cx - 160f
+                while (x <= cx + 160f) { if ((before.px(x, y) ushr 24) != 0) inked++; x += 1f }
+                y += 1f
+            }
+        }
+        assertTrue("the tab region holds drawn tab pixels ($inked)", inked > 1_000)
         repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY")
         var frames = 0
         while (true) {

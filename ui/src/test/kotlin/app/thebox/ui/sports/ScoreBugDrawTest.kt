@@ -180,6 +180,7 @@ class ScoreBugDrawTest {
     private var tabAllowedFlag by mutableStateOf(true)
     private val labelBakes = mutableListOf<Pair<String, String>>()
     private var halos = 0
+    private val sizeBakes = mutableListOf<Boolean>()
 
     private fun goalHooks(context: CoroutineContext = EmptyCoroutineContext) = GoalHooks(
         colours = { TeamColours(0xFF112233.toInt(), 0xFF445566.toInt(), 0xFF778899.toInt(), 0xFFAABBCC.toInt()) },
@@ -189,6 +190,7 @@ class ScoreBugDrawTest {
         probe = probe,
         ppSampler = PpTestSamplers.Fake,
         tabAllowed = { _, _, _ -> tabAllowedFlag },
+        bakeSize = { _, withShadow -> sizeBakes += withShadow },
         bakeHalo = { _, _, _ -> halos++ },
         bakeLabels = { _, away, home, _ -> labelBakes += away to home },
         context = context,
@@ -858,6 +860,8 @@ class ScoreBugDrawTest {
         advance(300)
         assertEquals("a kind change snaps too: no pulse", listOf(PpTransition.STILL, PpTransition.STILL), tabRecs().map { it.kind })
         assertEquals(0, halos)
+        assertTrue("the size bake ran", sizeBakes.isNotEmpty())
+        assertTrue("low-end mode never bakes the shadow", sizeBakes.none { it })
         val f = frame()
         assertEquals("no shadow in low-end mode", 0f, f.shadowAlpha, 0f)
         assertEquals("no halo in low-end mode", 0f, f.halo, 0f)
@@ -962,9 +966,8 @@ class ScoreBugDrawTest {
 }
 
 /**
- * Stand-ins for `PowerPlayTimeline.sample` (power play WP-2 builds the real one in another tree): the wiring tests drive
- * the runner, not the curves. [Fake] is a plain linear timeline with the shadow and halo "on"; [RealOrFake] uses the real
- * timeline once it exists and falls back to [Fake] while it is still the commit-0 `TODO()`.
+ * Stand-in for `PowerPlayTimeline.sample`: the wiring tests drive the runner, not the curves. [Fake] is a plain linear
+ * timeline with the shadow and halo "on". Tests that need the real curves use `PpSampler.Real`.
  */
 internal object PpTestSamplers {
     val Fake = PpSampler { track, kind, t, _, to, out ->
@@ -982,11 +985,4 @@ internal object PpTestSamplers {
         out
     }
 
-    val RealOrFake = PpSampler { track, kind, t, from, to, out ->
-        try {
-            PowerPlayTimeline.sample(track, kind, t, from, to, out)
-        } catch (_: NotImplementedError) {
-            Fake.sample(track, kind, t, from, to, out)
-        }
-    }
 }

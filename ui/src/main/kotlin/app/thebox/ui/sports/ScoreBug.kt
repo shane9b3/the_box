@@ -155,6 +155,8 @@ internal class GoalHooks(
     val ppSampler: PpSampler = PpSampler.Real,
     /** (Power play §4.4) Whether the tab may show at the placed [DesignBox]; called only while a power play or a tab exists. */
     val tabAllowed: (PlacementInput, OverlayGeometry, DesignBox) -> Boolean = ScoreBugPlacement::tabAllowed,
+    /** (Power play §3.4, §3.6) The per-size bake; `withShadow` is false in low-end mode (the shadow is never baked there). */
+    val bakeSize: (PowerPlayPainter, Boolean) -> Unit = { p, withShadow -> p.bakeSize(withShadow) },
     /** (Power play §3.4) The halo bake for one logo bitmap (never called in low-end mode), off the main thread. */
     val bakeHalo: (PowerPlayPainter, Side, Bitmap) -> Unit = { p, side, logo -> p.bakeHalo(side, logo) },
     /** (Power play §3.4) The five label masks for the followed teams' abbreviations, off the main thread. */
@@ -420,7 +422,7 @@ internal fun ScoreBugWith(
         // The power-play painter and its per-size bakes (§3.4), beside the goal painter; a failure just means no tab.
         val pp = try {
             withContext(hooks.background) {
-                PowerPlayPainter(s, d, pillW, pillH, sansTypeface(context, R.font.instrument_sans_bold)).also { it.bakeSize() }
+                PowerPlayPainter(s, d, pillW, pillH, sansTypeface(context, R.font.instrument_sans_bold)).also { hooks.bakeSize(it, !lowEnd) }
             }
         } catch (e: CancellationException) {
             throw e
