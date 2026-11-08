@@ -15,6 +15,13 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.MotionDurationScale
 import app.thebox.core.sports.FakeScoreRepository
 import app.thebox.core.sports.GameId
+import app.thebox.core.sports.PowerPlay
+import app.thebox.core.sports.PowerPlayKind
+import app.thebox.core.sports.PowerPlayTimeline
+import app.thebox.core.sports.PpFrame
+import app.thebox.core.sports.PpLabel
+import app.thebox.core.sports.PpTrack
+import app.thebox.core.sports.PpTransition
 import app.thebox.core.sports.League
 import app.thebox.core.sports.ScoreBugPlacement
 import app.thebox.core.sports.ScoreBugSize
@@ -27,6 +34,7 @@ import app.thebox.ui.full.StableScoreBug
 import app.thebox.ui.guide.GuideDebugCounters
 import app.thebox.ui.theme.BoxDesignScale
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -168,12 +176,21 @@ class ScoreBugDrawTest {
     /** Calls of the `bake` hook (S2 of the code review: never in low-end mode). */
     private var bakes = 0
 
+    /** Power play: whether the placement allows the tab (`tabAllowed`), the label bakes asked for, and the halo bakes. */
+    private var tabAllowedFlag by mutableStateOf(true)
+    private val labelBakes = mutableListOf<Pair<String, String>>()
+    private var halos = 0
+
     private fun goalHooks(context: CoroutineContext = EmptyCoroutineContext) = GoalHooks(
         colours = { TeamColours(0xFF112233.toInt(), 0xFF445566.toInt(), 0xFF778899.toInt(), 0xFFAABBCC.toInt()) },
         begin = { _, _, _, _, _, _, _ -> },
         bake = { bakes++; null },
         glowAllowed = { _, _, _, _ -> true },
         probe = probe,
+        ppSampler = PpTestSamplers.Fake,
+        tabAllowed = { _, _, _ -> tabAllowedFlag },
+        bakeHalo = { _, _, _ -> halos++ },
+        bakeLabels = { _, away, home, _ -> labelBakes += away to home },
         context = context,
         background = EmptyCoroutineContext,
     )
@@ -456,5 +473,520 @@ class ScoreBugDrawTest {
         assertEquals(1, probe.begins.size)
     }
 
+
+    // ------------------------------------------------------------------ the power-play tab (power play design §3.1, §5, §7, §9.3)
+    //
+    // `PowerPlayTimeline.sample` (WP-2) is a stub in this tree, so the runner is driven through its seams: a stand-in
+    // sampler, `tabAllowed`, and the label / halo bakes. The probe shows each transition a track plays, the content it was
+    // started with, the pin and its releases, and what a draw at this instant would show.
+
+    private fun ppEdm(secs: Int? = 79, kind: PowerPlayKind = PowerPlayKind.ONE_MAN, side: Side = Side.HOME) =
+        ScoreBugFixtures.ppView(
+            if (side == Side.HOME) "EDM" else "CGY", side, kind, secs, opponent = if (side == Side.HOME) "CGY" else "EDM",
+        )
+
+    private fun tabRecs() = probe.pp.transitions.filter { it.track == PpTrack.TAB }
+    private fun pillRecs() = probe.pp.transitions.filter { it.track == PpTrack.PILL }
+    private fun tabDriver() = probe.pp.tabDriver!!.value
+    private fun pinned() = probe.pp.pinned!!()
+    private fun drawn() = probe.pp.drawnContent!!()
+    private fun frame() = probe.pp.frame!!()
+
+    private fun setAllowed(v: Boolean) {
+        tabAllowedFlag = v
+        Snapshot.sendApplyNotifications()
+    }
+
+    private fun applyPlacement(p: app.thebox.core.sports.PlacementInput) {
+        placement = p
+        Snapshot.sendApplyNotifications()
+    }
+
+    /** Advances the test clock a frame at a time until the takeover driver reaches [ms]. */
+    private fun advanceTakeoverTo(ms: Float) {
+        var guard = 0
+        while (t() < ms) {
+            rule.mainClock.advanceTimeBy(16)
+            rule.waitForIdle()
+            check(++guard < 1_000) { "the takeover driver stopped at ${t()}" }
+        }
+    }
+
+    /** Followed, the tab open for EDM (home) at 5-on-4, settled. */
+    private fun openEdmTab(lowEnd: Boolean = false, context: CoroutineContext = EmptyCoroutineContext) {
+        startGoalHost(lowEnd, context)
+        repo.bug.value = ppEdm()
+        advance(2500)
+    }
+
+    @Test
+    fun aPowerPlayStartIsOneRecompositionAndNoneDuringTheReveal() {
+        startGoalHost()
+        val comp0 = compositions()
+        repo.bug.value = ppEdm()
+        advance(100)
+        assertEquals("one recomposition for the new snapshot", 1, compositions() - comp0)
+        assertEquals(listOf(PpTransition.OPEN), tabRecs().map { it.kind })
+        assertEquals(listOf(PpTransition.OPEN), pillRecs().map { it.kind })
+        advance(2500)
+        assertEquals("none while the tab slides, the shine sweeps and the label pulses", 1, compositions() - comp0)
+        assertEquals("the tab reached rest", 1900f, tabDriver(), 0f)
+    }
+
+    /** B1: a seconds update, a toast and an unrelated placement change, mid-open, never restart or freeze the open. */
+    @Test
+    fun recompositionsDuringTheOpenNeverFreezeTheTab() {
+        startGoalHost()
+        repo.bug.value = ppEdm()
+        advance(700)
+        val mid = tabDriver()
+        assertTrue("700 ms into the open: $mid", mid in 600f..800f)
+        repo.bug.value = ppEdm(secs = 59) // a seconds update
+        advance(100)
+        applyPlacement(ScoreBugFixtures.input().copy(toast = true)) // a toast (top right is unaffected)
+        advance(100)
+        applyPlacement(ScoreBugFixtures.input().copy(toast = true, reminder = true))
+        advance(100)
+        assertTrue("the driver kept running: $mid → ${tabDriver()}", tabDriver() > mid + 250f)
+        advance(1500)
+        assertEquals("the tab still reaches rest at 1 900", 1900f, tabDriver(), 0f)
+        assertEquals("the open was never re-started", 1, tabRecs().size)
+        assertEquals(1, pillRecs().size)
+        assertEquals("the seconds shown are the latest", 59, probe.pp.tabContent!!().secs)
+        assertEquals(PpLabel.ONE_MAN, probe.pp.tabContent!!().label)
+    }
+
+    @Test
+    fun aSecondsUpdateDoesNotRestartTheOpen() {
+        startGoalHost()
+        repo.bug.value = ppEdm()
+        advance(700)
+        val before = tabDriver()
+        repo.bug.value = ppEdm(secs = 58)
+        advance(100)
+        assertTrue("the driver was not reset: $before → ${tabDriver()}", tabDriver() >= before + 90f)
+        assertEquals(1, tabRecs().size)
+        assertEquals(58, probe.pp.tabContent!!().secs)
+    }
+
+    @Test
+    fun aSecondsUpdateAtRestDoesNotKickAtAll() {
+        openEdmTab()
+        repo.bug.value = ppEdm(secs = 40)
+        advance(1000)
+        assertEquals(1, tabRecs().size)
+        assertEquals(1, pillRecs().size)
+        assertEquals(40, probe.pp.tabContent!!().secs)
+    }
+
+    @Test
+    fun aSideChangeClosesThenOpensEachWithItsOwnContent() {
+        openEdmTab()
+        repo.bug.value = ppEdm(side = Side.AWAY, secs = 100) // CGY now has the man advantage
+        advance(100)
+        assertEquals(listOf(PpTransition.OPEN, PpTransition.CLOSE), tabRecs().map { it.kind })
+        assertEquals("the close slides out EDM's words", Side.HOME, tabRecs()[1].side)
+        assertEquals(Side.HOME, probe.pp.tabContent!!().side)
+        advance(700)
+        assertEquals(listOf(PpTransition.OPEN, PpTransition.CLOSE, PpTransition.OPEN), tabRecs().map { it.kind })
+        assertEquals("the open is CGY's", Side.AWAY, tabRecs()[2].side)
+        assertEquals(100, tabRecs()[2].secs)
+        assertEquals(listOf(PpTransition.OPEN, PpTransition.CLOSE, PpTransition.OPEN), pillRecs().map { it.kind })
+        assertEquals(listOf(Side.HOME, Side.HOME, Side.AWAY), pillRecs().map { it.side })
+    }
+
+    @Test
+    fun aKindChangePulsesTheLabelOnly() {
+        openEdmTab()
+        repo.bug.value = ppEdm(kind = PowerPlayKind.TWO_MAN, secs = 40)
+        advance(100)
+        assertEquals(listOf(PpTransition.OPEN, PpTransition.PULSE), tabRecs().map { it.kind })
+        assertEquals(PpLabel.TWO_MAN, tabRecs()[1].label)
+        assertEquals("the pill track has nothing to do", 1, pillRecs().size)
+    }
+
+    @Test
+    fun tabAllowedFalseClosesTheTabAndTheTintStays() {
+        openEdmTab()
+        setAllowed(false)
+        advance(100)
+        assertEquals(listOf(PpTransition.OPEN, PpTransition.CLOSE), tabRecs().map { it.kind })
+        assertEquals("the pill track stays (S3)", listOf(PpTransition.OPEN), pillRecs().map { it.kind })
+        setAllowed(true)
+        advance(100)
+        assertEquals(listOf(PpTransition.OPEN, PpTransition.CLOSE, PpTransition.OPEN), tabRecs().map { it.kind })
+    }
+
+    @Test
+    fun aTabThatIsNeverAllowedNeverOpensButTheTintDoes() {
+        startGoalHost()
+        setAllowed(false)
+        repo.bug.value = ppEdm()
+        advance(2500)
+        assertTrue(tabRecs().isEmpty())
+        assertEquals(listOf(PpTransition.OPEN), pillRecs().map { it.kind })
+    }
+
+    @Test
+    fun aFollowThatStartsOnAPowerPlaySnapsOpen() {
+        repo.bug.value = ppEdm()
+        rule.mainClock.autoAdvance = false
+        val hooks = goalHooks()
+        rule.setContent {
+            BoxDesignScale { ScoreBugWith(repo, placement, ScoreBugFixtures.noGeometry, false, Modifier, ScoreBugPlacement::place, hooks) }
+        }
+        advance(2500)
+        assertEquals(listOf(PpTransition.STILL), tabRecs().map { it.kind })
+        assertTrue(tabRecs()[0].to)
+        assertEquals(listOf(PpTransition.STILL), pillRecs().map { it.kind })
+    }
+
+    @Test
+    fun hiddenThenShownSnapsTheTabBack() {
+        openEdmTab()
+        assertFalse("the tab is drawn at rest", frame().tabClosed)
+        applyPlacement(ScoreBugFixtures.input().copy(screenOff = true))
+        advance(100)
+        assertTrue("parked at once", frame().tabClosed && frame().pillClosed)
+        advance(1000)
+        applyPlacement(ScoreBugFixtures.input())
+        advance(100)
+        assertEquals(listOf(PpTransition.OPEN, PpTransition.STILL), tabRecs().map { it.kind })
+        assertTrue(tabRecs()[1].to)
+        assertEquals(listOf(PpTransition.OPEN, PpTransition.STILL), pillRecs().map { it.kind })
+    }
+
+    @Test
+    fun placeModeShowsNoTabAndLeavingItSnaps() {
+        openEdmTab()
+        applyPlacement(ScoreBugFixtures.input(placing = true))
+        advance(100)
+        assertTrue(frame().tabClosed)
+        applyPlacement(ScoreBugFixtures.input())
+        advance(100)
+        assertEquals(listOf(PpTransition.OPEN, PpTransition.STILL), tabRecs().map { it.kind })
+    }
+
+    @Test
+    fun aSizeChangeClosesTheTabUntilItsLabelsAreBakedThenSnapsItOpen() {
+        openEdmTab()
+        assertEquals("labels baked once for the first painter", listOf("CGY" to "EDM"), labelBakes)
+        repo.bug.value = ppEdm(secs = 40) // same teams: no new bake
+        advance(100)
+        assertEquals(1, labelBakes.size)
+        applyPlacement(ScoreBugFixtures.input(size = ScoreBugSize.LARGE))
+        advance(1000)
+        assertEquals("one more bake for Large", 2, labelBakes.size)
+        assertEquals(listOf(PpTransition.OPEN, PpTransition.STILL, PpTransition.STILL), tabRecs().map { it.kind })
+        assertEquals(listOf(false, true), tabRecs().drop(1).map { it.to })
+    }
+
+    // ---- the pin and the release (§5)
+
+    @Test
+    fun aPowerPlayGoalPinsTheTabAndReleasesAt3600() {
+        openEdmTab()
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY")
+        advance(100)
+        assertTrue(on())
+        assertTrue("pinned from the goal view on", pinned())
+        assertEquals("the spoiler hold: the words it had", PpLabel.ONE_MAN, drawn().label)
+        advanceTakeoverTo(300f)
+        assertEquals("then PP GOAL, a plain swap", PpLabel.PP_GOAL, drawn().label)
+        advanceTakeoverTo(3_570f)
+        assertTrue("still pinned at 3 570", pinned())
+        assertTrue(probe.pp.releases.isEmpty())
+        assertEquals("the tab is still open (no close yet)", 1, tabRecs().size)
+        advanceTakeoverTo(3_700f)
+        assertFalse(pinned())
+        assertEquals("one release", 1, probe.pp.releases.size)
+        val r = probe.pp.releases[0]
+        assertFalse(r.snap)
+        assertTrue("released at the driver's 3 600: ${r.driverMs}", r.driverMs in 3_600f..3_640f)
+        // The power play ended in the goal snapshot: the tab closes, sliding PP GOAL out.
+        assertEquals(listOf(PpTransition.OPEN, PpTransition.CLOSE), tabRecs().map { it.kind })
+        assertEquals(PpLabel.PP_GOAL, tabRecs()[1].label)
+    }
+
+    @Test
+    fun aFiveOnThreeGoalCutsBackToTheCurrentWordsWithNoPulse() {
+        startGoalHost()
+        repo.bug.value = ppEdm(kind = PowerPlayKind.TWO_MAN, secs = 40)
+        advance(2500)
+        val after = PowerPlay(Side.HOME, PowerPlayKind.ONE_MAN, 45)
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, after = after, opponent = "CGY")
+        advanceTakeoverTo(300f)
+        assertEquals(PpLabel.PP_GOAL, drawn().label)
+        advanceTakeoverTo(3_700f)
+        assertFalse(pinned())
+        assertEquals("no close, no pulse, no slide", 1, tabRecs().size)
+        assertEquals(PpLabel.ONE_MAN, probe.pp.tabContent!!().label)
+        assertEquals(45, probe.pp.tabContent!!().secs)
+    }
+
+    @Test
+    fun aShorthandedGoalGetsNoPpGoalAndTheOpponentsTabStaysWithItsSecondsUpdating() {
+        openEdmTab()
+        val sh = ScoreBugFixtures.goalView("CGY", Side.AWAY, opponent = "EDM", away = 2, home = 2)
+            .copy(powerPlay = PowerPlay(Side.HOME, PowerPlayKind.ONE_MAN, 40)) // goalPp stays false
+        repo.bug.value = sh
+        advanceTakeoverTo(300f)
+        assertEquals(PpLabel.ONE_MAN, drawn().label)
+        assertEquals(Side.HOME, drawn().side)
+        assertEquals("the seconds update once the lead covers the pill", 40, drawn().secs)
+        advanceTakeoverTo(3_700f)
+        assertEquals("the tab never moved", 1, tabRecs().size)
+        assertEquals(40, probe.pp.tabContent!!().secs)
+    }
+
+    @Test
+    fun aNewGoalMidPinKeepsPpGoalAndDoesNotRelease() {
+        openEdmTab()
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY")
+        advanceTakeoverTo(1_000f)
+        assertEquals(PpLabel.PP_GOAL, drawn().label)
+        // CGY scores at even strength mid-takeover: the takeover restarts, the pin continues.
+        repo.bug.value = ScoreBugFixtures.goalView("CGY", Side.AWAY, opponent = "EDM", away = 2, home = 2, seq = 2)
+        advance(100)
+        assertEquals("restarted", 2, probe.begins.size)
+        assertTrue(t() < 600f)
+        assertTrue("no release on a restart", probe.pp.releases.isEmpty())
+        assertTrue(pinned())
+        assertEquals("held PP GOAL through the restart", PpLabel.PP_GOAL, drawn().label)
+        advanceTakeoverTo(400f)
+        assertEquals("and after the lead covers the pill again", PpLabel.PP_GOAL, drawn().label)
+        advanceTakeoverTo(3_700f)
+        assertEquals("one release, at the second run's 3 600", 1, probe.pp.releases.size)
+        assertFalse(pinned())
+        assertEquals("the close slides PP GOAL out", PpLabel.PP_GOAL, tabRecs().last().label)
+        assertEquals(PpTransition.CLOSE, tabRecs().last().kind)
+    }
+
+    @Test
+    fun anEvenStrengthGoalWhosePowerPlayStartsInTheGoalSnapshotOpensAt3600() {
+        startGoalHost()
+        repo.bug.value = ScoreBugFixtures.goalView("CGY", Side.AWAY, opponent = "EDM", away = 1, home = 2)
+            .copy(powerPlay = PowerPlay(Side.HOME, PowerPlayKind.ONE_MAN, 118))
+        advanceTakeoverTo(3_000f)
+        assertTrue("the tab stays closed through the takeover", tabRecs().isEmpty())
+        advanceTakeoverTo(3_700f)
+        assertEquals(listOf(PpTransition.OPEN), tabRecs().map { it.kind })
+    }
+
+    @Test
+    fun aGoalWhenTheTabWasNotAllowedGetsNoPpGoalAndTheTabStaysClosed() {
+        startGoalHost()
+        setAllowed(false)
+        repo.bug.value = ppEdm()
+        advance(2500)
+        assertTrue(tabRecs().isEmpty())
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY")
+        advanceTakeoverTo(500f)
+        assertTrue(frame().tabClosed)
+        assertEquals("no PP GOAL for a tab that was not shown", PpLabel.ONE_MAN, drawn().label)
+        advanceTakeoverTo(3_700f)
+        assertTrue(tabRecs().isEmpty())
+    }
+
+    @Test
+    fun anOverlayOpeningMidTakeoverKeepsTheTabUntil3600() {
+        openEdmTab()
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY", after = PowerPlay(Side.HOME, PowerPlayKind.ONE_MAN, 45))
+        advanceTakeoverTo(500f)
+        setAllowed(false) // an overlay opens
+        advanceTakeoverTo(3_500f)
+        assertEquals("the pin holds the tab", 1, tabRecs().size)
+        advanceTakeoverTo(3_700f)
+        assertEquals("then it closes", listOf(PpTransition.OPEN, PpTransition.CLOSE), tabRecs().map { it.kind })
+    }
+
+    @Test
+    fun hidingMidPinCancelsCleanly() {
+        openEdmTab()
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY")
+        advanceTakeoverTo(1_000f)
+        applyPlacement(ScoreBugFixtures.input().copy(screenOff = true))
+        advance(100)
+        assertFalse(on())
+        assertFalse(pinned())
+        assertEquals(listOf(true), probe.pp.releases.map { it.snap })
+        assertTrue(frame().tabClosed)
+        advance(1000)
+        applyPlacement(ScoreBugFixtures.input())
+        advance(3000)
+        assertEquals("no replay, and no tab: the power play ended in the goal", listOf(PpTransition.OPEN), tabRecs().map { it.kind })
+        assertEquals(1, probe.begins.size)
+    }
+
+    @Test
+    fun placeModeMidPinCancelsCleanly() {
+        openEdmTab()
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY")
+        advanceTakeoverTo(1_000f)
+        applyPlacement(ScoreBugFixtures.input(placing = true))
+        advance(100)
+        assertFalse(pinned())
+        assertEquals(listOf(true), probe.pp.releases.map { it.snap })
+        assertTrue(frame().tabClosed)
+    }
+
+    @Test
+    fun aFollowChangeMidPinCancelsCleanly() {
+        openEdmTab()
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY")
+        advanceTakeoverTo(1_000f)
+        repo.bug.value = ScoreBugFixtures.view(goalSeq = 0, gameId = GameId(League.NHL, "2025020999"))
+        advance(100)
+        assertFalse(on())
+        assertFalse(pinned())
+        assertTrue(frame().tabClosed && frame().pillClosed)
+        advance(3000)
+        assertEquals(listOf(PpTransition.OPEN), tabRecs().map { it.kind })
+    }
+
+    // ---- the still version (§3.6)
+
+    @Test
+    fun lowEndModeUsesTheStillVersionAndBakesNoHalo() {
+        startGoalHost(lowEnd = true)
+        repo.bug.value = ppEdm()
+        advance(300)
+        assertEquals(listOf(PpTransition.STILL), tabRecs().map { it.kind })
+        assertTrue(tabRecs()[0].to)
+        assertEquals(listOf(PpTransition.STILL), pillRecs().map { it.kind })
+        repo.bug.value = ppEdm(kind = PowerPlayKind.TWO_MAN)
+        advance(300)
+        assertEquals("a kind change snaps too: no pulse", listOf(PpTransition.STILL, PpTransition.STILL), tabRecs().map { it.kind })
+        assertEquals(0, halos)
+        val f = frame()
+        assertEquals("no shadow in low-end mode", 0f, f.shadowAlpha, 0f)
+        assertEquals("no halo in low-end mode", 0f, f.halo, 0f)
+    }
+
+    @Test
+    fun animationsOffUseTheStillVersionToo() {
+        startGoalHost(context = FixedScale(0f))
+        repo.bug.value = ppEdm()
+        advance(300)
+        assertEquals(listOf(PpTransition.STILL), tabRecs().map { it.kind })
+        repo.bug.value = ppEdm(side = Side.AWAY)
+        advance(300)
+        assertEquals("a side change snaps: no close, no open", listOf(PpTransition.STILL, PpTransition.STILL), tabRecs().map { it.kind })
+    }
+
+    @Test
+    fun theStillPathSwapsToPpGoalAtFrameA() {
+        openEdmTab(lowEnd = true)
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY")
+        advance(100)
+        assertTrue(on())
+        assertEquals("frame A", 0f, t(), 0f)
+        assertEquals(PpLabel.PP_GOAL, drawn().label)
+        advance(3600)
+        assertFalse(pinned())
+        assertEquals(listOf(PpTransition.STILL, PpTransition.STILL), tabRecs().map { it.kind })
+        assertFalse("the tab snapped closed", tabRecs()[1].to)
+        assertEquals(PpLabel.PP_GOAL, tabRecs()[1].label)
+    }
+
+    @Test
+    fun withTheAnimatorScaleAtTwoTheTabStillReleasesAtDriver3600() {
+        startGoalHost(context = FixedScale(2f))
+        repo.bug.value = ppEdm()
+        advance(4500)
+        assertEquals("the open ran at half speed but finished", 1900f, tabDriver(), 0f)
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY")
+        advance(100)
+        advanceTakeoverTo(3_570f)
+        assertTrue(pinned())
+        advanceTakeoverTo(3_700f)
+        assertFalse(pinned())
+        val r = probe.pp.releases.single()
+        assertTrue("released at the driver's 3 600, not at 3.6 s: ${r.driverMs}", r.driverMs in 3_600f..3_640f)
+    }
+
+    // ---- the live region and the description (§7)
+
+    @Test
+    fun theLiveRegionSaysEachStartKindChangeAndRealEndOnce() {
+        startGoalHost()
+        repo.bug.value = ppEdm()
+        advance(100)
+        assertEquals("Edmonton power play.", live())
+        repo.bug.value = ppEdm(secs = 59)
+        advance(100)
+        assertEquals("a seconds update says nothing", "", live())
+        repo.bug.value = ppEdm(kind = PowerPlayKind.TWO_MAN, secs = 50)
+        advance(100)
+        assertEquals("Edmonton five on three.", live())
+        repo.bug.value = ScoreBugFixtures.view(away = 1, home = 2, clockSecs = 1100, ppEnded = true)
+        advance(100)
+        assertEquals("Power play over.", live())
+        repo.bug.value = ScoreBugFixtures.stale
+        advance(100)
+        assertEquals("a stale view leaves the text unchanged", "Power play over.", live())
+        repo.bug.value = ScoreBugFixtures.view(away = 1, home = 2, clockSecs = 1000)
+        advance(100)
+        assertEquals("any other view clears it", "", live())
+    }
+
+    @Test
+    fun powerPlayOverIsNotAnnouncedAfterAGoal() {
+        startGoalHost()
+        repo.bug.value = ppEdm()
+        advance(100)
+        assertEquals("Edmonton power play.", live())
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY") // the power play ends in the goal
+        advance(100)
+        assertTrue(live(), live().startsWith("Edmonton goal."))
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY").copy(goalSide = null, goalPp = false)
+        advance(100)
+        assertEquals("the mark clears to empty, never to 'Power play over.'", "", live())
+    }
+
+    @Test
+    fun theDescriptionCarriesThePowerPlayAndItsTime() {
+        startGoalHost()
+        repo.bug.value = ppEdm(secs = 79)
+        advance(100)
+        assertTrue(desc(), desc().endsWith(". Edmonton power play, 1:19 left"))
+        repo.bug.value = ppEdm(secs = null)
+        advance(100)
+        assertTrue(desc(), desc().endsWith(". Edmonton power play"))
+        repo.bug.value = ScoreBugFixtures.view(away = 1, home = 2, clockSecs = 1000)
+        advance(100)
+        assertTrue(desc(), !desc().contains("power play"))
+    }
+
     private class FixedScale(override val scaleFactor: Float) : MotionDurationScale
+}
+
+/**
+ * Stand-ins for `PowerPlayTimeline.sample` (power play WP-2 builds the real one in another tree): the wiring tests drive
+ * the runner, not the curves. [Fake] is a plain linear timeline with the shadow and halo "on"; [RealOrFake] uses the real
+ * timeline once it exists and falls back to [Fake] while it is still the commit-0 `TODO()`.
+ */
+internal object PpTestSamplers {
+    val Fake = PpSampler { track, kind, t, _, to, out ->
+        val open = when (kind) {
+            PpTransition.OPEN -> (t / 550f).coerceIn(0f, 1f)
+            PpTransition.CLOSE -> 1f - (t / 550f).coerceIn(0f, 1f)
+            PpTransition.PULSE -> 1f
+            PpTransition.STILL -> if (to) 1f else 0f
+        }
+        val closed = open == 0f && (kind != PpTransition.OPEN)
+        when (track) {
+            PpTrack.TAB -> { out.slide = open; out.shadowAlpha = 0.5f * open; out.textAlpha = open; out.tabClosed = closed }
+            PpTrack.PILL -> { out.tint = open; out.halo = open; out.pillClosed = closed }
+        }
+        out
+    }
+
+    val RealOrFake = PpSampler { track, kind, t, from, to, out ->
+        try {
+            PowerPlayTimeline.sample(track, kind, t, from, to, out)
+        } catch (_: NotImplementedError) {
+            Fake.sample(track, kind, t, from, to, out)
+        }
+    }
 }
