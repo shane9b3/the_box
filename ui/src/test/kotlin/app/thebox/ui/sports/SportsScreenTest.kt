@@ -19,6 +19,7 @@ import app.thebox.core.sports.FailKind
 import app.thebox.core.sports.FakeScoreRepository
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
+import app.thebox.core.sports.League
 import app.thebox.core.sports.ScoreCorner
 import app.thebox.core.sports.SportsFixtures
 import app.thebox.ui.R
@@ -108,11 +109,11 @@ class SportsScreenTest {
         rule.onNodeWithTag(sportsCardTag("F1")).assertIsFocused()
         press(Key.DirectionUp)
         rule.onNodeWithTag(sportsDayTag(SportsDay.TODAY)).assertIsFocused()
-        // Up from the chips: the Corner chip; Up there: nothing (no top bar is drawn)
+        // Up from the chips: the shown league's chip (NFL §7.3, fix pass U4); Up there: nothing (no top bar is drawn)
         press(Key.DirectionUp)
-        rule.onNodeWithTag(SPORTS_CORNER_TAG).assertIsFocused()
+        rule.onNodeWithTag(sportsLeagueTag(League.NHL)).assertIsFocused()
         press(Key.DirectionUp)
-        rule.onNodeWithTag(SPORTS_CORNER_TAG).assertIsFocused()
+        rule.onNodeWithTag(sportsLeagueTag(League.NHL)).assertIsFocused()
         // Down reverses: the selected day chip, then the first card
         press(Key.DirectionDown)
         rule.onNodeWithTag(sportsDayTag(SportsDay.TODAY)).assertIsFocused()
@@ -178,7 +179,8 @@ class SportsScreenTest {
         board(pre)
         show()
         assertEquals(true, backFree.last())
-        press(Key.DirectionUp) // Today chip is focused already: Up reaches Corner
+        press(Key.DirectionUp) // Today chip is focused already: Up reaches the NHL chip, then Right twice Corner
+        press(Key.DirectionRight, Key.DirectionRight)
         rule.onNodeWithTag(SPORTS_CORNER_TAG).assertIsFocused()
         press(Key.DirectionCenter)
         rule.onNodeWithTag(SPORTS_MENU_TAG).assertExists()
@@ -193,7 +195,8 @@ class SportsScreenTest {
     @Test fun theCornerListWritesThePref() {
         board(pre)
         show()
-        press(Key.DirectionUp, Key.DirectionCenter)
+        press(Key.DirectionUp, Key.DirectionRight)
+        press(Key.DirectionRight, Key.DirectionCenter)
         press(Key.DirectionDown, Key.DirectionCenter) // second entry: Top left
         assertEquals(ScoreCorner.TOP_LEFT, store.flow(SportsDomain).value.corner)
         rule.onNodeWithTag(SPORTS_MENU_TAG).assertDoesNotExist()
@@ -203,7 +206,9 @@ class SportsScreenTest {
     @Test fun theDelayListStopsAtItsEndsAndWritesThePref() {
         board(pre)
         show()
-        press(Key.DirectionUp, Key.DirectionRight, Key.DirectionCenter)
+        press(Key.DirectionUp, Key.DirectionRight)
+        press(Key.DirectionRight, Key.DirectionRight)
+        press(Key.DirectionCenter)
         rule.onNodeWithTag(SPORTS_DELAY_TAG).assertExists()
         rule.onNodeWithTag(sportsMenuItemTag(0)).assertIsFocused()
         press(Key.DirectionUp) // the first entry: nothing above

@@ -126,6 +126,24 @@ class TestRoutes(NflCase):
         _, j = self.get_json(BOARD + "?seasontype=2&week=30")
         self.assertEqual([], j["events"])
 
+    def test_week_board_echoes_the_requested_season_type_and_week(self):
+        # C2: the season type is echoed (a postseason week reads type 3), the week passes through unchanged.
+        _, j = self.get_json(BOARD + "?seasontype=3&week=1")
+        self.assertEqual({"type": 3, "year": 2026}, j["season"])
+        self.assertEqual(1, j["week"]["number"])
+        self.assertEqual([], j["events"])
+        _, j = self.get_json(BOARD + "?seasontype=1&week=3")
+        self.assertEqual(1, j["season"]["type"])
+        self.assertEqual(3, j["week"]["number"])
+        _, j = self.get_json(BOARD + "?seasontype=2&week=8")
+        self.assertEqual(2, j["season"]["type"])
+
+    def test_week_zero_or_a_bad_week_is_a_400(self):
+        for q in ("?seasontype=2&week=0", "?seasontype=2&week=-1", "?seasontype=2&week=x", "?seasontype=2", "?seasontype=0&week=9"):
+            st, _, body = self.raw(BOARD + q)
+            self.assertEqual(400, st, q)
+            self.assertEqual(400, json.loads(body)["code"], q)
+
     def test_dated_board_has_the_featured_day_only(self):
         day = self.nfl.featured_day()
         _, j = self.get_json(BOARD + "?dates=" + day.strftime("%Y%m%d"))

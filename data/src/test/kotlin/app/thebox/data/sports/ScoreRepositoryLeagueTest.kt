@@ -71,6 +71,12 @@ class ScoreRepositoryLeagueTest {
             val g = if (id.league == League.NFL) SportsFixtures.nflGame(id = id.id) else SportsFixtures.game(id = id.id)
             return Fetch.Ok(g, mono.nowMs(), null, 0)
         }
+        /** The start hint of each `game(id, startUtcMs)` call (C1). */
+        val hints = ArrayList<Long?>()
+        override suspend fun game(id: GameId, startUtcMs: Long?): Fetch<GameSnapshot> {
+            hints += startUtcMs
+            return game(id)
+        }
         override fun logoUrl(team: TeamLine): String = team.logo.orEmpty()
         fun games() = calls.filter { it.startsWith("game:") }
         fun days() = calls.filterNot { it.startsWith("game:") }
@@ -235,6 +241,14 @@ class ScoreRepositoryLeagueTest {
         assertTrue(h.nhl.games().isEmpty())
         assertTrue(h.nfl.days().isEmpty())
         assertEquals(League.NFL, h.repo.bug.value?.gameId?.league)
+    }
+
+    @Test fun aRestoredFollowGivesTheSourceItsStart() = runTest {
+        // C1: after a restart the ESPN source remembers no dates; the persisted start picks the dated board.
+        val h = harness(doc = SportsFollowDoc(game = kcBuf, pollPhaseMs = 1_500L))
+        h.repo.reportDemand(DemandOwner.FULL_WITH_FOLLOW, true)
+        runCurrent()
+        assertEquals(listOf<Long?>(kcBuf.startUtcMs), h.nfl.hints)
     }
 
     @Test fun theFollowSurvivesALeagueSwitch() = runTest {

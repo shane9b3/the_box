@@ -96,7 +96,8 @@ data class EspnEndpoints(val apiBase: String, val logoBase: String) {
  * - **Endpoints:** `today()` = `scoreboard` (ESPN's current week); `day(key)` = `scoreboard?seasontype=&week=` for a
  *   week key or `scoreboard?dates=yyyymmdd` for a date key, anything else `HTTP_OTHER` without a request; `game(id)` =
  *   the event's remembered ET date's board, filtered to the id, then **once more against the week board** when the event
- *   is absent (N7). With nothing remembered (an app restart) the week board is read first. Absent from both = NotFound.
+ *   is absent (N7). With nothing remembered (an app restart) the follow's start hint gives the date (C1); with no hint
+ *   the week board is read first. Absent from every board tried = NotFound.
  * - **Remembered dates:** every decoded body's events (`id` → ET date of `date`), read from the DTO itself.
  * - **Logos:** each mapped [TeamLine.logo] is replaced by ESPN's combiner URL for the dark variant at
  *   [SportsConstants.ESPN_LOGO_PX] under the logo base (A-N2), or null for an abbreviation that is not `[a-z]{2,3}`.
@@ -146,19 +147,34 @@ class EspnScoreSource internal constructor(
         }
     }
 
-    override suspend fun game(id: GameId): Fetch<GameSnapshot> {
+    override suspend fun game(id: GameId): Fetch<GameSnapshot> = game(id, null)
+
+    /**
+     * The remembered ET date's board, else the hinted start's ET date (an app restart forgets the dates; C1), then the
+     * week board once (N7), then the hinted date if it was not tried yet: never NotFound before a dated board was read
+     * when a hint exists.
+     */
+    override suspend fun game(id: GameId, startUtcMs: Long?): Fetch<GameSnapshot> {
         if (id.league != League.NFL || !GAME_ID.matches(id.id)) return failedNow()
-        val date = synchronized(dates) { dates[id.id] }
-        if (date != null) {
-            when (val dated = gameFrom(url { addQueryParameter("dates", date) }, "scoreboard?dates", id)) {
+        val remembered = synchronized(dates) { dates[id.id] }
+        val hinted = startUtcMs?.takeIf { it > 0L }?.let { etDate(it) }
+        val first = remembered ?: hinted
+        if (first != null) {
+            when (val dated = gameFrom(url { addQueryParameter("dates", first) }, "scoreboard?dates", id)) {
                 is GameAnswer.Found -> return dated.fetch
                 is GameAnswer.Failed -> return dated.fetch
                 GameAnswer.Absent -> Unit // re-dated (weather, N7): the week board once more
             }
         }
-        return when (val week = gameFrom(url { }, "scoreboard", id)) {
-            is GameAnswer.Found -> week.fetch
-            is GameAnswer.Failed -> week.fetch
+        when (val week = gameFrom(url { }, "scoreboard", id)) {
+            is GameAnswer.Found -> return week.fetch
+            is GameAnswer.Failed -> return week.fetch
+            GameAnswer.Absent -> Unit
+        }
+        if (hinted == null || hinted == first) return Fetch.NotFound
+        return when (val dated = gameFrom(url { addQueryParameter("dates", hinted) }, "scoreboard?dates", id)) {
+            is GameAnswer.Found -> dated.fetch
+            is GameAnswer.Failed -> dated.fetch
             GameAnswer.Absent -> Fetch.NotFound
         }
     }
@@ -393,6 +409,9 @@ class EspnScoreSource internal constructor(
             }
             return instant.atZone(EASTERN).toLocalDate().format(YMD)
         }
+
+        /** A UTC instant (ms) → its US Eastern date `yyyyMMdd`. */
+        internal fun etDate(utcMs: Long): String = Instant.ofEpochMilli(utcMs).atZone(EASTERN).toLocalDate().format(YMD)
 
         /** `{base}combiner/i?img=/i/teamlogos/nfl/500-dark/scoreboard/{abbr}.png&h=200&w=200`, or null (§1.5). */
         internal fun combinerLogo(abbrev: String, logoBase: String): String? {

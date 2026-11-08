@@ -281,6 +281,8 @@ object SportsConstants {
     const val NFL_PRE_WINDOW_MS = 3_600_000L
     /** (S8) `lastPlay.type.id` of the coin toss: an `in` body still at it is PRE. */
     const val NFL_COIN_TOSS_TYPE = "70"
+    /** (Fix pass C3) A quarter's clock at its start (15:00): an `in` body with no `lastPlay` is PRE only at or above it. */
+    const val NFL_QUARTER_SECS = 900
     /** (N6) `lastPlay.type.id` of a kick-off: its team is the receiver. */
     const val NFL_KICKOFF_TYPE = "53"
 

@@ -69,7 +69,12 @@ internal object NflTestSupport {
         out
     }
 
-    fun hooks(probe: NflProbe?, context: CoroutineContext = EmptyCoroutineContext, tabAllowed: () -> Boolean = { true }) = NflHooks(
+    fun hooks(
+        probe: NflProbe?,
+        context: CoroutineContext = EmptyCoroutineContext,
+        background: CoroutineContext = EmptyCoroutineContext,
+        tabAllowed: () -> Boolean = { true },
+    ) = NflHooks(
         colours = { colours },
         sampler = sampler,
         glowAllowed = { _, _, _, _ -> true },
@@ -77,7 +82,7 @@ internal object NflTestSupport {
         bake = { null },
         bakeSize = { _, _ -> },
         context = context,
-        background = EmptyCoroutineContext,
+        background = background,
         begin = { _, _, _, _, _, _ -> },
         ppSampler = PpTestSamplers.Fake,
         bakeLabels = { _, _, _, _ -> null },
@@ -272,6 +277,94 @@ class NflBugDrawTest {
         Snapshot.sendApplyNotifications()
         advance(500)
         assertTrue("the NFL branch composed with no view", nflCount() > nfl0)
+    }
+
+    /**
+     * Fix pass U1: follow an NFL game, switch the League row to NHL, stop following, open place mode. The bug and its box
+     * are one league (the placement's NHL), never the NFL pill held from the follow in the NHL box.
+     */
+    @Test
+    fun placeModeAfterAnNflFollowEndsUsesOneLeagueForTheBugAndItsBox() {
+        var followed by mutableStateOf<League?>(League.NFL)
+        val placedLeagues = ArrayList<League>()
+        repo.bug.value = nfl()
+        rule.mainClock.autoAdvance = false
+        placement = NflTestSupport.input().copy(screenOff = true)
+        rule.setContent {
+            BoxDesignScale {
+                ScoreBug(repo, placement, ScoreBugFixtures.noGeometry, lowEnd = false, followedLeague = followed,
+                    place = { p, _ -> placedLeagues += p.league; null })
+            }
+        }
+        advance(1000)
+        repo.bug.value = null // stop following: the view goes, the league is held for the fade
+        followed = null
+        Snapshot.sendApplyNotifications()
+        advance(1000)
+        placedLeagues.clear()
+        placement = ScoreBugFixtures.input(placing = true).copy(league = League.NHL) // FullScreenHost: prefs.league
+        Snapshot.sendApplyNotifications()
+        advance(500)
+        // Which branch is live: a placement change recomposes only the composed one.
+        val nhl0 = nhlCount()
+        val nfl0 = nflCount()
+        placement = placement.copy(corner = app.thebox.core.sports.ScoreCorner.TOP_LEFT)
+        Snapshot.sendApplyNotifications()
+        advance(500)
+        assertTrue("the NHL branch is the one composed for the NHL placement", nhlCount() > nhl0)
+        assertEquals("not the NFL one held from the follow", nfl0, nflCount())
+        assertTrue("placed", placedLeagues.isNotEmpty())
+        assertTrue("every box is the NHL one", placedLeagues.all { it == League.NHL })
+
+        // And a mismatch the other way: an NFL placement while an NHL view still shows is placed as NHL (the drawn one).
+        placedLeagues.clear()
+        repo.bug.value = ScoreBugFixtures.live
+        placement = ScoreBugFixtures.input(placing = true).copy(league = League.NFL)
+        Snapshot.sendApplyNotifications()
+        advance(500)
+        assertTrue(placedLeagues.isNotEmpty())
+        assertTrue("the box follows the drawn league", placedLeagues.all { it == League.NHL })
+    }
+
+    /**
+     * Fix pass U3: after a Standard → Large switch the tab reappears with no new snapshot. The bakes run one background
+     * hop at a time; the last one (the labels) re-opens the tab at rest with a STILL on a driver already at 0, and must
+     * write a state the draw reads, or the draw node is never invalidated and the tab stays hidden on screen.
+     */
+    @Test
+    fun aSizeSwitchReopensTheTabAndInvalidatesTheDraw() {
+        val bg = ManualDispatcher()
+        repo.bug.value = nfl(tab = null)
+        rule.mainClock.autoAdvance = false
+        val hooks = NflTestSupport.hooks(probe, background = bg) { allowed }
+        rule.setContent {
+            BoxDesignScale { NflBug(repo, placement, ScoreBugFixtures.noGeometry, Modifier, ScoreBugPlacement::place, hooks) }
+        }
+        rule.waitForIdle()
+        fun drain() { repeat(20) { var ran = false; while (bg.runOne()) ran = true; advance(100); if (!ran) return } }
+        drain()
+        advance(2000)
+        repo.bug.value = nfl()
+        advance(2500)
+        assertTrue("the tab is open before the switch", args().p != null)
+
+        applyPlacement(NflTestSupport.input(size = ScoreBugSize.LARGE))
+        advance(100)
+        var labelHop: Set<Any>? = null
+        var hops = 0
+        while (true) {
+            var ran = false
+            val bakes0 = probe.labelBakes
+            val w = DrawInvalidation.statesWrittenBy { ran = bg.runOne(); advance(100) }
+            if (!ran) break
+            if (probe.labelBakes > bakes0) labelHop = w
+            check(++hops < 20)
+        }
+        val last = checkNotNull(labelHop) { "the labels were baked for Large" }
+        assertTrue("the bakes hopped to the background", hops >= 3)
+        assertTrue("the tab is open again", args().p != null)
+        val reads = DrawInvalidation.statesReadBy { args() }
+        assertTrue("the labels' publication invalidates the draw", last.any { it in reads })
     }
 
     /** The same seam visible, with the real painters and timeline (WP-3). */

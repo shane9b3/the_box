@@ -189,7 +189,11 @@ class ScoreBugDrawTest {
     /** Logo loads the fake loader served (S3/S5: so `FollowLogos` really sets images and the halo watch really runs). */
     private val logoLoads = mutableListOf<String>()
 
-    private fun goalHooks(context: CoroutineContext = EmptyCoroutineContext, ppSampler: PpSampler = PpTestSamplers.Fake) = GoalHooks(
+    private fun goalHooks(
+        context: CoroutineContext = EmptyCoroutineContext,
+        ppSampler: PpSampler = PpTestSamplers.Fake,
+        background: CoroutineContext = EmptyCoroutineContext,
+    ) = GoalHooks(
         colours = { TeamColours(0xFF112233.toInt(), 0xFF445566.toInt(), 0xFF778899.toInt(), 0xFFAABBCC.toInt()) },
         begin = { _, _, _, _, _, _, _ -> },
         bake = { bakes++; null },
@@ -203,7 +207,7 @@ class ScoreBugDrawTest {
         bakeLabels = { _, away, home, _ -> labelBakes += away to home; null },
         logoFetch = { url, w, h -> logoLoads += url; Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) },
         context = context,
-        background = EmptyCoroutineContext,
+        background = background,
     )
 
     private fun startGoalHost(
@@ -211,10 +215,11 @@ class ScoreBugDrawTest {
         context: CoroutineContext = EmptyCoroutineContext,
         ppSampler: PpSampler = PpTestSamplers.Fake,
         first: app.thebox.core.sports.ScoreBugView = ScoreBugFixtures.view(clockSecs = 1200),
+        background: CoroutineContext = EmptyCoroutineContext,
     ) {
         repo.bug.value = first
         rule.mainClock.autoAdvance = false
-        val hooks = goalHooks(context, ppSampler)
+        val hooks = goalHooks(context, ppSampler, background)
         rule.setContent {
             BoxDesignScale {
                 ScoreBugWith(repo, placement, ScoreBugFixtures.noGeometry, lowEnd, Modifier, ScoreBugPlacement::place, hooks)
@@ -718,6 +723,40 @@ class ScoreBugDrawTest {
         assertEquals("one more bake for Large", 2, labelBakes.size)
         assertEquals(listOf(PpTransition.OPEN, PpTransition.STILL, PpTransition.STILL), tabRecs().map { it.kind })
         assertEquals(listOf(false, true), tabRecs().drop(1).map { it.to })
+    }
+
+    /**
+     * NFL fix pass U3, the same bug in the NHL runner: after a size switch the power-play tab reopens with a STILL on a
+     * driver already at 0 once the labels are baked. That last background hop must write a state the draw reads, or the
+     * draw node is not invalidated and the tab stays hidden until the next snapshot.
+     */
+    @Test
+    fun aSizeSwitchReopensTheTabAndInvalidatesTheDraw() {
+        val bg = ManualDispatcher()
+        startGoalHost(background = bg)
+        fun drain() { repeat(20) { var ran = false; while (bg.runOne()) ran = true; advance(100); if (!ran) return } }
+        drain()
+        repo.bug.value = ppEdm()
+        advance(2500)
+        assertFalse("the tab is open before the switch", frame().tabClosed)
+
+        applyPlacement(ScoreBugFixtures.input(size = ScoreBugSize.LARGE))
+        advance(100)
+        var labelHop: Set<Any>? = null
+        var hops = 0
+        while (true) {
+            var ran = false
+            val bakes0 = labelBakes.size
+            val w = DrawInvalidation.statesWrittenBy { ran = bg.runOne(); advance(100) }
+            if (!ran) break
+            if (labelBakes.size > bakes0) labelHop = w
+            check(++hops < 20)
+        }
+        val last = checkNotNull(labelHop) { "the labels were baked for Large" }
+        assertTrue("the bakes hopped to the background", hops >= 3)
+        assertFalse("the tab is open again", frame().tabClosed)
+        val reads = DrawInvalidation.statesReadBy { drawOnce() }
+        assertTrue("the labels' publication invalidates the draw", last.any { it in reads })
     }
 
     // ---- the pin and the release (§5)

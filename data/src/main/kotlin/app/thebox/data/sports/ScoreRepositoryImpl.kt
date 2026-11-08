@@ -323,7 +323,7 @@ class ScoreRepositoryImpl internal constructor(
             lastStepAt = mono.nowMs()
             val game = doc.game
             if (machine.pollDue() && game != null && followDemand != Demand.NONE && isOnline) {
-                machine.fetched(sourceOf(game.league).game(game.id))
+                machine.fetched(sourceOf(game.league).game(game.id, game.startUtcMs))
                 // The answer took time: advance the machine to now, so what the answer made due is applied at once.
                 machine.step()
                 lastStepAt = mono.nowMs()

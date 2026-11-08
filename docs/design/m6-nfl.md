@@ -1684,3 +1684,34 @@ NFL anchor):
 - Focus: UP from the week chips lands on the Corner chip, not on the league chips (the same as the NHL day chips).
 - The emulator's test stream froze on one frame during the long run (fake panel `--no-pace`); unrelated to the bug.
 - Device items of §13 (Fire TV frame time, VoiceView, real-TV colours, the §1.6 live samples) are unchanged.
+
+## Fix pass (2026-11-08)
+On `main` after the integration pass (`bcdab85`), from the two NFL code reviews (all findings accepted by the lead). Each
+fix has a focused test that fails on the old code (checked by reverting the fix), except C1's, whose test calls the new
+overload (the old code read the week board only, so it answered NotFound).
+
+| ID | Fix | Test |
+|---|---|---|
+| C1 | **A followed game of another week survives a restart.** `ScoreSource.game(id, startUtcMs)` is new (additive, default `= game(id)`, so the NHL source and every fake are unchanged); `ScoreRepositoryImpl` passes `FollowedGame.startUtcMs`. `EspnScoreSource` reads the remembered ET date, else the ET date of the hint, then the week board once (N7), then the hinted date if it was not tried yet: never NotFound before a dated board has been read when a hint exists. With no hint the old order holds | `EspnScoreSourceTest.afterARestartTheFollowsStartPicksTheDatedBoard` (Thursday's game, current board without it: one `dates=20261112` request), `…withAHintNotFoundOnlyAfterTheDatedBoardWasTried`; `ScoreRepositoryLeagueTest.aRestoredFollowGivesTheSourceItsStart` |
+| C2 | **Fake panel week board.** `board()` echoes the requested `seasontype` in `season.type` and passes the week through unchanged (`THIS_WEEK` only when none was given). Week < 1, a season type < 1, or a missing / non-numeric week answers **400** JSON (as the bad `dates` path does) | `test_sports_nfl.py`: `test_week_board_echoes_the_requested_season_type_and_week`, `test_week_zero_or_a_bad_week_is_a_400` |
+| C3 | **No PRE mid-quarter.** `EspnMapper.beforeKickoff` takes the clock: an `in` Q1 0–0 body with no `lastPlay` (or no situation) is PRE only while the clock is at 15:00 (`SportsConstants.NFL_QUARTER_SECS` = 900); run down or unknown is LIVE. A coin-toss `lastPlay` keeps the S8 rule whatever the clock. The live-log test now feeds each row's clock | `EspnMapperTest.aMidQuarterBodyWithNoLastPlayIsLive`; the two S8 "no play" cases in `theCoinTossIsPreAndTheFirstDownIsLive` now carry a 15:00 clock |
+| U1 | **One league for the bug and its box.** `ScoreBug(...)`: `shown ?: followedLeague ?: (placement.league while placing) ?: lastLeague ?: prefs`, and the placement handed to the branch always carries that league (`placement.copy(league = league)` on a mismatch, in composition only), so the pill and the box can no longer disagree in either direction | `NflBugDrawTest.placeModeAfterAnNflFollowEndsUsesOneLeagueForTheBugAndItsBox` (NFL follow, League → NHL, stop following, place: NHL branch, every box NHL; and an NHL view with an NFL placement is placed as NHL) |
+| U2 | **The week rollover.** For the NFL, `isFor(TODAY)` trusts `DayState.Board.isToday`, and `learn` always relearns the neighbours from an isToday board (the old guard skipped a This-week board whose key equalled the stale Next week). NHL logic unchanged | `NflSportsTest.aWeekRolloverWhileTheViewModelLivesShowsTheNewWeekNotTheSkeleton` (Week 9 learned, ESPN moves to Week 10: Week 10 shows, Last/Next ask for 9/11) |
+| U3 | **The tab reappears after a size switch.** `NflTabRun` gets a `mutableIntStateOf` epoch, bumped in `readyChanged`, `release` and `play`, read in `sampleForDraw` (draw only; no recomposition, no draw-time allocation). **The NHL `PpRun` had the same bug** (a STILL `play` on a driver at 0 writes no state; `painter`/`labelKey` are plain) and gets the same epoch: this is the one NHL change of the pass | `NflBugDrawTest` / `ScoreBugDrawTest.aSizeSwitchReopensTheTabAndInvalidatesTheDraw`: the bakes run one background hop at a time (`ManualDispatcher`, new `DrawInvalidation.kt` test support); the label hop must write a state the draw reads (snapshot read/write observers, since Robolectric runs no draw pass) |
+| U4 | **Focus and the static pill.** Up from the day / week chips lands on the shown league's chip (both leagues; the league chip requesters moved up to `SportsScreen`). With Show Sports off the static pill reads `PlayerText.leagueName(prefs.league)` (tag `SPORTS_LEAGUE_PILL_TAG`) | `NflSportsTest.upFromTheWeekChipsLandsOnTheNflChip`, `…withShowSportsOffThePillNamesTheShownLeague`; the Up paths in `NflSportsTest.bothLeagueChips…` and four `SportsScreenTest` cases (`chipAndGridPaths`, `backWithAChoiceListOpen…`, `theCornerListWritesThePref`, `theDelayList…`) now go Up → NHL chip → Right to Corner / Delay |
+| Int. | **Week chips on a failed board: already disabled.** `canPrev`/`canNext` are `yesterdayKey`/`tomorrowKey != null` for the NFL, so with nothing learned both chips are disabled on `Failed`. The integration-pass observation came from keys learned before the failure (the view model outlived the panel restart); those are real neighbours and stay usable. No code change | `NflSportsTest.anNflFailureSaysEspn` now asserts both chips disabled and This week enabled |
+
+**Existing tests changed:** NFL files only, except the four `SportsScreenTest` focus paths (U4 changes NHL focus by the
+lead's instruction) and the `ScoreBugDrawTest` hook helpers (a `background` parameter, default unchanged).
+
+**Gate** (`lintAll :core:test :data:testDebugUnitTest :player:testDebugUnitTest :ui:testDebugUnitTest
+:app:testDebugUnitTest :app:assembleDebug`): green. Core 3 956, data 520 (3 skipped: SMB), player 511, ui 648, app 73;
+0 failures; lint has no new issues. Fake panel: `test_sports*.py` 63 OK, `test_fakepanel.py` 145 OK. On the first full
+run the new U1 test failed once while it passed on its own: it compared composition counts across the switch, and the
+NHL branch could compose before its baseline was read. It now checks which branch a later placement change recomposes,
+which does not depend on order. It still fails on the old code.
+
+**Device** (emulator-5554, `--no-pace --sports --sports-nfl`): U4 seen. Up from Tomorrow lands on the NHL chip; Up from
+the week chips does the same for the NFL; NFL ↔ NHL switching and follow / stop following work. U1 was not reproduced on
+the device: it needs an NFL view shown full screen before the follow ends, and the unit test covers it. The device was
+left on NHL with nothing followed.

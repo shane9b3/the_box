@@ -22,6 +22,7 @@ import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
@@ -712,6 +713,12 @@ private class NflTabRun(private val scope: CoroutineScope, private val hooks: Nf
     /** What the tab says, captured when a transition starts; same-side cuts write it in composition. */
     val content = NflTabContent()
     private val out = PpFrame()
+    /**
+     * (Fix pass U3) Bumped when what draw samples changes in plain fields only (labels ready, a release, a transition's
+     * start): a STILL play snaps a driver already at 0, which writes no state, so without this the draw node is never
+     * invalidated and the tab stays hidden until the next snapshot. Read in [sampleForDraw] (draw), never in composition.
+     */
+    private val epoch = mutableIntStateOf(0)
 
     var painter: NflTabPainter? = null
     var labelKey: NflLabelKey? = null
@@ -770,6 +777,7 @@ private class NflTabRun(private val scope: CoroutineScope, private val hooks: Nf
 
     fun readyChanged() {
         snapTab = true
+        epoch.intValue++
         step()
     }
 
@@ -860,6 +868,7 @@ private class NflTabRun(private val scope: CoroutineScope, private val hooks: Nf
     fun release(snap: Boolean) {
         if (!pinned) return
         pinned = false; pinEdge = false
+        epoch.intValue++
         if (snap) { snapTab = true; lastKey = -1; return }
         val w = effWant()
         lastKey = w
@@ -986,6 +995,7 @@ private class NflTabRun(private val scope: CoroutineScope, private val hooks: Nf
         driver.snapTo(0f)
         from.copyFrom(next)
         kind = k; to = toOpen
+        epoch.intValue++
         hooks.probe?.transitions?.add(NflProbe.Rec(k, toOpen, content.side, content.lead, content.tail, content.score))
         val ms = when (k) {
             PpTransition.OPEN -> K.PP_OPEN_MS
@@ -997,6 +1007,7 @@ private class NflTabRun(private val scope: CoroutineScope, private val hooks: Nf
 
     /** Samples the tab track into the preallocated frame for draw; null when nothing is drawn. */
     fun sampleForDraw(): PpFrame? {
+        epoch.intValue // read in draw: a bump invalidates the bug's draw node
         if (painter == null || !active) return null
         hooks.ppSampler.sample(PpTrack.TAB, kind, driver.value, from, to, out)
         out.pillClosed = true

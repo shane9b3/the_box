@@ -143,7 +143,8 @@ const val SCORE_BUG_LIVE_TAG = "score_bug_live"
  * (NFL, docs/design/m6-nfl.md §4.6, B4) The league seam: one branch at the top, before any `remember` of [ScoreBugWith],
  * keyed on the league so the NHL composable is byte-unchanged and an NFL view never reaches the NHL painters. The league
  * is the shown view's; with no view, [followedLeague] (`FullScreenHost` passes the followed game's); with no follow (a
- * fade after the follow ends), the last shown one, else the prefs' shown league. A league change of
+ * fade after the follow ends), the placement's league in place mode, else the last shown one, else the prefs' shown
+ * league; the placement handed down always carries that league (fix pass U1). A league change of
  * the follow swaps the bug with no fade (accepted in the NFL sign-off).
  */
 @Composable
@@ -163,11 +164,15 @@ fun ScoreBug(
     // (NFL integration pass) The follow's league comes before the held one: after an NHL follow is replaced by an NFL
     // game still in PRE (no view yet), place mode and the first view must take the NFL branch, not the NHL one held from
     // the last shown view. The held league still covers a fade after the follow ends (followedLeague null).
-    val league = shown ?: followedLeague ?: lastLeague.value ?: prefsLeague
+    // (Fix pass U1) Place mode with no view and no follow shows the placement's league (the prefs'), not the one held
+    // from an earlier follow; and the box is always sized for the league drawn, so one decision serves both.
+    val placingLeague = if (placement.placing) placement.league else null
+    val league = shown ?: followedLeague ?: placingLeague ?: lastLeague.value ?: prefsLeague
     SideEffect { if (shown != null) lastLeague.value = shown }
+    val placed = if (placement.league == league) placement else placement.copy(league = league)
     key(league) {
-        if (league == League.NFL) NflBug(source, placement, geometry, modifier, place, NflHooks.Default)
-        else ScoreBugWith(source, placement, geometry, lowEnd, modifier, place, GoalHooks.Default)
+        if (league == League.NFL) NflBug(source, placed, geometry, modifier, place, NflHooks.Default)
+        else ScoreBugWith(source, placed, geometry, lowEnd, modifier, place, GoalHooks.Default)
     }
 }
 
@@ -806,6 +811,12 @@ private class PpRun(private val scope: CoroutineScope, private val hooks: GoalHo
     val pill = PpTrackRun(PpTrack.PILL)
     /** The frame draw fills (both tracks write their own channels). */
     private val out = PpFrame()
+    /**
+     * (NFL fix pass U3, the same bug here) Bumped when what draw samples changes in plain fields only (labels ready, a
+     * release, a transition's start): a STILL play snaps a driver already at 0, which writes no state, so the draw node
+     * would not be invalidated after a size change's bake. Read in [sampleForDraw] (draw), never in composition.
+     */
+    private val epoch = mutableIntStateOf(0)
 
     /** The power-play painter of this size (built off the main thread) and the label bake that is done / under way. */
     var painter: PowerPlayPainter? = null
@@ -885,6 +896,7 @@ private class PpRun(private val scope: CoroutineScope, private val hooks: GoalHo
     /** The painter or the labels arrived or went (a size change, a new follow): the tracks snap to where they belong (S8). */
     fun readyChanged() {
         snapAll()
+        epoch.intValue++
         step()
     }
 
@@ -976,6 +988,7 @@ private class PpRun(private val scope: CoroutineScope, private val hooks: GoalHo
     fun release(snap: Boolean, goalShown: Boolean) {
         if (!pinned) return
         pinned = false
+        epoch.intValue++
         // What the tab drew at the end of the takeover is what a close slides out, or what the cut replaces.
         if (goalShown) tab.content.copyFrom(if (ppGoal) ppGoalContent else pinContent)
         ppGoal = false; pinEdge = false; pillHeld = false
@@ -1093,6 +1106,7 @@ private class PpRun(private val scope: CoroutineScope, private val hooks: GoalHo
         t.driver.snapTo(0f)
         t.from.copyFrom(t.next)
         t.kind = kind; t.to = to
+        epoch.intValue++
         hooks.probe?.pp?.transitions?.add(PpProbe.Rec(t.track, kind, to, t.content.side, t.content.label, t.content.secs))
         val ms = when (kind) {
             PpTransition.OPEN -> K.PP_OPEN_MS
@@ -1105,6 +1119,7 @@ private class PpRun(private val scope: CoroutineScope, private val hooks: GoalHo
 
     /** Samples both tracks into the preallocated frame for draw (no allocation); null when nothing is drawn. */
     fun sampleForDraw(): PpFrame? {
+        epoch.intValue // read in draw: a bump invalidates the bug's draw node
         if (painter == null || !(tab.active || pill.active)) return null
         return sampleInto(out)
     }

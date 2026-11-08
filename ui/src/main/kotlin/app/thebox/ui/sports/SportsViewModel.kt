@@ -210,14 +210,16 @@ class SportsViewModel internal constructor(
         b.games.firstOrNull()?.id?.league ?: if (SportsText.isWeekKey(b.dayKey)) League.NFL else League.NHL
 
     private fun learn(b: DayBoard, league: League) {
+        if (league == League.NFL) {
+            // S6: the week keys the board named, or none (an edge, the off-season or an empty board): never a date.
+            // (Fix pass U2) Always from a This-week board: once ESPN's week rolls over, the new This week is the key
+            // learned as Next week, and the guard below would skip it forever (the view model lives for days).
+            yesterdayKey = b.prevDay.takeIf { b.games.isNotEmpty() }
+            tomorrowKey = b.nextDay.takeIf { b.games.isNotEmpty() }
+            return
+        }
         // A board shown for Today that is not already known as another day's: remember its neighbours.
         if (b.dayKey != yesterdayKey && b.dayKey != tomorrowKey) {
-            if (league == League.NFL) {
-                // S6: the week keys the board named, or none (an edge, the off-season or an empty board): never a date.
-                yesterdayKey = b.prevDay.takeIf { b.games.isNotEmpty() }
-                tomorrowKey = b.nextDay.takeIf { b.games.isNotEmpty() }
-                return
-            }
             yesterdayKey = b.prevDay ?: runCatching { LocalDate.parse(b.dayKey).minusDays(1).toString() }.getOrNull()
             tomorrowKey = b.nextDay ?: runCatching { LocalDate.parse(b.dayKey).plusDays(1).toString() }.getOrNull()
         }
@@ -227,7 +229,9 @@ class SportsViewModel internal constructor(
     private fun isFor(day: DayState.Board, sel: SportsDay, league: League): Boolean {
         val b = day.board
         return when (sel) {
-            SportsDay.TODAY -> day.isToday && b.dayKey != yesterdayKey && b.dayKey != tomorrowKey
+            // (Fix pass U2) The NFL trusts the repository's isToday: a week key is never a calendar date, and after a
+            // week rollover the new This week equals the stale Next week key.
+            SportsDay.TODAY -> day.isToday && (league == League.NFL || (b.dayKey != yesterdayKey && b.dayKey != tomorrowKey))
             SportsDay.YESTERDAY -> dayKeyFor(sel, league)?.let { b.dayKey == it } ?: false
             SportsDay.TOMORROW -> dayKeyFor(sel, league)?.let { b.dayKey == it } ?: false
         }

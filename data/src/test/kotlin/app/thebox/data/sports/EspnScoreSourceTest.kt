@@ -158,6 +158,39 @@ class EspnScoreSourceTest {
         assertTrue(boards.isEmpty())
     }
 
+    @Test fun afterARestartTheFollowsStartPicksTheDatedBoard() {
+        // C1: followed on Tuesday from the Next week board, Thursday 20:15 ET (01:15Z Friday); the process died, so no
+        // date is remembered and the current week board does not list it.
+        val thursdayNight = java.time.Instant.parse("2026-11-13T01:15:00Z").toEpochMilli()
+        answers[""] = { json(events("401873038" to "2026-11-08T14:30Z")) }
+        answers["dates=20261112"] = { json(events("401899001" to "2026-11-13T01:15Z")) }
+        val s = source()
+        val g = runBlocking { s.game(kcBuf, thursdayNight) } as Fetch.Ok
+        assertEquals("401899001", g.value.id.id)
+        assertEquals("the hinted ET date first, no week board", listOf("dates=20261112"), queries())
+    }
+
+    @Test fun withAHintNotFoundOnlyAfterTheDatedBoardWasTried() {
+        val thursdayNight = java.time.Instant.parse("2026-11-13T01:15:00Z").toEpochMilli()
+        val s = source()
+        // A remembered date (the 8th) that no longer lists the game, a week board without it: the hint's date still runs.
+        answers["dates=20261107"] = { json(events("401899001" to "2026-11-08T18:00Z")) }
+        runBlocking { s.day("2026-11-07") }
+        requests.clear()
+        answers["dates=20261108"] = { json(events()) }
+        answers[""] = { json(events("401873038" to "2026-11-08T14:30Z")) }
+        answers["dates=20261112"] = { json(events("401899001" to "2026-11-13T01:15Z")) }
+        assertTrue(runBlocking { s.game(kcBuf, thursdayNight) } is Fetch.Ok)
+        assertEquals(listOf("dates=20261108", "", "dates=20261112"), queries())
+
+        // Nothing remembered and absent everywhere: the dated board, then the week board, then NotFound.
+        val fresh = source()
+        requests.clear()
+        answers["dates=20261112"] = { json(events()) }
+        assertEquals(Fetch.NotFound, runBlocking { fresh.game(kcBuf, thursdayNight) })
+        assertEquals(listOf("dates=20261112", ""), queries())
+    }
+
     @Test fun gameUsesTheDateRememberedFromAnyBoard() {
         answers["seasontype=2&week=9"] = { json(events("401873038" to "2026-11-08T14:30Z", "401899001" to "2026-11-08T18:00:00Z")) }
         answers["dates=20261108"] = { json(events("401873038" to "2026-11-08T14:30Z", "401899001" to "2026-11-08T18:00Z")) }

@@ -136,6 +136,8 @@ object EspnMapper {
         val sit = comp.situation as? JsonObject
         val lastPlay = sit?.obj("lastPlay")?.let { lastPlay(it, ::sideOfId) }
 
+        val secs = status.double("clock")?.takeIf { it.isFinite() }?.let { floor(it).toInt() }
+            ?: status.str("displayClock")?.let(::parseMmSs)
         val phase = when {
             name == "STATUS_POSTPONED" || name == "STATUS_CANCELED" || name == "STATUS_CANCELLED" ->
                 if (state == "in") GamePhase.LIVE else GamePhase.POSTPONED
@@ -143,7 +145,7 @@ object EspnMapper {
                 if (serverDateMs != null && serverDateMs >= start - SportsConstants.NFL_PRE_WINDOW_MS) GamePhase.PRE else GamePhase.SCHEDULED
             state == "post" -> GamePhase.FINAL
             // S8 (ruling 4): ESPN goes `in` at the coin toss; the bug appears with the first logged play after it.
-            beforeKickoff(period, away.score, home.score, sit) -> GamePhase.PRE
+            beforeKickoff(period, away.score, home.score, sit, secs) -> GamePhase.PRE
             name == "STATUS_END_PERIOD" || name == "STATUS_HALFTIME" -> GamePhase.INTERMISSION
             else -> GamePhase.LIVE // STATUS_IN_PROGRESS and any unknown `in` name (a weather delay)
         }
@@ -160,8 +162,6 @@ object EspnMapper {
         } else {
             null
         }
-        val secs = status.double("clock")?.takeIf { it.isFinite() }?.let { floor(it).toInt() }
-            ?: status.str("displayClock")?.let(::parseMmSs)
         val clock = secs?.let { GameClock(it.coerceAtLeast(0), running = false, inIntermission = phase == GamePhase.INTERMISSION) }
 
         return GameSnapshot(
@@ -180,12 +180,17 @@ object EspnMapper {
         )
     }
 
-    /** (S8) `in`, period 1, 0–0, and `lastPlay` absent or the coin toss: still before the opening kick-off. */
-    private fun beforeKickoff(period: Int?, away: Int?, home: Int?, sit: JsonObject?): Boolean {
+    /**
+     * (S8) `in`, period 1, 0–0, and `lastPlay` the coin toss, or absent with the clock still at 15:00: before the opening
+     * kick-off. (Fix pass C3) An absent `lastPlay` with the clock run down, or unknown, is a gap in the feed mid-quarter,
+     * so LIVE: it must not hide the bug for a poll.
+     */
+    private fun beforeKickoff(period: Int?, away: Int?, home: Int?, sit: JsonObject?, clockSecs: Int?): Boolean {
         if ((period ?: 1) > 1) return false
         if ((away ?: 0) != 0 || (home ?: 0) != 0) return false
         // A lastPlay that is absent, re-typed (not an object) or has no type id is no logged play.
-        val type = sit?.obj("lastPlay")?.obj("type")?.str("id") ?: return true
+        val type = sit?.obj("lastPlay")?.obj("type")?.str("id")
+            ?: return clockSecs != null && clockSecs >= SportsConstants.NFL_QUARTER_SECS
         return type == SportsConstants.NFL_COIN_TOSS_TYPE
     }
 

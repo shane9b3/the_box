@@ -175,10 +175,29 @@ class EspnMapperTest {
         val sit = """{"down":0,"distance":0,"yardLine":0,"lastPlay":{"id":"9","type":{"id":"53","text":"Kickoff"}}}"""
         assertEquals(GamePhase.LIVE, mapOne(event(period = "1", awayScore = "\"0\"", homeScore = "\"0\"", situation = sit))?.phase)
         val noPlay = """{"down":0,"distance":0,"yardLine":0}"""
-        assertEquals(GamePhase.PRE, mapOne(event(period = "1", awayScore = "\"0\"", homeScore = "\"0\"", situation = noPlay))?.phase)
-        assertEquals(GamePhase.PRE, mapOne(event(period = "1", awayScore = "\"0\"", homeScore = "\"0\""))?.phase, "no situation")
+        val atStart = "\"clock\": 900.0, \"displayClock\": \"15:00\""
+        assertEquals(GamePhase.PRE, mapOne(event(period = "1", clock = atStart, awayScore = "\"0\"", homeScore = "\"0\"", situation = noPlay))?.phase)
+        assertEquals(GamePhase.PRE, mapOne(event(period = "1", clock = atStart, awayScore = "\"0\"", homeScore = "\"0\""))?.phase, "no situation")
         assertEquals(GamePhase.LIVE, mapOne(event(period = "1", awayScore = "\"0\"", homeScore = "\"3\"", situation = noPlay))?.phase)
         assertEquals(GamePhase.LIVE, mapOne(event(period = "2", awayScore = "\"0\"", homeScore = "\"0\"", situation = noPlay))?.phase)
+    }
+
+    @Test
+    fun aMidQuarterBodyWithNoLastPlayIsLive() {
+        // C3: a 0–0 first quarter whose lastPlay went missing for a poll, with the clock run down: LIVE, not PRE.
+        val zero = "\"0\""
+        val noPlay = """{"down":2,"distance":7,"yardLine":40}"""
+        assertEquals(GamePhase.LIVE, mapOne(event(period = "1", awayScore = zero, homeScore = zero, situation = noPlay))?.phase, "10:00")
+        assertEquals(GamePhase.LIVE, mapOne(event(period = "1", awayScore = zero, homeScore = zero))?.phase, "10:00, no situation")
+        val justUnder = "\"clock\": 899.0, \"displayClock\": \"14:59\""
+        assertEquals(GamePhase.LIVE, mapOne(event(period = "1", clock = justUnder, awayScore = zero, homeScore = zero))?.phase)
+        val noClock = "\"displayClock\": \"\""
+        assertEquals(GamePhase.LIVE, mapOne(event(period = "1", clock = noClock, awayScore = zero, homeScore = zero))?.phase, "unknown clock")
+        val displayOnly = "\"displayClock\": \"15:00\""
+        assertEquals(GamePhase.PRE, mapOne(event(period = "1", clock = displayOnly, awayScore = zero, homeScore = zero))?.phase)
+        // The coin toss keeps the S8 rule whatever the clock says.
+        val toss = """{"lastPlay":{"id":"1","type":{"id":"70","text":"Coin Toss"}}}"""
+        assertEquals(GamePhase.PRE, mapOne(event(period = "1", awayScore = zero, homeScore = zero, situation = toss))?.phase)
     }
 
     @Test
@@ -379,12 +398,14 @@ class EspnMapperTest {
             val lpText = (o["lpType"] as? kotlinx.serialization.json.JsonPrimitive)?.takeIf { it.isString }?.content
             val lpType = lpText?.let { if (it == "Coin Toss") "70" else "5" }
             val sitBody = lpType?.let { """{"lastPlay":{"id":"1","type":{"id":"$it","text":"$lpText"}}}""" }
-            val s = assertNotNull(mapOne(event(state = state, name = name, period = period, awayScore = "\"${sc("away")}\"", homeScore = "\"${sc("home")}\"", situation = sitBody)), l)
+            val clockS = (o["clockS"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toDoubleOrNull() ?: 0.0
+            val clockField = "\"clock\": $clockS"
+            val s = assertNotNull(mapOne(event(state = state, name = name, period = period, clock = clockField, awayScore = "\"${sc("away")}\"", homeScore = "\"${sc("home")}\"", situation = sitBody)), l)
             val want = when {
                 state == "pre" -> GamePhase.SCHEDULED // the hand-made event starts 18:00Z, over an hour after serverNow
                 state == "post" -> GamePhase.FINAL
                 name == "STATUS_END_PERIOD" || name == "STATUS_HALFTIME" -> GamePhase.INTERMISSION
-                period == "1" && sc("away") == "0" && sc("home") == "0" && (lpType == null || lpType == "70") -> GamePhase.PRE.also { sawToss = true }
+                period == "1" && sc("away") == "0" && sc("home") == "0" && (lpType == "70" || (lpType == null && clockS >= 900.0)) -> GamePhase.PRE.also { sawToss = true }
                 else -> GamePhase.LIVE
             }
             assertEquals(want, s.phase, l)

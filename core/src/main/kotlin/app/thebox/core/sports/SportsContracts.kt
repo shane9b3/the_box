@@ -138,6 +138,11 @@ interface ScoreSource {
     suspend fun today(): Fetch<DayBoard>
     suspend fun day(dayKey: String): Fetch<DayBoard>
     suspend fun game(id: GameId): Fetch<GameSnapshot>
+    /**
+     * (Fix pass 2026-11-08, additive) [game] with the follow's [FollowedGame.startUtcMs] as a hint, so a source that
+     * finds games by date (ESPN) can read the right dated board after an app restart. The default ignores the hint.
+     */
+    suspend fun game(id: GameId, startUtcMs: Long?): Fetch<GameSnapshot> = game(id)
     /** The dark-background logo variant, validated against `SportsEndpoints.logoBase` (A-N2). */
     fun logoUrl(team: TeamLine): String
 }

@@ -476,7 +476,7 @@ class SportsNfl:
                  "season": {"year": SEASON, "displayName": str(SEASON), "type": {"id": "2", "type": 2, "name": "Regular Season", "abbreviation": "reg"}},
                  "calendarType": "list", "calendarIsWhitelist": True, "calendar": self.calendar()}]
 
-    def board(self, games, at, base, week=None, day=None):
+    def board(self, games, at, base, week=None, day=None, season_type=2):
         events = [self.event(g, at, base) for g in games if not self.state(g, at).get("gone")]
         for e in events:
             e.pop("_local", None)
@@ -484,8 +484,8 @@ class SportsNfl:
         if day is not None:
             o["day"] = {"date": day.isoformat()}
         else:
-            o["season"] = {"type": 2, "year": SEASON}
-            o["week"] = {"number": week or THIS_WEEK, "teamsOnBye": []}
+            o["season"] = {"type": season_type, "year": SEASON}
+            o["week"] = {"number": THIS_WEEK if week is None else week, "teamsOnBye": []}
         return o
 
     def dated_games(self, day):
@@ -572,9 +572,12 @@ def handle(h, path):
         try:
             t, n = int(q.get("seasontype", "2")), int(q["week"])
         except (KeyError, ValueError):
-            return answer(sp.board([], now, base, week=0))
+            t, n = None, None
+        if t is None or n < 1 or t < 1:
+            msg = "Invalid week parameter: " + q.get("seasontype", "") + "/" + q.get("week", "")
+            return fail(400, json.dumps({"code": 400, "message": msg}))
         games = sp.games() if (t, n) == (2, THIS_WEEK) else (sp.other_week_games(n) if t == 2 else [])
-        return answer(sp.board(games, now, base, week=n))
+        return answer(sp.board(games, now, base, week=n, season_type=t))
     return answer(sp.board(sp.games(), now, base))
 
 

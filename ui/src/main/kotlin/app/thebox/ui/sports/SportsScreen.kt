@@ -76,6 +76,7 @@ const val SPORTS_UPDATED_TAG = "sports_updated"
 const val SPORTS_SKELETON_TAG = "sports_skeleton"
 const val SPORTS_GRID_TAG = "sports_grid"
 const val SPORTS_WEEK_TAG = "sports_week"
+const val SPORTS_LEAGUE_PILL_TAG = "sports_league_pill"
 internal fun sportsLeagueTag(league: League) = "sports_league:" + league.name
 internal fun sportsDayTag(day: SportsDay) = "sports_day:" + day.name
 internal fun sportsMenuItemTag(i: Int) = "sports_menu_item:$i"
@@ -127,6 +128,7 @@ fun SportsScreen(
     val corner = remember { FocusRequester() }
     val delayChip = remember { FocusRequester() }
     val dayChips = remember { SportsDay.entries.associateWith { FocusRequester() } }
+    val leagueChips = remember { League.entries.associateWith { FocusRequester() } }
     val cardRequesters = remember { HashMap<String, FocusRequester>() }
     var menu by remember { mutableStateOf<ChipMenu?>(null) }
     var settled by remember { mutableStateOf(false) }
@@ -175,12 +177,13 @@ fun SportsScreen(
             },
     ) {
         Column(Modifier.fillMaxSize().padding(start = 96.dp, end = 96.dp, top = 56.dp, bottom = 40.dp)) {
-            TitleRow(ui, corner, delayChip, selectedChip, chips = !off, onOpen = { menu = it }, onLeague = viewModel::onLeague)
+            TitleRow(ui, corner, delayChip, leagueChips, selectedChip, chips = !off, onOpen = { menu = it }, onLeague = viewModel::onLeague)
             Spacer(Modifier.height(4.dp))
             CreditRow(ui)
             Spacer(Modifier.height(24.dp))
             // U-N4: with Show Sports off there is nothing to pick: no day chips (and no Corner / Delay chips).
-            if (off) Spacer(Modifier.height(DAY_CHIP_H.dp)) else DayChips(ui, dayChips, corner) { day ->
+            // NFL §7.3 (fix pass U4): Up from the day / week chips lands on the shown league's chip (both leagues).
+            if (off) Spacer(Modifier.height(DAY_CHIP_H.dp)) else DayChips(ui, dayChips, leagueChips.getValue(ui.prefs.league)) { day ->
                 settled = true
                 viewModel.onDay(day)
             }
@@ -260,20 +263,20 @@ private fun TitleRow(
     ui: SportsUiState,
     corner: FocusRequester,
     delayChip: FocusRequester,
+    leagueChips: Map<League, FocusRequester>,
     down: FocusRequester,
     chips: Boolean,
     onOpen: (ChipMenu) -> Unit,
     onLeague: (League) -> Unit,
 ) {
     val res = LocalResources.current
-    val leagueChips = remember { League.entries.associateWith { FocusRequester() } }
     Row(Modifier.fillMaxWidth().height(60.dp), verticalAlignment = Alignment.CenterVertically) {
         Line(stringResource(R.string.sports_title), GuideUi.sans(44, FontWeight.SemiBold))
         Spacer(Modifier.width(16.dp))
         if (!chips) {
-            // Show Sports off: nothing to pick, so the league reads as the static pill it was.
+            // Show Sports off: nothing to pick, so the shown league reads as a static pill (fix pass U4: not always NHL).
             Box(Modifier.background(GuideUi.White08, RoundedCornerShape(DesignTokens.Radii.Chip)).padding(horizontal = 14.dp, vertical = 5.dp)) {
-                Line(stringResource(R.string.sports_league_nhl), GuideUi.sans(22, FontWeight.SemiBold, GuideUi.Fg70))
+                Line(PlayerText.leagueName(res, ui.prefs.league), GuideUi.sans(22, FontWeight.SemiBold, GuideUi.Fg70), Modifier.testTag(SPORTS_LEAGUE_PILL_TAG))
             }
         } else {
             // NFL §7.3 (ruling 24): NHL · NFL, the shown one filled, 22/600, height 52. Up is consumed; Down reaches the day chips.

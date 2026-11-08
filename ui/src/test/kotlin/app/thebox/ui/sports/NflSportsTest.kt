@@ -102,10 +102,10 @@ class NflSportsTest {
         rule.onNodeWithTag(sportsLeagueTag(League.NHL)).assertExists()
         rule.onNodeWithTag(sportsLeagueTag(League.NFL)).assertExists()
         rule.onNodeWithText(str(R.string.sports_credit)).assertExists()
-        // Up from the day chips lands on Corner (unchanged); Left from Corner reaches the league chips; OK on NFL switches.
+        // Fix pass U4 (§7.3): Up from the day chips lands on the shown league's chip; Right reaches NFL; OK switches.
         press(Key.DirectionUp, Key.DirectionUp)
-        rule.onNodeWithTag(SPORTS_CORNER_TAG).assertIsFocused()
-        press(Key.DirectionLeft)
+        rule.onNodeWithTag(sportsLeagueTag(League.NHL)).assertIsFocused()
+        press(Key.DirectionRight)
         rule.onNodeWithTag(sportsLeagueTag(League.NFL)).assertIsFocused()
         press(Key.DirectionCenter)
         assertEquals(League.NFL, store.flow(SportsDomain).value.league)
@@ -144,6 +144,27 @@ class NflSportsTest {
         assertTrue(repo.showDayCalls.filterNotNull().none { Regex("\\d{4}-\\d{2}-\\d{2}").containsMatchIn(it) })
     }
 
+    @Test fun aWeekRolloverWhileTheViewModelLivesShowsTheNewWeekNotTheSkeleton() {
+        // Fix pass U2: the activity-scoped view model learned Week 9's neighbours; on Wednesday ESPN's current week moves
+        // to Week 10, the key it had learned as Next week. The new This week must show, and teach Week 9 / Week 11.
+        week(live)
+        val m = vm()
+        show(m)
+        rule.onNodeWithTag(SPORTS_WEEK_TAG).assertTextEquals("Week 9")
+        m.onLeft()
+        week(pre, key = "w2026-2-10", prev = "w2026-2-9", next = "w2026-2-11")
+        m.onEntered()
+        rule.waitForIdle()
+        rule.onNodeWithTag(SPORTS_SKELETON_TAG).assertDoesNotExist()
+        rule.onNodeWithTag(SPORTS_WEEK_TAG).assertTextEquals("Week 10")
+        rule.onNodeWithText("Seahawks").assertExists()
+        m.onDay(SportsDay.TOMORROW)
+        assertEquals("w2026-2-11", repo.showDayCalls.last())
+        m.onDay(SportsDay.TODAY)
+        m.onDay(SportsDay.YESTERDAY)
+        assertEquals("w2026-2-9", repo.showDayCalls.last())
+    }
+
     @Test fun aMissingNeighbourDisablesItsChipAtAnEdge() {
         week(live, key = "w2026-3-5", prev = "w2026-3-3", next = null)
         show()
@@ -175,6 +196,10 @@ class NflSportsTest {
         repo.day.value = DayState.Failed(FailKind.TIMEOUT)
         show()
         rule.onNodeWithTag(SPORTS_MESSAGE_TAG).assertTextEquals(str(R.string.sports_failed_espn))
+        // Integration-pass note: with no board ever loaded no neighbour is known, so both week chips are disabled.
+        rule.onNodeWithTag(sportsDayTag(SportsDay.YESTERDAY)).assertIsNotEnabled()
+        rule.onNodeWithTag(sportsDayTag(SportsDay.TOMORROW)).assertIsNotEnabled()
+        rule.onNodeWithTag(sportsDayTag(SportsDay.TODAY)).assertIsEnabled()
     }
 
     @Test fun aStaleBoardOfTheOtherLeagueNeverPassesForTheShownOne() {
@@ -184,6 +209,24 @@ class NflSportsTest {
     }
 
     // ------------------------------------------------------------------ the words
+
+    @Test fun upFromTheWeekChipsLandsOnTheNflChip() {
+        week(live)
+        show()
+        press(Key.DirectionUp) // the card → This week
+        rule.onNodeWithTag(sportsDayTag(SportsDay.TODAY)).assertIsFocused()
+        press(Key.DirectionRight)
+        rule.onNodeWithTag(sportsDayTag(SportsDay.TOMORROW)).assertIsFocused()
+        press(Key.DirectionUp)
+        rule.onNodeWithTag(sportsLeagueTag(League.NFL)).assertIsFocused()
+    }
+
+    @Test fun withShowSportsOffThePillNamesTheShownLeague() {
+        store.update(SportsDomain) { it.copy(enabled = false, league = League.NFL) }
+        repo.prefs.value = repo.prefs.value.copy(enabled = false, league = League.NFL)
+        show()
+        rule.onNodeWithTag(SPORTS_LEAGUE_PILL_TAG).assertTextEquals(str(R.string.sports_league_nfl))
+    }
 
     @Test fun cardWords() {
         val res = ApplicationProvider.getApplicationContext<android.content.Context>().resources
