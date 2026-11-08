@@ -18,10 +18,10 @@ object ScoreBugPlacement {
 
     fun place(input: PlacementInput, geo: OverlayGeometry): Box? {
         if (input.screenOff || input.modal) return null
-        if (input.placing) return cornerBox(input.corner, input.size)
+        if (input.placing) return cornerBox(input.corner, input.size, input.league)
 
         val corner = if (input.textTrackOn) toTop(input.corner) else input.corner
-        var box = cornerBox(corner, input.size)
+        var box = cornerBox(corner, input.size, input.league)
 
         if (isBottom(corner)) {
             when (input.bar) {
@@ -73,7 +73,7 @@ object ScoreBugPlacement {
     fun tabBox(input: PlacementInput, box: Box): Box {
         // Place mode puts the pill at the chosen corner itself (subtitles ignored, as in [place]).
         val corner = if (input.textTrackOn && !input.placing) toTop(input.corner) else input.corner
-        val inset = tabInset(input.size)
+        val inset = tabInset(input.size, input.league)
         val depth = tabDepth(input.size)
         return if (isBottom(corner)) {
             Box(box.l + inset, box.t - depth, box.r - inset, box.t)
@@ -107,10 +107,10 @@ object ScoreBugPlacement {
     fun tabInset(size: ScoreBugSize): Float =
         if (size == ScoreBugSize.LARGE) round(SportsConstants.PP_TAB_INSET * SportsConstants.SCORE_LARGE_SCALE) else SportsConstants.PP_TAB_INSET
 
-    /** (NFL §4.3) The tab's side inset for [league]. Commit 0: the NFL branch is stubbed to the NHL values (WP-1). */
+    /** (NFL §4.3) The tab's side inset for [league]: the NFL's is Standard 37, Large 46 (tab widths 446 / 558). */
     fun tabInset(size: ScoreBugSize, league: League): Float = when (league) {
         League.NHL -> tabInset(size)
-        League.NFL -> tabInset(size) // NFL WP-1: NFL_TAB_INSET / NFL_TAB_INSET_LARGE
+        League.NFL -> if (size == ScoreBugSize.LARGE) SportsConstants.NFL_TAB_INSET_LARGE else SportsConstants.NFL_TAB_INSET
     }
 
     /** (Power play §4.1) The tab's visible depth below (or above) the pill: Standard 36, Large 45. */
@@ -118,8 +118,11 @@ object ScoreBugPlacement {
         if (size == ScoreBugSize.LARGE) SportsConstants.PP_TAB_DEPTH * SportsConstants.SCORE_LARGE_SCALE else SportsConstants.PP_TAB_DEPTH
 
     /** The resting box of [corner] at [size] (§4.3). */
-    fun cornerBox(corner: ScoreCorner, size: ScoreBugSize): Box {
-        val w = width(size)
+    fun cornerBox(corner: ScoreCorner, size: ScoreBugSize): Box = cornerBox(corner, size, League.NHL)
+
+    /** (NFL §4.1, §4.4) The resting box of [corner] at [size] for [league]'s pill width (the height is shared). */
+    fun cornerBox(corner: ScoreCorner, size: ScoreBugSize, league: League): Box {
+        val w = width(size, league)
         val h = height(size)
         val l = if (isLeft(corner)) SportsConstants.SCORE_INSET_X else SCREEN_W - SportsConstants.SCORE_INSET_X - w
         val t = if (isBottom(corner)) SCREEN_H - SportsConstants.SCORE_INSET_Y - h else SportsConstants.SCORE_INSET_Y
@@ -129,10 +132,10 @@ object ScoreBugPlacement {
     fun width(size: ScoreBugSize): Float =
         if (size == ScoreBugSize.LARGE) SportsConstants.SCORE_LARGE_W else SportsConstants.SCORE_W
 
-    /** (NFL §4.4) The pill's width for [league]. Commit 0: the NFL branch is stubbed to the NHL values (WP-1). */
+    /** (NFL §4.4) The pill's width for [league]: the NFL's is Standard 520, Large 650. */
     fun width(size: ScoreBugSize, league: League): Float = when (league) {
         League.NHL -> width(size)
-        League.NFL -> width(size) // NFL WP-1: NFL_SCORE_W / NFL_SCORE_LARGE_W
+        League.NFL -> if (size == ScoreBugSize.LARGE) SportsConstants.NFL_SCORE_LARGE_W else SportsConstants.NFL_SCORE_W
     }
 
     fun height(size: ScoreBugSize): Float =
