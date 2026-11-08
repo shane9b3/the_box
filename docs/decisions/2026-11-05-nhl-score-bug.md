@@ -98,3 +98,11 @@ user's delay; nothing before puck drop.
 18. **6-on-4 keeps the tab**: the power-play team pulling its goalie is still a power play. Only an empty net at even
     strength shows nothing.
 19. **Intermission keeps the tab** with the frozen time the feed reports.
+
+## Owner rulings: 2026-11-08
+20. **Full animation on every box** (owner: "give them all animation"). The score bug, goal takeover and power-play
+    tab ignore the low-end device class (memoryClass ≤ 192, which includes Fire TV Sticks): fades, slides, glow,
+    shadow and baked masks all run. Only the system "Reduce animations" setting gives the still version. Other player
+    overlays keep their low-end snaps. To check on a real Stick: frame time during a takeover.
+Bug fix, same day: the NHL feed's `OVER` game state (just ended, before `FINAL`/`OFF`) was read as "not started", so
+the bug vanished in the closing minutes of the owner's test game. `OVER` now maps to FINAL.

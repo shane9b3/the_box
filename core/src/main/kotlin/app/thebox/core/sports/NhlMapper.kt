@@ -65,7 +65,9 @@ object NhlMapper {
             else -> when (g.str("gameState")) {
                 "PRE" -> GamePhase.PRE
                 "LIVE", "CRIT" -> if (clock?.inIntermission == true) GamePhase.INTERMISSION else GamePhase.LIVE
-                "OFF", "FINAL" -> GamePhase.FINAL
+                // OVER: the game has just ended, before FINAL/OFF (seen for ~20 s up to half an hour). The score is final;
+                // treating it as unknown hid the bug in the closing minutes (owner report, 2026-11-08).
+                "OVER", "OFF", "FINAL" -> GamePhase.FINAL
                 else -> GamePhase.SCHEDULED // FUT and anything unknown
             }
         }

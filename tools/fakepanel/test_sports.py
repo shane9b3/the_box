@@ -510,7 +510,7 @@ class TestPowerPlayTimeline(PpCase):
         self.assertEqual([
             ("FUT", None, False), ("PRE", None, False),
             ("LIVE", 1, False), ("LIVE", 1, True), ("LIVE", 2, False), ("LIVE", 2, True),
-            ("CRIT", 3, False), ("LIVE", 4, False), ("LIVE", 5, False), ("OFF", 5, False), ("FINAL", 5, False),
+            ("CRIT", 3, False), ("LIVE", 4, False), ("LIVE", 5, False), ("OVER", 5, False), ("OFF", 5, False), ("FINAL", 5, False),
         ], seen)
         self.assertEqual(110, starts[("LIVE", 4, False)] - starts[("CRIT", 3, False)])
         self.assertEqual(395, starts[("FINAL", 5, False)])

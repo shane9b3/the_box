@@ -109,7 +109,9 @@ PP_SEGMENTS = [
            "sit": [("1451", 0, 20, 100, False), ("1351", 20, 40, 20, False), ("1451", 40, 85, 35, False)]}),
     (30, {"gameState": "LIVE", "period": 4, "periodType": "OT", "clock": "run", "sit": [("1431", 5, 25, 40, False)]}),
     (20, {"gameState": "LIVE", "period": 5, "periodType": "SO", "clock": "zero"}),
-    (20, {"gameState": "OFF", "period": 5, "periodType": "SO", "clock": "zero", "winner": "home"}),
+    # OVER: the real feed's "just ended" state before FINAL/OFF (2026-11-08); it once hid the bug.
+    (10, {"gameState": "OVER", "period": 5, "periodType": "SO", "clock": "zero", "winner": "home"}),
+    (10, {"gameState": "OFF", "period": 5, "periodType": "SO", "clock": "zero", "winner": "home"}),
     (None, {"gameState": "FINAL", "period": 5, "periodType": "SO", "clock": "zero", "winner": "home"}),
 ]
 PP_AWAY, PP_HOME = "CGY", "EDM"

@@ -81,6 +81,19 @@ class NhlMapperTest {
         assertEquals(3, c.period)
     }
 
+    /** OVER (just ended, before FINAL/OFF) is final, not "not started": it hid the bug in the closing minutes (2026-11-08). */
+    @Test
+    fun overIsFinal() {
+        val json = """{"id":2026020251,"startTimeUTC":"2026-11-06T00:00:00Z","gameState":"OVER",
+            "periodDescriptor":{"number":4,"periodType":"OT","maxRegulationPeriods":3},
+            "clock":{"secondsRemaining":0,"running":false,"inIntermission":false},
+            "awayTeam":{"abbrev":"UTA","score":3},"homeTeam":{"abbrev":"MTL","score":2}}"""
+        val g = assertNotNull(NhlMapper.landing(Json.parseToJsonElement(json).jsonObject, base))
+        assertEquals(GamePhase.FINAL, g.phase)
+        assertEquals(PeriodKind.OT, g.finalKind)
+        assertEquals(1, g.otNumber)
+    }
+
     @Test
     fun overtimeNumberAndShootout() {
         val ot = assertNotNull(landing("landing-2ot-synthetic.json"))

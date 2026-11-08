@@ -138,7 +138,9 @@ fun FullScreenHost(
         // (Score bug commit 0, docs/design/m6-score-bug.md §4.4) After the bars and the stats; before the channel list,
         // the picker, the paused card, the error card, the transient lines, the guide overlays and screen-off.
         if (scoreSource != null && scorePrefs.enabled) {
-            StableScoreBug(scoreSource, scorePlacementInput(ui, state, scorePrefs, hostFacts, textTrackOn), lowEnd)
+            // Owner ruling 20 (2026-11-08): every box gets the full score-bug animation; only "Reduce animations" gives
+            // the still version. The other overlays keep the low-end snaps.
+            StableScoreBug(scoreSource, scorePlacementInput(ui, state, scorePrefs, hostFacts, textTrackOn), lowEnd = false)
         }
         if (player != null) {
             Fade(ui.channels, lowEnd) { c -> ChannelListPanel(c, player, Modifier.offset(PlayerUi.LIST_L.dp, PlayerUi.LIST_T.dp), nowMs) }
