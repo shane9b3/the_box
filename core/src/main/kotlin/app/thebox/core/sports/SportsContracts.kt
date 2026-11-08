@@ -1,5 +1,5 @@
-// Contract (score bug commit 0): docs/design/m6-score-bug.md §1.1, §2.3, §2.6, §2.7, §4.4, §4.5, §6. Changes go
-// through the lead; every enum here is append-only.
+// Contract (score bug commit 0): docs/design/m6-score-bug.md §1.1, §2.3, §2.6, §2.7, §4.4, §4.5, §6; power-play commit 0:
+// docs/design/m6-power-play.md §1.3. Changes go through the lead; every enum here is append-only.
 package app.thebox.core.sports
 
 import kotlinx.coroutines.flow.Flow
@@ -19,7 +19,11 @@ enum class GamePhase { SCHEDULED, PRE, LIVE, INTERMISSION, FINAL, POSTPONED }
 
 enum class PeriodKind { REG, OT, SO }
 
-/** [name] is the common name ("Canadiens", U-N8); [score] is null before the game; [logo] the validated dark logo URL. */
+/**
+ * [name] is the team's name as the source gives it: the landing gives the full name ("Edmonton Oilers"), not the common
+ * name (power-play design N4); the spoken strings use it as is. [score] is null before the game; [logo] the validated
+ * dark logo URL.
+ */
 data class TeamLine(val abbrev: String, val name: String, val score: Int?, val logo: String?)
 
 /** [secondsRemaining] in the period; it counts down in intermission too (facts §4). */
@@ -42,7 +46,26 @@ data class GameSnapshot(
     val otNumber: Int?,
     val clock: GameClock?,
     val finalKind: PeriodKind?,
+    /**
+     * (Power play, docs/design/m6-power-play.md §1.2, §1.3) The power play decoded from `situation.situationCode`, or
+     * null at even strength, 4-on-4, a delayed penalty or a bad code.
+     */
+    val powerPlay: PowerPlay? = null,
+    /** (Power play §1.2) The latest entry of the landing's `summary.scoring` (landing only; null from the day list). */
+    val lastGoal: GoalFact? = null,
 )
+
+/** (Power play §1.2) [TWO_MAN] is always 5-on-3. Append-only. */
+enum class PowerPlayKind { ONE_MAN, TWO_MAN }
+
+/**
+ * (Power play §1.2) [side] has the man advantage. [secondsRemaining] is the feed's own value (owner ruling 13: no local
+ * countdown), kept only in `0..SportsConstants.PP_SECS_MAX`, else null.
+ */
+data class PowerPlay(val side: Side, val kind: PowerPlayKind, val secondsRemaining: Int?)
+
+/** (Power play §1.2) One `summary.scoring` goal: the scorer's [side], the score after it, and whether it was `strength == "pp"`. */
+data class GoalFact(val side: Side, val away: Int, val home: Int, val pp: Boolean)
 
 /** One league day. [prevDay]/[nextDay] come from the body (`prevDate`/`nextDate`); `currentDate` is authoritative (A-N10). */
 data class DayBoard(val dayKey: String, val prevDay: String?, val nextDay: String?, val games: List<GameSnapshot>)
@@ -175,6 +198,15 @@ data class ScoreBugView(
     val goalSide: Side?,
     val clockSecs: Int? = null,
     val gameId: GameId? = null,
+    /**
+     * (Power play §1.4) The shown snapshot's power play while LIVE or INTERMISSION, not SO, neither stale nor waiting;
+     * else null (`knownView()` always null).
+     */
+    val powerPlay: PowerPlay? = null,
+    /** (Power play §1.4) The goal flagged by [goalSide] was a power-play goal; set and cleared with the goal mark. */
+    val goalPp: Boolean = false,
+    /** (Power play §1.4, §7) The previous fresh view had a power play, this fresh view has none, and it flagged no goal. */
+    val ppEnded: Boolean = false,
 )
 
 /**

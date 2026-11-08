@@ -17,6 +17,8 @@ import androidx.compose.ui.graphics.toArgb
 import androidx.core.graphics.withScale
 import app.thebox.core.sports.CentreText
 import app.thebox.core.sports.GoalFrame
+import app.thebox.core.sports.PpContent
+import app.thebox.core.sports.PpFrame
 import app.thebox.core.sports.ScoreBugView
 import app.thebox.core.sports.Side
 import app.thebox.core.sports.SportsConstants as K
@@ -226,6 +228,11 @@ internal class ScoreBugPainter(
      * [GoalFrame.popScale], clamped by [clampPop], in the team's `pop` lerped to the body's own white ([fg]) by
      * [GoalFrame.popMix]; lerping to `Fg` rather than pure white lands exactly on the plain bug at the pop's end.
      * No allocation: the colour arithmetic is integer, the clamp one `measureText`.
+     *
+     * (Power play, docs/design/m6-power-play.md §3.5; commit 0 signature, WP-2 order) [pp] draws [p] right after the
+     * glass and before the body: the tab with [content], then the tint and the halo on [pillSide]; [up] mirrors the tab
+     * above the pill. [pp] or [p] null = no power-play drawing. The power-play state lives in the run, never in
+     * [ScoreBugFrame] (B2).
      */
     fun drawFrame(
         c: Canvas,
@@ -238,10 +245,16 @@ internal class ScoreBugPainter(
         g: GoalFrame?,
         glow: GlowMasks?,
         glowOn: Boolean,
+        pp: PowerPlayPainter? = null,
+        p: PpFrame? = null,
+        content: PpContent? = null,
+        pillSide: Side? = null,
+        up: Boolean = false,
     ) {
         val colours = goal?.colours
         if (goal == null || g == null || colours == null || g.done) {
             drawGlass(c, glass)
+            if (pp != null && p != null) pp.draw(c, p, content, pillSide, up)
             drawBody(c, f, logos, logoWaited, placing)
             return
         }
@@ -249,6 +262,8 @@ internal class ScoreBugPainter(
         if (glowOn && glow != null) goal.drawGlow(c, g, glow)
         // 2. Glass.
         drawGlass(c, glass)
+        // 2b. Power play (§3.5 steps 3–5): the tab, the tint, the halo.
+        if (pp != null && p != null) pp.draw(c, p, content, pillSide, up)
         // 3. Body, with the scorer's pop.
         if (g.popOn) {
             val side = goal.side

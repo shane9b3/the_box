@@ -7,7 +7,19 @@ import kotlin.math.round
  * [base]: the panel; [accent]: the lead and streak 1; [glow]: the halo; [pop]: the scorer's digit's start colour on the
  * glass (the painter only lerps it to white). [glow] and [pop] are derived from [base] and [accent], never tabled.
  */
-data class TeamColours(val base: Int, val accent: Int, val glow: Int, val pop: Int)
+data class TeamColours(
+    val base: Int,
+    val accent: Int,
+    val glow: Int,
+    val pop: Int,
+    /**
+     * (Power play, docs/design/m6-power-play.md §6.1) The power-play tab's colour: [glow] when white text passes C5 on
+     * it, else the team's other colour. Commit 0 default: [base] (WP-1 derives it).
+     */
+    val tab: Int = base,
+    /** (Power play §6.3) The pill tint's and the halo's strength, 1 down in 5 % steps until C6 passes. WP-1 derives it. */
+    val tintScale: Float = 1f,
+)
 
 /**
  * (Goal animation §3; WP-1) The NHL teams' own colours (owner ruling 12: base = the primary, accent = the official
@@ -73,6 +85,9 @@ object NhlTeamColours {
 
     /** C1 (white on base ≥ 4.5) exceptions: owner ruling 12. */
     internal val C1_EXCEPTIONS: Set<String> = setOf("PHI")
+
+    /** (Power play §6.2) C5 (white tab text ≥ `PP_C5_MIN`) exceptions: none (owner ruling 17). */
+    internal val C5_EXCEPTIONS: Set<String> = emptySet()
 
     /** Resolved once: [of] allocates nothing per call. */
     private val RESOLVED: Map<String, TeamColours> = TABLE.mapValues { (_, c) -> derive(c.first, c.second) }

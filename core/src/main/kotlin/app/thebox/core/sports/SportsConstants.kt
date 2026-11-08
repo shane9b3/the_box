@@ -173,6 +173,81 @@ object SportsConstants {
     const val GLASS_DARK = 0xFF090B10.toInt()
     const val GLASS_WHITE_ICE = 0xFF2C2F34.toInt()
 
+    // ---- power-play tab (docs/design/m6-power-play.md §11; Standard design px, Large × 1.25 unless stated)
+    /** Transition lengths: an OPEN (slide, text, shine and pulse), a CLOSE, and one PULSE (a kind change). */
+    const val PP_OPEN_MS = 1_900L
+    const val PP_CLOSE_MS = 600L
+    const val PP_PULSE_MS = 450L
+    /** Channel durations (§3.3): the slide (both ways), the tab shadow (both ways), the pill tint and halo (both ways). */
+    const val PP_SLIDE_MS = 550L
+    const val PP_SHADOW_MS = 400L
+    const val PP_TINT_MS = 600L
+    /** The text on an OPEN: delay, alpha fade, offset move; [PP_TEXT_OUT_MS] the fade and move on a CLOSE. */
+    const val PP_TEXT_DELAY_MS = 380L
+    const val PP_TEXT_ALPHA_MS = 300L
+    const val PP_TEXT_MOVE_MS = 350L
+    const val PP_TEXT_OUT_MS = 200L
+    /** The shine sweep and the label pulse on an OPEN (the pulse is 2 × [PP_PULSE_MS] halves, ×1 → [PP_PULSE_SCALE] → 1). */
+    const val PP_SHINE_DELAY_MS = 500L
+    const val PP_SHINE_MS = 900L
+    const val PP_PULSE_DELAY_MS = 1_000L
+    const val PP_PULSE_SCALE = 1.07f
+    /** No shine or pulse on an OPEN that starts with `from.slide` above this (a reversed close). */
+    const val PP_REVERSE_SLIDE_MAX = 0.05f
+    /** The tab (§4.1): side inset (width 404 − 2 × 31 = 342), visible depth, overlap hidden under the pill, far-corner radius. */
+    const val PP_TAB_INSET = 31f
+    const val PP_TAB_DEPTH = 36f
+    const val PP_TAB_HIDDEN = 20f
+    const val PP_TAB_RADIUS = 18f
+    /** The tab's type (Instrument Sans Bold), tracking in em, the label → time gap and the divider (white × alpha). */
+    const val PP_TEXT_PX = 20f
+    const val PP_TRACK_EM = 0.05f
+    const val PP_GAP = 10f
+    const val PP_DIVIDER_W = 1f
+    const val PP_DIVIDER_H = 16f
+    const val PP_DIVIDER_ALPHA = 0.5f
+    /** The text's hard shadow (no blur): dy and black alpha. */
+    const val PP_TEXT_SHADOW_DY = 1f
+    const val PP_TEXT_SHADOW_ALPHA = 0.35f
+    /** The text centre from the pill edge (§4.1). */
+    const val PP_TEXT_CENTRE = 18f
+    /** The slide travel and the text's offset toward the pill at the start of its move. */
+    const val PP_TRAVEL = 40f
+    const val PP_TEXT_DY = 4f
+    /** The shine band: width, alpha, left edge travel (tab-local). */
+    const val PP_SHINE_W = 31f
+    const val PP_SHINE_ALPHA = 0.25f
+    const val PP_SHINE_FROM = -72f
+    const val PP_SHINE_TO = 425f
+    /** The tab shadow: dy (Standard 5, Large 6), σ (× d at both sizes, not × 1.25; N1) and alpha. */
+    const val PP_SHADOW_DY = 5f
+    const val PP_SHADOW_DY_LARGE = 6f
+    const val PP_SHADOW_SIGMA = 8f
+    const val PP_SHADOW_ALPHA = 0.5f
+    /** The logo halo: σ (Standard 4, Large 5) and alpha (× `TeamColours.tintScale`). */
+    const val PP_HALO_SIGMA = 4f
+    const val PP_HALO_SIGMA_LARGE = 5f
+    const val PP_HALO_ALPHA = 0.95f
+    /** The pill tint's horizontal gradient from the power-play end: stop positions and alphas (× `tintScale`). */
+    val PP_TINT_STOPS: List<Float> = listOf(0f, 0.25f, 0.58f)
+    val PP_TINT_ALPHAS: List<Float> = listOf(0.9f, 0.5f, 0f)
+    /** The tab's vertical gradient (§6.1): `mixBlack(tab, k)` at each stop, dark at the pill side (ruling 17: .10 far). */
+    val PP_GRADIENT_STOPS: List<Float> = listOf(0f, 0.5f, 1f)
+    val PP_GRADIENT_BLACK: List<Float> = listOf(0.70f, 0.28f, 0.10f)
+    /** C5 (white tab text, measured at gradient position [PP_C5_POINT]) and C6 (white digits on the tint, at x [PP_C6_X] of 404). */
+    const val PP_C5_MIN = 4.5
+    const val PP_C5_POINT = 0.80f
+    const val PP_C6_MIN = 4.5
+    const val PP_C6_X = 92f
+    /** `TeamColours.tintScale` drops from 1 in these steps until C6 passes (§6.3). */
+    const val PP_TINT_SCALE_STEP = 0.05f
+    /** The feed's seconds are kept only in 0..this (so `m:ss` is never 5 glyphs, N2). */
+    const val PP_SECS_MAX = 599
+    /** `ScoreBugPlacement.tabAllowed` inflates the tab box by this (the shadow's reach, N8). */
+    const val PP_TAB_NEIGHBOUR = 29f
+    /** The label masks are rasterised at this multiple of the rest size (the pulse never re-rasterises a glyph). */
+    const val PP_LABEL_ATLAS_SCALE = 1.25f
+
     // ---- place mode (§6)
     const val PLACE_RING_W = 3f
     const val PLACE_HINT_PX = 22

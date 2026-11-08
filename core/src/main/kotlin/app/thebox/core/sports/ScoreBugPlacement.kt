@@ -63,6 +63,20 @@ object ScoreBugPlacement {
         return true
     }
 
+    /**
+     * (Power play, docs/design/m6-power-play.md §4.2, §4.4; WP-1) The power-play tab's resting box (design px) for the
+     * placed pill [box]: below the pill for an effective top corner, above it for a bottom one (after
+     * [PlacementInput.textTrackOn]), at [input]'s size.
+     */
+    fun tabBox(input: PlacementInput, box: Box): Box = TODO("WP-1: power-play design §4.4")
+
+    /**
+     * (Power play §4.4; WP-1) Whether the tab may show for the placed pill [box]: false in place mode, or when an active
+     * overlay (channel list, stats, group card, picker, number entry, probing line) intersects [tabBox] inflated by
+     * [SportsConstants.PP_TAB_NEIGHBOUR]. False closes only the tab track; the pill track stays (S3).
+     */
+    fun tabAllowed(input: PlacementInput, geo: OverlayGeometry, box: Box): Boolean = TODO("WP-1: power-play design §4.4")
+
     /** The resting box of [corner] at [size] (§4.3). */
     fun cornerBox(corner: ScoreCorner, size: ScoreBugSize): Box {
         val w = width(size)

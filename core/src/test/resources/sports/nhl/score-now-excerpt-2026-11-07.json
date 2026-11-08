@@ -1,0 +1,116 @@
+{
+"source": "/v1/score/now -> /v1/score/2026-11-07 at 22:55:42 UTC",
+"games": [
+{
+"id": 2026020265,
+"away": "FLA",
+"home": "WSH",
+"gameState": "OFF",
+"clock": {
+"timeRemaining": "00:00",
+"secondsRemaining": 0,
+"running": false,
+"inIntermission": false
+},
+"situation": null
+},
+{
+"id": 2026020266,
+"away": "STL",
+"home": "NSH",
+"gameState": "OFF",
+"clock": {
+"timeRemaining": "00:00",
+"secondsRemaining": 0,
+"running": false,
+"inIntermission": false
+},
+"situation": null
+},
+{
+"id": 2026020267,
+"away": "NYR",
+"home": "SEA",
+"gameState": "LIVE",
+"clock": {
+"timeRemaining": "08:36",
+"secondsRemaining": 516,
+"running": false,
+"inIntermission": true
+},
+"situation": null
+},
+{
+"id": 2026020268,
+"away": "MTL",
+"home": "TOR",
+"gameState": "FUT",
+"clock": null,
+"situation": null
+},
+{
+"id": 2026020269,
+"away": "UTA",
+"home": "OTT",
+"gameState": "FUT",
+"clock": null,
+"situation": null
+},
+{
+"id": 2026020270,
+"away": "NJD",
+"home": "NYI",
+"gameState": "FUT",
+"clock": null,
+"situation": null
+},
+{
+"id": 2026020271,
+"away": "CHI",
+"home": "CAR",
+"gameState": "FUT",
+"clock": null,
+"situation": null
+},
+{
+"id": 2026020272,
+"away": "SJS",
+"home": "DAL",
+"gameState": "FUT",
+"clock": null,
+"situation": null
+},
+{
+"id": 2026020273,
+"away": "TBL",
+"home": "MIN",
+"gameState": "FUT",
+"clock": null,
+"situation": null
+},
+{
+"id": 2026020274,
+"away": "DET",
+"home": "COL",
+"gameState": "FUT",
+"clock": null,
+"situation": null
+},
+{
+"id": 2026020275,
+"away": "PIT",
+"home": "LAK",
+"gameState": "FUT",
+"clock": null,
+"situation": null
+},
+{
+"id": 2026020276,
+"away": "VAN",
+"home": "EDM",
+"gameState": "FUT",
+"clock": null,
+"situation": null
+}
+]
+}

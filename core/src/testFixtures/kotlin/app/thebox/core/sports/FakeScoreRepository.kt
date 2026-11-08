@@ -106,7 +106,23 @@ object SportsFixtures {
         finalKind: PeriodKind? = null,
         dayKey: String = "2026-11-05",
         startUtcMs: Long = 1_793_923_200_000L, // 2026-11-06T00:00:00Z
-    ): GameSnapshot = GameSnapshot(GameId(League.NHL, id), dayKey, startUtcMs, phase, away, home, period, periodKind, otNumber, clock, finalKind)
+        powerPlay: PowerPlay? = null,
+        lastGoal: GoalFact? = null,
+    ): GameSnapshot = GameSnapshot(
+        GameId(League.NHL, id), dayKey, startUtcMs, phase, away, home, period, periodKind, otNumber, clock, finalKind,
+        powerPlay, lastGoal,
+    )
+
+    /**
+     * (Power play commit 0, S7) The default live game ([game]) with [side] on a [kind] power play, [secs] left on it
+     * (null = the feed gave none). Any other [game] parameter can be passed through [base].
+     */
+    fun ppGame(
+        side: Side = Side.HOME,
+        kind: PowerPlayKind = PowerPlayKind.ONE_MAN,
+        secs: Int? = 79,
+        base: GameSnapshot = game(),
+    ): GameSnapshot = base.copy(powerPlay = PowerPlay(side, kind, secs))
 
     fun board(vararg games: GameSnapshot, dayKey: String = "2026-11-05"): DayBoard =
         DayBoard(dayKey, prevDay = "2026-11-04", nextDay = "2026-11-06", games = games.toList())
@@ -122,5 +138,6 @@ object SportsFixtures {
         goalSide = null,
         clockSecs = game.clock?.secondsRemaining?.coerceAtLeast(0),
         gameId = game.id, // goal animation §5.1: the machine sets it on every view
+        powerPlay = game.powerPlay, // power play §1.4: a fresh LIVE view carries the snapshot's power play
     )
 }
