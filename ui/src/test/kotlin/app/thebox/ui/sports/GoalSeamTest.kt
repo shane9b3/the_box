@@ -8,6 +8,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import app.thebox.core.sports.FakeScoreRepository
 import app.thebox.core.sports.NhlTeamColours
+import app.thebox.core.sports.PpLabel
 import app.thebox.core.sports.ScoreBugPlacement
 import app.thebox.core.sports.Side
 import app.thebox.core.sports.SportsConstants as K
@@ -51,21 +52,26 @@ class GoalSeamTest {
     /** `takeoverOn` as the real `begin` saw it, once per begin: it must be false (the painter is begun first). */
     private val onAtBegin = mutableListOf<Boolean>()
 
-    private fun hooks(context: CoroutineContext) = GoalHooks(
+    /** [glow] false: no goal glow outside the pill, so the tab region holds only the tab (the power-play seam test). */
+    private fun hooks(context: CoroutineContext, glow: Boolean = true) = GoalHooks(
         begin = { p, side, c, badge, abbrev, a, h ->
             onAtBegin += probe.takeoverOn!!.value
             GoalHooks.Default.begin(p, side, c, badge, abbrev, a, h)
         },
         probe = probe,
+        glowAllowed = { p, g, b, m -> glow && ScoreBugPlacement.glowAllowed(p, g, b, m) },
+        // Power play: the real timeline once WP-2 lands (the commit-0 TODO() falls back to a stand-in), the real painter.
+        ppSampler = PpTestSamplers.RealOrFake,
+        tabAllowed = { _, _, _ -> true },
         context = context,
         background = EmptyCoroutineContext,
     )
 
     /** [context] = a `MotionDurationScale` of 0 for the still path. */
-    private fun start(context: CoroutineContext = EmptyCoroutineContext) {
+    private fun start(context: CoroutineContext = EmptyCoroutineContext, glow: Boolean = true) {
         repo.bug.value = ScoreBugFixtures.view(clockSecs = 1200)
         rule.mainClock.autoAdvance = false
-        val hooks = hooks(context)
+        val hooks = hooks(context, glow)
         rule.setContent {
             BoxDesignScale {
                 ScoreBugWith(repo, ScoreBugFixtures.input(), ScoreBugFixtures.noGeometry, false, Modifier, ScoreBugPlacement::place, hooks)
@@ -234,6 +240,49 @@ class GoalSeamTest {
 
     @Test
     fun theStillPathNeverShowsTheNewScoreBeforeFrameA() = theNewScoreIsNeverSeenBeforeTheTakeoverCoversIt(still = true)
+
+    /**
+     * Power play §9.4: a real power-play goal through [ScoreBugWith]. From the goal view's first frame until the lead covers
+     * the pill, every pixel of the tab region equals the frame before (the tab shows the words it had, pinned); then the
+     * tab says PP GOAL. The painter is the real [PowerPlayPainter]; the pixel check is only strong once WP-2's painter draws
+     * a tab, and the content check (what the composite was handed) is strong already.
+     */
+    private fun aPowerPlayGoalHoldsTheTabThenSaysPpGoal(still: Boolean) {
+        start(if (still) FixedScale(0f) else EmptyCoroutineContext, glow = false)
+        repo.bug.value = ScoreBugFixtures.ppView("EDM", Side.HOME, opponent = "CGY", secs = 79)
+        rule.mainClock.advanceTimeBy(2500)
+        rule.waitForIdle()
+        val before = shot()
+        assertEquals("the tab is drawn at rest", PpLabel.ONE_MAN, probe.pp.lastDrawContent!!.label)
+        // The tab below the pill (top right): x 31..373, y pillH .. pillH + 36.
+        val cx = K.SCORE_W / 2f
+        val cy = K.SCORE_H + 18f
+        repo.bug.value = ScoreBugFixtures.ppGoalView("EDM", Side.HOME, opponent = "CGY")
+        var frames = 0
+        while (true) {
+            rule.mainClock.advanceTimeByFrame()
+            rule.waitForIdle()
+            val covered = on() && (still || t() >= GoalTimeline.LEAD_COVERED_MS)
+            val shot = shot()
+            if (covered) {
+                assertEquals("PP GOAL once the lead covers the pill (t = ${t()})", PpLabel.PP_GOAL, probe.pp.lastDrawContent!!.label)
+                break
+            }
+            assertEquals("frame $frames: the held words (t = ${if (on()) t() else -1f})", PpLabel.ONE_MAN, probe.pp.lastDrawContent!!.label)
+            assertEquals("frame $frames: the tab region is the previous frame's", 0, diff(shot, before, cx, cy, 160f, 14f))
+            check(++frames < 100) { "the takeover never covered the pill" }
+        }
+        // And it stays PP GOAL until the release at 3 600.
+        advanceTo(3_000f)
+        shot()
+        assertEquals(PpLabel.PP_GOAL, probe.pp.lastDrawContent!!.label)
+    }
+
+    @Test
+    fun aPowerPlayGoalHoldsTheTabUntilTheLeadCoversThenDrawsPpGoal() = aPowerPlayGoalHoldsTheTabThenSaysPpGoal(still = false)
+
+    @Test
+    fun theStillPathSwapsTheTabToPpGoalAtFrameA() = aPowerPlayGoalHoldsTheTabThenSaysPpGoal(still = true)
 
     private class FixedScale(override val scaleFactor: Float) : MotionDurationScale
 }

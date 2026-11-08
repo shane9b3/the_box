@@ -34,9 +34,12 @@ import java.util.concurrent.TimeUnit
  *   another (e.g. `http://10.0.2.2:8080`).
  * Without `goalFrames=1` the test is skipped.
  *
- * Anchoring (code review 2026-11-07 S3): the test re-anchors the featured game itself (`POST /admin/sports
- * {"restart": true}`: the CGY goal lands about 165 s later, plus the 20 s CDN bucket and the poll), then waits for the
- * takeover to **start** before it opens the 5 s window. The start is a burst of the bug's own draws
+ * Anchoring (code review 2026-11-07 S3; power-play review B3): the test re-anchors the featured game itself (`POST
+ * /admin/sports {"restart": true}`: the CGY goal lands about 165 s later, plus the 20 s CDN bucket and the poll). It arms
+ * on the **score change**: it polls the panel's `GET /admin/sports` for the featured game's score to rise above the one
+ * read right after the re-anchor, and only then waits for the takeover to **start**; it no longer arms on the first draw
+ * burst (a power-play reveal or a fade could be one). The panel's `sports_pp` stays off, so the default timeline (and
+ * this test's window) is unchanged. The start is a burst of the bug's own draws
  * ([DRAWS_SCORE_BUG], debug builds): at rest the bug draws once per snapshot and its fade and slide never redraw it, so
  * [BURST_DRAWS] draws inside [BURST_WINDOW_MS] is only the takeover. The idle window then starts 1 s after the
  * takeover's measured **end** (the last draw before [QUIET_MS] without one), not at a fixed offset.
@@ -64,7 +67,7 @@ class GoalFramesTest : PlayerTestBase() {
         val restarted = restartSports(sportsBase)
         assumeTrue("the panel at $sportsBase serves no sports (start it with --sports)", restarted.optBoolean("enabled"))
         log("sports re-anchored at ${restarted.optDouble("anchor_unix")}; waiting for the CGY goal's takeover")
-        val startedAt = awaitTakeoverStart(GOAL_TIMEOUT_MS)
+        val startedAt = awaitTakeoverStart(sportsBase, GOAL_TIMEOUT_MS)
 
         val totals = Collections.synchronizedList(ArrayList<Long>())
         val thread = HandlerThread("goal-frames").apply { start() }
@@ -127,9 +130,39 @@ class GoalFramesTest : PlayerTestBase() {
 
     private fun draws() = GuideDebugCounters.count(DRAWS_SCORE_BUG)
 
-    /** Polls the draw counter until [BURST_DRAWS] draws land inside [BURST_WINDOW_MS]; returns the burst's first sample. */
-    private fun awaitTakeoverStart(timeoutMs: Long): Long {
+    /** The featured game's score total (`away + home`) from `GET /admin/sports`, as the panel serves it for this CDN bucket. */
+    private fun featuredScore(base: String): Int {
+        val http = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).build()
+        return http.newCall(Request.Builder().url("$base/admin/sports").get().build()).execute().use { r ->
+            val text = r.body.string()
+            check(r.isSuccessful) { "panel /admin/sports -> ${r.code}: $text" }
+            val json = JSONObject(text)
+            val id = json.optString("featured")
+            val games = json.getJSONArray("games")
+            for (i in 0 until games.length()) {
+                val g = games.getJSONObject(i)
+                if (g.optString("id") != id) continue
+                val st = g.getJSONObject("state")
+                return@use st.optInt("away", 0) + st.optInt("home", 0)
+            }
+            error("the featured game $id is not in the panel's slate")
+        }
+    }
+
+    /**
+     * Waits for the featured game's score to rise (B3: the arm is the score change, not a draw burst), then polls the draw
+     * counter until [BURST_DRAWS] draws land inside [BURST_WINDOW_MS]; returns the burst's first sample. The burst is
+     * counted from the score change on, so a draw burst before the goal can never be taken for the takeover.
+     */
+    private fun awaitTakeoverStart(base: String, timeoutMs: Long): Long {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
+        val baseline = featuredScore(base)
+        while (featuredScore(base) <= baseline) {
+            if (SystemClock.uptimeMillis() >= deadline) {
+                throw AssertionError("the featured score never rose within ${timeoutMs / 1000} s of the re-anchor (is the panel's sports on?)")
+            }
+            Thread.sleep(SCORE_POLL_MS)
+        }
         val times = ArrayDeque<Long>()
         val counts = ArrayDeque<Int>()
         while (SystemClock.uptimeMillis() < deadline) {
@@ -162,6 +195,8 @@ class GoalFramesTest : PlayerTestBase() {
         /** 165 s to the goal after the re-anchor, a 20 s CDN bucket, the app's poll, and slack. */
         const val GOAL_TIMEOUT_MS = 300_000L
         const val POLL_MS = 50L
+        /** The score poll: the panel's score only moves once per 20 s CDN bucket. */
+        const val SCORE_POLL_MS = 500L
         const val BURST_WINDOW_MS = 500L
         /** A 60 Hz takeover draws about 30 times in 500 ms; a fade (≤ 300 ms) could not reach this even if it redrew. */
         const val BURST_DRAWS = 20
