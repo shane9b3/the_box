@@ -116,8 +116,8 @@ internal object ScoreBugFixtures {
     ) = goalView(team, side, opponent, away, home, seq, gameId).copy(powerPlay = after, goalPp = true)
 
     val live = view()
-    val intermission = view(bottom = CentreText.Intermission(PeriodLabel(PeriodKind.REG, 1)))
-    val endOf = view(bottom = CentreText.EndOf(PeriodLabel(PeriodKind.REG, 1)))
+    val intermission = view(top = CentreText.Intermission(PeriodLabel(PeriodKind.REG, 1)), bottom = null)
+    val endOf = view(top = CentreText.EndOf(PeriodLabel(PeriodKind.REG, 1)), bottom = null)
     val overtime = view(bottom = CentreText.Period(PeriodLabel(PeriodKind.OT, 1)), away = 3, home = 3)
     val secondOvertime = view(bottom = CentreText.Period(PeriodLabel(PeriodKind.OT, 2)), away = 3, home = 3)
     val shootout = view(top = CentreText.Shootout, bottom = null, away = 3, home = 3)

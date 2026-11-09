@@ -140,3 +140,8 @@ display it", starting low "like 2-4 seconds so its almost live".
     time.
 32. **NFL floor is 5 s** (ESPN rate limits are unknown; the owner chose the safer floor over 2 s). The proposal's 2/3/4 s
     NFL choices are dropped and Auto never recommends under 5 s.
+
+## Hockey breaks (owner, 2026-11-08)
+33. **No clock in a hockey break.** The centre column is one line: "End 1st" at 0:00 before the intermission starts,
+    then "1st INT" through the intermission (no countdown, no frozen clock). Amends ruling 6 for breaks only; play keeps
+    the feed's clock.

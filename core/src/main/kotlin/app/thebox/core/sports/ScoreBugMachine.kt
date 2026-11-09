@@ -280,8 +280,9 @@ class ScoreBugMachine(
         var bottom: CentreText? = when {
             s.phase == GamePhase.FINAL -> { top = CentreText.Final(s.finalKind ?: PeriodKind.REG); null }
             s.periodKind == PeriodKind.SO -> { top = CentreText.Shootout; null }
-            s.phase == GamePhase.INTERMISSION -> CentreText.Intermission(label)
-            s.clock?.let { it.secondsRemaining <= 0 && !it.running && !it.inIntermission } == true -> CentreText.EndOf(label)
+            // (Owner ruling 33, 2026-11-08) A break is one line with no clock: "End 1st" at 0:00, then "1st INT".
+            s.phase == GamePhase.INTERMISSION -> { top = CentreText.Intermission(label); null }
+            s.clock?.let { it.secondsRemaining <= 0 && !it.running && !it.inIntermission } == true -> { top = CentreText.EndOf(label); null }
             else -> CentreText.Period(label)
         }
         val goal = goalSide.takeIf { markUntil?.let { now < it } == true }

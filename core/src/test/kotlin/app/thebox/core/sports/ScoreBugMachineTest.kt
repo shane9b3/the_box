@@ -346,7 +346,8 @@ class ScoreBugMachineTest {
         r.at(80_000) // intermission: max(60 s, 2 × 40 s)
         val v = assertNotNull(r.m.view())
         assertEquals(CentreText.NoUpdate, v.bottom)
-        assertEquals(958, v.clockSecs)
+        assertEquals(CentreText.Intermission(PeriodLabel(PeriodKind.REG, 1)), v.top)
+        assertNull(v.clockSecs, "ruling 33: no clock in a break")
     }
 
     @Test
@@ -383,16 +384,17 @@ class ScoreBugMachineTest {
         r.at(80_000)
         r.ok(live(secs = 1200, period = 3))
         assertEquals(1200, r.m.view()!!.clockSecs)
-        // Intermission: the snapshot value too, never counted down locally.
+        // Intermission (ruling 33): one line, no clock at all.
         r.at(100_000)
         r.ok(live(inInt = true, running = false, phase = GamePhase.INTERMISSION, secs = 958, period = 3))
         r.at(139_000)
-        assertEquals(958, r.m.view()!!.clockSecs)
-        // Negative feed values read 0; one-line states carry no clock.
+        assertNull(r.m.view()!!.clockSecs)
+        // A negative feed value at the end of a period is "End 3rd", one line with no clock.
         r.at(140_000)
         r.ok(live(secs = -3, running = false, period = 3))
-        assertEquals(0, r.m.view()!!.clockSecs)
-        assertEquals(CentreText.EndOf(PeriodLabel(PeriodKind.REG, 3)), r.m.view()!!.bottom)
+        assertNull(r.m.view()!!.clockSecs)
+        assertEquals(CentreText.EndOf(PeriodLabel(PeriodKind.REG, 3)), r.m.view()!!.top)
+        assertNull(r.m.view()!!.bottom)
         r.at(160_000)
         r.ok(final())
         assertNull(r.m.view()!!.clockSecs)
@@ -450,10 +452,10 @@ class ScoreBugMachineTest {
         assertEquals(CentreText.Clock to CentreText.Period(PeriodLabel(PeriodKind.OT, 2)), pair(viewOf(live(period = 5, kind = PeriodKind.OT, ot = 2))))
         assertEquals(CentreText.Shootout to null, pair(viewOf(live(period = 5, kind = PeriodKind.SO, secs = 0, running = false))))
         assertEquals(
-            CentreText.Clock to CentreText.Intermission(PeriodLabel(PeriodKind.REG, 1)),
+            CentreText.Intermission(PeriodLabel(PeriodKind.REG, 1)) to null,
             pair(viewOf(live(inInt = true, running = false, phase = GamePhase.INTERMISSION, secs = 958, period = 1))),
         )
-        assertEquals(CentreText.Clock to CentreText.EndOf(PeriodLabel(PeriodKind.REG, 3)), pair(viewOf(live(secs = 0, running = false, period = 3))))
+        assertEquals(CentreText.EndOf(PeriodLabel(PeriodKind.REG, 3)) to null, pair(viewOf(live(secs = 0, running = false, period = 3))))
         assertEquals(CentreText.Final(PeriodKind.OT) to null, pair(viewOf(final(kind = PeriodKind.OT))))
         assertEquals(CentreText.Final(PeriodKind.SO) to null, pair(viewOf(final(kind = PeriodKind.SO))))
         val v = viewOf(live())

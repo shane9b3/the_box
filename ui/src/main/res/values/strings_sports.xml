@@ -45,7 +45,7 @@
     <!-- %5$s = the clock ("10:22"), %6$s = the period ("1st", "OT"). -->
     <string name="sports_desc_live">%1$s %2$d, %3$s %4$d, %5$s left in the %6$s</string>
     <!-- %5$s = the period ("1st"), %6$s = the intermission clock. -->
-    <string name="sports_desc_intermission">%1$s %2$d, %3$s %4$d, %5$s intermission, %6$s left</string>
+    <string name="sports_desc_intermission">%1$s %2$d, %3$s %4$d, %5$s intermission</string>
     <!-- %5$s = the period ("1st"). -->
     <string name="sports_desc_end_of">%1$s %2$d, %3$s %4$d, end of the %5$s</string>
     <string name="sports_desc_shootout">%1$s %2$d, %3$s %4$d, shootout</string>

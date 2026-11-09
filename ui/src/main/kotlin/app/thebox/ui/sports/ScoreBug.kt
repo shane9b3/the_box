@@ -1309,8 +1309,9 @@ internal class Describe(private val res: Resources, private val v: ScoreBugView)
             v.top is CentreText.Final -> f(R.string.sports_desc_final, SportsText.final(res, (v.top as CentreText.Final).kind))
             b is CentreText.NoUpdate -> f(R.string.sports_desc_no_update)
             b is CentreText.Delayed -> f(R.string.sports_desc_delayed)
-            b is CentreText.Intermission -> f(R.string.sports_desc_intermission, SportsText.period(res, b.period), SportsText.clock(secs))
-            b is CentreText.EndOf -> f(R.string.sports_desc_end_of, SportsText.period(res, b.period))
+            // (Ruling 33) A break is a one-line top with no clock.
+            v.top is CentreText.Intermission -> f(R.string.sports_desc_intermission, SportsText.period(res, (v.top as CentreText.Intermission).period))
+            v.top is CentreText.EndOf -> f(R.string.sports_desc_end_of, SportsText.period(res, (v.top as CentreText.EndOf).period))
             b is CentreText.Period -> f(R.string.sports_desc_live, SportsText.clock(secs), SportsText.period(res, b.period))
             // A clock with no period line (the place-mode sample): just the score.
             else -> res.getString(R.string.sports_quick_score, a.abbrev, a.score ?: 0, h.score ?: 0, h.abbrev)
