@@ -34,8 +34,13 @@ import kotlin.coroutines.resumeWithException
  * Conditional GET to `dest.part`, then rename to [dest] (docs/design/m1-data-layer.md §1.6, §4.1).
  * - `If-None-Match` / `If-Modified-Since` from the request; 304 → `notModified`, [dest] untouched.
  * - The body streams to disk (never into memory); more than `maxBytes` aborts with Unsupported and
- *   deletes the part file. No `Accept-Encoding` is set, so OkHttp decodes `Content-Encoding: gzip`
- *   transparently; `.gz` files land compressed and are sniffed by `Compression`.
+ *   deletes the part file.
+ * - `Accept-Encoding: gzip` is sent explicitly, so OkHttp does not inflate the body: a gzip response is stored as
+ *   it came (about a tenth of the flash writes, performance review H2) and `maxBytes` counts stored bytes. Every
+ *   reader goes through `Compression.decompress`, which goes by magic bytes (never by header) and unwraps up to
+ *   three layers, so plain bodies, `.gz` files and a `.gz` file sent with `Content-Encoding: gzip` all read back.
+ *   A caller's own `Accept-Encoding` header wins. Only this fetcher does it: `XtreamClient` sniffs raw bytes.
+ * - Logs name the host only: paths and queries can carry tokens (security review F6).
  * - Coroutine cancellation cancels the call and deletes the part file.
  */
 class OkHttpSourceFetcher @Inject constructor(
@@ -49,6 +54,7 @@ class OkHttpSourceFetcher @Inject constructor(
         val httpRequest = try {
             val builder = Request.Builder().url(request.url)
             for ((k, v) in request.headers) builder.header(k, v)
+            if (request.headers.keys.none { it.equals(ACCEPT_ENCODING, ignoreCase = true) }) builder.header(ACCEPT_ENCODING, "gzip")
             request.etag?.let { builder.header("If-None-Match", it) }
             request.lastModified?.let { builder.header("If-Modified-Since", it) }
             builder.build()
@@ -68,7 +74,7 @@ class OkHttpSourceFetcher @Inject constructor(
                 val etag = response.header("ETag")
                 val lastModified = response.header("Last-Modified")
                 if (response.code == 304) {
-                    BoxLog.i(TAG) { "not modified: ${request.url}" }
+                    BoxLog.i(TAG) { "not modified: ${Redact.host(request.url)}" }
                     return@withContext Outcome.Ok(
                         FetchResult(true, 0, etag ?: request.etag, lastModified ?: request.lastModified, null, null),
                     )
@@ -99,7 +105,7 @@ class OkHttpSourceFetcher @Inject constructor(
                 if (dest.exists() && !dest.delete()) throw IOException("cannot replace ${dest.name}")
                 if (!part.renameTo(dest)) throw IOException("cannot rename ${part.name}")
                 val contentType = body.contentType()
-                BoxLog.i(TAG) { "fetched ${request.url}: $total bytes" }
+                BoxLog.i(TAG) { "fetched ${Redact.host(request.url)}: $total bytes" }
                 Outcome.Ok(FetchResult(false, total, etag, lastModified, contentType?.let { "${it.type}/${it.subtype}" }, contentType?.charset()?.name()))
             }
         } catch (e: CancellationException) {
@@ -108,7 +114,7 @@ class OkHttpSourceFetcher @Inject constructor(
         } catch (e: IOException) {
             part.delete()
             coroutineContext.ensureActive() // "Canceled" from call.cancel() above: rethrow as cancellation
-            BoxLog.w(TAG, "fetch failed for ${request.url}: ${e.javaClass.simpleName}")
+            BoxLog.w(TAG, "fetch failed for ${Redact.host(request.url)}: ${e.javaClass.simpleName}")
             Outcome.Err(NetErrors.fromIo(e))
         } finally {
             onCancel.dispose()
@@ -120,6 +126,7 @@ class OkHttpSourceFetcher @Inject constructor(
     companion object {
         private const val TAG = "OkHttpSourceFetcher"
         private const val BUFFER = 64 * 1024
+        private const val ACCEPT_ENCODING = "Accept-Encoding"
     }
 }
 

@@ -136,7 +136,9 @@ private class DescriptionScrollState {
             val scrollMs = (over / pxPerMs).toLong().coerceAtLeast(1L)
             while (true) {
                 delay(DescriptionScroll.HOLD_MS)
-                tween(scrollMs) { t -> offset = over * t }
+                // M8 (performance review 2026-11-09): whole pixels only. An equal write does not invalidate, so the
+                // layer re-draws about SPEED times a second instead of every vsync, with the same pixels and timing.
+                tween(scrollMs) { t -> offset = (over * t).roundToInt().toFloat() }
                 delay(DescriptionScroll.HOLD_MS)
                 tween(DescriptionScroll.FADE_MS / 2) { t -> alpha = 1f - t }
                 offset = 0f

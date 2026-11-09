@@ -122,4 +122,21 @@ class TimeBaseFactoryTest {
         val device = factory.forM3u(TimeBaseSettings(tokenZone = TokenZoneSetting.Device))
         assertEquals(ZoneId.of("Australia/Sydney"), device.effectiveTemplateZone)
     }
+
+    @Test
+    fun fromStoredAppliesTheTokenZoneAndPaddingClampLikeFromAccount() {
+        // Correctness review F3: the Xtream fallback with no account row used to ignore these.
+        val zone = ZoneId.of("Europe/Berlin")
+        val settings = TimeBaseSettings(tokenZone = TokenZoneSetting.Utc, correctionHours = 1.0, paddingBeforeSec = -5, paddingAfterSec = 30)
+        val tb = factory.fromStored(zone, ZoneOffset.ofHours(1), Duration.ofSeconds(7), settings)
+        assertEquals(zone, tb.serverZone)
+        assertEquals(ZoneOffset.ofHours(1), tb.serverOffset)
+        assertEquals(Duration.ofSeconds(7), tb.clockSkew)
+        assertEquals(ZoneOffset.UTC, tb.tokenZone)
+        assertEquals(1.0, tb.correctionHours)
+        assertEquals(Duration.ZERO, tb.paddingBefore)
+        assertEquals(Duration.ofSeconds(30), tb.paddingAfter)
+        assertNull(tb.templateZone, "an Xtream playlist keeps the panel zone for template tokens")
+        assertEquals(ZoneId.of("Australia/Sydney"), factory.fromStored(null, null, Duration.ZERO, TimeBaseSettings(tokenZone = TokenZoneSetting.Device)).tokenZone)
+    }
 }

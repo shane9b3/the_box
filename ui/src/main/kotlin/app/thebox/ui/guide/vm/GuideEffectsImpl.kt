@@ -247,7 +247,15 @@ class GuideEffectsImpl(
         }
         val access = legacyParentalAccess(settings.settings.value.debugUnlocked) // (M5 commit 0, S10)
         launchSafely("number") {
-            val ch = library.byNumber(playlistId, number, access = access)
+            val ch = try {
+                library.byNumber(playlistId, number, access = access)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                // U4 (code review 2026-11-09): answer anyway; with no answer the committing overlay never closes.
+                BoxLog.w(TAG, "number failed: ${e.javaClass.simpleName}")
+                null
+            }
             val index = ch?.let { rows()?.indexOf(it.rowId) } ?: -1
             dispatch(GuideEvent.Number(token, ch, index))
         }

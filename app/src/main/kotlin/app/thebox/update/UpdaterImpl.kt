@@ -349,8 +349,12 @@ class UpdaterImpl @Inject constructor(
 
     private fun needsPermission(): Boolean = Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()
 
-    private fun runInstall(file: File) {
+    /** A session is being created and written (A4: on [io]); a second Update press must not start another. Main. */
+    private var installStarting = false
+
+    private suspend fun runInstall(file: File) {
         val m = offer?.first ?: return
+        if (installStarting) return
         if (needsPermission()) {
             _state.value = UpdateState.NeedsPermission(m.versionName)
             try {
@@ -365,32 +369,45 @@ class UpdaterImpl @Inject constructor(
         _state.value = UpdateState.Installing
         store.update(UpdateDomain) { it.copy(lastInstalledNotice = m.versionCode) }
         appScope.launch(Dispatchers.Main) { store.flush() }
-        installer.install(file, context.packageName) { status ->
-            when (status) {
-                InstallStatus.PendingUserAction -> {
-                    _state.value = UpdateState.Installing
-                    watchUnansweredConfirmation()
+        installStarting = true
+        try {
+            installer.install(file, context.packageName, io) { status ->
+                when (status) {
+                    InstallStatus.PendingUserAction -> {
+                        _state.value = UpdateState.Installing
+                        watchUnansweredConfirmation(session = true)
+                    }
+                    // A3 (code review 2026-11-09): the system installer sends no result; a return to the app without
+                    // the update installed means the user backed out.
+                    InstallStatus.FallbackStarted -> {
+                        _state.value = UpdateState.Installing
+                        watchUnansweredConfirmation(session = false)
+                    }
+                    InstallStatus.Success -> _state.value = UpdateState.Installing
+                    InstallStatus.Cancelled -> _state.value = UpdateState.ReadyToInstall(m.versionName)
+                    is InstallStatus.Blocked -> fail(UpdateFailure.INSTALL_BLOCKED, status.message)
+                    is InstallStatus.Failed -> fail(UpdateFailure.INSTALL_FAILED, status.message)
                 }
-                InstallStatus.FallbackStarted -> _state.value = UpdateState.Installing
-                InstallStatus.Success -> _state.value = UpdateState.Installing
-                InstallStatus.Cancelled -> _state.value = UpdateState.ReadyToInstall(m.versionName)
-                is InstallStatus.Blocked -> fail(UpdateFailure.INSTALL_BLOCKED, status.message)
-                is InstallStatus.Failed -> fail(UpdateFailure.INSTALL_FAILED, status.message)
             }
+        } finally {
+            installStarting = false
         }
     }
 
     /**
      * The system confirmation is another app's activity: when ours starts again while the session is still pending,
-     * the user left it unanswered (BACK/Home). The session is abandoned and Update is offered again.
+     * the user left it unanswered (BACK/Home). The session is abandoned and Update is offered again. Without a
+     * [session] (the `ACTION_VIEW` fallback, A3) there is nothing to abandon: Update is offered again.
      */
-    private fun watchUnansweredConfirmation() {
+    private fun watchUnansweredConfirmation(session: Boolean) {
         // D-B4: the app is still in front when PENDING_USER_ACTION arrives; the watcher acts only on a start that
         // follows a stop (a real return from the confirmation), never on the synchronous catch-up of addObserver.
         confirmationWatcher?.disarm()
         confirmationWatcher = UnansweredConfirmationWatcher(androidx.lifecycle.ProcessLifecycleOwner.get().lifecycle) {
             confirmationWatcher = null
-            if (_state.value == UpdateState.Installing) cancelPendingInstall()
+            if (_state.value == UpdateState.Installing) {
+                if (session) cancelPendingInstall() else offer?.first?.let { _state.value = UpdateState.ReadyToInstall(it.versionName) }
+            }
         }.also { it.arm() }
     }
 

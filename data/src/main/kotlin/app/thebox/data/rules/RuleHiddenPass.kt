@@ -8,6 +8,7 @@ import app.thebox.core.settings.tree.RuleTarget
 import app.thebox.data.db.dao.GroupDao
 import app.thebox.data.repo.exec
 import app.thebox.data.repo.forEachBound
+import app.thebox.data.repo.queryLong
 
 /**
  * The `rule_hidden` pass (docs/design/m5-setup-settings.md §3.7.3): recomputes `channel_group.rule_hidden` (group-name
@@ -40,8 +41,8 @@ object RuleHiddenPass {
                 continue
             }
             var changed = 0
-            changed += write(conn, "UPDATE channel_group SET rule_hidden = ? WHERE id = ?", groups!!.changes)
-            changed += write(conn, "UPDATE channel SET rule_hidden = ? WHERE id = ?", channels!!.changes)
+            changed += if (groups!!.clearAll) clearAll(conn, playlistId, GROUPS) else write(conn, "UPDATE channel_group SET rule_hidden = ? WHERE id = ?", groups.changes)
+            changed += if (channels!!.clearAll) clearAll(conn, playlistId, CHANNELS) else write(conn, "UPDATE channel SET rule_hidden = ? WHERE id = ?", channels.changes)
             if (disabled.isNotEmpty()) conn.exec("UPDATE playlist SET hide_rules_ver = hide_rules_ver + 1 WHERE id = ?") { bindLong(1, playlistId) }
             BoxLog.i(TAG) { "playlist=$playlistId groups=${groups.hidden} channels=${channels.hidden} changed=$changed disabled=${disabled.size}" }
             return Result(groups.hidden, channels.hidden, changed, disabled)
@@ -111,7 +112,13 @@ object RuleHiddenPass {
         conn.exec("UPDATE hide_rule SET enabled = 0, disabled_reason = ? WHERE id = ?") { bindText(1, reason.name); bindLong(2, id) }
     }
 
-    private class Eval(val hidden: Int, val changes: List<Pair<Long, Boolean>>)
+    /** [clearAll]: no rule applies, so every flag is cleared by one guarded UPDATE instead of a scan (performance review L6). */
+    private class Eval(val hidden: Int, val changes: List<Pair<Long, Boolean>>, val clearAll: Boolean = false)
+
+    private suspend fun clearAll(conn: PooledConnection, playlistId: Long, table: String): Int {
+        conn.exec("UPDATE $table SET rule_hidden = 0 WHERE playlist_id = ? AND rule_hidden = 1 AND missing_since IS NULL") { bindLong(1, playlistId) }
+        return conn.queryLong("SELECT changes()").toInt()
+    }
 
     private suspend fun evaluate(
         conn: PooledConnection,
@@ -123,6 +130,7 @@ object RuleHiddenPass {
         slow: MutableList<Long>,
         forceAll: Boolean = false,
     ): Eval {
+        if (matchers.isEmpty() && !forceAll) return Eval(0, emptyList(), clearAll = true)
         var hidden = 0
         val changes = ArrayList<Pair<Long, Boolean>>()
         scan(conn, playlistId, table) { page ->

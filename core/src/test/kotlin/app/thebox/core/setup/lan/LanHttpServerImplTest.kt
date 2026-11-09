@@ -182,7 +182,7 @@ class LanHttpServerImplTest {
     }
 
     @Test
-    fun fiveWrongCodesRotateTheCodeOnceAndTheSecondExhaustionStops() {
+    fun fiveWrongCodesRotateTheCodeAndTheSecondExhaustionBlocksOnlyThatAddress() {
         val first = started().code!!
         val wrong = if (first == "000000") "111111" else "000000"
         for (left in 4 downTo 1) {
@@ -199,7 +199,34 @@ class LanHttpServerImplTest {
         assertEquals(403, transport.exchange(post("/pair", host, """{"code":"$first"}""")).status)
         val wrong2 = if (second == "000000") "111111" else "000000"
         repeat(LanLimits.PAIR_MAX_WRONG - 2) { transport.exchange(post("/pair", host, """{"code":"$wrong2"}""")) }
-        assertEquals(410, transport.exchange(post("/pair", host, """{"code":"$wrong2"}""")).status)
+        val blocked = transport.exchange(post("/pair", host, """{"code":"$wrong2"}"""))
+        assertEquals(410, blocked.status)
+        assertTrue("too_many_wrong_codes" in blocked.body, blocked.body)
+        // F2 (2026-11-09): one LAN host no longer ends the session; it is blocked, and even the right code is refused from it.
+        assertEquals(410, transport.exchange(post("/pair", host, """{"code":"$second"}""")).status)
+        assertEquals(ServerPhase.WAITING, link.state.value.phase)
+        assertNull(link.state.value.failure)
+        // The real phone, on another address, still pairs with the code the TV shows.
+        val phone = transport.exchange(post("/pair", host, """{"code":"$second"}"""), ip = "192.168.1.35")
+        assertEquals(204, phone.status)
+        awaitValue { link.state.value.takeIf { it.phase == ServerPhase.PAIRED } }
+        assertEquals("192.168.1.35", link.state.value.pairedFrom)
+    }
+
+    @Test
+    fun wrongCodesFromManyAddressesEndTheSessionAtTheGlobalCeiling() {
+        started()
+        var last = 0
+        var n = 0
+        while (n < LanLimits.PAIR_MAX_WRONG_TOTAL) {
+            val ip = "192.168.1.${100 + n / (2 * LanLimits.PAIR_MAX_WRONG)}"
+            val code = link.state.value.code!!
+            val wrong = if (code == "000000") "111111" else "000000"
+            last = transport.exchange(post("/pair", host, """{"code":"$wrong"}"""), ip = ip).status
+            n++
+            if (n < LanLimits.PAIR_MAX_WRONG_TOTAL) assertNotEquals(ServerPhase.FAILED, link.state.value.phase, "still open after $n")
+        }
+        assertEquals(410, last)
         awaitValue { link.state.value.takeIf { it.phase == ServerPhase.FAILED } }
         assertEquals(LanFailure.TOO_MANY_WRONG_CODES, link.state.value.failure)
     }

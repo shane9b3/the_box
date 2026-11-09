@@ -43,6 +43,8 @@
           show(j.left > 0
             ? 'Wrong code. ' + j.left + (j.left === 1 ? ' try left.' : ' tries left.')
             : 'Too many wrong codes. Look at the TV for a new code.', 'err');
+        } else if (r.status === 410 && j.error === 'too_many_wrong_codes') {
+          show('Too many wrong codes from this phone. On the TV, close phone setup and open it again.', 'err');
         } else if (r.status === 410) {
           show('The TV stopped this session. Open phone setup on the TV again.', 'err');
         } else {

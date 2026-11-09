@@ -2,6 +2,7 @@ package app.thebox.data.repo
 
 import app.thebox.core.refresh.ChannelIdentity
 import app.thebox.core.source.EntryKind
+import app.thebox.data.db.LibraryDatabase
 import app.thebox.data.db.dao.ChannelPrefsDao
 import app.thebox.data.db.dao.GroupDao
 import app.thebox.data.db.entity.ChannelPrefsEntity
@@ -17,15 +18,21 @@ class ChannelPrefsRepository @Inject constructor(
     private val dao: ChannelPrefsDao,
     private val groupDao: GroupDao,
     private val clock: WallClock,
+    private val db: LibraryDatabase,
 ) {
     suspend fun get(c: ChannelIdentity): ChannelPrefsEntity? = dao.get(c.playlistId, c.stableKey.value)
 
     fun observe(c: ChannelIdentity): Flow<ChannelPrefsEntity?> = dao.observe(c.playlistId, c.stableKey.value)
 
-    /** Read-modify-write of one channel's prefs (creates the row on first use). */
+    /**
+     * Read-modify-write of one channel's prefs (creates the row on first use), in one write transaction so a
+     * column-targeted playback-memory write cannot land in between and be reverted (correctness review F4).
+     */
     suspend fun edit(c: ChannelIdentity, change: (ChannelPrefsEntity) -> ChannelPrefsEntity) {
-        val cur = dao.get(c.playlistId, c.stableKey.value) ?: ChannelPrefsEntity(c.playlistId, c.stableKey.value, updatedAt = clock.now())
-        dao.upsert(change(cur).copy(playlistId = c.playlistId, stableKey = c.stableKey.value, updatedAt = clock.now()))
+        db.writeTransaction {
+            val cur = dao.get(c.playlistId, c.stableKey.value) ?: ChannelPrefsEntity(c.playlistId, c.stableKey.value, updatedAt = clock.now())
+            dao.upsert(change(cur).copy(playlistId = c.playlistId, stableKey = c.stableKey.value, updatedAt = clock.now()))
+        }
     }
 
     suspend fun setHidden(c: ChannelIdentity, hidden: Boolean) = edit(c) { it.copy(hidden = hidden) }

@@ -155,7 +155,8 @@ class PhoneApi(
             is PairingSession.PairResult.Paired -> HttpResponse(204, securityHeaders() + ("Set-Cookie" to cookieHeader(r.cookie)))
             is PairingSession.PairResult.Wrong -> json(403, buildJsonObject { put("left", r.left) })
             PairingSession.PairResult.Busy -> json(403, error("busy"))
-            is PairingSession.PairResult.Stopped -> json(410, error("stopped"))
+            // Ended, or ended for this address after too many wrong codes from it (F2): the page says "open phone setup again".
+            is PairingSession.PairResult.Stopped -> json(410, error(if (session.ended) "stopped" else "too_many_wrong_codes"))
         }
     }
 

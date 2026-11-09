@@ -1,5 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Debug-only playback harness (docs/design/m2-playback-core.md §3.16). Not in release builds. -->
+<!-- Debug-only playback harness (docs/design/m2-playback-core.md §3.16). Not in release builds.
+     Security review F4 (2026-11-09): the thebox-debug:// entry points (wipe, keystore-reset, seeding, update override)
+     stay exported so `adb shell am start` and the benchmarks' shell commands still reach them, but they require
+     android.permission.DUMP: the shell UID holds it, the app's own UID (instrumented tests) needs no permission, and an
+     ordinary installed app cannot get it (signature|privileged|development: only `adb shell pm grant` could). A
+     non-exported component would also lock out adb, which can start those only as root. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application>
@@ -7,6 +12,7 @@
             android:name="app.thebox.debug.PlaybackDebugActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode|density|fontScale|layoutDirection|locale"
             android:exported="true"
+            android:permission="android.permission.DUMP"
             android:launchMode="singleTask"
             android:screenOrientation="landscape"
             android:theme="@style/Theme.TheBox">
@@ -21,6 +27,7 @@
         <activity
             android:name="app.thebox.debug.GuideDebugReceiver"
             android:exported="true"
+            android:permission="android.permission.DUMP"
             android:launchMode="singleTop"
             android:screenOrientation="landscape"
             android:theme="@style/Theme.TheBox">

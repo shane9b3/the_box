@@ -51,6 +51,9 @@ class TimeBaseFactoryImpl(private val deviceZone: () -> ZoneId = { ZoneId.system
     override fun forM3u(settings: TimeBaseSettings): TimeBase =
         build(PlaylistType.M3U_URL, settings, null, null, Duration.ZERO)
 
+    override fun fromStored(serverZone: ZoneId?, serverOffset: ZoneOffset?, clockSkew: Duration, settings: TimeBaseSettings): TimeBase =
+        build(PlaylistType.XTREAM, settings, serverZone, serverOffset, clockSkew)
+
     private fun build(type: PlaylistType, settings: TimeBaseSettings, zone: ZoneId?, offset: ZoneOffset?, skew: Duration): TimeBase {
         val tokenZone: ZoneId? = when (val t = settings.tokenZone) {
             TokenZoneSetting.Auto, TokenZoneSetting.Server -> null

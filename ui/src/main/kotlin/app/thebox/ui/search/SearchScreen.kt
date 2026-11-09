@@ -31,6 +31,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -101,13 +102,20 @@ fun SearchScreen(viewModel: SearchViewModel, modifier: Modifier = Modifier, onId
     LaunchedEffect(state.results) {
         if (menu != null && (menuResults == null || !viewModel.isCurrent(menuResults!!))) dismissMenu()
     }
+    // U1 (code review 2026-11-09): new results can remove the focused card; Compose then moves focus to the root key sink,
+    // where the screen never sees BACK. Give it to the field instead, a frame later (after the removal has settled).
+    var hasFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(state.results) {
+        withFrameNanos { }
+        if (!hasFocus && menu == null && viewModel.isVisiting) runCatching { field.requestFocus() }
+    }
     // §2.13 item 7: the root key sink may take BACK only while the field is empty and no menu is open (B1). The IME
     // consumes BACK while it shows, so an empty field that still gets BACK means "leave Search".
     val idle = state.query.isEmpty() && menu == null
     LaunchedEffect(idle) { onIdleChanged(idle) }
 
     Box(
-        modifier.fillMaxSize().onPreviewKeyEvent { e ->
+        modifier.fillMaxSize().onFocusChanged { hasFocus = it.hasFocus }.onPreviewKeyEvent { e ->
             if (e.key != Key.Back && e.key != Key.Escape && e.key != Key.ButtonB) return@onPreviewKeyEvent false
             if (e.type == KeyEventType.KeyUp && !e.nativeKeyEvent.isCanceled) {
                 when {
@@ -154,6 +162,7 @@ fun SearchScreen(viewModel: SearchViewModel, modifier: Modifier = Modifier, onId
                                 ProgrammeCard(
                                     hit,
                                     reminder = state.reminders.contains(hit.channel.identityHash, hit.info.rawStartMin),
+                                    clock24 = state.clock24,
                                     onClick = { if (viewModel.isCurrent(results)) viewModel.onProgramme(hit, results) },
                                     onLongClick = { focus -> openMenu(MenuTarget.Programme(hit), results, focus) },
                                 )
@@ -313,7 +322,7 @@ private fun ChannelCard(ch: GuideChannel, onClick: () -> Unit, onLongClick: (Foc
 }
 
 @Composable
-private fun ProgrammeCard(hit: ProgrammeHit, reminder: Boolean, onClick: () -> Unit, onLongClick: (FocusRequester) -> Unit) {
+private fun ProgrammeCard(hit: ProgrammeHit, reminder: Boolean, clock24: Boolean, onClick: () -> Unit, onLongClick: (FocusRequester) -> Unit) {
     ResultCard("${hit.channel.identityHash}:${hit.info.rawStartMin}", 520, 190, onClick, onLongClick) {
         val color = cardText()
         Column(verticalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxSize()) {
@@ -323,21 +332,30 @@ private fun ProgrammeCard(hit: ProgrammeHit, reminder: Boolean, onClick: () -> U
                 if (reminder) BasicText("  ●", style = Body.copy(color = DesignTokens.Colors.Live, fontSize = 24.sp))
             }
             BasicText(hit.channel.displayName, style = Small.copy(color = color.copy(alpha = 0.7f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
-            BasicText(timeText(hit), style = Small.copy(color = color.copy(alpha = 0.7f)))
+            // The configuration's locale (observable: a locale change recomposes); lint NonObservableLocale.
+            val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
+            BasicText(timeText(hit, clock24, locale), style = Small.copy(color = color.copy(alpha = 0.7f)))
         }
     }
 }
 
-private val HM: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm", Locale.getDefault())
-private val DAY: DateTimeFormatter = DateTimeFormatter.ofPattern("EEE d MMM", Locale.getDefault())
-
-/** "Tue 13 Oct · 19:30 – 20:00" in the device zone; the day only when it is not today. */
-internal fun timeText(hit: ProgrammeHit, zone: ZoneId = ZoneId.systemDefault(), nowMs: Long = System.currentTimeMillis()): String {
+/**
+ * "Tue 13 Oct · 19:30 – 20:00" (or "7:30 PM – 8:00 PM" with [clock24] off, as the header clock) in the device zone; the
+ * day only when it is not today. U5 (code review 2026-11-09): follows the 12/24-hour setting and the current locale.
+ */
+internal fun timeText(
+    hit: ProgrammeHit,
+    clock24: Boolean,
+    locale: Locale = Locale.getDefault(),
+    zone: ZoneId = ZoneId.systemDefault(),
+    nowMs: Long = System.currentTimeMillis(),
+): String {
+    val hm = DateTimeFormatter.ofPattern(if (clock24) "HH:mm" else "h:mm a", locale)
     val s = Instant.ofEpochSecond(hit.info.startMin * 60L).atZone(zone)
     val e = Instant.ofEpochSecond(hit.info.endMin * 60L).atZone(zone)
     val today = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
-    val day = if (s.toLocalDate() == today) "" else DAY.format(s) + " · "
-    return day + HM.format(s) + " – " + HM.format(e)
+    val day = if (s.toLocalDate() == today) "" else DateTimeFormatter.ofPattern("EEE d MMM", locale).format(s) + " · "
+    return day + hm.format(s) + " – " + hm.format(e)
 }
 
 @Composable

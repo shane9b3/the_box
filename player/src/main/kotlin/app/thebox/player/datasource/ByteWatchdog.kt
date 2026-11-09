@@ -5,6 +5,7 @@ import app.thebox.core.playback.MonoClock
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -15,7 +16,8 @@ import javax.inject.Singleton
  * The watchdog only drives the clock: each registered check (one per open `LiveTsDataSource`) decides with its own
  * timeouts whether its current call has been silent too long and cancels it (`Call.cancel()` unblocks a socket read
  * at once; `Thread.interrupt()` does not). Checks run on the watchdog thread and must not block. The thread starts on
- * the first registration and stays (one parked thread per process).
+ * the first registration and stays (one parked thread per process); (perf review L5) the timer itself runs only while
+ * a check is registered, so an idle process is not woken twice a second.
  */
 @Singleton
 internal class ByteWatchdog @Inject constructor(private val clock: MonoClock) {
@@ -23,6 +25,7 @@ internal class ByteWatchdog @Inject constructor(private val clock: MonoClock) {
 
     private val entries = CopyOnWriteArrayList<Entry>()
     private var executor: ScheduledExecutorService? = null
+    private var timer: ScheduledFuture<*>? = null
 
     /** False in tests that drive [tick] by hand. */
     @Volatile internal var autoStart = true
@@ -48,11 +51,21 @@ internal class ByteWatchdog @Inject constructor(private val clock: MonoClock) {
 
     internal fun registeredCount(): Int = entries.size
 
+    /** Called after the entry was added, so [timerTick]'s emptiness check under the same lock cannot miss it. */
     @Synchronized
     private fun ensureStarted() {
-        if (executor != null) return
-        executor = Executors.newSingleThreadScheduledExecutor { r -> Thread(r, THREAD_NAME).apply { isDaemon = true } }.also {
-            it.scheduleWithFixedDelay(::tick, WATCHDOG_TICK_MS, WATCHDOG_TICK_MS, TimeUnit.MILLISECONDS)
+        if (timer != null) return
+        val ex = executor ?: Executors.newSingleThreadScheduledExecutor { r -> Thread(r, THREAD_NAME).apply { isDaemon = true } }.also { executor = it }
+        timer = ex.scheduleWithFixedDelay(::timerTick, WATCHDOG_TICK_MS, WATCHDOG_TICK_MS, TimeUnit.MILLISECONDS)
+    }
+
+    private fun timerTick() {
+        tick()
+        synchronized(this) {
+            if (entries.isEmpty()) {
+                timer?.cancel(false)
+                timer = null
+            }
         }
     }
 

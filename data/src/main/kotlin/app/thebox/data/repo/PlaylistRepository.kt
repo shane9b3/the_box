@@ -161,19 +161,18 @@ class PlaylistRepository @Inject constructor(
         val account = accountDao.get(playlist.id)?.let { decodeAccount(it.infoJson) }
         if (account != null) return timeBaseFactory.fromAccount(playlist.type, account, settings)
         if (playlist.type != PlaylistType.XTREAM) return timeBaseFactory.forM3u(settings)
-        return TimeBase(
+        return timeBaseFactory.fromStored(
             serverZone = playlist.serverZone?.let { runCatching { ZoneId.of(it) }.getOrNull() },
-            serverOffset = playlist.serverOffsetSec?.let { ZoneOffset.ofTotalSeconds(it) },
+            serverOffset = playlist.serverOffsetSec?.let { runCatching { ZoneOffset.ofTotalSeconds(it) }.getOrNull() },
             clockSkew = Duration.ofSeconds(playlist.clockSkewSec),
-            correctionHours = settings.correctionHours ?: 0.0,
-            paddingBefore = Duration.ofSeconds(settings.paddingBeforeSec.toLong()),
-            paddingAfter = Duration.ofSeconds(settings.paddingAfterSec.toLong()),
+            settings = settings,
         )
     }
 
     suspend fun catchupDefaults(playlist: PlaylistEntity): PlaylistCatchupDefaults {
-        val xtreamShaped = playlist.type == PlaylistType.M3U_URL &&
-            (secretCache[playlist.credentialRef]?.username != null || accountDao.get(playlist.id) != null)
+        // From stored state only (correctness review F2): the secret cache is empty at process start.
+        val xtreamShaped = playlist.type != PlaylistType.XTREAM &&
+            (accountDao.get(playlist.id) != null || playlistDao.hasXtreamKeyedChannels(playlist.id))
         return PlaylistCatchupDefaults(
             type = playlist.type,
             modeSetting = catchupModeSetting(playlist.catchupModeSetting),

@@ -59,6 +59,8 @@ data class SearchUiState(
     /** The last search had no EPG generation (§2.13 item 7): channels still show, the programmes row says "Programme search needs guide data." */
     val guideDataMissing: Boolean = false,
     val reminders: ReminderIndex = ReminderIndex.EMPTY,
+    /** The 12/24-hour setting for the programme times (code review 2026-11-09, U5). */
+    val clock24: Boolean = true,
 )
 
 /**
@@ -113,12 +115,16 @@ class SearchViewModel internal constructor(
     private fun accessKey() = AccessKey(access(), parental.state.value.queryKey)
     private var publishedAccess: AccessKey? = null
 
+    /** True between [onEntered] (or typing) and [onLeft]: the screen is on a Search visit. */
+    val isVisiting: Boolean get() = active
+
     /** Searches actually started (test hook). */
     @Volatile var started: Int = 0
         private set
 
     init {
         viewModelScope.launch { reminders.index.collect { idx -> mutable.update { it.copy(reminders = idx) } } }
+        viewModelScope.launch { settings.settings.collect { s -> mutable.update { it.copy(clock24 = s.clock24) } } }
         val initialAccess = accessKey()
         viewModelScope.launch {
             var previous = initialAccess
@@ -134,9 +140,9 @@ class SearchViewModel internal constructor(
         active = true
         contentJob = viewModelScope.launch {
             coroutineScope {
-                launch { library.rowContent.distinctUntilChanged().collect { refresh() } }
-                launch { library.sources(ParentalAccess.OPEN).distinctUntilChanged().drop(1).collect { refresh() } }
-                launch { contentChanges.drop(1).collect { refresh() } }
+                launch { library.rowContent.distinctUntilChanged().collect { refresh(keepResults = true) } }
+                launch { library.sources(ParentalAccess.OPEN).distinctUntilChanged().drop(1).collect { refresh(keepResults = true) } }
+                launch { contentChanges.drop(1).collect { refresh(keepResults = true) } }
             }
         }
         return true
@@ -160,14 +166,23 @@ class SearchViewModel internal constructor(
         refresh()
     }
 
-    /** Clear first, including modal targets; an old IO result must never republish after relocking. */
-    fun refresh() {
+    /**
+     * Clear first, including modal targets; an old IO result must never republish after relocking.
+     *
+     * (code review 2026-11-09, U2) [keepResults] is for a content change with the same query and access (a library or
+     * EPG refresh, or the user's own Add to favourites): the shown snapshot stays, with its cards and focus, until the
+     * new result replaces it. An access change, a new query or a new visit still clears first.
+     */
+    fun refresh(keepResults: Boolean = false) {
         val requestEpoch = ++epoch
         job?.cancel()
-        publishedAccess = null
         val text = mutable.value.query
-        publish(null, searching = false)
-        if (!active || text.count { it.isLetterOrDigit() } < MIN_CHARS) {
+        val tooShort = !active || text.count { it.isLetterOrDigit() } < MIN_CHARS
+        if (!keepResults || tooShort) {
+            publishedAccess = null
+            publish(null, searching = false)
+        }
+        if (tooShort) {
             return
         }
         val key = accessKey()
@@ -201,7 +216,9 @@ class SearchViewModel internal constructor(
     private fun allowed(hit: ProgrammeHit, snapshot: SearchResults): Boolean =
         (isCurrent(snapshot) && hit in snapshot.programmes)
 
-    private fun publish(r: SearchResults?, searching: Boolean) {
+    private fun publish(new: SearchResults?, searching: Boolean) {
+        // U2: an equal answer after a kept snapshot keeps that instance, so an open menu's snapshot stays current.
+        val r = mutable.value.results?.takeIf { it == new } ?: new
         resultsFlow.value = r
         mutable.update { it.copy(results = r, searching = searching, guideDataMissing = r?.guideDataMissing ?: it.guideDataMissing) }
     }

@@ -16,8 +16,9 @@ import kotlin.random.Random
 
 /**
  * The phone page's own HTTP/1.1 server (docs/design/m5-setup-settings.md §0.3, §3.5.2), pure JVM over a [LanTransport].
- * One accept thread (`box-lan`), at most [Config.maxSockets] concurrent connections served by a pool of that size
- * (excess connections are closed immediately), `Connection: close` on every response (no keep-alive state), and a watchdog
+ * One accept thread (`box-lan`), at most [Config.maxSockets] concurrent connections served by a pool of that size,
+ * at most [Config.maxSocketsPerAddress] of them from one remote address (F2: one LAN host cannot hold every socket and
+ * keep the phone out; excess connections are closed immediately), `Connection: close` on every response (no keep-alive state), and a watchdog
  * that closes a connection with no progress for [Config.socketTimeoutMs] (a slow sender gets 408). Routing, pairing
  * and the security headers belong to the [LanHandler] ([PhoneApi]). Logs carry the method, a path template, the
  * status and the byte count, never a token, code, cookie or body.
@@ -29,6 +30,8 @@ class LanHttpServerImpl(
     data class Config(
         val socketTimeoutMs: Int = LanLimits.HTTP_SOCKET_TIMEOUT_MS,
         val maxSockets: Int = LanLimits.HTTP_MAX_SOCKETS,
+        /** Capped below the effective socket limit, so at least one socket stays free for another address. */
+        val maxSocketsPerAddress: Int = LanLimits.HTTP_MAX_SOCKETS_PER_ADDRESS,
         val maxHeaderBytes: Int = LanLimits.HTTP_MAX_HEADER_BYTES,
         val maxHeaders: Int = LanLimits.HTTP_MAX_HEADERS,
         val maxBodyBytes: Long = LanLimits.PHONE_UPLOAD_MAX_BYTES,
@@ -37,7 +40,7 @@ class LanHttpServerImpl(
         val logPath: (String) -> String = ::defaultLogPath,
     )
 
-    private class Active(val conn: LanConnection, @Volatile var lastProgressNs: Long, @Volatile var thread: Thread?) {
+    private class Active(val conn: LanConnection, val address: String, @Volatile var lastProgressNs: Long, @Volatile var thread: Thread?) {
         @Volatile var responding = false
     }
 
@@ -46,6 +49,8 @@ class LanHttpServerImpl(
     @Volatile private var watchdog: ScheduledExecutorService? = null
     private val active = ConcurrentHashMap.newKeySet<Active>()
     private val count = AtomicInteger()
+    /** Open connections per remote address; guarded by itself. */
+    private val perAddress = HashMap<String, Int>()
 
     /** The port actually bound; -1 before [start] or after [stop]. */
     @Volatile var port: Int = -1
@@ -79,6 +84,7 @@ class LanHttpServerImpl(
         watchdog = null
         for (a in active) { runCatching { a.conn.close() }; a.thread?.interrupt() }
         active.clear()
+        synchronized(perAddress) { perAddress.clear() }
         port = -1
         BoxLog.i(TAG) { "stopped" }
     }
@@ -108,6 +114,7 @@ class LanHttpServerImpl(
                 BoxLog.w(TAG, "accept failed: ${e.javaClass.simpleName}")
                 continue
             } ?: break
+            val address = conn.remoteAddress
             if (count.incrementAndGet() > max) {
                 count.decrementAndGet()
                 // Rejection must not allocate another worker or perform socket writes: a non-reading peer must
@@ -115,7 +122,12 @@ class LanHttpServerImpl(
                 runCatching { conn.close() }
                 continue
             }
-            val a = Active(conn, System.nanoTime(), null)
+            if (!takeAddressSlot(address, perAddressMax(max))) {
+                count.decrementAndGet()
+                runCatching { conn.close() } // same rule as above: no write, no worker
+                continue
+            }
+            val a = Active(conn, address, System.nanoTime(), null)
             active += a
             try {
                 workers.execute { serve(a, handler) }
@@ -144,7 +156,27 @@ class LanHttpServerImpl(
     }
 
     private fun finish(a: Active) {
-        if (active.remove(a)) count.decrementAndGet()
+        if (active.remove(a)) {
+            count.decrementAndGet()
+            releaseAddressSlot(a.address)
+        }
+    }
+
+    /** Below [max] whenever [max] > 1, so one address never holds every socket. */
+    private fun perAddressMax(max: Int): Int = minOf(config.maxSocketsPerAddress, max - 1).coerceAtLeast(1)
+
+    private fun takeAddressSlot(address: String, limit: Int): Boolean = synchronized(perAddress) {
+        val n = perAddress[address] ?: 0
+        if (n >= limit) return false
+        perAddress[address] = n + 1
+        true
+    }
+
+    private fun releaseAddressSlot(address: String) {
+        synchronized(perAddress) {
+            val n = (perAddress[address] ?: return) - 1
+            if (n <= 0) perAddress.remove(address) else perAddress[address] = n
+        }
     }
 
     private fun serve(a: Active, handler: LanHandler) {

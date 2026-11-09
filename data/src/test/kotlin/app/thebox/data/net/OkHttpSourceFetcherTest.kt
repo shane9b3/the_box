@@ -4,6 +4,7 @@ import app.thebox.core.common.AuthReason
 import app.thebox.core.common.NetworkKind
 import app.thebox.core.common.Outcome
 import app.thebox.core.common.SourceError
+import app.thebox.core.io.Compression
 import app.thebox.data.contracts.FetchRequest
 import app.thebox.data.contracts.FetchResult
 import kotlinx.coroutines.Dispatchers
@@ -16,6 +17,7 @@ import mockwebserver3.MockWebServer
 import okio.Buffer
 import okio.GzipSink
 import okio.buffer
+import okio.source
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -105,21 +107,55 @@ class OkHttpSourceFetcherTest {
         assertEquals("previous good copy", dest().readText())
     }
 
+    // ---- performance review H2: gzip bodies are stored compressed; readers decide by magic bytes
+
+    private fun gzip(b: Buffer): Buffer = Buffer().also { out -> GzipSink(out).buffer().use { it.writeAll(b) } }
+    private fun gzip(text: String): Buffer = gzip(Buffer().writeUtf8(text))
+    private fun stored(): String = Compression.decompress(dest().source().buffer()).use { it.readUtf8() }
+    private fun storedKind(): Compression.Kind = dest().source().buffer().use { Compression.sniff(it) }
+
     @Test
-    fun gzipContentEncodingIsDecodedTransparently() = runBlocking {
-        val gz = Buffer()
-        GzipSink(gz).buffer().use { it.writeUtf8("#EXTM3U gz\n") }
-        server.enqueue(MockResponse.Builder().code(200).body(gz).addHeader("Content-Encoding", "gzip").build())
-        ok(fetcher.fetch(FetchRequest(server.url("/g").toString()), dest()))
-        assertEquals("#EXTM3U gz\n", dest().readText())
+    fun acceptEncodingGzipIsSentUnlessTheCallerSetsOne() = runBlocking {
+        server.enqueue(MockResponse.Builder().code(200).body("x").build())
+        fetcher.fetch(FetchRequest(server.url("/a").toString()), dest())
+        assertEquals("gzip", server.takeRequest(1, TimeUnit.SECONDS)!!.headers["Accept-Encoding"])
+        server.enqueue(MockResponse.Builder().code(200).body("x").build())
+        fetcher.fetch(FetchRequest(server.url("/a").toString(), headers = mapOf("accept-encoding" to "identity")), dest())
+        assertEquals("identity", server.takeRequest(1, TimeUnit.SECONDS)!!.headers["Accept-Encoding"])
+    }
+
+    @Test
+    fun gzipContentEncodingIsStoredCompressedAndReadsBack() = runBlocking {
+        server.enqueue(MockResponse.Builder().code(200).body(gzip("#EXTM3U gz\n")).addHeader("Content-Encoding", "gzip").build())
+        val r = ok(fetcher.fetch(FetchRequest(server.url("/g").toString()), dest()))
+        assertEquals(Compression.Kind.GZIP, storedKind())
+        assertEquals(dest().length(), r.bytes)
+        assertEquals("#EXTM3U gz\n", stored())
+    }
+
+    @Test
+    fun aGzFileSentWithContentEncodingGzipIsTwoLayersAndReadsBack() = runBlocking {
+        server.enqueue(MockResponse.Builder().code(200).body(gzip(gzip("<tv></tv>\n"))).addHeader("Content-Encoding", "gzip").build())
+        ok(fetcher.fetch(FetchRequest(server.url("/epg.xml.gz").toString()), dest()))
+        assertEquals("<tv></tv>\n", stored())
+    }
+
+    @Test
+    fun aGzFileWithoutContentEncodingAndAPlainBodyBothReadBack() = runBlocking {
+        server.enqueue(MockResponse.Builder().code(200).body(gzip("<tv/>\n")).build())
+        ok(fetcher.fetch(FetchRequest(server.url("/epg.xml.gz").toString()), dest()))
+        assertEquals("<tv/>\n", stored())
+        // A server that ignores Accept-Encoding.
+        server.enqueue(MockResponse.Builder().code(200).body("#EXTM3U plain\n").build())
+        ok(fetcher.fetch(FetchRequest(server.url("/list.m3u").toString()), dest()))
+        assertEquals(Compression.Kind.NONE, storedKind())
+        assertEquals("#EXTM3U plain\n", stored())
     }
 
     @Test
     fun streamedSizeCapWithoutContentLength() = runBlocking {
-        // Transparent gzip hides the length, so only the streamed byte count can enforce the cap.
-        val gz = Buffer()
-        GzipSink(gz).buffer().use { it.writeUtf8("z".repeat(50_000)) }
-        server.enqueue(MockResponse.Builder().code(200).body(gz).addHeader("Content-Encoding", "gzip").build())
+        // A chunked body has no length, so only the streamed byte count can enforce the cap (it counts stored bytes).
+        server.enqueue(MockResponse.Builder().code(200).chunkedBody("z".repeat(50_000), 1_000).build())
         val r = fetcher.fetch(FetchRequest(server.url("/g").toString(), maxBytes = 10_000), dest())
         assertTrue((r as Outcome.Err).error is SourceError.Unsupported)
         assertFalse(dest().exists())

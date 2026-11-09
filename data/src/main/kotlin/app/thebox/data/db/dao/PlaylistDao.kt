@@ -84,6 +84,13 @@ interface PlaylistDao {
     @Query("SELECT catchup_probe_winner FROM playlist WHERE id = :id")
     suspend fun catchupProbeWinner(id: Long): String?
 
+    /**
+     * True when any channel of playlist [id] is keyed by the Xtream rule (`xc:`, `xcm:`, `xce:`): for an M3U this
+     * happens only when the refresh detected Xtream credentials. A range on the identity index; stops at the first row.
+     */
+    @Query("SELECT EXISTS(SELECT 1 FROM channel WHERE playlist_id = :id AND stable_key >= 'xc' AND stable_key < 'xd')")
+    suspend fun hasXtreamKeyedChannels(id: Long): Boolean
+
     // ---- M5 WP-B (docs/design/m5-setup-settings.md §3.3.1, §3.4.5): one column per playlist row, never the whole-row
     // [update] from a possibly stale entity (M2 N-L13): a refresh writes other columns of the same row concurrently.
 

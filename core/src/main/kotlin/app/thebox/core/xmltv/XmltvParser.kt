@@ -38,7 +38,7 @@ class XmltvParser(private val factory: () -> XmlPullParser) {
 
     /** Parses [input] (already decompressed). Blocking; polls [cancel] every [CANCEL_EVERY] programmes. */
     fun parse(input: InputStream, handler: XmltvHandler, cancel: CancelCheck = CancelCheck.Never, options: Options = Options.DEFAULT) {
-        val tail = TailInputStream(stripUtf8Bom(input))
+        val tail = TailInputStream(MarkupGapGuard(stripUtf8Bom(input), MAX_MARKUP_GAP_BYTES))
         val xpp = factory()
         configure(xpp, tail)
         Run(xpp, tail, handler, cancel, options).run()
@@ -103,7 +103,7 @@ class XmltvParser(private val factory: () -> XmlPullParser) {
 
         fun readChannel() {
             val id = attr("id")
-            if (id.isNullOrEmpty()) {
+            if (id.isNullOrEmpty() || id.length > MAX_ID_CHARS) {
                 skip()
                 return
             }
@@ -122,7 +122,7 @@ class XmltvParser(private val factory: () -> XmlPullParser) {
                         if (t.isNotEmpty()) (names ?: ArrayList<XmltvDisplayName>(2).also { names = it }).add(XmltvDisplayName(t, lang))
                     }
                     "icon" -> {
-                        if (icon == null) icon = attr("src")?.trim()?.ifEmpty { null }
+                        if (icon == null) icon = iconSrc()
                         skip()
                     }
                     else -> skip()
@@ -144,6 +144,10 @@ class XmltvParser(private val factory: () -> XmlPullParser) {
                     "channel" -> channel = xpp.getAttributeValue(a)
                     "catchup-id" -> catchupId = xpp.getAttributeValue(a)
                 }
+            }
+            if (channel != null && channel.length > MAX_ID_CHARS) {
+                skip()
+                return
             }
             if (channel == null || startAttr == null) {
                 if (channel != null) handler.onBadTime(channel)
@@ -171,7 +175,7 @@ class XmltvParser(private val factory: () -> XmlPullParser) {
             p.channelId = channel
             p.startMin = start
             p.stopMin = stop
-            if (!catchupId.isNullOrEmpty()) {
+            if (!catchupId.isNullOrEmpty() && catchupId.length <= MAX_ID_CHARS) {
                 p.catchupId = catchupId
                 p.flags = p.flags or ProgrammeFlags.HAS_CATCHUP_ID
             }
@@ -214,7 +218,7 @@ class XmltvParser(private val factory: () -> XmlPullParser) {
                     "desc" -> {
                         val r = if (options.storeDescriptions) picker.rank(attr("lang")) else 0
                         if (options.storeDescriptions && (descRank == -1 || r < descRank)) {
-                            p.description = cap(readText(), options.maxDescriptionChars)
+                            p.description = cap(readText(options.maxDescriptionChars), options.maxDescriptionChars)
                             descRank = r
                         } else {
                             skip()
@@ -230,7 +234,7 @@ class XmltvParser(private val factory: () -> XmlPullParser) {
                         }
                     }
                     "icon" -> {
-                        if (p.iconUrl == null) p.iconUrl = attr("src")?.trim()?.ifEmpty { null }
+                        if (p.iconUrl == null) p.iconUrl = iconSrc()
                         skip()
                     }
                     "rating" -> {
@@ -322,7 +326,7 @@ class XmltvParser(private val factory: () -> XmlPullParser) {
                     skip()
                     continue
                 }
-                val role = if (prefix == "a") attr("role")?.trim()?.ifEmpty { null } else null
+                val role = if (prefix == "a") attr("role")?.trim()?.ifEmpty { null }?.let { clip(it, MAX_TEXT_FIELD_CHARS) } else null
                 val name = readText()
                 if (name.isEmpty()) continue
                 val b = sb ?: StringBuilder(64).also { sb = it }
@@ -353,10 +357,13 @@ class XmltvParser(private val factory: () -> XmlPullParser) {
 
         /**
          * Text content of the current element (positioned on its START_TAG), nested elements skipped,
-         * trimmed. Ends on the element's END_TAG.
+         * trimmed, and cut to [max] chars on a code-point boundary. Ends on the element's END_TAG.
+         * Text past the cap (plus a little room for leading whitespace) is read past, never appended;
+         * one text event is already bounded by [MarkupGapGuard] (security review F1).
          */
-        fun readText(): String {
+        fun readText(max: Int = MAX_TEXT_FIELD_CHARS): String {
             val depth = xpp.depth
+            val keep = if (max > Int.MAX_VALUE - TRIM_ROOM) Int.MAX_VALUE else max + TRIM_ROOM
             var single: String? = null
             var multi = false
             while (true) {
@@ -369,10 +376,10 @@ class XmltvParser(private val factory: () -> XmlPullParser) {
                         } else {
                             if (!multi) {
                                 text.setLength(0)
-                                text.append(single)
+                                appendUpTo(single, keep)
                                 multi = true
                             }
-                            text.append(t)
+                            appendUpTo(t, keep)
                         }
                     }
                     XmlPullParser.START_TAG -> skip()
@@ -381,8 +388,17 @@ class XmltvParser(private val factory: () -> XmlPullParser) {
                 }
             }
             val raw = if (multi) text.toString() else single ?: return ""
-            return raw.trim()
+            return clip(raw.trim(), max)
         }
+
+        private fun appendUpTo(s: String?, keep: Int) {
+            if (s == null) return
+            val room = keep - text.length
+            if (room <= 0) return
+            text.append(s, 0, minOf(s.length, room))
+        }
+
+        private fun iconSrc(): String? = attr("src")?.trim()?.ifEmpty { null }?.takeIf { it.length <= MAX_URL_CHARS }
 
         /** Skips the subtree of the current START_TAG by depth counting; never reads text. */
         fun skip() {
@@ -425,10 +441,29 @@ class XmltvParser(private val factory: () -> XmlPullParser) {
             val n = super.read(b, off, len)
             if (n < 0) {
                 eof = true
-            } else {
-                for (k in off until off + n) record(b[k])
+            } else if (n > 0) {
+                recordAll(b, off, n)
             }
             return n
+        }
+
+        /** Only the last [TAIL] bytes of a read can matter: one arraycopy, not a loop over every byte (performance review L7). */
+        private fun recordAll(b: ByteArray, off: Int, n: Int) {
+            total += n
+            val keep = minOf(n, TAIL)
+            var src = off + n - keep
+            var left = keep
+            while (left > 0) {
+                val c = minOf(left, TAIL - pos)
+                System.arraycopy(b, src, ring, pos, c)
+                pos += c
+                src += c
+                left -= c
+                if (pos == TAIL) {
+                    pos = 0
+                    filled = true
+                }
+            }
         }
 
         private fun record(b: Byte) {
@@ -468,6 +503,11 @@ class XmltvParser(private val factory: () -> XmlPullParser) {
     companion object {
         const val FEATURE_RELAXED = "http://xmlpull.org/v1/doc/features.html#relaxed"
         const val CANCEL_EVERY = 1_000
+        const val MAX_TEXT_FIELD_CHARS = 1_024
+        const val MAX_ID_CHARS = 1_024
+        const val MAX_URL_CHARS = 8_192
+        const val MAX_MARKUP_GAP_BYTES = 1 shl 20
+        private const val TRIM_ROOM = 256
         private const val TAIL = 256
         private const val MAX_CATEGORY_CANDIDATES = 32
 
@@ -497,6 +537,11 @@ class XmltvParser(private val factory: () -> XmlPullParser) {
         /** `<desc>` cap on a code-point boundary. */
         internal fun cap(s: String, max: Int): String? {
             if (s.isEmpty()) return null
+            return clip(s, max)
+        }
+
+        /** [s] cut to [max] chars on a code-point boundary. */
+        internal fun clip(s: String, max: Int): String {
             if (s.length <= max) return s
             var cut = max
             if (cut > 0 && Character.isHighSurrogate(s[cut - 1])) cut--

@@ -112,4 +112,17 @@ class CompressionTest {
         val e = assertFailsWith<SourceException> { Compression.decompress(src(zip("dir/" to null))) }
         assertEquals(SourceError.NotASource(NotASourceKind.EMPTY), e.error)
     }
+
+    @Test
+    fun outputOverTheCeilingIsUnsupported() {
+        val big = ByteArray(1 shl 20) { 'a'.code.toByte() }
+        val bomb = gzip(big)
+        assertEquals(big.size.toLong(), Compression.decompress(src(bomb), maxBytes = big.size.toLong()).readByteArray().size.toLong())
+        val e = assertFailsWith<SourceException> { Compression.decompress(src(bomb), maxBytes = big.size - 1L).readByteArray() }
+        assertIs<SourceError.Unsupported>(e.error)
+        val nested = assertFailsWith<SourceException> { Compression.decompress(src(gzip(gzip(big))), maxBytes = 1000).readByteArray() }
+        assertIs<SourceError.Unsupported>(nested.error)
+        // Plain input is not counted: the download cap bounds it.
+        assertEquals(big.size, Compression.decompress(src(big), maxBytes = 10).readByteArray().size)
+    }
 }

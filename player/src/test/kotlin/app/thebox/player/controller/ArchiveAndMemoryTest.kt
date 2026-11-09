@@ -60,6 +60,21 @@ class ArchiveAndMemoryTest {
         assertEquals(120_000L, f.exo.seeks.last())
     }
 
+    /** (Fix pass P2) An archive request is one fixed URL: no Sources picker, and picking a server does nothing. */
+    @Test
+    fun archiveOffersNoServerSwitch() {
+        f.resolver.baseCount = 3
+        f.controller.tuneArchive(ArchiveTune(CH1, request))
+        f.idle()
+        f.play()
+        assertTrue(f.controller.servers.value.labels.isEmpty())
+        val builds = f.sources.builds.size
+        f.controller.selectServer(1)
+        f.idle()
+        assertEquals(builds, f.sources.builds.size)
+        assertEquals(1, f.resolver.archiveCalls.size)
+    }
+
     /** (M4 integration 2026-10-15) A ladder re-prepare of an archive cycle seeks back to the playhead, not to 0 (I-M4-13). */
     @Test
     fun ladderReprepareOfAnArchiveCycleContinuesAtThePlayhead() {

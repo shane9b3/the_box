@@ -35,7 +35,12 @@ class GuideEffectsImplTest {
     private val ch = channels[3]
     private val info = GuideFixtures.info(GuideFixtures.NOW_MIN + 30, GuideFixtures.NOW_MIN + 90, "Late Edition", shiftMin = 60)
 
-    private class Rig(scope: TestScope, channels: List<app.thebox.core.guide.GuideChannel>, val artwork: app.thebox.core.art.FakeProgrammeArtwork = app.thebox.core.art.FakeProgrammeArtwork()) {
+    private class Rig(
+        scope: TestScope,
+        channels: List<app.thebox.core.guide.GuideChannel>,
+        val artwork: app.thebox.core.art.FakeProgrammeArtwork = app.thebox.core.art.FakeProgrammeArtwork(),
+        wrap: (app.thebox.core.guide.GuideLibrary) -> app.thebox.core.guide.GuideLibrary = { it },
+    ) {
         val dispatcher = StandardTestDispatcher(scope.testScheduler)
         val controller = FakePlaybackController()
         val library = FakeGuideLibrary(channels)
@@ -50,7 +55,7 @@ class GuideEffectsImplTest {
         val events = ArrayList<GuideEvent>()
         val lineups = ArrayList<GuideLineup>()
         val effects = GuideEffectsImpl(
-            scope = scope, io = dispatcher, controller = controller, library = library, rows = { rows }, pager = { pager },
+            scope = scope, io = dispatcher, controller = controller, library = wrap(library), rows = { rows }, pager = { pager },
             reminders = book, alerts = alerts, catchup = catchup, session = session, settings = settings,
             dispatch = { events += it }, shell = shell, onLineup = { lineups += it }, artwork = artwork,
         )
@@ -267,6 +272,21 @@ class GuideEffectsImplTest {
         r.effects.lookupNumber(10L, 999)
         advanceUntilIdle()
         assertEquals(GuideEvent.Number(10L, null, -1), r.events.last())
+        r.effects.close()
+    }
+
+    /** U4 (code review 2026-11-09): a lookup that throws answers "no channel", so the number overlay closes itself. */
+    @Test
+    fun aFailedNumberLookupAnswersNoChannel() = runTest {
+        val r = Rig(this, channels, wrap = { base ->
+            object : app.thebox.core.guide.GuideLibrary by base {
+                override suspend fun byNumber(playlistId: Long?, number: Int, access: app.thebox.core.parental.ParentalAccess): app.thebox.core.guide.GuideChannel? =
+                    throw IllegalStateException("db busy")
+            }
+        })
+        r.effects.lookupNumber(11L, 5)
+        advanceUntilIdle()
+        assertEquals(GuideEvent.Number(11L, null, -1), r.events.filterIsInstance<GuideEvent.Number>().single())
         r.effects.close()
     }
 

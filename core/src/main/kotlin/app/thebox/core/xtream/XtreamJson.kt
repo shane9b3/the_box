@@ -23,6 +23,8 @@ enum class XtreamPayloadKind { ARRAY, OBJECT, HTML, EMPTY, OTHER }
  * both the array form and the `{"0":{…},"1":{…}}` object form.
  */
 object XtreamJson {
+    const val MAX_ITEM_BYTES = 1 shl 20
+
     val json: Json = Json {
         ignoreUnknownKeys = true
         isLenient = true
@@ -81,8 +83,8 @@ object XtreamJson {
     fun items(input: InputStream): Sequence<JsonElement> {
         val sniffed = sniff(input)
         val stream = when (sniffed.kind) {
-            XtreamPayloadKind.ARRAY -> sniffed.stream
-            XtreamPayloadKind.OBJECT -> ObjectValuesAsArrayStream(sniffed.stream)
+            XtreamPayloadKind.ARRAY -> ItemSizeGuard(sniffed.stream, MAX_ITEM_BYTES)
+            XtreamPayloadKind.OBJECT -> ItemSizeGuard(ObjectValuesAsArrayStream(sniffed.stream), MAX_ITEM_BYTES)
             XtreamPayloadKind.HTML -> throw SourceException(SourceError.NotASource(NotASourceKind.HTML_PAGE))
             XtreamPayloadKind.EMPTY -> throw SourceException(SourceError.NotASource(NotASourceKind.EMPTY))
             XtreamPayloadKind.OTHER -> throw SourceException(SourceError.NotASource(NotASourceKind.WRONG_FORMAT))
@@ -223,4 +225,50 @@ internal class ObjectValuesAsArrayStream(private val src: InputStream) : InputSt
     override fun close() = src.close()
 
     private fun isWs(b: Int) = b == ' '.code || b == '\t'.code || b == '\n'.code || b == '\r'.code
+}
+
+/**
+ * Fails a list response when one item of the top-level array is longer than [maxItem] bytes (security review
+ * F1): the decoder builds a whole `JsonElement` per item, so an endless item would otherwise grow the heap until
+ * the import is killed. The input must be positioned at the opening `[`.
+ */
+internal class ItemSizeGuard(private val src: InputStream, private val maxItem: Int) : InputStream() {
+    private var depth = 0
+    private var inString = false
+    private var escape = false
+    private var item = 0L
+
+    override fun read(): Int {
+        val b = src.read()
+        if (b >= 0) see(b)
+        return b
+    }
+
+    override fun read(b: ByteArray, off: Int, len: Int): Int {
+        val n = src.read(b, off, len)
+        for (k in off until off + n) see(b[k].toInt() and 0xFF)
+        return n
+    }
+
+    override fun close() = src.close()
+
+    private fun see(b: Int) {
+        if (depth >= 1 && ++item > maxItem) {
+            throw SourceException(SourceError.Unsupported("list item over ${maxItem / 1024} KiB"))
+        }
+        if (inString) {
+            when {
+                escape -> escape = false
+                b == '\\'.code -> escape = true
+                b == '"'.code -> inString = false
+            }
+            return
+        }
+        when (b) {
+            '"'.code -> inString = true
+            '{'.code, '['.code -> depth++
+            '}'.code, ']'.code -> if (depth > 0) depth--
+            ','.code -> if (depth == 1) item = 0
+        }
+    }
 }

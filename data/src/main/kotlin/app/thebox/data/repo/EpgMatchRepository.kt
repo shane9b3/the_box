@@ -204,7 +204,8 @@ class EpgMatchRepository @Inject constructor(
 
     // ---------------------------------------------------------------- internals
 
-    private suspend fun subjectsFor(source: EpgSourceEntity): List<SubjectRow> = channelDao.subjects(source.playlistId)
+    private suspend fun subjectsFor(source: EpgSourceEntity): List<SubjectRow> =
+        source.playlistId?.let { channelDao.subjects(it) } ?: channelDao.allSubjects()
 
     private suspend fun overrides(subjects: List<SubjectRow>): Map<ChannelIdentity, EpgChannelRef?> {
         if (subjects.isEmpty()) return emptyMap()
@@ -249,10 +250,18 @@ class EpgMatchRepository @Inject constructor(
         return refs.toList()
     }
 
+    /** Writes only the rows whose flag changes (performance review M1: an unchanged guide rewrote every row twice). */
     private suspend fun updateHasData(sourceId: Long, withData: Set<String>) {
         db.writeTransaction {
-            exec("UPDATE epg_match SET has_data = 0 WHERE source_id = ?") { bindLong(1, sourceId) }
-            forEachBound("UPDATE epg_match SET has_data = 1 WHERE source_id = ? AND xmltv_id = ?", withData) {
+            val had = HashSet<String>()
+            usePrepared("SELECT DISTINCT xmltv_id FROM epg_match WHERE source_id = ? AND has_data = 1") { st ->
+                st.bindLong(1, sourceId)
+                while (st.step()) had += st.getText(0)
+            }
+            forEachBound("UPDATE epg_match SET has_data = 0 WHERE source_id = ? AND xmltv_id = ? AND has_data = 1", had.filter { it !in withData }) {
+                bindLong(1, sourceId); bindText(2, it)
+            }
+            forEachBound("UPDATE epg_match SET has_data = 1 WHERE source_id = ? AND xmltv_id = ? AND has_data = 0", withData) {
                 bindLong(1, sourceId); bindText(2, it)
             }
         }

@@ -2326,7 +2326,7 @@ All fifteen were answered at sign-off; the rulings are in **Lead sign-off (2026-
 | `PIN_OFFER_MAX_PER_PLAYLIST` | 1 (B3) | 3.4.5 |
 | `BACKUP_NUDGE_DAYS` | 30 (S6) | 3.3.9 |
 | `HTTP_SOCKET_TIMEOUT_MS` | 15,000 | 3.5.2 |
-| `HTTP_MAX_SOCKETS` | 4 | 3.5.2 |
+| `HTTP_MAX_SOCKETS` | 6 (4 per address; 2026-11-09 review) | 3.5.2 |
 | `RULE_REGEX_MAX_CHARS` | 200 | 3.7.3 |
 | `RULE_REGEX_BUDGET_MS` | 50 | 3.7.3 |
 | `KEY_OVERRIDES_MAX` | 200 | 3.8.1 |

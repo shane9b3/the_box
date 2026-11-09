@@ -83,6 +83,8 @@ class FakeTimeBaseFactory : TimeBaseFactory {
         return TimeBase(serverZone = info.server.timezone?.let { ZoneId.of(it) })
     }
     override fun forM3u(settings: TimeBaseSettings): TimeBase = TimeBase(templateZone = java.time.ZoneOffset.UTC)
+    override fun fromStored(serverZone: ZoneId?, serverOffset: java.time.ZoneOffset?, clockSkew: java.time.Duration, settings: TimeBaseSettings): TimeBase =
+        TimeBase(serverZone = serverZone, serverOffset = serverOffset, clockSkew = clockSkew)
 }
 
 class FakeXtreamApi : XtreamApi {

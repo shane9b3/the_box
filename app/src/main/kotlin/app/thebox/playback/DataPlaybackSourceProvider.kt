@@ -15,6 +15,7 @@ import app.thebox.data.contracts.XtreamApi
 import app.thebox.data.contracts.XtreamConnection
 import app.thebox.data.db.dao.ChannelDao
 import app.thebox.data.db.dao.PlaylistDao
+import app.thebox.data.db.dao.XtreamAccountDao
 import app.thebox.data.db.entity.PlaylistEntity
 import app.thebox.data.di.IoDispatcher
 import app.thebox.data.repo.ChannelRepository
@@ -22,7 +23,6 @@ import app.thebox.data.repo.PlaylistRepository
 import app.thebox.player.api.PlaybackSourceProvider
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
-import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -45,6 +45,7 @@ class DataPlaybackSourceProvider @Inject constructor(
     private val channelDao: ChannelDao,
     private val playlists: PlaylistRepository,
     private val playlistDao: PlaylistDao,
+    private val accountDao: XtreamAccountDao,
     private val xtream: XtreamApi,
     @param:IoDispatcher private val io: CoroutineDispatcher,
 ) : PlaybackSourceProvider {
@@ -83,7 +84,9 @@ class DataPlaybackSourceProvider @Inject constructor(
     }
 
     override suspend fun account(playlistId: Long): XtreamAccountInfo? = withContext(io) {
-        playlists.account(playlistId).first()
+        // (Fix pass M7a) A one-shot read: `playlists.account(id).first()` registered and dropped a Room observer (its
+        // triggers are writes that can queue behind an import) on every tune.
+        accountDao.get(playlistId)?.let { PlaylistRepository.decodeAccount(it.infoJson) }
     }
 
     /**

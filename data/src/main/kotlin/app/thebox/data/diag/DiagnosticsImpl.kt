@@ -33,6 +33,7 @@ import app.thebox.core.playback.PlaybackEventLog
 import app.thebox.core.settings.SettingsStore
 import app.thebox.core.source.PlaylistType
 import app.thebox.data.db.dao.ChannelDao
+import app.thebox.data.db.dao.EpgSourceDao
 import app.thebox.data.db.dao.RefreshLogDao
 import app.thebox.data.db.entity.RefreshLogEntity
 import app.thebox.data.di.IoDispatcher
@@ -78,6 +79,8 @@ class DiagnosticsImpl @Inject constructor(
     @IoDispatcher private val io: CoroutineDispatcher,
     /** (Storage locations WP-S1, §8, A-S11) Network-folder user names and passwords join the audit's secrets. */
     private val storageLocations: app.thebox.data.storage.StorageLocationsImpl,
+    /** Guide sources: their URLs (a user-added one can carry a token in the path) join the audit (security review F6). */
+    private val epgSources: EpgSourceDao,
 ) : Diagnostics, NetworkTests {
 
     override suspend fun deviceFacts(): DeviceFacts = withContext(io) { DeviceFactsReader(context).read(credentials.usingKeystore, guideSettings.settings.value.performance.name) }
@@ -129,6 +132,14 @@ class DiagnosticsImpl @Inject constructor(
             }
             val last = refreshLog.latest(TARGET_PLAYLIST, p.id, 1).firstOrNull()
             ExportPlaylist(p.id, p.type.name, p.displaySource, channelDao.activeCount(p.id), last?.let { "${it.outcome} ${it.errorCode ?: ""}".trim() }, p.needsReauth, p.enabled)
+        }
+        for (src in runCatching { epgSources.all() }.getOrDefault(emptyList())) {
+            playlists.secret(src.credentialRef).getOrNull()?.let { s ->
+                s.username?.let(secrets::add)
+                s.password?.let(secrets::add)
+                s.headers.values.forEach(secrets::add)
+                s.urls.forEach(secrets::add)
+            }
         }
         // Storage locations (§8, A-S11): each network folder's user name, domain and password, read once on IO.
         runCatching { storageLocations.auditSecrets() }.getOrDefault(emptyList()).forEach(secrets::add)

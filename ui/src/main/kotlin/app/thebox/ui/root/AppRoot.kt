@@ -270,11 +270,10 @@ fun AppRoot(
         geometry.rects(holeMode, placed.width, placed.height, placed.pixelRatio, placed.aspectMode)
     }
 
-    // ---- key sink focus (B1): on every mode change and on resume
+    // ---- key sink focus (B1): on every mode change and on resume (the ON_RESUME effect is below, after `editorOpen`)
     val requester = remember { FocusRequester() }
     val sink = remember(host.keyRouter, requester) { host.keyRouter.sinkModifier(requester) }
     LaunchedEffect(ui.mode) { requestSinkFocus(requester) }
-    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { requestSinkFocus(requester) }
     // H-S11: Compose drops the key-ups of keys held while the window loses focus or detaches; end their holds.
     LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { host.keyRouter.onFocusLost() }
     DisposableEffect(host.keyRouter) { onDispose { host.keyRouter.onFocusLost() } }
@@ -323,6 +322,12 @@ fun AppRoot(
     }
     val editorOpen by editorOpenFlow.collectAsState(initial = false)
     LaunchedEffect(editorOpen) { if (!editorOpen) requestSinkFocus(requester) }
+    // ON_RESUME (B1) re-takes sink focus. U1 (code review 2026-11-09): not in SEARCH, SPORTS or the settings text editor,
+    // which are on Compose focus: on the sink they would never see BACK. Compose keeps their focused child across a pause.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
+        val composeFocus = ui.mode == ScreenMode.SEARCH || ui.mode == ScreenMode.SPORTS || editorOpen
+        if (!composeFocus) requestSinkFocus(requester)
+    }
     LaunchedEffect(player) { player?.events?.collect { onEvent(it) } }
     LaunchedEffect(toast) {
         if (toast != null) {

@@ -56,6 +56,11 @@ interface TimeBaseFactory {
     fun fromAccount(type: PlaylistType, info: app.thebox.core.xtream.XtreamAccountInfo, settings: TimeBaseSettings): TimeBase
     /** M3U playlists with no account info (no panel zone known). */
     fun forM3u(settings: TimeBaseSettings): TimeBase
+    /**
+     * Xtream playlists with no usable account response: the zone, offset and skew persisted from an earlier
+     * account (playlist columns). The user's token-zone and padding settings apply as in [fromAccount].
+     */
+    fun fromStored(serverZone: java.time.ZoneId?, serverOffset: java.time.ZoneOffset?, clockSkew: java.time.Duration, settings: TimeBaseSettings): TimeBase
 }
 
 /** Stub in commit 0 at catchup/CatchupResolverImpl.kt; WP-C owns the body. */

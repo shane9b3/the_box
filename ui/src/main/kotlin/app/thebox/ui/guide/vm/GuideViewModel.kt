@@ -103,6 +103,7 @@ import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -201,6 +202,12 @@ class GuideViewModel @Inject constructor(
      * BACK while it shows, so BACK reaching the key sink with an empty field means "leave Search" (KeyRouter, B1).
      */
     @Volatile var searchFieldIdle: Boolean = true
+
+    /**
+     * Bumped when [library]'s row content changes while something is tuned: re-sends Tuned with a fresh row (U3).
+     * Declared before `init`, whose feeds read it.
+     */
+    private val tunedRowsVersion = MutableStateFlow(0)
 
     override val ambient = AmbientState()
     override val surfacePlayer: Player get() = controller.surfacePlayer
@@ -407,7 +414,16 @@ class GuideViewModel @Inject constructor(
                 parentalLibrary.sources(access = legacyParentalAccess(unlocked)).collect { machine.dispatch(GuideEvent.Sources(it)) }
             }
         }
-        scope.launch { library.rowContent.collect { rowsCache.reloadLoaded() } }
+        scope.launch {
+            library.rowContent.collect {
+                rowsCache.reloadLoaded()
+                // U3 (code review 2026-11-09): an edit (name, logo, EPG mapping) or a rebuild can change the tuned row:
+                // forget it and re-send Tuned with a fresh lookup (as PlayerViewModel does, M3 H-L12).
+                cachedIdentity = null
+                cachedChannel = null
+                if (controller.state.value.target != null) tunedRowsVersion.update { it + 1 }
+            }
+        }
         scope.launch {
             rowsCache.changes.collect {
                 machine.dispatch(GuideEvent.RowsChanged(it))
@@ -434,7 +450,7 @@ class GuideViewModel @Inject constructor(
         scope.launch { alerts.current.collect { machine.dispatch(GuideEvent.Alert(it)) } }
         forwardParental()
         scope.launch {
-            combine(controller.state, archive.status, settingsSource.settings) { st, a, s -> Triple(st, a, s) }.collect { (st, a, s) ->
+            combine(controller.state, archive.status, settingsSource.settings, tunedRowsVersion) { st, a, s, _ -> Triple(st, a, s) }.collect { (st, a, s) ->
                 val identity = st.target?.identity
                 val channel = identity?.let { channelOf(it) }
                 // H-B1: the HDR poster is not a still. It is the controller's MINI state (video track off, viewport
@@ -466,9 +482,12 @@ class GuideViewModel @Inject constructor(
     private var cachedIdentity: ChannelIdentity? = null
     private var cachedChannel: GuideChannel? = null
 
-    /** The tuned channel's row (cached per identity, §3.16.2). */
+    /**
+     * The tuned channel's row (cached per identity, §3.16.2). U3 (code review 2026-11-09): only hits are cached (a failed
+     * lookup is retried on the next emission) and the cache is cleared when the row content changes.
+     */
     private suspend fun channelOf(identity: ChannelIdentity): GuideChannel? {
-        if (identity == cachedIdentity) return cachedChannel
+        if (identity == cachedIdentity && cachedChannel != null) return cachedChannel
         val ch = try {
             library.rowIdOf(identity)?.let { id -> library.channels(longArrayOf(id), 0, 1).firstOrNull() }
         } catch (e: CancellationException) {
@@ -477,8 +496,10 @@ class GuideViewModel @Inject constructor(
             BoxLog.w(TAG, "tuned channel lookup failed: ${e.javaClass.simpleName}")
             null
         }
-        cachedIdentity = identity
-        cachedChannel = ch
+        if (ch != null) {
+            cachedIdentity = identity
+            cachedChannel = ch
+        }
         return ch
     }
 

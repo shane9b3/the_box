@@ -24,7 +24,10 @@ import app.thebox.data.repo.FavouritesRepository
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.debounce
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOn
@@ -65,6 +68,7 @@ class GuideLibraryImpl @Inject constructor(
      */
     override fun sources(access: ParentalAccess): Flow<List<GuideSourceEntry>> =
         trigger(SOURCE_TABLES, withRecentCount = true, emitInitial = true)
+            .spaced(REQUERY_GAP_MS)
             .map { buildSources(access) }
             .distinctUntilChanged()
             .flowOn(io)
@@ -106,7 +110,7 @@ class GuideLibraryImpl @Inject constructor(
         // G-S6: only Recent depends on the watch history (`last_watched_at`); every other lineup ignores tune-time writes.
         val changes = if (source == GuideSource.Recent) db.invalidationTracker.createFlow(*LINEUP_TABLES, "channel_prefs").map { }
         else trigger(LINEUP_TABLES, withRecentCount = false, emitInitial = true)
-        val raw = changes.map { queries.lineup(source, access) }
+        val raw = changes.spaced(REQUERY_GAP_MS).map { queries.lineup(source, access) }
         val shaped = if (source != GuideSource.Recent) {
             raw.map { GuideLineup(source, GuideQueries.versionOf(source, it.ids), it.ids, it.archiveDaysUpperBound) }
         } else {
@@ -217,6 +221,21 @@ class GuideLibraryImpl @Inject constructor(
 
     companion object {
         const val ROW_CONTENT_DEBOUNCE_MS = 500L
+        /** Lineups and the Groups panel: at least this long between the end of one re-query and the next (H4). */
+        const val REQUERY_GAP_MS = 500L
+
+        /**
+         * (Performance review H4) Each import batch commits `channel`, and Room's tracker re-fires as soon as the last
+         * re-query ends, so lineups re-ran back to back for a whole import. A change after a quiet spell passes at
+         * once (the first emission, a user's hide or favourite); while changes keep coming they are conflated to one
+         * re-query per [gapMs], and the last change always gets its own, so the guide never stays stale.
+         */
+        internal fun Flow<Unit>.spaced(gapMs: Long): Flow<Unit> = flow {
+            conflate().collect {
+                emit(Unit)
+                delay(gapMs)
+            }
+        }
         /** Section labels (the panel shows them as given; M5 may localise by [SourceSection]). */
         const val LABEL_ALL = "All channels"
         const val LABEL_RECENT = "Recently watched"

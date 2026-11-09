@@ -213,20 +213,33 @@ interface ChannelDao {
     )
     suspend fun matchCounts(playlistId: Long): MatchCounts
 
-    /** Matching subjects: non-missing LIVE/RADIO channels of enabled playlists ([playlistId] null = all). */
+    /**
+     * Matching subjects: non-missing LIVE/RADIO channels of [playlistId] when it is enabled. One query per case
+     * (performance review M4): `(:id IS NULL OR c.playlist_id = :id)` could not use a playlist index.
+     */
+    @Query(SUBJECTS_OF_PLAYLIST)
+    suspend fun subjects(playlistId: Long): List<SubjectRow>
+
+    /** Matching subjects of every enabled playlist. */
     @Query(
         """
         SELECT c.playlist_id, c.stable_key, c.name, c.tvg_id, c.tvg_name
         FROM channel c JOIN playlist p ON p.id = c.playlist_id AND p.enabled = 1
-        WHERE c.kind IN (0, 1) AND c.missing_since IS NULL AND (:playlistId IS NULL OR c.playlist_id = :playlistId)
+        WHERE c.kind IN (0, 1) AND c.missing_since IS NULL
         ORDER BY c.playlist_id, c.sort_index""",
     )
-    suspend fun subjects(playlistId: Long?): List<SubjectRow>
+    suspend fun allSubjects(): List<SubjectRow>
 
     @Query("SELECT DISTINCT tvg_id FROM channel WHERE tvg_id IS NOT NULL AND missing_since IS NULL AND kind IN (0, 1) AND (:playlistId IS NULL OR playlist_id = :playlistId)")
     suspend fun tvgIds(playlistId: Long?): List<String>
 
     companion object {
+        const val SUBJECTS_OF_PLAYLIST = """
+        SELECT c.playlist_id, c.stable_key, c.name, c.tvg_id, c.tvg_name
+        FROM channel c JOIN playlist p ON p.id = c.playlist_id AND p.enabled = 1
+        WHERE c.playlist_id = :playlistId AND c.kind IN (0, 1) AND c.missing_since IS NULL
+        ORDER BY c.sort_index"""
+
         // ---- v5 effective group (docs/design/m6-channel-editor.md §3.6, review 2 ruling a and item 1). Every reader of a
         // channel's group joins through these pieces; ProviderGroupJoinGuardTest fails on any other provider-group join.
 

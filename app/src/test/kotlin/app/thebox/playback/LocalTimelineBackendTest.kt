@@ -123,6 +123,9 @@ private class BufferedController : PlaybackController by unusedLocalController()
         flow.value = PlaybackState.Connecting(np(tune.identity, archive = true), ConnectPhase.RESOLVING, 1, 0)
     }
 
+    /** (Fix pass A2) A REPREPARE setting: the buffered cycle re-prepares its reader at the pin. */
+    override fun reapplySettings() { calls += "reapplySettings" }
+
     /** (Fix pass B2) The controller's local fallback for a gap hand-off that cannot happen. */
     override fun skipGapLocal(): Boolean { calls += "skipGapLocal"; return true }
 
@@ -273,6 +276,18 @@ class LocalTimelineBackendTest {
         assertEquals("no re-tune, no archive request", listOf("pause", "resume"), r.controller.calls)
         assertEquals(ArchivePhase.PLAYING, r.status.phase)
         assertTrue(r.status.advancing)
+    }
+
+    /** (Fix pass A2) A REPREPARE setting changed while watching from the buffer: the controller re-prepares at the pin. */
+    @Test fun reapplyFromTheBufferReachesTheController() = runTest {
+        val r = Rig(this, archive = false)
+        r.buffer()
+        r.archivePlayback.pauseLive(r.channel)
+        r.archivePlayback.resume()
+        assertEquals(ArchivePhase.PLAYING, r.status.phase)
+        r.archivePlayback.reapply(r.status.wallMs)
+        assertEquals(listOf("pause", "resume", "reapplySettings"), r.controller.calls)
+        assertEquals("the viewer keeps their place: no seek, no re-tune", ArchivePhase.PLAYING, r.status.phase)
     }
 
     /** §11.2 seekTo inside the buffer: `seekLocal(mono(t), dir)`, SEEKING, settled at the new reader's first media. */

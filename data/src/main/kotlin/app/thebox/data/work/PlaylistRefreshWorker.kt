@@ -14,6 +14,7 @@ import app.thebox.data.repo.SyncStatusRepository
 import app.thebox.data.repo.Trigger
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.CancellationException
 
 /**
  * Refreshes one playlist (§3.10). Expedited for manual/onboarding refreshes: below API 31 WorkManager runs
@@ -38,13 +39,16 @@ class PlaylistRefreshWorker @AssistedInject constructor(
         if (id < 0) return Result.failure()
         val trigger = runCatching { Trigger.valueOf(inputData.getString(KEY_TRIGGER) ?: "") }.getOrDefault(Trigger.PERIODIC)
         val force = inputData.getBoolean(KEY_FORCE_SHRINK, false)
+        val writes = ProgressWrites()
         val result = refresher.refresh(id, trigger, force) { line ->
             status?.reportProgress(line)
-            setProgressAsync(workDataOf(KEY_PROGRESS to line))
+            if (writes.shouldWrite(line)) setProgressAsync(workDataOf(KEY_PROGRESS to line))
         }
         status?.reportProgress(null)
         try {
             maintenance?.runIfDue()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             BoxLog.w(TAG, "maintenance failed", e)
         }

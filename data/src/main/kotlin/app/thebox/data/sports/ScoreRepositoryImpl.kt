@@ -483,7 +483,14 @@ class ScoreRepositoryImpl internal constructor(
             return null
         }
         if (dayForce) return now
-        return dayPolicy.nextAt(dayOk, dayDemand, dayFailures, dayLastFailMono, dayRetryAfterS, phaseMs, dayJitter, now)
+        val at = dayPolicy.nextAt(dayOk, dayDemand, dayFailures, dayLastFailMono, dayRetryAfterS, phaseMs, dayJitter, now)
+        val ok = dayOk
+        if (at != null || dayWanted != null || ok == null || dayFailures != 0) return at
+        // Today's board is done (the policy has no next poll): forget the dated key, so the next fetch (the idle
+        // recheck, or a Retry after it failed) re-resolves today with `/score/now` and a tab left open past the
+        // rollover moves on to the new day (correctness review F5).
+        dayKey = null
+        return ok.receivedMono + SportsConstants.DAY_POLL_IDLE_MS
     }
 
     private fun dayDue(now: Long): Boolean {
@@ -502,7 +509,7 @@ class ScoreRepositoryImpl internal constructor(
                 dayFailures = 0
                 dayLastFailMono = null
                 dayRetryAfterS = null
-                if (dayKey == null) dayKey = f.value.dayKey
+                if (key == null) dayKey = f.value.dayKey
                 _day.value = DayState.Board(f.value, f.receivedMono, failing = false, isToday = dayWanted == null)
             }
             Fetch.NotFound -> dayFailed(FailKind.HTTP_OTHER, mono.nowMs(), null)

@@ -41,6 +41,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -290,18 +291,48 @@ class SearchViewModelTest {
         val old = vm.results.value!!
         library.tickRowContent()
         runCurrent()
-        assertNull(vm.results.value)
-        assertFalse(vm.isCurrent(old))
+        // U2 (code review 2026-11-09): a content change keeps the shown snapshot (cards and focus) until it is replaced.
+        assertSame(old, vm.results.value)
+        assertTrue(vm.isCurrent(old))
         advanceUntilIdle()
+        assertTrue("an equal re-query keeps the same snapshot (a state flow keeps equal values)", vm.isCurrent(old))
+        search.channels = emptyList() // the EPG / library change altered the answer
         content.value++
         runCurrent()
-        assertNull(vm.results.value)
+        assertSame(old, vm.results.value)
         advanceUntilIdle()
+        assertTrue(vm.results.value!!.channels.isEmpty())
+        assertFalse(vm.isCurrent(old))
+        search.channels = listOf(channel)
+        // An access change still clears first.
         settings.update { it.copy(debugUnlocked = true) }
         runCurrent()
         assertNull(vm.results.value)
         advanceUntilIdle()
         assertEquals(listOf("news", "news", "news", "news"), search.queries)
+    }
+
+    /** U2 (code review 2026-11-09): the user's own Add to favourites re-emits the sources; the results must not blank. */
+    @Test
+    fun addingAFavouriteKeepsTheShownResultsUntilTheRequeryReplacesThem() = runTest(dispatcher) {
+        val library = FakeGuideLibrary(listOf(channel))
+        val search = FakeGuideSearch(listOf(channel))
+        val vm = SearchViewModel(search, FakeReminderBook(), library, FakeGuideSettings(), FakeGuideSessionStore()) { nowMin * 60_000L }
+        vm.onEntered()
+        vm.onQuery("news")
+        advanceUntilIdle()
+        val shown = vm.results.value!!
+        val seen = ArrayList<SearchResults?>()
+        backgroundScope.launch(dispatcher) { vm.results.collect { seen += it } }
+        runCurrent()
+        vm.toggleFavourite(channel, shown)
+        runCurrent()
+        library.tickRowContent() // the real library re-emits its sources (the favourite tables) here; the fake does not
+        advanceUntilIdle()
+        assertTrue(vm.isFavourite(channel))
+        assertEquals(2, search.queries.size)
+        assertFalse("never published null", seen.any { it == null })
+        assertEquals(listOf(channel), vm.results.value!!.channels)
     }
 
     @Test

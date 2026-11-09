@@ -1,11 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- benchmark and nonMinifiedRelease build types only, never release (docs/design/m3-guide.md §5.7, §2.13 item 19): seeding for GuideScrollBenchmark and BaselineProfileGenerator. -->
+<!-- benchmark and nonMinifiedRelease build types only, never release (docs/design/m3-guide.md §5.7, §2.13 item 19): seeding for GuideScrollBenchmark and BaselineProfileGenerator.
+     Started only by `am start` from the shell, which holds DUMP; other apps cannot (security review F4, 2026-11-09). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <application>
         <activity
             android:name="app.thebox.bench.BenchSeedActivity"
             android:exported="true"
+            android:permission="android.permission.DUMP"
             android:theme="@style/Theme.TheBox" />
     </application>
 </manifest>

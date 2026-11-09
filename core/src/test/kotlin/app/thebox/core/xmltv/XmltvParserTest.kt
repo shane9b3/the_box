@@ -266,4 +266,96 @@ class XmltvParserTest {
         }
         assertEquals("Tom & Jerry été A B", c.programmes[0].title)
     }
+
+    // ---- security review F1: size caps
+
+    private fun doc(body: String) = ByteArrayInputStream("<?xml version=\"1.0\"?><tv>$body</tv>".toByteArray())
+
+    private val prog = "<programme start=\"20261013060000 +0000\" stop=\"20261013070000 +0000\" channel=\"c\">"
+
+    @Test
+    fun overLongFieldsAreCutAndTheRestIsReadPast() {
+        val long = "x".repeat(50_000)
+        val c = parse(
+            doc(
+                "<channel id=\"c\"><display-name>$long</display-name><icon src=\"http://h/${"p".repeat(10_000)}\"/></channel>" +
+                    "$prog<title>  $long</title><sub-title>${"y".repeat(3_000)}<!-- c -->${"y".repeat(3_000)}</sub-title>" +
+                    "<desc>$long</desc><category>$long</category><icon src=\"http://h/${"q".repeat(10_000)}\"/></programme>" +
+                    "$prog<title>Next</title></programme>",
+            ),
+        )
+        val ch = c.channels.single()
+        assertEquals(XmltvParser.MAX_TEXT_FIELD_CHARS, ch.displayNames.single().name.length)
+        assertNull(ch.iconUrl, "an over-long icon URL is dropped, not cut")
+        val p = c.programmes[0]
+        assertEquals("x".repeat(XmltvParser.MAX_TEXT_FIELD_CHARS), p.title, "leading whitespace does not count")
+        assertEquals("y".repeat(XmltvParser.MAX_TEXT_FIELD_CHARS), p.subtitle)
+        assertEquals(2048, p.desc!!.length)
+        assertEquals(XmltvParser.MAX_TEXT_FIELD_CHARS, p.categories.single().length)
+        assertNull(p.icon)
+        assertEquals("Next", c.programmes[1].title)
+    }
+
+    @Test
+    fun overLongIdsSkipTheElement() {
+        val id = "i".repeat(XmltvParser.MAX_ID_CHARS + 1)
+        val c = parse(
+            doc(
+                "<channel id=\"$id\"><display-name>A</display-name></channel>" +
+                    "<programme start=\"20261013060000 +0000\" channel=\"$id\"><title>A</title></programme>$prog<title>B</title></programme>",
+            ),
+        )
+        assertTrue(c.channels.isEmpty())
+        assertEquals(listOf("B"), c.programmes.map { it.title })
+    }
+
+    @Test
+    fun aTextRunWithoutTagsOverTheGapFailsAsUnsupported() {
+        val run = "z".repeat(XmltvParser.MAX_MARKUP_GAP_BYTES + 10)
+        val plain = assertFailsWith<SourceException> { parse(doc("$prog<title>$run</title></programme>")) }
+        assertIs<SourceError.Unsupported>(plain.error)
+        // Comments, CDATA and PIs do not reset the count: next() would join the text around them.
+        val chunk = "z".repeat(64 * 1024)
+        val joined = (1..20).joinToString("") { "$chunk<!--<a>--><![CDATA[<b>]]><?p <c>?>" }
+        val split = assertFailsWith<SourceException> { parse(doc("$prog<title>$joined</title></programme>")) }
+        assertIs<SourceError.Unsupported>(split.error)
+        // The same amount of text spread over elements is fine.
+        val many = (1..20).joinToString("") { "$prog<title>$chunk</title></programme>" }
+        assertEquals(20, parse(doc(many)).programmes.size)
+    }
+
+    @Test
+    fun aGzipBombFailsAsUnsupportedNotOutOfMemory() {
+        val bytes = java.io.ByteArrayOutputStream().also { o ->
+            java.util.zip.GZIPOutputStream(o).use { gz ->
+                gz.write("<?xml version=\"1.0\"?><tv>$prog<title>".toByteArray())
+                val zeros = ByteArray(1 shl 20) { 'a'.code.toByte() }
+                repeat(64) { gz.write(zeros) }
+                gz.write("</title></programme></tv>".toByteArray())
+            }
+        }.toByteArray()
+        assertTrue(bytes.size < 200_000, "the fixture is small: ${bytes.size}")
+        val e = assertFailsWith<SourceException> {
+            parse(Compression.decompress(okio.Buffer().write(bytes)).inputStream())
+        }
+        assertIs<SourceError.Unsupported>(e.error)
+    }
+
+    @Test
+    fun tailSeesTheEndWhateverTheReadSizes() {
+        // Performance review L7: the tail copies only the last bytes of each read.
+        val rnd = kotlin.random.Random(3)
+        for (size in listOf(0, 5, 255, 256, 257, 1_000, 70_000)) {
+            for (end in listOf("</tv>", "</TV>\n  ", "</tv", "<tv/>")) {
+                val body = ByteArray(size) { ('a' + rnd.nextInt(26)).code.toByte() } + end.toByteArray()
+                for (chunk in listOf(1, 7, 256, 300, 65_536)) {
+                    val t = XmltvParser.TailInputStream(ByteArrayInputStream(body))
+                    val buf = ByteArray(chunk)
+                    while (t.read(buf, 0, if (chunk == 1) 1 else rnd.nextInt(1, chunk + 1)) >= 0) Unit
+                    assertEquals(body.size.toLong(), t.total)
+                    assertEquals(end.trim().lowercase() == "</tv>", t.endsWithCloseTv(), "$size $end $chunk")
+                }
+            }
+        }
+    }
 }

@@ -35,7 +35,8 @@ import android.view.KeyEvent as AndroidKeyEvent
  *   the UP cancels it.
  * - Returns true for every key it handled including the matching UP; keys with no binding (volume, Home) return
  *   false. In SEARCH every key returns false except BACK while [searchFieldIdle] (empty field, IME hidden). SPORTS is
- *   the same, with the flag meaning "no choice list open" (docs/design/m6-score-bug.md §5.1).
+ *   the same, with the flag meaning "no choice list open" (docs/design/m6-score-bug.md §5.1). BACK is also taken while
+ *   the sink itself holds focus ([sinkFocused], U1): the screen cannot see it then.
  * - [KeyCapabilities.record] runs for every bound or unbound DOWN with repeat 0 (the impl writes only new codes, N7).
  * - (code review 2026-10-14, H-S4) A key whose action the machine would ignore (`GuideStateMachine.handles` false:
  *   M3 FULL passed Play/Pause and FF/RW; M4 FULL handles them, §7 item 15) returns false, so the framework hands it
@@ -90,6 +91,12 @@ class KeyRouterImpl(
     private var captureListener: ((CapturedKey) -> Unit)? = null
     /** (M5, S14) The captured code, swallowed until its UP; [NO_CODE] when none. */
     private var swallowCode = NO_CODE
+    /**
+     * (code review 2026-11-09, U1) The sink itself holds Compose focus, not one of its children. In SEARCH and SPORTS
+     * the screen sees keys only through a focused child; with focus on the sink it never sees BACK, so the router takes
+     * BACK (leave to the guide) instead of returning false and letting the Activity close the app.
+     */
+    internal var sinkFocused = false
 
     override fun capture(listener: ((CapturedKey) -> Unit)?) {
         captureListener = listener
@@ -168,7 +175,7 @@ class KeyRouterImpl(
             if (short == null && long == null) return false
             // SPORTS (docs/design/m6-score-bug.md §5.1) is on Compose focus too: every key but BACK passes through, and BACK
             // goes to the machine unless the screen holds it (its choice list is open: the same "idle" flag as Search).
-            if ((mode == ScreenMode.SEARCH || mode == ScreenMode.SPORTS) && !(short == BoxAction.BACK && searchFieldIdle())) return false
+            if ((mode == ScreenMode.SEARCH || mode == ScreenMode.SPORTS) && !(short == BoxAction.BACK && (searchFieldIdle() || sinkFocused))) return false
             if (long == null && short != null && !m.handles(short)) return false // H-S4: on to the media session
             consumedDown += code
             heldContext[code] = context
@@ -256,7 +263,7 @@ class KeyRouterImpl(
     override fun sinkModifier(requester: FocusRequester): Modifier =
         Modifier
             .focusRequester(requester)
-            .onFocusChanged { if (!it.isFocused) onFocusLost() }
+            .onFocusChanged { sinkFocused = it.isFocused; if (!it.isFocused) onFocusLost() }
             .onPreviewKeyEvent(::onKey)
             .focusable()
 

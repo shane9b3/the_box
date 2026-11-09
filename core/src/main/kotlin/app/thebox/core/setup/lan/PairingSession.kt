@@ -13,14 +13,23 @@ import kotlin.io.encoding.Base64
  * browser arrived without the cookie and the code then answered "another phone"): the right token or code presented
  * again **from the paired IP** pairs again with a new cookie, and the previous cookie is refused from then on. A wrong
  * token after pairing stays [PairResult.Busy]; a wrong code from the paired IP still counts. [PhoneApi] never pairs
- * on a HEAD or prefetch of the token path. [LanLimits.PAIR_MAX_WRONG] wrong codes rotate the code once; the second
- * exhaustion stops the session ([LanFailure.TOO_MANY_WRONG_CODES]). Idle [LanLimits.PAIR_IDLE_MS] and absolute [LanLimits.PAIR_MAX_MS] lifetimes end it with [LanFailure.EXPIRED].
+ * on a HEAD or prefetch of the token path.
+ *
+ * Wrong codes are counted **per remote address** (security review F2, 2026-11-09: before, any LAN host could end the
+ * session with ten wrong codes). An address's [LanLimits.PAIR_MAX_WRONG]th wrong code rotates the code; its second
+ * exhaustion blocks that address for the rest of the session ([PairResult.Stopped] for it alone, uncounted from then
+ * on) while the TV keeps waiting for the real phone. Only the paired address exhausting its tries still ends the
+ * session. The global ceiling [LanLimits.PAIR_MAX_WRONG_TOTAL] (all addresses) ends it with
+ * [LanFailure.TOO_MANY_WRONG_CODES], so many addresses together get at most that many guesses at a 10^6 code:
+ * ≤ 30 × 10^-6 = 3 × 10^-5 per session (the 128-bit token cannot be guessed). Ending it that way needs at least three
+ * addresses. Idle [LanLimits.PAIR_IDLE_MS] and absolute [LanLimits.PAIR_MAX_MS] lifetimes end it with [LanFailure.EXPIRED].
  * Thread-safe (the server's workers call it concurrently). Token, code and cookie are registered for redaction.
  */
 class PairingSession(
     private val clock: () -> Long,
     private val randomBytes: (ByteArray) -> Unit = { SecureRandom().nextBytes(it) },
     private val maxWrong: Int = LanLimits.PAIR_MAX_WRONG,
+    private val maxWrongTotal: Int = LanLimits.PAIR_MAX_WRONG_TOTAL,
     private val idleMs: Long = LanLimits.PAIR_IDLE_MS,
     private val maxMs: Long = LanLimits.PAIR_MAX_MS,
     /** Called after every change the TV screen shows (pairing, a new code, a failure, a request). */
@@ -28,11 +37,11 @@ class PairingSession(
 ) {
     sealed interface PairResult {
         data class Paired(val cookie: String) : PairResult
-        /** Wrong code; [left] tries before the code rotates (0 = it just rotated). */
+        /** Wrong code; [left] tries this address has before the code rotates or it is blocked (0 = the code just rotated). */
         data class Wrong(val left: Int) : PairResult
         /** Another phone (another IP) already paired. */
         data object Busy : PairResult
-        /** The session ended ([failure] says why). */
+        /** The session ended ([failure] says why), or ended for this address (too many wrong codes from it, [failure] null). */
         data class Stopped(val failure: LanFailure?) : PairResult
     }
 
@@ -48,7 +57,7 @@ class PairingSession(
         private set
     @Volatile var lastRequestAtMs: Long? = null
         private set
-    /** Wrong codes in the current code's cycle. */
+    /** Wrong codes since the code last rotated, all addresses. */
     @Volatile var wrongCodes: Int = 0
         private set
     /** True once a wrong-code exhaustion rotated the code (the TV says "here is a new one"). */
@@ -60,6 +69,9 @@ class PairingSession(
         private set
 
     private var cookie: String? = null
+    /** Wrong codes per remote address; at most [maxWrongTotal] entries (every entry took a counted wrong code). */
+    private val wrongByIp = HashMap<String, Int>()
+    private var wrongTotal = 0
 
     /** QR path pairing. */
     fun pairWithToken(candidate: String, ip: String): PairResult = synchronized(lock) {
@@ -77,23 +89,31 @@ class PairingSession(
         if (ended) return PairResult.Stopped(failure)
         // Another IP is refused uncounted; from the paired IP the right code re-pairs and a wrong one counts (2026-11-01).
         if (pairedFrom != null && pairedFrom != ip) return PairResult.Busy
+        val mine = wrongByIp[ip] ?: 0
+        if (mine >= 2 * maxWrong) return PairResult.Stopped(null) // this address is blocked; not counted again
         val digits = candidate.filter { it in '0'..'9' }
         if (digits.length == CODE_DIGITS && equalSecret(digits, code)) return pair(ip)
+        val n = mine + 1
+        wrongByIp[ip] = n
+        wrongTotal++
         wrongCodes++
-        val left = maxWrong - wrongCodes
-        if (left > 0) {
-            onChange()
-            return PairResult.Wrong(left)
-        }
-        if (rotated) {
+        if (wrongTotal >= maxWrongTotal || (n >= 2 * maxWrong && ip == pairedFrom)) {
             end(LanFailure.TOO_MANY_WRONG_CODES)
             return PairResult.Stopped(failure)
         }
-        rotated = true
-        wrongCodes = 0
-        code = newCode()
+        if (n >= 2 * maxWrong) {
+            onChange()
+            return PairResult.Stopped(null)
+        }
+        if (n == maxWrong) {
+            rotated = true
+            wrongCodes = 0
+            code = newCode()
+            onChange()
+            return PairResult.Wrong(0)
+        }
         onChange()
-        PairResult.Wrong(0)
+        PairResult.Wrong(if (n < maxWrong) maxWrong - n else 2 * maxWrong - n)
     }
 
     /** Every request after pairing: the cookie must match and come from the paired IP. */

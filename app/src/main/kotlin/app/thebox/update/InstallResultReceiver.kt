@@ -11,10 +11,12 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import app.thebox.core.common.BoxLog
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
 import javax.inject.Inject
 import javax.inject.Singleton
+import kotlin.coroutines.CoroutineContext
 
 /** What the installer reported (docs/design/m5-setup-settings.md §3.12.4). */
 sealed interface InstallStatus {
@@ -58,9 +60,29 @@ class InstallResultReceiver @Inject constructor(@ApplicationContext private val 
     /** Every status code seen this process (the instrumented suite reads it, I-M5-19). */
     val statusesSeen: MutableList<Int> = java.util.Collections.synchronizedList(ArrayList())
 
-    fun install(apk: File, packageName: String, onStatus: (InstallStatus) -> Unit) {
+    /**
+     * Creates, writes and commits the session. A4 (code review 2026-11-09): the session work (the APK copy and its fsync)
+     * runs on [io]; the caller's thread (main) keeps the receiver registration, the fallback's `startActivity` and every
+     * [onStatus] call.
+     */
+    suspend fun install(apk: File, packageName: String, io: CoroutineContext, onStatus: (InstallStatus) -> Unit) {
         listener = onStatus
         register()
+        when (val r = withContext(io) { commitSession(apk, packageName) }) {
+            SessionResult.Committed -> Unit
+            SessionResult.NoSession -> fallback(apk, onStatus)
+            is SessionResult.Failed -> onStatus(InstallStatus.Failed(PackageInstaller.STATUS_FAILURE, r.reason))
+        }
+    }
+
+    private sealed interface SessionResult {
+        data object Committed : SessionResult
+        /** Session installs are unavailable (Fire OS, §9 F14): use the `ACTION_VIEW` fallback. */
+        data object NoSession : SessionResult
+        data class Failed(val reason: String) : SessionResult
+    }
+
+    private fun commitSession(apk: File, packageName: String): SessionResult {
         val installer = context.packageManager.packageInstaller
         val sessionId = try {
             val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL).apply {
@@ -70,12 +92,10 @@ class InstallResultReceiver @Inject constructor(@ApplicationContext private val 
             installer.createSession(params)
         } catch (e: IOException) {
             BoxLog.w(TAG, "session not created (${e.javaClass.simpleName}); ACTION_VIEW fallback")
-            fallback(apk, onStatus)
-            return
+            return SessionResult.NoSession
         } catch (e: SecurityException) {
             BoxLog.w(TAG, "session not allowed (${e.javaClass.simpleName}); ACTION_VIEW fallback")
-            fallback(apk, onStatus)
-            return
+            return SessionResult.NoSession
         }
         try {
             installer.openSession(sessionId).use { session ->
@@ -86,14 +106,17 @@ class InstallResultReceiver @Inject constructor(@ApplicationContext private val 
                 val intent = Intent(ACTION).setPackage(context.packageName)
                 val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
                 val pending = PendingIntent.getBroadcast(context, sessionId, intent, flags)
+                // Set before commit: with the commit off the main thread, its status broadcast could otherwise come first.
+                pendingSession = sessionId
                 session.commit(pending.intentSender)
             }
-            pendingSession = sessionId
             BoxLog.i(TAG) { "session $sessionId committed (${apk.length()} bytes)" }
+            return SessionResult.Committed
         } catch (e: Exception) {
+            if (pendingSession == sessionId) pendingSession = null
             runCatching { installer.abandonSession(sessionId) }
             BoxLog.w(TAG, "session $sessionId failed before commit: ${e.javaClass.simpleName}")
-            onStatus(InstallStatus.Failed(PackageInstaller.STATUS_FAILURE, e.javaClass.simpleName))
+            return SessionResult.Failed(e.javaClass.simpleName)
         }
     }
 
@@ -130,6 +153,10 @@ class InstallResultReceiver @Inject constructor(@ApplicationContext private val 
                     try {
                         ctx.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     } catch (e: Exception) {
+                        // A6 (code review 2026-11-09): nobody can answer this session; abandon it rather than leak it.
+                        val id = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, pendingSession ?: -1)
+                        pendingSession = null
+                        if (id >= 0) runCatching { ctx.packageManager.packageInstaller.abandonSession(id) }
                         l?.invoke(InstallStatus.Blocked(e.javaClass.simpleName))
                         return
                     }

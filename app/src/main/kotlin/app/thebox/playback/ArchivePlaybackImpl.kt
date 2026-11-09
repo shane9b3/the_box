@@ -433,7 +433,9 @@ class ArchivePlaybackImpl(
      */
     override fun reapply(playheadMs: Long) {
         val s = session ?: return
-        if (s.local) return // §7.6: the controller re-prepares a buffered cycle reader-only at the pin itself
+        // (Fix pass A2, §7.6) Watching from the local buffer: the controller re-prepares the buffered cycle reader-only at
+        // the pin, so the setting applies and the viewer keeps their place.
+        if (s.local) { controller.reapplySettings(); return }
         if (s.phase == IDLE || s.phase == FAILED || s.phase == PAUSED || s.phase == PAUSED_LIVE) return
         if (s.ctx == null || s.request == null || !s.requestFirstMedia) { seekTo(playheadMs, 0); return }
         seekRerequest(s, RequestPlan(playheadMs, null, padBefore = false, targetMs = playheadMs), wasPaused = false)

@@ -149,6 +149,21 @@ class KeyRouterTest {
         assertEquals(listOf(GuideEvent.Act(BoxAction.BACK, 0, -1, 0)), machine.events)
     }
 
+    /** U1 (code review 2026-11-09): focus fell to the sink, so the screen never sees BACK; the router must not drop it. */
+    @Test fun searchAndSportsTakeBackWhileTheSinkItselfHoldsFocus() {
+        searchIdle = false // query typed / choice list open
+        for (m in listOf(ScreenMode.SEARCH, ScreenMode.SPORTS)) {
+            mode(m)
+            machine.events.clear()
+            router.sinkFocused = false
+            assertFalse(down(Keys.BACK)); assertFalse(up(Keys.BACK))
+            router.sinkFocused = true
+            assertTrue("$m: BACK on the sink is handled", down(Keys.BACK)); assertTrue(up(Keys.BACK))
+            assertFalse("other keys still pass", down(Keys.DPAD_DOWN))
+            assertEquals(listOf(GuideEvent.Act(BoxAction.BACK, 0, -1, 0)), machine.events)
+        }
+    }
+
     @Test fun unboundKeysAreNotHandledButRecorded() {
         assertFalse(down(24)) // VOLUME_UP
         assertFalse(up(24))

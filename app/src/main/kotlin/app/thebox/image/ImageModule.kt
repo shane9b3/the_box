@@ -3,12 +3,12 @@ package app.thebox.image
 import android.content.Context
 import app.thebox.core.guide.DeviceClassSource
 import coil3.ImageLoader
+import coil3.serviceLoaderEnabled
 import coil3.disk.DiskCache
 import coil3.disk.directory
 import coil3.memory.MemoryCache
 import coil3.network.okhttp.OkHttpNetworkFetcherFactory
 import coil3.request.crossfade
-import coil3.svg.SvgDecoder
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -24,7 +24,10 @@ import javax.inject.Singleton
  * - disk cache [DISK_CACHE_BYTES] in `cacheDir/coil_images` (one instance per directory);
  * - the app's shared OkHttp client (connection pool, default user agent) through
  *   `OkHttpNetworkFetcherFactory(callFactory)` — signature verified in the coil-network-okhttp 3.6.3 sources;
- * - no cross-fade (TV, and the grid draws logos itself).
+ * - no cross-fade (TV, and the grid draws logos itself);
+ * - no SVG decoder for ordinary images: only the score bug's team logos decode SVG ([SportsLogoSvg], security review
+ *   2026-11-09). The ServiceLoader is off, because coil-svg registers its decoder through it; the only other component
+ *   it would add (coil-network-okhttp's fetcher) is added explicitly below.
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -39,11 +42,11 @@ object ImageModule {
         return ImageLoader.Builder(context)
             .memoryCache { MemoryCache.Builder().maxSizeBytes(memory).build() }
             .diskCache { DiskCache.Builder().directory(context.cacheDir.resolve("coil_images")).maxSizeBytes(DISK_CACHE_BYTES).build() }
-            // (Score bug, docs/design/m6-score-bug.md §3, A-N8) SVG team logos. ServiceLoader registers one too; the
-            // duplicate is harmless and the explicit entry keeps the wiring visible.
+            .serviceLoaderEnabled(false)
             .components {
                 add(OkHttpNetworkFetcherFactory(client))
-                add(SvgDecoder.Factory())
+                // (Score bug, docs/design/m6-score-bug.md §3, A-N8) SVG team logos, per request only.
+                add(SportsLogoSvg())
             }
             .crossfade(false)
             .build()

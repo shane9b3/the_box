@@ -39,7 +39,7 @@ class ExternalPlayerLauncher @Inject constructor(@ApplicationContext private val
 
     /** False when the app is gone or refuses the intent (the caller shows the reason and the next step). */
     fun launch(handOff: ExternalHandOff, packageName: String): Boolean {
-        val intent = intentFor(handOff, packageName)
+        val intent = resolved(context.packageManager, handOff, packageName) ?: intentFor(handOff, packageName)
         return try {
             context.startActivity(intent)
             BoxLog.i(TAG) { "handed off to $packageName (${app.thebox.core.common.Redact.host(handOff.url)})" }
@@ -61,9 +61,18 @@ class ExternalPlayerLauncher @Inject constructor(@ApplicationContext private val
 
         fun mimeOf(url: String): String = if (url.substringBefore('?').endsWith(".m3u8", ignoreCase = true)) HLS_MIME else VIDEO_ANY
 
-        fun intentFor(handOff: ExternalHandOff, packageName: String): Intent {
+        /**
+         * The intent [packageName] accepts, or null when it accepts neither form. A player that does not declare the
+         * HLS type still takes an .m3u8 address as plain video, so that is tried second.
+         */
+        fun resolved(pm: PackageManager, handOff: ExternalHandOff, packageName: String): Intent? =
+            listOf(mimeOf(handOff.url), VIDEO_ANY).distinct()
+                .map { intentFor(handOff, packageName, it) }
+                .firstOrNull { it.resolveActivity(pm) != null }
+
+        fun intentFor(handOff: ExternalHandOff, packageName: String, mime: String = mimeOf(handOff.url)): Intent {
             val intent = Intent(Intent.ACTION_VIEW)
-                .setDataAndType(Uri.parse(handOff.url), mimeOf(handOff.url))
+                .setDataAndType(Uri.parse(handOff.url), mime)
                 .setPackage(packageName)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             handOff.title?.let { intent.putExtra(Intent.EXTRA_TITLE, it).putExtra("title", it) }

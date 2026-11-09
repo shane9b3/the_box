@@ -693,4 +693,56 @@ class ScoreRepositoryImplTest {
         assertNull(store.flow(SportsFollowDomain).value.game)
         assertEquals("a final game stops polling", polls, source.calls.size)
     }
+
+    // ---------------------------------------------------------------- today across the rollover (correctness review F5)
+
+    /** The real policy's shape for an all-final day: polls once, then nothing. */
+    private val allFinalPolicy = DayPolicy { lastOk, demand, failures, lastFailMono, _, _, _, now ->
+        when {
+            demand == Demand.NONE -> null
+            failures > 0 -> lastFailMono!! + 20_000L * failures
+            lastOk == null -> now
+            else -> null
+        }
+    }
+
+    private fun TestScope.dayRepo(source: FakeSource): ScoreRepositoryImpl {
+        val mono = MonoClock { testScheduler.currentTime }
+        val store = FakeSettingsStore()
+        store.update(SportsFollowDomain) { SportsFollowDoc(pollPhaseMs = 1_500L) }
+        return ScoreRepositoryImpl(
+            source, store, Awake(), Signals(), backgroundScope, mono,
+            machineFactory = { phase -> FakeMachine(mono, phase) }, dayPolicy = allFinalPolicy, random = Random(7),
+        ).also { runCurrent() }
+    }
+
+    @Test fun anAllFinalTodayBoardReResolvesTodaySoItMovesOnPastTheRollover() = runTest {
+        val source = FakeSource(MonoClock { testScheduler.currentTime })
+        val repo = dayRepo(source)
+        source.todayAnswer = { Fetch.Ok(SportsFixtures.board(dayKey = "2026-11-08"), testScheduler.currentTime, null, 0) }
+        repo.reportDemand(DemandOwner.SPORTS_TAB, true)
+        runCurrent()
+        assertEquals("2026-11-08", (repo.day.value as DayState.Board).board.dayKey)
+
+        // The server's today moves on; the tab is still open.
+        source.todayAnswer = { Fetch.Ok(SportsFixtures.board(dayKey = "2026-11-09"), testScheduler.currentTime, null, 0) }
+        advanceTimeBy(SportsConstants.DAY_POLL_IDLE_MS + 1)
+        runCurrent()
+        val b = repo.day.value as DayState.Board
+        assertEquals("2026-11-09", b.board.dayKey)
+        assertTrue(b.isToday)
+        assertEquals(listOf("today", "today"), source.days().map { it.first })
+    }
+
+    @Test fun anAllFinalPickedDayIsNotReResolved() = runTest {
+        val source = FakeSource(MonoClock { testScheduler.currentTime })
+        val repo = dayRepo(source)
+        repo.reportDemand(DemandOwner.SPORTS_TAB, true)
+        runCurrent()
+        repo.showDay("2026-11-01")
+        runCurrent()
+        advanceTimeBy(3 * SportsConstants.DAY_POLL_IDLE_MS)
+        runCurrent()
+        assertEquals(listOf("today", "day:2026-11-01"), source.days().map { it.first })
+    }
 }

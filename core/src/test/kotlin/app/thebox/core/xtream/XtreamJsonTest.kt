@@ -87,4 +87,20 @@ class XtreamJsonTest {
         val ids = Fixtures.use("xtream/live_streams_bom.json") { XtreamDecoders.liveStreams(it).map { s -> s.streamId }.toList() }
         assertEquals(listOf(101L, 102L, 103L), ids)
     }
+
+    @Test
+    fun oneOverLongItemFailsAsUnsupportedInBothForms() {
+        val huge = "a".repeat(XtreamJson.MAX_ITEM_BYTES + 10)
+        val arr = """[{"name":"ok"},{"name":"$huge"}]"""
+        val e = assertFailsWith<SourceException> { XtreamJson.items(bytes(arr)).toList() }
+        assertIs<SourceError.Unsupported>(e.error)
+        val obj = """{"0":{"name":"ok"},"1":{"name":"$huge"}}"""
+        val o = assertFailsWith<SourceException> { XtreamJson.items(bytes(obj)).toList() }
+        assertIs<SourceError.Unsupported>(o.error)
+        // Many items whose total is far over the cap are fine: the count restarts at each top-level comma,
+        // and commas, brackets and escaped quotes inside strings do not end an item.
+        val item = "a".repeat(64 * 1024)
+        val many = (1..40).joinToString(",", "[", "]") { """{"name":"$item","x":"a,]\\\"[","y":[1,2]}""" }
+        assertEquals(40, XtreamJson.items(bytes(many)).toList().size)
+    }
 }

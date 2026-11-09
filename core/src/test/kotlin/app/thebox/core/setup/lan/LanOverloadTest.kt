@@ -108,4 +108,47 @@ class LanOverloadTest {
             server.stop()
         }
     }
+
+    /** F2 (2026-11-09): one remote address cannot hold every socket; another address still gets served. */
+    @Test
+    fun oneAddressCannotTakeEverySocket() {
+        val queue = LinkedBlockingQueue<LanConnection>()
+        val release = CountDownLatch(1)
+        val entered = LinkedBlockingQueue<String>()
+        val rejected = CountDownLatch(1)
+        val request = "GET / HTTP/1.1\r\nHost: 192.168.1.20:47100\r\n\r\n".encodeToByteArray()
+        fun conn(ip: String, onClose: () -> Unit = {}) = object : LanConnection {
+            override val input = ByteArrayInputStream(request)
+            override val output = ByteArrayOutputStream()
+            override val remoteAddress = ip
+            override fun setReadTimeout(ms: Int) = Unit
+            override fun close() = onClose()
+        }
+        val poison = conn("poison")
+        val transport = LanTransport { _, boundPort ->
+            object : LanListener {
+                private val closed = AtomicBoolean()
+                override val port = boundPort
+                override fun accept(): LanConnection? = queue.take().takeUnless { closed.get() || it === poison }
+                override fun close() { closed.set(true); queue.offer(poison) }
+            }
+        }
+        val server = LanHttpServerImpl(transport, LanHttpServerImpl.Config(maxSockets = LanLimits.HTTP_MAX_SOCKETS, socketTimeoutMs = 10_000))
+        server.start(LanBind("192.168.1.20", 47100, LanLimits.HTTP_MAX_SOCKETS)) { r ->
+            entered.put(r.remoteAddress)
+            release.await()
+            LanHttpServerImpl.plain(200, "OK")
+        }
+        try {
+            repeat(LanLimits.HTTP_MAX_SOCKETS_PER_ADDRESS) { queue.put(conn("192.168.1.66")) }
+            repeat(LanLimits.HTTP_MAX_SOCKETS_PER_ADDRESS) { assertEquals("192.168.1.66", entered.poll(3, TimeUnit.SECONDS)) }
+            queue.put(conn("192.168.1.66") { rejected.countDown() })
+            assertTrue(rejected.await(3, TimeUnit.SECONDS), "the address's extra connection is closed")
+            queue.put(conn("192.168.1.34"))
+            assertEquals("192.168.1.34", entered.poll(3, TimeUnit.SECONDS), "the phone still gets a socket")
+        } finally {
+            release.countDown()
+            server.stop()
+        }
+    }
 }

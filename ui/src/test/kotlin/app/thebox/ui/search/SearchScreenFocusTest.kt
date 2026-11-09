@@ -111,12 +111,71 @@ class SearchScreenFocusTest {
         rule.onNodeWithText("BBC News").assertIsFocused()
     }
 
-    @Test fun invalidatingResultsDismissesTheMenuAndReturnsToTheField() {
-        val library = showResults()
+    /**
+     * U2 (code review 2026-11-09): a content change keeps the results; an equal answer keeps the menu (its snapshot is
+     * still current), a changed answer closes it and focus returns to its card.
+     */
+    @Test fun invalidatingResultsDismissesTheMenuAndReturnsToItsCard() {
+        val channel = GuideFixtures.channel(1, name = "BBC News")
+        val library = FakeGuideLibrary(listOf(channel))
+        val search = FakeGuideSearch(listOf(channel))
+        val vm = SearchViewModel(search, FakeReminderBook(), library, FakeGuideSettings(), FakeGuideSessionStore()) { GuideFixtures.NOW_MIN * 60_000L }
+        rule.setContent { BoxTheme { SearchScreen(vm) } }
+        rule.waitForIdle()
+        rule.runOnUiThread { vm.onQuery("news") }
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(SearchViewModel.DEBOUNCE_MS + 100))
+        rule.waitForIdle()
+        rule.onNodeWithTag(SEARCH_FIELD_TAG).performKeyInput { pressKey(Key.DirectionDown) }
+        rule.waitForIdle()
         openMenuWithoutRepeats()
         rule.runOnUiThread { library.tickRowContent() }
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(SearchViewModel.DEBOUNCE_MS + 100))
+        rule.waitForIdle()
+        rule.onNodeWithTag(SEARCH_MENU_TAG).assertExists()
+        search.programmes = listOf(app.thebox.core.guide.ProgrammeHit(channel, GuideFixtures.info(GuideFixtures.NOW_MIN + 60, GuideFixtures.NOW_MIN + 90, "News at Ten"), GuideFixtures.NOW_MIN + 90, false))
+        rule.runOnUiThread { library.tickRowContent() }
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(SearchViewModel.DEBOUNCE_MS + 100))
         rule.waitForIdle()
         rule.onNodeWithTag(SEARCH_MENU_TAG).assertDoesNotExist()
+        rule.onNodeWithTag(SEARCH_CARD_TAG + channel.rowId).assertIsFocused()
+    }
+
+    /** U2: a content refresh with the same query keeps the cards and the focused one. */
+    @Test fun contentRefreshKeepsTheFocusedCard() {
+        val library = showResults()
+        rule.onNodeWithText("BBC News").assertIsFocused()
+        rule.runOnUiThread { library.tickRowContent() }
+        rule.waitForIdle()
+        rule.onNodeWithText("BBC News").assertIsFocused()
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(SearchViewModel.DEBOUNCE_MS + 100))
+        rule.waitForIdle()
+        rule.onNodeWithText("BBC News").assertIsFocused()
+    }
+
+    /** U1 (code review 2026-11-09): new results that drop the focused card give focus to the field, not the root sink. */
+    @Test fun resultsThatRemoveTheFocusedCardReturnFocusToTheField() {
+        val bbc = GuideFixtures.channel(1, name = "BBC News")
+        val sky = GuideFixtures.channel(2, name = "Sky News")
+        var channels = listOf(bbc)
+        val search = object : app.thebox.core.guide.GuideSearch {
+            override suspend fun search(query: String, nowMs: Long, access: app.thebox.core.parental.ParentalAccess) =
+                app.thebox.core.guide.SearchResults(query, channels, emptyList())
+        }
+        val library = FakeGuideLibrary(listOf(bbc, sky))
+        val vm = SearchViewModel(search, FakeReminderBook(), library, FakeGuideSettings(), FakeGuideSessionStore()) { GuideFixtures.NOW_MIN * 60_000L }
+        rule.setContent { BoxTheme { SearchScreen(vm) } }
+        rule.waitForIdle()
+        rule.runOnUiThread { vm.onQuery("news") }
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(SearchViewModel.DEBOUNCE_MS + 100))
+        rule.waitForIdle()
+        rule.onNodeWithTag(SEARCH_FIELD_TAG).performKeyInput { pressKey(Key.DirectionDown) }
+        rule.waitForIdle()
+        rule.onNodeWithText("BBC News").assertIsFocused()
+        channels = listOf(sky)
+        rule.runOnUiThread { library.tickRowContent() }
+        shadowOf(Looper.getMainLooper()).idleFor(Duration.ofMillis(SearchViewModel.DEBOUNCE_MS + 100))
+        rule.waitForIdle()
+        rule.onNodeWithText("BBC News").assertDoesNotExist()
         rule.onNodeWithTag(SEARCH_FIELD_TAG).assertIsFocused()
     }
 

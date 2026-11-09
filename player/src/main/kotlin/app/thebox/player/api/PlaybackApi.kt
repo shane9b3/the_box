@@ -73,6 +73,11 @@ interface PlaybackController {
      */
     fun handOffExternal(): ExternalHandOff? = null
     /**
+     * (Fix pass A5) What [handOffExternal] would return, without stopping the stream: the caller checks that the chosen
+     * player can open it first. Default: null.
+     */
+    fun peekExternalHandOff(): ExternalHandOff? = null
+    /**
      * (M5 commit 0, B1) [previousChannel] with the [TuneGuard][app.thebox.core.playback.TuneGuard] refusal visible:
      * [PreviousResult.Locked] when the target needs the PIN. The default maps the M2 Boolean (never Locked); WP-A
      * overrides it when the guard lands in the controller.

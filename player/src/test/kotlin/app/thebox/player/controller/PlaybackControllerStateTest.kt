@@ -715,6 +715,28 @@ class PlaybackControllerStateTest {
     }
 
     @Test
+    fun unlimitedRetryCardLiftsWhenTheFirstFrameArrivesBeforeReady() {
+        // Fix pass P1: Media3 renders the first frame while still BUFFERING; READY follows. The card must still lift.
+        f.settings.update { it.copy(reconnectAttempts = -1) }
+        f.ladder.script = { _, _ -> LadderDecision.RetrySame(5_000) }
+        f.controller.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.exo.emitError(resetError())
+        f.idle()
+        f.advance(15_100)
+        assertTrue(f.state is PlaybackState.Error)
+        f.exo.emitError(resetError())
+        f.idle()
+        f.advance(5_100)
+        assertTrue("the card stays while retrying", f.state is PlaybackState.Error)
+
+        f.playFirstFrameBeforeReady()
+        assertTrue("first media then READY lifts the card", f.state is PlaybackState.Playing)
+        assertTrue("playback is active again (Home stops it)", f.controller.isPlaybackActive())
+        assertTrue(f.controller.keepScreenOn.value)
+    }
+
+    @Test
     fun terminalErrorHasNoRetryInfoAndLetsTheScreenSleep() {
         f.ladder.script = { _, _ ->
             LadderDecision.Fail(PlaybackError(PlaybackErrorCode.STREAM_INTERRUPTED, retry = app.thebox.core.playback.RetryInfo(3, 5, 1_000)))

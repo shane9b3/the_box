@@ -161,6 +161,30 @@ class WorkersTest {
         assertEquals(WorkNotifications.ID_EPG_PATCH, w.getForegroundInfo().notificationId)
     }
 
+    @Test
+    fun aCancelledSetForegroundIsRethrownNotTakenForABackgroundStart() = runBlocking {
+        // Correctness review F6: CancellationException is an IllegalStateException; it must not be swallowed.
+        val importer = FakeImporter()
+        val w = TestListenableWorkerBuilder<EpgImportWorker>(context)
+            .setWorkerFactory(factory(importer = importer))
+            .setForegroundUpdater(CancelledForegroundUpdater())
+            .build()
+        assertTrue("tryForeground rethrows", runCatching { w.tryForeground() }.exceptionOrNull() is java.util.concurrent.CancellationException)
+        assertTrue("doWork rethrows", runCatching { w.doWork() }.exceptionOrNull() is java.util.concurrent.CancellationException)
+        assertEquals("the build never starts", 0, importer.builds)
+    }
+
+    private class CancelledForegroundUpdater : ForegroundUpdater {
+        override fun setForegroundAsync(context: Context, id: UUID, foregroundInfo: ForegroundInfo): ListenableFuture<Void> = object : ListenableFuture<Void> {
+            override fun addListener(listener: Runnable, executor: Executor) = executor.execute(listener)
+            override fun cancel(mayInterruptIfRunning: Boolean) = false
+            override fun isCancelled() = true
+            override fun isDone() = true
+            override fun get(): Void = throw java.util.concurrent.CancellationException("worker stopped")
+            override fun get(timeout: Long, unit: TimeUnit): Void = get()
+        }
+    }
+
     /** API 31+ background start: setForeground fails with ForegroundServiceStartNotAllowedException (an IllegalStateException). */
     private class FailingForegroundUpdater : ForegroundUpdater {
         override fun setForegroundAsync(context: Context, id: UUID, foregroundInfo: ForegroundInfo): ListenableFuture<Void> = object : ListenableFuture<Void> {

@@ -89,5 +89,19 @@ internal class ControllerFixture(
         idle()
     }
 
+    /**
+     * Media3's real order: tracks, BUFFERING, the first frame (the video renderer renders it before it reports ready),
+     * then READY. [play] emits READY first.
+     */
+    fun playFirstFrameBeforeReady(tracks: androidx.media3.common.Tracks = FakeExoPlayer.avTracks()) {
+        exo.emitTracks(tracks)
+        exo.emitState(androidx.media3.common.Player.STATE_BUFFERING)
+        idle()
+        if (tracks.isTypeSelected(androidx.media3.common.C.TRACK_TYPE_VIDEO)) exo.emitFirstFrame() else exo.emitAudioAdvancing()
+        idle()
+        exo.emitState(androidx.media3.common.Player.STATE_READY)
+        idle()
+    }
+
     fun close() = scope.cancel()
 }

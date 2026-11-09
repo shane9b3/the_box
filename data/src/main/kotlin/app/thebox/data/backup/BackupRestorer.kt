@@ -168,13 +168,17 @@ internal class BackupRestorer(
                     is Outcome.Err -> BoxLog.w(TAG, "a login could not be stored (${r.error.code}); that playlist asks for it again")
                 }
             }
+            val usedRefs = HashSet<String>()
             val applied = importMutex.withLock {
-                db.writeTransaction { apply(this, file, scan, matches, refFor, mode) }
+                usedRefs.clear()
+                db.writeTransaction { apply(this, file, scan, matches, refFor, mode, usedRefs) }
             }
             // D-S4 (§3.10.4 step 5): the settings documents go live only now that the transaction committed.
             store.commitImport(committed = true)
-            // Old refs of playlists that got a new login go once the transaction committed.
+            // Old refs of playlists that got a new login go once the transaction committed, and so do logins written
+            // for nothing (a USER guide that already existed keeps its own; correctness review F7).
             for (r in applied.oldRefs) creds.delete(r)
+            for (r in written) if (r !in usedRefs) creds.delete(r)
             return applied.result to applied
         } catch (e: Exception) {
             store.commitImport(committed = false) // D-S4: rolled back, so nothing of the backup reaches memory
@@ -199,6 +203,7 @@ internal class BackupRestorer(
         matches: List<PlaylistMatch>,
         refFor: Map<String, String>,
         mode: RestoreMode,
+        usedRefs: MutableSet<String>,
     ): Applied {
         val now = nowMs()
         val idOf = HashMap<String, Long>() // backup uid → local id
@@ -217,6 +222,7 @@ internal class BackupRestorer(
             val type = PlaylistType.entries.firstOrNull { it.name == b.type } ?: PlaylistType.M3U_URL
             if (m.existingId == null) {
                 val ref = newRef ?: creds.newRef()
+                usedRefs += ref
                 conn.exec(
                     "INSERT INTO playlist(name, type, credential_ref, display_source, sort_index, enabled, needs_reauth, uid, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 ) {
@@ -239,6 +245,7 @@ internal class BackupRestorer(
                     if (taken) bindLong(4, id) else { bindText(4, b.uid); bindLong(5, id) }
                 }
                 if (newRef != null) {
+                    usedRefs += newRef
                     conn.usePrepared("SELECT credential_ref FROM playlist WHERE id = ?") { st -> st.bindLong(1, id); if (st.step()) oldRefs += st.getText(0) }
                     conn.exec("UPDATE playlist SET credential_ref = ?, needs_reauth = 0 WHERE id = ?") { bindText(1, newRef); bindLong(2, id) }
                     relogin += id
@@ -335,7 +342,7 @@ internal class BackupRestorer(
                             }
                             rows++
                         } else if (rec.origin == EpgSourceEntity.ORIGIN_USER) {
-                            rows += restoreUserSource(conn, rec, refFor, now)
+                            rows += restoreUserSource(conn, rec, refFor, now, usedRefs)
                         }
                     }
                     is BackupRecord.EpgMapping -> {
@@ -428,7 +435,13 @@ internal class BackupRestorer(
     }
 
     /** A USER guide source needs its URL (a login): restored only when the logins were opened. */
-    private suspend fun restoreUserSource(conn: PooledConnection, rec: BackupRecord.EpgSource, refFor: Map<String, String>, now: Long): Int {
+    private suspend fun restoreUserSource(
+        conn: PooledConnection,
+        rec: BackupRecord.EpgSource,
+        refFor: Map<String, String>,
+        now: Long,
+        usedRefs: MutableSet<String>,
+    ): Int {
         val secretRef = rec.secretRef ?: return 0
         val ref = refFor[secretRef] ?: return 0
         val hash = secretRef.removePrefix("epg:").toLongOrNull() ?: return 0
@@ -438,6 +451,7 @@ internal class BackupRestorer(
                 bindBool(1, rec.enabled); bindLong(2, rec.priority.toLong()); bindLong(3, rec.shiftMin.toLong()); bindTextOrNull(4, rec.assumeZone); bindLong(5, hash)
             }
         } else {
+            usedRefs += ref
             conn.exec(
                 "INSERT INTO epg_source(name, origin, playlist_id, ordinal, credential_ref, url_hash, display_source, priority, enabled, shift_min, assume_zone, created_at) " +
                     "VALUES (?, 'USER', NULL, 0, ?, ?, ?, ?, ?, ?, ?, ?)",

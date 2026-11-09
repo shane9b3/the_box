@@ -25,6 +25,9 @@ class FastNamesParityTest {
             "Sports 50 fps 50fps 60 Fps", "HDR10+ HDR10+x hdr10 hdr hlg", "VIP raw Backup", "\tTab\tName\t", "SD-HD", "4k8k 4K 8K",
             "x264x265", "Fox News (US) [backup] {raw}", "A&E", "100% Music", "N.C.I.S.", "UHD Sport", "uhd_sport", "Sky_Sports_1",
             "h264", "h.26", "h.2645", "1080 p", "fhd+", "hd+1", "+hd", "1hd", "hd1", "MTV\u0001Live", "\u001f", "Channel 5 (+1) HD",
+            // EPG display names and tvg-names with '_' spaced, as EpgMatcherImpl keys them (performance review M3).
+            "Das Erste HD", "ProSieben MAXX", "Rai 1 ᴴᴰ", "ТНТ HD", "Canal+ Sport 360",
+            "beIN SPORTS 1 (FR)", "C-SPAN 2", "ESPN2.us", "bbc.one.hd", "Sky Sports Main Event UHD", "TV 2 Zulu", "NPO 1 (NL) [HEVC]",
         ],
     )
     fun `hand-picked names`(s: String) = check(s)

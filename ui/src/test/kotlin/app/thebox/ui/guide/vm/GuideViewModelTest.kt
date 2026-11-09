@@ -92,13 +92,15 @@ class GuideViewModelTest {
         val playerSettings = app.thebox.core.full.fakes.FakePlayerSettings()
         val stores = ArrayList<ViewModelStore>()
         val device = FakeDeviceClassSource()
+        /** Wraps [library] for the view model (U3: a lookup that fails). */
+        var wrapLibrary: (app.thebox.core.guide.GuideLibrary) -> app.thebox.core.guide.GuideLibrary = { it }
 
         fun viewModel(machineFactory: app.thebox.core.guide.GuideStateMachineFactory = GuideStateMachineImpl.FACTORY): GuideViewModel {
             val store = ViewModelStore().also { stores += it }
             val factory = object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T = GuideViewModel(
-                    context, controller, FakeCatchupLauncher(), library,
+                    context, controller, FakeCatchupLauncher(), wrapLibrary(library),
                     GuideRowsCacheFactory { lib, scope -> GuideRowsCacheImpl(lib, scope) },
                     GuideWindowPagerFactory { _, _, _, _, _ -> FakeGuideWindowPager().also { pagers += it } },
                     settings, FakeGuideSessionStore(), FakeReminderBook(), alerts, machineFactory,
@@ -153,6 +155,38 @@ class GuideViewModelTest {
         idle()
         assertEquals(channels[2].identity, vm.machine.ui.value.tuned.identity)
         assertFalse("the user's Video choice wins over the 1 GB default", vm.machine.ui.value.tuned.still)
+    }
+
+    /** U3 (code review 2026-11-09): an edit to the tuned channel reaches the guide without another tune. */
+    @Test fun tunedChannelFollowsARowContentChange() {
+        val w = World()
+        val vm = w.viewModel()
+        w.controller.state.value = playing(channels[2])
+        idle()
+        assertEquals(channels[2].displayName, vm.machine.ui.value.tunedChannel?.displayName)
+        w.library.replace(channels[2].copy(displayName = "Renamed"))
+        idle()
+        assertEquals("Renamed", vm.machine.ui.value.tunedChannel?.displayName)
+    }
+
+    /** U3: one failed lookup is not cached; the next row-content change finds the tuned row. */
+    @Test fun aFailedTunedLookupIsRetried() {
+        val w = World()
+        var fail = true
+        w.wrapLibrary = { base ->
+            object : app.thebox.core.guide.GuideLibrary by base {
+                override suspend fun rowIdOf(identity: app.thebox.core.refresh.ChannelIdentity): Long? =
+                    if (fail) throw IllegalStateException("db busy") else base.rowIdOf(identity)
+            }
+        }
+        val vm = w.viewModel()
+        w.controller.state.value = playing(channels[2])
+        idle()
+        assertEquals(null, vm.machine.ui.value.tunedChannel)
+        fail = false
+        w.library.tickRowContent()
+        idle()
+        assertEquals(channels[2].identity, vm.machine.ui.value.tunedChannel?.identity)
     }
 
     /** H-B3: a toast sent before the root subscribes (the missed-reminders toast at a cold start) is delivered. */

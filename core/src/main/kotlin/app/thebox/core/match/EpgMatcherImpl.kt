@@ -2,6 +2,7 @@ package app.thebox.core.match
 
 import app.thebox.core.epg.EpgChannelInfo
 import app.thebox.core.epg.EpgChannelRef
+import app.thebox.core.identity.FastNames
 import app.thebox.core.refresh.ChannelIdentity
 import app.thebox.core.text.NameNormalizer
 import java.util.Locale
@@ -70,14 +71,14 @@ class EpgMatcher(private val settings: MatchSettings, private val blocking: Bool
                 base.add(baseOf(lower), i)
             }
             val nameNorm = NameNormalizer.forMatch(s.name)
-            nKey.add(NameNormalizer.forKey(s.name), i)
+            nKey.add(FastNames.forKey(s.name), i)
             nMatch.add(nameNorm, i)
             val pn = Similarity.prepare(nameNorm, hint, intern)
             simName[i] = pn
             var tokens = pn.tokens
             s.tvgName?.takeIf { it.isNotBlank() }?.let { tn ->
                 val spaced = tn.replace('_', ' ')
-                tvgKey.add(NameNormalizer.forKey(spaced), i)
+                tvgKey.add(FastNames.forKey(spaced), i)
                 val tvgNorm = NameNormalizer.forMatch(spaced)
                 tvgMatch.add(tvgNorm, i)
                 if (tvgNorm != nameNorm) {
@@ -165,7 +166,7 @@ class EpgMatcher(private val settings: MatchSettings, private val blocking: Bool
                 val dn = c.displayNames[d]
                 val norm = NameNormalizer.forMatch(dn)
                 if (names) {
-                    val key = NameNormalizer.forKey(dn)
+                    val key = FastNames.forKey(dn)
                     p.tvgNameKey.forEach(key) { hit(it, 3, true) }
                     p.tvgNameMatch.forEach(norm) { hit(it, 3, false) }
                     p.nameKey.forEach(key) { hit(it, 4, true) }

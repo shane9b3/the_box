@@ -241,6 +241,22 @@ class EpgImportTest {
     }
 
     @Test
+    fun anEndlessTitleInsideASmallGzipFailsTheSourceAsUnsupported() {
+        // Security review F1: a few-KB gzip that inflates to one huge text token.
+        val gz = File(tmp, "bomb.xml.gz").apply {
+            java.util.zip.GZIPOutputStream(outputStream()).use { o ->
+                o.write("<tv><programme start=\"20261013060000 +0000\" stop=\"20261013070000 +0000\" channel=\"c\"><title>".toByteArray())
+                val chunk = ByteArray(1 shl 20) { 'a'.code.toByte() }
+                repeat(16) { o.write(chunk) }
+                o.write("</title></programme></tv>".toByteArray())
+            }
+        }
+        val r = store(dir).buildAll(1L to gz)
+        assertEquals(1L, r.failedSourceId)
+        assertEquals("unsupported", r.sources.single().errorCode)
+    }
+
+    @Test
     fun cancellationMidSourceDeletesTheBuildingFile() {
         val s = store(dir)
         s.buildAll(1L to res("basic.xml"))

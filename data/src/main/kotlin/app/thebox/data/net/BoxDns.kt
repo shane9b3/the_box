@@ -40,12 +40,19 @@ import okhttp3.dnsoverhttps.DnsOverHttps
  * choice → a cached [DnsOverHttps] (own small client, never the base client this is installed on). A secure-DNS failure
  * falls back to the system resolver for that lookup and emits [fallbackUsed] once per process. Prefer IPv4 sorts the
  * answer ([eventListenerFactory] counts IPv6 connect failures for AUTO). Pooled connections keep their address.
+ *
+ * Secure-DNS answers are cached (performance review M10, 2026-11-09): OkHttp's [DnsOverHttps] caches only through its
+ * client's HTTP cache, which [dohClient] does not have, so every new connection (zap, reconnect, redirect) paid a DoH
+ * round trip. [DohCache] keeps successful answers per (endpoint, host) for [DOH_CACHE_TTL_MS] (DnsOverHttps does not
+ * expose the record TTL), at most [DOH_CACHE_MAX] hosts; failures, empty answers and system fallbacks are not cached.
  */
 @Singleton
 class BoxDns @Inject constructor(private val store: SettingsStore) : Dns, SecureDnsNotices {
     /** Test seams. */
     internal var system: Dns = Dns.SYSTEM
     internal var dohFactory: (DohEndpoint) -> Dns = ::buildDoh
+    internal var nanoClock: () -> Long = System::nanoTime
+    private val dohCache = DohCache(DOH_CACHE_MAX, DOH_CACHE_TTL_MS) { nanoClock() }
 
     private val resolvers = ConcurrentHashMap<DohEndpoint, Dns>()
     val ipv6Failures = Ipv6FailureCounter()
@@ -70,7 +77,9 @@ class BoxDns @Inject constructor(private val store: SettingsStore) : Dns, Secure
         } else {
             val doh = resolvers.getOrPut(endpoint) { dohFactory(endpoint) }
             try {
-                doh.lookup(hostname).ifEmpty { throw java.net.UnknownHostException("secure DNS: empty answer") }
+                dohCache.get(endpoint, hostname)
+                    ?: doh.lookup(hostname).ifEmpty { throw java.net.UnknownHostException("secure DNS: empty answer") }
+                        .also { dohCache.put(endpoint, hostname, it) }
             } catch (e: IOException) {
                 val fallback = system.lookup(hostname) // throws on its own failure: nothing resolves the name
                 BoxLog.w(TAG, "secure DNS failed (${e.javaClass.simpleName}); system resolver answered")
@@ -119,5 +128,33 @@ class BoxDns @Inject constructor(private val store: SettingsStore) : Dns, Secure
         private const val TAG = "BoxDns"
         const val DOH_TIMEOUT_S = 5L
         const val MAX_TIMEOUT_S = 120
+        const val DOH_CACHE_TTL_MS = 60_000L
+        const val DOH_CACHE_MAX = 128
     }
+}
+
+/** Successful secure-DNS answers per (endpoint, host), LRU-bounded at [max], each valid [ttlMs] from [nanoClock]. Thread-safe. */
+internal class DohCache(private val max: Int, private val ttlMs: Long, private val nanoClock: () -> Long) {
+    private class Entry(val addresses: List<InetAddress>, val expiresAtNs: Long)
+
+    private val map = object : LinkedHashMap<Pair<DohEndpoint, String>, Entry>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<Pair<DohEndpoint, String>, Entry>): Boolean = size > max
+    }
+
+    fun get(endpoint: DohEndpoint, host: String): List<InetAddress>? = synchronized(map) {
+        val key = endpoint to host.lowercase()
+        val e = map[key] ?: return null
+        if (nanoClock() - e.expiresAtNs >= 0) {
+            map.remove(key)
+            return null
+        }
+        e.addresses
+    }
+
+    fun put(endpoint: DohEndpoint, host: String, addresses: List<InetAddress>) {
+        if (addresses.isEmpty()) return
+        synchronized(map) { map[endpoint to host.lowercase()] = Entry(addresses.toList(), nanoClock() + ttlMs * 1_000_000L) }
+    }
+
+    val size: Int get() = synchronized(map) { map.size }
 }

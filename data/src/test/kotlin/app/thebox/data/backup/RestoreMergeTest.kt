@@ -196,6 +196,25 @@ class RestoreMergeTest {
     }
 
     @Test
+    fun restoringOntoAnExistingUserGuideLeavesNoUnusedLogin() = runBlocking {
+        // Correctness review F7: the backup's guide login was written under a fresh ref that nothing pointed at.
+        val src = graph()
+        seed(src)
+        src.db.epgSourceDao().insert(
+            EpgSourceEntity(name = "My guide", origin = EpgSourceEntity.ORIGIN_USER, playlistId = null, credentialRef = "cred-epg", urlHash = 77, displaySource = "guide.example", priority = 1, createdAt = 1),
+        )
+        src.creds.put("cred-epg", PlaylistSecret(listOf("http://guide.example/epg.xml")))
+        val file = export(src, "pw")
+        val dst = graph()
+        dst.service.restore(file, "pw".toCharArray(), RestoreMode.MERGE)
+        assertEquals(1L, dst.db.scalar("SELECT COUNT(*) FROM epg_source WHERE origin = 'USER'"))
+        dst.service.restore(file, "pw".toCharArray(), RestoreMode.MERGE)
+        val used = dst.db.strings("SELECT credential_ref FROM playlist UNION SELECT credential_ref FROM epg_source").toSet()
+        assertEquals(used, dst.creds.secrets.keys.toSet())
+        assertEquals(3, dst.creds.secrets.size)
+    }
+
+    @Test
     fun aSecondRestoreOfTheSameFileChangesNothing() = runBlocking {
         val src = graph()
         seed(src)

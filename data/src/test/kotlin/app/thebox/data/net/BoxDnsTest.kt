@@ -150,6 +150,49 @@ class BoxDnsTest {
         }
     }
 
+    /** M10 (performance review 2026-11-09): DoH answers are cached per endpoint and host for the TTL; failures are not. */
+    @Test
+    fun dohAnswersAreCachedForTheTtlAndFailuresAreNot() {
+        var now = 0L
+        dns.nanoClock = { now }
+        set(NetworkSettings(dns = DnsChoice.CLOUDFLARE, preferIpv4 = PreferIpv4.OFF))
+        assertEquals(listOf(v6, v4b), dns.lookup("panel.test"))
+        assertEquals(listOf(v6, v4b), dns.lookup("Panel.Test"))
+        assertEquals(1, dohCalls.size)
+        // Prefer IPv4 still sorts a cached answer at lookup time.
+        set(NetworkSettings(dns = DnsChoice.CLOUDFLARE, preferIpv4 = PreferIpv4.ON))
+        assertEquals(listOf(v4b, v6), dns.lookup("panel.test"))
+        assertEquals(1, dohCalls.size)
+        // Another endpoint has its own entries.
+        set(NetworkSettings(dns = DnsChoice.QUAD9, preferIpv4 = PreferIpv4.OFF))
+        dns.lookup("panel.test")
+        assertEquals(2, dohCalls.size)
+        // Expired: asked again.
+        set(NetworkSettings(dns = DnsChoice.CLOUDFLARE, preferIpv4 = PreferIpv4.OFF))
+        now += TimeUnit.MILLISECONDS.toNanos(BoxDns.DOH_CACHE_TTL_MS)
+        dns.lookup("panel.test")
+        assertEquals(3, dohCalls.size)
+        // A failure (system fallback) is not cached: once DoH answers again it is asked.
+        dohFails = true
+        dns.lookup("down.test")
+        dohFails = false
+        assertEquals(listOf(v6, v4b), dns.lookup("down.test"))
+        assertEquals(5, dohCalls.size)
+        assertEquals(listOf("down.test"), systemCalls)
+    }
+
+    @Test
+    fun dohCacheIsBounded() {
+        val ep = DohEndpoint("https://doh.example.net/dns-query", emptyList())
+        val cache = DohCache(max = 3, ttlMs = 60_000L) { 0L }
+        for (i in 1..5) cache.put(ep, "h$i.test", listOf(v4))
+        assertEquals(3, cache.size)
+        assertEquals(null, cache.get(ep, "h1.test"))
+        assertEquals(listOf(v4), cache.get(ep, "h5.test"))
+        cache.put(ep, "empty.test", emptyList())
+        assertEquals(null, cache.get(ep, "empty.test"))
+    }
+
     @Test
     fun realDohBuilderAcceptsTheEndpoints() {
         // Builds the real DnsOverHttps for every built-in endpoint (bootstrap IP literals, no network use).

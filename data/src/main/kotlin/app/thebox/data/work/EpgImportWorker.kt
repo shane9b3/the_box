@@ -12,6 +12,7 @@ import app.thebox.data.repo.SyncStatusRepository
 import app.thebox.data.repo.Trigger
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
+import kotlinx.coroutines.CancellationException
 
 /**
  * Downloads every active XMLTV source and rebuilds the guide (§3.10). Runs as a dataSync foreground service
@@ -33,10 +34,11 @@ class EpgImportWorker @AssistedInject constructor(
 
     override suspend fun doWork(): Result {
         tryForeground()
+        val writes = ProgressWrites()
         val trigger = runCatching { Trigger.valueOf(inputData.getString(KEY_TRIGGER) ?: "") }.getOrDefault(Trigger.PERIODIC)
         val r = importer.build(trigger, force = trigger == Trigger.MANUAL) { line ->
             status?.reportProgress(line)
-            setProgressAsync(workDataOf(PlaylistRefreshWorker.KEY_PROGRESS to line))
+            if (writes.shouldWrite(line)) setProgressAsync(workDataOf(PlaylistRefreshWorker.KEY_PROGRESS to line))
         }
         status?.reportProgress(null)
         val error = r.error ?: return Result.success(workDataOf(KEY_SKIPPED to r.skipped))
@@ -47,6 +49,8 @@ class EpgImportWorker @AssistedInject constructor(
     internal suspend fun tryForeground(): Boolean = try {
         setForeground(getForegroundInfo())
         true
+    } catch (e: CancellationException) {
+        throw e
     } catch (e: IllegalStateException) {
         BoxLog.w(TAG, "foreground service not allowed; importing in the background")
         false

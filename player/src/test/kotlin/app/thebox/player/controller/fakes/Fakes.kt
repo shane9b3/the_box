@@ -143,7 +143,7 @@ internal class FakeResolver(private val journal: Journal) : StreamUrlResolver {
     override suspend fun expandArchive(identity: ChannelIdentity, request: ArchiveRequest): ResolveOutcome {
         archiveCalls += request
         journal("expandArchive")
-        return ResolveOutcome.Ok(stream(identity, format = StreamFormat.HLS))
+        return ResolveOutcome.Ok(stream(identity, format = StreamFormat.HLS, baseCount = baseCount))
     }
 }
 

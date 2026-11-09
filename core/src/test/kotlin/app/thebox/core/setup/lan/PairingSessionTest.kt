@@ -4,6 +4,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
 import kotlin.test.assertNotEquals
+import kotlin.test.assertTrue
 
 /**
  * [PairingSession] rules of docs/design/m5-setup-settings.md §3.5.2, including the same-IP re-pair of the owner finding
@@ -71,5 +72,54 @@ class PairingSessionTest {
         val s = session()
         assertEquals(PairingSession.PairResult.Stopped(null), s.pairWithToken("AAAAAAAAAAAAAAAAAAAAAA", a))
         assertEquals(null, s.pairedFrom)
+    }
+
+    // F2 (security review 2026-11-09): wrong codes are counted per remote address.
+
+    @Test
+    fun oneAddressExhaustingItsTriesIsBlockedButTheSessionStaysOpen() {
+        val s = session()
+        val first = s.code
+        for (left in LanLimits.PAIR_MAX_WRONG - 1 downTo 1) assertEquals(PairingSession.PairResult.Wrong(left), s.pairWithCode(wrongCode(s), b))
+        assertEquals(PairingSession.PairResult.Wrong(0), s.pairWithCode(wrongCode(s), b), "the 5th rotates the code")
+        assertNotEquals(first, s.code)
+        for (left in LanLimits.PAIR_MAX_WRONG - 1 downTo 1) assertEquals(PairingSession.PairResult.Wrong(left), s.pairWithCode(wrongCode(s), b))
+        assertEquals(PairingSession.PairResult.Stopped(null), s.pairWithCode(wrongCode(s), b), "the 10th blocks the address")
+        assertEquals(false, s.ended)
+        val counted = s.wrongCodes
+        assertEquals(PairingSession.PairResult.Stopped(null), s.pairWithCode(s.code, b), "a blocked address cannot pair, even with the right code")
+        repeat(100) { s.pairWithCode(wrongCode(s), b) }
+        assertEquals(counted, s.wrongCodes, "a blocked address is not counted again")
+        assertEquals(false, s.ended)
+        assertIs<PairingSession.PairResult.Paired>(s.pairWithCode(s.code, a))
+        assertEquals(a, s.pairedFrom)
+    }
+
+    @Test
+    fun theGlobalCeilingEndsTheSessionAndNeedsSeveralAddresses() {
+        val s = session()
+        val perAddress = 2 * LanLimits.PAIR_MAX_WRONG
+        var guesses = 0
+        var ip = 0
+        while (!s.ended) {
+            val r = s.pairWithCode(wrongCode(s), "10.0.0.${ip + 1}")
+            guesses++
+            if (guesses % perAddress == 0) ip++
+            if (r is PairingSession.PairResult.Stopped && r.failure != null) break
+            check(guesses <= 1_000) { "the session never ended" }
+        }
+        assertEquals(LanLimits.PAIR_MAX_WRONG_TOTAL, guesses, "worst case: this many guesses at a 10^6 code per session")
+        assertEquals(LanFailure.TOO_MANY_WRONG_CODES, s.failure)
+        assertTrue((LanLimits.PAIR_MAX_WRONG_TOTAL + perAddress - 1) / perAddress >= 3, "one or two hosts cannot end it")
+    }
+
+    @Test
+    fun thePairedAddressExhaustingItsTriesStillEndsTheSession() {
+        val s = session()
+        assertIs<PairingSession.PairResult.Paired>(s.pairWithCode(s.code, a))
+        var last: PairingSession.PairResult? = null
+        repeat(2 * LanLimits.PAIR_MAX_WRONG) { last = s.pairWithCode(wrongCode(s), a) }
+        assertEquals(PairingSession.PairResult.Stopped(LanFailure.TOO_MANY_WRONG_CODES), last)
+        assertEquals(true, s.ended)
     }
 }

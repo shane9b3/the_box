@@ -355,6 +355,11 @@ internal class PlaybackControllerImpl @Inject constructor(
         var lastSignal: FailureSignal? = null
         var lastErrorAtMs = 0L
         var cardShown = false
+        /**
+         * (Fix pass P1) First media cleared [cardShown] before READY (Media3 renders the first frame while BUFFERING):
+         * READY still lifts the card.
+         */
+        var cardLiftPending = false
         var paused = false
         var resolved: ResolvedStream? = null
         var firstSession = true
@@ -609,12 +614,16 @@ internal class PlaybackControllerImpl @Inject constructor(
      * tune still resolving). Never logged with its URL ([ExternalHandOff.toString] keeps the host only).
      */
     override fun handOffExternal(): ExternalHandOff? {
-        val c = cycle ?: return null
-        val resolved = c.resolved ?: return null
-        val handOff = ExternalHandOff(url = resolved.url, headers = resolved.headers, title = c.title)
+        val handOff = peekExternalHandOff() ?: return null
         stop(StopReason.USER)
         BoxLog.i(TAG) { "handed off to an external player: $handOff" }
         return handOff
+    }
+
+    override fun peekExternalHandOff(): ExternalHandOff? {
+        val c = cycle ?: return null
+        val resolved = c.resolved ?: return null
+        return ExternalHandOff(url = resolved.url, headers = resolved.headers, title = c.title)
     }
 
     private val _servers = MutableStateFlow(ServerList())
@@ -623,6 +632,8 @@ internal class PlaybackControllerImpl @Inject constructor(
     /** (M5 integration, §3.6.2) The Sources picker: the same cycle, re-resolved on base [index]; the guard still applies. */
     override fun selectServer(index: Int) {
         val c = cycle ?: return
+        // (Fix pass P2) An archive request is a fixed URL on one base: there is nothing to switch to.
+        if (c.isArchive) return
         val count = c.resolved?.baseCount ?: return
         if (index !in 0 until count || index == c.resolved?.baseIndex) return
         if (c.identity != null && refused(c.identity, c.isArchive)) return
@@ -821,8 +832,9 @@ internal class PlaybackControllerImpl @Inject constructor(
         val resolved = reuse ?: (if (early != null) handleResolveOutcome(c, early) else resolve(c)) ?: return
         if (!current(c, id)) return
         c.resolved = resolved
-        // (M5 integration, E23) The Sources picker's servers for this tune.
-        _servers.value = if (resolved.baseHosts.size > 1) ServerList(resolved.baseHosts, resolved.baseIndex) else ServerList()
+        // (M5 integration, E23) The Sources picker's servers for this tune. (Fix pass P2) None for archive: the request's
+        // URL is expanded on one fixed base, so a picked server would restart on the same host.
+        _servers.value = if (!c.isArchive && resolved.baseHosts.size > 1) ServerList(resolved.baseHosts, resolved.baseIndex) else ServerList()
         if (resolved.droppedHeaders.isNotEmpty()) {
             // (code review 2026-10-14, N-S1) Names only; the event log redacts anyway.
             eventLog.add(PlaybackEventType.RESOLVED, id, "headers_dropped", resolved.droppedHeaders.joinToString(","))
@@ -1234,7 +1246,8 @@ internal class PlaybackControllerImpl @Inject constructor(
                     if (c.zap.readyMs == null) c.zap.readyMs = now - c.startedAtMs
                     eventLog.add(PlaybackEventType.READY, s.tuneId, "", "")
                 }
-                if (st is PlaybackState.Error && !c.cardShown) return
+                if (st is PlaybackState.Error && !c.cardShown && !(c.cardLiftPending && s.firstMedia)) return
+                c.cardLiftPending = false
                 if (player?.playWhenReady == true || c.paused) {
                     setState(PlaybackState.Playing(nowPlaying(c), paused = c.paused, warning = c.warning))
                 } else {
@@ -1404,9 +1417,14 @@ internal class PlaybackControllerImpl @Inject constructor(
                 }
             }
         }
-        if (c.cardShown) {
+        if (c.cardShown || c.cardLiftPending) {
             c.cardShown = false
-            if (player?.playbackState == Player.STATE_READY) setState(PlaybackState.Playing(nowPlaying(c), c.paused, c.warning))
+            if (player?.playbackState == Player.STATE_READY) {
+                c.cardLiftPending = false
+                setState(PlaybackState.Playing(nowPlaying(c), c.paused, c.warning))
+            } else {
+                c.cardLiftPending = true
+            }
         }
         scheduleHealthyReset(c)
         if (c.compatPending) scheduleCompatPersist(c, s)
@@ -1603,7 +1621,8 @@ internal class PlaybackControllerImpl @Inject constructor(
             format = s?.format ?: c.format ?: r?.formatHint ?: StreamFormat.UNKNOWN,
             // WP-A: resolved.xtream != null; an XTREAM playlist always resolves with it (the type covers a failed resolve).
             isXtream = r?.xtream != null || c.playlistInfo?.type == PlaylistType.XTREAM,
-            baseCount = r?.baseCount ?: 1,
+            // (Fix pass P2) Archive re-resolves keep the request's fixed base: no rotation for the ladder to plan.
+            baseCount = if (c.isArchive) 1 else r?.baseCount ?: 1,
             output = r?.output,
             counters = c.counters,
             reResolveAllowed = reResolveAllowed,
@@ -1646,7 +1665,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             is LadderDecision.ReResolve -> {
                 if (d.rotateBase) {
                     val r = c.resolved
-                    if (r != null && r.baseCount > 1) c.baseIndex = (r.baseIndex + 1) % r.baseCount
+                    if (r != null && r.baseCount > 1 && !c.isArchive) c.baseIndex = (r.baseIndex + 1) % r.baseCount
                 }
                 restart(c, d, signal, Plan(delayMs = d.delayMs, refreshAccount = d.refreshAccount))
             }
@@ -1802,6 +1821,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         endSession()
         stopPolling()
         c.cardShown = false
+        c.cardLiftPending = false
         setState(PlaybackState.Error(nowPlaying(c), enriched))
         finishZapRecord(c, "error:${enriched.code.key}")
         importGate.open()
@@ -1951,7 +1971,7 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     override fun isPlaybackActive(): Boolean = when (val st = _state.value) {
         is PlaybackState.Connecting, is PlaybackState.Buffering, is PlaybackState.Playing, is PlaybackState.Stalled -> true
-        is PlaybackState.Error -> cycle?.cardShown == true
+        is PlaybackState.Error -> cycle?.let { it.cardShown || it.cardLiftPending } == true
         else -> false
     }
 
@@ -3122,7 +3142,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             // (M6, §11.5) A buffered pause keeps the screen on while it is still being saved.
             is PlaybackState.Playing -> !s.paused || keepAwakePaused()
             // (M4, M2 E-L7) The unlimited-retry card (L19) keeps retrying behind it: the screen must stay on.
-            is PlaybackState.Error -> cycle?.cardShown == true
+            is PlaybackState.Error -> cycle?.let { it.cardShown || it.cardLiftPending } == true
             else -> false
         }
         BoxLog.d(TAG) { "state ${s.javaClass.simpleName}" }
