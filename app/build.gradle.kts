@@ -21,6 +21,13 @@ val releaseSigningReady = keystorePropertiesFile.exists() &&
     listOf("storeFile", "storePassword", "keyAlias", "keyPassword").all { !keystoreProperties.getProperty(it).isNullOrBlank() } &&
     rootProject.file(keystoreProperties.getProperty("storeFile", "")).isFile
 
+// App version: version.properties at the repo root (versionCode, versionName), bumped and committed by
+// tools/release/release.py. `-Pthebox.versionCode=` / `-Pthebox.versionName=` override it for one build without touching
+// the file (the release script's --dry-run uses them).
+val versionProperties = Properties().apply { rootProject.file("version.properties").inputStream().use(::load) }
+val appVersionCode: Int = (providers.gradleProperty("thebox.versionCode").orNull ?: versionProperties.getProperty("versionCode")).trim().toInt()
+val appVersionName: String = (providers.gradleProperty("thebox.versionName").orNull ?: versionProperties.getProperty("versionName")).trim()
+
 android {
     namespace = "app.thebox"
 
@@ -30,8 +37,8 @@ android {
 
     defaultConfig {
         applicationId = "app.thebox"
-        versionCode = 1
-        versionName = "0.0.1-m0"
+        versionCode = appVersionCode
+        versionName = appVersionName
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

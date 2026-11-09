@@ -38,7 +38,7 @@ class UpdateCheckSchedulerImpl @Inject constructor(
     private val store: SettingsStore,
     private val gate: StartupGate,
     @ApplicationScope private val scope: CoroutineScope,
-    /** D-L14: no daily worker while the build has no update endpoint (release until §8 Q8). */
+    /** D-L14: no daily worker while the build has no update endpoint (debug builds until the harness sets a manifest URL). */
     private val endpoints: UpdateEndpoints,
 ) : UpdateCheckScheduler {
 

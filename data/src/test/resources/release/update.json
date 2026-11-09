@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "sequence": 7,
+  "packageName": "app.thebox",
+  "channel": "stable",
+  "versionCode": 7,
+  "versionName": "0.1.6",
+  "minSdk": 25,
+  "publishedAt": "2026-11-08T12:00:00Z",
+  "notes": "Fixes catch-up on Flussonic servers\n- Faster zapping",
+  "apks": [
+    {
+      "abi": "armeabi-v7a",
+      "url": "https://github.com/shane9b3/the_box/releases/download/v0.1.6/TheBox-armeabi-v7a.apk",
+      "sizeBytes": 20,
+      "sha256": "1E462AD74F1A8EA434DCCFCA880BC8B06EF0E58988D7A97BF73807AB2264715D"
+    },
+    {
+      "abi": "arm64-v8a",
+      "url": "https://github.com/shane9b3/the_box/releases/download/v0.1.6/TheBox-arm64-v8a.apk",
+      "sizeBytes": 19,
+      "sha256": "469938CA10F68DD21B35BEFD0ADBDFFD1D1D49AC21C8A821A3F1407D5B1C299D"
+    },
+    {
+      "abi": "universal",
+      "url": "https://github.com/shane9b3/the_box/releases/download/v0.1.6/TheBox-universal.apk",
+      "sizeBytes": 33,
+      "sha256": "FD3DC929D3AE29B2F8204C373FD15AB86C8FABCFA655D25B6E49D41708F4A969"
+    }
+  ],
+  "signingCertSha256": [
+    "22409319E01C49126CE4C46207F1EB505E2D2BFC469E01A7C0EA0417E33C4634"
+  ],
+  "withdrawn": [
+    5
+  ],
+  "rolloutPercent": 100
+}

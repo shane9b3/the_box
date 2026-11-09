@@ -5,20 +5,28 @@ import javax.inject.Inject
 
 /**
  * The release build's update endpoint (docs/design/m5-setup-settings.md §3.12.1; reviewed 2026-10-16, S7: keys per
- * build type). **Owner decisions still open (§8 Q7, Q8):**
- * - TODO(owner, Q8): the GitHub `owner/repo` that publishes releases. Until it is set, [UPDATE_REPO] is null and the
- *   updater is disabled in release builds (no request ever leaves the device; the About row says so).
- * - TODO(owner, Q7): the manifest signing public keys (current and next, hex, 32 bytes each), generated and kept offline
- *   by the owner. The private keys are never in this repository.
+ * build type). §8 Q7 and Q8 were resolved by the owner on 2026-11-08:
+ * - Q8: releases are published on the public GitHub repository [UPDATE_REPO]. The design names a `BuildConfig` field;
+ *   a plain constant here does the same job with one source of truth (`tools/release/release.py` reads it to check that
+ *   the manifest it publishes is the one this build fetches).
+ * - Q7: [UPDATE_PUBLIC_KEYS_HEX] holds the manifest signing keys, current first, then the next key held for rotation.
+ *   The private halves are kept offline on the release Mac (`~/.thebox-release/`, see `tools/release/README.md`) and
+ *   are never in this repository. Releases are built and signed there by `tools/release/release.py`, not in CI.
  * Debug builds never read this object: `app/src/debug/.../DebugUpdateEndpoint` contributes an [UpdateEndpointOverride]
  * with the debug test key only, and release builds contain no override (the debug source set is not compiled into them).
  */
 object ReleaseUpdateConfig {
-    /** `{owner}/{repo}`; null until the owner names it (§8 Q8). */
-    val UPDATE_REPO: String? = null
+    /** `{owner}/{repo}` on GitHub whose latest release carries `update.json` and `update.json.sig` (§8 Q8). */
+    val UPDATE_REPO: String? = "shane9b3/the_box"
 
-    /** Ed25519 public keys (hex). Empty until the owner generates them (§8 Q7). */
-    val UPDATE_PUBLIC_KEYS_HEX: List<String> = emptyList()
+    /**
+     * Ed25519 public keys (hex, 32 bytes each, §8 Q7): the key that signs today's manifests, then the next key. To
+     * rotate, ship a release signed by the current key that lists the new pair, then start signing with the next key.
+     */
+    val UPDATE_PUBLIC_KEYS_HEX: List<String> = listOf(
+        "dc0243f367bda3024ea97a4b82777d41abd9b0ea4a92fbc607be1009af5ad7ba", // current (update-current.pem)
+        "4b056d8a1dc63b2fbdd9df8b282788bbd3a43f5a0b1dbcd9cd2a1cf4af0002d6", // next (update-next.pem), for rotation
+    )
 
     fun manifestUrl(repo: String): String = "https://github.com/$repo/releases/latest/download/update.json"
 

@@ -12,7 +12,7 @@ fun interface SignatureVerifier {
  * Where a build reads its manifest and which keys it trusts (§3.12.1; reviewed 2026-10-16, S7: **per build type**).
  * Release builds carry only the owner's keys, debug builds only the debug test key (plus a key the debug harness
  * registers at run time for the fake panel). An endpoint without a URL or without keys disables the updater
- * ([UpdateFailure.DISABLED]): that is the release build until the owner names the repository and the key (§8 Q7/Q8).
+ * ([UpdateFailure.DISABLED]): that is a debug build until the harness sets a manifest URL (the release build has both since §8 Q7/Q8 were resolved).
  */
 class UpdateEndpoint(
     val manifestUrl: String?,

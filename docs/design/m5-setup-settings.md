@@ -177,7 +177,7 @@ Contents: §3.11, §3.12, §6.3–§6.5, the licence texts, the integration pass
 
 **Contract amendments requested:** `VerdictKey.NAME_NOT_FOUND` (append); the debug manifest's `GuideDebugReceiver` filter gains hosts `settings, wipe, clock, update, phone, keystore-reset`; optionally `androidTest` Compose test deps for `performTextInput` (the suite uses `sendStringSync`).
 
-**Open owner decisions:** Q8 repository (`ReleaseUpdateConfig.UPDATE_REPO = null`: release updater disabled) and Q7 release manifest keys (`UPDATE_PUBLIC_KEYS_HEX` empty; offline custody of the release keystore and the manifest key).
+**Owner decisions (resolved 2026-11-08, `docs/decisions/2026-11-08-release-pipeline.md`):** were Q8 repository (`ReleaseUpdateConfig.UPDATE_REPO = null`: release updater disabled) and Q7 release manifest keys (`UPDATE_PUBLIC_KEYS_HEX` empty; offline custody of the release keystore and the manifest key). Now: `UPDATE_REPO = "shane9b3/the_box"`, the current and next manifest keys compiled in, releases cut on the owner's Mac by `tools/release/release.py`.
 
 ### 1.9 Commit-0 list (lead)
 
