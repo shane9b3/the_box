@@ -13,6 +13,7 @@ import app.thebox.core.sports.Fetch
 import app.thebox.core.sports.GameId
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.League
+import app.thebox.core.sports.PollMeter
 import app.thebox.core.sports.ScoreSource
 import app.thebox.core.sports.SportsConstants
 import app.thebox.core.sports.TeamLine
@@ -98,6 +99,8 @@ data class EspnEndpoints(val apiBase: String, val logoBase: String) {
  *   the event's remembered ET date's board, filtered to the id, then **once more against the week board** when the event
  *   is absent (N7). With nothing remembered (an app restart) the follow's start hint gives the date (C1); with no hint
  *   the week board is read first. Absent from every board tried = NotFound.
+ * - **(Update interval §4.2) The production follow** ([production]) reads the per-event `scoreboard/{id}` first, with
+ *   that board path as its fallback (see [eventGame]); `Fetch.Ok` carries `max-age` and the wire bytes ([WireMeter]).
  * - **Remembered dates:** every decoded body's events (`id` → ET date of `date`), read from the DTO itself.
  * - **Logos:** each mapped [TeamLine.logo] is replaced by ESPN's combiner URL for the dark variant at
  *   [SportsConstants.ESPN_LOGO_PX] under the logo base (A-N2), or null for an abbreviation that is not `[a-z]{2,3}`.
@@ -112,8 +115,13 @@ class EspnScoreSource internal constructor(
     private val mapGame: (EspnGameDto, GameId, Long?, String) -> GameSnapshot? = EspnMapper::game,
     private val parseWeekKey: (String) -> Triple<Int, Int, Int>? = EspnMapper::parseWeekKey,
     callTimeoutMs: Long = SportsConstants.SPORTS_CALL_TIMEOUT_MS,
+    /**
+     * (Update interval §4.2) The follow reads the per-event endpoint `scoreboard/{id}`, with the dated board as the
+     * fallback. Off = the board path only (NFL §1.5, the transport tests). Production turns it on through [production].
+     */
+    private val perEvent: Boolean = false,
 ) : ScoreSource {
-    private val client: OkHttpClient = client.newBuilder()
+    private val client: OkHttpClient = WireMeter.install(client.newBuilder(), client)
         .callTimeout(callTimeoutMs, TimeUnit.MILLISECONDS)
         .cache(null)
         .build()
@@ -149,13 +157,104 @@ class EspnScoreSource internal constructor(
 
     override suspend fun game(id: GameId): Fetch<GameSnapshot> = game(id, null)
 
-    /**
-     * The remembered ET date's board, else the hinted start's ET date (an app restart forgets the dates; C1), then the
-     * week board once (N7), then the hinted date if it was not tried yet: never NotFound before a dated board was read
-     * when a hint exists.
-     */
+    /** (Update interval §4.2) The per-event read with the board fallback when [perEvent]; else the board path. */
     override suspend fun game(id: GameId, startUtcMs: Long?): Fetch<GameSnapshot> {
         if (id.league != League.NFL || !GAME_ID.matches(id.id)) return failedNow()
+        if (!perEvent) return boardGame(id, startUtcMs)
+        return eventGame(id, startUtcMs)
+    }
+
+    /** One follow's per-event state (one follow at a time; a new id starts fresh, so the fallback ends with the follow). */
+    private class FollowState(val id: String) {
+        var shapeFails = 0
+        var fallbackAt: Long? = null
+        var endpoint = PollMeter.NFL_EVENT
+    }
+
+    private var followState: FollowState? = null
+
+    private fun stateOf(id: GameId): FollowState =
+        followState?.takeIf { it.id == id.id } ?: FollowState(id.id).also { followState = it }
+
+    /** (Update interval §3.2) The endpoint the last [game] answer for [id] came from. */
+    override fun followEndpoint(id: GameId): String =
+        if (!perEvent) PollMeter.NFL_BOARD else followState?.takeIf { it.id == id.id }?.endpoint ?: PollMeter.NFL_EVENT
+
+    /**
+     * (Update interval §4.2; review S3, S4) The per-event read:
+     * - **200** that decodes to the event: `Ok`. A 200 that does not (or names another event) is a *shape* failure.
+     * - **JSON 404** ("No event found", cached up to an hour): the dated board once (S4). Absent there too = `NotFound`;
+     *   present = the board's snapshot, counted as a shape failure.
+     * - **JSON 400**: a shape failure.
+     * - **403** (a WAF block of a hot client): treated as a 429 (the 20 s back-off base and the 10 s floor), no switch.
+     * - An HTML 404, a 30x, 429, 5xx, IO and timeouts never switch; the back-off handles them.
+     * - [SportsConstants.PER_EVENT_SWITCH_AFTER] shape failures in a row switch this follow to the board path at once;
+     *   the per-event endpoint is tried again every [SportsConstants.PER_EVENT_RETRY_MS] (one more shape failure goes back).
+     */
+    private suspend fun eventGame(id: GameId, startUtcMs: Long?): Fetch<GameSnapshot> {
+        val st = stateOf(id)
+        val now = mono.nowMs()
+        st.fallbackAt?.let { at ->
+            if (now - at < SportsConstants.PER_EVENT_RETRY_MS) {
+                st.endpoint = PollMeter.NFL_BOARD
+                return boardGame(id, startUtcMs)
+            }
+            st.fallbackAt = null
+            st.shapeFails = SportsConstants.PER_EVENT_SWITCH_AFTER - 1
+        }
+        st.endpoint = PollMeter.NFL_EVENT
+        val logoBase = endpoints.logoBase
+        val url = endpoints.apiBase.toHttpUrl().newBuilder().addPathSegment("scoreboard").addPathSegment(id.id).build()
+        val answer = call(url, EspnEventDto.serializer()) { listOf(it) }
+        val fetch: Fetch<GameSnapshot> = when (val f = answer.fetch) {
+            is Fetch.Ok -> {
+                val mapped = if (idOf(f.value) != id.id) null else mapSafely { mapGame(EspnGameDto(listOf(f.value)), id, f.serverDateMs, logoBase) }
+                if (mapped == null) {
+                    Fetch.Failed(FailKind.BAD_BODY, null, f.receivedMono)
+                } else {
+                    st.shapeFails = 0
+                    Fetch.Ok(withLogos(mapped, logoBase), f.receivedMono, f.serverDateMs, f.ageS, f.maxAgeS, f.wireBytes)
+                }
+            }
+            Fetch.NotFound -> Fetch.NotFound
+            is Fetch.Failed -> if (answer.code == HTTP_FORBIDDEN) Fetch.Failed(FailKind.HTTP_429, f.retryAfterS, f.receivedMono) else f
+        }
+        logTransition("scoreboard/{event}", fetch, answer)
+        val shape = (fetch is Fetch.Failed && fetch.kind == FailKind.BAD_BODY && answer.code == 200) ||
+            (answer.code == 400 && !answer.html)
+        return when {
+            fetch == Fetch.NotFound -> {
+                // S4: the 404 may be a cached edge glitch; only "absent from the board too" removes the follow.
+                st.endpoint = PollMeter.NFL_BOARD
+                val board = boardGame(id, startUtcMs)
+                if (board is Fetch.Ok) shapeFailed(st, now)
+                board
+            }
+            shape -> if (shapeFailed(st, now)) {
+                st.endpoint = PollMeter.NFL_BOARD
+                boardGame(id, startUtcMs)
+            } else {
+                fetch
+            }
+            else -> fetch
+        }
+    }
+
+    /** Counts one shape failure; true when it switched the follow to the board. */
+    private fun shapeFailed(st: FollowState, now: Long): Boolean {
+        st.shapeFails++
+        if (st.shapeFails < SportsConstants.PER_EVENT_SWITCH_AFTER) return false
+        if (st.fallbackAt == null) BoxLog.w(TAG, "per-event feed not usable; following on the dated board")
+        st.fallbackAt = now
+        return true
+    }
+
+    /**
+     * The board path (NFL §1.5, unchanged; the per-event fallback): the remembered ET date's board, else the hinted
+     * start's ET date (an app restart forgets the dates; C1), then the week board once (N7), then the hinted date if it
+     * was not tried yet: never NotFound before a dated board was read when a hint exists.
+     */
+    private suspend fun boardGame(id: GameId, startUtcMs: Long?): Fetch<GameSnapshot> {
         val remembered = synchronized(dates) { dates[id.id] }
         val hinted = startUtcMs?.takeIf { it > 0L }?.let { etDate(it) }
         val first = remembered ?: hinted
@@ -224,7 +323,7 @@ class EspnScoreSource internal constructor(
                 if (mapped == null) {
                     GameAnswer.Failed(Fetch.Failed(FailKind.BAD_BODY, null, f.receivedMono))
                 } else {
-                    GameAnswer.Found(Fetch.Ok(withLogos(mapped, logoBase), f.receivedMono, f.serverDateMs, f.ageS))
+                    GameAnswer.Found(Fetch.Ok(withLogos(mapped, logoBase), f.receivedMono, f.serverDateMs, f.ageS, f.maxAgeS, f.wireBytes))
                 }
             }
             Fetch.NotFound -> GameAnswer.Absent
@@ -255,12 +354,22 @@ class EspnScoreSource internal constructor(
     // ---- transport
 
     /** A decoded [Fetch] plus what the log line may say about it (content type and decoded length, never the body). */
-    private class Answer<T>(val fetch: Fetch<T>, val contentType: String?, val length: Long?)
+    private class Answer<T>(
+        val fetch: Fetch<T>,
+        val contentType: String?,
+        val length: Long?,
+        /** The HTTP status (0 = no response) and whether an error body was HTML, for the per-event shape rule. */
+        val code: Int = 0,
+        val html: Boolean = false,
+    ) {
+        fun withFetch(f: Fetch<T>) = Answer(f, contentType, length, code, html)
+    }
 
     /** `enqueue` under the coroutine: cancelling it cancels the call. The body is decoded on OkHttp's thread. */
     private suspend fun <T> call(url: HttpUrl, serializer: DeserializationStrategy<T>, events: (T) -> List<EspnEventDto>?): Answer<T> {
-        val request = Request.Builder().url(url).header("Accept", "application/json").build()
-        return suspendCancellableCoroutine { cont ->
+        val wire = WireBytes()
+        val request = WireMeter.tag(Request.Builder().url(url).header("Accept", "application/json"), wire).build()
+        val answer: Answer<T> = suspendCancellableCoroutine { cont ->
             val c = client.newCall(request)
             cont.invokeOnCancellation { c.cancel() }
             c.enqueue(object : Callback {
@@ -281,13 +390,15 @@ class EspnScoreSource internal constructor(
                 }
             })
         }
+        // (Update interval §3.2) The listener wrote the wire bytes when `response.use` closed the body.
+        return answer.withFetch(WireMeter.withWire(answer.fetch, wire))
     }
 
     private fun <T> classify(res: Response, serializer: DeserializationStrategy<T>, events: (T) -> List<EspnEventDto>?): Answer<T> {
         val received = mono.nowMs()
         val type = res.header("Content-Type")
-        fun failed(kind: FailKind, length: Long? = null) =
-            Answer<T>(Fetch.Failed(kind, NhlScoreSource.retryAfterS(res), received), type, length)
+        fun failed(kind: FailKind, length: Long? = null, html: Boolean = false) =
+            Answer<T>(Fetch.Failed(kind, NhlScoreSource.retryAfterS(res), received), type, length, res.code, html)
         return when (val code = res.code) {
             200 -> {
                 val declared = res.body.contentLength()
@@ -303,11 +414,22 @@ class EspnScoreSource internal constructor(
                 } catch (e: IllegalArgumentException) { // a lexer error that is not a SerializationException
                     return failed(FailKind.BAD_BODY, stream.count)
                 }
+                // (Update interval §3.2) Read to the end (whitespace, the gzip trailer), so the listener's wire bytes are
+                // the whole body and the connection is reusable.
+                try {
+                    val rest = ByteArray(DRAIN_BYTES)
+                    while (stream.read(rest) >= 0) Unit
+                } catch (e: IOException) {
+                    if (stream.overCap) return failed(FailKind.BAD_BODY, stream.count)
+                    throw e
+                }
                 if (stream.overCap) return failed(FailKind.BAD_BODY, stream.count)
                 remember(events(dto))
-                Answer(Fetch.Ok(dto, received, NhlScoreSource.serverDateMs(res), NhlScoreSource.ageS(res)), type, stream.count)
+                val ok = Fetch.Ok(dto, received, NhlScoreSource.serverDateMs(res), NhlScoreSource.ageS(res), WireMeter.maxAgeS(res))
+                Answer(ok, type, stream.count, code)
             }
-            404 -> if (isHtml(res, type)) failed(FailKind.HTTP_OTHER) else Answer(Fetch.NotFound, type, null)
+            404 -> if (isHtml(res, type)) failed(FailKind.HTTP_OTHER, html = true) else Answer(Fetch.NotFound, type, null, code)
+            400 -> failed(FailKind.HTTP_OTHER, html = isHtml(res, type))
             429 -> failed(FailKind.HTTP_429)
             in 500..599 -> failed(FailKind.HTTP_5XX)
             else -> failed(FailKind.HTTP_OTHER).also { if (code in 300..399) BoxLog.w(TAG, "unexpected redirect $code") }
@@ -379,6 +501,12 @@ class EspnScoreSource internal constructor(
 
     companion object {
         private const val TAG = "EspnScores"
+        private const val HTTP_FORBIDDEN = 403
+        private const val DRAIN_BYTES = 512
+
+        /** (Update interval §4.2) The production source: the per-event follow, with the board fallback. */
+        fun production(client: OkHttpClient, mono: MonoClock, endpoints: () -> EspnEndpoints): EspnScoreSource =
+            EspnScoreSource(client, mono, endpoints, perEvent = true)
         private const val HTML_SNIFF_BYTES = 512L
         private const val DATES_MAX = 512
         private val DATE_KEY = Regex("""\d{4}-\d{2}-\d{2}""")

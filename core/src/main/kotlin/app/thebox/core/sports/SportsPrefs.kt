@@ -15,4 +15,14 @@ data class SportsPrefs(
     val size: ScoreBugSize = ScoreBugSize.STANDARD,
     /** (NFL §7.1, ruling 24) The league the Sports tab and the picker list; remembered and backed up. */
     val league: League = League.NHL,
-)
+    /**
+     * (Update interval §5.1, rulings 29–32) The followed game's poll interval per league, in seconds: 0 = Auto (the
+     * default), else one of [SportsConstants.INTERVAL_CHOICES_NHL_S] / [SportsConstants.INTERVAL_CHOICES_NFL_S]. Backed up;
+     * the measurement behind Auto is not.
+     */
+    val nhlIntervalS: Int = 0,
+    val nflIntervalS: Int = 0,
+) {
+    /** [league]'s stored interval choice (0 = Auto), as stored. */
+    fun intervalS(league: League): Int = if (league == League.NHL) nhlIntervalS else nflIntervalS
+}

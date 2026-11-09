@@ -249,7 +249,9 @@ from `sports.py`, so the app only swaps the origin:
   (`"ev"`/`"pp"`/`"sh"`: overrides the latest `summary.scoring` entry, `sports_pp` only). `GET /admin/sports` shows the
   derived `situationCode`/`situationSeconds` in each game's state.
 - `sports_faults`: `status` (every `/v1` answer), `score_status`, `landing_status`, `html_404` (404s carry HTML),
-  `retry_after`, `pad_bytes` (a filler field; over 524288 trips the app's body cap), `age` (fixed), `no_date`, `stall_s`.
+  `retry_after`, `pad_bytes` (a filler field; over 524288 trips the app's body cap), `age` (fixed), `no_date`, `stall_s`,
+  `stall_ms` (a fractional stall, to fake a slow box for the update-interval meter), `max_age` (replaces 19 in
+  `max-age`/`s-maxage`).
 
 **Power-play timeline** (`--sports-pp`, config `sports_pp: true`, also through `POST /admin/config`; default off, and
 off every body is byte-for-byte as before). The featured game then plays `PP_SEGMENTS`, the landing and the day list carry
@@ -289,6 +291,10 @@ debug origin (`files/debug/sports_base`) serves both leagues:
   other week none). `?dates=YYYYMMDD`: one Eastern day (the featured game's day has it and SF @ SEA; every other day is empty;
   a bad value is HTTP 400 `{code, message}`). `GET /combiner/i?img=/i/teamlogos/nfl/500-dark/scoreboard/{abbr}.png&h=&w=`: a
   generated placeholder PNG. Anything else: 404 HTML. `Date` and `Cache-Control: max-age=5`; no `Age`, no `ETag`.
+- `GET /apis/site/v2/sports/football/nfl/scoreboard/{eventId}` (docs/design/m6-sports-update-interval.md §6): ESPN's per-event
+  endpoint, the app's NFL follow poll. One event object (the board's `events[]` entry, no `leagues`) at the request instant,
+  `Cache-Control: max-age=1`. Unknown digits (or a `gone` event): 404 JSON `{"code":404,"message":"No event found for
+  eventId: …"}`, `max-age=3600`. Non-digits: 400 JSON, gzip-encoded as ESPN's is, `max-age=3019`.
 - The featured game (KC @ BUF, id `401899001`) plays the §9.2 timeline, about 985 s (`sports_nfl_timeline_s`, 30..86400):
   coin toss, kick-off (no `possession`), drive, red zone, a TD with the 10 s score-before-play window, try, extra point, FG,
   a +7 pair in one body, halftime, a safety (BUF receives the free kick), a defensive TD with a two-point try drawn as a real
@@ -302,7 +308,13 @@ debug origin (`files/debug/sports_base`) serves both leagues:
   overrides a game. A +8 pair is one body: `POST /admin/config {"sports_nfl_script": {"401899001": {"away": 16}}}` while the
   timeline shows 8 (script values replace the timeline's). `lastPlayType` is an ESPN play type id ("67" passing TD, "59" FG,
   "36" interception-return TD, "20" safety, "53" kick-off, "70" coin toss).
-- `sports_nfl_faults`: the NHL keys (`status`, `score_status`, `html_404`, `retry_after`, `pad_bytes`, `age`, `no_date`, `stall_s`).
+- `sports_nfl_faults`: the NHL keys (`status`, `score_status`, `html_404`, `retry_after`, `pad_bytes`, `age`, `no_date`, `stall_s`,
+  `stall_ms`, `max_age`), plus two for the per-event route only: `event_status` (400 or a JSON 404 → the app falls back to
+  the dated board after two; 403 or 429 → the app slows to 10 s or more; with `html_404` a 404 is HTML, which never
+  switches) and `event_older_s` (the event as it was N s ago: an older body the app must not show).
+- NFL API requests are noted in `/admin/stats` → `sports.log` (`path`, `status`, `unix`) with the NHL ones, so poll gaps can be
+  read: e.g. `curl -s localhost:8080/admin/stats | python3 -c 'import json,sys; [print(r["unix"], r["path"]) for r in json.load(sys.stdin)["sports"]["log"]]'`.
+  The panel does not gzip, so the app's MB/h figure reads higher here than against ESPN.
 - `sample_espn.py --event {id} --out {dir}` records the real ESPN board for one event (§1.6): a JSONL log plus the raw body of
   every state change.
 

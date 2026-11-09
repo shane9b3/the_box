@@ -72,15 +72,25 @@ internal object SportsTiming {
      * (fix pass, C-S4): a longer `Retry-After` wins, but `Retry-After: 0` (or anything under the back-off) never brings
      * the next request closer than the back-off step.
      */
-    fun backoffAt(failMono: Long, failures: Int, retryAfterS: Int?, jitter: Double): Long {
-        val step = backoffMs(failures, jitter)
+    fun backoffAt(
+        failMono: Long,
+        failures: Int,
+        retryAfterS: Int?,
+        jitter: Double,
+        baseMs: Long = SportsConstants.BACKOFF_BASE_MS,
+    ): Long {
+        val step = backoffMs(failures, jitter, baseMs)
         val server = if (retryAfterS != null && retryAfterS > 0) retryAfterS * 1000L else 0L
         return failMono + maxOf(step, server)
     }
 
-    fun backoffMs(failures: Int, jitter: Double): Long {
+    /**
+     * `base × 2^(n−1)`, capped at 300 s, ±20 %. (Update interval §3.4) [baseMs] is 20 s everywhere but the NFL follow at a
+     * set interval ([SportsConstants.BACKOFF_FAST_BASE_MS], never for a 429).
+     */
+    fun backoffMs(failures: Int, jitter: Double, baseMs: Long = SportsConstants.BACKOFF_BASE_MS): Long {
         val n = (failures - 1).coerceIn(0, 16)
-        val base = minOf(SportsConstants.BACKOFF_BASE_MS shl n, SportsConstants.BACKOFF_MAX_MS)
+        val base = minOf(baseMs shl n, SportsConstants.BACKOFF_MAX_MS)
         return (base * (1.0 + SportsConstants.BACKOFF_JITTER * jitter.coerceIn(-1.0, 1.0))).roundToLong()
     }
 

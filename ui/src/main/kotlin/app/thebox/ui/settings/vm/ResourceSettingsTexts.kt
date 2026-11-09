@@ -281,6 +281,20 @@ class ResourceSettingsTexts(private val resources: Resources) : SettingsTexts {
         SettingsText.SPORTS_DELAY_SECONDS -> R.string.settings_sports_delay_seconds
         SettingsText.SPORTS_SIZE_STANDARD -> R.string.settings_sports_size_standard
         SettingsText.SPORTS_SIZE_LARGE -> R.string.settings_sports_size_large
+        SettingsText.SPORTS_INTERVAL -> R.string.settings_sports_interval
+        SettingsText.SPORTS_INTERVAL_AUTO -> R.string.settings_sports_interval_auto
+        SettingsText.SPORTS_INTERVAL_AUTO_AFTER -> R.string.settings_sports_interval_auto_after
+        SettingsText.SPORTS_INTERVAL_EVERY -> R.string.settings_sports_interval_every
+        SettingsText.SPORTS_INTERVAL_AFTER -> R.string.settings_sports_interval_after
+        SettingsText.SPORTS_INTERVAL_RECOMMENDED -> R.string.settings_sports_interval_recommended
+        SettingsText.SPORTS_INTERVAL_DESC -> R.string.settings_sports_interval_desc
+        SettingsText.SPORTS_INTERVAL_DESC_UNMEASURED -> R.string.settings_sports_interval_desc_unmeasured
+        SettingsText.SPORTS_INTERVAL_DESC_FAST -> R.string.settings_sports_interval_desc_fast
+        SettingsText.SPORTS_INTERVAL_NHL_FLOOR -> R.string.settings_sports_interval_nhl_floor
+        SettingsText.SPORTS_INTERVAL_FASTER -> R.string.settings_sports_interval_faster
+        SettingsText.SPORTS_INTERVAL_SLOWED -> R.string.settings_sports_interval_slowed
+        SettingsText.SPORTS_INTERVAL_FALLBACK -> R.string.settings_sports_interval_fallback
+        SettingsText.SPORTS_INTERVAL_LEAGUE -> R.string.settings_sports_interval_league
         }
     }
 }

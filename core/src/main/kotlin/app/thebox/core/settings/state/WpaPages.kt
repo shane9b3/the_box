@@ -47,6 +47,8 @@ import app.thebox.core.settings.tree.PlaybackRows
 import app.thebox.core.settings.tree.RemoteRows
 import app.thebox.core.settings.tree.SettingsTree
 import app.thebox.core.settings.tree.SportsRows
+import app.thebox.core.sports.League
+import app.thebox.core.sports.PollMeter
 import app.thebox.core.sports.ScoreBugSize
 import app.thebox.core.sports.ScoreCorner
 import app.thebox.core.sports.SportsConstants
@@ -59,6 +61,7 @@ import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
@@ -164,6 +167,8 @@ class WpaPages(
             store.flow(DataDomain).drop(1).map { },
             store.flow(NetworkDomain).drop(1).map { },
             store.flow(SportsDomain).drop(1).map { },
+            // (Update interval §5.2, review N8) Only the meters: a follow write never rebuilds every page.
+            store.flow(SportsFollowDomain).map { it.meters }.distinctUntilChanged().drop(1).map { },
             artwork.status.drop(1).map { },
         )
 
@@ -592,6 +597,7 @@ class WpaPages(
             withCurrent(SportsConstants.DELAY_STEPS_S.map { ChoiceOption(it.toString(), delayLabel(it)) }, p.delaySec.toString()) { delayLabel(it.toIntOrNull() ?: 0) },
             p.delaySec.toString(), t(SettingsText.SPORTS_DELAY_DESC),
         )
+        out += intervalRow(p)
         out += choice(
             SportsRows.SIZE, t(SettingsText.SPORTS_SIZE),
             listOf(ScoreBugSize.STANDARD to SettingsText.SPORTS_SIZE_STANDARD, ScoreBugSize.LARGE to SettingsText.SPORTS_SIZE_LARGE).map { (s, k) -> ChoiceOption(s.name, t(k)) },
@@ -599,6 +605,47 @@ class WpaPages(
         )
         return out
     }
+
+    /**
+     * (Update interval §5, rulings 29–32) The followed game's poll interval for the league on the Sports tab: Auto plus the
+     * league's list, the recommended option suffixed, and a detail with the recommendation, this box's time per update,
+     * the data use, and the NHL floor / faster / slowed / fallback lines that apply. The meter is the persisted one
+     * (`sports_follow`, this box only).
+     */
+    private fun intervalRow(p: SportsPrefs): SettingsRow {
+        val league = p.league
+        val m = store.flow(SportsFollowDomain).value.meters[league]
+        val rec = PollMeter.recommended(m, league)
+        val chosen = PollMeter.normalize(p.intervalS(league), league)
+        fun label(sec: Int) = if (league == League.NHL) t(SettingsText.SPORTS_INTERVAL_EVERY, sec) else t(SettingsText.SPORTS_INTERVAL_AFTER, sec)
+        val auto = if (league == League.NHL) t(SettingsText.SPORTS_INTERVAL_AUTO, rec) else t(SettingsText.SPORTS_INTERVAL_AUTO_AFTER, rec)
+        val options = listOf(ChoiceOption("0", auto)) + SportsConstants.intervalChoices(league).map { c ->
+            ChoiceOption(c.toString(), if (c == rec) t(SettingsText.SPORTS_INTERVAL_RECOMMENDED, label(c)) else label(c))
+        }
+        val effective = PollMeter.effectiveS(chosen, league, m)
+        val mb = mb(PollMeter.mbPerHour(m, league, effective))
+        val p90 = PollMeter.p90(m?.workMs.orEmpty())
+        val parts = ArrayList<String>()
+        parts += if (p90 != null && p90 < 100) {
+            t(SettingsText.SPORTS_INTERVAL_DESC_FAST, rec, mb)
+        } else if (p90 != null) {
+            t(SettingsText.SPORTS_INTERVAL_DESC, rec, String.format(Locale.ROOT, "%.1f", p90 / 1000.0), mb)
+        } else {
+            t(SettingsText.SPORTS_INTERVAL_DESC_UNMEASURED, rec, mb)
+        }
+        if (league == League.NHL) parts += t(SettingsText.SPORTS_INTERVAL_NHL_FLOOR)
+        if (chosen != 0 && chosen < rec) parts += t(SettingsText.SPORTS_INTERVAL_FASTER)
+        if (league == League.NFL && m?.slowed == true) parts += t(SettingsText.SPORTS_INTERVAL_SLOWED)
+        if (league == League.NFL && m?.endpoint == PollMeter.NFL_BOARD) {
+            parts += t(SettingsText.SPORTS_INTERVAL_FALLBACK, (PollMeter.bytesPerPoll(m, league) + 500) / 1000)
+        }
+        val other = if (league == League.NHL) League.NFL else League.NHL
+        parts += t(SettingsText.SPORTS_INTERVAL_LEAGUE, league.name, other.name)
+        return choice(SportsRows.INTERVAL, t(SettingsText.SPORTS_INTERVAL, league.name), options, chosen.toString(), parts.joinToString(" "))
+    }
+
+    /** MB an hour: one decimal under 10 (review N7), none above. */
+    private fun mb(v: Double): String = if (v < 10.0) String.format(Locale.ROOT, "%.1f", v) else String.format(Locale.ROOT, "%.0f", v)
 
     private fun delayLabel(sec: Int): String = if (sec <= 0) t(SettingsText.OFF) else t(SettingsText.SPORTS_DELAY_SECONDS, sec)
 
@@ -690,6 +737,10 @@ class WpaPages(
             SportsRows.CORNER -> choose?.let { c -> enumOf<ScoreCorner>(c)?.let { m -> sports { it.copy(corner = m) } } }
             SportsRows.DELAY -> choose?.toIntOrNull()?.let { v -> sports { it.copy(delaySec = v) } }
             SportsRows.SIZE -> choose?.let { c -> enumOf<ScoreBugSize>(c)?.let { m -> sports { it.copy(size = m) } } }
+            // (Update interval §5.1) The league on the Sports tab is the one the row shows, so the one it writes.
+            SportsRows.INTERVAL -> choose?.toIntOrNull()?.let { v ->
+                sports { if (it.league == League.NHL) it.copy(nhlIntervalS = v) else it.copy(nflIntervalS = v) }
+            }
             else -> Unit // links (sources, status, fix, mapping) push routes in the machine
         }
         return true

@@ -179,6 +179,29 @@
     <string name="settings_sports_size_standard">Standard</string>
     <string name="settings_sports_size_large">Large</string>
 
+    <!-- Update interval (docs/design/m6-sports-update-interval.md §5.2; owner rulings 29–32). %1$s = NHL / NFL. -->
+    <string name="settings_sports_interval">%1$s score updates</string>
+    <!-- %1$d = seconds. The NHL polls on its feed's 20 s buckets; the NFL waits this long after each update is read. -->
+    <string name="settings_sports_interval_auto">Auto (every %1$d s)</string>
+    <string name="settings_sports_interval_auto_after">Auto (%1$d s after each update)</string>
+    <string name="settings_sports_interval_every">Every %1$d s</string>
+    <string name="settings_sports_interval_after">%1$d s after each update</string>
+    <!-- %1$s = an option's label. -->
+    <string name="settings_sports_interval_recommended">%1$s · Recommended</string>
+    <!-- %1$d = recommended seconds, %2$s = this box's seconds per update ("0.4"), %3$s = MB an hour ("1.6"). -->
+    <string name="settings_sports_interval_desc">Recommended: %1$d s. This box takes about %2$s s to fetch and read an update. About %3$s MB an hour while a game is live.</string>
+    <!-- %1$d = recommended seconds, %2$s = MB an hour. -->
+    <string name="settings_sports_interval_desc_unmeasured">Recommended: %1$d s for now. Follow a game and this box will time a few updates. About %2$s MB an hour while a game is live.</string>
+    <!-- %1$d = recommended seconds, %2$s = MB an hour. A measured time under 0.1 s. -->
+    <string name="settings_sports_interval_desc_fast">Recommended: %1$d s. This box takes under 0.1 s to fetch and read an update. About %2$s MB an hour while a game is live.</string>
+    <string name="settings_sports_interval_nhl_floor">The NHL feed changes every 20 s, so checking more often would get the same score.</string>
+    <string name="settings_sports_interval_faster">This is faster than this box keeps up with, so updates may arrive late. Choose Auto to use the recommendation.</string>
+    <string name="settings_sports_interval_slowed">ESPN asked the app to check less often, so it checks every 10 s or slower for now.</string>
+    <!-- %1$s = KB per check ("20"). -->
+    <string name="settings_sports_interval_fallback">ESPN\'s single-game feed isn\'t answering, so each check downloads the whole day (about %1$s KB). Auto checks every 10 s or slower.</string>
+    <!-- %1$s = the league shown (NHL), %2$s = the other one (NFL). -->
+    <string name="settings_sports_interval_league">Showing %1$s. Switch to %2$s on the Sports tab to change the %2$s setting.</string>
+
     <!-- ==== NFL (docs/design/m6-nfl.md §4.2, §4.3, §5.2, §7.3, §8). Away team first everywhere ("KC – BUF"). -->
     <string name="sports_league_nfl">NFL</string>
     <!-- The fourth quarter (the NHL keeps sports_period_n "P4"). -->

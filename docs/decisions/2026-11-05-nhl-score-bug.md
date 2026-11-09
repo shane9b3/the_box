@@ -128,3 +128,15 @@ Owner answers to the design's open questions (2026-11-08):
 27. **Colour picks**: BAL purple + gold, DAL navy + silver, JAX teal + gold, TB red + pewter.
 28. **The NFL list is the ESPN week** (Thursday, Sunday and Monday games together), with Last week · This week · Next
     week chips.
+
+## Update interval (owner, 2026-11-08; design docs/design/m6-sports-update-interval.md)
+Request: "an option for the sports for the update time between each one with a recomended depending on how big the
+data is it is receiving"; Recommended is to follow "the amount of time it takes to grab the data parse it and then
+display it", starting low "like 2-4 seconds so its almost live".
+29. **One update-time setting per league**; the Sports settings row shows the league on screen.
+30. **NHL list starts at its feed floor, 20 s** (the NHL CDN serves `max-age=19` buckets; faster polls get the same
+    answer). NHL: Auto · 20 · 40 · 60 s.
+31. **New installs start on Auto**: Recommended from the feed's refresh and the box's measured fetch + parse + display
+    time.
+32. **NFL floor is 5 s** (ESPN rate limits are unknown; the owner chose the safer floor over 2 s). The proposal's 2/3/4 s
+    NFL choices are dropped and Auto never recommends under 5 s.

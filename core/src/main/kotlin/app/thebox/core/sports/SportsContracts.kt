@@ -120,7 +120,18 @@ data class DayBoard(val dayKey: String, val prevDay: String?, val nextDay: Strin
 
 /** One HTTP answer. [Ok.serverDateMs]/[Ok.ageS] come from `Date`/`Age` (Age clamped to [0, AGE_MAX_S]); `receivedMono` is stamped by the source. */
 sealed interface Fetch<out T> {
-    data class Ok<T>(val value: T, val receivedMono: Long, val serverDateMs: Long?, val ageS: Int) : Fetch<T>
+    /**
+     * (Update interval §4.1, additive) [maxAgeS]: `Cache-Control` `s-maxage`, else `max-age` (null = absent); [wireBytes]:
+     * the body bytes on the wire (compressed), from the source's `EventListener` (null = unknown).
+     */
+    data class Ok<T>(
+        val value: T,
+        val receivedMono: Long,
+        val serverDateMs: Long?,
+        val ageS: Int,
+        val maxAgeS: Int? = null,
+        val wireBytes: Long? = null,
+    ) : Fetch<T>
     /** A 404 with a JSON or empty body (an HTML 404 is `Failed(HTTP_OTHER)`, A-S12). */
     data object NotFound : Fetch<Nothing>
     data class Failed(val kind: FailKind, val retryAfterS: Int?, val receivedMono: Long) : Fetch<Nothing>
@@ -145,6 +156,12 @@ interface ScoreSource {
     suspend fun game(id: GameId, startUtcMs: Long?): Fetch<GameSnapshot> = game(id)
     /** The dark-background logo variant, validated against `SportsEndpoints.logoBase` (A-N2). */
     fun logoUrl(team: TeamLine): String
+
+    /**
+     * (Update interval §3.2, additive) The endpoint [id]'s follow poll reads now ("nhl-landing", "nfl-event", "nfl-board"):
+     * the meter's window resets when it changes.
+     */
+    fun followEndpoint(id: GameId): String = league.name.lowercase()
 }
 
 // ------------------------------------------------------------------ §2.3 demand
@@ -183,6 +200,29 @@ data class SportsFollowDoc(
     val game: FollowedGame? = null,
     val pollPhaseMs: Long? = null,
     val firstFollowShown: Boolean = false,
+    /**
+     * (Update interval §3.2, additive) This box's poll measurements per league: device-bound, so in this not-backed-up
+     * document. Written by the repository at most once a minute, and at once when [PollMeasure.slowed] or the endpoint
+     * changes.
+     */
+    val meters: Map<League, PollMeasure> = emptyMap(),
+)
+
+/**
+ * (Update interval §3.2, §4.1) One league's poll meter ([PollMeter] reads it): the [endpoint] the samples are from, the last
+ * [SportsConstants.METER_WINDOW] [workMs] samples (fetch + decode + map + machine + view; a failed poll at its elapsed
+ * time, capped), the good polls' [wireBytes], the largest [maxAgeS] seen, the hysteresis-held [recommendedS] and its
+ * [downStreak], and whether a 429 (or 403) has [slowed] the current follow (review S2, S10).
+ */
+@Serializable
+data class PollMeasure(
+    val endpoint: String = "",
+    val workMs: List<Int> = emptyList(),
+    val wireBytes: List<Int> = emptyList(),
+    val maxAgeS: Int? = null,
+    val recommendedS: Int? = null,
+    val downStreak: Int = 0,
+    val slowed: Boolean = false,
 )
 
 enum class RemoveReason { NOT_LISTED, POSTPONED, SPORTS_OFF }

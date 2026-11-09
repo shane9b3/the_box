@@ -96,7 +96,7 @@ class NhlScoreSource internal constructor(
     private val deriveLogo: (String, String) -> String = NhlMapper::darkLogoUrl,
     callTimeoutMs: Long = SportsConstants.SPORTS_CALL_TIMEOUT_MS,
 ) : ScoreSource {
-    private val client: OkHttpClient = client.newBuilder()
+    private val client: OkHttpClient = WireMeter.install(client.newBuilder(), client)
         .callTimeout(callTimeoutMs, TimeUnit.MILLISECONDS)
         .cache(null)
         .build()
@@ -121,6 +121,9 @@ class NhlScoreSource internal constructor(
         return get("gamecenter/${id.id}/landing", "gamecenter", mapLanding)
     }
 
+    /** (Update interval §3.2) The follow always reads the landing. */
+    override fun followEndpoint(id: GameId): String = app.thebox.core.sports.PollMeter.NHL_LANDING
+
     /** The landing's `darkLogo` only when it is under the logo base (A-N2); else the URL derived from the abbreviation. */
     override fun logoUrl(team: TeamLine): String {
         val base = endpoints.logoBase
@@ -129,10 +132,12 @@ class NhlScoreSource internal constructor(
 
     private suspend fun <T> get(path: String, kind: String, map: (JsonObject, String) -> T?): Fetch<T> {
         val e = endpoints
-        val request = Request.Builder().url(e.apiBase + path).header("Accept", "application/json").build()
+        val wire = WireBytes()
+        val request = WireMeter.tag(Request.Builder().url(e.apiBase + path).header("Accept", "application/json"), wire).build()
         val answer = call(request) { res -> classify(res, map, e.logoBase) }
         logTransition(kind, path, answer)
-        return answer.fetch
+        // (Update interval §3.2) The wire bytes: the listener wrote them when `response.use` closed the body.
+        return WireMeter.withWire(answer.fetch, wire)
     }
 
     /** A [Fetch] plus what the log line may say about it (content type and length, never the body). */
@@ -156,7 +161,7 @@ class NhlScoreSource internal constructor(
                 } catch (e: RuntimeException) {
                     null
                 } ?: return failed(FailKind.BAD_BODY, text.length.toLong())
-                Answer(Fetch.Ok(value, received, serverDateMs(res), ageS(res)), type, text.length.toLong())
+                Answer(Fetch.Ok(value, received, serverDateMs(res), ageS(res), WireMeter.maxAgeS(res)), type, text.length.toLong())
             }
             404 -> if (isHtml(res, type)) failed(FailKind.HTTP_OTHER) else Answer(Fetch.NotFound, type, null)
             429 -> failed(FailKind.HTTP_429)

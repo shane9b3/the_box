@@ -64,6 +64,10 @@ fun rowHeight(row: SettingsRow): Int = when {
 /** (WP-S4) The Test's progress Info row and the Find page's searching row: `:core`'s ids (Q-U9, closure fix pass). */
 internal val PROGRESS_ROW = app.thebox.core.settings.state.StoragePages.ROW_T_PROGRESS
 internal val SEARCHING_ROW = app.thebox.core.settings.state.StoragePages.ROW_SEARCHING
+internal val INTERVAL_ROW = app.thebox.core.settings.tree.SportsRows.INTERVAL
+private const val INTERVAL_DESC_LINES = 4
+/** The focused interval row's top and bottom padding once it grows past one line of detail. */
+private const val INTERVAL_PAD_V = 14
 
 /** An Info row of the storage pages with lines under its label. */
 internal fun isStorageInfo(row: SettingsRow): Boolean =
@@ -119,7 +123,9 @@ private fun RowBody(row: SettingsRow, focused: Boolean, moving: Boolean) {
     val base = if (focused) SettingsUi.Canvas else SettingsUi.Fg
     val text = base.copy(alpha = alpha)
     // U-S6: a storage Info row grows with its lines (at least rowHeight), so no next-step line is cut by the row's height.
-    val sized = if (isStorageInfo(row)) Modifier.heightIn(min = rowHeight(row).dp) else Modifier.height(rowHeight(row).dp)
+    // (Update interval §5.2) The focused interval row grows with its wrapped detail too.
+    val grows = isStorageInfo(row) || (focused && row.id == INTERVAL_ROW)
+    val sized = if (grows) Modifier.heightIn(min = rowHeight(row).dp) else Modifier.height(rowHeight(row).dp)
     var m = Modifier
         .fillMaxWidth()
         .then(sized)
@@ -131,7 +137,8 @@ private fun RowBody(row: SettingsRow, focused: Boolean, moving: Boolean) {
         moving -> m.border(1.dp, SettingsUi.Accent, shape).background(SettingsUi.White12, shape)
         else -> m
     }
-    Row(m.padding(horizontal = SettingsUi.ROW_PAD_H.dp), verticalAlignment = Alignment.CenterVertically) {
+    val padV = if (focused && row.id == INTERVAL_ROW) INTERVAL_PAD_V else 0
+    Row(m.padding(horizontal = SettingsUi.ROW_PAD_H.dp, vertical = padV.dp), verticalAlignment = Alignment.CenterVertically) {
         // (M5 integration, WP-E §1.8a) The About header card carries the wordmark.
         if (row.id == app.thebox.core.settings.tree.AboutRows.HEADER) {
             androidx.compose.foundation.Image(
@@ -148,7 +155,10 @@ private fun RowBody(row: SettingsRow, focused: Boolean, moving: Boolean) {
                 // (WP-S4, §9.1) An amber description ("Can't reach NAS: saving on this device for now.").
                 val amber = SettingsUi.isWarnText(d) && !focused
                 val color = if (amber) SettingsUi.Amber.copy(alpha = alpha) else text.copy(alpha = 0.55f * alpha)
-                Line(app.thebox.core.settings.state.StorageMarks.plain(d), SettingsUi.RowDesc.copy(color = color), Modifier.padding(top = 4.dp))
+                // (Update interval §5.2) The interval row's detail (recommendation, time per update, MB an hour, the
+                // floor / slowed / fallback lines) wraps while the row is focused; every other row stays one line.
+                val lines = if (focused && row.id == INTERVAL_ROW) INTERVAL_DESC_LINES else 1
+                Line(app.thebox.core.settings.state.StorageMarks.plain(d), SettingsUi.RowDesc.copy(color = color), Modifier.padding(top = 4.dp), maxLines = lines)
             }
             (row.kind as? RowKind.Info)?.let { info ->
                 if (info.lines.isNotEmpty()) {

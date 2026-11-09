@@ -55,6 +55,47 @@ object SportsConstants {
     const val SPORTS_CALL_TIMEOUT_MS = 10_000L
     const val MAX_BODY_BYTES = 524_288L
 
+    // ---- the update interval (docs/design/m6-sports-update-interval.md; owner rulings 29–32). Seconds; 0 = Auto.
+    /** (Ruling 30) The NHL list starts at its 20 s CDN bucket; multiples of 20 keep the phase alignment exact. */
+    val INTERVAL_CHOICES_NHL_S: List<Int> = listOf(20, 40, 60)
+    /** (Ruling 32) The NFL floor is 5 s; Auto never goes under it. */
+    val INTERVAL_CHOICES_NFL_S: List<Int> = listOf(5, 10, 15, 20, 30)
+    /** Auto before [METER_MIN] samples. */
+    const val INTERVAL_DEFAULT_NHL_S = 20
+    const val INTERVAL_DEFAULT_NFL_S = 5
+    /** The meter keeps this many samples per league (good polls, plus failed ones at their elapsed time, review S6). */
+    const val METER_WINDOW = 20
+    /** (Review S6) p90 only from this many samples; below it, the default. */
+    const val METER_MIN = 10
+    /** Work takes at most 1 / this of an interval (a duty-cycle choice, not a safety one: polls never stack; review N1). */
+    const val METER_FACTOR = 3
+    /** (Review S9) Auto moves down only when `METER_FACTOR × p90` fits in this share of the lower choice ... */
+    const val METER_DOWN_SHARE = 0.8
+    /** ... for this many samples in a row. */
+    const val METER_DOWN_STREAK = 10
+    /** A failed poll counts in the window at its elapsed time, at most this (the call timeout). */
+    const val METER_FAIL_CAP_MS = 10_000
+    /** The meters are written to `sports_follow` at most this often (and at once when the slowed or endpoint state changes). */
+    const val METER_PERSIST_MS = 60_000L
+    /** NFL back-off base at a set interval (5, 10, 20 … 300 s); a 429 keeps [BACKOFF_BASE_MS]. */
+    const val BACKOFF_FAST_BASE_MS = 5_000L
+    /** Breaks poll at 2 × the live interval, never under this. */
+    const val INTERMISSION_MIN_MS = 20_000L
+    /** (Review S2) After a 429 (or a 403) every NFL choice is at least this, for the rest of the follow. */
+    const val AUTO_429_FLOOR_S = 10
+    /** MB/h before a measurement (gzip bytes per poll; docs F2, F7). */
+    const val EST_WIRE_BYTES_NHL = 1_500
+    const val EST_WIRE_BYTES_NFL = 2_500
+    /** (Review S3) On the board fallback, the per-event endpoint is tried again this often. */
+    const val PER_EVENT_RETRY_MS = 600_000L
+    /** Two shape failures in a row (a 200 that does not decode, a JSON 400) switch the follow to the board. */
+    const val PER_EVENT_SWITCH_AFTER = 2
+
+    /** The interval choices of [league] (no Auto). */
+    fun intervalChoices(league: League): List<Int> = if (league == League.NHL) INTERVAL_CHOICES_NHL_S else INTERVAL_CHOICES_NFL_S
+
+    fun intervalDefault(league: League): Int = if (league == League.NHL) INTERVAL_DEFAULT_NHL_S else INTERVAL_DEFAULT_NFL_S
+
     // ---- logos (§3)
     const val LOGO_WAIT_MS = 1_500L
     /** Logos are rasterised at this multiple of the slot, then trimmed (U-S1). */

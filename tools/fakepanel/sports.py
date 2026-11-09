@@ -29,7 +29,8 @@ Scripting (config keys, also through `POST /admin/config`):
   `summary.scoring`. The 3rd period runs 110 s (the timeline is 50 s longer at 360). Off, every body is as before.
 - `sports_faults`: {"status": N (every /v1 answer), "score_status": N, "landing_status": N, "html_404": true (404s carry
   an HTML body), "retry_after": S, "pad_bytes": N (a filler field, for the 512 KB cap), "age": S (a fixed Age),
-  "no_date": true (no Date header), "stall_s": S (wait before answering)}.
+  "no_date": true (no Date header), "stall_s": S (wait before answering), "stall_ms": MS (a fractional stall, to fake a
+  slow box; docs/design/m6-sports-update-interval.md section 6), "max_age": S (overrides max-age and s-maxage)}.
 `GET /admin/sports` shows the slate; `/admin/stats` carries `sports: {requests, by_path, log}`.
 """
 import datetime as dt
@@ -54,7 +55,8 @@ DEFAULTS = {
     "sports_faults": {},
     "sports_pp": False,           # --sports-pp: the power-play timeline, `situation` and `summary.scoring` (needs sports)
 }
-FAULT_KEYS = ("status", "score_status", "landing_status", "html_404", "retry_after", "pad_bytes", "age", "no_date", "stall_s")
+FAULT_KEYS = ("status", "score_status", "landing_status", "html_404", "retry_after", "pad_bytes", "age", "no_date", "stall_s",
+              "stall_ms", "max_age")
 STATE_KEYS = ("gameState", "period", "periodType", "secondsRemaining", "running", "inIntermission", "away", "home",
               "scheduleState", "lastPeriodType", "gone", "situationCode", "situationSeconds", "goalStrength")
 
@@ -199,6 +201,7 @@ class Sports:
 
     def note(self, path, status):
         kind = re.sub(r"/\d{4}-\d{2}-\d{2}$", "/{date}", re.sub(r"/gamecenter/\d+/", "/gamecenter/{id}/", path))
+        kind = re.sub(r"/scoreboard/[^/]+$", "/scoreboard/{event}", kind)  # the NFL per-event route
         with self.lock:
             self.requests += 1
             self.by_path[kind] = self.by_path.get(kind, 0) + 1
@@ -500,10 +503,13 @@ def handle(h, path):
     f = p.cfg.get("sports_faults") or {}
     if f.get("stall_s"):
         time.sleep(float(f["stall_s"]))
+    if f.get("stall_ms"):
+        time.sleep(float(f["stall_ms"]) / 1000.0)
     now = time.time()
     at = Sports.bucket_start(now)
     base = h.base()
-    headers = {"Cache-Control": "no-transform, max-age=19, s-maxage=19", "Vary": "Accept-Encoding",
+    ma = int(f["max_age"]) if f.get("max_age") is not None else 19
+    headers = {"Cache-Control": f"no-transform, max-age={ma}, s-maxage={ma}", "Vary": "Accept-Encoding",
                "ETag": 'W/"%08x--gzip"' % int(at), "Age": str(int(f["age"]) if f.get("age") is not None else int(now - at))}
     if not f.get("no_date"):
         headers["Date"] = http_date(now)

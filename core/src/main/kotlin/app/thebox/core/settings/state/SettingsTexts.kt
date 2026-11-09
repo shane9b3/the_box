@@ -285,6 +285,23 @@ enum class SettingsText {
     SPORTS_DELAY_SECONDS,
     SPORTS_SIZE_STANDARD,
     SPORTS_SIZE_LARGE,
+    // (Update interval §5.2, docs/design/m6-sports-update-interval.md) The per-league interval row (SportsRows.INTERVAL).
+    // NHL options read "Every N s" (bucket-aligned); NFL ones "N s after each update" (scheduled from completion, S8).
+    SPORTS_INTERVAL,
+    SPORTS_INTERVAL_AUTO,
+    SPORTS_INTERVAL_AUTO_AFTER,
+    SPORTS_INTERVAL_EVERY,
+    SPORTS_INTERVAL_AFTER,
+    SPORTS_INTERVAL_RECOMMENDED,
+    SPORTS_INTERVAL_DESC,
+    SPORTS_INTERVAL_DESC_UNMEASURED,
+    /** A measured p90 under 0.1 s ("about 0.0 s" would read as broken). */
+    SPORTS_INTERVAL_DESC_FAST,
+    SPORTS_INTERVAL_NHL_FLOOR,
+    SPORTS_INTERVAL_FASTER,
+    SPORTS_INTERVAL_SLOWED,
+    SPORTS_INTERVAL_FALLBACK,
+    SPORTS_INTERVAL_LEAGUE,
 }
 
 fun interface SettingsTexts {

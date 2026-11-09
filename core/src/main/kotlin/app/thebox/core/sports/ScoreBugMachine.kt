@@ -49,6 +49,14 @@ class ScoreBugMachine(
     private var lastOk: Fetch.Ok<GameSnapshot>? = null
     private var skewMs = 0L
 
+    /**
+     * (Update interval §3.5) The followed game's live interval, ms; null = today's behaviour (every pre-interval test).
+     * NHL: multiples of 20 s, bucket-aligned. NFL: from completion ([doneMono] + interval).
+     */
+    private var liveMs: Long? = null
+    /** When the last `Ok` finished (after its decode, F15): the NFL's completion-based schedule runs from it. */
+    private var doneMono = 0L
+
     private var followAt = 0L
     private var eagerAt: Long? = null
     private var suppressStale = false
@@ -113,6 +121,15 @@ class ScoreBugMachine(
         }
     }
 
+    /**
+     * (Update interval §3.5, commit 0) The live poll interval in ms for the followed game's league, as the repository
+     * resolves it (pref → Auto → the 429 floor); null = today's timing. NHL 20 s is byte-identical to null.
+     */
+    fun interval(liveMs: Long?) {
+        this.liveMs = liveMs?.takeIf { it > 0 }
+        step()
+    }
+
     fun prefs(delaySec: Int) {
         delayMs = delaySec.coerceIn(0, SportsConstants.DELAY_STEPS_S.last()) * 1000L
         step()
@@ -124,7 +141,7 @@ class ScoreBugMachine(
         demand = d
         if (d == Demand.SEEN && was != Demand.SEEN && game != null) {
             val ok = lastOk
-            val old = ok == null || now - ok.receivedMono > SportsConstants.CDN_BUCKET_MS
+            val old = ok == null || now - ok.receivedMono > (liveMs ?: SportsConstants.CDN_BUCKET_MS)
             // C-S2: no rise poll (and so no "No update" suppression) while offline. C-S3: never ahead of a running
             // back-off or Retry-After.
             val backingOff = failures > 0 && (backoffAt ?: Long.MIN_VALUE) > now
@@ -152,6 +169,15 @@ class ScoreBugMachine(
         when (f) {
             is Fetch.Ok -> {
                 failures = 0; failAt = null; backoffAt = null; notFoundFirst = null
+                doneMono = now
+                val held = lastOk?.value
+                if (fast() && held != null && olderNfl(held, f.value)) {
+                    // (Review S5) An older body (the board fallback lags per-event by 6–9 s): a no-op Ok for stale and the
+                    // schedule, never shown, so the score never goes back in time.
+                    lastOk = f.copy(value = held)
+                    step()
+                    return
+                }
                 lastOk = f
                 f.serverDateMs?.let { date -> skewMs = date - (wall() - (now - f.receivedMono)) }
                 if (f.value.startUtcMs != g.startUtcMs) game = g.copy(startUtcMs = f.value.startUtcMs)
@@ -182,7 +208,10 @@ class ScoreBugMachine(
             is Fetch.Failed -> {
                 failures++
                 failAt = f.receivedMono
-                backoffAt = SportsTiming.backoffAt(f.receivedMono, failures, f.retryAfterS, jitter())
+                // (Update interval §3.4) The NFL at a set interval backs off from 5 s, so one dropped packet does not
+                // freeze the bug for 20 s; a 429 keeps the 20 s base, with Retry-After as a floor (C-S4).
+                val base = if (fast() && f.kind != FailKind.HTTP_429) SportsConstants.BACKOFF_FAST_BASE_MS else SportsConstants.BACKOFF_BASE_MS
+                backoffAt = SportsTiming.backoffAt(f.receivedMono, failures, f.retryAfterS, jitter(), base)
             }
         }
         step()
@@ -327,14 +356,70 @@ class ScoreBugMachine(
             GamePhase.FINAL, GamePhase.POSTPONED -> null
             // (NFL lead sign-off 1) An ESPN `in` body still at the coin toss (S8, PRE) polls at the LIVE cadence.
             GamePhase.SCHEDULED, GamePhase.PRE -> if (kickoffDue(ok.value)) {
-                SportsTiming.nextAligned(ok, pollPhaseMs, 0, floor)
+                livePoll(ok, floor)
             } else {
                 SportsTiming.nextAligned(ok, pollPhaseMs, SportsConstants.INTERMISSION_BUCKET_SKIP, maxOf(floor, preWakeMono(now)))
             }
-            GamePhase.LIVE -> SportsTiming.nextAligned(ok, pollPhaseMs, 0, floor)
-            GamePhase.INTERMISSION ->
-                SportsTiming.nextAligned(ok, pollPhaseMs, SportsConstants.INTERMISSION_BUCKET_SKIP, floor)
+            GamePhase.LIVE -> livePoll(ok, floor)
+            GamePhase.INTERMISSION -> {
+                val b = breakMs()
+                when {
+                    b == null -> SportsTiming.nextAligned(ok, pollPhaseMs, SportsConstants.INTERMISSION_BUCKET_SKIP, floor)
+                    fast() -> maxOf(doneMono + b, floor)
+                    else -> SportsTiming.nextAligned(ok, pollPhaseMs, bucketSkip(b), floor)
+                }
+            }
         }
+    }
+
+    /**
+     * (Update interval §3.5) A live poll: NHL bucket-aligned, skipping `interval / 20 s − 1` buckets (20 s → 0, as
+     * today); the NFL at a set interval from completion (per-event has `max-age=1`, so no bucket to align to).
+     */
+    private fun livePoll(ok: Fetch.Ok<GameSnapshot>, floor: Long): Long {
+        val l = liveMs
+        return when {
+            l == null -> SportsTiming.nextAligned(ok, pollPhaseMs, 0, floor)
+            fast() -> maxOf(doneMono + l, floor)
+            else -> SportsTiming.nextAligned(ok, pollPhaseMs, bucketSkip(l), floor)
+        }
+    }
+
+    private fun bucketSkip(ms: Long): Int = (ms / SportsConstants.CDN_BUCKET_MS - 1).coerceAtLeast(0L).toInt()
+
+    /** The NFL follow at a set interval: completion-based polls, the fast back-off, the older-body guard. */
+    private fun fast(): Boolean = liveMs != null && game?.league == League.NFL
+
+    /** (§3.5) Breaks at 2 × live, never under [SportsConstants.INTERMISSION_MIN_MS]; null = today's (skip one bucket). */
+    private fun breakMs(): Long? = liveMs?.let { maxOf(2 * it, SportsConstants.INTERMISSION_MIN_MS) }
+
+    /**
+     * (Review B1) A rise is a goal against a comparison at most this old: today's 100 s, or `2 × break + 20 s` when the
+     * interval makes breaks longer (NHL 60 s: 280 s). NHL 20 s stays 100 s.
+     */
+    private fun goalFreshMs(): Long {
+        val b = breakMs() ?: return GOAL_FRESH_MS
+        return maxOf(GOAL_FRESH_MS, 2 * b + SportsConstants.BACKOFF_BASE_MS)
+    }
+
+    /**
+     * (Review S5) [s] is older than the held [prev]: a lower `lastPlay.id` (ESPN's ids rise), or, with the same or no
+     * ids, an earlier (period, clock) at an equal or lower score sum.
+     */
+    private fun olderNfl(prev: GameSnapshot, s: GameSnapshot): Boolean {
+        if (prev.id != s.id || s.id.league != League.NFL) return false
+        val a = (prev.detail as? LeagueDetail.Nfl)?.lastPlay?.id?.toLongOrNull()
+        val b = (s.detail as? LeagueDetail.Nfl)?.lastPlay?.id?.toLongOrNull()
+        if (a != null && b != null && a != b) return b < a
+        fun inPlay(g: GameSnapshot) = g.phase == GamePhase.LIVE || g.phase == GamePhase.INTERMISSION
+        if (!inPlay(prev) || !inPlay(s)) return false
+        val pp = prev.period ?: return false
+        val sp = s.period ?: return false
+        val pc = prev.clock?.secondsRemaining
+        val sc = s.clock?.secondsRemaining
+        val earlier = sp < pp || (sp == pp && pc != null && sc != null && sc > pc)
+        val sum = { g: GameSnapshot -> (g.away.score ?: 0) + (g.home.score ?: 0) }
+        return earlier && sum(s) <= sum(prev)
     }
 
     /** Whether a rise to SEEN may poll now: not for a finished game, nor for a pre-game one still asleep. */
@@ -397,7 +482,7 @@ class ScoreBugMachine(
 
         // C-N1: a goal is flagged only against a recent comparison (not the hours-old snapshot shown before a long NONE
         // or UNSEEN stretch), and never when both sides rose meanwhile.
-        if (p != null && demand == Demand.SEEN && q.receivedMono - prev.receivedMono <= GOAL_FRESH_MS) {
+        if (p != null && demand == Demand.SEEN && q.receivedMono - prev.receivedMono <= goalFreshMs()) {
             val home = rose(p.home.score, s.home.score)
             val away = rose(p.away.score, s.away.score)
             val side = when {
@@ -698,9 +783,10 @@ class ScoreBugMachine(
     private fun staleAt(): Long? {
         if (suppressStale) return null
         val ok = lastOk ?: return null
+        // (Update interval §3.5) The cadence is the league's live or break interval; the 60 s floor stays.
         val cadence = when (ok.value.phase) {
-            GamePhase.LIVE -> SportsConstants.CDN_BUCKET_MS
-            GamePhase.INTERMISSION -> SportsConstants.CDN_BUCKET_MS * (1 + SportsConstants.INTERMISSION_BUCKET_SKIP)
+            GamePhase.LIVE -> liveMs ?: SportsConstants.CDN_BUCKET_MS
+            GamePhase.INTERMISSION -> breakMs() ?: (SportsConstants.CDN_BUCKET_MS * (1 + SportsConstants.INTERMISSION_BUCKET_SKIP))
             else -> return null
         }
         val c = if (demand == Demand.SEEN) cadence else maxOf(cadence, SportsConstants.POLL_UNSEEN_MS)

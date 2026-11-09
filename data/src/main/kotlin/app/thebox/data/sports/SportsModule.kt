@@ -55,7 +55,7 @@ abstract class SportsModule {
         @IntoMap
         @LeagueKey(League.NFL)
         fun nflScoreSource(@ApiClient client: OkHttpClient, @ApplicationContext context: Context): ScoreSource =
-            EspnScoreSource(client, ScoreRepositoryImpl.ELAPSED, endpoints = { EspnEndpoints.resolve(context) })
+            EspnScoreSource.production(client, ScoreRepositoryImpl.ELAPSED, endpoints = { EspnEndpoints.resolve(context) })
 
         @Provides
         @Singleton

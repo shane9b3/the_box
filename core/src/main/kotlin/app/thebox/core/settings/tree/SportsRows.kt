@@ -15,8 +15,10 @@ object SportsRows : RowSource {
     val CORNER = RowId("sports.corner")
     val DELAY = RowId("sports.delay")
     val SIZE = RowId("sports.size")
+    /** (Update interval §5.1) The followed game's poll interval for the league on the Sports tab (`SportsPrefs.league`). */
+    val INTERVAL = RowId("sports.interval")
 
-    override val rows: List<RowSpec> = listOf(SHOW, CORNER, DELAY, SIZE).map {
+    override val rows: List<RowSpec> = listOf(SHOW, CORNER, DELAY, INTERVAL, SIZE).map {
         RowSpec(it, SectionId.SPORTS, ADVANCED, LIVE, "S") // "S" (score bug): WpaPages builds the page and applies the intents, outside the WP-A simple-count sections
     }
 }

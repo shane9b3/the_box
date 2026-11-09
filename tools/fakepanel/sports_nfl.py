@@ -5,6 +5,11 @@ Routes (ESPN's own paths, so the app only swaps the origin: debug builds, `files
     GET /apis/site/v2/sports/football/nfl/scoreboard                       this week (week 9 of the 2026 regular season)
     GET .../scoreboard?seasontype=2&week=N                                 a week (8 and 10 carry one game each; others none)
     GET .../scoreboard?dates=YYYYMMDD                                      one Eastern day (a bad value is HTTP 400 {code, message})
+    GET .../scoreboard/{eventId}                                           one event object, `Cache-Control: max-age=1`
+                                                                           (docs/design/m6-sports-update-interval.md section 6):
+                                                                           unknown digits = 404 JSON "No event found for
+                                                                           eventId: …" (max-age=3600); non-digits = 400 JSON,
+                                                                           gzip-encoded as ESPN's is (max-age=3019)
     GET /combiner/i?img=/i/teamlogos/nfl/500-dark/scoreboard/{abbr}.png&h=200&w=200   a generated placeholder PNG
     anything else under those prefixes                                     404 HTML, as ESPN
 
@@ -27,7 +32,10 @@ Switches (config keys, also through `POST /admin/config`):
   ("away"/"home"/null), `situation: null` (the body has no `situation`), `gone: true` (the event leaves every board).
   A +8 pair is `{"401899001": {"away": <score + 8>}}` for one body.
 - `sports_nfl_faults`: the NHL fault keys (`status`, `score_status`, `html_404`, `retry_after`, `pad_bytes`, `age`,
-  `no_date`, `stall_s`; `landing_status` is accepted and ignored).
+  `no_date`, `stall_s`, `stall_ms`, `max_age`; `landing_status` is accepted and ignored), plus, on the per-event route
+  only, `event_status` (e.g. 400 or 404 to test the board fallback, 403 or 429 to test the slow-down; a 404 is the JSON
+  "No event found" unless `html_404`) and `event_older_s` (the event as it was N s ago: an older body, review S5).
+  NFL API requests are also noted in `/admin/stats` `sports.log` (path, status, unix), so the poll gaps can be read.
 
 `GET /admin/sports-nfl` shows the slate; `POST /admin/sports-nfl {"restart": true}` (or `{"anchor_unix": T}`) re-anchors only
 the NFL timeline; `POST /admin/sports {"restart": true}` restarts both (N8, in fakepanel.py's dispatch).
@@ -36,6 +44,7 @@ sports.py, its tests and testdata/sports_default_golden.json are untouched.
 """
 
 import datetime as dt
+import gzip
 import json
 import re
 import struct
@@ -60,6 +69,7 @@ DEFAULTS = {
     "sports_nfl_script": {},          # {event id: {state() key: value}}
     "sports_nfl_faults": {},          # the NHL fault keys (sports.FAULT_KEYS)
 }
+NFL_FAULT_KEYS = sports.FAULT_KEYS + ("event_status", "event_older_s")
 STATE_KEYS = ("state", "name", "period", "clock", "away", "home", "possession", "down", "distance", "yardLine",
               "possessionText", "shortDownDistanceText", "isRedZone", "lastPlayType", "lastPlayScoreValue",
               "lastPlayTeam", "situation", "gone")
@@ -249,7 +259,7 @@ def check_config(patch):
         f = patch["sports_nfl_faults"]
         if not isinstance(f, dict):
             raise ValueError("sports_nfl_faults must be an object")
-        bad = [k for k in f if k not in sports.FAULT_KEYS]
+        bad = [k for k in f if k not in NFL_FAULT_KEYS]
         if bad:
             raise ValueError("unknown sports_nfl_faults keys: " + ", ".join(bad))
 
@@ -515,8 +525,10 @@ def handle(h, path):
     f = cfg.get("sports_nfl_faults") or {}
     if f.get("stall_s"):
         time.sleep(float(f["stall_s"]))
+    if f.get("stall_ms"):
+        time.sleep(float(f["stall_ms"]) / 1000.0)
     now = time.time()
-    headers = {"Cache-Control": "max-age=5"}
+    headers = {"Cache-Control": "max-age=%d" % (int(f["max_age"]) if f.get("max_age") is not None else 5)}
     if f.get("age") is not None:
         headers["Age"] = str(int(f["age"]))
     if not f.get("no_date"):
@@ -535,13 +547,16 @@ def handle(h, path):
                 body = json.dumps({"code": st, "message": "fakepanel NFL fault"})
         elif st == 404 and f.get("html_404"):
             body, ctype = NOT_FOUND_HTML, "text/html"
+        if path != LOGO_PREFIX:
+            p.sports.note(path, st)
         sports.send(h, st, body, ctype, hd)
         return True
 
-    def answer(obj):
+    def answer(obj, hd=None):
         if f.get("pad_bytes"):
             obj = dict(obj, pad="x" * int(f["pad_bytes"]))
-        sports.send(h, 200, json.dumps(obj), "application/json", headers)
+        p.sports.note(path, 200)
+        sports.send(h, 200, json.dumps(obj), "application/json", hd or headers)
         return True
 
     if path == LOGO_PREFIX:
@@ -554,6 +569,9 @@ def handle(h, path):
         return True
     if f.get("status"):
         return fail(f["status"])
+    m = re.fullmatch(re.escape(API_PREFIX) + r"scoreboard/([^/]+)", path)
+    if m:
+        return event_route(h, sp, f, headers, m[1], now, fail, answer)
     if path != API_PREFIX + "scoreboard":
         return fail(404, NOT_FOUND_HTML, "text/html")
     if f.get("score_status"):
@@ -579,6 +597,35 @@ def handle(h, path):
         games = sp.games() if (t, n) == (2, THIS_WEEK) else (sp.other_week_games(n) if t == 2 else [])
         return answer(sp.board(games, now, base, week=n, season_type=t))
     return answer(sp.board(sp.games(), now, base))
+
+
+def event_route(h, sp, f, headers, eid, now, fail, answer):
+    """`scoreboard/{eventId}`: one event object at the request instant (ESPN's per-event endpoint, F6-F9)."""
+    if not re.fullmatch(r"\d+", eid):
+        body = gzip.compress(json.dumps({"code": 400, "message": "Invalid eventId: " + eid}).encode())
+        hd = dict(headers, **{"Cache-Control": "max-age=3019", "Content-Encoding": "gzip"})
+        h.panel.sports.note(h.path.split("?")[0], 400)
+        sports.send(h, 400, body, "application/json", hd)
+        return True
+    if f.get("event_status"):
+        st = int(f["event_status"])
+        if st == 404 and not f.get("html_404"):
+            return fail(404, json.dumps({"code": 404, "message": "No event found for eventId: " + eid}))
+        return fail(st)
+    at = now - float(f.get("event_older_s") or 0)
+    game = next((g for g in sp.games() + sp.other_week_games(8) + sp.other_week_games(10) if g[0] == eid), None)
+    if game is None or sp.state(game, at).get("gone"):
+        return _not_found(h, eid, dict(headers, **{"Cache-Control": "max-age=3600"}))
+    e = sp.event(game, at, h.base())
+    e.pop("_local", None)
+    ma = int(f["max_age"]) if f.get("max_age") is not None else 1
+    return answer(e, dict(headers, **{"Cache-Control": "max-age=%d" % ma}))
+
+
+def _not_found(h, eid, hd):
+    h.panel.sports.note(h.path.split("?")[0], 404)
+    sports.send(h, 404, json.dumps({"code": 404, "message": "No event found for eventId: " + eid}), "application/json", hd)
+    return True
 
 
 def admin(h, path, data):

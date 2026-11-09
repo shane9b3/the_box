@@ -298,6 +298,19 @@ class TestScriptAndFaults(SportsCase):
         self.assertEqual("99", h["age"], "the app clamps it to 60")
         self.assertNotIn("date", h)
 
+    def test_stall_ms_and_max_age(self):
+        """docs/design/m6-sports-update-interval.md section 6: a slow box, and a different feed refresh."""
+        import time
+        gid = self.featured()
+        self.panel.update_config({"sports_faults": {"max_age": 7}})
+        st, h, _ = self.raw(f"/v1/gamecenter/{gid}/landing")
+        self.assertEqual((200, "no-transform, max-age=7, s-maxage=7"), (st, h["cache-control"]))
+        self.panel.update_config({"sports_faults": {"stall_ms": 250}})
+        t0 = time.monotonic()
+        st, h, _ = self.raw(f"/v1/gamecenter/{gid}/landing")
+        self.assertGreaterEqual(time.monotonic() - t0, 0.24)
+        self.assertEqual((200, "no-transform, max-age=19, s-maxage=19"), (st, h["cache-control"]), "the default is unchanged")
+
     def test_bad_config_is_rejected(self):
         for patch in ({"sports": "yes"}, {"sports_timeline_s": 1}, {"sports_script": {"1": {"colour": "red"}}},
                       {"sports_faults": {"explode": True}}):

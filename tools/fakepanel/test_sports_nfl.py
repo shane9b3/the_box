@@ -359,6 +359,94 @@ class TestScriptAndFaults(NflCase):
         self.assertEqual("3", h["age"])
 
 
+class TestPerEvent(NflCase):
+    """docs/design/m6-sports-update-interval.md section 6: ESPN's per-event endpoint and its faults."""
+
+    EVENT = BOARD + "/" + sports_nfl.FEATURED_ID
+
+    def test_one_event_object_like_the_boards_entry_with_max_age_1(self):
+        e = self.at("q1 KC ball", 2)
+        h, j = self.get_json(self.EVENT)
+        self.assertEqual("max-age=1", h["cache-control"])
+        self.assertIn("date", h)
+        self.assertNotIn("leagues", j)
+        self.assertNotIn("events", j)
+        self.assertEqual(sports_nfl.FEATURED_ID, j["id"])
+        self.assertNotIn("_local", j)
+        for k in ("date", "competitions", "status"):
+            self.assertEqual(e[k], j[k], k)
+
+    def test_unknown_digits_are_a_json_404_cached_for_an_hour(self):
+        st, h, body = self.raw(BOARD + "/999999999")
+        self.assertEqual(404, st)
+        self.assertTrue(h["content-type"].startswith("application/json"))
+        self.assertEqual("max-age=3600", h["cache-control"])
+        self.assertEqual({"code": 404, "message": "No event found for eventId: 999999999"}, json.loads(body))
+
+    def test_non_digits_are_a_gzip_json_400(self):
+        st, h, body = self.raw(BOARD + "/abc")
+        self.assertEqual(400, st)
+        self.assertEqual("gzip", h["content-encoding"])
+        self.assertEqual("max-age=3019", h["cache-control"])
+        import gzip
+        self.assertEqual(400, json.loads(gzip.decompress(body))["code"])
+
+    def test_a_gone_event_is_a_404(self):
+        self.panel.cfg["sports_nfl_script"] = {sports_nfl.FEATURED_ID: {"gone": True}}
+        self.assertEqual(404, self.raw(self.EVENT)[0])
+
+    def test_event_status_hits_the_per_event_route_only(self):
+        self.admin("/admin/config", {"sports_nfl_faults": {"event_status": 400}})
+        self.assertEqual(400, self.raw(self.EVENT)[0])
+        self.assertEqual(200, self.raw(BOARD)[0], "the board keeps answering (the fallback)")
+        self.admin("/admin/config", {"sports_nfl_faults": {"event_status": 404}})
+        st, h, body = self.raw(self.EVENT)
+        self.assertEqual((404, "application/json"), (st, h["content-type"]))
+        self.assertIn("No event found", json.loads(body)["message"])
+        self.admin("/admin/config", {"sports_nfl_faults": {"event_status": 404, "html_404": True}})
+        st, h, _ = self.raw(self.EVENT)
+        self.assertEqual(404, st)
+        self.assertTrue(h["content-type"].startswith("text/html"))
+        self.admin("/admin/config", {"sports_nfl_faults": {"event_status": 403}})
+        self.assertEqual(403, self.raw(self.EVENT)[0])
+        self.admin("/admin/config", {"sports_nfl_faults": {"event_status": 429, "retry_after": 30}})
+        st, h, _ = self.raw(self.EVENT)
+        self.assertEqual((429, "30"), (st, h["retry-after"]))
+
+    def test_max_age_and_stall_ms(self):
+        import time
+        self.admin("/admin/config", {"sports_nfl_faults": {"max_age": 9}})
+        self.assertEqual("max-age=9", self.raw(self.EVENT)[1]["cache-control"])
+        self.assertEqual("max-age=9", self.raw(BOARD)[1]["cache-control"])
+        self.admin("/admin/config", {"sports_nfl_faults": {"stall_ms": 300}})
+        t0 = time.monotonic()
+        self.assertEqual(200, self.raw(self.EVENT)[0])
+        self.assertGreaterEqual(time.monotonic() - t0, 0.29)
+
+    def test_event_older_s_serves_an_older_body(self):
+        self.at("q1 KC ball", 2)
+        _, now = self.get_json(self.EVENT)
+        self.admin("/admin/config", {"sports_nfl_faults": {"event_older_s": 60}})
+        _, old = self.get_json(self.EVENT)
+        self.assertNotEqual(now["competitions"][0]["status"], old["competitions"][0]["status"])
+
+    def test_requests_are_in_the_sports_log(self):
+        self.raw(self.EVENT)
+        self.raw(BOARD)
+        st, _, body = self.raw("/admin/stats")
+        log = json.loads(body)["sports"]["log"]
+        paths = [r["path"] for r in log]
+        self.assertIn(self.EVENT, paths)
+        self.assertIn(BOARD, paths)
+        self.assertTrue(all("unix" in r for r in log))
+        self.assertIn("/apis/site/v2/sports/football/nfl/scoreboard/{event}", json.loads(body)["sports"]["by_path"])
+
+    def test_new_fault_keys_are_accepted_and_others_rejected(self):
+        sports_nfl.check_config({"sports_nfl_faults": {"event_status": 400, "event_older_s": 5, "stall_ms": 1, "max_age": 1}})
+        with self.assertRaises(ValueError):
+            sports_nfl.check_config({"sports_nfl_faults": {"event_stat": 400}})
+
+
 class TestRestart(NflCase):
     def test_each_restart_reanchors_the_right_timelines(self):
         self.admin("/admin/sports-nfl", {"anchor_unix": 1000})

@@ -17,6 +17,8 @@ import app.thebox.core.sports.FollowedGame
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.League
+import app.thebox.core.sports.PollMeasure
+import app.thebox.core.sports.PollMeter
 import app.thebox.core.sports.RemoveReason
 import app.thebox.core.sports.ScoreBugMachine
 import app.thebox.core.sports.ScoreBugView
@@ -76,6 +78,11 @@ internal interface FollowMachine {
     fun knownView(): ScoreBugView?
     fun followed(): FollowedGame?
     fun drainEvents(): List<ScoreEvent>
+    /**
+     * (Update interval §3.5) The followed league's live interval in ms (null = today's timing). A default no-op so the
+     * loop's fakes compile; [of] forwards it (review B2: production must never silently drop it).
+     */
+    fun interval(liveMs: Long?) {}
 
     companion object {
         fun of(m: ScoreBugMachine): FollowMachine = object : FollowMachine {
@@ -91,6 +98,7 @@ internal interface FollowMachine {
             override fun knownView(): ScoreBugView? = m.knownView()
             override fun followed(): FollowedGame? = m.followed()
             override fun drainEvents(): List<ScoreEvent> = m.drainEvents()
+            override fun interval(liveMs: Long?) = m.interval(liveMs)
         }
     }
 }
@@ -246,6 +254,17 @@ class ScoreRepositoryImpl internal constructor(
     /** The tab or the picker is open (whatever the platform facts): its rising edge resets the day to today (C-S6). */
     private var dayUiOpen = false
 
+    // ---- the poll meter (update interval §3.2, §4.3)
+    /** Per league; loaded from `SportsFollowDoc.meters`, written at most once a minute (at once on slowed/endpoint). */
+    private val meters = HashMap<League, PollMeasure>()
+    /** Leagues whose first sample of this process was skipped (cold DNS/TLS/class loading, review S6). */
+    private val meterWarm = HashSet<League>()
+    private var meterPersistAt: Long? = null
+    private var metersDirty = false
+    /** The interval last sent to the machine; [intervalSent] false = none yet. */
+    private var intervalSentMs: Long? = null
+    private var intervalSent = false
+
     /** When the machine was last stepped, so a wake-up that stays in the past never spins the loop. */
     private var lastStepAt: Long? = null
     private var holding = false
@@ -276,6 +295,7 @@ class ScoreRepositoryImpl internal constructor(
 
     private fun start() {
         doc = store.flow(SportsFollowDomain).value
+        meters.putAll(doc.meters)
         phaseMs = doc.pollPhaseMs?.takeIf { it in SportsConstants.POLL_PHASE_MIN_MS..SportsConstants.POLL_PHASE_MAX_MS }
             ?: (SportsConstants.POLL_PHASE_MIN_MS + random.nextLong(SportsConstants.POLL_PHASE_MAX_MS - SportsConstants.POLL_PHASE_MIN_MS + 1))
                 .also { drawn -> persist(doc.copy(pollPhaseMs = drawn)) }
@@ -287,6 +307,7 @@ class ScoreRepositoryImpl internal constructor(
         // A follow survives a restart (§2.6), unless Sports was turned off meanwhile (a restore): then it ends quietly.
         if (doc.game != null && !sports.enabled) persist(doc.copy(game = null))
         machine.prefs(sports.delaySec)
+        pushInterval()
         machine.follow(doc.game)
         _followed.value = doc.game
         pushDemand()
@@ -323,10 +344,18 @@ class ScoreRepositoryImpl internal constructor(
             lastStepAt = mono.nowMs()
             val game = doc.game
             if (machine.pollDue() && game != null && followDemand != Demand.NONE && isOnline) {
-                machine.fetched(sourceOf(game.league).game(game.id, game.startUtcMs))
+                val source = sourceOf(game.league)
+                val t0 = mono.nowMs()
+                val f = source.game(game.id, game.startUtcMs)
+                machine.fetched(f)
                 // The answer took time: advance the machine to now, so what the answer made due is applied at once.
                 machine.step()
+                // (Update interval §3.2, review S6) The work the bug needs: fetch, decode, map, the machine and its view.
+                // The day list (fetchDay, below) is never inside a sample.
+                machine.view()
+                val workMs = mono.nowMs() - t0
                 lastStepAt = mono.nowMs()
+                measure(game, source.followEndpoint(game.id), f, workMs)
             }
             if (dayDue(mono.nowMs())) fetchDay()
             publish()
@@ -381,6 +410,7 @@ class ScoreRepositoryImpl internal constructor(
         val was = sports
         sports = p
         if (p.delaySec != was.delaySec) machine.prefs(p.delaySec)
+        if (p.nhlIntervalS != was.nhlIntervalS || p.nflIntervalS != was.nflIntervalS) pushInterval()
         if (p.league != was.league) {
             // (NFL §7.1) The switch: the day list goes back to the new league's today (Loading, then its board). A day
             // key of the old league is never sent to the new source. The follow is untouched: it polls its own league.
@@ -511,9 +541,82 @@ class ScoreRepositoryImpl internal constructor(
     }
 
     private fun persist(d: SportsFollowDoc) {
-        doc = d
-        _followed.value = d.game
-        store.update(SportsFollowDomain) { it.copy(game = d.game, pollPhaseMs = d.pollPhaseMs, firstFollowShown = d.firstFollowShown) }
+        val followChanged = d.game?.id != doc.game?.id
+        var next = d
+        if (followChanged) {
+            // (Update interval §3.2, review S2/S10) The slowed state belongs to one follow; the meters are written when a
+            // follow ends (or another starts), so the settings row shows the latest measurement.
+            for ((l, m) in meters.entries.toList()) if (m.slowed) meters[l] = m.copy(slowed = false)
+            if (metersDirty || next.meters != meters) next = next.copy(meters = meters.toMap())
+            metersDirty = false
+            meterPersistAt = mono.nowMs()
+        }
+        doc = next
+        _followed.value = next.game
+        store.update(SportsFollowDomain) {
+            it.copy(game = next.game, pollPhaseMs = next.pollPhaseMs, firstFollowShown = next.firstFollowShown, meters = next.meters)
+        }
+        if (followChanged) pushInterval()
+    }
+
+    // ---- the update interval (docs/design/m6-sports-update-interval.md §3.2–§3.5, §4.3)
+
+    /** Sends the followed league's effective interval (pref → Auto → the 429 floor) to the machine when it changed. */
+    private fun pushInterval() {
+        if (!::machine.isInitialized) return // start() sends it once the machine exists
+        val g = doc.game ?: return
+        val league = g.league
+        val ms = PollMeter.effectiveS(sports.intervalS(league), league, meters[league]) * 1000L
+        if (intervalSent && intervalSentMs == ms) return
+        intervalSent = true
+        intervalSentMs = ms
+        machine.interval(ms)
+    }
+
+    /**
+     * One follow poll into [game]'s league meter: an accepted `Ok` (still this follow) at its work time, wire bytes and
+     * `max-age`; a timeout or IO failure at its elapsed time, capped (S6: a failing network recommends slower); a 429 (or
+     * a 403, which the ESPN source reports as one) marks the NFL follow slowed (S2). The first sample of a process is
+     * skipped. Persisted at most once per [SportsConstants.METER_PERSIST_MS], at once when slowed or the endpoint changes.
+     */
+    private fun measure(game: FollowedGame, endpoint: String, f: Fetch<GameSnapshot>, workMs: Long) {
+        val league = game.league
+        val was = meters[league]
+        var m = was
+        when (f) {
+            is Fetch.Ok -> if (f.value.id == game.id && machine.followed()?.id == game.id) {
+                if (meterWarm.add(league)) return
+                m = PollMeter.add(m, league, endpoint, workMs, f.wireBytes, f.maxAgeS)
+            }
+            Fetch.NotFound -> Unit
+            is Fetch.Failed -> when (f.kind) {
+                FailKind.TIMEOUT, FailKind.IO -> if (league in meterWarm) {
+                    m = PollMeter.add(m, league, endpoint, workMs, null, null, failed = true)
+                } else {
+                    meterWarm += league
+                }
+                FailKind.HTTP_429 -> if (league == League.NFL && m?.slowed != true) {
+                    m = (m ?: PollMeasure(endpoint = endpoint)).copy(slowed = true)
+                }
+                else -> Unit
+            }
+        }
+        if (m == null || m == was) return
+        meters[league] = m
+        metersDirty = true
+        val now = mono.nowMs()
+        val urgent = was == null || was.slowed != m.slowed || was.endpoint != m.endpoint
+        val at = meterPersistAt
+        if (urgent || at == null || now - at >= SportsConstants.METER_PERSIST_MS) persistMeters(now)
+        pushInterval()
+    }
+
+    private fun persistMeters(now: Long) {
+        metersDirty = false
+        meterPersistAt = now
+        val snapshot = meters.toMap()
+        doc = doc.copy(meters = snapshot)
+        store.update(SportsFollowDomain) { it.copy(meters = snapshot) }
     }
 
     companion object {
