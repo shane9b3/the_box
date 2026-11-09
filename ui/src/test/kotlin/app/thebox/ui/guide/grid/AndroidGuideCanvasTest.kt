@@ -80,7 +80,8 @@ class AndroidGuideCanvasTest {
         val (bmp2, gc2) = surface()
         gc2.drawText("Six O'Clock News", 0, 3, 10f, 50f, GuideTextStyle.CELL_TITLE, Color.WHITE)
         var right = 0
-        for (y in 30 until 55) for (x in 60 until 200) if (Color.red(bmp2.getPixel(x, y)) > 128) right++
+        // "Six" at the 36 px cell title (2026-11-09) ends before x 80; the rest of the string would reach past 200.
+        for (y in 30 until 55) for (x in 80 until 200) if (Color.red(bmp2.getPixel(x, y)) > 128) right++
         assertEquals(0, right)
     }
 
@@ -129,7 +130,7 @@ class AndroidGuideCanvasTest {
         val m = big.bitmap(GuideAsset.EDGE_CHEVRON)
         assertEquals(24, m.width); assertEquals(48, m.height)
         assertTrue("both chevrons share one mask", big.bitmap(GuideAsset.CLIP_CHEVRON) === m)
-        assertEquals("the ↺ mask is 2× the 20 px label glyph", 80, big.bitmap(GuideAsset.ARCHIVE_GLYPH).width)
+        assertEquals("the ↺ mask is 2× the 24 px label glyph", 96, big.bitmap(GuideAsset.ARCHIVE_GLYPH).width)
     }
 
     @Test

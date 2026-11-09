@@ -17,7 +17,7 @@ object GridConstants {
     const val LOGO_CACHE_LOW_END = 48
     const val LOGO_CACHE_BYTES = 4L * 1024 * 1024
     const val LOGO_CACHE_BYTES_LOW_END = 2L * 1024 * 1024
-    /** Logo slot (§3.7), design px. */
-    const val LOGO_W = 130f
-    const val LOGO_H = 64f
+    /** Logo slot (§3.7), design px: 130 × 64 in a 74 row until 2026-11-09, now in proportion to the 85 row. */
+    const val LOGO_W = 150f
+    const val LOGO_H = 74f
 }

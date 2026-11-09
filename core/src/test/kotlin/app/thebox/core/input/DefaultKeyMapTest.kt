@@ -97,11 +97,4 @@ class DefaultKeyMapTest {
             "subtitles", "aspect", "start_over", "favourites", "info_bar", "number_entry", "play_pause", "seek_back",
             "seek_forward", "jump_to_live", "stats_overlay", "screen_off", "exit")) assertTrue(id in ids, id)
     }
-
-    /** Decision 2026-10-19 ruling 4: for the footer the four colour keys are one family. */
-    @Test fun colourKeysCountAsOneFamily() {
-        val colours = setOf(Keys.PROG_RED, Keys.PROG_GREEN, Keys.PROG_YELLOW, Keys.PROG_BLUE)
-        for (c in colours) assertEquals(colours + Keys.DPAD_UP, DefaultKeyMap.seenWithColourFamily(setOf(c, Keys.DPAD_UP)))
-        assertEquals(setOf(Keys.CHANNEL_UP), DefaultKeyMap.seenWithColourFamily(setOf(Keys.CHANNEL_UP)))
-    }
 }

@@ -8,7 +8,6 @@ import app.thebox.core.guide.DayItem
 import app.thebox.core.guide.DeviceClass
 import app.thebox.core.guide.EmptyKind
 import app.thebox.core.guide.ExitConfirmation
-import app.thebox.core.guide.FooterHint
 import app.thebox.core.guide.GridContext
 import app.thebox.core.guide.GridFocus
 import app.thebox.core.guide.GridMove
@@ -63,8 +62,6 @@ import app.thebox.core.settings.SettingsEvent
 import app.thebox.core.settings.SettingsMachine
 import app.thebox.core.settings.SettingsRoute
 import app.thebox.core.full.PlayerEvent
-import app.thebox.core.input.DefaultKeyMap
-import app.thebox.core.input.FooterKeyNames
 import app.thebox.core.parental.ParentalAccess
 import app.thebox.core.parental.ParentalActions
 import app.thebox.core.parental.ParentalAnswer
@@ -266,14 +263,9 @@ class GuideStateMachineImpl(
     /** (decision 2026-10-19, ruling 7) The raw "next single Left opens Groups" probe and the key over its inputs. */
     private var leftEdge = false
     private var edgeKey = Long.MIN_VALUE
-    /** Footer inputs that change without a focus move (zone, overlay, tab, home, probe): [refreshFooter] on change. */
-    private var footerKey = Long.MIN_VALUE
 
     private var exitHintUntil = Long.MAX_VALUE
     private var groupCardUntil = Long.MAX_VALUE
-    private var keysSeen: Set<Int> = emptySet()
-    /** (M5, §3.8.4) Keys bound to each hinted action (EffectiveKeyMap ∩ seen); null until the first KeyHints (M3 rule). */
-    private var keyHints: Map<BoxAction, List<Int>>? = null
 
     // ---------------------------------------------------------------- parental (M5, WP-C; §0.9, §3.9)
     private var parental = ParentalState(pinSet = false, unlocked = false, policy = ParentalPolicy())
@@ -306,7 +298,6 @@ class GuideStateMachineImpl(
     init {
         frame.nowMin = nowMin
         recomputeLimits(reclamp = false)
-        u = u.copy(footer = footer(null))
         _ui.value = u
     }
 
@@ -381,7 +372,6 @@ class GuideStateMachineImpl(
             is GuideEvent.Number -> onNumber(event.token, event.channel, event.lineupIndex)
             is GuideEvent.Settings -> onSettings(event.settings, event.device)
             is GuideEvent.Sync -> u = u.copy(sync = event.chip)
-            is GuideEvent.KeysSeen -> { keysSeen = event.keyCodes; refreshFooter() }
             is GuideEvent.Metrics -> { frame.metrics = event.metrics; frameDirty = true }
             is GuideEvent.SearchClosed -> onSearchClosed(event.channel, event.tuned, event.archive)
             is GuideEvent.DataWindow -> { dataWindow = event.window; recomputeLimits(reclamp = true) }
@@ -401,7 +391,6 @@ class GuideStateMachineImpl(
             // M5 WP-C (§3.9)
             is GuideEvent.Parental -> onParental(event.state)
             is GuideEvent.PinChecked -> onPinChecked(event.token, event.check)
-            is GuideEvent.KeyHints -> { keyHints = event.hints; refreshFooter() }
             is GuideEvent.Update -> {
                 // C-S2: a card that arrives is not focused; it takes keys only after UPDATE_CARD_IDLE_MS without a key.
                 if (updateCard == null && event.card != null) { updateFocused = false; updateIdleFromMs = curMs }
@@ -514,7 +503,6 @@ class GuideStateMachineImpl(
         setMode(ScreenMode.GUIDE)
         u = u.copy(zone = Zone.GRID, overlay = null)
         jumpToNow()
-        refreshFooter()
     }
 
     private fun release(action: BoxAction) {
@@ -692,8 +680,8 @@ class GuideStateMachineImpl(
 
     private fun tabsKey(a: GuideEvent.Act) {
         when (a.action) {
-            BoxAction.LEFT -> if (u.tabFocused > 0) { u = u.copy(tabFocused = u.tabFocused - 1); announceZone(); refreshFooter() }
-            BoxAction.RIGHT -> if (u.tabFocused < TAB_COUNT - 1) { u = u.copy(tabFocused = u.tabFocused + 1); announceZone(); refreshFooter() }
+            BoxAction.LEFT -> if (u.tabFocused > 0) { u = u.copy(tabFocused = u.tabFocused - 1); announceZone() }
+            BoxAction.RIGHT -> if (u.tabFocused < TAB_COUNT - 1) { u = u.copy(tabFocused = u.tabFocused + 1); announceZone() }
             BoxAction.SELECT -> when (u.tabFocused) {
                 TAB_GUIDE -> enterZone(Zone.GRID)
                 TAB_SEARCH -> openSearch()
@@ -740,7 +728,6 @@ class GuideStateMachineImpl(
         }
         frame.gridFocused = z == Zone.GRID
         frameDirty = true
-        refreshFooter()
         if (z != Zone.GRID) announceZone()
     }
 
@@ -780,7 +767,6 @@ class GuideStateMachineImpl(
         groupCardUntil = Long.MAX_VALUE
         settingsFromFull = false
         effects.setFullScreen(true)
-        refreshFooter()
         full?.enterFull(curMs, reason)
     }
 
@@ -793,7 +779,6 @@ class GuideStateMachineImpl(
         if (wasFull) full?.leaveFull()
         goHome()
         frameDirty = true
-        refreshFooter()
     }
 
     /** (M5 commit 0, S9) Every exit from SETTINGS, whatever the route, tells the settings machine once. */
@@ -808,7 +793,6 @@ class GuideStateMachineImpl(
         u = u.copy(mode = mode, overlay = if (mode == ScreenMode.FULL) null else u.overlay)
         if (wasFull && mode != ScreenMode.FULL) { effects.setFullScreen(false); full?.leaveFull() }
         if (mode == ScreenMode.GUIDE) settingsFromFull = false
-        refreshFooter()
     }
 
     /** (docs/design/m6-score-bug.md §5.1) OK on the Sports tab: the screen is Compose's; the root swaps it in. */
@@ -1194,7 +1178,6 @@ class GuideStateMachineImpl(
             closePin()
             if (p != null) notifyOwner(p, granted = false)
         }
-        refreshFooter()
     }
 
     /** The current source is a locked group the session can no longer open: All channels of its playlist at now. */
@@ -1263,7 +1246,7 @@ class GuideStateMachineImpl(
         val row = homeRow()
         if (f.row != row) return false
         // (review 2026-10-19, S6) The home window start does not depend on the row: cached in recomputeLimits, so the
-        // footer and the edge probe can ask on every publish without allocating.
+        // Back ladder and the edge probe can ask on every publish without allocating.
         if (f.windowStartMin != homeWs) return false
         if (nowMin >= f.cellStart && nowMin < f.cellEnd) return true
         refreshHomeCell(row)
@@ -2052,7 +2035,6 @@ class GuideStateMachineImpl(
                 else -> pendingFullHash = channel.identityHash
             }
         }
-        refreshFooter()
     }
 
     // ---------------------------------------------------------------- ticks and timers
@@ -2128,7 +2110,7 @@ class GuideStateMachineImpl(
         return d
     }
 
-    // ---------------------------------------------------------------- focus, panel, footer
+    // ---------------------------------------------------------------- focus, panel
 
     /**
      * (amended 2026-10-14, §2.13 item 2) [animate] is the navigator's `Moved.animate` (`!ctx.snap`); placements that
@@ -2184,7 +2166,6 @@ class GuideStateMachineImpl(
         if (t == null || ch == null) {
             if (u.panel != null) u = u.copy(panel = null)
             if (newCell) { panelToken++; descDueAtMs = Long.MAX_VALUE; info = null }
-            refreshFooter()
             return
         }
         val old = u.panel
@@ -2222,7 +2203,6 @@ class GuideStateMachineImpl(
         // (2026-10-18) Armed on the new panel, not the old one: a description already loaded for the previous cell
         // used to leave the timer unarmed, so the next cell's description never arrived until a further move.
         if (newCell) armDescription()
-        refreshFooter()
     }
 
     private fun armDescription() {
@@ -2240,17 +2220,12 @@ class GuideStateMachineImpl(
         effects.loadInfo(panelToken, ch, t.rawStart)
     }
 
-    private fun refreshFooter() {
-        val f = footer(target())
-        if (f != u.footer) u = u.copy(footer = f)
-    }
-
     /**
      * (decision 2026-10-19 ruling 7; review B1) Once per publish: the "next single Left opens Groups" probe
      * ([GuideNavigator.leftEdge], never `move(LEFT)`) behind a cheap key over every input it reads (focus, window data,
      * rows, now, earliest, suspect channels, lineup size), so a tick, an archive failure, a row or window arrival or a
      * reclamp refreshes the cue without a key press. Sets the drawn cues ([GuideFrame.leftEdgeCue] and
-     * [GuideFrame.clipCue], GRID with no overlay only) and refreshes the footer when one of its inputs changed.
+     * [GuideFrame.clipCue], GRID with no overlay only). (The footer this also keyed was removed on 2026-11-09.)
      */
     private fun refreshLeftEdge() {
         val f = frame.focus
@@ -2274,112 +2249,6 @@ class GuideStateMachineImpl(
             frame.leftEdgeCue = edgeCue
             frame.clipCue = clipCue
             frameDirty = true
-        }
-        // (review 2026-10-19, S1) Like the panel, the footer waits for the end of a vertical hold: release() rebuilds the
-        // panel and the footer, and the next publish re-keys it. A 25 Hz hold does no per-row footer work.
-        if (holdingVertical) return
-        val o = u.overlay
-        var fk = Hash64.long(Hash64.OFFSET, u.mode.ordinal.toLong())
-        fk = Hash64.long(fk, u.zone.ordinal.toLong()); fk = Hash64.long(fk, u.tabFocused.toLong())
-        fk = Hash64.long(fk, when (o) { null -> 0L; is Overlay.Groups -> if (o.menu != null) 1L else if (o.viaBack) 2L else 3L; else -> 4L })
-        fk = Hash64.bool(fk, leftEdge); fk = Hash64.bool(fk, f == null); fk = Hash64.bool(fk, isHome())
-        if (fk != footerKey) { footerKey = fk; refreshFooter() }
-    }
-
-    /**
-     * §3.18.3: from KeysSeen (keys the device has actually reported), never from deviceHasKey. (M5, §3.8.4) Once the
-     * host sends [GuideEvent.KeyHints] (EffectiveKeyMap.keysFor ∩ seen), the hints follow the user's mapping: a
-     * remapped Red stops advertising Remind and the key that now carries Start over / Remind / Page is named instead.
-     *
-     * (decision 2026-10-19 ruling 8) The list is in priority order; the UI measures it and drops hints from the end,
-     * never wrapping. GRID names the next Left (when it opens Groups) and the next Back stop; the Groups panel and the
-     * top bar have their own sets; HEADER and the other overlays keep the M3 set.
-     */
-    private fun footer(t: Target?): List<FooterHint> {
-        val out = ArrayList<FooterHint>(10)
-        val o = u.overlay
-        if (u.mode == ScreenMode.GUIDE) {
-            if (o is Overlay.Groups && o.menu == null) {
-                out += FooterHint(GuideTexts.KEYS_UD, GuideTexts.HINT_CHOOSE)
-                out += FooterHint(GuideTexts.KEYS_OK, GuideTexts.HINT_OPEN)
-                if (o.viaBack) {
-                    out += FooterHint(GuideTexts.KEYS_BACK, GuideTexts.HINT_TOP)
-                    out += FooterHint(GuideTexts.KEYS_RIGHT, GuideTexts.HINT_GUIDE)
-                } else {
-                    out += FooterHint(GuideTexts.KEYS_BACK, GuideTexts.HINT_GUIDE)
-                }
-                return out
-            }
-            if (o == null && u.zone == Zone.TABS) {
-                out += FooterHint(GuideTexts.KEYS_LR, GuideTexts.HINT_CHOOSE)
-                out += FooterHint(GuideTexts.KEYS_OK, GuideTexts.HINT_OPEN)
-                out += FooterHint(GuideTexts.KEYS_BACK, GuideTexts.HINT_EXIT)
-                return out
-            }
-            if (o == null && u.zone == Zone.GRID) {
-                if (frame.focus == null) {
-                    // Empty source (or nothing placed yet): Left opens Groups only on an empty lineup; Back always does.
-                    if (leftEdge) out += FooterHint(GuideTexts.KEYS_LEFT, GuideTexts.HINT_GROUPS)
-                    out += FooterHint(GuideTexts.KEYS_BACK, GuideTexts.HINT_GROUPS)
-                    return out
-                }
-                val home = isHome()
-                out += FooterHint(GuideTexts.KEYS_ARROWS, GuideTexts.HINT_BROWSE)
-                out += FooterHint(GuideTexts.KEYS_OK, GuideTexts.HINT_WATCH)
-                if (leftEdge) out += FooterHint(GuideTexts.KEYS_LEFT, GuideTexts.HINT_GROUPS)
-                out += FooterHint(GuideTexts.KEYS_BACK, if (home) GuideTexts.HINT_GROUPS else GuideTexts.HINT_NOW)
-                // The Groups key is named only where neither Left nor Back already opens Groups.
-                if (!home && !leftEdge) groupsKeyName()?.let { out += FooterHint(it, GuideTexts.HINT_GROUPS) }
-                out += FooterHint(GuideTexts.KEYS_HOLD_OK, GuideTexts.HINT_OPTIONS)
-                if (somethingTuned()) out += FooterHint(GuideTexts.KEYS_HOLD_BACK, GuideTexts.HINT_FULL_SCREEN)
-                keyHintsTail(t, out)
-                return out
-            }
-        }
-        out += FooterHint(GuideTexts.KEYS_ARROWS, GuideTexts.HINT_BROWSE)
-        out += FooterHint(GuideTexts.KEYS_OK, GuideTexts.HINT_WATCH)
-        out += FooterHint(GuideTexts.KEYS_HOLD_OK, GuideTexts.HINT_OPTIONS)
-        if (somethingTuned()) out += FooterHint(GuideTexts.KEYS_HOLD_BACK, GuideTexts.HINT_FULL_SCREEN)
-        keyHintsTail(t, out)
-        return out
-    }
-
-    /**
-     * The key that opens Groups, or null when none was seen. (decision 2026-10-19 ruling 4) The four colour keys count as
-     * one family: once any was seen, Yellow may be named (the host applies the same rule to [GuideEvent.KeyHints]).
-     */
-    private fun groupsKeyName(): String? {
-        val hints = keyHints
-        if (hints != null) return hints[BoxAction.GROUPS_PANEL].orEmpty().firstOrNull()?.let { FooterKeyNames.of(it) }
-        return if (Keys.PROG_YELLOW in DefaultKeyMap.seenWithColourFamily(keysSeen)) GuideTexts.KEYS_YELLOW else null
-    }
-
-    /** [Red] · [CH±] · [0–9], from the key map when the host sent it, else from the keys seen (M3 rule). */
-    private fun keyHintsTail(t: Target?, out: MutableList<FooterHint>) {
-        val hints = keyHints
-        if (hints != null) {
-            val future = t?.cls == CellClass.FUTURE
-            val startOver = hints[BoxAction.START_OVER].orEmpty()
-            val remind = hints[BoxAction.REMIND].orEmpty()
-            when {
-                startOver.isNotEmpty() -> out += FooterHint(FooterKeyNames.of(startOver.first()), if (future) GuideTexts.HINT_REMIND else GuideTexts.HINT_FROM_START)
-                future && remind.isNotEmpty() -> out += FooterHint(FooterKeyNames.of(remind.first()), GuideTexts.HINT_REMIND)
-            }
-            val page = hints[BoxAction.ZAP_UP].orEmpty() + hints[BoxAction.PAGE_UP].orEmpty()
-            if (Keys.CHANNEL_UP in page) out += FooterHint(GuideTexts.KEYS_CH, GuideTexts.HINT_PAGE)
-            else page.firstOrNull()?.let { out += FooterHint(FooterKeyNames.of(it), GuideTexts.HINT_PAGE) }
-            if (keysSeen.any { it in Keys.DIGIT_0..Keys.DIGIT_0 + 9 || it in Keys.NUMPAD_0..Keys.NUMPAD_0 + 9 }) {
-                out += FooterHint(GuideTexts.KEYS_DIGITS, GuideTexts.HINT_CHANNEL)
-            }
-            return
-        }
-        // (review 2026-10-19, L2) The fallback applies the colour family to Red too, as GuideViewModel.keyHints does.
-        if (Keys.PROG_RED in DefaultKeyMap.seenWithColourFamily(keysSeen)) {
-            out += FooterHint(GuideTexts.KEYS_RED, if (t?.cls == CellClass.FUTURE) GuideTexts.HINT_REMIND else GuideTexts.HINT_FROM_START)
-        }
-        if (Keys.CHANNEL_UP in keysSeen) out += FooterHint(GuideTexts.KEYS_CH, GuideTexts.HINT_PAGE)
-        if (keysSeen.any { it in Keys.DIGIT_0..Keys.DIGIT_0 + 9 || it in Keys.NUMPAD_0..Keys.NUMPAD_0 + 9 }) {
-            out += FooterHint(GuideTexts.KEYS_DIGITS, GuideTexts.HINT_CHANNEL)
         }
     }
 

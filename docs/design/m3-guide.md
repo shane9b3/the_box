@@ -1439,6 +1439,20 @@ The integration pass reconciled every contract gap in the five hand-off notes. C
 
 Verification at 1080p: a 30-min tick is 259.67 px (prototype: 1558 / 6); the prototype's now line at 19:47 with the window at 19:00 sits at `281 + 47 × 8.6556 = 687.8`. Both are rows of the WP-A geometry test.
 
+**Amended 2026-11-09 (owner request: no footer, bigger grid; `docs/decisions/2026-11-09-guide-bigger-grid.md`).** The table above is the prototype; the values in force are `GuideGeometry`:
+
+| Quantity | Design px (2026-11-09) | Was (2026-10-17) |
+|---|---|---|
+| Panel outer | (64, 500) – (1856, 1024): down to the bottom safe margin `SAFE_B` = 56 (= `HOLE_T`) | (64, 500) – (1856, 960) |
+| Header row (ruler) | y 501 – 558, 57 | 501 – 549, 48 |
+| Label column | x 81 – 361, 280; text at 81 + 14 | 81 – 321, 240; + 12 |
+| Timeline | x 361 – 1839, 1478; `pxPerMin` 8.211, 30-min tick 246.3 | 321 – 1839, 1518; 8.433, 253.0 |
+| Row *i* | top 558 + 93 *i*, height 85 (gap 8), 5 visible; row 5 ends at 1015 | 549 + 82 *i*, 74; 951 |
+| Rows clip | y 558 – 1023 (inner panel bottom) | 549 – 959 |
+| Now line | from `rowsTop − 7`; dot radius 6 at `rowsTop − 6` | − 6; radius 5 at − 5 |
+| Cells | pad 19 (narrow 10 below 180 outer), no text below 36 inner, progress 4 | 16 (8 below 150), 30, 3 |
+| Now line at 19:47, window 19:00 | `361 + 47 × 8.2111 = 746.92` | 717.37 |
+
 ### 3.2 Paging (WP-B)
 
 #### 3.2.1 Lineup and row blocks
@@ -1986,13 +2000,13 @@ GUIDE → FULL: `HoleChrome` fades a black scrim over the hole in `SCRIM_MS` (12
 | Date + clock | right-aligned at 1856, top 56 | §3.5.2 |
 | Panel meta row … buttons | (amended 2026-11-09) top-aligned under the tabs in (832, 56) – (1856, 461), gap 16; the description fills the column to y 461 (§3.9.1); it was bottom-aligned | prototype; buttons padding 14 × 26, radius 14; focused button = `FG` fill + accent ring; the secondary uses `rgba(255,255,255,.1)` with no blur (B1.3) |
 | Grid | §3.1 | the host |
-| Group chip | label column of the header row: (93, 507), max 184 × 36 | pill with the source label and ▾ |
-| Now chip, Day chip | right-aligned in the header row, ending at 1827 | pills, 36 high |
-| Groups panel | (64, 500) – (424, 960) | over the label column (S7a: 360 wide, full grid height) |
-| Days strip | (281, 501) – (1839, 549) | over the ruler |
-| Menu / Sheet | anchored to `renderer.focusedCellBounds`, below the cell if it fits above y 960, else above it but never above y 470 | clamped to the grid panel |
+| Group chip | label column of the header row: (95, 507), max 252 × 45 (2026-11-09; was (93, 507), 222 × 36) | pill with the source label (29 px/600) and ▾ (22) |
+| Now chip, Day chip | right-aligned in the header row, ending at 1825 (was 1827) | pills, 45 high, 26 px/600 (was 36, 22) |
+| Groups panel | (64, 500) – (424, 1024) (`PANEL_T`, `PANEL_H`) | over the label column (S7a: 360 wide, full grid height) |
+| Days strip | (361, 501) – (1839, 558) (`TIMELINE_L`, `HEADER_H`; the 281 of the prototype was stale) | over the ruler; day pills 45 high, 26 px |
+| Menu / Sheet | anchored to `renderer.focusedCellBounds`, below the cell if it fits above y 1024 (the panel bottom), else above it but never above y 470 | clamped to the grid panel |
 | Number entry | top right (1520, 72), 320 × 160 | over the header region |
-| Footer hints | (64, bottom 40), 17 px .55, key caps mono 14 | §3.18.3 |
+| Footer hints | **removed 2026-11-09** (owner request); the grid panel takes the space | §3.18.3 |
 | Reminder card | right 64, bottom 96, 520 × 152 | |
 | Toasts | left 64, bottom 96 | never steal focus |
 
@@ -2066,6 +2080,12 @@ Per key code, state `{downAt, longFired, repeats}`.
 Only DPAD_CENTER-family keys and, in PLAYER, LEFT/RIGHT have long bindings, so every other key acts on DOWN with auto-repeat (lowest latency for D-pad browsing).
 
 #### 3.18.3 Footer hints
+
+> **Removed 2026-11-09** (owner: "could we remove the remote helper text on the bottom of the guide page and scale the
+> guide grid to fill the space"; `docs/decisions/2026-11-09-guide-bigger-grid.md`). The guide has no footer row: the
+> state machine no longer builds hints (`GuideUiState.footer`, `GuideEvent.KeysSeen` and `GuideEvent.KeyHints` are
+> gone) and `GuideScreen` draws none. The in-grid cues of ruling 7 (edge and clip chevrons, the label ↺) stay. The
+> shared `FooterHints` layout below is still used by Sports and the channel editor. The rest of this section is history.
 
 Built by the state machine from `KeysSeen` (`KeyCapabilities.seen`, persisted, product §2.1: "keys the device has actually reported") **in priority order**, by zone (decision 2026-10-19, ruling 8). `[…]` = only when that key was seen or bound; the four colour keys count as one family (once any of Red, Green, Yellow or Blue was seen, all four may be named).
 
@@ -2478,7 +2498,8 @@ All sixteen proposer items and the seven reviewer additions are decided in the *
 - Cell states from the script: focused `bg #eef1f6`, `shadow 0 0 0 3px accent, 0 12px 30px rgba(0,0,0,.4)`, `color #0a0d13`, bar accent; on now `.11`; default `.05`, border `.08`; past text `rgba(238,241,246,.45)`.
 - Now line `top:-6px;width:2px;box-shadow:0 0 12px`, dot `top:-4px;left:-4px;10×10`; `nowLeft = calc(200px + (100% - 200px) * NOW/WIN)`.
 - Anchor rule in the script: `anchor = Math.max(p.s, 0) + 1` (start + 1 min), replaced by plan §4's sticky anchor.
-- Footer `left:64px;right:64px;bottom:40px;gap:36px;font-size:17px`, key caps mono 14 with `.22` border radius 7.
+- Footer `left:64px;right:64px;bottom:40px;gap:36px;font-size:17px`, key caps mono 14 with `.22` border radius 7. **2026-11-09: the guide's footer is removed** (owner request).
+- **2026-11-09 (owner request "remove the remote helper text … scale the guide grid to fill the space", `docs/decisions/2026-11-09-guide-bigger-grid.md`):** grid panel height 460 → **524** (bottom 960 → **1024**, the bottom safe margin 56 = the top margin); ruler row 48 → **57**; row **85**, gap 8, pitch **93**, still **5 rows** (rows 558…1015 ≤ 1023); label column 240 → **280** → timeline **1478 px for 180 min ≈ 8.211 px/min** (30-min tick 246.3 px); logo slot 130×64 → **150×74**. Type ≈ 1.2×: cell title 30 → **36**/600, cell time 20 → **24**, no-info 22 → **26**, ruler mono 20 → **24**, contextual label 18 → **22**/600, channel number 20 → **24**, name 26 → **31**/600; chips 36 → **45** high, Group chip 24 → **29**, Now/Day 22 → **26**, ▾ **22**. Marks: label ↺ 20 → **24**, cell ↺ 12 → **14**, reminder dot 8 → **10**, tuned dot 7 → **8**, now-line dot 10 → **12** (overhang 7), progress 3 → **4**; cell pad 16 → **19** (narrow 8 → **10** below **180**), label pad 12 → **14**, label gap 14 → **17**, tick label pad 10 → **12**.
 - Labels: `watchLabel = row === tuned && isNow ? 'Watching' : isNow ? 'Watch now' : 'Watch from start'`; `durLabel` "1 h 30 min" form.
 
 ### A.2 Code on `main` (`9a87271`)

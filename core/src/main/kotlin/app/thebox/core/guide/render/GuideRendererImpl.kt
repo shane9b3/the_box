@@ -309,7 +309,7 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
             val x = m.timelineLeft + s * G.TICK_LABEL_PAD
             val cb = centredBaseline(m.headerTop, m.headerBottom, GuideTextStyle.RULER_CONTEXT)
             canvas.drawText(ctx, 0, ctx.length, x, cb, GuideTextStyle.RULER_CONTEXT, C.TEXT_LABEL)
-            minLabelX = x + width(ctx, GuideTextStyle.RULER_CONTEXT) + s * CONTEXT_GAP
+            minLabelX = x + width(ctx, GuideTextStyle.RULER_CONTEXT) + s * G.CONTEXT_GAP
         }
         val ruleW = maxOf(1f, s * G.PANEL_BORDER)
         val hasContext = minLabelX > m.timelineLeft
@@ -321,9 +321,16 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
             val text = l.hm(t)
             val tw = rulerWidth(l, t, text)
             var lx = x + s * G.TICK_LABEL_PAD
-            if (lx < minLabelX) lx = minLabelX
+            var show = true
+            if (lx < minLabelX) {
+                lx = minLabelX
+                // (decision 2026-11-09) With the bigger type a long context label ("THIS MORNING") can push this label
+                // into the next tick's: then this one is dropped, so every label that is drawn sits on its own rule.
+                val nextLx = m.xOf(next30(l, t), ws, off) + s * G.TICK_LABEL_PAD
+                if (lx + tw + s * G.CONTEXT_GAP > nextLx) show = false
+            }
             if (x + ruleW > m.timelineLeft) canvas.fillRect(x, m.headerTop, x + ruleW, m.headerBottom, C.TICK_RULE)
-            if (lx + tw > m.timelineLeft) canvas.drawText(text, 0, text.length, lx, baseline, GuideTextStyle.RULER, C.TEXT_TICK)
+            if (show && lx + tw > m.timelineLeft) canvas.drawText(text, 0, text.length, lx, baseline, GuideTextStyle.RULER, C.TEXT_TICK)
             minLabelX = -Float.MAX_VALUE
             t = next30(l, t)
         }
@@ -360,14 +367,14 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
         var x = l + s * G.LABEL_PAD_X
         var right = r - s * G.LABEL_PAD_X
         if (ch.identityHash == frame.tunedHash && frame.tunedHash != 0L) {
-            if (bg) canvas.fillCircle(right - s * TUNED_DOT / 2, mid, s * TUNED_DOT / 2, C.LIVE)
-            right -= s * (TUNED_DOT + LABEL_ICON_GAP)
+            if (bg) canvas.fillCircle(right - s * G.TUNED_DOT / 2, mid, s * G.TUNED_DOT / 2, C.LIVE)
+            right -= s * (G.TUNED_DOT + G.LABEL_ICON_GAP)
         }
         if (ch.archiveDays > 0) {
-            val g = s * LABEL_GLYPH
+            val g = s * G.LABEL_GLYPH
             val asset = if (isSuspect(frame, ch)) GuideAsset.ARCHIVE_GLYPH_HOLLOW else GuideAsset.ARCHIVE_GLYPH
             if (bg) canvas.drawAsset(asset, right - g, mid - g / 2, right, mid + g / 2, C.TEXT_LABEL)
-            right -= g + s * LABEL_ICON_GAP
+            right -= g + s * G.LABEL_ICON_GAP
         }
         if (pass == PASS_BG) return
         val num = ch.number
@@ -525,15 +532,15 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
             val titleBase = centredBaseline(top, bottom, tStyle)
             if (archived) {
                 // The catch-up cue (↺, hollow when suspect) now leads the title instead of the removed time line.
-                val g = s * CELL_GLYPH
+                val g = s * G.CELL_GLYPH
                 canvas.drawAsset(if (suspect) GuideAsset.ARCHIVE_GLYPH_HOLLOW else GuideAsset.ARCHIVE_GLYPH,
                     textX, titleBase - g * 0.9f, textX + g, titleBase + g * 0.1f, textColor)
-                textX += g + s * GLYPH_GAP
+                textX += g + s * G.GLYPH_GAP
             }
             if (programme && start > now && frame.reminders.contains(ch.identityHash, d.cellRawStart[c])) {
-                val rd = s * REMINDER_DOT / 2
+                val rd = s * G.REMINDER_DOT / 2
                 canvas.fillCircle(textX + rd, titleBase - asc[ti] * 0.35f, rd, if (focused) C.CANVAS else C.LIVE)
-                textX += s * (REMINDER_DOT + REMINDER_GAP)
+                textX += s * (G.REMINDER_DOT + G.REMINDER_GAP)
             }
             val title = if (programme) d.cellTitle[c] else NO_INFO
             if (title != null && rightEdge - textX > 0f) {
@@ -547,9 +554,9 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
 
         if (onNow && pass != PASS_TEXT) {
             val ph = s * G.PROGRESS_H
-            val bx0 = x0 + s * PROGRESS_INSET_X
-            val bx1 = x1 - s * PROGRESS_INSET_X
-            val pb = bottom - s * PROGRESS_INSET_B
+            val bx0 = x0 + s * G.PROGRESS_INSET_X
+            val bx1 = x1 - s * G.PROGRESS_INSET_X
+            val pb = bottom - s * G.PROGRESS_INSET_B
             val frac = (now - start).toFloat() / (end - start)
             if (bx1 > bx0) canvas.fillRect(bx0, pb - ph, bx0 + (bx1 - bx0) * frac, pb, if (focused) C.ACCENT else C.CELL_PROGRESS)
         }
@@ -727,11 +734,6 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
         private val STYLES = GuideTextStyle.entries.toTypedArray()
 
         // Design px not in GuideGeometry (prototype / §3.6.3–§3.6.4).
-        private const val TUNED_DOT = 7f
-        /** In-cell ↺ (leads a catch-up title). */
-        private const val CELL_GLYPH = 12f
-        /** Label-column ↺ (decision 2026-10-19: 12 → 20 so "this channel has catch-up" reads at 10 feet). */
-        private const val LABEL_GLYPH = 20f
         /** Decision 2026-10-19 chevrons (EDGE_CHEVRON, CLIP_CHEVRON): 12 × 24 design px. */
         private const val CHEVRON_W = 12f
         private const val CHEVRON_H = 24f
@@ -742,15 +744,8 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
         /** The title moves right of the clip chevron when less than this gap is left, and then starts this far after it. */
         private const val CLIP_CUE_MIN_GAP = 2f
         private const val CLIP_CUE_TEXT_GAP = 4f
-        private const val GLYPH_GAP = 6f
-        private const val LABEL_ICON_GAP = 8f
-        private const val REMINDER_DOT = 8f
-        private const val REMINDER_GAP = 6f
-        private const val PROGRESS_INSET_X = 4f
-        private const val PROGRESS_INSET_B = 2f
         private const val SHADOW_BLUR = 30f
         private const val SHADOW_DY = 12f
-        private const val CONTEXT_GAP = 12f
         private const val SKELETON_BAR_R = 4f
         private const val BUBBLE_W = 160f
         private const val BUBBLE_H = 88f

@@ -19,33 +19,34 @@ import kotlin.test.assertTrue
  */
 class GuideContractsTest {
     @Test
-    fun timelineIs1518PxFor180Minutes() {
-        assertEquals(1518f, GuideGeometry.TIMELINE_W)
+    fun timelineIs1478PxFor180Minutes() {
+        // Decision 2026-11-09: label column 240 → 280 (1518 before).
+        assertEquals(1478f, GuideGeometry.TIMELINE_W)
         assertEquals(GuideGeometry.PANEL_W - 2 * GuideGeometry.PANEL_BORDER - 2 * GuideGeometry.PANEL_PAD_X - GuideGeometry.LABEL_W, GuideGeometry.TIMELINE_W)
-        assertTrue(abs(GuideGeometry.PX_PER_MIN - 8.4333f) < 1e-3f)
+        assertTrue(abs(GuideGeometry.PX_PER_MIN - 8.2111f) < 1e-3f)
         assertEquals(GuideGeometry.ROW_H + GuideGeometry.ROW_GAP, GuideGeometry.ROW_PITCH)
         assertEquals(GuideGeometry.CANVAS_W, GuideGeometry.PANEL_L + GuideGeometry.PANEL_W + GuideGeometry.HEAD_R)
     }
 
     @Test
     fun prototypeNowLineAt19h47() {
-        // Appendix A.1 / §5.1: window 19:00–22:00, now 19:47 → 240 + 1518 × 47/180 = 636.37 px from the content edge,
-        // 717.37 px from the screen's left edge (64 + 1 + 16 + 636.37). Owner ruling 2026-10-17 (label 240).
+        // Appendix A.1 / §5.1: window 19:00–22:00, now 19:47 → 280 + 1478 × 47/180 = 665.92 px from the content edge,
+        // 746.92 px from the screen's left edge (64 + 1 + 16 + 665.92). Decision 2026-11-09 (label 280).
         val m = FakeGuideMetrics(1f)
         val windowStart = GuideFixtures.floor30(GuideFixtures.NOW_MIN) - 30
         assertEquals(GuideFixtures.NOW_MIN - 47, windowStart)
         val x = m.xOf(GuideFixtures.NOW_MIN, windowStart, 0f)
-        assertTrue(abs(x - 717.37f) < 0.05f, "x=$x")
+        assertTrue(abs(x - 746.92f) < 0.05f, "x=$x")
     }
 
     @Test
-    fun halfMinuteScrollOffsetShifts4Point22Px() {
+    fun halfMinuteScrollOffsetShifts4Point11Px() {
         // §2.12 item 3: the animated fraction is a small offset from an Int window start, exact at any epoch minute.
         val m = FakeGuideMetrics(1f)
         val windowStart = GuideFixtures.floor30(GuideFixtures.NOW_MIN) - 30
         val x0 = m.xOf(GuideFixtures.NOW_MIN, windowStart, 0f)
         val x1 = m.xOf(GuideFixtures.NOW_MIN, windowStart, 0.5f)
-        assertTrue(abs((x0 - x1) - 4.2167f) < 0.01f, "shift=${x0 - x1}")
+        assertTrue(abs((x0 - x1) - 4.1056f) < 0.01f, "shift=${x0 - x1}")
     }
 
     @Test

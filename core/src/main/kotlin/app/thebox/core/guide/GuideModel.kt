@@ -13,30 +13,74 @@ object GuideGeometry {
     const val HOLE_L = 64f; const val HOLE_T = 56f; const val HOLE_W = 720f; const val HOLE_H = 405f; const val HOLE_R = 20f
     // Header region right of the hole (left 832, top 56, right 64, height 405)
     const val HEAD_L = 832f; const val HEAD_T = 56f; const val HEAD_R = 64f; const val HEAD_H = 405f
-    // Grid panel (left 64, right 64, top 500, height 460, radius 24, padding 0 16 12, 1 px border)
-    const val PANEL_L = 64f; const val PANEL_T = 500f; const val PANEL_W = 1792f; const val PANEL_H = 460f; const val PANEL_R = 24f
+    /**
+     * Outer safe margin at the canvas bottom: the same 56 as the top ([HOLE_T], [HEAD_T]). Decision 2026-11-09 (owner
+     * request "remove the remote helper text … scale the guide grid to fill the space"): the footer hint row is gone
+     * and the grid panel runs down to `CANVAS_H − SAFE_B` = 1024.
+     */
+    const val SAFE_B = HOLE_T
+    // Grid panel (left 64, right 64, top 500, down to the bottom safe margin: height 524, radius 24, padding 0 16, 1 px border)
+    const val PANEL_L = 64f; const val PANEL_T = 500f; const val PANEL_W = 1792f; const val PANEL_H = CANVAS_H - SAFE_B - PANEL_T; const val PANEL_R = 24f
     const val PANEL_PAD_X = 16f; const val PANEL_PAD_B = 12f; const val PANEL_BORDER = 1f
-    const val HEADER_H = 48f
-    const val LABEL_W = 240f
-    const val LABEL_PAD_X = 12f; const val LABEL_GAP = 14f
-    const val ROW_H = 74f; const val ROW_GAP = 8f; const val ROW_PITCH = 82f
+    /**
+     * Ruler row: 1 + 57 + 5 × 93 + 1 = 524, so the rows clip (1023) lands exactly on a sixth row's top and no sliver of
+     * it shows, as 1 + 48 + 5 × 82 + 1 = 460 did before (2026-11-09; 48 before).
+     */
+    const val HEADER_H = 57f
+    /** Label column (2026-11-09: 240 → 280 so the 31 px names keep the characters the 26 px names had). */
+    const val LABEL_W = 280f
+    const val LABEL_PAD_X = 14f; const val LABEL_GAP = 17f
+    /** 2026-11-09: rows 85, gap 8, pitch 93, still 5 rows (74 / 82 from 2026-10-17 to 2026-11-09). */
+    const val ROW_H = 85f; const val ROW_GAP = 8f; const val ROW_PITCH = 93f
     const val VISIBLE_ROWS = 5
     const val WINDOW_MIN = 180
     const val TICK_MIN = 30
-    const val TIMELINE_W = 1518f                        // 1792 − 2×1 border − 2×16 padding − 240 (Appendix A.1; owner ruling 2026-10-17)
-    const val PX_PER_MIN = TIMELINE_W / WINDOW_MIN      // 8.4333
-    const val TICK_LABEL_PAD = 10f
+    const val TIMELINE_W = 1478f                        // 1792 − 2×1 border − 2×16 padding − 280 (Appendix A.1; decision 2026-11-09)
+    const val PX_PER_MIN = TIMELINE_W / WINDOW_MIN      // 8.2111
+    const val TICK_LABEL_PAD = 12f
+    /** Gap after the ruler's contextual label (TONIGHT) before the first tick label it does not hide. */
+    const val CONTEXT_GAP = 14f
     // Cells
-    const val CELL_INSET_X = 3f; const val CELL_R = 12f; const val CELL_PAD_X = 16f; const val CELL_PAD_X_NARROW = 8f
-    const val CELL_LINE_GAP = 4f; const val CELL_BORDER = 1f; const val PROGRESS_H = 3f; const val FOCUS_RING = 3f
+    const val CELL_INSET_X = 3f; const val CELL_R = 12f; const val CELL_PAD_X = 19f; const val CELL_PAD_X_NARROW = 10f
+    const val CELL_LINE_GAP = 5f; const val CELL_BORDER = 1f; const val PROGRESS_H = 4f; const val FOCUS_RING = 3f
+    const val PROGRESS_INSET_X = 5f; const val PROGRESS_INSET_B = 2f
     /** Below this outer width a cell draws its title only (no time line) with [CELL_PAD_X_NARROW]. */
-    const val NARROW_CELL_W = 150f
+    const val NARROW_CELL_W = 180f
     /** Below this inner width a cell draws no text at all. */
-    const val MIN_TEXT_W = 30f
+    const val MIN_TEXT_W = 36f
+    /** ↺ leading a catch-up title in a cell, and its gap to the title. */
+    const val CELL_GLYPH = 14f; const val GLYPH_GAP = 7f
+    /** Reminder dot leading a future title, and its gap to the title. */
+    const val REMINDER_DOT = 10f; const val REMINDER_GAP = 7f
+    // Label column marks
+    /** ↺ in the label column (decision 2026-10-19: 12 → 20; 2026-11-09: 24). Also the size the ↺ mask is rasterised for. */
+    const val LABEL_GLYPH = 24f
+    const val TUNED_DOT = 8f; const val LABEL_ICON_GAP = 10f
     // Now line
-    const val NOW_W = 2f; const val NOW_DOT = 10f; const val NOW_OVERHANG = 6f; const val NOW_GLOW = 12f
-    // Footer
-    const val FOOTER_L = 64f; const val FOOTER_B = 40f
+    const val NOW_W = 2f; const val NOW_DOT = 12f; const val NOW_OVERHANG = 7f; const val NOW_GLOW = 12f
+    // Header-row chips (Group chip in the label column; Now and Day chips right-aligned), Compose, design px.
+    const val CHIP_H = 45f
+    /** Chips are centred in the ruler row: 500 + 1 + (57 − 45) / 2 = 507. */
+    const val CHIP_T = PANEL_T + PANEL_BORDER + (HEADER_H - CHIP_H) / 2
+    const val CHIP_PAD_X = 17f; const val CHIP_GAP = 12f
+    /** Group chip left = labelLeft + LABEL_PAD_X (95), max width the label column less its pads (252). */
+    const val GROUP_CHIP_L = PANEL_L + PANEL_BORDER + PANEL_PAD_X + LABEL_PAD_X
+    const val GROUP_CHIP_MAX_W = LABEL_W - 2 * LABEL_PAD_X
+    /** The Now and Day chips end here: the timeline's right edge less LABEL_PAD_X (1825). */
+    const val CHIPS_RIGHT = PANEL_L + PANEL_W - PANEL_BORDER - PANEL_PAD_X - LABEL_PAD_X
+    /** Chip type: the Group chip's source name, the Now/Day chips' labels, the ▾ carets (2026-11-09: 24/22/20 → 29/26/22). */
+    const val CHIP_GROUP_TEXT = 29f; const val CHIP_TEXT = 26f; const val CHIP_CARET_TEXT = 22f
+    // Derived edges (design px) for the Compose overlays that anchor to the grid.
+    /** Content left (labelLeft, 81) and width (label column + timeline, 1758). */
+    const val CONTENT_L = PANEL_L + PANEL_BORDER + PANEL_PAD_X
+    const val CONTENT_W = PANEL_W - 2 * (PANEL_BORDER + PANEL_PAD_X)
+    /** Left edge of the timeline / ruler (361; the day strip covers the ruler from here). */
+    const val TIMELINE_L = CONTENT_L + LABEL_W
+    /** Top of row 0 (558) and the inner panel bottom the rows clip to (1023). */
+    const val ROWS_T = PANEL_T + PANEL_BORDER + HEADER_H
+    const val ROWS_B = PANEL_T + PANEL_H - PANEL_BORDER
+    /** Bottom of the fifth visible row (1015). */
+    const val LAST_ROW_B = ROWS_T + (VISIBLE_ROWS - 1) * ROW_PITCH + ROW_H
 }
 
 /** ARGB values. oklch tokens use their sRGB fallbacks (DesignTokens.kt). Commit 0 tests equality with DesignTokens.Colors. */
@@ -67,13 +111,15 @@ object GuideColors {
 
 /** Single-line styles drawn by the renderer. Sizes in design px; weights as in docs/01-design-reference.md. */
 enum class GuideTextStyle(val sizePx: Float, val weight: Int, val mono: Boolean, val letterSpacingEm: Float = 0f) {
-    CELL_TITLE(30f, 600, false),
-    CELL_TIME(20f, 400, true),
-    RULER(20f, 400, true),
-    RULER_CONTEXT(18f, 600, false, 0.1f),
-    CH_NUMBER(20f, 400, true),
-    CH_NAME(26f, 600, false),
-    NO_INFO(22f, 500, false),
+    // Decision 2026-11-09 (bigger grid, ≈ 1.2×): title 30 → 36, time 20 → 24, ruler 20 → 24, TONIGHT 18 → 22,
+    // number 20 → 24, name 26 → 31, no-info 22 → 26. Floor 18 design px.
+    CELL_TITLE(36f, 600, false),
+    CELL_TIME(24f, 400, true),
+    RULER(24f, 400, true),
+    RULER_CONTEXT(22f, 600, false, 0.1f),
+    CH_NUMBER(24f, 400, true),
+    CH_NAME(31f, 600, false),
+    NO_INFO(26f, 500, false),
     BUBBLE(64f, 500, true),
 }
 

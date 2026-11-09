@@ -8,19 +8,21 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-/** docs/design/m3-guide.md §3.6.4, §5.1 (B4, S6). Fake widths: chars × size × 0.5 (CELL_TITLE 30 px: 15 px per char). */
+/** docs/design/m3-guide.md §3.6.4, §5.1 (B4, S6). Fake widths: chars × size × 0.5 (CELL_TITLE 36 px since 2026-11-09: 18 px per char). */
 class TextFitTest {
     private val st = GuideTextStyle.CELL_TITLE
     private val ell = 15f
+    /** Fake width of one character in [st]. */
+    private val c = st.sizePx * 0.5f
 
     @Test
     fun fitsWholeOrCutsBeforeTheEllipsis() {
         val fit = TextFit(FakeTextMeasurer(), 512)
-        val t = "Six O'Clock News"                    // 16 chars = 240 px
-        assertEquals(16, fit.fit(t, Hash64.of(t), st, 250f, ell))
-        assertEquals(240f, fit.lastWidth)
-        assertEquals(5, fit.fit(t, Hash64.of(t), st, 100f, ell))    // (100 − 15) / 15 = 5
-        assertEquals(75f, fit.lastWidth)
+        val t = "Six O'Clock News"                    // 16 chars = 16 c
+        assertEquals(16, fit.fit(t, Hash64.of(t), st, 16 * c + 10f, ell))
+        assertEquals(16 * c, fit.lastWidth)
+        assertEquals(5, fit.fit(t, Hash64.of(t), st, 5 * c + ell + 1f, ell))    // 5 chars and the ellipsis
+        assertEquals(5 * c, fit.lastWidth)
         assertEquals(0, fit.fit(t, Hash64.of(t), st, 5f, ell))
         assertFalse(fit.lastRtl)
     }
@@ -47,7 +49,7 @@ class TextFitTest {
         val fit = TextFit(FakeTextMeasurer(), 512)
         // "News 😀 tonight": the emoji is chars 5..6. A cut of 6 would split it.
         val t = "News 😀 tonight"
-        val n = fit.fit(t, Hash64.of(t), st, 6 * 13f + ell, ell)
+        val n = fit.fit(t, Hash64.of(t), st, 5.2f * c + ell, ell)
         assertEquals(5, n)
         assertFalse(Character.isHighSurrogate(t[n - 1]))
     }

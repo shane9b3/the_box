@@ -68,17 +68,17 @@ class GuideRendererTest {
         val f = frame(List(8) { simpleRow() }, focusRow = 2)
         val ops = draw(f)
         // 1. Panel fill + border.
-        assertEquals(Op.RoundRect(64f, 500f, 1856f, 960f, 24f, C.PANEL_FILL), ops[0])
+        assertEquals(Op.RoundRect(64f, 500f, 1856f, 1024f, 24f, C.PANEL_FILL), ops[0])
         assertTrue(ops[1] is Op.Stroke && (ops[1] as Op.Stroke).argb == C.PANEL_BORDER)
         // 2. Save + clip to the content box.
         assertTrue(ops[2] is Op.Save)
-        assertEquals(Op.Clip(81f, 501f, 1839f, 959f), ops[3])
+        assertEquals(Op.Clip(81f, 501f, 1839f, 1023f), ops[3])
         // 3. Ruler (own clip), contextual label first.
-        assertEquals(Op.Clip(321f, 501f, 1839f, 549f), ops[5])
-        val ruler = ops.subList(6, ops.indexOfFirst { it is Op.Clip && it.t == 549f })
+        assertEquals(Op.Clip(361f, 501f, 1839f, 558f), ops[5])
+        val ruler = ops.subList(6, ops.indexOfFirst { it is Op.Clip && it.t == 558f })
         assertTrue(ruler.filterIsInstance<Op.Text>().map { it.text }.containsAll(listOf("19:00", "19:30", "20:00", "21:30")))
         // 4. Rows area clip, then per row: label, save/clip, cells, restore.
-        val rowsClip = ops.indexOf(Op.Clip(81f, 549f, 1839f, 959f))
+        val rowsClip = ops.indexOf(Op.Clip(81f, 558f, 1839f, 1023f))
         assertTrue(rowsClip > 5)
         // 5. Focused cell after every row; 6. now line after it; 8. final restore.
         val shadow = ops.indexOfFirst { it is Op.Asset && it.asset == GuideAsset.FOCUS_SHADOW }
@@ -107,7 +107,7 @@ class GuideRendererTest {
         assertEquals(fill.l - 30f, shadowOp.l); assertEquals(fill.t - 30f + 12f, shadowOp.t)
         // Its title is dark on light; the on-now progress bar is accent.
         assertTrue(texts(ops.subList(shadow, ops.size)).any { it.argb == C.CANVAS && it.style == GuideTextStyle.CELL_TITLE })
-        assertTrue(ops.subList(shadow, ops.size).any { it is Op.Rect && it.argb == C.ACCENT && it.b - it.t == 3f })
+        assertTrue(ops.subList(shadow, ops.size).any { it is Op.Rect && it.argb == C.ACCENT && it.b - it.t == 4f })
         // The focused cell is not also drawn in the row pass.
         assertEquals(1, ops.count { it is Op.RoundRect && it.l == fill.l && it.t == fill.t })
     }
@@ -132,8 +132,8 @@ class GuideRendererTest {
         f.leftEdgeCue = true
         val ops = draw(f)
         val e = assets(ops, GuideAsset.EDGE_CHEVRON).single()
-        // 12 × 24 at design x 67, centred on row 2 (top 549 + 2 × 82, height 74).
-        val mid = 549f + 2 * 82f + 37f
+        // 12 × 24 at design x 67, centred on row 2 (top 558 + 2 × 93, height 85; decision 2026-11-09).
+        val mid = 558f + 2 * 93f + 42.5f
         assertEquals(Op.Asset(GuideAsset.EDGE_CHEVRON, 67f, mid - 12f, 79f, mid + 12f, C.ACCENT), e)
         // In the chrome pass after the content clip (labelLeft 81) is restored, so the gutter is not clipped away.
         assertTrue(ops.indexOf(e) > ops.indexOfLast { it is Op.Restore }, "drawn after the last restore")
@@ -159,45 +159,46 @@ class GuideRendererTest {
         f.clipCue = true
         val ops = draw(f)
         val c = assets(ops, GuideAsset.CLIP_CHEVRON).single()
-        // At the cell's visible left inner edge (timelineLeft 321 + 4), 12 × 24 centred on row 1, in the focused title's
+        // At the cell's visible left inner edge (timelineLeft 361 + 4), 12 × 24 centred on row 1, in the focused title's
         // colour (the focused cell is filled with FG, so an FG chevron would not show).
-        val mid = 549f + 82f + 37f
-        assertEquals(Op.Asset(GuideAsset.CLIP_CHEVRON, 325f, mid - 12f, 337f, mid + 12f, C.CANVAS), c)
+        val mid = 558f + 93f + 42.5f
+        assertEquals(Op.Asset(GuideAsset.CLIP_CHEVRON, 365f, mid - 12f, 377f, mid + 12f, C.CANVAS), c)
         val fill = ops.indexOfFirst { it is Op.RoundRect && it.argb == C.FG }
         assertTrue(ops.indexOf(c) > fill, "over the focused fill")
-        // The 16 px pad would put the title flush against the chevron (gap 0 < 2): it starts 4 px after it instead.
-        fun row1Title(o: List<Op>) = texts(o).single { it.text == "Long film" && it.baseline > 549f + 82f && it.baseline < 549f + 2 * 82f }
+        // The 19 px pad (decision 2026-11-09) leaves 3 px between the chevron (ending at 377) and the title, ≥ the 2 px
+        // minimum, so the title stays at the pad; with the old 16 px pad it was pushed to 4 px after the chevron.
+        fun row1Title(o: List<Op>) = texts(o).single { it.text == "Long film" && it.baseline > 558f + 93f && it.baseline < 558f + 2 * 93f }
         val title = row1Title(ops)
-        assertEquals(337f + 4f, title.x)
+        assertEquals(361f + 19f, title.x)
         assertTrue(assets(ops, GuideAsset.EDGE_CHEVRON).isEmpty())
         // Without the cue, or with focus elsewhere: no chevron, the title at the plain pad.
         f.clipCue = false
         val plain = draw(f)
         assertTrue(assets(plain, GuideAsset.CLIP_CHEVRON).isEmpty())
-        assertEquals(321f + 16f, row1Title(plain).x)
+        assertEquals(361f + 19f, row1Title(plain).x)
         f.clipCue = true; f.gridFocused = false
         val away = draw(f)
         assertTrue(assets(away, GuideAsset.CLIP_CHEVRON).isEmpty())
-        assertEquals(321f + 16f, row1Title(away).x)
+        assertEquals(361f + 19f, row1Title(away).x)
     }
 
     @Test
-    fun labelArchiveGlyphIs20AndTheInCellOneStays12() {
+    fun labelArchiveGlyphIs24AndTheInCellOneIs14() {
         val rows = List(2) { listOf(Cell(at(15), at(19, 30), title = "Past"), Cell(at(19, 30), at(20), title = "Now"), Cell(at(20), at(23), title = "Next")) }
         val ch = listOf(GuideFixtures.channel(0, archiveDays = 7), GuideFixtures.channel(1, archiveDays = 7))
         val f = frame(rows, ch)
         f.suspectArchive = longArrayOf(ch[1].identityHash)
         val ops = draw(f)
         val all = ops.filterIsInstance<Op.Asset>().filter { it.asset == GuideAsset.ARCHIVE_GLYPH || it.asset == GuideAsset.ARCHIVE_GLYPH_HOLLOW }
-        val label = all.filter { it.r <= 321f }
-        val inCell = all.filter { it.l >= 321f }
+        val label = all.filter { it.r <= 361f }
+        val inCell = all.filter { it.l >= 361f }
         assertEquals(listOf(GuideAsset.ARCHIVE_GLYPH, GuideAsset.ARCHIVE_GLYPH_HOLLOW), label.map { it.asset }, "solid and hollow in the label column")
         for (g in label) {
-            assertEquals(20f, g.r - g.l); assertEquals(20f, g.b - g.t)
-            assertEquals(321f - 12f, g.r, "right-aligned at the label pad")
+            assertEquals(24f, g.r - g.l); assertEquals(24f, g.b - g.t)
+            assertEquals(361f - 14f, g.r, "right-aligned at the label pad")
         }
         assertTrue(inCell.isNotEmpty())
-        for (g in inCell) { assertEquals(12f, g.r - g.l); assertEquals(12f, g.b - g.t, 0.01f) }
+        for (g in inCell) { assertEquals(14f, g.r - g.l); assertEquals(14f, g.b - g.t, 0.01f) }
     }
 
     @Test
@@ -205,7 +206,7 @@ class GuideRendererTest {
         val rows = listOf(listOf(Cell(at(18), at(20), title = "Long film"), Cell(at(20), at(23), title = "Later")))
         val ops = draw(frame(rows))
         val t = texts(ops).first { it.text == "Long film" }
-        assertEquals(321f + 16f, t.x)
+        assertEquals(361f + 19f, t.x)
     }
 
     @Test
@@ -215,13 +216,14 @@ class GuideRendererTest {
         val ops = draw(frame(rows))
         val cellL = m.xOf(at(19, 30), h19, 0f) + 3f
         val cellR = m.xOf(at(20), h19, 0f) - 3f
-        val textX = cellL + 16f
-        val avail = cellR - 16f - textX
+        val textX = cellL + 19f
+        val avail = cellR - 19f - textX
+        val cw = GuideTextStyle.CELL_TITLE.sizePx * 0.5f // fake measurer: 18 px per char at 36 px
         val prefix = texts(ops).first { title.startsWith(it.text) && it.text.isNotEmpty() && it.style == GuideTextStyle.CELL_TITLE }
-        val n = ((avail.toInt() - 15f) / 15f).toInt()
-        assertEquals(title.substring(0, n), prefix.text)
+        val n = ((avail - cw) / cw).toInt()
+        assertEquals(title.substring(0, n).trimEnd(), prefix.text.trimEnd())
         val ell = texts(ops).first { it.text == GuideRendererImpl.ELLIPSIS && it.style == GuideTextStyle.CELL_TITLE }
-        assertTrue(near(textX + n * 15f, ell.x), "ellipsis placed at the cut width")
+        assertTrue(near(textX + prefix.text.length * cw, ell.x), "ellipsis placed at the cut width")
         assertEquals(textX, prefix.x)
     }
 
@@ -240,7 +242,7 @@ class GuideRendererTest {
         // Archive band on archive rows only, ending at now.
         val bands = ops.filterIsInstance<Op.Rect>().filter { it.argb == C.ARCHIVE_BAND }
         assertEquals(2, bands.size)
-        assertTrue(bands.all { near(it.r, m.xOf(now, h19, 0f)) && it.l == 321f })
+        assertTrue(bands.all { near(it.r, m.xOf(now, h19, 0f)) && it.l == 361f })
         // Owner ruling 2026-10-17: no time line in cells (the ruler carries the times).
         assertFalse(texts(ops).any { it.style == GuideTextStyle.CELL_TIME })
     }
@@ -254,17 +256,17 @@ class GuideRendererTest {
         val dot = ops.filterIsInstance<Op.Circle>().first { it.argb == C.LIVE }
         val title = texts(ops).first { it.text == "Match" }
         assertTrue(dot.cx < title.x)
-        assertTrue(near(m.xOf(at(20), h19, 0f) + 3f + 16f + 4f, dot.cx))
+        assertTrue(near(m.xOf(at(20), h19, 0f) + 3f + 19f + 5f, dot.cx))
     }
 
     @Test
     fun nowLineX() {
         val ops = draw(frame(List(6) { simpleRow() }))
         val line = ops.filterIsInstance<Op.Rect>().first { it.argb == C.ACCENT }
-        assertTrue(near(717.37f, (line.l + line.r) / 2))
-        assertEquals(549f - 6f, line.t)
+        assertTrue(near(746.92f, (line.l + line.r) / 2))
+        assertEquals(558f - 7f, line.t)
         val dot = ops.filterIsInstance<Op.Circle>().first { it.argb == C.ACCENT }
-        assertEquals(549f - 5f, dot.cy); assertEquals(5f, dot.radius)
+        assertEquals(558f - 6f, dot.cy); assertEquals(6f, dot.radius)
     }
 
     @Test
@@ -277,10 +279,10 @@ class GuideRendererTest {
         assertTrue(skel.any { it.r - it.l == 40f && it.b - it.t == 12f })
         assertTrue(skel.any { it.r - it.l == 110f && it.b - it.t == 16f })
         // Row 2 is outside the snapshot: LOADING blocks cut at :00/:30.
-        val row2Top = 549f + 2 * 82f
+        val row2Top = 558f + 2 * 93f
         val loading = skel.filter { it.t == row2Top }
         assertTrue(loading.size >= 6)
-        assertTrue(loading.all { abs((it.r + 3f - (it.l - 3f)) - 253.0f) < 0.1f || it.l < 321f + 5f || it.r > 1830f })
+        assertTrue(loading.all { abs((it.r + 3f - (it.l - 3f)) - 246.33f) < 0.1f || it.l < 361f + 5f || it.r > 1830f })
     }
 
     @Test
@@ -288,10 +290,10 @@ class GuideRendererTest {
         val rows = listOf(listOf(Cell(at(15), at(19)), Cell(at(19), at(19, 12), title = "Narrow"), Cell(at(19, 12), at(19, 15), title = "Tiny"), Cell(at(19, 15), at(23))))
         val ops = draw(frame(rows))
         val t = texts(ops)
-        // 12 min ≈ 101 px < 150: title only, 8 px padding, no time line.
-        val narrow = t.firstOrNull { it.text.startsWith("Narr") || it.text == "Narrow" }
+        // 12 min ≈ 99 px < 180: title only, 10 px padding, no time line.
+        val narrow = t.firstOrNull { it.text.startsWith("Na") }
         assertNotNull(narrow)
-        assertEquals(m.xOf(at(19), h19, 0f) + 3f + 8f, narrow.x)
+        assertEquals(m.xOf(at(19), h19, 0f) + 3f + 10f, narrow.x)
         assertFalse(t.any { it.style == GuideTextStyle.CELL_TIME && abs(it.x - narrow.x) < 1f })
         // 3 min ≈ 25 px: no text at all.
         assertFalse(t.any { it.text.startsWith("T") && it.style == GuideTextStyle.CELL_TITLE })
@@ -341,8 +343,8 @@ class GuideRendererTest {
         f.tunedHash = GuideFixtures.channel(1).identityHash
         val ops = draw(f)
         val dot = ops.filterIsInstance<Op.Circle>().single { it.argb == C.LIVE }
-        assertEquals(321f - 12f - 3.5f, dot.cx)
-        assertTrue(near(549f + 82f + 37f, dot.cy))
+        assertEquals(361f - 14f - 4f, dot.cx)
+        assertTrue(near(558f + 93f + 42.5f, dot.cy))
         assertEquals(listOf("1", "2", "3"), texts(ops).filter { it.style == GuideTextStyle.CH_NUMBER }.map { it.text })
         f.showNumbers = false
         assertTrue(texts(draw(f)).none { it.style == GuideTextStyle.CH_NUMBER })
@@ -373,9 +375,10 @@ class GuideRendererTest {
     @Test
     fun emojiAtTheCutIsNotSplit() {
         val title = "Match of the Day 😀😀 highlights and more"
-        val rows = listOf(listOf(Cell(at(15), at(19, 30)), Cell(at(19, 30), at(20, 9), title = title), Cell(at(20, 9), at(23))))
+        val rows = listOf(listOf(Cell(at(15), at(19, 30)), Cell(at(19, 30), at(20, 18), title = title), Cell(at(20, 18), at(23))))
         val ops = draw(frame(rows))
-        // 39 min ≈ 329 px − 38 = 291 px: the fake measurer's cut lands on the low surrogate of the first emoji (18 chars); it backs off to 17.
+        // 48 min ≈ 394 px − 6 − 38 = 350 px at 18 px a char: the fake measurer's cut lands on the low surrogate of the
+        // first emoji (18 chars); it backs off to 17.
         assertTrue(texts(ops).any { it.text == "Match of the Day " })
         for (t in texts(ops)) {
             assertFalse(t.text.isNotEmpty() && Character.isHighSurrogate(t.text.last()), "split surrogate in '${t.text}'")
@@ -391,7 +394,7 @@ class GuideRendererTest {
         val body = texts(ops).first { it.style == GuideTextStyle.CELL_TITLE && title.startsWith(it.text) && it.text.isNotEmpty() }
         val ell = texts(ops).first { it.style == GuideTextStyle.CELL_TITLE && it.text == GuideRendererImpl.ELLIPSIS }
         assertTrue(ell.x < body.x, "ellipsis on the left")
-        assertTrue(near(cellR - 16f, body.x + body.text.length * 15f, 1f), "right-aligned to the inner edge")
+        assertTrue(near(cellR - 19f, body.x + body.text.length * GuideTextStyle.CELL_TITLE.sizePx * 0.5f, 1f), "right-aligned to the inner edge")
     }
 
     /**
@@ -431,8 +434,8 @@ class GuideRendererTest {
         f.bubbleNumber = 105
         val ops = draw(f)
         val pill = ops.filterIsInstance<Op.RoundRect>().first { it.r - it.l == 160f }
-        assertEquals(81f + 40f, pill.l)
-        assertTrue(near(549f + 2 * 82f + 37f, (pill.t + pill.b) / 2))
+        assertEquals(81f + 60f, pill.l)
+        assertTrue(near(558f + 2 * 93f + 42.5f, (pill.t + pill.b) / 2))
         assertTrue(texts(ops).any { it.text == "105" && it.style == GuideTextStyle.BUBBLE })
     }
 
@@ -441,7 +444,7 @@ class GuideRendererTest {
         val f = frame(List(8) { simpleRow() })
         val a = draw(f).filterIsInstance<Op.Text>().first { it.text == "19:30" }
         val b = draw(f, off = 0.5f).filterIsInstance<Op.Text>().first { it.text == "19:30" }
-        assertTrue(near(a.x - b.x, 4.2167f, 0.01f))
+        assertTrue(near(a.x - b.x, 4.1056f, 0.01f))
         // Half a row: 6 label rows drawn (5 visible + the partial one).
         val ops = draw(f, row = 0.5f)
         assertEquals(6, texts(ops).count { it.style == GuideTextStyle.CH_NUMBER })
@@ -453,7 +456,7 @@ class GuideRendererTest {
         val out = FloatArray(4)
         assertTrue(renderer.focusedCellBounds(f, h19, 0f, 0f, out))
         assertTrue(near(m.xOf(at(19, 30), h19, 0f) + 3f, out[0]))
-        assertEquals(549f + 164f, out[1]); assertEquals(549f + 164f + 74f, out[3])
+        assertEquals(558f + 186f, out[1]); assertEquals(558f + 186f + 85f, out[3])
         assertFalse(renderer.focusedCellBounds(f, h19, 0f, 10f, out), "scrolled off")
         val d = renderer.describeFocus(f)
         assertEquals("Channel 2, channel 3, Show 9, 19:30 to 20:00, on now", d)
@@ -466,7 +469,29 @@ class GuideRendererTest {
         f.metrics = GuideMetricsImpl(2f)
         val ops = draw(f)
         val t = texts(ops).first { it.text == "Show 10" }
-        assertEquals(2 * (m.xOf(at(20), h19, 0f) + 3f + 16f), t.x)
-        assertEquals(Op.RoundRect(128f, 1000f, 3712f, 1920f, 48f, C.PANEL_FILL), ops[0])
+        assertEquals(2 * (m.xOf(at(20), h19, 0f) + 3f + 19f), t.x)
+        assertEquals(Op.RoundRect(128f, 1000f, 3712f, 2048f, 48f, C.PANEL_FILL), ops[0])
+    }
+
+    /** Decision 2026-11-09: a long context label never makes the pushed first tick label overprint the next one. */
+    @Test
+    fun longContextLabelDropsThePushedTickLabelInsteadOfOverlapping() {
+        val f = frame(List(6) { simpleRow() })
+        f.contextLabel = "A VERY LONG CONTEXT" // 19 chars × 11 = 209 px: 373 + 209 + 14 = 596, "19:00" would end at 656
+        val ops = draw(f)
+        val ctx = texts(ops).single { it.style == GuideTextStyle.RULER_CONTEXT }
+        val ticks = texts(ops).filter { it.style == GuideTextStyle.RULER }.sortedBy { it.x }
+        assertFalse(ticks.any { it.text == "19:00" }, "the pushed first label is dropped")
+        val first = ticks.first { it.text == "19:30" }
+        assertTrue(near(m.xOf(at(19, 30), h19, 0f) + 12f, first.x), "19:30 stays on its own rule")
+        val ctxEnd = ctx.x + ctx.text.length * GuideTextStyle.RULER_CONTEXT.sizePx * 0.5f
+        assertTrue(ticks.first().x >= ctxEnd, "no tick label under the context label")
+        for (i in 1 until ticks.size) {
+            val prevEnd = ticks[i - 1].x + ticks[i - 1].text.length * GuideTextStyle.RULER.sizePx * 0.5f
+            assertTrue(ticks[i].x >= prevEnd, "${ticks[i - 1].text} and ${ticks[i].text} do not overlap")
+        }
+        // A short context label still keeps the pushed first label.
+        f.contextLabel = "TONIGHT"
+        assertTrue(texts(draw(f)).any { it.style == GuideTextStyle.RULER && it.text == "19:00" })
     }
 }

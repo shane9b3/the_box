@@ -79,13 +79,5 @@ class DefaultKeyMap : KeyMap {
 
     companion object {
         val OK_KEYS = intArrayOf(Keys.DPAD_CENTER, Keys.ENTER, Keys.NUMPAD_ENTER, Keys.BUTTON_A)
-        /** Red, Green, Yellow, Blue. */
-        val COLOUR_KEYS: Set<Int> = setOf(Keys.PROG_RED, Keys.PROG_GREEN, Keys.PROG_YELLOW, Keys.PROG_BLUE)
-
-        /**
-         * (decision 2026-10-19 ruling 4) For the footer the four colour keys are one family: once any was seen, all four
-         * count as seen, so a remote whose Yellow was never pressed still learns that Yellow opens Groups.
-         */
-        fun seenWithColourFamily(seen: Set<Int>): Set<Int> = if (seen.any { it in COLOUR_KEYS }) seen + COLOUR_KEYS else seen
     }
 }

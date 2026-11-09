@@ -96,8 +96,8 @@ class GoldenFrameTest {
         val bmp = render()
         // Above the panel: untouched canvas.
         assertTrue(bmp.getPixel(960, 400) == GuideColors.CANVAS)
-        // Now line at x ≈ 717.4 below the header (label 240, owner ruling 2026-10-17).
-        val now = bmp.getPixel(717, 700)
+        // Now line at x ≈ 746.9 below the header (label 280, decision 2026-11-09).
+        val now = bmp.getPixel(747, 700)
         assertTrue("now line accent (${Integer.toHexString(now)})", Color.blue(now) > 180 && Color.red(now) < 150)
         // The focused cell is filled with FG (left padding, clear of text).
         val fp = bmp.getPixel(focusX, focusY)

@@ -4,7 +4,6 @@ import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
-import app.thebox.core.guide.FooterHint
 import app.thebox.core.guide.GuideUiState
 import app.thebox.core.guide.MiniPhase
 import app.thebox.core.guide.PanelState
@@ -39,13 +38,12 @@ class ShellRedrawTest {
     @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
 
     private val tuned = TunedState(identity = GuideFixtures.identity(1), rowId = 1, phase = MiniPhase.PLAYING)
-    private val footer = listOf(FooterHint("↑↓←→", "Browse"))
 
     private fun panel(i: Int) = PanelState(101 + i, "Channel $i", null, true, 0, "Show $i", "19:30 – 20:00 · 30 min", null, emptyList(), false)
 
     @Test
     fun aGridMoveRecomposesThePanelNotTheMiniPlayer() {
-        val machine = FakeGuideStateMachine(GuideUiState(tuned = tuned, footer = footer, panel = panel(0)))
+        val machine = FakeGuideStateMachine(GuideUiState(tuned = tuned, panel = panel(0)))
         val host = FakeShellHost(machine)
         rule.setContent { BoxTheme { AppRoot(host, grid = { m -> Spacer(m.graphicsLayer()) }) } }
         rule.waitForIdle()
@@ -83,7 +81,7 @@ class ShellRedrawTest {
     fun archiveStatusesInGuideRecomposeNeitherTheMiniPlayerNorThePanel() {
         val ch = GuideFixtures.channel(1, archiveDays = 7)
         val t = TunedState(identity = ch.identity, rowId = ch.rowId, identityHash = ch.identityHash, phase = MiniPhase.PLAYING, isArchive = true)
-        val machine = FakeGuideStateMachine(GuideUiState(tuned = t, tunedChannel = ch, footer = footer, panel = panel(0)))
+        val machine = FakeGuideStateMachine(GuideUiState(tuned = t, tunedChannel = ch, panel = panel(0)))
         val host = FakeShellHost(machine)
         rule.setContent { BoxTheme { AppRoot(host, grid = { m -> Spacer(m.graphicsLayer()) }) } }
         rule.waitForIdle()

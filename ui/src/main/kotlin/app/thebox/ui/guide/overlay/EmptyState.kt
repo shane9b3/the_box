@@ -17,11 +17,15 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.thebox.core.guide.EmptyKind
+import app.thebox.core.guide.GuideGeometry as G
 import app.thebox.ui.R
 import app.thebox.ui.guide.screen.GuideUi
 import app.thebox.ui.guide.screen.Line
 
 const val EMPTY_STATE_TAG = "empty_state"
+
+/** No-guide-data banner height, design px; its bottom sits on the fifth row's bottom ([G.LAST_ROW_B]). */
+private const val BANNER_H = 56f
 
 /**
  * Empty states inside the grid panel (docs/design/m3-guide.md §3.8.4, §3.15): each says what is missing and what to do
@@ -38,7 +42,7 @@ fun EmptyState(empty: EmptyKind?, modifier: Modifier = Modifier, debugHint: Bool
     if (kind == EmptyKind.NO_GUIDE_DATA) {
         // A banner, not a replacement: the grid stays usable with NO_EPG rows (WP-D hand-off gap 8, §2.13 item 20).
         Box(
-            modifier.offset(81.dp, 892.dp).width(1758.dp).height(56.dp).background(BannerFill, RoundedCornerShape(12.dp)).testTag(EMPTY_STATE_TAG),
+            modifier.offset(G.CONTENT_L.dp, (G.LAST_ROW_B - BANNER_H).dp).width(G.CONTENT_W.dp).height(BANNER_H.dp).background(BannerFill, RoundedCornerShape(12.dp)).testTag(EMPTY_STATE_TAG),
             contentAlignment = Alignment.Center,
         ) {
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -48,7 +52,7 @@ fun EmptyState(empty: EmptyKind?, modifier: Modifier = Modifier, debugHint: Bool
         }
         return
     }
-    Box(modifier.offset(64.dp, 549.dp).width(1792.dp).height(400.dp).testTag(EMPTY_STATE_TAG), contentAlignment = Alignment.Center) {
+    Box(modifier.offset(G.PANEL_L.dp, G.ROWS_T.dp).width(G.PANEL_W.dp).height((G.ROWS_B - G.ROWS_T).dp).testTag(EMPTY_STATE_TAG), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Line(stringResource(title), GuideUi.sans(36, FontWeight.SemiBold))
             Line(stringResource(step), GuideUi.sans(26, color = GuideUi.Fg70))

@@ -99,7 +99,6 @@ data class GuideUiState(
     val tuned: TunedState = TunedState(),
     val tunedNow: ProgrammeInfo? = null,
     val tunedChannel: GuideChannel? = null,
-    val footer: List<FooterHint> = emptyList(),
     val sync: SyncChip? = null,
     val empty: EmptyKind? = null,
     /** Group-name card in FULL after a group cycle (decision note accelerator 3). */
@@ -135,7 +134,6 @@ sealed interface GuideEvent {
     data class Number(val token: Long, val channel: GuideChannel?, val lineupIndex: Int) : GuideEvent
     data class Settings(val settings: GuideSettings, val device: DeviceClass) : GuideEvent
     data class Sync(val chip: SyncChip?) : GuideEvent
-    data class KeysSeen(val keyCodes: Set<Int>) : GuideEvent
     data class Metrics(val metrics: GuideMetrics) : GuideEvent
     /**
      * (reviewed 2026-10-14, B7) SEARCH closed. [channel] non-null: focus it in the grid; [tuned]: it was tuned from
@@ -173,8 +171,6 @@ sealed interface GuideEvent {
     data class Parental(val state: app.thebox.core.parental.ParentalState) : GuideEvent
     /** Answer to [GuideEffects.verifyPin]. */
     data class PinChecked(val token: Long, val check: app.thebox.core.parental.PinCheck) : GuideEvent
-    /** Keys bound to each action (EffectiveKeyMap), for the footer hints. */
-    data class KeyHints(val hints: Map<BoxAction, List<Int>>) : GuideEvent
     data class Update(val card: app.thebox.core.update.UpdateCardState?) : GuideEvent
 }
 

@@ -153,8 +153,8 @@ class GuideAssets(private val scale: Float) {
         const val GLOW_PEAK = 0.6f
         /** Lock glyph size (design px). */
         const val GLYPH = 12f
-        /** ↺ mask size: the largest draw, the label column's 20 design px (decision 2026-10-19). */
-        const val ARCHIVE_GLYPH = 20f
+        /** ↺ mask size: the largest draw, the label column's glyph (decision 2026-10-19; 24 since 2026-11-09). */
+        const val ARCHIVE_GLYPH = app.thebox.core.guide.GuideGeometry.LABEL_GLYPH
         const val CHEVRON_W = 12f
         const val CHEVRON_H = 24f
         const val CHEVRON_STROKE = 3f

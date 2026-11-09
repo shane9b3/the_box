@@ -22,15 +22,16 @@ import app.thebox.core.guide.GuideUiState
 import app.thebox.core.guide.Overlay
 import app.thebox.ui.guide.screen.Chip
 import app.thebox.ui.guide.screen.GuideUi
+import app.thebox.core.guide.GuideGeometry as G
 import app.thebox.ui.guide.screen.Line
 import app.thebox.ui.theme.DesignTokens
 
 const val DAY_STRIP_TAG = "day_strip"
 
 /**
- * The day strip over the ruler, (281, 501) – (1839, 549) (docs/design/m3-guide.md §3.15, §3.5.1): every browsable day
+ * The day strip over the ruler, (361, 501) – (1839, 558) (docs/design/m3-guide.md §3.15, §3.5.1): every browsable day
  * plus "Tonight 20:00"; days without guide coverage are dimmed (the machine skips them). Opaque so the ruler does not
- * show through.
+ * show through. Anchored to [G.TIMELINE_L] / [G.HEADER_H] (decision 2026-11-09; it used the prototype's 281 before).
  */
 @Composable
 fun DayStrip(state: GuideUiState, modifier: Modifier = Modifier) {
@@ -40,9 +41,9 @@ fun DayStrip(state: GuideUiState, modifier: Modifier = Modifier) {
     val shape = RoundedCornerShape(DesignTokens.Radii.Row)
     Box(
         modifier
-            .offset(281.dp, 501.dp)
-            .width(1558.dp)
-            .height(48.dp)
+            .offset(G.TIMELINE_L.dp, (G.PANEL_T + G.PANEL_BORDER).dp)
+            .width(G.TIMELINE_W.dp)
+            .height(G.HEADER_H.dp)
             .testTag(DAY_STRIP_TAG)
             .background(GuideUi.OverlayFill, shape)
             .border(1.dp, GuideUi.OverlayBorder, shape),
@@ -52,14 +53,14 @@ fun DayStrip(state: GuideUiState, modifier: Modifier = Modifier) {
             items(o.items.size) { i ->
                 val item = o.items[i]
                 val focused = i == o.focused
-                Chip(focused, Modifier.height(36.dp), padding = PaddingValues(horizontal = 16.dp)) { color ->
+                Chip(focused, Modifier.height(G.CHIP_H.dp), padding = PaddingValues(horizontal = G.CHIP_PAD_X.dp)) { color ->
                     val c = when {
                         focused -> color
                         !item.enabled -> GuideUi.Fg.copy(alpha = 0.3f)
                         item.primeTime -> DesignTokens.Colors.AccentText
                         else -> GuideUi.Fg70
                     }
-                    Line(item.label, GuideUi.sans(22, if (focused) FontWeight.SemiBold else FontWeight.Medium, c))
+                    Line(item.label, GuideUi.sans(G.CHIP_TEXT.toInt(), if (focused) FontWeight.SemiBold else FontWeight.Medium, c))
                 }
             }
         }

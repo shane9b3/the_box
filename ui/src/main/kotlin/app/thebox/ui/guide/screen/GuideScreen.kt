@@ -43,8 +43,10 @@ const val GRID_SLOT_TAG = "grid_slot"
  *   [onHoleMeasured] (the root dedupes) and holds the mini-player overlay;
  * - the header/panel column (832, 56) – (1856, 461) with a default `graphicsLayer()` (B8): tabs, sync chip, clock,
  *   focused-programme panel (top-aligned under the tabs, owner request 2026-11-09);
- * - the grid slot (64, 500) 1792 × 460: [grid] gets the modifier (WP-A's `GuideGridHost` carries its own layer);
- * - header chips, footer hints, and the overlays. No overlay intersects the hole (I-3).
+ * - the grid slot (64, 500) 1792 × 524, down to the bottom safe margin (y 1024): [grid] gets the modifier (WP-A's
+ *   `GuideGridHost` carries its own layer);
+ * - header chips and the overlays. No overlay intersects the hole (I-3). There is no footer hint row: the owner asked
+ *   for it to go and for the grid to fill the space (decision 2026-11-09).
  *
  * This composable is a child of the root key sink and never an ancestor of `VideoLayer`.
  *
@@ -115,8 +117,6 @@ fun GuideScreen(
             dayLabel = state.dayLabel,
         )
         EmptyState(state.empty, debugHint = debugHint)
-
-        FooterHints(state.footer, Modifier.align(Alignment.BottomStart).padding(start = GuideGeometry.FOOTER_L.dp, bottom = GuideGeometry.FOOTER_B.dp))
 
         when (val o = state.overlay) {
             is Overlay.Groups -> GroupsPanel(state)

@@ -44,7 +44,7 @@ class LogoCacheTest {
         c.onLoaded = { loaded++ }
         repeat(60) { assertNull(c.get("http://x/a.png")) }      // 60 frames while loading
         assertEquals(1, requests.size)
-        assertEquals(Triple("http://x/a.png", 130, 64), requests[0])
+        assertEquals(Triple("http://x/a.png", 150, 74), requests[0])  // GridConstants.LOGO_W × LOGO_H (2026-11-09)
         pending["http://x/a.png"]!!.complete(bmp())
         scope.advanceUntilIdle()
         assertEquals(1, loaded)
@@ -74,7 +74,7 @@ class LogoCacheTest {
         val c = cache()
         c.scale = 2f
         c.get("u")
-        assertEquals(Triple("u", 260, 128), requests.last())
+        assertEquals(Triple("u", 300, 148), requests.last())
     }
 
     @Test

@@ -91,7 +91,6 @@ class GuideSettingsAttachTest {
     fun newEventsAreNoOps() {
         val w = GuideWorld()
         val before = w.ui
-        w.send(GuideEvent.KeyHints(emptyMap()))
         w.send(GuideEvent.Update(null))
         w.send(GuideEvent.PinChecked(1, app.thebox.core.parental.PinCheck.Ok))
         w.send(GuideEvent.Parental(app.thebox.core.parental.ParentalState(false, false, app.thebox.core.parental.ParentalPolicy())))

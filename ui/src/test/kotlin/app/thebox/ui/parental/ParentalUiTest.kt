@@ -177,7 +177,7 @@ class ParentalUiTest {
                     context, controller, FakeCatchupLauncher(), library,
                     GuideRowsCacheFactory { lib, scope -> GuideRowsCacheImpl(lib, scope) },
                     GuideWindowPagerFactory { _, _, _, _, _ -> FakeGuideWindowPager() },
-                    FakeGuideSettings(), FakeGuideSessionStore(), FakeReminderBook(), FakeReminderAlerts(), FakeKeyCapabilities(), GuideStateMachineImpl.FACTORY,
+                    FakeGuideSettings(), FakeGuideSessionStore(), FakeReminderBook(), FakeReminderAlerts(), GuideStateMachineImpl.FACTORY,
                     FakeNavigator(), FakeTimeLabels(), FakeGuideRenderer(), FakeDeviceClassSource(), FakeSyncFeed(), FakeGuideDataWindowSource(),
                     FakeGuideDebugProbe(), router, FakeGuideMetricsFactory(), FakeRowCellsBuilder(), FakeGuideImages(), ImageLoader(context), GuideTrim(null, null),
                     app.thebox.core.full.fakes.FakeArchivePlayback(), app.thebox.core.full.fakes.FakePlayerSettings(),

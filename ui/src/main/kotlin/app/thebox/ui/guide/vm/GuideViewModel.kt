@@ -8,12 +8,6 @@ import app.thebox.core.settings.SettingsTimings
 import app.thebox.ui.root.EffectDelegates
 import kotlinx.coroutines.CompletableDeferred
 import app.thebox.core.parental.legacyParentalAccess
-import app.thebox.core.input.BoxAction
-import app.thebox.core.input.KeyBindingStore
-import app.thebox.core.input.KeyContext
-import app.thebox.core.input.Press
-import app.thebox.core.input.RemappedKeyMap
-import app.thebox.core.input.DefaultKeyMap
 import app.thebox.core.parental.ParentalAccess
 import app.thebox.core.parental.ParentalControls
 import app.thebox.core.parental.ParentalSession
@@ -24,7 +18,6 @@ import app.thebox.core.playback.TuneVerdict
 import app.thebox.player.api.StopReason
 import app.thebox.ui.parental.EmptyZapList
 import app.thebox.ui.parental.GuardedPlaybackController
-import app.thebox.ui.parental.NoKeyBindings
 import app.thebox.ui.parental.NoPinSession
 import app.thebox.ui.parental.ParentalEffectsImpl
 import app.thebox.ui.parental.ParentalGuideLibrary
@@ -74,7 +67,6 @@ import app.thebox.core.guide.SyncFeedState
 import app.thebox.core.guide.SyncFeed
 import app.thebox.core.guide.syncChipReason
 import app.thebox.core.guide.TimeLabels
-import app.thebox.core.input.KeyCapabilities
 import app.thebox.core.playback.Viewport
 import app.thebox.core.refresh.ChannelIdentity
 import app.thebox.player.api.PlaybackController
@@ -135,7 +127,6 @@ class GuideViewModel @Inject constructor(
     private val session: GuideSessionStore,
     reminderBook: ReminderBook,
     private val alerts: ReminderAlerts,
-    private val keyCapabilities: KeyCapabilities,
     stateMachineFactory: GuideStateMachineFactory,
     navigator: GuideNavigator,
     private val labels: TimeLabels,
@@ -161,7 +152,6 @@ class GuideViewModel @Inject constructor(
     private val parental: ParentalSession = NoPinSession,
     private val parentalControls: ParentalControls = ParentalControls.NONE,
     tuneGuard: TuneGuard = TuneGuard.ALLOW_ALL,
-    private val keyBindings: KeyBindingStore = NoKeyBindings,
     // (M5 integration, WP-E §1.8a item 2) The S17 update card and the "Updated to …" notice.
     private val updateCards: app.thebox.core.update.UpdateCardSource = NoUpdateCards,
     /** (owner ruling 2026-10-18) Programme posters for the focused panel (`:data`'s TMDB lookup; NONE in tests). */
@@ -442,7 +432,6 @@ class GuideViewModel @Inject constructor(
         }
         scope.launch { reminderBook.index.collect { machine.dispatch(GuideEvent.Reminders(it)) } }
         scope.launch { alerts.current.collect { machine.dispatch(GuideEvent.Alert(it)) } }
-        scope.launch { keyCapabilities.seen.collect { machine.dispatch(GuideEvent.KeysSeen(it)) } }
         forwardParental()
         scope.launch {
             combine(controller.state, archive.status, settingsSource.settings) { st, a, s -> Triple(st, a, s) }.collect { (st, a, s) ->
@@ -674,11 +663,6 @@ class GuideViewModel @Inject constructor(
                 was = m
             }
         }
-        scope.launch {
-            combine(keyCapabilities.seen, keyBindings.overrides) { seen, o -> seen to o }.collect { (seen, o) ->
-                machine.dispatch(GuideEvent.KeyHints(keyHints(seen, o, KeyContext.GUIDE)))
-            }
-        }
     }
 
     /**
@@ -739,17 +723,6 @@ class GuideViewModel @Inject constructor(
         /** The next tick: the machine's deadline or the next minute boundary, whichever is first, at least [MIN_TICK_GAP_MS] away. */
         fun nextTickAt(nowMs: Long, deadlineMs: Long): Long =
             maxOf(nowMs + MIN_TICK_GAP_MS, minOf(deadlineMs, nowMs - Math.floorMod(nowMs, MINUTE_MS) + MINUTE_MS))
-
-        /** The actions the footer hints name (§3.8.4). */
-        private val HINTED = listOf(BoxAction.START_OVER, BoxAction.REMIND, BoxAction.ZAP_UP, BoxAction.PAGE_UP, BoxAction.GROUPS_PANEL)
-
-        /** For each hinted action, the seen keys bound to it (short presses) in [context]: EffectiveKeyMap ∩ seen. */
-        fun keyHints(seen: Set<Int>, overrides: app.thebox.core.input.KeyBindingOverrides, context: KeyContext): Map<BoxAction, List<Int>> {
-            val map = RemappedKeyMap(DefaultKeyMap(), null, null).also { it.apply(overrides) }
-            // (decision 2026-10-19 ruling 4) the colour keys count as one family for the footer.
-            val seenAll = DefaultKeyMap.seenWithColourFamily(seen)
-            return HINTED.associateWith { a -> map.keysFor(context, a).filter { it.second == Press.SHORT && it.first in seenAll }.map { it.first } }
-        }
 
         fun lowEndFor(s: GuideSettings, device: DeviceClass): Boolean = when (s.performance) {
             PerformanceMode.LOW -> true

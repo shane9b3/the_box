@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.thebox.core.guide.GuideGeometry
 import app.thebox.core.guide.GroupMenuItem
 import app.thebox.core.guide.GroupsShortcut
 import app.thebox.core.guide.GuideSourceEntry
@@ -39,6 +40,9 @@ import app.thebox.ui.guide.screen.Line
 import app.thebox.ui.theme.DesignTokens
 
 const val GROUPS_PANEL_TAG = "groups_panel"
+
+/** Groups panel width, design px (it spans the grid panel's height, [GuideGeometry.PANEL_H]). */
+const val GROUPS_PANEL_W = 360f
 
 /** A row of the panel: a shortcut, a playlist section header, or an entry. [index] is the `Overlay.Groups.focused` index. */
 internal sealed interface GroupsRow {
@@ -62,7 +66,7 @@ internal fun groupsRows(o: Overlay.Groups): List<GroupsRow> {
 }
 
 /**
- * The Groups panel over the label column, (64, 500) – (424, 960) (docs/design/m3-guide.md §3.15, §3.8; S7a, E22): the
+ * The Groups panel over the label column, (64, 500) – (424, 1024), the grid panel's height (docs/design/m3-guide.md §3.15, §3.8; S7a, E22): the
  * Search and Settings shortcut rows, then every source with its count (a locked group with the padlock, M5 §3.9.1); the
  * current source carries an accent dot. The
  * list is lazy (a playlist can have hundreds of groups) and follows the virtual focus. The group menu (Hide, Lock or
@@ -76,7 +80,7 @@ fun GroupsPanel(state: GuideUiState, modifier: Modifier = Modifier) {
     val list = rememberLazyListState(initialFirstVisibleItemIndex = (focusedRow - 4).coerceAtLeast(0))
     LaunchedEffect(focusedRow) { if (focusedRow >= 0) keepVisible(list, focusedRow) }
     val shape = RoundedCornerShape(DesignTokens.Radii.Panel)
-    Box(modifier.offset(64.dp, 500.dp).width(360.dp).height(460.dp).testTag(GROUPS_PANEL_TAG)) {
+    Box(modifier.offset(GuideGeometry.PANEL_L.dp, GuideGeometry.PANEL_T.dp).width(GROUPS_PANEL_W.dp).height(GuideGeometry.PANEL_H.dp).testTag(GROUPS_PANEL_TAG)) {
         Column(
             Modifier
                 .fillMaxSize()

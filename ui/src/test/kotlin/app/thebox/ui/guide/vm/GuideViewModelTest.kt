@@ -101,7 +101,7 @@ class GuideViewModelTest {
                     context, controller, FakeCatchupLauncher(), library,
                     GuideRowsCacheFactory { lib, scope -> GuideRowsCacheImpl(lib, scope) },
                     GuideWindowPagerFactory { _, _, _, _, _ -> FakeGuideWindowPager().also { pagers += it } },
-                    settings, FakeGuideSessionStore(), FakeReminderBook(), alerts, FakeKeyCapabilities(), machineFactory,
+                    settings, FakeGuideSessionStore(), FakeReminderBook(), alerts, machineFactory,
                     FakeNavigator(), labels, FakeGuideRenderer(), device, FakeSyncFeed(), FakeGuideDataWindowSource(),
                     probe, router, FakeGuideMetricsFactory(), FakeRowCellsBuilder(), FakeGuideImages(), ImageLoader(context), GuideTrim(null, null),
                     archive, playerSettings,

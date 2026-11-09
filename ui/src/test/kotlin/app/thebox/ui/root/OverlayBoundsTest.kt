@@ -120,19 +120,21 @@ class OverlayBoundsTest {
 
     @Test
     fun anchoringRule() {
-        // Below the cell when it fits above y 960.
-        val top = anchoredOrigin(Rect(500f, 549f, 760f, 609f), 380f, 200f)
-        assertEquals(617f, top.y)
+        // Below the cell when it fits above the panel bottom, y 1024 (decision 2026-11-09; 960 before). Row 0: 558–643.
+        val top = anchoredOrigin(Rect(500f, 558f, 760f, 643f), 380f, 200f)
+        assertEquals(651f, top.y)
         assertEquals(500f, top.x)
-        // Else above, never above y 470.
-        val low = anchoredOrigin(Rect(1700f, 889f, 1830f, 949f), 380f, 300f)
-        assertEquals(581f, low.y)
+        // Row 3 (837–922): a 90-high overlay now fits below it (it would not have under the old 960 bottom).
+        assertEquals(930f, anchoredOrigin(Rect(500f, 837f, 760f, 922f), 380f, 90f).y)
+        // Else above, never above y 470. Row 4: 930–1015.
+        val low = anchoredOrigin(Rect(1700f, 930f, 1830f, 1015f), 380f, 300f)
+        assertEquals(622f, low.y)
         assertEquals("clamped to the panel", 1856f - 380f, low.x)
-        val tall = anchoredOrigin(Rect(300f, 821f, 500f, 881f), 380f, 400f)
+        val tall = anchoredOrigin(Rect(300f, 837f, 500f, 922f), 380f, 400f)
         assertEquals(MIN_TOP, tall.y)
-        // No anchor: centred in the grid panel.
+        // No anchor: centred in the grid panel (500 – 1024).
         val c = anchoredOrigin(null, 380f, 200f)
         assertEquals(64f + (1792f - 380f) / 2f, c.x)
-        assertEquals(500f + (460f - 200f) / 2f, c.y)
+        assertEquals(500f + (524f - 200f) / 2f, c.y)
     }
 }

@@ -38,7 +38,7 @@ private const val ITEM_GAP = 4f
 
 /**
  * Where an anchored overlay of [w] × [h] design px goes (docs/design/m3-guide.md §3.15): below the focused cell if it
- * fits above y 960, else above it but never above y 470; x starts at the cell and is clamped to the grid panel. No
+ * fits above the grid panel's bottom (y 1024), else above it but never above y 470; x starts at the cell and is clamped to the grid panel. No
  * anchor (cell off-screen): centred in the grid panel. Pure.
  */
 fun anchoredOrigin(cell: Rect?, w: Float, h: Float): Offset {

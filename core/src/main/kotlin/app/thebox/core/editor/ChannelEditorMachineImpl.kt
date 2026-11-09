@@ -1461,7 +1461,7 @@ class ChannelEditorMachineImpl(
         const val GROUP_CHIPS = 3
         const val CHANNEL_CHIPS = 4
 
-        // Key caps of the footer (as GuideTexts.KEYS_*).
+        // Key caps of the footer.
         const val KEY_UP_DOWN = "↑ ↓"
         const val KEY_LEFT_RIGHT = "← →"
         const val KEY_LEFT = "←"

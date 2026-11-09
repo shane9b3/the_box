@@ -3,7 +3,6 @@ package app.thebox.core.guide.state
 import app.thebox.core.guide.CellFlags
 import app.thebox.core.guide.CellKind
 import app.thebox.core.guide.ExitConfirmation
-import app.thebox.core.guide.FooterHint
 import app.thebox.core.guide.GuideSettings
 import app.thebox.core.guide.GuideWindowData
 import app.thebox.core.guide.Overlay
@@ -30,8 +29,6 @@ class SliverAtNowTest {
     private fun world(startTuned: Boolean = true, exit: ExitConfirmation = ExitConfirmation.BACK_TWICE, data: GuideWindowData = SLIVER_AT_NOW) =
         GuideWorld(startTuned = startTuned, data = data, realNavigator = true, settings = GuideSettings(exitConfirmation = exit))
 
-    private fun footerHas(w: GuideWorld, keys: String, label: String) = FooterHint(keys, label) in w.ui.footer
-
     @Test fun theFixturePutsNowInASliverOnTheTunedRow() {
         val w = world()
         val f = w.machine.frame.focus!!
@@ -42,7 +39,6 @@ class SliverAtNowTest {
 
     @Test fun backFromHomeReachesGroupsTheTopBarAndTheExitStep() {
         val w = world()
-        assertTrue(footerHas(w, GuideTexts.KEYS_BACK, GuideTexts.HINT_GROUPS), "home: Back · Groups; footer=${w.ui.footer}")
         w.press(BACK)
         assertTrue(assertIs<Overlay.Groups>(w.ui.overlay).viaBack, "one Back opens Groups")
         w.press(BACK)
@@ -56,10 +52,8 @@ class SliverAtNowTest {
     @Test fun fromAnotherRowBackGoesHomeThenOpensGroups() {
         val w = world()
         w.press(DOWN); w.press(DOWN)
-        assertTrue(footerHas(w, GuideTexts.KEYS_BACK, GuideTexts.HINT_NOW))
         w.press(BACK)
         assertNull(w.ui.overlay); assertEquals(0, w.machine.frame.focus!!.row)
-        assertTrue(footerHas(w, GuideTexts.KEYS_BACK, GuideTexts.HINT_GROUPS))
         w.press(BACK)
         assertTrue(assertIs<Overlay.Groups>(w.ui.overlay).viaBack)
     }

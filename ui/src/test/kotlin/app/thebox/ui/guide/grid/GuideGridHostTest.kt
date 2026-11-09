@@ -201,8 +201,8 @@ class GuideGridHostTest {
         val bmp = Bitmap.createBitmap(1920, 1080, Bitmap.Config.ARGB_8888)
         bmp.eraseColor(GuideColors.CANVAS)
         view.draw(Canvas(bmp))
-        // The now line (accent) is drawn at x ≈ 717.
-        val p = bmp.getPixel(717, 700)
+        // The now line (accent) is drawn at x ≈ 747 (label 280, decision 2026-11-09).
+        val p = bmp.getPixel(747, 700)
         assertTrue(Integer.toHexString(p), Color.blue(p) > 180 && Color.red(p) < 150)
         assertEquals(GuideColors.CANVAS, bmp.getPixel(960, 300))
     }

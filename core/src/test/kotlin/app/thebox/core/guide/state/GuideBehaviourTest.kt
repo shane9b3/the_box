@@ -213,7 +213,6 @@ class GuideBehaviourTest {
                 failure = app.thebox.core.catchup.archive.ArchiveFailure.NOT_IN_ARCHIVE,
             )))
             assertTrue(cue(w))
-            assertTrue(w.ui.footer.any { it.keys == GuideTexts.KEYS_LEFT && it.label == GuideTexts.HINT_GROUPS })
             w.press(LEFT)
             assertIs<Overlay.Groups>(w.ui.overlay)
         }
@@ -226,7 +225,6 @@ class GuideBehaviourTest {
             val end = w.machine.frame.focus!!.cellEnd
             while (w.nowMin() <= end) w.advance(60_000)
             assertFalse(cue(w), "the focused cell is in the past now")
-            assertFalse(w.ui.footer.any { it.keys == GuideTexts.KEYS_LEFT })
             w.press(LEFT)
             assertNull(w.ui.overlay)
         }
@@ -267,7 +265,6 @@ class GuideBehaviourTest {
             val f = w.machine.frame.focus!!
             assertTrue(f.cellStart < w.machine.frame.windowStartMin, "clipped on-now cell")
             assertTrue(clip(w)); assertFalse(cue(w))
-            assertEquals(GuideTexts.HINT_GROUPS, w.ui.footer.first { it.keys == GuideTexts.KEYS_BACK }.label, "home: Back · Groups")
             w.press(LEFT)
             assertNull(w.ui.overlay); assertTrue(w.machine.frame.focus!!.cellEnd <= f.cellStart, "moved to the previous programme")
             assertFalse(clip(w), "the window followed the focus")
@@ -441,19 +438,6 @@ class GuideBehaviourTest {
             assertEquals(-1, w.machine.frame.bubbleNumber)
             assertEquals(w.channels[3].displayName, w.ui.panel!!.channelName)
             assertEquals(0, w.calls.last("ensureWindow")!!.args[2])
-        }
-
-        /** Review 2026-10-19 S1: like the panel, the footer is not rebuilt per row during a vertical hold, only on release. */
-        @Test fun verticalHoldDoesNotRebuildTheFooter() {
-            val w = GuideWorld()
-            val footer = w.ui.footer
-            assertTrue(app.thebox.core.guide.FooterHint(GuideTexts.KEYS_BACK, GuideTexts.HINT_GROUPS) in footer, "home: Back · Groups")
-            // Rows 1–6 cross no-archive, no-EPG (3) and archive (5) rows: the Left probe and home both flip mid-hold.
-            for (i in 1..6) w.press(DOWN, repeat = i, heldMs = 450L + 50L * i)
-            assertEquals(6, w.machine.frame.focus!!.row)
-            assertSame(footer, w.ui.footer, "footer not rebuilt while repeat > 0")
-            w.release(DOWN)
-            assertTrue(app.thebox.core.guide.FooterHint(GuideTexts.KEYS_BACK, GuideTexts.HINT_NOW) in w.ui.footer, "rebuilt on release")
         }
 
         @Test fun horizontalHoldStepsTimeAfterOneSecond() {
@@ -908,18 +892,6 @@ class GuideBehaviourTest {
             w.advance(60_000)
             assertEquals(w.nowMin(), w.machine.frame.nowMin)
             assertEquals(loads + 1, w.calls.names().count { it == "loadTunedNow" })
-        }
-
-        @Test fun footerFromKeysSeen() {
-            val w = GuideWorld()
-            // Decision 2026-10-19 ruling 8: home on an archive row, Left browses: "Back · Groups"; owner ruling 2026-10-17:
-            // "Hold Back · Full screen" while something plays.
-            assertEquals(listOf("Browse", "Watch", "Groups", "Options", "Full screen"), w.ui.footer.map { it.label })
-            w.send(GuideEvent.KeysSeen(setOf(Keys.PROG_RED, Keys.CHANNEL_UP, Keys.DIGIT_0 + 5)))
-            assertEquals(listOf("Browse", "Watch", "Groups", "Options", "Full screen", "From start", "Page", "Channel"), w.ui.footer.map { it.label })
-            w.press(RIGHT)
-            // Not home, Left browses: "Back · Now" and, Red having been seen (colour family), "Yellow · Groups".
-            assertEquals(listOf("Browse", "Watch", "Now", "Groups", "Options", "Full screen", "Remind", "Page", "Channel"), w.ui.footer.map { it.label })
         }
 
         @Test fun dayJumpKeepsRowAndUsesToTime() {

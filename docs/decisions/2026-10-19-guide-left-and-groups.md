@@ -71,7 +71,7 @@ repo; the outcome is this note. Key facts the meeting established:
    - The label-column ↺ glyph grows from 12 to 20 design px so "this channel has catch-up" reads at 10 feet.
    The "Left opens Groups" probe is `GuideNavigator.leftEdge`, computed once per publish behind a cheap key over its
    inputs (focus, window data, rows version, now, earliest, suspect count, lineup size), never by `move(LEFT)`.
-8. **The footer names the next Left and the next Back stop**, in priority order from core; the UI measures and drops
+8. *(Superseded 2026-11-09: the guide has no footer, `2026-11-09-guide-bigger-grid.md`.)* **The footer names the next Left and the next Back stop**, in priority order from core; the UI measures and drops
    hints from the end, never wrapping. Sets (`[…]` = only when that key was seen or bound, as today):
 
    | State | Hints |

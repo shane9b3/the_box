@@ -53,34 +53,3 @@ object ActionCatalog {
     /** [BoxAction.id] → action; null for an unknown id (an override from a newer backup is ignored, §3.8.2). */
     fun actionOf(id: String?): BoxAction? = id?.let { byId[it] }
 }
-
-/**
- * Short key names for the guide's footer hints (§3.8.4), in English like `GuideTexts` (the footer is built in :core);
- * the capture overlay names keys from `:ui`'s own string table instead.
- */
-object FooterKeyNames {
-    fun of(keyCode: Int): String = when (keyCode) {
-        Keys.PROG_RED -> "Red"
-        Keys.PROG_GREEN -> "Green"
-        Keys.PROG_YELLOW -> "Yellow"
-        Keys.PROG_BLUE -> "Blue"
-        Keys.CHANNEL_UP, Keys.CHANNEL_DOWN -> "CH±"
-        Keys.PAGE_UP, Keys.PAGE_DOWN -> "Page"
-        Keys.MEDIA_RECORD -> "Rec"
-        Keys.MEDIA_NEXT -> "⏭"
-        Keys.MEDIA_PREVIOUS -> "⏮"
-        Keys.MEDIA_PLAY_PAUSE -> "⏯"
-        Keys.MEDIA_FAST_FORWARD -> "⏩"
-        Keys.MEDIA_REWIND -> "⏪"
-        Keys.INFO -> "Info"
-        Keys.GUIDE -> "Guide"
-        Keys.MENU -> "Menu"
-        Keys.SEARCH -> "Search"
-        Keys.SETTINGS -> "Settings"
-        Keys.LAST_CHANNEL -> "Last"
-        Keys.CAPTIONS -> "CC"
-        Keys.MEDIA_AUDIO_TRACK -> "Audio"
-        Keys.TV_ZOOM_MODE -> "Zoom"
-        else -> "#$keyCode"
-    }
-}

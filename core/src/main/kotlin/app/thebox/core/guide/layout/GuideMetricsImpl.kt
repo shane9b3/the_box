@@ -41,7 +41,7 @@ class GuideMetricsImpl(override val scale: Float) : GuideMetrics {
     override val rowsTop = headerBottom
     override val rowPitch = G.ROW_PITCH * scale
     override val rowHeight = snap(G.ROW_H)
-    /** Inner panel bottom (959 at 1080p): §3.1 clips there, not at the padding, so row 5 (ending at 949) is whole. */
+    /** Inner panel bottom (1023 at 1080p, decision 2026-11-09): §3.1 clips there, not at the padding, so row 5 (ending at 1015) is whole. */
     override val rowsBottom = snap(G.PANEL_T + G.PANEL_H - G.PANEL_BORDER)
     override val pxPerMin = timelineWidth / G.WINDOW_MIN
 
