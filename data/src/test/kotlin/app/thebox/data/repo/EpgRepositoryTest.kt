@@ -17,6 +17,7 @@ import app.thebox.data.testutil.TestGraph
 import app.thebox.data.testutil.epgChannel
 import app.thebox.data.testutil.newChannel
 import app.thebox.data.testutil.newPlaylist
+import app.thebox.data.testutil.scalar
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
@@ -156,6 +157,39 @@ class EpgRepositoryTest {
         assertNull(b.await().error)
         assertEquals(1, g.fetcher.maxInFlight.get())
         assertTrue(File(g.cacheRoot, "epg/$s.src").exists())
+    }
+
+    /** A restore placeholder (docs/design/m5-restore-placeholder-guides.md): hash 0, a ref with no secret. */
+    private suspend fun placeholder(): Long = db.epgSourceDao().insert(
+        EpgSourceEntity(
+            name = "Restored", origin = EpgSourceEntity.ORIGIN_PLAYLIST_HEADER, playlistId = p, credentialRef = g.creds.newRef(),
+            urlHash = EpgSourceEntity.PLACEHOLDER_HASH, displaySource = "", priority = 0, createdAt = 1,
+        ),
+    )
+
+    @Test
+    fun aPlaceholderAloneIsNeitherBuiltNorReportedAsAFailure() = runBlocking {
+        val ph = placeholder()
+        val r = g.epg.build(Trigger.PERIODIC)
+        assertTrue(r.skipped)
+        assertNull(r.error)
+        assertEquals(0, g.store.builds.get())
+        assertEquals(0L, db.scalar("SELECT COUNT(*) FROM refresh_log WHERE outcome = 'FAILED'"))
+        val row = db.epgSourceDao().get(ph)!!
+        assertNull("no setStatus on a placeholder", row.lastStatus)
+        assertNull(row.lastImportAt)
+        assertTrue(g.fetcher.requests.isEmpty())
+    }
+
+    @Test
+    fun aPlaceholderNextToAWorkingGuideStaysUntouched() = runBlocking {
+        val ph = placeholder()
+        val s = userSource()
+        val r = g.epg.build(Trigger.MANUAL)
+        assertNull(r.error)
+        assertEquals(listOf(s), g.store.lastBuild!!.sources.map { it.sourceId })
+        assertEquals("SUCCESS", db.refreshLogDao().latest("EPG_BUILD", null).single().outcome)
+        assertNull(db.epgSourceDao().get(ph)!!.lastStatus)
     }
 
     @Test

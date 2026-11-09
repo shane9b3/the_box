@@ -18,6 +18,7 @@ import app.thebox.data.contracts.XtreamAction
 import app.thebox.data.contracts.XtreamLogin
 import app.thebox.data.db.LibraryDatabase
 import app.thebox.data.db.entity.EpgMappingEntity
+import app.thebox.data.db.entity.EpgSourceEntity
 import app.thebox.data.testutil.FakeDiffer
 import app.thebox.data.testutil.FakeXtreamDecoder
 import app.thebox.data.testutil.TestDb
@@ -307,6 +308,112 @@ class RefreshRepositoryTest {
         assertTrue("merge batches pause on ImportMutex.gate", waits >= 1)
         // EpgRepository exposes the same gate.
         assertTrue(g.epg.gate === g.importMutex.gate)
+    }
+
+    // ---- restore placeholders (docs/design/m5-restore-placeholder-guides.md §2) ------------------------------
+
+    /** What `BackupRestorer` writes for a never-refreshed playlist: overrides, hash 0, a ref with no secret. */
+    private suspend fun placeholder(pid: Long, ordinal: Int, origin: String = EpgSourceEntity.ORIGIN_PLAYLIST_HEADER): EpgSourceEntity {
+        val id = db.epgSourceDao().insert(
+            EpgSourceEntity(
+                name = "Old box guide $ordinal", origin = origin, playlistId = pid, ordinal = ordinal, credentialRef = g.creds.newRef(),
+                urlHash = EpgSourceEntity.PLACEHOLDER_HASH, displaySource = "", priority = 7 + ordinal, enabled = true, shiftMin = 60,
+                assumeZone = "Europe/Oslo", createdAt = 1,
+            ),
+        )
+        db.epgMappingDao().upsert(EpgMappingEntity(pid, "map-$ordinal", id, "x$ordinal.uk", 1))
+        return db.epgSourceDao().get(id)!!.also { assertTrue(it.isPlaceholder) }
+    }
+
+    private fun epgs(vararg urls: String) = urls.joinToString(",")
+
+    @Test
+    fun theFirstRefreshFillsAPlaceholderInPlace() = runBlocking {
+        val id = addPlaylist()
+        val ph = placeholder(id, 0)
+        assertTrue("inert before the refresh", db.epgSourceDao().active().isEmpty())
+        g.fetcher.bodies[url] = m3u("BBC", epg = "http://epg.one/guide.xml?token=abc")
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.MANUAL).error)
+        val after = db.epgSourceDao().forPlaylist(id).single()
+        assertEquals(ph.id, after.id)
+        assertFalse(after.isPlaceholder)
+        assertTrue(after.urlHash != 0L)
+        assertEquals("epg.one", after.displaySource)
+        assertEquals(ph.credentialRef, after.credentialRef)
+        assertEquals("http://epg.one/guide.xml?token=abc", (g.playlists.secret(after.credentialRef) as Outcome.Ok).value.urls.single())
+        assertEquals(listOf(ph.name, "${ph.priority}", "60", "Europe/Oslo", "true"), listOf(after.name, "${after.priority}", "${after.shiftMin}", after.assumeZone, "${after.enabled}"))
+        assertEquals(listOf("map-0|${ph.id}"), db.strings("SELECT stable_key || '|' || source_id FROM epg_mapping"))
+        assertEquals(listOf(Trigger.PLAYLIST_CHANGED), g.requester.imports)
+        assertEquals(listOf(ph.id), db.epgSourceDao().active().map { it.id })
+    }
+
+    @Test
+    fun aProviderListingFewerGuidesDropsTheExtraPlaceholderAndListingMoreAddsRows() = runBlocking {
+        val id = addPlaylist()
+        val p0 = placeholder(id, 0)
+        placeholder(id, 1)
+        g.fetcher.bodies[url] = m3u("BBC", epg = "http://epg.one/a.xml")
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.MANUAL).error)
+        assertEquals(listOf(p0.id), db.epgSourceDao().forPlaylist(id).map { it.id })
+        assertEquals("the dropped guide's mapping cascades", listOf("map-0"), db.strings("SELECT stable_key FROM epg_mapping"))
+
+        val id2 = (g.playlists.addM3uUrl("Two", "http://lists.example/two.m3u") as Outcome.Ok).value
+        val q0 = placeholder(id2, 0)
+        g.fetcher.bodies["http://lists.example/two.m3u"] = m3u("CNN", epg = epgs("http://epg.two/a.xml", "http://epg.two/b.xml"))
+        assertNull(g.refresh(FakeDiffer()).refresh(id2, Trigger.MANUAL).error)
+        val rows = db.epgSourceDao().forPlaylist(id2)
+        assertEquals(listOf(0, 1), rows.map { it.ordinal })
+        assertEquals(q0.id, rows[0].id)
+        assertTrue(rows.none { it.isPlaceholder })
+    }
+
+    @Test
+    fun aFailedDownloadLeavesThePlaceholderAlone() = runBlocking {
+        val id = addPlaylist()
+        val ph = placeholder(id, 0)
+        g.fetcher.errors[url] = SourceError.Network(NetworkKind.CONNECT)
+        assertTrue(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.MANUAL).error != null)
+        assertEquals(ph, db.epgSourceDao().get(ph.id))
+        assertEquals(1L, db.scalar("SELECT COUNT(*) FROM epg_mapping"))
+        assertTrue(db.epgSourceDao().active().isEmpty())
+    }
+
+    @Test
+    fun anXtreamPlaceholderIsFilledInPlace() = runBlocking {
+        val id = (g.playlists.addXtream("X", listOf("http://a.example"), "bob", "pw123") as Outcome.Ok).value
+        val ph = placeholder(id, 0, EpgSourceEntity.ORIGIN_XTREAM)
+        g.xtream.login = Outcome.Ok(XtreamLogin(account(), baseIndexUsed = 0))
+        g.xtream.downloads[XtreamAction.LIVE_CATEGORIES] = "1|News\n"
+        g.xtream.downloads[XtreamAction.LIVE_STREAMS] = "10|BBC|1\n"
+        assertNull(g.refresh().refresh(id, Trigger.MANUAL).error)
+        val after = db.epgSourceDao().forPlaylist(id).single()
+        assertEquals(ph.id, after.id)
+        assertFalse(after.isPlaceholder)
+        assertEquals(listOf(60, 7), listOf(after.shiftMin, after.priority))
+        assertTrue((g.playlists.secret(after.credentialRef) as Outcome.Ok).value.urls.single().contains("xmltv.php"))
+        assertEquals(1L, db.scalar("SELECT COUNT(*) FROM epg_mapping WHERE source_id = ?", ph.id))
+        assertEquals(listOf(Trigger.PLAYLIST_CHANGED), g.requester.imports)
+        assertNoSecretInDatabase("pw123")
+    }
+
+    @Test
+    fun aGuideLoginThatCannotBeStoredKeepsThePlaceholderAndAddsNoRow() = runBlocking {
+        // Placeholder review S1: a live row without its secret would fail every guide build with cred.missing.
+        val id = addPlaylist()
+        val ph = placeholder(id, 0)
+        g.fetcher.bodies[url] = m3u("BBC", epg = epgs("http://epg.one/a.xml", "http://epg.one/b.xml"))
+        g.creds.failPut = SourceError.Credentials(CredentialFailure.UNAVAILABLE)
+        assertNull(g.refresh(FakeDiffer()).refresh(id, Trigger.MANUAL).error)
+        assertEquals(listOf(ph), db.epgSourceDao().forPlaylist(id))
+        assertTrue(db.epgSourceDao().active().isEmpty())
+        assertTrue(g.requester.imports.isEmpty())
+        // The next refresh retries and fills it.
+        g.creds.failPut = null
+        assertNull(g.refresh(FakeDiffer()).refresh(id, Trigger.MANUAL).error)
+        val rows = db.epgSourceDao().forPlaylist(id)
+        assertEquals(listOf(ph.id), rows.filter { it.ordinal == 0 }.map { it.id })
+        assertEquals(2, rows.size)
+        assertTrue(rows.none { it.isPlaceholder })
     }
 
     private fun account() = XtreamAccountInfo(

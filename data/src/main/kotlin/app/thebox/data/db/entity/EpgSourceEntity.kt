@@ -49,9 +49,24 @@ data class EpgSourceEntity(
     @ColumnInfo(name = "programme_count", defaultValue = "0") val programmeCount: Int = 0,
     @ColumnInfo(name = "created_at") val createdAt: Long,
 ) {
+    /**
+     * A playlist guide a restore created before the playlist's first refresh (docs/design/m5-restore-placeholder-guides.md):
+     * it carries the user's overrides and mappings but no address yet. Only [EpgSourceDao.active] filters it out.
+     */
+    val isPlaceholder: Boolean get() = origin != ORIGIN_USER && urlHash == PLACEHOLDER_HASH
+
     companion object {
         const val ORIGIN_USER = "USER"
         const val ORIGIN_PLAYLIST_HEADER = "PLAYLIST_HEADER"
         const val ORIGIN_XTREAM = "XTREAM"
+
+        /** The `url_hash` of a placeholder. `syncSources` never stores it for a real playlist guide. */
+        const val PLACEHOLDER_HASH = 0L
+
+        /** SQL predicate for a placeholder row on `epg_source` aliased `s` (see [isPlaceholder]). */
+        const val PLACEHOLDER_SQL = "(s.origin <> 'USER' AND s.url_hash = 0)"
+
+        /** Most guide URLs a playlist header may list for a restore to create placeholders for (ordinals 0..31). */
+        const val MAX_HEADER_GUIDES = 32
     }
 }

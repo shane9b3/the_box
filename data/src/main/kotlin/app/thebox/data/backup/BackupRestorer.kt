@@ -264,6 +264,7 @@ internal class BackupRestorer(
         val lockedUids = HashSet<String>()
         var lockedGroups = 0
         val listIdOf = HashMap<String, Long>()
+        val localOf = HashMap<Long, LocalState?>() // pid → the local playlist's type and refresh_seq, read once per pass
         val problems = HashSet<String>()
         FileInputStream(file).use { input ->
             val r = BackupReader(input)
@@ -333,14 +334,24 @@ internal class BackupRestorer(
                         rows++
                     }
                     is BackupRecord.EpgSource -> {
-                        // Playlist-derived sources: only the user overrides, on the source the playlist already has (§3.10.2).
+                        // Playlist-derived sources (§3.10.2; docs/design/m5-restore-placeholder-guides.md §1): (a) the
+                        // overrides go onto the row the playlist already has; (b) a playlist that never refreshed gets a
+                        // placeholder row the first refresh fills in; (c) anything else is skipped.
                         val pid = rec.playlistUid?.let { idOf[it] }
                         if (rec.origin != EpgSourceEntity.ORIGIN_USER && pid != null) {
-                            conn.exec("UPDATE epg_source SET enabled = ?, priority = ?, shift_min = ?, assume_zone = ? WHERE playlist_id = ? AND origin = ? AND ordinal = ?") {
-                                bindBool(1, rec.enabled); bindLong(2, rec.priority.toLong()); bindLong(3, rec.shiftMin.toLong()); bindTextOrNull(4, rec.assumeZone)
-                                bindLong(5, pid); bindText(6, rec.origin); bindLong(7, rec.ordinal.toLong())
+                            val has = conn.queryLong("SELECT COUNT(*) FROM epg_source WHERE playlist_id = ? AND origin = ? AND ordinal = ?") {
+                                bindLong(1, pid); bindText(2, rec.origin); bindLong(3, rec.ordinal.toLong())
+                            } > 0
+                            if (has) {
+                                conn.exec("UPDATE epg_source SET enabled = ?, priority = ?, shift_min = ?, assume_zone = ? WHERE playlist_id = ? AND origin = ? AND ordinal = ?") {
+                                    bindBool(1, rec.enabled); bindLong(2, rec.priority.toLong()); bindLong(3, rec.shiftMin.toLong()); bindTextOrNull(4, rec.assumeZone)
+                                    bindLong(5, pid); bindText(6, rec.origin); bindLong(7, rec.ordinal.toLong())
+                                }
+                                rows++
+                            } else if (placeholderFits(rec, localOf.getOrPut(pid) { localPlaylist(conn, pid) })) {
+                                insertPlaceholder(conn, rec, pid, now)
+                                rows++
                             }
-                            rows++
                         } else if (rec.origin == EpgSourceEntity.ORIGIN_USER) {
                             rows += restoreUserSource(conn, rec, refFor, now, usedRefs)
                         }
@@ -431,6 +442,47 @@ internal class BackupRestorer(
             conn.usePrepared("SELECT id FROM epg_source WHERE playlist_id = ? AND origin = ? AND ordinal = ?") { st ->
                 st.bindLong(1, pid); st.bindText(2, k.origin); st.bindLong(3, k.ordinal.toLong()); if (st.step()) st.getLong(0) else null
             }
+        }
+    }
+
+    /** The local playlist row's type and `refresh_seq` (not the backup's type: a SAME_UID match does not compare types). */
+    private class LocalState(val type: PlaylistType?, val refreshSeq: Long)
+
+    private suspend fun localPlaylist(conn: PooledConnection, pid: Long): LocalState? =
+        conn.usePrepared("SELECT type, refresh_seq FROM playlist WHERE id = ?") { st ->
+            st.bindLong(1, pid)
+            if (st.step()) LocalState(PlaylistType.entries.firstOrNull { it.name == st.getText(0) }, st.getLong(1)) else null
+        }
+
+    /**
+     * Case (b) of docs/design/m5-restore-placeholder-guides.md §1. Only for a playlist that never completed a merge
+     * (`refresh_seq = 0`): that is race-free against a refresh, because the merge commits `refresh_seq` under
+     * [ImportMutex] before `syncSources` runs and this restore holds the same mutex. The origin must fit the local
+     * playlist's type, and the ordinal must be one `syncSources` can produce (else it would never prune the row).
+     */
+    private fun placeholderFits(rec: BackupRecord.EpgSource, local: LocalState?): Boolean {
+        if (local == null || local.refreshSeq != 0L) return false
+        return when (rec.origin) {
+            EpgSourceEntity.ORIGIN_XTREAM -> local.type == PlaylistType.XTREAM && rec.ordinal == 0
+            EpgSourceEntity.ORIGIN_PLAYLIST_HEADER ->
+                (local.type == PlaylistType.M3U_URL || local.type == PlaylistType.M3U_FILE) && rec.ordinal in 0 until EpgSourceEntity.MAX_HEADER_GUIDES
+            else -> false
+        }
+    }
+
+    /**
+     * A placeholder: the user's overrides, `url_hash` = [EpgSourceEntity.PLACEHOLDER_HASH], no address, and a fresh
+     * credential ref with **no** secret (the column is NOT NULL; `syncSources` writes the secret under it later). The
+     * ref is not in `usedRefs`/`written`: nothing is stored under it, so neither cleanup has anything to do.
+     */
+    private suspend fun insertPlaceholder(conn: PooledConnection, rec: BackupRecord.EpgSource, pid: Long, now: Long) {
+        conn.exec(
+            "INSERT INTO epg_source(name, origin, playlist_id, ordinal, credential_ref, url_hash, display_source, priority, enabled, shift_min, assume_zone, created_at) " +
+                "VALUES (?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, ?)",
+        ) {
+            bindText(1, rec.name); bindText(2, rec.origin); bindLong(3, pid); bindLong(4, rec.ordinal.toLong()); bindText(5, creds.newRef())
+            bindLong(6, EpgSourceEntity.PLACEHOLDER_HASH); bindLong(7, rec.priority.toLong()); bindBool(8, rec.enabled)
+            bindLong(9, rec.shiftMin.toLong()); bindTextOrNull(10, rec.assumeZone); bindLong(11, now)
         }
     }
 

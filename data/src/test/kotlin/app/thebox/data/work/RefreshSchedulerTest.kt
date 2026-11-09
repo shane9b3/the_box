@@ -130,6 +130,22 @@ class RefreshSchedulerTest {
     }
 
     @Test
+    fun appStartWithOnlyRestorePlaceholdersSchedulesNoGuideWork() = runBlocking {
+        // docs/design/m5-restore-placeholder-guides.md §3: a placeholder has no address until the first refresh.
+        val restored = db.newPlaylist("restored")
+        db.epgSourceDao().insert(
+            EpgSourceEntity(
+                name = "x", origin = EpgSourceEntity.ORIGIN_PLAYLIST_HEADER, playlistId = restored, credentialRef = "r",
+                urlHash = EpgSourceEntity.PLACEHOLDER_HASH, displaySource = "", priority = 0, createdAt = 1,
+            ),
+        )
+        scheduler.onAppStart()
+        assertEquals("the playlist itself still refreshes", 1, infos(RefreshScheduler.refreshName(restored)).size)
+        assertEquals(0, infos(RefreshScheduler.EPG_PERIODIC).size)
+        assertEquals(0, infos(RefreshScheduler.EPG_IMPORT).size)
+    }
+
+    @Test
     fun aFreshGuideIsNotRebuiltAtAppStart() = runBlocking {
         db.epgSourceDao().insert(EpgSourceEntity(name = "u", origin = "USER", credentialRef = "r", urlHash = 1, displaySource = "h", priority = 0, createdAt = 1))
         store.publish()

@@ -21,9 +21,17 @@ interface EpgSourceDao {
     @Query("SELECT * FROM epg_source WHERE id = :id")
     suspend fun get(id: Long): EpgSourceEntity?
 
+    /**
+     * Every row, including restore placeholders ([EpgSourceEntity.isPlaceholder], [EpgSourceEntity.PLACEHOLDER_SQL]).
+     * A reader that acts on guides (downloads, matches, schedules) must use [active] or filter placeholders itself.
+     */
     @Query("SELECT * FROM epg_source ORDER BY priority, id")
     fun observeAll(): Flow<List<EpgSourceEntity>>
 
+    /**
+     * Every row, including restore placeholders ([EpgSourceEntity.isPlaceholder], [EpgSourceEntity.PLACEHOLDER_SQL]).
+     * A reader that acts on guides (downloads, matches, schedules) must use [active] or filter placeholders itself.
+     */
     @Query("SELECT * FROM epg_source ORDER BY priority, id")
     suspend fun all(): List<EpgSourceEntity>
 
@@ -35,13 +43,15 @@ interface EpgSourceDao {
 
     /**
      * Sources that take part in the guide, in priority order: enabled USER sources, and enabled sources of
-     * enabled playlists that use their playlist EPG.
+     * enabled playlists that use their playlist EPG. Restore placeholders are left out: they have no address
+     * until the playlist's first refresh fills them in (docs/design/m5-restore-placeholder-guides.md §3).
      */
     @Query(
         """
         SELECT s.* FROM epg_source s
         LEFT JOIN playlist p ON p.id = s.playlist_id
         WHERE s.enabled = 1 AND (s.playlist_id IS NULL OR (p.enabled = 1 AND p.use_playlist_epg = 1))
+          AND NOT """ + EpgSourceEntity.PLACEHOLDER_SQL + """
         ORDER BY s.priority, s.id""",
     )
     suspend fun active(): List<EpgSourceEntity>

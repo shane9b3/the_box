@@ -36,8 +36,13 @@ import java.util.concurrent.ConcurrentHashMap
 class FakeCredentialStore : CredentialStore {
     val secrets = ConcurrentHashMap<String, PlaylistSecret>()
     var failGet: SourceError? = null
+    /** When set, [put] returns it without storing (the Keystore/Tink failure path). */
+    var failPut: SourceError? = null
     override fun newRef(): String = "cred-" + UUID.randomUUID()
-    override suspend fun put(ref: String, secret: PlaylistSecret): Outcome<Unit> { secrets[ref] = secret; return Outcome.Ok(Unit) }
+    override suspend fun put(ref: String, secret: PlaylistSecret): Outcome<Unit> {
+        failPut?.let { return Outcome.Err(it) }
+        secrets[ref] = secret; return Outcome.Ok(Unit)
+    }
     override suspend fun get(ref: String): Outcome<PlaylistSecret> =
         failGet?.let { Outcome.Err(it) } ?: secrets[ref]?.let { Outcome.Ok(it) } ?: Outcome.Err(SourceError.Credentials(CredentialFailure.MISSING))
     override suspend fun delete(ref: String) { secrets.remove(ref) }

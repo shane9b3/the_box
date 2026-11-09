@@ -21,7 +21,9 @@ import androidx.sqlite.execSQL
  *   instrumented `MigrationTestHelper` test.
  * - `fallbackToDestructiveMigration*` is forbidden: it would wipe favourites, prefs, mappings and reminders.
  * - `channel`, `channel_group`, `channel_fts` and `epg_match` are re-derivable. A migration may drop and
- *   refill them by setting `playlist.etag = NULL` and `refresh_seq = 0` (forces a full refresh). User-data
+ *   refill them by setting `playlist.etag = NULL` and `refresh_seq = 0` (forces a full refresh). `refresh_seq = 0`
+ *   also tells a restore that the playlist has no guide rows yet; resetting it makes a restore in that window create
+ *   placeholder guides the next refresh prunes (harmless; docs/design/m5-restore-placeholder-guides.md). User-data
  *   tables (`favourite*`, `channel_prefs`, `group_prefs`, `epg_mapping`, `reminder`, `stream_source`,
  *   `purged_key`, `credential`) must always be migrated.
  */

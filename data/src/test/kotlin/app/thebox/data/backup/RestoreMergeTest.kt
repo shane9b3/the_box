@@ -128,7 +128,12 @@ class RestoreMergeTest {
         db.reminderDao().insert(ReminderEntity(playlistId = a, stableKey = "k1", startMin = nowMin + 60, endMin = nowMin + 90, titleHash = 9, title = "Future", channelName = "One", createdAt = 1))
         db.reminderDao().insert(ReminderEntity(playlistId = a, stableKey = "k1", startMin = nowMin - 60, endMin = nowMin - 30, titleHash = 8, title = "Past", channelName = "One", createdAt = 1))
         db.reminderDao().insert(ReminderEntity(playlistId = a, stableKey = "k2", startMin = nowMin + 120, endMin = nowMin + 150, titleHash = 7, title = "Fired", channelName = "Two", state = 1, createdAt = 1))
-        val src = db.epgSourceDao().insert(EpgSourceEntity(name = "XT", origin = EpgSourceEntity.ORIGIN_XTREAM, playlistId = a, credentialRef = "cred-a", urlHash = 42, displaySource = "panel.a", priority = 0, createdAt = 1))
+        val src = db.epgSourceDao().insert(
+            EpgSourceEntity(
+                name = "XT", origin = EpgSourceEntity.ORIGIN_XTREAM, playlistId = a, credentialRef = "cred-a", urlHash = 42, displaySource = "panel.a",
+                priority = 4, enabled = false, shiftMin = 60, assumeZone = "Europe/London", createdAt = 1,
+            ),
+        )
         db.epgMappingDao().upsert(EpgMappingEntity(a, "k1", src, "one.uk", 1))
         db.epgMappingDao().upsert(EpgMappingEntity(a, "k9", null, null, 1)) // explicit "no guide data"
         db.hideRuleDao().insert(HideRuleEntity(playlistId = b, target = 0, pattern = "XXX", isRegex = false, createdAt = 1))
@@ -154,12 +159,40 @@ class RestoreMergeTest {
         "reminder" to db.strings("SELECT p.uid || '|' || stable_key || '|' || title || '|' || state FROM reminder r JOIN playlist p ON p.id = r.playlist_id WHERE state = 0 AND start_min > $nowMin ORDER BY 1"),
         "epg_mapping" to db.strings("SELECT p.uid || '|' || stable_key || '|' || COALESCE(xmltv_id, '-') || '|' || (source_id IS NULL) FROM epg_mapping m JOIN playlist p ON p.id = m.playlist_id ORDER BY 1"),
         "hide_rule" to db.strings("SELECT p.uid || '|' || target || '|' || pattern || '|' || is_regex || '|' || h.enabled FROM hide_rule h JOIN playlist p ON p.id = h.playlist_id ORDER BY 1"),
+        // The user's guide overrides (playlist guides by (uid, origin, ordinal); the address is not a user choice).
+        "epg_source" to db.strings(
+            "SELECT COALESCE(p.uid, '') || '|' || s.origin || '|' || s.ordinal || '|' || s.name || '|' || s.priority || '|' || s.enabled || '|' || s.shift_min || '|' || COALESCE(s.assume_zone, '') " +
+                "FROM epg_source s LEFT JOIN playlist p ON p.id = s.playlist_id ORDER BY 1",
+        ),
     )
 
-    /** A playlist-derived EPG source exists only after a refresh; the restore target gets one so mappings can land. */
-    private suspend fun addXtreamSource(db: LibraryDatabase, uid: String) {
-        val pid = db.scalar("SELECT id FROM playlist WHERE uid = ?", uid)
-        db.epgSourceDao().insert(EpgSourceEntity(name = "XT", origin = EpgSourceEntity.ORIGIN_XTREAM, playlistId = pid, credentialRef = "x", urlHash = 42, displaySource = "panel.a", priority = 0, createdAt = 1))
+    /** The playlist-guide rows of [uid] as `origin|ordinal|placeholder|priority|enabled|shift|zone`. */
+    private suspend fun guides(db: LibraryDatabase, uid: String): List<String> = db.strings(
+        "SELECT s.origin || '|' || s.ordinal || '|' || ${EpgSourceEntity.PLACEHOLDER_SQL} || '|' || s.priority || '|' || s.enabled || '|' || s.shift_min || '|' || COALESCE(s.assume_zone, '') " +
+            "FROM epg_source s JOIN playlist p ON p.id = s.playlist_id WHERE p.uid = ? ORDER BY s.origin, s.ordinal",
+        uid,
+    )
+
+    /** The seed's XTREAM guide as a placeholder carrying its overrides. */
+    private val xtPlaceholder = listOf("XTREAM|0|1|4|0|60|Europe/London")
+
+    /** Mappings of [uid] whose source is a row of that playlist (`stable_key|xmltv_id`). */
+    private suspend fun mappedToOwnGuide(db: LibraryDatabase, uid: String): List<String> = db.strings(
+        "SELECT m.stable_key || '|' || m.xmltv_id FROM epg_mapping m JOIN playlist p ON p.id = m.playlist_id JOIN epg_source s ON s.id = m.source_id " +
+            "WHERE p.uid = ? AND s.playlist_id = p.id ORDER BY 1",
+        uid,
+    )
+
+    /** Writes a crafted backup file. */
+    private fun crafted(vararg records: BackupRecord): File {
+        val f = File(dir, "crafted-${System.nanoTime()}.thebox")
+        f.outputStream().use { out ->
+            val w = BackupWriter(out)
+            w.writeHeader(BackupHeader(createdAtMs = 1, appVersionName = "x", appVersionCode = 1, includesLogins = false, counts = emptyMap()))
+            records.forEach { w.write(it) }
+            w.finish()
+        }
+        return f
     }
 
     @Test
@@ -172,10 +205,12 @@ class RestoreMergeTest {
         assertEquals(2, result.playlistsAdded)
         assertEquals(2, result.loginsRestored)
         assertEquals(0, result.needsLogin)
-        // Mappings to a playlist-derived source wait for its source: the second restore (after a "refresh") lands them.
-        addXtreamSource(dst.db, "uid-a")
-        dst.service.restore(file, "correct horse".toCharArray(), RestoreMode.MERGE)
+        // One restore: the never-refreshed playlist gets a placeholder guide, so its mappings and overrides land
+        // (docs/design/m5-restore-placeholder-guides.md; correctness review F1).
         assertEquals(userTables(src.db), userTables(dst.db))
+        assertEquals(xtPlaceholder, guides(dst.db, "uid-a"))
+        assertEquals(listOf("k1|one.uk"), mappedToOwnGuide(dst.db, "uid-a"))
+        assertEquals("a placeholder never takes part in the guide", 0, dst.db.epgSourceDao().active().size)
         // Logins decrypt and are stored under new refs.
         val refA = dst.db.strings("SELECT credential_ref FROM playlist WHERE uid = 'uid-a'").single()
         assertEquals(PlaylistSecret(listOf("http://panel.a:8080", "http://backup.a"), "ann", "p+w"), (dst.creds.get(refA) as Outcome.Ok).value)
@@ -209,9 +244,13 @@ class RestoreMergeTest {
         dst.service.restore(file, "pw".toCharArray(), RestoreMode.MERGE)
         assertEquals(1L, dst.db.scalar("SELECT COUNT(*) FROM epg_source WHERE origin = 'USER'"))
         dst.service.restore(file, "pw".toCharArray(), RestoreMode.MERGE)
-        val used = dst.db.strings("SELECT credential_ref FROM playlist UNION SELECT credential_ref FROM epg_source").toSet()
+        val used = dst.db.strings("SELECT credential_ref FROM playlist UNION SELECT credential_ref FROM epg_source s WHERE NOT ${EpgSourceEntity.PLACEHOLDER_SQL}").toSet()
         assertEquals(used, dst.creds.secrets.keys.toSet())
         assertEquals(3, dst.creds.secrets.size)
+        // The XTREAM guide's placeholder holds a ref with nothing stored under it (its first refresh writes it).
+        val placeholderRefs = dst.db.strings("SELECT credential_ref FROM epg_source s WHERE ${EpgSourceEntity.PLACEHOLDER_SQL}")
+        assertEquals(1, placeholderRefs.size)
+        assertTrue(placeholderRefs.none { dst.creds.secrets.containsKey(it) })
     }
 
     @Test
@@ -223,10 +262,15 @@ class RestoreMergeTest {
         dst.service.restore(file, null, RestoreMode.MERGE)
         val first = userTables(dst.db)
         val counts = dst.db.scalar("SELECT COUNT(*) FROM playlist") to dst.db.scalar("SELECT COUNT(*) FROM favourite_list")
+        // Without a passphrase: the playlist asks for its login, and its guide still gets a placeholder and its mappings.
+        assertEquals(1L, dst.db.scalar("SELECT needs_reauth FROM playlist WHERE uid = 'uid-a'"))
+        assertEquals(xtPlaceholder, guides(dst.db, "uid-a"))
+        assertEquals(listOf("k1|one.uk"), mappedToOwnGuide(dst.db, "uid-a"))
         val again = dst.service.restore(file, null, RestoreMode.MERGE) as RestoreResult.Done
         assertEquals(0, again.playlistsAdded)
         assertEquals(2, again.playlistsUpdated)
         assertEquals(first, userTables(dst.db))
+        assertEquals("the second pass updates the placeholder, never duplicates it", xtPlaceholder, guides(dst.db, "uid-a"))
         assertEquals(counts, dst.db.scalar("SELECT COUNT(*) FROM playlist") to dst.db.scalar("SELECT COUNT(*) FROM favourite_list"))
         // Previews now match by uid.
         val preview = (dst.service.preview(file) as Outcome.Ok).value
@@ -276,6 +320,102 @@ class RestoreMergeTest {
         assertEquals(listOf("uid-a|Provider A"), dst.db.strings("SELECT uid || '|' || name FROM playlist WHERE id = $local"))
         // Field by field: the backup's columns win, the local custom number survives.
         assertEquals(listOf("My One|7|1"), dst.db.strings("SELECT custom_name || '|' || custom_number || '|' || hidden FROM channel_prefs WHERE playlist_id = $local AND stable_key = 'k1'"))
+        // The matched playlist never refreshed (refresh_seq = 0): it gets the placeholder, and the mapping lands on it.
+        assertEquals(xtPlaceholder, guides(dst.db, "uid-a"))
+        assertEquals(listOf("k1|one.uk"), mappedToOwnGuide(dst.db, "uid-a"))
+    }
+
+    @Test
+    fun aRefreshedPlaylistKeepsItsOwnGuidesAndGetsNoPlaceholder() = runBlocking {
+        val src = graph()
+        seed(src)
+        val file = export(src, null)
+        val dst = graph()
+        // Matched by source, refreshed on this device, and its provider lists no guide: the device's list wins.
+        val local = dst.db.newPlaylist("Old name", type = PlaylistType.XTREAM) { it.copy(uid = "local-uid", displaySource = "panel.a:8080", refreshSeq = 3) }
+        dst.service.restore(file, null, RestoreMode.MERGE)
+        assertEquals(0L, dst.db.scalar("SELECT COUNT(*) FROM epg_source WHERE playlist_id = ?", local))
+        assertEquals("the mapping to a guide this TV lacks is skipped", 0L, dst.db.scalar("SELECT COUNT(*) FROM epg_mapping WHERE playlist_id = ? AND stable_key = 'k1'", local))
+    }
+
+    @Test
+    fun aGuideOfTheWrongOriginForTheLocalPlaylistTypeGetsNoPlaceholder() = runBlocking {
+        val src = graph()
+        seed(src)
+        val file = export(src, null)
+        val dst = graph()
+        // Same uid, but the local playlist is an M3U list: the type check reads the local row, not the backup.
+        val local = dst.db.newPlaylist("Mine", type = PlaylistType.M3U_URL) { it.copy(uid = "uid-a", displaySource = "elsewhere/list.m3u") }
+        dst.service.restore(file, null, RestoreMode.MERGE)
+        assertEquals(0L, dst.db.scalar("SELECT COUNT(*) FROM epg_source WHERE playlist_id = ?", local))
+        assertEquals(0L, dst.db.scalar("SELECT COUNT(*) FROM epg_mapping WHERE playlist_id = ? AND source_id IS NOT NULL", local))
+    }
+
+    @Test
+    fun onlyOrdinalsARefreshCanProduceBecomePlaceholders() = runBlocking {
+        fun guide(uid: String, origin: String, ordinal: Int) =
+            BackupRecord.EpgSource(uid, "G$ordinal", origin, ordinal, priority = 2, enabled = true, shiftMin = 30, assumeZone = null, secretRef = null)
+        val x = EpgSourceEntity.ORIGIN_XTREAM
+        val h = EpgSourceEntity.ORIGIN_PLAYLIST_HEADER
+        val f = crafted(
+            BackupRecord.Playlist("uid-x", "X", "XTREAM", "panel.x", 0, true, emptyMap<String, JsonElement>(), null),
+            BackupRecord.Playlist("uid-m", "M", "M3U_URL", "m.example/list.m3u", 1, true, emptyMap<String, JsonElement>(), null),
+            guide("uid-x", x, 1), guide("uid-x", x, -1), guide("uid-x", x, 0), guide("uid-x", h, 0),
+            guide("uid-m", h, -1), guide("uid-m", h, EpgSourceEntity.MAX_HEADER_GUIDES), guide("uid-m", h, 1),
+            guide("uid-m", h, EpgSourceEntity.MAX_HEADER_GUIDES - 1), guide("uid-m", x, 0),
+            BackupRecord.EpgMapping("uid-m", "m1", "PLAYLIST_HEADER|uid-m|1|0", "one.uk"),
+            BackupRecord.EpgMapping("uid-m", "m2", "PLAYLIST_HEADER|uid-m|${EpgSourceEntity.MAX_HEADER_GUIDES}|0", "two.uk"),
+        )
+        val dst = graph()
+        dst.service.restore(f, null, RestoreMode.MERGE) as RestoreResult.Done
+        assertEquals(listOf("XTREAM|0|1|2|1|30|"), guides(dst.db, "uid-x"))
+        // A header placeholder at ordinal 1 needs no ordinal 0 next to it.
+        assertEquals(listOf("PLAYLIST_HEADER|1|1|2|1|30|", "PLAYLIST_HEADER|31|1|2|1|30|"), guides(dst.db, "uid-m"))
+        assertEquals(listOf("m1|one.uk"), mappedToOwnGuide(dst.db, "uid-m"))
+        assertEquals(1L, dst.db.scalar("SELECT COUNT(*) FROM epg_mapping"))
+    }
+
+    @Test
+    fun replaceOntoAnEmptyLibraryKeepsGuideMappingsAndOverrides() = runBlocking {
+        val src = graph()
+        seed(src)
+        val file = export(src, "pw")
+        val dst = graph()
+        dst.service.restore(file, "pw".toCharArray(), RestoreMode.REPLACE)
+        assertEquals(userTables(src.db), userTables(dst.db))
+        assertEquals(xtPlaceholder, guides(dst.db, "uid-a"))
+        assertEquals(listOf("k1|one.uk"), mappedToOwnGuide(dst.db, "uid-a"))
+    }
+
+    @Test
+    fun anExportTakenBeforeTheFirstRefreshRoundTrips() = runBlocking {
+        val src = graph()
+        seed(src)
+        val dst = graph()
+        dst.service.restore(export(src, "pw"), "pw".toCharArray(), RestoreMode.MERGE)
+        // The new TV exports before its first refresh: the placeholder travels with its overrides, keyed `|0`.
+        val third = graph()
+        third.service.restore(export(dst, "pw"), "pw".toCharArray(), RestoreMode.MERGE)
+        assertEquals(userTables(src.db), userTables(third.db))
+        assertEquals(xtPlaceholder, guides(third.db, "uid-a"))
+        assertEquals(listOf("k1|one.uk"), mappedToOwnGuide(third.db, "uid-a"))
+    }
+
+    @Test
+    fun deletingAPlaylistBeforeItsFirstRefreshLeavesNothingBehind() = runBlocking {
+        val src = graph()
+        seed(src)
+        val dst = graph()
+        dst.service.restore(export(src, "pw"), "pw".toCharArray(), RestoreMode.MERGE)
+        val a = dst.db.scalar("SELECT id FROM playlist WHERE uid = 'uid-a'")
+        val secretsBefore = dst.creds.secrets.size
+        val repo = app.thebox.data.repo.PlaylistRepository(
+            dst.db.playlistDao(), dst.db.xtreamAccountDao(), dst.db.epgSourceDao(), dst.creds, app.thebox.data.testutil.FakeTimeBaseFactory(), clock,
+        )
+        repo.delete(a)
+        assertEquals(0L, dst.db.scalar("SELECT COUNT(*) FROM epg_source WHERE playlist_id = ?", a))
+        assertEquals(0L, dst.db.scalar("SELECT COUNT(*) FROM epg_mapping WHERE playlist_id = ?", a))
+        assertEquals("only the playlist's own login goes", secretsBefore - 1, dst.creds.secrets.size)
     }
 
     @Test

@@ -135,6 +135,24 @@ class DaoTest {
     }
 
     @Test
+    fun activeLeavesOutRestorePlaceholdersOnly() = runBlocking {
+        // docs/design/m5-restore-placeholder-guides.md §3: placeholder = origin <> 'USER' AND url_hash = 0.
+        val p = db.newPlaylist()
+        val x = db.newPlaylist("X", type = app.thebox.core.source.PlaylistType.XTREAM)
+        val dao = db.epgSourceDao()
+        fun src(origin: String, playlist: Long?, ordinal: Int, hash: Long, priority: Int) =
+            EpgSourceEntity(name = "s$priority", origin = origin, playlistId = playlist, ordinal = ordinal, credentialRef = "r$priority", urlHash = hash, displaySource = "h", priority = priority, createdAt = 1)
+        dao.insert(src("PLAYLIST_HEADER", p, 0, 42, 0)) // real header guide at ordinal 0
+        val ph = dao.insert(src("PLAYLIST_HEADER", p, 1, 0, 1)) // placeholder at ordinal 1, next to it
+        dao.insert(src("XTREAM", x, 0, 0, 2)) // Xtream placeholder
+        dao.insert(src("USER", null, 0, 0, 3)) // a USER guide whose hash happens to be 0 is never a placeholder
+        assertEquals(listOf(0, 3), dao.active().map { it.priority })
+        assertEquals(listOf(false, true, true, false), dao.all().map { it.isPlaceholder })
+        assertEquals(4, dao.all().size)
+        assertTrue(dao.get(ph)!!.isPlaceholder)
+    }
+
+    @Test
     fun mappingAndMatch() = runBlocking {
         val p = db.newPlaylist()
         val s = db.epgSourceDao().insert(EpgSourceEntity(name = "u", origin = "USER", credentialRef = "r", urlHash = 1, displaySource = "h", priority = 0, createdAt = 1))

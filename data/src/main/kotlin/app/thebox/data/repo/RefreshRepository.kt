@@ -165,7 +165,8 @@ class RefreshRepository @Inject constructor(
                 val base = secret.urls.getOrNull(dl.login?.baseIndexUsed ?: playlist.activeBaseIndex) ?: secret.urls.first()
                 val xmltv = runCatching { XtreamUrls(base, secret.username.orEmpty(), secret.password.orEmpty()).xmltv() }
                     .onFailure { BoxLog.w(TAG, "xmltv url unavailable: ${it.javaClass.simpleName}") }.getOrNull()
-                sourcesChanged = syncSources(playlist, EpgSourceEntity.ORIGIN_XTREAM, listOfNotNull(xmltv), secret)
+                // An empty list would delete the guide row and its mappings; keep them when the URL cannot be built.
+                if (xmltv != null) sourcesChanged = syncSources(playlist, EpgSourceEntity.ORIGIN_XTREAM, listOf(xmltv), secret)
             } else {
                 val h = header ?: M3uHeader()
                 val detected = sink.detected
@@ -367,12 +368,18 @@ class RefreshRepository @Inject constructor(
         var changed = false
         val existing = sourceDao.forPlaylist(p.id).filter { it.origin == origin }.associateBy { it.ordinal }
         urls.forEachIndexed { ordinal, url ->
-            val hash = Hash64.of(Redact.text(template(url, user, pass)))
+            // Hash 0 marks a restore placeholder (EpgSourceEntity.isPlaceholder); a real row never stores it.
+            val hash = Hash64.of(Redact.text(template(url, user, pass))).let { if (it == EpgSourceEntity.PLACEHOLDER_HASH) 1L else it }
             val display = PlaylistRepository.displayHost(url)
             val cur = existing[ordinal]
             if (cur == null) {
                 val ref = playlists.newRef()
-                playlists.putSecret(ref, PlaylistSecret(listOf(url), headers = secret.headers))
+                // A row without its secret would fail every guide build with cred.missing: retry on the next refresh.
+                val put = playlists.putSecret(ref, PlaylistSecret(listOf(url), headers = secret.headers))
+                if (put is Outcome.Err) {
+                    BoxLog.w(TAG, "guide login not stored (${put.error.code}); retried next refresh")
+                    return@forEachIndexed
+                }
                 sourceDao.insert(
                     EpgSourceEntity(
                         name = if (urls.size > 1) "${p.name} (${ordinal + 1})" else p.name, origin = origin, playlistId = p.id,
@@ -383,7 +390,15 @@ class RefreshRepository @Inject constructor(
                 changed = true
             } else {
                 val old = (playlists.secret(cur.credentialRef) as? Outcome.Ok)?.value?.urls?.firstOrNull()
-                if (old != url) playlists.putSecret(cur.credentialRef, PlaylistSecret(listOf(url), headers = secret.headers))
+                if (old != url) {
+                    // S1: on failure the row keeps its old hash, so a restore placeholder stays a placeholder (inert)
+                    // and the next refresh retries; never a live row with no secret.
+                    val put = playlists.putSecret(cur.credentialRef, PlaylistSecret(listOf(url), headers = secret.headers))
+                    if (put is Outcome.Err) {
+                        BoxLog.w(TAG, "guide login not stored (${put.error.code}); retried next refresh")
+                        return@forEachIndexed
+                    }
+                }
                 if (cur.urlHash != hash || old != url) {
                     sourceDao.update(cur.copy(urlHash = hash, displaySource = display, etag = null, lastModified = null))
                     changed = true
