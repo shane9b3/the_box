@@ -158,10 +158,12 @@ interface ScoreSource {
     fun logoUrl(team: TeamLine): String
 
     /**
-     * (Update interval §3.2, additive) The endpoint [id]'s follow poll reads now ("nhl-landing", "nfl-event", "nfl-board"):
-     * the meter's window resets when it changes.
+     * (Update interval §3.2, additive) The endpoint [id]'s last follow answer came from ("nhl-landing", "nfl-event",
+     * "nfl-board"): the meter's window resets when a good poll names another one. Null (fix pass 2) = that answer was a
+     * one-off check on another endpoint (the S4 board read after a per-event 404) while the follow has not switched:
+     * not a sample of either window.
      */
-    fun followEndpoint(id: GameId): String = league.name.lowercase()
+    fun followEndpoint(id: GameId): String? = league.name.lowercase()
 }
 
 // ------------------------------------------------------------------ §2.3 demand

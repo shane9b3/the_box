@@ -153,6 +153,38 @@ class EspnEventSourceTest {
         assertEquals(listOf("event:$id", "board?dates=20261108"), requests)
     }
 
+    @Test fun theOneOffBoardCheckIsNotABoardSample() {
+        // Fix pass 2: the S4 board read after a JSON 404 is a one-off check (null), not the fallback.
+        val text = fixture(live)
+        val id = idOf(text)
+        board = { json("""{"events":[$text]}""") }
+        val s = perEvent()
+        assertTrue(runBlocking { s.game(game(id), startHint) } is Fetch.Ok)
+        assertEquals(null, s.followEndpoint(game(id)))
+        // The second shape failure switches: now it is the board.
+        assertTrue(runBlocking { s.game(game(id), startHint) } is Fetch.Ok)
+        assertEquals(PollMeter.NFL_BOARD, s.followEndpoint(game(id)))
+    }
+
+    @Test fun a403OnTheBoardFallbackIsA429() {
+        // Fix pass 3: the same mapping as per-event, so the 10 s floor and "slowed" apply on the fallback too.
+        val text = fixture(live)
+        val id = idOf(text)
+        event = { json("""{"code":400,"message":"bad"}""", 400) }
+        board = { json("""{"events":[$text]}""") }
+        val s = perEvent()
+        runBlocking { s.game(game(id), startHint); s.game(game(id), startHint) }
+        assertEquals(PollMeter.NFL_BOARD, s.followEndpoint(game(id)))
+        board = { json("{}", 403, "Retry-After" to "40") }
+        val f = runBlocking { s.game(game(id), startHint) } as Fetch.Failed
+        assertEquals(FailKind.HTTP_429, f.kind)
+        assertEquals(40, f.retryAfterS)
+        assertEquals(PollMeter.NFL_BOARD, s.followEndpoint(game(id)))
+        // The board-only follow maps it the same way.
+        val b = runBlocking { boardOnly().game(game(id), startHint) } as Fetch.Failed
+        assertEquals(FailKind.HTTP_429, b.kind)
+    }
+
     // ---------------------------------------------------------------- the fallback (S3)
 
     @Test fun twoJson400sSwitchToTheBoardAndItIsRetriedEveryTenMinutes() {

@@ -65,9 +65,16 @@ fun rowHeight(row: SettingsRow): Int = when {
 internal val PROGRESS_ROW = app.thebox.core.settings.state.StoragePages.ROW_T_PROGRESS
 internal val SEARCHING_ROW = app.thebox.core.settings.state.StoragePages.ROW_SEARCHING
 internal val INTERVAL_ROW = app.thebox.core.settings.tree.SportsRows.INTERVAL
-private const val INTERVAL_DESC_LINES = 4
+/**
+ * (Fix pass 4) The focused interval row's detail: the longest (a fixed 5 s on the fallback while slowed: recommendation,
+ * faster, slowed, fallback) needs about 5–6 lines at the row's width; the league line is dropped when those show.
+ */
+internal const val INTERVAL_DESC_LINES = 6
 /** The focused interval row's top and bottom padding once it grows past one line of detail. */
 private const val INTERVAL_PAD_V = 14
+
+/** The description's line cap: the focused interval row wraps to [INTERVAL_DESC_LINES]; every other row is one line. */
+internal fun descLines(row: SettingsRow, focused: Boolean): Int = if (focused && row.id == INTERVAL_ROW) INTERVAL_DESC_LINES else 1
 
 /** An Info row of the storage pages with lines under its label. */
 internal fun isStorageInfo(row: SettingsRow): Boolean =
@@ -157,7 +164,7 @@ private fun RowBody(row: SettingsRow, focused: Boolean, moving: Boolean) {
                 val color = if (amber) SettingsUi.Amber.copy(alpha = alpha) else text.copy(alpha = 0.55f * alpha)
                 // (Update interval §5.2) The interval row's detail (recommendation, time per update, MB an hour, the
                 // floor / slowed / fallback lines) wraps while the row is focused; every other row stays one line.
-                val lines = if (focused && row.id == INTERVAL_ROW) INTERVAL_DESC_LINES else 1
+                val lines = descLines(row, focused)
                 Line(app.thebox.core.settings.state.StorageMarks.plain(d), SettingsUi.RowDesc.copy(color = color), Modifier.padding(top = 4.dp), maxLines = lines)
             }
             (row.kind as? RowKind.Info)?.let { info ->

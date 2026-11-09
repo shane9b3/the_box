@@ -514,3 +514,36 @@ fixes: core 4,356 / data 542 (3 Samba skipped) / player 511 / ui 648 / app 73. F
   test fakes are unchanged.
 - The fixtures kept their names (`sbEvent.json`, `ev_401873050.json`, `ev_401873045.json`), not `event-*.json`.
 - Device items D1–D4 stay open (Stick p90, frame time at 5 s, ESPN 429s over a game, per-event at halftime/OT).
+
+## Fix pass (2026-11-08)
+
+Code review of e62169e: nothing serious; the lead accepted five items. Each fix has a unit test that fails with the fix
+reverted. NHL behaviour is unchanged (the NHL source, its meter and the NHL machine paths are untouched).
+
+1. **The board fallback ended with the follow, but its meter did not.** `ScoreRepositoryImpl.persist` now also resets
+   the NFL meter from `nfl-board` to a fresh `nfl-event` window on any follow change, and `start()` does the same for a
+   meter the last process left on the board (a new process's ESPN source always starts a follow on per-event); slowed is
+   kept across a restart mid-follow, cleared with the follow as before. So the row's fallback line, Auto's 10 s and the
+   next follow's first gap go with the follow. A sample on a fresh (empty) meter is persisted at once, as the first one
+   always was. Tests: `ScoreRepositoryIntervalTest.aFollowThatEndsOnTheBoardLeavesNoFallbackBehind` (meter reset, the
+   next follow polls every 5 s from its first gap), `…aBoardMeterFromTheLastProcessIsResetAtStart`.
+2. **Only a real switch moves the meter.** `PollMeter.add` drops a *failed* sample on another endpoint (the window and
+   the hysteresis stay); only a good `Ok` there starts a fresh window. `ScoreSource.followEndpoint` may now return null:
+   the ESPN source returns null after the one-off S4 board check (a per-event JSON 404 read against the board) unless that
+   check is the second shape failure that switches; the repository takes no sample (Ok or timeout) for a null endpoint,
+   while a 429 still marks slowed. Tests: `PollMeterTest.aFailureOnAnotherEndpointLeavesTheWindowAndTheHysteresis`,
+   `EspnEventSourceTest.theOneOffBoardCheckIsNotABoardSample`, `ScoreRepositoryIntervalTest.aOneOffCheckOnAnotherEndpointIsNotASample`.
+3. **A 403 on the board path is a 429 too.** `EspnScoreSource.gameFrom` (the follow's board reads, both on the fallback
+   and in the board-only source) maps 403 → `HTTP_429` with its `Retry-After`, as `eventGame` does, so the 20 s base, the
+   10 s floor and "slowed" apply. The day list (`today`/`day`) keeps 403 = `HTTP_OTHER`. Test:
+   `EspnEventSourceTest.a403OnTheBoardFallbackIsA429`.
+4. **The focused interval row's detail wraps to 6 lines** (`INTERVAL_DESC_LINES`, now behind `descLines(row, focused)`;
+   every other row and the unfocused interval row stay one line), and `WpaPages.intervalRow` drops the league line when
+   the slowed or the fallback line shows. Tests: `IntervalRowLinesTest` (ui), `SportsIntervalRowTest.theLeagueLineGivesWayToTheSlowedAndFallbackLines`.
+5. **The S5 older-body hold is bounded at 30 s** (`SportsConstants.NFL_OLDER_HOLD_MAX_MS`), timed from the first of a run
+   of held bodies; after that, an older body whose score or phase differs from the held one is accepted (ESPN's
+   correction, e.g. a deleted overturned TD sending `lastPlay.id` back down); one with the same score and phase stays a
+   no-op. A Final body is never held. Why 30 s: a body that merely lags is at most ~20 s old (the board is 6–9 s behind
+   per-event and its `max-age` is 10 s), so 30 s never lets a lagging copy through; it is also the longest NFL choice, so
+   at any choice the correction shows on the first poll at least 30 s after it first arrived. Tests:
+   `ScoreBugMachineIntervalTest.anOlderBodyIsHeldAtMostThirtySeconds`, `…anOlderBodyWithTheSameScoreStaysANoOpAndAFinalIsNeverHeld`.

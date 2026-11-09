@@ -60,7 +60,7 @@ class ScoreRepositoryIntervalTest {
         var dayWorkMs = 0L
         var inFlight = 0
         var maxInFlight = 0
-        var endpoint = if (league == League.NFL) PollMeter.NFL_EVENT else PollMeter.NHL_LANDING
+        var endpoint: String? = if (league == League.NFL) PollMeter.NFL_EVENT else PollMeter.NHL_LANDING
         lateinit var answer: () -> Fetch<GameSnapshot>
 
         override suspend fun today(): Fetch<DayBoard> {
@@ -81,7 +81,7 @@ class ScoreRepositoryIntervalTest {
             }
         }
         override fun logoUrl(team: TeamLine): String = ""
-        override fun followEndpoint(id: GameId): String = endpoint
+        override fun followEndpoint(id: GameId): String? = endpoint
         fun gaps() = polls.zipWithNext { a, b -> b - a }
     }
 
@@ -224,6 +224,66 @@ class ScoreRepositoryIntervalTest {
         // The board's 10 s feed moves Auto to 10 s.
         run(60_000L)
         assertTrue(r.source.gaps().toString(), r.source.gaps().takeLast(3).all { it == 10_000L })
+    }
+
+    // ---------------------------------------------------------------- fix pass 1 and 2: the fallback ends with the follow
+
+    private fun TestScope.onTheBoard(r: Rig) {
+        r.source.endpoint = PollMeter.NFL_BOARD
+        r.source.answer = { Fetch.Ok(nflLive, testScheduler.currentTime, null, 0, maxAgeS = 10, wireBytes = 19_700) }
+        run(40_000L)
+        assertEquals(PollMeter.NFL_BOARD, r.meter!!.endpoint)
+    }
+
+    @Test fun aFollowThatEndsOnTheBoardLeavesNoFallbackBehind() = runTest {
+        val r = rig(nflLive)
+        run(20_000L)
+        onTheBoard(r)
+        r.repo.follow(null)
+        runCurrent()
+        val m = r.meter!!
+        assertEquals("the settings row's fallback line goes with the follow", PollMeter.NFL_EVENT, m.endpoint)
+        assertTrue(m.workMs.isEmpty())
+        assertEquals(5, PollMeter.recommended(m, League.NFL))
+        // The next follow starts on per-event at 5 s, not the board's 10 s.
+        val next = SportsFixtures.nflGame(id = "401899002", clock = GameClock(222, running = false, inIntermission = false))
+        r.source.endpoint = PollMeter.NFL_EVENT
+        r.source.answer = { Fetch.Ok(next, testScheduler.currentTime, null, 0, maxAgeS = 1, wireBytes = 2_200) }
+        val from = r.source.polls.size
+        r.repo.follow(next)
+        run(30_000L)
+        val gaps = r.source.polls.drop(from).zipWithNext { a, b -> b - a }
+        assertTrue(gaps.toString(), gaps.size >= 4 && gaps.all { it == 5_000L })
+    }
+
+    @Test fun aBoardMeterFromTheLastProcessIsResetAtStart() = runTest {
+        var board: PollMeasure? = null
+        repeat(12) { board = PollMeter.add(board, League.NFL, PollMeter.NFL_BOARD, 300, 19_700, 10) }
+        val r = rig(nflLive, doc = SportsFollowDoc(pollPhaseMs = 1_500L, meters = mapOf(League.NFL to board!!)))
+        val m = r.meter!!
+        assertEquals(PollMeter.NFL_EVENT, m.endpoint)
+        assertTrue(m.workMs.isEmpty())
+    }
+
+    @Test fun aOneOffCheckOnAnotherEndpointIsNotASample() = runTest {
+        val r = rig(nflLive)
+        run(60_000L)
+        val before = r.meter!!
+        // The S4 board read after a per-event 404 (the source says null): neither an Ok nor a timeout counts.
+        r.source.endpoint = null
+        r.source.answer = { Fetch.Ok(nflLive, testScheduler.currentTime, null, 0, maxAgeS = 10, wireBytes = 19_700) }
+        run(5_000L)
+        r.source.answer = { Fetch.Failed(FailKind.TIMEOUT, null, testScheduler.currentTime) }
+        run(10_000L)
+        r.source.endpoint = PollMeter.NFL_EVENT
+        r.source.answer = { Fetch.Ok(nflLive, testScheduler.currentTime, null, 0, maxAgeS = 1, wireBytes = 2_200) }
+        run(70_000L)
+        val m = r.meter!!
+        assertEquals(PollMeter.NFL_EVENT, m.endpoint)
+        assertEquals("the board's 10 s max-age never reached the per-event window", 1, m.maxAgeS)
+        assertTrue(m.wireBytes.all { it == 2_200 })
+        assertTrue("the window kept growing: ${before.workMs.size} → ${m.workMs.size}", m.workMs.size > before.workMs.size)
+        assertTrue("no timeout sample", m.workMs.all { it == 0 })
     }
 
     @Test fun aSlowBoxMovesAutoUp() = runTest {

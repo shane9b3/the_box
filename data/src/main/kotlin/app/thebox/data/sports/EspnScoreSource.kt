@@ -168,7 +168,8 @@ class EspnScoreSource internal constructor(
     private class FollowState(val id: String) {
         var shapeFails = 0
         var fallbackAt: Long? = null
-        var endpoint = PollMeter.NFL_EVENT
+        /** The meter endpoint of the last answer; null = a one-off board check while still on per-event (fix pass 2). */
+        var endpoint: String? = PollMeter.NFL_EVENT
     }
 
     private var followState: FollowState? = null
@@ -176,9 +177,15 @@ class EspnScoreSource internal constructor(
     private fun stateOf(id: GameId): FollowState =
         followState?.takeIf { it.id == id.id } ?: FollowState(id.id).also { followState = it }
 
-    /** (Update interval §3.2) The endpoint the last [game] answer for [id] came from. */
-    override fun followEndpoint(id: GameId): String =
-        if (!perEvent) PollMeter.NFL_BOARD else followState?.takeIf { it.id == id.id }?.endpoint ?: PollMeter.NFL_EVENT
+    /**
+     * (Update interval §3.2) The endpoint the last [game] answer for [id] came from: the board only once the follow has
+     * switched to it; null after the one-off S4 board check (fix pass 2), which is a sample of neither window.
+     */
+    override fun followEndpoint(id: GameId): String? {
+        if (!perEvent) return PollMeter.NFL_BOARD
+        val st = followState?.takeIf { it.id == id.id } ?: return PollMeter.NFL_EVENT
+        return st.endpoint
+    }
 
     /**
      * (Update interval §4.2; review S3, S4) The per-event read:
@@ -186,7 +193,8 @@ class EspnScoreSource internal constructor(
      * - **JSON 404** ("No event found", cached up to an hour): the dated board once (S4). Absent there too = `NotFound`;
      *   present = the board's snapshot, counted as a shape failure.
      * - **JSON 400**: a shape failure.
-     * - **403** (a WAF block of a hot client): treated as a 429 (the 20 s back-off base and the 10 s floor), no switch.
+     * - **403** (a WAF block of a hot client): treated as a 429 (the 20 s back-off base and the 10 s floor), no switch;
+     *   the board path's follow reads map it the same way (fix pass 3).
      * - An HTML 404, a 30x, 429, 5xx, IO and timeouts never switch; the back-off handles them.
      * - [SportsConstants.PER_EVENT_SWITCH_AFTER] shape failures in a row switch this follow to the board path at once;
      *   the per-event endpoint is tried again every [SportsConstants.PER_EVENT_RETRY_MS] (one more shape failure goes back).
@@ -224,10 +232,11 @@ class EspnScoreSource internal constructor(
             (answer.code == 400 && !answer.html)
         return when {
             fetch == Fetch.NotFound -> {
-                // S4: the 404 may be a cached edge glitch; only "absent from the board too" removes the follow.
-                st.endpoint = PollMeter.NFL_BOARD
+                // S4: the 404 may be a cached edge glitch; only "absent from the board too" removes the follow. The board
+                // read is a one-off check (endpoint null, no meter sample) unless it is the shape failure that switches.
                 val board = boardGame(id, startUtcMs)
-                if (board is Fetch.Ok) shapeFailed(st, now)
+                val switched = board is Fetch.Ok && shapeFailed(st, now)
+                st.endpoint = if (switched) PollMeter.NFL_BOARD else null
                 board
             }
             shape -> if (shapeFailed(st, now)) {
@@ -327,7 +336,9 @@ class EspnScoreSource internal constructor(
                 }
             }
             Fetch.NotFound -> GameAnswer.Absent
-            is Fetch.Failed -> GameAnswer.Failed(f)
+            // (Fix pass 3) A 403 on the follow's board read is the same WAF slow-down as on per-event: a 429 (the 20 s
+            // back-off base, the 10 s floor and "slowed").
+            is Fetch.Failed -> GameAnswer.Failed(if (answer.code == HTTP_FORBIDDEN) Fetch.Failed(FailKind.HTTP_429, f.retryAfterS, f.receivedMono) else f)
         }
         val logged: Fetch<*> = when (result) {
             is GameAnswer.Found -> result.fetch

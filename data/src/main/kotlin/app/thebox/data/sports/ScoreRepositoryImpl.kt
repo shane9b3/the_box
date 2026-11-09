@@ -296,6 +296,9 @@ class ScoreRepositoryImpl internal constructor(
     private fun start() {
         doc = store.flow(SportsFollowDomain).value
         meters.putAll(doc.meters)
+        // (Fix pass 1) A new process's ESPN source starts every follow on per-event, so a board meter left by the last
+        // process (a follow that ended, or the app stopped, on the fallback) is stale: back to a fresh per-event window.
+        if (resetNflFallback(keepSlowed = true)) persistMeters(mono.nowMs())
         phaseMs = doc.pollPhaseMs?.takeIf { it in SportsConstants.POLL_PHASE_MIN_MS..SportsConstants.POLL_PHASE_MAX_MS }
             ?: (SportsConstants.POLL_PHASE_MIN_MS + random.nextLong(SportsConstants.POLL_PHASE_MAX_MS - SportsConstants.POLL_PHASE_MIN_MS + 1))
                 .also { drawn -> persist(doc.copy(pollPhaseMs = drawn)) }
@@ -547,6 +550,9 @@ class ScoreRepositoryImpl internal constructor(
             // (Update interval §3.2, review S2/S10) The slowed state belongs to one follow; the meters are written when a
             // follow ends (or another starts), so the settings row shows the latest measurement.
             for ((l, m) in meters.entries.toList()) if (m.slowed) meters[l] = m.copy(slowed = false)
+            // (Fix pass 1) The board fallback belongs to one follow too: the next follow starts on per-event, so the
+            // meter (Auto, the settings row's fallback line) goes back to a fresh per-event window.
+            resetNflFallback(keepSlowed = false)
             if (metersDirty || next.meters != meters) next = next.copy(meters = meters.toMap())
             metersDirty = false
             meterPersistAt = mono.nowMs()
@@ -579,24 +585,27 @@ class ScoreRepositoryImpl internal constructor(
      * a 403, which the ESPN source reports as one) marks the NFL follow slowed (S2). The first sample of a process is
      * skipped. Persisted at most once per [SportsConstants.METER_PERSIST_MS], at once when slowed or the endpoint changes.
      */
-    private fun measure(game: FollowedGame, endpoint: String, f: Fetch<GameSnapshot>, workMs: Long) {
+    private fun measure(game: FollowedGame, endpoint: String?, f: Fetch<GameSnapshot>, workMs: Long) {
         val league = game.league
         val was = meters[league]
         var m = was
         when (f) {
-            is Fetch.Ok -> if (f.value.id == game.id && machine.followed()?.id == game.id) {
+            // (Fix pass 2) A null endpoint is a one-off check on another endpoint: never a sample (a 429 still slows).
+            is Fetch.Ok -> if (endpoint != null && f.value.id == game.id && machine.followed()?.id == game.id) {
                 if (meterWarm.add(league)) return
                 m = PollMeter.add(m, league, endpoint, workMs, f.wireBytes, f.maxAgeS)
             }
             Fetch.NotFound -> Unit
             is Fetch.Failed -> when (f.kind) {
-                FailKind.TIMEOUT, FailKind.IO -> if (league in meterWarm) {
+                FailKind.TIMEOUT, FailKind.IO -> if (endpoint == null) {
+                    Unit
+                } else if (league in meterWarm) {
                     m = PollMeter.add(m, league, endpoint, workMs, null, null, failed = true)
                 } else {
                     meterWarm += league
                 }
                 FailKind.HTTP_429 -> if (league == League.NFL && m?.slowed != true) {
-                    m = (m ?: PollMeasure(endpoint = endpoint)).copy(slowed = true)
+                    m = (m ?: PollMeasure(endpoint = endpoint ?: PollMeter.NFL_EVENT)).copy(slowed = true)
                 }
                 else -> Unit
             }
@@ -605,10 +614,22 @@ class ScoreRepositoryImpl internal constructor(
         meters[league] = m
         metersDirty = true
         val now = mono.nowMs()
-        val urgent = was == null || was.slowed != m.slowed || was.endpoint != m.endpoint
+        val urgent = was == null || was.workMs.isEmpty() || was.slowed != m.slowed || was.endpoint != m.endpoint
         val at = meterPersistAt
         if (urgent || at == null || now - at >= SportsConstants.METER_PERSIST_MS) persistMeters(now)
         pushInterval()
+    }
+
+    /**
+     * (Fix pass 1) The NFL meter on the board fallback → a fresh [PollMeter.NFL_EVENT] window (the per-event window was
+     * already dropped when it switched). True when it changed.
+     */
+    private fun resetNflFallback(keepSlowed: Boolean): Boolean {
+        val m = meters[League.NFL] ?: return false
+        if (m.endpoint != PollMeter.NFL_BOARD) return false
+        meters[League.NFL] = PollMeasure(endpoint = PollMeter.NFL_EVENT, slowed = keepSlowed && m.slowed)
+        metersDirty = true
+        return true
     }
 
     private fun persistMeters(now: Long) {

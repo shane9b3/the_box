@@ -90,6 +90,13 @@ object SportsConstants {
     const val PER_EVENT_RETRY_MS = 600_000L
     /** Two shape failures in a row (a 200 that does not decode, a JSON 400) switch the follow to the board. */
     const val PER_EVENT_SWITCH_AFTER = 2
+    /**
+     * (Fix pass 5) The S5 older-body guard holds a run of older NFL bodies at most this long. A body that merely lags
+     * (the board fallback is 6–9 s behind per-event; the board's `max-age` is 10 s) is at most ~20 s old, so 30 s never
+     * lets a lagging copy through; and it is the longest NFL choice, so a correction (an overturned score whose
+     * `lastPlay.id` went back down) shows on the first poll ≥ 30 s after it first arrived, at any choice.
+     */
+    const val NFL_OLDER_HOLD_MAX_MS = 30_000L
 
     /** The interval choices of [league] (no Auto). */
     fun intervalChoices(league: League): List<Int> = if (league == League.NHL) INTERVAL_CHOICES_NHL_S else INTERVAL_CHOICES_NFL_S

@@ -56,6 +56,8 @@ class ScoreBugMachine(
     private var liveMs: Long? = null
     /** When the last `Ok` finished (after its decode, F15): the NFL's completion-based schedule runs from it. */
     private var doneMono = 0L
+    /** (Fix pass 5) When the first of the current run of held older NFL bodies arrived; null = none held. */
+    private var olderSince: Long? = null
 
     private var followAt = 0L
     private var eagerAt: Long? = null
@@ -171,13 +173,14 @@ class ScoreBugMachine(
                 failures = 0; failAt = null; backoffAt = null; notFoundFirst = null
                 doneMono = now
                 val held = lastOk?.value
-                if (fast() && held != null && olderNfl(held, f.value)) {
+                if (fast() && held != null && olderNfl(held, f.value) && holdsOlder(now, held, f.value)) {
                     // (Review S5) An older body (the board fallback lags per-event by 6–9 s): a no-op Ok for stale and the
                     // schedule, never shown, so the score never goes back in time.
                     lastOk = f.copy(value = held)
                     step()
                     return
                 }
+                olderSince = null
                 lastOk = f
                 f.serverDateMs?.let { date -> skewMs = date - (wall() - (now - f.receivedMono)) }
                 if (f.value.startUtcMs != g.startUtcMs) game = g.copy(startUtcMs = f.value.startUtcMs)
@@ -408,6 +411,7 @@ class ScoreBugMachine(
      */
     private fun olderNfl(prev: GameSnapshot, s: GameSnapshot): Boolean {
         if (prev.id != s.id || s.id.league != League.NFL) return false
+        if (s.phase == GamePhase.FINAL) return false // (fix pass 5) a Final body is never held
         val a = (prev.detail as? LeagueDetail.Nfl)?.lastPlay?.id?.toLongOrNull()
         val b = (s.detail as? LeagueDetail.Nfl)?.lastPlay?.id?.toLongOrNull()
         if (a != null && b != null && a != b) return b < a
@@ -420,6 +424,18 @@ class ScoreBugMachine(
         val earlier = sp < pp || (sp == pp && pc != null && sc != null && sc > pc)
         val sum = { g: GameSnapshot -> (g.away.score ?: 0) + (g.home.score ?: 0) }
         return earlier && sum(s) <= sum(prev)
+    }
+
+    /**
+     * (Fix pass 5) Whether the older [s] is still held. The guard assumes ESPN's `lastPlay.id` only rises; an overturned
+     * scoring play that ESPN deletes can send it back down for good. So a run of older bodies is held for at most
+     * [SportsConstants.NFL_OLDER_HOLD_MAX_MS] from the first; after that, one whose score or phase differs from the held
+     * snapshot is ESPN's correction and is shown. One with the same score and phase stays a no-op.
+     */
+    private fun holdsOlder(now: Long, held: GameSnapshot, s: GameSnapshot): Boolean {
+        val since = olderSince ?: now.also { olderSince = it }
+        if (now - since < SportsConstants.NFL_OLDER_HOLD_MAX_MS) return true
+        return s.phase == held.phase && s.away.score == held.away.score && s.home.score == held.home.score
     }
 
     /** Whether a rise to SEEN may poll now: not for a finished game, nor for a pre-game one still asleep. */
@@ -819,6 +835,7 @@ class ScoreBugMachine(
         queue.clear(); shown = null; lastOk = null
         eagerAt = null; suppressStale = false
         failures = 0; failAt = null; backoffAt = null; notFoundFirst = null
+        olderSince = null
         // goalSeq is monotonic for the machine's lifetime (goal animation §5.1, B1.4): a re-follow never reuses a seq
         // the UI has already seen.
         goalSide = null; markUntil = null; goalPp = false

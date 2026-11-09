@@ -635,12 +635,16 @@ class WpaPages(
         }
         if (league == League.NHL) parts += t(SettingsText.SPORTS_INTERVAL_NHL_FLOOR)
         if (chosen != 0 && chosen < rec) parts += t(SettingsText.SPORTS_INTERVAL_FASTER)
-        if (league == League.NFL && m?.slowed == true) parts += t(SettingsText.SPORTS_INTERVAL_SLOWED)
-        if (league == League.NFL && m?.endpoint == PollMeter.NFL_BOARD) {
-            parts += t(SettingsText.SPORTS_INTERVAL_FALLBACK, (PollMeter.bytesPerPoll(m, league) + 500) / 1000)
+        val slowed = league == League.NFL && m?.slowed == true
+        val fallback = league == League.NFL && m?.endpoint == PollMeter.NFL_BOARD
+        if (slowed) parts += t(SettingsText.SPORTS_INTERVAL_SLOWED)
+        if (fallback) parts += t(SettingsText.SPORTS_INTERVAL_FALLBACK, (PollMeter.bytesPerPoll(m, league) + 500) / 1000)
+        // (Fix pass 4) The league line is the least urgent: it gives way to the slowed / fallback lines, so the focused
+        // row's wrapped detail (6 lines) never cuts off the state that explains the interval.
+        if (!slowed && !fallback) {
+            val other = if (league == League.NHL) League.NFL else League.NHL
+            parts += t(SettingsText.SPORTS_INTERVAL_LEAGUE, league.name, other.name)
         }
-        val other = if (league == League.NHL) League.NFL else League.NHL
-        parts += t(SettingsText.SPORTS_INTERVAL_LEAGUE, league.name, other.name)
         return choice(SportsRows.INTERVAL, t(SettingsText.SPORTS_INTERVAL, league.name), options, chosen.toString(), parts.joinToString(" "))
     }
 

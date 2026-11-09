@@ -16,6 +16,7 @@ import kotlin.math.ceil
  *   [SportsConstants.METER_DOWN_STREAK] samples in a row whose `METER_FACTOR × p90` fits in
  *   [SportsConstants.METER_DOWN_SHARE] of the lower choice.
  * - **An endpoint change resets the window** (the board fallback has a 10 s feed); [PollMeasure.slowed] survives it.
+ *   Only a good sample changes the endpoint; a failed one on another endpoint is dropped (fix pass 2).
  * - **Effective interval** = the choice (Auto = the recommendation), raised to [SportsConstants.AUTO_429_FLOOR_S] for the
  *   NFL after a 429 or 403 (S2: a server instruction, so for every choice).
  */
@@ -59,7 +60,10 @@ object PollMeter {
     ): PollMeasure {
         val base = when {
             m == null -> PollMeasure(endpoint = endpoint)
-            m.endpoint != endpoint -> PollMeasure(endpoint = endpoint, slowed = m.slowed)
+            // (Fix pass 2) Only a good poll on the new endpoint moves the meter there (the source names a new endpoint
+            // only once it has switched): a failure on another endpoint says nothing about either window, so it is dropped
+            // and the window and the hysteresis stay as they are.
+            m.endpoint != endpoint -> if (failed) return m else PollMeasure(endpoint = endpoint, slowed = m.slowed)
             else -> m
         }
         val w = (if (failed) minOf(workMs, SportsConstants.METER_FAIL_CAP_MS.toLong()) else workMs).coerceIn(0L, Int.MAX_VALUE.toLong()).toInt()

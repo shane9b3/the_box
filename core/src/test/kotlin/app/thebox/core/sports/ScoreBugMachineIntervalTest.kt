@@ -348,6 +348,49 @@ class ScoreBugMachineIntervalTest {
     }
 
     @Test
+    fun anOlderBodyIsHeldAtMostThirtySeconds() {
+        // Fix pass 5: ESPN deletes an overturned TD and lastPlay goes back to a lower id for good.
+        val r = Rig(nflStart, liveMs = 5_000L)
+        r.follow(nfl())
+        r.ok(nfl(away = 24, lastPlayId = "4013906"))
+        r.at(5_000L)
+        r.ok(nfl(away = 30, secs = 190, lastPlayId = "4013936")) // the TD, later overturned
+        r.at(5_001L)
+        assertEquals(30, r.m.view()!!.away.score)
+        var t = 10_000L
+        while (t < 10_000L + SportsConstants.NFL_OLDER_HOLD_MAX_MS) {
+            r.at(t)
+            r.ok(nfl(away = 24, secs = 185, lastPlayId = "4013906"))
+            r.at(t + 1)
+            assertEquals(30, r.m.view()!!.away.score, "held at $t")
+            t += 5_000L
+        }
+        r.at(t)
+        r.ok(nfl(away = 24, secs = 180, lastPlayId = "4013906"))
+        r.at(t + 1)
+        assertEquals(24, r.m.view()!!.away.score, "the correction shows after 30 s")
+    }
+
+    @Test
+    fun anOlderBodyWithTheSameScoreStaysANoOpAndAFinalIsNeverHeld() {
+        val r = Rig(nflStart, liveMs = 5_000L)
+        r.follow(nfl())
+        r.ok(nfl(secs = 200, lastPlayId = "4013936"))
+        r.at(1L)
+        r.at(5_000L)
+        r.ok(nfl(secs = 210, lastPlayId = "4013906"))
+        r.at(40_000L)
+        r.ok(nfl(secs = 215, lastPlayId = "4013906"))
+        r.at(45_001L)
+        assertEquals(200, r.m.view()!!.clockSecs, "same score and phase: still held")
+        // A Final body is never held, however its lastPlay compares.
+        r.at(50_000L)
+        r.ok(nfl(away = 27, phase = GamePhase.FINAL, lastPlayId = "4013900"))
+        r.at(50_001L)
+        assertEquals(27, r.m.view()!!.away.score)
+    }
+
+    @Test
     fun identicalBodiesAreEqualViews() {
         // N3: the StateFlow dedupes equal views, so an unchanged body never recomposes the bug.
         val r = Rig(nflStart, liveMs = 5_000L)

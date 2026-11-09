@@ -72,6 +72,20 @@ class PollMeterTest {
     }
 
     @Test
+    fun aFailureOnAnotherEndpointLeavesTheWindowAndTheHysteresis() {
+        // Fix pass 2: a 2 s box, held at 10 s on per-event.
+        val m = fill(League.NFL, 2_000, 20)
+        assertEquals(10, m.recommendedS)
+        val before = m
+        val failed = PollMeter.add(m, League.NFL, PollMeter.NFL_BOARD, 10_000, null, null, failed = true)
+        assertEquals(before, failed, "a failed sample on another endpoint is dropped")
+        // A good sample there is a real switch: a fresh window.
+        val switched = PollMeter.add(m, League.NFL, PollMeter.NFL_BOARD, 300, 20_000, 10)
+        assertEquals(PollMeter.NFL_BOARD, switched.endpoint)
+        assertEquals(listOf(300), switched.workMs)
+    }
+
+    @Test
     fun theWindowKeepsTwentyAndFailuresCountCappedWithoutBytes() {
         val m = fill(League.NFL, 100, 25)
         assertEquals(SportsConstants.METER_WINDOW, m.workMs.size)

@@ -106,6 +106,20 @@ class SportsIntervalRowTest {
     }
 
     @Test
+    fun theLeagueLineGivesWayToTheSlowedAndFallbackLines() {
+        // Fix pass 4: a fixed 5 s on the fallback while slowed is the longest detail; the league line drops out.
+        store.update(SportsDomain) { it.copy(league = League.NFL, nflIntervalS = 5) }
+        val board = meter(League.NFL, 300, n = 3, endpoint = PollMeter.NFL_BOARD, maxAge = 10, bytes = 19_700)
+        for (m in listOf(board, board.copy(slowed = true), meter(League.NFL, 300).copy(slowed = true))) {
+            store.update(SportsFollowDomain) { it.copy(meters = mapOf(League.NFL to m)) }
+            val d = row().description!!
+            assertTrue(!d.contains("SPORTS_INTERVAL_LEAGUE"), d)
+        }
+        store.update(SportsFollowDomain) { it.copy(meters = mapOf(League.NFL to meter(League.NFL, 300))) }
+        assertTrue(row().description!!.endsWith("SPORTS_INTERVAL_LEAGUE(NFL,NHL)"))
+    }
+
+    @Test
     fun aStoredValueNotInTheListReadsAsTheNextAbove() {
         store.update(SportsDomain) { it.copy(league = League.NFL, nflIntervalS = 2) }
         assertEquals("SPORTS_INTERVAL_RECOMMENDED(SPORTS_INTERVAL_AFTER(5))", row().value)
