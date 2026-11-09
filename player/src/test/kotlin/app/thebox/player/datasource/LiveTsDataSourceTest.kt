@@ -722,10 +722,12 @@ class LiveTsDataSourceTest {
         readExactly(ds, 3 * PKT)
         assertEquals("no read in progress", 0L, telemetry.readPendingSinceMs)
         val blocked = executor.submit<Int> { ds.read(ByteArray(PKT), 0, PKT) }
-        Thread.sleep(300)
+        // Poll rather than a fixed sleep: a slow CI runner may not have reached the socket read in 300 ms.
+        val until = System.nanoTime() + 10_000_000_000L
+        while (telemetry.readPendingSinceMs == 0L && System.nanoTime() < until) Thread.sleep(20)
         assertTrue("a read waits on the socket", telemetry.readPendingSinceMs > 0)
         ds.close()
-        try { blocked.get(2, TimeUnit.SECONDS) } catch (_: ExecutionException) { }
+        try { blocked.get(10, TimeUnit.SECONDS) } catch (_: ExecutionException) { }
         assertEquals(0L, telemetry.readPendingSinceMs)
     }
 

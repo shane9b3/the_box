@@ -368,7 +368,8 @@ class PhoneApiNetworkFolderTest {
             val cookie = l.pair()
             assertEquals(202, l.send(cookie))
             assertEquals(ServerPhase.RECEIVED, l.link.state.value.phase)
-            assertEquals(1, submissions.size)
+            // The receiver collects on its own dispatcher: wait for it (a slow CI runner lost this race).
+            awaitValue { submissions.size.takeIf { it == 1 } }
             l.link.reportStatus("Signed in to NAS. Choose the folder on the TV.", done = true)
             // The TV replaces the QR page at once; the phone still reads the result during the grace.
             l.link.stop()
@@ -408,7 +409,7 @@ class PhoneApiNetworkFolderTest {
             assertTrue(PhoneScreenModel.tooManySignIns(failed, PhonePurpose.NETWORK_FOLDER))
             assertFalse(PhoneScreenModel.tooManySignIns(failed, PhonePurpose.SETUP))
             assertFalse(PhoneScreenModel.tooManySignIns(LanServerState(ServerPhase.FAILED, failure = LanFailure.TOO_MANY_WRONG_CODES), PhonePurpose.NETWORK_FOLDER))
-            assertEquals(LanLimits.PAIR_MAX_WRONG, submissions.size)
+            awaitValue { submissions.size.takeIf { it == LanLimits.PAIR_MAX_WRONG } }
         } finally {
             l.close()
         }
