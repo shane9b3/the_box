@@ -25,9 +25,10 @@ import javax.inject.Singleton
  * - the app's shared OkHttp client (connection pool, default user agent) through
  *   `OkHttpNetworkFetcherFactory(callFactory)` — signature verified in the coil-network-okhttp 3.6.3 sources;
  * - no cross-fade (TV, and the grid draws logos itself);
- * - no SVG decoder for ordinary images: only the score bug's team logos decode SVG ([SportsLogoSvg], security review
- *   2026-11-09). The ServiceLoader is off, because coil-svg registers its decoder through it; the only other component
- *   it would add (coil-network-okhttp's fetcher) is added explicitly below.
+ * - SVG images (provider logos, the score bug's team logos) decode only through [GuardedSvg], which refuses large
+ *   files and entity declarations (security review 2026-11-09). The ServiceLoader is off, because coil-svg registers
+ *   its unguarded decoder through it; the only other component it would add (coil-network-okhttp's fetcher) is added
+ *   explicitly below.
  */
 @Module
 @InstallIn(SingletonComponent::class)
@@ -45,8 +46,7 @@ object ImageModule {
             .serviceLoaderEnabled(false)
             .components {
                 add(OkHttpNetworkFetcherFactory(client))
-                // (Score bug, docs/design/m6-score-bug.md §3, A-N8) SVG team logos, per request only.
-                add(SportsLogoSvg())
+                add(GuardedSvg())
             }
             .crossfade(false)
             .build()

@@ -9,7 +9,7 @@ the combined fix diff, whose low-severity findings were fixed in the same commit
   limits for phone setup, 30 wrong codes in total, 6 sockets with 4 per address (F2); backup and device-transfer
   exclusion rules (F3); debug entry points behind `DUMP`, no public debug APK artifact (F4); workflow actions pinned to
   commit SHAs with least-privilege permissions (F5); fetch URLs logged as host only, guide URLs masked in the log
-  export (F6); the SVG decoder limited to sports logos.
+  export (F6); SVG images decoded only when small and free of entity declarations (`GuardedSvg`).
 - Correctness: U1–U5, P1, P2 (the Sources picker is hidden for catch-up), A1–A6, and core/data findings 2–7.
 - Core/data finding 1 (restore drops guide matches on a new device), fixed after the pass: the restore creates
   placeholder guide rows the first refresh fills in (`docs/design/m5-restore-placeholder-guides.md`, reviewed in
@@ -25,5 +25,5 @@ the combined fix diff, whose low-severity findings were fixed in the same commit
   Settings access, which also allows Clear data).
 - P2 proper fix (rebuild the archive URL on the chosen base), M7(b), L9: need a core contract change.
 - A setting changed while paused in the local rewind buffer applies only at the next re-prepare.
-- Trade-offs (the first awaits the owner's word): a provider channel logo supplied as SVG no longer renders; a single run of more than 1 MiB of
+- Trade-offs: an SVG logo over 512 KiB or one that declares XML entities does not render; a single run of more than 1 MiB of
   guide text without a tag fails that guide source with a reason.
