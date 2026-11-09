@@ -2016,7 +2016,7 @@ GUIDE → FULL: `HoleChrome` fades a black scrim over the hole in `SCRIM_MS` (12
 | `Stopped` | STOPPED |
 | `Error` | ERROR (`error.code`) |
 
-`identity` = `state.target?.identity`; `isArchive` = `target.isArchive`; `still` = `settings.miniStill || device.stillByDefault` (amended 2026-10-14, code review H-B1: **not** `video.posterMode`; the poster keeps viewport MINI and the shell reads `VideoInfo.posterMode` directly, M2 §3.9.5); `rowId` via `library.rowIdOf` (cached per identity).
+`identity` = `state.target?.identity`; `isArchive` = `target.isArchive`; `still` = `settings.miniStill` (owner finding 2026-11-08: the explicit Mini player choice wins; Auto already resolves to Still on every nominal 1 GB box through the low-end rule; was `|| device.stillByDefault`, which overrode an explicit Video) (amended 2026-10-14, code review H-B1: **not** `video.posterMode`; the poster keeps viewport MINI and the shell reads `VideoInfo.posterMode` directly, M2 §3.9.5); `rowId` via `library.rowIdOf` (cached per identity).
 
 #### 3.16.3 Effects to the controller
 

@@ -450,7 +450,10 @@ class GuideViewModel @Inject constructor(
                 val channel = identity?.let { channelOf(it) }
                 // H-B1: the HDR poster is not a still. It is the controller's MINI state (video track off, viewport
                 // MINI); mapping it to a still hid the viewport, which ended the poster, which showed MINI again: a loop.
-                val still = s.miniStill || device.stillByDefault
+                // (Owner finding 2026-11-08) The user's "Mini player" choice wins. `s.miniStill` already resolves Auto
+                // to the low-end rule (every nominal 1 GB box is low-end), so a forced `device.stillByDefault` here only
+                // overrode an explicit "Video" (or Performance: High quality) and left the mini player on the logo.
+                val still = s.miniStill
                 // (M4, B1) An archive session's own hand-offs and probe errors are hidden by the one shared rule.
                 // (M5, B1) A tune the guard refused never played: the mini player shows nothing for it.
                 val shown = if (st is PlaybackState.Stopped && st.reason == StopReason.LOCKED) PlaybackState.Idle else st

@@ -91,6 +91,7 @@ class GuideViewModelTest {
         val archive = app.thebox.core.full.fakes.FakeArchivePlayback()
         val playerSettings = app.thebox.core.full.fakes.FakePlayerSettings()
         val stores = ArrayList<ViewModelStore>()
+        val device = FakeDeviceClassSource()
 
         fun viewModel(machineFactory: app.thebox.core.guide.GuideStateMachineFactory = GuideStateMachineImpl.FACTORY): GuideViewModel {
             val store = ViewModelStore().also { stores += it }
@@ -101,7 +102,7 @@ class GuideViewModelTest {
                     GuideRowsCacheFactory { lib, scope -> GuideRowsCacheImpl(lib, scope) },
                     GuideWindowPagerFactory { _, _, _, _, _ -> FakeGuideWindowPager().also { pagers += it } },
                     settings, FakeGuideSessionStore(), FakeReminderBook(), alerts, FakeKeyCapabilities(), machineFactory,
-                    FakeNavigator(), labels, FakeGuideRenderer(), FakeDeviceClassSource(), FakeSyncFeed(), FakeGuideDataWindowSource(),
+                    FakeNavigator(), labels, FakeGuideRenderer(), device, FakeSyncFeed(), FakeGuideDataWindowSource(),
                     probe, router, FakeGuideMetricsFactory(), FakeRowCellsBuilder(), FakeGuideImages(), ImageLoader(context), GuideTrim(null, null),
                     archive, playerSettings,
                     app.thebox.core.settings.fakes.FakeSettingsStore(), // M5 commit 0: startup waits for it (S1)
@@ -140,6 +141,18 @@ class GuideViewModelTest {
         w.settings.update { it.copy(miniStill = true) }
         idle()
         assertTrue("the Still setting is", vm.machine.ui.value.tuned.still)
+    }
+
+    /** (Owner finding 2026-11-08) On a nominal 1 GB box an explicit "Mini player: Video" plays video, not the logo. */
+    @Test fun explicitVideoWinsOnAOneGigabyteBox() {
+        val w = World()
+        w.device.device = app.thebox.core.guide.DeviceClass(lowRam = false, totalMemBytes = 900L shl 20, memoryClassMb = 128)
+        w.settings.update { it.copy(miniStill = false) }
+        val vm = w.viewModel()
+        w.controller.state.value = playing(channels[2])
+        idle()
+        assertEquals(channels[2].identity, vm.machine.ui.value.tuned.identity)
+        assertFalse("the user's Video choice wins over the 1 GB default", vm.machine.ui.value.tuned.still)
     }
 
     /** H-B3: a toast sent before the root subscribes (the missed-reminders toast at a cold start) is delivered. */
