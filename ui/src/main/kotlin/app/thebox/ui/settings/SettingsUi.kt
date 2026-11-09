@@ -208,7 +208,7 @@ fun ProgressTrack(fraction: Float, modifier: Modifier = Modifier) {
 
 /** True when the system animations are off (`ANIMATOR_DURATION_SCALE` == 0): the dots then stay still (U-N5). */
 @Composable
-private fun animationsOff(): Boolean {
+internal fun animationsOff(): Boolean {
     val context = LocalContext.current
     return remember(context) {
         try {

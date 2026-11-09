@@ -132,7 +132,7 @@ class RestoreMergeTest {
         db.epgMappingDao().upsert(EpgMappingEntity(a, "k1", src, "one.uk", 1))
         db.epgMappingDao().upsert(EpgMappingEntity(a, "k9", null, null, 1)) // explicit "no guide data"
         db.hideRuleDao().insert(HideRuleEntity(playlistId = b, target = 0, pattern = "XXX", isRegex = false, createdAt = 1))
-        g.settings.update(guide) { it.copy(clock = ClockMode.H24, showLogos = false) }
+        g.settings.update(guide) { it.copy(clock = ClockMode.H24, showLogos = false, scrollDescriptions = false) }
         return a to b
     }
 
@@ -190,6 +190,7 @@ class RestoreMergeTest {
         // Settings documents, setup completed, follow-up for the new playlists.
         assertEquals(ClockMode.H24, dst.settings.flow(guide).value.clock)
         assertFalse(dst.settings.flow(guide).value.showLogos)
+        assertFalse("Scroll long descriptions travels with the backup (2026-11-09)", dst.settings.flow(guide).value.scrollDescriptions)
         assertEquals(SetupState(completed = true), dst.settings.flow(SetupDomain).value)
         assertEquals(2, dst.follow.calls.first().first.size)
     }

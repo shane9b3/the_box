@@ -143,6 +143,8 @@ data class GuideSettings(
     val openGuideOn: OpenGuideOn = OpenGuideOn.LAST,
     val reminderAutoSwitch: Boolean = false,
     val reminderLeadSec: Int = 60,
+    /** (owner request 2026-11-09) The focused panel scrolls a description that does not fit; false = ellipsis. */
+    val scrollDescriptions: Boolean = true,
     /** Debug builds only (`thebox-debug://guide?unlocked=1`): show locked/adult groups until M5's PIN exists (lead §7 item 12). */
     val debugUnlocked: Boolean = false,
 )

@@ -185,6 +185,8 @@ class ResourceSettingsTexts(private val resources: Resources) : SettingsTexts {
         SettingsText.IF_LOGOS -> R.string.settings_if_logos
         SettingsText.IF_AMBIENT -> R.string.settings_if_ambient
         SettingsText.IF_NUMBERS -> R.string.settings_if_numbers
+        SettingsText.IF_SCROLL_DESCRIPTIONS -> R.string.settings_if_scroll_descriptions
+        SettingsText.IF_SCROLL_DESCRIPTIONS_DESC -> R.string.settings_if_scroll_descriptions_desc
         SettingsText.IF_REMINDER_SWITCH -> R.string.settings_if_reminder_switch
         SettingsText.IF_REMINDER_LEAD -> R.string.settings_if_reminder_lead
         SettingsText.LEAD_MIN -> R.string.settings_lead_min

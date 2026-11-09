@@ -4,6 +4,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -41,7 +42,7 @@ const val GRID_SLOT_TAG = "grid_slot"
  * - the hole slot (64, 56) 720 × 405: transparent; publishes its `boundsInWindow(clipBounds = false)` through
  *   [onHoleMeasured] (the root dedupes) and holds the mini-player overlay;
  * - the header/panel column (832, 56) – (1856, 461) with a default `graphicsLayer()` (B8): tabs, sync chip, clock,
- *   focused-programme panel;
+ *   focused-programme panel (top-aligned under the tabs, owner request 2026-11-09);
  * - the grid slot (64, 500) 1792 × 460: [grid] gets the modifier (WP-A's `GuideGridHost` carries its own layer);
  * - header chips, footer hints, and the overlays. No overlay intersects the hole (I-3).
  *
@@ -54,6 +55,9 @@ const val GRID_SLOT_TAG = "grid_slot"
 /** Trace section around the header/panel column draw (I-18, §2.13 item 20). */
 const val TRACE_PANEL = "guide-panel"
 
+/** Tabs → panel gap, design px (§3.15 "gap 16"). */
+private const val PANEL_GAP = 16
+
 @Composable
 fun GuideScreen(
     state: GuideUiState,
@@ -63,6 +67,7 @@ fun GuideScreen(
     onHoleMeasured: (RectPx) -> Unit,
     modifier: Modifier = Modifier,
     debugHint: Boolean = false,
+    scrollDescriptions: Boolean = true,
     grid: @Composable (Modifier) -> Unit,
 ) {
     Box(modifier.fillMaxSize().testTag(GUIDE_SCREEN_TAG)) {
@@ -90,8 +95,10 @@ fun GuideScreen(
                 },
         ) {
             HeaderTabs(state.zone, state.tabFocused, state.sync, clock24)
-            Spacer(Modifier.weight(1f))
-            FocusedPanel(state.panel)
+            // (owner request 2026-11-09) The panel sits at the top, under the tabs (gap 16, §3.15), and its description
+            // fills the rest of the column down to y 461; a scrolling description re-records only this layer (I-18).
+            Spacer(Modifier.height(PANEL_GAP.dp))
+            FocusedPanel(state.panel, Modifier.weight(1f), scrollDescription = scrollDescriptions)
         }
 
         grid(

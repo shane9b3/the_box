@@ -183,6 +183,8 @@ enum class SettingsText {
     PERF_AUTO,
     PERF_HIGH,
     PERF_LOW,
+    IF_SCROLL_DESCRIPTIONS,
+    IF_SCROLL_DESCRIPTIONS_DESC,
     IF_LOGOS,
     IF_AMBIENT,
     IF_NUMBERS,

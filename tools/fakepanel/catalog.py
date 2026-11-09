@@ -202,6 +202,18 @@ def programme(ch, slot_start, tz):
             "title": f"{show} ({local.strftime('%H:%M')})", "desc": f"{ch['name']} - {show}"}
 
 
+LONG_DESC = ("{show} on {ch}. " + " ".join(
+    f"Part {i}: the presenters walk through another chapter of the story, with interviews, archive footage and a "
+    f"look at what happens next." for i in range(1, 9)) + " The end.")
+
+
+def desc(cfg, ch, p):
+    """`long_desc` (owner request 2026-11-09, guide panel scroll): channels 1 and 2 carry a description of ~900 chars."""
+    if cfg.get("long_desc") and ch["id"] in (1, 2):
+        return LONG_DESC.format(show=p["title"], ch=ch["name"])
+    return p["desc"]
+
+
 def programmes(ch, t_from, t_to, tz):
     s = int(t_from) // SLOT * SLOT
     while s < t_to:
@@ -224,7 +236,7 @@ def epg_listings(cfg, ch, tz, now, short=False, limit=4, syn=None):
         out.append({
             "id": str(p["start"]), "epg_id": "1", "title": enc(p["title"]), "lang": "en",
             "start": a.strftime("%Y-%m-%d %H:%M:%S"), "end": b.strftime("%Y-%m-%d %H:%M:%S"),
-            "description": enc(p["desc"]), "channel_id": ch["tvg_id"],
+            "description": enc(desc(cfg, ch, p)), "channel_id": ch["tvg_id"],
             "start_timestamp": str(p["start"]), "stop_timestamp": str(p["stop"]),
             "now_playing": 1 if p["start"] <= now < p["stop"] else 0,
             "has_archive": 1 if (ch["archive"] and p["stop"] <= now and p["start"] >= now - ARCHIVE_DAYS * 86400) else 0})
@@ -245,7 +257,7 @@ def xmltv(cfg, base, tz_unused, now, offset):
     for c in channels(cfg):
         for p in programmes(c, now - EPG_BACK_DAYS * 86400, now + EPG_FWD_DAYS * 86400, zone):
             parts.append(f'<programme start="{fmt(p["start"])}" stop="{fmt(p["stop"])}" channel={quoteattr(c["tvg_id"])}>'
-                         f'<title lang="en">{escape(p["title"])}</title><desc lang="en">{escape(p["desc"])}</desc></programme>\n')
+                         f'<title lang="en">{escape(p["title"])}</title><desc lang="en">{escape(desc(cfg, c, p))}</desc></programme>\n')
     parts.append("</tv>\n")
     return "".join(parts).encode()
 

@@ -25,6 +25,7 @@
   "synthetic": 0,
   "synthetic_days_back": 3,
   "synthetic_days_ahead": 7,
+  "long_desc": false,
   "epg_version": 0,
   "epg_status": 0,
   "faults": {

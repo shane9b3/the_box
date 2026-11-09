@@ -51,6 +51,7 @@ DEFAULTS = {
     "faults": {}, "stream_faults": {},
     "media_override": {},       # {"<stream id>": "std|mp2|50fps|radio|hdr"}: serve another clip for that live stream
     "synthetic": 0, "synthetic_days_back": 3, "synthetic_days_ahead": 7,  # --synthetic N: N generated live channels
+    "long_desc": False,         # catalog mode: ~900-char programme descriptions on channels 1 and 2 (guide panel scroll)
     "epg_version": 0,           # bump (via /admin/config) to change synthetic programme titles (" v2", ...)
     "epg_status": 0,            # >= 400: xmltv.php answers this status with a short body (owner finding 2026-11-01)
     # M4 (docs/design/m4-player-ux.md §5.6): archive behaviour for the player suite

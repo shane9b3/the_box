@@ -13,6 +13,8 @@ object InterfaceRows : RowSource {
     val CLOCK = RowId("interface.clock")
     val MINI_PLAYER = RowId("interface.mini_player")
     val PERFORMANCE = RowId("interface.performance")
+    /** (owner request 2026-11-09) "Scroll long descriptions" in the guide panel; simple (the §3.3.13 budget is 36). */
+    val SCROLL_DESCRIPTIONS = RowId("interface.scroll_descriptions")
     val LOGOS = RowId("interface.logos")
     val AMBIENT = RowId("interface.ambient")
     val NUMBERS = RowId("interface.numbers")
@@ -23,6 +25,7 @@ object InterfaceRows : RowSource {
         a(CLOCK, SIMPLE, LIVE),
         a(MINI_PLAYER, SIMPLE, LIVE),
         a(PERFORMANCE, SIMPLE, LIVE),
+        a(SCROLL_DESCRIPTIONS, SIMPLE, LIVE),
         a(LOGOS, ADVANCED, LIVE),
         a(AMBIENT, ADVANCED, LIVE),
         a(NUMBERS, ADVANCED, LIVE),

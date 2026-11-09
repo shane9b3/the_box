@@ -127,6 +127,27 @@ class WpaPagesTest {
         }
     }
 
+    // ---------------------------------------------------------------- scroll long descriptions (owner request 2026-11-09)
+
+    @Test
+    fun scrollDescriptionsIsASimpleToggleOnByDefaultThatWritesThePref() = runTest {
+        val r = row(SectionId.INTERFACE, InterfaceRows.SCROLL_DESCRIPTIONS, advanced = false)
+        assertEquals(Visibility.SIMPLE, r.visibility)
+        assertEquals(EffectTiming.LIVE, r.effect)
+        assertEquals("IF_SCROLL_DESCRIPTIONS", r.label)
+        assertEquals("IF_SCROLL_DESCRIPTIONS_DESC", r.description)
+        assertTrue((r.kind as RowKind.Toggle).on, "on by default")
+        val ids = page(SectionId.INTERFACE).rows.map { it.id }
+        assertEquals(ids.indexOf(InterfaceRows.PERFORMANCE) + 1, ids.indexOf(InterfaceRows.SCROLL_DESCRIPTIONS), "beside the other guide display rows")
+        val route = SettingsRoute.Section(SectionId.INTERFACE)
+        assertTrue(pages.onIntent(route, RowIntent.Toggle(InterfaceRows.SCROLL_DESCRIPTIONS, false), PageContext(advanced = false, nowMs = 0)))
+        assertFalse(store.flow(GuideDomain).value.scrollDescriptions)
+        assertFalse((row(SectionId.INTERFACE, InterfaceRows.SCROLL_DESCRIPTIONS).kind as RowKind.Toggle).on)
+        assertFalse(GuidePrefsMapping.toSettings(store.flow(GuideDomain).value, system24h = true, deviceLowEnd = false).scrollDescriptions)
+        assertTrue(pages.onIntent(route, RowIntent.Toggle(InterfaceRows.SCROLL_DESCRIPTIONS, true), PageContext(advanced = false, nowMs = 0)))
+        assertTrue(store.flow(GuideDomain).value.scrollDescriptions)
+    }
+
     // ---------------------------------------------------------------- programme posters (owner rulings 2026-10-18/19)
 
     @Test

@@ -50,7 +50,11 @@ All are changeable at runtime through `/admin`. See `config.example.json` for ev
 `username password timezone quirks series_episodes_array epg_plain auth_mode bad_creds_mode status max_connections
 active_cons_override exp_days allowed_output_formats epg_offset epg_gzip strict_timeshift_tz timeshift_expect timeshift_ranges
 hls_timeout hls_window token_ttl token_single_use pace faults stream_faults media_override synthetic synthetic_days_back synthetic_days_ahead epg_version epg_status
-timeshift_mode timeshift_window archive_lag_sec timeshift_future timeshift_chunked timeshift_reject_forms timeshift_range_ignored player_fixtures`
+timeshift_mode timeshift_window archive_lag_sec timeshift_future timeshift_chunked timeshift_reject_forms timeshift_range_ignored player_fixtures long_desc`
+
+`long_desc` (bool, default false; catalog mode): programmes on channels 1 and 2 carry a ~900-character description in
+both `xmltv.php` and the Xtream EPG calls, for the guide panel's scrolling description (owner request 2026-11-09). Set it
+with `--set long_desc=true` or `POST /admin/config {"long_desc":true}`, then refresh the guide.
 
 `epg_status` (int, default 0): when ≥ 400, `xmltv.php` answers that status with a short text body (after the auth checks;
 counted as rejection `epg_status`), in both catalog and synthetic mode. `POST /admin/config {"epg_status":500}` reproduces a

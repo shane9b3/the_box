@@ -14,7 +14,9 @@ import org.junit.runner.RunWith
  * (otherwise the capture proves nothing). The panel column (`guide-panel`) and the ambient (`guide-ambient`) carry
  * their own trace sections (§2.13 item 20): the ambient must not redraw at all while scrolling, and the panel at most
  * once per focus change (its content changes with the focus) plus description loads, so most `guide-draw` frames are
- * grid-only.
+ * grid-only. (2026-11-09, docs/decisions/2026-11-09-guide-panel-description.md) A long description that scrolls
+ * fires `guide-panel` on every scroll frame, legitimately: the scroll starts only after a 3 s hold on one programme, so
+ * it never fires during this run of moves, and it never makes a grid-only frame draw the panel or the grid redraw.
  */
 @RunWith(AndroidJUnit4::class)
 class LayerScopeTest : GuideTestBase() {

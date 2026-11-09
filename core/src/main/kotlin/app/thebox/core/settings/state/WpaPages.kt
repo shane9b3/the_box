@@ -486,6 +486,7 @@ class WpaPages(
                 .map { (m, k) -> ChoiceOption(m.name, t(k)) },
             g.performance.name,
         )
+        out += toggle(InterfaceRows.SCROLL_DESCRIPTIONS, t(SettingsText.IF_SCROLL_DESCRIPTIONS), g.scrollDescriptions, t(SettingsText.IF_SCROLL_DESCRIPTIONS_DESC))
         out += toggle(InterfaceRows.LOGOS, t(SettingsText.IF_LOGOS), g.showLogos)
         val ambient = GuidePrefsMapping.ambient(g, env.deviceLowEnd)
         out += toggle(InterfaceRows.AMBIENT, t(SettingsText.IF_AMBIENT), ambient).let { r ->
@@ -719,6 +720,7 @@ class WpaPages(
             InterfaceRows.CLOCK -> choose?.let { c -> enumOf<ClockMode>(c)?.let { m -> guide { it.copy(clock = m) } } }
             InterfaceRows.MINI_PLAYER -> choose?.let { c -> guide { it.copy(miniStill = c == STILL) } }
             InterfaceRows.PERFORMANCE -> choose?.let { c -> enumOf<PerformanceMode>(c)?.let { m -> guide { it.copy(performance = m) } } }
+            InterfaceRows.SCROLL_DESCRIPTIONS -> on?.let { v -> guide { it.copy(scrollDescriptions = v) } }
             InterfaceRows.LOGOS -> on?.let { v -> guide { it.copy(showLogos = v) } }
             InterfaceRows.AMBIENT -> on?.let { v -> guide { it.copy(ambient = v) } }
             InterfaceRows.NUMBERS -> on?.let { v -> guide { it.copy(showNumbers = v) } }

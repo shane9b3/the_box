@@ -114,6 +114,11 @@ data class GuidePrefs(
      * documents and backups is ignored on read (`ignoreUnknownKeys`).
      */
     val posters: Boolean = true,
+    /**
+     * (owner request 2026-11-09) "Scroll long descriptions": a description longer than the guide panel's space scrolls
+     * up slowly; Off clips it with an ellipsis (docs/decisions/2026-11-09-guide-panel-description.md).
+     */
+    val scrollDescriptions: Boolean = true,
 )
 
 enum class SubtitleMode { OFF, ON, FORCED_ONLY }

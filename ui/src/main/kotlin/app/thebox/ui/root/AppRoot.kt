@@ -373,6 +373,7 @@ fun AppRoot(
                             anchor = anchor,
                             onHoleMeasured = onHoleMeasured,
                             debugHint = debugHint,
+                            scrollDescriptions = settings.scrollDescriptions,
                             grid = grid,
                         )
                         ScreenMode.FULL -> FullScreenHost(ui, player = player, clock24 = settings.clock24, lowEnd = lowEnd, hostFacts = scoreFacts)

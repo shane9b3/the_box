@@ -10,13 +10,13 @@ import kotlin.test.assertTrue
 
 /**
  * Simple rows across all sections, the playlist page counted once (docs/design/m5-setup-settings.md §3.2.3, §3.3.13):
- * ≤ 35, and exactly the §3.3.13 split per section. Sections whose rows another WP has not registered yet are reported,
- * not counted (the total is asserted as = 35 once every section is registered). Channel options are per channel and
+ * ≤ 36 (35 until the owner request of 2026-11-09 added "Scroll long descriptions" to Interface), and exactly the §3.3.13 split per section. Sections whose rows another WP has not registered yet are reported,
+ * not counted (the total is asserted as = 36 once every section is registered). Channel options are per channel and
  * not counted.
  */
 class SimpleRowCountTest {
     private val expected = mapOf(
-        SectionId.PLAYLISTS to 7, SectionId.GUIDE to 3, SectionId.PLAYBACK to 5, SectionId.CHANNELS to 4, SectionId.INTERFACE to 3,
+        SectionId.PLAYLISTS to 7, SectionId.GUIDE to 3, SectionId.PLAYBACK to 5, SectionId.CHANNELS to 4, SectionId.INTERFACE to 4,
         SectionId.REMOTE to 2, SectionId.PARENTAL to 4, SectionId.BACKUP to 2, SectionId.ABOUT to 5, SectionId.NETWORK to 0,
     )
 
@@ -42,7 +42,7 @@ class SimpleRowCountTest {
 
     @Test
     fun simpleRowsMatchTheTarget() {
-        assertEquals(35, expected.values.sum())
+        assertEquals(36, expected.values.sum())
         for (s in listOf(SectionId.GUIDE, SectionId.PLAYBACK, SectionId.INTERFACE, SectionId.REMOTE, SectionId.NETWORK)) {
             // guide.fix_unmatched is built on the TV guide page but registered by WP-B (MatchingRows).
             val pending = if (s == SectionId.GUIDE && SettingsTree.spec(app.thebox.core.settings.tree.GuideRows.FIX_UNMATCHED) == null) 1 else 0
@@ -50,8 +50,8 @@ class SimpleRowCountTest {
         }
         val registered = expected.keys.filter { s -> SettingsTree.rowsOf(s).any { it.owner != "A" } || s in WpaPages.SECTIONS }
         val total = registered.sumOf { simple(it) }
-        assertTrue(total <= 35, "simple rows $total > 35")
-        if (registered.size == expected.size) assertEquals(35, total)
+        assertTrue(total <= 36, "simple rows $total > 36")
+        if (registered.size == expected.size) assertEquals(36, total)
         else println("SimpleRowCountTest: sections not registered yet: ${expected.keys - registered.toSet()} (total so far $total)")
     }
 
@@ -83,6 +83,6 @@ class SimpleRowCountTest {
         for (s in listOf(SectionId.CHANNELS, SectionId.PARENTAL, SectionId.BACKUP)) counts[s] = published(app.thebox.core.settings.SettingsRoute.Section(s))
         counts[SectionId.ABOUT] = simple(SectionId.ABOUT)
         for ((s, n) in counts) assertEquals(expected[s], n, "SIMPLE rows the $s page publishes with advanced off")
-        assertEquals(35, counts.values.sum() + (expected.keys - counts.keys).sumOf { expected.getValue(it) })
+        assertEquals(36, counts.values.sum() + (expected.keys - counts.keys).sumOf { expected.getValue(it) })
     }
 }

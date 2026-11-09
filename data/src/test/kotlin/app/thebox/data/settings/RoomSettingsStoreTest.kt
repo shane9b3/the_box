@@ -129,6 +129,17 @@ class RoomSettingsStoreTest {
         waitFor { row(Domains.GUIDE)?.json == """{"showLogos":false}""" }
     }
 
+    /** (owner request 2026-11-09) "Scroll long descriptions" persists; a document from before it reads On. */
+    @Test fun scrollDescriptionsPersistsAndDefaultsOn() {
+        runBlocking { db.appSettingDao().upsert(AppSettingEntity(Domains.GUIDE, """{"showNumbers":false}""", 1, 1)) }
+        val s = store(debounceMs = 30)
+        s.load()
+        runBlocking { s.awaitReady() }
+        assertTrue("an older document has no field: On", s.flow(GuideDomain).value.scrollDescriptions)
+        s.update(GuideDomain) { it.copy(scrollDescriptions = false) }
+        waitFor { row(Domains.GUIDE)?.json?.let { Json.parseToJsonElement(it) } == Json.parseToJsonElement("""{"showNumbers":false,"scrollDescriptions":false}""") }
+    }
+
     @Test fun readyTimeoutUnblocksWithDefaults() = runBlocking {
         val gate = CompletableDeferred<Unit>()
         val s = store(timeoutMs = 50, beforeRead = { gate.await() })

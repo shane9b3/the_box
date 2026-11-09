@@ -210,6 +210,8 @@
     <string name="settings_if_logos">Channel logos in the guide</string>
     <string name="settings_if_ambient">Ambient background</string>
     <string name="settings_if_numbers">Show channel numbers</string>
+    <string name="settings_if_scroll_descriptions">Scroll long descriptions</string>
+    <string name="settings_if_scroll_descriptions_desc">Long program descriptions in the guide scroll slowly so you can read them all.</string>
     <string name="settings_if_reminder_switch">Switch channel when a reminder starts</string>
     <string name="settings_if_reminder_lead">Remind me</string>
     <string name="settings_lead_min">%1$d min before</string>

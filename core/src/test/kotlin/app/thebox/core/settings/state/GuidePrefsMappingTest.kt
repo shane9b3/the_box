@@ -42,6 +42,18 @@ class GuidePrefsMappingTest {
         assertEquals(null, out.miniStill)
     }
 
+    /** (owner request 2026-11-09) "Scroll long descriptions": On by default, mapped both ways. */
+    @Test
+    fun scrollDescriptionsMapsBothWays() {
+        assertTrue(GuidePrefs().scrollDescriptions)
+        assertTrue(GuidePrefsMapping.toSettings(GuidePrefs(), true, false).scrollDescriptions)
+        assertFalse(GuidePrefsMapping.toSettings(GuidePrefs(scrollDescriptions = false), true, false).scrollDescriptions)
+        val before = GuidePrefsMapping.toSettings(GuidePrefs(), true, false)
+        assertFalse(GuidePrefsMapping.fromSettings(GuidePrefs(), before, before.copy(scrollDescriptions = false)).scrollDescriptions)
+        val stored = GuidePrefs(scrollDescriptions = false)
+        assertFalse(GuidePrefsMapping.fromSettings(stored, before, before.copy(reminderLeadSec = 120)).scrollDescriptions, "untouched: the stored Off survives")
+    }
+
     @Test
     fun parentRoutes() {
         assertEquals(SettingsRoute.Playlist(4), SettingsMachineImpl.parentOf(SettingsRoute.PlaylistSource(4)))

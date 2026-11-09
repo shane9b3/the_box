@@ -40,6 +40,7 @@ object GuidePrefsMapping {
         openGuideOn = p.openGuideOn,
         reminderAutoSwitch = p.reminderAutoSwitch,
         reminderLeadSec = p.reminderLeadSec,
+        scrollDescriptions = p.scrollDescriptions,
         debugUnlocked = debugUnlocked,
     )
 
@@ -60,6 +61,7 @@ object GuidePrefsMapping {
         openGuideOn = pick(old.openGuideOn, before.openGuideOn, after.openGuideOn),
         reminderAutoSwitch = pick(old.reminderAutoSwitch, before.reminderAutoSwitch, after.reminderAutoSwitch),
         reminderLeadSec = pick(old.reminderLeadSec, before.reminderLeadSec, after.reminderLeadSec),
+        scrollDescriptions = pick(old.scrollDescriptions, before.scrollDescriptions, after.scrollDescriptions),
     )
 
     /** [after] when the caller changed the field, else the stored [old]. */
