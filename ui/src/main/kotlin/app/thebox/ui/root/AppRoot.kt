@@ -94,6 +94,16 @@ fun viewportFor(hole: HoleMode): Viewport = when (hole) {
     HoleMode.STILL, HoleMode.COVERED -> Viewport.HIDDEN
 }
 
+/**
+ * The viewport the controller gets (owner report 2026-11-10, docs/decisions/2026-11-10-guide-start-back-audio.md): an
+ * opaque screen (SETTINGS, SEARCH, SPORTS: COVERED without [screenOff]) keeps [beneath], the viewport of the screen it
+ * covers, so opening and leaving it never toggles the video track: the toggle re-selects tracks in the player, which
+ * cut the audio for about a second each way. Its picture still goes to the 1 × 1 parked surface. The player's screen
+ * off is COVERED with [screenOff] and keeps HIDDEN (decoding stops there).
+ */
+fun viewportFor(hole: HoleMode, screenOff: Boolean, beneath: Viewport): Viewport =
+    if (hole == HoleMode.COVERED && !screenOff) beneath else viewportFor(hole)
+
 private fun nothingTuned(t: TunedState) = t.identity == null || t.phase == MiniPhase.IDLE || t.phase == MiniPhase.STOPPED
 
 /** The bottom bar FULL shows (toasts and captions lift over it, N8, U-B2). */
@@ -263,7 +273,11 @@ fun AppRoot(
     }
 
     val holeMode = if (screenOff) HoleMode.COVERED else holeModeFor(shown, ui.tuned)
-    LaunchedEffect(holeMode) { host.setViewport(viewportFor(holeMode)) }
+    // The viewport of the last uncovered hole (HIDDEN before there was one, e.g. a first-run Settings).
+    val beneath = remember { arrayOf(Viewport.HIDDEN) }
+    if (holeMode != HoleMode.COVERED) beneath[0] = viewportFor(holeMode)
+    val viewport = viewportFor(holeMode, screenOff, beneath[0])
+    LaunchedEffect(viewport) { host.setViewport(viewport) }
     val sticky = remember { StickyVideo() }
     val placed = sticky.resolve(video, playback, ui.tuned.handoff)
     val rects = remember(holeMode, holeVersion, container, placed.width, placed.height, placed.pixelRatio, placed.aspectMode) {

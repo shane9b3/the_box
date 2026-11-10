@@ -157,6 +157,40 @@ class RootTreeRuleTest {
         rule.onNodeWithTag(SETTINGS_TAG).fetchSemanticsNode()
     }
 
+    /**
+     * Owner report 2026-11-10 (docs/decisions/2026-11-10-guide-start-back-audio.md): the audio dropped for about a second
+     * when Settings opened over the guide and again on the way back. Settings (Search, Sports) covering the hole keeps the
+     * viewport of the screen beneath, so the video track is never toggled (a toggle re-selects tracks in the player).
+     */
+    @Test
+    fun anOpaqueScreenOverTheGuideKeepsTheMiniViewport() {
+        val machine = FakeGuideStateMachine(GuideUiState(tuned = playing()))
+        val host = FakeShellHost(machine)
+        rule.setContent { BoxTheme { AppRoot(host, grid = { m -> Spacer(m.graphicsLayer()) }) } }
+        rule.waitForIdle()
+        for (over in listOf(ScreenMode.SETTINGS, ScreenMode.SEARCH, ScreenMode.SPORTS)) {
+            rule.runOnIdle { machine.mutableUi.value = machine.mutableUi.value.copy(mode = over) }
+            rule.waitForIdle()
+            rule.runOnIdle { machine.mutableUi.value = machine.mutableUi.value.copy(mode = ScreenMode.GUIDE) }
+            rule.waitForIdle()
+        }
+        assertEquals("guide → Settings/Search/Sports → guide: ${host.viewports}", listOf(Viewport.MINI), host.viewports.distinct())
+    }
+
+    @Test
+    fun settingsOverFullKeepsTheFullViewport() {
+        val machine = FakeGuideStateMachine(GuideUiState(mode = ScreenMode.FULL, tuned = playing()))
+        val host = FakeShellHost(machine)
+        rule.setContent { BoxTheme { AppRoot(host, grid = { m -> Spacer(m.graphicsLayer()) }) } }
+        rule.waitForIdle()
+        rule.runOnIdle { machine.mutableUi.value = machine.mutableUi.value.copy(mode = ScreenMode.SETTINGS) }
+        rule.waitForIdle()
+        rule.onNodeWithTag(SETTINGS_TAG).fetchSemanticsNode()
+        rule.runOnIdle { machine.mutableUi.value = machine.mutableUi.value.copy(mode = ScreenMode.FULL) }
+        rule.waitForIdle()
+        assertEquals("FULL → Settings → FULL: ${host.viewports}", listOf(Viewport.FULL), host.viewports.distinct())
+    }
+
     /** Code review 2026-10-14, H-S8: HoleChrome has its own default layer, as a sibling (not an ancestor) of the video. */
     @Test
     fun holeChromeCarriesItsOwnLayerAsASibling() {

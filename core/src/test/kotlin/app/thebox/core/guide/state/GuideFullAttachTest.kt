@@ -55,6 +55,40 @@ class GuideFullAttachTest {
         assertTrue(!k.ui.booting, "any key ends the blank")
     }
 
+    /**
+     * Owner report 2026-11-10 (docs/decisions/2026-11-10-guide-start-back-audio.md): a warm launch (the process outlived
+     * Exit, so the controller is Stopped BACKGROUND on the last channel) forwards that leftover STOPPED Tuned first. It
+     * must not end the blank, or the guide shows until the startup tune connects and goes FULL.
+     */
+    @Test
+    fun aLeftoverStoppedTunedKeepsTheBootBlankUntilStartFullLands() {
+        for (stale in listOf(app.thebox.core.guide.MiniPhase.STOPPED, app.thebox.core.guide.MiniPhase.ERROR)) {
+            val w = GuideWorld(startTuned = false)
+            w.tuneTo(w.channels[2], stale); w.flush() // the previous session's state, before the startup decision
+            assertTrue(w.ui.booting, "a leftover $stale is not the startup decision")
+            w.send(GuideEvent.StartFull)
+            if (stale == app.thebox.core.guide.MiniPhase.STOPPED) assertTrue(w.ui.booting, "StartFull still waits for the tune")
+            w.tuneTo(w.channels[2], app.thebox.core.guide.MiniPhase.CONNECTING); w.flush()
+            assertEquals(ScreenMode.FULL, w.ui.mode)
+            assertTrue(!w.ui.booting)
+        }
+        // Order the other way round: StartFull first, then the leftover STOPPED.
+        val s = GuideWorld(startTuned = false)
+        s.send(GuideEvent.StartFull)
+        s.tuneTo(s.channels[2], app.thebox.core.guide.MiniPhase.STOPPED); s.flush()
+        assertTrue(s.ui.booting, "a leftover STOPPED after StartFull keeps the blank")
+        // GUIDE_WITH_LAST: StartGuide ends it at once, whatever arrived before.
+        val g = GuideWorld(startTuned = false)
+        g.tuneTo(g.channels[2], app.thebox.core.guide.MiniPhase.STOPPED); g.flush()
+        g.send(GuideEvent.StartGuide)
+        assertTrue(!g.ui.booting)
+        assertEquals(ScreenMode.GUIDE, g.ui.mode)
+        // A live session (recreated activity over a playing controller) still ends it on its own.
+        val p = GuideWorld(startTuned = false)
+        p.tuneTo(p.channels[2], app.thebox.core.guide.MiniPhase.PLAYING); p.flush()
+        assertTrue(!p.ui.booting)
+    }
+
     /** WP-A gave the commit-0 no-op events their bodies: Archive and Player keep the mode, OpenSettings opens SETTINGS. */
     @Test
     fun newEventsHaveTheirM4Bodies() {

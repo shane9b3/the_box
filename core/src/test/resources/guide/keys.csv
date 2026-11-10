@@ -176,6 +176,24 @@ exit,exit_dialog,RIGHT,GUIDE,TABS,ExitDialog,-,-
 exit,exit_dialog,SELECT,GUIDE,TABS,none,exitApp,-
 exit,exit_dialog_cancel,SELECT,GUIDE,TABS,none,-,-
 exit,exit_dialog,BACK,GUIDE,TABS,none,-,-
+# ---- Held Back (PLAY in the guide context) from every zone and overlay (owner report 2026-11-10,
+# docs/decisions/2026-11-10-guide-start-back-audio.md): FULL when something is tuned, as in the grid; a transient overlay
+# (Groups and its menu, Days, Menu, Sheet, number entry, the exit hint) closes first, the entry is dropped, not committed.
+# Nothing tuned: nothing happens. The modal exit dialog, the PIN pad and the reminder card keep their own keys.
+grid,grid_idle_home,PLAY,GUIDE,GRID,none,-,same
+tabs,tabs,PLAY,FULL,TABS,none,setFullScreen,-
+tabs,tabs_settings,PLAY,FULL,TABS,none,setFullScreen,-
+header,header,PLAY,FULL,HEADER,none,setFullScreen,-
+groups,groups,PLAY,FULL,GRID,none,setFullScreen,-
+groups,groups_from_tabs,PLAY,FULL,TABS,none,setFullScreen,-
+groupmenu,groups_menu,PLAY,FULL,GRID,none,setFullScreen,-
+days,days,PLAY,FULL,HEADER,none,setFullScreen,-
+menu,menu,PLAY,FULL,GRID,none,setFullScreen,-
+sheet,sheet,PLAY,FULL,GRID,none,setFullScreen,-
+number,number,PLAY,FULL,GRID,none,setFullScreen,-
+exit,exit_hint_tuned,PLAY,FULL,TABS,none,setFullScreen,-
+exit,exit_hint,PLAY,GUIDE,TABS,ExitHint,-,-
+exit,exit_dialog,PLAY,GUIDE,TABS,ExitDialog,-,-
 # ---- Reminder card (modal, S2)
 card,card_guard,SELECT,GUIDE,GRID,Card,-,card:0
 card,card_guard,BACK,GUIDE,GRID,Card,-,card:0

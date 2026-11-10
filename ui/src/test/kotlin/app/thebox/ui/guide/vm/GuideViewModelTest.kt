@@ -393,6 +393,36 @@ class GuideViewModelTest {
     }
 
     /**
+     * Owner report 2026-11-10 ("On launch: Full screen, last channel" flashed the guide): on a warm launch the controller is
+     * still Stopped on the last channel. When the startup's reads are slower than the Tuned feed (a real box), that
+     * leftover STOPPED reached the machine first and ended the boot blank, so the guide drew until the tune connected.
+     */
+    @Test fun aWarmLaunchIntoFullKeepsTheBlankOverTheStoppedSession() {
+        val w = World()
+        val gate = kotlinx.coroutines.CompletableDeferred<Unit>()
+        w.wrapLibrary = { base ->
+            object : app.thebox.core.guide.GuideLibrary by base {
+                override suspend fun lastWatched(): GuideChannel? { gate.await(); return base.lastWatched() }
+            }
+        }
+        val ch = channels[3]
+        w.library.lastWatched = ch
+        w.controller.state.value = PlaybackState.Stopped(NowPlaying(1, ch.identity, ch.displayName, false, StreamFormat.TS), app.thebox.player.api.StopReason.USER, resumable = false)
+        w.playerSettings.update { it.copy(onLaunch = app.thebox.core.full.OnLaunch.FULL_LAST) }
+        val vm = w.viewModel()
+        assertEquals("the leftover session reached the machine", app.thebox.core.guide.MiniPhase.STOPPED, vm.machine.ui.value.tuned.phase)
+        assertTrue("a leftover Stopped session is not the startup decision", vm.machine.ui.value.booting)
+        gate.complete(Unit)
+        idle()
+        assertTrue("tune" in w.controller.calls)
+        assertTrue("StartFull keeps the blank until the tune lands", vm.machine.ui.value.booting)
+        w.controller.state.value = PlaybackState.Playing(NowPlaying(2, ch.identity, ch.displayName, false, StreamFormat.TS))
+        idle()
+        assertEquals(app.thebox.core.guide.ScreenMode.FULL, vm.machine.ui.value.mode)
+        assertFalse(vm.machine.ui.value.booting)
+    }
+
+    /**
      * Device finding 2026-10-17: Exit leaves the process alive with the controller Stopped, so the warm relaunch found no
      * Idle player and showed the guide with nothing playing whatever "On launch" said. Stopped and Error are "nothing
      * playing"; only a live session (an activity recreated over a playing controller) keeps the startup tune away.

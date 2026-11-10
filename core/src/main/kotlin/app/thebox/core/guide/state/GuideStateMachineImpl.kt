@@ -450,6 +450,7 @@ class GuideStateMachineImpl(
         // H-S11: a fresh press (repeat 0) of any key ends every hold, so a lost key-up cannot leave a hold stuck.
         if (a.repeat == 0) clearHolds(action)
         endBoot() // a key always ends the boot blank (a cancelled startup PIN, a refused tune)
+        if (action == BoxAction.PLAY && u.mode == ScreenMode.GUIDE && guidePlay()) return
         if (u.overlay != null && overlayKey(a)) return
         // M4 §3.1.1 step 3: in FULL the player machine takes the action first; false falls through to the guide.
         if (u.mode == ScreenMode.FULL) { val f = full; if (f != null && f.act(a)) return }
@@ -1199,6 +1200,21 @@ class GuideStateMachineImpl(
     // ---------------------------------------------------------------- Back ladder and exit (§3.4.6)
 
     /**
+     * Owner report 2026-11-10 (docs/decisions/2026-11-10-guide-start-back-audio.md): held Back (PLAY in the guide
+     * context, owner ruling 2026-10-17) goes FULL from every zone and overlay of the guide, not only the grid. A transient
+     * overlay (Groups and its menu, Days, Menu, Sheet, number entry, the exit hint) closes first; a half-typed number is
+     * dropped, not committed. Nothing tuned: nothing happens. The modal exit dialog keeps its keys (false: overlayKey
+     * ignores PLAY there); the PIN pad and the reminder and update cards took the key before this.
+     */
+    private fun guidePlay(): Boolean {
+        if ((u.overlay as? Overlay.Exit)?.dialog == true) return false
+        if (!somethingTuned()) return true
+        if (u.overlay != null) closeOverlay()
+        goFull()
+        return true
+    }
+
+    /**
      * Back walks outward (decision 2026-10-19 ruling 2, amending the 2026-10-18 ladder): zone → grid, scrolled or
      * non-home grid → home, home → the Groups panel (opened "via Back"), whose Back → the top bar with Search focused
      * ([groupsKey]), top bar → the exit step. Hold Back is the way back to the full-screen player.
@@ -1899,7 +1915,11 @@ class GuideStateMachineImpl(
     }
 
     private fun onTuned(state: TunedState, channel: GuideChannel?) {
-        if (state.phase != MiniPhase.IDLE) endBoot()
+        // Owner report 2026-11-10: only a live session ends the blank here. A STOPPED or ERROR Tuned during the boot is
+        // the previous session's (a warm launch after Exit finds the controller Stopped BACKGROUND on the last channel);
+        // ending the blank on it drew the guide until the FULL_LAST tune connected. StartGuide, StartFull's goFull and
+        // any key end it instead.
+        if (state.phase != MiniPhase.IDLE && state.phase != MiniPhase.STOPPED && state.phase != MiniPhase.ERROR) endBoot()
         val identityChanged = state.identity != tuned.identity
         tuned = state
         tunedChannel = channel

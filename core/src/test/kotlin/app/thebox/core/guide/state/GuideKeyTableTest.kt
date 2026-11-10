@@ -171,6 +171,7 @@ class GuideKeyTableTest {
             "number" to { home().also { it.press(DIGIT, digit = 1) } },
             // Decision 2026-10-19 ruling 2: home → Groups → top bar (Search) → exit step.
             "exit_hint" to { idle().keys(BACK, BACK, BACK) },
+            "exit_hint_tuned" to { home().keys(BACK, BACK, BACK).also { check(it.ui.overlay is Overlay.Exit) } },
             "exit_dialog" to { GuideWorld(startTuned = false, settings = GuideSettings(exitConfirmation = ExitConfirmation.ASK)).keys(BACK, BACK, BACK) },
             "exit_dialog_cancel" to { GuideWorld(startTuned = false, settings = GuideSettings(exitConfirmation = ExitConfirmation.ASK)).keys(BACK, BACK, BACK, RIGHT) },
             "card_guard" to ::alerted,
