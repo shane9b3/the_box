@@ -2,7 +2,6 @@ package app.thebox.update
 
 import app.thebox.core.update.UpdateAction
 import app.thebox.core.update.UpdateActions
-import app.thebox.core.update.UpdateState
 import javax.inject.Inject
 
 /**
@@ -15,10 +14,11 @@ class UpdateActionsImpl @Inject constructor(private val updater: UpdaterImpl) : 
         when (action) {
             UpdateAction.UPDATE -> updater.updateNow()
             UpdateAction.LATER -> updater.later()
-            UpdateAction.SKIP -> {
-                val vc = (updater.state.value as? UpdateState.Available)?.manifest?.versionCode ?: return updater.later()
-                updater.skip(vc)
-            }
+            // Review S7: from the offer, so Skip also skips on the Not installed / permission / failure cards.
+            UpdateAction.SKIP -> skip(updater.offeredVersionCode(), updater::skip, updater::later)
         }
     }
 }
+
+/** Skip [offered] (the release on offer), or act as Later when nothing is on offer. */
+internal fun skip(offered: Long?, skip: (Long) -> Unit, later: () -> Unit) = if (offered != null) skip(offered) else later()

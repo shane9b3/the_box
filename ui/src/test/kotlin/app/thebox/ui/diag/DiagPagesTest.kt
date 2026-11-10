@@ -106,6 +106,24 @@ class DiagPagesTest {
         assertEquals(listOf("download", "install", "check(true)"), updater.calls)
     }
 
+    /** Review S9 (2026-11-10): Not installed installs on OK; the busy rule (S1) disables the row while checking the file. */
+    @Test
+    fun theUpdateRowKnowsVerifyingAndNotInstalled() = runTest {
+        val scope = TestScope(UnconfinedTestDispatcher(testScheduler))
+        updater.state.value = app.thebox.core.update.UpdateState.NotInstalled("0.1.5")
+        pages.onIntent(RowIntent.Run(AboutRows.UPDATE), scope) {}
+        assertEquals(listOf("install"), updater.calls)
+        assertEquals("Press OK to install version 0.1.5.", pages.updateDesc(updater.state.value))
+        assertEquals("0.1.5 not installed · OK to try again", pages.updateValue(updater.state.value))
+        assertTrue(pages.page(SettingsRoute.Section(SectionId.ABOUT)).first().rows.single { it.id == AboutRows.UPDATE }.enabled)
+        updater.state.value = app.thebox.core.update.UpdateState.Verifying("0.1.5")
+        assertEquals("Checking the download…", pages.updateValue(updater.state.value))
+        assertFalse("busy while the file is checked", pages.page(SettingsRoute.Section(SectionId.ABOUT)).first().rows.single { it.id == AboutRows.UPDATE }.enabled)
+        // Review N4: a failed install is not a failed check.
+        assertEquals("The update failed · OK to try again", pages.updateValue(app.thebox.core.update.UpdateState.Failed(app.thebox.core.update.UpdateFailure.INSTALL_FAILED, null)))
+        assertTrue(pages.updateValue(app.thebox.core.update.UpdateState.Failed(app.thebox.core.update.UpdateFailure.NETWORK, null)).startsWith("Last check failed"))
+    }
+
     @Test
     fun aboutIntents() = runTest {
         val scope = TestScope(UnconfinedTestDispatcher(testScheduler))

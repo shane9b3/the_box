@@ -188,7 +188,7 @@ class SettingsDebugProbe @Inject constructor(
         fun isM5(uri: Uri): Boolean = uri.host in M5_HOSTS || M5_KEYS.any { it in uri.queryParameterNames }
 
         val M5_HOSTS = setOf("settings", "wipe", "clock", "update", "phone", "keystore-reset")
-        val M5_KEYS = listOf("settings", "route", "wipe", "clock_offset_ms", "offsetMs", "update_manifest", "manifest", "update_key", "update_check", "phone_port", "keystore_reset", "doh_http")
+        val M5_KEYS = listOf("settings", "route", "wipe", "clock_offset_ms", "offsetMs", "update_manifest", "manifest", "update_key", "update_route", "update_check", "phone_port", "keystore_reset", "doh_http")
     }
 }
 

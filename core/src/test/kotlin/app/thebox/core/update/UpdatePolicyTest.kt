@@ -118,4 +118,104 @@ class UpdatePolicyTest {
         assertEquals(UpdateAction.LATER, assertIs<UpdateCardModel.KeyResult.Pressed>(UpdateCardModel.onAction(c, BoxAction.BACK)).action)
         assertIs<UpdateCardModel.KeyResult.NotMine>(UpdateCardModel.onAction(c, BoxAction.ZAP_UP))
     }
+
+    // ---------------------------------------------------------------- 2026-11-10 (docs/design/m5-update-visible-install.md)
+
+    /** Review S1: one busy rule for runCheck, download() and the About row. */
+    @Test
+    fun busyIsDownloadingVerifyingReadyAndInstalling() {
+        assertTrue(UpdateState.Downloading("1.0.4", 1, 10).isBusy)
+        assertTrue(UpdateState.Verifying("1.0.4").isBusy)
+        assertTrue(UpdateState.Installing.isBusy)
+        assertTrue(UpdateState.ReadyToInstall("1.0.4").isBusy, "code review S5: no buttons, the hand-off is under way")
+        for (s in listOf(UpdateState.Idle, UpdateState.Checking, UpdateState.UpToDate(1), UpdateState.Available(manifest, apk), UpdateState.NeedsPermission("1.0.4"),
+            UpdateState.NotInstalled("1.0.4"), UpdateState.Failed(UpdateFailure.NETWORK, null))) {
+            assertFalse(s.isBusy, "$s")
+        }
+    }
+
+    /** Review S3: a downloaded update newer than the running version is kept; everything else goes. */
+    @Test
+    fun startKeepsTheNewestNewerApkAndDeletesTheRest() {
+        val plan = UpdatePolicy.startupFiles(listOf("5.apk", "7.apk", "7.apk.part", "3.apk", "junk", "8.apk.part"), runningVersionCode = 5)
+        assertEquals(7L, plan.keepVersionCode)
+        assertEquals(listOf("5.apk", "7.apk.part", "3.apk", "junk", "8.apk.part"), plan.delete)
+        val landed = UpdatePolicy.startupFiles(listOf("5.apk"), runningVersionCode = 5)
+        assertNull(landed.keepVersionCode)
+        assertEquals(listOf("5.apk"), landed.delete)
+        assertEquals(UpdatePolicy.StartupFiles(null, emptyList()), UpdatePolicy.startupFiles(emptyList(), 5))
+    }
+
+    /** Review S3: the restart check for a waiting download runs whatever the cadence (once per process). */
+    @Test
+    fun aWaitingDownloadChecksAgainWhateverTheCadence() {
+        val justChecked = UpdatePrefs(lastCheckMs = now - 1_000)
+        assertFalse(UpdatePolicy.shouldRun(justChecked, now, manual = false, checkedThisProcess = false))
+        assertTrue(UpdatePolicy.shouldRun(justChecked, now, manual = false, checkedThisProcess = false, resume = true))
+        assertTrue(UpdatePolicy.shouldRun(UpdatePrefs(checkAutomatically = false), now, manual = false, checkedThisProcess = false, resume = true))
+        assertFalse(UpdatePolicy.shouldRun(justChecked, now, manual = false, checkedThisProcess = true, resume = true), "the worker checked already")
+    }
+
+    @Test
+    fun landedIsTheTargetOrHigher() {
+        assertTrue(UpdatePolicy.landed(6, 6))
+        assertTrue(UpdatePolicy.landed(7, 6))
+        assertFalse(UpdatePolicy.landed(5, 6))
+    }
+
+    /** Found on the emulator (2026-11-10): a second hex() hashed nothing and refused every download as damaged. */
+    @Test
+    fun sha256HexIsIdempotent() {
+        val c = Sha256Counter()
+        val b = "abc".toByteArray()
+        c.update(b, 0, b.size)
+        val first = c.hex()
+        assertEquals("BA7816BF8F01CFEA414140DE5DAE2223B00361A396177A9CB410FF61F20015AD", first)
+        assertEquals(first, c.hex())
+    }
+
+    @Test
+    fun sha256RefusesAWriteAfterTheDigest() {
+        val c = Sha256Counter()
+        c.hex()
+        kotlin.test.assertFailsWith<IllegalStateException> { c.update(ByteArray(1), 0, 1) }
+    }
+
+    /**
+     * Code review S4 (and the restart reuse of a file a previous process left, review S3): the waiting file is kept and
+     * reused only while its version is offered or the server could not tell; otherwise it is deleted.
+     */
+    @Test
+    fun aWaitingFileFromAPreviousProcess() {
+        // Previous process: downloaded 7 while 6 ran, then died (the API 30 permission grant).
+        val plan = UpdatePolicy.startupFiles(listOf("7.apk", "7.apk.part"), runningVersionCode = 6)
+        assertEquals(7L, plan.keepVersionCode)
+        assertEquals(listOf("7.apk.part"), plan.delete)
+        assertTrue(UpdatePolicy.keepsWaitingFile(7, UpdatePolicy.CheckOutcome.Offered(7)))
+        assertTrue(UpdatePolicy.keepsWaitingFile(7, UpdatePolicy.CheckOutcome.Unreachable), "offline: try again next start")
+        assertTrue(UpdatePolicy.keepsWaitingFile(7, UpdatePolicy.CheckOutcome.NotRun))
+        assertFalse(UpdatePolicy.keepsWaitingFile(7, UpdatePolicy.CheckOutcome.Offered(8)))
+        assertFalse(UpdatePolicy.keepsWaitingFile(7, UpdatePolicy.CheckOutcome.Nothing), "withdrawn, skipped or up to date")
+        assertFalse(UpdatePolicy.keepsWaitingFile(7, UpdatePolicy.CheckOutcome.Rejected))
+    }
+
+    /** Review S6: a file verified in the background waits for the next start; once. */
+    @Test
+    fun deferredHandOff() {
+        val d = DeferredHandOff()
+        assertTrue(d.onVerified(inForeground = true))
+        assertFalse(d.onStart())
+        assertFalse(d.onVerified(inForeground = false))
+        assertTrue(d.pending)
+        assertTrue(d.onStart())
+        assertFalse(d.onStart(), "once")
+        d.onVerified(inForeground = false)
+        d.clear()
+        assertFalse(d.onStart())
+    }
+
+    @Test
+    fun restrictionFailureIsAlwaysShown() {
+        assertTrue(UpdatePolicy.showsFailure(UpdateFailure.INSTALL_RESTRICTED, manual = false))
+    }
 }

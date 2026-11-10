@@ -62,11 +62,15 @@ class Sha256Counter {
         private set
 
     fun update(buf: ByteArray, off: Int, len: Int) {
+        check(digest == null) { "update after hex()" }
         md.update(buf, off, len)
         bytes += len
     }
 
-    fun hex(): String = md.digest().joinToString("") { "%02X".format(it) }
+    private var digest: String? = null
+
+    /** The digest (upper-case hex). Idempotent: `MessageDigest.digest()` resets, so the first result is kept. */
+    fun hex(): String = digest ?: md.digest().joinToString("") { "%02X".format(it) }.also { digest = it }
 
     companion object {
         fun of(input: InputStream): Pair<String, Long> {

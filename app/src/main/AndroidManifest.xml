@@ -40,6 +40,12 @@
             <category android:name="android.intent.category.OPENABLE" />
             <data android:mimeType="application/octet-stream" />
         </intent>
+        <!-- docs/design/m5-update-visible-install.md (review B1): the updater pins its APK VIEW intent to the system
+             installer; a vendor installer that is not force-queryable must be visible on API 30+. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="content" android:mimeType="application/vnd.android.package-archive" />
+        </intent>
     </queries>
 
     <!-- Runs on TV boxes and also on phones/tablets; neither touch nor leanback is required. -->

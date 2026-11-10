@@ -177,7 +177,8 @@ class GuideDebugReceiver : ComponentActivity() {
     /**
      * The M5 switches (§6.5), applied in this order: `keystore_reset=1` (or host `keystore-reset`), `wipe=1` (host
      * `wipe`), `clock_offset_ms=N` (host `clock?offsetMs=N`), `phone_port=N` (host `phone?port=N`),
-     * `update_manifest=URL` + `update_key=HEX` (host `update?manifest=URL&key=HEX`), `update_check=1|manual`,
+     * `update_manifest=URL` + `update_key=HEX` (host `update?manifest=URL&key=HEX`), `update_route=session|auto`,
+     * `update_check=1|manual`,
      * `settings=<route>` / `route=<route>` (host `settings?route=…`; [SettingsDebugProbe.parseRoute]). The outcome is
      * published on [m5Status] (seq + done) for the suite.
      */
@@ -196,6 +197,8 @@ class GuideDebugReceiver : ComponentActivity() {
         }
         (uri.lastParam("update_manifest") ?: uri.lastParam("manifest"))?.let { probe.updateEndpoint.manifestUrl = it.ifBlank { null } }
         (uri.lastParam("update_key") ?: if (uri.host == "update") uri.lastParam("key") else null)?.let { probe.updateEndpoint.runtimeKeyHex = it.ifBlank { null } }
+        // Review S8: `update_route=session` forces the PackageInstaller session (the fallback), `auto` restores the choice.
+        uri.lastParam("update_route")?.let { probe.installer.forceSession = it == "session" }
         val check = uri.lastParam("update_check")
         val route = SettingsDebugProbe.parseRoute(uri.lastParam("settings") ?: uri.lastParam("route"))
         m5StatusFlow.value = M5Status(seq, done = false)

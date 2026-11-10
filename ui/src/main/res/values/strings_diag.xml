@@ -17,9 +17,12 @@
     <string name="about_update_value_downloading">Downloading %1$d %%</string>
     <string name="about_update_value_ready">%1$s ready to install</string>
     <string name="about_update_value_installing">Installing…</string>
+    <string name="about_update_value_verifying">Checking the download…</string>
+    <string name="about_update_value_not_installed">%1$s not installed · OK to try again</string>
     <string name="about_update_value_permission">Allow The Box to install updates</string>
     <!-- U-L15 (code review 2026-10-16): a next step on the failed check; every Apache-2.0 dependency credited -->
     <string name="about_update_value_failed">Last check failed · OK to try again</string>
+    <string name="about_update_value_update_failed">The update failed · OK to try again</string>
     <string name="about_update_value_disabled">Updates are not set up for this build</string>
     <string name="about_update_value_idle">Version %1$s</string>
     <string name="about_update_desc_available">Press OK to download and install version %1$s.</string>
@@ -186,7 +189,9 @@
     <string name="update_card_later">Later</string>
     <string name="update_card_skip">Skip this version</string>
     <string name="update_card_downloading">Downloading %1$d %%</string>
-    <string name="update_card_ready">Opening the installer…</string>
+    <string name="update_card_verifying">Checking the download…</string>
+    <string name="update_card_opening">Opening the installer…</string>
+    <string name="update_card_not_installed">Not installed. Press Update to try again.</string>
     <string name="update_failed_network">The update could not be downloaded. Check the internet connection, then try again.</string>
     <string name="update_failed_signature">This update was not signed by The Box. It was not installed.</string>
     <string name="update_failed_manifest">The update information is damaged. Try again later.</string>
@@ -194,6 +199,7 @@
     <string name="update_failed_package">This file is not an update of The Box. It was not installed.</string>
     <string name="update_failed_space">Not enough free storage for the update. Free some space, then try again.</string>
     <string name="update_failed_blocked">This TV blocked the installation. It may only install apps from verified developers or need "Install unknown apps" for The Box.</string>
+    <string name="update_failed_restricted">This TV does not allow installing apps from outside its store. Install the update from the release page, or ask whoever manages this TV.</string>
     <string name="update_failed_install">The update could not be installed: %1$s. Try again, or install it from the release page.</string>
     <string name="update_failed_install_plain">The update could not be installed. Try again, or install it from the release page.</string>
     <string name="update_failed_disabled">Updates are not set up for this build.</string>

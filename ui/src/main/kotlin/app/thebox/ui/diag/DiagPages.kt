@@ -45,6 +45,7 @@ import app.thebox.core.update.UpdateDomain
 import app.thebox.core.update.UpdateFailure
 import app.thebox.core.update.UpdateState
 import app.thebox.core.update.Updater
+import app.thebox.core.update.isBusy
 import app.thebox.player.api.PlaybackController
 import app.thebox.ui.R
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -124,7 +125,7 @@ class DiagPages @Inject constructor(
             val rows = listOf(
                 SettingsRow(AboutRows.HEADER, s(R.string.about_title), kind = RowKind.Info(headerLines())),
                 SettingsRow(AboutRows.UPDATE, s(R.string.about_update), value = updateValue(u), description = n[AboutRows.UPDATE] ?: updateDesc(u),
-                    kind = RowKind.Action(), enabled = u !is UpdateState.Checking && u !is UpdateState.Downloading && u != UpdateState.Installing, effect = EffectTiming.LIVE),
+                    kind = RowKind.Action(), enabled = u !is UpdateState.Checking && !u.isBusy, effect = EffectTiming.LIVE),
                 SettingsRow(AboutRows.DIAGNOSTICS, s(R.string.about_diagnostics), description = s(R.string.about_diagnostics_desc),
                     kind = RowKind.Link(SettingsRoute.Diagnostics), effect = EffectTiming.NONE),
                 exportRow(AboutRows.EXPORT_LOGS, n),
@@ -176,6 +177,7 @@ class DiagPages @Inject constructor(
     fun updateDesc(u: UpdateState): String = when (u) {
         is UpdateState.Available -> context.getString(R.string.about_update_desc_available, u.manifest.versionName)
         is UpdateState.ReadyToInstall -> context.getString(R.string.about_update_desc_ready, u.versionName)
+        is UpdateState.NotInstalled -> context.getString(R.string.about_update_desc_ready, u.versionName)
         else -> s(R.string.about_update_desc)
     }
 
@@ -189,8 +191,16 @@ class DiagPages @Inject constructor(
             is UpdateState.Downloading -> context.getString(R.string.about_update_value_downloading, if (u.total > 0) (u.bytes * 100 / u.total).toInt() else 0)
             is UpdateState.NeedsPermission -> s(R.string.about_update_value_permission)
             is UpdateState.ReadyToInstall -> context.getString(R.string.about_update_value_ready, u.versionName)
+            is UpdateState.Verifying -> s(R.string.about_update_value_verifying)
             UpdateState.Installing -> s(R.string.about_update_value_installing)
-            is UpdateState.Failed -> if (u.reason == UpdateFailure.DISABLED) s(R.string.about_update_value_disabled) else s(R.string.about_update_value_failed)
+            is UpdateState.NotInstalled -> context.getString(R.string.about_update_value_not_installed, u.versionName)
+            is UpdateState.Failed -> when (u.reason) {
+                UpdateFailure.DISABLED -> s(R.string.about_update_value_disabled)
+                // Review N4: a download or install failure is not a failed check.
+                UpdateFailure.HASH_MISMATCH, UpdateFailure.WRONG_PACKAGE, UpdateFailure.WRONG_CERT, UpdateFailure.NO_SPACE,
+                UpdateFailure.INSTALL_BLOCKED, UpdateFailure.INSTALL_FAILED, UpdateFailure.INSTALL_RESTRICTED -> s(R.string.about_update_value_update_failed)
+                else -> s(R.string.about_update_value_failed)
+            }
         }
     }
 
@@ -433,7 +443,7 @@ class DiagPages @Inject constructor(
             // here in one press; otherwise the row checks.
             id == AboutRows.UPDATE && intent is RowIntent.Run -> when (updater.state.value) {
                 is UpdateState.Available -> updater.download()
-                is UpdateState.ReadyToInstall, is UpdateState.NeedsPermission -> updater.install()
+                is UpdateState.ReadyToInstall, is UpdateState.NeedsPermission, is UpdateState.NotInstalled -> updater.install()
                 else -> updater.check(manual = true)
             }
             id == AboutRows.AUTO_CHECK && intent is RowIntent.Toggle -> {

@@ -394,7 +394,8 @@ class GuideStateMachineImpl(
             is GuideEvent.Update -> {
                 // C-S2: a card that arrives is not focused; it takes keys only after UPDATE_CARD_IDLE_MS without a key.
                 if (updateCard == null && event.card != null) { updateFocused = false; updateIdleFromMs = curMs }
-                updateCard = event.card?.let { c -> updateCard?.let { c.copy(focused = it.focused) } ?: c }
+                // The guide owns the focus within a phase; a new phase takes the model's (NOT_INSTALLED: Update, review §6).
+                updateCard = event.card?.let { c -> updateCard?.takeIf { it.phase == c.phase }?.let { c.copy(focused = it.focused) } ?: c }
                 if (updateCard == null) updateFocused = false
             }
         }
