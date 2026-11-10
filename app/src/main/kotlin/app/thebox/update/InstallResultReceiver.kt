@@ -10,6 +10,7 @@ import android.content.pm.PackageInstaller
 import android.content.pm.PackageManager
 import android.os.Build
 import androidx.core.content.ContextCompat
+import androidx.core.content.IntentCompat
 import androidx.core.content.FileProvider
 import app.thebox.core.common.BoxLog
 import app.thebox.core.update.InstallRoute
@@ -81,18 +82,25 @@ class InstallResultReceiver @Inject constructor(@ApplicationContext private val 
      * review 2026-11-09): the installer query and the session work (the APK copy and its fsync) run on [io]; the
      * caller's thread (main) keeps the receiver registration, the installer's `startActivity` and every [onStatus] call.
      */
-    suspend fun install(apk: File, packageName: String, io: CoroutineContext, installerRouteFailed: Boolean, onStatus: (InstallStatus) -> Unit) {
+    /**
+     * [beforeSystemInstaller] runs right before the installer activity is started (second code review S-2: the
+     * updater records the attempt there).
+     */
+    suspend fun install(
+        apk: File, packageName: String, io: CoroutineContext, installerRouteFailed: Boolean,
+        beforeSystemInstaller: () -> Unit, onStatus: (InstallStatus) -> Unit,
+    ) {
         listener = onStatus
         register()
         val pinned = withContext(io) { pinnedInstaller(apk) }
         val route = InstallRoute.choose(Build.VERSION.SDK_INT, pinned, forceSession, installerRouteFailed = installerRouteFailed)
         BoxLog.i(TAG) { "install route $route (installer ${pinned ?: "none"}${if (forceSession) ", session forced" else ""}${if (installerRouteFailed) ", installer route failed before" else ""})" }
         val triedPinned = route == InstallRoute.Route.SYSTEM_INSTALLER && pinned != null
-        if (triedPinned && startSystemInstaller(apk, pinned!!, onStatus)) return
+        if (triedPinned && startSystemInstaller(apk, pinned!!, beforeSystemInstaller, onStatus)) return
         when (val r = withContext(io) { commitSession(apk, packageName) }) {
             SessionResult.Committed -> onStatus(InstallStatus.SessionCommitted)
             // The forced session (debug) may still find the pinned installer; never an un-pinned VIEW (review §5).
-            SessionResult.NoSession -> if (triedPinned || pinned == null || !startSystemInstaller(apk, pinned, onStatus)) onStatus(InstallStatus.Failed(PackageInstaller.STATUS_FAILURE, "no installer"))
+            SessionResult.NoSession -> if (triedPinned || pinned == null || !startSystemInstaller(apk, pinned, beforeSystemInstaller, onStatus)) onStatus(InstallStatus.Failed(PackageInstaller.STATUS_FAILURE, "no installer"))
             is SessionResult.Failed -> onStatus(InstallStatus.Failed(PackageInstaller.STATUS_FAILURE, r.reason))
         }
     }
@@ -143,7 +151,8 @@ class InstallResultReceiver @Inject constructor(@ApplicationContext private val 
      * [onStatus] runs outside the try (code review nit): a throwing listener must not look like a failed start and
      * cause a second hand-off.
      */
-    private fun startSystemInstaller(apk: File, installerPackage: String, onStatus: (InstallStatus) -> Unit): Boolean {
+    private fun startSystemInstaller(apk: File, installerPackage: String, before: () -> Unit, onStatus: (InstallStatus) -> Unit): Boolean {
+        before()
         val started = try {
             val view = viewIntent(apk).setPackage(installerPackage)
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -233,24 +242,34 @@ class InstallResultReceiver @Inject constructor(@ApplicationContext private val 
     override fun onReceive(ctx: Context, intent: Intent) {
         val status = intent.getIntExtra(PackageInstaller.EXTRA_STATUS, PackageInstaller.STATUS_FAILURE)
         val message = intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)
+        val id = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, -1)
         statusesSeen += status
+        // Second code review S-3: only the session in flight; a late status of an abandoned one changes nothing.
+        if (!InstallRoute.acceptsStatus(id, pendingSession)) {
+            BoxLog.i(TAG) { "status $status of session $id ignored (current ${pendingSession ?: "none"})" }
+            return
+        }
         BoxLog.i(TAG) { "status $status" }
         val l = listener
         when (status) {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
-                @Suppress("DEPRECATION")
-                val confirm = if (Build.VERSION.SDK_INT >= 33) intent.getParcelableExtra(Intent.EXTRA_INTENT, Intent::class.java) else intent.getParcelableExtra(Intent.EXTRA_INTENT)
-                if (confirm != null) {
+                val confirm = IntentCompat.getParcelableExtra(intent, Intent.EXTRA_INTENT, Intent::class.java)
+                // S-1: nothing to show is a failure with a reason, never a confirmation that is not there.
+                val failure = InstallRoute.confirmationFailure(confirm != null) {
                     try {
-                        ctx.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        ctx.startActivity(confirm!!.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        null
                     } catch (e: Exception) {
-                        // A6 (code review 2026-11-09): nobody can answer this session; abandon it rather than leak it.
-                        val id = intent.getIntExtra(PackageInstaller.EXTRA_SESSION_ID, pendingSession ?: -1)
-                        pendingSession = null
-                        if (id >= 0) runCatching { ctx.packageManager.packageInstaller.abandonSession(id) }
-                        l?.invoke(InstallStatus.Blocked(e.javaClass.simpleName))
-                        return
+                        e.javaClass.simpleName
                     }
+                }
+                if (failure != null) {
+                    // A6 (code review 2026-11-09): nobody can answer this session; abandon it rather than leak it.
+                    val sid = pendingSession
+                    pendingSession = null
+                    if (sid != null) runCatching { ctx.packageManager.packageInstaller.abandonSession(sid) }
+                    l?.invoke(InstallStatus.Failed(PackageInstaller.STATUS_FAILURE, failure))
+                    return
                 }
                 l?.invoke(InstallStatus.PendingUserAction)
             }

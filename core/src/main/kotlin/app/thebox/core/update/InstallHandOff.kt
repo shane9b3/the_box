@@ -46,26 +46,74 @@ object InstallRoute {
     }
 
     /**
-     * [prefs] after a miss of the installer route for [versionCode]. NEVER_APPEARED switches at once. LEFT_INSTALLER
-     * counts one: a first Cancel keeps the installer route (so Update → Install still ends on Done / Open), a second
-     * return without the update for the same version switches (an installer that fails with its own error screen looks
-     * exactly like a Cancel from here).
+     * [prefs] after a miss of the installer route for [versionCode] on the system [fingerprint]. NEVER_APPEARED switches
+     * that version at once and marks the installer route broken on this system (the installer did not come up at all:
+     * a capability failure, not a choice). LEFT_INSTALLER counts one: a first Cancel keeps the installer route (so Update
+     * → Install still ends on Done / Open), a second return without the update for the same version switches it (an
+     * installer that fails with its own error screen looks exactly like a Cancel from here). Switching on two different
+     * versions also marks the system broken (second code review S-2): two hand Cancels on one release only cost that
+     * release its Open screen. The attempt record is consumed.
      */
-    fun recordMiss(prefs: UpdatePrefs, versionCode: Long, miss: Miss): UpdatePrefs {
+    fun recordMiss(prefs: UpdatePrefs, versionCode: Long, miss: Miss, fingerprint: String): UpdatePrefs {
         val prior = if (prefs.installerRouteVersionCode == versionCode) prefs.installerRouteMisses else 0
         val misses = if (miss == Miss.NEVER_APPEARED) MISSES_BEFORE_SWITCH else (prior + 1).coerceAtMost(MISSES_BEFORE_SWITCH)
-        return prefs.copy(installerRouteVersionCode = versionCode, installerRouteMisses = misses)
+        var p = prefs.copy(installerRouteVersionCode = versionCode, installerRouteMisses = misses, installerRouteAttemptVersionCode = null)
+        if (miss == Miss.NEVER_APPEARED) {
+            p = p.copy(installerRouteBrokenOn = fingerprint)
+        } else if (misses >= MISSES_BEFORE_SWITCH && prior < MISSES_BEFORE_SWITCH) {
+            val earlier = p.installerRouteSwitchedVersionCode
+            p = if (earlier != null && earlier != versionCode) p.copy(installerRouteBrokenOn = fingerprint) else p.copy(installerRouteSwitchedVersionCode = versionCode)
+        }
+        return p
     }
 
-    /** Whether the next Update of [versionCode] skips the installer activity. */
-    fun installerRouteFailed(prefs: UpdatePrefs, versionCode: Long): Boolean =
-        prefs.installerRouteVersionCode == versionCode && prefs.installerRouteMisses >= MISSES_BEFORE_SWITCH
+    /** (S-2) Written before the installer activity starts, so a process killed meanwhile still counts the miss. */
+    fun recordAttempt(prefs: UpdatePrefs, versionCode: Long): UpdatePrefs = prefs.copy(installerRouteAttemptVersionCode = versionCode)
 
-    /** The memory is dropped once a version at least as new as the remembered one runs. */
-    fun clearedOnStart(prefs: UpdatePrefs, runningVersionCode: Long): UpdatePrefs {
-        val vc = prefs.installerRouteVersionCode ?: return prefs
-        return if (runningVersionCode >= vc) prefs.copy(installerRouteVersionCode = null, installerRouteMisses = 0) else prefs
+    /** The update landed in this process: the attempt is not a miss. */
+    fun clearAttempt(prefs: UpdatePrefs): UpdatePrefs = prefs.copy(installerRouteAttemptVersionCode = null)
+
+    /** Whether the next Update of [versionCode] skips the installer activity on the system [fingerprint]. */
+    fun installerRouteFailed(prefs: UpdatePrefs, versionCode: Long, fingerprint: String): Boolean =
+        prefs.installerRouteBrokenOn == fingerprint ||
+            (prefs.installerRouteVersionCode == versionCode && prefs.installerRouteMisses >= MISSES_BEFORE_SWITCH)
+
+    /**
+     * What a start does with the route memory, running [runningVersionCode] on [fingerprint]:
+     * - an attempt for a newer version that did not land (the process died while the installer was up, then the user
+     *   came back without the update) counts as a LEFT_INSTALLER miss; one that landed is simply dropped;
+     * - the per-version memory is dropped once that version (or newer) runs;
+     * - the "broken on this system" mark is dropped when the system fingerprint changed.
+     */
+    fun onStart(prefs: UpdatePrefs, runningVersionCode: Long, fingerprint: String): UpdatePrefs {
+        var p = prefs
+        p.installerRouteAttemptVersionCode?.let { vc ->
+            p = if (runningVersionCode >= vc) clearAttempt(p) else recordMiss(p, vc, Miss.LEFT_INSTALLER, fingerprint)
+        }
+        p.installerRouteVersionCode?.let { vc -> if (runningVersionCode >= vc) p = p.copy(installerRouteVersionCode = null, installerRouteMisses = 0) }
+        if (p.installerRouteBrokenOn != null && p.installerRouteBrokenOn != fingerprint) p = p.copy(installerRouteBrokenOn = null)
+        return p
     }
+
+    // ---------------------------------------------------------------- session statuses (second code review S-3)
+
+    /**
+     * Whether a session status for [statusSessionId] (`EXTRA_SESSION_ID`, -1 when absent) belongs to the session in
+     * flight ([current]); statuses of an abandoned or older session are ignored. Without an id (a platform that leaves
+     * it out) the status is taken only while a session is in flight.
+     */
+    fun acceptsStatus(statusSessionId: Int, current: Int?): Boolean =
+        current != null && (statusSessionId < 0 || statusSessionId == current)
+
+    /**
+     * (second code review S-1) What a `STATUS_PENDING_USER_ACTION` means: null when a confirmation was started, else why
+     * not. A status without `EXTRA_INTENT` is a failure with a reason, never a confirmation that is not there.
+     * [startError] is called only when there is an intent (it starts the confirmation and names the error, or null).
+     */
+    inline fun confirmationFailure(hasIntent: Boolean, startError: () -> String?): String? =
+        if (!hasIntent) NO_CONFIRMATION else startError()
+
+    const val NO_CONFIRMATION = "no confirmation"
 
     /** A `PackageInstaller.SessionInfo`, reduced to what [installerSessionInProgress] reads. */
     data class SessionFacts(val sessionId: Int, val appPackageName: String?, val active: Boolean, val committed: Boolean)
@@ -114,16 +162,14 @@ class HandOffWatcher(private val deadlineMs: Long = HAND_OFF_DEADLINE_MS, privat
     enum class Trigger { RETURN, DEADLINE }
 
     /**
-     * A hand-off happened at [nowMs]. [withDeadline] false: no deadline (the session route once its confirmation is
-     * up: a return or its own statuses end it, and a deadline could fire while the user's Install runs).
+     * A hand-off happened at [nowMs]. Always with a deadline (second code review S-1): it runs only while
+     * `MainActivity` is resumed, so not while a confirmation is up; a confirmation that never shows, or one dismissed
+     * in under 700 ms, ends in a check instead of "Installing" for ever.
      */
-    fun arm(nowMs: Long, withDeadline: Boolean = true) {
+    fun arm(nowMs: Long) {
         waits = 0
-        this.withDeadline = withDeadline
         start(nowMs)
     }
-
-    private var withDeadline = true
 
     /**
      * The check found the installer still at work: wait again (a fresh deadline and trigger). False when it has waited
@@ -132,7 +178,6 @@ class HandOffWatcher(private val deadlineMs: Long = HAND_OFF_DEADLINE_MS, privat
     fun keepWaiting(nowMs: Long): Boolean {
         if (waits >= maxWaits) return false
         waits++
-        withDeadline = true
         start(nowMs)
         return true
     }
@@ -143,8 +188,8 @@ class HandOffWatcher(private val deadlineMs: Long = HAND_OFF_DEADLINE_MS, privat
         leftPause = false
         returned = false
         firedBy = null
-        deadlineLive = withDeadline
-        resumedSinceMs = if (activityResumed && withDeadline) nowMs else null
+        deadlineLive = true
+        resumedSinceMs = if (activityResumed) nowMs else null
     }
 
     fun disarm() {
@@ -156,7 +201,7 @@ class HandOffWatcher(private val deadlineMs: Long = HAND_OFF_DEADLINE_MS, privat
     fun onActivityResumed(nowMs: Long): Boolean {
         activityResumed = true
         // A short bounce (no process-level leave): the installer is not in front; give it a fresh deadline.
-        if (armed && withDeadline && !deadlineLive && !left) deadlineLive = true
+        if (armed && !deadlineLive && !left) deadlineLive = true
         if (deadlineLive && resumedSinceMs == null) resumedSinceMs = nowMs
         return fire(nowMs)
     }
@@ -203,4 +248,18 @@ class HandOffWatcher(private val deadlineMs: Long = HAND_OFF_DEADLINE_MS, privat
         /** How many times a check that finds the installer still at work waits again before "Not installed". */
         const val MAX_WAITS = 3
     }
+}
+
+/**
+ * (second code review S-3) One update job at a time: a job starts only when none runs; [done] when it ends (finally).
+ * Thread-safe.
+ */
+class SingleFlight {
+    private var running = false
+
+    @Synchronized fun tryStart(): Boolean = if (running) false else { running = true; true }
+
+    @Synchronized fun done() { running = false }
+
+    @get:Synchronized val busy: Boolean get() = running
 }

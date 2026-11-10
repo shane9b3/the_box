@@ -23,6 +23,7 @@ import app.thebox.core.update.ApkVerifier
 import app.thebox.core.update.DeferredHandOff
 import app.thebox.core.update.InstallRoute
 import app.thebox.core.update.HandOffWatcher
+import app.thebox.core.update.SingleFlight
 import app.thebox.core.update.ManifestVerdict
 import app.thebox.core.update.ManifestVerifier
 import app.thebox.core.update.RunningBuild
@@ -50,6 +51,9 @@ import app.thebox.ui.R
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineExceptionHandler
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -125,8 +129,24 @@ class UpdaterImpl @Inject constructor(
     @Volatile private var checkedThisProcess = false
     @Volatile private var offer: Pair<UpdateManifest, ApkEntry>? = null
     @Volatile private var lastManual = false
-    @Volatile private var lastOutcome: UpdatePolicy.CheckOutcome = UpdatePolicy.CheckOutcome.NotRun
     private var work: Job? = null
+    /** Second code review S-3: one update job at a time. */
+    private val flight = SingleFlight()
+    private var jobSeq = 0
+    private val fingerprint: String = Build.FINGERPRINT.orEmpty()
+
+    /**
+     * Second code review nit: `appScope` has no handler, and a dead package manager (or any bug) in the updater must
+     * not take the app down. Logged; a busy state ends in a failure with a next step, a check in Idle.
+     */
+    private val guard = CoroutineExceptionHandler { _, e ->
+        BoxLog.w(TAG, "updater error: ${e.javaClass.simpleName}")
+        val s = _state.value
+        when {
+            s == UpdateState.Checking -> _state.value = UpdateState.Idle
+            s.isBusy -> fail(UpdateFailure.INSTALL_FAILED, e.javaClass.simpleName)
+        }
+    }
 
     private val laterThisProcess = MutableStateFlow(false)
     private val _notice = MutableStateFlow<String?>(null)
@@ -150,13 +170,13 @@ class UpdaterImpl @Inject constructor(
         combine(_state, laterThisProcess) { s, later -> fold.next(s, later) }.stateIn(appScope, SharingStarted.Eagerly, null)
 
     init {
-        appScope.launch(io) {
+        appScope.launch(io + guard) {
             checkUpdatedNotice()
             resumeAfterRestart()
         }
         // Immediate when built on the main thread (MainActivity's view models): the callbacks are in place before its
         // onResume. Built elsewhere, observeLifecycle starts from the process state, so nothing depends on immediacy.
-        appScope.launch(Dispatchers.Main.immediate) { observeLifecycle() }
+        appScope.launch(Dispatchers.Main.immediate + guard) { observeLifecycle() }
     }
 
     /** Sets [next] unless the state is one [blockedBy] refuses; one step under [stateLock]. */
@@ -169,7 +189,7 @@ class UpdaterImpl @Inject constructor(
     override fun check(manual: Boolean) {
         // Asking by hand brings the card back after Later / BACK (not while busy: the check would not run).
         if (manual && !_state.value.isBusy) laterThisProcess.value = false
-        appScope.launch(io) { runCheck(manual) }
+        appScope.launch(io + guard) { runCheck(manual) }
     }
 
     /**
@@ -177,17 +197,30 @@ class UpdaterImpl @Inject constructor(
      * is verified (the card's Update, the About row). Refused while busy or while a check runs.
      */
     override fun download() {
-        val (m, apk) = offer ?: return
-        val first = if (File(updateDir(), "${m.versionCode}.apk").isFile) UpdateState.Verifying(m.versionName) else UpdateState.Downloading(m.versionName, 0, apk.sizeBytes)
-        if (!claim(first) { it.isBusy || it == UpdateState.Checking }) return
-        startWork(m, apk)
+        // The offer, the busy rule, the single-flight slot and the state change in one step (second code review).
+        val o = synchronized(stateLock) {
+            val o = offer ?: return
+            val s = _state.value
+            if (s.isBusy || s == UpdateState.Checking || !flight.tryStart()) return
+            // "Downloading 0 %" until the job knows (off the main thread) whether a stored file can be reused.
+            _state.value = UpdateState.Downloading(o.first.versionName, 0, o.second.sizeBytes)
+            o
+        }
+        startWork(o.first, o.second)
     }
 
+    /** Starts the job; the caller holds the [flight] slot. */
     private fun startWork(m: UpdateManifest, apk: ApkEntry) {
         // Pressing Update on a version skipped earlier un-skips it (the restart check of review S3 must not drop it).
         if (store.flow(UpdateDomain).value.skippedVersionCode == m.versionCode) store.update(UpdateDomain) { it.copy(skippedVersionCode = null) }
-        work?.cancel()
-        work = appScope.launch(io) { runDownload(m, apk) }
+        val seq = ++jobSeq
+        work = appScope.launch(io + guard) {
+            try {
+                runDownload(m, apk, seq)
+            } finally {
+                flight.done()
+            }
+        }
     }
 
     /** Hands the offer's file to the installer, after checking it again (a missing file is downloaded again). */
@@ -195,7 +228,9 @@ class UpdaterImpl @Inject constructor(
 
     override fun skip(versionCode: Long) {
         store.update(UpdateDomain) { it.copy(skippedVersionCode = versionCode) }
-        if (offer?.first?.versionCode == versionCode && claim(UpdateState.Idle)) updateDir().listFiles()?.forEach { it.delete() }
+        if (offer?.first?.versionCode == versionCode && !flight.busy && claim(UpdateState.Idle)) {
+            appScope.launch(io + guard) { if (!flight.busy) updateDir().listFiles()?.forEach { it.delete() } }
+        }
     }
 
     /** The versionCode of the release on offer (review S7: Skip on any card with buttons), null when none. */
@@ -241,12 +276,15 @@ class UpdaterImpl @Inject constructor(
      * One check (the worker awaits it). Returns the state it ended in. [resume] (review S3): the restart check for a
      * download already on disk; it runs whatever the cadence and stays silent on failure.
      */
-    suspend fun runCheck(manual: Boolean, resume: Boolean = false): UpdateState = mutex.withLock {
-        withContext(io) {
+    suspend fun runCheck(manual: Boolean, resume: Boolean = false): UpdateState = runCheckWithOutcome(manual, resume).first
+
+    /** [runCheck] plus what it ended in for a waiting download (code review S4), returned rather than shared. */
+    private suspend fun runCheckWithOutcome(manual: Boolean, resume: Boolean): Pair<UpdateState, UpdatePolicy.CheckOutcome> = mutex.withLock {
+        var outcome: UpdatePolicy.CheckOutcome = UpdatePolicy.CheckOutcome.NotRun
+        val end = withContext(io) {
             store.awaitReady()
             val now = System.currentTimeMillis()
             var prefs = store.flow(UpdateDomain).value
-            lastOutcome = UpdatePolicy.CheckOutcome.NotRun
             if (!UpdatePolicy.shouldRun(prefs, now, manual, checkedThisProcess, resume)) return@withContext _state.value
             // S1 (review) + S5 (code review): one busy rule, checked and claimed in one step.
             if (!claim(UpdateState.Checking)) return@withContext _state.value
@@ -255,7 +293,7 @@ class UpdaterImpl @Inject constructor(
             val endpoint = endpoints.current()
             if (!endpoint.enabled) {
                 BoxLog.i(TAG) { "updates disabled for ${endpoint.label}" }
-                lastOutcome = UpdatePolicy.CheckOutcome.Rejected
+                outcome = UpdatePolicy.CheckOutcome.Rejected
                 return@withContext publish(if (manual) UpdateState.Failed(UpdateFailure.DISABLED, null) else UpdateState.Idle)
             }
             val (bucket, withBucket) = UpdatePolicy.bucketOf(prefs) { Random.nextInt(0, 100) }
@@ -272,7 +310,7 @@ class UpdaterImpl @Inject constructor(
             } catch (e: Exception) {
                 BoxLog.w(TAG, "manifest fetch failed: ${e.javaClass.simpleName}")
                 store.update(UpdateDomain) { it.copy(lastCheckMs = now) }
-                lastOutcome = UpdatePolicy.CheckOutcome.Unreachable
+                outcome = UpdatePolicy.CheckOutcome.Unreachable
                 return@withContext publish(if (manual) UpdateState.Failed(UpdateFailure.NETWORK, null) else UpdateState.Idle)
             }
             val verdict = verifier.verify(fetched.first, fetched.second, endpoint, running(), prefs, bucket, manual)
@@ -280,25 +318,26 @@ class UpdaterImpl @Inject constructor(
                 is ManifestVerdict.Offer -> {
                     store.update(UpdateDomain) { it.copy(lastCheckMs = now, highestSequence = maxOf(it.highestSequence, verdict.manifest.sequence)) }
                     offer = verdict.manifest to verdict.apk
-                    lastOutcome = UpdatePolicy.CheckOutcome.Offered(verdict.manifest.versionCode)
+                    outcome = UpdatePolicy.CheckOutcome.Offered(verdict.manifest.versionCode)
                     BoxLog.i(TAG) { "offer ${verdict.manifest.versionName} (${verdict.manifest.versionCode}) ${verdict.apk.abi}, seq ${verdict.manifest.sequence}" }
                     publish(UpdateState.Available(verdict.manifest, verdict.apk))
                 }
                 is ManifestVerdict.Nothing -> {
                     store.update(UpdateDomain) { it.copy(lastCheckMs = now, highestSequence = maxOf(it.highestSequence, verdict.manifest.sequence)) }
                     offer = null
-                    lastOutcome = UpdatePolicy.CheckOutcome.Nothing
+                    outcome = UpdatePolicy.CheckOutcome.Nothing
                     BoxLog.i(TAG) { "no offer: ${verdict.reason}" }
                     publish(UpdateState.UpToDate(now))
                 }
                 is ManifestVerdict.Rejected -> {
                     store.update(UpdateDomain) { it.copy(lastCheckMs = now) }
-                    lastOutcome = UpdatePolicy.CheckOutcome.Rejected
+                    outcome = UpdatePolicy.CheckOutcome.Rejected
                     BoxLog.w(TAG, "manifest rejected: ${verdict.failure} ${verdict.detail}")
                     publish(if (manual) UpdateState.Failed(verdict.failure, null) else UpdateState.Idle)
                 }
             }
         }
+        end to outcome
     }
 
     private fun publish(s: UpdateState): UpdateState {
@@ -342,9 +381,9 @@ class UpdaterImpl @Inject constructor(
     private fun updateDir(): File = File(context.filesDir, UPDATE_DIR)
 
     /** Code review nit: an unexpected runtime error ends in a failure with a next step, never a crash. */
-    private suspend fun runDownload(m: UpdateManifest, apk: ApkEntry) {
+    private suspend fun runDownload(m: UpdateManifest, apk: ApkEntry, seq: Int) {
         try {
-            download(m, apk)
+            download(m, apk, seq)
         } catch (e: CancellationException) {
             throw e
         } catch (e: RuntimeException) {
@@ -353,7 +392,7 @@ class UpdaterImpl @Inject constructor(
         }
     }
 
-    private suspend fun download(m: UpdateManifest, apk: ApkEntry) {
+    private suspend fun download(m: UpdateManifest, apk: ApkEntry, seq: Int) {
         val dir = updateDir().apply { mkdirs() }
         dir.listFiles()?.filter { it.name != "${m.versionCode}.apk" }?.forEach { it.delete() }
         val final = File(dir, "${m.versionCode}.apk")
@@ -383,7 +422,8 @@ class UpdaterImpl @Inject constructor(
             final.delete()
         }
         if (dir.usableSpace < UpdateTimings.FREE_SPACE_FACTOR * apk.sizeBytes) return fail(UpdateFailure.NO_SPACE)
-        val part = File(dir, "${m.versionCode}.apk.part")
+        // Each job writes its own part file (second code review S-3).
+        val part = File(dir, "${m.versionCode}.apk.$seq.part")
         _state.value = UpdateState.Downloading(m.versionName, 0, apk.sizeBytes)
         val hash = Sha256Counter()
         try {
@@ -394,6 +434,7 @@ class UpdaterImpl @Inject constructor(
                     val buf = ByteArray(64 * 1024)
                     var lastPublish = 0L
                     while (true) {
+                        currentCoroutineContext().ensureActive() // a cancelled job stops between reads
                         val n = input.read(buf)
                         if (n < 0) break
                         if (hash.bytes + n > apk.sizeBytes) throw SizeException()
@@ -533,27 +574,40 @@ class UpdaterImpl @Inject constructor(
         controller.get().stop(StopReason.USER)
         _state.value = UpdateState.Installing
         store.update(UpdateDomain) { it.copy(lastInstalledNotice = m.versionCode) }
-        appScope.launch(Dispatchers.Main) { store.flush() }
-        val routeFailed = InstallRoute.installerRouteFailed(store.flow(UpdateDomain).value, m.versionCode)
+        appScope.launch(Dispatchers.Main + guard) { store.flush() }
+        val routeFailed = InstallRoute.installerRouteFailed(store.flow(UpdateDomain).value, m.versionCode, fingerprint)
         handOffSession = false
         sessionConfirmationShown = false
         installerSeen = false
         installStarting = true
         try {
-            installer.install(file, context.packageName, io, routeFailed) { status ->
+            val attempt = {
+                // Second code review S-2: written (and flushed) before the installer starts, so a miss counts even when
+                // this process dies while the installer is up.
+                store.update(UpdateDomain) { InstallRoute.recordAttempt(it, m.versionCode) }
+                appScope.launch(Dispatchers.Main + guard) { store.flush() }
+                Unit
+            }
+            installer.install(file, context.packageName, io, routeFailed, attempt) { status ->
+                // Second code review S-3: a status changes the state only while this hand-off is in progress.
+                if (_state.value != UpdateState.Installing) {
+                    BoxLog.i(TAG) { "installer status $status ignored in ${_state.value.javaClass.simpleName}" }
+                    return@install
+                }
                 when (status) {
-                    // Code review nit: armed at commit, so a confirmation status that never comes still has a deadline.
-                    InstallStatus.SessionCommitted -> if (!sessionConfirmationShown) watchHandOff(session = true, withDeadline = true)
+                    // Armed at commit, so a confirmation status that never comes still has a deadline.
+                    InstallStatus.SessionCommitted -> {
+                        store.update(UpdateDomain) { InstallRoute.clearAttempt(it) } // the session route took over
+                        if (!sessionConfirmationShown) watchHandOff(session = true)
+                    }
+                    // Second code review S-1: with a deadline too; it runs only while MainActivity is resumed, so not
+                    // while the confirmation is up, and an Install that brings us back is covered by keepWaiting.
                     InstallStatus.PendingUserAction -> {
-                        _state.value = UpdateState.Installing
                         sessionConfirmationShown = true
-                        watchHandOff(session = true, withDeadline = false)
+                        watchHandOff(session = true)
                     }
                     // The system installer sends no result; the watcher decides (review S5).
-                    is InstallStatus.SystemInstallerStarted -> {
-                        _state.value = UpdateState.Installing
-                        watchHandOff(session = false, withDeadline = true)
-                    }
+                    is InstallStatus.SystemInstallerStarted -> watchHandOff(session = false)
                     InstallStatus.Success -> _state.value = UpdateState.Installing
                     InstallStatus.Cancelled -> notInstalled(m)
                     is InstallStatus.Blocked -> { watcher.disarm(); fail(UpdateFailure.INSTALL_BLOCKED, status.message) }
@@ -569,9 +623,9 @@ class UpdaterImpl @Inject constructor(
 
     private fun now(): Long = SystemClock.elapsedRealtime()
 
-    private fun watchHandOff(session: Boolean, withDeadline: Boolean) {
+    private fun watchHandOff(session: Boolean) {
         handOffSession = session
-        watcher.arm(now(), withDeadline = withDeadline)
+        watcher.arm(now())
         scheduleTick()
     }
 
@@ -579,7 +633,7 @@ class UpdaterImpl @Inject constructor(
     private fun scheduleTick() {
         tickJob?.cancel()
         val at = watcher.deadlineAtMs() ?: return
-        tickJob = appScope.launch(Dispatchers.Main) {
+        tickJob = appScope.launch(Dispatchers.Main + guard) {
             delay((at - now()).coerceAtLeast(0))
             if (watcher.onTick(now())) onHandOffCheck()
         }
@@ -605,7 +659,8 @@ class UpdaterImpl @Inject constructor(
         if (installed != null && UpdatePolicy.landed(installed, m.versionCode)) {
             BoxLog.i(TAG) { "update ${m.versionCode} landed while this process lived" }
             _state.value = UpdateState.Idle
-            appScope.launch(io) { checkUpdatedNotice() }
+            store.update(UpdateDomain) { InstallRoute.clearAttempt(it) }
+            appScope.launch(io + guard) { checkUpdatedNotice() }
             return
         }
         if (handOffSession) {
@@ -627,7 +682,7 @@ class UpdaterImpl @Inject constructor(
             }
         }
         val miss = if (installerSeen) InstallRoute.Miss.LEFT_INSTALLER else InstallRoute.Miss.NEVER_APPEARED
-        store.update(UpdateDomain) { InstallRoute.recordMiss(it, m.versionCode, miss) }
+        store.update(UpdateDomain) { InstallRoute.recordMiss(it, m.versionCode, miss, fingerprint) }
         BoxLog.i(TAG) { "back from the installer without the update ($miss)" }
         notInstalled(m)
     }
@@ -673,7 +728,7 @@ class UpdaterImpl @Inject constructor(
     private fun resumeDeferredHandOff() {
         val (m, apk) = offer ?: return
         val claimed = synchronized(stateLock) {
-            if (_state.value is UpdateState.ReadyToInstall) { _state.value = UpdateState.Verifying(m.versionName); true } else false
+            if (_state.value is UpdateState.ReadyToInstall && flight.tryStart()) { _state.value = UpdateState.Verifying(m.versionName); true } else false
         }
         if (claimed) startWork(m, apk)
     }
@@ -684,7 +739,7 @@ class UpdaterImpl @Inject constructor(
     private suspend fun checkUpdatedNotice() {
         store.awaitReady()
         val running = runCatching { inspector.installedVersionCode() }.getOrNull() ?: return
-        store.update(UpdateDomain) { InstallRoute.clearedOnStart(it, running) }
+        store.update(UpdateDomain) { InstallRoute.onStart(it, running, fingerprint) }
         val prefs = store.flow(UpdateDomain).value
         val target = prefs.lastInstalledNotice ?: return
         if (running >= target) {
@@ -714,11 +769,10 @@ class UpdaterImpl @Inject constructor(
         BoxLog.i(TAG) { "downloaded update $keep is waiting; checking again after the first frame" }
         gate.awaitOpen()
         delay(UpdateTimings.UPDATE_RESUME_CHECK_DELAY_MS)
-        runCheck(manual = false, resume = true)
-        val outcome = lastOutcome
+        val outcome = runCheckWithOutcome(manual = false, resume = true).second
         if (!UpdatePolicy.keepsWaitingFile(keep, outcome)) {
             BoxLog.i(TAG) { "the waiting update $keep is no longer offered ($outcome); deleted" }
-            if (!_state.value.isBusy) File(dir, "$keep.apk").delete()
+            if (!_state.value.isBusy && !flight.busy) File(dir, "$keep.apk").delete()
         }
     }
 

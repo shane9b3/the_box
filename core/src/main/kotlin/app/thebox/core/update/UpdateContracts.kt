@@ -35,6 +35,18 @@ data class UpdatePrefs(
      */
     val installerRouteVersionCode: Long? = null,
     val installerRouteMisses: Int = 0,
+    /**
+     * (second code review 2026-11-10, S-2) A hand-off through the installer activity is under way for this versionCode
+     * (written before it starts). A start that still runs an older version counts it as a miss.
+     */
+    val installerRouteAttemptVersionCode: Long? = null,
+    /** (S-2) The last versionCode whose installer route was given up after repeated returns without the update. */
+    val installerRouteSwitchedVersionCode: Long? = null,
+    /**
+     * (S-2) `Build.FINGERPRINT` of the system on which the installer route is broken for every version: later releases
+     * start on the session route. Dropped when the fingerprint changes (a system update may have fixed the installer).
+     */
+    val installerRouteBrokenOn: String? = null,
 )
 
 sealed interface UpdateState {
