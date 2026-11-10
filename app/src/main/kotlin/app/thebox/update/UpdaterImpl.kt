@@ -116,12 +116,16 @@ class UpdaterImpl @Inject constructor(
     // ---------------------------------------------------------------- Updater
 
     override fun check(manual: Boolean) {
+        // Asking by hand brings the card back after Later / BACK.
+        if (manual) laterThisProcess.value = false
         appScope.launch(io) { runCheck(manual) }
     }
 
+    /** Downloads the offer and opens the installer as soon as the file is verified (the card's Update, the About row). */
     override fun download() {
         val o = offer ?: return
         if (_state.value is UpdateState.Downloading || _state.value == UpdateState.Installing) return
+        installWhenReady = true
         work?.cancel()
         work = appScope.launch(io) { runDownload(o.first, o.second) }
     }

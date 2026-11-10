@@ -92,6 +92,21 @@ class DiagPagesTest {
     }
 
     @Test
+    fun theUpdateRowInstallsAReleaseThatIsOnOffer() = runTest {
+        val scope = TestScope(UnconfinedTestDispatcher(testScheduler))
+        val manifest = app.thebox.core.update.UpdateManifest(1, 5, "app.thebox", "stable", 5, "0.1.3", 25, "", "Fixes", emptyList(), listOf("A"))
+        val offered = app.thebox.core.update.UpdateState.Available(manifest, app.thebox.core.update.ApkEntry("universal", "https://x/a.apk", 10, "0".repeat(64)))
+        updater.state.value = offered
+        assertTrue(pages.onIntent(RowIntent.Run(AboutRows.UPDATE), scope) {})
+        assertTrue("the row says what OK does", pages.updateDesc(offered).contains("0.1.3"))
+        updater.state.value = app.thebox.core.update.UpdateState.ReadyToInstall("0.1.3")
+        pages.onIntent(RowIntent.Run(AboutRows.UPDATE), scope) {}
+        updater.state.value = app.thebox.core.update.UpdateState.UpToDate(0)
+        pages.onIntent(RowIntent.Run(AboutRows.UPDATE), scope) {}
+        assertEquals(listOf("download", "install", "check(true)"), updater.calls)
+    }
+
+    @Test
     fun aboutIntents() = runTest {
         val scope = TestScope(UnconfinedTestDispatcher(testScheduler))
         val out = ArrayList<DiagOutcome>()

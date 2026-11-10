@@ -22,6 +22,8 @@
     <string name="about_update_value_failed">Last check failed · OK to try again</string>
     <string name="about_update_value_disabled">Updates are not set up for this build</string>
     <string name="about_update_value_idle">Version %1$s</string>
+    <string name="about_update_desc_available">Press OK to download and install version %1$s.</string>
+    <string name="about_update_desc_ready">Press OK to install version %1$s.</string>
     <string name="about_update_desc">Asks GitHub for a newer version of The Box. Nothing about you is sent.</string>
     <string name="about_diagnostics">Diagnostics</string>
     <string name="about_diagnostics_desc">This TV, sound, picture, decoders and a connection test</string>

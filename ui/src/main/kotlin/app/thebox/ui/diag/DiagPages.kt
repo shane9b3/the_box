@@ -123,7 +123,7 @@ class DiagPages @Inject constructor(
         combine(updater.state, store.flow(UpdateDomain), parental.state, notices) { u, prefs, p, n ->
             val rows = listOf(
                 SettingsRow(AboutRows.HEADER, s(R.string.about_title), kind = RowKind.Info(headerLines())),
-                SettingsRow(AboutRows.UPDATE, s(R.string.about_update), value = updateValue(u), description = n[AboutRows.UPDATE] ?: s(R.string.about_update_desc),
+                SettingsRow(AboutRows.UPDATE, s(R.string.about_update), value = updateValue(u), description = n[AboutRows.UPDATE] ?: updateDesc(u),
                     kind = RowKind.Action(), enabled = u !is UpdateState.Checking && u !is UpdateState.Downloading && u != UpdateState.Installing, effect = EffectTiming.LIVE),
                 SettingsRow(AboutRows.DIAGNOSTICS, s(R.string.about_diagnostics), description = s(R.string.about_diagnostics_desc),
                     kind = RowKind.Link(SettingsRoute.Diagnostics), effect = EffectTiming.NONE),
@@ -170,6 +170,13 @@ class DiagPages @Inject constructor(
             context.getString(R.string.about_header_abi, Build.SUPPORTED_ABIS.firstOrNull() ?: "?"),
             context.getString(R.string.about_header_installer, installer ?: s(R.string.about_installer_unknown)),
         )
+    }
+
+    /** What OK on the update row does now: it installs a release that is on offer, otherwise it checks. */
+    fun updateDesc(u: UpdateState): String = when (u) {
+        is UpdateState.Available -> context.getString(R.string.about_update_desc_available, u.manifest.versionName)
+        is UpdateState.ReadyToInstall -> context.getString(R.string.about_update_desc_ready, u.versionName)
+        else -> s(R.string.about_update_desc)
     }
 
     fun updateValue(u: UpdateState): String {
@@ -422,7 +429,13 @@ class DiagPages @Inject constructor(
     fun onIntent(intent: RowIntent, scope: CoroutineScope, out: (DiagOutcome) -> Unit): Boolean {
         val id = intent.row
         when {
-            id == AboutRows.UPDATE && intent is RowIntent.Run -> updater.check(manual = true)
+            // A release already on offer (found by a check, or put off with the card's Later / BACK) is installed from
+            // here in one press; otherwise the row checks.
+            id == AboutRows.UPDATE && intent is RowIntent.Run -> when (updater.state.value) {
+                is UpdateState.Available -> updater.download()
+                is UpdateState.ReadyToInstall, is UpdateState.NeedsPermission -> updater.install()
+                else -> updater.check(manual = true)
+            }
             id == AboutRows.AUTO_CHECK && intent is RowIntent.Toggle -> {
                 store.update(UpdateDomain) { it.copy(checkAutomatically = intent.on) }
                 scheduler.scheduleCheck()
