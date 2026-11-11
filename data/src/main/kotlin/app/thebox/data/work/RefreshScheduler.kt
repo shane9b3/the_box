@@ -15,7 +15,9 @@ import app.thebox.core.common.BoxLog
 import app.thebox.core.epg.EpgStore
 import app.thebox.data.db.dao.EpgSourceDao
 import app.thebox.data.db.dao.PlaylistDao
+import app.thebox.data.db.dao.RefreshLogDao
 import app.thebox.data.db.entity.PlaylistEntity
+import app.thebox.data.db.entity.RefreshLogEntity
 import app.thebox.data.di.WallClock
 import app.thebox.data.repo.DataSettings
 import app.thebox.data.repo.EpgWorkRequester
@@ -40,6 +42,7 @@ class RefreshScheduler @Inject constructor(
     private val workManager: WorkManager,
     private val playlistDao: PlaylistDao,
     private val sourceDao: EpgSourceDao,
+    private val logDao: RefreshLogDao,
     private val epgStore: EpgStore,
     private val settings: DataSettings,
     private val clock: WallClock,
@@ -109,7 +112,12 @@ class RefreshScheduler @Inject constructor(
     /**
      * App start (§3.10): boxes are often unplugged, so periodic work drifts. Refreshes playlists with
      * `update_on_start` whose last success is older than 12 h (KEEP), and imports the EPG when the generation
-     * is missing or older than its interval. Also (re)registers the periodic work.
+     * is missing or the guide was last found current longer ago than its interval. Also (re)registers the periodic work.
+     *
+     * (review 2026-11-10, S2) "Found current" is the newer of the generation's build and the last SUCCESS or
+     * NOT_MODIFIED `EPG_BUILD` row: a run that downloaded an unchanged guide and skipped the build does not move
+     * `built_at_ms`, and measuring from the build alone downloaded the whole guide on every launch until the next
+     * rebuild. A FAILED row never counts. A time in the future (the clock moved back) does not count either.
      */
     suspend fun onAppStart() {
         val now = clock.now()
@@ -128,7 +136,8 @@ class RefreshScheduler @Inject constructor(
             return
         }
         val interval = settings.current.epgRefreshIntervalH * 3_600_000L
-        if (builtAt == null || now - builtAt >= interval) {
+        fun recent(at: Long?) = at != null && now - at in 0 until interval
+        if (builtAt == null || !(recent(builtAt) || recent(logDao.lastCurrentAt(RefreshLogEntity.TARGET_EPG_BUILD, null)))) {
             workManager.enqueueUniqueWork(EPG_IMPORT, ExistingWorkPolicy.KEEP, epgImportRequest(Trigger.APP_START))
         }
     }

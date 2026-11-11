@@ -5,6 +5,13 @@ internal object EpgSchema {
     const val SCHEMA_VERSION = 1
 
     /**
+     * Stored under [Meta.APP_VERSION] and mixed into [app.thebox.core.epg.EpgBuildInputs] (review 2026-11-10, S1). Bump
+     * it with any importer change that writes different rows from the same XMLTV and settings (a new field, a parse
+     * fix): unchanged guides are then rebuilt once from their cached files instead of keeping the old rows.
+     */
+    const val IMPORTER_VERSION = "1"
+
+    /**
      * Build `programme_by_text` before the bulk load instead of after it (no sort, ~20 % slower inserts).
      * Switch only if the device run (I-5) shows the native sorter peak above 64 MB (review S1).
      *
@@ -125,5 +132,7 @@ internal object EpgSchema {
         const val PROGRAMME_COUNT = "programme_count"
         const val CHANNEL_COUNT = "channel_count"
         const val APP_VERSION = "app_version"
+        /** (2026-11-10, review S1) [app.thebox.core.epg.EpgBuildRequest.buildInputs] of the last full build. */
+        const val BUILD_INPUTS = "build_inputs"
     }
 }

@@ -12,6 +12,7 @@ import androidx.work.testing.SynchronousExecutor
 import androidx.work.testing.WorkManagerTestInitHelper
 import app.thebox.data.db.LibraryDatabase
 import app.thebox.data.db.entity.EpgSourceEntity
+import app.thebox.data.db.entity.RefreshLogEntity
 import app.thebox.data.repo.EpgImporter
 import app.thebox.data.repo.EpgRunResult
 import app.thebox.data.repo.InMemoryDataSettings
@@ -75,10 +76,12 @@ class RefreshSchedulerTest {
             context, Configuration.Builder().setExecutor(SynchronousExecutor()).setWorkerFactory(factory).build(),
         )
         wm = WorkManager.getInstance(context)
-        scheduler = RefreshScheduler(wm, db.playlistDao(), db.epgSourceDao(), store, settings, clock)
+        scheduler = RefreshScheduler(wm, db.playlistDao(), db.epgSourceDao(), db.refreshLogDao(), store, settings, clock)
     }
 
     @After fun tearDown() { db.close() }
+
+    private companion object { const val HOUR = 3_600_000L }
 
     private fun infos(name: String): List<WorkInfo> = wm.getWorkInfosForUniqueWork(name).get()
 
@@ -154,13 +157,64 @@ class RefreshSchedulerTest {
         assertEquals(1, infos(RefreshScheduler.EPG_IMPORT).size)
         val db2 = TestDb.create()
         val fresh = FakeEpgStore().apply { publish() }
-        val s2 = RefreshScheduler(wm, db2.playlistDao(), db2.epgSourceDao(), fresh, settings, FakeClock(start = 1000))
+        val s2 = RefreshScheduler(wm, db2.playlistDao(), db2.epgSourceDao(), db2.refreshLogDao(), fresh, settings, FakeClock(start = 1000))
         db2.epgSourceDao().insert(EpgSourceEntity(name = "u", origin = "USER", credentialRef = "r", urlHash = 1, displaySource = "h", priority = 0, createdAt = 1))
         wm.cancelAllWork().result.get()
         wm.pruneWork().result.get()
         s2.onAppStart()
         assertEquals(0, infos(RefreshScheduler.EPG_IMPORT).size)
         db2.close()
+    }
+
+    // ---- review 2026-11-10 S2: a not-modified guide run counts as fresh at app start, a failed one does not
+
+    private suspend fun guideRow(outcome: String, finishedAt: Long) {
+        db.refreshLogDao().insert(
+            RefreshLogEntity(
+                targetType = RefreshLogEntity.TARGET_EPG_BUILD, targetId = null, trigger = "PERIODIC",
+                startedAt = finishedAt - 1000, finishedAt = finishedAt, outcome = outcome,
+            ),
+        )
+    }
+
+    private suspend fun guideWithGenerationAge(ageMs: Long) {
+        db.epgSourceDao().insert(EpgSourceEntity(name = "u", origin = "USER", credentialRef = "r", urlHash = 1, displaySource = "h", priority = 0, createdAt = 1))
+        store.publish(builtAtMs = clock.now() - ageMs)
+        settings.update { it.copy(epgRefreshIntervalH = 6) }
+    }
+
+    @Test
+    fun aRecentNotModifiedRunKeepsAnOldGenerationFromDownloadingAtAppStart() = runBlocking {
+        guideWithGenerationAge(8 * HOUR)
+        guideRow("NOT_MODIFIED", clock.now() - 1 * HOUR)
+        scheduler.onAppStart()
+        assertEquals(0, infos(RefreshScheduler.EPG_IMPORT).size)
+    }
+
+    @Test
+    fun aRecentFailedRunDoesNotCountAsFresh() = runBlocking {
+        guideWithGenerationAge(8 * HOUR)
+        guideRow("NOT_MODIFIED", clock.now() - 7 * HOUR)
+        guideRow("FAILED", clock.now() - 1 * HOUR)
+        scheduler.onAppStart()
+        assertEquals(1, infos(RefreshScheduler.EPG_IMPORT).size)
+    }
+
+    @Test
+    fun anOldNotModifiedRunStillImports() = runBlocking {
+        guideWithGenerationAge(8 * HOUR)
+        guideRow("NOT_MODIFIED", clock.now() - 6 * HOUR)
+        scheduler.onAppStart()
+        assertEquals(1, infos(RefreshScheduler.EPG_IMPORT).size)
+    }
+
+    @Test
+    fun aRunLoggedInTheFutureDoesNotCountAsFresh() = runBlocking {
+        // The clock moved back after the run: a negative age is not "recent".
+        guideWithGenerationAge(8 * HOUR)
+        guideRow("SUCCESS", clock.now() + 2 * HOUR)
+        scheduler.onAppStart()
+        assertEquals(1, infos(RefreshScheduler.EPG_IMPORT).size)
     }
 
     @Test

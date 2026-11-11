@@ -1,6 +1,7 @@
 package app.thebox.core.guide.render
 
 import app.thebox.core.guide.GuideCanvas
+import app.thebox.core.guide.fakes.FakeGuideImages
 import app.thebox.core.guide.fakes.FakeTextMeasurer
 import app.thebox.core.guide.fakes.RecordingGuideCanvas
 import kotlin.test.Test
@@ -84,5 +85,27 @@ class RowRecordingTest {
         frame.nowMin += 1
         renderer.draw(c, frame, frame.windowStartMin, 7.5f, GuideReferenceFrame.SCROLL_ROW)
         assertEquals(n, c.recorded, "a minute tick changes colours and progress")
+    }
+
+    @Test
+    fun replayedRowsTouchTheirLogoInsteadOfGettingIt() {
+        // Review 2026-11-10 S3: the logo cache must learn that a replayed row's logo is still on screen.
+        val images = FakeGuideImages()
+        val f = GuideReferenceFrame.build(FakeTextMeasurer(), images = images)
+        val c = Replaying()
+        renderer.draw(c, f, f.windowStartMin, 0f, GuideReferenceFrame.SCROLL_ROW)
+        assertTrue(images.touched.isEmpty(), "first draw records every row and gets its logo")
+        val gets = images.requested.toList()
+        assertTrue(gets.isNotEmpty())
+        renderer.draw(c, f, f.windowStartMin, 0f, GuideReferenceFrame.SCROLL_ROW)
+        assertEquals(gets, images.requested, "no get from replayed rows")
+        assertEquals(gets.toSet(), images.touched.toSet(), "every visible logo touched")
+        assertEquals(images.touched.size, images.touched.toSet().size, "once per row per draw (text pass only)")
+        // Logos off: nothing to touch.
+        images.touched.clear()
+        f.showLogos = false
+        renderer.draw(c, f, f.windowStartMin, 0f, GuideReferenceFrame.SCROLL_ROW)
+        renderer.draw(c, f, f.windowStartMin, 0f, GuideReferenceFrame.SCROLL_ROW)
+        assertTrue(images.touched.isEmpty())
     }
 }

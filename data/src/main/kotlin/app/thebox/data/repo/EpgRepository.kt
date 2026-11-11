@@ -8,13 +8,16 @@ import app.thebox.core.common.Outcome
 import app.thebox.core.common.Redact
 import app.thebox.core.common.SourceError
 import app.thebox.core.common.SourceException
+import app.thebox.core.epg.EpgBuildInputs
 import app.thebox.core.epg.EpgBuildRequest
 import app.thebox.core.epg.EpgChannelRef
+import app.thebox.core.epg.EpgGenerationInfo
 import app.thebox.core.epg.EpgImportReport
 import app.thebox.core.epg.EpgPatchRequest
 import app.thebox.core.epg.EpgSourceFile
 import app.thebox.core.epg.EpgStore
 import app.thebox.core.epg.FreeSpace
+import app.thebox.core.match.EpgMatcher
 import app.thebox.core.match.MatchMethod
 import app.thebox.core.model.StableKey
 import app.thebox.core.refresh.ChannelIdentity
@@ -64,7 +67,8 @@ data class ResolvedEpg(val ref: EpgChannelRef?, val shiftMin: Int, val method: M
  * EPG sources and import orchestration (§3.10 EpgImportWorker, §3.6.5 after-build steps, §2.2).
  *
  * build: conditional GET per active source to `cacheDir/epg/<id>.new` → skip when nothing changed (304, or a file
- * byte-identical to `.src`) and a generation younger than [MAX_UNCHANGED_GENERATION_AGE_MS] exists →
+ * byte-identical to `.src`), the generation was built from the same inputs and its future window still covers the
+ * next run (`rebuildReason`, review 2026-11-10 S1/N1) →
  * `EpgStore.build` under ImportMutex + EpgWriteLock with [EpgMatchRepository] as the whitelist → retry once with
  * the last good `.src` when a source failed → promote `.new` to `.src` and persist validators/counts (only now, S10) → has_data, late-channel matching, patch enqueue → refresh_log.
  */
@@ -136,11 +140,41 @@ class EpgRepository @Inject constructor(
     }
 
     /** Built-at of the current generation, or null (none yet, or the store is not available). */
-    fun generationBuiltAt(): Long? = try {
-        store.info.value?.builtAtMs
+    fun generationBuiltAt(): Long? = generationInfo()?.builtAtMs
+
+    private fun generationInfo(): EpgGenerationInfo? = try {
+        store.info.value
     } catch (e: NotImplementedError) {
         null // WP-B stub on a branch without WP-B
     }
+
+    /**
+     * Why an unchanged download must still rebuild from the cached files, or null to skip (review 2026-11-10, S1, N1):
+     * - the build inputs differ from the generation's (a NEXT_EPG_IMPORT setting, the active sources, the importer
+     *   version; a generation from before the fingerprint has none, so it rebuilds once);
+     * - the generation was built in the future (the clock moved back);
+     * - the future window would have shrunk by more than [MAX_FUTURE_SHRINK_MS] by the next periodic run. The build
+     *   keeps `[now − pastDays, now + futureDays)` and the guide stops at `window_to_min`, so the window only moves on
+     *   a rebuild.
+     */
+    private fun rebuildReason(info: EpgGenerationInfo, inputs: String, s: DataSettingsSnapshot, now: Long): String? {
+        if (info.buildInputs != inputs) return "build inputs changed"
+        if (now < info.builtAtMs) return "built in the future (clock moved back)"
+        val shrunkMs = s.epgFutureDays * DAY_MS - (info.windowToMin * MINUTE_MS - now)
+        val nextRunMs = s.epgRefreshIntervalH.coerceAtLeast(1) * HOUR_MS
+        if (shrunkMs + nextRunMs > MAX_FUTURE_SHRINK_MS) return "future window ${shrunkMs / HOUR_MS} h short"
+        return null
+    }
+
+    /** [EpgBuildInputs] of the active sources (not only the ones this run could read) and the settings a build reads. */
+    private fun buildInputs(sources: List<EpgSourceEntity>, s: DataSettingsSnapshot): String = EpgBuildInputs.fingerprint(
+        sources = sources.map { EpgBuildInputs.Source(it.id, it.assumeZone) },
+        pastDays = s.epgPastDays, futureDays = s.epgFutureDays,
+        storeDescriptions = s.storeDescriptions, maxDescriptionChars = s.maxDescriptionChars,
+        preferredLanguages = s.preferredLanguages,
+        // EpgMatchRepository.whitelistFor reads the match settings; the matcher version changes what it accepts.
+        matching = "${s.match}|${EpgMatcher.VERSION}",
+    )
 
     /**
      * Serialises whole build/patch runs, downloads and `.new` → `.src` promotion included. `epg-periodic` and
@@ -213,27 +247,29 @@ class EpgRepository @Inject constructor(
         }
         transientLoss?.let { if (generationBuiltAt() != null) return finishBuild(started, trigger, null, it) }
         if (picked.isEmpty()) return finishBuild(started, trigger, null, lastError ?: SourceError.Internal("no source available"))
-        val builtAt = generationBuiltAt()
-        if (!anyChanged && !force && builtAt != null) {
-            // The generation keeps only [now − pastDays, now + futureDays) of its build time and nothing else moves
-            // that window, so an unchanged source still gets a rebuild (from the cached files) once a day.
-            val age = clock.now() - builtAt
-            if (age in 0 until MAX_UNCHANGED_GENERATION_AGE_MS) {
+        // 2. Skip when nothing changed (review 2026-11-10, S1 and N1): every download is unchanged, the generation was
+        // built from the same inputs, and its future window still covers the configured days until the next run.
+        val s = settings.current
+        val inputs = buildInputs(sources, s)
+        val info = generationInfo()
+        if (!anyChanged && !force && info != null) {
+            val reason = rebuildReason(info, inputs, s, clock.now())
+            if (reason == null) {
                 BoxLog.i(TAG) { "all sources not modified: build skipped" }
                 // A clean not-modified run resolves earlier build failures like a playlist 304 does (RefreshLogDao).
                 // A source that failed in this run without a cached file keeps the old behaviour: no row.
                 if (lastError == null) log(RefreshLogEntity.TARGET_EPG_BUILD, trigger, started, null, null, RefreshOutcome.NOT_MODIFIED)
                 return EpgRunResult(null, null, skipped = true)
             }
-            BoxLog.i(TAG) { "sources not modified but the guide was built ${age / HOUR_MS} h ago: rebuilding from the cached files" }
+            BoxLog.i(TAG) { "sources not modified, rebuilding from the cached files: $reason" }
         }
 
-        // 2. Build under ImportMutex → EpgWriteLock.
-        val s = settings.current
+        // 3. Build under ImportMutex → EpgWriteLock.
         fun request(files: List<Picked>) = EpgBuildRequest(
             sources = files.map { EpgSourceFile(it.source.id, it.file, it.source.assumeZone?.let { z -> runCatching { ZoneId.of(z) }.getOrNull() }) },
             nowMs = clock.now(), pastDays = s.epgPastDays, futureDays = s.epgFutureDays,
             storeDescriptions = s.storeDescriptions, maxDescriptionChars = s.maxDescriptionChars, preferredLanguages = s.preferredLanguages,
+            buildInputs = inputs,
         )
         val cancel = cancelCheck()
         var report: EpgImportReport
@@ -264,7 +300,7 @@ class EpgRepository @Inject constructor(
         }
         if (report.failedSourceId != null) return finishBuild(started, trigger, report, SourceError.Parse("source ${report.failedSourceId} failed"))
 
-        // 3. Promote downloads and persist validators/counts (only after a successful build, S10).
+        // 4. Promote downloads and persist validators/counts (only after a successful build, S10).
         val stats = report.sources.associateBy { it.sourceId }
         for (p in picked) {
             val src = File(dir, "${p.source.id}.src")
@@ -280,7 +316,7 @@ class EpgRepository @Inject constructor(
         }
         enforceCachePolicy(picked.map { it.source.id })
 
-        // 4. has_data, late channels, patch.
+        // 5. has_data, late channels, patch.
         progress("Matching channels")
         val pending = matches.afterBuild(store)
         if (pending.isNotEmpty()) requester.patchEpg()
@@ -398,27 +434,39 @@ class EpgRepository @Inject constructor(
     }
 
     /** True when [a] and [b] have the same length and bytes; streamed in fixed buffers, never whole in memory. */
-    private suspend fun sameBytes(a: File, b: File): Boolean = withContext(io) { sameFileBytes(a, b) }
+    private suspend fun sameBytes(a: File, b: File): Boolean = withContext(io) {
+        val ctx = coroutineContext
+        sameFileBytes(a, b) { !ctx.isActive }
+    }
 
     companion object {
         private const val TAG = "EpgRepository"
         const val CACHE_DIR = "epgCacheDir"
         private const val ONE_GB = 1L shl 30
+        private const val MINUTE_MS = 60_000L
         private const val HOUR_MS = 3_600_000L
+        private const val DAY_MS = 24 * HOUR_MS
 
         /**
-         * A not-modified run still rebuilds when the generation is at least this old (performance review M6,
-         * 2026-11-10). The build keeps `[now − pastDays, now + futureDays)` of build time and the guide clamps its
-         * last browsable minute to the generation's `window_to_min`, so without a rebuild a static XMLTV loses a day
-         * of future per day. 20 h gives at least one rebuild a day on the 6 h and 12 h schedules (every 4th / 2nd run)
-         * and on the daily one with 4 h of WorkManager drift, so the shortest future window (3 days) keeps ≥ 2 days.
+         * A not-modified run skips only while the future window, shrunk since its build, will have lost at most this
+         * much by the next periodic run: `shrunk + interval ≤ 26 h` (review 2026-11-10, N1). It replaces the 20 h age
+         * rule of performance review M6, which a mid-cycle build defeated on the daily schedule (up to ~43 h lost).
+         * The guide then always shows at least `futureDays − 26 h − WorkManager delay`, so the 3-day setting keeps
+         * about 2 days:
+         * - 6 h: the 6/12/18 h runs skip (shrunk + 6 ≤ 24), the 24 h run rebuilds (30 > 26): at most 24 h lost.
+         * - 12 h: the 12 h run skips (24 ≤ 26, so it may run up to 2 h late), the 24 h run rebuilds: 24–26 h lost.
+         * - 24 h and daily: every run rebuilds (≥ 24 + 24), also after a mid-cycle manual or playlist build: 24 h lost.
+         * Measured from `window_to_min`, so it does not matter what kind of build came last.
          */
-        internal const val MAX_UNCHANGED_GENERATION_AGE_MS = 20 * HOUR_MS
+        internal const val MAX_FUTURE_SHRINK_MS = 26 * HOUR_MS
     }
 }
 
-/** Streams both files through 64 KB buffers; false on any length or byte difference, or when either is unreadable. */
-internal fun sameFileBytes(a: File, b: File): Boolean {
+/**
+ * Streams both files through 64 KB buffers; false on any length or byte difference, or when either is unreadable.
+ * [cancelled] is checked per buffer (review 2026-11-10, N4), so a cancelled worker does not wait for a 150 MB compare.
+ */
+internal fun sameFileBytes(a: File, b: File, cancelled: () -> Boolean = { false }): Boolean {
     if (!a.isFile || !b.isFile) return false
     val len = a.length()
     if (len != b.length()) return false
@@ -429,6 +477,7 @@ internal fun sameFileBytes(a: File, b: File): Boolean {
                 val bb = ByteArray(COMPARE_BUFFER)
                 var left = len
                 while (left > 0) {
+                    if (cancelled()) throw CancellationException("guide compare cancelled")
                     val n = minOf(left, COMPARE_BUFFER.toLong()).toInt()
                     if (!readFully(ia, ba, n) || !readFully(ib, bb, n)) return false
                     for (i in 0 until n) if (ba[i] != bb[i]) return false // Arrays.equals(range) is API 33
