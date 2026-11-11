@@ -1,0 +1,678 @@
+package app.thebox.ui.sports
+
+import android.graphics.Bitmap
+import android.graphics.BlurMaskFilter
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.LinearGradient
+import android.graphics.Paint
+import android.graphics.Shader
+import androidx.compose.ui.graphics.asAndroidBitmap
+import androidx.test.core.app.ApplicationProvider
+import app.thebox.core.sports.BarKind
+import app.thebox.core.sports.ClockSlot
+import app.thebox.core.sports.GoalFrame
+import app.thebox.core.sports.GoalSpec
+import app.thebox.core.sports.GoalTimeline
+import app.thebox.core.sports.NhlTeamColours
+import app.thebox.core.sports.PeriodKind
+import app.thebox.core.sports.PeriodLabel
+import app.thebox.core.sports.Side
+import app.thebox.core.sports.SportsConstants as K
+import app.thebox.core.sports.StackedColours
+import app.thebox.core.sports.StackedFrame
+import app.thebox.core.sports.StackedMock as M
+import app.thebox.core.sports.StackedPair
+import app.thebox.core.sports.StackedTargets
+import app.thebox.ui.R
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+import java.io.File
+import kotlin.math.abs
+import kotlin.math.pow
+
+/**
+ * The Stacked painters' hand-built inputs (Stacked §10.2: "frames built by hand … so it does not wait on WP-1"). The
+ * colours are the design's own §5.1 table values (EDM, TOR) and the goal colours come from the real `NhlTeamColours`
+ * table; the takeover spec is §7.2's STACKED column. None of it reads the commit-0 stubs (`NhlStackedColours`,
+ * `StackedTargets.of`, `StackedTimeline`, `GoalSpec.STACKED`).
+ */
+internal object StackedFixtures {
+    /** The 32 NHL abbreviations (2026-27). */
+    val TEAMS = listOf(
+        "ANA", "BOS", "BUF", "CGY", "CAR", "CHI", "COL", "CBJ", "DAL", "DET", "EDM", "FLA", "LAK", "MIN", "MTL", "NSH",
+        "NJD", "NYI", "NYR", "OTT", "PHI", "PIT", "SJS", "SEA", "STL", "TBL", "TOR", "UTA", "VAN", "VGK", "WSH", "WPG",
+    )
+
+    /** §5.1's EDM and TOR columns. */
+    val EDM = StackedColours(
+        stripe = 0xFFFF4C00.toInt(), barBg = 0xFFD33F00.toInt(), barA = 0xFF041E42.toInt(), barB = 0xFFFF9466.toInt(),
+        goal = NhlTeamColours.of("EDM"), rowFlashAlpha = 0.40f,
+    )
+    val TOR = StackedColours(
+        stripe = 0xFFFFFFFF.toInt(), barBg = 0xFF001A4B.toInt(), barA = 0xFFFFFFFF.toInt(), barB = 0xFF66799D.toInt(),
+        goal = NhlTeamColours.of("TOR"), rowFlashAlpha = 0.50f,
+    )
+    /** The mock's matchup: EDM (away, top row) at TOR. */
+    val EDM_TOR = StackedPair(EDM, TOR)
+
+    /** §7.2's STACKED column (WP-1 puts the same numbers into `GoalSpec.STACKED`). */
+    val SPEC = GoalSpec(
+        streak1Alpha = 0.55f, streak2Alpha = 0.30f, streakFrom = -90f, streakTo = 450f, flashAlpha = 0.40f,
+        badgeMs = 600f, badgeMidScale = 1.1f, badgeMidDeg = 6f, letterMs = 450f, letterDrop = 27f, letterOvershoot = -2.25f,
+        pulsePeak = 1.06f, tallySlide = 16.2f, popFromScale = 1.5f, popMs = 900f, rowFlashMs = 1_200f, endMs = 4_800f,
+        stillFrameBMs = 1_200f,
+    )
+
+    /**
+     * The takeover at [t] under [SPEC] through the real `GoalTimeline` (whose shared keyframes are final), with the row
+     * flash envelope written by hand (commit 0's sampler writes 0 there): 1 → 0 over 1 200 ms from 3 600, an ease-out
+     * stand-in `(1 − p)²`; the still version's frame B writes 1.
+     */
+    fun goalFrame(t: Float, still: Boolean, out: GoalFrame = GoalFrame()): GoalFrame {
+        if (still) GoalTimeline.sampleStill(SPEC, t, out) else GoalTimeline.sample(SPEC, t, out)
+        val p = (t - 3_600f) / SPEC.rowFlashMs
+        out.rowFlashAlpha = when {
+            p < 0f || p >= 1f -> 0f
+            still -> 1f
+            else -> (1f - p) * (1f - p)
+        }
+        return out
+    }
+
+    /** A sampled layout: each column / the bar open by its fraction, its contents at rest for that fraction. */
+    fun frame(sog: Float, clock: Float, bar: Float, stripeAway: Float = 0f, stripeHome: Float = 0f): StackedFrame =
+        StackedFrame().apply {
+            sogWidth = sog; sogAlpha = sog; sogDx = K.STACKED_SOG_DX * (1f - sog)
+            clockWidth = clock; clockAlpha = clock
+            barHeight = bar; barClosed = bar <= 0f
+            stripeAX = K.STACKED_BAR_STRIPE_TRAVEL * (1f - bar); stripeBX = stripeAX
+            barTextAlpha = bar; barTextDx = K.STACKED_BAR_TEXT_DX * (1f - bar)
+            this.stripeAway = stripeAway; this.stripeHome = stripeHome
+        }
+
+    val TARGETS = StackedTargets(
+        sogOpen = false, clockOpen = true, bar = null, barPeriod = null, barSecs = null, ppSide = null,
+        period = PeriodLabel(PeriodKind.REG, 2), clockSlot = ClockSlot.Clock, columnDim = false, barDim = false,
+    )
+
+    @Suppress("LongParameterList")
+    fun body(
+        p: StackedPainter,
+        away: Int = 2,
+        home: Int = 1,
+        awaySog: String = "14",
+        homeSog: String = "10",
+        period: String = "2ND",
+        slot: ClockSlot = ClockSlot.Clock,
+        slotText: String = "",
+        clockSecs: Int = 384,
+        dim: Boolean = false,
+        awayAbbrev: String = "EDM",
+        homeAbbrev: String = "TOR",
+    ) = StackedFrameState(
+        awayAbbrev = awayAbbrev, homeAbbrev = homeAbbrev, awayScore = away.toString(), homeScore = home.toString(),
+        awaySog = awaySog, homeSog = homeSog,
+        periodText = period, periodPx = p.fitColumn(period, M.PERIOD_PX * K.STACKED_SCALE, 0.02f),
+        slot = slot, slotText = slotText,
+        slotPx = if (slot == ClockSlot.Clock) p.clockPx else p.fitColumn(slotText, M.CLOCK_PX * K.STACKED_SCALE),
+        clockSecs = clockSecs, columnDim = dim, targets = TARGETS,
+    )
+}
+
+/**
+ * Stacked §10.2 `StackedScreenshotTest` (WP-2): the Stacked box drawn through the real [StackedPainter.drawFrame] (and
+ * through it [StackedGoalPainter] and [NineSlice]) with the bundled fonts, from hand-built frames ([StackedFixtures]):
+ * every §8 look the painter can be handed, a few mid-transition frames, the bar above the box (bottom corners), place
+ * mode, and the takeover at 0 / 216 / 1 000 / 1 800 / 3 600 / 4 200 ms plus the still version's frames A and B, over
+ * the dark gradient, white ice and 50 % grey, at Standard and Large.
+ *
+ * Every frame is written under `ui/build/score-bug-stacked/` with contact sheets, for review by eye against the mock-up
+ * (`design/nhl-stacked/Stacked.dc.html` at × 0.45); they are not goldens. The asserted numbers are §10.2's (white on the
+ * row ≥ 7 : 1, bar text ≥ 4.5, SOG label ≥ 4.5, from the drawn pixels) plus the §6 drawing rules: the nine-slice shadow
+ * matches a direct blur, the glow is ≤ 2 % at the screen edge, nothing leaves the layer (footprint + 2 M), round corners,
+ * the bar stays visible through the takeover, and the end of the takeover is pixel-equal to the plain box.
+ *
+ * Logos are synthetic stand-ins (a team-colour oval with a light border), loaded at the takeover size as WP-3 loads them.
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35])
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+class StackedScreenshotTest {
+    private val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+    private val res = context.resources
+    private val bold = sansTypeface(context, R.font.instrument_sans_bold)
+    private val italic = StackedPainter.barTypeface(context)
+    private val barlow = sansTypeface(context, R.font.barlow_condensed_black_italic)
+    private val out = File("build/score-bug-stacked").apply { mkdirs() }
+
+    private inner class Rig(val large: Boolean) {
+        val s = if (large) K.SCORE_LARGE_SCALE else 1f
+        val m = if (large) K.GOAL_LAYER_MARGIN_LARGE else K.GOAL_LAYER_MARGIN
+        val painter = StackedPainter(s, large, bold, italic)
+        val goal = StackedGoalPainter(s, large, barlow, bold, res.getString(R.string.sports_goal_word), StackedFixtures.SPEC)
+        val shadow: NineSlice = painter.bakeShadow()!!
+        val glows = HashMap<Pair<Int, Int>, GlowMasks>()
+        val logoPx = Math.round(K.STACKED_GOAL_LOGO * s)
+        /** The layer: footprint (`STACKED_W_MAX` × top + bar) + 2 M, device px. */
+        val layerW = Math.round((K.STACKED_W_MAX * s) + 2 * m)
+        val layerH = Math.round(((K.STACKED_H + K.STACKED_BAR_H) * s) + 2 * m)
+        val logos: FollowLogos = FollowLogos({ url, w, h -> logoBitmap(if (url == "EDM") 0xFFFF4C00.toInt() else 0xFF00205B.toInt(), w, h) }, CoroutineScope(Dispatchers.Unconfined))
+            .apply { start("EDM", "TOR", logoPx, logoPx) }
+
+        fun glow(w: Float, h: Float): GlowMasks = glows.getOrPut(Math.round(w) to Math.round(h)) { goal.bakeGlow(w, h)!! }
+    }
+
+    private val std by lazy { Rig(false) }
+    private val big by lazy { Rig(true) }
+    private fun rig(large: Boolean) = if (large) big else std
+
+    private fun logoBitmap(colour: Int, w: Int, h: Int): Bitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888).apply {
+        val c = Canvas(this)
+        val p = Paint(Paint.ANTI_ALIAS_FLAG)
+        val b = w * 0.06f
+        p.color = 0xFFF2F2F2.toInt()
+        c.drawOval(w * 0.1f, 1f, w * 0.9f, h - 1f, p)
+        p.color = colour
+        c.drawOval(w * 0.1f + b, 1f + b, w * 0.9f - b, h - 1f - b, p)
+        p.color = Color.WHITE
+        c.drawRect(w * 0.36f, h * 0.44f, w * 0.64f, h * 0.56f, p)
+    }
+
+    /** One look: the body, the layout, the bar's content (and the previous one during a change / swap). */
+    private class Look(
+        val name: String,
+        val body: (StackedPainter) -> StackedFrameState,
+        val f: StackedFrame,
+        val bar: Triple<BarKind, Side?, Int>? = null,
+        val barPeriod: PeriodLabel? = null,
+        val barDim: Boolean = false,
+        val prev: Triple<BarKind, Side?, Int>? = null,
+        val prevPeriod: PeriodLabel? = null,
+        val placing: Boolean = false,
+        val logos: Boolean = true,
+    )
+
+    private val p2 = PeriodLabel(PeriodKind.REG, 2)
+    private val noSecs = BarContent.NO_SECS
+
+    private val looks: List<Look> = listOf(
+        Look("play", { StackedFixtures.body(it) }, StackedFixtures.frame(0f, 1f, 0f)),
+        Look("pp-edm", { StackedFixtures.body(it) }, StackedFixtures.frame(1f, 1f, 1f, stripeAway = 1f), Triple(BarKind.POWER_PLAY, Side.AWAY, 97)),
+        Look("pp-tor-5on3", { StackedFixtures.body(it, clockSecs = 612) }, StackedFixtures.frame(1f, 1f, 1f, stripeHome = 1f), Triple(BarKind.TWO_MAN, Side.HOME, 48)),
+        Look("pp-goal-edm", { StackedFixtures.body(it, away = 3) }, StackedFixtures.frame(1f, 1f, 1f, stripeAway = 1f), Triple(BarKind.PP_GOAL, Side.AWAY, noSecs)),
+        Look("pp-no-sog", { StackedFixtures.body(it, awaySog = "", homeSog = "") }, StackedFixtures.frame(0f, 1f, 1f, stripeAway = 1f), Triple(BarKind.POWER_PLAY, Side.AWAY, 19 * 60 + 59)),
+        Look("intermission", { StackedFixtures.body(it) }, StackedFixtures.frame(1f, 0f, 1f), Triple(BarKind.INTERMISSION, null, noSecs), p2),
+        Look("pp-into-int", { StackedFixtures.body(it, period = "1ST", slot = ClockSlot.Intermission, slotText = res.getString(R.string.sports_stacked_int)) }, StackedFixtures.frame(1f, 1f, 1f, stripeAway = 1f), Triple(BarKind.POWER_PLAY, Side.AWAY, 72)),
+        Look("end-of-period", { StackedFixtures.body(it, period = "1ST", slot = ClockSlot.End, slotText = res.getString(R.string.sports_stacked_end)) }, StackedFixtures.frame(0f, 1f, 0f)),
+        Look("stale-play", { StackedFixtures.body(it, slot = ClockSlot.NoUpdate, slotText = res.getString(R.string.sports_no_update), dim = true) }, StackedFixtures.frame(0f, 1f, 0f)),
+        Look("delayed-play", { StackedFixtures.body(it, slot = ClockSlot.Delayed, slotText = res.getString(R.string.sports_delayed), dim = true) }, StackedFixtures.frame(0f, 1f, 0f)),
+        Look("stale-int", { StackedFixtures.body(it) }, StackedFixtures.frame(1f, 0f, 1f), Triple(BarKind.NO_UPDATE, null, noSecs), barDim = true),
+        Look("shootout", { StackedFixtures.body(it, away = 3, home = 3, period = "SO") }, StackedFixtures.frame(1f, 0f, 1f), Triple(BarKind.SHOOTOUT, null, noSecs)),
+        Look("final-so", { StackedFixtures.body(it, away = 4, home = 3) }, StackedFixtures.frame(1f, 0f, 1f), Triple(BarKind.FINAL, null, noSecs), PeriodLabel(PeriodKind.SO, 1)),
+        Look("ot", { StackedFixtures.body(it, away = 10, home = 10, period = "OT", clockSecs = 252, awaySog = "38", homeSog = "41") }, StackedFixtures.frame(0f, 1f, 0f)),
+        Look("pp-opening", { StackedFixtures.body(it) },
+            StackedFixtures.frame(0.6f, 1f, 0.5f, stripeAway = 0.7f).apply { sogAlpha = 0.4f; stripeAX = -30f; stripeBX = -50f; barTextAlpha = 0f; barTextDx = K.STACKED_BAR_TEXT_DX },
+            Triple(BarKind.POWER_PLAY, Side.AWAY, 97)),
+        Look("int-folding", { StackedFixtures.body(it) },
+            StackedFixtures.frame(1f, 0.4f, 1f).apply { clockAlpha = 0f; barTextAlpha = 0.5f; barTextDx = -4f },
+            Triple(BarKind.INTERMISSION, null, noSecs), p2),
+        Look("change-pp-to-int", { StackedFixtures.body(it) },
+            StackedFixtures.frame(1f, 0.5f, 1f).apply { barBgMix = 0.5f; barSwapped = false; stripeAX = -40f; stripeBX = -20f; barTextAlpha = 0.3f; barTextDx = -8f },
+            Triple(BarKind.INTERMISSION, null, noSecs), p2, prev = Triple(BarKind.POWER_PLAY, Side.AWAY, 12)),
+        Look("place", { StackedFixtures.body(it, away = 0, home = 0, awaySog = "", homeSog = "", period = "", clockSecs = 0, awayAbbrev = "AWY", homeAbbrev = "HME") },
+            StackedFixtures.frame(0f, 1f, 0f), placing = true, logos = false),
+    )
+
+    private class Shot(val bmp: Bitmap, val ox: Float, val oy: Float) {
+        /** The pixel at box coordinates (x, y) (the top part's top-left is 0, 0). */
+        fun px(x: Float, y: Float): Int = bmp.getPixel((x + ox).toInt(), (y + oy).toInt())
+    }
+
+    private fun bar(r: Rig, spec: Triple<BarKind, Side?, Int>?, period: PeriodLabel?, dim: Boolean, pair: StackedPair): BarContent? =
+        spec?.let { (kind, side, secs) ->
+            BarContent().also {
+                it.kind = kind; it.side = side; it.secs = secs; it.period = period; it.dim = dim
+                r.painter.fillBar(it, pair, "EDM", "TOR", res)
+            }
+        }
+
+    /**
+     * [look] on [bg] (DARK, GREY, TRANSPARENT or a colour) in the layer. [t] non-null = a takeover by [scorer] at [t]
+     * ([still] = the still version); [shadow] / [glowOn] as the runner would hand them; [up] = the bar above the box.
+     */
+    private fun render(
+        look: Look,
+        large: Boolean,
+        bg: Int = DARK,
+        t: Float? = null,
+        still: Boolean = false,
+        scorer: Side = Side.AWAY,
+        up: Boolean = false,
+        shadow: Boolean = true,
+        glowOn: Boolean = true,
+        pair: StackedPair = StackedFixtures.EDM_TOR,
+    ): Shot {
+        val r = rig(large)
+        val bmp = Bitmap.createBitmap(r.layerW, r.layerH, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        when (bg) {
+            DARK -> c.drawRect(0f, 0f, r.layerW.toFloat(), r.layerH.toFloat(), Paint().apply {
+                shader = LinearGradient(0f, 0f, r.layerW.toFloat(), r.layerH.toFloat(), Color.rgb(20, 22, 28), Color.rgb(70, 40, 38), Shader.TileMode.CLAMP)
+            })
+            TRANSPARENT -> Unit
+            else -> c.drawColor(bg)
+        }
+        val f = look.f
+        val a = StackedDrawArgs()
+        a.body = look.body(r.painter)
+        a.colours = pair
+        a.f = f
+        a.bar = bar(r, look.bar, look.barPeriod, look.barDim, pair)
+        a.barPrev = bar(r, look.prev, look.prevPeriod, false, pair)
+        a.up = up
+        a.logos = if (look.logos) r.logos else null
+        a.logoWaited = true
+        a.placing = look.placing
+        a.shadow = if (shadow) r.shadow else null
+        a.still = still
+        if (t != null) {
+            val body = a.body!!
+            val goalColours = if (scorer == Side.AWAY) pair.away.goal else pair.home.goal
+            val badge = (if (scorer == Side.AWAY) r.logos.away else r.logos.home).image?.asAndroidBitmap()
+            r.goal.begin(scorer, goalColours, badge, body.awayAbbrev, body.homeAbbrev, body.awayScore.toInt(), body.homeScore.toInt(), f.boxW)
+            a.goal = r.goal
+            a.g = StackedFixtures.goalFrame(t, still)
+            a.glow = r.glow(f.boxW * r.s, (K.STACKED_H + if (f.barClosed) 0f else f.barH) * r.s)
+            a.glowOn = glowOn
+            a.t = t
+        }
+        val ox = r.m
+        val oy = r.m + if (up) K.STACKED_BAR_H * r.s else 0f
+        c.translate(ox, oy)
+        r.painter.drawFrame(c, a)
+        return Shot(bmp, ox, oy)
+    }
+
+    private fun save(name: String, bmp: Bitmap) {
+        File(out, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+    }
+
+    private fun sheet(name: String, cells: List<List<Bitmap>>) {
+        val cw = cells.flatten().maxOf { it.width }
+        val ch = cells.flatten().maxOf { it.height }
+        val cols = cells.maxOf { it.size }
+        val b = Bitmap.createBitmap(cols * cw, cells.size * ch, Bitmap.Config.ARGB_8888)
+        val c = Canvas(b)
+        c.drawColor(Color.BLACK)
+        cells.forEachIndexed { row, list -> list.forEachIndexed { col, bmp -> c.drawBitmap(bmp, col * cw.toFloat(), row * ch.toFloat(), null) } }
+        save(name, b)
+    }
+
+    private fun lum(c: Int): Double {
+        fun ch(v: Int): Double { val x = v / 255.0; return if (x <= 0.03928) x / 12.92 else ((x + 0.055) / 1.055).pow(2.4) }
+        return 0.2126 * ch(Color.red(c)) + 0.7152 * ch(Color.green(c)) + 0.0722 * ch(Color.blue(c))
+    }
+
+    private fun contrast(a: Int, b: Int): Double {
+        val l1 = lum(a); val l2 = lum(b)
+        return (maxOf(l1, l2) + 0.05) / (minOf(l1, l2) + 0.05)
+    }
+
+    private fun near(expected: Int, actual: Int, tol: Int) =
+        abs(Color.red(expected) - Color.red(actual)) <= tol && abs(Color.green(expected) - Color.green(actual)) <= tol &&
+            abs(Color.blue(expected) - Color.blue(actual)) <= tol
+
+    private fun hex(c: Int) = "#" + Integer.toHexString(c).padStart(8, '0').uppercase()
+    private fun sz(large: Boolean) = if (large) "large" else "std"
+    private val backgrounds = listOf("dark" to DARK, "ice" to Color.WHITE, "grey" to GREY)
+    private val times = listOf(0, 216, 1_000, 1_800, 3_600, 4_200)
+
+    // ------------------------------------------------------------------ the frames and contact sheets
+
+    @Test
+    fun everyLookAtBothSizesOverEveryBackgroundAndTheContactSheets() {
+        for (large in listOf(false, true)) for ((bgName, bg) in backgrounds) {
+            val shots = looks.map { look ->
+                render(look, large, bg).bmp.also { save("stacked-${look.name}-${sz(large)}-$bgName", it) }
+            }
+            val upShots = looks.filter { it.bar != null }.take(3).map { look ->
+                render(look, large, bg, up = true).bmp.also { save("stacked-${look.name}-up-${sz(large)}-$bgName", it) }
+            }
+            sheet("stacked-contact-sheet-${sz(large)}-$bgName", (shots + upShots).chunked(4))
+        }
+        assertTrue(File(out, "stacked-contact-sheet-std-dark.png").length() > 10_000)
+    }
+
+    @Test
+    fun theTakeoverAtTheDesignTimesAndTheStillFrames() {
+        val bases = listOf(looks.first { it.name == "pp-edm" }, looks.first { it.name == "play" }, looks.first { it.name == "intermission" })
+        for (large in listOf(false, true)) for ((bgName, bg) in backgrounds) {
+            val rows = bases.map { look ->
+                val animated = times.map { t ->
+                    render(look, large, bg, t = t.toFloat()).bmp.also { save("stacked-goal-${look.name}-${sz(large)}-$bgName-t$t", it) }
+                }
+                val stillA = render(look, large, bg, t = 1_000f, still = true).bmp.also { save("stacked-goal-${look.name}-${sz(large)}-$bgName-still-a", it) }
+                val stillB = render(look, large, bg, t = 4_200f, still = true).bmp.also { save("stacked-goal-${look.name}-${sz(large)}-$bgName-still-b", it) }
+                animated + stillA + stillB
+            }
+            sheet("stacked-goal-contact-sheet-${sz(large)}-$bgName", rows)
+            // The home scorer (TOR: navy panel, white lead) on the PP box, and the bar above the box.
+            save("stacked-goal-tor-${sz(large)}-$bgName-t1800", render(bases[0], large, bg, t = 1_800f, scorer = Side.HOME).bmp)
+            save("stacked-goal-pp-edm-up-${sz(large)}-$bgName-t1800", render(bases[0], large, bg, t = 1_800f, up = true).bmp)
+        }
+        assertTrue(File(out, "stacked-goal-contact-sheet-std-dark.png").length() > 10_000)
+    }
+
+    // ------------------------------------------------------------------ §10.2's contrast assertions, from the pixels
+
+    @Test
+    fun whiteOnTheRowIsAtLeastSevenToOne() {
+        for (large in listOf(false, true)) for ((_, bg) in backgrounds) {
+            val r = rig(large)
+            val shot = render(looks[0], large, bg)
+            // An empty spot of the away row: right of the score, left of the row's end.
+            val row = shot.px(K.STACKED_ROWS_W * r.s - 4f * r.s, 4f * r.s)
+            assertTrue("row ${hex(row)} vs #12284F", near(K.STACKED_ROW_BG, row, 2))
+            val cr = contrast(Color.WHITE, row)
+            assertTrue("white on the row: $cr", cr >= 7.0)
+            // And the code's ink reaches white.
+            var white = 0
+            for (y in (20 * r.s).toInt()..(34 * r.s).toInt()) for (x in (80 * r.s).toInt()..(130 * r.s).toInt()) {
+                if (near(Color.WHITE, shot.px(x.toFloat(), y.toFloat()), 6)) white++
+            }
+            assertTrue("white code pixels: $white", white > 20)
+        }
+    }
+
+    @Test
+    fun barTextIsAtLeastFourAndAHalfToOneOnEveryBar() {
+        val bars = looks.filter { it.bar != null && it.prev == null && it.name != "pp-opening" }
+        for (large in listOf(false, true)) for (look in bars) for (up in listOf(false, true)) {
+            val r = rig(large)
+            val shot = render(look, large, DARK, up = up)
+            val y = if (up) -K.STACKED_BAR_H * r.s / 2f else (K.STACKED_H + K.STACKED_BAR_H / 2f) * r.s
+            // The bar's background at its right end, clear of stripes and words.
+            val bg = shot.px(look.f.boxW * r.s - 4f * r.s, y)
+            val cr = contrast(Color.WHITE, bg)
+            println("bar ${look.name} ${sz(large)}${if (up) " up" else ""}: ${hex(bg)} white %.2f".format(cr))
+            assertTrue("${look.name}: white on ${hex(bg)} is $cr", cr >= 4.5)
+            var white = 0
+            for (yy in (y - 8f * r.s).toInt()..(y + 8f * r.s).toInt()) for (x in (64 * r.s).toInt()..(150 * r.s).toInt()) {
+                if (Color.red(shot.px(x.toFloat(), yy.toFloat())) > 235 && Color.green(shot.px(x.toFloat(), yy.toFloat())) > 235) white++
+            }
+            if (!look.barDim && look.f.barTextAlpha >= 1f) assertTrue("${look.name}: white word pixels $white", white > 20)
+        }
+    }
+
+    @Test
+    fun theSogLabelIsAtLeastFourAndAHalfToOne() {
+        for (large in listOf(false, true)) {
+            val r = rig(large)
+            val shot = render(looks.first { it.name == "pp-edm" }, large)
+            val col = shot.px((K.STACKED_ROWS_W + 3f) * r.s, 4f * r.s)
+            assertTrue("column ${hex(col)} vs #15191F", near(K.STACKED_COL_BG, col, 2))
+            val cr = contrast(K.STACKED_SOG_LABEL, col)
+            assertTrue("SOG label: $cr", cr >= 4.5)
+            // The label's ink is there, in its colour, on the row line.
+            var label = 0
+            val cx = (K.STACKED_ROWS_W + K.STACKED_SOG_W / 2f) * r.s
+            for (y in ((K.STACKED_H / 2f - 6f) * r.s).toInt()..((K.STACKED_H / 2f + 6f) * r.s).toInt()) for (x in (cx - 18 * r.s).toInt()..(cx + 18 * r.s).toInt()) {
+                if (near(K.STACKED_SOG_LABEL, shot.px(x.toFloat(), y.toFloat()), 10)) label++
+            }
+            assertTrue("label pixels $label", label > 10)
+        }
+    }
+
+    // ------------------------------------------------------------------ §6: drawing rules
+
+    /**
+     * (§6, B4) The stretched nine-slice is the blurred shadow of the box at every size the box goes through (3 widths ×
+     * bar open / closed), outside the box (its centre is skipped):
+     * - across the middle of each straight side, where the slices are stretched, it is the analytic Gaussian edge
+     *   `½·erfc(d / σ√2)` within [EDGE_TOL] / 255 (the "exact profile" claim);
+     * - everywhere, it is within [DIRECT_TOL] / 255 of a direct `BlurMaskFilter` of the whole box (Skia's own round-rect
+     *   blur takes an approximate path near the corners, so this bound is looser; the measured worst is printed).
+     */
+    @Test
+    fun theNineSliceShadowMatchesTheBlurAtEveryBoxSize() {
+        val worsts = ArrayList<Int>()
+        val edges = ArrayList<Int>()
+        for (large in listOf(false, true)) {
+            val r = rig(large)
+            val src = r.shadow.sourceSide
+            val sigma = K.STACKED_SHADOW_SIGMA * r.s
+            val dy = K.STACKED_SHADOW_DY * r.s
+            assertTrue("source $src ≥ 6σ + 1 (${6 * sigma + 1})", src >= 6 * sigma + 1)
+            for (w in listOf(301.5f, 333f, 391.5f)) for (barOpen in listOf(false, true)) {
+                val bw = w * r.s
+                val bh = (K.STACKED_H + if (barOpen) K.STACKED_BAR_H else 0f) * r.s
+                val sliced = Bitmap.createBitmap(r.layerW, r.layerH, Bitmap.Config.ARGB_8888)
+                val paint = Paint(Paint.FILTER_BITMAP_FLAG).apply { color = Color.BLACK }
+                Canvas(sliced).apply { translate(r.m, r.m) }.let { r.shadow.draw(it, 0f, 0f, bw, bh, paint) }
+                val direct = Bitmap.createBitmap(r.layerW, r.layerH, Bitmap.Config.ARGB_8888)
+                Canvas(direct).apply {
+                    translate(r.m, r.m)
+                    val rad = M.BOX_RADIUS * K.STACKED_SCALE * r.s
+                    drawRoundRect(0f, dy, bw, bh + dy, rad, rad, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                        color = Color.BLACK
+                        maskFilter = BlurMaskFilter(((sigma - 0.5f) / 0.57735f), BlurMaskFilter.Blur.NORMAL)
+                    })
+                }
+                // The analytic edge across the middle of each side, sampled at pixel centres; d = the distance past the
+                // shadow shape's edge (the box moved down by dy), positive outside.
+                fun alphaAt(b: Bitmap, px: Int, py: Int) = Color.alpha(b.getPixel(px + r.m.toInt(), py + r.m.toInt()))
+                fun want(d: Float) = Math.round(255.0 * 0.5 * erfc(d / (sigma * Math.sqrt(2.0)))).toInt()
+                val mx = (bw / 2f).toInt()
+                val my = (bh / 2f + dy).toInt()
+                // (x, y, d) along the four mid-side lines.
+                val probes = ArrayList<Triple<Int, Int, Float>>()
+                for (y in -30..-1) probes += Triple(mx, y, dy - (y + 0.5f))
+                for (y in Math.ceil(bh.toDouble()).toInt()..(bh + 30).toInt()) probes += Triple(mx, y, y + 0.5f - (bh + dy))
+                for (x in -30..-1) probes += Triple(x, my, -(x + 0.5f))
+                for (x in Math.ceil(bw.toDouble()).toInt()..(bw + 30).toInt()) probes += Triple(x, my, x + 0.5f - bw)
+                var edge = 0
+                var skia = 0
+                var sideVsDirect = 0
+                for ((x, y, d) in probes) {
+                    edge = maxOf(edge, abs(alphaAt(sliced, x, y) - want(d)))
+                    skia = maxOf(skia, abs(alphaAt(direct, x, y) - want(d)))
+                    sideVsDirect = maxOf(sideVsDirect, abs(alphaAt(sliced, x, y) - alphaAt(direct, x, y)))
+                }
+                println("nine-slice ${sz(large)} $w × ${if (barOpen) 141 else 108} mid-sides: vs erfc Δα $edge (Skia's direct blur vs erfc $skia), vs direct $sideVsDirect")
+                edges += edge
+                var worst = 0
+                var at = ""
+                for (y in 0 until r.layerH) for (x in 0 until r.layerW) {
+                    val bx = x - r.m
+                    val by = y - r.m
+                    if (bx >= 0f && bx < bw && by >= 0f && by < bh) continue // the centre is skipped: the box covers it
+                    val d = abs(Color.alpha(sliced.getPixel(x, y)) - Color.alpha(direct.getPixel(x, y)))
+                    if (d > worst) { worst = d; at = "($bx, $by) sliced ${Color.alpha(sliced.getPixel(x, y))} direct ${Color.alpha(direct.getPixel(x, y))}" }
+                }
+                println("nine-slice ${sz(large)} $w × ${if (barOpen) 141 else 108}: edges vs erfc Δα $edge; vs a direct blur worst Δα $worst at $at")
+                worsts += worst
+            }
+            assertEquals("ALPHA_8", Bitmap.Config.ALPHA_8, r.shadow.bitmap!!.config)
+        }
+        assertTrue("edges vs erfc Δα $edges", edges.all { it <= EDGE_TOL })
+        assertTrue("vs a direct blur Δα $worsts", worsts.all { it <= DIRECT_TOL })
+    }
+
+    /** The complementary error function (Abramowitz & Stegun 7.1.26, |ε| < 1.5e-7). */
+    private fun erfc(x: Double): Double {
+        val z = abs(x)
+        val t = 1.0 / (1.0 + 0.3275911 * z)
+        val y = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429)))) * Math.exp(-z * z)
+        return if (x >= 0) y else 2.0 - y
+    }
+
+    /** (§6 N6) At the glow's peak, 56 px past the box (the screen-edge inset) the glow is ≤ 2 %, at every pinned box. */
+    @Test
+    fun theGlowFadesBeforeTheScreenEdge() {
+        val g = StackedFixtures.goalFrame(1_800f, still = false)
+        for (large in listOf(false, true)) for (look in listOf("pp-edm", "play", "intermission")) {
+            val r = rig(large)
+            val l = looks.first { it.name == look }
+            val w = l.f.boxW * r.s
+            val h = (K.STACKED_H + if (l.f.barClosed) 0f else l.f.barH) * r.s
+            val glow = r.glow(w, h)
+            assertTrue("the peak mask fits the layer", glow.peakMargin <= r.m + 0.01f)
+            val bmp = Bitmap.createBitmap(r.layerW + 40, r.layerH + 40, Bitmap.Config.ARGB_8888)
+            val c = Canvas(bmp)
+            c.translate(r.m + 20, r.m + 20)
+            r.goal.begin(Side.AWAY, StackedFixtures.EDM.goal, null, "EDM", "TOR", 3, 1, l.f.boxW)
+            r.goal.drawGlow(c, g, glow, 0f, 0f)
+            val a20 = Color.alpha(bmp.getPixel((r.m + 20 + w / 2f).toInt(), (r.m + 20 - 20f).toInt())) / 255.0
+            val a56 = Color.alpha(bmp.getPixel((r.m + 20 + w / 2f).toInt(), (r.m + 20 - 56f).toInt())) / 255.0
+            val b56 = Color.alpha(bmp.getPixel((r.m + 20 + w / 2f).toInt(), (r.m + 20 + h + 56f).toInt())) / 255.0
+            println("glow $look ${sz(large)}: α 20 px %.3f, 56 px above %.4f, below %.4f".format(a20, a56, b56))
+            assertTrue("glow at 20 px: $a20", a20 > 0.15)
+            assertTrue("glow at 56 px above: $a56", a56 <= K.GOAL_GLOW_EDGE_MAX_ALPHA)
+            assertTrue("glow at 56 px below: $b56", b56 <= K.GOAL_GLOW_EDGE_MAX_ALPHA)
+            assertTrue("glow is the team colour", near(StackedFixtures.EDM.goal.glow, bmp.getPixel((r.m + 20 + w / 2f).toInt(), (r.m + 20 - 20f).toInt()), 12))
+        }
+    }
+
+    /** The layer (footprint + 2 M) holds everything: its outermost ring of pixels stays transparent through a takeover. */
+    @Test
+    fun nothingReachesTheLayerEdge() {
+        for (large in listOf(false, true)) for (look in looks.filter { it.name in setOf("pp-edm", "play", "intermission") }) for (up in listOf(false, true)) {
+            var t = 0f
+            while (t <= 4_800f) {
+                val shot = render(look, large, TRANSPARENT, t = t, up = up)
+                val b = shot.bmp
+                for (x in 0 until b.width) {
+                    assertEquals("${look.name} ($x, 0) at $t", 0, Color.alpha(b.getPixel(x, 0)))
+                    assertEquals("${look.name} ($x, bottom) at $t", 0, Color.alpha(b.getPixel(x, b.height - 1)))
+                }
+                for (y in 0 until b.height) {
+                    assertEquals("${look.name} (0, $y) at $t", 0, Color.alpha(b.getPixel(0, y)))
+                    assertEquals("${look.name} (right, $y) at $t", 0, Color.alpha(b.getPixel(b.width - 1, y)))
+                }
+                t += 300f
+            }
+        }
+    }
+
+    /** (§6 N3) The box's corners are round: the row stripes, the bar and the last column never paint a square corner. */
+    @Test
+    fun theBoxCornersAreRound() {
+        for (large in listOf(false, true)) for (look in looks.filter { it.name in setOf("pp-edm", "play", "intermission") }) for (up in listOf(false, true)) {
+            val r = rig(large)
+            val shot = render(look, large, TRANSPARENT, shadow = false, up = up)
+            val w = look.f.boxW * r.s
+            val top = if (up && !look.f.barClosed) -K.STACKED_BAR_H * r.s else 0f
+            val bottom = K.STACKED_H * r.s + if (!up && !look.f.barClosed) K.STACKED_BAR_H * r.s else 0f
+            // The pixel holding each corner (the right edge can be fractional: 301.5, 391.5).
+            for ((x, y) in listOf(0f to top, w - 0.5f to top, 0f to bottom - 0.5f, w - 0.5f to bottom - 0.5f)) {
+                val a = Color.alpha(shot.px(x, y))
+                // A square corner covers this pixel fully (255); the 2.7 (3.4 Large) radius leaves it partly empty.
+                assertTrue("${look.name} ${sz(large)} up=$up corner ($x, $y) α $a", a < 240)
+            }
+            // Along an edge, one pixel in, the box is solid.
+            assertEquals(255, Color.alpha(shot.px(w / 2f, top + 1f)))
+        }
+    }
+
+    /** (§7.2) The takeover covers the top part only: the open bar is unchanged under it, and outside the box nothing moves with the glow off. */
+    @Test
+    fun theTakeoverLeavesTheBarVisible() {
+        for (large in listOf(false, true)) for (up in listOf(false, true)) {
+            val r = rig(large)
+            val look = looks.first { it.name == "pp-edm" }
+            val plain = render(look, large, DARK, up = up)
+            val goal = render(look, large, DARK, t = 1_800f, up = up, glowOn = false)
+            val barY = if (up) -K.STACKED_BAR_H * r.s / 2f else (K.STACKED_H + K.STACKED_BAR_H / 2f) * r.s
+            for (x in listOf(10f, 100f, 250f, 380f)) {
+                assertEquals("bar at $x", plain.px(x * r.s, barY), goal.px(x * r.s, barY))
+            }
+            val panel = goal.px(look.f.boxW * r.s - 6f * r.s, K.STACKED_H * r.s / 2f)
+            assertTrue("panel ${hex(panel)} is EDM's base", near(StackedFixtures.EDM.goal.base, panel, 4) || Color.red(panel) > 200)
+        }
+    }
+
+    /** (§7.2, §7.3) The row flash: the scorer's row takes its stripe colour after 3 600, at the C7 peak (animated) or .25 (still). */
+    @Test
+    fun theRowFlashAndTheStillTint() {
+        for (large in listOf(false, true)) {
+            val r = rig(large)
+            val look = looks.first { it.name == "play" }
+            val spotX = K.STACKED_ROWS_W * r.s - 4f * r.s
+            val plain = render(look, large).px(spotX, 4f * r.s)
+            val flash = render(look, large, t = 3_600f + 1f).px(spotX, 4f * r.s)
+            val expected = StackedPainter.lerpColour(K.STACKED_ROW_BG, StackedFixtures.EDM.stripe, StackedFixtures.EDM.rowFlashAlpha)
+            assertTrue("flash ${hex(flash)} vs ${hex(expected)}", near(expected, flash, 4))
+            val stillB = render(look, large, t = 4_200f, still = true).px(spotX, 4f * r.s)
+            val tint = StackedPainter.lerpColour(K.STACKED_ROW_BG, StackedFixtures.EDM.stripe, K.STACKED_STILL_ROW_TINT)
+            assertTrue("still tint ${hex(stillB)} vs ${hex(tint)}", near(tint, stillB, 4))
+            // The other row is untouched.
+            assertEquals(render(look, large).px(spotX, 58f * r.s), render(look, large, t = 3_601f).px(spotX, 58f * r.s))
+            assertTrue(plain != flash)
+        }
+    }
+
+    /** At and after `endMs` (and the still version's frame B end) the frame is pixel-equal to the plain box. */
+    @Test
+    fun fromTheEndItIsPixelEqualToThePlainBox() {
+        for (large in listOf(false, true)) for (look in looks.filter { it.name in setOf("pp-edm", "intermission") }) {
+            val plain = render(look, large).bmp
+            assertTrue("animated at 4 800", render(look, large, t = 4_800f).bmp.sameAs(plain))
+            assertTrue("still at 4 800", render(look, large, t = 4_800f, still = true).bmp.sameAs(plain))
+        }
+    }
+
+    /** (§7.3) The still frame A has no glow: outside the box it is pixel-equal to the plain box. */
+    @Test
+    fun theStillFrameAHasNoGlowOrStreak() {
+        for (large in listOf(false, true)) {
+            val r = rig(large)
+            val look = looks.first { it.name == "pp-edm" }
+            val plain = render(look, large, TRANSPARENT)
+            val a = render(look, large, TRANSPARENT, t = 1_000f, still = true)
+            val w = look.f.boxW * r.s
+            val h = (K.STACKED_H + K.STACKED_BAR_H) * r.s
+            for (y in 0 until plain.bmp.height) for (x in 0 until plain.bmp.width) {
+                val bx = x - plain.ox
+                val by = y - plain.oy
+                if (bx > -1f && bx < w + 1f && by > -1f && by < h + 1f) continue
+                assertEquals("($x, $y)", plain.bmp.getPixel(x, y), a.bmp.getPixel(x, y))
+            }
+        }
+    }
+
+    /** The bar's words cut over at the change's swap instant: before it the previous words and stripe colours are drawn. */
+    @Test
+    fun aChangeDrawsThePreviousContentUntilItsSwap() {
+        val r = std
+        val look = looks.first { it.name == "change-pp-to-int" }
+        val before = render(look, false)
+        val after = render(Look(look.name, look.body, StackedFrame().apply { copyFrom(look.f); barSwapped = true }, look.bar, look.barPeriod, prev = look.prev), false)
+        val y = (K.STACKED_H + K.STACKED_BAR_H / 2f) * r.s
+        val bgMid = StackedPainter.lerpColour(StackedFixtures.EDM.barBg, K.STACKED_BAR_NEUTRAL, 0.5f)
+        val px = before.px(look.f.boxW - 4f, y)
+        assertTrue("half-way background ${hex(px)} vs ${hex(bgMid)}", near(bgMid, px, 3))
+        assertTrue("the words differ across the swap", !before.bmp.sameAs(after.bmp))
+    }
+
+    private companion object {
+        const val DARK = 0x01010101
+        const val GREY = 0xFF808080.toInt()
+        const val TRANSPARENT = 0x00000000
+        /**
+         * The stretched sides against the analytic Gaussian edge, alpha of 255. Measured 3–4: the bake's own blur (Skia's
+         * box-filter approximation of a Gaussian) is the whole of it; Skia's direct blur of the full box is 4–8 off the
+         * same curve, so the slicing adds nothing.
+         */
+        const val EDGE_TOL = 4
+        /** Against Skia's direct round-rect blur, alpha of 255 (≈ 3 %, under 2 % once tinted at .55). */
+        const val DIRECT_TOL = 8
+    }
+}
