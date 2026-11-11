@@ -304,6 +304,11 @@ enum class SettingsText {
     SPORTS_INTERVAL_SLOWED,
     SPORTS_INTERVAL_FALLBACK,
     SPORTS_INTERVAL_LEAGUE,
+    // (Stacked commit 0, docs/design/m6-score-bug-stacked-theme.md §1.1) The style row (SportsRows.STYLE) and its values.
+    SPORTS_STYLE,
+    SPORTS_STYLE_DESC,
+    SPORTS_STYLE_PILL,
+    SPORTS_STYLE_STACKED,
 }
 
 fun interface SettingsTexts {

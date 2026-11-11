@@ -63,6 +63,7 @@ import app.thebox.core.sports.GoalTimeline
 import app.thebox.core.sports.League
 import app.thebox.core.sports.NflTab
 import app.thebox.core.sports.NflView
+import app.thebox.core.sports.NhlBugStyle
 import app.thebox.core.sports.NhlTeamColours
 import app.thebox.core.sports.OverlayGeometry
 import app.thebox.core.sports.PeriodKind
@@ -146,6 +147,11 @@ const val SCORE_BUG_LIVE_TAG = "score_bug_live"
  * fade after the follow ends), the placement's league in place mode, else the last shown one, else the prefs' shown
  * league; the placement handed down always carries that league (fix pass U1). A league change of
  * the follow swaps the bug with no fade (accepted in the NFL sign-off).
+ *
+ * (Stacked, docs/design/m6-score-bug-stacked-theme.md §2.2) The style seam, in the same branch: an NHL bug draws
+ * [StackedBug] when `SportsPrefs.nhlStyle` is STACKED, else [ScoreBugWith] (byte-unchanged). The style is PILL whenever
+ * the league is the NFL, so [NflBug] never sees it. The placement handed down carries the league and the style drawn; a
+ * style change swaps the bug with no fade, like a league change.
  */
 @Composable
 fun ScoreBug(
@@ -160,7 +166,9 @@ fun ScoreBug(
     val lastLeague = remember { mutableStateOf<League?>(null) }
     val shown = source.bug.collectAsState().value?.league
     // The prefs are collected (not read with `.value`, StateFlowValueCalledInComposition); they change only on a setting.
-    val prefsLeague = source.prefs.collectAsState().value.league
+    // (Stacked N1) One collection, two reads: the league and the NHL style.
+    val prefs = source.prefs.collectAsState().value
+    val prefsLeague = prefs.league
     // (NFL integration pass) The follow's league comes before the held one: after an NHL follow is replaced by an NFL
     // game still in PRE (no view yet), place mode and the first view must take the NFL branch, not the NHL one held from
     // the last shown view. The held league still covers a fade after the follow ends (followedLeague null).
@@ -169,10 +177,14 @@ fun ScoreBug(
     val placingLeague = if (placement.placing) placement.league else null
     val league = shown ?: followedLeague ?: placingLeague ?: lastLeague.value ?: prefsLeague
     SideEffect { if (shown != null) lastLeague.value = shown }
-    val placed = if (placement.league == league) placement else placement.copy(league = league)
-    key(league) {
-        if (league == League.NFL) NflBug(source, placed, geometry, modifier, place, NflHooks.Default)
-        else ScoreBugWith(source, placed, geometry, lowEnd, modifier, place, GoalHooks.Default)
+    val style = if (league == League.NHL) prefs.nhlStyle else NhlBugStyle.PILL
+    val placed = if (placement.league == league && placement.style == style) placement else placement.copy(league = league, style = style)
+    key(league, style) {
+        when {
+            league == League.NFL -> NflBug(source, placed, geometry, modifier, place, NflHooks.Default)
+            style == NhlBugStyle.STACKED -> StackedBug(source, placed, geometry, modifier, place, StackedHooks.Default)
+            else -> ScoreBugWith(source, placed, geometry, lowEnd, modifier, place, GoalHooks.Default)
+        }
     }
 }
 
@@ -1139,41 +1151,6 @@ private class PpRun(private val scope: CoroutineScope, private val hooks: GoalHo
         fun tabWant(pp: PowerPlay) = 1 + pp.side.ordinal * 2 + pp.kind.ordinal
         fun pillWant(pp: PowerPlay) = 1 + pp.side.ordinal
         fun sideOfTab(want: Int) = if ((want - 1) / 2 == 0) Side.AWAY else Side.HOME
-    }
-}
-
-/**
- * (Power play §7) The live region's text for the power play: the first of the goal string (while the mark is set), a start or
- * kind change, a real end ([ScoreBugView.ppEnded]), else "". A stale or waiting view leaves it unchanged; a new follow
- * resets it. Idempotent per view instance, so recompositions never repeat or lose a phrase.
- */
-private class LiveText {
-    private var game: GameId? = null
-    private var lastView: ScoreBugView? = null
-    private var prev: PowerPlay? = null
-    var text = ""
-        private set
-
-    fun next(v: ScoreBugView, goalDesc: String, res: Resources): String {
-        if (v === lastView) return text
-        lastView = v
-        val first = v.gameId != game
-        if (first) { game = v.gameId; prev = null; text = "" }
-        if (v.bottom is CentreText.Delayed || v.bottom is CentreText.NoUpdate) return text
-        val pp = v.powerPlay
-        val p = prev
-        val began = !first && pp != null && (p == null || p.side != pp.side || p.kind != pp.kind)
-        prev = pp
-        text = when {
-            v.goalSide != null -> goalDesc
-            began && pp != null -> res.getString(
-                if (pp.kind == PowerPlayKind.TWO_MAN) R.string.sports_live_pp_two_man else R.string.sports_live_pp,
-                (if (pp.side == Side.AWAY) v.away else v.home).name,
-            )
-            v.ppEnded -> res.getString(R.string.sports_live_pp_over)
-            else -> ""
-        }
-        return text
     }
 }
 

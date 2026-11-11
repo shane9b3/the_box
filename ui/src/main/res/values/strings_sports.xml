@@ -261,4 +261,30 @@
     <string name="sports_desc_nfl_goal">goal</string>
     <!-- The one-line Halftime state's description. -->
     <string name="sports_desc_halftime">%1$s %2$d, %3$s %4$d, halftime</string>
+
+    <!-- ==== Stacked style (docs/design/m6-score-bug-stacked-theme.md §1.1, §8, §10). Words: Score bug style, Style, Pill,
+         Stacked; never "theme". The bar and the clock column are upper case. -->
+    <!-- The clock column's lower slot: at 0:00 before the intermission, and in a power play carried into the intermission. -->
+    <string name="sports_stacked_end">END</string>
+    <string name="sports_stacked_int">INT</string>
+    <!-- The bar. %1$s = a period, upper case ("1ST", "OT", "2OT"). -->
+    <string name="sports_stacked_intermission">%1$s INTERMISSION</string>
+    <string name="sports_stacked_shootout">SHOOTOUT</string>
+    <string name="sports_stacked_no_update">NO UPDATE</string>
+    <string name="sports_stacked_delayed">DELAYED</string>
+    <!-- %1$s = the scoring team's abbreviation ("EDM"). -->
+    <string name="sports_stacked_pp_goal">%1$s POWER PLAY GOAL</string>
+    <!-- The shots-on-goal column's label. -->
+    <string name="sports_stacked_sog">SOG</string>
+    <!-- Joined to the state's description with ". " in code. %1$s/%3$s team names (away, home), %2$d/%4$d their shots. -->
+    <string name="sports_desc_sog">Shots on goal: %1$s %2$d, %3$s %4$d</string>
+    <!-- The quick bar sheet's row. %1$s = sports_style_pill or sports_style_stacked. -->
+    <string name="sports_picker_style">Style · %1$s</string>
+    <string name="sports_style_pill">Pill</string>
+    <string name="sports_style_stacked">Stacked</string>
+    <!-- Settings → Sports. Keys: SettingsText.SPORTS_STYLE* (ResourceSettingsTexts). -->
+    <string name="settings_sports_style">Score bug style</string>
+    <string name="settings_sports_style_desc">For hockey games. Stacked shows the teams one above the other, with shots on goal during power plays and breaks.</string>
+    <string name="settings_sports_style_pill">Pill</string>
+    <string name="settings_sports_style_stacked">Stacked</string>
 </resources>

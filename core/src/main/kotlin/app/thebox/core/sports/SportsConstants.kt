@@ -482,4 +482,198 @@ object SportsConstants {
     /** The longest word ("EXTRA POINT", 11 with the space) fits; the frame's letter arrays are this long. */
     const val NFL_LETTERS_MAX = 12
     const val NFL_ATLAS_SCALE = 1.5f
+
+    // ==== Stacked style (docs/design/m6-score-bug-stacked-theme.md §13; Stacked commit 0). Standard design px; Large is
+    // × SCORE_LARGE_SCALE (1.25) unless stated. Mock-px geometry is in [StackedMock]; × STACKED_SCALE gives design px.
+
+    // ---- data (§3.3)
+    /** `TeamLine.sog` is kept only in 0..SOG_MAX; anything else (or non-numeric) is null. */
+    const val SOG_MAX = 199
+
+    // ---- scale, footprint and raised texts (§4.1, §4.2, §4.3)
+    /** The mock-up × this = Standard design px (S5; owner Q1, the alternative is .50). */
+    const val STACKED_SCALE = 0.45f
+    /**
+     * The footprint (`ScoreBugPlacement.cornerBox` for STACKED): [STACKED_W_MAX] × ([STACKED_H] + [STACKED_BAR_H]) =
+     * 392 × 141 Standard; Large × 1.25 (490 × 176.25).
+     */
+    const val STACKED_W_MAX = 392f
+    /** The top part (two rows): 240 mock px. */
+    const val STACKED_H = 108f
+    /** The bar (S5: the mock's 40 / 66 text-to-bar proportion at 20-px text). */
+    const val STACKED_BAR_H = 33f
+    /** The drawn box's widths: the rows (540 mock), the SOG column (130), the clock column (200). */
+    const val STACKED_ROWS_W = 243f
+    const val STACKED_SOG_W = 58.5f
+    const val STACKED_CLOCK_W = 90f
+    /** Raised information text (S5): the bar text, the takeover tally, the SOG label. */
+    const val STACKED_BAR_TEXT_PX = 20f
+    const val STACKED_TALLY_PX = 20f
+    const val STACKED_SOG_LABEL_PX = 18f
+    /** The clock column's strings step down by this to [STACKED_FIT_MIN_PX], never below, no ellipsis (§4.2 fit rules). */
+    const val STACKED_FIT_STEP_PX = 2f
+    const val STACKED_FIT_MIN_PX = 18f
+    /** The takeover's badge, and the logo bitmap size requested from `FollowLogos` (S6). Large 84.375. */
+    const val STACKED_GOAL_LOGO = 67.5f
+    /** The takeover's side padding drops from 18 to this when the content has under [STACKED_TAKEOVER_SLACK_MIN] slack. */
+    const val STACKED_TAKEOVER_PAD_TIGHT = 8f
+    const val STACKED_TAKEOVER_SLACK_MIN = 18f
+    /** The row divider, the column inset lines and the bar hairline: 1 design px, not scaled. */
+    const val STACKED_HAIRLINE_W = 1f
+    /** The faux-italic fallback (§11, N2) if the italic face fails to load: Bold with this `textSkewX`. */
+    const val STACKED_FAUX_ITALIC_SKEW_X = -0.21f
+
+    // ---- colours (§5)
+    const val STACKED_ROW_BG = 0xFF12284F.toInt()
+    const val STACKED_COL_BG = 0xFF15191F.toInt()
+    const val STACKED_BORDER = 0xFF2B3550.toInt()
+    const val STACKED_INSET_LINE = 0xFF2B3240.toInt()
+    const val STACKED_RULE = 0xFF5B6170.toInt()
+    const val STACKED_SOG_LABEL = 0xFFC3C7D0.toInt()
+    const val STACKED_BAR_NEUTRAL = 0xFF1B2440.toInt()
+    /** White at this alpha: the row divider and the bar's hairline (S2: on every bar). */
+    const val STACKED_BAR_HAIRLINE_ALPHA = 0.22f
+    /** Dimmed text (stale, delayed): the clock column and the bar words. */
+    const val STACKED_DIM_ALPHA = 0.55f
+    /** Stripe ≥ 3.0 against the row navy (WCAG 1.4.11); bar stripes A and B ≥ 2.0 against their bar; A vs B ≥ 1.5. */
+    const val STACKED_STRIPE_MIN = 3.0
+    const val STACKED_BAR_STRIPE_MIN = 2.0
+    const val STACKED_BAR_AB_MIN = 1.5
+    /** Two stripes collide below this CIELAB ΔE76 (S3). */
+    const val STACKED_STRIPE_DE_MIN = 20.0
+    /** C7: white and the scorer's pop colour ≥ 3.0 on the row-flash blend; the peak α starts at .55, steps .05 down. */
+    const val STACKED_C7_MIN = 3.0
+    const val STACKED_ROW_FLASH_ALPHA = 0.55f
+    const val STACKED_ROW_FLASH_STEP = 0.05f
+    /** The still version's frame-B row tint: a fixed alpha of the scorer's flash colour (§7.3). */
+    const val STACKED_STILL_ROW_TINT = 0.25f
+    /** Bar stripe candidates: `mixBlack(tab, .5)` and `towardWhite(tab, .4)` (S2). */
+    const val STACKED_BAR_A_BLACK = 0.5
+    const val STACKED_BAR_B_WHITE = 0.4
+    /** The stripe lightening step toward white (5 %) and the PP bar background's `mixBlack(tab, .172)`. */
+    const val STACKED_STRIPE_WHITE_STEP = 0.05
+    const val STACKED_BAR_BG_BLACK = 0.172
+
+    // ---- shadow and glow (§6)
+    const val STACKED_SHADOW_DY = 5.4f
+    const val STACKED_SHADOW_SIGMA = 8.1f
+    const val STACKED_SHADOW_ALPHA = 0.55f
+    /** The nine-slice source square (≥ 6σ + 1); Large has its own (not × 1.25). */
+    const val STACKED_SHADOW_SRC = 50f
+    const val STACKED_SHADOW_SRC_LARGE = 62f
+    /** The exact-box glow bakes kept per size (LRU). */
+    const val STACKED_GLOW_CACHE = 2
+    /** Hard text shadows: the bar text (1 px), the logo badge (2.7 px), both black .25. */
+    const val STACKED_BAR_TEXT_SHADOW_DY = 1f
+    const val STACKED_BADGE_SHADOW_DY = 2.7f
+    const val STACKED_TEXT_SHADOW_ALPHA = 0.25f
+
+    // ---- layout transitions (§7.1; CSS transitions; ms)
+    const val STACKED_SOG_MS = 450L
+    const val STACKED_SOG_CLOSE_DELAY_MS = 350L
+    const val STACKED_SOG_IN_ALPHA_MS = 300L
+    const val STACKED_SOG_IN_MOVE_MS = 350L
+    const val STACKED_SOG_IN_DELAY_MS = 300L
+    const val STACKED_SOG_OUT_MS = 200L
+    /** The SOG contents' x offset when hidden (−12 mock). */
+    const val STACKED_SOG_DX = -5.4f
+    const val STACKED_CLOCK_MS = 450L
+    const val STACKED_CLOCK_OPEN_DELAY_MS = 350L
+    const val STACKED_CLOCK_OUT_MS = 150L
+    const val STACKED_CLOCK_IN_MS = 300L
+    const val STACKED_CLOCK_IN_DELAY_MS = 500L
+    const val STACKED_BAR_MS = 400L
+    const val STACKED_BAR_OPEN_DELAY_MS = 400L
+    const val STACKED_BAR_STRIPE_IN_MS = 450L
+    const val STACKED_BAR_STRIPE_A_DELAY_MS = 700L
+    const val STACKED_BAR_STRIPE_B_DELAY_MS = 780L
+    const val STACKED_BAR_STRIPE_OUT_MS = 300L
+    /** The bar stripes' travel when hidden (−140 mock), and their CSS skew. */
+    const val STACKED_BAR_STRIPE_TRAVEL = -63f
+    const val STACKED_BAR_SKEW_DEG = -30f
+    const val STACKED_BAR_TEXT_IN_ALPHA_MS = 350L
+    const val STACKED_BAR_TEXT_IN_MOVE_MS = 450L
+    const val STACKED_BAR_TEXT_DELAY_MS = 850L
+    const val STACKED_BAR_TEXT_OUT_MS = 150L
+    /** The bar text's x offset when hidden (−24 mock). */
+    const val STACKED_BAR_TEXT_DX = -10.8f
+    /** A bar **change** (§7.1): stripes and text out, background lerp and content swap at 300, stripes back at 300 / 380, text at 450. */
+    const val STACKED_BAR_CHANGE_OUT_MS = 300L
+    const val STACKED_BAR_CHANGE_STRIPE_A_DELAY_MS = 300L
+    const val STACKED_BAR_CHANGE_STRIPE_B_DELAY_MS = 380L
+    const val STACKED_BAR_CHANGE_TEXT_DELAY_MS = 450L
+    const val STACKED_BAR_CHANGE_MS = 900L
+    /** A bar **text swap** (§7.1, S10): text out 150, swap, text in 350 / 450; stripes and background untouched. */
+    const val STACKED_BAR_SWAP_OUT_MS = 150L
+    const val STACKED_BAR_SWAP_IN_ALPHA_MS = 350L
+    const val STACKED_BAR_SWAP_IN_MOVE_MS = 450L
+    const val STACKED_BAR_SWAP_MS = 600L
+    /** The row stripe's widen / narrow (3.6 ⇄ 6.3). */
+    const val STACKED_ROW_STRIPE_MS = 400L
+    /** The row flash after a goal (§7.2), from 3 600 ms; `GoalSpec.STACKED.rowFlashMs`. */
+    const val STACKED_ROW_FLASH_MS = 1_200L
+}
+
+/**
+ * (Stacked §4.2, §13) The mock-up's geometry in **mock px** (`design/nhl-stacked/Stacked.dc.html`, drawn at 870 × 240 + a
+ * 66 bar). Design px = mock px × [SportsConstants.STACKED_SCALE] (Large × 1.25 more), except where §4.2 raises or drops a
+ * value: the bar height ([SportsConstants.STACKED_BAR_H]), the bar text, tally and SOG label sizes, the 1-px lines (not
+ * scaled), the score slot (widened from 90 to [SCORE_SLOT_W]), the SOG label's rules (dropped) and the name line (dropped).
+ */
+object StackedMock {
+    const val TOP_H = 240f
+    const val ROW_W = 540f
+    const val ROW_H = 120f
+    /** The row stripe, and its power-play width. */
+    const val STRIPE_W = 8f
+    const val PP_STRIPE_W = 14f
+    /** The logo slot: margin-left, width; the logo's height. */
+    const val LOGO_ML = 22f
+    const val LOGO_SLOT_W = 112f
+    const val LOGO_H = 96f
+    /** The team code: padding-left, size (800 → Instrument Sans Bold). */
+    const val CODE_PL = 30f
+    const val CODE_PX = 60f
+    /** The score slot: width (the mock's 90 widened so "10" fits), margin-right, size. */
+    const val SCORE_SLOT_W = 102f
+    const val SCORE_MR = 34f
+    const val SCORE_PX = 78f
+    /** The SOG column, its digits, its label (19 → raised to 18 design px, letter-spacing .08 em). */
+    const val SOG_COL_W = 130f
+    const val SOG_DIGITS_PX = 54f
+    const val SOG_LABEL_PX = 19f
+    const val SOG_LABEL_TRACK_EM = 0.08f
+    /** The clock column, the period slot (height, bottom padding, size), the rule's side margin, the clock size. */
+    const val CLOCK_COL_W = 200f
+    const val PERIOD_SLOT_H = 112f
+    const val PERIOD_PAD_B = 14f
+    const val PERIOD_PX = 48f
+    const val RULE_MARGIN = 26f
+    const val CLOCK_PX = 64f
+    /** The bar (66 → [SportsConstants.STACKED_BAR_H] 33), its stripes, and its text. */
+    const val BAR_H = 66f
+    const val BAR_STRIPE_A_L = 46f
+    const val BAR_STRIPE_B_L = 84f
+    const val BAR_STRIPE_W = 26f
+    const val BAR_STRIPE_OVERHANG = 10f
+    const val BAR_STRIPE_TRAVEL = -140f
+    const val BAR_TEXT_PL = 140f
+    const val BAR_TEXT_GAP = 26f
+    const val BAR_TEXT_PX = 40f
+    /** The box's corner radius; its drop shadow (offset y, blur). */
+    const val BOX_RADIUS = 6f
+    const val SHADOW_DY = 12f
+    const val SHADOW_BLUR = 36f
+    /** The goal panel: padding, gap, badge size, GOAL size and tracking, the tally (30 → raised to 20 design px). */
+    const val GOAL_PAD = 40f
+    const val GOAL_GAP = 30f
+    const val GOAL_LOGO = 150f
+    const val GOAL_WORD_PX = 140f
+    const val GOAL_TRACK_EM = 0.04f
+    const val TALLY_PX = 30f
+    const val TALLY_LINE_GAP = 6f
+    /** The streaks: widths and overhang. */
+    const val STREAK1_W = 110f
+    const val STREAK2_W = 40f
+    const val STREAK_OVERHANG = 40f
 }

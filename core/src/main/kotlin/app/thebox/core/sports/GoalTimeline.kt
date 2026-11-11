@@ -54,7 +54,16 @@ class GoalFrame {
     var popScale = 1f
     var popMix = 1f
 
-    /** True once t ≥ the takeover plus the pop: the frame is the plain bug. */
+    /**
+     * (Stacked §7.2, S9) The scoring row's flash **envelope**, 0..1: 1 when the flash starts (t = 3 600), eased to 0 over
+     * [GoalSpec.rowFlashMs]; the still version's frame B writes 1 for its whole length. It is not an alpha on its own: the
+     * Stacked painter draws the scorer's row stripe colour over the row at α = `rowFlashAlpha × StackedColours.rowFlashAlpha`
+     * (the team's C7 peak) on the animated path, and at α = `rowFlashAlpha × SportsConstants.STACKED_STILL_ROW_TINT` on the
+     * still path (§7.3: "a fixed .25"). [GoalSpec.CLASSIC] writes 0 on every sample and still sample.
+     */
+    var rowFlashAlpha = 0f
+
+    /** True once t ≥ the takeover plus the pop (CLASSIC) or [GoalSpec.endMs]: the frame is the plain bug. */
     var done = false
 
     companion object {
@@ -107,6 +116,74 @@ internal class CubicBezier(x1: Float, y1: Float, x2: Float, y2: Float) {
         const val EPS = 1e-7
         const val NEWTON_STEPS = 8
         const val BISECT_STEPS = 60
+    }
+}
+
+/**
+ * (Stacked §7.2, S9) The numbers that differ between the Pill's takeover ([CLASSIC]) and the Stacked one ([STACKED]); the
+ * keyframe skeleton (the lead and panel wipes, the glow, the streak and letter starts, the flash cadence, the badge and
+ * tally starts) is shared and stays in [GoalTimeline]. Offsets are Standard design px of the bug the spec draws on (the
+ * 404-px pill for CLASSIC, the Stacked box for STACKED); times are ms from the takeover start, or lengths in ms.
+ *
+ * - [streak1Alpha] / [streak2Alpha]: the streaks' alphas (painter values; [GoalTimeline] does not read them).
+ * - [streakFrom] / [streakTo]: the streaks' left-edge travel; [flashAlpha]: the white flash's peak.
+ * - [badgeMs], [badgeMidScale], [badgeMidDeg]: the badge keyframes (the 450-ms start and the 70 % mid are shared).
+ * - [letterMs], [letterDrop], [letterOvershoot]: each GOAL letter (starts 420 + 80·i, mid at 60 %, × 1.9 → .94 shared).
+ * - [pulsePeak]: the word pulse; [tallySlide]: the tally's slide-in distance; [popFromScale]: the score pop's start.
+ * - [popMs]: the score pop's length from 3 600; [rowFlashMs]: the row flash's length from 3 600 (0 = none: CLASSIC).
+ * - [endMs]: when [GoalFrame.done] turns true on the animated path (CLASSIC 4 500, STACKED 4 800).
+ * - [stillFrameBMs]: the still version's frame B length from 3 600 ([GoalTimeline.sampleStill] is done at 3 600 + it).
+ *
+ * **[CLASSIC] holds exactly the values `GoalTimeline` used at `87e22d4`**; its samples are bit-identical to the pre-spec
+ * timeline (`GoalSpecTest` with `LegacyGoalTimeline`, Stacked WP-1). [STACKED] is a placeholder equal to [CLASSIC] until
+ * Stacked WP-1 fills in the §7.2 values (streaks .55 / .30 and −90 → 450, flash .40, badge 600 / 1.1 / 6°, letters
+ * 450 / 27 / −2.25, pulse 1.06, tally 16.2, pop × 1.5, pop 900, row flash 1 200, end 4 800, still frame B 1 200).
+ */
+data class GoalSpec(
+    val streak1Alpha: Float,
+    val streak2Alpha: Float,
+    val streakFrom: Float,
+    val streakTo: Float,
+    val flashAlpha: Float,
+    val badgeMs: Float,
+    val badgeMidScale: Float,
+    val badgeMidDeg: Float,
+    val letterMs: Float,
+    val letterDrop: Float,
+    val letterOvershoot: Float,
+    val pulsePeak: Float,
+    val tallySlide: Float,
+    val popFromScale: Float,
+    val popMs: Float,
+    val rowFlashMs: Float,
+    val endMs: Float,
+    val stillFrameBMs: Float,
+) {
+    companion object {
+        /** The Pill's takeover: today's constants, unchanged. */
+        val CLASSIC = GoalSpec(
+            streak1Alpha = SportsConstants.GOAL_STREAK1_ALPHA,
+            streak2Alpha = SportsConstants.GOAL_STREAK2_ALPHA,
+            streakFrom = GoalTimeline.STREAK_FROM,
+            streakTo = GoalTimeline.STREAK_TO,
+            flashAlpha = SportsConstants.GOAL_FLASH_ALPHA,
+            badgeMs = GoalTimeline.BADGE_MS,
+            badgeMidScale = GoalTimeline.BADGE_MID_SCALE,
+            badgeMidDeg = GoalTimeline.BADGE_MID_DEG,
+            letterMs = GoalTimeline.LETTER_MS,
+            letterDrop = SportsConstants.GOAL_LETTER_DROP,
+            letterOvershoot = SportsConstants.GOAL_LETTER_OVERSHOOT,
+            pulsePeak = GoalTimeline.PULSE_PEAK,
+            tallySlide = SportsConstants.GOAL_TALLY_SLIDE,
+            popFromScale = GoalTimeline.POP_FROM_SCALE,
+            popMs = GoalTimeline.POP_MS,
+            rowFlashMs = 0f,
+            endMs = GoalTimeline.END,
+            stillFrameBMs = GoalTimeline.POP_MS,
+        )
+
+        /** The Stacked takeover (§7.2). Placeholder equal to [CLASSIC] until Stacked WP-1 sets its values. */
+        val STACKED: GoalSpec = CLASSIC.copy()
     }
 }
 
@@ -194,8 +271,11 @@ object GoalTimeline {
     /** 0 → 1 → 0 over one cycle, each half eased on its own (`0 %, 100 % {0} 50 % {1}`). */
     private fun upDown(p: Float): Float = if (p < 0.5f) EASE_IN_OUT.ease(p * 2f) else 1f - EASE_IN_OUT.ease(p * 2f - 1f)
 
-    /** Fills [out] for [tMs] since the takeover start and returns it. */
-    fun sample(tMs: Float, out: GoalFrame): GoalFrame {
+    /** Fills [out] for [tMs] since the takeover start and returns it: [sample] under [GoalSpec.CLASSIC] (the Pill). */
+    fun sample(tMs: Float, out: GoalFrame): GoalFrame = sample(GoalSpec.CLASSIC, tMs, out)
+
+    /** (Stacked §7.2, S9) Fills [out] for [tMs] since the takeover start under [spec] and returns it. Allocation-free. */
+    fun sample(spec: GoalSpec, tMs: Float, out: GoalFrame): GoalFrame {
         val t = if (tMs.isNaN() || tMs < 0f) 0f else tMs
 
         // Lead (gLead, fill both): entering [0, w·p], full, leaving [w·p, w]; both wipe left to right.
@@ -238,33 +318,33 @@ object GoalTimeline {
         }
         // Streaks (gStreak, fill both; the filled states sit off the pill, so they are drawn only while running).
         out.streak1On = t >= STREAK1_START && t <= STREAK1_START + STREAK1_MS
-        out.streak1X = lerp(STREAK_FROM, STREAK_TO, STREAK.ease((t - STREAK1_START) / STREAK1_MS))
+        out.streak1X = lerp(spec.streakFrom, spec.streakTo, STREAK.ease((t - STREAK1_START) / STREAK1_MS))
         out.streak2On = t >= STREAK2_START && t <= STREAK2_START + STREAK2_MS
-        out.streak2X = lerp(STREAK_FROM, STREAK_TO, STREAK.ease((t - STREAK2_START) / STREAK2_MS))
+        out.streak2X = lerp(spec.streakFrom, spec.streakTo, STREAK.ease((t - STREAK2_START) / STREAK2_MS))
         // Flash (gFlash, no fill): GOAL_FLASH_CYCLES × (0 → .45 → 0).
         out.flashAlpha = if (t >= FLASH_START && t < FLASH_END) {
-            SportsConstants.GOAL_FLASH_ALPHA * upDown(((t - FLASH_START) % FLASH_CYCLE) / FLASH_CYCLE)
+            spec.flashAlpha * upDown(((t - FLASH_START) % FLASH_CYCLE) / FLASH_CYCLE)
         } else {
             0f
         }
         // Badge (gBadge, fill both): 0 % α 0 ×.3 −120° → 70 % α 1 ×1.12 +8° → rest.
-        val bp = ((t - BADGE_START) / BADGE_MS).coerceIn(0f, 1f)
+        val bp = ((t - BADGE_START) / spec.badgeMs).coerceIn(0f, 1f)
         if (bp < BADGE_MID) {
             val q = SPRING.ease(bp / BADGE_MID)
             out.badgeAlpha = q
-            out.badgeScale = lerp(BADGE_FROM_SCALE, BADGE_MID_SCALE, q)
-            out.badgeRotDeg = lerp(BADGE_FROM_DEG, BADGE_MID_DEG, q)
+            out.badgeScale = lerp(BADGE_FROM_SCALE, spec.badgeMidScale, q)
+            out.badgeRotDeg = lerp(BADGE_FROM_DEG, spec.badgeMidDeg, q)
         } else {
             val q = SPRING.ease((bp - BADGE_MID) / (1f - BADGE_MID))
             out.badgeAlpha = 1f
-            out.badgeScale = lerp(BADGE_MID_SCALE, 1f, q)
-            out.badgeRotDeg = lerp(BADGE_MID_DEG, 0f, q)
+            out.badgeScale = lerp(spec.badgeMidScale, 1f, q)
+            out.badgeRotDeg = lerp(spec.badgeMidDeg, 0f, q)
         }
         // Letters (gLetter, fill both, staggered): 0 % α 0 dy+drop ×1.9 → 60 % α 1 dy overshoot ×.94 → rest.
-        val drop = SportsConstants.GOAL_LETTER_DROP
-        val over = SportsConstants.GOAL_LETTER_OVERSHOOT
+        val drop = spec.letterDrop
+        val over = spec.letterOvershoot
         for (i in 0 until GoalFrame.LETTERS) {
-            val p = ((t - letterDelay(i)) / LETTER_MS).coerceIn(0f, 1f)
+            val p = ((t - letterDelay(i)) / spec.letterMs).coerceIn(0f, 1f)
             if (p < LETTER_MID) {
                 val q = SPRING.ease(p / LETTER_MID)
                 out.letterAlpha[i] = q
@@ -279,57 +359,69 @@ object GoalTimeline {
         }
         // Pulse (gWord, no fill): PULSE_CYCLES × (1 → 1.07 → 1).
         out.wordPulse = if (t >= PULSE_START && t < PULSE_END) {
-            1f + (PULSE_PEAK - 1f) * upDown(((t - PULSE_START) % PULSE_CYCLE_MS) / PULSE_CYCLE_MS)
+            1f + (spec.pulsePeak - 1f) * upDown(((t - PULSE_START) % PULSE_CYCLE_MS) / PULSE_CYCLE_MS)
         } else {
             1f
         }
         // Tally (gSlideR, fill both): α 0, dx +slide → rest.
         val tq = SPRING.ease((t - TALLY_START) / TALLY_MS)
         out.tallyAlpha = tq
-        out.tallyDx = SportsConstants.GOAL_TALLY_SLIDE * (1f - tq)
+        out.tallyDx = spec.tallySlide * (1f - tq)
         // Pop: its first state from the panel's exit (hidden under the lead until the lead leaves, §6.2 "pop reveal"),
         // then gPop over GOAL_POP_MS. The colour has only the 0 % / 100 % keyframes, so it is eased once over the pop.
         when {
             t < PANEL_OUT_START -> { out.popOn = false; out.popScale = 1f; out.popMix = 1f }
-            t < TAKEOVER -> { out.popOn = true; out.popScale = POP_FROM_SCALE; out.popMix = 0f }
-            t < END -> {
-                val p = (t - TAKEOVER) / POP_MS
+            t < TAKEOVER -> { out.popOn = true; out.popScale = spec.popFromScale; out.popMix = 0f }
+            t < TAKEOVER + spec.popMs -> {
+                val p = (t - TAKEOVER) / spec.popMs
                 out.popOn = true
                 out.popMix = SPRING.ease(p)
                 out.popScale = when {
-                    p < POP_K1 -> lerp(POP_FROM_SCALE, POP_K1_SCALE, SPRING.ease(p / POP_K1))
+                    p < POP_K1 -> lerp(spec.popFromScale, POP_K1_SCALE, SPRING.ease(p / POP_K1))
                     p < POP_K2 -> lerp(POP_K1_SCALE, POP_K2_SCALE, SPRING.ease((p - POP_K1) / (POP_K2 - POP_K1)))
                     else -> lerp(POP_K2_SCALE, 1f, SPRING.ease((p - POP_K2) / (1f - POP_K2)))
                 }
             }
             else -> { out.popOn = false; out.popScale = 1f; out.popMix = 1f }
         }
-        out.done = t >= END
+        // (Stacked §7.2) The row flash: CLASSIC (rowFlashMs 0) writes 0, never leaves the field as it was. The STACKED
+        // envelope (1 → 0 over rowFlashMs from 3 600, ease-out) is Stacked WP-1's.
+        out.rowFlashAlpha = 0f
+        out.done = t >= spec.endMs
         return out
     }
 
     /**
      * The still version (§7) for [tMs]: frame A (0..3 600, the panel at rest: base, badge, GOAL, tally; no lead,
      * streaks, flash, pulse or glow), frame B (3 600..4 500, the plain bug with the scorer's digit in `pop` at × 1),
-     * then the plain bug ([GoalFrame.done]).
+     * then the plain bug ([GoalFrame.done]): [sampleStill] under [GoalSpec.CLASSIC] (the Pill).
      */
-    fun sampleStill(tMs: Float, out: GoalFrame): GoalFrame {
+    fun sampleStill(tMs: Float, out: GoalFrame): GoalFrame = sampleStill(GoalSpec.CLASSIC, tMs, out)
+
+    /**
+     * (Stacked §7.3, S9) The still version under [spec]: frame A (0..3 600), frame B (3 600 .. 3 600 +
+     * [GoalSpec.stillFrameBMs]), then the plain bug ([GoalFrame.done]). Allocation-free.
+     */
+    fun sampleStill(spec: GoalSpec, tMs: Float, out: GoalFrame): GoalFrame {
         val t = if (tMs.isNaN() || tMs < 0f) 0f else tMs
         val a = t < TAKEOVER
+        val bEnd = TAKEOVER + spec.stillFrameBMs
         out.leadFrom = 0f; out.leadTo = 0f
         out.panelFrom = if (a) 0f else 1f; out.panelTo = 1f
         out.glowLowAlpha = 0f; out.glowPeakAlpha = 0f
-        out.streak1On = false; out.streak1X = STREAK_FROM
-        out.streak2On = false; out.streak2X = STREAK_FROM
+        out.streak1On = false; out.streak1X = spec.streakFrom
+        out.streak2On = false; out.streak2X = spec.streakFrom
         out.flashAlpha = 0f
         out.badgeAlpha = 1f; out.badgeScale = 1f; out.badgeRotDeg = 0f
         for (i in 0 until GoalFrame.LETTERS) { out.letterAlpha[i] = 1f; out.letterDy[i] = 0f; out.letterScale[i] = 1f }
         out.wordPulse = 1f
         out.tallyAlpha = 1f; out.tallyDx = 0f
-        out.popOn = !a && t < END
+        out.popOn = !a && t < bEnd
         out.popScale = 1f
         out.popMix = if (out.popOn) 0f else 1f
-        out.done = t >= END
+        // (Stacked §7.3) Frame B's row tint: CLASSIC writes 0; STACKED's 1 during frame B is Stacked WP-1's.
+        out.rowFlashAlpha = 0f
+        out.done = t >= bEnd
         return out
     }
 }

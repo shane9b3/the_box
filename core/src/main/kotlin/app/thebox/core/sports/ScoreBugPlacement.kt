@@ -18,10 +18,10 @@ object ScoreBugPlacement {
 
     fun place(input: PlacementInput, geo: OverlayGeometry): Box? {
         if (input.screenOff || input.modal) return null
-        if (input.placing) return cornerBox(input.corner, input.size, input.league)
+        if (input.placing) return cornerBox(input.corner, input.size, input.league, input.style)
 
         val corner = if (input.textTrackOn) toTop(input.corner) else input.corner
-        var box = cornerBox(corner, input.size, input.league)
+        var box = cornerBox(corner, input.size, input.league, input.style)
 
         if (isBottom(corner)) {
             when (input.bar) {
@@ -140,6 +140,43 @@ object ScoreBugPlacement {
 
     fun height(size: ScoreBugSize): Float =
         if (size == ScoreBugSize.LARGE) SportsConstants.SCORE_LARGE_H else SportsConstants.SCORE_H
+
+    /**
+     * (Stacked §4.3, contract fixed in Stacked commit 0) The resting box of [corner] at [size] for [league] and [style]:
+     * for an NHL [NhlBugStyle.STACKED] bug it is the **footprint** (the largest the box can be, bar included), placed at
+     * the corner exactly as the pill is (right corners at `1920 − 96 − w`, bottom corners at `1080 − 56 − h`). [style] is
+     * ignored for the NFL. Every [place] rule runs on this box.
+     */
+    fun cornerBox(corner: ScoreCorner, size: ScoreBugSize, league: League, style: NhlBugStyle): Box {
+        val w = width(size, league, style)
+        val h = height(size, league, style)
+        val l = if (isLeft(corner)) SportsConstants.SCORE_INSET_X else SCREEN_W - SportsConstants.SCORE_INSET_X - w
+        val t = if (isBottom(corner)) SCREEN_H - SportsConstants.SCORE_INSET_Y - h else SportsConstants.SCORE_INSET_Y
+        return Box(l, t, l + w, t + h)
+    }
+
+    /**
+     * (Stacked §4.3; Stacked WP-1) The placed box's width for [league] and [style]. NFL and Pill: [width] (`size`,
+     * `league`), unchanged. NHL Stacked: the footprint width, `STACKED_W_MAX` (392), Large × `SCORE_LARGE_SCALE` (490).
+     *
+     * **Commit-0 stub:** the Pill's width for every style.
+     */
+    fun width(size: ScoreBugSize, league: League, style: NhlBugStyle): Float = when {
+        league != League.NHL || style == NhlBugStyle.PILL -> width(size, league)
+        else -> width(size, league) // Stacked WP-1: the footprint width
+    }
+
+    /**
+     * (Stacked §4.3; Stacked WP-1) The placed box's height for [league] and [style]. NFL and Pill: [height] (`size`),
+     * unchanged. NHL Stacked: the footprint height, `STACKED_H + STACKED_BAR_H` (141), Large × `SCORE_LARGE_SCALE`
+     * (176.25).
+     *
+     * **Commit-0 stub:** the Pill's height for every style.
+     */
+    fun height(size: ScoreBugSize, league: League, style: NhlBugStyle): Float = when {
+        league != League.NHL || style == NhlBugStyle.PILL -> height(size)
+        else -> height(size) // Stacked WP-1: the footprint height
+    }
 
     private fun above(box: Box, barTop: Float): Box {
         val bottom = barTop - SportsConstants.SCORE_BAR_GAP

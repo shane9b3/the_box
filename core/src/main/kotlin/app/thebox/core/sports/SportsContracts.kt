@@ -1,6 +1,6 @@
 // Contract (score bug commit 0): docs/design/m6-score-bug.md §1.1, §2.3, §2.6, §2.7, §4.4, §4.5, §6; power-play commit 0:
-// docs/design/m6-power-play.md §1.3; NFL commit 0: docs/design/m6-nfl.md §2. Changes go through the lead; every enum
-// here is append-only.
+// docs/design/m6-power-play.md §1.3; NFL commit 0: docs/design/m6-nfl.md §2; Stacked commit 0:
+// docs/design/m6-score-bug-stacked-theme.md §1.3, §2.1, §3.3. Changes go through the lead; every enum here is append-only.
 package app.thebox.core.sports
 
 import kotlinx.coroutines.flow.Flow
@@ -32,6 +32,12 @@ data class TeamLine(
     val logo: String?,
     /** (NFL §1.3, S5) The short name ("Chiefs", "Commanders") for the cards, the live region and `Describe`; always null for the NHL. */
     val shortName: String? = null,
+    /**
+     * (Stacked §3.3) Shots on goal: the feed's `sog` (regulation + overtime; shootout attempts are not counted), kept only
+     * in `0..SportsConstants.SOG_MAX`, else null. Null for the NFL (`EspnMapper`) and before puck drop (absent on FUT /
+     * PRE). Set by `NhlMapper.team()` (Stacked WP-1). The Pill ignores it.
+     */
+    val sog: Int? = null,
 )
 
 /** [secondsRemaining] in the period; it counts down in intermission too (facts §4). */
@@ -344,6 +350,13 @@ data class ScoreBugView(
     val league: League = League.NHL,
     /** (NFL §3.1) Set on `view()` only, and only for an NFL game; its fields are gated by NFL §3.4. */
     val nfl: NflView? = null,
+    /**
+     * (Stacked §2.1, B1) The shown snapshot's period label on the NHL path of `ScoreBugMachine.view()`, whatever the state:
+     * kept in stale and waiting views, where [bottom] is overwritten with [CentreText.NoUpdate] / [CentreText.Delayed].
+     * `PeriodLabel(SO, 1)` in the shootout; the final game's last label at FINAL. Null for the NFL, `knownView()`'s own
+     * fallback and the place-mode sample. Changes only when the period changes. The Pill ignores it.
+     */
+    val period: PeriodLabel? = null,
 )
 
 /**
@@ -410,6 +423,16 @@ enum class ScoreCorner { TOP_RIGHT, TOP_LEFT, BOTTOM_RIGHT, BOTTOM_LEFT }
 @Serializable
 enum class ScoreBugSize { STANDARD, LARGE }
 
+/**
+ * (Stacked §1, §1.3) The NHL score bug's look ("Score bug style"): [PILL] (today's bug, the default) or [STACKED] (the
+ * teams one above the other, docs/design/m6-score-bug-stacked-theme.md). Persisted by name in `SportsPrefs.nhlStyle`;
+ * append-only. A plain `@Serializable` enum: an unknown name in a stored or restored document decodes to the property's
+ * default through the settings store's `coerceInputValues` (S7). NHL only: an NFL game draws the NFL bug whatever the
+ * style (§9).
+ */
+@Serializable
+enum class NhlBugStyle { PILL, STACKED }
+
 /** NONE | PASSIVE_INFO (after a zap, `InfoBarState.active == false`) | USER_BAR (active info bar, scrub bar) | QUICK. */
 enum class BottomBar { NONE, PASSIVE_INFO, USER_BAR, QUICK }
 
@@ -444,6 +467,12 @@ data class PlacementInput(
     val screenOff: Boolean,
     /** (NFL §4.4, §4.6) The followed (or shown) league; set by `FullScreenHost` from the follow, else the prefs. */
     val league: League = League.NHL,
+    /**
+     * (Stacked §2.1, §4.3) The NHL bug's style; set by `FullScreenHost.scorePlacementInput` from `SportsPrefs.nhlStyle`,
+     * and forced to [NhlBugStyle.PILL] by `ScoreBug(...)` whenever the drawn league is the NFL. [ScoreBugPlacement] sizes
+     * the box with it (the Stacked footprint); ignored for the NFL.
+     */
+    val style: NhlBugStyle = NhlBugStyle.PILL,
 )
 
 /** What `AppRoot` knows and `FullScreenHost` does not (A-B2): a toast, the reminder card, a modal (exit dialog, PIN pad). */
@@ -466,6 +495,11 @@ data class ScoreFacts(
     val enabled: Boolean = true,
     /** (NFL WP-5 amendment, §7.1) The shown league (`SportsPrefs.league`); null = not reported, and the picker has no League row. */
     val league: League? = null,
+    /**
+     * (Stacked §1.1, §1.3, S8) `SportsPrefs.nhlStyle`, filled by `PlayerViewModel` (Stacked WP-4). Null = not reported:
+     * the sheet has no Style row. The Style row's gating on the followed game's league is WP-4's (§1.1).
+     */
+    val style: NhlBugStyle? = null,
 )
 
 /** `PlayerUiState.placeScore` while `PlayerLayer.PLACE_SCORE` (§6, U-B1). [sample]: no followed game, draw the sample bug. */
