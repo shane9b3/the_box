@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.transformWhile
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
+import app.thebox.core.settings.Visibility
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -113,7 +114,8 @@ class DiagPagesTest {
         updater.state.value = app.thebox.core.update.UpdateState.NotInstalled("0.1.5")
         pages.onIntent(RowIntent.Run(AboutRows.UPDATE), scope) {}
         assertEquals(listOf("install"), updater.calls)
-        assertEquals("Press OK to install version 0.1.5.", pages.updateDesc(updater.state.value))
+        // The check row points down to Install update (2026-11-11); OK on it still installs.
+        assertEquals("Version 0.1.5 is ready. Choose Install update below.", pages.updateDesc(updater.state.value))
         assertEquals("0.1.5 not installed · OK to try again", pages.updateValue(updater.state.value))
         assertTrue(pages.page(SettingsRoute.Section(SectionId.ABOUT)).first().rows.single { it.id == AboutRows.UPDATE }.enabled)
         updater.state.value = app.thebox.core.update.UpdateState.Verifying("0.1.5")
@@ -122,6 +124,70 @@ class DiagPagesTest {
         // Review N4: a failed install is not a failed check.
         assertEquals("The update failed · OK to try again", pages.updateValue(app.thebox.core.update.UpdateState.Failed(app.thebox.core.update.UpdateFailure.INSTALL_FAILED, null)))
         assertTrue(pages.updateValue(app.thebox.core.update.UpdateState.Failed(app.thebox.core.update.UpdateFailure.NETWORK, null)).startsWith("Last check failed"))
+    }
+
+    private fun offer() = app.thebox.core.update.UpdateState.Available(
+        app.thebox.core.update.UpdateManifest(1, 5, "app.thebox", "stable", 5, "1.4.0", 25, "", "Fixes", emptyList(), listOf("A")),
+        app.thebox.core.update.ApkEntry("universal", "https://x/a.apk", 10, "0".repeat(64)),
+    )
+
+    private suspend fun aboutRows(state: app.thebox.core.update.UpdateState): List<app.thebox.core.settings.SettingsRow> {
+        updater.state.value = state
+        return pages.page(SettingsRoute.Section(SectionId.ABOUT)).first().rows
+    }
+
+    @Test
+    fun installRowIsAbsentUnlessAReleaseIsOnOffer() = runTest {
+                for (s in listOf(app.thebox.core.update.UpdateState.Idle, app.thebox.core.update.UpdateState.Checking, app.thebox.core.update.UpdateState.UpToDate(0), app.thebox.core.update.UpdateState.Failed(app.thebox.core.update.UpdateFailure.NETWORK, null), app.thebox.core.update.UpdateState.Failed(app.thebox.core.update.UpdateFailure.HASH_MISMATCH, null))) {
+            assertTrue("absent in $s", aboutRows(s).none { it.id == AboutRows.INSTALL })
+        }
+        for (s in listOf(offer(), app.thebox.core.update.UpdateState.Downloading("1.4.0", 4, 10), app.thebox.core.update.UpdateState.Verifying("1.4.0"), app.thebox.core.update.UpdateState.NeedsPermission("1.4.0"), app.thebox.core.update.UpdateState.ReadyToInstall("1.4.0"), app.thebox.core.update.UpdateState.Installing, app.thebox.core.update.UpdateState.NotInstalled("1.4.0"))) {
+            val rows = aboutRows(s)
+            val i = rows.indexOfFirst { it.id == AboutRows.UPDATE }
+            assertEquals("directly below the check row in $s", AboutRows.INSTALL, rows[i + 1].id)
+            assertEquals("Install update", rows[i + 1].label)
+            assertTrue(rows[i + 1].kind is RowKind.Action)
+            assertEquals(Visibility.SIMPLE, rows[i + 1].visibility)
+        }
+    }
+
+    @Test
+    fun aFailureAsksForFocusOnTheCheckRow() = runTest {
+        val about = SettingsRoute.Section(SectionId.ABOUT)
+        updater.state.value = offer()
+        assertEquals(null, pages.page(about).first().focus)
+        updater.state.value = app.thebox.core.update.UpdateState.Failed(app.thebox.core.update.UpdateFailure.NETWORK, null)
+        assertEquals(AboutRows.UPDATE, pages.page(about).first().focus)
+    }
+
+    @Test
+    fun installRowTextsAndEnabledPerState() = runTest {
+                fun row(s: app.thebox.core.update.UpdateState) = pages.installRow(s)!!
+        assertEquals("1.4.0", row(offer()).value)
+        assertEquals("Downloads version 1.4.0 and installs it.", row(offer()).description)
+        assertEquals("Downloading 40 %", row(app.thebox.core.update.UpdateState.Downloading("1.4.0", 4, 10)).value)
+        assertEquals("Checking the download…", row(app.thebox.core.update.UpdateState.Verifying("1.4.0")).value)
+        assertEquals("Installing…", row(app.thebox.core.update.UpdateState.Installing).value)
+        assertEquals("1.4.0", row(app.thebox.core.update.UpdateState.ReadyToInstall("1.4.0")).value)
+        assertEquals("Version 1.4.0 is downloaded. Press OK to install.", row(app.thebox.core.update.UpdateState.ReadyToInstall("1.4.0")).description)
+        assertTrue(row(app.thebox.core.update.UpdateState.NeedsPermission("1.4.0")).description!!.contains("allow"))
+        assertEquals("Version 1.4.0 was not installed. Press OK to try again.", row(app.thebox.core.update.UpdateState.NotInstalled("1.4.0")).description)
+        for (s in listOf(offer(), app.thebox.core.update.UpdateState.NeedsPermission("1.4.0"), app.thebox.core.update.UpdateState.ReadyToInstall("1.4.0"), app.thebox.core.update.UpdateState.NotInstalled("1.4.0"))) assertTrue("enabled in $s", row(s).enabled)
+        for (s in listOf(app.thebox.core.update.UpdateState.Downloading("1.4.0", 4, 10), app.thebox.core.update.UpdateState.Verifying("1.4.0"), app.thebox.core.update.UpdateState.Installing)) assertFalse("disabled in $s", row(s).enabled)
+        // The check row keeps its value and points down.
+        val check = aboutRows(offer()).single { it.id == AboutRows.UPDATE }
+        assertEquals("1.4.0 available", check.value)
+        assertEquals("Version 1.4.0 is available. Choose Install update below.", check.description)
+    }
+
+    @Test
+    fun installRowOkDownloadsOrInstalls() = runTest {
+        val scope = TestScope(UnconfinedTestDispatcher(testScheduler))
+                for (s in listOf(offer(), app.thebox.core.update.UpdateState.ReadyToInstall("1.4.0"), app.thebox.core.update.UpdateState.NeedsPermission("1.4.0"), app.thebox.core.update.UpdateState.NotInstalled("1.4.0"))) {
+            updater.state.value = s
+            assertTrue(pages.onIntent(RowIntent.Run(AboutRows.INSTALL), scope) {})
+        }
+        assertEquals(listOf("download", "install", "install", "install"), updater.calls)
     }
 
     @Test
