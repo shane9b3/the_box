@@ -135,9 +135,8 @@ internal class CubicBezier(x1: Float, y1: Float, x2: Float, y2: Float) {
  * - [stillFrameBMs]: the still version's frame B length from 3 600 ([GoalTimeline.sampleStill] is done at 3 600 + it).
  *
  * **[CLASSIC] holds exactly the values `GoalTimeline` used at `87e22d4`**; its samples are bit-identical to the pre-spec
- * timeline (`GoalSpecTest` with `LegacyGoalTimeline`, Stacked WP-1). [STACKED] is a placeholder equal to [CLASSIC] until
- * Stacked WP-1 fills in the §7.2 values (streaks .55 / .30 and −90 → 450, flash .40, badge 600 / 1.1 / 6°, letters
- * 450 / 27 / −2.25, pulse 1.06, tally 16.2, pop × 1.5, pop 900, row flash 1 200, end 4 800, still frame B 1 200).
+ * timeline (`GoalSpecTest` with `LegacyGoalTimeline`). [STACKED] holds the §7.2 values: the mock-up's (`Stacked.dc.html`,
+ * the `s*` keyframes) at `STACKED_SCALE` .45 for the offsets, with the flash ruling's 3 × 400 ms cadence kept.
  */
 data class GoalSpec(
     val streak1Alpha: Float,
@@ -182,8 +181,31 @@ data class GoalSpec(
             stillFrameBMs = GoalTimeline.POP_MS,
         )
 
-        /** The Stacked takeover (§7.2). Placeholder equal to [CLASSIC] until Stacked WP-1 sets its values. */
-        val STACKED: GoalSpec = CLASSIC.copy()
+        /**
+         * The Stacked takeover (§7.2): mock px × `STACKED_SCALE` (.45) for every offset; the times are the mock's. The
+         * shared skeleton (wipes, glow, streak / letter / badge / tally / pulse starts, the 3 × 400 ms flash) is
+         * [GoalTimeline]'s.
+         */
+        val STACKED: GoalSpec = GoalSpec(
+            streak1Alpha = 0.55f,                                   // .s-streak, accent .55
+            streak2Alpha = 0.30f,                                   // .s-streak2, white .30
+            streakFrom = -200f * SportsConstants.STACKED_SCALE,     // sStreak translateX(-200px) → −90
+            streakTo = 1_000f * SportsConstants.STACKED_SCALE,      // → 1000px → 450
+            flashAlpha = 0.40f,                                     // sFlash 50 % {.4} (cadence: the flash ruling)
+            badgeMs = 600f,                                         // .s-logo .6s
+            badgeMidScale = 1.1f,                                   // sLogo 70 % scale(1.1)
+            badgeMidDeg = 6f,                                       // sLogo 70 % rotate(6deg)
+            letterMs = 450f,                                        // .s-letter .45s
+            letterDrop = 60f * SportsConstants.STACKED_SCALE,       // sLetter translateY(60px) → 27
+            letterOvershoot = -5f * SportsConstants.STACKED_SCALE,  // sLetter 60 % translateY(-5px) → −2.25
+            pulsePeak = 1.06f,                                      // sWord 50 % scale(1.06)
+            tallySlide = 36f * SportsConstants.STACKED_SCALE,       // sSlideR translateX(36px) → 16.2
+            popFromScale = 1.5f,                                    // sPop* 0 % scale(1.5)
+            popMs = SportsConstants.GOAL_POP_MS.toFloat(),          // .score.pop-* .9s
+            rowFlashMs = SportsConstants.STACKED_ROW_FLASH_MS.toFloat(), // .row.flash-* 1.2s ease-out
+            endMs = SportsConstants.GOAL_TAKEOVER_MS + SportsConstants.STACKED_ROW_FLASH_MS.toFloat(), // the mock's 4 800 idle
+            stillFrameBMs = SportsConstants.STACKED_ROW_FLASH_MS.toFloat(),
+        )
     }
 }
 
@@ -205,6 +227,8 @@ object GoalTimeline {
     internal val STREAK = CubicBezier(0.4f, 0f, 0.2f, 1f)
     /** `cubic-bezier(.2,.8,.2,1)`: the letters, the badge, the tally, the pop. */
     internal val SPRING = CubicBezier(0.2f, 0.8f, 0.2f, 1f)
+    /** (Stacked §7.2) CSS `ease-out` = `cubic-bezier(0,0,.58,1)`: the row flash (`.row.flash-*`). */
+    internal val EASE_OUT = CubicBezier(0f, 0f, 0.58f, 1f)
 
     // ---- keyframe instants, ms from the takeover start (CSS percentages of the 3.6 s wipes in the comments)
     internal const val LEAD_IN_END = 216f          // gLead 6 %
@@ -384,9 +408,13 @@ object GoalTimeline {
             }
             else -> { out.popOn = false; out.popScale = 1f; out.popMix = 1f }
         }
-        // (Stacked §7.2) The row flash: CLASSIC (rowFlashMs 0) writes 0, never leaves the field as it was. The STACKED
-        // envelope (1 → 0 over rowFlashMs from 3 600, ease-out) is Stacked WP-1's.
-        out.rowFlashAlpha = 0f
+        // (Stacked §7.2) The row flash (sRow*, ease-out, from 3 600): the envelope 1 → 0 over rowFlashMs; 0 before and
+        // after. CLASSIC (rowFlashMs 0) writes 0, never leaves the field as it was.
+        out.rowFlashAlpha = if (spec.rowFlashMs > 0f && t >= TAKEOVER && t < TAKEOVER + spec.rowFlashMs) {
+            1f - EASE_OUT.ease((t - TAKEOVER) / spec.rowFlashMs)
+        } else {
+            0f
+        }
         out.done = t >= spec.endMs
         return out
     }
@@ -419,8 +447,9 @@ object GoalTimeline {
         out.popOn = !a && t < bEnd
         out.popScale = 1f
         out.popMix = if (out.popOn) 0f else 1f
-        // (Stacked §7.3) Frame B's row tint: CLASSIC writes 0; STACKED's 1 during frame B is Stacked WP-1's.
-        out.rowFlashAlpha = 0f
+        // (Stacked §7.3) Frame B's row tint: the envelope is 1 for the whole of frame B when the spec has a row flash
+        // (the painter draws it at STACKED_STILL_ROW_TINT); CLASSIC writes 0.
+        out.rowFlashAlpha = if (spec.rowFlashMs > 0f && out.popOn) 1f else 0f
         out.done = t >= bEnd
         return out
     }

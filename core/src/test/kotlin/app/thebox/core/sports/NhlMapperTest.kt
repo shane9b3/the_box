@@ -33,8 +33,8 @@ class NhlMapperTest {
         assertEquals(GameId(League.NHL, "2026020251"), g.id)
         assertEquals("2026-11-05", g.dayKey)
         assertEquals(1_793_923_200_000L, g.startUtcMs)
-        assertEquals(TeamLine("UTA", "Mammoth", 2, "${base}UTA_dark.svg"), g.away)
-        assertEquals(TeamLine("MTL", "Canadiens", 2, "${base}MTL_dark.svg"), g.home)
+        assertEquals(TeamLine("UTA", "Mammoth", 2, "${base}UTA_dark.svg", sog = 5), g.away)
+        assertEquals(TeamLine("MTL", "Canadiens", 2, "${base}MTL_dark.svg", sog = 8), g.home)
         assertEquals(1, g.period)
         assertEquals(PeriodKind.REG, g.periodKind)
         assertNull(g.otNumber)
@@ -327,6 +327,60 @@ class NhlMapperTest {
             assertEquals(PowerPlay(Side.AWAY, PowerPlayKind.ONE_MAN, 79), assertNotNull(landing(name)).powerPlay, name)
         }
         assertNull(assertNotNull(landing("landing-missing-fields-synthetic.json")).powerPlay)
+    }
+
+    // ------------------------------------------------------------------ shots on goal (Stacked §3.3, §10.1)
+
+    @Test
+    fun recordedShotsOnGoal() {
+        val day = assertNotNull(NhlMapper.day(body(SportsFixtures.SCORE_2026_11_05), base))
+        val vgk = day.games.single { it.away.abbrev == "VGK" }
+        assertEquals(14, vgk.away.sog)
+        assertEquals(8, vgk.home.sog)
+        assertTrue(day.games.filter { it.phase == GamePhase.INTERMISSION }.all { it.away.sog != null && it.home.sog != null })
+        // PRE (ANA–EDM) and FUT (NSH–COL): no `sog` in the body.
+        for (g in day.games.filter { it.phase == GamePhase.PRE || it.phase == GamePhase.SCHEDULED }) {
+            assertNull(g.away.sog, g.away.abbrev)
+            assertNull(g.home.sog, g.home.abbrev)
+        }
+        val off = assertNotNull(NhlMapper.day(body(SportsFixtures.SCORE_2026_11_04), base)).games.single { it.away.abbrev == "OTT" }
+        assertEquals(30, off.away.sog)
+        assertEquals(25, off.home.sog)
+
+        val g = assertNotNull(NhlMapper.landing(body(SportsFixtures.LANDING_LIVE_INT), base))
+        assertEquals(5, g.away.sog)
+        assertEquals(8, g.home.sog)
+    }
+
+    private fun sogOf(raw: String?): Int? {
+        val field = raw?.let { ",\"sog\":$it" } ?: ""
+        val json = """{"id":2026020251,"startTimeUTC":"2026-11-06T00:00:00Z","gameState":"LIVE",
+            "awayTeam":{"abbrev":"UTA"$field},"homeTeam":{"abbrev":"MTL"}}"""
+        return assertNotNull(NhlMapper.landing(Json.parseToJsonElement(json).jsonObject, base)).away.sog
+    }
+
+    @Test
+    fun shotsOnGoalAreKeptOnlyInRange() {
+        assertEquals(0, sogOf("0"))
+        assertEquals(12, sogOf("12"))
+        assertEquals(SportsConstants.SOG_MAX, sogOf("199"))
+        assertEquals(12, sogOf("\"12\""), "a JSON string is read as leniently as every other field (N1)")
+        assertNull(sogOf("-1"))
+        assertNull(sogOf("200"))
+        assertNull(sogOf("\"x\""))
+        assertNull(sogOf("null"))
+        assertNull(sogOf("12.5"))
+        assertNull(sogOf("{}"))
+        assertNull(sogOf(null))
+    }
+
+    @Test
+    fun espnLeavesShotsOnGoalNull() {
+        val json = Json { ignoreUnknownKeys = true }
+        val dto = json.decodeFromString(EspnGameDto.serializer(), SportsFixtures.text("sports/nfl/scoreboard-live-first-down-2026-11-08.json"))
+        val g = assertNotNull(EspnMapper.game(dto, GameId(League.NFL, "401873038"), null, "https://a.espncdn.com/"))
+        assertNull(g.away.sog)
+        assertNull(g.home.sog)
     }
 
     @Test
