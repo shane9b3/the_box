@@ -18,6 +18,9 @@ import kotlinx.serialization.json.JsonElement
  * non-null field, decodes to **that property's default** and the document's other fields are kept (both in a stored
  * document and in a restored one). Limits: it acts only on properties with a default; an unknown value inside a
  * collection or as a map key still fails the whole document, as before.
+ * (Stacked fix pass 2026-11-11, review C N9) A domain with [coerce] = false opts out: there an unknown value still fails
+ * the whole document, so a restore keeps the device's document whole ("unreadable; kept"). The parental policy does this,
+ * because its defaults are the less strict choices and a coerced value would weaken it.
  */
 class SettingsDomain<T>(
     val name: String,
@@ -28,6 +31,8 @@ class SettingsDomain<T>(
     /** Bumped on an incompatible change; the store passes old documents through [migrate]. */
     val schema: Int = 1,
     val migrate: (fromSchema: Int, json: JsonElement) -> JsonElement = { _, j -> j },
+    /** False: no `coerceInputValues` for this domain (an unknown value fails the document; see the class comment). */
+    val coerce: Boolean = true,
 )
 
 interface SettingsStore {

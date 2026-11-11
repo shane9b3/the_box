@@ -390,6 +390,11 @@ class Sports:
             if st and st[0] * k <= t < st[1] * k:
                 s["_stale"] = True
             code, secs = self.pp_situation(seg, t, k, ln)
+            if code and end and clock == "run" and ln is not None and t >= ln - end * k:
+                # Stacked review C N12: inside the period's "end" window the game clock is stopped, so the PP clock is too.
+                frozen = self.pp_situation(seg, ln - end * k, k, ln)[1]
+                if frozen is not None:
+                    secs = frozen
             if code:
                 s.update(situationCode=code, situationSeconds=secs)
             if seg.get("winner"):

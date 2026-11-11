@@ -2,6 +2,7 @@ package app.thebox.data.settings
 
 import androidx.room.useWriterConnection
 import app.thebox.core.common.BoxLog
+import app.thebox.core.parental.ParentalDomain
 import app.thebox.core.settings.Domains
 import app.thebox.core.settings.SettingsDomain
 import app.thebox.core.settings.SettingsStore
@@ -40,7 +41,8 @@ import javax.inject.Singleton
  * - Writes are coalesced per domain (`SETTINGS_WRITE_DEBOUNCE_MS`) and run on IO; [flush] writes at once (ON_STOP,
  *   leaving Settings, before a backup). JSON is `ignoreUnknownKeys`, `encodeDefaults = false`, so a value equal to its
  *   default is not stored and a later default change reaches users who never touched it; and `coerceInputValues`, so an
- *   unknown enum name falls back to that field's default (Stacked S7).
+ *   unknown enum name falls back to that field's default (Stacked S7), except in a domain with `coerce = false` (the
+ *   parental policy, Stacked fix pass N9: [STRICT_JSON]).
  * - [importInTransaction] (restore, §3.10.4) runs inside the caller's `useWriterConnection { immediateTransaction {} }`
  *   and cancels pending writes of the domains it replaces: a debounced write that was already waiting for the writer
  *   connection re-checks its generation once it gets it and is dropped.
@@ -196,6 +198,13 @@ class RoomSettingsStore @Inject constructor(
                     val (row, apply) = importSlotLocked(slot, json, now) ?: continue
                     rows += row; touched += slot; publish += apply
                 } else if (name in KNOWN_DOMAINS && name !in NOT_BACKED_UP_DOMAINS) {
+                    // (Review C N9) A non-coerced domain not registered yet is checked now, as its slot would decode it:
+                    // an unreadable one keeps the device's document, as the registered path does.
+                    val strict = UNCOERCED_DOMAINS[name]
+                    if (strict != null && !readable(strict, json)) {
+                        BoxLog.w(TAG, "import: $name unreadable; kept")
+                        continue
+                    }
                     val row = AppSettingEntity(name, json.toString(), 1, now)
                     // A slot registered between the import and the commit reads the new row too.
                     publish += { stored?.put(name, row); slots[name]?.let { republishLocked(it, row) } }
@@ -274,7 +283,7 @@ class RoomSettingsStore @Inject constructor(
     /** The row to write and (D-S4) what publishes it in memory after the commit; null when unreadable. */
     private fun <T> importSlotLocked(s: Slot<T>, json: JsonElement, now: Long): Pair<AppSettingEntity, () -> Unit>? {
         val v = try {
-            JSON.decodeFromJsonElement(s.domain.serializer, json)
+            jsonFor(s.domain).decodeFromJsonElement(s.domain.serializer, json)
         } catch (e: Exception) {
             BoxLog.w(TAG, "import: ${s.domain.name} unreadable (${e.javaClass.simpleName}); kept")
             return null
@@ -349,11 +358,12 @@ class RoomSettingsStore @Inject constructor(
 
     private fun <T> decode(domain: SettingsDomain<T>, row: AppSettingEntity?): T {
         if (row == null) return domain.default
+        val json = jsonFor(domain)
         return try {
             if (row.schemaVer < domain.schema) {
-                JSON.decodeFromJsonElement(domain.serializer, domain.migrate(row.schemaVer, JSON.parseToJsonElement(row.json)))
+                json.decodeFromJsonElement(domain.serializer, domain.migrate(row.schemaVer, JSON.parseToJsonElement(row.json)))
             } else {
-                JSON.decodeFromString(domain.serializer, row.json)
+                json.decodeFromString(domain.serializer, row.json)
             }
         } catch (e: Exception) {
             BoxLog.w(TAG, "settings document ${domain.name} unreadable (${e.javaClass.simpleName}); defaults until changed")
@@ -371,6 +381,26 @@ class RoomSettingsStore @Inject constructor(
          * domain. An unknown value inside a collection or as a map key still fails the document.
          */
         val JSON: Json = Json { ignoreUnknownKeys = true; encodeDefaults = false; coerceInputValues = true }
+
+        /**
+         * (Stacked fix pass 2026-11-11, review C N9) [JSON] without `coerceInputValues`, for a domain that opts out
+         * (`SettingsDomain.coerce` = false: the parental policy). An unknown value fails that whole document, so a restore
+         * keeps the device's document ("unreadable; kept"), as before Stacked's S7.
+         */
+        val STRICT_JSON: Json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
+
+        /** The JSON [domain] decodes with. */
+        fun jsonFor(domain: SettingsDomain<*>): Json = if (domain.coerce) JSON else STRICT_JSON
+
+        /** The non-coerced domains, checked on import even before their owner registers them. */
+        private val UNCOERCED_DOMAINS: Map<String, SettingsDomain<*>> = listOf(ParentalDomain).associateBy { it.name }
+
+        private fun readable(domain: SettingsDomain<*>, json: JsonElement): Boolean = try {
+            jsonFor(domain).decodeFromJsonElement(domain.serializer, json)
+            true
+        } catch (_: Exception) {
+            false
+        }
 
         /** §2.2 `Domains`: an import of any other name is ignored. */
         val KNOWN_DOMAINS: Set<String> = setOf(

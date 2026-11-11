@@ -3,12 +3,17 @@ package app.thebox.ui.sports
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.test.core.app.ApplicationProvider
@@ -149,6 +154,48 @@ class StackedBoundsTest {
         settle()
         val left = bounds(SCORE_BUG_TAG)
         assertTrue("right of a left-corner box, not of the footprint", bounds(SCORE_BUG_HINT_TAG).left in left.right..left.right + 20f)
+    }
+
+    // ------------------------------------------------------------------ a right-to-left locale (review U S2)
+
+    /**
+     * (Fix pass 2026-11-11, review U S2) Under a right-to-left layout direction (a Hebrew or Arabic system locale), hosted
+     * in a full-screen box as `FullScreenHost` hosts it, the layer, the drawn box and the place hint land exactly where
+     * they do left-to-right, in every corner, at both sizes, at the play and the power-play widths.
+     */
+    @Test
+    fun aRightToLeftLocaleMovesNothing() {
+        var dir by mutableStateOf(LayoutDirection.Ltr)
+        rule.mainClock.autoAdvance = false
+        val hooks = StackedRunFixtures.hooks(probe)
+        rule.setContent {
+            CompositionLocalProvider(LocalLayoutDirection provides dir) {
+                Box(Modifier.fillMaxSize()) {
+                    BoxDesignScale { StackedBug(repo, placement, ScoreBugFixtures.noGeometry, Modifier, ScoreBugPlacement::place, hooks) }
+                }
+            }
+        }
+        val views = listOf(StackedRunFixtures.view(), StackedRunFixtures.view(pp = StackedRunFixtures.pp()))
+        for (size in ScoreBugSize.entries) for (corner in ScoreCorner.entries) for (placing in listOf(false, true)) for (v in views) {
+            val got = HashMap<LayoutDirection, List<Rect>>()
+            for (d in listOf(LayoutDirection.Ltr, LayoutDirection.Rtl)) {
+                dir = d
+                placement = StackedRunFixtures.input(corner, size, placing = placing)
+                repo.bug.value = v
+                settle()
+                val hint = if (placing) listOf(bounds(SCORE_BUG_HINT_TAG)) else emptyList()
+                got[d] = listOf(bounds(STACKED_LAYER_TAG), bounds(SCORE_BUG_TAG), bounds(SCORE_BUG_LIVE_TAG)) + hint
+            }
+            val msg = "$corner/$size placing=$placing pp=${v.powerPlay != null}"
+            val ltr = got.getValue(LayoutDirection.Ltr)
+            val rtl = got.getValue(LayoutDirection.Rtl)
+            for (i in ltr.indices) assertRect("$msg: node $i under RTL", ltr[i].left, ltr[i].top, ltr[i].right, ltr[i].bottom, rtl[i])
+            if (placing) {
+                val box = ltr[1]
+                val hint = rtl[3]
+                assertTrue("$msg: the hint clears the drawn box ($hint vs $box)", hint.right <= box.left + 1 || hint.left >= box.right - 1)
+            }
+        }
     }
 
     // ------------------------------------------------------------------ the shadow and the glow inside the layer

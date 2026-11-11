@@ -24,6 +24,9 @@ import app.thebox.core.sports.StackedFrame
 import app.thebox.core.sports.StackedMock as M
 import app.thebox.core.sports.StackedPair
 import app.thebox.core.sports.StackedTargets
+import app.thebox.core.sports.StackedTimeline
+import app.thebox.core.sports.StackedTrack
+import app.thebox.core.sports.StackedTransition
 import app.thebox.ui.R
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -117,14 +120,43 @@ internal object StackedFixtures {
         dim: Boolean = false,
         awayAbbrev: String = "EDM",
         homeAbbrev: String = "TOR",
-    ) = StackedFrameState(
-        awayAbbrev = awayAbbrev, homeAbbrev = homeAbbrev, awayScore = away.toString(), homeScore = home.toString(),
-        awaySog = awaySog, homeSog = homeSog,
-        periodText = period, periodPx = p.fitColumn(period, M.PERIOD_PX * K.STACKED_SCALE, 0.02f),
-        slot = slot, slotText = slotText,
-        slotPx = if (slot == ClockSlot.Clock) p.clockPx else p.fitColumn(slotText, M.CLOCK_PX * K.STACKED_SCALE),
-        clockSecs = clockSecs, columnDim = dim, targets = TARGETS,
-    )
+    ): StackedFrameState {
+        val fit = if (slot == ClockSlot.Clock) null else p.fitSlot(slotText)
+        return StackedFrameState(
+            awayAbbrev = awayAbbrev, homeAbbrev = homeAbbrev, awayScore = away.toString(), homeScore = home.toString(),
+            awaySog = awaySog, homeSog = homeSog,
+            periodText = period, periodPx = p.fitColumn(period, M.PERIOD_PX * K.STACKED_SCALE, 0.02f),
+            slot = slot, slotText = slotText,
+            slotPx = fit?.px ?: p.clockPx,
+            clockSecs = clockSecs, columnDim = dim, targets = TARGETS,
+            slotBreak = fit?.brk ?: -1, slotDy1 = fit?.dy1 ?: 0f, slotDy2 = fit?.dy2 ?: 0f,
+        )
+    }
+
+    /** A track's transition [kind] at [t] ms (ending open when [to]), as the runner starts it ([StackedTimeline.sample]). */
+    class Move(val track: StackedTrack, val kind: StackedTransition, val t: Float, val to: Boolean = kind != StackedTransition.CLOSE)
+
+    /** Every track at rest: the SOG and clock columns, the bar open or not, the row stripes wide or not. */
+    fun rest(sog: Boolean, clock: Boolean, bar: Boolean, stripeAway: Boolean = false, stripeHome: Boolean = false): StackedFrame {
+        val out = StackedFrame()
+        val x = StackedFrame()
+        StackedTimeline.sample(StackedTrack.SOG, StackedTransition.STILL, 0f, x, sog, out)
+        StackedTimeline.sample(StackedTrack.CLOCK, StackedTransition.STILL, 0f, x, clock, out)
+        StackedTimeline.sample(StackedTrack.BAR, StackedTransition.STILL, 0f, x, bar, out)
+        StackedTimeline.sample(StackedTrack.STRIPE_AWAY, StackedTransition.STILL, 0f, x, stripeAway, out)
+        StackedTimeline.sample(StackedTrack.STRIPE_HOME, StackedTransition.STILL, 0f, x, stripeHome, out)
+        return out
+    }
+
+    /**
+     * (Fix pass 2026-11-11, review U S4) A mid-transition frame the timeline really produces: [from] at rest, then each of
+     * [moves] sampled at its named instant through the real `StackedTimeline` (the other tracks stay at [from]).
+     */
+    fun sampled(from: StackedFrame, vararg moves: Move): StackedFrame {
+        val out = StackedFrame().apply { copyFrom(from) }
+        for (m in moves) StackedTimeline.sample(m.track, m.kind, m.t, from, m.to, out)
+        return out
+    }
 }
 
 /**
@@ -198,6 +230,8 @@ class StackedScreenshotTest {
         val prevPeriod: PeriodLabel? = null,
         val placing: Boolean = false,
         val logos: Boolean = true,
+        /** A frame from the middle of a transition. */
+        val moving: Boolean = false,
     )
 
     private val p2 = PeriodLabel(PeriodKind.REG, 2)
@@ -218,15 +252,33 @@ class StackedScreenshotTest {
         Look("shootout", { StackedFixtures.body(it, away = 3, home = 3, period = "SO") }, StackedFixtures.frame(1f, 0f, 1f), Triple(BarKind.SHOOTOUT, null, noSecs)),
         Look("final-so", { StackedFixtures.body(it, away = 4, home = 3) }, StackedFixtures.frame(1f, 0f, 1f), Triple(BarKind.FINAL, null, noSecs), PeriodLabel(PeriodKind.SO, 1)),
         Look("ot", { StackedFixtures.body(it, away = 10, home = 10, period = "OT", clockSecs = 252, awaySog = "38", homeSog = "41") }, StackedFixtures.frame(0f, 1f, 0f)),
-        Look("pp-opening", { StackedFixtures.body(it) },
-            StackedFixtures.frame(0.6f, 1f, 0.5f, stripeAway = 0.7f).apply { sogAlpha = 0.4f; stripeAX = -30f; stripeBX = -50f; barTextAlpha = 0f; barTextDx = K.STACKED_BAR_TEXT_DX },
-            Triple(BarKind.POWER_PLAY, Side.AWAY, 97)),
-        Look("int-folding", { StackedFixtures.body(it) },
-            StackedFixtures.frame(1f, 0.4f, 1f).apply { clockAlpha = 0f; barTextAlpha = 0.5f; barTextDx = -4f },
-            Triple(BarKind.INTERMISSION, null, noSecs), p2),
-        Look("change-pp-to-int", { StackedFixtures.body(it) },
-            StackedFixtures.frame(1f, 0.5f, 1f).apply { barBgMix = 0.5f; barSwapped = false; stripeAX = -40f; stripeBX = -20f; barTextAlpha = 0.3f; barTextDx = -8f },
-            Triple(BarKind.INTERMISSION, null, noSecs), p2, prev = Triple(BarKind.POWER_PLAY, Side.AWAY, 12)),
+        // (Fix pass 2026-11-11, review U S4) Mid-transition cells come from the real timeline at named instants, so the
+        // sheets never show a state the runner cannot draw.
+        Look("pp-open-t300", { StackedFixtures.body(it) },
+            StackedFixtures.sampled(StackedFixtures.rest(sog = false, clock = true, bar = false),
+                StackedFixtures.Move(StackedTrack.SOG, StackedTransition.OPEN, 300f), StackedFixtures.Move(StackedTrack.BAR, StackedTransition.OPEN, 300f),
+                StackedFixtures.Move(StackedTrack.STRIPE_AWAY, StackedTransition.OPEN, 300f)),
+            Triple(BarKind.POWER_PLAY, Side.AWAY, 97), moving = true),
+        Look("pp-open-t900", { StackedFixtures.body(it) },
+            StackedFixtures.sampled(StackedFixtures.rest(sog = false, clock = true, bar = false),
+                StackedFixtures.Move(StackedTrack.SOG, StackedTransition.OPEN, 900f), StackedFixtures.Move(StackedTrack.BAR, StackedTransition.OPEN, 900f),
+                StackedFixtures.Move(StackedTrack.STRIPE_AWAY, StackedTransition.OPEN, 900f)),
+            Triple(BarKind.POWER_PLAY, Side.AWAY, 97), moving = true),
+        Look("pp-close-t400", { StackedFixtures.body(it) },
+            StackedFixtures.sampled(StackedFixtures.rest(sog = true, clock = true, bar = true, stripeAway = true),
+                StackedFixtures.Move(StackedTrack.SOG, StackedTransition.CLOSE, 400f), StackedFixtures.Move(StackedTrack.BAR, StackedTransition.CLOSE, 400f),
+                StackedFixtures.Move(StackedTrack.STRIPE_AWAY, StackedTransition.CLOSE, 400f)),
+            Triple(BarKind.POWER_PLAY, Side.AWAY, 12), moving = true),
+        Look("int-to-play-t600", { StackedFixtures.body(it) },
+            StackedFixtures.sampled(StackedFixtures.rest(sog = true, clock = false, bar = true),
+                StackedFixtures.Move(StackedTrack.CLOCK, StackedTransition.OPEN, 600f), StackedFixtures.Move(StackedTrack.SOG, StackedTransition.CLOSE, 600f),
+                StackedFixtures.Move(StackedTrack.BAR, StackedTransition.CLOSE, 600f)),
+            Triple(BarKind.INTERMISSION, null, noSecs), p2, moving = true),
+        Look("change-pp-to-int-t100", { StackedFixtures.body(it) },
+            StackedFixtures.sampled(StackedFixtures.rest(sog = true, clock = true, bar = true, stripeAway = true),
+                StackedFixtures.Move(StackedTrack.BAR, StackedTransition.CHANGE, 100f), StackedFixtures.Move(StackedTrack.CLOCK, StackedTransition.CLOSE, 100f),
+                StackedFixtures.Move(StackedTrack.STRIPE_AWAY, StackedTransition.CLOSE, 100f)),
+            Triple(BarKind.INTERMISSION, null, noSecs), p2, prev = Triple(BarKind.POWER_PLAY, Side.AWAY, 12), moving = true),
         Look("place", { StackedFixtures.body(it, away = 0, home = 0, awaySog = "", homeSog = "", period = "", clockSecs = 0, awayAbbrev = "AWY", homeAbbrev = "HME") },
             StackedFixtures.frame(0f, 1f, 0f), placing = true, logos = false),
     )
@@ -371,6 +423,112 @@ class StackedScreenshotTest {
         assertTrue(File(out, "stacked-goal-contact-sheet-std-dark.png").length() > 10_000)
     }
 
+    // ------------------------------------------------------------------ geometry probes (review U S3)
+
+    /**
+     * The ink of one colour in a region of [shot] (box coordinates, device px): every pixel at least half-way from [bg]
+     * to [ink] on [channel] (red 16, green 8, blue 0), as a box of whole-pixel edges; null when there is none.
+     */
+    private fun inkBox(shot: Shot, x0: Float, y0: Float, x1: Float, y1: Float, bg: Int, ink: Int, channel: Int = 8): android.graphics.RectF? {
+        val b = (bg shr channel) and 0xFF
+        val k = (ink shr channel) and 0xFF
+        var l = Int.MAX_VALUE; var t = Int.MAX_VALUE; var r = Int.MIN_VALUE; var bt = Int.MIN_VALUE
+        for (py in Math.floor((y0 + shot.oy).toDouble()).toInt() until Math.ceil((y1 + shot.oy).toDouble()).toInt()) {
+            for (px in Math.floor((x0 + shot.ox).toDouble()).toInt() until Math.ceil((x1 + shot.ox).toDouble()).toInt()) {
+                val v = (shot.bmp.getPixel(px, py) shr channel) and 0xFF
+                if ((v - b).toFloat() / (k - b) >= 0.5f) { l = minOf(l, px); r = maxOf(r, px); t = minOf(t, py); bt = maxOf(bt, py) }
+            }
+        }
+        if (l == Int.MAX_VALUE) return null
+        return android.graphics.RectF(l - shot.ox, t - shot.oy, r + 1 - shot.ox, bt + 1 - shot.oy)
+    }
+
+    /**
+     * (Fix pass 2026-11-11, review U S3) The screenshot test's regression pin: the drawn ink of a dozen things per size,
+     * found by scanning the rendered pixels, against §4.2's table (mock × 0.45) within ±1 device px. Each text's expected
+     * ink is its §4.2 origin plus the glyphs' own outline bounds (the font's side bearings), so a moved code, a resized
+     * clock, a lost stripe or a shifted bar fails here. No image goldens.
+     */
+    @Test
+    fun theDrawnGeometryMatchesTheDesignTable() {
+        // ±1 px for shapes; text gets ±1.5: the renderer snaps each glyph run's origin to a whole pixel (no subpixel text)
+        // and boosts edge coverage (text gamma), against the outlines' exact float bounds.
+        val tol = 1f
+        val textTol = 1.5f
+        for (large in listOf(false, true)) {
+            val r = rig(large)
+            val s = r.s
+            val p = r.painter
+            val play = render(looks.first { it.name == "play" }, large, DARK, shadow = false)
+            val pp = render(looks.first { it.name == "pp-edm" }, large, DARK, shadow = false)
+            fun check(what: String, expected: Float, actual: Float?, shape: Boolean = false) {
+                assertTrue("${sz(large)} $what: nothing drawn", actual != null)
+                println("probe ${sz(large)} $what: expected %.2f, drawn %.2f".format(expected, actual))
+                assertEquals("${sz(large)} $what", expected, actual!!, if (shape) tol else textTol)
+            }
+            val row = K.STACKED_ROW_BG
+            val col = K.STACKED_COL_BG
+            val white = Color.WHITE
+            val rowH = K.STACKED_H / 2f * s
+
+            // 1–2. The away code's left ink edge: 3.6 + 9.9 + 50.4 + 13.5 = 77.4; 80.1 on the power play's wide stripe.
+            val codeInk = p.inkBounds(StackedPainter.Ink.CODE, "EDM", 0f, 0f)
+            check("code left (77.4)", 77.4f * s + codeInk.left, inkBox(play, 66f * s, 0f, 170f * s, rowH, row, white)?.left)
+            check("code left on the PP (80.1)", 80.1f * s + codeInk.left, inkBox(pp, 66f * s, 0f, 170f * s, rowH, row, white)?.left)
+            // 3–4. The scores' right ink edge: 243 − 15.3 = 227.7, both rows.
+            check("away score right (227.7)", p.inkBounds(StackedPainter.Ink.SCORE, "2", 227.7f * s, 0f).right,
+                inkBox(play, 175f * s, 0f, 243f * s, rowH, row, white)?.right)
+            check("home score right (227.7)", p.inkBounds(StackedPainter.Ink.SCORE, "1", 227.7f * s, 0f).right,
+                inkBox(play, 175f * s, rowH, 243f * s, 2 * rowH, row, white)?.right)
+            // 5–7. The SOG digits centred at x 272.25 on each row (y 27 / 81), the label on the row line (y 54).
+            val sogCx = (K.STACKED_ROWS_W + K.STACKED_SOG_W / 2f) * s
+            val sogTop = inkBox(pp, (K.STACKED_ROWS_W + 2f) * s, 0f, (K.STACKED_ROWS_W + K.STACKED_SOG_W - 2f) * s, rowH - 10f * s, col, white)
+            check("SOG digits x centre (272.25)", p.inkBounds(StackedPainter.Ink.SOG, "14", sogCx, 0f).centerX(), sogTop?.centerX())
+            check("away SOG y centre (27)", 27f * s, sogTop?.centerY())
+            val sogBottom = inkBox(pp, (K.STACKED_ROWS_W + 2f) * s, rowH + 10f * s, (K.STACKED_ROWS_W + K.STACKED_SOG_W - 2f) * s, 2 * rowH, col, white)
+            check("home SOG y centre (81)", 81f * s, sogBottom?.centerY())
+            val label = inkBox(pp, (K.STACKED_ROWS_W + 2f) * s, rowH - 9f * s, (K.STACKED_ROWS_W + K.STACKED_SOG_W - 2f) * s, rowH + 9f * s, col, K.STACKED_SOG_LABEL)
+            check("SOG label y centre (54)", 54f * s, label?.centerY())
+            check("SOG label x centre (272.25)", p.inkBounds(StackedPainter.Ink.SOG_LABEL, "SOG", sogCx, 0f).centerX(), label?.centerX())
+            // 8. The period's baseline: the 50.4 slot less its 6.3 padding, less the font's descent (≈ 38.7).
+            val x0 = K.STACKED_ROWS_W * s // the clock column in play (SOG closed)
+            val cx = x0 + K.STACKED_CLOCK_W / 2f * s
+            val periodBottom = (50.4f - 6.3f) * s
+            val fm = Paint().apply { typeface = bold; textSize = M.PERIOD_PX * K.STACKED_SCALE * s }.fontMetrics
+            val periodBaseline = periodBottom - fm.descent
+            assertEquals("${sz(large)} the period's baseline (38.7)", 38.7f * s, periodBaseline, 0.6f * s)
+            val period = inkBox(play, x0 + 2f * s, 0f, x0 + K.STACKED_CLOCK_W * s - 2f * s, 48f * s, col, white)
+            check("period ink bottom", p.inkBounds(StackedPainter.Ink.PERIOD, "2ND", cx, periodBaseline).bottom, period?.bottom)
+            check("period x centre", p.inkBounds(StackedPainter.Ink.PERIOD, "2ND", cx, periodBaseline).centerX(), period?.centerX())
+            // 9. The rule: y 50.4, x 243 + 11.7 = 254.7 to 333 − 11.7 = 321.3.
+            val rule = inkBox(play, x0 + 2f * s, 46f * s, x0 + K.STACKED_CLOCK_W * s - 2f * s, 56f * s, col, K.STACKED_RULE)
+            check("rule left (254.7)", 254.7f * s, rule?.left, shape = true)
+            check("rule right (321.3)", 321.3f * s, rule?.right, shape = true)
+            check("rule top (50.4)", 50.4f * s, rule?.top, shape = true)
+            // 10. The clock "6:24": tabular, centred in the column below the rule, inside the 5-px air (B1).
+            val line = (K.STACKED_HAIRLINE_W * s).coerceAtLeast(1f)
+            val clockCy = (50.4f * s + line + K.STACKED_H * s) / 2f
+            val want = p.clockInk(384).apply { offset(cx, clockCy) }
+            val clock = inkBox(play, x0 + 2f * s, 56f * s, x0 + K.STACKED_CLOCK_W * s - 2f * s, K.STACKED_H * s - 1f, col, white)
+            check("clock ink left", want.left, clock?.left)
+            check("clock ink right", want.right, clock?.right)
+            check("clock ink top", want.top, clock?.top)
+            check("clock ink bottom", want.bottom, clock?.bottom)
+            assertTrue("${sz(large)} the clock keeps its air: ${clock!!.left}..${clock.right}", clock.left >= x0 + 5f * s - tol && clock.right <= x0 + 85f * s + tol)
+            // 11–12. The bar at rest: stripes A / B at 20.7 / 37.8 (11.7 wide) on its centre line, the words at 63.
+            val barCy = (K.STACKED_H + K.STACKED_BAR_H / 2f) * s
+            val edm = StackedFixtures.EDM
+            val stripeA = inkBox(pp, 3f * s, barCy - 0.5f, 60f * s, barCy + 0.5f, edm.barBg, edm.barA, channel = 16)
+            check("bar stripe A left (20.7)", 20.7f * s, stripeA?.left, shape = true)
+            check("bar stripe A right (32.4)", 32.4f * s, stripeA?.right, shape = true)
+            val stripeB = inkBox(pp, 34f * s, barCy - 0.5f, 60f * s, barCy + 0.5f, edm.barBg, edm.barB, channel = 0)
+            check("bar stripe B left (37.8)", 37.8f * s, stripeB?.left, shape = true)
+            check("bar stripe B right (49.5)", 49.5f * s, stripeB?.right, shape = true)
+            val words = inkBox(pp, 57f * s, barCy - 9f * s, 250f * s, barCy + 9f * s, edm.barBg, white, channel = 0)
+            check("bar words left (63)", p.inkBounds(StackedPainter.Ink.BAR, "EDM", 63f * s, 0f).left, words?.left)
+        }
+    }
+
     // ------------------------------------------------------------------ §10.2's contrast assertions, from the pixels
 
     @Test
@@ -394,7 +552,7 @@ class StackedScreenshotTest {
 
     @Test
     fun barTextIsAtLeastFourAndAHalfToOneOnEveryBar() {
-        val bars = looks.filter { it.bar != null && it.prev == null && it.name != "pp-opening" }
+        val bars = looks.filter { it.bar != null && !it.moving }
         for (large in listOf(false, true)) for (look in bars) for (up in listOf(false, true)) {
             val r = rig(large)
             val shot = render(look, large, DARK, up = up)
@@ -652,11 +810,13 @@ class StackedScreenshotTest {
     @Test
     fun aChangeDrawsThePreviousContentUntilItsSwap() {
         val r = std
-        val look = looks.first { it.name == "change-pp-to-int" }
+        val look = looks.first { it.name == "change-pp-to-int-t100" }
+        assertTrue("before the swap instant", !look.f.barSwapped)
+        assertTrue("the background mid-mix: ${look.f.barBgMix}", look.f.barBgMix in 0.05f..0.95f)
         val before = render(look, false)
         val after = render(Look(look.name, look.body, StackedFrame().apply { copyFrom(look.f); barSwapped = true }, look.bar, look.barPeriod, prev = look.prev), false)
         val y = (K.STACKED_H + K.STACKED_BAR_H / 2f) * r.s
-        val bgMid = StackedPainter.lerpColour(StackedFixtures.EDM.barBg, K.STACKED_BAR_NEUTRAL, 0.5f)
+        val bgMid = StackedPainter.lerpColour(StackedFixtures.EDM.barBg, K.STACKED_BAR_NEUTRAL, look.f.barBgMix)
         val px = before.px(look.f.boxW - 4f, y)
         assertTrue("half-way background ${hex(px)} vs ${hex(bgMid)}", near(bgMid, px, 3))
         assertTrue("the words differ across the swap", !before.bmp.sameAs(after.bmp))

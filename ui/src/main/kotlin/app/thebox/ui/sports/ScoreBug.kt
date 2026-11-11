@@ -31,6 +31,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -183,10 +184,17 @@ fun ScoreBug(
         when {
             league == League.NFL -> NflBug(source, placed, geometry, modifier, place, NflHooks.Default)
             style == NhlBugStyle.STACKED -> StackedBug(source, placed, geometry, modifier, place, StackedHooks.Default)
-            else -> ScoreBugWith(source, placed, geometry, lowEnd, modifier, place, GoalHooks.Default)
+            else -> ScoreBugWith(source, placed, geometry, lowEnd, modifier, place, LocalGoalHooks.current)
         }
     }
 }
+
+/**
+ * (Stacked fix pass 2026-11-11, review C S4) The Pill's hooks under [ScoreBug]: always [GoalHooks.Default] in the app. A
+ * test that hosts the real `StableScoreBug` provides hooks whose background work runs on its own clock, so off-thread
+ * setup cannot land inside a measured window.
+ */
+internal val LocalGoalHooks = staticCompositionLocalOf { GoalHooks.Default }
 
 /**
  * (Goal animation, WP-3) The goal takeover's seams: what [ScoreBug] calls into WP-1/WP-2 for, so tests can stand in for the

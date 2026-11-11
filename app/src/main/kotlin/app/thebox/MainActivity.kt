@@ -121,6 +121,8 @@ class MainActivity : ComponentActivity() {
                 firstFrameAtElapsedMs = android.os.SystemClock.elapsedRealtime()
                 startupGate.open()
                 controller.prewarm()
+                // (Stacked fix pass, review U N11) The Stacked bar's italic into the font cache, off the main thread.
+                lifecycleScope.launch(kotlinx.coroutines.Dispatchers.Default) { app.thebox.ui.sports.StackedFonts.preload(this@MainActivity) }
             }
         }
     }

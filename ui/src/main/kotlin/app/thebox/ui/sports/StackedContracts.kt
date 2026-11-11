@@ -27,6 +27,9 @@ import app.thebox.core.sports.StackedTargets
  * - [clockSecs]: `ScoreBugView.clockSecs` (ruling 6), 0 when null; read only for [ClockSlot.Clock].
  * - [columnDim]: the clock column at `STACKED_DIM_ALPHA`.
  * - [targets]: the view's `StackedTargets.of(v)`, the layout this body belongs to.
+ * - (Fix pass 2026-11-11, review U S1) [slotBreak]: the space a two-line [slotText] breaks at ("No" / "update"), −1 = one
+ *   line; [slotDy1] / [slotDy2]: the two baselines relative to the lower slot's centre (design px). From
+ *   [StackedPainter.fitSlot].
  */
 internal class StackedFrameState(
     val awayAbbrev: String,
@@ -43,6 +46,9 @@ internal class StackedFrameState(
     val clockSecs: Int,
     val columnDim: Boolean,
     val targets: StackedTargets,
+    val slotBreak: Int = -1,
+    val slotDy1: Float = 0f,
+    val slotDy2: Float = 0f,
 )
 
 /**
@@ -69,6 +75,8 @@ internal class BarContent {
     var bg: Int = 0
     var stripeA: Int = 0
     var stripeB: Int = 0
+    /** (Review U N3) The label's advance (device px, the words before a power play's time), set by [StackedPainter.fillBar]. */
+    var labelAdvance: Float = 0f
 
     /** Copies everything from [o] (no allocation). */
     fun copyFrom(o: BarContent) {
@@ -82,6 +90,7 @@ internal class BarContent {
         bg = o.bg
         stripeA = o.stripeA
         stripeB = o.stripeB
+        labelAdvance = o.labelAdvance
     }
 
     companion object {

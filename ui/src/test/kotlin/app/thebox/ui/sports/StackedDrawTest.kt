@@ -244,6 +244,31 @@ class StackedDrawTest {
         assertLayout("at the new view's rest", sog = true, clock = true, bar = true)
     }
 
+    /**
+     * (Fix pass 2026-11-11, review C S1) The follow ends (Stop following, or the 5-minute stale hide: the source's view
+     * goes null) on a power play: through the 150-ms fade the box keeps its layout, its bar words and the game's colours;
+     * the runner resets only once the fade is done.
+     */
+    @Test
+    fun rule3AFollowThatEndsFadesWithItsLayoutAndColoursThenResets() {
+        start(live(pp = ppHome))
+        val colours = args().colours
+        assertEquals(app.thebox.core.sports.NhlStackedColours.pair("CGY", "EDM"), colours)
+        val n = probe.transitions.size
+        show(null) // 16 ms into the fade
+        assertLayout("mid-fade: the power play's box", sog = true, clock = true, bar = true)
+        assertEquals("mid-fade: the bar's words", "EDM POWER PLAY 1:19", words())
+        assertTrue("mid-fade: the game's colours, not the fallback", args().colours === colours)
+        assertEquals("CGY", body().awayAbbrev)
+        assertEquals("nothing was kicked", n, probe.transitions.size)
+        advance(80) // still fading
+        assertLayout("later in the fade", sog = true, clock = true, bar = true)
+        assertTrue(args().colours === colours)
+        advance(1_000) // the fade is done: the runner resets
+        assertEquals("reset after the fade", "", words())
+        assertEquals("parked closed", 0f, f().sogWidth, 1e-4f)
+    }
+
     // ------------------------------------------------------------------ S1 rule 4: place mode parks
 
     @Test
@@ -276,10 +301,14 @@ class StackedDrawTest {
 
     // ------------------------------------------------------------------ S1 rule 5: back-to-back goals
 
-    /** EDM's power-play goal (ruling 15), then a CGY goal mid-takeover: the takeover restarts, the pin holds, and once
-     * CGY's lead covers the box the old "EDM POWER PLAY GOAL" closes (no power play now). */
+    /**
+     * EDM's power-play goal (ruling 15), then a CGY goal mid-takeover: the takeover restarts and the pin holds. Once CGY's
+     * lead covers the box the old "EDM POWER PLAY GOAL" words fade out (no power play now), but the bar keeps its height
+     * and the pinned box its size and glow until the 3 600 release, where the bar closes (fix pass 2026-11-11, review C
+     * S2: rule 5 against B4's fixed box).
+     */
     @Test
-    fun rule5ABackToBackGoalClosesAnEarlierPowerPlayGoal() {
+    fun rule5ABackToBackGoalHidesAnEarlierPowerPlayGoalsWordsAndClosesTheBarAtTheRelease() {
         start(live(pp = ppHome))
         show(live(home = 3, seq = 1, side = Side.HOME, goalPp = true)) // the PP is over in the goal snapshot
         advanceTakeoverTo(GoalTimeline.LEAD_COVERED_MS + 50f)
@@ -290,11 +319,30 @@ class StackedDrawTest {
         assertTrue("the pin continues", pinned())
         assertTrue(probe.releases.isEmpty())
         assertEquals("held until the new lead covers", "EDM POWER PLAY GOAL", words())
+        val glow = args().glow
+        assertNotNull(glow)
         advanceTakeoverTo(GoalTimeline.LEAD_COVERED_MS + 50f)
-        val close = movesOf(StackedTrack.BAR).last()
-        assertEquals(StackedTransition.CLOSE, close.kind)
-        assertEquals("the close slides out the PP GOAL words", BarKind.PP_GOAL, close.barKind)
+        val swap = movesOf(StackedTrack.BAR).last()
+        assertEquals("the words fade out: a text swap to nothing", StackedTransition.SWAP, swap.kind)
+        assertEquals(BarKind.PP_GOAL, swap.barKind)
+        var t = GoalTimeline.LEAD_COVERED_MS + 50f
+        while (t < K.GOAL_TAKEOVER_MS - 50f) {
+            advanceTakeoverTo(t)
+            assertEquals("the bar keeps its height at $t", K.STACKED_BAR_H, f().barH, 1e-3f)
+            assertEquals("the pinned box keeps its width at $t", K.STACKED_ROWS_W + K.STACKED_SOG_W + K.STACKED_CLOCK_W, f().boxW, 1e-3f)
+            assertTrue("the glow keeps its masks at $t", args().glow === glow)
+            t += 250f
+        }
+        assertEquals("no words on the bar", "", words())
+        assertTrue("nothing closed during the pin", movesOf(StackedTrack.BAR).none { it.kind == StackedTransition.CLOSE })
         assertTrue("still pinned until 3 600", pinned())
+        advanceTakeoverTo(K.GOAL_TAKEOVER_MS.toFloat() + 32f)
+        assertFalse(pinned())
+        val close = movesOf(StackedTrack.BAR).last()
+        assertEquals("the bar closes at the release", StackedTransition.CLOSE, close.kind)
+        assertEquals(K.GOAL_TAKEOVER_MS.toFloat(), probe.releases.last().driverMs, 40f)
+        advance(1_000)
+        assertLayout("after the release", sog = false, clock = true, bar = false)
     }
 
     /** A 5-on-3 power-play goal leaves a 5-on-4; a CGY goal follows: the old words cut to EDM's current power play. */
@@ -590,6 +638,9 @@ class StackedDrawTest {
         check("even strength", sog = false, clock = true, bar = null, period = "2ND", slot = "clock")
         push(game(secs = 600, pp = PowerPlay(Side.HOME, PowerPlayKind.ONE_MAN, 97)), at = 20_000)
         check("power play", sog = true, clock = true, bar = "EDM POWER PLAY 1:37", ppSide = Side.HOME)
+        // Review C N13: after the first view the power play animates open (rule 2 snaps only the first).
+        assertTrue("the SOG column animated open", movesOf(StackedTrack.SOG).any { it.kind == StackedTransition.OPEN })
+        assertTrue("the bar animated open", movesOf(StackedTrack.BAR).any { it.kind == StackedTransition.OPEN })
         push(game(secs = 580, pp = PowerPlay(Side.HOME, PowerPlayKind.TWO_MAN, 77)), at = 40_000)
         check("5-on-3", sog = true, clock = true, bar = "EDM 5-ON-3 1:17", ppSide = Side.HOME)
         push(game(secs = 0, running = false), at = 60_000)

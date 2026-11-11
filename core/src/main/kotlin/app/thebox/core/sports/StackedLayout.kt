@@ -86,7 +86,7 @@ data class StackedTargets(
          * | `Intermission` + `powerPlay` | PP carried (B3): SOG open, PP bar with the frozen time, clock open, slot `Intermission` | (no `powerPlay` when dim: next row) |
          * | `Intermission` | SOG open, clock folded, neutral `INTERMISSION` bar naming the period ("OT INTERMISSION") | SOG open, clock folded, `NO_UPDATE` / `DELAYED` bar, dimmed |
          * | `Shootout` | SOG open, clock folded, `SHOOTOUT` bar | SOG open, clock folded, `NO_UPDATE` / `DELAYED` bar |
-         * | `Final(kind)` | SOG open, clock folded, `FINAL` bar (`barPeriod` = `PeriodLabel(kind, 1)`) | `DELAYED` / `NO_UPDATE` bar (not reachable: `staleAt()` is null at FINAL) |
+         * | `Final(kind)` | SOG open, clock folded, `FINAL` bar (`barPeriod` = `PeriodLabel(kind, 1)`) | `DELAYED` bar while waiting (following an already-final game with Delay > 0: then a text swap to `FINAL`); `NO_UPDATE` is not reachable (`staleAt()` is null at FINAL) |
          *
          * - The SOG column never opens while either side's `sog` is null (§8 "Missing SOG").
          * - The row stripe widens for the power-play side whenever a PP bar is the target ([ppSide]).

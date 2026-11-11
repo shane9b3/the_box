@@ -112,7 +112,9 @@ internal class StackedPainter(
     private val sogLabelPaint = text(K.STACKED_SOG_LABEL_PX, sansBold, Paint.Align.CENTER, M.SOG_LABEL_TRACK_EM)
     private val periodPaint = text(M.PERIOD_PX * K.STACKED_SCALE, sansBold, Paint.Align.CENTER, PERIOD_TRACK_EM)
     private val slotPaint = text(M.CLOCK_PX * K.STACKED_SCALE, sansBold, Paint.Align.CENTER)
-    private val clockPaint = text(M.CLOCK_PX * K.STACKED_SCALE, sansBold, Paint.Align.LEFT)
+    // (Fix pass 2026-11-11, review U B1) Tabular figures, as the mock's `font-variant-numeric: tabular-nums` and §4.2's
+    // "64 / 700 tabular": Instrument Sans Bold's proportional "0" is 0.682 em, its `tnum` digits are all 0.600 em.
+    private val clockPaint = text(M.CLOCK_PX * K.STACKED_SCALE, sansBold, Paint.Align.LEFT, tnum = true)
     private val barPaint = text(K.STACKED_BAR_TEXT_PX, barFont ?: sansBold, Paint.Align.LEFT, BAR_TRACK_EM).apply {
         if (barFont == null) textSkewX = K.STACKED_FAUX_ITALIC_SKEW_X
     }
@@ -148,6 +150,10 @@ internal class StackedPainter(
     private val clockCap: Float
     private val clockBuf = CharArray(8)
     private val barSecsBuf = CharArray(8)
+    /** The lower slot of the clock column (below the rule), device px: its height, for a two-line slot string. */
+    private val slotH = h - (ruleTop + line)
+    /** (Review U N2) The SOG label, resolved from `sports_stacked_sog` by [frame]; "SOG" until the first frame. */
+    private var sogLabel = "SOG"
 
     /** The fallback look (a null [StackedDrawArgs.colours]), resolved once. */
     private val fallback: StackedPair = NhlStackedColours.pair(null, null)
@@ -171,7 +177,7 @@ internal class StackedPainter(
             for (d in 0..9) w = maxOf(w, clockPaint.measureText(DIGITS, d, d + 1))
             return 4 * w + clockPaint.measureText(":")
         }
-        while (px - K.STACKED_FIT_STEP_PX >= K.STACKED_FIT_MIN_PX && widest() > columnBudget()) px -= K.STACKED_FIT_STEP_PX
+        while (px - K.STACKED_FIT_STEP_PX >= K.STACKED_FIT_MIN_PX && widest() > clockBudget()) px -= K.STACKED_FIT_STEP_PX
         clockPx = px
         clockPaint.textSize = px * s
         var cell = 0f
@@ -194,8 +200,11 @@ internal class StackedPainter(
         stripePath.close()
     }
 
-    /** The clock column's text budget, device px: the column less [COLUMN_BREATHING] a side (ink for words, advance for the clock). */
-    private fun columnBudget(): Float = clockW - 2 * COLUMN_BREATHING * s
+    /** The clock column's budget for words (ink), device px: the column less [WORD_BREATHING] a side. */
+    private fun columnBudget(): Float = clockW - 2 * WORD_BREATHING * s
+
+    /** The clock column's budget for the clock (tabular advance), device px: the column less [CLOCK_BREATHING] a side. */
+    private fun clockBudget(): Float = clockW - 2 * CLOCK_BREATHING * s
 
     // ------------------------------------------------------------------ words and fit (§4.2 fit rules)
 
@@ -225,6 +234,43 @@ internal class StackedPainter(
     }
 
     /**
+     * (Fix pass 2026-11-11, review U S1) The lower slot's word ("END", "INT", "Delayed", "No update"), fitted. One line
+     * by [fitColumn]; but a string with a space that does not fit on one line at the start size breaks at its **first**
+     * space onto two lines at one fitted size (each line's ink inside the column's breathing, the block's ink inside the
+     * slot's), the block centred on the slot, whenever that gives a larger size than one line or the only fit. The words
+     * are never changed or shortened (§8: the slot stays the slot). Called once per shown view, never per frame.
+     */
+    fun fitSlot(text: String): SlotFit {
+        val start = M.CLOCK_PX * K.STACKED_SCALE
+        if (text.isEmpty()) return SlotFit(start)
+        val one = fitColumn(text, start)
+        val oneFits = inkWidth(text, one) <= columnBudget()
+        val brk = text.indexOf(' ')
+        if (brk <= 0 || brk == text.length - 1 || (oneFits && one >= start)) return SlotFit(one)
+        val a = text.substring(0, brk)
+        val b = text.substring(brk + 1)
+        measurePaint.letterSpacing = 0f
+        val ra = Rect()
+        val rb = Rect()
+        var px = start
+        while (true) {
+            measurePaint.textSize = px * s
+            measurePaint.getTextBounds(a, 0, a.length, ra)
+            measurePaint.getTextBounds(b, 0, b.length, rb)
+            val pitch = px * s * SLOT_LINE_PITCH_EM
+            val block = pitch + rb.bottom - ra.top
+            if (maxOf(ra.width(), rb.width()) <= columnBudget() && block <= slotH - 2 * WORD_BREATHING * s) {
+                if (oneFits && one >= px) return SlotFit(one)
+                // The baselines relative to the slot's centre (design px): the block's ink is centred on it.
+                val dy1 = (-block / 2f - ra.top) / s
+                return SlotFit(px, brk, dy1, dy1 + pitch / s)
+            }
+            if (px <= K.STACKED_FIT_MIN_PX) return SlotFit(one) // two lines fit nowhere: one line at the floor
+            px = (px - K.STACKED_FIT_STEP_PX).coerceAtLeast(K.STACKED_FIT_MIN_PX)
+        }
+    }
+
+    /**
      * (WP-2) The view's resolved words for [t] (`StackedTargets.of(v)`), fitted at this size (§4.2: clock-column strings
      * step down by `STACKED_FIT_STEP_PX` to `STACKED_FIT_MIN_PX`). Called once per shown view, never per frame.
      */
@@ -239,6 +285,8 @@ internal class StackedPainter(
         }
         val periodStart = M.PERIOD_PX * K.STACKED_SCALE
         val slotStart = M.CLOCK_PX * K.STACKED_SCALE
+        sogLabel = res.getString(R.string.sports_stacked_sog)
+        val fit = if (t.clockSlot == ClockSlot.Clock || slotText.isEmpty()) null else fitSlot(slotText)
         return StackedFrameState(
             awayAbbrev = v.away.abbrev,
             homeAbbrev = v.home.abbrev,
@@ -252,12 +300,15 @@ internal class StackedPainter(
             slotText = slotText,
             slotPx = when {
                 t.clockSlot == ClockSlot.Clock -> clockPx
-                slotText.isEmpty() -> slotStart
-                else -> fitColumn(slotText, slotStart)
+                fit == null -> slotStart
+                else -> fit.px
             },
             clockSecs = v.clockSecs ?: 0,
             columnDim = t.columnDim,
             targets = t,
+            slotBreak = fit?.brk ?: -1,
+            slotDy1 = fit?.dy1 ?: 0f,
+            slotDy2 = fit?.dy2 ?: 0f,
         )
     }
 
@@ -294,6 +345,9 @@ internal class StackedPainter(
         val n = minOf(words.length, BarContent.MAX_CHARS)
         words.toCharArray(c.chars, 0, 0, n)
         c.len = n
+        // (Review U N3) The label's advance, measured once here rather than on every frame.
+        val split = timeSplit(c)
+        c.labelAdvance = barPaint.measureText(c.chars, 0, if (split < 0) c.len else split)
         if (isTeamKind(c.kind) && team != null) {
             c.bg = team.barBg
             c.stripeA = team.barA
@@ -416,7 +470,7 @@ internal class StackedPainter(
         barPaint.color = text
         c.drawText(b.chars, 0, labelEnd, x, baseline, barPaint)
         if (split >= 0) {
-            val tx = x + barPaint.measureText(b.chars, 0, labelEnd) + barTextGap
+            val tx = x + b.labelAdvance + barTextGap
             barTimePaint.color = shadow
             c.drawText(b.chars, split + 1, b.len - split - 1, tx, baseline + dy, barTimePaint)
             barTimePaint.color = text
@@ -525,7 +579,7 @@ internal class StackedPainter(
             if (body.awaySog.isNotEmpty()) drawText(body.awaySog, cx, rowH / 2f + sogOffset, sogPaint)
             if (body.homeSog.isNotEmpty()) drawText(body.homeSog, cx, rowH * 1.5f + sogOffset, sogPaint)
             sogLabelPaint.color = argb(alpha, K.STACKED_SOG_LABEL)
-            drawText(SOG_LABEL, cx, rowH + sogLabelOffset, sogLabelPaint)
+            drawText(sogLabel, cx, rowH + sogLabelOffset, sogLabelPaint)
         }
     }
 
@@ -534,6 +588,8 @@ internal class StackedPainter(
         c.withClip(x0, 0f, x0 + f.clockWidth * clockW, h) {
             val alpha = f.clockAlpha * (if (body.columnDim) K.STACKED_DIM_ALPHA else 1f)
             if (alpha <= 0f) return@withClip
+            // (Review U N1) The inset line is the column's edge, not its content: it fades with the column but is not
+            // dimmed with a stale or delayed column's words.
             fill.color = argb(f.clockAlpha, K.STACKED_INSET_LINE)
             drawRect(x0, 0f, x0 + line, h, fill)
             val cx = x0 + clockW / 2f
@@ -551,8 +607,15 @@ internal class StackedPainter(
                 else -> if (body.slotText.isNotEmpty()) {
                     slotPaint.textSize = body.slotPx * s
                     slotPaint.color = argb(alpha, 0xFFFFFF)
-                    slotPaint.getFontMetrics(fm)
-                    drawText(body.slotText, cx, clockCy - (fm.ascent + fm.descent) / 2f, slotPaint)
+                    val brk = body.slotBreak
+                    if (brk > 0) {
+                        // Two lines (fix pass, review U S1): broken at the first space, the block centred on the slot.
+                        drawText(body.slotText, 0, brk, cx, clockCy + body.slotDy1 * s, slotPaint)
+                        drawText(body.slotText, brk + 1, body.slotText.length, cx, clockCy + body.slotDy2 * s, slotPaint)
+                    } else {
+                        slotPaint.getFontMetrics(fm)
+                        drawText(body.slotText, cx, clockCy - (fm.ascent + fm.descent) / 2f, slotPaint)
+                    }
                 }
             }
         }
@@ -640,8 +703,75 @@ internal class StackedPainter(
     /** The clock's drawn width for [secs], device px. */
     internal fun clockWidth(secs: Int): Float = (clockChars(secs, CharArray(8)) - 1) * digitCell + colonAdvance
 
-    /** The clock column's text budget, device px. */
+    /** The clock column's text budget for words, device px. */
     internal val columnTextBudget: Float get() = columnBudget()
+
+    /** The clock column's budget for the clock's advance, device px. */
+    internal val clockTextBudget: Float get() = clockBudget()
+
+    /** The lower slot's ink budget, device px (its height less the breathing above and below). */
+    internal val slotTextHeightBudget: Float get() = slotH - 2 * WORD_BREATHING * s
+
+    /** The clock's ink for [secs] exactly as [drawClock] places it, x relative to the column's centre (device px; allocates). */
+    internal fun clockInk(secs: Int): RectF {
+        val buf = CharArray(8)
+        val n = clockChars(secs, buf)
+        var x = -((n - 1) * digitCell + colonAdvance) / 2f
+        val out = RectF()
+        val path = Path()
+        val r = RectF()
+        for (i in 0 until n) {
+            val ch = buf[i]
+            val gx = if (ch == ':') x else x + (digitCell - digitAdvance[ch - '0']) / 2f
+            path.reset()
+            clockPaint.getTextPath(buf, i, 1, gx, clockCap, path)
+            path.computeBounds(r, true)
+            if (i == 0) out.set(r) else out.union(r)
+            x += if (ch == ':') colonAdvance else digitCell
+        }
+        return out
+    }
+
+    /** Which of this painter's text paints [inkBounds] measures with. */
+    internal enum class Ink { CODE, SCORE, SOG, SOG_LABEL, PERIOD, SLOT, BAR, BAR_TIME }
+
+    /**
+     * [text]'s exact ink (the glyph outlines' float bounds) as this painter's [ink] paint draws it at origin ([x], [y]),
+     * with that paint's alignment and tracking, device px; [px] overrides its size (design px). For the screenshot test's
+     * geometry probes (allocates).
+     */
+    internal fun inkBounds(ink: Ink, text: String, x: Float, y: Float, px: Float? = null): RectF {
+        val p = Paint(
+            when (ink) {
+                Ink.CODE -> codePaint
+                Ink.SCORE -> scorePaint
+                Ink.SOG -> sogPaint
+                Ink.SOG_LABEL -> sogLabelPaint
+                Ink.PERIOD -> periodPaint
+                Ink.SLOT -> slotPaint
+                Ink.BAR -> barPaint
+                Ink.BAR_TIME -> barTimePaint
+            },
+        )
+        if (px != null) p.textSize = px * s
+        // The alignment is applied here, from the advance, so the path's origin is always the text's left.
+        val left = when (p.textAlign) {
+            Paint.Align.CENTER -> x - p.measureText(text) / 2f
+            Paint.Align.RIGHT -> x - p.measureText(text)
+            else -> x
+        }
+        p.textAlign = Paint.Align.LEFT
+        val path = Path()
+        p.getTextPath(text, 0, text.length, left, y, path)
+        return RectF().also { path.computeBounds(it, true) }
+    }
+
+    /** Test seam: the y offsets [drawFrame] adds to a row's centre for the score and the SOG digits, and the label's. */
+    internal val scoreBaselineOffset: Float get() = scoreOffset
+    internal val sogBaselineOffset: Float get() = sogOffset
+    internal val sogLabelBaselineOffset: Float get() = sogLabelOffset
+    internal val codeBaselineOffset: Float get() = codeOffset
+    internal val barBaselineOffset: Float get() = barOffset
 
     companion object {
         /**
@@ -652,18 +782,22 @@ internal class StackedPainter(
         fun barTypeface(context: android.content.Context): Typeface? = sansTypeface(context, R.font.instrument_sans_bold_italic)
 
         private const val DIGITS = "0123456789"
-        private const val SOG_LABEL = "SOG"
         private const val OPAQUE = 0xFF shl 24
         /** The mock's letter-spacings (em): the team code (.01), the period (.02), the bar words (.01). */
         private const val CODE_TRACK_EM = 0.01f
         private const val PERIOD_TRACK_EM = 0.02f
         private const val BAR_TRACK_EM = 0.01f
         /**
-         * Design px kept free each side of a clock-column string's ink: the 1-px inset line on the column's left and the
-         * 1-px border on the box's right. The pill keeps 8 (`FIT_BREATHING`), but "No update" at the 18-px floor is 88 px
-         * of advance (≈ 86 of ink) in the 90-px column, so only 1 is possible (reported to the lead).
+         * (Fix pass 2026-11-11, review U B1 / S1; was 1 for both) Design px kept free each side of the clock column's
+         * text, which also clears the 1-px inset line on its left and the 1-px border on the box's right:
+         * [CLOCK_BREATHING] for the clock's tabular advance ("19:58" is ≈ 77 of the 80 left at 28.8; the mock has ≈ 5 px of
+         * air), [WORD_BREATHING] for a word's ink (the period, "END", "INT", "Delayed", each line of a two-line
+         * "No update"), and above and below a two-line block in the lower slot.
          */
-        private const val COLUMN_BREATHING = 1f
+        private const val CLOCK_BREATHING = 5f
+        private const val WORD_BREATHING = 6f
+        /** A two-line slot string's baseline-to-baseline distance, em (a tight display stack). */
+        private const val SLOT_LINE_PITCH_EM = 1.05f
 
         /** `m:ss` / `mm:ss` for [secs] (0..99:59) into [out]; returns the length. Allocation-free. */
         private fun clockChars(secs: Int, out: CharArray): Int {
@@ -695,5 +829,24 @@ internal class StackedPainter(
             }
             return (0xFF shl 24) or ch(16) or ch(8) or ch(0)
         }
+    }
+}
+
+/**
+ * (Fix pass 2026-11-11) A fitted lower-slot word ([StackedPainter.fitSlot]): its size [px] (design px); [brk] the space it
+ * breaks at onto two lines (−1 = one line); [dy1] / [dy2] the two lines' baselines relative to the slot's centre (design
+ * px, Standard scale folded out).
+ */
+internal class SlotFit(val px: Float, val brk: Int = -1, val dy1: Float = 0f, val dy2: Float = 0f)
+
+/**
+ * (Fix pass 2026-11-11, review U N11) Loads the Stacked bar's Bold Italic (88 KB) into `ResourcesCompat`'s font cache off
+ * the main thread, so the composition that first builds a [StackedPainter] finds it cached instead of reading the file
+ * there. `MainActivity` calls it on a background thread after the first frame; a no-op once cached, harmless when Stacked
+ * is never shown.
+ */
+object StackedFonts {
+    fun preload(context: android.content.Context) {
+        StackedPainter.barTypeface(context)
     }
 }
