@@ -13,7 +13,6 @@ import app.thebox.core.xtream.XtreamAccountInfo
 import app.thebox.data.contracts.PlaylistSecret
 import app.thebox.data.contracts.XtreamApi
 import app.thebox.data.contracts.XtreamConnection
-import app.thebox.data.db.dao.ChannelDao
 import app.thebox.data.db.dao.PlaylistDao
 import app.thebox.data.db.dao.XtreamAccountDao
 import app.thebox.data.db.entity.PlaylistEntity
@@ -42,7 +41,6 @@ import javax.inject.Singleton
 @Singleton
 class DataPlaybackSourceProvider @Inject constructor(
     private val channels: ChannelRepository,
-    private val channelDao: ChannelDao,
     private val playlists: PlaylistRepository,
     private val playlistDao: PlaylistDao,
     private val accountDao: XtreamAccountDao,
@@ -57,15 +55,16 @@ class DataPlaybackSourceProvider @Inject constructor(
 
     /** Not parental-filtered: a tune by identity comes from a UI that already applied the PIN (§2.4.2). */
     override suspend fun channel(identity: ChannelIdentity): ChannelStreamInfo? = withContext(io) {
-        val ch = channels.get(identity) ?: return@withContext null
-        val row = channelDao.row(identity.playlistId, identity.stableKey.value)
+        // (Review 2026-11-09, M7b) One row read: the channel and its container_ext come from the same row.
+        val read = channels.getWithRow(identity) ?: return@withContext null
+        val ch = read.channel
         ChannelStreamInfo(
             identity = identity,
             name = ch.name,
             urlTemplate = ch.streamUrl,
             headers = ch.headers,
             xtreamStreamId = ch.xtreamStreamId,
-            containerExt = row?.channel?.containerExt,
+            containerExt = read.row.channel.containerExt,
             kind = ch.kind,
             catchup = ch.catchup,
         )

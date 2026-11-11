@@ -3,6 +3,7 @@ package app.thebox.settings
 import app.thebox.core.catchup.archive.ArchivePhase
 import app.thebox.core.catchup.archive.ArchivePlayback
 import app.thebox.core.catchup.archive.ArchiveStatus
+import app.thebox.core.catchup.archive.TimelineSource
 import app.thebox.core.guide.GuideEvent
 import app.thebox.core.input.BoxAction
 import app.thebox.core.settings.SectionId
@@ -31,12 +32,12 @@ import java.lang.reflect.Proxy
  * instead of a live re-prepare (paused archive: left paused). Machine + effects + applier composed with fakes.
  */
 class ReapplyOnExitTest {
-    private class Rig(phase: ArchivePhase = ArchivePhase.IDLE) {
+    private class Rig(phase: ArchivePhase = ArchivePhase.IDLE, source: TimelineSource = TimelineSource.PROVIDER) {
         var reapplies = 0
         val seeks = ArrayList<Pair<Long, Long>>()
         /** U-L16 (code review 2026-10-16): `ArchivePlayback.reapply(playhead)` recorded apart from a seek. */
         val reapplied = ArrayList<Long>()
-        val status = MutableStateFlow(ArchiveStatus(phase = phase, wallMs = 50_000, atMs = 1_000, advancing = true))
+        val status = MutableStateFlow(ArchiveStatus(phase = phase, wallMs = 50_000, atMs = 1_000, advancing = phase != ArchivePhase.PAUSED && phase != ArchivePhase.PAUSED_LIVE, source = source))
         val controller: PlaybackController = proxy { name, _ -> if (name == "reapplySettings") reapplies++; null }
         val archive: ArchivePlayback = proxy { name, args ->
             when (name) {
@@ -142,6 +143,30 @@ class ReapplyOnExitTest {
         assertEquals(0, r.reapplies)
         assertEquals(emptyList<Pair<Long, Long>>(), r.seeks)
         assertEquals(emptyList<Long>(), r.reapplied)
+    }
+
+    @Test fun pausedInTheLocalBufferIsReappliedAtThePausedPlayhead() {
+        // Review 2026-11-09: a resume in the local buffer only continues the reader, so the change applies now through
+        // ArchivePlayback.reapply (LOCAL → the controller's paused reader re-prepare at the pin, still paused).
+        val r = Rig(ArchivePhase.PAUSED, TimelineSource.LOCAL)
+        r.open(SettingsRoute.Section(SectionId.PLAYBACK))
+        r.chooseNext(PlaybackRows.AUDIO_OUTPUT)
+        r.machine.onLeave()
+        assertEquals("not a live re-prepare at the edge", 0, r.reapplies)
+        assertEquals("the paused playhead, not advanced by the clock", listOf(50_000L), r.reapplied)
+        assertEquals(emptyList<Pair<Long, Long>>(), r.seeks)
+    }
+
+    @Test fun pausedAtLiveIsLeftForResume() {
+        for (source in TimelineSource.values()) {
+            val r = Rig(ArchivePhase.PAUSED_LIVE, source)
+            r.open(SettingsRoute.Section(SectionId.PLAYBACK))
+            r.chooseNext(PlaybackRows.BUFFER)
+            r.machine.onLeave()
+            assertEquals(0, r.reapplies)
+            assertEquals(emptyList<Long>(), r.reapplied)
+            assertEquals(emptyList<Pair<Long, Long>>(), r.seeks)
+        }
     }
 
     private companion object {

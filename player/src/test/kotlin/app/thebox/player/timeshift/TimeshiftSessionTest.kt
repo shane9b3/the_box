@@ -235,6 +235,116 @@ class TimeshiftSessionTest {
         assertEquals(2, (ringFactory as FakeRingFactory).creates)
     }
 
+    private val block = TimeshiftConstants.RING_BLOCK_BYTES
+
+    @Test
+    fun anExactCapacityMatchReusesTheRing() {
+        val f = factory
+        val first = grant(f)
+        val second = grant(f)
+        assertEquals(1, (ringFactory as FakeRingFactory).creates)
+        assertEquals(first.capacityBytes, second.capacityBytes)
+    }
+
+    @Test
+    fun aSlightlySmallerExistingRingIsReusedAndTheGrantCarriesItsSize() {
+        val f = factory
+        val first = grant(f)
+        // One block more room (review L3): the ring is kept, not rebuilt.
+        policy.capacity = first.capacityBytes + block
+        assertEquals(first.capacityBytes, grant(f).capacityBytes)
+        // 1 % of 256 MiB is above 2 blocks, so the tolerance is 1 %.
+        policy.capacity = first.capacityBytes + first.capacityBytes / 100 / block * block
+        assertEquals(first.capacityBytes, grant(f).capacityBytes)
+        assertEquals(1, (ringFactory as FakeRingFactory).creates)
+    }
+
+    @Test
+    fun theToleranceBoundaryOnTheSmallestRing() {
+        val f = factory
+        // 1,026 blocks: 1 % of the new size is just over 10 blocks (more than the 2-block floor).
+        policy.capacity = 1_026L * block
+        grant(f)
+        policy.capacity = 1_036L * block
+        assertEquals(1_026L * block, grant(f).capacityBytes)
+        assertEquals("10 blocks short is within 1 %", 1, (ringFactory as FakeRingFactory).creates)
+        policy.capacity = 1_040L * block
+        assertEquals(1_040L * block, grant(f).capacityBytes)
+        assertEquals("14 blocks short is past it: rebuilt", 2, (ringFactory as FakeRingFactory).creates)
+    }
+
+    @Test
+    fun aSlightlyLargerExistingRingIsRebuilt() {
+        val f = factory
+        val first = grant(f)
+        policy.capacity = first.capacityBytes - block
+        val second = grant(f)
+        assertEquals("a larger ring would eat into the reserve (§8.2)", 2, (ringFactory as FakeRingFactory).creates)
+        assertEquals(first.capacityBytes - block, second.capacityBytes)
+    }
+
+    @Test
+    fun aSmallerRingOutsideTheToleranceIsRebuilt() {
+        val f = factory
+        val first = grant(f)
+        policy.capacity = first.capacityBytes + first.capacityBytes / 100 + block
+        val second = grant(f)
+        assertEquals(2, (ringFactory as FakeRingFactory).creates)
+        assertEquals(policy.capacity / block * block, second.capacityBytes)
+    }
+
+    @Test
+    fun aDebugRingSizeIsAlwaysExact() {
+        val f = factory
+        try {
+            TimeshiftDebugOverrides.ringBytes = 128L * block
+            grant(f)
+            TimeshiftDebugOverrides.ringBytes = 129L * block
+            assertEquals(129L * block, grant(f).capacityBytes)
+            assertEquals(2, (ringFactory as FakeRingFactory).creates)
+        } finally {
+            TimeshiftDebugOverrides.clear()
+        }
+    }
+
+    /**
+     * Review L3 with the real §8.2 sizing on an 8 GB device limited by free space: other apps take a block, the ring
+     * shrinks (the reserve holds); they give it back, the smaller ring is kept. Free space here falls as the ring file
+     * grows, as StatFs does.
+     */
+    @Test
+    fun theFreeSpaceFloorStillHoldsWhenSpaceWobbles() {
+        val total = 8_000_000_000L
+        val reserve = maxOf(TimeshiftConstants.FREE_SPACE_RESERVE_MIN, (total * TimeshiftConstants.FREE_SPACE_RESERVE_FRACTION).toLong())
+        val n = 10_000L
+        var diskFree = reserve + n * block + block / 2
+        lateinit var st: TimeshiftStorageImpl
+        st = TimeshiftStorageImpl(
+            File(root, "cache2/timeshift"), File(root, "nb2/w"), 3, clock,
+            posix = FakePosix(), statFs = { TimeshiftStorageImpl.Space(total, diskFree - st.currentFileBytes()) },
+        )
+        val rings = FakeRingFactory(FakeTsRing())
+        val f = TimeshiftSessionFactoryImpl(
+            st, app.thebox.core.playback.timeshift.TimeshiftPolicyImpl(), rings,
+            app.thebox.core.playback.timeshift.RingWriterFactory { r, i, c, tag -> writers.create(r, i, c, tag) },
+            Provider { FakeIndexer() }, transport, clock, lowRam = false, background = { it.run() },
+        )
+        val g1 = grant(f)
+        assertEquals(n * block, g1.capacityBytes)
+
+        diskFree -= block // another app wrote a block: the floor now allows one block less
+        val g2 = grant(f)
+        assertEquals("the larger ring is not kept", 2, rings.creates)
+        assertEquals((n - 1) * block, g2.capacityBytes)
+        assertTrue("the reserve holds", g2.capacityBytes <= diskFree - reserve)
+
+        diskFree += block // and freed it again: the smaller ring is within the tolerance
+        val g3 = grant(f)
+        assertEquals("no rebuild for a one-block wobble", 2, rings.creates)
+        assertEquals((n - 1) * block, g3.capacityBytes)
+        assertTrue(g3.capacityBytes <= diskFree - reserve)
+    }
+
     @Test
     fun offNoSpaceAndStorageErrorsAreOffReasons() {
         val f = factory

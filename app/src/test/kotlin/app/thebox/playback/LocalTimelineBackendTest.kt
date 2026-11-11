@@ -290,6 +290,19 @@ class LocalTimelineBackendTest {
         assertEquals("the viewer keeps their place: no seek, no re-tune", ArchivePhase.PLAYING, r.status.phase)
     }
 
+    /** (Review 2026-11-09) The same while paused in the buffer: the controller re-prepares, the session stays paused in place. */
+    @Test fun reapplyWhilePausedInTheBufferStaysPaused() = runTest {
+        val r = Rig(this, archive = false)
+        r.buffer()
+        r.archivePlayback.pauseLive(r.channel)
+        assertEquals(ArchivePhase.PAUSED, r.status.phase)
+        val wall = r.status.wallMs
+        r.archivePlayback.reapply(wall)
+        assertEquals(listOf("pause", "reapplySettings"), r.controller.calls)
+        assertEquals("never resumed by a settings change", ArchivePhase.PAUSED, r.status.phase)
+        assertEquals(wall, r.status.wallMs)
+    }
+
     /** §11.2 seekTo inside the buffer: `seekLocal(mono(t), dir)`, SEEKING, settled at the new reader's first media. */
     @Test fun seekInsideTheBufferIsLocal() = runTest {
         val r = Rig(this, archive = false)

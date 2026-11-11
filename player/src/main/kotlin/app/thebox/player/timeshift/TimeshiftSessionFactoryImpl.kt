@@ -58,8 +58,8 @@ import kotlin.math.ceil
  * - [prepare] (IO, in parallel with the resolve; needs no resolved stream, A-N5): the sweep wait, StatFs, the sizing of
  *   §8.2, then — under one lock — the bounded join of the previous cycle's pump (`PUMP_JOIN_MAX_MS`), and either a
  *   logical reset of the existing ring (zap: `generation++`, the file is reused, §8.3) or a new file and ring when the
- *   capacity changed. The first extent is allocated here (this device only); the RAM pool covers the first seconds
- *   anyway. Answers [TimeshiftPrepared.Off] with the reason for: the setting Off (and then the file is deleted), no
+ *   capacity changed (beyond the small shrink tolerance of [capacityReusable], review L3). The first extent is
+ *   allocated here (this device only); the RAM pool covers the first seconds anyway. Answers [TimeshiftPrepared.Off] with the reason for: the setting Off (and then the file is deleted), no
  *   length, too little space (`NO_SPACE`), a storage error (`STORAGE_ERROR`).
  * - [start] (main, after the resolve): builds the writer from the resolved stream under the writer tune id and starts
  *   the pump. A pre-first-byte retry restarts that writer; it never starts a second session on a grant (fix pass B2).
@@ -228,7 +228,9 @@ internal class TimeshiftSessionFactoryImpl(
                 "prepare: ${choice.target.kind} chosen=${choice.chosenId.take(12)} fb=${choice.fallback} pool=$pool cap=${capacity shr 20}MiB " +
                     "${if (r === before) "reuse" else "build"} ${(System.nanoTime() - ringT0) / 1_000_000} ms"
             }
-            val grant = TimeshiftGrant(r, capacity, mode, hold, choice)
+            // (L3) A reused ring may be a little smaller than this cycle's sizing: the grant carries what the ring holds.
+            val ringBytes = synchronized(ringLock) { if (ring === r) ringCapacity else capacity }
+            val grant = TimeshiftGrant(r, ringBytes, mode, hold, choice)
             synchronized(ringLock) {
                 lengths[grant] = lengthMs
                 limits[grant] = dailyLimit
@@ -311,7 +313,7 @@ internal class TimeshiftSessionFactoryImpl(
             // S4: a ring made RAM-only by a disk stop, or whose file was unlinked, is rebuilt instead of reused.
             // §5.1: also a storage that is gone, needs a fresh file (A-B4) or switched to this device.
             val broken = existing != null && ((existing as? TsRingImpl)?.storageUsable == false || storageUnusable(ringStorage))
-            if (existing != null && !broken && ringCapacity == capacity && ringIndexEntries == indexEntries && ringLengthMs == lengthMs &&
+            if (existing != null && !broken && capacityReusable(ringCapacity, capacity) && ringIndexEntries == indexEntries && ringLengthMs == lengthMs &&
                 ringLocationId == target.locationId && ringPool == pool
             ) {
                 existing.reset()
@@ -360,6 +362,26 @@ internal class TimeshiftSessionFactoryImpl(
         if (ringIndexEntries != indexEntries || ringLengthMs != lengthMs || ringPool != pool) return false
         val occupied = (fb.secondaryStorage as? AndroidRingStorage)?.file?.length() ?: 0L
         return ringCapacity <= capacity + occupied
+    }
+
+    /**
+     * (Review 2026-11-09, performance L3) Whether a ring of [existingCapacity] may serve a cycle sized [capacity]. When
+     * free space limits the size (an 8 GB stick), the sizing moves by a block or so between zaps; an exact match would
+     * rebuild the ring (a new file, a new first extent, a new pool) for nothing.
+     *
+     * - **Smaller** existing ring, within [REUSE_TOLERANCE_BLOCKS] blocks or [REUSE_TOLERANCE_DIVISOR] (1 %) of
+     *   [capacity], whichever is larger: reused. It needs less space than the sizing allows, so the §8.2 reserve holds;
+     *   the window is at most 1 % shorter (about 18 s of 30 min), and a rebuild always restores the full target.
+     * - **Larger** existing ring: never reused. With the same length (checked by the caller) a capacity below the old
+     *   one means `available + currentFile − reserve` fell under it, so keeping it would eat into the reserve (§8.2).
+     *   The daily cap counts bytes written, not the ring's size, so it is not affected either way.
+     * - A debug ring size ([TimeshiftDebugOverrides.ringBytes]) is exact.
+     */
+    private fun capacityReusable(existingCapacity: Long, capacity: Long): Boolean {
+        if (existingCapacity == capacity) return true
+        if (TimeshiftDebugOverrides.ringBytes != null || existingCapacity > capacity) return false
+        val tolerance = maxOf(REUSE_TOLERANCE_BLOCKS * TimeshiftConstants.RING_BLOCK_BYTES, capacity / REUSE_TOLERANCE_DIVISOR)
+        return capacity - existingCapacity <= tolerance
     }
 
     /** §5.1 reuse: a storage that is gone, needs a fresh file (A-B4) or switched to this device is never reused. No I/O. */
@@ -668,6 +690,9 @@ internal class TimeshiftSessionFactoryImpl(
 
     private companion object {
         const val TAG = "TimeshiftFactory"
+        /** (L3) The reuse tolerance: a smaller ring within max(2 blocks, 1 %) of the new capacity is kept. */
+        const val REUSE_TOLERANCE_BLOCKS = 2L
+        const val REUSE_TOLERANCE_DIVISOR = 100L
     }
 }
 
