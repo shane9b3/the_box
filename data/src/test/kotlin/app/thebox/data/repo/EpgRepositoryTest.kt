@@ -55,6 +55,10 @@ class EpgRepositoryTest {
 
     @After fun tearDown() { db.close() }
 
+    private companion object {
+        const val HOUR = 3_600_000L
+    }
+
     private suspend fun userSource(): Long {
         val id = (g.epg.addUserSource("Guide", xml) as Outcome.Ok).value
         g.fetcher.bodies[xml] = "<tv/>"
@@ -93,6 +97,140 @@ class EpgRepositoryTest {
         // MANUAL forces a rebuild from the cached file.
         g.epg.build(Trigger.MANUAL, force = true)
         assertEquals(2, g.store.builds.get())
+    }
+
+    // ---- performance review M6 (2026-11-10): no validators, identical file, generation max age
+
+    private fun logOutcomes() = runBlocking { db.refreshLogDao().latest("EPG_BUILD", null, 10).map { it.outcome } }
+
+    @Test
+    fun identicalFileWithoutValidatorsSkipsTheBuildAsNotModified() = runBlocking {
+        val s = userSource()
+        g.fetcher.noValidators += xml
+        g.fetcher.bodies[xml] = "<tv>same</tv>"
+        assertNull(g.epg.build(Trigger.MANUAL).error)
+        assertEquals(1, g.store.builds.get())
+        val src = File(g.cacheRoot, "epg/$s.src")
+        val before = src.lastModified()
+        g.clock.advance(12 * HOUR)
+        val r = g.epg.build(Trigger.PERIODIC)
+        assertTrue(r.skipped)
+        assertNull(r.error)
+        assertEquals("no validators were sent", null, g.fetcher.requests.last().etag)
+        assertEquals("no rebuild", 1, g.store.builds.get())
+        assertTrue("the new download is dropped", !File(g.cacheRoot, "epg/$s.new").exists())
+        assertEquals("<tv>same</tv>", src.readText())
+        assertEquals(before, src.lastModified())
+        assertEquals(listOf("NOT_MODIFIED", "SUCCESS"), logOutcomes())
+    }
+
+    @Test
+    fun notModifiedResolvesAnEarlierBuildFailure() = runBlocking {
+        userSource()
+        g.epg.build(Trigger.MANUAL)
+        g.store.duringBuild = { throw IllegalStateException("disk full") }
+        g.fetcher.bodies[xml] = "<tv>changed</tv>"
+        assertEquals("internal", g.epg.build(Trigger.PERIODIC).error!!.code)
+        g.store.duringBuild = {}
+        g.fetcher.notModified += xml
+        assertTrue(g.epg.build(Trigger.PERIODIC).skipped)
+        assertEquals(listOf("NOT_MODIFIED", "FAILED", "SUCCESS"), logOutcomes())
+        assertEquals(0L, db.scalar("SELECT COUNT(*) FROM refresh_log WHERE outcome = 'FAILED' AND acknowledged = 0"))
+    }
+
+    @Test
+    fun oneByteDifferentWithTheSameLengthRebuilds() = runBlocking {
+        val s = userSource()
+        g.fetcher.noValidators += xml
+        g.fetcher.bodies[xml] = "<tv>aaaa</tv>"
+        g.epg.build(Trigger.MANUAL)
+        g.fetcher.bodies[xml] = "<tv>aaab</tv>"
+        val r = g.epg.build(Trigger.PERIODIC)
+        assertTrue(!r.skipped)
+        assertEquals(2, g.store.builds.get())
+        assertTrue(g.store.lastBuild!!.sources.single().file.name.endsWith(".new"))
+        assertEquals("<tv>aaab</tv>", File(g.cacheRoot, "epg/$s.src").readText())
+        assertEquals(listOf("SUCCESS", "SUCCESS"), logOutcomes())
+    }
+
+    @Test
+    fun differentLengthRebuilds() = runBlocking {
+        val s = userSource()
+        g.fetcher.noValidators += xml
+        g.fetcher.bodies[xml] = "<tv>aaaa</tv>"
+        g.epg.build(Trigger.MANUAL)
+        g.fetcher.bodies[xml] = "<tv>aaaa </tv>"
+        assertTrue(!g.epg.build(Trigger.PERIODIC).skipped)
+        assertEquals(2, g.store.builds.get())
+        assertEquals("<tv>aaaa </tv>", File(g.cacheRoot, "epg/$s.src").readText())
+    }
+
+    @Test
+    fun anIdenticalFileRebuildsFromTheCacheOnceTheGenerationIsOld() = runBlocking {
+        val s = userSource()
+        g.fetcher.noValidators += xml
+        g.epg.build(Trigger.MANUAL)
+        g.clock.advance(EpgRepository.MAX_UNCHANGED_GENERATION_AGE_MS - 1)
+        assertTrue(g.epg.build(Trigger.PERIODIC).skipped)
+        assertEquals(1, g.store.builds.get())
+        g.clock.advance(1)
+        val r = g.epg.build(Trigger.PERIODIC)
+        assertTrue(!r.skipped)
+        assertNull(r.error)
+        assertEquals(2, g.store.builds.get())
+        assertEquals("built from the kept file", "$s.src", g.store.lastBuild!!.sources.single().file.name)
+        assertEquals("window moves to now", g.clock.now(), g.store.lastBuild!!.nowMs)
+        assertTrue(!File(g.cacheRoot, "epg/$s.new").exists())
+        // The new generation is young again: the next identical file is skipped.
+        g.clock.advance(12 * HOUR)
+        assertTrue(g.epg.build(Trigger.PERIODIC).skipped)
+        assertEquals(2, g.store.builds.get())
+    }
+
+    @Test
+    fun notModifiedRebuildsFromTheCacheOnceTheGenerationIsOld() = runBlocking {
+        val s = userSource()
+        g.epg.build(Trigger.MANUAL)
+        g.fetcher.notModified += xml
+        g.clock.advance(19 * HOUR)
+        assertTrue(g.epg.build(Trigger.PERIODIC).skipped)
+        g.clock.advance(1 * HOUR)
+        val requests = g.fetcher.requests.size
+        val r = g.epg.build(Trigger.PERIODIC)
+        assertTrue(!r.skipped)
+        assertEquals("one conditional GET, no second download", requests + 1, g.fetcher.requests.size)
+        assertEquals(2, g.store.builds.get())
+        assertEquals("$s.src", g.store.lastBuild!!.sources.single().file.name)
+        assertTrue(db.epgSourceDao().get(s)!!.etag != null)
+        assertEquals(listOf("SUCCESS", "NOT_MODIFIED", "SUCCESS"), logOutcomes())
+    }
+
+    @Test
+    fun aGenerationBuiltInTheFutureIsRebuilt() = runBlocking {
+        // The device clock moved back after the build: the age is negative and would otherwise never reach the limit.
+        userSource()
+        g.epg.build(Trigger.MANUAL)
+        g.fetcher.notModified += xml
+        g.clock.advance(-2 * HOUR)
+        assertTrue(!g.epg.build(Trigger.PERIODIC).skipped)
+        assertEquals(2, g.store.builds.get())
+    }
+
+    @Test
+    fun sameFileBytesComparesLengthAndContent() {
+        val dir = File(g.cacheRoot, "cmp").apply { mkdirs() }
+        val big = ByteArray(200_000) { (it * 31).toByte() }
+        val a = File(dir, "a").apply { writeBytes(big) }
+        val b = File(dir, "b").apply { writeBytes(big) }
+        assertTrue(sameFileBytes(a, b))
+        b.writeBytes(big.copyOf().also { it[199_999] = (it[199_999] + 1).toByte() })
+        assertTrue("last byte differs", !sameFileBytes(a, b))
+        b.writeBytes(big.copyOf().also { it[0] = (it[0] + 1).toByte() })
+        assertTrue("first byte differs", !sameFileBytes(a, b))
+        b.writeBytes(big.copyOf(199_999))
+        assertTrue("shorter", !sameFileBytes(a, b))
+        assertTrue("missing file", !sameFileBytes(a, File(dir, "none")))
+        assertTrue(sameFileBytes(File(dir, "e1").apply { writeBytes(ByteArray(0)) }, File(dir, "e2").apply { writeBytes(ByteArray(0)) }))
     }
 
     @Test
