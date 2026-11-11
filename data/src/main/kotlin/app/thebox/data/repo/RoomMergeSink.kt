@@ -125,14 +125,10 @@ class RoomMergeSink(
                 }
             }
             if (batch.updates.isNotEmpty()) {
+                // The differ already compared the stored name's hash; no SELECT per update. A 32-bit collision
+                // (about 2^-32 per rename) leaves that channel's FTS row on the old name until its next rename.
                 val renamed = ArrayList<Pair<Long, String>>()
-                usePrepared("SELECT name FROM channel WHERE id = ?") { st ->
-                    for (u in batch.updates) {
-                        st.bindLong(1, u.id)
-                        if (st.step() && st.getText(0) != u.channel.channel.name) renamed += u.id to u.channel.channel.name
-                        st.reset()
-                    }
-                }
+                for (u in batch.updates) if (u.renamed) renamed += u.id to u.channel.channel.name
                 forEachBound(UPDATE_SQL, batch.updates) { u ->
                     bindContent(this, u.channel, 1)
                     bindLong(1 + CONTENT.size, nowMs)

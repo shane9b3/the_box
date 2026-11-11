@@ -213,7 +213,8 @@ class PlaylistDifferImpl internal constructor(
             } else {
                 val missing = index.missingSince(slot) != null
                 if (index.contentHash(slot) != contentHash) {
-                    updates += ChannelUpdate(index.id(slot), kc, restored = missing)
+                    val renamed = index.nameHash32(slot) != nameHash.toInt()
+                    updates += ChannelUpdate(index.id(slot), kc, restored = missing, renamed = renamed)
                     report.updated++
                     if (index.urlHash(slot) != urlHash) {
                         report.urlChanged++
@@ -225,7 +226,7 @@ class PlaylistDifferImpl internal constructor(
                                 if (familyByUrl.containsKey(urlHash)) null else UrlInsert(key, groupMapKey(GroupKeys.groupKind(raw.kind), groupKey))
                         }
                     }
-                    if (index.nameHash32(slot) != nameHash.toInt()) report.renamed++
+                    if (renamed) report.renamed++
                     if (missing) report.restored++
                 } else if (missing || index.sortIndex(slot) != raw.position) {
                     touches += ChannelTouch(index.id(slot), raw.position, restored = missing)

@@ -14,6 +14,7 @@ import coil3.size.Scale
 import coil3.toBitmap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlin.coroutines.cancellation.CancellationException
@@ -30,6 +31,11 @@ import kotlin.math.roundToInt
  *   draw on the hardware canvas of both hosts and keep pixels off the heap on API 26+).
  * - Our LRU holds at most [GridConstants.LOGO_CACHE] entries and [GridConstants.LOGO_CACHE_BYTES] (48 /
  *   2 MB in low-end mode, [lowEnd]); failures are remembered for the session ([failed]).
+ * - Stale loads are cancelled (review M9): the host calls [tick] once per draw; a load whose URL no [get] has asked for
+ *   in [STALE_FRAMES] draws is cancelled, so after a long D-pad hold the visible rows' logos do not queue behind rows
+ *   long off screen. A cancelled URL is neither cached nor [failed]; the next [get] starts it again. Rows that replay a
+ *   recording (O-2) do not call [get], so a still-visible row can be cancelled; the version bump on cancel re-keys the
+ *   frame, every row redraws, and [get] restarts it in the same draw.
  * - [onLoaded] fires on main after each successful load (the host bumps its image tick).
  */
 class LogoCache internal constructor(
@@ -43,7 +49,10 @@ class LogoCache internal constructor(
 
     private val lru = LinkedHashMap<String, Entry>(64, 0.75f, true)
     private val failedUrls = HashSet<String>()
-    private val inFlight = HashSet<String>()
+    private class Load(var lastFrame: Int) { var job: Job? = null }
+
+    private val inFlight = HashMap<String, Load>()
+    private var frame = 0
     private var bytes = 0L
     private var generation = 0
 
@@ -65,7 +74,9 @@ class LogoCache internal constructor(
     override fun get(url: String): GuideImage? {
         val e = lru[url]
         if (e != null) return e.image
-        if (url in failedUrls || url in inFlight) return null
+        if (url in failedUrls) return null
+        val pending = inFlight[url]
+        if (pending != null) { pending.lastFrame = frame; return null }
         load(url)
         return null
     }
@@ -77,6 +88,30 @@ class LogoCache internal constructor(
 
     override fun trim() {
         version++
+        evict()
+    }
+
+    /**
+     * Called once per draw by the host, before the renderer runs. No allocation unless a sweep cancels something:
+     * the sweep itself runs every [SWEEP_EVERY] draws and only while loads are in flight.
+     */
+    fun tick() {
+        frame++
+        if (inFlight.isEmpty() || frame % SWEEP_EVERY != 0) return
+        var cancelled = false
+        val it = inFlight.values.iterator()
+        while (it.hasNext()) {
+            val l = it.next()
+            if (frame - l.lastFrame >= STALE_FRAMES) {
+                it.remove()
+                l.job?.cancel()
+                cancelled = true
+            }
+        }
+        if (cancelled) version++
+    }
+
+    private fun evict() {
         val maxEntries = if (lowEnd) GridConstants.LOGO_CACHE_LOW_END else GridConstants.LOGO_CACHE
         val maxBytes = if (lowEnd) GridConstants.LOGO_CACHE_BYTES_LOW_END else GridConstants.LOGO_CACHE_BYTES
         val it = lru.entries.iterator()
@@ -91,17 +126,19 @@ class LogoCache internal constructor(
     override fun clear() {
         version++
         lru.clear()
+        for (l in inFlight.values) l.job?.cancel()
         inFlight.clear()
         bytes = 0
         generation++
     }
 
     private fun load(url: String) {
-        inFlight += url
+        val rec = Load(frame)
+        inFlight[url] = rec
         val gen = generation
         val w = (GridConstants.LOGO_W * scale).roundToInt().coerceAtLeast(1)
         val h = (GridConstants.LOGO_H * scale).roundToInt().coerceAtLeast(1)
-        scope.launch {
+        rec.job = scope.launch {
             val bmp = try {
                 fetch(url, w, h)
             } catch (e: CancellationException) {
@@ -109,8 +146,8 @@ class LogoCache internal constructor(
             } catch (_: Throwable) {
                 null
             }
-            if (gen != generation) return@launch
-            inFlight -= url
+            if (gen != generation || inFlight[url] !== rec) return@launch
+            inFlight.remove(url)
             if (bmp == null) {
                 failedUrls += url
                 return@launch
@@ -118,13 +155,17 @@ class LogoCache internal constructor(
             val b = bmp.allocationByteCount
             lru[url] = Entry(BitmapGuideImage(bmp), b)
             bytes += b
-            trim()
-            version++
+            evict()
+            version++   // once per arrival (review M9): the frame key hashes it, so each bump is a full invalidation
             onLoaded?.invoke()
         }
     }
 
     companion object {
+        /** Draws without a [get] before an in-flight load is cancelled: about 1 s at 60 fps, so a scroll-past-and-back is not thrashed. */
+        internal const val STALE_FRAMES = 60
+        private const val SWEEP_EVERY = 8
+
         private fun mainScope() = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
         private fun coilFetch(loader: ImageLoader, context: Context): suspend (String, Int, Int) -> Bitmap? = { url, w, h ->
