@@ -10,7 +10,10 @@ import app.thebox.data.contracts.SecureBlobStore
 import app.thebox.data.security.KeyResetFlag
 import app.thebox.data.testutil.TestDb
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.test.TestScope
+import kotlinx.coroutines.test.advanceTimeBy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -26,6 +29,7 @@ import org.robolectric.annotation.Config
  * `parental_attempts` SharedPreferences. The wall clock never shortens a wait; a reboot restarts it in full at the same
  * step; process death within a boot continues it; a pre-F7 record decodes and never unlocks earlier.
  */
+@OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
 class ParentalLockoutClockTest {
@@ -156,5 +160,119 @@ class ParentalLockoutClockTest {
         // No anchor: the wait restarts (top step at most), never ends at once.
         assertEquals(wall + LockoutPolicy.WAIT_MAX_MS, process().lockedUntil(wall))
         assertTrue(prefs.getLong("locked_elapsed", -1) >= 0)
+    }
+
+    // ---- Review 2026-11-11 S1: a value of the wrong type decodes to the worst case for its field.
+
+    /** A running 2-minute wait, 10 s in, on this boot (elapsed 50 000, anchor 40 000), with one key overridden. */
+    private fun runningWait(damage: android.content.SharedPreferences.Editor.() -> Unit) {
+        prefs.edit()
+            .putInt("failures", 6).putLong("locked_elapsed", 40_000).putInt("locked_boot", 4).putLong("wait_ms", 120_000)
+            .apply(damage).commit()
+    }
+
+    @Test fun wrongTypedFailuresDecodesToTheTopStep() = runBlocking {
+        runningWait { putString("failures", "6") }
+        assertEquals(LockoutPolicy.TOP_FAILURES, PrefsAttemptsStore(TestDb.context).read().failures)
+        assertEquals("the wait itself is untouched", wall + 110_000, process().lockedUntil(wall))
+        // Negative is damage too, never a reset.
+        runningWait { putInt("failures", -3) }
+        assertEquals(LockoutPolicy.TOP_FAILURES, PrefsAttemptsStore(TestDb.context).read().failures)
+        // The next wrong PINs climb from the top step: 13, 14 → no wait, 15 → 30 min.
+        prefs.edit().putInt("failures", -3).putLong("wait_ms", 0).commit()
+        val s = process()
+        assertEquals(PinCheck.Wrong(2), s.verify(wrong, wall))
+        assertEquals(PinCheck.Wrong(1), s.verify(wrong, wall))
+        assertEquals(PinCheck.LockedOut(wall + LockoutPolicy.WAIT_MAX_MS), s.verify(wrong, wall))
+    }
+
+    @Test fun wrongTypedWaitDecodesToThirtyMinutesReAnchoredNow() = runBlocking {
+        runningWait { putInt("wait_ms", 120_000) }
+        val a = PrefsAttemptsStore(TestDb.context).read()
+        assertEquals(LockoutPolicy.WAIT_MAX_MS, a.waitMs)
+        assertNull("re-anchored now, not credited", a.lockedAtElapsedMs)
+        assertEquals(wall + LockoutPolicy.WAIT_MAX_MS, process().lockedUntil(wall))
+        assertEquals("rewritten with the right types", LockoutPolicy.Attempts(6, 50_000, 4, LockoutPolicy.WAIT_MAX_MS), PrefsAttemptsStore(TestDb.context).read())
+        // Never longer than 30 min: it ends normally.
+        elapsed += LockoutPolicy.WAIT_MAX_MS
+        assertNull(process().lockedUntil(wall))
+        // A negative wait is damage too.
+        runningWait { putLong("wait_ms", -1) }
+        assertEquals(LockoutPolicy.WAIT_MAX_MS, PrefsAttemptsStore(TestDb.context).read().waitMs)
+    }
+
+    @Test fun wrongTypedAnchorRestartsTheWaitInFull() = runBlocking {
+        runningWait { putString("locked_elapsed", "40000") }
+        assertEquals(wall + 120_000, process().lockedUntil(wall))
+        runningWait { putLong("locked_boot", 4L) }
+        assertEquals(wall + 120_000, process().lockedUntil(wall))
+        assertEquals(LockoutPolicy.Attempts(6, 50_000, 4, 120_000), PrefsAttemptsStore(TestDb.context).read())
+    }
+
+    @Test fun everyKeyWrongTypedAtOnceNeverThrowsAndLocksAtMostThirtyMinutes() = runBlocking {
+        prefs.edit()
+            .putString("failures", "x").putString("locked_elapsed", "x").putString("locked_boot", "x").putString("wait_ms", "x")
+            .commit()
+        assertEquals(LockoutPolicy.Attempts(LockoutPolicy.TOP_FAILURES, null, null, LockoutPolicy.WAIT_MAX_MS), PrefsAttemptsStore(TestDb.context).read())
+        assertEquals(PinCheck.LockedOut(wall + LockoutPolicy.WAIT_MAX_MS), process().verify(right, wall))
+        elapsed += LockoutPolicy.WAIT_MAX_MS
+        assertEquals(PinCheck.Ok, process().verify(right, wall))
+    }
+
+    // ---- Review 2026-11-11 L2: the Android clock, BOOT_COUNT and a negative debug offset.
+
+    @Test fun androidClockReadsBootCountAndNeverGoesNegative() = runBlocking {
+        val resolver = TestDb.context.contentResolver
+        android.provider.Settings.Global.putInt(resolver, android.provider.Settings.Global.BOOT_COUNT, 5)
+        val real = AndroidLockoutClock(TestDb.context)
+        assertEquals(5, real.now(wall).bootCount)
+        try {
+            app.thebox.core.diag.DebugOverrides.clockOffsetMs = -10_000_000_000L
+            assertEquals(0L, real.now(wall).elapsedMs)
+            // A wait started under that offset is anchored at 0, not at a negative value that would never end.
+            val s = ParentalPinStoreImpl(blobs, PrefsAttemptsStore(TestDb.context), real, flag, Dispatchers.Unconfined).also { it.iterations = 100 }
+            s.verify(wrong, wall); s.verify(wrong, wall)
+            assertEquals(PinCheck.LockedOut(wall + 30_000), s.verify(wrong, wall))
+            assertEquals(0L, PrefsAttemptsStore(TestDb.context).read().lockedAtElapsedMs)
+            assertEquals(wall + 30_000, s.lockedUntil(wall))
+            // 31 s of (offset) elapsed time later the wait is over.
+            app.thebox.core.diag.DebugOverrides.clockOffsetMs = -android.os.SystemClock.elapsedRealtime() + 31_000
+            assertNull(s.lockedUntil(wall))
+        } finally {
+            app.thebox.core.diag.DebugOverrides.clockOffsetMs = 0
+        }
+    }
+
+    // ---- Review 2026-11-11 L4: the in-process settle timer.
+
+    private fun timedProcess(scope: TestScope) =
+        ParentalPinStoreImpl(blobs, PrefsAttemptsStore(TestDb.context), clock, flag, Dispatchers.Unconfined, scope).also { it.iterations = 100 }
+
+    @Test fun settleTimerClearsAServedWaitOnlyAfterTheSlackAndARebootThenFindsNothing() = runBlocking {
+        val scope = TestScope()
+        val s = timedProcess(scope)
+        s.verify(wrong, wall); s.verify(wrong, wall)
+        assertEquals(PinCheck.LockedOut(wall + 30_000), s.verify(wrong, wall))
+        elapsed += 30_000 // the device's elapsed clock runs on; nobody reads the store
+        scope.advanceTimeBy(30_000 + ParentalPinStoreImpl.SETTLE_SLACK_MS - 1)
+        assertEquals("not before the slack", 30_000L, PrefsAttemptsStore(TestDb.context).read().waitMs)
+        scope.advanceTimeBy(2)
+        assertEquals("served: cleared, counter kept", LockoutPolicy.Attempts(3), PrefsAttemptsStore(TestDb.context).read())
+        reboot()
+        assertNull(process().lockedUntil(wall))
+    }
+
+    @Test fun settleTimerThatFiresEarlyReschedulesAndClearsLater() = runBlocking {
+        val scope = TestScope()
+        val s = timedProcess(scope)
+        s.verify(wrong, wall); s.verify(wrong, wall); s.verify(wrong, wall)
+        // The timer fires but elapsed realtime says only 10 s passed (e.g. its delay ran while elapsed did not agree).
+        elapsed += 10_000
+        scope.advanceTimeBy(30_000 + ParentalPinStoreImpl.SETTLE_SLACK_MS + 1)
+        assertEquals(30_000L, PrefsAttemptsStore(TestDb.context).read().waitMs)
+        // It rescheduled for the 20 s left (+ slack); once elapsed agrees, it clears.
+        elapsed += 20_000
+        scope.advanceTimeBy(20_000 + ParentalPinStoreImpl.SETTLE_SLACK_MS + 1)
+        assertEquals(LockoutPolicy.Attempts(3), PrefsAttemptsStore(TestDb.context).read())
     }
 }

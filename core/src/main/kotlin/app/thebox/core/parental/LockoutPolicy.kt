@@ -52,6 +52,8 @@ object LockoutPolicy {
     const val WAIT_6_MS = 120_000L
     const val WAIT_9_MS = 600_000L
     const val WAIT_MAX_MS = 1_800_000L
+    /** The first count on the top step ([WAIT_MAX_MS]); a damaged stored counter decodes to it (review 2026-11-11 S1). */
+    const val TOP_FAILURES = 12
 
     /** The wait that starts when the [failures]-th consecutive wrong PIN arrives (0 = none). */
     fun waitAfter(failures: Int): Long = when {

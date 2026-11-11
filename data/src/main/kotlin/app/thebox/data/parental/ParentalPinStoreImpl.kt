@@ -44,22 +44,35 @@ class PrefsAttemptsStore @Inject constructor(@ApplicationContext context: Contex
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     /**
-     * (F7, 2026-11-11) Lenient decoding: a missing or unreadable key falls back to its default and never throws, so a
-     * damaged file can neither drop the counter silently into an exception path nor lock the PIN prompt for good. A
-     * file written before F7 has the same keys plus `locked_wall`, which is ignored (and removed on the next write);
+     * (F7, 2026-11-11) Decoding never throws. A **missing** key is its neutral default (a fresh install, or nothing
+     * written yet). A **damaged** value (wrong type, or a negative counter or wait) falls back to the worst case for its
+     * field, so damage can only lengthen a lockout, never shorten it or reset the ladder (review 2026-11-11 S1):
+     * - `failures` → [LockoutPolicy.TOP_FAILURES] (the top step);
+     * - `wait_ms` → [LockoutPolicy.WAIT_MAX_MS], re-anchored now;
+     * - `locked_elapsed` / `locked_boot` → no anchor, so a running wait is re-anchored now at its full length.
+     * A stored wait above 30 min is clamped to 30 min, so damage never locks for longer than the top step.
+     *
+     * A file written before F7 has the same keys plus `locked_wall`, which is ignored (and removed on the next write);
      * its running wait is then judged by [LockoutPolicy.resolve] on elapsed realtime alone: on the same boot it
      * continues, after a reboot it restarts in full, so an old-format wait never ends earlier than it would have.
      */
-    override fun read(): LockoutPolicy.Attempts = LockoutPolicy.Attempts(
-        failures = int(K_FAILURES, 0).coerceAtLeast(0),
-        lockedAtElapsedMs = long(K_ELAPSED, -1L).takeIf { it >= 0 },
-        lockedAtBoot = int(K_BOOT, -1).takeIf { it >= 0 },
-        // A stored wait longer than the top step is damage: clamp it so it cannot lock the prompt for longer.
-        waitMs = long(K_WAIT, 0L).coerceIn(0L, LockoutPolicy.WAIT_MAX_MS),
-    )
+    override fun read(): LockoutPolicy.Attempts {
+        val failures = int(K_FAILURES, 0)?.takeIf { it >= 0 } ?: LockoutPolicy.TOP_FAILURES
+        val storedWait = long(K_WAIT, 0L)?.takeIf { it >= 0 }
+        val elapsed = long(K_ELAPSED, -1L) // -1 = no anchor (written so); null = damaged
+        val boot = int(K_BOOT, -1)
+        val anchorUsable = storedWait != null && elapsed != null && boot != null
+        return LockoutPolicy.Attempts(
+            failures = failures,
+            lockedAtElapsedMs = elapsed?.takeIf { anchorUsable && it >= 0 },
+            lockedAtBoot = boot?.takeIf { anchorUsable && it >= 0 },
+            waitMs = (storedWait ?: LockoutPolicy.WAIT_MAX_MS).coerceAtMost(LockoutPolicy.WAIT_MAX_MS),
+        )
+    }
 
-    private fun int(key: String, def: Int): Int = try { prefs.getInt(key, def) } catch (e: ClassCastException) { def }
-    private fun long(key: String, def: Long): Long = try { prefs.getLong(key, def) } catch (e: ClassCastException) { def }
+    /** The stored value, [def] when missing, null when it has the wrong type (damage). */
+    private fun int(key: String, def: Int): Int? = try { prefs.getInt(key, def) } catch (e: ClassCastException) { null }
+    private fun long(key: String, def: Long): Long? = try { prefs.getLong(key, def) } catch (e: ClassCastException) { null }
 
     /** Synchronous (`commit`, on IO): a process kill right after a wrong PIN must not reset the counter. */
     override fun write(a: LockoutPolicy.Attempts) {
@@ -99,10 +112,17 @@ class AndroidLockoutClock @Inject constructor(@ApplicationContext private val co
         } catch (e: RuntimeException) {
             null // F26 unverified on Fire OS: unknown boot = only "elapsed went backwards" detects a reboot (LockoutPolicy)
         }
-        // The debug harness's clock offset (DebugOverrides, §6.5; 0 in release builds) moves the elapsed clock too.
-        return LockoutPolicy.Clock(SystemClock.elapsedRealtime() + app.thebox.core.diag.DebugOverrides.clockOffsetMs, wallMs, boot)
+        return LockoutPolicy.Clock(elapsedWithDebugOffset(), wallMs, boot)
     }
 }
+
+/**
+ * Elapsed realtime plus the debug harness's clock offset (DebugOverrides, §6.5; 0 in release builds), never negative:
+ * a negative offset larger than the uptime would otherwise give a negative anchor, which is stored as "no anchor" and
+ * re-anchored on every read, so the wait would never end (review 2026-11-11 L2).
+ */
+internal fun elapsedWithDebugOffset(): Long =
+    (SystemClock.elapsedRealtime() + app.thebox.core.diag.DebugOverrides.clockOffsetMs).coerceAtLeast(0L)
 
 /**
  * The parental PIN (docs/design/m5-setup-settings.md §2.6, §3.9.4, §3.9.6): a PBKDF2 verifier ([PinVerifier]) inside the
@@ -245,7 +265,7 @@ class ParentalPinStoreImpl @Inject constructor(
         }
     }
 
-    private companion object {
+    internal companion object {
         const val TAG = "ParentalPin"
         const val SETTLE_SLACK_MS = 1_000L
     }

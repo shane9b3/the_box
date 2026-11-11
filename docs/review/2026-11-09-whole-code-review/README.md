@@ -44,8 +44,10 @@ the combined fix diff, whose low-severity findings were fixed in the same commit
   only; the wall clock no longer shortens or lengthens it. After a reboot (BOOT_COUNT changed, or elapsed realtime
   below the stored anchor) the wait restarts in full at the same ladder step. **Accepted cost:** restarting the TV
   during a lockout starts the wait again (at most 30 minutes, the top step). A finished wait is recorded as served on
-  any read, on app start / return to the foreground and by an in-process timer, so a later reboot does not restart it
-  (only a wait that ran out while the app was not running and was followed by a reboot can be served twice). Pre-F7
-  records decode; their wait continues on the same boot and restarts after a reboot, never ending earlier. Sibling:
+  any read, on app start / return to the foreground and by an in-process timer, so a later reboot does not restart it.
+  A wait can still be served twice when it ran out while the app's process was dead or frozen or the device was asleep
+  (the timer does not count deep sleep) and a reboot followed before the app came back. Pre-F7 records decode; their
+  wait continues on the same boot and restarts after a reboot, never ending earlier; a damaged record decodes to the
+  worst case for each field (review `docs/review/2026-11-11-parental-lockout-clock-review.md`, fix pass). Sibling:
   the "Stay unlocked: 1 hour" timer now also ends after one hour of elapsed realtime, so a clock moved back cannot
   extend it. Clear data remains the known, accepted bypass. Design: `docs/design/m5-setup-settings.md` §3.9.4–§3.9.5.

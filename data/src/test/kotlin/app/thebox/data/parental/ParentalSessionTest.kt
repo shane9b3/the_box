@@ -162,6 +162,15 @@ class ParentalSessionTest {
         assertEquals(ParentalAccess.LOCKED_AUTO, session.state.value.access)
     }
 
+    /** (Review 2026-11-11 L4) refresh() settles the stored lockout: here a wait anchored past "now" is re-anchored. */
+    @Test fun refreshSettlesTheStoredLockout() {
+        withPin()
+        // The pins' clock reads elapsed 0, boot 1: an anchor at 5 000 means elapsed went backwards (a reboot).
+        attempts.a = LockoutPolicy.Attempts(failures = 3, lockedAtElapsedMs = 5_000, lockedAtBoot = 1, waitMs = 30_000)
+        session.refresh()
+        assertEquals(LockoutPolicy.Attempts(3, 0, 1, 30_000), attempts.a)
+    }
+
     @Test fun askEveryTimeRelocksWhenLeavingTheContent() {
         withPin()
         policy(StayUnlocked.ASK_EVERY_TIME)

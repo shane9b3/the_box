@@ -93,7 +93,7 @@ class ParentalSessionImpl @Inject constructor(
      * (F7 sibling, 2026-11-11) Elapsed realtime for the 1-hour timer, with the debug harness's offset (0 in release):
      * a wall clock moved back can no longer stretch the unlock beyond one hour of real time. Tests replace it.
      */
-    internal var elapsed: () -> Long = { android.os.SystemClock.elapsedRealtime() + app.thebox.core.diag.DebugOverrides.clockOffsetMs }
+    internal var elapsed: () -> Long = ::elapsedWithDebugOffset
 
     init {
         scope.launch {
