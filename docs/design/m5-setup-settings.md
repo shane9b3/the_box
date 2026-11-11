@@ -1584,6 +1584,8 @@ Product §4.10's "Include logins" toggle becomes a step of the backup flow (the 
 | `about.reset` | Action, destructive, PIN if set: "Reset The Box" → confirm → `ActivityManager.clearApplicationUserData()` (§9 F25) | – | G | S | – | – | RESTART |
 | `about.auto_check` | Toggle "Check for updates automatically" ("Asks GitHub once a day; sends no information about you") | On | G | A | `update.checkAutomatically` | updater | LIVE |
 
+(2026-11-11, owner request) While a release is on offer or in progress, an unregistered SIMPLE Action row `about.install` ("Install update", value = version or progress) shows directly below `about.update`: OK downloads (Available) or installs (Ready / Needs permission / Not installed); disabled while downloading, verifying or installing; absent otherwise, including Failed (no version in that state). The check row's text then points to it; OK on it still installs. Not registered, so the simple-row count stays 5.
+
 The About page opens with the wordmark (`ui/src/main/res/drawable/wordmark.xml`, white, 56 high) and the version, build type, ABI and "Installed from: {installer package or 'unknown'}".
 
 #### 3.3.11 Network (advanced section)

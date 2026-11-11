@@ -122,10 +122,11 @@ class DiagPages @Inject constructor(
 
     private fun aboutPage(route: SettingsRoute): Flow<PageModel> =
         combine(updater.state, store.flow(UpdateDomain), parental.state, notices) { u, prefs, p, n ->
-            val rows = listOf(
+            val rows = listOfNotNull(
                 SettingsRow(AboutRows.HEADER, s(R.string.about_title), kind = RowKind.Info(headerLines())),
                 SettingsRow(AboutRows.UPDATE, s(R.string.about_update), value = updateValue(u), description = n[AboutRows.UPDATE] ?: updateDesc(u),
                     kind = RowKind.Action(), enabled = u !is UpdateState.Checking && !u.isBusy, effect = EffectTiming.LIVE),
+                installRow(u),
                 SettingsRow(AboutRows.DIAGNOSTICS, s(R.string.about_diagnostics), description = s(R.string.about_diagnostics_desc),
                     kind = RowKind.Link(SettingsRoute.Diagnostics), effect = EffectTiming.NONE),
                 exportRow(AboutRows.EXPORT_LOGS, n),
@@ -137,7 +138,10 @@ class DiagPages @Inject constructor(
                 SettingsRow(AboutRows.AUTO_CHECK, s(R.string.about_auto_check), description = s(R.string.about_auto_check_desc),
                     kind = RowKind.Toggle(prefs.checkAutomatically), visibility = Visibility.ADVANCED, effect = EffectTiming.LIVE),
             )
-            PageModel(route, s(R.string.about_title), rows = rows, version = version.incrementAndGet())
+            // A failed download or install removes the Install update row; the focus goes to the check row, whose
+            // value says what failed and that OK tries again, instead of falling onto the row below.
+            PageModel(route, s(R.string.about_title), rows = rows, version = version.incrementAndGet(),
+                focus = AboutRows.UPDATE.takeIf { u is UpdateState.Failed })
         }
 
     private fun exportRow(id: RowId, n: Map<RowId, String>): SettingsRow = SettingsRow(
@@ -173,12 +177,38 @@ class DiagPages @Inject constructor(
         )
     }
 
-    /** What OK on the update row does now: it installs a release that is on offer, otherwise it checks. */
+    /**
+     * The update row's line. With a release on offer it points down to the Install update row (which [installRow]
+     * shows only then); OK on this row still installs it, so nothing that worked stops working. Otherwise it checks.
+     */
     fun updateDesc(u: UpdateState): String = when (u) {
         is UpdateState.Available -> context.getString(R.string.about_update_desc_available, u.manifest.versionName)
         is UpdateState.ReadyToInstall -> context.getString(R.string.about_update_desc_ready, u.versionName)
         is UpdateState.NotInstalled -> context.getString(R.string.about_update_desc_ready, u.versionName)
+        is UpdateState.NeedsPermission -> context.getString(R.string.about_update_desc_ready, u.versionName)
         else -> s(R.string.about_update_desc)
+    }
+
+    /**
+     * The "Install update" row, directly below the check row, while a release is on offer or in progress; null otherwise.
+     * Not registered in [AboutRows] (a row that is only sometimes there). [UpdateState.Failed] carries no version and
+     * no sign that the updater still holds the offer, so the row is absent there and the check row's "OK to try again"
+     * (a new check) is the way back.
+     */
+    fun installRow(u: UpdateState): SettingsRow? {
+        val (value, desc) = when (u) {
+            is UpdateState.Available -> u.manifest.versionName to context.getString(R.string.about_install_desc_available, u.manifest.versionName)
+            is UpdateState.Downloading -> updateValue(u) to context.getString(R.string.about_install_desc_downloading, u.versionName)
+            is UpdateState.Verifying -> updateValue(u) to context.getString(R.string.about_install_desc_verifying, u.versionName)
+            is UpdateState.NeedsPermission -> u.versionName to s(R.string.about_install_desc_permission)
+            is UpdateState.ReadyToInstall -> u.versionName to context.getString(R.string.about_install_desc_ready, u.versionName)
+            UpdateState.Installing -> updateValue(u) to s(R.string.about_install_desc_installing)
+            is UpdateState.NotInstalled -> u.versionName to context.getString(R.string.about_install_desc_not_installed, u.versionName)
+            else -> return null
+        }
+        val working = u is UpdateState.Downloading || u is UpdateState.Verifying || u == UpdateState.Installing
+        return SettingsRow(AboutRows.INSTALL, s(R.string.about_install), value = value, description = desc,
+            kind = RowKind.Action(), enabled = !working, effect = EffectTiming.LIVE)
     }
 
     fun updateValue(u: UpdateState): String {
@@ -445,6 +475,11 @@ class DiagPages @Inject constructor(
                 is UpdateState.Available -> updater.download()
                 is UpdateState.ReadyToInstall, is UpdateState.NeedsPermission, is UpdateState.NotInstalled -> updater.install()
                 else -> updater.check(manual = true)
+            }
+            id == AboutRows.INSTALL && intent is RowIntent.Run -> when (updater.state.value) {
+                is UpdateState.Available -> updater.download()
+                is UpdateState.ReadyToInstall, is UpdateState.NeedsPermission, is UpdateState.NotInstalled -> updater.install()
+                else -> Unit
             }
             id == AboutRows.AUTO_CHECK && intent is RowIntent.Toggle -> {
                 store.update(UpdateDomain) { it.copy(checkAutomatically = intent.on) }
