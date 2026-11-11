@@ -42,7 +42,11 @@ sealed interface BackupRecord {
         /** Key into the Secrets record; null when logins are not included. */
         val secretRef: String?,
     ) : BackupRecord
-    /** (N2) [ordinal] keys playlist-derived sources: (playlistUid, origin, ordinal). */
+    /**
+     * (N2) [ordinal] keys playlist-derived sources in a backup: (playlistUid, origin, ordinal). It is the guide link's
+     * position in the playlist's list at export time; a refresh pairs rows with links by address, so a re-ordered list
+     * moves the ordinal with the link (decision 2026-11-11; restore-side keying by address is open, review L2).
+     */
     @Serializable @SerialName("epg_source") data class EpgSource(val playlistUid: String?, val name: String, val origin: String, val ordinal: Int, val priority: Int, val enabled: Boolean, val shiftMin: Int, val assumeZone: String?, val secretRef: String?) : BackupRecord
     @Serializable @SerialName("group_pref") data class GroupPref(val playlistUid: String, val kind: Int, val groupKey: String, val hidden: Boolean, val locked: Boolean?, val sortIndex: Int?, val customName: String?) : BackupRecord
     /** User columns of channel_prefs only (never playback_flags, fps_milli: M2 §2.10). */

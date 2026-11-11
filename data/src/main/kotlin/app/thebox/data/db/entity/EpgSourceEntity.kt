@@ -8,7 +8,9 @@ import androidx.room.PrimaryKey
 
 /**
  * EPG sources (ordered). [id] is the stable sourceId used in epg.db and EpgChannelRef. Playlist-derived
- * sources are identified by (playlist_id, origin, ordinal) and their URL is updated in place (S14).
+ * sources are unique by (playlist_id, origin, ordinal), but a refresh pairs them with the playlist's guide links
+ * by address first and their URL is updated in place (S14); the ordinal follows the link's position in the list
+ * (`RefreshRepository.syncSources`, docs/decisions/2026-11-11-keep-header-guide-links.md).
  */
 @Entity(
     tableName = "epg_source",
