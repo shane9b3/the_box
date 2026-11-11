@@ -579,8 +579,10 @@ class ControllerTimeshiftTest {
         c.reapplySettings()
         f.idle()
         assertEquals(pinRap, f.sources.last.ring!!.startOffset)
+        assertFalse("a reapply with the same decoder mode holds the last frame: ${f.journal}", f.journal.entries.contains("player.stop"))
         f.play()
 
+        // (Ladder fix 2026-11-11) The two decisions that need a new video decoder stop the player first; the place stays.
         c.setVideoDecoderOverride(app.thebox.core.playback.VideoDecoderMode.SOFTWARE_PREFERRED)
         f.idle()
         assertEquals(pinRap, f.sources.last.ring!!.startOffset)
@@ -590,7 +592,7 @@ class ControllerTimeshiftTest {
         f.idle()
         assertEquals(pinRap, f.sources.last.ring!!.startOffset)
         f.play()
-        assertFalse("reader re-prepares never stop the player: ${f.journal}", f.journal.entries.contains("player.stop"))
+        assertEquals("one stop per decoder re-prepare: ${f.journal}", 2, f.journal.count("player.stop"))
         assertEquals("no recorder restart for reader-side work", listOf("start"), writer.calls)
 
         // selectServer: a writer restart on the chosen base; the reader (and the viewer's place) is untouched.
@@ -601,6 +603,173 @@ class ControllerTimeshiftTest {
         assertTrue(writer.calls.contains("restart:WRITER_RESTART"))
         assertEquals(1, f.resolver.calls.last().baseIndex)
         assertEquals(1, writerTransport.last.ctx.resolved.baseIndex)
+    }
+
+    // ------------------------------------------------------------------ ladder fix 2026-11-11: fresh video decoders
+
+    /** The journal from the last `player.stop` / `setMediaSource` / `prepare` of one reader re-prepare, in order. */
+    private fun assertStopThenReprepare(what: String) {
+        val j = f.journal.entries
+        val stop = j.lastIndexOf("player.stop")
+        assertTrue("$what: the player is stopped: $j", stop >= 0)
+        assertTrue("$what: stop before setMediaSource: $j", stop < j.lastIndexOf("setMediaSource"))
+        assertTrue("$what: setMediaSource before prepare: $j", j.lastIndexOf("setMediaSource") < j.lastIndexOf("prepare"))
+        assertEquals("$what: one stop: $j", 1, f.journal.count("player.stop"))
+        assertTrue("$what: the OPEN event says so", f.events.events.last { it.type == PlaybackEventType.OPEN }.detail.endsWith("fresh_video_decoder"))
+    }
+
+    /** The time-shift session survives: same ring generation, no recorder restart, one connection, still saving. */
+    private fun assertSessionSurvives(generation: Long) {
+        assertEquals(generation, ring.generation)
+        assertNull("the ring is not stopped", ring.stop)
+        assertEquals(1, ringFactory.creates)
+        assertEquals("one recorder", 1, writers.writers.size)
+        assertTrue("no recorder restart: ${writer.calls}", writer.calls.none { it.startsWith("restart") })
+        assertEquals("one connection: the writer's", 1, writerTransport.opened.size)
+        assertTrue(c.localBuffer.value!!.available)
+    }
+
+    private fun stuckDecoderStallKeepsThePlace(kind: StallKind) {
+        f.ladder.script = { _, _ -> LadderDecision.Reprepare() }
+        playBuffered()
+        goBehind()
+        val pinRap = ring.fakeIndex.offsetAt(ring.fakeIndex.floorRap(130_000L))
+        val generation = ring.generation
+        f.journal.entries.clear()
+        f.engine.watchdog.onStall!!(StallVerdict(kind, "x"))
+        f.idle()
+        assertStopThenReprepare(kind.name)
+        assertEquals("same RAP", pinRap, f.sources.last.ring!!.startOffset)
+        assertEquals(pinRap, ring.pins[PinOwner.PLAYHEAD])
+        assertSessionSurvives(generation)
+        assertTrue(f.exo.playWhenReady)
+        f.play()
+        assertTrue(f.state is PlaybackState.Playing)
+        assertTrue("still behind live", c.localBuffer.value!!.available)
+    }
+
+    @Test
+    fun aDecoderStuckStallStopsThePlayerBeforeTheReaderReprepareAndKeepsThePlace() = stuckDecoderStallKeepsThePlace(StallKind.DECODER_STUCK)
+
+    @Test
+    fun aFrozenVideoStallStopsThePlayerBeforeTheReaderReprepareAndKeepsThePlace() = stuckDecoderStallKeepsThePlace(StallKind.FROZEN_VIDEO)
+
+    @Test
+    fun aRaisedCompatReprepareAfterADecoderStallAlsoGetsAFreshDecoder() {
+        f.ladder.script = { _, _ -> LadderDecision.Reprepare(raiseTsCompat = true) }
+        playBuffered()
+        f.journal.entries.clear()
+        f.engine.watchdog.onStall!!(StallVerdict(StallKind.DECODER_STUCK, "x"))
+        f.idle()
+        assertStopThenReprepare("compat")
+    }
+
+    @Test
+    fun softwareVideoAfterAStallStopsThePlayerButAfterAPlayerErrorItIsUnchanged() {
+        f.ladder.script = { _, _ -> LadderDecision.SoftwareVideoAndReprepare }
+        playBuffered()
+        val generation = ring.generation
+        f.journal.entries.clear()
+        f.engine.watchdog.onStall!!(StallVerdict(StallKind.DECODER_STUCK, "x"))
+        f.idle()
+        assertStopThenReprepare("software video after a stall")
+        assertSessionSurvives(generation)
+        f.play()
+
+        // A player error: Media3 already reset the renderers, so the re-prepare is today's (no stop, no tag).
+        f.journal.entries.clear()
+        f.exo.emitError(PlaybackException("decode", null, PlaybackException.ERROR_CODE_DECODING_FAILED))
+        f.idle()
+        assertFalse("no extra stop after a player error: ${f.journal}", f.journal.entries.contains("player.stop"))
+        assertTrue(f.journal.entries.contains("setMediaSource"))
+        assertEquals(PlaybackEventType.OPEN, f.events.events.last { it.type == PlaybackEventType.OPEN }.type)
+        assertFalse(f.events.events.last { it.type == PlaybackEventType.OPEN }.detail.contains("fresh"))
+    }
+
+    @Test
+    fun aPausedDecoderOverrideComesBackPausedAtThePin() {
+        playBuffered()
+        goBehind()
+        c.pause()
+        f.idle()
+        val pinRap = ring.fakeIndex.offsetAt(ring.fakeIndex.floorRap(130_000L))
+        val generation = ring.generation
+        f.journal.entries.clear()
+        c.setVideoDecoderOverride(app.thebox.core.playback.VideoDecoderMode.SOFTWARE_PREFERRED)
+        f.idle()
+        assertStopThenReprepare("override")
+        assertEquals(pinRap, f.sources.last.ring!!.startOffset)
+        assertEquals(app.thebox.core.playback.VideoDecoderMode.SOFTWARE_PREFERRED, f.playerFactory.bundle!!.codecPolicy.videoMode)
+        assertSessionSurvives(generation)
+        f.play()
+        assertFalse("still paused", f.exo.playWhenReady)
+        assertEquals(true, (f.state as PlaybackState.Playing).paused)
+    }
+
+    @Test
+    fun aReapplyStopsThePlayerOnlyWhenTheDecoderModeChanged() {
+        playBuffered()
+        val generation = ring.generation
+        f.journal.entries.clear()
+        f.settings.update { it.copy(bufferMode = app.thebox.core.playback.BufferMode.LARGE) }
+        c.reapplySettings()
+        f.idle()
+        assertFalse("same decoder mode: no stop: ${f.journal}", f.journal.entries.contains("player.stop"))
+        f.play()
+
+        f.journal.entries.clear()
+        f.settings.update { it.copy(videoDecoderMode = app.thebox.core.playback.VideoDecoderMode.SOFTWARE_PREFERRED) }
+        c.reapplySettings()
+        f.idle()
+        assertStopThenReprepare("decoder mode setting")
+        assertSessionSurvives(generation)
+    }
+
+    @Test
+    fun repairsThatAlreadyTookEffectStillHoldTheLastFrame() {
+        val decisions = listOf(
+            LadderDecision.DisableTunnelingAndReprepare,
+            LadderDecision.StereoAndReprepare,
+            LadderDecision.DisablePassthroughAndReprepare(null),
+            LadderDecision.SoftwareAudioAndReprepare("audio/ac3"),
+            LadderDecision.Reprepare(),
+        )
+        var next = 0
+        f.ladder.script = { _, _ -> decisions[next] }
+        playBuffered()
+        for ((i, d) in decisions.withIndex()) {
+            next = i
+            f.journal.entries.clear()
+            // A stall that does not blame the video decoder (the plain Reprepare case) or any other stall verdict.
+            f.engine.watchdog.onStall!!(StallVerdict(if (d is LadderDecision.Reprepare) StallKind.POSITION_STUCK else StallKind.AUDIO_NOT_STARTED, "x"))
+            f.idle()
+            assertTrue("$d re-prepared: ${f.journal}", f.journal.entries.contains("setMediaSource"))
+            assertFalse("$d: no stop: ${f.journal}", f.journal.entries.contains("player.stop"))
+            f.play()
+        }
+    }
+
+    @Test
+    fun withTheBufferOffEveryDecoderRepairStopsOnceAsBefore() {
+        f.settings.update { it.copy(timeshift = TimeshiftLength.OFF) }
+        f.ladder.script = { _, _ -> LadderDecision.Reprepare() }
+        tune()
+        f.play()
+        f.journal.entries.clear()
+        f.engine.watchdog.onStall!!(StallVerdict(StallKind.DECODER_STUCK, "x"))
+        f.idle()
+        f.play()
+        c.setVideoDecoderOverride(app.thebox.core.playback.VideoDecoderMode.SOFTWARE_PREFERRED)
+        f.idle()
+        f.play()
+        f.settings.update { it.copy(videoDecoderMode = app.thebox.core.playback.VideoDecoderMode.HARDWARE_ONLY) }
+        c.reapplySettings()
+        f.idle()
+        val j = f.journal.entries
+        assertEquals("one stop per re-prepare, as before: $j", 3, f.journal.count("player.stop"))
+        assertEquals(3, f.journal.count("setMediaSource"))
+        assertTrue(f.events.events.none { it.detail.contains("fresh_video_decoder") })
+        assertTrue(f.sources.builds.none { it.ring != null })
     }
 
     @Test

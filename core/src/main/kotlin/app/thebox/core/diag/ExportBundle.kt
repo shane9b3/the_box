@@ -77,7 +77,8 @@ class ExportBundleBuilder(private val maxBytes: Int = LogLimits.LOG_EXPORT_MAX_B
         inputs.events.takeLast(EVENTS).forEach { e -> head += "${e.wallMs} +${e.elapsedMs} tune=${e.tuneId} ${e.type} ${e.code} ${e.detail}" }
         section(head, "Zaps (last $ZAPS)")
         inputs.zaps.takeLast(ZAPS).forEach { z ->
-            head += "tune=${z.tuneId} ${z.format} resolve=${z.resolveMs} lease=${z.leaseMs} firstByte=${z.firstByteMs} ready=${z.readyMs} firstFrame=${z.firstFrameMs} ${z.outcome}"
+            head += "tune=${z.tuneId} ${z.format} resolve=${z.resolveMs} lease=${z.leaseMs} firstByte=${z.firstByteMs} ready=${z.readyMs} firstFrame=${z.firstFrameMs} ${z.outcome}" +
+                (z.decoders?.let { " | ${it.summary()}" } ?: "")
         }
 
         section(tail, "Crash reports (last $CRASH_REPORTS)")

@@ -268,7 +268,9 @@ class DiagPages @Inject constructor(
             context.getString(R.string.diag_decoder_line, d.mime.removePrefix("video/").uppercase(), d.name, s(if (d.hardware) R.string.diag_decoder_hw else R.string.diag_decoder_sw), d.maxResolution ?: "?")
         }.ifEmpty { listOf(s(R.string.diag_decoders_none)) }
         val zaps = runCatching { controller.diagnostics.zaps().takeLast(ZAPS_SHOWN).reversed() }.getOrDefault(emptyList()).map { z ->
-            context.getString(R.string.diag_zap_line, z.format.name, ms(z.readyMs), ms(z.firstFrameMs), z.outcome)
+            val line = context.getString(R.string.diag_zap_line, z.format.name, ms(z.readyMs), ms(z.firstFrameMs), z.outcome)
+            // (Keep-decoders WP-0) The decoder cost of the zap; the decoder names are in the log export.
+            z.decoders?.let { d -> context.getString(R.string.diag_zap_decoders, line, ms(d.videoInitMs), ms(d.audioInitMs), ms(d.prepareToFirstFrameMs)) } ?: line
         }.ifEmpty { listOf(s(R.string.diag_zaps_none)) }
         val rows = ArrayList<SettingsRow>(16 + playlists.size)
         rows += info("diag.device", R.string.diag_device, device)
