@@ -288,6 +288,26 @@ class EpgGenerationTest {
     }
 
     @Test
+    fun buildInputsAreStoredWithTheGenerationAndReplacedByEveryFullBuild() {
+        // Review 2026-11-10 S1: the orchestrator compares this against the current inputs before skipping a build.
+        val s = store(dir)
+        s.buildAll(1L to res("basic.xml"))
+        assertNull(s.info.value!!.buildInputs, "no fingerprint requested: none stored (a generation from before S1)")
+        s.build(request(1L to res("basic.xml")).copy(buildInputs = "fp-1"), ALL)
+        assertEquals("fp-1", s.info.value!!.buildInputs)
+        assertEquals("fp-1", EpgTestDb.meta(File(dir, "epg-2.db"))["build_inputs"])
+        assertEquals(EpgSchema.IMPORTER_VERSION, EpgTestDb.meta(File(dir, "epg-2.db"))["app_version"])
+        // A patch keeps it; an in-place build replaces it, and one without a fingerprint removes the stale one.
+        s.patch(EpgPatchRequest(listOf(EpgSourceFile(1, res("basic.xml"))), listOf(EpgChannelRef(1, "bbc1.uk")), NOW_MS, 1, 7))
+        assertEquals("fp-1", s.info.value!!.buildInputs)
+        s.build(request(1L to res("basic.xml"), forceInPlace = true).copy(buildInputs = "fp-2"), ALL)
+        assertEquals("fp-2", s.info.value!!.buildInputs)
+        s.build(request(1L to res("basic.xml"), forceInPlace = true), ALL)
+        assertNull(s.info.value!!.buildInputs)
+        assertNull(EpgTestDb.meta(File(dir, "epg-2.db"))["build_inputs"])
+    }
+
+    @Test
     fun patchAddsAChannelAndReadersSeeItAfterReResolve() {
         val s = store(dir)
         s.build(request(1L to res("no_channels.xml"), 2L to res("basic.xml")), ids("a.id", "bbc1.uk"))

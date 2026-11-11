@@ -187,21 +187,21 @@ class EpgStoreImpl(
             val now = clock()
             conn.inTransaction {
                 writeSourceStats(conn, stats, now)
-                conn.putMeta(
-                    mapOf(
-                        EpgSchema.Meta.SCHEMA_VERSION to EpgSchema.SCHEMA_VERSION.toString(),
-                        EpgSchema.Meta.GENERATION to gen.toString(),
-                        EpgSchema.Meta.PATCH_SEQ to "0",
-                        EpgSchema.Meta.BUILT_AT_MS to now.toString(),
-                        EpgSchema.Meta.FTS to fts.id,
-                        EpgSchema.Meta.WINDOW_FROM_MIN to from.toString(),
-                        EpgSchema.Meta.WINDOW_TO_MIN to to.toString(),
-                        EpgSchema.Meta.PROGRAMME_COUNT to programmes.toString(),
-                        EpgSchema.Meta.CHANNEL_COUNT to channels.toString(),
-                        EpgSchema.Meta.APP_VERSION to APP_VERSION,
-                        EpgSchema.Meta.COMPLETE to "1",
-                    ),
+                val meta = hashMapOf(
+                    EpgSchema.Meta.SCHEMA_VERSION to EpgSchema.SCHEMA_VERSION.toString(),
+                    EpgSchema.Meta.GENERATION to gen.toString(),
+                    EpgSchema.Meta.PATCH_SEQ to "0",
+                    EpgSchema.Meta.BUILT_AT_MS to now.toString(),
+                    EpgSchema.Meta.FTS to fts.id,
+                    EpgSchema.Meta.WINDOW_FROM_MIN to from.toString(),
+                    EpgSchema.Meta.WINDOW_TO_MIN to to.toString(),
+                    EpgSchema.Meta.PROGRAMME_COUNT to programmes.toString(),
+                    EpgSchema.Meta.CHANNEL_COUNT to channels.toString(),
+                    EpgSchema.Meta.APP_VERSION to EpgSchema.IMPORTER_VERSION,
+                    EpgSchema.Meta.COMPLETE to "1",
                 )
+                request.buildInputs?.let { meta[EpgSchema.Meta.BUILD_INPUTS] = it }
+                conn.putMeta(meta)
             }
             conn.exec("PRAGMA journal_mode=DELETE")
             conn.close()
@@ -305,6 +305,11 @@ class EpgStoreImpl(
                     meta[EpgSchema.Meta.BUILT_AT_MS] = now.toString()
                     meta[EpgSchema.Meta.WINDOW_FROM_MIN] = from.toString()
                     meta[EpgSchema.Meta.WINDOW_TO_MIN] = to.toString()
+                    meta[EpgSchema.Meta.APP_VERSION] = EpgSchema.IMPORTER_VERSION
+                    // Review 2026-11-10 S1: the generation now holds this build's inputs; an older fingerprint must go.
+                    val inputs = request.buildInputs
+                    if (inputs != null) meta[EpgSchema.Meta.BUILD_INPUTS] = inputs
+                    else conn.query("DELETE FROM meta WHERE key = ?", { bindText(1, EpgSchema.Meta.BUILD_INPUTS) }) { it.step() }
                 }
                 conn.putMeta(meta)
             }
@@ -689,6 +694,7 @@ class EpgStoreImpl(
             windowFromMin = m[EpgSchema.Meta.WINDOW_FROM_MIN]?.toIntOrNull() ?: 0,
             windowToMin = m[EpgSchema.Meta.WINDOW_TO_MIN]?.toIntOrNull() ?: 0,
             fts = m[EpgSchema.Meta.FTS] ?: FtsKind.FTS5.id,
+            buildInputs = m[EpgSchema.Meta.BUILD_INPUTS],
         )
     }
 
@@ -795,6 +801,5 @@ class EpgStoreImpl(
         /** A parse failure after this share of the compressed bytes counts as truncation, not failure (§3.5.6). */
         const val TRUNCATION_ACCEPT = 0.9
         const val XML_RECOVERED = "XML_RECOVERED"
-        private const val APP_VERSION = "1"
     }
 }

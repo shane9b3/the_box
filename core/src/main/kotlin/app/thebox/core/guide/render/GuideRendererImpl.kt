@@ -178,6 +178,11 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
                 if (!canvas.beginRow(rowKey(base, frame, i), top)) {
                     drawRow(canvas, frame, m, i, top, bottom)
                     canvas.endRow()
+                } else if (pass != PASS_BG && frame.showLogos) {
+                    // Review 2026-11-10 S3: the replayed row's label did not call images.get, so tell the cache its
+                    // logo is still on screen (no allocation: the URL is the channel's own field).
+                    val url = rows.channel(i)?.logoUrl
+                    if (url != null) frame.images?.touch(url)
                 }
             }
             i++

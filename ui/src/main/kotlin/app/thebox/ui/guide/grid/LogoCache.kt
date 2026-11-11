@@ -33,9 +33,9 @@ import kotlin.math.roundToInt
  *   2 MB in low-end mode, [lowEnd]); failures are remembered for the session ([failed]).
  * - Stale loads are cancelled (review M9): the host calls [tick] once per draw; a load whose URL no [get] has asked for
  *   in [STALE_FRAMES] draws is cancelled, so after a long D-pad hold the visible rows' logos do not queue behind rows
- *   long off screen. A cancelled URL is neither cached nor [failed]; the next [get] starts it again. Rows that replay a
- *   recording (O-2) do not call [get], so a still-visible row can be cancelled; the version bump on cancel re-keys the
- *   frame, every row redraws, and [get] restarts it in the same draw.
+ *   long off screen. A cancelled URL is neither cached nor [failed]; the next [get] or [touch] starts it again. Rows that
+ *   replay a recording (O-2) call [touch] instead of [get] (review 2026-11-10, S3), so a visible row's load is never
+ *   cancelled and a cancel does not bump [version].
  * - [onLoaded] fires on main after each successful load (the host bumps its image tick).
  */
 class LogoCache internal constructor(
@@ -81,6 +81,15 @@ class LogoCache internal constructor(
         return null
     }
 
+    /**
+     * Review 2026-11-10 S3: [get] without the result, for rows replayed from a recording. A hit marks the entry recently
+     * drawn, a pending load stays alive (map lookup, no allocation), and a URL that is neither cached, failed nor in
+     * flight starts its load, as [get] would: the row's recording can outlive a load cancelled while it was off screen.
+     */
+    override fun touch(url: String) {
+        get(url)
+    }
+
     override fun failed(url: String): Boolean = url in failedUrls
 
     override var version: Long = 0L
@@ -98,17 +107,16 @@ class LogoCache internal constructor(
     fun tick() {
         frame++
         if (inFlight.isEmpty() || frame % SWEEP_EVERY != 0) return
-        var cancelled = false
         val it = inFlight.values.iterator()
         while (it.hasNext()) {
             val l = it.next()
             if (frame - l.lastFrame >= STALE_FRAMES) {
                 it.remove()
                 l.job?.cancel()
-                cancelled = true
             }
         }
-        if (cancelled) version++
+        // No version bump (review 2026-11-10, S3): visible rows call get or touch every draw, so only off-screen loads
+        // are cancelled, and what get returns for a visible row did not change. Bumping it re-recorded every row.
     }
 
     private fun evict() {

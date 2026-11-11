@@ -290,7 +290,12 @@ class LocalTimelineBackendTest {
         assertEquals("the viewer keeps their place: no seek, no re-tune", ArchivePhase.PLAYING, r.status.phase)
     }
 
-    /** (Review 2026-11-09) The same while paused in the buffer: the controller re-prepares, the session stays paused in place. */
+    /**
+     * The same while paused in the buffer: the controller re-prepares, the session stays paused in place. This routing
+     * predates the paused-reapply fix (`ArchivePlaybackImpl.reapply` sends every LOCAL session to the controller), so
+     * this test does not pin the fix (`ReapplyOnExitTest.pausedInTheLocalBufferIsReappliedAtThePausedPlayhead` does);
+     * it pins the contract the fix relies on: no resume, no seek, no provider re-request (review 2026-11-10).
+     */
     @Test fun reapplyWhilePausedInTheBufferStaysPaused() = runTest {
         val r = Rig(this, archive = false)
         r.buffer()

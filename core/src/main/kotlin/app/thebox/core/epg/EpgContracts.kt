@@ -58,6 +58,11 @@ data class EpgBuildRequest(
     val preferredLanguages: List<String> = emptyList(),
     /** Test/diagnostic switch: skip the disk check and use the in-place path. */
     val forceInPlace: Boolean = false,
+    /**
+     * (2026-11-10, deferred-items review S1) [EpgBuildInputs.fingerprint] of what this build was made from. Stored in
+     * the generation's meta and returned as [EpgGenerationInfo.buildInputs]; null stores nothing.
+     */
+    val buildInputs: String? = null,
 )
 
 data class EpgPatchRequest(
@@ -119,6 +124,8 @@ data class EpgGenerationInfo(
     val windowFromMin: Int,
     val windowToMin: Int,
     val fts: String,
+    /** (2026-11-10, review S1) [EpgBuildRequest.buildInputs] of the last full build; null for a generation built before. */
+    val buildInputs: String? = null,
 )
 
 fun interface FreeSpace {

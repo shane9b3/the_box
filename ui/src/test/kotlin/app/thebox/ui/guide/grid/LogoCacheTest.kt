@@ -2,9 +2,12 @@ package app.thebox.ui.guide.grid
 
 import android.content.ComponentCallbacks2
 import android.graphics.Bitmap
+import app.thebox.core.guide.GuideCanvas
 import app.thebox.core.guide.fakes.FakeGuideRenderer
+import app.thebox.core.guide.fakes.RecordingGuideCanvas
 import app.thebox.core.guide.fakes.FakeTextMeasurer
 import app.thebox.core.guide.layout.GridConstants
+import app.thebox.core.guide.render.GuideReferenceFrame
 import app.thebox.core.guide.render.GuideRendererImpl
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
@@ -170,13 +173,97 @@ class LogoCacheTest {
         assertTrue("cancelled loads did not add a failure", !c.failed("a"))
     }
 
+    // ---- review 2026-11-10 S3: rows replayed from a recording touch their logo instead of getting it
+
     @Test
-    fun cancellingBumpsTheVersionSoVisibleRowsRequestAgain() {
+    fun cancellingDoesNotBumpTheVersion() {
         val c = cancellableCache()
         c.get("a")
         val v = c.version
         c.ticks(LogoCache.STALE_FRAMES + 16)
-        assertTrue(c.version > v)
+        assertEquals(listOf("a"), cancelled)
+        assertEquals("only off-screen loads are cancelled: no row needs re-recording", v, c.version)
+    }
+
+    @Test
+    fun aTouchedPendingLoadSurvivesPastTheStaleWindow() {
+        val c = cancellableCache()
+        c.get("visible"); c.get("gone")
+        repeat(LogoCache.STALE_FRAMES * 3) { c.tick(); c.touch("visible") }
+        assertEquals("the off-screen one is still cancelled", listOf("gone"), cancelled)
+        assertEquals("touch did not start a second load", 2, requests.size)
+        pending["visible"]!!.complete(bmp())
+        scope.advanceUntilIdle()
+        assertNotNull(c.get("visible"))
+    }
+
+    @Test
+    fun touchRestartsALoadCancelledWhileItsRowWasOffScreen() {
+        // The row's recording outlived the cancel: replaying it must bring the load back, as get would.
+        val c = cancellableCache()
+        c.get("a")
+        c.ticks(LogoCache.STALE_FRAMES + 16)
+        assertEquals(listOf("a"), cancelled)
+        c.touch("a")
+        assertEquals(2, requests.size)
+        c.touch("a")
+        assertEquals("deduplicated like get", 2, requests.size)
+        pending["a"]!!.complete(bmp())
+        scope.advanceUntilIdle()
+        assertNotNull(c.get("a"))
+    }
+
+    @Test
+    fun touchKeepsACachedLogoRecentlyUsedAndLeavesFailuresAlone() {
+        val c = LogoCache({ url, _, _ -> if (url == "bad") null else bmp(96, 40) }, scope)
+        c.get("keep"); c.get("bad")
+        scope.advanceUntilIdle()
+        c.lowEnd = true
+        for (i in 0 until GridConstants.LOGO_CACHE_LOW_END - 1) c.get("u$i")
+        scope.advanceUntilIdle()
+        c.touch("keep")                                  // replayed: still on screen
+        c.get("one-more"); scope.advanceUntilIdle()      // evicts the least recently used
+        assertNotNull("touched entry survives", c.get("keep"))
+        c.touch("bad")
+        assertTrue(c.failed("bad"))
+    }
+
+    @Test
+    fun aReplayedVisibleRowKeepsItsLoadAliveThroughTheRenderer() {
+        // End to end with O-2 replays: after the first draw every row replays, so only touch reaches the cache.
+        val c = cancellableCache()
+        val frame = GuideReferenceFrame.build(FakeTextMeasurer(), images = c)
+        val renderer = GuideRendererImpl(FakeTextMeasurer())
+        val canvas = ReplayingCanvas()
+        repeat(LogoCache.STALE_FRAMES * 3) {
+            c.tick()
+            renderer.draw(canvas, frame, frame.windowStartMin, 0f, GuideReferenceFrame.SCROLL_ROW)
+        }
+        assertTrue("rows were replayed", canvas.replayed > 0)
+        assertTrue("visible logos were requested", requests.isNotEmpty())
+        assertEquals("no visible row's load was cancelled", emptyList<String>(), cancelled)
+        assertEquals("one load per visible logo", requests.map { it.first }.toSet().size, requests.size)
+        val v = c.version
+        // Scrolled far away: the old rows' loads go stale and are cancelled, without a version bump.
+        repeat(LogoCache.STALE_FRAMES + 16) {
+            c.tick()
+            renderer.draw(canvas, frame, frame.windowStartMin, 0f, 30f)
+        }
+        assertTrue(cancelled.containsAll(listOf("logo://1", "logo://2")))
+        assertEquals(v, c.version)
+    }
+
+    /** Records each key once and replays it after, like the API 29+ RenderNode adapter. */
+    private class ReplayingCanvas(private val inner: RecordingGuideCanvas = RecordingGuideCanvas()) : GuideCanvas by inner {
+        private val known = HashSet<Long>()
+        var replayed = 0
+        override fun beginRow(key: Long, top: Float): Boolean {
+            inner.ops.clear()
+            if (key in known) { replayed++; return true }
+            known += key
+            return false
+        }
+        override fun endRow() {}
     }
 
     @Test

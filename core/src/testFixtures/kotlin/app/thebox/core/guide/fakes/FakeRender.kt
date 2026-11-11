@@ -64,8 +64,11 @@ class FakeGuideImages(
     val failing: MutableSet<String> = HashSet(),
 ) : GuideImages {
     val requested = ArrayList<String>()
+    /** URLs of rows replayed from a recording (review 2026-11-10, S3). */
+    val touched = ArrayList<String>()
     var trims = 0
     override fun get(url: String): GuideImage? { requested += url; return loaded[url] }
+    override fun touch(url: String) { touched += url }
     override fun failed(url: String): Boolean = url in failing
     override var onLoaded: (() -> Unit)? = null
     override fun trim() { trims++ }

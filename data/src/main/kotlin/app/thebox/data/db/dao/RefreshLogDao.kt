@@ -56,6 +56,17 @@ interface RefreshLogDao {
     @Query("SELECT * FROM refresh_log WHERE target_type = :targetType AND target_id IS :targetId ORDER BY started_at DESC, id DESC LIMIT :limit")
     suspend fun latest(targetType: String, targetId: Long?, limit: Int = 1): List<RefreshLogEntity>
 
+    /**
+     * (review 2026-11-10, S2) `finished_at` of the newest row (by id, so a clock jump cannot reorder them) of one target
+     * that reached its source and found it current: SUCCESS or NOT_MODIFIED. A FAILED row never counts. Null when none.
+     */
+    @Query(
+        """
+        SELECT finished_at FROM refresh_log WHERE target_type = :targetType AND target_id IS :targetId
+        AND outcome IN ('SUCCESS', 'NOT_MODIFIED') ORDER BY id DESC LIMIT 1""",
+    )
+    suspend fun lastCurrentAt(targetType: String, targetId: Long?): Long?
+
     @Query("SELECT * FROM refresh_log WHERE target_type = :targetType AND target_id IS :targetId ORDER BY started_at DESC, id DESC")
     fun observe(targetType: String, targetId: Long?): Flow<List<RefreshLogEntity>>
 

@@ -165,15 +165,17 @@ class EpgRepositoryTest {
         assertEquals("<tv>aaaa </tv>", File(g.cacheRoot, "epg/$s.src").readText())
     }
 
+    // Review 2026-11-10 N1: with the default 12 h schedule an unchanged guide skips while shrunk + 12 h ≤ 26 h.
+
     @Test
-    fun anIdenticalFileRebuildsFromTheCacheOnceTheGenerationIsOld() = runBlocking {
+    fun anIdenticalFileRebuildsFromTheCacheOnceTheWindowWouldShrinkTooFar() = runBlocking {
         val s = userSource()
         g.fetcher.noValidators += xml
         g.epg.build(Trigger.MANUAL)
-        g.clock.advance(EpgRepository.MAX_UNCHANGED_GENERATION_AGE_MS - 1)
+        g.clock.advance(13 * HOUR)
         assertTrue(g.epg.build(Trigger.PERIODIC).skipped)
         assertEquals(1, g.store.builds.get())
-        g.clock.advance(1)
+        g.clock.advance(2 * HOUR)
         val r = g.epg.build(Trigger.PERIODIC)
         assertTrue(!r.skipped)
         assertNull(r.error)
@@ -181,20 +183,20 @@ class EpgRepositoryTest {
         assertEquals("built from the kept file", "$s.src", g.store.lastBuild!!.sources.single().file.name)
         assertEquals("window moves to now", g.clock.now(), g.store.lastBuild!!.nowMs)
         assertTrue(!File(g.cacheRoot, "epg/$s.new").exists())
-        // The new generation is young again: the next identical file is skipped.
+        // The new generation covers the window again: the next identical file is skipped.
         g.clock.advance(12 * HOUR)
         assertTrue(g.epg.build(Trigger.PERIODIC).skipped)
         assertEquals(2, g.store.builds.get())
     }
 
     @Test
-    fun notModifiedRebuildsFromTheCacheOnceTheGenerationIsOld() = runBlocking {
+    fun notModifiedRebuildsFromTheCacheOnceTheWindowWouldShrinkTooFar() = runBlocking {
         val s = userSource()
         g.epg.build(Trigger.MANUAL)
         g.fetcher.notModified += xml
-        g.clock.advance(19 * HOUR)
+        g.clock.advance(13 * HOUR)
         assertTrue(g.epg.build(Trigger.PERIODIC).skipped)
-        g.clock.advance(1 * HOUR)
+        g.clock.advance(2 * HOUR)
         val requests = g.fetcher.requests.size
         val r = g.epg.build(Trigger.PERIODIC)
         assertTrue(!r.skipped)
@@ -203,6 +205,133 @@ class EpgRepositoryTest {
         assertEquals("$s.src", g.store.lastBuild!!.sources.single().file.name)
         assertTrue(db.epgSourceDao().get(s)!!.etag != null)
         assertEquals(listOf("SUCCESS", "NOT_MODIFIED", "SUCCESS"), logOutcomes())
+    }
+
+    @Test
+    fun sixHourScheduleRebuildsAnUnchangedGuideEveryFourthRun() = runBlocking {
+        userSource()
+        g.settings.update { it.copy(epgRefreshIntervalH = 6, epgFutureDays = 3) }
+        g.epg.build(Trigger.MANUAL)
+        g.fetcher.notModified += xml
+        val built = ArrayList<Boolean>()
+        repeat(8) {
+            g.clock.advance(6 * HOUR)
+            built += !g.epg.build(Trigger.PERIODIC).skipped
+        }
+        assertEquals(listOf(false, false, false, true, false, false, false, true), built)
+    }
+
+    @Test
+    fun dailyScheduleRebuildsEveryRunEvenAfterAMidCycleBuild() = runBlocking {
+        // N1: the old 20 h age rule skipped the 24 h run after a manual build at 5 h, so the window lost ~43 h.
+        userSource()
+        g.settings.update { it.copy(epgRefreshIntervalH = 24, epgFutureDays = 3) }
+        g.epg.build(Trigger.MANUAL)
+        g.fetcher.notModified += xml
+        g.clock.advance(5 * HOUR)
+        g.epg.build(Trigger.MANUAL, force = true)
+        assertEquals(2, g.store.builds.get())
+        g.clock.advance(19 * HOUR)
+        assertTrue(!g.epg.build(Trigger.PERIODIC).skipped)
+        g.clock.advance(24 * HOUR)
+        assertTrue(!g.epg.build(Trigger.PERIODIC).skipped)
+        assertEquals(4, g.store.builds.get())
+    }
+
+    // ---- review 2026-11-10 S1: the skip also requires the build inputs to match
+
+    @Test
+    fun aChangedNextImportSettingRebuildsAnIdenticalFileFromTheCache() = runBlocking {
+        val s = userSource()
+        g.fetcher.noValidators += xml
+        g.epg.build(Trigger.MANUAL)
+        g.settings.update { it.copy(epgFutureDays = 14) }
+        g.clock.advance(1 * HOUR)
+        val requests = g.fetcher.requests.size
+        val r = g.epg.build(Trigger.PERIODIC)
+        assertTrue(!r.skipped)
+        assertEquals("one download, no second one", requests + 1, g.fetcher.requests.size)
+        assertEquals(2, g.store.builds.get())
+        assertEquals("$s.src", g.store.lastBuild!!.sources.single().file.name)
+        assertEquals(14, g.store.lastBuild!!.futureDays)
+        // Inputs unchanged now: skipped again.
+        g.clock.advance(1 * HOUR)
+        assertTrue(g.epg.build(Trigger.PERIODIC).skipped)
+        // Descriptions, languages and matching are build inputs too.
+        for (change in listOf<(DataSettingsSnapshot) -> DataSettingsSnapshot>(
+            { it.copy(storeDescriptions = false) },
+            { it.copy(preferredLanguages = listOf("fr")) },
+            { it.copy(match = it.match.copy(caseInsensitiveIds = false)) },
+        )) {
+            val before = g.store.builds.get()
+            g.settings.update(change)
+            assertTrue(!g.epg.build(Trigger.PERIODIC).skipped)
+            assertEquals(before + 1, g.store.builds.get())
+            assertTrue(g.epg.build(Trigger.PERIODIC).skipped)
+        }
+    }
+
+    @Test
+    fun aGenerationWithoutAFingerprintIsRebuiltOnce() = runBlocking {
+        // A generation built before S1 has no build_inputs: one rebuild from the cache stores them, then skips resume.
+        userSource()
+        g.epg.build(Trigger.MANUAL)
+        g.store.dropBuildInputs()
+        g.fetcher.notModified += xml
+        assertTrue(!g.epg.build(Trigger.PERIODIC).skipped)
+        assertTrue(g.epg.build(Trigger.PERIODIC).skipped)
+        assertEquals(2, g.store.builds.get())
+    }
+
+    @Test
+    fun aChangedSourceZoneRebuilds() = runBlocking {
+        val s = userSource()
+        g.epg.build(Trigger.MANUAL)
+        g.fetcher.notModified += xml
+        assertTrue(g.epg.build(Trigger.PERIODIC).skipped)
+        db.epgSourceDao().update(db.epgSourceDao().get(s)!!.copy(assumeZone = "Europe/Berlin"))
+        assertTrue(!g.epg.build(Trigger.PERIODIC).skipped)
+    }
+
+    // ---- review 2026-11-10 S4
+
+    @Test
+    fun aFailedSourceNextToAnIdenticalOneLogsNoNotModifiedRow() = runBlocking {
+        val a = userSource()
+        val xml2 = "http://epg2.example/guide.xml"
+        val b = (g.epg.addUserSource("Guide 2", xml2) as Outcome.Ok).value
+        g.fetcher.bodies[xml2] = "<tv>b</tv>"
+        g.fetcher.noValidators += xml2
+        g.store.catalogue[b] = listOf(epgChannel(b, "cnn", "CNN"))
+        assertNull(g.epg.build(Trigger.MANUAL).error)
+        // An earlier failed build row.
+        g.store.duringBuild = { throw IllegalStateException("disk full") }
+        g.fetcher.bodies[xml] = "<tv>changed</tv>"
+        assertEquals("internal", g.epg.build(Trigger.PERIODIC).error!!.code)
+        g.store.duringBuild = {}
+        g.fetcher.bodies[xml] = "<tv/>"
+        // A answers 500 (its cached .src is used), B is byte-identical.
+        g.fetcher.errors[xml] = SourceError.Http(500)
+        assertTrue(File(g.cacheRoot, "epg/$a.src").exists())
+        val rows = logOutcomes().size
+        val r = g.epg.build(Trigger.PERIODIC)
+        assertTrue(r.skipped)
+        assertEquals("no new row", rows, logOutcomes().size)
+        assertEquals(listOf("FAILED", "SUCCESS"), logOutcomes())
+        assertEquals("A's failure is still shown", 1L, db.scalar("SELECT COUNT(*) FROM refresh_log WHERE outcome = 'FAILED' AND acknowledged = 0"))
+    }
+
+    @Test
+    fun manualForceWithAnIdenticalFileRebuildsFromTheKeptFile() = runBlocking {
+        val s = userSource()
+        g.fetcher.noValidators += xml
+        g.epg.build(Trigger.MANUAL)
+        val r = g.epg.build(Trigger.MANUAL, force = true)
+        assertTrue(!r.skipped)
+        assertNull(r.error)
+        assertTrue(!File(g.cacheRoot, "epg/$s.new").exists())
+        assertEquals("$s.src", g.store.lastBuild!!.sources.single().file.name)
+        assertEquals(listOf("SUCCESS", "SUCCESS"), logOutcomes())
     }
 
     @Test
@@ -231,6 +360,8 @@ class EpgRepositoryTest {
         assertTrue("shorter", !sameFileBytes(a, b))
         assertTrue("missing file", !sameFileBytes(a, File(dir, "none")))
         assertTrue(sameFileBytes(File(dir, "e1").apply { writeBytes(ByteArray(0)) }, File(dir, "e2").apply { writeBytes(ByteArray(0)) }))
+        // Review 2026-11-10 N4: a cancelled worker stops the compare at the next buffer.
+        assertTrue(runCatching { sameFileBytes(a, a) { true } }.exceptionOrNull() is kotlin.coroutines.cancellation.CancellationException)
     }
 
     @Test

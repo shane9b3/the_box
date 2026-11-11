@@ -85,3 +85,6 @@ Known gaps (from the review, open): with several guide sources, a source that fa
 dropped from a build that still logs SUCCESS, so its earlier failure is cleared while its data is missing (narrow,
 predates this change). A playlist refresh that fails after the merge saved the new ETag gets a 304 next time, and that
 NOT_MODIFIED clears the failure although the post-merge steps did not re-run (rare).
+(amended 2026-11-10, review of the deferred fixes N3) Since the unchanged-guide skip (performance review M6), the first
+gap also applies when every other source answers 304 or an identical file: the periodic rebuild that keeps the future
+window moving (at least once a day) drops such a source the same way, where before it stayed in the generation.

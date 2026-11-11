@@ -502,6 +502,8 @@ A kicked or refused recorder stops (`SLOT_LOST`) and never reconnects while paus
 | `selectServer` (`:535`) | writer restart on the chosen base; reader untouched |
 | seeks, boundaries, Back to live | reader-only (§6) |
 
+(amended 2026-11-10) `LiveSettingsApplierImpl` now calls `reapplySettings` for a session paused in the local buffer (`ArchivePhase.PAUSED`, `TimelineSource.LOCAL`) through `ArchivePlayback.reapply`. The reader re-prepares at the PLAYHEAD pin, the RAP before the paused frame, so the paused picture and the resume point can move back by up to one GOP.
+
 ---
 
 ## 8. Disk policy and flash wear
@@ -530,7 +532,7 @@ capacity = floorToBlocks(clamp(lengthMs/1000 × rate × 1.15, 64 MiB,
 |---|---|
 | App start | sweep `cacheDir/timeshift/` for every file not named `ring-<this pid>.bin`; `prepare()` awaits the sweep |
 | First buffered tune | create, write the header, allocate extents as the head grows |
-| Zap | **logical reset** (`generation++`, after the old pump exits); the file is reused |
+| Zap | **logical reset** (`generation++`, after the old pump exits); the file is reused. (amended 2026-11-10, review L3) The ring is reused when its capacity equals the new sizing or is smaller by at most max(2 blocks, 1 % of the new sizing); a larger ring, a capacity outside that tolerance, a different length, index size, pool or location, or a debug ring size (`TimeshiftDebugOverrides.ringBytes`, exact) rebuilds it. A smaller ring keeps the §8.2 reserve; the window is at most 1 % shorter until the next rebuild. The grant carries the ring's actual capacity. |
 | Stop, lifecycle stop, length set to Off, next tune unbuffered, `onTrimMemory(TRIM_MEMORY_COMPLETE)` | close the fd, then delete |
 
 ### 8.4 Flash-wear budget (lead ruling 2)
@@ -1513,7 +1515,7 @@ On the main working tree, uncommitted (the lead commits). `./gradlew :player:tes
 - `AndroidRingStorage.kt`: `RandomAccessFile`/`FileChannel` positional I/O from direct buffers (pwrite/pread, A-S8), `Os.posix_fallocate` behind a `RingPosix` seam with the sparse `setLength` fallback (EOPNOTSUPP/ENOSYS/no native `Os`; ENOSPC is an error), `Os.fstat(fd).st_nlink` with a re-stat fallback, StatFs space, close-then-unlink `delete()`, every written byte to the daily counter. Header through WP-A's `RingHeaderCodec`.
 - `TimeshiftStorageImpl.kt`: `cacheDir/timeshift/ring-<pid>.bin`, the once-per-process sweep on a background thread that spares this pid's file, `awaitSweep()`, StatFs, and the daily write counter in `noBackupFilesDir/timeshift-writes` (`<date> <bytes>`, local-midnight reset, persisted every 64 MiB).
 - `TimeshiftSessionImpl.kt`: the cycle's session (writer under `writerTuneId`, stash, pause hold, writer restart with a new upstream under the same id, connection release on FULL/HOLD/SLOT_LOST/PREEMPTED/UPSTREAM_FAILED, not-saved ranges, `snapshot`), plus `TimeshiftSessionControl` (below). Close order: `writer.stop(SESSION_END)` → `transport.endSession(writerTuneId)` (call cancelled, then lease) → `writer.close()`; the pump is joined by the next `prepare`.
-- `TimeshiftSessionFactoryImpl.kt`: the A-C1 split. `prepare` (IO): Off → delete the file; sweep wait, StatFs, sizing through `TimeshiftPolicy` and the debug overrides, `NO_SPACE` below `MIN_RING_BYTES`, then under one lock the bounded join of the previous pump and either a logical `reset()` (zap; file reused) or a new storage + ring when the capacity changed; first extent allocated; `STORAGE_ERROR` on `IOException`. `start` (main): writer + fresh indexer, session started. Discard (stop, lifecycle, Off, trim) closes the ring, closes the fd, deletes the file, never under an open session. Also `TimeshiftPrefsSource`/`StoreTimeshiftPrefs` and `NoTimeshiftFactory`.
+- `TimeshiftSessionFactoryImpl.kt`: the A-C1 split. `prepare` (IO): Off → delete the file; sweep wait, StatFs, sizing through `TimeshiftPolicy` and the debug overrides, `NO_SPACE` below `MIN_RING_BYTES`, then under one lock the bounded join of the previous pump and either a logical `reset()` (zap; file reused) or a new storage + ring when the capacity changed beyond the §8.3 tolerance; first extent allocated; `STORAGE_ERROR` on `IOException`. `start` (main): writer + fresh indexer, session started. Discard (stop, lifecycle, Off, trim) closes the ring, closes the fd, deletes the file, never under an open session. Also `TimeshiftPrefsSource`/`StoreTimeshiftPrefs` and `NoTimeshiftFactory`.
 - `TimeshiftStartup.kt` (public): `onAppStart()` (sweep) and `onTrimMemoryComplete()`; `TimeshiftDebugOverrides.kt`: a public object (ring bytes, hold, daily cap, free space) for WP-D's debug receiver; `TimeshiftModule.kt`: + `WriterTransport` → `TransportFactoryImpl`, `TimeshiftPrefsSource` → `StoreTimeshiftPrefs`, an unscoped `TsIndexer` provider.
 
 **Edits:**

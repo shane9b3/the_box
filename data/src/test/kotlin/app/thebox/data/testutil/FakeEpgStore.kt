@@ -75,7 +75,12 @@ class FakeEpgStore(
             stats += EpgSourceStat(s.sourceId, channels.size, kept, kept, 0, 0, 0, 0, 0, s.file.length(), false, null)
         }
         val gen = (state.value?.generation ?: 0) + 1
-        state.value = EpgGenerationInfo(gen, 0, request.nowMs, programmes, catalogue.values.sumOf { it.size }, 1000, 0, 0, "fts4")
+        // The real store's window ([now − pastDays, now + futureDays) in epoch minutes) and fingerprint (review 2026-11-10).
+        val nowMin = Math.floorDiv(request.nowMs, 60_000L)
+        state.value = EpgGenerationInfo(
+            gen, 0, request.nowMs, programmes, catalogue.values.sumOf { it.size }, 1000,
+            (nowMin - request.pastDays * 1440L).toInt(), (nowMin + request.futureDays * 1440L).toInt(), "fts4", request.buildInputs,
+        )
         return EpgImportReport(EpgImportReport.Mode.REBUILD, gen, stats, programmes, programmes, 1000, 5, "fts4")
     }
 
@@ -90,6 +95,9 @@ class FakeEpgStore(
 
     override fun recover() { recovers.incrementAndGet() }
     override fun clear() { state.value = null; imported.clear() }
+
+    /** The current generation as an app from before review 2026-11-10 S1 wrote it: no build-input fingerprint. */
+    fun dropBuildInputs() { state.value = state.value?.copy(buildInputs = null) }
 
     /** Publishes a generation without a build (all catalogue channels, [importedIds] imported). */
     fun publish(importedIds: Map<Long, Set<String>> = emptyMap(), builtAtMs: Long = 0) {

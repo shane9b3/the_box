@@ -65,6 +65,14 @@ interface GuideImages {
     /** (code review 2026-10-14, O-2) Bumped whenever what [get] returns can change (a load, a trim, a clear). */
     val version: Long get() = 0
     fun get(url: String): GuideImage?
+    /**
+     * (2026-11-10, review S3) [url] is on screen in a row the renderer replayed from its recording (O-2), so [get] was
+     * not called for it this draw. Keeps a pending load alive and the cached image recently used. It may start a load
+     * exactly where [get] would (not cached, not failed, not in flight): a recording can outlive a load that was
+     * cancelled while its row was off screen, and nothing else would restart it. Must not allocate otherwise.
+     * Default: nothing (a cache that never cancels loads).
+     */
+    fun touch(url: String) {}
     /** True when [url] failed this session (draw the name instead, do not retry). */
     fun failed(url: String): Boolean
     var onLoaded: (() -> Unit)?
