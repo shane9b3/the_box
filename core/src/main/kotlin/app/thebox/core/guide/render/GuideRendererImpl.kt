@@ -383,7 +383,8 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
         }
         if (pass == PASS_BG) return
         val num = ch.number
-        if (frame.showNumbers && num != null) {
+        val numberDrawn = frame.showNumbers && num != null
+        if (numberDrawn) {
             val str = numberString(num)
             canvas.drawText(str, 0, str.length, x, centredBaseline(top, bottom, GuideTextStyle.CH_NUMBER), GuideTextStyle.CH_NUMBER, C.TEXT_LABEL)
             x += numberWidth(num, str) + s * G.LABEL_GAP
@@ -400,7 +401,15 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
                 val k = minOf(slotW / img.widthPx, slotH / img.heightPx)
                 val w = img.widthPx * k
                 val h = img.heightPx * k
-                canvas.drawImage(img, x, mid - h / 2, x + w, mid + h / 2, 1f)
+                var ix = x
+                if (!numberDrawn) {
+                    // No number: centre on the whole label column, then keep inside the padded span.
+                    ix = l + m.labelWidth / 2 - w / 2
+                    val lo = l + s * G.LABEL_PAD_X
+                    if (ix + w > right) ix = right - w
+                    if (ix < lo) ix = lo
+                }
+                canvas.drawImage(img, ix, mid - h / 2, ix + w, mid + h / 2, 1f)
                 return
             }
         }
