@@ -337,6 +337,55 @@ class GuideRendererTest {
         assertEquals(listOf("logo://1"), images.requested.distinct(), "failed URLs are not requested again")
     }
 
+    private fun logoOp(f: GuideFrame, imgW: Int, imgH: Int, channel: GuideChannel): Op.Image {
+        f.images = FakeGuideImages().also { it.loaded["logo://x"] = FakeGuideImage(imgW, imgH, "logo://x") }
+        f.showLogos = true
+        return draw(f).filterIsInstance<Op.Image>().first()
+    }
+
+    @Test
+    fun logoCentredInTheColumnWhenNumbersHidden() {
+        val ch = GuideFixtures.channel(0, logoUrl = "logo://x")
+        val f = frame(List(1) { simpleRow() }, listOf(ch))
+        f.showNumbers = false
+        val op = logoOp(f, 100, 74, ch) // 100 px wide, narrower than the 150 slot
+        assertTrue(near(m.labelLeft + m.labelWidth / 2, (op.l + op.r) / 2, 0.5f), "centre ${(op.l + op.r) / 2}")
+        assertTrue(near(100f, op.r - op.l, 0.01f))
+    }
+
+    @Test
+    fun logoStaysInsidePaddedSpanWithDotAndArchiveGlyph() {
+        val ch = GuideFixtures.channel(0, archiveDays = 7, logoUrl = "logo://x")
+        val f = frame(List(1) { simpleRow() }, listOf(ch))
+        f.tunedHash = ch.identityHash
+        f.showNumbers = false
+        val op = logoOp(f, 300, 148, ch) // fills the 150 x 74 slot
+        val right = m.labelLeft + m.labelWidth - 14f - (8f + 10f) - (24f + 10f)
+        assertTrue(op.r <= right + 0.001f, "right ${op.r} > $right")
+        assertTrue(op.l >= m.labelLeft + 14f - 0.001f, "left ${op.l}")
+    }
+
+    @Test
+    fun logoKeepsItsPositionAfterTheNumberWhenNumbersShown() {
+        val ch = GuideFixtures.channel(0, logoUrl = "logo://x")
+        val f = frame(List(1) { simpleRow() }, listOf(ch))
+        f.showNumbers = true
+        val op = logoOp(f, 100, 74, ch)
+        val num = texts(draw(f)).single { it.style == GuideTextStyle.CH_NUMBER }
+        assertEquals(num.x + FakeTextMeasurer().let { _ -> num.text.length * GuideTextStyle.CH_NUMBER.sizePx * 0f } + (op.l - num.x), op.l)
+        assertTrue(op.l > num.x, "logo is after the number")
+        assertTrue(op.l < m.labelLeft + 14f + 60f, "left-aligned after number + gap, not centred")
+    }
+
+    @Test
+    fun channelWithoutNumberIsCentredEvenWhenNumbersShown() {
+        val ch = GuideFixtures.channel(0, number = null, logoUrl = "logo://x")
+        val f = frame(List(1) { simpleRow() }, listOf(ch))
+        f.showNumbers = true
+        val op = logoOp(f, 100, 74, ch)
+        assertTrue(near(m.labelLeft + m.labelWidth / 2, (op.l + op.r) / 2, 0.5f))
+    }
+
     @Test
     fun tunedDotAndNumbers() {
         val f = frame(List(3) { simpleRow() })
