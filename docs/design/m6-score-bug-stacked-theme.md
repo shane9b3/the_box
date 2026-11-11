@@ -150,6 +150,15 @@ fails in two places. Both were verified in the code:
     documents.
 
   In every case all the other fields survive, and the unknown field reads as its default.
+- **Parental policy excepted (fix pass 2026-11-11, review C N9, lead ruling).** `coerceInputValues` must not weaken a
+  parental setting on restore: both parental enums default to the less strict choice (`SHOW_WITH_LOCK`,
+  `UNTIL_APP_CLOSES`). `SettingsDomain` gains `coerce: Boolean = true`; `ParentalDomain` sets it false and the store
+  decodes it with `RoomSettingsStore.STRICT_JSON` (no coercion). A restored parental document holding a value this build
+  does not know fails as a whole and the device's document is kept whole ("unreadable; kept"), on both restore paths: into
+  a registered slot, and before the slot registers (the raw document is checked against the strict decode before it is
+  stored). `RoomSettingsStoreCoerceTest` pins both, with `replace` on and off. The core test fixture's `SETTINGS_JSON`
+  now also has `coerceInputValues`, and `FakeSettingsStore` decodes a non-coerced domain strictly and skips an unreadable
+  document as the store does, so fakes and production agree.
 
 **Writes.**
 - The Settings row writes through `WpaPages.applySports`, in a new `SportsRows.STYLE` arm beside `SIZE` (`WpaPages.kt:745`).
@@ -188,7 +197,7 @@ The setting is app-wide, never per playlist (SB §7).
 | `ScoreBugMachine` | **one line** in `view()`: `period = label` on the NHL path (`ScoreBugMachine.kt:297`) (B1) | In play, the period label goes only into `bottom = CentreText.Period(label)` (`:286`). The waiting / stale branch then **overwrites** `bottom` with `Delayed` / `NoUpdate` (`:289–292`), so a stale or waiting view loses the period. Stacked's clock column has its own period slot and needs it. The NFL path and `knownView()` are unchanged. |
 | `ScoreBugView` | **one trailing field** `period: PeriodLabel? = null` (B1) | Null for the NFL and the place-mode sample. The Pill ignores it. It changes only when the period changes, so the SB §4.7 budget (one view per snapshot) holds. |
 | `CentreText`, `PowerPlay`, `GoalFact`, `DayState`, `ScoreRepository`, `ScoreRepositoryImpl`, `NhlScoreSource` | reused, unchanged | |
-| `TeamLine` | **one trailing field** `sog: Int? = null` | Read by `NhlMapper` (§3); null for the NFL and before puck drop. |
+| `TeamLine` | **one trailing field** `sog: Int? = null` | Read by `NhlMapper` (§3); null for the NFL and before puck drop. **Known difference for the Pill (review C N1):** `sog` is part of `TeamLine` equality, so a shots-only stat correction (for example during an intermission, no clock) now gives a new view where it used to give an equal one; the Pill recomposes once and rebuilds its frame, drawing nothing different. Within the one-view-per-snapshot budget. |
 | `NhlMapper` | **one line** in `team()` | §3.3 |
 | `GoalTimeline` | **split by a spec** (S9): `sample(spec, tMs, out)` and `sampleStill(spec, tMs, out)`. The existing `sample(tMs, out)` / `sampleStill(tMs, out)` call them with `GoalSpec.CLASSIC` | The Stacked takeover has the same keyframe skeleton. About a dozen numbers differ (§7.2), plus the end time, the pop length and the still frame-B length, all of which are in the spec. |
 | `GoalFrame` | **one field** `rowFlashAlpha: Float = 0f` | CLASSIC **writes 0** on every sample and still sample (S9), never "leaves it". |
@@ -274,14 +283,23 @@ when the key is unchanged (ruling 13).
    `StackedHolder.lastFrame: StackedFrameState?`. Nothing new is seen before the takeover hides it.
 2. **First fresh view snaps** (PP N5; `ScoreBug.kt:575`). The first non-waiting view of a follow snaps every track to
    its rest. Nothing animates in on follow.
-3. **Hide freezes, reappearance snaps** (`ScoreBug.kt:566–573`). A hidden bug's tracks freeze where they are and fade
-   with the bug. Once the fade is done they park. On reappearance every track snaps to the current targets.
+3. **Hide freezes, reappearance snaps** (`ScoreBug.kt:566–573`). A hidden bug's tracks start nothing new and fade
+   with the bug (a transition already running finishes under the 150-ms fade, as the Pill's do: review C N3). Once the
+   fade is done they park. On reappearance every track snaps to the current targets. **(Fix pass 2026-11-11, review C
+   S1.)** A follow that ends (Stop following) or a stale feed past the 5-minute hide (the source's view goes null) is
+   such a hide: the box keeps its layout, its bar words and the game's colours (the colour pair is keyed on the **shown**
+   view, never on the source's) through the fade, and the runner resets only once the fade is done (or at once in place
+   mode, or when the next follow's first view resets it).
 4. **Place mode parks** every track and shows the sample (§4.3).
 5. **Back-to-back goals** (the B2.4 override, `ScoreBug.kt:964`).
    - A new goal mid-takeover restarts the takeover and keeps the pin.
    - If the bar still says an earlier goal's "… POWER PLAY GOAL" and this goal is not a power-play goal for that side,
      then once this goal's lead covers the box the bar takes the current power play's words (same side: a text cut) or
      closes.
+   - **Rule 5 against B4 (fix pass 2026-11-11, review C S2, lead ruling).** While the pin holds, "closes" means the
+     words only: they fade out (a text swap to nothing) and the bar keeps its height, so the pinned box and its glow
+     keep their size. The bar itself closes at the 3 600 release, through the normal re-evaluation. B4's "no layout
+     track starts a transition until 3 600" therefore holds for the bar too.
 6. **Goal + a layout change in the same snapshot** (a goal and a PP start; a goal and INT; a goal and the PP ending).
    - The layout is **pinned at the pre-goal targets** for the whole takeover.
    - At the 3 600 release, every track re-evaluates against the current view, and the normal transitions run.
@@ -444,6 +462,16 @@ alternative is **0.50**:
 **Fit rules** (SB U-N3):
 - every string is measured at both sizes;
 - clock-column strings step down 2 px to 18, never below, with no ellipsis;
+- **the clock column keeps air (fix pass 2026-11-11, review U B1 / S1, lead ruling).** The clock is drawn with tabular
+  figures (`'tnum'`, as the mock's `tabular-nums`; Instrument Sans Bold's proportional "0" is 0.682 em, its tabular
+  digits 0.600 em), so `mm:ss` is ≈ 77 px at 28.8 and stays at 28.8. The clock's advance keeps **5** px each side
+  (`CLOCK_BREATHING`); every word in the column (the period, "END", "INT", "Delayed", "No update") keeps **6** px of ink
+  each side (`WORD_BREATHING`). Both clear the 1-px inset line and the 1-px border; both were 1. "Delayed" fits on one
+  line (20.8 Standard, 18.8 Large, measured). A slot string with a space that does not fit on one line at 28.8 breaks at
+  its **first** space onto two lines at one fitted size (baselines 1.05 em apart), the block's ink centred on the lower
+  slot and kept 6 px inside it, when that gives the larger size: "No update" draws as "No" / "update" at 20.8 (block
+  41 of the 44.6 allowed, Standard). The strings and the §8 slot are unchanged
+  (`StackedPainter.fitSlot`; `StackedFitTest` asserts the drawn widths, the block and its centring);
 - **bar strings must fit at 20 px, including the italic overhang** (the glyphs' measured right-side bearing past the
   advance), for all 32 abbreviations. `StackedFitTest` asserts it. The worst cases are "EDM POWER PLAY GOAL" (≈ 220 +
   63 padding, in 391.5) and "2ND INTERMISSION" (≈ 247, in 301.5);
@@ -490,7 +518,12 @@ SOG and clock columns open and fold on the rows' right, so the rows never move: 
 - **Bounds:** `SCORE_BUG_TAG` is on the **drawn box**; the layer is the footprint + 2 M (`StackedBoundsTest`, S11).
 - **Place mode** draws the sample at the anchored play-width box (333 × 108) in the footprint, and the place hint is
   positioned from the **drawn** box, not the footprint (N8). The sample is "AWY 0 / HME 0", clock "0:00", period slot
-  empty, fallback discs.
+  empty, fallback discs. **(Fix pass 2026-11-11, review C N11: text fixed to match the code.)** The sample is drawn only
+  with **no follow**; with a followed game, place mode draws that game's real view at its rest layout, as the Pill does
+  (`view = bug ?: sample`), and rule 4's tracks rest on that view's targets.
+- **Layout direction (fix pass 2026-11-11, review U S2).** The bug's layer and the place hint are laid out
+  left-to-right whatever the system locale (`LocalLayoutDirection` pinned to `Ltr` around them), so a right-to-left
+  locale never mirrors the drawn box inside its footprint. `StackedBoundsTest.aRightToLeftLocaleMovesNothing` pins it.
 - **Pill and NFL unchanged:** `style` defaults to `PILL`. `ScoreBugPlacementTest` and `NflPlacementTest` keep their
   existing cases unedited.
 
@@ -718,6 +751,12 @@ STACKED 1 200).
 - The takeover covers **the top part only** (108 tall); the bar stays visible.
 - `GOAL_MARK_MS` (4.5 s, the live-region mark) is unchanged.
 - The takeover is laid out on the **pinned pre-goal width** (S1 item 6).
+- **Score pop visibility (fix pass 2026-11-11, review U N4: recorded, as built).** The pop's first state (× 1.5, the pop
+  colour) is visible from 3 168 ms, uncovered by the panel's exit and the lead's exit (3 384), under GA's "pop reveal"
+  rule (`GoalTimeline.kt:396–398`), as the Pill does; the mock shows the plain white score during the exit and pops at
+  3 600. The code follows the Pill's established behaviour; this line records it.
+- **Rule 5 against B4 (fix pass 2026-11-11):** a back-to-back goal during the pin hides an earlier "… POWER PLAY GOAL"
+  bar's words only; the bar closes at the 3 600 release (§2.3 rule 5).
 
 ### 7.3 Still version ("Reduce animations"; `motionOff()`)
 
@@ -765,7 +804,8 @@ mock-up does not show that §12 asks about.
 | Stale in a PP carried into INT | as last; PP stripe narrows (no PP when stale) | open | open: "1ST" / "No update", .55 | closed | lead |
 | Stale at end of period (N5) | as play | closed | "1ST" / "No update", .55 | closed | lead |
 | Stale in the shootout (N5) | as shootout | open | folded | "NO UPDATE" at .55 | lead |
-| Stale / waiting at final | **cannot happen**: `staleAt()` returns null outside LIVE / INTERMISSION (`ScoreBugMachine.kt:800–808`), and a final view is never "waiting" after a snapshot | | | | |
+| Stale at final | **cannot happen**: `staleAt()` returns null outside LIVE / INTERMISSION (`ScoreBugMachine.kt:800–808`) | | | | |
+| Waiting at final (fix pass 2026-11-11, review C N10: the first draft said it cannot happen) | following an already-final game with Delay > 0 gives a **waiting** view (`shown == null`) with `top = Final` | open | folded | "DELAYED" at .55 for up to the delay, then a text swap to "FINAL" | code |
 | Hidden after 5 min stale | the box fades out (`view()` null) | | | | machine |
 | Missing SOG (either side null) | | never opens | | | lead |
 | Place mode (no follow) | sample "AWY 0 / HME 0" | closed | "" / "0:00" | closed | |

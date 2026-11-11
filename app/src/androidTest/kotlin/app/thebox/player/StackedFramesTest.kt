@@ -7,10 +7,7 @@ import android.view.FrameMetrics
 import android.view.Window
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import app.thebox.core.full.PickerChoice
-import app.thebox.core.full.PickerKind
 import app.thebox.core.full.PlayerLayer
-import app.thebox.core.full.QuickItem
 import app.thebox.core.sports.NhlBugStyle
 import app.thebox.player.api.PlaybackState
 import app.thebox.ui.guide.GuideDebugCounters
@@ -38,7 +35,8 @@ import java.util.concurrent.TimeUnit
  * - the fake panel runs with `--sports --sports-pp`, the debug build points at it (`files/debug/sports_base`), and the
  *   featured game (CGY @ EDM) is followed with Show Sports on;
  * - the **size and corner** under test are set by hand (Settings → Sports, or the sheet's Corner row); the test sets
- *   **Style → Stacked** itself through the quick bar's Score bug sheet (Stacked §1.1);
+ *   **Style → Stacked** itself through the quick bar's Score bug sheet (Stacked §1.1), and restores the style the sheet
+ *   showed before in a `finally` (fix pass 2026-11-11: app data persists between instrumented tests);
  * - run it with `-e stackedFrames 1`, and:
  *   - `-e stackedWhat goal` (default) for the takeover, or `pp` for a power play's open (SOG column, bar, stripes, text);
  *   - `-e stackedQuick 1` to hold the quick bar open over the window (a bottom corner is then lifted above it, S11);
@@ -69,7 +67,17 @@ class StackedFramesTest : PlayerTestBase() {
         awaitController("playing") { it is PlaybackState.Playing }
         awaitPlayer("bare video, no overlay", 15_000) { it.layer == PlayerLayer.NONE && it.info == null && it.scrub == null && it.stats == null }
 
-        chooseStacked()
+        // (Fix pass 2026-11-11, review C S3) The style is persisted app data: whatever the sheet showed is restored after.
+        val previous = setNhlStyle(NhlBugStyle.STACKED)
+        assumeTrue("the sheet has a Style row (an NHL game followed)", previous != null)
+        try {
+            measure(args, what, quick)
+        } finally {
+            if (previous != NhlBugStyle.STACKED) setNhlStyle(previous!!)
+        }
+    }
+
+    private fun measure(args: android.os.Bundle, what: String, quick: Boolean) {
         Thread.sleep(2_000)
         assumeTrue("the Stacked bug is composed (is a game followed?)", GuideDebugCounters.count(COMPOSITIONS_STACKED_BUG) > 0)
 
@@ -125,22 +133,6 @@ class StackedFramesTest : PlayerTestBase() {
             thread.quitSafely()
         }
         assertTrue("idle after the burst drew ${idle.size} frames in 10 s (gate ≤ 1)", idle.size <= 1)
-    }
-
-    /** Stacked §1.1: the quick bar's Score bug sheet, its Style row toggled to Stacked if it shows Pill, then back out. */
-    private fun chooseStacked() {
-        openQuickBar()
-        quickSelect(QuickItem.SCORE_BUG)
-        val sheet = awaitPlayer("the score sheet") { it.layer == PlayerLayer.PICKER && it.picker?.kind == PickerKind.SCORE_BUG }.picker!!
-        val row = sheet.choices.filterIsInstance<PickerChoice.ScoreStyleRow>().firstOrNull()
-        assumeTrue("the sheet has a Style row (an NHL game followed)", row != null)
-        if (row!!.style == NhlBugStyle.PILL) {
-            pickerSelect(PickerKind.SCORE_BUG) { it is PickerChoice.ScoreStyleRow }
-            awaitPlayer("Style · Stacked") { s ->
-                s.picker?.choices?.any { it is PickerChoice.ScoreStyleRow && it.style == NhlBugStyle.STACKED } == true
-            }
-        }
-        toBareVideo()
     }
 
     private val http = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).build()

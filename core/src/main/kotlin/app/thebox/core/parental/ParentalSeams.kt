@@ -13,11 +13,17 @@ import app.thebox.core.settings.SettingsDomain
  * the lockout countdown on open, "never relock mid-programme"). Each is listed as a proposed amendment in §1.6a.
  */
 
-/** The `parental` settings domain (§4.1). Backed up (the policy, never the PIN). WP-A references it, never redefines it. */
+/**
+ * The `parental` settings domain (§4.1). Backed up (the policy, never the PIN). WP-A references it, never redefines it.
+ * (Stacked fix pass 2026-11-11, review C N9) Not coerced: a policy holding a value this build does not know (a newer
+ * build's backup) fails as a whole, so a restore keeps the device's policy instead of importing it with the less strict
+ * defaults (`SHOW_WITH_LOCK`, `UNTIL_APP_CLOSES`).
+ */
 val ParentalDomain: SettingsDomain<ParentalPolicy> = SettingsDomain(
     name = Domains.PARENTAL,
     serializer = ParentalPolicy.serializer(),
     default = ParentalPolicy(),
+    coerce = false,
 )
 
 /**

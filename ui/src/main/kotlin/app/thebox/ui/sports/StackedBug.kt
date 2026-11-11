@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicText
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
@@ -38,6 +39,7 @@ import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
@@ -47,6 +49,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.thebox.core.sports.BarKey
@@ -116,10 +119,14 @@ const val DRAWS_STACKED_BUG = "StackedBugDraw"
  * **The S1 rules** carried from the Pill runner (§2.3), each pinned by a `StackedDrawTest` case:
  * 1. the pre-goal body is held until the takeover's lead covers the box (frame A on the still path);
  * 2. the first view of a follow, and its first non-waiting view, snap every track to rest;
- * 3. a hidden bug's tracks freeze and fade with it, park once the fade is done, and snap on reappearance;
+ * 3. a hidden bug's tracks start nothing new and fade with it (a transition already running finishes under the 150-ms
+ *    fade, as the Pill's do), park once the fade is done, and snap on reappearance; a follow that ends (or goes stale past
+ *    the hide) is such a hide: its colours and layout stay through the fade and the runner resets after it (fix pass
+ *    2026-11-11, review C S1);
  * 4. place mode parks the tracks (they rest at the shown view's targets, the sample's with no follow);
  * 5. a goal mid-takeover restarts it and keeps the pin; an earlier goal's "POWER PLAY GOAL" gives way once this goal's
- *    lead covers the box (a cut to the current power play's words on the same side, else a close);
+ *    lead covers the box (a cut to the current power play's words on the same side, else its words fade out and the bar
+ *    itself closes at the 3 600 release, so the pinned box keeps its size: review C S2, B4);
  * 6. a goal and a layout change in one snapshot: the layout is pinned at the pre-goal targets until the 3 600 release;
  * 7. hide, place mode, a new game and a size change cancel the takeover and release the pin with snaps; a style flip
  *    removes this composable. `lastSeq` is updated above the visibility return, so nothing is replayed.
@@ -222,8 +229,11 @@ internal fun StackedBug(
     /** The pre-goal body, drawn until the takeover's lead covers the box (S1 rule 1); read only in draw. */
     val held = remember { mutableStateOf<StackedFrameState?>(null) }
     val liveTexts = remember { LiveText() }
-    val awayAbbrev = bug?.away?.abbrev ?: ""
-    val homeAbbrev = bug?.home?.abbrev ?: ""
+    // (Fix pass 2026-11-11, review C S1) The colours and the bar's names follow the **shown** view (the held one through
+    // a fade-out after the follow ends or goes stale), never the place-mode sample: the fade keeps the game's colours.
+    val colourView = (view ?: holder.lastView)?.takeIf { it !== sample }
+    val awayAbbrev = colourView?.away?.abbrev ?: ""
+    val homeAbbrev = colourView?.home?.abbrev ?: ""
     val pair = remember(awayAbbrev, homeAbbrev) { hooks.colours(awayAbbrev.ifEmpty { null }, homeAbbrev.ifEmpty { null }) }
     run.painter = painter; run.res = res; run.s = s; run.pair = pair; run.away = awayAbbrev; run.home = homeAbbrev
     val margin = if (shownLarge) K.GOAL_LAYER_MARGIN_LARGE else K.GOAL_LAYER_MARGIN
@@ -280,12 +290,21 @@ internal fun StackedBug(
     }
     if (real == null) {
         cancelTakeover()
-        if (g.seen) run.reset()
+        // (Fix pass 2026-11-11, review C S1) The follow ended (or went stale past the hide): the tracks freeze and fade
+        // with the bug like any hide (rule 3), and reset only once the fade is done (or right away in place mode, which
+        // shows the sample; or when the next follow's first view resets them).
+        if (g.seen) holder.resetPending = true
         g.seen = false // the next snapshot is a "first snapshot" again: nothing replays
     } else if (!g.seen || real.gameId != g.gameId) {
         cancelTakeover()
         run.reset()
+        holder.resetPending = false
         g.seen = true; g.gameId = real.gameId; g.lastSeq = real.goalSeq; g.size = placement.size
+    }
+    if (holder.resetPending && (box != null || fadeDone)) {
+        holder.resetPending = false
+        run.reset()
+        run.dropGlow() // review C N7: nothing of the ended follow is kept but the painters
     }
     // Rules 3 and 4: hidden, the tracks freeze where they are and fade with the bug, then park once the fade is done; place
     // mode keeps them at rest on the shown view's targets; reappearing and leaving place mode snap.
@@ -460,42 +479,46 @@ internal fun StackedBug(
         painter.drawFrame(c, fillArgs())
     }
     hooks.probe?.let { it.args = ::fillArgs; it.draw = ::drawBug }
+    // (Fix pass 2026-11-11, review U S2) The box is drawn at absolute offsets inside its footprint: a right-to-left system
+    // locale must not mirror the spacers (the rows would move and the place hint would land on the box).
     val m = margin
-    Box(
-        modifier
-            .stackedPlaceAt(holder, pos, d, m)
-            // A leaf layer (never an ancestor of the SurfaceView): the fade, clipped to the footprint + M (GA §1, §6).
-            .graphicsLayer { alpha = fade.value; clip = true }
-            .size((footW + 2 * m).dp, (footH + 2 * m).dp)
-            .testTag(STACKED_LAYER_TAG),
-    ) {
-        Spacer(
-            Modifier
-                .offset(m.dp, (m + tagY).dp)
-                .size(tagW.dp, tagH.dp)
-                .testTag(SCORE_BUG_TAG)
-                .semantics { contentDescription = desc }
-                .drawBehind {
-                    drawIntoCanvas {
-                        val nc = it.nativeCanvas
-                        // The painter's origin is the top part's top-left (StackedDrawArgs); the node is the drawn box.
-                        nc.translate(0f, originDy)
-                        drawBug(nc)
-                        nc.translate(0f, -originDy)
-                    }
-                },
-        )
-        // The persistent live region (GA S9): on the drawn box, always composed while the bug is.
-        Spacer(
-            Modifier
-                .offset(m.dp, (m + tagY).dp)
-                .size(tagW.dp, tagH.dp)
-                .testTag(SCORE_BUG_LIVE_TAG)
-                .semantics { contentDescription = liveText; liveRegion = LiveRegionMode.Polite },
-        )
+    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+        Box(
+            modifier
+                .stackedPlaceAt(holder, pos, d, m)
+                // A leaf layer (never an ancestor of the SurfaceView): the fade, clipped to the footprint + M (GA §1, §6).
+                .graphicsLayer { alpha = fade.value; clip = true }
+                .size((footW + 2 * m).dp, (footH + 2 * m).dp)
+                .testTag(STACKED_LAYER_TAG),
+        ) {
+            Spacer(
+                Modifier
+                    .offset(m.dp, (m + tagY).dp)
+                    .size(tagW.dp, tagH.dp)
+                    .testTag(SCORE_BUG_TAG)
+                    .semantics { contentDescription = desc }
+                    .drawBehind {
+                        drawIntoCanvas {
+                            val nc = it.nativeCanvas
+                            // The painter's origin is the top part's top-left (StackedDrawArgs); the node is the drawn box.
+                            nc.translate(0f, originDy)
+                            drawBug(nc)
+                            nc.translate(0f, -originDy)
+                        }
+                    },
+            )
+            // The persistent live region (GA S9): on the drawn box, always composed while the bug is.
+            Spacer(
+                Modifier
+                    .offset(m.dp, (m + tagY).dp)
+                    .size(tagW.dp, tagH.dp)
+                    .testTag(SCORE_BUG_LIVE_TAG)
+                    .semantics { contentDescription = liveText; liveRegion = LiveRegionMode.Polite },
+            )
+        }
+        // A sibling of the clipped layer, not inside it (GA §1); positioned from the drawn box, not the footprint (N8).
+        if (placing) StackedPlaceHint(holder, pos, fade, rightSide, tagY, tagW, tagH)
     }
-    // A sibling of the clipped layer, not inside it (GA §1); positioned from the drawn box, not the footprint (N8).
-    if (placing) StackedPlaceHint(holder, pos, fade, rightSide, tagY, tagW, tagH)
 }
 
 /** Bumps [s] without reading it: a bump in composition must not subscribe the composition to the draw's epoch. */
@@ -606,6 +629,8 @@ private class StackedHolder {
     var lastFollowed: ScoreBugView? = null
     /** The targets of the last fresh (non-`dim`) view of this follow (`StackedTargets.of(v, lastFresh)`). */
     var lastFresh: StackedTargets? = null
+    /** The follow ended while shown: the runner resets once the fade-out is done (review C S1). */
+    var resetPending = false
 
     /** The footprint's top-left in design px: the sliding position once positioned, else the placed box. */
     fun offset(pos: Animatable<Offset, *>): Offset =
@@ -802,7 +827,9 @@ internal class StackedRun(private val scope: CoroutineScope, private val hooks: 
                     fill(bar, tb, tg.barSecs, tg.barPeriod, tg.barDim)
                     barWant = tb
                 } else {
-                    kickBar(null, tg, snap = false) // slides "POWER PLAY GOAL" out; closed until the release
+                    // (Fix pass 2026-11-11, review C S2) B4 fixes the box until 3 600: only the words go now (a text
+                    // swap to nothing); the bar keeps its height and closes at the release, through the normal step.
+                    hideBarWords()
                 }
             }
             goalPp && StackedTargets.isTeam(cur.kind) && cur.side == side -> {
@@ -826,7 +853,18 @@ internal class StackedRun(private val scope: CoroutineScope, private val hooks: 
         hooks.probe?.releases?.add(StackedProbe.Release(driverMs, snap))
         bump(epoch)
         if (snap) snapPending = true
-        step()
+        // Review C N2: a cancel releases from composition; the kicks there must not subscribe it to the drivers.
+        Snapshot.withoutReadObservation { step() }
+    }
+
+    /** Rule 5 while pinned (review C S2): the bar's words fade out (a text swap to an empty content); its key stays. */
+    private fun hideBarWords() {
+        if (bar.len == 0) return
+        sampleTrack(barTrack, scratch)
+        val showingPrev = (barTrack.kind == StackedTransition.CHANGE || barTrack.kind == StackedTransition.SWAP) && !scratch.barSwapped
+        if (!showingPrev) barPrev.copyFrom(bar)
+        bar.len = 0
+        launchPlay(barTrack, false) { still -> if (still) StackedTransition.STILL else StackedTransition.SWAP }
     }
 
     // ------------------------------------------------------------------ the transitions
@@ -857,6 +895,13 @@ internal class StackedRun(private val scope: CoroutineScope, private val hooks: 
             want == null -> {
                 if (showingPrev) bar.copyFrom(barPrev) // a close slides out the words on screen
                 StackedTransition.CLOSE
+            }
+            // Review C N4: a bar asked open while it is still closing changes from the words on screen (§7.1), so its
+            // colour never swaps mid-slide.
+            old == null && barTrack.kind == StackedTransition.CLOSE && !scratch.barClosed && bar.len > 0 -> {
+                barPrev.copyFrom(bar)
+                fill(bar, want, tg?.barSecs, tg?.barPeriod, tg?.barDim ?: false)
+                if (StackedTargets.sameLook(BarKey(barPrev.kind, barPrev.side), want)) StackedTransition.SWAP else StackedTransition.CHANGE
             }
             old == null -> {
                 fill(bar, want, tg?.barSecs, tg?.barPeriod, tg?.barDim ?: false)
@@ -965,6 +1010,13 @@ internal class StackedRun(private val scope: CoroutineScope, private val hooks: 
         if (p != null) atRest()
     }
 
+    /** Review C N7: the follow ended; the cached glow masks go (a later bake fills the cache again). */
+    fun dropGlow() {
+        glowCount = 0
+        glowMasks.fill(null)
+        bump(glowEpoch)
+    }
+
     /** The masks for the pinned box, once baked (the glow joins on the first frame after they land, §6); draw only. */
     fun glowForDraw(): GlowMasks? {
         glowEpoch.intValue
@@ -973,7 +1025,9 @@ internal class StackedRun(private val scope: CoroutineScope, private val hooks: 
 
     /** Every track idle: prewarm the glow for the box at rest, so a goal normally finds its masks ready (§6). */
     private fun atRest() {
-        if (pinned || hidden || goalPainter == null || running > 0) return
+        if (pinned || hidden || running > 0) return
+        // Review C N5: after a size change the old painter is still set until its effect clears it; no bake for it.
+        if (goalPainter?.s != s) return
         // Only once the tracks head where the view says (a step still to come would kick them, then call back here).
         val tg = inTargets ?: return
         if (sog.want != tg.sogOpen || clock.want != tg.clockOpen || barWant != tg.bar) return
@@ -1051,6 +1105,7 @@ private class BodyMerge {
             periodText = c?.periodText ?: body.periodText, periodPx = c?.periodPx ?: body.periodPx,
             slot = c?.slot ?: body.slot, slotText = c?.slotText ?: body.slotText, slotPx = c?.slotPx ?: body.slotPx,
             clockSecs = c?.clockSecs ?: body.clockSecs, columnDim = c?.columnDim ?: body.columnDim, targets = body.targets,
+            slotBreak = c?.slotBreak ?: body.slotBreak, slotDy1 = c?.slotDy1 ?: body.slotDy1, slotDy2 = c?.slotDy2 ?: body.slotDy2,
         ).also { out = it }
     }
 }
@@ -1069,10 +1124,17 @@ internal class StackedDescribe(private val res: Resources, private val v: ScoreB
     }
 }
 
-/** Places the bug's layer so the footprint (inset by [margin] design px inside it) lands on the placed footprint. */
+/** [max] when the parent bounds that axis, else the content's own [own] size. */
+private fun fullOr(bounded: Boolean, max: Int, own: Int): Int = if (bounded) max else own
+
+/**
+ * Places the bug's layer so the footprint (inset by [margin] design px inside it) lands on the placed footprint.
+ * (Fix pass 2026-11-11, review U S2) The node takes the whole of its parent's bounded space and places the layer at an
+ * absolute offset inside it, so a right-to-left parent (which aligns a smaller child to its right) cannot move the box.
+ */
 private fun Modifier.stackedPlaceAt(holder: StackedHolder, pos: Animatable<Offset, *>, d: Float, margin: Float): Modifier = layout { m, c ->
-    val p = m.measure(c)
-    layout(p.width, p.height) {
+    val p = m.measure(c.copy(minWidth = 0, minHeight = 0))
+    layout(fullOr(c.hasBoundedWidth, c.maxWidth, p.width), fullOr(c.hasBoundedHeight, c.maxHeight, p.height)) {
         val o = holder.offset(pos)
         p.place(IntOffset(((o.x - margin) * d).roundToInt(), ((o.y - margin) * d).roundToInt()))
     }
@@ -1095,9 +1157,10 @@ private fun StackedPlaceHint(
     val hintDesc = androidx.compose.ui.res.stringResource(R.string.sports_place_hint_desc)
     Box(
         Modifier
-            .layout { m, _ ->
+            .layout { m, c ->
                 val p = m.measure(Constraints())
-                layout(p.width, p.height) {
+                // As stackedPlaceAt (review U S2): the whole bounded parent, the hint at an absolute offset in it.
+                layout(fullOr(c.hasBoundedWidth, c.maxWidth, p.width), fullOr(c.hasBoundedHeight, c.maxHeight, p.height)) {
                     val o = holder.offset(pos)
                     val gap = (K.SCORE_BAR_GAP * density).roundToInt()
                     val bx = (o.x * density).roundToInt()

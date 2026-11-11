@@ -83,7 +83,8 @@ internal class StackedGoalPainter(
     private val badgePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
     private val badgeShadowPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { color = Color.BLACK }
     private val letterPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
-    private val glowPaint = Paint()
+    /** Review U N6: filtered, like the shadow, so a fractional mask origin (720p) does not snap by up to half a pixel. */
+    private val glowPaint = Paint(Paint.FILTER_BITMAP_FLAG)
     private val badgeText = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = sansBold; textSize = K.GOAL_BADGE_TEXT_PX * s; color = Color.WHITE; textAlign = Paint.Align.CENTER
     }
@@ -233,6 +234,9 @@ internal class StackedGoalPainter(
             this.badge = copy
             badgeShadow = copy.extractAlpha()
             badgeSource = badge
+            // Review U N10: upload both now, not on the first frame the badge shows (450 ms into the takeover).
+            copy.prepareToDraw()
+            badgeShadow?.prepareToDraw()
         }
         this.badge?.let { b ->
             // `height: 150px; width: auto` in a 150-wide slot: the logo (already fitted to the slot) at its own size,

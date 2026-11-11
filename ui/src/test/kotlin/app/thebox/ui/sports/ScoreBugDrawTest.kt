@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -69,9 +70,19 @@ class ScoreBugDrawTest {
     private var hostCompositions = 0
     private var unrelated by mutableIntStateOf(0)
 
+    /**
+     * (Stacked fix pass 2026-11-11, review C S4) The real `StableScoreBug` with the production hooks except the background
+     * context: the painter setup (Barlow, the GOAL atlas, the glow, the power-play painter and its labels) runs on the
+     * test thread under the virtual clock. On `Dispatchers.Default` it finished in wall time, so under the gate's load its
+     * publication could land after a test's baselines and count as an apply or a recomposition (the flaky minute test).
+     * Every test here that takes a baseline after [start] shares that, so all of them host this way;
+     * [theOffThreadSetupStillPublishes] keeps the production background path covered.
+     */
     private fun render(lowEnd: Boolean) {
         rule.setContent {
-            BoxDesignScale { Host(lowEnd) }
+            CompositionLocalProvider(LocalGoalHooks provides GoalHooks(background = EmptyCoroutineContext)) {
+                BoxDesignScale { Host(lowEnd) }
+            }
         }
         rule.waitForIdle()
     }
@@ -124,6 +135,19 @@ class ScoreBugDrawTest {
 
     @Test
     fun theLowEndVariantIsJustAsStill() = aMinuteWithoutASnapshotDoesNothing(lowEnd = true)
+
+    /** The production background path (`Dispatchers.Default`): the setup still lands and publishes (review C S4 / N6). */
+    @Test
+    fun theOffThreadSetupStillPublishes() {
+        startGoalHost(background = kotlinx.coroutines.Dispatchers.Default)
+        val deadline = System.currentTimeMillis() + 20_000
+        while (synchronized(labelBakes) { labelBakes.isEmpty() } && System.currentTimeMillis() < deadline) {
+            Thread.sleep(20)
+            rule.waitForIdle()
+        }
+        assertEquals("the labels were baked off the main thread and published", listOf("CGY" to "EDM"), synchronized(labelBakes) { labelBakes.toList() })
+        assertTrue("the power-play painter landed", probe.pp.painter?.invoke() != null)
+    }
 
     @Test
     fun eachNewSnapshotRedrawsOnceAndTheClockStepsToItsValue() {
@@ -204,7 +228,7 @@ class ScoreBugDrawTest {
         bakeSize = { _, withShadow -> sizeBakes += withShadow },
         // A stand-in mask, so the runner publishes it and the watch dedupes per bitmap as in production.
         bakeHalo = { _, _, _ -> halos++; Bitmap.createBitmap(1, 1, Bitmap.Config.ALPHA_8) },
-        bakeLabels = { _, away, home, _ -> labelBakes += away to home; null },
+        bakeLabels = { _, away, home, _ -> synchronized(labelBakes) { labelBakes += away to home }; null },
         logoFetch = { url, w, h -> logoLoads += url; Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888) },
         context = context,
         background = background,

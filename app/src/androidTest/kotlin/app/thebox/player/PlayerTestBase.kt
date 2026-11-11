@@ -225,6 +225,29 @@ abstract class PlayerTestBase : GuideTestBase() {
         return st.choices[target]
     }
 
+    /**
+     * (Stacked fix pass 2026-11-11, review C S3) Sets the persisted NHL score bug style to [want] through the quick bar's
+     * Score bug sheet (its Style row toggles Pill ↔ Stacked), then returns to bare video. Returns the style the sheet
+     * showed before, or null when the sheet has no Style row (no NHL game followed). App data persists between
+     * instrumented tests, so a test that changes the style restores it in a `finally`.
+     */
+    protected fun setNhlStyle(want: app.thebox.core.sports.NhlBugStyle): app.thebox.core.sports.NhlBugStyle? {
+        openQuickBar()
+        quickSelect(QuickItem.SCORE_BUG)
+        val sheet = awaitPlayer("the score sheet") { it.layer == PlayerLayer.PICKER && it.picker?.kind == PickerKind.SCORE_BUG }.picker!!
+        val row = sheet.choices.filterIsInstance<PickerChoice.ScoreStyleRow>().firstOrNull()
+        if (row == null) {
+            toBareVideo()
+            return null
+        }
+        if (row.style != want) {
+            pickerSelect(PickerKind.SCORE_BUG) { it is PickerChoice.ScoreStyleRow }
+            awaitPlayer("Style · $want") { s -> s.picker?.choices?.any { it is PickerChoice.ScoreStyleRow && it.style == want } == true }
+        }
+        toBareVideo()
+        return row.style
+    }
+
     // ------------------------------------------------------------------ pills, clocks
 
     /** The pill's −MM:SS value now (device wall clock), extrapolated like the UI (§2.1 PillState). */

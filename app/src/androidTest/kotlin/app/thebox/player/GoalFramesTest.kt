@@ -62,6 +62,9 @@ class GoalFramesTest : PlayerTestBase() {
         fullOn(10)
         awaitController("playing") { it is PlaybackState.Playing }
         awaitPlayer("bare video, no overlay", 15_000) { it.layer == PlayerLayer.NONE && it.info == null && it.scrub == null && it.stats == null }
+        // (Stacked fix pass 2026-11-11, review C S3) This test measures the Pill's counters: a style left on Stacked by an
+        // earlier run (app data persists) is set back to Pill first.
+        setNhlStyle(app.thebox.core.sports.NhlBugStyle.PILL)
 
         val sportsBase = args.getString("sportsPanel") ?: pp.base
         val restarted = restartSports(sportsBase)

@@ -22,8 +22,14 @@ import kotlinx.coroutines.flow.first
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
 
-/** The store's JSON (docs/design/m5-setup-settings.md §2.2): unknown keys ignored, defaults not encoded. */
-val SETTINGS_JSON: Json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
+/**
+ * The store's JSON (docs/design/m5-setup-settings.md §2.2): unknown keys ignored, defaults not encoded, and (Stacked S7;
+ * fix pass 2026-11-11, review C N9) `coerceInputValues`, as `RoomSettingsStore.JSON` decodes, so fakes and production agree.
+ */
+val SETTINGS_JSON: Json = Json { ignoreUnknownKeys = true; encodeDefaults = false; coerceInputValues = true }
+
+/** As `RoomSettingsStore.STRICT_JSON`: for a domain with `SettingsDomain.coerce` = false (the parental policy). */
+val SETTINGS_JSON_STRICT: Json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
 
 /**
  * In-memory [SettingsStore] for JVM tests (docs/design/m5-setup-settings.md §1.9 item 8). [ready] starts as [readyAtOnce];
@@ -71,7 +77,13 @@ class FakeSettingsStore(readyAtOnce: Boolean = true) : SettingsStore {
         imports += documents to replace
         for ((name, json) in documents) {
             val d = domains[name] as SettingsDomain<Any?>? ?: continue
-            state(d).value = SETTINGS_JSON.decodeFromJsonElement(d.serializer, json)
+            // As the real store: a document this build cannot read is skipped and the current one kept.
+            val v = try {
+                (if (d.coerce) SETTINGS_JSON else SETTINGS_JSON_STRICT).decodeFromJsonElement(d.serializer, json)
+            } catch (_: IllegalArgumentException) { // SerializationException is one
+                continue
+            }
+            state(d).value = v
         }
     }
 }

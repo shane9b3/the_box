@@ -1,5 +1,9 @@
 package app.thebox.data.settings
 
+import app.thebox.core.parental.LockedInGuide
+import app.thebox.core.parental.ParentalDomain
+import app.thebox.core.parental.ParentalPolicy
+import app.thebox.core.parental.StayUnlocked
 import app.thebox.core.settings.Domains
 import app.thebox.core.settings.state.SportsDomain
 import app.thebox.core.settings.state.SportsFollowDomain
@@ -105,6 +109,69 @@ class RoomSettingsStoreCoerceTest {
                 s.commitImport()
             }
             assertEquals(doc, expected, s.flow(SportsDomain).value)
+        }
+    }
+
+    // ---------------------------------------------------------------- the parental policy is not coerced (review C N9)
+
+    /** What the device holds: stricter than every default. */
+    private val deviceParental = ParentalPolicy(
+        autoLockAdult = true, lockedInGuide = LockedInGuide.HIDE, lockSettings = true, stayUnlocked = StayUnlocked.ASK_EVERY_TIME,
+    )
+    private val deviceParentalJson = """{"lockedInGuide":"HIDE","lockSettings":true,"stayUnlocked":"ASK_EVERY_TIME"}"""
+    /** A newer build's backup: a value this build does not know. Coerced, it would read SHOW_WITH_LOCK / UNTIL_APP_CLOSES. */
+    private val futureParental = listOf(
+        """{"lockedInGuide":"BLUR","lockSettings":true,"stayUnlocked":"ASK_EVERY_TIME"}""",
+        """{"lockedInGuide":"HIDE","lockSettings":true,"stayUnlocked":"TEN_MINUTES"}""",
+    )
+
+    private fun storeWithDeviceParental(): RoomSettingsStore = runBlocking {
+        db.appSettingDao().upsert(AppSettingEntity(Domains.PARENTAL, deviceParentalJson, 1, 1))
+        store().also { it.load(); it.awaitReady() }
+    }
+
+    private fun storedParental(): String? = runBlocking { db.appSettingDao().all().firstOrNull { it.domain == Domains.PARENTAL }?.json }
+
+    @Test fun aParentalDocumentWithAnUnknownValueIsKeptWholeOnARestoreIntoARegisteredSlot() {
+        for (doc in futureParental) for (replace in listOf(false, true)) {
+            val s = storeWithDeviceParental()
+            assertEquals(deviceParental, s.flow(ParentalDomain).value) // registered
+            runBlocking {
+                s.importInTransaction(mapOf(Domains.PARENTAL to json(doc)), replace = replace)
+                s.commitImport()
+            }
+            assertEquals("$doc replace=$replace", deviceParental, s.flow(ParentalDomain).value)
+            assertEquals("$doc replace=$replace: the row", deviceParentalJson, storedParental())
+            db.close(); db = TestDb.create()
+        }
+    }
+
+    @Test fun aParentalDocumentWithAnUnknownValueIsKeptWholeOnARestoreBeforeItsSlotRegisters() {
+        for (doc in futureParental) for (replace in listOf(false, true)) {
+            val s = storeWithDeviceParental()
+            runBlocking {
+                // `parental` is not among the domains registered at start: this is the raw-JSON path.
+                s.importInTransaction(mapOf(Domains.PARENTAL to json(doc)), replace = replace)
+                s.commitImport()
+            }
+            assertEquals("$doc replace=$replace: the row", deviceParentalJson, storedParental())
+            assertEquals("$doc replace=$replace", deviceParental, s.flow(ParentalDomain).value)
+            db.close(); db = TestDb.create()
+        }
+    }
+
+    @Test fun aReadableParentalDocumentStillRestoresOnBothPaths() {
+        val doc = """{"autoLockAdult":false,"lockedInGuide":"HIDE"}"""
+        val expected = ParentalPolicy(autoLockAdult = false, lockedInGuide = LockedInGuide.HIDE)
+        for (registered in listOf(true, false)) {
+            val s = storeWithDeviceParental()
+            if (registered) s.flow(ParentalDomain)
+            runBlocking {
+                s.importInTransaction(mapOf(Domains.PARENTAL to json(doc)), replace = false)
+                s.commitImport()
+            }
+            assertEquals("registered=$registered", expected, s.flow(ParentalDomain).value)
+            db.close(); db = TestDb.create()
         }
     }
 

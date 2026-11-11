@@ -184,28 +184,72 @@ class StackedFitTest {
 
     // ------------------------------------------------------------------ the clock column
 
+    /**
+     * (Fix pass 2026-11-11, review U B1) The clock is tabular and keeps the mock's air: at 28.8 px every `m:ss` / `mm:ss`
+     * is drawn (advance and ink) at least [CLOCK_AIR] design px inside each edge of the 90-px column, at both sizes.
+     */
+    @Test
+    fun theClockIsTabularAndKeepsItsAir() {
+        for (large in sizes) {
+            val p = painter(large)
+            val s = scale(large)
+            val half = K.STACKED_CLOCK_W * s / 2f
+            assertEquals("the clock stays at the mock's size ${sz(large)}", M.CLOCK_PX * K.STACKED_SCALE, p.clockPx, 1e-3f)
+            assertEquals("the clock's budget ${sz(large)}", (K.STACKED_CLOCK_W - 2 * CLOCK_AIR) * s, p.clockTextBudget, 1e-3f)
+            // Tabular: every value of the same shape is the same width, so a tick never moves the clock.
+            assertEquals(p.clockWidth(10 * 60 + 12), p.clockWidth(19 * 60 + 58), 1e-3f)
+            assertEquals(p.clockWidth(0), p.clockWidth(9 * 60 + 59), 1e-3f)
+            for (secs in listOf(0, 59, 9 * 60 + 59, 10 * 60 + 12, 11 * 60 + 11, 19 * 60 + 58, 20 * 60)) {
+                val w = p.clockWidth(secs)
+                assertTrue("clock $secs ${sz(large)}: drawn $w > ${(K.STACKED_CLOCK_W - 2 * CLOCK_AIR) * s}", w <= (K.STACKED_CLOCK_W - 2 * CLOCK_AIR) * s)
+                val ink = p.clockInk(secs)
+                assertTrue("clock $secs ${sz(large)}: ink ${ink.left}..${ink.right} within ±${half - CLOCK_AIR * s}", ink.left >= -half + CLOCK_AIR * s && ink.right <= half - CLOCK_AIR * s)
+            }
+            val ink = p.clockInk(19 * 60 + 58)
+            println("clock ${sz(large)}: %.1f px, \"19:58\" drawn %.1f, ink %.1f..%.1f in ±%.1f".format(p.clockPx, p.clockWidth(19 * 60 + 58), ink.left, ink.right, half))
+        }
+    }
+
     @Test
     fun theClockColumnStringsFitAtEighteenOrMore() {
         for (large in sizes) {
             val p = painter(large)
+            val s = scale(large)
             val budget = p.columnTextBudget
+            assertEquals("the words' budget ${sz(large)}", (K.STACKED_CLOCK_W - 2 * WORD_AIR) * s, budget, 1e-3f)
             assertTrue("clock px ${p.clockPx}", p.clockPx >= K.STACKED_FIT_MIN_PX)
             for (secs in listOf(0, 59, 9 * 60 + 59, 19 * 60 + 58, 20 * 60)) {
                 val w = p.clockWidth(secs)
-                assertTrue("clock $secs ${sz(large)}: $w > $budget", w <= budget)
+                assertTrue("clock $secs ${sz(large)}: $w > ${p.clockTextBudget}", w <= p.clockTextBudget)
             }
-            println("clock ${sz(large)}: %.1f px, \"19:58\" %.1f of %.1f".format(p.clockPx, p.clockWidth(19 * 60 + 58), budget))
-            val slots = listOf(
-                res.getString(R.string.sports_no_update), res.getString(R.string.sports_delayed),
-                res.getString(R.string.sports_stacked_end), res.getString(R.string.sports_stacked_int),
-            )
+            val noUpdate = res.getString(R.string.sports_no_update)
+            val delayed = res.getString(R.string.sports_delayed)
+            val slots = listOf(noUpdate, delayed, res.getString(R.string.sports_stacked_end), res.getString(R.string.sports_stacked_int))
             for (t in slots) {
-                val px = p.fitColumn(t, M.CLOCK_PX * K.STACKED_SCALE)
-                val w = p.columnWidth(t, px)
-                println("slot \"$t\" ${sz(large)}: %.1f px, %.1f of %.1f".format(px, w, budget))
-                assertTrue("\"$t\" ${sz(large)} at $px", px >= K.STACKED_FIT_MIN_PX)
-                assertTrue("\"$t\" ${sz(large)} $w > $budget", w <= budget)
+                val fit = p.fitSlot(t)
+                assertTrue("\"$t\" ${sz(large)} at ${fit.px}", fit.px >= K.STACKED_FIT_MIN_PX)
+                val lines = if (fit.brk > 0) listOf(t.substring(0, fit.brk), t.substring(fit.brk + 1)) else listOf(t)
+                for (l in lines) {
+                    val w = p.columnWidth(l, fit.px)
+                    println("slot \"$l\" (of \"$t\") ${sz(large)}: %.1f px, ink %.1f of %.1f".format(fit.px, w, budget))
+                    assertTrue("\"$l\" ${sz(large)} $w > $budget", w <= budget)
+                }
             }
+            // S1: "No update" wraps at its space into "No" / "update", above the floor, the block inside the slot.
+            val nu = p.fitSlot(noUpdate)
+            assertEquals("\"$noUpdate\" ${sz(large)} breaks at its space", noUpdate.indexOf(' '), nu.brk)
+            assertTrue("\"$noUpdate\" ${sz(large)} at ${nu.px}", nu.px > K.STACKED_FIT_MIN_PX)
+            val top = p.inkBounds(StackedPainter.Ink.SLOT, noUpdate.substring(0, nu.brk), 0f, nu.dy1 * s, nu.px)
+            val bottom = p.inkBounds(StackedPainter.Ink.SLOT, noUpdate.substring(nu.brk + 1), 0f, nu.dy2 * s, nu.px)
+            val block = bottom.bottom - top.top
+            println("\"$noUpdate\" ${sz(large)}: two lines at %.1f px, block %.1f of %.1f, centred %.2f".format(nu.px, block, p.slotTextHeightBudget, (top.top + bottom.bottom) / 2f))
+            assertTrue("the block ${sz(large)}: $block > ${p.slotTextHeightBudget}", block <= p.slotTextHeightBudget + 0.5f)
+            assertEquals("the block is centred on the slot ${sz(large)}", 0f, (top.top + bottom.bottom) / 2f, 1f)
+            assertTrue("the lines do not touch ${sz(large)}", bottom.top - top.bottom >= 2f * s)
+            // "Delayed" stays one line, with room.
+            val dl = p.fitSlot(delayed)
+            assertEquals(-1, dl.brk)
+            assertTrue("\"$delayed\" ${sz(large)}", p.columnWidth(delayed, dl.px) <= budget)
             for (period in listOf("1ST", "2ND", "3RD", "OT", "2OT", "3OT", "P4", "SO")) {
                 val px = p.fitColumn(period, M.PERIOD_PX * K.STACKED_SCALE, 0.02f)
                 val w = p.columnWidth(period, px, period = true)
@@ -260,5 +304,8 @@ class StackedFitTest {
     private companion object {
         /** The least free space kept between neighbouring texts, design px. */
         const val MIN_GAP = 2f
+        /** (Fix pass 2026-11-11) The clock column's air each side: the clock's (review U B1) and the words' (S1), design px. */
+        const val CLOCK_AIR = 5f
+        const val WORD_AIR = 6f
     }
 }
