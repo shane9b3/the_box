@@ -50,8 +50,9 @@ class RefreshRepositoryTest {
     private val url = "http://panel.example:8080/get.php?username=alice&password=SECRETPW&type=m3u_plus"
     private val detected = DetectedCredentials("http://panel.example:8080", "alice", "SECRETPW")
 
-    private fun m3u(vararg names: String, epg: String = "http://panel.example:8080/xmltv.php?username=alice&password=SECRETPW") = buildString {
-        append("#EXTM3U url-tvg=\"$epg\"\n")
+    /** [epg] null writes a bare `#EXTM3U` line (no guide-link attribute at all). */
+    private fun m3u(vararg names: String, epg: String? = "http://panel.example:8080/xmltv.php?username=alice&password=SECRETPW") = buildString {
+        append(if (epg == null) "#EXTM3U\n" else "#EXTM3U url-tvg=\"$epg\"\n")
         names.forEachIndexed { i, n ->
             append("#EXTINF:-1 tvg-id=\"$n.uk\" group-title=\"News\",$n\n")
             append("http://panel.example:8080/live/alice/SECRETPW/${i + 1}.ts\n")
@@ -224,10 +225,11 @@ class RefreshRepositoryTest {
         assertEquals(1L, db.scalar("SELECT COUNT(*) FROM epg_mapping"))
         val secret = (g.playlists.secret(after.credentialRef) as Outcome.Ok).value
         assertEquals("http://epg.two/guide.xml?token=xyz", secret.urls.single())
-        // Dropping the header URL removes the source.
+        // A header with an empty url-tvg keeps the last known link (decision 2026-11-11; this used to delete it).
         g.fetcher.bodies[url] = m3u("BBC", epg = "")
         g.refresh(FakeDiffer(detected)).refresh(id, Trigger.MANUAL)
-        assertTrue(db.epgSourceDao().forPlaylist(id).isEmpty())
+        assertEquals(listOf(after), db.epgSourceDao().forPlaylist(id))
+        assertEquals(1L, db.scalar("SELECT COUNT(*) FROM epg_mapping"))
     }
 
     @Test
@@ -414,6 +416,165 @@ class RefreshRepositoryTest {
         assertEquals(listOf(ph.id), rows.filter { it.ordinal == 0 }.map { it.id })
         assertEquals(2, rows.size)
         assertTrue(rows.none { it.isPlaceholder })
+    }
+
+    // ---- header guide links across refreshes (docs/decisions/2026-11-11-keep-header-guide-links.md) ----------
+
+    private val linkA = "http://epg.a.example/guide.xml?token=one"
+    private val linkB = "http://epg.b.example/guide.xml?token=two"
+    private val linkC = "http://epg.c.example/guide.xml"
+
+    /** A playlist whose header lists [links], refreshed once, with a manual match on each guide row (in order). */
+    private suspend fun playlistWithMatchedLinks(vararg links: String): Pair<Long, List<EpgSourceEntity>> {
+        val id = addPlaylist()
+        g.fetcher.bodies[url] = m3u("BBC", "CNN", "ITV", epg = epgs(*links))
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.MANUAL).error)
+        val rows = db.epgSourceDao().forPlaylist(id)
+        assertEquals(links.size, rows.size)
+        rows.forEachIndexed { i, s -> db.epgMappingDao().upsert(EpgMappingEntity(id, "key-$i", s.id, "x$i.uk", 1)) }
+        return id to rows
+    }
+
+    private suspend fun mappings() = db.strings("SELECT stable_key || '|' || source_id FROM epg_mapping ORDER BY stable_key")
+
+    private suspend fun urlOf(s: EpgSourceEntity) = (g.playlists.secret(s.credentialRef) as Outcome.Ok).value.urls.single()
+
+    @Test
+    fun caseA_aHeaderWithTheSameLinksChangesNothing() = runBlocking {
+        val (id, rows) = playlistWithMatchedLinks(linkA, linkB)
+        val before = mappings()
+        val imports = g.requester.imports.size
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error)
+        assertEquals(rows, db.epgSourceDao().forPlaylist(id))
+        assertEquals(before, mappings())
+        assertEquals("no guide rebuild for an unchanged set", imports, g.requester.imports.size)
+    }
+
+    @Test
+    fun caseB_aHeaderWithNoLinksKeepsTheSourcesAndTheManualMatches() = runBlocking {
+        val (id, rows) = playlistWithMatchedLinks(linkA, linkB)
+        val userId = (g.epg.addUserSource("Mine", "http://user.example/epg.xml") as Outcome.Ok).value
+        db.epgMappingDao().upsert(EpgMappingEntity(id, "key-user", userId, "u.uk", 1))
+        val before = mappings()
+        val imports = g.requester.imports.size
+        // A bare #EXTM3U line: the attribute is missing altogether.
+        g.fetcher.bodies[url] = m3u("BBC", "CNN", "ITV", epg = null)
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error)
+        assertEquals(rows, db.epgSourceDao().forPlaylist(id))
+        assertEquals(listOf(linkA, linkB), rows.map { urlOf(it) })
+        assertEquals(before, mappings())
+        assertNotNull(db.epgSourceDao().get(userId))
+        assertEquals(imports, g.requester.imports.size)
+        // The attribute present but empty is the same case.
+        g.fetcher.bodies[url] = m3u("BBC", "CNN", "ITV", epg = "")
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error)
+        assertEquals(rows, db.epgSourceDao().forPlaylist(id))
+        assertEquals(before, mappings())
+        // The links coming back is case (a): nothing changes.
+        g.fetcher.bodies[url] = m3u("BBC", "CNN", "ITV", epg = epgs(linkA, linkB))
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error)
+        assertEquals(rows, db.epgSourceDao().forPlaylist(id))
+        assertEquals(before, mappings())
+    }
+
+    @Test
+    fun caseC_aDroppedLinkRemovesOnlyItsOwnRowAndTheRemainingLinkKeepsItsMatches() = runBlocking {
+        val (id, rows) = playlistWithMatchedLinks(linkA, linkB)
+        val (a, b) = rows
+        g.fetcher.bodies[url] = m3u("BBC", "CNN", "ITV", epg = epgs(linkB))
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error)
+        val after = db.epgSourceDao().forPlaylist(id).single()
+        assertEquals("B keeps its row", b.id, after.id)
+        assertEquals(0, after.ordinal)
+        assertEquals(linkB, urlOf(after))
+        assertEquals(b.urlHash, after.urlHash)
+        assertNull(db.epgSourceDao().get(a.id))
+        // A's match goes with A (the provider withdrew that guide); B's match is untouched.
+        assertEquals(listOf("key-1|${b.id}"), mappings())
+    }
+
+    @Test
+    fun caseC_aReorderedHeaderKeepsEachLinksRowAndMatches() = runBlocking {
+        val (id, rows) = playlistWithMatchedLinks(linkA, linkB)
+        val (a, b) = rows
+        val before = mappings()
+        g.fetcher.bodies[url] = m3u("BBC", "CNN", "ITV", epg = epgs(linkB, linkA))
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error)
+        val after = db.epgSourceDao().forPlaylist(id).associateBy { it.id }
+        assertEquals(setOf(a.id, b.id), after.keys)
+        assertEquals(listOf(1, 0), listOf(after.getValue(a.id).ordinal, after.getValue(b.id).ordinal))
+        assertEquals(listOf(linkA, linkB), listOf(urlOf(after.getValue(a.id)), urlOf(after.getValue(b.id))))
+        assertEquals(before, mappings())
+    }
+
+    @Test
+    fun caseC_anAddedLinkAddsARowAndKeepsTheOthers() = runBlocking {
+        val (id, rows) = playlistWithMatchedLinks(linkA)
+        val before = mappings()
+        val imports = g.requester.imports.size
+        g.fetcher.bodies[url] = m3u("BBC", "CNN", "ITV", epg = epgs(linkC, linkA))
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error)
+        val after = db.epgSourceDao().forPlaylist(id)
+        assertEquals(2, after.size)
+        val kept = after.single { it.id == rows[0].id }
+        assertEquals(listOf(1, linkA), listOf(kept.ordinal, urlOf(kept)))
+        assertEquals(listOf(0, linkC), after.single { it.id != rows[0].id }.let { listOf(it.ordinal, urlOf(it)) })
+        assertEquals(before, mappings())
+        assertEquals(imports + 1, g.requester.imports.size)
+    }
+
+    @Test
+    fun regression_aChangedLinkStillUpdatesTheSourceInPlace() = runBlocking {
+        // S14 still holds when the header is not empty: a link that is replaced (new host) takes over the free row.
+        val (id, rows) = playlistWithMatchedLinks(linkA, linkB)
+        val before = mappings()
+        val imports = g.requester.imports.size
+        g.fetcher.bodies[url] = m3u("BBC", "CNN", "ITV", epg = epgs(linkA, linkC))
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error)
+        val after = db.epgSourceDao().forPlaylist(id)
+        assertEquals(rows.map { it.id }, after.map { it.id })
+        assertEquals(listOf(linkA, linkC), after.map { urlOf(it) })
+        assertEquals("epg.c.example", after[1].displaySource)
+        assertTrue(after[1].urlHash != rows[1].urlHash)
+        assertEquals(before, mappings())
+        assertEquals(imports + 1, g.requester.imports.size)
+    }
+
+    @Test
+    fun caseD_aFailedOrRejectedDownloadLeavesTheHeaderSourcesAlone() = runBlocking {
+        val id = addPlaylist()
+        g.fetcher.bodies[url] = m3u(*Array(60) { "C$it" }, epg = epgs(linkA, linkB))
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.MANUAL).error)
+        val rows = db.epgSourceDao().forPlaylist(id)
+        rows.forEachIndexed { i, s -> db.epgMappingDao().upsert(EpgMappingEntity(id, "key-$i", s.id, "x$i.uk", 1)) }
+        val before = mappings()
+        // Network failure.
+        g.fetcher.errors[url] = SourceError.Network(NetworkKind.CONNECT)
+        assertEquals("net.connect", g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error!!.code)
+        g.fetcher.errors.remove(url)
+        // Shrink guard, with a header that lost its links too.
+        g.fetcher.bodies[url] = m3u("C1", epg = null)
+        assertEquals("shrink", g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error!!.code)
+        // Empty playlist (header line only).
+        g.fetcher.bodies[url] = "#EXTM3U\n"
+        assertTrue(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error != null)
+        assertEquals(rows, db.epgSourceDao().forPlaylist(id))
+        assertEquals(before, mappings())
+    }
+
+    @Test
+    fun xtreamGuideSourceAndMatchesSurviveRefreshes() = runBlocking {
+        val id = (g.playlists.addXtream("X", listOf("http://a.example"), "bob", "pw123") as Outcome.Ok).value
+        g.xtream.login = Outcome.Ok(XtreamLogin(account(), baseIndexUsed = 0))
+        g.xtream.downloads[XtreamAction.LIVE_CATEGORIES] = "1|News\n"
+        g.xtream.downloads[XtreamAction.LIVE_STREAMS] = "10|BBC|1\n"
+        assertNull(g.refresh().refresh(id, Trigger.MANUAL).error)
+        val src = db.epgSourceDao().forPlaylist(id).single()
+        assertEquals(EpgSourceEntity.ORIGIN_XTREAM, src.origin)
+        db.epgMappingDao().upsert(EpgMappingEntity(id, "key-0", src.id, "x.uk", 1))
+        assertNull(g.refresh().refresh(id, Trigger.PERIODIC).error)
+        assertEquals(listOf(src), db.epgSourceDao().forPlaylist(id))
+        assertEquals(listOf("key-0|${src.id}"), mappings())
     }
 
     private fun account() = XtreamAccountInfo(

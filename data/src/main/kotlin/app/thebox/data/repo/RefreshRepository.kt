@@ -171,7 +171,14 @@ class RefreshRepository @Inject constructor(
                 val h = header ?: M3uHeader()
                 val detected = sink.detected
                 playlistDao.setHeader(playlistId, Converters.json.encodeToString(M3uHeader.serializer(), redactHeader(h, secret, detected)))
-                sourcesChanged = syncSources(playlist, EpgSourceEntity.ORIGIN_PLAYLIST_HEADER, h.epgUrls, secret, detected)
+                // Decision 2026-11-11 (docs/decisions/2026-11-11-keep-header-guide-links.md): a header with no guide
+                // links keeps the last known ones. Syncing an empty list would delete the rows, and the delete
+                // cascades to the user's manual matches; one bad download would lose them for good.
+                if (h.epgUrls.isEmpty()) {
+                    BoxLog.i(TAG) { "playlist $playlistId header lists no guide links; keeping the last known ones" }
+                } else {
+                    sourcesChanged = syncSources(playlist, EpgSourceEntity.ORIGIN_PLAYLIST_HEADER, h.epgUrls, secret, detected)
+                }
                 if (detected != null) loginDetected(playlist, detected)
             }
 
@@ -356,9 +363,19 @@ class RefreshRepository @Inject constructor(
     }
 
     /**
-     * Upserts the playlist's EPG sources of one origin by (playlist_id, origin, ordinal), updating the URL in
-     * place (S14: ids and user mappings survive a URL change). The real URL goes only into the source's
-     * credential blob; `url_hash` hashes the templated/redacted form (B3). Returns true when the set changed.
+     * Upserts the playlist's EPG sources of one origin, updating the URL in place (S14: ids and user mappings
+     * survive a URL change). The real URL goes only into the source's credential blob; `url_hash` hashes the
+     * templated/redacted form (B3). Returns true when the set of addresses changed (a pure re-order does not).
+     *
+     * Rows are paired with [urls] in three passes (decision 2026-11-11, case c), so a link that is still listed
+     * never loses its row, and so its manual matches, because another link moved or went away:
+     * 1. same address: the exact URL in the row's secret, then the same `url_hash` (the address with secrets and
+     *    the query redacted, so a rotated token is the same guide);
+     * 2. the rows left over, in ordinal order, take the links left over, in list order (S14: a new host or a
+     *    tokenised URL updates in place; restore placeholders fill in order);
+     * 3. rows still left over are links the provider withdrew from a non-empty list: deleted, and their matches
+     *    cascade with them. Callers never pass an empty list for a playlist header (that case keeps every row).
+     * Each kept row's ordinal becomes its link's position.
      */
     private suspend fun syncSources(
         p: PlaylistEntity, origin: String, urls: List<String>, secret: PlaylistSecret, detected: DetectedCredentials? = null,
@@ -366,12 +383,34 @@ class RefreshRepository @Inject constructor(
         val user = detected?.username ?: secret.username
         val pass = detected?.password ?: secret.password
         var changed = false
-        val existing = sourceDao.forPlaylist(p.id).filter { it.origin == origin }.associateBy { it.ordinal }
+        // Hash 0 marks a restore placeholder (EpgSourceEntity.isPlaceholder); a real row never stores it.
+        val hashes = urls.map { url -> Hash64.of(Redact.text(template(url, user, pass))).let { if (it == EpgSourceEntity.PLACEHOLDER_HASH) 1L else it } }
+        val free = sourceDao.forPlaylist(p.id).filter { it.origin == origin }.sortedBy { it.ordinal }.toMutableList()
+        val oldUrls = free.associate { it.id to (playlists.secret(it.credentialRef) as? Outcome.Ok)?.value?.urls?.firstOrNull() }
+        val claimed = arrayOfNulls<EpgSourceEntity>(urls.size)
+        fun claim(match: (Int, EpgSourceEntity) -> Boolean) {
+            for (i in urls.indices) if (claimed[i] == null) {
+                val row = free.firstOrNull { match(i, it) } ?: continue
+                claimed[i] = row
+                free.remove(row)
+            }
+        }
+        claim { i, row -> oldUrls[row.id] == urls[i] }
+        claim { i, row -> !row.isPlaceholder && row.urlHash == hashes[i] }
+        claim { _, _ -> true }
+        for (s in free) {
+            playlists.deleteSecret(s.credentialRef)
+            sourceDao.delete(s.id)
+            changed = true
+        }
+        // Park moved rows on negative ordinals first: (playlist_id, origin, ordinal) is unique.
+        claimed.forEachIndexed { i, row ->
+            if (row != null && row.ordinal != i) claimed[i] = row.copy(ordinal = -1 - i).also { sourceDao.update(it) }
+        }
         urls.forEachIndexed { ordinal, url ->
-            // Hash 0 marks a restore placeholder (EpgSourceEntity.isPlaceholder); a real row never stores it.
-            val hash = Hash64.of(Redact.text(template(url, user, pass))).let { if (it == EpgSourceEntity.PLACEHOLDER_HASH) 1L else it }
+            val hash = hashes[ordinal]
             val display = PlaylistRepository.displayHost(url)
-            val cur = existing[ordinal]
+            val cur = claimed[ordinal]?.let { if (it.ordinal != ordinal) it.copy(ordinal = ordinal).also { m -> sourceDao.update(m) } else it }
             if (cur == null) {
                 val ref = playlists.newRef()
                 // A row without its secret would fail every guide build with cred.missing: retry on the next refresh.
@@ -389,7 +428,7 @@ class RefreshRepository @Inject constructor(
                 )
                 changed = true
             } else {
-                val old = (playlists.secret(cur.credentialRef) as? Outcome.Ok)?.value?.urls?.firstOrNull()
+                val old = oldUrls[cur.id]
                 if (old != url) {
                     // S1: on failure the row keeps its old hash, so a restore placeholder stays a placeholder (inert)
                     // and the next refresh retries; never a live row with no secret.
@@ -404,11 +443,6 @@ class RefreshRepository @Inject constructor(
                     changed = true
                 }
             }
-        }
-        for ((ordinal, s) in existing) if (ordinal >= urls.size) {
-            playlists.deleteSecret(s.credentialRef)
-            sourceDao.delete(s.id)
-            changed = true
         }
         return changed
     }

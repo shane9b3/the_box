@@ -1959,6 +1959,11 @@ CREATE INDEX index_favourite_channel ON favourite(playlist_id, stable_key);
 -- (reviewed 2026-10-13, S14) Playlist-derived sources (PLAYLIST_HEADER, XTREAM) are identified by
 -- (playlist_id, origin, ordinal) and their URL is UPDATED IN PLACE. Delete+recreate on a URL change
 -- (tokenised x-tvg-url, new host) would cascade-delete the user's epg_mapping overrides.
+-- (amended 2026-11-11, docs/decisions/2026-11-11-keep-header-guide-links.md) A header that lists NO guide
+-- links keeps every PLAYLIST_HEADER row as it is (the last known links). For a non-empty list a refresh
+-- pairs rows with links by address first (exact URL, then url_hash), then the rows left over take the
+-- links left over in order (S14); only rows still left over (links withdrawn from a non-empty list) are
+-- deleted, and their epg_mapping rows cascade. Ordinal = the link's position after each refresh.
 CREATE TABLE epg_source (
   id              INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
   name            TEXT    NOT NULL,
@@ -2941,7 +2946,7 @@ Container: `FLUSSONIC` takes it from `g4` (`mpegts` → TS, `.m3u8` → HLS); `F
   1. Read the secret. `Credentials(UNAVAILABLE)` → `Result.retry()`; any other `Credentials` error → `Result.failure` and a log row.
   2. Download to `cacheDir/playlists/<id>.src` with conditional GET (M3U), or Xtream `login` + `download(LIVE_CATEGORIES)` + `download(LIVE_STREAMS)`. Not modified → report `NOT_MODIFIED`.
   3. Run `PlaylistDiffer.merge` with an `EntryProducer` that re-opens the file and decompresses it (`Compression`) on each pass.
-  4. Store `M3uHeader` (EPG URLs redacted, B3) and account info. Upsert playlist EPG sources by `(playlist_id, origin, ordinal)`, updating the URL in place (S14): `x-tvg-url` → `PLAYLIST_HEADER`, Xtream → `XtreamUrls.xmltv()` as `XTREAM`. (reviewed 2026-10-13, B1) For an **Xtream-shaped M3U** (`DetectedCredentials` present), also call `XtreamApi.login` with the detected base and pair. It is best effort (a failure only logs), and on success `TimeBaseFactory.fromAccount` refreshes `server_zone`/`server_offset_sec`/`clock_skew_sec`, so `xc` catch-up uses the panel zone. Persist `etag`/`last_modified` only through `MergeSink.finish` (S10).
+  4. Store `M3uHeader` (EPG URLs redacted, B3) and account info. Upsert playlist EPG sources, updating the URL in place (S14): `x-tvg-url` → `PLAYLIST_HEADER`, Xtream → `XtreamUrls.xmltv()` as `XTREAM`. (amended 2026-11-11) A header with no guide links leaves the `PLAYLIST_HEADER` sources and their mappings untouched; otherwise rows pair with links by address, then in order, and only links withdrawn from a non-empty list are deleted (`docs/decisions/2026-11-11-keep-header-guide-links.md`). (reviewed 2026-10-13, B1) For an **Xtream-shaped M3U** (`DetectedCredentials` present), also call `XtreamApi.login` with the detected base and pair. It is best effort (a failure only logs), and on success `TimeBaseFactory.fromAccount` refreshes `server_zone`/`server_offset_sec`/`clock_skew_sec`, so `xc` catch-up uses the panel zone. Persist `etag`/`last_modified` only through `MergeSink.finish` (S10).
   5. Incremental matching, then enqueue `epg-patch` if needed, or `epg-import` when the playlist's EPG sources changed.
   6. Write the report.
 
