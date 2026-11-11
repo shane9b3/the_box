@@ -50,7 +50,8 @@ SIGNATURE_NAME = "update.json.sig"
 DEFAULT_KEY_DIR = os.path.expanduser("~/.thebox-release")
 DEFAULT_SIGNING_KEY = os.path.join(DEFAULT_KEY_DIR, "update-current.pem")
 # Owner's paths that stay modified/untracked on the release Mac and do not block a release (CLAUDE.md, task brief).
-IGNORED_DIRTY = ("gradle.properties", "gradle/gradle-daemon-jvm.properties", "design/nfl/support.js", "design/nfl/vendor/")
+IGNORED_DIRTY = ("gradle.properties", "gradle/gradle-daemon-jvm.properties", "design/nfl/support.js", "design/nfl/vendor/",
+                 "design/nhl-stacked/support.js", "design/nhl-stacked/vendor/")
 COMMIT_AUTHOR = ("Shawn Johnson", "38891628+shane9b3@users.noreply.github.com")
 COMMIT_TRAILER = "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 DEFAULT_JAVA_HOME = "/usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home"

@@ -58,7 +58,7 @@ python3 -I tools/release/release.py --notes "Fixes catch-up on Flussonic servers
 What it does, stopping at the first problem:
 
 1. Preflight: on `main`, tree clean (the owner's `gradle.properties`, `gradle/gradle-daemon-jvm.properties` and
-   `design/nfl/support.js`, `design/nfl/vendor/` are ignored), `main` equals `origin/main`, the signing key is one the
+   `design/nfl/support.js`, `design/nfl/vendor/`, `design/nhl-stacked/support.js`, `design/nhl-stacked/vendor/` are ignored), `main` equals `origin/main`, the signing key is one the
    new build **and** the last released build trust, the version is above every `v*` tag and the live manifest, the
    live manifest's signature is good (its `withdrawn` list is carried over).
 2. Version: `version.properties` versionCode + 1 and PATCH + 1, unless `--version-code` / `--version-name`.
