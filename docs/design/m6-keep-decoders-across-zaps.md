@@ -1,5 +1,17 @@
 # Keep decoders across zaps (performance H1): design
 
+> **Lead ruling, 2026-11-11 (after the design review, `docs/review/2026-11-11-keep-decoders-design-review.md`): not built yet.**
+> The review found two blockers (B1: foreground mode can be left on when a stop arrives while there is no session;
+> B2: with pause and rewind on, which is the default, neither the fallback nor the ladder's decoder repairs force a
+> real reset) and showed that the gain is unproven: the AudioTrack and the FFmpeg decoder never survive, the video
+> codec survives only for like-for-like channels, and a refused reuse makes that zap slower.
+> Order of work: (1) fix the pre-existing ladder defect on its own (video-decoder repairs do nothing while the rewind
+> buffer is on), with its own review; (2) WP-0: record decoder init times per zap in today's build; (3) the owner
+> measures on a Fire TV Stick. If video + audio decoder init is under about 80 ms per zap, H1 is closed as "measured,
+> not worth it". Otherwise this design is revised for B1, B2 and the should-fix items and built, shipped off.
+> The owner's decision was "build it, switched off"; holding the build behind the measurement is the lead's
+> recommendation and is the owner's to overrule.
+
 Status: **proposed 2026-11-11** (proposer). Waiting for the adversarial review. Nothing is implemented.
 
 Owner decision (2026-11-11): "Build it, switched off". Decoders are kept across zaps behind a player-internal flag that ships **OFF**. The flag is turned on only after measurement on a real Fire TV Stick. So OFF must behave exactly as today, and ON must be safe enough to trial.
