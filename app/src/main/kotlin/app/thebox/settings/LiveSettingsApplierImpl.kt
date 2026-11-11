@@ -3,6 +3,7 @@ package app.thebox.settings
 import app.thebox.core.catchup.archive.ArchivePhase
 import app.thebox.core.catchup.archive.ArchivePlayback
 import app.thebox.core.catchup.archive.LiveSettingsApplier
+import app.thebox.core.catchup.archive.TimelineSource
 import app.thebox.core.common.BoxLog
 import app.thebox.player.api.PlaybackController
 import javax.inject.Inject
@@ -14,7 +15,9 @@ import javax.inject.Singleton
  * - an **archive** session that is playing is re-requested at the playhead through [ArchivePlayback.seekTo] (the
  *   archive layer re-requests, or seeks natively within the current request; a native seek keeps the old pipeline
  *   until the next re-request, see §1.4a). A paused archive session is left paused: the change applies when it resumes
- *   (a resume after a long pause re-requests anyway, and leaving Settings must not start playback);
+ *   (a resume after a long pause re-requests anyway, and leaving Settings must not start playback). A session paused
+ *   in the **local** rewind buffer is re-prepared now through [ArchivePlayback.reapply] and stays paused (its resume
+ *   would only continue the reader);
  * - otherwise [PlaybackController.reapplySettings] re-prepares the live tune at the live edge (a no-op when nothing
  *   live plays). Never a new engine.
  * [nowMs] is the device wall clock the archive status's `atMs` uses.
@@ -36,7 +39,16 @@ class LiveSettingsApplierImpl internal constructor(
                 // (M5 integration) An exact re-request at the playhead (ArchivePlayback.reapply amendment).
                 archive.reapply(playhead)
             }
-            ArchivePhase.PAUSED, ArchivePhase.PAUSED_LIVE -> BoxLog.i(TAG) { "reapply: archive paused; applies on resume" }
+            // (Review 2026-11-09) Paused in the local rewind buffer: a resume only continues the reader (no re-request), so
+            // the change would wait for the next zap or seek. `reapply` routes a LOCAL session to the controller, which
+            // re-prepares the buffered reader at the pin and stays paused (M6 §7.6).
+            ArchivePhase.PAUSED -> if (s.source == TimelineSource.LOCAL) {
+                BoxLog.i(TAG) { "reapply: paused in the local buffer; re-preparing the reader, still paused" }
+                archive.reapply(s.wallMs)
+            } else {
+                BoxLog.i(TAG) { "reapply: archive paused; applies on resume" }
+            }
+            ArchivePhase.PAUSED_LIVE -> BoxLog.i(TAG) { "reapply: archive paused; applies on resume" }
             ArchivePhase.IDLE, ArchivePhase.FAILED -> controller.reapplySettings()
         }
     }

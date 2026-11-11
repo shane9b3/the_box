@@ -67,11 +67,20 @@ class ChannelRepository @Inject constructor(
         }
     }
 
-    suspend fun get(identity: ChannelIdentity): Channel? {
+    suspend fun get(identity: ChannelIdentity): Channel? = getWithRow(identity)?.channel
+
+    /**
+     * [get] together with the row it was built from, for callers that also need a column the [Channel] model does not
+     * carry (the tune path's `container_ext`): one row read instead of two (review 2026-11-09, performance M7b).
+     */
+    suspend fun getWithRow(identity: ChannelIdentity): ChannelWithRow? {
         val p = playlists.get(identity.playlistId) ?: return null
         val row = channelDao.row(identity.playlistId, identity.stableKey.value) ?: return null
-        return toChannel(p, defaults(p), row)
+        return ChannelWithRow(toChannel(p, defaults(p), row), row)
     }
+
+    /** A [Channel] and the [ChannelRow] it was read from ([getWithRow]). */
+    class ChannelWithRow(val channel: Channel, val row: ChannelRow)
 
     /** Title search over `channel_fts` (prefix match per word, diacritics folded). */
     suspend fun search(text: String, unlocked: Boolean, limit: Int = 50): List<Channel> {
