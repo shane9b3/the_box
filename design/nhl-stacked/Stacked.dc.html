@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Stacked hockey score bug</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,500;0,600;0,700;0,800;1,800&amp;family=Barlow+Condensed:ital,wght@1,800;1,900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#FF8A3D}a:hover{color:#ffb07a}
+.sog{width:0;transition:width .45s cubic-bezier(.4,0,.2,1) .35s}
+.sog.on{width:130px;transition-delay:0s}
+.sog-in{opacity:0;transform:translateX(-12px);transition:opacity .2s,transform .2s}
+.sog.on .sog-in{opacity:1;transform:none;transition:opacity .3s .3s,transform .35s .3s}
+.clockcol{width:200px;transition:width .45s cubic-bezier(.4,0,.2,1) .35s}
+.clockcol.off{width:0;transition-delay:0s}
+.clock-in{opacity:1;transition:opacity .3s .5s}
+.clockcol.off .clock-in{opacity:0;transition:opacity .15s 0s}
+.bar{height:0;transition:height .4s cubic-bezier(.4,0,.2,1) 0s}
+.bar.on{height:66px;transition-delay:.4s}
+.bar-stripe{transform:translateX(-140px) skewX(-30deg);transition:transform .3s ease-in}
+.bar.on .bar-stripe{transform:translateX(0) skewX(-30deg);transition:transform .45s cubic-bezier(.2,.8,.2,1) .7s}
+.bar.on .bar-stripe.b{transition-delay:.78s}
+.bar-text{opacity:0;transform:translateX(-24px);transition:opacity .15s,transform .15s}
+.bar.on .bar-text{opacity:1;transform:none;transition:opacity .35s .85s,transform .45s cubic-bezier(.2,.8,.2,1) .85s}
+.stripe{width:8px;transition:width .4s ease}
+.stripe.on{width:14px}
+@keyframes sLead{0%{clip-path:inset(0 100% 0 0)}6%{clip-path:inset(0 0 0 0)}94%{clip-path:inset(0 0 0 0)}100%{clip-path:inset(0 0 0 100%)}}
+@keyframes sWipe{0%,3%{clip-path:inset(0 100% 0 0)}11%{clip-path:inset(0 0 0 0)}88%{clip-path:inset(0 0 0 0)}97%,100%{clip-path:inset(0 0 0 100%)}}
+@keyframes sFlash{0%,100%{opacity:0}50%{opacity:.4}}
+@keyframes sStreak{0%{transform:translateX(-200px) skewX(-24deg)}100%{transform:translateX(1000px) skewX(-24deg)}}
+@keyframes sLetter{0%{opacity:0;transform:translateY(60px) scale(1.9)}60%{opacity:1;transform:translateY(-5px) scale(.94)}100%{opacity:1;transform:none}}
+@keyframes sWord{0%,100%{transform:scale(1)}50%{transform:scale(1.06)}}
+@keyframes sSlideL{0%{opacity:0;transform:translateX(-36px)}100%{opacity:1;transform:none}}
+@keyframes sSlideR{0%{opacity:0;transform:translateX(36px)}100%{opacity:1;transform:none}}
+@keyframes sLogo{0%{opacity:0;transform:scale(.3) rotate(-120deg)}70%{opacity:1;transform:scale(1.1) rotate(6deg)}100%{opacity:1;transform:none}}
+@keyframes sGlow{0%,100%{box-shadow:0 12px 36px rgba(0,0,0,.55),0 0 0 0 rgba(230,30,50,0)}15%,85%{box-shadow:0 12px 36px rgba(0,0,0,.55),0 0 40px 6px rgba(230,30,50,.55)}50%{box-shadow:0 12px 36px rgba(0,0,0,.55),0 0 90px 18px rgba(230,30,50,.8)}}
+@keyframes sPopEdm{0%{transform:scale(1.5);color:#FF8A3D}40%{transform:scale(.9)}70%{transform:scale(1.06)}100%{transform:scale(1);color:#fff}}
+@keyframes sPopTor{0%{transform:scale(1.5);color:#7aa7ff}40%{transform:scale(.9)}70%{transform:scale(1.06)}100%{transform:scale(1);color:#fff}}
+@keyframes sRowEdm{0%{background-color:rgba(255,76,0,.55)}100%{background-color:rgba(255,76,0,0)}}
+@keyframes sRowTor{0%{background-color:rgba(37,99,235,.6)}100%{background-color:rgba(37,99,235,0)}}
+.s-lead{animation:sLead 3.6s cubic-bezier(.7,0,.2,1) both}
+.s-wrap{animation:sWipe 3.6s cubic-bezier(.7,0,.2,1) both}
+.s-flash{animation:sFlash .3s ease-in-out .42s 4}
+.s-streak{animation:sStreak 1s cubic-bezier(.4,0,.2,1) .35s both}
+.s-streak2{animation:sStreak .8s cubic-bezier(.4,0,.2,1) 1.75s both}
+.s-letter{display:inline-block;animation:sLetter .45s cubic-bezier(.2,.8,.2,1) both}
+.s-word{animation:sWord .5s ease-in-out 1.15s 3}
+.s-in-l{animation:sSlideL .45s cubic-bezier(.2,.8,.2,1) .72s both}
+.s-in-r{animation:sSlideR .45s cubic-bezier(.2,.8,.2,1) .9s both}
+.s-logo{animation:sLogo .6s cubic-bezier(.2,.8,.2,1) .45s both}
+.bug.glow{animation:sGlow 3.6s ease-in-out both}
+.score.pop-edm{animation:sPopEdm .9s cubic-bezier(.2,.8,.2,1) both}
+.score.pop-tor{animation:sPopTor .9s cubic-bezier(.2,.8,.2,1) both}
+.row.flash-edm{animation:sRowEdm 1.2s ease-out both}
+.row.flash-tor{animation:sRowTor 1.2s ease-out both}
+button:focus-visible{outline:2px solid #FF8A3D;outline-offset:3px}
+@media (prefers-reduced-motion: reduce){.sog,.sog-in,.clockcol,.clock-in,.bar,.bar-stripe,.bar-text,.stripe{transition-duration:.01s!important;transition-delay:0s!important}.s-flash,.s-streak,.s-streak2,.s-word{animation:none;opacity:0}.s-letter,.s-logo,.s-in-l,.s-in-r{animation-duration:.01s}}
+</style>
+</helmet>
+<div style="width: 1100px; height: 520px; box-sizing: border-box; background: #0e0e10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 44px; font-family: Inter, system-ui, sans-serif; color: #ffffff">
+<div style="width: 880px; height: 310px; display: flex; align-items: flex-start; justify-content: flex-start">
+<div class="{{bugClass}}" style="display: flex; flex-direction: column; border: 1px solid #2b3550; border-radius: 6px; overflow: hidden; box-shadow: 0 12px 36px rgba(0,0,0,0.55); background: #15191f">
+<div style="position: relative; display: flex; height: 240px">
+<div style="width: 540px; display: flex; flex-direction: column; background: #12284f">
+<div class="{{edmRow}}" style="height: 120px; display: flex; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.22); box-sizing: border-box">
+<div class="{{edmStripe}}" style="align-self: stretch; background: #FF4C00"></div>
+<div style="width: 112px; display: flex; justify-content: center; margin-left: 22px">
+<img src="./assets/34a562603607afde9fc65f6618e153c0.png" alt="Edmonton Oilers" style="height: 96px; width: auto; display: block">
+</div>
+<div style="flex: 1; padding-left: 30px; font-weight: 800; font-size: 60px; letter-spacing: 0.01em">EDM</div>
+<div class="{{edmScoreClass}}" style="width: 90px; margin-right: 34px; text-align: right; font-weight: 800; font-size: 78px; line-height: 1; font-variant-numeric: tabular-nums">{{edm}}</div>
+</div>
+<div class="{{torRow}}" style="height: 120px; display: flex; align-items: center">
+<div class="{{torStripe}}" style="align-self: stretch; background: #2563EB"></div>
+<div style="width: 112px; display: flex; justify-content: center; margin-left: 22px">
+<img src="./assets/ae35f598d4de21900e7669f18045808c.png" alt="Toronto Maple Leafs" style="height: 98px; width: auto; display: block">
+</div>
+<div style="flex: 1; padding-left: 30px; font-weight: 800; font-size: 60px; letter-spacing: 0.01em">TOR</div>
+<div class="{{torScoreClass}}" style="width: 90px; margin-right: 34px; text-align: right; font-weight: 800; font-size: 78px; line-height: 1; font-variant-numeric: tabular-nums">{{tor}}</div>
+</div>
+</div>
+<div class="{{sogClass}}" style="height: 240px; position: relative; overflow: hidden; background: #15191f">
+<div class="sog-in" style="position: absolute; left: 0; top: 0; width: 130px; height: 240px; box-shadow: inset 1px 0 0 #2b3240">
+<div style="position: absolute; left: 0; right: 0; top: 0; height: 120px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 54px; font-variant-numeric: tabular-nums">{{edmSog}}</div>
+<div style="position: absolute; left: 0; right: 0; top: 120px; height: 120px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 54px; font-variant-numeric: tabular-nums">{{torSog}}</div>
+<div style="position: absolute; left: 14px; right: 14px; top: 108px; height: 24px; display: flex; align-items: center; gap: 8px">
+<div style="flex: 1; height: 2px; background: #5b6170"></div>
+<div style="font-weight: 700; font-size: 19px; letter-spacing: 0.08em; color: #c3c7d0">SOG</div>
+<div style="flex: 1; height: 2px; background: #5b6170"></div>
+</div>
+</div>
+</div>
+<div class="{{clockClass}}" style="height: 240px; position: relative; overflow: hidden; background: #15191f">
+<div class="clock-in" style="position: absolute; left: 0; top: 0; width: 200px; height: 240px; display: flex; flex-direction: column; box-shadow: inset 1px 0 0 #2b3240">
+<div style="height: 112px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 14px; box-sizing: border-box; font-weight: 800; font-size: 48px; letter-spacing: 0.02em">2ND</div>
+<div style="height: 2px; margin: 0 26px; background: #5b6170"></div>
+<div style="flex: 1; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 64px; font-variant-numeric: tabular-nums">{{gameClock}}</div>
+</div>
+</div>
+<sc-if value="{{showGoal}}" hint-placeholder-val="{{ false }}">
+<div class="s-lead" style="position: absolute; inset: 0; z-index: 5; background: {{accent}}"></div>
+<div class="s-wrap" role="status" aria-label="{{ariaLabel}}" style="position: absolute; inset: 0; z-index: 6; background: {{base}}; overflow: hidden; display: flex; align-items: center; gap: 30px; padding: 0 40px; box-sizing: border-box">
+<div class="s-streak" style="position: absolute; top: -40px; bottom: -40px; left: 0; width: 110px; background: {{accent}}; opacity: 0.55"></div>
+<div class="s-streak2" style="position: absolute; top: -40px; bottom: -40px; left: 0; width: 40px; background: #ffffff; opacity: 0.3"></div>
+<div class="s-flash" style="position: absolute; inset: 0; background: #ffffff; opacity: 0"></div>
+<div class="s-logo" style="position: relative; width: 150px; flex: none; display: flex; justify-content: center">
+<sc-if value="{{isEdm}}" hint-placeholder-val="{{ true }}"><img src="./assets/34a562603607afde9fc65f6618e153c0.png" alt="" style="height: 150px; width: auto; display: block; filter: drop-shadow(0 6px 0 rgba(0,0,0,0.25))"></sc-if>
+<sc-if value="{{isTor}}" hint-placeholder-val="{{ false }}"><img src="./assets/ae35f598d4de21900e7669f18045808c.png" alt="" style="height: 150px; width: auto; display: block; filter: drop-shadow(0 6px 0 rgba(0,0,0,0.25))"></sc-if>
+</div>
+<div style="position: relative; flex: 1; display: flex; flex-direction: column; align-items: center">
+<div class="s-in-l" style="font-weight: 700; font-size: 18px; letter-spacing: 0.22em; color: #ffffff; white-space: nowrap">{{goalLabel}}</div>
+<div class="s-word" style="font-family: 'Barlow Condensed', Inter, sans-serif; font-style: italic; font-weight: 900; font-size: 140px; line-height: 0.86; letter-spacing: 0.04em; color: #ffffff; text-shadow: 0 6px 0 rgba(0,0,0,0.28)">
+<span class="s-letter" style="animation-delay: 0.42s">G</span><span class="s-letter" style="animation-delay: 0.5s">O</span><span class="s-letter" style="animation-delay: 0.58s">A</span><span class="s-letter" style="animation-delay: 0.66s">L</span>
+</div>
+</div>
+<div class="s-in-r" style="position: relative; display: flex; flex-direction: column; gap: 6px; font-weight: 800; font-size: 30px; font-variant-numeric: tabular-nums; color: #ffffff; white-space: nowrap">
+<div>EDM {{edm}}</div>
+<div>TOR {{tor}}</div>
+</div>
+</div>
+</sc-if>
+</div>
+<div class="{{barClass}}" style="position: relative; overflow: hidden; background: {{barBg}}">
+<div style="position: absolute; left: 0; right: 0; bottom: 0; height: 66px; display: flex; align-items: center">
+<div class="bar-stripe" style="position: absolute; top: -10px; bottom: -10px; left: 46px; width: 26px; background: {{stripeA}}"></div>
+<div class="bar-stripe b" style="position: absolute; top: -10px; bottom: -10px; left: 84px; width: 26px; background: {{stripeB}}"></div>
+<div class="bar-text" style="position: relative; display: flex; align-items: center; gap: 26px; padding-left: 140px; font-style: italic; font-weight: 800; font-size: 40px; letter-spacing: 0.01em; color: #ffffff; text-shadow: 0 2px 2px rgba(0,0,0,0.25); white-space: nowrap">
+<span>{{barLabel}}</span>
+<sc-if value="{{showBarClock}}" hint-placeholder-val="{{ true }}"><span style="font-variant-numeric: tabular-nums">{{ppClock}}</span></sc-if>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; max-width: 1000px">
+<button type="button" onClick="{{edmGoal}}" style="height: 44px; padding: 0 18px; border-radius: 6px; border: 1px solid #FF4C00; background: #12284f; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">EDM goal</button>
+<button type="button" onClick="{{torGoal}}" style="height: 44px; padding: 0 18px; border-radius: 6px; border: 1px solid #2563EB; background: #12284f; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">TOR goal</button>
+<button type="button" onClick="{{edmPp}}" style="height: 44px; padding: 0 18px; border-radius: 6px; border: none; background: #C24A08; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">EDM power play</button>
+<button type="button" onClick="{{torPp}}" style="height: 44px; padding: 0 18px; border-radius: 6px; border: none; background: #1D4ED8; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">TOR power play</button>
+<button type="button" onClick="{{intermission}}" style="height: 44px; padding: 0 18px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.25); background: #1b2440; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">Intermission</button>
+<button type="button" onClick="{{evenStrength}}" style="height: 44px; padding: 0 18px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">Back to play</button>
+<button type="button" onClick="{{reset}}" style="height: 44px; padding: 0 18px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">Reset</button>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"autoplay":{"editor":"boolean","default":true},"$preview":{"width":1100,"height":520}}'>
+class Component extends DCLogic {
+  state = { mode: 'play', barMode: 'pp', ppTeam: 'EDM', ppSecs: 97, gameSecs: 384, edm: 2, tor: 1, edmSog: 14, torSog: 10, phase: 'idle', team: 'EDM', ppGoal: false };
+  componentDidMount() {
+    this.loopTimers = [];
+    this.timers = [];
+    this.ticker = setInterval(() => this.tick(), 1000);
+    if (this.props.autoplay ?? true) this.cycle();
+  }
+  componentWillUnmount() {
+    clearInterval(this.ticker);
+    this.stopLoop();
+    this.clearTimers();
+  }
+  stopLoop() {
+    (this.loopTimers || []).forEach(clearTimeout);
+    this.loopTimers = [];
+  }
+  clearTimers() {
+    (this.timers || []).forEach(clearTimeout);
+    this.timers = [];
+  }
+  tick() {
+    this.setState((s) => {
+      if (s.mode === 'int' || s.phase === 'goal') return null;
+      const next = { gameSecs: Math.max(0, s.gameSecs - 1) };
+      if (s.mode === 'pp') {
+        if (s.ppSecs <= 1) { next.mode = 'play'; next.ppSecs = 0; }
+        else next.ppSecs = s.ppSecs - 1;
+      }
+      return next;
+    });
+  }
+  initial() {
+    return { mode: 'play', phase: 'idle', gameSecs: 384, edm: 2, tor: 1, edmSog: 14, torSog: 10 };
+  }
+  cycle() {
+    this.clearTimers();
+    this.setState(this.initial());
+    this.loopTimers.push(setTimeout(() => this.startPp('EDM'), 1800));
+    this.loopTimers.push(setTimeout(() => this.goal('EDM'), 6000));
+    this.loopTimers.push(setTimeout(() => this.startInt(), 12500));
+    this.loopTimers.push(setTimeout(() => this.setState({ mode: 'play' }), 18500));
+    this.loopTimers.push(setTimeout(() => this.goal('TOR'), 20500));
+    this.loopTimers.push(setTimeout(() => this.cycle(), 27000));
+  }
+  startPp(team) {
+    this.setState({ mode: 'pp', barMode: 'pp', ppTeam: team, ppSecs: 97 });
+  }
+  startInt() {
+    this.setState({ mode: 'int', barMode: 'int' });
+  }
+  goal(team) {
+    this.clearTimers();
+    const ppGoal = this.state.mode === 'pp' && this.state.ppTeam === team;
+    this.setState({ phase: 'idle' });
+    this.timers.push(setTimeout(() => {
+      this.setState((s) => ({
+        phase: 'goal',
+        team: team,
+        ppGoal: ppGoal,
+        mode: s.mode === 'int' ? 'play' : s.mode,
+        edm: team === 'EDM' ? s.edm + 1 : s.edm,
+        tor: team === 'TOR' ? s.tor + 1 : s.tor,
+        edmSog: team === 'EDM' ? s.edmSog + 1 : s.edmSog,
+        torSog: team === 'TOR' ? s.torSog + 1 : s.torSog
+      }));
+      this.timers.push(setTimeout(() => {
+        this.setState(ppGoal ? { phase: 'after', mode: 'play' } : { phase: 'after' });
+      }, 3600));
+      this.timers.push(setTimeout(() => this.setState({ phase: 'idle' }), 4800));
+    }, 40));
+  }
+  manual(fn) {
+    this.stopLoop();
+    fn();
+  }
+  reset() {
+    this.stopLoop();
+    this.clearTimers();
+    this.setState(this.initial());
+  }
+  fmt(n) {
+    return Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0');
+  }
+  renderVals() {
+    const s = this.state;
+    const isInt = s.mode === 'int';
+    const showExtra = s.mode !== 'play';
+    const looks = {
+      EDM: { bg: '#D9520A', a: '#12284f', b: '#FF9A5A' },
+      TOR: { bg: '#1D4ED8', a: '#0b1f4d', b: '#ffffff' },
+      INT: { bg: '#1b2440', a: '#FF4C00', b: '#2563EB' }
+    };
+    const look = s.barMode === 'int' ? looks.INT : (looks[s.ppTeam] || looks.EDM);
+    const goalTeams = {
+      EDM: { base: '#C94A06', accent: '#12284f', name: 'EDMONTON OILERS' },
+      TOR: { base: '#1D4ED8', accent: '#ffffff', name: 'TORONTO MAPLE LEAFS' }
+    };
+    const g = goalTeams[s.team] || goalTeams.EDM;
+    const after = s.phase === 'after';
+    return {
+      edm: s.edm,
+      tor: s.tor,
+      edmSog: s.edmSog,
+      torSog: s.torSog,
+      gameClock: this.fmt(s.gameSecs),
+      ppClock: this.fmt(s.ppSecs),
+      sogClass: showExtra ? 'sog on' : 'sog',
+      clockClass: isInt ? 'clockcol off' : 'clockcol',
+      barClass: showExtra ? 'bar on' : 'bar',
+      barBg: look.bg,
+      stripeA: look.a,
+      stripeB: look.b,
+      barLabel: s.barMode === 'int' ? '2ND INTERMISSION' : s.ppTeam + ' POWER PLAY',
+      showBarClock: s.barMode !== 'int',
+      edmStripe: s.mode === 'pp' && s.ppTeam === 'EDM' ? 'stripe on' : 'stripe',
+      torStripe: s.mode === 'pp' && s.ppTeam === 'TOR' ? 'stripe on' : 'stripe',
+      showGoal: s.phase === 'goal',
+      isEdm: s.team === 'EDM',
+      isTor: s.team === 'TOR',
+      base: g.base,
+      accent: g.accent,
+      goalLabel: s.ppGoal ? 'POWER PLAY GOAL' : g.name,
+      ariaLabel: g.name + ' goal',
+      bugClass: s.phase === 'goal' ? 'bug glow' : 'bug',
+      edmScoreClass: after && s.team === 'EDM' ? 'score pop-edm' : 'score',
+      torScoreClass: after && s.team === 'TOR' ? 'score pop-tor' : 'score',
+      edmRow: after && s.team === 'EDM' ? 'row flash-edm' : 'row',
+      torRow: after && s.team === 'TOR' ? 'row flash-tor' : 'row',
+      edmGoal: () => this.manual(() => this.goal('EDM')),
+      torGoal: () => this.manual(() => this.goal('TOR')),
+      edmPp: () => this.manual(() => this.startPp('EDM')),
+      torPp: () => this.manual(() => this.startPp('TOR')),
+      intermission: () => this.manual(() => this.startInt()),
+      evenStrength: () => this.manual(() => this.setState({ mode: 'play' })),
+      reset: () => this.reset()
+    };
+  }
+}
+</script>
+</body>
+</html>
