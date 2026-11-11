@@ -143,6 +143,34 @@ class ParentalSessionTest {
         assertEquals(ParentalAccess.LOCKED_AUTO, session.state.value.access)
     }
 
+    /** (F7 sibling, 2026-11-11) The hour is elapsed realtime: a wall clock moved back cannot extend the unlock. */
+    @Test fun oneHourIsRealTimeWhateverTheWallClock() {
+        withPin()
+        policy(StayUnlocked.ONE_HOUR)
+        var mono = 5_000L
+        session.elapsed = { mono }
+        session.unlock(10_000_000)
+        mono += ParentalSessionImpl.ONE_HOUR_MS - 1
+        session.onTick(10_000_000 - 86_400_000) // the wall clock was moved a day back
+        assertEquals(ParentalAccess.OPEN, session.state.value.access)
+        mono += 1
+        session.onTick(10_000_000 - 86_400_000)
+        assertEquals("an hour of real time passed", ParentalAccess.LOCKED_AUTO, session.state.value.access)
+        // A wall clock moved forward may end it early (harmless: it only relocks sooner).
+        session.unlock(20_000_000)
+        session.onTick(20_000_000 + ParentalSessionImpl.ONE_HOUR_MS)
+        assertEquals(ParentalAccess.LOCKED_AUTO, session.state.value.access)
+    }
+
+    /** (Review 2026-11-11 L4) refresh() settles the stored lockout: here a wait anchored past "now" is re-anchored. */
+    @Test fun refreshSettlesTheStoredLockout() {
+        withPin()
+        // The pins' clock reads elapsed 0, boot 1: an anchor at 5 000 means elapsed went backwards (a reboot).
+        attempts.a = LockoutPolicy.Attempts(failures = 3, lockedAtElapsedMs = 5_000, lockedAtBoot = 1, waitMs = 30_000)
+        session.refresh()
+        assertEquals(LockoutPolicy.Attempts(3, 0, 1, 30_000), attempts.a)
+    }
+
     @Test fun askEveryTimeRelocksWhenLeavingTheContent() {
         withPin()
         policy(StayUnlocked.ASK_EVERY_TIME)

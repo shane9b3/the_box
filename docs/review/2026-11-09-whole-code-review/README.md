@@ -21,8 +21,7 @@ the combined fix diff, whose low-severity findings were fixed in the same commit
 - Performance H1 (decoders released on every zap), M5, L1, L2, L4: need measuring on a real Fire TV Stick.
 - Performance H3 (baseline profile): generating it runs instrumented tests, which wipe the emulator's login.
 - Performance M2 and the duplicate-identity ordering weakness (M1 code review, Later 7): need a design.
-- Security F5 Gradle dependency verification; F7 (clock moved forward ends the parental lockout; needs Android
-  Settings access, which also allows Clear data).
+- Security F5 Gradle dependency verification. (F7 is now fixed, see 2026-11-11 below.)
 - P2 proper fix (rebuild the archive URL on the chosen base): needs a core contract change.
 - Trade-offs: an SVG logo over 512 KiB or one that declares XML entities does not render; a single run of more than 1 MiB of
   guide text without a tag fails that guide source with a reason.
@@ -41,3 +40,14 @@ the combined fix diff, whose low-severity findings were fixed in the same commit
   S2 (app start counts a recent SUCCESS/NOT_MODIFIED guide run as fresh), the 20 h age rule replaced by a future-window
   rule (N1), S3 (replayed rows `touch` their logo; a cancel no longer bumps the version), S4 tests, N4 (the compare
   stops on cancel). Dispositions in that review's "Fix pass" section.
+- 2026-11-11: Security F7 (owner decision 2026-11-11). The parental PIN lockout is measured on elapsed realtime
+  only; the wall clock no longer shortens or lengthens it. After a reboot (BOOT_COUNT changed, or elapsed realtime
+  below the stored anchor) the wait restarts in full at the same ladder step. **Accepted cost:** restarting the TV
+  during a lockout starts the wait again (at most 30 minutes, the top step). A finished wait is recorded as served on
+  any read, on app start / return to the foreground and by an in-process timer, so a later reboot does not restart it.
+  A wait can still be served twice when it ran out while the app's process was dead or frozen or the device was asleep
+  (the timer does not count deep sleep) and a reboot followed before the app came back. Pre-F7 records decode; their
+  wait continues on the same boot and restarts after a reboot, never ending earlier; a damaged record decodes to the
+  worst case for each field (review `docs/review/2026-11-11-parental-lockout-clock-review.md`, fix pass). Sibling:
+  the "Stay unlocked: 1 hour" timer now also ends after one hour of elapsed realtime, so a clock moved back cannot
+  extend it. Clear data remains the known, accepted bypass. Design: `docs/design/m5-setup-settings.md` §3.9.4–§3.9.5.

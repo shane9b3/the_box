@@ -78,6 +78,8 @@ Overall: the high-value surfaces (self-updater, LAN phone setup, credential stor
 
 ### F7. Low: after a reboot, the parental lockout uses the wall clock, so setting the clock forward ends the wait
 
+- **Status:** fixed 2026-11-11 (see `README.md`, "Fixed after the pass"; design `docs/design/m5-setup-settings.md` §3.9.4).
+
 - **Where:** `core/src/main/kotlin/app/thebox/core/parental/LockoutPolicy.kt:51-63`. On another boot, `passed = now.wallMs - lockedAtWallMs`. Moving the clock *back* is capped, moving it *forward* is not.
 - **Attack:** a child with access to Android Settings reboots, sets the date ahead, and gets 3 more guesses per cycle. That makes 10^4 PINs feasible in hours instead of weeks.
 - **Context:** the same person can also use Settings → Apps → Clear data, which wipes the PIN outright (inherent to Android without device-owner). So this is a small extra route, not a new class.

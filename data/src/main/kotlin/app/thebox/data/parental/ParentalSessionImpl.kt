@@ -46,7 +46,8 @@ import javax.inject.Singleton
  * so access is LOCKED_* and every lock holds until the first read lands), the policy (the
  * `parental` settings domain), `unlocked`, `pinLostToKeyReset` ([KeyResetFlag]) and `openedAnyway`.
  *
- * Stay unlocked: **Until The Box closes** relocks on app stop; **1 hour** at unlock + 60 min or app stop; **Ask every
+ * Stay unlocked: **Until The Box closes** relocks on app stop; **1 hour** at unlock + 60 min of elapsed realtime (or
+ * earlier if the wall clock says the hour passed; F7 sibling) or app stop; **Ask every
  * time** when the user leaves the unlocked content (a tune outside locked content, leaving Settings) or app stop. Only
  * a timer expiry in the foreground waits for the user to tune away from locked content that is playing (a programme is
  * never cut off mid-watch, B1); an app stop is never "mid-programme" (resume goes through the guard and asks). App stop
@@ -81,11 +82,18 @@ class ParentalSessionImpl @Inject constructor(
     private var pinLost = false
     private var unlocked = false
     private var unlockedAtMs = 0L
+    private var unlockedAtElapsedMs = 0L
     private var openedAnyway: Set<GuideSource> = emptySet()
     /** A 1-hour expiry arrived while locked content plays: relock once the user tunes away (B1). */
     private var timeoutPending = false
     private var watchingLocked = false
     private var startedActivities = 0
+
+    /**
+     * (F7 sibling, 2026-11-11) Elapsed realtime for the 1-hour timer, with the debug harness's offset (0 in release):
+     * a wall clock moved back can no longer stretch the unlock beyond one hour of real time. Tests replace it.
+     */
+    internal var elapsed: () -> Long = ::elapsedWithDebugOffset
 
     init {
         scope.launch {
@@ -126,6 +134,14 @@ class ParentalSessionImpl @Inject constructor(
             try {
                 withContext(io) {
                     pins.isSet()
+                    // F7: record a lockout that ran out as served (and re-anchor one after a reboot).
+                    try {
+                        pins.settleLockout(app.thebox.core.diag.DebugOverrides.nowMs())
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        BoxLog.w(TAG, "lockout settle failed: ${e.javaClass.simpleName}")
+                    }
                     val lost = runCatching { keyReset.pinLost() }.getOrDefault(false)
                     synchronized(lock) { pinLost = lost }
                 }
@@ -157,6 +173,7 @@ class ParentalSessionImpl @Inject constructor(
             if (!pinSet) return
             unlocked = true
             unlockedAtMs = nowMs
+            unlockedAtElapsedMs = elapsed()
             timeoutPending = false
         }
         publish()
@@ -173,7 +190,10 @@ class ParentalSessionImpl @Inject constructor(
 
     override fun onTick(nowMs: Long) {
         val expire = synchronized(lock) {
-            if (!unlocked || policy.stayUnlocked != StayUnlocked.ONE_HOUR || nowMs - unlockedAtMs < ONE_HOUR_MS) return
+            if (!unlocked || policy.stayUnlocked != StayUnlocked.ONE_HOUR) return
+            // The hour is real time (elapsed realtime): a wall clock moved back cannot extend it. A wall clock moved
+            // forward may end it early, which only relocks sooner (harmless).
+            if (elapsed() - unlockedAtElapsedMs < ONE_HOUR_MS && nowMs - unlockedAtMs < ONE_HOUR_MS) return
             if (watchingLocked) { timeoutPending = true; false } else true
         }
         if (expire) relock(RelockReason.TIMEOUT)
