@@ -1244,4 +1244,106 @@ class ScoreBugMachineTest {
         }
         assertEquals(trace(false), trace(true))
     }
+
+    // ------------------------------------------------------------------ Stacked (docs/design/m6-score-bug-stacked-theme.md §2.1 B1, §3.3)
+
+    @Test
+    fun periodSurvivesStaleAndWaitingInPlayAndInABreak() {
+        val reg2 = PeriodLabel(PeriodKind.REG, 2)
+        val ot1 = PeriodLabel(PeriodKind.OT, 1)
+        val int1 = live(inInt = true, running = false, phase = GamePhase.INTERMISSION, secs = 958, period = 1)
+        val cases = listOf(
+            "play" to (live() to reg2),
+            "OT" to (live(period = 4, kind = PeriodKind.OT, ot = 1) to ot1),
+            "intermission" to (int1 to PeriodLabel(PeriodKind.REG, 1)),
+            "end of period" to (live(secs = 0, running = false, period = 3) to PeriodLabel(PeriodKind.REG, 3)),
+            "shootout" to (live(period = 5, kind = PeriodKind.SO, secs = 0, running = false) to PeriodLabel(PeriodKind.SO, 1)),
+        )
+        for ((name, c) in cases) {
+            val (snap, label) = c
+            // Fresh.
+            val f = Rig()
+            f.follow()
+            f.ok(snap)
+            assertEquals(label, f.m.view()!!.period, "$name fresh")
+            // Stale: `bottom` is overwritten with NoUpdate, the period is kept.
+            f.m.online(false)
+            f.at(80_000)
+            val stale = f.m.view()!!
+            assertEquals(CentreText.NoUpdate, stale.bottom, "$name stale")
+            assertTrue(stale.dim)
+            assertEquals(label, stale.period, "$name stale keeps the period")
+            // Waiting on the delay: `bottom` is Delayed, the period is kept.
+            val w = Rig(delaySec = 30)
+            w.follow()
+            w.ok(snap)
+            val waiting = w.m.view()!!
+            assertEquals(CentreText.Delayed, waiting.bottom, "$name waiting")
+            assertEquals(label, waiting.period, "$name waiting keeps the period")
+        }
+        // A final keeps the last label; the NFL never sets it.
+        val fin = Rig()
+        fin.follow()
+        fin.ok(final(kind = PeriodKind.OT).copy(period = 4, periodKind = PeriodKind.OT, otNumber = 1))
+        assertEquals(ot1, fin.m.view()!!.period)
+        val nfl = SportsFixtures.nflGame(startUtcMs = 1_793_923_200_000L)
+        val n = Rig()
+        n.follow(nfl)
+        n.ok(nfl)
+        assertEquals(League.NFL, n.m.view()!!.league)
+        assertNull(n.m.view()!!.period, "NFL")
+        n.m.online(false)
+        n.at(80_000)
+        assertNull(n.m.view()!!.period, "NFL stale")
+    }
+
+    @Test
+    fun periodChangesOnlyWithThePeriod() {
+        val r = Rig()
+        r.follow()
+        r.ok(live(secs = 622))
+        val first = r.m.view()!!
+        r.at(20_000)
+        r.ok(live(secs = 602))
+        assertEquals(first.period, r.m.view()!!.period)
+        r.at(40_000)
+        r.ok(live(secs = 1_200, period = 3))
+        assertEquals(PeriodLabel(PeriodKind.REG, 3), r.m.view()!!.period)
+    }
+
+    @Test
+    fun shotsRideTheShownSnapshot() {
+        val int = live(inInt = true, running = false, phase = GamePhase.INTERMISSION, secs = 958, period = 1)
+        fun withSog(s: GameSnapshot, a: Int?, h: Int?) = s.copy(away = s.away.copy(sog = a), home = s.home.copy(sog = h))
+        val r = Rig()
+        r.follow()
+        r.ok(withSog(int, 5, 8))
+        val before = r.m.view()!!
+        assertEquals(5, before.away.sog)
+        assertEquals(8, before.home.sog)
+        // Between snapshots the view does not change (one view per snapshot, SB §4.7).
+        r.at(10_000)
+        assertEquals(before, r.m.view())
+        // A SOG-only change in an intermission (a stat correction; no clock under ruling 33): one new view, nothing else moves.
+        r.at(40_000)
+        r.ok(withSog(int, 6, 8))
+        val after = r.m.view()!!
+        assertEquals(6, after.away.sog)
+        assertEquals(before.copy(away = before.away.copy(sog = 6)), after, "only the SOG changed")
+        assertEquals(before.goalSeq, after.goalSeq, "no goal")
+        r.at(50_000)
+        assertEquals(after, r.m.view())
+        // With a delay the SOG rides the delayed timeline with the score (ruling 1).
+        val d = Rig(delaySec = 30)
+        d.follow()
+        d.ok(withSog(live(secs = 622), 10, 12))
+        d.at(20_000)
+        d.ok(withSog(live(secs = 602), 11, 12))
+        d.at(30_000)
+        assertEquals(10, d.m.view()!!.away.sog)
+        d.at(49_999)
+        assertEquals(10, d.m.view()!!.away.sog)
+        d.at(50_000)
+        assertEquals(11, d.m.view()!!.away.sog)
+    }
 }

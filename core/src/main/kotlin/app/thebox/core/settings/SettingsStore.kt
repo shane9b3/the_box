@@ -14,6 +14,10 @@ import kotlinx.serialization.json.JsonElement
  * the first frame with defaults). [importInTransaction] cancels pending writes of the domains it replaces. Values that
  * are not user choices (PlaybackSettings.defaultUserAgent, test hooks) never enter the store. JSON is `ignoreUnknownKeys`, `encodeDefaults = false`, so a
  * value equal to its default is not stored and a later default change reaches users who never touched it.
+ * (Stacked commit 0, S7) and `coerceInputValues = true`: an enum name this build does not know, or a JSON `null` for a
+ * non-null field, decodes to **that property's default** and the document's other fields are kept (both in a stored
+ * document and in a restored one). Limits: it acts only on properties with a default; an unknown value inside a
+ * collection or as a map key still fails the whole document, as before.
  */
 class SettingsDomain<T>(
     val name: String,

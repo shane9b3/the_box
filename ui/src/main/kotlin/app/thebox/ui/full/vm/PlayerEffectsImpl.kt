@@ -100,6 +100,7 @@ class PlayerEffectsImpl(
     override fun setScoreCorner(c: app.thebox.core.sports.ScoreCorner) = vm.updateSports { it.copy(corner = c) }
     override fun setScoreDelay(sec: Int) = vm.updateSports { it.copy(delaySec = sec) }
     override fun setScoreLeague(league: app.thebox.core.sports.League) = vm.updateSports { it.copy(league = league) }
+    override fun setScoreStyle(style: app.thebox.core.sports.NhlBugStyle) = vm.updateSports { it.copy(nhlStyle = style) }
     override fun scorePicker(open: Boolean) { vm.scoreRepo?.reportDemand(app.thebox.core.sports.DemandOwner.SCORE_PICKER, open) }
     override fun retryScores() { vm.scoreRepo?.retry() }
 

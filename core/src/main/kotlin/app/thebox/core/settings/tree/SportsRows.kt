@@ -17,8 +17,13 @@ object SportsRows : RowSource {
     val SIZE = RowId("sports.size")
     /** (Update interval §5.1) The followed game's poll interval for the league on the Sports tab (`SportsPrefs.league`). */
     val INTERVAL = RowId("sports.interval")
+    /**
+     * (Stacked commit 0, docs/design/m6-score-bug-stacked-theme.md §1.1) "Score bug style" · Pill / Stacked, after [SIZE];
+     * ADVANCED like every Sports row.
+     */
+    val STYLE = RowId("sports.style")
 
-    override val rows: List<RowSpec> = listOf(SHOW, CORNER, DELAY, INTERVAL, SIZE).map {
+    override val rows: List<RowSpec> = listOf(SHOW, CORNER, DELAY, INTERVAL, SIZE, STYLE).map {
         RowSpec(it, SectionId.SPORTS, ADVANCED, LIVE, "S") // "S" (score bug): WpaPages builds the page and applies the intents, outside the WP-A simple-count sections
     }
 }

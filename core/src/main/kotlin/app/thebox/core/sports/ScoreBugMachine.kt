@@ -300,6 +300,7 @@ class ScoreBugMachine(
             powerPlay = if (fresh) gatedPp(s) else null,
             goalPp = goal != null && goalPp,
             ppEnded = fresh && e === ppEndedEntry,
+            period = label, // (Stacked §2.1, B1) kept in stale and waiting views, where `bottom` is overwritten
         )
     }
 

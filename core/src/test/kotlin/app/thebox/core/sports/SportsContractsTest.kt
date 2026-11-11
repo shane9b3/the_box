@@ -73,6 +73,34 @@ class SportsContractsTest {
     }
 
     @Test
+    fun nhlStyleDefaultsToPillAndIsNeverWrittenForPill() {
+        // (Stacked §1.3) An old document (no key) is Pill; a Pill document has no key; Stacked round-trips by name.
+        assertEquals(NhlBugStyle.PILL, SportsPrefs().nhlStyle)
+        assertEquals(NhlBugStyle.PILL, json.decodeFromString(SportsPrefs.serializer(), """{"corner":"TOP_LEFT"}""").nhlStyle)
+        assertEquals("""{"corner":"TOP_LEFT"}""", json.encodeToString(SportsPrefs.serializer(), SportsPrefs(corner = ScoreCorner.TOP_LEFT)))
+        val stacked = SportsPrefs(nhlStyle = NhlBugStyle.STACKED)
+        val text = json.encodeToString(SportsPrefs.serializer(), stacked)
+        assertEquals("""{"nhlStyle":"STACKED"}""", text)
+        assertEquals(stacked, json.decodeFromString(SportsPrefs.serializer(), text))
+        // The persisted names are append-only.
+        assertEquals(listOf("PILL", "STACKED"), NhlBugStyle.entries.map { it.name })
+    }
+
+    @Test
+    fun theStackedModelFieldsDefaultToNull() {
+        // (Stacked §2.1, §3.3) Trailing, defaulted fields: older constructors keep compiling and mean "not known".
+        assertNull(TeamLine("EDM", "Oilers", 2, null).sog)
+        val v = ScoreBugView(TeamLine("A", "A", 0, null), TeamLine("B", "B", 0, null), CentreText.Clock, null, false, 0, null)
+        assertNull(v.period)
+        assertEquals(NhlBugStyle.PILL, PlacementInput(
+            corner = ScoreCorner.TOP_RIGHT, size = ScoreBugSize.STANDARD, placing = false, bar = BottomBar.NONE,
+            channelList = false, stats = false, groupCard = false, picker = false, numberEntry = false, probing = null,
+            toast = false, reminder = false, modal = false, textTrackOn = false, screenOff = false,
+        ).style)
+        assertNull(ScoreFacts().style)
+    }
+
+    @Test
     fun boxIntersection() {
         val a = Box(0f, 0f, 10f, 10f)
         assertTrue(a.intersects(Box(5f, 5f, 15f, 15f)))

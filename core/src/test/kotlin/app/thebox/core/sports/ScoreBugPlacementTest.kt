@@ -295,4 +295,181 @@ class ScoreBugPlacementTest {
             assertNull(ScoreBugPlacement.place(everything.copy(screenOff = true), geo))
         }
     }
+
+    // ------------------------------------------------------------------ Stacked (docs/design/m6-score-bug-stacked-theme.md §4.3)
+
+    private fun stacked(corner: ScoreCorner, size: ScoreBugSize = ScoreBugSize.STANDARD) =
+        input(corner, size).copy(style = NhlBugStyle.STACKED)
+
+    /** The §4.3 footprint: 392 × 141 Standard, 490 × 176.25 Large, at the pill's insets. */
+    private fun stackedExpected(row: String, c: ScoreCorner, s: ScoreBugSize): Box? {
+        val w = if (s == ScoreBugSize.LARGE) 490f else 392f
+        val h = if (s == ScoreBugSize.LARGE) 176.25f else 141f
+        val l = if (left(c)) 96f else 1920f - 96f - w
+        val top = Box(l, 56f, l + w, 56f + h)
+        val rest = if (bottom(c)) Box(l, 1080f - 56f - h, l + w, 1080f - 56f) else top
+        fun lifted(barTop: Float) = Box(l, barTop - 16f - h, l + w, barTop - 16f)
+        return when (row) {
+            "bare" -> rest
+            // The probing line (600..1320 × 72..128) clears every Stacked footprint (Large right starts at 1334).
+            "probing" -> rest
+            "passive" -> if (bottom(c)) null else rest
+            "userBar" -> if (bottom(c)) lifted(820f) else rest
+            "quick" -> if (bottom(c)) lifted(952f) else rest
+            "subtitles", "subtitlesUserBar" -> top
+            "channelList" -> if (left(c)) null else rest
+            "stats" -> if (left(c) && !bottom(c)) null else rest
+            "groupCard" -> if (left(c) && !bottom(c)) null else rest
+            // §1.1 (S8): the picker sheet (1376..1872 × 48..928) intersects both right-corner footprints.
+            "picker" -> if (!left(c)) null else rest
+            "numberEntry" -> if (!left(c) && !bottom(c)) null else rest
+            "toast" -> if (bottom(c) && left(c)) null else rest
+            "reminder" -> if (bottom(c) && !left(c)) null else rest
+            "modal", "screenOff" -> null
+            else -> error(row)
+        }
+    }
+
+    @Test
+    fun stackedEveryRowEveryCornerBothSizes() {
+        for ((name, mod) in rows) for (c in corners) for (s in sizes) {
+            assertEquals(stackedExpected(name, c, s), ScoreBugPlacement.place(mod(stacked(c, s)), geo), "stacked $name $c $s")
+        }
+    }
+
+    @Test
+    fun stackedFootprintAtTheFourCorners() {
+        // §4.3's table (Standard), and Large.
+        assertEquals(Box(1432f, 56f, 1824f, 197f), ScoreBugPlacement.place(stacked(ScoreCorner.TOP_RIGHT), geo))
+        assertEquals(Box(96f, 56f, 488f, 197f), ScoreBugPlacement.place(stacked(ScoreCorner.TOP_LEFT), geo))
+        assertEquals(Box(1432f, 883f, 1824f, 1024f), ScoreBugPlacement.place(stacked(ScoreCorner.BOTTOM_RIGHT), geo))
+        assertEquals(Box(96f, 883f, 488f, 1024f), ScoreBugPlacement.place(stacked(ScoreCorner.BOTTOM_LEFT), geo))
+        assertEquals(Box(1334f, 56f, 1824f, 232.25f), ScoreBugPlacement.place(stacked(ScoreCorner.TOP_RIGHT, ScoreBugSize.LARGE), geo))
+        assertEquals(Box(96f, 847.75f, 586f, 1024f), ScoreBugPlacement.place(stacked(ScoreCorner.BOTTOM_LEFT, ScoreBugSize.LARGE), geo))
+        // width / height and cornerBox agree; the footprint is the box's maximum (rows + SOG + clock, bar open).
+        for (s in sizes) {
+            val k = if (s == ScoreBugSize.LARGE) 1.25f else 1f
+            assertEquals(392f * k, ScoreBugPlacement.width(s, League.NHL, NhlBugStyle.STACKED))
+            assertEquals(141f * k, ScoreBugPlacement.height(s, League.NHL, NhlBugStyle.STACKED))
+            val widest = SportsConstants.STACKED_ROWS_W + SportsConstants.STACKED_SOG_W + SportsConstants.STACKED_CLOCK_W
+            assertEquals(391.5f, widest)
+            assertTrue(widest * k <= ScoreBugPlacement.width(s, League.NHL, NhlBugStyle.STACKED))
+            for (c in corners) {
+                val b = ScoreBugPlacement.cornerBox(c, s, League.NHL, NhlBugStyle.STACKED)
+                assertTrue(b.l >= 96f && b.r <= 1920f - 96f && b.t >= 56f && b.b <= 1080f - 56f, "$c $s inside the insets: $b")
+            }
+        }
+    }
+
+    @Test
+    fun pillAndNflIgnoreTheStyle() {
+        for (s in sizes) for (c in corners) {
+            assertEquals(ScoreBugPlacement.cornerBox(c, s), ScoreBugPlacement.cornerBox(c, s, League.NHL, NhlBugStyle.PILL))
+            for (style in NhlBugStyle.entries) {
+                assertEquals(ScoreBugPlacement.cornerBox(c, s, League.NFL), ScoreBugPlacement.cornerBox(c, s, League.NFL, style), "NFL $style")
+            }
+            assertEquals(ScoreBugPlacement.place(input(c, s), geo), ScoreBugPlacement.place(stacked(c, s).copy(style = NhlBugStyle.PILL), geo))
+        }
+    }
+
+    @Test
+    fun stackedNoBoxIntersectsAnActiveOverlay() {
+        val flags = listOf<(PlacementInput) -> PlacementInput>(
+            { it.copy(channelList = true) }, { it.copy(stats = true) }, { it.copy(groupCard = true) },
+            { it.copy(picker = true) }, { it.copy(numberEntry = true) }, { it.copy(probing = probing) },
+        )
+        for (c in corners) for (s in sizes) for (bar in BottomBar.entries) for (tt in listOf(false, true)) {
+            for (mask in 0 until (1 shl flags.size)) {
+                var i = stacked(c, s).copy(bar = bar, textTrackOn = tt)
+                flags.forEachIndexed { k, f -> if (mask and (1 shl k) != 0) i = f(i) }
+                val box = ScoreBugPlacement.place(i, geo) ?: continue
+                val active = buildList {
+                    if (i.channelList) add(geo.channelList)
+                    if (i.stats) add(geo.stats)
+                    if (i.groupCard) add(geo.groupCard)
+                    if (i.picker) add(geo.picker)
+                    if (i.numberEntry) add(geo.numberEntry)
+                    i.probing?.let(::add)
+                }
+                assertTrue(active.none { it.intersects(box) }, "$c $s $bar $mask")
+                assertTrue(box.l >= 96f && box.r <= 1920f - 96f && box.t >= 56f && box.b <= 1080f - 56f, "$box")
+                when (bar) {
+                    BottomBar.USER_BAR -> assertTrue(box.b <= geo.infoBarTop - 16f || box.t == 56f)
+                    BottomBar.QUICK -> assertTrue(box.b <= geo.quickBarTop - 16f || box.t == 56f)
+                    BottomBar.PASSIVE_INFO -> assertEquals(56f, box.t)
+                    BottomBar.NONE -> Unit
+                }
+            }
+        }
+    }
+
+    @Test
+    fun stackedGlowAllowedWithTheMargin() {
+        for (c in corners) for (s in sizes) {
+            assertEquals(true, glow(stacked(c, s)), "bare $c $s")
+            for (bar in listOf(BottomBar.USER_BAR, BottomBar.QUICK)) {
+                assertEquals(!bottom(c), glow(stacked(c, s).copy(bar = bar)), "$c $s $bar")
+                assertEquals(true, glow(stacked(c, s).copy(bar = bar, textTrackOn = true)), "$c $s $bar subtitles")
+            }
+        }
+        // Top right Standard footprint 1432..1824: the halo (M 74) starts at 1358.
+        val i = stacked(ScoreCorner.TOP_RIGHT).copy(stats = true)
+        assertEquals(false, glow(i, geo.copy(stats = Box(1000f, 56f, 1359f, 300f))))
+        assertEquals(true, glow(i, geo.copy(stats = Box(1000f, 56f, 1358f, 300f))))
+        // Large (M 76): footprint 1334..1824, the halo starts at 1258.
+        val l = stacked(ScoreCorner.TOP_RIGHT, ScoreBugSize.LARGE).copy(stats = true)
+        assertEquals(false, glow(l, geo.copy(stats = Box(1000f, 56f, 1259f, 300f))))
+        assertEquals(true, glow(l, geo.copy(stats = Box(1000f, 56f, 1258f, 300f))))
+    }
+
+    @Test
+    fun stackedPlaceModeIsTheFootprint() {
+        for (c in corners) for (s in sizes) {
+            val everything = stacked(c, s).copy(
+                placing = true, bar = BottomBar.PASSIVE_INFO, channelList = true, stats = true, groupCard = true,
+                picker = true, numberEntry = true, probing = probing, toast = true, reminder = true, textTrackOn = true,
+            )
+            assertEquals(ScoreBugPlacement.cornerBox(c, s, League.NHL, NhlBugStyle.STACKED), ScoreBugPlacement.place(everything, geo), "$c $s")
+        }
+    }
+
+    @Test
+    fun theRowsAreAnchoredAtTheFootprintsLeftEdge() {
+        val play = SportsConstants.STACKED_ROWS_W + SportsConstants.STACKED_CLOCK_W
+        val pp = play + SportsConstants.STACKED_SOG_W
+        val brk = SportsConstants.STACKED_ROWS_W + SportsConstants.STACKED_SOG_W
+        assertEquals(333f, play); assertEquals(391.5f, pp); assertEquals(301.5f, brk)
+        // §4.3's table, top right Standard: right edges 1765 / 1823.5 / 1733.5 (gaps 59 / 0 / 90.5).
+        val tr = assertNotNull(ScoreBugPlacement.place(stacked(ScoreCorner.TOP_RIGHT), geo))
+        assertEquals(Box(1432f, 56f, 1765f, 164f), ScoreBugPlacement.stackedTopBox(tr, ScoreBugSize.STANDARD, play))
+        assertEquals(1823.5f, ScoreBugPlacement.stackedTopBox(tr, ScoreBugSize.STANDARD, pp).r)
+        assertEquals(1733.5f, ScoreBugPlacement.stackedTopBox(tr, ScoreBugSize.STANDARD, brk).r)
+        assertFalse(ScoreBugPlacement.stackedBarUp(tr), "top corner: the bar drops below (164..197)")
+        // Bottom right: the box bottom at 1024, the bar above (883..916).
+        val br = assertNotNull(ScoreBugPlacement.place(stacked(ScoreCorner.BOTTOM_RIGHT), geo))
+        assertTrue(ScoreBugPlacement.stackedBarUp(br))
+        assertEquals(Box(1432f, 916f, 1765f, 1024f), ScoreBugPlacement.stackedTopBox(br, ScoreBugSize.STANDARD, play))
+        for (c in corners) for (s in sizes) for (w in listOf(play, pp, brk)) {
+            val fp = assertNotNull(ScoreBugPlacement.place(stacked(c, s), geo))
+            val k = if (s == ScoreBugSize.LARGE) 1.25f else 1f
+            val top = ScoreBugPlacement.stackedTopBox(fp, s, w)
+            assertEquals(fp.l, top.l, "$c $s $w: rows never move")
+            assertEquals(w * k, top.r - top.l, 1e-3f)
+            assertEquals(108f * k, top.b - top.t, 1e-3f)
+            assertTrue(top.r <= fp.r, "$c $s $w: inside the footprint")
+            // The top part plus the open bar fills the footprint's height exactly.
+            val barH = SportsConstants.STACKED_BAR_H * k
+            if (bottom(c)) {
+                assertEquals(fp.b, top.b); assertEquals(fp.t, top.t - barH, 1e-3f)
+            } else {
+                assertEquals(fp.t, top.t); assertEquals(fp.b, top.b + barH, 1e-3f)
+            }
+        }
+        // S11: subtitles move a bottom corner to the top, so its bar drops downwards; a lifted bottom bug keeps it above.
+        val moved = assertNotNull(ScoreBugPlacement.place(stacked(ScoreCorner.BOTTOM_LEFT).copy(textTrackOn = true), geo))
+        assertFalse(ScoreBugPlacement.stackedBarUp(moved))
+        val lifted = assertNotNull(ScoreBugPlacement.place(stacked(ScoreCorner.BOTTOM_LEFT).copy(bar = BottomBar.USER_BAR), geo))
+        assertTrue(ScoreBugPlacement.stackedBarUp(lifted))
+        assertEquals(804f, ScoreBugPlacement.stackedTopBox(lifted, ScoreBugSize.STANDARD, play).b)
+    }
 }

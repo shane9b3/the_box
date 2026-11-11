@@ -22,6 +22,12 @@ data class SportsPrefs(
      */
     val nhlIntervalS: Int = 0,
     val nflIntervalS: Int = 0,
+    /**
+     * (Stacked §1.3) "Score bug style" for NHL games; Pill (the default) is never written to the document
+     * (`encodeDefaults = false`). Backed up with the rest of the domain. An unknown name decodes to [NhlBugStyle.PILL]
+     * (the store's `coerceInputValues`, S7).
+     */
+    val nhlStyle: NhlBugStyle = NhlBugStyle.PILL,
 ) {
     /** [league]'s stored interval choice (0 = Auto), as stored. */
     fun intervalS(league: League): Int = if (league == League.NHL) nhlIntervalS else nflIntervalS

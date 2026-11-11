@@ -27,12 +27,21 @@ Scripting (config keys, also through `POST /admin/config`):
   of SEGMENTS: CGY goals at 1st 15 s (ev) and 2nd 30 s (pp), EDM goals at 3rd 40 s (pp) and 100 s (ev), situations 1451 / 1541 /
   1351 / 1431 in set windows (seconds count down 1 s/s, frozen in an intermission), and the landing carries
   `summary.scoring`. The 3rd period runs 110 s (the timeline is 50 s longer at 360). Off, every body is as before.
+- `awaySog` / `homeSog` (script keys): an int 0..199, or `null` to omit that team's `sog` (a game whose shots are missing).
+  Default `sog` = 3 + 2 * (score without the shootout winner's +1) + 4 * min(period, 4): the NHL counts no shootout attempts,
+  so it does not rise from the 3rd period into SO, OVER, OFF or FINAL (docs/design/m6-score-bug-stacked-theme.md section 3.3).
+- `sports_stacked` (`--sports-stacked`, default off; needs sports): the Stacked style's scenario. It plays the `sports_pp`
+  timeline (so it implies it) with STACKED_SEGMENTS' additions: the last 8 s of the 1st and 3rd periods are an end of period
+  (`secondsRemaining` 0, not running, not in intermission); 2nd period 40..50 s has no SOG (`awaySog` and `homeSog` null);
+  the 2nd intermission is 90 s long, carries a frozen power play (1541, a PP carried into intermission; the 1st intermission
+  already carries 1451) and is stale in its 10..80 s (every /v1 answer is 503). Off, every body is as before.
 - `sports_faults`: {"status": N (every /v1 answer), "score_status": N, "landing_status": N, "html_404": true (404s carry
   an HTML body), "retry_after": S, "pad_bytes": N (a filler field, for the 512 KB cap), "age": S (a fixed Age),
   "no_date": true (no Date header), "stall_s": S (wait before answering), "stall_ms": MS (a fractional stall, to fake a
   slow box; docs/design/m6-sports-update-interval.md section 6), "max_age": S (overrides max-age and s-maxage)}.
 `GET /admin/sports` shows the slate; `/admin/stats` carries `sports: {requests, by_path, log}`.
 """
+import copy
 import datetime as dt
 import email.utils
 import json
@@ -54,11 +63,12 @@ DEFAULTS = {
     "sports_script": {},
     "sports_faults": {},
     "sports_pp": False,           # --sports-pp: the power-play timeline, `situation` and `summary.scoring` (needs sports)
+    "sports_stacked": False,      # --sports-stacked: the pp timeline plus the Stacked scenario (needs sports)
 }
 FAULT_KEYS = ("status", "score_status", "landing_status", "html_404", "retry_after", "pad_bytes", "age", "no_date", "stall_s",
               "stall_ms", "max_age")
 STATE_KEYS = ("gameState", "period", "periodType", "secondsRemaining", "running", "inIntermission", "away", "home",
-              "scheduleState", "lastPeriodType", "gone", "situationCode", "situationSeconds", "goalStrength")
+              "scheduleState", "lastPeriodType", "gone", "situationCode", "situationSeconds", "goalStrength", "awaySog", "homeSog")
 
 # abbrev -> (team id, place name, common name, colour)
 TEAMS = {
@@ -116,7 +126,19 @@ PP_SEGMENTS = [
     (20, {"gameState": "OFF", "period": 5, "periodType": "SO", "clock": "zero", "winner": "home"}),
     (None, {"gameState": "FINAL", "period": 5, "periodType": "SO", "clock": "zero", "winner": "home"}),
 ]
+SOG_MAX = 199  # SportsConstants.SOG_MAX
 PP_AWAY, PP_HOME = "CGY", "EDM"
+
+# The Stacked scenario (config `sports_stacked`; docs/design/m6-score-bug-stacked-theme.md section 10.4): PP_SEGMENTS plus
+# per-segment windows, in segment seconds at TIMELINE_DEFAULT_S (they scale with k): "end": the last N s of a running period
+# are an end of period (0 left, not running, not in intermission); "sog_null": (start, end) the SOG column's missing-data
+# window (awaySog and homeSog null); "stale": (start, end) every /v1 answer is a 503 (the app's view goes stale). The 1st INT
+# already carries the PP (1451, frozen); the 2nd INT is lengthened to 90 s so a stale window fits and also carries a frozen PP.
+STACKED_SEGMENTS = [copy.deepcopy(seg) for seg in PP_SEGMENTS]
+STACKED_SEGMENTS[2] = (STACKED_SEGMENTS[2][0], dict(STACKED_SEGMENTS[2][1], end=8))
+STACKED_SEGMENTS[4] = (STACKED_SEGMENTS[4][0], dict(STACKED_SEGMENTS[4][1], sog_null=(40, 50)))
+STACKED_SEGMENTS[5] = (90, dict(STACKED_SEGMENTS[5][1], sit=[("1541", 0, 90, 20, True)], stale=(10, 80)))
+STACKED_SEGMENTS[6] = (STACKED_SEGMENTS[6][0], dict(STACKED_SEGMENTS[6][1], end=8))
 SIT_CODE_RE = re.compile(r"[0-9]{4}")
 SIT_DEFAULT_S = 60  # a scripted situationCode with no situationSeconds and no timeline situation
 
@@ -127,6 +149,8 @@ def check_config(patch):
         raise ValueError("sports must be true or false")
     if "sports_pp" in patch and not isinstance(patch["sports_pp"], bool):
         raise ValueError("sports_pp must be true or false")
+    if "sports_stacked" in patch and not isinstance(patch["sports_stacked"], bool):
+        raise ValueError("sports_stacked must be true or false")
     if "sports_timeline_s" in patch:
         v = patch["sports_timeline_s"]
         if isinstance(v, bool) or not isinstance(v, (int, float)) or not 30 <= v <= 86400:
@@ -146,6 +170,9 @@ def check_config(patch):
                 n = v["situationSeconds"]
                 if isinstance(n, bool) or not isinstance(n, int) or not 0 <= n <= 599:
                     raise ValueError("situationSeconds must be an integer 0..599")
+            for key in ("awaySog", "homeSog"):
+                if key in v and v[key] is not None and (isinstance(v[key], bool) or not isinstance(v[key], int) or not 0 <= v[key] <= SOG_MAX):
+                    raise ValueError(f"{key} must be an integer 0..{SOG_MAX}, or null")
             if "goalStrength" in v and v["goalStrength"] not in ("ev", "pp", "sh"):
                 raise ValueError('goalStrength must be "ev", "pp" or "sh"')
     if "sports_faults" in patch:
@@ -265,7 +292,7 @@ class Sports:
 
     def featured(self, at):
         """The compressed timeline: the state of the featured game at unix [at]."""
-        if self.panel.cfg.get("sports_pp"):
+        if self.panel.cfg.get("sports_pp") or self.panel.cfg.get("sports_stacked"):
             return self.featured_pp(at)
         t = at - self.anchor
         k = self.scale()
@@ -321,7 +348,7 @@ class Sports:
         k = self.scale()
         away = home = 0
         periods = []  # [{"number", "periodType", "goals"}] of the periods started so far (no shootout)
-        for length, seg in PP_SEGMENTS:
+        for length, seg in (STACKED_SEGMENTS if self.panel.cfg.get("sports_stacked") else PP_SEGMENTS):
             ln = None if length is None else length * k
             if seg["gameState"] not in ("FUT", "PRE") and seg["periodType"] != "SO" \
                     and (not periods or periods[-1]["number"] != seg["period"]):
@@ -353,6 +380,15 @@ class Sports:
                 s.update(secondsRemaining=max(0, int(math.ceil(ln - t))), running=False, inIntermission=True)
             else:
                 s.update(secondsRemaining=0, running=False, inIntermission=False)
+            end = seg.get("end")
+            if end and clock == "run" and ln is not None and t >= ln - end * k:
+                s.update(secondsRemaining=0, running=False, inIntermission=False)
+            sn = seg.get("sog_null")
+            if sn and sn[0] * k <= t < sn[1] * k:
+                s.update(awaySog=None, homeSog=None)
+            st = seg.get("stale")
+            if st and st[0] * k <= t < st[1] * k:
+                s["_stale"] = True
             code, secs = self.pp_situation(seg, t, k, ln)
             if code:
                 s.update(situationCode=code, situationSeconds=secs)
@@ -390,7 +426,18 @@ class Sports:
         return s
 
     # ---- bodies
-    def team(self, abbrev, score, base, landing, s):
+    @staticmethod
+    def sog(side, score, s):
+        """The team's shots: a script override (None = omitted), else 3 + 2 * regScore + 4 * min(period, 4). The NHL counts no
+        shootout attempts, so the shootout winner's +1 (the only time `lastPeriodType` is SO) is not a shot."""
+        key = side + "Sog"
+        if key in s:
+            return s[key]
+        other = s.get("home" if side == "away" else "away", 0)
+        reg = score - 1 if s.get("lastPeriodType") == "SO" and score > other else score
+        return 3 + 2 * reg + 4 * min(int(s.get("period") or 0), 4)
+
+    def team(self, abbrev, score, base, landing, s, side="away"):
         tid, place, common, _ = TEAMS[abbrev]
         t = {"id": tid}
         if landing:
@@ -399,7 +446,9 @@ class Sports:
             t.update({"name": {"default": common}, "abbrev": abbrev})
         if score is not None:
             t["score"] = score
-            t["sog"] = 3 + 2 * score + int(s.get("period") or 0) * 4
+            sog = self.sog(side, score, s)
+            if sog is not None:
+                t["sog"] = sog
         t["logo"] = f"{base}/logos/nhl/svg/{abbrev}_light.svg"
         if landing:
             t["darkLogo"] = f"{base}/logos/nhl/svg/{abbrev}_dark.svg"
@@ -429,8 +478,8 @@ class Sports:
              "venue": {"default": f"{TEAMS[home][1]} Arena"}, "startTimeUTC": iso_z(start),
              "easternUTCOffset": "-05:00", "venueUTCOffset": "-05:00", "venueTimezone": "America/New_York",
              "gameState": state, "gameScheduleState": s.get("scheduleState", "OK"),
-             "awayTeam": self.team(away, s.get("away", 0) if started else None, base, landing, s),
-             "homeTeam": self.team(home, s.get("home", 0) if started else None, base, landing, s)}
+             "awayTeam": self.team(away, s.get("away", 0) if started else None, base, landing, s, "away"),
+             "homeTeam": self.team(home, s.get("home", 0) if started else None, base, landing, s, "home")}
         if not landing:
             o["gameCenterLink"] = f"/gamecenter/{away.lower()}-vs-{home.lower()}/{day:%Y/%m/%d}/{gid}"
         if started:
@@ -535,6 +584,8 @@ def handle(h, path):
 
     if f.get("status"):
         return fail(f["status"], "status")
+    if p.cfg.get("sports_stacked") and sp.state(sp.slate(sp.today(sp.anchor), at)[0], at).get("_stale"):
+        return fail(503, "sports_stacked stale window")  # the scenario's stale window (every /v1 answer)
     if path == "/v1/score/now":
         day = sp.today(now)
         sp.note(path, 307)

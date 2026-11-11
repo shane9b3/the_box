@@ -23,6 +23,8 @@ import sports  # noqa: E402
 # The default-timeline golden (power play section 8, code review N8): every body the default (sports_pp off) timeline
 # serves, at a fixed anchor, captured from the pre-power-play sports.py (`git show b30ef7a:tools/fakepanel/sports.py`)
 # with `default_bodies` below. Full bodies at GOLDEN_FULL instants, a SHA-256 over all of them at each second 0..420.
+# Amended once (Stacked WP-4, design section 3.3): re-captured after the shootout `sog` fix, so only `sog` differs from the
+# pre-power-play bytes, and only in the SO, OVER, OFF and FINAL states (checked: the old and new golden differ in no other field).
 GOLDEN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata", "sports_default_golden.json")
 GOLDEN_ANCHOR = 1762632000.0  # 2025-11-08 15:00 Eastern
 GOLDEN_BASE = "http://golden"
@@ -603,6 +605,133 @@ class TestPowerPlayScripts(PpCase):
             with self.assertRaises(ValueError, msg=patch):
                 self.panel.update_config(patch)
         self.panel.update_config({"sports_script": {"1": {"situationCode": None, "situationSeconds": 0, "goalStrength": "pp"}}})
+
+
+def sogs(body):
+    """(away sog, home sog) of a game body; None where the field is absent."""
+    return body["awayTeam"].get("sog"), body["homeTeam"].get("sog")
+
+
+class TestShotsOnGoal(PpCase):
+    """docs/design/m6-score-bug-stacked-theme.md section 3.3: `sog` on live and final games, the shootout fix, the overrides."""
+    overrides = {"sports": True, "sports_pp": True}  # the pp timeline has the 110 s 3rd and the OVER step
+    P1 = sports.PRE_PUCK_S
+
+    def test_present_when_started_absent_before(self):
+        for t in (0, 20, 44):  # FUT, PRE
+            for landing in (True, False):
+                self.assertEqual((None, None), sogs(self.body(t, landing)), t)
+        for t in (self.P1 + 10, self.P1 + 70, self.P1 + 100):  # LIVE, INT, LIVE
+            for landing in (True, False):
+                a, h = sogs(self.body(t, landing))
+                self.assertIsInstance(a, int, t)
+                self.assertIsInstance(h, int, t)
+        sp = self.panel.sports  # the day list's other games: the OFF game has it, the FUT game does not
+        day = sp.today(sp.anchor)
+        by_id = {g["id"]: g for g in sp.day_body(day, sp.anchor, "http://x")["games"]}
+        ids = [g[0] for g in sp.slate(day, sp.anchor)]
+        self.assertIsNotNone(sogs(by_id[int(ids[4])])[0])  # OTT @ BUF, OFF
+        self.assertEqual((None, None), sogs(by_id[int(ids[3])]))  # NSH @ COL, FUT
+
+    def test_formula_in_regulation(self):
+        self.assertEqual((3 + 4, 3 + 4), sogs(self.body(self.P1 + 10, True)))  # 1st period, 0-0
+        self.assertEqual((3 + 2 * 2 + 8, 3 + 8), sogs(self.body(self.P1 + 60 + 30 + 40, True)))  # 2nd period, CGY 2-0
+
+    def test_no_rise_from_the_third_period_into_the_shootout_and_final(self):
+        ot = self.P1 + 60 + 30 + 60 + 20 + 110
+        end = ot + 30 + 20 + 20 + 20 + 5  # past the FINAL step
+        seen = {}
+        for t in range(ot - 1, end + 1):
+            body = self.body(t, True)
+            seen[body["gameState"], body["periodDescriptor"]["periodType"]] = sogs(body)
+        self.assertEqual({("CRIT", "REG"), ("LIVE", "OT"), ("LIVE", "SO"), ("OVER", "SO"), ("OFF", "SO"), ("FINAL", "SO")}, set(seen))
+        reg = 3 + 2 * 2 + 12  # 2-2 into overtime, three periods of 4
+        self.assertEqual((reg, reg), seen[("CRIT", "REG")])
+        so = (reg + 4, reg + 4)  # the OT period adds 4; the shootout adds none
+        self.assertEqual(so, seen[("LIVE", "OT")])
+        for state in ("LIVE", "OVER", "OFF", "FINAL"):
+            self.assertEqual(so, seen[(state, "SO")], state)
+        self.assertEqual(3, self.body(end, True)["homeTeam"]["score"], "the winner's +1 is in the score, not in the shots")
+
+    def test_overrides_and_null_omits_the_field(self):
+        t = self.P1 + 10
+        self.panel.update_config({"sports_script": {self.featured(): {"awaySog": 12, "homeSog": 0}}})
+        for landing in (True, False):
+            self.assertEqual((12, 0), sogs(self.body(t, landing)))
+        self.panel.update_config({"sports_script": {self.featured(): {"awaySog": None}}})
+        for landing in (True, False):
+            body = self.body(t, landing)
+            self.assertNotIn("sog", body["awayTeam"])
+            self.assertEqual(7, body["homeTeam"]["sog"])
+        self.panel.update_config({"sports_script": {self.featured(): {"awaySog": None, "homeSog": None}}})
+        self.assertEqual((None, None), sogs(self.body(t, True)))
+
+    def test_config_rejections(self):
+        for key in ("awaySog", "homeSog"):
+            for v in (-1, 200, 1.5, "12", True):
+                with self.assertRaises(ValueError, msg=(key, v)):
+                    self.panel.update_config({"sports_script": {"1": {key: v}}})
+            for v in (0, 199, None):
+                self.panel.update_config({"sports_script": {"1": {key: v}}})
+        with self.assertRaises(ValueError):
+            self.panel.update_config({"sports_stacked": "yes"})
+
+
+class TestStackedScenario(PpCase):
+    """`sports_stacked`: the pp timeline plus end of period, SOG null, a longer 2nd INT with a PP and a stale window."""
+    overrides = {"sports": True, "sports_stacked": True}
+    P1 = sports.PRE_PUCK_S
+    P1I = P1 + 60
+    P2 = P1I + 30
+    P2I = P2 + 60
+    P3 = P2I + 90  # the 2nd INT is 90 s
+
+    def test_off_by_default_and_the_pp_timeline_is_implied(self):
+        self.assertFalse(fakepanel.DEFAULTS["sports_stacked"])
+        self.assertEqual("1451", self.at(self.P1 + 40)["situationCode"])
+        self.assertIn("summary", self.body(self.P1 + 40, True))
+
+    def test_end_of_period(self):
+        for t in (self.P1 + 53, self.P1 + 59):
+            s = self.at(t)
+            self.assertEqual((0, False, False), (s["secondsRemaining"], s["running"], s["inIntermission"]), t)
+        s = self.at(self.P1 + 50)
+        self.assertEqual((10, True), (s["secondsRemaining"], s["running"]))
+        c = self.body(self.P1 + 55, True)["clock"]
+        self.assertEqual((0, False, False), (c["secondsRemaining"], c["running"], c["inIntermission"]))
+        s = self.at(self.P3 + 105)  # the 3rd period's end
+        self.assertEqual((0, False, False), (s["secondsRemaining"], s["running"], s["inIntermission"]))
+
+    def test_the_first_intermission_carries_the_frozen_pp(self):
+        s = self.at(self.P1I + 10)
+        self.assertEqual(("1451", 5, True), (s["situationCode"], s["situationSeconds"], s["inIntermission"]))
+
+    def test_sog_goes_null_in_the_window_only(self):
+        for t, present in ((self.P2 + 39, True), (self.P2 + 40, False), (self.P2 + 49, False), (self.P2 + 50, True)):
+            self.assertEqual(present, sogs(self.body(t, True))[0] is not None, t)
+            self.assertEqual(present, sogs(self.body(t, False))[1] is not None, t)
+
+    def test_second_intermission_carries_a_pp_and_is_stale_in_its_window(self):
+        s = self.at(self.P2I + 40)
+        self.assertEqual(("1541", 20, True), (s["situationCode"], s["situationSeconds"], s["inIntermission"]))
+        self.assertTrue(s.get("_stale"))
+        self.assertNotIn("_stale", self.at(self.P2I + 5))
+        self.assertNotIn("_stale", self.at(self.P2I + 85))
+
+    def test_served_503_while_stale_and_200_outside(self):
+        sp = self.panel.sports
+        now = sp.bucket_start(time.time())
+        day = sp.today(now).isoformat()
+        with sp.lock:
+            sp.anchor = now - (self.P2I + 40)  # the bucket's start is in the stale window
+        self.assertEqual(503, self.raw("/v1/score/" + day)[0])
+        with sp.lock:
+            sp.anchor = now - (self.P2 + 5)
+        self.assertEqual(200, self.raw("/v1/score/" + day)[0])
+
+    def test_later_phases_still_follow(self):
+        self.assertEqual("CRIT", self.at(self.P3 + 5)["gameState"])
+        self.assertEqual("FINAL", self.at(self.P3 + 110 + 30 + 20 + 20 + 20 + 5)["gameState"])
 
 
 if __name__ == "__main__":

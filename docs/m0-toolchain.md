@@ -48,6 +48,11 @@ on 2026-10-13.
    Fonts builds from (`Instrument/instrument-sans`, `JetBrains/JetBrainsMono`); the OFL texts are
    from `google/fonts`. OFL files live in `ui/src/main/assets/licenses/` (aapt rejects non-font
    files in `res/font`), which also ships them in the APK as the OFL requires.
+   (M6 Stacked score bug, 2026-11-10) `instrument_sans_bold_italic.ttf` is the same upstream's
+   static `fonts/ttf/InstrumentSans-BoldItalic.ttf` at commit `7fa2230` (88 200 bytes, SHA-256
+   `c423640296fc5c59442320aa673f4214010a2989b93cc83396bed9f341f8322b`); the bundled Bold matches
+   that commit byte for byte. Same OFL text, so no new licence file
+   (docs/design/m6-score-bug-stacked-theme.md §11).
 4. **Extra convention plugin** `thebox.android.test` for the two `com.android.test` modules,
    alongside the five requested (`thebox.android.application`, `.android.library`,
    `.android.compose`, `.jvm.library`, `.hilt`).

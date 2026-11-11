@@ -226,6 +226,9 @@ class PlayerKeysTableTest {
             "score_loading" to { scoreSheet(ScoreFacts()) },
             "score_failed" to { scoreSheet(ScoreFacts(day = DayState.Failed(FailKind.IO)), DOWN, DOWN) },
             "score_place" to { scoreSheet(FOLLOWING, DOWN, SELECT) },
+            // (Stacked §1.1; WP-3, the coverage WP-4 left) The Style row: the followed game, Corner, Delay, then Style.
+            "score_style" to { scoreSheet(FOLLOWING.copy(style = app.thebox.core.sports.NhlBugStyle.PILL), DOWN, DOWN, DOWN) },
+            "score_style_stacked" to { scoreSheet(FOLLOWING.copy(style = app.thebox.core.sports.NhlBugStyle.STACKED), DOWN, DOWN, DOWN) },
             "score_place_sample" to { scoreSheet(ScoreFacts(), SELECT) },
             "score_place_bl" to { scoreSheet(ScoreFacts(corner = ScoreCorner.BOTTOM_LEFT), SELECT) },
             "score_off" to { liveWithArchive().also { it.player.scores(ScoreFacts(enabled = false)) }.k(UP) },

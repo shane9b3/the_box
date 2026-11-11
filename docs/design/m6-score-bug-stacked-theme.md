@@ -969,6 +969,14 @@ anything for the owner.
   - **Fallback:** if upstream publishes no static Bold Italic, the bar uses Bold with `textSkewX = −0.21`, and
     `StackedFitTest` keeps the overhang check (N2).
   - About 87 KB.
+  - **Recorded (commit 0, 2026-11-10): the real italic, not the fallback.** Source:
+    `Instrument/instrument-sans` at commit `7fa22308a3d0c94ee2b3cd537a1196b65db34a3e` (`master`, 2023-06-14; the file's
+    last change is `24690a4`, 2023-04-12), `fonts/ttf/InstrumentSans-BoldItalic.ttf`, 88 200 bytes, SHA-256
+    `c423640296fc5c59442320aa673f4214010a2989b93cc83396bed9f341f8322b`. Static (no `fvar` table). The bundled
+    `instrument_sans_bold.ttf` is byte-identical to that commit's `InstrumentSans-Bold.ttf` (SHA-256 `735badeb…dffad3`),
+    so it is the same source as the existing weights. Its name table carries the same copyright line, and that commit's
+    `OFL.txt` is identical to `InstrumentSans-OFL.txt`: no licence change. The fallback skew stays as
+    `STACKED_FAUX_ITALIC_SKEW_X` for a face that fails to load.
 
 ---
 
@@ -1214,3 +1222,133 @@ The lead rulings close Q1, Q3, Q5, Q7, Q8a, Q10, Q12, Q13, Q14, Q15 and Q16. §1
 ### Noted, out of scope
 
 None. The first draft's out-of-scope note on the corner and size enums is now fixed by S7.
+
+---
+
+## Commit 0 notes (2026-11-10)
+
+What commit 0 decided where this design was silent, ambiguous or wrong against the code. Each item is the smallest
+choice that keeps the four WPs disjoint. With Pill (the default) the app behaves exactly as before; choosing Stacked
+draws the Pill until WP-3 lands.
+
+### Files: what exists after commit 0, and who owns it
+
+1. **New, owned by the lead (no WP edits it): `ui/.../sports/StackedContracts.kt`.** It holds the WP-2 ↔ WP-3 seam:
+   `StackedFrameState`, `BarContent` and `StackedDrawArgs`.
+   - Why: WP-3 builds these and WP-2 draws them. If they lived in `StackedPainter.kt`, WP-2 could change a type that
+     WP-3 constructs.
+   - This adds a file to commit 0's §14 table. No WP's file list changes because of it.
+2. **WP-2's three files exist as stubs with final signatures**: `StackedPainter.kt`, `StackedGoalPainter.kt` and
+   `NineSlice.kt`.
+   - Why: `StackedHooks` (in WP-3's `StackedBug.kt`) names `StackedGoalPainter` and `GlowMasks`. WP-3 also builds both
+     painters and holds a `NineSlice`. Without the stubs, WP-3 could not compile alone.
+   - WP-2 replaces the bodies. It may add private members. It must not change a non-private signature.
+   - `NineSlice`'s insides are WP-2's: only the painters read them. WP-3 only holds the object.
+3. **WP-3's `StackedBug.kt` exists.** It holds `StackedBug` (its body calls `ScoreBugWith`, exactly as the Pill branch
+   does), `StackedHooks` (the design's list), `StackedSampler` and a minimal `StackedProbe`.
+   - WP-3 owns all of it. It may add hooks and probe fields, as long as every default stays the real object.
+   - `ScoreBug.kt` references only `StackedBug(...)` and `StackedHooks.Default`.
+4. **`PlayerText.kt`** gains `scoreStyleRow(res, style)` and `styleName(res, style)` next to the `choice` arm (B2).
+5. **Strings.** Besides the §8 list:
+   - `sports_style_pill` and `sports_style_stacked` are added. They are the sheet's own value words, kept apart from the
+     `settings_sports_style_*` strings as Size already is (`sports_size_*` vs `settings_sports_size_*`).
+   - "FINAL", "FINAL/OT" and "FINAL/SO" reuse `sports_final*` upper-cased (`Locale.ROOT`). The PP bar words reuse
+     `sports_pp_label` and `sports_pp_two_man`. "No update" and "Delayed" in the clock slot reuse `sports_no_update`
+     and `sports_delayed`.
+6. **Fixture.** `SportsFixtures.liveView` (`core/src/testFixtures/.../FakeScoreRepository.kt`) now sets `period` for an
+   NHL game.
+   - Three existing tests compare whole views against the machine: `centreColumnStates`,
+     `powerPlayIsShownWhileLiveOrInIntermissionOnly` and `anNhlGameNeverCarriesAnNflView`. They failed on the new field
+     alone.
+   - Their test bodies are unedited.
+
+### Contracts that the design left open
+
+7. **`GoalFrame.rowFlashAlpha` is an envelope (0..1), not an alpha.** One field has to serve two cases: the per-team C7
+   peak on the animated path, and the fixed .25 tint on the still path (§7.3). So:
+   - the painter draws the stripe colour at α = `rowFlashAlpha × StackedColours.rowFlashAlpha` (animated);
+   - it draws at α = `rowFlashAlpha × STACKED_STILL_ROW_TINT` when `StackedDrawArgs.still` is set;
+   - STACKED's sampler writes 1 → 0 over `rowFlashMs` (ease-out), and 1 during the still version's frame B;
+   - CLASSIC writes 0 on every sample.
+8. **`GoalSpec` fields.**
+   - The fields: `streak1Alpha`, `streak2Alpha`, `streakFrom`, `streakTo`, `flashAlpha`, `badgeMs`, `badgeMidScale`,
+     `badgeMidDeg`, `letterMs`, `letterDrop`, `letterOvershoot`, `pulsePeak`, `tallySlide`, `popFromScale`, `popMs`,
+     `rowFlashMs` (0 = none), `endMs` and `stillFrameBMs`.
+   - The streak alphas are read by the painters, not the timeline. The Stacked streak widths stay painter constants
+     (`StackedMock.STREAK*`).
+   - Ends of each phase:
+     - the pop runs from 3 600 to `3 600 + popMs`;
+     - the animated `done` is `t ≥ endMs`;
+     - the still version's frame B ends, and `done` turns true, at `3 600 + stillFrameBMs`.
+   - For CLASSIC every one of these sums equals the old `END` (4 500) exactly.
+   - `GoalSpec.STACKED` is a `CLASSIC.copy()` placeholder. Its §7.2 values are WP-1's.
+9. **CLASSIC is bit-identical.**
+   - Commit 0 checked it with a throwaway test. That test compared a frozen copy of the `87e22d4` `GoalTimeline` with
+     the new one on every `GoalFrame` field (`Float.toBits`, booleans and `done` by equality).
+   - Coverage:
+     - inputs: t from −1 to 4 700 in 0.25-ms steps, plus NaN and +∞ (18 807 instants);
+     - entry points: the old `sample` and `sampleStill` overloads and the `(GoalSpec.CLASSIC, …)` ones;
+     - `rowFlashAlpha` stayed 0 throughout.
+   - All passed. The test was then deleted, because the committed `LegacyGoalTimeline` + `GoalSpecTest` are WP-1's
+     files (§14).
+   - `GoalTimelineTest` is unedited and green.
+10. **`StackedTimeline`.**
+    - Commit 0 adds `StackedTransition { OPEN, CLOSE, CHANGE, SWAP, STILL }`. `CHANGE` and `SWAP` apply to the bar
+      only; `STILL` snaps to `to`.
+    - It also adds `totalMs(track, kind)`, the driver length including delays. The runner needs it, and the timeline
+      owns the numbers.
+    - `StackedFrame` channels are fractions of the open size: `sogWidth`, `clockWidth`, `barHeight` and the row stripes
+      (0 = 3.6, 1 = 6.3).
+    - Offsets are in Standard design px: `sogDx`, `stripeAX` / `stripeBX` and `barTextDx`.
+    - `barBgMix` and `barSwapped` drive a change or a swap. The painter draws `StackedDrawArgs.barPrev` while
+      `barSwapped` is false.
+    - `boxW` and `barH` are real in commit 0: rows + fraction × each column, and fraction × `STACKED_BAR_H`.
+    - The stub `sample` writes each transition's end state at once, and `totalMs` returns 0.
+11. **`ClockSlot.Int` is renamed `ClockSlot.Intermission`.** A nested `Int` shadows `kotlin.Int` for anyone who
+    star-imports `ClockSlot`.
+12. **`StackedTargets` details.**
+    - For `FINAL`, `barPeriod` is `PeriodLabel(finalKind, 1)` (REG → "FINAL", OT → "FINAL/OT", SO → "FINAL/SO").
+    - `barSecs` is the PP's `secondsRemaining`, or null.
+    - The stub `of()` returns the play state. The stub `sameLook()` is `a == b`. WP-1 implements both.
+13. **Painter API** (WP-2 implements, WP-3 calls).
+    - `StackedPainter(s, large, sansBold, barFont)` takes `s` with the Large factor folded in, as `ScoreBugPainter`
+      does.
+    - Its methods:
+      - `frame(v, targets, res)`, once per shown view;
+      - `fillBar(content, pair, awayAbbrev, homeAbbrev, res)`, when a bar content is captured;
+      - `bakeShadow(): NineSlice?`, off the main thread;
+      - `drawFrame(c, args)`;
+      - `StackedPainter.barTypeface(context)`, which loads `R.font.instrument_sans_bold_italic`.
+    - `StackedGoalPainter(s, large, goalFont, sansBold, word, spec = GoalSpec.STACKED)` has:
+      - `begin(side, colours, badge, awayAbbrev, homeAbbrev, away, home, boxW)`, where `boxW` is the pinned
+        Standard design px;
+      - `bakeGlow(w, h): GlowMasks?`, where `w` and `h` are **device px** of the whole pinned box, the top part plus the
+        open bar;
+      - `drawGlow(c, g, glow, x, y)`;
+      - `drawTakeover(c, g)`.
+    - **Origin:** `drawFrame` draws with (0, 0) at the top-left of the box's top part. The bar is drawn below it, or
+      above it at negative y when `up`.
+14. **Placement.**
+    - `ScoreBugPlacement` gains `cornerBox(corner, size, league, style)` and `width/height(size, league, style)`.
+    - `place()` now calls the style overload.
+    - The STACKED branch is a stub that returns the Pill's sizes. That way the commit-0 fallback (the Pill drawn by
+      `StackedBug`) is placed exactly as the Pill.
+    - For WP-1: the Large footprint is 490 × (135 + 41.25) = **176.25**. §4.3's "176" is rounded; use the exact value
+      unless WP-1 records a reason to round.
+    - **Integration order:** once WP-1's footprint lands, the commit-0 fallback would draw the 404-px pill inside the
+      392-px footprint, 12 px past the right inset. So WP-3 must land with or before WP-1, never WP-1 alone on `main`.
+15. **Store test.** `RoomSettingsStoreCoerceTest` has the four §1.3 cases: decode, a registered import and an
+    unregistered import, each run with both documents. It also pins the stated limits:
+    - a `null` for a non-null field coerces;
+    - an unknown `League` map key in `SportsFollowDoc.meters` still fails that document.
+16. **Constants.** §13 is in `SportsConstants`, and the mock geometry is in a top-level `StackedMock`.
+    - Commit 0 also names the remaining §4.2, §6 and §7.1 numbers:
+      - `STACKED_ROWS_W` / `STACKED_SOG_W` / `STACKED_CLOCK_W` (243 / 58.5 / 90, exact, not mock × 0.45f);
+      - fit and padding: `STACKED_FIT_STEP_PX`, `STACKED_FIT_MIN_PX`, `STACKED_TAKEOVER_PAD_TIGHT`,
+        `STACKED_TAKEOVER_SLACK_MIN`, `STACKED_HAIRLINE_W`;
+      - fallback and colour rules: `STACKED_FAUX_ITALIC_SKEW_X`, `STACKED_STRIPE_WHITE_STEP`, `STACKED_BAR_BG_BLACK`;
+      - text shadows: `STACKED_*_SHADOW_DY`, `STACKED_TEXT_SHADOW_ALPHA`;
+      - every §7.1 duration and delay, split per property (`STACKED_SOG_*`, `STACKED_CLOCK_*`, `STACKED_BAR_*`,
+        `STACKED_BAR_CHANGE_*`, `STACKED_BAR_SWAP_*`, `STACKED_ROW_STRIPE_MS`).
+    - WP-1 may add constants in `SportsConstants.kt`. WP-2 and WP-3 read them and never edit the file.
+17. **Font: the real italic** (recorded in §11). No faux-italic fallback was needed.

@@ -22,6 +22,7 @@ import app.thebox.core.playback.StreamFormat
 import app.thebox.core.playback.VideoDecoderMode
 import app.thebox.core.playback.timeshift.RecordStop
 import app.thebox.core.sports.League
+import app.thebox.core.sports.NhlBugStyle
 import app.thebox.player.api.PlaybackNotice
 import app.thebox.ui.R
 import app.thebox.ui.sports.SportsText
@@ -499,7 +500,20 @@ object PlayerText {
         is PickerChoice.ScoreFailed -> SportsText.failure(res, c.kind, if (league != League.NHL) league else c.league)
         is PickerChoice.ScoreDelayChoice -> SportsText.delay(res, c.delaySec)
         is PickerChoice.ScoreLeagueRow -> scoreLeagueRow(res, c.league)
+        is PickerChoice.ScoreStyleRow -> scoreStyleRow(res, c.style)
     }
+
+    /** (Stacked commit 0, docs/design/m6-score-bug-stacked-theme.md §1.1) The sheet's Style row: "Style · Pill" ([style] is the current one; OK toggles it). */
+    fun scoreStyleRow(res: Resources, style: NhlBugStyle): String =
+        res.getString(R.string.sports_picker_style, styleName(res, style))
+
+    /** (Stacked §1.1) "Pill" / "Stacked". */
+    fun styleName(res: Resources, style: NhlBugStyle): String = res.getString(
+        when (style) {
+            NhlBugStyle.PILL -> R.string.sports_style_pill
+            NhlBugStyle.STACKED -> R.string.sports_style_stacked
+        },
+    )
 
     /** (NFL §7.3, S4) The picker's League row: "League · NFL" ([league] is the shown one; OK toggles it). */
     fun scoreLeagueRow(res: Resources, league: League): String =

@@ -202,5 +202,7 @@ object SportsFixtures {
         gameId = game.id, // goal animation §5.1: the machine sets it on every view
         powerPlay = game.powerPlay, // power play §1.4: a fresh LIVE view carries the snapshot's power play
         league = game.id.league,
+        // (Stacked §2.1, B1) the machine's NHL views carry the period label; the NFL's never do
+        period = if (game.id.league == League.NHL) PeriodLabel(game.periodKind ?: PeriodKind.REG, game.period ?: 1) else null,
     )
 }

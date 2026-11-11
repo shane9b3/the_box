@@ -39,7 +39,8 @@ import javax.inject.Singleton
  *   stored document wins and the queue is replayed on it, then written.
  * - Writes are coalesced per domain (`SETTINGS_WRITE_DEBOUNCE_MS`) and run on IO; [flush] writes at once (ON_STOP,
  *   leaving Settings, before a backup). JSON is `ignoreUnknownKeys`, `encodeDefaults = false`, so a value equal to its
- *   default is not stored and a later default change reaches users who never touched it.
+ *   default is not stored and a later default change reaches users who never touched it; and `coerceInputValues`, so an
+ *   unknown enum name falls back to that field's default (Stacked S7).
  * - [importInTransaction] (restore, §3.10.4) runs inside the caller's `useWriterConnection { immediateTransaction {} }`
  *   and cancels pending writes of the domains it replaces: a debounced write that was already waiting for the writer
  *   connection re-checks its generation once it gets it and is dropped.
@@ -363,8 +364,13 @@ class RoomSettingsStore @Inject constructor(
     companion object {
         private const val TAG = "SettingsStore"
 
-        /** §2.2: unknown keys ignored, defaults not encoded. */
-        val JSON: Json = Json { ignoreUnknownKeys = true; encodeDefaults = false }
+        /**
+         * §2.2: unknown keys ignored, defaults not encoded. (Stacked commit 0, S7) `coerceInputValues`: an unknown enum name
+         * or a `null` for a non-null field reads as that property's default and the other fields survive, on [decode]
+         * and on an import into a registered slot (`importSlotLocked`), so a newer build's backup never resets a whole
+         * domain. An unknown value inside a collection or as a map key still fails the document.
+         */
+        val JSON: Json = Json { ignoreUnknownKeys = true; encodeDefaults = false; coerceInputValues = true }
 
         /** §2.2 `Domains`: an import of any other name is ignored. */
         val KNOWN_DOMAINS: Set<String> = setOf(

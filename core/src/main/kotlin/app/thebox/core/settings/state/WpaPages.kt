@@ -48,6 +48,7 @@ import app.thebox.core.settings.tree.RemoteRows
 import app.thebox.core.settings.tree.SettingsTree
 import app.thebox.core.settings.tree.SportsRows
 import app.thebox.core.sports.League
+import app.thebox.core.sports.NhlBugStyle
 import app.thebox.core.sports.PollMeter
 import app.thebox.core.sports.ScoreBugSize
 import app.thebox.core.sports.ScoreCorner
@@ -604,6 +605,12 @@ class WpaPages(
             listOf(ScoreBugSize.STANDARD to SettingsText.SPORTS_SIZE_STANDARD, ScoreBugSize.LARGE to SettingsText.SPORTS_SIZE_LARGE).map { (s, k) -> ChoiceOption(s.name, t(k)) },
             p.size.name,
         )
+        // (Stacked §1.1) Score bug style, after Size. A setting of its own (NHL only on screen), so it always shows.
+        out += choice(
+            SportsRows.STYLE, t(SettingsText.SPORTS_STYLE),
+            listOf(NhlBugStyle.PILL to SettingsText.SPORTS_STYLE_PILL, NhlBugStyle.STACKED to SettingsText.SPORTS_STYLE_STACKED).map { (s, k) -> ChoiceOption(s.name, t(k)) },
+            p.nhlStyle.name, t(SettingsText.SPORTS_STYLE_DESC),
+        )
         return out
     }
 
@@ -743,6 +750,7 @@ class WpaPages(
             SportsRows.CORNER -> choose?.let { c -> enumOf<ScoreCorner>(c)?.let { m -> sports { it.copy(corner = m) } } }
             SportsRows.DELAY -> choose?.toIntOrNull()?.let { v -> sports { it.copy(delaySec = v) } }
             SportsRows.SIZE -> choose?.let { c -> enumOf<ScoreBugSize>(c)?.let { m -> sports { it.copy(size = m) } } }
+            SportsRows.STYLE -> choose?.let { c -> enumOf<NhlBugStyle>(c)?.let { m -> sports { it.copy(nhlStyle = m) } } }
             // (Update interval §5.1) The league on the Sports tab is the one the row shows, so the one it writes.
             SportsRows.INTERVAL -> choose?.toIntOrNull()?.let { v ->
                 sports { if (it.league == League.NHL) it.copy(nhlIntervalS = v) else it.copy(nflIntervalS = v) }

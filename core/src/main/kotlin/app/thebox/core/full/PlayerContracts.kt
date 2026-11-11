@@ -395,6 +395,12 @@ sealed interface PickerChoice {
      * OK toggles the shown league ([league] is the current one); the board reloads under a Loading row.
      */
     data class ScoreLeagueRow(val league: app.thebox.core.sports.League) : PickerChoice
+    /**
+     * (Stacked commit 0, docs/design/m6-score-bug-stacked-theme.md §1.1, S8; append-only) "Style · Pill", after the Delay
+     * row: OK toggles Pill ⇄ Stacked ([style] is the current one) through [PlayerEffects.setScoreStyle]; the sheet stays
+     * open and focus stays on the row. Shown per §1.1 (the followed game's league, else the sheet's; Stacked WP-4).
+     */
+    data class ScoreStyleRow(val style: app.thebox.core.sports.NhlBugStyle) : PickerChoice
 }
 
 /**
@@ -635,6 +641,8 @@ interface PlayerEffects {
     fun setScoreDelay(sec: Int) = Unit
     /** (NFL WP-5 amendment, §7.1) The picker's League row: writes `SportsPrefs.league`; the repository reloads that league's board. */
     fun setScoreLeague(league: app.thebox.core.sports.League) = Unit
+    /** (Stacked §1.3) The sheet's Style row: writes `SportsPrefs.nhlStyle` (`PlayerEffectsImpl`, Stacked WP-4). */
+    fun setScoreStyle(style: app.thebox.core.sports.NhlBugStyle) = Unit
     /** The SCORE_BUG sheet opened / closed: demand `SCORE_PICKER` (§2.3). */
     fun scorePicker(open: Boolean) = Unit
     /** OK on the picker's failure row. */

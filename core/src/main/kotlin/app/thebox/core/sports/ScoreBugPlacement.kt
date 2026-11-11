@@ -18,10 +18,10 @@ object ScoreBugPlacement {
 
     fun place(input: PlacementInput, geo: OverlayGeometry): Box? {
         if (input.screenOff || input.modal) return null
-        if (input.placing) return cornerBox(input.corner, input.size, input.league)
+        if (input.placing) return cornerBox(input.corner, input.size, input.league, input.style)
 
         val corner = if (input.textTrackOn) toTop(input.corner) else input.corner
-        var box = cornerBox(corner, input.size, input.league)
+        var box = cornerBox(corner, input.size, input.league, input.style)
 
         if (isBottom(corner)) {
             when (input.bar) {
@@ -140,6 +140,70 @@ object ScoreBugPlacement {
 
     fun height(size: ScoreBugSize): Float =
         if (size == ScoreBugSize.LARGE) SportsConstants.SCORE_LARGE_H else SportsConstants.SCORE_H
+
+    /**
+     * (Stacked §4.3, contract fixed in Stacked commit 0) The resting box of [corner] at [size] for [league] and [style]:
+     * for an NHL [NhlBugStyle.STACKED] bug it is the **footprint** (the largest the box can be, bar included), placed at
+     * the corner exactly as the pill is (right corners at `1920 − 96 − w`, bottom corners at `1080 − 56 − h`). [style] is
+     * ignored for the NFL. Every [place] rule runs on this box.
+     */
+    fun cornerBox(corner: ScoreCorner, size: ScoreBugSize, league: League, style: NhlBugStyle): Box {
+        val w = width(size, league, style)
+        val h = height(size, league, style)
+        val l = if (isLeft(corner)) SportsConstants.SCORE_INSET_X else SCREEN_W - SportsConstants.SCORE_INSET_X - w
+        val t = if (isBottom(corner)) SCREEN_H - SportsConstants.SCORE_INSET_Y - h else SportsConstants.SCORE_INSET_Y
+        return Box(l, t, l + w, t + h)
+    }
+
+    /**
+     * (Stacked §4.3; Stacked WP-1) The placed box's width for [league] and [style]. NFL and Pill: [width] (`size`,
+     * `league`), unchanged. NHL Stacked: the footprint width, `STACKED_W_MAX` (392), Large × `SCORE_LARGE_SCALE` (490).
+     */
+    fun width(size: ScoreBugSize, league: League, style: NhlBugStyle): Float = when {
+        league != League.NHL || style == NhlBugStyle.PILL -> width(size, league)
+        else -> SportsConstants.STACKED_W_MAX * stackedScale(size)
+    }
+
+    /**
+     * (Stacked §4.3; Stacked WP-1) The placed box's height for [league] and [style]. NFL and Pill: [height] (`size`),
+     * unchanged. NHL Stacked: the footprint height, `STACKED_H + STACKED_BAR_H` (141), Large × `SCORE_LARGE_SCALE`
+     * (176.25, exact: Commit 0 note 14; nothing needs it rounded, and the bounds tests use these values).
+     */
+    fun height(size: ScoreBugSize, league: League, style: NhlBugStyle): Float = when {
+        league != League.NHL || style == NhlBugStyle.PILL -> height(size)
+        else -> (SportsConstants.STACKED_H + SportsConstants.STACKED_BAR_H) * stackedScale(size)
+    }
+
+    /** (Stacked §4.1) The Stacked bug's size factor over Standard design px: 1, or `SCORE_LARGE_SCALE` for Large. */
+    fun stackedScale(size: ScoreBugSize): Float = if (size == ScoreBugSize.LARGE) SportsConstants.SCORE_LARGE_SCALE else 1f
+
+    /**
+     * (Stacked §2.3 S11, §4.3; WP-1 addition) Whether the Stacked bar opens **above** the box: the placed footprint
+     * [footprint] is in the lower half of the screen (an **effective** bottom corner, so with subtitles on a bottom
+     * corner moved to the top drops its bar downwards; a bug lifted above a bar stays a bottom one). The Pill's `up` rule
+     * (`box.t + h / 2 > 540`).
+     */
+    fun stackedBarUp(footprint: Box): Boolean = footprint.t + (footprint.b - footprint.t) / 2f > SCREEN_H / 2f
+
+    /**
+     * (Stacked §4.3; WP-1 addition) The drawn box's **top part** (the two rows and the open columns, without the bar) in
+     * design px, inside the placed [footprint] at [size], for a top part [boxW] Standard design px wide
+     * (`StackedFrame.boxW`; 333 in play, 391.5 with the SOG column, 301.5 in a break).
+     * - **The rows never move:** the left edge is the footprint's left edge in every corner; the box grows and shrinks on
+     *   its right (S4, owner Q7 default).
+     * - Vertically: at the footprint's top with the bar below it, or, when [stackedBarUp], at the footprint's bottom
+     *   with the bar above it (the bar's `STACKED_BAR_H` × scale is the rest of the footprint's height).
+     *
+     * Place mode draws the sample here with `boxW` = `STACKED_ROWS_W + STACKED_CLOCK_W` (333), and the place hint is
+     * positioned from this box, not the footprint (N8).
+     */
+    fun stackedTopBox(footprint: Box, size: ScoreBugSize, boxW: Float): Box {
+        val k = stackedScale(size)
+        val w = boxW * k
+        val h = SportsConstants.STACKED_H * k
+        val t = if (stackedBarUp(footprint)) footprint.b - h else footprint.t
+        return Box(footprint.l, t, footprint.l + w, t + h)
+    }
 
     private fun above(box: Box, barTop: Float): Box {
         val bottom = barTop - SportsConstants.SCORE_BAR_GAP

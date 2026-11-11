@@ -178,7 +178,9 @@ object NhlMapper {
             ABBREV.matches(abbrev) -> darkLogoUrl(abbrev, logoBase)
             else -> null
         }
-        return TeamLine(abbrev, name, t.int("score")?.coerceAtLeast(0), logo)
+        // (Stacked §3.3) Shots on goal: lenient like every field (a JSON string "12" is 12), kept only in 0..SOG_MAX.
+        val sog = t.int("sog")?.takeIf { it in 0..SportsConstants.SOG_MAX }
+        return TeamLine(abbrev, name, t.int("score")?.coerceAtLeast(0), logo, sog = sog)
     }
 
     private fun periodKind(s: String?): PeriodKind? = when (s) {
