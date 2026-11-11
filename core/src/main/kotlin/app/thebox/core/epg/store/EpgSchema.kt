@@ -7,8 +7,13 @@ internal object EpgSchema {
     /**
      * Build `programme_by_text` before the bulk load instead of after it (no sort, ~20 % slower inserts).
      * Switch only if the device run (I-5) shows the native sorter peak above 64 MB (review S1).
+     *
+     * (2026-11-10, performance review H5) On: `EpgIndexMemoryTest` at 1.96M programmes (bundled SQLite, JVM, x86-64
+     * macOS) measured the build's RSS peak at 108–115 MB over the pre-build baseline with the post-load sort (the
+     * index/FTS/ANALYZE phase alone +66–72 MB) and 56–57 MB with the index built during the load (that phase +13 MB),
+     * for ~20 % more build time (38–40 s → 45–46 s) and +2 % file size. The device run (I-5) should still confirm.
      */
-    const val INDEX_BEFORE_LOAD = false
+    const val INDEX_BEFORE_LOAD = true
 
     /** Longest stored programme row; longer programmes are split (§3.5.5). */
     const val MAX_ROW_MIN = 360

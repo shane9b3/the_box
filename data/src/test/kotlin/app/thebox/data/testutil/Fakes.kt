@@ -53,6 +53,8 @@ class FakeFetcher : SourceFetcher {
     val bodies = HashMap<String, String>()
     val errors = HashMap<String, SourceError>()
     val notModified = HashSet<String>()
+    /** URLs whose server sends no ETag or Last-Modified (typical of `xmltv.php`), so it never answers 304. */
+    val noValidators = HashSet<String>()
     val requests: MutableList<FetchRequest> = java.util.Collections.synchronizedList(ArrayList())
     /** Simulated download time; with [maxInFlight] it shows whether two runs download at once. */
     @Volatile var delayMs = 0L
@@ -77,6 +79,7 @@ class FakeFetcher : SourceFetcher {
         val body = bodies[request.url] ?: return Outcome.Err(SourceError.Http(404))
         dest.parentFile?.mkdirs()
         dest.writeText(body)
+        if (request.url in noValidators) return Outcome.Ok(FetchResult(false, body.length.toLong(), null, null, "text/xml", null))
         return Outcome.Ok(FetchResult(false, body.length.toLong(), "\"e-${body.hashCode()}\"", "Mon, 01 Jan 2026 00:00:00 GMT", "audio/x-mpegurl", null))
     }
 }
