@@ -498,6 +498,7 @@ class RefreshRepositoryTest {
         val (id, rows) = playlistWithMatchedLinks(linkA, linkB)
         val (a, b) = rows
         val before = mappings()
+        val imports = g.requester.imports.size
         g.fetcher.bodies[url] = m3u("BBC", "CNN", "ITV", epg = epgs(linkB, linkA))
         assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error)
         val after = db.epgSourceDao().forPlaylist(id).associateBy { it.id }
@@ -505,6 +506,177 @@ class RefreshRepositoryTest {
         assertEquals(listOf(1, 0), listOf(after.getValue(a.id).ordinal, after.getValue(b.id).ordinal))
         assertEquals(listOf(linkA, linkB), listOf(urlOf(after.getValue(a.id)), urlOf(after.getValue(b.id))))
         assertEquals(before, mappings())
+        assertEquals("a pure re-order queues no guide rebuild", imports, g.requester.imports.size)
+    }
+
+    // ---- fix pass (docs/review/2026-11-11-keep-header-guide-links-review.md) ----------------------------------
+
+    private suspend fun setOrdinal(sourceId: Long, ordinal: Int) =
+        db.writeTransaction { exec("UPDATE epg_source SET ordinal = ? WHERE id = ?") { bindLong(1, ordinal.toLong()); bindLong(2, sourceId) } }
+
+    @Test
+    fun s1_parkedOrdinalsLeftByAnInterruptedSyncHealOnTheNextRefresh() = runBlocking {
+        // The reviewer's reproduction: an interrupted [A,B] → [B,A] left RB on -1 and RA on -2.
+        val (id, rows) = playlistWithMatchedLinks(linkA, linkB)
+        val (a, b) = rows
+        setOrdinal(b.id, -1)
+        setOrdinal(a.id, -2)
+        val before = mappings()
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error)
+        val after = db.epgSourceDao().forPlaylist(id)
+        assertEquals(listOf(a.id to 0, b.id to 1), after.map { it.id to it.ordinal })
+        assertEquals(listOf(linkA, linkB), after.map { urlOf(it) })
+        assertEquals(before, mappings())
+        // And again in the other order (no state is left that breaks a later refresh).
+        g.fetcher.bodies[url] = m3u("BBC", "CNN", "ITV", epg = epgs(linkB, linkA))
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error)
+        assertEquals(listOf(b.id to 0, a.id to 1), db.epgSourceDao().forPlaylist(id).map { it.id to it.ordinal })
+        assertEquals(before, mappings())
+    }
+
+    @Test
+    fun l4_aRotatedTokenKeepsTheRowRewritesItsLoginAndQueuesARebuild() = runBlocking {
+        val (id, rows) = playlistWithMatchedLinks(linkA, linkB)
+        val (a, b) = rows
+        val rotated = "http://epg.a.example/guide.xml?token=three"
+        val before = mappings()
+        val imports = g.requester.imports.size
+        g.fetcher.bodies[url] = m3u("BBC", "CNN", "ITV", epg = epgs(linkB, rotated))
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error)
+        val after = db.epgSourceDao().forPlaylist(id)
+        assertEquals(listOf(b.id to 0, a.id to 1), after.map { it.id to it.ordinal })
+        assertEquals(listOf(linkB, rotated), after.map { urlOf(it) })
+        assertEquals(a.credentialRef, after[1].credentialRef)
+        assertEquals(before, mappings())
+        assertEquals(imports + 1, g.requester.imports.size)
+    }
+
+    @Test
+    fun l4_aRowWhoseLoginIsMissingHealsInPlace() = runBlocking {
+        val (id, rows) = playlistWithMatchedLinks(linkA, linkB)
+        g.creds.secrets.remove(rows[0].credentialRef)
+        g.playlists.clearSecretCache()
+        val before = mappings()
+        val imports = g.requester.imports.size
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error)
+        val after = db.epgSourceDao().forPlaylist(id)
+        assertEquals(rows.map { it.id }, after.map { it.id })
+        assertEquals(listOf(linkA, linkB), after.map { urlOf(it) })
+        assertEquals(before, mappings())
+        assertEquals("the rewritten login queues a rebuild", imports + 1, g.requester.imports.size)
+    }
+
+    @Test
+    fun l4_aFailedLoginWriteOnAMovedRowKeepsItsOldAddressUntilTheNextRefresh() = runBlocking {
+        val (id, rows) = playlistWithMatchedLinks(linkA, linkB)
+        val (a, b) = rows
+        val rotated = "http://epg.a.example/guide.xml?token=three"
+        g.fetcher.bodies[url] = m3u("BBC", "CNN", "ITV", epg = epgs(linkB, rotated))
+        g.creds.failPut = SourceError.Credentials(CredentialFailure.UNAVAILABLE)
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error)
+        var after = db.epgSourceDao().forPlaylist(id)
+        assertEquals(listOf(b.id to 0, a.id to 1), after.map { it.id to it.ordinal })
+        assertEquals(linkA, urlOf(after[1]))
+        assertEquals(a.urlHash, after[1].urlHash)
+        g.creds.failPut = null
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error)
+        after = db.epgSourceDao().forPlaylist(id)
+        assertEquals(listOf(linkB, rotated), after.map { urlOf(it) })
+        assertEquals(2L, db.scalar("SELECT COUNT(*) FROM epg_mapping"))
+    }
+
+    @Test
+    fun l4_placeholdersStayThroughAnEmptyFirstHeaderAndFillByOrdinalLater() = runBlocking {
+        val id = addPlaylist()
+        val p0 = placeholder(id, 0)
+        val p1 = placeholder(id, 1)
+        g.fetcher.bodies[url] = m3u("BBC", epg = null)
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.MANUAL).error)
+        assertEquals(listOf(p0, p1), db.epgSourceDao().forPlaylist(id))
+        assertEquals(2L, db.scalar("SELECT COUNT(*) FROM epg_mapping"))
+        g.fetcher.bodies[url] = m3u("BBC", epg = epgs(linkC))
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.MANUAL).error)
+        val after = db.epgSourceDao().forPlaylist(id).single()
+        assertEquals(p0.id, after.id)
+        assertFalse(after.isPlaceholder)
+        assertEquals(linkC, urlOf(after))
+        assertEquals(listOf("map-0"), db.strings("SELECT stable_key FROM epg_mapping"))
+    }
+
+    @Test
+    fun s3_aMovedLinkThatSharesNothingUniqueWithARowGetsANewRowAndNoMatchesCross() = runBlocking {
+        // The reviewer's case: [A, B] → [B'], B' = B on a new host. A and B share the path /guide.xml, so the path
+        // does not single out B's row: B' gets a new row, and neither A's nor B's match is moved onto it.
+        val (id, rows) = playlistWithMatchedLinks(linkA, linkB)
+        val moved = "http://epg.new.example/guide.xml?token=two"
+        g.fetcher.bodies[url] = m3u("BBC", "CNN", "ITV", epg = epgs(moved))
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error)
+        val after = db.epgSourceDao().forPlaylist(id).single()
+        assertTrue(after.id !in rows.map { it.id })
+        assertEquals(moved, urlOf(after))
+        assertEquals(emptyList<String>(), mappings())
+    }
+
+    @Test
+    fun s3_aMovedLinkPairsWithTheOneRowSharingItsPathOrHost() = runBlocking {
+        val a = "http://epg.a.example/uk.xml"
+        val b = "http://epg.b.example/us.xml"
+        val (id, rows) = playlistWithMatchedLinks(a, b)
+        // Same path, new host: B's row.
+        val newHost = "http://cdn.new.example/us.xml"
+        g.fetcher.bodies[url] = m3u("BBC", "CNN", "ITV", epg = epgs(newHost))
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.PERIODIC).error)
+        val kept = db.epgSourceDao().forPlaylist(id).single()
+        assertEquals(rows[1].id, kept.id)
+        assertEquals(newHost, urlOf(kept))
+        assertEquals(listOf("key-1|${rows[1].id}"), mappings())
+
+        // Same host, new path, while another link is added: the row on that host.
+        val (id2, rows2) = playlistWithMatchedLinks2(a, b)
+        val newPath = "http://epg.a.example/uk-v2.xml"
+        g.fetcher.bodies["http://lists.example/two.m3u"] = m3u("BBC", "CNN", "ITV", epg = epgs(newPath, b, linkC))
+        assertNull(g.refresh(FakeDiffer()).refresh(id2, Trigger.PERIODIC).error)
+        val after = db.epgSourceDao().forPlaylist(id2)
+        assertEquals(listOf(rows2[0].id, rows2[1].id), after.take(2).map { it.id })
+        assertEquals(listOf(newPath, b, linkC), after.map { urlOf(it) })
+        assertEquals(listOf("key-0|${rows2[0].id}", "key-1|${rows2[1].id}"), mappings().filter { it.endsWith("|${rows2[0].id}") || it.endsWith("|${rows2[1].id}") })
+    }
+
+    /** A second playlist (its own URL) with [links] and a manual match per row, for tests that need two. */
+    private suspend fun playlistWithMatchedLinks2(vararg links: String): Pair<Long, List<EpgSourceEntity>> {
+        val id = (g.playlists.addM3uUrl("Two", "http://lists.example/two.m3u") as Outcome.Ok).value
+        g.fetcher.bodies["http://lists.example/two.m3u"] = m3u("BBC", "CNN", "ITV", epg = epgs(*links))
+        assertNull(g.refresh(FakeDiffer()).refresh(id, Trigger.MANUAL).error)
+        val rows = db.epgSourceDao().forPlaylist(id)
+        rows.forEachIndexed { i, s -> db.epgMappingDao().upsert(EpgMappingEntity(id, "key-$i", s.id, "x$i.uk", 1)) }
+        return id to rows
+    }
+
+    @Test
+    fun s2_afterAnAddressChangeAHeaderWithNoLinksRetiresTheOldGuides() = runBlocking {
+        val (id, _) = playlistWithMatchedLinks(linkA, linkB)
+        val userId = (g.epg.addUserSource("Mine", "http://user.example/epg.xml") as Outcome.Ok).value
+        // What SourceSetupImpl.saveM3u does when the address moves to another host or path.
+        db.playlistDao().setHeader(id, null)
+        val imports = g.requester.imports.size
+        g.fetcher.bodies[url] = m3u("BBC", "CNN", "ITV", epg = null)
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.MANUAL).error)
+        assertTrue(db.epgSourceDao().forPlaylist(id).isEmpty())
+        assertEquals(emptyList<String>(), mappings())
+        assertNotNull(db.epgSourceDao().get(userId))
+        assertEquals(imports + 1, g.requester.imports.size)
+        // That refresh stored a header again, so the guard is back for the next one.
+        assertNotNull(db.playlistDao().get(id)!!.headerJson)
+    }
+
+    @Test
+    fun s2_withoutAnAddressChangeTheEmptyHeaderStillKeepsTheGuides() = runBlocking {
+        val (id, rows) = playlistWithMatchedLinks(linkA)
+        assertNotNull(db.playlistDao().get(id)!!.headerJson)
+        g.fetcher.bodies[url] = m3u("BBC", "CNN", "ITV", epg = null)
+        assertNull(g.refresh(FakeDiffer(detected)).refresh(id, Trigger.MANUAL).error)
+        assertEquals(rows, db.epgSourceDao().forPlaylist(id))
+        assertEquals(1L, db.scalar("SELECT COUNT(*) FROM epg_mapping"))
     }
 
     @Test

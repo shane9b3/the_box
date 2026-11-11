@@ -48,6 +48,7 @@ import app.thebox.data.di.WallClock
 import app.thebox.data.net.ContentCopier
 import app.thebox.data.work.ImportMutex
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -174,8 +175,13 @@ class RefreshRepository @Inject constructor(
                 // Decision 2026-11-11 (docs/decisions/2026-11-11-keep-header-guide-links.md): a header with no guide
                 // links keeps the last known ones. Syncing an empty list would delete the rows, and the delete
                 // cascades to the user's manual matches; one bad download would lose them for good.
-                if (h.epgUrls.isEmpty()) {
-                    BoxLog.i(TAG) { "playlist $playlistId header lists no guide links; keeping the last known ones" }
+                // Exception: the first successful download after the user changed the playlist's address (the edit
+                // clears header_json; see SourceSetupImpl.saveM3u) is authoritative, so the old provider's guides go.
+                val addressChanged = playlist.headerJson == null && playlist.refreshSeq > 0
+                if (h.epgUrls.isEmpty() && !addressChanged) {
+                    if (sourceDao.forPlaylist(playlistId).any { it.origin == EpgSourceEntity.ORIGIN_PLAYLIST_HEADER }) {
+                        BoxLog.i(TAG) { "playlist $playlistId header lists no guide links; keeping the last known ones" }
+                    }
                 } else {
                     sourcesChanged = syncSources(playlist, EpgSourceEntity.ORIGIN_PLAYLIST_HEADER, h.epgUrls, secret, detected)
                 }
@@ -366,85 +372,123 @@ class RefreshRepository @Inject constructor(
      * Upserts the playlist's EPG sources of one origin, updating the URL in place (S14: ids and user mappings
      * survive a URL change). The real URL goes only into the source's credential blob; `url_hash` hashes the
      * templated/redacted form (B3). Returns true when the set of addresses changed (a pure re-order does not).
+     * An empty [urls] deletes every row of [origin]; step 4 decides when that is wanted (decision 2026-11-11).
      *
-     * Rows are paired with [urls] in three passes (decision 2026-11-11, case c), so a link that is still listed
-     * never loses its row, and so its manual matches, because another link moved or went away:
-     * 1. same address: the exact URL in the row's secret, then the same `url_hash` (the address with secrets and
-     *    the query redacted, so a rotated token is the same guide);
-     * 2. the rows left over, in ordinal order, take the links left over, in list order (S14: a new host or a
-     *    tokenised URL updates in place; restore placeholders fill in order);
-     * 3. rows still left over are links the provider withdrew from a non-empty list: deleted, and their matches
-     *    cascade with them. Callers never pass an empty list for a playlist header (that case keeps every row).
-     * Each kept row's ordinal becomes its link's position.
+     * Pairing rows with links (decision 2026-11-11, case c; [pair]):
+     * 1. the exact URL held in the row's secret;
+     * 2. the same `url_hash` (the templated address with the query redacted, so a rotated token is the same guide);
+     * 3. the rows and links left over: when there are as many of each, by position (S14: a renamed host or a new
+     *    path updates in place, restore placeholders fill in order). Otherwise a placeholder takes the link at its
+     *    ordinal, and another row only a link that shares its host, or failing that its path, with no other
+     *    left-over row (a unique match). A row is never handed to an unrelated link: that link gets a new row.
+     * Rows still unpaired are deleted, and their matches cascade with them. A link whose URL changed only in a
+     * way none of these see (another host and another path, with a different number of links) therefore gets a
+     * new row, and the old row's matches go.
+     *
+     * Crash safety (review S1): all Keystore writes come first (new refs for new rows; in-place rewrites of rows
+     * whose address changes), then one IMMEDIATE transaction holds every `epg_source` write, then the secrets of
+     * deleted rows are deleted. A committed row therefore always has its secret, and an interruption leaves the
+     * old set or the new set. A secret rewritten before an interrupted transaction holds the address the row was
+     * moving to, and the next refresh pairs the row by that address and finishes the update. Moved rows are parked
+     * on [PARK_BASE] − id inside the transaction, which no other row can hold. Ordinal = the link's position in
+     * [urls]; a position whose new row could not store its secret stays empty until the next refresh.
      */
     private suspend fun syncSources(
         p: PlaylistEntity, origin: String, urls: List<String>, secret: PlaylistSecret, detected: DetectedCredentials? = null,
     ): Boolean {
         val user = detected?.username ?: secret.username
         val pass = detected?.password ?: secret.password
-        var changed = false
         // Hash 0 marks a restore placeholder (EpgSourceEntity.isPlaceholder); a real row never stores it.
         val hashes = urls.map { url -> Hash64.of(Redact.text(template(url, user, pass))).let { if (it == EpgSourceEntity.PLACEHOLDER_HASH) 1L else it } }
-        val free = sourceDao.forPlaylist(p.id).filter { it.origin == origin }.sortedBy { it.ordinal }.toMutableList()
-        val oldUrls = free.associate { it.id to (playlists.secret(it.credentialRef) as? Outcome.Ok)?.value?.urls?.firstOrNull() }
-        val claimed = arrayOfNulls<EpgSourceEntity>(urls.size)
-        fun claim(match: (Int, EpgSourceEntity) -> Boolean) {
-            for (i in urls.indices) if (claimed[i] == null) {
-                val row = free.firstOrNull { match(i, it) } ?: continue
-                claimed[i] = row
-                free.remove(row)
+        val rows = sourceDao.forPlaylist(p.id).filter { it.origin == origin }.sortedBy { it.ordinal }
+        val oldUrls = rows.associate { it.id to (playlists.secret(it.credentialRef) as? Outcome.Ok)?.value?.urls?.firstOrNull() }
+        val claimed = pair(rows, urls, hashes, oldUrls)
+        val dropped = rows.filter { r -> claimed.none { it?.id == r.id } }
+
+        // 1. Keystore writes. A failure leaves that slot as it was (S1 of the placeholder review): no new row, or the
+        //    row keeps its old address and hash; the next refresh retries.
+        val newRefs = arrayOfNulls<String>(urls.size)
+        val readdressed = BooleanArray(urls.size)
+        urls.forEachIndexed { i, url ->
+            val cur = claimed[i]
+            val ref = cur?.credentialRef ?: playlists.newRef()
+            if (cur != null && oldUrls[cur.id] == url) {
+                readdressed[i] = cur.urlHash != hashes[i]
+                return@forEachIndexed
             }
+            val put = playlists.putSecret(ref, PlaylistSecret(listOf(url), headers = secret.headers))
+            if (put is Outcome.Err) {
+                BoxLog.w(TAG, "guide login not stored (${put.error.code}); retried next refresh")
+                return@forEachIndexed
+            }
+            if (cur == null) newRefs[i] = ref else readdressed[i] = true
         }
-        claim { i, row -> oldUrls[row.id] == urls[i] }
-        claim { i, row -> !row.isPlaceholder && row.urlHash == hashes[i] }
-        claim { _, _ -> true }
-        for (s in free) {
-            playlists.deleteSecret(s.credentialRef)
-            sourceDao.delete(s.id)
-            changed = true
-        }
-        // Park moved rows on negative ordinals first: (playlist_id, origin, ordinal) is unique.
-        claimed.forEachIndexed { i, row ->
-            if (row != null && row.ordinal != i) claimed[i] = row.copy(ordinal = -1 - i).also { sourceDao.update(it) }
-        }
-        urls.forEachIndexed { ordinal, url ->
-            val hash = hashes[ordinal]
-            val display = PlaylistRepository.displayHost(url)
-            val cur = claimed[ordinal]?.let { if (it.ordinal != ordinal) it.copy(ordinal = ordinal).also { m -> sourceDao.update(m) } else it }
-            if (cur == null) {
-                val ref = playlists.newRef()
-                // A row without its secret would fail every guide build with cred.missing: retry on the next refresh.
-                val put = playlists.putSecret(ref, PlaylistSecret(listOf(url), headers = secret.headers))
-                if (put is Outcome.Err) {
-                    BoxLog.w(TAG, "guide login not stored (${put.error.code}); retried next refresh")
-                    return@forEachIndexed
-                }
-                sourceDao.insert(
-                    EpgSourceEntity(
-                        name = if (urls.size > 1) "${p.name} (${ordinal + 1})" else p.name, origin = origin, playlistId = p.id,
-                        ordinal = ordinal, credentialRef = ref, urlHash = hash, displaySource = display,
-                        priority = sourceDao.maxPriority() + 1, createdAt = clock.now(),
-                    ),
-                )
-                changed = true
-            } else {
-                val old = oldUrls[cur.id]
-                if (old != url) {
-                    // S1: on failure the row keeps its old hash, so a restore placeholder stays a placeholder (inert)
-                    // and the next refresh retries; never a live row with no secret.
-                    val put = playlists.putSecret(cur.credentialRef, PlaylistSecret(listOf(url), headers = secret.headers))
-                    if (put is Outcome.Err) {
-                        BoxLog.w(TAG, "guide login not stored (${put.error.code}); retried next refresh")
-                        return@forEachIndexed
+
+        // 2. Every epg_source write in one transaction.
+        var changed = dropped.isNotEmpty() || readdressed.any { it }
+        try {
+            db.writeTransaction<Unit> {
+                for (s in dropped) exec("DELETE FROM epg_source WHERE id = ?") { bindLong(1, s.id) }
+                val moved = claimed.withIndex().filter { (i, r) -> r != null && r.ordinal != i }
+                for ((_, r) in moved) exec("UPDATE epg_source SET ordinal = ? WHERE id = ?") { bindLong(1, PARK_BASE - r!!.id); bindLong(2, r.id) }
+                for ((i, r) in moved) exec("UPDATE epg_source SET ordinal = ? WHERE id = ?") { bindLong(1, i.toLong()); bindLong(2, r!!.id) }
+                urls.forEachIndexed { i, url ->
+                    val cur = claimed[i]
+                    if (cur != null && readdressed[i]) {
+                        exec("UPDATE epg_source SET url_hash = ?, display_source = ?, etag = NULL, last_modified = NULL WHERE id = ?") {
+                            bindLong(1, hashes[i]); bindText(2, PlaylistRepository.displayHost(url)); bindLong(3, cur.id)
+                        }
                     }
-                }
-                if (cur.urlHash != hash || old != url) {
-                    sourceDao.update(cur.copy(urlHash = hash, displaySource = display, etag = null, lastModified = null))
+                    val ref = newRefs[i] ?: return@forEachIndexed
+                    val priority = queryLong("SELECT COALESCE(MAX(priority), -1) + 1 FROM epg_source")
+                    exec(
+                        """INSERT INTO epg_source (name, origin, playlist_id, ordinal, credential_ref, url_hash, display_source, priority,
+                           enabled, shift_min, channel_count, programme_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, 0, 0, 0, ?)""",
+                    ) {
+                        bindText(1, if (urls.size > 1) "${p.name} (${i + 1})" else p.name); bindText(2, origin); bindLong(3, p.id)
+                        bindLong(4, i.toLong()); bindText(5, ref); bindLong(6, hashes[i]); bindText(7, PlaylistRepository.displayHost(url))
+                        bindLong(8, priority); bindLong(9, clock.now())
+                    }
                     changed = true
                 }
             }
+        } catch (e: Throwable) {
+            // Nothing was committed: the new refs belong to no row.
+            withContext(NonCancellable) { for (ref in newRefs) if (ref != null) playlists.deleteSecret(ref) }
+            throw e
         }
+
+        // 3. Secrets of the deleted rows, only once nothing refers to them. A crash here leaves an orphan blob only.
+        for (s in dropped) playlists.deleteSecret(s.credentialRef)
         return changed
+    }
+
+    /** [syncSources] pairing: index i of the result is the existing row that serves `urls[i]`, or null for a new row. */
+    private fun pair(rows: List<EpgSourceEntity>, urls: List<String>, hashes: List<Long>, oldUrls: Map<Long, String?>): Array<EpgSourceEntity?> {
+        val free = rows.toMutableList()
+        val claimed = arrayOfNulls<EpgSourceEntity>(urls.size)
+        fun claim(i: Int, row: EpgSourceEntity) { claimed[i] = row; free.remove(row) }
+        for (i in urls.indices) free.firstOrNull { oldUrls[it.id] == urls[i] }?.let { claim(i, it) }
+        for (i in urls.indices) if (claimed[i] == null) free.firstOrNull { !it.isPlaceholder && it.urlHash == hashes[i] }?.let { claim(i, it) }
+        val left = urls.indices.filter { claimed[it] == null }
+        if (left.size == free.size) {
+            left.forEachIndexed { k, i -> claimed[i] = free[k] }
+            return claimed
+        }
+        for (i in left) free.firstOrNull { it.isPlaceholder && it.ordinal == i }?.let { claim(i, it) }
+        for (i in left) if (claimed[i] == null) {
+            val host = PlaylistRepository.displayHost(urls[i])
+            val path = pathOf(urls[i])
+            val real = free.filter { !it.isPlaceholder }
+            val byHost = real.filter { it.displaySource.isNotEmpty() && it.displaySource.equals(host, ignoreCase = true) }
+            val pick = when {
+                byHost.size == 1 -> byHost[0]
+                byHost.size > 1 -> byHost.singleOrNull { path != null && pathOf(oldUrls[it.id]) == path }
+                else -> real.singleOrNull { path != null && pathOf(oldUrls[it.id]) == path }
+            }
+            pick?.let { claim(i, it) }
+        }
+        return claimed
     }
 
     private fun redactHeader(h: M3uHeader, secret: PlaylistSecret, d: DetectedCredentials?): M3uHeader {
@@ -488,6 +532,16 @@ class RefreshRepository @Inject constructor(
     companion object {
         private const val TAG = "RefreshRepository"
         const val PLAYLIST_CACHE_DIR = "playlistCacheDir"
+
+        /**
+         * Parking ordinals for rows that move inside the [syncSources] transaction: `PARK_BASE - id`. Unique per row and
+         * far below any ordinal a committed row can hold (0..n, or the -1..-32 an interrupted c2c838e build could leave).
+         */
+        private const val PARK_BASE = -1_000_000L
+
+        /** The URL's path without a trailing slash; null when it has none (too generic to pair guides on). */
+        internal fun pathOf(url: String?): String? =
+            url?.let { runCatching { java.net.URI(it.trim()).path }.getOrNull() }?.trimEnd('/')?.takeIf { it.isNotEmpty() }
 
         /** `{{base}}/…/{{u}}/{{p}}/…` with each token exactly once: the stored form of an Xtream API channel URL (§1.2.4 ParsedChannel.url). */
         internal fun isXtreamTemplate(url: String): Boolean =

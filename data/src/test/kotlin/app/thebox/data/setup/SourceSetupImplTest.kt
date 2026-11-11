@@ -153,6 +153,48 @@ class SourceSetupImplTest {
         assertTrue((setup.saveM3u(M3uForm(null, null, null, emptyList())) as Outcome.Err).error is SourceError.NotASource)
     }
 
+    // ------------------------------------------------------------------ header guides after an edit (review S2, 2026-11-11)
+
+    @Test
+    fun editingAnM3uToAnotherAddressClearsTheStoredHeader() = real {
+        val id = (setup.saveM3u(M3uForm("L", "http://lists.example.com/a.m3u?token=1", null, emptyList())) as Outcome.Ok).value
+        db.playlistDao().setHeader(id, "{}")
+        // Another host: the next download decides the header guides even with no links.
+        assertEquals(Outcome.Ok(id), setup.saveM3u(M3uForm("L", "http://other.example.net/a.m3u?token=1", null, emptyList()), id))
+        assertNull(db.playlistDao().get(id)!!.headerJson)
+        // Another path on the same host counts too.
+        db.playlistDao().setHeader(id, "{}")
+        assertEquals(Outcome.Ok(id), setup.saveM3u(M3uForm("L", "http://other.example.net/b.m3u", null, emptyList()), id))
+        assertNull(db.playlistDao().get(id)!!.headerJson)
+    }
+
+    @Test
+    fun editingOnlyTheLoginOrTokenKeepsTheStoredHeader() = real {
+        val id = (setup.saveM3u(M3uForm("L", "http://panel.example.com:8080/get.php?username=a&password=b&type=m3u_plus", null, emptyList())) as Outcome.Ok).value
+        db.playlistDao().setHeader(id, "{}")
+        val edits = listOf(
+            "http://panel.example.com:8080/get.php?username=c&password=d&type=m3u_plus",
+            "HTTP://Panel.Example.com:8080/get.php?username=c&password=e",
+            "http://user:pw@panel.example.com:8080/get.php/",
+        )
+        for (u in edits) {
+            assertEquals(Outcome.Ok(id), setup.saveM3u(M3uForm("L", u, null, emptyList()), id))
+            assertEquals(u, "{}", db.playlistDao().get(id)!!.headerJson)
+        }
+    }
+
+    @Test
+    fun sameAddressComparesSchemeHostPortAndPathOnly() {
+        fun same(a: String, b: String) = app.thebox.data.repo.PlaylistRepository.sameAddress(a, b)
+        assertTrue(same("http://h.example/a.m3u?t=1", "http://h.example/a.m3u?t=2"))
+        assertTrue(same("http://h.example:80/a.m3u", "http://H.EXAMPLE/a.m3u/"))
+        assertTrue(same("content://com.android.providers/doc/1", "content://com.android.providers/doc/1"))
+        assertTrue(!same("http://h.example/a.m3u", "https://h.example/a.m3u"))
+        assertTrue(!same("http://h.example/a.m3u", "http://h.example:8080/a.m3u"))
+        assertTrue(!same("http://h.example/a.m3u", "http://h.example/b.m3u"))
+        assertTrue(!same("content://com.android.providers/doc/1", "content://com.android.providers/doc/2"))
+    }
+
     // ------------------------------------------------------------------ UA probe (§3.4.5)
 
     private suspend fun xtreamWithChannel(): Long {

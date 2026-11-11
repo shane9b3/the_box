@@ -192,11 +192,18 @@ class SourceSetupImpl @Inject constructor(
             val wantType = if (url != null) PlaylistType.M3U_URL else PlaylistType.M3U_FILE
             if (p.type != wantType) return Outcome.Err(SourceError.Unsupported("type change"))
             val old = (playlists.secret(p) as? Outcome.Ok)?.value
-            val secret = (old ?: PlaylistSecret(emptyList())).copy(urls = listOf(url ?: file!!))
+            val address = url ?: file!!
+            val secret = (old ?: PlaylistSecret(emptyList())).copy(urls = listOf(address))
             when (val r = playlists.replaceSecret(existingId, secret)) {
                 is Outcome.Err -> return r
                 is Outcome.Ok -> Unit
             }
+            // Review S2 (decision 2026-11-11): a list at another address is another provider. Clearing the stored header
+            // makes the next successful download authoritative for the header guides even when it lists none, so the
+            // old provider's guides go. A new login or token only (same scheme, host, port and path) keeps them, and
+            // so does an old address that cannot be read (nothing to compare: keeping is the safe direction).
+            val previous = old?.urls?.firstOrNull()
+            if (previous != null && !PlaylistRepository.sameAddress(previous, address)) playlistDao.setHeader(existingId, null)
             playlistDao.setDisplaySource(existingId, if (url != null) PlaylistRepository.displayHost(url) else form.fileName?.takeIf { it.isNotBlank() } ?: fileName(file!!))
             if (form.userAgent != null && form.userAgent != p.userAgent) playlistDao.setUserAgent(existingId, form.userAgent)
             id = existingId

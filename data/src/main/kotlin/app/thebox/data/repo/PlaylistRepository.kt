@@ -236,6 +236,23 @@ class PlaylistRepository @Inject constructor(
             else -> runCatching { CatchupModeSetting.Forced(CatchupMode.valueOf(setting.uppercase())) }.getOrDefault(CatchupModeSetting.Auto)
         }
 
+        /**
+         * True when two playlist addresses point at the same list (decision 2026-11-11, review S2): the same scheme,
+         * host and port (case-insensitive, default ports filled in) and the same path (a trailing slash ignored).
+         * User info, query and fragment are ignored, so a new login or token in `get.php?username=…&password=…`
+         * is the same address; another host, port or path is not. Unparseable input compares without its query.
+         */
+        fun sameAddress(a: String, b: String): Boolean {
+            fun key(s: String): String = runCatching {
+                val u = URI(s.trim())
+                val scheme = u.scheme?.lowercase() ?: return@runCatching null
+                val port = if (u.port > 0) u.port else when (scheme) { "http" -> 80; "https" -> 443; else -> -1 }
+                val host = (u.host ?: u.rawAuthority?.substringAfterLast('@'))?.lowercase().orEmpty()
+                "$scheme://$host:$port${u.rawPath.orEmpty().trimEnd('/')}"
+            }.getOrNull() ?: s.trim().substringBefore('?').trimEnd('/')
+            return key(a) == key(b)
+        }
+
         /** "host:port" (no user info, path or query): safe to show and to store in clear. */
         fun displayHost(url: String): String = runCatching {
             val u = URI(url.trim())
