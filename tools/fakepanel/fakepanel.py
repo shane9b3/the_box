@@ -2362,6 +2362,7 @@ def main(argv=None):
     ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--sports", action="store_true", help="serve the fake NHL score API (/v1/score, /v1/gamecenter, logos)")
     ap.add_argument("--sports-pp", action="store_true", help="with --sports: the featured game plays the power-play timeline (situation + summary.scoring)")
+    ap.add_argument("--sports-stacked", action="store_true", help="with --sports: the Stacked score bug scenario (the pp timeline plus end of period, no SOG, a stale intermission)")
     ap.add_argument("--sports-timeline", type=float, metavar="S", help="the featured game's timeline length (default 360 s)")
     ap.add_argument("--sports-nfl", action="store_true", help="with --sports: also serve the fake ESPN NFL scoreboard (/apis/site/v2/..., /combiner/i)")
     ap.add_argument("--update-apk-dir", help="U-S14: load every *.apk in this directory as an update APK by name "
@@ -2394,6 +2395,8 @@ def main(argv=None):
         cfg["sports"] = True
     if a.sports_pp:
         cfg["sports_pp"] = True
+    if a.sports_stacked:
+        cfg["sports_stacked"] = True
     if a.sports_timeline is not None:
         cfg["sports_timeline_s"] = a.sports_timeline
     if a.sports_nfl:

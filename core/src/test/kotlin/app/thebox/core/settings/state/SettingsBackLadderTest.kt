@@ -187,7 +187,7 @@ class SettingsBackLadderTest {
         val w = SettingsWorld(store).also { it.advanced = true; it.machine.dispatch(SettingsEvent.Advanced(true)) }.open()
         w.enter(SectionId.SPORTS)
         assertEquals(SettingsRoute.Section(SectionId.SPORTS), w.ui.route)
-        assertEquals(listOf("sports.show", "sports.corner", "sports.delay", "sports.interval", "sports.size"), w.ui.page!!.rows.map { it.id.key })
+        assertEquals(listOf("sports.show", "sports.corner", "sports.delay", "sports.interval", "sports.size", "sports.style"), w.ui.page!!.rows.map { it.id.key })
         assertTrue(w.ui.page!!.rows.all { it.visibility == app.thebox.core.settings.Visibility.ADVANCED })
         w.act(BoxAction.BACK)
         assertEquals(SettingsRoute.Root, w.ui.route)

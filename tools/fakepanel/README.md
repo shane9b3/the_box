@@ -278,6 +278,21 @@ runs **110 s** instead of 60, and a 20 s `OVER` step precedes OFF (the timeline 
 
 Seconds count down 1 s/s with the clock (`ceil`) and freeze in an intermission.
 
+**Stacked scenario** (`--sports-stacked`, config `sports_stacked: true`; default off; needs `sports`; docs/design/m6-score-bug-stacked-theme.md
+§10.4). The featured game plays the power-play timeline (it implies `--sports-pp`) with `STACKED_SEGMENTS`' windows added, in
+segment seconds at 360:
+
+| Where | What |
+|---|---|
+| 1st and 3rd periods, last 8 s | end of period: `secondsRemaining` 0, `running` false, `inIntermission` false |
+| 1st INT | EDM `1451`, frozen (a PP carried into intermission; from the PP timeline) |
+| 2nd LIVE, 40-50 | `awaySog` and `homeSog` null: both teams' `sog` omitted |
+| 2nd INT (90 instead of 20) | CGY `1541` frozen at 20 s; stale in 10-80: every `/v1` answer is 503 (the bug goes "NO UPDATE") |
+
+Shots on goal: `sog` = 3 + 2 x (score without the shootout winner's +1) + 4 x min(period, 4), so it does not rise from the
+3rd period into the shootout or the final (the NHL counts no shootout attempts). `sports_script` takes `awaySog` / `homeSog`
+(an integer 0..199, or `null` to omit that team's `sog`).
+
 Point a **debug** build at it (the override is read only in debug builds, at app start):
 
 ```

@@ -12,6 +12,8 @@ import app.thebox.core.input.BoxAction.UP
 import app.thebox.core.sports.DayState
 import app.thebox.core.sports.FailKind
 import app.thebox.core.sports.GamePhase
+import app.thebox.core.sports.League
+import app.thebox.core.sports.NhlBugStyle
 import app.thebox.core.sports.ScoreCorner
 import app.thebox.core.sports.ScoreFacts
 import app.thebox.core.sports.SportsFixtures
@@ -132,5 +134,73 @@ class ScoreBugPlayerTest {
         // The next sheet shows the saved corner at once.
         w.press(SELECT)
         assertEquals(ScoreCorner.BOTTOM_RIGHT, (w.ui.picker!!.choices[0] as PickerChoice.ScoreCornerRow).corner)
+    }
+
+    // ---- (Stacked WP-4, docs/design/m6-score-bug-stacked-theme.md §1.1, S8 / M4) The sheet's Style row
+
+    private fun styleRows(w: PlayerWorld) = w.ui.picker!!.choices.filterIsInstance<PickerChoice.ScoreStyleRow>()
+
+    @Test fun noStyleRowUntilTheHostReportsTheStyle() {
+        val w = PlayerWorld()
+        w.player.scores(ScoreFacts(league = League.NHL))
+        openSheet(w)
+        assertTrue(styleRows(w).isEmpty())
+    }
+
+    @Test fun theStyleRowIsAfterDelayAndShowsForNothingFollowedOnTheNhlOrAnUnreportedLeague() {
+        val w = PlayerWorld()
+        w.player.scores(ScoreFacts(style = NhlBugStyle.PILL))
+        openSheet(w)
+        assertEquals(listOf("ScoreCornerRow", "ScoreDelayRow", "ScoreStyleRow"), w.ui.picker!!.choices.take(3).map { it::class.simpleName })
+        w.player.scores(ScoreFacts(style = NhlBugStyle.PILL, league = League.NHL))
+        assertEquals(1, styleRows(w).size)
+        w.player.scores(ScoreFacts(style = NhlBugStyle.PILL, league = League.NFL))
+        assertTrue(styleRows(w).isEmpty(), "browsing the NFL with nothing followed: no row")
+    }
+
+    @Test fun theRowFollowsTheFollowedGamesLeague() {
+        val w = PlayerWorld()
+        val nhl = SportsFixtures.game(id = "H1")
+        val nfl = SportsFixtures.nflGame()
+        // An NHL follow while browsing the NFL list keeps the row.
+        w.player.scores(ScoreFacts(style = NhlBugStyle.PILL, league = League.NFL, followed = SportsFixtures.liveView(nhl), game = SportsFixtures.followedOf(nhl), day = board(nfl)))
+        openSheet(w)
+        assertEquals(1, styleRows(w).size)
+        assertEquals(listOf("ScoreGame", "ScoreLeagueRow", "ScoreCornerRow", "ScoreDelayRow", "ScoreStyleRow", "ScoreStop"), w.ui.picker!!.choices.take(6).map { it::class.simpleName })
+        // An NFL follow while browsing the NHL list hides it.
+        w.player.scores(ScoreFacts(style = NhlBugStyle.PILL, league = League.NHL, followed = SportsFixtures.nflView(game = nfl), game = SportsFixtures.followedOf(nfl), day = board(nhl)))
+        assertTrue(styleRows(w).isEmpty(), "an NFL follow never shows a row that changes nothing on screen")
+    }
+
+    @Test fun okTogglesTheStyleAndTheSheetStaysOpenWithFocusOnTheRow() {
+        val w = PlayerWorld()
+        w.player.scores(ScoreFacts(style = NhlBugStyle.PILL))
+        openSheet(w)
+        w.press(DOWN); w.press(DOWN) // Corner, Delay, then Style
+        assertEquals(PickerChoice.ScoreStyleRow(NhlBugStyle.PILL), w.ui.picker!!.let { it.choices[it.focused] })
+        w.press(SELECT)
+        assertEquals(PlayerLayer.PICKER, w.ui.layer)
+        assertEquals(PickerKind.SCORE_BUG, w.ui.picker!!.kind)
+        val p = w.ui.picker!!
+        assertEquals(PickerChoice.ScoreStyleRow(NhlBugStyle.STACKED), p.choices[p.focused], "shown at once, focus stays on the row")
+        // The store's flow confirms it: the same style arrives from the host.
+        w.player.scores(ScoreFacts(style = NhlBugStyle.STACKED))
+        assertEquals(PickerChoice.ScoreStyleRow(NhlBugStyle.STACKED), w.ui.picker!!.let { it.choices[it.focused] })
+        w.press(SELECT)
+        val q = w.ui.picker!!
+        assertEquals(PickerChoice.ScoreStyleRow(NhlBugStyle.PILL), q.choices[q.focused], "and back")
+        assertEquals(PlayerLayer.PICKER, w.ui.layer)
+    }
+
+    @Test fun theStyleRowSurvivesTheDelayListRoundTrip() {
+        val w = PlayerWorld()
+        w.player.scores(ScoreFacts(style = NhlBugStyle.STACKED))
+        openSheet(w)
+        w.press(DOWN) // Delay
+        w.press(SELECT)
+        assertEquals(PickerKind.SCORE_DELAY, w.ui.picker!!.kind)
+        w.press(SELECT) // choose the current delay: back to the sheet on the Delay row
+        assertEquals(PickerKind.SCORE_BUG, w.ui.picker!!.kind)
+        assertEquals(NhlBugStyle.STACKED, styleRows(w).single().style)
     }
 }
