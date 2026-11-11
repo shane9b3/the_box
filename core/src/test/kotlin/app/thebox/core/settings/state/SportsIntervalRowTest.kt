@@ -38,7 +38,7 @@ class SportsIntervalRowTest {
     @Test
     fun theRowIsAdvancedLiveAfterTheDelay() {
         val rows = pages.build(SettingsRoute.Section(SectionId.SPORTS), advanced = true).rows
-        assertEquals(listOf(SportsRows.SHOW, SportsRows.CORNER, SportsRows.DELAY, SportsRows.INTERVAL, SportsRows.SIZE), rows.map { it.id })
+        assertEquals(listOf(SportsRows.SHOW, SportsRows.CORNER, SportsRows.DELAY, SportsRows.INTERVAL, SportsRows.SIZE, SportsRows.STYLE), rows.map { it.id })
         assertEquals(Visibility.ADVANCED, row().visibility)
         assertEquals(EffectTiming.LIVE, row().effect)
         assertTrue(pages.build(SettingsRoute.Section(SectionId.SPORTS), advanced = false).rows.isEmpty())

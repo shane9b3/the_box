@@ -39,6 +39,7 @@ import app.thebox.core.sports.FollowedGame
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.League
+import app.thebox.core.sports.NhlBugStyle
 import app.thebox.core.sports.ScoreCorner
 import app.thebox.core.sports.ScoreFacts
 import app.thebox.core.sports.ScorePlaceState
@@ -2082,6 +2083,10 @@ class PlayerStateMachineImpl(
         if (league != null) out += PickerChoice.ScoreLeagueRow(league)
         out += PickerChoice.ScoreCornerRow(f.corner)
         out += PickerChoice.ScoreDelayRow(f.delaySec)
+        // (Stacked §1.1, S8) The Style row follows the followed game's league, else the browsed league (not reported = NHL):
+        // an NFL follow never shows a row that changes nothing on screen; following an NHL game while browsing the NFL keeps it.
+        val style = f.style
+        if (style != null && (followed?.league ?: league ?: League.NHL) == League.NHL) out += PickerChoice.ScoreStyleRow(style)
         if (followed != null) out += PickerChoice.ScoreStop
         val nfl = league == League.NFL
         val others = board?.games.orEmpty().filter { followed == null || it.id != followed.id }
@@ -2160,6 +2165,17 @@ class PlayerStateMachineImpl(
                 if (p != null) {
                     val choices = choicesFor(p.kind, menu)
                     picker = p.copy(choices = choices, current = currentChoice(p.kind, choices), focused = choices.indexOfFirst { it is PickerChoice.ScoreLeagueRow }.coerceAtLeast(0))
+                }
+            }
+            is PickerChoice.ScoreStyleRow -> {
+                // Stacked §1.1 (S8 / M4): OK toggles Pill <-> Stacked; the sheet stays open and focus stays on this row.
+                val next = if (c.style == NhlBugStyle.PILL) NhlBugStyle.STACKED else NhlBugStyle.PILL
+                effects.setScoreStyle(next)
+                scoreFacts = scoreFacts.copy(style = next) // shown at once; the store's flow confirms it
+                val p = picker
+                if (p != null) {
+                    val choices = choicesFor(p.kind, menu)
+                    picker = p.copy(choices = choices, current = currentChoice(p.kind, choices), focused = choices.indexOfFirst { it is PickerChoice.ScoreStyleRow }.coerceAtLeast(0))
                 }
             }
             is PickerChoice.ScoreDelayChoice -> {
