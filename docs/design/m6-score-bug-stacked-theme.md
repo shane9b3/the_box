@@ -5,6 +5,7 @@ Status: **proposed 2026-11-10; reviewed 2026-11-10; revised under the lead's rul
 - Every finding is applied in place and marked "(B1)", "(S4)" and so on. The "Lead sign-off (2026-11-10)" section at the
   end gives each finding's disposition.
 - Items marked **pending owner** are built with the stated default. §12 lists them.
+- **2026-11-11: the owner confirmed every default in §12** (size 0.45, team colours for the goal, true-colour PP bars with a hairline, the carried-over PP in intermission, "1ST / END", the shootout bar, rows that never move, Large offered). "Pending owner" below is history.
 
 Owner request (2026-11-10): "an option for a different theme for the NHL score bug". The mock-up is
 `design/nhl-stacked/Stacked.dc.html`; its README is beside it. `support.js` and `vendor/` are only the viewer runtime. The

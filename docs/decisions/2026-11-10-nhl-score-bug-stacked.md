@@ -16,25 +16,23 @@ above the other, a shots-on-goal column, a clock column, and a bar under the box
 - NHL only: an NFL game always draws the NFL bug.
 - Words on screen: "Score bug style", "Style", "Pill", "Stacked". Never "theme".
 
-## Look-and-feel defaults built, pending owner confirmation (design §12)
+## Look-and-feel defaults (design §12): all eight confirmed by the owner, 2026-11-11
 Each is built with the default shown; the owner screenshots decide.
-1. **Size.** The mock-up × 0.45 (about 392 × 141 with the bar), not the larger × 0.50 (435 × 153). *Pending owner
-   confirmation.*
+1. **Size.** The mock-up × 0.45 (about 392 × 141 with the bar), not the larger × 0.50 (435 × 153). *Confirmed by the owner, 2026-11-11.*
 2. **Goal colours.** Each team's own two colours, as the current goal animation uses them (Edmonton: a navy panel with an
-   orange sweep, the reverse of the mock-up). *Pending owner confirmation.*
+   orange sweep, the reverse of the mock-up). *Confirmed by the owner, 2026-11-11.*
 3. **Power-play bar for navy, black and grey teams** (Toronto, Buffalo, St. Louis, Tampa Bay, Nashville, Winnipeg,
    Seattle, Los Angeles, Vegas, Utah, Boston, Pittsburgh). The teams' real colours, with a thin light line and bright
-   sliding stripes so the bar always reads. *Pending owner confirmation.*
+   sliding stripes so the bar always reads. *Confirmed by the owner, 2026-11-11.*
 4. **A power play that carries into intermission.** 4a: an ordinary intermission is exactly the mock-up ("1ST
    INTERMISSION", the clock column folds). 4b: a power play carried over the break keeps its bar with the frozen time
-   ("EDM POWER PLAY 1:12") and the clock column reads "1ST" over "INT". *Pending owner confirmation.*
-5. **End of a period** (0:00, before intermission). The clock column shows "1ST" over "END". *Pending owner
-   confirmation.*
+   ("EDM POWER PLAY 1:12") and the clock column reads "1ST" over "INT". *Confirmed by the owner, 2026-11-11.*
+5. **End of a period** (0:00, before intermission). The clock column shows "1ST" over "END". *Confirmed by the owner, 2026-11-11.*
 6. **Shootout.** Treated like a break: the clock column folds, shots stay open, the bar says "SHOOTOUT", then changes to
-   "FINAL/SO"; the winning shootout goal plays the goal animation. *Pending owner confirmation.*
+   "FINAL/SO"; the winning shootout goal plays the goal animation. *Confirmed by the owner, 2026-11-11.*
 7. **Right-hand corners.** The team rows never move; the box's right edge moves as the columns open and fold, and at even
-   strength the box sits a little in from the screen edge. *Pending owner confirmation.*
-8. **Large size.** Offered for Stacked as for the current bug (25 % bigger). *Pending owner confirmation.*
+   strength the box sits a little in from the screen edge. *Confirmed by the owner, 2026-11-11.*
+8. **Large size.** Offered for Stacked as for the current bug (25 % bigger). *Confirmed by the owner, 2026-11-11.*
 
 ## Lead rulings from the design sign-off (2026-11-10)
 - The name, the Pill default and the two places for the setting; hockey only; the Style row's gating (followed league,
