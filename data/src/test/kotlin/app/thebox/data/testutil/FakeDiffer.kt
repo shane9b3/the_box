@@ -52,9 +52,9 @@ class FakeDiffer(
         if (!ctx.forceAcceptShrink && ctx.previousLiveCount >= 50 && live < 0.2 * ctx.previousLiveCount) {
             throw SourceException(SourceError.SuspiciousShrink(ctx.previousLiveCount, live))
         }
-        class Old(val id: Long, val hash: Long, val sort: Int, val missingSince: Long?, val missingCount: Int, val key: String)
+        class Old(val id: Long, val hash: Long, val sort: Int, val missingSince: Long?, val missingCount: Int, val key: String, val nameHash32: Int)
         val old = HashMap<String, Old>()
-        existing.forEach { old[it.stableKey] = Old(it.id, it.contentHash, it.sortIndex, it.missingSince, it.missingCount, it.stableKey) }
+        existing.forEach { old[it.stableKey] = Old(it.id, it.contentHash, it.sortIndex, it.missingSince, it.missingCount, it.stableKey, it.nameHash.toInt()) }
         try {
             sink.begin(groups.values.toList(), detected)
             // Pass 2.
@@ -74,7 +74,7 @@ class FakeDiffer(
                 val o = old[kc.stableKey.value]
                 when {
                     o == null -> { ins += kc; added++ }
-                    o.hash != kc.contentHash -> { upd += ChannelUpdate(o.id, kc, o.missingSince != null); updated++; if (o.missingSince != null) restored++ }
+                    o.hash != kc.contentHash -> { upd += ChannelUpdate(o.id, kc, o.missingSince != null, o.nameHash32 != Hash64.of(kc.channel.name).toInt()); updated++; if (o.missingSince != null) restored++ }
                     o.sort != kc.sortIndex || o.missingSince != null -> { tch += ChannelTouch(o.id, kc.sortIndex, o.missingSince != null); if (o.missingSince != null) restored++ }
                     else -> unchanged++
                 }

@@ -144,7 +144,7 @@ fun GuideGridHost(machine: GuideStateMachine, renderer: GuideRenderer, modifier:
                     val m = frame.metrics ?: return@onDrawBehind
                     val images = frame.images
                     if (images != null && images.onLoaded !== onLogo) images.onLoaded = onLogo
-                    (images as? LogoCache)?.let { it.scale = m.scale; it.lowEnd = frame.lowEnd }
+                    (images as? LogoCache)?.let { it.scale = m.scale; it.lowEnd = frame.lowEnd; it.tick() }
                     val ox = originX.floatValue
                     val oy = originY.floatValue
                     val base = scroll.baseWs

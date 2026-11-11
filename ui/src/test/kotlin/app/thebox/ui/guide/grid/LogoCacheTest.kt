@@ -115,6 +115,100 @@ class LogoCacheTest {
         assertEquals(2, requests.size)
     }
 
+    private val cancelled = ArrayList<String>()
+
+    /** A cache whose fetches record their cancellation. */
+    private fun cancellableCache() = LogoCache({ url, w, h ->
+        requests += Triple(url, w, h)
+        try {
+            pending.getOrPut(url) { CompletableDeferred() }.await()
+        } catch (e: kotlin.coroutines.cancellation.CancellationException) {
+            cancelled += url
+            pending.remove(url)
+            throw e
+        }
+    }, scope)
+
+    private fun LogoCache.ticks(n: Int) = repeat(n) { tick() }
+
+    @Test
+    fun offScreenLoadsAreCancelledAfterTheStaleWindowAndStillRequestedOnesAreNot() {
+        val c = cancellableCache()
+        c.get("gone"); c.get("kept")
+        // "kept" keeps being asked for each draw; "gone" is not.
+        repeat(LogoCache.STALE_FRAMES + 16) { c.tick(); c.get("kept") }
+        assertEquals(listOf("gone"), cancelled)
+        assertFalse("a cancelled load is not a failure", c.failed("gone"))
+        assertEquals(0, c.size)
+        pending["kept"]!!.complete(bmp())
+        scope.advanceUntilIdle()
+        assertNotNull(c.get("kept"))
+    }
+
+    @Test
+    fun aBriefScrollPastAndBackDoesNotCancel() {
+        val c = cancellableCache()
+        c.get("a")
+        c.ticks(LogoCache.STALE_FRAMES - 10)
+        c.get("a")                                  // back in view
+        c.ticks(LogoCache.STALE_FRAMES - 10)
+        assertTrue(cancelled.isEmpty())
+        assertEquals(1, requests.size)
+    }
+
+    @Test
+    fun aCancelledUrlLoadsAgainWhenItNextBecomesVisible() {
+        val c = cancellableCache()
+        c.get("a")
+        c.ticks(LogoCache.STALE_FRAMES + 16)
+        assertEquals(listOf("a"), cancelled)
+        assertNull(c.get("a"))
+        assertEquals(2, requests.size)
+        pending["a"]!!.complete(bmp())
+        scope.advanceUntilIdle()
+        assertNotNull(c.get("a"))
+        assertTrue("cancelled loads did not add a failure", !c.failed("a"))
+    }
+
+    @Test
+    fun cancellingBumpsTheVersionSoVisibleRowsRequestAgain() {
+        val c = cancellableCache()
+        c.get("a")
+        val v = c.version
+        c.ticks(LogoCache.STALE_FRAMES + 16)
+        assertTrue(c.version > v)
+    }
+
+    @Test
+    fun anArrivalBumpsTheVersionExactlyOnce() {
+        val c = cancellableCache()
+        c.get("a")
+        val v = c.version
+        pending["a"]!!.complete(bmp())
+        scope.advanceUntilIdle()
+        assertEquals(v + 1, c.version)
+    }
+
+    @Test
+    fun aFailedLoadKeepsItsNegativeCacheAcrossTicks() {
+        val c = cancellableCache()
+        c.get("bad")
+        pending["bad"]!!.complete(null)
+        scope.advanceUntilIdle()
+        c.ticks(LogoCache.STALE_FRAMES * 3)
+        assertTrue(c.failed("bad"))
+        assertNull(c.get("bad"))
+        assertEquals(1, requests.size)
+    }
+
+    @Test
+    fun clearCancelsInFlightLoads() {
+        val c = cancellableCache()
+        c.get("a")
+        c.clear()
+        assertEquals(listOf("a"), cancelled)
+    }
+
     @Test
     fun trimMemoryClearsLogosAndTextCaches() {
         val c = LogoCache({ _, _, _ -> bmp() }, scope)

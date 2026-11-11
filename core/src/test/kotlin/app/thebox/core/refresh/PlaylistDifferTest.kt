@@ -100,6 +100,7 @@ class PlaylistDifferTest {
         assertEquals(1, r.restored)
         assertEquals(listOf(false, false, true), s.updates.map { it.restored })
         assertEquals(listOf(10L, 11L, 12L), s.updates.map { it.id })
+        assertEquals(listOf(false, true, false), s.updates.map { it.renamed }, "only the name change sets renamed")
         assertEquals(0, r.added)
     }
 

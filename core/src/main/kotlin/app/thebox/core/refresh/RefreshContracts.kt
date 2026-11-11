@@ -78,7 +78,12 @@ fun interface EntryProducer {
 
 data class GroupRow(val groupKey: String, val name: String, val kind: EntryKind, val sortIndex: Int, val adult: Boolean)
 
-class ChannelUpdate(val id: Long, val channel: KeyedChannel, val restored: Boolean)
+/**
+ * [renamed]: the stored name differs from the incoming one (32-bit name hash compare, so a 2^-32 collision reads as
+ * "not renamed"). The sink uses it to refresh the FTS row without a SELECT per update. Deliberately has no default,
+ * so a producer cannot forget to set it.
+ */
+class ChannelUpdate(val id: Long, val channel: KeyedChannel, val restored: Boolean, val renamed: Boolean)
 
 /** Content unchanged; only position and/or missing state changed. */
 class ChannelTouch(val id: Long, val sortIndex: Int, val restored: Boolean)

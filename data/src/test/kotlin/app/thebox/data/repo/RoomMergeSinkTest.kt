@@ -194,6 +194,15 @@ class RoomMergeSinkTest {
     }
 
     @Test
+    fun updateWithoutRenameLeavesTheFtsRowAlone() = runBlocking {
+        run(listOf(pc("Alpha", url = "http://h/live/1.ts", group = "News")))
+        val (r, sink) = run(listOf(pc("Alpha", url = "http://h/live/1.ts", group = "Sport")))
+        assertEquals(1, r.updated)
+        assertEquals(0, sink.ftsWrites)
+        assertEquals(listOf("Alpha"), db.strings("SELECT name FROM channel_fts WHERE channel_fts MATCH 'alpha'"))
+    }
+
+    @Test
     fun autoRemapsMoveUserDataInTheFinishTransaction() = runBlocking {
         // S7: the provider added a tvg-id, so the key moved from url: to tvg:.
         run(listOf(pc("BBC", url = "http://h/live/bbc.ts")))
