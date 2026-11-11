@@ -60,7 +60,7 @@ class PlayerFiveKeyReachabilityTest {
     /** (Score bug WP-4b) Every start state has today's board with one live game, so the score sheet offers a game to follow. */
     private fun world(start: Start, s: PlayerSettings): PlayerWorld = baseWorld(start, s).also { w ->
         val g = SportsFixtures.game()
-        w.player.scores(ScoreFacts(day = DayState.Board(SportsFixtures.board(g), fetchedAtMono = 0L, failing = false)))
+        w.player.scores(ScoreFacts(day = DayState.Board(SportsFixtures.board(g), fetchedAtMono = 0L, failing = false), style = app.thebox.core.sports.NhlBugStyle.PILL))
     }
 
     private fun baseWorld(start: Start, s: PlayerSettings): PlayerWorld = when (start) {
@@ -146,7 +146,7 @@ class PlayerFiveKeyReachabilityTest {
         // the at-live scrub bar is reached by TIME_SHIFT / SEEK_BACK only, which are not among the five keys.
         layers = PlayerLayer.entries - PlayerLayer.ERROR - PlayerLayer.SCRUB,
         items = listOf(TIME_SHIFT, AUDIO, ASPECT, SUBTITLES, FAVOURITE_ADD, FAVOURITE_REMOVE, START_OVER, PREVIOUS_CHANNEL, STREAM_INFO, VIDEO_DECODER, QuickItem.SCREEN_OFF, QuickItem.SOURCES, QuickItem.SCORE_BUG, SETTINGS),
-        scrub = emptyList(), effects = listOf("startOver", "pauseLive", "playProgramme", "followGame", "setScoreCorner", "setScoreDelay", "scorePicker"))
+        scrub = emptyList(), effects = listOf("startOver", "pauseLive", "playProgramme", "followGame", "setScoreCorner", "setScoreDelay", "setScoreStyle", "scorePicker"))
 
     @ParameterizedTest
     @EnumSource(UpDownInPlayer::class)
@@ -273,6 +273,12 @@ class PlayerFiveKeyReachabilityTest {
     }
 
     private companion object {
-        const val MAX_DEPTH = 18
+        /**
+         * (Stacked WP-3) 19, was 18. The Score bug sheet's Style row (Stacked §1.1) sits between Delay and the games, and
+         * the sheet opens on the first game, so its Corner row is one more Up away: the shortest five-key path to
+         * `setScoreCorner` grew from 17 to 18 keys under the default Up/Down setting (Up, Right × 11 to Score bug, OK,
+         * Up × 3, OK, OK) and from 18 to 19 under ZAP and CHANNEL_LIST. The search depth, not a reachability gap.
+         */
+        const val MAX_DEPTH = 19
     }
 }

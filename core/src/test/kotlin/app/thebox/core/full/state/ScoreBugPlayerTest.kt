@@ -179,6 +179,8 @@ class ScoreBugPlayerTest {
         w.press(DOWN); w.press(DOWN) // Corner, Delay, then Style
         assertEquals(PickerChoice.ScoreStyleRow(NhlBugStyle.PILL), w.ui.picker!!.let { it.choices[it.focused] })
         w.press(SELECT)
+        // The effect (Stacked WP-3, flagged by WP-4): OK writes the other style through PlayerEffects.setScoreStyle.
+        assertEquals(listOf(NhlBugStyle.STACKED), w.fx.calls.filter { it.name == "setScoreStyle" }.map { it.args.single() })
         assertEquals(PlayerLayer.PICKER, w.ui.layer)
         assertEquals(PickerKind.SCORE_BUG, w.ui.picker!!.kind)
         val p = w.ui.picker!!
@@ -189,6 +191,7 @@ class ScoreBugPlayerTest {
         w.press(SELECT)
         val q = w.ui.picker!!
         assertEquals(PickerChoice.ScoreStyleRow(NhlBugStyle.PILL), q.choices[q.focused], "and back")
+        assertEquals(listOf(NhlBugStyle.STACKED, NhlBugStyle.PILL), w.fx.calls.filter { it.name == "setScoreStyle" }.map { it.args.single() })
         assertEquals(PlayerLayer.PICKER, w.ui.layer)
     }
 

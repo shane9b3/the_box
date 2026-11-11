@@ -1,0 +1,212 @@
+package app.thebox.ui.sports
+
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import androidx.activity.ComponentActivity
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithTag
+import androidx.test.core.app.ApplicationProvider
+import app.thebox.core.sports.FakeScoreRepository
+import app.thebox.core.sports.GoalFrame
+import app.thebox.core.sports.GoalSpec
+import app.thebox.core.sports.GoalTimeline
+import app.thebox.core.sports.League
+import app.thebox.core.sports.NhlBugStyle
+import app.thebox.core.sports.NhlStackedColours
+import app.thebox.core.sports.NhlTeamColours
+import app.thebox.core.sports.ScoreBugPlacement
+import app.thebox.core.sports.ScoreBugSize
+import app.thebox.core.sports.ScoreBugView
+import app.thebox.core.sports.ScoreCorner
+import app.thebox.core.sports.Side
+import app.thebox.core.sports.SportsConstants as K
+import app.thebox.core.sports.SportsPrefs
+import app.thebox.core.sports.StackedFrame
+import app.thebox.core.sports.StackedTargets
+import app.thebox.ui.R
+import app.thebox.ui.theme.BoxDesignScale
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
+import org.junit.Rule
+import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
+import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
+
+/**
+ * docs/design/m6-score-bug-stacked-theme.md §10.2 `StackedBoundsTest` (Stacked WP-3; S11, §4.3, §6). In a 1920 × 1080
+ * window (1 design px = 1 px):
+ * - the bounded layer is the footprint + 2 M, and the footprint sits inside the 96 / 56 insets;
+ * - `SCORE_BUG_TAG` is the **drawn** box: inside the footprint in all four corners at both sizes, in play, on a power
+ *   play and in an intermission; the bar opens above the box in the bottom corners;
+ * - the rows never move between states (the box's left edge, and its top part's top or bottom edge);
+ * - the drop shadow and the baked glow never leave the layer, at every width and bar height, both sizes, bar up or down
+ *   (rendered with the real painters, native graphics).
+ */
+@RunWith(RobolectricTestRunner::class)
+@Config(sdk = [35], qualifiers = "w960dp-h540dp-xhdpi")
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
+class StackedBoundsTest {
+    @Suppress("DEPRECATION")
+    @get:Rule val rule = createAndroidComposeRule<ComponentActivity>()
+
+    private val repo = FakeScoreRepository(SportsPrefs(nhlStyle = NhlBugStyle.STACKED))
+    private val probe = StackedProbe()
+    private var placement by mutableStateOf(StackedRunFixtures.input())
+
+    private fun render() {
+        rule.mainClock.autoAdvance = false
+        val hooks = StackedRunFixtures.hooks(probe)
+        rule.setContent {
+            BoxDesignScale { StackedBug(repo, placement, ScoreBugFixtures.noGeometry, Modifier, ScoreBugPlacement::place, hooks) }
+        }
+        settle()
+    }
+
+    private fun settle() {
+        Snapshot.sendApplyNotifications()
+        rule.waitForIdle()
+        repeat(150) { rule.mainClock.advanceTimeBy(16) }
+        rule.waitForIdle()
+    }
+
+    private fun bounds(tag: String): Rect = rule.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+
+    private fun assertRect(msg: String, l: Float, t: Float, r: Float, b: Float, actual: Rect) {
+        // Layout rounds each offset to whole px (the Large footprint is 176.25 tall).
+        val e = 1.01f
+        assertEquals("$msg left", l, actual.left, e); assertEquals("$msg top", t, actual.top, e)
+        assertEquals("$msg right", r, actual.right, e); assertEquals("$msg bottom", b, actual.bottom, e)
+    }
+
+    private val states: List<Pair<String, ScoreBugView>> = listOf(
+        "play" to StackedRunFixtures.view(),
+        "power play" to StackedRunFixtures.view(pp = StackedRunFixtures.pp()),
+        "intermission" to StackedRunFixtures.intermission(),
+    )
+
+    @Test
+    fun theDrawnBoxSitsInTheFootprintInEveryCornerAtBothSizesAndTheRowsNeverMove() {
+        repo.bug.value = StackedRunFixtures.view()
+        render()
+        for (size in ScoreBugSize.entries) {
+            val k = ScoreBugPlacement.stackedScale(size)
+            val m = if (size == ScoreBugSize.LARGE) K.GOAL_LAYER_MARGIN_LARGE else K.GOAL_LAYER_MARGIN
+            for (corner in ScoreCorner.entries) {
+                placement = StackedRunFixtures.input(corner, size)
+                val foot = ScoreBugPlacement.cornerBox(corner, size, League.NHL, NhlBugStyle.STACKED)
+                val bottom = corner == ScoreCorner.BOTTOM_LEFT || corner == ScoreCorner.BOTTOM_RIGHT
+                assertTrue("$corner/$size: the footprint inside the insets ($foot)",
+                    foot.l >= K.SCORE_INSET_X && foot.r <= 1920f - K.SCORE_INSET_X && foot.t >= K.SCORE_INSET_Y && foot.b <= 1080f - K.SCORE_INSET_Y)
+                val rowsLeft = HashSet<Float>()
+                val rowsEdge = HashSet<Float>()
+                for ((name, v) in states) {
+                    repo.bug.value = v
+                    settle()
+                    val msg = "$corner/$size/$name"
+                    assertRect("$msg: the layer is the footprint + 2 M", foot.l - m, foot.t - m, foot.r + m, foot.b + m, bounds(STACKED_LAYER_TAG))
+                    val t = StackedTargets.of(v)
+                    val w = (K.STACKED_ROWS_W + (if (t.sogOpen) K.STACKED_SOG_W else 0f) + (if (t.clockOpen) K.STACKED_CLOCK_W else 0f)) * k
+                    val h = K.STACKED_H * k
+                    val bar = if (t.bar != null) K.STACKED_BAR_H * k else 0f
+                    val tag = bounds(SCORE_BUG_TAG)
+                    if (bottom) {
+                        assertRect("$msg: the drawn box, its bar above", foot.l, foot.b - h - bar, foot.l + w, foot.b, tag)
+                        assertTrue("$msg: up", probe.args!!().up)
+                    } else {
+                        assertRect("$msg: the drawn box, its bar below", foot.l, foot.t, foot.l + w, foot.t + h + bar, tag)
+                        assertTrue("$msg: down", !probe.args!!().up)
+                    }
+                    assertTrue("$msg: inside the footprint ($tag in $foot)",
+                        tag.left >= foot.l - 1 && tag.right <= foot.r + 1 && tag.top >= foot.t - 1 && tag.bottom <= foot.b + 1)
+                    rowsLeft += tag.left
+                    rowsEdge += if (bottom) tag.bottom else tag.top // the top part's outer edge
+                }
+                assertEquals("$corner/$size: the rows' left edge never moves", 1, rowsLeft.size)
+                assertEquals("$corner/$size: the top part's outer edge never moves", 1, rowsEdge.size)
+            }
+        }
+    }
+
+    /** The place hint is beside the drawn box (N8), toward the centre and centred on its height. */
+    @Test
+    fun thePlaceHintIsPositionedFromTheDrawnBox() {
+        placement = StackedRunFixtures.input(ScoreCorner.TOP_RIGHT, placing = true)
+        render()
+        val bug = bounds(SCORE_BUG_TAG)
+        assertRect("the sample at the play width", 1432f, 56f, 1765f, 164f, bug)
+        val hint = bounds(SCORE_BUG_HINT_TAG)
+        assertTrue("left of the drawn box: $hint", hint.right <= bug.left)
+        assertEquals((bug.top + bug.bottom) / 2f, (hint.top + hint.bottom) / 2f, 1.5f)
+        placement = StackedRunFixtures.input(ScoreCorner.TOP_LEFT, placing = true)
+        settle()
+        val left = bounds(SCORE_BUG_TAG)
+        assertTrue("right of a left-corner box, not of the footprint", bounds(SCORE_BUG_HINT_TAG).left in left.right..left.right + 20f)
+    }
+
+    // ------------------------------------------------------------------ the shadow and the glow inside the layer
+
+    @Test
+    fun theShadowAndTheGlowNeverLeaveTheLayer() {
+        val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+        val res = context.resources
+        val pair = NhlStackedColours.pair("CGY", "EDM")
+        for (size in ScoreBugSize.entries) {
+            val large = size == ScoreBugSize.LARGE
+            val k = ScoreBugPlacement.stackedScale(size)
+            val s = k // 1 design px = 1 px
+            val m = if (large) K.GOAL_LAYER_MARGIN_LARGE else K.GOAL_LAYER_MARGIN
+            val footW = ScoreBugPlacement.width(size, League.NHL, NhlBugStyle.STACKED)
+            val footH = ScoreBugPlacement.height(size, League.NHL, NhlBugStyle.STACKED)
+            val painter = StackedPainter(s, large, sansTypeface(context, R.font.instrument_sans_bold), StackedPainter.barTypeface(context))
+            val goal = StackedGoalPainter(s, large, sansTypeface(context, R.font.barlow_condensed_black_italic), sansTypeface(context, R.font.instrument_sans_bold), "GOAL")
+            val shadow = painter.bakeShadow()
+            val g = GoalTimeline.sample(GoalSpec.STACKED, 1_800f, GoalFrame()) // the glow's peak
+            for (cols in listOf(false to true, true to true, true to false)) for (barOpen in listOf(false, true)) for (up in listOf(false, true)) {
+                val v = StackedRunFixtures.view(pp = if (barOpen) StackedRunFixtures.pp() else null)
+                val t = StackedTargets.of(v)
+                val f = StackedFrame().apply {
+                    sogWidth = if (cols.first) 1f else 0f; sogAlpha = sogWidth; sogDx = 0f
+                    clockWidth = if (cols.second) 1f else 0f; clockAlpha = clockWidth
+                    barHeight = if (barOpen) 1f else 0f; barClosed = !barOpen; stripeAX = 0f; stripeBX = 0f; barTextAlpha = 1f; barTextDx = 0f
+                }
+                val bar = BarContent().also {
+                    it.kind = app.thebox.core.sports.BarKind.POWER_PLAY; it.side = Side.HOME; it.secs = 79
+                    painter.fillBar(it, pair, "CGY", "EDM", res)
+                }
+                goal.begin(Side.HOME, NhlTeamColours.of("EDM"), null, "CGY", "EDM", 0, 3, f.boxW)
+                val glow = goal.bakeGlow(f.boxW * s, (K.STACKED_H + f.barH) * s)!!
+                val a = StackedDrawArgs().apply {
+                    body = painter.frame(v, t, res); colours = pair; this.f = f; this.bar = bar; this.up = up
+                    this.shadow = shadow; this.goal = goal; this.g = g; this.glow = glow; glowOn = true
+                }
+                val extra = 60
+                val lw = (footW + 2 * m).toInt()
+                val lh = (footH + 2 * m).toInt()
+                val bmp = Bitmap.createBitmap(lw + 2 * extra, lh + 2 * extra, Bitmap.Config.ARGB_8888)
+                val c = Canvas(bmp)
+                val topY = if (up) footH - K.STACKED_H * k else 0f
+                c.translate(extra + m, extra + m + topY)
+                painter.drawFrame(c, a)
+                var outside = 0
+                var worst = 0
+                for (y in 0 until bmp.height) for (x in 0 until bmp.width) {
+                    // One px of slack for the masks' ceil()ed size.
+                    val inX = x >= extra - 1 && x < extra + lw + 1
+                    val inY = y >= extra - 1 && y < extra + lh + 1
+                    if (inX && inY) continue
+                    val alpha = bmp.getPixel(x, y) ushr 24
+                    if (alpha > 0) { outside++; worst = maxOf(worst, alpha) }
+                }
+                assertEquals("$size cols=$cols bar=$barOpen up=$up: pixels outside the layer (worst α $worst)", 0, outside)
+            }
+        }
+    }
+}
