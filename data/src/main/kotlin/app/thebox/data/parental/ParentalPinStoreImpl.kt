@@ -13,10 +13,16 @@ import app.thebox.core.parental.PIN_KDF_ITERATIONS
 import app.thebox.core.parental.ParentalPinStore
 import app.thebox.core.parental.PinCheck
 import app.thebox.data.contracts.SecureBlobStore
+import app.thebox.data.di.ApplicationScope
 import app.thebox.data.di.IoDispatcher
 import app.thebox.data.security.KeyResetFlag
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -37,22 +43,32 @@ interface AttemptsStore {
 class PrefsAttemptsStore @Inject constructor(@ApplicationContext context: Context) : AttemptsStore {
     private val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    /**
+     * (F7, 2026-11-11) Lenient decoding: a missing or unreadable key falls back to its default and never throws, so a
+     * damaged file can neither drop the counter silently into an exception path nor lock the PIN prompt for good. A
+     * file written before F7 has the same keys plus `locked_wall`, which is ignored (and removed on the next write);
+     * its running wait is then judged by [LockoutPolicy.resolve] on elapsed realtime alone: on the same boot it
+     * continues, after a reboot it restarts in full, so an old-format wait never ends earlier than it would have.
+     */
     override fun read(): LockoutPolicy.Attempts = LockoutPolicy.Attempts(
-        failures = prefs.getInt(K_FAILURES, 0),
-        lockedAtElapsedMs = prefs.getLong(K_ELAPSED, -1L).takeIf { it >= 0 },
-        lockedAtWallMs = prefs.getLong(K_WALL, -1L).takeIf { it >= 0 },
-        lockedAtBoot = prefs.getInt(K_BOOT, -1).takeIf { it >= 0 },
-        waitMs = prefs.getLong(K_WAIT, 0L),
+        failures = int(K_FAILURES, 0).coerceAtLeast(0),
+        lockedAtElapsedMs = long(K_ELAPSED, -1L).takeIf { it >= 0 },
+        lockedAtBoot = int(K_BOOT, -1).takeIf { it >= 0 },
+        // A stored wait longer than the top step is damage: clamp it so it cannot lock the prompt for longer.
+        waitMs = long(K_WAIT, 0L).coerceIn(0L, LockoutPolicy.WAIT_MAX_MS),
     )
+
+    private fun int(key: String, def: Int): Int = try { prefs.getInt(key, def) } catch (e: ClassCastException) { def }
+    private fun long(key: String, def: Long): Long = try { prefs.getLong(key, def) } catch (e: ClassCastException) { def }
 
     /** Synchronous (`commit`, on IO): a process kill right after a wrong PIN must not reset the counter. */
     override fun write(a: LockoutPolicy.Attempts) {
         prefs.edit()
             .putInt(K_FAILURES, a.failures)
             .putLong(K_ELAPSED, a.lockedAtElapsedMs ?: -1L)
-            .putLong(K_WALL, a.lockedAtWallMs ?: -1L)
             .putInt(K_BOOT, a.lockedAtBoot ?: -1)
             .putLong(K_WAIT, a.waitMs)
+            .remove(K_WALL_LEGACY)
             .commit()
     }
 
@@ -61,13 +77,17 @@ class PrefsAttemptsStore @Inject constructor(@ApplicationContext context: Contex
         const val PREFS = "parental_attempts"
         const val K_FAILURES = "failures"
         const val K_ELAPSED = "locked_elapsed"
-        const val K_WALL = "locked_wall"
+        /** Written before F7 (2026-11-11): the wall clock at the start of the wait. Ignored; removed on write. */
+        const val K_WALL_LEGACY = "locked_wall"
         const val K_BOOT = "locked_boot"
         const val K_WAIT = "wait_ms"
     }
 }
 
-/** Elapsed-realtime and the boot count for [LockoutPolicy] (§3.9.4, §9 F26). */
+/**
+ * Elapsed realtime and the boot count for [LockoutPolicy] (§3.9.4, §9 F26). The wall clock passed in is only carried
+ * through for the countdown display; the lockout decision never reads it (F7).
+ */
 fun interface LockoutClock {
     fun now(wallMs: Long): LockoutPolicy.Clock
 }
@@ -77,7 +97,7 @@ class AndroidLockoutClock @Inject constructor(@ApplicationContext private val co
         val boot = try {
             Settings.Global.getInt(context.contentResolver, Settings.Global.BOOT_COUNT, -1).takeIf { it >= 0 }
         } catch (e: RuntimeException) {
-            null // F26 unverified on Fire OS: unknown boot = treat as another boot (wall clock capped at the step)
+            null // F26 unverified on Fire OS: unknown boot = only "elapsed went backwards" detects a reboot (LockoutPolicy)
         }
         // The debug harness's clock offset (DebugOverrides, §6.5; 0 in release builds) moves the elapsed clock too.
         return LockoutPolicy.Clock(SystemClock.elapsedRealtime() + app.thebox.core.diag.DebugOverrides.clockOffsetMs, wallMs, boot)
@@ -97,8 +117,11 @@ class ParentalPinStoreImpl @Inject constructor(
     private val clock: LockoutClock,
     private val keyReset: KeyResetFlag,
     @IoDispatcher private val io: CoroutineDispatcher,
+    /** (F7) Clears a finished wait when it runs out while the process lives; null in tests (reads still settle it). */
+    @ApplicationScope private val scope: CoroutineScope? = null,
 ) : ParentalPinStore {
     private val mutex = Mutex()
+    private var settleJob: Job? = null
     private val _pinSet = MutableStateFlow<Boolean?>(null)
     /** null until the first [isSet]; the session treats unknown as "no PIN" (content filtered, FILTERED_NO_PIN). */
     val pinSet: StateFlow<Boolean?> = _pinSet.asStateFlow()
@@ -140,7 +163,7 @@ class ParentalPinStoreImpl @Inject constructor(
         try {
             mutex.withLock {
                 val now = clock.now(nowMs)
-                val a = attempts.read()
+                val a = current(now)
                 LockoutPolicy.lockedUntilWallMs(a, now)?.let { return@withLock PinCheck.LockedOut(it) }
                 val blob = when (val r = blobs.getBlob(SecureBlobStore.REF_PARENTAL_PIN)) {
                     is Outcome.Ok -> r.value
@@ -163,6 +186,7 @@ class ParentalPinStoreImpl @Inject constructor(
                 } else {
                     val (next, check) = LockoutPolicy.onWrong(a, now)
                     attempts.write(next)
+                    scheduleSettle(next.waitMs)
                     check
                 }
             }
@@ -178,10 +202,51 @@ class ParentalPinStoreImpl @Inject constructor(
     }
 
     override suspend fun lockedUntil(nowMs: Long): Long? = withContext(io) {
-        LockoutPolicy.lockedUntilWallMs(attempts.read(), clock.now(nowMs))
+        mutex.withLock {
+            val now = clock.now(nowMs)
+            val until = LockoutPolicy.lockedUntilWallMs(current(now), now)
+            if (until != null) scheduleSettle(until - now.wallMs)
+            until
+        }
+    }
+
+    /**
+     * (F7) Brings the persisted lockout up to date (re-anchors a wait after a reboot, clears a finished one) without a
+     * PIN check: the session calls it on start and on every return to the foreground, so a wait that ran out is
+     * recorded as served before a later reboot could restart it.
+     */
+    suspend fun settleLockout(nowMs: Long) {
+        withContext(io) {
+            mutex.withLock {
+                val now = clock.now(nowMs)
+                val remaining = LockoutPolicy.remainingMs(current(now), now)
+                if (remaining > 0) scheduleSettle(remaining)
+            }
+        }
+    }
+
+    /** The persisted attempts resolved at [now] ([LockoutPolicy.resolve]); writes them back when they changed. Under [mutex]. */
+    private fun current(now: LockoutPolicy.Clock): LockoutPolicy.Attempts {
+        val stored = attempts.read()
+        val resolved = LockoutPolicy.resolve(stored, now)
+        if (resolved != stored) attempts.write(resolved)
+        return resolved
+    }
+
+    /** Settles the wait just after it runs out, if the process is still alive then. Under [mutex]; one pending at a time. */
+    private fun scheduleSettle(remainingMs: Long) {
+        val s = scope ?: return
+        if (remainingMs <= 0) return
+        settleJob?.cancel()
+        settleJob = s.launch {
+            delay(remainingMs + SETTLE_SLACK_MS)
+            runCatching { settleLockout(app.thebox.core.diag.DebugOverrides.nowMs()) }
+                .onFailure { if (it is CancellationException) throw it; BoxLog.w(TAG, "lockout settle failed: ${it.javaClass.simpleName}") }
+        }
     }
 
     private companion object {
         const val TAG = "ParentalPin"
+        const val SETTLE_SLACK_MS = 1_000L
     }
 }
