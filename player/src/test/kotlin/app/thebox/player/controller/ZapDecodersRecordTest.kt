@@ -32,11 +32,17 @@ class ZapDecodersRecordTest {
     private fun videoInit(name: String, ms: Long) = f.exo.analytics.toList().forEach { it.onVideoDecoderInitialized(FakeExoPlayer.eventTime(), name, 0L, ms) }
     private fun audioInit(name: String, ms: Long) = f.exo.analytics.toList().forEach { it.onAudioDecoderInitialized(FakeExoPlayer.eventTime(), name, 0L, ms) }
     private fun videoReleased(name: String) = f.exo.analytics.toList().forEach { it.onVideoDecoderReleased(FakeExoPlayer.eventTime(), name) }
+    private fun formats(video: androidx.media3.common.Format = FakeExoPlayer.VIDEO, audio: androidx.media3.common.Format = FakeExoPlayer.AUDIO) =
+        f.exo.analytics.toList().forEach {
+            it.onVideoInputFormatChanged(FakeExoPlayer.eventTime(), video, null)
+            it.onAudioInputFormatChanged(FakeExoPlayer.eventTime(), audio, null)
+        }
 
     @Test
     fun eachZapRecordsItsDecoderInitsAndTheOldDecodersRelease() {
         f.controller.tune(TuneTarget.Channel(CH1))
         f.idle()
+        formats()
         videoInit("hw.avc", 38)
         audioInit("aac", 4)
         f.advance(300)
@@ -49,13 +55,22 @@ class ZapDecodersRecordTest {
         assertEquals(4L, d1.audioInitMs)
         assertTrue("prepare to first frame: $d1", d1.prepareToFirstFrameMs!! >= 300)
         assertNull("the first tune stops nothing", d1.stopToPrepareMs)
+        assertEquals("the channel kind, no name", "avc 720", d1.videoKind())
+        assertEquals("mp4a-latm 2ch", d1.audioKind())
+        assertEquals(42L, d1.initTotalMs)
 
         f.advance(5_000)
         // A ladder-free repair during playback must not count towards the next zap.
         videoInit("late", 99)
+        // The resolve hop really suspends here (as Dispatchers.IO does on the device), so tune() returns before prepare.
+        f.controller.ioDispatcher = kotlinx.coroutines.Dispatchers.Main
         f.controller.tune(TuneTarget.Channel(CH2))
-        f.idle()
+        assertEquals("not prepared yet", 1, f.exo.prepares)
+        // The old decoder's release arrives while the new zap resolves (before its prepare); so does a late init of the
+        // old channel, which must not count.
         videoReleased("hw.avc")
+        videoInit("late.old", 77)
+        f.idle()
         videoInit("hw.avc", 31)
         audioInit("aac", 3)
         f.play()

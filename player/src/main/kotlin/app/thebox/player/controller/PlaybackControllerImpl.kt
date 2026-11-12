@@ -465,12 +465,12 @@ internal class PlaybackControllerImpl @Inject constructor(
         /** (M6, §6, §7.6 `Plan.readerOnly`) Re-prepare the ring reader only: no facts, resolve, broker or writer. */
         val reader: ReaderStart? = null,
         /**
-         * (Ladder fix 2026-11-11, docs/design/m6-timeshift.md §6 step 3) The next prepare needs a new video decoder. Only
-         * a buffered reader re-prepare reads it: it then stops the player before the re-prepare, because a
-         * `setMediaSource` without `stop()` only disables the renderers and Media3 reuses the same codec. Unbuffered
-         * sessions always stop anyway.
+         * (Ladder fix 2026-11-11, docs/design/m6-timeshift.md §6 step 3) The next prepare needs new decoders. Only a
+         * buffered reader re-prepare reads it: it then stops the player before the re-prepare, because a `setMediaSource`
+         * without `stop()` only disables the renderers and Media3 reuses the same codecs. The stop resets every renderer
+         * (video and audio). Unbuffered sessions always stop anyway.
          */
-        val freshVideoDecoder: Boolean = false,
+        val freshDecoders: Boolean = false,
     )
 
     /** (M6, §6) Where a reader session opens: a RAP's packet and that RAP's PTS mono (< 0 = resolved at first media). */
@@ -616,10 +616,12 @@ internal class PlaybackControllerImpl @Inject constructor(
         val waiting: ((NowPlaying) -> PlaybackState)? =
             if (c.firstMediaReached) ({ np -> PlaybackState.Buffering(np, BufferingCause.RECOVERING, null) }) else null
         // (Ladder fix 2026-11-11) A changed video decoder mode needs a new codec: a buffered re-prepare stops the player
-        // first. The policy holds the mode the current codec was created under (applySwitches).
-        val modeChanged = eng?.bundle?.codecPolicy?.let { it.videoMode != effectiveVideoMode(c) } ?: false
-        launchSession(c, Plan(reuseResolved = c.resolved != null, freshVideoDecoder = modeChanged), waiting)
+        // first.
+        launchSession(c, Plan(reuseResolved = c.resolved != null, freshDecoders = videoModeChanged(c)), waiting)
     }
+
+    /** The effective video decoder mode differs from the one the current codec was created under (applySwitches). */
+    private fun videoModeChanged(c: Cycle): Boolean = eng?.bundle?.codecPolicy?.let { it.videoMode != effectiveVideoMode(c) } ?: false
 
     /**
      * (M5, §2.12 item 6, §3.3.4) The external-player hand-off: the resolved address and headers of the current tune, then
@@ -728,7 +730,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             _notices.tryEmit(PlaybackNotice.LeftAppCleared)
         }
         publishLocalBuffer(force = true)
-        zapDecoders.begin()
+        zapDecoders.begin(c.cycleId)
         launchSession(c, Plan(refreshAccount = refreshAccount), waiting = null)
         c.firstTuneId = c.currentTuneId
         eventLog.add(PlaybackEventType.TUNE, c.currentTuneId, if (c.isArchive) "archive" else "live", identity?.stableKey?.value ?: "direct")
@@ -773,16 +775,17 @@ internal class PlaybackControllerImpl @Inject constructor(
         // (M6, §6 step 3) A reader-only re-prepare holds the last frame: no player.stop() between the two prepares.
         val readerOnly = plan.reader != null && c.ts != null
         endSession(stopPlayer = !readerOnly)
-        if (readerOnly && plan.freshVideoDecoder) {
-            // (Ladder fix 2026-11-11) ...unless the decision needs a new video decoder. Without stop() Media3 disables
-            // the renderers without a reset and reuses the codec (ExoPlayerImplInternal.prepareInternal and
+        if (readerOnly && plan.freshDecoders) {
+            // (Ladder fix 2026-11-11) ...unless the decision needs new decoders. Without stop() Media3 disables
+            // the renderers without a reset and reuses the codecs (ExoPlayerImplInternal.prepareInternal and
             // seekToPeriodPosition: resetRenderers = false), so the selector is never asked again. stop() →
             // stopInternal(forceResetRenderers = false) → resetInternal(resetRenderers = !foregroundMode); foreground
             // mode is never on, so every renderer is reset and MediaCodecRenderer.onReset releases the codec. Only the
             // player stops: the ring, the recorder and its connection, the cycle and the pin (in `plan.reader`, taken
             // above) are untouched, and the reader re-opens at the same RAP with playWhenReady = !paused.
-            player?.stop()
-            BoxLog.i(TAG) { "buffered re-prepare: player stopped first for a new video decoder" }
+            // Through stopExo() like every other stop; its WP-0 note ignores a stop after the zap's first prepare.
+            stopExo()
+            BoxLog.i(TAG) { "buffered re-prepare: player stopped first for new decoders" }
         }
         val id = ++lastTuneId
         c.currentTuneId = id
@@ -805,7 +808,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         val e = ensureEngine()
         val readerStart = plan.reader
         if (readerStart != null && c.ts != null) {
-            runReaderSession(e, c, id, readerStart, plan.freshVideoDecoder)
+            runReaderSession(e, c, id, readerStart, plan.freshDecoders)
             return
         }
         // (M6, §7.1, A-C1, A-N5) Storage is prepared on IO in parallel with the facts and the resolve. Setting Off: no
@@ -1266,6 +1269,13 @@ internal class PlaybackControllerImpl @Inject constructor(
 
         override fun onVideoDecoderReleased(eventTime: AnalyticsListener.EventTime, decoderName: String) =
             zapDecoders.onVideoDecoderReleased(clock.nowMs())
+
+        // (WP-0 review S1) The channel kind of the zap: MIME, height, frame rate, channel count; no name, no URL.
+        override fun onVideoInputFormatChanged(eventTime: AnalyticsListener.EventTime, format: Format, decoderReuseEvaluation: androidx.media3.exoplayer.DecoderReuseEvaluation?) =
+            zapDecoders.onVideoFormat(format.sampleMimeType, format.height, format.frameRate)
+
+        override fun onAudioInputFormatChanged(eventTime: AnalyticsListener.EventTime, format: Format, decoderReuseEvaluation: androidx.media3.exoplayer.DecoderReuseEvaluation?) =
+            zapDecoders.onAudioFormat(format.sampleMimeType, format.channelCount)
 
         override fun onLoadError(
             eventTime: AnalyticsListener.EventTime,
@@ -1734,7 +1744,7 @@ internal class PlaybackControllerImpl @Inject constructor(
                     if (!c.compatPending) BoxLog.i(TAG) { "compat raised for this cycle only (${signal.name})" }
                     extendSwitchWindow(c)
                 }
-                restart(c, d, signal, Plan(reuseResolved = c.resolved != null, freshVideoDecoder = isStuckDecoderStall(signal, error)))
+                restart(c, d, signal, Plan(reuseResolved = c.resolved != null, freshDecoders = isStuckPipelineStall(signal, error)))
             }
             LadderDecision.DisableTunnelingAndReprepare -> {
                 c.tunnelingOff = true
@@ -1752,9 +1762,9 @@ internal class PlaybackControllerImpl @Inject constructor(
                 eventLog.add(PlaybackEventType.VIDEO_FALLBACK, c.currentTuneId, "software_video", "")
                 _notices.tryEmit(PlaybackNotice.VideoDecoderSwitchedToSoftware)
                 extendSwitchWindow(c)
-                // After a player error Media3 has already released the codec (see isStuckDecoderStall); otherwise the
+                // After a player error Media3 has already released the codec (see isStuckPipelineStall); otherwise the
                 // software decoder needs a new codec, which a buffered re-prepare gets only with a stop() first.
-                restart(c, d, signal, Plan(reuseResolved = c.resolved != null, freshVideoDecoder = error == null))
+                restart(c, d, signal, Plan(reuseResolved = c.resolved != null, freshDecoders = error == null))
             }
             is LadderDecision.DisablePassthroughAndReprepare -> {
                 routeDeniedPassthrough += d.mimeType ?: "*"
@@ -1814,13 +1824,15 @@ internal class PlaybackControllerImpl @Inject constructor(
     }
 
     /**
-     * (Ladder fix 2026-11-11) A stall verdict that blames the video decoder, with no player error behind it. Every player
-     * error has already reset the renderers in Media3 (`ExoPlayerImplInternal`: renderer and runtime errors call
-     * `stopInternal(forceResetRenderers = true)`; IO errors `stopInternal(false)`, which resets too because we never turn
-     * foreground mode on), so only the watchdog's verdicts leave the stuck codec in place for a buffered re-prepare.
+     * (Ladder fix 2026-11-11) An L27 stall verdict (a stuck decoder, a frozen picture, or a position that stopped
+     * advancing: review S3), with no player error behind it. Every player error has already reset the renderers in Media3
+     * (`ExoPlayerImplInternal`: renderer and runtime errors call `stopInternal(forceResetRenderers = true)`; IO errors
+     * `stopInternal(false)`, which resets too because we never turn foreground mode on), so only the watchdog's verdicts
+     * leave the stuck codecs in place for a buffered re-prepare. With the buffer off the same repair always stops.
      */
-    private fun isStuckDecoderStall(signal: FailureSignal, error: PlaybackException?): Boolean =
-        error == null && signal is FailureSignal.Stall && (signal.kind == StallKind.DECODER_STUCK || signal.kind == StallKind.FROZEN_VIDEO)
+    private fun isStuckPipelineStall(signal: FailureSignal, error: PlaybackException?): Boolean =
+        error == null && signal is FailureSignal.Stall &&
+            (signal.kind == StallKind.DECODER_STUCK || signal.kind == StallKind.FROZEN_VIDEO || signal.kind == StallKind.POSITION_STUCK)
 
     /** Ends the session and opens a new one after the decision's delay, showing the §4.3 waiting state. */
     private fun restart(c: Cycle, d: LadderDecision, signal: FailureSignal, plan: Plan) {
@@ -2200,9 +2212,10 @@ internal class PlaybackControllerImpl @Inject constructor(
         _video.update { it.copy(decoderOverride = channelDecoderOverride(c)) }
         if (isPlaybackActive() && session != null) {
             eventLog.add(PlaybackEventType.DECISION, c.currentTuneId, "Reprepare", "decoder override")
-            // (M6, §7.6) Buffered: reader-only at the pin (launchSession converts the plan), with the player stopped first
-            // so that the chosen decoder is really created (ladder fix 2026-11-11).
-            launchSession(c, Plan(reuseResolved = c.resolved != null, freshVideoDecoder = true), waiting = { np -> _state.value.withTarget(np) })
+            // (M6, §7.6) Buffered: reader-only at the pin (launchSession converts the plan). (Ladder fix 2026-11-11) When the
+            // effective mode changes, the player is stopped first so that the chosen decoder is really created; picking
+            // the mode already in effect costs no gap (review L6).
+            launchSession(c, Plan(reuseResolved = c.resolved != null, freshDecoders = videoModeChanged(c)), waiting = { np -> _state.value.withTarget(np) })
         }
     }
 
@@ -2490,9 +2503,9 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     /**
      * §7.6 `Plan.readerOnly`: a reader session at [start]; no facts, resolve, broker or writer; codec policies applied.
-     * [freshVideoDecoder]: `launchSession` stopped the player first (ladder fix 2026-11-11), noted on the OPEN event.
+     * [freshDecoders]: `launchSession` stopped the player first (ladder fix 2026-11-11), noted on the OPEN event.
      */
-    private fun runReaderSession(e: Engine, c: Cycle, id: Long, start: ReaderStart, freshVideoDecoder: Boolean = false) {
+    private fun runReaderSession(e: Engine, c: Cycle, id: Long, start: ReaderStart, freshDecoders: Boolean = false) {
         val ts = c.ts ?: return
         val resolved = c.resolved ?: return
         applySwitches(e, c, resolved)
@@ -2523,7 +2536,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         session = s
         val p = e.bundle.player
         // No stop() since the previous prepare (endSession(stopPlayer = false)): the last frame stays (§6 step 3). The
-        // exception is [freshVideoDecoder], where launchSession stopped the player so that Media3 releases the codec.
+        // exception is [freshDecoders], where launchSession stopped the player so that Media3 releases the codec.
         p.setMediaSource(built.source, /* resetPosition = */ true)
         p.prepare()
         zapDecoders.onPrepare(clock.nowMs())
@@ -2532,7 +2545,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         e.parts.beginSession(built.telemetry, format, isLive = true, isHls = false)
         e.parts.watchdog.start { verdict -> onStall(verdict) }
         updateExpectations()
-        eventLog.add(PlaybackEventType.OPEN, id, "RING", if (freshVideoDecoder) "offset=${start.offset} fresh_video_decoder" else "offset=${start.offset}")
+        eventLog.add(PlaybackEventType.OPEN, id, "RING", if (freshDecoders) "offset=${start.offset} fresh_decoders" else "offset=${start.offset}")
         e.parts.displayMode.awaitSettled {
             if (session === s) {
                 settledSession = s
@@ -3230,7 +3243,7 @@ internal class PlaybackControllerImpl @Inject constructor(
     private fun finishZapRecord(c: Cycle, outcome: String) {
         if (c.zap.recorded) return
         c.zap.recorded = true
-        val decoders = zapDecoders.finish(if (c.firstMediaReached) c.firstMediaAtMs else null)
+        val decoders = zapDecoders.finish(c.cycleId, if (c.firstMediaReached) c.firstMediaAtMs else null)
         val record = ZapRecord(
             tuneId = c.firstTuneId,
             stableKey = c.identity?.stableKey?.value,
@@ -3248,7 +3261,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             "zap ${record.tuneId} ${record.format} resolve=${record.resolveMs} lease=${record.leaseMs} firstByte=${record.firstByteMs} " +
                 "ready=${record.readyMs} firstMedia=${record.firstFrameMs} $outcome"
         }
-        BoxLog.i(TAG) { decoders.logLine(record.tuneId) }
+        if (decoders != null) BoxLog.i(TAG) { decoders.logLine(record.tuneId) }
     }
 
     private fun remember(id: ChannelIdentity, change: (ChannelPlaybackMemory) -> ChannelPlaybackMemory) {

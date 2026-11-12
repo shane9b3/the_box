@@ -615,7 +615,7 @@ class ControllerTimeshiftTest {
         assertTrue("$what: stop before setMediaSource: $j", stop < j.lastIndexOf("setMediaSource"))
         assertTrue("$what: setMediaSource before prepare: $j", j.lastIndexOf("setMediaSource") < j.lastIndexOf("prepare"))
         assertEquals("$what: one stop: $j", 1, f.journal.count("player.stop"))
-        assertTrue("$what: the OPEN event says so", f.events.events.last { it.type == PlaybackEventType.OPEN }.detail.endsWith("fresh_video_decoder"))
+        assertTrue("$what: the OPEN event says so", f.events.events.last { it.type == PlaybackEventType.OPEN }.detail.endsWith("fresh_decoders"))
     }
 
     /** The time-shift session survives: same ring generation, no recorder restart, one connection, still saving. */
@@ -653,6 +653,23 @@ class ControllerTimeshiftTest {
 
     @Test
     fun aFrozenVideoStallStopsThePlayerBeforeTheReaderReprepareAndKeepsThePlace() = stuckDecoderStallKeepsThePlace(StallKind.FROZEN_VIDEO)
+
+    /** (Review S3) L27a on a stuck position gets fresh codecs with the buffer on, as it does with the buffer off. */
+    @Test
+    fun aPositionStuckStallStopsThePlayerBeforeTheReaderReprepareAndKeepsThePlace() = stuckDecoderStallKeepsThePlace(StallKind.POSITION_STUCK)
+
+    /** (Review L6) Picking the decoder mode already in effect re-prepares at the pin without a stop. */
+    @Test
+    fun aDecoderOverrideToTheModeInEffectDoesNotStopThePlayer() {
+        playBuffered()
+        val pinBefore = f.sources.builds.size
+        f.journal.entries.clear()
+        c.setVideoDecoderOverride(app.thebox.core.playback.VideoDecoderMode.AUTO)
+        f.idle()
+        assertEquals("re-prepared", pinBefore + 1, f.sources.builds.size)
+        assertFalse("same mode: no stop: ${f.journal}", f.journal.entries.contains("player.stop"))
+        assertFalse(f.events.events.last { it.type == PlaybackEventType.OPEN }.detail.contains("fresh"))
+    }
 
     @Test
     fun aRaisedCompatReprepareAfterADecoderStallAlsoGetsAFreshDecoder() {
@@ -740,8 +757,8 @@ class ControllerTimeshiftTest {
         for ((i, d) in decisions.withIndex()) {
             next = i
             f.journal.entries.clear()
-            // A stall that does not blame the video decoder (the plain Reprepare case) or any other stall verdict.
-            f.engine.watchdog.onStall!!(StallVerdict(if (d is LadderDecision.Reprepare) StallKind.POSITION_STUCK else StallKind.AUDIO_NOT_STARTED, "x"))
+            // A stall verdict that is not an L27 stall (DECODER_STUCK, FROZEN_VIDEO, POSITION_STUCK get fresh decoders).
+            f.engine.watchdog.onStall!!(StallVerdict(StallKind.AUDIO_NOT_STARTED, "x"))
             f.idle()
             assertTrue("$d re-prepared: ${f.journal}", f.journal.entries.contains("setMediaSource"))
             assertFalse("$d: no stop: ${f.journal}", f.journal.entries.contains("player.stop"))
@@ -768,7 +785,7 @@ class ControllerTimeshiftTest {
         val j = f.journal.entries
         assertEquals("one stop per re-prepare, as before: $j", 3, f.journal.count("player.stop"))
         assertEquals(3, f.journal.count("setMediaSource"))
-        assertTrue(f.events.events.none { it.detail.contains("fresh_video_decoder") })
+        assertTrue(f.events.events.none { it.detail.contains("fresh_decoders") })
         assertTrue(f.sources.builds.none { it.ring != null })
     }
 
