@@ -74,6 +74,27 @@ class DiagPagesTest {
         override fun resetApp(): Boolean { calls += "reset"; return false }
     }
 
+    /** (WP-0 review S2) One read-only row per zap: the zap on the label, the decoder cost on one description line. */
+    @Test
+    fun aZapRowCarriesTheZapAndItsDecoderCostOnTwoShortLines() {
+        val d = app.thebox.core.playback.diag.ZapDecoders(
+            videoDecoder = "OMX.MTK.VIDEO.DECODER.AVC", videoInitMs = 38, videoInits = 1, audioDecoder = "c2.android.aac.decoder", audioInitMs = 4,
+            audioInits = 1, prepareToFirstFrameMs = 512, videoMime = "video/avc", videoHeight = 720, videoFps = 25f, audioMime = "audio/mp4a-latm", audioChannels = 2,
+        )
+        val z = app.thebox.core.playback.ZapRecord(7, "ch1", app.thebox.core.playback.StreamFormat.TS, 120, 10, 300, 420, 650, "ok", d)
+        val row = pages.zapRow(0, z)
+        assertEquals("diag.zap.0", row.id.key)
+        assertEquals("TS · ready 420 ms · first frame 650 ms · ok", row.label)
+        assertEquals("Init: video avc 720 38 ms · audio mp4a-latm 4 ms · frame 512 ms after prepare", row.description)
+        assertTrue(row.kind is RowKind.Info && (row.kind as RowKind.Info).lines.isEmpty())
+        assertEquals(EffectTiming.NONE, row.effect)
+        assertTrue("no decoder name on the TV line", !row.description!!.contains("OMX"))
+        // No audio decoder (passthrough): a dash, never 0 ms; an old record without figures has no second line.
+        assertEquals("Init: video avc 720 38 ms · audio mp4a-latm – · frame 512 ms after prepare",
+            pages.zapRow(1, z.copy(decoders = d.copy(audioInitMs = null, audioDecoder = null))).description)
+        assertEquals(null, pages.zapRow(2, z.copy(decoders = null)).description)
+    }
+
     @Test
     fun aboutPageHasEveryRegisteredRowWithItsTimingAndVisibility() = runTest {
         val page = pages.page(SettingsRoute.Section(SectionId.ABOUT)).first()

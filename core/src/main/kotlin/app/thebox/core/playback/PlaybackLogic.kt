@@ -324,6 +324,8 @@ data class ZapRecord(
     val readyMs: Long?,
     val firstFrameMs: Long?,
     val outcome: String,
+    /** (Keep-decoders WP-0) Decoder init and release cost of this zap; null when not measured. */
+    val decoders: app.thebox.core.playback.diag.ZapDecoders? = null,
 )
 
 interface PlaybackEventLog {

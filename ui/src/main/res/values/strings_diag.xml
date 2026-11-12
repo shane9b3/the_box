@@ -92,6 +92,9 @@
     <string name="diag_security_fallback">This TV has no working Android Keystore, so logins are protected by a key stored with the app. Anyone with root access could read them.</string>
     <string name="diag_zaps">Recent channel changes</string>
     <string name="diag_zap_line">%1$s · ready %2$s · first frame %3$s · %4$s</string>
+    <!-- Keep-decoders WP-0, one zap row's second line: video kind and decoder init, audio kind and init, prepare() to the first frame. -->
+    <string name="diag_zap_decoders">Init: video %1$s · audio %2$s · frame %3$s after prepare</string>
+    <string name="diag_zaps_newest">Newest first, one row each</string>
     <string name="diag_zaps_none">No channel changes yet</string>
     <string name="diag_test">Connection test: %1$s</string>
     <string name="diag_test_desc">DNS, connection, login and speed of this provider</string>

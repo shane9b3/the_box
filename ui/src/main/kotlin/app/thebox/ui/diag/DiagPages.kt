@@ -267,9 +267,7 @@ class DiagPages @Inject constructor(
         val decoders = f.decoders.map { d ->
             context.getString(R.string.diag_decoder_line, d.mime.removePrefix("video/").uppercase(), d.name, s(if (d.hardware) R.string.diag_decoder_hw else R.string.diag_decoder_sw), d.maxResolution ?: "?")
         }.ifEmpty { listOf(s(R.string.diag_decoders_none)) }
-        val zaps = runCatching { controller.diagnostics.zaps().takeLast(ZAPS_SHOWN).reversed() }.getOrDefault(emptyList()).map { z ->
-            context.getString(R.string.diag_zap_line, z.format.name, ms(z.readyMs), ms(z.firstFrameMs), z.outcome)
-        }.ifEmpty { listOf(s(R.string.diag_zaps_none)) }
+        val zaps = runCatching { controller.diagnostics.zaps().takeLast(ZAPS_SHOWN).reversed() }.getOrDefault(emptyList())
         val rows = ArrayList<SettingsRow>(16 + playlists.size)
         rows += info("diag.device", R.string.diag_device, device)
         rows += info("diag.sound", R.string.diag_sound, sound)
@@ -277,7 +275,10 @@ class DiagPages @Inject constructor(
         rows += info("diag.decoders", R.string.diag_decoders, decoders)
         rows += info("diag.ffmpeg", R.string.diag_ffmpeg, listOf(s(if (f.ffmpegAudio) R.string.diag_ffmpeg_yes else R.string.diag_ffmpeg_no)))
         rows += SettingsRow(RowId("diag.security"), s(R.string.diag_security), kind = RowKind.Info(listOf(s(if (f.keystoreBacked) R.string.diag_security_keystore else R.string.diag_security_fallback)), if (f.keystoreBacked) Tone.GOOD else Tone.WARN), effect = EffectTiming.NONE)
-        rows += info("diag.zaps", R.string.diag_zaps, zaps)
+        rows += info("diag.zaps", R.string.diag_zaps, listOf(s(if (zaps.isEmpty()) R.string.diag_zaps_none else R.string.diag_zaps_newest)))
+        // (WP-0 review S2) One read-only row per zap, newest first: the zap on the label line, its decoder cost on the
+        // description line, each short enough for one line (a joined Info row was clipped to the newest zap).
+        zaps.forEachIndexed { i, z -> rows += zapRow(i, z) }
         for (p in playlists) {
             rows += SettingsRow(RowId("diag.test.${p.id}"), context.getString(R.string.diag_test, p.name), value = p.displayHost, description = s(R.string.diag_test_desc),
                 kind = RowKind.Link(SettingsRoute.NetworkTest(p.id)), effect = EffectTiming.NONE)
@@ -287,6 +288,18 @@ class DiagPages @Inject constructor(
         if (context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0) rows += info("diag.debug", R.string.diag_debug, listOf("thebox-debug://guide, thebox-debug://play"))
         return rows
     }
+
+    fun zapRow(index: Int, z: app.thebox.core.playback.ZapRecord): SettingsRow = SettingsRow(
+        RowId("diag.zap.$index"), context.getString(R.string.diag_zap_line, z.format.name, ms(z.readyMs), ms(z.firstFrameMs), z.outcome),
+        description = z.decoders?.let { d ->
+            // (Keep-decoders WP-0) MIME and height, no frame rate or decoder name: those are in the log export.
+            context.getString(R.string.diag_zap_decoders, part(d.videoKind(withFps = false), d.videoInitMs), part(d.audioKind(withChannels = false), d.audioInitMs), ms(d.prepareToFirstFrameMs))
+        },
+        kind = RowKind.Info(emptyList()), effect = EffectTiming.NONE,
+    )
+
+    /** `avc 720 38 ms`, `avc 720 -`, or the time alone. */
+    private fun part(kind: String?, initMs: Long?): String = if (kind == null) ms(initMs) else "$kind ${ms(initMs)}"
 
     private fun info(id: String, label: Int, lines: List<String>) = SettingsRow(RowId(id), s(label), kind = RowKind.Info(lines), effect = EffectTiming.NONE)
 
