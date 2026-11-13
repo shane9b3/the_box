@@ -511,17 +511,25 @@ alternative is **0.50**:
      toward the rows), the border and the drop shadow (left-right symmetric, one bake for both sides) follow.
   3. **Columns** open away from the rows on both sides: their contents are anchored to the inner edge and revealed by
      a clip of the open width, so on the right they slide out leftwards; the SOG contents' 5.4-px slide also mirrors.
-  4. **The bar** spans the box as on the left. Its two stripes are anchored to the bar's right end (20.7 / 37.8 from
-     it) and slide in from that end; they keep their "/" lean, matching the italic words. Its words read left to right,
-     right-aligned 63 from the right end (their slide-in mirrors). The hairline is full width.
-  5. **The goal takeover:** the lead and panel wipes run from the right (the screen edge) and the streaks sweep right
-     to left, leaning the other way (the wipes' clips are reflected and the streaks, plain gradient bands, are drawn
-     under a horizontal reflection about the top part's centre). The badge, GOAL and the tally are not mirrored.
-  6. Implementation: one `StackedDrawArgs.mirrored` flag. The painter's origin stays the rows' left edge; the box is
+  4. **Slanted bands: one rule (fix pass 2026-11-13, review S2).** The bar's two stripes and the goal's two streaks
+     keep their "/" lean on both sides, matching the italic bar words and the italic GOAL. Only their **position** and
+     **direction of travel** mirror: each band's extent on its own centre line is reflected within the box
+     (x' = box right − (x − box left) − band width), so it moves the other way.
+     - **The bar** spans the box as on the left. Its stripes are anchored to the bar's right end (20.7 / 37.8 from it)
+       and slide in from that end. Its words read left to right, right-aligned 63 from the right end (their slide-in
+       mirrors). The hairline is full width.
+     - **The goal takeover:** the lead and panel wipes start at the right (the screen edge; their clips are reflected
+       about the top part's centre) and the streaks sweep right to left. The badge, GOAL and the tally are not
+       mirrored: they keep their left-to-right places, so in a right corner the badge sits on the box's inner side.
+  5. Implementation: one `StackedDrawArgs.mirrored` flag. The painter's origin stays the rows' left edge; the box is
      `[rowsW − w, rowsW]`, every box is re-anchored (x' = box right − (x − box left) − w), text and logos are
-     re-anchored, never drawn under a canvas `scale(−1, 1)`; only the takeover's text-free streaks are. No allocation in
-     draw, no new layers or clips on any ancestor of the video surface. The runner takes the origin from the layer's own
-     px, so layout's whole-px rounding of the node never moves the rows between the 333- and 391.5-wide boxes.
+     re-anchored. Nothing is drawn under a canvas reflection. No allocation in draw, no new layers or clips on any
+     ancestor of the video surface.
+  6. **Pixel grid (fix pass 2026-11-13, review L1).** The runner places the painter's origin from the layer's own px
+     (`stackedOriginDx`): the rows' outer (right) edge is snapped to the whole pixel `round((M + footprint width) · d)`
+     in the layer, as a left corner's outer edge is a whole pixel, and it is the same pixel at every box width, so
+     layout's whole-px rounding of the node never moves the rows between the 333-, 391.5- and 301.5-wide boxes
+     (`StackedOriginTest` at 720p, 1080p and 4K). Left corners keep an origin of exactly 0.
 
   The earlier default (rows at the footprint's left edge in every corner, so a right-corner box floated 59 px in at
   even strength and 90.5 px in a break; owner Q7, confirmed 2026-11-11) is **superseded**. The still-rejected

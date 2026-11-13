@@ -152,8 +152,8 @@ class StackedBoundsTest {
 
     /**
      * (Owner request 2026-11-13) In the right corners the drawn box ends at the right margin (1920 − 96) at even strength
-     * and on a power play, at both sizes; and the rows, found in the pixels of the real draw (the row background's
-     * extent), are the same rectangle in both states, hugging that margin.
+     * on a power play and in a break, at both sizes; and the rows, found in the pixels of the real draw (the row
+     * background's extent), are the same rectangle in all three states, hugging that margin.
      */
     @Test
     fun theMirroredBoxEndsAtTheRightMarginAndTheRowsNeverMove() {
@@ -165,10 +165,12 @@ class StackedBoundsTest {
             placement = StackedRunFixtures.input(corner, size)
             val foot = ScoreBugPlacement.cornerBox(corner, size, League.NHL, NhlBugStyle.STACKED)
             val rows = ArrayList<Rect>()
-            for (v in listOf(StackedRunFixtures.view(), StackedRunFixtures.view(pp = StackedRunFixtures.pp()))) {
+            // Even strength (333), the power play (391.5) and the break (301.5, fix pass review L5).
+            val views = listOf(StackedRunFixtures.view(), StackedRunFixtures.view(pp = StackedRunFixtures.pp()), StackedRunFixtures.intermission())
+            for ((i, v) in views.withIndex()) {
                 repo.bug.value = v
                 settle()
-                val msg = "$corner/$size pp=${v.powerPlay != null}"
+                val msg = "$corner/$size ${listOf("even", "power play", "break")[i]}"
                 val tag = bounds(SCORE_BUG_TAG)
                 assertEquals("$msg: the box's right edge is the margin", margin, tag.right, 1.01f)
                 val a = probe.args!!()
@@ -191,8 +193,9 @@ class StackedBoundsTest {
                 assertTrue("$msg: the rows were drawn", l <= r)
                 rows += Rect(layer.left + l, layer.top + t, layer.left + r + 1, layer.top + b + 1)
             }
-            println("mirrored rows $corner/$size: even ${rows[0]}, power play ${rows[1]}")
+            println("mirrored rows $corner/$size: even ${rows[0]}, power play ${rows[1]}, break ${rows[2]}")
             assertEquals("$corner/$size: the rows do not move on the power play", rows[0], rows[1])
+            assertEquals("$corner/$size: the rows do not move in a break", rows[0], rows[2])
             // The row background stops at the stripe (3.6 wide at even strength, 6.3 on the PP side) and the rounded
             // corner, so its last pixel is a few px in from the margin; its first is the rows' left edge.
             assertEquals("$corner/$size: the rows' left edge", margin - K.STACKED_ROWS_W * k, rows[0].left, 1.01f)

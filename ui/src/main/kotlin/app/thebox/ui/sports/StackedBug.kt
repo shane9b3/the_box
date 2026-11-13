@@ -447,12 +447,9 @@ internal fun StackedBug(
     // The painter's origin is the rows' left edge: the drawn box's left edge. Mirrored, the rows sit at the footprint's
     // right edge, the open columns' width into the node; the node's offset is rounded to whole px by layout (as
     // `Dp.roundToPx`), so the origin is taken from the layer's own px instead, and the rows never move by that rounding
-    // (a 391.5-wide power-play box would otherwise shift them half a px against the 333-wide one).
-    val originDx = if (mirrored) {
-        (margin + footW - K.STACKED_ROWS_W * k) * d - ((margin + tagX) * d).roundToInt()
-    } else {
-        0f
-    }
+    // (a 391.5-wide power-play box would otherwise shift them half a px against the 333-wide one), and their outer edge
+    // is snapped to a whole px (review L1).
+    val originDx = stackedOriginDx(mirrored, margin, footW, K.STACKED_ROWS_W * k, tagX, d)
 
     val args = remember { StackedDrawArgs() }
     val merge = remember { BodyMerge() }
@@ -538,6 +535,17 @@ internal fun StackedBug(
 
 /** Bumps [s] without reading it: a bump in composition must not subscribe the composition to the draw's epoch. */
 private fun bump(s: androidx.compose.runtime.MutableIntState) = Snapshot.withoutReadObservation { s.intValue += 1 }
+
+/**
+ * (Owner request 2026-11-13; fix pass, review L1) The painter's x origin (the rows' left edge) inside the drawn-box node,
+ * device px. Unmirrored: 0, as it always was. Mirrored: the node sits at `round((margin + tagX) · d)` in the layer (layout
+ * rounds its offset as `Dp.roundToPx`), and the rows' **outer** (right) edge is snapped to the whole pixel
+ * `round((margin + footW) · d)` in the layer, as a left corner's outer edge is a whole pixel; so the rows never move
+ * between box widths ([tagX]) and their stripe and border are not split across two pixels at 720p. [rowsW] and [footW]
+ * are design px with the size factor in; [d] is device px per design px.
+ */
+internal fun stackedOriginDx(mirrored: Boolean, margin: Float, footW: Float, rowsW: Float, tagX: Float, d: Float): Float =
+    if (mirrored) ((margin + footW) * d).roundToInt() - rowsW * d - ((margin + tagX) * d).roundToInt() else 0f
 
 /** The top part's width at rest, Standard design px: the rows plus each open column (§4.2: 333 / 391.5 / 301.5). */
 private fun restBoxW(sogOpen: Boolean, clockOpen: Boolean): Float =

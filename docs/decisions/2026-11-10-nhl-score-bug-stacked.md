@@ -33,6 +33,7 @@ Each is built with the default shown; the owner screenshots decide.
 7. **Right-hand corners.** The team rows never move; the box's right edge moves as the columns open and fold, and at even
    strength the box sits a little in from the screen edge. *Confirmed by the owner, 2026-11-11.* **Superseded by the
    owner's request of 2026-11-13** (below): the right corners are mirrored.
+8. **Large size.** Offered for Stacked as for the current bug (25 % bigger). *Confirmed by the owner, 2026-11-11.*
 
 ## Right-hand corners mirrored (owner request 2026-11-13)
 "In the stacked nhl scorebug when it is on the right side of the screen can we mirror the layout so it sits closer to
@@ -47,11 +48,15 @@ mirror the layout it will work and look better on the right, the left layout loo
   right-aligned. Edge features mirror: the team stripes are on the right edge, the bar's two stripes sit at its right
   end (keeping their "/" lean to match the italic words), the columns and their contents slide out leftwards.
 - The goal animation's wipes start at the screen edge and its streak sweeps right to left; the badge, GOAL and the
-  score lines are not mirrored.
-- The left corners are pixel-identical to before (all 306 existing Stacked screenshots byte-identical).
+  score lines are not mirrored. Lead ruling (fix pass 2026-11-13, review S2): the streaks keep their "/" lean on both
+  sides, the same rule as the bar stripes, so they never cross the italic GOAL the other way.
+- The rows' outer edge sits on a whole pixel at 720p, 1080p and 4K (fix pass, review L1).
+- The left corners are pixel-identical to before (all 306 existing Stacked screenshots byte-identical, checked again
+  after the fix pass).
+- Open (review L2, accepted): changing corner flips the layout at the start of the 300-ms slide rather than at its end,
+  as the bar's up/down already does; it shows only in place mode or on a settings change.
 - Design: `docs/design/m6-score-bug-stacked-theme.md` §4.3. Code: `ScoreBugPlacement.stackedMirrored`,
-  `StackedDrawArgs.mirrored`.
-8. **Large size.** Offered for Stacked as for the current bug (25 % bigger). *Confirmed by the owner, 2026-11-11.*
+  `StackedDrawArgs.mirrored`. Review: `docs/review/2026-11-13-stacked-mirror-review.md`.
 
 ## Lead rulings from the design sign-off (2026-11-10)
 - The name, the Pill default and the two places for the setting; hockey only; the Style row's gating (followed league,

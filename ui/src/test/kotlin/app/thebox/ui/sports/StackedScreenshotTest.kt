@@ -1078,6 +1078,161 @@ class StackedScreenshotTest {
         assertTrue(File(out, "stacked-mirror-sheet-std.png").length() > 10_000)
     }
 
+    // ------------------------------------------------------------------ fix pass 2026-11-13 (review S2, L5): directions
+
+    /** The x extent of the pixels on row [y] of [bmp] for which [hit] holds, as (first, last + 1); null when none. */
+    private fun rowExtent(bmp: Bitmap, y: Int, x0: Int, x1: Int, hit: (Int) -> Boolean): Pair<Float, Float>? {
+        var l = Int.MAX_VALUE
+        var r = Int.MIN_VALUE
+        for (x in x0 until x1) if (hit(bmp.getPixel(x, y))) { l = minOf(l, x); r = maxOf(r, x) }
+        return if (l == Int.MAX_VALUE) null else l.toFloat() to (r + 1).toFloat()
+    }
+
+    /** The takeover alone ([StackedGoalPainter.drawTakeover]) for [g] over a transparent [boxW]-wide top part. */
+    private fun takeoverOnly(large: Boolean, g: GoalFrame, mirrored: Boolean, boxW: Float = 391.5f): Bitmap {
+        val r = rig(large)
+        r.goal.begin(Side.AWAY, StackedFixtures.EDM.goal, null, "EDM", "TOR", 3, 1, boxW)
+        val bmp = Bitmap.createBitmap(Math.ceil((boxW * r.s).toDouble()).toInt(), Math.ceil((K.STACKED_H * r.s).toDouble()).toInt(), Bitmap.Config.ARGB_8888)
+        r.goal.extent(0f, K.STACKED_H * r.s)
+        r.goal.drawTakeover(Canvas(bmp), g, mirrored)
+        return bmp
+    }
+
+    /** [StackedFixtures.goalFrame] at [t] with only the wipes and streaks left on (no flash, badge, GOAL or tally). */
+    private fun wipesAndStreaks(t: Float): GoalFrame = StackedFixtures.goalFrame(t, still = false).apply {
+        flashAlpha = 0f; badgeAlpha = 0f; tallyAlpha = 0f; letterAlpha.fill(0f)
+    }
+
+    /**
+     * (Review L5) The lead wipe starts at the screen-edge side and travels inwards: on the left from the box's left edge
+     * rightwards, mirrored from its right edge leftwards; the panel wipe after it likewise.
+     */
+    @Test
+    fun theWipesStartAtTheScreenEdgeOnBothSides() {
+        val accent = StackedFixtures.EDM.goal.accent or (0xFF shl 24)
+        val base = StackedFixtures.EDM.goal.base or (0xFF shl 24)
+        for (large in listOf(false, true)) {
+            val r = rig(large)
+            val w = 391.5f * r.s
+            val y = (K.STACKED_H * r.s / 2f).toInt()
+            // The lead wipes in over 0–216 ms, the panel over 108–396 ms (each drawn alone here).
+            for ((what, colour, times) in listOf(Triple("lead", accent, listOf(60f, 140f)), Triple("panel", base, listOf(200f, 300f)))) {
+                val ext = HashMap<Pair<Boolean, Float>, Pair<Float, Float>>()
+                for (mirrored in listOf(false, true)) for (t in times) {
+                    val g = wipesAndStreaks(t).apply {
+                        streak1On = false; streak2On = false
+                        if (what == "panel") { leadFrom = 0f; leadTo = 0f } else { panelFrom = 0f; panelTo = 0f }
+                    }
+                    val bmp = takeoverOnly(large, g, mirrored)
+                    val e = rowExtent(bmp, y, 0, bmp.width) { near(colour, it, 6) && Color.alpha(it) > 250 }
+                    assertTrue("$what ${sz(large)} mirrored=$mirrored at $t: drawn (g ${g.leadFrom}..${g.leadTo} / ${g.panelFrom}..${g.panelTo})", e != null)
+                    ext[mirrored to t] = e!!
+                    println("wipe $what ${sz(large)} mirrored=$mirrored t=$t: ${e.first}..${e.second} of $w")
+                }
+                val (t0, t1) = times
+                // Left: anchored at x 0, its leading (right) edge moves right and is not yet at the far end.
+                assertTrue("$what left starts at the left edge", ext.getValue(false to t0).first <= 1f)
+                assertTrue("$what left leads rightwards", ext.getValue(false to t1).second > ext.getValue(false to t0).second + 2f)
+                assertTrue("$what left has not reached the inner end", ext.getValue(false to t0).second < w - 10f)
+                // Mirrored: anchored at the right edge, its leading (left) edge moves left.
+                assertTrue("$what mirrored starts at the right edge", ext.getValue(true to t0).second >= w - 1f)
+                assertTrue("$what mirrored leads leftwards", ext.getValue(true to t1).first < ext.getValue(true to t0).first - 2f)
+                assertTrue("$what mirrored has not reached the inner end", ext.getValue(true to t0).first > 10f)
+                // And it is the reflection.
+                for (t in times) {
+                    assertEquals("$what at $t reflected (left)", w - ext.getValue(false to t).second, ext.getValue(true to t).first, 1f)
+                }
+            }
+        }
+    }
+
+    /**
+     * (Review S2, L5) The streak sweeps away from the screen edge on both sides (left to right on the left, right to left
+     * mirrored), its centre-line extent is the reflection of the left one, and it leans "/" on both sides (its top further
+     * right than its bottom), like the bar stripes and the italic GOAL.
+     */
+    @Test
+    fun theStreakSweepsAwayFromTheScreenEdgeAndLeansTheSameWay() {
+        val base = StackedFixtures.EDM.goal.base or (0xFF shl 24)
+        for (large in listOf(false, true)) {
+            val r = rig(large)
+            val w = 391.5f * r.s
+            val h = K.STACKED_H * r.s
+            val mid = (h / 2f).toInt()
+            val top = (10f * r.s).toInt()
+            val bottom = (h - 10f * r.s).toInt()
+            val margin = (4f * r.s).toInt()
+            fun band(bmp: Bitmap, y: Int) = rowExtent(bmp, y, margin, bmp.width - margin) { !near(base, it, 20) && Color.alpha(it) > 250 }
+            val centres = HashMap<Pair<Boolean, Float>, Float>()
+            for (mirrored in listOf(false, true)) for (t in listOf(600f, 800f)) {
+                val g = wipesAndStreaks(t).apply { streak2On = false }
+                assertTrue("streak 1 on at $t", g.streak1On && g.panelTo >= 1f && g.panelFrom <= 0f)
+                val bmp = takeoverOnly(large, g, mirrored)
+                val m = band(bmp, mid)
+                val a = band(bmp, top)
+                val b = band(bmp, bottom)
+                val msg = "${sz(large)} mirrored=$mirrored t=$t"
+                assertTrue("$msg: the band is drawn ($m, $a, $b)", m != null && a != null && b != null)
+                val cm = (m!!.first + m.second) / 2f
+                val ca = (a!!.first + a.second) / 2f
+                val cb = (b!!.first + b.second) / 2f
+                println("streak $msg: centre top %.1f, middle %.1f, bottom %.1f".format(ca, cm, cb))
+                assertTrue("$msg: leans \"/\" (top $ca right of bottom $cb)", ca > cb + 10f * r.s)
+                centres[mirrored to t] = cm
+                if (mirrored) {
+                    assertEquals("$msg: the centre line is the reflection", w - centres.getValue(false to t), cm, 1.5f)
+                }
+            }
+            assertTrue("${sz(large)}: left sweeps rightwards", centres.getValue(false to 800f) > centres.getValue(false to 600f) + 10f)
+            assertTrue("${sz(large)}: mirrored sweeps leftwards", centres.getValue(true to 800f) < centres.getValue(true to 600f) - 10f)
+        }
+    }
+
+    /**
+     * (Review L5) Mid-transition column contents and the bar's slide-in move the mirrored way: the SOG contents slide
+     * toward the rows on both sides (left on the left, right mirrored), and the bar's stripes and words slide in from the
+     * bar's outer end (from the left on the left, from the right mirrored), by the same amounts.
+     */
+    @Test
+    fun theMirroredSlidesRunTheOtherWay() {
+        for (large in listOf(false, true)) {
+            val r = rig(large)
+            val s = r.s
+            val rowH = K.STACKED_H / 2f * s
+            val barCy = (K.STACKED_H + K.STACKED_BAR_H / 2f) * s
+            val rest = StackedFixtures.rest(sog = true, clock = true, bar = true, stripeAway = true)
+            val moved = StackedFrame().apply {
+                copyFrom(rest); sogDx = -2.7f; sogAlpha = 1f; stripeAX = -10f; stripeBX = -10f; barTextDx = -5.4f
+            }
+            val pp = looks.first { it.name == "pp-edm" }
+            // Dark-grey bar stripes, so they never read as the white words on any channel.
+            val pair = StackedPair(probePair.away.copy(barA = 0xFF202020.toInt(), barB = 0xFF404040.toInt()), probePair.home)
+            val bar = bar(r, pp.bar, null, false, pair)!!
+            fun shot(f: StackedFrame, mirrored: Boolean) =
+                render(Look("slide", pp.body, f, pp.bar), large, DARK, shadow = false, pair = pair, mirrored = mirrored).let { Shot(it.bmp, it.ox + it.bl, it.oy) }
+            val w = rest.boxW * s
+            val rowsW = K.STACKED_ROWS_W * s
+            val sogW = K.STACKED_SOG_W * s
+            for (mirrored in listOf(false, true)) {
+                val a = shot(rest, mirrored)
+                val b = shot(moved, mirrored)
+                val msg = "${sz(large)} mirrored=$mirrored"
+                val sx0 = if (mirrored) w - rowsW - sogW + 2f else rowsW + 2f
+                fun sog(x: Shot) = inkBox(x, sx0, 2f, sx0 + sogW - 4f, rowH - 10f * s, K.STACKED_COL_BG, Color.WHITE)!!.centerX()
+                val sogShift = sog(b) - sog(a)
+                assertEquals("$msg: the SOG contents slide toward the rows", (if (mirrored) 2.7f else -2.7f) * s, sogShift, 1f)
+                // Inside the box only (the dark gradient outside it can come near the grey stripe).
+                fun stripe(x: Shot) = extent(x, bar.stripeA, barCy, barCy + 0.001f, tol = 12, x0 = 2f, x1 = w - 2f)!!.let { (it.first + it.second) / 2f }
+                assertEquals("$msg: bar stripe A slides in from the outer end", (if (mirrored) 10f else -10f) * s, stripe(b) - stripe(a), 1f)
+                fun words(x: Shot) = inkBox(x, 3f * s, barCy - 9f * s, w - 3f * s, barCy + 9f * s, bar.bg, Color.WHITE, channel = 8)!!
+                val wa = words(a)
+                val wb = words(b)
+                val shift = if (mirrored) wb.right - wa.right else wb.left - wa.left
+                assertEquals("$msg: the bar words slide in from the outer end", (if (mirrored) 5.4f else -5.4f) * s, shift, 1.5f)
+            }
+        }
+    }
+
     private companion object {
         const val DARK = 0x01010101
         const val GREY = 0xFF808080.toInt()
