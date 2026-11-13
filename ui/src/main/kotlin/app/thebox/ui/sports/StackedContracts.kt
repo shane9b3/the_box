@@ -77,6 +77,11 @@ internal class BarContent {
     var stripeB: Int = 0
     /** (Review U N3) The label's advance (device px, the words before a power play's time), set by [StackedPainter.fillBar]. */
     var labelAdvance: Float = 0f
+    /**
+     * (Owner request 2026-11-13) The whole words' advance (device px: the label, and a power play's gap and time), set by
+     * [StackedPainter.fillBar]; a mirrored bar right-aligns its words by it.
+     */
+    var wordsAdvance: Float = 0f
 
     /** Copies everything from [o] (no allocation). */
     fun copyFrom(o: BarContent) {
@@ -91,6 +96,7 @@ internal class BarContent {
         stripeA = o.stripeA
         stripeB = o.stripeB
         labelAdvance = o.labelAdvance
+        wordsAdvance = o.wordsAdvance
     }
 
     companion object {
@@ -106,7 +112,8 @@ internal class BarContent {
  * preallocated holder per draw (no allocation), as `NflDrawArgs` does for the NFL. A probe can read it without drawing.
  *
  * **Coordinates.** [StackedPainter.drawFrame] draws in device px with the origin at the top-left of the box's **top
- * part** (the rows' left edge, the top of the away row). The top part is `f.boxW` × `STACKED_H` design px; the bar is
+ * part** (the rows' left edge, the top of the away row); when [mirrored], at the rows' left edge, which is then
+ * `f.boxW − STACKED_ROWS_W` (× scale) right of the top part's left edge. The top part is `f.boxW` × `STACKED_H` design px; the bar is
  * drawn below it (y from `STACKED_H`) or, when [up], above it (y from −`f.barH` to 0); the drop shadow and the glow reach
  * outside both. The runner's bounded layer (footprint + 2 M) contains all of it.
  *
@@ -122,6 +129,9 @@ internal class BarContent {
  *   the exact-box glow masks and whether the glow may draw; [g] null or `g.done` = no takeover.
  * - [still]: the still version ("Reduce animations"): the row tint reads `STACKED_STILL_ROW_TINT`, not the C7 peak.
  * - [t]: the takeover driver this draw read (0 with none); for probes only.
+ * - [mirrored]: (owner request 2026-11-13) a right-hand corner (`ScoreBugPlacement.stackedMirrored`): the layout is
+ *   mirrored about the rows. The origin stays the rows' left edge; the rows hug the screen edge on their right, and the
+ *   SOG and clock columns open to their left (negative x). Text and logos are never mirrored, only re-anchored.
  */
 internal class StackedDrawArgs {
     var body: StackedFrameState? = null
@@ -140,4 +150,5 @@ internal class StackedDrawArgs {
     var glowOn = false
     var still = false
     var t = 0f
+    var mirrored = false
 }

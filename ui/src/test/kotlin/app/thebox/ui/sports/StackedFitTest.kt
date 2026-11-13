@@ -149,7 +149,59 @@ class StackedFitTest {
         assertEquals("EDM POWER PLAY", p.barText(bare))
     }
 
+    /**
+     * (Owner request 2026-11-13) Mirrored (a right-hand corner), the bar's words are right-aligned 63 from the bar's right
+     * end: every team bar in the narrowest power-play box (333) and every neutral bar in the break box (301.5) keeps its
+     * ink (the italic's overhang included) clear of the box's left border and of stripe B's lean on its right (stripe B
+     * spans 37.8..49.5 from the right end on the centre line; leaning "/", its left edge reaches ≈ 59 at the bar's bottom).
+     */
+    @Test
+    fun everyBarStringFitsItsMirroredSlot() {
+        val periods = listOf(PeriodLabel(PeriodKind.REG, 1), PeriodLabel(PeriodKind.OT, 2), PeriodLabel(PeriodKind.OT, 5))
+        var least = Float.MAX_VALUE
+        var leastAt = ""
+        for (large in sizes) {
+            val p = painter(large)
+            val s = scale(large)
+            val team = (K.STACKED_ROWS_W + K.STACKED_CLOCK_W) * s
+            val brk = (K.STACKED_ROWS_W + K.STACKED_SOG_W) * s
+            val cases = ArrayList<Pair<BarContent, Float>>()
+            for (abbrev in teams) for (side in Side.entries) {
+                val away = if (side == Side.AWAY) abbrev else "TOR"
+                val home = if (side == Side.HOME) abbrev else "TOR"
+                cases += bar(p, BarKind.POWER_PLAY, side, 19 * 60 + 59, null, away, home) to team
+                cases += bar(p, BarKind.POWER_PLAY, side, BarContent.NO_SECS, null, away, home) to team
+                cases += bar(p, BarKind.TWO_MAN, side, 19 * 60 + 59, null, away, home) to team
+                cases += bar(p, BarKind.PP_GOAL, side, BarContent.NO_SECS, null, away, home) to team
+            }
+            for (pl in periods) cases += bar(p, BarKind.INTERMISSION, null, BarContent.NO_SECS, pl, "EDM", "TOR") to brk
+            for (k in listOf(BarKind.SHOOTOUT, BarKind.NO_UPDATE, BarKind.DELAYED)) cases += bar(p, k, null, BarContent.NO_SECS, null, "EDM", "TOR") to brk
+            cases += bar(p, BarKind.FINAL, null, BarContent.NO_SECS, PeriodLabel(PeriodKind.SO, 1), "EDM", "TOR") to brk
+            for ((c, w) in cases) {
+                val ink = p.barTextInkMirrored(c, w)
+                val text = "\"${p.barText(c)}\" ${sz(large)} mirrored in $w"
+                assertTrue("$text starts at ${ink.left}", ink.left >= K.STACKED_HAIRLINE_W * s)
+                assertTrue("$text ends at ${ink.right}, stripe B at ${w - 59f * s}", ink.right <= w - 59f * s)
+                // Right-aligned: its right ink is the anchor (63 from the end) give or take the last glyph's bearing.
+                assertEquals("$text right edge", w - 63f * s, ink.right, 3f * s)
+                if (ink.left < least) { least = ink.left; leastAt = text }
+            }
+        }
+        println("mirrored bars: least left slack %.1f px (%s)".format(least, leastAt))
+    }
+
     // ------------------------------------------------------------------ the rows and the SOG column
+
+    /** (Owner request 2026-11-13) A mirrored row keeps the same block, so every code-to-score gap is the same. */
+    @Test
+    fun aMirroredRowKeepsEveryCodeToScoreGap() {
+        for (large in sizes) {
+            val p = painter(large)
+            for (score in 0..19) for (abbrev in teams) {
+                assertEquals("$abbrev / $score ${sz(large)}", p.rowGap(abbrev, score.toString()), p.rowGap(abbrev, score.toString(), mirrored = true), 1e-3f)
+            }
+        }
+    }
 
     @Test
     fun everyCodeClearsEveryScoreAndTwoDigitScoresStayInTheirSlot() {

@@ -186,11 +186,21 @@ object ScoreBugPlacement {
     fun stackedBarUp(footprint: Box): Boolean = footprint.t + (footprint.b - footprint.t) / 2f > SCREEN_H / 2f
 
     /**
+     * (Stacked §4.3, owner request 2026-11-13) Whether the Stacked box is drawn **mirrored**: the placed [footprint] is in
+     * the right half of the screen (a right-hand corner; subtitles and a lifted bug keep their side). Mirrored, the rows
+     * hug the footprint's right edge and the SOG and clock columns open and fold on the rows' left. The `up` rule's twin
+     * ([stackedBarUp]), so the bug is mirrored exactly where it is placed.
+     */
+    fun stackedMirrored(footprint: Box): Boolean = footprint.l + (footprint.r - footprint.l) / 2f > SCREEN_W / 2f
+
+    /**
      * (Stacked §4.3; WP-1 addition) The drawn box's **top part** (the two rows and the open columns, without the bar) in
      * design px, inside the placed [footprint] at [size], for a top part [boxW] Standard design px wide
      * (`StackedFrame.boxW`; 333 in play, 391.5 with the SOG column, 301.5 in a break).
-     * - **The rows never move:** the left edge is the footprint's left edge in every corner; the box grows and shrinks on
-     *   its right (S4, owner Q7 default).
+     * - **The rows never move.** Left corners: the box's left edge (the rows' outer edge) is the footprint's left edge
+     *   and the box grows and shrinks on its right (S4). Right corners ([stackedMirrored], owner request 2026-11-13): the
+     *   layout is mirrored, so the box's right edge (the rows' outer edge) is the footprint's right edge, at the
+     *   screen-edge inset in every state, and the box grows and shrinks on its left.
      * - Vertically: at the footprint's top with the bar below it, or, when [stackedBarUp], at the footprint's bottom
      *   with the bar above it (the bar's `STACKED_BAR_H` × scale is the rest of the footprint's height).
      *
@@ -202,8 +212,15 @@ object ScoreBugPlacement {
         val w = boxW * k
         val h = SportsConstants.STACKED_H * k
         val t = if (stackedBarUp(footprint)) footprint.b - h else footprint.t
-        return Box(footprint.l, t, footprint.l + w, t + h)
+        return if (stackedMirrored(footprint)) Box(footprint.r - w, t, footprint.r, t + h) else Box(footprint.l, t, footprint.l + w, t + h)
     }
+
+    /**
+     * (Stacked §4.3, owner request 2026-11-13) The two team rows' box inside the placed [footprint] at [size] (design px):
+     * `STACKED_ROWS_W` × `STACKED_H` (× scale), at the footprint's left edge, or its right edge when [stackedMirrored],
+     * at the top part's height. The same in every state: the rows never move.
+     */
+    fun stackedRowsBox(footprint: Box, size: ScoreBugSize): Box = stackedTopBox(footprint, size, SportsConstants.STACKED_ROWS_W)
 
     private fun above(box: Box, barTop: Float): Box {
         val bottom = barTop - SportsConstants.SCORE_BAR_GAP

@@ -47,8 +47,9 @@ The mock-up's sizes are "mock px". §4 maps them to design px.
 5. **Size: the mock-up × 0.45** (`STACKED_SCALE`). The information text (bar text, takeover tally) is raised to **20 px**
    (S5).
    - The footprint is 392 × 141 Standard and 490 × 176 Large.
-   - **The team rows never move** (S4, pending owner): the SOG and clock columns open and fold to the rows' right in
-     every corner, as in the mock (§4.3).
+   - **The team rows never move** (S4): in the left corners the SOG and clock columns open and fold to the rows'
+     right, as in the mock; **in the right corners the layout is mirrored** (owner request 2026-11-13): the rows hug
+     the right margin and the columns open and fold to their left (§4.3).
 6. **Shots on goal are already in the feed** (`awayTeam.sog` / `homeTeam.sog`, in both endpoints). The app drops them
    today. `NhlMapper.team()` reads one more field. The fake panel already sends `sog`; it gains script keys and a shootout
    fix (§3).
@@ -485,30 +486,56 @@ alternative is **0.50**:
 - Standard **392 × 141**, Large **490 × 176**, from `width/height(size, NHL, STACKED)`.
 - It sits at the corner exactly as today: right corners at `1920 − 96 − w`, bottom corners at `1080 − 56 − h`.
 
-**Inside the footprint, the box's left edge (the rows) is anchored at the footprint's left edge in every corner.** The
-SOG and clock columns open and fold on the rows' right, so the rows never move: the mock's behaviour.
-- **Left corners:** the box's right edge moves, just as in the mock.
-- **Right corners:** the box's **right edge floats**:
+**Inside the footprint the rows never move, and they hug the footprint's outer edge.**
+- **Left corners:** the box's left edge (the rows) is the footprint's left edge; the SOG and clock columns open and
+  fold on the rows' right, so the box's right edge moves, just as in the mock. Unchanged (pixel-identical to the
+  2026-11-11 build).
+- **Right corners: mirrored (owner request 2026-11-13, superseding the earlier default below).** "When it is on the
+  right side of the screen can we mirror the layout so it sits closer to the edge of the screen like it does on the
+  left." `ScoreBugPlacement.stackedMirrored(footprint)` (the footprint's centre in the right half, the twin of
+  `stackedBarUp`) turns it on. The box's right edge (the rows) is the footprint's right edge, `1920 − 96`, in every
+  state; the columns open and fold on the rows' **left**, so the box's left edge moves:
 
-  | State | Box width | Right edge (top right, Standard) | Gap to the 96-px inset |
+  | State | Box width | Left edge (top right, Standard) | Right edge |
   |---|---|---|---|
-  | Play | 333 | 1765 | 59 |
-  | Power play, PP carried into INT | 391.5 | 1823.5 | 0 |
-  | Intermission, shootout, final | 301.5 | 1733.5 | 90.5 |
+  | Play | 333 | 1491 | 1824 |
+  | Power play, PP carried into INT | 391.5 | 1432.5 | 1824 |
+  | Intermission, shootout, final | 301.5 | 1522.5 | 1824 |
 
-  The bug is therefore not flush with the right inset at even strength. That is the price of still rows. The rejected
-  alternative (right edge flush, rows sliding sideways by up to 90 px on every power play and break) is recorded in
-  §12 Q7.
+  What mirrors and what does not:
+  1. **Column order** is the mirror, `[clock][SOG][rows]`: the column next to the rows is the SOG column on both sides.
+  2. **Rows:** the reading order is kept (logo, code, score left to right; nothing is drawn mirrored). The outer-edge
+     features mirror: the team stripe is on the rows' right edge, the rounded corners and the row block are anchored
+     to it (the contents are one left-to-right block before the stripe, so on a power play the wider stripe moves the
+     score 2.7 px, where on the left it moves the logo and code). Dividers, inset lines (on each column's inner edge,
+     toward the rows), the border and the drop shadow (left-right symmetric, one bake for both sides) follow.
+  3. **Columns** open away from the rows on both sides: their contents are anchored to the inner edge and revealed by
+     a clip of the open width, so on the right they slide out leftwards; the SOG contents' 5.4-px slide also mirrors.
+  4. **The bar** spans the box as on the left. Its two stripes are anchored to the bar's right end (20.7 / 37.8 from
+     it) and slide in from that end; they keep their "/" lean, matching the italic words. Its words read left to right,
+     right-aligned 63 from the right end (their slide-in mirrors). The hairline is full width.
+  5. **The goal takeover:** the lead and panel wipes run from the right (the screen edge) and the streaks sweep right
+     to left, leaning the other way (the wipes' clips are reflected and the streaks, plain gradient bands, are drawn
+     under a horizontal reflection about the top part's centre). The badge, GOAL and the tally are not mirrored.
+  6. Implementation: one `StackedDrawArgs.mirrored` flag. The painter's origin stays the rows' left edge; the box is
+     `[rowsW − w, rowsW]`, every box is re-anchored (x' = box right − (x − box left) − w), text and logos are
+     re-anchored, never drawn under a canvas `scale(−1, 1)`; only the takeover's text-free streaks are. No allocation in
+     draw, no new layers or clips on any ancestor of the video surface. The runner takes the origin from the layer's own
+     px, so layout's whole-px rounding of the node never moves the rows between the 333- and 391.5-wide boxes.
+
+  The earlier default (rows at the footprint's left edge in every corner, so a right-corner box floated 59 px in at
+  even strength and 90.5 px in a break; owner Q7, confirmed 2026-11-11) is **superseded**. The still-rejected
+  alternative remains: rows sliding sideways on every power play and break.
 - **Vertical:**
   - top corners: the box top is at the footprint top, and the bar drops below it;
   - bottom corners: the box bottom is at the footprint bottom, and the bar opens **above** it (ruling 16's mirror).
 
-| Corner | Footprint (Standard) | Rows' left edge | Box top / bar |
+| Corner | Footprint (Standard) | Rows (outer edge) | Box top / bar |
 |---|---|---|---|
-| Top right (default) | (1432, 56)–(1824, 197) | 1432 | top 56; bar below (164–197) |
-| Top left | (96, 56)–(488, 197) | 96 | top 56; bar below |
-| Bottom right | (1432, 883)–(1824, 1024) | 1432 | bottom 1024; bar above (883–916) |
-| Bottom left | (96, 883)–(488, 1024) | 96 | bottom 1024; bar above |
+| Top right (default) | (1432, 56)–(1824, 197) | right edge 1824, rows 1581–1824 (mirrored) | top 56; bar below (164–197) |
+| Top left | (96, 56)–(488, 197) | left edge 96, rows 96–339 | top 56; bar below |
+| Bottom right | (1432, 883)–(1824, 1024) | right edge 1824, rows 1581–1824 (mirrored) | bottom 1024; bar above (883–916) |
+| Bottom left | (96, 883)–(488, 1024) | left edge 96, rows 96–339 | bottom 1024; bar above |
 
 **Placement rules.**
 - Every existing rule runs unchanged on the footprint: hiding (overlay intersections, toast, reminder, passive bar),
@@ -962,7 +989,7 @@ override. Follow CGY @ EDM and set Score bug style → Stacked from the sheet. T
 - the same in play (the PP bar closes; "No update" in the clock column).
 
 **Repeat:**
-- at each corner: rows still in the right corners, the bar above at the bottom;
+- at each corner: rows still (and, in the right corners, mirrored against the right margin), the bar above at the bottom;
 - at Large;
 - with Delay 30 s;
 - with subtitles on in a bottom corner.
@@ -1054,7 +1081,9 @@ answer. The screenshots come from `StackedStatesScreenshotTest` and the hand pas
    its right side as the shots and clock columns open and close. In a right-hand corner that means the box's right edge
    moves in and out (by up to about 90 px), and at even strength the box sits a little in from the screen edge. The
    alternative keeps the right edge fixed against the screen edge, but then the logos and scores slide sideways each
-   time a power play or break starts. *Default: rows stay still, as in your mock-up.*
+   time a power play or break starts. *Default: rows stay still, as in your mock-up.* **Superseded 2026-11-13:** the
+   owner asked for the right corners to be mirrored; the rows stay still against the right margin and the columns open
+   to their left (§4.3).
 8. **Large size.** Score bug size "Large" makes the Stacked box 25 % bigger: about a quarter of the screen width and a
    sixth of its height. *Default: offered as for the current bug.* We will check it over real games; the alternative
    is to keep Stacked at the standard size only.

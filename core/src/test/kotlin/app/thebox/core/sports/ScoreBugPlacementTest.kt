@@ -439,24 +439,29 @@ class ScoreBugPlacementTest {
         val pp = play + SportsConstants.STACKED_SOG_W
         val brk = SportsConstants.STACKED_ROWS_W + SportsConstants.STACKED_SOG_W
         assertEquals(333f, play); assertEquals(391.5f, pp); assertEquals(301.5f, brk)
-        // §4.3's table, top right Standard: right edges 1765 / 1823.5 / 1733.5 (gaps 59 / 0 / 90.5).
+        // (Owner request 2026-11-13: the right corners are mirrored; the earlier floating right edge, 1765 / 1823.5 /
+        // 1733.5, is superseded.) Top right Standard: the right edge at the 96-px inset (1824) in every state; the box's
+        // left edge moves instead: 1491 / 1432.5 / 1522.5.
         val tr = assertNotNull(ScoreBugPlacement.place(stacked(ScoreCorner.TOP_RIGHT), geo))
-        assertEquals(Box(1432f, 56f, 1765f, 164f), ScoreBugPlacement.stackedTopBox(tr, ScoreBugSize.STANDARD, play))
-        assertEquals(1823.5f, ScoreBugPlacement.stackedTopBox(tr, ScoreBugSize.STANDARD, pp).r)
-        assertEquals(1733.5f, ScoreBugPlacement.stackedTopBox(tr, ScoreBugSize.STANDARD, brk).r)
+        assertTrue(ScoreBugPlacement.stackedMirrored(tr))
+        assertEquals(Box(1491f, 56f, 1824f, 164f), ScoreBugPlacement.stackedTopBox(tr, ScoreBugSize.STANDARD, play))
+        assertEquals(1432.5f, ScoreBugPlacement.stackedTopBox(tr, ScoreBugSize.STANDARD, pp).l)
+        assertEquals(1522.5f, ScoreBugPlacement.stackedTopBox(tr, ScoreBugSize.STANDARD, brk).l)
         assertFalse(ScoreBugPlacement.stackedBarUp(tr), "top corner: the bar drops below (164..197)")
         // Bottom right: the box bottom at 1024, the bar above (883..916).
         val br = assertNotNull(ScoreBugPlacement.place(stacked(ScoreCorner.BOTTOM_RIGHT), geo))
         assertTrue(ScoreBugPlacement.stackedBarUp(br))
-        assertEquals(Box(1432f, 916f, 1765f, 1024f), ScoreBugPlacement.stackedTopBox(br, ScoreBugSize.STANDARD, play))
+        assertEquals(Box(1491f, 916f, 1824f, 1024f), ScoreBugPlacement.stackedTopBox(br, ScoreBugSize.STANDARD, play))
         for (c in corners) for (s in sizes) for (w in listOf(play, pp, brk)) {
             val fp = assertNotNull(ScoreBugPlacement.place(stacked(c, s), geo))
             val k = if (s == ScoreBugSize.LARGE) 1.25f else 1f
             val top = ScoreBugPlacement.stackedTopBox(fp, s, w)
-            assertEquals(fp.l, top.l, "$c $s $w: rows never move")
+            val right = c == ScoreCorner.TOP_RIGHT || c == ScoreCorner.BOTTOM_RIGHT
+            assertEquals(right, ScoreBugPlacement.stackedMirrored(fp), "$c $s: mirrored exactly in the right corners")
+            if (right) assertEquals(fp.r, top.r, "$c $s $w: rows never move (mirrored)") else assertEquals(fp.l, top.l, "$c $s $w: rows never move")
             assertEquals(w * k, top.r - top.l, 1e-3f)
             assertEquals(108f * k, top.b - top.t, 1e-3f)
-            assertTrue(top.r <= fp.r, "$c $s $w: inside the footprint")
+            assertTrue(top.r <= fp.r && top.l >= fp.l, "$c $s $w: inside the footprint")
             // The top part plus the open bar fills the footprint's height exactly.
             val barH = SportsConstants.STACKED_BAR_H * k
             if (bottom(c)) {
@@ -471,5 +476,39 @@ class ScoreBugPlacementTest {
         val lifted = assertNotNull(ScoreBugPlacement.place(stacked(ScoreCorner.BOTTOM_LEFT).copy(bar = BottomBar.USER_BAR), geo))
         assertTrue(ScoreBugPlacement.stackedBarUp(lifted))
         assertEquals(804f, ScoreBugPlacement.stackedTopBox(lifted, ScoreBugSize.STANDARD, play).b)
+    }
+
+    /**
+     * (Owner request 2026-11-13) In the right corners the visible box ends at the right margin (1920 − 96) at even strength
+     * and on a power play, at both sizes, exactly as a left-corner box starts at the left margin; the rows' rectangle is
+     * the same in both states (the rows never move), and it is the mirror of the left corner's within the screen.
+     */
+    @Test
+    fun theMirroredBoxEndsAtTheRightMarginAndItsRowsNeverMove() {
+        val play = SportsConstants.STACKED_ROWS_W + SportsConstants.STACKED_CLOCK_W
+        val pp = play + SportsConstants.STACKED_SOG_W
+        val brk = SportsConstants.STACKED_ROWS_W + SportsConstants.STACKED_SOG_W
+        for (s in sizes) for (c in listOf(ScoreCorner.TOP_RIGHT, ScoreCorner.BOTTOM_RIGHT)) {
+            val k = if (s == ScoreBugSize.LARGE) 1.25f else 1f
+            val fp = assertNotNull(ScoreBugPlacement.place(stacked(c, s), geo))
+            val margin = 1920f - SportsConstants.SCORE_INSET_X
+            val even = ScoreBugPlacement.stackedTopBox(fp, s, play)
+            val power = ScoreBugPlacement.stackedTopBox(fp, s, pp)
+            assertEquals(margin, even.r, "$c $s: even strength ends at the margin")
+            assertEquals(margin, power.r, "$c $s: a power play ends at the margin")
+            assertEquals(margin, ScoreBugPlacement.stackedTopBox(fp, s, brk).r, "$c $s: a break ends at the margin")
+            val rows = ScoreBugPlacement.stackedRowsBox(fp, s)
+            assertEquals(Box(margin - 243f * k, even.t, margin, even.b), rows, "$c $s: the rows hug the margin")
+            assertEquals(Box(power.r - 243f * k, power.t, power.r, power.b), rows, "$c $s: the rows do not move on the power play")
+            // The mirror of the left corner on the same row of the screen.
+            val lc = if (c == ScoreCorner.TOP_RIGHT) ScoreCorner.TOP_LEFT else ScoreCorner.BOTTOM_LEFT
+            val lfp = assertNotNull(ScoreBugPlacement.place(stacked(lc, s), geo))
+            for (w in listOf(play, pp, brk)) {
+                val l = ScoreBugPlacement.stackedTopBox(lfp, s, w)
+                val r = ScoreBugPlacement.stackedTopBox(fp, s, w)
+                assertEquals(Box(1920f - l.r, l.t, 1920f - l.l, l.b), r, "$c $s $w: the reflection of $lc")
+            }
+            assertFalse(ScoreBugPlacement.stackedMirrored(lfp))
+        }
     }
 }

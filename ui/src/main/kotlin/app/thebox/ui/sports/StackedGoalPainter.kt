@@ -347,18 +347,36 @@ internal class StackedGoalPainter(
         if (hi > 0) { glowPaint.alpha = hi; c.drawBitmap(glow.peak, x - glow.peakMargin, y - glow.peakMargin, glowPaint) }
     }
 
-    /** The lead, the panel and its contents for [g], over the top part (origin = its top-left, device px). */
-    fun drawTakeover(c: Canvas, g: GoalFrame) {
+    /**
+     * The lead, the panel and its contents for [g], over the top part (origin = its top-left, device px).
+     *
+     * (Owner request 2026-11-13) [mirrored] (a right-hand corner): the wipes run from the right (the screen edge) and the
+     * streaks sweep right to left, leaning the other way: the wipes' clips are reflected about the top part's centre and
+     * the streaks (plain gradient bands, no text) are drawn under a horizontal reflection about it. The badge, GOAL and
+     * the tally are not mirrored: they keep their places and read left to right.
+     */
+    fun drawTakeover(c: Canvas, g: GoalFrame, mirrored: Boolean = false) {
         if (colours == null || boxW <= 0f) return
         box.right = boxW
         if (g.leadTo > g.leadFrom) {
-            c.withClip(g.leadFrom * boxW, 0f, g.leadTo * boxW, h) { drawRoundRect(box, radius, radius, leadPaint) }
+            val l = if (mirrored) (1f - g.leadTo) * boxW else g.leadFrom * boxW
+            val r = if (mirrored) (1f - g.leadFrom) * boxW else g.leadTo * boxW
+            c.withClip(l, 0f, r, h) { drawRoundRect(box, radius, radius, leadPaint) }
         }
         if (g.panelTo <= g.panelFrom) return
-        c.withClip(g.panelFrom * boxW, 0f, g.panelTo * boxW, h) {
+        val pl = if (mirrored) (1f - g.panelTo) * boxW else g.panelFrom * boxW
+        val pr = if (mirrored) (1f - g.panelFrom) * boxW else g.panelTo * boxW
+        c.withClip(pl, 0f, pr, h) {
             drawRoundRect(box, radius, radius, panelPaint)
-            if (g.streak1On) streak(this, g.streak1X * s, streak1Paint)
-            if (g.streak2On) streak(this, g.streak2X * s, streak2Paint)
+            if (mirrored) {
+                withScale(-1f, 1f, boxW / 2f, 0f) {
+                    if (g.streak1On) streak(this, g.streak1X * s, streak1Paint)
+                    if (g.streak2On) streak(this, g.streak2X * s, streak2Paint)
+                }
+            } else {
+                if (g.streak1On) streak(this, g.streak1X * s, streak1Paint)
+                if (g.streak2On) streak(this, g.streak2X * s, streak2Paint)
+            }
             val fa = alpha255(g.flashAlpha)
             if (fa > 0) { flashPaint.alpha = fa; drawRoundRect(box, radius, radius, flashPaint) }
             drawBadge(this, g)

@@ -106,8 +106,10 @@ class StackedPainterAllocationTest {
                 colours = pair; bar = cur; barPrev = prev; logos = held; logoWaited = true
                 shadow = p.bakeShadow(); goal = r.goal; glow = masks; glowOn = true
             }
-            for (up in listOf(false, true)) {
+            // (Owner request 2026-11-13) And mirrored, as a right-hand corner draws it.
+            for (up in listOf(false, true)) for (mirrored in listOf(false, true)) {
                 a.up = up
+                a.mirrored = mirrored
                 val plain = allocated {
                     for (i in frames.indices) { a.body = bodies[i % 2]; a.f = frames[i]; a.g = null; p.drawFrame(r.canvas, a) }
                 }
@@ -117,7 +119,7 @@ class StackedPainterAllocationTest {
                 val still = allocated {
                     for (i in frames.indices) { a.body = bodies[0]; a.f = frames[i]; a.g = stills[i]; a.still = true; p.drawFrame(r.canvas, a) }
                 }
-                println("StackedPainter.drawFrame × 300 ${if (large) "Large" else "Standard"} up=$up: plain $plain B, takeover $takeover B, still $still B")
+                println("StackedPainter.drawFrame × 300 ${if (large) "Large" else "Standard"} up=$up mirrored=$mirrored: plain $plain B, takeover $takeover B, still $still B")
                 assertTrue("plain: allocated $plain B", plain < LIMIT)
                 assertTrue("takeover: allocated $takeover B", takeover < LIMIT)
                 assertTrue("still: allocated $still B", still < LIMIT)
@@ -132,15 +134,17 @@ class StackedPainterAllocationTest {
         r.goal.begin(Side.HOME, StackedFixtures.TOR.goal, badge, "EDM", "TOR", 2, 2, 391.5f)
         val glow = r.goal.bakeGlow(391.5f, 141f)!!
         val frames = Array(300) { StackedFixtures.goalFrame(it * 16f, still = false, GoalFrame()) }
-        val bytes = allocated {
-            for (g in frames) {
-                r.goal.extent(0f, 141f)
-                r.goal.drawGlow(r.canvas, g, glow, 0f, 0f)
-                r.goal.drawTakeover(r.canvas, g)
+        for (mirrored in listOf(false, true)) {
+            val bytes = allocated {
+                for (g in frames) {
+                    r.goal.extent(0f, 141f)
+                    r.goal.drawGlow(r.canvas, g, glow, 0f, 0f)
+                    r.goal.drawTakeover(r.canvas, g, mirrored)
+                }
             }
+            println("StackedGoalPainter.drawGlow + drawTakeover × 300 mirrored=$mirrored: $bytes B")
+            assertTrue("mirrored=$mirrored: allocated $bytes B", bytes < LIMIT)
         }
-        println("StackedGoalPainter.drawGlow + drawTakeover × 300: $bytes B")
-        assertTrue("allocated $bytes B", bytes < LIMIT)
     }
 
     @Test

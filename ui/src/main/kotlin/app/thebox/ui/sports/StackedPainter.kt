@@ -94,6 +94,7 @@ internal class StackedPainter(
     private val barH = K.STACKED_BAR_H * s
     private val barStripeAL = M.BAR_STRIPE_A_L * K.STACKED_SCALE * s
     private val barStripeBL = M.BAR_STRIPE_B_L * K.STACKED_SCALE * s
+    private val barStripeW = M.BAR_STRIPE_W * K.STACKED_SCALE * s
     private val barOverhang = M.BAR_STRIPE_OVERHANG * K.STACKED_SCALE * s
     private val barTextL = M.BAR_TEXT_PL * K.STACKED_SCALE * s
     private val barTextGap = M.BAR_TEXT_GAP * K.STACKED_SCALE * s
@@ -192,7 +193,7 @@ internal class StackedPainter(
 
         val sh = barH + 2 * barOverhang
         val k = tan(Math.toRadians(-K.STACKED_BAR_SKEW_DEG.toDouble())).toFloat() * sh / 2f
-        val w = M.BAR_STRIPE_W * K.STACKED_SCALE * s
+        val w = barStripeW
         stripePath.moveTo(k, 0f)
         stripePath.lineTo(k + w, 0f)
         stripePath.lineTo(w - k, sh)
@@ -348,6 +349,8 @@ internal class StackedPainter(
         // (Review U N3) The label's advance, measured once here rather than on every frame.
         val split = timeSplit(c)
         c.labelAdvance = barPaint.measureText(c.chars, 0, if (split < 0) c.len else split)
+        c.wordsAdvance = c.labelAdvance +
+            if (split < 0) 0f else barTextGap + barTimePaint.measureText(c.chars, split + 1, c.len - split - 1)
         if (isTeamKind(c.kind) && team != null) {
             c.bg = team.barBg
             c.stripeA = team.barA
@@ -389,31 +392,34 @@ internal class StackedPainter(
         val bh = if (f.barClosed) 0f else f.barH * s
         val top = if (a.up) -bh else 0f
         val bottom = if (a.up) h else h + bh
-        box.set(0f, top, w, bottom)
+        // (Owner request 2026-11-13) Mirrored, the rows stay at [0, rowsW] and the columns open to their left.
+        val mirrored = a.mirrored
+        val l = if (mirrored) rowsW - w else 0f
+        box.set(l, top, l + w, bottom)
 
         val goal = a.goal
         val g = a.g
         val takeover = goal != null && g != null && !g.done && goal.colours != null
 
         // 1. The glow, around the whole box (the bar included), from the exact-box masks.
-        if (takeover && a.glowOn) a.glow?.let { goal!!.drawGlow(c, g!!, it, 0f, top) }
-        // 2. The drop shadow, stretched to the box as it is now.
-        a.shadow?.draw(c, 0f, top, w, bottom, shadowPaint)
+        if (takeover && a.glowOn) a.glow?.let { goal!!.drawGlow(c, g!!, it, l, top) }
+        // 2. The drop shadow, stretched to the box as it is now (left-right symmetric, so one bake serves both sides).
+        a.shadow?.draw(c, l, top, l + w, bottom, shadowPaint)
         // 3. The box fill: the columns' `#15191F` (and the bar's corners under its own fill).
         fill.color = K.STACKED_COL_BG
         c.drawRoundRect(box, radius, radius, fill)
         // 4. The bar.
-        if (bh > 0f) drawBar(c, a, f, bh, w)
+        if (bh > 0f) drawBar(c, a, f, bh, l, l + w)
         // 5. The rows.
         drawRows(c, a, body, f, pair, if (takeover) goal else null, if (takeover) g else null)
         // 6. The SOG column.
-        if (f.sogWidth > 0f) drawSog(c, body, f)
+        if (f.sogWidth > 0f) drawSog(c, body, f, mirrored)
         // 7. The clock column.
-        if (f.clockWidth > 0f) drawClockColumn(c, body, f)
-        // 8. The takeover over the top part.
+        if (f.clockWidth > 0f) drawClockColumn(c, body, f, mirrored)
+        // 8. The takeover over the top part (its own coordinates start at the top part's left edge).
         if (takeover) {
             goal!!.extent(top, bottom)
-            goal.drawTakeover(c, g!!)
+            if (mirrored) c.withTranslation(l, 0f) { goal.drawTakeover(this, g!!, true) } else goal.drawTakeover(c, g!!)
         }
         // 9. The border, 1 px `#2B3550`, inside the box's edge.
         stroke.strokeWidth = line
@@ -432,8 +438,12 @@ internal class StackedPainter(
         }
     }
 
-    /** The bar: background (lerped through a change), the two stripes, the words, the hairline, under its clip. */
-    private fun drawBar(c: Canvas, a: StackedDrawArgs, f: StackedFrame, bh: Float, w: Float) {
+    /**
+     * The bar ([l]..[r], device px): background (lerped through a change), the two stripes, the words, the hairline, under
+     * its clip. Mirrored, the stripes and the words are anchored to the bar's right end (the rows' outer edge) and move
+     * the other way; the stripes keep their "/" lean and the words read left to right, right-aligned.
+     */
+    private fun drawBar(c: Canvas, a: StackedDrawArgs, f: StackedFrame, bh: Float, l: Float, r: Float) {
         val cur = a.bar ?: return
         val prev = a.barPrev
         val words = if (!f.barSwapped && prev != null) prev else cur
@@ -442,19 +452,23 @@ internal class StackedPainter(
         val regionBottom = regionTop + bh
         // Contents are anchored to the bar's outer edge: bottom-anchored below the box, top-anchored above it.
         val contentTop = if (a.up) regionTop else regionBottom - barH
-        c.withClip(0f, regionTop, w, regionBottom) {
+        val m = a.mirrored
+        c.withClip(l, regionTop, r, regionBottom) {
             fill.color = bg or OPAQUE
             drawRoundRect(box, radius, radius, fill)
             val stripeTop = contentTop - barOverhang
             fill.color = words.stripeA or OPAQUE
-            withTranslation(barStripeAL + f.stripeAX * s, stripeTop) { drawPath(stripePath, fill) }
+            val ax = if (m) r - barStripeAL - barStripeW - f.stripeAX * s else barStripeAL + f.stripeAX * s
+            withTranslation(ax, stripeTop) { drawPath(stripePath, fill) }
             fill.color = words.stripeB or OPAQUE
-            withTranslation(barStripeBL + f.stripeBX * s, stripeTop) { drawPath(stripePath, fill) }
+            val bx = if (m) r - barStripeBL - barStripeW - f.stripeBX * s else barStripeBL + f.stripeBX * s
+            withTranslation(bx, stripeTop) { drawPath(stripePath, fill) }
             val alpha = f.barTextAlpha * (if (words.dim) K.STACKED_DIM_ALPHA else 1f)
-            if (alpha > 0f && words.len > 0) drawBarWords(this, words, contentTop + barH / 2f + barOffset, barTextL + f.barTextDx * s, alpha)
+            val tx = if (m) r - barTextL - f.barTextDx * s - words.wordsAdvance else barTextL + f.barTextDx * s
+            if (alpha > 0f && words.len > 0) drawBarWords(this, words, contentTop + barH / 2f + barOffset, tx, alpha)
             // The hairline on the bar's inner edge (S2: every bar).
             fill.color = argb(K.STACKED_BAR_HAIRLINE_ALPHA, 0xFFFFFF)
-            if (a.up) drawRect(0f, regionBottom - line, w, regionBottom, fill) else drawRect(0f, regionTop, w, regionTop + line, fill)
+            if (a.up) drawRect(l, regionBottom - line, r, regionBottom, fill) else drawRect(l, regionTop, r, regionTop + line, fill)
         }
     }
 
@@ -512,10 +526,20 @@ internal class StackedPainter(
         }
         val awayStripe = lerp(stripeW, ppStripeW, f.stripeAway)
         val homeStripe = lerp(stripeW, ppStripeW, f.stripeHome)
+        // The stripes are on the rows' outer edge: the left, or the right when mirrored.
+        val m = a.mirrored
         fill.color = pair.away.stripe or OPAQUE
-        c.withClip(0f, 0f, awayStripe, rowH) { drawRoundRect(box, radius, radius, fill) }
+        if (m) {
+            c.withClip(rowsW - awayStripe, 0f, rowsW, rowH) { drawRoundRect(box, radius, radius, fill) }
+        } else {
+            c.withClip(0f, 0f, awayStripe, rowH) { drawRoundRect(box, radius, radius, fill) }
+        }
         fill.color = pair.home.stripe or OPAQUE
-        c.withClip(0f, rowH, homeStripe, h) { drawRoundRect(box, radius, radius, fill) }
+        if (m) {
+            c.withClip(rowsW - homeStripe, rowH, rowsW, h) { drawRoundRect(box, radius, radius, fill) }
+        } else {
+            c.withClip(0f, rowH, homeStripe, h) { drawRoundRect(box, radius, radius, fill) }
+        }
         // The divider under the away row (its border-bottom, across the stripe too).
         fill.color = argb(K.STACKED_BAR_HAIRLINE_ALPHA, 0xFFFFFF)
         c.drawRect(0f, rowH - line, rowsW, rowH, fill)
@@ -527,15 +551,21 @@ internal class StackedPainter(
         row(c, rowH * 1.5f, homeStripe, body.homeAbbrev, a.logos?.home, a, body.homeScore, popSide == Side.HOME, popScale, popColour)
     }
 
-    /** One row's logo, code and score, centred on [cy]; the logo and code start after the stripe ([stripe] wide). */
+    /**
+     * One row's logo, code and score, centred on [cy]. The contents are one left-to-right block beside the stripe
+     * ([stripe] wide): after it (the logo and code move with it, the score keeps its place) or, mirrored, before it (the
+     * reading order kept; the score moves with the stripe, the logo keeps its place).
+     */
     private fun row(
         c: Canvas, cy: Float, stripe: Float, abbrev: String, slot: FollowLogos.Slot?, a: StackedDrawArgs,
         score: String, pop: Boolean, popScale: Float, popColour: Int,
     ) {
-        val logoCx = stripe + logoMl + logoSlotW / 2f
+        val start = if (a.mirrored) 0f else stripe
+        val scoreRight = if (a.mirrored) this.scoreRight - stripe else this.scoreRight
+        val logoCx = start + logoMl + logoSlotW / 2f
         logo(c, logoCx, cy, abbrev, slot, a.logos != null, a.logoWaited)
         codePaint.color = white
-        c.drawText(abbrev, stripe + logoMl + logoSlotW + codePl, cy + codeOffset, codePaint)
+        c.drawText(abbrev, start + logoMl + logoSlotW + codePl, cy + codeOffset, codePaint)
         if (!pop) {
             scorePaint.color = white
             c.drawText(score, scoreRight, cy + scoreOffset, scorePaint)
@@ -566,14 +596,21 @@ internal class StackedPainter(
         }
     }
 
-    private fun drawSog(c: Canvas, body: StackedFrameState, f: StackedFrame) {
-        val x0 = rowsW
-        c.withClip(x0, 0f, x0 + f.sogWidth * sogW, h) {
+    /**
+     * The SOG column beside the rows: its contents are anchored to the rows' edge (the inset line there) and revealed by a
+     * clip of the open width, so it opens away from the rows: rightwards, or leftwards when [mirrored].
+     */
+    private fun drawSog(c: Canvas, body: StackedFrameState, f: StackedFrame, mirrored: Boolean) {
+        val open = f.sogWidth * sogW
+        val cl = if (mirrored) -open else rowsW
+        c.withClip(cl, 0f, cl + open, h) {
             val alpha = f.sogAlpha
             if (alpha <= 0f) return@withClip
-            val x = x0 + f.sogDx * s
+            // The contents' left edge. Mirrored, the column's right edge is the rows' left edge (0), and sogDx moves the
+            // contents the other way (toward the rows on both sides).
+            val x = if (mirrored) -sogW - f.sogDx * s else rowsW + f.sogDx * s
             fill.color = argb(alpha, K.STACKED_INSET_LINE)
-            drawRect(x, 0f, x + line, h, fill)
+            if (mirrored) drawRect(x + sogW - line, 0f, x + sogW, h, fill) else drawRect(x, 0f, x + line, h, fill)
             val cx = x + sogW / 2f
             sogPaint.color = argb(alpha, 0xFFFFFF)
             if (body.awaySog.isNotEmpty()) drawText(body.awaySog, cx, rowH / 2f + sogOffset, sogPaint)
@@ -583,15 +620,23 @@ internal class StackedPainter(
         }
     }
 
-    private fun drawClockColumn(c: Canvas, body: StackedFrameState, f: StackedFrame) {
-        val x0 = rowsW + f.sogWidth * sogW
-        c.withClip(x0, 0f, x0 + f.clockWidth * clockW, h) {
+    /**
+     * The clock column after the SOG column's open width: its contents are anchored to its inner edge (the inset line)
+     * and revealed by a clip of the open width, rightwards, or leftwards when [mirrored].
+     */
+    private fun drawClockColumn(c: Canvas, body: StackedFrameState, f: StackedFrame, mirrored: Boolean) {
+        val open = f.clockWidth * clockW
+        val sog = f.sogWidth * sogW
+        // [x0]: the contents' left edge (a full clockW wide); [cl]: the clip's left edge.
+        val x0 = if (mirrored) -sog - clockW else rowsW + sog
+        val cl = if (mirrored) -sog - open else x0
+        c.withClip(cl, 0f, cl + open, h) {
             val alpha = f.clockAlpha * (if (body.columnDim) K.STACKED_DIM_ALPHA else 1f)
             if (alpha <= 0f) return@withClip
             // (Review U N1) The inset line is the column's edge, not its content: it fades with the column but is not
             // dimmed with a stale or delayed column's words.
             fill.color = argb(f.clockAlpha, K.STACKED_INSET_LINE)
-            drawRect(x0, 0f, x0 + line, h, fill)
+            if (mirrored) drawRect(x0 + clockW - line, 0f, x0 + clockW, h, fill) else drawRect(x0, 0f, x0 + line, h, fill)
             val cx = x0 + clockW / 2f
             if (body.periodText.isNotEmpty()) {
                 periodPaint.textSize = body.periodPx * s
@@ -660,19 +705,42 @@ internal class StackedPainter(
         return right + overhang
     }
 
+    /**
+     * (Owner request 2026-11-13) The mirrored bar's words' ink (glyph outlines, the italic's overhang included) as
+     * [drawFrame] places them at rest in a bar whose right end is [r] (device px), x only: `RectF.left` / `right`.
+     */
+    internal fun barTextInkMirrored(b: BarContent, r: Float): RectF {
+        val split = timeSplit(b)
+        val labelEnd = if (split < 0) b.len else split
+        val x = r - barTextL - b.wordsAdvance
+        val out = RectF()
+        val path = Path()
+        barPaint.getTextPath(b.chars, 0, labelEnd, x, 0f, path)
+        path.computeBounds(out, true)
+        if (split >= 0) {
+            val t = RectF()
+            path.reset()
+            barTimePaint.getTextPath(b.chars, split + 1, b.len - split - 1, x + b.labelAdvance + barTextGap, 0f, path)
+            path.computeBounds(t, true)
+            out.union(t)
+        }
+        return out
+    }
+
     /** The bar's words as [fillBar] resolved them. */
     internal fun barText(b: BarContent): String = String(b.chars, 0, b.len)
 
     /**
      * Free device px between the end of the code's ink and the start of the score's ink in one row (the stripe at its
-     * power-play width, the widest case); negative = they overlap.
+     * power-play width, the widest case); negative = they overlap. [mirrored]: as a mirrored row places them (the block
+     * before the stripe: the code from the rows' left edge, the score a stripe's width further in).
      */
-    internal fun rowGap(abbrev: String, score: String): Float {
+    internal fun rowGap(abbrev: String, score: String, mirrored: Boolean = false): Float {
         val r = Rect()
         codePaint.getTextBounds(abbrev, 0, abbrev.length, r)
-        val codeRight = ppStripeW + logoMl + logoSlotW + codePl + r.right
+        val codeRight = (if (mirrored) 0f else ppStripeW) + logoMl + logoSlotW + codePl + r.right
         scorePaint.getTextBounds(score, 0, score.length, r)
-        val scoreLeft = scoreRight - scorePaint.measureText(score) + r.left
+        val scoreLeft = (if (mirrored) scoreRight - ppStripeW else scoreRight) - scorePaint.measureText(score) + r.left
         return scoreLeft - codeRight
     }
 

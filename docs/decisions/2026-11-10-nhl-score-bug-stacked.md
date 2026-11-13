@@ -31,7 +31,26 @@ Each is built with the default shown; the owner screenshots decide.
 6. **Shootout.** Treated like a break: the clock column folds, shots stay open, the bar says "SHOOTOUT", then changes to
    "FINAL/SO"; the winning shootout goal plays the goal animation. *Confirmed by the owner, 2026-11-11.*
 7. **Right-hand corners.** The team rows never move; the box's right edge moves as the columns open and fold, and at even
-   strength the box sits a little in from the screen edge. *Confirmed by the owner, 2026-11-11.*
+   strength the box sits a little in from the screen edge. *Confirmed by the owner, 2026-11-11.* **Superseded by the
+   owner's request of 2026-11-13** (below): the right corners are mirrored.
+
+## Right-hand corners mirrored (owner request 2026-11-13)
+"In the stacked nhl scorebug when it is on the right side of the screen can we mirror the layout so it sits closer to
+the edge of the screen like it does on the left, I think it leaves room for the sog when there is a penalty, but if we
+mirror the layout it will work and look better on the right, the left layout looks great."
+
+- In the two right-hand corners the layout is mirrored: the rows hug the right margin (1920 − 96, as the left corners
+  hug 96) and the SOG and clock columns open and fold to their left, in the order clock, SOG, rows. The rows still never
+  move. The box now ends at the margin at even strength, on a power play and in a break; the earlier "box sits about
+  59–90 px in on the right" default is gone.
+- Reading order is kept: logo, code and score read left to right, and the bar's words read left to right,
+  right-aligned. Edge features mirror: the team stripes are on the right edge, the bar's two stripes sit at its right
+  end (keeping their "/" lean to match the italic words), the columns and their contents slide out leftwards.
+- The goal animation's wipes start at the screen edge and its streak sweeps right to left; the badge, GOAL and the
+  score lines are not mirrored.
+- The left corners are pixel-identical to before (all 306 existing Stacked screenshots byte-identical).
+- Design: `docs/design/m6-score-bug-stacked-theme.md` §4.3. Code: `ScoreBugPlacement.stackedMirrored`,
+  `StackedDrawArgs.mirrored`.
 8. **Large size.** Offered for Stacked as for the current bug (25 % bigger). *Confirmed by the owner, 2026-11-11.*
 
 ## Lead rulings from the design sign-off (2026-11-10)

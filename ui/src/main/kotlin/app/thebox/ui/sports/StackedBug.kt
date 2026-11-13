@@ -113,7 +113,8 @@ const val DRAWS_STACKED_BUG = "StackedBugDraw"
  * five layout tracks of `StackedTimeline`, the pin, S1 rules 1–7) and the goal takeover, drawing through one
  * `Spacer.drawBehind { StackedPainter.drawFrame(...) }` node tagged `SCORE_BUG_TAG` on the **drawn** box. Reached only
  * through `ScoreBug(...)`'s style branch (NHL and `NhlBugStyle.STACKED`); [placement] always carries `style = STACKED`, so
- * `place` returns the **footprint** (§4.3) and the box is drawn inside it with the rows anchored at its left edge.
+ * `place` returns the **footprint** (§4.3) and the box is drawn inside it with the rows anchored at its left edge, or, in a
+ * right-hand corner, mirrored with the rows at its right edge (`ScoreBugPlacement.stackedMirrored`, owner 2026-11-13).
  * No `lowEnd` parameter (ruling 20); the still version follows `motionOff()`.
  *
  * **The S1 rules** carried from the Pill runner (§2.3), each pinned by a `StackedDrawTest` case:
@@ -429,17 +430,29 @@ internal fun StackedBug(
     val liveText = if (shownView === sample) "" else liveTexts.next(shownView, desc, res)
     // S11: the bar opens below an effective top corner's box and above a bottom one's, from the placed footprint.
     val up = ScoreBugPlacement.stackedBarUp(last)
+    // (Owner request 2026-11-13) A right-hand corner draws the layout mirrored: the rows hug the footprint's right edge.
+    val mirrored = ScoreBugPlacement.stackedMirrored(last)
 
     // The drawn box at the targets' rest, in design px from the footprint's top-left (§4.3: the rows never move).
     val restW = restBoxW(shownTargets.sogOpen, shownTargets.clockOpen)
-    val topBox = ScoreBugPlacement.stackedTopBox(last, shownSize, restW) // WP-1: the rows' box in the footprint
+    val topBox = ScoreBugPlacement.stackedTopBox(last, shownSize, restW) // WP-1: the top part in the footprint
     val topH = topBox.b - topBox.t
     val barRest = if (shownTargets.bar != null) K.STACKED_BAR_H * k else 0f
     val tagW = topBox.r - topBox.l
+    val tagX = topBox.l - last.l
     val topY = topBox.t - last.t
     val tagY = if (up) topY - barRest else topY
     val tagH = topH + barRest
     val originDy = (topY - tagY) * d
+    // The painter's origin is the rows' left edge: the drawn box's left edge. Mirrored, the rows sit at the footprint's
+    // right edge, the open columns' width into the node; the node's offset is rounded to whole px by layout (as
+    // `Dp.roundToPx`), so the origin is taken from the layer's own px instead, and the rows never move by that rounding
+    // (a 391.5-wide power-play box would otherwise shift them half a px against the 333-wide one).
+    val originDx = if (mirrored) {
+        (margin + footW - K.STACKED_ROWS_W * k) * d - ((margin + tagX) * d).roundToInt()
+    } else {
+        0f
+    }
 
     val args = remember { StackedDrawArgs() }
     val merge = remember { BodyMerge() }
@@ -465,6 +478,7 @@ internal fun StackedBug(
         a.bar = run.bar
         a.barPrev = run.barPrevForDraw()
         a.up = up
+        a.mirrored = mirrored
         a.logos = shownLogos
         a.logoWaited = logoWaited.value
         a.placing = placing
@@ -493,31 +507,32 @@ internal fun StackedBug(
         ) {
             Spacer(
                 Modifier
-                    .offset(m.dp, (m + tagY).dp)
+                    .offset((m + tagX).dp, (m + tagY).dp)
                     .size(tagW.dp, tagH.dp)
                     .testTag(SCORE_BUG_TAG)
                     .semantics { contentDescription = desc }
                     .drawBehind {
                         drawIntoCanvas {
                             val nc = it.nativeCanvas
-                            // The painter's origin is the top part's top-left (StackedDrawArgs); the node is the drawn box.
-                            nc.translate(0f, originDy)
+                            // The painter's origin is the rows' left edge at the top part's top (StackedDrawArgs); the
+                            // node is the drawn box.
+                            nc.translate(originDx, originDy)
                             drawBug(nc)
-                            nc.translate(0f, -originDy)
+                            nc.translate(-originDx, -originDy)
                         }
                     },
             )
             // The persistent live region (GA S9): on the drawn box, always composed while the bug is.
             Spacer(
                 Modifier
-                    .offset(m.dp, (m + tagY).dp)
+                    .offset((m + tagX).dp, (m + tagY).dp)
                     .size(tagW.dp, tagH.dp)
                     .testTag(SCORE_BUG_LIVE_TAG)
                     .semantics { contentDescription = liveText; liveRegion = LiveRegionMode.Polite },
             )
         }
         // A sibling of the clipped layer, not inside it (GA §1); positioned from the drawn box, not the footprint (N8).
-        if (placing) StackedPlaceHint(holder, pos, fade, rightSide, tagY, tagW, tagH)
+        if (placing) StackedPlaceHint(holder, pos, fade, rightSide, tagX, tagY, tagW, tagH)
     }
 }
 
@@ -1141,8 +1156,8 @@ private fun Modifier.stackedPlaceAt(holder: StackedHolder, pos: Animatable<Offse
 }
 
 /**
- * The place-mode hint beside the **drawn** box toward the screen centre (SB §6, N8): the drawn box is ([tagY], [tagW],
- * [tagH]) design px from the footprint's top-left. A sibling of the clipped layer, placed from the same [pos].
+ * The place-mode hint beside the **drawn** box toward the screen centre (SB §6, N8): the drawn box is ([tagX], [tagY],
+ * [tagW], [tagH]) design px from the footprint's top-left. A sibling of the clipped layer, placed from the same [pos].
  */
 @Composable
 private fun StackedPlaceHint(
@@ -1150,6 +1165,7 @@ private fun StackedPlaceHint(
     pos: Animatable<Offset, *>,
     fade: Animatable<Float, *>,
     bugOnRight: Boolean,
+    tagX: Float,
     tagY: Float,
     tagW: Float,
     tagH: Float,
@@ -1163,7 +1179,7 @@ private fun StackedPlaceHint(
                 layout(fullOr(c.hasBoundedWidth, c.maxWidth, p.width), fullOr(c.hasBoundedHeight, c.maxHeight, p.height)) {
                     val o = holder.offset(pos)
                     val gap = (K.SCORE_BAR_GAP * density).roundToInt()
-                    val bx = (o.x * density).roundToInt()
+                    val bx = ((o.x + tagX) * density).roundToInt()
                     val x = if (bugOnRight) bx - p.width - gap else bx + (tagW * density).roundToInt() + gap
                     p.place(x, ((o.y + tagY) * density).roundToInt() + ((tagH * density).roundToInt() - p.height) / 2)
                 }
