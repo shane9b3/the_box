@@ -74,6 +74,9 @@ internal class StackedGoalPainter(
     private val radius = M.BOX_RADIUS * K.STACKED_SCALE * s
     private val badgeSlot = K.STACKED_GOAL_LOGO * s
     private val gap = M.GOAL_GAP * K.STACKED_SCALE * s
+    /** The streak bands' CSS (horizontal) widths: each band's extent along its own centre line, device px. */
+    private val streak1W = M.STREAK1_W * K.STACKED_SCALE * s
+    private val streak2W = M.STREAK2_W * K.STACKED_SCALE * s
 
     private val leadPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val panelPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -211,8 +214,8 @@ internal class StackedGoalPainter(
         leadPaint.color = colours.accent or OPAQUE
         panelPaint.color = colours.base or OPAQUE
         glowPaint.color = colours.glow or OPAQUE
-        streak1Paint.shader = streakShader(M.STREAK1_W * K.STACKED_SCALE * s, colours.accent, spec.streak1Alpha)
-        streak2Paint.shader = streakShader(M.STREAK2_W * K.STACKED_SCALE * s, Color.WHITE, spec.streak2Alpha)
+        streak1Paint.shader = streakShader(streak1W, colours.accent, spec.streak1Alpha)
+        streak2Paint.shader = streakShader(streak2W, Color.WHITE, spec.streak2Alpha)
         val l1 = "$awayAbbrev $away"
         val l2 = "$homeAbbrev $home"
         if (tally1.size < l1.length) tally1 = CharArray(l1.length)
@@ -347,18 +350,35 @@ internal class StackedGoalPainter(
         if (hi > 0) { glowPaint.alpha = hi; c.drawBitmap(glow.peak, x - glow.peakMargin, y - glow.peakMargin, glowPaint) }
     }
 
-    /** The lead, the panel and its contents for [g], over the top part (origin = its top-left, device px). */
-    fun drawTakeover(c: Canvas, g: GoalFrame) {
+    /**
+     * The lead, the panel and its contents for [g], over the top part (origin = its top-left, device px).
+     *
+     * (Owner request 2026-11-13; fix pass 2026-11-13, review S2) [mirrored] (a right-hand corner): the wipes run from the
+     * right (the screen edge), their clips reflected about the top part's centre, and the streaks sweep right to left:
+     * each band's horizontal extent on the centre line is reflected (`boxW − dx − bandW`), so it travels the other way,
+     * but it keeps its "/" lean, as the bar's stripes do, matching the italic GOAL. Nothing is drawn under a reflection.
+     * The badge, GOAL and the tally are not mirrored: they keep their places and read left to right.
+     */
+    fun drawTakeover(c: Canvas, g: GoalFrame, mirrored: Boolean = false) {
         if (colours == null || boxW <= 0f) return
         box.right = boxW
         if (g.leadTo > g.leadFrom) {
-            c.withClip(g.leadFrom * boxW, 0f, g.leadTo * boxW, h) { drawRoundRect(box, radius, radius, leadPaint) }
+            val l = if (mirrored) (1f - g.leadTo) * boxW else g.leadFrom * boxW
+            val r = if (mirrored) (1f - g.leadFrom) * boxW else g.leadTo * boxW
+            c.withClip(l, 0f, r, h) { drawRoundRect(box, radius, radius, leadPaint) }
         }
         if (g.panelTo <= g.panelFrom) return
-        c.withClip(g.panelFrom * boxW, 0f, g.panelTo * boxW, h) {
+        val pl = if (mirrored) (1f - g.panelTo) * boxW else g.panelFrom * boxW
+        val pr = if (mirrored) (1f - g.panelFrom) * boxW else g.panelTo * boxW
+        c.withClip(pl, 0f, pr, h) {
             drawRoundRect(box, radius, radius, panelPaint)
-            if (g.streak1On) streak(this, g.streak1X * s, streak1Paint)
-            if (g.streak2On) streak(this, g.streak2X * s, streak2Paint)
+            if (mirrored) {
+                if (g.streak1On) streak(this, boxW - g.streak1X * s - streak1W, streak1Paint)
+                if (g.streak2On) streak(this, boxW - g.streak2X * s - streak2W, streak2Paint)
+            } else {
+                if (g.streak1On) streak(this, g.streak1X * s, streak1Paint)
+                if (g.streak2On) streak(this, g.streak2X * s, streak2Paint)
+            }
             val fa = alpha255(g.flashAlpha)
             if (fa > 0) { flashPaint.alpha = fa; drawRoundRect(box, radius, radius, flashPaint) }
             drawBadge(this, g)

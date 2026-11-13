@@ -75,7 +75,7 @@ class StackedSeamTest {
         advance(5_000)
         assertTrue("the Stacked bug composed", stacked() - s0 >= 2)
         assertEquals("ScoreBugWith (GoalPainter, ScoreBugPainter, PowerPlayPainter) never composed", 0, pill() - p0)
-        assertEquals("the drawn box is the Stacked one (333 × 108 in play)", Rect(1432f, 56f, 1765f, 164f), bounds())
+        assertEquals("the drawn box is the Stacked one (333 × 108 in play; top right, mirrored to the margin)", Rect(1491f, 56f, 1824f, 164f), bounds())
     }
 
     @Test
@@ -109,7 +109,7 @@ class StackedSeamTest {
     fun aStyleFlipSwapsWithNoFade() {
         repo.bug.value = StackedRunFixtures.view()
         host()
-        assertEquals(Rect(1432f, 56f, 1765f, 164f), bounds())
+        assertEquals(Rect(1491f, 56f, 1824f, 164f), bounds())
         repo.prefs.value = SportsPrefs(nhlStyle = NhlBugStyle.PILL)
         Snapshot.sendApplyNotifications()
         rule.waitForIdle()
@@ -123,7 +123,7 @@ class StackedSeamTest {
         rule.waitForIdle()
         rule.mainClock.advanceTimeBy(16)
         rule.waitForIdle()
-        assertEquals("and back", Rect(1432f, 56f, 1765f, 164f), bounds())
+        assertEquals("and back", Rect(1491f, 56f, 1824f, 164f), bounds())
     }
 
     // ------------------------------------------------------------------ S9: the Pill stays on GoalSpec.CLASSIC

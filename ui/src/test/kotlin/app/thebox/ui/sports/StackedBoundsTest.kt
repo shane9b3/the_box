@@ -16,6 +16,8 @@ import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.test.core.app.ApplicationProvider
 import app.thebox.core.sports.FakeScoreRepository
 import app.thebox.core.sports.GoalFrame
@@ -108,6 +110,9 @@ class StackedBoundsTest {
                 placement = StackedRunFixtures.input(corner, size)
                 val foot = ScoreBugPlacement.cornerBox(corner, size, League.NHL, NhlBugStyle.STACKED)
                 val bottom = corner == ScoreCorner.BOTTOM_LEFT || corner == ScoreCorner.BOTTOM_RIGHT
+                // (Owner request 2026-11-13) The right corners are mirrored: the box's right edge (the rows' outer edge)
+                // is the footprint's right edge, and the box grows on its left.
+                val right = corner == ScoreCorner.TOP_RIGHT || corner == ScoreCorner.BOTTOM_RIGHT
                 assertTrue("$corner/$size: the footprint inside the insets ($foot)",
                     foot.l >= K.SCORE_INSET_X && foot.r <= 1920f - K.SCORE_INSET_X && foot.t >= K.SCORE_INSET_Y && foot.b <= 1080f - K.SCORE_INSET_Y)
                 val rowsLeft = HashSet<Float>()
@@ -122,21 +127,79 @@ class StackedBoundsTest {
                     val h = K.STACKED_H * k
                     val bar = if (t.bar != null) K.STACKED_BAR_H * k else 0f
                     val tag = bounds(SCORE_BUG_TAG)
+                    val l = if (right) foot.r - w else foot.l
                     if (bottom) {
-                        assertRect("$msg: the drawn box, its bar above", foot.l, foot.b - h - bar, foot.l + w, foot.b, tag)
+                        assertRect("$msg: the drawn box, its bar above", l, foot.b - h - bar, l + w, foot.b, tag)
                         assertTrue("$msg: up", probe.args!!().up)
                     } else {
-                        assertRect("$msg: the drawn box, its bar below", foot.l, foot.t, foot.l + w, foot.t + h + bar, tag)
+                        assertRect("$msg: the drawn box, its bar below", l, foot.t, l + w, foot.t + h + bar, tag)
                         assertTrue("$msg: down", !probe.args!!().up)
                     }
+                    assertEquals("$msg: mirrored exactly in the right corners", right, probe.args!!().mirrored)
                     assertTrue("$msg: inside the footprint ($tag in $foot)",
                         tag.left >= foot.l - 1 && tag.right <= foot.r + 1 && tag.top >= foot.t - 1 && tag.bottom <= foot.b + 1)
-                    rowsLeft += tag.left
+                    // The rows' outer edge. Mirrored, the node's left is rounded to whole px by layout, so its right edge
+                    // is the margin within that rounding (the drawing itself is not rounded:
+                    // theMirroredBoxEndsAtTheRightMarginAndTheRowsNeverMove pins the rows from the pixels).
+                    if (right) assertEquals("$msg: the rows' outer edge is the footprint's right edge", foot.r, tag.right, 1.01f) else rowsLeft += tag.left
                     rowsEdge += if (bottom) tag.bottom else tag.top // the top part's outer edge
                 }
-                assertEquals("$corner/$size: the rows' left edge never moves", 1, rowsLeft.size)
+                if (!right) assertEquals("$corner/$size: the rows' left edge never moves", 1, rowsLeft.size)
                 assertEquals("$corner/$size: the top part's outer edge never moves", 1, rowsEdge.size)
             }
+        }
+    }
+
+    /**
+     * (Owner request 2026-11-13) In the right corners the drawn box ends at the right margin (1920 − 96) at even strength
+     * on a power play and in a break, at both sizes; and the rows, found in the pixels of the real draw (the row
+     * background's extent), are the same rectangle in all three states, hugging that margin.
+     */
+    @Test
+    fun theMirroredBoxEndsAtTheRightMarginAndTheRowsNeverMove() {
+        repo.bug.value = StackedRunFixtures.view()
+        render()
+        val margin = 1920f - K.SCORE_INSET_X
+        for (size in ScoreBugSize.entries) for (corner in listOf(ScoreCorner.TOP_RIGHT, ScoreCorner.BOTTOM_RIGHT)) {
+            val k = ScoreBugPlacement.stackedScale(size)
+            placement = StackedRunFixtures.input(corner, size)
+            val foot = ScoreBugPlacement.cornerBox(corner, size, League.NHL, NhlBugStyle.STACKED)
+            val rows = ArrayList<Rect>()
+            // Even strength (333), the power play (391.5) and the break (301.5, fix pass review L5).
+            val views = listOf(StackedRunFixtures.view(), StackedRunFixtures.view(pp = StackedRunFixtures.pp()), StackedRunFixtures.intermission())
+            for ((i, v) in views.withIndex()) {
+                repo.bug.value = v
+                settle()
+                val msg = "$corner/$size ${listOf("even", "power play", "break")[i]}"
+                val tag = bounds(SCORE_BUG_TAG)
+                assertEquals("$msg: the box's right edge is the margin", margin, tag.right, 1.01f)
+                val a = probe.args!!()
+                assertTrue("$msg: mirrored", a.mirrored)
+                // The layer as the runner draws it (its node offsets, the origin translation), captured.
+                val layer = bounds(STACKED_LAYER_TAG)
+                val bmp = rule.onNodeWithTag(STACKED_LAYER_TAG, useUnmergedTree = true).captureToImage().asAndroidBitmap()
+                val rowsBox = ScoreBugPlacement.stackedRowsBox(foot, size)
+                // The row background (#12284F) inside the rows' band (2 px in from the top and bottom): its first and
+                // last pixel.
+                var l = Int.MAX_VALUE
+                var r = Int.MIN_VALUE
+                var t = Int.MAX_VALUE
+                var b = Int.MIN_VALUE
+                val y0 = (rowsBox.t - layer.top).toInt() + 2
+                val y1 = (rowsBox.b - layer.top).toInt() - 2
+                for (y in y0 until y1) for (x in 0 until bmp.width) {
+                    if (bmp.getPixel(x, y) == (K.STACKED_ROW_BG or (0xFF shl 24))) { l = minOf(l, x); r = maxOf(r, x); t = minOf(t, y); b = maxOf(b, y) }
+                }
+                assertTrue("$msg: the rows were drawn", l <= r)
+                rows += Rect(layer.left + l, layer.top + t, layer.left + r + 1, layer.top + b + 1)
+            }
+            println("mirrored rows $corner/$size: even ${rows[0]}, power play ${rows[1]}, break ${rows[2]}")
+            assertEquals("$corner/$size: the rows do not move on the power play", rows[0], rows[1])
+            assertEquals("$corner/$size: the rows do not move in a break", rows[0], rows[2])
+            // The row background stops at the stripe (3.6 wide at even strength, 6.3 on the PP side) and the rounded
+            // corner, so its last pixel is a few px in from the margin; its first is the rows' left edge.
+            assertEquals("$corner/$size: the rows' left edge", margin - K.STACKED_ROWS_W * k, rows[0].left, 1.01f)
+            assertTrue("$corner/$size: the rows reach the margin's stripe (${rows[0].right})", rows[0].right in (margin - 8f * k)..margin)
         }
     }
 
@@ -146,7 +209,8 @@ class StackedBoundsTest {
         placement = StackedRunFixtures.input(ScoreCorner.TOP_RIGHT, placing = true)
         render()
         val bug = bounds(SCORE_BUG_TAG)
-        assertRect("the sample at the play width", 1432f, 56f, 1765f, 164f, bug)
+        // (Owner request 2026-11-13) Mirrored: the sample's right edge at the margin.
+        assertRect("the sample at the play width", 1491f, 56f, 1824f, 164f, bug)
         val hint = bounds(SCORE_BUG_HINT_TAG)
         assertTrue("left of the drawn box: $hint", hint.right <= bug.left)
         assertEquals((bug.top + bug.bottom) / 2f, (hint.top + hint.bottom) / 2f, 1.5f)
