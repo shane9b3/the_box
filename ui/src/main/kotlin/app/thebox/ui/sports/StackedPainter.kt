@@ -50,7 +50,8 @@ import kotlin.math.tan
  * - each row 243 × 54 on `#12284F`: the stripe (3.6, 6.3 on the power play; the logo and code move with it, as the
  *   flex row does), the logo slot (margin 9.9, 50.4 wide, logo 43.2 tall), the code (padding 13.5, 27 px), the score
  *   (right-aligned in a 45.9 slot, 15.3 from the row's end, 35.1 px, tabular); a 1-px white .22 divider under the away
- *   row;
+ *   row. Mirrored (a right-hand corner, owner 2026-11-13), the row is the true reflection: [score][code][logo][stripe],
+ *   the code right-aligned and the score left-aligned, glyphs never flipped;
  * - the SOG column (58.5): an inset line, the digits (24.3 px) centred on each row, "SOG" (18 px, `#C3C7D0`, tracking
  *   .08 em) on the row line; its contents fade and slide by `sogDx` and are revealed by a `clipRect` of the open width;
  * - the clock column (90): an inset line, the period (21.6 px, tracking .02 em; its line box ends 6.3 above the 50.4
@@ -109,6 +110,10 @@ internal class StackedPainter(
 
     private val codePaint = text(M.CODE_PX * K.STACKED_SCALE, sansBold, Paint.Align.LEFT, CODE_TRACK_EM)
     private val scorePaint = text(M.SCORE_PX * K.STACKED_SCALE, sansBold, Paint.Align.RIGHT, tnum = true)
+    // (Owner request 2026-11-13, second pass) A mirrored row's alignments are the mirror of the left ones: the code is
+    // right-aligned against the logo, the score left-aligned at the mirror of its right anchor.
+    private val codeMirroredPaint = Paint(codePaint).apply { textAlign = Paint.Align.RIGHT }
+    private val scoreMirroredPaint = Paint(scorePaint).apply { textAlign = Paint.Align.LEFT }
     private val sogPaint = text(M.SOG_DIGITS_PX * K.STACKED_SCALE, sansBold, Paint.Align.CENTER, tnum = true)
     private val sogLabelPaint = text(K.STACKED_SOG_LABEL_PX, sansBold, Paint.Align.CENTER, M.SOG_LABEL_TRACK_EM)
     private val periodPaint = text(M.PERIOD_PX * K.STACKED_SCALE, sansBold, Paint.Align.CENTER, PERIOD_TRACK_EM)
@@ -552,31 +557,46 @@ internal class StackedPainter(
     }
 
     /**
-     * One row's logo, code and score, centred on [cy]. The contents are one left-to-right block beside the stripe
-     * ([stripe] wide): after it (the logo and code move with it, the score keeps its place) or, mirrored, before it (the
-     * reading order kept; the score moves with the stripe, the logo keeps its place).
+     * One row's logo, code and score, centred on [cy]: the stripe ([stripe] wide), the logo slot, the code (left-aligned)
+     * and the score (right-aligned in its slot, a fixed distance from the rows' end). The logo and code move with the
+     * stripe; the score keeps its place.
+     *
+     * (Owner request 2026-11-13, second pass) [StackedDrawArgs.mirrored]: every position is the true reflection about the
+     * rows' centre line (x ↦ rowsW − x), so from the screen edge the order is the same on both sides: stripe, logo, code,
+     * score. The alignments mirror too (the code right-aligned against the logo, the score left-aligned at the mirror of
+     * its right anchor); glyphs and logos are never flipped, only placed. See [rowX].
      */
     private fun row(
         c: Canvas, cy: Float, stripe: Float, abbrev: String, slot: FollowLogos.Slot?, a: StackedDrawArgs,
         score: String, pop: Boolean, popScale: Float, popColour: Int,
     ) {
-        val start = if (a.mirrored) 0f else stripe
-        val scoreRight = if (a.mirrored) this.scoreRight - stripe else this.scoreRight
-        val logoCx = start + logoMl + logoSlotW / 2f
-        logo(c, logoCx, cy, abbrev, slot, a.logos != null, a.logoWaited)
-        codePaint.color = white
-        c.drawText(abbrev, start + logoMl + logoSlotW + codePl, cy + codeOffset, codePaint)
+        val m = a.mirrored
+        logo(c, rowX(logoCentre(stripe), m), cy, abbrev, slot, a.logos != null, a.logoWaited)
+        val cp = if (m) codeMirroredPaint else codePaint
+        cp.color = white
+        c.drawText(abbrev, rowX(codeAnchor(stripe), m), cy + codeOffset, cp)
+        val sp = if (m) scoreMirroredPaint else scorePaint
+        val sx = rowX(scoreRight, m)
         if (!pop) {
-            scorePaint.color = white
-            c.drawText(score, scoreRight, cy + scoreOffset, scorePaint)
+            sp.color = white
+            c.drawText(score, sx, cy + scoreOffset, sp)
         } else {
             // The pop scales the score's box (the 45.9 slot) about its centre, as the CSS transform does.
-            scorePaint.color = popColour
-            val cx = scoreRight - scoreSlotW / 2f
-            c.withScale(popScale, popScale, cx, cy) { drawText(score, scoreRight, cy + scoreOffset, scorePaint) }
-            scorePaint.color = white
+            sp.color = popColour
+            val cx = rowX(scoreRight - scoreSlotW / 2f, m)
+            c.withScale(popScale, popScale, cx, cy) { drawText(score, sx, cy + scoreOffset, sp) }
+            sp.color = white
         }
     }
+
+    /** The logo slot's centre in an unmirrored row with a [stripe]-wide stripe, device px from the rows' left edge. */
+    private fun logoCentre(stripe: Float): Float = stripe + logoMl + logoSlotW / 2f
+
+    /** The code's anchor (its left, unmirrored) in a row with a [stripe]-wide stripe, device px from the rows' left. */
+    private fun codeAnchor(stripe: Float): Float = stripe + logoMl + logoSlotW + codePl
+
+    /** An unmirrored row's x ([x], device px from the rows' left edge) as [mirrored] places it: `rowsW − x` mirrored. */
+    private fun rowX(x: Float, mirrored: Boolean): Float = if (mirrored) rowsW - x else x
 
     /**
      * The logo (the takeover-size bitmap, S6, drawn down to 43.2 tall and at most the 50.4 slot wide, `FILTER_BITMAP`), or
@@ -731,25 +751,91 @@ internal class StackedPainter(
     internal fun barText(b: BarContent): String = String(b.chars, 0, b.len)
 
     /**
-     * Free device px between the end of the code's ink and the start of the score's ink in one row (the stripe at its
-     * power-play width, the widest case); negative = they overlap. [mirrored]: as a mirrored row places them (the block
-     * before the stripe: the code from the rows' left edge, the score a stripe's width further in).
+     * Free device px between the code's ink and the score's ink in one row (the stripe at its power-play width, the
+     * widest case); negative = they overlap. [mirrored]: as a mirrored row places them (owner request 2026-11-13, second
+     * pass: the reflection, [score][code][logo][stripe], the code right-aligned at the mirror of its left anchor, the score
+     * left-aligned at the mirror of its right anchor), so the gap runs from the score's right ink to the code's left ink.
      */
     internal fun rowGap(abbrev: String, score: String, mirrored: Boolean = false): Float {
+        val e = rowExtents(abbrev, score, ppStripeW, mirrored)
         val r = Rect()
         codePaint.getTextBounds(abbrev, 0, abbrev.length, r)
-        val codeRight = (if (mirrored) 0f else ppStripeW) + logoMl + logoSlotW + codePl + r.right
+        val codeInkL = e.code.first + r.left
+        val codeInkR = e.code.first + r.right
         scorePaint.getTextBounds(score, 0, score.length, r)
-        val scoreLeft = (if (mirrored) scoreRight - ppStripeW else scoreRight) - scorePaint.measureText(score) + r.left
-        return scoreLeft - codeRight
+        val scoreInkL = e.score.first + r.left
+        val scoreInkR = e.score.first + r.right
+        return if (mirrored) codeInkL - scoreInkR else scoreInkL - codeInkR
     }
 
-    /** The score's ink left of its 45.9 slot (device px; > 0 = it spills out of the slot). */
-    internal fun scoreSpill(score: String): Float {
+    /**
+     * The score's ink outside its 45.9 slot on the code's side (device px; > 0 = it spills out of the slot): left of the
+     * slot, or, [mirrored], right of the reflected slot (the score left-aligned in it).
+     */
+    internal fun scoreSpill(score: String, mirrored: Boolean = false): Float {
         val r = Rect()
         scorePaint.getTextBounds(score, 0, score.length, r)
+        if (mirrored) {
+            val e = rowExtents("", score, stripeW, true)
+            return (e.score.first + r.right) - e.scoreSlot.second
+        }
         return (scoreRight - scoreSlotW) - (scoreRight - scorePaint.measureText(score) + r.left)
     }
+
+    /**
+     * (Owner request 2026-11-13, second pass) A row's elements' x extents as [row] places them, device px from the rows'
+     * left edge, for a [stripe]-wide stripe: the stripe, the logo slot, the code's and the score's advance boxes (their
+     * alignment applied), and the score slot. For the fit and mirror tests (allocates; never called in draw).
+     *
+     * (Fix pass, review L3) The code and score use the anchors and the very paints [row] draws with, and their left
+     * edges come from those paints' own `textAlign`, so a change to a paint's alignment shows here too.
+     */
+    internal fun rowExtents(abbrev: String, score: String, stripe: Float, mirrored: Boolean): RowExtents {
+        fun span(a: Float, b: Float) = if (mirrored) (rowsW - b) to (rowsW - a) else a to b
+        fun left(anchor: Float, p: Paint, w: Float) = when (p.textAlign) {
+            Paint.Align.CENTER -> anchor - w / 2f
+            Paint.Align.RIGHT -> anchor - w
+            else -> anchor
+        }
+        val cp = if (mirrored) codeMirroredPaint else codePaint
+        val sp = if (mirrored) scoreMirroredPaint else scorePaint
+        val codeW = cp.measureText(abbrev)
+        val codeL = left(rowX(codeAnchor(stripe), mirrored), cp, codeW)
+        val scoreW = sp.measureText(score)
+        val scoreL = left(rowX(scoreRight, mirrored), sp, scoreW)
+        val logoCx = rowX(logoCentre(stripe), mirrored)
+        return RowExtents(
+            stripe = span(0f, stripe),
+            logoSlot = (logoCx - logoSlotW / 2f) to (logoCx + logoSlotW / 2f),
+            code = codeL to codeL + codeW,
+            score = scoreL to scoreL + scoreW,
+            scoreSlot = span(scoreRight - scoreSlotW, scoreRight),
+        )
+    }
+
+    /** [rowExtents]' result: each element's (left, right), device px from the rows' left edge. */
+    internal class RowExtents(
+        val stripe: Pair<Float, Float>,
+        val logoSlot: Pair<Float, Float>,
+        val code: Pair<Float, Float>,
+        val score: Pair<Float, Float>,
+        val scoreSlot: Pair<Float, Float>,
+    ) {
+        val all: List<Pair<String, Pair<Float, Float>>>
+            get() = listOf("stripe" to stripe, "logo slot" to logoSlot, "code" to code, "score" to score, "score slot" to scoreSlot)
+    }
+
+    /** The power-play stripe's width, device px (the widest row case). */
+    internal val ppStripeWidth: Float get() = ppStripeW
+
+    /** The even-strength stripe's width, device px. */
+    internal val stripeWidth: Float get() = stripeW
+
+    /** The rows' width, device px. */
+    internal val rowsWidth: Float get() = rowsW
+
+    /** [text]'s advance in this painter's code or score paint (tracking and tabular figures included), device px. */
+    internal fun advance(ink: Ink, text: String): Float = (if (ink == Ink.SCORE) scorePaint else codePaint).measureText(text)
 
     /** Free device px either side of [text] in the SOG column at the digits' size (negative = clipped). */
     internal fun sogSlack(text: String, label: Boolean = false): Float {

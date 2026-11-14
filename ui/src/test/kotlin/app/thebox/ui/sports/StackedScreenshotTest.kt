@@ -873,8 +873,9 @@ class StackedScreenshotTest {
      * bar above the box) at both sizes, each element of the mirrored box is the reflection, within the box, of the same
      * element of the left-corner box (box coordinates: x ↦ w − x), within a pixel: the row stripes, the row background, the
      * column background, the inset lines, the rule, the bar's background and its two stripes on their centre line; and
-     * the centred texts' centres (the SOG digits and label, the period, the clock). Text is never mirrored, so the row's
-     * code and score and the bar's words are pinned separately (`theMirroredGeometryProbes`).
+     * the centred texts' centres (the SOG digits and label, the period, the clock). Glyphs are never flipped, so the
+     * row's logo, code and score are pinned by `theMirroredRowIsTheReflectionOfTheLeftOne` and the bar's words by
+     * `theMirroredGeometryProbes`.
      */
     @Test
     fun theMirroredBoxIsTheReflectionOfTheLeftOne() {
@@ -956,10 +957,10 @@ class StackedScreenshotTest {
 
     /**
      * (Owner request 2026-11-13) The mirrored box's own numbers, from the drawn pixels (box coordinates; the rows are its
-     * right 243): the stripe on the rows' right edge; the row's contents one block before it in reading order (the code's
-     * ink at 9.9 + 50.4 + 13.5 = 73.8 past the rows' left edge, the score's right ink 243 − 3.6 − 15.3 = 224.1, 221.4 on
-     * the wide power-play stripe); the columns in the order [clock][SOG][rows]; the bar's stripes at 20.7 / 37.8 from its
-     * right end and its words right-aligned 63 from it.
+     * right 243): the stripe on the rows' right edge; the row's contents the reflection of the left row (second pass,
+     * owner 2026-11-13): the code right-aligned at stripe + 9.9 + 50.4 + 13.5 from the rows' right edge (77.4, 80.1 on
+     * the wide power-play stripe), the score left-aligned 15.3 from the rows' left edge; the columns in the order
+     * [clock][SOG][rows]; the bar's stripes at 20.7 / 37.8 from its right end and its words right-aligned 63 from it.
      */
     @Test
     fun theMirroredGeometryProbes() {
@@ -987,12 +988,16 @@ class StackedScreenshotTest {
                 val line = (K.STACKED_HAIRLINE_W * s).coerceAtLeast(1f)
                 assertEquals("$name ${sz(large)}: away stripe's outer edge = the box's right edge less the border", w - line, stripe!!.second, 1f)
                 assertEquals("$name ${sz(large)}: away stripe's inner edge (${if (wide) 6.3 else 3.6} in)", w - awayStripe, stripe.first, 1f)
-                val codeInk = p.inkBounds(StackedPainter.Ink.CODE, "EDM", 0f, 0f)
-                val code = inkBox(shot, rl + 66f * s, 0f, rl + 170f * s, rowH, K.STACKED_ROW_BG, white)
-                assertEquals("$name ${sz(large)}: code left (73.8)", rl + 73.8f * s + codeInk.left, code!!.left, textTol)
-                val scoreR = rl + (243f - (if (wide) 6.3f else 3.6f) - 15.3f) * s
-                val score = inkBox(shot, rl + 175f * s, 0f, rl + 243f * s - awayStripe - 1f, rowH, K.STACKED_ROW_BG, white)
-                assertEquals("$name ${sz(large)}: away score right", p.inkBounds(StackedPainter.Ink.SCORE, "2", scoreR, 0f).right, score!!.right, textTol)
+                // (Second pass) The reflection: the code right-aligned 73.8 + the stripe in from the rows' right edge, the
+                // score left-aligned 15.3 in from the rows' left edge.
+                val codeR = w - awayStripe - 73.8f * s
+                val codeInk = p.inkBounds(StackedPainter.Ink.CODE, "EDM", codeR - p.advance(StackedPainter.Ink.CODE, "EDM"), 0f)
+                val code = inkBox(shot, rl + 68f * s, 0f, rl + 172f * s, rowH, K.STACKED_ROW_BG, white)
+                assertEquals("$name ${sz(large)}: code right (73.8 + stripe from the right)", codeInk.right, code!!.right, textTol)
+                assertEquals("$name ${sz(large)}: code left", codeInk.left, code.left, textTol)
+                val scoreL = rl + 15.3f * s
+                val score = inkBox(shot, rl + 2f, 0f, rl + 66f * s, rowH, K.STACKED_ROW_BG, white)
+                assertEquals("$name ${sz(large)}: away score left (15.3)", p.inkBounds(StackedPainter.Ink.SCORE, "2", scoreL + p.advance(StackedPainter.Ink.SCORE, "2"), 0f).left, score!!.left, textTol)
                 // The clock column is the outermost: the period and the clock centred on its 90, at the box's left edge.
                 val ccx = K.STACKED_CLOCK_W / 2f * s
                 val clock = inkBox(shot, 2f * s, 56f * s, K.STACKED_CLOCK_W * s - 2f * s, h - 1f, K.STACKED_COL_BG, white)
@@ -1056,26 +1061,296 @@ class StackedScreenshotTest {
             val inter = looks.first { it.name == "intermission" }
             cells += Triple("Bottom, intermission", render(inter, large, DARK, up = true).bmp, render(inter, large, DARK, up = true, mirrored = true).bmp)
             cells += Triple("Bottom, goal 700 ms", render(pp, large, DARK, t = 700f, up = true).bmp, render(pp, large, DARK, t = 700f, up = true, mirrored = true).bmp)
-            val labelW = 300
-            val gap = 24
-            val cw = cells[0].second.width
-            val ch = cells[0].second.height
-            val head = 40
-            val sheet = Bitmap.createBitmap(labelW + 2 * cw + gap, head + cells.size * ch, Bitmap.Config.ARGB_8888)
-            val c = Canvas(sheet)
-            c.drawColor(Color.rgb(12, 12, 14))
-            val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 22f; typeface = bold }
-            c.drawText("Left corners (unchanged)", (labelW + 10).toFloat(), 28f, text)
-            c.drawText("Right corners (mirrored)", (labelW + cw + gap + 10).toFloat(), 28f, text)
-            cells.forEachIndexed { i, (label, l, r) ->
-                val y = head + i * ch
-                c.drawText(label, 12f, y + ch / 2f + 8f, text)
-                c.drawBitmap(l, labelW.toFloat(), y.toFloat(), null)
-                c.drawBitmap(r, (labelW + cw + gap).toFloat(), y.toFloat(), null)
+            mirrorSheet("stacked-mirror-sheet-${sz(large)}", cells)
+            // (Second pass, owner 2026-11-13) The owner's short sheet: the five states he asked to compare.
+            val short = listOf(
+                Triple("Even strength", "play", null as Float?),
+                Triple("Power play", "pp-edm", null),
+                Triple("Intermission", "intermission", null),
+                Triple("Goal 700 ms", "pp-edm", 700f),
+                Triple("Goal 1800 ms", "play", 1_800f),
+                Triple("Final", "final-so", null),
+            ).map { (label, name, t) ->
+                val look = looks.first { it.name == name }
+                Triple(label, render(look, large, DARK, t = t).bmp, render(look, large, DARK, t = t, mirrored = true).bmp)
             }
-            save("stacked-mirror-sheet-${sz(large)}", sheet)
+            mirrorSheet("stacked-mirror-states-${sz(large)}", short)
         }
         assertTrue(File(out, "stacked-mirror-sheet-std.png").length() > 10_000)
+        assertTrue(File(out, "stacked-mirror-states-std.png").length() > 10_000)
+    }
+
+    /**
+     * (Fix pass, review L1) The badge's spin mirrors: mid-spin, an asymmetric stand-in badge (a horizontal white bar,
+     * whose x-reflection is itself) leans one way on the left and the other way mirrored, by the same amount, so the
+     * mirrored badge is the reflection of the left one (a negated rotation, the logo itself never flipped). At rest
+     * (1 800 ms, 0°) it does not lean on either side and its extent reflects exactly.
+     */
+    @Test
+    fun theMirroredBadgeSpinsTheOtherWay() {
+        val base = StackedFixtures.EDM.goal.base or (0xFF shl 24)
+        // The first instant well into the spin with the badge visible.
+        val mid = (450..1_500 step 10).map { it.toFloat() }.first { t ->
+            val g = StackedFixtures.goalFrame(t, still = false)
+            g.badgeAlpha >= 0.5f && abs(g.badgeRotDeg) >= 20f
+        }
+        for (large in listOf(false, true)) {
+            val r = rig(large)
+            val s = r.s
+            val px = r.logoPx
+            val badge = Bitmap.createBitmap(px, px, Bitmap.Config.ARGB_8888).apply {
+                Canvas(this).drawRect(0f, px * 0.4f, px.toFloat(), px * 0.6f, Paint().apply { color = Color.WHITE })
+            }
+            val w = 391.5f * s
+            /** (centre x, lean, ink extent) of the badge's white ink: lean = Σ (x − cx)(y − cy), > 0 = "\" on screen. */
+            fun measure(bmp: Bitmap, x0: Float, x1: Float): Triple<Float, Double, Pair<Float, Float>> {
+                val pts = ArrayList<Pair<Int, Int>>()
+                val b = (base shr 8) and 0xFF
+                for (y in 0 until bmp.height) for (x in maxOf(0, x0.toInt()) until minOf(bmp.width, x1.toInt())) {
+                    val v = (bmp.getPixel(x, y) shr 8) and 0xFF
+                    if ((v - b).toFloat() / (255 - b) >= 0.5f && Color.alpha(bmp.getPixel(x, y)) > 250) pts += x to y
+                }
+                assertTrue("badge drawn", pts.size > 50)
+                val cx = pts.sumOf { it.first.toDouble() } / pts.size
+                val cy = pts.sumOf { it.second.toDouble() } / pts.size
+                val lean = pts.sumOf { (it.first - cx) * (it.second - cy) } / pts.size
+                return Triple(cx.toFloat(), lean, pts.minOf { it.first }.toFloat() to (pts.maxOf { it.first } + 1).toFloat())
+            }
+            for ((t, spinning) in listOf(mid to true, 1_800f to false)) {
+                val g = StackedFixtures.goalFrame(t, still = false).apply {
+                    flashAlpha = 0f; streak1On = false; streak2On = false; tallyAlpha = 0f; letterAlpha.fill(0f)
+                }
+                val left = takeoverOnly(large, g, false, 391.5f, badge)
+                val slot = r.goal.badgeSlotWidth
+                val bl = r.goal.badgeLeft - slot / 2f
+                val br = r.goal.badgeRight + slot / 2f
+                val right = takeoverOnly(large, g, true, 391.5f, badge)
+                val a = measure(left, bl, br)
+                val b = measure(right, w - br, w - bl)
+                val msg = "${sz(large)} t=$t rot=${g.badgeRotDeg}"
+                println("badge $msg: lean left %.1f, mirrored %.1f".format(a.second, b.second))
+                // A filtered bitmap at a fractional centre lands on the pixel grid a little differently on each side, and
+                // the thresholded ink rounds to whole pixels: 1.5 px.
+                val tol = 1.5f
+                assertEquals("$msg: the centre reflects", w - a.first, b.first, tol)
+                assertEquals("$msg: the extent reflects (left)", w - a.third.second, b.third.first, tol)
+                assertEquals("$msg: the extent reflects (right)", w - a.third.first, b.third.second, tol)
+                if (spinning) {
+                    assertTrue("$msg: leaning on the left (${a.second})", abs(a.second) > 20.0 * s * s)
+                    assertTrue("$msg: leans the other way mirrored (${a.second} vs ${b.second})", a.second * b.second < 0)
+                    assertEquals("$msg: by the same amount", -a.second, b.second, abs(a.second) * 0.1)
+                } else {
+                    assertTrue("$msg: upright at rest (${a.second}, ${b.second})", abs(a.second) < 2.0 * s * s && abs(b.second) < 2.0 * s * s)
+                }
+            }
+        }
+    }
+
+    /**
+     * (Fix pass, review L2) The mirrored score pop scales about the reflected slot's centre. At 3 550 ms (the panel gone,
+     * the pop at its 1.5 start scale, before the row flash) the popped score's ink is its rest ink scaled by `popScale`
+     * about the pivot, on both sides: the left pivot `243 − 15.3 − 45.9 / 2` from the rows' left edge, the mirrored one
+     * as far from the rows' right edge. An unmirrored pivot would put the mirrored score about 95 px away.
+     */
+    @Test
+    fun theMirroredScorePopScalesAboutTheReflectedSlot() {
+        val t = 3_550f
+        val g = StackedFixtures.goalFrame(t, still = false)
+        assertTrue("the pop is on at its start scale (${g.popOn}, ${g.popScale}), the panel out", g.popOn && g.popScale > 1.3f && g.panelTo <= g.panelFrom && g.rowFlashAlpha == 0f)
+        val look = looks.first { it.name == "play" }
+        for (large in listOf(false, true)) {
+            val s = rig(large).s
+            val w = look.f.boxW * s
+            val rowsW = K.STACKED_ROWS_W * s
+            val rowH = K.STACKED_H / 2f * s
+            val pivotRows = (243f - 15.3f - 45.9f / 2f) * s
+            for (mirrored in listOf(false, true)) {
+                fun shot(tt: Float?) = render(look, large, DARK, t = tt, shadow = false, glowOn = false, mirrored = mirrored).let { Shot(it.bmp, it.ox + it.bl, it.oy) }
+                val rl = if (mirrored) w - rowsW else 0f
+                // The score's side of the row: the rows' far side from the stripe, 140 in from the stripe's edge.
+                val x0 = if (mirrored) rl + 2f else 140f * s
+                val x1 = if (mirrored) rl + rowsW - 140f * s else rowsW - 7f * s
+                fun ink(sh: Shot): android.graphics.RectF? {
+                    var l = Int.MAX_VALUE; var r = Int.MIN_VALUE
+                    for (py in (2f + sh.oy).toInt() until (rowH - 2f + sh.oy).toInt()) for (px in (x0 + sh.ox).toInt() until (x1 + sh.ox).toInt()) {
+                        val c = sh.bmp.getPixel(px, py)
+                        val d = maxOf(abs(Color.red(c) - Color.red(K.STACKED_ROW_BG)), abs(Color.green(c) - Color.green(K.STACKED_ROW_BG)), abs(Color.blue(c) - Color.blue(K.STACKED_ROW_BG)))
+                        if (d > 120) { l = minOf(l, px); r = maxOf(r, px) }
+                    }
+                    return if (l == Int.MAX_VALUE) null else android.graphics.RectF(l - sh.ox, 0f, r + 1 - sh.ox, 0f)
+                }
+                val rest = ink(shot(null))
+                val pop = ink(shot(t))
+                val msg = "${sz(large)} mirrored=$mirrored"
+                assertTrue("$msg: the score is drawn at rest and popped ($rest, $pop)", rest != null && pop != null)
+                val pivot = if (mirrored) rl + rowsW - pivotRows else pivotRows
+                val k = g.popScale
+                println("pop $msg: rest ${rest!!.left}..${rest.right}, popped ${pop!!.left}..${pop.right}, pivot $pivot × $k")
+                assertEquals("$msg: popped left about the pivot", pivot + k * (rest.left - pivot), pop.left, 2f * k)
+                assertEquals("$msg: popped right about the pivot", pivot + k * (rest.right - pivot), pop.right, 2f * k)
+            }
+        }
+    }
+
+    /** A left-vs-right sheet: one row per (label, left-corner layer, right-corner layer), headed. */
+    private fun mirrorSheet(name: String, cells: List<Triple<String, Bitmap, Bitmap>>) {
+        val labelW = 300
+        val gap = 24
+        val cw = cells[0].second.width
+        val ch = cells[0].second.height
+        val head = 40
+        val sheet = Bitmap.createBitmap(labelW + 2 * cw + gap, head + cells.size * ch, Bitmap.Config.ARGB_8888)
+        val c = Canvas(sheet)
+        c.drawColor(Color.rgb(12, 12, 14))
+        val text = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 22f; typeface = bold }
+        c.drawText("Left corners (unchanged)", (labelW + 10).toFloat(), 28f, text)
+        c.drawText("Right corners (mirrored)", (labelW + cw + gap + 10).toFloat(), 28f, text)
+        cells.forEachIndexed { i, (label, l, r) ->
+            val y = head + i * ch
+            c.drawText(label, 12f, y + ch / 2f + 8f, text)
+            c.drawBitmap(l, labelW.toFloat(), y.toFloat(), null)
+            c.drawBitmap(r, (labelW + cw + gap).toFloat(), y.toFloat(), null)
+        }
+        save(name, sheet)
+    }
+
+    // ------------------------------------------------------------------ second pass (owner 2026-11-13): true reflection
+
+    /**
+     * Glyphs are placed, never flipped: a text's advance box reflects (x ↦ w − x, box coordinates) and its ink keeps its
+     * own offset in that box. From the left ink [a] of a text with advance [adv] and ink [ink] (relative to its advance's
+     * left), the mirrored ink's (left, right).
+     */
+    private fun reflectedInk(a: android.graphics.RectF, adv: Float, ink: android.graphics.RectF, w: Float): Pair<Float, Float> {
+        val advL = a.left - ink.left
+        val l = (w - (advL + adv)) + ink.left
+        return l to l + ink.width()
+    }
+
+    /**
+     * (Owner request 2026-11-13, second pass: "i think i would like the right hand side stacked scorebug to follow the
+     * same order from the edge of the tv as the one on the left side".) A mirrored row's every element is the exact
+     * reflection of the left row's about the rows' centre line, from the drawn pixels (box coordinates, x ↦ w − x), at
+     * even strength and on a power play (away, and home on the 5-on-3), both rows, both sizes: the stripe, the logo (its
+     * solid team-colour fill; the logo is symmetric), the code and the score (their advance boxes reflect, each ink keeping
+     * its offset in its box). So from the screen edge the order is the same on both sides: stripe, logo, code, score.
+     */
+    @Test
+    fun theMirroredRowIsTheReflectionOfTheLeftOne() {
+        val textTol = 1.5f
+        var checks = 0
+        for (large in listOf(false, true)) {
+            val r = rig(large)
+            val s = r.s
+            val p = r.painter
+            val h = K.STACKED_H * s
+            val rowH = h / 2f
+            val rowsW = K.STACKED_ROWS_W * s
+            for (name in listOf("play", "pp-edm", "pp-tor-5on3")) {
+                val look = looks.first { it.name == name }
+                val body = look.body(p)
+                val w = look.f.boxW * s
+                // Raw shots for `extent` (box coordinates through `bl`), boxed ones for `inkBox`.
+                val rawLeft = render(look, large, DARK, shadow = false, pair = probePair)
+                val rawRight = render(look, large, DARK, shadow = false, pair = probePair, mirrored = true)
+                val left = Shot(rawLeft.bmp, rawLeft.ox + rawLeft.bl, rawLeft.oy)
+                val right = Shot(rawRight.bmp, rawRight.ox + rawRight.bl, rawRight.oy)
+                for (home in listOf(false, true)) {
+                    val msg = "$name ${sz(large)} ${if (home) "home" else "away"}"
+                    val y0 = if (home) rowH + 2f else 2f
+                    val y1 = if (home) h - 2f else rowH - 2f
+                    fun shape(what: String, colour: Int, tol: Int) {
+                        val a = extent(rawLeft, colour, y0, y1, tol, 0f, rowsW)
+                        val b = extent(rawRight, colour, y0, y1, tol, w - rowsW, w)
+                        assertTrue("$msg $what: drawn on both sides ($a, $b)", a != null && b != null)
+                        assertEquals("$msg $what left (unmirrored $a)", w - a!!.second, b!!.first, 1f)
+                        assertEquals("$msg $what right (unmirrored $a)", w - a.first, b.second, 1f)
+                        checks++
+                    }
+                    shape("stripe", if (home) probePair.home.stripe else probePair.away.stripe, 6)
+                    shape("logo", if (home) 0xFF00205B.toInt() else 0xFFFF4C00.toInt(), 4)
+                    fun text(what: String, ink: StackedPainter.Ink, t: String, x0: Float, x1: Float) {
+                        val a = inkBox(left, x0, y0, x1, y1, K.STACKED_ROW_BG, Color.WHITE)
+                        val b = inkBox(right, w - x1, y0, w - x0, y1, K.STACKED_ROW_BG, Color.WHITE)
+                        assertTrue("$msg $what: drawn on both sides ($a, $b)", a != null && b != null)
+                        val adv = p.advance(ink, t)
+                        // The ink relative to the advance's left edge (inkBounds applies the paint's alignment).
+                        val inkRel = p.inkBounds(ink, t, if (ink == StackedPainter.Ink.SCORE) adv else 0f, 0f)
+                        val want = reflectedInk(a!!, adv, inkRel, w)
+                        assertEquals("$msg $what ink left (unmirrored ${a.left}..${a.right})", want.first, b!!.left, textTol)
+                        assertEquals("$msg $what ink right (unmirrored ${a.left}..${a.right})", want.second, b.right, textTol)
+                        checks++
+                    }
+                    text("code", StackedPainter.Ink.CODE, if (home) body.homeAbbrev else body.awayAbbrev, 68f * s, 172f * s)
+                    text("score", StackedPainter.Ink.SCORE, if (home) body.homeScore else body.awayScore, 175f * s, rowsW - 7f * s)
+                }
+            }
+        }
+        println("mirrored rows: $checks element checks")
+        assertEquals(2 * 3 * 2 * 4, checks)
+    }
+
+    /**
+     * (Owner request 2026-11-13, second pass) The mirrored takeover's badge, GOAL and tally are placed at the reflection
+     * of their left places (x ↦ boxW − x), so the badge is nearest the screen edge on both sides, from the drawn pixels at
+     * 1 800 ms (everything in; flash and streaks off) at 391.5, 333 and 301.5 wide, both sizes: the badge (a symmetric
+     * stand-in) exactly; GOAL's ink centre about its reflected centre; each tally line right-aligned, its advance box the
+     * reflection of the left one's.
+     */
+    @Test
+    fun theMirroredTakeoverIsTheReflectionOfTheLeftOne() {
+        val textTol = 1.5f
+        var checks = 0
+        val base = StackedFixtures.EDM.goal.base or (0xFF shl 24)
+        for (large in listOf(false, true)) for (boxW in listOf(391.5f, 333f, 301.5f)) {
+            val r = rig(large)
+            val s = r.s
+            val g = StackedFixtures.goalFrame(1_800f, still = false).apply { flashAlpha = 0f; streak1On = false; streak2On = false }
+            assertTrue("everything is in at 1 800 ms", g.badgeAlpha >= 1f && g.tallyAlpha >= 1f && g.letterAlpha.all { it >= 1f })
+            val badge = Bitmap.createBitmap(r.logoPx, r.logoPx, Bitmap.Config.ARGB_8888).apply { eraseColor(Color.WHITE) }
+            val left = Shot(takeoverOnly(large, g, false, boxW, badge), 0f, 0f)
+            val right = Shot(takeoverOnly(large, g, true, boxW, badge), 0f, 0f)
+            val goal = r.goal
+            val w = boxW * s
+            val h = K.STACKED_H * s
+            val msg = "${sz(large)} $boxW"
+            fun ink(shot: Shot, x0: Float, x1: Float, y0: Float = 1f, y1: Float = h - 1f) = inkBox(shot, x0, y0, x1, y1, base, Color.WHITE)
+            // The badge: symmetric, so its extent reflects exactly.
+            val bl = goal.badgeLeft - 2f
+            val br = goal.badgeRight + 2f
+            val ba = ink(left, bl, br)!!
+            val bb = ink(right, w - br, w - bl)!!
+            assertEquals("$msg badge left (unmirrored ${ba.left}..${ba.right})", w - ba.right, bb.left, 1f)
+            assertEquals("$msg badge right", w - ba.left, bb.right, 1f)
+            assertTrue("$msg: the badge is nearest the screen edge (the right)", bb.left > w / 2f)
+            checks++
+            // GOAL: its ink keeps its offset from the word's centre, which reflects.
+            val wl = goal.wordLeft - 6f * s
+            val wr = goal.wordRight + 6f * s
+            val wa = ink(left, wl, wr)!!
+            val wb = ink(right, w - wr, w - wl)!!
+            val cx = goal.wordCentre
+            assertEquals("$msg GOAL centre", (w - cx) + (wa.centerX() - cx), wb.centerX(), textTol)
+            assertEquals("$msg GOAL width", wa.width(), wb.width(), 1f)
+            checks++
+            // The tally: each line right-aligned at the mirror of its left anchor.
+            assertTrue("$msg: tally shown", goal.tallyShown || boxW < 333f)
+            if (goal.tallyShown) {
+                val (b1, b2) = goal.tallyBaselines
+                for ((i, base1) in listOf(b1, b2).withIndex()) {
+                    val tl = goal.tallyLeft - 4f * s
+                    val ta = ink(left, tl, w - 1f, base1 - 20f * s, base1 + 4f * s)!!
+                    val tb = ink(right, 1f, w - tl, base1 - 20f * s, base1 + 4f * s)!!
+                    val want = reflectedInk(ta, goal.tallyAdvance(i), goal.tallyInk(i), w)
+                    assertEquals("$msg tally line ${i + 1} ink left (unmirrored ${ta.left}..${ta.right})", want.first, tb.left, textTol)
+                    assertEquals("$msg tally line ${i + 1} ink right", want.second, tb.right, textTol)
+                    assertTrue("$msg: the tally is nearest the box's inner end (the left)", tb.right < w / 2f)
+                    checks++
+                }
+            }
+        }
+        println("mirrored takeover: $checks element checks")
+        assertTrue("checks ran: $checks", checks >= 2 * 3 * 2 + 2 * 2 * 2)
     }
 
     // ------------------------------------------------------------------ fix pass 2026-11-13 (review S2, L5): directions
@@ -1089,9 +1364,9 @@ class StackedScreenshotTest {
     }
 
     /** The takeover alone ([StackedGoalPainter.drawTakeover]) for [g] over a transparent [boxW]-wide top part. */
-    private fun takeoverOnly(large: Boolean, g: GoalFrame, mirrored: Boolean, boxW: Float = 391.5f): Bitmap {
+    private fun takeoverOnly(large: Boolean, g: GoalFrame, mirrored: Boolean, boxW: Float = 391.5f, badge: Bitmap? = null): Bitmap {
         val r = rig(large)
-        r.goal.begin(Side.AWAY, StackedFixtures.EDM.goal, null, "EDM", "TOR", 3, 1, boxW)
+        r.goal.begin(Side.AWAY, StackedFixtures.EDM.goal, badge, "EDM", "TOR", 3, 1, boxW)
         val bmp = Bitmap.createBitmap(Math.ceil((boxW * r.s).toDouble()).toInt(), Math.ceil((K.STACKED_H * r.s).toDouble()).toInt(), Bitmap.Config.ARGB_8888)
         r.goal.extent(0f, K.STACKED_H * r.s)
         r.goal.drawTakeover(Canvas(bmp), g, mirrored)

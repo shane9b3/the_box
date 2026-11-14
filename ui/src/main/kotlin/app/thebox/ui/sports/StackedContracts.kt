@@ -131,7 +131,10 @@ internal class BarContent {
  * - [t]: the takeover driver this draw read (0 with none); for probes only.
  * - [mirrored]: (owner request 2026-11-13) a right-hand corner (`ScoreBugPlacement.stackedMirrored`): the layout is
  *   mirrored about the rows. The origin stays the rows' left edge; the rows hug the screen edge on their right, and the
- *   SOG and clock columns open to their left (negative x). Text and logos are never mirrored, only re-anchored.
+ *   SOG and clock columns open to their left (negative x). (Second pass, same day) Every element's position is the
+ *   true reflection, so the order from the screen edge is the same on both sides (stripe, logo, code, score, SOG,
+ *   clock; the takeover's badge nearest the edge), and text alignments mirror. Glyphs and logos are never flipped,
+ *   only placed.
  */
 internal class StackedDrawArgs {
     var body: StackedFrameState? = null
