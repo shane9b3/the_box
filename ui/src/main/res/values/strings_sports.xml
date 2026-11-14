@@ -310,8 +310,9 @@
     <string name="sports_failed_refused">%1$s scores stopped letting this app in. CHL scores need an app update; NHL and NFL scores still work.</string>
     <!-- (CHL emulator pass, defect 2) A follow the 8-hour expiry would drop at once: never confirmed, never stored. Either
          the listed start is wrong or this box's clock is, so the text blames neither. %1$s = away abbreviation, %2$s = home
-         abbreviation. -->
-    <string name="sports_toast_too_old">Not following %1$s – %2$s: its start time is more than 8 hours ago by this box\'s clock. Check the date and time in the TV\'s settings, or pick it again in Sports later.</string>
+         abbreviation. A toast shows 2 lines (ToastView): SportsToastFitTest lays every sports toast out whole with 4-letter
+         codes, so keep this one no longer than the _final variant. -->
+    <string name="sports_toast_too_old">Not following %1$s – %2$s: it started more than 8 hours ago by this box\'s clock. Check the TV\'s date and time, or pick it again later.</string>
     <string name="sports_toast_too_old_final">Not following %1$s – %2$s: that game is over and started more than 8 hours ago by this box\'s clock. Follow another game in Sports.</string>
     <!-- %1$s = away abbreviation, %2$s = home abbreviation, %3$s = the league ("OHL"). -->
     <string name="sports_toast_not_listed_league">The %3$s no longer lists %1$s – %2$s. Follow another game in Sports.</string>
