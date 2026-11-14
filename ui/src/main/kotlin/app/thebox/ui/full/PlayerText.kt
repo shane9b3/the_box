@@ -22,6 +22,8 @@ import app.thebox.core.playback.StreamFormat
 import app.thebox.core.playback.VideoDecoderMode
 import app.thebox.core.playback.timeshift.RecordStop
 import app.thebox.core.sports.League
+import app.thebox.core.sports.LeagueGroup
+import app.thebox.core.sports.group
 import app.thebox.core.sports.NhlBugStyle
 import app.thebox.player.api.PlaybackNotice
 import app.thebox.ui.R
@@ -500,9 +502,9 @@ object PlayerText {
         is PickerChoice.ScoreFailed -> SportsText.failure(res, c.kind, if (league != League.NHL) league else c.league)
         is PickerChoice.ScoreDelayChoice -> SportsText.delay(res, c.delaySec)
         is PickerChoice.ScoreLeagueRow -> scoreLeagueRow(res, c.league)
+        // (CHL §6.3, L5) "CHL league · OHL": the sub-league's own name.
+        is PickerChoice.ScoreChlRow -> scoreChlRow(res, c.league)
         is PickerChoice.ScoreStyleRow -> scoreStyleRow(res, c.style)
-        // TODO(WP-5, CHL §1.6 #48): commit 0's minimal row text ("CHL league · OHL"); never listed before WP-2.
-        is PickerChoice.ScoreChlRow -> res.getString(R.string.sports_picker_chl_league, leagueName(res, c.league))
     }
 
     /** (Stacked commit 0, docs/design/m6-score-bug-stacked-theme.md §1.1) The sheet's Style row: "Style · Pill" ([style] is the current one; OK toggles it). */
@@ -517,19 +519,34 @@ object PlayerText {
         },
     )
 
-    /** (NFL §7.3, S4) The picker's League row: "League · NFL" ([league] is the shown one; OK toggles it). */
+    /**
+     * (NFL §7.3, S4; CHL L5) The picker's League row: "League · CHL" ([league] is the shown one; OK cycles NHL → NFL → CHL).
+     * The row names the **group** ([groupName]), so it reads "League · CHL" for any CHL league; the sub-league has its own row.
+     */
     fun scoreLeagueRow(res: Resources, league: League): String =
-        res.getString(R.string.sports_picker_league, leagueName(res, league))
+        res.getString(R.string.sports_picker_league, groupName(res, league.group))
 
-    /** (NFL §7.3) "NHL" / "NFL". */
+    /** (CHL §6.3, L5) The picker's CHL row: "CHL league · OHL" ([league] is the shown CHL league: [leagueName]). */
+    fun scoreChlRow(res: Resources, league: League): String =
+        res.getString(R.string.sports_picker_chl_league, leagueName(res, league))
+
+    /** "NHL" / "NFL" / "OHL" / "WHL" / "QMJHL": one league's own name. */
     fun leagueName(res: Resources, league: League): String = res.getString(
         when (league) {
             League.NHL -> R.string.sports_league_nhl
             League.NFL -> R.string.sports_league_nfl
-            // CHL commit 0 (minimal, to compile); TODO(WP-5, CHL §1.6 #48): `groupName` and the League / CHL row texts (L5).
             League.OHL -> R.string.sports_league_ohl
             League.WHL -> R.string.sports_league_whl
             League.QMJHL -> R.string.sports_league_qmjhl
+        },
+    )
+
+    /** (CHL L5) "NHL" / "NFL" / "CHL": a league group's name (the Sports tab chip, the League row, the interval title). */
+    fun groupName(res: Resources, group: LeagueGroup): String = res.getString(
+        when (group) {
+            LeagueGroup.NHL -> R.string.sports_league_nhl
+            LeagueGroup.NFL -> R.string.sports_league_nfl
+            LeagueGroup.CHL -> R.string.sports_league_chl
         },
     )
 

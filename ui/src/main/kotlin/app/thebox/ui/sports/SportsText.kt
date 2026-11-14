@@ -18,7 +18,12 @@ import app.thebox.core.sports.ScoreBugView
 import app.thebox.core.sports.ScoreCorner
 import app.thebox.core.sports.ScoreEvent
 import app.thebox.core.sports.ScoreFacts
+import app.thebox.core.sports.Sport
+import app.thebox.core.sports.LeagueGroup
+import app.thebox.core.sports.group
+import app.thebox.core.sports.sport
 import app.thebox.ui.R
+import app.thebox.ui.full.PlayerText
 import app.thebox.ui.guide.screen.TimeFormats
 import java.util.Date
 import java.util.Locale
@@ -47,7 +52,11 @@ object SportsText {
             1 -> res.getString(R.string.sports_period_1)
             2 -> res.getString(R.string.sports_period_2)
             3 -> res.getString(R.string.sports_period_3)
-            4 -> if (league == League.NFL) res.getString(R.string.sports_period_4) else res.getString(R.string.sports_period_n, p.number) // NFL: "4th", the NHL keeps "P4"
+            // NFL: "4th"; every hockey league keeps "P4" (CHL §1.1: an exhaustive when over the sport, never `== NFL`)
+            4 -> when (league.sport) {
+                Sport.FOOTBALL -> res.getString(R.string.sports_period_4)
+                Sport.HOCKEY -> res.getString(R.string.sports_period_n, p.number)
+            }
             else -> res.getString(R.string.sports_period_n, p.number)
         }
         PeriodKind.OT -> if (p.number <= 1) res.getString(R.string.sports_period_ot) else res.getString(R.string.sports_period_ot_n, p.number)
@@ -124,11 +133,17 @@ object SportsText {
      */
     fun state(res: Resources, g: GameSnapshot, clock24: Boolean, league: League = League.NHL, nowMs: Long = System.currentTimeMillis()): String {
         val nfl = league == League.NFL || g.id.league == League.NFL
-        val lg = if (nfl) League.NFL else League.NHL
+        // (CHL §1.6 #59) The game's own league decides the period words; the shown league only makes a game "NFL".
+        val lg = if (nfl) League.NFL else g.id.league
         val p = periodOf(g)
         val clockSecs = g.clock?.secondsRemaining ?: 0
         return when (g.phase) {
-            GamePhase.SCHEDULED, GamePhase.PRE -> if (nfl) nflStart(g.startUtcMs, clock24, nowMs) else startTime(g.startUtcMs, clock24)
+            // (CHL B2) A league that lists the time as to be decided shows "Time TBD", never the placeholder midnight.
+            GamePhase.SCHEDULED, GamePhase.PRE -> when {
+                g.startTbd -> res.getString(R.string.sports_time_tbd)
+                nfl -> nflStart(g.startUtcMs, clock24, nowMs)
+                else -> startTime(g.startUtcMs, clock24)
+            }
             GamePhase.POSTPONED -> res.getString(R.string.sports_postponed)
             GamePhase.FINAL -> final(res, g.finalKind)
             GamePhase.INTERMISSION -> when {
@@ -218,14 +233,58 @@ object SportsText {
         }
     }
 
-    /** §5.4: the day list's failure text (no network vs NHL.com did not answer). */
-    fun failure(res: Resources, kind: FailKind, league: League = League.NHL): String = res.getString(
-        when {
-            kind == FailKind.OFFLINE -> R.string.sports_no_network
-            league == League.NFL -> R.string.sports_failed_espn
-            else -> R.string.sports_failed
-        },
-    )
+    /**
+     * §5.4: the day list's failure text: no network; (CHL §2.6, S7) a refused CHL key, which needs an app update; else the
+     * league's own "did not answer" line (NHL.com, ESPN, or "OHL scores did not answer").
+     */
+    fun failure(res: Resources, kind: FailKind, league: League = League.NHL): String = when {
+        kind == FailKind.OFFLINE -> res.getString(R.string.sports_no_network)
+        else -> when (league.group) {
+            LeagueGroup.NHL -> res.getString(R.string.sports_failed)
+            LeagueGroup.NFL -> res.getString(R.string.sports_failed_espn)
+            LeagueGroup.CHL ->
+                if (kind == FailKind.REFUSED) res.getString(R.string.sports_failed_refused, PlayerText.leagueName(res, league))
+                else res.getString(R.string.sports_failed_league, PlayerText.leagueName(res, league))
+        }
+    }
+
+    /** (CHL §6.5) "No OHL games today. Pick another day above." for a CHL day board; the NHL and NFL keep their own strings. */
+    fun emptyDay(res: Resources, day: SportsDay, league: League, weekOff: Boolean = false): String = when (league.group) {
+        LeagueGroup.NHL -> res.getString(
+            when (day) {
+                SportsDay.YESTERDAY -> R.string.sports_empty_yesterday
+                SportsDay.TODAY -> R.string.sports_empty_today
+                SportsDay.TOMORROW -> R.string.sports_empty_tomorrow
+            },
+        )
+        LeagueGroup.NFL -> res.getString(if (weekOff) R.string.sports_week_off else R.string.sports_empty_week)
+        LeagueGroup.CHL -> res.getString(
+            when (day) {
+                SportsDay.YESTERDAY -> R.string.sports_empty_yesterday_league
+                SportsDay.TODAY -> R.string.sports_empty_today_league
+                SportsDay.TOMORROW -> R.string.sports_empty_tomorrow_league
+            },
+            PlayerText.leagueName(res, league),
+        )
+    }
+
+    /** (CHL §6.6, P9, Q2) The Sports tab's credit line; the QMJHL's reads "LHJMQ" verbatim (the feed's required attribution). */
+    fun credit(res: Resources, league: League): String = when (league.group) {
+        LeagueGroup.NHL -> res.getString(R.string.sports_credit)
+        LeagueGroup.NFL -> res.getString(R.string.sports_credit_espn)
+        LeagueGroup.CHL -> res.getString(
+            R.string.sports_credit_chl,
+            res.getString(
+                when (league) {
+                    League.OHL -> R.string.sports_credit_chl_ohl
+                    League.WHL -> R.string.sports_credit_chl_whl
+                    League.QMJHL -> R.string.sports_credit_chl_qmjhl
+                    // Unreachable under the group check above; the OHL's text is the neutral choice.
+                    League.NHL, League.NFL -> R.string.sports_credit_chl_ohl
+                },
+            ),
+        )
+    }
 
     /** The toast of a repository event (§2.6, §5.3, U-S12); always a reason and a next step. */
     fun toast(res: Resources, e: ScoreEvent): String = when (e) {
@@ -237,8 +296,11 @@ object SportsText {
 
     private fun removed(res: Resources, why: RemoveReason, g: FollowedGame, league: League = League.NHL): String = when (why) {
         RemoveReason.POSTPONED -> res.getString(R.string.sports_toast_postponed, g.away, g.home)
-        RemoveReason.NOT_LISTED ->
-            res.getString(if (league == League.NFL) R.string.sports_toast_not_listed_espn else R.string.sports_toast_not_listed, g.away, g.home)
+        RemoveReason.NOT_LISTED -> when (league.group) {
+            LeagueGroup.NHL -> res.getString(R.string.sports_toast_not_listed, g.away, g.home)
+            LeagueGroup.NFL -> res.getString(R.string.sports_toast_not_listed_espn, g.away, g.home)
+            LeagueGroup.CHL -> res.getString(R.string.sports_toast_not_listed_league, g.away, g.home, PlayerText.leagueName(res, league))
+        }
         RemoveReason.SPORTS_OFF -> res.getString(R.string.sports_toast_sports_off)
     }
 }

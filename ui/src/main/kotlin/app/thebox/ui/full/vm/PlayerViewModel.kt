@@ -415,7 +415,7 @@ class PlayerViewModel @Inject constructor(
             combine(combine(repo.bug, repo.lastScore, ::Pair), repo.followed, repo.day, repo.prefs) { (bug, known), game, day, p ->
                 app.thebox.core.sports.ScoreFacts(
                     followed = bug, lastScore = known, game = game, day = day,
-                    corner = p.corner, delaySec = p.delaySec, enabled = p.enabled, league = p.league, style = p.nhlStyle,
+                    corner = p.corner, delaySec = p.delaySec, enabled = p.enabled, league = p.league, style = p.nhlStyle, chlLeague = p.chlShown,
                 )
             }.distinctUntilChanged().collect { machine.scores(it) }
         }

@@ -179,8 +179,8 @@ class SportsScreenTest {
         board(pre)
         show()
         assertEquals(true, backFree.last())
-        press(Key.DirectionUp) // Today chip is focused already: Up reaches the NHL chip, then Right twice Corner
-        press(Key.DirectionRight, Key.DirectionRight)
+        press(Key.DirectionUp) // Today chip is focused already: Up reaches the NHL chip, then Right three times Corner (NFL, CHL)
+        press(Key.DirectionRight, Key.DirectionRight, Key.DirectionRight)
         rule.onNodeWithTag(SPORTS_CORNER_TAG).assertIsFocused()
         press(Key.DirectionCenter)
         rule.onNodeWithTag(SPORTS_MENU_TAG).assertExists()
@@ -196,7 +196,7 @@ class SportsScreenTest {
         board(pre)
         show()
         press(Key.DirectionUp, Key.DirectionRight)
-        press(Key.DirectionRight, Key.DirectionCenter)
+        press(Key.DirectionRight, Key.DirectionRight, Key.DirectionCenter) // NHL, then NFL, CHL, Corner
         press(Key.DirectionDown, Key.DirectionCenter) // second entry: Top left
         assertEquals(ScoreCorner.TOP_LEFT, store.flow(SportsDomain).value.corner)
         rule.onNodeWithTag(SPORTS_MENU_TAG).assertDoesNotExist()
@@ -207,7 +207,7 @@ class SportsScreenTest {
         board(pre)
         show()
         press(Key.DirectionUp, Key.DirectionRight)
-        press(Key.DirectionRight, Key.DirectionRight)
+        press(Key.DirectionRight, Key.DirectionRight, Key.DirectionRight)
         press(Key.DirectionCenter)
         rule.onNodeWithTag(SPORTS_DELAY_TAG).assertExists()
         rule.onNodeWithTag(sportsMenuItemTag(0)).assertIsFocused()

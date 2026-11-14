@@ -97,7 +97,7 @@ internal class StackedGoalPainter(
     }
     /** (Owner request 2026-11-13, second pass) The tally mirrored: right-aligned at the mirror of its left anchor. */
     private val tallyMirroredPaint = Paint(tallyPaint).apply { textAlign = Paint.Align.RIGHT }
-    private val badgeTextOffset: Float
+    private var badgeTextOffset: Float = 0f
     private val tallyBaseline1: Float
     private val tallyBaseline2: Float
 
@@ -212,6 +212,11 @@ internal class StackedGoalPainter(
         this.side = side
         this.colours = colours
         this.abbrev = if (side == Side.AWAY) awayAbbrev else homeAbbrev
+        // (CHL §6.4, O3) A 4-letter code's fallback text steps down to fit the 67.5 px badge slot; every other code stays at 24.
+        badgeText.textSize = goalBadgeFallbackPx(badgeText.typeface, abbrev, K.STACKED_GOAL_LOGO) * s
+        val tb = android.graphics.Rect()
+        badgeText.getTextBounds("M", 0, 1, tb)
+        badgeTextOffset = -(tb.top + tb.bottom) / 2f
         this.boxW = boxW * s
         leadPaint.color = colours.accent or OPAQUE
         panelPaint.color = colours.base or OPAQUE
