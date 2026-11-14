@@ -82,7 +82,7 @@ internal class GoalPainter(
         typeface = sansBold; textSize = K.GOAL_TALLY_PX * s; color = Color.WHITE; textAlign = Paint.Align.RIGHT
         fontFeatureSettings = "'tnum'"
     }
-    private val badgeTextOffset: Float
+    private var badgeTextOffset: Float = 0f
     private val tallyBaseline: Float
 
     // ---- the badge (§2.3, §4): centre of the bug's logo slot
@@ -204,6 +204,11 @@ internal class GoalPainter(
         this.side = side
         this.colours = colours
         this.abbrev = abbrev
+        // (CHL §6.4, O3) A 4-letter code's fallback text steps down to fit the 64 px slot; every other code stays at 24.
+        badgeText.textSize = goalBadgeFallbackPx(badgeText.typeface, abbrev, K.SCORE_LOGO_W) * s
+        val tb = android.graphics.Rect()
+        badgeText.getTextBounds("M", 0, 1, tb)
+        badgeTextOffset = -(tb.top + tb.bottom) / 2f
         leadPaint.color = colours.accent or OPAQUE
         panelPaint.color = colours.base or OPAQUE
         glowPaint.color = colours.glow or OPAQUE
