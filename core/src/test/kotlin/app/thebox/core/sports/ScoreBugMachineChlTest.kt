@@ -3,6 +3,7 @@ package app.thebox.core.sports
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
@@ -98,7 +99,7 @@ class ScoreBugMachineChlTest {
     }
 
     @Test
-    fun refusedIsRetriedOnlyAtThreeHundredSecondsWhateverRetryAfterSays() {
+    fun refusedIsRetriedAtThreeHundredSecondsOrLaterNeverFaster() {
         for (league in CHL_LEAGUES) {
             for (retryAfter in listOf<Int?>(null, 5, 30, 900)) {
                 val r = Rig(start)
@@ -106,12 +107,83 @@ class ScoreBugMachineChlTest {
                 r.ok(g(league))
                 r.at(5_000L)
                 r.fail(FailKind.REFUSED, retryAfter)
-                assertEquals(5_000L + SportsConstants.BACKOFF_MAX_MS, r.nextPoll(), "$league retryAfter=$retryAfter")
+                val gap = maxOf(SportsConstants.BACKOFF_MAX_MS, (retryAfter ?: 0) * 1000L)
+                assertEquals(5_000L + gap, r.nextPoll(), "$league retryAfter=$retryAfter: max(300 s, Retry-After)")
                 // A second refusal neither speeds it up nor slows it down.
                 val again = r.now
                 r.fail(FailKind.REFUSED, retryAfter)
-                assertEquals(again + SportsConstants.BACKOFF_MAX_MS, r.nextPoll(), "$league: still 300 s on the second refusal")
+                assertEquals(again + gap, r.nextPoll(), "$league: same gap on the second refusal")
             }
+        }
+    }
+
+    @Test
+    fun afterARefusedRetryAnswersTheCadenceAndTheBackOffStartOverFromFiveSeconds() {
+        for (league in CHL_LEAGUES) {
+            val r = Rig(start)
+            r.follow(g(league))
+            r.ok(g(league))
+            r.at(5_000L)
+            r.fail(FailKind.REFUSED)
+            assertEquals(305_000L, r.nextPoll())
+            r.ok(g(league))
+            assertEquals(305_000L + 10_000L, r.nextPoll(), "$league: back on doneMono + interval")
+            val failedAt = r.now
+            r.fail(FailKind.TIMEOUT)
+            val gap = r.nextPoll()!! - failedAt
+            assertTrue(gap in 4_000L..6_000L, "$league: the next failure starts from the 5 s base, not failures = 2: $gap")
+        }
+    }
+
+    @Test
+    fun aRiseToSeenInsideARefusedBackOffDoesNotPollEarly() {
+        for (league in CHL_LEAGUES) {
+            val r = Rig(start)
+            r.follow(g(league))
+            r.m.demand(Demand.UNSEEN)
+            r.ok(g(league))
+            r.at(5_000L)
+            r.fail(FailKind.REFUSED)
+            r.at(65_000L)
+            r.m.demand(Demand.SEEN)
+            assertFalse(r.m.pollDue(), "$league: the back-off holds")
+            assertEquals(305_000L, r.nextPoll(), "$league")
+        }
+    }
+
+    @Test
+    fun aRefusalBeforeThePreGameWakeRetriesAtTheLaterOfBackOffAndWake() {
+        for (league in CHL_LEAGUES) {
+            val wake = 8 * 60_000L // start - 2 min, 10 min ahead of "now"
+            val early = Rig(start, wallOffsetMs = -10 * 60_000L)
+            val pre = g(league, phase = GamePhase.SCHEDULED)
+            early.follow(pre)
+            early.ok(pre)
+            early.at(100_000L)
+            early.fail(FailKind.REFUSED)
+            assertEquals(wake, early.nextPoll(), "$league: +300 s is 400 s, the wake (480 s) is later")
+            val late = Rig(start, wallOffsetMs = -10 * 60_000L)
+            late.follow(pre)
+            late.ok(pre)
+            late.at(300_000L)
+            late.fail(FailKind.REFUSED)
+            assertEquals(600_000L, late.nextPoll(), "$league: +300 s is later than the wake")
+        }
+    }
+
+    @Test
+    fun preGameWhileTheBugIsNotOnScreenPollsNoFasterThanTheUnseenFloor() {
+        for (league in CHL_LEAGUES) {
+            val r = Rig(start, wallOffsetMs = -10 * 60_000L)
+            val pre = g(league, phase = GamePhase.SCHEDULED)
+            r.follow(pre)
+            r.m.demand(Demand.UNSEEN)
+            r.ok(pre)
+            val wake = 8 * 60_000L
+            assertEquals(wake, r.nextPoll(), "$league: still asleep until the wake")
+            r.at(wake + 100)
+            r.ok(pre)
+            assertEquals(wake + 100 + SportsConstants.POLL_UNSEEN_MS, r.nextPoll(), "$league: 120 s, not 40 s")
         }
     }
 
@@ -156,6 +228,8 @@ class ScoreBugMachineChlTest {
 
     @Test
     fun anOlderBodyIsNotHeldForAChlGame() {
+        // olderNfl has no league check of its own, so this fails if nfl() ever became timed(): the 620 s body below is
+        // "older" (same period, earlier clock, equal score) and would be held instead of shown.
         for (league in CHL_LEAGUES) {
             val r = Rig(start)
             val a = SportsFixtures.chlGame(league = league, clock = GameClock(600, true, false))

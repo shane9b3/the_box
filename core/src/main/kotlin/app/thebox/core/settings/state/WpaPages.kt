@@ -658,7 +658,8 @@ class WpaPages(
             parts += when (league.group) {
                 LeagueGroup.NFL -> t(SettingsText.SPORTS_INTERVAL_SLOWED)
                 LeagueGroup.CHL -> t(SettingsText.SPORTS_INTERVAL_SLOWED_LEAGUE, league.name)
-                LeagueGroup.NHL -> t(SettingsText.SPORTS_INTERVAL_SLOWED)
+                // Unreachable (`slowed` needs a timed league); the league-named text is the safe one if it ever is reached.
+                LeagueGroup.NHL -> t(SettingsText.SPORTS_INTERVAL_SLOWED_LEAGUE, league.name)
             }
         }
         if (fallback) parts += t(SettingsText.SPORTS_INTERVAL_FALLBACK, (PollMeter.bytesPerPoll(m, league) + 500) / 1000)
