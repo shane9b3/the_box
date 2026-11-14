@@ -9,8 +9,8 @@ A debug build's `files/debug/sports_base` origin sends the app's CHL requests he
         The body echoes the key in SiteKit.Parameters, as the real host does. `Cache-Control: max-age=240`.
     GET /firebase/svf/{client}/runningclock/games/{id}.json
     GET /firebase/svf/{client}/{publishedclock|goalssummary|shotssummary|penalties|goals|shootouts}/1/games/{id}.json
-        One node at the request instant. With `X-Firebase-ETag: true` the answer carries a content ETag and a matching
-        `If-None-Match` is a 304 with an empty body. An unknown game (or a node it does not have) is JSON `null`.
+        One node at the request instant. With `X-Firebase-ETag: true` the answer carries a content ETag; a matching
+        `If-None-Match` is a 304 with an empty body, with or without `X-Firebase-ETag` (as the real database). An unknown game (or a node it does not have) is JSON `null`.
     GET /firebase/svf/{client}/runningclock/games.json?orderBy="DatePlayed"&equalTo="YYYY-MM-DD"   (and .../1/games.json)
         The Today overlay date query: {game id: node} for that date ({} for none; `penalties` has an empty DatePlayed, so
         it never matches, as the real database). Combined with `X-Firebase-ETag` it is Firebase's 400 "Mixing querying
@@ -517,14 +517,16 @@ def _firebase(h, sp, cfg, path, q, now):
     value = sp.nodes(client, game, now).get(node) if game else None
     body = json.dumps(value).encode()
     headers = {"Cache-Control": "no-cache"}
+    tag = etag_of(body)
     if wants_tag:
-        tag = etag_of(body)
         headers["ETag"] = tag
         headers["Access-Control-Expose-Headers"] = "ETag"
-        if h.headers.get("If-None-Match") == tag:
-            p.sports.note(path, 304)
-            sports.send(h, 304, b"", "application/json; charset=utf-8", dict(headers, Date=sports.http_date(now)))
-            return True
+    # As the real database (checked 2026-11-14, WP-3 review L1): a matching If-None-Match is a 304 with or without
+    # X-Firebase-ETag; only the ETag *header* needs X-Firebase-ETag.
+    if h.headers.get("If-None-Match") == tag:
+        p.sports.note(path, 304)
+        sports.send(h, 304, b"", "application/json; charset=utf-8", dict(headers, Date=sports.http_date(now)))
+        return True
     p.sports.note(path, 200)
     return _send(h, 200, body, "application/json; charset=utf-8", headers)
 

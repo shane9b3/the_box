@@ -164,6 +164,9 @@ class RoutesTest(ChlCase):
         self.assertEqual(tag, h2["etag"])
         st, _, _ = self.node("ohl", "goalssummary", gid, {"X-Firebase-ETag": "true", "If-None-Match": "other"})
         self.assertEqual(200, st)
+        st, h3, body3 = self.node("ohl", "goalssummary", gid, {"If-None-Match": tag})  # as Firebase: no X-Firebase-ETag needed
+        self.assertEqual((304, b""), (st, body3))
+        self.assertNotIn("etag", h3)
 
     def test_unknown_game_root_and_refusal(self):
         st, h, body = self.node("ohl", "runningclock", "123", {"X-Firebase-ETag": "true"})
@@ -355,8 +358,14 @@ class LiveGateTest(ChlCase):
                         last[n] = v
                 f.write(json.dumps({"unix": sp.anchor + t, "status": status, "nodes": changed}) + "\n")
                 t += 5.0
+        day = sp.day(client).isoformat()
+        for name, at in (("board-start.json", sp.anchor), ("board-end.json", sp.anchor + total + 10)):
+            params = {"feed": "modulekit", "view": "gamesbydate", "key": "KEY_REDACTED", "client_code": client,
+                      "fetch_date": day}
+            with open(os.path.join(folder, name), "w") as f:
+                json.dump(sp.sitekit("Gamesbydate", params, [sp.board_entry(client, g, at) for g in sp.games(client)]), f)
         with open(os.path.join(folder, "meta.json"), "w") as f:
-            json.dump({"league": client, "game": game[0], "interval_s": 5}, f)
+            json.dump({"league": client, "game": game[0], "interval_s": 5, "date": day}, f)
 
     def test_the_fake_game_passes_the_gate(self):
         import io

@@ -73,7 +73,7 @@ class ChlContractsTest {
         assertEquals(listOf(5, 10, 15, 20, 30), SportsConstants.intervalChoices(League.NFL), "the NFL's are unchanged")
         assertEquals(20, SportsConstants.intervalDefault(League.NHL))
         assertEquals(5, SportsConstants.intervalDefault(League.NFL))
-        assertEquals(2_000, SportsConstants.EST_WIRE_BYTES_CHL)
+        assertEquals(4_000, SportsConstants.EST_WIRE_BYTES_CHL) // (WP-3 fix pass, lead ruling S2) headers counted
         assertEquals(131_072L, SportsConstants.CHL_NODE_MAX_BYTES)
         assertEquals(5, SportsConstants.CHL_DAY_ROLLOVER_H)
         assertEquals(1_200, SportsConstants.CHL_REG_PERIOD_S)

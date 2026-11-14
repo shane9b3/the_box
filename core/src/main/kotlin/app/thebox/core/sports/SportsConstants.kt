@@ -89,8 +89,12 @@ object SportsConstants {
     /** MB/h before a measurement (gzip bytes per poll; docs F2, F7). */
     const val EST_WIRE_BYTES_NHL = 1_500
     const val EST_WIRE_BYTES_NFL = 2_500
-    /** (CHL §2.5, S4) Six conditional Firebase requests per poll on one HTTP/2 connection, until measured. */
-    const val EST_WIRE_BYTES_CHL = 2_000
+    /**
+     * (CHL §2.5, S4; WP-3 fix pass, lead ruling S2) Six conditional Firebase requests per poll. Firebase is HTTP/1.1 and
+     * sends nothing compressed, so each request and its answer (a 304 included) carry about 650 B of uncompressed headers;
+     * the CHL source counts those headers with the bodies, so this is a poll's true wire cost (about 4 KB in play).
+     */
+    const val EST_WIRE_BYTES_CHL = 4_000
     /** (Review S3) On the board fallback, the per-event endpoint is tried again this often. */
     const val PER_EVENT_RETRY_MS = 600_000L
     /** Two shape failures in a row (a 200 that does not decode, a JSON 400) switch the follow to the board. */
