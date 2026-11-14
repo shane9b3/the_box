@@ -247,6 +247,13 @@ The NHL source changes only by filling `maxAgeS`. Its endpoints and parsing stay
 
 ## 5. Settings
 
+> **CHL amendment (2026-11-14, `docs/design/m6-chl-leagues.md` §2.5, §6.5; lead P1, L4).** One CHL setting shared by OHL, WHL and QMJHL
+> (`SportsPrefs.chlIntervalS`): Auto · 5 · 10 · 15 · 20 · 30 s after each update, Auto never under 5 s. The row is titled
+> with the group ("CHL score updates") and, when a CHL game is followed, shows and runs **the followed league's** meter.
+> The MB/h estimate before a measurement is `EST_WIRE_BYTES_CHL = 4 000` B a poll; the CHL's samples count every request's and
+> answer's headers too (six HTTP/1.1 Firebase exchanges with `If-None-Match`, 304s included), about 3 MB an hour at 5 s.
+> There is no "other league" line any more.
+
 ### 5.1 Where
 
 - Sports section, **ADVANCED** (lead ruling on U-B2: every Sports row is advanced; the simple count stays 35).

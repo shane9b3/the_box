@@ -137,7 +137,11 @@ object PollMeter {
         return s[(s.size - 1) / 2]
     }
 
-    /** About this many MB an hour at [intervalS] while a game is live (headers not counted). */
+    /**
+     * About this many MB an hour at [intervalS] while a game is live. The NHL and NFL samples count response bodies only
+     * (headers not counted); the CHL's count every request's and answer's headers too (304s included; CHL §2.4, WP-3 fix
+     * pass S2), as does [SportsConstants.EST_WIRE_BYTES_CHL].
+     */
     fun mbPerHour(m: PollMeasure?, league: League, intervalS: Int): Double =
         3600.0 / intervalS.coerceAtLeast(1) * bytesPerPoll(m, league) / 1_000_000.0
 

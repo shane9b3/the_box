@@ -81,6 +81,11 @@ them into `core/src/test/resources/sports/nhl/` (N11).
 
 ### 1.2 Decoding (`NhlMapper.powerPlay`, pure)
 
+> **CHL amendment (2026-11-14, `docs/design/m6-chl-leagues.md` §5).** The CHL feed has no power-play state. `ChlPowerPlay.derive` (pure, `:core`)
+> derives it from penalties, goals and the clock; when a hide rule fires the snapshot says
+> `GameSnapshot.powerPlayUnknown` instead of a power play (accepted degradation: occasional errors; no empty-net or 6-on-4
+> state).
+
 ```
 code: a 4-character string, or a JSON integer of 3–4 digits left-padded to 4 ("651" → "0651"); anything else → none
 must match [01][3-6][3-6][01]
@@ -121,6 +126,10 @@ ScoreBugView(…, val powerPlay: PowerPlay? = null, val goalPp: Boolean = false,
 `TeamLine.name`'s KDoc is corrected: the landing gives "Edmonton Oilers", not the common name (N4).
 
 ### 1.4 Machine (`ScoreBugMachine`)
+
+> **CHL amendment (2026-11-14, `docs/design/m6-chl-leagues.md` §4.1).** An unknown power play (`powerPlayUnknown`) holds the last shown tab for
+> at most 30 s (`PP_UNKNOWN_HOLD_MS`, by elapsed time), then closes it silently: a hide is never "Power play over.". A goal by
+> the held side inside the hold drops it. Always false, so unchanged, for the NHL.
 
 - **`view().powerPlay`** is the shown snapshot's power play when:
   - the phase is LIVE or INTERMISSION;

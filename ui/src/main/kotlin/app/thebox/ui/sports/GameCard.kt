@@ -44,6 +44,7 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import app.thebox.core.sports.FailKind
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.isChl
 import app.thebox.core.sports.PeriodKind
@@ -58,6 +59,8 @@ import kotlin.math.roundToInt
 
 internal const val SPORTS_CARD_TAG = "sports_card:"
 internal const val SPORTS_FOLLOWING_TAG = "sports_following:"
+/** (CHL integration, L10) The followed card's refusal text, while the game's feed refuses the app. */
+internal const val SPORTS_REFUSED_TAG = "sports_refused:"
 internal const val SPORTS_ACTION_TAG = "sports_action:"
 internal fun sportsCardTag(gameId: String) = SPORTS_CARD_TAG + gameId
 
@@ -120,13 +123,15 @@ internal fun GameCard(
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(DesignTokens.Radii.Button)
     val ink = if (focused) Ink else GuideUi.Fg
+    // (CHL integration, WP-3 review L10) The followed game's feed refused the app: the reason and the next step.
+    val refused = if (card.refused) SportsText.failure(res, FailKind.REFUSED, g.id.league) else null
     val desc = run {
         val state = SportsText.state(res, g, clock24)
         val live = if (g.phase == GamePhase.LIVE) res.getString(R.string.sports_live) + ", " else ""
         res.getString(
             if (card.followed) R.string.sports_card_desc_following else R.string.sports_card_desc,
             g.away.name, g.away.score?.toString() ?: "", g.home.name, g.home.score?.toString() ?: "", live + state,
-        )
+        ) + (refused?.let { ". $it" } ?: "")
     }
     val interaction = remember { MutableInteractionSource() }
     Box(
@@ -149,9 +154,19 @@ internal fun GameCard(
                 if (focused) ActionChip(g.id.id, card.followed) else if (card.followed) FollowingChip(g.id.id, false)
             }
             Spacer(Modifier.height(GameCardMetrics.HEADER_GAP.dp))
-            TeamRow(g.away, ink, g.id.league.isChl)
-            Spacer(Modifier.height(GameCardMetrics.ROW_GAP.dp))
-            TeamRow(g.home, ink, g.id.league.isChl)
+            if (refused != null) {
+                // The two team rows' 128 px hold the reason (24 px, up to four lines); the header keeps the state and the chip.
+                Line(
+                    refused,
+                    GuideUi.sans(GameCardMetrics.STATE_PX, FontWeight.Medium, if (focused) ink else GuideUi.Warn),
+                    Modifier.fillMaxWidth().testTag(SPORTS_REFUSED_TAG + g.id.id),
+                    maxLines = 4,
+                )
+            } else {
+                TeamRow(g.away, ink, g.id.league.isChl)
+                Spacer(Modifier.height(GameCardMetrics.ROW_GAP.dp))
+                TeamRow(g.home, ink, g.id.league.isChl)
+            }
         }
     }
 }

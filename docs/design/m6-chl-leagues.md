@@ -8,6 +8,9 @@ Status:
 - **WP-1 implemented and reviewed 2026-11-14** (`docs/review/2026-11-14-chl-wp1-mapper-review.md`, "Fix pass"). The
   rulings (S1, S2 model changes; the 11 implementation departures) are written into §3.6, §5.3, §5.5, §5.6 and §5.7, each
   marked "(WP-1 fix pass)".
+- **Integrated 2026-11-14** on `chl`: WP-2 to WP-5 merged with their fix passes; the integration items (L10 refused reason
+  on screen, one debug-override constant, the `:ui:sportsHashGate` reader, §9 doc amendments) are in the decision note's
+  "Integration" section.
 - Review: `docs/review/2026-11-13-chl-leagues-design-review.md`. Every finding is applied in place and marked (B1),
   (S4), (L7) and so on; the dispositions are in the decision note's "Design review" section.
 - Owner request, owner decisions and lead rulings: `docs/decisions/2026-11-13-chl-leagues.md` (binding).
@@ -488,7 +491,10 @@ those polls pay their TLS handshakes; accepted.
     `fail + BACKOFF_MAX_MS` (row 37). Never faster, whatever `Retry-After` says; (lead ruling) a longer `Retry-After`
     wins: `max(300 s, Retry-After)`, honoured up to 3 600 s on REFUSED only.
   - A follow keeps its game: the bug dims, then hides on the existing timers.
-  - The tab and the sheet show the REFUSED text.
+  - The tab and the sheet show the REFUSED text. (Integration, WP-3 review L10) For a refused **follow** (either host),
+    `ScoreRepository.followFailure` is REFUSED until the next answer or a follow change: the followed card on the Sports tab
+    shows the text in place of its two team rows, and the quick-bar sheet adds the followed league's failure row under the
+    followed game (not twice when the day row already says it for the same league). No new string.
   - One log line per state change.
   - Partial refusals stay partial: `lscluster` refused leaves a live follow working; Firebase refused fails the
     follow and the Today overlay but not the board.
@@ -1188,13 +1194,18 @@ checked).
 - **Hash gate (S9):**
   - before commit 0, run the sports screenshot suites on `main` and commit the SHA-256 list of every PNG to
     `ui/src/test/resources/golden/sports-hashes.txt`;
-  - after integration, every NHL, NFL and Stacked case must hash equal (a test reads the list).
-  - New CHL cases are reviewed by eye and then added to the list.
+  - after integration, every NHL, NFL and Stacked case must hash equal. (Integration) The reader is the Gradle task
+    `./gradlew :ui:sportsHashGate`: it deletes the six output folders, reruns `:ui:testDebugUnitTest`, then hashes; on a
+    host other than the list's `# host:` line it is skipped with a message (`docs/m0-toolchain.md`).
+  - New CHL cases are reviewed by eye (`ui/build/chl-ui/`); they are not in the list.
 - **Live power-play gate (S8):**
   - `tools/chl/record_live.py` (WP-3) records all seven nodes for a followed game every 5 s, to a fixture folder;
   - record at least **one full live game per league** before release;
-  - `pp_replay.py live <folder>` replays the derivation poll by poll and compares it with the model on that game's
-    final data. It reports:
+  - (WP-3 fix pass S3; integration) **The gate is `ChlLiveGateTest`** (`:core` tests, `ChlLiveGate`):
+    `CHL_LIVE_RECORDINGS=<folder> ./gradlew :core:test --tests '*ChlLiveGateTest*' -i` replays each recording poll by
+    poll through `HockeyTechMapper.followed` (and so `ChlPowerPlay`) and compares it with the model on that game's final
+    data (procedure: `tools/chl/README.md`). Without the variable, it runs the fake panel's recordings only.
+    `pp_replay.py live <folder>` is a quick check, not the gate. Both report:
 
 | Metric | Definition |
 |---|---|
@@ -1204,7 +1215,8 @@ checked).
 
   - **Threshold (proposed for the lead): wrong-bar seconds ≤ 5 % of the final model's power-play seconds per league,
     and no single wrong stretch longer than 30 s.** Hidden and missing seconds are reported, not gated: they are the
-    accepted misses 1–2.
+    accepted misses 1–2. (WP-3 fix pass S3) `ChlLiveGateTest` also gates hidden + missing ≤ 25 % and shown seconds within
+    ±5 s ≥ 95 %, per league.
 - **Owner sign-off:** the 61 colour pairs (contact sheet: Pill goal and PP tab, Stacked rows), `SAMPLED` lines named;
   the NIAG and CAP recovered logos.
 - **Only on a live game:**
@@ -1256,6 +1268,10 @@ checked).
 ---
 
 ## 9. Existing docs to amend at implementation time (not edited by this design)
+
+(Integration 2026-11-14: done. Each amended doc carries a "CHL amendment (2026-11-14)" note at the section named below;
+the NHL and Stacked decisions carry a "CHL leagues" section; the master plan's M6 row, `README.md` and the fake-panel
+README name the CHL.)
 
 - `docs/00-master-plan.md` M6 row: a "CHL leagues" entry.
 - `docs/decisions/2026-11-05-nhl-score-bug.md`:

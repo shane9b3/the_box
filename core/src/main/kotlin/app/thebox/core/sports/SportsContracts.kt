@@ -480,6 +480,13 @@ interface ScoreRepository : ScoreBugSource {
      * "No update"); null before LIVE and with nothing followed. The quick-bar value line and the picker read it.
      */
     val lastScore: StateFlow<ScoreBugView?>
+    /**
+     * (CHL integration, WP-3 review L10) The followed game's last poll failure: the kind of the last `Fetch.Failed` the
+     * machine took for this follow; null after an `Ok` or `NotFound`, on a follow change and with nothing followed. Not
+     * persisted. The Sports tab's followed card and the quick-bar sheet show [FailKind.REFUSED] only (the reason and the
+     * next step, `sports_failed_refused`); every other kind keeps the bug's own dim-and-hide, as before.
+     */
+    val followFailure: StateFlow<FailKind?>
     val events: Flow<ScoreEvent>
     /** null = stop following. Following another game replaces the current one. */
     fun follow(game: GameSnapshot?)
@@ -587,6 +594,11 @@ data class ScoreFacts(
      * step falls back to OHL.
      */
     val chlLeague: League? = null,
+    /**
+     * (CHL integration, WP-3 review L10; appended) `ScoreRepository.followFailure`: the followed game's last poll failure.
+     * The sheet adds the followed league's failure row after the followed game for [FailKind.REFUSED] only.
+     */
+    val followFailure: FailKind? = null,
 )
 
 /** `PlayerUiState.placeScore` while `PlayerLayer.PLACE_SCORE` (§6, U-B1). [sample]: no followed game, draw the sample bug. */

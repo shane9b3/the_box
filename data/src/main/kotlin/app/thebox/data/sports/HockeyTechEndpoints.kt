@@ -4,6 +4,7 @@ import android.content.Context
 import app.thebox.core.common.BoxLog
 import app.thebox.core.common.Redact
 import app.thebox.core.sports.League
+import app.thebox.core.sports.SportsConstants
 import app.thebox.data.BuildConfig
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import java.io.File
@@ -98,7 +99,7 @@ class HockeyTechEndpoints internal constructor(
         fun resolve(context: Context): HockeyTechEndpoints {
             if (!BuildConfig.DEBUG) return DEFAULT
             val text = try {
-                File(context.filesDir, SportsEndpoints.DEBUG_OVERRIDE_FILE).takeIf { it.isFile }?.readText()
+                File(context.filesDir, SportsConstants.DEBUG_OVERRIDE_FILE).takeIf { it.isFile }?.readText()
             } catch (e: IOException) {
                 null
             }

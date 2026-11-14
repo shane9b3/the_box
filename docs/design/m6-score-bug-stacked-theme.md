@@ -76,6 +76,10 @@ The mock-up's sizes are "mock px". §4 maps them to design px.
 
 ### 1.1 What it is called and where it lives (lead ruling: name, default and both places)
 
+> **CHL amendment (2026-11-14, `docs/design/m6-chl-leagues.md` P12).** "Score bug style" applies to every hockey league (NHL, OHL, WHL, QMJHL);
+> the stored name `nhlStyle` is unchanged. The Style row shows for a followed hockey game, or while the sheet browses a
+> hockey league.
+
 | Where | What the user sees | Notes |
 |---|---|---|
 | Settings → Sports (ADVANCED) | **Score bug style** · *Pill* / *Stacked*. Detail: "For hockey games. Stacked shows the teams one above the other, with shots on goal during power plays and breaks." | New row `SportsRows.STYLE = RowId("sports.style")`, after `SIZE`. ADVANCED, as every Sports row is (SB §7), so the simple count stays at 35 and `SimpleRowCountTest` is untouched. |
@@ -585,6 +589,10 @@ of its height. The hand pass (§10.4) judges it over real video.
 
 ## 5. Team colours
 
+> **CHL amendment (2026-11-14, `docs/design/m6-chl-leagues.md` §1.5, §6.2).** `StackedColourTable.pair(league, away, home)` keeps one resolved
+> table and pair cache per hockey league; the NHL's is this section's `NhlStackedColours`, untouched (its screenshots are
+> held byte-equal by `./gradlew :ui:sportsHashGate`).
+
 The mock-up hard-codes EDM and TOR:
 - rows `#12284F`;
 - stripes `#FF4C00` / `#2563EB`;
@@ -890,6 +898,10 @@ The style applies to the **NHL only**:
 ---
 
 ## 10. Tests
+
+> **CHL amendment (2026-11-14, `docs/design/m6-chl-leagues.md` §6.4, §7.2).** Fits are measured for every 2-, 3- and 4-letter CHL code and for
+> "NFL" (a QMJHL team). A code longer than 3 letters in a logo fallback is a plain 44 px disc in the row's stripe colour with
+> no text (`ChlStackedFallbackTest`); CHL screenshots go to `ui/build/chl-ui/` and are reviewed by eye.
 
 ### 10.1 `:core` and `:data` (JVM)
 

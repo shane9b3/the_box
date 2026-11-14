@@ -224,6 +224,52 @@ class ScoreRepositoryChlTest {
         assertEquals(DayState.Failed(FailKind.REFUSED), r.repo.day.value)
     }
 
+    // ---------------------------------------------------------------- integration (WP-3 review L10)
+
+    /** A refused follow poll is published as `followFailure`; the next answer clears it, and so does a follow change. */
+    @Test fun aRefusedFollowIsPublishedUntilAnAnswerOrAFollowChange() = runTest {
+        val mono = MonoClock { testScheduler.currentTime }
+        val ohl = Source(League.OHL, mono).apply { game = { Fetch.Failed(FailKind.REFUSED, null, mono.nowMs()) } }
+        val whl = Source(League.WHL, mono).apply { game = { Fetch.Failed(FailKind.REFUSED, null, mono.nowMs()) } }
+        val r = rig(listOf(ohl, whl), SportsFollowDoc(game = ohlGame, pollPhaseMs = 1_500L), SportsPrefs())
+        r.repo.reportDemand(DemandOwner.FULL_WITH_FOLLOW, true)
+        runCurrent()
+        assertEquals(listOf("OHL:29191"), ohl.games)
+        assertEquals(FailKind.REFUSED, r.repo.followFailure.value)
+        // Another kind replaces it (the card and the sheet then show nothing new; the bug dims as before).
+        ohl.game = { Fetch.Failed(FailKind.TIMEOUT, null, mono.nowMs()) }
+        advanceTimeBy(20_001)
+        runCurrent()
+        assertEquals(FailKind.TIMEOUT, r.repo.followFailure.value)
+        // An answer clears it.
+        ohl.game = { Fetch.Ok(SportsFixtures.chlGame(id = ohlGame.id.id), mono.nowMs(), null, 0) }
+        advanceTimeBy(20_001)
+        runCurrent()
+        assertEquals(null, r.repo.followFailure.value)
+        // Refused again, then a follow change: the new follow starts clean.
+        ohl.game = { Fetch.Failed(FailKind.REFUSED, null, mono.nowMs()) }
+        advanceTimeBy(20_001)
+        runCurrent()
+        assertEquals(FailKind.REFUSED, r.repo.followFailure.value)
+        // The screen-off layer (demand NONE) meanwhile, so the new follow is not polled yet: only the change can clear it.
+        r.repo.reportScreenOff(true)
+        runCurrent()
+        val whlSnap = SportsFixtures.chlGame(league = League.WHL, id = "1023288", away = SportsFixtures.chlTeam("CGY", "Calgary Hitmen"), home = SportsFixtures.chlTeam("MH", "Medicine Hat Tigers"))
+        r.repo.follow(whlSnap)
+        runCurrent()
+        assertEquals(League.WHL, r.repo.followed.value?.league)
+        assertTrue(whl.games.isEmpty())
+        assertEquals("a follow change clears it", null, r.repo.followFailure.value)
+        // The WHL follow's own refusal.
+        r.repo.reportScreenOff(false)
+        runCurrent()
+        assertEquals(listOf("WHL:1023288"), whl.games)
+        assertEquals(FailKind.REFUSED, r.repo.followFailure.value)
+        r.repo.follow(null)
+        runCurrent()
+        assertEquals("nothing followed, no failure", null, r.repo.followFailure.value)
+    }
+
     // ---------------------------------------------------------------- row 39
 
     @Test fun a429SlowsTheChlMeter() = runTest {

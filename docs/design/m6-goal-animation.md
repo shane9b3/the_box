@@ -253,6 +253,11 @@ moment later.
 
 ### 3.3 The table (ruling 12; verified 2026-11-07)
 
+> **CHL amendment (2026-11-14, `docs/design/m6-chl-leagues.md` §1.5, §6.2).** Colours are looked up by `(League, code)` through
+> `TeamColourTable.of(league, abbrev)`: NHL → `NhlTeamColours` (this table, unchanged), NFL → `NflTeamColours`, OHL / WHL /
+> QMJHL → `ChlTeamColours` (61 teams, `docs/research/chl-team-colours.md`). CGY, EDM, OTT, SEA, VAN, CHI and VIC exist in
+> more than one league, so a lookup without its league is a bug.
+
 Sources:
 - **TCC** = `https://teamcolorcodes.com/<slug>/`, a secondary source, accessed 2026-11-07.
 - ANA: the Ducks' own brand guide.

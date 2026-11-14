@@ -218,6 +218,7 @@ class ScoreRepositoryImpl internal constructor(
     private val _lastScore = MutableStateFlow<ScoreBugView?>(null)
     private val _day = MutableStateFlow<DayState>(DayState.Loading)
     private val _followed = MutableStateFlow<FollowedGame?>(null)
+    private val _followFailure = MutableStateFlow<FailKind?>(null)
     private val _events = MutableSharedFlow<ScoreEvent>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
     override val bug: StateFlow<ScoreBugView?> = _bug.asStateFlow()
@@ -225,6 +226,7 @@ class ScoreRepositoryImpl internal constructor(
     override val prefs: StateFlow<SportsPrefs> = store.flow(SportsDomain)
     override val day: StateFlow<DayState> = _day.asStateFlow()
     override val followed: StateFlow<FollowedGame?> = _followed.asStateFlow()
+    override val followFailure: StateFlow<FailKind?> = _followFailure.asStateFlow()
     override val events: Flow<ScoreEvent> = _events.asSharedFlow()
 
     override fun reportDemand(owner: DemandOwner, on: Boolean) = post(Input.DemandReport(owner, on))
@@ -365,6 +367,8 @@ class ScoreRepositoryImpl internal constructor(
                 val t0 = mono.nowMs()
                 val f = source?.game(game.id, game.startUtcMs) ?: unboundFailure()
                 machine.fetched(f)
+                // (CHL integration, L10) The follow's last failure, for the card and the sheet; an answer clears it.
+                _followFailure.value = (f as? Fetch.Failed)?.kind
                 // The answer took time: advance the machine to now, so what the answer made due is applied at once.
                 machine.step()
                 // (Update interval §3.2, review S6) The work the bug needs: fetch, decode, map, the machine and its view.
@@ -605,6 +609,8 @@ class ScoreRepositoryImpl internal constructor(
         }
         doc = next
         _followed.value = next.game
+        // (CHL integration, L10) A failure belongs to one follow.
+        if (followChanged) _followFailure.value = null
         store.update(SportsFollowDomain) {
             it.copy(game = next.game, pollPhaseMs = next.pollPhaseMs, firstFollowShown = next.firstFollowShown, meters = next.meters)
         }

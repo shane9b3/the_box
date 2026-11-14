@@ -109,6 +109,12 @@ reviewer rejects code that does otherwise.
 
 ### 1.1 The league seam (`:core`, `app.thebox.core.sports`)
 
+> **CHL amendment (2026-11-14, `docs/design/m6-chl-leagues.md` §1.1).** `League` is now `NHL, NFL, OHL, WHL, QMJHL` (append-only, persisted by
+> name). A derived, unpersisted `LeagueGroup { NHL, NFL, CHL }` drives the Sports tab chips and the quick-bar League row;
+> `League.isHockey` sends every hockey league down the NHL path (Pill, Stacked, power-play tab, goal takeover, Style row).
+> Branches are exhaustive `when`s over `League` / `LeagueGroup` / `Sport`. A team code is never read as a league (the
+> QMJHL's Newfoundland Regiment is `NFL`).
+
 ```kotlin
 enum class League { NHL }
 data class GameId(val league: League, val id: String)               // NHL "2026020251"
@@ -174,6 +180,13 @@ unbounded playlists and EPGs; these bodies are bounded.
 the URL is derived from the abbreviation.
 
 ### 2.2 HTTP client
+
+> **CHL amendment (2026-11-14, `docs/design/m6-chl-leagues.md` §2).** A-S1 (no ETag) is scoped to the NHL CDN. The CHL source
+> (`HockeyTechScoreSource`, one class, three instances) reads HockeyTech's keyed `lscluster` feed for the day list and
+> HockeyTech's Firebase database for the followed game, with `If-None-Match` on all six nodes every poll. The leagues' public
+> site keys are embedded in one `:data` source file with the owner's acceptance of the terms risk (2026-11-13) and never
+> logged. A refused key or closed database is `FailKind.REFUSED` (retried only after 5 min; shown with its reason on the
+> tab, the followed card and the quick-bar sheet).
 
 - Built from `@ApiClient` `newBuilder()` with `callTimeout` 10 s. It inherits `BoxDns`, the default UA, redirects and
   gzip.
@@ -348,6 +361,12 @@ Inputs are: follow, demand, prefs, network, awake, lifecycle and day requests. T
 ---
 
 ## 3. Logos
+
+> **CHL amendment (2026-11-14, `docs/design/m6-chl-leagues.md` §3.5, §6.4).** CHL logos are fetched at runtime from
+> `assets.leaguestat.com/{client}/logos/` only: a JPEG URL is swapped for `{teamId}.png`, and a CHL-only `ChlLogoCheck`
+> (before `LogoTrim`) rejects a logo without transparency. 55 of 61 show; BRAM, BDN, KEL, PEN, SAS and WEN fall back to the
+> code. A 4-letter code's fallback is a capsule on the Pill (text down to 16 px), a plain stripe-coloured disc on Stacked.
+> NHL and NFL requests are built exactly as before.
 
 - **Dependency:** `io.coil-kt.coil3:coil-svg:3.6.3` in **`:app` only**, where `ImageModule` is (A-N8).
   `ImageModule` adds `SvgDecoder.Factory()` explicitly. ServiceLoader also registers one; the duplicate is harmless,

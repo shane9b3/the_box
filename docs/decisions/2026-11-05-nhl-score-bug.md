@@ -145,3 +145,19 @@ display it", starting low "like 2-4 seconds so its almost live".
 33. **No clock in a hockey break.** The centre column is one line: "End 1st" at 0:00 before the intermission starts,
     then "1st INT" through the intermission (no countdown, no frozen clock). Amends ruling 6 for breaks only; play keeps
     the feed's clock.
+
+## CHL leagues (2026-11-13, integrated 2026-11-14)
+The OHL, WHL and QMJHL use these hockey bugs (owner request 2026-11-13). Decision: `docs/decisions/2026-11-13-chl-leagues.md`;
+design: `docs/design/m6-chl-leagues.md`. These rulings are amended for the CHL only; the NHL keeps them as written:
+- **Ruling 29** (lead P1): one CHL update-interval setting shared by OHL, WHL and QMJHL, 5 · 10 · 15 · 20 · 30 s after
+  each update, Auto never under 5 s. The settings row shows and runs **the followed league's** meter when a CHL game is
+  followed (L4).
+- **Ruling 33** (lead P4, narrowed by S3): the CHL feed cannot tell "End 1st" from the intermission, so every CHL break
+  where play can follow reads "1st INT" (Stacked "1ST" over "INT"). A decided CHL game at 0:00 reads "End 3rd" / "End OT"
+  with no power play until the scorekeeper finalises.
+- **A-S1** (no ETag) is scoped to the NHL CDN, whose ETag is a bucket id (lead P2). The CHL's Firebase nodes are read with
+  `If-None-Match` on every node, every poll.
+- **Ruling 13** (power-play time only from the feed): the CHL feed has no power-play state, so the CHL tab is derived
+  from penalties, goals and the clock (owner decision 2). An unknown state holds the tab for at most 30 s, then closes it
+  silently (never "Power play over.").
+- **Ruling 18** (6-on-4) cannot apply to the CHL: the feed has no empty-net or 6-on-4 state (accepted degradation).

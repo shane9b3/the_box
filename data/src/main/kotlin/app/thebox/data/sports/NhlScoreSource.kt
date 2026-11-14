@@ -42,8 +42,8 @@ data class SportsEndpoints(val apiBase: String, val logoBase: String) {
         const val LOGO_BASE = "https://assets.nhle.com/logos/nhl/svg/"
         val DEFAULT = SportsEndpoints(API_BASE, LOGO_BASE)
 
-        /** Under `filesDir`; one line, an origin such as `http://10.0.2.2:8080`. */
-        const val DEBUG_OVERRIDE_FILE = "debug/sports_base"
+        /** Under `filesDir`; one line, an origin such as `http://10.0.2.2:8080` (the one constant in `:core`). */
+        const val DEBUG_OVERRIDE_FILE = SportsConstants.DEBUG_OVERRIDE_FILE
 
         /**
          * An override origin → `{origin}/v1/` and `{origin}/logos/nhl/svg/` (the fake panel serves the NHL's own paths).

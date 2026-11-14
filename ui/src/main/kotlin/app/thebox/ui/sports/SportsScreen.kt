@@ -108,7 +108,8 @@ private const val SCROLL_MARGIN = 64
  *
  * Initial focus: the followed game, else the first live card, else the Today chip.
  *
- * (NFL WP-5, docs/design/m6-nfl.md §7.3) The title row carries the NHL · NFL league chips (the selected one filled); Corner
+ * (NFL WP-5, docs/design/m6-nfl.md §7.3; CHL §6.3) The title row carries the NHL · NFL · CHL chips (the selected one filled;
+ * with CHL shown, the inline OHL · WHL · QMJHL switch follows on the same row); Corner
  * and Delay stay right-aligned, and Up from the day chips still lands on Corner, from where Left reaches the league chips.
  * For the NFL the day chips read Last week · This week · Next week and a neighbour the board did not name is disabled.
  */

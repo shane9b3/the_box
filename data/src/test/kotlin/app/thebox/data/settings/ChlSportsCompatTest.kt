@@ -83,6 +83,29 @@ class ChlSportsCompatTest {
         assertEquals("the new build reads it whole", League.WHL, store.decodeFromString(SportsPrefs.serializer(), newDoc).league)
     }
 
+    /**
+     * (CHL integration) The same build: a backup of CHL prefs restores whole, and a followed CHL game with its meter
+     * survives a restart (the `sports_follow` document read back by the store's own JSON).
+     */
+    @Test
+    fun theSameBuildRestoresChlPrefsAndKeepsAChlFollowAcrossARestart() {
+        for (league in listOf(League.OHL, League.WHL, League.QMJHL)) {
+            val prefs = SportsPrefs(league = league, chlLeague = league, chlIntervalS = 15, nhlStyle = NhlBugStyle.STACKED, corner = ScoreCorner.BOTTOM_LEFT)
+            assertEquals(prefs, store.decodeFromString(SportsPrefs.serializer(), store.encodeToString(SportsPrefs.serializer(), prefs)))
+            val follow = SportsFollowDoc(
+                game = FollowedGame(league, "92001", 1_794_612_600_000L, "NFL", "CHA"), pollPhaseMs = 1_500, firstFollowShown = true,
+                meters = mapOf(league to PollMeasure(endpoint = PollMeter.CHL_LIVE, workMs = listOf(120), wireBytes = listOf(3_878))),
+            )
+            val back = store.decodeFromString(SportsFollowDoc.serializer(), store.encodeToString(SportsFollowDoc.serializer(), follow))
+            assertEquals(follow, back)
+            // L2: the team code "NFL" stays a team code; the league is the stored enum name.
+            assertEquals(league, back.game?.league)
+        }
+        // Leaving the CHL keeps the remembered sub-league (§1.3 writing rule) and it survives the round trip.
+        val nhl = SportsPrefs(league = League.NHL, chlLeague = League.QMJHL)
+        assertEquals(League.QMJHL, store.decodeFromString(SportsPrefs.serializer(), store.encodeToString(SportsPrefs.serializer(), nhl)).chlShown)
+    }
+
     @Test
     fun aBuildOlderThanTheCoerceChangeFindsTheDocumentUnreadable() {
         val newDoc = store.encodeToString(SportsPrefs.serializer(), SportsPrefs(league = League.QMJHL, chlLeague = League.QMJHL))

@@ -7,7 +7,15 @@
 # differ by anti-aliasing rounding: regenerate the list there from 5472974, never "fix" it from a changed tree.
 # 2026-11-14 (CHL WP-5, lead ruling): sports-tab/sports-tab.png changed on purpose, the title row has a third chip, CHL
 #   (was c0aa7099...; only the chip's pixels differ). Every other hash is unchanged.
-# The gate, from the repo root (delete the old PNGs first, or a stale file from a removed case still hashes OK):
+# host: Mac OS X 15.0.1 x86_64 jdk 21.0.2
+#   (machine-read by the gate: os.name, os.version, os.arch and java.version of the Gradle JVM, which runs the unit tests.
+#   On any other host the gate is SKIPPED with a message, never failed; regenerate the list there to gate on it.)
+# The gate (CHL integration; docs/m0-toolchain.md "Sports screenshot hash gate"), from the repo root:
+#   ./gradlew :ui:sportsHashGate
+# It deletes the six folders below first (`cleanSportsShots`; a stale PNG from a removed case never passes), forces
+# :ui:testDebugUnitTest to rerun (never from the build cache), and checks every line below only after that whole task has
+# finished, so test order does not matter. PNGs in the six folders that are not listed are reported, not failed.
+# The old by-hand form (same result on this host):
 #   (cd ui/build && rm -rf score-bug score-bug-stacked nfl-screenshots power-play goal-animation sports-tab) && \
 #   ./gradlew :ui:testDebugUnitTest --tests 'app.thebox.ui.sports.*ScreenshotTest' --rerun && \
 #   (cd ui/build && grep -v '^#' ../src/test/resources/golden/sports-hashes.txt | shasum -a 256 -c --quiet)

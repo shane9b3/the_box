@@ -35,6 +35,7 @@ import app.thebox.core.full.PlayerUiState
 import app.thebox.core.full.QuickBarState
 import app.thebox.core.full.QuickItem
 import app.thebox.core.sports.DayState
+import app.thebox.core.sports.FailKind
 import app.thebox.core.sports.FollowedGame
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
@@ -2084,6 +2085,10 @@ class PlayerStateMachineImpl(
         val out = ArrayList<PickerChoice>()
         val followed = f.game
         if (followed != null) out += PickerChoice.ScoreGame(board?.games?.firstOrNull { it.id == followed.id } ?: stubOf(followed), followed = true)
+        // (CHL integration, WP-3 review L10) The followed game's feed refused the app: its reason and next step right under
+        // it, in the followed league's words. Not twice when the day row below already says it for the same league.
+        val dayRefused = (f.day as? DayState.Failed)?.kind == FailKind.REFUSED && f.league == followed?.league
+        if (followed != null && f.followFailure == FailKind.REFUSED && !dayRefused) out += PickerChoice.ScoreFailed(FailKind.REFUSED, followed.league)
         // (NFL §7.3, ruling 24) The League row is second, after the followed game; absent until the host reports a league.
         val league = f.league
         if (league != null) out += PickerChoice.ScoreLeagueRow(league)

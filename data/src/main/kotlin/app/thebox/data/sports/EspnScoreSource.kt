@@ -73,7 +73,7 @@ data class EspnEndpoints(val apiBase: String, val logoBase: String) {
         fun resolve(context: Context): EspnEndpoints {
             if (!BuildConfig.DEBUG) return DEFAULT
             val text = try {
-                File(context.filesDir, SportsEndpoints.DEBUG_OVERRIDE_FILE).takeIf { it.isFile }?.readText()
+                File(context.filesDir, SportsConstants.DEBUG_OVERRIDE_FILE).takeIf { it.isFile }?.readText()
             } catch (e: IOException) {
                 null
             }
