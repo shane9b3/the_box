@@ -16,7 +16,8 @@ Model (one-second steps; the Kotlin version may be event-driven, the rules are t
   2 start = TimeStart, else Time; S2: a TimeOnSet row whose TimeOn is not after its TimeStart (and the penalty would end
     inside the period) is inconsistent: its start is Time.
   3 chain = same (side, period, Time, PenalizedPlayerId), the player id non-zero (0 = a bench minor: never chained);
-    links ordered by (start, LSEventId); a link starts no earlier than the previous link's end.
+    links ordered by (start, major first, LSEventId) (S2 fix pass: a major and a minor at one start serve the major
+    first); a later link starts at the previous link's end, its own TimeStart only orders it (S1 fix pass).
   4 at most 2 serving per side; a further row waits for a seat.
   5 end = start + 60 x minutes; 6 a recorded TimeOn inside (start, end] caps it (unless --no-timeon).
   7 at a goal second (before expiries) the scorer's opponent, if it has more serving, loses its earliest-started serving
@@ -80,9 +81,18 @@ def counted_rows(pens, ot_len=OT_REG, use_timeon=True):
         for i, m in enumerate([2, 2] if mins == 4 else [mins]):
             rows.append(dict(side=side_of(p.get("Home") == 1), s=g(per, start, ot_len), dur=m * 60, minor=m == 2,
                              key=key, id=(p.get("LSEventId") or 0, i), on=on if use_timeon else None, per=per))
-    # links in (start, id) order; the chain position follows that order
-    rows.sort(key=lambda r: (r["s"], r["id"]))
+    # links in (start, major first, id) order (S2); the chain position follows that order
+    rows.sort(key=order)
+    seen = set()
+    for r in rows:
+        r["first"] = r["key"] not in seen  # S1: only a chain's first link waits for its own start
+        seen.add(r["key"])
     return rows
+
+
+def order(r):
+    """The row order: start, then a major before a minor (S2), then LSEventId and link."""
+    return (r["s"], r["minor"], r["id"])
 
 
 def h9_windows(pens, ot_len=OT_REG):
@@ -154,8 +164,8 @@ class Sim:
                 for r in pending:
                     prev_ok = busy[r["key"]] == 0 and all(
                         x.get("e") is not None and x["e"] <= t for x in self.rows
-                        if x["key"] == r["key"] and (x["s"], x["id"]) < (r["s"], r["id"]))
-                    if r["s"] <= t and len(serving[r["side"]]) < 2 and prev_ok:
+                        if x["key"] == r["key"] and order(x) < order(r))
+                    if (r["s"] <= t or not r["first"]) and len(serving[r["side"]]) < 2 and prev_ok:
                         r["start"] = t
                         e = t + r["dur"]
                         if r["on"] is not None:
@@ -183,13 +193,13 @@ class Sim:
         side = r["side"]
         key = r["key"]
         others = [x["e"] for x in serving[side] if x is not r]
-        queue = sorted((x for x in pending if x["side"] == side), key=lambda x: (x["s"], x["id"]))
+        queue = sorted((x for x in pending if x["side"] == side), key=order)
         used = set()
         while True:
-            nxt = next((x for x in queue if id(x) not in used and x["key"] == key and x["s"] <= end), None)
+            nxt = next((x for x in queue if id(x) not in used and x["key"] == key and (x["s"] <= end or not x["first"])), None)
             if nxt is None and others and min(others) > end:
                 nxt = next((x for x in queue if id(x) not in used and x["key"] != key and x["s"] <= end
-                            and all(y["key"] != x["key"] or id(y) in used or (y["s"], y["id"]) >= (x["s"], x["id"])
+                            and all(y["key"] != x["key"] or id(y) in used or order(y) >= order(x)
                                     for y in queue)), None)
             if nxt is None:
                 return end

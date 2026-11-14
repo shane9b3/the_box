@@ -92,8 +92,12 @@ object ChlPowerPlay {
         // H7: no penalties node while the summary counts power plays (or cannot say).
         if (pens == null && (ppAttempts == null || ppAttempts > 0)) return ChlPp.Unknown
 
+        // (WP-1 fix pass L3) A hostile-size node: hide instead of paying for the model (real games have ≤ 40 rows).
+        if ((goals?.size ?: 0) > MAX_GOALS) return ChlPp.Unknown
         val built = buildRows(pens.orEmpty(), clock, useTimeOn = true, feedPeriod = now.feedPeriod)
-        // H2 (rows): a counted row with an unparsable time, minutes null, or a period after the feed's.
+        if (built.rows.size > MAX_COUNTED_ROWS) return ChlPp.Unknown
+        // H2 (rows): a counted row with an unparsable time, minutes null, a period after the feed's, or (fix pass L2) a
+        // `Time` / `TimeStart` past its period's length.
         if (built.unplaceable) return ChlPp.Unknown
         // H3: a counted row (the first of its chain; later links start where the chain puts them) starts in the future.
         if (built.rows.any { it.firstLink && it.s > nowG + SportsConstants.CHL_PP_FUTURE_TOLERANCE_S }) return ChlPp.Unknown
@@ -128,7 +132,8 @@ object ChlPowerPlay {
         val kind = if (kotlin.math.abs(st.away - st.home) >= 2) PowerPlayKind.TWO_MAN else PowerPlayKind.ONE_MAN
         val shortEnds = if (side == Side.HOME) st.awayEnds else st.homeEnds
         val secs = (shortEnds.minOrNull() ?: return ChlPp.Unknown) - nowG
-        // H4: seconds out of range, or a serving row longer than its penalty.
+        // H4: seconds out of range, or a serving row longer than its penalty. (Fix pass L6) The second clause cannot fire
+        // today (a row's end is at most start + its duration, and TimeOn only caps it); it stays as a guard.
         if (secs <= 0 || secs > SportsConstants.PP_SECS_MAX) return ChlPp.Unknown
         if (model.servingRows().any { it.e - it.start > 60 * it.minutes }) return ChlPp.Unknown
         return ChlPp.Shown(PowerPlay(side, kind, secs))
@@ -164,6 +169,10 @@ object ChlPowerPlay {
     /** No game has more periods than this (5 overtimes past regulation, and some slack). */
     private const val MAX_PERIODS = 12
 
+    /** (WP-1 fix pass L3) Above these the node is not a real game's (≤ ~40 rows, ≤ ~15 goals): Unknown. */
+    internal const val MAX_COUNTED_ROWS = 80
+    internal const val MAX_GOALS = 80
+
     // ------------------------------------------------------------------ §5.3 steps 1–6: counted rows
 
     /** A chain key (B2): the same side, period, call time and player; a null player (bench minor) never chains. */
@@ -173,7 +182,10 @@ object ChlPowerPlay {
     /** One 2-, 4- (as two links) or 5-minute seat request. Mutable while a [Model] runs. */
     internal class Row(
         val home: Boolean,
-        /** Game time of the recorded start (§5.3 step 2). */
+        /**
+         * Game time of the recorded start (§5.3 step 2). (WP-1 fix pass S1) For a later link of a chain it only orders the
+         * links: that link starts at its predecessor's end, whatever its own `TimeStart` says.
+         */
         val s: Int,
         val dur: Int,
         val minor: Boolean,
@@ -186,18 +198,21 @@ object ChlPowerPlay {
         /** The row's `Minutes` (4 for both links of a double minor). */
         val minutes: Int,
     ) {
-        /** The first link of its chain by `(s, id)` (H3 applies to it only). */
+        /** The first link of its chain in [ORDER] (H3 and the start time apply to it only). */
         var firstLink: Boolean = true
         var start: Int = -1
         var e: Int = -1
         val started: Boolean get() = start >= 0
 
-        internal fun before(o: Row): Boolean = compareValuesBy(this, o, { it.s }, { it.id }, { it.link }) < 0
+        internal fun before(o: Row): Boolean = ORDER.compare(this, o) < 0
     }
+
+    /** (§5.3 step 3; WP-1 fix pass S2) Rows by start, then a major before a minor (one player's major is served first), then id, link. */
+    internal val ORDER: Comparator<Row> = compareBy<Row>({ it.s }, { it.minor }, { it.id }, { it.link })
 
     internal class Rows(val rows: List<Row>, val unplaceable: Boolean)
 
-    /** (§5.3 steps 1–3) The counted rows in `(s, id)` order; [Rows.unplaceable] = H2 for a counted row. */
+    /** (§5.3 steps 1–3) The counted rows in [ORDER]; [Rows.unplaceable] = H2 for a counted row. */
     internal fun buildRows(pens: List<ChlPenalty>, clock: GameClockMap, useTimeOn: Boolean, feedPeriod: Int): Rows {
         val out = ArrayList<Row>()
         var unplaceable = false
@@ -209,6 +224,8 @@ object ChlPowerPlay {
             if (p.period < 1 || p.period > feedPeriod || p.timeS == null) { unplaceable = true; continue }
             var st = p.startS
             val len = clock.length(p.period)
+            // (Fix pass L2) A call or start past the period's end cannot be placed.
+            if (len != null && (p.timeS > len || (st != null && st > len))) { unplaceable = true; continue }
             // S2: a recorded end not after the start, for a penalty that would end inside its period: start at the call.
             if (st != null && p.onS != null && p.onS <= st && len != null && st + 60 * minutes <= len) st = null
             val start = st ?: p.timeS
@@ -220,7 +237,7 @@ object ChlPowerPlay {
                 out += Row(p.home, s, m * 60, m == 2, key, p.id, i, if (useTimeOn) p.onS else null, p.period, minutes)
             }
         }
-        out.sortWith(compareBy<Row>({ it.s }, { it.id }, { it.link }))
+        out.sortWith(ORDER)
         val seen = HashSet<Any>()
         for (r in out) r.firstLink = seen.add(r.key)
         return Rows(out, unplaceable)
@@ -357,7 +374,8 @@ object ChlPowerPlay {
             while (progressed) {
                 progressed = false
                 for (r in pending) {
-                    if (r.s > t || serving(r.home).size >= 2 || (busy[r.key] ?: 0) != 0) continue
+                    // (Fix pass S1) Only a chain's first link waits for its own start; a later one follows its predecessor.
+                    if ((r.firstLink && r.s > t) || serving(r.home).size >= 2 || (busy[r.key] ?: 0) != 0) continue
                     val prevOk = rows.all { x -> x.key != r.key || !x.before(r) || (x.started && x.e <= t) }
                     if (!prevOk) continue
                     r.start = t
@@ -389,10 +407,10 @@ object ChlPowerPlay {
             var key = r.key
             val others = serving(r.home).filter { it !== r }.map { it.e }
             val minOther = others.minOrNull()
-            val queue = pending.filter { it.home == r.home } // already in (s, id) order
+            val queue = pending.filter { it.home == r.home } // already in ORDER
             val used = HashSet<Row>()
             while (true) {
-                var nxt = queue.firstOrNull { it !in used && it.key == key && it.s <= end }
+                var nxt = queue.firstOrNull { it !in used && it.key == key && (it.s <= end || !it.firstLink) }
                 if (nxt == null && minOther != null && minOther > end) {
                     nxt = queue.firstOrNull { x ->
                         x !in used && x.key != key && x.s <= end &&

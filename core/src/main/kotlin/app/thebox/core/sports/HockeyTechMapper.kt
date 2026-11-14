@@ -88,7 +88,8 @@ object HockeyTechMapper {
         for (el in list) {
             val s = el as? JsonObject ?: continue
             val id = s.str("season_id")?.takeIf { DIGITS.matches(it) } ?: continue
-            out[id] = s.bool("playoff") ?: false
+            // (WP-1 fix pass L7) A missing flag is unknown: no entry, so the board entry's own `playoff` decides.
+            out[id] = s.bool("playoff") ?: continue
         }
         return out
     }
@@ -284,7 +285,9 @@ object HockeyTechMapper {
         val status = rcStatus ?: f.status
         val awayGoals = gs?.int("VisitorGoalTotal")?.takeIf { it >= 0 } ?: g.away.score ?: f.away.score
         val homeGoals = gs?.int("HomeGoalTotal")?.takeIf { it >= 0 } ?: g.home.score ?: f.home.score
-        val started = (awayGoals ?: 0) + (homeGoals ?: 0) > 0 || listOf(rcStatus, f.status).any(::startedStatus)
+        // (WP-1 fix pass S3) A game the board already shows in play stays started (status 3 is unverified).
+        val started = (awayGoals ?: 0) + (homeGoals ?: 0) > 0 || listOf(rcStatus, f.status).any(::startedStatus) ||
+            g.phase != GamePhase.SCHEDULED
         val period: Int?
         val remaining: Int?
         val running: Boolean
@@ -482,8 +485,9 @@ object HockeyTechMapper {
     internal fun parsePenalties(node: JsonObject): Penalties {
         val out = ArrayList<ChlPenalty>()
         var unplaceable = false
-        for ((key, o) in entries(node["GamePenalties"])) {
-            val id = o.long("LSEventId") ?: key?.trim()?.toLongOrNull() ?: 0L
+        for ((ordinal, entry) in entries(node["GamePenalties"]).withIndex()) {
+            val (key, o) = entry
+            val id = rowId(o, key, ordinal)
             val minutes = o.int("Minutes")
             val ppFlag = o.bool("PowerPlay") == true
             val penaltyShot = o.bool("PenaltyShot") == true
@@ -513,10 +517,11 @@ object HockeyTechMapper {
     /** A `goals` node (`GameGoals`) → rows; a goal without a parsable `IsHome` is dropped (H6 then sees the gap). */
     internal fun parseGoals(node: JsonObject): List<ChlGoal> {
         val out = ArrayList<ChlGoal>()
-        for ((key, o) in entries(node["GameGoals"])) {
+        for ((ordinal, entry) in entries(node["GameGoals"]).withIndex()) {
+            val (key, o) = entry
             val home = o.bool("IsHome") ?: continue
             out += ChlGoal(
-                id = o.long("LSEventId") ?: key?.trim()?.toLongOrNull() ?: 0L,
+                id = rowId(o, key, ordinal),
                 home = home,
                 period = o.int("Period"),
                 timeS = elapsed(o["Time"]),
@@ -564,12 +569,20 @@ object HockeyTechMapper {
         else -> false
     }
 
-    /** A Firebase collection: an object keyed by id, or (Firebase's array form) a list with null holes. */
+    /**
+     * A Firebase collection: an object keyed by id, or (Firebase's array form) a list with null holes, keyed by its index
+     * (Firebase stores small integer keys as an array). (WP-1 fix pass L1) The key is the id when `LSEventId` is absent,
+     * so two rows without one never share an id (and bench minors never chain).
+     */
     private fun entries(el: JsonElement?): List<Pair<String?, JsonObject>> = when (el) {
         is JsonObject -> el.mapNotNull { (k, v) -> (v as? JsonObject)?.let { k to it } }
-        is JsonArray -> el.mapNotNull { v -> (v as? JsonObject)?.let { null to it } }
+        is JsonArray -> el.mapIndexedNotNull { i, v -> (v as? JsonObject)?.let { i.toString() to it } }
         else -> emptyList()
     }
+
+    /** `LSEventId`, else the collection key, else a negative ordinal: distinct for every row of a node. */
+    private fun rowId(o: JsonObject, key: String?, ordinal: Int): Long =
+        o.long("LSEventId") ?: key?.trim()?.toLongOrNull() ?: -(ordinal + 1L)
 
     // ------------------------------------------------------------------ §3.1 names, codes, logos
 

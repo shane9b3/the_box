@@ -5,6 +5,9 @@ Status:
 - **Commit 0 implemented and reviewed 2026-11-13** (`docs/review/2026-11-13-chl-commit0-review.md`, "Fix pass"). The
   reconciled decisions are written into §1.2, §1.6, §2.3, §3.2, §4.1, §6.4, §8 and §10 below, each marked "(C0 fix
   pass)".
+- **WP-1 implemented and reviewed 2026-11-14** (`docs/review/2026-11-14-chl-wp1-mapper-review.md`, "Fix pass"). The
+  rulings (S1, S2 model changes; the 11 implementation departures) are written into §3.6, §5.3, §5.5, §5.6 and §5.7, each
+  marked "(WP-1 fix pass)".
 - Review: `docs/review/2026-11-13-chl-leagues-design-review.md`. Every finding is applied in place and marked (B1),
   (S4), (L7) and so on; the dispositions are in the decision note's "Design review" section.
 - Owner request, owner decisions and lead rulings: `docs/decisions/2026-11-13-chl-leagues.md` (binding).
@@ -619,6 +622,29 @@ board `final == "1"`) wins. `Started` = `publishedclock.Started`, or any score, 
   older mark than the season-suffixed JPEGs (`_295`), so they go on the owner's sign-off sheet.
 - Coil decodes PNG natively. Logos are never bundled; the fixtures hold the outcome table, not the images.
 
+
+### 3.6 Implementation notes (WP-1 fix pass; the reviewed departures, so this document matches the code)
+
+The WP-1 review (`docs/review/2026-11-14-chl-wp1-mapper-review.md`) accepted these 11 departures from the text above.
+
+| # | Rule as implemented | Why |
+|---|---|---|
+| 1 | H3 applies only to a chain's first link (§5.6) | The edited two-row form gives link 2 a future `TimeStart` by design (E30, E32); with S1 a later link's own start no longer matters |
+| 2 | Period ≥ 4 with unequal scores → no power play at any clock, not only at 0:00 (§3.4 S3) | CHL OT is sudden death (regular season and playoffs): an unequal OT score means the game is over |
+| 3 | **Started** = `publishedclock.Started`, or a score > 0, or any status source (`StatusId`, `status_id`, the board) ∈ {2, 4, 5}; the board's own `started == "1"`; status 1 is always SCHEDULED; the overlay also keeps a game the board shows in play started (review S3) | "status ≥ 2" would make the "3, not Started" row unreachable. **Watch item (S8):** `publishedclock` wins over `runningclock`, so a lagging `StatusId 1` would hide a live game; the recorded samples always agree |
+| 4 | Playoff flag unknown → regular season iff the board lists a 300 s OT (`periods["4"].length`) | A conservative inference from data; otherwise OT → H1 |
+| 5 | Periods 1–3 use the board's listed length when present (1..3600 s), else 1200; OT the board's, else 300 / 1200 by the playoff flag, else unknown (H1) | Strictly more information; identical on every fixture |
+| 6 | Extra Unknown cases: no feed period, no clock, a needed row with no side or period, a flagged row with period < 1, `ppAttempts` unknown with `penalties` null (§5.6) | Each one hides; none can show |
+| 7 | `goalTotal` = both totals − 1 when `Shootout` is true; `lastGoal` is null when the per-side goal counts differ from the score (so a Final SO has none) | §3.3; the −1 is unreachable in play |
+| 8 | Elapsed times strictly `mm:ss`, seconds 0..59 (else unparsable → H2); a call or start past its period's length → H2 | Prefer hiding |
+| 9 | Board: an absent or null `Gamesbydate` is an empty day, another shape or an unparsable day is unmappable; board clocks are not running (no flag); `time_tbd == "1"` or an unparsable `schedule_time` → `startTbd`, local midnight in the league's reference zone | The board is a cached string clock |
+| 10 | Overlay: the date check is per entry (a missing `DatePlayed` is accepted, so the unfiltered node also works); a missing score falls back to the board's, never 0; scores-only re-classifies the board's (already adjusted) clock | |
+| 11 | `followed()` always sets `startTbd = false` | `ChlGameFacts` (frozen) has no TBD flag: the source copies the board snapshot's `startTbd` for a followed TBD game |
+
+Also (review L1, L7): a row without `LSEventId` takes its collection key (the index in Firebase's array form), else a
+negative ordinal, so two rows never share an id; a `seasons` entry without a `playoff` flag is absent (unknown), so the
+board entry's own `playoff` decides.
+
 ---
 
 ## 4. Machine and repository
@@ -718,6 +744,9 @@ object ChlPowerPlay {
 
 ### 5.3 Algorithm
 
+(WP-1 fix pass L3) A node with more than 80 counted rows (links) or more than 80 goals is not a real game's (≤ ~40
+rows, ≤ ~15 goals): the derivation returns Unknown before the model runs, so a hostile body cannot cost seconds per poll.
+
 1. **Counted rows.** A row counts iff all of these hold:
    - `ppFlag`;
    - `!penaltyShot`;
@@ -736,9 +765,13 @@ object ChlPowerPlay {
 3. **Chains (B2).** Rows with the same `(side, period, timeS, playerId)`, `playerId` non-null, form a chain:
    - no offence in the key: one player's tripping + unsportsmanlike are served one after the other;
    - `playerId` null (0 in the feed, bench minors) never chains: two bench minors at one stoppage are two seats;
-   - **links are ordered by `(s, id)`**, not by id: in the OHL's edited form the later link has the lower id (29179
-     P2 15:07: 454471 starts 15:16, 454472 starts 15:07);
-   - a link starts no earlier than the previous link's end.
+   - **links are ordered by `(s, major first, id)`**, not by id: in the OHL's edited form the later link has the lower
+     id (29179 P2 15:07: 454471 starts 15:16, 454472 starts 15:07);
+   - (WP-1 fix pass S2) on an equal start, a major is served before a minor (the standard rule: one player's major and
+     minor at one stoppage serve the major first). **No recorded game exercises this** (no chain contains a 5); E35;
+   - (WP-1 fix pass S1) **a later link starts at the previous link's end**; its own `TimeStart` only orders the links.
+     A pre-filled link-2 `TimeStart` (the two-row form before the scorekeeper edits it after a PP goal) therefore gives
+     no gap and no phantom tail; E34. The recorded replay is byte-identical (no recorded chain has a gap).
 4. **Two seats per side.** At most 2 rows serve at once per side. A further row waits and starts when a seat frees.
 5. **Scheduled end** `e = start + 60 × minutes` (per link: 120).
 6. **Recorded end.** If `onS` is set, find the first `x ∈ {g(period, onS), g(period + 1, onS)}` with `start < x ≤ e`,
@@ -812,8 +845,11 @@ Notation:
 | **E31** (S1) | WHL 1023281 P2: home 5-min fighting flagged 1 + away 2-min unflagged, both at 5:16 | (2, 14:30) and (2, 12:00) | (2, 14:30): **Unknown** (H9, 4-on-4); (2, 12:00): AWAY, ONE_MAN, 136 |
 | **E32** (S2) | OHL 29185 P1 double minor at 5:36, both `TimeStart` 07:36, first `TimeOn` 07:36 | (1, 13:30) and (1, 9:30) | (1, 13:30): AWAY, ONE_MAN, 186; (1, 9:30): None (no phantom 9:36–11:36 bar) |
 | **E33** (S3) | P3 0:00 stopped, status 2, scores 4–1, `A2@19:08` | (3, 0:00) | phase LIVE, "End 3rd"; None (decided) |
+| **E34** (WP-1 fix pass S1) | double minor, two-row form: `A2@5:00` `TimeStart` 05:00 and `A2@5:00` `TimeStart` 07:00 (pre-filled), one player, + `Hg@6:30 pp` | (1, 13:20), (1, 12:50), (1, 11:20) | HOME, ONE_MAN, 110; HOME, ONE_MAN, 80; None (link 2 runs 6:30–8:30) |
+| **E35** (WP-1 fix pass S2) | one player: `A2@2:00` (lower id) + `A5@2:00`, both flagged, + `Hg@3:00 pp` | (1, 15:00), (1, 12:30), (1, 11:30), (1, 11:00) | HOME, ONE_MAN, 240; 90; 30; None (major 2:00–7:00, never released, then the minor 7:00–9:00) |
 
-E29–E32 match `tools/chl/pp_replay.py probe` on the recorded games (the `all` command prints them).
+E29–E32 match `tools/chl/pp_replay.py probe` on the recorded games (the `all` command prints them). E34 and E35 match
+the reference after the WP-1 fix pass (before it, E34 read None / 110 / 20 and E35 180 / 30 / None).
 
 ### 5.6 Hide rules (return `Unknown`: "prefer hiding the bar to showing a wrong one")
 
@@ -821,12 +857,17 @@ E29–E32 match `tools/chl/pp_replay.py probe` on the recorded games (the `all` 
 - **H2** (with S13):
   - a counted row has an unparsable time, `minutes` null, or a period > `now.feedPeriod`;
   - or a **goal** has an unparsable period or time while any counted row is serving (its release cannot be placed).
-- **H3** — a counted row starts after `nowG + 5 s`.
-- **H4** — computed seconds ≤ 0 or > `PP_SECS_MAX`, or a serving row with `e − start > 60 × minutes`.
+  - (WP-1 fix pass L2) or a counted row's `Time` or `TimeStart` is past its period's length.
+  - (WP-1 departure 6) also: a flagged row with period < 1; a row the model needs (flagged, or unflagged 2 / 5 for H9)
+    with no parsable `Home` or `Period` (the mapper's check).
+- **H3** — a counted row starts after `nowG + 5 s`. (WP-1 departure 1) **Only the first link of a chain**: a later
+  link starts where the chain puts it (S1), so its recorded `TimeStart` may be in the future (E30, E32).
+- **H4** — computed seconds ≤ 0 or > `PP_SECS_MAX`, or a serving row with `e − start > 60 × minutes`. The second clause
+  cannot fire with today's model (`e ≤ start + dur`; `TimeOn` only caps) and stays as a guard.
 - **H5** — within the last 120 s of game time, a goal flagged `pp` by a side the model did not give the advantage at
   `t`, or flagged `sh` by a side the model did not make short-handed.
 - **H6** — `goals` null, or its count ≠ `goalTotal` (the shootout +1 excluded), while any counted row serves.
-- **H7** — `penalties` null and `ppAttempts > 0`.
+- **H7** — `penalties` null and `ppAttempts > 0`, or (WP-1 departure 6) `ppAttempts` unknown.
 - **H8** — `penalties` or `goals` failed this poll.
 - **H9 (S1)** — at the same `(period, timeS)`:
   1. pair off unflagged 2- or 5-minute rows of equal minutes across the two sides;
@@ -848,6 +889,10 @@ E29–E32 match `tools/chl/pp_replay.py probe` on the recorded games (the `all` 
    nothing.
 5. **Simultaneous expiry and goal** follow step 7's order (goal first).
 6. **Other major / minor combinations** beyond H9 rely on the flags.
+   - (WP-1 review L4) Coincident minors flagged 1 / 1 (against §5.3's 0 / 0 netting) plus a third minor and a PP goal:
+     `A2@4:00`, `H2@4:00` (both flagged), `A2@4:30`, `Hg@5:00 pp`. The goal releases a coincident minor, so the model
+     shows HOME 20 at 6:10 while the real game is at even strength from 6:00 (coincident minors are never released).
+     Accepted: it needs a scorekeeper flag error; no rule.
 7. **Seconds** = until the advantage shrinks, as computed now. In 4-on-3 (2 vs 1) it is the short-handed side's
    earliest seat; if the other side's single penalty ends first, the advantage grows and the time jumps.
 8. **Finished data only.** The replays below use final data. Live behaviour is measured by the S8 gate (§7.4).
@@ -864,6 +909,10 @@ the feed's own flags.
 | Even strength | **161 / 161** |
 
 - The one miss is OHL 29182 P3 00:41: a PP goal with no penalty on record. H5 hides it (E21).
+- (WP-1 fix pass, 2026-11-14) Unchanged after the S1 / S2 model changes, in the reference and in Kotlin; the audit below
+  too. `ChlPowerPlayReplayTest` also asserts second-by-second parity with the reference (`tools/chl/pp_parity.py`) and a
+  5 s polled replay: 4 718 polls show a bar, 22 147 none, 49 unknown; every bar agrees with the reference on side, kind
+  and seconds, and every "none" poll is even in the reference.
 - No goal second falls inside an H9 window.
 
 **Duration audit (S8):** the model run **without** `TimeOn` (so it is independent of it), compared with every
