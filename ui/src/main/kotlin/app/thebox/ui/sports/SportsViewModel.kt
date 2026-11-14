@@ -37,8 +37,12 @@ import kotlinx.coroutines.flow.stateIn
  */
 enum class SportsDay { YESTERDAY, TODAY, TOMORROW }
 
-/** One card: the snapshot, whether it is the followed game, and the mono instant the board was fetched. */
-data class GameCardModel(val game: GameSnapshot, val followed: Boolean, val anchorMono: Long)
+/**
+ * One card: the snapshot, whether it is the followed game, and the mono instant the board was fetched. [refused] (CHL
+ * integration, WP-3 review L10): the followed game's feed refused the app (`ScoreRepository.followFailure` is
+ * [FailKind.REFUSED]); the card then shows the reason and the next step. Always false for other cards.
+ */
+data class GameCardModel(val game: GameSnapshot, val followed: Boolean, val anchorMono: Long, val refused: Boolean = false)
 
 /** What the games area shows (§5.4). */
 sealed interface SportsBody {
@@ -112,10 +116,10 @@ class SportsViewModel internal constructor(
     val state: StateFlow<SportsUiState> = if (repo == null) {
         MutableStateFlow(SportsUiState(body = SportsBody.Failed(FailKind.IO)))
     } else {
-        combine(repo.day, repo.followed, repo.prefs, selected) { day, followed, prefs, sel ->
+        combine(repo.day, repo.followed, repo.prefs, selected, repo.followFailure) { day, followed, prefs, sel, failure ->
             if (!prefs.enabled) SportsUiState(sel, SportsBody.Off, null, prefs)
             else {
-                val body = bodyOf(day, followed?.id, sel, prefs.league)
+                val body = bodyOf(day, followed?.id, sel, prefs.league, failure == FailKind.REFUSED)
                 val nfl = prefs.league.group == LeagueGroup.NFL
                 SportsUiState(
                     sel, body, (day as? DayState.Board)?.takeIf { it.failing }?.fetchedAtMono, prefs,
@@ -222,7 +226,7 @@ class SportsViewModel internal constructor(
         LeagueGroup.CHL -> SportsDays.today(league, nowUtcMs()).plusDays(days).toString()
     }
 
-    private fun bodyOf(day: DayState, followedId: app.thebox.core.sports.GameId?, sel: SportsDay, league: League): SportsBody = when (day) {
+    private fun bodyOf(day: DayState, followedId: app.thebox.core.sports.GameId?, sel: SportsDay, league: League, refused: Boolean = false): SportsBody = when (day) {
         DayState.Loading -> SportsBody.Loading
         is DayState.Failed -> SportsBody.Failed(day.kind)
         is DayState.Board -> {
@@ -233,7 +237,7 @@ class SportsViewModel internal constructor(
                 if (sel == SportsDay.TODAY && day.isToday) learn(b, league)
                 if (!isFor(day, sel, league)) SportsBody.Loading
                 else if (b.games.isEmpty()) SportsBody.Empty(b.dayKey, sel)
-                else SportsBody.Games(order(b.games, league).map { GameCardModel(it, it.id == followedId, day.fetchedAtMono) })
+                else SportsBody.Games(order(b.games, league).map { GameCardModel(it, it.id == followedId, day.fetchedAtMono, refused && it.id == followedId) })
             }
         }
     }

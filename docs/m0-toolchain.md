@@ -85,6 +85,22 @@ errors; version-freshness checks are disabled because versions are pinned here. 
 recorded in each module's `lint-baseline.xml` (regenerate by deleting the file and running
 `./gradlew lintAll`; never baseline an error without a written reason).
 
+### Sports screenshot hash gate (CHL design §7.4, S9)
+
+```sh
+./gradlew :ui:sportsHashGate   # NHL / NFL / Stacked screenshots must hash equal to ui/src/test/resources/golden/sports-hashes.txt
+```
+
+- It deletes the six screenshot folders under `ui/build/` first (`:ui:cleanSportsShots`), forces
+  `:ui:testDebugUnitTest` to rerun (never from the build cache), and only then hashes every listed PNG, so test order
+  does not matter. Run it with any other `:ui` tests in the same invocation; it is part of every milestone gate that
+  touches `:ui` drawing, together with the smoke build and `lintAll`.
+- The PNG bytes depend on the host. The list's `# host:` line records the one it was taken on (macOS 15.0.1 x86_64, JDK
+  21.0.2). On another host the gate is **skipped with a warning**, not failed; regenerate the list there from the commit
+  the list header names (never "fix" it from a changed tree).
+- New cases (PNGs in the six folders that are not listed) are reported, not failed: review them by eye, then add them.
+  The CHL suites write to `ui/build/chl-ui/`, which is reviewed by eye and not hashed.
+
 Also verified: `:app:assembleBenchmark` (R8 minify + resource shrink),
 `:baselineprofile:assemble`, `help --task :benchmark:connectedBenchmarkAndroidTest`.
 

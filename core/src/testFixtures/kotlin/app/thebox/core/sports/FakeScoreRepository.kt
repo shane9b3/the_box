@@ -21,6 +21,8 @@ class FakeScoreRepository(
     override val prefs = MutableStateFlow(prefs)
     override val day = MutableStateFlow<DayState>(DayState.Loading)
     override val followed = MutableStateFlow<FollowedGame?>(null)
+    /** (CHL integration, L10) The test sets it; [follow] clears it, as the real repository does on a follow change. */
+    override val followFailure = MutableStateFlow<FailKind?>(null)
     val eventFlow = MutableSharedFlow<ScoreEvent>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
     override val events: Flow<ScoreEvent> get() = eventFlow
 
@@ -50,6 +52,7 @@ class FakeScoreRepository(
         followCalls += game
         val f = game?.let { SportsFixtures.followedOf(it) }
         val first = followed.value == null && followCalls.count { it != null } == 1
+        if (f?.id != followed.value?.id) followFailure.value = null
         followed.value = f
         if (f == null) { bug.value = null; lastScore.value = null }
         if (raiseFollowEvents && game != null && f != null) {

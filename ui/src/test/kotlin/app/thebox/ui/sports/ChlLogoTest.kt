@@ -160,8 +160,9 @@ class ChlLogoTest {
             java.io.File(dir, ChlLogoCheck.DEBUG_OVERRIDE_FILE).writeText("https://panel.test:9443/some/path")
             assertEquals("origin only", "https://panel.test:9443", ChlLogoCheck.overrideOrigin(dir, debuggable = true))
         } finally { dir.deleteRecursively() }
-        // The same file the data source reads (SportsEndpoints.DEBUG_OVERRIDE_FILE).
+        // The same file the data sources read: one constant in `:core` (SportsConstants.DEBUG_OVERRIDE_FILE).
         assertEquals("debug/sports_base", ChlLogoCheck.DEBUG_OVERRIDE_FILE)
+        assertEquals(app.thebox.core.sports.SportsConstants.DEBUG_OVERRIDE_FILE, ChlLogoCheck.DEBUG_OVERRIDE_FILE)
         // The fetch under test: no override, the fake form is refused without a request; with it, only its origin is requested.
         val loader = ImageLoader.Builder(context).build()
         assertNull(runBlocking { coilLogoFetch(loader, context, false, "")("https://evil.test/leaguestat/ohl/logos/1.png", 64, 46) })

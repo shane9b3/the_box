@@ -8,6 +8,7 @@ import app.thebox.core.input.BoxAction.SELECT
 import app.thebox.core.input.BoxAction.UP
 import app.thebox.core.sports.CHL_LEAGUES
 import app.thebox.core.sports.DayState
+import app.thebox.core.sports.FailKind
 import app.thebox.core.sports.League
 import app.thebox.core.sports.NhlBugStyle
 import app.thebox.core.sports.ScoreFacts
@@ -110,5 +111,36 @@ class ChlScoreSheetTest {
             )
             assertTrue(w.ui.picker!!.choices.none { it is PickerChoice.ScoreStyleRow }, "$league: an NFL follow hides it")
         }
+    }
+
+    /** (CHL integration, WP-3 review L10) A refused follow: its league's reason row right under the followed game. */
+    @Test fun aRefusedFollowShowsItsReasonUnderTheFollowedGame() {
+        val ohl = SportsFixtures.chlGame()
+        val followed = SportsFixtures.followedOf(ohl)
+        val board = DayState.Board(SportsFixtures.board(ohl, dayKey = "2026-11-13", league = League.WHL), 0L, failing = false)
+        val w = PlayerWorld()
+        w.player.scores(ScoreFacts(game = followed, day = board, league = League.WHL, chlLeague = League.WHL, followFailure = FailKind.REFUSED))
+        openSheet(w)
+        val rows = w.ui.picker!!.choices
+        assertTrue(rows[0] is PickerChoice.ScoreGame && (rows[0] as PickerChoice.ScoreGame).followed)
+        assertEquals(PickerChoice.ScoreFailed(FailKind.REFUSED, League.OHL), rows[1], "the followed league's words, not the shown one's")
+        assertTrue(rows[2] is PickerChoice.ScoreLeagueRow)
+        assertTrue(w.ui.picker!!.let { it.choices[it.focused] } is PickerChoice.ScoreGame, "focus still lands on the followed game")
+        // An answer clears it; another kind never adds the row.
+        for (kind in listOf<FailKind?>(null, FailKind.TIMEOUT, FailKind.HTTP_5XX, FailKind.BAD_BODY)) {
+            w.player.scores(ScoreFacts(game = followed, day = board, league = League.WHL, chlLeague = League.WHL, followFailure = kind))
+            assertTrue(w.ui.picker!!.choices.none { it is PickerChoice.ScoreFailed }, "$kind")
+        }
+        // Not twice when the day row already says it for the followed league.
+        val both = PlayerWorld()
+        both.player.scores(ScoreFacts(game = followed, day = DayState.Failed(FailKind.REFUSED), league = League.OHL, chlLeague = League.OHL, followFailure = FailKind.REFUSED))
+        openSheet(both)
+        assertEquals(listOf(PickerChoice.ScoreFailed(FailKind.REFUSED, League.OHL)), both.ui.picker!!.choices.filterIsInstance<PickerChoice.ScoreFailed>())
+        assertTrue(both.ui.picker!!.choices[1] is PickerChoice.ScoreLeagueRow, "the day row stays at the bottom")
+        // Nothing followed: no row, whatever the flow says.
+        val none = PlayerWorld()
+        none.player.scores(ScoreFacts(day = board, league = League.WHL, followFailure = FailKind.REFUSED))
+        openSheet(none)
+        assertTrue(none.ui.picker!!.choices.none { it is PickerChoice.ScoreFailed })
     }
 }

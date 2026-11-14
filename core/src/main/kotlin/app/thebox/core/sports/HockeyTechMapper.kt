@@ -14,7 +14,7 @@ import java.util.Locale
 /**
  * (CHL §3) HockeyTech bodies → the normalised types. Pure: no I/O, no clock. Every field is optional and lenient (§3.1);
  * an unmappable body yields null, which the source turns into `FailKind.BAD_BODY`. The signatures are the commit-0
- * contract (with the types in `HockeyTechContracts.kt`); WP-1 fills the bodies without changing them.
+ * contract (with the types in `HockeyTechContracts.kt`); WP-1 implemented the bodies without changing them.
  *
  * Leniency (§3.1): ints may be JSON numbers or strings (`2`, `"2"`, `"02"`); booleans `true`/`false`, `1`/`0`,
  * `"1"`/`"0"`; clocks `"mm:ss"` or `"hh:mm:ss"`, `"-"` = unknown; codes `trim().uppercase(Locale.ROOT)` gated to

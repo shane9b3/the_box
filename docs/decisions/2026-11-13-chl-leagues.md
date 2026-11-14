@@ -1,6 +1,7 @@
 # CHL leagues (OHL, WHL, QMJHL) on the hockey score bugs (owner request 2026-11-13)
 
-Status: **design reviewed and revised 2026-11-13; ready for commit 0.**
+Status: **design reviewed and revised 2026-11-13; commit 0 and WP-1 to WP-5 implemented and reviewed 2026-11-13/14;
+integrated 2026-11-14** (see "Integration" below).
 - Design: `docs/design/m6-chl-leagues.md`.
 - Review: `docs/review/2026-11-13-chl-leagues-design-review.md`.
 
@@ -184,3 +185,23 @@ Lead rulings on `docs/review/2026-11-14-chl-wp5-ui-and-colours-review.md`:
 - Design: `docs/design/m6-chl-leagues.md`.
 - Review: `docs/review/2026-11-13-chl-leagues-design-review.md`.
 - Standing hockey rulings: `docs/decisions/2026-11-05-nhl-score-bug.md`, `docs/decisions/2026-11-10-nhl-score-bug-stacked.md`.
+
+## Integration (2026-11-14)
+- **Site keys:** the three leagues' public site keys are embedded in one source file (`HockeyTechKeys` in
+  `data/src/main/kotlin/app/thebox/data/sports/HockeyTechEndpoints.kt`) and registered with `Redact` at class
+  initialisation, with the **owner's acceptance of the terms risk (owner decision 1, 2026-11-13)**. They appear in no doc,
+  fixture, log or diagnostics export; a debug build pointed at the fake panel sends the fake panel's own keys.
+- **Refused feed on screen (WP-3 review L10):** `ScoreRepository.followFailure: StateFlow<FailKind?>` carries the followed
+  game's last poll failure (cleared by an answer and on a follow change). For `FailKind.REFUSED` the followed card on the
+  Sports tab shows `sports_failed_refused` in place of its two team rows, and the quick-bar sheet adds the followed
+  league's failure row under the followed game. No new string. Other kinds keep the bug's own dim-and-hide.
+- **One debug override name:** `SportsConstants.DEBUG_OVERRIDE_FILE` (`:core`) is read by the three data sources and by
+  `ChlLogoCheck`, each only in a debug build.
+- **Hash gate:** `./gradlew :ui:sportsHashGate` (`docs/m0-toolchain.md`); skipped with a message on a host other than the
+  one in the list's `# host:` line.
+- **Live gate:** `ChlLiveGateTest` (with `CHL_LIVE_RECORDINGS` for real recordings) is the S8 gate; `pp_replay.py live` is
+  a quick check.
+- **Memorial Cup and CHL-wide events** stay out of v1 (owner decision 5).
+- Amended for the CHL: `docs/decisions/2026-11-05-nhl-score-bug.md` (rulings 13, 18, 29, 33, A-S1),
+  `docs/decisions/2026-11-10-nhl-score-bug-stacked.md` (hockey only), the M6 row of `docs/00-master-plan.md`, the
+  score-bug, NFL, power-play, goal-animation, Stacked and update-interval designs, `README.md`.

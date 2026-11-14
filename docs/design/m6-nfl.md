@@ -341,6 +341,11 @@ body whose state changed.
 
 ## 2. Contracts (`SportsContracts.kt`, commit 0; trailing and defaulted, NHL call sites unchanged)
 
+> **CHL amendment (2026-11-14, `docs/design/m6-chl-leagues.md` §1).** `League` gained `OHL, WHL, QMJHL` (append-only). `League.sport` is
+> FOOTBALL for the NFL only; the CHL leagues take every hockey branch. Code that tested `league == NFL` for "the other
+> league" now branches on `League.group` / `League.sport` / `League.timing` (the CHL is timed from completion, like the
+> NFL, but never takes an NFL rule).
+
 ```kotlin
 @Serializable enum class League { NHL, NFL }                                  // append-only (persisted)
 
@@ -1027,6 +1032,10 @@ sentence (the slugs are in the table's source comments in code). It is a seconda
 ---
 
 ## 7. League switch, Sports tab and picker (ruling 24)
+
+> **CHL amendment (2026-11-14, `docs/design/m6-chl-leagues.md` §6.3).** Three groups: the chips read `NHL · NFL · CHL`, and with CHL shown an
+> inline `OHL · WHL · QMJHL` switch follows on the same row. The quick-bar League row cycles NHL → NFL → CHL (the remembered
+> sub-league, `SportsPrefs.chlLeague`) → NHL, and a "CHL league" row follows it while a CHL league is shown.
 
 ### 7.1 State
 

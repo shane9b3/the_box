@@ -11,9 +11,12 @@ above the other, a shots-on-goal column, a clock column, and a bar under the box
 - One setting, **Score bug style**: *Pill* · *Stacked*. **Pill stays the default**, so nothing changes for existing users.
 - Stored as `SportsPrefs.nhlStyle` in the backed-up `sports` domain; app-wide, never per playlist.
 - Reachable from Settings → Sports (ADVANCED) and from a **Style** row in the quick bar's Score bug sheet (OK toggles;
-  the sheet stays open). The row shows for a followed NHL game, or, with nothing followed, while the sheet browses the
-  NHL.
-- NHL only: an NFL game always draws the NFL bug.
+  the sheet stays open). The row shows for a followed hockey game, or, with nothing followed, while the sheet browses a
+  hockey league (NHL, OHL, WHL or QMJHL; CHL P12).
+- Hockey only (amended 2026-11-13, CHL P12; was "NHL only"): every hockey league (NHL, OHL, WHL, QMJHL) uses the style;
+  an NFL game always draws the NFL bug. The CHL leagues have their own per-league colour tables
+  (`StackedColourTable`), and a CHL code longer than 3 letters falls back to a plain stripe-coloured disc in the Stacked
+  logo slot (CHL design §6.4, WP-5 fix pass S1). See `docs/decisions/2026-11-13-chl-leagues.md`.
 - Words on screen: "Score bug style", "Style", "Pill", "Stacked". Never "theme".
 
 ## Look-and-feel defaults (design §12): all eight confirmed by the owner, 2026-11-11

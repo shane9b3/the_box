@@ -269,6 +269,37 @@ class ChlSportsTabTest {
         assertTrue(desc, desc.contains("Steelheads") && desc.contains("Time TBD"))
     }
 
+    /** (CHL integration, WP-3 review L10) A refused follow: the followed card says why and what to do; the others are untouched. */
+    @Test fun aRefusedFollowPutsTheReasonOnTheFollowedCardOnly() {
+        wire(SportsPrefs(league = League.OHL))
+        val followed = SportsFixtures.chlGame(id = "1", away = SportsFixtures.chlTeam("LDN", "Knights", 1), home = SportsFixtures.chlTeam("KIT", "Rangers", 2))
+        val other = SportsFixtures.chlGame(id = "2", away = SportsFixtures.chlTeam("OTT", "67's", 0), home = SportsFixtures.chlTeam("KGN", "Frontenacs", 0))
+        board(followed, other, league = League.OHL)
+        repo.follow(followed)
+        show()
+        rule.onNodeWithTag(SPORTS_REFUSED_TAG + "1", useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithText("Knights").assertExists()
+        val text = "OHL scores stopped letting this app in. CHL scores need an app update; NHL and NFL scores still work."
+        repo.followFailure.value = FailKind.REFUSED
+        rule.waitForIdle()
+        rule.onNodeWithTag(SPORTS_REFUSED_TAG + "1", useUnmergedTree = true).assertTextEquals(text)
+        rule.onNodeWithTag(SPORTS_REFUSED_TAG + "2", useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithText("Knights").assertDoesNotExist()
+        rule.onNodeWithText("Frontenacs").assertExists()
+        val desc = rule.onNodeWithTag(sportsCardTag("1")).fetchSemanticsNode().config[SemanticsProperties.ContentDescription].joinToString()
+        assertTrue(desc, desc.contains("Knights") && desc.endsWith(text))
+        // Other kinds keep the card as it was (the bug dims and hides on its own timers).
+        repo.followFailure.value = FailKind.TIMEOUT
+        rule.waitForIdle()
+        rule.onNodeWithTag(SPORTS_REFUSED_TAG + "1", useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithText("Knights").assertExists()
+        // Stop following clears it (the fake, as the real repository, clears it on a follow change).
+        repo.followFailure.value = FailKind.REFUSED
+        repo.follow(null)
+        rule.waitForIdle()
+        rule.onNodeWithTag(SPORTS_REFUSED_TAG + "1", useUnmergedTree = true).assertDoesNotExist()
+    }
+
     @Test fun theBugsSpokenTextUsesCityAndNickname() {
         val g = SportsFixtures.chlGame()
         val text = Describe(rule.activity.resources, SportsFixtures.liveView(g)).text()

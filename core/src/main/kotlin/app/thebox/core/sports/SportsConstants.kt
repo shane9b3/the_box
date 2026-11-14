@@ -5,6 +5,13 @@ package app.thebox.core.sports
  * (1 design px = window width ÷ 1920). `:ui`'s `PlayerUi.SCORE_*` alias the geometry ones.
  */
 object SportsConstants {
+    /**
+     * (CHL integration) The **debug** build's sports endpoint override, under `filesDir`: one line, an origin such as
+     * `http://10.0.2.2:8080` (tools/fakepanel/README.md). The one name for the data sources (`SportsEndpoints`,
+     * `EspnEndpoints`, `HockeyTechEndpoints`) and the CHL logo check (`ChlLogoCheck`); each reads it only in a debug build.
+     */
+    const val DEBUG_OVERRIDE_FILE = "debug/sports_base"
+
     // ---- cadence (§2.3)
     /** The CDN's 20 s cache bucket (`Date − Age` gives its start; A-S2). */
     const val CDN_BUCKET_MS = 20_000L

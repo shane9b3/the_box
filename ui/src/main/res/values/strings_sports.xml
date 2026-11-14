@@ -180,9 +180,9 @@
     <string name="settings_sports_size_standard">Standard</string>
     <string name="settings_sports_size_large">Large</string>
 
-    <!-- Update interval (docs/design/m6-sports-update-interval.md §5.2; owner rulings 29–32). %1$s = NHL / NFL. -->
+    <!-- Update interval (docs/design/m6-sports-update-interval.md §5.2; owner rulings 29–32; CHL P1). %1$s = the league group: NHL / NFL / CHL. -->
     <string name="settings_sports_interval">%1$s score updates</string>
-    <!-- %1$d = seconds. The NHL polls on its feed's 20 s buckets; the NFL waits this long after each update is read. -->
+    <!-- %1$d = seconds. The NHL polls on its feed's 20 s buckets; the NFL and the CHL wait this long after each update is read. -->
     <string name="settings_sports_interval_auto">Auto (every %1$d s)</string>
     <string name="settings_sports_interval_auto_after">Auto (%1$d s after each update)</string>
     <string name="settings_sports_interval_every">Every %1$d s</string>

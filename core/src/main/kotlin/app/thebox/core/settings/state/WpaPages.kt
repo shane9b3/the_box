@@ -609,7 +609,7 @@ class WpaPages(
             listOf(ScoreBugSize.STANDARD to SettingsText.SPORTS_SIZE_STANDARD, ScoreBugSize.LARGE to SettingsText.SPORTS_SIZE_LARGE).map { (s, k) -> ChoiceOption(s.name, t(k)) },
             p.size.name,
         )
-        // (Stacked §1.1) Score bug style, after Size. A setting of its own (NHL only on screen), so it always shows.
+        // (Stacked §1.1) Score bug style, after Size. A setting of its own (hockey only on screen: NHL, OHL, WHL, QMJHL; CHL P12), so it always shows.
         out += choice(
             SportsRows.STYLE, t(SettingsText.SPORTS_STYLE),
             listOf(NhlBugStyle.PILL to SettingsText.SPORTS_STYLE_PILL, NhlBugStyle.STACKED to SettingsText.SPORTS_STYLE_STACKED).map { (s, k) -> ChoiceOption(s.name, t(k)) },

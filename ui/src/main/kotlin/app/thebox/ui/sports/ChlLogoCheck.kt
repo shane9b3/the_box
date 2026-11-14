@@ -33,8 +33,8 @@ class ChlLogoCheck : Transformation() {
         /** What follows `{origin}/leaguestat/` in the fake panel's form (design §2.8), only ever accepted for the override's origin. */
         private val FAKE_TAIL = Regex("""(ohl|whl|lhjmq)/logos/[0-9]+(_[0-9]+)?\.(png|jpg|jpeg)""")
 
-        /** The data source's debug override file under `filesDir` (`SportsEndpoints.DEBUG_OVERRIDE_FILE`; one line, an origin). */
-        const val DEBUG_OVERRIDE_FILE = "debug/sports_base"
+        /** The data source's debug override file under `filesDir` (one line, an origin): the one constant in `:core`. */
+        const val DEBUG_OVERRIDE_FILE = app.thebox.core.sports.SportsConstants.DEBUG_OVERRIDE_FILE
 
         /**
          * The debug endpoint override's origin (`scheme://host[:port]`, no trailing slash), or null. It is non-null **only** when

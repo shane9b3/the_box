@@ -371,6 +371,12 @@ debug origin (`files/debug/sports_base`) serves both leagues:
   `ChlLiveGateTest` (`tools/chl/README.md`); `pp_replay.py live <folder>` is a quick Python check only.
 - A matching `If-None-Match` is a 304 with or without `X-Firebase-ETag`, as the real database; the `ETag` header is sent
   only with `X-Firebase-ETag: true`.
+- What the switches show in the app (CHL integration): `--chl-refuse` turns the CHL day list into "OHL scores stopped
+  letting this app in…" (retried only after 5 min); `--chl-firebase-refuse` while a CHL game is followed keeps the board but
+  puts the same text on the followed card (in place of its team rows) and under the followed game in the quick-bar Score bug
+  sheet, and the bug dims, then hides.
+- The app accepts the panel's `{origin}/leaguestat/…` logo URLs (and runs the CHL no-alpha check on them) only in a debug
+  build whose `files/debug/sports_base` names that origin; a release build accepts `https://assets.leaguestat.com/…` only.
 
 ## Logging
 
