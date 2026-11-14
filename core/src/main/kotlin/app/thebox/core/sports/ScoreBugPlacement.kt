@@ -108,10 +108,9 @@ object ScoreBugPlacement {
         if (size == ScoreBugSize.LARGE) round(SportsConstants.PP_TAB_INSET * SportsConstants.SCORE_LARGE_SCALE) else SportsConstants.PP_TAB_INSET
 
     /** (NFL §4.3) The tab's side inset for [league]: the NFL's is Standard 37, Large 46 (tab widths 446 / 558). */
-    fun tabInset(size: ScoreBugSize, league: League): Float = when (league) {
-        League.NHL -> tabInset(size)
-        League.OHL, League.WHL, League.QMJHL -> tabInset(size) // TODO(WP-2, CHL §1.6 #18): `when (league.sport)`
-        League.NFL -> if (size == ScoreBugSize.LARGE) SportsConstants.NFL_TAB_INSET_LARGE else SportsConstants.NFL_TAB_INSET
+    fun tabInset(size: ScoreBugSize, league: League): Float = when (league.sport) {
+        Sport.HOCKEY -> tabInset(size)
+        Sport.FOOTBALL -> if (size == ScoreBugSize.LARGE) SportsConstants.NFL_TAB_INSET_LARGE else SportsConstants.NFL_TAB_INSET
     }
 
     /** (Power play §4.1) The tab's visible depth below (or above) the pill: Standard 36, Large 45. */
@@ -134,10 +133,9 @@ object ScoreBugPlacement {
         if (size == ScoreBugSize.LARGE) SportsConstants.SCORE_LARGE_W else SportsConstants.SCORE_W
 
     /** (NFL §4.4) The pill's width for [league]: the NFL's is Standard 520, Large 650. */
-    fun width(size: ScoreBugSize, league: League): Float = when (league) {
-        League.NHL -> width(size)
-        League.OHL, League.WHL, League.QMJHL -> width(size) // TODO(WP-2, CHL §1.6 #18): `when (league.sport)`
-        League.NFL -> if (size == ScoreBugSize.LARGE) SportsConstants.NFL_SCORE_LARGE_W else SportsConstants.NFL_SCORE_W
+    fun width(size: ScoreBugSize, league: League): Float = when (league.sport) {
+        Sport.HOCKEY -> width(size)
+        Sport.FOOTBALL -> if (size == ScoreBugSize.LARGE) SportsConstants.NFL_SCORE_LARGE_W else SportsConstants.NFL_SCORE_W
     }
 
     fun height(size: ScoreBugSize): Float =
@@ -162,7 +160,7 @@ object ScoreBugPlacement {
      * `league`), unchanged. NHL Stacked: the footprint width, `STACKED_W_MAX` (392), Large × `SCORE_LARGE_SCALE` (490).
      */
     fun width(size: ScoreBugSize, league: League, style: NhlBugStyle): Float = when {
-        league != League.NHL || style == NhlBugStyle.PILL -> width(size, league)
+        !league.isHockey || style == NhlBugStyle.PILL -> width(size, league)
         else -> SportsConstants.STACKED_W_MAX * stackedScale(size)
     }
 
@@ -172,7 +170,7 @@ object ScoreBugPlacement {
      * (176.25, exact: Commit 0 note 14; nothing needs it rounded, and the bounds tests use these values).
      */
     fun height(size: ScoreBugSize, league: League, style: NhlBugStyle): Float = when {
-        league != League.NHL || style == NhlBugStyle.PILL -> height(size)
+        !league.isHockey || style == NhlBugStyle.PILL -> height(size)
         else -> (SportsConstants.STACKED_H + SportsConstants.STACKED_BAR_H) * stackedScale(size)
     }
 
