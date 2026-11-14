@@ -9,9 +9,10 @@ Usage (from the repo root):
   python3 -I tools/chl/pp_replay.py ends     # modelled end of every flagged minor vs its recorded TimeOn (OHL/WHL)
   python3 -I tools/chl/pp_replay.py probe ohl 29185 1:10:30 ...   # state at (period:mm:ss elapsed)
   python3 -I tools/chl/pp_replay.py all
-  python3 -I tools/chl/pp_replay.py live <folder> [--ot-len 1200]   # S8: a record_live.py recording, poll by poll
-    vs the model on the game's final data (its last poll): wrong-bar, hidden and missing seconds; exit 2 on a FAIL
-    (wrong-bar > 5 % of the final model's PP seconds, or a wrong stretch > 30 s; the proposed threshold, O1)
+  python3 -I tools/chl/pp_replay.py live <folder> [--ot-len 1200]   # a QUICK CHECK of a record_live.py recording
+    (the Python model against itself, H3/H6/H8/H9 only). **Not the release gate**: the S8 gate runs the shipped Kotlin
+    mapper, `ChlLiveGateTest` (CHL_LIVE_RECORDINGS=<folder> ./gradlew :core:test --tests '*ChlLiveGateTest*'; see
+    tools/chl/README.md).
 Optional: --dir <captures dir> (default core/src/testFixtures/resources/sports/chl/firebase/finals-2026-11-13).
 
 Model (one-second steps; the Kotlin version may be event-driven, the rules are the same):
@@ -396,7 +397,8 @@ def live_state(nodes, failed, now, ot_len):
 
 
 def cmd_live(folder, ot_len=OT_REG):
-    """S8: the derivation poll by poll against the model on the game's final data (the last poll's nodes)."""
+    """A quick check (not the S8 release gate, which is the Kotlin `ChlLiveGateTest`): the Python derivation poll by poll
+    against the model on the game's final data (the last poll's nodes)."""
     polls = live_polls(folder)
     if not polls:
         print("no polls")
@@ -438,7 +440,8 @@ def cmd_live(folder, ot_len=OT_REG):
     print(f"{meta.get('league')} {meta.get('game')}: {len(polls)} polls; final-model PP {model_pp:.0f} s; "
           f"wrong-bar {wrong:.0f} s ({100 * share:.1f} %), longest wrong stretch {longest:.0f} s; "
           f"hidden {hidden:.0f} s; missing {missing:.0f} s")
-    print(("PASS" if ok else "FAIL") + f" (gate: wrong <= {100 * LIVE_WRONG_SHARE_MAX:.0f} %, stretch <= {LIVE_WRONG_STRETCH_MAX} s)")
+    print(("PASS" if ok else "FAIL") + f" (quick check: wrong <= {100 * LIVE_WRONG_SHARE_MAX:.0f} %, stretch <= {LIVE_WRONG_STRETCH_MAX} s;"
+          " the release gate is ChlLiveGateTest)")
     return 0 if ok else 2
 
 

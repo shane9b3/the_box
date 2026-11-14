@@ -287,23 +287,43 @@ class HockeyTechScoreSourceTest {
         assertEquals(625, snap.clock?.secondsRemaining)
     }
 
-    @Test fun wireBytesAreTheSumOfThePollsBodiesAndA304AddsNone() {
+    /**
+     * (Lead ruling S2) The poll's wire bytes are its bodies plus every request's and answer's header bytes (request line,
+     * status line, headers, blank lines), 304s included; the exact header count is what [HockeyTechScoreSource.headerBytes]
+     * computes from the exchanges the server saw.
+     */
+    @Test fun wireBytesCountBodiesAndHeadersAndA304CountsItsHeaders() {
         liveGame()
         val s = source()
         val first = runBlocking { s.game(ohl29191, start29191) } as Fetch.Ok
-        val expected = listOf(rc(), pc(), gs(), ss(), awayMinor, threeGoals).sumOf { it.toByteArray().size.toLong() }
-        assertEquals(expected, first.wireBytes)
+        val bodies = listOf(rc(), pc(), gs(), ss(), awayMinor, threeGoals).sumOf { it.toByteArray().size.toLong() }
+        val headers = first.wireBytes!! - bodies
+        // Six exchanges: each request (GET line, Host, Connection, Accept-Encoding, User-Agent, Accept, X-Firebase-ETag)
+        // and each answer (status line, Content-Type, Content-Length, ETag).
+        assertTrue("headers $headers B", headers in 6 * 200L..6 * 600L)
         nowMono += 5_000
         val second = runBlocking { s.game(ohl29191, start29191) } as Fetch.Ok
-        assertEquals(0L, second.wireBytes)
+        // Five 304s and a 304 runningclock: no body, but every header still crossed the wire (with If-None-Match now).
+        assertTrue("a 304 poll still costs its headers: ${second.wireBytes}", second.wireBytes!! in 6 * 200L..6 * 650L)
         assertNull(second.maxAgeS)
         assertEquals(0, second.ageS)
     }
 
-    @Test fun thePollIsParallel() {
+    @Test fun theHeaderCountMatchesHttp11() {
+        val req = okhttp3.Request.Builder().url("http://h.example/a/b.json?x=1").header("Accept", "application/json").build()
+        val res = okhttp3.Response.Builder().request(req).protocol(okhttp3.Protocol.HTTP_1_1).code(304).message("Not Modified")
+            .header("ETag", "abc").build()
+        val expected = "GET /a/b.json?x=1 HTTP/1.1\r\n".length + "Accept: application/json\r\n".length + 2 +
+            "HTTP/1.1 304 Not Modified\r\n".length + "ETag: abc\r\n".length + 2
+        assertEquals(expected.toLong(), HockeyTechScoreSource.headerBytes(res))
+    }
+
+    /** (Lead ruling L11) At most three of a poll's requests at once, the clock and the score asked first. */
+    @Test fun thePollRunsThreeAtATimeClockAndScoreFirst() {
         liveGame()
         val s = source()
         runBlocking { s.game(ohl29191, start29191) } // warm: the board, teams, seasons
+        requests.clear()
         for (n in listOf("runningclock", "publishedclock", "goalssummary", "shotssummary", "penalties", "goals")) {
             val body = nodes.getValue("ohl/$n/29191")
             nodeFaults[n] = { json(body).newBuilder().headersDelay(400, TimeUnit.MILLISECONDS).build() }
@@ -311,7 +331,21 @@ class HockeyTechScoreSourceTest {
         val t0 = System.nanoTime()
         ok(runBlocking { s.game(ohl29191, start29191) })
         val ms = (System.nanoTime() - t0) / 1_000_000
-        assertTrue("six 400 ms answers took $ms ms: not parallel", ms < 1_800)
+        assertTrue("six 400 ms answers took $ms ms: not three at a time", ms in 780L..1_700L)
+        val firstThree = fbNodes().take(3).map(::nodeName).toSet()
+        assertTrue("$firstThree", firstThree.containsAll(setOf("runningclock", "goalssummary")))
+    }
+
+    @Test fun aFailedShotsOrClockNodeKeepsItsLastBody() {
+        liveGame()
+        val s = source()
+        ok(runBlocking { s.game(ohl29191, start29191) })
+        nodeFaults["shotssummary"] = { json("x", 503) }
+        nodeFaults["publishedclock"] = { json("x", 503) }
+        nowMono += 5_000
+        val snap = ok(runBlocking { s.game(ohl29191, start29191) })
+        assertEquals("no SOG flicker (review L7)", 11 to 14, snap.away.sog to snap.home.sog)
+        assertEquals(GamePhase.LIVE, snap.phase)
     }
 
     @Test fun shootoutsIsAddedForTheWhlAfterAPossibleShootoutAndResetWithTheFollow() {
@@ -429,14 +463,21 @@ class HockeyTechScoreSourceTest {
         val f = runBlocking { source().game(ohl29191, start29191) } as Fetch.Failed
         assertEquals(FailKind.REFUSED, f.kind)
         assertEquals(900, f.retryAfterS)
+        nodeFaults["runningclock"] = { json("""{"error":"Permission denied"}""", 401, "Retry-After" to "9000") }
+        assertEquals(3_600, (runBlocking { source().game(ohl29191, start29191) } as Fetch.Failed).retryAfterS)
     }
 
-    @Test fun a429CarriesRetryAfter() {
+    @Test fun a429CarriesRetryAfterClampedTo300s() {
         liveGame()
         nodeFaults["runningclock"] = { json("{}", 429, "Retry-After" to "42") }
         val f = runBlocking { source().game(ohl29191, start29191) } as Fetch.Failed
         assertEquals(FailKind.HTTP_429, f.kind)
         assertEquals(42, f.retryAfterS)
+        // (Lead ruling S1) A long Retry-After never freezes a CHL follow or day list past 300 s, as for the NHL.
+        nodeFaults["runningclock"] = { json("{}", 429, "Retry-After" to "1800") }
+        assertEquals(300, (runBlocking { source().game(ohl29191, start29191) } as Fetch.Failed).retryAfterS)
+        feedFaults["gamesbydate"] = { text("busy", 503).newBuilder().addHeader("Retry-After", "1800").build() }
+        assertEquals(300, (runBlocking { source().day("2026-11-12") } as Fetch.Failed).retryAfterS)
     }
 
     @Test fun aTimeoutIsTimeout() {
@@ -702,6 +743,77 @@ class HockeyTechScoreSourceTest {
         )) {
             assertEquals("$bad", "", s.logoUrl(line(bad)))
         }
+        // (Review L5) Never an "ok" line for a logo; a rejected URL is logged once, however often a card asks.
+        logs.clear()
+        repeat(5) { s.logoUrl(line("${prefix}6.jpg")); s.logoUrl(line("${prefix}5_88.png")) }
+        assertEquals(listOf("ChlScores OHL logo → rejected"), logs.filter { it.contains("logo") })
+    }
+
+    @Test fun logoUrlNeverResolvesTheEndpointsItself() {
+        var resolved = 0
+        val s = source(endpoints = { resolved++; HockeyTechEndpoints.fromOverride(origin())!! })
+        assertEquals("", s.logoUrl(TeamLine("OTT", "Ottawa 67's", null, "${origin()}/leaguestat/ohl/logos/5.png")))
+        assertEquals("no file read on the UI thread", 0, resolved)
+    }
+
+    // ---------------------------------------------------------------- the pre-game window (§2.5, lead ruling L6)
+
+    @Test fun liveModeStartsTwoMinutesBeforeTheListedStart() {
+        // WHL 1023286 VIC @ KAM, status 1, 19:00 Vancouver.
+        val id = GameId(League.WHL, "1023286")
+        val start = at("2026-11-13T19:00", "America/Vancouver")
+        val s = source(League.WHL)
+        wallMs = start - 3 * 60_000L
+        ok(runBlocking { s.game(id, start) })
+        assertTrue("3 min ahead: board mode", fb().isEmpty())
+        wallMs = start - 2 * 60_000L + 1_000L
+        val snap = ok(runBlocking { s.game(id, start) })
+        assertTrue("inside 2 min: live mode", fbNodes().any { nodeName(it) == "runningclock" })
+        assertEquals("Firebase does not list it yet (null): board mode for that poll", GamePhase.SCHEDULED, snap.phase)
+    }
+
+    @Test fun aTimeTbdGameStaysInBoardModeUntilTheBoardSaysItStarted() {
+        boardEdit = { b -> editGame(b, "1023286") { it + ("time_tbd" to JsonPrimitive("1")) } }
+        val id = GameId(League.WHL, "1023286")
+        wallMs = at("2026-11-13T21:30", "America/Vancouver")
+        val s = source(League.WHL)
+        val snap = ok(runBlocking { s.game(id, null) })
+        assertTrue(snap.startTbd)
+        assertTrue("TBD and still scheduled: never Firebase", fb().isEmpty())
+        boardEdit = { b -> editGame(b, "1023286") { it + ("time_tbd" to JsonPrimitive("1")) + ("status" to JsonPrimitive("2")) } }
+        liveGame("whl", "1023286", penalties = noPenalties)
+        nodes["whl/goalssummary/1023286"] = gs(away = 0, home = 0)
+        nodes["whl/goals/1023286"] = goals()
+        nowMono += HockeyTechScoreSource.BOARD_CACHE_MS + 1
+        ok(runBlocking { s.game(id, null) }) // the board mode poll re-reads the board: now started
+        ok(runBlocking { s.game(id, null) })
+        assertTrue("started: live mode", fbNodes().any { nodeName(it) == "runningclock" })
+    }
+
+    // ---------------------------------------------------------------- seasons and teams refresh (review L3, L4)
+
+    @Test fun seasonsAreReReadAtMostDaily() {
+        val s = source()
+        board(runBlocking { s.day("2026-11-13") })
+        nowMono += HockeyTechScoreSource.BOARD_CACHE_MS + 1
+        board(runBlocking { s.day("2026-11-13") })
+        assertEquals(1, feeds("seasons").size)
+        nowMono += HockeyTechScoreSource.SEASONS_REFRESH_MS
+        board(runBlocking { s.day("2026-11-13") })
+        assertEquals(2, feeds("seasons").size)
+    }
+
+    @Test fun aFollowWhoseFactsLackedTeamsAsksAgain() {
+        feedFaults["teamsbyseason"] = { text("x", 500) }
+        liveGame()
+        val s = source()
+        assertNull("no teams yet: the code plate", ok(runBlocking { s.game(ohl29191, start29191) }).away.logo)
+        feedFaults.clear()
+        nowMono += HockeyTechScoreSource.BOARD_CACHE_MS + 1
+        ok(runBlocking { s.game(ohl29191, start29191) })
+        assertEquals("the follow re-asked for the teams", 2, feeds("teamsbyseason").size)
+        val withLogo = ok(runBlocking { s.game(ohl29191, start29191) })
+        assertNotNull(withLogo.away.logo)
     }
 
     // ---------------------------------------------------------------- redaction (§2.2, L6)
@@ -731,15 +843,37 @@ class HockeyTechScoreSourceTest {
         failed(runBlocking { fake.game(ohl29191, start29191) })
         nodeFaults["runningclock"] = { json("{}", 401) }
         failed(runBlocking { fake.game(ohl29191, start29191) })
+        // Over the cap (with the key in the body), and a timeout.
+        nodeFaults["runningclock"] = { json("""{"k":"${HockeyTechKeys.OHL}","pad":"${"x".repeat(140_000)}"}""") }
+        assertEquals(FailKind.BAD_BODY, failed(runBlocking { fake.game(ohl29191, start29191) }))
+        nodeFaults["runningclock"] = { json(rc()).newBuilder().headersDelay(2, TimeUnit.SECONDS).build() }
+        assertEquals(FailKind.TIMEOUT, failed(runBlocking { source(callTimeoutMs = 400).also { runBlocking { it.game(ohl29191, start29191) } }.game(ohl29191, start29191) }))
+        nodeFaults.clear()
+        // The overlay, teams and seasons failure paths, with the key echoed in their bodies.
+        overlays["runningclock"] = { json("""{"error":"${HockeyTechKeys.OHL}"}""", 503) }
+        feedFaults["teamsbyseason"] = { text("Invalid key. ${HockeyTechKeys.OHL}") }
+        feedFaults["seasons"] = { json("""{"SiteKit":{"key":"${HockeyTechKeys.OHL}"""") }
+        runBlocking { source(endpoints = ::realKeyEndpoints).day("2026-11-13") } // refused by the server's key check
+        runBlocking { source().day("2026-11-13") }
+        overlays["runningclock"] = { json("{}", 401) }
+        runBlocking { source().day("2026-11-13") }
         server.close()
         failed(runBlocking { fake.game(ohl29191, start29191) })
         failed(runBlocking { source(endpoints = ::realKeyEndpoints).day("2026-11-14") })
 
-        assertTrue("some transitions were logged", logs.size >= 4)
+        assertTrue("some transitions were logged", logs.size >= 8)
         assertTrue("no throwable is ever handed to the log", logThrowables.isEmpty())
+        assertTrue(logs.any { it.contains("over cap") })
+        assertTrue(logs.any { it.contains("live → TIMEOUT") })
+        assertTrue(logs.any { it.contains("overlay → HTTP_5XX") })
+        assertTrue(logs.any { it.contains("overlay → REFUSED") })
+        assertTrue(logs.any { it.contains("teams → REFUSED") })
+        assertTrue(logs.any { it.contains("seasons → BAD_BODY") })
         for (line in logs) {
+            // (Review S4) The sink sees lines after Redact: a mask means something needed redacting, i.e. a leak.
+            assertFalse("a redaction mask in: $line", line.contains("***"))
             for (k in keys) assertFalse(line, line.contains(k))
-            for (bad in listOf("http", "://", "?", "index.php", "firebase", "leaguestat", "localhost", "127.0.0.1", "SiteKit", "Clock", "{")) {
+            for (bad in listOf("http:", "https:", "://", "?", "index.php", "firebase", "leaguestat", "localhost", "127.0.0.1", "SiteKit", "Clock", "{")) {
                 assertFalse("\"$bad\" in: $line", line.contains(bad, ignoreCase = true))
             }
         }

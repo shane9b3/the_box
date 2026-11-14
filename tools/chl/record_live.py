@@ -13,15 +13,18 @@ poll by poll with the model on the game's final data.
 
 It stops once the game is final (publishedclock `Final` or status 4) for three polls in a row, or after --max-hours.
 
-Optional board facts: with a key (--key or the HOCKEYTECH_KEY environment variable; **never hard-coded here**) it also
-saves that day's `gamesbydate` once at the start and once at the end as board-start.json / board-end.json (period lengths,
-the playoff flag), with the key replaced by KEY_REDACTED before writing. The key is never printed.
+Board facts (needed by the Kotlin gate, `ChlLiveGateTest`): with a key it also saves that day's `gamesbydate` once at the
+start and once at the end as board-start.json / board-end.json (team codes, start, period lengths, the playoff flag), with
+the key replaced by KEY_REDACTED before writing. The key comes **only** from the HOCKEYTECH_KEY environment variable or
+from a file (`--key-file`, one line); never from the command line (it would show in `ps` and the shell history, review
+L8) and never hard-coded here. It is never printed. See tools/chl/README.md for the game-night procedure.
 
 Usage (from the repo root):
   python3 -I tools/chl/record_live.py --league whl --game 1023288 --out tools/chl/recordings/whl-1023288
-  HOCKEYTECH_KEY=... python3 -I tools/chl/record_live.py --league ohl --game 29191 --date 2026-11-13 --out ...
-  python3 -I tools/chl/record_live.py --league ohl --game 900001 --firebase http://127.0.0.1:8080/firebase/svf/ \
-      --feed http://127.0.0.1:8080/hockeytech/feed/index.php --key fakepanel-ohl --out /tmp/fake-ohl   # the fake panel
+  python3 -I tools/chl/record_live.py --league ohl --game 29191 --date 2026-11-13 --key-file ~/.config/thebox/ohl.key --out ...
+  HOCKEYTECH_KEY=fakepanel-ohl python3 -I tools/chl/record_live.py --league ohl --game 900001 --date <day> \
+      --firebase http://127.0.0.1:8080/firebase/svf/ --feed http://127.0.0.1:8080/hockeytech/feed/index.php \
+      --out /tmp/fake-ohl   # a dry run against the fake panel (its key is a dummy)
 
 Requests carry a generic User-Agent and nothing about the user. Standard library only.
 """
@@ -90,7 +93,7 @@ def main(argv=None):
     ap.add_argument("--interval", type=float, default=5.0)
     ap.add_argument("--max-hours", type=float, default=4.0)
     ap.add_argument("--date", help="the game's date YYYY-MM-DD (for the optional board facts)")
-    ap.add_argument("--key", help="the lscluster key for the board facts (else HOCKEYTECH_KEY; else no board)")
+    ap.add_argument("--key-file", help="a file whose first line is the lscluster key (else HOCKEYTECH_KEY; else no board)")
     ap.add_argument("--firebase", default=FIREBASE, help="Firebase base ending in /svf/ (the fake panel's for a dry run)")
     ap.add_argument("--feed", default=FEED)
     args = ap.parse_args(argv)
@@ -99,7 +102,13 @@ def main(argv=None):
     if args.interval < 5.0:
         ap.error("--interval below 5 s is not allowed (the app's floor; do not hammer the service)")
     client = CLIENTS[args.league]
-    key = args.key or os.environ.get("HOCKEYTECH_KEY") or None
+    key = None
+    if args.key_file:
+        with open(os.path.expanduser(args.key_file)) as f:
+            key = f.readline().strip() or None
+    key = key or os.environ.get("HOCKEYTECH_KEY") or None
+    if not key or not args.date:
+        print("no key or no --date: recording without board facts (the Kotlin gate needs them)", file=sys.stderr)
     os.makedirs(args.out, exist_ok=True)
     meta = {"league": args.league, "client": client, "game": args.game, "interval_s": args.interval,
             "date": args.date, "started_unix": time.time()}

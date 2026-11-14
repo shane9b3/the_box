@@ -237,7 +237,7 @@ work package, §8).
 | 3a | `SportsContracts.kt` `GameSnapshot`, `DayBoard`, `FailKind` | — | §1.2 additions | C0 |
 | 4 | `core/.../sports/SportsPrefs.kt:23-33` | two intervals | §1.3 | C0 |
 | 5 | `core/.../sports/SportsConstants.kt:59-65` | NHL / NFL choices | `INTERVAL_CHOICES_CHL_S`, `INTERVAL_DEFAULT_CHL_S` (Appendix A) | C0 |
-| 6 | `SportsConstants.kt:87-88` | `EST_WIRE_BYTES_NHL/NFL` | `EST_WIRE_BYTES_CHL = 2_000` (§2.5) | C0 |
+| 6 | `SportsConstants.kt:87-88` | `EST_WIRE_BYTES_NHL/NFL` | `EST_WIRE_BYTES_CHL = 4_000` (§2.5; WP-3 fix pass S2) | C0 |
 | 7 | `SportsConstants.kt:102-104` | `if NHL else NFL` | `when (league.group)` | C0 |
 | 8 | `core/.../sports/PollMeter.kt:125` | 429 floor for NFL | timed leagues | WP-2 |
 | 9 | `PollMeter.kt:131` | NHL else NFL estimate | `when (league.group)` | WP-2 |
@@ -340,8 +340,13 @@ Facts:
   - a key for another client, "Client access denied.";
   - a missing `gc` game, 404 `{"error": "No such game"}`.
 - **`lscluster` echoes the key** in `SiteKit.Parameters.key`.
-- **Conditional GETs:** `If-None-Match: <ETag>` on a Firebase node returns 304 with an empty body. The ETag comes
-  with `X-Firebase-ETag: true`.
+- **Conditional GETs:** `If-None-Match: <ETag>` on a Firebase node returns 304 with an empty body (with or without
+  `X-Firebase-ETag`). The `ETag` header is sent only when the request carries `X-Firebase-ETag: true`; a `null` node's
+  is `null_etag`. A date query (`orderBy`/`equalTo`) with `X-Firebase-ETag` is a 400 "Mixing querying parameters and ETag
+  requests is not supported" (WP-3, checked 2026-11-14).
+- **(WP-3 fix pass, review S2) Firebase is HTTP/1.1 only and never compresses** (curl `--http2` negotiates 1.1; `goals`
+  answers 7.8 KB raw with `Accept-Encoding: gzip`). Each request carries about 250–300 B of headers and each answer about
+  370 B, a 304 included (measured 2026-11-14). An idle connection is kept about 75 s.
 
 ### 2.2 Keys, redaction, telemetry
 
@@ -404,25 +409,32 @@ pass, deviation 4) The NHL and the NFL keep the Eastern calendar date with **no 
      `overlay(board: ChlBoard, runningclock, goalssummary): ChlBoard` takes the facts with the board, because §3.4's clock
      table needs each game's playoff flag and OT length. Its clock, status and scores replace the board's for
      matching ids. A failed overlay keeps the board ("Updated 2 min ago").
+- (WP-3 fix pass, review L9) A day answer's `receivedMono` is the answer's own, also when the `gamesbydate` body comes from
+  the 240 s cache: the day policy schedules from it. The tab's "Updated" is therefore up to 240 s optimistic for a cached
+  board without an overlay. Expired bodies are dropped (at most yesterday, today, tomorrow kept, L2), and `seasons` is
+  re-read at most once a day (L3).
 - REFUSED day failures: §2.6.
 
 ### 2.4 The followed game
 
 `game(id, startUtcMs)` has two modes.
 
-**Board mode** (S5): only when the game is **board-SCHEDULED** (status 1, start in the future), or **board-FINAL and
-evicted** from Firebase. The game is read from the cached `gamesbydate` board of its date. Board without the game →
+**Board mode** (S5): only when the game is **board-SCHEDULED** until `start − PRE_WAKE_MS` (§2.5; a "Time TBD" game until
+the board reports it started, WP-3 fix pass L6), or **board-FINAL and evicted** from Firebase. The game is read from the cached `gamesbydate` board of its date. Board without the game →
 `Fetch.NotFound`.
 
-**Live mode** (any game that is not in board mode): each poll requests **all six nodes in parallel**, each with
-`If-None-Match` (S4). OkHttp `enqueue`, one coroutine each, all cancelled together; one HTTP/2 connection.
+**Live mode** (any game that is not in board mode): each poll requests **all six nodes**, each with `X-Firebase-ETag: true`
+and `If-None-Match` (S4). OkHttp `enqueue`, one coroutine each, all cancelled together; (WP-3 fix pass, lead ruling L11)
+**at most three at a time**, `runningclock` and `goalssummary` first, on the shared client's keep-alive connections (about
+two round trips a poll). At the 120 s not-in-FULL cadence the connections have closed (Firebase keeps them about 75 s), so
+those polls pay their TLS handshakes; accepted.
 
 | Node | Required? | On failure |
 |---|---|---|
 | `runningclock/games/{id}` | yes | poll `Failed(kind)` |
 | `goalssummary/1/games/{id}` | yes | poll `Failed(kind)` |
-| `publishedclock/1/games/{id}` | no | status from `runningclock.status_id` |
-| `shotssummary/1/games/{id}` | no | `sog = null` |
+| `publishedclock/1/games/{id}` | no | its last confirmed body (WP-3 fix pass L7); none yet: status from `runningclock.status_id` |
+| `shotssummary/1/games/{id}` | no | its last confirmed body (L7); none yet: `sog = null` |
 | `penalties/1/games/{id}` | no | `powerPlayUnknown = true` (H8) |
 | `goals/1/games/{id}` | no | `lastGoal = null`; `powerPlayUnknown = true` (H6) |
 | `shootouts/1/games/{id}` | no | added only when the **previous** snapshot was a possible shootout (§3.3 (b)/(c)), WHL and QMJHL |
@@ -433,7 +445,9 @@ evicted** from Firebase. The game is read from the cached `gamesbydate` board of
 - **`Fetch.Ok` metadata:**
   - `receivedMono` / `serverDateMs` come from the `runningclock` answer;
   - `ageS = 0`;
-  - `wireBytes` = the sum over the poll (WireMeter);
+  - `wireBytes` = the sum over the poll of the body bytes (WireMeter) **plus every request's and answer's header bytes**
+    (request line, status line, headers, blank lines; 304s included; WP-3 fix pass, lead ruling S2). The NHL and NFL
+    keep counting bodies only;
   - `maxAgeS = null`.
 - A 10 s `SPORTS_CALL_TIMEOUT_MS` is kept. Polls never stack (the next waits for completion), and the meter counts
   a timeout's elapsed time (L10).
@@ -450,12 +464,13 @@ evicted** from Firebase. The game is read from the cached `gamesbydate` board of
 - **Why 5 s:**
   - the running clock is real time and is shown as polled (ruling 6), so the interval is the clock's step;
   - 5 s is the NFL floor the owner already accepted for an undocumented host.
-- **Wire cost per poll** (S4: six requests, one HTTP/2 connection, compressed headers):
-  - `runningclock` ~0.3 KB;
-  - five 304s at ~0.15 KB each;
-  - a changed `shotssummary` ~0.5 KB, most polls in play;
-  - a changed `penalties` 1–6 KB, or `goals` ≤ 10 KB, a few times a game.
-  - Estimated **~1.5–2 KB per poll**, about **1.4 MB an hour at 5 s**. `EST_WIRE_BYTES_CHL = 2_000` until measured.
+- **Wire cost per poll** (S4; corrected by the WP-3 fix pass, lead ruling S2: six HTTP/1.1 requests, uncompressed headers):
+  - headers: about 640 B per request and answer, a 304 included, so about **3.9 KB** for six;
+  - bodies: `runningclock` 110 B every poll (it changes every second); a changed `shotssummary` ~0.3 KB most polls in
+    play; a changed `goalssummary` ~0.5 KB, `penalties` 1–19 KB or `goals` up to ~13 KB a few times a game;
+  - measured on the real host as the source reports it to the meter (2026-11-14, OHL 29191, `HockeyTechWireProbe`): a
+    first poll 26.0 KB (all six bodies), an all-304 poll **3 878 B**; in play about 4.0–4.3 KB;
+  - about **3 MB an hour at 5 s**. `EST_WIRE_BYTES_CHL = 4_000`.
 
 ### 2.6 Errors and their texts
 
@@ -463,14 +478,15 @@ evicted** from Firebase. The game is read from the cached `gamesbydate` board of
 |---|---|---|
 | No default network | `DayState.Failed(OFFLINE)` | existing "No internet connection…" |
 | Timeout / IO / 5xx / HTML 404 | `Failed(TIMEOUT / IO / HTTP_5XX / HTTP_OTHER)` | "OHL scores did not answer. Press OK to try again; scores may be down for a few minutes." |
-| 429 | `Failed(HTTP_429)` + `Retry-After` | same text; the meter's slowed note |
+| 429 | `Failed(HTTP_429)` + `Retry-After` (clamped to 300 s, as the NHL's; WP-3 fix pass S1) | same text; the meter's slowed note |
 | `lscluster` 200 non-JSON body starting `Invalid key` / `Client access denied`; Firebase 401 / 403 | `Failed(REFUSED)` | "OHL scores stopped letting this app in. CHL scores need an app update; NHL and NFL scores still work." |
 | Non-JSON, over the cap, unmappable; a live-mode `null` (S5) | `Failed(BAD_BODY)` | the "did not answer" text |
 | Board without the followed game | `NotFound` | toast "The OHL no longer lists LDN – KIT. Follow another game in Sports." |
 
 - **REFUSED (S7):**
   - The machine's next follow poll is at `receivedMono + BACKOFF_MAX_MS` (row 12); the next day request at
-    `fail + BACKOFF_MAX_MS` (row 37). Never faster, whatever `Retry-After` says.
+    `fail + BACKOFF_MAX_MS` (row 37). Never faster, whatever `Retry-After` says; (lead ruling) a longer `Retry-After`
+    wins: `max(300 s, Retry-After)`, honoured up to 3 600 s on REFUSED only.
   - A follow keeps its game: the bug dims, then hides on the existing timers.
   - The tab and the sheet show the REFUSED text.
   - One log line per state change.
@@ -1287,7 +1303,7 @@ Still open:
 |---|---|---|
 | `INTERVAL_CHOICES_CHL_S` | `[5, 10, 15, 20, 30]` | §2.5, P1 |
 | `INTERVAL_DEFAULT_CHL_S` | 5 | Auto's start |
-| `EST_WIRE_BYTES_CHL` | 2 000 | §2.5, S4 |
+| `EST_WIRE_BYTES_CHL` | 4 000 | §2.5, S4; WP-3 fix pass S2 (HTTP/1.1 headers counted) |
 | `CHL_NODE_MAX_BYTES` | 131 072 | §2.7 |
 | `CHL_DAY_ROLLOVER_H` | 5 | §2.3 |
 | `CHL_REG_PERIOD_S` / `CHL_OT_REG_S` / `CHL_OT_PLAYOFF_S` | 1200 / 300 / 1200 | §3.3 |

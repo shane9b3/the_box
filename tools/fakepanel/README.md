@@ -367,8 +367,10 @@ debug origin (`files/debug/sports_base`) serves both leagues:
   (`sports_chl_null_live`, S5: the featured game's nodes are `null` while live), `--chl-drop-penalties N`
   (`sports_chl_drop_penalties`, B3: every Nth `penalties` request 503).
 - `tools/chl/record_live.py` records a game's seven nodes every 5 s (the S8 recorder; `--firebase` / `--feed` point it at the
-  panel for a dry run, e.g. `--firebase http://127.0.0.1:8080/firebase/svf/ --key fakepanel-ohl`), and
-  `python3 -I tools/chl/pp_replay.py live <folder>` runs the S8 gate on the recording.
+  panel for a dry run, with `HOCKEYTECH_KEY=fakepanel-ohl` for the board). The S8 gate on a recording is the Kotlin
+  `ChlLiveGateTest` (`tools/chl/README.md`); `pp_replay.py live <folder>` is a quick Python check only.
+- A matching `If-None-Match` is a 304 with or without `X-Firebase-ETag`, as the real database; the `ETag` header is sent
+  only with `X-Firebase-ETag: true`.
 
 ## Logging
 

@@ -35,7 +35,7 @@ class SportsIntervalRowChlTest {
             assertEquals(listOf("0", "5", "10", "15", "20", "30"), options(r).map { it.id })
             assertEquals("SPORTS_INTERVAL_RECOMMENDED(SPORTS_INTERVAL_AFTER(5))", options(r)[1].label)
             assertTrue(!r.description!!.contains("SPORTS_INTERVAL_NHL_FLOOR"), r.description)
-            assertEquals("SPORTS_INTERVAL_DESC_UNMEASURED(5,1.4) SPORTS_INTERVAL_LEAGUE(CHL)", r.description)
+            assertEquals("SPORTS_INTERVAL_DESC_UNMEASURED(5,2.9) SPORTS_INTERVAL_LEAGUE(CHL)", r.description) // EST_WIRE_BYTES_CHL 4 000 (WP-3 fix pass S2)
         }
     }
 
