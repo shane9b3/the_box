@@ -32,7 +32,7 @@ object ChlTeamColours {
         "OSH" to (rgb(0xE21836) to rgb(0x06173C)), // LOW, owner sign-off; TCC oshawa-generals-color-codes, Wikipedia, logo; 2026-11-13
         "OTT" to (rgb(0xAC1F2D) to rgb(0x000000)), // high; TCC ottawa-67s-color-codes, Wikipedia; 2026-11-13
         "OS" to (rgb(0xBF2F38) to rgb(0xFFDD00)), // LOW, owner sign-off; TCC owen-sound-attack-color-codes, Wikipedia; 2026-11-13
-        "PBO" to (rgb(0x75263D) to rgb(0x000000)), // medium; TCC peterborough-petes-color-codes, Wikipedia, logo; 2026-11-13
+        "PBO" to (rgb(0x77273E) to rgb(0x000000)), // medium; nudged from 75263D (lead ruling R2, pending owner); TCC peterborough-petes-color-codes, Wikipedia, logo; 2026-11-13
         "SAG" to (rgb(0x003263) to rgb(0xBE2F38)), // high; TCC saginaw-spirit-color-codes, Wikipedia; 2026-11-13
         "SAR" to (rgb(0x231F20) to rgb(0xFFC425)), // high; TCC sarnia-sting-color-codes, Wikipedia; 2026-11-13
         "SOO" to (rgb(0xCF2029) to rgb(0xFFFFFF)), // medium; TCC sault-ste-marie-greyhounds-color-codes, Wikipedia; 2026-11-13
@@ -49,7 +49,7 @@ object ChlTeamColours {
         "KAM" to (rgb(0x032C62) to rgb(0xD0471D)), // high; TCC kamloops-blazers-color-codes, Wikipedia; 2026-11-13
         "KEL" to (rgb(0x008293) to rgb(0x000000)), // medium; TCC kelowna-rockets-color-codes, Wikipedia; 2026-11-13 nudged from #008394 for C1
         "LET" to (rgb(0xCC1D30) to rgb(0x121942)), // high; TCC lethbridge-hurricanes-color-codes, Wikipedia; 2026-11-13
-        "MH" to (rgb(0xE56B1F) to rgb(0x000000)), // high; TCC medicine-hat-tigers-color-codes, Wikipedia; 2026-11-13
+        "MH" to (rgb(0xE56B1F) to rgb(0x231F20)), // high; TCC medicine-hat-tigers-color-codes, Wikipedia; 2026-11-13
         "MJ" to (rgb(0xCC0000) to rgb(0x000000)), // medium; TCC moose-jaw-warriors-color-codes, Wikipedia; 2026-11-13
         "PEN" to (rgb(0x25366C) to rgb(0x7AB2E0)), // medium; Wikipedia, logo; 2026-11-13
         "POR" to (rgb(0x000000) to rgb(0xCC202E)), // medium; TCC portland-winterhawks-color-codes, Wikipedia; 2026-11-13
@@ -64,7 +64,7 @@ object ChlTeamColours {
         "TC" to (rgb(0x0D1D41) to rgb(0xAC1A2D)), // medium; TCC tri-city-americans-color-codes, Wikipedia; 2026-11-13
         "VAN" to (rgb(0x231F20) to rgb(0x97002E)), // medium; TCC vancouver-giants-color-codes, Wikipedia; 2026-11-13
         "VIC" to (rgb(0x013974) to rgb(0xA0A9AD)), // medium; TCC victoria-royals-color-codes, Wikipedia; 2026-11-13
-        "WEN" to (rgb(0x002F87) to rgb(0x231F20)), // medium; TCC wenatchee-wild-color-codes, Wikipedia; 2026-11-13
+        "WEN" to (rgb(0x002F87) to rgb(0x026FA8)), // medium; accent is the sourced blue, not 231F20 (lead ruling R2, pending owner); TCC wenatchee-wild-color-codes, Wikipedia; 2026-11-13
     )
 
     /** QMJHL (18; the feed's mixed-case codes upper-cased; "NFL" is the Newfoundland Regiment, a team). */
