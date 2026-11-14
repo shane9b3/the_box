@@ -1,0 +1,62 @@
+league	code	team_id	feed_url	app_url	status	png	corners	verdict
+ohl	BAR	7	https://assets.leaguestat.com/ohl/logos/7.png	https://assets.leaguestat.com/ohl/logos/7.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	BRAM	18	https://assets.leaguestat.com/ohl/logos/18.jpg	https://assets.leaguestat.com/ohl/logos/18.png	404	None	None	fallback (no image)
+ohl	BFD	1	https://assets.leaguestat.com/ohl/logos/1.png	https://assets.leaguestat.com/ohl/logos/1.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	ER	8	https://assets.leaguestat.com/ohl/logos/8.png	https://assets.leaguestat.com/ohl/logos/8.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	FLNT	13	https://assets.leaguestat.com/ohl/logos/13.png	https://assets.leaguestat.com/ohl/logos/13.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	GUE	9	https://assets.leaguestat.com/ohl/logos/9.png	https://assets.leaguestat.com/ohl/logos/9.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	KGN	2	https://assets.leaguestat.com/ohl/logos/2.png	https://assets.leaguestat.com/ohl/logos/2.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	KIT	10	https://assets.leaguestat.com/ohl/logos/10.png	https://assets.leaguestat.com/ohl/logos/10.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	LDN	14	https://assets.leaguestat.com/ohl/logos/14.png	https://assets.leaguestat.com/ohl/logos/14.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	NIAG	20	https://assets.leaguestat.com/ohl/logos/20.jpg	https://assets.leaguestat.com/ohl/logos/20.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	NB	19	https://assets.leaguestat.com/ohl/logos/19.png	https://assets.leaguestat.com/ohl/logos/19.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	OSH	4	https://assets.leaguestat.com/ohl/logos/4.png	https://assets.leaguestat.com/ohl/logos/4.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	OTT	5	https://assets.leaguestat.com/ohl/logos/5_88.png	https://assets.leaguestat.com/ohl/logos/5_88.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	OS	11	https://assets.leaguestat.com/ohl/logos/11.png	https://assets.leaguestat.com/ohl/logos/11.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	PBO	6	https://assets.leaguestat.com/ohl/logos/6.png	https://assets.leaguestat.com/ohl/logos/6.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	SAG	34	https://assets.leaguestat.com/ohl/logos/34.png	https://assets.leaguestat.com/ohl/logos/34.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	SAR	15	https://assets.leaguestat.com/ohl/logos/15.png	https://assets.leaguestat.com/ohl/logos/15.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	SOO	16	https://assets.leaguestat.com/ohl/logos/16.png	https://assets.leaguestat.com/ohl/logos/16.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	SBY	12	https://assets.leaguestat.com/ohl/logos/12.png	https://assets.leaguestat.com/ohl/logos/12.png	200	RGBA	[0, 0, 0, 0]	logo
+ohl	WSR	17	https://assets.leaguestat.com/ohl/logos/17.png	https://assets.leaguestat.com/ohl/logos/17.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	BDN	201	https://assets.leaguestat.com/whl/logos/201.jpg	https://assets.leaguestat.com/whl/logos/201.png	404	None	None	fallback (no image)
+whl	CGY	202	https://assets.leaguestat.com/whl/logos/202.png	https://assets.leaguestat.com/whl/logos/202.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	EDM	228	https://assets.leaguestat.com/whl/logos/228.png	https://assets.leaguestat.com/whl/logos/228.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	EVT	226	https://assets.leaguestat.com/whl/logos/226.png	https://assets.leaguestat.com/whl/logos/226.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	KAM	203	https://assets.leaguestat.com/whl/logos/203.png	https://assets.leaguestat.com/whl/logos/203.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	KEL	204	https://assets.leaguestat.com/whl/logos/204.jpg	https://assets.leaguestat.com/whl/logos/204.png	404	None	None	fallback (no image)
+whl	LET	205	https://assets.leaguestat.com/whl/logos/205.png	https://assets.leaguestat.com/whl/logos/205.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	MH	206	https://assets.leaguestat.com/whl/logos/206.png	https://assets.leaguestat.com/whl/logos/206.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	MJ	207	https://assets.leaguestat.com/whl/logos/207.png	https://assets.leaguestat.com/whl/logos/207.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	PEN	277	https://assets.leaguestat.com/whl/logos/277_295.jpg	https://assets.leaguestat.com/whl/logos/277.png	404	None	None	fallback (no image)
+whl	POR	208	https://assets.leaguestat.com/whl/logos/208.png	https://assets.leaguestat.com/whl/logos/208.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	PA	209	https://assets.leaguestat.com/whl/logos/209.png	https://assets.leaguestat.com/whl/logos/209.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	PG	210	https://assets.leaguestat.com/whl/logos/210.png	https://assets.leaguestat.com/whl/logos/210.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	RD	211	https://assets.leaguestat.com/whl/logos/211.png	https://assets.leaguestat.com/whl/logos/211.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	REG	212	https://assets.leaguestat.com/whl/logos/212.png	https://assets.leaguestat.com/whl/logos/212.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	SAS	213	https://assets.leaguestat.com/whl/logos/213.jpg	https://assets.leaguestat.com/whl/logos/213.png	404	None	None	fallback (no image)
+whl	SEA	214	https://assets.leaguestat.com/whl/logos/214.png	https://assets.leaguestat.com/whl/logos/214.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	SPO	215	https://assets.leaguestat.com/whl/logos/215.png	https://assets.leaguestat.com/whl/logos/215.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	SC	216	https://assets.leaguestat.com/whl/logos/216.png	https://assets.leaguestat.com/whl/logos/216.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	TC	217	https://assets.leaguestat.com/whl/logos/217.png	https://assets.leaguestat.com/whl/logos/217.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	VAN	223	https://assets.leaguestat.com/whl/logos/223.png	https://assets.leaguestat.com/whl/logos/223.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	VIC	227	https://assets.leaguestat.com/whl/logos/227.png	https://assets.leaguestat.com/whl/logos/227.png	200	RGBA	[0, 0, 0, 0]	logo
+whl	WEN	222	https://assets.leaguestat.com/whl/logos/222_295.jpg	https://assets.leaguestat.com/whl/logos/222.png	200	RGB	[255, 255, 255, 255]	fallback (no alpha)
+lhjmq	BAC	16	https://assets.leaguestat.com/lhjmq/logos/16.png	https://assets.leaguestat.com/lhjmq/logos/16.png	200	RGBA	[0, 0, 0, 0]	logo
+lhjmq	BLB	19	https://assets.leaguestat.com/lhjmq/logos/19.png	https://assets.leaguestat.com/lhjmq/logos/19.png	200	RGBA	[0, 0, 0, 0]	logo
+lhjmq	CAP	3	https://assets.leaguestat.com/lhjmq/logos/3.jpg	https://assets.leaguestat.com/lhjmq/logos/3.png	200	RGBA	[0, 0, 0, 0]	logo
+lhjmq	CHA	7	https://assets.leaguestat.com/lhjmq/logos/7.png	https://assets.leaguestat.com/lhjmq/logos/7.png	200	RGBA	[0, 0, 0, 0]	logo
+lhjmq	CHI	10	https://assets.leaguestat.com/lhjmq/logos/10.png	https://assets.leaguestat.com/lhjmq/logos/10.png	200	RGBA	[0, 0, 0, 0]	logo
+lhjmq	DRU	14	https://assets.leaguestat.com/lhjmq/logos/14_214.png	https://assets.leaguestat.com/lhjmq/logos/14_214.png	200	RGBA	[0, 0, 0, 0]	logo
+lhjmq	GAT	12	https://assets.leaguestat.com/lhjmq/logos/12.png	https://assets.leaguestat.com/lhjmq/logos/12.png	200	RGBA	[0, 0, 0, 0]	logo
+lhjmq	HAL	5	https://assets.leaguestat.com/lhjmq/logos/5_214.png	https://assets.leaguestat.com/lhjmq/logos/5_214.png	200	RGBA	[0, 0, 0, 0]	logo
+lhjmq	MON	1	https://assets.leaguestat.com/lhjmq/logos/1.png	https://assets.leaguestat.com/lhjmq/logos/1.png	200	RGBA	interlaced	logo
+lhjmq	NFL	2	https://assets.leaguestat.com/lhjmq/logos/2_214.png	https://assets.leaguestat.com/lhjmq/logos/2_214.png	200	RGBA	[0, 0, 0, 0]	logo
+lhjmq	QUE	9	https://assets.leaguestat.com/lhjmq/logos/9.png	https://assets.leaguestat.com/lhjmq/logos/9.png	200	RGBA	[0, 0, 0, 0]	logo
+lhjmq	RIM	18	https://assets.leaguestat.com/lhjmq/logos/18_214.png	https://assets.leaguestat.com/lhjmq/logos/18_214.png	200	RGBA	[0, 0, 0, 0]	logo
+lhjmq	ROU	11	https://assets.leaguestat.com/lhjmq/logos/11.png	https://assets.leaguestat.com/lhjmq/logos/11.png	200	RGBA	[0, 0, 0, 0]	logo
+lhjmq	SNB	8	https://assets.leaguestat.com/lhjmq/logos/8.png	https://assets.leaguestat.com/lhjmq/logos/8.png	200	RGBA	[0, 0, 0, 0]	logo
+lhjmq	SHA	13	https://assets.leaguestat.com/lhjmq/logos/13.png	https://assets.leaguestat.com/lhjmq/logos/13.png	200	RGBA	[0, 0, 0, 0]	logo
+lhjmq	SHE	60	https://assets.leaguestat.com/lhjmq/logos/60_214.png	https://assets.leaguestat.com/lhjmq/logos/60_214.png	200	RGBA	[0, 0, 0, 0]	logo
+lhjmq	VDO	15	https://assets.leaguestat.com/lhjmq/logos/15.png	https://assets.leaguestat.com/lhjmq/logos/15.png	200	RGBA	[0, 0, 0, 0]	logo
+lhjmq	VIC	17	https://assets.leaguestat.com/lhjmq/logos/17.png	https://assets.leaguestat.com/lhjmq/logos/17.png	200	RGBA	[0, 0, 0, 0]	logo

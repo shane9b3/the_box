@@ -1,0 +1,393 @@
+{
+ "SiteKit": {
+  "Parameters": {
+   "feed": "modulekit",
+   "view": "schedule",
+   "key": "KEY_REDACTED",
+   "client_code": "whl",
+   "season_id": 293,
+   "fmt": "json",
+   "lang": "en",
+   "lang_id": 1,
+   "league_id": "26"
+  },
+  "Schedule": [
+   {
+    "id": "1022929",
+    "game_id": "1022929",
+    "season_id": "293",
+    "quick_score": "0",
+    "date_played": "2026-03-27",
+    "date_tbd": "0",
+    "date": "Mar. 27",
+    "date_with_day": "Fri, Mar 27",
+    "date_time_played": "2026-03-27T19:00:00Z",
+    "GameDateISO8601": "2026-03-27T19:00:00-06:00",
+    "home_team": "202",
+    "visiting_team": "201",
+    "home_goal_count": "1",
+    "visiting_goal_count": "0",
+    "period": "6",
+    "overtime": "1",
+    "schedule_time": "19:00:00",
+    "time_tbd": "0",
+    "schedule_notes": "",
+    "game_clock": "00:14:49",
+    "timezone": "America/Edmonton",
+    "game_number": "0",
+    "shootout": "0",
+    "attendance": "2959",
+    "status": "4",
+    "location": "2",
+    "game_status": "Final OT3",
+    "intermission": "0",
+    "game_type": "",
+    "game_letter": "D",
+    "if_necessary": "0",
+    "period_trans": "OT3",
+    "started": "1",
+    "final": "1",
+    "tickets_url": "",
+    "home_audio_url": "",
+    "visiting_audio_url": "",
+    "uses_spalk_rc": null,
+    "home_team_name": "Calgary Hitmen",
+    "home_team_code": "CGY",
+    "home_team_nickname": "Hitmen",
+    "home_team_city": "Calgary",
+    "home_team_division_long": "Central Division",
+    "home_team_division_short": "Central",
+    "visiting_team_name": "Brandon Wheat Kings",
+    "visiting_team_code": "BDN",
+    "visiting_team_nickname": "Wheat Kings",
+    "visiting_team_city": "Brandon",
+    "visiting_team_division_long": "East Division",
+    "visiting_team_division_short": "East",
+    "notes_text": "",
+    "use_shootouts": "0",
+    "venue_name": "Scotiabank Saddledome - Calgary, AB",
+    "venue_url": "",
+    "venue_location": "Calgary, AB",
+    "last_modified": "2026-08-24 05:58:23",
+    "flo_core_event_id": "",
+    "flo_live_event_id": "",
+    "htv_game_id": "",
+    "client_code": "whl",
+    "scheduled_time": "7:00 pm MDT",
+    "broadcasters": {
+     "home_video": [
+      {
+       "broadcaster_id": "6",
+       "name": "CHL TV",
+       "logo_url": "https://assets.leaguestat.com/chl/broadcasters/chl-tv.png",
+       "url": ""
+      }
+     ],
+     "home_webcast": [
+      {
+       "broadcaster_id": "6",
+       "name": "CHL TV",
+       "logo_url": "https://assets.leaguestat.com/chl/broadcasters/chl-tv.png",
+       "url": ""
+      }
+     ],
+     "visiting_video": [
+      {
+       "broadcaster_id": "6",
+       "name": "CHL TV",
+       "logo_url": "https://assets.leaguestat.com/chl/broadcasters/chl-tv.png",
+       "url": ""
+      }
+     ],
+     "visiting_webcast": [
+      {
+       "broadcaster_id": "6",
+       "name": "CHL TV",
+       "logo_url": "https://assets.leaguestat.com/chl/broadcasters/chl-tv.png",
+       "url": ""
+      }
+     ]
+    },
+    "mobile_calendar": "https://lscluster.hockeytech.com/components/calendar/ical_add_games.php?client_code=whl&game_ids=1022929"
+   },
+   {
+    "id": "1022939",
+    "game_id": "1022939",
+    "season_id": "293",
+    "quick_score": "0",
+    "date_played": "2026-04-05",
+    "date_tbd": "0",
+    "date": "Apr. 5",
+    "date_with_day": "Sun, Apr 5",
+    "date_time_played": "2026-04-05T14:00:00Z",
+    "GameDateISO8601": "2026-04-05T14:00:00-06:00",
+    "home_team": "213",
+    "visiting_team": "228",
+    "home_goal_count": "2",
+    "visiting_goal_count": "3",
+    "period": "5",
+    "overtime": "1",
+    "schedule_time": "14:00:00",
+    "time_tbd": "0",
+    "schedule_notes": "",
+    "game_clock": "00:05:55",
+    "timezone": "America/Regina",
+    "game_number": "0",
+    "shootout": "0",
+    "attendance": "5104",
+    "status": "4",
+    "location": "102",
+    "game_status": "Final OT2",
+    "intermission": "0",
+    "game_type": "",
+    "game_letter": "C",
+    "if_necessary": "1",
+    "period_trans": "OT2",
+    "started": "1",
+    "final": "1",
+    "tickets_url": "",
+    "home_audio_url": "",
+    "visiting_audio_url": "",
+    "uses_spalk_rc": null,
+    "home_team_name": "Saskatoon Blades",
+    "home_team_code": "SAS",
+    "home_team_nickname": "Blades",
+    "home_team_city": "Saskatoon",
+    "home_team_division_long": "East Division",
+    "home_team_division_short": "East",
+    "visiting_team_name": "Edmonton Oil Kings",
+    "visiting_team_code": "EDM",
+    "visiting_team_nickname": "Oil Kings",
+    "visiting_team_city": "Edmonton",
+    "visiting_team_division_long": "Central Division",
+    "visiting_team_division_short": "Central",
+    "notes_text": "",
+    "use_shootouts": "0",
+    "venue_name": "SaskTel Centre - Saskatoon, SK",
+    "venue_url": "",
+    "venue_location": "Saskatoon, SK",
+    "last_modified": "2026-08-24 05:58:23",
+    "flo_core_event_id": "",
+    "flo_live_event_id": "",
+    "htv_game_id": "",
+    "client_code": "whl",
+    "scheduled_time": "2:00 pm CST",
+    "broadcasters": {
+     "home_video": [
+      {
+       "broadcaster_id": "6",
+       "name": "CHL TV",
+       "logo_url": "https://assets.leaguestat.com/chl/broadcasters/chl-tv.png",
+       "url": ""
+      }
+     ],
+     "home_webcast": [
+      {
+       "broadcaster_id": "6",
+       "name": "CHL TV",
+       "logo_url": "https://assets.leaguestat.com/chl/broadcasters/chl-tv.png",
+       "url": ""
+      }
+     ],
+     "visiting_video": [
+      {
+       "broadcaster_id": "6",
+       "name": "CHL TV",
+       "logo_url": "https://assets.leaguestat.com/chl/broadcasters/chl-tv.png",
+       "url": ""
+      }
+     ],
+     "visiting_webcast": [
+      {
+       "broadcaster_id": "6",
+       "name": "CHL TV",
+       "logo_url": "https://assets.leaguestat.com/chl/broadcasters/chl-tv.png",
+       "url": ""
+      }
+     ]
+    },
+    "mobile_calendar": "https://lscluster.hockeytech.com/components/calendar/ical_add_games.php?client_code=whl&game_ids=1022939"
+   },
+   {
+    "id": "1023012",
+    "game_id": "1023012",
+    "season_id": "293",
+    "quick_score": "0",
+    "date_played": "2026-04-25",
+    "date_tbd": "0",
+    "date": "Apr. 25",
+    "date_with_day": "Sat, Apr 25",
+    "date_time_played": "2026-04-25T18:30:00Z",
+    "GameDateISO8601": "2026-04-25T18:30:00-07:00",
+    "home_team": "226",
+    "visiting_team": "277",
+    "home_goal_count": "5",
+    "visiting_goal_count": "4",
+    "period": "5",
+    "overtime": "1",
+    "schedule_time": "18:30:00",
+    "time_tbd": "0",
+    "schedule_notes": "",
+    "game_clock": "00:13:19",
+    "timezone": "America/Vancouver",
+    "game_number": "0",
+    "shootout": "0",
+    "attendance": "6990",
+    "status": "4",
+    "location": "119",
+    "game_status": "Final OT2",
+    "intermission": "0",
+    "game_type": "",
+    "game_letter": "N",
+    "if_necessary": "0",
+    "period_trans": "OT2",
+    "started": "1",
+    "final": "1",
+    "tickets_url": "https://www.ticketmaster.com/everett-silvertips-tickets/artist/882195?home_away=home",
+    "home_audio_url": "",
+    "visiting_audio_url": "",
+    "uses_spalk_rc": null,
+    "home_team_name": "Everett Silvertips",
+    "home_team_code": "EVT",
+    "home_team_nickname": "Silvertips",
+    "home_team_city": "Everett",
+    "home_team_division_long": "U.S. Division",
+    "home_team_division_short": "U.S.",
+    "visiting_team_name": "Penticton Vees",
+    "visiting_team_code": "PEN",
+    "visiting_team_nickname": "Vees",
+    "visiting_team_city": "Penticton",
+    "visiting_team_division_long": "B.C. Division",
+    "visiting_team_division_short": "B.C.",
+    "notes_text": "Everett takes time out with 13:34 remaining in the first overtime.",
+    "use_shootouts": "0",
+    "venue_name": "Angel of the Winds Arena - Everett, WA",
+    "venue_url": "",
+    "venue_location": "Everett, WA",
+    "last_modified": "2026-08-24 05:58:23",
+    "flo_core_event_id": "",
+    "flo_live_event_id": "",
+    "htv_game_id": "",
+    "client_code": "whl",
+    "scheduled_time": "6:30 pm PCT",
+    "broadcasters": {
+     "home_video": [
+      {
+       "broadcaster_id": "6",
+       "name": "CHL TV",
+       "logo_url": "https://assets.leaguestat.com/chl/broadcasters/chl-tv.png",
+       "url": ""
+      }
+     ],
+     "home_webcast": [
+      {
+       "broadcaster_id": "6",
+       "name": "CHL TV",
+       "logo_url": "https://assets.leaguestat.com/chl/broadcasters/chl-tv.png",
+       "url": ""
+      }
+     ]
+    },
+    "mobile_calendar": "https://lscluster.hockeytech.com/components/calendar/ical_add_games.php?client_code=whl&game_ids=1023012"
+   },
+   {
+    "id": "1022923",
+    "game_id": "1022923",
+    "season_id": "293",
+    "quick_score": "0",
+    "date_played": "2026-03-27",
+    "date_tbd": "0",
+    "date": "Mar. 27",
+    "date_with_day": "Fri, Mar 27",
+    "date_time_played": "2026-03-27T19:05:00Z",
+    "GameDateISO8601": "2026-03-27T19:05:00-07:00",
+    "home_team": "277",
+    "visiting_team": "214",
+    "home_goal_count": "3",
+    "visiting_goal_count": "2",
+    "period": "4",
+    "overtime": "1",
+    "schedule_time": "19:05:00",
+    "time_tbd": "0",
+    "schedule_notes": "",
+    "game_clock": "00:13:12",
+    "timezone": "America/Vancouver",
+    "game_number": "0",
+    "shootout": "0",
+    "attendance": "3917",
+    "status": "4",
+    "location": "163",
+    "game_status": "Final OT",
+    "intermission": "0",
+    "game_type": "",
+    "game_letter": "F",
+    "if_necessary": "0",
+    "period_trans": "OT",
+    "started": "1",
+    "final": "1",
+    "tickets_url": "",
+    "home_audio_url": "",
+    "visiting_audio_url": "",
+    "uses_spalk_rc": null,
+    "home_team_name": "Penticton Vees",
+    "home_team_code": "PEN",
+    "home_team_nickname": "Vees",
+    "home_team_city": "Penticton",
+    "home_team_division_long": "B.C. Division",
+    "home_team_division_short": "B.C.",
+    "visiting_team_name": "Seattle Thunderbirds",
+    "visiting_team_code": "SEA",
+    "visiting_team_nickname": "Thunderbirds",
+    "visiting_team_city": "Seattle",
+    "visiting_team_division_long": "U.S. Division",
+    "visiting_team_division_short": "U.S.",
+    "notes_text": "",
+    "use_shootouts": "0",
+    "venue_name": "South Okanagan Events Centre - Penticton, BC",
+    "venue_url": "",
+    "venue_location": "Penticton, BC",
+    "last_modified": "2026-08-24 05:58:23",
+    "flo_core_event_id": "",
+    "flo_live_event_id": "",
+    "htv_game_id": "",
+    "client_code": "whl",
+    "scheduled_time": "7:05 pm PCT",
+    "broadcasters": {
+     "home_video": [
+      {
+       "broadcaster_id": "6",
+       "name": "CHL TV",
+       "logo_url": "https://assets.leaguestat.com/chl/broadcasters/chl-tv.png",
+       "url": ""
+      }
+     ],
+     "home_webcast": [
+      {
+       "broadcaster_id": "6",
+       "name": "CHL TV",
+       "logo_url": "https://assets.leaguestat.com/chl/broadcasters/chl-tv.png",
+       "url": ""
+      }
+     ],
+     "visiting_video": [
+      {
+       "broadcaster_id": "6",
+       "name": "CHL TV",
+       "logo_url": "https://assets.leaguestat.com/chl/broadcasters/chl-tv.png",
+       "url": ""
+      }
+     ],
+     "visiting_webcast": [
+      {
+       "broadcaster_id": "6",
+       "name": "CHL TV",
+       "logo_url": "https://assets.leaguestat.com/chl/broadcasters/chl-tv.png",
+       "url": ""
+      }
+     ]
+    },
+    "mobile_calendar": "https://lscluster.hockeytech.com/components/calendar/ical_add_games.php?client_code=whl&game_ids=1022923"
+   }
+  ]
+ }
+}

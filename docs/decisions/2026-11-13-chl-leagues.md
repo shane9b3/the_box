@@ -1,0 +1,148 @@
+# CHL leagues (OHL, WHL, QMJHL) on the hockey score bugs (owner request 2026-11-13)
+
+Status: **design reviewed and revised 2026-11-13; ready for commit 0.**
+- Design: `docs/design/m6-chl-leagues.md`.
+- Review: `docs/review/2026-11-13-chl-leagues-design-review.md`.
+
+## Request
+"Can you look into adding the CHL, which includes 3 leagues, OHL, WHL, and QMJHL, they would use the same NHL score
+bugs."
+
+A feasibility report came first (2026-11-13): HockeyTech is the only free source with a live clock, shots and goal
+flags; the feed has no power-play state; intermission is not flagged. The owner then approved the work: "go ahead with
+the chl, use your recommendations".
+
+## Owner decisions (2026-11-13)
+1. **Data: the HockeyTech feeds**, including the keys embedded in the league sites. The owner accepts the terms risk.
+2. **Show the derived power play**, accepting occasional errors.
+3. **Sports tab: one CHL chip** (NHL · NFL · CHL) with a switch between OHL / WHL / QMJHL inside it.
+4. **English names, the label "QMJHL", codes upper-cased** (BaC → BAC).
+5. **Memorial Cup and CHL-wide events are out of the first version.**
+6. **The CHL leagues use the same NHL score bugs**: the Pill and the Stacked bug, with the same "Score bug style"
+   setting.
+
+## Data source and why
+- **HockeyTech / LeagueStat** runs the stats of all three leagues. Nothing else has a live CHL clock:
+  - ESPN has no CHL league;
+  - TheSportsDB's free key is disabled and has no live clock;
+  - Sportradar is paid.
+- Two HockeyTech surfaces, checked live on 2026-11-13:
+  - the keyed `lscluster.hockeytech.com` (gzip, `max-age=240` on lists) for the day list, teams and seasons;
+  - HockeyTech's Firebase database (no key today, real time, content ETags) for the followed game and Today's live
+    clocks and scores.
+- The Firebase running clock tracks the real game clock second by second. The keyed lists are cached for 4 minutes,
+  so they serve the day list only.
+
+## Accepted degradations
+- **The power play is derived** from penalties, goals and the clock (design §5). The design lists the known misses
+  (§5.7). When a hide rule fires, the bar holds its last state for at most 30 s and then closes silently; a hide is
+  never announced as "Power play over."
+  - Replay of the design text on 42 recorded finished games: the derived advantage agrees with the feed's own goal
+    flags for **56 / 57** power-play goals, **5 / 5** short-handed and **161 / 161** even-strength. The one miss is a
+    data error (a PP goal with no penalty on record), which a hide rule covers.
+  - The modelled penalty ends match the recorded release time for **124 / 129** flagged minors; the 5 others are
+    scorekeeper artifacts listed in the design.
+  - Live behaviour is measured before release by the recorded-game gate (design §7.4).
+- **No "End 1st":** a break where play can follow reads "1st INT". A decided game at 0:00 reads "End 3rd" / "End OT"
+  until the scorekeeper finalises.
+- **No empty-net or 6-on-4 state.**
+- **Cached day list** (up to 4 min) except Today's clocks and scores.
+- **Logos:** no dark variants.
+  - The JPEG swap recovers **2** logos (NIAG, CAP).
+  - **6 teams fall back** to the abbreviation: BRAM, BDN, KEL, PEN and SAS have no PNG; WEN's PNG has no
+    transparency.
+  - 55 of 61 show a logo.
+- **No remote kill switch** (as the NHL): a refused key or a closed database shows its reason, and a fix ships as an
+  app update.
+
+## Lead rulings (2026-11-13)
+From the proposer's P1–P13, as amended by the review:
+- **P1.** One CHL update-interval setting, shared by OHL, WHL and QMJHL: 5 · 10 · 15 · 20 · 30 s after each update;
+  Auto never under 5 s. The setting shows and runs **the followed league's meter** (L4). Amends ruling 29.
+- **P2.** Conditional GETs (`If-None-Match`) on **every** Firebase node, and **all six nodes every live poll** (S4).
+  The no-ETag rule A-S1 is scoped to the NHL CDN (its ETag is a bucket id, not a content hash).
+- **P3.** The keys are source constants in `:data` (`HockeyTechKeys`), registered with `Redact` **at class
+  initialisation** (L6). They appear in no doc, fixture or log.
+- **P4, narrowed by S3.**
+  - "1st INT" (Stacked "1ST" over "INT") for every break where play can follow, including the "20:00 2nd" form, which
+    maps to period P − 1 at 0:00 (S12).
+  - A decided game at 0:00 (period ≥ 3, scores differ) reads "End 3rd" / "End OT", with no power play.
+  - Amends ruling 33 for the CHL.
+- **P5, before puck drop only.**
+  - `Final` or 4 → FINAL; 5 (forfeit) → FINAL; 2 → from the clock; 1 → SCHEDULED.
+  - An unknown status: SCHEDULED **before the game has started**; afterwards, the clock inference (S6).
+- **P6, scoped to the CHL** (S9).
+  - CHL logo URLs are validated under `assets.leaguestat.com/{client}/logos/`; a JPEG is swapped for `{teamId}.png`;
+    `50x50/` is never used.
+  - A CHL logo without transparency (no alpha, or four opaque corners) falls back: a CHL-only check runs before the
+    trim.
+  - The disc becomes a capsule for 4-letter codes.
+  - NHL and NFL code paths are untouched. Their screenshots are held by a SHA-256 hash gate.
+- **P7.** "Today" per league reference zone (OHL and QMJHL `America/Toronto`, WHL `America/Vancouver`), rolling over
+  at 05:00.
+- **P8.** `FailKind.REFUSED` with its own text. The follow and the day list retry only at `BACKOFF_MAX_MS` (300 s),
+  at named sites in the machine and repository (S7).
+- **P9.** The credit line is the feed's attribution: "Official statistics provided by {league} · Powered by
+  HockeyTech.com", with **"LHJMQ" verbatim** for the QMJHL (Q2). "QMJHL" is used everywhere else.
+- **P10.** Cards use the nickname. The bug, the live region and the logo descriptions use "City Nickname".
+- **P11.** Every new settings row is ADVANCED.
+- **P12.** The style setting (`SportsPrefs.nhlStyle`, stored name unchanged) applies to every hockey league.
+- **P13.** The `gc` 60 s fallback when Firebase is refused: **not in v1**.
+- **Open questions:**
+  - **Q1**: SCHEDULED only before the start; a postponed game expires 8 h after its listed start.
+  - **Q2**: the attribution "LHJMQ" stays verbatim.
+  - **Q3**: no P13.
+  - **Q4**: measure the 4-letter fits in commit 0; extend the 2 px step-down rule to codes; never a display alias.
+  - **Q5**: accepted ("until the advantage shrinks"; a double minor counts down once from 4:00).
+  - **Q6**: Firebase streaming later.
+  - **Q7**: 05:00.
+  - **Q8**: accepted, with S5 (board mode only for a scheduled game or an evicted final one).
+  - **Q9**: accepted; the premise is reworded ("recent games, unbounded age, not guaranteed").
+  - **Q10**: the "Show Sports" description names HockeyTech.
+
+## Design review (2026-11-13): dispositions
+Verdict "ready after changes". Every item is accepted and applied in the design.
+
+| Item | Disposition |
+|---|---|
+| B1 hockey views lack their league | Accepted. Commit 0 sets `league = s.id.league` in the hockey `view()` / `knownView()`, with a machine test and a UI colour-seam test (design §1.5, §1.6 #13a). |
+| B2 chaining | Accepted as written: chain key `(side, period, Time, PenalizedPlayerId)` with no offence; player id 0 = null (never chained); links ordered by `(start, id)`. E29, E30. The replay was re-run with the revised reference script: 56/57 · 5/5 · 161/161. |
+| B3 a hide reads as "over" | Accepted. Append-only `GameSnapshot.powerPlayUnknown`. The machine holds the last tab state for at most 30 s of consecutive unknown, then closes it silently; there is no "Power play over." for a hide (design §4.1, sites §1.6 #13b). |
+| S1 major vs unflagged minor | Accepted: hide rule H9 with cross-side pairing; E31. |
+| S2 `TimeOn` ≤ `TimeStart` | Accepted; E32. |
+| S3 end of a decided game | Accepted: "End 3rd" / "End OT", no power play; E33. |
+| S4 conditional nodes | Accepted: all six nodes every poll, with `If-None-Match`; `EST_WIRE_BYTES_CHL` 2 000. |
+| S5 silent board fallback | Accepted: a live-mode `null` is `BAD_BODY`; board mode only for scheduled or evicted final games. |
+| S6 unknown status after start | Accepted. |
+| S7 REFUSED back-off sites | Accepted (machine `fetched`; repository day back-off). |
+| S8 validation on goal instants only | Accepted. The duration audit is a unit test (124/129, five listed artifacts). Pre-release gate on recorded live 5 s sequences: **proposed threshold ≤ 5 % wrong-bar seconds per league and no wrong stretch > 30 s**; the lead confirms it at the gate (design §7.4, O1). |
+| S9 byte-identical not testable | Accepted: the alpha rule is CHL-only; SHA-256 hash gate for the NHL, NFL and Stacked screenshots. |
+| S10 logo facts | Accepted and corrected: 2 recovered, 6 fall back, 55 show; MON interlaced. |
+| S11 work-package collisions | Accepted. Strings, `SettingsText` keys, `SportsDays`, B1 and B3 are in commit 0; `PlayerEffectsImpl` / `PlayerViewModel` go to WP-5; file ownership is listed per package (design §8). |
+| S12 the "20:00" break fields | Accepted: period P − 1, remaining 0, in intermission. |
+| S13 goals without a time | Accepted: H2 covers goals. |
+| L1–L11 | All accepted. L7: the inline sub-switch is taken (no vertical shift). L2: the QMJHL team code `NFL` is never read as a league (`TeamCodeIsNotALeagueTest`, plus fit cases). L3: `breakMs()` unchanged. L11: the status lines are fixed. |
+
+## Fixtures and scripts in the repo (2026-11-13)
+- **Captures:** `core/src/testFixtures/resources/sports/chl/` (47 files, ~0.9 MB):
+  - the 21 Firebase final-data nodes;
+  - live clock samples;
+  - `gamesbydate`, `teamsbyseason` and `seasons` for the three leagues;
+  - the forfeit and playoff-OT excerpts;
+  - the `gc` clock tab;
+  - the error bodies;
+  - the 61-row logo outcome table (no images).
+- **Scripts:**
+  - `tools/chl/pp_replay.py`: the reference model of design §5, the goal replay, the duration audit and probes;
+  - `tools/chl/logo_audit.py`: the logo outcome table.
+- **Keys stripped:** the `lscluster` bodies echo the key in `SiteKit.Parameters.key`. Every occurrence of each of the
+  four known keys (OHL, WHL, QMJHL, CHL) was replaced with `KEY_REDACTED`, in 12 files. Then checked as follows:
+  - a `grep` for each key across the fixtures and `tools/chl` finds 0 files;
+  - every remaining `"key"` value is `KEY_REDACTED`;
+  - a search for any 16-hex-digit token finds only a ticket-vendor event id in two boards.
+- The scripts contain no keys.
+
+## Links
+- Design: `docs/design/m6-chl-leagues.md`.
+- Review: `docs/review/2026-11-13-chl-leagues-design-review.md`.
+- Standing hockey rulings: `docs/decisions/2026-11-05-nhl-score-bug.md`, `docs/decisions/2026-11-10-nhl-score-bug-stacked.md`.
