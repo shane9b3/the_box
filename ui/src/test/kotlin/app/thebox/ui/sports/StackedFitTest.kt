@@ -192,15 +192,45 @@ class StackedFitTest {
 
     // ------------------------------------------------------------------ the rows and the SOG column
 
-    /** (Owner request 2026-11-13) A mirrored row keeps the same block, so every code-to-score gap is the same. */
+    /**
+     * (Owner request 2026-11-13, second pass) A mirrored row is the true reflection, [score][code][logo][stripe]: every
+     * element's advance box is the reflection of the left one about the rows' centre line (exactly, at even strength and
+     * on the power play), and, glyphs not being flipped, the ink gap between the score and the code differs from the left
+     * one only by the side bearings. It still never closes: every code clears every score (0–19, the two-digit scores
+     * inside their reflected slot) with the stripe at its power-play width, at Standard and Large.
+     */
     @Test
-    fun aMirroredRowKeepsEveryCodeToScoreGap() {
+    fun aMirroredRowIsTheReflectionAndEveryCodeClearsEveryScore() {
+        var least = Float.MAX_VALUE
+        var leastAt = ""
         for (large in sizes) {
             val p = painter(large)
-            for (score in 0..19) for (abbrev in teams) {
-                assertEquals("$abbrev / $score ${sz(large)}", p.rowGap(abbrev, score.toString()), p.rowGap(abbrev, score.toString(), mirrored = true), 1e-3f)
+            val s = scale(large)
+            val rowsW = p.rowsWidth
+            for (score in 0..19) {
+                val sc = score.toString()
+                assertTrue("\"$sc\" ${sz(large)} mirrored spills ${p.scoreSpill(sc, mirrored = true)} px out of the slot", p.scoreSpill(sc, mirrored = true) <= 0f)
+                for (abbrev in teams) {
+                    for (stripe in listOf(p.stripeWidth, p.ppStripeWidth)) {
+                        val l = p.rowExtents(abbrev, sc, stripe, mirrored = false)
+                        val m = p.rowExtents(abbrev, sc, stripe, mirrored = true)
+                        for ((i, e) in l.all.withIndex()) {
+                            val (what, a) = e
+                            val b = m.all[i].second
+                            assertEquals("$abbrev / $sc ${sz(large)} stripe $stripe: $what left", rowsW - a.second, b.first, 1e-3f)
+                            assertEquals("$abbrev / $sc ${sz(large)} stripe $stripe: $what right", rowsW - a.first, b.second, 1e-3f)
+                        }
+                        // From the screen edge (the right): stripe, logo slot, code, score.
+                        assertTrue("$abbrev / $sc: logo inside the stripe", m.logoSlot.second <= m.stripe.first)
+                        assertTrue("$abbrev / $sc: code inside the logo", m.code.second <= m.logoSlot.first)
+                    }
+                    val gap = p.rowGap(abbrev, sc, mirrored = true) / s
+                    if (gap < least) { least = gap; leastAt = "$abbrev $sc ${sz(large)}" }
+                    assertTrue("$abbrev / $sc ${sz(large)} mirrored: gap $gap design px", gap >= MIN_GAP)
+                }
             }
         }
+        println("mirrored rows: least score-to-code gap %.1f design px (%s)".format(least, leastAt))
     }
 
     @Test

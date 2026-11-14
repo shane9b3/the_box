@@ -95,6 +95,8 @@ internal class StackedGoalPainter(
         typeface = sansBold; textSize = K.STACKED_TALLY_PX * s; color = Color.WHITE; textAlign = Paint.Align.LEFT
         fontFeatureSettings = "'tnum'"
     }
+    /** (Owner request 2026-11-13, second pass) The tally mirrored: right-aligned at the mirror of its left anchor. */
+    private val tallyMirroredPaint = Paint(tallyPaint).apply { textAlign = Paint.Align.RIGHT }
     private val badgeTextOffset: Float
     private val tallyBaseline1: Float
     private val tallyBaseline2: Float
@@ -357,7 +359,14 @@ internal class StackedGoalPainter(
      * right (the screen edge), their clips reflected about the top part's centre, and the streaks sweep right to left:
      * each band's horizontal extent on the centre line is reflected (`boxW − dx − bandW`), so it travels the other way,
      * but it keeps its "/" lean, as the bar's stripes do, matching the italic GOAL. Nothing is drawn under a reflection.
-     * The badge, GOAL and the tally are not mirrored: they keep their places and read left to right.
+     *
+     * (Owner request 2026-11-13, second pass) The badge, GOAL and the tally are placed at the reflection of their left
+     * places (x ↦ boxW − x), so the badge is nearest the screen edge on both sides: mirrored the order is tally, GOAL,
+     * badge. The tally's lines are right-aligned at the mirror of their left anchor and slide in from the other side.
+     * The badge's spin direction mirrors too (fix pass, review L1: the rotation's sign is negated, so it turns
+     * counter-clockwise into place, rolling with the right-to-left wipe; a negated rotation never draws the logo
+     * reversed, and at rest, 0°, the frame is unchanged). GOAL's letters and every glyph keep their own orientation
+     * and order.
      */
     fun drawTakeover(c: Canvas, g: GoalFrame, mirrored: Boolean = false) {
         if (colours == null || boxW <= 0f) return
@@ -381,14 +390,15 @@ internal class StackedGoalPainter(
             }
             val fa = alpha255(g.flashAlpha)
             if (fa > 0) { flashPaint.alpha = fa; drawRoundRect(box, radius, radius, flashPaint) }
-            drawBadge(this, g)
-            drawWord(this, g)
+            drawBadge(this, g, if (mirrored) boxW - badgeCx else badgeCx, mirrored)
+            drawWord(this, g, if (mirrored) boxW - wordCx else wordCx)
             val ta = alpha255(g.tallyAlpha)
             if (showTally && ta > 0) {
-                tallyPaint.alpha = ta
-                val x = tallyX + g.tallyDx * s
-                drawText(tally1, 0, tally1Len, x, tallyBaseline1, tallyPaint)
-                drawText(tally2, 0, tally2Len, x, tallyBaseline2, tallyPaint)
+                val p = if (mirrored) tallyMirroredPaint else tallyPaint
+                p.alpha = ta
+                val x = if (mirrored) boxW - tallyX - g.tallyDx * s else tallyX + g.tallyDx * s
+                drawText(tally1, 0, tally1Len, x, tallyBaseline1, p)
+                drawText(tally2, 0, tally2Len, x, tallyBaseline2, p)
             }
         }
     }
@@ -399,11 +409,12 @@ internal class StackedGoalPainter(
         c.withTranslation(dx, 0f) { drawRoundRect(scratch, radius, radius, p) }
     }
 
-    private fun drawBadge(c: Canvas, g: GoalFrame) {
+    /** The badge centred at ([cx], the panel's middle); [mirrored] negates its spin (review L1). */
+    private fun drawBadge(c: Canvas, g: GoalFrame, cx: Float, mirrored: Boolean) {
         val a = alpha255(g.badgeAlpha)
         if (a <= 0) return
-        c.withTranslation(badgeCx, cy) {
-            rotate(g.badgeRotDeg)
+        c.withTranslation(cx, cy) {
+            rotate(if (mirrored) -g.badgeRotDeg else g.badgeRotDeg)
             scale(g.badgeScale, g.badgeScale)
             val b = badge
             if (b != null) {
@@ -421,12 +432,13 @@ internal class StackedGoalPainter(
         }
     }
 
-    private fun drawWord(c: Canvas, g: GoalFrame) {
-        c.withScale(g.wordPulse, g.wordPulse, wordCx, cy) {
+    /** GOAL centred at ([cx], the panel's middle). */
+    private fun drawWord(c: Canvas, g: GoalFrame, cx: Float) {
+        c.withScale(g.wordPulse, g.wordPulse, cx, cy) {
             for (i in 0 until GoalFrame.LETTERS) {
                 val a = alpha255(g.letterAlpha[i])
                 if (a <= 0) continue
-                withTranslation(wordCx + letterOx[i], cy + g.letterDy[i] * s) {
+                withTranslation(cx + letterOx[i], cy + g.letterDy[i] * s) {
                     scale(g.letterScale[i], g.letterScale[i])
                     letterPaint.alpha = a
                     drawBitmap(atlas, letterSrc[i], letterDst[i], letterPaint)
@@ -456,6 +468,20 @@ internal class StackedGoalPainter(
     internal val tallyLeft: Float get() = tallyX
     internal val tallyRight: Float get() = tallyX + tallyW
     internal val wordCentre: Float get() = wordCx
+    /** The tally line [i]'s (0 or 1) advance, device px. */
+    internal fun tallyAdvance(i: Int): Float =
+        if (i == 0) tallyPaint.measureText(tally1, 0, tally1Len) else tallyPaint.measureText(tally2, 0, tally2Len)
+    /** The tally line [i]'s ink x extent relative to its advance's left edge, device px. Allocates; never called in draw. */
+    internal fun tallyInk(i: Int): RectF {
+        val p = Paint(tallyPaint).apply { textAlign = Paint.Align.LEFT }
+        val path = android.graphics.Path()
+        if (i == 0) p.getTextPath(tally1, 0, tally1Len, 0f, 0f, path) else p.getTextPath(tally2, 0, tally2Len, 0f, 0f, path)
+        return RectF().also { path.computeBounds(it, true) }
+    }
+    /** The two tally lines' baselines, device px from the top part's top. */
+    internal val tallyBaselines: Pair<Float, Float> get() = tallyBaseline1 to tallyBaseline2
+    /** The badge slot's width, device px. */
+    internal val badgeSlotWidth: Float get() = badgeSlot
     /** The two tally lines [begin] fixed. Allocates; never called in draw. */
     internal val tallyText: String get() = String(tally1, 0, tally1Len) + "\n" + String(tally2, 0, tally2Len)
 

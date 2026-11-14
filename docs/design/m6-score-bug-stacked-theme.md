@@ -504,11 +504,20 @@ alternative is **0.50**:
 
   What mirrors and what does not:
   1. **Column order** is the mirror, `[clock][SOG][rows]`: the column next to the rows is the SOG column on both sides.
-  2. **Rows:** the reading order is kept (logo, code, score left to right; nothing is drawn mirrored). The outer-edge
-     features mirror: the team stripe is on the rows' right edge, the rounded corners and the row block are anchored
-     to it (the contents are one left-to-right block before the stripe, so on a power play the wider stripe moves the
-     score 2.7 px, where on the left it moves the logo and code). Dividers, inset lines (on each column's inner edge,
-     toward the rows), the border and the drop shadow (left-right symmetric, one bake for both sides) follow.
+  2. **Rows: the same order from the screen edge (owner request 2026-11-13, second pass, superseding "the reading
+     order is kept").** "i think i would like the right hand side stacked scorebug to follow the same order from the
+     edge of the tv as the one on the left side". Every row element's position is the reflection of its left place
+     about the rows' centre line (x ↦ 243 − x), so a mirrored row is [score][code][logo][stripe] and, from the screen
+     edge, both sides read stripe, logo, code, score:
+     - the stripe on the rows' right edge (3.6, 6.3 on the power play);
+     - the logo slot centred stripe + 9.9 + 25.2 in from the right edge;
+     - the code **right-aligned** at stripe + 9.9 + 50.4 + 13.5 from the right edge (77.4, 80.1 on the power play);
+     - the score **left-aligned** 15.3 from the rows' left edge, in the reflected 45.9 slot; the goal pop scales it
+       about the reflected slot's centre.
+     As on the left, the wider power-play stripe moves the logo and code 2.7 px and the score keeps its place. Glyphs and
+     logos are never flipped. The narrowest score-to-code ink gap (WPG / 10, Standard) is 36.6 px against 41.6 on the
+     left; the difference is the glyphs' side bearings (`StackedFitTest`). Dividers, inset lines (on each column's inner
+     edge, toward the rows), the border and the drop shadow (left-right symmetric, one bake for both sides) follow.
   3. **Columns** open away from the rows on both sides: their contents are anchored to the inner edge and revealed by
      a clip of the open width, so on the right they slide out leftwards; the SOG contents' 5.4-px slide also mirrors.
   4. **Slanted bands: one rule (fix pass 2026-11-13, review S2).** The bar's two stripes and the goal's two streaks
@@ -519,11 +528,17 @@ alternative is **0.50**:
        and slide in from that end. Its words read left to right, right-aligned 63 from the right end (their slide-in
        mirrors). The hairline is full width.
      - **The goal takeover:** the lead and panel wipes start at the right (the screen edge; their clips are reflected
-       about the top part's centre) and the streaks sweep right to left. The badge, GOAL and the tally are not
-       mirrored: they keep their left-to-right places, so in a right corner the badge sits on the box's inner side.
+       about the top part's centre) and the streaks sweep right to left. (Second pass, 2026-11-13) The badge, GOAL and
+       the tally are placed at the reflection of their left places (x ↦ boxW − x), so the badge is nearest the screen
+       edge on both sides and the mirrored order is tally, GOAL, badge. The tally's two lines are right-aligned at the
+       mirror of their left anchor and slide in from the inner side (`−tallyDx`). The badge's spin direction mirrors
+       (fix pass, review L1: `rotate(−badgeRotDeg)`, counter-clockwise into place, rolling with the wipe; the logo is
+       never drawn reversed and the rest frame, 0°, is unchanged). GOAL's letters (their order and their per-letter
+       animation) and every glyph keep their own orientation.
   5. Implementation: one `StackedDrawArgs.mirrored` flag. The painter's origin stays the rows' left edge; the box is
      `[rowsW − w, rowsW]`, every box is re-anchored (x' = box right − (x − box left) − w), text and logos are
-     re-anchored. Nothing is drawn under a canvas reflection. No allocation in draw, no new layers or clips on any
+     re-anchored at the reflection of their anchors with the mirrored alignment (left ↔ right; centred stays centred).
+     Nothing is drawn under a canvas reflection. No allocation in draw, no new layers or clips on any
      ancestor of the video surface.
   6. **Pixel grid (fix pass 2026-11-13, review L1).** The runner places the painter's origin from the layer's own px
      (`stackedOriginDx`): the rows' outer (right) edge is snapped to the whole pixel `round((M + footprint width) · d)`

@@ -44,15 +44,28 @@ mirror the layout it will work and look better on the right, the left layout loo
   hug 96) and the SOG and clock columns open and fold to their left, in the order clock, SOG, rows. The rows still never
   move. The box now ends at the margin at even strength, on a power play and in a break; the earlier "box sits about
   59–90 px in on the right" default is gone.
-- Reading order is kept: logo, code and score read left to right, and the bar's words read left to right,
-  right-aligned. Edge features mirror: the team stripes are on the right edge, the bar's two stripes sit at its right
-  end (keeping their "/" lean to match the italic words), the columns and their contents slide out leftwards.
-- The goal animation's wipes start at the screen edge and its streak sweeps right to left; the badge, GOAL and the
-  score lines are not mirrored. Lead ruling (fix pass 2026-11-13, review S2): the streaks keep their "/" lean on both
-  sides, the same rule as the bar stripes, so they never cross the italic GOAL the other way.
+- **Same order from the screen edge (owner request 2026-11-13, after seeing the first mirror; supersedes "reading
+  order is kept").** "i think i would like the right hand side stacked scorebug to follow the same order from the edge
+  of the tv as the one on the left side". In a right-hand corner every element's **position** is the true mirror of
+  the left layout, so from the screen edge both sides read stripe, logo, team code, score, then the SOG column, then the
+  clock column; a mirrored row is [score][code][logo][stripe] left to right. Glyphs and logo bitmaps are never flipped
+  (no canvas reflection); only anchors and alignments mirror: the code is right-aligned against the logo, the score
+  left-aligned at the mirror of its right anchor, and the paddings are the exact mirror (on a power play the wider
+  stripe moves the logo and code, the score keeps its place, as on the left). The SOG and clock columns are centred
+  stacks, so their contents only re-anchor. The bar is unchanged: its words read left to right, right-aligned at the
+  outer end, its two stripes at that end keeping their "/" lean to match the italic words.
+- The goal animation's wipes start at the screen edge and its streak sweeps right to left. The badge, GOAL and the tally
+  are placed at the reflection of their left places (same pass, same request), so the badge is nearest the screen edge
+  on both sides: mirrored the order is tally, GOAL, badge, the tally's lines right-aligned and sliding in from the
+  inner side. Lead ruling (fix pass 2026-11-13, row-mirror review L1): the badge's spin direction mirrors too (its
+  rotation negated, so it turns counter-clockwise into place and rolls with the right-to-left wipe), because every
+  other motion mirrors and a negated rotation never draws the logo reversed; at rest (0°) nothing changes. The letters
+  and every glyph keep their own orientation. Lead ruling (fix pass
+  2026-11-13, review S2): the streaks keep their "/" lean on both sides, the same rule as the bar stripes, so they never
+  cross the italic GOAL the other way.
 - The rows' outer edge sits on a whole pixel at 720p, 1080p and 4K (fix pass, review L1).
 - The left corners are pixel-identical to before (all 306 existing Stacked screenshots byte-identical, checked again
-  after the fix pass).
+  after the fix pass and after the same-order pass).
 - Open (review L2, accepted): changing corner flips the layout at the start of the 300-ms slide rather than at its end,
   as the bar's up/down already does; it shows only in place mode or on a settings change.
 - Design: `docs/design/m6-score-bug-stacked-theme.md` §4.3. Code: `ScoreBugPlacement.stackedMirrored`,
