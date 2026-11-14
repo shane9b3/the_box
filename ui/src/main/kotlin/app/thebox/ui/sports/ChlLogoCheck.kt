@@ -27,20 +27,56 @@ class ChlLogoCheck : Transformation() {
         /** The HockeyTech logo host (design §2.1: `https://assets.leaguestat.com/{client}/logos/{file}`). */
         const val HOST = "assets.leaguestat.com"
 
-        /** The whole URL, as §3.5 validates it: the base, a client folder, `logos/`, then `{id}[_{n}].png|jpg|jpeg`. */
-        private val CHL_LOGO = Regex(
-            """(https://assets\.leaguestat\.com|https?://[^/?#@\\]+/leaguestat)/(ohl|whl|lhjmq)/logos/[0-9]+(_[0-9]+)?\.(png|jpg|jpeg)""",
-        )
-        /** The fake panel's logo folder (design §2.8: `{origin}/leaguestat/`), so a debug override takes the same check (review L2). */
-        private val FAKE_PANEL = Regex("""https?://[^/?#@\\]+/leaguestat/.*""")
+        /** The one logo form of a release build: the real host, a client folder, `logos/`, then `{id}[_{n}].png|jpg|jpeg`. */
+        private val CHL_LOGO = Regex("""https://assets\.leaguestat\.com/(ohl|whl|lhjmq)/logos/[0-9]+(_[0-9]+)?\.(png|jpg|jpeg)""")
 
-        /** True when [url] is a well-formed CHL logo URL (no `..`, no query, no other host, no other path). */
-        fun isChlLogoUrl(url: String): Boolean = CHL_LOGO.matches(url)
+        /** What follows `{origin}/leaguestat/` in the fake panel's form (design §2.8), only ever accepted for the override's origin. */
+        private val FAKE_TAIL = Regex("""(ohl|whl|lhjmq)/logos/[0-9]+(_[0-9]+)?\.(png|jpg|jpeg)""")
 
-        /** True when [url] points at the CHL logo host at all, valid or not (an invalid one is never requested). */
-        fun isChlHost(url: String): Boolean =
+        /** The data source's debug override file under `filesDir` (`SportsEndpoints.DEBUG_OVERRIDE_FILE`; one line, an origin). */
+        const val DEBUG_OVERRIDE_FILE = "debug/sports_base"
+
+        /**
+         * The debug endpoint override's origin (`scheme://host[:port]`, no trailing slash), or null. It is non-null **only** when
+         * the app is a debug build ([debuggable]) and the override file the data source reads (`HockeyTechEndpoints.resolve`,
+         * the same file as `SportsEndpoints`) holds an http or https origin. A release build, or a debug build without the
+         * file, always gets null: only the real host's form is then a CHL logo URL.
+         */
+        fun overrideOrigin(filesDir: java.io.File, debuggable: Boolean): String? {
+            if (!debuggable) return null
+            val text = try {
+                java.io.File(filesDir, DEBUG_OVERRIDE_FILE).takeIf { it.isFile }?.readText()
+            } catch (e: java.io.IOException) {
+                null
+            }?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: return null
+            val uri = try { java.net.URI(text) } catch (e: java.net.URISyntaxException) { return null }
+            val scheme = uri.scheme?.lowercase()
+            if (scheme != "http" && scheme != "https") return null
+            val host = uri.host ?: return null
+            return "$scheme://$host" + if (uri.port >= 0) ":${uri.port}" else ""
+        }
+
+        /** [overrideOrigin] for this app: debuggable build and the override file under `filesDir`. */
+        fun overrideOrigin(context: android.content.Context): String? =
+            overrideOrigin(context.filesDir, (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0)
+
+        /**
+         * True when [url] is a well-formed CHL logo URL: exactly the real host's form (https, no `..`, no query, no other
+         * path), or, only when [overrideOrigin] is non-null, the fake panel's `{overrideOrigin}/leaguestat/{client}/logos/{file}`
+         * on **that** origin and no other.
+         */
+        fun isChlLogoUrl(url: String, overrideOrigin: String? = null): Boolean =
+            CHL_LOGO.matches(url) || (overrideOrigin != null && url.startsWith("$overrideOrigin/leaguestat/") &&
+                FAKE_TAIL.matches(url.removePrefix("$overrideOrigin/leaguestat/")))
+
+        /**
+         * True when [url] points at the CHL logo host (in any spelling) or, with an override, at the override's `/leaguestat/`
+         * folder, valid or not: such a URL is checked, and an invalid one is never requested.
+         */
+        fun isChlHost(url: String, overrideOrigin: String? = null): Boolean =
             url.startsWith("https://$HOST/", ignoreCase = true) || url.startsWith("http://$HOST/", ignoreCase = true) ||
-                url.startsWith("https://$HOST:", ignoreCase = true) || url.contains("@$HOST", ignoreCase = true) || FAKE_PANEL.matches(url)
+                url.startsWith("https://$HOST:", ignoreCase = true) || url.contains("@$HOST", ignoreCase = true) ||
+                (overrideOrigin != null && url.startsWith("$overrideOrigin/leaguestat/"))
 
         /** True when the bitmap has an alpha channel and at least one of its four corner pixels is transparent. */
         fun hasTransparentCorner(b: Bitmap): Boolean {

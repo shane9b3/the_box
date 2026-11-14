@@ -364,3 +364,8 @@ Applied on top of `chl` (uncommitted). Lead rulings as given; each item with wha
 
 Hash gate: `sports-tab/sports-tab.png` legitimately changed (the third chip); its line in `sports-hashes.txt` is updated and
 noted in the file header. Every other hash matches.
+
+**Follow-up (lead ruling): the relaxed URL form is debug-only.** The fake panel's `{origin}/leaguestat/…` form is accepted
+only when the app is a debug build (`FLAG_DEBUGGABLE`) and the data source's override file (`files/debug/sports_base`) holds an
+http or https origin, and then only for that origin (`ChlLogoCheck.overrideOrigin`). A release build, or a debug build with
+no override, accepts exactly `https://assets.leaguestat.com/(ohl|whl|lhjmq)/logos/{id}[_{n}].(png|jpg|jpeg)`.

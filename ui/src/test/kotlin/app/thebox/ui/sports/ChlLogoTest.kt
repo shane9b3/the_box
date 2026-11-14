@@ -116,19 +116,56 @@ class ChlLogoTest {
             assertTrue(u, ChlLogoCheck.isChlHost(u))
             assertFalse(u, ChlLogoCheck.isChlLogoUrl(u))
         }
-        // (Review L2) The fake panel's logo folder takes the same check and is a valid CHL logo URL.
-        val fake = "http://10.0.2.2:8080/leaguestat/whl/logos/222.png"
-        assertTrue(ChlLogoCheck.isChlHost(fake))
-        assertTrue(ChlLogoCheck.isChlLogoUrl(fake))
-        assertFalse(ChlLogoCheck.isChlLogoUrl("http://10.0.2.2:8080/leaguestat/whl/logos/../222.png"))
-        assertFalse(ChlLogoCheck.isChlLogoUrl("http://10.0.2.2:8080/leaguestat/whl/logos/222.png?x=1"))
-        // NHL and NFL URLs are never the CHL's
-        assertFalse(ChlLogoCheck.isChlHost("https://assets.nhle.com/logos/nhl/svg/CGY_dark.svg"))
-        assertFalse(ChlLogoCheck.isChlHost("http://10.0.2.2:8080/nhle/logos/nhl/svg/CGY_dark.svg"))
+        // (Lead ruling) No override: the fake panel's form is not a CHL URL at all, whatever the origin.
+        for (u in listOf("https://evil.test/leaguestat/ohl/logos/1.png", "http://10.0.2.2:8080/leaguestat/whl/logos/222.png")) {
+            assertFalse(u, ChlLogoCheck.isChlLogoUrl(u))
+            assertFalse(u, ChlLogoCheck.isChlHost(u))
+        }
+        // With the override active, only the override's own origin passes (and the real host's form always does).
+        val o = "http://10.0.2.2:8080"
+        val fake = "$o/leaguestat/whl/logos/222.png"
+        assertTrue(ChlLogoCheck.isChlHost(fake, o))
+        assertTrue(ChlLogoCheck.isChlLogoUrl(fake, o))
+        assertFalse("another origin", ChlLogoCheck.isChlLogoUrl("https://evil.test/leaguestat/ohl/logos/1.png", o))
+        assertFalse("a prefix of the origin", ChlLogoCheck.isChlLogoUrl("http://10.0.2.2:80801/leaguestat/ohl/logos/1.png", o))
+        assertFalse("userinfo trick", ChlLogoCheck.isChlLogoUrl("http://10.0.2.2:8080@evil.test/leaguestat/ohl/logos/1.png", o))
+        assertFalse(ChlLogoCheck.isChlLogoUrl("$o/leaguestat/whl/logos/../222.png", o))
+        assertFalse(ChlLogoCheck.isChlLogoUrl("$o/leaguestat/whl/logos/222.png?x=1", o))
+        assertFalse(ChlLogoCheck.isChlLogoUrl("$o/leaguestat/x/logos/222.png", o))
+        assertTrue(ChlLogoCheck.isChlLogoUrl("https://assets.leaguestat.com/ohl/logos/14.png", o))
+        assertTrue(ChlLogoCheck.isChlLogoUrl("https://assets.leaguestat.com/ohl/logos/14.png"))
+        // NHL and NFL URLs are never the CHL's, override or not
+        for (ov in listOf<String?>(null, o)) {
+            assertFalse(ChlLogoCheck.isChlHost("https://assets.nhle.com/logos/nhl/svg/CGY_dark.svg", ov))
+            assertFalse(ChlLogoCheck.isChlHost("http://10.0.2.2:8080/nhle/logos/nhl/svg/CGY_dark.svg", ov))
+            assertFalse(ChlLogoCheck.isChlHost("https://a.espncdn.com/combiner/i?img=/i/teamlogos/nfl/500-dark/scoreboard/kc.png", ov))
+        }
         // A CHL league's fetch refuses any URL that is not a valid CHL logo URL, whatever the host.
         val fetch = coilLogoFetch(ImageLoader.Builder(context).build(), context, chlLeague = true)
         assertNull(runBlocking { fetch("https://evil.test/x.png", 64, 46) })
         assertNull(runBlocking { fetch("https://assets.nhle.com/logos/nhl/svg/CGY_dark.svg", 64, 46) })
+    }
+
+    @Test
+    fun theOverrideIsSeenOnlyInADebugBuildWithTheDataSourcesFile() {
+        val dir = java.nio.file.Files.createTempDirectory("filesdir").toFile()
+        try {
+            assertNull("no file", ChlLogoCheck.overrideOrigin(dir, debuggable = true))
+            java.io.File(dir, "debug").mkdirs()
+            java.io.File(dir, ChlLogoCheck.DEBUG_OVERRIDE_FILE).writeText("http://10.0.2.2:8080/\n")
+            assertEquals("http://10.0.2.2:8080", ChlLogoCheck.overrideOrigin(dir, debuggable = true))
+            assertNull("a release build never has one, even with the file", ChlLogoCheck.overrideOrigin(dir, debuggable = false))
+            java.io.File(dir, ChlLogoCheck.DEBUG_OVERRIDE_FILE).writeText("ftp://x")
+            assertNull("not http(s)", ChlLogoCheck.overrideOrigin(dir, debuggable = true))
+            java.io.File(dir, ChlLogoCheck.DEBUG_OVERRIDE_FILE).writeText("https://panel.test:9443/some/path")
+            assertEquals("origin only", "https://panel.test:9443", ChlLogoCheck.overrideOrigin(dir, debuggable = true))
+        } finally { dir.deleteRecursively() }
+        // The same file the data source reads (SportsEndpoints.DEBUG_OVERRIDE_FILE).
+        assertEquals("debug/sports_base", ChlLogoCheck.DEBUG_OVERRIDE_FILE)
+        // The fetch under test: no override, the fake form is refused without a request; with it, only its origin is requested.
+        val loader = ImageLoader.Builder(context).build()
+        assertNull(runBlocking { coilLogoFetch(loader, context, false, "")("https://evil.test/leaguestat/ohl/logos/1.png", 64, 46) })
+        assertNull(runBlocking { coilLogoFetch(loader, context, true, "http://10.0.2.2:8080")("https://evil.test/leaguestat/ohl/logos/1.png", 64, 46) })
     }
 
     @Test
