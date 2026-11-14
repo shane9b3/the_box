@@ -143,6 +143,24 @@ Lead rulings, applied in the fix pass and written into the design (§1.2, §2.3,
   (`settings_sports_show_desc` names HockeyTech; `settings_sports_interval_league` drops the "other" league) and adds
   CHL contracts with no source bound.
 
+## WP-5 review fix pass (2026-11-14)
+Lead rulings on `docs/review/2026-11-14-chl-wp5-ui-and-colours-review.md`:
+- **S1 / R1 (Stacked fallback):** in the Stacked bug the logo fallback stays inside the 50.4 px logo slot with ≥ 6 px to
+  the stripe and to the code's ink, in all four geometries and both sizes. For a code longer than 3 characters it is a
+  plain 44 px disc **without text**, filled with that team's Stacked stripe colour; the row prints the code beside it.
+  3-letter and 2-letter fallbacks and all NHL fallbacks are unchanged. The Pill keeps the capsule. Reason: no capsule
+  text size at or above the 16 px floor fits a 50.4 px slot. Written into design §6.4; tested by
+  `ChlStackedFallbackTest`.
+- **S2 / R3:** a bounded negative cache (128 URLs, 6 h, process lifetime) for failed CHL card logos, so the cards do not
+  refetch 404s on every visit; NHL and NFL unchanged.
+- **L1 / L2:** the CHL alpha check is chosen by the league where the caller knows it (the cards), and by the URL shape
+  (the CHL host in any spelling, or the fake panel's `/leaguestat/` folder) in the bug's hook, so the emulator shows
+  WEN's fallback.
+- **L5, L6, L7, L8:** two-entry capsule cache; a key press cancels the pending focus pull; Back-from-a-sub-chip and RTL
+  tests; the static grep also covers string comparisons of a code with a league's name.
+- **L3 (byte cap on CHL logo downloads):** not done; Coil's fetcher gives no hook inside the WP-5 files. Decoded size is
+  bounded by subsampling; accepted for a fixed HTTPS host.
+
 ## Fixtures and scripts in the repo (2026-11-13)
 - **Captures:** `core/src/testFixtures/resources/sports/chl/` (47 files, ~0.9 MB):
   - the 21 Firebase final-data nodes;

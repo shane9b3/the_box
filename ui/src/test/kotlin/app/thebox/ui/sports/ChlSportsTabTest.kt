@@ -170,6 +170,52 @@ class ChlSportsTabTest {
     @Config(sdk = [35], qualifiers = "w640dp-h360dp-xhdpi")
     @Test fun nothingMovesVerticallyAndTheRowEndsBeforeCornerAt1280() = assertNothingMovesVerticallyAndTheRowFits()
 
+    @Test fun backOnASubChipChangesNothingAndLeavesFocusAndTheRouterFree() {
+        wire(SportsPrefs(league = League.OHL, chlLeague = League.OHL))
+        board(SportsFixtures.chlGame(), league = League.OHL)
+        val backFree = ArrayList<Boolean>()
+        val vm = SportsViewModel(repo, store, { android.os.SystemClock.elapsedRealtime() }, easternToday = { LocalDate.of(2026, 11, 13) })
+        rule.setContent { BoxTheme { SportsScreen(vm, clock24 = false, onBackFreeChanged = { backFree += it }) } }
+        rule.waitForIdle()
+        press(listOf(Key.DirectionUp, Key.DirectionUp))
+        rule.onNodeWithTag(sportsChlTag(League.OHL)).assertIsFocused()
+        press(listOf(Key.Back))
+        // The screen does not consume Back on a chip: the ladder (the router's) takes it. Nothing here changed.
+        rule.onNodeWithTag(sportsChlTag(League.OHL)).assertIsFocused()
+        assertEquals(League.OHL, store.flow(SportsDomain).value.league)
+        assertTrue(backFree.last())
+    }
+
+    @Test fun aKeyBeforeTheSubSwitchAppearsCancelsTheFocusPull() {
+        // (Review L6) The store answers late (nothing mirrors the write); a Left before it lands must not be undone.
+        store.update(SportsDomain) { SportsPrefs(league = League.NHL, chlLeague = League.OHL) }
+        repo.prefs.value = SportsPrefs(league = League.NHL, chlLeague = League.OHL)
+        board(SportsFixtures.game(id = "H1"), league = League.NHL)
+        show()
+        press(listOf(Key.DirectionUp, Key.DirectionUp, Key.DirectionRight, Key.DirectionRight, Key.DirectionCenter))
+        press(listOf(Key.DirectionLeft)) // NFL; the repository's prefs still say NHL, so no sub-chips yet
+        repo.prefs.value = store.flow(SportsDomain).value // the write lands now
+        rule.waitForIdle()
+        rule.onNodeWithTag(sportsGroupTag(app.thebox.core.sports.LeagueGroup.NFL)).assertIsFocused()
+    }
+
+    @Test fun rightToLeftMirrorsTheRowAndKeepsItOnOneLine() {
+        wire(SportsPrefs(league = League.WHL, chlLeague = League.WHL))
+        board(SportsFixtures.chlGame(league = League.WHL), league = League.WHL)
+        val vm = SportsViewModel(repo, store, { android.os.SystemClock.elapsedRealtime() }, easternToday = { LocalDate.of(2026, 11, 13) })
+        rule.setContent {
+            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.ui.platform.LocalLayoutDirection provides androidx.compose.ui.unit.LayoutDirection.Rtl) {
+                BoxTheme { SportsScreen(vm, clock24 = false) }
+            }
+        }
+        rule.waitForIdle()
+        val order = listOf("sports_league:NHL", "sports_league:NFL", "sports_league:CHL", sportsChlTag(League.OHL), sportsChlTag(League.WHL), sportsChlTag(League.QMJHL))
+        val lefts = order.map { bounds(it).left }
+        assertEquals("the row reads right to left", lefts.sortedDescending(), lefts)
+        val tops = order.map { bounds(it).top }
+        assertTrue("one line", tops.all { Math.abs(it - tops[0]) < 0.5f })
+    }
+
     // ------------------------------------------------------------------ credit, empty, failed, refused
 
     @Test fun theCreditNamesTheLeagueAndTheQmjhlKeepsLhjmqVerbatim() {

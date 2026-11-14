@@ -95,6 +95,13 @@ class TeamCodeIsNotALeagueTest {
                     if (Regex("""League\.valueOf\(|enumValueOf<League>|League\.entries\.(first|find)\w*\s*\{[^}]*(abbrev|name)""").containsMatchIn(line)) {
                         offenders += "${f.relativeTo(root)}:${i + 1}: $line"
                     }
+                    // (Review L8) a code compared with a league's name, in either order, or `equals("NFL")` on a code
+                    val leagueWord = """"(NHL|NFL|OHL|WHL|QMJHL|CHL)""""
+                    val codeWord = """(abbrev|away|home|code|teamCode)\w*(\.\w+)*"""
+                    if (Regex("""$codeWord\s*(==|!=)\s*$leagueWord""").containsMatchIn(line) ||
+                        Regex("""$leagueWord\s*(==|!=)\s*$codeWord""").containsMatchIn(line) ||
+                        Regex("""$codeWord\.equals\(\s*$leagueWord""").containsMatchIn(line)
+                    ) offenders += "${f.relativeTo(root)}:${i + 1}: $line"
                     // any valueOf( whose argument is a team code (abbrev, away, home, code)
                     Regex("""valueOf\(([^)]*)\)""").findAll(line).forEach { m ->
                         if (Regex("""\b(abbrev|away|home|code|teamCode)\b""").containsMatchIn(m.groupValues[1])) offenders += "${f.relativeTo(root)}:${i + 1}: $line"

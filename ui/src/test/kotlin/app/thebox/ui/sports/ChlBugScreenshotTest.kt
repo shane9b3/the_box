@@ -35,7 +35,7 @@ import org.robolectric.annotation.GraphicsMode
  * mirrored rows, the exact reflection `[score][code][logo][stripe]`; the Pill is not mirrored). Drawn by the real painters
  * with the bundled fonts over a dark frame. Written to `ui/build/chl-ui/` and the review scratchpad; not goldens.
  *
- * The Stacked colours are the design's EDM / TOR pair (the CHL tables are WP-4's); the logos are synthetic stand-ins.
+ * The Stacked colours are the real OHL table's (`StackedColourTable.pair(OHL, …)`); the logos are synthetic stand-ins.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -144,12 +144,12 @@ class ChlBugScreenshotTest {
         val c = Canvas(bmp)
         val a = StackedDrawArgs()
         a.body = StackedFixtures.body(r.painter, awayAbbrev = away, homeAbbrev = home, away = 1, home = 10)
-        a.colours = StackedFixtures.EDM_TOR
+        a.colours = app.thebox.core.sports.StackedColourTable.pair(League.OHL, away, home)
         a.f = if (pp) StackedFixtures.frame(1f, 1f, 1f, stripeAway = 1f) else StackedFixtures.frame(1f, 1f, 0f)
         if (pp) {
             a.bar = BarContent().also {
                 it.kind = BarKind.POWER_PLAY; it.side = Side.AWAY; it.secs = 92; it.period = null
-                r.painter.fillBar(it, StackedFixtures.EDM_TOR, away, home, res)
+                r.painter.fillBar(it, a.colours, away, home, res)
             }
         }
         if (logos) {

@@ -1039,6 +1039,17 @@ Code lengths:
   | NFL | 18 (disc) | 24 | 24 | 3 characters: the disc |
 
   Every 3-letter code keeps today's size, so NHL and NFL drawing is unchanged.
+- **(WP-5 fix pass, lead ruling on review S1 / R1) The Stacked rows' fallback for a code longer than 3 characters.** The
+  Pill capsule above is right for the Pill (64 px slot) and stays. The Stacked logo slot is 50.4 px (`LOGO_SLOT_W` 112 ×
+  0.45) and the logo moves with the stripe, so a 67 px capsule overhung it by 8.3 px a side and sat about 1 px from the
+  stripe. **Rule:** in the Stacked bug the logo fallback stays **inside the logo slot** and keeps **≥ 6 design px** from
+  the stripe and from the code's ink, unmirrored and mirrored, with and without the power-play stripe, Standard and
+  Large. For a code of more than 3 characters Stacked draws a **plain 44 px disc without text**, filled with that team's
+  Stacked stripe colour (`StackedColourTable.pair(league, away, home)`, already contrast-safe against the row); the
+  code is printed beside it by the row. 3-letter and 2-letter fallbacks and every NHL fallback are unchanged (the disc
+  with its text; hash gate). Measured on the painted pixels (`ChlStackedFallbackTest`, BRAM / FLNT / NIAG, all four
+  geometries, both rows, both sizes): disc 43 to 44 px wide, gap to the stripe 12.8 to 14.0, gap to the code's ink 16.8
+  to 19.0 design px. The code text is never drawn inside the Stacked fallback, so the 16 px floor does not apply there.
 - **Step-down extended to codes (Q4):** if a 4-letter code fails a row fit or a bar string at its size, the existing
   2 px step rule applies to the code text (rows) or the bar string, down to the 18 px floor. **Never a display
   alias.** A failure at the floor is a lead escalation, not a silent clip.

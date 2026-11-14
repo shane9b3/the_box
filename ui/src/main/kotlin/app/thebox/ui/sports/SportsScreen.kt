@@ -181,6 +181,8 @@ fun SportsScreen(
             .fillMaxSize()
             .testTag(SPORTS_SCREEN_TAG)
             .onPreviewKeyEvent { e ->
+                // (Review L6) Any move before the sub-switch has appeared cancels the pending focus pull to its chip.
+                if (focusSub && e.type == KeyEventType.KeyDown && e.key != Key.DirectionCenter) focusSub = false
                 if (menu != null && (e.key == Key.Back || e.key == Key.Escape || e.key == Key.ButtonB)) {
                     if (e.type == KeyEventType.KeyUp) {
                         val m = menu

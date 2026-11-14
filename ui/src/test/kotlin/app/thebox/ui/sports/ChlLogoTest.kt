@@ -106,6 +106,47 @@ class ChlLogoTest {
         assertNull(runBlocking { fetch("https://assets.leaguestat.com/ohl/logos/14.png?x=1", 64, 46) })
     }
 
+    @Test
+    fun theLeagueDecidesAndEverySpellingOfTheHostIsCheckedOrRejected() {
+        // (Review L1) Odd spellings of the CHL host are seen as the CHL's (so never the NHL path) and then rejected.
+        for (u in listOf(
+            "HTTPS://ASSETS.LEAGUESTAT.COM/ohl/logos/14.png", "https://assets.leaguestat.com:443/ohl/logos/14.png",
+            "https://x@assets.leaguestat.com/ohl/logos/14.png",
+        )) {
+            assertTrue(u, ChlLogoCheck.isChlHost(u))
+            assertFalse(u, ChlLogoCheck.isChlLogoUrl(u))
+        }
+        // (Review L2) The fake panel's logo folder takes the same check and is a valid CHL logo URL.
+        val fake = "http://10.0.2.2:8080/leaguestat/whl/logos/222.png"
+        assertTrue(ChlLogoCheck.isChlHost(fake))
+        assertTrue(ChlLogoCheck.isChlLogoUrl(fake))
+        assertFalse(ChlLogoCheck.isChlLogoUrl("http://10.0.2.2:8080/leaguestat/whl/logos/../222.png"))
+        assertFalse(ChlLogoCheck.isChlLogoUrl("http://10.0.2.2:8080/leaguestat/whl/logos/222.png?x=1"))
+        // NHL and NFL URLs are never the CHL's
+        assertFalse(ChlLogoCheck.isChlHost("https://assets.nhle.com/logos/nhl/svg/CGY_dark.svg"))
+        assertFalse(ChlLogoCheck.isChlHost("http://10.0.2.2:8080/nhle/logos/nhl/svg/CGY_dark.svg"))
+        // A CHL league's fetch refuses any URL that is not a valid CHL logo URL, whatever the host.
+        val fetch = coilLogoFetch(ImageLoader.Builder(context).build(), context, chlLeague = true)
+        assertNull(runBlocking { fetch("https://evil.test/x.png", 64, 46) })
+        assertNull(runBlocking { fetch("https://assets.nhle.com/logos/nhl/svg/CGY_dark.svg", 64, 46) })
+    }
+
+    @Test
+    fun theNegativeCacheIsBoundedAndExpires() {
+        CardLogoCache.clearFailed()
+        val u = "https://assets.leaguestat.com/ohl/logos/18.png"
+        assertFalse(CardLogoCache.recentlyFailed(u, now = 0L))
+        CardLogoCache.markFailed(u, now = 1_000L)
+        assertTrue(CardLogoCache.recentlyFailed(u, now = 1_000L + CardLogoCache.FAILED_TTL_MS - 1))
+        assertFalse("it expires after the TTL", CardLogoCache.recentlyFailed(u, now = 1_000L + CardLogoCache.FAILED_TTL_MS))
+        // bounded: 200 more URLs push the oldest out
+        CardLogoCache.markFailed("first", now = 5L)
+        for (i in 0 until 200) CardLogoCache.markFailed("https://assets.leaguestat.com/ohl/logos/$i.png", now = 6L)
+        assertFalse(CardLogoCache.recentlyFailed("first", now = 7L))
+        assertTrue(CardLogoCache.recentlyFailed("https://assets.leaguestat.com/ohl/logos/199.png", now = 7L))
+        CardLogoCache.clearFailed()
+    }
+
     /** One recorded outcome row (S10): `league code team_id feed_url app_url status png corners verdict`. */
     private class Row(val code: String, val appUrl: String, val verdict: String, val png: String, val corners: String)
 

@@ -27,10 +27,11 @@ typealias LogoFetch = suspend (url: String, w: Int, h: Int) -> Bitmap?
  * (docs/design/m6-score-bug.md §3) The Coil path: the SVG is rasterised at 4x the slot with the memory cache off (the
  * [FollowLogos] holder is the cache), then [LogoTrim] crops and fits it. Coil's disk cache keeps the SVG source.
  */
-fun coilLogoFetch(loader: ImageLoader, context: Context): LogoFetch = fetch@{ url, w, h ->
-    // (CHL §3.5, S9) A URL on the CHL logo host must be exactly a CHL logo URL (else no request and no logo), and its request
-    // gets the no-alpha check ahead of the trim. NHL and NFL URLs are built exactly as before.
-    val chl = ChlLogoCheck.isChlHost(url)
+fun coilLogoFetch(loader: ImageLoader, context: Context, chlLeague: Boolean = false): LogoFetch = fetch@{ url, w, h ->
+    // (CHL §3.5, S9; review L1, L2) A CHL logo (the caller knows the league; the bug's hook sees only the URL, so a URL on the
+    // CHL logo host or the fake panel's `/leaguestat/` folder counts too) must be exactly a CHL logo URL, else no request and
+    // no logo, and its request gets the no-alpha check ahead of the trim. NHL and NFL requests are built exactly as before.
+    val chl = chlLeague || ChlLogoCheck.isChlHost(url)
     if (chl && !ChlLogoCheck.isChlLogoUrl(url)) return@fetch null
     (loader.execute(logoRequest(context, url, chl, w, h)) as? SuccessResult)?.image?.toBitmap()
 }
@@ -77,11 +78,14 @@ internal class LogoDisc(private val scale: Float, private val face: Typeface?) {
     // ---- the capsule (4+ character codes); measured in design px, drawn at [scale]
     private val measure by lazy(LazyThreadSafetyMode.NONE) { Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = face } }
     private val bounds = Rect()
-    private var capsuleCode: String? = null
-    private var capsulePx = SportsConstants.LOGO_DISC_TEXT_PX
-    /** The capsule's width in design px. */
-    private var capsuleW = SportsConstants.LOGO_DISC_D
-    private var capsuleOffset = 0f
+    // (Review L5) Two entries, one per team of the bug: both rows may draw a capsule every frame (BRAM vs FLNT), and a miss
+    // costs a step-down search; a hit costs two string compares and no allocation.
+    private val capsuleCodes = arrayOfNulls<String>(2)
+    private val capsulePxs = IntArray(2)
+    /** Each capsule's width in design px. */
+    private val capsuleWs = FloatArray(2)
+    private val capsuleOffsets = FloatArray(2)
+    private var capsuleNext = 0
 
     /** The score ink's left edge in the Pill (least over 0..19, design px from the bug's left edge); computed once. */
     private val scoreInkLeft: Float by lazy(LazyThreadSafetyMode.NONE) {
@@ -131,16 +135,32 @@ internal class LogoDisc(private val scale: Float, private val face: Typeface?) {
         c.drawText(abbrev, cx, cy + centreOffset, text)
     }
 
+    /**
+     * (CHL §6.4, lead ruling on S1) The Stacked rows' fallback for a code of more than 3 characters: a plain 44 px disc
+     * **without text**, filled with the team's Stacked stripe colour ([colour], opaque; contrast-safe against the row by the
+     * Stacked table). It sits inside the 50.4 px logo slot with the disc's own gaps to the stripe and the code, which the
+     * row already prints beside it.
+     */
+    fun drawStripeDisc(c: Canvas, cx: Float, cy: Float, colour: Int) {
+        stripeFill.color = colour
+        c.drawCircle(cx, cy, SportsConstants.LOGO_DISC_D * scale / 2f, stripeFill)
+    }
+
+    private val stripeFill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
+
     private fun drawCapsule(c: Canvas, cx: Float, cy: Float, abbrev: String, alpha: Float) {
-        if (abbrev != capsuleCode) {
-            capsuleCode = abbrev
-            capsulePx = capsuleTextPx(abbrev)
-            capsuleW = capsuleWidthAt(abbrev, capsulePx)
-            text.textSize = capsulePx * scale
-            capsuleOffset = -(text.fontMetrics.ascent + text.fontMetrics.descent) / 2f
+        var i = if (capsuleCodes[0] == abbrev) 0 else if (capsuleCodes[1] == abbrev) 1 else -1
+        if (i < 0) {
+            i = capsuleNext
+            capsuleNext = 1 - capsuleNext
+            capsuleCodes[i] = abbrev
+            capsulePxs[i] = capsuleTextPx(abbrev)
+            capsuleWs[i] = capsuleWidthAt(abbrev, capsulePxs[i])
+            text.textSize = capsulePxs[i] * scale
+            capsuleOffsets[i] = -(text.fontMetrics.ascent + text.fontMetrics.descent) / 2f
         }
-        text.textSize = capsulePx * scale
-        val hw = capsuleW * scale / 2f
+        text.textSize = capsulePxs[i] * scale
+        val hw = capsuleWs[i] * scale / 2f
         val hh = SportsConstants.LOGO_DISC_D * scale / 2f
         fill.alpha = (0x14 * alpha).toInt()
         rect.set(cx - hw, cy - hh, cx + hw, cy + hh)
@@ -150,7 +170,7 @@ internal class LogoDisc(private val scale: Float, private val face: Typeface?) {
         rect.set(cx - hw + h, cy - hh + h, cx + hw - h, cy + hh - h)
         c.drawRoundRect(rect, hh - h, hh - h, stroke)
         text.alpha = (255 * alpha).toInt()
-        c.drawText(abbrev, cx, cy + capsuleOffset, text)
+        c.drawText(abbrev, cx, cy + capsuleOffsets[i], text)
         text.textSize = SportsConstants.LOGO_DISC_TEXT_PX * scale
     }
 
