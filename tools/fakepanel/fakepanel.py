@@ -32,6 +32,7 @@ import catalog as cat  # noqa: E402
 import ed25519  # noqa: E402
 import sports  # noqa: E402
 import sports_nfl  # noqa: E402
+import sports_chl  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PKT = 188
@@ -79,6 +80,8 @@ DEFAULTS = {
     **sports.DEFAULTS,
     # NFL score bug (docs/design/m6-nfl.md §9): the fake ESPN scoreboard under /apis/site/v2/ and /combiner/ (sports_nfl.py)
     **sports_nfl.DEFAULTS,
+    # CHL leagues (docs/design/m6-chl-leagues.md §7.3): fake HockeyTech under /hockeytech/, /firebase/svf/, /leaguestat/
+    **sports_chl.DEFAULTS,
 }
 FAULT_DOC = {
     "redirect": False, "token_ttl": None, "linger": 0, "linger_status": 403, "close_every": 0,
@@ -950,6 +953,7 @@ class Panel:
         self.reset_stats()
         self.sports = sports.Sports(self)
         self.sports_nfl = sports_nfl.SportsNfl(self)
+        self.sports_chl = sports_chl.SportsChl(self)
         self.clips, self.vod_data, self.vod_ctype = build_media(
             media_dir or os.path.join(HERE, "media"), use_ffmpeg, self.log)
 
@@ -1069,6 +1073,7 @@ class Panel:
             raise ValueError("sleep_login must be a number >= 0")
         sports.check_config(patch)
         sports_nfl.check_config(patch)
+        sports_chl.check_config(patch)
         if "dns_records" in patch and not isinstance(patch["dns_records"], dict):
             raise ValueError("dns_records must be an object {name: ipv4}")
         for table in [patch.get("faults") or {}] + list((patch.get("stream_faults") or {}).values()):
@@ -1117,6 +1122,7 @@ class Panel:
         self.reset_stats()
         self.sports.reset()
         self.sports_nfl.reset()  # NFL N8: one restart restarts both timelines
+        self.sports_chl.reset()
 
     # ---- M5: update manifest (docs/design/m5-setup-settings.md §3.12.1, §6.4)
     def update_public_hex(self):
@@ -1405,6 +1411,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return None
         if sports_nfl.handle(self, path):
             return None
+        if sports_chl.handle(self, path):
+            return None
         if path == "/player_api.php":
             return self.player_api()
         if path.startswith("/update/"):
@@ -1505,9 +1513,12 @@ class Handler(http.server.BaseHTTPRequestHandler):
         if path == "/admin/sports":
             if self.command in ("POST", "PUT") and data and data.get("restart"):
                 p.sports_nfl.reset()  # NFL N8: restarting the NHL timeline restarts the NFL one too
+                p.sports_chl.reset()  # and the CHL slate
             return sports.admin(self, path, data)
         if path == "/admin/sports-nfl":
             return sports_nfl.admin(self, path, data)
+        if path == "/admin/sports-chl":
+            return sports_chl.admin(self, path, data)
         if path == "/admin/now":
             now = time.time()
             return self.json({"unix": now, "panel_wall": dt.datetime.fromtimestamp(now, p.tz()).strftime("%Y-%m-%d %H:%M:%S"),
@@ -2365,6 +2376,12 @@ def main(argv=None):
     ap.add_argument("--sports-stacked", action="store_true", help="with --sports: the Stacked score bug scenario (the pp timeline plus end of period, no SOG, a stale intermission)")
     ap.add_argument("--sports-timeline", type=float, metavar="S", help="the featured game's timeline length (default 360 s)")
     ap.add_argument("--sports-nfl", action="store_true", help="with --sports: also serve the fake ESPN NFL scoreboard (/apis/site/v2/..., /combiner/i)")
+    ap.add_argument("--sports-chl", action="store_true", help="with --sports: also serve the fake HockeyTech CHL feeds (/hockeytech/, /firebase/svf/, /leaguestat/)")
+    ap.add_argument("--chl-timeline", type=float, metavar="S", help="with --sports-chl: the featured CHL game's timeline length (default 520 s)")
+    ap.add_argument("--chl-refuse", action="store_true", help="with --sports-chl: every keyed request answers \"Invalid key.\"")
+    ap.add_argument("--chl-firebase-refuse", action="store_true", help="with --sports-chl: every Firebase request is 401 Permission denied")
+    ap.add_argument("--chl-null-live", action="store_true", help="with --sports-chl: the featured game's nodes are null while live (S5)")
+    ap.add_argument("--chl-drop-penalties", type=int, metavar="N", help="with --sports-chl: every Nth penalties request is a 503 (B3)")
     ap.add_argument("--update-apk-dir", help="U-S14: load every *.apk in this directory as an update APK by name "
                                              "(thebox-update-v2.apk -> v2); select one with the update_apk config key")
     ap.add_argument("--update-key", help="file with the 32-byte Ed25519 seed (hex) the update manifest is signed with "
@@ -2403,6 +2420,24 @@ def main(argv=None):
         if not a.sports:
             ap.error("--sports-nfl needs --sports")
         cfg["sports_nfl"] = True
+    chl_flags = (a.chl_timeline is not None or a.chl_refuse or a.chl_firebase_refuse or a.chl_null_live
+                 or a.chl_drop_penalties is not None)
+    if a.sports_chl or chl_flags:
+        if not a.sports:
+            ap.error("--sports-chl needs --sports")
+        if chl_flags and not a.sports_chl:
+            ap.error("the --chl-* switches need --sports-chl")
+        cfg["sports_chl"] = True
+    if a.chl_timeline is not None:
+        cfg["sports_chl_timeline_s"] = a.chl_timeline
+    if a.chl_refuse:
+        cfg["sports_chl_refuse"] = True
+    if a.chl_firebase_refuse:
+        cfg["sports_chl_firebase_refuse"] = True
+    if a.chl_null_live:
+        cfg["sports_chl_null_live"] = True
+    if a.chl_drop_penalties is not None:
+        cfg["sports_chl_drop_penalties"] = a.chl_drop_penalties
     for flag in ("synthetic", "synthetic_days_back", "synthetic_days_ahead"):
         if getattr(a, flag) is not None:
             cfg[flag] = getattr(a, flag)
