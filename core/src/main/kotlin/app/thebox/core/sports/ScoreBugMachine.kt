@@ -57,7 +57,7 @@ class ScoreBugMachine(
      * NHL: multiples of 20 s, bucket-aligned. NFL: from completion ([doneMono] + interval).
      */
     private var liveMs: Long? = null
-    /** When the last `Ok` finished (after its decode, F15): the NFL's completion-based schedule runs from it. */
+    /** When the last `Ok` finished (after its decode, F15): the timed leagues' (NFL, CHL) completion-based schedule runs from it. */
     private var doneMono = 0L
     /** (Fix pass 5) When the first of the current run of held older NFL bodies arrived; null = none held. */
     private var olderSince: Long? = null
@@ -229,10 +229,10 @@ class ScoreBugMachine(
                 // (Update interval §3.4) The NFL at a set interval backs off from 5 s, so one dropped packet does not
                 // freeze the bug for 20 s; a 429 keeps the 20 s base, with Retry-After as a floor (C-S4).
                 // (CHL §1.6 #12, S7) The same for every timed league; a REFUSED source (key or database closed) is retried
-                // only at BACKOFF_MAX_MS, whatever Retry-After says.
+                // at BACKOFF_MAX_MS or later: a longer Retry-After is honoured, a shorter one never speeds it up.
                 val base = if (timed() && f.kind != FailKind.HTTP_429) SportsConstants.BACKOFF_FAST_BASE_MS else SportsConstants.BACKOFF_BASE_MS
                 backoffAt = if (f.kind == FailKind.REFUSED) {
-                    f.receivedMono + SportsConstants.BACKOFF_MAX_MS
+                    f.receivedMono + maxOf(SportsConstants.BACKOFF_MAX_MS, (f.retryAfterS ?: 0).coerceAtLeast(0) * 1000L)
                 } else {
                     SportsTiming.backoffAt(f.receivedMono, failures, f.retryAfterS, jitter(), base)
                 }
@@ -411,7 +411,7 @@ class ScoreBugMachine(
 
     /**
      * (Update interval §3.5) A live poll: NHL bucket-aligned, skipping `interval / 20 s − 1` buckets (20 s → 0, as
-     * today); the NFL at a set interval from completion (per-event has `max-age=1`, so no bucket to align to).
+     * today); the timed leagues (NFL, CHL) at a set interval from completion (no bucket to align to).
      */
     private fun livePoll(ok: Fetch.Ok<GameSnapshot>, floor: Long): Long {
         val l = liveMs
@@ -424,7 +424,11 @@ class ScoreBugMachine(
 
     private fun bucketSkip(ms: Long): Int = (ms / SportsConstants.CDN_BUCKET_MS - 1).coerceAtLeast(0L).toInt()
 
-    /** (CHL §1.6 #15) A follow at a set interval, timed from completion (the NFL and the CHL): fast back-off, no buckets. */
+    /**
+     * (CHL §1.6 #15) A follow at a set interval, timed from completion (the NFL and the CHL): fast back-off, no buckets.
+     * The CHL relies on the repository always sending an interval (`pushInterval`, never null for Auto): with `liveMs`
+     * null a CHL follow would fall onto the NHL bucket path.
+     */
     private fun timed(): Boolean = liveMs != null && game?.league?.timing == PollTiming.COMPLETION
 
     /** The NFL's own rules: the older-body guard. */
@@ -447,7 +451,8 @@ class ScoreBugMachine(
      * ids, an earlier (period, clock) at an equal or lower score sum.
      */
     private fun olderNfl(prev: GameSnapshot, s: GameSnapshot): Boolean {
-        if (prev.id != s.id || s.id.league != League.NFL) return false
+        // Only called under nfl(); the league gate is that call's, so a mutated gate shows in tests.
+        if (prev.id != s.id) return false
         if (s.phase == GamePhase.FINAL) return false // (fix pass 5) a Final body is never held
         val a = (prev.detail as? LeagueDetail.Nfl)?.lastPlay?.id?.toLongOrNull()
         val b = (s.detail as? LeagueDetail.Nfl)?.lastPlay?.id?.toLongOrNull()

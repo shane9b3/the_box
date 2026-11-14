@@ -18,7 +18,7 @@ import kotlin.math.ceil
  * - **An endpoint change resets the window** (the board fallback has a 10 s feed); [PollMeasure.slowed] survives it.
  *   Only a good sample changes the endpoint; a failed one on another endpoint is dropped (fix pass 2).
  * - **Effective interval** = the choice (Auto = the recommendation), raised to [SportsConstants.AUTO_429_FLOOR_S] for the
- *   NFL after a 429 or 403 (S2: a server instruction, so for every choice).
+ *   timed leagues (NFL, CHL) after a 429 or 403 (S2: a server instruction, so for every choice).
  */
 object PollMeter {
     /** The nearest-rank p90 of [work], or null when there are fewer than [SportsConstants.METER_MIN] samples. */

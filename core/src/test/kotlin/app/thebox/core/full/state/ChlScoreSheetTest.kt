@@ -39,17 +39,20 @@ class ChlScoreSheetTest {
             focusOn(w) { it is PickerChoice.ScoreLeagueRow }
             w.press(SELECT)
             assertEquals(listOf<Any?>(League.NFL), leagueCalls(w, "setScoreLeague"))
+            assertTrue(w.ui.picker!!.let { it.choices[it.focused] } is PickerChoice.ScoreLeagueRow, "focus stays on the League row")
             w.player.scores(ScoreFacts(league = League.NFL, chlLeague = remembered))
             focusOn(w) { it is PickerChoice.ScoreLeagueRow }
             w.press(SELECT)
             val chl = remembered ?: League.OHL
             assertEquals(listOf<Any?>(League.NFL, chl), leagueCalls(w, "setScoreLeague"), "NFL -> CHL steps to $chl")
-            assertTrue(w.ui.picker!!.choices.any { it is PickerChoice.ScoreChlRow }, "the CHL row appears at once")
+            assertTrue(w.ui.picker!!.let { it.choices[it.focused] } is PickerChoice.ScoreLeagueRow, "focus stays after NFL -> CHL")
+            assertEquals(PickerChoice.ScoreChlRow(chl), w.ui.picker!!.choices.single { it is PickerChoice.ScoreChlRow }, "the CHL row shows $chl at once")
             w.player.scores(ScoreFacts(league = chl, chlLeague = chl))
             focusOn(w) { it is PickerChoice.ScoreLeagueRow }
             w.press(SELECT)
             assertEquals(listOf<Any?>(League.NFL, chl, League.NHL), leagueCalls(w, "setScoreLeague"), "CHL -> NHL")
             assertTrue(w.ui.picker!!.choices.none { it is PickerChoice.ScoreChlRow })
+            assertTrue(w.ui.picker!!.let { it.choices[it.focused] } is PickerChoice.ScoreLeagueRow, "focus stays after CHL -> NHL")
         }
     }
 
