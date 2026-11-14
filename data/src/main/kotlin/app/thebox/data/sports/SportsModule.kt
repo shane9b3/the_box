@@ -57,6 +57,31 @@ abstract class SportsModule {
         fun nflScoreSource(@ApiClient client: OkHttpClient, @ApplicationContext context: Context): ScoreSource =
             EspnScoreSource.production(client, ScoreRepositoryImpl.ELAPSED, endpoints = { EspnEndpoints.resolve(context) })
 
+        /** (CHL §2, §1.6 #41) HockeyTech, one instance per CHL league. */
+        @Provides
+        @Singleton
+        @IntoMap
+        @LeagueKey(League.OHL)
+        fun ohlScoreSource(@ApiClient client: OkHttpClient, @ApplicationContext context: Context): ScoreSource =
+            chlSource(League.OHL, client, context)
+
+        @Provides
+        @Singleton
+        @IntoMap
+        @LeagueKey(League.WHL)
+        fun whlScoreSource(@ApiClient client: OkHttpClient, @ApplicationContext context: Context): ScoreSource =
+            chlSource(League.WHL, client, context)
+
+        @Provides
+        @Singleton
+        @IntoMap
+        @LeagueKey(League.QMJHL)
+        fun qmjhlScoreSource(@ApiClient client: OkHttpClient, @ApplicationContext context: Context): ScoreSource =
+            chlSource(League.QMJHL, client, context)
+
+        private fun chlSource(league: League, client: OkHttpClient, context: Context): ScoreSource =
+            HockeyTechScoreSource(league, client, ScoreRepositoryImpl.ELAPSED, endpoints = { HockeyTechEndpoints.resolve(context) })
+
         @Provides
         @Singleton
         fun signals(@ApplicationContext context: Context): SportsSignals = AndroidSportsSignals(context)

@@ -9,6 +9,9 @@ Usage (from the repo root):
   python3 -I tools/chl/pp_replay.py ends     # modelled end of every flagged minor vs its recorded TimeOn (OHL/WHL)
   python3 -I tools/chl/pp_replay.py probe ohl 29185 1:10:30 ...   # state at (period:mm:ss elapsed)
   python3 -I tools/chl/pp_replay.py all
+  python3 -I tools/chl/pp_replay.py live <folder> [--ot-len 1200]   # S8: a record_live.py recording, poll by poll
+    vs the model on the game's final data (its last poll): wrong-bar, hidden and missing seconds; exit 2 on a FAIL
+    (wrong-bar > 5 % of the final model's PP seconds, or a wrong stretch > 30 s; the proposed threshold, O1)
 Optional: --dir <captures dir> (default core/src/testFixtures/resources/sports/chl/firebase/finals-2026-11-13).
 
 Model (one-second steps; the Kotlin version may be event-driven, the rules are the same):
@@ -316,7 +319,134 @@ def cmd_probe(d, league, gid, ats):
               f"{'HOME' if st[0] == 'H' else 'AWAY'} {st[1]} {st[2]} s" + (" (HIDDEN, H9)" if st[3] else "")))
 
 
+LIVE_WRONG_SHARE_MAX = 0.05   # S8 gate (proposed, O1): wrong-bar seconds <= 5 % of the final model's PP seconds
+LIVE_WRONG_STRETCH_MAX = 30   # and no single wrong stretch longer than 30 s
+
+
+def live_polls(folder):
+    """The recorded polls of `record_live.py` rebuilt: [(unix, {node: body})], each poll with every node's latest body."""
+    cur, out = {}, []
+    with open(os.path.join(folder, "polls.jsonl")) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            p = json.loads(line)
+            cur.update(p.get("nodes") or {})
+            failed = {n for n, st in (p.get("status") or {}).items() if st not in (200, 304)}
+            out.append((p["unix"], dict(cur), failed))
+    return out
+
+
+def poll_inputs(nodes, ot_len):
+    pens = ((nodes.get("penalties") or {}).get("GamePenalties")) or {}
+    goals = []
+    for x in (((nodes.get("goals") or {}).get("GameGoals")) or {}).values():
+        try:
+            per, t = int(x["Period"]), mmss(x["Time"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if t is None:
+            continue
+        goals.append(dict(side=side_of(x.get("IsHome") == 1), t=g(per, t, ot_len), pp=x.get("PowerPlay") == 1,
+                          sh=x.get("ShortHanded") == 1, ps=x.get("PenaltyShot") == 1, en=x.get("EmptyNet") == 1,
+                          per=per, time=x["Time"]))
+    return pens, goals
+
+
+def poll_now(nodes, ot_len):
+    """Game time now (§5.2), or None when the poll is not in play (pre-game, a shootout, final, no clock)."""
+    rc = nodes.get("runningclock") or {}
+    pc = nodes.get("publishedclock") or {}
+    gs = nodes.get("goalssummary") or {}
+    if pc.get("Final") is True or rc.get("status_id") in (1, 4, 5) or gs.get("Shootout") is True:
+        return None
+    c = rc.get("Clock") or {}
+    try:
+        p = int(c.get("period"))
+        rem = int(c.get("Minutes")) * 60 + int(c.get("Seconds"))
+    except (TypeError, ValueError):
+        return None
+    if p < 1 or not 0 <= rem <= plen(p, ot_len):
+        return None
+    if rem == plen(p, ot_len) and p >= 2 and not c.get("Running"):  # S12: "20:00 3rd" during the break
+        return g(p - 1, plen(p - 1, ot_len), ot_len)
+    return g(p, plen(p, ot_len) - rem, ot_len)
+
+
+def live_state(nodes, failed, now, ot_len):
+    """What the app would show at [now] from this poll: None (no bar), "hidden", or (side, kind)."""
+    if "penalties" in failed or "goals" in failed:
+        return "hidden"  # H8
+    pens, goals = poll_inputs(nodes, ot_len)
+    rows = counted_rows(pens, ot_len)
+    if any(r["s"] > now + 5 for r in rows):
+        return "hidden"  # H3
+    sim = Sim(rows, goals, h9_windows(pens, ot_len), ot_len, end=now + 1)
+    st = sim.state(now)
+    if st is None:
+        return None
+    gs = nodes.get("goalssummary") or {}
+    total = (gs.get("VisitorGoalTotal") or 0) + (gs.get("HomeGoalTotal") or 0)
+    if len(goals) != total:
+        return "hidden"  # H6
+    if st[3]:
+        return "hidden"  # H9
+    return st[0], st[1]
+
+
+def cmd_live(folder, ot_len=OT_REG):
+    """S8: the derivation poll by poll against the model on the game's final data (the last poll's nodes)."""
+    polls = live_polls(folder)
+    if not polls:
+        print("no polls")
+        return 1
+    with open(os.path.join(folder, "meta.json")) as f:
+        meta = json.load(f)
+    interval = float(meta.get("interval_s") or 5)
+    fpens, fgoals = poll_inputs(polls[-1][1], ot_len)
+    ends = [r["s"] for r in counted_rows(fpens, ot_len)] + [x["t"] for x in fgoals]
+    final = Sim(counted_rows(fpens, ot_len), fgoals, h9_windows(fpens, ot_len), ot_len, end=max(ends + [0]) + 5000)
+    wrong = hidden = missing = model_pp = 0.0
+    stretch = longest = 0.0
+    for i, (unix, nodes, failed) in enumerate(polls):
+        now = poll_now(nodes, ot_len)
+        if now is None:
+            stretch = 0.0
+            continue
+        dt = min((polls[i + 1][0] - unix) if i + 1 < len(polls) else interval, 2 * interval)
+        f = final.state(now)
+        f = None if f is None or f[3] else (f[0], f[1])
+        shown = live_state(nodes, failed, now, ot_len)
+        if f is not None:
+            model_pp += dt
+        if shown == "hidden":
+            hidden += dt
+            stretch = 0.0
+        elif shown is None:
+            if f is not None:
+                missing += dt
+            stretch = 0.0
+        elif shown != f:
+            wrong += dt
+            stretch += dt
+            longest = max(longest, stretch)
+        else:
+            stretch = 0.0
+    share = wrong / model_pp if model_pp else 0.0
+    ok = share <= LIVE_WRONG_SHARE_MAX and longest <= LIVE_WRONG_STRETCH_MAX
+    print(f"{meta.get('league')} {meta.get('game')}: {len(polls)} polls; final-model PP {model_pp:.0f} s; "
+          f"wrong-bar {wrong:.0f} s ({100 * share:.1f} %), longest wrong stretch {longest:.0f} s; "
+          f"hidden {hidden:.0f} s; missing {missing:.0f} s")
+    print(("PASS" if ok else "FAIL") + f" (gate: wrong <= {100 * LIVE_WRONG_SHARE_MAX:.0f} %, stretch <= {LIVE_WRONG_STRETCH_MAX} s)")
+    return 0 if ok else 2
+
+
 def main(argv):
+    if len(argv) > 1 and argv[1] == "live":
+        # pp_replay.py live <recording folder> [--ot-len 1200]: the S8 live gate on one record_live.py recording.
+        ot = int(argv[argv.index("--ot-len") + 1]) if "--ot-len" in argv else OT_REG
+        sys.exit(cmd_live(argv[2], ot))
     d = DEFAULT_DIR
     if "--dir" in argv:
         i = argv.index("--dir")
