@@ -54,6 +54,8 @@ class RecordingPlayerEffects : PlayerEffects {
     override fun setScoreCorner(c: app.thebox.core.sports.ScoreCorner) = rec("setScoreCorner", c)
     override fun setScoreDelay(sec: Int) = rec("setScoreDelay", sec)
     override fun setScoreLeague(league: app.thebox.core.sports.League) = rec("setScoreLeague", league)
+    // (CHL WP-2) The sheet's CHL league row, recorded.
+    override fun setScoreChlLeague(league: app.thebox.core.sports.League) = rec("setScoreChlLeague", league)
     // (Stacked WP-3, flagged by WP-4) The sheet's Style row, recorded so its effect can be asserted.
     override fun setScoreStyle(style: app.thebox.core.sports.NhlBugStyle) = rec("setScoreStyle", style)
     override fun scorePicker(open: Boolean) = rec("scorePicker", open)

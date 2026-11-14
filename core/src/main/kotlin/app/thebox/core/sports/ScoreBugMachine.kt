@@ -188,7 +188,7 @@ class ScoreBugMachine(
                 failures = 0; failAt = null; backoffAt = null; notFoundFirst = null
                 doneMono = now
                 val held = lastOk?.value
-                if (fast() && held != null && olderNfl(held, f.value) && holdsOlder(now, held, f.value)) {
+                if (nfl() && held != null && olderNfl(held, f.value) && holdsOlder(now, held, f.value)) {
                     // (Review S5) An older body (the board fallback lags per-event by 6–9 s): a no-op Ok for stale and the
                     // schedule, never shown, so the score never goes back in time.
                     lastOk = f.copy(value = held)
@@ -228,8 +228,14 @@ class ScoreBugMachine(
                 failAt = f.receivedMono
                 // (Update interval §3.4) The NFL at a set interval backs off from 5 s, so one dropped packet does not
                 // freeze the bug for 20 s; a 429 keeps the 20 s base, with Retry-After as a floor (C-S4).
-                val base = if (fast() && f.kind != FailKind.HTTP_429) SportsConstants.BACKOFF_FAST_BASE_MS else SportsConstants.BACKOFF_BASE_MS
-                backoffAt = SportsTiming.backoffAt(f.receivedMono, failures, f.retryAfterS, jitter(), base)
+                // (CHL §1.6 #12, S7) The same for every timed league; a REFUSED source (key or database closed) is retried
+                // only at BACKOFF_MAX_MS, whatever Retry-After says.
+                val base = if (timed() && f.kind != FailKind.HTTP_429) SportsConstants.BACKOFF_FAST_BASE_MS else SportsConstants.BACKOFF_BASE_MS
+                backoffAt = if (f.kind == FailKind.REFUSED) {
+                    f.receivedMono + SportsConstants.BACKOFF_MAX_MS
+                } else {
+                    SportsTiming.backoffAt(f.receivedMono, failures, f.retryAfterS, jitter(), base)
+                }
             }
         }
         step()
@@ -385,6 +391,9 @@ class ScoreBugMachine(
             // (NFL lead sign-off 1) An ESPN `in` body still at the coin toss (S8, PRE) polls at the LIVE cadence.
             GamePhase.SCHEDULED, GamePhase.PRE -> if (kickoffDue(ok.value)) {
                 livePoll(ok, floor)
+            } else if (timed() && !nfl()) {
+                // (CHL §2.5, §1.6 #14) Asleep until start − PRE_WAKE_MS, then every PRE_POLL_MS from completion.
+                maxOf(doneMono + SportsConstants.PRE_POLL_MS, floor, preWakeMono(now))
             } else {
                 SportsTiming.nextAligned(ok, pollPhaseMs, SportsConstants.INTERMISSION_BUCKET_SKIP, maxOf(floor, preWakeMono(now)))
             }
@@ -393,7 +402,7 @@ class ScoreBugMachine(
                 val b = breakMs()
                 when {
                     b == null -> SportsTiming.nextAligned(ok, pollPhaseMs, SportsConstants.INTERMISSION_BUCKET_SKIP, floor)
-                    fast() -> maxOf(doneMono + b, floor)
+                    timed() -> maxOf(doneMono + b, floor)
                     else -> SportsTiming.nextAligned(ok, pollPhaseMs, bucketSkip(b), floor)
                 }
             }
@@ -408,15 +417,18 @@ class ScoreBugMachine(
         val l = liveMs
         return when {
             l == null -> SportsTiming.nextAligned(ok, pollPhaseMs, 0, floor)
-            fast() -> maxOf(doneMono + l, floor)
+            timed() -> maxOf(doneMono + l, floor)
             else -> SportsTiming.nextAligned(ok, pollPhaseMs, bucketSkip(l), floor)
         }
     }
 
     private fun bucketSkip(ms: Long): Int = (ms / SportsConstants.CDN_BUCKET_MS - 1).coerceAtLeast(0L).toInt()
 
-    /** The NFL follow at a set interval: completion-based polls, the fast back-off, the older-body guard. */
-    private fun fast(): Boolean = liveMs != null && game?.league == League.NFL
+    /** (CHL §1.6 #15) A follow at a set interval, timed from completion (the NFL and the CHL): fast back-off, no buckets. */
+    private fun timed(): Boolean = liveMs != null && game?.league?.timing == PollTiming.COMPLETION
+
+    /** The NFL's own rules: the older-body guard. */
+    private fun nfl(): Boolean = liveMs != null && game?.league == League.NFL
 
     /** (§3.5) Breaks at 2 × live, never under [SportsConstants.INTERMISSION_MIN_MS]; null = today's (skip one bucket). */
     private fun breakMs(): Long? = liveMs?.let { maxOf(2 * it, SportsConstants.INTERMISSION_MIN_MS) }

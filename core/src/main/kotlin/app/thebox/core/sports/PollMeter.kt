@@ -118,17 +118,21 @@ object PollMeter {
         return choices.firstOrNull { it > choiceS } ?: 0
     }
 
-    /** The interval the machine runs, in seconds: the choice (Auto = [recommended]), with the NFL's 429 floor (S2). */
+    /** The interval the machine runs, in seconds: the choice (Auto = [recommended]), with the 429 floor for the timed leagues (S2). */
     fun effectiveS(choiceS: Int, league: League, m: PollMeasure?): Int {
         val c = normalize(choiceS, league)
         val base = if (c == 0) recommended(m, league) else c
-        return if (league == League.NFL && m?.slowed == true) maxOf(base, SportsConstants.AUTO_429_FLOOR_S) else base
+        return if (league.timing == PollTiming.COMPLETION && m?.slowed == true) maxOf(base, SportsConstants.AUTO_429_FLOOR_S) else base
     }
 
     /** The median wire bytes per good poll, else the league's estimate (§3.7). */
     fun bytesPerPoll(m: PollMeasure?, league: League): Int {
         val b = m?.wireBytes.orEmpty()
-        if (b.isEmpty()) return if (league == League.NHL) SportsConstants.EST_WIRE_BYTES_NHL else SportsConstants.EST_WIRE_BYTES_NFL
+        if (b.isEmpty()) return when (league.group) {
+            LeagueGroup.NHL -> SportsConstants.EST_WIRE_BYTES_NHL
+            LeagueGroup.NFL -> SportsConstants.EST_WIRE_BYTES_NFL
+            LeagueGroup.CHL -> SportsConstants.EST_WIRE_BYTES_CHL
+        }
         val s = b.sorted()
         return s[(s.size - 1) / 2]
     }
