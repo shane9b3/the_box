@@ -13,8 +13,19 @@ colour in the accent slot (ER, KGN, SAR, BDN, CGY, POR, VAN, SHA, VDO, EVT, SAS,
 Red-first for KIT, REG, SPO, QUE, MON and BAC is by Wikipedia and the logo, not TCC. Any of them flips with a one-line
 change in the table.
 
-**Departures from the research table (2 hex values):** OHL NB `#807A11` to `#7F7911` and WHL KEL `#008394` to `#008293`,
-1 % darker so white-on-primary (C1) passes 4.5 (they were 4.46 and 4.49). Imperceptible; no exception needed.
+**Departures from the research table (4 values; the sourced values stay in the tables below, and `ChlTeamColoursTest`
+lists these four explicitly):**
+- OHL NB `#807A11` to `#7F7911` and WHL KEL `#008394` to `#008293`: 1 % darker so white-on-primary (C1) passes 4.5 (they
+  were 4.46 and 4.49). Imperceptible; no exception needed.
+- **Lead ruling R2, pending the owner's sign-off:** OHL PBO base `#75263D` to `#77273E`. Its base against the glass
+  (`#090B10`) was 1.97, just under the 2.0 glow rule, so the glow, tab and bar came out black. After: 2.01, so the glow
+  and tab are maroon `#77273E` (C5 11.77; white on the bar 11.77), where before they were black `#000000` (glow against
+  the glass 1.07, C5 21.00).
+- **Lead ruling R2, pending the owner's sign-off:** WHL WEN accent `#231F20` to its sourced third colour, blue
+  `#026FA8`. Before: base against the glass 1.65, so the glow was `#231F20` (1.21 against the glass) and the tab and bar
+  near-black (C5 17.29). After: the glow and tab are `#026FA8` (3.60 against the glass; C5 7.23; white on the bar 7.23).
+- MH's accent is `#231F20` in the note and the table (the sourced value; the first pass wrote `#000000` in the table, L9).
+  Its glow and tab are the orange base either way.
 
 **C1 exceptions:** only WHL MH (orange `#E56B1F`, white on it 3.25 : 1; the brand colour, like the NHL's PHI, ruling 12).
 
@@ -71,7 +82,7 @@ Researched 2026-11-13. Primary = base, secondary = accent, same convention as `N
 | KAM | Kamloops Blazers | `#032C62` | `#D0471D` | `#FFFFFF` | high |  | Logo #042C64/#D4441C matches TCC. Wikipedia navy #08007B looks off. Sources: https://teamcolorcodes.com/kamloops-blazers-color-codes/ ; https://en.wikipedia.org/wiki/Kamloops_Blazers |
 | KEL | Kelowna Rockets | `#008394` | `#000000` | `#E13A3E` | medium | C1 white-on-primary 4.5 (<4.5) | Teal agreed (TCC=Wikipedia #008394). Second colour: TCC black, Wikipedia red #E13A3E, copper #B98544; logo has red and black. Sources: https://teamcolorcodes.com/kelowna-rockets-color-codes/ ; https://en.wikipedia.org/wiki/Kelowna_Rockets |
 | LET | Lethbridge Hurricanes | `#CC1D30` | `#121942` | `#FFFFFF` | high |  | Wikipedia #CD172C/#0A1240. Sources: https://teamcolorcodes.com/lethbridge-hurricanes-color-codes/ ; https://en.wikipedia.org/wiki/Lethbridge_Hurricanes |
-| MH | Medicine Hat Tigers | `#E56B1F` | `#000000` | `#FFFFFF` | high | C1 white-on-primary 3.3 (<4.5) | TCC = Wikipedia (#E56B1F/#231F20). Orange primary: white-on-primary contrast is low (see C1). Sources: https://teamcolorcodes.com/medicine-hat-tigers-color-codes/ ; https://en.wikipedia.org/wiki/Medicine_Hat_Tigers |
+| MH | Medicine Hat Tigers | `#E56B1F` | `#231F20` | `#FFFFFF` | high | C1 white-on-primary 3.3 (<4.5) | TCC = Wikipedia (#E56B1F/#231F20); the secondary is the sourced near-black #231F20 (the first pass wrote #000000 in the table by mistake, L9). Orange primary: white-on-primary contrast is low (see C1). Sources: https://teamcolorcodes.com/medicine-hat-tigers-color-codes/ ; https://en.wikipedia.org/wiki/Medicine_Hat_Tigers |
 | MJ | Moose Jaw Warriors | `#CC0000` | `#000000` | `#FFFFFF` | medium |  | Red differs (Wikipedia #E2373C, logo #CC0404 matches TCC). Sources: https://teamcolorcodes.com/moose-jaw-warriors-color-codes/ ; https://en.wikipedia.org/wiki/Moose_Jaw_Warriors |
 | PEN | Penticton Vees | `#25366C` | `#7AB2E0` | `#000000` | medium |  | NEW WHL FRANCHISE (ex-BCHL; 2022 BCHL rebrand). No TCC page. Wikipedia infobox navy #25366C, mountain blue #7AB2E0, black; logo is darker navy #0C1E42. Single hex source. Sources: https://en.wikipedia.org/wiki/Penticton_Vees_(WHL) ; https://assets.leaguestat.com/whl/logos/277.png |
 | POR | Portland Winterhawks | `#000000` | `#CC202E` | `#7899AE` | medium | near-black primary | TCC lists red first; Wikipedia (black, red, gray, gold) and logo are black-first. Sources: https://teamcolorcodes.com/portland-winterhawks-color-codes/ ; https://en.wikipedia.org/wiki/Portland_Winterhawks |

@@ -326,3 +326,23 @@ bar orange, the way EDM's `#FF4C00` (4.69) already is in the NHL.
 
 **R3 (lead): whether S2's negative logo cache is wanted for v1.** It is cheap, and it removes repeated 404s for 5
 teams on every visit to the tab.
+
+---
+
+## Fix pass (WP-4)
+
+Lead rulings applied on top of `chl` (uncommitted; the lead commits). Files: `ChlTeamColours.kt`,
+`docs/research/chl-team-colours.md`, `ChlTeamColoursTest.kt`, the sheet test.
+
+- **R2 (PBO).** Base `#75263D` to `#77273E`. Base against the glass 1.97 to 2.01; glow and tab black (glow 1.07 against the
+  glass, C5 21.00) to maroon `#77273E` (2.01; C5 11.77; white on the bar 11.77). Recorded in the note as a lead ruling
+  pending the owner's sign-off.
+- **R2 (WEN).** Accent `#231F20` to the sourced blue `#026FA8`. Glow and tab near-black `#231F20` (1.21 against the glass,
+  C5 17.29) to blue (3.60; C5 7.23; white on the bar 7.23). Same note entry.
+- **S4.** `everyBaseAndAccentEqualsTheResearchNoteExceptTheListedNudges` parses the three team tables in the note (61
+  rows) and asserts every base and accent equals the table, with the four nudges (NB, KEL, PBO, WEN) listed explicitly
+  in the test; a nudge that equals the note fails, so the list cannot go stale. A mistyped hex or a swapped base and
+  accent now fails. The spot-check test also pins PBO's and WEN's glow and tab.
+- **L9.** MH's accent is `#231F20` (the sourced value in both TCC and Wikipedia); the table said `#000000` by mistake. The
+  table and the note now agree. No visible change: MH's glow and tab are the orange base.
+- Contact sheets re-rendered.

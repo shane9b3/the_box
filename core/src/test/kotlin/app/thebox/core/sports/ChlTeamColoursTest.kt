@@ -111,6 +111,50 @@ class ChlTeamColoursTest {
         assertEquals(ChlTeamColours.FALLBACK, ChlTeamColours.of(League.WHL, "BAR"))
     }
 
+    /** (S4) The documented departures from the research note: (league, code) to (base, accent) as the table has them. */
+    private val nudges: Map<Pair<League, String>, Pair<Int, Int>> = mapOf(
+        (League.OHL to "NB") to (0x7F7911 to 0x000000), // C1 4.46 -> 4.52
+        (League.WHL to "KEL") to (0x008293 to 0x000000), // C1 4.49 -> 4.55
+        (League.OHL to "PBO") to (0x77273E to 0x000000), // R2: base against the glass 1.97 -> 2.01 (maroon glow, not black)
+        (League.WHL to "WEN") to (0x002F87 to 0x026FA8), // R2: sourced blue accent, not near-black 231F20
+    )
+
+    /** `docs/research/chl-team-colours.md`'s three team tables: (league, code) to (primary, secondary) as the note has them. */
+    private fun noteRows(): Map<Pair<League, String>, Pair<Int, Int>> {
+        var dir: java.io.File? = java.io.File("").absoluteFile
+        while (dir != null && !java.io.File(dir, "docs/research/chl-team-colours.md").isFile) dir = dir.parentFile
+        val text = checkNotNull(dir) { "docs/research/chl-team-colours.md not found above ${java.io.File("").absolutePath}" }
+            .let { java.io.File(it, "docs/research/chl-team-colours.md").readText() }
+        val row = Regex("^\\| ([A-Z]+) \\| [^|]+ \\| `#([0-9A-F]{6})` \\| `#([0-9A-F]{6})` \\|")
+        val rows = HashMap<Pair<League, String>, Pair<Int, Int>>()
+        var league: League? = null
+        for (line in text.lines()) {
+            if (line.startsWith("## ")) league = CHL_LEAGUES.firstOrNull { line.startsWith("## ${it.name} (") }
+            val l = league ?: continue
+            val m = row.find(line) ?: continue
+            val key = l to m.groupValues[1]
+            check(key !in rows) { "duplicate row $key in the note" }
+            rows[key] = m.groupValues[2].toInt(16) to m.groupValues[3].toInt(16)
+        }
+        return rows
+    }
+
+    @Test
+    fun everyBaseAndAccentEqualsTheResearchNoteExceptTheListedNudges() {
+        val note = noteRows()
+        assertEquals(61, note.size, "the note's three tables list 61 teams")
+        for (l in CHL_LEAGUES) for (code in ChlTeamColours.codes(l)) {
+            val want = nudges[l to code] ?: note.getValue(l to code)
+            val got = ChlTeamColours.of(l, code)
+            assertEquals(
+                listOf(hex(want.first), hex(want.second)), listOf(hex(got.base), hex(got.accent)), "$l $code base/accent",
+            )
+        }
+        assertEquals(note.keys, CHL_LEAGUES.flatMap { l -> ChlTeamColours.codes(l).map { l to it } }.toSet(), "no row missing or extra")
+        // A nudge is a nudge: it differs from the note, and by no more than the stated change.
+        for ((k, v) in nudges) assertNotEquals(note.getValue(k), v, "$k is listed as a nudge but equals the note: drop it")
+    }
+
     @Test
     fun theSourcedPrimariesArePinned() {
         // Spot checks of the sourced hex (docs/research/chl-team-colours.md); NB and KEL are the 1 % C1 nudges.
@@ -118,6 +162,12 @@ class ChlTeamColoursTest {
         assertEquals("#7F7911", hex(ChlTeamColours.of(League.OHL, "NB").base))
         assertEquals("#008293", hex(ChlTeamColours.of(League.WHL, "KEL").base))
         assertEquals("#E56B1F", hex(ChlTeamColours.of(League.WHL, "MH").base))
+        assertEquals("#231F20", hex(ChlTeamColours.of(League.WHL, "MH").accent))
+        // R2: PBO's glow and tab are maroon (not black), WEN's are blue (not near-black).
+        assertEquals("#77273E", hex(ChlTeamColours.of(League.OHL, "PBO").glow))
+        assertEquals("#77273E", hex(ChlTeamColours.of(League.OHL, "PBO").tab))
+        assertEquals("#026FA8", hex(ChlTeamColours.of(League.WHL, "WEN").glow))
+        assertEquals("#026FA8", hex(ChlTeamColours.of(League.WHL, "WEN").tab))
         assertEquals("#0E2342", hex(ChlTeamColours.of(League.QMJHL, "NFL").base))
         assertEquals("#FCB827", hex(ChlTeamColours.of(League.QMJHL, "VIC").accent))
     }
