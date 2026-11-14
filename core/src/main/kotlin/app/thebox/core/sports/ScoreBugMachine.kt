@@ -30,6 +30,9 @@ import kotlin.random.Random
  *   INTERMISSION, not SO, neither stale nor waiting (`knownView()` never has one). `goalPp` is decided where a goal is
  *   flagged and lives with the mark; `ppEnded` belongs to the shown snapshot. Polling, stale, hide and the delay queue
  *   do not look at the power play.
+ * - **CHL** (docs/design/m6-chl-leagues.md §4.1): a CHL game is an NHL game here; hockey views carry their league (B1).
+ *   A snapshot with `powerPlayUnknown` holds the last shown power play for less than `PP_UNKNOWN_HOLD_MS` of consecutive
+ *   unknown snapshots (on the delayed timeline's anchors), then closes it silently: a hide never says "over" (B3).
  */
 class ScoreBugMachine(
     private val mono: MonoClock,
@@ -54,7 +57,7 @@ class ScoreBugMachine(
      * NHL: multiples of 20 s, bucket-aligned. NFL: from completion ([doneMono] + interval).
      */
     private var liveMs: Long? = null
-    /** When the last `Ok` finished (after its decode, F15): the NFL's completion-based schedule runs from it. */
+    /** When the last `Ok` finished (after its decode, F15): the timed leagues' (NFL, CHL) completion-based schedule runs from it. */
     private var doneMono = 0L
     /** (Fix pass 5) When the first of the current run of held older NFL bodies arrived; null = none held. */
     private var olderSince: Long? = null
@@ -79,6 +82,18 @@ class ScoreBugMachine(
     private var lastShownPp: PowerPlay? = null
     /** (Power play §1.4, §7) The shown entry whose view carries `ppEnded` (a real end, with no goal flagged by it). */
     private var ppEndedEntry: Entry? = null
+    /**
+     * (CHL B3, §4.1) The `anchorMono` of the first of the current run of consecutive shown snapshots with
+     * `powerPlayUnknown`; null = the shown snapshot's power play is known. While the run is younger than
+     * [SportsConstants.PP_UNKNOWN_HOLD_MS], [lastShownPp] is held (drawn, never announced as over); after it, the tab
+     * closes silently. Reset by a known snapshot, a follow change ([reset]) and the delay's back-in-time path.
+     */
+    private var ppUnknownSince: Long? = null
+    /**
+     * (CHL fix pass B1) The score changed inside the current unknown run: the first known snapshot after it treats the run
+     * as a score change, so a power play ended by that goal is never announced as "Power play over.".
+     */
+    private var scoredInUnknownRun = false
 
     private val events = ArrayList<ScoreEvent>()
 
@@ -121,6 +136,29 @@ class ScoreBugMachine(
             eagerAt = now
             step()
         }
+    }
+
+    /**
+     * (CHL emulator pass, defect 2; review fix 2) A user's follow of [game], decided once: the corrected wall clock is read
+     * once, and the same reading decides both whether [game] would be removed at once (the [expired] rule, unchanged) and
+     * the [step] that follows. False: refused; nothing changes (a current follow is kept, nothing is reset). True: [game] is
+     * followed (or already was) and that step did not drop it. The repository confirms ("Following") only on true.
+     * [follow] (the restore path and `follow(null)`) is unchanged.
+     */
+    fun followIfKept(game: FollowedGame): Boolean {
+        val cur = this.game
+        if (cur != null && game.id == cur.id) {
+            follow(game)
+            return this.game?.id == game.id
+        }
+        val w = correctedWall()
+        if (expiredAt(game, w)) return false
+        reset()
+        this.game = game
+        followAt = mono.nowMs()
+        eagerAt = followAt
+        stepAt(w)
+        return this.game?.id == game.id
     }
 
     /**
@@ -173,7 +211,7 @@ class ScoreBugMachine(
                 failures = 0; failAt = null; backoffAt = null; notFoundFirst = null
                 doneMono = now
                 val held = lastOk?.value
-                if (fast() && held != null && olderNfl(held, f.value) && holdsOlder(now, held, f.value)) {
+                if (nfl() && held != null && olderNfl(held, f.value) && holdsOlder(now, held, f.value)) {
                     // (Review S5) An older body (the board fallback lags per-event by 6–9 s): a no-op Ok for stale and the
                     // schedule, never shown, so the score never goes back in time.
                     lastOk = f.copy(value = held)
@@ -183,7 +221,10 @@ class ScoreBugMachine(
                 olderSince = null
                 lastOk = f
                 f.serverDateMs?.let { date -> skewMs = date - (wall() - (now - f.receivedMono)) }
-                if (f.value.startUtcMs != g.startUtcMs) game = g.copy(startUtcMs = f.value.startUtcMs)
+                // (CHL review S1) The TBD flag follows the snapshot too: a time the league later names ends it.
+                if (f.value.startUtcMs != g.startUtcMs || f.value.startTbd != g.startTbd) {
+                    game = g.copy(startUtcMs = f.value.startUtcMs, startTbd = f.value.startTbd)
+                }
                 if (f.value.phase == GamePhase.POSTPONED) {
                     remove(RemoveReason.POSTPONED)
                     return
@@ -213,23 +254,33 @@ class ScoreBugMachine(
                 failAt = f.receivedMono
                 // (Update interval §3.4) The NFL at a set interval backs off from 5 s, so one dropped packet does not
                 // freeze the bug for 20 s; a 429 keeps the 20 s base, with Retry-After as a floor (C-S4).
-                val base = if (fast() && f.kind != FailKind.HTTP_429) SportsConstants.BACKOFF_FAST_BASE_MS else SportsConstants.BACKOFF_BASE_MS
-                backoffAt = SportsTiming.backoffAt(f.receivedMono, failures, f.retryAfterS, jitter(), base)
+                // (CHL §1.6 #12, S7) The same for every timed league; a REFUSED source (key or database closed) is retried
+                // at BACKOFF_MAX_MS or later: a longer Retry-After is honoured, a shorter one never speeds it up.
+                val base = if (timed() && f.kind != FailKind.HTTP_429) SportsConstants.BACKOFF_FAST_BASE_MS else SportsConstants.BACKOFF_BASE_MS
+                backoffAt = if (f.kind == FailKind.REFUSED) {
+                    f.receivedMono + maxOf(SportsConstants.BACKOFF_MAX_MS, (f.retryAfterS ?: 0).coerceAtLeast(0) * 1000L)
+                } else {
+                    SportsTiming.backoffAt(f.receivedMono, failures, f.retryAfterS, jitter(), base)
+                }
             }
         }
         step()
     }
 
     /** Advance to `mono.nowMs()`: expiry, stale, hide, the delay queue (A-B1). */
-    fun step() {
+    fun step() = stepAt(correctedWall())
+
+    /** [step] with the expiry decided at the corrected wall clock [w] (one reading per decision). */
+    private fun stepAt(w: Long) {
         val now = mono.nowMs()
         if (game == null) return
         advanceDisplay(now)
-        if (expired()) {
+        if (expired(w)) {
             reset()
             game = null
             return
         }
+        expireHold(now)
         prune(now)
         markUntil?.let { if (now >= it) { markUntil = null; goalSide = null; goalPp = false; nflScores = emptyList() } }
     }
@@ -257,8 +308,9 @@ class ScoreBugMachine(
         later(staleAt)
         later(staleAt?.plus(SportsConstants.HIDE_AFTER_MS))
         g.finalSeenUtcMs?.let { later(monoAtWall(now, it + SportsConstants.EXPIRE_AFTER_FINAL_MS)) }
-        later(monoAtWall(now, g.startUtcMs + SportsConstants.HARD_EXPIRY_MS))
+        later(monoAtWall(now, hardExpiryAt(g)))
         later(markUntil)
+        later(holdEndsAt()) // (CHL fix pass S4) the hold ends by elapsed time, even with no new snapshot
         return best
     }
 
@@ -297,9 +349,11 @@ class ScoreBugMachine(
         return ScoreBugView(
             s.away, s.home, top, bottom, dim = waiting || stale, goalSeq = goalSeq, goalSide = goal, clockSecs = clockSecs,
             gameId = game?.id,
-            powerPlay = if (fresh) gatedPp(s) else null,
+            // (CHL B3, §4.1) An unknown power play draws the held one ([lastShownPp] is null once the hold is over).
+            powerPlay = if (fresh) (if (s.powerPlayUnknown) heldPp(now) else gatedPp(s)) else null,
             goalPp = goal != null && goalPp,
             ppEnded = fresh && e === ppEndedEntry,
+            league = s.id.league, // (CHL B1, §1.6 #13a) every hockey league; the NHL's value is unchanged
             period = label, // (Stacked §2.1, B1) kept in stale and waiting views, where `bottom` is overwritten
         )
     }
@@ -326,7 +380,11 @@ class ScoreBugMachine(
             )
         }
         val clockSecs = s.clock?.takeIf { clockShown(s) }?.secondsRemaining?.coerceAtLeast(0)
-        return ScoreBugView(s.away, s.home, CentreText.Clock, CentreText.NoUpdate, dim = true, goalSeq = goalSeq, goalSide = null, clockSecs = clockSecs, gameId = game?.id)
+        // (CHL B1, §1.6 #13a) The hockey branch carries the snapshot's league; the NHL's value is unchanged.
+        return ScoreBugView(
+            s.away, s.home, CentreText.Clock, CentreText.NoUpdate, dim = true, goalSeq = goalSeq, goalSide = null,
+            clockSecs = clockSecs, gameId = game?.id, league = s.id.league,
+        )
     }
 
     /**
@@ -362,6 +420,9 @@ class ScoreBugMachine(
             // (NFL lead sign-off 1) An ESPN `in` body still at the coin toss (S8, PRE) polls at the LIVE cadence.
             GamePhase.SCHEDULED, GamePhase.PRE -> if (kickoffDue(ok.value)) {
                 livePoll(ok, floor)
+            } else if (timed() && !nfl()) {
+                // (CHL §2.5, §1.6 #14) Asleep until start − PRE_WAKE_MS, then every PRE_POLL_MS from completion.
+                maxOf(doneMono + SportsConstants.PRE_POLL_MS, floor, preWakeMono(now))
             } else {
                 SportsTiming.nextAligned(ok, pollPhaseMs, SportsConstants.INTERMISSION_BUCKET_SKIP, maxOf(floor, preWakeMono(now)))
             }
@@ -370,7 +431,7 @@ class ScoreBugMachine(
                 val b = breakMs()
                 when {
                     b == null -> SportsTiming.nextAligned(ok, pollPhaseMs, SportsConstants.INTERMISSION_BUCKET_SKIP, floor)
-                    fast() -> maxOf(doneMono + b, floor)
+                    timed() -> maxOf(doneMono + b, floor)
                     else -> SportsTiming.nextAligned(ok, pollPhaseMs, bucketSkip(b), floor)
                 }
             }
@@ -379,21 +440,28 @@ class ScoreBugMachine(
 
     /**
      * (Update interval §3.5) A live poll: NHL bucket-aligned, skipping `interval / 20 s − 1` buckets (20 s → 0, as
-     * today); the NFL at a set interval from completion (per-event has `max-age=1`, so no bucket to align to).
+     * today); the timed leagues (NFL, CHL) at a set interval from completion (no bucket to align to).
      */
     private fun livePoll(ok: Fetch.Ok<GameSnapshot>, floor: Long): Long {
         val l = liveMs
         return when {
             l == null -> SportsTiming.nextAligned(ok, pollPhaseMs, 0, floor)
-            fast() -> maxOf(doneMono + l, floor)
+            timed() -> maxOf(doneMono + l, floor)
             else -> SportsTiming.nextAligned(ok, pollPhaseMs, bucketSkip(l), floor)
         }
     }
 
     private fun bucketSkip(ms: Long): Int = (ms / SportsConstants.CDN_BUCKET_MS - 1).coerceAtLeast(0L).toInt()
 
-    /** The NFL follow at a set interval: completion-based polls, the fast back-off, the older-body guard. */
-    private fun fast(): Boolean = liveMs != null && game?.league == League.NFL
+    /**
+     * (CHL §1.6 #15) A follow at a set interval, timed from completion (the NFL and the CHL): fast back-off, no buckets.
+     * The CHL relies on the repository always sending an interval (`pushInterval`, never null for Auto): with `liveMs`
+     * null a CHL follow would fall onto the NHL bucket path.
+     */
+    private fun timed(): Boolean = liveMs != null && game?.league?.timing == PollTiming.COMPLETION
+
+    /** The NFL's own rules: the older-body guard. */
+    private fun nfl(): Boolean = liveMs != null && game?.league == League.NFL
 
     /** (§3.5) Breaks at 2 × live, never under [SportsConstants.INTERMISSION_MIN_MS]; null = today's (skip one bucket). */
     private fun breakMs(): Long? = liveMs?.let { maxOf(2 * it, SportsConstants.INTERMISSION_MIN_MS) }
@@ -412,7 +480,8 @@ class ScoreBugMachine(
      * ids, an earlier (period, clock) at an equal or lower score sum.
      */
     private fun olderNfl(prev: GameSnapshot, s: GameSnapshot): Boolean {
-        if (prev.id != s.id || s.id.league != League.NFL) return false
+        // Only called under nfl(); the league gate is that call's, so a mutated gate shows in tests.
+        if (prev.id != s.id) return false
         if (s.phase == GamePhase.FINAL) return false // (fix pass 5) a Final body is never held
         val a = (prev.detail as? LeagueDetail.Nfl)?.lastPlay?.id?.toLongOrNull()
         val b = (s.detail as? LeagueDetail.Nfl)?.lastPlay?.id?.toLongOrNull()
@@ -484,7 +553,7 @@ class ScoreBugMachine(
             // The delay grew: back in time, silently.
             shown = q
             ppEndedEntry = null
-            lastShownPp = gatedPp(q.snap)
+            rewindHold(q)
             if (q.snap.id.league == League.NFL) {
                 // (NFL §3.3, §3.6) The try, the inference memory and the held tab restart from the earlier snapshot.
                 resetNflPlay()
@@ -527,7 +596,8 @@ class ScoreBugMachine(
                 goalSeq++
                 goalSide = side
                 markUntil = at + SportsConstants.GOAL_MARK_MS
-                goalPp = goalWasPp(p, s, side)
+                // (CHL B3, §4.1) After an unknown snapshot, the fallback compares against the held power play.
+                goalPp = goalWasPp(p, s, side, if (p.powerPlayUnknown) lastShownPp else p.powerPlay)
                 flagged = true
             }
         }
@@ -540,8 +610,27 @@ class ScoreBugMachine(
         // Fix pass N5: any score change counts as a goal here, flagged or not (UNSEEN demand, a long gap), so an unflagged
         // goal that ends the power play is never announced as "Power play over.".
         val scored = p != null && (p.away.score != s.away.score || p.home.score != s.home.score)
-        ppEndedEntry = if (lastShownPp != null && pp == null && !flagged && !scored && inPlay) q else null
-        lastShownPp = pp
+        if (s.powerPlayUnknown) {
+            // (CHL B3, §4.1) The source could not decide: hold the last shown power play (never "over") while the run of
+            // unknown snapshots is younger than the hold, then close it silently. Only in play: an unknown FINAL or SO
+            // snapshot has no power play to hold.
+            val since = ppUnknownSince ?: q.anchorMono.also { ppUnknownSince = it }
+            ppEndedEntry = null
+            if (p != null && scored) {
+                // (CHL fix pass B1) A goal by the side on the held power play releases the minor: drop the hold silently
+                // (the goal mark's PP GOAL says what happened). A short-handed goal keeps it.
+                scoredInUnknownRun = true
+                val held = lastShownPp
+                if (held != null && rose(scoreOf(p, held.side), scoreOf(s, held.side))) lastShownPp = null
+            }
+            if (!inPlay || q.anchorMono - since >= SportsConstants.PP_UNKNOWN_HOLD_MS) lastShownPp = null
+        } else {
+            val scoredInRun = scoredInUnknownRun
+            ppUnknownSince = null
+            scoredInUnknownRun = false
+            ppEndedEntry = if (lastShownPp != null && pp == null && !flagged && !scored && !scoredInRun && inPlay) q else null
+            lastShownPp = pp
+        }
 
         val g = game
         if (s.phase == GamePhase.FINAL && g != null && g.finalSeenUtcMs == null) {
@@ -550,6 +639,53 @@ class ScoreBugMachine(
     }
 
     private fun rose(was: Int?, now: Int?) = was != null && now != null && now > was
+
+    // ------------------------------------------------------------------ CHL: the unknown-power-play hold (§4.1)
+
+    /** When the current hold ends on the delayed timeline: `since + delay + PP_UNKNOWN_HOLD_MS`; null = nothing held. */
+    private fun holdEndsAt(): Long? {
+        if (lastShownPp == null || shown?.snap?.powerPlayUnknown != true) return null
+        return ppUnknownSince?.let { it + delayMs + SportsConstants.PP_UNKNOWN_HOLD_MS }
+    }
+
+    /** (CHL fix pass S4) The held power play while the hold lasts by elapsed time; null after it. */
+    private fun heldPp(now: Long): PowerPlay? = lastShownPp.takeIf { holdEndsAt()?.let { now < it } == true }
+
+    /** (CHL fix pass S4) Ends the hold silently once its time is up, whether or not a new snapshot was shown. */
+    private fun expireHold(now: Long) {
+        val end = holdEndsAt() ?: return
+        if (now >= end) lastShownPp = null
+    }
+
+    /**
+     * (CHL fix pass L1) The delay grew and [q] shows again: the hold restarts from the queue as it was at [q]. A known
+     * [q] holds its own power play; an unknown one holds the last known power play before its run (the hold's start is
+     * that run's first anchor, and a goal by the held side inside the run up to [q] drops it, as in [advanceDisplay]).
+     */
+    private fun rewindHold(q: Entry) {
+        scoredInUnknownRun = false
+        if (!q.snap.powerPlayUnknown) {
+            lastShownPp = gatedPp(q.snap)
+            ppUnknownSince = null
+            return
+        }
+        val at = queue.indexOf(q)
+        var i = at
+        while (i >= 0 && queue[i].snap.powerPlayUnknown) i--
+        ppUnknownSince = queue[i + 1].anchorMono
+        var held = if (i >= 0) gatedPp(queue[i].snap) else null
+        for (j in maxOf(i, 0) until at) {
+            val a = queue[j].snap
+            val b = queue[j + 1].snap
+            if (a.away.score != b.away.score || a.home.score != b.home.score) {
+                if (j >= i) scoredInUnknownRun = true
+                val h = held
+                if (h != null && rose(scoreOf(a, h.side), scoreOf(b, h.side))) held = null
+            }
+        }
+        val inPlay = (q.snap.phase == GamePhase.LIVE || q.snap.phase == GamePhase.INTERMISSION) && q.snap.periodKind != PeriodKind.SO
+        lastShownPp = if (inPlay && q.anchorMono - ppUnknownSince!! < SportsConstants.PP_UNKNOWN_HOLD_MS) held else null
+    }
 
     // ------------------------------------------------------------------ NFL (docs/design/m6-nfl.md §3)
 
@@ -776,17 +912,18 @@ class ScoreBugMachine(
      * when [p] is LIVE or INTERMISSION (a power play carried over the break, scored on early in the next period, is compared
      * against the intermission poll) and neither [p] nor [s] is the shootout (so never the shootout winner's +1).
      * 1. [GameSnapshot.lastGoal] has the scorer's side and equals [s]'s score: its `strength == "pp"`.
-     * 2. Otherwise the summary lags, and the fallback is "[p] had [side] on the power play". Its known misses:
+     * 2. Otherwise the summary lags, and the fallback is "[p] had [side] on the power play" ([prevPp]: [p]'s own power
+     *    play, or the held one when [p] was unknown, CHL B3). Its known misses:
      *    - a minor that expires inside a poll gap, then an even-strength goal by the same team: a false PP GOAL;
      *    - a power play that starts and is scored on inside one gap: no PP GOAL;
      *    - `situation` clearing a bucket before the score rises: no PP GOAL.
      */
-    private fun goalWasPp(p: GameSnapshot, s: GameSnapshot, side: Side): Boolean {
+    private fun goalWasPp(p: GameSnapshot, s: GameSnapshot, side: Side, prevPp: PowerPlay?): Boolean {
         if (p.phase != GamePhase.LIVE && p.phase != GamePhase.INTERMISSION) return false
         if (p.periodKind == PeriodKind.SO || s.periodKind == PeriodKind.SO || s.finalKind == PeriodKind.SO) return false
         val g = s.lastGoal
         if (g != null && g.side == side && g.away == s.away.score && g.home == s.home.score) return g.pp
-        return p.powerPlay?.side == side
+        return prevPp?.side == side
     }
 
     private fun prune(now: Long) {
@@ -819,12 +956,23 @@ class ScoreBugMachine(
 
     // ------------------------------------------------------------------ removal
 
-    private fun expired(): Boolean {
+    private fun expired(w: Long): Boolean {
         val g = game ?: return false
-        val w = correctedWall()
-        if (g.finalSeenUtcMs != null && w >= g.finalSeenUtcMs + SportsConstants.EXPIRE_AFTER_FINAL_MS) return true
-        return w >= g.startUtcMs + SportsConstants.HARD_EXPIRY_MS
+        return expiredAt(g, w)
     }
+
+    /** The removal rule for [g] at the corrected wall clock [w]: 5 min after a seen final, or the hard expiry. */
+    private fun expiredAt(g: FollowedGame, w: Long): Boolean {
+        if (g.finalSeenUtcMs != null && w >= g.finalSeenUtcMs + SportsConstants.EXPIRE_AFTER_FINAL_MS) return true
+        return w >= hardExpiryAt(g)
+    }
+
+    /**
+     * `start + HARD_EXPIRY_MS`; (CHL integration review S1) for a "Time TBD" start, from the end of its league day instead
+     * (its start is a midnight placeholder, so a follow at 08:00 local would otherwise expire at once).
+     */
+    private fun hardExpiryAt(g: FollowedGame): Long =
+        (if (g.startTbd) SportsDays.dayEndUtcMs(g.league, g.startUtcMs) else g.startUtcMs) + SportsConstants.HARD_EXPIRY_MS
 
     private fun remove(why: RemoveReason) {
         val g = game ?: return
@@ -841,7 +989,7 @@ class ScoreBugMachine(
         // goalSeq is monotonic for the machine's lifetime (goal animation §5.1, B1.4): a re-follow never reuses a seq
         // the UI has already seen.
         goalSide = null; markUntil = null; goalPp = false
-        lastShownPp = null; ppEndedEntry = null
+        lastShownPp = null; ppEndedEntry = null; ppUnknownSince = null; scoredInUnknownRun = false
         nflScores = emptyList(); nflShown.clear()
         resetNflPlay()
     }

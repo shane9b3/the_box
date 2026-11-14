@@ -164,7 +164,8 @@
     <!-- ==== Settings: the Sports section (7). Keys: SettingsText.SECTION_SPORTS, SPORTS_* (ResourceSettingsTexts). -->
     <string name="settings_section_sports">Sports</string>
     <string name="settings_sports_show">Show Sports</string>
-    <string name="settings_sports_show_desc">The Sports tab and the score bug. Scores and logos come from NHL.com and ESPN while you use them.</string>
+    <!-- (CHL Q10) The only settings text that names HockeyTech. -->
+    <string name="settings_sports_show_desc">The Sports tab and the score bug. Scores and logos come from NHL.com, ESPN and HockeyTech while you use them.</string>
     <string name="settings_sports_corner">Score bug corner</string>
     <string name="settings_sports_corner_desc">A bottom corner moves to the top while subtitles are on.</string>
     <string name="settings_sports_delay">Score bug delay</string>
@@ -179,28 +180,30 @@
     <string name="settings_sports_size_standard">Standard</string>
     <string name="settings_sports_size_large">Large</string>
 
-    <!-- Update interval (docs/design/m6-sports-update-interval.md §5.2; owner rulings 29–32). %1$s = NHL / NFL. -->
+    <!-- Update interval (docs/design/m6-sports-update-interval.md §5.2; owner rulings 29–32; CHL P1). %1$s = the league group: NHL / NFL / CHL. -->
     <string name="settings_sports_interval">%1$s score updates</string>
-    <!-- %1$d = seconds. The NHL polls on its feed's 20 s buckets; the NFL waits this long after each update is read. -->
+    <!-- %1$d = seconds. The NHL polls on its feed's 20 s buckets; the NFL and the CHL wait this long after each update is read. -->
     <string name="settings_sports_interval_auto">Auto (every %1$d s)</string>
     <string name="settings_sports_interval_auto_after">Auto (%1$d s after each update)</string>
     <string name="settings_sports_interval_every">Every %1$d s</string>
     <string name="settings_sports_interval_after">%1$d s after each update</string>
     <!-- %1$s = an option's label. -->
     <string name="settings_sports_interval_recommended">%1$s · Recommended</string>
-    <!-- %1$d = recommended seconds, %2$s = this box's seconds per update ("0.4"), %3$s = MB an hour ("1.6"). -->
-    <string name="settings_sports_interval_desc">Recommended: %1$d s. This box takes about %2$s s to fetch and read an update. About %3$s MB an hour while a game is live.</string>
+    <!-- %1$d = recommended seconds, %2$s = this box's seconds per update ("0.4"), %3$s = MB an hour ("1.6"). (CHL emulator
+         pass, defect 4) The data use comes first: the unfocused row shows one line, and the figure is the point. -->
+    <string name="settings_sports_interval_desc">About %3$s MB an hour while a game is live. Recommended: %1$d s; this box takes about %2$s s to fetch and read an update.</string>
     <!-- %1$d = recommended seconds, %2$s = MB an hour. -->
-    <string name="settings_sports_interval_desc_unmeasured">Recommended: %1$d s for now. Follow a game and this box will time a few updates. About %2$s MB an hour while a game is live.</string>
+    <string name="settings_sports_interval_desc_unmeasured">About %2$s MB an hour while a game is live. Recommended: %1$d s for now; follow a game and this box will time a few updates.</string>
     <!-- %1$d = recommended seconds, %2$s = MB an hour. A measured time under 0.1 s. -->
-    <string name="settings_sports_interval_desc_fast">Recommended: %1$d s. This box takes under 0.1 s to fetch and read an update. About %2$s MB an hour while a game is live.</string>
+    <string name="settings_sports_interval_desc_fast">About %2$s MB an hour while a game is live. Recommended: %1$d s; this box takes under 0.1 s to fetch and read an update.</string>
     <string name="settings_sports_interval_nhl_floor">The NHL feed changes every 20 s, so checking more often would get the same score.</string>
     <string name="settings_sports_interval_faster">This is faster than this box keeps up with, so updates may arrive late. Choose Auto to use the recommendation.</string>
     <string name="settings_sports_interval_slowed">ESPN asked the app to check less often, so it checks every 10 s or slower for now.</string>
     <!-- %1$s = KB per check ("20"). -->
     <string name="settings_sports_interval_fallback">ESPN\'s single-game feed isn\'t answering, so each check downloads the whole day (about %1$s KB). Auto checks every 10 s or slower.</string>
-    <!-- %1$s = the league shown (NHL), %2$s = the other one (NFL). -->
-    <string name="settings_sports_interval_league">Showing %1$s. Switch to %2$s on the Sports tab to change the %2$s setting.</string>
+    <!-- (CHL §6.5) %1$s = the league group shown ("NHL", "NFL", "CHL"). There is no "other" league any more: a caller that
+         still passes a second argument has it ignored. -->
+    <string name="settings_sports_interval_league">Showing %1$s. Pick another league on the Sports tab to change its setting.</string>
 
     <!-- ==== NFL (docs/design/m6-nfl.md §4.2, §4.3, §5.2, §7.3, §8). Away team first everywhere ("KC – BUF"). -->
     <string name="sports_league_nfl">NFL</string>
@@ -287,4 +290,44 @@
     <string name="settings_sports_style_desc">For hockey games. Stacked shows the teams one above the other, with shots on goal during power plays and breaks.</string>
     <string name="settings_sports_style_pill">Pill</string>
     <string name="settings_sports_style_stacked">Stacked</string>
+
+    <!-- ==== CHL (docs/design/m6-chl-leagues.md §6.5, §6.6; commit 0, S11: every CHL string lands here and the file is
+         frozen after it). Words on screen add CHL, OHL, WHL, QMJHL. Never "feed", "API", "key", "Firebase"; HockeyTech only
+         in the credit and the Show Sports description (Q10). -->
+    <!-- League names (owner decision 4): PlayerText.leagueName / groupName (L5). -->
+    <string name="sports_league_ohl">OHL</string>
+    <string name="sports_league_whl">WHL</string>
+    <string name="sports_league_qmjhl">QMJHL</string>
+    <string name="sports_league_chl">CHL</string>
+    <!-- Empty states for any league. %1$s = the league ("OHL"; the NHL passes "NHL"). -->
+    <string name="sports_empty_yesterday_league">No %1$s games yesterday. Pick another day above.</string>
+    <string name="sports_empty_today_league">No %1$s games today. Pick another day above.</string>
+    <string name="sports_empty_tomorrow_league">No %1$s games tomorrow. Pick another day above.</string>
+    <!-- %1$s = the league, %2$s = the date. -->
+    <string name="sports_empty_day_league">No %1$s games on %2$s. Pick another day above.</string>
+    <!-- Failures (§2.6). %1$s = the league ("OHL"). -->
+    <string name="sports_failed_league">%1$s scores did not answer. Press OK to try again; scores may be down for a few minutes.</string>
+    <string name="sports_failed_refused">%1$s scores stopped letting this app in. CHL scores need an app update; NHL and NFL scores still work.</string>
+    <!-- (CHL emulator pass, defect 2) A follow the 8-hour expiry would drop at once: never confirmed, never stored. Either
+         the listed start is wrong or this box's clock is, so the text blames neither. %1$s = away abbreviation, %2$s = home
+         abbreviation. A toast shows 2 lines (ToastView): SportsToastFitTest lays every sports toast out whole with 4-letter
+         codes, so keep this one no longer than the _final variant. -->
+    <string name="sports_toast_too_old">Not following %1$s – %2$s: it started more than 8 hours ago by this box\'s clock. Check the TV\'s date and time, or pick it again later.</string>
+    <string name="sports_toast_too_old_final">Not following %1$s – %2$s: that game is over and started more than 8 hours ago by this box\'s clock. Follow another game in Sports.</string>
+    <!-- %1$s = away abbreviation, %2$s = home abbreviation, %3$s = the league ("OHL"). -->
+    <string name="sports_toast_not_listed_league">The %3$s no longer lists %1$s – %2$s. Follow another game in Sports.</string>
+    <!-- The quick-bar sheet's row after the League row (§6.3). %1$s = the shown CHL league ("OHL"). -->
+    <string name="sports_picker_chl_league">CHL league · %1$s</string>
+    <!-- A card's or picker row's start time when the league lists the game's time as to be decided (§3.2 time_tbd). -->
+    <string name="sports_time_tbd">Time TBD</string>
+    <!-- The credit line (§6.6, P9): the feed's own attribution, built from resources. %1$s = sports_credit_chl_ohl / _whl /
+         _qmjhl. -->
+    <string name="sports_credit_chl">Official statistics provided by %1$s · Powered by HockeyTech.com</string>
+    <string name="sports_credit_chl_ohl" translatable="false">Ontario Hockey League</string>
+    <string name="sports_credit_chl_whl" translatable="false">Western Hockey League</string>
+    <!-- (Q2) The QMJHL's required attribution, verbatim; "QMJHL" is used everywhere else. -->
+    <string name="sports_credit_chl_qmjhl" translatable="false">LHJMQ</string>
+    <!-- Settings → Sports, the update interval's slowed note for a league timed from completion other than the NFL.
+         %1$s = the league ("OHL"). Key: SettingsText.SPORTS_INTERVAL_SLOWED_LEAGUE. -->
+    <string name="settings_sports_interval_slowed_league">%1$s scores asked the app to check less often, so it checks every 10 s or slower for now.</string>
 </resources>

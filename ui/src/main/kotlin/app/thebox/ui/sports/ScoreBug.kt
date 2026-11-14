@@ -65,7 +65,6 @@ import app.thebox.core.sports.League
 import app.thebox.core.sports.NflTab
 import app.thebox.core.sports.NflView
 import app.thebox.core.sports.NhlBugStyle
-import app.thebox.core.sports.NhlTeamColours
 import app.thebox.core.sports.OverlayGeometry
 import app.thebox.core.sports.PeriodKind
 import app.thebox.core.sports.PeriodLabel
@@ -83,11 +82,15 @@ import app.thebox.core.sports.ScoreBugSize
 import app.thebox.core.sports.ScoreBugSource
 import app.thebox.core.sports.ScoreBugView
 import app.thebox.core.sports.Side
+import app.thebox.core.sports.Sport
 import app.thebox.core.sports.SportsConstants as K
 import app.thebox.core.sports.TabLead
 import app.thebox.core.sports.TabTail
+import app.thebox.core.sports.TeamColourTable
 import app.thebox.core.sports.TeamColours
 import app.thebox.core.sports.TeamLine
+import app.thebox.core.sports.isHockey
+import app.thebox.core.sports.sport
 import app.thebox.ui.R
 import app.thebox.ui.guide.GuideDebugCounters
 import app.thebox.ui.guide.screen.LocalShellImageLoader
@@ -178,13 +181,18 @@ fun ScoreBug(
     val placingLeague = if (placement.placing) placement.league else null
     val league = shown ?: followedLeague ?: placingLeague ?: lastLeague.value ?: prefsLeague
     SideEffect { if (shown != null) lastLeague.value = shown }
-    val style = if (league == League.NHL) prefs.nhlStyle else NhlBugStyle.PILL
+    // (CHL §1.6 #42, P12) The style applies to every hockey league.
+    val style = if (league.isHockey) prefs.nhlStyle else NhlBugStyle.PILL
     val placed = if (placement.league == league && placement.style == style) placement else placement.copy(league = league, style = style)
     key(league, style) {
-        when {
-            league == League.NFL -> NflBug(source, placed, geometry, modifier, place, NflHooks.Default)
-            style == NhlBugStyle.STACKED -> StackedBug(source, placed, geometry, modifier, place, StackedHooks.Default)
-            else -> ScoreBugWith(source, placed, geometry, lowEnd, modifier, place, LocalGoalHooks.current)
+        // (CHL §1.6 #43) One branch per sport: every hockey league takes the NHL path.
+        when (league.sport) {
+            Sport.FOOTBALL -> NflBug(source, placed, geometry, modifier, place, NflHooks.Default)
+            Sport.HOCKEY -> if (style == NhlBugStyle.STACKED) {
+                StackedBug(source, placed, geometry, modifier, place, StackedHooks.Default)
+            } else {
+                ScoreBugWith(source, placed, geometry, lowEnd, modifier, place, LocalGoalHooks.current)
+            }
         }
     }
 }
@@ -202,7 +210,8 @@ internal val LocalGoalHooks = staticCompositionLocalOf { GoalHooks.Default }
  * [sampler] is a `fun interface` so the per-frame call boxes nothing.
  */
 internal class GoalHooks(
-    val colours: (String?) -> TeamColours = NhlTeamColours::of,
+    /** (CHL §1.5, #44) League-keyed: the league is the shown view's ([ScoreBugView.league]). */
+    val colours: (League, String?) -> TeamColours = TeamColourTable::of,
     val sampler: GoalSampler = GoalSampler.Real,
     val begin: (GoalPainter, Side, TeamColours, Bitmap?, String, Int, Int) -> Unit = { p, side, c, badge, abbrev, a, h -> p.begin(side, c, badge, abbrev, a, h) },
     val bake: (GoalPainter) -> GlowMasks? = { it.bakeGlow() },
@@ -317,6 +326,8 @@ private class GoalRun {
     // Captured at start; never re-read (B1.5).
     var side: Side = Side.AWAY
     var abbrev = ""
+    /** (CHL B1) The scorer's league, for the league-keyed colours. */
+    var league: League = League.NHL
     var away = 0
     var home = 0
     var still = false
@@ -553,7 +564,7 @@ internal fun ScoreBugWith(
     // baked for this size and these teams, and a power play; the pill track needs only the painter and a power play. The
     // placement function runs only while a power play or a tab exists, so a game without one never calls it.
     val real = bug
-    pr.lowEnd = lowEnd; pr.away = awayAbbrev; pr.home = homeAbbrev
+    pr.lowEnd = lowEnd; pr.away = awayAbbrev; pr.home = homeAbbrev; pr.league = holder.lastFollowed?.league ?: League.NHL
     val ppShown = box != null && !placement.placing
     val target: PowerPlay? = if (ppShown) real?.powerPlay else null
     val tabAllowedNow = box != null && !placement.placing && (target != null || pr.tab.want != 0) && hooks.tabAllowed(placement, geometry, box)
@@ -607,7 +618,7 @@ internal fun ScoreBugWith(
             val side = real.goalSide
             if (side != null && box != null && !placement.placing) {
                 val line = if (side == Side.AWAY) real.away else real.home
-                run.side = side; run.abbrev = line.abbrev
+                run.side = side; run.abbrev = line.abbrev; run.league = real.league
                 run.away = real.away.score ?: 0; run.home = real.home.score ?: 0
                 run.glowOn = !lowEnd
                 run.active = true; run.token++
@@ -657,7 +668,7 @@ internal fun ScoreBugWith(
         val image = (if (side == Side.AWAY) logos.away else logos.home).image
         withContext(hooks.context) {
             val still = lowEnd || motionOff() // S8: the exact scale Compose applies to animateTo
-            hooks.begin(goalPainter, side, hooks.colours(run.abbrev), image?.asAndroidBitmap(), run.abbrev, run.away, run.home)
+            hooks.begin(goalPainter, side, hooks.colours(run.league, run.abbrev), image?.asAndroidBitmap(), run.abbrev, run.away, run.home)
             hooks.probe?.begins?.add(GoalProbe.Begin(side, run.abbrev, run.away, run.home, still))
             hooks.probe?.painter = goalPainter
             run.painter = goalPainter
@@ -847,6 +858,8 @@ private class PpRun(private val scope: CoroutineScope, private val hooks: GoalHo
     var haloGame: GameId? = null
     var away = ""
     var home = ""
+    /** (CHL B1) The followed game's league, for the league-keyed tab colours. */
+    var league: League = League.NHL
     /** The painter has baked the labels of the followed teams: the tab may open (S8). */
     private val ready: Boolean
         get() {
@@ -1041,7 +1054,7 @@ private class PpRun(private val scope: CoroutineScope, private val hooks: GoalHo
 
     private fun begin(side: Side) {
         val p = painter ?: return
-        p.begin(side, hooks.colours(if (side == Side.AWAY) away else home))
+        p.begin(side, hooks.colours(league, if (side == Side.AWAY) away else home))
     }
 
     private fun evaluateTab(want: Int, side: Side, kind: PowerPlayKind, secs: Int, snap: Boolean, cut: Boolean) {

@@ -35,10 +35,15 @@ import app.thebox.core.full.PlayerUiState
 import app.thebox.core.full.QuickBarState
 import app.thebox.core.full.QuickItem
 import app.thebox.core.sports.DayState
+import app.thebox.core.sports.FailKind
 import app.thebox.core.sports.FollowedGame
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.League
+import app.thebox.core.sports.LeagueGroup
+import app.thebox.core.sports.group
+import app.thebox.core.sports.isChl
+import app.thebox.core.sports.isHockey
 import app.thebox.core.sports.NhlBugStyle
 import app.thebox.core.sports.ScoreCorner
 import app.thebox.core.sports.ScoreFacts
@@ -960,6 +965,8 @@ class PlayerStateMachineImpl(
             is PickerChoice.ScoreGame, is PickerChoice.ScoreCornerRow, is PickerChoice.ScoreDelayRow, PickerChoice.ScoreStop,
             PickerChoice.ScoreTodayDivider, is PickerChoice.ScoreDayDivider, PickerChoice.ScoreLoading, is PickerChoice.ScoreFailed,
             is PickerChoice.ScoreDelayChoice, is PickerChoice.ScoreLeagueRow, is PickerChoice.ScoreStyleRow -> Unit
+            // The CHL league row is built and handled by scoreSelect, like the League row.
+            is PickerChoice.ScoreChlRow -> Unit
         }
     }
 
@@ -2078,15 +2085,21 @@ class PlayerStateMachineImpl(
         val out = ArrayList<PickerChoice>()
         val followed = f.game
         if (followed != null) out += PickerChoice.ScoreGame(board?.games?.firstOrNull { it.id == followed.id } ?: stubOf(followed), followed = true)
+        // (CHL integration, WP-3 review L10) The followed game's feed refused the app: its reason and next step right under
+        // it, in the followed league's words. Not twice when the day row below already says it for the same league.
+        val dayRefused = (f.day as? DayState.Failed)?.kind == FailKind.REFUSED && f.league == followed?.league
+        if (followed != null && f.followFailure == FailKind.REFUSED && !dayRefused) out += PickerChoice.ScoreFailed(FailKind.REFUSED, followed.league)
         // (NFL §7.3, ruling 24) The League row is second, after the followed game; absent until the host reports a league.
         val league = f.league
         if (league != null) out += PickerChoice.ScoreLeagueRow(league)
+        // (CHL §1.6 #31) The CHL league row follows the League row while a CHL league is shown.
+        if (league != null && league.isChl) out += PickerChoice.ScoreChlRow(league)
         out += PickerChoice.ScoreCornerRow(f.corner)
         out += PickerChoice.ScoreDelayRow(f.delaySec)
         // (Stacked §1.1, S8) The Style row follows the followed game's league, else the browsed league (not reported = NHL):
         // an NFL follow never shows a row that changes nothing on screen; following an NHL game while browsing the NFL keeps it.
         val style = f.style
-        if (style != null && (followed?.league ?: league ?: League.NHL) == League.NHL) out += PickerChoice.ScoreStyleRow(style)
+        if (style != null && (followed?.league ?: league ?: League.NHL).isHockey) out += PickerChoice.ScoreStyleRow(style)
         if (followed != null) out += PickerChoice.ScoreStop
         val nfl = league == League.NFL
         val others = board?.games.orEmpty().filter { followed == null || it.id != followed.id }
@@ -2136,6 +2149,8 @@ class PlayerStateMachineImpl(
             phase = when { final != null -> GamePhase.FINAL; v != null -> GamePhase.LIVE; else -> GamePhase.SCHEDULED },
             away = v?.away ?: TeamLine(g.away, g.away, null, null), home = v?.home ?: TeamLine(g.home, g.home, null, null),
             period = null, periodKind = null, otNumber = null, clock = null, finalKind = final?.kind,
+            // (CHL review S1) Off the board, a "Time TBD" follow still reads "Time TBD", never its midnight placeholder.
+            startTbd = g.startTbd,
         )
     }
 
@@ -2157,14 +2172,35 @@ class PlayerStateMachineImpl(
             PickerChoice.ScoreStop -> { effects.followGame(null); closeLayer() }
             is PickerChoice.ScoreFailed -> effects.retryScores()
             is PickerChoice.ScoreLeagueRow -> {
-                // NFL §7.3: OK toggles the shown league; the board reloads under a Loading row and focus stays on this row.
-                val next = if (c.league == League.NHL) League.NFL else League.NHL
+                // NFL §7.3 / CHL §1.6 #33: OK steps the group NHL -> NFL -> CHL (the remembered sub-league) -> NHL; the board
+                // reloads under a Loading row and focus stays on this row.
+                val next = when (c.league.group) {
+                    LeagueGroup.NHL -> League.NFL
+                    LeagueGroup.NFL -> scoreFacts.chlLeague?.takeIf { it.isChl } ?: League.OHL
+                    LeagueGroup.CHL -> League.NHL
+                }
                 effects.setScoreLeague(next)
                 scoreFacts = scoreFacts.copy(league = next, day = DayState.Loading) // shown at once; the repository's flow confirms it
                 val p = picker
                 if (p != null) {
                     val choices = choicesFor(p.kind, menu)
                     picker = p.copy(choices = choices, current = currentChoice(p.kind, choices), focused = choices.indexOfFirst { it is PickerChoice.ScoreLeagueRow }.coerceAtLeast(0))
+                }
+            }
+            is PickerChoice.ScoreChlRow -> {
+                // CHL §1.6 #34: OK steps OHL -> WHL -> QMJHL -> OHL; focus stays; the board reloads under a Loading row.
+                val next = when (c.league) {
+                    League.OHL -> League.WHL
+                    League.WHL -> League.QMJHL
+                    League.QMJHL -> League.OHL
+                    League.NHL, League.NFL -> League.OHL
+                }
+                effects.setScoreChlLeague(next)
+                scoreFacts = scoreFacts.copy(league = next, chlLeague = next, day = DayState.Loading)
+                val p = picker
+                if (p != null) {
+                    val choices = choicesFor(p.kind, menu)
+                    picker = p.copy(choices = choices, current = currentChoice(p.kind, choices), focused = choices.indexOfFirst { it is PickerChoice.ScoreChlRow }.coerceAtLeast(0))
                 }
             }
             is PickerChoice.ScoreStyleRow -> {

@@ -17,6 +17,10 @@ import app.thebox.core.sports.FollowedGame
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.League
+import app.thebox.core.sports.LeagueGroup
+import app.thebox.core.sports.PollTiming
+import app.thebox.core.sports.group
+import app.thebox.core.sports.timing
 import app.thebox.core.sports.PollMeasure
 import app.thebox.core.sports.PollMeter
 import app.thebox.core.sports.RemoveReason
@@ -83,6 +87,11 @@ internal interface FollowMachine {
      * loop's fakes compile; [of] forwards it (review B2: production must never silently drop it).
      */
     fun interval(liveMs: Long?) {}
+    /**
+     * (CHL emulator pass, defect 2; review fix 2) [ScoreBugMachine.followIfKept]: a user's follow, decided once; false =
+     * refused and nothing changed. The loop's fakes keep every follow.
+     */
+    fun followIfKept(game: FollowedGame): Boolean { follow(game); return true }
 
     companion object {
         fun of(m: ScoreBugMachine): FollowMachine = object : FollowMachine {
@@ -99,6 +108,7 @@ internal interface FollowMachine {
             override fun followed(): FollowedGame? = m.followed()
             override fun drainEvents(): List<ScoreEvent> = m.drainEvents()
             override fun interval(liveMs: Long?) = m.interval(liveMs)
+            override fun followIfKept(game: FollowedGame): Boolean = m.followIfKept(game)
         }
     }
 }
@@ -183,10 +193,18 @@ class ScoreRepositoryImpl internal constructor(
     ) : this(mapOf(source.league to source), store, awake, signals, scope, mono, machineFactory, dayPolicy, random)
 
     /**
-     * [league]'s source. A league with no source (a test built with one source) falls back to the first one, so the
-     * NHL-only graphs behave as before.
+     * [league]'s source, or null. (CHL §1.6 #35) **No silent fallback**: a league with no source never reads another
+     * league's source (a WHL game id sent to the OHL's, or the NHL's). The caller answers `Failed(HTTP_OTHER)`, and the
+     * missing binding is logged once per league.
      */
-    private fun sourceOf(league: League): ScoreSource = sources[league] ?: sources.values.first()
+    private fun sourceOf(league: League): ScoreSource? = sources[league]
+        ?: null.also { if (unbound.add(league)) BoxLog.w(TAG, "no score source bound for $league") }
+
+    /** Leagues already logged as unbound (#35). */
+    private val unbound = HashSet<League>()
+
+    /** (#35) The answer when [league] has no source: a plain failure, so the usual back-off and texts apply. */
+    private fun unboundFailure(): Fetch.Failed = Fetch.Failed(FailKind.HTTP_OTHER, null, mono.nowMs())
 
     private sealed interface Input {
         data class Follow(val game: GameSnapshot?) : Input
@@ -206,6 +224,7 @@ class ScoreRepositoryImpl internal constructor(
     private val _lastScore = MutableStateFlow<ScoreBugView?>(null)
     private val _day = MutableStateFlow<DayState>(DayState.Loading)
     private val _followed = MutableStateFlow<FollowedGame?>(null)
+    private val _followFailure = MutableStateFlow<FailKind?>(null)
     private val _events = MutableSharedFlow<ScoreEvent>(extraBufferCapacity = 16, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
     override val bug: StateFlow<ScoreBugView?> = _bug.asStateFlow()
@@ -213,6 +232,7 @@ class ScoreRepositoryImpl internal constructor(
     override val prefs: StateFlow<SportsPrefs> = store.flow(SportsDomain)
     override val day: StateFlow<DayState> = _day.asStateFlow()
     override val followed: StateFlow<FollowedGame?> = _followed.asStateFlow()
+    override val followFailure: StateFlow<FailKind?> = _followFailure.asStateFlow()
     override val events: Flow<ScoreEvent> = _events.asSharedFlow()
 
     override fun reportDemand(owner: DemandOwner, on: Boolean) = post(Input.DemandReport(owner, on))
@@ -251,6 +271,8 @@ class ScoreRepositoryImpl internal constructor(
     private var dayJitter = 0.0
     private var dayForce = false
     private var dayDemand = Demand.NONE
+    /** (CHL #37, S7) Per league: the earliest next day request after a `FailKind.REFUSED`; cleared by its next answer. */
+    private val dayRefused = HashMap<League, Long>()
     /** The tab or the picker is open (whatever the platform facts): its rising edge resets the day to today (C-S6). */
     private var dayUiOpen = false
 
@@ -349,8 +371,10 @@ class ScoreRepositoryImpl internal constructor(
             if (machine.pollDue() && game != null && followDemand != Demand.NONE && isOnline) {
                 val source = sourceOf(game.league)
                 val t0 = mono.nowMs()
-                val f = source.game(game.id, game.startUtcMs)
+                val f = source?.game(game.id, game.startUtcMs) ?: unboundFailure()
                 machine.fetched(f)
+                // (CHL integration, L10) The follow's last failure, for the card and the sheet; an answer clears it.
+                _followFailure.value = (f as? Fetch.Failed)?.kind
                 // The answer took time: advance the machine to now, so what the answer made due is applied at once.
                 machine.step()
                 // (Update interval §3.2, review S6) The work the bug needs: fetch, decode, map, the machine and its view.
@@ -358,7 +382,7 @@ class ScoreRepositoryImpl internal constructor(
                 machine.view()
                 val workMs = mono.nowMs() - t0
                 lastStepAt = mono.nowMs()
-                measure(game, source.followEndpoint(game.id), f, workMs)
+                if (source != null) measure(game, source.followEndpoint(game.id), f, workMs)
             }
             if (dayDue(mono.nowMs())) fetchDay()
             publish()
@@ -381,7 +405,8 @@ class ScoreRepositoryImpl internal constructor(
                 dayKey = i.dayKey
                 resetDay(loading = true)
             }
-            Input.Retry -> {
+            // (CHL S7) A refused league is not asked again before its 300 s, whatever the user presses.
+            Input.Retry -> if (sports.league !in dayRefused) {
                 dayFailures = 0
                 dayLastFailMono = null
                 dayRetryAfterS = null
@@ -400,11 +425,17 @@ class ScoreRepositoryImpl internal constructor(
             return
         }
         if (!sports.enabled) return
-        val f = FollowedGame(game.id.league, game.id.id, game.startUtcMs, game.away.abbrev, game.home.abbrev)
+        val f = FollowedGame(game.id.league, game.id.id, game.startUtcMs, game.away.abbrev, game.home.abbrev, startTbd = game.startTbd)
         if (doc.game?.id == f.id) return
         val final = game.phase == GamePhase.FINAL
+        // (CHL emulator pass, defect 2; review fix 2) One decision, the machine's: a follow the hard expiry would drop at
+        // once (a listed start more than 8 h ago by this box's clock) is never stored or confirmed; the toast says why and
+        // any current follow is kept. Followed / FollowTooOld both come from this one answer, so they cannot disagree.
+        if (!machine.followIfKept(f)) {
+            _events.tryEmit(ScoreEvent.FollowTooOld(f, final))
+            return
+        }
         val first = !doc.firstFollowShown
-        machine.follow(f)
         persist(doc.copy(game = f, firstFollowShown = doc.firstFollowShown || !final))
         _events.tryEmit(if (final) ScoreEvent.FollowedFinal(f) else ScoreEvent.Followed(f, first))
     }
@@ -413,7 +444,10 @@ class ScoreRepositoryImpl internal constructor(
         val was = sports
         sports = p
         if (p.delaySec != was.delaySec) machine.prefs(p.delaySec)
-        if (p.nhlIntervalS != was.nhlIntervalS || p.nflIntervalS != was.nflIntervalS) pushInterval()
+        // (CHL §1.6 #36) The CHL's one setting too; pushInterval reads the followed league's own.
+        if (p.nhlIntervalS != was.nhlIntervalS || p.nflIntervalS != was.nflIntervalS || p.chlIntervalS != was.chlIntervalS) {
+            pushInterval()
+        }
         if (p.league != was.league) {
             // (NFL §7.1) The switch: the day list goes back to the new league's today (Loading, then its board). A day
             // key of the old league is never sent to the new source. The follow is untouched: it polls its own league.
@@ -482,6 +516,13 @@ class ScoreRepositoryImpl internal constructor(
             markDayOffline()
             return null
         }
+        // (CHL §1.6 #37, S7; lead ruling) REFUSED: the next day request of that league at `fail + max(BACKOFF_MAX_MS,
+        // Retry-After)`, never sooner (no Retry, no day switch, no reopen of the tab brings it closer). A reset meanwhile
+        // shows the refusal, not Loading.
+        dayRefused[sports.league]?.let { nextAt ->
+            if (_day.value == DayState.Loading) _day.value = DayState.Failed(FailKind.REFUSED)
+            return nextAt
+        }
         if (dayForce) return now
         val at = dayPolicy.nextAt(dayOk, dayDemand, dayFailures, dayLastFailMono, dayRetryAfterS, phaseMs, dayJitter, now)
         val ok = dayOk
@@ -501,10 +542,16 @@ class ScoreRepositoryImpl internal constructor(
     private suspend fun fetchDay() {
         dayForce = false
         val key = dayKey
-        val source = sourceOf(sports.league)
-        val f = if (key == null) source.today() else source.day(key)
+        val league = sports.league
+        val source = sourceOf(league)
+        val f = when {
+            source == null -> unboundFailure()
+            key == null -> source.today()
+            else -> source.day(key)
+        }
         when (f) {
             is Fetch.Ok -> {
+                dayRefused.remove(league)
                 dayOk = f
                 dayFailures = 0
                 dayLastFailMono = null
@@ -513,7 +560,15 @@ class ScoreRepositoryImpl internal constructor(
                 _day.value = DayState.Board(f.value, f.receivedMono, failing = false, isToday = dayWanted == null)
             }
             Fetch.NotFound -> dayFailed(FailKind.HTTP_OTHER, mono.nowMs(), null)
-            is Fetch.Failed -> dayFailed(f.kind, f.receivedMono, f.retryAfterS)
+            is Fetch.Failed -> {
+                if (f.kind == FailKind.REFUSED) {
+                    val server = (f.retryAfterS ?: 0).coerceAtLeast(0) * 1000L
+                    dayRefused[league] = f.receivedMono + maxOf(SportsConstants.BACKOFF_MAX_MS, server)
+                } else {
+                    dayRefused.remove(league)
+                }
+                dayFailed(f.kind, f.receivedMono, f.retryAfterS)
+            }
         }
     }
 
@@ -566,6 +621,8 @@ class ScoreRepositoryImpl internal constructor(
         }
         doc = next
         _followed.value = next.game
+        // (CHL integration, L10) A failure belongs to one follow.
+        if (followChanged) _followFailure.value = null
         store.update(SportsFollowDomain) {
             it.copy(game = next.game, pollPhaseMs = next.pollPhaseMs, firstFollowShown = next.firstFollowShown, meters = next.meters)
         }
@@ -611,8 +668,9 @@ class ScoreRepositoryImpl internal constructor(
                 } else {
                     meterWarm += league
                 }
-                FailKind.HTTP_429 -> if (league == League.NFL && m?.slowed != true) {
-                    m = (m ?: PollMeasure(endpoint = endpoint ?: PollMeter.NFL_EVENT)).copy(slowed = true)
+                // (CHL §1.6 #39) Every league timed from completion (the NFL and the CHL) is slowed by a 429.
+                FailKind.HTTP_429 -> if (league.timing == PollTiming.COMPLETION && m?.slowed != true) {
+                    m = (m ?: PollMeasure(endpoint = endpoint ?: defaultEndpoint(league))).copy(slowed = true)
                 }
                 else -> Unit
             }
@@ -652,6 +710,13 @@ class ScoreRepositoryImpl internal constructor(
         /** The hold when a wake-up instant stays in the past after a step (a machine bug); never a busy loop. */
         internal const val STUCK_WAKE_HOLD_MS = 1_000L
         internal val ELAPSED = MonoClock { android.os.SystemClock.elapsedRealtime() }
+
+        /** A meter's endpoint before any sample named one (#39). */
+        private fun defaultEndpoint(league: League): String = when (league.group) {
+            LeagueGroup.NHL -> PollMeter.NHL_LANDING
+            LeagueGroup.NFL -> PollMeter.NFL_EVENT
+            LeagueGroup.CHL -> PollMeter.CHL_LIVE
+        }
 
         private fun minOfNullable(a: Long?, b: Long?): Long? = when {
             a == null -> b

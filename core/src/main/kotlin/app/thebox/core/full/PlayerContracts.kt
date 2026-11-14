@@ -396,6 +396,12 @@ sealed interface PickerChoice {
      */
     data class ScoreLeagueRow(val league: app.thebox.core.sports.League) : PickerChoice
     /**
+     * (CHL commit 0, docs/design/m6-chl-leagues.md §6.3, §1.6 #29; append-only) "CHL league · OHL", the row after the
+     * League row while a CHL league is shown: OK cycles OHL → WHL → QMJHL → OHL through [PlayerEffects.setScoreChlLeague]
+     * ([league] is the shown sub-league, `SportsPrefs.chlShown`); focus stays, and the board reloads under a Loading row.
+     */
+    data class ScoreChlRow(val league: app.thebox.core.sports.League) : PickerChoice
+    /**
      * (Stacked commit 0, docs/design/m6-score-bug-stacked-theme.md §1.1, S8; append-only) "Style · Pill", after the Delay
      * row: OK toggles Pill ⇄ Stacked ([style] is the current one) through [PlayerEffects.setScoreStyle]; the sheet stays
      * open and focus stays on the row. Shown per §1.1 (the followed game's league, else the sheet's; Stacked WP-4).
@@ -639,8 +645,17 @@ interface PlayerEffects {
     /** Place mode's OK / Back: persist the corner. */
     fun setScoreCorner(c: app.thebox.core.sports.ScoreCorner) = Unit
     fun setScoreDelay(sec: Int) = Unit
-    /** (NFL WP-5 amendment, §7.1) The picker's League row: writes `SportsPrefs.league`; the repository reloads that league's board. */
+    /**
+     * (NFL WP-5 amendment, §7.1) The picker's League row: writes `SportsPrefs.league`; the repository reloads that league's
+     * board. (CHL fix pass B3) Always a concrete league: the row's CHL step passes `ScoreFacts.chlLeague` (the remembered
+     * sub-league, OHL when not reported), and for a CHL league the implementation also writes `SportsPrefs.chlLeague`.
+     */
     fun setScoreLeague(league: app.thebox.core.sports.League) = Unit
+    /**
+     * (CHL commit 0, §1.3, §1.6 #30) The sheet's CHL league row: writes `SportsPrefs.league` and `SportsPrefs.chlLeague`
+     * to [league] (OHL, WHL or QMJHL); the repository reloads that league's board (`PlayerEffectsImpl`, CHL WP-5).
+     */
+    fun setScoreChlLeague(league: app.thebox.core.sports.League) = Unit
     /** (Stacked §1.3) The sheet's Style row: writes `SportsPrefs.nhlStyle` (`PlayerEffectsImpl`, Stacked WP-4). */
     fun setScoreStyle(style: app.thebox.core.sports.NhlBugStyle) = Unit
     /** The SCORE_BUG sheet opened / closed: demand `SCORE_PICKER` (§2.3). */

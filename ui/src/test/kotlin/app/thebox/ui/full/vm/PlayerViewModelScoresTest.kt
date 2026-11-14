@@ -109,6 +109,25 @@ class PlayerViewModelScoresTest {
         assertEquals(1, repo.retries)
     }
 
+    /** (CHL emulator pass, defect 2) A follow the repository refuses as too old: its toast, and nothing is followed. */
+    @Test
+    fun aRefusedFollowToastsWhyAndFollowsNothing() {
+        val repo = FakeScoreRepository(raiseFollowEvents = true).apply { refuseFollowsAsTooOld = true }
+        val vm = vm(repo)
+        val out = ArrayList<String>()
+        CoroutineScope(Dispatchers.Main.immediate).launch { vm.events.collect { e -> if (e is ShellEvent.Message) out += e.text } }
+        val game = SportsFixtures.game()
+        repo.day.value = DayState.Board(SportsFixtures.board(game), fetchedAtMono = 1L, failing = false); idle()
+        vm.effects.followGame(game.id); idle()
+        assertEquals(listOf(game), repo.followCalls)
+        assertEquals(
+            listOf("Not following CGY – EDM: it started more than 8 hours ago by this box's clock. Check the TV's date and time, or pick it again later."),
+            out,
+        )
+        assertNull(repo.followed.value)
+        assertNull(machine.scoreFacts.last().game)
+    }
+
     @Test
     fun fullWithoutScreenOffIsDemandAndEventsAreToasts() {
         val repo = FakeScoreRepository()

@@ -41,3 +41,6 @@ ffmpeg/libs/*.aar
 
 # Local SMB test server state (tools/smbtest)
 tools/smbtest/work/
+
+# CHL live recordings (tools/chl/record_live.py; tools/chl/README.md): kept out of git unless the lead asks for a fixture
+tools/chl/recordings/

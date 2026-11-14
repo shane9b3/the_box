@@ -1,5 +1,6 @@
 package app.thebox.ui.full.vm
 
+import app.thebox.core.sports.isChl
 import app.thebox.core.full.ErrorButton
 import app.thebox.core.full.ErrorCardState
 import app.thebox.core.settings.SettingsRoute
@@ -99,7 +100,14 @@ class PlayerEffectsImpl(
     override fun followGame(id: app.thebox.core.sports.GameId?) = vm.followGame(id)
     override fun setScoreCorner(c: app.thebox.core.sports.ScoreCorner) = vm.updateSports { it.copy(corner = c) }
     override fun setScoreDelay(sec: Int) = vm.updateSports { it.copy(delaySec = sec) }
-    override fun setScoreLeague(league: app.thebox.core.sports.League) = vm.updateSports { it.copy(league = league) }
+    // (CHL §1.3) Choosing a CHL league writes `league` and the remembered `chlLeague`; NHL and NFL leave `chlLeague` alone.
+    override fun setScoreLeague(league: app.thebox.core.sports.League) = vm.updateSports {
+        it.copy(league = league, chlLeague = if (league.isChl) league else it.chlLeague)
+    }
+    override fun setScoreChlLeague(league: app.thebox.core.sports.League) {
+        // The sheet's CHL row passes OHL, WHL or QMJHL; anything else is not a CHL league and is ignored.
+        if (league.isChl) vm.updateSports { it.copy(league = league, chlLeague = league) }
+    }
     override fun setScoreStyle(style: app.thebox.core.sports.NhlBugStyle) = vm.updateSports { it.copy(nhlStyle = style) }
     override fun scorePicker(open: Boolean) { vm.scoreRepo?.reportDemand(app.thebox.core.sports.DemandOwner.SCORE_PICKER, open) }
     override fun retryScores() { vm.scoreRepo?.retry() }

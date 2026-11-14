@@ -80,4 +80,18 @@ class SportsTextTest {
         assertEquals("Postponed", SportsText.state(res, ppd, clock24 = true))
         assertEquals("CGY – EDM · Postponed", SportsText.pickerGame(res, ppd, clock24 = true))
     }
+
+    /** (CHL emulator pass, defect 2) A follow the 8-hour expiry would drop at once says why, never "Following". */
+    @Test
+    fun aTooOldFollowSaysWhyAndWhatToDo() {
+        val f = SportsFixtures.followedOf(SportsFixtures.game())
+        assertEquals(
+            "Not following CGY – EDM: it started more than 8 hours ago by this box's clock. Check the TV's date and time, or pick it again later.",
+            SportsText.toast(res, app.thebox.core.sports.ScoreEvent.FollowTooOld(f, final = false)),
+        )
+        assertEquals(
+            "Not following CGY – EDM: that game is over and started more than 8 hours ago by this box's clock. Follow another game in Sports.",
+            SportsText.toast(res, app.thebox.core.sports.ScoreEvent.FollowTooOld(f, final = true)),
+        )
+    }
 }

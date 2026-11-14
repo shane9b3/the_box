@@ -412,10 +412,11 @@ class PlayerViewModel @Inject constructor(
     private fun forwardScores() {
         val repo = scoreRepo ?: return
         viewModelScope.launch {
-            combine(combine(repo.bug, repo.lastScore, ::Pair), repo.followed, repo.day, repo.prefs) { (bug, known), game, day, p ->
+            combine(combine(repo.bug, repo.lastScore, ::Pair), combine(repo.followed, repo.followFailure, ::Pair), repo.day, repo.prefs) { (bug, known), (game, failure), day, p ->
                 app.thebox.core.sports.ScoreFacts(
                     followed = bug, lastScore = known, game = game, day = day,
-                    corner = p.corner, delaySec = p.delaySec, enabled = p.enabled, league = p.league, style = p.nhlStyle,
+                    corner = p.corner, delaySec = p.delaySec, enabled = p.enabled, league = p.league, style = p.nhlStyle, chlLeague = p.chlShown,
+                    followFailure = failure,
                 )
             }.distinctUntilChanged().collect { machine.scores(it) }
         }

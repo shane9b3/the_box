@@ -161,6 +161,19 @@ class SportsScreenTest {
         assertEquals(null, repo.followed.value)
     }
 
+    /** (CHL emulator pass, defect 2) A follow refused as too old: the card never turns to Following. */
+    @Test fun aRefusedFollowNeverShowsFollowing() {
+        repo.refuseFollowsAsTooOld = true
+        board(live, live2)
+        show()
+        press(Key.DirectionCenter)
+        assertEquals(listOf<GameSnapshot?>(live), repo.followCalls)
+        assertEquals(null, repo.followed.value)
+        rule.onNodeWithTag(SPORTS_ACTION_TAG + "L1", useUnmergedTree = true).assertTextEquals(str(R.string.sports_card_action_follow))
+        press(Key.DirectionRight)
+        rule.onNodeWithTag(SPORTS_FOLLOWING_TAG + "L1", useUnmergedTree = true).assertDoesNotExist()
+    }
+
     @Test fun anUnfocusedCardHasNoActionChip() {
         board(live, live2)
         show()
@@ -179,8 +192,8 @@ class SportsScreenTest {
         board(pre)
         show()
         assertEquals(true, backFree.last())
-        press(Key.DirectionUp) // Today chip is focused already: Up reaches the NHL chip, then Right twice Corner
-        press(Key.DirectionRight, Key.DirectionRight)
+        press(Key.DirectionUp) // Today chip is focused already: Up reaches the NHL chip, then Right three times Corner (NFL, CHL)
+        press(Key.DirectionRight, Key.DirectionRight, Key.DirectionRight)
         rule.onNodeWithTag(SPORTS_CORNER_TAG).assertIsFocused()
         press(Key.DirectionCenter)
         rule.onNodeWithTag(SPORTS_MENU_TAG).assertExists()
@@ -196,7 +209,7 @@ class SportsScreenTest {
         board(pre)
         show()
         press(Key.DirectionUp, Key.DirectionRight)
-        press(Key.DirectionRight, Key.DirectionCenter)
+        press(Key.DirectionRight, Key.DirectionRight, Key.DirectionCenter) // NHL, then NFL, CHL, Corner
         press(Key.DirectionDown, Key.DirectionCenter) // second entry: Top left
         assertEquals(ScoreCorner.TOP_LEFT, store.flow(SportsDomain).value.corner)
         rule.onNodeWithTag(SPORTS_MENU_TAG).assertDoesNotExist()
@@ -207,7 +220,7 @@ class SportsScreenTest {
         board(pre)
         show()
         press(Key.DirectionUp, Key.DirectionRight)
-        press(Key.DirectionRight, Key.DirectionRight)
+        press(Key.DirectionRight, Key.DirectionRight, Key.DirectionRight)
         press(Key.DirectionCenter)
         rule.onNodeWithTag(SPORTS_DELAY_TAG).assertExists()
         rule.onNodeWithTag(sportsMenuItemTag(0)).assertIsFocused()

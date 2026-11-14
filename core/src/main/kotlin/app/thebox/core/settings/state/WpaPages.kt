@@ -48,6 +48,10 @@ import app.thebox.core.settings.tree.RemoteRows
 import app.thebox.core.settings.tree.SettingsTree
 import app.thebox.core.settings.tree.SportsRows
 import app.thebox.core.sports.League
+import app.thebox.core.sports.LeagueGroup
+import app.thebox.core.sports.PollTiming
+import app.thebox.core.sports.group
+import app.thebox.core.sports.timing
 import app.thebox.core.sports.NhlBugStyle
 import app.thebox.core.sports.PollMeter
 import app.thebox.core.sports.ScoreBugSize
@@ -605,7 +609,7 @@ class WpaPages(
             listOf(ScoreBugSize.STANDARD to SettingsText.SPORTS_SIZE_STANDARD, ScoreBugSize.LARGE to SettingsText.SPORTS_SIZE_LARGE).map { (s, k) -> ChoiceOption(s.name, t(k)) },
             p.size.name,
         )
-        // (Stacked §1.1) Score bug style, after Size. A setting of its own (NHL only on screen), so it always shows.
+        // (Stacked §1.1) Score bug style, after Size. A setting of its own (hockey only on screen: NHL, OHL, WHL, QMJHL; CHL P12), so it always shows.
         out += choice(
             SportsRows.STYLE, t(SettingsText.SPORTS_STYLE),
             listOf(NhlBugStyle.PILL to SettingsText.SPORTS_STYLE_PILL, NhlBugStyle.STACKED to SettingsText.SPORTS_STYLE_STACKED).map { (s, k) -> ChoiceOption(s.name, t(k)) },
@@ -621,12 +625,17 @@ class WpaPages(
      * (`sports_follow`, this box only).
      */
     private fun intervalRow(p: SportsPrefs): SettingsRow {
-        val league = p.league
-        val m = store.flow(SportsFollowDomain).value.meters[league]
+        // (CHL L4, §1.6 #21) The meter and the list are the followed game's league when it sits in the shown group (a CHL
+        // sub-league's own meter), else the shown league.
+        val follow = store.flow(SportsFollowDomain).value
+        val followed = follow.game?.league?.takeIf { it.group == p.league.group }
+        val league = followed ?: p.league
+        val m = follow.meters[league]
         val rec = PollMeter.recommended(m, league)
         val chosen = PollMeter.normalize(p.intervalS(league), league)
-        fun label(sec: Int) = if (league == League.NHL) t(SettingsText.SPORTS_INTERVAL_EVERY, sec) else t(SettingsText.SPORTS_INTERVAL_AFTER, sec)
-        val auto = if (league == League.NHL) t(SettingsText.SPORTS_INTERVAL_AUTO, rec) else t(SettingsText.SPORTS_INTERVAL_AUTO_AFTER, rec)
+        val bucketed = when (league.timing) { PollTiming.BUCKET -> true; PollTiming.COMPLETION -> false }
+        fun label(sec: Int) = if (bucketed) t(SettingsText.SPORTS_INTERVAL_EVERY, sec) else t(SettingsText.SPORTS_INTERVAL_AFTER, sec)
+        val auto = if (bucketed) t(SettingsText.SPORTS_INTERVAL_AUTO, rec) else t(SettingsText.SPORTS_INTERVAL_AUTO_AFTER, rec)
         val options = listOf(ChoiceOption("0", auto)) + SportsConstants.intervalChoices(league).map { c ->
             ChoiceOption(c.toString(), if (c == rec) t(SettingsText.SPORTS_INTERVAL_RECOMMENDED, label(c)) else label(c))
         }
@@ -641,19 +650,32 @@ class WpaPages(
         } else {
             t(SettingsText.SPORTS_INTERVAL_DESC_UNMEASURED, rec, mb)
         }
-        if (league == League.NHL) parts += t(SettingsText.SPORTS_INTERVAL_NHL_FLOOR)
+        if (league.group == LeagueGroup.NHL) parts += t(SettingsText.SPORTS_INTERVAL_NHL_FLOOR)
         if (chosen != 0 && chosen < rec) parts += t(SettingsText.SPORTS_INTERVAL_FASTER)
-        val slowed = league == League.NFL && m?.slowed == true
+        val slowed = league.timing == PollTiming.COMPLETION && m?.slowed == true
         val fallback = league == League.NFL && m?.endpoint == PollMeter.NFL_BOARD
-        if (slowed) parts += t(SettingsText.SPORTS_INTERVAL_SLOWED)
+        if (slowed) {
+            parts += when (league.group) {
+                LeagueGroup.NFL -> t(SettingsText.SPORTS_INTERVAL_SLOWED)
+                LeagueGroup.CHL -> t(SettingsText.SPORTS_INTERVAL_SLOWED_LEAGUE, league.name)
+                // Unreachable (`slowed` needs a timed league); the league-named text is the safe one if it ever is reached.
+                LeagueGroup.NHL -> t(SettingsText.SPORTS_INTERVAL_SLOWED_LEAGUE, league.name)
+            }
+        }
         if (fallback) parts += t(SettingsText.SPORTS_INTERVAL_FALLBACK, (PollMeter.bytesPerPoll(m, league) + 500) / 1000)
         // (Fix pass 4) The league line is the least urgent: it gives way to the slowed / fallback lines, so the focused
-        // row's wrapped detail (6 lines) never cuts off the state that explains the interval.
+        // row's wrapped detail (6 lines) never cuts off the state that explains the interval. (CHL §6.5) It names only the
+        // shown league's group; there is no "other".
+        // The string uses only %1$s; the NHL / NFL calls keep passing the old second argument (unused) so their text is
+        // byte-identical to before.
         if (!slowed && !fallback) {
-            val other = if (league == League.NHL) League.NFL else League.NHL
-            parts += t(SettingsText.SPORTS_INTERVAL_LEAGUE, league.name, other.name)
+            parts += when (league.group) {
+                LeagueGroup.NHL -> t(SettingsText.SPORTS_INTERVAL_LEAGUE, league.name, League.NFL.name)
+                LeagueGroup.NFL -> t(SettingsText.SPORTS_INTERVAL_LEAGUE, league.name, League.NHL.name)
+                LeagueGroup.CHL -> t(SettingsText.SPORTS_INTERVAL_LEAGUE, league.group.name)
+            }
         }
-        return choice(SportsRows.INTERVAL, t(SettingsText.SPORTS_INTERVAL, league.name), options, chosen.toString(), parts.joinToString(" "))
+        return choice(SportsRows.INTERVAL, t(SettingsText.SPORTS_INTERVAL, league.group.name), options, chosen.toString(), parts.joinToString(" "))
     }
 
     /** MB an hour: one decimal under 10 (review N7), none above. */
@@ -753,7 +775,13 @@ class WpaPages(
             SportsRows.STYLE -> choose?.let { c -> enumOf<NhlBugStyle>(c)?.let { m -> sports { it.copy(nhlStyle = m) } } }
             // (Update interval §5.1) The league on the Sports tab is the one the row shows, so the one it writes.
             SportsRows.INTERVAL -> choose?.toIntOrNull()?.let { v ->
-                sports { if (it.league == League.NHL) it.copy(nhlIntervalS = v) else it.copy(nflIntervalS = v) }
+                sports {
+                    when (it.league.group) {
+                        LeagueGroup.NHL -> it.copy(nhlIntervalS = v)
+                        LeagueGroup.NFL -> it.copy(nflIntervalS = v)
+                        LeagueGroup.CHL -> it.copy(chlIntervalS = v)
+                    }
+                }
             }
             else -> Unit // links (sources, status, fix, mapping) push routes in the machine
         }

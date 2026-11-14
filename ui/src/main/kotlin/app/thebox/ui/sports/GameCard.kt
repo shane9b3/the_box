@@ -44,7 +44,9 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import app.thebox.core.sports.FailKind
 import app.thebox.core.sports.GamePhase
+import app.thebox.core.sports.isChl
 import app.thebox.core.sports.PeriodKind
 import app.thebox.core.sports.TeamLine
 import app.thebox.ui.R
@@ -57,6 +59,10 @@ import kotlin.math.roundToInt
 
 internal const val SPORTS_CARD_TAG = "sports_card:"
 internal const val SPORTS_FOLLOWING_TAG = "sports_following:"
+/** (CHL integration, L10) The followed card's refusal text, while the game's feed refuses the app. */
+internal const val SPORTS_REFUSED_TAG = "sports_refused:"
+/** (Integration review L1) The refused card's matchup row. */
+internal const val SPORTS_REFUSED_MATCHUP_TAG = "sports_refused_matchup:"
 internal const val SPORTS_ACTION_TAG = "sports_action:"
 internal fun sportsCardTag(gameId: String) = SPORTS_CARD_TAG + gameId
 
@@ -93,6 +99,10 @@ internal object GameCardMetrics {
     const val INNER_W = CARD_W - 2 * PAD
     /** The team name's column: the row minus plate, gap, score column and the gap before it. */
     const val NAME_W = INNER_W - PLATE_W - PLATE_GAP - SCORE_W - NAME_SCORE_GAP
+    /** (Integration review L1) The refused card's body: a 40 px matchup row and 88 px of reason (3 lines) = the two team rows. */
+    const val REFUSED_MATCHUP_H = 40
+    const val REFUSED_REASON_H = 2 * ROW_H + ROW_GAP - REFUSED_MATCHUP_H
+    const val REFUSED_REASON_LINES = 3
 }
 
 /**
@@ -119,13 +129,15 @@ internal fun GameCard(
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(DesignTokens.Radii.Button)
     val ink = if (focused) Ink else GuideUi.Fg
+    // (CHL integration, WP-3 review L10) The followed game's feed refused the app: the reason and the next step.
+    val refused = if (card.refused) SportsText.failure(res, FailKind.REFUSED, g.id.league) else null
     val desc = run {
         val state = SportsText.state(res, g, clock24)
         val live = if (g.phase == GamePhase.LIVE) res.getString(R.string.sports_live) + ", " else ""
         res.getString(
             if (card.followed) R.string.sports_card_desc_following else R.string.sports_card_desc,
             g.away.name, g.away.score?.toString() ?: "", g.home.name, g.home.score?.toString() ?: "", live + state,
-        )
+        ) + (refused?.let { ". $it" } ?: "")
     }
     val interaction = remember { MutableInteractionSource() }
     Box(
@@ -148,9 +160,28 @@ internal fun GameCard(
                 if (focused) ActionChip(g.id.id, card.followed) else if (card.followed) FollowingChip(g.id.id, false)
             }
             Spacer(Modifier.height(GameCardMetrics.HEADER_GAP.dp))
-            TeamRow(g.away, ink)
-            Spacer(Modifier.height(GameCardMetrics.ROW_GAP.dp))
-            TeamRow(g.home, ink)
+            if (refused != null) {
+                // (Integration review L1) The two team rows' 128 px: a 40 px matchup row ("Knights · Rangers", 32/600), then the
+                // reason at 24 px in at most 3 lines (88 px), warning colour (ink on the focused card's light fill, for
+                // contrast). The header keeps the state and the chip.
+                Box(Modifier.fillMaxWidth().height(GameCardMetrics.REFUSED_MATCHUP_H.dp), contentAlignment = Alignment.CenterStart) {
+                    Line(
+                        res.getString(R.string.sports_card_live_line, cardName(g.away), cardName(g.home)),
+                        GuideUi.sans(GameCardMetrics.NAME_PX, FontWeight.SemiBold, ink),
+                        Modifier.fillMaxWidth().testTag(SPORTS_REFUSED_MATCHUP_TAG + g.id.id),
+                    )
+                }
+                Line(
+                    refused,
+                    GuideUi.sans(GameCardMetrics.STATE_PX, FontWeight.Medium, if (focused) ink else GuideUi.Warn),
+                    Modifier.fillMaxWidth().height(GameCardMetrics.REFUSED_REASON_H.dp).testTag(SPORTS_REFUSED_TAG + g.id.id),
+                    maxLines = GameCardMetrics.REFUSED_REASON_LINES,
+                )
+            } else {
+                TeamRow(g.away, ink, g.id.league.isChl)
+                Spacer(Modifier.height(GameCardMetrics.ROW_GAP.dp))
+                TeamRow(g.home, ink, g.id.league.isChl)
+            }
         }
     }
 }
@@ -159,9 +190,9 @@ internal fun GameCard(
 internal fun cardName(team: TeamLine): String = team.shortName ?: team.name
 
 @Composable
-private fun TeamRow(team: TeamLine, ink: Color) {
+private fun TeamRow(team: TeamLine, ink: Color, chl: Boolean) {
     Row(Modifier.fillMaxWidth().height(GameCardMetrics.ROW_H.dp), verticalAlignment = Alignment.CenterVertically) {
-        LogoPlate(team)
+        LogoPlate(team, chl)
         Spacer(Modifier.width(GameCardMetrics.PLATE_GAP.dp))
         // (NFL §7.2, S5) The NFL shows the short name ("Commanders"); the NHL's `name` is already the common name.
         Line(cardName(team), GuideUi.sans(GameCardMetrics.NAME_PX, FontWeight.SemiBold, ink), Modifier.weight(1f))
@@ -181,7 +212,7 @@ private fun TeamRow(team: TeamLine, ink: Color) {
  * The `_dark` art is drawn on the dark plate in both focus states (§5.2), so its white parts never sit on the light card.
  */
 @Composable
-private fun LogoPlate(team: TeamLine) {
+private fun LogoPlate(team: TeamLine, chl: Boolean) {
     val loader = LocalShellImageLoader.current
     val context = LocalContext.current
     val density = LocalDensity.current.density
@@ -193,10 +224,14 @@ private fun LogoPlate(team: TeamLine) {
     val logo by produceState(url?.let { CardLogoCache.get(it, w, h) }, url, loader, w, h) {
         value = url?.let { CardLogoCache.get(it, w, h) }
         if (value != null || url == null || loader == null) return@produceState
-        val bmp = runCatching { coilLogoFetch(loader, context)(url, w, h) }
+        // (Review S2) A CHL logo that failed (404, no alpha) is not fetched again for a while: the code plate stays.
+        if (chl && CardLogoCache.recentlyFailed(url)) return@produceState
+        val outcome = runCatching { coilLogoFetchDetailed(loader, context, chl, null)(url, w, h) }
             .onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
-            .getOrNull()?.asImageBitmap()
-        if (bmp != null) CardLogoCache.put(url, w, h, bmp)
+            .getOrElse { LogoOutcome(null, it) }
+        val bmp = outcome.bitmap?.asImageBitmap()
+        // (Integration review S2) 6 h only for a permanent failure (4xx, no alpha, a rejected URL); 60 s for the rest.
+        if (bmp != null) CardLogoCache.put(url, w, h, bmp) else if (chl) failedLogoTtlMs(outcome)?.let { CardLogoCache.markFailed(url, ttlMs = it) }
         value = bmp
     }
     Box(Modifier.size(GameCardMetrics.PLATE_W.dp, GameCardMetrics.PLATE_H.dp).background(Plate, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
@@ -215,6 +250,30 @@ internal object CardLogoCache {
     private fun key(url: String, w: Int, h: Int) = "$url@${w}x$h"
     fun get(url: String, w: Int, h: Int): ImageBitmap? = lru.get(key(url, w, h))
     fun put(url: String, w: Int, h: Int, img: ImageBitmap) { lru.put(key(url, w, h), img) }
+
+    // (CHL review S2) The negative cache: URL to the elapsed-realtime ms until which it counts as failed. CHL only (NHL and NFL logos never
+    // fail in steady state and keep today's behaviour); bounded to 128 URLs (the 61 teams and spare), expiring after
+    // [FAILED_TTL_MS] for a permanent failure or [TRANSIENT_TTL_MS] for any other (integration review S2), and with the process.
+    const val FAILED_TTL_MS = 6 * 60 * 60 * 1000L
+    /** (Integration review S2) A transient failure (no network, timeout, 5xx, decode): tried again after a minute. */
+    const val TRANSIENT_TTL_MS = 60_000L
+    private const val FAILED_MAX = 128
+    private val failed = object : LinkedHashMap<String, Long>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?): Boolean = size > FAILED_MAX
+    }
+
+    /** URL to the elapsed-realtime ms until which it counts as failed. */
+    fun recentlyFailed(url: String, now: Long = android.os.SystemClock.elapsedRealtime()): Boolean = synchronized(failed) {
+        val until = failed[url] ?: return false
+        if (now >= until) { failed.remove(url); false } else true
+    }
+
+    fun markFailed(url: String, now: Long = android.os.SystemClock.elapsedRealtime(), ttlMs: Long = FAILED_TTL_MS) {
+        synchronized(failed) { failed[url] = now + ttlMs }
+    }
+
+    /** Tests only. */
+    internal fun clearFailed() { synchronized(failed) { failed.clear() } }
 }
 
 /** The logo's slot inside the 80 x 56 plate (5 px clear on each side: the old 56 x 36 slot x 1.25). Design px. */

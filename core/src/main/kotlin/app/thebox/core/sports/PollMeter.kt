@@ -18,7 +18,7 @@ import kotlin.math.ceil
  * - **An endpoint change resets the window** (the board fallback has a 10 s feed); [PollMeasure.slowed] survives it.
  *   Only a good sample changes the endpoint; a failed one on another endpoint is dropped (fix pass 2).
  * - **Effective interval** = the choice (Auto = the recommendation), raised to [SportsConstants.AUTO_429_FLOOR_S] for the
- *   NFL after a 429 or 403 (S2: a server instruction, so for every choice).
+ *   timed leagues (NFL, CHL) after a 429 or 403 (S2: a server instruction, so for every choice).
  */
 object PollMeter {
     /** The nearest-rank p90 of [work], or null when there are fewer than [SportsConstants.METER_MIN] samples. */
@@ -118,22 +118,30 @@ object PollMeter {
         return choices.firstOrNull { it > choiceS } ?: 0
     }
 
-    /** The interval the machine runs, in seconds: the choice (Auto = [recommended]), with the NFL's 429 floor (S2). */
+    /** The interval the machine runs, in seconds: the choice (Auto = [recommended]), with the 429 floor for the timed leagues (S2). */
     fun effectiveS(choiceS: Int, league: League, m: PollMeasure?): Int {
         val c = normalize(choiceS, league)
         val base = if (c == 0) recommended(m, league) else c
-        return if (league == League.NFL && m?.slowed == true) maxOf(base, SportsConstants.AUTO_429_FLOOR_S) else base
+        return if (league.timing == PollTiming.COMPLETION && m?.slowed == true) maxOf(base, SportsConstants.AUTO_429_FLOOR_S) else base
     }
 
     /** The median wire bytes per good poll, else the league's estimate (§3.7). */
     fun bytesPerPoll(m: PollMeasure?, league: League): Int {
         val b = m?.wireBytes.orEmpty()
-        if (b.isEmpty()) return if (league == League.NHL) SportsConstants.EST_WIRE_BYTES_NHL else SportsConstants.EST_WIRE_BYTES_NFL
+        if (b.isEmpty()) return when (league.group) {
+            LeagueGroup.NHL -> SportsConstants.EST_WIRE_BYTES_NHL
+            LeagueGroup.NFL -> SportsConstants.EST_WIRE_BYTES_NFL
+            LeagueGroup.CHL -> SportsConstants.EST_WIRE_BYTES_CHL
+        }
         val s = b.sorted()
         return s[(s.size - 1) / 2]
     }
 
-    /** About this many MB an hour at [intervalS] while a game is live (headers not counted). */
+    /**
+     * About this many MB an hour at [intervalS] while a game is live. The NHL and NFL samples count response bodies only
+     * (headers not counted); the CHL's count every request's and answer's headers too (304s included; CHL §2.4, WP-3 fix
+     * pass S2), as does [SportsConstants.EST_WIRE_BYTES_CHL].
+     */
     fun mbPerHour(m: PollMeasure?, league: League, intervalS: Int): Double =
         3600.0 / intervalS.coerceAtLeast(1) * bytesPerPoll(m, league) / 1_000_000.0
 
@@ -141,4 +149,6 @@ object PollMeter {
     const val NFL_EVENT = "nfl-event"
     const val NFL_BOARD = "nfl-board"
     const val NHL_LANDING = "nhl-landing"
+    /** (CHL §1.6 #10) The CHL follow's live-mode polls (the six Firebase nodes), for OHL, WHL and QMJHL alike. */
+    const val CHL_LIVE = "chl-live"
 }

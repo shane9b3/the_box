@@ -12,8 +12,8 @@ import app.thebox.core.sports.League
 import app.thebox.core.sports.NhlMapper
 import app.thebox.core.sports.ScoreSource
 import app.thebox.core.sports.SportsConstants
+import app.thebox.core.sports.SportsDebugOverride
 import app.thebox.core.sports.TeamLine
-import app.thebox.data.BuildConfig
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -23,7 +23,6 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
-import java.io.File
 import java.io.IOException
 import java.io.InterruptedIOException
 import java.net.SocketTimeoutException
@@ -34,7 +33,7 @@ import kotlin.coroutines.resumeWithException
 /**
  * The NHL's base URLs (docs/design/m6-score-bug.md §2.1, §2.2). One place; a **debug** build can point both at the fake
  * panel (A-N3): `adb shell run-as app.thebox.debug sh -c 'mkdir -p files/debug && echo http://10.0.2.2:8080 >
- * files/debug/sports_base'`, then restart the app. The file is read only behind `BuildConfig.DEBUG` (see [resolve]).
+ * files/debug/sports_base'`, then restart the app. The file is read only in a debuggable app (`SportsDebugOverride`, see [resolve]).
  */
 data class SportsEndpoints(val apiBase: String, val logoBase: String) {
     companion object {
@@ -42,8 +41,8 @@ data class SportsEndpoints(val apiBase: String, val logoBase: String) {
         const val LOGO_BASE = "https://assets.nhle.com/logos/nhl/svg/"
         val DEFAULT = SportsEndpoints(API_BASE, LOGO_BASE)
 
-        /** Under `filesDir`; one line, an origin such as `http://10.0.2.2:8080`. */
-        const val DEBUG_OVERRIDE_FILE = "debug/sports_base"
+        /** Under `filesDir`; one line, an origin such as `http://10.0.2.2:8080` (the one constant in `:core`). */
+        const val DEBUG_OVERRIDE_FILE = SportsConstants.DEBUG_OVERRIDE_FILE
 
         /**
          * An override origin → `{origin}/v1/` and `{origin}/logos/nhl/svg/` (the fake panel serves the NHL's own paths).
@@ -59,12 +58,10 @@ data class SportsEndpoints(val apiBase: String, val logoBase: String) {
 
         /** The endpoints for this build: [DEFAULT], or the debug override file in a debug build. Call off the main thread. */
         fun resolve(context: Context): SportsEndpoints {
-            if (!BuildConfig.DEBUG) return DEFAULT
-            val text = try {
-                File(context.filesDir, DEBUG_OVERRIDE_FILE).takeIf { it.isFile }?.readText()
-            } catch (e: IOException) {
-                null
-            }
+            // (Integration review L4) The shared check: the installed app's FLAG_DEBUGGABLE; a release build never opens the file.
+            val debuggable = SportsDebugOverride.isDebuggable(context.applicationInfo.flags)
+            if (!debuggable) return DEFAULT
+            val text = SportsDebugOverride.text(context.filesDir, debuggable)
             return fromOverride(text)?.also { BoxLog.w(TAG, "debug build: sports endpoints overridden") } ?: DEFAULT
         }
 

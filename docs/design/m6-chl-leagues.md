@@ -2,6 +2,15 @@
 
 Status:
 - **Proposed 2026-11-13; reviewed 2026-11-13; revised 2026-11-13 after the lead's rulings.**
+- **Commit 0 implemented and reviewed 2026-11-13** (`docs/review/2026-11-13-chl-commit0-review.md`, "Fix pass"). The
+  reconciled decisions are written into §1.2, §1.6, §2.3, §3.2, §4.1, §6.4, §8 and §10 below, each marked "(C0 fix
+  pass)".
+- **WP-1 implemented and reviewed 2026-11-14** (`docs/review/2026-11-14-chl-wp1-mapper-review.md`, "Fix pass"). The
+  rulings (S1, S2 model changes; the 11 implementation departures) are written into §3.6, §5.3, §5.5, §5.6 and §5.7, each
+  marked "(WP-1 fix pass)".
+- **Integrated 2026-11-14** on `chl`: WP-2 to WP-5 merged with their fix passes; the integration items (L10 refused reason
+  on screen, one debug-override constant, the `:ui:sportsHashGate` reader, §9 doc amendments) are in the decision note's
+  "Integration" section.
 - Review: `docs/review/2026-11-13-chl-leagues-design-review.md`. Every finding is applied in place and marked (B1),
   (S4), (L7) and so on; the dispositions are in the decision note's "Design review" section.
 - Owner request, owner decisions and lead rulings: `docs/decisions/2026-11-13-chl-leagues.md` (binding).
@@ -145,6 +154,20 @@ Rules:
    */
   val powerPlayUnknown: Boolean = false,
   ```
+- **(C0 fix pass, commit-0 review B2) `GameSnapshot.startTbd: Boolean = false`**, appended after `powerPlayUnknown`:
+  the league lists the time as to be decided (`time_tbd == "1"`). `startUtcMs` is then local midnight of the game day
+  in the league's reference zone, a placeholder for ordering and the pre-game wake; the card and picker row show "Time TBD"
+  (`sports_time_tbd`). CHL only; always false for the NHL and the NFL.
+  (Integration fix pass, review S1) The follow carries it too: `FollowedGame.startTbd: Boolean = false` (appended,
+  defaulted; persisted in `sports_follow`). For a TBD follow the machine's hard expiry is measured from the **end of the
+  league day** (`SportsDays.dayEndUtcMs`: 05:00 local the next morning) + `HARD_EXPIRY_MS`, not from the placeholder, so
+  a follow at any hour of the game day stays until 13:00 local the next day; a snapshot that names a time clears the flag
+  and the ordinary `start + 8 h` applies. The quick-bar line and the sheet's off-board row read "Time TBD". The Today
+  overlay ignores a scheduled TBD game (its placeholder is not a start, review L5) until the board reports it started.
+- **(C0 fix pass, commit-0 review B3) `ScoreFacts.chlLeague: League? = null`**: the remembered CHL sub-league
+  (`SportsPrefs.chlShown`), filled by `PlayerViewModel` (WP-5, row 50), read by the sheet (WP-2, rows 31–34). The League
+  row's CHL step calls `setScoreLeague(chlLeague ?: OHL)`: `setScoreLeague` always takes a concrete league, and for a CHL
+  league its implementation also writes `chlLeague`.
 - **`DayBoard.league: League? = null`.** Every CHL board sets it. Without it, `SportsViewModel.boardLeague`
   (`SportsViewModel.kt:209-210`) would read an **empty** CHL board as an NHL board, and the tab would show Loading
   forever.
@@ -223,13 +246,13 @@ work package, §8).
 | 3a | `SportsContracts.kt` `GameSnapshot`, `DayBoard`, `FailKind` | — | §1.2 additions | C0 |
 | 4 | `core/.../sports/SportsPrefs.kt:23-33` | two intervals | §1.3 | C0 |
 | 5 | `core/.../sports/SportsConstants.kt:59-65` | NHL / NFL choices | `INTERVAL_CHOICES_CHL_S`, `INTERVAL_DEFAULT_CHL_S` (Appendix A) | C0 |
-| 6 | `SportsConstants.kt:87-88` | `EST_WIRE_BYTES_NHL/NFL` | `EST_WIRE_BYTES_CHL = 2_000` (§2.5) | C0 |
+| 6 | `SportsConstants.kt:87-88` | `EST_WIRE_BYTES_NHL/NFL` | `EST_WIRE_BYTES_CHL = 4_000` (§2.5; WP-3 fix pass S2) | C0 |
 | 7 | `SportsConstants.kt:102-104` | `if NHL else NFL` | `when (league.group)` | C0 |
 | 8 | `core/.../sports/PollMeter.kt:125` | 429 floor for NFL | timed leagues | WP-2 |
 | 9 | `PollMeter.kt:131` | NHL else NFL estimate | `when (league.group)` | WP-2 |
 | 10 | `PollMeter.kt:141-143` | endpoint ids | `CHL_LIVE = "chl-live"` | C0 |
 | 11 | `core/.../sports/ScoreBugMachine.kt:176` | older-body hold under `fast()` | `league == NFL` only | WP-2 |
-| 12 | `ScoreBugMachine.kt:200-218` (`fetched`, `Failed`) | fast base under `fast()` | timed; **REFUSED → `backoffAt = receivedMono + BACKOFF_MAX_MS`**, whatever `Retry-After` says (S7) | WP-2 |
+| 12 | `ScoreBugMachine.kt:200-218` (`fetched`, `Failed`) | fast base under `fast()` | timed; **REFUSED → `backoffAt = receivedMono + max(BACKOFF_MAX_MS, Retry-After)`**: never sooner than 300 s, a longer `Retry-After` honoured up to 3 600 s on REFUSED only (S7; WP-2 L3 lead ruling; corrected in the integration fix pass, review S3) | WP-2 |
 | 13 | `ScoreBugMachine.kt:276, 317-325` | NFL view branch | unchanged (CHL takes the hockey path) | — |
 | **13a** | **`ScoreBugMachine.kt:297-310` (hockey `view()`), `:329` (hockey `knownView()`)** | `league` defaults to NHL | **`league = s.id.league`** (B1). NHL value unchanged | **C0** |
 | **13b** | **`ScoreBugMachine.kt:79-81` (state), `:300` (view `powerPlay`), `:486-487` (delay back-in-time), `:536-544` (advance: `ppEndedEntry` / `lastShownPp`), `:771-772` (`gatedPp`)** | null PP = none | **§4.1 unknown-PP hold** (B3) | **C0** (contract + machine) |
@@ -256,7 +279,7 @@ work package, §8).
 | 34 | `PlayerStateMachineImpl.kt` (new, after 2169) | — | `ScoreChlRow` OK: OHL → WHL → QMJHL → OHL; focus stays; board reloads under Loading | WP-2 |
 | 35 | `data/.../sports/ScoreRepositoryImpl.kt:189` | `?: sources.values.first()` | **no silent fallback**: `Failed(HTTP_OTHER)`, logged once | WP-3 |
 | 36 | `ScoreRepositoryImpl.kt:416` | `pushInterval()` on NHL/NFL change | also `chlIntervalS` | WP-3 |
-| 37 | `ScoreRepositoryImpl.kt:479-499, 520-529` (day `dayNextAt`, `dayFailed`) | back-off from 20 s | **REFUSED → next day request at `fail + BACKOFF_MAX_MS`** (S7) | WP-3 |
+| 37 | `ScoreRepositoryImpl.kt:479-499, 520-529` (day `dayNextAt`, `dayFailed`) | back-off from 20 s | **REFUSED → next day request at `fail + max(BACKOFF_MAX_MS, Retry-After)`**, Retry-After up to 3 600 s on REFUSED only (S7; lead ruling; corrected in the integration fix pass, review S3) | WP-3 |
 | 38 | `ScoreRepositoryImpl.kt:582-592` (`pushInterval`) | the followed league's meter | unchanged (it already uses the followed league; L4) | — |
 | 39 | `ScoreRepositoryImpl.kt:614` | 429 slowed for NFL | timed leagues | WP-3 |
 | 40 | `ScoreRepositoryImpl.kt:635-637` | NFL meter reset | NFL only | — |
@@ -326,8 +349,13 @@ Facts:
   - a key for another client, "Client access denied.";
   - a missing `gc` game, 404 `{"error": "No such game"}`.
 - **`lscluster` echoes the key** in `SiteKit.Parameters.key`.
-- **Conditional GETs:** `If-None-Match: <ETag>` on a Firebase node returns 304 with an empty body. The ETag comes
-  with `X-Firebase-ETag: true`.
+- **Conditional GETs:** `If-None-Match: <ETag>` on a Firebase node returns 304 with an empty body (with or without
+  `X-Firebase-ETag`). The `ETag` header is sent only when the request carries `X-Firebase-ETag: true`; a `null` node's
+  is `null_etag`. A date query (`orderBy`/`equalTo`) with `X-Firebase-ETag` is a 400 "Mixing querying parameters and ETag
+  requests is not supported" (WP-3, checked 2026-11-14).
+- **(WP-3 fix pass, review S2) Firebase is HTTP/1.1 only and never compresses** (curl `--http2` negotiates 1.1; `goals`
+  answers 7.8 KB raw with `Accept-Encoding: gzip`). Each request carries about 250–300 B of headers and each answer about
+  370 B, a 304 included (measured 2026-11-14). An idle connection is kept about 75 s.
 
 ### 2.2 Keys, redaction, telemetry
 
@@ -364,7 +392,10 @@ Facts:
 
 ### 2.3 The day list
 
-**"Today"** (P7, `SportsDays`, `:core`, **commit 0** (S11)): `today(league, nowUtc) = (nowUtc at zone − 5 h).toLocalDate()`.
+**"Today"** (P7, `SportsDays`, `:core`, **commit 0** (S11)): for the CHL, `today(league, nowUtc) = (nowUtc at zone − 5 h)
+.toLocalDate()`, the 5 h taken on the **local wall clock** so the day turns over at 05:00 local on DST days too. (C0 fix
+pass, deviation 4) The NHL and the NFL keep the Eastern calendar date with **no rollover**, exactly today's
+`LocalDate.now(EASTERN)`.
 
 | League | Reference zone | Why |
 |---|---|---|
@@ -383,27 +414,36 @@ Facts:
      next board retries.
   3. `seasons` once per process per league (playoff flag).
   4. **Today only**, while a game is live or about to start: the Firebase overlay (`runningclock` + `goalssummary`
-     for `DatePlayed == D`) at `DAY_POLL_LIVE_MS` (30 s). Its clock, status and scores replace the board's for
+     for `DatePlayed == D`) at `DAY_POLL_LIVE_MS` (30 s). (C0 fix pass B4) The mapper's
+     `overlay(board: ChlBoard, runningclock, goalssummary): ChlBoard` takes the facts with the board, because §3.4's clock
+     table needs each game's playoff flag and OT length. Its clock, status and scores replace the board's for
      matching ids. A failed overlay keeps the board ("Updated 2 min ago").
+- (WP-3 fix pass, review L9) A day answer's `receivedMono` is the answer's own, also when the `gamesbydate` body comes from
+  the 240 s cache: the day policy schedules from it. The tab's "Updated" is therefore up to 240 s optimistic for a cached
+  board without an overlay. Expired bodies are dropped (at most yesterday, today, tomorrow kept, L2), and `seasons` is
+  re-read at most once a day (L3).
 - REFUSED day failures: §2.6.
 
 ### 2.4 The followed game
 
 `game(id, startUtcMs)` has two modes.
 
-**Board mode** (S5): only when the game is **board-SCHEDULED** (status 1, start in the future), or **board-FINAL and
-evicted** from Firebase. The game is read from the cached `gamesbydate` board of its date. Board without the game →
+**Board mode** (S5): only when the game is **board-SCHEDULED** until `start − PRE_WAKE_MS` (§2.5; a "Time TBD" game until
+the board reports it started, WP-3 fix pass L6), or **board-FINAL and evicted** from Firebase. The game is read from the cached `gamesbydate` board of its date. Board without the game →
 `Fetch.NotFound`.
 
-**Live mode** (any game that is not in board mode): each poll requests **all six nodes in parallel**, each with
-`If-None-Match` (S4). OkHttp `enqueue`, one coroutine each, all cancelled together; one HTTP/2 connection.
+**Live mode** (any game that is not in board mode): each poll requests **all six nodes**, each with `X-Firebase-ETag: true`
+and `If-None-Match` (S4). OkHttp `enqueue`, one coroutine each, all cancelled together; (WP-3 fix pass, lead ruling L11)
+**at most three at a time**, `runningclock` and `goalssummary` first, on the shared client's keep-alive connections (about
+two round trips a poll). At the 120 s not-in-FULL cadence the connections have closed (Firebase keeps them about 75 s), so
+those polls pay their TLS handshakes; accepted.
 
 | Node | Required? | On failure |
 |---|---|---|
 | `runningclock/games/{id}` | yes | poll `Failed(kind)` |
 | `goalssummary/1/games/{id}` | yes | poll `Failed(kind)` |
-| `publishedclock/1/games/{id}` | no | status from `runningclock.status_id` |
-| `shotssummary/1/games/{id}` | no | `sog = null` |
+| `publishedclock/1/games/{id}` | no | its last confirmed body (WP-3 fix pass L7); none yet: status from `runningclock.status_id` |
+| `shotssummary/1/games/{id}` | no | its last confirmed body (L7); none yet: `sog = null` |
 | `penalties/1/games/{id}` | no | `powerPlayUnknown = true` (H8) |
 | `goals/1/games/{id}` | no | `lastGoal = null`; `powerPlayUnknown = true` (H6) |
 | `shootouts/1/games/{id}` | no | added only when the **previous** snapshot was a possible shootout (§3.3 (b)/(c)), WHL and QMJHL |
@@ -414,7 +454,9 @@ evicted** from Firebase. The game is read from the cached `gamesbydate` board of
 - **`Fetch.Ok` metadata:**
   - `receivedMono` / `serverDateMs` come from the `runningclock` answer;
   - `ageS = 0`;
-  - `wireBytes` = the sum over the poll (WireMeter);
+  - `wireBytes` = the sum over the poll of the body bytes (WireMeter) **plus every request's and answer's header bytes**
+    (request line, status line, headers, blank lines; 304s included; WP-3 fix pass, lead ruling S2). The NHL and NFL
+    keep counting bodies only;
   - `maxAgeS = null`.
 - A 10 s `SPORTS_CALL_TIMEOUT_MS` is kept. Polls never stack (the next waits for completion), and the meter counts
   a timeout's elapsed time (L10).
@@ -431,12 +473,13 @@ evicted** from Firebase. The game is read from the cached `gamesbydate` board of
 - **Why 5 s:**
   - the running clock is real time and is shown as polled (ruling 6), so the interval is the clock's step;
   - 5 s is the NFL floor the owner already accepted for an undocumented host.
-- **Wire cost per poll** (S4: six requests, one HTTP/2 connection, compressed headers):
-  - `runningclock` ~0.3 KB;
-  - five 304s at ~0.15 KB each;
-  - a changed `shotssummary` ~0.5 KB, most polls in play;
-  - a changed `penalties` 1–6 KB, or `goals` ≤ 10 KB, a few times a game.
-  - Estimated **~1.5–2 KB per poll**, about **1.4 MB an hour at 5 s**. `EST_WIRE_BYTES_CHL = 2_000` until measured.
+- **Wire cost per poll** (S4; corrected by the WP-3 fix pass, lead ruling S2: six HTTP/1.1 requests, uncompressed headers):
+  - headers: about 640 B per request and answer, a 304 included, so about **3.9 KB** for six;
+  - bodies: `runningclock` 110 B every poll (it changes every second); a changed `shotssummary` ~0.3 KB most polls in
+    play; a changed `goalssummary` ~0.5 KB, `penalties` 1–19 KB or `goals` up to ~13 KB a few times a game;
+  - measured on the real host as the source reports it to the meter (2026-11-14, OHL 29191, `HockeyTechWireProbe`): a
+    first poll 26.0 KB (all six bodies), an all-304 poll **3 878 B**; in play about 4.0–4.3 KB;
+  - about **3 MB an hour at 5 s**. `EST_WIRE_BYTES_CHL = 4_000`.
 
 ### 2.6 Errors and their texts
 
@@ -444,16 +487,20 @@ evicted** from Firebase. The game is read from the cached `gamesbydate` board of
 |---|---|---|
 | No default network | `DayState.Failed(OFFLINE)` | existing "No internet connection…" |
 | Timeout / IO / 5xx / HTML 404 | `Failed(TIMEOUT / IO / HTTP_5XX / HTTP_OTHER)` | "OHL scores did not answer. Press OK to try again; scores may be down for a few minutes." |
-| 429 | `Failed(HTTP_429)` + `Retry-After` | same text; the meter's slowed note |
+| 429 | `Failed(HTTP_429)` + `Retry-After` (clamped to 300 s, as the NHL's; WP-3 fix pass S1) | same text; the meter's slowed note |
 | `lscluster` 200 non-JSON body starting `Invalid key` / `Client access denied`; Firebase 401 / 403 | `Failed(REFUSED)` | "OHL scores stopped letting this app in. CHL scores need an app update; NHL and NFL scores still work." |
 | Non-JSON, over the cap, unmappable; a live-mode `null` (S5) | `Failed(BAD_BODY)` | the "did not answer" text |
 | Board without the followed game | `NotFound` | toast "The OHL no longer lists LDN – KIT. Follow another game in Sports." |
 
 - **REFUSED (S7):**
-  - The machine's next follow poll is at `receivedMono + BACKOFF_MAX_MS` (row 12); the next day request at
-    `fail + BACKOFF_MAX_MS` (row 37). Never faster, whatever `Retry-After` says.
+  - The machine's next follow poll is at `receivedMono + max(BACKOFF_MAX_MS, Retry-After)` (row 12); the next day
+    request at `fail + max(BACKOFF_MAX_MS, Retry-After)` (row 37). Never sooner than 300 s; a longer `Retry-After` is
+    honoured up to 3 600 s, on REFUSED only (lead ruling; the source clamps every other kind's `Retry-After` to 300 s).
   - A follow keeps its game: the bug dims, then hides on the existing timers.
-  - The tab and the sheet show the REFUSED text.
+  - The tab and the sheet show the REFUSED text. (Integration, WP-3 review L10) For a refused **follow** (either host),
+    `ScoreRepository.followFailure` is REFUSED until the next answer or a follow change: the followed card on the Sports tab
+    shows the text in place of its two team rows, and the quick-bar sheet adds the followed league's failure row under the
+    followed game (not twice when the day row already says it for the same league). No new string.
   - One log line per state change.
   - Partial refusals stay partial: `lscluster` refused leaves a live follow working; Firebase refused fails the
     follow and the Today overlay but not the board.
@@ -514,7 +561,7 @@ unmappable body yields null, and the source turns it into `BAD_BODY`.
 |---|---|---|
 | `id` | `game_id` | digits only, else drop |
 | `dayKey` | `date_played` | else the board's date |
-| `startUtcMs` | `date_played` + `schedule_time` in `timezone` | unknown zone → the league's reference zone; `time_tbd == "1"` → midnight local and "Time TBD" |
+| `startUtcMs` | `date_played` + `schedule_time` in `timezone` | unknown zone → the league's reference zone; `time_tbd == "1"` → midnight local and "Time TBD" (`startTbd = true`, C0 fix pass B2) |
 | `away` / `home` | `visiting_team_*` / `home_team_*`, `*_goal_count`, `*_shots` | score null while status 1; logo by team id (§3.5) |
 | `phase` | `status`, `final`, clock | §3.4 |
 | `period`, `clock` | `period`, `game_clock` | display only; Today's overlay replaces them |
@@ -603,6 +650,29 @@ board `final == "1"`) wins. `Started` = `publishedclock.Started`, or any score, 
   older mark than the season-suffixed JPEGs (`_295`), so they go on the owner's sign-off sheet.
 - Coil decodes PNG natively. Logos are never bundled; the fixtures hold the outcome table, not the images.
 
+
+### 3.6 Implementation notes (WP-1 fix pass; the reviewed departures, so this document matches the code)
+
+The WP-1 review (`docs/review/2026-11-14-chl-wp1-mapper-review.md`) accepted these 11 departures from the text above.
+
+| # | Rule as implemented | Why |
+|---|---|---|
+| 1 | H3 applies only to a chain's first link (§5.6) | The edited two-row form gives link 2 a future `TimeStart` by design (E30, E32); with S1 a later link's own start no longer matters |
+| 2 | Period ≥ 4 with unequal scores → no power play at any clock, not only at 0:00 (§3.4 S3) | CHL OT is sudden death (regular season and playoffs): an unequal OT score means the game is over |
+| 3 | **Started** = `publishedclock.Started`, or a score > 0, or any status source (`StatusId`, `status_id`, the board) ∈ {2, 4, 5}; the board's own `started == "1"`; status 1 is always SCHEDULED; the overlay also keeps a game the board shows in play started (review S3) | "status ≥ 2" would make the "3, not Started" row unreachable. **Watch item (S8):** `publishedclock` wins over `runningclock`, so a lagging `StatusId 1` would hide a live game; the recorded samples always agree |
+| 4 | Playoff flag unknown → regular season iff the board lists a 300 s OT (`periods["4"].length`) | A conservative inference from data; otherwise OT → H1 |
+| 5 | Periods 1–3 use the board's listed length when present (1..3600 s), else 1200; OT the board's, else 300 / 1200 by the playoff flag, else unknown (H1) | Strictly more information; identical on every fixture |
+| 6 | Extra Unknown cases: no feed period, no clock, a needed row with no side or period, a flagged row with period < 1, `ppAttempts` unknown with `penalties` null (§5.6) | Each one hides; none can show |
+| 7 | `goalTotal` = both totals − 1 when `Shootout` is true; `lastGoal` is null when the per-side goal counts differ from the score (so a Final SO has none) | §3.3; the −1 is unreachable in play |
+| 8 | Elapsed times strictly `mm:ss`, seconds 0..59 (else unparsable → H2); a call or start past its period's length → H2 | Prefer hiding |
+| 9 | Board: an absent or null `Gamesbydate` is an empty day, another shape or an unparsable day is unmappable; board clocks are not running (no flag); `time_tbd == "1"` or an unparsable `schedule_time` → `startTbd`, local midnight in the league's reference zone | The board is a cached string clock |
+| 10 | Overlay: the date check is per entry (a missing `DatePlayed` is accepted, so the unfiltered node also works); a missing score falls back to the board's, never 0; scores-only re-classifies the board's (already adjusted) clock | |
+| 11 | `followed()` always sets `startTbd = false` | `ChlGameFacts` (frozen) has no TBD flag: the source copies the board snapshot's `startTbd` for a followed TBD game |
+
+Also (review L1, L7): a row without `LSEventId` takes its collection key (the index in Firebase's array form), else a
+negative ordinal, so two rows never share an id; a `seasons` entry without a `playoff` flag is absent (unknown), so the
+board entry's own `playoff` decides.
+
 ---
 
 ## 4. Machine and repository
@@ -625,13 +695,29 @@ board `final == "1"`) wins. `Started` = `publishedclock.Started`, or any score, 
       announces nothing; PP → unknown → none (known) announces "Power play over." once, which is true.
   - **`view()` (`:300`):** `powerPlay = if (fresh) (if (s.powerPlayUnknown) heldPp else gatedPp(s)) else null`, where
     `heldPp` is `lastShownPp` inside the hold, else null. The held tab keeps its last label and frozen seconds.
-  - **`goalWasPp`:** unchanged. With `p.powerPlay` held from the last known state, a goal inside the hold is judged by
-    `lastGoal` first, then by the held power play.
+  - **`goalWasPp`:** (C0 fix pass, deviation 2) takes the previous power play as a parameter: `p.powerPlay`, or the held
+    one when `p` was unknown (an unknown snapshot's own `powerPlay` is null, so "unchanged" could not work). A goal inside
+    the hold is judged by `lastGoal` first, then by the held power play. NHL results are identical.
+  - **The boundary** (C0 fix pass, deviation 1): the hold lasts while `anchor − ppUnknownSince < PP_UNKNOWN_HOLD_MS`
+    (strict), so it is at most 30 s and the 7th unknown poll at 5 s closes it, as the test below says.
+  - **Only in play** (deviation 3): an unknown FINAL or SO snapshot holds nothing.
+  - **A goal inside the run** (C0 fix pass, commit-0 review B1): when an unknown snapshot raises the score of the side on
+    the held power play, the hold is dropped silently (the goal released the minor; the mark's PP GOAL says so). A
+    short-handed goal keeps it. Any score change inside the run is carried into the first known snapshot after it as a
+    score change, so the known "none" that follows never says "Power play over.".
+  - **By elapsed time** (C0 fix pass, review S4): the hold also ends at `ppUnknownSince + delay + PP_UNKNOWN_HOLD_MS` with
+    no new snapshot (breaks, slower intervals, back-off). `nextWakeAtMono` wakes for it; `view()` never draws a held tab
+    past it.
+  - **Delay grown inside a run** (C0 fix pass, review L1): the snapshot shown again restarts the hold from the queue: a
+    known one holds its own power play; an unknown one holds the last known power play before its run, unless the held
+    side scored inside the run.
   - Tests:
     - PP → unknown → PP: nothing spoken, the tab never closes;
     - PP → unknown × 7 (35 s at 5 s): the tab closes silently at the 30 s anchor;
     - PP → unknown → known none: "Power play over." once;
-    - the delay queue: the hold runs on the delayed timeline.
+    - the delay queue: the hold runs on the delayed timeline (anchor ≠ arrival in the test);
+    - (fix pass) PP → unknown + PP goal → known none: no "over", no bar after the goal; a short-handed goal keeps the
+      hold; the hold ends by time with no new poll; a delay grown inside a run holds the last known power play.
 - `ScoreRepositoryImpl`:
   - five-league `Map<League, ScoreSource>` with no silent fallback (#35);
   - a CHL sub-league switch behaves like any league switch;
@@ -686,6 +772,9 @@ object ChlPowerPlay {
 
 ### 5.3 Algorithm
 
+(WP-1 fix pass L3) A node with more than 80 counted rows (links) or more than 80 goals is not a real game's (≤ ~40
+rows, ≤ ~15 goals): the derivation returns Unknown before the model runs, so a hostile body cannot cost seconds per poll.
+
 1. **Counted rows.** A row counts iff all of these hold:
    - `ppFlag`;
    - `!penaltyShot`;
@@ -704,9 +793,13 @@ object ChlPowerPlay {
 3. **Chains (B2).** Rows with the same `(side, period, timeS, playerId)`, `playerId` non-null, form a chain:
    - no offence in the key: one player's tripping + unsportsmanlike are served one after the other;
    - `playerId` null (0 in the feed, bench minors) never chains: two bench minors at one stoppage are two seats;
-   - **links are ordered by `(s, id)`**, not by id: in the OHL's edited form the later link has the lower id (29179
-     P2 15:07: 454471 starts 15:16, 454472 starts 15:07);
-   - a link starts no earlier than the previous link's end.
+   - **links are ordered by `(s, major first, id)`**, not by id: in the OHL's edited form the later link has the lower
+     id (29179 P2 15:07: 454471 starts 15:16, 454472 starts 15:07);
+   - (WP-1 fix pass S2) on an equal start, a major is served before a minor (the standard rule: one player's major and
+     minor at one stoppage serve the major first). **No recorded game exercises this** (no chain contains a 5); E35;
+   - (WP-1 fix pass S1) **a later link starts at the previous link's end**; its own `TimeStart` only orders the links.
+     A pre-filled link-2 `TimeStart` (the two-row form before the scorekeeper edits it after a PP goal) therefore gives
+     no gap and no phantom tail; E34. The recorded replay is byte-identical (no recorded chain has a gap).
 4. **Two seats per side.** At most 2 rows serve at once per side. A further row waits and starts when a seat frees.
 5. **Scheduled end** `e = start + 60 × minutes` (per link: 120).
 6. **Recorded end.** If `onS` is set, find the first `x ∈ {g(period, onS), g(period + 1, onS)}` with `start < x ≤ e`,
@@ -780,8 +873,11 @@ Notation:
 | **E31** (S1) | WHL 1023281 P2: home 5-min fighting flagged 1 + away 2-min unflagged, both at 5:16 | (2, 14:30) and (2, 12:00) | (2, 14:30): **Unknown** (H9, 4-on-4); (2, 12:00): AWAY, ONE_MAN, 136 |
 | **E32** (S2) | OHL 29185 P1 double minor at 5:36, both `TimeStart` 07:36, first `TimeOn` 07:36 | (1, 13:30) and (1, 9:30) | (1, 13:30): AWAY, ONE_MAN, 186; (1, 9:30): None (no phantom 9:36–11:36 bar) |
 | **E33** (S3) | P3 0:00 stopped, status 2, scores 4–1, `A2@19:08` | (3, 0:00) | phase LIVE, "End 3rd"; None (decided) |
+| **E34** (WP-1 fix pass S1) | double minor, two-row form: `A2@5:00` `TimeStart` 05:00 and `A2@5:00` `TimeStart` 07:00 (pre-filled), one player, + `Hg@6:30 pp` | (1, 13:20), (1, 12:50), (1, 11:20) | HOME, ONE_MAN, 110; HOME, ONE_MAN, 80; None (link 2 runs 6:30–8:30) |
+| **E35** (WP-1 fix pass S2) | one player: `A2@2:00` (lower id) + `A5@2:00`, both flagged, + `Hg@3:00 pp` | (1, 15:00), (1, 12:30), (1, 11:30), (1, 11:00) | HOME, ONE_MAN, 240; 90; 30; None (major 2:00–7:00, never released, then the minor 7:00–9:00) |
 
-E29–E32 match `tools/chl/pp_replay.py probe` on the recorded games (the `all` command prints them).
+E29–E32 match `tools/chl/pp_replay.py probe` on the recorded games (the `all` command prints them). E34 and E35 match
+the reference after the WP-1 fix pass (before it, E34 read None / 110 / 20 and E35 180 / 30 / None).
 
 ### 5.6 Hide rules (return `Unknown`: "prefer hiding the bar to showing a wrong one")
 
@@ -789,12 +885,17 @@ E29–E32 match `tools/chl/pp_replay.py probe` on the recorded games (the `all` 
 - **H2** (with S13):
   - a counted row has an unparsable time, `minutes` null, or a period > `now.feedPeriod`;
   - or a **goal** has an unparsable period or time while any counted row is serving (its release cannot be placed).
-- **H3** — a counted row starts after `nowG + 5 s`.
-- **H4** — computed seconds ≤ 0 or > `PP_SECS_MAX`, or a serving row with `e − start > 60 × minutes`.
+  - (WP-1 fix pass L2) or a counted row's `Time` or `TimeStart` is past its period's length.
+  - (WP-1 departure 6) also: a flagged row with period < 1; a row the model needs (flagged, or unflagged 2 / 5 for H9)
+    with no parsable `Home` or `Period` (the mapper's check).
+- **H3** — a counted row starts after `nowG + 5 s`. (WP-1 departure 1) **Only the first link of a chain**: a later
+  link starts where the chain puts it (S1), so its recorded `TimeStart` may be in the future (E30, E32).
+- **H4** — computed seconds ≤ 0 or > `PP_SECS_MAX`, or a serving row with `e − start > 60 × minutes`. The second clause
+  cannot fire with today's model (`e ≤ start + dur`; `TimeOn` only caps) and stays as a guard.
 - **H5** — within the last 120 s of game time, a goal flagged `pp` by a side the model did not give the advantage at
   `t`, or flagged `sh` by a side the model did not make short-handed.
 - **H6** — `goals` null, or its count ≠ `goalTotal` (the shootout +1 excluded), while any counted row serves.
-- **H7** — `penalties` null and `ppAttempts > 0`.
+- **H7** — `penalties` null and `ppAttempts > 0`, or (WP-1 departure 6) `ppAttempts` unknown.
 - **H8** — `penalties` or `goals` failed this poll.
 - **H9 (S1)** — at the same `(period, timeS)`:
   1. pair off unflagged 2- or 5-minute rows of equal minutes across the two sides;
@@ -816,6 +917,10 @@ E29–E32 match `tools/chl/pp_replay.py probe` on the recorded games (the `all` 
    nothing.
 5. **Simultaneous expiry and goal** follow step 7's order (goal first).
 6. **Other major / minor combinations** beyond H9 rely on the flags.
+   - (WP-1 review L4) Coincident minors flagged 1 / 1 (against §5.3's 0 / 0 netting) plus a third minor and a PP goal:
+     `A2@4:00`, `H2@4:00` (both flagged), `A2@4:30`, `Hg@5:00 pp`. The goal releases a coincident minor, so the model
+     shows HOME 20 at 6:10 while the real game is at even strength from 6:00 (coincident minors are never released).
+     Accepted: it needs a scorekeeper flag error; no rule.
 7. **Seconds** = until the advantage shrinks, as computed now. In 4-on-3 (2 vs 1) it is the short-handed side's
    earliest seat; if the other side's single penalty ends first, the advantage grows and the time jumps.
 8. **Finished data only.** The replays below use final data. Live behaviour is measured by the S8 gate (§7.4).
@@ -832,6 +937,10 @@ the feed's own flags.
 | Even strength | **161 / 161** |
 
 - The one miss is OHL 29182 P3 00:41: a PP goal with no penalty on record. H5 hides it (E21).
+- (WP-1 fix pass, 2026-11-14) Unchanged after the S1 / S2 model changes, in the reference and in Kotlin; the audit below
+  too. `ChlPowerPlayReplayTest` also asserts second-by-second parity with the reference (`tools/chl/pp_parity.py`) and a
+  5 s polled replay: 4 718 polls show a bar, 22 147 none, 49 unknown; every bar agrees with the reference on side, kind
+  and seconds, and every "none" poll is even in the reference.
 - No goal second falls inside an H9 window.
 
 **Duration audit (S8):** the model run **without** `TimeOn` (so it is independent of it), compared with every
@@ -942,6 +1051,33 @@ Code lengths:
   - **Bar strings:** `{CODE} POWER PLAY 1:32`, `{CODE} 5-ON-3 1:32`, `{CODE} POWER PLAY GOAL` at 20 px with the
     italic overhang, inside 333 / 301.5, plus "NFL POWER PLAY GOAL".
   - Takeover badge fallback and tally for every within-league pair.
+- **(C0 fix pass, lead ruling on O3, review S1–S2) Logo fallbacks of 4-letter codes.** The capsule text and both goal
+  badges' fallback text (Pill `GoalPainter`, Stacked `StackedGoalPainter`) step down in 2 px steps from their size (18,
+  24, 24) and, **for a 4-character code only**, may go below the general 18 px floor to
+  `LOGO_FALLBACK_CODE4_FLOOR_PX` = 16 (`CodeFit.stepDown`, `CodeFit.fallbackFloorPx`). Never a display alias. Limits:
+  the capsule overhangs the 64 px slot by ≤ `LOGO_CAPSULE_OVERHANG_MAX` (4) a side and keeps ≥
+  `LOGO_CAPSULE_SCORE_GAP_MIN` (6) from the score's **ink** (widest of 0–19); a badge's text **ink** fits its slot (Pill
+  64, Stacked 67.5). Measured in commit 0 (`ChlCodeFitMeasureTest`; the sizes WP-5 must draw are pinned there):
+
+  | Code | Capsule px | Pill badge px | Stacked badge px | Notes |
+  |---|---|---|---|---|
+  | BRAM | **16** | **22** | **22** | 18 px: capsule 73, overhang 4.5 (fails); 16 px: capsule 67, overhang 1.5, gap 9.5 (Large 9.3). Badge ink 70 at 24, 63 at 22 |
+  | FLNT | 18 | 24 | 24 | capsule 67, overhang 1.5, gap 9.5 |
+  | NIAG | 18 | 24 | 24 | capsule 65, overhang 0.5, gap 10.5 |
+  | NFL | 18 (disc) | 24 | 24 | 3 characters: the disc |
+
+  Every 3-letter code keeps today's size, so NHL and NFL drawing is unchanged.
+- **(WP-5 fix pass, lead ruling on review S1 / R1) The Stacked rows' fallback for a code longer than 3 characters.** The
+  Pill capsule above is right for the Pill (64 px slot) and stays. The Stacked logo slot is 50.4 px (`LOGO_SLOT_W` 112 ×
+  0.45) and the logo moves with the stripe, so a 67 px capsule overhung it by 8.3 px a side and sat about 1 px from the
+  stripe. **Rule:** in the Stacked bug the logo fallback stays **inside the logo slot** and keeps **≥ 6 design px** from
+  the stripe and from the code's ink, unmirrored and mirrored, with and without the power-play stripe, Standard and
+  Large. For a code of more than 3 characters Stacked draws a **plain 44 px disc without text**, filled with that team's
+  Stacked stripe colour (`StackedColourTable.pair(league, away, home)`, already contrast-safe against the row); the
+  code is printed beside it by the row. 3-letter and 2-letter fallbacks and every NHL fallback are unchanged (the disc
+  with its text; hash gate). Measured on the painted pixels (`ChlStackedFallbackTest`, BRAM / FLNT / NIAG, all four
+  geometries, both rows, both sizes): disc 43 to 44 px wide, gap to the stripe 12.8 to 14.0, gap to the code's ink 16.8
+  to 19.0 design px. The code text is never drawn inside the Stacked fallback, so the 16 px floor does not apply there.
 - **Step-down extended to codes (Q4):** if a 4-letter code fails a row fit or a bar string at its size, the existing
   2 px step rule applies to the code text (rows) or the bar string, down to the 18 px floor. **Never a display
   alias.** A failure at the floor is a lead escalation, not a silent clip.
@@ -1064,13 +1200,18 @@ checked).
 - **Hash gate (S9):**
   - before commit 0, run the sports screenshot suites on `main` and commit the SHA-256 list of every PNG to
     `ui/src/test/resources/golden/sports-hashes.txt`;
-  - after integration, every NHL, NFL and Stacked case must hash equal (a test reads the list).
-  - New CHL cases are reviewed by eye and then added to the list.
+  - after integration, every NHL, NFL and Stacked case must hash equal. (Integration) The reader is the Gradle task
+    `./gradlew :ui:sportsHashGate`: it deletes the six output folders, reruns `:ui:testDebugUnitTest`, then hashes; on a
+    host other than the list's `# host:` line it is skipped with a message (`docs/m0-toolchain.md`).
+  - New CHL cases are reviewed by eye (`ui/build/chl-ui/`); they are not in the list.
 - **Live power-play gate (S8):**
   - `tools/chl/record_live.py` (WP-3) records all seven nodes for a followed game every 5 s, to a fixture folder;
   - record at least **one full live game per league** before release;
-  - `pp_replay.py live <folder>` replays the derivation poll by poll and compares it with the model on that game's
-    final data. It reports:
+  - (WP-3 fix pass S3; integration) **The gate is `ChlLiveGateTest`** (`:core` tests, `ChlLiveGate`):
+    `CHL_LIVE_RECORDINGS=<folder> ./gradlew :core:test --tests '*ChlLiveGateTest*' -i` replays each recording poll by
+    poll through `HockeyTechMapper.followed` (and so `ChlPowerPlay`) and compares it with the model on that game's final
+    data (procedure: `tools/chl/README.md`). Without the variable, it runs the fake panel's recordings only.
+    `pp_replay.py live <folder>` is a quick check, not the gate. Both report:
 
 | Metric | Definition |
 |---|---|
@@ -1080,7 +1221,8 @@ checked).
 
   - **Threshold (proposed for the lead): wrong-bar seconds ≤ 5 % of the final model's power-play seconds per league,
     and no single wrong stretch longer than 30 s.** Hidden and missing seconds are reported, not gated: they are the
-    accepted misses 1–2.
+    accepted misses 1–2. (WP-3 fix pass S3) `ChlLiveGateTest` also gates hidden + missing ≤ 25 % and shown seconds within
+    ±5 s ≥ 95 %, per league.
 - **Owner sign-off:** the 61 colour pairs (contact sheet: Pill goal and PP tab, Stacked rows), `SAMPLED` lines named;
   the NIAG and CAP recovered logos.
 - **Only on a live game:**
@@ -1113,16 +1255,29 @@ checked).
 | **WP-2** core sweep | `ScoreBugMachine.kt` rows 11, 12, 14, 15 (timed, REFUSED back-off); `PollMeter.kt` rows 8–9; `ScoreBugPlacement.kt`; `WpaPages.kt` rows 21–27; `PlayerStateMachineImpl.kt` rows 31–34; their tests (`ScoreBugMachineChlTest` for timing / back-off, placement, sheet, settings) | Sonnet (under this spec) | C0 | ~350 + ~450 tests |
 | **WP-3** data source | new `data/.../sports/HockeyTechScoreSource.kt`, `HockeyTechEndpoints.kt`; `SportsModule.kt`; `ScoreRepositoryImpl.kt` rows 35–37, 39; `ExportRedactionTest` cases; `HockeyTechScoreSourceTest`; `tools/fakepanel/sports_chl.py`, `test_sports_chl.py`, `fakepanel.py` (flag wiring), `tools/fakepanel/README.md`; `tools/chl/record_live.py` and the `live` command of `pp_replay.py` | Opus | C0 | ~800 Kotlin + ~700 Python |
 | **WP-4** team tables | `core/.../sports/ChlTeamColours.kt`, `StackedColourTable.kt` (CHL tables), `ChlTeamColoursTest`, `StackedColourTableTest`, the colour research note | Sonnet (research and table); Opus review of the generalisation | C0 | ~350 + ~300 tests |
-| **WP-5** UI | `SportsViewModel.kt`, `SportsScreen.kt`, `SportsText.kt`, `PlayerText.kt`, `TeamLogo.kt` (+ new `ChlLogoCheck.kt`), `GameCard.kt` (if the fit needs it), `PlayerEffectsImpl.kt` (row 49), `PlayerViewModel.kt` (row 50); UI tests (fit, `ChlLogoTest`, `TeamCodeIsNotALeagueTest`, Sports tab, screenshots) | Sonnet | C0; WP-4 tables for final screenshots (stubs suffice to build) | ~750 + screenshots |
+| **WP-5** UI | `SportsViewModel.kt`, `SportsScreen.kt`, `SportsText.kt`, `PlayerText.kt`, `TeamLogo.kt` (+ new `ChlLogoCheck.kt`), `GameCard.kt` (if the fit needs it), `PlayerEffectsImpl.kt` (row 49), `PlayerViewModel.kt` (row 50, incl. `ScoreFacts.chlLeague`), **`GoalPainter.kt` and `StackedGoalPainter.kt` (the 4-letter badge fallback text only, §6.4 C0 fix pass)**; UI tests (fit, `ChlLogoTest`, `TeamCodeIsNotALeagueTest`, Sports tab, screenshots) | Sonnet | C0; WP-4 tables for final screenshots (stubs suffice to build) | ~750 + screenshots |
 | **Integration + review** | merge; fake-panel emulator pass; hash gate; code reviews (core, UI); S8 recordings; owner sign-offs | Opus | all | — |
 
 - No file is owned by two packages. `ScoreBugMachine.kt` is split by rows: C0 lands 13a and 13b first; WP-2 edits only
   the timing / back-off functions (`fetched`'s Failed branch, `pollAt`, `fast` → `timed`/`nfl`), and rebases on C0.
 - `strings_sports.xml` and the `SettingsText` files are frozen after C0. A WP that needs a string asks the lead.
+- (C0 fix pass) Commit 0 also owns `HockeyTechContracts.kt` (the mapper ↔ source types), `CodeFit.kt` and the frozen
+  stub signatures of `HockeyTechMapper` (incl. `overlay(ChlBoard…): ChlBoard` and `wantsShootouts(prev, facts)`),
+  `ChlPowerPlay`, `ChlTeamColours`, `StackedColourTable` and `HockeyTechScoreSource`. `GameSnapshot.startTbd` (WP-1 sets,
+  WP-5 reads) and `ScoreFacts.chlLeague` (WP-5 fills, WP-2 reads) are frozen in `SportsContracts.kt`.
+- (C0 fix pass, deviation 6, review L9) Until WP-2 lands row 19 (`ScoreBugPlacement.kt:163/173`), `StackedBug` sizes a
+  CHL Stacked bug with the Pill footprint (unreachable: no CHL source is bound). **WP-5 must not approve CHL Stacked
+  screenshots taken before WP-2 is merged.**
+- (C0 fix pass, review S5) WP-4 and WP-5 touch `:ui` drawing: before handing off, run the hash gate one-liner in the
+  header of `ui/src/test/resources/golden/sports-hashes.txt` (old PNGs deleted first).
 
 ---
 
 ## 9. Existing docs to amend at implementation time (not edited by this design)
+
+(Integration 2026-11-14: done. Each amended doc carries a "CHL amendment (2026-11-14)" note at the section named below;
+the NHL and Stacked decisions carry a "CHL leagues" section; the master plan's M6 row, `README.md` and the fake-panel
+README name the CHL.)
 
 - `docs/00-master-plan.md` M6 row: a "CHL leagues" entry.
 - `docs/decisions/2026-11-05-nhl-score-bug.md`:
@@ -1159,8 +1314,8 @@ Still open:
 - **O1.** The S8 gate threshold (proposed: ≤ 5 % wrong-bar seconds per league, no wrong stretch > 30 s). The lead
   sets it.
 - **O2.** Status 3 and postponed samples. Recorded when seen; the mapping is revisited then.
-- **O3.** If the commit-0 measurement shows a 4-letter code failing even at the 18 px floor (§6.4): a lead
-  escalation.
+- **O3. Settled (C0 fix pass).** BRAM's capsule failed at 18 px (overhang 4.5). The lead's ruling: a 4-letter code's
+  logo-fallback text may step down to 16 px; BRAM then fits (capsule 16 px, badges 22 px). See §6.4.
 
 ---
 
@@ -1170,7 +1325,7 @@ Still open:
 |---|---|---|
 | `INTERVAL_CHOICES_CHL_S` | `[5, 10, 15, 20, 30]` | §2.5, P1 |
 | `INTERVAL_DEFAULT_CHL_S` | 5 | Auto's start |
-| `EST_WIRE_BYTES_CHL` | 2 000 | §2.5, S4 |
+| `EST_WIRE_BYTES_CHL` | 4 000 | §2.5, S4; WP-3 fix pass S2 (HTTP/1.1 headers counted) |
 | `CHL_NODE_MAX_BYTES` | 131 072 | §2.7 |
 | `CHL_DAY_ROLLOVER_H` | 5 | §2.3 |
 | `CHL_REG_PERIOD_S` / `CHL_OT_REG_S` / `CHL_OT_PLAYOFF_S` | 1200 / 300 / 1200 | §3.3 |

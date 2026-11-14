@@ -337,6 +337,57 @@ debug origin (`files/debug/sports_base`) serves both leagues:
 - `sample_espn.py --event {id} --out {dir}` records the real ESPN board for one event (§1.6): a JSONL log plus the raw body of
   every state change.
 
+## Sports: the fake HockeyTech CHL feeds (docs/design/m6-chl-leagues.md §7.3)
+
+`--sports --sports-chl` (config `sports_chl: true`; needs `sports`) adds `sports_chl.py`'s routes under the same debug origin
+(`files/debug/sports_base`): a debug build with that file sends the app's CHL requests to `{origin}/hockeytech/feed/index.php`,
+`{origin}/firebase/svf/` and `{origin}/leaguestat/`, **with the fake keys `fakepanel-ohl`, `fakepanel-whl`,
+`fakepanel-lhjmq`**. The real HockeyTech keys never reach the panel (they are in one app source file only).
+
+- `GET /hockeytech/feed/index.php?feed=modulekit&view=gamesbydate|teamsbyseason|seasons&key=…&client_code=ohl|whl|lhjmq&…`:
+  a wrong key is a 200 `text/html` "Invalid key.", another client's fake key "Client access denied." (as HockeyTech). The body
+  echoes the key in `SiteKit.Parameters`; `max-age=240`.
+- `GET /firebase/svf/{client}/runningclock/games/{id}.json` and `/{node}/1/games/{id}.json` for `publishedclock`,
+  `goalssummary`, `shotssummary`, `penalties`, `goals`, `shootouts`: the node at the request instant. With
+  `X-Firebase-ETag: true` a content ETag; a matching `If-None-Match` is a 304 with no body. Unknown games are `null`.
+  The date queries (`games.json?orderBy="DatePlayed"&equalTo="YYYY-MM-DD"`, the Today overlay) answer `{id: node}`; with
+  `X-Firebase-ETag` they are Firebase's 400 "Mixing querying parameters and ETag requests". `/firebase/svf.json` is 401.
+- `GET /leaguestat/{client}/logos/{file}`: an RGBA PNG (transparent corners); WHL `222.png` is RGB (WEN falls back); OHL
+  `18.png` is 404 (BRAM, the capsule); a `.jpg` is a JPEG marker body (the app swaps every JPEG for `{id}.png`).
+- Slate per league, on the league's "today" (05:00 rollover): the **featured** game (OHL LDN @ KIT `900001`, WHL CGY @ EDM
+  `9100001`, QMJHL NFL @ CHA `92001`) plays 19 segments in 520 s (`--chl-timeline S` = `sports_chl_timeline_s`): pre-game
+  "-", puck drop, a minor, a 5-on-3, a PP goal (the goal row one segment before the released minor's `TimeOn`), a double
+  minor, the S1 fighting major against an unflagged minor, a 0:00 break then "20:00 2nd", a tie, a 3-on-3 OT power play, the
+  tied 0:00 OT, shootout attempts with `Shootout` false (WHL and QMJHL only), Final SO with the winner's +1. The **S3** game
+  (`900002` …) is 4-1 at 0:30, holds 0:00 at status 2 for 60 s, then goes final. An **evening** game (status 1, three hours
+  ahead) and an **evicted final** are on the board but not in Firebase (board mode). `GET /admin/sports-chl` shows the slate
+  and each game's segment; `POST /admin/sports-chl {"restart": true}` (or `/admin/sports`) re-anchors it.
+- Switches (also `POST /admin/config`): `--chl-refuse` (`sports_chl_refuse`: every keyed request "Invalid key."),
+  `--chl-firebase-refuse` (`sports_chl_firebase_refuse`: every Firebase request 401), `--chl-null-live`
+  (`sports_chl_null_live`, S5: the featured game's nodes are `null` while live), `--chl-drop-penalties N`
+  (`sports_chl_drop_penalties`, B3: every Nth `penalties` request 503), `--chl-time-tbd` (`sports_chl_time_tbd`: the
+  evening game, scheduled in every league, is "Time TBD": `time_tbd` `"1"`, `schedule_time` `"00:00:00"`; the app shows
+  "Time TBD" and keeps the follow until 8 h after the league day's end).
+- Start times: every game's `date_played` + `schedule_time` in its `timezone` is its real start instant, on the league day
+  (05:00 rollover in the league's reference zone; Firebase `DatePlayed` is the same day). A start outside that day is
+  clamped to it. **Run after the game zone's midnight but before 05:00, the featured game is listed at 23:59 (game zone)
+  of the league day, up to ~6–7 h before its puck drop, and the evening "scheduled" game is listed at 23:59, in the
+  past.** In that window the featured timeline is capped so the game reaches Final at least 30 min before listed start
+  + 8 h (the app's hard expiry), and the panel logs one line when the cap shortens `--chl-timeline`. **For normal
+  behaviour, run the panel between 05:00 and 21:00 league time.** (Before this fix the panel listed the next calendar
+  day's wall clock under the league day's date, ~24 h in the past, so a follow expired at once.)
+- `tools/chl/record_live.py` records a game's seven nodes every 5 s (the S8 recorder; `--firebase` / `--feed` point it at the
+  panel for a dry run, with `HOCKEYTECH_KEY=fakepanel-ohl` for the board). The S8 gate on a recording is the Kotlin
+  `ChlLiveGateTest` (`tools/chl/README.md`); `pp_replay.py live <folder>` is a quick Python check only.
+- A matching `If-None-Match` is a 304 with or without `X-Firebase-ETag`, as the real database; the `ETag` header is sent
+  only with `X-Firebase-ETag: true`.
+- What the switches show in the app (CHL integration): `--chl-refuse` turns the CHL day list into "OHL scores stopped
+  letting this app in…" (retried only after 5 min); `--chl-firebase-refuse` while a CHL game is followed keeps the board but
+  puts the same text on the followed card (in place of its team rows) and under the followed game in the quick-bar Score bug
+  sheet, and the bug dims, then hides.
+- The app accepts the panel's `{origin}/leaguestat/…` logo URLs (and runs the CHL no-alpha check on them) only in a debug
+  build whose `files/debug/sports_base` names that origin; a release build accepts `https://assets.leaguestat.com/…` only.
+
 ## Logging
 
 One line per request: timestamp, client, method+path, UA, status, bytes, `cons[user]=active/max`, notes (`REJECT:reason`, `REDIRECT`, `FORCED-CLOSE`, `TZ-WARN`...).

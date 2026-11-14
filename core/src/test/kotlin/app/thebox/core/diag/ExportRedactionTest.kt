@@ -77,6 +77,29 @@ class ExportRedactionTest {
         assertTrue(text.contains("== Redaction audit: ${summary.auditHits} value(s) replaced by ****"))
     }
 
+    /**
+     * (CHL §2.2, L6) A HockeyTech site key, registered the way `HockeyTechKeys` registers the real ones (a stand-in here:
+     * the real keys live in one `:data` file only; `HockeyTechExportRedactionTest` runs this case with them): a log line
+     * with the key, a full `lscluster` URL, the key echoed in a body excerpt, and a stack trace whose message carries it.
+     */
+    @Test
+    fun aRegisteredSiteKeyLeavesNoTraceInTheBundle() {
+        val key = "c0ffee00d00dfeed"
+        Redact.registerSecret(key)
+        val logs = listOf(
+            "ChlScores key $key",
+            "GET https://lscluster.hockeytech.com/feed/index.php?feed=modulekit&view=gamesbydate&fetch_date=2026-11-13&key=$key&client_code=ohl&fmt=json&lang=en",
+            """kotlinx.serialization.json.internal.JsonDecodingException: Unexpected JSON token at offset 120: {"SiteKit":{"Parameters":{"key":"$key",""",
+        )
+        val crash = listOf(
+            """{"STACK_TRACE":"java.io.IOException: unexpected end of stream on https://lscluster.hockeytech.com/feed/index.php?key=$key\n\tat okhttp3.internal.http1.Http1ExchangeCodec.readResponseHeaders(Http1ExchangeCodec.kt:210)\nCaused by: kotlinx.serialization.SerializationException: key $key"}""",
+        )
+        val (text, _) = build(inputs(logs, extra = emptyList(), crash = crash))
+        assertFalse(text.contains(key), text)
+        assertFalse(text.contains("key=$key"), text)
+        assertTrue(text.contains("lscluster.hockeytech.com"), "the host may stay; the query may not")
+    }
+
     @Test
     fun cleanLogsNeedNoAuditHit() {
         val (text, summary) = build(inputs(listOf("guide opened in 120 ms", "zap 3 → 4 ready 800 ms"), extra = emptyList()))

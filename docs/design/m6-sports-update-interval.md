@@ -247,6 +247,13 @@ The NHL source changes only by filling `maxAgeS`. Its endpoints and parsing stay
 
 ## 5. Settings
 
+> **CHL amendment (2026-11-14, `docs/design/m6-chl-leagues.md` §2.5, §6.5; lead P1, L4).** One CHL setting shared by OHL, WHL and QMJHL
+> (`SportsPrefs.chlIntervalS`): Auto · 5 · 10 · 15 · 20 · 30 s after each update, Auto never under 5 s. The row is titled
+> with the group ("CHL score updates") and, when a CHL game is followed, shows and runs **the followed league's** meter.
+> The MB/h estimate before a measurement is `EST_WIRE_BYTES_CHL = 4 000` B a poll; the CHL's samples count every request's and
+> answer's headers too (six HTTP/1.1 Firebase exchanges with `If-None-Match`, 304s included), about 3 MB an hour at 5 s.
+> There is no "other league" line any more.
+
 ### 5.1 Where
 
 - Sports section, **ADVANCED** (lead ruling on U-B2: every Sports row is advanced; the simple count stays 35).
@@ -271,12 +278,16 @@ The user's choice is backed up; the measurement is not (§3.2). Auto restored on
 | `SPORTS_INTERVAL_AUTO` (value, option) | "Auto (every %1$d s)" |
 | `SPORTS_INTERVAL_EVERY` (value, option) | "Every %1$d s" |
 | `SPORTS_INTERVAL_RECOMMENDED` (option suffix) | "%1$s · Recommended" |
-| `SPORTS_INTERVAL_DESC` (detail, measured) | "Recommended: every %1$d s. This box takes about %2$s s to get, read and show an update. About %3$s MB an hour while a game is live." |
-| `SPORTS_INTERVAL_DESC_UNMEASURED` | "Recommended: every %1$d s for now. Follow a game and this box will time a few updates. About %2$s MB an hour while a game is live." |
+| `SPORTS_INTERVAL_DESC` (detail, measured) | "About %3$s MB an hour while a game is live. Recommended: %1$d s; this box takes about %2$s s to fetch and read an update." |
+| `SPORTS_INTERVAL_DESC_UNMEASURED` | "About %2$s MB an hour while a game is live. Recommended: %1$d s for now; follow a game and this box will time a few updates." |
+| `SPORTS_INTERVAL_DESC_FAST` (measured under 0.1 s) | "About %2$s MB an hour while a game is live. Recommended: %1$d s; this box takes under 0.1 s to fetch and read an update." |
 | `SPORTS_INTERVAL_NHL_FLOOR` (appended for the NHL) | "The NHL feed changes every 20 s, so checking more often would get the same score." |
 | `SPORTS_INTERVAL_FASTER` (fixed < recommended) | "This is faster than this box keeps up with, so updates may arrive late. Choose Auto to use the recommendation." |
 | `SPORTS_INTERVAL_SLOWED` (after a 429) | "ESPN asked the app to check less often, so Auto checks every 10 s until this game ends." |
 | `SPORTS_INTERVAL_FALLBACK` | "ESPN's single-game feed isn't answering, so each check downloads the whole day (about %1$s KB). Auto checks every 10 s or slower." |
+
+(CHL emulator pass, 2026-11-14) The three detail strings lead with the data use: the unfocused row shows one ellipsised
+line, and the MB-an-hour figure is the point of the sentence. The texts above are the current `strings_sports.xml` ones.
 
 - **Row value:** "Auto (every 3 s)" or "Every 5 s".
 - **Options:** the recommended one carries the suffix, e.g. "Every 3 s · Recommended".

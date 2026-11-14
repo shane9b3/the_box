@@ -1,6 +1,7 @@
 # CHL leagues (OHL, WHL, QMJHL) on the hockey score bugs (owner request 2026-11-13)
 
-Status: **design reviewed and revised 2026-11-13; ready for commit 0.**
+Status: **design reviewed and revised 2026-11-13; commit 0 and WP-1 to WP-5 implemented and reviewed 2026-11-13/14;
+integrated 2026-11-14** (see "Integration" below).
 - Design: `docs/design/m6-chl-leagues.md`.
 - Review: `docs/review/2026-11-13-chl-leagues-design-review.md`.
 
@@ -123,6 +124,44 @@ Verdict "ready after changes". Every item is accepted and applied in the design.
 | S13 goals without a time | Accepted: H2 covers goals. |
 | L1–L11 | All accepted. L7: the inline sub-switch is taken (no vertical shift). L2: the QMJHL team code `NFL` is never read as a league (`TeamCodeIsNotALeagueTest`, plus fit cases). L3: `breakMs()` unchanged. L11: the status lines are fixed. |
 
+## Commit 0 and its review (2026-11-13)
+Commit 0 was implemented and reviewed (`docs/review/2026-11-13-chl-commit0-review.md`, verdict "merge after fixes").
+Lead rulings, applied in the fix pass and written into the design (§1.2, §2.3, §4.1, §6.4, §8, §10):
+- **Deviations accepted:** the hold is strict (`< 30 s`); `goalWasPp` takes the previous (or held) power play; no hold at
+  FINAL / SO; NHL and NFL "today" keep the Eastern date with no rollover (the CHL rolls over at 05:00 on the local wall
+  clock); a CHL Stacked bug has the Pill footprint until WP-2's row 19.
+- **B1:** a goal by the held side inside an unknown run drops the hold silently, and a score change inside the run
+  counts as a score change for the first known snapshot after it (no false "Power play over.").
+- **B2:** `GameSnapshot.startTbd` (appended). **B3:** `ScoreFacts.chlLeague` (appended); `setScoreLeague` keeps taking a
+  concrete league. **B4:** `HockeyTechMapper.overlay` takes and returns a `ChlBoard`. L6: `wantsShootouts(prev, facts)`.
+- **S4:** the hold ends by elapsed time, even when polls slow down.
+- **O3 (BRAM), S1, S2:** a 4-letter code in a logo fallback (the capsule, the Pill and Stacked goal badges) may step its
+  text down to a **16 px** floor; never a display alias. The capsule keeps overhang ≤ 4 and a gap ≥ 6 to the score's ink.
+  Measured: BRAM capsule 16 px (overhang 1.5, gap 9.5), badges 22 px; FLNT and NIAG fit at 18 / 24. `GoalPainter` and
+  `StackedGoalPainter` (that fallback text only) belong to WP-5.
+- **S5:** the hash list records its host; the gate deletes the old PNGs first; the reader test stays with integration.
+- **No release from `main` between commit 0 and integration** (lead): commit 0 already changes two settings texts
+  (`settings_sports_show_desc` names HockeyTech; `settings_sports_interval_league` drops the "other" league) and adds
+  CHL contracts with no source bound.
+
+## WP-5 review fix pass (2026-11-14)
+Lead rulings on `docs/review/2026-11-14-chl-wp5-ui-and-colours-review.md`:
+- **S1 / R1 (Stacked fallback):** in the Stacked bug the logo fallback stays inside the 50.4 px logo slot with ≥ 6 px to
+  the stripe and to the code's ink, in all four geometries and both sizes. For a code longer than 3 characters it is a
+  plain 44 px disc **without text**, filled with that team's Stacked stripe colour; the row prints the code beside it.
+  3-letter and 2-letter fallbacks and all NHL fallbacks are unchanged. The Pill keeps the capsule. Reason: no capsule
+  text size at or above the 16 px floor fits a 50.4 px slot. Written into design §6.4; tested by
+  `ChlStackedFallbackTest`.
+- **S2 / R3:** a bounded negative cache (128 URLs, 6 h, process lifetime) for failed CHL card logos, so the cards do not
+  refetch 404s on every visit; NHL and NFL unchanged.
+- **L1 / L2:** the CHL alpha check is chosen by the league where the caller knows it (the cards), and by the URL shape
+  (the CHL host in any spelling, or the fake panel's `/leaguestat/` folder) in the bug's hook, so the emulator shows
+  WEN's fallback.
+- **L5, L6, L7, L8:** two-entry capsule cache; a key press cancels the pending focus pull; Back-from-a-sub-chip and RTL
+  tests; the static grep also covers string comparisons of a code with a league's name.
+- **L3 (byte cap on CHL logo downloads):** not done; Coil's fetcher gives no hook inside the WP-5 files. Decoded size is
+  bounded by subsampling; accepted for a fixed HTTPS host.
+
 ## Fixtures and scripts in the repo (2026-11-13)
 - **Captures:** `core/src/testFixtures/resources/sports/chl/` (47 files, ~0.9 MB):
   - the 21 Firebase final-data nodes;
@@ -146,3 +185,70 @@ Verdict "ready after changes". Every item is accepted and applied in the design.
 - Design: `docs/design/m6-chl-leagues.md`.
 - Review: `docs/review/2026-11-13-chl-leagues-design-review.md`.
 - Standing hockey rulings: `docs/decisions/2026-11-05-nhl-score-bug.md`, `docs/decisions/2026-11-10-nhl-score-bug-stacked.md`.
+
+## Integration (2026-11-14)
+- **Site keys:** the three leagues' public site keys are embedded in one source file (`HockeyTechKeys` in
+  `data/src/main/kotlin/app/thebox/data/sports/HockeyTechEndpoints.kt`) and registered with `Redact` at class
+  initialisation, with the **owner's acceptance of the terms risk (owner decision 1, 2026-11-13)**. They appear in no doc,
+  fixture, log or diagnostics export; a debug build pointed at the fake panel sends the fake panel's own keys.
+- **Refused feed on screen (WP-3 review L10):** `ScoreRepository.followFailure: StateFlow<FailKind?>` carries the followed
+  game's last poll failure (cleared by an answer and on a follow change). For `FailKind.REFUSED` the followed card on the
+  Sports tab shows `sports_failed_refused` in place of its two team rows, and the quick-bar sheet adds the followed
+  league's failure row under the followed game. No new string. Other kinds keep the bug's own dim-and-hide.
+- **One debug override name:** `SportsConstants.DEBUG_OVERRIDE_FILE` (`:core`) is read by the three data sources and by
+  `ChlLogoCheck`, each only in a debug build.
+- **Hash gate:** `./gradlew :ui:sportsHashGate` (`docs/m0-toolchain.md`); skipped with a message on a host other than the
+  one in the list's `# host:` line.
+- **Live gate:** `ChlLiveGateTest` (with `CHL_LIVE_RECORDINGS` for real recordings) is the S8 gate; `pp_replay.py live` is
+  a quick check.
+- **Memorial Cup and CHL-wide events** stay out of v1 (owner decision 5).
+- Amended for the CHL: `docs/decisions/2026-11-05-nhl-score-bug.md` (rulings 13, 18, 29, 33, A-S1),
+  `docs/decisions/2026-11-10-nhl-score-bug-stacked.md` (hockey only), the M6 row of `docs/00-master-plan.md`, the
+  score-bug, NFL, power-play, goal-animation, Stacked and update-interval designs, `README.md`.
+
+## Fix pass after the integration review (2026-11-14)
+Review: `docs/review/2026-11-14-chl-integration-review.md` (ready to merge as an unreleased feature). Lead rulings:
+- **S1 ("Time TBD" follow expired at once).** Chosen: `FollowedGame.startTbd` (appended, defaulted) and, for a TBD
+  follow, the hard expiry measured from the end of the league day (next 05:00 local) instead of the midnight placeholder.
+  - Why not the other option (a 05:00-next-day placeholder in the mapper): the placeholder is also the pre-game wake
+    (`start − PRE_WAKE_MS`), so the machine would sleep through an evening TBD game until the next morning.
+  - Why not `max(start, follow time)`: the follow time is not persisted, so a restart would need a second new field; the
+    day end needs only the flag, is the same before and after a restart, and is never earlier than a same-day follow.
+  - L5 is removed separately: the overlay skips a scheduled TBD game.
+- **S2:** a failed CHL card logo is cached for 6 h only on an HTTP 4xx, the no-alpha check or a rejected URL; any other
+  failure (no network, timeout, 5xx, decode) for 60 s; a cancelled fetch is not cached.
+- **S3:** design §1.6 rows 12 and 37 and §2.6 now say `max(300 s, Retry-After)`, up to 3 600 s on REFUSED only.
+- **L1:** the refused card keeps a 40 px matchup row ("Knights · Rangers", `sports_card_live_line`) above the reason
+  (24 px, at most 3 lines, warning colour; ink on the focused card's light fill for contrast); the spoken text names the
+  teams, then the reason.
+- **L4:** one shared debug check, `SportsDebugOverride` (`:core`): the installed app's `FLAG_DEBUGGABLE`, used by the
+  three data sources and `ChlLogoCheck`. The data sources no longer read `BuildConfig.DEBUG`.
+- **L6:** `pp_replay.py` no longer calls `live` the S8 gate.
+- **L2, L3: no change.**
+- **L7, accepted and stated here:** `sports_follow.meters` keeps a CHL league's meter after its follow ends. A downgrade
+  to v0.1.7 (or any build without the CHL leagues) after **any** CHL follow, not only while one is followed, therefore
+  fails to read the whole `sports_follow` document: that build starts with no follow, fresh NHL / NFL meters and a new
+  poll phase. Device-only data, downgrades unsupported; never "fixed" with an NHL default (design §1.4).
+
+## Emulator pass fixes (2026-11-14)
+
+- **A follow that would hard-expire at once is refused, not confirmed.** A game whose listed start is already more than
+  `HARD_EXPIRY_MS` (8 h) ago by this box's corrected clock (a feed's wrong start time, or a wrong box clock) used to toast
+  "Following …" and was then dropped silently by the machine's first step. Now `ScoreBugMachine.followIfKept` reads the
+  clock once and that one reading decides both the refusal and the step after it; `ScoreRepositoryImpl.applyFollow`
+  confirms (`Followed` / `FollowedFinal`) only when it returns true and otherwise emits `ScoreEvent.FollowTooOld`
+  (`sports_toast_too_old` / `_final`: a reason and a next step), stores nothing and keeps any current follow. All
+  leagues; the restore path (`follow(doc.game)` on start) is unchanged.
+- **The expiry rule is unchanged** (`start + 8 h`; a "Time TBD" start from the end of its league day; 5 min after a
+  seen final).
+- **Live-game exemption: considered, deferred.** Exempting a game the board shows LIVE (or measuring its expiry from
+  when it was first seen live) would let a game with a wrong listed start be followed while it plays. It changes the
+  expiry rule, so it is a separate change with its own proposer and review, not part of this fix.
+- **Failure rows in the quick-bar Score bug sheet are two slots high and wrap** (132 design px, 22/500, up to 4 lines):
+  the followed game's refused-feed row and every day-failure row read whole instead of "OHL scores stopped letting
+  thi…". The sheet's window counts such a row twice, so it never grows past 880 px; the rows and D-pad order are unchanged.
+- **Interval detail strings lead with the MB-an-hour figure** (Settings → Sports), so the unfocused one-line row always
+  shows it (`docs/design/m6-sports-update-interval.md` string table).
+- **Fake panel:** every game's `date_played` + `schedule_time` in `timezone` is its real start, on the league day; a run
+  between the game zone's midnight and 05:00 lists the featured game at 23:59 (up to ~6-7 h before its puck drop) and
+  caps its timeline to end before the app's expiry. New `--chl-time-tbd` (`sports_chl_time_tbd`).
