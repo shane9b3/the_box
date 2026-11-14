@@ -320,4 +320,59 @@ class ChlPowerPlayTest {
 
     @Test fun aPlayoffOvertimeUsesItsLength() =
         assertEquals(home(60), derive(listOf(a2("19:00", period = 4)), now(4, "0:00", GamePhase.INTERMISSION), length = { 1200 }))
+
+    // ------------------------------------------------------------------ WP-1 fix pass
+
+    /**
+     * E34 (fix pass S1): a double minor in the two-row form with link 2's `TimeStart` pre-filled (07:00) and a PP goal at
+     * 6:30 before the scorekeeper edits it. Link 2 starts at link 1's end (the goal), not at its own 07:00: no gap, no
+     * phantom tail.
+     */
+    @Test fun e34_aPreFilledSecondLinkFollowsTheGoal() {
+        val rows = listOf(a2("5:00", player = 7, start = "5:00").copy(id = 1), a2("5:00", player = 7, start = "7:00").copy(id = 2))
+        val g = listOf(goal(true, "6:30", pp = true))
+        assertEquals(home(110), derive(rows, now(1, "13:20"), g)) // 6:40
+        assertEquals(home(80), derive(rows, now(1, "12:50"), g)) // 7:10
+        assertEquals(ChlPp.None, derive(rows, now(1, "11:20"), g)) // 8:40: even strength
+        // With no goal, link 2 still follows link 1 straight on (5:00–9:00).
+        assertEquals(home(180), derive(rows, now(1, "14:00")))
+    }
+
+    /**
+     * E35 (fix pass S2): one player's minor (lower id) and major at one stoppage, then a PP goal: the major is served
+     * first (2:00–7:00, never released), then the minor (7:00–9:00). No recorded game has this case.
+     */
+    @Test fun e35_aMajorIsServedBeforeAMinor() {
+        val rows = listOf(
+            pen(false, "2:00", minutes = 2, player = 9, id = 1),
+            pen(false, "2:00", minutes = 5, player = 9, id = 2),
+        )
+        val g = listOf(goal(true, "3:00", pp = true))
+        assertEquals(home(240), derive(rows, now(1, "15:00"), g)) // 5:00
+        assertEquals(home(90), derive(rows, now(1, "12:30"), g)) // 7:30
+        assertEquals(home(30), derive(rows, now(1, "11:30"), g)) // 8:30
+        assertEquals(ChlPp.None, derive(rows, now(1, "11:00"), g)) // 9:00
+    }
+
+    /** Fix pass L2: a counted row called or started past its period's length cannot be placed (H2). */
+    @Test fun h2_aTimePastThePeriodsEnd() {
+        assertEquals(ChlPp.Unknown, derive(listOf(a2("25:00")), now(2, "13:30")))
+        assertEquals(ChlPp.Unknown, derive(listOf(a2("19:00", start = "20:30")), now(2, "19:00")))
+        assertEquals(ChlPp.Unknown, derive(listOf(a2("5:30", period = 4)), now(4, "0:30"))) // OT is 300 s
+        // 20:00 itself is the period's end, a valid (if odd) call time.
+        assertEquals(home(60), derive(listOf(a2("20:00")), now(2, "19:00")))
+    }
+
+    /** Fix pass L3: a hostile-size node hides instead of running the model. */
+    @Test fun aHostileSizeNodeIsUnknown() {
+        val many = List(ChlPowerPlay.MAX_COUNTED_ROWS + 1) { pen(it % 2 == 0, "1:00", player = 5) }
+        assertEquals(ChlPp.Unknown, derive(many, now(1, "18:30")))
+        // At the cap the model runs: 40 home and 40 away minors at one stoppage (distinct players) are even.
+        val atCap = List(ChlPowerPlay.MAX_COUNTED_ROWS) { pen(it % 2 == 0, "0:10") }
+        assertEquals(ChlPp.None, derive(atCap, now(1, "10:00")))
+        val goals = List(ChlPowerPlay.MAX_GOALS + 1) { goal(it % 2 == 0, "0:30") }
+        assertEquals(ChlPp.Unknown, derive(emptyList(), now(1, "10:00"), goals, attempts = 0))
+        val fewer = List(ChlPowerPlay.MAX_GOALS) { goal(it % 2 == 0, "0:30") }
+        assertEquals(ChlPp.None, derive(emptyList(), now(1, "10:00"), fewer, attempts = 0))
+    }
 }

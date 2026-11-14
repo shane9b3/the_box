@@ -198,6 +198,8 @@ class ChlPowerPlayReplayTest {
     @Test
     fun aPolledReplayNeverShowsAWrongSideOrKind() {
         var shownPolls = 0
+        var nonePolls = 0
+        var unknownPolls = 0
         var secondsDiffer = 0
         for (client in CLIENTS) {
             for (gid in ChlFixtures.finals(client, "penalties").keys) {
@@ -216,9 +218,17 @@ class ChlPowerPlayReplayTest {
                             knownPens, knownGoals, knownGoals.size, 1, ChlNow(p, len - el, p, GamePhase.LIVE, false, false),
                             ::regLength,
                         )
-                        if (pp !is ChlPp.Shown) continue
-                        shownPolls++
                         val st = full.model.stateAt(nowG)
+                        when (pp) {
+                            ChlPp.Unknown -> { unknownPolls++; continue }
+                            // (Fix pass L5) None is what the machine announces as "over": the reference must be even too.
+                            ChlPp.None -> {
+                                nonePolls++
+                                assertEquals(st.away, st.home, "$client $gid P$p ${mmss(el)}: None, the reference is not even")
+                                continue
+                            }
+                            is ChlPp.Shown -> shownPolls++
+                        }
                         assertTrue(st.away != st.home, "$client $gid P$p ${mmss(el)}: shown $pp, the reference is even")
                         val adv = if (st.away > st.home) Side.HOME else Side.AWAY
                         val kind = if (kotlin.math.abs(st.away - st.home) >= 2) PowerPlayKind.TWO_MAN else PowerPlayKind.ONE_MAN
@@ -230,8 +240,9 @@ class ChlPowerPlayReplayTest {
                 }
             }
         }
-        println("polled replay: $shownPolls polls showed a bar, $secondsDiffer with other seconds")
-        assertTrue(shownPolls > 1_500, "$shownPolls polls showed a bar")
+        println("polled replay: shown $shownPolls, none $nonePolls, unknown $unknownPolls, $secondsDiffer with other seconds")
+        // (Fix pass L5) The exact split, so a rule that hides or drops bars more often fails here.
+        assertEquals(EXPECTED_POLLS, Triple(shownPolls, nonePolls, unknownPolls), "shown / none / unknown polls")
         assertEquals(0, secondsDiffer, "seconds that differ from the full-knowledge reference")
     }
 
@@ -252,6 +263,9 @@ class ChlPowerPlayReplayTest {
     private fun mmss(s: Int): String = "%02d:%02d".format(s / 60, s % 60)
 
     companion object {
+        /** The polled replay's shown / none / unknown counts (2026-11-14, after the WP-1 fix pass). */
+        val EXPECTED_POLLS = Triple(4_718, 22_147, 49)
+
         fun regLength(q: Int): Int? = if (q <= 3) 1200 else 300
     }
 }

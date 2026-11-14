@@ -791,4 +791,46 @@ class HockeyTechMapperTest {
         val so = followed(rc("00", "00", 4), gs = gs(2, 2), goals = null)!!
         assertTrue(HockeyTechMapper.wantsShootouts(so, f))
     }
+
+    // ------------------------------------------------------------------ WP-1 fix pass
+
+    /** Fix pass L1: rows in Firebase's array form without `LSEventId` keep distinct ids, so bench minors never chain. */
+    @Test
+    fun arrayFormRowsWithoutIdsStayDistinct() {
+        val arr = json(
+            """{"GamePenalties":[null,
+              {"Home":0,"Period":2,"Time":"09:00","TimeStart":"09:00","TimeStartSet":1,"Minutes":2,"PowerPlay":1,"PenalizedPlayerId":0},
+              {"Home":0,"Period":2,"Time":"09:00","TimeStart":"09:00","TimeStartSet":1,"Minutes":2,"PowerPlay":1,"PenalizedPlayerId":0}
+            ]}""",
+        )
+        val rows = HockeyTechMapper.parsePenalties(arr).rows
+        assertEquals(listOf(1L, 2L), rows.map { it.id })
+        assertEquals(PowerPlay(Side.HOME, PowerPlayKind.TWO_MAN, 90), followed(rc("10", "30", 2), pens = arr)!!.powerPlay)
+        // The object form with non-numeric keys and no LSEventId: negative ordinals, still distinct.
+        val obj = HockeyTechMapper.parseGoals(json("""{"GameGoals":{"a":{"IsHome":true,"Period":1,"Time":"01:00"},"b":{"IsHome":false,"Period":1,"Time":"02:00"}}}"""))
+        assertEquals(listOf(-1L, -2L), obj.map { it.id })
+    }
+
+    /** Fix pass S3: a Today overlay never demotes a game the board shows in play to SCHEDULED. */
+    @Test
+    fun overlayKeepsAStartedGameStarted() {
+        val b = boardOf(entry("game_id" to "7", "status" to "3", "started" to "1", "home_goal_count" to "0", "visiting_goal_count" to "0", "period" to "1"))
+        assertEquals(GamePhase.LIVE, b.board.games.single().phase)
+        val q = json("""{"7":{"Clock":{"Minutes":"09","Seconds":"30","Running":true,"period":1},"status_id":3}}""")
+        val o = HockeyTechMapper.overlay(b, q, json("""{"7":{"VisitorGoalTotal":0,"HomeGoalTotal":0}}""")).board.games.single()
+        assertEquals(GamePhase.LIVE, o.phase)
+        assertEquals(0, o.away.score)
+        assertEquals(GameClock(570, running = true, inIntermission = false), o.clock)
+    }
+
+    /** Fix pass L7: a season without a `playoff` field is unknown (absent), so the board entry's own flag decides. */
+    @Test
+    fun aSeasonWithoutAPlayoffFlagIsUnknown() {
+        val s = HockeyTechMapper.seasons(json("""{"SiteKit":{"Seasons":[{"season_id":"1"},{"season_id":"2","playoff":"1"},{"season_id":"3","playoff":"x"}]}}"""))!!
+        assertEquals(mapOf("2" to true), s)
+        val b = HockeyTechMapper.board(
+            League.OHL, "2026-11-13", json("""{"SiteKit":{"Gamesbydate":[${entry("season_id" to "1", "playoff" to "1")}]}}"""), null, s,
+        )!!
+        assertEquals(true, b.facts.values.single().playoff)
+    }
 }
