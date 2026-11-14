@@ -189,12 +189,13 @@
     <string name="settings_sports_interval_after">%1$d s after each update</string>
     <!-- %1$s = an option's label. -->
     <string name="settings_sports_interval_recommended">%1$s · Recommended</string>
-    <!-- %1$d = recommended seconds, %2$s = this box's seconds per update ("0.4"), %3$s = MB an hour ("1.6"). -->
-    <string name="settings_sports_interval_desc">Recommended: %1$d s. This box takes about %2$s s to fetch and read an update. About %3$s MB an hour while a game is live.</string>
+    <!-- %1$d = recommended seconds, %2$s = this box's seconds per update ("0.4"), %3$s = MB an hour ("1.6"). (CHL emulator
+         pass, defect 4) The data use comes first: the unfocused row shows one line, and the figure is the point. -->
+    <string name="settings_sports_interval_desc">About %3$s MB an hour while a game is live. Recommended: %1$d s; this box takes about %2$s s to fetch and read an update.</string>
     <!-- %1$d = recommended seconds, %2$s = MB an hour. -->
-    <string name="settings_sports_interval_desc_unmeasured">Recommended: %1$d s for now. Follow a game and this box will time a few updates. About %2$s MB an hour while a game is live.</string>
+    <string name="settings_sports_interval_desc_unmeasured">About %2$s MB an hour while a game is live. Recommended: %1$d s for now; follow a game and this box will time a few updates.</string>
     <!-- %1$d = recommended seconds, %2$s = MB an hour. A measured time under 0.1 s. -->
-    <string name="settings_sports_interval_desc_fast">Recommended: %1$d s. This box takes under 0.1 s to fetch and read an update. About %2$s MB an hour while a game is live.</string>
+    <string name="settings_sports_interval_desc_fast">About %2$s MB an hour while a game is live. Recommended: %1$d s; this box takes under 0.1 s to fetch and read an update.</string>
     <string name="settings_sports_interval_nhl_floor">The NHL feed changes every 20 s, so checking more often would get the same score.</string>
     <string name="settings_sports_interval_faster">This is faster than this box keeps up with, so updates may arrive late. Choose Auto to use the recommendation.</string>
     <string name="settings_sports_interval_slowed">ESPN asked the app to check less often, so it checks every 10 s or slower for now.</string>
@@ -307,6 +308,11 @@
     <!-- Failures (§2.6). %1$s = the league ("OHL"). -->
     <string name="sports_failed_league">%1$s scores did not answer. Press OK to try again; scores may be down for a few minutes.</string>
     <string name="sports_failed_refused">%1$s scores stopped letting this app in. CHL scores need an app update; NHL and NFL scores still work.</string>
+    <!-- (CHL emulator pass, defect 2) A follow the 8-hour expiry would drop at once: never confirmed, never stored. Either
+         the listed start is wrong or this box's clock is, so the text blames neither. %1$s = away abbreviation, %2$s = home
+         abbreviation. -->
+    <string name="sports_toast_too_old">Not following %1$s – %2$s: its start time is more than 8 hours ago by this box\'s clock. Check the date and time in the TV\'s settings, or pick it again in Sports later.</string>
+    <string name="sports_toast_too_old_final">Not following %1$s – %2$s: that game is over and started more than 8 hours ago by this box\'s clock. Follow another game in Sports.</string>
     <!-- %1$s = away abbreviation, %2$s = home abbreviation, %3$s = the league ("OHL"). -->
     <string name="sports_toast_not_listed_league">The %3$s no longer lists %1$s – %2$s. Follow another game in Sports.</string>
     <!-- The quick-bar sheet's row after the League row (§6.3). %1$s = the shown CHL league ("OHL"). -->

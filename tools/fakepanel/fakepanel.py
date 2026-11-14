@@ -2382,6 +2382,7 @@ def main(argv=None):
     ap.add_argument("--chl-firebase-refuse", action="store_true", help="with --sports-chl: every Firebase request is 401 Permission denied")
     ap.add_argument("--chl-null-live", action="store_true", help="with --sports-chl: the featured game's nodes are null while live (S5)")
     ap.add_argument("--chl-drop-penalties", type=int, metavar="N", help="with --sports-chl: every Nth penalties request is a 503 (B3)")
+    ap.add_argument("--chl-time-tbd", action="store_true", help="with --sports-chl: one scheduled game per league is \"Time TBD\" (time_tbd \"1\")")
     ap.add_argument("--update-apk-dir", help="U-S14: load every *.apk in this directory as an update APK by name "
                                              "(thebox-update-v2.apk -> v2); select one with the update_apk config key")
     ap.add_argument("--update-key", help="file with the 32-byte Ed25519 seed (hex) the update manifest is signed with "
@@ -2421,7 +2422,7 @@ def main(argv=None):
             ap.error("--sports-nfl needs --sports")
         cfg["sports_nfl"] = True
     chl_flags = (a.chl_timeline is not None or a.chl_refuse or a.chl_firebase_refuse or a.chl_null_live
-                 or a.chl_drop_penalties is not None)
+                 or a.chl_drop_penalties is not None or a.chl_time_tbd)
     if a.sports_chl or chl_flags:
         if not a.sports:
             ap.error("--sports-chl needs --sports")
@@ -2438,6 +2439,8 @@ def main(argv=None):
         cfg["sports_chl_null_live"] = True
     if a.chl_drop_penalties is not None:
         cfg["sports_chl_drop_penalties"] = a.chl_drop_penalties
+    if a.chl_time_tbd:
+        cfg["sports_chl_time_tbd"] = True
     for flag in ("synthetic", "synthetic_days_back", "synthetic_days_ahead"):
         if getattr(a, flag) is not None:
             cfg[flag] = getattr(a, flag)

@@ -139,6 +139,29 @@ class ScoreBugMachine(
     }
 
     /**
+     * (CHL emulator pass, defect 2; review fix 2) A user's follow of [game], decided once: the corrected wall clock is read
+     * once, and the same reading decides both whether [game] would be removed at once (the [expired] rule, unchanged) and
+     * the [step] that follows. False: refused; nothing changes (a current follow is kept, nothing is reset). True: [game] is
+     * followed (or already was) and that step did not drop it. The repository confirms ("Following") only on true.
+     * [follow] (the restore path and `follow(null)`) is unchanged.
+     */
+    fun followIfKept(game: FollowedGame): Boolean {
+        val cur = this.game
+        if (cur != null && game.id == cur.id) {
+            follow(game)
+            return this.game?.id == game.id
+        }
+        val w = correctedWall()
+        if (expiredAt(game, w)) return false
+        reset()
+        this.game = game
+        followAt = mono.nowMs()
+        eagerAt = followAt
+        stepAt(w)
+        return this.game?.id == game.id
+    }
+
+    /**
      * (Update interval §3.5, commit 0) The live poll interval in ms for the followed game's league, as the repository
      * resolves it (pref → Auto → the 429 floor); null = today's timing. NHL 20 s is byte-identical to null.
      */
@@ -245,11 +268,14 @@ class ScoreBugMachine(
     }
 
     /** Advance to `mono.nowMs()`: expiry, stale, hide, the delay queue (A-B1). */
-    fun step() {
+    fun step() = stepAt(correctedWall())
+
+    /** [step] with the expiry decided at the corrected wall clock [w] (one reading per decision). */
+    private fun stepAt(w: Long) {
         val now = mono.nowMs()
         if (game == null) return
         advanceDisplay(now)
-        if (expired()) {
+        if (expired(w)) {
             reset()
             game = null
             return
@@ -930,9 +956,13 @@ class ScoreBugMachine(
 
     // ------------------------------------------------------------------ removal
 
-    private fun expired(): Boolean {
+    private fun expired(w: Long): Boolean {
         val g = game ?: return false
-        val w = correctedWall()
+        return expiredAt(g, w)
+    }
+
+    /** The removal rule for [g] at the corrected wall clock [w]: 5 min after a seen final, or the hard expiry. */
+    private fun expiredAt(g: FollowedGame, w: Long): Boolean {
         if (g.finalSeenUtcMs != null && w >= g.finalSeenUtcMs + SportsConstants.EXPIRE_AFTER_FINAL_MS) return true
         return w >= hardExpiryAt(g)
     }

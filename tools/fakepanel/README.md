@@ -365,7 +365,17 @@ debug origin (`files/debug/sports_base`) serves both leagues:
 - Switches (also `POST /admin/config`): `--chl-refuse` (`sports_chl_refuse`: every keyed request "Invalid key."),
   `--chl-firebase-refuse` (`sports_chl_firebase_refuse`: every Firebase request 401), `--chl-null-live`
   (`sports_chl_null_live`, S5: the featured game's nodes are `null` while live), `--chl-drop-penalties N`
-  (`sports_chl_drop_penalties`, B3: every Nth `penalties` request 503).
+  (`sports_chl_drop_penalties`, B3: every Nth `penalties` request 503), `--chl-time-tbd` (`sports_chl_time_tbd`: the
+  evening game, scheduled in every league, is "Time TBD": `time_tbd` `"1"`, `schedule_time` `"00:00:00"`; the app shows
+  "Time TBD" and keeps the follow until 8 h after the league day's end).
+- Start times: every game's `date_played` + `schedule_time` in its `timezone` is its real start instant, on the league day
+  (05:00 rollover in the league's reference zone; Firebase `DatePlayed` is the same day). A start outside that day is
+  clamped to it. **Run after the game zone's midnight but before 05:00, the featured game is listed at 23:59 (game zone)
+  of the league day, up to ~6–7 h before its puck drop, and the evening "scheduled" game is listed at 23:59, in the
+  past.** In that window the featured timeline is capped so the game reaches Final at least 30 min before listed start
+  + 8 h (the app's hard expiry), and the panel logs one line when the cap shortens `--chl-timeline`. **For normal
+  behaviour, run the panel between 05:00 and 21:00 league time.** (Before this fix the panel listed the next calendar
+  day's wall clock under the league day's date, ~24 h in the past, so a follow expired at once.)
 - `tools/chl/record_live.py` records a game's seven nodes every 5 s (the S8 recorder; `--firebase` / `--feed` point it at the
   panel for a dry run, with `HOCKEYTECH_KEY=fakepanel-ohl` for the board). The S8 gate on a recording is the Kotlin
   `ChlLiveGateTest` (`tools/chl/README.md`); `pp_replay.py live <folder>` is a quick Python check only.

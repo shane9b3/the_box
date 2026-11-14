@@ -161,6 +161,19 @@ class SportsScreenTest {
         assertEquals(null, repo.followed.value)
     }
 
+    /** (CHL emulator pass, defect 2) A follow refused as too old: the card never turns to Following. */
+    @Test fun aRefusedFollowNeverShowsFollowing() {
+        repo.refuseFollowsAsTooOld = true
+        board(live, live2)
+        show()
+        press(Key.DirectionCenter)
+        assertEquals(listOf<GameSnapshot?>(live), repo.followCalls)
+        assertEquals(null, repo.followed.value)
+        rule.onNodeWithTag(SPORTS_ACTION_TAG + "L1", useUnmergedTree = true).assertTextEquals(str(R.string.sports_card_action_follow))
+        press(Key.DirectionRight)
+        rule.onNodeWithTag(SPORTS_FOLLOWING_TAG + "L1", useUnmergedTree = true).assertDoesNotExist()
+    }
+
     @Test fun anUnfocusedCardHasNoActionChip() {
         board(live, live2)
         show()
