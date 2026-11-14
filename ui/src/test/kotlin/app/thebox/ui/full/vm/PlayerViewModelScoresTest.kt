@@ -121,7 +121,7 @@ class PlayerViewModelScoresTest {
         vm.effects.followGame(game.id); idle()
         assertEquals(listOf(game), repo.followCalls)
         assertEquals(
-            listOf("Not following CGY – EDM: its start time is more than 8 hours ago by this box's clock. Check the date and time in the TV's settings, or pick it again in Sports later."),
+            listOf("Not following CGY – EDM: it started more than 8 hours ago by this box's clock. Check the TV's date and time, or pick it again later."),
             out,
         )
         assertNull(repo.followed.value)

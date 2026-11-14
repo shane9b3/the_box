@@ -86,7 +86,7 @@ class SportsTextTest {
     fun aTooOldFollowSaysWhyAndWhatToDo() {
         val f = SportsFixtures.followedOf(SportsFixtures.game())
         assertEquals(
-            "Not following CGY – EDM: its start time is more than 8 hours ago by this box's clock. Check the date and time in the TV's settings, or pick it again in Sports later.",
+            "Not following CGY – EDM: it started more than 8 hours ago by this box's clock. Check the TV's date and time, or pick it again later.",
             SportsText.toast(res, app.thebox.core.sports.ScoreEvent.FollowTooOld(f, final = false)),
         )
         assertEquals(
