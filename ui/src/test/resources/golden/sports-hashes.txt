@@ -5,6 +5,8 @@
 # Host (commit-0 review S5; the bytes depend on it): macOS 15.0.1 Darwin x86_64; JDK OpenJDK 21.0.2; Robolectric 4.17,
 # android-all-instrumented 15-robolectric-13954326-i7 (sdk 35), GraphicsMode NATIVE. Another host (arm64, Linux CI) may
 # differ by anti-aliasing rounding: regenerate the list there from 5472974, never "fix" it from a changed tree.
+# 2026-11-14 (CHL WP-5, lead ruling): sports-tab/sports-tab.png changed on purpose, the title row has a third chip, CHL
+#   (was c0aa7099...; only the chip's pixels differ). Every other hash is unchanged.
 # The gate, from the repo root (delete the old PNGs first, or a stale file from a removed case still hashes OK):
 #   (cd ui/build && rm -rf score-bug score-bug-stacked nfl-screenshots power-play goal-animation sports-tab) && \
 #   ./gradlew :ui:testDebugUnitTest --tests 'app.thebox.ui.sports.*ScreenshotTest' --rerun && \
@@ -1268,4 +1270,4 @@ a94f710c8ed57ad9ed4a901f306523a81a2e8c6283581a85876afafbd17dc7e3  score-bug/stat
 0338c36df0d0b9bf41fc2a198ed53080e1b47914f5b90be3d95c056c7a7d0e1b  score-bug/state-so.png
 6aac14c491a0f65109e0a328244aa8ce0510f7546af7f77f5776529fea6f23c3  score-bug/state-stale.png
 a8dc9b96921d1bc2f1f151cd8518cfd3b93f711f20fc2305430c738e3933ab68  score-bug/white-ice-live.png
-c0aa709982f364f39acd4f9e65f1ff48599d2b3f908a1c2dfa6af70a645a2b4d  sports-tab/sports-tab.png
+dba857ff9fccb994aa63f457b0530751f5fce82a28e66285a3b88c125717b539  sports-tab/sports-tab.png

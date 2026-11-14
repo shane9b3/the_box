@@ -552,8 +552,8 @@ internal class StackedPainter(
         val popSide = if (goal != null && g != null && g.popOn) goal.side else null
         val popColour = if (popSide != null) lerpColour(goal!!.colours!!.pop, white, g!!.popMix) else white
         val popScale = g?.popScale ?: 1f
-        row(c, rowH / 2f, awayStripe, body.awayAbbrev, a.logos?.away, a, body.awayScore, popSide == Side.AWAY, popScale, popColour)
-        row(c, rowH * 1.5f, homeStripe, body.homeAbbrev, a.logos?.home, a, body.homeScore, popSide == Side.HOME, popScale, popColour)
+        row(c, rowH / 2f, awayStripe, body.awayAbbrev, a.logos?.away, a, body.awayScore, popSide == Side.AWAY, popScale, popColour, pair.away.stripe)
+        row(c, rowH * 1.5f, homeStripe, body.homeAbbrev, a.logos?.home, a, body.homeScore, popSide == Side.HOME, popScale, popColour, pair.home.stripe)
     }
 
     /**
@@ -568,10 +568,10 @@ internal class StackedPainter(
      */
     private fun row(
         c: Canvas, cy: Float, stripe: Float, abbrev: String, slot: FollowLogos.Slot?, a: StackedDrawArgs,
-        score: String, pop: Boolean, popScale: Float, popColour: Int,
+        score: String, pop: Boolean, popScale: Float, popColour: Int, stripeColour: Int,
     ) {
         val m = a.mirrored
-        logo(c, rowX(logoCentre(stripe), m), cy, abbrev, slot, a.logos != null, a.logoWaited)
+        logo(c, rowX(logoCentre(stripe), m), cy, abbrev, slot, a.logos != null, a.logoWaited, stripeColour)
         val cp = if (m) codeMirroredPaint else codePaint
         cp.color = white
         c.drawText(abbrev, rowX(codeAnchor(stripe), m), cy + codeOffset, cp)
@@ -602,7 +602,7 @@ internal class StackedPainter(
      * The logo (the takeover-size bitmap, S6, drawn down to 43.2 tall and at most the 50.4 slot wide, `FILTER_BITMAP`), or
      * the fallback disc as the pill decides it (no holder, failed, or waited past `LOGO_WAIT_MS`).
      */
-    private fun logo(c: Canvas, cx: Float, cy: Float, abbrev: String, slot: FollowLogos.Slot?, hasHolder: Boolean, waited: Boolean) {
+    private fun logo(c: Canvas, cx: Float, cy: Float, abbrev: String, slot: FollowLogos.Slot?, hasHolder: Boolean, waited: Boolean, stripeColour: Int) {
         val img = slot?.image
         if (img != null) {
             val b: Bitmap = img.asAndroidBitmap()
@@ -612,7 +612,9 @@ internal class StackedPainter(
             logoDst.set(cx - lw / 2f, cy - lh / 2f, cx + lw / 2f, cy + lh / 2f)
             c.drawBitmap(b, null, logoDst, bmpPaint)
         } else if (!hasHolder || slot!!.failed || waited) {
-            disc.draw(c, cx, cy, abbrev)
+            // (CHL §6.4, S1) A code of more than 3 characters has no room for its text in the 50.4 slot: a plain disc in the
+            // team's stripe colour (the code is printed beside it). Every other code draws exactly as before.
+            if (disc.isCapsule(abbrev)) disc.drawStripeDisc(c, cx, cy, stripeColour or OPAQUE) else disc.draw(c, cx, cy, abbrev)
         }
     }
 

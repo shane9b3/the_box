@@ -45,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import app.thebox.core.sports.GamePhase
+import app.thebox.core.sports.isChl
 import app.thebox.core.sports.PeriodKind
 import app.thebox.core.sports.TeamLine
 import app.thebox.ui.R
@@ -148,9 +149,9 @@ internal fun GameCard(
                 if (focused) ActionChip(g.id.id, card.followed) else if (card.followed) FollowingChip(g.id.id, false)
             }
             Spacer(Modifier.height(GameCardMetrics.HEADER_GAP.dp))
-            TeamRow(g.away, ink)
+            TeamRow(g.away, ink, g.id.league.isChl)
             Spacer(Modifier.height(GameCardMetrics.ROW_GAP.dp))
-            TeamRow(g.home, ink)
+            TeamRow(g.home, ink, g.id.league.isChl)
         }
     }
 }
@@ -159,9 +160,9 @@ internal fun GameCard(
 internal fun cardName(team: TeamLine): String = team.shortName ?: team.name
 
 @Composable
-private fun TeamRow(team: TeamLine, ink: Color) {
+private fun TeamRow(team: TeamLine, ink: Color, chl: Boolean) {
     Row(Modifier.fillMaxWidth().height(GameCardMetrics.ROW_H.dp), verticalAlignment = Alignment.CenterVertically) {
-        LogoPlate(team)
+        LogoPlate(team, chl)
         Spacer(Modifier.width(GameCardMetrics.PLATE_GAP.dp))
         // (NFL §7.2, S5) The NFL shows the short name ("Commanders"); the NHL's `name` is already the common name.
         Line(cardName(team), GuideUi.sans(GameCardMetrics.NAME_PX, FontWeight.SemiBold, ink), Modifier.weight(1f))
@@ -181,7 +182,7 @@ private fun TeamRow(team: TeamLine, ink: Color) {
  * The `_dark` art is drawn on the dark plate in both focus states (§5.2), so its white parts never sit on the light card.
  */
 @Composable
-private fun LogoPlate(team: TeamLine) {
+private fun LogoPlate(team: TeamLine, chl: Boolean) {
     val loader = LocalShellImageLoader.current
     val context = LocalContext.current
     val density = LocalDensity.current.density
@@ -193,10 +194,12 @@ private fun LogoPlate(team: TeamLine) {
     val logo by produceState(url?.let { CardLogoCache.get(it, w, h) }, url, loader, w, h) {
         value = url?.let { CardLogoCache.get(it, w, h) }
         if (value != null || url == null || loader == null) return@produceState
-        val bmp = runCatching { coilLogoFetch(loader, context)(url, w, h) }
+        // (Review S2) A CHL logo that failed (404, no alpha) is not fetched again for a while: the code plate stays.
+        if (chl && CardLogoCache.recentlyFailed(url)) return@produceState
+        val bmp = runCatching { coilLogoFetch(loader, context, chl)(url, w, h) }
             .onFailure { if (it is kotlin.coroutines.cancellation.CancellationException) throw it }
             .getOrNull()?.asImageBitmap()
-        if (bmp != null) CardLogoCache.put(url, w, h, bmp)
+        if (bmp != null) CardLogoCache.put(url, w, h, bmp) else if (chl) CardLogoCache.markFailed(url)
         value = bmp
     }
     Box(Modifier.size(GameCardMetrics.PLATE_W.dp, GameCardMetrics.PLATE_H.dp).background(Plate, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
@@ -215,6 +218,25 @@ internal object CardLogoCache {
     private fun key(url: String, w: Int, h: Int) = "$url@${w}x$h"
     fun get(url: String, w: Int, h: Int): ImageBitmap? = lru.get(key(url, w, h))
     fun put(url: String, w: Int, h: Int, img: ImageBitmap) { lru.put(key(url, w, h), img) }
+
+    // (CHL review S2) The negative cache: URL to the elapsed-realtime ms of its failure. CHL only (NHL and NFL logos never
+    // fail in steady state and keep today's behaviour); bounded to 128 URLs (the 61 teams and spare), expiring after
+    // [FAILED_TTL_MS] and with the process.
+    const val FAILED_TTL_MS = 6 * 60 * 60 * 1000L
+    private const val FAILED_MAX = 128
+    private val failed = object : LinkedHashMap<String, Long>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?): Boolean = size > FAILED_MAX
+    }
+
+    fun recentlyFailed(url: String, now: Long = android.os.SystemClock.elapsedRealtime()): Boolean = synchronized(failed) {
+        val at = failed[url] ?: return false
+        if (now - at >= FAILED_TTL_MS) { failed.remove(url); false } else true
+    }
+
+    fun markFailed(url: String, now: Long = android.os.SystemClock.elapsedRealtime()) { synchronized(failed) { failed[url] = now } }
+
+    /** Tests only. */
+    internal fun clearFailed() { synchronized(failed) { failed.clear() } }
 }
 
 /** The logo's slot inside the 80 x 56 plate (5 px clear on each side: the old 56 x 36 slot x 1.25). Design px. */

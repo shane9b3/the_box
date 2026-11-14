@@ -346,3 +346,21 @@ Lead rulings applied on top of `chl` (uncommitted; the lead commits). Files: `Ch
 - **L9.** MH's accent is `#231F20` (the sourced value in both TCC and Wikipedia); the table said `#000000` by mistake. The
   table and the note now agree. No visible change: MH's glow and tab are the orange base.
 - Contact sheets re-rendered.
+## Fix pass (WP-5), 2026-11-14
+
+Applied on top of `chl` (uncommitted). Lead rulings as given; each item with what was done.
+
+| Item | Done |
+|---|---|
+| **S1 / R1** Stacked fallback | `StackedPainter` passes the row's stripe colour to the fallback. A code longer than 3 characters draws a plain 44 px disc without text in that colour (`LogoDisc.drawStripeDisc`); 3- and 2-letter fallbacks and the NHL are unchanged. The Pill keeps the capsule. Rule written into design §6.4 and the decision note. New `ChlStackedFallbackTest` measures the painted pixels for BRAM, FLNT and NIAG: unmirrored and mirrored, with and without the power-play stripe, Standard and Large, both rows. Measured: disc 43 to 44 px, gap to the stripe **12.8 to 14.0**, gap to the code ink **16.8 to 19.0** design px (least: 12.8 and 16.8); all ≥ 6. |
+| **S2 / R3** negative cache | `CardLogoCache.markFailed` / `recentlyFailed`: per URL, 128 entries (LRU), 6 h, process lifetime; CHL cards only. Tested for expiry and the bound. |
+| **L1** league decides | `coilLogoFetch(loader, context, chlLeague)`: the cards pass the game's league; the bug's hook (URL only) still recognises the CHL host in any spelling (case, port, userinfo), all of which are then validated and rejected unless exact. |
+| **L2** fake panel | The fake panel's `{origin}/leaguestat/{client}/logos/{id}.png` is a valid CHL logo URL and takes the alpha check, so WEN's fallback shows on the emulator. |
+| **L3** byte cap | Not done: Coil's fetcher offers no hook within the WP-5 files. Decoded memory stays bounded by subsampling. |
+| **L5** capsule cache | Two entries (one per team); a hit allocates nothing. |
+| **L6** late focus pull | Any key press other than OK cancels a pending pull to the sub-chip. Tested. |
+| **L7** tests | Back on a sub-chip; RTL (the row reads right to left on one line). |
+| **L8** grep | Also fails on a code compared with a league's name (`==`, `!=`, `equals`, either order). Main sources have none. |
+
+Hash gate: `sports-tab/sports-tab.png` legitimately changed (the third chip); its line in `sports-hashes.txt` is updated and
+noted in the file header. Every other hash matches.

@@ -28,13 +28,19 @@ class ChlLogoCheck : Transformation() {
         const val HOST = "assets.leaguestat.com"
 
         /** The whole URL, as §3.5 validates it: the base, a client folder, `logos/`, then `{id}[_{n}].png|jpg|jpeg`. */
-        private val CHL_LOGO = Regex("""https://assets\.leaguestat\.com/(ohl|whl|lhjmq)/logos/[0-9]+(_[0-9]+)?\.(png|jpg|jpeg)""")
+        private val CHL_LOGO = Regex(
+            """(https://assets\.leaguestat\.com|https?://[^/?#@\\]+/leaguestat)/(ohl|whl|lhjmq)/logos/[0-9]+(_[0-9]+)?\.(png|jpg|jpeg)""",
+        )
+        /** The fake panel's logo folder (design §2.8: `{origin}/leaguestat/`), so a debug override takes the same check (review L2). */
+        private val FAKE_PANEL = Regex("""https?://[^/?#@\\]+/leaguestat/.*""")
 
         /** True when [url] is a well-formed CHL logo URL (no `..`, no query, no other host, no other path). */
         fun isChlLogoUrl(url: String): Boolean = CHL_LOGO.matches(url)
 
         /** True when [url] points at the CHL logo host at all, valid or not (an invalid one is never requested). */
-        fun isChlHost(url: String): Boolean = url.startsWith("https://$HOST/") || url.startsWith("http://$HOST/")
+        fun isChlHost(url: String): Boolean =
+            url.startsWith("https://$HOST/", ignoreCase = true) || url.startsWith("http://$HOST/", ignoreCase = true) ||
+                url.startsWith("https://$HOST:", ignoreCase = true) || url.contains("@$HOST", ignoreCase = true) || FAKE_PANEL.matches(url)
 
         /** True when the bitmap has an alpha channel and at least one of its four corner pixels is transparent. */
         fun hasTransparentCorner(b: Bitmap): Boolean {
