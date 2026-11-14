@@ -141,4 +141,6 @@ object PollMeter {
     const val NFL_EVENT = "nfl-event"
     const val NFL_BOARD = "nfl-board"
     const val NHL_LANDING = "nhl-landing"
+    /** (CHL §1.6 #10) The CHL follow's live-mode polls (the six Firebase nodes), for OHL, WHL and QMJHL alike. */
+    const val CHL_LIVE = "chl-live"
 }

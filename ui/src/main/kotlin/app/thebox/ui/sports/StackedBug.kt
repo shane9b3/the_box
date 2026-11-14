@@ -62,7 +62,6 @@ import app.thebox.core.sports.GoalSpec
 import app.thebox.core.sports.GoalTimeline
 import app.thebox.core.sports.League
 import app.thebox.core.sports.NhlBugStyle
-import app.thebox.core.sports.NhlStackedColours
 import app.thebox.core.sports.OverlayGeometry
 import app.thebox.core.sports.PlacementInput
 import app.thebox.core.sports.ScoreBugPlacement
@@ -72,6 +71,7 @@ import app.thebox.core.sports.ScoreBugView
 import app.thebox.core.sports.Side
 import app.thebox.core.sports.SportsConstants as K
 import app.thebox.core.sports.StackedFrame
+import app.thebox.core.sports.StackedColourTable
 import app.thebox.core.sports.StackedPair
 import app.thebox.core.sports.StackedTargets
 import app.thebox.core.sports.StackedTimeline
@@ -187,8 +187,9 @@ internal fun StackedBug(
     val shownSize = if (shownLarge) ScoreBugSize.LARGE else ScoreBugSize.STANDARD
     val k = ScoreBugPlacement.stackedScale(shownSize)
     val s = d * k
-    val footW = ScoreBugPlacement.width(shownSize, League.NHL, NhlBugStyle.STACKED)
-    val footH = ScoreBugPlacement.height(shownSize, League.NHL, NhlBugStyle.STACKED)
+    // (CHL §1.6 #45) The placed league (any hockey league; the Stacked geometry is league-independent).
+    val footW = ScoreBugPlacement.width(shownSize, placement.league, NhlBugStyle.STACKED)
+    val footH = ScoreBugPlacement.height(shownSize, placement.league, NhlBugStyle.STACKED)
     // The words' painter: measurement only (paints, the clock's digit table), so it is built here like the Pill's; the
     // bakes (the shadow, the GOAL atlas, the glow) run off the main thread below.
     val painter = remember(s, shownLarge) {
@@ -235,7 +236,11 @@ internal fun StackedBug(
     val colourView = (view ?: holder.lastView)?.takeIf { it !== sample }
     val awayAbbrev = colourView?.away?.abbrev ?: ""
     val homeAbbrev = colourView?.home?.abbrev ?: ""
-    val pair = remember(awayAbbrev, homeAbbrev) { hooks.colours(awayAbbrev.ifEmpty { null }, homeAbbrev.ifEmpty { null }) }
+    // (CHL §1.5, #46, B1) League-keyed: team identity is (league, code), from the shown view.
+    val colourLeague = colourView?.league ?: placement.league
+    val pair = remember(colourLeague, awayAbbrev, homeAbbrev) {
+        hooks.colours(colourLeague, awayAbbrev.ifEmpty { null }, homeAbbrev.ifEmpty { null })
+    }
     run.painter = painter; run.res = res; run.s = s; run.pair = pair; run.away = awayAbbrev; run.home = homeAbbrev
     val margin = if (shownLarge) K.GOAL_LAYER_MARGIN_LARGE else K.GOAL_LAYER_MARGIN
     hooks.probe?.let { p ->
@@ -366,7 +371,7 @@ internal fun StackedBug(
         }
         val side = g.side
         val image = (if (side == Side.AWAY) logos.away else logos.home).image?.asAndroidBitmap()
-        val p = run.pair ?: NhlStackedColours.pair(null, null)
+        val p = run.pair ?: StackedColourTable.pair(League.NHL, null, null)
         val colours = (if (side == Side.AWAY) p.away else p.home).goal
         withContext(hooks.context) {
             val still = motionOff() // the exact scale Compose applies to animateTo
@@ -558,7 +563,8 @@ private fun waiting(v: ScoreBugView): Boolean = v.bottom is CentreText.Delayed |
  * (Stacked §2.3) The Stacked bug's test seams, as [GoalHooks] / [NflHooks]; the defaults are the real objects. Owned by
  * Stacked WP-3, which may add seams (the defaults must stay the real objects).
  *
- * - [colours]: the game's pair (`NhlStackedColours.pair`, S3's collision rule applied).
+ * - [colours]: the game's pair (`StackedColourTable.pair`, league-keyed (CHL §1.5), S3's collision rule applied within
+ *   the league).
  * - [sampler]: the layout tracks (`StackedTimeline.sample`); [goalSampler]: the takeover under `GoalSpec.STACKED`.
  * - [bakeGlow]: the exact-box glow ([StackedGoalPainter.bakeGlow], w × h device px), off the main thread.
  * - [logoFetch]: the followed game's logo loader; null = the shell's image loader.
@@ -570,7 +576,7 @@ private fun waiting(v: ScoreBugView): Boolean = v.bottom is CentreText.Delayed |
  * - (WP-3) [glowAllowed]: whether the takeover's glow may draw around the placed footprint (§4.3, GA §2.4).
  */
 internal class StackedHooks(
-    val colours: (String?, String?) -> StackedPair = NhlStackedColours::pair,
+    val colours: (League, String?, String?) -> StackedPair = StackedColourTable::pair,
     val sampler: StackedSampler = StackedSampler.Real,
     val goalSampler: GoalSampler = GoalSampler { t, still, out ->
         if (still) GoalTimeline.sampleStill(GoalSpec.STACKED, t, out) else GoalTimeline.sample(GoalSpec.STACKED, t, out)

@@ -309,6 +309,10 @@ enum class SettingsText {
     SPORTS_STYLE_DESC,
     SPORTS_STYLE_PILL,
     SPORTS_STYLE_STACKED,
+    // (CHL commit 0, docs/design/m6-chl-leagues.md §6.5, S11) The slowed note for a league timed from completion other than
+    // the NFL (%1$s = the league's name, "OHL"). SPORTS_INTERVAL takes the group's name ("CHL"); SPORTS_INTERVAL_LEAGUE
+    // now takes only the shown league (no "other").
+    SPORTS_INTERVAL_SLOWED_LEAGUE,
 }
 
 fun interface SettingsTexts {

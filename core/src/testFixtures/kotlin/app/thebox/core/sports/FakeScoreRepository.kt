@@ -6,7 +6,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
- * (Score bug commit 0, docs/design/m6-score-bug.md §9) A [ScoreRepository] for `:ui`, `:data` and `:app` tests. Every
+ * (Score bug commit 0, docs/design/m6-score-bug.md §9; CHL commit 0: any of the five leagues, see
+ * [SportsFixtures.chlGame]) A [ScoreRepository] for `:ui`, `:data` and `:app` tests. Every
  * output is a public mutable flow the test drives; every input is recorded. [follow] sets [followed] (and, with
  * [raiseFollowEvents], emits `Followed` / `FollowedFinal` as the real repository does), so follow toggles round-trip.
  * It makes no requests and has no clock.
@@ -110,9 +111,13 @@ object SportsFixtures {
         lastGoal: GoalFact? = null,
         detail: LeagueDetail? = null,
         league: League = League.NHL,
+        /** (CHL B3) The source could not decide the power play. */
+        powerPlayUnknown: Boolean = false,
+        /** (CHL fix pass B2) The start time is "Time TBD". */
+        startTbd: Boolean = false,
     ): GameSnapshot = GameSnapshot(
         GameId(league, id), dayKey, startUtcMs, phase, away, home, period, periodKind, otNumber, clock, finalKind,
-        powerPlay, lastGoal, detail,
+        powerPlay, lastGoal, detail, powerPlayUnknown, startTbd,
     )
 
     // ------------------------------------------------------------------ NFL (docs/design/m6-nfl.md commit 0)
@@ -186,8 +191,8 @@ object SportsFixtures {
         base: GameSnapshot = game(),
     ): GameSnapshot = base.copy(powerPlay = PowerPlay(side, kind, secs))
 
-    fun board(vararg games: GameSnapshot, dayKey: String = "2026-11-05"): DayBoard =
-        DayBoard(dayKey, prevDay = "2026-11-04", nextDay = "2026-11-06", games = games.toList())
+    fun board(vararg games: GameSnapshot, dayKey: String = "2026-11-05", league: League? = null): DayBoard =
+        DayBoard(dayKey, prevDay = "2026-11-04", nextDay = "2026-11-06", games = games.toList(), league = league)
 
     /** The bug's view of [game] in play: the snapshot's clock (owner ruling 6) over the period. */
     fun liveView(game: GameSnapshot = game()): ScoreBugView = ScoreBugView(
@@ -202,7 +207,49 @@ object SportsFixtures {
         gameId = game.id, // goal animation §5.1: the machine sets it on every view
         powerPlay = game.powerPlay, // power play §1.4: a fresh LIVE view carries the snapshot's power play
         league = game.id.league,
-        // (Stacked §2.1, B1) the machine's NHL views carry the period label; the NFL's never do
-        period = if (game.id.league == League.NHL) PeriodLabel(game.periodKind ?: PeriodKind.REG, game.period ?: 1) else null,
+        // (Stacked §2.1, B1) the machine's hockey views carry the period label; the NFL's never do
+        period = if (game.id.league.isHockey) PeriodLabel(game.periodKind ?: PeriodKind.REG, game.period ?: 1) else null,
+    )
+
+    // ------------------------------------------------------------------ CHL (docs/design/m6-chl-leagues.md commit 0)
+
+    /**
+     * A CHL team line: the upper-cased [abbrev], "City Nickname" as [name] (a followed snapshot's form, P10), no short name,
+     * and a validated-looking HockeyTech logo URL under [client]'s logo folder (null [teamId] = no logo, the fallback).
+     */
+    fun chlTeam(abbrev: String, name: String, score: Int? = null, client: String = "ohl", teamId: Int? = 14, sog: Int? = null): TeamLine =
+        TeamLine(abbrev, name, score, teamId?.let { "https://assets.leaguestat.com/$client/logos/$it.png" }, shortName = null, sog = sog)
+
+    /**
+     * A CHL game; defaults to OHL LDN @ KIT, LIVE, 2nd period, 10:22 running, 1–2 (HockeyTech game ids are numeric and
+     * unique only within a league). Any [League] may be passed; the teams default to OHL ones.
+     */
+    fun chlGame(
+        league: League = League.OHL,
+        id: String = "29191",
+        phase: GamePhase = GamePhase.LIVE,
+        away: TeamLine = chlTeam("LDN", "London Knights", 1, teamId = 14),
+        home: TeamLine = chlTeam("KIT", "Kitchener Rangers", 2, teamId = 10),
+        period: Int? = 2,
+        periodKind: PeriodKind? = PeriodKind.REG,
+        otNumber: Int? = null,
+        clock: GameClock? = GameClock(622, running = true, inIntermission = false),
+        finalKind: PeriodKind? = null,
+        dayKey: String = "2026-11-13",
+        startUtcMs: Long = 1_794_612_600_000L, // 2026-11-13T23:30:00Z (18:30 Eastern)
+        powerPlay: PowerPlay? = null,
+        lastGoal: GoalFact? = null,
+        powerPlayUnknown: Boolean = false,
+        startTbd: Boolean = false,
+    ): GameSnapshot = game(
+        id, phase, away, home, period, periodKind, otNumber, clock, finalKind, dayKey, startUtcMs, powerPlay, lastGoal,
+        detail = null, league = league, powerPlayUnknown = powerPlayUnknown, startTbd = startTbd,
+    )
+
+    /** The QMJHL's Newfoundland Regiment, whose code is "NFL" (L2: a team code, never a league), at Charlottetown. */
+    fun qmjhlNflAtCha(): GameSnapshot = chlGame(
+        league = League.QMJHL, id = "32755",
+        away = chlTeam("NFL", "Newfoundland Regiment", 2, client = "lhjmq", teamId = 2),
+        home = chlTeam("CHA", "Charlottetown Islanders", 3, client = "lhjmq", teamId = 7),
     )
 }

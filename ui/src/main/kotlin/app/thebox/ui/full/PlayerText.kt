@@ -501,6 +501,8 @@ object PlayerText {
         is PickerChoice.ScoreDelayChoice -> SportsText.delay(res, c.delaySec)
         is PickerChoice.ScoreLeagueRow -> scoreLeagueRow(res, c.league)
         is PickerChoice.ScoreStyleRow -> scoreStyleRow(res, c.style)
+        // TODO(WP-5, CHL §1.6 #48): commit 0's minimal row text ("CHL league · OHL"); never listed before WP-2.
+        is PickerChoice.ScoreChlRow -> res.getString(R.string.sports_picker_chl_league, leagueName(res, c.league))
     }
 
     /** (Stacked commit 0, docs/design/m6-score-bug-stacked-theme.md §1.1) The sheet's Style row: "Style · Pill" ([style] is the current one; OK toggles it). */
@@ -524,6 +526,10 @@ object PlayerText {
         when (league) {
             League.NHL -> R.string.sports_league_nhl
             League.NFL -> R.string.sports_league_nfl
+            // CHL commit 0 (minimal, to compile); TODO(WP-5, CHL §1.6 #48): `groupName` and the League / CHL row texts (L5).
+            League.OHL -> R.string.sports_league_ohl
+            League.WHL -> R.string.sports_league_whl
+            League.QMJHL -> R.string.sports_league_qmjhl
         },
     )
 

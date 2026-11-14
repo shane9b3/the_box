@@ -30,6 +30,9 @@ import kotlin.random.Random
  *   INTERMISSION, not SO, neither stale nor waiting (`knownView()` never has one). `goalPp` is decided where a goal is
  *   flagged and lives with the mark; `ppEnded` belongs to the shown snapshot. Polling, stale, hide and the delay queue
  *   do not look at the power play.
+ * - **CHL** (docs/design/m6-chl-leagues.md §4.1): a CHL game is an NHL game here; hockey views carry their league (B1).
+ *   A snapshot with `powerPlayUnknown` holds the last shown power play for less than `PP_UNKNOWN_HOLD_MS` of consecutive
+ *   unknown snapshots (on the delayed timeline's anchors), then closes it silently: a hide never says "over" (B3).
  */
 class ScoreBugMachine(
     private val mono: MonoClock,
@@ -79,6 +82,18 @@ class ScoreBugMachine(
     private var lastShownPp: PowerPlay? = null
     /** (Power play §1.4, §7) The shown entry whose view carries `ppEnded` (a real end, with no goal flagged by it). */
     private var ppEndedEntry: Entry? = null
+    /**
+     * (CHL B3, §4.1) The `anchorMono` of the first of the current run of consecutive shown snapshots with
+     * `powerPlayUnknown`; null = the shown snapshot's power play is known. While the run is younger than
+     * [SportsConstants.PP_UNKNOWN_HOLD_MS], [lastShownPp] is held (drawn, never announced as over); after it, the tab
+     * closes silently. Reset by a known snapshot, a follow change ([reset]) and the delay's back-in-time path.
+     */
+    private var ppUnknownSince: Long? = null
+    /**
+     * (CHL fix pass B1) The score changed inside the current unknown run: the first known snapshot after it treats the run
+     * as a score change, so a power play ended by that goal is never announced as "Power play over.".
+     */
+    private var scoredInUnknownRun = false
 
     private val events = ArrayList<ScoreEvent>()
 
@@ -230,6 +245,7 @@ class ScoreBugMachine(
             game = null
             return
         }
+        expireHold(now)
         prune(now)
         markUntil?.let { if (now >= it) { markUntil = null; goalSide = null; goalPp = false; nflScores = emptyList() } }
     }
@@ -259,6 +275,7 @@ class ScoreBugMachine(
         g.finalSeenUtcMs?.let { later(monoAtWall(now, it + SportsConstants.EXPIRE_AFTER_FINAL_MS)) }
         later(monoAtWall(now, g.startUtcMs + SportsConstants.HARD_EXPIRY_MS))
         later(markUntil)
+        later(holdEndsAt()) // (CHL fix pass S4) the hold ends by elapsed time, even with no new snapshot
         return best
     }
 
@@ -297,9 +314,11 @@ class ScoreBugMachine(
         return ScoreBugView(
             s.away, s.home, top, bottom, dim = waiting || stale, goalSeq = goalSeq, goalSide = goal, clockSecs = clockSecs,
             gameId = game?.id,
-            powerPlay = if (fresh) gatedPp(s) else null,
+            // (CHL B3, §4.1) An unknown power play draws the held one ([lastShownPp] is null once the hold is over).
+            powerPlay = if (fresh) (if (s.powerPlayUnknown) heldPp(now) else gatedPp(s)) else null,
             goalPp = goal != null && goalPp,
             ppEnded = fresh && e === ppEndedEntry,
+            league = s.id.league, // (CHL B1, §1.6 #13a) every hockey league; the NHL's value is unchanged
             period = label, // (Stacked §2.1, B1) kept in stale and waiting views, where `bottom` is overwritten
         )
     }
@@ -326,7 +345,11 @@ class ScoreBugMachine(
             )
         }
         val clockSecs = s.clock?.takeIf { clockShown(s) }?.secondsRemaining?.coerceAtLeast(0)
-        return ScoreBugView(s.away, s.home, CentreText.Clock, CentreText.NoUpdate, dim = true, goalSeq = goalSeq, goalSide = null, clockSecs = clockSecs, gameId = game?.id)
+        // (CHL B1, §1.6 #13a) The hockey branch carries the snapshot's league; the NHL's value is unchanged.
+        return ScoreBugView(
+            s.away, s.home, CentreText.Clock, CentreText.NoUpdate, dim = true, goalSeq = goalSeq, goalSide = null,
+            clockSecs = clockSecs, gameId = game?.id, league = s.id.league,
+        )
     }
 
     /**
@@ -484,7 +507,7 @@ class ScoreBugMachine(
             // The delay grew: back in time, silently.
             shown = q
             ppEndedEntry = null
-            lastShownPp = gatedPp(q.snap)
+            rewindHold(q)
             if (q.snap.id.league == League.NFL) {
                 // (NFL §3.3, §3.6) The try, the inference memory and the held tab restart from the earlier snapshot.
                 resetNflPlay()
@@ -527,7 +550,8 @@ class ScoreBugMachine(
                 goalSeq++
                 goalSide = side
                 markUntil = at + SportsConstants.GOAL_MARK_MS
-                goalPp = goalWasPp(p, s, side)
+                // (CHL B3, §4.1) After an unknown snapshot, the fallback compares against the held power play.
+                goalPp = goalWasPp(p, s, side, if (p.powerPlayUnknown) lastShownPp else p.powerPlay)
                 flagged = true
             }
         }
@@ -540,8 +564,27 @@ class ScoreBugMachine(
         // Fix pass N5: any score change counts as a goal here, flagged or not (UNSEEN demand, a long gap), so an unflagged
         // goal that ends the power play is never announced as "Power play over.".
         val scored = p != null && (p.away.score != s.away.score || p.home.score != s.home.score)
-        ppEndedEntry = if (lastShownPp != null && pp == null && !flagged && !scored && inPlay) q else null
-        lastShownPp = pp
+        if (s.powerPlayUnknown) {
+            // (CHL B3, §4.1) The source could not decide: hold the last shown power play (never "over") while the run of
+            // unknown snapshots is younger than the hold, then close it silently. Only in play: an unknown FINAL or SO
+            // snapshot has no power play to hold.
+            val since = ppUnknownSince ?: q.anchorMono.also { ppUnknownSince = it }
+            ppEndedEntry = null
+            if (p != null && scored) {
+                // (CHL fix pass B1) A goal by the side on the held power play releases the minor: drop the hold silently
+                // (the goal mark's PP GOAL says what happened). A short-handed goal keeps it.
+                scoredInUnknownRun = true
+                val held = lastShownPp
+                if (held != null && rose(scoreOf(p, held.side), scoreOf(s, held.side))) lastShownPp = null
+            }
+            if (!inPlay || q.anchorMono - since >= SportsConstants.PP_UNKNOWN_HOLD_MS) lastShownPp = null
+        } else {
+            val scoredInRun = scoredInUnknownRun
+            ppUnknownSince = null
+            scoredInUnknownRun = false
+            ppEndedEntry = if (lastShownPp != null && pp == null && !flagged && !scored && !scoredInRun && inPlay) q else null
+            lastShownPp = pp
+        }
 
         val g = game
         if (s.phase == GamePhase.FINAL && g != null && g.finalSeenUtcMs == null) {
@@ -550,6 +593,53 @@ class ScoreBugMachine(
     }
 
     private fun rose(was: Int?, now: Int?) = was != null && now != null && now > was
+
+    // ------------------------------------------------------------------ CHL: the unknown-power-play hold (§4.1)
+
+    /** When the current hold ends on the delayed timeline: `since + delay + PP_UNKNOWN_HOLD_MS`; null = nothing held. */
+    private fun holdEndsAt(): Long? {
+        if (lastShownPp == null || shown?.snap?.powerPlayUnknown != true) return null
+        return ppUnknownSince?.let { it + delayMs + SportsConstants.PP_UNKNOWN_HOLD_MS }
+    }
+
+    /** (CHL fix pass S4) The held power play while the hold lasts by elapsed time; null after it. */
+    private fun heldPp(now: Long): PowerPlay? = lastShownPp.takeIf { holdEndsAt()?.let { now < it } == true }
+
+    /** (CHL fix pass S4) Ends the hold silently once its time is up, whether or not a new snapshot was shown. */
+    private fun expireHold(now: Long) {
+        val end = holdEndsAt() ?: return
+        if (now >= end) lastShownPp = null
+    }
+
+    /**
+     * (CHL fix pass L1) The delay grew and [q] shows again: the hold restarts from the queue as it was at [q]. A known
+     * [q] holds its own power play; an unknown one holds the last known power play before its run (the hold's start is
+     * that run's first anchor, and a goal by the held side inside the run up to [q] drops it, as in [advanceDisplay]).
+     */
+    private fun rewindHold(q: Entry) {
+        scoredInUnknownRun = false
+        if (!q.snap.powerPlayUnknown) {
+            lastShownPp = gatedPp(q.snap)
+            ppUnknownSince = null
+            return
+        }
+        val at = queue.indexOf(q)
+        var i = at
+        while (i >= 0 && queue[i].snap.powerPlayUnknown) i--
+        ppUnknownSince = queue[i + 1].anchorMono
+        var held = if (i >= 0) gatedPp(queue[i].snap) else null
+        for (j in maxOf(i, 0) until at) {
+            val a = queue[j].snap
+            val b = queue[j + 1].snap
+            if (a.away.score != b.away.score || a.home.score != b.home.score) {
+                if (j >= i) scoredInUnknownRun = true
+                val h = held
+                if (h != null && rose(scoreOf(a, h.side), scoreOf(b, h.side))) held = null
+            }
+        }
+        val inPlay = (q.snap.phase == GamePhase.LIVE || q.snap.phase == GamePhase.INTERMISSION) && q.snap.periodKind != PeriodKind.SO
+        lastShownPp = if (inPlay && q.anchorMono - ppUnknownSince!! < SportsConstants.PP_UNKNOWN_HOLD_MS) held else null
+    }
 
     // ------------------------------------------------------------------ NFL (docs/design/m6-nfl.md §3)
 
@@ -776,17 +866,18 @@ class ScoreBugMachine(
      * when [p] is LIVE or INTERMISSION (a power play carried over the break, scored on early in the next period, is compared
      * against the intermission poll) and neither [p] nor [s] is the shootout (so never the shootout winner's +1).
      * 1. [GameSnapshot.lastGoal] has the scorer's side and equals [s]'s score: its `strength == "pp"`.
-     * 2. Otherwise the summary lags, and the fallback is "[p] had [side] on the power play". Its known misses:
+     * 2. Otherwise the summary lags, and the fallback is "[p] had [side] on the power play" ([prevPp]: [p]'s own power
+     *    play, or the held one when [p] was unknown, CHL B3). Its known misses:
      *    - a minor that expires inside a poll gap, then an even-strength goal by the same team: a false PP GOAL;
      *    - a power play that starts and is scored on inside one gap: no PP GOAL;
      *    - `situation` clearing a bucket before the score rises: no PP GOAL.
      */
-    private fun goalWasPp(p: GameSnapshot, s: GameSnapshot, side: Side): Boolean {
+    private fun goalWasPp(p: GameSnapshot, s: GameSnapshot, side: Side, prevPp: PowerPlay?): Boolean {
         if (p.phase != GamePhase.LIVE && p.phase != GamePhase.INTERMISSION) return false
         if (p.periodKind == PeriodKind.SO || s.periodKind == PeriodKind.SO || s.finalKind == PeriodKind.SO) return false
         val g = s.lastGoal
         if (g != null && g.side == side && g.away == s.away.score && g.home == s.home.score) return g.pp
-        return p.powerPlay?.side == side
+        return prevPp?.side == side
     }
 
     private fun prune(now: Long) {
@@ -841,7 +932,7 @@ class ScoreBugMachine(
         // goalSeq is monotonic for the machine's lifetime (goal animation §5.1, B1.4): a re-follow never reuses a seq
         // the UI has already seen.
         goalSide = null; markUntil = null; goalPp = false
-        lastShownPp = null; ppEndedEntry = null
+        lastShownPp = null; ppEndedEntry = null; ppUnknownSince = null; scoredInUnknownRun = false
         nflScores = emptyList(); nflShown.clear()
         resetNflPlay()
     }

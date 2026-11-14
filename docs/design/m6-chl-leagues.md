@@ -2,6 +2,9 @@
 
 Status:
 - **Proposed 2026-11-13; reviewed 2026-11-13; revised 2026-11-13 after the lead's rulings.**
+- **Commit 0 implemented and reviewed 2026-11-13** (`docs/review/2026-11-13-chl-commit0-review.md`, "Fix pass"). The
+  reconciled decisions are written into §1.2, §1.6, §2.3, §3.2, §4.1, §6.4, §8 and §10 below, each marked "(C0 fix
+  pass)".
 - Review: `docs/review/2026-11-13-chl-leagues-design-review.md`. Every finding is applied in place and marked (B1),
   (S4), (L7) and so on; the dispositions are in the decision note's "Design review" section.
 - Owner request, owner decisions and lead rulings: `docs/decisions/2026-11-13-chl-leagues.md` (binding).
@@ -145,6 +148,14 @@ Rules:
    */
   val powerPlayUnknown: Boolean = false,
   ```
+- **(C0 fix pass, commit-0 review B2) `GameSnapshot.startTbd: Boolean = false`**, appended after `powerPlayUnknown`:
+  the league lists the time as to be decided (`time_tbd == "1"`). `startUtcMs` is then local midnight of the game day
+  in the league's reference zone, a placeholder for ordering and expiry; the card and picker row show "Time TBD"
+  (`sports_time_tbd`). CHL only; always false for the NHL and the NFL.
+- **(C0 fix pass, commit-0 review B3) `ScoreFacts.chlLeague: League? = null`**: the remembered CHL sub-league
+  (`SportsPrefs.chlShown`), filled by `PlayerViewModel` (WP-5, row 50), read by the sheet (WP-2, rows 31–34). The League
+  row's CHL step calls `setScoreLeague(chlLeague ?: OHL)`: `setScoreLeague` always takes a concrete league, and for a CHL
+  league its implementation also writes `chlLeague`.
 - **`DayBoard.league: League? = null`.** Every CHL board sets it. Without it, `SportsViewModel.boardLeague`
   (`SportsViewModel.kt:209-210`) would read an **empty** CHL board as an NHL board, and the tab would show Loading
   forever.
@@ -364,7 +375,10 @@ Facts:
 
 ### 2.3 The day list
 
-**"Today"** (P7, `SportsDays`, `:core`, **commit 0** (S11)): `today(league, nowUtc) = (nowUtc at zone − 5 h).toLocalDate()`.
+**"Today"** (P7, `SportsDays`, `:core`, **commit 0** (S11)): for the CHL, `today(league, nowUtc) = (nowUtc at zone − 5 h)
+.toLocalDate()`, the 5 h taken on the **local wall clock** so the day turns over at 05:00 local on DST days too. (C0 fix
+pass, deviation 4) The NHL and the NFL keep the Eastern calendar date with **no rollover**, exactly today's
+`LocalDate.now(EASTERN)`.
 
 | League | Reference zone | Why |
 |---|---|---|
@@ -383,7 +397,9 @@ Facts:
      next board retries.
   3. `seasons` once per process per league (playoff flag).
   4. **Today only**, while a game is live or about to start: the Firebase overlay (`runningclock` + `goalssummary`
-     for `DatePlayed == D`) at `DAY_POLL_LIVE_MS` (30 s). Its clock, status and scores replace the board's for
+     for `DatePlayed == D`) at `DAY_POLL_LIVE_MS` (30 s). (C0 fix pass B4) The mapper's
+     `overlay(board: ChlBoard, runningclock, goalssummary): ChlBoard` takes the facts with the board, because §3.4's clock
+     table needs each game's playoff flag and OT length. Its clock, status and scores replace the board's for
      matching ids. A failed overlay keeps the board ("Updated 2 min ago").
 - REFUSED day failures: §2.6.
 
@@ -514,7 +530,7 @@ unmappable body yields null, and the source turns it into `BAD_BODY`.
 |---|---|---|
 | `id` | `game_id` | digits only, else drop |
 | `dayKey` | `date_played` | else the board's date |
-| `startUtcMs` | `date_played` + `schedule_time` in `timezone` | unknown zone → the league's reference zone; `time_tbd == "1"` → midnight local and "Time TBD" |
+| `startUtcMs` | `date_played` + `schedule_time` in `timezone` | unknown zone → the league's reference zone; `time_tbd == "1"` → midnight local and "Time TBD" (`startTbd = true`, C0 fix pass B2) |
 | `away` / `home` | `visiting_team_*` / `home_team_*`, `*_goal_count`, `*_shots` | score null while status 1; logo by team id (§3.5) |
 | `phase` | `status`, `final`, clock | §3.4 |
 | `period`, `clock` | `period`, `game_clock` | display only; Today's overlay replaces them |
@@ -625,13 +641,29 @@ board `final == "1"`) wins. `Started` = `publishedclock.Started`, or any score, 
       announces nothing; PP → unknown → none (known) announces "Power play over." once, which is true.
   - **`view()` (`:300`):** `powerPlay = if (fresh) (if (s.powerPlayUnknown) heldPp else gatedPp(s)) else null`, where
     `heldPp` is `lastShownPp` inside the hold, else null. The held tab keeps its last label and frozen seconds.
-  - **`goalWasPp`:** unchanged. With `p.powerPlay` held from the last known state, a goal inside the hold is judged by
-    `lastGoal` first, then by the held power play.
+  - **`goalWasPp`:** (C0 fix pass, deviation 2) takes the previous power play as a parameter: `p.powerPlay`, or the held
+    one when `p` was unknown (an unknown snapshot's own `powerPlay` is null, so "unchanged" could not work). A goal inside
+    the hold is judged by `lastGoal` first, then by the held power play. NHL results are identical.
+  - **The boundary** (C0 fix pass, deviation 1): the hold lasts while `anchor − ppUnknownSince < PP_UNKNOWN_HOLD_MS`
+    (strict), so it is at most 30 s and the 7th unknown poll at 5 s closes it, as the test below says.
+  - **Only in play** (deviation 3): an unknown FINAL or SO snapshot holds nothing.
+  - **A goal inside the run** (C0 fix pass, commit-0 review B1): when an unknown snapshot raises the score of the side on
+    the held power play, the hold is dropped silently (the goal released the minor; the mark's PP GOAL says so). A
+    short-handed goal keeps it. Any score change inside the run is carried into the first known snapshot after it as a
+    score change, so the known "none" that follows never says "Power play over.".
+  - **By elapsed time** (C0 fix pass, review S4): the hold also ends at `ppUnknownSince + delay + PP_UNKNOWN_HOLD_MS` with
+    no new snapshot (breaks, slower intervals, back-off). `nextWakeAtMono` wakes for it; `view()` never draws a held tab
+    past it.
+  - **Delay grown inside a run** (C0 fix pass, review L1): the snapshot shown again restarts the hold from the queue: a
+    known one holds its own power play; an unknown one holds the last known power play before its run, unless the held
+    side scored inside the run.
   - Tests:
     - PP → unknown → PP: nothing spoken, the tab never closes;
     - PP → unknown × 7 (35 s at 5 s): the tab closes silently at the 30 s anchor;
     - PP → unknown → known none: "Power play over." once;
-    - the delay queue: the hold runs on the delayed timeline.
+    - the delay queue: the hold runs on the delayed timeline (anchor ≠ arrival in the test);
+    - (fix pass) PP → unknown + PP goal → known none: no "over", no bar after the goal; a short-handed goal keeps the
+      hold; the hold ends by time with no new poll; a delay grown inside a run holds the last known power play.
 - `ScoreRepositoryImpl`:
   - five-league `Map<League, ScoreSource>` with no silent fallback (#35);
   - a CHL sub-league switch behaves like any league switch;
@@ -942,6 +974,22 @@ Code lengths:
   - **Bar strings:** `{CODE} POWER PLAY 1:32`, `{CODE} 5-ON-3 1:32`, `{CODE} POWER PLAY GOAL` at 20 px with the
     italic overhang, inside 333 / 301.5, plus "NFL POWER PLAY GOAL".
   - Takeover badge fallback and tally for every within-league pair.
+- **(C0 fix pass, lead ruling on O3, review S1–S2) Logo fallbacks of 4-letter codes.** The capsule text and both goal
+  badges' fallback text (Pill `GoalPainter`, Stacked `StackedGoalPainter`) step down in 2 px steps from their size (18,
+  24, 24) and, **for a 4-character code only**, may go below the general 18 px floor to
+  `LOGO_FALLBACK_CODE4_FLOOR_PX` = 16 (`CodeFit.stepDown`, `CodeFit.fallbackFloorPx`). Never a display alias. Limits:
+  the capsule overhangs the 64 px slot by ≤ `LOGO_CAPSULE_OVERHANG_MAX` (4) a side and keeps ≥
+  `LOGO_CAPSULE_SCORE_GAP_MIN` (6) from the score's **ink** (widest of 0–19); a badge's text **ink** fits its slot (Pill
+  64, Stacked 67.5). Measured in commit 0 (`ChlCodeFitMeasureTest`; the sizes WP-5 must draw are pinned there):
+
+  | Code | Capsule px | Pill badge px | Stacked badge px | Notes |
+  |---|---|---|---|---|
+  | BRAM | **16** | **22** | **22** | 18 px: capsule 73, overhang 4.5 (fails); 16 px: capsule 67, overhang 1.5, gap 9.5 (Large 9.3). Badge ink 70 at 24, 63 at 22 |
+  | FLNT | 18 | 24 | 24 | capsule 67, overhang 1.5, gap 9.5 |
+  | NIAG | 18 | 24 | 24 | capsule 65, overhang 0.5, gap 10.5 |
+  | NFL | 18 (disc) | 24 | 24 | 3 characters: the disc |
+
+  Every 3-letter code keeps today's size, so NHL and NFL drawing is unchanged.
 - **Step-down extended to codes (Q4):** if a 4-letter code fails a row fit or a bar string at its size, the existing
   2 px step rule applies to the code text (rows) or the bar string, down to the 18 px floor. **Never a display
   alias.** A failure at the floor is a lead escalation, not a silent clip.
@@ -1113,12 +1161,21 @@ checked).
 | **WP-2** core sweep | `ScoreBugMachine.kt` rows 11, 12, 14, 15 (timed, REFUSED back-off); `PollMeter.kt` rows 8–9; `ScoreBugPlacement.kt`; `WpaPages.kt` rows 21–27; `PlayerStateMachineImpl.kt` rows 31–34; their tests (`ScoreBugMachineChlTest` for timing / back-off, placement, sheet, settings) | Sonnet (under this spec) | C0 | ~350 + ~450 tests |
 | **WP-3** data source | new `data/.../sports/HockeyTechScoreSource.kt`, `HockeyTechEndpoints.kt`; `SportsModule.kt`; `ScoreRepositoryImpl.kt` rows 35–37, 39; `ExportRedactionTest` cases; `HockeyTechScoreSourceTest`; `tools/fakepanel/sports_chl.py`, `test_sports_chl.py`, `fakepanel.py` (flag wiring), `tools/fakepanel/README.md`; `tools/chl/record_live.py` and the `live` command of `pp_replay.py` | Opus | C0 | ~800 Kotlin + ~700 Python |
 | **WP-4** team tables | `core/.../sports/ChlTeamColours.kt`, `StackedColourTable.kt` (CHL tables), `ChlTeamColoursTest`, `StackedColourTableTest`, the colour research note | Sonnet (research and table); Opus review of the generalisation | C0 | ~350 + ~300 tests |
-| **WP-5** UI | `SportsViewModel.kt`, `SportsScreen.kt`, `SportsText.kt`, `PlayerText.kt`, `TeamLogo.kt` (+ new `ChlLogoCheck.kt`), `GameCard.kt` (if the fit needs it), `PlayerEffectsImpl.kt` (row 49), `PlayerViewModel.kt` (row 50); UI tests (fit, `ChlLogoTest`, `TeamCodeIsNotALeagueTest`, Sports tab, screenshots) | Sonnet | C0; WP-4 tables for final screenshots (stubs suffice to build) | ~750 + screenshots |
+| **WP-5** UI | `SportsViewModel.kt`, `SportsScreen.kt`, `SportsText.kt`, `PlayerText.kt`, `TeamLogo.kt` (+ new `ChlLogoCheck.kt`), `GameCard.kt` (if the fit needs it), `PlayerEffectsImpl.kt` (row 49), `PlayerViewModel.kt` (row 50, incl. `ScoreFacts.chlLeague`), **`GoalPainter.kt` and `StackedGoalPainter.kt` (the 4-letter badge fallback text only, §6.4 C0 fix pass)**; UI tests (fit, `ChlLogoTest`, `TeamCodeIsNotALeagueTest`, Sports tab, screenshots) | Sonnet | C0; WP-4 tables for final screenshots (stubs suffice to build) | ~750 + screenshots |
 | **Integration + review** | merge; fake-panel emulator pass; hash gate; code reviews (core, UI); S8 recordings; owner sign-offs | Opus | all | — |
 
 - No file is owned by two packages. `ScoreBugMachine.kt` is split by rows: C0 lands 13a and 13b first; WP-2 edits only
   the timing / back-off functions (`fetched`'s Failed branch, `pollAt`, `fast` → `timed`/`nfl`), and rebases on C0.
 - `strings_sports.xml` and the `SettingsText` files are frozen after C0. A WP that needs a string asks the lead.
+- (C0 fix pass) Commit 0 also owns `HockeyTechContracts.kt` (the mapper ↔ source types), `CodeFit.kt` and the frozen
+  stub signatures of `HockeyTechMapper` (incl. `overlay(ChlBoard…): ChlBoard` and `wantsShootouts(prev, facts)`),
+  `ChlPowerPlay`, `ChlTeamColours`, `StackedColourTable` and `HockeyTechScoreSource`. `GameSnapshot.startTbd` (WP-1 sets,
+  WP-5 reads) and `ScoreFacts.chlLeague` (WP-5 fills, WP-2 reads) are frozen in `SportsContracts.kt`.
+- (C0 fix pass, deviation 6, review L9) Until WP-2 lands row 19 (`ScoreBugPlacement.kt:163/173`), `StackedBug` sizes a
+  CHL Stacked bug with the Pill footprint (unreachable: no CHL source is bound). **WP-5 must not approve CHL Stacked
+  screenshots taken before WP-2 is merged.**
+- (C0 fix pass, review S5) WP-4 and WP-5 touch `:ui` drawing: before handing off, run the hash gate one-liner in the
+  header of `ui/src/test/resources/golden/sports-hashes.txt` (old PNGs deleted first).
 
 ---
 
@@ -1159,8 +1216,8 @@ Still open:
 - **O1.** The S8 gate threshold (proposed: ≤ 5 % wrong-bar seconds per league, no wrong stretch > 30 s). The lead
   sets it.
 - **O2.** Status 3 and postponed samples. Recorded when seen; the mapping is revisited then.
-- **O3.** If the commit-0 measurement shows a 4-letter code failing even at the 18 px floor (§6.4): a lead
-  escalation.
+- **O3. Settled (C0 fix pass).** BRAM's capsule failed at 18 px (overhang 4.5). The lead's ruling: a 4-letter code's
+  logo-fallback text may step down to 16 px; BRAM then fits (capsule 16 px, badges 22 px). See §6.4.
 
 ---
 

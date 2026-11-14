@@ -960,6 +960,8 @@ class PlayerStateMachineImpl(
             is PickerChoice.ScoreGame, is PickerChoice.ScoreCornerRow, is PickerChoice.ScoreDelayRow, PickerChoice.ScoreStop,
             PickerChoice.ScoreTodayDivider, is PickerChoice.ScoreDayDivider, PickerChoice.ScoreLoading, is PickerChoice.ScoreFailed,
             is PickerChoice.ScoreDelayChoice, is PickerChoice.ScoreLeagueRow, is PickerChoice.ScoreStyleRow -> Unit
+            // TODO(WP-2, CHL §1.6 #31–34): the CHL league row is built and handled by scoreSelect; never listed in commit 0.
+            is PickerChoice.ScoreChlRow -> Unit
         }
     }
 

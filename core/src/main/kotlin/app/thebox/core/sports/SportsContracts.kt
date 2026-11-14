@@ -9,9 +9,62 @@ import kotlinx.serialization.Serializable
 
 // ------------------------------------------------------------------ §1.1 the league seam
 
-/** Persisted by name ([FollowedGame], [SportsPrefs.league]); append-only. */
+/**
+ * Persisted by name ([FollowedGame], [SportsPrefs.league], [SportsPrefs.chlLeague], `SportsFollowDoc.meters`); append-only.
+ * (CHL commit 0, docs/design/m6-chl-leagues.md §1.1) [OHL], [WHL] and [QMJHL] are the CHL's three leagues. The stored
+ * name `QMJHL` is the enum name; HockeyTech's client code (`lhjmq`) exists only inside `:data`.
+ *
+ * **A team code is never a league (L2):** a [League] is read only from a persisted enum name or from the source binding,
+ * never from a [TeamLine.abbrev] or [FollowedGame.away]/[FollowedGame.home] (the QMJHL's Newfoundland Regiment is "NFL").
+ * Every branch over leagues is an exhaustive `when` over [League], [LeagueGroup] or [Sport], never `== NHL` / `else`.
+ */
 @Serializable
-enum class League { NHL, NFL }
+enum class League { NHL, NFL, OHL, WHL, QMJHL }
+
+/** (CHL §1.1) The sport a league plays. Not persisted. */
+enum class Sport { HOCKEY, FOOTBALL }
+
+/** (CHL §1.1) The Sports tab chip a league sits under (owner decision 3). Not persisted; derived from [League]. */
+enum class LeagueGroup {
+    NHL, NFL, CHL;
+
+    val members: List<League>
+        get() = when (this) {
+            NHL -> listOf(League.NHL)
+            NFL -> listOf(League.NFL)
+            CHL -> CHL_LEAGUES
+        }
+}
+
+/** (CHL §1.1; Update interval §3.5) How a league's live polls are timed: the NHL bucket-aligned; every other from completion. */
+enum class PollTiming { BUCKET, COMPLETION }
+
+val League.sport: Sport
+    get() = when (this) {
+        League.NFL -> Sport.FOOTBALL
+        League.NHL, League.OHL, League.WHL, League.QMJHL -> Sport.HOCKEY
+    }
+
+/** Every hockey league takes the NHL path: Pill, Stacked, power-play tab, goal takeover, Style row (CHL §0.1). */
+val League.isHockey: Boolean get() = sport == Sport.HOCKEY
+
+val League.group: LeagueGroup
+    get() = when (this) {
+        League.NHL -> LeagueGroup.NHL
+        League.NFL -> LeagueGroup.NFL
+        League.OHL, League.WHL, League.QMJHL -> LeagueGroup.CHL
+    }
+
+val League.isChl: Boolean get() = group == LeagueGroup.CHL
+
+val League.timing: PollTiming
+    get() = when (this) {
+        League.NHL -> PollTiming.BUCKET
+        League.NFL, League.OHL, League.WHL, League.QMJHL -> PollTiming.COMPLETION
+    }
+
+/** (CHL §1.1) The CHL's leagues in chip and cycle order. */
+val CHL_LEAGUES: List<League> = listOf(League.OHL, League.WHL, League.QMJHL)
 
 /** [id] is the league's own game id (NHL "2026020251"). */
 data class GameId(val league: League, val id: String)
@@ -69,6 +122,20 @@ data class GameSnapshot(
     val lastGoal: GoalFact? = null,
     /** (NFL §1.3, §2) The league-specific detail; null for the NHL, which keeps its own fields ([powerPlay], [lastGoal]). */
     val detail: LeagueDetail? = null,
+    /**
+     * (CHL B3, append-only) True when the source could not decide the power play this poll (a §5.6 hide rule fired, or the
+     * penalties / goals node failed). [powerPlay] is then null and means "unknown", not "none". Always false for the NHL
+     * and the NFL. `ScoreBugMachine` holds the last shown power play for at most `SportsConstants.PP_UNKNOWN_HOLD_MS` of
+     * consecutive unknown snapshots, then closes it silently (CHL §4.1).
+     */
+    val powerPlayUnknown: Boolean = false,
+    /**
+     * (CHL fix pass B2, append-only; §3.2) The league lists the start time as to be decided (`time_tbd == "1"`):
+     * [startUtcMs] is then local midnight of [dayKey] in the league's reference zone, a placeholder for ordering and the
+     * follow's expiry only, and the cards and picker rows show "Time TBD" (`sports_time_tbd`) instead of a time. CHL only;
+     * always false for the NHL and the NFL.
+     */
+    val startTbd: Boolean = false,
 )
 
 // ------------------------------------------------------------------ NFL §2 the league detail
@@ -122,7 +189,17 @@ data class PowerPlay(val side: Side, val kind: PowerPlayKind, val secondsRemaini
 data class GoalFact(val side: Side, val away: Int, val home: Int, val pp: Boolean)
 
 /** One league day. [prevDay]/[nextDay] come from the body (`prevDate`/`nextDate`); `currentDate` is authoritative (A-N10). */
-data class DayBoard(val dayKey: String, val prevDay: String?, val nextDay: String?, val games: List<GameSnapshot>)
+data class DayBoard(
+    val dayKey: String,
+    val prevDay: String?,
+    val nextDay: String?,
+    val games: List<GameSnapshot>,
+    /**
+     * (CHL §1.2, append-only) The board's league. Every CHL board sets it, so an empty CHL board is never read as an NHL
+     * one (`SportsViewModel.boardLeague` infers the league from the games); null = infer (the NHL and NFL sources).
+     */
+    val league: League? = null,
+)
 
 /** One HTTP answer. [Ok.serverDateMs]/[Ok.ageS] come from `Date`/`Age` (Age clamped to [0, AGE_MAX_S]); `receivedMono` is stamped by the source. */
 sealed interface Fetch<out T> {
@@ -146,8 +223,11 @@ sealed interface Fetch<out T> {
 /**
  * Why a request failed. (Commit 0 addition) [OFFLINE] is never returned by a source: the repository uses it in
  * [DayState.Failed] when there is no default network, so the UI can pick the §5.4 "No internet connection" text.
+ *
+ * (CHL §1.2, §2.6, S7; appended) [REFUSED]: the source refused this app (a refused key, or the database's "Permission
+ * denied"). The follow and the day list retry it only at `SportsConstants.BACKOFF_MAX_MS`. Not persisted.
  */
-enum class FailKind { TIMEOUT, IO, HTTP_429, HTTP_5XX, HTTP_OTHER, BAD_BODY, OFFLINE }
+enum class FailKind { TIMEOUT, IO, HTTP_429, HTTP_5XX, HTTP_OTHER, BAD_BODY, OFFLINE, REFUSED }
 
 interface ScoreSource {
     val league: League
@@ -424,11 +504,11 @@ enum class ScoreCorner { TOP_RIGHT, TOP_LEFT, BOTTOM_RIGHT, BOTTOM_LEFT }
 enum class ScoreBugSize { STANDARD, LARGE }
 
 /**
- * (Stacked §1, §1.3) The NHL score bug's look ("Score bug style"): [PILL] (today's bug, the default) or [STACKED] (the
- * teams one above the other, docs/design/m6-score-bug-stacked-theme.md). Persisted by name in `SportsPrefs.nhlStyle`;
- * append-only. A plain `@Serializable` enum: an unknown name in a stored or restored document decodes to the property's
- * default through the settings store's `coerceInputValues` (S7). NHL only: an NFL game draws the NFL bug whatever the
- * style (§9).
+ * (Stacked §1, §1.3) The hockey score bug's look ("Score bug style"): [PILL] (today's bug, the default) or [STACKED] (the
+ * teams one above the other, docs/design/m6-score-bug-stacked-theme.md). Persisted by name in `SportsPrefs.nhlStyle`
+ * (the stored name is unchanged); append-only. A plain `@Serializable` enum: an unknown name in a stored or restored
+ * document decodes to the property's default through the settings store's `coerceInputValues` (S7). Hockey only (CHL
+ * P12): every `League.isHockey` game (NHL, OHL, WHL, QMJHL) uses it; an NFL game draws the NFL bug whatever the style (§9).
  */
 @Serializable
 enum class NhlBugStyle { PILL, STACKED }
@@ -468,9 +548,9 @@ data class PlacementInput(
     /** (NFL §4.4, §4.6) The followed (or shown) league; set by `FullScreenHost` from the follow, else the prefs. */
     val league: League = League.NHL,
     /**
-     * (Stacked §2.1, §4.3) The NHL bug's style; set by `FullScreenHost.scorePlacementInput` from `SportsPrefs.nhlStyle`,
-     * and forced to [NhlBugStyle.PILL] by `ScoreBug(...)` whenever the drawn league is the NFL. [ScoreBugPlacement] sizes
-     * the box with it (the Stacked footprint); ignored for the NFL.
+     * (Stacked §2.1, §4.3; CHL §1.6 #3) The hockey bug's style; set by `FullScreenHost.scorePlacementInput` from
+     * `SportsPrefs.nhlStyle`, and forced to [NhlBugStyle.PILL] by `ScoreBug(...)` whenever the drawn league is not hockey
+     * (the NFL). [ScoreBugPlacement] sizes the box with it (the Stacked footprint); ignored for the NFL.
      */
     val style: NhlBugStyle = NhlBugStyle.PILL,
 )
@@ -500,6 +580,13 @@ data class ScoreFacts(
      * the sheet has no Style row. The Style row's gating on the followed game's league is WP-4's (§1.1).
      */
     val style: NhlBugStyle? = null,
+    /**
+     * (CHL fix pass B3, §6.3, §1.6 #33) The remembered CHL sub-league (`SportsPrefs.chlShown`: OHL, WHL or QMJHL), filled
+     * by `PlayerViewModel` (CHL WP-5, row 50) and read by the sheet (WP-2, rows 31–34): the League row cycles NHL → NFL →
+     * CHL, and its CHL step calls `setScoreLeague(chlLeague)`, a concrete league. Null = not reported: the cycle's CHL
+     * step falls back to OHL.
+     */
+    val chlLeague: League? = null,
 )
 
 /** `PlayerUiState.placeScore` while `PlayerLayer.PLACE_SCORE` (§6, U-B1). [sample]: no followed game, draw the sample bug. */

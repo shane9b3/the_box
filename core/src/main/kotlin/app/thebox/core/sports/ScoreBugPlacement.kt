@@ -110,6 +110,7 @@ object ScoreBugPlacement {
     /** (NFL §4.3) The tab's side inset for [league]: the NFL's is Standard 37, Large 46 (tab widths 446 / 558). */
     fun tabInset(size: ScoreBugSize, league: League): Float = when (league) {
         League.NHL -> tabInset(size)
+        League.OHL, League.WHL, League.QMJHL -> tabInset(size) // TODO(WP-2, CHL §1.6 #18): `when (league.sport)`
         League.NFL -> if (size == ScoreBugSize.LARGE) SportsConstants.NFL_TAB_INSET_LARGE else SportsConstants.NFL_TAB_INSET
     }
 
@@ -135,6 +136,7 @@ object ScoreBugPlacement {
     /** (NFL §4.4) The pill's width for [league]: the NFL's is Standard 520, Large 650. */
     fun width(size: ScoreBugSize, league: League): Float = when (league) {
         League.NHL -> width(size)
+        League.OHL, League.WHL, League.QMJHL -> width(size) // TODO(WP-2, CHL §1.6 #18): `when (league.sport)`
         League.NFL -> if (size == ScoreBugSize.LARGE) SportsConstants.NFL_SCORE_LARGE_W else SportsConstants.NFL_SCORE_W
     }
 

@@ -128,7 +128,9 @@ fun SportsScreen(
     val corner = remember { FocusRequester() }
     val delayChip = remember { FocusRequester() }
     val dayChips = remember { SportsDay.entries.associateWith { FocusRequester() } }
-    val leagueChips = remember { League.entries.associateWith { FocusRequester() } }
+    // CHL commit 0: the chips stay NHL · NFL until the CHL source and the group chips land (no CHL source is bound yet).
+    // TODO(WP-5, CHL §1.6 #55): `NHL · NFL · CHL` groups and the inline sub-switch (§6.3).
+    val leagueChips = remember { CHIP_LEAGUES.associateWith { FocusRequester() } }
     val cardRequesters = remember { HashMap<String, FocusRequester>() }
     var menu by remember { mutableStateOf<ChipMenu?>(null) }
     var settled by remember { mutableStateOf(false) }
@@ -183,7 +185,7 @@ fun SportsScreen(
             Spacer(Modifier.height(24.dp))
             // U-N4: with Show Sports off there is nothing to pick: no day chips (and no Corner / Delay chips).
             // NFL §7.3 (fix pass U4): Up from the day / week chips lands on the shown league's chip (both leagues).
-            if (off) Spacer(Modifier.height(DAY_CHIP_H.dp)) else DayChips(ui, dayChips, leagueChips.getValue(ui.prefs.league)) { day ->
+            if (off) Spacer(Modifier.height(DAY_CHIP_H.dp)) else DayChips(ui, dayChips, leagueChips[ui.prefs.league] ?: leagueChips.getValue(League.NHL)) { day ->
                 settled = true
                 viewModel.onDay(day)
             }
@@ -281,7 +283,7 @@ private fun TitleRow(
         } else {
             // NFL §7.3 (ruling 24): NHL · NFL, the shown one filled, 22/600, height 52. Up is consumed; Down reaches the day chips.
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                League.entries.forEach { league ->
+                CHIP_LEAGUES.forEach { league ->
                     FocusChip(
                         text = PlayerText.leagueName(res, league),
                         requester = leagueChips.getValue(league),
@@ -578,3 +580,6 @@ private fun ChoiceList(kind: ChipMenu, prefsCorner: ScoreCorner, prefsDelay: Int
         }
     }
 }
+
+/** (CHL commit 0) The title row's league chips until WP-5 (CHL §1.6 #55). */
+private val CHIP_LEAGUES: List<League> = listOf(League.NHL, League.NFL)

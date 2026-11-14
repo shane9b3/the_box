@@ -301,6 +301,7 @@ class ResourceSettingsTexts(private val resources: Resources) : SettingsTexts {
         SettingsText.SPORTS_STYLE_DESC -> R.string.settings_sports_style_desc
         SettingsText.SPORTS_STYLE_PILL -> R.string.settings_sports_style_pill
         SettingsText.SPORTS_STYLE_STACKED -> R.string.settings_sports_style_stacked
+        SettingsText.SPORTS_INTERVAL_SLOWED_LEAGUE -> R.string.settings_sports_interval_slowed_league
         }
     }
 }

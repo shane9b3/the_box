@@ -63,6 +63,9 @@ object SportsConstants {
     /** Auto before [METER_MIN] samples. */
     const val INTERVAL_DEFAULT_NHL_S = 20
     const val INTERVAL_DEFAULT_NFL_S = 5
+    /** (CHL §2.5, P1) One setting for OHL, WHL and QMJHL, from completion; the floor is 5 s and Auto never goes under it. */
+    val INTERVAL_CHOICES_CHL_S: List<Int> = listOf(5, 10, 15, 20, 30)
+    const val INTERVAL_DEFAULT_CHL_S = 5
     /** The meter keeps this many samples per league (good polls, plus failed ones at their elapsed time, review S6). */
     const val METER_WINDOW = 20
     /** (Review S6) p90 only from this many samples; below it, the default. */
@@ -86,6 +89,8 @@ object SportsConstants {
     /** MB/h before a measurement (gzip bytes per poll; docs F2, F7). */
     const val EST_WIRE_BYTES_NHL = 1_500
     const val EST_WIRE_BYTES_NFL = 2_500
+    /** (CHL §2.5, S4) Six conditional Firebase requests per poll on one HTTP/2 connection, until measured. */
+    const val EST_WIRE_BYTES_CHL = 2_000
     /** (Review S3) On the board fallback, the per-event endpoint is tried again this often. */
     const val PER_EVENT_RETRY_MS = 600_000L
     /** Two shape failures in a row (a 200 that does not decode, a JSON 400) switch the follow to the board. */
@@ -99,9 +104,48 @@ object SportsConstants {
     const val NFL_OLDER_HOLD_MAX_MS = 30_000L
 
     /** The interval choices of [league] (no Auto). */
-    fun intervalChoices(league: League): List<Int> = if (league == League.NHL) INTERVAL_CHOICES_NHL_S else INTERVAL_CHOICES_NFL_S
+    fun intervalChoices(league: League): List<Int> = when (league.group) {
+        LeagueGroup.NHL -> INTERVAL_CHOICES_NHL_S
+        LeagueGroup.NFL -> INTERVAL_CHOICES_NFL_S
+        LeagueGroup.CHL -> INTERVAL_CHOICES_CHL_S
+    }
 
-    fun intervalDefault(league: League): Int = if (league == League.NHL) INTERVAL_DEFAULT_NHL_S else INTERVAL_DEFAULT_NFL_S
+    fun intervalDefault(league: League): Int = when (league.group) {
+        LeagueGroup.NHL -> INTERVAL_DEFAULT_NHL_S
+        LeagueGroup.NFL -> INTERVAL_DEFAULT_NFL_S
+        LeagueGroup.CHL -> INTERVAL_DEFAULT_CHL_S
+    }
+
+    // ---- CHL (docs/design/m6-chl-leagues.md, Appendix A)
+    /** (§2.7) The cap on one Firebase node or Today overlay body; `lscluster` bodies keep [MAX_BODY_BYTES]. */
+    const val CHL_NODE_MAX_BYTES = 131_072L
+    /** (§2.3, P7, Q7) A CHL league's "today" rolls over at 05:00 in its reference zone (`SportsDays`). */
+    const val CHL_DAY_ROLLOVER_H = 5
+    /** (§3.3) Regular periods; regular-season overtime (3-on-3); playoff overtime. Game time in s. */
+    const val CHL_REG_PERIOD_S = 1_200
+    const val CHL_OT_REG_S = 300
+    const val CHL_OT_PLAYOFF_S = 1_200
+    /** (§5.6 H3) A counted penalty starting more than this after now hides the bar. */
+    const val CHL_PP_FUTURE_TOLERANCE_S = 5
+    /** (§5.6 H5) The window of game time in which a goal's pp / sh flag is checked against the model. */
+    const val CHL_PP_CONSISTENCY_WINDOW_S = 120
+    /**
+     * (CHL B3, §4.1) `ScoreBugMachine` holds the last shown power play through consecutive `powerPlayUnknown` snapshots
+     * while the shown snapshot's anchor is less than this after the first unknown one's; then the tab closes silently.
+     */
+    const val PP_UNKNOWN_HOLD_MS = 30_000L
+    /** (§6.4, P6) The fallback capsule's side padding for a code of more than 3 characters, design px. */
+    const val LOGO_CAPSULE_PAD = 10f
+    /** (§6.4) A capsule wider than the 64 px logo slot may overhang it by at most this, each side, design px. */
+    const val LOGO_CAPSULE_OVERHANG_MAX = 4f
+    /** (§6.4) The least gap from the capsule's edge to the score's ink (the widest of 0–19), design px. */
+    const val LOGO_CAPSULE_SCORE_GAP_MIN = 6f
+    /**
+     * (§6.4, lead ruling on O3 / review S1–S2, 2026-11-13) The text floor of a **4-character** code in a logo fallback (the
+     * Pill capsule, the Pill goal badge, the Stacked goal badge): the 2 px step-down may go below the general 18 px floor
+     * to this. Never a display alias. Every other text keeps [SCORE_TEXT_FLOOR_PX].
+     */
+    const val LOGO_FALLBACK_CODE4_FLOOR_PX = 16
 
     // ---- logos (§3)
     const val LOGO_WAIT_MS = 1_500L

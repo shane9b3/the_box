@@ -123,6 +123,26 @@ Verdict "ready after changes". Every item is accepted and applied in the design.
 | S13 goals without a time | Accepted: H2 covers goals. |
 | L1–L11 | All accepted. L7: the inline sub-switch is taken (no vertical shift). L2: the QMJHL team code `NFL` is never read as a league (`TeamCodeIsNotALeagueTest`, plus fit cases). L3: `breakMs()` unchanged. L11: the status lines are fixed. |
 
+## Commit 0 and its review (2026-11-13)
+Commit 0 was implemented and reviewed (`docs/review/2026-11-13-chl-commit0-review.md`, verdict "merge after fixes").
+Lead rulings, applied in the fix pass and written into the design (§1.2, §2.3, §4.1, §6.4, §8, §10):
+- **Deviations accepted:** the hold is strict (`< 30 s`); `goalWasPp` takes the previous (or held) power play; no hold at
+  FINAL / SO; NHL and NFL "today" keep the Eastern date with no rollover (the CHL rolls over at 05:00 on the local wall
+  clock); a CHL Stacked bug has the Pill footprint until WP-2's row 19.
+- **B1:** a goal by the held side inside an unknown run drops the hold silently, and a score change inside the run
+  counts as a score change for the first known snapshot after it (no false "Power play over.").
+- **B2:** `GameSnapshot.startTbd` (appended). **B3:** `ScoreFacts.chlLeague` (appended); `setScoreLeague` keeps taking a
+  concrete league. **B4:** `HockeyTechMapper.overlay` takes and returns a `ChlBoard`. L6: `wantsShootouts(prev, facts)`.
+- **S4:** the hold ends by elapsed time, even when polls slow down.
+- **O3 (BRAM), S1, S2:** a 4-letter code in a logo fallback (the capsule, the Pill and Stacked goal badges) may step its
+  text down to a **16 px** floor; never a display alias. The capsule keeps overhang ≤ 4 and a gap ≥ 6 to the score's ink.
+  Measured: BRAM capsule 16 px (overhang 1.5, gap 9.5), badges 22 px; FLNT and NIAG fit at 18 / 24. `GoalPainter` and
+  `StackedGoalPainter` (that fallback text only) belong to WP-5.
+- **S5:** the hash list records its host; the gate deletes the old PNGs first; the reader test stays with integration.
+- **No release from `main` between commit 0 and integration** (lead): commit 0 already changes two settings texts
+  (`settings_sports_show_desc` names HockeyTech; `settings_sports_interval_league` drops the "other" league) and adds
+  CHL contracts with no source bound.
+
 ## Fixtures and scripts in the repo (2026-11-13)
 - **Captures:** `core/src/testFixtures/resources/sports/chl/` (47 files, ~0.9 MB):
   - the 21 Firebase final-data nodes;

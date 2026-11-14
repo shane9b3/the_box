@@ -218,7 +218,7 @@ class ScoreBugDrawTest {
         ppSampler: PpSampler = PpTestSamplers.Fake,
         background: CoroutineContext = EmptyCoroutineContext,
     ) = GoalHooks(
-        colours = { TeamColours(0xFF112233.toInt(), 0xFF445566.toInt(), 0xFF778899.toInt(), 0xFFAABBCC.toInt()) },
+        colours = { _, _ -> TeamColours(0xFF112233.toInt(), 0xFF445566.toInt(), 0xFF778899.toInt(), 0xFFAABBCC.toInt()) },
         begin = { _, _, _, _, _, _, _ -> },
         bake = { bakes++; null },
         glowAllowed = { _, _, _, _ -> true },
