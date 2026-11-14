@@ -271,6 +271,13 @@ data class FollowedGame(
     val away: String,
     val home: String,
     val finalSeenUtcMs: Long? = null,
+    /**
+     * (CHL integration review S1; appended, defaulted, so earlier `sports_follow` documents read unchanged and an NHL / NFL
+     * follow encodes as before) The league lists the start as "Time TBD": [startUtcMs] is then the midnight placeholder of
+     * the game day (`GameSnapshot.startTbd`), and the hard expiry is measured from the end of that league day
+     * (`SportsDays.dayEndUtcMs`), not from the placeholder. Always false for the NHL and the NFL.
+     */
+    val startTbd: Boolean = false,
 ) {
     val id: GameId get() = GameId(league, gameId)
 }

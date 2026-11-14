@@ -266,3 +266,19 @@ None.
 
 **Read only:** everything in Notes and in the findings: code tracing, greps and git history. Nothing ran on an emulator
 or a device, and no instrumented test ran. `ChlLiveGateTest` ran on the fake recordings only, inside `:core:test`.
+
+## Fix pass (2026-11-14)
+
+Applied uncommitted on `chl` `513239d`; the lead commits. NHL and NFL behaviour unchanged (hash gate below).
+
+| Item | Disposition |
+|---|---|
+| S1 | Fixed. `FollowedGame.startTbd` (appended, defaulted: an older `sports_follow` reads unchanged, an NHL / NFL follow encodes as before), set from the snapshot on Follow and refreshed from each Ok. `ScoreBugMachine.hardExpiryAt`: a TBD follow expires at `SportsDays.dayEndUtcMs` (the next 05:00 local) + 8 h; a named time clears the flag. Chosen over the 05:00 placeholder because the placeholder also drives the pre-game wake (an evening TBD game would be slept through), and over `max(start, follow time)` because the follow time is not persisted (a restart would need a second field). Also: the quick-bar line and the sheet's off-board row read "Time TBD", not "12:00 AM". Tests: `ScoreBugMachineChlTest` (a follow at 14:00 local stays 4 h later and until 8 h after 05:00 next day; a timed game keeps start + 8 h; a restored follow at 20:00 stays and a named time clears the flag), `SportsDaysTest.theDayEndOfATbdPlaceholderIsTheNextFiveLocal` (incl. both DST days), `ScoreRepositoryChlTest.aTimeTbdFollowAfterEightLocalSurvivesAndSurvivesARestart` (real machine, persisted flag, a second repository on the same store). |
+| L5 | Fixed with S1: `needsOverlay` skips a scheduled TBD game (`HockeyTechScoreSourceTest.aScheduledTimeTbdGameAsksForNoOverlay`: none at 05:10, the overlay once the board says it started). |
+| S2 | Fixed. `coilLogoFetchDetailed` reports a `LogoOutcome`; `failedLogoTtlMs`: 6 h for `HttpException` 400–499, `ChlLogoCheck.NoTransparency` (the check now throws this subclass of `IllegalStateException`) or a rejected URL; 60 s (`CardLogoCache.TRANSIENT_TTL_MS`) for everything else; a cancellation is rethrown, never cached. The cache stores an expiry per URL. Tests: `ChlLogoTest.onlyAPermanentFailureIsCachedForSixHours` (4xx, no alpha, rejected; 5xx, 3xx, no host, timeout, IO, decode, unknown; the 60 s expiry), `aRejectedChlUrlIsReportedAsRejected`. |
+| S3 | Fixed: §1.6 rows 12 and 37 and the §2.6 sentence say `max(300 s, Retry-After)`, up to 3 600 s on REFUSED only. |
+| L1 | Fixed: a 40 px matchup row (`sports_card_live_line` with the two card names, 32/600) above `sports_failed_refused` (24 px, 3 lines, 88 px, warning colour; ink when focused, for contrast on the light fill). Spoken text: the card description (teams first) then the reason. Tests: `ChlSportsTabTest.aRefusedFollowPutsTheReasonOnTheFollowedCardOnly` (matchup text, order of the spoken text), `ChlTabScreenshotTest.theRefusedCardFitsTheLongestNamesAndSaysWhichGameItIs` (each league's two longest nicknames from the recorded team lists, focused and unfocused: no visual overflow, inside the card). Screenshot: `scratchpad/chl-ui/card-refused.png` and `ui/build/chl-ui/card-refused.png`. |
+| L4 | Fixed: `SportsDebugOverride` (`:core`): `isDebuggable(applicationInfo.flags)` and `text(filesDir, debuggable)`, used by `SportsEndpoints`, `EspnEndpoints`, `HockeyTechEndpoints` and `ChlLogoCheck`. A release or benchmark build never opens the file. Tests: `SportsDebugOverrideTest`; `ChlLogoTest` pins `FLAG_DEBUGGABLE` to the platform constant. |
+| L6 | Fixed: `pp_replay.py`'s `live` comment calls it a quick check; the gate is `ChlLiveGateTest`. |
+| L2, L3 | No change (lead). |
+| L7 | No change; stated in the decision note's fix-pass section ("after **any** CHL follow"). |

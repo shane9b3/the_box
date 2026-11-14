@@ -284,10 +284,13 @@ class ChlSportsTabTest {
         rule.waitForIdle()
         rule.onNodeWithTag(SPORTS_REFUSED_TAG + "1", useUnmergedTree = true).assertTextEquals(text)
         rule.onNodeWithTag(SPORTS_REFUSED_TAG + "2", useUnmergedTree = true).assertDoesNotExist()
+        // (Integration review L1) The team rows give way to one matchup row, so the card still says which game it is.
         rule.onNodeWithText("Knights").assertDoesNotExist()
+        rule.onNodeWithTag(SPORTS_REFUSED_MATCHUP_TAG + "1", useUnmergedTree = true).assertTextEquals("Knights · Rangers")
         rule.onNodeWithText("Frontenacs").assertExists()
         val desc = rule.onNodeWithTag(sportsCardTag("1")).fetchSemanticsNode().config[SemanticsProperties.ContentDescription].joinToString()
-        assertTrue(desc, desc.contains("Knights") && desc.endsWith(text))
+        assertTrue(desc, desc.startsWith("Knights") && desc.contains("Rangers") && desc.endsWith(text))
+        assertTrue("the teams, then the reason", desc.indexOf("Rangers") < desc.indexOf(text))
         // Other kinds keep the card as it was (the bug dims and hides on its own timers).
         repo.followFailure.value = FailKind.TIMEOUT
         rule.waitForIdle()

@@ -19,6 +19,16 @@ class SportsDaysTest {
         assertEquals(ZoneId.of("America/New_York"), SportsDays.zone(League.NFL))
     }
 
+    /** (Integration review S1) A "Time TBD" placeholder's day ends at the next morning's 05:00 local, DST days included. */
+    @Test
+    fun theDayEndOfATbdPlaceholderIsTheNextFiveLocal() {
+        assertEquals(ms("2026-11-14T05:00:00", "America/Toronto"), SportsDays.dayEndUtcMs(League.OHL, ms("2026-11-13T00:00:00", "America/Toronto")))
+        assertEquals(ms("2026-11-14T05:00:00", "America/Vancouver"), SportsDays.dayEndUtcMs(League.WHL, ms("2026-11-13T00:00:00", "America/Vancouver")))
+        // The first Sunday of November (fall back) and the second Sunday of March (spring forward): still 05:00 local.
+        assertEquals(ms("2026-11-01T05:00:00", "America/Toronto"), SportsDays.dayEndUtcMs(League.QMJHL, ms("2026-10-31T00:00:00", "America/Toronto")))
+        assertEquals(ms("2027-03-14T05:00:00", "America/Toronto"), SportsDays.dayEndUtcMs(League.OHL, ms("2027-03-13T00:00:00", "America/Toronto")))
+    }
+
     @Test
     fun theChlDayRollsOverAtFiveLocal() {
         for (l in listOf(League.OHL, League.QMJHL)) {

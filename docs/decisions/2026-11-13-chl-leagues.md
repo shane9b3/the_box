@@ -205,3 +205,27 @@ Lead rulings on `docs/review/2026-11-14-chl-wp5-ui-and-colours-review.md`:
 - Amended for the CHL: `docs/decisions/2026-11-05-nhl-score-bug.md` (rulings 13, 18, 29, 33, A-S1),
   `docs/decisions/2026-11-10-nhl-score-bug-stacked.md` (hockey only), the M6 row of `docs/00-master-plan.md`, the
   score-bug, NFL, power-play, goal-animation, Stacked and update-interval designs, `README.md`.
+
+## Fix pass after the integration review (2026-11-14)
+Review: `docs/review/2026-11-14-chl-integration-review.md` (ready to merge as an unreleased feature). Lead rulings:
+- **S1 ("Time TBD" follow expired at once).** Chosen: `FollowedGame.startTbd` (appended, defaulted) and, for a TBD
+  follow, the hard expiry measured from the end of the league day (next 05:00 local) instead of the midnight placeholder.
+  - Why not the other option (a 05:00-next-day placeholder in the mapper): the placeholder is also the pre-game wake
+    (`start − PRE_WAKE_MS`), so the machine would sleep through an evening TBD game until the next morning.
+  - Why not `max(start, follow time)`: the follow time is not persisted, so a restart would need a second new field; the
+    day end needs only the flag, is the same before and after a restart, and is never earlier than a same-day follow.
+  - L5 is removed separately: the overlay skips a scheduled TBD game.
+- **S2:** a failed CHL card logo is cached for 6 h only on an HTTP 4xx, the no-alpha check or a rejected URL; any other
+  failure (no network, timeout, 5xx, decode) for 60 s; a cancelled fetch is not cached.
+- **S3:** design §1.6 rows 12 and 37 and §2.6 now say `max(300 s, Retry-After)`, up to 3 600 s on REFUSED only.
+- **L1:** the refused card keeps a 40 px matchup row ("Knights · Rangers", `sports_card_live_line`) above the reason
+  (24 px, at most 3 lines, warning colour; ink on the focused card's light fill for contrast); the spoken text names the
+  teams, then the reason.
+- **L4:** one shared debug check, `SportsDebugOverride` (`:core`): the installed app's `FLAG_DEBUGGABLE`, used by the
+  three data sources and `ChlLogoCheck`. The data sources no longer read `BuildConfig.DEBUG`.
+- **L6:** `pp_replay.py` no longer calls `live` the S8 gate.
+- **L2, L3: no change.**
+- **L7, accepted and stated here:** `sports_follow.meters` keeps a CHL league's meter after its follow ends. A downgrade
+  to v0.1.7 (or any build without the CHL leagues) after **any** CHL follow, not only while one is followed, therefore
+  fails to read the whole `sports_follow` document: that build starts with no follow, fresh NHL / NFL meters and a new
+  poll phase. Device-only data, downgrades unsupported; never "fixed" with an NHL default (design §1.4).

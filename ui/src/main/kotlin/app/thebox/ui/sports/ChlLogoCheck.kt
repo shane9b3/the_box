@@ -19,9 +19,12 @@ class ChlLogoCheck : Transformation() {
     override val cacheKey: String get() = "ChlLogoCheck"
 
     override suspend fun transform(input: Bitmap, size: Size): Bitmap {
-        check(hasTransparentCorner(input)) { "CHL logo has no transparency" }
+        if (!hasTransparentCorner(input)) throw NoTransparency()
         return input
     }
+
+    /** (Integration review S2) The no-alpha refusal: a permanent answer for this URL (the cards cache it for 6 h). */
+    class NoTransparency : IllegalStateException("CHL logo has no transparency")
 
     companion object {
         /** The HockeyTech logo host (design §2.1: `https://assets.leaguestat.com/{client}/logos/{file}`). */
@@ -43,12 +46,9 @@ class ChlLogoCheck : Transformation() {
          * file, always gets null: only the real host's form is then a CHL logo URL.
          */
         fun overrideOrigin(filesDir: java.io.File, debuggable: Boolean): String? {
-            if (!debuggable) return null
-            val text = try {
-                java.io.File(filesDir, DEBUG_OVERRIDE_FILE).takeIf { it.isFile }?.readText()
-            } catch (e: java.io.IOException) {
-                null
-            }?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: return null
+            // (Integration review L4) The same check and read as the data sources (`SportsDebugOverride`).
+            val text = app.thebox.core.sports.SportsDebugOverride.text(filesDir, debuggable)
+                ?.trim()?.trimEnd('/')?.takeIf { it.isNotEmpty() } ?: return null
             val uri = try { java.net.URI(text) } catch (e: java.net.URISyntaxException) { return null }
             val scheme = uri.scheme?.lowercase()
             if (scheme != "http" && scheme != "https") return null
@@ -58,7 +58,7 @@ class ChlLogoCheck : Transformation() {
 
         /** [overrideOrigin] for this app: debuggable build and the override file under `filesDir`. */
         fun overrideOrigin(context: android.content.Context): String? =
-            overrideOrigin(context.filesDir, (context.applicationInfo.flags and android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE) != 0)
+            overrideOrigin(context.filesDir, app.thebox.core.sports.SportsDebugOverride.isDebuggable(context.applicationInfo.flags))
 
         /**
          * True when [url] is a well-formed CHL logo URL: exactly the real host's form (https, no `..`, no query, no other

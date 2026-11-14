@@ -163,6 +163,8 @@ class ChlLogoTest {
         // The same file the data sources read: one constant in `:core` (SportsConstants.DEBUG_OVERRIDE_FILE).
         assertEquals("debug/sports_base", ChlLogoCheck.DEBUG_OVERRIDE_FILE)
         assertEquals(app.thebox.core.sports.SportsConstants.DEBUG_OVERRIDE_FILE, ChlLogoCheck.DEBUG_OVERRIDE_FILE)
+        // (Integration review L4) `:core`'s shared check pins the platform's flag value.
+        assertEquals(android.content.pm.ApplicationInfo.FLAG_DEBUGGABLE, app.thebox.core.sports.SportsDebugOverride.FLAG_DEBUGGABLE)
         // The fetch under test: no override, the fake form is refused without a request; with it, only its origin is requested.
         val loader = ImageLoader.Builder(context).build()
         assertNull(runBlocking { coilLogoFetch(loader, context, false, "")("https://evil.test/leaguestat/ohl/logos/1.png", 64, 46) })
@@ -183,6 +185,44 @@ class ChlLogoTest {
         assertFalse(CardLogoCache.recentlyFailed("first", now = 7L))
         assertTrue(CardLogoCache.recentlyFailed("https://assets.leaguestat.com/ohl/logos/199.png", now = 7L))
         CardLogoCache.clearFailed()
+    }
+
+    /** (Integration review S2) 6 h only for a 4xx, the no-alpha check or a rejected URL; every other failure 60 s. */
+    @Test
+    fun onlyAPermanentFailureIsCachedForSixHours() {
+        fun http(code: Int) = coil3.network.HttpException(coil3.network.NetworkResponse(code = code))
+        val bmp = bitmap(intArrayOf(clear, clear, clear, clear))
+        assertNull("a success caches nothing", failedLogoTtlMs(LogoOutcome(bmp)))
+        for (code in listOf(400, 403, 404, 410, 499)) {
+            assertEquals("HTTP $code", CardLogoCache.FAILED_TTL_MS, failedLogoTtlMs(LogoOutcome(null, http(code))))
+        }
+        assertEquals("no alpha", CardLogoCache.FAILED_TTL_MS, failedLogoTtlMs(LogoOutcome(null, ChlLogoCheck.NoTransparency())))
+        assertEquals("rejected URL", CardLogoCache.FAILED_TTL_MS, failedLogoTtlMs(LogoOutcome(null, rejected = true)))
+        val transient = listOf(
+            http(500), http(503), http(302),
+            java.net.UnknownHostException("no network"), java.net.SocketTimeoutException("timeout"),
+            java.io.IOException("reset"), IllegalStateException("decode"), null,
+        )
+        for (t in transient) assertEquals("$t", CardLogoCache.TRANSIENT_TTL_MS, failedLogoTtlMs(LogoOutcome(null, t)))
+        // The no-alpha refusal is what the transformation throws, so the fetch sees exactly it.
+        val flat = bitmap(intArrayOf(opaque, opaque, opaque, opaque))
+        assertTrue(runCatching { runBlocking { ChlLogoCheck().transform(flat, coil3.size.Size.ORIGINAL) } }.exceptionOrNull() is ChlLogoCheck.NoTransparency)
+        // A transient mark clears after a minute; a permanent one after 6 h.
+        CardLogoCache.clearFailed()
+        CardLogoCache.markFailed("t", now = 0L, ttlMs = CardLogoCache.TRANSIENT_TTL_MS)
+        CardLogoCache.markFailed("p", now = 0L)
+        assertTrue(CardLogoCache.recentlyFailed("t", now = 59_999L))
+        assertFalse("tried again after 60 s", CardLogoCache.recentlyFailed("t", now = 60_000L))
+        assertTrue(CardLogoCache.recentlyFailed("p", now = 60_000L))
+        CardLogoCache.clearFailed()
+    }
+
+    /** The fetch reports a rejected URL as such, without a request. */
+    @Test
+    fun aRejectedChlUrlIsReportedAsRejected() {
+        val o = runBlocking { coilLogoFetchDetailed(ImageLoader.Builder(context).build(), context, true, "")("https://evil.test/leaguestat/ohl/logos/1.png", 64, 46) }
+        assertTrue(o.rejected)
+        assertNull(o.bitmap)
     }
 
     /** One recorded outcome row (S10): `league code team_id feed_url app_url status png corners verdict`. */

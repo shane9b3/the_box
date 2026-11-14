@@ -39,4 +39,16 @@ object SportsDays {
      */
     fun today(league: League, nowUtcMs: Long): LocalDate =
         Instant.ofEpochMilli(nowUtcMs).atZone(zone(league)).toLocalDateTime().minusHours(rolloverH(league).toLong()).toLocalDate()
+
+    /**
+     * (CHL integration review S1) The end of the league day of the **calendar date** of [utcMs] in the reference zone: the
+     * next day's rollover (05:00 local the next morning for the CHL; midnight for the NHL and NFL). Meant for a "Time TBD"
+     * game, whose start is local midnight of its game date (`HockeyTechMapper`): the end of that day is the earliest it can
+     * be known to be over, so its hard expiry is measured from here, not from the placeholder.
+     */
+    fun dayEndUtcMs(league: League, utcMs: Long): Long {
+        val z = zone(league)
+        val date = Instant.ofEpochMilli(utcMs).atZone(z).toLocalDate()
+        return date.plusDays(1).atTime(rolloverH(league), 0).atZone(z).toInstant().toEpochMilli() // local wall clock (DST days too)
+    }
 }

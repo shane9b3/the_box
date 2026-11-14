@@ -228,6 +228,9 @@ object SportsText {
         val view = facts.followed ?: facts.lastScore
         return if (view != null) {
             res.getString(R.string.sports_quick_score, view.away.abbrev, view.away.score ?: 0, view.home.score ?: 0, view.home.abbrev)
+        } else if (game.startTbd) {
+            // (CHL review S1) Never "Starts 12:00 AM" from the placeholder.
+            res.getString(R.string.sports_time_tbd)
         } else {
             res.getString(R.string.sports_quick_starts, startTime(game.startUtcMs, clock24))
         }

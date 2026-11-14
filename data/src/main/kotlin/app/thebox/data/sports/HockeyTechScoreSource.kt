@@ -367,7 +367,9 @@ class HockeyTechScoreSource internal constructor(
         return games.any { g ->
             when (g.phase) {
                 GamePhase.LIVE, GamePhase.INTERMISSION, GamePhase.PRE -> true
-                GamePhase.SCHEDULED -> g.startUtcMs - now <= OVERLAY_LEAD_MS && now - g.startUtcMs <= OVERLAY_LATE_MS
+                // (CHL integration review L5) A "Time TBD" game's start is a midnight placeholder, not a start: it asks for
+                // the overlay only once the board reports it started.
+                GamePhase.SCHEDULED -> !g.startTbd && g.startUtcMs - now <= OVERLAY_LEAD_MS && now - g.startUtcMs <= OVERLAY_LATE_MS
                 else -> false
             }
         }

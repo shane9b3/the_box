@@ -15,6 +15,11 @@ import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.pressKey
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import app.thebox.core.full.PickerChoice
 import app.thebox.core.full.PickerKind
 import app.thebox.core.full.PickerState
@@ -193,5 +198,74 @@ class ChlTabScreenshotTest {
             val bmp = rule.onNodeWithTag(PICKER_SHEET_TAG).captureToImage().asAndroidBitmap()
             save("sheet-${league.name.lowercase()}", bmp)
         }
+    }
+
+    /** The two longest card names (nicknames) of [league]'s recorded team list, with their codes. */
+    private fun longestPair(league: League): List<Pair<String, String>> {
+        val file = "sports/chl/lscluster/teamsbyseason-${client.getValue(league)}-2026-27.json"
+        val root = kotlinx.serialization.json.Json.parseToJsonElement(SportsFixtures.text(file)).jsonObject
+        val teams = root.getValue("SiteKit").jsonObject.getValue("Teamsbyseason").jsonArray.map { it.jsonObject }
+        return teams.map { t ->
+            val nick = (t["nickname"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: (t["name"] as kotlinx.serialization.json.JsonPrimitive).content
+            nick to (t["code"] as kotlinx.serialization.json.JsonPrimitive).content.uppercase()
+        }.sortedByDescending { it.first.length }.take(2)
+    }
+
+    private fun overflows(tag: String): Boolean {
+        val node = rule.onNodeWithTag(tag, useUnmergedTree = true).fetchSemanticsNode()
+        val results = ArrayList<androidx.compose.ui.text.TextLayoutResult>()
+        node.config[androidx.compose.ui.semantics.SemanticsActions.GetTextLayoutResult].action!!.invoke(results)
+        return results.single().hasVisualOverflow
+    }
+
+    /**
+     * (Integration review L1) The refused followed card for each league with its two longest card names (WHL Thunderbirds ·
+     * Winterhawks; the QMJHL's longer league name in the reason): the 40 px matchup row and the 3-line reason both fit the
+     * 128 px of the team rows, focused and unfocused. Saved as `card-refused.png` (the three cards, unfocused).
+     */
+    @Test
+    fun theRefusedCardFitsTheLongestNamesAndSaysWhichGameItIs() {
+        val vm = SportsViewModel(repo, app.thebox.core.settings.fakes.FakeSettingsStore(), { android.os.SystemClock.elapsedRealtime() }, easternToday = { LocalDate.of(2026, 11, 13) })
+        repo.prefs.value = SportsPrefs(league = League.OHL, chlLeague = League.OHL)
+        repo.day.value = DayState.Board(SportsFixtures.board(dayKey = "2026-11-13", league = League.OHL), 0L, false)
+        rule.setContent { BoxTheme { Box(Modifier.fillMaxSize().background(DesignTokens.Colors.Canvas)) { SportsScreen(vm, clock24 = false) } } }
+        rule.waitForIdle()
+        val shots = ArrayList<Bitmap>()
+        for (league in listOf(League.OHL, League.WHL, League.QMJHL)) {
+            val (a, h) = longestPair(league)
+            val followed = SportsFixtures.chlGame(
+                league = league, id = "${league.ordinal}9",
+                away = SportsFixtures.chlTeam(a.second, a.first, 3, client = client.getValue(league), teamId = null),
+                home = SportsFixtures.chlTeam(h.second, h.first, 2, client = client.getValue(league), teamId = null),
+            )
+            val other = games(league).first()
+            repo.prefs.value = SportsPrefs(league = league, chlLeague = league)
+            repo.day.value = DayState.Board(SportsFixtures.board(other, followed, dayKey = "2026-11-13", league = league), android.os.SystemClock.elapsedRealtime(), false)
+            repo.follow(followed)
+            repo.followFailure.value = FailKind.REFUSED
+            rule.waitForIdle()
+            val id = followed.id.id
+            rule.onNodeWithTag(SPORTS_REFUSED_MATCHUP_TAG + id, useUnmergedTree = true).assertTextEquals("${a.first} · ${h.first}")
+            for (pass in 0 until 2) {
+                assertTrue("$league matchup fits on one line (pass $pass)", !overflows(SPORTS_REFUSED_MATCHUP_TAG + id))
+                assertTrue("$league reason fits in 3 lines (pass $pass)", !overflows(SPORTS_REFUSED_TAG + id))
+                val card = rule.onNodeWithTag(sportsCardTag(id)).fetchSemanticsNode().boundsInRoot
+                val reason = rule.onNodeWithTag(SPORTS_REFUSED_TAG + id, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+                assertTrue("$league reason inside the card", reason.bottom <= card.bottom)
+                // Left moves focus to the other card for the second pass (whichever was focused, the text must fit both ways).
+                rule.onRoot().performKeyInput { pressKey(androidx.compose.ui.input.key.Key.DirectionLeft) }
+                rule.waitForIdle()
+            }
+            shots += rule.onNodeWithTag(sportsCardTag(id)).captureToImage().asAndroidBitmap()
+            repo.follow(null)
+        }
+        val sheet = Bitmap.createBitmap(shots.maxOf { it.width }, shots.sumOf { it.height + 16 }, Bitmap.Config.ARGB_8888)
+        Canvas(sheet).apply {
+            drawColor(0xFF0A0D13.toInt())
+            var y = 0f
+            for (b in shots) { drawBitmap(b, 0f, y, null); y += b.height + 16 }
+        }
+        save("card-refused", sheet)
+        assertTrue(File("build/chl-ui/card-refused.png").length() > 2_000)
     }
 }

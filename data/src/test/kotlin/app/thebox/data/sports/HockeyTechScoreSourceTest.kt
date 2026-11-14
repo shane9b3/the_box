@@ -705,6 +705,29 @@ class HockeyTechScoreSourceTest {
         assertTrue(fb().isEmpty())
     }
 
+    /** (Integration review L5) A scheduled "Time TBD" game's midnight placeholder never asks for the Today overlay. */
+    @Test fun aScheduledTimeTbdGameAsksForNoOverlay() {
+        fun only(status: String): (JsonObject) -> JsonObject = { b ->
+            val kit = b.getValue("SiteKit").jsonObject
+            val g = kit.getValue("Gamesbydate").jsonArray.map { it.jsonObject }.first { (it["game_id"] as JsonPrimitive).content == "29191" }
+            val edited = JsonObject(g + mapOf("time_tbd" to JsonPrimitive("1"), "status" to JsonPrimitive(status), "final" to JsonPrimitive("0"),
+                "visiting_goal_count" to JsonPrimitive("0"), "home_goal_count" to JsonPrimitive("0"), "started" to JsonPrimitive("0")))
+            JsonObject(b + ("SiteKit" to JsonObject(kit + ("Gamesbydate" to kotlinx.serialization.json.JsonArray(listOf(edited))))))
+        }
+        boardEdit = only("1")
+        // 05:10 Toronto: the CHL "today" is 2026-11-13, 5 h 10 min after the placeholder (inside the old 6 h late window).
+        wallMs = at("2026-11-13T05:10", "America/Toronto")
+        val s = source()
+        val b = board(runBlocking { s.day("2026-11-13") })
+        assertTrue(b.games.single().startTbd)
+        assertTrue("no overlay for a TBD placeholder", fb().isEmpty())
+        // Once the board says it started, the overlay is asked for as for any live game.
+        boardEdit = only("2")
+        nowMono += 241_000
+        runBlocking { s.day("2026-11-13") }
+        assertTrue(fb().isNotEmpty())
+    }
+
     @Test fun aFailedOverlayKeepsTheBoardAndARefusedOneIsSkippedFor300s() {
         overlays["runningclock"] = { json("x", 503) }
         val s = source()

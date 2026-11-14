@@ -92,7 +92,7 @@ object SportsFixtures {
         (SportsFixtures::class.java.classLoader.getResourceAsStream(path) ?: error("missing fixture $path")).use { it.readBytes().decodeToString() }
 
     fun followedOf(s: GameSnapshot): FollowedGame =
-        FollowedGame(s.id.league, s.id.id, s.startUtcMs, s.away.abbrev, s.home.abbrev)
+        FollowedGame(s.id.league, s.id.id, s.startUtcMs, s.away.abbrev, s.home.abbrev, startTbd = s.startTbd)
 
     fun team(abbrev: String, name: String, score: Int? = null, shortName: String? = null): TeamLine =
         TeamLine(abbrev, name, score, "https://assets.nhle.com/logos/nhl/svg/${abbrev}_dark.svg", shortName)
