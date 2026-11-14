@@ -419,7 +419,7 @@ class ScoreRepositoryImpl internal constructor(
             return
         }
         if (!sports.enabled) return
-        val f = FollowedGame(game.id.league, game.id.id, game.startUtcMs, game.away.abbrev, game.home.abbrev)
+        val f = FollowedGame(game.id.league, game.id.id, game.startUtcMs, game.away.abbrev, game.home.abbrev, startTbd = game.startTbd)
         if (doc.game?.id == f.id) return
         val final = game.phase == GamePhase.FINAL
         val first = !doc.firstFollowShown

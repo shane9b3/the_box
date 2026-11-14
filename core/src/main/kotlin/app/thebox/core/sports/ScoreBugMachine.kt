@@ -198,7 +198,10 @@ class ScoreBugMachine(
                 olderSince = null
                 lastOk = f
                 f.serverDateMs?.let { date -> skewMs = date - (wall() - (now - f.receivedMono)) }
-                if (f.value.startUtcMs != g.startUtcMs) game = g.copy(startUtcMs = f.value.startUtcMs)
+                // (CHL review S1) The TBD flag follows the snapshot too: a time the league later names ends it.
+                if (f.value.startUtcMs != g.startUtcMs || f.value.startTbd != g.startTbd) {
+                    game = g.copy(startUtcMs = f.value.startUtcMs, startTbd = f.value.startTbd)
+                }
                 if (f.value.phase == GamePhase.POSTPONED) {
                     remove(RemoveReason.POSTPONED)
                     return
@@ -279,7 +282,7 @@ class ScoreBugMachine(
         later(staleAt)
         later(staleAt?.plus(SportsConstants.HIDE_AFTER_MS))
         g.finalSeenUtcMs?.let { later(monoAtWall(now, it + SportsConstants.EXPIRE_AFTER_FINAL_MS)) }
-        later(monoAtWall(now, g.startUtcMs + SportsConstants.HARD_EXPIRY_MS))
+        later(monoAtWall(now, hardExpiryAt(g)))
         later(markUntil)
         later(holdEndsAt()) // (CHL fix pass S4) the hold ends by elapsed time, even with no new snapshot
         return best
@@ -931,8 +934,15 @@ class ScoreBugMachine(
         val g = game ?: return false
         val w = correctedWall()
         if (g.finalSeenUtcMs != null && w >= g.finalSeenUtcMs + SportsConstants.EXPIRE_AFTER_FINAL_MS) return true
-        return w >= g.startUtcMs + SportsConstants.HARD_EXPIRY_MS
+        return w >= hardExpiryAt(g)
     }
+
+    /**
+     * `start + HARD_EXPIRY_MS`; (CHL integration review S1) for a "Time TBD" start, from the end of its league day instead
+     * (its start is a midnight placeholder, so a follow at 08:00 local would otherwise expire at once).
+     */
+    private fun hardExpiryAt(g: FollowedGame): Long =
+        (if (g.startTbd) SportsDays.dayEndUtcMs(g.league, g.startUtcMs) else g.startUtcMs) + SportsConstants.HARD_EXPIRY_MS
 
     private fun remove(why: RemoveReason) {
         val g = game ?: return

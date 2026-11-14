@@ -156,8 +156,14 @@ Rules:
   ```
 - **(C0 fix pass, commit-0 review B2) `GameSnapshot.startTbd: Boolean = false`**, appended after `powerPlayUnknown`:
   the league lists the time as to be decided (`time_tbd == "1"`). `startUtcMs` is then local midnight of the game day
-  in the league's reference zone, a placeholder for ordering and expiry; the card and picker row show "Time TBD"
+  in the league's reference zone, a placeholder for ordering and the pre-game wake; the card and picker row show "Time TBD"
   (`sports_time_tbd`). CHL only; always false for the NHL and the NFL.
+  (Integration fix pass, review S1) The follow carries it too: `FollowedGame.startTbd: Boolean = false` (appended,
+  defaulted; persisted in `sports_follow`). For a TBD follow the machine's hard expiry is measured from the **end of the
+  league day** (`SportsDays.dayEndUtcMs`: 05:00 local the next morning) + `HARD_EXPIRY_MS`, not from the placeholder, so
+  a follow at any hour of the game day stays until 13:00 local the next day; a snapshot that names a time clears the flag
+  and the ordinary `start + 8 h` applies. The quick-bar line and the sheet's off-board row read "Time TBD". The Today
+  overlay ignores a scheduled TBD game (its placeholder is not a start, review L5) until the board reports it started.
 - **(C0 fix pass, commit-0 review B3) `ScoreFacts.chlLeague: League? = null`**: the remembered CHL sub-league
   (`SportsPrefs.chlShown`), filled by `PlayerViewModel` (WP-5, row 50), read by the sheet (WP-2, rows 31–34). The League
   row's CHL step calls `setScoreLeague(chlLeague ?: OHL)`: `setScoreLeague` always takes a concrete league, and for a CHL
@@ -246,7 +252,7 @@ work package, §8).
 | 9 | `PollMeter.kt:131` | NHL else NFL estimate | `when (league.group)` | WP-2 |
 | 10 | `PollMeter.kt:141-143` | endpoint ids | `CHL_LIVE = "chl-live"` | C0 |
 | 11 | `core/.../sports/ScoreBugMachine.kt:176` | older-body hold under `fast()` | `league == NFL` only | WP-2 |
-| 12 | `ScoreBugMachine.kt:200-218` (`fetched`, `Failed`) | fast base under `fast()` | timed; **REFUSED → `backoffAt = receivedMono + BACKOFF_MAX_MS`**, whatever `Retry-After` says (S7) | WP-2 |
+| 12 | `ScoreBugMachine.kt:200-218` (`fetched`, `Failed`) | fast base under `fast()` | timed; **REFUSED → `backoffAt = receivedMono + max(BACKOFF_MAX_MS, Retry-After)`**: never sooner than 300 s, a longer `Retry-After` honoured up to 3 600 s on REFUSED only (S7; WP-2 L3 lead ruling; corrected in the integration fix pass, review S3) | WP-2 |
 | 13 | `ScoreBugMachine.kt:276, 317-325` | NFL view branch | unchanged (CHL takes the hockey path) | — |
 | **13a** | **`ScoreBugMachine.kt:297-310` (hockey `view()`), `:329` (hockey `knownView()`)** | `league` defaults to NHL | **`league = s.id.league`** (B1). NHL value unchanged | **C0** |
 | **13b** | **`ScoreBugMachine.kt:79-81` (state), `:300` (view `powerPlay`), `:486-487` (delay back-in-time), `:536-544` (advance: `ppEndedEntry` / `lastShownPp`), `:771-772` (`gatedPp`)** | null PP = none | **§4.1 unknown-PP hold** (B3) | **C0** (contract + machine) |
@@ -273,7 +279,7 @@ work package, §8).
 | 34 | `PlayerStateMachineImpl.kt` (new, after 2169) | — | `ScoreChlRow` OK: OHL → WHL → QMJHL → OHL; focus stays; board reloads under Loading | WP-2 |
 | 35 | `data/.../sports/ScoreRepositoryImpl.kt:189` | `?: sources.values.first()` | **no silent fallback**: `Failed(HTTP_OTHER)`, logged once | WP-3 |
 | 36 | `ScoreRepositoryImpl.kt:416` | `pushInterval()` on NHL/NFL change | also `chlIntervalS` | WP-3 |
-| 37 | `ScoreRepositoryImpl.kt:479-499, 520-529` (day `dayNextAt`, `dayFailed`) | back-off from 20 s | **REFUSED → next day request at `fail + BACKOFF_MAX_MS`** (S7) | WP-3 |
+| 37 | `ScoreRepositoryImpl.kt:479-499, 520-529` (day `dayNextAt`, `dayFailed`) | back-off from 20 s | **REFUSED → next day request at `fail + max(BACKOFF_MAX_MS, Retry-After)`**, Retry-After up to 3 600 s on REFUSED only (S7; lead ruling; corrected in the integration fix pass, review S3) | WP-3 |
 | 38 | `ScoreRepositoryImpl.kt:582-592` (`pushInterval`) | the followed league's meter | unchanged (it already uses the followed league; L4) | — |
 | 39 | `ScoreRepositoryImpl.kt:614` | 429 slowed for NFL | timed leagues | WP-3 |
 | 40 | `ScoreRepositoryImpl.kt:635-637` | NFL meter reset | NFL only | — |
@@ -487,9 +493,9 @@ those polls pay their TLS handshakes; accepted.
 | Board without the followed game | `NotFound` | toast "The OHL no longer lists LDN – KIT. Follow another game in Sports." |
 
 - **REFUSED (S7):**
-  - The machine's next follow poll is at `receivedMono + BACKOFF_MAX_MS` (row 12); the next day request at
-    `fail + BACKOFF_MAX_MS` (row 37). Never faster, whatever `Retry-After` says; (lead ruling) a longer `Retry-After`
-    wins: `max(300 s, Retry-After)`, honoured up to 3 600 s on REFUSED only.
+  - The machine's next follow poll is at `receivedMono + max(BACKOFF_MAX_MS, Retry-After)` (row 12); the next day
+    request at `fail + max(BACKOFF_MAX_MS, Retry-After)` (row 37). Never sooner than 300 s; a longer `Retry-After` is
+    honoured up to 3 600 s, on REFUSED only (lead ruling; the source clamps every other kind's `Retry-After` to 300 s).
   - A follow keeps its game: the bug dims, then hides on the existing timers.
   - The tab and the sheet show the REFUSED text. (Integration, WP-3 review L10) For a refused **follow** (either host),
     `ScoreRepository.followFailure` is REFUSED until the next answer or a follow change: the followed card on the Sports tab

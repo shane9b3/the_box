@@ -241,4 +241,64 @@ class ScoreBugMachineChlTest {
             assertEquals(620, assertNotNull(r.m.knownView()).clockSecs, "$league: the NFL's older-body guard is not run")
         }
     }
+
+    // ------------------------------------------------------------------ (integration review S1) "Time TBD" follows
+
+    /** OHL LDN – KIT on 2026-11-13 with the time to be decided: the start is local midnight (Toronto), 05:00 UTC. */
+    private fun tbd(phase: GamePhase = GamePhase.SCHEDULED) = SportsFixtures.chlGame(
+        phase = phase, startTbd = true, period = null, periodKind = null, clock = null,
+        startUtcMs = java.time.LocalDate.parse("2026-11-13").atStartOfDay(SportsDays.TORONTO).toInstant().toEpochMilli(),
+    )
+
+    private val hour = 3_600_000L
+
+    @Test
+    fun aTimeTbdGameFollowedInTheAfternoonStaysFollowedUntilEightHoursAfterItsLeagueDay() {
+        val g = tbd()
+        // 14:00 Toronto: 14 h after the placeholder, past the old midnight + 8 h expiry.
+        val r = Rig(g.startUtcMs, wallOffsetMs = 14 * hour)
+        r.follow(g)
+        r.at(1)
+        assertEquals(g.id, r.m.followed()?.id, "still followed at once")
+        assertTrue(r.m.followed()!!.startTbd)
+        r.ok(g)
+        r.at(4 * hour)
+        assertEquals(g.id, r.m.followed()?.id, "still followed 4 h later (18:00)")
+        // The league day ends at 05:00 the next morning (29 h after the placeholder); the hard expiry is 8 h after that.
+        val expiresAt = 37 * hour - 14 * hour
+        r.at(expiresAt - 1)
+        assertEquals(g.id, r.m.followed()?.id)
+        r.at(expiresAt)
+        assertEquals(null, r.m.followed(), "expired 8 h after the league day's end")
+        assertTrue(r.m.drainEvents().none { it is ScoreEvent.Removed }, "expiry stays silent, as for any game")
+    }
+
+    @Test
+    fun aTimedGameStillExpiresEightHoursAfterItsStart() {
+        val g = tbd().copy(startTbd = false)
+        val r = Rig(g.startUtcMs, wallOffsetMs = 14 * hour)
+        r.follow(g)
+        r.at(1)
+        assertEquals(null, r.m.followed(), "unchanged rule: start + 8 h")
+    }
+
+    @Test
+    fun aRestoredTimeTbdFollowKeepsItsDayEndExpiryAndANamedTimeEndsIt() {
+        val g = tbd()
+        // The persisted record (as the repository writes it) read back by a new process at 20:00 Toronto.
+        val restored = SportsFixtures.followedOf(g)
+        assertTrue(restored.startTbd)
+        val r = Rig(g.startUtcMs, wallOffsetMs = 20 * hour)
+        r.m.follow(restored)
+        r.m.demand(Demand.SEEN)
+        r.at(1)
+        assertEquals(g.id, r.m.followed()?.id, "a restart does not expire it")
+        // The league names 19:30: the follow takes the real start and the ordinary rule from then on.
+        val named = g.copy(startTbd = false, startUtcMs = g.startUtcMs + 19 * hour + 30 * 60_000L, phase = GamePhase.LIVE,
+            period = 1, periodKind = PeriodKind.REG, clock = GameClock(1_100, running = true, inIntermission = false))
+        r.ok(named)
+        r.at(2)
+        assertFalse(r.m.followed()!!.startTbd)
+        assertEquals(named.startUtcMs, r.m.followed()!!.startUtcMs)
+    }
 }

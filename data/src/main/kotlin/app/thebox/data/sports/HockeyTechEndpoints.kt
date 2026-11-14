@@ -5,10 +5,8 @@ import app.thebox.core.common.BoxLog
 import app.thebox.core.common.Redact
 import app.thebox.core.sports.League
 import app.thebox.core.sports.SportsConstants
-import app.thebox.data.BuildConfig
+import app.thebox.core.sports.SportsDebugOverride
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
-import java.io.File
-import java.io.IOException
 
 /**
  * (CHL §2.2, owner decision 1, lead rulings P3 and L6) The public site keys HockeyTech's `lscluster` feed takes, as the
@@ -97,12 +95,10 @@ class HockeyTechEndpoints internal constructor(
 
         /** The endpoints for this build: [DEFAULT], or the debug override file in a debug build. Call off the main thread. */
         fun resolve(context: Context): HockeyTechEndpoints {
-            if (!BuildConfig.DEBUG) return DEFAULT
-            val text = try {
-                File(context.filesDir, SportsConstants.DEBUG_OVERRIDE_FILE).takeIf { it.isFile }?.readText()
-            } catch (e: IOException) {
-                null
-            }
+            // (Integration review L4) The shared check: the installed app's FLAG_DEBUGGABLE; a release build never opens the file.
+            val debuggable = SportsDebugOverride.isDebuggable(context.applicationInfo.flags)
+            if (!debuggable) return DEFAULT
+            val text = SportsDebugOverride.text(context.filesDir, debuggable)
             return fromOverride(text)?.also { BoxLog.w(TAG, "debug build: CHL endpoints overridden") } ?: DEFAULT
         }
 

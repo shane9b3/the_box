@@ -31,6 +31,34 @@ fun coilLogoFetch(loader: ImageLoader, context: Context, chlLeague: Boolean = fa
 
 /** [overrideOrigin] fixes the debug override for tests (null = read it from the app, once); "" = none. */
 internal fun coilLogoFetch(loader: ImageLoader, context: Context, chlLeague: Boolean, fixedOverride: String?): LogoFetch {
+    val detailed = coilLogoFetchDetailed(loader, context, chlLeague, fixedOverride)
+    return { url, w, h -> detailed(url, w, h).bitmap }
+}
+
+/**
+ * (CHL integration review S2) One logo fetch's outcome: the [bitmap], or why there is none. [rejected]: the URL failed the
+ * CHL validation, so nothing was requested. [error]: the `ErrorResult`'s throwable (null on success or a rejection).
+ */
+internal class LogoOutcome(val bitmap: Bitmap?, val error: Throwable? = null, val rejected: Boolean = false)
+
+/**
+ * (CHL integration review S2) How long a failed **CHL card** logo stays failed in [CardLogoCache]: [CardLogoCache.FAILED_TTL_MS]
+ * (6 h) only for a permanent answer (the URL rejected, an HTTP 4xx, or [ChlLogoCheck]'s no-alpha refusal), else
+ * [CardLogoCache.TRANSIENT_TTL_MS] (60 s: no network, a timeout, a 5xx, a decode error). Null on success (nothing to cache).
+ * A cancelled fetch never reaches here (the caller rethrows it).
+ */
+internal fun failedLogoTtlMs(o: LogoOutcome): Long? = when {
+    o.bitmap != null -> null
+    o.rejected -> CardLogoCache.FAILED_TTL_MS
+    o.error is ChlLogoCheck.NoTransparency -> CardLogoCache.FAILED_TTL_MS
+    (o.error as? coil3.network.HttpException)?.response?.code in 400..499 -> CardLogoCache.FAILED_TTL_MS
+    else -> CardLogoCache.TRANSIENT_TTL_MS
+}
+
+/** [coilLogoFetch] with the reason a logo is missing ([LogoOutcome]), for the cards' negative cache. */
+internal fun coilLogoFetchDetailed(
+    loader: ImageLoader, context: Context, chlLeague: Boolean, fixedOverride: String?,
+): suspend (url: String, w: Int, h: Int) -> LogoOutcome {
     var overrideOrigin: String? = fixedOverride
     return fetch@{ url, w, h ->
     // (CHL §3.5, S9; review L1, L2) A CHL logo (the caller knows the league; the bug's hook sees only the URL, so a URL on the
@@ -40,8 +68,11 @@ internal fun coilLogoFetch(loader: ImageLoader, context: Context, chlLeague: Boo
     val resolved = overrideOrigin ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ChlLogoCheck.overrideOrigin(context) ?: "" }.also { overrideOrigin = it }
     val override = resolved.ifEmpty { null }
     val chl = chlLeague || ChlLogoCheck.isChlHost(url, override)
-    if (chl && !ChlLogoCheck.isChlLogoUrl(url, override)) return@fetch null
-    (loader.execute(logoRequest(context, url, chl, w, h)) as? SuccessResult)?.image?.toBitmap()
+    if (chl && !ChlLogoCheck.isChlLogoUrl(url, override)) return@fetch LogoOutcome(null, rejected = true)
+    when (val r = loader.execute(logoRequest(context, url, chl, w, h))) {
+        is SuccessResult -> LogoOutcome(r.image.toBitmap())
+        is coil3.request.ErrorResult -> LogoOutcome(null, r.throwable)
+    }
     }
 }
 

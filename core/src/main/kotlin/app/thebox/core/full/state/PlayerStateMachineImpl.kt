@@ -2149,6 +2149,8 @@ class PlayerStateMachineImpl(
             phase = when { final != null -> GamePhase.FINAL; v != null -> GamePhase.LIVE; else -> GamePhase.SCHEDULED },
             away = v?.away ?: TeamLine(g.away, g.away, null, null), home = v?.home ?: TeamLine(g.home, g.home, null, null),
             period = null, periodKind = null, otNumber = null, clock = null, finalKind = final?.kind,
+            // (CHL review S1) Off the board, a "Time TBD" follow still reads "Time TBD", never its midnight placeholder.
+            startTbd = g.startTbd,
         )
     }
 

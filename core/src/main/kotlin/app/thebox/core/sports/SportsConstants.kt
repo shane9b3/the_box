@@ -10,7 +10,7 @@ object SportsConstants {
      * `http://10.0.2.2:8080` (tools/fakepanel/README.md). The one name for the data sources (`SportsEndpoints`,
      * `EspnEndpoints`, `HockeyTechEndpoints`) and the CHL logo check (`ChlLogoCheck`); each reads it only in a debug build.
      */
-    const val DEBUG_OVERRIDE_FILE = "debug/sports_base"
+    const val DEBUG_OVERRIDE_FILE = SportsDebugOverride.FILE // (review L4) read only through SportsDebugOverride.text
 
     // ---- cadence (§2.3)
     /** The CDN's 20 s cache bucket (`Date − Age` gives its start; A-S2). */

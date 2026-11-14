@@ -447,7 +447,8 @@ def cmd_live(folder, ot_len=OT_REG):
 
 def main(argv):
     if len(argv) > 1 and argv[1] == "live":
-        # pp_replay.py live <recording folder> [--ot-len 1200]: the S8 live gate on one record_live.py recording.
+        # pp_replay.py live <recording folder> [--ot-len 1200]: a quick Python check of one record_live.py recording.
+        # The S8 gate itself is the Kotlin ChlLiveGateTest (tools/chl/README.md).
         ot = int(argv[argv.index("--ot-len") + 1]) if "--ot-len" in argv else OT_REG
         sys.exit(cmd_live(argv[2], ot))
     d = DEFAULT_DIR

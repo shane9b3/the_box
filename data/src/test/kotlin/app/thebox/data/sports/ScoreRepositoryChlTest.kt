@@ -270,6 +270,48 @@ class ScoreRepositoryChlTest {
         assertEquals("nothing followed, no failure", null, r.repo.followFailure.value)
     }
 
+    // ---------------------------------------------------------------- integration review S1: "Time TBD"
+
+    /**
+     * The real machine behind the repository: an OHL "Time TBD" game (start = midnight Toronto, the mapper's placeholder)
+     * followed at 14:00 local stays followed, is persisted with its flag, and a new process restored from the same store
+     * keeps it until 8 h after the league day's end (05:00 the next morning).
+     */
+    @Test fun aTimeTbdFollowAfterEightLocalSurvivesAndSurvivesARestart() = runTest {
+        val hour = 3_600_000L
+        val placeholder = java.time.LocalDate.parse("2026-11-13").atStartOfDay(java.time.ZoneId.of("America/Toronto")).toInstant().toEpochMilli()
+        val snap = SportsFixtures.chlGame(
+            id = "29300", phase = app.thebox.core.sports.GamePhase.SCHEDULED, startTbd = true, startUtcMs = placeholder,
+            period = null, periodKind = null, clock = null,
+        )
+        val mono = MonoClock { testScheduler.currentTime }
+        val wallAt14 = placeholder + 14 * hour
+        val store = FakeSettingsStore()
+        store.update(SportsFollowDomain) { SportsFollowDoc(pollPhaseMs = 1_500L) }
+        fun repo(wall0: Long): ScoreRepositoryImpl {
+            val ohl = Source(League.OHL, mono).apply { game = { Fetch.Ok(snap, mono.nowMs(), null, 0) } }
+            return ScoreRepositoryImpl(
+                listOf<ScoreSource>(ohl).associateBy { it.league }, store, Awake(), Signals(), backgroundScope, mono,
+                machineFactory = { phase -> FollowMachine.of(app.thebox.core.sports.ScoreBugMachine(mono, { wall0 + testScheduler.currentTime }, phase)) },
+                random = Random(3),
+            )
+        }
+        val first = repo(wallAt14)
+        runCurrent()
+        first.follow(snap)
+        runCurrent()
+        assertEquals("followed at 14:00 local", snap.id, first.followed.value?.id)
+        assertTrue("persisted with its TBD flag", store.flow(SportsFollowDomain).value.game?.startTbd == true)
+        advanceTimeBy(4 * hour)
+        runCurrent()
+        assertEquals("still followed at 18:00", snap.id, first.followed.value?.id)
+        // A new process (same store) at 20:00 local: the restored follow is not dropped.
+        val restarted = repo(placeholder + 20 * hour - testScheduler.currentTime)
+        runCurrent()
+        assertEquals("restored and kept", snap.id, restarted.followed.value?.id)
+        assertTrue(restarted.followed.value!!.startTbd)
+    }
+
     // ---------------------------------------------------------------- row 39
 
     @Test fun a429SlowsTheChlMeter() = runTest {

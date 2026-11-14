@@ -16,8 +16,8 @@ import app.thebox.core.sports.League
 import app.thebox.core.sports.PollMeter
 import app.thebox.core.sports.ScoreSource
 import app.thebox.core.sports.SportsConstants
+import app.thebox.core.sports.SportsDebugOverride
 import app.thebox.core.sports.TeamLine
-import app.thebox.data.BuildConfig
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -35,7 +35,6 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
-import java.io.File
 import java.io.FilterInputStream
 import java.io.IOException
 import java.io.InputStream
@@ -71,12 +70,10 @@ data class EspnEndpoints(val apiBase: String, val logoBase: String) {
 
         /** The endpoints for this build: [DEFAULT], or the debug override file in a debug build. Call off the main thread. */
         fun resolve(context: Context): EspnEndpoints {
-            if (!BuildConfig.DEBUG) return DEFAULT
-            val text = try {
-                File(context.filesDir, SportsConstants.DEBUG_OVERRIDE_FILE).takeIf { it.isFile }?.readText()
-            } catch (e: IOException) {
-                null
-            }
+            // (Integration review L4) The shared check: the installed app's FLAG_DEBUGGABLE; a release build never opens the file.
+            val debuggable = SportsDebugOverride.isDebuggable(context.applicationInfo.flags)
+            if (!debuggable) return DEFAULT
+            val text = SportsDebugOverride.text(context.filesDir, debuggable)
             return fromOverride(text)?.also { BoxLog.w(TAG, "debug build: ESPN endpoints overridden") } ?: DEFAULT
         }
 
