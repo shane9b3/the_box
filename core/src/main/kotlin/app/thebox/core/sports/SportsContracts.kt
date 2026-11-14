@@ -332,6 +332,12 @@ sealed interface ScoreEvent {
      * follow on this install (the long toast). Not raised for [FollowedFinal] games.
      */
     data class Followed(val game: FollowedGame, val first: Boolean) : ScoreEvent
+    /**
+     * (CHL emulator pass, defect 2; appended) A follow refused because the hard expiry would drop it at once: [game]'s listed
+     * start is more than `HARD_EXPIRY_MS` ago. Nothing is stored and the current follow (if any) is untouched. [final]: the
+     * game was already final when picked.
+     */
+    data class FollowTooOld(val game: FollowedGame, val final: Boolean) : ScoreEvent
 }
 
 // ------------------------------------------------------------------ §2.7 the machine's outputs

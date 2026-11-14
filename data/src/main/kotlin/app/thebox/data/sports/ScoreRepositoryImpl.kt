@@ -87,6 +87,11 @@ internal interface FollowMachine {
      * loop's fakes compile; [of] forwards it (review B2: production must never silently drop it).
      */
     fun interval(liveMs: Long?) {}
+    /**
+     * (CHL emulator pass, defect 2; review fix 2) [ScoreBugMachine.followIfKept]: a user's follow, decided once; false =
+     * refused and nothing changed. The loop's fakes keep every follow.
+     */
+    fun followIfKept(game: FollowedGame): Boolean { follow(game); return true }
 
     companion object {
         fun of(m: ScoreBugMachine): FollowMachine = object : FollowMachine {
@@ -103,6 +108,7 @@ internal interface FollowMachine {
             override fun followed(): FollowedGame? = m.followed()
             override fun drainEvents(): List<ScoreEvent> = m.drainEvents()
             override fun interval(liveMs: Long?) = m.interval(liveMs)
+            override fun followIfKept(game: FollowedGame): Boolean = m.followIfKept(game)
         }
     }
 }
@@ -422,8 +428,14 @@ class ScoreRepositoryImpl internal constructor(
         val f = FollowedGame(game.id.league, game.id.id, game.startUtcMs, game.away.abbrev, game.home.abbrev, startTbd = game.startTbd)
         if (doc.game?.id == f.id) return
         val final = game.phase == GamePhase.FINAL
+        // (CHL emulator pass, defect 2; review fix 2) One decision, the machine's: a follow the hard expiry would drop at
+        // once (a listed start more than 8 h ago by this box's clock) is never stored or confirmed; the toast says why and
+        // any current follow is kept. Followed / FollowTooOld both come from this one answer, so they cannot disagree.
+        if (!machine.followIfKept(f)) {
+            _events.tryEmit(ScoreEvent.FollowTooOld(f, final))
+            return
+        }
         val first = !doc.firstFollowShown
-        machine.follow(f)
         persist(doc.copy(game = f, firstFollowShown = doc.firstFollowShown || !final))
         _events.tryEmit(if (final) ScoreEvent.FollowedFinal(f) else ScoreEvent.Followed(f, first))
     }

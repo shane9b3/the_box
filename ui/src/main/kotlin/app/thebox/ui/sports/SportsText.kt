@@ -294,6 +294,9 @@ object SportsText {
         is ScoreEvent.Followed -> if (e.first) res.getString(R.string.sports_toast_following_first, e.game.away, e.game.home)
             else res.getString(R.string.sports_toast_following, e.game.away, e.game.home)
         is ScoreEvent.FollowedFinal -> res.getString(R.string.sports_toast_followed_final)
+        is ScoreEvent.FollowTooOld -> res.getString(
+            if (e.final) R.string.sports_toast_too_old_final else R.string.sports_toast_too_old, e.game.away, e.game.home,
+        )
         is ScoreEvent.Removed -> removed(res, e.why, e.game, e.game.league)
     }
 

@@ -229,3 +229,26 @@ Review: `docs/review/2026-11-14-chl-integration-review.md` (ready to merge as an
   to v0.1.7 (or any build without the CHL leagues) after **any** CHL follow, not only while one is followed, therefore
   fails to read the whole `sports_follow` document: that build starts with no follow, fresh NHL / NFL meters and a new
   poll phase. Device-only data, downgrades unsupported; never "fixed" with an NHL default (design §1.4).
+
+## Emulator pass fixes (2026-11-14)
+
+- **A follow that would hard-expire at once is refused, not confirmed.** A game whose listed start is already more than
+  `HARD_EXPIRY_MS` (8 h) ago by this box's corrected clock (a feed's wrong start time, or a wrong box clock) used to toast
+  "Following …" and was then dropped silently by the machine's first step. Now `ScoreBugMachine.followIfKept` reads the
+  clock once and that one reading decides both the refusal and the step after it; `ScoreRepositoryImpl.applyFollow`
+  confirms (`Followed` / `FollowedFinal`) only when it returns true and otherwise emits `ScoreEvent.FollowTooOld`
+  (`sports_toast_too_old` / `_final`: a reason and a next step), stores nothing and keeps any current follow. All
+  leagues; the restore path (`follow(doc.game)` on start) is unchanged.
+- **The expiry rule is unchanged** (`start + 8 h`; a "Time TBD" start from the end of its league day; 5 min after a
+  seen final).
+- **Live-game exemption: considered, deferred.** Exempting a game the board shows LIVE (or measuring its expiry from
+  when it was first seen live) would let a game with a wrong listed start be followed while it plays. It changes the
+  expiry rule, so it is a separate change with its own proposer and review, not part of this fix.
+- **Failure rows in the quick-bar Score bug sheet are two slots high and wrap** (132 design px, 22/500, up to 4 lines):
+  the followed game's refused-feed row and every day-failure row read whole instead of "OHL scores stopped letting
+  thi…". The sheet's window counts such a row twice, so it never grows past 880 px; the rows and D-pad order are unchanged.
+- **Interval detail strings lead with the MB-an-hour figure** (Settings → Sports), so the unfocused one-line row always
+  shows it (`docs/design/m6-sports-update-interval.md` string table).
+- **Fake panel:** every game's `date_played` + `schedule_time` in `timezone` is its real start, on the league day; a run
+  between the game zone's midnight and 05:00 lists the featured game at 23:59 (up to ~6-7 h before its puck drop) and
+  caps its timeline to end before the app's expiry. New `--chl-time-tbd` (`sports_chl_time_tbd`).

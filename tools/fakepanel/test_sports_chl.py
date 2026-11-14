@@ -395,5 +395,210 @@ class LiveGateTest(ChlCase):
             self.assertGreater(hidden, 0, buf.getvalue())
 
 
+class _StubPanel:
+    def __init__(self, **cfg):
+        self.cfg = dict(sports_chl.DEFAULTS, sports=True, sports_chl=True, **cfg)
+
+
+def _unix(client_zone, y, mo, d, h, mi):
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+    return dt.datetime(y, mo, d, h, mi, tzinfo=ZoneInfo(client_zone)).timestamp()
+
+
+def _mapper_start(entry, client):
+    """HockeyTechMapper.boardGame's start: date_played + schedule_time in timezone; "Time TBD" = midnight of
+    date_played in the league's reference zone. Returns (unix s, tbd)."""
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+    day = dt.date.fromisoformat(entry["date_played"])
+    if entry["time_tbd"] in ("1", "true"):
+        return int(dt.datetime.combine(day, dt.time(0), ZoneInfo(sports_chl.ZONES[client])).timestamp()), True
+    t = dt.time.fromisoformat(entry["schedule_time"])
+    return int(dt.datetime.combine(day, t, ZoneInfo(entry["timezone"])).timestamp()), False
+
+
+class StartTimeTest(unittest.TestCase):
+    """(Emulator pass, defect 3) Every date/time field of a game names one league day (05:00 rollover), on both sides of
+    05:00, in every league zone, over three consecutive days and the DST change days. The clock is injected."""
+
+    DAYS = [(2026, 11, 12), (2026, 11, 13), (2026, 11, 14), (2026, 3, 8), (2026, 11, 1)]
+    TIMES = [(0, 0), (0, 30), (2, 30), (3, 30), (4, 59), (5, 0), (5, 1), (8, 0), (12, 0), (19, 0), (21, 30), (22, 59),
+             (23, 30), (23, 59)]
+
+    def slate(self, client, unix, **cfg):
+        sp = sports_chl.SportsChl(_StubPanel(**cfg), clock=lambda: unix)
+        self.assertEqual(unix, sp.anchor)
+        return sp
+
+    def check(self, sp, client, label, at):
+        import datetime as dt
+        from zoneinfo import ZoneInfo
+        ref = ZoneInfo(sports_chl.ZONES[client])
+        day = sp.day(client)
+        want_day = (dt.datetime.fromtimestamp(sp.anchor, ref) - dt.timedelta(hours=5)).date()
+        self.assertEqual(want_day, day, label)
+        for g in sp.games(client):
+            e = sp.board_entry(client, g, at)
+            start, tbd = _mapper_start(e, client)
+            self.assertEqual(day.isoformat(), e["date_played"], label)
+            self.assertEqual(g[3], start, f"{label} {g[4]}: date_played + schedule_time in timezone is the listed start")
+            if not tbd:
+                league_day = (dt.datetime.fromtimestamp(start, ref) - dt.timedelta(hours=5)).date()
+                self.assertEqual(day, league_day, f"{label} {g[4]}: the start is on the league day")
+            nodes = sp.nodes(client, g, at)
+            for n in ("runningclock", "publishedclock", "goalssummary", "shotssummary"):
+                if nodes[n] is not None:
+                    self.assertEqual(day.isoformat(), nodes[n]["DatePlayed"], f"{label} {g[4]} {n}")
+        featured = sp.games(client)[0][3]
+        drop = sp.featured_start()
+        self.assertLessEqual(featured, drop + 1, label)
+        # At or before the puck drop: never ~24 h off, inside the app's 8 h hard expiry. The worst case is a run just before
+        # 05:00 Vancouver (listed at 23:59 Edmonton): 6 h, 7 h on the night the clocks go back.
+        self.assertLess(drop - featured, 7.5 * 3600, label)
+        return featured, drop
+
+    def test_every_field_names_one_league_day(self):
+        for client in sports_chl.CLIENTS:
+            zone = sports_chl.ZONES[client]
+            for (y, mo, d) in self.DAYS:
+                for (h, mi) in self.TIMES:
+                    unix = _unix(zone, y, mo, d, h, mi)
+                    sp = self.slate(client, unix)
+                    label = f"{client} {y}-{mo:02d}-{d:02d} {h:02d}:{mi:02d} {zone}"
+                    _, total = sp.seg_starts()
+                    for at in (unix, unix + 60, unix + total + 10):
+                        featured, drop = self.check(sp, client, label, at)
+                    if 5 <= h < 22:
+                        # The usual evening: the listed start is the puck drop itself (whole seconds).
+                        self.assertEqual(int(drop), featured, label)
+
+    def test_the_reported_whl_case_is_not_a_day_off(self):
+        # WHL 9100001 at 02:30 Vancouver (03:30 Edmonton) on 2026-11-14: it was listed as 2026-11-13 03:30 Edmonton.
+        unix = _unix("America/Vancouver", 2026, 11, 14, 2, 30)
+        sp = self.slate("whl", unix)
+        e = sp.board_entry("whl", sp.games("whl")[0], unix + 60)
+        self.assertEqual("9100001", e["game_id"])
+        self.assertEqual("2026-11-13", e["date_played"])
+        start, _ = _mapper_start(e, "whl")
+        self.assertGreater(start, unix - 8 * 3600, "inside the 8 h hard expiry")
+        self.assertLessEqual(start, unix + 60)
+        self.assertEqual("23:59:00", e["schedule_time"])
+
+    def test_both_sides_of_the_rollover(self):
+        for client in sports_chl.CLIENTS:
+            zone = sports_chl.ZONES[client]
+            before = self.slate(client, _unix(zone, 2026, 11, 14, 4, 59))
+            after = self.slate(client, _unix(zone, 2026, 11, 14, 5, 0))
+            self.assertEqual("2026-11-13", before.day(client).isoformat(), client)
+            self.assertEqual("2026-11-14", after.day(client).isoformat(), client)
+            for sp in (before, after):
+                for g in sp.games(client):
+                    self.assertEqual(sp.day(client).isoformat(), sp.board_entry(client, g, sp.anchor)["date_played"])
+            # After the rollover the featured game is listed at its puck drop.
+            self.assertEqual(int(after.featured_start()), after.games(client)[0][3], client)
+
+    def test_a_clamped_start_caps_the_timeline_before_the_hard_expiry(self):
+        long = 86400
+        for client in sports_chl.CLIENTS:
+            zone = sports_chl.ZONES[client]
+            for (h, mi) in ((0, 30), (2, 30), (4, 59)):
+                unix = _unix(zone, 2026, 11, 14, h, mi)
+                logs = []
+                panel = _StubPanel(sports_chl_timeline_s=long)
+                panel.log = logs.append
+                sp = sports_chl.SportsChl(panel, clock=lambda: unix)
+                label = f"{client} {h:02d}:{mi:02d}"
+                self.assertLess(sp.scale(), sp.raw_scale(), label)
+                starts, _ = sp.seg_starts()
+                final_at = sp.anchor + starts[sports_chl.SEG["final so"]]
+                for c in sports_chl.CLIENTS:
+                    listed = sp.games(c)[0][3]
+                    self.assertLessEqual(final_at, listed + sports_chl.HARD_EXPIRY_S - sports_chl.EXPIRY_MARGIN_S, f"{label} {c}")
+                    self.assertEqual(4, sp.state(c, sp.games(c)[0], final_at + 1)["status"], f"{label} {c}: final by then")
+                self.assertEqual(1, len(logs), label)
+                self.assertIn("capped", logs[0])
+                sp.reset()  # a restart logs it again, once
+                self.assertEqual(2, len(logs), label)
+
+    def test_no_cap_in_normal_hours_or_at_the_default_timeline(self):
+        for client in sports_chl.CLIENTS:
+            zone = sports_chl.ZONES[client]
+            # One scale serves every league, so "normal hours" must be normal in all three zones (08:00 Toronto is 05:00
+            # Vancouver); the 24 h timeline's 1.8 h pre-game must also end before the eastmost game zone's midnight.
+            for (h, mi) in ((8, 0), (12, 0), (16, 0)):
+                logs = []
+                panel = _StubPanel(sports_chl_timeline_s=86400)
+                panel.log = logs.append
+                sp = sports_chl.SportsChl(panel, clock=lambda: _unix(zone, 2026, 11, 14, h, mi))
+                self.assertIsNone(sp.scale_cap(), f"{client} {h}:{mi}")
+                self.assertEqual(sp.raw_scale(), sp.scale())
+                self.assertEqual([], logs)
+            for (y, mo, d) in self.DAYS:
+                for (h, mi) in self.TIMES:  # the default 520 s is never capped, clamped or not
+                    sp = self.slate(client, _unix(zone, y, mo, d, h, mi))
+                    self.assertEqual(1.0, sp.scale(), f"{client} {y}-{mo}-{d} {h}:{mi}")
+
+    def test_time_tbd(self):
+        for client in sports_chl.CLIENTS:
+            zone = sports_chl.ZONES[client]
+            for (h, mi) in ((2, 30), (5, 0), (14, 0), (23, 30)):
+                unix = _unix(zone, 2026, 11, 14, h, mi)
+                off = self.slate(client, unix)
+                on = self.slate(client, unix, sports_chl_time_tbd=True)
+                entries = [on.board_entry(client, g, unix + 60) for g in on.games(client)]
+                tbd = [e for e in entries if e["time_tbd"] == "1"]
+                self.assertEqual(1, len(tbd), f"{client} {h}:{mi}: exactly one TBD game per league")
+                e = tbd[0]
+                self.assertEqual(sports_chl.SLATE[client][2][0], e["game_id"])
+                self.assertEqual(("1", "0", "0"), (e["status"], e["final"], e["started"]), "scheduled: not live, not final")
+                self.assertEqual("00:00:00", e["schedule_time"])
+                start, is_tbd = _mapper_start(e, client)
+                self.assertTrue(is_tbd)
+                self.assertEqual(on.games(client)[2][3], start, "the listed start is the mapper's placeholder")
+                self.assertEqual(on.day(client).isoformat(), e["date_played"])
+                # The other games are unchanged by the switch.
+                plain = [off.board_entry(client, g, unix + 60) for g in off.games(client)]
+                for a, b in zip(plain, entries):
+                    if a["game_id"] != e["game_id"]:
+                        self.assertEqual(a, b)
+                self.assertTrue(all(x["time_tbd"] == "0" for x in plain))
+
+    def test_time_tbd_config_and_cli(self):
+        sports_chl.check_config({"sports_chl_time_tbd": True})
+        with self.assertRaises(ValueError):
+            sports_chl.check_config({"sports_chl_time_tbd": "yes"})
+        self.assertIs(False, sports_chl.DEFAULTS["sports_chl_time_tbd"])
+        self.assertIn("sports_chl_time_tbd", fakepanel.DEFAULTS)
+        from unittest import mock
+
+        class Stop(Exception):
+            pass
+
+        seen = {}
+
+        def capture(cfg, *a, **k):
+            seen.update(cfg)
+            raise Stop()
+
+        with mock.patch.object(fakepanel, "Panel", side_effect=capture):
+            with self.assertRaises(Stop):
+                fakepanel.main(["--sports", "--sports-chl", "--chl-time-tbd"])
+        self.assertIs(True, seen["sports_chl_time_tbd"])
+        with mock.patch.object(fakepanel, "Panel", side_effect=capture), mock.patch("sys.stderr"):
+            with self.assertRaises(SystemExit):
+                fakepanel.main(["--sports", "--chl-time-tbd"])  # needs --sports-chl
+
+
+class TimeTbdRouteTest(ChlCase):
+    def test_admin_config_switches_it(self):
+        self.admin("/admin/config", {"sports_chl_time_tbd": True})
+        games = json.loads(self.feed("ohl", "gamesbydate", fetch_date=self.chl.day("ohl").isoformat())[2])["SiteKit"]["Gamesbydate"]
+        self.assertEqual([sports_chl.SLATE["ohl"][2][0]], [g["game_id"] for g in games if g["time_tbd"] == "1"])
+        self.admin("/admin/config", {"sports_chl_time_tbd": False})
+        games = json.loads(self.feed("ohl", "gamesbydate", fetch_date=self.chl.day("ohl").isoformat())[2])["SiteKit"]["Gamesbydate"]
+        self.assertTrue(all(g["time_tbd"] == "0" for g in games))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -13,6 +13,7 @@ import app.thebox.core.sports.FailKind
 import app.thebox.core.sports.Fetch
 import app.thebox.core.sports.FollowedGame
 import app.thebox.core.sports.GameId
+import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.League
 import app.thebox.core.sports.PollMeter
@@ -27,6 +28,7 @@ import app.thebox.core.sports.TeamLine
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -310,6 +312,132 @@ class ScoreRepositoryChlTest {
         runCurrent()
         assertEquals("restored and kept", snap.id, restarted.followed.value?.id)
         assertTrue(restarted.followed.value!!.startTbd)
+    }
+
+    // ---------------------------------------------------------------- emulator pass, defect 2
+
+    /** The real machine behind the repository, with the wall clock at [wall0] + test time; events collected. */
+    private class Real(val repo: ScoreRepositoryImpl, val store: FakeSettingsStore, val events: List<ScoreEvent>)
+
+    private fun TestScope.real(league: League, wall0: Long, game: GameSnapshot): Real {
+        val mono = MonoClock { testScheduler.currentTime }
+        val store = FakeSettingsStore()
+        store.update(SportsFollowDomain) { SportsFollowDoc(pollPhaseMs = 1_500L) }
+        val src = Source(league, mono).apply { this.game = { Fetch.Ok(game, mono.nowMs(), null, 0) } }
+        val repo = ScoreRepositoryImpl(
+            listOf<ScoreSource>(src).associateBy { it.league }, store, Awake(), Signals(), backgroundScope, mono,
+            machineFactory = { phase -> FollowMachine.of(app.thebox.core.sports.ScoreBugMachine(mono, { wall0 + testScheduler.currentTime }, phase)) },
+            random = Random(3),
+        )
+        val events = ArrayList<ScoreEvent>()
+        backgroundScope.launch { repo.events.collect { events += it } }
+        runCurrent()
+        return Real(repo, store, events)
+    }
+
+    private fun snapOf(league: League, startUtcMs: Long, phase: GamePhase = GamePhase.LIVE): GameSnapshot = when (league) {
+        League.NHL -> SportsFixtures.game(startUtcMs = startUtcMs, phase = phase)
+        League.NFL -> SportsFixtures.nflGame(startUtcMs = startUtcMs, phase = phase)
+        else -> SportsFixtures.chlGame(league = league, startUtcMs = startUtcMs, phase = phase)
+    }
+
+    private val hour = 3_600_000L
+    private val allLeagues = listOf(League.NHL, League.NFL, League.OHL, League.WHL, League.QMJHL)
+
+    /**
+     * A game whose listed start is more than 8 h ago (the fake panel's ~24 h-off start, or a feed's wrong time): the hard
+     * expiry would drop it at once, so the follow is refused with its own toast. Nothing is stored, no "Following" is
+     * said, and the first-follow toast is still to come. Every league (the path is shared).
+     */
+    @Test fun aFollowTheExpiryWouldDropAtOnceIsRefusedAndNotStored() = runTest {
+        val start = 1_794_612_600_000L
+        for (league in allLeagues) {
+            val stale = snapOf(league, start)
+            val r = real(league, start + SportsConstants.HARD_EXPIRY_MS + hour, stale)
+            r.repo.follow(stale)
+            runCurrent()
+            val e = r.events.single()
+            assertTrue("$league: the too-old event, not Following ($e)", e is ScoreEvent.FollowTooOld && e.game.id == stale.id && !e.final)
+            assertEquals("$league: nothing followed", null, r.repo.followed.value)
+            assertEquals("$league: nothing stored", null, r.store.flow(SportsFollowDomain).value.game)
+            assertTrue("$league: the first-follow toast is still to come", !r.store.flow(SportsFollowDomain).value.firstFollowShown)
+            // Exactly at the boundary is expired too (the machine's `>=`).
+            val edge = real(league, start + SportsConstants.HARD_EXPIRY_MS, stale)
+            edge.repo.follow(stale)
+            runCurrent()
+            assertTrue("$league: the boundary is refused", edge.events.single() is ScoreEvent.FollowTooOld)
+            assertEquals(null, edge.store.flow(SportsFollowDomain).value.game)
+            // A final game picked from an old board: the final variant.
+            val oldFinal = snapOf(league, start, GamePhase.FINAL)
+            val f = real(league, start + SportsConstants.HARD_EXPIRY_MS + hour, oldFinal)
+            f.repo.follow(oldFinal)
+            runCurrent()
+            assertTrue("$league: final variant", (f.events.single() as ScoreEvent.FollowTooOld).final)
+            assertEquals(null, f.store.flow(SportsFollowDomain).value.game)
+        }
+    }
+
+    /** A refused follow leaves the follow already in place alone (stored, followed). */
+    @Test fun aRefusedFollowKeepsTheCurrentOne() = runTest {
+        val start = 1_794_612_600_000L
+        val now = start + SportsConstants.HARD_EXPIRY_MS + hour
+        val current = snapOf(League.OHL, now - hour)
+        val r = real(League.OHL, now, current)
+        r.repo.follow(current)
+        runCurrent()
+        assertEquals(current.id, r.repo.followed.value?.id)
+        val stale = SportsFixtures.chlGame(id = "29999", startUtcMs = start)
+        r.repo.follow(stale)
+        runCurrent()
+        assertTrue(r.events.last() is ScoreEvent.FollowTooOld)
+        assertEquals("the current follow is untouched", current.id, r.repo.followed.value?.id)
+        assertEquals(current.id.id, r.store.flow(SportsFollowDomain).value.game?.id?.id)
+    }
+
+    /** A normal follow (an hour ago, just inside 8 h, later today) is unchanged in every league: stored, "Following", kept. */
+    @Test fun aNormalFollowIsUnchanged() = runTest {
+        val now = 1_794_612_600_000L
+        for (league in allLeagues) {
+            for (start in listOf(now - hour, now - SportsConstants.HARD_EXPIRY_MS + 60_000L, now + 2 * hour)) {
+                val snap = snapOf(league, start, if (start > now) GamePhase.SCHEDULED else GamePhase.LIVE)
+                val r = real(league, now, snap)
+                r.repo.follow(snap)
+                runCurrent()
+                assertEquals("$league $start: followed", snap.id, r.repo.followed.value?.id)
+                assertEquals("$league $start: stored", snap.id.id, r.store.flow(SportsFollowDomain).value.game?.id?.id)
+                val e = r.events.single()
+                assertTrue("$league $start: Following ($e)", e is ScoreEvent.Followed && e.first)
+            }
+            // A final game that started an hour ago keeps its own toast.
+            val fin = snapOf(league, now - hour, GamePhase.FINAL)
+            val r = real(league, now, fin)
+            r.repo.follow(fin)
+            runCurrent()
+            assertTrue("$league final", r.events.single() is ScoreEvent.FollowedFinal)
+            assertEquals(fin.id.id, r.store.flow(SportsFollowDomain).value.game?.id?.id)
+        }
+    }
+
+    /**
+     * A "Time TBD" follow is unchanged: its midnight placeholder start is more than 8 h ago by mid-afternoon, but its
+     * expiry counts from the league day's end, so it is followed ("Following"), stored, and not refused.
+     */
+    @Test fun aTimeTbdFollowIsNotRefused() = runTest {
+        for (league in listOf(League.OHL, League.WHL, League.QMJHL)) {
+            val placeholder = java.time.LocalDate.parse("2026-11-13").atStartOfDay(app.thebox.core.sports.SportsDays.zone(league)).toInstant().toEpochMilli()
+            val snap = SportsFixtures.chlGame(
+                league = league, id = "29300", phase = GamePhase.SCHEDULED, startTbd = true, startUtcMs = placeholder,
+                period = null, periodKind = null, clock = null,
+            )
+            for (at in listOf(14L, 23L)) {
+                val r = real(league, placeholder + at * hour, snap)
+                r.repo.follow(snap)
+                runCurrent()
+                assertEquals("$league TBD at $at:00 followed", snap.id, r.repo.followed.value?.id)
+                assertTrue("$league TBD at $at:00: Following", r.events.single() is ScoreEvent.Followed)
+                assertTrue(r.store.flow(SportsFollowDomain).value.game?.startTbd == true)
+            }
+        }
     }
 
     // ---------------------------------------------------------------- row 39

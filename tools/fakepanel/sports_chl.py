@@ -29,12 +29,25 @@ The slate (per league, all on the league's "today" at the anchor, 05:00 rollover
 - an evening game (status 1, three hours ahead; not in Firebase: board mode);
 - an afternoon final that Firebase no longer lists (board mode, evicted final).
 
+Every listed start is on the league day (emulator pass, defect 3): `date_played` + `schedule_time` in `timezone` (how
+HockeyTechMapper reads it) is the game's own start instant, Firebase's `DatePlayed` is the same day, and the instant is
+inside that league day: from 05:00 in the reference zone to the game zone's midnight (the latest start a HockeyTech day
+can spell). A start that would fall outside is clamped to the edge, so a panel run after midnight (before the 05:00
+rollover) lists the featured game at 23:59 of the league day, up to ~6-7 h before its puck drop (never ~24 h off); the
+evening game, past that edge, stays "not started" at 23:59, in the past. While the featured start is clamped the timeline
+is capped so the game reaches Final at least 30 min before listed start + 8 h (the app's hard expiry); the panel logs
+one line when the cap shortens `sports_chl_timeline_s`. For normal behaviour run the panel between 05:00 and 21:00
+league time.
+
 Switches (config keys, also through `POST /admin/config`):
 - `sports_chl` (`--sports-chl`, needs `--sports`), `sports_chl_timeline_s` (default 520, 60..86400; segments scale).
 - `sports_chl_refuse` (`--chl-refuse`): every keyed request is "Invalid key.".
 - `sports_chl_firebase_refuse` (`--chl-firebase-refuse`): every Firebase request is 401 "Permission denied".
 - `sports_chl_null_live` (`--chl-null-live`, S5): the featured game's nodes are `null` while it is live.
 - `sports_chl_drop_penalties` (`--chl-drop-penalties N`, B3): every Nth `penalties` node request is a 503.
+- `sports_chl_time_tbd` (`--chl-time-tbd`): the evening game (scheduled: not live, not final) is "Time TBD" in every
+  league: `time_tbd` "1" and `schedule_time` "00:00:00"; its listed start is local midnight of the league day in the
+  reference zone (HockeyTechMapper's placeholder, `startTbd`).
 
 `GET /admin/sports-chl` shows the slate and each game's state; `POST /admin/sports-chl {"restart": true}` (or
 `{"anchor_unix": T}`) re-anchors it; `POST /admin/sports {"restart": true}` restarts it with the NHL and NFL timelines.
@@ -66,6 +79,8 @@ ROLLOVER_H = 5
 TIMELINE_DEFAULT_S = 520  # the sum of the FEATURED segments
 SEGMENT_S3_RUN = 30
 SEGMENT_S3_HOLD = 60
+HARD_EXPIRY_S = 8 * 3600   # the app's SportsConstants.HARD_EXPIRY_MS: a follow is removed 8 h after its listed start
+EXPIRY_MARGIN_S = 30 * 60  # the featured game reaches Final at least this long before that
 
 DEFAULTS = {
     "sports_chl": False,                  # --sports-chl: serve the routes above (needs sports; 404 otherwise)
@@ -74,6 +89,7 @@ DEFAULTS = {
     "sports_chl_firebase_refuse": False,  # --chl-firebase-refuse
     "sports_chl_null_live": False,        # --chl-null-live
     "sports_chl_drop_penalties": 0,       # --chl-drop-penalties N
+    "sports_chl_time_tbd": False,         # --chl-time-tbd
 }
 
 # team id -> (code as the feed spells it, city, nickname, logo file); the QMJHL's codes are mixed case in the feed.
@@ -170,7 +186,7 @@ JPEG_MARKERS = b"\xff\xd8\xff\xd9"  # SOI + EOI: "a JPEG" for the route; the app
 
 def check_config(patch):
     """Raises ValueError for a bad CHL key in a config patch."""
-    for k in ("sports_chl", "sports_chl_refuse", "sports_chl_firebase_refuse", "sports_chl_null_live"):
+    for k in ("sports_chl", "sports_chl_refuse", "sports_chl_firebase_refuse", "sports_chl_null_live", "sports_chl_time_tbd"):
         if k in patch and not isinstance(patch[k], bool):
             raise ValueError(k + " must be true or false")
     if "sports_chl_timeline_s" in patch:
@@ -201,19 +217,49 @@ def etag_of(body):
 class SportsChl:
     """The CHL slate's clock. Thread-safe; one per Panel."""
 
-    def __init__(self, panel):
+    def __init__(self, panel, clock=time.time):
         self.panel = panel
+        self.clock = clock  # unix s; tests inject a fixed one
         self.lock = threading.Lock()
-        self.anchor = time.time()
+        self.anchor = clock()
         self.penalty_requests = 0
+        self.note_cap()
 
     def reset(self):
         with self.lock:
-            self.anchor = time.time()
+            self.anchor = self.clock()
             self.penalty_requests = 0
+        self.note_cap()
+
+    def raw_scale(self):
+        return float(self.panel.cfg.get("sports_chl_timeline_s") or TIMELINE_DEFAULT_S) / TIMELINE_DEFAULT_S
+
+    def scale_cap(self):
+        """The largest scale that keeps the featured game's Final at least EXPIRY_MARGIN_S before its listed start +
+        HARD_EXPIRY_S, in every league whose listed start the window clamps (a run after the game zone's midnight,
+        before 05:00); None when no league clamps it."""
+        k = self.raw_scale()
+        final_at = sum(s["len"] for s in FEATURED[:SEG["final so"]])  # Final's offset from the anchor, default scale
+        cap = None
+        for c in CLIENTS:
+            _, last = self.start_window(c)
+            if self.anchor + FEATURED[0]["len"] * k > last:  # the listed start is clamped to `last`
+                c_cap = (last + HARD_EXPIRY_S - EXPIRY_MARGIN_S - self.anchor) / final_at
+                cap = c_cap if cap is None else min(cap, c_cap)
+        return cap
 
     def scale(self):
-        return float(self.panel.cfg.get("sports_chl_timeline_s") or TIMELINE_DEFAULT_S) / TIMELINE_DEFAULT_S
+        """The timeline scale: sports_chl_timeline_s / 520, capped by scale_cap while the listed start is clamped."""
+        k, cap = self.raw_scale(), self.scale_cap()
+        return k if cap is None else min(k, cap)
+
+    def note_cap(self):
+        """One log line when the cap shortens the configured timeline (at start-up and on a restart)."""
+        k, cap = self.raw_scale(), self.scale_cap()
+        if cap is not None and cap < k and hasattr(self.panel, "log"):
+            self.panel.log(f"CHL: the featured game is listed at 23:59 of the league day (run before 05:00), so its "
+                           f"timeline is capped at {TIMELINE_DEFAULT_S * cap:.0f} s (asked {TIMELINE_DEFAULT_S * k:.0f} s) "
+                           f"to end before the app's 8 h expiry")
 
     # ---- time
     def seg_starts(self):
@@ -233,16 +279,40 @@ class SportsChl:
         local = dt.datetime.fromtimestamp(self.anchor, z) - dt.timedelta(hours=ROLLOVER_H)
         return local.date()
 
+    def start_window(self, client):
+        """(first, last) unix s a listed start of the league day can take: 05:00 of the day in the reference zone, to
+        one minute before the game zone's next midnight (`date_played` + `schedule_time` cannot spell a later start)."""
+        d = self.day(client)
+        ref, gz = ZoneInfo(ZONES[client]), ZoneInfo(GAME_ZONES[client])
+        nxt = d + dt.timedelta(days=1)
+        first = dt.datetime.combine(d, dt.time(ROLLOVER_H), ref).timestamp()
+        last = min(dt.datetime.combine(nxt, dt.time(ROLLOVER_H), ref).timestamp(),
+                   dt.datetime.combine(nxt, dt.time(0), gz).timestamp()) - 60
+        return int(first), int(last)
+
+    def tbd_start(self, client):
+        """A "Time TBD" game's listed start: local midnight of the league day in the reference zone (the mapper's)."""
+        return int(dt.datetime.combine(self.day(client), dt.time(0), ZoneInfo(ZONES[client])).timestamp())
+
     def games(self, client):
-        """[(id, away id, home id, start unix, kind)] for the league's slate."""
-        f = self.featured_start()
+        """[(id, away id, home id, start unix, kind)] for the league's slate; every start whole seconds, on the league
+        day (start_window), or tbd_start for the "Time TBD" evening game."""
+        first, last = self.start_window(client)
+
+        def on_day(t):
+            return max(first, min(last, int(t)))
+
         ids = SLATE[client]
+        evening = self.tbd_start(client) if self.panel.cfg.get("sports_chl_time_tbd") else on_day(self.anchor + 3 * 3600)
         return [
-            (ids[0][0], ids[0][1], ids[0][2], f, "featured"),
-            (ids[1][0], ids[1][1], ids[1][2], self.anchor - 2 * 3600, "s3"),
-            (ids[2][0], ids[2][1], ids[2][2], self.anchor + 3 * 3600, "evening"),
-            (ids[3][0], ids[3][1], ids[3][2], self.anchor - 4 * 3600, "evicted"),
+            (ids[0][0], ids[0][1], ids[0][2], on_day(self.featured_start()), "featured"),
+            (ids[1][0], ids[1][1], ids[1][2], on_day(self.anchor - 2 * 3600), "s3"),
+            (ids[2][0], ids[2][1], ids[2][2], evening, "evening"),
+            (ids[3][0], ids[3][1], ids[3][2], on_day(self.anchor - 4 * 3600), "evicted"),
         ]
+
+    def tbd(self, client, game):
+        return game[4] == "evening" and bool(self.panel.cfg.get("sports_chl_time_tbd"))
 
     # ---- the state of a game at unix [at]
     def state(self, client, game, at):
@@ -371,6 +441,7 @@ class SportsChl:
         st = self.state(client, game, at)
         z = ZoneInfo(GAME_ZONES[client])
         local = dt.datetime.fromtimestamp(start, z)
+        tbd = self.tbd(client, game)
         a_goals = sum(1 for g in st["goals"] if not g[0])
         h_goals = sum(1 for g in st["goals"] if g[0]) + (1 if st["shootout"] else 0)
         started = st["status"] >= 2
@@ -378,7 +449,7 @@ class SportsChl:
         if st["period"] >= 4:
             periods["4"] = {"id": "4", "length": "300"}
         e = {"game_id": gid, "id": gid, "season_id": SEASONS[client], "date_played": self.day(client).isoformat(),
-             "schedule_time": local.strftime("%H:%M:%S"), "time_tbd": "0", "timezone": GAME_ZONES[client],
+             "schedule_time": "00:00:00" if tbd else local.strftime("%H:%M:%S"), "time_tbd": "1" if tbd else "0", "timezone": GAME_ZONES[client],
              "status": str(st["status"]), "started": "1" if started else "0", "final": "1" if st["final"] else "0",
              "period": str(st["period"]), "game_clock": "00:" + mmss(st["rem"] or 0) if st["rem"] is not None else "",
              "game_status": "", "intermission": "0", "shootout": "1" if st["shootout"] else "0", "playoff": "0",

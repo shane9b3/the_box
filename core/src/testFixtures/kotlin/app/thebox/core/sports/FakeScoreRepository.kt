@@ -35,6 +35,11 @@ class FakeScoreRepository(
     val screenOffCalls = mutableListOf<Boolean>()
     var retries = 0
         private set
+    /**
+     * (CHL emulator pass, defect 2) While true, [follow] of a game refuses it as the real repository does when the hard
+     * expiry would drop it at once: the call is recorded, [followed] is unchanged, and `FollowTooOld` is emitted.
+     */
+    var refuseFollowsAsTooOld = false
 
     /** The demand the real repository would derive from the reports alone (no follow, awake and lifecycle rules). */
     val seen: Boolean get() = demandOn.isNotEmpty()
@@ -51,6 +56,10 @@ class FakeScoreRepository(
     override fun follow(game: GameSnapshot?) {
         followCalls += game
         val f = game?.let { SportsFixtures.followedOf(it) }
+        if (refuseFollowsAsTooOld && game != null && f != null && f.id != followed.value?.id) {
+            eventFlow.tryEmit(ScoreEvent.FollowTooOld(f, final = game.phase == GamePhase.FINAL))
+            return
+        }
         val first = followed.value == null && followCalls.count { it != null } == 1
         if (f?.id != followed.value?.id) followFailure.value = null
         followed.value = f
