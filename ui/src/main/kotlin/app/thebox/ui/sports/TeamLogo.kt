@@ -27,13 +27,22 @@ typealias LogoFetch = suspend (url: String, w: Int, h: Int) -> Bitmap?
  * (docs/design/m6-score-bug.md §3) The Coil path: the SVG is rasterised at 4x the slot with the memory cache off (the
  * [FollowLogos] holder is the cache), then [LogoTrim] crops and fits it. Coil's disk cache keeps the SVG source.
  */
-fun coilLogoFetch(loader: ImageLoader, context: Context, chlLeague: Boolean = false): LogoFetch = fetch@{ url, w, h ->
+fun coilLogoFetch(loader: ImageLoader, context: Context, chlLeague: Boolean = false): LogoFetch = coilLogoFetch(loader, context, chlLeague, null)
+
+/** [overrideOrigin] fixes the debug override for tests (null = read it from the app, once); "" = none. */
+internal fun coilLogoFetch(loader: ImageLoader, context: Context, chlLeague: Boolean, fixedOverride: String?): LogoFetch {
+    var overrideOrigin: String? = fixedOverride
+    return fetch@{ url, w, h ->
     // (CHL §3.5, S9; review L1, L2) A CHL logo (the caller knows the league; the bug's hook sees only the URL, so a URL on the
     // CHL logo host or the fake panel's `/leaguestat/` folder counts too) must be exactly a CHL logo URL, else no request and
     // no logo, and its request gets the no-alpha check ahead of the trim. NHL and NFL requests are built exactly as before.
-    val chl = chlLeague || ChlLogoCheck.isChlHost(url)
-    if (chl && !ChlLogoCheck.isChlLogoUrl(url)) return@fetch null
+    // The override (a debug build with the data source's override file) is read once, off the caller's thread; "" = none.
+    val resolved = overrideOrigin ?: kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { ChlLogoCheck.overrideOrigin(context) ?: "" }.also { overrideOrigin = it }
+    val override = resolved.ifEmpty { null }
+    val chl = chlLeague || ChlLogoCheck.isChlHost(url, override)
+    if (chl && !ChlLogoCheck.isChlLogoUrl(url, override)) return@fetch null
     (loader.execute(logoRequest(context, url, chl, w, h)) as? SuccessResult)?.image?.toBitmap()
+    }
 }
 
 /** The logo request for [data] (a URL; a bitmap in tests): rasterised at 4x the slot, then (CHL only) checked, then trimmed. */
