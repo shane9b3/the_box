@@ -1,5 +1,8 @@
 // Contract (NFL commit 0, docs/design/m6-nfl.md §5.1, §5.6, §5.7): the frame and the sample signatures are fixed for
 // WP-3 (the timeline body and the painters) and WP-4 (the runner); changes go through the lead.
+// (NFL Stacked commit 0, docs/design/m6-nfl-stacked.md §4.3) [NflScoreSpec] and the spec overloads are fixed too:
+// NFL Stacked WP-2 fills `NflScoreSpec.STACKED` and the STACKED-only branches; `NflScoreSpec.PILL` is frozen bit-for-bit
+// against `LegacyNflScoreTimeline` (test source) by `NflScoreSpecLegacyTest`.
 package app.thebox.core.sports
 
 import app.thebox.core.sports.SportsConstants as K
@@ -84,7 +87,18 @@ class NflScoreFrame {
     /** (§5.7) The segment being drawn: 0 = the only score or the pair's first, 1 = the pair's second. */
     var segment = 0
 
-    /** True once t ≥ the end (one score: takeover + pop; a pair: `NFL_DOUBLE_MARK_MS`): the frame is the plain bug. */
+    /**
+     * (NFL Stacked §4.3, commit 0) The row flash's envelope, 0..1: 1 at 3 600 of a segment, eased out to 0 over
+     * [NflScoreSpec.rowFlashMs]; the still version's frame B writes 1 for its whole length. [NflScoreSpec.PILL]
+     * (`rowFlashMs` 0) always writes 0. Not an alpha on its own: the Stacked painter multiplies it by the scorer's C7 peak
+     * (`StackedColours.rowFlashAlpha`), or by `STACKED_STILL_ROW_TINT` on the still path.
+     */
+    var rowFlashAlpha = 0f
+
+    /**
+     * True once t ≥ the end (one score: [NflScoreSpec.endMs], the Pill's takeover + pop; a pair:
+     * [NflScoreSpec.pairEndMs], the Pill's `NFL_DOUBLE_MARK_MS`): the frame is the plain bug.
+     */
     var done = false
 
     /** Copies every channel from [o] (no allocation). */
@@ -127,12 +141,135 @@ class NflScoreFrame {
         popScale = o.popScale
         popMix = o.popMix
         segment = o.segment
+        rowFlashAlpha = o.rowFlashAlpha
         done = o.done
     }
 
     companion object {
         /** `NFL_LETTERS_MAX`: "EXTRA POINT" is 11 with the space. */
         const val LETTERS = K.NFL_LETTERS_MAX
+    }
+}
+
+/**
+ * (NFL Stacked §4.3, commit 0) Every number [NflScoreTimeline] reads that differs between the Pill's takeover ([PILL],
+ * the 520 × 70 pill) and the Stacked one ([STACKED], the 333-wide Stacked box), as [GoalSpec] split `GoalTimeline`. The
+ * keyframe skeleton (the wipes, the glow, every start time, the 450 ms flash grid, the letter stagger, the pop) is shared
+ * and stays in [NflScoreTimeline]. Offsets are Standard design px of the bug the spec draws on; times are ms from the
+ * takeover's (or a pair segment's) start, or lengths in ms. Painter-only values ([streak1Alpha], [streak2Alpha],
+ * [runPx], [postsX] … [postsH]) are carried for the painters; the timeline does not read them.
+ *
+ * - [streak1Alpha] / [streak2Alpha]: the streaks' alphas; [streakFrom] / [streakTo]: their left edge's travel.
+ * - The ball run (TD, two-point, safety): [runFrom] → [runTo] at [runY] (the sprite's top-left), [runPx] wide, peak
+ *   alpha [runAlpha]; the rotation and the alpha keyframes are shared.
+ * - The ball arc (XP, FG): the three keyframes ([arcP0X], [arcP0Y]) → ([arcP1X], [arcP1Y]) → ([arcP2X], [arcP2Y]),
+ *   scales [arcS0] / [arcS1] / [arcS2], rotations [arcR0] / [arcR1] / [arcR2], peak alpha [arcAlpha].
+ * - The goalposts: [postsX], [postsY], [postsW], [postsH] (painter) and the drop-in [postsDy].
+ * - [flashAlpha]: the white panel flash's peak.
+ * - [badgeDx] / [badgeMidDx]: the badge's start and 70 % offsets; [letterDrop] / [letterOvershoot]: each letter's start
+ *   and 60 % dy; [pointsDx] / [pointsMidDx]: the "+N" block's start and 70 % offsets.
+ * - [tabPulseCycles]: the pinned tab's pulse cycles on the 450 grid from 0 (the Pill 8; STACKED 0: no bar pulse).
+ * - [rowFlashMs]: the row flash's length from 3 600 of a segment (0 = none: PILL).
+ * - [endMs]: one score's end ([NflScoreFrame.done]); [pairSecondMs] / [pairEndMs]: a +7/+8 pair's second segment's start
+ *   and the pair's end; [stillFrameBMs]: the still version's frame B length from 3 600 for one score (done at
+ *   3 600 + it, so it equals `endMs − 3 600`).
+ */
+data class NflScoreSpec(
+    val streak1Alpha: Float,
+    val streak2Alpha: Float,
+    val streakFrom: Float,
+    val streakTo: Float,
+    val runFrom: Float,
+    val runTo: Float,
+    val runY: Float,
+    val runPx: Float,
+    val runAlpha: Float,
+    val arcP0X: Float,
+    val arcP0Y: Float,
+    val arcP1X: Float,
+    val arcP1Y: Float,
+    val arcP2X: Float,
+    val arcP2Y: Float,
+    val arcS0: Float,
+    val arcS1: Float,
+    val arcS2: Float,
+    val arcR0: Float,
+    val arcR1: Float,
+    val arcR2: Float,
+    val arcAlpha: Float,
+    val postsX: Float,
+    val postsY: Float,
+    val postsW: Float,
+    val postsH: Float,
+    val postsDy: Float,
+    val flashAlpha: Float,
+    val badgeDx: Float,
+    val badgeMidDx: Float,
+    val letterDrop: Float,
+    val letterOvershoot: Float,
+    val pointsDx: Float,
+    val pointsMidDx: Float,
+    val tabPulseCycles: Int,
+    val rowFlashMs: Float,
+    val endMs: Float,
+    val pairSecondMs: Float,
+    val pairEndMs: Float,
+    val stillFrameBMs: Float,
+) {
+    companion object {
+        /** The Pill's takeover: today's `SportsConstants.NFL_*` values, unchanged (frozen by `NflScoreSpecLegacyTest`). */
+        val PILL = NflScoreSpec(
+            streak1Alpha = 0.6f,
+            streak2Alpha = 0.35f,
+            streakFrom = K.NFL_STREAK_FROM,
+            streakTo = K.NFL_STREAK_TO,
+            runFrom = K.NFL_RUN_FROM,
+            runTo = K.NFL_RUN_TO,
+            runY = K.NFL_RUN_Y,
+            runPx = K.NFL_BALL_PX,
+            runAlpha = K.NFL_RUN_ALPHA,
+            arcP0X = K.NFL_ARC_P0_X,
+            arcP0Y = K.NFL_ARC_P0_Y,
+            arcP1X = K.NFL_ARC_P1_X,
+            arcP1Y = K.NFL_ARC_P1_Y,
+            arcP2X = K.NFL_ARC_P2_X,
+            arcP2Y = K.NFL_ARC_P2_Y,
+            arcS0 = K.NFL_ARC_SCALES[0],
+            arcS1 = K.NFL_ARC_SCALES[1],
+            arcS2 = K.NFL_ARC_SCALES[2],
+            arcR0 = K.NFL_ARC_ROTATIONS[0],
+            arcR1 = K.NFL_ARC_ROTATIONS[1],
+            arcR2 = K.NFL_ARC_ROTATIONS[2],
+            arcAlpha = K.NFL_ARC_ALPHA,
+            postsX = K.NFL_POSTS_X,
+            postsY = K.NFL_POSTS_Y,
+            postsW = K.NFL_POSTS_W,
+            postsH = K.NFL_POSTS_H,
+            postsDy = K.NFL_POSTS_DY,
+            flashAlpha = K.NFL_FLASH_ALPHA,
+            badgeDx = K.NFL_LOGO_DX,
+            badgeMidDx = K.NFL_LOGO_MID_DX,
+            letterDrop = K.NFL_LETTER_DROP,
+            letterOvershoot = K.NFL_LETTER_OVERSHOOT,
+            pointsDx = K.NFL_POINTS_DX,
+            pointsMidDx = K.NFL_POINTS_MID_DX,
+            tabPulseCycles = K.NFL_TAB_PULSE_CYCLES,
+            rowFlashMs = 0f,
+            endMs = (K.NFL_TAKEOVER_MS + K.NFL_POP_MS).toFloat(),
+            pairSecondMs = K.NFL_PAIR_SECOND_START_MS.toFloat(),
+            pairEndMs = K.NFL_DOUBLE_MARK_MS.toFloat(),
+            stillFrameBMs = K.NFL_POP_MS.toFloat(),
+        )
+
+        /**
+         * The Stacked box's takeover (§4.3 "STACKED" column: streaks −90 → 450, run (−36, 38.25) → (450, 38.25) at
+         * 31.5 / .45, the arc, posts at (234, 22.5) 40.5 × 54 dy 7.2, flash .40, badge −22.5 / +1.8, letters +27 /
+         * −2.25, points +16.2 / −1.35, no tab pulse, row flash 1 200, end 4 800, pair 4 800 / 9 600, still B 1 200).
+         *
+         * Commit 0 placeholder: **equal to [PILL]** until NFL Stacked WP-2 sets the §4.3 values (and `NflScoreSpecTest`
+         * checks them), so the commit-0 fallback is today's takeover.
+         */
+        val STACKED = PILL // WP-2: the §4.3 STACKED values.
     }
 }
 
@@ -179,11 +316,8 @@ object NflScoreTimeline {
 
     internal const val TAKEOVER = K.NFL_TAKEOVER_MS.toFloat()
     internal const val POP_MS = K.NFL_POP_MS.toFloat()
-    /** One score's end: the takeover plus the pop (4 500). */
+    /** The pop's end: the takeover plus the pop (4 500; [NflScoreSpec.PILL]'s one-score `endMs`). */
     internal const val END = TAKEOVER + POP_MS
-    /** (§5.7) The pair's second segment starts here (4 500) and the pair ends at `NFL_DOUBLE_MARK_MS` (9 000). */
-    internal const val PAIR_SECOND = K.NFL_PAIR_SECOND_START_MS.toFloat()
-    internal const val PAIR_END = K.NFL_DOUBLE_MARK_MS.toFloat()
 
     // ---- the flash grid (§5.3): every flashing channel is a whole number of 450 ms cycles from a multiple of 450
     internal const val GRID = K.NFL_FLASH_GRID_MS.toFloat()
@@ -191,7 +325,6 @@ object NflScoreTimeline {
     internal const val FLASH_END = FLASH_START + K.NFL_FLASH_CYCLES * GRID
     internal const val POSTS_HIT_START = K.NFL_POSTS_HIT_START_MS.toFloat()
     internal const val POSTS_HIT_END = POSTS_HIT_START + K.NFL_POSTS_HIT_CYCLES * GRID
-    internal const val TAB_PULSE_END = K.NFL_TAB_PULSE_CYCLES * GRID
 
     internal const val STREAK1_START = 350f
     internal const val STREAK1_MS = 1_000f
@@ -215,14 +348,6 @@ object NflScoreTimeline {
     internal const val LOGO_MS = K.NFL_LOGO_MS.toFloat()
     internal const val POINTS_START = K.NFL_POINTS_START_MS.toFloat()
     internal const val POINTS_MS = K.NFL_POINTS_MS.toFloat()
-
-    // The arc's three keyframes (the List constants copied once, so a sample never touches a boxed value).
-    private val ARC_S0 = K.NFL_ARC_SCALES[0]
-    private val ARC_S1 = K.NFL_ARC_SCALES[1]
-    private val ARC_S2 = K.NFL_ARC_SCALES[2]
-    private val ARC_R0 = K.NFL_ARC_ROTATIONS[0]
-    private val ARC_R1 = K.NFL_ARC_ROTATIONS[1]
-    private val ARC_R2 = K.NFL_ARC_ROTATIONS[2]
 
     /** The word's character count for [kind] (the space of "EXTRA POINT" and "FIELD GOAL" takes a stagger slot). */
     fun letterCount(kind: NflScoreKind): Int = when (kind) {
@@ -259,27 +384,45 @@ object NflScoreTimeline {
         else -> peak * (1f - e.ease((p - outAt) / (1f - outAt)))
     }
 
-    /** One takeover of [kind] at [tMs] since its start (3 600 ms + the 900 ms pop). */
-    fun sample(kind: NflScoreKind, tMs: Float, out: NflScoreFrame): NflScoreFrame {
+    /** One takeover of [kind] at [tMs] since its start (3 600 ms + the 900 ms pop): [NflScoreSpec.PILL]. */
+    fun sample(kind: NflScoreKind, tMs: Float, out: NflScoreFrame): NflScoreFrame = sample(NflScoreSpec.PILL, kind, tMs, out)
+
+    /** (Ruling 25, §5.7) A +7/+8 pair under [NflScoreSpec.PILL]: [first] (TOUCHDOWN) from 0, [second] from 4 500. */
+    fun samplePair(first: NflScoreKind, second: NflScoreKind, tMs: Float, out: NflScoreFrame): NflScoreFrame =
+        samplePair(NflScoreSpec.PILL, first, second, tMs, out)
+
+    /** (§5.6) The still version under [NflScoreSpec.PILL]: see the spec overload. */
+    fun sampleStill(first: NflScoreKind, second: NflScoreKind?, tMs: Float, out: NflScoreFrame): NflScoreFrame =
+        sampleStill(NflScoreSpec.PILL, first, second, tMs, out)
+
+    /**
+     * (NFL Stacked §4.3) One takeover of [kind] under [spec] at [tMs] since its start; done at [NflScoreSpec.endMs].
+     * Writes every [NflScoreFrame] field, [NflScoreFrame.rowFlashAlpha] included. NaN or negative [tMs] is 0.
+     */
+    fun sample(spec: NflScoreSpec, kind: NflScoreKind, tMs: Float, out: NflScoreFrame): NflScoreFrame {
         val t = clean(tMs)
-        animate(kind, t, out)
+        animate(spec, kind, t, out)
         out.segment = 0
-        out.done = t >= END
+        out.done = t >= spec.endMs
         return out
     }
 
-    /** (Ruling 25, §5.7) A +7/+8 pair: [first] (TOUCHDOWN) from 0, [second] from `NFL_PAIR_SECOND_START_MS`. */
-    fun samplePair(first: NflScoreKind, second: NflScoreKind, tMs: Float, out: NflScoreFrame): NflScoreFrame {
+    /**
+     * (Ruling 25, §5.7; NFL Stacked §4.3) A +7/+8 pair under [spec]: [first] (TOUCHDOWN) from 0, [second] from
+     * [NflScoreSpec.pairSecondMs]; done at [NflScoreSpec.pairEndMs].
+     */
+    fun samplePair(spec: NflScoreSpec, first: NflScoreKind, second: NflScoreKind, tMs: Float, out: NflScoreFrame): NflScoreFrame {
         val t = clean(tMs)
-        if (t < PAIR_SECOND) {
-            animate(first, t, out)
+        val pairSecond = spec.pairSecondMs
+        if (t < pairSecond) {
+            animate(spec, first, t, out)
             out.segment = 0
         } else {
             // The second segment restarts every channel, the flash grid included (its first tab peak is at 4 725).
-            animate(second, t - PAIR_SECOND, out)
+            animate(spec, second, t - pairSecond, out)
             out.segment = 1
         }
-        out.done = t >= PAIR_END
+        out.done = t >= spec.pairEndMs
         return out
     }
 
@@ -290,19 +433,24 @@ object NflScoreTimeline {
      *   `NFL_POSTS_ALPHA`); no lead, streaks, ball, flash, pulse or glow, and no tab pulse.
      * - **B** (3 600..4 500 of its segment): the plain bug with the scorer's digits in `pop` at × 1.
      * - Then the plain bug ([NflScoreFrame.done]).
+     *
+     * (NFL Stacked §4.4) Under [spec]: one score's frame B lasts [NflScoreSpec.stillFrameBMs] from 3 600; a pair's B1 ends
+     * at [NflScoreSpec.pairSecondMs] and B2 at [NflScoreSpec.pairEndMs]; [NflScoreFrame.rowFlashAlpha] is 1 through a
+     * frame B when [NflScoreSpec.rowFlashMs] > 0, else 0.
      */
-    fun sampleStill(first: NflScoreKind, second: NflScoreKind?, tMs: Float, out: NflScoreFrame): NflScoreFrame {
+    fun sampleStill(spec: NflScoreSpec, first: NflScoreKind, second: NflScoreKind?, tMs: Float, out: NflScoreFrame): NflScoreFrame {
         val t = clean(tMs)
-        val inSecond = second != null && t >= PAIR_SECOND
+        val pairSecond = spec.pairSecondMs
+        val inSecond = second != null && t >= pairSecond
         val kind = if (second != null && inSecond) second else first
-        val u = if (inSecond) t - PAIR_SECOND else t
-        val end = if (second != null) PAIR_END else END
+        val u = if (inSecond) t - pairSecond else t
+        val end = if (second != null) spec.pairEndMs else TAKEOVER + spec.stillFrameBMs
         val a = u < TAKEOVER
         out.leadFrom = 0f; out.leadTo = 0f
         out.panelFrom = if (a) 0f else 1f; out.panelTo = 1f
         out.glowLowAlpha = 0f; out.glowPeakAlpha = 0f
-        out.streak1On = false; out.streak1X = K.NFL_STREAK_FROM
-        out.streak2On = false; out.streak2X = K.NFL_STREAK_FROM
+        out.streak1On = false; out.streak1X = spec.streakFrom
+        out.streak2On = false; out.streak2X = spec.streakFrom
         out.runOn = false
         out.arcOn = false
         out.ballX = 0f; out.ballY = 0f; out.ballRotDeg = 0f; out.ballScale = 1f; out.ballAlpha = 0f
@@ -319,13 +467,14 @@ object NflScoreTimeline {
         out.popOn = !a && t < end
         out.popScale = 1f
         out.popMix = if (out.popOn) 0f else 1f
+        out.rowFlashAlpha = if (spec.rowFlashMs > 0f && out.popOn) 1f else 0f
         out.segment = if (inSecond) 1 else 0
         out.done = t >= end
         return out
     }
 
-    /** Every channel of one takeover of [kind] at [t] ≥ 0 (not [NflScoreFrame.segment] / [NflScoreFrame.done]). */
-    private fun animate(kind: NflScoreKind, t: Float, out: NflScoreFrame) {
+    /** Every channel of one takeover of [kind] under [spec] at [t] ≥ 0 (not [NflScoreFrame.segment] / [NflScoreFrame.done]). */
+    private fun animate(spec: NflScoreSpec, kind: NflScoreKind, t: Float, out: NflScoreFrame) {
         // Lead (tLead, fill both): entering [0, w·p], full, leaving [w·p, w]; both wipe left to right.
         when {
             t < LEAD_IN_END -> { out.leadFrom = 0f; out.leadTo = WIPE.ease(t / LEAD_IN_END) }
@@ -366,9 +515,9 @@ object NflScoreTimeline {
         }
         // Streaks (tStreak, fill both; the filled states sit off the pill, so they are drawn only while running).
         out.streak1On = t >= STREAK1_START && t <= STREAK1_START + STREAK1_MS
-        out.streak1X = lerp(K.NFL_STREAK_FROM, K.NFL_STREAK_TO, STD.ease((t - STREAK1_START) / STREAK1_MS))
+        out.streak1X = lerp(spec.streakFrom, spec.streakTo, STD.ease((t - STREAK1_START) / STREAK1_MS))
         out.streak2On = t >= STREAK2_START && t <= STREAK2_START + STREAK2_MS
-        out.streak2X = lerp(K.NFL_STREAK_FROM, K.NFL_STREAK_TO, STD.ease((t - STREAK2_START) / STREAK2_MS))
+        out.streak2X = lerp(spec.streakFrom, spec.streakTo, STD.ease((t - STREAK2_START) / STREAK2_MS))
 
         val run = runsBall(kind)
         if (run) {
@@ -377,11 +526,11 @@ object NflScoreTimeline {
             out.runOn = p >= 0f && p <= 1f
             out.arcOn = false
             val q = ROLL.ease(p)
-            out.ballX = lerp(K.NFL_RUN_FROM, K.NFL_RUN_TO, q)
-            out.ballY = K.NFL_RUN_Y
+            out.ballX = lerp(spec.runFrom, spec.runTo, q)
+            out.ballY = spec.runY
             out.ballRotDeg = K.NFL_RUN_ROT * q
             out.ballScale = 1f
-            out.ballAlpha = ballAlpha(p, K.NFL_RUN_ALPHA_IN, K.NFL_RUN_ALPHA_OUT, K.NFL_RUN_ALPHA, ROLL)
+            out.ballAlpha = ballAlpha(p, K.NFL_RUN_ALPHA_IN, K.NFL_RUN_ALPHA_OUT, spec.runAlpha, ROLL)
         } else {
             // Ball arc (tArc, ease): the transform keyed at 0 / 50 / 100 % (two segments), the opacity at 0 / 10 / 85 / 100 %.
             val p = (t - ARC_START) / ARC_MS
@@ -390,24 +539,24 @@ object NflScoreTimeline {
             val pc = p.coerceIn(0f, 1f)
             if (pc < 0.5f) {
                 val q = EASE.ease(pc / 0.5f)
-                out.ballX = lerp(K.NFL_ARC_P0_X, K.NFL_ARC_P1_X, q)
-                out.ballY = lerp(K.NFL_ARC_P0_Y, K.NFL_ARC_P1_Y, q)
-                out.ballScale = lerp(ARC_S0, ARC_S1, q)
-                out.ballRotDeg = lerp(ARC_R0, ARC_R1, q)
+                out.ballX = lerp(spec.arcP0X, spec.arcP1X, q)
+                out.ballY = lerp(spec.arcP0Y, spec.arcP1Y, q)
+                out.ballScale = lerp(spec.arcS0, spec.arcS1, q)
+                out.ballRotDeg = lerp(spec.arcR0, spec.arcR1, q)
             } else {
                 val q = EASE.ease((pc - 0.5f) / 0.5f)
-                out.ballX = lerp(K.NFL_ARC_P1_X, K.NFL_ARC_P2_X, q)
-                out.ballY = lerp(K.NFL_ARC_P1_Y, K.NFL_ARC_P2_Y, q)
-                out.ballScale = lerp(ARC_S1, ARC_S2, q)
-                out.ballRotDeg = lerp(ARC_R1, ARC_R2, q)
+                out.ballX = lerp(spec.arcP1X, spec.arcP2X, q)
+                out.ballY = lerp(spec.arcP1Y, spec.arcP2Y, q)
+                out.ballScale = lerp(spec.arcS1, spec.arcS2, q)
+                out.ballRotDeg = lerp(spec.arcR1, spec.arcR2, q)
             }
-            out.ballAlpha = ballAlpha(p, K.NFL_ARC_ALPHA_IN, K.NFL_ARC_ALPHA_OUT, K.NFL_ARC_ALPHA, EASE)
+            out.ballAlpha = ballAlpha(p, K.NFL_ARC_ALPHA_IN, K.NFL_ARC_ALPHA_OUT, spec.arcAlpha, EASE)
         }
         // Goalposts (XP, FG): tPosts (ease-out, fill both) α 0 → .4, dy 8 → 0 from 200; then tPostsHit, on the grid.
         out.postsOn = !run && t < TAKEOVER
         if (out.postsOn) {
             val q = EASE_OUT.ease((t - POSTS_IN_START) / POSTS_IN_MS)
-            out.postsDy = K.NFL_POSTS_DY * (1f - q)
+            out.postsDy = spec.postsDy * (1f - q)
             out.postsAlpha = if (t >= POSTS_HIT_START && t < POSTS_HIT_END) {
                 K.NFL_POSTS_ALPHA + (K.NFL_POSTS_HIT_ALPHA - K.NFL_POSTS_ALPHA) * cycles(t, POSTS_HIT_START, GRID, POSTS_HIT_END)
             } else {
@@ -418,26 +567,26 @@ object NflScoreTimeline {
             out.postsDy = 0f
         }
         // Panel flash (tFlash, no fill): NFL_FLASH_CYCLES × (0 → .42 → 0) on the grid from 450.
-        out.flashAlpha = K.NFL_FLASH_ALPHA * cycles(t, FLASH_START, GRID, FLASH_END)
+        out.flashAlpha = spec.flashAlpha * cycles(t, FLASH_START, GRID, FLASH_END)
         // Logo badge (tLogo, spring, fill both): α 0 dx −32 ×.4 −25° → 70 %: α 1 dx +2 ×1.1 +4° → rest.
         val bp = ((t - LOGO_START) / LOGO_MS).coerceIn(0f, 1f)
         if (bp < K.NFL_LOGO_MID) {
             val q = SPRING.ease(bp / K.NFL_LOGO_MID)
             out.badgeAlpha = q
-            out.badgeDx = lerp(K.NFL_LOGO_DX, K.NFL_LOGO_MID_DX, q)
+            out.badgeDx = lerp(spec.badgeDx, spec.badgeMidDx, q)
             out.badgeScale = lerp(K.NFL_LOGO_FROM_SCALE, K.NFL_LOGO_MID_SCALE, q)
             out.badgeRotDeg = lerp(K.NFL_LOGO_FROM_DEG, K.NFL_LOGO_MID_DEG, q)
         } else {
             val q = SPRING.ease((bp - K.NFL_LOGO_MID) / (1f - K.NFL_LOGO_MID))
             out.badgeAlpha = 1f
-            out.badgeDx = lerp(K.NFL_LOGO_MID_DX, 0f, q)
+            out.badgeDx = lerp(spec.badgeMidDx, 0f, q)
             out.badgeScale = lerp(K.NFL_LOGO_MID_SCALE, 1f, q)
             out.badgeRotDeg = lerp(K.NFL_LOGO_MID_DEG, 0f, q)
         }
         // Letters (tLetter, spring, fill both, 55 ms apart): α 0 dy +22 ×1.9 → 60 %: α 1 dy −2 ×.94 → rest.
         out.letterCount = letterCount(kind)
-        val drop = K.NFL_LETTER_DROP
-        val over = K.NFL_LETTER_OVERSHOOT
+        val drop = spec.letterDrop
+        val over = spec.letterOvershoot
         for (i in 0 until NflScoreFrame.LETTERS) {
             val p = ((t - letterDelay(i)) / LETTER_MS).coerceIn(0f, 1f)
             if (p < K.NFL_LETTER_MID) {
@@ -459,16 +608,16 @@ object NflScoreTimeline {
         if (sp < K.NFL_POINTS_MID) {
             val q = SPRING.ease(sp / K.NFL_POINTS_MID)
             out.blockAlpha = q
-            out.blockDx = lerp(K.NFL_POINTS_DX, K.NFL_POINTS_MID_DX, q)
+            out.blockDx = lerp(spec.pointsDx, spec.pointsMidDx, q)
             out.blockScale = lerp(K.NFL_POINTS_FROM_SCALE, K.NFL_POINTS_MID_SCALE, q)
         } else {
             val q = SPRING.ease((sp - K.NFL_POINTS_MID) / (1f - K.NFL_POINTS_MID))
             out.blockAlpha = 1f
-            out.blockDx = lerp(K.NFL_POINTS_MID_DX, 0f, q)
+            out.blockDx = lerp(spec.pointsMidDx, 0f, q)
             out.blockScale = lerp(K.NFL_POINTS_MID_SCALE, 1f, q)
         }
         // The pinned tab's pulse (tTab, no fill): 8 × (0 → 1 → 0) from 0, peaks at 225 + 450 k.
-        out.tabPulse = cycles(t, 0f, GRID, TAB_PULSE_END)
+        out.tabPulse = cycles(t, 0f, GRID, spec.tabPulseCycles * GRID)
         // Pop: its first state from the panel's exit (hidden under the lead until the lead leaves, GA §6.2), then the
         // pop keyframes over NFL_POP_MS; the colour has only 0 % / 100 % keyframes, so it is eased once over the pop.
         when {
@@ -487,6 +636,13 @@ object NflScoreTimeline {
                 }
             }
             else -> { out.popOn = false; out.popScale = 1f; out.popMix = 1f }
+        }
+        // (NFL Stacked §4.3) The row flash (from 3 600, ease-out): the envelope 1 → 0 over rowFlashMs; 0 before and after.
+        // PILL (rowFlashMs 0) writes 0, never leaves the field as it was.
+        out.rowFlashAlpha = if (spec.rowFlashMs > 0f && t >= TAKEOVER && t < TAKEOVER + spec.rowFlashMs) {
+            1f - EASE_OUT.ease((t - TAKEOVER) / spec.rowFlashMs)
+        } else {
+            0f
         }
     }
 }

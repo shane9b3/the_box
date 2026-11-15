@@ -89,7 +89,6 @@ import app.thebox.core.sports.TabTail
 import app.thebox.core.sports.TeamColourTable
 import app.thebox.core.sports.TeamColours
 import app.thebox.core.sports.TeamLine
-import app.thebox.core.sports.isHockey
 import app.thebox.core.sports.sport
 import app.thebox.ui.R
 import app.thebox.ui.guide.GuideDebugCounters
@@ -152,9 +151,10 @@ const val SCORE_BUG_LIVE_TAG = "score_bug_live"
  * league; the placement handed down always carries that league (fix pass U1). A league change of
  * the follow swaps the bug with no fade (accepted in the NFL sign-off).
  *
- * (Stacked, docs/design/m6-score-bug-stacked-theme.md §2.2) The style seam, in the same branch: an NHL bug draws
- * [StackedBug] when `SportsPrefs.nhlStyle` is STACKED, else [ScoreBugWith] (byte-unchanged). The style is PILL whenever
- * the league is the NFL, so [NflBug] never sees it. The placement handed down carries the league and the style drawn; a
+ * (Stacked, docs/design/m6-score-bug-stacked-theme.md §2.2) The style seam, in the same branch: a hockey bug draws
+ * [StackedBug] when `SportsPrefs.nhlStyle` is STACKED, else [ScoreBugWith] (byte-unchanged). (NFL Stacked,
+ * docs/design/m6-nfl-stacked.md §7) The same setting applies to the NFL: STACKED draws [StackedNflBug], PILL draws
+ * [NflBug] with the same call and key as before. The placement handed down carries the league and the style drawn; a
  * style change swaps the bug with no fade, like a league change.
  */
 @Composable
@@ -181,13 +181,17 @@ fun ScoreBug(
     val placingLeague = if (placement.placing) placement.league else null
     val league = shown ?: followedLeague ?: placingLeague ?: lastLeague.value ?: prefsLeague
     SideEffect { if (shown != null) lastLeague.value = shown }
-    // (CHL §1.6 #42, P12) The style applies to every hockey league.
-    val style = if (league.isHockey) prefs.nhlStyle else NhlBugStyle.PILL
+    // (CHL §1.6 #42, P12; NFL Stacked §7) The style applies to every league: hockey and the NFL.
+    val style = prefs.nhlStyle
     val placed = if (placement.league == league && placement.style == style) placement else placement.copy(league = league, style = style)
     key(league, style) {
         // (CHL §1.6 #43) One branch per sport: every hockey league takes the NHL path.
         when (league.sport) {
-            Sport.FOOTBALL -> NflBug(source, placed, geometry, modifier, place, NflHooks.Default)
+            Sport.FOOTBALL -> if (style == NhlBugStyle.STACKED) {
+                StackedNflBug(source, placed, geometry, modifier, place, StackedNflHooks.Default)
+            } else {
+                NflBug(source, placed, geometry, modifier, place, NflHooks.Default)
+            }
             Sport.HOCKEY -> if (style == NhlBugStyle.STACKED) {
                 StackedBug(source, placed, geometry, modifier, place, StackedHooks.Default)
             } else {

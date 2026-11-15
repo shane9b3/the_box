@@ -278,7 +278,7 @@ fun scorePlacementInput(
         textTrackOn = textTrackOn,
         screenOff = ui.layer == PlayerLayer.SCREEN_OFF,
         league = followedLeague ?: prefs.league,
-        // (Stacked §2.1) The NHL bug's style; `ScoreBug(...)` forces PILL whenever the drawn league is the NFL.
+        // (Stacked §2.1; NFL Stacked §7) The bug's style, for every league (hockey and the NFL).
         style = prefs.nhlStyle,
     )
 }

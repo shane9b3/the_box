@@ -723,6 +723,7 @@ class ScoreBugMachine(
             s.away, s.home, top, bottom, dim = waiting || stale, goalSeq = goalSeq, goalSide = goal, clockSecs = clockSecs,
             gameId = game?.id,
             league = League.NFL,
+            period = label, // (NFL Stacked §3.2) the B1 line's twin: the Stacked clock column keeps "4TH" while stale or waiting
             nfl = NflView(
                 down = if (drawn) nflDown else null,
                 tab = if (drawn) nflTab else null,

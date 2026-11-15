@@ -43,7 +43,6 @@ import app.thebox.core.sports.League
 import app.thebox.core.sports.LeagueGroup
 import app.thebox.core.sports.group
 import app.thebox.core.sports.isChl
-import app.thebox.core.sports.isHockey
 import app.thebox.core.sports.NhlBugStyle
 import app.thebox.core.sports.ScoreCorner
 import app.thebox.core.sports.ScoreFacts
@@ -2106,10 +2105,10 @@ class PlayerStateMachineImpl(
         if (league != null && league.isChl) out += PickerChoice.ScoreChlRow(league)
         out += PickerChoice.ScoreCornerRow(f.corner)
         out += PickerChoice.ScoreDelayRow(f.delaySec)
-        // (Stacked §1.1, S8) The Style row follows the followed game's league, else the browsed league (not reported = NHL):
-        // an NFL follow never shows a row that changes nothing on screen; following an NHL game while browsing the NFL keeps it.
+        // (Stacked §1.1, S8; NFL Stacked §7) The Style row shows whenever the host reports the style: one setting for every
+        // league (hockey and the NFL), so it changes what is on screen whatever is followed or browsed.
         val style = f.style
-        if (style != null && (followed?.league ?: league ?: League.NHL).isHockey) out += PickerChoice.ScoreStyleRow(style)
+        if (style != null) out += PickerChoice.ScoreStyleRow(style)
         if (followed != null) out += PickerChoice.ScoreStop
         val nfl = league == League.NFL
         val others = board?.games.orEmpty().filter { followed == null || it.id != followed.id }

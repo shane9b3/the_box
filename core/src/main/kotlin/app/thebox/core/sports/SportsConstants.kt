@@ -667,6 +667,81 @@ object SportsConstants {
     const val STACKED_ROW_STRIPE_MS = 400L
     /** The row flash after a goal (§7.2), from 3 600 ms; `GoalSpec.STACKED.rowFlashMs`. */
     const val STACKED_ROW_FLASH_MS = 1_200L
+
+    // ==== NFL Stacked style (docs/design/m6-nfl-stacked.md §8.5; NFL Stacked commit 0). Standard design px; Large is
+    // × SCORE_LARGE_SCALE (1.25) unless stated. Mock-px geometry is in [StackedNflMock]; takeover numbers are in
+    // `NflScoreSpec.STACKED`. WP-2 owns additions to this block; the other work packages only read it.
+
+    // ---- data and machine (§3.2, §3.3; WP-1)
+    /** `situation.awayTimeouts` / `homeTimeouts` are kept only in 0..this (3); anything else is null. */
+    const val NFL_TIMEOUTS_MAX = 3
+    /** A confirmed timeout mark ends after this at the latest (the type-21 play is otherwise its end). */
+    const val NFL_TIMEOUT_MARK_MAX_MS = 180_000L
+    /** The fallback timeout mark (a drop of exactly 1 with no type 21 seen; a lost challenge) lasts this. */
+    const val NFL_TIMEOUT_FALLBACK_MS = 8_000L
+    /** The flag mark lasts this on the machine clock from when its entry is shown (lead default, RC3). */
+    const val NFL_FLAG_MARK_MS = 8_000L
+    /** `lastPlay.type.id` of a penalty with no play, and of a team timeout. */
+    const val NFL_TYPE_PENALTY = "8"
+    const val NFL_TYPE_TIMEOUT = "21"
+
+    // ---- footprint and texts (§2.3, §2.4, §5.1)
+    /** The widest drawn box, rows + clock (333); the footprint is this × ([STACKED_H] + [STACKED_BAR_H]) = 333 × 141. */
+    const val STACKED_NFL_W_MAX = STACKED_ROWS_W + STACKED_CLOCK_W
+    /** The yards column (Appendix A): not built in v1, and not in the footprint (RC6). */
+    const val STACKED_NFL_YDS_ENABLED = false
+    /** The team code (Instrument Sans Bold) and the clock (tabular). */
+    const val STACKED_NFL_CODE_PX = 25.2f
+    const val STACKED_NFL_CLOCK_PX = 27.9f
+    /** The possession ball, and its gap after the code's ink. */
+    const val STACKED_NFL_BALL = 13.5f
+    const val STACKED_NFL_BALL_GAP = 5.4f
+    /** The timeout pips: width, height (2.7 → 3.0, S-D12), radius, gap, top from the row's top. */
+    const val STACKED_NFL_PIP_W = 9.9f
+    const val STACKED_NFL_PIP_H = 3.0f
+    const val STACKED_NFL_PIP_R = 0.9f
+    const val STACKED_NFL_PIP_GAP = 2.7f
+    const val STACKED_NFL_PIP_TOP = 40.05f
+    /** A lit pip, and a used one (white at this alpha). */
+    const val STACKED_NFL_PIP_LIT = 0xFFFFD34D.toInt()
+    const val STACKED_NFL_PIP_USED_ALPHA = 0.22f
+    /** The pip burn: 4 × 400 ms (the flash rule; the mock's 5 × 320). */
+    const val STACKED_NFL_BURN_CYCLE_MS = 400L
+    const val STACKED_NFL_BURN_CYCLES = 4
+    /** The gap between the bar's label, its divider and its sub part. */
+    const val STACKED_NFL_BAR_TEXT_GAP = 10.8f
+    /** The flag bar: background, text / divider / icon / stripe A, stripe B (S-D6). */
+    const val STACKED_NFL_FLAG_BG = 0xFFFFD100.toInt()
+    const val STACKED_NFL_FLAG_FG = 0xFF111111.toInt()
+    const val STACKED_NFL_FLAG_B = 0xFF806800.toInt()
+    /** The flag icon, before the words. */
+    const val STACKED_NFL_FLAG_ICON_W = 15.8f
+    const val STACKED_NFL_FLAG_ICON_H = 17.9f
+    /** The takeover word's fit floor (§2.5) and the 3-digit score's fit floor (§5.4). */
+    const val STACKED_NFL_WORD_FLOOR_PX = 28f
+    const val STACKED_NFL_SCORE_FLOOR_PX = 24f
+
+    // ---- the bar's re-key intro (§4.1; ms)
+    const val STACKED_NFL_REKEY_BG_MS = 350L
+    const val STACKED_NFL_REKEY_STRIPE_MS = 450L
+    const val STACKED_NFL_REKEY_STRIPE_B_DELAY_MS = 80L
+    const val STACKED_NFL_REKEY_TEXT_DELAY_MS = 100L
+    const val STACKED_NFL_REKEY_TEXT_MS = 450L
+    /** The re-keyed text's x offset when hidden (−26 mock); mirrored, it starts on the screen-edge side (+11.7). */
+    const val STACKED_NFL_REKEY_TEXT_DX = -11.7f
+    const val STACKED_NFL_REKEY_MS = 550L
+
+    // ---- the flag bar's shake and the icon's wave (§4.1)
+    const val STACKED_NFL_SHAKE_DELAY_MS = 150L
+    const val STACKED_NFL_SHAKE_MS = 500L
+    const val STACKED_NFL_SHAKE_CYCLES = 2
+    const val STACKED_NFL_SHAKE_DX1 = 2.7f
+    const val STACKED_NFL_SHAKE_DX2 = 1.8f
+    const val STACKED_NFL_WAVE_MS = 600L
+    const val STACKED_NFL_WAVE_DEG = 8f
+    /** The wave's pivot inside the icon. */
+    const val STACKED_NFL_WAVE_PIVOT_X = 2.1f
+    const val STACKED_NFL_WAVE_PIVOT_Y = 13.8f
 }
 
 /**
@@ -731,4 +806,64 @@ object StackedMock {
     const val STREAK1_W = 110f
     const val STREAK2_W = 40f
     const val STREAK_OVERHANG = 40f
+}
+
+/**
+ * (NFL Stacked §2.3–§2.5) The NFL mock-up's geometry in **mock px** (`design/nfl-stacked/StackedNFL.dc.html`; the same
+ * family as [StackedMock]: top part 240, rows 540, clock column 200, bar 66). Design px = mock px ×
+ * [SportsConstants.STACKED_SCALE] (Large × 1.25 more), except where the design raises a value (the bar, the bar text, the
+ * tally, the pip height: [SportsConstants]). WP-2 may append; nothing here is read by the hockey code.
+ */
+object StackedNflMock {
+    /** The row stripe, and its possession width. */
+    const val STRIPE_W = 8f
+    const val POSS_STRIPE_W = 14f
+    /** The logo slot: margin-left, width; the centre block's padding-left. */
+    const val LOGO_ML = 20f
+    const val LOGO_SLOT_W = 120f
+    const val CENTRE_PL = 26f
+    /** The team code: size; the code block = code 56 + gap 8 + pips 6. */
+    const val CODE_PX = 56f
+    const val CODE_PIPS_GAP = 8f
+    /** The possession ball and its gap after the code. */
+    const val BALL = 30f
+    const val BALL_GAP = 12f
+    /** The timeout pips: 3 × (22 × 6, r 2), gap 6. */
+    const val PIP_W = 22f
+    const val PIP_H = 6f
+    const val PIP_R = 2f
+    const val PIP_GAP = 6f
+    /** The score slot: width, margin-right, size. */
+    const val SCORE_SLOT_W = 100f
+    const val SCORE_MR = 32f
+    const val SCORE_PX = 78f
+    /** The clock column's period slot (height, bottom padding, size), the rule's margin, the clock size. */
+    const val PERIOD_SLOT_H = 112f
+    const val PERIOD_PAD_B = 14f
+    const val PERIOD_PX = 48f
+    const val RULE_MARGIN = 26f
+    const val CLOCK_PX = 62f
+    /** The bar text: padding-left, gap, size; the divider; the flag icon. */
+    const val BAR_TEXT_PL = 140f
+    const val BAR_TEXT_GAP = 24f
+    const val BAR_TEXT_PX = 38f
+    const val BAR_DIVIDER_W = 2f
+    const val BAR_DIVIDER_H = 30f
+    const val FLAG_ICON_W = 30f
+    const val FLAG_ICON_H = 34f
+    /** The takeover: padding, gap, badge, words (TD, XP, FG), "+N", block gap. */
+    const val SCORE_PAD = 36f
+    const val SCORE_GAP = 30f
+    const val SCORE_BADGE = 130f
+    const val WORD_TD_PX = 86f
+    const val WORD_XP_PX = 74f
+    const val WORD_FG_PX = 80f
+    const val POINTS_PX = 58f
+    const val BLOCK_GAP = 6f
+    /** The takeover ball and the goalposts (90 × 120 at (520, 50)). */
+    const val SCORE_BALL = 70f
+    const val POSTS_W = 90f
+    const val POSTS_H = 120f
+    const val POSTS_X = 520f
+    const val POSTS_Y = 50f
 }

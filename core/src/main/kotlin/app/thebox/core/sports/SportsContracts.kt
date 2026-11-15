@@ -146,6 +146,10 @@ sealed interface LeagueDetail {
      * [possession] is the competitor whose id equals `situation.possession` (ESPN omits it after every kick-off);
      * [redZone] is `isRedZone && play is Down` (the machine adds its own checks, §3.5); [breakKind] is set in
      * INTERMISSION.
+     *
+     * (NFL Stacked §3.2, commit 0; trailing, defaulted) [awayTimeouts] / [homeTimeouts]: `situation.awayTimeouts` /
+     * `homeTimeouts`, read leniently (a number or a numeric string) and kept only in `0..SportsConstants.NFL_TIMEOUTS_MAX`
+     * (3), else null; null without a `situation` (before kick-off, at Final). Filled by `EspnMapper` (NFL Stacked WP-1).
      */
     data class Nfl(
         val play: NflPlay,
@@ -153,6 +157,8 @@ sealed interface LeagueDetail {
         val redZone: Boolean,
         val breakKind: NflBreak?,
         val lastPlay: NflLastPlay?,
+        val awayTimeouts: Int? = null,
+        val homeTimeouts: Int? = null,
     ) : LeagueDetail
 }
 
@@ -173,8 +179,21 @@ sealed interface NflPlay {
 /** (B1) Whose half the ball is in ([territory] null = midfield, yard 50); [yard] 1..50. Never OWN/OPP. */
 data class FieldPos(val territory: Side?, val yard: Int)
 
-/** (NFL §1.3) `situation.lastPlay`: [side] from `team.id`. */
-data class NflLastPlay(val id: String, val typeId: String?, val typeText: String?, val side: Side?, val scoreValue: Int?)
+/**
+ * (NFL §1.3) `situation.lastPlay`: [side] from `team.id`.
+ *
+ * (NFL Stacked §3.2, commit 0; trailing, defaulted) [penalty]: `type.id == SportsConstants.NFL_TYPE_PENALTY` ("8") **or**
+ * the play's `text` contains the upper-case `"PENALTY on"` (case-sensitive), so a declined foul ("Penalty on …,
+ * declined.") is false. The text itself is never stored. Filled by `EspnMapper` (NFL Stacked WP-1).
+ */
+data class NflLastPlay(
+    val id: String,
+    val typeId: String?,
+    val typeText: String?,
+    val side: Side?,
+    val scoreValue: Int?,
+    val penalty: Boolean = false,
+)
 
 /** (Power play §1.2) [TWO_MAN] is always 5-on-3. Append-only. */
 enum class PowerPlayKind { ONE_MAN, TWO_MAN }
@@ -405,8 +424,38 @@ sealed interface TabTail {
 /** (NFL §4.3) The possession tab; a null [tail] shows the lead alone, centred. */
 data class NflTab(val side: Side, val lead: TabLead, val tail: TabTail?)
 
-/** [scores]: empty, one score, or two for a +7/+8 update (ruling 25), in play order; set with the goal mark. */
-data class NflView(val down: DownText?, val tab: NflTab?, val scores: List<NflScore> = emptyList())
+/**
+ * (NFL Stacked §3.3, commit 0) A team timeout on the Stacked bar ("TIMEOUT BUF | 1 LEFT"): the caller [side] (from the
+ * count that dropped below its per-half low-water mark, never from `lastPlay.team`) and the timeouts it has [left]
+ * (0..3). [confirmed]: the mark comes from a type-21 `lastPlay` and holds while that play is the shown `lastPlay`
+ * (the live region announces only these, Rec 9); false = the fallback (a drop of exactly 1 with no 21 seen), held for
+ * `SportsConstants.NFL_TIMEOUT_FALLBACK_MS`.
+ */
+data class NflTimeoutMark(val side: Side, val left: Int, val confirmed: Boolean)
+
+/**
+ * [scores]: empty, one score, or two for a +7/+8 update (ruling 25), in play order; set with the goal mark.
+ *
+ * (NFL Stacked §3.2, §3.3, commit 0; trailing, defaulted; filled by `ScoreBugMachine`, NFL Stacked WP-1; the Pill ignores
+ * them, but they are in the view's equality, so a count change or a mark's start / end emits a view):
+ * - [awayTimeouts] / [homeTimeouts]: the shown entry's counts when it has them, else the half group's last shown counts
+ *   (held through stale, waiting and a break with no `situation`), else null (the pips are hidden);
+ * - [timeoutSlots]: the pips drawn per side, the highest count seen in the half group (periods 1–2, 3–4, 5+; ≤ 3), null
+ *   with no counts;
+ * - [timeout]: the active timeout mark, or null;
+ * - [flagId]: the penalised `lastPlay` id while the flag mark holds (`NFL_FLAG_MARK_MS`), else null; the live region
+ *   announces once per id. A flag and a timeout mark never coexist (the newer `lastPlay` ends the older mark).
+ */
+data class NflView(
+    val down: DownText?,
+    val tab: NflTab?,
+    val scores: List<NflScore> = emptyList(),
+    val awayTimeouts: Int? = null,
+    val homeTimeouts: Int? = null,
+    val timeoutSlots: Int? = null,
+    val timeout: NflTimeoutMark? = null,
+    val flagId: String? = null,
+)
 
 /**
  * What the bug draws (§4.5). `ScoreBugMachine.view()` is null before LIVE (owner ruling 2026-11-05).
@@ -446,8 +495,9 @@ data class ScoreBugView(
     /**
      * (Stacked §2.1, B1) The shown snapshot's period label on the NHL path of `ScoreBugMachine.view()`, whatever the state:
      * kept in stale and waiting views, where [bottom] is overwritten with [CentreText.NoUpdate] / [CentreText.Delayed].
-     * `PeriodLabel(SO, 1)` in the shootout; the final game's last label at FINAL. Null for the NFL, `knownView()`'s own
-     * fallback and the place-mode sample. Changes only when the period changes. The Pill ignores it.
+     * `PeriodLabel(SO, 1)` in the shootout; the final game's last label at FINAL. (NFL Stacked §3.2) Also set on the NFL
+     * path, so the Stacked clock column keeps "4TH" while stale or waiting. Null for `knownView()`'s own fallback and the
+     * place-mode sample. Changes only when the period changes. The Pills ignore it.
      */
     val period: PeriodLabel? = null,
 )
@@ -527,8 +577,9 @@ enum class ScoreBugSize { STANDARD, LARGE }
  * (Stacked §1, §1.3) The hockey score bug's look ("Score bug style"): [PILL] (today's bug, the default) or [STACKED] (the
  * teams one above the other, docs/design/m6-score-bug-stacked-theme.md). Persisted by name in `SportsPrefs.nhlStyle`
  * (the stored name is unchanged); append-only. A plain `@Serializable` enum: an unknown name in a stored or restored
- * document decodes to the property's default through the settings store's `coerceInputValues` (S7). Hockey only (CHL
- * P12): every `League.isHockey` game (NHL, OHL, WHL, QMJHL) uses it; an NFL game draws the NFL bug whatever the style (§9).
+ * document decodes to the property's default through the settings store's `coerceInputValues` (S7). (NFL Stacked §0.1,
+ * §7, owner Q1 default) One setting for every league: every `League.isHockey` game (NHL, OHL, WHL, QMJHL; CHL P12) and
+ * the NFL (`StackedNflBug`, docs/design/m6-nfl-stacked.md) use it.
  */
 @Serializable
 enum class NhlBugStyle { PILL, STACKED }
@@ -568,9 +619,9 @@ data class PlacementInput(
     /** (NFL §4.4, §4.6) The followed (or shown) league; set by `FullScreenHost` from the follow, else the prefs. */
     val league: League = League.NHL,
     /**
-     * (Stacked §2.1, §4.3; CHL §1.6 #3) The hockey bug's style; set by `FullScreenHost.scorePlacementInput` from
-     * `SportsPrefs.nhlStyle`, and forced to [NhlBugStyle.PILL] by `ScoreBug(...)` whenever the drawn league is not hockey
-     * (the NFL). [ScoreBugPlacement] sizes the box with it (the Stacked footprint); ignored for the NFL.
+     * (Stacked §2.1, §4.3; CHL §1.6 #3; NFL Stacked §7) The bug's style; set by `FullScreenHost.scorePlacementInput`
+     * from `SportsPrefs.nhlStyle` for every league. [ScoreBugPlacement] sizes the box with it (the Stacked footprints:
+     * hockey's, and the NFL Stacked one).
      */
     val style: NhlBugStyle = NhlBugStyle.PILL,
 )
@@ -597,7 +648,7 @@ data class ScoreFacts(
     val league: League? = null,
     /**
      * (Stacked §1.1, §1.3, S8) `SportsPrefs.nhlStyle`, filled by `PlayerViewModel` (Stacked WP-4). Null = not reported:
-     * the sheet has no Style row. The Style row's gating on the followed game's league is WP-4's (§1.1).
+     * the sheet has no Style row. (NFL Stacked §7) Reported, the row shows for every league, followed or browsed.
      */
     val style: NhlBugStyle? = null,
     /**
