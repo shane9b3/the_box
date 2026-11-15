@@ -742,6 +742,76 @@ object SportsConstants {
     /** The wave's pivot inside the icon. */
     const val STACKED_NFL_WAVE_PIVOT_X = 2.1f
     const val STACKED_NFL_WAVE_PIVOT_Y = 13.8f
+
+    // ---- WP-2 additions: the geometry of `StackedNflGeometry` (§2.3–§2.5, §5.2–§5.4; [StackedNflMock] × STACKED_SCALE)
+    /** The row stripe, and its possession width (8 / 14 mock). */
+    const val STACKED_NFL_STRIPE_W = 3.6f
+    const val STACKED_NFL_POSS_STRIPE_W = 6.3f
+    /** The logo slot after the stripe (margin-left 20, width 120 mock); the logo fits inside 50.4 × 43.2 (ST S6). */
+    const val STACKED_NFL_LOGO_ML = 9f
+    const val STACKED_NFL_LOGO_SLOT_W = 54f
+    const val STACKED_NFL_LOGO_FIT_W = 50.4f
+    const val STACKED_NFL_LOGO_FIT_H = 43.2f
+    /** The code's start after the stripe: logo margin 9 + slot 54 + centre padding 11.7. */
+    const val STACKED_NFL_CODE_DX = 74.7f
+    /** The code's line box top in the row ((120 − 70) / 2 = 25 mock). */
+    const val STACKED_NFL_CODE_TOP = 11.25f
+    /** The least gap between the possession ball and the score slot (§5.2 `StackedNflFitTest`). */
+    const val STACKED_NFL_CODE_SCORE_GAP_MIN = 12f
+    /** The score slot (100 wide, margin-right 32 mock), its size, and the width three digits are scaled to fit (§5.4). */
+    const val STACKED_NFL_SCORE_W = 45f
+    const val STACKED_NFL_SCORE_MR = 14.4f
+    const val STACKED_NFL_SCORE_PX = 35.1f
+    const val STACKED_NFL_SCORE_FIT_W = 43f
+    /** The clock column: the quarter (48 mock), its slot (112, padding-bottom 14), the rule's margin (26). */
+    const val STACKED_NFL_PERIOD_PX = 21.6f
+    const val STACKED_NFL_PERIOD_SLOT_H = 50.4f
+    const val STACKED_NFL_PERIOD_PAD_B = 6.3f
+    const val STACKED_NFL_RULE_MARGIN = 11.7f
+    /** The clock's air each side inside the column (ST fix pass). */
+    const val STACKED_NFL_CLOCK_AIR = 5f
+    /** The bar: stripes A / B at 46 / 84, 26 wide, overhang 10 (mock); the words at 140; the divider 2 × 30 (→ 1 × 15.8). */
+    const val STACKED_NFL_BAR_STRIPE_A_X = 20.7f
+    const val STACKED_NFL_BAR_STRIPE_B_X = 37.8f
+    const val STACKED_NFL_BAR_STRIPE_W = 11.7f
+    const val STACKED_NFL_BAR_STRIPE_OVERHANG = 4.5f
+    const val STACKED_NFL_BAR_TEXT_X = 63f
+    const val STACKED_NFL_BAR_DIVIDER_W = 1f
+    const val STACKED_NFL_BAR_DIVIDER_H = 15.8f
+    /** The bar words' room keeps this for the italic's overhang at the end (§2.4 "room = width − 63 − overhang ≈ 4"). */
+    const val STACKED_NFL_BAR_OVERHANG = 4f
+    /** The flag bar's divider: the words' colour at this alpha (the mock's black .4; the other bars white .5). */
+    const val STACKED_NFL_FLAG_DIVIDER_ALPHA = 0.4f
+    const val STACKED_NFL_BAR_DIVIDER_ALPHA = 0.5f
+    /** The takeover (§2.5): padding (36 mock; tight `STACKED_TAKEOVER_PAD_TIGHT`), gap (30), badge (130). */
+    const val STACKED_NFL_TAKEOVER_PAD = 16.2f
+    const val STACKED_NFL_TAKEOVER_GAP = 13.5f
+    const val STACKED_NFL_BADGE = 58.5f
+    const val STACKED_NFL_BADGE_SHADOW_DY = 2.25f
+    /** The takeover words' natural sizes (TD 86, XP 74, FG 80 mock; SAFETY as TD, TWO-POINT as FG), tracking .03 em. */
+    const val STACKED_NFL_WORD_TD_PX = 38.7f
+    const val STACKED_NFL_WORD_XP_PX = 33.3f
+    const val STACKED_NFL_WORD_FG_PX = 36f
+    const val STACKED_NFL_WORD_SAFETY_PX = 38.7f
+    const val STACKED_NFL_WORD_2PT_PX = 36f
+    const val STACKED_NFL_WORD_TRACK_EM = 0.03f
+    const val STACKED_NFL_WORD_SHADOW_DY = 2.25f
+    /** "+N" (58 mock) and the block gap (6); the tally is `STACKED_TALLY_PX` (20). */
+    const val STACKED_NFL_POINTS_PX = 26.1f
+    const val STACKED_NFL_BLOCK_GAP = 2.7f
+    /** The streaks (110 / 40 wide, overhang 40 mock), skewed −24°. */
+    const val STACKED_NFL_STREAK1_W = 49.5f
+    const val STACKED_NFL_STREAK2_W = 18f
+    const val STACKED_NFL_STREAK_OVERHANG = 18f
+    const val STACKED_NFL_STREAK_SKEW_DEG = -24f
+    /** The possession ball's pop-in (`.ball` → `.ball.on`): from scale .4 and −40° (mirrored +40°), α over 300 ease, transform 400 Spring. */
+    const val STACKED_NFL_BALL_FROM_SCALE = 0.4f
+    const val STACKED_NFL_BALL_FROM_DEG = -40f
+    const val STACKED_NFL_BALL_ALPHA_MS = 300L
+    const val STACKED_NFL_BALL_MOVE_MS = 400L
+    /** A pip's lit ⇄ used transition (`.to` background-color / opacity .4s), and the burn's white α at its peak (`toBurn` 50 %). */
+    const val STACKED_NFL_PIP_MS = 400L
+    const val STACKED_NFL_BURN_ALPHA = 0.15f
 }
 
 /**
