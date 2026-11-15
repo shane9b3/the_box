@@ -321,6 +321,132 @@ class TestTimeline(NflCase):
         self.assertEqual(0, self.nfl.featured(time.time())["window"])  # pre lasts 80 s at x2
 
 
+class TestStackedEvents(NflCase):
+    """docs/design/m6-nfl-stacked.md 9.4: the scripted timeouts and flags, window by window."""
+
+    def sit(self, label, off=1):
+        return self.comp(self.at(label, off))["situation"]
+
+    @staticmethod
+    def counts(s):
+        return s.get("awayTimeouts"), s.get("homeTimeouts")
+
+    def test_every_body_carries_counts_and_a_numeric_strictly_increasing_play_id(self):
+        ids = []
+        for w in sports_nfl.W:
+            if not w.get("situation"):
+                continue
+            s = self.sit(w["label"])
+            self.assertIsInstance(s["awayTimeouts"], int, w["label"])
+            self.assertIsInstance(s["homeTimeouts"], int, w["label"])
+            ids.append(int(s["lastPlay"]["id"]))
+        self.assertEqual(sorted(set(ids)), ids)
+
+    def test_the_counts_persist_and_the_second_half_resets_them(self):
+        self.assertEqual((3, 3), self.counts(self.sit("q1 coin toss")))
+        self.assertEqual((3, 3), self.counts(self.sit("q2 field goal, dead ball")))
+        self.assertEqual((3, 2), self.counts(self.sit("q2 BUF ball")))
+        self.assertEqual((3, 2), self.counts(self.sit("halftime")), "held through the break")
+        self.assertEqual((3, 3), self.counts(self.sit("q3 KC at its own 2")), "the half reset")
+        self.assertEqual((3, 3), self.counts(self.sit("end 3rd")))
+
+    def test_home_team_timeout_is_a_type_21_with_the_count_dropping_in_the_same_poll_held_over_two_polls(self):
+        before = self.sit("q2 +7 pair in one body")
+        self.assertEqual(3, before["homeTimeouts"])
+        a, b = self.sit("q2 BUF ball", 1), self.sit("q2 BUF ball", 40)
+        for s in (a, b):
+            self.assertEqual(("21", "Timeout", "TO"), tuple(s["lastPlay"]["type"][k] for k in ("id", "text", "abbreviation")))
+            self.assertEqual("2", s["lastPlay"]["team"]["id"])
+            self.assertEqual("Timeout #1 by BUF at 12:55.", s["lastPlay"]["text"])
+            self.assertEqual((3, 2), self.counts(s))
+        self.assertEqual(a["lastPlay"]["id"], b["lastPlay"]["id"], "held: the same play across polls")
+        self.assertGreaterEqual(sports_nfl.W[[w["label"] for w in sports_nfl.W].index("q2 BUF ball")]["len"], 50)
+        nxt = self.sit("halftime")
+        self.assertGreater(int(nxt["lastPlay"]["id"]), int(a["lastPlay"]["id"]))
+        self.assertEqual("65", nxt["lastPlay"]["type"]["id"])
+
+    def test_away_team_timeout_flap_and_the_lost_challenge(self):
+        s = self.sit("q4 KC 3rd and 9")
+        self.assertEqual(("21", "12", (2, 3)), (s["lastPlay"]["type"]["id"], s["lastPlay"]["team"]["id"], self.counts(s)))
+        flap = self.sit("q4 turnover, BUF in the red zone")
+        self.assertEqual((3, 3), self.counts(flap))
+        self.assertNotEqual("21", flap["lastPlay"]["type"]["id"])
+        again = self.sit("q4 field goal, dead ball")
+        self.assertEqual((2, 3), self.counts(again))
+        self.assertNotEqual("21", again["lastPlay"]["type"]["id"], "back to 2 with no type 21: not below the low-water mark")
+        lost = self.sit("q4 BUF 3rd and 9 at its 2")
+        self.assertEqual((2, 2), self.counts(lost))
+        self.assertEqual("5", lost["lastPlay"]["type"]["id"], "no 21: the fallback 8 s mark")
+
+    def test_overtime_counts_are_2_2_and_the_ot_timeout_is_a_type_21(self):
+        self.assertEqual((2, 2), self.counts(self.sit("ot KC 1st")))
+        s = self.sit("ot KC 1st and goal at 8")
+        self.assertEqual((2, 1), self.counts(s))
+        self.assertEqual(("21", "2"), (s["lastPlay"]["type"]["id"], s["lastPlay"]["team"]["id"]))
+        self.assertNotIn("situation", self.comp(self.at("ot walk-off touchdown (post)", 1)))
+
+    def test_accepted_penalty_on_a_no_play_is_type_8(self):
+        s = self.sit("q1 3rd and 2, OPP 38")
+        lp_ = s["lastPlay"]
+        self.assertEqual(("8", "Penalty", "PEN"), tuple(lp_["type"][k] for k in ("id", "text", "abbreviation")))
+        self.assertIn("PENALTY on BUF-", lp_["text"])
+        self.assertEqual((3, 3), self.counts(s))
+
+    def test_accepted_foul_on_a_play_that_stands_is_a_normal_type_with_upper_case_penalty_on(self):
+        lp_ = self.sit("q1 KC ball")["lastPlay"]
+        self.assertEqual("24", lp_["type"]["id"])
+        self.assertIn("PENALTY on BUF-", lp_["text"])
+
+    def test_declined_foul_is_mixed_case_and_not_type_8(self):
+        lp_ = self.sit("q1 BUF 2nd and 7")["lastPlay"]
+        self.assertEqual("3", lp_["type"]["id"])
+        self.assertIn("Penalty on KC-", lp_["text"])
+        self.assertIn("declined", lp_["text"])
+        self.assertNotIn("PENALTY on", lp_["text"])
+
+    def test_touchdown_with_a_penalty_in_the_same_update(self):
+        e = self.at("q1 score before the play (10 s)", 1)
+        self.assertEqual({"away": "6", "home": "0"}, self.score(e))
+        self.assertIn("PENALTY on", self.comp(e)["situation"]["lastPlay"]["text"])
+
+    def test_official_timeout_kickoff_after_a_score_is_red_zone_with_down_minus_1(self):
+        s = self.sit("q1 extra point, KC kick-off")
+        self.assertEqual(("74", -1, True, "12"), (s["lastPlay"]["type"]["id"], s["down"], s["isRedZone"], s["possession"]))
+        self.assertEqual(0, s["distance"])
+        self.assertEqual(35, 100 - s["yardLine"])
+
+    def test_two_minute_warning_is_type_75(self):
+        s = self.sit("q3 KC 1st at KC 40")
+        self.assertEqual(("75", "Two-minute warning"), (s["lastPlay"]["type"]["id"], s["lastPlay"]["type"]["text"]))
+
+    def test_no_possession_during_a_kickoff_return(self):
+        s = self.sit("q1 BUF ball, no possession")
+        self.assertNotIn("possession", s)
+        self.assertEqual(("53", "1st & 10"), (s["lastPlay"]["type"]["id"], s["shortDownDistanceText"]))
+
+    def test_end_of_quarter_and_halftime_keep_the_situation_and_counts(self):
+        for label, name in (("end 1st", "STATUS_END_PERIOD"), ("halftime", "STATUS_HALFTIME"), ("end 4th", "STATUS_END_PERIOD")):
+            c = self.comp(self.at(label, 1))
+            self.assertEqual(name, c["status"]["type"]["name"])
+            self.assertIn("awayTimeouts", c["situation"])
+            self.assertNotIn("PENALTY", c["situation"]["lastPlay"]["text"])
+
+    def test_script_keys_override_counts_text_and_id(self):
+        self.admin("/admin/config", {"sports_nfl_script": {sports_nfl.FEATURED_ID: {
+            "awayTimeouts": 1, "homeTimeouts": None, "lastPlayText": "Penalty on X, declined.", "lastPlayId": "401899001999"}}})
+        s = self.sit("q1 KC ball")
+        self.assertEqual(1, s["awayTimeouts"])
+        self.assertNotIn("homeTimeouts", s)
+        self.assertEqual("Penalty on X, declined.", s["lastPlay"]["text"])
+        self.assertEqual("401899001999", s["lastPlay"]["id"])
+
+    def test_new_key_rejections(self):
+        for v in ({"awayTimeouts": 4}, {"homeTimeouts": -1}, {"awayTimeouts": True}, {"lastPlayText": 5}, {"lastPlayId": "abc"}):
+            with self.assertRaises(ValueError, msg=str(v)):
+                sports_nfl.check_config({"sports_nfl_script": {"1": v}})
+        sports_nfl.check_config({"sports_nfl_script": {"1": {"awayTimeouts": 0, "homeTimeouts": None, "lastPlayId": 5, "lastPlayText": ""}}})
+
+
 class TestScriptAndFaults(NflCase):
     def test_script_overrides_and_situation_null(self):
         self.admin("/admin/config", {"sports_nfl_script": {sports_nfl.FEATURED_ID: {"away": 8, "state": "in", "name": "STATUS_IN_PROGRESS", "period": 2, "clock": 100}}})
