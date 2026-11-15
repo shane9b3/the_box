@@ -1222,7 +1222,7 @@ The passive bar never takes keys; layer stays NONE. Timers are deadlines in `nex
 
 #### 3.3.1 Opening
 
-The list opens on the guide's current source and lineup (`PlayerEvent.GuideSourceNow`, forwarded by the guide VM whenever it changes), with the cursor on the tuned row (or 0) and `top` placing it at visible row 3. Opening via GROUPS_PANEL/LEFT focuses the GROUPS column on the current source. Selecting another group calls `loadListLineup(source)`; the VM loads `GuideLibrary.lineup(source, unlocked)` (first emission), calls `listRows.setLineup`, then `ListLineup`. The guide's own source does **not** change (TiviMate keeps the guide where it was); a tune from the list makes that lineup the zap list (`tune(channel, lineup)`), as the guide's OK does (`GuideEffectsImpl`, M3 §3.16.3).
+The list opens on the guide's current source and lineup (`PlayerEvent.GuideSourceNow`, forwarded by the guide VM whenever it changes), with the cursor on the tuned row (or 0) and `top` placing it at visible row 3. Opening via GROUPS_PANEL/LEFT focuses the GROUPS column on the current source. Selecting another group calls `loadListLineup(source)`; the VM loads `GuideLibrary.lineup(source, unlocked)` (first emission), calls `listRows.setLineup`, then `ListLineup`. The guide's own source does **not** change while the list browses (TiviMate keeps the guide where it was); (owner report 2026-11-14) after a list tune, the guide entered from FULL moves to the list's group only if its own group does not hold the playing channel (`docs/decisions/2026-11-14-guide-opens-on-playing-channel.md`). A tune from the list makes that lineup the zap list (`tune(channel, lineup)`), as the guide's OK does (`GuideEffectsImpl`, M3 §3.16.3).
 
 #### 3.3.2 Paging
 

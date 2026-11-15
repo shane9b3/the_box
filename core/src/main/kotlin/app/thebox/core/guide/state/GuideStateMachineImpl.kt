@@ -52,6 +52,7 @@ import app.thebox.core.catchup.archive.ArchiveFailure
 import app.thebox.core.catchup.archive.ArchivePhase
 import app.thebox.core.catchup.archive.ArchiveStatus
 import app.thebox.core.full.EnterReason
+import app.thebox.core.full.ListTune
 import app.thebox.core.full.PlayerLayer
 import app.thebox.core.full.PlayerStateMachine
 import app.thebox.core.input.BoxAction
@@ -219,6 +220,32 @@ class GuideStateMachineImpl(
     private var tuned = TunedState()
     private var tunedChannel: GuideChannel? = null
     private var tunedIndex = -1
+    /**
+     * (owner report 2026-11-14) The group the playing channel was tuned from, bound to that channel's identity hash. Set
+     * when the channel's Tuned arrives for a [pendingTunedFrom] request: the grid's OK or catch-up, a granted PIN tune,
+     * Search, the player's channel list. Any other channel change (Previous channel, a reminder, number entry, a zap, the
+     * startup tune) clears it.
+     */
+    private var tunedFrom: ListTune? = null
+    /** (2026-11-14) A tune requested with a lineup, waiting for its channel's Tuned; dropped by a cancelled PIN prompt. */
+    private var pendingTunedFrom: ListTune? = null
+    /** (2026-11-14) Search was opened from FULL: Back out of it is an entry into the guide from FULL. */
+    private var searchFromFull = false
+
+    /** (2026-11-14) Where an entry into the guide comes from: the mode switch [commitEntry] runs for it. */
+    private enum class EntryFrom { FULL, SEARCH, SETTINGS }
+
+    /**
+     * (2026-11-14) An entry into the guide waiting for the playing channel's group ([enterGuide]): the screen it comes
+     * from stays up until the lookup's answer ([GuideEvent.SourceHolding] with [token]) and that source's first lineup,
+     * or [until]. [applied]: the answer, applied; [committed]: the guide is showing (the hold timed out).
+     */
+    private class Entry(val token: Long, val from: EntryFrom, val rowId: Long, val until: Long) {
+        var applied: GuideSource? = null
+        var committed = false
+    }
+    private var entry: Entry? = null
+    private var entryToken = 0L
     private var tunedNowRequestedFor = Int.MIN_VALUE
     private var pendingArchiveHash = 0L
     private val suspect = HashSet<Long>()
@@ -398,6 +425,7 @@ class GuideStateMachineImpl(
                 updateCard = event.card?.let { c -> updateCard?.takeIf { it.phase == c.phase }?.let { c.copy(focused = it.focused) } ?: c }
                 if (updateCard == null) updateFocused = false
             }
+            is GuideEvent.SourceHolding -> onSourceHolding(event.token, event.source)
         }
     }
 
@@ -439,6 +467,9 @@ class GuideStateMachineImpl(
 
     private fun act(a: GuideEvent.Act) {
         val action = a.action
+        // (2026-11-14) A key while an entry into the guide waits: the guide shows now (its home) and the key acts there;
+        // the lookup's answer, when it comes, is dropped.
+        dropEntry(commit = true)
         // M5 commit 0 (§0.9, §1.9 item 5): the PIN prompt is modal above every mode and gets the first refusal.
         if (u.pin != null && pinKey(a)) return
         // H-B2: the card is modal only where it is drawn (GUIDE, FULL); in SEARCH/SETTINGS it waits for the mode to return.
@@ -454,7 +485,10 @@ class GuideStateMachineImpl(
         if (action == BoxAction.PLAY && u.mode == ScreenMode.GUIDE && guidePlay()) return
         if (u.overlay != null && overlayKey(a)) return
         // M4 §3.1.1 step 3: in FULL the player machine takes the action first; false falls through to the guide.
-        if (u.mode == ScreenMode.FULL) { val f = full; if (f != null && f.act(a)) return }
+        if (u.mode == ScreenMode.FULL) {
+            val f = full
+            if (f != null && f.act(a)) { f.takeListTune()?.let { noteTuneFrom(it.identityHash, it.source) }; return }
+        }
         // M5 commit 0 (§1.9 item 5): in SETTINGS the settings machine acts first; the guide acts on what it declines.
         if (u.mode == ScreenMode.SETTINGS && settingsKey(a)) return
         if (globalKey(a)) return
@@ -499,8 +533,12 @@ class GuideStateMachineImpl(
         return false
     }
 
-    /** (N11) Settings → the guide grid at now, whatever opened it (FULL included). */
+    /**
+     * (N11) Settings → the guide grid at now, whatever opened it. (2026-11-14) Opened from FULL, this enters the guide
+     * from FULL: the playing channel's row ([enterGuide]).
+     */
     private fun leaveSettingsToGuide() {
+        if (settingsFromFull) { enterGuide(EntryFrom.SETTINGS); return }
         settingsFromFull = false
         setMode(ScreenMode.GUIDE)
         u = u.copy(zone = Zone.GRID, overlay = null)
@@ -763,6 +801,7 @@ class GuideStateMachineImpl(
     /** [reason] decides the player's auto-shown bar (§3.1.1): ARCHIVE, REMINDER, SEARCH, LAUNCH, else USER. */
     private fun goFull(reason: EnterReason = EnterReason.USER) {
         endBoot()
+        dropEntry(commit = false) // (2026-11-14) back to FULL: a waiting entry into the guide is dropped
         if (u.mode == ScreenMode.FULL) return
         leavingSettings(ScreenMode.FULL)
         u = u.copy(mode = ScreenMode.FULL, overlay = null, groupCard = null)
@@ -772,15 +811,130 @@ class GuideStateMachineImpl(
         full?.enterFull(curMs, reason)
     }
 
-    /** BACK/OPEN_GUIDE in FULL (B2/F10): GUIDE, viewport MINI, focus home. */
-    private fun returnToGuide() {
-        val wasFull = u.mode == ScreenMode.FULL
-        u = u.copy(mode = ScreenMode.GUIDE, zone = Zone.GRID, overlay = null, groupCard = null)
-        groupCardUntil = Long.MAX_VALUE
-        effects.setFullScreen(false)
-        if (wasFull) full?.leaveFull()
-        goHome()
+    /**
+     * BACK/OPEN_GUIDE in FULL (B2/F10), and the error card's Guide button: GUIDE, viewport MINI, focus home. (Owner report
+     * 2026-11-14) Home is the playing channel's row at now, in a group that holds it ([enterGuide]).
+     */
+    private fun returnToGuide() = enterGuide(EntryFrom.FULL)
+
+    /**
+     * Owner report 2026-11-14 (docs/decisions/2026-11-14-guide-opens-on-playing-channel.md): every entry into the guide
+     * from FULL (and from a Search or Settings opened from FULL) focuses the playing channel's row at now, the failed
+     * channel's on the error card. The group the guide shows holds it: the mode switches at once and [goHome] focuses it.
+     * Otherwise [playingCandidates] are asked off-screen, in one lookup ([GuideEffects.findSourceHolding]); the screen
+     * the user is leaving stays up (the guide's first frame is held, so no frame of the wrong group shows) until the
+     * answer's lineup lands focused on the row ([onEntryLineup]), or [ENTRY_HOLD_MS]. No answer source: the guide where it
+     * was, at now ([goHome], as before). Nothing tuned (idle, stopped): [goHome], unchanged.
+     */
+    private fun enterGuide(from: EntryFrom) {
+        dropEntry(commit = false)
+        val candidates = playingCandidates()
+        if (candidates.isNullOrEmpty()) { commitEntry(from); goHome(); return }
+        val e = Entry(++entryToken, from, tuned.rowId, curMs + ENTRY_HOLD_MS)
+        entry = e
+        effects.findSourceHolding(e.token, candidates, e.rowId)
+    }
+
+    /**
+     * The sources that may hold the playing row, in the lead's order (2026-11-14): a group still loading (cycled in FULL
+     * just before), the group it was tuned from (bound to this channel), the startup source ([initialSource], "Open guide
+     * on"), All channels of its playlist. Only listed entries outside a parental door; never Recent (a quick list, not a
+     * group), never the shown lineup (it does not hold the row). Null: no lookup (nothing tuned, the row unknown, or the
+     * shown lineup holds it).
+     */
+    private fun playingCandidates(): List<GuideSource>? {
+        val l = lineup ?: return null
+        val id = tuned.identity ?: return null
+        if (tuned.rowId < 0 || !somethingTuned()) return null
+        val loading = requestedSource?.takeIf { it != l.source }
+        if (loading == null && tunedIndex >= 0 && frame.focus != null) return null
+        val from = tunedFrom?.takeIf { it.identityHash == tuned.identityHash }?.source
+        val out = ArrayList<GuideSource>(4)
+        for (s in listOfNotNull(loading, from, initialSource(sources), GuideSource.All(id.playlistId))) {
+            if (s == l.source || s == GuideSource.Recent || s in out) continue
+            val entry = sources.firstOrNull { it.source == s } ?: continue
+            if (entry.section == SourceSection.RECENT || ParentalRules.needsDoor(entry, parental)) continue
+            out += s
+        }
+        return out
+    }
+
+    /** The mode switch of an entry into the guide, per where it comes from (the old returnToGuide, Search, Settings). */
+    private fun commitEntry(from: EntryFrom) {
+        when (from) {
+            EntryFrom.FULL -> {
+                val wasFull = u.mode == ScreenMode.FULL
+                u = u.copy(mode = ScreenMode.GUIDE, zone = Zone.GRID, overlay = null, groupCard = null)
+                groupCardUntil = Long.MAX_VALUE
+                effects.setFullScreen(false)
+                if (wasFull) full?.leaveFull()
+            }
+            EntryFrom.SEARCH -> u = u.copy(mode = ScreenMode.GUIDE, overlay = null, zone = Zone.GRID, tabFocused = TAB_GUIDE)
+            EntryFrom.SETTINGS -> {
+                settingsFromFull = false
+                setMode(ScreenMode.GUIDE)
+                u = u.copy(zone = Zone.GRID, overlay = null)
+            }
+        }
         frameDirty = true
+    }
+
+    /**
+     * Ends a waiting entry: its answer is dropped (the token no longer matches). [commit]: the guide shows now if it was
+     * still held (a key, another source change), at home; false: the user is leaving (FULL, Search, Settings).
+     */
+    private fun dropEntry(commit: Boolean) {
+        val e = entry ?: return
+        entry = null
+        if (commit && !e.committed) { commitEntry(e.from); goHome() }
+    }
+
+    /** [GuideEvent.SourceHolding]: the answer for the waiting entry (any other token is stale and ignored). */
+    private fun onSourceHolding(token: Long, source: GuideSource?) {
+        val e = entry ?: return
+        if (token != e.token || e.applied != null) return
+        when {
+            source == null || (source == lineup?.source && source == requestedSource) -> {
+                entry = null
+                if (!e.committed) commitEntry(e.from)
+                goHome()
+            }
+            source == requestedSource -> { e.applied = source; pendingFocusRowId = e.rowId } // already loading
+            else -> { e.applied = source; applySource(source, focusRowId = e.rowId, fromEntry = true) }
+        }
+    }
+
+    /** [onLineup] of [l]: the waiting entry's answer landed (focused on the row when it holds it): the guide shows. */
+    private fun onEntryLineup(l: GuideLineup, found: Boolean) {
+        val e = entry ?: return
+        if (e.applied != l.source) return
+        entry = null
+        if (!e.committed) commitEntry(e.from)
+        if (!found) goHome()
+    }
+
+    /** The hold timed out: the guide shows where it was; the answer may still move it (until a key or a source change). */
+    private fun tickEntry() {
+        val e = entry ?: return
+        if (e.committed || curMs < e.until) return
+        e.committed = true
+        commitEntry(e.from)
+        goHome()
+    }
+
+    /** (2026-11-14) A tune of [identityHash] requested from [source]'s lineup: [tunedFrom] once its Tuned arrives. */
+    private fun noteTuneFrom(identityHash: Long, source: GuideSource?) {
+        val t = source?.takeIf { it != GuideSource.Recent }?.let { ListTune(identityHash, it) }
+        // Its Tuned already came (Search reports the tune after the controller took it): bind now.
+        if (t != null && tuned.identityHash == identityHash && somethingTuned()) { tunedFrom = t; pendingTunedFrom = null } else pendingTunedFrom = t
+    }
+
+    /** (2026-11-14) A new channel plays: it was tuned from the pending request's group, or from none (cleared). */
+    private fun bindTunedFrom(state: TunedState) {
+        val p = pendingTunedFrom
+        // The same channel back after an idle gap (a resume) keeps its binding; any other channel clears it.
+        tunedFrom = p?.takeIf { it.identityHash == state.identityHash } ?: tunedFrom?.takeIf { it.identityHash == state.identityHash }
+        pendingTunedFrom = null
     }
 
     /** (M5 commit 0, S9) Every exit from SETTINGS, whatever the route, tells the settings machine once. */
@@ -789,6 +943,7 @@ class GuideStateMachineImpl(
     }
 
     private fun setMode(mode: ScreenMode) {
+        if (mode != ScreenMode.GUIDE) dropEntry(commit = false) // (2026-11-14) leaving: a waiting entry is dropped
         if (u.mode == mode) return
         leavingSettings(mode)
         val wasFull = u.mode == ScreenMode.FULL
@@ -814,6 +969,7 @@ class GuideStateMachineImpl(
 
     private fun openSearch() {
         endBoot()
+        searchFromFull = u.mode == ScreenMode.FULL
         u = u.copy(overlay = null)
         setMode(ScreenMode.SEARCH)
         effects.openSearch()
@@ -1087,7 +1243,10 @@ class GuideStateMachineImpl(
                 applySource(purpose.entry.source)
             } else notifyOwner(purpose, granted = true)
             is PinPurpose.Tune -> if (purpose.owner == PinOwner.PLAYER && full != null) notifyOwner(purpose, granted = true)
-            else effects.tune(purpose.channel, lineup ?: emptyLineupFor(purpose.channel))
+            else {
+                noteTuneFrom(purpose.channel.identityHash, lineup?.source)
+                effects.tune(purpose.channel, lineup ?: emptyLineupFor(purpose.channel))
+            }
             is PinPurpose.EnterSettings -> {
                 pendingSettingsFromFull = false
                 openSettings(purpose.route)
@@ -1102,6 +1261,7 @@ class GuideStateMachineImpl(
         val purpose = pinPurpose
         closePin()
         if (purpose != null) notifyOwner(purpose, granted = false)
+        if (purpose is PinPurpose.Tune) pendingTunedFrom = null // (2026-11-14) a refused tune is tuned from nowhere
         pendingSettingsFromFull = false
         // A refused resume / tune in FULL with nothing playing: BACK leaves the guide on All channels (§3.9.2).
         if (purpose is PinPurpose.Tune && purpose.owner == PinOwner.GUIDE && u.mode == ScreenMode.FULL && !somethingTuned()) {
@@ -1704,7 +1864,7 @@ class GuideStateMachineImpl(
         }
         if (inFull && numberConfirmUntil != Long.MAX_VALUE) full?.zapNeedsConfirm(curMs) // the confirming commit
         if (o != null) closeOverlay() else resetNumber()
-        if (inFull) { tune(channel); return }
+        if (inFull) { tune(channel, fromLineup = false); return }
         if (lineupIndex >= 0 && lineupIndex < lineupSize()) {
             u = u.copy(zone = Zone.GRID)
             setFocus(navigator.focusAt(lineupIndex, nowMin, ctx(0)))
@@ -1716,14 +1876,17 @@ class GuideStateMachineImpl(
 
     // ---------------------------------------------------------------- tune, archive
 
-    private fun tune(ch: GuideChannel) {
+    /** [fromLineup]: the channel is in [lineup] (the grid, the sheet); false: number entry in FULL (not tuned from a group). */
+    private fun tune(ch: GuideChannel, fromLineup: Boolean = true) {
         val l = lineup ?: return
+        noteTuneFrom(ch.identityHash, if (fromLineup) l.source else null)
         effects.tune(ch, l)
     }
 
     /** Catch-up (§3.13.6): the launcher may fail (toast by the host); FULL follows the first archive [GuideEvent.Tuned]. */
     private fun playArchive(ch: GuideChannel, info: ProgrammeInfo) {
         pendingArchiveHash = ch.identityHash
+        noteTuneFrom(ch.identityHash, lineup?.source)
         effects.playArchive(ch, info)
     }
 
@@ -1793,7 +1956,9 @@ class GuideStateMachineImpl(
         }
     }
 
-    private fun applySource(source: GuideSource, focusRowId: Long = -1, persist: Boolean = true) {
+    private fun applySource(source: GuideSource, focusRowId: Long = -1, persist: Boolean = true, fromEntry: Boolean = false) {
+        // (2026-11-14) Any other source change (the user's, a relock, a deleted playlist) drops a waiting entry's answer.
+        if (!fromEntry) dropEntry(commit = true)
         requestedSource = source
         pendingFocusRowId = focusRowId
         if (source !is GuideSource.Favourites) lastNonFavourite = source
@@ -1816,6 +1981,7 @@ class GuideStateMachineImpl(
             frameDirty = true
             u = u.copy(panel = null)
             refreshEmpty()
+            onEntryLineup(l, found = false)
             return
         }
         val pending = if (pendingFocusRowId >= 0) indexOf(l, pendingFocusRowId) else -1
@@ -1842,6 +2008,7 @@ class GuideStateMachineImpl(
         if (pending >= 0 || l.source == requestedSource) pendingFocusRowId = -1
         setFocus(newFocus)
         refreshEmpty()
+        onEntryLineup(l, found = pending >= 0)
     }
 
     private fun clampTop(top: Int, row: Int, size: Int): Int =
@@ -1922,6 +2089,7 @@ class GuideStateMachineImpl(
         // any key end it instead.
         if (state.phase != MiniPhase.IDLE && state.phase != MiniPhase.STOPPED && state.phase != MiniPhase.ERROR) endBoot()
         val identityChanged = state.identity != tuned.identity
+        if (identityChanged && state.identity != null) bindTunedFrom(state)
         tuned = state
         tunedChannel = channel
         if (frame.tunedHash != state.identityHash) { frame.tunedHash = state.identityHash; frameDirty = true }
@@ -2041,10 +2209,19 @@ class GuideStateMachineImpl(
     private fun onSearchClosed(channel: GuideChannel?, tunedFromSearch: Boolean, archive: Boolean) {
         // I-19 (§5.5, device bug G4): every exit from Search lands in the grid, with the Guide tab current.
         startupFocusPending = false
+        dropEntry(commit = false) // a held Back out of Search: the search screen's own close replaces it
+        val fromFull = searchFromFull
+        searchFromFull = false
+        // (2026-11-14) Back out of a Search opened from FULL enters the guide from FULL.
+        if (channel == null && fromFull && !tunedFromSearch) { enterGuide(EntryFrom.SEARCH); return }
         u = u.copy(mode = ScreenMode.GUIDE, overlay = null, zone = Zone.GRID, tabFocused = TAB_GUIDE)
         if (channel != null) {
             val l = lineup
             val idx = if (l != null) indexOf(l, channel.rowId) else -1
+            // (2026-11-14) A tune from Search takes the guide's lineup as its zap list (GuideViewModel). Only a channel that
+            // lineup holds counts as tuned from its group; the tune itself was requested by the search screen already, so
+            // the binding waits for its Tuned like any other (a refused or cancelled tune never binds).
+            if (tunedFromSearch && !archive) noteTuneFrom(channel.identityHash, if (idx >= 0 && l != null) l.source else null)
             if (idx >= 0) { u = u.copy(zone = Zone.GRID); setFocus(navigator.focusAt(idx, nowMin, ctx(0))) }
             else { u = u.copy(zone = Zone.GRID); applySource(GuideSource.All(channel.identity.playlistId), focusRowId = channel.rowId) }
         }
@@ -2078,6 +2255,7 @@ class GuideStateMachineImpl(
         }
         if (descDueAtMs <= curMs && !holdingVertical && !holdingHorizontal) loadDescription()
         tickPin()
+        tickEntry()
         // Number entry
         val o = u.overlay
         if (o is Overlay.Number) {
@@ -2119,6 +2297,7 @@ class GuideStateMachineImpl(
         }
         if (o is Overlay.Exit && !o.dialog) d = minOf(d, exitHintUntil)
         if (u.groupCard != null) d = minOf(d, groupCardUntil)
+        entry?.let { if (!it.committed) d = minOf(d, it.until) } // (2026-11-14) the held entry's timeout
         // C-S2: the update card's focus arrives after the idle wait.
         if (u.update != null && !updateFocused) d = minOf(d, updateIdleFromMs + UPDATE_CARD_IDLE_MS)
         // (M5) The lockout countdown ticks once a second while the prompt shows it.
@@ -2418,6 +2597,11 @@ class GuideStateMachineImpl(
         const val PANEL_DESC_DELAY_LOW_END_MS = 600L
         const val EXIT_CONFIRM_MS = 2_000L
         const val GROUP_CARD_MS = 2_000L
+        /**
+         * (2026-11-14) How long an entry into the guide holds the screen it leaves for the playing channel's group (one
+         * indexed lookup and that group's lineup); then the guide shows where it was and the answer moves it.
+         */
+        const val ENTRY_HOLD_MS = 700L
         const val REMINDER_CARD_MS = 60_000L
         const val REMINDER_CARD_GUARD_MS = 600L
         const val NUMBER_NOT_FOUND_MS = 1_500L

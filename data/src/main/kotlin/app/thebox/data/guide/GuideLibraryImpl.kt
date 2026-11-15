@@ -127,6 +127,10 @@ class GuideLibraryImpl @Inject constructor(
 
     override suspend fun rowIdOf(identity: ChannelIdentity): Long? = withContext(io) { queries.rowIdOf(identity) }
 
+    /** (2026-11-14) One first-match query, no lineup built (the guide's off-screen group lookup). */
+    override suspend fun holds(source: GuideSource, rowId: Long, access: ParentalAccess): Boolean =
+        withContext(io) { queries.holds(source, rowId, access) }
+
     override suspend fun byNumber(playlistId: Long?, number: Int, access: ParentalAccess): GuideChannel? = withContext(io) {
         val p = (if (playlistId != null) playlistDao.get(playlistId) else null)
             ?: playlistDao.all().filter { it.enabled }.minWithOrNull(compareBy({ it.sortIndex }, { it.id }))

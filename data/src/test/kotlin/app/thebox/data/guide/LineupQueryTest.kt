@@ -171,5 +171,31 @@ class LineupQueryTest {
         assertEquals(n1Id(), gg.library.lastWatched()!!.rowId)
     }
 
+    /**
+     * (2026-11-14) `holds` (the guide's off-screen group lookup) agrees with the lineup itself for every channel, source
+     * and access: hidden, locked, missing, non-live and disabled-playlist rows included.
+     */
+    @Test
+    fun holdsAgreesWithTheLineup() = runBlocking {
+        val listId = db.favouriteDao().insertList(FavouriteListEntity(name = "Favs", sortIndex = 0, createdAt = 0))
+        db.favouriteDao().insert(FavouriteEntity(listId, p, "n2", 0, 0))
+        db.exec("INSERT INTO channel_prefs(playlist_id, stable_key, hidden, watch_count, updated_at, last_watched_at) VALUES (?, 'n3', 0, 1, 1, 50)", p)
+        val sources = listOf(
+            GuideSource.All(p), GuideSource.All(off), GuideSource.Group(p, "g:news"), GuideSource.Group(p, "g:locked"),
+            GuideSource.Group(p, "g:hidden"), GuideSource.Group(p, "g:adult"), GuideSource.Favourites(listId), GuideSource.Recent,
+        )
+        var checked = 0
+        for (unlocked in listOf(false, true)) for (s in sources) {
+            val access = app.thebox.core.parental.legacyParentalAccess(unlocked)
+            val members = lineup(s, unlocked).rowIds.toSet()
+            for ((key, id) in ids) {
+                assertEquals("$s / $key / unlocked=$unlocked", id in members, gg.library.holds(s, id, access))
+                checked++
+            }
+        }
+        assertTrue(checked > 100)
+        assertTrue("the favourite is held", gg.library.holds(GuideSource.Favourites(listId), ids.getValue("n2"), app.thebox.core.parental.legacyParentalAccess(false)))
+    }
+
     private fun n1Id() = ids.getValue("n1")
 }

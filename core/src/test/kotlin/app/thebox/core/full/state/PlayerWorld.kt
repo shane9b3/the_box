@@ -61,6 +61,8 @@ class PlayerWorld(
     enter: Boolean = true,
     favouritesEntry: Boolean = true,
     recentEntry: Boolean = false,
+    /** (2026-11-14) Channel indices of a source that holds only some channels, for the guide's and the list's lineups. */
+    val members: Map<GuideSource, Set<Int>> = emptyMap(),
 ) {
     var nowMs = startMs
     /** U-S7: archive starts record the call and start nothing (a synchronous `ArchiveStart.Failed`). */
@@ -72,6 +74,8 @@ class PlayerWorld(
     private val queue = ArrayDeque<Any>()
 
     var autoPlay = true
+    /** (2026-11-14) Identity hashes the guard refuses: their tunes are recorded and nothing plays. */
+    val refused = HashSet<Long>()
     var settleSeeks = true
     var exited = false
     val favourites = HashSet<Long>()
@@ -336,7 +340,7 @@ class PlayerWorld(
             val cur = channels.indexOfFirst { it.identityHash == tunedRaw.identityHash }.coerceAtLeast(0)
             doTune(channels[Math.floorMod(cur + delta, channels.size)])
         }
-        override fun tune(channel: GuideChannel, lineup: GuideLineup?) { fx.tune(channel, lineup); doTune(channel) }
+        override fun tune(channel: GuideChannel, lineup: GuideLineup?) { fx.tune(channel, lineup); if (channel.identityHash !in refused) doTune(channel) }
         override fun previousChannel() { fx.previousChannel(); previousCh?.let { doTune(it) } }
         override fun retry() { fx.retry(); tunedCh?.let { ch -> setTuned(tunedState(ch, MiniPhase.CONNECTING, tunedRaw.isArchive, newCycle = true), ch); if (autoPlay) setTuned(tunedState(ch, MiniPhase.PLAYING, tunedRaw.isArchive), ch) } }
         override fun stopPlayback() { fx.stopPlayback(); tunedCh?.let { setTuned(tunedState(it, MiniPhase.STOPPED, tunedRaw.isArchive), it) } }
@@ -441,7 +445,8 @@ class PlayerWorld(
         }
         override fun loadListLineup(source: GuideSource) {
             fx.loadListLineup(source)
-            val ids = if (source is GuideSource.Favourites) channels.filter { it.identityHash in favourites }.map { it.rowId } else channels.map { it.rowId }
+            val ids = members[source]?.let { m -> channels.filterIndexed { i, _ -> i in m }.map { it.rowId } }
+                ?: if (source is GuideSource.Favourites) channels.filter { it.identityHash in favourites }.map { it.rowId } else channels.map { it.rowId }
             val l = GuideLineup(source, 1, ids.toLongArray(), 7)
             queue += Runnable { listRows.setLineup(l) }
             queue += PlayerEvent.ListLineup(l)
@@ -475,12 +480,18 @@ class PlayerWorld(
     private inner class GuideHost : GuideEffects by gx {
         override fun loadLineup(source: GuideSource) {
             gx.loadLineup(source)
-            val l = GuideLineup(source, 1, channels.map { it.rowId }.toLongArray(), 7)
+            val m = members[source]
+            val l = GuideLineup(source, 1, channels.filterIndexed { i, _ -> m == null || i in m }.map { it.rowId }.toLongArray(), 7)
+            if (members.isNotEmpty()) guide!!.frame.rows = FakeGuideRows(channels.filterIndexed { i, _ -> m == null || i in m })
             queue += GuideEvent.Lineup(l)
-            queue += GuideEvent.Window(GRID_DATA)
+            if (m == null) queue += GuideEvent.Window(GRID_DATA)
             queue += PlayerEvent.GuideSourceNow(source, l)
         }
-        override fun tune(channel: GuideChannel, lineup: GuideLineup) { gx.tune(channel, lineup); doTune(channel) }
+        override fun tune(channel: GuideChannel, lineup: GuideLineup) { gx.tune(channel, lineup); if (channel.identityHash !in refused) doTune(channel) }
+        override fun findSourceHolding(token: Long, sources: List<GuideSource>, rowId: Long) {
+            gx.findSourceHolding(token, sources, rowId)
+            queue += GuideEvent.SourceHolding(token, sources.firstOrNull { s -> members[s]?.let { m -> channels.indexOfFirst { it.rowId == rowId } in m } ?: true })
+        }
         override fun playArchive(channel: GuideChannel, info: ProgrammeInfo) { gx.playArchive(channel, info); startArchive(channel, info.rawStartMin * 60_000L, timeShift = false) }
         override fun zap(delta: Int, isRepeat: Boolean) { gx.zap(delta, isRepeat) }
         override fun previousChannel() { gx.previousChannel(); previousCh?.let { doTune(it) } }

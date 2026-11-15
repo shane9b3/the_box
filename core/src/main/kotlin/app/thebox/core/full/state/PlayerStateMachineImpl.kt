@@ -129,6 +129,8 @@ class PlayerStateMachineImpl(
     private var guideSource: GuideSource? = null
     private var guideLineup: GuideLineup? = null
     private var listLineup: GuideLineup? = null
+    /** (2026-11-14) The last channel-list tune request, until [takeListTune]. */
+    private var listTune: app.thebox.core.full.ListTune? = null
     private var previous: GuideChannel? = null
     private var rowsVersion = 0L
     private var nowVersion = 0L
@@ -1587,6 +1589,14 @@ class PlayerStateMachineImpl(
         return zapHeldBack(nowMs, number = true)
     }
 
+    override fun takeListTune(): app.thebox.core.full.ListTune? = listTune.also { listTune = null }
+
+    /** A channel-list tune with [lineup] as the zap list; the guide machine reads where it came from (2026-11-14). */
+    private fun listTune(ch: GuideChannel, lineup: GuideLineup?) {
+        listTune = lineup?.let { app.thebox.core.full.ListTune(ch.identityHash, it.source) }
+        effects.tune(ch, lineup)
+    }
+
     /** §11.5: when the paused frame dims (PAUSED_DIM_AFTER_MS after the pause or the last key); MAX when not paused. */
     private fun dimAtMs(): Long {
         if (localPausedSinceMs == Long.MIN_VALUE || !inFull) return Long.MAX_VALUE
@@ -1710,11 +1720,11 @@ class PlayerStateMachineImpl(
             BoxAction.UP -> { list.move(-1, a.repeat); ensureList() }
             BoxAction.DOWN -> { list.move(+1, a.repeat); ensureList() }
             BoxAction.LEFT -> { listColumn = ListColumn.GROUPS; listGroupFocused = currentGroupIndex().coerceAtLeast(0) }
-            BoxAction.RIGHT -> listRowChannel()?.let { if (it.identityHash != tuned.identityHash) effects.tune(it, listLineupNow()) }
+            BoxAction.RIGHT -> listRowChannel()?.let { if (it.identityHash != tuned.identityHash) listTune(it, listLineupNow()) }
             BoxAction.SELECT -> {
                 if (list.focused == -1) { previous?.let { effects.previousChannel() }; return true }
                 val ch = listRowChannel() ?: return true
-                if (ch.identityHash == tuned.identityHash) closeLayer() else effects.tune(ch, listLineupNow())
+                if (ch.identityHash == tuned.identityHash) closeLayer() else listTune(ch, listLineupNow())
             }
             BoxAction.BACK -> {
                 if (listOpenedByBack) return false

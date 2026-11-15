@@ -61,6 +61,9 @@ class ParentalGuideLibrary(
             .distinctUntilChanged()
             .flatMapLatest { a -> inner.lineup(source, a) }
 
+    override suspend fun holds(source: GuideSource, rowId: Long, access: ParentalAccess): Boolean =
+        inner.holds(source, rowId, effective(access, session.state.value, source))
+
     override suspend fun byNumber(playlistId: Long?, number: Int, access: ParentalAccess): GuideChannel? {
         val a = effective(access, session.state.value, null)
         val ch = inner.byNumber(playlistId, number, a)

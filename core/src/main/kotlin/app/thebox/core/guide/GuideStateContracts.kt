@@ -172,6 +172,8 @@ sealed interface GuideEvent {
     /** Answer to [GuideEffects.verifyPin]. */
     data class PinChecked(val token: Long, val check: app.thebox.core.parental.PinCheck) : GuideEvent
     data class Update(val card: app.thebox.core.update.UpdateCardState?) : GuideEvent
+    /** (2026-11-14) The answer to [GuideEffects.findSourceHolding] for [token]: the first source holding the row, or null. */
+    data class SourceHolding(val token: Long, val source: GuideSource?) : GuideEvent
 }
 
 /** Side effects requested by the state machine; implemented by :ui's GuideEffectsImpl (WP-C). Main-safe, non-blocking. */
@@ -215,6 +217,13 @@ interface GuideEffects {
     fun setChannelLocked(channel: GuideChannel, locked: Boolean) = Unit
     /** (lead amendment, §1.9a) Group menu Lock / Unlock (`GroupMenuItem.LOCK` / `UNLOCK`); WP-C dispatches it. */
     fun setGroupLocked(entry: GuideSourceEntry, locked: Boolean) = Unit
+    /**
+     * (Owner report 2026-11-14, docs/decisions/2026-11-14-guide-opens-on-playing-channel.md) Off-screen membership lookup:
+     * the first of [sources] whose lineup holds [rowId] (`GuideLibrary.holds`, on IO), answered once as
+     * [GuideEvent.SourceHolding] with [token] (null: none). Loads no lineup, touches no zap list. Default: no answer (the
+     * machine's hold times out and keeps the guide where it was).
+     */
+    fun findSourceHolding(token: Long, sources: List<GuideSource>, rowId: Long) = Unit
     fun toast(kind: GuideToast, arg: String? = null)
     /** TalkBack/VoiceView announcement (debounced by the caller). */
     fun announce(text: String)

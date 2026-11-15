@@ -103,6 +103,33 @@ class GuideEffectsImpl(
         }
     }
 
+    private var holdingJob: Job? = null
+
+    /**
+     * (2026-11-14) First of [sources] whose lineup holds [rowId] (`GuideLibrary.holds`: one first-match query each, on
+     * IO; no lineup is loaded and nothing else changes), answered once. A newer lookup replaces an older one; a failed
+     * query counts as "does not hold".
+     */
+    override fun findSourceHolding(token: Long, sources: List<GuideSource>, rowId: Long) {
+        holdingJob?.cancel()
+        val access = legacyParentalAccess(settings.settings.value.debugUnlocked)
+        holdingJob = scope.launch {
+            var found: GuideSource? = null
+            for (s in sources) {
+                val holds = try {
+                    library.holds(s, rowId, access)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    BoxLog.w(TAG, "holds failed: ${e.javaClass.simpleName}")
+                    false
+                }
+                if (holds) { found = s; break }
+            }
+            dispatch(GuideEvent.SourceHolding(token, found))
+        }
+    }
+
     override fun ensureRows(from: Int, to: Int) {
         rows()?.ensure(from, to)
     }

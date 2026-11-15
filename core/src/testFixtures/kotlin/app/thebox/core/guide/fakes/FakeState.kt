@@ -50,6 +50,7 @@ class RecordingGuideEffects : GuideEffects {
     override fun groupAction(entry: GuideSourceEntry, action: GroupAction) = rec("groupAction", entry, action)
     override fun lookupNumber(token: Long, number: Int) = rec("lookupNumber", token, number)
     override fun persistSource(source: GuideSource) = rec("persistSource", source)
+    override fun findSourceHolding(token: Long, sources: List<GuideSource>, rowId: Long) = rec("findSourceHolding", token, sources, rowId)
     override fun openSearch() = rec("openSearch")
     override fun openSettings() = rec("openSettings")
     override fun exitApp() = rec("exitApp")
