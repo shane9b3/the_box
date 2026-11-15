@@ -119,6 +119,29 @@ class ScoreBugMachine(
     /** (N5) The scores of the snapshots shown going forward, (receivedMono, away, home), kept [SportsConstants.QUEUE_KEEP_MS]. */
     private val nflShown = ArrayList<Triple<Long, Int?, Int?>>()
 
+    // ---- NFL Stacked (docs/design/m6-nfl-stacked.md §3.3). Written only in advanceDisplay / stepAt, cleared by reset()
+    // and re-seeded by the "back in time" path; view() only reads them.
+    /** The play-id high-water: the largest numeric `lastPlay.id` shown in the follow. A new play is strictly above it. */
+    private var maxPlayId: Long? = null
+    /** The half group (0: periods 1–2, 1: 3–4, 2: 5+) the counts below belong to; null before the first period. */
+    private var toGroup: Int? = null
+    /** (RC2) Per side: the lowest count seen in the group (the low-water mark), the highest (the slots, RC7), the last shown. */
+    private var lowAway: Int? = null
+    private var lowHome: Int? = null
+    private var slotsAway: Int? = null
+    private var slotsHome: Int? = null
+    private var lastAway: Int? = null
+    private var lastHome: Int? = null
+    /** (RC1) A new type-21 `lastPlay` shown before either count dropped: the drop is looked for while it stays the lastPlay. */
+    private var pendingTimeoutId: String? = null
+    /** (RC1) The timeout mark, its end on the machine clock, and the type-21 id it holds on (null for the fallback). */
+    private var timeoutMark: NflTimeoutMark? = null
+    private var timeoutUntil: Long? = null
+    private var timeoutPlayId: String? = null
+    /** (RC3) The flag mark: the penalised `lastPlay` id and its end on the machine clock. */
+    private var flagId: String? = null
+    private var flagUntil: Long? = null
+
     // ------------------------------------------------------------------ inputs
 
     fun follow(game: FollowedGame?) {
@@ -283,6 +306,7 @@ class ScoreBugMachine(
         expireHold(now)
         prune(now)
         markUntil?.let { if (now >= it) { markUntil = null; goalSide = null; goalPp = false; nflScores = emptyList() } }
+        expireNflMarks(now)
     }
 
     fun pollDue(): Boolean {
@@ -310,6 +334,8 @@ class ScoreBugMachine(
         g.finalSeenUtcMs?.let { later(monoAtWall(now, it + SportsConstants.EXPIRE_AFTER_FINAL_MS)) }
         later(monoAtWall(now, hardExpiryAt(g)))
         later(markUntil)
+        later(flagUntil) // (NFL Stacked §3.3) the flag and timeout marks end by elapsed time too
+        later(timeoutUntil)
         later(holdEndsAt()) // (CHL fix pass S4) the hold ends by elapsed time, even with no new snapshot
         return best
     }
@@ -545,7 +571,10 @@ class ScoreBugMachine(
         val q = queue.lastOrNull { it.anchorMono + delayMs <= now }
         val prev = shown
         if (q == null) {
-            if (prev != null) shown = null
+            if (prev != null) {
+                shown = null
+                endNflMarks() // (NFL Stacked §3.3) a waiting view ends the flag and timeout marks
+            }
             return
         }
         if (q === prev) return
@@ -558,6 +587,10 @@ class ScoreBugMachine(
                 // (NFL §3.3, §3.6) The try, the inference memory and the held tab restart from the earlier snapshot.
                 resetNflPlay()
                 nflAdvance(null, q)
+                // (NFL Stacked §3.3) The counts, the play-id high-water and the marks restart from the earlier snapshot, as
+                // a first view: no mark is set by it, and the entries after it are shown (and marked) again, as goals are.
+                resetNflStacked()
+                nflStackedAdvance(null, q, at = now, freshCompare = false, flagged = false)
             }
             return
         }
@@ -601,7 +634,11 @@ class ScoreBugMachine(
                 flagged = true
             }
         }
-        if (s.id.league == League.NFL) nflAdvance(p, q)
+        if (s.id.league == League.NFL) {
+            nflAdvance(p, q)
+            val fresh = prev != null && demand == Demand.SEEN && q.receivedMono - prev.receivedMono <= goalFreshMs()
+            nflStackedAdvance(p, q, at, fresh, flagged)
+        }
 
         // Power play §1.4, §7: a real end is "the previous fresh view had one, this one has none, and it flagged no goal".
         val pp = gatedPp(s)
@@ -719,6 +756,16 @@ class ScoreBugMachine(
         val fresh = !waiting && !stale
         val drawn = fresh && e === nflEntry &&
             (s.phase == GamePhase.LIVE || (s.phase == GamePhase.INTERMISSION && nflTry))
+        // (NFL Stacked §3.3) The marks only on a fresh LIVE view (stale / waiting and breaks win, RC4, RC5); they are also
+        // ended there by advanceDisplay / stepAt, so this only covers a view() read before the next step.
+        val marks = fresh && s.phase == GamePhase.LIVE
+        // (RC7) Regulation halves always have 3 slots (a follow that starts after a timeout must still draw the used pip);
+        // in overtime, the highest count seen in the group (regular-season OT starts at 2).
+        val slots = when {
+            lastAway == null && lastHome == null -> null
+            toGroup == OT_GROUP -> maxOf(slotsAway ?: 0, slotsHome ?: 0)
+            else -> SportsConstants.NFL_TIMEOUTS_MAX
+        }
         return ScoreBugView(
             s.away, s.home, top, bottom, dim = waiting || stale, goalSeq = goalSeq, goalSide = goal, clockSecs = clockSecs,
             gameId = game?.id,
@@ -728,6 +775,11 @@ class ScoreBugMachine(
                 down = if (drawn) nflDown else null,
                 tab = if (drawn) nflTab else null,
                 scores = if (goal != null) nflScores else emptyList(),
+                awayTimeouts = lastAway,
+                homeTimeouts = lastHome,
+                timeoutSlots = slots,
+                timeout = timeoutMark.takeIf { marks && timeoutUntil?.let { now < it } == true },
+                flagId = flagId.takeIf { marks && flagUntil?.let { now < it } == true },
             ),
         )
     }
@@ -871,6 +923,134 @@ class ScoreBugMachine(
         nflShown.removeAll { q.receivedMono - it.first > SportsConstants.QUEUE_KEEP_MS }
     }
 
+    /**
+     * (NFL Stacked §3.3, RC1–RC4) The counts, the play-id high-water and the flag / timeout marks for the newly shown [q]
+     * (previous shown snapshot [p]; null = the follow's first view or the back-in-time re-seed, which never marks), shown
+     * from [at] on the machine clock. [freshCompare]: SEEN demand and a recent comparison (C-N1), as for a goal; [flagged]:
+     * this entry flagged a score (the score wins: no flag or timeout starts, and both end).
+     *
+     * - **High-water.** A new play is a numeric `lastPlay.id` strictly above [maxPlayId]; a re-sent, reverted or
+     *   non-numeric id is never new, so a replay after a refused or held poll, or a restart (a first view), never marks.
+     * - **Counts (RC2, RC7).** Per half group and side: the low-water mark ([lowAway] …) only falls; the slots
+     *   ([slotsAway] …) are the highest count seen (≤ 3); a new group starts both at its first counts. Increases (the
+     *   halftime reset, a 2 → 3 flap) never mark.
+     * - **Timeout (RC1).** A new type 21, or the pending one still shown, names the one side now below its low-water mark
+     *   (confirmed; held while that 21 is the shown `lastPlay`, at most `NFL_TIMEOUT_MARK_MAX_MS`). Two sides → none; none
+     *   yet → pending. With no 21: exactly one side exactly 1 below its mark → the unconfirmed fallback for
+     *   `NFL_TIMEOUT_FALLBACK_MS` (also a lost challenge), unless the shown `lastPlay` is an official timeout, the two-minute
+     *   warning or an end-of-period play. `lastPlay.team` and the text are never read for the caller.
+     * - **Flag (RC3).** A new play with `penalty` and no score change in the entry: [flagId] for `NFL_FLAG_MARK_MS`. A
+     *   newer play ends it. A flag and a timeout never coexist: the mark that starts ends the other (RC4).
+     */
+    private fun nflStackedAdvance(p: GameSnapshot?, q: Entry, at: Long, freshCompare: Boolean, flagged: Boolean) {
+        val s = q.snap
+        val d = s.detail as? LeagueDetail.Nfl
+        val lp = d?.lastPlay
+        val num = lp?.id?.toLongOrNull()
+        val max = maxPlayId
+        val isNew = num != null && (max == null || num > max)
+        if (isNew) maxPlayId = num
+
+        // Counts: the drops are measured against the low-water marks before this entry.
+        s.period?.let { halfGroup(it) }?.let { g ->
+            if (g != toGroup) {
+                toGroup = g
+                lowAway = null; lowHome = null; slotsAway = null; slotsHome = null; lastAway = null; lastHome = null
+                pendingTimeoutId = null
+            }
+        }
+        val a = d?.awayTimeouts
+        val h = d?.homeTimeouts
+        val dropAway = if (a != null && lowAway != null) (lowAway!! - a).coerceAtLeast(0) else 0
+        val dropHome = if (h != null && lowHome != null) (lowHome!! - h).coerceAtLeast(0) else 0
+        if (a != null) {
+            lowAway = minOf(lowAway ?: a, a); slotsAway = maxOf(slotsAway ?: a, a).coerceAtMost(SportsConstants.NFL_TIMEOUTS_MAX); lastAway = a
+        }
+        if (h != null) {
+            lowHome = minOf(lowHome ?: h, h); slotsHome = maxOf(slotsHome ?: h, h).coerceAtMost(SportsConstants.NFL_TIMEOUTS_MAX); lastHome = h
+        }
+
+        // Ends (state of the marks before this entry).
+        val live = s.phase == GamePhase.LIVE
+        if (timeoutMark != null) {
+            val heldOn = timeoutPlayId
+            if (flagged || !live || (heldOn != null && lp?.id != heldOn)) endTimeout()
+        }
+        if (flagId != null && (flagged || isNew || !live)) endFlag()
+        if (pendingTimeoutId != null && lp?.id != pendingTimeoutId) pendingTimeoutId = null
+
+        // Starts: never on the first view, under UNSEEN, outside LIVE, or on an entry that flagged a score.
+        if (p == null || demand != Demand.SEEN || !live || flagged) return
+        val changed = p.away.score != s.away.score || p.home.score != s.home.score
+        if (isNew && lp!!.penalty && !changed && freshCompare) {
+            endTimeout()
+            pendingTimeoutId = null
+            flagId = lp.id
+            flagUntil = at + SportsConstants.NFL_FLAG_MARK_MS
+            return
+        }
+        val dropSide: Side? = when {
+            dropAway > 0 && dropHome == 0 -> Side.AWAY
+            dropHome > 0 && dropAway == 0 -> Side.HOME
+            else -> null
+        }
+        val twoSided = dropAway > 0 && dropHome > 0
+        if (lp != null && lp.typeId == SportsConstants.NFL_TYPE_TIMEOUT && (isNew || lp.id == pendingTimeoutId)) {
+            val fallback = timeoutMark?.takeIf { !it.confirmed && (timeoutUntil ?: Long.MIN_VALUE) > at }
+            when {
+                dropSide != null -> startTimeout(dropSide, if (dropSide == Side.AWAY) a!! else h!!, lp.id, at)
+                twoSided -> { pendingTimeoutId = null; endTimeout() }
+                // (WP-1 reading) The drop came a poll before its 21: the running fallback becomes the confirmed mark.
+                fallback != null && isNew ->
+                    startTimeout(fallback.side, (if (fallback.side == Side.AWAY) a else h) ?: fallback.left, lp.id, at)
+                isNew -> pendingTimeoutId = lp.id
+            }
+            return
+        }
+        val drop = if (dropSide == Side.AWAY) dropAway else dropHome
+        if (dropSide != null && drop == 1 && freshCompare && lp?.typeId !in NFL_NEVER_TIMEOUT) {
+            endFlag()
+            timeoutMark = NflTimeoutMark(dropSide, if (dropSide == Side.AWAY) a!! else h!!, confirmed = false)
+            timeoutPlayId = null
+            timeoutUntil = at + SportsConstants.NFL_TIMEOUT_FALLBACK_MS
+        }
+    }
+
+    private fun startTimeout(side: Side, left: Int, playId: String, at: Long) {
+        endFlag()
+        pendingTimeoutId = null
+        timeoutMark = NflTimeoutMark(side, left, confirmed = true)
+        timeoutPlayId = playId
+        timeoutUntil = at + SportsConstants.NFL_TIMEOUT_MARK_MAX_MS
+    }
+
+    private fun endTimeout() { timeoutMark = null; timeoutUntil = null; timeoutPlayId = null }
+    private fun endFlag() { flagId = null; flagUntil = null }
+    private fun endNflMarks() { endTimeout(); endFlag() }
+
+    /** (NFL Stacked §3.3) The marks' time limits, and their end on a stale view (RC5; the same rule as [view]). */
+    private fun expireNflMarks(now: Long) {
+        timeoutUntil?.let { if (now >= it) endTimeout() }
+        flagUntil?.let { if (now >= it) endFlag() }
+        if (timeoutMark == null && flagId == null) return
+        val staleAt = staleAt()
+        if (shown != null && staleAt != null && now >= staleAt) endNflMarks()
+    }
+
+    /** Periods 1–2, 3–4, 5+ (RC2). */
+    private fun halfGroup(period: Int): Int = when {
+        period <= 2 -> 0
+        period <= 4 -> 1
+        else -> OT_GROUP
+    }
+
+    private fun resetNflStacked() {
+        maxPlayId = null; toGroup = null
+        lowAway = null; lowHome = null; slotsAway = null; slotsHome = null; lastAway = null; lastHome = null
+        pendingTimeoutId = null
+        endNflMarks()
+    }
+
     private fun delta(was: Int?, now: Int?): Int? = if (was != null && now != null) now - was else null
 
     /**
@@ -993,6 +1173,7 @@ class ScoreBugMachine(
         lastShownPp = null; ppEndedEntry = null; ppUnknownSince = null; scoredInUnknownRun = false
         nflScores = emptyList(); nflShown.clear()
         resetNflPlay()
+        resetNflStacked()
     }
 
     /** (NFL §3.6) The try, the inference memory, the held tab and the current rendering. */
@@ -1011,8 +1192,15 @@ class ScoreBugMachine(
 
         /** (NFL §3.3) A touchdown's points: the rise (and the `lastPlay.scoreValue`) that sets the try. */
         const val TD_POINTS = 6
+        /** (NFL Stacked RC2) The half group of periods 5+ (overtime), in [halfGroup]'s numbering. */
+        const val OT_GROUP = 2
         /** (NFL §3.5) The red zone: the opponent's half at this yard or closer. */
         const val RED_ZONE_YARDS = 20
         val KICK_RETURN = Regex("(?i)kickoff return \\(offense\\)")
+        /**
+         * (NFL Stacked §3.3, sign-off 1) `lastPlay` types that never set a timeout mark, not even the fallback: the official
+         * timeout (74), the two-minute warning (75) and the end-of-period plays (2, 65, 66).
+         */
+        val NFL_NEVER_TIMEOUT = setOf("74", "75", "2", "65", "66")
     }
 }
