@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Stacked NFL score bug</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:ital,wght@0,500;0,600;0,700;0,800;1,800&amp;family=Barlow+Condensed:ital,wght@1,800;1,900&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#FFB81C}a:hover{color:#ffd36b}
+.yds{width:0;transition:width .45s cubic-bezier(.4,0,.2,1) .2s}
+.yds.on{width:140px;transition-delay:0s}
+.yds-in{opacity:0;transform:translateX(-12px);transition:opacity .2s,transform .2s}
+.yds.on .yds-in{opacity:1;transform:none;transition:opacity .3s .3s,transform .35s .3s}
+.clockcol{width:200px;transition:width .45s cubic-bezier(.4,0,.2,1) .35s}
+.clockcol.off{width:0;transition-delay:0s}
+.clock-in{opacity:1;transition:opacity .3s .5s}
+.clockcol.off .clock-in{opacity:0;transition:opacity .15s 0s}
+.bar{transition:background-color .35s ease}
+.bar-in{animation:barIn .45s cubic-bezier(.2,.8,.2,1) .1s both}
+.bar-stripe{animation:stripeIn .45s cubic-bezier(.2,.8,.2,1) both}
+.bar-stripe.b{animation-delay:.08s}
+@keyframes barIn{0%{opacity:0;transform:translateX(-26px)}100%{opacity:1;transform:none}}
+@keyframes stripeIn{0%{transform:translateX(-140px) skewX(-30deg)}100%{transform:translateX(0) skewX(-30deg)}}
+.flag-shake{animation:flagShake .5s ease-in-out .15s 2}
+@keyframes flagShake{0%,100%{transform:translateX(0)}20%{transform:translateX(-6px)}40%{transform:translateX(6px)}60%{transform:translateX(-4px)}80%{transform:translateX(4px)}}
+.flag-icon{animation:flagWave .6s ease-in-out infinite alternate;transform-origin:4px 26px}
+@keyframes flagWave{0%{transform:rotate(-8deg)}100%{transform:rotate(8deg)}}
+.stripe{width:8px;transition:width .4s ease}
+.stripe.on{width:14px}
+.ball{opacity:0;transform:scale(.4) rotate(-40deg);transition:opacity .3s,transform .4s cubic-bezier(.2,.8,.2,1)}
+.ball.on{opacity:1;transform:none}
+.to{width:22px;height:6px;border-radius:2px;background:#ffd34d;transition:background-color .4s,opacity .4s}
+.to.used{background:#ffffff;opacity:.22}
+.to.burn{animation:toBurn .32s ease-in-out 5}
+@keyframes toBurn{0%,100%{opacity:1;background:#ffd34d}50%{opacity:.15;background:#ffffff}}
+@keyframes sLead{0%{clip-path:inset(0 100% 0 0)}6%{clip-path:inset(0 0 0 0)}94%{clip-path:inset(0 0 0 0)}100%{clip-path:inset(0 0 0 100%)}}
+@keyframes sWipe{0%,3%{clip-path:inset(0 100% 0 0)}11%{clip-path:inset(0 0 0 0)}88%{clip-path:inset(0 0 0 0)}97%,100%{clip-path:inset(0 0 0 100%)}}
+@keyframes sFlash{0%,100%{opacity:0}50%{opacity:.4}}
+@keyframes sStreak{0%{transform:translateX(-200px) skewX(-24deg)}100%{transform:translateX(1000px) skewX(-24deg)}}
+@keyframes sTumble{0%{opacity:0;transform:translate(-80px,85px) rotate(0deg)}15%{opacity:.45}85%{opacity:.45}100%{opacity:0;transform:translate(1000px,85px) rotate(900deg)}}
+@keyframes sArc{0%{opacity:0;transform:translate(30px,160px) scale(1) rotate(0deg)}10%{opacity:.6}50%{transform:translate(300px,-10px) scale(.75) rotate(360deg)}85%{opacity:.6}100%{opacity:0;transform:translate(530px,53px) scale(.45) rotate(720deg)}}
+@keyframes sPosts{0%{opacity:0;transform:translateY(16px)}100%{opacity:.4;transform:none}}
+@keyframes sPostsHit{0%,100%{opacity:.4}50%{opacity:.95}}
+@keyframes sLetter{0%{opacity:0;transform:translateY(60px) scale(1.9)}60%{opacity:1;transform:translateY(-5px) scale(.94)}100%{opacity:1;transform:none}}
+@keyframes sWord{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+@keyframes sSlideL{0%{opacity:0;transform:translateX(-36px)}100%{opacity:1;transform:none}}
+@keyframes sSlideR{0%{opacity:0;transform:translateX(36px) scale(.6)}70%{opacity:1;transform:translateX(-3px) scale(1.12)}100%{opacity:1;transform:none}}
+@keyframes sLogo{0%{opacity:0;transform:translateX(-50px) scale(.4) rotate(-25deg)}70%{opacity:1;transform:translateX(4px) scale(1.1) rotate(4deg)}100%{opacity:1;transform:none}}
+@keyframes sGlow{0%,100%{box-shadow:0 12px 36px rgba(0,0,0,.55),0 0 0 0 rgba(227,24,55,0)}15%,85%{box-shadow:0 12px 36px rgba(0,0,0,.55),0 0 40px 6px rgba(227,24,55,.55)}50%{box-shadow:0 12px 36px rgba(0,0,0,.55),0 0 90px 18px rgba(227,24,55,.8)}}
+@keyframes sPopKc{0%{transform:scale(1.5);color:#FFB81C}40%{transform:scale(.9)}70%{transform:scale(1.06)}100%{transform:scale(1);color:#fff}}
+@keyframes sPopBuf{0%{transform:scale(1.5);color:#7aa7ff}40%{transform:scale(.9)}70%{transform:scale(1.06)}100%{transform:scale(1);color:#fff}}
+@keyframes sRowKc{0%{background-color:rgba(227,24,55,.6)}100%{background-color:rgba(227,24,55,0)}}
+@keyframes sRowBuf{0%{background-color:rgba(30,91,216,.65)}100%{background-color:rgba(30,91,216,0)}}
+.s-lead{animation:sLead 3.6s cubic-bezier(.7,0,.2,1) both}
+.s-wrap{animation:sWipe 3.6s cubic-bezier(.7,0,.2,1) both}
+.s-flash{animation:sFlash .3s ease-in-out .42s 4}
+.s-streak{animation:sStreak 1s cubic-bezier(.4,0,.2,1) .35s both}
+.s-streak2{animation:sStreak .8s cubic-bezier(.4,0,.2,1) 1.8s both}
+.s-tumble{animation:sTumble 1.3s cubic-bezier(.3,0,.3,1) .3s both}
+.s-arc{animation:sArc 1.4s cubic-bezier(.25,.1,.25,1) .3s both}
+.s-posts{animation:sPosts .4s ease-out .2s both,sPostsHit .3s ease-in-out 1.65s 3}
+.s-letter{display:inline-block;animation:sLetter .42s cubic-bezier(.2,.8,.2,1) both}
+.s-word{animation:sWord .5s ease-in-out 1.4s 3}
+.s-in-l{animation:sSlideL .45s cubic-bezier(.2,.8,.2,1) .8s both}
+.s-in-r{animation:sSlideR .5s cubic-bezier(.2,.8,.2,1) 1.1s both}
+.s-logo{animation:sLogo .6s cubic-bezier(.2,.8,.2,1) .45s both}
+.bug.glow{animation:sGlow 3.6s ease-in-out both}
+.score.pop-kc{animation:sPopKc .9s cubic-bezier(.2,.8,.2,1) both}
+.score.pop-buf{animation:sPopBuf .9s cubic-bezier(.2,.8,.2,1) both}
+.row.flash-kc{animation:sRowKc 1.2s ease-out both}
+.row.flash-buf{animation:sRowBuf 1.2s ease-out both}
+button:focus-visible{outline:2px solid #FFB81C;outline-offset:3px}
+@media (prefers-reduced-motion: reduce){.yds,.yds-in,.clockcol,.clock-in,.bar,.stripe,.ball,.to{transition-duration:.01s!important;transition-delay:0s!important}.s-flash,.s-streak,.s-streak2,.s-tumble,.s-arc,.s-word,.flag-shake,.flag-icon,.to.burn{animation:none}.s-letter,.s-logo,.s-in-l,.s-in-r,.bar-in,.bar-stripe{animation-duration:.01s}}
+</style>
+</helmet>
+<div style="width: 1100px; height: 540px; box-sizing: border-box; background: #0e0e10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 44px; font-family: Inter, system-ui, sans-serif; color: #ffffff">
+<div style="width: 880px; height: 310px; display: flex; align-items: flex-start; justify-content: flex-start">
+<div class="{{bugClass}}" style="display: flex; flex-direction: column; border: 1px solid #2b3550; border-radius: 6px; overflow: hidden; box-shadow: 0 12px 36px rgba(0,0,0,0.55); background: #15191f">
+<div style="position: relative; display: flex; height: 240px">
+<div style="width: 540px; display: flex; flex-direction: column; background: #12284f">
+<div class="{{kcRow}}" style="height: 120px; display: flex; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.22); box-sizing: border-box">
+<div class="{{kcStripe}}" style="align-self: stretch; background: #E31837"></div>
+<div style="width: 120px; display: flex; justify-content: center; margin-left: 20px">
+<img src="./assets/3bbd50edac45d15e8b4888e874011dbf.png" alt="Kansas City Chiefs" style="width: 112px; height: auto; display: block">
+</div>
+<div style="flex: 1; padding-left: 26px; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: center; gap: 12px">
+<div style="font-weight: 800; font-size: 56px; line-height: 1; letter-spacing: 0.01em">KC</div>
+<div class="{{kcBall}}" aria-label="Possession" role="img">
+<svg width="30" height="30" viewBox="0 0 24 24" fill="#8B4513" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 19.5c-1.5-5 1-10.5 5-13s8-2.5 10-2c1.5 5-1 10.5-5 13s-8 2.5-10 2z"></path><path d="M9 15l6-6"></path><path d="M10.5 11.5l2 2"></path><path d="M12 10l2 2"></path><path d="M9 13l2 2"></path></svg>
+</div>
+</div>
+<div aria-label="{{kcToLabel}}" role="img" style="display: flex; gap: 6px">
+<sc-for list="{{kcTos}}" as="t" hint-placeholder-count="3"><div class="{{t.cls}}"></div></sc-for>
+</div>
+</div>
+<div class="{{kcScoreClass}}" style="width: 100px; margin-right: 32px; text-align: right; font-weight: 800; font-size: 78px; line-height: 1; font-variant-numeric: tabular-nums">{{kc}}</div>
+</div>
+<div class="{{bufRow}}" style="height: 120px; display: flex; align-items: center">
+<div class="{{bufStripe}}" style="align-self: stretch; background: #1E5BD8"></div>
+<div style="width: 120px; display: flex; justify-content: center; margin-left: 20px">
+<img src="./assets/a93d56206deaee9924dace155c9d15af.png" alt="Buffalo Bills" style="width: 114px; height: auto; display: block">
+</div>
+<div style="flex: 1; padding-left: 26px; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; align-items: center; gap: 12px">
+<div style="font-weight: 800; font-size: 56px; line-height: 1; letter-spacing: 0.01em">BUF</div>
+<div class="{{bufBall}}" aria-label="Possession" role="img">
+<svg width="30" height="30" viewBox="0 0 24 24" fill="#8B4513" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 19.5c-1.5-5 1-10.5 5-13s8-2.5 10-2c1.5 5-1 10.5-5 13s-8 2.5-10 2z"></path><path d="M9 15l6-6"></path><path d="M10.5 11.5l2 2"></path><path d="M12 10l2 2"></path><path d="M9 13l2 2"></path></svg>
+</div>
+</div>
+<div aria-label="{{bufToLabel}}" role="img" style="display: flex; gap: 6px">
+<sc-for list="{{bufTos}}" as="t" hint-placeholder-count="3"><div class="{{t.cls}}"></div></sc-for>
+</div>
+</div>
+<div class="{{bufScoreClass}}" style="width: 100px; margin-right: 32px; text-align: right; font-weight: 800; font-size: 78px; line-height: 1; font-variant-numeric: tabular-nums">{{buf}}</div>
+</div>
+</div>
+<div class="{{ydsClass}}" style="height: 240px; position: relative; overflow: hidden; background: #15191f">
+<div class="yds-in" style="position: absolute; left: 0; top: 0; width: 140px; height: 240px; box-shadow: inset 1px 0 0 #2b3240">
+<div style="position: absolute; left: 0; right: 0; top: 0; height: 120px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 48px; font-variant-numeric: tabular-nums">{{kcYds}}</div>
+<div style="position: absolute; left: 0; right: 0; top: 120px; height: 120px; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 48px; font-variant-numeric: tabular-nums">{{bufYds}}</div>
+<div style="position: absolute; left: 14px; right: 14px; top: 108px; height: 24px; display: flex; align-items: center; gap: 8px">
+<div style="flex: 1; height: 2px; background: #5b6170"></div>
+<div style="font-weight: 700; font-size: 18px; letter-spacing: 0.08em; color: #c3c7d0">YDS</div>
+<div style="flex: 1; height: 2px; background: #5b6170"></div>
+</div>
+</div>
+</div>
+<div class="{{clockClass}}" style="height: 240px; position: relative; overflow: hidden; background: #15191f">
+<div class="clock-in" style="position: absolute; left: 0; top: 0; width: 200px; height: 240px; display: flex; flex-direction: column; box-shadow: inset 1px 0 0 #2b3240">
+<div style="height: 112px; display: flex; align-items: flex-end; justify-content: center; padding-bottom: 14px; box-sizing: border-box; font-weight: 800; font-size: 48px; letter-spacing: 0.02em">{{quarter}}</div>
+<div style="height: 2px; margin: 0 26px; background: #5b6170"></div>
+<div style="flex: 1; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 62px; font-variant-numeric: tabular-nums">{{gameClock}}</div>
+</div>
+</div>
+<sc-if value="{{showScore}}" hint-placeholder-val="{{ false }}">
+<div class="s-lead" style="position: absolute; inset: 0; z-index: 5; background: {{accent}}"></div>
+<div class="s-wrap" role="status" aria-label="{{ariaLabel}}" style="position: absolute; inset: 0; z-index: 6; background: {{base}}; overflow: hidden; display: flex; align-items: center; gap: 30px; padding: 0 36px; box-sizing: border-box">
+<div class="s-streak" style="position: absolute; top: -40px; bottom: -40px; left: 0; width: 110px; background: {{accent}}; opacity: 0.55"></div>
+<div class="s-streak2" style="position: absolute; top: -40px; bottom: -40px; left: 0; width: 40px; background: #ffffff; opacity: 0.3"></div>
+<sc-if value="{{isKick}}" hint-placeholder-val="{{ false }}">
+<div class="s-posts" style="position: absolute; left: 520px; top: 50px; width: 90px; height: 120px">
+<svg width="90" height="120" viewBox="0 0 60 80" fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M10 6V44"></path><path d="M50 6V44"></path><path d="M10 44H50"></path><path d="M30 44V78"></path></svg>
+</div>
+</sc-if>
+<div class="{{ballAnim}}" style="position: absolute; top: 0; left: 0; width: 70px; height: 70px">
+<svg width="70" height="70" viewBox="0 0 24 24" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4.5 19.5c-1.5-5 1-10.5 5-13s8-2.5 10-2c1.5 5-1 10.5-5 13s-8 2.5-10 2z"></path><path d="M9 15l6-6"></path><path d="M10.5 11.5l2 2"></path><path d="M12 10l2 2"></path><path d="M9 13l2 2"></path></svg>
+</div>
+<div class="s-flash" style="position: absolute; inset: 0; background: #ffffff; opacity: 0"></div>
+<div class="s-logo" style="position: relative; width: 130px; flex: none; display: flex; justify-content: center">
+<sc-if value="{{isKc}}" hint-placeholder-val="{{ true }}"><img src="./assets/3bbd50edac45d15e8b4888e874011dbf.png" alt="" style="width: 130px; height: auto; display: block; filter: drop-shadow(0 5px 0 rgba(0,0,0,0.25))"></sc-if>
+<sc-if value="{{isBuf}}" hint-placeholder-val="{{ false }}"><img src="./assets/a93d56206deaee9924dace155c9d15af.png" alt="" style="width: 130px; height: auto; display: block; filter: drop-shadow(0 5px 0 rgba(0,0,0,0.25))"></sc-if>
+</div>
+<div style="position: relative; flex: 1; display: flex; flex-direction: column; align-items: center">
+<div class="s-in-l" style="font-weight: 700; font-size: 17px; letter-spacing: 0.22em; color: #ffffff; white-space: nowrap">{{teamName}}</div>
+<div class="s-word" style="font-family: 'Barlow Condensed', Inter, sans-serif; font-style: italic; font-weight: 900; font-size: {{wordSize}}; line-height: 0.9; letter-spacing: 0.03em; color: #ffffff; text-shadow: 0 5px 0 rgba(0,0,0,0.28); white-space: nowrap">
+<sc-for list="{{letters}}" as="l" hint-placeholder-count="9"><span class="s-letter" style="animation-delay: {{l.delay}}">{{l.c}}</span></sc-for>
+</div>
+</div>
+<div class="s-in-r" style="position: relative; display: flex; flex-direction: column; align-items: flex-end; gap: 6px">
+<div style="font-weight: 800; font-size: 58px; line-height: 1; color: #ffffff">{{pts}}</div>
+<div style="font-weight: 600; font-size: 15px; letter-spacing: 0.06em; color: #ffffff; white-space: nowrap">KC {{kc}} · BUF {{buf}}</div>
+</div>
+</div>
+</sc-if>
+</div>
+<div class="bar" style="position: relative; height: 66px; overflow: hidden; background-color: {{barBg}}">
+<sc-if value="{{barEven}}" hint-placeholder-val="{{ true }}">
+<div class="{{v.shake}}" style="position: absolute; inset: 0; display: flex; align-items: center">
+<div class="bar-stripe" style="position: absolute; top: -10px; bottom: -10px; left: 46px; width: 26px; background: {{v.a}}"></div>
+<div class="bar-stripe b" style="position: absolute; top: -10px; bottom: -10px; left: 84px; width: 26px; background: {{v.b}}"></div>
+<div class="bar-in" style="position: relative; display: flex; align-items: center; gap: 24px; padding-left: 140px; font-style: italic; font-weight: 800; font-size: 38px; letter-spacing: 0.01em; color: {{v.fg}}; white-space: nowrap">
+<sc-if value="{{v.flag}}" hint-placeholder-val="{{ false }}">
+<svg class="flag-icon" width="30" height="34" viewBox="0 0 30 34" aria-hidden="true"><path d="M4 2V32" stroke="#111111" stroke-width="3" stroke-linecap="round"></path><path d="M6 3C12 1 16 7 26 4V18C16 21 12 15 6 17Z" fill="#111111"></path></svg>
+</sc-if>
+<span>{{v.label}}</span>
+<sc-if value="{{v.hasSub}}" hint-placeholder-val="{{ true }}"><span style="width: 2px; height: 30px; background: {{v.divider}}"></span><span style="font-variant-numeric: tabular-nums">{{v.sub}}</span></sc-if>
+</div>
+</div>
+</sc-if>
+<sc-if value="{{barOdd}}" hint-placeholder-val="{{ false }}">
+<div class="{{v.shake}}" style="position: absolute; inset: 0; display: flex; align-items: center">
+<div class="bar-stripe" style="position: absolute; top: -10px; bottom: -10px; left: 46px; width: 26px; background: {{v.a}}"></div>
+<div class="bar-stripe b" style="position: absolute; top: -10px; bottom: -10px; left: 84px; width: 26px; background: {{v.b}}"></div>
+<div class="bar-in" style="position: relative; display: flex; align-items: center; gap: 24px; padding-left: 140px; font-style: italic; font-weight: 800; font-size: 38px; letter-spacing: 0.01em; color: {{v.fg}}; white-space: nowrap">
+<sc-if value="{{v.flag}}" hint-placeholder-val="{{ false }}">
+<svg class="flag-icon" width="30" height="34" viewBox="0 0 30 34" aria-hidden="true"><path d="M4 2V32" stroke="#111111" stroke-width="3" stroke-linecap="round"></path><path d="M6 3C12 1 16 7 26 4V18C16 21 12 15 6 17Z" fill="#111111"></path></svg>
+</sc-if>
+<span>{{v.label}}</span>
+<sc-if value="{{v.hasSub}}" hint-placeholder-val="{{ true }}"><span style="width: 2px; height: 30px; background: {{v.divider}}"></span><span style="font-variant-numeric: tabular-nums">{{v.sub}}</span></sc-if>
+</div>
+</div>
+</sc-if>
+</div>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 10px; align-items: center">
+<div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; align-items: center">
+<div role="group" aria-label="Team" style="display: flex; gap: 4px; padding: 4px; border-radius: 8px; background: #1e1e21; border: 1px solid rgba(255,255,255,0.12)">
+<button type="button" aria-pressed="{{selKc}}" onClick="{{pickKc}}" style="height: 38px; padding: 0 16px; border-radius: 5px; border: none; background: {{kcBtnBg}}; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 700; font-size: 15px; cursor: pointer">Chiefs</button>
+<button type="button" aria-pressed="{{selBuf}}" onClick="{{pickBuf}}" style="height: 38px; padding: 0 16px; border-radius: 5px; border: none; background: {{bufBtnBg}}; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 700; font-size: 15px; cursor: pointer">Bills</button>
+</div>
+<button type="button" onClick="{{playTd}}" style="height: 44px; padding: 0 16px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.25); background: #2a2a2e; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">Touchdown</button>
+<button type="button" onClick="{{playXp}}" style="height: 44px; padding: 0 16px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.25); background: #2a2a2e; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">Extra point</button>
+<button type="button" onClick="{{playFg}}" style="height: 44px; padding: 0 16px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.25); background: #2a2a2e; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">Field goal</button>
+<button type="button" onClick="{{callTimeout}}" style="height: 44px; padding: 0 16px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.25); background: #2a2a2e; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">Timeout</button>
+</div>
+<div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center">
+<button type="button" onClick="{{throwFlag}}" style="height: 44px; padding: 0 16px; border-radius: 6px; border: none; background: #FFD100; color: #111111; font-family: Inter, system-ui, sans-serif; font-weight: 700; font-size: 15px; cursor: pointer">Flag</button>
+<button type="button" onClick="{{halftime}}" style="height: 44px; padding: 0 16px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.25); background: #1b2440; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">Halftime</button>
+<button type="button" onClick="{{backToPlay}}" style="height: 44px; padding: 0 16px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">Back to play</button>
+<button type="button" onClick="{{reset}}" style="height: 44px; padding: 0 16px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.25); background: transparent; color: #ffffff; font-family: Inter, system-ui, sans-serif; font-weight: 600; font-size: 15px; cursor: pointer">Reset</button>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"autoplay":{"editor":"boolean","default":true},"$preview":{"width":1100,"height":540}}'>
+class Component extends DCLogic {
+  state = Object.assign(this.initial(), { sel: 'KC', team: 'KC', kind: 'TD', barKey: 0 });
+  initial() {
+    return {
+      kc: 24, buf: 17, kcYds: 312, bufYds: 287, kcTo: 3, bufTo: 2, burn: null,
+      quarter: '4TH', gameSecs: 222, mode: 'play', phase: 'idle', poss: 'KC',
+      label: '1ST & 10', sub: 'KC 35'
+    };
+  }
+  componentDidMount() {
+    this.timers = [];
+    this.loopTimers = [];
+    this.ticker = setInterval(() => this.tick(), 1000);
+    if (this.props.autoplay ?? true) this.cycle();
+  }
+  componentWillUnmount() {
+    clearInterval(this.ticker);
+    this.stopLoop();
+    this.clearTimers();
+  }
+  stopLoop() {
+    (this.loopTimers || []).forEach(clearTimeout);
+    this.loopTimers = [];
+  }
+  clearTimers() {
+    (this.timers || []).forEach(clearTimeout);
+    this.timers = [];
+  }
+  tick() {
+    this.setState((s) => (s.mode === 'play' && s.phase === 'idle' && s.gameSecs > 0) ? { gameSecs: s.gameSecs - 1 } : null);
+  }
+  bump(extra) {
+    this.setState((s) => Object.assign({ barKey: s.barKey + 1 }, typeof extra === 'function' ? extra(s) : extra));
+  }
+  cycle() {
+    this.clearTimers();
+    this.bump(this.initial());
+    const at = (ms, fn) => this.loopTimers.push(setTimeout(fn, ms));
+    at(2500, () => this.flag());
+    at(5500, () => this.back());
+    at(7500, () => this.score('TD', 'KC'));
+    at(12800, () => this.score('XP', 'KC'));
+    at(18000, () => this.timeout('BUF'));
+    at(22500, () => this.back());
+    at(24500, () => this.half());
+    at(30500, () => this.cycle());
+  }
+  flag() {
+    this.bump({ mode: 'flag' });
+  }
+  timeout(team) {
+    const key = team === 'KC' ? 'kcTo' : 'bufTo';
+    if (this.state[key] <= 0) return;
+    this.bump((s) => ({ mode: 'timeout', toTeam: team, burn: { team: team, idx: s[key] - 1 }, [key]: s[key] - 1 }));
+    this.timers.push(setTimeout(() => this.setState({ burn: null }), 1700));
+  }
+  half() {
+    this.bump({ mode: 'half' });
+  }
+  back() {
+    this.bump((s) => {
+      if (s.mode === 'half') return { mode: 'play', quarter: '3RD', gameSecs: 900, label: 'KICKOFF', sub: s.poss + ' 35' };
+      return { mode: 'play' };
+    });
+  }
+  score(kind, team) {
+    const pts = { TD: 6, XP: 1, FG: 3 }[kind];
+    this.clearTimers();
+    this.setState({ phase: 'idle' });
+    this.timers.push(setTimeout(() => {
+      this.bump((s) => ({
+        phase: 'score', kind: kind, team: team, poss: team, mode: 'play',
+        kc: team === 'KC' ? s.kc + pts : s.kc,
+        buf: team === 'BUF' ? s.buf + pts : s.buf
+      }));
+      const next = kind === 'TD'
+        ? { phase: 'after', label: 'EXTRA POINT', sub: team + ' 15' }
+        : { phase: 'after', label: team + ' KICKOFF', sub: team + ' 35' };
+      this.timers.push(setTimeout(() => this.bump(next), 3600));
+      this.timers.push(setTimeout(() => this.setState({ phase: 'idle' }), 4800));
+    }, 40));
+  }
+  manual(fn) {
+    this.stopLoop();
+    fn();
+  }
+  fmt(n) {
+    return Math.floor(n / 60) + ':' + String(n % 60).padStart(2, '0');
+  }
+  tos(team, count, burn) {
+    return [0, 1, 2].map((i) => {
+      let cls = i < count ? 'to' : 'to used';
+      if (burn && burn.team === team && burn.idx === i) cls = 'to burn';
+      return { cls: cls };
+    });
+  }
+  renderVals() {
+    const s = this.state;
+    const teams = {
+      KC: { base: '#E31837', accent: '#FFB81C', name: 'KANSAS CITY CHIEFS', bar: '#C8102E', a: '#FFB81C', b: '#12284f' },
+      BUF: { base: '#00338D', accent: '#C60C30', name: 'BUFFALO BILLS', bar: '#1D4ED8', a: '#C60C30', b: '#ffffff' }
+    };
+    const plays = { TD: { word: 'TOUCHDOWN', pts: 6, size: '86px' }, XP: { word: 'EXTRA POINT', pts: 1, size: '74px' }, FG: { word: 'FIELD GOAL', pts: 3, size: '80px' } };
+    const pt = teams[s.poss] || teams.KC;
+    const g = teams[s.team] || teams.KC;
+    const pl = plays[s.kind] || plays.TD;
+    let view;
+    let bg;
+    if (s.mode === 'flag') {
+      bg = '#FFD100';
+      view = { label: 'FLAG ON THE PLAY', sub: '', hasSub: false, flag: true, fg: '#111111', a: '#111111', b: '#ffffff', divider: 'rgba(0,0,0,0.4)', shake: 'flag-shake' };
+    } else if (s.mode === 'timeout') {
+      const tt = teams[s.toTeam] || teams.KC;
+      bg = tt.bar;
+      view = { label: 'TIMEOUT ' + s.toTeam, sub: (s.toTeam === 'KC' ? s.kcTo : s.bufTo) + ' LEFT', hasSub: true, flag: false, fg: '#ffffff', a: tt.a, b: tt.b, divider: 'rgba(255,255,255,0.5)', shake: '' };
+    } else if (s.mode === 'half') {
+      bg = '#1b2440';
+      view = { label: 'HALFTIME', sub: '', hasSub: false, flag: false, fg: '#ffffff', a: '#E31837', b: '#1E5BD8', divider: 'rgba(255,255,255,0.5)', shake: '' };
+    } else if (s.phase === 'score') {
+      bg = g.bar;
+      view = { label: pl.word, sub: s.team + ' +' + pl.pts, hasSub: true, flag: false, fg: '#ffffff', a: g.a, b: g.b, divider: 'rgba(255,255,255,0.5)', shake: '' };
+    } else {
+      bg = pt.bar;
+      view = { label: s.label, sub: s.sub, hasSub: !!s.sub, flag: false, fg: '#ffffff', a: pt.a, b: pt.b, divider: 'rgba(255,255,255,0.5)', shake: '' };
+    }
+    const after = s.phase === 'after';
+    const statsOn = s.mode === 'timeout' || s.mode === 'half';
+    const letters = pl.word.split('').map((c, i) => ({ c: c === ' ' ? ' ' : c, delay: (0.42 + i * 0.055).toFixed(3) + 's' }));
+    return {
+      kc: s.kc, buf: s.buf, kcYds: s.kcYds, bufYds: s.bufYds,
+      quarter: s.quarter,
+      gameClock: this.fmt(s.gameSecs),
+      kcTos: this.tos('KC', s.kcTo, s.burn),
+      bufTos: this.tos('BUF', s.bufTo, s.burn),
+      kcToLabel: s.kcTo + ' timeouts left',
+      bufToLabel: s.bufTo + ' timeouts left',
+      kcBall: s.poss === 'KC' && s.mode !== 'half' ? 'ball on' : 'ball',
+      bufBall: s.poss === 'BUF' && s.mode !== 'half' ? 'ball on' : 'ball',
+      kcStripe: s.poss === 'KC' && s.mode !== 'half' ? 'stripe on' : 'stripe',
+      bufStripe: s.poss === 'BUF' && s.mode !== 'half' ? 'stripe on' : 'stripe',
+      ydsClass: statsOn ? 'yds on' : 'yds',
+      clockClass: s.mode === 'half' ? 'clockcol off' : 'clockcol',
+      barBg: bg,
+      v: view,
+      barEven: s.barKey % 2 === 0,
+      barOdd: s.barKey % 2 === 1,
+      showScore: s.phase === 'score',
+      isKc: s.team === 'KC',
+      isBuf: s.team === 'BUF',
+      isKick: s.kind !== 'TD',
+      ballAnim: s.kind === 'TD' ? 's-tumble' : 's-arc',
+      letters: letters,
+      wordSize: pl.size,
+      pts: '+' + pl.pts,
+      base: g.base,
+      accent: g.accent,
+      teamName: g.name,
+      ariaLabel: g.name + ' ' + pl.word.toLowerCase(),
+      bugClass: s.phase === 'score' ? 'bug glow' : 'bug',
+      kcScoreClass: after && s.team === 'KC' ? 'score pop-kc' : 'score',
+      bufScoreClass: after && s.team === 'BUF' ? 'score pop-buf' : 'score',
+      kcRow: after && s.team === 'KC' ? 'row flash-kc' : 'row',
+      bufRow: after && s.team === 'BUF' ? 'row flash-buf' : 'row',
+      selKc: s.sel === 'KC' ? 'true' : 'false',
+      selBuf: s.sel === 'BUF' ? 'true' : 'false',
+      kcBtnBg: s.sel === 'KC' ? '#E31837' : 'transparent',
+      bufBtnBg: s.sel === 'BUF' ? '#00338D' : 'transparent',
+      pickKc: () => this.setState({ sel: 'KC' }),
+      pickBuf: () => this.setState({ sel: 'BUF' }),
+      playTd: () => this.manual(() => this.score('TD', this.state.sel)),
+      playXp: () => this.manual(() => this.score('XP', this.state.sel)),
+      playFg: () => this.manual(() => this.score('FG', this.state.sel)),
+      callTimeout: () => this.manual(() => this.timeout(this.state.sel)),
+      throwFlag: () => this.manual(() => this.flag()),
+      halftime: () => this.manual(() => this.half()),
+      backToPlay: () => this.manual(() => this.back()),
+      reset: () => this.manual(() => { this.clearTimers(); this.bump(this.initial()); })
+    };
+  }
+}
+</script>
+</body>
+</html>
