@@ -262,14 +262,56 @@ data class NflScoreSpec(
         )
 
         /**
-         * The Stacked box's takeover (§4.3 "STACKED" column: streaks −90 → 450, run (−36, 38.25) → (450, 38.25) at
-         * 31.5 / .45, the arc, posts at (234, 22.5) 40.5 × 54 dy 7.2, flash .40, badge −22.5 / +1.8, letters +27 /
-         * −2.25, points +16.2 / −1.35, no tab pulse, row flash 1 200, end 4 800, pair 4 800 / 9 600, still B 1 200).
-         *
-         * Commit 0 placeholder: **equal to [PILL]** until NFL Stacked WP-2 sets the §4.3 values (and `NflScoreSpecTest`
-         * checks them), so the commit-0 fallback is today's takeover.
+         * (NFL Stacked §4.3; WP-2) The Stacked box's takeover: the mock's (`StackedNFL.dc.html`, the `s*` keyframes) mock
+         * px × `STACKED_SCALE` (.45) for every offset, on the 333-wide box (the painter scales x by `boxW / 333`, "×k");
+         * the times are the shared skeleton's (the 450 ms flash grid kept, NFL §5.3). Streaks −90 → 450 (.55 / .30), run
+         * (−36, 38.25) → (450, 38.25) at 31.5 / .45, the arc (13.5, 72) → (135, −4.5) → (238.5, 23.85) × 1 / .75 / .45,
+         * 0 / 360 / 720° / .60, posts at (234, 22.5) 40.5 × 54 dy 7.2, flash .40, badge −22.5 / +1.8, letters +27 /
+         * −2.25, points +16.2 / −1.35, no tab pulse (the bar does not pulse), row flash 1 200, end 4 800 (the takeover
+         * 3 600 + the row flash), a pair's second at 4 800 and its end at 9 600, still frame B 1 200.
          */
-        val STACKED = PILL // WP-2: the §4.3 STACKED values.
+        val STACKED = NflScoreSpec(
+            streak1Alpha = 0.55f,                                    // .s-streak opacity .55
+            streak2Alpha = 0.30f,                                    // .s-streak2 opacity .3
+            streakFrom = -200f * K.STACKED_SCALE,                    // sStreak translateX(-200px) → −90
+            streakTo = 1_000f * K.STACKED_SCALE,                     // → 1000px → 450
+            runFrom = -80f * K.STACKED_SCALE,                        // sTumble translate(-80px, 85px) → −36
+            runTo = 1_000f * K.STACKED_SCALE,                        // → (1000px, 85px) → 450
+            runY = 85f * K.STACKED_SCALE,                            // → 38.25
+            runPx = StackedNflMock.SCORE_BALL * K.STACKED_SCALE,     // 70 → 31.5
+            runAlpha = 0.45f,                                        // sTumble 15 % / 85 % opacity .45
+            arcP0X = 30f * K.STACKED_SCALE,                          // sArc 0 % translate(30px, 160px) → (13.5, 72)
+            arcP0Y = 160f * K.STACKED_SCALE,
+            arcP1X = 300f * K.STACKED_SCALE,                         // 50 % translate(300px, -10px) → (135, −4.5)
+            arcP1Y = -10f * K.STACKED_SCALE,
+            arcP2X = 530f * K.STACKED_SCALE,                         // 100 % translate(530px, 53px) → (238.5, 23.85)
+            arcP2Y = 53f * K.STACKED_SCALE,
+            arcS0 = 1f,                                              // scale(1) → scale(.75) → scale(.45)
+            arcS1 = 0.75f,
+            arcS2 = 0.45f,
+            arcR0 = 0f,                                              // rotate(0) → 360deg → 720deg
+            arcR1 = 360f,
+            arcR2 = 720f,
+            arcAlpha = 0.6f,                                         // sArc 10 % / 85 % opacity .6
+            postsX = StackedNflMock.POSTS_X * K.STACKED_SCALE,       // left 520px → 234
+            postsY = StackedNflMock.POSTS_Y * K.STACKED_SCALE,       // top 50px → 22.5
+            postsW = StackedNflMock.POSTS_W * K.STACKED_SCALE,       // 90 → 40.5
+            postsH = StackedNflMock.POSTS_H * K.STACKED_SCALE,       // 120 → 54
+            postsDy = 16f * K.STACKED_SCALE,                         // sPosts translateY(16px) → 7.2
+            flashAlpha = 0.40f,                                      // sFlash 50 % opacity .4
+            badgeDx = -50f * K.STACKED_SCALE,                        // sLogo translateX(-50px) → −22.5
+            badgeMidDx = 4f * K.STACKED_SCALE,                       // 70 % translateX(4px) → +1.8
+            letterDrop = 60f * K.STACKED_SCALE,                      // sLetter translateY(60px) → 27
+            letterOvershoot = -5f * K.STACKED_SCALE,                 // 60 % translateY(-5px) → −2.25
+            pointsDx = 36f * K.STACKED_SCALE,                        // sSlideR translateX(36px) → 16.2
+            pointsMidDx = -3f * K.STACKED_SCALE,                     // 70 % translateX(-3px) → −1.35
+            tabPulseCycles = 0,                                      // §4.3 "Bar … no pulse"
+            rowFlashMs = K.STACKED_ROW_FLASH_MS.toFloat(),           // .row.flash-* 1.2s ease-out
+            endMs = (K.NFL_TAKEOVER_MS + K.STACKED_ROW_FLASH_MS).toFloat(),          // 4 800
+            pairSecondMs = (K.NFL_TAKEOVER_MS + K.STACKED_ROW_FLASH_MS).toFloat(),   // 4 800 (lead sign-off)
+            pairEndMs = 2f * (K.NFL_TAKEOVER_MS + K.STACKED_ROW_FLASH_MS).toFloat(), // 9 600
+            stillFrameBMs = K.STACKED_ROW_FLASH_MS.toFloat(),        // frame B 3 600 → 4 800
+        )
     }
 }
 

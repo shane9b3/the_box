@@ -180,18 +180,17 @@ object ScoreBugPlacement {
     }
 
     /**
-     * (NFL Stacked §5.1; WP-2) The NFL Stacked footprint's width: `STACKED_NFL_W_MAX` × [stackedScale] (333 / 416.25).
-     *
-     * **Commit-0 stub:** the NFL **Pill**'s width (520 / 650; ST commit-0 note 14), so the commit-0 fallback (the Pill
-     * drawn by `StackedNflBug`) is placed as the Pill. WP-2 switches it to the footprint, landing with WP-4's runner.
+     * (NFL Stacked §5.1, RC6; WP-2) The NFL Stacked footprint's width: `STACKED_NFL_W_MAX` (rows + clock, 333; no YDS
+     * column) × [stackedScale], 416.25 Large. The drawn top part is 333 in play and 243 in breaks and at Final
+     * (`stackedTopBox` with `StackedNflFrame.boxW`); the footprint is the widest of them.
      */
-    private fun nflStackedWidth(size: ScoreBugSize): Float = width(size, League.NFL) // WP-2: STACKED_NFL_W_MAX × stackedScale(size)
+    private fun nflStackedWidth(size: ScoreBugSize): Float = SportsConstants.STACKED_NFL_W_MAX * stackedScale(size)
 
     /**
      * (NFL Stacked §5.1; WP-2) The NFL Stacked footprint's height: (`STACKED_H` + `STACKED_BAR_H`) × [stackedScale]
-     * (141 / 176.25). **Commit-0 stub:** the NFL Pill's height, as [nflStackedWidth].
+     * (141 / 176.25), the NHL Stacked's.
      */
-    private fun nflStackedHeight(size: ScoreBugSize): Float = height(size) // WP-2: (STACKED_H + STACKED_BAR_H) × stackedScale(size)
+    private fun nflStackedHeight(size: ScoreBugSize): Float = (SportsConstants.STACKED_H + SportsConstants.STACKED_BAR_H) * stackedScale(size)
 
     /** (Stacked §4.1) The Stacked bug's size factor over Standard design px: 1, or `SCORE_LARGE_SCALE` for Large. */
     fun stackedScale(size: ScoreBugSize): Float = if (size == ScoreBugSize.LARGE) SportsConstants.SCORE_LARGE_SCALE else 1f
