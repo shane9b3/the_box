@@ -5,6 +5,7 @@ import app.thebox.core.epg.EpgGenerationInfo
 import app.thebox.core.refresh.ChannelIdentity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
 
 /** What the grid lists. Persisted by these fields (never by channel_group.id). */
 sealed interface GuideSource {
@@ -70,6 +71,12 @@ interface GuideLibrary {
     suspend fun groupAction(entry: GuideSourceEntry, action: GroupAction)
     /** The last watched channel (channel_prefs.last_watched_at), for "On launch: guide with last channel". */
     suspend fun lastWatched(): GuideChannel?
+    /**
+     * (2026-11-14) Whether [source]'s lineup (under [access]) holds [rowId], without building the lineup. The default reads
+     * the first lineup emission (test doubles); the Room library answers with one first-match query.
+     */
+    suspend fun holds(source: GuideSource, rowId: Long, access: app.thebox.core.parental.ParentalAccess): Boolean =
+        rowId in lineup(source, access).first().rowIds
     /**
      * (reviewed 2026-10-14, B5/F3) Ticks (debounced 500 ms) whenever a row's content may have changed without the
      * lineup's membership changing: tables channel, channel_prefs, playlist, epg_mapping, epg_match, epg_source.

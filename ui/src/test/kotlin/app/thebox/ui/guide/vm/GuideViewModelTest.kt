@@ -241,6 +241,45 @@ class GuideViewModelTest {
         assertEquals("then the tuned row", 7, vm.machine.frame.focus!!.row)
     }
 
+    /**
+     * Owner report 2026-11-14 (docs/decisions/2026-11-14-guide-opens-on-playing-channel.md) through the real feeds: in
+     * the guide, another group that lacks the playing channel; hold Back; Back: the guide is on the playing row again.
+     */
+    @Test fun theGuideFromFullOpensOnThePlayingChannel() {
+        val w = World()
+        val news = app.thebox.core.guide.GuideSource.Group(1, "news")
+        w.library.lineups[news] = listOf(channels[10].rowId, channels[11].rowId, channels[12].rowId)
+        w.library.sourceEntries.value = w.library.sourceEntries.value +
+            app.thebox.core.guide.GuideSourceEntry(news, "News", 3, app.thebox.core.guide.SourceSection.GROUP, null)
+        w.library.lastWatched = channels[7]
+        val vm = w.viewModel()
+        awaitFocus(vm)
+        w.controller.state.value = playing(channels[7])
+        idle()
+        assertEquals("the startup tune's row", 7, vm.machine.frame.focus!!.row)
+        val m = vm.machine
+        m.dispatch(GuideEvent.Act(BoxAction.GROUPS_PANEL))
+        val o = m.ui.value.overlay as app.thebox.core.guide.Overlay.Groups
+        repeat(o.shortcuts.size + o.entries.indexOfFirst { it.source == news } - o.focused) { m.dispatch(GuideEvent.Act(BoxAction.DOWN)) }
+        m.dispatch(GuideEvent.Act(BoxAction.SELECT))
+        awaitRow(vm, channels[10])
+        m.dispatch(GuideEvent.Act(BoxAction.DOWN))
+        m.dispatch(GuideEvent.Act(BoxAction.PLAY)) // hold Back in the guide
+        assertEquals(app.thebox.core.guide.ScreenMode.FULL, m.ui.value.mode)
+        m.dispatch(GuideEvent.Act(BoxAction.BACK))
+        awaitRow(vm, channels[7]) // News does not hold it: All channels, the startup source (one off-screen lookup)
+        assertEquals(app.thebox.core.guide.ScreenMode.GUIDE, m.ui.value.mode)
+        assertEquals(7, m.frame.focus!!.row)
+    }
+
+    /** Idles the main looper until the focused row shows [ch], for at most 5 s. */
+    private fun awaitRow(vm: GuideViewModel, ch: GuideChannel) {
+        val deadline = System.nanoTime() + 5_000_000_000L
+        fun at() = vm.machine.frame.focus?.let { vm.machine.frame.rows.channel(it.row) }?.identity == ch.identity
+        while (!at() && System.nanoTime() < deadline) { idle(); Thread.sleep(5) }
+        assertTrue("focused on ${ch.displayName}", at())
+    }
+
     /** H-S1 through the real feeds: hiding the focused channel re-emits the lineup; focus keeps its index. */
     @Test fun hidingTheFocusedChannelKeepsTheIndex() {
         val w = World()

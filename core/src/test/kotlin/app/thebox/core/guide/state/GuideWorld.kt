@@ -55,6 +55,11 @@ class GuideWorld(
      * default), true = Sources and the first Lineup first, the startup Tuned after them (H-S2).
      */
     tuneAfterLineup: Boolean = false,
+    /**
+     * (2026-11-14) Channel indices of a source that holds only some channels (every other non-favourites source holds
+     * them all). Such a lineup gets its own rows and a synthetic window of its size.
+     */
+    val members: Map<GuideSource, Set<Int>> = emptyMap(),
 ) {
     var nowMs = startMs
     val calls = RecordingGuideEffects()
@@ -134,7 +139,7 @@ class GuideWorld(
     private fun lineupFor(source: GuideSource): GuideLineup {
         val ids = when (source) {
             is GuideSource.Favourites -> channels.filter { it.identityHash in favourites && it.identityHash !in hidden }.map { it.rowId }
-            else -> channels.filter { it.identityHash !in hidden }.map { it.rowId }
+            else -> channels.filterIndexed { i, ch -> ch.identityHash !in hidden && members[source]?.contains(i) != false }.map { it.rowId }
         }
         return GuideLineup(source, lineupVersion, ids.toLongArray(), archiveDaysUpperBound = channels.maxOf { it.archiveDays })
     }
@@ -147,19 +152,33 @@ class GuideWorld(
         queue += GuideEvent.Lineup(l)
     }
 
+    /** (2026-11-14) True: `findSourceHolding` answers only on [answerHolding] (a pending lookup). */
+    var deferHolding = false
+    private val heldAnswers = ArrayList<GuideEvent.SourceHolding>()
+
+    /** Sends the deferred lookup answers (in order). */
+    fun answerHolding() { val a = heldAnswers.toList(); heldAnswers.clear(); a.forEach { send(it) } }
+
     private inner class Sim : GuideEffects by calls {
+        override fun findSourceHolding(token: Long, sources: List<GuideSource>, rowId: Long) {
+            calls.findSourceHolding(token, sources, rowId)
+            val answer = GuideEvent.SourceHolding(token, sources.firstOrNull { rowId in lineupFor(it).rowIds })
+            if (deferHolding) heldAnswers += answer else queue += answer
+        }
         override fun loadLineup(source: GuideSource) {
             calls.loadLineup(source)
             currentSource = source
             val l = lineupFor(source)
-            if (source is GuideSource.Favourites || hidden.isNotEmpty()) {
+            if (source is GuideSource.Favourites || hidden.isNotEmpty() || source in members) {
                 // Favourites lineups are a different row order: give them their own snapshot-free lineup.
                 rows.rows = l.rowIds.map { id -> channels.first { it.rowId == id } }
             } else {
                 rows.rows = channels
             }
             queue += GuideEvent.Lineup(l)
-            if (source !is GuideSource.Favourites) queue += GuideEvent.Window(data)
+            if (source in members) {
+                queue += GuideEvent.Window(GuideFixtures.windowData(GuideFixtures.syntheticRows(l.rowIds.size, FROM, TO), fromMin = FROM, toMin = TO))
+            } else if (source !is GuideSource.Favourites) queue += GuideEvent.Window(data)
         }
         override fun tune(channel: GuideChannel, lineup: GuideLineup) { calls.tune(channel, lineup); tuneTo(channel) }
         override fun playArchive(channel: GuideChannel, info: ProgrammeInfo) { calls.playArchive(channel, info); if (archiveSucceeds) tuneTo(channel, MiniPhase.CONNECTING, archive = true) }

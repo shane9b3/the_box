@@ -722,11 +722,21 @@ interface PlayerStateMachine {
     fun zapNeedsConfirm(nowMs: Long): Boolean = false
 
     /**
+     * (Owner report 2026-11-14, docs/decisions/2026-11-14-guide-opens-on-playing-channel.md) The channel and source of a
+     * channel-list tune requested by the last [act], then null: the guide machine asks after each [act] it handed over and
+     * binds it once that channel's Tuned arrives, so the guide can open on the group it was tuned from. Default: none.
+     */
+    fun takeListTune(): ListTune? = null
+
+    /**
      * (Score bug commit 0, docs/design/m6-score-bug.md §6, A-B2; append-only) The followed game, the day list and the
      * `sports` prefs, from PlayerViewModel whenever one changes (main). Default: ignored (WP-4b's machine reads it).
      */
     fun scores(facts: app.thebox.core.sports.ScoreFacts) = Unit
 }
+
+/** (2026-11-14) A channel-list tune: [identityHash] of the channel, [source] of the list's lineup. */
+data class ListTune(val identityHash: Long, val source: app.thebox.core.guide.GuideSource)
 
 fun interface PlayerStateMachineFactory {
     /** [listRows]: the channel list's own GuideRowsCache (main-only reads). */

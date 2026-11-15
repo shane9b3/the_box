@@ -1598,7 +1598,7 @@ The `BACK_TWICE` exit hint is not modal: it is a 2 s toast-like overlay; a secon
 
 | Action | Behaviour |
 |---|---|
-| BACK | (reviewed 2026-10-14, B2/F10) GUIDE, viewport MINI, focus **home** (tuned row at now), `returnedFromFull = true` (cleared by any other action); product nav map: the next Back shows the exit step |
+| BACK | (reviewed 2026-10-14, B2/F10) GUIDE, viewport MINI, focus **home** (tuned row at now), `returnedFromFull = true` (cleared by any other action); product nav map: the next Back shows the exit step. (Owner report 2026-11-14) When the group the guide shows does not hold the playing (or failed) channel, one off-screen lookup picks a group that does (the group it was tuned from, else the §3.8.4 startup source, else All channels) and FULL stays up until that group's lineup lands on the row (`docs/decisions/2026-11-14-guide-opens-on-playing-channel.md`); OPEN_GUIDE in FULL and the error card's Guide button the same |
 | UP / ZAP_UP, DOWN / ZAP_DOWN | `effects.zap(−1 / +1, isRepeat)` (M2 debounce coalesces holds) |
 | GROUP_PREV / GROUP_NEXT (long ← / →) | previous/next Groups entry becomes the source and the zap list (the channel keeps playing); `groupCard` shows its label for `GROUP_CARD_MS` (2,000) (accelerator 3) |
 | SELECT | error phase with RETRY in the code's steps → `retry()`; otherwise no-op until M4's channel list |

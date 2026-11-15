@@ -66,6 +66,26 @@ class GuideQueries @Inject constructor(
         }
     }
 
+    /**
+     * (2026-11-14) Whether [source]'s lineup under [access] holds [rowId]: the lineup's own predicate with the id pinned
+     * (`?9`) and `LIMIT 1`, so nothing is ordered or collected. Recent (a limited, ordered list) and the group union are
+     * wrapped instead, keeping their membership exact.
+     */
+    suspend fun holds(source: GuideSource, rowId: Long, access: ParentalAccess): Boolean = db.read {
+        val q = lineupClause(source)
+        val sql = when (q) {
+            is Clause.Parts -> if (q.twoPass) "SELECT 1 FROM (SELECT c.id AS id ${q.from} WHERE ${q.where} $PARENTAL_RAW ${q.order}) WHERE id = ?9 LIMIT 1"
+            else "SELECT 1 ${q.from} WHERE ${q.where} AND c.id = ?9 $PARENTAL_RAW LIMIT 1"
+            is Clause.Sql -> "SELECT 1 FROM (${q.idsSql}) WHERE id = ?9 LIMIT 1"
+        }
+        usePrepared(sql) { st ->
+            st.bindAccess(access)
+            q.bind(st)
+            st.bindLong(9, rowId)
+            st.step()
+        }
+    }
+
     /** Upper bound of archive days over every lineup-visible channel (search look-back, §3.10.2). */
     suspend fun archiveDaysAll(access: ParentalAccess): Int = db.read {
         int("SELECT $ARCHIVE_DAYS $LINEUP_FROM WHERE $LINEUP_BASE $PARENTAL_RAW") { st -> st.bindAccess(access) }

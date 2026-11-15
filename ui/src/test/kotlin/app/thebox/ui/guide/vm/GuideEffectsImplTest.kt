@@ -78,6 +78,38 @@ class GuideEffectsImplTest {
         r.effects.close()
     }
 
+    /**
+     * (2026-11-14) The guide's off-screen group lookup: the first source that holds the row, asked in order and no
+     * further; a failed query counts as "does not hold"; no lineup, rows, pager or zap-list traffic; one answer.
+     */
+    @Test
+    fun findSourceHoldingAnswersTheFirstHolderOnce() = runTest {
+        val asked = ArrayList<GuideSource>()
+        val news = GuideSource.Group(1, "news")
+        val broken = GuideSource.Group(1, "broken")
+        val r = Rig(this, channels, wrap = { base ->
+            object : app.thebox.core.guide.GuideLibrary by base {
+                override suspend fun holds(source: GuideSource, rowId: Long, access: app.thebox.core.parental.ParentalAccess): Boolean {
+                    asked += source
+                    if (source == broken) throw IllegalStateException("db busy")
+                    return base.holds(source, rowId, access)
+                }
+            }
+        })
+        r.library.lineups[news] = listOf(channels[1].rowId)
+        val target = channels[4].rowId
+        r.effects.findSourceHolding(5L, listOf(broken, news, GuideSource.All(1), GuideSource.Favourites(7)), target)
+        advanceUntilIdle()
+        assertEquals(listOf(GuideEvent.SourceHolding(5L, GuideSource.All(1))), r.events)
+        assertEquals("stops at the first holder", listOf(broken, news, GuideSource.All(1)), asked)
+        assertEquals(0, r.pager.invalidations); assertTrue(r.lineups.isEmpty()); assertTrue(r.controller.calls.isEmpty())
+        r.events.clear()
+        r.effects.findSourceHolding(6L, listOf(news), target)
+        advanceUntilIdle()
+        assertEquals(listOf(GuideEvent.SourceHolding(6L, null)), r.events)
+        r.effects.close()
+    }
+
     @Test
     fun rowsAndWindowAreForwarded() = runTest {
         val r = Rig(this, channels)
