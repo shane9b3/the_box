@@ -141,14 +141,19 @@ object SportsFixtures {
         shortName,
     )
 
-    /** The default NFL detail: KC ball, 1st & 10 in its own half at the 35. */
+    /**
+     * The default NFL detail: KC ball, 1st & 10 in its own half at the 35. (NFL Stacked commit 0) [awayTimeouts] /
+     * [homeTimeouts]: `situation`'s counts (null = absent, the default).
+     */
     fun nflDetail(
         play: NflPlay = NflPlay.Down(1, 10, goalToGo = false, field = FieldPos(Side.AWAY, 35)),
         possession: Side? = Side.AWAY,
         redZone: Boolean = false,
         breakKind: NflBreak? = null,
         lastPlay: NflLastPlay? = null,
-    ): LeagueDetail.Nfl = LeagueDetail.Nfl(play, possession, redZone, breakKind, lastPlay)
+        awayTimeouts: Int? = null,
+        homeTimeouts: Int? = null,
+    ): LeagueDetail.Nfl = LeagueDetail.Nfl(play, possession, redZone, breakKind, lastPlay, awayTimeouts, homeTimeouts)
 
     /** An NFL game; defaults to KC @ BUF (the fake panel's featured game), LIVE, 4th quarter, 3:42, 24–17. */
     fun nflGame(
@@ -169,7 +174,11 @@ object SportsFixtures {
         detail = detail, league = League.NFL,
     )
 
-    /** The NFL bug's view of [game] in play: the quarter over the clock (NFL §3.1), with [nfl] (default 1st & 10, KC ball, own 35). */
+    /**
+     * The NFL bug's view of [game] in play: the quarter over the clock (NFL §3.1), with [nfl] (default 1st & 10, KC ball,
+     * own 35). (NFL Stacked commit 0) [period]: `ScoreBugView.period`, null by default (pass [nflPeriod] of the game for
+     * what the machine now sets).
+     */
     fun nflView(
         game: GameSnapshot = nflGame(),
         nfl: NflView? = NflView(
@@ -178,6 +187,7 @@ object SportsFixtures {
         ),
         goalSeq: Int = 0,
         goalSide: Side? = null,
+        period: PeriodLabel? = null,
     ): ScoreBugView = ScoreBugView(
         away = game.away,
         home = game.home,
@@ -190,6 +200,38 @@ object SportsFixtures {
         gameId = game.id,
         league = League.NFL,
         nfl = nfl,
+        period = period,
+    )
+
+    /** (NFL Stacked commit 0) [game]'s period label as the NFL machine sets `ScoreBugView.period` (REG n, OT n). */
+    fun nflPeriod(game: GameSnapshot = nflGame()): PeriodLabel = when (game.periodKind) {
+        PeriodKind.OT -> PeriodLabel(PeriodKind.OT, game.otNumber ?: 1)
+        PeriodKind.SO -> PeriodLabel(PeriodKind.SO, 1)
+        else -> PeriodLabel(PeriodKind.REG, game.period ?: 1)
+    }
+
+    /**
+     * (NFL Stacked §9.1 shapes, commit 0) The default NFL Stacked view: [nflView] with the machine's period, both teams'
+     * timeouts ([awayTimeouts] / [homeTimeouts], 3 slots) and the optional marks. For WP-2's layout tests and WP-3 / WP-4's
+     * screenshots and runner tests.
+     */
+    fun nflStackedView(
+        game: GameSnapshot = nflGame(),
+        down: DownText? = DownText.Down(1, 10, goal = false),
+        tab: NflTab? = NflTab(Side.AWAY, TabLead.BALL, TabTail.Field(FieldZone.OWN, 35)),
+        awayTimeouts: Int? = 3,
+        homeTimeouts: Int? = 2,
+        timeoutSlots: Int? = 3,
+        timeout: NflTimeoutMark? = null,
+        flagId: String? = null,
+        goalSeq: Int = 0,
+        goalSide: Side? = null,
+    ): ScoreBugView = nflView(
+        game = game,
+        nfl = NflView(down, tab, awayTimeouts = awayTimeouts, homeTimeouts = homeTimeouts, timeoutSlots = timeoutSlots, timeout = timeout, flagId = flagId),
+        goalSeq = goalSeq,
+        goalSide = goalSide,
+        period = nflPeriod(game),
     )
 
     /**

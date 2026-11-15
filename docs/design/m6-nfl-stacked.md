@@ -972,3 +972,68 @@ timeout and at halftime).
 | When | timeout mark, halftime, end of quarter, final (both counts known) | |
 | Footprint | 396 × 141 / 495 × 176.25; widths: timeout 396, breaks 306 | |
 | Mirror | `[clock][YDS][rows]`, opens leftwards, contents' slide +5.4 | |
+
+---
+
+## Commit 0 rulings (2026-11-15)
+
+Where commit 0 had to choose (the design was silent, ambiguous, or would have put one file in two work packages), the
+choice that keeps WP-1 … WP-5 disjoint was taken. Each item: what, and why.
+
+1. **The PILL freeze lands in commit 0, as its own test.** `core/src/test/.../LegacyNflScoreTimeline.kt` (the frozen
+   `NflScoreTimeline` of `412446e`, constants inlined, own bezier) and `NflScoreSpecLegacyTest.kt` (bitwise on every
+   `NflScoreFrame` field, every kind, single, pair and still, old and spec overloads, −1 … 9 700 at 0.25 ms plus NaN and
+   +∞; PILL always writes `rowFlashAlpha = 0`). §8.2 had `LegacyNflScoreTimeline.kt` under WP-2, but the lead brief and
+   §4.3 make the PILL split commit 0's and "checked bit-identical before commit". WP-2 keeps `NflScoreSpecTest.kt` (the
+   STACKED values, the flash-grid peaks, the STACKED row flash) and **never edits** the two commit-0 files.
+2. **`NflScoreSpec` is a data class with these fields** (all `Float` except `tabPulseCycles: Int`): `streak1Alpha`,
+   `streak2Alpha`, `streakFrom`, `streakTo`, `runFrom`, `runTo`, `runY`, `runPx`, `runAlpha`, `arcP0X/Y`, `arcP1X/Y`,
+   `arcP2X/Y`, `arcS0..2`, `arcR0..2`, `arcAlpha`, `postsX`, `postsY`, `postsW`, `postsH`, `postsDy`, `flashAlpha`,
+   `badgeDx`, `badgeMidDx`, `letterDrop`, `letterOvershoot`, `pointsDx`, `pointsMidDx`, `tabPulseCycles`, `rowFlashMs`,
+   `endMs`, `pairSecondMs`, `pairEndMs`, `stillFrameBMs`. Painter-only values (streak alphas, `runPx`, posts geometry) are
+   carried but not read by the timeline. The pop (900 ms, `NFL_POP_MS`) is shared skeleton, not spec. One score's still
+   frame B ends at `3 600 + stillFrameBMs`; a pair's B1 / B2 at `pairSecondMs` / `pairEndMs`. The generic row-flash
+   envelope (ease-out from 3 600 over `rowFlashMs`, 1 through a still frame B) is written in commit 0 and is inert under
+   PILL; `NflScoreSpec.STACKED = PILL` until WP-2. The timeline's private `PAIR_SECOND`, `PAIR_END`, `TAB_PULSE_END` and
+   `ARC_*` copies are gone (read from the spec).
+3. **The full §8.5 constant block and `StackedNflMock` are in commit 0**, not only the ones the stubs read: WP-1 needs
+   `NFL_TIMEOUTS_MAX`, `NFL_TIMEOUT_*`, `NFL_FLAG_MARK_MS`, `NFL_TYPE_*` and may not edit `SportsConstants.kt`. Extra
+   names: `STACKED_NFL_REKEY_*` spelled out (`_BG_MS`, `_STRIPE_MS`, `_STRIPE_B_DELAY_MS`, `_TEXT_DELAY_MS`, `_TEXT_MS`,
+   `_TEXT_DX`, `_MS`), `STACKED_NFL_SHAKE_DELAY_MS / _MS / _CYCLES / _DX1 / _DX2`, `STACKED_NFL_WAVE_MS / _DEG /
+   _PIVOT_X / _PIVOT_Y`, `STACKED_NFL_BURN_CYCLES`, `STACKED_NFL_PIP_H` 3.0. WP-2 may append to the block (and to
+   `StackedNflMock`); nobody edits a commit-0 value without the lead.
+4. **`StackedColourTable`'s NFL arm** (`League.NFL -> NflStackedColours.pair(away, home)`) changes in commit 0 (§8.3 says
+   only that line changes, and no WP lists the file). `StackedColourTableTest`'s NFL line now asserts the delegation
+   (`assertSame(NflStackedColours.pair("BUF", "CHI"), StackedColourTable.pair(League.NFL, "BUF", "CHI"))`), which holds
+   for the stub and for WP-2's cached table, so WP-2 does not touch that test. `NflStackedColours.pair` stub = the NHL
+   fallback pair (the arm's old value).
+5. **The placement stub** is two private helpers in `ScoreBugPlacement` (`nflStackedWidth` / `nflStackedHeight`, the
+   NFL Pill's 520 × 70 / 650 × 87.5), reached by a new first branch `league == NFL && style == STACKED` in
+   `width/height(size, league, style)`. WP-2 replaces the two helper bodies (marked `// WP-2`), landing with WP-4.
+6. **Every test that pinned the hockey-only Style gate changes in commit 0** (all are "NFL followed / browsed → Style
+   row shown" now): `ScoreBugPlayerTest` (two assertions: browsing the NFL, and an NFL follow), `ChlScoreSheetTest`
+   (an NFL follow while browsing a CHL list), and `ScoreBugMachineTest.periodSurvivesStaleAndWaitingInPlayAndInABreak`
+   (it asserted `period == null` for the NFL; now REG 4 fresh and stale). `StackedSeamTest`'s NFL case now asserts the
+   NFL + STACKED branch composes `StackedNflBug` (counter below) and neither hockey bug; it no longer asserts `NflBug`, so
+   WP-4's runner does not break it.
+7. **Debug counters and the layer tag live in `StackedNflContracts.kt`** (lead-owned): `COMPOSITIONS_STACKED_NFL_BUG`,
+   `FRAMES_STACKED_NFL_BUG`, `DRAWS_STACKED_NFL_BUG`, `STACKED_NFL_LAYER_TAG`, so the seam test, WP-4's tests and the
+   instrumented `StackedNflFramesTest` share them. The commit-0 `StackedNflBug` bumps the composition counter and calls
+   `NflBug(…, NflHooks.Default)`.
+8. **Typefaces are nullable** in both painter constructors (`Typeface?`), as `StackedPainter` / `StackedGoalPainter`:
+   fonts load through `sansTypeface`, which returns null on failure. Painter constructor parameters are `val`s.
+9. **`NflBarContent` adds** `wordsAdvance` (device px, set by `fillBar`; a mirrored bar right-aligns by it, as
+   `BarContent.wordsAdvance`) and `copyFrom(o)` (the runner's `barPrev` copy).
+10. **The runner-only seam types are in `StackedNflBug.kt`** (WP-4 owns and may extend them): `StackedNflSampler`
+    (`Real`, `Pinned`), `NflScoreSampler` (`sample(tMs, still, first, second, out)`, `Real` = `NflScoreTimeline` under
+    `NflScoreSpec.STACKED`), `StackedNflProbe` (`args`, `draw`). WP-3 does not use them.
+11. **Stub behaviour.** `StackedNflTargets.of` = the play state (clock open, snapshot clock or blank, no bar, no
+    possession, the view's counts, nothing burning). `StackedNflTimeline` writes each track's rest state at once,
+    `totalMs` = 0. `StackedNflFrame.PIPS` = `NFL_TIMEOUTS_MAX`; pip index 0 is nearest the logo. The painters draw
+    nothing. Nothing of these is reachable in the app with commit 0 alone.
+12. **Shared fixtures** (core `testFixtures`): `SportsFixtures.nflDetail(…, awayTimeouts, homeTimeouts)`,
+    `nflView(…, period = null)`, `nflPeriod(game)` (the machine's label), `nflStackedView(…)` (period, counts 3 / 2 of 3,
+    optional marks), and `NflStackedFixtures` (the eight §3.1 names, `dto`, `snapshot`, `idOf`; the bodies are `:core`
+    test resources, so `dto` / `snapshot` work in `:core` tests only). `NflStackedFixturesTest` checks all eight map.
+13. **Settings:** the Style row in Settings was already unconditional; only its comment and
+    `settings_sports_style_desc` change (§7). `FullScreenHost`'s placement comment is corrected (no code change there).

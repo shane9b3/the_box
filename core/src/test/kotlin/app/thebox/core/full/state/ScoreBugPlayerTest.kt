@@ -147,18 +147,19 @@ class ScoreBugPlayerTest {
         assertTrue(styleRows(w).isEmpty())
     }
 
-    @Test fun theStyleRowIsAfterDelayAndShowsForNothingFollowedOnTheNhlOrAnUnreportedLeague() {
+    @Test fun theStyleRowIsAfterDelayAndShowsForNothingFollowedOnAnyLeague() {
         val w = PlayerWorld()
         w.player.scores(ScoreFacts(style = NhlBugStyle.PILL))
         openSheet(w)
         assertEquals(listOf("ScoreCornerRow", "ScoreDelayRow", "ScoreStyleRow"), w.ui.picker!!.choices.take(3).map { it::class.simpleName })
         w.player.scores(ScoreFacts(style = NhlBugStyle.PILL, league = League.NHL))
         assertEquals(1, styleRows(w).size)
+        // (NFL Stacked §7, commit 0) One style for every league: browsing the NFL with nothing followed keeps the row.
         w.player.scores(ScoreFacts(style = NhlBugStyle.PILL, league = League.NFL))
-        assertTrue(styleRows(w).isEmpty(), "browsing the NFL with nothing followed: no row")
+        assertEquals(1, styleRows(w).size, "browsing the NFL with nothing followed: the row shows")
     }
 
-    @Test fun theRowFollowsTheFollowedGamesLeague() {
+    @Test fun theRowShowsWhateverLeagueIsFollowed() {
         val w = PlayerWorld()
         val nhl = SportsFixtures.game(id = "H1")
         val nfl = SportsFixtures.nflGame()
@@ -167,9 +168,10 @@ class ScoreBugPlayerTest {
         openSheet(w)
         assertEquals(1, styleRows(w).size)
         assertEquals(listOf("ScoreGame", "ScoreLeagueRow", "ScoreCornerRow", "ScoreDelayRow", "ScoreStyleRow", "ScoreStop"), w.ui.picker!!.choices.take(6).map { it::class.simpleName })
-        // An NFL follow while browsing the NHL list hides it.
+        // (NFL Stacked §7, commit 0) An NFL follow while browsing the NHL list shows it too, in the same place.
         w.player.scores(ScoreFacts(style = NhlBugStyle.PILL, league = League.NHL, followed = SportsFixtures.nflView(game = nfl), game = SportsFixtures.followedOf(nfl), day = board(nhl)))
-        assertTrue(styleRows(w).isEmpty(), "an NFL follow never shows a row that changes nothing on screen")
+        assertEquals(1, styleRows(w).size, "NFL followed: the Style row shows (the NFL Stacked bug)")
+        assertEquals(listOf("ScoreGame", "ScoreLeagueRow", "ScoreCornerRow", "ScoreDelayRow", "ScoreStyleRow", "ScoreStop"), w.ui.picker!!.choices.take(6).map { it::class.simpleName })
     }
 
     @Test fun okTogglesTheStyleAndTheSheetStaysOpenWithFocusOnTheRow() {
