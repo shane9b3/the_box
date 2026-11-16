@@ -196,7 +196,10 @@ class StackedNflGeometryTest {
             near(g[G.G_LABEL] + 80.0 + K.STACKED_NFL_BAR_TEXT_GAP, g[G.G_DIVIDER], "divider gap")
             near(g[G.G_DIVIDER] + K.STACKED_NFL_BAR_DIVIDER_W + K.STACKED_NFL_BAR_TEXT_GAP.toDouble(), g[G.G_SUB], "sub gap")
             // The red-zone patch: from the divider to the bar's end in reading order, under the sub, on both sides.
-            assertEquals(g[G.G_DIVIDER], g[G.G_RED_FROM]); assertEquals(barW, g[G.G_RED_TO])
+            assertEquals(g[G.G_DIVIDER], g[G.G_RED_FROM])
+            // Integration ruling 4: mirrored, the patch stops a text gap after the sub (the stripes keep the team's bar).
+            if (m) near(g[G.G_SUB] + 40.0 + K.STACKED_NFL_BAR_TEXT_GAP, g[G.G_RED_TO], "mirrored red end")
+            else assertEquals(barW, g[G.G_RED_TO])
             assertTrue(g[G.G_SUB] + 40f <= g[G.G_RED_TO], "m=$m $barW")
             // The group's own offsets are the same both sides (only the group is re-anchored).
             val l = G.barGroup(barW, icon = true, labelW = 80f, subW = 40f, mirrored = false, out = FloatArray(G.G_SIZE))

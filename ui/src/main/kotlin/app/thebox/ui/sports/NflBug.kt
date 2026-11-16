@@ -80,7 +80,6 @@ import app.thebox.core.sports.SportsConstants as K
 import app.thebox.core.sports.TabLead
 import app.thebox.core.sports.TabTail
 import app.thebox.core.sports.TeamColours
-import app.thebox.core.sports.TeamLine
 import app.thebox.ui.R
 import app.thebox.ui.full.PlayerUi
 import app.thebox.ui.guide.GuideDebugCounters
@@ -95,7 +94,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.Locale
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.cancellation.CancellationException
@@ -468,7 +466,7 @@ internal fun NflBug(
         } else if (tr.hidden) {
             tr.hidden = false; tr.snap()
         }
-        if (!tr.freshSeen && !waiting(real)) { tr.freshSeen = true; tr.snap() } // the first non-waiting view of a follow
+        if (!tr.freshSeen && !nflWaiting(real)) { tr.freshSeen = true; tr.snap() } // the first non-waiting view of a follow
         if (box == null || placement.placing || placement.size != run.size) {
             cancelTakeover()
             run.size = placement.size
@@ -673,10 +671,6 @@ internal fun NflBug(
     // A sibling of the clipped layer, not inside it (GA §1): same position source, same look.
     if (placing) NflPlaceHint(holder, pos, fade, rightSide, w, h)
 }
-
-/** NFL two-line states put "Delayed" / "No update" on the top line; one-line breaks have only a top. */
-private fun waiting(v: ScoreBugView): Boolean =
-    v.top is CentreText.Delayed || v.top is CentreText.NoUpdate || v.bottom is CentreText.Delayed || v.bottom is CentreText.NoUpdate
 
 /** The tab's label bake key: the painter (one per size) and the followed teams' abbreviations. */
 private data class NflLabelKey(val painter: NflTabPainter, val away: String, val home: String)
@@ -1038,37 +1032,9 @@ private class NflLiveText {
         if (v === lastView) return text
         lastView = v
         if (v.gameId != game) { game = v.gameId; text = "" }
-        if (waiting(v)) return text
+        if (nflWaiting(v)) return text
         text = if (v.goalSide != null) nflScoreText(res, v) ?: "" else ""
         return text
-    }
-}
-
-private fun shortOf(t: TeamLine) = t.shortName ?: t.name
-
-private fun kindWord(res: Resources, k: NflScoreKind): String = res.getString(
-    when (k) {
-        NflScoreKind.TOUCHDOWN -> R.string.sports_nfl_td
-        NflScoreKind.EXTRA_POINT -> R.string.sports_nfl_xp
-        NflScoreKind.FIELD_GOAL -> R.string.sports_nfl_fg
-        NflScoreKind.SAFETY -> R.string.sports_nfl_safety
-        NflScoreKind.TWO_POINT -> R.string.sports_nfl_2pt
-    },
-).lowercase(Locale.getDefault())
-
-/** The score announcement of a view under the mark ("%5$s %6$s. %1$s %2$d, %3$s %4$d"); null with no score kind. */
-private fun nflScoreText(res: Resources, v: ScoreBugView): String? {
-    val scores = v.nfl?.scores.orEmpty()
-    val side = v.goalSide ?: return null
-    if (scores.isEmpty()) return null
-    val a = v.away
-    val h = v.home
-    val scorer = (if (side == Side.AWAY) a else h).name
-    val first = kindWord(res, scores[0].kind)
-    return if (scores.size >= 2) {
-        res.getString(R.string.sports_live_nfl_pair, shortOf(a), a.score ?: 0, shortOf(h), h.score ?: 0, scorer, first, kindWord(res, scores[1].kind))
-    } else {
-        res.getString(R.string.sports_live_nfl_score, shortOf(a), a.score ?: 0, shortOf(h), h.score ?: 0, scorer, first)
     }
 }
 
@@ -1085,7 +1051,7 @@ internal class NflDescribe(private val res: Resources, private val v: ScoreBugVi
         val parts = ArrayList<String>(3)
         val tab = n.tab
         if (tab != null && tab.lead == TabLead.BALL) {
-            parts += res.getString(R.string.sports_desc_nfl_ball, shortOf(if (tab.side == Side.AWAY) v.away else v.home))
+            parts += res.getString(R.string.sports_desc_nfl_ball, nflShortOf(if (tab.side == Side.AWAY) v.away else v.home))
         }
         val down = n.down
         if (down is DownText.Down) {
@@ -1113,7 +1079,7 @@ internal class NflDescribe(private val res: Resources, private val v: ScoreBugVi
     private fun state(): String {
         val a = v.away
         val h = v.home
-        fun f(id: Int, vararg extra: Any) = res.getString(id, shortOf(a), a.score ?: 0, shortOf(h), h.score ?: 0, *extra)
+        fun f(id: Int, vararg extra: Any) = res.getString(id, nflShortOf(a), a.score ?: 0, nflShortOf(h), h.score ?: 0, *extra)
         val top = v.top
         val bottom = v.bottom
         if (v.goalSide != null) nflScoreText(res, v)?.let { return it }

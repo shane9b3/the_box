@@ -22,14 +22,13 @@ import app.thebox.core.sports.NflBarKind
 import app.thebox.core.sports.NflScoreFrame
 import app.thebox.core.sports.NflScoreKind
 import app.thebox.core.sports.NflShapes
-import app.thebox.core.sports.NhlStackedColours
+import app.thebox.core.sports.NflStackedColours
 import app.thebox.core.sports.ScoreBugView
 import app.thebox.core.sports.Side
 import app.thebox.core.sports.SportsConstants as K
-import app.thebox.core.sports.StackedColours
 import app.thebox.core.sports.StackedMock
 import app.thebox.core.sports.StackedNflFrame
-import app.thebox.core.sports.StackedNflMock as M
+import app.thebox.core.sports.StackedNflGeometry as G
 import app.thebox.core.sports.StackedNflTargets
 import app.thebox.core.sports.StackedPair
 import app.thebox.core.sports.TabTail
@@ -65,11 +64,10 @@ import kotlin.math.tan
  *   words (20 Bold Italic at 63): [flag icon] label | divider | sub, the red-zone patch from the divider, the 1-px white
  *   .22 hairline on its inner edge, the NHL bar's 1-px black .25 text shadow (not on the yellow flag bar).
  *
- * **The takeover.** [StackedNflDrawArgs] carries the sampled [StackedNflDrawArgs.score] but not the score painter or its
- * glow masks, so the runner hands them here once through [takeover] / [glow]; [drawFrame] then draws, as the hockey
- * composite: glow, shadow, box, bar, rows (with the row flash and the pop), clock column, the takeover over the top part,
- * and the border on top. With [takeover] null the runner calls [StackedNflScorePainter.drawGlow] before and
- * [StackedNflScorePainter.drawTakeover] after [drawFrame] itself (the takeover then covers the border's top part).
+ * **The takeover** (integration ruling 1): the runner hands the score painter, its exact-box glow and the shadow through
+ * [StackedNflDrawArgs] ([StackedNflDrawArgs.takeover], [StackedNflDrawArgs.glow], [StackedNflDrawArgs.shadow]) and
+ * [drawFrame] draws, as the hockey composite: glow, shadow, box, bar, rows (with the row flash and the pop), clock
+ * column, the takeover over the top part, and the border on top. Nothing else draws the takeover.
  */
 internal class StackedNflPainter(
     val s: Float,
@@ -79,47 +77,42 @@ internal class StackedNflPainter(
 ) {
     private val white = Color.WHITE
 
-    // ---- geometry, device px
+    // ---- geometry, device px (every number from `SportsConstants` / `StackedNflGeometry`: one rule, one place)
     private val h = K.STACKED_H * s
     private val rowH = h / 2f
     private val rowsW = K.STACKED_ROWS_W * s
     private val clockW = K.STACKED_CLOCK_W * s
     private val radius = StackedMock.BOX_RADIUS * K.STACKED_SCALE * s
     private val line = (K.STACKED_HAIRLINE_W * s).coerceAtLeast(1f)
-    private val stripeW = M.STRIPE_W * K.STACKED_SCALE * s
-    private val possStripeW = M.POSS_STRIPE_W * K.STACKED_SCALE * s
-    private val logoMl = M.LOGO_ML * K.STACKED_SCALE * s
-    private val logoSlotW = M.LOGO_SLOT_W * K.STACKED_SCALE * s
+    private val stripeW = K.STACKED_NFL_STRIPE_W * s
+    private val possStripeW = K.STACKED_NFL_POSS_STRIPE_W * s
+    private val logoSlotW = K.STACKED_NFL_LOGO_SLOT_W * s
     /** The logo's fit box inside the slot (§2.3: 50.4 × 43.2, the hockey row's logo box). */
-    private val logoFitW = StackedMock.LOGO_SLOT_W * K.STACKED_SCALE * s
-    private val logoFitH = StackedMock.LOGO_H * K.STACKED_SCALE * s
-    private val centrePl = M.CENTRE_PL * K.STACKED_SCALE * s
-    private val codeTop = CODE_LINE_TOP * s
+    private val logoFitW = K.STACKED_NFL_LOGO_FIT_W * s
+    private val logoFitH = K.STACKED_NFL_LOGO_FIT_H * s
+    private val codeTop = K.STACKED_NFL_CODE_TOP * s
     private val ballPx = K.STACKED_NFL_BALL * s
-    private val ballGap = K.STACKED_NFL_BALL_GAP * s
     private val pipW = K.STACKED_NFL_PIP_W * s
     private val pipH = K.STACKED_NFL_PIP_H * s
     private val pipR = K.STACKED_NFL_PIP_R * s
-    private val pipGap = K.STACKED_NFL_PIP_GAP * s
     private val pipTop = K.STACKED_NFL_PIP_TOP * s
-    private val scoreSlotW = M.SCORE_SLOT_W * K.STACKED_SCALE * s
-    private val scoreRight = rowsW - M.SCORE_MR * K.STACKED_SCALE * s
-    private val periodBottom = (M.PERIOD_SLOT_H - M.PERIOD_PAD_B) * K.STACKED_SCALE * s
-    private val ruleTop = M.PERIOD_SLOT_H * K.STACKED_SCALE * s
-    private val ruleMargin = M.RULE_MARGIN * K.STACKED_SCALE * s
+    private val scoreSlotW = K.STACKED_NFL_SCORE_W * s
+    private val scoreRight = G.SCORE_RIGHT * s
+    private val periodBottom = (K.STACKED_NFL_PERIOD_SLOT_H - K.STACKED_NFL_PERIOD_PAD_B) * s
+    private val ruleTop = K.STACKED_NFL_PERIOD_SLOT_H * s
+    private val ruleMargin = K.STACKED_NFL_RULE_MARGIN * s
     private val clockCy = (ruleTop + line + h) / 2f
     private val slotH = h - (ruleTop + line)
     private val barH = K.STACKED_BAR_H * s
-    private val barStripeAL = StackedMock.BAR_STRIPE_A_L * K.STACKED_SCALE * s
-    private val barStripeBL = StackedMock.BAR_STRIPE_B_L * K.STACKED_SCALE * s
-    private val barStripeW = StackedMock.BAR_STRIPE_W * K.STACKED_SCALE * s
-    private val barOverhang = StackedMock.BAR_STRIPE_OVERHANG * K.STACKED_SCALE * s
-    private val barTextL = M.BAR_TEXT_PL * K.STACKED_SCALE * s
+    private val barStripeW = K.STACKED_NFL_BAR_STRIPE_W * s
+    private val barOverhang = K.STACKED_NFL_BAR_STRIPE_OVERHANG * s
     private val barGap = K.STACKED_NFL_BAR_TEXT_GAP * s
-    private val dividerW = (M.BAR_DIVIDER_W / 2f * s).coerceAtLeast(1f)
-    private val dividerH = K.STACKED_BAR_TEXT_PX * (M.BAR_DIVIDER_H / M.BAR_TEXT_PX) * s
+    private val dividerW = (K.STACKED_NFL_BAR_DIVIDER_W * s).coerceAtLeast(1f)
+    private val dividerH = K.STACKED_NFL_BAR_DIVIDER_H * s
     private val iconW = K.STACKED_NFL_FLAG_ICON_W * s
     private val iconH = K.STACKED_NFL_FLAG_ICON_H * s
+    /** `StackedNflGeometry.barGroup`'s output (draw path: preallocated). */
+    private val group = FloatArray(G.G_SIZE)
 
     // ---- paints (built once; draw only changes colour, alpha and size)
     private fun text(px: Float, tf: Typeface?, align: Paint.Align, track: Float = 0f, tnum: Boolean = false) =
@@ -131,9 +124,9 @@ internal class StackedNflPainter(
 
     private val codePaint = text(K.STACKED_NFL_CODE_PX, sansBold, Paint.Align.LEFT, CODE_TRACK_EM)
     private val codeMirroredPaint = Paint(codePaint).apply { textAlign = Paint.Align.RIGHT }
-    private val scorePaint = text(M.SCORE_PX * K.STACKED_SCALE, sansBold, Paint.Align.RIGHT, tnum = true)
+    private val scorePaint = text(K.STACKED_NFL_SCORE_PX, sansBold, Paint.Align.RIGHT, tnum = true)
     private val scoreMirroredPaint = Paint(scorePaint).apply { textAlign = Paint.Align.LEFT }
-    private val periodPaint = text(M.PERIOD_PX * K.STACKED_SCALE, sansBold, Paint.Align.CENTER, PERIOD_TRACK_EM)
+    private val periodPaint = text(K.STACKED_NFL_PERIOD_PX, sansBold, Paint.Align.CENTER, PERIOD_TRACK_EM)
     private val slotPaint = text(K.STACKED_NFL_CLOCK_PX, sansBold, Paint.Align.CENTER)
     private val clockPaint = text(K.STACKED_NFL_CLOCK_PX, sansBold, Paint.Align.LEFT, tnum = true)
     private val barPaint = text(K.STACKED_BAR_TEXT_PX, barFont ?: sansBold, Paint.Align.LEFT, BAR_TRACK_EM).apply {
@@ -190,18 +183,8 @@ internal class StackedNflPainter(
     private var homeCodePx = 0f
     private var homeCodeAdv = 0f
 
-    /** The fallback look (a null [StackedNflDrawArgs.colours]), resolved once. */
-    private val fallback: StackedPair = NhlStackedColours.pair(null, null)
-
-    /** The shadow [bakeShadow] last made; [drawFrame] draws it (the draw args carry none). */
-    @Volatile private var shadow: NineSlice? = null
-
-    /**
-     * The takeover's painter and its baked glow (see the class comment): set by the runner when it builds or re-bakes
-     * them, so [drawFrame] draws the takeover in the composite's order. Null = the runner draws them itself.
-     */
-    @Volatile var takeover: StackedNflScorePainter? = null
-    @Volatile var glow: GlowMasks? = null
+    /** The fallback look (a null [StackedNflDrawArgs.colours]): the NFL table's own fallback pair, resolved once. */
+    private val fallback: StackedPair = NflStackedColours.pair(null, null)
 
     init {
         scorePaint.getTextBounds("0", 0, 1, bounds)
@@ -260,7 +243,7 @@ internal class StackedNflPainter(
             while (i < q.size) { cubicTo(q[i], q[i + 1], q[i + 2], q[i + 3], q[i + 4], q[i + 5]); i += 6 }
             close()
         }
-        c.drawPath(outline, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = BALL_FILL })
+        c.drawPath(outline, Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL; color = K.STACKED_NFL_BALL_FILL })
         c.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE; color = Color.WHITE; strokeWidth = NflShapes.BALL_STROKE
             strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
@@ -287,7 +270,7 @@ internal class StackedNflPainter(
     }
 
     private fun columnBudget(): Float = clockW - 2 * WORD_BREATHING * s
-    private fun clockBudget(): Float = clockW - 2 * CLOCK_BREATHING * s
+    private fun clockBudget(): Float = clockW - 2 * K.STACKED_NFL_CLOCK_AIR * s
 
     // ------------------------------------------------------------------ words and fit (built per view, never per frame)
 
@@ -357,7 +340,7 @@ internal class StackedNflPainter(
             ClockSlot.NoUpdate -> res.getString(R.string.sports_no_update)
             ClockSlot.Delayed -> res.getString(R.string.sports_delayed)
         }
-        val periodStart = M.PERIOD_PX * K.STACKED_SCALE
+        val periodStart = K.STACKED_NFL_PERIOD_PX
         val fit = if (targets.clockSlot == ClockSlot.Clock || slotText.isEmpty()) null else fitSlot(slotText)
         return StackedNflFrameState(
             awayAbbrev = v.away.abbrev,
@@ -392,11 +375,6 @@ internal class StackedNflPainter(
     fun fillBar(content: NflBarContent, key: NflBarKey, pair: StackedPair?, awayAbbrev: String, homeAbbrev: String, res: Resources) {
         val p = pair ?: fallback
         val side = key.side
-        val team: StackedColours? = when (side) {
-            Side.AWAY -> p.away
-            Side.HOME -> p.home
-            null -> null
-        }
         val abbrev = if (side == Side.HOME) homeAbbrev else awayAbbrev
         var label = ""
         var sub = ""
@@ -445,37 +423,21 @@ internal class StackedNflPainter(
         sub.toCharArray(content.sub, 0, 0, content.subLen)
         content.redZone = red && content.subLen > 0
         content.flag = key.kind == NflBarKind.FLAG
-        when {
-            content.flag -> {
-                content.bg = K.STACKED_NFL_FLAG_BG
-                content.a = K.STACKED_NFL_FLAG_FG
-                content.b = K.STACKED_NFL_FLAG_B
-                content.fg = K.STACKED_NFL_FLAG_FG
-            }
-            isTeamKind(key.kind) && team != null -> {
-                content.bg = team.barBg
-                content.a = team.barA
-                content.b = team.barB
-                content.fg = white
-            }
-            else -> {
-                content.bg = K.STACKED_BAR_NEUTRAL
-                content.a = p.away.stripe
-                content.b = p.home.stripe
-                content.fg = white
-            }
-        }
+        // §2.6: the one colour rule (`NflStackedColours.bar`): team bar, the yellow flag bar, or the neutral bar.
+        val colours = NflStackedColours.bar(key, p)
+        content.bg = colours.bg
+        content.a = colours.a
+        content.b = colours.b
+        content.fg = colours.fg
         content.wordsAdvance = wordsAdvance(content)
     }
 
-    /** The bar's words' advance (device px): [icon + gap] label [gap divider gap sub]. Allocation-free. */
-    private fun wordsAdvance(b: NflBarContent): Float {
-        var w = 0f
-        if (b.flag) w += iconW + barGap
-        w += barPaint.measureText(b.label, 0, b.labelLen)
-        if (b.subLen > 0) w += 2 * barGap + dividerW + barSubPaint.measureText(b.sub, 0, b.subLen)
-        return w
-    }
+    /** The bar's words' advance (device px): `StackedNflGeometry.barGroupW` of the measured label and sub. */
+    private fun wordsAdvance(b: NflBarContent): Float =
+        G.barGroupW(b.flag, labelW(b) / s, subW(b) / s) * s
+
+    private fun labelW(b: NflBarContent): Float = barPaint.measureText(b.label, 0, b.labelLen)
+    private fun subW(b: NflBarContent): Float = if (b.subLen > 0) barSubPaint.measureText(b.sub, 0, b.subLen) else 0f
 
     /** The down label (§3.4): "1ST & 10", "4TH & GOAL", "3RD", "EXTRA POINT" for the try, "KICKOFF". */
     private fun down(res: Resources, d: DownText): String = when (d) {
@@ -506,15 +468,20 @@ internal class StackedNflPainter(
         return res.getString(R.string.sports_stacked_nfl_field, who, t.yard.coerceIn(0, 99))
     }
 
-    /** The drop shadow's nine-slice for this size (ST §6), baked off the main thread; [drawFrame] draws the latest bake. */
-    fun bakeShadow(): NineSlice? = NineSlice(s, large).also { shadow = it }
+    /**
+     * The drop shadow's nine-slice for this size (ST §6), baked off the main thread by the runner, which hands this
+     * painter's own bake back through [StackedNflDrawArgs.shadow].
+     */
+    fun bakeShadow(): NineSlice? = NineSlice(s, large)
 
     // ------------------------------------------------------------------ the composite
 
     /**
-     * The whole box for [a] (see [StackedNflDrawArgs] for the coordinates). Order: the glow (an attached [takeover]),
-     * shadow, box fill, bar, rows (stripes, logos, codes, balls, pips, scores, the row flash and the pop), clock column,
-     * the takeover over the top part, the border. Allocation-free.
+     * The whole box for [a] (see [StackedNflDrawArgs] for the coordinates), in the hockey composite's order
+     * (`StackedPainter.drawFrame`): the glow ([StackedNflDrawArgs.takeover]'s exact-box masks, when
+     * [StackedNflDrawArgs.glowOn]), the shadow ([StackedNflDrawArgs.shadow]), box fill, bar, rows (stripes, logos, codes,
+     * balls, pips, scores, the row flash and the pop), clock column, the takeover over the top part, and the border on
+     * top (the mock's border is outside the content, so the takeover never covers it). Allocation-free.
      */
     fun drawFrame(c: Canvas, a: StackedNflDrawArgs) {
         val st = a.state ?: return
@@ -525,18 +492,19 @@ internal class StackedNflPainter(
         val top = if (a.up) -bh else 0f
         val bottom = if (a.up) h else h + bh
         val mirrored = a.mirrored
+        // §5.3: mirrored, the rows hug the box's right edge, so the top part spans [rowsW - w, rowsW].
         val l = if (mirrored) rowsW - w else 0f
         box.set(l, top, l + w, bottom)
 
         val g = a.score
         val scoring = a.takeoverOn && g != null && !g.done && a.scoreSide != null
-        val tk = takeover
+        val tk = a.takeover
         val drawTakeover = scoring && tk != null && tk.colours != null
 
-        // 1. The glow, around the whole box, from the exact-box masks (an attached takeover only).
-        if (drawTakeover) glow?.let { tk!!.drawGlow(c, g!!, it, l, top) }
+        // 1. The glow around the whole box (the pinned box under the pin), from the exact-box masks.
+        if (drawTakeover && a.glowOn) a.glow?.let { tk!!.drawGlow(c, g!!, it, l, top) }
         // 2. The drop shadow, stretched to the box as it is now.
-        shadow?.draw(c, l, top, l + w, bottom, shadowPaint)
+        a.shadow?.draw(c, l, top, l + w, bottom, shadowPaint)
         // 3. The box fill: the clock column's `#15191F`.
         fill.color = K.STACKED_COL_BG
         c.drawRoundRect(box, radius, radius, fill)
@@ -551,7 +519,7 @@ internal class StackedNflPainter(
             tk!!.extent(top, bottom)
             tk.drawTakeover(c, g!!, mirrored)
         }
-        // 8. The border, 1 px `#2B3550`, inside the box's edge.
+        // 8. The border, 1 px `#2B3550`, inside the box's edge, on top of everything.
         stroke.strokeWidth = line
         stroke.color = K.STACKED_BORDER
         box.inset(line / 2f, line / 2f)
@@ -561,8 +529,10 @@ internal class StackedNflPainter(
 
     /**
      * The bar ([l]..[r], device px): background (lerped through a REKEY), the red-zone patch, the two stripes, the words,
-     * the hairline, under its clip. Mirrored, the stripes and the words are anchored to the bar's right end and move the
-     * other way; the stripes keep their "/" lean, the words read left to right, right-aligned (§5.3).
+     * the hairline, under its clip. Positions are `StackedNflGeometry`'s (bar-local design px, x [s]): the stripes
+     * ([G.barStripeX]) and the words group ([G.barGroup]: reading order on both sides, right-aligned when mirrored, the
+     * red-zone patch from the divider to the bar's end); the REKEY slide and the flag shake are offsets through [G.dx]
+     * (section 5.3: the slide starts on the screen-edge side, Rec 5).
      */
     private fun drawBar(c: Canvas, a: StackedNflDrawArgs, f: StackedNflFrame, bh: Float, l: Float, r: Float) {
         val cur = a.bar ?: return
@@ -572,73 +542,74 @@ internal class StackedNflPainter(
         val regionBottom = regionTop + bh
         val contentTop = if (a.up) regionTop else regionBottom - barH
         val m = a.mirrored
+        val barW = (r - l) / s
         // The flag bar's shake moves the words, divider and stripes (mirrored: the other way).
-        val shake = (if (cur.flag) f.shakeDx else 0f) * s * (if (m) -1f else 1f)
+        val shake = G.dx(if (cur.flag) f.shakeDx else 0f, m) * s
         val textAlpha = f.barTextAlpha * (if (cur.dim) K.STACKED_DIM_ALPHA else 1f)
         val words = cur.labelLen > 0
-        // The words' left edge: 63 from the bar's outer end; the REKEY slide starts on the screen-edge side (Rec 5).
-        val tx = (if (m) r - barTextL - f.barTextDx * s - cur.wordsAdvance else l + barTextL + f.barTextDx * s) + shake
+        val gr = G.barGroup(barW, cur.flag, labelW(cur) / s, subW(cur) / s, m, group)
+        val x0 = l + G.dx(f.barTextDx, m) * s + shake
         c.withClip(l, regionTop, r, regionBottom) {
             fill.color = bg or OPAQUE
             drawRoundRect(box, radius, radius, fill)
-            // The red-zone patch: from the divider to the bar's end, under the sub part (R26), with the words' alpha.
-            if (cur.redZone && words && textAlpha > 0f) {
-                val dx = tx + labelEnd(cur)
-                fill.color = argb(textAlpha, RED_ZONE_SUB)
-                drawRect(dx + barGap, regionTop, r, regionBottom, fill)
+            // The red-zone patch under the sub part (R26), with the words' alpha.
+            if (cur.redZone && words && textAlpha > 0f && !gr[G.G_RED_FROM].isNaN()) {
+                fill.color = argb(textAlpha, NflStackedColours.RED_ZONE_SUB)
+                // Left corners to the bar's end; mirrored a gap past the sub, moving with the words (ruling 4).
+                val redEnd = (if (m) x0 else l) + gr[G.G_RED_TO] * s
+                drawRect(x0 + gr[G.G_RED_FROM] * s, regionTop, redEnd, regionBottom, fill)
             }
             val stripeTop = contentTop - barOverhang
             fill.color = cur.a or OPAQUE
-            val ax = (if (m) r - barStripeAL - barStripeW - f.stripeAX * s else l + barStripeAL + f.stripeAX * s) + shake
+            val ax = l + G.barStripeX(K.STACKED_NFL_BAR_STRIPE_A_X, f.stripeAX, barW, m) * s + shake
             withTranslation(ax, stripeTop) { drawPath(stripePath, fill) }
             fill.color = cur.b or OPAQUE
-            val bx = (if (m) r - barStripeBL - barStripeW - f.stripeBX * s else l + barStripeBL + f.stripeBX * s) + shake
+            val bx = l + G.barStripeX(K.STACKED_NFL_BAR_STRIPE_B_X, f.stripeBX, barW, m) * s + shake
             withTranslation(bx, stripeTop) { drawPath(stripePath, fill) }
-            if (textAlpha > 0f && words) drawBarWords(this, cur, contentTop + barH / 2f, tx, textAlpha, f.waveDeg)
+            if (textAlpha > 0f && words) drawBarWords(this, cur, contentTop + barH / 2f, x0, gr, textAlpha, f.waveDeg)
             // The hairline on the bar's inner edge (ST S2: every bar).
             fill.color = argb(K.STACKED_BAR_HAIRLINE_ALPHA, 0xFFFFFF)
             if (a.up) drawRect(l, regionBottom - line, r, regionBottom, fill) else drawRect(l, regionTop, r, regionTop + line, fill)
         }
     }
 
-    /** The label's end from the words' left edge (icon, gap and label advance), device px. */
-    private fun labelEnd(b: NflBarContent): Float =
-        (if (b.flag) iconW + barGap else 0f) + barPaint.measureText(b.label, 0, b.labelLen)
-
-    /** The bar's words centred on [cy] from [x]: [icon] label | sub, with the hard text shadow off the flag bar. */
-    private fun drawBarWords(c: Canvas, b: NflBarContent, cy: Float, x: Float, alpha: Float, waveDeg: Float) {
-        var pen = x
+    /**
+     * The bar's words centred on [cy] at the group positions [gr] (bar-local design px, from [x0] in device px):
+     * [icon] label | sub, with the hard text shadow off the flag bar.
+     */
+    private fun drawBarWords(c: Canvas, b: NflBarContent, cy: Float, x0: Float, gr: FloatArray, alpha: Float, waveDeg: Float) {
         val baseline = cy + barOffset
         val fg = b.fg and 0xFFFFFF
-        if (b.flag) {
+        if (b.flag && !gr[G.G_ICON].isNaN()) {
             spritePaint.color = argb(alpha, fg)
             val iy = cy - iconH / 2f
-            c.withTranslation(pen, iy) {
+            c.withTranslation(x0 + gr[G.G_ICON] * s, iy) {
                 rotate(waveDeg, K.STACKED_NFL_WAVE_PIVOT_X * s, K.STACKED_NFL_WAVE_PIVOT_Y * s)
                 spriteDst.set(0f, 0f, iconW, iconH)
                 drawBitmap(flagIcon, null, spriteDst, spritePaint)
             }
-            pen += iconW + barGap
         }
         val shadowOn = !b.flag
         val dy = K.STACKED_BAR_TEXT_SHADOW_DY * s
+        val lx = x0 + gr[G.G_LABEL] * s
         if (shadowOn) {
             barPaint.color = argb(alpha * K.STACKED_TEXT_SHADOW_ALPHA, 0x000000)
-            c.drawText(b.label, 0, b.labelLen, pen, baseline + dy, barPaint)
+            c.drawText(b.label, 0, b.labelLen, lx, baseline + dy, barPaint)
         }
         barPaint.color = argb(alpha, fg)
-        c.drawText(b.label, 0, b.labelLen, pen, baseline, barPaint)
-        if (b.subLen <= 0) return
-        pen += barPaint.measureText(b.label, 0, b.labelLen) + barGap
-        fill.color = if (b.flag) argb(alpha * FLAG_DIVIDER_ALPHA, 0x000000) else argb(alpha * DIVIDER_ALPHA, 0xFFFFFF)
-        c.drawRect(pen, cy - dividerH / 2f, pen + dividerW, cy + dividerH / 2f, fill)
-        pen += dividerW + barGap
+        c.drawText(b.label, 0, b.labelLen, lx, baseline, barPaint)
+        if (b.subLen <= 0 || gr[G.G_SUB].isNaN()) return
+        val dx = x0 + gr[G.G_DIVIDER] * s
+        fill.color = if (b.flag) argb(alpha * K.STACKED_NFL_FLAG_DIVIDER_ALPHA, 0x000000)
+        else argb(alpha * K.STACKED_NFL_BAR_DIVIDER_ALPHA, 0xFFFFFF)
+        c.drawRect(dx, cy - dividerH / 2f, dx + dividerW, cy + dividerH / 2f, fill)
+        val sx = x0 + gr[G.G_SUB] * s
         if (shadowOn) {
             barSubPaint.color = argb(alpha * K.STACKED_TEXT_SHADOW_ALPHA, 0x000000)
-            c.drawText(b.sub, 0, b.subLen, pen, baseline + dy, barSubPaint)
+            c.drawText(b.sub, 0, b.subLen, sx, baseline + dy, barSubPaint)
         }
         barSubPaint.color = argb(alpha, fg)
-        c.drawText(b.sub, 0, b.subLen, pen, baseline, barSubPaint)
+        c.drawText(b.sub, 0, b.subLen, sx, baseline, barSubPaint)
     }
 
     private fun drawRows(
@@ -663,8 +634,8 @@ internal class StackedNflPainter(
                 withClip(0f, y0, rowsW, y0 + rowH) { drawRoundRect(box, radius, radius, fill) }
             }
         }
-        val awayStripe = lerp(stripeW, possStripeW, f.stripeAway)
-        val homeStripe = lerp(stripeW, possStripeW, f.stripeHome)
+        val awayStripe = G.stripeW(f.stripeAway.coerceIn(0f, 1f)) * s
+        val homeStripe = G.stripeW(f.stripeHome.coerceIn(0f, 1f)) * s
         val m = a.mirrored
         fill.color = pair.away.stripe or OPAQUE
         if (m) c.withClip(rowsW - awayStripe, 0f, rowsW, rowH) { drawRoundRect(box, radius, radius, fill) }
@@ -683,43 +654,47 @@ internal class StackedNflPainter(
         } else white
         val popScale = (g?.popScale ?: 1f).coerceIn(POP_SCALE_MIN, POP_SCALE_MAX)
         val t = st.targets
-        row(c, 0f, Side.AWAY, awayStripe, st.awayAbbrev, a.awayLogo, st.awayScore, f, t, m, popSide == Side.AWAY, popScale, popColour, pair.away.stripe)
-        row(c, rowH, Side.HOME, homeStripe, st.homeAbbrev, a.homeLogo, st.homeScore, f, t, m, popSide == Side.HOME, popScale, popColour, pair.home.stripe)
+        row(c, 0f, Side.AWAY, awayStripe, st.awayAbbrev, a.awayLogo, a.awayLogoPending, st.awayScore, f, t, m, popSide == Side.AWAY, popScale, popColour, pair.away.stripe)
+        row(c, rowH, Side.HOME, homeStripe, st.homeAbbrev, a.homeLogo, a.homeLogoPending, st.homeScore, f, t, m, popSide == Side.HOME, popScale, popColour, pair.home.stripe)
     }
 
     /**
-     * One row from [y0]: logo, code, ball, pips and score. Unmirrored x's are measured from the rows' left edge; mirrored
-     * every position is reflected (x ↦ rowsW − x) and the alignments swap; glyphs, logos and the ball are never flipped.
+     * One row from [y0]: logo, code, ball, pips and score, at `StackedNflGeometry`'s row-local positions ([G.logoX],
+     * [G.codeX], [G.ballX], [G.pipX], [G.SCORE_RIGHT]; design px x [s]) for a [stripe]-wide stripe (device px). Mirrored,
+     * every position is reflected about the rows ([G.rowX]) and the alignments swap; glyphs, logos and the ball are never
+     * flipped (from the screen edge: stripe, logo, code, ball, score, then the clock column).
      */
     private fun row(
-        c: Canvas, y0: Float, side: Side, stripe: Float, abbrev: String, logo: Bitmap?, score: String,
+        c: Canvas, y0: Float, side: Side, stripe: Float, abbrev: String, logo: Bitmap?, logoPending: Boolean, score: String,
         f: StackedNflFrame, t: StackedNflTargets, m: Boolean, pop: Boolean, popScale: Float, popColour: Int, stripeColour: Int,
     ) {
         val cy = y0 + rowH / 2f
-        logo(c, rowX(stripe + logoMl + logoSlotW / 2f, m), cy, abbrev, logo, stripeColour)
-        // The code (a 4+ letter code steps down to fit, §5.4; cached per string).
+        val sw = stripe / s
+        logo(c, G.rowX(G.logoX(sw), K.STACKED_NFL_LOGO_SLOT_W, m) * s + logoSlotW / 2f, cy, abbrev, logo, logoPending, stripeColour)
+        // The code (a code too wide for its room steps down to fit, section 5.4; cached per string).
         val codePx: Float
         val codeAdv: Float
         if (side == Side.AWAY) {
-            if (abbrev !== awayCodeRef) { awayCodeRef = abbrev; awayCodePx = codeFitPx(abbrev); awayCodeAdv = codeAdvance(abbrev, awayCodePx) }
+            if (abbrev != awayCodeRef) { awayCodeRef = abbrev; awayCodePx = codeFitPx(abbrev); awayCodeAdv = codeAdvance(abbrev, awayCodePx) }
             codePx = awayCodePx; codeAdv = awayCodeAdv
         } else {
-            if (abbrev !== homeCodeRef) { homeCodeRef = abbrev; homeCodePx = codeFitPx(abbrev); homeCodeAdv = codeAdvance(abbrev, homeCodePx) }
+            if (abbrev != homeCodeRef) { homeCodeRef = abbrev; homeCodePx = codeFitPx(abbrev); homeCodeAdv = codeAdvance(abbrev, homeCodePx) }
             codePx = homeCodePx; codeAdv = homeCodeAdv
         }
-        val anchor = stripe + logoMl + logoSlotW + centrePl
+        val codeX = G.codeX(sw)
         val cp = if (m) codeMirroredPaint else codePaint
         cp.textSize = codePx * s
         cp.color = white
-        c.drawText(abbrev, rowX(anchor, m), y0 + codeBaseline, cp)
+        // Left-aligned at its start; mirrored, right-aligned at the reflected start.
+        c.drawText(abbrev, if (m) (K.STACKED_ROWS_W - codeX) * s else codeX * s, y0 + codeBaseline, cp)
         // The possession ball, 5.4 after the code's advance, centred on the code's line.
         val ba = if (side == Side.AWAY) f.ballAwayAlpha else f.ballHomeAlpha
         if (ba > 0f) {
             val bs = if (side == Side.AWAY) f.ballAwayScale else f.ballHomeScale
-            val bd = (if (side == Side.AWAY) f.ballAwayDeg else f.ballHomeDeg) * (if (m) -1f else 1f)
-            val bl = anchor + codeAdv + ballGap
-            val bcx = rowX(bl + ballPx / 2f, m)
-            val bcy = y0 + codeCy
+            val bd = G.deg(if (side == Side.AWAY) f.ballAwayDeg else f.ballHomeDeg, m)
+            val bl = G.rowX(G.ballX(codeX, codeAdv / s), K.STACKED_NFL_BALL, m) * s
+            val bcx = bl + ballPx / 2f
+            val bcy = y0 + (G.BALL_TOP + K.STACKED_NFL_BALL / 2f) * s
             spritePaint.color = argb(ba, 0xFFFFFF)
             c.withTranslation(bcx, bcy) {
                 rotate(bd)
@@ -742,56 +717,52 @@ internal class StackedNflPainter(
                 val b = burn[i].coerceIn(0f, 1f)
                 if (b > 0f) {
                     colour = lerpColour(colour, white, b)
-                    alpha = alpha + (PIP_BURN_ALPHA - alpha) * b
+                    alpha += (K.STACKED_NFL_BURN_ALPHA - alpha) * b
                 }
                 fill.color = argb(alpha, colour)
-                val px = anchor + i * (pipW + pipGap)
-                val left = if (m) rowsW - px - pipW else px
+                val left = G.rowX(G.pipX(codeX, i), K.STACKED_NFL_PIP_W, m) * s
                 rect.set(left, py, left + pipW, py + pipH)
                 c.drawRoundRect(rect, pipR, pipR, fill)
             }
         }
-        // The score: right-aligned at 228.6 (mirrored: left-aligned at its reflection); 3 digits fitted (§5.4).
+        // The score: right-aligned at 228.6 (mirrored: left-aligned at its reflection); 3 digits fitted (section 5.4).
         if (score.isEmpty()) return
         val spx = if (side == Side.AWAY) {
-            if (score !== awayScoreRef) { awayScoreRef = score; awayScorePx = scoreFitPx(score) }
+            if (score != awayScoreRef) { awayScoreRef = score; awayScorePx = scoreFitPx(score) }
             awayScorePx
         } else {
-            if (score !== homeScoreRef) { homeScoreRef = score; homeScorePx = scoreFitPx(score) }
+            if (score != homeScoreRef) { homeScoreRef = score; homeScorePx = scoreFitPx(score) }
             homeScorePx
         }
         val sp = if (m) scoreMirroredPaint else scorePaint
         sp.textSize = spx * s
-        val sy = cy + scoreOffset * (spx / SCORE_PX)
-        val sx = rowX(scoreRight, m)
+        val sy = cy + scoreOffset * (spx / K.STACKED_NFL_SCORE_PX)
+        val sx = if (m) rowsW - scoreRight else scoreRight
         if (!pop) {
             sp.color = white
             c.drawText(score, sx, sy, sp)
         } else {
             sp.color = popColour
-            val pcx = rowX(scoreRight - scoreSlotW / 2f, m)
+            val pcx = if (m) rowsW - scoreRight + scoreSlotW / 2f else scoreRight - scoreSlotW / 2f
             c.withScale(popScale, popScale, pcx, cy) { drawText(score, sx, sy, sp) }
             sp.color = white
         }
     }
 
-    /** The score's size (design px): 35.1, or scaled to fit 43 when wider (three digits), floor 24 (§5.4). */
+    /** The score's size (design px): `StackedNflGeometry.scorePx` (35.1 in the 45 slot; wider: fitted to 43, floor 24). */
     private fun scoreFitPx(score: String): Float {
-        measurePaint.textSize = SCORE_PX * s
         measurePaint.fontFeatureSettings = "'tnum'"
-        val w = measurePaint.measureText(score)
+        val px = G.scorePx(s) { dev -> measurePaint.textSize = dev; measurePaint.measureText(score) }
         measurePaint.fontFeatureSettings = null
-        val room = SCORE_FIT_W * s
-        return if (w <= room) SCORE_PX else (SCORE_PX * room / w).coerceAtLeast(K.STACKED_NFL_SCORE_FLOOR_PX)
+        return px / s
     }
 
-    /** The code's size (design px): 25.2 for 2–3 letters; a longer one steps down 2 px until it fits, floor 18 (§5.4). */
+    /** The code's size (design px): `StackedNflGeometry.codePx` (25.2, 2-px steps to 18; 18 when even that is too wide). */
     private fun codeFitPx(abbrev: String): Float {
-        if (abbrev.length <= 3) return K.STACKED_NFL_CODE_PX
-        var px = K.STACKED_NFL_CODE_PX
-        val room = scoreRight - scoreSlotW - CODE_SCORE_GAP_MIN * s - (possStripeW + logoMl + logoSlotW + centrePl) - ballGap - ballPx
-        while (px > CODE_MIN_PX && codeAdvance(abbrev, px) > room) px = (px - CODE_STEP_PX).coerceAtLeast(CODE_MIN_PX)
-        return px
+        val old = codePaint.textSize
+        val px = G.codePx(s) { dev -> codePaint.textSize = dev; codePaint.measureText(abbrev) }
+        codePaint.textSize = old
+        return (px ?: K.STACKED_FIT_MIN_PX * s) / s
     }
 
     private fun codeAdvance(abbrev: String, px: Float): Float {
@@ -802,16 +773,19 @@ internal class StackedNflPainter(
         return w
     }
 
-    private fun rowX(x: Float, mirrored: Boolean): Float = if (mirrored) rowsW - x else x
-
-    /** The logo fitted in 50.4 × 43.2 about ([cx], [cy]), or the fallback disc (a 4+ letter code: the stripe disc). */
-    private fun logo(c: Canvas, cx: Float, cy: Float, abbrev: String, b: Bitmap?, stripeColour: Int) {
+    /**
+     * The logo fitted in 50.4 x 43.2 about ([cx], [cy]); with no bitmap, nothing while [pending] (the follow's logo is
+     * loading, under `LOGO_WAIT_MS`, as the NHL Stacked bug), else the fallback disc (a 4+ letter code: the stripe disc).
+     */
+    private fun logo(c: Canvas, cx: Float, cy: Float, abbrev: String, b: Bitmap?, pending: Boolean, stripeColour: Int) {
         if (b != null) {
             val k = minOf(logoFitH / b.height.coerceAtLeast(1), logoFitW / b.width.coerceAtLeast(1))
             val lw = b.width * k
             val lh = b.height * k
             logoDst.set(cx - lw / 2f, cy - lh / 2f, cx + lw / 2f, cy + lh / 2f)
             c.drawBitmap(b, null, logoDst, bmpPaint)
+        } else if (pending) {
+            return
         } else if (disc.isCapsule(abbrev)) {
             disc.drawStripeDisc(c, cx, cy, stripeColour or OPAQUE)
         } else {
@@ -887,19 +861,18 @@ internal class StackedNflPainter(
      * 63 from [r]), the italic's overhang and the icon included.
      */
     internal fun barInk(b: NflBarContent, l: Float, r: Float, mirrored: Boolean): RectF {
-        val x = if (mirrored) r - barTextL - b.wordsAdvance else l + barTextL
+        val gr = G.barGroup((r - l) / s, b.flag, labelW(b) / s, subW(b) / s, mirrored, FloatArray(G.G_SIZE))
+        val x = l + gr[G.G_LABEL] * s
         val out = RectF(x, 0f, x, 0f)
-        var pen = x
-        if (b.flag) { out.union(RectF(pen, 0f, pen + iconW, 1f)); pen += iconW + barGap }
+        if (b.flag) out.union(RectF(l + gr[G.G_ICON] * s, 0f, l + gr[G.G_ICON] * s + iconW, 1f))
         val path = Path()
         val t = RectF()
-        barPaint.getTextPath(b.label, 0, b.labelLen, pen, 0f, path)
+        barPaint.getTextPath(b.label, 0, b.labelLen, x, 0f, path)
         path.computeBounds(t, true)
         out.union(t)
         if (b.subLen > 0) {
-            pen += barPaint.measureText(b.label, 0, b.labelLen) + 2 * barGap + dividerW
             path.reset()
-            barSubPaint.getTextPath(b.sub, 0, b.subLen, pen, 0f, path)
+            barSubPaint.getTextPath(b.sub, 0, b.subLen, l + gr[G.G_SUB] * s, 0f, path)
             path.computeBounds(t, true)
             out.union(t)
         }
@@ -908,18 +881,18 @@ internal class StackedNflPainter(
 
     /**
      * A row's element extents for a [stripe]-wide stripe, device px from the rows' left (mirrored as drawn): the code's
-     * advance, the ball, the pips (three slots) and the score's ink for [score] at its fitted size.
+     * ink, the ball, the pips (three slots) and the score's ink for [score] at its fitted size.
      */
     internal fun rowExtents(abbrev: String, score: String, stripe: Float, mirrored: Boolean): RowExtents {
         val px = codeFitPx(abbrev)
         val adv = codeAdvance(abbrev, px)
-        val anchor = stripe + logoMl + logoSlotW + centrePl
+        val codeX = G.codeX(stripe / s) * s
         fun span(a: Float, b: Float) = if (mirrored) (rowsW - b) to (rowsW - a) else a to b
         val codeInk = Rect()
         val cp = Paint(codePaint).apply { textSize = px * s; textAlign = Paint.Align.LEFT }
         cp.getTextBounds(abbrev, 0, abbrev.length, codeInk)
-        val code = span(anchor + codeInk.left, anchor + codeInk.right)
-        val ballL = anchor + adv + ballGap
+        val code = span(codeX + codeInk.left, codeX + codeInk.right)
+        val ballL = G.ballX(codeX / s, adv / s) * s
         val spx = scoreFitPx(score)
         val sp = Paint(scorePaint).apply { textSize = spx * s; textAlign = Paint.Align.LEFT }
         val sw = sp.measureText(score)
@@ -927,10 +900,11 @@ internal class StackedNflPainter(
         sp.getTextBounds(score, 0, score.length, si)
         val scoreInk = if (mirrored) (rowsW - scoreRight + si.left) to (rowsW - scoreRight + si.right)
         else (scoreRight - sw + si.left) to (scoreRight - sw + si.right)
+        val pipsEnd = G.pipX(codeX / s, StackedNflFrame.PIPS - 1) * s + pipW
         return RowExtents(
             code = code,
             ball = span(ballL, ballL + ballPx),
-            pips = span(anchor, anchor + 3 * pipW + 2 * pipGap),
+            pips = span(codeX, pipsEnd),
             score = scoreInk,
             scorePx = spx,
             codePx = px,
@@ -973,33 +947,14 @@ internal class StackedNflPainter(
         private const val CODE_TRACK_EM = 0.01f
         private const val PERIOD_TRACK_EM = 0.02f
         private const val BAR_TRACK_EM = 0.01f
-        /** The code's line box top in the row: (120 − (56 + 8 + 6)) / 2 mock = 25 → 11.25 (§2.3). */
-        private const val CODE_LINE_TOP = 11.25f
-        /** A 4+ letter code (§5.4): 2-px steps, floor 18, keeping 12 to the score slot. */
-        private const val CODE_MIN_PX = 18f
-        private const val CODE_STEP_PX = 2f
-        private const val CODE_SCORE_GAP_MIN = 12f
-        /** The score (§2.3, §5.4): 35.1, three digits fitted to 43. */
-        private const val SCORE_PX = M.SCORE_PX * K.STACKED_SCALE
-        private const val SCORE_FIT_W = 43f
         /** The pop's scale is clamped here (the timeline's spring overshoots to 1.5). */
         private const val POP_SCALE_MIN = 0.5f
         private const val POP_SCALE_MAX = 1.6f
-        /** The burn's white flash: the mock's `toBurn` 50 % opacity. */
-        private const val PIP_BURN_ALPHA = 0.15f
-        /** The divider: white .5 on a team or neutral bar, black .4 on the flag bar (§2.4). */
-        private const val DIVIDER_ALPHA = 0.5f
-        private const val FLAG_DIVIDER_ALPHA = 0.4f
-        /** The red-zone sub patch (§6.3): `mixBlack(#C8102E, .172)`. */
-        const val RED_ZONE_SUB = 0xFFA60D26.toInt()
-        /** The possession ball's fill (§6.3). */
-        const val BALL_FILL = 0xFF8B4513.toInt()
         /** The flag icon's viewBox. */
         private const val FLAG_VIEW_W = 30f
         private const val FLAG_VIEW_H = 34f
         /** The sprites are baked at this multiple of their drawn size (as `NFL_ATLAS_SCALE`). */
         private const val SPRITE_SCALE = 1.5f
-        private const val CLOCK_BREATHING = 5f
         private const val WORD_BREATHING = 6f
         private const val SLOT_LINE_PITCH_EM = 1.05f
 
@@ -1016,9 +971,6 @@ internal class StackedNflPainter(
             out[n++] = '0' + r % 10
             return n
         }
-
-        private fun isTeamKind(k: NflBarKind) = k == NflBarKind.PLAY || k == NflBarKind.PAT || k == NflBarKind.KICKOFF ||
-            k == NflBarKind.TIMEOUT || k == NflBarKind.SCORE
 
         /** The five score words (`sports_nfl_*`) by kind. */
         internal fun scoreWord(k: NflScoreKind): Int = when (k) {

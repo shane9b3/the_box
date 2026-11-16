@@ -18,6 +18,7 @@ import app.thebox.core.sports.SportsPrefs
 import app.thebox.ui.sports.StackedNflRunFixtures as F
 import app.thebox.ui.theme.BoxDesignScale
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
@@ -100,5 +101,22 @@ class StackedNflLogoTest {
         render(home = false)
         assertEquals(1, requests.size)
         assertNull("no bitmap: the painter's LogoDisc", probe.args!!().homeLogo)
+        assertFalse("no URL: the disc at once, no wait", probe.args!!().homeLogoPending)
+    }
+
+    /** Integration ruling 6 (as `StackedBug`): a logo still loading leaves its slot empty for `LOGO_WAIT_MS`, then the disc. */
+    @Test
+    fun aSlowLogoWaitsThenTheDisc() {
+        repo.bug.value = withLogos(F.view())
+        rule.mainClock.autoAdvance = false
+        val hooks = F.hooks(probe, calls, logoFetch = { _, _, _ -> kotlinx.coroutines.awaitCancellation() })
+        rule.setContent {
+            BoxDesignScale { StackedNflBug(repo, placement, ScoreBugFixtures.noGeometry, Modifier, ScoreBugPlacement::place, hooks) }
+        }
+        advance(200)
+        assertNull(probe.args!!().awayLogo)
+        assertTrue("loading: the slot waits (no disc flash)", probe.args!!().awayLogoPending && probe.args!!().homeLogoPending)
+        advance(K.LOGO_WAIT_MS)
+        assertFalse("after LOGO_WAIT_MS: the disc", probe.args!!().awayLogoPending || probe.args!!().homeLogoPending)
     }
 }

@@ -7,25 +7,32 @@ import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.Shader
 import androidx.test.core.app.ApplicationProvider
-import app.thebox.core.sports.ClockSlot
+import app.thebox.core.sports.DownText
 import app.thebox.core.sports.FieldZone
 import app.thebox.core.sports.NflBarKey
 import app.thebox.core.sports.NflBarKind
 import app.thebox.core.sports.NflScore
 import app.thebox.core.sports.NflScoreKind
+import app.thebox.core.sports.NflStackedColours
+import app.thebox.core.sports.NflTimeoutMark
 import app.thebox.core.sports.PeriodKind
 import app.thebox.core.sports.PeriodLabel
+import app.thebox.core.sports.ScoreBugView
 import app.thebox.core.sports.Side
 import app.thebox.core.sports.SportsConstants as K
 import app.thebox.core.sports.StackedNflFrame
+import app.thebox.core.sports.StackedNflTargets
+import app.thebox.core.sports.StackedNflTrack
+import app.thebox.core.sports.StackedNflTransition
 import app.thebox.core.sports.StackedPair
 import app.thebox.core.sports.TabTail
 import app.thebox.ui.R
 import app.thebox.ui.sports.StackedNflTestKit.DARK
 import app.thebox.ui.sports.StackedNflTestKit.GREY
 import app.thebox.ui.sports.StackedNflTestKit.TRANSPARENT
+import app.thebox.ui.sports.StackedNflTestKit.down
 import app.thebox.ui.sports.StackedNflTestKit.field
-import app.thebox.ui.sports.StackedNflTestKit.play
+import app.thebox.ui.sports.StackedNflTestKit.tab
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -37,17 +44,17 @@ import java.io.File
 import kotlin.math.pow
 
 /**
- * NFL Stacked §9.2 `StackedNflScreenshotTest` (WP-3): the box drawn through the real [StackedNflPainter.drawFrame] (and
- * through it [StackedNflScorePainter] and [NineSlice]) with the bundled fonts, from **hand-built** frames
- * ([StackedNflTestKit]; re-point at integration): every §3.4 state for KC @ BUF, the dark-bar matchups IND @ NE and
- * DAL @ NYG, BUF–NE, DAL @ PHI, LV–PIT and CIN–DEN; the four corners × Standard / Large over the dark gradient, and the
- * top corners over white ice and 50 % grey; the takeover for each kind at 0 / 216 / 450 / 1 000 / 1 500 / 2 025 /
- * 3 600 / 4 200, a +7 pair at 3 600 / 5 016 / 8 400, the still frames; the flag at 150 / 400; the burn at 200 / 1 600.
+ * NFL Stacked §9.2 `StackedNflScreenshotTest`, **through the real pipeline** (integration pass 2026-11-15): each state is a
+ * `ScoreBugView` as the NFL machine shapes it, laid out by `StackedNflTargets.of`, worded by `StackedNflPainter.frame` /
+ * `fillBar`, coloured by `NflStackedColours`, sampled from `StackedNflTimeline` (rest, or a transition at a time) and the
+ * takeover from `NflScoreTimeline` under `NflScoreSpec.STACKED`, then drawn by `StackedNflPainter.drawFrame` (which draws
+ * the takeover itself, the hockey order). Every §3.4 state for KC @ BUF, the dark-bar matchups IND @ NE and DAL @ NYG,
+ * BUF–NE, DAL @ PHI, LV–PIT and CIN–DEN; the four corners × Standard / Large over the dark gradient, the top corners over
+ * white ice and 50 % grey; every takeover kind at the design times on both sides, a +7 pair, the still frames.
  *
- * PNGs under `ui/build/score-bug-stacked-nfl/` (not yet goldens: the lead appends them after the owner's review), plus a
- * contact sheet for the lead in [StackedNflTestKit.SHEETS]. Asserted: the bar background is the content's colour where
- * drawn, white words on every team bar ≥ 4.5 : 1 and the flag words ≥ 4.5, the rows' white ≥ 7, and no ball, post or
- * streak pixel outside the top part.
+ * PNGs under `ui/build/score-bug-stacked-nfl/` (hashed by `:ui:sportsHashGate`), contact sheets also to
+ * [StackedNflTestKit.SHEETS]. Asserted: the bar background is the content's colour where drawn, the words pass contrast
+ * (team bars ≥ 4.5, flag ≥ 4.5, rows ≥ 7), and no ball, post or streak pixel outside the top part.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -66,7 +73,7 @@ class StackedNflScreenshotTest {
         val painter = StackedNflPainter(s, large, bold, italic)
         val score = StackedNflScorePainter(s, large, barlow, bold, StackedNflTestKit.SPEC)
         val shadow = painter.bakeShadow()!!
-        val logoPx = Math.round(58.5f * s)
+        val logoPx = Math.round(STACKED_NFL_BADGE * s)
         val logos = HashMap<String, Bitmap>()
         fun logo(code: String) = logos.getOrPut(code) { StackedNflTestKit.logo(code, logoPx) }
         val glows = HashMap<Pair<Int, Int>, GlowMasks>()
@@ -83,73 +90,82 @@ class StackedNflScreenshotTest {
         TL("tl", false, false), TR("tr", true, false), BL("bl", false, true), BR("br", true, true)
     }
 
-    /** One look: the matchup, the state, the layout, the bar key (and the previous one during a REKEY). */
+    /**
+     * One look: a real view and how its frame is sampled. [frame] gets the targets' rest frame and may move one track
+     * into a transition; [bar] overrides the bar key (the runner's pinned score labels only); [prev] is the bar a REKEY
+     * leaves (its background lerps under `barBgMix`).
+     */
     private class Look(
         val name: String,
-        val match: String = "KC-BUF",
-        val state: (StackedNflPainter) -> StackedNflFrameState,
-        val f: () -> StackedNflFrame,
+        val view: ScoreBugView,
+        val frame: (StackedNflTargets, StackedNflFrame) -> StackedNflFrame = { _, f -> f },
         val bar: NflBarKey? = null,
-        val barDim: Boolean = false,
-        val prev: NflBarKey? = null,
+        val prev: ScoreBugView? = null,
     ) {
-        val away get() = match.substringBefore('-')
-        val home get() = match.substringAfter('-')
+        val away get() = view.away.abbrev
+        val home get() = view.home.abbrev
     }
 
     private val kit = StackedNflTestKit
     private val p1 = PeriodLabel(PeriodKind.REG, 1)
-    private fun st(away: String = "KC", home: String = "BUF", a: Int? = 3, h: Int? = 2, slots: Int = 3): (StackedNflPainter) -> StackedNflFrameState =
-        { p -> kit.state(p, away, home, targets = kit.targets(a, h, slots)) }
+    private val flagView = kit.view(flagId = "401873061503")
+    private val buf1 = NflTimeoutMark(Side.HOME, 1, confirmed = true)
+    private val timeoutView = kit.view(homeTimeouts = 1, timeout = buf1)
+
+    /** [f] with the bar track [ms] into [kind] from the bar at rest (open) or closed. */
+    private fun bar(kind: StackedNflTransition, ms: Float, fromOpen: Boolean) = { t: StackedNflTargets, f: StackedNflFrame ->
+        val from = kit.rest(t).also { if (!fromOpen) kit.at(it, StackedNflTrack.BAR, StackedNflTransition.STILL, 0f, StackedNflFrame(), to = false) }
+        kit.at(f, StackedNflTrack.BAR, kind, ms, from)
+    }
 
     private val looks: List<Look> = listOf(
-        Look("play", state = st(), f = { kit.frame(poss = Side.AWAY) }, bar = play(Side.AWAY, 1, 10, tail = field(FieldZone.OWN, 35))),
-        Look("play-redzone", state = st(), f = { kit.frame(poss = Side.HOME) }, bar = play(Side.HOME, 4, null, goal = true, tail = TabTail.RedZone)),
-        Look("play-neutral", state = st(), f = { kit.frame() }, bar = play(null, 3, 7)),
-        Look("play-midfield", state = st(), f = { kit.frame(poss = Side.AWAY) }, bar = play(Side.AWAY, 2, 5, tail = field(FieldZone.MIDFIELD, 50))),
-        Look("play-no-distance", state = st(), f = { kit.frame(poss = Side.AWAY) }, bar = play(Side.AWAY, 3, null, tail = field(FieldZone.OPP, 12))),
-        Look("pat", state = st(), f = { kit.frame(poss = Side.AWAY) }, bar = NflBarKey(NflBarKind.PAT, Side.AWAY)),
-        Look("kickoff", state = st(), f = { kit.frame(poss = Side.AWAY) }, bar = NflBarKey(NflBarKind.KICKOFF, Side.AWAY, tail = field(FieldZone.OWN, 35))),
-        Look("flag-t150", state = st(), f = { kit.frame(poss = Side.AWAY).apply { shakeDx = kit.shake(150f); waveDeg = kit.wave(150f) } }, bar = NflBarKey(NflBarKind.FLAG, null)),
-        Look("flag-t400", state = st(), f = { kit.frame(poss = Side.AWAY).apply { shakeDx = kit.shake(400f); waveDeg = kit.wave(400f) } }, bar = NflBarKey(NflBarKind.FLAG, null)),
-        Look("timeout-burn-t200", state = st(h = 1), f = { kit.burn(kit.frame(poss = Side.AWAY, homeLit = 1), Side.HOME, 1, 200f) }, bar = NflBarKey(NflBarKind.TIMEOUT, Side.HOME, left = 1)),
-        Look("timeout-burn-t1600", state = st(h = 1), f = { kit.burn(kit.frame(poss = Side.AWAY, homeLit = 1), Side.HOME, 1, 1_600f) }, bar = NflBarKey(NflBarKind.TIMEOUT, Side.HOME, left = 1)),
-        Look("timeout", state = st(h = 1), f = { kit.frame(poss = Side.AWAY, homeLit = 1) }, bar = NflBarKey(NflBarKind.TIMEOUT, Side.HOME, left = 1)),
-        Look("halftime", state = st(), f = { kit.frame(clock = 0f) }, bar = NflBarKey(NflBarKind.HALFTIME, null)),
-        Look("end-of-1st", state = st(), f = { kit.frame(clock = 0f) }, bar = NflBarKey(NflBarKind.END_PERIOD, null, period = p1)),
-        Look("final", state = st(), f = { kit.frame(clock = 0f) }, bar = NflBarKey(NflBarKind.FINAL, null, finalKind = PeriodKind.REG)),
-        Look("final-ot", state = st(), f = { kit.frame(clock = 0f) }, bar = NflBarKey(NflBarKind.FINAL, null, finalKind = PeriodKind.OT)),
-        Look("stale-play", state = { kit.state(it, slot = ClockSlot.NoUpdate, slotText = res.getString(R.string.sports_no_update), dim = true) }, f = { kit.frame(bar = 0f) }),
-        Look("delayed-play", state = { kit.state(it, slot = ClockSlot.Delayed, slotText = res.getString(R.string.sports_delayed), dim = true) }, f = { kit.frame(bar = 0f) }),
-        Look("stale-break", state = st(), f = { kit.frame(clock = 0f) }, bar = NflBarKey(NflBarKind.NO_UPDATE, null), barDim = true),
-        Look("delayed-break", state = st(), f = { kit.frame(clock = 0f) }, bar = NflBarKey(NflBarKind.DELAYED, null), barDim = true),
-        Look("no-situation", state = st(), f = { kit.frame(bar = 0f) }),
-        Look("score-bar", state = { kit.state(it, awayScore = "30") }, f = { kit.frame(poss = Side.AWAY) }, bar = NflBarKey(NflBarKind.SCORE, Side.AWAY, score = NflScoreKind.TOUCHDOWN, points = 6)),
-        Look("score-between-pair", state = { kit.state(it, awayScore = "30") }, f = { kit.frame(poss = Side.AWAY) }, bar = NflBarKey(NflBarKind.SCORE, Side.AWAY, score = NflScoreKind.EXTRA_POINT)),
-        Look("rekey-t200", state = st(h = 1),
-            f = { kit.frame(poss = Side.AWAY, homeLit = 1, text = 0.25f).apply { barBgMix = 0.55f } },
-            bar = NflBarKey(NflBarKind.TIMEOUT, Side.HOME, left = 1), prev = play(Side.AWAY, 1, 10, tail = field(FieldZone.OWN, 35))),
-        Look("open-t200", state = st(), f = { kit.frame(poss = Side.AWAY, bar = 0.5f, text = 0f) }, bar = play(Side.AWAY, 1, 10, tail = field(FieldZone.OWN, 35))),
-        Look("three-digit", state = { kit.state(it, awayScore = "100", homeScore = "99") }, f = { kit.frame(poss = Side.HOME) }, bar = play(Side.HOME, 2, 8, tail = field(FieldZone.OPP, 41))),
-        Look("ot-two-slots", state = { kit.state(it, period = "OT", targets = kit.targets(1, 2, 2)) }, f = { kit.frame(poss = Side.HOME, awayLit = 1, homeLit = 2) }, bar = play(Side.HOME, 1, 10, tail = field(FieldZone.OWN, 25))),
-        Look("pips-hidden", state = { kit.state(it, targets = kit.targets(null, null, 0)) }, f = { kit.frame(poss = Side.AWAY) }, bar = play(Side.AWAY, 1, 10, tail = field(FieldZone.OWN, 35))),
+        Look("play", kit.view()),
+        Look("play-redzone", kit.view(down = down(4, null, goal = true), tab = kit.tab(Side.HOME, TabTail.RedZone))),
+        Look("play-neutral", kit.view(down = down(3, 7), tab = null)),
+        Look("play-midfield", kit.view(down = down(2, 5), tab = kit.tab(Side.AWAY, field(FieldZone.MIDFIELD, 50)))),
+        Look("play-no-distance", kit.view(down = down(3, null), tab = kit.tab(Side.AWAY, field(FieldZone.OPP, 12)))),
+        Look("pat", kit.view(down = DownText.Pat, tab = kit.tab(Side.AWAY, null))),
+        Look("kickoff", kit.view(down = DownText.Kickoff, tab = kit.tab(Side.AWAY, field(FieldZone.OWN, 35)))),
+        Look("flag-t150", flagView, { _, f -> kit.flag(f, 150f) }),
+        Look("flag-t400", flagView, { _, f -> kit.flag(f, 400f) }),
+        Look("timeout-burn-t200", timeoutView, { _, f -> kit.burn(f, Side.HOME, 2, 1, 200f) }),
+        Look("timeout-burn-t1600", timeoutView, { _, f -> kit.burn(f, Side.HOME, 2, 1, 1_600f) }),
+        Look("timeout", timeoutView),
+        Look("halftime", kit.halftime()),
+        Look("end-of-1st", kit.endOf(p1)),
+        Look("final", kit.final()),
+        Look("final-ot", kit.final(PeriodKind.OT)),
+        Look("stale-play", kit.staleInPlay()),
+        Look("delayed-play", kit.delayedInPlay()),
+        Look("stale-break", kit.staleInBreak()),
+        Look("delayed-break", kit.delayedInBreak()),
+        Look("no-situation", kit.view(down = null)),
+        Look("score-bar", kit.view(awayScore = 30), bar = kit.scoreKey(Side.AWAY, NflScoreKind.TOUCHDOWN, 6)),
+        Look("score-between-pair", kit.view(awayScore = 30), bar = NflBarKey(NflBarKind.PAT, Side.AWAY)),
+        // Mid-transition frames (deliberate): a REKEY 200 ms in (the new words still sliding in over the lerped
+        // background), an OPEN 200 ms in (the bar half open, its words not yet in: they start at 400).
+        Look("rekey-t200", timeoutView, bar(StackedNflTransition.REKEY, 200f, fromOpen = true), prev = kit.view()),
+        Look("open-t200", kit.view(), bar(StackedNflTransition.OPEN, 200f, fromOpen = false)),
+        Look("three-digit", kit.view(awayScore = 100, homeScore = 99, down = down(2, 8), tab = kit.tab(Side.HOME, field(FieldZone.OPP, 41)))),
+        Look("ot-two-slots", kit.view(awayTimeouts = 1, homeTimeouts = 2, slots = 2, period = PeriodLabel(PeriodKind.OT, 1), tab = kit.tab(Side.HOME, field(FieldZone.OWN, 25)))),
+        Look("pips-hidden", kit.view(awayTimeouts = null, homeTimeouts = null, slots = null)),
         // The dark-bar matchups (Rec 2) and the collision pairs.
-        Look("ind-ne-play", "IND-NE", st("IND", "NE"), { kit.frame(poss = Side.AWAY) }, play(Side.AWAY, 1, 10, tail = field(FieldZone.OWN, 25))),
-        Look("ind-ne-redzone", "IND-NE", st("IND", "NE"), { kit.frame(poss = Side.HOME) }, play(Side.HOME, 2, 4, tail = TabTail.RedZone)),
-        Look("dal-nyg-play", "DAL-NYG", st("DAL", "NYG"), { kit.frame(poss = Side.AWAY) }, play(Side.AWAY, 3, 6, tail = field(FieldZone.OPP, 44))),
-        Look("dal-nyg-timeout", "DAL-NYG", st("DAL", "NYG", h = 0), { kit.frame(poss = Side.AWAY, homeLit = 0) }, NflBarKey(NflBarKind.TIMEOUT, Side.HOME, left = 0)),
-        Look("buf-ne-play", "BUF-NE", st("BUF", "NE"), { kit.frame(poss = Side.HOME) }, play(Side.HOME, 1, 10, tail = field(FieldZone.OWN, 20))),
-        Look("dal-phi-play", "DAL-PHI", st("DAL", "PHI"), { kit.frame(poss = Side.HOME) }, play(Side.HOME, 2, 10, tail = field(FieldZone.OPP, 30))),
-        Look("lv-pit-play", "LV-PIT", st("LV", "PIT"), { kit.frame(poss = Side.AWAY) }, play(Side.AWAY, 1, 10, tail = field(FieldZone.OWN, 35))),
-        Look("cin-den-kickoff", "CIN-DEN", st("CIN", "DEN"), { kit.frame(poss = Side.AWAY) }, NflBarKey(NflBarKind.KICKOFF, Side.AWAY, tail = field(FieldZone.OWN, 35))),
+        Look("ind-ne-play", kit.view("IND", "NE", tab = kit.tab(Side.AWAY, field(FieldZone.OWN, 25)))),
+        Look("ind-ne-redzone", kit.view("IND", "NE", down = down(2, 4), tab = kit.tab(Side.HOME, TabTail.RedZone))),
+        Look("dal-nyg-play", kit.view("DAL", "NYG", down = down(3, 6), tab = kit.tab(Side.AWAY, field(FieldZone.OPP, 44)))),
+        Look("dal-nyg-timeout", kit.view("DAL", "NYG", homeTimeouts = 0, timeout = NflTimeoutMark(Side.HOME, 0, true))),
+        Look("buf-ne-play", kit.view("BUF", "NE", tab = kit.tab(Side.HOME, field(FieldZone.OWN, 20)))),
+        Look("dal-phi-play", kit.view("DAL", "PHI", down = down(2, 10), tab = kit.tab(Side.HOME, field(FieldZone.OPP, 30)))),
+        Look("lv-pit-play", kit.view("LV", "PIT")),
+        Look("cin-den-kickoff", kit.view("CIN", "DEN", down = DownText.Kickoff)),
     )
 
     private fun content(r: Rig, key: NflBarKey?, dim: Boolean, pair: StackedPair, away: String, home: String): NflBarContent? =
         key?.let { NflBarContent().also { c -> c.dim = dim; r.painter.fillBar(c, it, pair, away, home, res) } }
 
-    private class Shot(val bmp: Bitmap, val ox: Float, val oy: Float, val content: NflBarContent?)
+    private class Shot(val bmp: Bitmap, val ox: Float, val oy: Float, val content: NflBarContent?, val f: StackedNflFrame)
 
-    /** A takeover to draw over [render]'s look: [kind] (and a pair's [second]) at [t] by [scorer]. */
+    /** A takeover over [render]'s look: [kind] (and a pair's [second]) at [t] by [scorer]. */
     private class Take(val t: Float, val kind: NflScoreKind, val second: NflScoreKind? = null, val still: Boolean = false, val scorer: Side = Side.AWAY)
 
     private fun render(look: Look, large: Boolean, corner: Corner, bg: Int = DARK, take: Take? = null): Shot {
@@ -163,32 +179,33 @@ class StackedNflScreenshotTest {
             TRANSPARENT -> Unit
             else -> c.drawColor(bg)
         }
-        val pair = kit.PAIRS.getValue(look.match)
-        val f = look.f()
+        val pair = NflStackedColours.pair(look.away, look.home)
+        val targets = kit.targets(look.view)
+        val f = look.frame(targets, kit.rest(targets))
         val a = StackedNflDrawArgs()
-        val stt = look.state(r.painter)
+        val stt = r.painter.frame(look.view, targets, res)
         a.state = stt
         a.frame = f
         a.colours = pair
-        a.bar = content(r, look.bar, look.barDim, pair, look.away, look.home)
-        a.barPrev = content(r, look.prev, false, pair, look.away, look.home)
+        a.bar = content(r, look.bar ?: targets.bar, targets.barDim, pair, look.away, look.home)
+        a.barPrev = look.prev?.let { content(r, kit.targets(it).bar, false, pair, look.away, look.home) }
         a.awayLogo = r.logo(look.away)
         a.homeLogo = r.logo(look.home)
         a.mirrored = corner.mirrored
         a.up = corner.up
         a.still = take?.still ?: false
-        r.painter.takeover = null
-        r.painter.glow = null
+        a.shadow = r.shadow
         if (take != null) {
             val sc = if (take.scorer == Side.AWAY) pair.away else pair.home
             val awayN = stt.awayScore.toIntOrNull() ?: 0
             val homeN = stt.homeScore.toIntOrNull() ?: 0
             val g = kit.score(take.t, take.kind, take.second, take.still)
             val kind = if (g.segment == 1 && take.second != null) take.second else take.kind
-            val pts = POINTS.getValue(kind)
-            r.score.begin(take.scorer, listOf(NflScore(kind, pts, awayN, homeN)), sc.goal, r.logo(if (take.scorer == Side.AWAY) look.away else look.home), look.away, look.home, f.boxW)
-            r.painter.takeover = r.score
-            r.painter.glow = r.glow(f.boxW, K.STACKED_H + if (f.barClosed) 0f else f.barH)
+            r.score.begin(take.scorer, listOf(NflScore(kind, POINTS.getValue(kind), awayN, homeN)), sc.goal,
+                r.logo(if (take.scorer == Side.AWAY) look.away else look.home), look.away, look.home, f.boxW)
+            a.takeover = r.score
+            a.glow = r.glow(f.boxW, K.STACKED_H + if (f.barClosed) 0f else f.barH)
+            a.glowOn = true
             a.score = g
             a.scoreSide = take.scorer
             a.takeoverOn = true
@@ -197,14 +214,14 @@ class StackedNflScreenshotTest {
         val oy = r.m + if (corner.up) K.STACKED_BAR_H * r.s else 0f
         c.translate(ox, oy)
         r.painter.drawFrame(c, a)
-        return Shot(bmp, ox, oy, a.bar)
+        return Shot(bmp, ox, oy, a.bar, f)
     }
 
     private fun save(name: String, bmp: Bitmap) {
         File(out, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
-    private fun sheet(name: String, cells: List<List<Bitmap>>, alsoForLead: Boolean = false) {
+    private fun sheet(name: String, cells: List<List<Bitmap>>) {
         val cw = cells.flatten().maxOf { it.width }
         val ch = cells.flatten().maxOf { it.height }
         val cols = cells.maxOf { it.size }
@@ -213,7 +230,7 @@ class StackedNflScreenshotTest {
         c.drawColor(Color.BLACK)
         cells.forEachIndexed { row, list -> list.forEachIndexed { col, bmp -> c.drawBitmap(bmp, col * cw.toFloat(), row * ch.toFloat(), null) } }
         save(name, b)
-        if (alsoForLead) runCatching {
+        runCatching {
             kit.SHEETS.mkdirs()
             File(kit.SHEETS, "$name.png").outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
@@ -238,12 +255,10 @@ class StackedNflScreenshotTest {
     @Test
     fun everyStateInEveryCornerAtBothSizesAndTheContactSheets() {
         for (large in listOf(false, true)) {
-            val byCorner = Corner.entries.map { corner ->
-                looks.map { look -> render(look, large, corner).bmp.also { save("nfl-stacked-${look.name}-${corner.tag}-${sz(large)}-dark", it) } }
+            for (corner in Corner.entries) {
+                val shots = looks.map { look -> render(look, large, corner).bmp.also { save("nfl-stacked-${look.name}-${corner.tag}-${sz(large)}-dark", it) } }
+                sheet("nfl-stacked-contact-sheet-${sz(large)}-dark-${corner.tag}", shots.chunked(4))
             }
-            sheet("nfl-stacked-contact-sheet-${sz(large)}-dark-tl", byCorner[0].chunked(4), alsoForLead = true)
-            sheet("nfl-stacked-contact-sheet-${sz(large)}-dark-tr", byCorner[1].chunked(4), alsoForLead = true)
-            sheet("nfl-stacked-contact-sheet-${sz(large)}-dark-bottom", (byCorner[2].take(8) + byCorner[3].take(8)).chunked(4), alsoForLead = !large)
             for ((bgName, bg) in listOf("ice" to Color.WHITE, "grey" to GREY)) {
                 val shots = looks.take(16).flatMap { look ->
                     listOf(Corner.TL, Corner.TR).map { corner ->
@@ -258,64 +273,73 @@ class StackedNflScreenshotTest {
 
     private val times = listOf(0, 216, 450, 1_000, 1_500, 2_025, 3_600, 4_200)
 
+    /** The look a takeover of [kind] by [scorer] at [t] draws over: the held pre-score body until 216, then the scored one. */
+    private fun takeLook(kind: NflScoreKind, t: Int, scorer: Side = Side.AWAY): Look {
+        if (t < 216) return looks.first { it.name == "play" }
+        val v = if (scorer == Side.AWAY) kit.view(awayScore = 24 + POINTS.getValue(kind)) else kit.view(homeScore = 17 + POINTS.getValue(kind))
+        return Look("td", v, bar = kit.scoreKey(scorer, kind, POINTS.getValue(kind)))
+    }
+
     @Test
     fun theTakeoverForEveryKindAtTheDesignTimesThePairAndTheStillFrames() {
-        val play = looks.first { it.name == "play" }
         val half = looks.first { it.name == "halftime" }
-        val leadRows = ArrayList<List<Bitmap>>()
-        for (large in listOf(false, true)) for (corner in listOf(Corner.TL, Corner.TR, Corner.BR)) {
+        for (large in listOf(false, true)) for (corner in Corner.entries) {
+            val strip = ArrayList<List<Bitmap>>()
             for (kind in NflScoreKind.entries) {
-                val row = times.map { t ->
-                    // The runner swaps in the scored body once the lead covers the box (216) and the score bar from 216.
-                    val look = if (t < 216) play else Look("td", state = { kit.state(it, awayScore = "30") }, f = { kit.frame(poss = Side.AWAY) },
-                        bar = NflBarKey(NflBarKind.SCORE, Side.AWAY, score = kind, points = POINTS.getValue(kind)))
-                    render(look, large, corner, take = Take(t.toFloat(), kind)).bmp.also {
+                strip += times.map { t ->
+                    render(takeLook(kind, t), large, corner, take = Take(t.toFloat(), kind)).bmp.also {
                         save("nfl-stacked-score-${kind.name.lowercase()}-${corner.tag}-${sz(large)}-t$t", it)
                     }
                 }
-                if (corner != Corner.BR || !large) leadRows += row.take(8)
-                if (corner == Corner.BR) break // one kind is enough for the bottom corner
             }
+            // A +7 pair (TD then XP): 0 / 216 / 1 500 / 3 600 (tally A pops, "EXTRA POINT") / 5 016 / 6 300 / 8 400 / 9 000.
+            strip += listOf(0, 216, 1_500, 3_600, 5_016, 6_300, 8_400, 9_000).map { t ->
+                val bar = when {
+                    t < 216 -> null
+                    t < 3_600 -> kit.scoreKey(Side.AWAY, NflScoreKind.TOUCHDOWN, 6)
+                    t < 5_016 -> NflBarKey(NflBarKind.PAT, Side.AWAY)
+                    else -> kit.scoreKey(Side.AWAY, NflScoreKind.EXTRA_POINT, 1)
+                }
+                val v = kit.view(awayScore = if (t < 216) 24 else if (t < 5_016) 30 else 31)
+                render(Look("pair", v, bar = bar), large, corner, take = Take(t.toFloat(), NflScoreKind.TOUCHDOWN, NflScoreKind.EXTRA_POINT)).bmp
+                    .also { save("nfl-stacked-score-pair-${corner.tag}-${sz(large)}-t$t", it) }
+            }
+            sheet("nfl-stacked-takeover-strip-${sz(large)}-${corner.tag}", strip)
         }
-        sheet("nfl-stacked-takeover-sheet", leadRows.take(15), alsoForLead = true)
-        // A +7 pair (TD then XP) at 3 600 / 5 016 / 8 400, and the still frames A / B of a single score and of the pair.
-        val pairRow = listOf(3_600, 5_016, 8_400).map { t ->
-            render(looks.first { it.name == "score-bar" }, false, Corner.TL, take = Take(t.toFloat(), NflScoreKind.TOUCHDOWN, NflScoreKind.EXTRA_POINT)).bmp
-                .also { save("nfl-stacked-score-pair-tl-std-t$t", it) }
-        }
+        // The still frames A / B of a single score and of the pair, and a takeover pinned at the 243 break width.
         val stills = listOf(1_000, 4_000, 6_000, 9_000).map { t ->
-            render(looks.first { it.name == "score-bar" }, false, Corner.TL, take = Take(t.toFloat(), NflScoreKind.TOUCHDOWN, if (t > 4_800) NflScoreKind.EXTRA_POINT else null, still = true)).bmp
+            render(Look("still", kit.view(awayScore = 30), bar = kit.scoreKey(Side.AWAY, NflScoreKind.TOUCHDOWN, 6)), false, Corner.TL,
+                take = Take(t.toFloat(), NflScoreKind.TOUCHDOWN, if (t > 4_800) NflScoreKind.EXTRA_POINT else null, still = true)).bmp
                 .also { save("nfl-stacked-score-still-tl-std-t$t", it) }
         }
-        // A takeover pinned at the 243 break width (§2.5 step 4 territory).
         val breakRow = listOf(450, 1_500).map { t ->
             render(half, false, Corner.TL, take = Take(t.toFloat(), NflScoreKind.TOUCHDOWN)).bmp.also { save("nfl-stacked-score-td-break-tl-std-t$t", it) }
         }
-        sheet("nfl-stacked-takeover-pair-still-sheet", listOf(pairRow + breakRow.take(1), stills + breakRow.drop(1)), alsoForLead = true)
-        assertTrue(File(out, "nfl-stacked-takeover-sheet.png").length() > 10_000)
+        sheet("nfl-stacked-takeover-still-break-sheet", listOf(stills, breakRow))
+        assertTrue(File(out, "nfl-stacked-takeover-strip-std-tl.png").length() > 10_000)
     }
 
     // ------------------------------------------------------------------ assertions on the drawn pixels
 
     @Test
     fun theBarBackgroundIsTheContentsColourAndItsWordsPassContrast() {
-        for (look in looks.filter { it.bar != null && it.prev == null && !it.name.startsWith("open") }) for (corner in Corner.entries) {
+        for (look in looks.filter { kit.targets(it.view).bar != null && it.prev == null && !it.name.startsWith("open") }) for (corner in Corner.entries) {
             val r = std
             val shot = render(look, false, corner)
             val b = shot.content!!
-            val l = if (corner.mirrored) (K.STACKED_ROWS_W - look.f().boxW) * r.s else 0f
-            val w = look.f().boxW * r.s
-            // The bar's far end from its stripes and words: the right end unmirrored, the left end mirrored.
+            val w = shot.f.boxW * r.s
+            val l = if (corner.mirrored) K.STACKED_ROWS_W * r.s - w else 0f
+            // The bar's far end from its words: the right end unmirrored (on the red patch in the red zone), the left
+            // end mirrored (the words are right-aligned, the patch runs to the right end, under the stripes).
             val x = if (corner.mirrored) l + 3f else l + w - 3f
             val y = if (corner.up) -K.STACKED_BAR_H * r.s / 2f else K.STACKED_H * r.s + K.STACKED_BAR_H * r.s / 2f
             val px = shot.bmp.getPixel((x + shot.ox).toInt(), (y + shot.oy).toInt())
-            val want = if (b.redZone && !corner.mirrored) StackedNflPainter.RED_ZONE_SUB else b.bg
+            val want = if (b.redZone && !corner.mirrored) NflStackedColours.RED_ZONE_SUB else b.bg
             assertTrue("${look.name} ${corner.tag}: bar bg ${Integer.toHexString(px)} vs ${Integer.toHexString(want)}", kit.near(want, px, 3))
             val min = 4.5
             assertTrue("${look.name}: words ${contrast(b.fg, b.bg)} on the bar", contrast(b.fg or (0xFF shl 24), b.bg or (0xFF shl 24)) >= min)
-            if (b.redZone) assertTrue("${look.name}: words on red", contrast(b.fg or (0xFF shl 24), StackedNflPainter.RED_ZONE_SUB) >= min)
+            if (b.redZone) assertTrue("${look.name}: words on red", contrast(b.fg or (0xFF shl 24), NflStackedColours.RED_ZONE_SUB) >= min)
         }
-        // White on the rows (≥ 7, §9.2) and the flag words (≥ 4.5).
         assertTrue(contrast(Color.WHITE, K.STACKED_ROW_BG) >= 7.0)
         assertTrue(contrast(K.STACKED_NFL_FLAG_FG, K.STACKED_NFL_FLAG_BG) >= 4.5)
     }
@@ -323,15 +347,33 @@ class StackedNflScreenshotTest {
     @Test
     fun theRowsCodeIsWhiteOnNavyFromTheDrawnPixels() {
         val shot = render(looks.first(), false, Corner.TL)
-        val r = std
-        // The code "KC"'s line box in the away row: the brightest pixel there is the glyphs' white.
         var brightest = 0
-        val x0 = (81f * r.s + shot.ox).toInt()
+        val x0 = (81f + shot.ox).toInt()
         for (y in (12 + shot.oy.toInt())..(36 + shot.oy.toInt())) for (x in x0..(x0 + 30)) {
             val p = shot.bmp.getPixel(x, y)
             if (lum(p) > lum(brightest)) brightest = p
         }
         assertTrue("code ink ${Integer.toHexString(brightest)}", contrast(brightest, K.STACKED_ROW_BG) >= 7.0)
+    }
+
+    @Test
+    fun theTakeoverCoversTheTopPartButNeverTheBorder() {
+        // Integration ruling 1 (the hockey order): at 1 000 the panel covers the top part, and the 1-px border is on top.
+        for (corner in Corner.entries) {
+            val shot = render(takeLook(NflScoreKind.FIELD_GOAL, 1_000), false, corner, take = Take(1_000f, NflScoreKind.FIELD_GOAL))
+            val w = shot.f.boxW
+            val l = if (corner.mirrored) K.STACKED_ROWS_W - w else 0f
+            val top = if (corner.up) -K.STACKED_BAR_H else 0f
+            val edge = shot.bmp.getPixel((shot.ox + l + w / 2f).toInt(), (shot.oy + top + 0.3f).toInt())
+            assertTrue("${corner.tag}: the border's colour on the top edge ${Integer.toHexString(edge)}", kit.near(K.STACKED_BORDER, edge, 40))
+            // The glow is drawn around the drawn box (device px, mirrored x, bar-up y): tinted just outside every edge.
+            val bottom = if (corner.up) K.STACKED_H else K.STACKED_H + K.STACKED_BAR_H
+            val bgAt = { x: Float, y: Float -> render(looks.first(), false, corner).bmp.getPixel((shot.ox + x).toInt(), (shot.oy + y).toInt()) }
+            for ((x, y) in listOf(l + w / 2f to top - 4f, l + w / 2f to bottom + 4f, l - 4f to K.STACKED_H / 2f, l + w + 4f to K.STACKED_H / 2f)) {
+                val glow = shot.bmp.getPixel((shot.ox + x).toInt(), (shot.oy + y).toInt())
+                assertTrue("${corner.tag}: the glow at ($x, $y) ${Integer.toHexString(glow)}", !kit.near(bgAt(x, y), glow, 4))
+            }
+        }
     }
 
     @Test
@@ -364,42 +406,42 @@ class StackedNflScreenshotTest {
     @Test
     fun theBarWordsAreTheDesignsWords() {
         val r = std
+        fun words(v: ScoreBugView) = NflBarContent().also { r.painter.fillBar(it, kit.targets(v).bar!!, kit.pair(v.away.abbrev, v.home.abbrev), v.away.abbrev, v.home.abbrev, res) }
+            .let { r.painter.barText(it) }
         fun words(key: NflBarKey, away: String = "KC", home: String = "BUF") =
-            NflBarContent().also { r.painter.fillBar(it, key, kit.PAIRS["KC-BUF"], away, home, res) }.let { r.painter.barText(it) }
-        assertEquals("1ST & 10 | KC 35", words(play(Side.AWAY, 1, 10, tail = field(FieldZone.OWN, 35))))
-        assertEquals("1ST & 10 | BUF 35", words(play(Side.AWAY, 1, 10, tail = field(FieldZone.OPP, 35))))
-        assertEquals("4TH & GOAL | RED ZONE", words(play(Side.HOME, 4, null, goal = true, tail = TabTail.RedZone)))
-        assertEquals("3RD | KC 35", words(play(Side.AWAY, 3, null, tail = field(FieldZone.OWN, 35))))
-        assertEquals("2ND & 5 | 50", words(play(Side.AWAY, 2, 5, tail = field(FieldZone.MIDFIELD, 50))))
-        assertEquals("3RD & 7", words(play(null, 3, 7, tail = field(FieldZone.OWN, 20))))
+            NflBarContent().also { r.painter.fillBar(it, key, kit.pair(away, home), away, home, res) }.let { r.painter.barText(it) }
+        assertEquals("1ST & 10 | KC 35", words(kit.view()))
+        assertEquals("1ST & 10 | BUF 35", words(kit.view(tab = tab(Side.AWAY, field(FieldZone.OPP, 35)))))
+        assertEquals("4TH & GOAL | RED ZONE", words(kit.view(down = down(4, null, true), tab = tab(Side.HOME, TabTail.RedZone))))
+        assertEquals("3RD | KC 35", words(kit.view(down = down(3, null))))
+        assertEquals("2ND & 5 | 50", words(kit.view(down = down(2, 5), tab = tab(Side.AWAY, field(FieldZone.MIDFIELD, 50)))))
+        assertEquals("3RD & 7", words(kit.view(down = down(3, 7), tab = null)))
+        assertEquals("EXTRA POINT", words(kit.view(down = DownText.Pat, tab = tab(Side.AWAY, null))))
+        assertEquals("LV KICKOFF | LV 35", words(kit.view("SEA", "LV", down = DownText.Kickoff, tab = tab(Side.HOME))))
+        // RC9: a kick-off never reads RED ZONE, through the real table.
+        assertEquals("LV KICKOFF", words(kit.view("SEA", "LV", down = DownText.Kickoff, tab = tab(Side.HOME, TabTail.RedZone))))
+        assertEquals("FLAG ON THE PLAY", words(flagView))
+        assertEquals("TIMEOUT BUF | 1 LEFT", words(timeoutView))
+        assertEquals("TIMEOUT BUF | 0 LEFT", words(kit.view(homeTimeouts = 0, timeout = NflTimeoutMark(Side.HOME, 0, true))))
+        assertEquals("END OF 1ST", words(kit.endOf(p1)))
+        assertEquals("END OF 4TH", words(kit.endOf(PeriodLabel(PeriodKind.REG, 4))))
+        assertEquals("END OF OT", words(kit.endOf(PeriodLabel(PeriodKind.OT, 1))))
+        assertEquals("HALFTIME", words(kit.halftime()))
+        assertEquals("FINAL", words(kit.final()))
+        assertEquals("FINAL/OT", words(kit.final(PeriodKind.OT)))
+        assertEquals("NO UPDATE", words(kit.staleInBreak()))
+        assertEquals("DELAYED", words(kit.delayedInBreak()))
+        assertEquals("TOUCHDOWN | KC +6", words(kit.scoreKey(Side.AWAY, NflScoreKind.TOUCHDOWN, 6)))
         assertEquals("EXTRA POINT", words(NflBarKey(NflBarKind.PAT, Side.AWAY)))
-        assertEquals("LV KICKOFF | LV 35", words(NflBarKey(NflBarKind.KICKOFF, Side.HOME, tail = field(FieldZone.OWN, 35)), "SEA", "LV"))
-        // RC9: a kick-off never reads RED ZONE.
-        assertEquals("LV KICKOFF", words(NflBarKey(NflBarKind.KICKOFF, Side.HOME, tail = TabTail.RedZone), "SEA", "LV"))
-        assertEquals("FLAG ON THE PLAY", words(NflBarKey(NflBarKind.FLAG, null)))
-        assertEquals("TIMEOUT BUF | 1 LEFT", words(NflBarKey(NflBarKind.TIMEOUT, Side.HOME, left = 1)))
-        assertEquals("TIMEOUT BUF | 0 LEFT", words(NflBarKey(NflBarKind.TIMEOUT, Side.HOME, left = 0)))
-        assertEquals("END OF 1ST", words(NflBarKey(NflBarKind.END_PERIOD, null, period = p1)))
-        assertEquals("END OF 4TH", words(NflBarKey(NflBarKind.END_PERIOD, null, period = PeriodLabel(PeriodKind.REG, 4))))
-        assertEquals("END OF OT", words(NflBarKey(NflBarKind.END_PERIOD, null, period = PeriodLabel(PeriodKind.OT, 1))))
-        assertEquals("HALFTIME", words(NflBarKey(NflBarKind.HALFTIME, null)))
-        assertEquals("FINAL", words(NflBarKey(NflBarKind.FINAL, null, finalKind = PeriodKind.REG)))
-        assertEquals("FINAL/OT", words(NflBarKey(NflBarKind.FINAL, null, finalKind = PeriodKind.OT)))
-        assertEquals("NO UPDATE", words(NflBarKey(NflBarKind.NO_UPDATE, null)))
-        assertEquals("DELAYED", words(NflBarKey(NflBarKind.DELAYED, null)))
-        assertEquals("TOUCHDOWN | KC +6", words(NflBarKey(NflBarKind.SCORE, Side.AWAY, score = NflScoreKind.TOUCHDOWN, points = 6)))
-        assertEquals("EXTRA POINT", words(NflBarKey(NflBarKind.SCORE, Side.AWAY, score = NflScoreKind.EXTRA_POINT)))
-        assertEquals("TWO-POINT | BUF +2", words(NflBarKey(NflBarKind.SCORE, Side.HOME, score = NflScoreKind.TWO_POINT, points = 2)))
-        // Colours: a team kind takes the side's bar; neutral and break kinds the neutral bar with the row stripes; the flag
-        // bar its fixed yellow (S-D6).
-        val pair = kit.PAIRS.getValue("KC-BUF")
+        assertEquals("TWO-POINT | BUF +2", words(kit.scoreKey(Side.HOME, NflScoreKind.TWO_POINT, 2)))
+        // Colours: the one rule, `NflStackedColours.bar`.
+        val pair = kit.pair("KC", "BUF")
         val c = NflBarContent()
-        r.painter.fillBar(c, play(Side.HOME, 1, 10), pair, "KC", "BUF", res)
-        assertEquals(listOf(pair.home.barBg, pair.home.barA, pair.home.barB, Color.WHITE), listOf(c.bg, c.a, c.b, c.fg))
-        r.painter.fillBar(c, play(null, 1, 10), pair, "KC", "BUF", res)
-        assertEquals(listOf(K.STACKED_BAR_NEUTRAL, pair.away.stripe, pair.home.stripe), listOf(c.bg, c.a, c.b))
-        r.painter.fillBar(c, NflBarKey(NflBarKind.FLAG, null), pair, "KC", "BUF", res)
-        assertEquals(listOf(K.STACKED_NFL_FLAG_BG, K.STACKED_NFL_FLAG_FG, K.STACKED_NFL_FLAG_B, K.STACKED_NFL_FLAG_FG), listOf(c.bg, c.a, c.b, c.fg))
-        assertTrue(c.flag)
+        for (v in listOf(kit.view(tab = tab(Side.HOME)), kit.view(tab = null), flagView, kit.halftime(), timeoutView)) {
+            val key = kit.targets(v).bar!!
+            r.painter.fillBar(c, key, pair, "KC", "BUF", res)
+            val want = NflStackedColours.bar(key, pair)
+            assertEquals(listOf(want.bg, want.a, want.b, want.fg), listOf(c.bg, c.a, c.b, c.fg))
+        }
     }
 }

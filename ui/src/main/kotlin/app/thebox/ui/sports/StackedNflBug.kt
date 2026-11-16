@@ -54,7 +54,6 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import app.thebox.core.sports.Box as DesignBox
-import app.thebox.core.sports.CentreText
 import app.thebox.core.sports.GameId
 import app.thebox.core.sports.GoalTimeline
 import app.thebox.core.sports.League
@@ -85,7 +84,6 @@ import app.thebox.core.sports.StackedNflTrack
 import app.thebox.core.sports.StackedNflTransition
 import app.thebox.core.sports.StackedPair
 import app.thebox.core.sports.TeamColours
-import app.thebox.core.sports.TeamLine
 import app.thebox.ui.R
 import app.thebox.ui.full.PlayerUi
 import app.thebox.ui.guide.GuideDebugCounters
@@ -100,7 +98,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.util.Locale
 import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 import kotlin.coroutines.cancellation.CancellationException
@@ -112,9 +109,9 @@ import kotlin.math.roundToInt
  * `FollowLogos` at the takeover badge size, the place hint, the live region), [StackedNflRun] (the eight layout tracks of
  * `StackedNflTimeline` keyed on `StackedNflTargets`, the flag sub-track, the pin) and the scoring takeover
  * (`NflScoreTimeline` under `NflScoreSpec.STACKED`, one score or a +7/+8 pair), drawing through one
- * `Spacer.drawBehind { … }` node tagged `SCORE_BUG_TAG` on the **drawn** box: the glow
- * ([StackedNflScorePainter.drawGlow]), the box ([StackedNflPainter.drawFrame]) and the takeover
- * ([StackedNflScorePainter.drawTakeover]). Reached only through `ScoreBug(...)`'s style branch (NFL and
+ * `Spacer.drawBehind { … }` node tagged `SCORE_BUG_TAG` on the **drawn** box: one [StackedNflPainter.drawFrame], which
+ * draws the glow, the box and the takeover (handed in through [StackedNflDrawArgs]) in the hockey order, the border on
+ * top (integration ruling 1). Reached only through `ScoreBug(...)`'s style branch (NFL and
  * `NhlBugStyle.STACKED`); [placement] carries `league = NFL` and `style = STACKED`, so `place` returns the footprint and
  * the box is drawn inside it, the rows at its left edge, or mirrored at its right edge in a right-hand corner.
  *
@@ -210,11 +207,16 @@ internal fun StackedNflBug(
     val logos = remember(loader) { FollowLogos(hooks.logoFetch ?: loader?.let { coilLogoFetch(it, context) }, scope) }
     DisposableEffect(logos) { onDispose { logos.release() } }
     val followed = holder.lastFollowed
+    /** (Integration ruling 6, as `StackedBug`) The logos had `LOGO_WAIT_MS` to land: until then an empty slot, not a disc. */
+    val logoWaited = remember { mutableStateOf(false) }
     LaunchedEffect(followed?.away?.logo, followed?.home?.logo, s) {
         if (followed == null) return@LaunchedEffect
         // ST S6: one bitmap per team at the takeover's badge size (58.5 × s); the rows draw it scaled down.
         val px = (STACKED_NFL_BADGE * s).roundToInt().coerceAtLeast(1)
         logos.start(followed.away.logo, followed.home.logo, px, px)
+        logoWaited.value = false
+        delay(K.LOGO_WAIT_MS)
+        logoWaited.value = true
     }
 
     // ---- the runner and the takeover. Bookkeeping runs above the visibility return, so a score while hidden or placing
@@ -313,7 +315,7 @@ internal fun StackedNflBug(
     if (real != null) {
         // Rule 2: the first view of a follow, and its first non-waiting one, snap: nothing animates in on follow.
         if (!run.viewSeen) { run.viewSeen = true; run.snapAll() }
-        if (!run.freshSeen && !waitingView(real)) { run.freshSeen = true; run.snapAll() }
+        if (!run.freshSeen && !nflWaiting(real)) { run.freshSeen = true; run.snapAll() }
         if (box == null || placement.placing || placement.size != g.size) {
             cancelTakeover()
             if (placement.size != g.size) run.snapAll()
@@ -511,28 +513,30 @@ internal fun StackedNflBug(
         a.colours = pair
         if (isSample) {
             a.awayLogo = null; a.homeLogo = null // the sample never borrows the follow's logos
+            a.awayLogoPending = false; a.homeLogoPending = false // place mode: discs at once
         } else {
             a.awayLogo = logos.away.image?.asAndroidBitmap()
             a.homeLogo = logos.home.image?.asAndroidBitmap()
+            // ST S6 / StackedBug: no holder or a failed load → the disc; else the slot waits LOGO_WAIT_MS for the logo.
+            val wait = !logoWaited.value && (hooks.logoFetch != null || loader != null)
+            a.awayLogoPending = wait && a.awayLogo == null && !logos.away.failed
+            a.homeLogoPending = wait && a.homeLogo == null && !logos.home.failed
         }
         a.mirrored = mirrored
         a.up = up
         a.still = if (on) g.still else run.still
+        // Integration ruling 2: the shadow the drawing painter baked (a state read: the draw joins the bake when it lands).
+        a.shadow = shadow.value
+        // Integration ruling 1: the painter draws the takeover in the hockey order (glow, box, takeover, border on top);
+        // the glow box is the pinned box, which is the drawn box while pinned (the CLOCK / BAR layout is pinned).
+        a.takeover = if (a.takeoverOn) g.painter else null
+        a.glow = if (a.takeoverOn) run.glowForDraw() else null
+        a.glowOn = a.takeoverOn && g.glowOn
         return a
     }
     fun drawBug(c: android.graphics.Canvas) {
         if (GuideDebugCounters.ENABLED) GuideDebugCounters.bump(DRAWS_STACKED_NFL_BUG)
-        val a = fillArgs()
-        val gp = g.painter
-        val sf = a.score
-        if (a.takeoverOn && gp != null && sf != null && g.glowOn) {
-            // The glow box is the pinned box: its left edge mirrored left of the rows, its top above an upward bar.
-            val gx = if (mirrored) (K.STACKED_ROWS_W - run.pinBoxW) * s else 0f
-            val gy = if (up && run.pinBarOpen) -K.STACKED_BAR_H * s else 0f
-            gp.drawGlow(c, sf, run.glowForDraw(), gx, gy)
-        }
-        painter.drawFrame(c, a)
-        if (a.takeoverOn && gp != null && sf != null) gp.drawTakeover(c, sf, mirrored)
+        painter.drawFrame(c, fillArgs())
     }
     hooks.probe?.let { it.args = ::fillArgs; it.draw = ::drawBug }
     // The box is drawn at absolute offsets inside its footprint: a right-to-left locale must not mirror the spacers.
@@ -579,15 +583,15 @@ internal fun StackedNflBug(
 /** The takeover badge (mock 130 × 0.45 = 58.5 Standard design px); the logos are fetched at this size (ST S6). */
 internal const val STACKED_NFL_BADGE = StackedNflMock.SCORE_BADGE * K.STACKED_SCALE
 
+/** A zero-width space: marks a back-to-back flag's live text as new without changing what is spoken (ruling 7). */
+internal const val FLAG_TEXT_MARK = "\u200B"
+
 /** The flag bar's wave runs at most this long from its REKEY: the flag mark's hold (S-D8, the idle budget). */
 private const val FLAG_HOLD_MS = K.NFL_FLAG_MARK_MS
 
 /** The top part's width at rest, Standard design px: the rows plus the open clock column (§5.1: 333 / 243). */
 internal fun nflRestBoxW(clockOpen: Boolean): Float = K.STACKED_ROWS_W + (if (clockOpen) K.STACKED_CLOCK_W else 0f)
 
-/** NFL views put "Delayed" / "No update" on either line: the follow has not yet shown a fresh view. */
-private fun waitingView(v: ScoreBugView): Boolean =
-    v.top is CentreText.Delayed || v.top is CentreText.NoUpdate || v.bottom is CentreText.Delayed || v.bottom is CentreText.NoUpdate
 
 /** [b] with the rows' scores replaced by a pair's first tally (§4.3: the digits follow tally A until 5 016). */
 private fun withScores(b: StackedNflFrameState, away: Int, home: Int) = StackedNflFrameState(
@@ -1273,8 +1277,6 @@ private class NflBodyMerge {
     }
 }
 
-private fun shortOf(t: TeamLine) = t.shortName ?: t.name
-
 /**
  * (NFL Stacked §8.4) The semantics string: the Pill's [NflDescribe] (score, clock, possession, down, red zone), plus the
  * timeouts while the pips show them ("Timeouts left: Chiefs 3, Bills 2"). The score string stands alone.
@@ -1286,7 +1288,7 @@ internal class StackedNflDescribe(private val res: Resources, private val v: Sco
         val h = t.homeTimeouts
         if (v.goalSide != null || a == null || h == null || t.timeoutSlots <= 0) return base
         val sep = if (base.endsWith(".")) " " else ". "
-        return base + sep + res.getString(R.string.sports_desc_nfl_timeouts, shortOf(v.away), a, shortOf(v.home), h)
+        return base + sep + res.getString(R.string.sports_desc_nfl_timeouts, nflShortOf(v.away), a, nflShortOf(v.home), h)
     }
 }
 
@@ -1299,49 +1301,31 @@ internal class StackedNflDescribe(private val res: Resources, private val v: Sco
 internal class StackedNflLiveText {
     private var game: GameId? = null
     private var lastView: ScoreBugView? = null
+    /** The flag id last announced, and how many flags so far (its parity marks a back-to-back flag's text). */
+    private var flagId: String? = null
+    private var flags = 0
     var text = ""
         private set
 
     fun next(v: ScoreBugView, res: Resources): String {
         if (v === lastView) return text
         lastView = v
-        if (v.gameId != game) { game = v.gameId; text = "" }
-        if (waitingView(v)) return text
+        if (v.gameId != game) { game = v.gameId; text = ""; flagId = null; flags = 0 }
+        if (nflWaiting(v)) return text
         val n = v.nfl
         val mark = n?.timeout
+        val id = n?.flagId
+        if (id != null && id != flagId) { flagId = id; flags++ }
         text = when {
-            v.goalSide != null -> stackedNflScoreText(res, v) ?: ""
-            n?.flagId != null -> res.getString(R.string.sports_live_nfl_flag)
-            mark != null && mark.confirmed -> res.getString(R.string.sports_live_nfl_timeout, shortOf(if (mark.side == Side.AWAY) v.away else v.home))
+            v.goalSide != null -> nflScoreText(res, v) ?: ""
+            // Integration ruling 7: a live region speaks only when its text changes, so a flag that directly follows
+            // another (a new flagId, no "" between) ends in a zero-width space on every second flag: spoken the same,
+            // but a new text, so each flagId is announced once.
+            id != null -> res.getString(R.string.sports_live_nfl_flag) + if (flags % 2 == 0) FLAG_TEXT_MARK else ""
+            mark != null && mark.confirmed -> res.getString(R.string.sports_live_nfl_timeout, nflShortOf(if (mark.side == Side.AWAY) v.away else v.home))
             else -> ""
         }
         return text
-    }
-}
-
-private fun kindWord(res: Resources, k: NflScoreKind): String = res.getString(
-    when (k) {
-        NflScoreKind.TOUCHDOWN -> R.string.sports_nfl_td
-        NflScoreKind.EXTRA_POINT -> R.string.sports_nfl_xp
-        NflScoreKind.FIELD_GOAL -> R.string.sports_nfl_fg
-        NflScoreKind.SAFETY -> R.string.sports_nfl_safety
-        NflScoreKind.TWO_POINT -> R.string.sports_nfl_2pt
-    },
-).lowercase(Locale.getDefault())
-
-/** The score announcement of a view under the mark (the Pill's wording); null with no score kind. */
-private fun stackedNflScoreText(res: Resources, v: ScoreBugView): String? {
-    val scores = v.nfl?.scores.orEmpty()
-    val side = v.goalSide ?: return null
-    if (scores.isEmpty()) return null
-    val a = v.away
-    val h = v.home
-    val scorer = (if (side == Side.AWAY) a else h).name
-    val first = kindWord(res, scores[0].kind)
-    return if (scores.size >= 2) {
-        res.getString(R.string.sports_live_nfl_pair, shortOf(a), a.score ?: 0, shortOf(h), h.score ?: 0, scorer, first, kindWord(res, scores[1].kind))
-    } else {
-        res.getString(R.string.sports_live_nfl_score, shortOf(a), a.score ?: 0, shortOf(h), h.score ?: 0, scorer, first)
     }
 }
 

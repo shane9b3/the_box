@@ -198,19 +198,20 @@ class StackedNflFitTest {
 
     @Test
     fun nothingOfTheBoxLeavesItsFootprint() {
+        // Real views through the real table and timeline (integration pass): flag, red zone, halftime, no situation.
         val looks = listOf(
-            kit.frame(poss = Side.AWAY) to NflBarKey(NflBarKind.FLAG, null),
-            kit.frame(poss = Side.HOME) to NflBarKey(NflBarKind.PLAY, Side.HOME, down = app.thebox.core.sports.DownText.Down(4, null, true), tail = TabTail.RedZone),
-            kit.frame(clock = 0f) to NflBarKey(NflBarKind.HALFTIME, null),
-            kit.frame(bar = 0f) to null,
-        )
+            kit.view(flagId = "401873061503"),
+            kit.view(down = kit.down(4, null, goal = true), tab = kit.tab(Side.HOME, TabTail.RedZone)),
+            kit.halftime(),
+            kit.view(down = null),
+        ).map { v -> Triple(v, kit.rest(kit.targets(v)), kit.targets(v).bar) }
         for (large in listOf(false, true)) {
             val s = scale(large)
             val p = painter(large) // no shadow bake: the shadow is the halo's, inside the layer's margins
             val m = if (large) K.GOAL_LAYER_MARGIN_LARGE else K.GOAL_LAYER_MARGIN
             val lw = Math.round(K.STACKED_NFL_W_MAX * s + 2 * m)
             val lh = Math.round((K.STACKED_H + K.STACKED_BAR_H) * s + 2 * m)
-            for ((f, key) in looks) for (mirrored in listOf(false, true)) for (up in listOf(false, true)) {
+            for ((v, f, key) in looks) for (mirrored in listOf(false, true)) for (up in listOf(false, true)) {
                 for (shake in listOf(0f, -2.7f, 2.7f)) {
                     val bmp = Bitmap.createBitmap(lw, lh, Bitmap.Config.ARGB_8888)
                     val c = Canvas(bmp)
@@ -220,9 +221,9 @@ class StackedNflFitTest {
                     f.shakeDx = shake
                     f.waveDeg = 8f
                     val a = StackedNflDrawArgs().apply {
-                        state = kit.state(p, slot = ClockSlot.Clock)
+                        state = kit.state(p, v, res)
                         frame = f
-                        colours = kit.PAIRS.getValue("KC-BUF")
+                        colours = kit.pair("KC", "BUF")
                         bar = key?.let { k -> NflBarContent().also { p.fillBar(it, k, colours, "KC", "BUF", res) } }
                         this.mirrored = mirrored
                         this.up = up

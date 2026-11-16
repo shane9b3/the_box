@@ -302,7 +302,7 @@ class StackedNflDrawTest {
         assertEquals(StackedNflTransition.REKEY, movesOf(StackedNflTrack.BAR).single().kind)
         assertEquals(listOf("401873061503"), probe.flags.filter { !it.still }.map { it.id })
         advance(300)
-        assertTrue("the flag sub-track is sampled in draw", f().shakeDx > 0f && calls.flagSamples > 0)
+        assertTrue("the flag sub-track is sampled in draw (the real shake and wave)", f().waveDeg != 0f && calls.flagSamples > 0)
         show(F.view(flagId = "401873061503", clock = 200)) // the same flag, a later poll
         advance(500)
         assertEquals("the same id: no second shake", 1, probe.flags.size)
@@ -628,6 +628,23 @@ class StackedNflDrawTest {
         assertEquals("Timeout, Bills.", live())
         show(F.touchdown())
         assertTrue(live(), live().startsWith("Kansas City Chiefs touchdown."))
+    }
+
+    /** Integration ruling 7: a flag right after another (a new flagId, no "" between) is a new live text, spoken the same. */
+    @Test
+    fun backToBackFlagsAreEachAnnounced() {
+        start()
+        show(F.view(flagId = "401873061503"))
+        val first = live()
+        show(F.view(flagId = "401873061503", clock = 200))
+        assertEquals("the same flag on a later poll: unchanged, no second announcement", first, live())
+        show(F.view(flagId = "401873061520"))
+        val second = live()
+        assertTrue("a new flagId changes the live text", second != first)
+        assertEquals("spoken the same", "Flag on the play.", second.replace(FLAG_TEXT_MARK, ""))
+        show(F.view(flagId = "401873061540"))
+        assertTrue("and the third", live() != second)
+        assertEquals("Flag on the play.", live().replace(FLAG_TEXT_MARK, ""))
     }
 
     @Test

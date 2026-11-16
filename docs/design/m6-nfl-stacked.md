@@ -1037,3 +1037,89 @@ choice that keeps WP-1 … WP-5 disjoint was taken. Each item: what, and why.
     test resources, so `dto` / `snapshot` work in `:core` tests only). `NflStackedFixturesTest` checks all eight map.
 13. **Settings:** the Style row in Settings was already unconditional; only its comment and
     `settings_sports_style_desc` change (§7). `FullScreenHost`'s placement comment is corrected (no code change there).
+
+---
+
+## Integration rulings (2026-11-15)
+
+Taken in the integration pass (foundation + WP-1 … WP-5 on `nfl-stacked`, each built against stubs of the others). Each
+item: what, and why. Where a number differed between two packages, this design decides and the ruling names the winner.
+The NHL / CHL Stacked and NFL Pill drawing is unchanged (the 1 260 existing hash lines are unedited and green).
+
+1. **One takeover mechanism, the hockey order.** WP-3 drew the takeover inside `StackedNflPainter.drawFrame` from two
+   public painter vars; WP-4 drew it from outside (glow before, takeover after `drawFrame`), which would have drawn it
+   twice and put the border under the takeover. Kept: the hockey contract. `StackedNflDrawArgs` gains `takeover`,
+   `glow`, `glowOn` (as `StackedDrawArgs.goal` / `glow` / `glowOn`); `drawFrame` draws glow, shadow, box, bar, rows,
+   clock column, takeover, **border on top**. The painter vars and the runner's own glow / takeover calls are removed.
+   The glow is drawn at the drawn box's top-left (device px; mirrored `rowsW − w`; bar up `−barH`), which under the pin
+   is the baked box (the CLOCK / BAR layout channels are pinned), so the runner's and the painter's rect conventions
+   are one. Tests: `StackedNflScreenshotTest.theTakeoverCoversTheTopPartButNeverTheBorder` (border pixel and glow on all
+   four sides, four corners), `StackedNflEndToEndTest` (border over the takeover through the runner).
+2. **Shadow.** `StackedNflDrawArgs.shadow` carries the bake of the **drawing** painter instance (`remember(painter)`);
+   the draw reads it as state, so the frame after the bake lands draws it. The painter no longer caches a bake.
+3. **`takeoverOn` lifetime.** The runner holds `takeoverOn` until the driver reaches `endMs` (4 800; a pair 9 600) and
+   hands a frame only while `!done`; the painter's row flash and pop (3 600–4 800) are gated on it. Checked:
+   `StackedNflRunnerAssumptionsTest.theStackedSpecLengths`, the end-to-end pop / row-flash assertion at 3 800.
+4. **Mirrored red-zone patch.** WP-2 / WP-3 ran it from the divider to the bar's end on both sides; mirrored, that end
+   holds the two stripes, and a team whose stripe A is red (BUF, ATL, ARI, TB, …) lost it on the red patch (seen in the
+   screenshots). Mirrored, the patch now stops one text gap (10.8) after the sub, the divider's gap reflected, so the
+   stripes keep the team's bar under them as in a left corner. Left corners unchanged. `StackedNflGeometry.barGroup`
+   (`G_RED_TO`), `StackedNflGeometryTest`.
+5. **The flag wave at 8 s.** The runner stops the sub-track at the 8-s hold and rests the icon at 0° (`still`); the
+   wave is not at 0° then. Accepted: the flag mark ends at 8 s on the machine clock, so the bar re-keys away at that
+   moment and the REKEY hides the old words at its 0 %.
+6. **Missing logo.** As the NHL Stacked bug: while a followed team's logo is loading and `LOGO_WAIT_MS` (1 500) has not
+   passed, the slot is empty (`StackedNflDrawArgs.awayLogoPending` / `homeLogoPending`); then the `LogoDisc`. No URL, a
+   failed load, no loader, or place mode: the disc at once. `StackedNflLogoTest.aSlowLogoWaitsThenTheDisc`.
+7. **Back-to-back flags.** A live region speaks only when its text changes; a flag directly after another (a new
+   `flagId`, no "" between) kept the same text and was not announced. Every second flag's text now ends in a zero-width
+   space (`FLAG_TEXT_MARK`): spoken the same, a new text, so each `flagId` is announced once (and the same id on a later
+   poll is not). `StackedNflDrawTest.backToBackFlagsAreEachAnnounced`.
+8. **`ScoreBugPlacementTest.pillAndNflIgnoreTheStyle`** (red after WP-2's real footprint): the NFL loop is limited to
+   PILL, with an explicit NFL + STACKED expectation (top right Standard (1491, 56)–(1824, 197)). The only edit to that
+   file.
+9. **Timeout slots** (WP-1, confirmed): 3 in regulation always; in overtime the highest count seen in the period-5+
+   group (≤ 3). The other WP-1 readings in the notes (a 21 with a drop of 2 names the side; a drop one poll before its
+   21 upgrades the running fallback in place; the fallback is not ended by a plain new play; any score change in the
+   entry suppresses the flag; the 100-s freshness gate covers flag and fallback; a new half with no counts hides the
+   pips; flag and timeout never coexist, the flag wins in one entry; confirmed mark ≤ 180 s) are accepted as built.
+10. **Both orders of a 21 and its drop** burn exactly one pip, on the caller's side: 21 first → no mark until the drop,
+    then mark and drop in one view (one BURN); drop first → the fallback mark and the BURN, then the 21 upgrades it in
+    place (same bar key: no REKEY, no second burn). If the fallback has expired before the 21 arrives (a poll gap over
+    8 s), the 21 marks nothing: still one burn. `StackedNflEndToEndTest` drives both through the real machine.
+11. **`STACKED_NFL_WAVE_PIVOT_Y` = 13.69** (the mock's 26 × 17.9 / 34), not 13.8 (a rounding in §4.1 / §8.5; nothing
+    pinned 13.8). The test's tolerance is now 0.01.
+12. **One rule, one place (the duplicated rules).** The painters call `StackedNflGeometry` (row positions, stripe width,
+    code / score fit, bar stripes, the words group and red patch, `G.dx` / `G.deg` for the mirror, the takeover fit and
+    layout, `arcK`) and `NflStackedColours` (`bar(key, pair)`, `RED_ZONE_SUB`, the fallback pair); their private copies
+    are deleted. Where the numbers differed:
+    - **Score fit threshold:** the painter fitted a score wider than 43, WP-2 one wider than the 45 slot. §5.4 ("0–99 at
+      35.1 in 45; three digits scale to fit 43") → WP-2. No two-digit score changes ("88" is 42.1).
+    - **Code fit:** the painter stepped down only codes of 4+ letters, WP-2 any code too wide for its room. §5.4 ("a
+      longer one steps the code down") → WP-2; every NFL code fits at 25.2, so nothing moves (`StackedNflFitTest`).
+    - **Fallback colours:** the painter's null-pair look was the NHL fallback pair; §6.1 → `NflStackedColours.pair(null,
+      null)` (`NflTeamColours.FALLBACK`).
+    - **Divider width:** 1 design px (geometry) drawn at least 1 device px wide (as every hairline).
+    Painter-private design numbers moved to `SportsConstants`: the ball fill (`STACKED_NFL_BALL_FILL`, new), and to the
+    existing WP-2 names: code line top, divider alphas, burn α, score fit, "+N" size, block gap, word / badge shadow dy,
+    word sizes, streak skew and widths, word tracking, badge, padding and gap, clock air. Left in the painters (drawing
+    details, not design numbers): the SVG view boxes, sprite bake scale, tracking of the codes / period / bar words,
+    word breathing, slot line pitch, pop clamp, the disc alphas.
+13. **`NflBug.kt`'s private helpers** (`waiting`, `shortOf`, `kindWord`, `nflScoreText`) move verbatim to `NflText.kt`
+    (internal, `nfl*` names) and both NFL bugs call them; an exception to §8.3 (`NflBug.kt` "must not change") taken so
+    the wording exists once. NFL Pill behaviour and pixels are unchanged (its tests and hash lines are green).
+14. **Tests on the real code.** `StackedNflTestKit` now builds real views and reads `StackedNflTargets.of`,
+    `StackedNflPainter.frame`, `NflStackedColours`, `StackedNflTimeline` and `NflScoreSpec.STACKED` (no hand-built
+    frames). The runner tests (`StackedNflTestSupport`) use the real table, transitions, lengths, spec and score sampler;
+    only the painters' once-per-change calls and the glow bake stay recording fakes. Their stale fixture now has "No
+    update" on the top line, as the NFL machine writes it (it had it on the clock line, which the real table reads as
+    play). `StackedNflEndToEndTest`: the real machine with the eight 2026-11-15 fixtures and scripted snapshots, the real
+    runner and painters, rendered and asserted (play, possession, flag, timeouts, both orders, TD, +7, FG, safety, score
+    during a flag, end of quarter, halftime, stale, delayed, final; four corners × two sizes; draw allocations; idle).
+15. **The "bar with no words" cell** in WP-3's contact sheet (row 7, first column) is `open-t200`: the bar 200 ms into
+    OPEN (half height; its words start at 400). Deliberate; kept and labelled.
+16. **Golden hashes.** The `score-bug-stacked-nfl/` shots (827 PNGs from the real pipeline, deterministic over two clean
+    runs) are appended to `sports-hashes.txt` under a dated comment; no existing line changed. The owner's review of the
+    shots (§9.3) is still due; a change after it re-records only these lines.
+17. **Owner eye check (recorded, not changed):** the goalposts at the mock's x (234 on the 333 box) overlap the "+N" /
+    tally block from about 1 800 ms (the mock overlaps and clips there too); the posts are under the block's text.
