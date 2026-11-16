@@ -19,8 +19,8 @@ object StackedColourTable {
         League.OHL -> OHL.pair(away, home)
         League.WHL -> WHL.pair(away, home)
         League.QMJHL -> QMJHL.pair(away, home)
-        // The Stacked bug is hockey only (`ScoreBug(...)` forces the Pill / NFL bug for the NFL): never drawn.
-        League.NFL -> NhlStackedColours.pair(null, null)
+        // (NFL Stacked §6.1, Rec 4) The NFL's own table and pair cache; the CHL `LeagueTable` path is untouched.
+        League.NFL -> NflStackedColours.pair(away, home)
     }
 
     private val OHL = LeagueTable(League.OHL)

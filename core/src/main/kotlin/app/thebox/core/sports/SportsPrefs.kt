@@ -27,8 +27,8 @@ data class SportsPrefs(
     val nhlIntervalS: Int = 0,
     val nflIntervalS: Int = 0,
     /**
-     * (Stacked §1.3) "Score bug style" for hockey games (CHL P12: every `League.isHockey` league; the stored name is
-     * unchanged); Pill (the default) is never written to the document (`encodeDefaults = false`). Backed up with the rest of the domain. An unknown name decodes to [NhlBugStyle.PILL]
+     * (Stacked §1.3) "Score bug style" for every league (CHL P12: every `League.isHockey` league; NFL Stacked §7: the
+     * NFL too; the stored name is unchanged, no migration); Pill (the default) is never written to the document (`encodeDefaults = false`). Backed up with the rest of the domain. An unknown name decodes to [NhlBugStyle.PILL]
      * (the store's `coerceInputValues`, S7).
      */
     val nhlStyle: NhlBugStyle = NhlBugStyle.PILL,

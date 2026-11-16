@@ -1281,7 +1281,7 @@ class ScoreBugMachineTest {
             assertEquals(CentreText.Delayed, waiting.bottom, "$name waiting")
             assertEquals(label, waiting.period, "$name waiting keeps the period")
         }
-        // A final keeps the last label; the NFL never sets it.
+        // A final keeps the last label; (NFL Stacked §3.2, commit 0) the NFL sets it too, and keeps it while stale.
         val fin = Rig()
         fin.follow()
         fin.ok(final(kind = PeriodKind.OT).copy(period = 4, periodKind = PeriodKind.OT, otNumber = 1))
@@ -1291,10 +1291,11 @@ class ScoreBugMachineTest {
         n.follow(nfl)
         n.ok(nfl)
         assertEquals(League.NFL, n.m.view()!!.league)
-        assertNull(n.m.view()!!.period, "NFL")
+        assertEquals(PeriodLabel(PeriodKind.REG, 4), n.m.view()!!.period, "NFL")
         n.m.online(false)
         n.at(80_000)
-        assertNull(n.m.view()!!.period, "NFL stale")
+        assertEquals(CentreText.NoUpdate, n.m.view()!!.top, "NFL stale")
+        assertEquals(PeriodLabel(PeriodKind.REG, 4), n.m.view()!!.period, "NFL stale keeps the period")
     }
 
     @Test

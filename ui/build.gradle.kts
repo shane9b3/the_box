@@ -56,7 +56,7 @@ dependencies {
 // 3. `sportsHashGate` compares each SHA-256 with `src/test/resources/golden/sports-hashes.txt`.
 // The bytes depend on the host (OS, CPU, JDK): the list's `# host:` line records the one it was taken on. On any other
 // host the gate is SKIPPED with a message (not failed); regenerate the list there from the commit the header names.
-val sportsShotDirs = listOf("score-bug", "score-bug-stacked", "nfl-screenshots", "power-play", "goal-animation", "sports-tab")
+val sportsShotDirs = listOf("score-bug", "score-bug-stacked", "nfl-screenshots", "power-play", "goal-animation", "sports-tab", "score-bug-stacked-nfl")
 val cleanSportsShots = tasks.register<Delete>("cleanSportsShots") {
     description = "Deletes the sports screenshot folders the hash gate checks."
     delete(sportsShotDirs.map { layout.buildDirectory.dir(it) })

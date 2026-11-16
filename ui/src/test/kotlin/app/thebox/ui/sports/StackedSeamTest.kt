@@ -32,7 +32,8 @@ import kotlin.coroutines.EmptyCoroutineContext
  * docs/design/m6-score-bug-stacked-theme.md §10.2 `StackedSeamTest` (Stacked WP-3): `ScoreBug(...)`'s style seam with the
  * production hooks. STACKED never composes the Pill (so never builds its `GoalPainter`, `ScoreBugPainter` or
  * `PowerPlayPainter`, which only `ScoreBugWith` constructs) and PILL never composes Stacked (so never builds a Stacked
- * painter); an NFL view with STACKED prefs takes `NflBug`; a style flip swaps the bug with no fade.
+ * painter); an NFL view with STACKED prefs takes `StackedNflBug` (NFL Stacked §7, commit 0), never the hockey Stacked bug
+ * or the hockey Pill; a style flip swaps the bug with no fade.
  *
  * Also the `:ui` side of the S9 pin WP-1 could not write: the Pill's `GoalSampler.Real` and its takeover length
  * (`ScoreBug.kt`'s private `TAKEOVER_TOTAL_MS`) are still `GoalSpec.CLASSIC`'s.
@@ -47,7 +48,7 @@ class StackedSeamTest {
 
     private fun pill() = GuideDebugCounters.count(COMPOSITIONS_SCORE_BUG)
     private fun stacked() = GuideDebugCounters.count(COMPOSITIONS_STACKED_BUG)
-    private fun nfl() = GuideDebugCounters.count(COMPOSITIONS_NFL_BUG)
+    private fun stackedNfl() = GuideDebugCounters.count(COMPOSITIONS_STACKED_NFL_BUG)
 
     private fun host() {
         rule.mainClock.autoAdvance = false
@@ -93,13 +94,13 @@ class StackedSeamTest {
     }
 
     @Test
-    fun anNflViewWithStackedPrefsTakesTheNflBug() {
+    fun anNflViewWithStackedPrefsTakesTheStackedNflBug() {
         repo.bug.value = SportsFixtures.nflView()
-        val n0 = nfl()
+        val n0 = stackedNfl()
         val s0 = stacked()
         val p0 = pill()
         host()
-        assertTrue("the NFL bug composed", nfl() > n0)
+        assertTrue("the NFL Stacked bug composed", stackedNfl() > n0)
         assertEquals(0, stacked() - s0)
         assertEquals(0, pill() - p0)
     }

@@ -72,7 +72,7 @@ DEFAULTS = {
 NFL_FAULT_KEYS = sports.FAULT_KEYS + ("event_status", "event_older_s")
 STATE_KEYS = ("state", "name", "period", "clock", "away", "home", "possession", "down", "distance", "yardLine",
               "possessionText", "shortDownDistanceText", "isRedZone", "lastPlayType", "lastPlayScoreValue",
-              "lastPlayTeam", "situation", "gone")
+              "lastPlayTeam", "situation", "gone", "awayTimeouts", "homeTimeouts", "lastPlayText", "lastPlayId")
 
 NOT_FOUND_HTML = b"<html><body><h1>404 Not Found</h1></body></html>"
 
@@ -94,7 +94,8 @@ PLAY_TYPES = {
     "67": ("Passing Touchdown", "TD"), "68": ("Rushing Touchdown", "TD"), "59": ("Field Goal Good", "FG"),
     "74": ("Official Timeout", "Off TO"), "36": ("Interception Return Touchdown", "TD"),
     "26": ("Pass Interception Return", "INT"), "20": ("Safety", "SF"), "2": ("End Period", "EP"),
-    "65": ("End of Half", "EH"),
+    "65": ("End of Half", "EH"), "8": ("Penalty", "PEN"), "21": ("Timeout", "TO"), "3": ("Pass Incompletion", "INC"),
+    "52": ("Punt", "PUNT"), "75": ("Two-minute warning", "2MW"),
 }
 ORD = {1: "1st", 2: "2nd", 3: "3rd", 4: "4th"}
 
@@ -132,6 +133,7 @@ def win(label, n, period, away, home, run, **kw):
 def brk(label, period, away, home, name, prev, last):
     """A break (END_PERIOD or HALFTIME): the situation of [prev] is kept, the clock is 0:00."""
     d = dict(prev)
+    d.pop("lastPlayText", None)
     d.update(label=label, len=25, period=period, away=away, home=home, run=False, name=name, **last)
     return d
 
@@ -147,27 +149,37 @@ def _build():
     q1 = [
         win("q1 coin toss", 25, 1, 0, 0, False, down=0, distance=0, yardLine=0, possession=None, isRedZone=False, **lp("70", "home")),
         win("q1 kick-off, no possession", 25, 1, 0, 0, True, **down(1, 10, 75, "KC 25", None), **lp("53", "away")),
-        win("q1 KC ball", 25, 1, 0, 0, True, **down(1, 10, 75, "KC 25", "away"), **lp("5", "away")),
-        win("q1 3rd and 2, OPP 38", 25, 1, 0, 0, True, **down(3, 2, 38, "BUF 38", "away"), **lp("24", "away")),
+        win("q1 KC ball", 25, 1, 0, 0, True, **down(1, 10, 75, "KC 25", "away"), **lp("24", "away"),
+            lastPlayText="(12:49) P.Mahomes pass short right to T.Kelce for 6 yards. PENALTY on BUF-J.Poyer, "
+                         "Unnecessary Roughness, 15 yards, enforced at KC 31."),
+        win("q1 3rd and 2, OPP 38", 25, 1, 0, 0, True, **down(3, 2, 38, "BUF 38", "away"), **lp("8", "home"),
+            lastPlayText="(12:20) (No Play) PENALTY on BUF-T.Edmunds, Defensive Holding, 5 yards, enforced at BUF 43 - No Play."),
         win("q1 1st and goal, red zone", 25, 1, 0, 0, True, **down(1, 4, 4, "BUF 4", "away", goal=True, red=True), **lp("24", "away")),
     ]
     W.extend(q1)
     stale = dict(q1[-1])
-    stale.update(label="q1 score before the play (10 s)", len=10, away=6, run=False)
+    stale.update(label="q1 score before the play (10 s)", len=10, away=6, run=False,
+                 lastPlayText="(11:02) P.Mahomes pass short left to T.Kelce for 4 yards, TOUCHDOWN. Penalty on BUF-J.Poyer, "
+                              "Defensive Holding, 5 yards, declined.")
     W.append(stale)
     W.append(win("q1 try", 25, 1, 6, 0, False, **dead(0), **lp("67", "away", 6)))
-    W.append(win("q1 extra point, KC kick-off", 25, 1, 7, 0, False, **kick(65, "away"), **lp("74", "away")))
+    W.append(win("q1 extra point, KC kick-off", 25, 1, 7, 0, False, **kick(65, "away"), **lp("74", "away"),
+                 lastPlayText="(11:02) PENALTY on KC-J.Smith, Unnecessary Roughness, 15 yards, enforced on the kickoff."))
     W.append(win("q1 BUF ball, no possession", 25, 1, 7, 0, True, **down(1, 10, 25, "BUF 25", None), **lp("53", "home")))
-    last = win("q1 BUF 2nd and 7", 25, 1, 7, 0, True, **down(2, 7, 28, "BUF 28", "home"), **lp("5", "home"))
+    last = win("q1 BUF 2nd and 7", 25, 1, 7, 0, True, **down(2, 7, 28, "BUF 28", "home"), **lp("3", "home"),
+               lastPlayText="(3:10) J.Allen pass incomplete deep right to S.Diggs. Penalty on KC-C.Jones, Offensive Holding, declined.")
     W.append(last)
     W.append(brk("end 1st", 1, 7, 0, "STATUS_END_PERIOD", last, lp("2", "home")))
     # Q2
     W.append(win("q2 BUF 1st at KC 30", 25, 2, 7, 0, True, **down(1, 10, 70, "KC 30", "home"), **lp("24", "home")))
     W.append(win("q2 field goal, dead ball", 25, 2, 7, 3, False, **dead(100), **lp("59", "home", 3)))
     W.append(win("q2 BUF kick-off", 25, 2, 7, 3, False, **kick(35, "home"), **lp("74", "home")))
-    W.append(win("q2 KC red zone", 25, 2, 7, 3, True, **down(2, 4, 12, "BUF 12", "away", red=True), **lp("24", "away")))
+    # the two-minute warning (type 75) comes at the 2:00 mark of Q2 (and Q4) only; the window's clock starts at 2:00
+    W.append(win("q2 KC red zone, two-minute warning", 25, 2, 7, 3, True, **down(2, 4, 12, "BUF 12", "away", red=True),
+                 **lp("75", "away"), lastPlayText="Two-minute warning", clock0=120))
     W.append(win("q2 +7 pair in one body", 25, 2, 14, 3, False, **kick(65, "away"), **lp("74", "away")))
-    last = win("q2 BUF ball", 50, 2, 14, 3, True, **down(1, 10, 25, "BUF 25", "home"), **lp("5", "home"))
+    last = win("q2 BUF ball", 50, 2, 14, 3, True, **down(1, 10, 25, "BUF 25", "home"), **lp("21", "home"),
+               homeTimeouts=2, lastPlayText="Timeout #1 by BUF at 01:35.")
     W.append(last)
     W.append(brk("halftime", 2, 14, 3, "STATUS_HALFTIME", last, lp("65", "home")))
     # Q3
@@ -177,6 +189,7 @@ def _build():
     last = win("q3 KC 1st at KC 40", 25, 3, 14, 5, True, **down(1, 10, 60, "KC 40", "away"), **lp("5", "away"))
     W.append(last)
     stale = dict(last)
+    stale.pop("lastPlayText", None)
     stale.update(label="q3 defensive TD, stale situation", away=14, home=11, run=False, **lp("36", "home", 6))
     W.append(stale)
     W.append(win("q3 two-point try as a real down", 25, 3, 14, 11, False,
@@ -186,24 +199,45 @@ def _build():
     W.append(last)
     W.append(brk("end 3rd", 3, 14, 13, "STATUS_END_PERIOD", last, lp("2", "away")))
     # Q4
-    W.append(win("q4 KC 3rd and 9", 25, 4, 14, 13, True, **down(3, 9, 70, "KC 30", "away"), **lp("5", "away")))
-    W.append(win("q4 turnover, BUF in the red zone", 25, 4, 14, 13, True, **down(1, 10, 82, "KC 18", "home", red=True), **lp("26", "home")))
-    W.append(win("q4 field goal, dead ball", 25, 4, 14, 16, False, **dead(100), **lp("59", "home", 3)))
-    W.append(win("q4 BUF kick-off", 25, 4, 14, 16, False, **kick(35, "home"), **lp("74", "home")))
-    W.append(win("q4 BUF 3rd and 9 at its 2", 25, 4, 14, 16, True, **down(3, 9, 2, "BUF 2", "home"), **lp("5", "home")))
+    W.append(win("q4 KC 3rd and 9", 25, 4, 14, 13, True, **down(3, 9, 70, "KC 30", "away"), **lp("21", "away"),
+                 awayTimeouts=2, lastPlayText="Timeout #1 by KC at 15:00."))
+    W.append(win("q4 turnover, BUF in the red zone", 25, 4, 14, 13, True, **down(1, 10, 82, "KC 18", "home", red=True), **lp("26", "home"),
+                 awayTimeouts=3))  # a count flap: 2 -> 3 (never marks)
+    W.append(win("q4 BUF 2nd and 6, rush", 25, 4, 14, 13, True, **down(2, 6, 86, "KC 14", "home", red=True), **lp("5", "home"),
+                 awayTimeouts=2))  # ... 3 -> 2 again on a live, non-scoring play: not below the low-water mark, no mark
+    W.append(win("q4 field goal, dead ball", 25, 4, 14, 16, False, **dead(100), **lp("59", "home", 3)))  # the count stays 2
+    W.append(win("q4 BUF 3rd and 9 at its 2", 25, 4, 14, 16, True, **down(3, 9, 2, "BUF 2", "home"), **lp("5", "home"),
+                 homeTimeouts=2))  # no type 21: the fallback 8 s mark (a lost challenge)
     last = win("q4 KC safety, BUF free kick", 25, 4, 16, 16, False, **kick(20, "home", red=False), **lp("20", "away", 2))
     W.append(last)
     W.append(brk("end 4th", 4, 16, 16, "STATUS_END_PERIOD", last, lp("2", "home")))
     # OT
-    W.append(win("ot KC 1st", 25, 5, 16, 16, True, **down(1, 10, 75, "KC 25", "away"), **lp("53", "away")))
-    W.append(win("ot KC 1st and goal at 8", 25, 5, 16, 16, True, **down(1, 8, 8, "BUF 8", "away", goal=True, red=True), **lp("24", "away")))
+    W.append(win("ot KC 1st", 25, 5, 16, 16, True, **down(1, 10, 75, "KC 25", "away"), **lp("53", "away"),
+                 awayTimeouts=2, homeTimeouts=2))  # an OT group of 2 slots
+    W.append(win("ot KC 1st and goal at 8", 25, 5, 16, 16, True, **down(1, 8, 8, "BUF 8", "away", goal=True, red=True), **lp("21", "home"),
+                 homeTimeouts=1, lastPlayText="Timeout #1 by BUF at 09:35."))
     W.append({"label": "ot walk-off touchdown (post)", "len": 25, "period": 5, "state": "post", "name": "STATUS_FINAL",
               "run": False, "situation": False, "away": 22, "home": 16, **lp("68", "away", 6)})
     W.append({"label": "final", "len": None, "period": 5, "state": "post", "name": "STATUS_FINAL", "run": False,
               "situation": False, "away": 22, "home": 16, **lp("68", "away", 6)})
 
 
+def _carry_timeouts():
+    """Timeout counts persist between windows; each half group (periods 1-2, 3-4, 5+) restarts at 3/3 unless a window
+    names them. Windows with no situation (pre, post) carry none."""
+    group, away, home = None, 3, 3
+    for w in W:
+        if not w.get("situation"):
+            continue
+        g = 1 if w["period"] <= 2 else 2 if w["period"] <= 4 else 3
+        if g != group:
+            group, away, home = g, 3, 3
+        away, home = w.get("awayTimeouts", away), w.get("homeTimeouts", home)
+        w["awayTimeouts"], w["homeTimeouts"] = away, home
+
+
 _build()
+_carry_timeouts()
 
 
 def _clocks():
@@ -215,6 +249,8 @@ def _clocks():
             continue
         if w["period"] != cur:
             cur, ptr = w["period"], (600 if w["period"] == 5 else 900)
+        if "clock0" in w:
+            ptr = w["clock0"]
         if w["name"] in ("STATUS_END_PERIOD", "STATUS_HALFTIME") or w["state"] == "post":
             out.append(0)
             continue
@@ -251,6 +287,13 @@ def check_config(patch):
                 raise ValueError('possession must be "away", "home" or null')
             if "lastPlayTeam" in v and v["lastPlayTeam"] not in ("away", "home", None):
                 raise ValueError('lastPlayTeam must be "away", "home" or null')
+            for k in ("awayTimeouts", "homeTimeouts"):
+                if k in v and v[k] is not None and (isinstance(v[k], bool) or v[k] not in (0, 1, 2, 3)):
+                    raise ValueError(k + " must be 0..3 or null (omitted from the body)")
+            if "lastPlayText" in v and not isinstance(v["lastPlayText"], str):
+                raise ValueError("lastPlayText must be a string")
+            if "lastPlayId" in v and (isinstance(v["lastPlayId"], bool) or not re.fullmatch(r"\d+", str(v["lastPlayId"]))):
+                raise ValueError("lastPlayId must be digits (a numeric-like play id)")
             if "state" in v and v["state"] not in ("pre", "in", "post"):
                 raise ValueError('state must be "pre", "in" or "post"')
             if "situation" in v and v["situation"] is not None:
@@ -321,7 +364,7 @@ class SportsNfl:
             t -= ln[i]
             i += 1
         w = W[i]
-        s = {k: v for k, v in w.items() if k not in ("label", "len", "run")}
+        s = {k: v for k, v in w.items() if k not in ("label", "len", "run", "clock0")}
         if w["state"] != "pre":
             c0 = CLOCK0[i]
             s["clock"] = max(0, c0 - int(t / self.scale())) if w["run"] else c0
@@ -461,8 +504,10 @@ class SportsNfl:
         tid = s.get("lastPlayType")
         if tid is not None:
             text, abbr = PLAY_TYPES.get(str(tid), (str(tid), "PL"))
-            lp_ = {"id": f"{eid}{int(s.get('window', 0)):03d}", "type": {"id": str(tid), "text": text, "abbreviation": abbr},
-                   "text": text, "scoreValue": s.get("lastPlayScoreValue") or 0, "statYardage": 0,
+            pid = s.get("lastPlayId")
+            lp_ = {"id": str(pid) if pid is not None else f"{eid}{int(s.get('window', 0)):03d}",
+                   "type": {"id": str(tid), "text": text, "abbreviation": abbr},
+                   "text": s.get("lastPlayText") or text, "scoreValue": s.get("lastPlayScoreValue") or 0, "statYardage": 0,
                    "start": {"yardLine": yl}, "end": {"yardLine": yl}}
             side = s.get("lastPlayTeam")
             if side in ids:
@@ -476,7 +521,11 @@ class SportsNfl:
             sit["shortDownDistanceText"] = short
             if ptext:
                 sit["possessionText"] = ptext
-        sit.update({"isRedZone": bool(s.get("isRedZone")), "homeTimeouts": 3, "awayTimeouts": 3})
+        sit["isRedZone"] = bool(s.get("isRedZone"))
+        for k in ("homeTimeouts", "awayTimeouts"):  # a script value of null omits the key, as a body without counts
+            v = s.get(k, 3)
+            if v is not None:
+                sit[k] = int(v)
         if s.get("possession") in ids:
             sit["possession"] = ids[s["possession"]]
         return sit

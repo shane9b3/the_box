@@ -138,7 +138,8 @@ class StackedColourTableTest {
         }
         assertEquals(32 * 31, n)
         assertSame(NhlStackedColours.pair(null, null), StackedColourTable.pair(League.NHL, null, null))
-        assertSame(NhlStackedColours.pair(null, null), StackedColourTable.pair(League.NFL, "BUF", "CHI"))
+        // (NFL Stacked §6.1, commit 0) The NFL arm is `NflStackedColours.pair`, its own table and cache (WP-2 fills it).
+        assertSame(NflStackedColours.pair("BUF", "CHI"), StackedColourTable.pair(League.NFL, "BUF", "CHI"))
         // Same code, different leagues: the NHL's OTT is untouched by the OHL's.
         assertEquals(NhlStackedColours.pair("OTT", "TOR"), StackedColourTable.pair(League.NHL, "OTT", "TOR"))
         assertEquals("#DA1A32", hex(NhlTeamColours.of("OTT").base))

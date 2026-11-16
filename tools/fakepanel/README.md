@@ -323,10 +323,44 @@ debug origin (`files/debug/sports_base`) serves both leagues:
 - `POST /admin/sports-nfl {"restart": true}` (or `{"anchor_unix": T}`) re-anchors the NFL timeline; `POST /admin/sports
   {"restart": true}` restarts both (N8); `GET /admin/sports-nfl` shows the slate.
 - `sports_nfl_script`: `{"<event id>": {state, name, period, clock, away, home, possession, down, distance, yardLine,
-  possessionText, shortDownDistanceText, isRedZone, lastPlayType, lastPlayScoreValue, lastPlayTeam, situation: null, gone}}`
+  possessionText, shortDownDistanceText, isRedZone, lastPlayType, lastPlayScoreValue, lastPlayTeam, awayTimeouts,
+  homeTimeouts, lastPlayText, lastPlayId, situation: null, gone}}`
   overrides a game. A +8 pair is one body: `POST /admin/config {"sports_nfl_script": {"401899001": {"away": 16}}}` while the
   timeline shows 8 (script values replace the timeline's). `lastPlayType` is an ESPN play type id ("67" passing TD, "59" FG,
   "36" interception-return TD, "20" safety, "53" kick-off, "70" coin toss).
+- NFL Stacked keys (docs/design/m6-nfl-stacked.md §9.4), all in `sports_nfl_script`: `awayTimeouts` / `homeTimeouts` (0..3, or
+  `null` to leave the count out of the body; the timeline's own value when unset, 3/3 at the start of each half), `lastPlayText`
+  (the play's text; the type's name when unset) and `lastPlayId` (digits; unset = event id + window number, numeric and strictly
+  increasing, so use this key to re-send or send an older id). Type ids added: "8" Penalty, "21" Timeout, "3" Pass
+  Incompletion, "52" Punt, "75" Two-minute warning. A team timeout is type 21 with the caller's count dropping in the same
+  body; a penalty is type 8 or a normal play whose text holds upper-case "PENALTY on"; a declined foul is mixed-case
+  "Penalty on …, declined." and is never type 8. No new CLI flag: the scripted timeline already reaches overtime (counts
+  2/2), so there is no `--nfl-overtime`.
+- What the default timeline does for the Stacked bug (Q-times are seconds into the quarter; every window is 25 s or more
+  except the one 10 s window):
+
+  | Time in script (window) | Scripted feed | What the bug should show |
+  |---|---|---|
+  | Q1 50-75 (KC 1st & 10) | type 24, text "... PENALTY on BUF-...", play stands | flag bar for 8 s, then the normal bar |
+  | Q1 75-100 (KC 3rd & 2) | type 8 "Penalty", no-play text | flag bar for 8 s |
+  | Q1 125-135 (the 10 s window) | score 6-0, `lastPlay` still the old play, text holds the mixed-case declined "Penalty on BUF-..., declined." (as ESPN writes it) | TOUCHDOWN takeover only; no flag (declined) |
+  | Q1 160-185 (KC kick-off) | score 7-0, type 74 Official Timeout, down -1, `isRedZone` true, text holds an ACCEPTED upper-case "PENALTY on KC-..., Unnecessary Roughness, ... enforced on the kickoff." | KC KICKOFF, never RED ZONE; no timeout bar; no flag (a flagged score never shows a flag: score wins) |
+  | Q1 185-210 (BUF ball) | type 53 kick-off return, no `possession` | no possession mark; no flicker or error |
+  | Q1 210-235 (BUF 2nd & 7) | type 3, "Penalty on KC-..., declined." | no flag bar |
+  | Q2 75-100 (KC red zone, two-minute warning) | type 75 "Two-minute warning", clock starts at 2:00, counts unchanged (3/3) | no bar (75 never marks) |
+  | Q2 125-175 (BUF ball) | type 21, `homeTimeouts` 3 -> 2 in the same body, held all window | TIMEOUT BUF, 2 LEFT while that type-21 play is the last play (a timeout bar, not 8 s); home pips 2 of 3 |
+  | halftime / end of quarter | situation kept, counts kept | break bar; pips held |
+  | Q3 0-25 | counts back to 3/3 (the half reset) | pips refill; no timeout bar |
+  | Q4 0-25 (KC 3rd & 9) | type 21, `awayTimeouts` 3 -> 2 | TIMEOUT KC, 2 LEFT |
+  | Q4 25-50 | `awayTimeouts` 3 (a flap), type 26 | no bar |
+  | Q4 50-75 (BUF 2nd & 6) | `awayTimeouts` 3 -> 2 again, a live non-scoring rush (type 5, no 21) | no bar (not below the low-water mark of 2) |
+  | Q4 75-100 (FG dead ball) | score +3, type 59, counts unchanged (away 2) | no timeout bar |
+  | Q4 100-125 (BUF 3rd & 9) | `homeTimeouts` 3 -> 2, type 5 (no 21) | fallback: TIMEOUT BUF, 2 LEFT for 8 s (a lost challenge) |
+  | OT 0-25 | counts 2/2 | 2 pips per side |
+  | OT 25-50 (KC 1st & goal) | type 21, `homeTimeouts` 2 -> 1 | TIMEOUT BUF, 1 LEFT, 2 pip slots drawn |
+
+  Flag bar: 8 s. No bar for official timeouts or the two-minute warning. A script `lastPlayId` lower than one already shown
+  must never start a bar.
 - `sports_nfl_faults`: the NHL keys (`status`, `score_status`, `html_404`, `retry_after`, `pad_bytes`, `age`, `no_date`, `stall_s`,
   `stall_ms`, `max_age`), plus two for the per-event route only: `event_status` (400 or a JSON 404 → the app falls back to
   the dated board after two; 403 or 429 → the app slows to 10 s or more; with `html_404` a 404 is HTML, which never

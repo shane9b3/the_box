@@ -87,13 +87,14 @@ class ChlScoreSheetTest {
         }
     }
 
-    @Test fun theStyleRowShowsForAnyHockeyLeagueAndNotForTheNfl() {
+    @Test fun theStyleRowShowsForAnyHockeyLeagueAndForTheNfl() {
         for (league in CHL_LEAGUES + League.NHL) {
             val w = PlayerWorld()
             w.player.scores(ScoreFacts(style = NhlBugStyle.PILL, league = league))
             openSheet(w)
             assertEquals(1, w.ui.picker!!.choices.count { it is PickerChoice.ScoreStyleRow }, "$league browsing")
-            // A CHL follow while browsing the NFL list keeps the row; an NFL follow while browsing a CHL list hides it.
+            // A CHL follow while browsing the NFL list keeps the row; (NFL Stacked §7, commit 0) so does an NFL follow while
+            // browsing a CHL list: one style for every league.
             val chl = SportsFixtures.chlGame(league = league.takeIf { it != League.NHL } ?: League.OHL)
             w.player.scores(
                 ScoreFacts(
@@ -109,7 +110,7 @@ class ChlScoreSheetTest {
                     followed = SportsFixtures.nflView(game = nfl), game = SportsFixtures.followedOf(nfl),
                 ),
             )
-            assertTrue(w.ui.picker!!.choices.none { it is PickerChoice.ScoreStyleRow }, "$league: an NFL follow hides it")
+            assertEquals(1, w.ui.picker!!.choices.count { it is PickerChoice.ScoreStyleRow }, "$league: an NFL follow keeps it")
         }
     }
 

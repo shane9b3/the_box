@@ -220,8 +220,23 @@ object EspnMapper {
             typeText = type?.str("text"),
             side = sideOf(lp.obj("team")?.str("id")),
             scoreValue = lp.int("scoreValue"),
+            penalty = penalty(type?.str("id"), lp.str("text")),
         )
     }
+
+    /**
+     * (NFL Stacked §3.2, RC3) A flagged play: a no-play penalty (type 8), or an accepted foul on a play that stands, which
+     * ESPN writes with the upper-case "PENALTY on" in the play text. A declined foul is written "Penalty on …, declined."
+     * (mixed case) and is not a flag. Offsetting fouls are unproven and take the same rule. The text is never stored.
+     */
+    private fun penalty(typeId: String?, text: String?): Boolean =
+        typeId == SportsConstants.NFL_TYPE_PENALTY || (text != null && PENALTY_TEXT in text)
+
+    private const val PENALTY_TEXT = "PENALTY on"
+
+    /** (NFL Stacked §3.2) A timeout count kept only in `0..NFL_TIMEOUTS_MAX`; anything else (−1, 4, "x") is null. */
+    private fun timeouts(sit: JsonObject, key: String): Int? =
+        sit.int(key)?.takeIf { it in 0..SportsConstants.NFL_TIMEOUTS_MAX }
 
     // ------------------------------------------------------------------ the situation (§1.3)
 
@@ -258,8 +273,14 @@ object EspnMapper {
             }
             else -> NflPlay.None
         }
+        // (RC9) The kick-off after a score can carry `isRedZone: true` for minutes (SEA @ LV, 2026-11-15): only a real down
+        // is ever in the red zone.
         val redZone = sit.bool("isRedZone") == true && play is NflPlay.Down
-        return LeagueDetail.Nfl(play, possession, redZone, breakKind, lastPlay)
+        return LeagueDetail.Nfl(
+            play, possession, redZone, breakKind, lastPlay,
+            awayTimeouts = timeouts(sit, "awayTimeouts"),
+            homeTimeouts = timeouts(sit, "homeTimeouts"),
+        )
     }
 
     /** (B1) Whose half the ball is in: from `possessionText`'s prefix, else from the home-relative `yardLine`. */
