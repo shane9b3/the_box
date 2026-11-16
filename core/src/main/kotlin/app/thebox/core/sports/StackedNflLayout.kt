@@ -29,7 +29,8 @@ enum class NflBarKind { PLAY, PAT, KICKOFF, FLAG, TIMEOUT, END_PERIOD, HALFTIME,
  * - [side]: the team whose colours the bar takes ([NflBarKind.PLAY], [NflBarKind.PAT], [NflBarKind.KICKOFF],
  *   [NflBarKind.TIMEOUT], [NflBarKind.SCORE]); null = neutral (or the flag bar).
  * - [down] / [tail]: [NflBarKind.PLAY] and [NflBarKind.KICKOFF] (`NflView.down` / `NflView.tab.tail`, the gated values:
- *   a kick-off never carries `TabTail.RedZone`, RC9).
+ *   a kick-off never carries `TabTail.RedZone`, RC9). A neutral PLAY key ([side] null, C-N4) carries the raw field
+ *   relative to the away side ([StackedNflTargets.neutralTail]).
  * - [left]: [NflBarKind.TIMEOUT]'s timeouts left (0..3).
  * - [period]: [NflBarKind.END_PERIOD]'s period; [finalKind]: [NflBarKind.FINAL]'s kind (REG "FINAL", OT "FINAL/OT").
  * - [score] / [points]: [NflBarKind.SCORE]'s kind and points (6, 1, 3, 2).
@@ -153,14 +154,30 @@ data class StackedNflTargets(
                 val left = mark.left.coerceIn(0, K.NFL_TIMEOUTS_MAX)
                 return open(NflBarKey(NflBarKind.TIMEOUT, mark.side, left = left), poss, slot, burn = mark.side)
             }
-            val bar = when (val d = n?.down) {
+            // C-S1: a dead ball after a field goal or a safety holds the bar shown with the held tab (§3.4 "the held bar").
+            val shownDown = n?.down ?: n?.heldDown?.takeIf { tab != null }
+            val bar = when (val d = shownDown) {
                 null -> null
-                is DownText.Down -> NflBarKey(NflBarKind.PLAY, poss, down = d, tail = tab?.tail)
+                // C-N4: the neutral bar keeps the field; its tail is relative to the away side (see [NflBarKey]).
+                is DownText.Down -> NflBarKey(
+                    NflBarKind.PLAY, poss, down = d,
+                    tail = if (poss != null) tab?.tail else n?.field?.let { neutralTail(it) },
+                )
                 DownText.Pat -> NflBarKey(NflBarKind.PAT, poss)
                 // RC9: a kick-off never reads RED ZONE, whatever the tab's tail says.
                 DownText.Kickoff -> NflBarKey(NflBarKind.KICKOFF, poss, down = d, tail = tab?.tail?.takeUnless { it == TabTail.RedZone })
             }
             return open(bar, poss, slot, burn = null)
+        }
+
+        /**
+         * (C-N4) A neutral [NflBarKind.PLAY] key's tail: the raw field relative to the **away** side (OWN = the away
+         * team's half, OPP = the home team's, midfield 50), so the painter can name the yard line with no possession.
+         */
+        fun neutralTail(f: FieldPos): TabTail = when (f.territory) {
+            null -> TabTail.Field(FieldZone.MIDFIELD, 50)
+            Side.AWAY -> TabTail.Field(FieldZone.OWN, f.yard)
+            Side.HOME -> TabTail.Field(FieldZone.OPP, f.yard)
         }
     }
 }
@@ -404,6 +421,25 @@ object StackedNflGeometry {
 
     /** (§4.3 "×k") The arc's and the posts' x scale for a takeover pinned at [boxW] Standard px: `boxW / 333`. */
     fun arcK(boxW: Float): Float = boxW / K.STACKED_NFL_W_MAX
+
+    /**
+     * (Review fix U-B1) How far the goalposts move left (≤ 0, device px, unmirrored) so their ink ends one
+     * `STACKED_NFL_TAKEOVER_GAP` before the "+N" / tally block: [blockLeft] the block's left edge, [postsX] the posts'
+     * left edge as placed by the spec (`postsX × arcK × k`), [postsW] their drawn width, all device px at [k] device px
+     * per Standard px. The mock keeps its posts behind the end of the word, never on the score; the tally here is wider
+     * than the mock's, so the mock's x would put them on it. 0 when they already clear it.
+     */
+    fun postsShift(blockLeft: Float, postsX: Float, postsW: Float, k: Float): Float {
+        val inkRight = postsX + postsW * NflShapes.POSTS_INK_RIGHT / NflShapes.POSTS_VIEW_W
+        return minOf(0f, blockLeft - K.STACKED_NFL_TAKEOVER_GAP * k - inkRight)
+    }
+
+    /**
+     * (U-B1) The arc's x bent by the posts' [shift]: 0 at the arc's start ([p0x]) growing linearly to the full shift at
+     * its end ([p2x]), so the ball still drops between the moved uprights. Device px, unmirrored.
+     */
+    fun bendArc(x: Float, shift: Float, p0x: Float, p2x: Float): Float =
+        if (shift == 0f || p2x == p0x) x else x + shift * ((x - p0x) / (p2x - p0x)).coerceIn(0f, 1f)
 
     /** (§5.3) A takeover sprite at box-local [x] (the frame's `ballX`, the posts' `postsX × k`), [w] wide, as drawn. */
     fun spriteX(x: Float, w: Float, boxW: Float, mirrored: Boolean): Float = boxX(x, w, boxW, mirrored)

@@ -343,18 +343,18 @@ debug origin (`files/debug/sports_base`) serves both leagues:
   |---|---|---|
   | Q1 50-75 (KC 1st & 10) | type 24, text "... PENALTY on BUF-...", play stands | flag bar for 8 s, then the normal bar |
   | Q1 75-100 (KC 3rd & 2) | type 8 "Penalty", no-play text | flag bar for 8 s |
-  | Q1 125-135 (the 10 s window) | score 6-0, `lastPlay` still the old play, text holds "PENALTY on" | TOUCHDOWN takeover only; no flag |
-  | Q1 160-185 (KC kick-off) | type 74 Official Timeout, down -1, `isRedZone` true | KC KICKOFF, never RED ZONE; no timeout bar |
+  | Q1 125-135 (the 10 s window) | score 6-0, `lastPlay` still the old play, text holds the mixed-case declined "Penalty on BUF-..., declined." (as ESPN writes it) | TOUCHDOWN takeover only; no flag (declined) |
+  | Q1 160-185 (KC kick-off) | score 7-0, type 74 Official Timeout, down -1, `isRedZone` true, text holds an ACCEPTED upper-case "PENALTY on KC-..., Unnecessary Roughness, ... enforced on the kickoff." | KC KICKOFF, never RED ZONE; no timeout bar; no flag (a flagged score never shows a flag: score wins) |
   | Q1 185-210 (BUF ball) | type 53 kick-off return, no `possession` | no possession mark; no flicker or error |
   | Q1 210-235 (BUF 2nd & 7) | type 3, "Penalty on KC-..., declined." | no flag bar |
+  | Q2 75-100 (KC red zone, two-minute warning) | type 75 "Two-minute warning", clock starts at 2:00, counts unchanged (3/3) | no bar (75 never marks) |
   | Q2 125-175 (BUF ball) | type 21, `homeTimeouts` 3 -> 2 in the same body, held all window | TIMEOUT BUF, 2 LEFT while that type-21 play is the last play (a timeout bar, not 8 s); home pips 2 of 3 |
   | halftime / end of quarter | situation kept, counts kept | break bar; pips held |
   | Q3 0-25 | counts back to 3/3 (the half reset) | pips refill; no timeout bar |
-  | Q3 75-100 (KC 1st at KC 40) | type 75 Two-minute warning | no bar |
   | Q4 0-25 (KC 3rd & 9) | type 21, `awayTimeouts` 3 -> 2 | TIMEOUT KC, 2 LEFT |
   | Q4 25-50 | `awayTimeouts` 3 (a flap), type 26 | no bar |
-  | Q4 50-75 | `awayTimeouts` 2 again, type 59 | no bar (not below the low-water mark) |
-  | Q4 75-100 (BUF kick-off) | type 74, `isRedZone` true | no timeout bar |
+  | Q4 50-75 (BUF 2nd & 6) | `awayTimeouts` 3 -> 2 again, a live non-scoring rush (type 5, no 21) | no bar (not below the low-water mark of 2) |
+  | Q4 75-100 (FG dead ball) | score +3, type 59, counts unchanged (away 2) | no timeout bar |
   | Q4 100-125 (BUF 3rd & 9) | `homeTimeouts` 3 -> 2, type 5 (no 21) | fallback: TIMEOUT BUF, 2 LEFT for 8 s (a lost challenge) |
   | OT 0-25 | counts 2/2 | 2 pips per side |
   | OT 25-50 (KC 1st & goal) | type 21, `homeTimeouts` 2 -> 1 | TIMEOUT BUF, 1 LEFT, 2 pip slots drawn |

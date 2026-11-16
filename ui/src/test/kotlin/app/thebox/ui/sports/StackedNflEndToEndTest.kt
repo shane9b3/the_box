@@ -510,6 +510,35 @@ class StackedNflEndToEndTest {
         save("13-final", render())
     }
 
+    /**
+     * Review fix C-S1, through the real machine, runner and painters: a field goal on a dead-ball body. At the release
+     * the bar re-keys to the held bar (§3.4 "the held bar": BUF's 4th & 3, no CLOSE), holds it through the re-sent
+     * dead body, and re-keys to "BUF KICKOFF" on the kick-off body: never closed in between.
+     */
+    @Test
+    fun aFieldGoalOnADeadBallHoldsTheBarUntilTheKickoff() {
+        val fourth = NflPlay.Down(4, 3, goalToGo = false, field = FieldPos(Side.AWAY, 20))
+        start(g(poss = Side.HOME, play = fourth, secs = 400, lastPlay = lp(id = 1)))
+        assertEquals("4TH & 3 | KC 20", words())
+        val held = barKey()
+        val dead = g(poss = Side.HOME, home = 3, secs = 396, play = NflPlay.Dead(Side.HOME, 3), lastPlay = lp("59", side = Side.HOME))
+        poll(dead)
+        assertTrue(on())
+        advanceTakeoverTo(400f)
+        assertEquals("FIELD GOAL | BUF +3", words())
+        advanceTakeoverTo(K.NFL_TAKEOVER_MS + 100f)
+        assertEquals("released to the held bar", held, barKey())
+        assertEquals("4TH & 3 | KC 20", words())
+        advanceTakeoverTo(4_700f); advance(500)
+        assertFalse(on())
+        poll(dead)
+        assertEquals("the re-sent dead body keeps it", held, barKey())
+        assertFalse(f().barClosed)
+        poll(g(poss = Side.HOME, home = 3, secs = 396, play = NflPlay.Kickoff(Side.HOME, FieldPos(Side.HOME, 35)), lastPlay = lp("74", side = Side.HOME)))
+        assertEquals(NflBarKind.KICKOFF, barKey()!!.kind)
+        assertTrue("never closed between the score and the kick-off", movesOf(StackedNflTrack.BAR).none { it.kind == StackedNflTransition.CLOSE })
+    }
+
     /** Delayed (a 30-s delay, nothing old enough yet): "Delayed" in the clock slot, the bar closed; then fresh, at rest. */
     @Test
     fun delayedInPlayClosesTheBarThenTheFirstFreshViewSnapsOpen() {

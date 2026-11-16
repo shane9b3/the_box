@@ -301,6 +301,9 @@ class StackedNflTimelineTest {
         // Still: no shake, icon at 0°.
         StackedNflTimeline.sampleFlag(400f, true, f)
         assertEquals(0f, f.shakeDx); assertEquals(0f, f.waveDeg)
+        // Review fix C-N5: +∞ (the end) and NaN never write NaN; the end rests the icon at 0°.
+        assertEquals(0f, wave(Float.POSITIVE_INFINITY)); assertEquals(0f, shake(Float.POSITIVE_INFINITY))
+        assertTrue(wave(Float.NaN).isFinite()); assertTrue(shake(Float.NaN).isFinite())
         // The keyframes in the constants (the mock's ±6 / ±4 at .45).
         near(6.0 * 0.45, K.STACKED_NFL_SHAKE_DX1, "dx1"); near(4.0 * 0.45, K.STACKED_NFL_SHAKE_DX2, "dx2")
         // The pivot (the mock's transform-origin 4px 26px in the 30 × 34 icon) inside the 15.8 × 17.9 icon: x at 15.8 / 30;

@@ -124,6 +124,10 @@ class StackedNflFramesTest : PlayerTestBase() {
         val idleListener = Window.OnFrameMetricsAvailableListener { _, metrics, _ ->
             if (metrics.getMetric(FrameMetrics.FIRST_DRAW_FRAME) == 0L) idle.add(1L)
         }
+        // Review fix U-N4: a snapshot that lands in the window (the NFL poll floor is 5 s) recomposes the bug once and
+        // redraws once by design ("one composition per snapshot", e.g. a clock-only update), so the gate allows one frame
+        // per composition seen in the window, plus one.
+        val composedBefore = GuideDebugCounters.count(COMPOSITIONS_STACKED_NFL_BUG)
         main { activity().window.addOnFrameMetricsAvailableListener(idleListener, Handler(thread.looper)) }
         try {
             Thread.sleep(10_000)
@@ -131,7 +135,9 @@ class StackedNflFramesTest : PlayerTestBase() {
             main { activity().window.removeOnFrameMetricsAvailableListener(idleListener) }
             thread.quitSafely()
         }
-        assertTrue("idle after the burst drew ${idle.size} frames in 10 s (gate ≤ 1)", idle.size <= 1)
+        val snapshots = (GuideDebugCounters.count(COMPOSITIONS_STACKED_NFL_BUG) - composedBefore).coerceAtLeast(0)
+        val allowed = 1 + snapshots
+        assertTrue("idle after the burst drew ${idle.size} frames in 10 s with $snapshots compositions (gate ≤ $allowed)", idle.size <= allowed)
     }
 
     private val http = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(10, TimeUnit.SECONDS).build()

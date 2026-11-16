@@ -148,3 +148,22 @@ row's intent ("not below the low-water mark") is not what stops it there.
 - `ui/` runner and painters (reviewer B). In particular, whether the runner holds the bar across a null target in a way
   that would hide C-S1 (a grep found no such handling).
 - `:ui:sportsHashGate`, `lintAll`, `:app:assembleDebug`, and device and emulator items.
+
+## Fix pass (2026-11-16)
+
+Lead rulings applied. The decisions are in `docs/design/m6-nfl-stacked.md` § "Review fix pass (2026-11-16)".
+
+| ID | Result | Where |
+|---|---|---|
+| C-S1 | **Fixed:** built the held bar (option a). | `NflView.heldDown` (`SportsContracts.kt:458`); the machine sets it on a `Dead` body with the held tab (`ScoreBugMachine.kt:115`, `:935`); `StackedNflTargets.of` reads `down ?: heldDown` (`StackedNflLayout.kt:157`). Tests: `ScoreBugMachineNflStackedTest.theBarIsHeldOnTheDeadBallAfterAFieldGoal` (`:294`) and `StackedNflEndToEndTest.aFieldGoalOnADeadBallHoldsTheBarUntilTheKickoff` (`:519`, FG → held bar at the release → no CLOSE → KICKOFF). |
+| C-S2 | **Fixed:** a re-seed window per regulation group. It runs from the group's first entry to the first new play after it, or to the group's first mark. Both counts at 3 inside the window re-seed `low` at 3 / 3 and forget a pending 21. OT groups never re-seed. | `ScoreBugMachine.kt:150` (state), `:1022` (rule). The flap test still holds. `theHalftimeResetAndTheNewHalfNeverMark` (`:183`) now asserts the mark after the reset. New tests: `staleCountsAtTheStartOfAHalfDoNotSilenceItsTimeouts` (`:206`, the scenario above plus its limits) and `aFlapToThreeThreeLaterInTheHalfNeverReSeeds` (`:239`). |
+| C-N1 | **Fixed (smallest safe form):** a ring of the last 32 shown ids, which are never new. After 3 consecutive shown entries below the high-water, it drops to the highest of them. A flip back to an already-shown id cannot re-mark. | `ScoreBugMachine.kt:136`, `:997`, `:1092`; test `aPermanentDownwardIdCorrectionLowersTheHighWater` (`:271`). |
+| C-N2 | **Documented:** a confirmed type-21 start has no freshness check, deliberately (the 180-s cap and the next `lastPlay` bound it). | Design §3.3 (`m6-nfl-stacked.md:344`). |
+| C-N3 | **Fixed:** `halfGroup(p ≥ 5) = 2 + (p − 5) / 2`, so OT periods pair into halves; the OT slots rule applies to every OT group. | `ScoreBugMachine.kt:1127`; test `playoffOvertimePairsAreTheirOwnHalves` (`:254`). |
+| C-N4 | **Fixed:** the raw field is carried as `NflView.field`. A neutral key's tail is relative to the away side (`StackedNflTargets.neutralTail`), and the painter reads a null side as away for the field only. | `SportsContracts.kt:465`, `ScoreBugMachine.kt:126`, `StackedNflLayout.kt:161`, `:177`, `StackedNflPainter.kt:475`; tests `theNeutralBarKeepsTheField` (`:322`) and `StackedNflScreenshotTest.theBarWordsAreTheDesignsWords`. |
+| C-N5 | **Fixed:** a non-finite t rests the icon at 0°. | `StackedNflTimeline.kt:253`; `StackedNflTimelineTest.theFlagShakeAndWave`. |
+| C-N6 | **Fixed:** the TD body carries the mixed-case declined foul. An accepted upper-case foul on the Q1 XP / kick-off window keeps "score wins" exercised. | `sports_nfl.py:162`, `:167`; README; `test_sports_nfl.py`. |
+| C-N7 | **Fixed:** the two-minute warning moved to Q2 75–100, with its clock from 2:00 (new per-window `clock0`). Length unchanged (985 s); windows stay ≥ 25 s. | `sports_nfl.py:177-179`, `:252`, `:367`. |
+| C-N8 | **Fixed:** the Q4 re-drop to 2 is on a live, non-scoring rush (type 5) before the FG. The Q4 BUF kick-off window was removed to keep 985 s. | `sports_nfl.py:206`; design §9.4 rows. |
+
+`python3 -m unittest` in `tools/fakepanel`: 275 tests, OK.

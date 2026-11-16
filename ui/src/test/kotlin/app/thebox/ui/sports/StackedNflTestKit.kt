@@ -100,6 +100,8 @@ internal object StackedNflTestKit {
         dim: Boolean = false,
         clock: Int = 222,
         period: PeriodLabel = Q4,
+        heldDown: DownText? = null,
+        field: app.thebox.core.sports.FieldPos? = null,
     ): ScoreBugView {
         val g = SportsFixtures.nflGame(
             away = SportsFixtures.nflTeam(away, away, away, awayScore),
@@ -112,6 +114,7 @@ internal object StackedNflTestKit {
         return v.copy(
             top = top ?: CentreText.Period(period), bottom = bottom, dim = dim, period = period,
             clockSecs = if (bottom == CentreText.Clock) clock else null,
+            nfl = v.nfl?.copy(heldDown = heldDown, field = field),
         )
     }
 
@@ -172,6 +175,12 @@ internal object StackedNflTestKit {
         "BUF" to "a93d56206deaee9924dace155c9d15af.png",
     )
 
+    /**
+     * (Review fix U-N5) The team's logo at [px] when the mock ships its asset (KC, BUF), else null: the painter then
+     * draws the real `LogoDisc` fallback, as the app does for a team with no logo (the contact sheets and the hash gate).
+     */
+    fun logoOrNull(code: String, px: Int): Bitmap? = if (code in ASSETS) logo(code, px) else null
+
     fun logo(code: String, px: Int): Bitmap {
         ASSETS[code]?.let { name ->
             val f = listOf(File("../design/nfl-stacked/assets/$name"), File("design/nfl-stacked/assets/$name")).firstOrNull { it.isFile }
@@ -202,7 +211,7 @@ internal object StackedNflTestKit {
     const val TRANSPARENT = 0x00000000
 
     /** The lead's contact-sheet folder for the integration pass (outside the repo); created on demand. */
-    val SHEETS = File("/private/tmp/claude-501/-Users-shawnjohnson-Projects-The-Box/dedf5c50-b6f4-4a8c-a23c-fadfe67ec05f/scratchpad/nfl-stacked/int")
+    val SHEETS = File("/private/tmp/claude-501/-Users-shawnjohnson-Projects-The-Box/dedf5c50-b6f4-4a8c-a23c-fadfe67ec05f/scratchpad/nfl-stacked/fix")
 
     fun near(a: Int, b: Int, tol: Int) =
         abs(Color.red(a) - Color.red(b)) <= tol && abs(Color.green(a) - Color.green(b)) <= tol && abs(Color.blue(a) - Color.blue(b)) <= tol

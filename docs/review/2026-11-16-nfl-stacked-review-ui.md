@@ -255,3 +255,23 @@ Checked and correct:
   - 720p legibility of the ball and pips (U-N9).
   - Whether the frame clock pauses on Home on Fire OS (U-N7).
   - Font fallback on a device without the bundled fonts.
+
+## Fix pass (2026-11-16)
+
+Lead rulings applied. The decisions are in `docs/design/m6-nfl-stacked.md` § "Review fix pass (2026-11-16)". The
+regenerated sheets are in `/private/tmp/claude-501/-Users-shawnjohnson-Projects-The-Box/dedf5c50-b6f4-4a8c-a23c-fadfe67ec05f/scratchpad/nfl-stacked/fix/`.
+
+| ID | Result | Where |
+|---|---|---|
+| U-B1 (V1–V3) | **Fixed.** The posts' ink ends 13.5 before the "+N" / tally block, the arc's end bends by the same shift, and the posts stay under the word. At Standard 333 FG the shift is ≈ −25. The posts' ink was 239.7–268.8 against a block at 257.3; it is now 214.8–243.8. | `StackedNflGeometry.postsShift` / `bendArc` (`StackedNflLayout.kt:432`, `:441`), `NflShapes.POSTS_INK_*`, `StackedNflScorePainter.kt:326`, `:465`, `:474`. Tests: `StackedNflFitTest.theGoalpostsNeverCrossTheScoreAndTheBallPassesBetweenThem` (`:209`: XP / FG × 4 corners × 2 sizes × 333 / 243 × 2 tallies, every 5 ms, pair and still, real sprite ink against the drawn block, ball inside the uprights) and `theGoalpostsShiftNumbers` (`:274`). Integration ruling 17 replaced. The strips were checked by eye in all four corners at both sizes. |
+| U-S1 (V4, V5) | **Fixed through the runner's own sequencing.** The new pure `StackedNflPinSchedule` (`StackedNflBug.kt:603`) holds the cover, release and B-cover times, the body, the segment and the pinned bar key. The runner uses it with unchanged values, and the screenshot test builds every takeover look from it and from the machine's `NflScore`s (`StackedNflScreenshotTest.kt:334`). A2 is now "EXTRA POINT \| KC +1" over 31, and B2 is the released bar over 31. **Found by this:** the break box's score label "TOUCHDOWN \| KC +6" clipped at 243. Pinned at the break width, the label is now the word alone (`StackedNflBug.kt:617`), and the fit test covers it. | |
+| U-S2 | **Fixed:** the zero-width space is gone. A flag right after "Flag on the play." reads "Another flag on the play." (`strings_sports.xml:319`), alternating; a flag after a gap reads the first wording again. | `StackedNflBug.kt:1376-1383`; `StackedNflDrawTest.backToBackFlagsAreEachAnnounced` (`:643`). The TalkBack check on a Fire TV is still due (device). |
+| U-S3 | **Fixed:** NFL Stacked golden lines 827 → 406. There is no t = 0 cell. Sheets and strips are not hashed: they go to `ui/build/score-bug-stacked-nfl-review/` and the scratchpad. Ice and grey are hashed in TL only. Looks are hashed in TL and BR at both sizes, plus 4 looks in TR and BL. Strips are hashed in TL and BR. No other line of `sports-hashes.txt` changed. | `StackedNflScreenshotTest.kt:277`, `:334`. |
+| U-N1 | **Fixed:** `labelW` / `subW` are cached at `fillBar` and copied in `copyFrom`. | `StackedNflContracts.kt:88`, `StackedNflPainter.kt:447`. |
+| U-N2 | **Fixed as the NHL Stacked runner does:** the new score shows at once with no takeover (not queued). The probe counts it. | `StackedNflBug.kt:345`, `:772`; `StackedNflDrawTest.aScoreBeforeTheTakeoverPainterShowsTheScoreAtOnce` (`:669`). |
+| U-N3 / V7 | **Not applied (lead):** inherited from `StackedBug`; fix both together. | |
+| U-N4 | **Fixed:** the idle gate allows one frame per composition in the window, plus one. | `StackedNflFramesTest.kt:127`. |
+| U-N5 (V6) | **Fixed:** the real `LogoDisc` is drawn for teams without a mock asset (`StackedNflTestKit.logoOrNull`), and a `fallback-capsule` look ("WASH") was added. The §5.4 sentence is corrected. | |
+| U-N6 | **Fixed (matched to the Pill):** the Pill builds the tally and "+N" in code with ASCII digits, so those stay code. The Stacked bar's `%d` resources are formatted with `Locale.ROOT` (`StackedNflPainter.kt:438`). The Pill is unchanged. | |
+| U-N7, U-N8, U-N9 | **Not applied (lead):** U-N7 is inherited, U-N8 is an owner eye check, U-N9 is device-only. | |
+| U-N10 | **Fixed:** no array per pin. | `StackedNflBug.kt:1007`. |

@@ -183,6 +183,7 @@ internal object StackedNflRunFixtures {
         logoFetch: LogoFetch? = null,
         glowAllowed: Boolean = true,
         linear: Boolean = false,
+        background: CoroutineContext = EmptyCoroutineContext,
     ) = StackedNflHooks(
         sampler = StackedNflSampler { track, kind, t, from, to, out ->
             calls.sampled += track to kind
@@ -192,7 +193,7 @@ internal object StackedNflRunFixtures {
         bakeGlow = { _, _, _ -> fakeGlow() },
         logoFetch = logoFetch,
         context = context,
-        background = EmptyCoroutineContext,
+        background = background,
         probe = probe,
         spec = SPEC,
         pinnedSampler = PinnedSampler,
@@ -214,6 +215,8 @@ internal object StackedNflRunFixtures {
             w.toCharArray().copyInto(c.label)
             c.labelLen = w.length
             c.subLen = 0
+            c.labelW = -1f
+            c.subW = -1f
             c.flag = key.kind == NflBarKind.FLAG
         },
         begin = { _, side, scores, _, badge, _, _, _ -> calls.begins += side to scores; calls.badges += badge },

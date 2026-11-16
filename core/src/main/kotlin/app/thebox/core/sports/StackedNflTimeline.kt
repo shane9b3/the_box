@@ -249,6 +249,8 @@ object StackedNflTimeline {
             val a = SHAKE_KEYS[seg]
             a + (SHAKE_KEYS[seg + 1] - a) * EASE_IN_OUT.ease(q)
         }
+        // Review fix C-N5: +∞ ("the end") rests the icon at 0° (∞ % x is NaN); the shake is already 0 there.
+        if (!t.isFinite()) { out.waveDeg = 0f; return out }
         val half = K.STACKED_NFL_WAVE_MS.toFloat()
         val ph = t % (2f * half)
         val deg = K.STACKED_NFL_WAVE_DEG
