@@ -84,6 +84,12 @@ internal class NflBarContent {
     var fg: Int = 0
     /** Set by [StackedNflPainter.fillBar]: the drawn words' advance in device px (icon, label, divider, sub). */
     var wordsAdvance: Float = 0f
+    /**
+     * (Review fix U-N1) Set by [StackedNflPainter.fillBar]: the label's and the sub's measured widths, device px, so the
+     * draw path never measures text; −1 = not measured (a hand-filled content), measured on use.
+     */
+    var labelW: Float = -1f
+    var subW: Float = -1f
 
     /** Back to empty (no key, no words, colours 0). */
     fun clear() {
@@ -98,6 +104,8 @@ internal class NflBarContent {
         b = 0
         fg = 0
         wordsAdvance = 0f
+        labelW = -1f
+        subW = -1f
     }
 
     /** Copies everything from [o] (no allocation). */
@@ -115,6 +123,8 @@ internal class NflBarContent {
         b = o.b
         fg = o.fg
         wordsAdvance = o.wordsAdvance
+        labelW = o.labelW
+        subW = o.subW
     }
 
     companion object {

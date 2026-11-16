@@ -760,4 +760,13 @@ object NflShapes {
         10f, 44f, 50f, 44f,
         30f, 44f, 30f, 78f,
     )
+
+    /**
+     * (NFL Stacked review fix U-B1) The posts' ink across the viewBox, in units: the outer edges of the two uprights (x 10
+     * and 50 less / plus half the stroke) and the inner edges the ball passes between.
+     */
+    const val POSTS_INK_LEFT = 10f - POSTS_STROKE / 2f
+    const val POSTS_INK_RIGHT = 50f + POSTS_STROKE / 2f
+    const val POSTS_INNER_LEFT = 10f + POSTS_STROKE / 2f
+    const val POSTS_INNER_RIGHT = 50f - POSTS_STROKE / 2f
 }

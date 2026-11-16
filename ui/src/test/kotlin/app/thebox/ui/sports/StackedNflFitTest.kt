@@ -88,6 +88,8 @@ class StackedNflFitTest {
                     NflBarKey(NflBarKind.FINAL, null, finalKind = PeriodKind.OT),
                     NflBarKey(NflBarKind.NO_UPDATE, null),
                     NflBarKey(NflBarKind.DELAYED, null),
+                    // A score pinned at the break width: the label alone (StackedNflPinSchedule.label, review fix U-S1).
+                    *NflScoreKind.entries.map { NflBarKey(NflBarKind.SCORE, Side.AWAY, score = it) }.toTypedArray(),
                 )
                 for ((keys, width) in listOf(team to K.STACKED_NFL_W_MAX, breaks to K.STACKED_ROWS_W)) for (key in keys) {
                     val c = NflBarContent()
@@ -194,6 +196,88 @@ class StackedNflFitTest {
             assertEquals("+6", at(NflScoreKind.TOUCHDOWN, 333f).pointsText)
             assertEquals("24 – 17", sp.tallyText)
         }
+    }
+
+    /**
+     * Review fix U-B1 (V1–V3): the goalposts' **ink** (the sprite's lit columns) never crosses the "+N" / tally block as
+     * drawn (with its slide and its 1.12 overshoot), for XP and FG (single, and as a pair's second), every corner, both
+     * sizes, at 333 and 243, the widest tally and a narrow one, at every 5 ms of the takeover and in the still frame;
+     * and the arc's ball, on its last visible frame, is inside the uprights (its ink between their inner edges, its
+     * centre between the uprights' tops and the crossbar).
+     */
+    @Test
+    fun theGoalpostsNeverCrossTheScoreAndTheBallPassesBetweenThem() {
+        val corners = listOf("tl" to false, "bl" to false, "tr" to true, "br" to true)
+        val kicks = listOf(NflScoreKind.EXTRA_POINT, NflScoreKind.FIELD_GOAL)
+        val f = app.thebox.core.sports.NflScoreFrame()
+        val posts = android.graphics.RectF()
+        val block = android.graphics.RectF()
+        for (large in listOf(false, true)) {
+            val sp = scorer(large)
+            val s = scale(large)
+            // The sprite's lit columns as fractions of its width (the real ink, anti-aliasing included).
+            val spr = sp.postsSprite
+            var c0 = spr.width
+            var c1 = -1
+            for (x in 0 until spr.width) for (y in 0 until spr.height) if (Color.alpha(spr.getPixel(x, y)) > 0) { c0 = minOf(c0, x); c1 = maxOf(c1, x) }
+            val inkL = c0.toFloat() / spr.width
+            val inkR = (c1 + 1).toFloat() / spr.width
+            for (boxW in listOf(K.STACKED_ROWS_W, K.STACKED_NFL_W_MAX)) for (kind in kicks) for ((corner, mirrored) in corners) {
+                for (score in listOf(NflScore(kind, if (kind == NflScoreKind.FIELD_GOAL) 3 else 1, 88, 88), NflScore(kind, 1, 7, 0))) {
+                    sp.begin(Side.AWAY, listOf(score), kit.KC.goal, null, "KC", "BUF", boxW)
+                    val what = "$kind $corner ${if (large) "Large" else "Std"} at $boxW, ${sp.tallyText}"
+                    var checked = 0
+                    fun check(tag: String) {
+                        if (!f.postsOn || f.postsAlpha <= 0f || f.blockAlpha <= 0f) return
+                        sp.postsRect(f, mirrored, posts)
+                        sp.blockDrawnRect(f, mirrored, block)
+                        val l = posts.left + inkL * posts.width()
+                        val r = posts.left + inkR * posts.width()
+                        assertTrue("$what $tag: posts ink $l..$r crosses the block ${block.left}..${block.right}", r <= block.left || l >= block.right)
+                        assertTrue("$what $tag: posts inside the box", l >= 0f && r <= sp.boxWidth)
+                        checked++
+                    }
+                    var t = 0f
+                    while (t <= K.NFL_TAKEOVER_MS) { kit.SPEC.let { app.thebox.core.sports.NflScoreTimeline.sample(it, kind, t, f) }; check("t $t"); t += 5f }
+                    var p = 0f
+                    while (p <= K.NFL_TAKEOVER_MS) { app.thebox.core.sports.NflScoreTimeline.samplePair(kit.SPEC, NflScoreKind.TOUCHDOWN, kind, kit.SPEC.pairSecondMs + p, f); check("pair +$p"); p += 25f }
+                    app.thebox.core.sports.NflScoreTimeline.sampleStill(kit.SPEC, kind, null, 0f, f); check("still")
+                    assertTrue("$what: the posts were drawn with the block ($checked frames)", checked > 100)
+                    // The ball's last visible frame of the arc: inside the uprights.
+                    var last = -1f
+                    t = 0f
+                    while (t <= K.NFL_TAKEOVER_MS) {
+                        app.thebox.core.sports.NflScoreTimeline.sample(kit.SPEC, kind, t, f)
+                        if (f.arcOn && f.ballAlpha > 0f) last = t
+                        t += 1f
+                    }
+                    app.thebox.core.sports.NflScoreTimeline.sample(kit.SPEC, kind, last, f)
+                    sp.postsRect(f, mirrored, posts)
+                    val ballPx = kit.SPEC.runPx * s
+                    val x0 = sp.arcX(f)
+                    val cx = (if (mirrored) sp.boxWidth - x0 - ballPx else x0) + ballPx / 2f
+                    val cy = f.ballY * s + ballPx / 2f
+                    val rInk = app.thebox.core.sports.NflShapes.ballInkRadiusUnits() * ballPx / app.thebox.core.sports.NflShapes.BALL_VIEWBOX * f.ballScale
+                    val u = posts.width() / app.thebox.core.sports.NflShapes.POSTS_VIEW_W
+                    val inL = posts.left + app.thebox.core.sports.NflShapes.POSTS_INNER_LEFT * u
+                    val inR = posts.left + app.thebox.core.sports.NflShapes.POSTS_INNER_RIGHT * u
+                    val v = posts.height() / app.thebox.core.sports.NflShapes.POSTS_VIEW_H
+                    assertTrue("$what: ball ${cx - rInk}..${cx + rInk} between the uprights $inL..$inR at t $last", cx - rInk >= inL && cx + rInk <= inR)
+                    assertTrue("$what: ball centre $cy between the uprights' tops and the crossbar", cy >= posts.top + 6f * v && cy <= posts.top + 44f * v)
+                }
+            }
+        }
+    }
+
+    /** U-B1: the numbers (Standard, 333, FIELD GOAL "+3" over "88 – 88"): the posts move about 25 px left, off the block. */
+    @Test
+    fun theGoalpostsShiftNumbers() {
+        val sp = scorer(false)
+        sp.begin(Side.AWAY, listOf(NflScore(NflScoreKind.FIELD_GOAL, 3, 88, 88)), kit.KC.goal, null, "KC", "BUF", 333f)
+        val blockLeft = sp.blockLeft
+        val inkRight = kit.SPEC.postsX + kit.SPEC.postsW * app.thebox.core.sports.NflShapes.POSTS_INK_RIGHT / 60f
+        assertEquals(blockLeft - 13.5f - inkRight, sp.postsShiftUsed, 1e-3f)
+        assertTrue("shift ${sp.postsShiftUsed}", sp.postsShiftUsed < -20f && sp.postsShiftUsed > -30f)
     }
 
     @Test

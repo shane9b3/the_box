@@ -111,11 +111,20 @@ class ScoreBugMachine(
     private var lastDownPoss: Side? = null
     /** (§3.4) The last shown tab in its plain form (never RED ZONE): held through a `Dead` with no try pending. */
     private var heldTab: NflTab? = null
+    /**
+     * (NFL Stacked §3.4, review fix C-S1) The down shown with [heldTab], held through a `Dead` the same way; the Stacked
+     * bar's "held bar" after a field goal or a safety. The Pill never reads it.
+     */
+    private var heldDown: DownText? = null
     /** The rendering of [nflEntry] (§3.4), gated in [view]. [nflTry]: rendered as the try (kept through a break). */
     private var nflEntry: Entry? = null
     private var nflDown: DownText? = null
     private var nflTab: NflTab? = null
     private var nflTry = false
+    /** (NFL Stacked C-S1) [heldDown] when [nflEntry] is a `Dead` rendered with the held tab, else null. */
+    private var nflHeldDown: DownText? = null
+    /** (NFL Stacked C-N4) The raw field of [nflEntry]'s `Down` (the neutral bar names the yard line by its territory). */
+    private var nflField: FieldPos? = null
     /** (N5) The scores of the snapshots shown going forward, (receivedMono, away, home), kept [SportsConstants.QUEUE_KEEP_MS]. */
     private val nflShown = ArrayList<Triple<Long, Int?, Int?>>()
 
@@ -123,8 +132,27 @@ class ScoreBugMachine(
     // and re-seeded by the "back in time" path; view() only reads them.
     /** The play-id high-water: the largest numeric `lastPlay.id` shown in the follow. A new play is strictly above it. */
     private var maxPlayId: Long? = null
-    /** The half group (0: periods 1–2, 1: 3–4, 2: 5+) the counts below belong to; null before the first period. */
+    /**
+     * (Review fix C-N1) The numeric `lastPlay` ids shown recently (a ring of [SEEN_IDS]): an id in it is never new, so
+     * lowering [maxPlayId] after a permanent downward correction can never re-mark a play already shown.
+     */
+    private val seenIds = LongArray(SEEN_IDS)
+    private var seenCount = 0
+    /** (C-N1) Consecutive shown entries whose numeric id is below [maxPlayId], and the highest of their ids. */
+    private var belowRun = 0
+    private var belowMax: Long? = null
+    /**
+     * The half group the counts below belong to (0: periods 1–2, 1: 3–4, then one group per overtime pair: 2 = periods
+     * 5–6, 3 = 7–8, …, review fix C-N3); null before the first period.
+     */
     private var toGroup: Int? = null
+    /**
+     * (Review fix C-S2) The group's re-seed window: open from the group's first entry until its first new play after
+     * that entry, or its first mark. While open, both counts at `NFL_TIMEOUTS_MAX` in a regulation group re-seed the
+     * low-water marks at 3 / 3 (stale counts at the start of a half cannot silence the half's timeouts).
+     */
+    private var reseedOpen = false
+    private var groupOpening = false
     /** (RC2) Per side: the lowest count seen in the group (the low-water mark), the highest (the slots, RC7), the last shown. */
     private var lowAway: Int? = null
     private var lowHome: Int? = null
@@ -763,7 +791,7 @@ class ScoreBugMachine(
         // in overtime, the highest count seen in the group (regular-season OT starts at 2).
         val slots = when {
             lastAway == null && lastHome == null -> null
-            toGroup == OT_GROUP -> maxOf(slotsAway ?: 0, slotsHome ?: 0)
+            (toGroup ?: 0) >= OT_GROUP -> maxOf(slotsAway ?: 0, slotsHome ?: 0)
             else -> SportsConstants.NFL_TIMEOUTS_MAX
         }
         return ScoreBugView(
@@ -780,6 +808,8 @@ class ScoreBugMachine(
                 timeoutSlots = slots,
                 timeout = timeoutMark.takeIf { marks && timeoutUntil?.let { now < it } == true },
                 flagId = flagId.takeIf { marks && flagUntil?.let { now < it } == true },
+                heldDown = if (drawn) nflHeldDown else null,
+                field = if (drawn) nflField else null,
             ),
         )
     }
@@ -879,28 +909,38 @@ class ScoreBugMachine(
         var down: DownText? = null
         var tab: NflTab? = null
         var plain: NflTab? = null
+        var plainDown: DownText? = null
+        var held: DownText? = null
+        var field: FieldPos? = null
         when {
             asTry -> {
                 down = DownText.Pat
                 tab = NflTab(pending!!, TabLead.BALL, TabTail.ExtraPoint)
                 plain = tab
+                plainDown = down
             }
             play is NflPlay.Down -> {
                 down = DownText.Down(play.down, play.distance, play.goalToGo)
+                field = play.field
                 val poss = d?.possession ?: inferPossession(lp)
                 if (poss != null) {
                     plain = NflTab(poss, TabLead.BALL, tail(play.field, poss))
                     tab = if (redZone(d, play, poss)) plain.copy(tail = TabTail.RedZone) else plain
+                    plainDown = down
                 }
             }
             play is NflPlay.Dead -> {
                 tab = heldTab // after a FG or a safety: no close/open before the kick-off body
                 plain = heldTab
+                // (NFL Stacked C-S1) §3.4 "the held bar": the down shown with the held tab (Stacked only).
+                plainDown = heldDown.takeIf { heldTab != null }
+                held = plainDown
             }
             play is NflPlay.Kickoff -> {
                 down = DownText.Kickoff
                 plain = play.kicker?.let { NflTab(it, TabLead.KICKOFF, tail(play.field, it)) }
                 tab = plain
+                if (plain != null) plainDown = down
             }
             else -> Unit // None: no column, no tab
         }
@@ -908,7 +948,10 @@ class ScoreBugMachine(
         nflDown = down
         nflTab = tab
         nflTry = asTry
+        nflHeldDown = held
+        nflField = field
         heldTab = plain
+        heldDown = plainDown
         // The inference memory: the previous shown play.
         when (play) {
             is NflPlay.Kickoff -> lastKicker = play.kicker
@@ -948,8 +991,21 @@ class ScoreBugMachine(
         val lp = d?.lastPlay
         val num = lp?.id?.toLongOrNull()
         val max = maxPlayId
-        val isNew = num != null && (max == null || num > max)
-        if (isNew) maxPlayId = num
+        val isNew = num != null && (max == null || num > max) && !seen(num)
+        if (num != null) {
+            if (isNew) maxPlayId = num
+            // (C-N1) A permanent downward correction (an overturned play deleted, ids re-used below the old maximum):
+            // after NFL_ID_LOWER_AFTER consecutive shown entries below the high-water, it drops to the highest of them.
+            // The ring keeps every shown id from being new again, so a body flipping back never re-marks.
+            if (max != null && num < max) {
+                belowRun++
+                belowMax = maxOf(belowMax ?: num, num)
+                if (belowRun >= NFL_ID_LOWER_AFTER) { maxPlayId = belowMax; belowRun = 0; belowMax = null }
+            } else {
+                belowRun = 0; belowMax = null
+            }
+            remember(num)
+        }
 
         // Counts: the drops are measured against the low-water marks before this entry.
         s.period?.let { halfGroup(it) }?.let { g ->
@@ -957,10 +1013,25 @@ class ScoreBugMachine(
                 toGroup = g
                 lowAway = null; lowHome = null; slotsAway = null; slotsHome = null; lastAway = null; lastHome = null
                 pendingTimeoutId = null
+                reseedOpen = true
+                groupOpening = true
             }
         }
         val a = d?.awayTimeouts
         val h = d?.homeTimeouts
+        // (C-S2) Stale counts at the start of a regulation half: the first counts seen can be the old half's (ESPN sends
+        // the old `situation` for a poll or two). Both counts at 3 in the re-seed window re-seed the marks at 3 / 3. A
+        // 2 → 3 flap later in the half never re-seeds (the window is closed by then: a new play or a mark).
+        val opening = groupOpening
+        groupOpening = false
+        val max3 = SportsConstants.NFL_TIMEOUTS_MAX
+        if (reseedOpen && !opening && (toGroup ?: OT_GROUP) < OT_GROUP && a == max3 && h == max3 &&
+            (lowAway != max3 || lowHome != max3)
+        ) {
+            lowAway = max3; lowHome = max3
+            pendingTimeoutId = null
+        }
+        if (!opening && isNew) reseedOpen = false
         val dropAway = if (a != null && lowAway != null) (lowAway!! - a).coerceAtLeast(0) else 0
         val dropHome = if (h != null && lowHome != null) (lowHome!! - h).coerceAtLeast(0) else 0
         if (a != null) {
@@ -987,6 +1058,7 @@ class ScoreBugMachine(
             pendingTimeoutId = null
             flagId = lp.id
             flagUntil = at + SportsConstants.NFL_FLAG_MARK_MS
+            reseedOpen = false
             return
         }
         val dropSide: Side? = when {
@@ -1013,7 +1085,20 @@ class ScoreBugMachine(
             timeoutMark = NflTimeoutMark(dropSide, if (dropSide == Side.AWAY) a!! else h!!, confirmed = false)
             timeoutPlayId = null
             timeoutUntil = at + SportsConstants.NFL_TIMEOUT_FALLBACK_MS
+            reseedOpen = false
         }
+    }
+
+    /** (C-N1) [id] is in the ring of recently shown ids. */
+    private fun seen(id: Long): Boolean {
+        for (i in 0 until minOf(seenCount, SEEN_IDS)) if (seenIds[i] == id) return true
+        return false
+    }
+
+    private fun remember(id: Long) {
+        if (seen(id)) return
+        seenIds[seenCount % SEEN_IDS] = id
+        seenCount++
     }
 
     private fun startTimeout(side: Side, left: Int, playId: String, at: Long) {
@@ -1022,6 +1107,7 @@ class ScoreBugMachine(
         timeoutMark = NflTimeoutMark(side, left, confirmed = true)
         timeoutPlayId = playId
         timeoutUntil = at + SportsConstants.NFL_TIMEOUT_MARK_MAX_MS
+        reseedOpen = false
     }
 
     private fun endTimeout() { timeoutMark = null; timeoutUntil = null; timeoutPlayId = null }
@@ -1037,15 +1123,20 @@ class ScoreBugMachine(
         if (shown != null && staleAt != null && now >= staleAt) endNflMarks()
     }
 
-    /** Periods 1–2, 3–4, 5+ (RC2). */
+    /**
+     * Periods 1–2, 3–4 (RC2), then (review fix C-N3) one group per pair of overtime periods: 5–6, 7–8, … (playoff
+     * overtime gives each team 3 timeouts per two-period "half"; the regular season's one OT period is group 2 alone).
+     */
     private fun halfGroup(period: Int): Int = when {
         period <= 2 -> 0
         period <= 4 -> 1
-        else -> OT_GROUP
+        else -> OT_GROUP + (period - 5) / 2
     }
 
     private fun resetNflStacked() {
         maxPlayId = null; toGroup = null
+        seenCount = 0; belowRun = 0; belowMax = null
+        reseedOpen = false; groupOpening = false
         lowAway = null; lowHome = null; slotsAway = null; slotsHome = null; lastAway = null; lastHome = null
         pendingTimeoutId = null
         endNflMarks()
@@ -1179,8 +1270,8 @@ class ScoreBugMachine(
     /** (NFL §3.6) The try, the inference memory, the held tab and the current rendering. */
     private fun resetNflPlay() {
         pendingTry = null; tryAt = null; tryDoneId = null
-        lastKicker = null; lastDown = null; lastDownPoss = null; heldTab = null
-        nflEntry = null; nflDown = null; nflTab = null; nflTry = false
+        lastKicker = null; lastDown = null; lastDownPoss = null; heldTab = null; heldDown = null
+        nflEntry = null; nflDown = null; nflTab = null; nflTry = false; nflHeldDown = null; nflField = null
     }
 
     private companion object {
@@ -1192,8 +1283,12 @@ class ScoreBugMachine(
 
         /** (NFL §3.3) A touchdown's points: the rise (and the `lastPlay.scoreValue`) that sets the try. */
         const val TD_POINTS = 6
-        /** (NFL Stacked RC2) The half group of periods 5+ (overtime), in [halfGroup]'s numbering. */
+        /** (NFL Stacked RC2) The first overtime half group (periods 5–6), in [halfGroup]'s numbering; later pairs are above. */
         const val OT_GROUP = 2
+        /** (C-N1) The ring of recently shown play ids. */
+        const val SEEN_IDS = 32
+        /** (C-N1) Consecutive shown entries below the high-water before it is lowered to them. */
+        const val NFL_ID_LOWER_AFTER = 3
         /** (NFL §3.5) The red zone: the opponent's half at this yard or closer. */
         const val RED_ZONE_YARDS = 20
         val KICK_RETURN = Regex("(?i)kickoff return \\(offense\\)")

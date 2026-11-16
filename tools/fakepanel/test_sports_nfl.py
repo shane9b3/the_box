@@ -197,6 +197,7 @@ class TestTimeline(NflCase):
     def test_the_total_is_985_s_and_every_window_is_25_s_or_more_but_the_one_10_s_window(self):
         lens = [w["len"] for w in sports_nfl.W if w["len"] is not None]
         self.assertEqual(985, sum(lens))
+        self.assertEqual(sports_nfl.TIMELINE_DEFAULT_S, 985)
         short = [w["label"] for w in sports_nfl.W if w["len"] is not None and w["len"] < 25]
         self.assertEqual(["q1 score before the play (10 s)"], short)
         self.assertEqual(10, sports_nfl.W[[w["label"] for w in sports_nfl.W].index(short[0])]["len"])
@@ -357,7 +358,7 @@ class TestStackedEvents(NflCase):
         for s in (a, b):
             self.assertEqual(("21", "Timeout", "TO"), tuple(s["lastPlay"]["type"][k] for k in ("id", "text", "abbreviation")))
             self.assertEqual("2", s["lastPlay"]["team"]["id"])
-            self.assertEqual("Timeout #1 by BUF at 12:55.", s["lastPlay"]["text"])
+            self.assertEqual("Timeout #1 by BUF at 01:35.", s["lastPlay"]["text"])
             self.assertEqual((3, 2), self.counts(s))
         self.assertEqual(a["lastPlay"]["id"], b["lastPlay"]["id"], "held: the same play across polls")
         self.assertGreaterEqual(sports_nfl.W[[w["label"] for w in sports_nfl.W].index("q2 BUF ball")]["len"], 50)
@@ -371,9 +372,18 @@ class TestStackedEvents(NflCase):
         flap = self.sit("q4 turnover, BUF in the red zone")
         self.assertEqual((3, 3), self.counts(flap))
         self.assertNotEqual("21", flap["lastPlay"]["type"]["id"])
-        again = self.sit("q4 field goal, dead ball")
+        again = self.sit("q4 BUF 2nd and 6, rush")
         self.assertEqual((2, 3), self.counts(again))
-        self.assertNotEqual("21", again["lastPlay"]["type"]["id"], "back to 2 with no type 21: not below the low-water mark")
+        self.assertEqual("5", again["lastPlay"]["type"]["id"], "a live rush, no type 21")
+        self.assertEqual(0, again["lastPlay"]["scoreValue"], "not a score: the fallback check really runs")
+        self.assertEqual({"away": "14", "home": "13"}, self.score(self.at("q4 BUF 2nd and 6, rush", 1)))
+        self.assertGreater(again["down"], 0, "a live down")
+        fg = self.sit("q4 field goal, dead ball")
+        self.assertEqual("59", fg["lastPlay"]["type"]["id"])
+        self.assertEqual((2, 3), self.counts(fg), "the FG carries the same count: no count change")
+        labels = [w["label"] for w in sports_nfl.W]
+        order = [labels.index(x) for x in ("q4 turnover, BUF in the red zone", "q4 BUF 2nd and 6, rush", "q4 field goal, dead ball")]
+        self.assertEqual(sorted(order), order, "flap, then the re-drop, then the FG")
         lost = self.sit("q4 BUF 3rd and 9 at its 2")
         self.assertEqual((2, 2), self.counts(lost))
         self.assertEqual("5", lost["lastPlay"]["type"]["id"], "no 21: the fallback 8 s mark")
@@ -407,7 +417,18 @@ class TestStackedEvents(NflCase):
     def test_touchdown_with_a_penalty_in_the_same_update(self):
         e = self.at("q1 score before the play (10 s)", 1)
         self.assertEqual({"away": "6", "home": "0"}, self.score(e))
-        self.assertIn("PENALTY on", self.comp(e)["situation"]["lastPlay"]["text"])
+        text = self.comp(e)["situation"]["lastPlay"]["text"]
+        self.assertIn("TOUCHDOWN. Penalty on BUF-J.Poyer", text)
+        self.assertIn("declined", text)
+        self.assertNotIn("PENALTY on", text, "ESPN writes a declined foul in mixed case")
+
+    def test_an_accepted_upper_case_foul_rides_on_a_scoring_window_so_score_wins_is_exercised(self):
+        e = self.at("q1 extra point, KC kick-off", 1)
+        self.assertEqual({"away": "7", "home": "0"}, self.score(e))
+        text = self.comp(e)["situation"]["lastPlay"]["text"]
+        self.assertIn("PENALTY on KC-", text)
+        self.assertIn("enforced on the kickoff", text)
+        self.assertNotIn("declined", text)
 
     def test_official_timeout_kickoff_after_a_score_is_red_zone_with_down_minus_1(self):
         s = self.sit("q1 extra point, KC kick-off")
@@ -416,8 +437,17 @@ class TestStackedEvents(NflCase):
         self.assertEqual(35, 100 - s["yardLine"])
 
     def test_two_minute_warning_is_type_75(self):
-        s = self.sit("q3 KC 1st at KC 40")
+        s = self.sit("q2 KC red zone, two-minute warning")
         self.assertEqual(("75", "Two-minute warning"), (s["lastPlay"]["type"]["id"], s["lastPlay"]["type"]["text"]))
+        self.assertEqual((3, 3), self.counts(s), "type 75 never marks: no count change")
+        self.assertEqual((3, 3), self.counts(self.sit("q2 +7 pair in one body")))
+        self.assertEqual("2:00", self.comp(self.at("q2 KC red zone, two-minute warning", 0))["status"]["displayClock"])
+        for w in sports_nfl.W:
+            if w.get("lastPlayType") == "75":
+                self.assertIn(w["period"], (2, 4), w["label"])
+        self.assertEqual(["q2 KC red zone, two-minute warning"],
+                         [w["label"] for w in sports_nfl.W if w.get("lastPlayType") == "75"])
+        self.assertNotEqual("75", self.sit("q3 KC 1st at KC 40")["lastPlay"]["type"]["id"])
 
     def test_no_possession_during_a_kickoff_return(self):
         s = self.sit("q1 BUF ball, no possession")

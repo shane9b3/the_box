@@ -317,11 +317,16 @@ carries the same `situation`.
 
 **Play-id high-water.** `maxPlayId: Long?` = the largest `lastPlay.id.toLongOrNull()` seen in the follow (ids are event
 id + sequence, e.g. `401873061503` < `…520` < `…536`). "A new play" means an id strictly greater than `maxPlayId`. A
-non-numeric id is never new (no mark).
+non-numeric id is never new (no mark). *(Fix pass C-N1)* An id in the ring of the last 32 shown ids is never new; after 3
+consecutive shown entries below the high-water (a permanent downward correction), the high-water drops to the highest
+of them.
 
-**Counts and the low-water mark (RC2).** Half groups: periods 1–2, 3–4, 5+. Per group and side keep `low` = the lowest
-count seen and `slots` = the highest count seen (≤ 3). A new group resets both to the first counts seen in it. Increases
-never mark and never raise `low`. `NflView.away/homeTimeouts` are the shown entry's counts when present, else the
+**Counts and the low-water mark (RC2).** Half groups: periods 1–2, 3–4, then one per pair of overtime periods (5–6,
+7–8, …; fix pass C-N3). Per group and side keep `low` = the lowest count seen and `slots` = the highest count seen
+(≤ 3). A new group resets both to the first counts seen in it. Increases never mark and never raise `low`, with one
+exception (fix pass C-S2): in a regulation group, while its re-seed window is open (from the group's first entry until
+the first new play after that entry, or the group's first mark), both counts at 3 re-seed `low` at 3 / 3 and forget a
+pending 21. `NflView.away/homeTimeouts` are the shown entry's counts when present, else the
 group's last shown counts (held through stale, waiting and a break with no `situation`), else null (pips hidden).
 `timeoutSlots` = the group's `slots` (RC7: 3 in regulation; in OT whatever ESPN starts the group at).
 
@@ -336,6 +341,10 @@ group's last shown counts (held through stale, waiting and a break with no `situ
   score, a phase other than LIVE, a stale or waiting view, or `NFL_TIMEOUT_MARK_MAX_MS` **180 000**. The clock is not
   used (clock lag, §3.1).
 - Types 74, 75, 2, 65, 66 never set a mark. `lastPlay.text` and `lastPlay.team` are never used for the caller.
+- *(Fix pass C-N2)* The confirmed (type-21) start has **no freshness check**, deliberately: a new type 21 is itself
+  proof that a team timeout happened, and the mark is bounded by `NFL_TIMEOUT_MARK_MAX_MS` (180 s) and by the next
+  `lastPlay`. After a long gap the caller is still the side below its low-water mark; if only the older drop is
+  visible, the older caller can be named, for at most one 21's hold. The flag and the fallback keep the 100-s gate.
 
 **Flag mark (RC3).** On a newly shown fresh entry (SEEN demand, not the first view) whose `lastPlay` has a **new id** and
 `penalty` true → `flagId = id` for `NFL_FLAG_MARK_MS` **8 000** on the machine clock (from when the entry is shown). Not
@@ -362,10 +371,10 @@ Precedence (RC4): **pinned score (runner) > stale / waiting > break / final > fl
 | Timeout mark | as play | quarter / clock | TIMEOUT, caller: "TIMEOUT BUF \| 1 LEFT" ("0 LEFT" at zero); that side's pip burns | mock |
 | LIVE, a down, side known | possession side | quarter / clock | PLAY, possession team: "1ST & 10 \| KC 35"; "3RD \| KC 35" (distance unknown); "4TH & GOAL \| BUF 2"; "… \| 50" midfield; no field: label alone | mock |
 | … in the red zone (NFL §3.5 gating) | possession | as play | PLAY, sub "RED ZONE" on red | R26 |
-| LIVE, a down, side unknown | none | as play | PLAY, **neutral**, same words | S-D10 |
+| LIVE, a down, side unknown | none | as play | PLAY, **neutral**, same words: the field by its territory, "1ST & 10 \| KC 35" (`NflView.field`, fix pass C-N4) | S-D10 |
 | LIVE, the try (`DownText.Pat`) | the trying side | as play | PAT, that team: "EXTRA POINT" (no spot: not reliable in the feed) | mock, S-D7 |
 | LIVE, kick-off | kicker | as play | KICKOFF, kicker: "LV KICKOFF \| LV 35"; **never RED ZONE** (the bar reads the gated `redZone`/`TabTail`, never `isRedZone`; RC9) | mock |
-| LIVE, dead ball after FG / safety | held side | as play | the held bar (no change) | NFL §3.4 |
+| LIVE, dead ball after FG / safety | held side | as play | the held bar (no change): the down shown with the held tab (`NflView.heldDown`, Stacked only; fix pass C-S1) | NFL §3.4 |
 | LIVE, no `situation` | none | as play | **closed** | R21 |
 | Pinned score (runner) | pinned | pinned | from 216 ms "TOUCHDOWN \| KC +6", scorer's colours | mock + D10 |
 | Between a pair's takeovers | pinned | pinned | "EXTRA POINT", scorer's colours | NFL lead 3 |
@@ -552,8 +561,9 @@ about the box (x' = box right − (x − box left) − w); alignments swap; noth
 
 ### 5.4 Codes, logos, scores
 - Codes are 2–3 letters (WSH, LAR, LAC, JAX checked live). A longer one steps the code down 2 px to 18; never ellipsised.
-- Missing logo: `LogoDisc` in the stripe colour with the code (`StackedPainter.kt:603-617` behaviour); the badge falls
-  back to the same disc at 58.5.
+- Missing logo: the `LogoDisc` (`StackedPainter.kt:603-617` behaviour): a 2–3 letter code in a translucent white disc,
+  as the hockey bug; a 4+ letter code in the stripe-colour capsule (fix pass U-N5 corrected this sentence). The badge
+  falls back to the same disc at 58.5.
 - Scores 0–99 at 35.1 in 45; three digits scale to fit 43, floor 24 ("100" → 24.5). The tally slot widens by §2.5.
 
 ---
@@ -874,13 +884,15 @@ lead appends the `score-bug-stacked-nfl/` hashes (same host header).
   | Q1 75–100 (KC 3rd & 2 "BUF 38") | type 8, "… PENALTY on BUF-…, Defensive Holding, 5 yards …" → flag |
   | Q1 50–75 (KC 1st & 10 "KC 25") | type 24 with "PENALTY on BUF-…, Unnecessary Roughness, 15 yards" (accepted, play stands) → flag |
   | Q1 210–235 (BUF 2nd & 7) | type 3, "Penalty on KC-…, Offensive Holding, declined." → **no** flag |
-  | Q1 160–185 (the KC kick-off, already `isRedZone` true) | `lastPlayType` 74 "Official Timeout" → "KC KICKOFF \| KC 35", no red (RC9) |
-  | Q1 125–135 (the 10-s TD window) | `lastPlayText` with "PENALTY on" on the scoring body → TOUCHDOWN only |
-  | Q2 125–175 (BUF 1st & 10 "BUF 25") | `homeTimeouts` 2, type 21 team BUF → "TIMEOUT BUF \| 2 LEFT", burn |
+  | Q1 160–185 (the KC kick-off, already `isRedZone` true; score 6 → 7) | `lastPlayType` 74 "Official Timeout" → "KC KICKOFF \| KC 35", no red (RC9); its text carries an **accepted** "PENALTY on KC-…, Unnecessary Roughness, 15 yards, enforced on the kickoff." → no flag (a flagged score: the score wins; fix pass C-N6) |
+  | Q1 125–135 (the 10-s TD window) | `lastPlayText` with ESPN's mixed-case declined foul "Penalty on BUF-…, declined." → TOUCHDOWN only, no flag (fix pass C-N6: the old upper-case "declined" string does not occur) |
+  | Q2 75–100 (KC red zone, two-minute warning) | type 75 "Two-minute warning", clock from 2:00, counts unchanged 3/3 → no bar (75 never marks; fix pass C-N7, moved from Q3) |
+  | Q2 125–175 (BUF 1st & 10 "BUF 25") | `homeTimeouts` 2, type 21 team BUF ("Timeout #1 by BUF at 01:35.") → "TIMEOUT BUF \| 2 LEFT", burn |
   | Q3 0–25 | 3/3 (the half reset; no mark) |
   | Q4 0–25 (KC 3rd & 9) | `awayTimeouts` 2 with type 21 → mark |
   | Q4 25–50 | `awayTimeouts` 3 (a flap, no mark) |
-  | Q4 75–100 | `awayTimeouts` 2 again, `lastPlayType` 5 (no 21): **no** mark (not below the low-water 2) |
+  | Q4 50–75 (BUF 2nd & 6, a rush) | `awayTimeouts` 2 again, `lastPlayType` 5 (no 21, not a score): **no** mark (not below the low-water 2; fix pass C-N8, was on the FG body) |
+  | Q4 75–100 (FG dead ball) | +3, type 59, counts unchanged (away 2); the Q4 BUF kick-off window was removed to keep 985 s |
   | Q4 100–125 (BUF 3rd & 9) | `homeTimeouts` 2 with no 21 → fallback 8-s mark (lost challenge) |
   | OT 0–25 / 25–50 | 2/2 (an OT group of 2 slots); OT 25–50 `homeTimeouts` 1, type 21 → mark, 2 slots drawn |
 - `test_sports_nfl.py`: the new keys and rejections; each row above in the week and dated bodies; existing assertions on
@@ -1072,9 +1084,10 @@ The NHL / CHL Stacked and NFL Pill drawing is unchanged (the 1 260 existing hash
    passed, the slot is empty (`StackedNflDrawArgs.awayLogoPending` / `homeLogoPending`); then the `LogoDisc`. No URL, a
    failed load, no loader, or place mode: the disc at once. `StackedNflLogoTest.aSlowLogoWaitsThenTheDisc`.
 7. **Back-to-back flags.** A live region speaks only when its text changes; a flag directly after another (a new
-   `flagId`, no "" between) kept the same text and was not announced. Every second flag's text now ends in a zero-width
-   space (`FLAG_TEXT_MARK`): spoken the same, a new text, so each `flagId` is announced once (and the same id on a later
-   poll is not). `StackedNflDrawTest.backToBackFlagsAreEachAnnounced`.
+   `flagId`, no "" between) kept the same text and was not announced. *(Superseded by the fix pass, U-S2: the zero-width
+   space is gone. A flag directly after a "Flag on the play." reads "Another flag on the play."
+   (`sports_live_nfl_flag_again`), then the wordings alternate; a flag after a gap is "Flag on the play." again.)*
+   `StackedNflDrawTest.backToBackFlagsAreEachAnnounced`.
 8. **`ScoreBugPlacementTest.pillAndNflIgnoreTheStyle`** (red after WP-2's real footprint): the NFL loop is limited to
    PILL, with an explicit NFL + STACKED expectation (top right Standard (1491, 56)–(1824, 197)). The only edit to that
    file.
@@ -1121,5 +1134,131 @@ The NHL / CHL Stacked and NFL Pill drawing is unchanged (the 1 260 existing hash
 16. **Golden hashes.** The `score-bug-stacked-nfl/` shots (827 PNGs from the real pipeline, deterministic over two clean
     runs) are appended to `sports-hashes.txt` under a dated comment; no existing line changed. The owner's review of the
     shots (§9.3) is still due; a change after it re-records only these lines.
-17. **Owner eye check (recorded, not changed):** the goalposts at the mock's x (234 on the 333 box) overlap the "+N" /
-    tally block from about 1 800 ms (the mock overlaps and clips there too); the posts are under the block's text.
+17. *(Replaced by the fix pass, U-B1.)* **The goalposts never touch the score.** The mock keeps its posts behind the
+    end of the **word** (its tally is about 13 px wide and starts after them); here the tally slot is 67.7 wide, so the
+    mock's x (234 on the 333 box) put the posts' ink on the "+N" and the tally ("+3" read "+8" in a right-hand corner).
+    The posts now end one `STACKED_NFL_TAKEOVER_GAP` (13.5) before the block, the arc's end bends by the same shift so
+    the ball still drops between the uprights, and the posts stay under the word (`StackedNflGeometry.postsShift` /
+    `bendArc`; `StackedNflFitTest.theGoalpostsNeverCrossTheScoreAndTheBallPassesBetweenThem`).
+
+---
+
+## Review fix pass (2026-11-16)
+
+The two code reviews (`docs/review/2026-11-16-nfl-stacked-review-core.md`, C-…; `…-review-ui.md`, U-… and V1–V7) were
+reconciled by the lead. Each item: what was decided, and why. The original 1 260 golden lines are unchanged. The NHL
+Stacked, NHL Pill, CHL and NFL Pill code paths are untouched (`NflScoreSpecLegacyTest` and `LegacyNflScoreTimeline` are
+unedited). The NFL Pill's view gains two trailing fields that it never reads.
+
+1. **U-B1 (blocker; V1–V3), the goalposts.** The posts end one `STACKED_NFL_TAKEOVER_GAP` (13.5) before the "+N" /
+   tally block's left edge, and never cover it in any corner. `StackedNflGeometry.postsShift(blockLeft, postsX, postsW, k)`
+   = `min(0, blockLeft − 13.5k − inkRight)`, where `inkRight` is the upright's outer ink (`NflShapes.POSTS_INK_RIGHT`, x 51.5
+   of the 60-unit view box). The arc's x is bent by `bendArc`: 0 at the arc's start, the full shift at its end. The ball
+   therefore still drops between the uprights. The draw order is unchanged: the posts stay under the word, as in the mock.
+   - Standard numbers, 333 box, FIELD GOAL "+3" over the "88 – 88" slot (padding 8):
+     - Before: the block started at 257.3, the posts' ink ran 239.7 – 268.8, and the right upright (267.8) crossed "+3"
+       and the tally.
+     - After: the shift is ≈ −25.0, the ink runs 214.8 – 243.8 (13.5 clear of the block), and the ball's end centre
+       moves 254.3 → 229.3, between the inner edges 216.8 – 241.8.
+     - Large is the same × 1.25.
+     - At 243 the shift is computed the same way, from that box's own block.
+   - `StackedNflFitTest.theGoalpostsNeverCrossTheScoreAndTheBallPassesBetweenThem` checks:
+     - every XP and FG, single and as a pair's second, in 4 corners × 2 sizes × 333 / 243, with a wide and a narrow
+       tally;
+     - every 5 ms, plus the still frame;
+     - the sprite's real lit columns against the block as drawn (slide and 1.12 overshoot included);
+     - and that the ball's last visible frame is inside the uprights.
+   - Integration ruling 17 is replaced (above).
+2. **C-S1, the held bar.** `NflView.heldDown` is a trailing field, Stacked only, and the Pill never reads it.
+   - The machine sets it on a `Dead` body rendered with the held tab: the down that was shown with that tab, held the
+     same way as `heldTab`.
+   - `StackedNflTargets.of` reads `down ?: heldDown` while a tab is held. After a field goal or a safety, the release
+     therefore re-keys to the held bar ("4TH & 3 | KC 20"). The bar stays open until the kick-off body re-keys it to
+     "KC KICKOFF".
+   - A dead ball with no held tab (a follow that starts on it) stays closed.
+   - Tests: `ScoreBugMachineNflStackedTest.theBarIsHeldOnTheDeadBallAfterAFieldGoal`,
+     `StackedNflEndToEndTest.aFieldGoalOnADeadBallHoldsTheBarUntilTheKickoff` (no CLOSE between the score and the
+     kick-off), and the `fg-dead-ball-held` look.
+3. **C-S2, the re-seed window.** In a regulation group, the window opens with the group's first entry. It closes on the
+   first new play id after that entry, or on the group's first mark (timeout, fallback or flag). While it is open, both
+   counts at 3 re-seed `low` at 3 / 3 and forget a pending 21.
+   - The opening entry does not close the window, because ESPN's stale `situation` usually arrives with that first body.
+   - Overtime groups never re-seed.
+   - The Q4 2 → 3 → 2 flap still never re-marks: it comes after the half's plays and marks.
+   - `theHalftimeResetAndTheNewHalfNeverMark` was changed: it had pinned "3 → 2 after the reset is not below the stale
+     low 2", and now asserts the fallback mark.
+   - New tests: the reviewer's scenario (`staleCountsAtTheStartOfAHalfDoNotSilenceItsTimeouts`, confirmed and fallback;
+     a pending 21 forgotten; OT), and `aFlapToThreeThreeLaterInTheHalfNeverReSeeds`.
+   - Known limit: if stale counts outlast the half's first new play, the window has closed. The marks then wait for a
+     count below the stale low, as before (tested).
+4. **C-N1, a permanent downward id correction: fixed (the smallest safe form).**
+   - The fix:
+     - The machine keeps a ring of the last 32 numeric `lastPlay` ids shown. An id in it is never new.
+     - After 3 consecutive shown entries whose id is below the high-water, the high-water drops to the highest of them.
+   - Why this is safe:
+     - A body that flips back to an already-shown id never re-marks, because the id is in the ring.
+     - Two stray older bodies change nothing.
+     - The residual risk is that a never-shown older id gets marked after three consecutive older shown bodies. The
+       older-body guard already prevents that sequence.
+   - Test: `aPermanentDownwardIdCorrectionLowersTheHighWater`.
+5. **C-N2.** This is documented in §3.3: the confirmed type-21 start has no freshness check, deliberately. The 21 is its
+   own proof, the 180-s cap bounds it, and so does the next `lastPlay`.
+6. **C-N3, playoff overtime.** `halfGroup(p ≥ 5) = 2 + (p − 5) / 2`. OT periods pair into halves (5–6, 7–8, …), each with
+   its own low-water mark and slots. 3OT starts fresh. Test: `playoffOvertimePairsAreTheirOwnHalves`.
+7. **C-N4, the neutral PLAY bar keeps the field.**
+   - `NflView.field` is a trailing field, Stacked only: the shown `Down`'s raw field.
+   - A neutral key's tail is the field relative to the away side (`StackedNflTargets.neutralTail`). The painter reads a
+     null side as "away" for the field only, so the bar reads "3RD & 7 | BUF 35", or "… | 50" at midfield.
+8. **C-N5.** `sampleFlag(+∞)` rests the icon at 0°. NaN was already cleaned to 0. Tested.
+9. **C-N6 / C-N7 / C-N8, fake panel** (§9.4 rows updated):
+   - C-N6: the Q1 TD body carries the mixed-case declined foul. The Q1 XP / kick-off window carries an accepted
+     upper-case foul enforced on the kick-off, so "a flagged score never flags" is still exercised.
+   - C-N7: the two-minute warning moved to Q2 75–100. Its clock starts at 2:00 through a new per-window `clock0`, and the
+     Q2 timeout text now says 01:35.
+   - C-N8: the Q4 re-drop to 2 is on a live, non-scoring rush (type 5). To keep 985 s, the Q4 BUF kick-off window was
+     removed. The Q1 kick-off window covers the same RC9 case.
+   - The README table and `test_sports_nfl.py` are updated.
+10. **U-S1, the takeover looks come from the runner's own schedule.** `StackedNflPinSchedule` (pure, in
+    `StackedNflBug.kt`) now holds the cover, release and pair-B cover times, the rows' body (pre-score, the pair's
+    first tally, scored), the painted segment, and the pinned bar key.
+    - The runner's coroutines and draw use it with unchanged values: 216, 3 600 / 8 400, 5 016; still: 0, 4 800.
+    - The screenshot test builds every takeover look from it and from the machine's own `NflScore`s:
+      - the pair's A2 is "EXTRA POINT | KC +1" over 31 – 17, and B2 is the released bar over 31 (V4);
+      - the break box shows the score label (V5).
+    - Doing this exposed a real defect: "TOUCHDOWN | KC +6" does not fit the 243 bar (§2.4), and it clipped to
+      "TOUCHDOWN | K". Pinned at the break width, the score label is now the word alone ("TOUCHDOWN"); the "+6" is on the
+      panel. `StackedNflPinSchedule.label`; the fit test now covers these keys at 243.
+11. **U-S2, back-to-back flags.** The zero-width space is gone. A new `flagId` that directly follows a "Flag on the
+    play." reads "Another flag on the play." (`sports_live_nfl_flag_again`), and the wordings alternate after that. A
+    flag after a gap is "Flag on the play." again. The test asserts the exact plain-ASCII strings. The one-time TalkBack
+    check on a Fire TV is still due (device-only).
+12. **U-S3, a proportionate golden set.** What is hashed now:
+    - every look in TL (unmirrored, bar below) and BR (mirrored, bar above) at both sizes;
+    - 4 looks (play, flag, timeout, halftime) also in TR and BL;
+    - ice and grey in TL only;
+    - the takeover strips' cells in TL and BR at both sizes, with no t = 0 cell (it was the `play` look);
+    - the 6 still and break shots.
+
+    The 21 contact sheets and strips are no longer hashed. They are written to `ui/build/score-bug-stacked-nfl-review/`
+    (not a gated folder) and to the scratchpad. Golden lines for `score-bug-stacked-nfl/`: 827 → 406. Every other line
+    of `sports-hashes.txt` is byte-identical (`git diff` touches only the NFL block and its comment).
+13. **U-N1.** `NflBarContent.labelW` / `subW` are measured once in `fillBar` and copied in `copyFrom`. The draw path no
+    longer measures text. −1 means "not measured" (hand-filled test content).
+14. **U-N2, a score before the takeover painter exists.** This follows the NHL Stacked runner (`StackedBug`): it is not
+    queued. The new score shows at once, snapped, with no takeover and no pin. It is no longer silent: the probe counts
+    it (`scoresWithoutTakeover`). Test: `StackedNflDrawTest.aScoreBeforeTheTakeoverPainterShowsTheScoreAtOnce`, with
+    the painter's dispatcher paused.
+15. **U-N4.** The instrumented idle gate allows one frame per composition seen in the 10-s window, plus one. A
+    clock-only snapshot recomposes and redraws once by design.
+16. **U-N5 (V6).** The screenshot test draws the real `LogoDisc` for every team without a mock asset
+    (`StackedNflTestKit.logoOrNull`). A `fallback-capsule` look (the 4-letter "WASH") covers the capsule. The §5.4
+    sentence is corrected.
+17. **U-N6, digit formatting.**
+    - The NFL Pill builds the tally ("24 – 17") and "+N" in code with ASCII digits. The Stacked takeover does the same,
+      so they stay code (matching the Pill).
+    - The Stacked bar's `%d` resources ("N LEFT", the yard line, "& 10", "KC +6") are now formatted with `Locale.ROOT`
+      (`StackedNflPainter.rootFmt`). An Arabic-locale device no longer mixes Arabic-Indic digits into the bar.
+    - The Pill's own `sports_down_and` call is unchanged.
+18. **U-N10.** `pin()` no longer allocates an array per score.
+19. **Not in this pass (lead):** U-N3 / V7 (the y snapping inherited from `StackedBug`; fix both together), U-N7 (a
+    resumed takeover replays late), U-N8 (three digits at the floor: owner eye check), U-N9 (720p legibility: device).

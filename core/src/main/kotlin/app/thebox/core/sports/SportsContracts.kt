@@ -455,6 +455,17 @@ data class NflView(
     val timeoutSlots: Int? = null,
     val timeout: NflTimeoutMark? = null,
     val flagId: String? = null,
+    /**
+     * (NFL Stacked review fix C-S1; trailing, Stacked only, the Pill never reads it) On a dead ball after a field goal or
+     * a safety ([down] null, [tab] the held tab): the down shown with that tab, so the Stacked bar holds (§3.4 "the held
+     * bar"); null otherwise.
+     */
+    val heldDown: DownText? = null,
+    /**
+     * (NFL Stacked review fix C-N4; trailing, Stacked only) The shown `Down`'s raw field, so the neutral bar (no
+     * possession, S-D10) still names the yard line by its territory ("same words"); null otherwise.
+     */
+    val field: FieldPos? = null,
 )
 
 /**

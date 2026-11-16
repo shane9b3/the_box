@@ -399,7 +399,7 @@ internal class StackedNflPainter(
             NflBarKind.FLAG -> label = res.getString(R.string.sports_stacked_nfl_flag)
             NflBarKind.TIMEOUT -> {
                 label = res.getString(R.string.sports_stacked_nfl_timeout, abbrev)
-                sub = res.getString(R.string.sports_stacked_nfl_left, (key.left ?: 0).coerceIn(0, K.NFL_TIMEOUTS_MAX))
+                sub = rootFmt(res, R.string.sports_stacked_nfl_left, (key.left ?: 0).coerceIn(0, K.NFL_TIMEOUTS_MAX))
             }
             NflBarKind.END_PERIOD -> {
                 val period = key.period?.let { SportsText.period(res, it, League.NFL) } ?: ""
@@ -411,7 +411,7 @@ internal class StackedNflPainter(
             NflBarKind.DELAYED -> label = res.getString(R.string.sports_stacked_delayed)
             NflBarKind.SCORE -> {
                 label = res.getString(scoreWord(key.score ?: NflScoreKind.TOUCHDOWN))
-                if (key.points != null) sub = res.getString(R.string.sports_stacked_nfl_points, abbrev, key.points)
+                key.points?.let { pts -> sub = rootFmt(res, R.string.sports_stacked_nfl_points, abbrev, pts) }
             }
         }
         label = label.uppercase(Locale.ROOT)
@@ -429,15 +429,24 @@ internal class StackedNflPainter(
         content.a = colours.a
         content.b = colours.b
         content.fg = colours.fg
+        content.labelW = barPaint.measureText(content.label, 0, content.labelLen)
+        content.subW = if (content.subLen > 0) barSubPaint.measureText(content.sub, 0, content.subLen) else 0f
         content.wordsAdvance = wordsAdvance(content)
     }
+
+    /**
+     * (Review fix U-N6) A bar format with digits, in `Locale.ROOT`, so an Arabic-locale device never mixes Arabic-Indic
+     * digits (fallback glyphs) with the box's Western score digits. Only the Stacked bar; the Pill is unchanged.
+     */
+    private fun rootFmt(res: Resources, id: Int, vararg args: Any): String = String.format(Locale.ROOT, res.getString(id), *args)
 
     /** The bar's words' advance (device px): `StackedNflGeometry.barGroupW` of the measured label and sub. */
     private fun wordsAdvance(b: NflBarContent): Float =
         G.barGroupW(b.flag, labelW(b) / s, subW(b) / s) * s
 
-    private fun labelW(b: NflBarContent): Float = barPaint.measureText(b.label, 0, b.labelLen)
-    private fun subW(b: NflBarContent): Float = if (b.subLen > 0) barSubPaint.measureText(b.sub, 0, b.subLen) else 0f
+    // U-N1: the widths cached by fillBar; a hand-filled content (tests) is measured.
+    private fun labelW(b: NflBarContent): Float = if (b.labelW >= 0f) b.labelW else barPaint.measureText(b.label, 0, b.labelLen)
+    private fun subW(b: NflBarContent): Float = if (b.subW >= 0f) b.subW else if (b.subLen > 0) barSubPaint.measureText(b.sub, 0, b.subLen) else 0f
 
     /** The down label (§3.4): "1ST & 10", "4TH & GOAL", "3RD", "EXTRA POINT" for the try, "KICKOFF". */
     private fun down(res: Resources, d: DownText): String = when (d) {
@@ -447,7 +456,7 @@ internal class StackedNflPainter(
             )
             when {
                 d.goal -> res.getString(R.string.sports_down_goal, n)
-                d.distance != null -> res.getString(R.string.sports_down_and, n, d.distance)
+                d.distance != null -> rootFmt(res, R.string.sports_down_and, n, d.distance!!)
                 else -> n
             }
         }
@@ -462,10 +471,11 @@ internal class StackedNflPainter(
     private fun field(res: Resources, t: TabTail?, side: Side?, awayAbbrev: String, homeAbbrev: String): String {
         if (t !is TabTail.Field) return ""
         if (t.zone == FieldZone.MIDFIELD) return res.getString(R.string.sports_stacked_nfl_mid)
-        if (side == null) return ""
-        val ownSide = if (t.zone == FieldZone.OWN) side else if (side == Side.AWAY) Side.HOME else Side.AWAY
+        // C-N4: a neutral key's tail is relative to the away side (StackedNflTargets.neutralTail).
+        val rel = side ?: Side.AWAY
+        val ownSide = if (t.zone == FieldZone.OWN) rel else if (rel == Side.AWAY) Side.HOME else Side.AWAY
         val who = if (ownSide == Side.AWAY) awayAbbrev else homeAbbrev
-        return res.getString(R.string.sports_stacked_nfl_field, who, t.yard.coerceIn(0, 99))
+        return rootFmt(res, R.string.sports_stacked_nfl_field, who, t.yard.coerceIn(0, 99))
     }
 
     /**

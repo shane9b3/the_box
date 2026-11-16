@@ -159,11 +159,12 @@ def _build():
     W.extend(q1)
     stale = dict(q1[-1])
     stale.update(label="q1 score before the play (10 s)", len=10, away=6, run=False,
-                 lastPlayText="(11:02) P.Mahomes pass short left to T.Kelce for 4 yards, TOUCHDOWN. PENALTY on BUF-J.Poyer, "
+                 lastPlayText="(11:02) P.Mahomes pass short left to T.Kelce for 4 yards, TOUCHDOWN. Penalty on BUF-J.Poyer, "
                               "Defensive Holding, 5 yards, declined.")
     W.append(stale)
     W.append(win("q1 try", 25, 1, 6, 0, False, **dead(0), **lp("67", "away", 6)))
-    W.append(win("q1 extra point, KC kick-off", 25, 1, 7, 0, False, **kick(65, "away"), **lp("74", "away")))
+    W.append(win("q1 extra point, KC kick-off", 25, 1, 7, 0, False, **kick(65, "away"), **lp("74", "away"),
+                 lastPlayText="(11:02) PENALTY on KC-J.Smith, Unnecessary Roughness, 15 yards, enforced on the kickoff."))
     W.append(win("q1 BUF ball, no possession", 25, 1, 7, 0, True, **down(1, 10, 25, "BUF 25", None), **lp("53", "home")))
     last = win("q1 BUF 2nd and 7", 25, 1, 7, 0, True, **down(2, 7, 28, "BUF 28", "home"), **lp("3", "home"),
                lastPlayText="(3:10) J.Allen pass incomplete deep right to S.Diggs. Penalty on KC-C.Jones, Offensive Holding, declined.")
@@ -173,18 +174,19 @@ def _build():
     W.append(win("q2 BUF 1st at KC 30", 25, 2, 7, 0, True, **down(1, 10, 70, "KC 30", "home"), **lp("24", "home")))
     W.append(win("q2 field goal, dead ball", 25, 2, 7, 3, False, **dead(100), **lp("59", "home", 3)))
     W.append(win("q2 BUF kick-off", 25, 2, 7, 3, False, **kick(35, "home"), **lp("74", "home")))
-    W.append(win("q2 KC red zone", 25, 2, 7, 3, True, **down(2, 4, 12, "BUF 12", "away", red=True), **lp("24", "away")))
+    # the two-minute warning (type 75) comes at the 2:00 mark of Q2 (and Q4) only; the window's clock starts at 2:00
+    W.append(win("q2 KC red zone, two-minute warning", 25, 2, 7, 3, True, **down(2, 4, 12, "BUF 12", "away", red=True),
+                 **lp("75", "away"), lastPlayText="Two-minute warning", clock0=120))
     W.append(win("q2 +7 pair in one body", 25, 2, 14, 3, False, **kick(65, "away"), **lp("74", "away")))
     last = win("q2 BUF ball", 50, 2, 14, 3, True, **down(1, 10, 25, "BUF 25", "home"), **lp("21", "home"),
-               homeTimeouts=2, lastPlayText="Timeout #1 by BUF at 12:55.")
+               homeTimeouts=2, lastPlayText="Timeout #1 by BUF at 01:35.")
     W.append(last)
     W.append(brk("halftime", 2, 14, 3, "STATUS_HALFTIME", last, lp("65", "home")))
     # Q3
     W.append(win("q3 KC at its own 2", 25, 3, 14, 3, True, **down(2, 8, 98, "KC 2", "away"), **lp("5", "away")))
     W.append(win("q3 safety, KC free kick", 25, 3, 14, 5, False, **kick(80, "away", red=False), **lp("20", "home", 2)))
     W.append(win("q3 BUF receives the free kick", 25, 3, 14, 5, True, **down(1, 10, 45, "BUF 45", "home"), **lp("53", "home")))
-    last = win("q3 KC 1st at KC 40", 25, 3, 14, 5, True, **down(1, 10, 60, "KC 40", "away"), **lp("75", "away"),
-               lastPlayText="Two-minute warning")
+    last = win("q3 KC 1st at KC 40", 25, 3, 14, 5, True, **down(1, 10, 60, "KC 40", "away"), **lp("5", "away"))
     W.append(last)
     stale = dict(last)
     stale.pop("lastPlayText", None)
@@ -201,9 +203,9 @@ def _build():
                  awayTimeouts=2, lastPlayText="Timeout #1 by KC at 15:00."))
     W.append(win("q4 turnover, BUF in the red zone", 25, 4, 14, 13, True, **down(1, 10, 82, "KC 18", "home", red=True), **lp("26", "home"),
                  awayTimeouts=3))  # a count flap: 2 -> 3 (never marks)
-    W.append(win("q4 field goal, dead ball", 25, 4, 14, 16, False, **dead(100), **lp("59", "home", 3),
-                 awayTimeouts=2))  # ... and 3 -> 2 again: not below the low-water mark, no mark
-    W.append(win("q4 BUF kick-off", 25, 4, 14, 16, False, **kick(35, "home"), **lp("74", "home")))
+    W.append(win("q4 BUF 2nd and 6, rush", 25, 4, 14, 13, True, **down(2, 6, 86, "KC 14", "home", red=True), **lp("5", "home"),
+                 awayTimeouts=2))  # ... 3 -> 2 again on a live, non-scoring play: not below the low-water mark, no mark
+    W.append(win("q4 field goal, dead ball", 25, 4, 14, 16, False, **dead(100), **lp("59", "home", 3)))  # the count stays 2
     W.append(win("q4 BUF 3rd and 9 at its 2", 25, 4, 14, 16, True, **down(3, 9, 2, "BUF 2", "home"), **lp("5", "home"),
                  homeTimeouts=2))  # no type 21: the fallback 8 s mark (a lost challenge)
     last = win("q4 KC safety, BUF free kick", 25, 4, 16, 16, False, **kick(20, "home", red=False), **lp("20", "away", 2))
@@ -247,6 +249,8 @@ def _clocks():
             continue
         if w["period"] != cur:
             cur, ptr = w["period"], (600 if w["period"] == 5 else 900)
+        if "clock0" in w:
+            ptr = w["clock0"]
         if w["name"] in ("STATUS_END_PERIOD", "STATUS_HALFTIME") or w["state"] == "post":
             out.append(0)
             continue
@@ -360,7 +364,7 @@ class SportsNfl:
             t -= ln[i]
             i += 1
         w = W[i]
-        s = {k: v for k, v in w.items() if k not in ("label", "len", "run")}
+        s = {k: v for k, v in w.items() if k not in ("label", "len", "run", "clock0")}
         if w["state"] != "pre":
             c0 = CLOCK0[i]
             s["clock"] = max(0, c0 - int(t / self.scale())) if w["run"] else c0

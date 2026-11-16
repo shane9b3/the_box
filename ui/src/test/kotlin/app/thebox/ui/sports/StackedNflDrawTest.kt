@@ -73,10 +73,14 @@ class StackedNflDrawTest {
 
     // ------------------------------------------------------------------ host and helpers
 
-    private fun start(first: ScoreBugView? = F.view(), context: CoroutineContext = EmptyCoroutineContext) {
+    private fun start(
+        first: ScoreBugView? = F.view(),
+        context: CoroutineContext = EmptyCoroutineContext,
+        background: CoroutineContext = EmptyCoroutineContext,
+    ) {
         repo.bug.value = first
         rule.mainClock.autoAdvance = false
-        val hooks = F.hooks(probe, calls, context)
+        val hooks = F.hooks(probe, calls, context, background = background)
         rule.setContent {
             BoxDesignScale { StackedNflBug(repo, placement, ScoreBugFixtures.noGeometry, Modifier, ScoreBugPlacement::place, hooks) }
         }
@@ -630,21 +634,47 @@ class StackedNflDrawTest {
         assertTrue(live(), live().startsWith("Kansas City Chiefs touchdown."))
     }
 
-    /** Integration ruling 7: a flag right after another (a new flagId, no "" between) is a new live text, spoken the same. */
+    /**
+     * Review fix U-S2 (replaces integration ruling 7's zero-width space): a flag right after another (a new flagId, no ""
+     * between) alternates two real wordings, so each new flagId is a different text in plain words (no format character
+     * a screen reader could strip before de-duplicating), and the same id on a later poll is not re-announced.
+     */
     @Test
     fun backToBackFlagsAreEachAnnounced() {
         start()
         show(F.view(flagId = "401873061503"))
         val first = live()
+        assertEquals("Flag on the play.", first)
         show(F.view(flagId = "401873061503", clock = 200))
         assertEquals("the same flag on a later poll: unchanged, no second announcement", first, live())
         show(F.view(flagId = "401873061520"))
         val second = live()
-        assertTrue("a new flagId changes the live text", second != first)
-        assertEquals("spoken the same", "Flag on the play.", second.replace(FLAG_TEXT_MARK, ""))
+        assertEquals("a new flagId right after: the second wording", "Another flag on the play.", second)
+        show(F.view(flagId = "401873061520", clock = 190))
+        assertEquals(second, live())
         show(F.view(flagId = "401873061540"))
-        assertTrue("and the third", live() != second)
-        assertEquals("Flag on the play.", live().replace(FLAG_TEXT_MARK, ""))
+        assertEquals("the third alternates back", "Flag on the play.", live())
+        for (t in listOf(first, second, live())) assertTrue("plain text only: $t", t.all { it.code in 0x20..0x7E })
+        // A flag after a gap (the bar back to the play, "" between) is the first wording again.
+        show(F.view())
+        show(F.view(flagId = "401873061560"))
+        assertEquals("Flag on the play.", live())
+    }
+
+    /**
+     * Review fix U-N2: a score before the takeover painter is built (its background work has not run) is not dropped:
+     * as the NHL Stacked runner, the new score shows at once with no takeover and no pin, and the probe counts it.
+     */
+    @Test
+    fun aScoreBeforeTheTakeoverPainterShowsTheScoreAtOnce() {
+        val paused = kotlinx.coroutines.test.StandardTestDispatcher()
+        start(background = paused)
+        assertNull("the painter is not built while its dispatcher is paused", probe.scorePainter!!())
+        show(F.touchdown())
+        assertFalse(on())
+        assertFalse(pinned())
+        assertEquals(1, probe.scoresWithoutTakeover)
+        assertEquals("the new score is on the box", "30", body().awayScore)
     }
 
     @Test

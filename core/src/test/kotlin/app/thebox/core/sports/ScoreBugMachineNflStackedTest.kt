@@ -62,6 +62,7 @@ class ScoreBugMachineNflStackedTest {
         breakKind: NflBreak? = null,
         play: NflPlay = NflPlay.Down(1, 10, goalToGo = false, field = FieldPos(Side.AWAY, 35)),
         finalKind: PeriodKind? = null,
+        poss: Side? = Side.AWAY,
     ): GameSnapshot = SportsFixtures.nflGame(
         phase = phase,
         away = SportsFixtures.nflTeam("KC", "Kansas City Chiefs", "Chiefs", away),
@@ -71,7 +72,7 @@ class ScoreBugMachineNflStackedTest {
         otNumber = if (period >= 5) period - 4 else null,
         clock = GameClock(secs, running = false, inIntermission = phase == GamePhase.INTERMISSION),
         finalKind = finalKind,
-        detail = SportsFixtures.nflDetail(play, Side.AWAY, false, breakKind, lastPlay, a, h),
+        detail = SportsFixtures.nflDetail(play, poss, false, breakKind, lastPlay, a, h),
     )
 
     // ------------------------------------------------------------------ the live sequence (§3.1 fixtures)
@@ -195,6 +196,137 @@ class ScoreBugMachineNflStackedTest {
         val e = rig(g(a = 1, h = 1, period = 2))
         assertNull(e.next(g(a = 2, h = 3, period = 3))?.timeout, "a new group starts at its first counts")
         assertNull(e.next(g(a = 3, h = 3, period = 3))?.timeout)
+        // Review fix C-S2 (this test pinned the opposite): the 3 / 3 that follows re-seeds the low-water marks, so the
+        // half's first real timeout marks (before the fix, KC's 3 → 2 here was "not below the low-water mark 2").
+        assertEquals(NflTimeoutMark(Side.AWAY, 2, false), e.next(g(a = 2, h = 3, period = 3))?.timeout)
+    }
+
+    /** Review fix C-S2, the reviewer's scenario: Q2 ends 1 / 1, the first Q3 body still says 1 / 1, then 3 / 3, then a 21. */
+    @Test
+    fun staleCountsAtTheStartOfAHalfDoNotSilenceItsTimeouts() {
+        val r = rig(g(a = 1, h = 1, period = 2))
+        assertNull(r.next(g(a = 1, h = 1, period = 3))?.timeout, "the old half's situation")
+        assertNull(r.next(g(a = 3, h = 3, period = 3))?.timeout, "the reset: an increase, no mark")
+        val to = lp("21", side = Side.HOME)
+        assertEquals(NflTimeoutMark(Side.HOME, 2, true), r.next(g(a = 3, h = 2, period = 3, lastPlay = to))?.timeout)
+        // The fallback too.
+        val f = rig(g(a = 1, h = 1, period = 2))
+        f.next(g(a = 1, h = 1, period = 3))
+        f.next(g(a = 3, h = 3, period = 3))
+        assertEquals(NflTimeoutMark(Side.AWAY, 2, false), f.next(g(a = 2, h = 3, period = 3))?.timeout)
+        // A pending 21 seen on the stale counts is forgotten by the re-seed (its drop was never below the new marks).
+        val p = rig(g(a = 1, h = 1, period = 2))
+        p.next(g(a = 1, h = 1, period = 3))
+        val pend = lp("21")
+        assertNull(p.next(g(a = 1, h = 1, period = 3, lastPlay = pend))?.timeout)
+        assertNull(p.next(g(a = 3, h = 3, period = 3, lastPlay = pend))?.timeout, "the reset is not the 21's drop")
+        // The window closes on the half's first new play after its first body: stale counts that outlast it are the
+        // documented limit (the marks then wait for a count below the stale low).
+        val late = rig(g(a = 1, h = 1, period = 2))
+        late.next(g(a = 1, h = 1, period = 3))
+        late.next(g(a = 1, h = 1, period = 3)) // a new play, still the old counts: the window closes
+        late.next(g(a = 3, h = 3, period = 3))
+        assertNull(late.next(g(a = 2, h = 3, period = 3))?.timeout)
+        // Overtime groups never re-seed (their first counts are the group's own).
+        val ot = rig(g(a = 1, h = 1, period = 4))
+        ot.next(g(a = 2, h = 2, period = 5))
+        ot.next(g(a = 3, h = 3, period = 5))
+        assertNull(ot.next(g(a = 2, h = 3, period = 5))?.timeout, "OT: not below the group's low 2")
+    }
+
+    /** C-S2: the Q4 2 → 3 → 2 flap after the half's plays and marks never re-seeds (the rule above keeps it). */
+    @Test
+    fun aFlapToThreeThreeLaterInTheHalfNeverReSeeds() {
+        val r = rig(g(a = 3, h = 3, period = 4))
+        assertEquals(NflTimeoutMark(Side.AWAY, 2, true), r.next(g(a = 2, h = 3, period = 4, lastPlay = lp("21")))?.timeout)
+        assertNull(r.next(g(a = 3, h = 3, period = 4))?.timeout, "a flap to 3 / 3")
+        assertNull(r.next(g(a = 2, h = 3, period = 4, lastPlay = lp("5")))?.timeout, "not below the low-water mark 2")
+        // With no mark in the group but its plays seen, the same.
+        val n = rig(g(a = 3, h = 3, period = 4, lastPlay = lp("24")))
+        n.next(g(a = 3, h = 3, period = 4, lastPlay = lp("24")))
+        assertNull(n.next(g(a = 2, h = 3, period = 4, lastPlay = lp("74")))?.timeout, "a drop on an official timeout: no mark")
+        n.next(g(a = 3, h = 3, period = 4))
+        assertNull(n.next(g(a = 2, h = 3, period = 4, lastPlay = lp("5")))?.timeout)
+    }
+
+    /** Review fix C-N3: playoff overtime, one half group per pair of OT periods (5–6, 7–8): 3OT starts fresh. */
+    @Test
+    fun playoffOvertimePairsAreTheirOwnHalves() {
+        val r = rig(g(a = 3, h = 3, period = 5))
+        assertEquals(NflTimeoutMark(Side.AWAY, 2, true), r.next(g(a = 2, h = 3, period = 5, lastPlay = lp("21")))?.timeout)
+        assertEquals(NflTimeoutMark(Side.AWAY, 1, true), r.next(g(a = 1, h = 3, period = 6, lastPlay = lp("21")))?.timeout, "2OT is the same half")
+        val third = assertNotNull(r.next(g(a = 3, h = 3, period = 7)))
+        assertNull(third.timeout)
+        assertEquals(3, third.timeoutSlots)
+        assertEquals(NflTimeoutMark(Side.AWAY, 2, true), r.next(g(a = 2, h = 3, period = 7, lastPlay = lp("21")))?.timeout, "3OT: a new half")
+        assertEquals(3, r.nfl()?.timeoutSlots)
+        assertEquals(NflTimeoutMark(Side.HOME, 2, true), r.next(g(a = 2, h = 2, period = 8, lastPlay = lp("21", side = Side.HOME)))?.timeout)
+    }
+
+    /**
+     * Review fix C-N1: a permanent downward id correction. After three shown entries below the high-water it drops to
+     * them, so a later play above the correction marks; a body flipping back to an id already shown never re-marks.
+     */
+    @Test
+    fun aPermanentDownwardIdCorrectionLowersTheHighWater() {
+        val r = rig(g(lastPlay = lp(id = 899)))
+        val pen900 = lp("8", penalty = true, id = 900)
+        assertEquals(pen900.id, r.next(g(lastPlay = pen900))?.flagId)
+        r.at(r.now + SportsConstants.NFL_FLAG_MARK_MS)
+        val corrected = lp("24", id = 880)
+        r.next(g(lastPlay = corrected)); r.next(g(lastPlay = corrected)); r.next(g(lastPlay = corrected))
+        val pen885 = lp("8", penalty = true, id = 885)
+        assertEquals(pen885.id, r.next(g(lastPlay = pen885))?.flagId, "a new play above the correction")
+        r.at(r.now + SportsConstants.NFL_FLAG_MARK_MS)
+        assertNull(r.next(g(lastPlay = pen900))?.flagId, "900 was shown before: never new again")
+        assertNull(r.next(g(lastPlay = lp("8", penalty = true, id = 870)))?.flagId, "below the lowered mark")
+        // Two entries below are not enough: a CDN flip back and forth keeps the high-water.
+        val b = rig(g(lastPlay = lp(id = 899)))
+        b.next(g(lastPlay = lp(id = 900)))
+        b.next(g(lastPlay = corrected)); b.next(g(lastPlay = corrected))
+        assertNull(b.next(g(lastPlay = pen885))?.flagId, "885 is below 900 and is the third: the mark drops only after it")
+    }
+
+    // ------------------------------------------------------------------ the held bar (C-S1) and the neutral field (C-N4)
+
+    /** Review fix C-S1: §3.4 "LIVE, dead ball after FG / safety | the held bar": the bar holds through the dead ball. */
+    @Test
+    fun theBarIsHeldOnTheDeadBallAfterAFieldGoal() {
+        val fourth = NflPlay.Down(4, 3, goalToGo = false, field = FieldPos(Side.HOME, 20))
+        val r = rig(g(play = fourth, secs = 400))
+        val play = assertNotNull(StackedNflTargets.of(assertNotNull(r.m.view())).bar)
+        assertEquals(NflBarKind.PLAY, play.kind)
+        val dead = g(play = NflPlay.Dead(Side.AWAY, 3), away = 3, secs = 395, lastPlay = lp("59", score = 3))
+        r.next(dead)
+        val v = assertNotNull(r.m.view())
+        assertEquals(Side.AWAY, v.goalSide, "the field goal flags")
+        assertNull(v.nfl?.down, "the Pill's down column is unchanged (none on a dead ball)")
+        assertEquals(DownText.Down(4, 3, false), v.nfl?.heldDown)
+        assertEquals(play, StackedNflTargets.of(v).bar, "the held bar: no change")
+        // After the goal mark, and on the re-sent dead body: still held.
+        r.at(r.now + SportsConstants.GOAL_MARK_MS + 1)
+        assertEquals(play, StackedNflTargets.of(assertNotNull(r.m.view())).bar)
+        r.next(dead)
+        assertEquals(play, StackedNflTargets.of(assertNotNull(r.m.view())).bar)
+        // The kick-off body re-keys to the kicker's bar.
+        r.next(g(play = NflPlay.Kickoff(Side.AWAY, FieldPos(Side.AWAY, 35)), away = 3, secs = 395))
+        assertEquals(NflBarKind.KICKOFF, StackedNflTargets.of(assertNotNull(r.m.view())).bar?.kind)
+        // A dead ball with no held tab (the follow starts on it) is still closed.
+        val s = rig(dead)
+        assertNull(s.nfl()?.heldDown)
+        assertNull(StackedNflTargets.of(assertNotNull(s.m.view())).bar)
+    }
+
+    /** Review fix C-N4: the neutral bar (no possession) keeps the field position: "1ST & 10 | KC 35" by territory. */
+    @Test
+    fun theNeutralBarKeepsTheField() {
+        val r = rig(g(poss = null, lastPlay = lp("24", side = null), play = NflPlay.Down(1, 10, false, FieldPos(Side.HOME, 35))))
+        val v = assertNotNull(r.m.view())
+        assertNull(v.nfl?.tab, "no possession: no ball, no tab")
+        val bar = assertNotNull(StackedNflTargets.of(v).bar)
+        assertEquals(NflBarKey(NflBarKind.PLAY, null, down = DownText.Down(1, 10, false), tail = TabTail.Field(FieldZone.OPP, 35)), bar)
+        val mid = rig(g(poss = null, lastPlay = lp("24", side = null), play = NflPlay.Down(1, 10, false, FieldPos(null, 50))))
+        assertEquals(TabTail.Field(FieldZone.MIDFIELD, 50), StackedNflTargets.of(assertNotNull(mid.m.view())).bar?.tail)
     }
 
     @Test

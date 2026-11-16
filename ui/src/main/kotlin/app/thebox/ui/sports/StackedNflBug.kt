@@ -342,6 +342,12 @@ internal fun StackedNflBug(
                 held.value = holder.lastFrame
                 run.pin(side, a, b)
             } else {
+                // Review fix U-N2, as the NHL Stacked runner (`StackedBug`): a score that cannot play its takeover (the
+                // takeover painter is still being built after a follow or a size change, or the bug is hidden or
+                // placing) is not queued: the new score is shown at once, snapped, with no takeover. Counted for tests.
+                if (side != null && scores.isNotEmpty() && box != null && !placement.placing && sp == null) {
+                    hooks.probe?.let { it.scoresWithoutTakeover++ }
+                }
                 run.release(snap = true, driverMs = 0f)
             }
         }
@@ -409,10 +415,10 @@ internal fun StackedNflBug(
                     // The lead covering the box, the pair's steps and the release are children watching the driver, so
                     // the takeover keeps its single tween under any MotionDurationScale.
                     launch {
-                        snapshotFlow { driver.value >= GoalTimeline.LEAD_COVERED_MS }.first { it }
+                        snapshotFlow { driver.value >= StackedNflPinSchedule.coverMs(false) }.first { it }
                         if (g.token == token) run.covered(0)
                     }
-                    val releaseAt = if (second == null) takeover else spec.pairSecondMs + takeover
+                    val releaseAt = StackedNflPinSchedule.releaseMs(second != null, spec)
                     launch {
                         snapshotFlow { driver.value >= releaseAt }.first { it }
                         if (g.token == token) run.release(snap = false, driverMs = driver.value)
@@ -428,7 +434,7 @@ internal fun StackedNflBug(
                             if (g.token == token) beginSegment(secondList, 1)
                         }
                         launch {
-                            snapshotFlow { driver.value >= spec.pairSecondMs + GoalTimeline.LEAD_COVERED_MS }.first { it }
+                            snapshotFlow { driver.value >= StackedNflPinSchedule.bCoverMs(false, spec) }.first { it }
                             if (g.token == token) run.covered(1)
                         }
                     }
@@ -497,12 +503,11 @@ internal fun StackedNflBug(
         }
         // Pending, or the lead still wiping in: the pre-score body (rule 1). The still path's frame A covers at once.
         val hold = held.value
-        val covered = !g.still && t >= GoalTimeline.LEAD_COVERED_MS || g.still
-        val bCovered = if (g.still) hooks.spec.pairSecondMs else hooks.spec.pairSecondMs + GoalTimeline.LEAD_COVERED_MS
+        val body = StackedNflPinSchedule.body(t, g.still, g.pair, hooks.spec)
         val pairA = g.pairBody
         val base = when {
-            hold != null && (!on || !covered) -> hold
-            on && g.pair && pairA != null && t < bCovered -> pairA
+            hold != null && (!on || body == StackedNflPinSchedule.Body.PRE_SCORE) -> hold
+            on && g.pair && pairA != null && body != StackedNflPinSchedule.Body.SCORED -> pairA
             else -> frame
         }
         val f = run.sampleForDraw()
@@ -583,14 +588,64 @@ internal fun StackedNflBug(
 /** The takeover badge (mock 130 × 0.45 = 58.5 Standard design px); the logos are fetched at this size (ST S6). */
 internal const val STACKED_NFL_BADGE = StackedNflMock.SCORE_BADGE * K.STACKED_SCALE
 
-/** A zero-width space: marks a back-to-back flag's live text as new without changing what is spoken (ruling 7). */
-internal const val FLAG_TEXT_MARK = "\u200B"
-
 /** The flag bar's wave runs at most this long from its REKEY: the flag mark's hold (S-D8, the idle budget). */
 private const val FLAG_HOLD_MS = K.NFL_FLAG_MARK_MS
 
 /** The top part's width at rest, Standard design px: the rows plus the open clock column (§5.1: 333 / 243). */
 internal fun nflRestBoxW(clockOpen: Boolean): Float = K.STACKED_ROWS_W + (if (clockOpen) K.STACKED_CLOCK_W else 0f)
+
+/**
+ * (§4.3, §4.4; review fix U-S1) The pinned takeover's schedule as pure functions of the driver time: when each
+ * segment's lead covers the box, when the pin releases, which body the rows draw, which segment is painted, and the
+ * pinned bar's key. The runner keys its sequencing on these (so the screenshot test can build the same looks from them,
+ * never by hand). Times in ms on the takeover driver; [still] the motion-off path (frames A / B, §4.4).
+ */
+internal object StackedNflPinSchedule {
+    /** Segment A's lead covers the box: 216 (the still path: frame A, at once). */
+    fun coverMs(still: Boolean): Float = if (still) 0f else GoalTimeline.LEAD_COVERED_MS
+    /** A pair's segment B covers the box: its start (`pairSecondMs`) plus the lead. */
+    fun bCoverMs(still: Boolean, spec: NflScoreSpec): Float = spec.pairSecondMs + coverMs(still)
+    /** The release (rule 4): 3 600, or a pair's 8 400. */
+    fun releaseMs(pair: Boolean, spec: NflScoreSpec): Float =
+        if (pair) spec.pairSecondMs + K.NFL_TAKEOVER_MS else K.NFL_TAKEOVER_MS.toFloat()
+
+    /**
+     * The score label "TOUCHDOWN | KC +6" on a box pinned at [boxW] (Standard px). §2.4: the label with its sub needs the
+     * 333 bar; pinned at the 243 break width (a score during a break) it is the word alone, "TOUCHDOWN" (the "+6" is on
+     * the panel), so it never clips (review fix U-S1, found once the break look came from this schedule).
+     */
+    fun label(side: Side, s: NflScore, boxW: Float) =
+        NflBarKey(NflBarKind.SCORE, side, score = s.kind, points = s.points.takeIf { boxW >= K.STACKED_NFL_W_MAX })
+    fun labelA(side: Side, a: NflScore, boxW: Float) = label(side, a, boxW)
+    /** "EXTRA POINT" between a pair's takeovers (NFL lead 3). */
+    fun interim(side: Side, b: NflScore?) = if (b != null) NflBarKey(NflBarKind.PAT, side) else null
+    fun labelB(side: Side, b: NflScore?, boxW: Float) = b?.let { label(side, it, boxW) }
+
+    /** Which body the rows draw at [t] while the takeover is on. */
+    enum class Body { PRE_SCORE, PAIR_FIRST_TALLY, SCORED }
+
+    fun body(t: Float, still: Boolean, pair: Boolean, spec: NflScoreSpec): Body = when {
+        t < coverMs(still) -> Body.PRE_SCORE
+        pair && t < bCoverMs(still, spec) -> Body.PAIR_FIRST_TALLY
+        else -> Body.SCORED
+    }
+
+    /** The segment painted at [t]: 1 from a pair's `pairSecondMs` (B's `begin`), else 0. */
+    fun segment(t: Float, pair: Boolean, spec: NflScoreSpec): Int = if (pair && t >= spec.pairSecondMs) 1 else 0
+
+    /**
+     * The bar key the pin shows at [t] with [barOpen] (the bar was open at the pin), or null for "not a pinned label":
+     * the bar the pin found before A covers, and the current view's bar from the release on.
+     */
+    fun barKey(side: Side, a: NflScore, b: NflScore?, t: Float, still: Boolean, barOpen: Boolean, boxW: Float, spec: NflScoreSpec): NflBarKey? {
+        if (!barOpen || t < coverMs(still) || t >= releaseMs(b != null, spec)) return null
+        return when {
+            b == null || t < K.NFL_TAKEOVER_MS -> labelA(side, a, boxW)
+            t < bCoverMs(still, spec) -> interim(side, b)
+            else -> labelB(side, b, boxW)
+        }
+    }
+}
 
 
 /** [b] with the rows' scores replaced by a pair's first tally (§4.3: the digits follow tally A until 5 016). */
@@ -714,6 +769,8 @@ internal class StackedNflProbe {
     /** The bar's current content (live holder). */
     var barContent: (() -> NflBarContent)? = null
     var scorePainter: (() -> StackedNflScorePainter?)? = null
+    /** (U-N2) Scores shown at once with no takeover because the takeover painter was not built yet. */
+    var scoresWithoutTakeover = 0
     var painter: (() -> StackedNflPainter)? = null
     var shadow: (() -> NineSlice?)? = null
     /** The cached glow boxes, newest first (Standard design px × 10, rounded). */
@@ -947,16 +1004,17 @@ internal class StackedNflRun(private val scope: CoroutineScope, private val hook
             // A reappearance in the score's own composition snaps first (in composition: reads unobserved).
             if (snapPending && !hidden) Snapshot.withoutReadObservation { step() }
             pinned = true
-            for (t in arrayOf(clock, barTrack)) if (!t.idle) t.pinSample = true
+            if (!clock.idle) clock.pinSample = true // U-N10: no array per score
+            if (!barTrack.idle) barTrack.pinSample = true
             pinBoxW = nflRestBoxW(clock.want)
             pinBarOpen = barWant != null
             pinH = K.STACKED_H + (if (pinBarOpen) K.STACKED_BAR_H else 0f)
             requestGlow(pinBoxW, pinH)
         }
         covered = false
-        labelA = NflBarKey(NflBarKind.SCORE, side, score = a.kind, points = a.points)
-        interimKey = if (b != null) NflBarKey(NflBarKind.PAT, side) else null
-        labelB = b?.let { NflBarKey(NflBarKind.SCORE, side, score = it.kind, points = it.points) }
+        labelA = StackedNflPinSchedule.labelA(side, a, pinBoxW)
+        interimKey = StackedNflPinSchedule.interim(side, b)
+        labelB = StackedNflPinSchedule.labelB(side, b, pinBoxW)
         bump(epoch)
     }
 
@@ -1301,7 +1359,7 @@ internal class StackedNflDescribe(private val res: Resources, private val v: Sco
 internal class StackedNflLiveText {
     private var game: GameId? = null
     private var lastView: ScoreBugView? = null
-    /** The flag id last announced, and how many flags so far (its parity marks a back-to-back flag's text). */
+    /** The flag id last announced, and its wording (1 the first, 2 "Another …" right after a first, review fix U-S2). */
     private var flagId: String? = null
     private var flags = 0
     var text = ""
@@ -1315,13 +1373,14 @@ internal class StackedNflLiveText {
         val n = v.nfl
         val mark = n?.timeout
         val id = n?.flagId
-        if (id != null && id != flagId) { flagId = id; flags++ }
+        // U-S2: a new flagId directly after a flag's first wording takes the second one; otherwise the first.
+        if (id != null && id != flagId) { flagId = id; flags = if (text == res.getString(R.string.sports_live_nfl_flag)) 2 else 1 }
         text = when {
             v.goalSide != null -> nflScoreText(res, v) ?: ""
-            // Integration ruling 7: a live region speaks only when its text changes, so a flag that directly follows
-            // another (a new flagId, no "" between) ends in a zero-width space on every second flag: spoken the same,
-            // but a new text, so each flagId is announced once.
-            id != null -> res.getString(R.string.sports_live_nfl_flag) + if (flags % 2 == 0) FLAG_TEXT_MARK else ""
+            // Review fix U-S2 (replaces integration ruling 7's zero-width space): a live region speaks only when its text
+            // changes, so the flags alternate two real wordings: each new flagId reads differently from the one before
+            // ("Flag on the play." / "Another flag on the play."), and the same id on a later poll is not re-announced.
+            id != null -> res.getString(if (flags % 2 == 0) R.string.sports_live_nfl_flag_again else R.string.sports_live_nfl_flag)
             mark != null && mark.confirmed -> res.getString(R.string.sports_live_nfl_timeout, nflShortOf(if (mark.side == Side.AWAY) v.away else v.home))
             else -> ""
         }

@@ -244,6 +244,9 @@ internal class StackedNflScorePainter(
     private var blockW = 0f
     private var pointsBaseline = 0f
     private var tallyBaseline = 0f
+    /** (U-B1) The posts' placed left edge (`postsX × k`, device px, unmirrored) and their shift off the block (≤ 0). */
+    private var postsX0 = 0f
+    private var postsShift = 0f
     private val letterOx = FloatArray(NflScoreFrame.LETTERS)
     private val letterDst = Array(NflScoreFrame.LETTERS) { RectF() }
 
@@ -320,6 +323,9 @@ internal class StackedNflScorePainter(
         badgeCx = items[G.T_BADGE].let { if (it.isNaN()) pad else it } + badgeSlot / 2f
         wordCx = items[G.T_WORD] + wordW / 2f
         blockRight = items[G.T_BLOCK] + blockW
+        // U-B1: the posts end one gap before the block (the mock keeps them behind the end of the word); the arc bends with them.
+        postsX0 = spec.postsX * s * G.arcK(boxW / s)
+        postsShift = G.postsShift(blockRight - blockW, postsX0, spec.postsW * s, s)
         // The block: "+N" (line box 26.1) over the tally (20), 2.7 apart, centred on the panel; caps centred per line.
         if (showTally) {
             val blockH = (K.STACKED_NFL_POINTS_PX + K.STACKED_NFL_BLOCK_GAP + K.STACKED_TALLY_PX) * s
@@ -442,15 +448,11 @@ internal class StackedNflScorePainter(
                 val pa = alpha255(g.postsAlpha)
                 if (pa > 0) {
                     spritePaint.color = (pa shl 24) or 0xFFFFFF
-                    val pw = spec.postsW * s
-                    val x0 = spec.postsX * s * k
-                    val x = if (mirrored) boxW - x0 - pw else x0
-                    val y = (spec.postsY + g.postsDy) * s
-                    dst.set(x, y, x + pw, y + spec.postsH * s)
+                    postsRect(g, mirrored, dst)
                     drawBitmap(posts, null, dst, spritePaint)
                 }
             }
-            if (g.arcOn) drawBall(this, g, g.ballX * s * k, mirrored)
+            if (g.arcOn) drawBall(this, g, arcX(g, k), mirrored)
             else if (g.runOn) drawBall(this, g, g.ballX * s, mirrored)
             val fa = alpha255(g.flashAlpha)
             if (fa > 0) { flashPaint.alpha = fa; drawRoundRect(box, radius, radius, flashPaint) }
@@ -458,6 +460,31 @@ internal class StackedNflScorePainter(
             drawWord(this, g, if (mirrored) boxW - wordCx else wordCx)
             drawBlock(this, g, mirrored)
         }
+    }
+
+    /** (U-B1) The posts' drawn rect for frame [g] (box-local device px, [mirrored] reflected), shifted off the block. */
+    internal fun postsRect(g: NflScoreFrame, mirrored: Boolean, out: RectF): RectF {
+        val pw = spec.postsW * s
+        val x0 = postsX0 + postsShift
+        val x = if (mirrored) boxW - x0 - pw else x0
+        val y = (spec.postsY + g.postsDy) * s
+        return out.apply { set(x, y, x + pw, y + spec.postsH * s) }
+    }
+
+    /** (U-B1) The arc ball's sprite left (device px, unmirrored): the frame's x × k, bent by the posts' shift. */
+    internal fun arcX(g: NflScoreFrame, k: Float = G.arcK(boxW / s)): Float =
+        G.bendArc(g.ballX * s * k, postsShift, spec.arcP0X * s * k, spec.arcP2X * s * k)
+
+    /**
+     * (U-B1) The "+N" / tally block's drawn extent for frame [g] across x (box-local device px, [mirrored] reflected),
+     * with its slide and scale; [out]'s top / bottom are the panel's.
+     */
+    internal fun blockDrawnRect(g: NflScoreFrame, mirrored: Boolean, out: RectF): RectF {
+        val right = if (mirrored) boxW - (blockRight - blockW) else blockRight
+        val dx = (if (mirrored) -g.blockDx else g.blockDx) * s
+        val bcx = right - blockW / 2f
+        val half = blockW / 2f * g.blockScale
+        return out.apply { set(bcx - half + dx, 0f, bcx + half + dx, h) }
     }
 
     /** The band at left edge [dx]: translate, then the box offset back by −dx, so the shader moves without a matrix. */
@@ -572,6 +599,8 @@ internal class StackedNflScorePainter(
     internal val atlasBitmap: Bitmap get() = atlas
     internal val ballSprite: Bitmap get() = ball
     internal val postsSprite: Bitmap get() = posts
+    internal val postsShiftUsed: Float get() = postsShift
+    internal val boxWidth: Float get() = boxW
 
     companion object {
         /** The five words by [NflScoreKind] ordinal (`sports_nfl_*`, not translated). */
