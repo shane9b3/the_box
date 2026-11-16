@@ -1,6 +1,6 @@
 // Contract (NFL Stacked commit 0): docs/design/m6-nfl-stacked.md §8.1. The seam between WP-3 (the painters:
-// StackedNflPainter.kt, StackedNflScorePainter.kt) and WP-4 (the runner: StackedNflBug.kt). Neither WP edits this file;
-// changes go through the lead.
+// StackedNflPainter.kt, StackedNflScorePainter.kt) and WP-4 (the runner: StackedNflBug.kt); extended at integration
+// (design doc "Integration rulings (2026-11-15)"). Changes go through the lead.
 package app.thebox.ui.sports
 
 import android.graphics.Bitmap
@@ -143,6 +143,14 @@ internal class NflBarContent {
  * - [still]: the still version ("Reduce animations").
  * - [score] / [scoreSide] / [takeoverOn]: the takeover: the sampled frame (`NflScoreSpec.STACKED`), the scorer, and
  *   whether a takeover is drawn this frame.
+ *
+ * (Integration rulings 2026-11-15, as `StackedDrawArgs`) The takeover is drawn **inside** [StackedNflPainter.drawFrame]
+ * in the hockey order (glow, shadow, box, bar, rows, clock column, takeover, border on top), from:
+ * - [takeover]: the score painter `begin()` ran on (null = no takeover drawn); [glow] / [glowOn]: its exact-box masks
+ *   and whether the glow may draw (GA N4 latch);
+ * - [shadow]: the nine-slice the **drawing** painter baked (`StackedNflPainter.bakeShadow`), null until it lands;
+ * - [awayLogoPending] / [homeLogoPending]: a followed team's logo is still loading and `LOGO_WAIT_MS` has not passed:
+ *   the slot stays empty (no disc flash before the logo), as the NHL Stacked bug's `logoWaited`.
  */
 internal class StackedNflDrawArgs {
     var frame: StackedNflFrame? = null
@@ -152,10 +160,16 @@ internal class StackedNflDrawArgs {
     var colours: StackedPair? = null
     var awayLogo: Bitmap? = null
     var homeLogo: Bitmap? = null
+    var awayLogoPending = false
+    var homeLogoPending = false
     var mirrored = false
     var up = false
     var still = false
+    var shadow: NineSlice? = null
     var score: NflScoreFrame? = null
     var scoreSide: Side? = null
     var takeoverOn = false
+    var takeover: StackedNflScorePainter? = null
+    var glow: GlowMasks? = null
+    var glowOn = false
 }

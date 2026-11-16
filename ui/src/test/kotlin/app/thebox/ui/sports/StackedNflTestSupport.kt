@@ -11,7 +11,6 @@ import app.thebox.core.sports.NflBarKind
 import app.thebox.core.sports.NflScore
 import app.thebox.core.sports.NflScoreKind
 import app.thebox.core.sports.NflScoreSpec
-import app.thebox.core.sports.NflScoreTimeline
 import app.thebox.core.sports.NflTab
 import app.thebox.core.sports.NflTimeoutMark
 import app.thebox.core.sports.NhlBugStyle
@@ -26,6 +25,7 @@ import app.thebox.core.sports.SportsConstants as K
 import app.thebox.core.sports.SportsFixtures
 import app.thebox.core.sports.StackedNflFrame
 import app.thebox.core.sports.StackedNflTargets
+import app.thebox.core.sports.StackedNflTimeline
 import app.thebox.core.sports.StackedNflTrack
 import app.thebox.core.sports.StackedNflTransition
 import app.thebox.core.sports.TabLead
@@ -35,18 +35,12 @@ import kotlin.coroutines.CoroutineContext
 import kotlin.coroutines.EmptyCoroutineContext
 
 /**
- * (NFL Stacked WP-4) Views, inputs and hooks for the NFL Stacked runner tests. The runner is tested against the
- * foundation's contracts only: the layout table (WP-2), the timelines (WP-2) and the painters (WP-3) are replaced by the
- * fakes here, so the tests hold before and after those packages land.
- *
- * - [targets]: a small stand-in for `StackedNflTargets.of` (WP-2): stale / waiting in play closes the bar, the breaks
- *   fold the clock and name the break, then flag > timeout > play (RC4), possession from the tab, the view's counts,
- *   the burn on the timeout mark's caller.
- * - [LinearSampler]: CLOCK and BAR as straight lines over [totalMs] (so a mid-transition value and the pin's snap are
- *   observable); the rest at their end. [PinnedSampler]: the layout channels at the end.
- * - [totalMs]: lengths in the §4.1 family (OPEN / CLOSE 400, REKEY 550, BURN 2 000, CLOCK 450).
- * - [SPEC]: `NflScoreSpec.PILL` with the STACKED lengths of §4.3 (end 4 800, pair second 4 800, pair end 9 600, still B
- *   1 200), so the pair sequencing is tested at 4 800 before WP-2 sets the STACKED values.
+ * (NFL Stacked WP-4; re-pointed at the real code in the integration pass, 2026-11-15) Views, inputs and hooks for the
+ * NFL Stacked runner tests. The layout table is the real `StackedNflTargets.of`, the transitions the real
+ * `StackedNflTimeline` (sampled and timed), the takeover `NflScoreTimeline` under the real `NflScoreSpec.STACKED`. Fakes
+ * are kept only where a test must observe a call: the painters' once-per-change calls (`frame`, `fillBar`, `begin`:
+ * recorded, with plain words), the glow bake (a 1-px mask, counted) and recording wrappers around the real samplers.
+ * `StackedNflEndToEndTest` runs everything real, painters included.
  */
 internal object StackedNflRunFixtures {
     val GAME = SportsFixtures.nflGame()
@@ -55,9 +49,8 @@ internal object StackedNflRunFixtures {
     val bufTab = NflTab(Side.HOME, TabLead.BALL, TabTail.Field(FieldZone.OWN, 25))
     val firstAndTen = DownText.Down(1, 10, goal = false)
 
-    val SPEC: NflScoreSpec = NflScoreSpec.PILL.copy(
-        endMs = 4_800f, pairSecondMs = 4_800f, pairEndMs = 9_600f, stillFrameBMs = 1_200f, rowFlashMs = 1_200f,
-    )
+    /** The shipped takeover spec (end 4 800, pair second 4 800, pair end 9 600, still B 1 200). */
+    val SPEC: NflScoreSpec = NflScoreSpec.STACKED
 
     /** KC @ BUF in play (4th, 3:42, 24–17), KC ball 1st & 10, timeouts 3 / 2 of 3, or as told. */
     fun view(
@@ -98,11 +91,13 @@ internal object StackedNflRunFixtures {
     /** KC's +7 pair (touchdown 30–17 then the extra point 31–17), seq [seq]. */
     fun pair(seq: Int = 1) = view(away = 31, seq = seq, side = Side.AWAY, scores = listOf(td(), xp()))
 
+    /** Halftime; [dim]: stale in the break (the NFL machine writes "No update" on the top line, no clock line). */
     fun halftime(dim: Boolean = false) = view(
-        top = CentreText.Halftime, bottom = if (dim) CentreText.NoUpdate else null, tab = null, down = null, dim = dim,
+        top = if (dim) CentreText.NoUpdate else CentreText.Halftime, bottom = null, tab = null, down = null, dim = dim,
     )
 
-    fun stale() = view(bottom = CentreText.NoUpdate, dim = true)
+    /** Stale in play, as the NFL machine writes it: "No update" on the top line over the clock line, no down or tab. */
+    fun stale() = view(top = CentreText.NoUpdate, dim = true, down = null, tab = null)
 
     fun input(
         corner: ScoreCorner = ScoreCorner.TOP_RIGHT,
@@ -113,55 +108,11 @@ internal object StackedNflRunFixtures {
     ): PlacementInput = ScoreBugFixtures.input(corner, size, placing, bar)
         .copy(league = League.NFL, style = NhlBugStyle.STACKED, textTrackOn = textTrackOn)
 
-    /** The test stand-in for WP-2's §3.4 table (see the class doc). */
-    fun targets(v: ScoreBugView): StackedNflTargets {
-        val n = v.nfl
-        val stale = v.top is CentreText.NoUpdate || v.bottom is CentreText.NoUpdate
-        val waiting = v.top is CentreText.Delayed || v.bottom is CentreText.Delayed
-        val top = v.top
-        val brk = top is CentreText.Halftime || top is CentreText.EndOf || top is CentreText.Final
-        val mark = n?.timeout
-        val tab = n?.tab
-        val bar: NflBarKey? = when {
-            brk && stale -> NflBarKey(NflBarKind.NO_UPDATE, null)
-            brk && waiting -> NflBarKey(NflBarKind.DELAYED, null)
-            stale || waiting -> null
-            top is CentreText.Halftime -> NflBarKey(NflBarKind.HALFTIME, null)
-            top is CentreText.Final -> NflBarKey(NflBarKind.FINAL, null, finalKind = top.kind)
-            top is CentreText.EndOf -> NflBarKey(NflBarKind.END_PERIOD, null, period = top.period)
-            n?.flagId != null -> NflBarKey(NflBarKind.FLAG, null)
-            mark != null -> NflBarKey(NflBarKind.TIMEOUT, mark.side, left = mark.left)
-            tab != null -> NflBarKey(NflBarKind.PLAY, tab.side, down = n.down, tail = tab.tail)
-            else -> null
-        }
-        val live = !brk && !stale && !waiting
-        return StackedNflTargets(
-            clockOpen = !brk,
-            bar = bar,
-            possSide = if (live) n?.tab?.side else null,
-            period = v.period,
-            clockSlot = when {
-                brk -> ClockSlot.Blank
-                stale -> ClockSlot.NoUpdate
-                waiting -> ClockSlot.Delayed
-                v.clockSecs != null -> ClockSlot.Clock
-                else -> ClockSlot.Blank
-            },
-            columnDim = stale || waiting,
-            barDim = brk && (stale || waiting),
-            awayTimeouts = n?.awayTimeouts,
-            homeTimeouts = n?.homeTimeouts,
-            timeoutSlots = n?.timeoutSlots ?: 0,
-            burnSide = if (live) mark?.side else null,
-        )
-    }
+    /** The real §3.4 table. */
+    fun targets(v: ScoreBugView): StackedNflTargets = StackedNflTargets.of(v)
 
-    fun totalMs(track: StackedNflTrack, kind: StackedNflTransition): Float = when (kind) {
-        StackedNflTransition.STILL -> 0f
-        StackedNflTransition.REKEY -> K.STACKED_NFL_REKEY_MS.toFloat()
-        StackedNflTransition.BURN -> (K.STACKED_NFL_BURN_CYCLE_MS * K.STACKED_NFL_BURN_CYCLES + 400).toFloat()
-        StackedNflTransition.OPEN, StackedNflTransition.CLOSE -> if (track == StackedNflTrack.CLOCK) 450f else 400f
-    }
+    /** The real transition lengths. */
+    fun totalMs(track: StackedNflTrack, kind: StackedNflTransition): Float = StackedNflTimeline.totalMs(track, kind)
 
     /** CLOCK and BAR along a straight line over [totalMs] from the interrupted value; the others at their end. */
     val LinearSampler = StackedNflSampler { track, kind, t, from, to, out ->
@@ -189,14 +140,8 @@ internal object StackedNflRunFixtures {
     /** The pin's sampler stand-in: the layout channels at the end of the transition. */
     val PinnedSampler = StackedNflSampler { track, kind, _, from, to, out -> LinearSampler.sample(track, kind, Float.POSITIVE_INFINITY, from, to, out) }
 
-    /** The takeover under [SPEC]. */
-    val ScoreSampler = NflScoreSampler { t, still, first, second, out ->
-        when {
-            still -> NflScoreTimeline.sampleStill(SPEC, first, second, t, out)
-            second != null -> NflScoreTimeline.samplePair(SPEC, first, second, t, out)
-            else -> NflScoreTimeline.sample(SPEC, first, t, out)
-        }
-    }
+    /** The takeover: the production sampler (`NflScoreSpec.STACKED`). */
+    val ScoreSampler = NflScoreSampler.Real
 
     fun fakeGlow(): GlowMasks {
         val b = Bitmap.createBitmap(1, 1, Bitmap.Config.ALPHA_8)
@@ -237,7 +182,7 @@ internal object StackedNflRunFixtures {
         context: CoroutineContext = EmptyCoroutineContext,
         logoFetch: LogoFetch? = null,
         glowAllowed: Boolean = true,
-        linear: Boolean = true,
+        linear: Boolean = false,
     ) = StackedNflHooks(
         sampler = StackedNflSampler { track, kind, t, from, to, out ->
             calls.sampled += track to kind
@@ -257,9 +202,7 @@ internal object StackedNflRunFixtures {
         },
         flagSampler = StackedNflFlagSampler { t, still, out ->
             calls.flagSamples++
-            out.shakeDx = if (still) 0f else t
-            out.waveDeg = 0f
-            out
+            StackedNflFlagSampler.Real.sample(t, still, out)
         },
         totalMs = ::totalMs,
         targets = ::targets,

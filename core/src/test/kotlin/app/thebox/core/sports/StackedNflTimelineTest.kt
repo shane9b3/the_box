@@ -305,7 +305,7 @@ class StackedNflTimelineTest {
         near(6.0 * 0.45, K.STACKED_NFL_SHAKE_DX1, "dx1"); near(4.0 * 0.45, K.STACKED_NFL_SHAKE_DX2, "dx2")
         // The pivot (the mock's transform-origin 4px 26px in the 30 × 34 icon) inside the 15.8 × 17.9 icon: x at 15.8 / 30;
         // y as commit 0 set it (13.8; 26 × 17.9 / 34 is 13.69, a 0.11-px difference, reported to the lead).
-        near(4.0 * 15.8 / 30.0, K.STACKED_NFL_WAVE_PIVOT_X, "pivot x", 0.01); near(26.0 * 17.9 / 34.0, K.STACKED_NFL_WAVE_PIVOT_Y, "pivot y", 0.12)
+        near(4.0 * 15.8 / 30.0, K.STACKED_NFL_WAVE_PIVOT_X, "pivot x", 0.01); near(26.0 * 17.9 / 34.0, K.STACKED_NFL_WAVE_PIVOT_Y, "pivot y (integration ruling: the mock 13.69)", 0.01)
     }
 
     // ------------------------------------------------------------------ still, pinned, lengths

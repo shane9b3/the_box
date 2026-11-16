@@ -696,6 +696,8 @@ object SportsConstants {
     /** The possession ball, and its gap after the code's ink. */
     const val STACKED_NFL_BALL = 13.5f
     const val STACKED_NFL_BALL_GAP = 5.4f
+    /** The possession ball's fill (§6.3, the mock's `#8B4513`; stroked white). */
+    const val STACKED_NFL_BALL_FILL = 0xFF8B4513.toInt()
     /** The timeout pips: width, height (2.7 → 3.0, S-D12), radius, gap, top from the row's top. */
     const val STACKED_NFL_PIP_W = 9.9f
     const val STACKED_NFL_PIP_H = 3.0f
@@ -741,7 +743,7 @@ object SportsConstants {
     const val STACKED_NFL_WAVE_DEG = 8f
     /** The wave's pivot inside the icon. */
     const val STACKED_NFL_WAVE_PIVOT_X = 2.1f
-    const val STACKED_NFL_WAVE_PIVOT_Y = 13.8f
+    const val STACKED_NFL_WAVE_PIVOT_Y = 13.69f
 
     // ---- WP-2 additions: the geometry of `StackedNflGeometry` (§2.3–§2.5, §5.2–§5.4; [StackedNflMock] × STACKED_SCALE)
     /** The row stripe, and its possession width (8 / 14 mock). */

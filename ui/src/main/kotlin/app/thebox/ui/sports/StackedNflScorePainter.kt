@@ -25,7 +25,7 @@ import app.thebox.core.sports.NflShapes
 import app.thebox.core.sports.Side
 import app.thebox.core.sports.SportsConstants as K
 import app.thebox.core.sports.StackedMock
-import app.thebox.core.sports.StackedNflMock as M
+import app.thebox.core.sports.StackedNflGeometry as G
 import app.thebox.core.sports.TeamColours
 import kotlin.math.ceil
 import kotlin.math.cos
@@ -74,12 +74,11 @@ internal class StackedNflScorePainter(
     private val cy = h / 2f
     private val rowsW = K.STACKED_ROWS_W * s
     private val radius = StackedMock.BOX_RADIUS * K.STACKED_SCALE * s
-    private val badgeSlot = M.SCORE_BADGE * K.STACKED_SCALE * s
-    private val gap = M.SCORE_GAP * K.STACKED_SCALE * s
-    private val padStd = M.SCORE_PAD * K.STACKED_SCALE * s
-    private val padTight = K.STACKED_TAKEOVER_PAD_TIGHT * s
-    private val streak1W = StackedMock.STREAK1_W * K.STACKED_SCALE * s
-    private val streak2W = StackedMock.STREAK2_W * K.STACKED_SCALE * s
+    private val badgeSlot = K.STACKED_NFL_BADGE * s
+    private val streak1W = K.STACKED_NFL_STREAK1_W * s
+    private val streak2W = K.STACKED_NFL_STREAK2_W * s
+    /** `StackedNflGeometry.takeover`'s output (begin only). */
+    private val items = FloatArray(G.T_SIZE)
 
     private val leadPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val panelPaint = Paint(Paint.ANTI_ALIAS_FLAG)
@@ -100,7 +99,7 @@ internal class StackedNflScorePainter(
         typeface = sansBold; textSize = K.GOAL_BADGE_TEXT_PX * s; color = Color.WHITE; textAlign = Paint.Align.CENTER
     }
     private val pointsPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        typeface = sansBold; textSize = POINTS_PX * s; color = Color.WHITE; textAlign = Paint.Align.RIGHT
+        typeface = sansBold; textSize = K.STACKED_NFL_POINTS_PX * s; color = Color.WHITE; textAlign = Paint.Align.RIGHT
     }
     private val tallyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         typeface = sansBold; textSize = K.STACKED_TALLY_PX * s; color = Color.WHITE; textAlign = Paint.Align.RIGHT
@@ -146,7 +145,7 @@ internal class StackedNflScorePainter(
         val px = ATLAS_WORD_PX * s
         val wordPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = wordFont; textSize = px * a; color = Color.WHITE }
         val shadow = Paint(wordPaint).apply { color = argb(K.NFL_WORD_SHADOW_ALPHA, 0x000000) }
-        val dy = WORD_SHADOW_DY * s * a
+        val dy = K.STACKED_NFL_WORD_SHADOW_DY * s * a
         val pad = ceil(2f * a).toInt()
         val bounds = Array(chars.size) { Rect() }
         var top = 0
@@ -175,7 +174,7 @@ internal class StackedNflScorePainter(
             x0 += cellW[i]
         }
         inkMid = (top + bottom) / 2f / a
-        val track = K.NFL_WORD_TRACK_EM * px * a
+        val track = K.STACKED_NFL_WORD_TRACK_EM * px * a
         for ((w, word) in WORDS.withIndex()) {
             val n = minOf(word.length, NflScoreFrame.LETTERS)
             var width = 0f
@@ -273,7 +272,7 @@ internal class StackedNflScorePainter(
         val t = if (score == null) "" else "${score.away} – ${score.home}"
         tallyLen = minOf(t.length, tally.size)
         t.toCharArray(tally, 0, 0, tallyLen)
-        badgeText.textSize = goalBadgeFallbackPx(badgeText.typeface, abbrev, M.SCORE_BADGE * K.STACKED_SCALE) * s
+        badgeText.textSize = goalBadgeFallbackPx(badgeText.typeface, abbrev, K.STACKED_NFL_BADGE) * s
         val tb = Rect()
         badgeText.getTextBounds("M", 0, 1, tb)
         badgeTextOffset = -(tb.top + tb.bottom) / 2f
@@ -298,49 +297,35 @@ internal class StackedNflScorePainter(
     }
 
     /**
-     * §2.5's fit on the pinned width: [pad][badge][gap][word][gap][block][pad], the block (`"+N"` over the tally) as wide as
-     * "88 – 88" (or the actual tally when wider). Padding 16.2 while the word fits at its own size; then padding 8; then
-     * the word scales down to fit, floor 28; then the tally is dropped; then the badge. The word is centred between the
-     * badge and the block, as the mock's `flex: 1` column.
+     * Section 2.5's fit on the pinned width, by `StackedNflGeometry.fitTakeover` (padding 16.2 while the word fits at its
+     * own size; then 8; then the word scaled to fit, floor 28; then the tally dropped; then the badge) and the items'
+     * places by `StackedNflGeometry.takeover` (the badge at the padding, the block right-aligned at the far padding, the
+     * word centred between: the mock's `flex: 1` column). The block (`"+N"` over the tally) is as wide as "88 – 88" or
+     * the actual tally when wider. Unmirrored here; [drawTakeover] reflects about the box.
      */
     private fun layout() {
         val pointsW = pointsPaint.measureText(points, 0, pointsLen)
         val tallyW = maxOf(tallyPaint.measureText(TALLY_SLOT), tallyPaint.measureText(tally, 0, tallyLen))
-        val base = WORD_PX[kind.ordinal]
-        val baseW = baseWidth[kind.ordinal] * base / ATLAS_WORD_PX
-        fun room(p: Float, tally: Boolean, badge: Boolean) =
-            boxW - 2 * p - (if (badge) badgeSlot + gap else 0f) - gap - (if (tally) maxOf(tallyW, pointsW) else pointsW)
-        fun fit(room: Float) = if (baseW <= room) base else base * (room / baseW)
-        pad = padStd
-        showTally = tallyLen > 0
-        showBadge = true
-        var px = base
-        if (baseW > room(pad, showTally, true)) {
-            pad = padTight
-            px = fit(room(pad, showTally, true))
-            if (px < K.STACKED_NFL_WORD_FLOOR_PX && showTally) {
-                showTally = false
-                px = fit(room(pad, false, true))
-            }
-            if (px < K.STACKED_NFL_WORD_FLOOR_PX) {
-                showBadge = false
-                px = fit(room(pad, showTally, false))
-            }
-            px = px.coerceAtLeast(K.STACKED_NFL_WORD_FLOOR_PX)
-        }
-        wordPx = px
-        blockW = if (showTally) maxOf(tallyW, pointsW) else pointsW
-        badgeCx = pad + badgeSlot / 2f
-        blockRight = boxW - pad
-        val midL = pad + if (showBadge) badgeSlot + gap else 0f
-        val midR = blockRight - blockW - gap
-        wordCx = (midL + midR) / 2f
+        val nat = G.wordPx(kind) * s
+        val atlasW = baseWidth[kind.ordinal]
+        val withTally = maxOf(tallyW, pointsW)
+        val fit = G.fitTakeover(boxW, s, nat, { px -> atlasW * (px / s) / ATLAS_WORD_PX }, if (tallyLen > 0) withTally else pointsW, pointsW)
+        pad = fit.pad
+        wordPx = fit.wordPx / s
+        showTally = fit.tally && tallyLen > 0
+        showBadge = fit.badge
+        blockW = if (showTally) withTally else pointsW
+        val wordW = atlasW * wordPx / ATLAS_WORD_PX
+        G.takeover(boxW, s, fit, wordW, blockW, false, items)
+        badgeCx = items[G.T_BADGE].let { if (it.isNaN()) pad else it } + badgeSlot / 2f
+        wordCx = items[G.T_WORD] + wordW / 2f
+        blockRight = items[G.T_BLOCK] + blockW
         // The block: "+N" (line box 26.1) over the tally (20), 2.7 apart, centred on the panel; caps centred per line.
         if (showTally) {
-            val blockH = (POINTS_PX + BLOCK_GAP + K.STACKED_TALLY_PX) * s
+            val blockH = (K.STACKED_NFL_POINTS_PX + K.STACKED_NFL_BLOCK_GAP + K.STACKED_TALLY_PX) * s
             val top = cy - blockH / 2f
-            pointsBaseline = top + POINTS_PX * s / 2f + pointsCap
-            tallyBaseline = top + (POINTS_PX + BLOCK_GAP + K.STACKED_TALLY_PX / 2f) * s + tallyCap
+            pointsBaseline = top + K.STACKED_NFL_POINTS_PX * s / 2f + pointsCap
+            tallyBaseline = top + (K.STACKED_NFL_POINTS_PX + K.STACKED_NFL_BLOCK_GAP + K.STACKED_TALLY_PX / 2f) * s + tallyCap
         } else {
             pointsBaseline = cy + pointsCap
         }
@@ -375,7 +360,7 @@ internal class StackedNflScorePainter(
 
     /** The streak band (GA S4): `skewX(−24deg)`, the gradient perpendicular to its edges, soft 1 px stops. */
     private fun streakShader(w: Float, rgb: Int, alpha: Float): Shader {
-        val rad = Math.toRadians(-K.GOAL_STREAK_SKEW_DEG.toDouble())
+        val rad = Math.toRadians(-K.STACKED_NFL_STREAK_SKEW_DEG.toDouble())
         val nx = cos(rad).toFloat()
         val ny = sin(rad).toFloat()
         val len = w * nx
@@ -452,7 +437,7 @@ internal class StackedNflScorePainter(
             if (g.streak1On) streak(this, if (mirrored) boxW - g.streak1X * s - streak1W else g.streak1X * s, streak1Paint)
             if (g.streak2On) streak(this, if (mirrored) boxW - g.streak2X * s - streak2W else g.streak2X * s, streak2Paint)
             // The arc and the posts are on the 333 box's x's (×k); the run crosses whatever box there is.
-            val k = boxW / (K.STACKED_NFL_W_MAX * s)
+            val k = G.arcK(boxW / s)
             if (g.postsOn) {
                 val pa = alpha255(g.postsAlpha)
                 if (pa > 0) {
@@ -506,7 +491,7 @@ internal class StackedNflScorePainter(
             val b = badge
             if (b != null) {
                 badgeShadow.alpha = alpha255(g.badgeAlpha * K.STACKED_TEXT_SHADOW_ALPHA)
-                val dy = BADGE_SHADOW_DY * s
+                val dy = K.STACKED_NFL_BADGE_SHADOW_DY * s
                 dst.set(badgeDst.left, badgeDst.top + dy, badgeDst.right, badgeDst.bottom + dy)
                 drawBitmap(b, null, dst, badgeShadow)
                 badgePaint.alpha = a
@@ -591,17 +576,8 @@ internal class StackedNflScorePainter(
     companion object {
         /** The five words by [NflScoreKind] ordinal (`sports_nfl_*`, not translated). */
         val WORDS = NflScorePainter.WORDS
-        /** Each word's own size (§2.5): TD 38.7, XP 33.3, FG 36, SAFETY 38.7, TWO-POINT 36 (design px). */
-        val WORD_PX = floatArrayOf(38.7f, 33.3f, 36f, 38.7f, 36f)
-        /** The atlas is drawn at the largest word size. */
-        private const val ATLAS_WORD_PX = 38.7f
-        /** The word's hard shadow (`text-shadow: 0 5px 0` → 2.25). */
-        private const val WORD_SHADOW_DY = 2.25f
-        /** The badge's hard shadow (`drop-shadow(0 5px 0)` → 2.25). */
-        private const val BADGE_SHADOW_DY = 2.25f
-        /** "+N" (58 mock → 26.1) and the block gap (6 → 2.7). */
-        private const val POINTS_PX = 26.1f
-        private const val BLOCK_GAP = 2.7f
+        /** The atlas is drawn at the largest word size (TOUCHDOWN / SAFETY, `StackedNflGeometry.wordPx`). */
+        private const val ATLAS_WORD_PX = K.STACKED_NFL_WORD_TD_PX
         /** The tally's slot (§2.5: "88 – 88" 67.7 at 20). */
         private const val TALLY_SLOT = "88 – 88"
         /** The `LogoDisc` alphas (white .08 fill, .12 stroke). */

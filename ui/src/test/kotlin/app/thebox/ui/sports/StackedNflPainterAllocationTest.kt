@@ -3,7 +3,7 @@ package app.thebox.ui.sports
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import androidx.test.core.app.ApplicationProvider
-import app.thebox.core.sports.ClockSlot
+import app.thebox.core.sports.NflTimeoutMark
 import app.thebox.core.sports.FieldZone
 import app.thebox.core.sports.NflBarKey
 import app.thebox.core.sports.NflBarKind
@@ -11,6 +11,8 @@ import app.thebox.core.sports.NflScore
 import app.thebox.core.sports.NflScoreKind
 import app.thebox.core.sports.Side
 import app.thebox.core.sports.SportsConstants as K
+import app.thebox.core.sports.StackedNflTrack
+import app.thebox.core.sports.StackedNflTransition
 import app.thebox.core.sports.TabTail
 import app.thebox.ui.R
 import org.junit.Assert.assertTrue
@@ -26,7 +28,10 @@ import java.lang.management.ManagementFactory
  * REKEY in flight with the flag's shake and wave, a red-zone bar, rows with logos, balls, a burning pip, the clock column,
  * and the attached takeover with its glow, the row flash and the pop) and the score painter's own draws allocate nothing
  * per frame. Measured as `StackedPainterAllocationTest` (the thread's allocated bytes over 300 frames, least of two passes
- * after warm-ups). Hand-built frames ([StackedNflTestKit]).
+ * after warm-ups). Real inputs (integration pass): the views' `StackedNflTargets.of`, `StackedNflPainter.frame` / `fillBar`,
+ * `NflStackedColours`, frames sampled from `StackedNflTimeline`, the takeover under `NflScoreSpec.STACKED`; the takeover,
+ * glow and shadow handed in through [StackedNflDrawArgs] as the runner does. The runner's whole draw (its sampling, the
+ * args fill and this) is measured by `StackedNflEndToEndTest`.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -60,9 +65,9 @@ class StackedNflPainterAllocationTest {
             val bmp = Bitmap.createBitmap(Math.round(K.STACKED_NFL_W_MAX * s + 2 * m), Math.round((K.STACKED_H + K.STACKED_BAR_H) * s + 2 * m), Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp).apply { translate(m + 90f * s, m) }
             val p = StackedNflPainter(s, large, bold, italic)
-            p.bakeShadow()
+            val shadow = p.bakeShadow()
             val sp = StackedNflScorePainter(s, large, barlow, bold, kit.SPEC)
-            val pair = kit.PAIRS.getValue("KC-BUF")
+            val pair = kit.pair("KC", "BUF")
             val logo = kit.logo("KC", Math.round(58.5f * s))
             sp.begin(Side.AWAY, listOf(NflScore(NflScoreKind.TOUCHDOWN, 6, 30, 17)), pair.away.goal, logo, "KC", "BUF", K.STACKED_NFL_W_MAX)
             val glow = sp.bakeGlow(K.STACKED_NFL_W_MAX, K.STACKED_H + K.STACKED_BAR_H)
@@ -73,20 +78,24 @@ class StackedNflPainterAllocationTest {
             val play = NflBarContent().also {
                 p.fillBar(it, NflBarKey(NflBarKind.PLAY, Side.AWAY, down = app.thebox.core.sports.DownText.Down(1, 10, false), tail = TabTail.Field(FieldZone.OWN, 35)), pair, "KC", "BUF", res)
             }
+            val timeout = kit.view(homeTimeouts = 1, timeout = NflTimeoutMark(Side.HOME, 1, confirmed = true))
+            val tg = kit.targets(timeout)
+            val open = kit.rest(tg)
             val frames = Array(300) { i ->
-                val k = i / 299f
-                kit.burn(kit.frame(poss = Side.AWAY, homeLit = 1, text = k), Side.HOME, 1, i * 8f).apply {
-                    barBgMix = k; shakeDx = kit.shake(i * 4f); waveDeg = kit.wave(i * 16f); clockWidth = 1f - k * 0.5f
-                }
+                // A REKEY in flight, the clock column folding, the burn and the flag's shake and wave, all from the timeline.
+                val f = kit.rest(tg)
+                kit.at(f, StackedNflTrack.BAR, StackedNflTransition.REKEY, i * 2f, open)
+                kit.at(f, StackedNflTrack.CLOCK, StackedNflTransition.CLOSE, i * 1.5f, open)
+                kit.burn(f, Side.HOME, 2, 1, i * 8f)
+                kit.flag(f, i * 16f)
             }
-            val states = arrayOf(kit.state(p), kit.state(p, slot = ClockSlot.NoUpdate, slotText = res.getString(R.string.sports_no_update), dim = true))
+            val states = arrayOf(kit.state(p, timeout, res), kit.state(p, kit.staleInPlay(), res))
             val scores = Array(300) { kit.score(it * 16f, NflScoreKind.TOUCHDOWN) }
-            val a = StackedNflDrawArgs().apply { colours = pair; awayLogo = logo; homeLogo = kit.logo("BUF", Math.round(58.5f * s)) }
+            val a = StackedNflDrawArgs().apply { colours = pair; awayLogo = logo; homeLogo = kit.logo("BUF", Math.round(58.5f * s)); this.shadow = shadow }
             for (mirrored in listOf(false, true)) for (up in listOf(false, true)) {
                 a.mirrored = mirrored
                 a.up = up
-                p.takeover = null
-                p.glow = null
+                a.takeover = null; a.glow = null; a.glowOn = false
                 val plain = allocated {
                     for (i in frames.indices) {
                         a.state = states[i % 2]; a.frame = frames[i]
@@ -95,8 +104,7 @@ class StackedNflPainterAllocationTest {
                         p.drawFrame(canvas, a)
                     }
                 }
-                p.takeover = sp
-                p.glow = glow
+                a.takeover = sp; a.glow = glow; a.glowOn = true
                 val takeover = allocated {
                     for (i in frames.indices) {
                         a.state = states[0]; a.frame = frames[i]; a.bar = play; a.barPrev = null

@@ -265,8 +265,9 @@ object StackedNflGeometry {
 
     /**
      * (§2.4, §5.3) The bar's words group in a [barW]-wide bar, in reading order on both sides: writes the left edges of
-     * the icon, the label, the divider and the sub, the group's width, and the red-zone patch (from the divider to the
-     * bar's end in reading order, under the sub part on both sides) into [out] (size [G_SIZE]; unused slots NaN). Left
+     * the icon, the label, the divider and the sub, the group's width, and the red-zone patch (from the divider, under
+     * the sub part on both sides: to the bar's end in a left corner, one text gap past the sub when mirrored so the
+     * stripes there keep the team's bar; integration ruling 4) into [out] (size [G_SIZE]; unused slots NaN). Left
      * corners: the group starts at `STACKED_NFL_BAR_TEXT_X` (63); mirrored: it is right-aligned 63 from the bar's right
      * end. The REKEY slide (`StackedNflFrame.barTextDx`) and the flag shake are added by the painter through [dx].
      */
@@ -282,7 +283,10 @@ object StackedNflGeometry {
             out[G_DIVIDER] = x + gap
             out[G_SUB] = x + 2 * gap + K.STACKED_NFL_BAR_DIVIDER_W
             out[G_RED_FROM] = out[G_DIVIDER]
-            out[G_RED_TO] = barW
+            // (Integration ruling 4) Left corners: to the bar's end. Mirrored, the stripes sit at that end: the patch
+            // stops one text gap after the sub (the divider's gap, reflected), so the stripes keep the team's bar
+            // under them as in a left corner (a red stripe A on the red patch vanished: BUF, ATL, ARI, TB ...).
+            out[G_RED_TO] = if (mirrored) out[G_SUB] + subW + gap else barW
         } else {
             out[G_DIVIDER] = Float.NaN; out[G_SUB] = Float.NaN; out[G_RED_FROM] = Float.NaN; out[G_RED_TO] = Float.NaN
         }
