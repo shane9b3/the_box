@@ -164,7 +164,7 @@ advances of the bundled files (no kerning; the method reproduces NFL §5.2's "TO
 | Centre block padding-left | 26 | 11.7 | code starts at stripe + 74.7: **78.3** (81.0 with the 6.3 stripe) |
 | Team code | 56 / 800, .01 em, line-height 1 | **25.2** Instrument Sans Bold | widest "WSH" 62.7, narrowest "SF" 31.8 |
 | Code line box top | (120 − 70) / 2 = 25 | 11.25 | block = code 56 + gap 8 + pips 6 |
-| Possession ball | 30 SVG, fill `#8B4513`, stroke white 1.6 / 24 | **13.5**, stroke 0.9 | gap 12 → 5.4 after the code; centred on the code line |
+| Possession ball | 30 SVG, fill `#8B4513`, stroke white 1.6 / 24 | **21**, stroke 1.4 (owner feedback 2026-11-16: enlarged from 13.5, stroke 0.9; it read small on a TV) | gap 12 → 5.4 after the code; centred on the code line |
 | Timeout pips | 3 × (22 × 6, r 2), gap 6, 8 below the code line | **9.9 × 3.0**, r 0.9, gap 2.7, top **40.05** (bottom 43.05) | height raised 2.7 → 3.0 (S-D12, §2.3.1) |
 | Pip colours | lit `#FFD34D`, used white α .22, transition .4 s | same | lit 10.18 : 1 on the row; lit vs used 5.09 |
 | Pip burn | `toBurn` .32 s × 5 | **4 × 400 ms** | flash rule (§4.2) |
@@ -559,11 +559,12 @@ anchored 333 box and positions the hint from the drawn box (ST N8).
 | 0 – 3.6 (6.3 with possession) | stripe |
 | stripe + 9 … + 63 | logo slot |
 | stripe + 74.7 | code start (78.3 / **81.0**: the wider stripe moves logo, code, ball, pips by 2.7; the score stays, ST §4.3) |
-| code end + 5.4 | ball 13.5 |
+| code end + 5.4 | ball 21 (13.5 before 2026-11-16) |
 | code start | pips, top 40.05 |
 | 183.6 – 228.6 | score slot, right-aligned at 228.6 |
 
-Narrowest gap: 81.0 + 62.7 ("WSH") + 5.4 + 13.5 = 162.6 against "88"'s ink at ≈ 186.5: 23.9 px. `StackedNflFitTest`
+Narrowest gap: 81.0 + 62.7 ("WSH") + 5.4 + 21 = 170.1 against "88"'s ink at ≈ 186.5: 16.4 px (23.9 with the old 13.5
+ball; with the real font WSH advances 61.0 and the drawn gap is 19.2 Standard / 19.6 Large, 17.2 to a mirrored "100"; ≥ 12 / ≥ 4 required). `StackedNflFitTest`
 asserts ≥ 12 for all 32 codes with "88" and the 3-digit fit, both sizes, both mirror states.
 
 ### 5.3 Right-hand mirror
@@ -837,7 +838,7 @@ upper-cased (`Locale.ROOT`): the Pill's down texts, "EXTRA POINT", "RED ZONE", t
 ### 8.5 Constants (`SportsConstants`; Standard, Large × 1.25)
 `STACKED_NFL_W_MAX` 333 (= rows + clock; the play box), `STACKED_NFL_YDS_ENABLED` false (YDS 2026-11-16: **true**, with
 `STACKED_NFL_YDS_*`, `STACKED_NFL_FOOTPRINT_W`, `NFL_YDS_*`; `m6-nfl-stacked-yds.md` §5.0), `STACKED_NFL_CODE_PX` 25.2,
-`STACKED_NFL_CLOCK_PX` 27.9, `STACKED_NFL_BALL` 13.5, `STACKED_NFL_BALL_GAP` 5.4, `STACKED_NFL_PIP_W` 9.9, `_H` **3.0**,
+`STACKED_NFL_CLOCK_PX` 27.9, `STACKED_NFL_BALL` 21 (13.5 before 2026-11-16), `STACKED_NFL_BALL_GAP` 5.4, `STACKED_NFL_PIP_W` 9.9, `_H` **3.0**,
 `_R` .9, `_GAP` 2.7, `_TOP` 40.05, `STACKED_NFL_PIP_LIT` `#FFD34D`, `STACKED_NFL_PIP_USED_ALPHA` .22,
 `STACKED_NFL_BURN_CYCLE_MS` 400, `_CYCLES` 4, `STACKED_NFL_BAR_TEXT_GAP` 10.8, `STACKED_NFL_FLAG_BG/FG/B`,
 `STACKED_NFL_FLAG_ICON_W/H` 15.8 / 17.9, `STACKED_NFL_REKEY_BG_MS` 350, `_STRIPE_MS` 450, `_STRIPE_B_DELAY_MS` 80,

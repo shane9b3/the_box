@@ -742,7 +742,7 @@ object SportsConstants {
     const val STACKED_NFL_CODE_PX = 25.2f
     const val STACKED_NFL_CLOCK_PX = 27.9f
     /** The possession ball, and its gap after the code's ink. */
-    const val STACKED_NFL_BALL = 13.5f
+    const val STACKED_NFL_BALL = 21f // owner feedback 2026-11-16: 13.5 → 21 (the mock's 30 → 46.7)
     const val STACKED_NFL_BALL_GAP = 5.4f
     /** The possession ball's fill (§6.3, the mock's `#8B4513`; stroked white). */
     const val STACKED_NFL_BALL_FILL = 0xFF8B4513.toInt()

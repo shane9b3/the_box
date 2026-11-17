@@ -246,7 +246,7 @@ internal class StackedNflPainter(
         stripePath.close()
     }
 
-    /** The possession ball: the mock's 24-unit football, filled `#8B4513`, stroked white 1.6 / 24, at 1.5× its 13.5 px. */
+    /** The possession ball: the mock's 24-unit football, filled `#8B4513`, stroked white 1.6 / 24, at 1.5× its 21 px (13.5 before owner feedback 2026-11-16). */
     private fun bakeBall(): Bitmap {
         val a = SPRITE_SCALE
         val px = ceil(ballPx * a).toInt().coerceAtLeast(1)
