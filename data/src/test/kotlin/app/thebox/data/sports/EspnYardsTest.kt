@@ -108,7 +108,8 @@ class EspnYardsTest {
     // ---------------------------------------------------------------- the path, the overlap, the snapshot
 
     @Test fun bothTeamsAreFetchedInParallelAndAttachedToTheStoppageSnapshot() {
-        statsAnswer = { team -> total(if (team == AWAY) 142 else 51).newBuilder().headersDelay(300, TimeUnit.MILLISECONDS).build() }
+        // (Code review S2) 1 s delays and wide bounds: the overlap must hold on a loaded runner too.
+        statsAnswer = { team -> total(if (team == AWAY) 142 else 51).newBuilder().headersDelay(1_000, TimeUnit.MILLISECONDS).build() }
         val f = poll(source())
         assertTrue(f is Fetch.Ok)
         assertEquals(142 to 51, yards(f))
@@ -118,10 +119,9 @@ class EspnYardsTest {
         )
         assertEquals(2, stats.size)
         val (a, b) = stats.map { it.first }
-        assertTrue("the two calls overlap", kotlin.math.abs(a - b) < 250)
+        assertTrue("the second call arrived before the first's 1 s delay ended", kotlin.math.abs(a - b) < 1_000)
         val side = (f as Fetch.Ok).sideMs
-        assertTrue("sideMs > 0: $side", side >= 300)
-        assertTrue("in parallel, not 2 × 300: $side", side < 600)
+        assertTrue("in parallel (≥ 1 s, not 2 × 1 s): $side", side in 1_000 until 1_900)
 
         // wireBytes is the board's only: the same poll without the extras reports the same bytes.
         val plain = poll(source(), FollowExtras.NONE) as Fetch.Ok
@@ -194,6 +194,34 @@ class EspnYardsTest {
         assertEquals("one fetch and one refresh only", 4, stats.size)
     }
 
+    /**
+     * (Integration ruling, live2 2026-11-16 21:25–21:45) At a team timeout (`"T"` key) the refresh is due 12 s after the
+     * first good fetch and used from the first poll at least 5 s after it, still in the timeout; the official timeout
+     * above keeps 30 s / 20 s.
+     */
+    @Test fun aTeamTimeoutRefreshesAtTwelveSecondsAndUsesItFiveSecondsLater() {
+        // The live2 official-timeout board re-typed as a team timeout (type 21, `"T"` key).
+        board = NflYardsFixtures.text(NflYardsFixtures.OFFICIAL_TIMEOUT).replace("\"id\":\"74\"", "\"id\":\"21\"")
+        val s = source()
+        statsAnswer = { team -> total(if (team == AWAY) 110 else 51) }
+        assertEquals(110 to 51, yards(poll(s)))
+        assertEquals(2, stats.size)
+        statsAnswer = { team -> total(if (team == AWAY) 118 else 51) }
+        jump += SportsConstants.NFL_YDS_TIMEOUT_REFRESH_MS - 1_000
+        assertEquals("11 s: no refresh yet", 110 to 51, yards(poll(s)))
+        assertEquals(2, stats.size)
+        jump += 1_500
+        assertEquals("refresh read at ≥ 12 s, not yet used", 110 to 51, yards(poll(s)))
+        assertEquals(4, stats.size)
+        jump += SportsConstants.NFL_YDS_TIMEOUT_CONFIRM_MS - 1_000
+        assertEquals("4 s later: still not used", 110 to 51, yards(poll(s)))
+        jump += 1_500
+        assertEquals("≥ 5 s later in the same timeout: used", 118 to 51, yards(poll(s)))
+        jump += 60_000
+        poll(s)
+        assertEquals("one fetch and one refresh only", 4, stats.size)
+    }
+
     // ---------------------------------------------------------------- failures (S4)
 
     @Test fun retryableFailuresGiveNoYardsAndRetryAtFifteenSeconds() {
@@ -230,7 +258,8 @@ class EspnYardsTest {
         val took = (System.nanoTime() - t) / 1_000_000L
         assertTrue(f is Fetch.Ok)
         assertEquals(none, yards(f))
-        assertTrue("cut at ≈ 2.5 s: $took ms", took in 2_400L..2_950L)
+        // (Code review S2) Cut by the 2.5 s statistics call timeout, not the 10 s one; the upper bound leaves room for a load.
+        assertTrue("cut at ≈ 2.5 s: $took ms", took in 2_400L..3_500L)
         assertEquals(2, stats.size)
         jump += 60_000
         poll(s)

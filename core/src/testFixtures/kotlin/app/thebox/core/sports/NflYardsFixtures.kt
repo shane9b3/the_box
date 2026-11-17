@@ -19,6 +19,12 @@ object NflYardsFixtures {
     /** 20:42:42: the same 74, held. */
     const val OFFICIAL_TIMEOUT_HELD = "scoreboard-live-official-timeout-held-2026-11-16"
 
+    /**
+     * (Integration) live2's 20:58–22:00 sequence for the replay (`NflYardsLive2ReplayTest`): one trimmed base event, the
+     * distinct samples (status, situation, scores), the board's poll times and the per-team feed's `totalYards` readings.
+     */
+    const val LIVE2_REPLAY = "scoreboard-live2-replay-2026-11-16"
+
     /** The scoreboards above in time order (the S1 three, then the official timeout pair). */
     val BOARDS: List<String> = listOf(END_PERIOD, CHANGE_OF_ENDS, FIRST_PLAY_AFTER_CHANGE_OF_ENDS, OFFICIAL_TIMEOUT, OFFICIAL_TIMEOUT_HELD)
 

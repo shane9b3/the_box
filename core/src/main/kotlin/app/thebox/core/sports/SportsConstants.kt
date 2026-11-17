@@ -726,10 +726,20 @@ object SportsConstants {
     const val NFL_TYPE_END_PERIOD = "2"
     /** Each statistics call's timeout (S4). */
     const val NFL_YDS_CALL_TIMEOUT_MS = 2_500L
-    /** The one refresh in a stoppage comes at least this long after the first good fetch. */
+    /**
+     * The one refresh in a stoppage comes from the first poll at least this long after the poll that carried the first good
+     * fetch (both `receivedMono`; code review S1).
+     */
     const val NFL_YDS_REFRESH_MS = 30_000L
-    /** A refresh is used only from a poll at least this long after it, still in the stoppage (B1). */
+    /** A refresh is used only from a poll at least this long after the poll that read it, still in the stoppage (B1). */
     const val NFL_YDS_CONFIRM_MS = 20_000L
+    /**
+     * At a team timeout (`"T"` key) only, the refresh and its confirm (integration ruling, live2 2026-11-16 21:25–21:45):
+     * the previous play's yards reached the statistics feed 10–20 s after the type-21 timeout appeared on the board, and
+     * team timeouts lasted about 40–60 s. Safe because no play runs during a team timeout, which lasts at least 30 s.
+     */
+    const val NFL_YDS_TIMEOUT_REFRESH_MS = 12_000L
+    const val NFL_YDS_TIMEOUT_CONFIRM_MS = 5_000L
     /** A failure other than a timeout / IO is retried after this. */
     const val NFL_YDS_RETRY_MS = 15_000L
     /** Per stoppage: at most this many attempts, and this many good fetches (the first and one refresh). */

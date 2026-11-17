@@ -1,7 +1,8 @@
 # NFL Stacked score bug: the YDS column (team total yards): design
 
 Status: **proposed 2026-11-16; reviewed 2026-11-16 (ready after fixes); revised under the lead's rulings 2026-11-16;
-foundation built (uncommitted).** Review: `docs/review/2026-11-16-nfl-stacked-yds-design-review.md` (B1, S1–S10,
+built (foundation, WP-1, WP-2, WP-3); integrated 2026-11-16 under the "Integration rulings" at the end.** Code review:
+`docs/review/2026-11-16-nfl-stacked-yds-code-review.md`. Review: `docs/review/2026-11-16-nfl-stacked-yds-design-review.md` (B1, S1–S10,
 N1–N10). Decision: `docs/decisions/2026-11-16-nfl-stacked-yards-column.md`. Every finding's change is listed in
 "Review rulings" at the end; items marked "(Sn)" / "(Bn)" / "(Nn)" apply it in place.
 
@@ -33,9 +34,11 @@ Units are design px (screen width ÷ 1920) and ms. **Must** means a reviewer rej
    - END OF nTH, including the change-of-ends shape (S1, lead default);
    - HALFTIME and FINAL.
 3. **Delay-safe within a stated residual (B1).** The yards ride on their snapshot through the delay queue, so they
-   show exactly when its score shows. A refresh is used only from a poll at least 20 s after it that is still in the
-   same stoppage. A first fetch at the very end of a stoppage can carry the next play's yards (§1.8).
-4. **Per stoppage: one fetch, then one refresh at least 30 s later.**
+   show exactly when its score shows. A refresh is used only from a poll at least 20 s after it (**5 s at a team
+   timeout**, integration ruling I1) that is still in the same stoppage. A first fetch at the very end of a stoppage can
+   carry the next play's yards (§1.8).
+4. **Per stoppage: one fetch, then one refresh at least 30 s later (12 s at a team timeout, I1).** Both delays count
+   from the polls' `receivedMono` (I2).
    - A non-stall failure retries after 15 s, with at most 3 attempts.
    - A timeout or IO failure ends that stoppage's attempts.
    - A 429 or 403, or two timeout / IO failures in a row, stop the yards for 10 min (S4). The scoreboard is never
@@ -93,7 +96,10 @@ Files under `/private/tmp/claude-501/-Users-shawnjohnson-Projects-The-Box/dedf5c
 | Size | 16.4–18.3 KB gzip for both teams (≈ 8–9 KB each); the final body 10.4 KB gzip / 126 KB raw |
 | **Official timeouts (74) are the long in-game stoppages** (S2) | five of 2.5–3 min in about 1.3 quarters (live1 20:24:48–20:27:48, 20:31:18–20:33:48; live2 20:36:42–20:39:22, 20:42:32–20:45:12, 21:05:53–); yards flat through each |
 | **END OF 1ST is one sample** (S1) | live2: `STATUS_END_PERIOD` at 20:58:13 only. From 20:58:23 the board reads `STATUS_IN_PROGRESS`, period 2, 15:00, `lastPlay` `…1101` type 2 "END QUARTER 1", `situation` populated (1 & 10, possession, 3/3). This lasts **3 min**, until the first Q2 snap at 21:01:23, which still shows **15:00** (the clock lags the play) |
-| No team timeout (21), no halftime, no Q3 start | live1 and live2 through Q2 10:16 (21:12:53): counts 3/3 throughout. Halftime, the start of Q3 and freshness at a team timeout are **unproven** |
+| No team timeout (21), no halftime, no Q3 start | live1 and live2 through Q2 10:16 (21:12:53): counts 3/3 throughout. (Superseded by the three rows below: live2 ran on to 22:00:25.) |
+| **Team timeouts: the previous play's yards often reach the feed late** (I1) | live2 21:25–21:45, five team timeouts (21:25:33, 21:39:14, 21:40:54, 21:43:24, 21:44:24), each 50–60 s on the board. In three the feed caught up 10–20 s after the type 21 appeared: 21:39:14 timeout, core BAL 110 at 21:39:04 → **118 at 21:39:34**; 21:40:54 → 131 by 21:41:04; 21:44:24, 143 at 21:44:04 → 161 at 21:44:34. The feed lagged the board; it never led it at a timeout |
+| **Halftime** (I3) | live2 21:45:24–21:59:45: `STATUS_HALFTIME`, period 2, 0:00, `lastPlay` type **65** "END QUARTER 2"; `situation` stays populated (1 & 10 at 35); core 175 / 161 at the first halftime sample (21:45:34), unchanged to the end; the timeout counts read 1 / 0 until **21:46:44**, then 3 / 3 (about 80 s in) |
+| **The start of Q3** (I3) | 21:59:45 is still `STATUS_HALFTIME` with the kick-off (type 53) as `lastPlay` (key `"H2"`, mapped as halftime); 21:59:55 is `STATUS_IN_PROGRESS` P3 14:55 with that kick-off (LIVE, no key); the first scrimmage play at 22:00:25. No change-of-ends shape at the start of Q3 |
 | The stats host answers the app's client | the lead, 2026-11-16: HTTP 200 with `okhttp/4.12.0` and with a plain user agent (N10) |
 
 `corestats.json`: `totalYards` (and `netTotalYards`) are team values copied identically into the passing, rushing and
@@ -191,21 +197,26 @@ adds or changes yards therefore emits one view, and the Pill recomposes to the s
 - Otherwise return the key, and set `attempts++` and `lastAttemptAt = now`, when one of these holds:
   1. `attempts == 0`;
   2. the last attempt failed **retryably** (not a timeout / IO) and `now − lastAttemptAt ≥ NFL_YDS_RETRY_MS` (15 000);
-  3. `successes == 1`, `now − firstOkAt ≥ NFL_YDS_REFRESH_MS` (30 000) and the key is not `"F"` (the one refresh).
+  3. `successes < NFL_YDS_SUCCESSES_MAX` (2), `now − firstOkAt ≥ NFL_YDS_REFRESH_MS` (30 000; **`NFL_YDS_TIMEOUT_REFRESH_MS`
+     12 000 for a team-timeout `"T"` key**, I1) and the key is not `"F"` (the one refresh).
 - A key whose last attempt was a timeout / IO failure is never due again (S4b).
 
 **`fetched(key, at, r)`** (an unknown key is ignored):
 - `Ok(a, h)`:
   - `stalls = 0`, `successes++`;
-  - the first success: `values = (a, h)`, `firstOkAt = at`;
-  - the refresh: `pending = (a, h)`, `pendingAt = at`.
+  - the first success: `values = (a, h)`, `firstOkAt = lastAttemptAt` (the poll's `receivedMono` that `due` was asked
+    with, not `at`; I2);
+  - the refresh: `pending = (a, h)`, `pendingAt = lastAttemptAt` (I2).
+- `at` (the completion) only times a block.
 - `Failed(HTTP_429)`: `blockedUntil = at + NFL_YDS_BLOCK_MS` (600 000).
 - `Failed(TIMEOUT | IO)`: no retry in this key; `stalls++`, and at `NFL_YDS_STALLS_TO_BLOCK` (2) the same block.
 - `Failed(anything else)`: retryable; `stalls = 0`.
 
 **`attach(s, received)`:**
-- If `stoppageKey(s) == current` and `pending != null` and `received ≥ pendingAt + NFL_YDS_CONFIRM_MS` (20 000), then
-  `values = pending` and `pending = null` (B1).
+- If `stoppageKey(s) == current` and `pending != null` and `received ≥ pendingAt + NFL_YDS_CONFIRM_MS` (20 000;
+  **`NFL_YDS_TIMEOUT_CONFIRM_MS` 5 000 for a `"T"` key**, I1), then `values = pending` and `pending = null` (B1).
+- On the NFL's 10 s grid a team timeout first seen at T0 reads at T0, refreshes at T0 + 20 and shows the refresh from
+  T0 + 30; on a 5 s grid T0 + 15 and T0 + 20. Every other stoppage refreshes at T0 + 30 and shows it from T0 + 50.
 - Then, if `values != null`, return `s` with `d.copy(awayYards, homeYards)`; otherwise return `s` unchanged.
 
 ### 1.7 The request (WP-1)
@@ -256,6 +267,10 @@ adds or changes yards therefore emits one view, and the Pill recomposes to the s
   - **Refresh:** read at `t_r`, it is used only from a poll at `≥ t_r + 20 s` that still shows the same stoppage. If the
     next snap happened just before `t_r`, the board shows it within about 10–20 s, the key changes, and the refresh is
     dropped.
+  - **Team timeout (I1):** read at `t_r ≥ T0 + 12 s`, used from a poll at `≥ t_r + 5 s` still showing the same type 21.
+    No play runs during a team timeout and it lasts at least 30 s, so the refresh normally reads the timeout's own
+    (late) yards. Residual: the refresh is not capped to the first 30 s of the timeout, so a first poll that lands late
+    in a long timeout can refresh near its end; the 5 s confirm then guards only by one poll (stated, not changed).
   - **First fetch, the residual (accepted):** a first poll that lands in the last ≈ 10–20 s of the board's stoppage
     window can read stats that already include the next play, and the column then shows them with the stoppage. For
     that, the poll cadence must be longer than the stoppage minus the board's lag. At the NFL's 5–30 s intervals and
@@ -553,8 +568,11 @@ Both stay unused until WP-2; lint's `UnusedResources` should be run after WP-2.
     `value` → null, 1 000 → null.
 - **`NflYardsPlannerTest`** (WP-1, new):
   - the first poll is due and `attach` carries the values on the same poll;
-  - the refresh is due at +30 000 and not at +29 999;
+  - the refresh is due at +30 000 and not at +29 999 (O, E and H keys);
   - the refresh is not attached at `pendingAt + 19 999`, and is attached at `+20 000` while still in the key;
+  - a `"T"` key: due at +12 000 and not at +11 999; not attached at `pendingAt + 4 999`, attached at `+5 000` (I1);
+  - both delays count from the polls, not the completions (I2), with poll-grid cases: a 50 s team timeout on a 10 s
+    and a 5 s grid whose yards change 15 s in shows the corrected figure before it ends;
   - a key change drops the pending refresh;
   - a retryable failure is due again at +15 000;
   - a timeout or IO failure is never due again in that key;
@@ -685,7 +703,7 @@ again.
      keeps its bar while YDS opens (396).
 3. **Team timeout.** `{"jump": "q2 BUF ball"}`:
    - the TIMEOUT BUF bar, the pip burn and YDS 142 / 51;
-   - two stats requests, then two more ≈ 30 s later, and nothing after that.
+   - two stats requests, then two more on the first poll ≥ 12 s later (I1), and nothing after that.
 4. **Halftime.** `{"jump": "halftime"}`:
    - the clock folds and YDS stays: a 306 box, ordered clock · YDS · rows from the edge;
    - switch the corner to TL, Size Large, then a bottom corner with subtitles on, one look each. Restore top right
@@ -796,9 +814,8 @@ Applied in place, marked "(YDS 2026-11-16)":
   or two stalls, the scoreboard is untouched, and a crash in the step is caught (S5).
 - **The first-fetch spoiler residual** (§1.8), and **inline latency** at Delay 0 (≤ 2.5 s, S4).
 - **Unproven feed states:**
-  - freshness at a team timeout;
-  - halftime and the start of Q3;
-  - whether OT and halftime also have a change-of-ends shape (§1.12 handles periods 2 and 4 only).
+  - ~~freshness at a team timeout~~ (measured, I1); ~~halftime and the start of Q3~~ (measured, I3);
+  - whether OT has a change-of-ends shape (§1.12 handles periods 2 and 4 only; halftime and Q3 have none, I3).
 - **S1 changes a shipped bar.** The END OF 1ST / 3RD look now lasts the 3-min change of ends instead of one poll, on
   both styles. The first play after it shows up to one break-cadence poll late. It is a lead default, pending the owner.
 - **S2 adds fetches** (≈ 0.27 MB/h with yards on) and a 396 box at every TV timeout. It is a lead default, pending the
@@ -851,3 +868,16 @@ Remaining. Both are lead defaults, built unless the owner objects:
 | N7 scope cuts | accepted | single current key; 26 goldens; no `stats_lag_s`; no `EST_NFL_YARDS_MB_H` (figure unchanged); `Fetch.Ok.sideMs` kept |
 | N9 owner questions | accepted | the switch question answered (no switch); S1 and S2 added |
 | N10 user agent | checked by the lead | HTTP 200 with `okhttp/4.12.0` and a plain agent (§1.1) |
+
+## Integration rulings (lead, 2026-11-16)
+
+From live2's later rows (`scratchpad/yds/live2/log.tsv`, 21:25–22:00:25; §1.1) and the code review
+(`docs/review/2026-11-16-nfl-stacked-yds-code-review.md`).
+
+| ID | Ruling | Change |
+|---|---|---|
+| **I1** | Team timeouts refresh sooner. In three of five team timeouts (21:25:33–21:44:24) the previous play's yards reached the feed 10–20 s after the type 21 was on the board (21:39:14 → 110, 21:39:34 → 118), and team timeouts lasted about 50–60 s. At 30 s + 20 s the corrected figure would rarely be seen. Safe because no play runs during a team timeout, and a team timeout lasts at least 30 s | `"T"` keys only: refresh due `NFL_YDS_TIMEOUT_REFRESH_MS` = 12 000 after the first success's poll, used from the first later poll at least `NFL_YDS_TIMEOUT_CONFIRM_MS` = 5 000 after the refresh's poll that still carries the key (`SportsConstants`, `NflYardsPlanner`). O / E / H / F keep 30 000 / 20 000 (official timeouts and the two-minute warning run 2–3.5 min; breaks run minutes). §0, §1.6, §1.8, §4.1, §4.7 |
+| **I2** | (Code review S1) The delays counted from the fetch's completion, so on a poll grid each slipped by one poll (a 30 s refresh came at +40, a 20 s confirm at +30) | `firstOkAt` and `pendingAt` are the attempt's poll `receivedMono`; `NFL_YDS_SUCCESSES_MAX` is now used by `due`. Poll-grid tests (10 s and 5 s) in `NflYardsPlannerTest` |
+| **I3** | Halftime and the Q3 start as recorded: `STATUS_HALFTIME`, `lastPlay` type 65, yards settled at halftime's first sample, counts reset to 3 / 3 about 80 s in (21:46:44), `situation` populated; the Q3 kick-off arrives first on a halftime body (still `"H2"`), then LIVE P3. No mapper change | §1.1 rows; `NflYardsLive2ReplayTest` replays 20:58–22:00 (trimmed fixture `scoreboard-live2-replay-2026-11-16.json`) through the mapper and the planner |
+| **I4** | (Code review S2) Wall-clock bounds in `EspnYardsTest` | 1 s delays, `sideMs` in 1 000..1 899, overlap < 1 000 ms; the stall's upper bound 3 500 ms |
+| **I5** | The e2e case runs through the real path | `StackedNflEndToEndTest`: WP-2's view stand-in removed; snapshots pass through a real `NflYardsPlanner` (the source's step without HTTP) into the real machine. New case: the live2 official timeout → END OF 1ST → change of ends → first Q2 play (396 → 306 held, no move → 333) |

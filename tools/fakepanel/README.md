@@ -325,7 +325,7 @@ debug origin (`files/debug/sports_base`) serves both leagues:
   frozen at 15:00, `lastPlay` type 2 "End Period" with the text "END QUARTER n", the situation kept (as ESPN's live bodies).
   The next window's first play ends it. The timeline is still 985 s (10 + 15 = the old 25 s break).
 - `GET /v2/sports/football/leagues/nfl/events/{eid}/competitions/{eid}/competitors/{tid}/statistics` (ESPN's core API, the NFL
-  yards column; the app reaches it through the same `sports_base` origin): the team's season-to-date statistics in ESPN's shape,
+  yards column; the app reaches it through the same `sports_base` origin): the team's statistics for this game (per event, not season-to-date) in ESPN's shape,
   `splits.categories[].stats[]`, with `totalYards` (float `value`, string `displayValue`) repeated in `passing`, `rushing` and
   `receiving` among filler stats (about 40 KB). `Cache-Control: max-age=10`. Team ids are the scoreboard's (KC `12`, BUF `2`).
   404 JSON `{"error":{"code":404,"message":"no instance found"}}` before kick-off (`pre`), for an unknown event or team, for a

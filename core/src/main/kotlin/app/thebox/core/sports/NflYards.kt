@@ -28,7 +28,7 @@ object NflYards {
             GamePhase.LIVE -> {
                 val lp = d.lastPlay ?: return null
                 when (lp.typeId) {
-                    SportsConstants.NFL_TYPE_TIMEOUT -> "T" + lp.id
+                    SportsConstants.NFL_TYPE_TIMEOUT -> KEY_TEAM_TIMEOUT + lp.id
                     SportsConstants.NFL_TYPE_OFFICIAL_TIMEOUT, SportsConstants.NFL_TYPE_TWO_MINUTE_WARNING -> "O" + lp.id
                     else -> null
                 }
@@ -39,6 +39,9 @@ object NflYards {
 
     /** The FINAL stoppage's key: exactly one fetch, no refresh (S10). */
     const val KEY_FINAL = "F"
+
+    /** A team timeout's key prefix: the faster refresh and confirm (integration ruling, live2 2026-11-16). */
+    const val KEY_TEAM_TIMEOUT = "T"
 
     /**
      * (§1.7) The (away, home) competitor ids of [e] for the statistics URL: `competitions[0].competitors[].id`, else
@@ -98,8 +101,8 @@ sealed interface YardsResult {
 /**
  * (§1.6) One follow's yards state, owned by `EspnScoreSource` and used only on the score actor (single-threaded): which
  * stoppage to fetch on this poll ([due]), what came back ([fetched]), and the snapshot with the usable yards attached
- * ([attach]). Holds a single current stoppage key (review N7), the confirm rule for the refresh (B1) and the follow-wide
- * block (429 / 403, or two timeout / IO failures in a row, S4). A stall ends its stoppage; the stall count resets after a block.
+ * ([attach]). Holds a single current stoppage key (review N7), the confirm rule for the refresh (B1; 12 s / 5 s at a team
+ * timeout, 30 s / 20 s otherwise) and the follow-wide block (429 / 403, or two timeout / IO failures in a row, S4). A stall ends its stoppage; the stall count resets after a block.
  */
 class NflYardsPlanner {
     private enum class Last { NONE, OK, RETRYABLE, STALL }
@@ -131,7 +134,8 @@ class NflYardsPlanner {
             Last.NONE -> attempts == 0
             Last.RETRYABLE -> nowMono - lastAttemptAt >= SportsConstants.NFL_YDS_RETRY_MS
             // The one refresh; FINAL gets exactly one fetch (S10).
-            Last.OK -> successes == 1 && k != NflYards.KEY_FINAL && nowMono - firstOkAt >= SportsConstants.NFL_YDS_REFRESH_MS
+            Last.OK -> successes < SportsConstants.NFL_YDS_SUCCESSES_MAX && k != NflYards.KEY_FINAL &&
+                nowMono - firstOkAt >= refreshMs(k)
             Last.STALL -> false // (S4b) a timeout / IO failure ends this stoppage's attempts
         }
         if (!due) return null
@@ -140,7 +144,10 @@ class NflYardsPlanner {
         return k
     }
 
-    /** The outcome of the attempt [due] returned [key] for, completed at [atMono]. */
+    /**
+     * The outcome of the attempt [due] returned [key] for, completed at [atMono] (which only times a block; the refresh and
+     * the confirm count from the attempt's poll).
+     */
     fun fetched(key: String, atMono: Long, r: YardsResult) {
         if (key != this.key) return
         when (r) {
@@ -148,14 +155,16 @@ class NflYardsPlanner {
                 stalls = 0
                 successes++
                 last = Last.OK
+                // (Code review S1) Both times are the attempt's poll (`receivedMono`), not the fetch's completion, so the
+                // refresh and confirm delays mean what they say on a poll grid (a completion time slips each by a poll).
                 if (successes == 1) {
                     away = r.away
                     home = r.home
-                    firstOkAt = atMono
+                    firstOkAt = lastAttemptAt
                 } else {
                     pendingAway = r.away
                     pendingHome = r.home
-                    pendingAt = atMono
+                    pendingAt = lastAttemptAt
                 }
             }
             is YardsResult.Failed -> when (r.kind) {
@@ -181,15 +190,15 @@ class NflYardsPlanner {
 
     /**
      * [s] (received at [receivedMono]) with the yards usable for its stoppage, or [s] unchanged. Only a snapshot in the
-     * current stoppage carries them; a refresh is used only from a poll received at least `NFL_YDS_CONFIRM_MS` after it
-     * was read (B1).
+     * current stoppage carries them; a refresh is used only from a poll received at least `NFL_YDS_CONFIRM_MS`
+     * (`NFL_YDS_TIMEOUT_CONFIRM_MS` at a team timeout) after the poll that carried it (B1; code review S1).
      */
     fun attach(s: GameSnapshot, receivedMono: Long): GameSnapshot {
         val k = NflYards.stoppageKey(s) ?: return s
         if (k != key) return s
         val pa = pendingAway
         val ph = pendingHome
-        if (pa != null && ph != null && receivedMono >= pendingAt + SportsConstants.NFL_YDS_CONFIRM_MS) {
+        if (pa != null && ph != null && receivedMono >= pendingAt + confirmMs(k)) {
             away = pa
             home = ph
             pendingAway = null
@@ -200,6 +209,17 @@ class NflYardsPlanner {
         val d = s.detail as? LeagueDetail.Nfl ?: return s
         return s.copy(detail = d.copy(awayYards = a, homeYards = h))
     }
+
+    /**
+     * (Integration ruling, live2 2026-11-16) A team timeout's refresh is due `NFL_YDS_TIMEOUT_REFRESH_MS` after the first
+     * good fetch and confirmed after `NFL_YDS_TIMEOUT_CONFIRM_MS`: the previous play's yards often reach the feed 10–20 s
+     * after the timeout is on the board, no play runs during it, and it lasts at least 30 s. Every other key: 30 s / 20 s.
+     */
+    private fun refreshMs(k: String): Long =
+        if (k.startsWith(NflYards.KEY_TEAM_TIMEOUT)) SportsConstants.NFL_YDS_TIMEOUT_REFRESH_MS else SportsConstants.NFL_YDS_REFRESH_MS
+
+    private fun confirmMs(k: String): Long =
+        if (k.startsWith(NflYards.KEY_TEAM_TIMEOUT)) SportsConstants.NFL_YDS_TIMEOUT_CONFIRM_MS else SportsConstants.NFL_YDS_CONFIRM_MS
 
     private fun start(k: String) {
         key = k
