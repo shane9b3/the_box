@@ -207,6 +207,7 @@ internal class NflTabPainter(
         texts[KICK + 1] = res.getString(R.string.sports_tab_kickoff, home)
         for (k in NflScoreKind.values()) texts[WORD + k.ordinal] = res.getString(wordRes(k))
         texts[XP] = res.getString(R.string.sports_tab_xp)
+        texts[TRY2] = res.getString(R.string.sports_tab_2pt_try)
         // "OWN %1$d": the words before the number are baked; the number is drawn from the digit table.
         val own = res.getString(R.string.sports_tab_own, 0)
         val opp = res.getString(R.string.sports_tab_opp, 0)
@@ -342,6 +343,7 @@ internal class NflTabPainter(
                     FieldZone.OPP -> { tailMask = OPP; yard = tail.yard.coerceIn(0, 99) }
                 }
                 TabTail.ExtraPoint -> tailMask = XP
+                TabTail.TwoPointTry -> tailMask = TRY2
                 TabTail.RedZone -> tailMask = RZ
                 null -> Unit
             }
@@ -437,6 +439,7 @@ internal class NflTabPainter(
             else -> when (val t = content.tail) {
                 is TabTail.Field -> if (t.zone == FieldZone.MIDFIELD) l.w[MID] else l.w[if (t.zone == FieldZone.OWN) OWN else OPP] + l.zoneGap + (if (t.yard >= 10) 2 else 1) * cell
                 TabTail.ExtraPoint -> l.w[XP]
+                TabTail.TwoPointTry -> l.w[TRY2]
                 TabTail.RedZone -> l.w[RZ]
                 null -> -1f
             }
@@ -459,7 +462,9 @@ internal class NflTabPainter(
         private const val RZ = 13
         private const val PTS = 14 // + side × 4 + the index in POINTS
         private val POINTS = intArrayOf(1, 2, 3, 6)
-        private const val LABELS = 22
+        /** (Owner ruling 2026-11-16) "2-PT TRY", a SemiBold tail like [XP]. */
+        private const val TRY2 = 22
+        private const val LABELS = 23
         private const val DIGITS = "0123456789"
 
         fun wordRes(k: NflScoreKind): Int = when (k) {

@@ -77,6 +77,10 @@ class StackedNflLayoutTest {
         val pat = of(view(down = DownText.Pat, tab = NflTab(buf, TabLead.BALL, TabTail.ExtraPoint)))
         assertEquals(NflBarKey(NflBarKind.PAT, buf), pat.bar, "\"EXTRA POINT\", no spot (S-D7)")
         assertEquals(buf, pat.possSide)
+        // Owner ruling 2026-11-16: the two-point try keeps the PAT kind (colours, side) and carries its tail ("2-PT TRY").
+        val two = of(view(down = DownText.Pat, tab = NflTab(buf, TabLead.BALL, TabTail.TwoPointTry)))
+        assertEquals(NflBarKey(NflBarKind.PAT, buf, tail = TabTail.TwoPointTry), two.bar)
+        assertEquals(buf, two.possSide)
         val ko = of(view(down = DownText.Kickoff, tab = NflTab(buf, TabLead.KICKOFF, TabTail.Field(FieldZone.OWN, 35))))
         assertEquals(NflBarKey(NflBarKind.KICKOFF, buf, DownText.Kickoff, TabTail.Field(FieldZone.OWN, 35)), ko.bar)
         assertEquals(buf, ko.possSide)

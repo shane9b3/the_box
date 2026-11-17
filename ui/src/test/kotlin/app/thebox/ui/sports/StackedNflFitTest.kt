@@ -73,6 +73,8 @@ class StackedNflFitTest {
             for (t in teams) {
                 val team = listOf(
                     NflBarKey(NflBarKind.TIMEOUT, Side.AWAY, left = 1),
+                    NflBarKey(NflBarKind.PAT, Side.AWAY),
+                    NflBarKey(NflBarKind.PAT, Side.AWAY, tail = TabTail.TwoPointTry),
                     NflBarKey(NflBarKind.KICKOFF, Side.AWAY, tail = TabTail.Field(FieldZone.OWN, 35)),
                     NflBarKey(NflBarKind.PLAY, Side.AWAY, down = app.thebox.core.sports.DownText.Down(4, null, true), tail = TabTail.RedZone),
                     NflBarKey(NflBarKind.PLAY, Side.AWAY, down = app.thebox.core.sports.DownText.Down(3, 10, false), tail = TabTail.Field(FieldZone.OPP, 35)),

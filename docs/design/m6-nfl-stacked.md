@@ -372,7 +372,7 @@ Precedence (RC4): **pinned score (runner) > stale / waiting > break / final > fl
 | LIVE, a down, side known | possession side | quarter / clock | PLAY, possession team: "1ST & 10 \| KC 35"; "3RD \| KC 35" (distance unknown); "4TH & GOAL \| BUF 2"; "… \| 50" midfield; no field: label alone | mock |
 | … in the red zone (NFL §3.5 gating) | possession | as play | PLAY, sub "RED ZONE" on red | R26 |
 | LIVE, a down, side unknown | none | as play | PLAY, **neutral**, same words: the field by its territory, "1ST & 10 \| KC 35" (`NflView.field`, fix pass C-N4) | S-D10 |
-| LIVE, the try (`DownText.Pat`) | the trying side | as play | PAT, that team: "EXTRA POINT" (no spot: not reliable in the feed) | mock, S-D7 |
+| LIVE, the try (`DownText.Pat`) | the trying side | as play | PAT, that team: "EXTRA POINT" (no spot: not reliable in the feed); "2-PT TRY" when the tab's tail is `TabTail.TwoPointTry` (the key's `tail`) | mock, S-D7, owner 2026-11-16 |
 | LIVE, kick-off | kicker | as play | KICKOFF, kicker: "LV KICKOFF \| LV 35"; **never RED ZONE** (the bar reads the gated `redZone`/`TabTail`, never `isRedZone`; RC9) | mock |
 | LIVE, dead ball after FG / safety | held side | as play | the held bar (no change): the down shown with the held tab (`NflView.heldDown`, Stacked only; fix pass C-S1) | NFL §3.4 |
 | LIVE, no `situation` | none | as play | **closed** | R21 |
@@ -385,6 +385,15 @@ dimmed); hidden when the counts are null.
 
 Clock words: `SportsText.period(res, label, League.NFL).uppercase(Locale.ROOT)` ("1ST" … "4TH", "OT", "2OT"). ESPN shows
 0:00 during untimed downs; it is drawn as 0:00 (NFL §3.1).
+
+**Two-point try (owner ruling 2026-11-16).** The try's bar reads "2-PT TRY" (string `sports_tab_2pt_try`, upper case
+like "EXTRA POINT") instead of "EXTRA POINT" when the machine marks the tab `TabTail.TwoPointTry` (NFL §3.3): a pending
+try reads as a **two-point try** only when the shown play is a real `Down` at `tryAt` that is neither the `Down` shown
+with the snapshot that set the try (the stale body that carried the score) nor the last `Down` shown before it (both
+frozen when the try is set, so repeated polls of the same try-down keep the reading), is goal-to-go, and has the ball in
+the opponent's half at yard ≤ 5 (`TWO_POINT_YARDS`; an unknown field is not). Same `PAT` kind, side and colours; the key
+carries `tail = TwoPointTry` (a REKEY from "EXTRA POINT"). The pair's in-between bar stays "EXTRA POINT". A `Dead` try
+(the only shape seen from ESPN) cannot be told from a kick and still reads "EXTRA POINT".
 
 What the honest behaviour costs (recorded): the flag appears **after** the play (ESPN logs the foul with the resolved
 play) for 8 s; a foul whose play is overtaken within one poll gap is missed (the newest `lastPlay` wins); a declined foul

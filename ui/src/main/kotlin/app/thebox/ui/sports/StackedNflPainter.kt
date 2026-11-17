@@ -390,7 +390,8 @@ internal class StackedNflPainter(
                     sub = field(res, t, side, awayAbbrev, homeAbbrev)
                 }
             }
-            NflBarKind.PAT -> label = res.getString(R.string.sports_tab_xp)
+            // Owner ruling 2026-11-16: a two-point try (the key's tail) reads "2-PT TRY".
+            NflBarKind.PAT -> label = res.getString(if (key.tail == TabTail.TwoPointTry) R.string.sports_tab_2pt_try else R.string.sports_tab_xp)
             // RC9: a kick-off never reads RED ZONE, whatever the key carries.
             NflBarKind.KICKOFF -> {
                 label = res.getString(R.string.sports_stacked_nfl_kickoff, abbrev)

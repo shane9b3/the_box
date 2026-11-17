@@ -103,6 +103,14 @@ class ScoreBugMachine(
     /** (§3.3, B2) The side whose try is pending, and the (period, clock) of the snapshot that set it. */
     private var pendingTry: Side? = null
     private var tryAt: Pair<Int?, Int?>? = null
+    /**
+     * (§3.3, owner ruling 2026-11-16) The `Down`s that are never the try drawn as a real down: [tryScoreDown] the `Down`
+     * shown with the snapshot that set the try (the stale body that carried the score), [tryPrevDown] the last shown
+     * `Down` before it. Frozen while the try is pending ([lastDown] moves on every shown `Down`, so after the first poll of
+     * a try-down it is that try-down itself and cannot tell it from the stale body).
+     */
+    private var tryScoreDown: NflPlay.Down? = null
+    private var tryPrevDown: NflPlay.Down? = null
     /** (§3.3) The TD `lastPlay` whose try is over: a later `Dead` body still naming it never sets the try again. */
     private var tryDoneId: String? = null
     /** (§3.4) Inference memory: the kicker of the previously shown play when it was a `Kickoff`; the last shown `Down`. */
@@ -871,7 +879,11 @@ class ScoreBugMachine(
      *    is pending (the app started during the try). The TD `lastPlay` seen with a score change is remembered as done,
      *    so a `Dead` body still naming it after the try never sets the try again (WP-1 reading);
      * 3. **render**: a `Dead`, a `Down` equal to the previous shown `Down` (the stale body that carries the score), or a
-     *    `Down` at `tryAt` renders as the try ("PAT", "X BALL | EXTRA POINT").
+     *    `Down` at `tryAt` renders as the try ("PAT", "X BALL | EXTRA POINT"). (Owner ruling 2026-11-16) The try reads as a
+     *    two-point try ("X BALL | 2-PT TRY"; the down column stays "PAT") only when the shown play is a real `Down` at
+     *    `tryAt` that is neither [tryScoreDown] nor [tryPrevDown], goal-to-go, with the ball in the opponent's half at yard
+     *    ≤ [TWO_POINT_YARDS] (an unknown field is not). A `Dead` try (the only shape seen from ESPN) cannot be told from a
+     *    kick and stays "EXTRA POINT".
      */
     private fun nflAdvance(p: GameSnapshot?, q: Entry) {
         val s = q.snap
@@ -889,6 +901,8 @@ class ScoreBugMachine(
         if (changed || play is NflPlay.Kickoff || (play is NflPlay.Down && at != tryAt)) {
             pendingTry = null
             tryAt = null
+            tryScoreDown = null
+            tryPrevDown = null
         }
         val lp = d?.lastPlay
         if (changed && lp != null && lp.scoreValue == TD_POINTS) tryDoneId = lp.id
@@ -896,16 +910,22 @@ class ScoreBugMachine(
         if (six != null) {
             pendingTry = six
             tryAt = at
+            tryScoreDown = play as? NflPlay.Down
+            tryPrevDown = lastDown
         } else if (play is NflPlay.Dead && pendingTry == null && play.scoreValue == TD_POINTS && play.scorer != null &&
             lp != null && lp.id != tryDoneId
         ) {
             pendingTry = play.scorer
             tryAt = at
+            tryScoreDown = null
+            tryPrevDown = lastDown
         }
         // 3. Render.
         val pending = pendingTry
         val asTry = pending != null &&
             (play is NflPlay.Dead || (play is NflPlay.Down && (play == lastDown || at == tryAt)))
+        val twoPoint = asTry && play is NflPlay.Down && at == tryAt && play != tryScoreDown && play != tryPrevDown &&
+            play.goalToGo && twoPointSpot(play.field, pending!!)
         var down: DownText? = null
         var tab: NflTab? = null
         var plain: NflTab? = null
@@ -915,7 +935,7 @@ class ScoreBugMachine(
         when {
             asTry -> {
                 down = DownText.Pat
-                tab = NflTab(pending!!, TabLead.BALL, TabTail.ExtraPoint)
+                tab = NflTab(pending!!, TabLead.BALL, if (twoPoint) TabTail.TwoPointTry else TabTail.ExtraPoint)
                 plain = tab
                 plainDown = down
             }
@@ -1165,6 +1185,10 @@ class ScoreBugMachine(
         else -> TabTail.Field(FieldZone.OPP, field.yard)
     }
 
+    /** (Owner ruling 2026-11-16) The ball inside [side]'s opponent's [TWO_POINT_YARDS]; an unknown field never is. */
+    private fun twoPointSpot(f: FieldPos?, side: Side): Boolean =
+        f != null && f.territory != null && f.territory != side && f.yard in 1..TWO_POINT_YARDS
+
     /**
      * (NFL §3.5, ruling 26) RED ZONE only on a real down not rendered as the try, with the tab's side known, `isRedZone`
      * set, and the field (when known) the opponent's half at yard ≤ 20.
@@ -1269,7 +1293,7 @@ class ScoreBugMachine(
 
     /** (NFL §3.6) The try, the inference memory, the held tab and the current rendering. */
     private fun resetNflPlay() {
-        pendingTry = null; tryAt = null; tryDoneId = null
+        pendingTry = null; tryAt = null; tryDoneId = null; tryScoreDown = null; tryPrevDown = null
         lastKicker = null; lastDown = null; lastDownPoss = null; heldTab = null; heldDown = null
         nflEntry = null; nflDown = null; nflTab = null; nflTry = false; nflHeldDown = null; nflField = null
     }
@@ -1291,6 +1315,8 @@ class ScoreBugMachine(
         const val NFL_ID_LOWER_AFTER = 3
         /** (NFL §3.5) The red zone: the opponent's half at this yard or closer. */
         const val RED_ZONE_YARDS = 20
+        /** (Owner ruling 2026-11-16) A try drawn as a real goal-to-go `Down` this close reads "2-PT TRY". */
+        const val TWO_POINT_YARDS = 5
         val KICK_RETURN = Regex("(?i)kickoff return \\(offense\\)")
         /**
          * (NFL Stacked §3.3, sign-off 1) `lastPlay` types that never set a timeout mark, not even the fallback: the official

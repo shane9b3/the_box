@@ -480,6 +480,9 @@ class StackedNflScreenshotTest {
         // C-S1: the held bar on the dead ball after a field goal.
         assertEquals("4TH & 3 | KC 20", words(kit.view(down = null, heldDown = down(4, 3), tab = tab(Side.HOME, field(FieldZone.OPP, 20)))))
         assertEquals("EXTRA POINT", words(kit.view(down = DownText.Pat, tab = tab(Side.AWAY, null))))
+        assertEquals("EXTRA POINT", words(kit.view(down = DownText.Pat, tab = tab(Side.AWAY, TabTail.ExtraPoint))))
+        // Owner ruling 2026-11-16: a try drawn as a real goal-to-go down inside the 5.
+        assertEquals("2-PT TRY", words(kit.view(down = DownText.Pat, tab = tab(Side.AWAY, TabTail.TwoPointTry))))
         assertEquals("LV KICKOFF | LV 35", words(kit.view("SEA", "LV", down = DownText.Kickoff, tab = tab(Side.HOME))))
         // RC9: a kick-off never reads RED ZONE, through the real table.
         assertEquals("LV KICKOFF", words(kit.view("SEA", "LV", down = DownText.Kickoff, tab = tab(Side.HOME, TabTail.RedZone))))
@@ -496,6 +499,7 @@ class StackedNflScreenshotTest {
         assertEquals("DELAYED", words(kit.delayedInBreak()))
         assertEquals("TOUCHDOWN | KC +6", words(kit.scoreKey(Side.AWAY, NflScoreKind.TOUCHDOWN, 6)))
         assertEquals("EXTRA POINT", words(NflBarKey(NflBarKind.PAT, Side.AWAY)))
+        assertEquals("2-PT TRY", words(NflBarKey(NflBarKind.PAT, Side.AWAY, tail = TabTail.TwoPointTry)))
         assertEquals("TWO-POINT | BUF +2", words(kit.scoreKey(Side.HOME, NflScoreKind.TWO_POINT, 2)))
         // Colours: the one rule, `NflStackedColours.bar`.
         val pair = kit.pair("KC", "BUF")

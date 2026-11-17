@@ -505,6 +505,15 @@ A rise of 7 or 8 sets nothing: the try is over.
 
 The try's rendering is down column "PAT" and tab "X BALL | EXTRA POINT", in X's colours.
 
+**Two-point try (owner ruling 2026-11-16).** a pending try reads as a **two-point try** only when the shown play is a
+real `Down` at `tryAt` that is neither the `Down` shown with the snapshot that set the try (the stale body that carried
+the score) nor the last `Down` shown before it (both frozen when the try is set, so repeated polls of the same try-down
+keep the reading), is goal-to-go, and has the ball in the opponent's half at yard ≤ 5 (`TWO_POINT_YARDS`; an unknown
+field is not). Then the tab reads "X BALL | 2-PT TRY" (`TabTail.TwoPointTry`, string `sports_tab_2pt_try`); the down
+column stays "PAT", never RED ZONE. Every other pending try reads as above. Limit: a try that arrives as a `Dead` (the
+only shape seen from ESPN so far) cannot be told from a kick and still reads "EXTRA POINT"; only a try the feed draws as
+a real down (the fake panel's §9.2 defensive-TD row) reads "2-PT TRY". The +2 scoring (TWO-POINT takeover) is unchanged.
+
 **Tests** (B2): replay the log's 14:41:58 → 14:42:44 rows with a +2 instead of the +1:
 - once with the try as `Dead`;
 - once as a `Down` at the 2 with the clock unchanged.
@@ -1181,7 +1190,7 @@ body's `situation`. `yl` is home-relative (BUF's goal line); KC kicks from KC 35
 | | 50–75 | BUF 1st & 10 "BUF 45", possession **BUF** (BUF received the free kick; S9) | a side change |
 | | 75–100 | KC 1st & 10 "KC 40", possession KC | |
 | | 100–125 | **14–11**; the situation still KC 1st & 10 "KC 40" (stale); `lastPlay` 36 team BUF | defensive TD = TOUCHDOWN; **renders "BUF BALL \| EXTRA POINT" at once** (B2) |
-| | 125–150 | 14–11; the two-point try **as a real down**: 1st & Goal "KC 2", possession BUF, **clock unchanged** | still PAT; `pendingTry` survives (B2) |
+| | 125–150 | 14–11; the two-point try **as a real down**: 1st & Goal "KC 2", possession BUF, **clock unchanged** | still PAT; `pendingTry` survives (B2); tab "BUF BALL \| 2-PT TRY" (owner 2026-11-16, §3.3) |
 | | 150–175 | **14–13**; BUF kick-off: down −1, dist 0, yl 35, possession BUF | TWO-POINT via `pendingTry` |
 | | 175–210 | KC 1st & 10 "KC 25", possession KC | |
 | END_PERIOD (25) | | period 3 | "End 3rd" |

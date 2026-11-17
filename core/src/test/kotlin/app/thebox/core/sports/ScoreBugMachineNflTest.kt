@@ -340,9 +340,62 @@ class ScoreBugMachineNflTest {
     fun theTryAsADownAtTheTwoWithTheClockUnchangedThenTwoPoint() {
         val r = tdRig()
         val asDown = r.next(g(6, 0, play = down(1, 2, goal = true, field = FieldPos(buf, 2)), secs = 672, redZone = true))
-        assertEquals(DownText.Pat, asDown?.nfl?.down, "a Down at tryAt renders as the try")
-        assertEquals(tab(kc, TabLead.BALL, TabTail.ExtraPoint), asDown?.nfl?.tab)
+        assertEquals(DownText.Pat, asDown?.nfl?.down, "a Down at tryAt renders as the try; the column stays PAT")
+        assertEquals(tab(kc, TabLead.BALL, TabTail.TwoPointTry), asDown?.nfl?.tab, "a goal-to-go Down inside the 5: 2-PT TRY, never RED ZONE")
         assertEquals(NflScoreKind.TWO_POINT, r.next(g(8, 0, play = NflPlay.Kickoff(kc, FieldPos(kc, 35)), secs = 672))?.nfl?.scores?.single()?.kind)
+    }
+
+    @Test
+    fun theTwoPointTryHoldsOverRepeatedPollsOfTheSameDown() {
+        // Owner ruling 2026-11-16: lastDown is the try-down itself from its second poll on; the reading must not flip back.
+        val r = tdRig()
+        val tryDown = down(1, 2, goal = true, field = FieldPos(buf, 2))
+        repeat(4) { i ->
+            val v = assertNotNull(r.next(g(6, 0, play = tryDown, secs = 672, redZone = true)))
+            assertEquals(DownText.Pat, v.nfl?.down, "poll ${i + 1}")
+            assertEquals(tab(kc, TabLead.BALL, TabTail.TwoPointTry), v.nfl?.tab, "poll ${i + 1}")
+        }
+        // A Dead body during the same try cannot be told from a kick: EXTRA POINT.
+        val dead = r.next(g(6, 0, play = NflPlay.Dead(kc, 6), possession = null, secs = 672, lastPlay = td))
+        assertEquals(tab(kc, TabLead.BALL, TabTail.ExtraPoint), dead?.nfl?.tab)
+        val two = r.next(g(8, 0, play = NflPlay.Kickoff(kc, FieldPos(kc, 35)), secs = 672))
+        assertEquals(NflScoreKind.TWO_POINT, two?.nfl?.scores?.single()?.kind, "the +2 scoring is unchanged")
+    }
+
+    @Test
+    fun theStaleScoreBodyStaysExtraPointOverRepeatedPolls() {
+        // The TD's stale body is a 1st & Goal at BUF 4 (goal-to-go, inside the 5) but it carried the score: EXTRA POINT.
+        val r = tdRig()
+        val goal = down(1, 4, goal = true, field = FieldPos(buf, 4))
+        repeat(4) { i ->
+            val v = assertNotNull(r.next(g(6, 0, play = goal, secs = 672, redZone = true)))
+            assertEquals(DownText.Pat, v.nfl?.down, "poll ${i + 1}")
+            assertEquals(tab(kc, TabLead.BALL, TabTail.ExtraPoint), v.nfl?.tab, "poll ${i + 1}")
+        }
+        // The previous down before the score (shown after a Dead score body) is not the try either.
+        val goal2 = down(2, 3, goal = true, field = FieldPos(buf, 3))
+        val p = rig(g(0, 0, play = goal2, secs = 600))
+        assertEquals(tab(kc, TabLead.BALL, TabTail.ExtraPoint), p.next(g(6, 0, play = NflPlay.Dead(kc, 6), possession = null, secs = 600, lastPlay = td))?.nfl?.tab)
+        repeat(3) { i ->
+            val v = assertNotNull(p.next(g(6, 0, play = goal2, secs = 600)))
+            assertEquals(tab(kc, TabLead.BALL, TabTail.ExtraPoint), v.nfl?.tab, "pre-score down, poll ${i + 1}")
+        }
+    }
+
+    @Test
+    fun aTryDownThatIsNotGoalToGoInsideTheFiveStaysExtraPoint() {
+        // Not goal-to-go; outside the 5; the scorer's own half; an unknown field: all EXTRA POINT (the try, still PAT).
+        for (play in listOf(
+            down(1, 2, goal = false, field = FieldPos(buf, 2)),
+            down(1, 6, goal = true, field = FieldPos(buf, 6)),
+            down(1, 2, goal = true, field = FieldPos(kc, 2)),
+            down(1, 2, goal = true, field = null),
+        )) {
+            val r = tdRig()
+            val v = r.next(g(6, 0, play = play, secs = 672, redZone = true))
+            assertEquals(DownText.Pat, v?.nfl?.down, "$play")
+            assertEquals(tab(kc, TabLead.BALL, TabTail.ExtraPoint), v?.nfl?.tab, "$play")
+        }
     }
 
     @Test
@@ -407,9 +460,10 @@ class ScoreBugMachineNflTest {
         assertEquals(NflScoreKind.TOUCHDOWN, v?.nfl?.scores?.single()?.kind)
         assertEquals(tab(buf, TabLead.BALL, TabTail.ExtraPoint), v?.nfl?.tab, "\"BUF BALL | EXTRA POINT\" from the first snapshot")
         assertEquals(DownText.Pat, v?.nfl?.down)
-        // The two-point try drawn as a real down, clock unchanged: still PAT; then TWO-POINT.
+        // The two-point try drawn as a real down, clock unchanged: PAT in the column, "BUF BALL | 2-PT TRY"; then TWO-POINT.
         val asDown = r.next(g(14, 11, play = down(1, 2, goal = true, field = FieldPos(kc, 2)), possession = buf, secs = 500, period = 3))
         assertEquals(DownText.Pat, asDown?.nfl?.down)
+        assertEquals(tab(buf, TabLead.BALL, TabTail.TwoPointTry), asDown?.nfl?.tab)
         val two = r.next(g(14, 13, play = NflPlay.Kickoff(buf, FieldPos(buf, 35)), possession = buf, secs = 500, period = 3))
         assertEquals(NflScoreKind.TWO_POINT, two?.nfl?.scores?.single()?.kind)
         assertEquals(tab(buf, TabLead.KICKOFF, field(FieldZone.OWN, 35)), two?.nfl?.tab)

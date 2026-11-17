@@ -915,7 +915,7 @@ private class NflTabRun(private val scope: CoroutineScope, private val hooks: Nf
     private fun cut(t: NflTab) {
         content.lead = t.lead
         if (t.tail !is TabTail.RedZone) content.tail = t.tail
-        else if (content.tail == null || content.tail is TabTail.ExtraPoint) content.tail = TabTail.RedZone
+        else if (content.tail == null || content.tail is TabTail.ExtraPoint || content.tail is TabTail.TwoPointTry) content.tail = TabTail.RedZone
     }
 
     private fun setContent(t: NflTab) {
