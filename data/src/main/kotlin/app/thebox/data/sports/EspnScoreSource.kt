@@ -8,16 +8,23 @@ import app.thebox.core.sports.EspnBoardDto
 import app.thebox.core.sports.EspnEventDto
 import app.thebox.core.sports.EspnGameDto
 import app.thebox.core.sports.EspnMapper
+import app.thebox.core.sports.EspnStatsDto
 import app.thebox.core.sports.FailKind
 import app.thebox.core.sports.Fetch
+import app.thebox.core.sports.FollowExtras
 import app.thebox.core.sports.GameId
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.League
+import app.thebox.core.sports.NflYards
+import app.thebox.core.sports.NflYardsPlanner
 import app.thebox.core.sports.PollMeter
 import app.thebox.core.sports.ScoreSource
 import app.thebox.core.sports.SportsConstants
 import app.thebox.core.sports.SportsDebugOverride
 import app.thebox.core.sports.TeamLine
+import app.thebox.core.sports.YardsResult
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.serialization.DeserializationStrategy
 import kotlinx.serialization.ExperimentalSerializationApi
@@ -45,6 +52,7 @@ import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.cancellation.CancellationException
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 
@@ -53,10 +61,16 @@ import kotlin.coroutines.resumeWithException
  * [SportsEndpoints]) serves both leagues: `{origin}/apis/site/v2/sports/football/nfl/` and the logo base `{origin}/`
  * (the fake panel serves `/combiner/i`).
  */
-data class EspnEndpoints(val apiBase: String, val logoBase: String) {
+data class EspnEndpoints(
+    val apiBase: String,
+    val logoBase: String,
+    /** (NFL YDS §1.7) The per-team statistics base (`events/{id}/competitions/{id}/competitors/{team}/statistics`). */
+    val statsBase: String = STATS_BASE,
+) {
     companion object {
         const val API_BASE = "https://site.api.espn.com/apis/site/v2/sports/football/nfl/"
         const val LOGO_BASE = "https://a.espncdn.com/"
+        const val STATS_BASE = "https://sports.core.api.espn.com/v2/sports/football/leagues/nfl/"
         val DEFAULT = EspnEndpoints(API_BASE, LOGO_BASE)
 
         /** An override origin → the ESPN paths under it. Null for a blank or unusable text (not http/https, or not a URL). */
@@ -65,7 +79,7 @@ data class EspnEndpoints(val apiBase: String, val logoBase: String) {
             val url = t.toHttpUrlOrNull() ?: return null
             if (url.scheme != "http" && url.scheme != "https") return null
             val origin = url.newBuilder().encodedPath("/").query(null).fragment(null).build().toString().trimEnd('/')
-            return EspnEndpoints("$origin/apis/site/v2/sports/football/nfl/", "$origin/")
+            return EspnEndpoints("$origin/apis/site/v2/sports/football/nfl/", "$origin/", "$origin/v2/sports/football/leagues/nfl/")
         }
 
         /** The endpoints for this build: [DEFAULT], or the debug override file in a debug build. Call off the main thread. */
@@ -112,6 +126,8 @@ class EspnScoreSource internal constructor(
     private val mapGame: (EspnGameDto, GameId, Long?, String) -> GameSnapshot? = EspnMapper::game,
     private val parseWeekKey: (String) -> Triple<Int, Int, Int>? = EspnMapper::parseWeekKey,
     callTimeoutMs: Long = SportsConstants.SPORTS_CALL_TIMEOUT_MS,
+    /** (NFL YDS §1.7) One team's total yards from a statistics body; a parameter so the S5 catch-all is testable. */
+    private val statsYards: (EspnStatsDto) -> Int? = NflYards::totalYards,
     /**
      * (Update interval §4.2) The follow reads the per-event endpoint `scoreboard/{id}`, with the dated board as the
      * fallback. Off = the board path only (NFL §1.5, the transport tests). Production turns it on through [production].
@@ -122,6 +138,14 @@ class EspnScoreSource internal constructor(
         .callTimeout(callTimeoutMs, TimeUnit.MILLISECONDS)
         .cache(null)
         .build()
+
+    /**
+     * (NFL YDS §1.7, S4) The statistics client: the built [client] (so the [WireMeter] listener factory is kept) with the
+     * yards' own [SportsConstants.NFL_YDS_CALL_TIMEOUT_MS] call timeout.
+     */
+    private val statsClient: OkHttpClient by lazy {
+        client.newBuilder().callTimeout(SportsConstants.NFL_YDS_CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS).build()
+    }
 
     /** Resolved on first use (the actor's first request, off the main thread). */
     private val endpoints: EspnEndpoints by lazy(endpoints)
@@ -154,6 +178,16 @@ class EspnScoreSource internal constructor(
 
     override suspend fun game(id: GameId): Fetch<GameSnapshot> = game(id, null)
 
+    /**
+     * (NFL YDS §1.3, §1.7) The follow poll with [extras]: with `nflYards`, a good answer runs the yards step (a stoppage
+     * snapshot gets both teams' total yards attached). The board's answer is returned whatever the step does (S5).
+     */
+    override suspend fun game(id: GameId, startUtcMs: Long?, extras: FollowExtras): Fetch<GameSnapshot> {
+        val f = game(id, startUtcMs)
+        if (!extras.nflYards || f !is Fetch.Ok) return f
+        return withYards(id, f)
+    }
+
     /** (Update interval §4.2) The per-event read with the board fallback when [perEvent]; else the board path. */
     override suspend fun game(id: GameId, startUtcMs: Long?): Fetch<GameSnapshot> {
         if (id.league != League.NFL || !GAME_ID.matches(id.id)) return failedNow()
@@ -170,6 +204,106 @@ class EspnScoreSource internal constructor(
     }
 
     private var followState: FollowState? = null
+
+    /** (NFL YDS §1.6) One follow's yards state: its planner and the competitor ids of its last decoded event. */
+    private class YardsFollow(val id: String) {
+        val planner = NflYardsPlanner()
+        var teamIds: Pair<String, String>? = null
+        var noIdsLogged = false
+    }
+
+    private var yardsFollow: YardsFollow? = null
+
+    private fun yardsOf(id: GameId): YardsFollow =
+        yardsFollow?.takeIf { it.id == id.id } ?: YardsFollow(id.id).also { yardsFollow = it }
+
+    /** (§1.7) Keep [e]'s competitor ids for [id]'s follow (never logged). */
+    private fun captureIds(id: GameId, e: EspnEventDto) {
+        val ids = NflYards.teamIds(e) ?: return
+        yardsOf(id).teamIds = ids
+    }
+
+    /**
+     * (NFL YDS §1.6, §1.7) The yards step on the board's [f]: ask the planner, fetch both teams in parallel when due, tell
+     * the planner (only after both calls finished), attach. Every throwable but cancellation is caught (S5): the board's
+     * answer is returned in any case, its `wireBytes` untouched and the step's time in `sideMs`.
+     */
+    private suspend fun withYards(id: GameId, f: Fetch.Ok<GameSnapshot>): Fetch<GameSnapshot> {
+        val t0 = mono.nowMs()
+        return try {
+            val y = yardsOf(id)
+            val ids = y.teamIds
+            if (ids == null) {
+                if (!y.noIdsLogged && NflYards.stoppageKey(f.value) != null) {
+                    y.noIdsLogged = true
+                    BoxLog.w(TAG, "yards: no competitor ids for the follow")
+                }
+            } else {
+                val key = y.planner.due(f.value, f.receivedMono)
+                if (key != null) {
+                    val r = fetchYards(id, ids)
+                    y.planner.fetched(key, mono.nowMs(), r)
+                }
+            }
+            f.copy(value = y.planner.attach(f.value, f.receivedMono), sideMs = (mono.nowMs() - t0).coerceAtLeast(0L))
+        } catch (e: CancellationException) {
+            throw e
+        } catch (t: Throwable) {
+            BoxLog.w(TAG, "yards step failed: ${t.javaClass.simpleName}")
+            f.copy(sideMs = (mono.nowMs() - t0).coerceAtLeast(0L))
+        }
+    }
+
+    /** Both teams' statistics in parallel; any throwable is `Failed(BAD_BODY)` (S5). */
+    private suspend fun fetchYards(id: GameId, ids: Pair<String, String>): YardsResult = try {
+        val (a, h) = coroutineScope {
+            val away = async { stats(id, ids.first) }
+            val home = async { stats(id, ids.second) }
+            away.await() to home.await()
+        }
+        val av = (a as? Fetch.Ok)?.let { statsYards(it.value) }
+        val hv = (h as? Fetch.Ok)?.let { statsYards(it.value) }
+        if (av != null && hv != null) {
+            YardsResult.Ok(av, hv)
+        } else {
+            val kinds = listOf(a to av, h to hv).mapNotNull { (fetch, v) ->
+                when (fetch) {
+                    is Fetch.Ok -> if (v == null) FailKind.BAD_BODY else null
+                    Fetch.NotFound -> FailKind.HTTP_OTHER
+                    is Fetch.Failed -> fetch.kind
+                }
+            }
+            YardsResult.Failed(
+                when {
+                    FailKind.HTTP_429 in kinds -> FailKind.HTTP_429
+                    FailKind.TIMEOUT in kinds -> FailKind.TIMEOUT
+                    FailKind.IO in kinds -> FailKind.IO
+                    else -> kinds.firstOrNull() ?: FailKind.BAD_BODY
+                },
+            )
+        }
+    } catch (e: CancellationException) {
+        throw e
+    } catch (t: Throwable) {
+        YardsResult.Failed(FailKind.BAD_BODY)
+    }
+
+    /** One team's statistics (§1.7): the usual capped, drained decode; a 403 is a 429. Logged by state change, no id. */
+    private suspend fun stats(id: GameId, teamId: String): Fetch<EspnStatsDto> {
+        val url = endpoints.statsBase.toHttpUrl().newBuilder()
+            .addPathSegment("events").addPathSegment(id.id)
+            .addPathSegment("competitions").addPathSegment(id.id)
+            .addPathSegment("competitors").addPathSegment(teamId)
+            .addPathSegment("statistics")
+            .build()
+        val answer = call(url, EspnStatsDto.serializer(), statsClient) { null }
+        val fetch: Fetch<EspnStatsDto> = when (val f = answer.fetch) {
+            is Fetch.Failed -> if (answer.code == HTTP_FORBIDDEN) Fetch.Failed(FailKind.HTTP_429, f.retryAfterS, f.receivedMono) else f
+            else -> f
+        }
+        logTransition("competitors/{team}/statistics", fetch, answer)
+        return fetch
+    }
 
     private fun stateOf(id: GameId): FollowState =
         followState?.takeIf { it.id == id.id } ?: FollowState(id.id).also { followState = it }
@@ -214,6 +348,7 @@ class EspnScoreSource internal constructor(
         val fetch: Fetch<GameSnapshot> = when (val f = answer.fetch) {
             is Fetch.Ok -> {
                 val mapped = if (idOf(f.value) != id.id) null else mapSafely { mapGame(EspnGameDto(listOf(f.value)), id, f.serverDateMs, logoBase) }
+                if (mapped != null) captureIds(id, f.value)
                 if (mapped == null) {
                     Fetch.Failed(FailKind.BAD_BODY, null, f.receivedMono)
                 } else {
@@ -326,6 +461,7 @@ class EspnScoreSource internal constructor(
                 GameAnswer.Absent
             } else {
                 val mapped = mapSafely { mapGame(f.value, id, f.serverDateMs, logoBase) }
+                if (mapped != null) f.value.events.orEmpty().firstOrNull { idOf(it) == id.id }?.let { captureIds(id, it) }
                 if (mapped == null) {
                     GameAnswer.Failed(Fetch.Failed(FailKind.BAD_BODY, null, f.receivedMono))
                 } else {
@@ -374,11 +510,16 @@ class EspnScoreSource internal constructor(
     }
 
     /** `enqueue` under the coroutine: cancelling it cancels the call. The body is decoded on OkHttp's thread. */
-    private suspend fun <T> call(url: HttpUrl, serializer: DeserializationStrategy<T>, events: (T) -> List<EspnEventDto>?): Answer<T> {
+    private suspend fun <T> call(
+        url: HttpUrl,
+        serializer: DeserializationStrategy<T>,
+        http: OkHttpClient = client,
+        events: (T) -> List<EspnEventDto>?,
+    ): Answer<T> {
         val wire = WireBytes()
         val request = WireMeter.tag(Request.Builder().url(url).header("Accept", "application/json"), wire).build()
         val answer: Answer<T> = suspendCancellableCoroutine { cont ->
-            val c = client.newCall(request)
+            val c = http.newCall(request)
             cont.invokeOnCancellation { c.cancel() }
             c.enqueue(object : Callback {
                 override fun onFailure(call: Call, e: IOException) {

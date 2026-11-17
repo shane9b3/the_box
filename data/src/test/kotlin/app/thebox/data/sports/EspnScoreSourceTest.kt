@@ -430,7 +430,11 @@ class EspnScoreSourceTest {
 
     @Test fun endpointOverrideParsing() {
         assertEquals(
-            EspnEndpoints("http://10.0.2.2:8080/apis/site/v2/sports/football/nfl/", "http://10.0.2.2:8080/"),
+            EspnEndpoints(
+                "http://10.0.2.2:8080/apis/site/v2/sports/football/nfl/",
+                "http://10.0.2.2:8080/",
+                "http://10.0.2.2:8080/v2/sports/football/leagues/nfl/", // (NFL YDS §1.7) the statistics base
+            ),
             EspnEndpoints.fromOverride(" http://10.0.2.2:8080/\n"),
         )
         assertEquals("http://panel.test/apis/site/v2/sports/football/nfl/", EspnEndpoints.fromOverride("http://panel.test/x?y=1")?.apiBase)
