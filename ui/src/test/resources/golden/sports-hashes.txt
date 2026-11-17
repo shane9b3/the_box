@@ -1692,3 +1692,32 @@ f925a40fb52996e1f597041b5b7d0a9a974dc6a6c977ad8fa1ae0bbf33bb8b11  score-bug-stac
 04987690345f0b6c13a26a85cec27923bb997791f339678762c8eb260094ddcf  score-bug-stacked-nfl/nfl-stacked-timeout-tl-std-ice.png
 080165d8e50699e766680be9b42d58713a7ea92a4784416b7b7bbe27e0255fb9  score-bug-stacked-nfl/nfl-stacked-timeout-tr-large-dark.png
 094e007a58feb99d936337462eed004378dda615434ab875b9943f5b92d9e570  score-bug-stacked-nfl/nfl-stacked-timeout-tr-std-dark.png
+# 2026-11-16 (NFL YDS WP-2, docs/design/m6-nfl-stacked-yds.md §4.6): appended the 26 score-bug-stacked-nfl/yds-* shots
+#   (StackedNflScreenshotTest.theYdsColumnShotsSheetsAndStrips; layer from STACKED_NFL_FOOTPRINT_W). Same host; two runs
+#   hashed equal; every line above is unchanged. Pending the owner's review of the shots.
+eade77970b23dfc1b19ce5bae3be5cf83d4943740e719f21623408c7fcb08192  score-bug-stacked-nfl/yds-close-t425-br-std.png
+0eb5a3028d74eddd313304d2e882603daa6a7f84260f1f5f7d112306b9600483  score-bug-stacked-nfl/yds-close-t425-tl-std.png
+e3dd0eeb1086b66ae8c6303f6f7a442be81d1843480dc7844b54261ff8d4b230  score-bug-stacked-nfl/yds-end-1st-negative-br-std.png
+647b4e2e54a10969f4ef54c237f7a421614c8e769aa033d8b088e6e7470e0fab  score-bug-stacked-nfl/yds-end-1st-negative-tl-std.png
+cd67238ac872f933536286d3c225531997d49c5505d7b59857a14047ea321ff8  score-bug-stacked-nfl/yds-fg-1500-pinned-396-br-std.png
+ff1c705b5e86cbe964ce9016ae586be8e885867463f1d5f5fbffef14bd7853a2  score-bug-stacked-nfl/yds-fg-1500-pinned-396-tl-large.png
+d8b26a216a3b6bf3947801b0fb787dc36010f44c363661d841eb63fcb50fef84  score-bug-stacked-nfl/yds-fg-1500-pinned-396-tl-std.png
+f7b93559d96577044cfde3d61839717e538abd07adafe5d763eaaa6979061cdd  score-bug-stacked-nfl/yds-final-3-digit-br-std.png
+89b053bec803cadd4be00172c592f4c7abf9915d1faa870dfae91a894fdc679f  score-bug-stacked-nfl/yds-final-3-digit-tl-std.png
+83af5152b164505ca57f23f457054733760fdf5bae5a9b38e02b366dd09d14e2  score-bug-stacked-nfl/yds-halftime-br-large.png
+3eadecb3d1c26aa65e303543941ab6fb1a29527c78e6fdcb22a775cb059562f4  score-bug-stacked-nfl/yds-halftime-br-std.png
+f1fa4fe1c153d8754db6928fd8dbb5b5c6ed440cc5f512961635963f88325068  score-bug-stacked-nfl/yds-halftime-tl-large.png
+ad9af7a134d95c1bc056413b4f9121d59a7bb5912a2a629601c94c316057eb43  score-bug-stacked-nfl/yds-halftime-tl-std.png
+cfa4a1d253505d39e99e0e4b392acdb0957ee964bc7b7740c4a038e493e515d9  score-bug-stacked-nfl/yds-official-timeout-br-std.png
+32b092373fade6223faa6e59c869ce5f7dad8a26c70adfdb49173906f70f2042  score-bug-stacked-nfl/yds-official-timeout-tl-std.png
+4f47ab5b8554608eccf134958ecf95f855a056ad0ac5f4f25db6524667a7d494  score-bug-stacked-nfl/yds-open-t225-br-std.png
+d8e9d4d281f714136556042e3e875bcc838c3aaf186c48a2c6844bd2f64750f9  score-bug-stacked-nfl/yds-open-t225-tl-std.png
+fc2a49db929d84cd7fcc3d98cf1e4366a7b23a157e2f2cb1213f212d74374dc8  score-bug-stacked-nfl/yds-stale-halftime-br-std.png
+29e29d724b7373f24c7b74ce2ff185dc4ca0321dae9c259d90ea80c658898635  score-bug-stacked-nfl/yds-stale-halftime-tl-std.png
+dbd084363d6c7a97bf88bb4b8003dca1864880508e5defbe264c89e2137d1e41  score-bug-stacked-nfl/yds-timeout-bl-std.png
+cbb6e6de63a9293a76214ba009455a4d8c792c6e04c1ab9f1cc9c36913d6becf  score-bug-stacked-nfl/yds-timeout-br-large.png
+5f4706dc61dacd9d113fb3ba1d788f480a70de20e394f89150647580f7c16828  score-bug-stacked-nfl/yds-timeout-br-std.png
+c505bdd735af11ca936b02a0b6b0d32589d0c8d6e8acdd4ce93440dc177d64dc  score-bug-stacked-nfl/yds-timeout-still-tl-std.png
+10dead8666c8200e268ee3a7cd34d900e91418ab09444285198168685b53fe34  score-bug-stacked-nfl/yds-timeout-tl-large.png
+c505bdd735af11ca936b02a0b6b0d32589d0c8d6e8acdd4ce93440dc177d64dc  score-bug-stacked-nfl/yds-timeout-tl-std.png
+80f3a363dcfbbd9a961c713be5590f48a64e62a6ae0714bca637903217fe4f47  score-bug-stacked-nfl/yds-timeout-tr-std.png

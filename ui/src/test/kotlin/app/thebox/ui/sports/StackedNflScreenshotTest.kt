@@ -21,6 +21,7 @@ import app.thebox.core.sports.ScoreBugView
 import app.thebox.core.sports.Side
 import app.thebox.core.sports.SportsConstants as K
 import app.thebox.core.sports.StackedNflFrame
+import app.thebox.core.sports.StackedNflGeometry as G
 import app.thebox.core.sports.StackedNflTargets
 import app.thebox.core.sports.StackedNflTrack
 import app.thebox.core.sports.StackedNflTransition
@@ -239,7 +240,7 @@ class StackedNflScreenshotTest {
         File(out, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
-    private fun sheet(name: String, cells: List<List<Bitmap>>) {
+    private fun sheet(name: String, cells: List<List<Bitmap>>, dest: File = kit.SHEETS) {
         val cw = cells.flatten().maxOf { it.width }
         val ch = cells.flatten().maxOf { it.height }
         val cols = cells.maxOf { it.size }
@@ -249,8 +250,8 @@ class StackedNflScreenshotTest {
         cells.forEachIndexed { row, list -> list.forEachIndexed { col, bmp -> c.drawBitmap(bmp, col * cw.toFloat(), row * ch.toFloat(), null) } }
         File(review, "$name.png").outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
         runCatching {
-            kit.SHEETS.mkdirs()
-            File(kit.SHEETS, "$name.png").outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            dest.mkdirs()
+            File(dest, "$name.png").outputStream().use { b.compress(Bitmap.CompressFormat.PNG, 100, it) }
         }
     }
 
@@ -510,5 +511,215 @@ class StackedNflScreenshotTest {
             val want = NflStackedColours.bar(key, pair)
             assertEquals(listOf(want.bg, want.a, want.b, want.fg), listOf(c.bg, c.a, c.b, c.fg))
         }
+    }
+
+    // ------------------------------------------------------------------ NFL YDS (docs/design/m6-nfl-stacked-yds.md §4.6)
+
+    /**
+     * (NFL YDS WP-2) One look of the YDS column: [view] is the body the rows and columns show; [layout] the view whose
+     * targets lay the frame out (the pin's pre-score layout; default [view]); [frame] may move tracks into a transition;
+     * [bar] overrides the bar key (the pinned score label); [prev] is the bar a REKEY leaves; [lastClock] / [lastYds]
+     * are the last bodies with the clock / YDS column open, merged as the runner's `NflBodyMerge` does.
+     */
+    private class YLook(
+        val name: String,
+        val view: ScoreBugView,
+        val layout: ScoreBugView = view,
+        val frame: (StackedNflTargets, StackedNflFrame) -> StackedNflFrame = { _, f -> f },
+        val bar: NflBarKey? = null,
+        val prev: ScoreBugView? = null,
+        val lastClock: ScoreBugView? = null,
+        val lastYds: ScoreBugView? = null,
+    )
+
+    /** The YDS shots' layer: the 396 footprint (`STACKED_NFL_FOOTPRINT_W`) + 2 M; mirrored, the rows hug its right edge. */
+    private fun renderYds(look: YLook, large: Boolean, corner: Corner, take: Take? = null, still: Boolean = false): Shot {
+        val r = rig(large)
+        val lw = Math.round(K.STACKED_NFL_FOOTPRINT_W * r.s + 2 * r.m)
+        val bmp = Bitmap.createBitmap(lw, r.layerH, Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.drawRect(0f, 0f, lw.toFloat(), r.layerH.toFloat(), Paint().apply {
+            shader = LinearGradient(0f, 0f, lw.toFloat(), r.layerH.toFloat(), Color.rgb(20, 22, 28), Color.rgb(70, 40, 38), Shader.TileMode.CLAMP)
+        })
+        val away = look.view.away.abbrev
+        val home = look.view.home.abbrev
+        val pair = NflStackedColours.pair(away, home)
+        val lt = kit.targets(look.layout)
+        val f = look.frame(lt, kit.rest(lt))
+        val body = r.painter.frame(look.view, kit.targets(look.view), res)
+        val lc = look.lastClock?.let { r.painter.frame(it, kit.targets(it), res) }
+        val ly = look.lastYds?.let { r.painter.frame(it, kit.targets(it), res) }
+        val a = StackedNflDrawArgs()
+        a.state = NflBodyMerge().of(body, f, lc, ly)
+        a.frame = f
+        a.colours = pair
+        a.bar = content(r, look.bar ?: lt.bar, lt.barDim, pair, away, home)
+        a.barPrev = look.prev?.let { content(r, kit.targets(it).bar, false, pair, away, home) }
+        a.awayLogo = r.logo(away)
+        a.homeLogo = r.logo(home)
+        a.mirrored = corner.mirrored
+        a.up = corner.up
+        a.still = take?.still ?: still
+        a.shadow = r.shadow
+        if (take != null) {
+            val sc = if (take.scorer == Side.AWAY) pair.away else pair.home
+            r.score.begin(take.scorer, listOf(take.scores[0]), sc.goal, r.logo(if (take.scorer == Side.AWAY) away else home), away, home, f.boxW)
+            a.takeover = r.score
+            a.glow = r.glow(f.boxW, K.STACKED_H + if (f.barClosed) 0f else f.barH)
+            a.glowOn = true
+            a.score = kit.score(take.t, take.kind, take.second, take.still)
+            a.scoreSide = take.scorer
+            a.takeoverOn = true
+        }
+        val ox = r.m + if (corner.mirrored) (K.STACKED_NFL_FOOTPRINT_W - K.STACKED_ROWS_W) * r.s else 0f
+        val oy = r.m + if (corner.up) K.STACKED_BAR_H * r.s else 0f
+        c.translate(ox, oy)
+        r.painter.drawFrame(c, a)
+        return Shot(bmp, ox, oy, a.bar, f)
+    }
+
+    private fun yds(v: ScoreBugView, away: Int, home: Int) = kit.yds(v, away, home)
+    private val bufTimeout2 = NflTimeoutMark(Side.HOME, 2, confirmed = true)
+    /** TIMEOUT BUF | 2 LEFT, 142 / 51 (fake panel "q2 BUF ball"). */
+    private val ydsTimeout = yds(kit.view(homeTimeouts = 2, timeout = bufTimeout2), 142, 51)
+    /** An official timeout (S2): the play bar "1ST & 10 | BUF 25" unchanged, YDS beside it; 41 / 0. */
+    private val ydsOfficial = yds(kit.view(tab = kit.tab(Side.HOME, field(FieldZone.OWN, 25))), 41, 0)
+    private val ydsHalftime = yds(kit.halftime(), 168, 97)
+    private val ydsEnd1st = yds(kit.endOf(p1), 75, -2)
+    private val ydsFinal = yds(kit.final(), 389, 312)
+    private val ydsStaleHalftime = yds(kit.staleInBreak(), 168, 97)
+    /** KC's kick-off after an official timeout (RC9 shape), 7 / −2. */
+    private val ydsKickoff = yds(kit.view(down = DownText.Kickoff, tab = kit.tab(Side.AWAY, field(FieldZone.OWN, 35))), 7, -2)
+    private val ydsExtremes = yds(kit.view(homeTimeouts = 2, timeout = bufTimeout2), 999, -99)
+
+    /** [t]'s rest frame with the YDS track closed (the frame a late OPEN starts from). */
+    private fun ydsClosed(t: StackedNflTargets) =
+        kit.rest(t).also { kit.at(it, StackedNflTrack.YDS, StackedNflTransition.STILL, 0f, StackedNflFrame(), to = false) }
+
+    private val ydsOpenAt = { ms: Float -> { t: StackedNflTargets, f: StackedNflFrame -> kit.at(f, StackedNflTrack.YDS, StackedNflTransition.OPEN, ms, ydsClosed(t)) } }
+    private val ydsCloseAt = { ms: Float -> { t: StackedNflTargets, f: StackedNflFrame -> kit.at(f, StackedNflTrack.YDS, StackedNflTransition.CLOSE, ms, kit.rest(t), to = false) } }
+
+    /** The field goal after BUF's "icing" timeout (S9): KC 27 – 17, laid out on the pinned 396 box at [t]. */
+    private fun ydsFieldGoal(t: Int): Pair<YLook, Take> {
+        val fg = NflScore(NflScoreKind.FIELD_GOAL, 3, 27, 17)
+        val scored = kit.view(awayScore = 27, homeTimeouts = 2)
+        val pre = ydsTimeout
+        val pinW = nflRestBoxW(kit.targets(pre).ydsOpen, kit.targets(pre).clockOpen)
+        val body = when (StackedNflPinSchedule.body(t.toFloat(), false, false, kit.SPEC)) {
+            StackedNflPinSchedule.Body.PRE_SCORE -> pre
+            else -> scored
+        }
+        val key = StackedNflPinSchedule.barKey(Side.AWAY, fg, null, t.toFloat(), false, kit.targets(pre).bar != null, pinW, kit.SPEC)
+        return YLook("fg-$t-pinned-396", body, layout = pre, bar = key, lastYds = pre) to Take(t.toFloat(), listOf(fg))
+    }
+
+    /** Play → halftime with yards at [ms]: the clock folds, the bar re-keys, the ball goes and YDS opens, together (§3.5). */
+    private fun playToHalftime(ms: Float): YLook {
+        val play = kit.view()
+        val from = kit.rest(kit.targets(play))
+        return YLook("play-to-halftime-t${ms.toInt()}", ydsHalftime, frame = { _, f ->
+            kit.at(f, StackedNflTrack.CLOCK, StackedNflTransition.CLOSE, ms, from, to = false)
+            kit.at(f, StackedNflTrack.BAR, StackedNflTransition.REKEY, ms, from)
+            kit.at(f, StackedNflTrack.STRIPE_AWAY, StackedNflTransition.CLOSE, ms, from, to = false)
+            kit.at(f, StackedNflTrack.BALL_AWAY, StackedNflTransition.CLOSE, ms, from, to = false)
+            kit.at(f, StackedNflTrack.YDS, StackedNflTransition.OPEN, ms, from)
+        }, prev = play, lastClock = play)
+    }
+
+    private val ydsRest = listOf(
+        YLook("timeout", ydsTimeout), YLook("official-timeout", ydsOfficial), YLook("halftime", ydsHalftime),
+        YLook("end-1st-negative", ydsEnd1st), YLook("final-3-digit", ydsFinal), YLook("stale-halftime", ydsStaleHalftime),
+    )
+
+    /**
+     * (NFL YDS §4.6) The 26 hashed `yds-*` shots under `score-bug-stacked-nfl/`, the contact sheets of the yards states
+     * (Standard and Large; TL, TR mirrored, BR) and the frame strips of the column opening and of play → halftime.
+     */
+    @Test
+    fun theYdsColumnShotsSheetsAndStrips() {
+        fun shot(name: String, b: Bitmap) = save("yds-$name", b)
+        var n = 0
+        for (look in ydsRest) for (corner in listOf(Corner.TL, Corner.BR)) { shot("${look.name}-${corner.tag}-std", renderYds(look, false, corner).bmp); n++ }
+        for (look in ydsRest.filter { it.name == "timeout" || it.name == "halftime" }) for (corner in listOf(Corner.TL, Corner.BR)) {
+            shot("${look.name}-${corner.tag}-large", renderYds(look, true, corner).bmp); n++
+        }
+        for (corner in listOf(Corner.TR, Corner.BL)) { shot("timeout-${corner.tag}-std", renderYds(ydsRest[0], false, corner).bmp); n++ }
+        for (corner in listOf(Corner.TL, Corner.BR)) {
+            shot("open-t225-${corner.tag}-std", renderYds(YLook("open-t225", ydsTimeout, frame = ydsOpenAt(225f)), false, corner).bmp); n++
+            shot("close-t425-${corner.tag}-std", renderYds(YLook("close-t425", ydsTimeout, frame = ydsCloseAt(425f)), false, corner).bmp); n++
+        }
+        val (fgLook, fgTake) = ydsFieldGoal(1_500)
+        for ((large, corner) in listOf(false to Corner.TL, false to Corner.BR, true to Corner.TL)) {
+            shot("fg-1500-pinned-396-${corner.tag}-${sz(large)}", renderYds(fgLook, large, corner, take = fgTake).bmp); n++
+        }
+        // Reduce animations: the STILL transition puts the whole column up at once (here 225 ms in: no partial width).
+        val still = YLook("timeout-still", ydsTimeout, frame = { t, f -> kit.at(f, StackedNflTrack.YDS, StackedNflTransition.STILL, 225f, ydsClosed(t), to = true) })
+        shot("timeout-still-tl-std", renderYds(still, false, Corner.TL, still = true).bmp); n++
+        assertEquals("§4.6: 26 shots", 26, n)
+
+        // The contact sheets: every yards state (1-, 2-, 3-digit and negative values) beside the v1 play / halftime looks.
+        val states = listOf(
+            YLook("timeout", ydsTimeout), YLook("official-timeout", ydsOfficial), YLook("kickoff", ydsKickoff),
+            YLook("halftime", ydsHalftime), YLook("end-1st", ydsEnd1st), YLook("final", ydsFinal),
+            YLook("stale-halftime", ydsStaleHalftime), YLook("extremes", ydsExtremes),
+            YLook("v1-play", kit.view()), YLook("v1-halftime", kit.halftime()),
+        )
+        for (large in listOf(false, true)) for (corner in listOf(Corner.TL, Corner.TR, Corner.BR)) {
+            sheet("yds-states-${sz(large)}-${corner.tag}", states.map { renderYds(it, large, corner).bmp }.chunked(4), kit.YDS_SHEETS)
+        }
+        // The frame strips: the column opening (late yards on a timeout) and play → halftime, TL and BR, Standard.
+        val openTimes = listOf(0, 75, 150, 225, 300, 375, 450, 525, 600, 650)
+        val halfTimes = listOf(0, 100, 200, 300, 350, 400, 450, 550, 650, 800)
+        val strip = listOf(Corner.TL, Corner.BR).flatMap { corner ->
+            listOf(
+                openTimes.map { renderYds(YLook("open", ydsTimeout, frame = ydsOpenAt(it.toFloat())), false, corner).bmp },
+                halfTimes.map { renderYds(playToHalftime(it.toFloat()), false, corner).bmp },
+            )
+        }
+        sheet("yds-strip-open-and-play-to-halftime-std", strip, kit.YDS_SHEETS)
+        // The field goal pinned at 396 through the takeover, TL and BR.
+        val fgTimes = listOf(216, 450, 1_000, 1_500, 2_025, 3_000)
+        sheet("yds-strip-fg-pinned-396-std", listOf(Corner.TL, Corner.BR).map { corner ->
+            fgTimes.map { t -> ydsFieldGoal(t).let { (l, tk) -> renderYds(l, false, corner, take = tk).bmp } }
+        }, kit.YDS_SHEETS)
+        assertTrue(File(review, "yds-states-std-tl.png").length() > 10_000)
+        assertFalse("the sheets are not in the gated folder", File(out, "yds-states-std-tl.png").exists())
+    }
+
+    /** (NFL YDS §3.1–§3.3) The drawn column: digits in it, the clock column after it, mirrored `[clock][YDS][rows]`. */
+    @Test
+    fun theYdsColumnIsDrawnBetweenTheRowsAndTheClockOnBothSides() {
+        fun bright(shot: Shot, x0: Float, x1: Float, y0: Float, y1: Float): Int {
+            var n = 0
+            for (y in (shot.oy + y0).toInt() until (shot.oy + y1).toInt()) for (x in (shot.ox + x0).toInt() until (shot.ox + x1).toInt()) {
+                val p = shot.bmp.getPixel(x, y)
+                if (Color.red(p) > 200 && Color.green(p) > 200 && Color.blue(p) > 200) n++
+            }
+            return n
+        }
+        for (corner in Corner.entries) {
+            val shot = renderYds(YLook("timeout", ydsTimeout), false, corner)
+            assertEquals("${corner.tag}: the 396 box", K.STACKED_NFL_FOOTPRINT_W, shot.f.boxW, 1e-3f)
+            // Box-local → rows-origin x: mirrored the box spans [243 − 396, 243].
+            val l = if (corner.mirrored) K.STACKED_ROWS_W - K.STACKED_NFL_FOOTPRINT_W else 0f
+            val ydsL = l + G.ydsX(K.STACKED_NFL_FOOTPRINT_W, K.STACKED_NFL_YDS_W, corner.mirrored)
+            val clockL = l + G.clockX(K.STACKED_NFL_FOOTPRINT_W, K.STACKED_CLOCK_W, K.STACKED_NFL_YDS_W, corner.mirrored)
+            assertEquals(if (corner.mirrored) -K.STACKED_NFL_YDS_W else K.STACKED_ROWS_W, ydsL, 1e-3f)
+            assertEquals(if (corner.mirrored) -K.STACKED_NFL_YDS_W - K.STACKED_CLOCK_W else K.STACKED_ROWS_W + K.STACKED_NFL_YDS_W, clockL, 1e-3f)
+            val rowH = K.STACKED_H / 2f
+            assertTrue("${corner.tag}: \"142\" in the away row", bright(shot, ydsL + 4f, ydsL + 59f, 14f, rowH - 14f) > 20)
+            assertTrue("${corner.tag}: \"51\" in the home row", bright(shot, ydsL + 4f, ydsL + 59f, rowH + 14f, K.STACKED_H - 14f) > 20)
+            assertTrue("${corner.tag}: the clock digits after the column", bright(shot, clockL + 8f, clockL + 82f, K.STACKED_NFL_PERIOD_SLOT_H + 4f, K.STACKED_H - 4f) > 20)
+            // On the rows' line only the grey "YDS" label (`STACKED_SOG_LABEL`), no white digit ink (§3.1 clearances).
+            assertEquals("${corner.tag}: the label band", 0, bright(shot, ydsL + 2f, ydsL + 61f, rowH - 2.5f, rowH + 2.5f))
+            // The column's background between the label and the digits: the box fill.
+            val bg = shot.bmp.getPixel((shot.ox + ydsL + 4f).toInt(), (shot.oy + rowH / 2f).toInt())
+            assertTrue("${corner.tag}: column fill ${Integer.toHexString(bg)}", kit.near(K.STACKED_COL_BG, bg, 6))
+        }
+        // Halftime (306): the clock folded, the column beside the rows.
+        val half = renderYds(YLook("halftime", ydsHalftime), false, Corner.TL)
+        assertEquals(306f, half.f.boxW, 1e-3f)
+        // The play look without yards keeps its 333 box (the v1 pixels: the same frame as the hashed `play` look).
+        assertEquals(K.STACKED_NFL_W_MAX, renderYds(YLook("play", kit.view()), false, Corner.TL).f.boxW, 1e-3f)
     }
 }

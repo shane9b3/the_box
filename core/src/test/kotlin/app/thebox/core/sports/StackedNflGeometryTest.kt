@@ -414,4 +414,45 @@ class StackedNflGeometryTest {
         // The mock's 2.7 would be 1.8 at 720p (S-D12).
         assertTrue(2.7f * 1280f / 1920f < 2f)
     }
+
+    /**
+     * (NFL YDS §3.3, §3.7) The YDS column and the clock column after it, at 396 (in-play stoppage) and 306 (break), both
+     * mirror states: `[rows][YDS][clock]` on the left, `[clock][YDS][rows]` from the edge inwards on the right; the old
+     * forms are the `ydsW = 0` ones, exactly.
+     */
+    @Test
+    fun theYdsColumnSitsBetweenTheRowsAndTheClockOnBothSides() {
+        val y = K.STACKED_NFL_YDS_W
+        val c = K.STACKED_CLOCK_W
+        assertEquals(396f, K.STACKED_NFL_FOOTPRINT_W)
+        // 396, left: rows 0–243, YDS 243–306, clock 306–396.
+        assertEquals(243f, G.ydsX(396f, y, false))
+        assertEquals(306f, G.clockX(396f, c, y, false))
+        assertEquals(306f, G.clockContentX(396f, y, false))
+        assertEquals(0f, G.rowsLeft(396f, false))
+        // 396, mirrored: clock 0–90, YDS 90–153, rows 153–396.
+        assertEquals(0f, G.clockX(396f, c, y, true))
+        assertEquals(0f, G.clockContentX(396f, y, true))
+        assertEquals(90f, G.ydsX(396f, y, true))
+        assertEquals(153f, G.rowsLeft(396f, true))
+        // 306 (a break: the clock folded): YDS beside the rows on both sides; the folded clock's contents just past it.
+        assertEquals(243f, G.ydsX(306f, y, false)); assertEquals(306f, G.clockX(306f, 0f, y, false))
+        assertEquals(0f, G.ydsX(306f, y, true)); assertEquals(63f, G.rowsLeft(306f, true))
+        assertEquals(-90f, G.clockContentX(306f, y, true), "mirrored: the folded contents beyond the screen-edge side, clipped")
+        // Mid-open (half the column, 364.5): the clock moves with the open width; mirrored the YDS content anchors on the rows.
+        assertEquals(274.5f, G.clockX(364.5f, c, y / 2f, false))
+        assertEquals(0f, G.clockX(364.5f, c, y / 2f, true))
+        assertEquals(90f, G.ydsX(364.5f, y / 2f, true))
+        // The mirror identity: each mirrored edge is the reflection of the left one.
+        for (boxW in listOf(396f, 364.5f, 306f, 333f)) for (yw in listOf(0f, y / 2f, y)) for (cw in listOf(0f, c / 2f, c)) {
+            assertEquals(boxW - G.ydsX(boxW, yw, false) - yw, G.ydsX(boxW, yw, true), 1e-3f)
+            assertEquals(boxW - G.clockX(boxW, cw, yw, false) - cw, G.clockX(boxW, cw, yw, true), 1e-3f)
+            assertEquals(boxW - G.clockContentX(boxW, yw, false) - c, G.clockContentX(boxW, yw, true), 1e-3f)
+        }
+        // The old forms are the ydsW = 0 forms, bit for bit (every v1 golden keeps its pixels).
+        for (boxW in listOf(333f, 288f, 243f)) for (m in listOf(false, true)) for (cw in listOf(0f, 45f, 90f)) {
+            assertEquals(G.clockX(boxW, cw, 0f, m), G.clockX(boxW, cw, m))
+            assertEquals(G.clockContentX(boxW, 0f, m), G.clockContentX(boxW, m))
+        }
+    }
 }

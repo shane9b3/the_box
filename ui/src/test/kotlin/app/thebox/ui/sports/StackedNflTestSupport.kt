@@ -13,6 +13,7 @@ import app.thebox.core.sports.NflScoreKind
 import app.thebox.core.sports.NflScoreSpec
 import app.thebox.core.sports.NflTab
 import app.thebox.core.sports.NflTimeoutMark
+import app.thebox.core.sports.NflYards
 import app.thebox.core.sports.NhlBugStyle
 import app.thebox.core.sports.PeriodKind
 import app.thebox.core.sports.PeriodLabel
@@ -159,7 +160,19 @@ internal object StackedNflRunFixtures {
         periodPx = K.STACKED_NFL_CLOCK_PX,
         slot = t.clockSlot, slotText = t.clockSlot.toString(), slotPx = K.STACKED_NFL_CLOCK_PX,
         clockSecs = v.clockSecs ?: 0, columnDim = t.columnDim, targets = t,
+        // (NFL YDS) The digits as `StackedNflPainter.frame` writes them: both teams' or neither.
+        awayYds = yardsOf(v)?.let { NflYards.text(it.first) }.orEmpty(),
+        homeYds = yardsOf(v)?.let { NflYards.text(it.second) }.orEmpty(),
     )
+
+    private fun yardsOf(v: ScoreBugView): Pair<Int, Int>? {
+        val a = v.nfl?.awayYards
+        val h = v.nfl?.homeYards
+        return if (a != null && h != null) a to h else null
+    }
+
+    /** (NFL YDS) [v] carrying both teams' total yards, as the machine shows a stoppage snapshot's. */
+    fun yds(v: ScoreBugView, away: Int, home: Int): ScoreBugView = v.copy(nfl = v.nfl!!.copy(awayYards = away, homeYards = home))
 
     /** What the fakes saw: every `fillBar` key, every `begin`, every sampled (track, kind) pair. */
     class Calls {

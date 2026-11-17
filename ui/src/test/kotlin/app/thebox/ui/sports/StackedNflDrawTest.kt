@@ -685,5 +685,129 @@ class StackedNflDrawTest {
         assertFalse(desc(), desc().contains("Timeouts"))
     }
 
+    // ------------------------------------------------------------------ NFL YDS (docs/design/m6-nfl-stacked-yds.md §4.3)
+
+    private fun yds(v: ScoreBugView, a: Int, h: Int) = F.yds(v, a, h)
+    private val bufMark = NflTimeoutMark(Side.HOME, 1, confirmed = true)
+    private val Y = StackedNflTrack.YDS
+
+    @Test
+    fun lateYardsOpenTheColumnAloneARefreshRedrawsAndTheNextPlayClosesWithTheLastDigits() {
+        start()
+        show(F.view(homeTimeouts = 1, timeout = bufMark)) // the timeout, no yards yet
+        assertTrue("no yards, no YDS kick", movesOf(Y).isEmpty())
+        advance(1_000)
+        assertEquals(K.STACKED_NFL_W_MAX, f().boxW, 1e-3f)
+        val bars = movesOf(StackedNflTrack.BAR).size
+        val pips = movesOf(StackedNflTrack.PIPS_HOME).size
+        show(yds(F.view(homeTimeouts = 1, timeout = bufMark), 142, 51)) // the same stoppage, its yards arrive
+        assertEquals(StackedNflTransition.OPEN, movesOf(Y).single().kind)
+        assertEquals("yards are not in the bar key: no REKEY", bars, movesOf(StackedNflTrack.BAR).size)
+        assertEquals("no second burn", pips, movesOf(StackedNflTrack.PIPS_HOME).size)
+        advance(200)
+        val mid = f().boxW
+        assertTrue("opening: $mid", mid > K.STACKED_NFL_W_MAX && mid < K.STACKED_NFL_FOOTPRINT_W)
+        advance(1_000)
+        assertEquals("rows + YDS + clock", K.STACKED_NFL_FOOTPRINT_W, f().boxW, 1e-3f)
+        assertEquals(1f, f().ydsAlpha, 0f)
+        assertEquals("142" to "51", body().awayYds to body().homeYds)
+        // A refresh: new digits in place, no kick.
+        val n = probe.transitions.size
+        show(yds(F.view(homeTimeouts = 1, timeout = bufMark), 145, 51))
+        assertEquals("a refresh kicks nothing", n, probe.transitions.size)
+        assertEquals("145", body().awayYds)
+        // The next play: the column closes and fades out with the last digits.
+        show(F.view(homeTimeouts = 1))
+        assertEquals(StackedNflTransition.CLOSE, movesOf(Y).last().kind)
+        advance(100)
+        assertTrue(f().ydsWidth > 0f)
+        assertEquals("closing keeps the last digits", "145" to "51", body().awayYds to body().homeYds)
+        advance(1_000)
+        assertEquals(K.STACKED_NFL_W_MAX, f().boxW, 1e-3f)
+        assertEquals("", body().awayYds)
+    }
+
+    @Test
+    fun anOfficialTimeoutOpensBesideThePlayBarWithNoRekeyAndNoBurn() {
+        start()
+        val n = moves().size
+        show(yds(F.view(clock = 200), 41, 0)) // S2: a 74 / 75 keeps its play bar
+        assertEquals(listOf(Y to StackedNflTransition.OPEN), moves().drop(n).map { it.track to it.kind })
+        assertEquals(play, barKey())
+        advance(1_000)
+        assertEquals(K.STACKED_NFL_FOOTPRINT_W, f().boxW, 1e-3f)
+        assertEquals("41" to "0", body().awayYds to body().homeYds)
+    }
+
+    /** Review S6: going from play into halftime the folding clock's texts and the opening column's digits compose. */
+    @Test
+    fun playToHalftimeWithYardsDrawsTheDigitsAt350() {
+        start()
+        show(yds(F.halftime(), 168, 97))
+        assertEquals(StackedNflTransition.CLOSE, movesOf(StackedNflTrack.CLOCK).single().kind)
+        assertEquals(StackedNflTransition.OPEN, movesOf(Y).single().kind)
+        advance(350 - 16) // show() ran 16 ms
+        val fr = f()
+        assertTrue("the clock still folding at 350: ${fr.clockWidth}", fr.clockWidth > 0f)
+        assertTrue("the digits fading in at 350: ${fr.ydsAlpha}", fr.ydsAlpha > 0f)
+        val st = body()
+        assertEquals("the folding clock keeps its texts (the play body)", "Q4", st.periodText)
+        assertEquals("the opening column has the halftime body's digits", "168" to "97", st.awayYds to st.homeYds)
+        advance(1_000)
+        assertEquals("rows + YDS", K.STACKED_ROWS_W + K.STACKED_NFL_YDS_W, f().boxW, 1e-3f)
+        // Halftime → kick-off: YDS closes, the clock opens, the digits stay while it closes.
+        show(F.view())
+        assertEquals(StackedNflTransition.CLOSE, movesOf(Y).last().kind)
+        assertEquals(StackedNflTransition.OPEN, movesOf(StackedNflTrack.CLOCK).last().kind)
+        advance(100)
+        assertEquals("168", body().awayYds)
+        assertEquals("the opening clock's own texts", "Q4", body().periodText)
+        advance(1_000)
+        assertEquals(K.STACKED_NFL_W_MAX, f().boxW, 1e-3f)
+    }
+
+    /** §3.6, review S9: the field goal after an "icing" timeout is laid out on 396; the column closes at the release. */
+    @Test
+    fun aFieldGoalAfterATimeoutStaysPinnedAt396AndClosesTheColumnAtTheRelease() {
+        start()
+        show(yds(F.view(homeTimeouts = 1, timeout = bufMark), 142, 51))
+        advance(1_000)
+        assertEquals(K.STACKED_NFL_FOOTPRINT_W, f().boxW, 1e-3f)
+        val fg = app.thebox.core.sports.NflScore(NflScoreKind.FIELD_GOAL, 3, 27, 17)
+        show(F.view(away = 27, homeTimeouts = 1, seq = 1, side = Side.AWAY, scores = listOf(fg)))
+        advanceTakeoverTo(1_000f)
+        assertTrue(pinned())
+        assertEquals("pinned at 396", K.STACKED_NFL_FOOTPRINT_W, f().boxW, 1e-3f)
+        assertEquals("the takeover is laid out on 396", K.STACKED_NFL_FOOTPRINT_W, probe.begins.single().boxW, 1e-3f)
+        assertEquals("the full label at 396", NflBarKey(NflBarKind.SCORE, Side.AWAY, score = NflScoreKind.FIELD_GOAL, points = 3), barKey())
+        assertEquals("the pinned column keeps the last digits", "142", body().awayYds)
+        assertTrue("no YDS close while pinned", movesOf(Y).none { it.kind == StackedNflTransition.CLOSE })
+        assertTrue("the glow is baked for the 396 box: ${probe.glowBakes}", probe.glowBakes.any { it.first == K.STACKED_NFL_FOOTPRINT_W })
+        advanceTakeoverTo(K.NFL_TAKEOVER_MS + 32f)
+        assertFalse("released", pinned())
+        assertEquals(StackedNflTransition.CLOSE, movesOf(Y).last().kind)
+        advance(1_000)
+        assertEquals(K.STACKED_NFL_W_MAX, f().boxW, 1e-3f)
+    }
+
+    @Test
+    fun theFirstViewAtHalftimeSnapsTheColumnOpen() {
+        start(yds(F.halftime(), 168, 97))
+        assertTrue("rule 2: nothing animates in", movesOf(Y).isEmpty())
+        assertEquals(K.STACKED_ROWS_W + K.STACKED_NFL_YDS_W, f().boxW, 1e-3f)
+        assertEquals(1f, f().ydsAlpha, 0f)
+        assertEquals("168", body().awayYds)
+    }
+
+    @Test
+    fun theDescriptionCarriesTheYardsWhileTheColumnIsOpen() {
+        start(yds(F.view(homeTimeouts = 1, timeout = bufMark), 142, -2))
+        assertTrue(desc(), desc().endsWith("Timeouts left: Chiefs 3, Bills 1. Total yards: Chiefs 142, Bills −2"))
+        show(F.view())
+        assertFalse(desc(), desc().contains("Total yards"))
+        show(yds(F.view(flagId = "401873061503"), 142, 51))
+        assertFalse("never on the flag bar", desc().contains("Total yards"))
+    }
+
     private class FixedScale(override val scaleFactor: Float) : MotionDurationScale
 }
