@@ -363,11 +363,11 @@ class ScoreBugPlacementTest {
 
     @Test
     fun pillAndNflIgnoreTheStyle() {
-        assertEquals(Box(1491f, 56f, 1824f, 197f), ScoreBugPlacement.cornerBox(ScoreCorner.TOP_RIGHT, ScoreBugSize.STANDARD, League.NFL, NhlBugStyle.STACKED))
+        assertEquals(Box(1428f, 56f, 1824f, 197f), ScoreBugPlacement.cornerBox(ScoreCorner.TOP_RIGHT, ScoreBugSize.STANDARD, League.NFL, NhlBugStyle.STACKED))
         for (s in sizes) for (c in corners) {
             assertEquals(ScoreBugPlacement.cornerBox(c, s), ScoreBugPlacement.cornerBox(c, s, League.NHL, NhlBugStyle.PILL))
             // (NFL Stacked integration ruling 8) The NFL Pill ignores the style; NFL + STACKED has its own footprint
-            // (333 × 141 Standard, `NflStackedPlacementTest`), so only the Pill is the style-independent default.
+            // (396 × 141 Standard with the YDS column, `NflStackedPlacementTest`), so only the Pill is the style-independent default.
             assertEquals(ScoreBugPlacement.cornerBox(c, s, League.NFL), ScoreBugPlacement.cornerBox(c, s, League.NFL, NhlBugStyle.PILL), "NFL PILL")
             assertEquals(
                 ScoreBugPlacement.width(s, League.NFL, NhlBugStyle.STACKED),

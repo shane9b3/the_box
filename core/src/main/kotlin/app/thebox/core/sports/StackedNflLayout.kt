@@ -81,6 +81,12 @@ data class StackedNflTargets(
     val homeTimeouts: Int?,
     val timeoutSlots: Int,
     val burnSide: Side?,
+    /**
+     * (NFL YDS §2; trailing, defaulted) The YDS column is open: the view carries both teams' yards and is not a flag or
+     * a stale / waiting play state (the source attaches yards only to stoppage snapshots). WP-2 writes the rule in [of];
+     * until then it is always false (the column never opens).
+     */
+    val ydsOpen: Boolean = false,
 ) {
     companion object {
         /**

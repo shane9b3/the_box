@@ -7,10 +7,11 @@ import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 
 /**
- * docs/design/m6-nfl-stacked.md §5.1, §9.1 `NflStackedPlacementTest` (WP-2): the NFL Stacked footprint (333 × 141
- * Standard, 416.25 × 176.25 Large; RC6, no YDS column) at the four corners × two sizes, the drawn box's widths (333 in
- * play, 243 in breaks and at Final) with the rows never moving and the right corners mirrored, every SB §4.4 hide / lift
- * rule on the footprint, and the `glowAllowed` halo (M 74 / 76).
+ * docs/design/m6-nfl-stacked.md §5.1, §9.1 `NflStackedPlacementTest` (WP-2), updated for the YDS column
+ * (docs/design/m6-nfl-stacked-yds.md §3.2, foundation): the NFL Stacked footprint (396 × 141 Standard, 495 × 176.25
+ * Large) at the four corners × two sizes, the drawn box's widths (396 at a stoppage with yards, 333 in play, 306 / 243 in
+ * breaks and at Final with / without yards) with the rows never moving and the right corners mirrored, every SB §4.4
+ * hide / lift rule on the footprint, and the `glowAllowed` halo (M 74 / 76).
  */
 class NflStackedPlacementTest {
     private val geo = OverlayGeometryFixture.DESIGN
@@ -31,16 +32,22 @@ class NflStackedPlacementTest {
 
     private val play = SportsConstants.STACKED_ROWS_W + SportsConstants.STACKED_CLOCK_W
     private val brk = SportsConstants.STACKED_ROWS_W
+    private val stop = SportsConstants.STACKED_ROWS_W + SportsConstants.STACKED_NFL_YDS_W + SportsConstants.STACKED_CLOCK_W
+    private val brkYds = SportsConstants.STACKED_ROWS_W + SportsConstants.STACKED_NFL_YDS_W
+    private val widths = listOf(stop, play, brkYds, brk)
 
     @Test
     fun theFootprintIsTheDesignsNumbers() {
         assertEquals(333f, SportsConstants.STACKED_NFL_W_MAX)
         assertEquals(333f, play)
         assertEquals(243f, brk)
-        assertFalse(SportsConstants.STACKED_NFL_YDS_ENABLED, "RC6: the YDS column is not in the footprint")
-        assertEquals(333f, ScoreBugPlacement.width(ScoreBugSize.STANDARD, League.NFL, NhlBugStyle.STACKED))
+        assertEquals(396f, stop)
+        assertEquals(306f, brkYds)
+        assertTrue(SportsConstants.STACKED_NFL_YDS_ENABLED, "NFL YDS: the YDS column is in the footprint")
+        assertEquals(396f, SportsConstants.STACKED_NFL_FOOTPRINT_W)
+        assertEquals(396f, ScoreBugPlacement.width(ScoreBugSize.STANDARD, League.NFL, NhlBugStyle.STACKED))
         assertEquals(141f, ScoreBugPlacement.height(ScoreBugSize.STANDARD, League.NFL, NhlBugStyle.STACKED))
-        assertEquals(416.25f, ScoreBugPlacement.width(ScoreBugSize.LARGE, League.NFL, NhlBugStyle.STACKED))
+        assertEquals(495f, ScoreBugPlacement.width(ScoreBugSize.LARGE, League.NFL, NhlBugStyle.STACKED))
         assertEquals(176.25f, ScoreBugPlacement.height(ScoreBugSize.LARGE, League.NFL, NhlBugStyle.STACKED))
         // NFL + Pill keeps the Pill's 520 × 70 / 650 × 88 (§7: the same call and key).
         assertEquals(520f, ScoreBugPlacement.width(ScoreBugSize.STANDARD, League.NFL, NhlBugStyle.PILL))
@@ -56,14 +63,14 @@ class NflStackedPlacementTest {
         val std = ScoreBugSize.STANDARD
         val lg = ScoreBugSize.LARGE
         val want = mapOf(
-            (ScoreCorner.TOP_RIGHT to std) to Box(1491f, 56f, 1824f, 197f),
-            (ScoreCorner.TOP_RIGHT to lg) to Box(1407.75f, 56f, 1824f, 232.25f),
-            (ScoreCorner.TOP_LEFT to std) to Box(96f, 56f, 429f, 197f),
-            (ScoreCorner.TOP_LEFT to lg) to Box(96f, 56f, 512.25f, 232.25f),
-            (ScoreCorner.BOTTOM_RIGHT to std) to Box(1491f, 883f, 1824f, 1024f),
-            (ScoreCorner.BOTTOM_RIGHT to lg) to Box(1407.75f, 847.75f, 1824f, 1024f),
-            (ScoreCorner.BOTTOM_LEFT to std) to Box(96f, 883f, 429f, 1024f),
-            (ScoreCorner.BOTTOM_LEFT to lg) to Box(96f, 847.75f, 512.25f, 1024f),
+            (ScoreCorner.TOP_RIGHT to std) to Box(1428f, 56f, 1824f, 197f),
+            (ScoreCorner.TOP_RIGHT to lg) to Box(1329f, 56f, 1824f, 232.25f),
+            (ScoreCorner.TOP_LEFT to std) to Box(96f, 56f, 492f, 197f),
+            (ScoreCorner.TOP_LEFT to lg) to Box(96f, 56f, 591f, 232.25f),
+            (ScoreCorner.BOTTOM_RIGHT to std) to Box(1428f, 883f, 1824f, 1024f),
+            (ScoreCorner.BOTTOM_RIGHT to lg) to Box(1329f, 847.75f, 1824f, 1024f),
+            (ScoreCorner.BOTTOM_LEFT to std) to Box(96f, 883f, 492f, 1024f),
+            (ScoreCorner.BOTTOM_LEFT to lg) to Box(96f, 847.75f, 591f, 1024f),
         )
         for ((key, box) in want) {
             val (c, s) = key
@@ -80,7 +87,7 @@ class NflStackedPlacementTest {
     }
 
     @Test
-    fun theRowsNeverMoveAndTheBoxIs333InPlayAnd243InABreak() {
+    fun theRowsNeverMoveAtAnyOfTheFourBoxWidths() {
         // §5.1 "Rows": top right 1581–1824 (Large 1520.25–1824), top left 96–339 (Large 96–399.75).
         val tr = assertNotNull(ScoreBugPlacement.place(input(ScoreCorner.TOP_RIGHT), geo))
         assertEquals(Box(1581f, 56f, 1824f, 164f), ScoreBugPlacement.stackedRowsBox(tr, ScoreBugSize.STANDARD))
@@ -90,7 +97,10 @@ class NflStackedPlacementTest {
         assertEquals(Box(96f, 56f, 339f, 164f), ScoreBugPlacement.stackedRowsBox(tl, ScoreBugSize.STANDARD))
         val tlL = assertNotNull(ScoreBugPlacement.place(input(ScoreCorner.TOP_LEFT, ScoreBugSize.LARGE), geo))
         assertEquals(Box(96f, 56f, 399.75f, 191f), ScoreBugPlacement.stackedRowsBox(tlL, ScoreBugSize.LARGE))
-        // Top right Standard: 1491–1824 in play, 1581–1824 in a break; the bar below (164..197).
+        // Top right Standard: 1428–1824 at a stoppage with yards, 1491–1824 in play, 1518–1824 / 1581–1824 in a break with /
+        // without yards; the bar below (164..197).
+        assertEquals(Box(1428f, 56f, 1824f, 164f), ScoreBugPlacement.stackedTopBox(tr, ScoreBugSize.STANDARD, stop))
+        assertEquals(Box(1518f, 56f, 1824f, 164f), ScoreBugPlacement.stackedTopBox(tr, ScoreBugSize.STANDARD, brkYds))
         assertEquals(Box(1491f, 56f, 1824f, 164f), ScoreBugPlacement.stackedTopBox(tr, ScoreBugSize.STANDARD, play))
         assertEquals(Box(1581f, 56f, 1824f, 164f), ScoreBugPlacement.stackedTopBox(tr, ScoreBugSize.STANDARD, brk))
         // Bottom left Standard: the top part at the bottom, the bar above (883..916).
@@ -101,7 +111,7 @@ class NflStackedPlacementTest {
         for (c in corners) for (s in sizes) {
             val fp = assertNotNull(ScoreBugPlacement.place(input(c, s), geo))
             val rows = ScoreBugPlacement.stackedRowsBox(fp, s)
-            for (w in listOf(play, brk)) {
+            for (w in widths) {
                 val top = ScoreBugPlacement.stackedTopBox(fp, s, w)
                 assertEquals(w * k(s), top.r - top.l, 1e-3f, "$c $s $w")
                 assertEquals(108f * k(s), top.b - top.t, 1e-3f)
@@ -118,7 +128,7 @@ class NflStackedPlacementTest {
                 val lc = if (c == ScoreCorner.TOP_RIGHT) ScoreCorner.TOP_LEFT else ScoreCorner.BOTTOM_LEFT
                 val lfp = assertNotNull(ScoreBugPlacement.place(input(lc, s), geo))
                 assertEquals(Box(1920f - lfp.r, lfp.t, 1920f - lfp.l, lfp.b), fp, "$c $s footprint mirror")
-                for (w in listOf(play, brk)) {
+                for (w in widths) {
                     val l = ScoreBugPlacement.stackedTopBox(lfp, s, w)
                     assertEquals(Box(1920f - l.r, l.t, 1920f - l.l, l.b), ScoreBugPlacement.stackedTopBox(fp, s, w), "$c $s $w")
                 }
@@ -147,7 +157,7 @@ class NflStackedPlacementTest {
     )
 
     private fun expected(row: String, c: ScoreCorner, s: ScoreBugSize): Box? {
-        val w = 333f * k(s)
+        val w = 396f * k(s)
         val h = 141f * k(s)
         val l = if (left(c)) 96f else 1920f - 96f - w
         val top = Box(l, 56f, l + w, 56f + h)
@@ -155,7 +165,7 @@ class NflStackedPlacementTest {
         fun lifted(barTop: Float) = Box(l, barTop - 16f - h, l + w, barTop - 16f)
         return when (row) {
             "bare" -> rest
-            // The probing line (600..1320 × 72..128) clears both NFL Stacked top footprints (≤ 512.25 / ≥ 1407.75).
+            // The probing line (600..1320 × 72..128) clears both NFL Stacked top footprints (≤ 591 / ≥ 1329; NFL YDS §3.2).
             "probing" -> rest
             "passive" -> if (bottom(c)) null else rest
             "userBar" -> if (bottom(c)) lifted(820f) else rest
@@ -184,7 +194,7 @@ class NflStackedPlacementTest {
         assertEquals(936f, assertNotNull(ScoreBugPlacement.place(input(ScoreCorner.BOTTOM_RIGHT).copy(bar = BottomBar.QUICK), geo)).b)
         // Subtitles move a bottom corner to the top: its bar then drops downwards (ST S11); lifted keeps it above.
         val moved = assertNotNull(ScoreBugPlacement.place(input(ScoreCorner.BOTTOM_RIGHT).copy(textTrackOn = true), geo))
-        assertEquals(Box(1491f, 56f, 1824f, 197f), moved)
+        assertEquals(Box(1428f, 56f, 1824f, 197f), moved)
         assertFalse(ScoreBugPlacement.stackedBarUp(moved))
         assertTrue(ScoreBugPlacement.stackedMirrored(moved))
         val lifted = assertNotNull(ScoreBugPlacement.place(input(ScoreCorner.BOTTOM_LEFT).copy(bar = BottomBar.USER_BAR), geo))
@@ -201,23 +211,23 @@ class NflStackedPlacementTest {
     fun theGlowHaloIsTheFootprintInflatedByM() {
         assertEquals(74f, margin(ScoreBugSize.STANDARD))
         assertEquals(76f, margin(ScoreBugSize.LARGE))
-        // §5.1: top right Standard (1417, −18)–(1898, 271); Large (1331.75, −20)–(1900, 308.25).
+        // NFL YDS §3.2: top right Standard (1354, −18)–(1898, 271); Large (1253, −20)–(1900, 308.25).
         val tr = assertNotNull(ScoreBugPlacement.place(input(ScoreCorner.TOP_RIGHT), geo))
         val m = margin(ScoreBugSize.STANDARD)
-        assertEquals(Box(1417f, -18f, 1898f, 271f), Box(tr.l - m, tr.t - m, tr.r + m, tr.b + m))
+        assertEquals(Box(1354f, -18f, 1898f, 271f), Box(tr.l - m, tr.t - m, tr.r + m, tr.b + m))
         val trL = assertNotNull(ScoreBugPlacement.place(input(ScoreCorner.TOP_RIGHT, ScoreBugSize.LARGE), geo))
         val mL = margin(ScoreBugSize.LARGE)
-        assertEquals(Box(1331.75f, -20f, 1900f, 308.25f), Box(trL.l - mL, trL.t - mL, trL.r + mL, trL.b + mL))
-        // §4.5: the leaf layer = footprint + 2 M: 481 × 289 Standard, 568.25 × 328.25 Large.
-        assertEquals(481f, tr.r - tr.l + 2 * m); assertEquals(289f, tr.b - tr.t + 2 * m)
-        assertEquals(568.25f, trL.r - trL.l + 2 * mL); assertEquals(328.25f, trL.b - trL.t + 2 * mL)
+        assertEquals(Box(1253f, -20f, 1900f, 308.25f), Box(trL.l - mL, trL.t - mL, trL.r + mL, trL.b + mL))
+        // §4.5 (NFL YDS §3.2): the leaf layer = footprint + 2 M: 544 × 289 Standard, 647 × 328.25 Large.
+        assertEquals(544f, tr.r - tr.l + 2 * m); assertEquals(289f, tr.b - tr.t + 2 * m)
+        assertEquals(647f, trL.r - trL.l + 2 * mL); assertEquals(328.25f, trL.b - trL.t + 2 * mL)
         // An overlay one pixel inside the halo stops the glow; at the halo's edge it does not.
         val i = input(ScoreCorner.TOP_RIGHT).copy(stats = true)
-        assertEquals(false, glow(i, geo.copy(stats = Box(1000f, 56f, 1418f, 300f))))
-        assertEquals(true, glow(i, geo.copy(stats = Box(1000f, 56f, 1417f, 300f))))
+        assertEquals(false, glow(i, geo.copy(stats = Box(1000f, 56f, 1355f, 300f))))
+        assertEquals(true, glow(i, geo.copy(stats = Box(1000f, 56f, 1354f, 300f))))
         val l = input(ScoreCorner.TOP_RIGHT, ScoreBugSize.LARGE).copy(stats = true)
-        assertEquals(false, glow(l, geo.copy(stats = Box(1000f, 56f, 1332.75f, 300f))))
-        assertEquals(true, glow(l, geo.copy(stats = Box(1000f, 56f, 1331.75f, 300f))))
+        assertEquals(false, glow(l, geo.copy(stats = Box(1000f, 56f, 1254f, 300f))))
+        assertEquals(true, glow(l, geo.copy(stats = Box(1000f, 56f, 1253f, 300f))))
         for (c in corners) for (s in sizes) {
             assertEquals(true, glow(input(c, s)), "bare $c $s")
             for (bar in listOf(BottomBar.USER_BAR, BottomBar.QUICK)) {
@@ -248,7 +258,7 @@ class NflStackedPlacementTest {
                 }
                 assertTrue(active.none { it.intersects(box) }, "$c $s $bar $mask")
                 assertTrue(box.l >= 96f && box.r <= 1824f && box.t >= 56f && box.b <= 1024f, "$box")
-                assertEquals(333f * k(s), box.r - box.l, 1e-3f)
+                assertEquals(396f * k(s), box.r - box.l, 1e-3f)
             }
         }
     }

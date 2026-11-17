@@ -36,6 +36,7 @@ const val STACKED_NFL_LAYER_TAG = "score_bug_stacked_nfl_layer"
  * - [columnDim]: the clock column at `STACKED_DIM_ALPHA`.
  * - [targets]: the view's `StackedNflTargets.of(v)`, the layout this body belongs to (the pips' counts and slots, the
  *   possession side, the bar key).
+ * - [awayYds] / [homeYds]: the YDS column's digits (NFL YDS §3.7).
  * - [slotBreak] / [slotDy1] / [slotDy2]: a two-line [slotText] ("No" / "update"): the space it breaks at (−1 = one line)
  *   and the two baselines relative to the lower slot's centre (design px), as `StackedFrameState`.
  */
@@ -55,6 +56,12 @@ internal class StackedNflFrameState(
     val slotBreak: Int = -1,
     val slotDy1: Float = 0f,
     val slotDy2: Float = 0f,
+    /**
+     * (NFL YDS §3.7; trailing) The YDS column's digits for each row (`NflYards.text`: "142", "−2"; "" = none), filled by
+     * [StackedNflPainter.frame] from `NflView.awayYards` / `homeYards` (WP-2). `NflBodyMerge` carries them (review S6).
+     */
+    val awayYds: String = "",
+    val homeYds: String = "",
 )
 
 /**

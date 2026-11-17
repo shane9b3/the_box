@@ -159,6 +159,12 @@ sealed interface LeagueDetail {
         val lastPlay: NflLastPlay?,
         val awayTimeouts: Int? = null,
         val homeTimeouts: Int? = null,
+        /**
+         * (NFL YDS §1.4; trailing, defaulted) Team total yards (−99..999), both or neither. Never set by `EspnMapper`
+         * (the scoreboard has none): `EspnScoreSource` attaches them to a stoppage snapshot (`NflYards.stoppageKey`).
+         */
+        val awayYards: Int? = null,
+        val homeYards: Int? = null,
     ) : LeagueDetail
 }
 
@@ -233,6 +239,11 @@ sealed interface Fetch<out T> {
         val ageS: Int,
         val maxAgeS: Int? = null,
         val wireBytes: Long? = null,
+        /**
+         * (NFL YDS §1.10; trailing) Time the source spent on side requests in this answer (the NFL yards), excluded from
+         * the meter's work sample. [wireBytes] stays the main body only.
+         */
+        val sideMs: Long = 0L,
     ) : Fetch<T>
     /** A 404 with a JSON or empty body (an HTML 404 is `Failed(HTTP_OTHER)`, A-S12). */
     data object NotFound : Fetch<Nothing>
@@ -269,6 +280,16 @@ interface ScoreSource {
      * not a sample of either window.
      */
     fun followEndpoint(id: GameId): String? = league.name.lowercase()
+
+    /** (NFL YDS §1.4, additive) [game] with [extras]; the default ignores them. */
+    suspend fun game(id: GameId, startUtcMs: Long?, extras: FollowExtras): Fetch<GameSnapshot> = game(id, startUtcMs)
+}
+
+/** (NFL YDS §1.4) What a follow poll may also fetch. A source ignores what it does not support. */
+data class FollowExtras(val nflYards: Boolean = false) {
+    companion object {
+        val NONE = FollowExtras()
+    }
 }
 
 // ------------------------------------------------------------------ §2.3 demand
@@ -471,6 +492,12 @@ data class NflView(
      * possession, S-D10) still names the yard line by its territory ("same words"); null otherwise.
      */
     val field: FieldPos? = null,
+    /**
+     * (NFL YDS §1.11; trailing, Stacked only, the Pill never reads them) The view's own entry's team yards
+     * (`LeagueDetail.Nfl.awayYards` / `homeYards`), both or neither; null otherwise.
+     */
+    val awayYards: Int? = null,
+    val homeYards: Int? = null,
 )
 
 /**
