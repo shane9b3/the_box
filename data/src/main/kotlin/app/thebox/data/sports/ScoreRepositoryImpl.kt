@@ -13,11 +13,13 @@ import app.thebox.core.sports.DemandOwner
 import app.thebox.core.sports.DeviceAwake
 import app.thebox.core.sports.FailKind
 import app.thebox.core.sports.Fetch
+import app.thebox.core.sports.FollowExtras
 import app.thebox.core.sports.FollowedGame
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.League
 import app.thebox.core.sports.LeagueGroup
+import app.thebox.core.sports.NhlBugStyle
 import app.thebox.core.sports.PollTiming
 import app.thebox.core.sports.group
 import app.thebox.core.sports.timing
@@ -371,7 +373,7 @@ class ScoreRepositoryImpl internal constructor(
             if (machine.pollDue() && game != null && followDemand != Demand.NONE && isOnline) {
                 val source = sourceOf(game.league)
                 val t0 = mono.nowMs()
-                val f = source?.game(game.id, game.startUtcMs) ?: unboundFailure()
+                val f = source?.game(game.id, game.startUtcMs, followExtras(game)) ?: unboundFailure()
                 machine.fetched(f)
                 // (CHL integration, L10) The follow's last failure, for the card and the sheet; an answer clears it.
                 _followFailure.value = (f as? Fetch.Failed)?.kind
@@ -380,7 +382,8 @@ class ScoreRepositoryImpl internal constructor(
                 // (Update interval §3.2, review S6) The work the bug needs: fetch, decode, map, the machine and its view.
                 // The day list (fetchDay, below) is never inside a sample.
                 machine.view()
-                val workMs = mono.nowMs() - t0
+                // (NFL YDS §1.10) The yards step's time is a side request: never part of the work sample.
+                val workMs = mono.nowMs() - t0 - ((f as? Fetch.Ok)?.sideMs ?: 0L).coerceAtLeast(0L)
                 lastStepAt = mono.nowMs()
                 if (source != null) measure(game, source.followEndpoint(game.id), f, workMs)
             }
@@ -388,6 +391,16 @@ class ScoreRepositoryImpl internal constructor(
             publish()
         }
     }
+
+    /**
+     * (NFL YDS §1.9) What this follow poll may also fetch: the NFL yards only while the Stacked NFL bug can be seen (an NFL
+     * follow, Style Stacked, demand SEEN with the full-screen player showing the follow). The Pill, the Sports tab and the
+     * picker never fetch them.
+     */
+    private fun followExtras(game: FollowedGame): FollowExtras = FollowExtras(
+        nflYards = SportsConstants.STACKED_NFL_YDS_ENABLED && game.league == League.NFL &&
+            sports.nhlStyle == NhlBugStyle.STACKED && followDemand == Demand.SEEN && DemandOwner.FULL_WITH_FOLLOW in owners,
+    )
 
     // ---- inputs
 

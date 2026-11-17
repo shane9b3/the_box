@@ -802,6 +802,9 @@ class ScoreBugMachine(
             (toGroup ?: 0) >= OT_GROUP -> maxOf(slotsAway ?: 0, slotsHome ?: 0)
             else -> SportsConstants.NFL_TIMEOUTS_MAX
         }
+        // (NFL YDS §1.11) The view's own entry's yards, both or neither, in every NFL view (fresh, stale, waiting); no hold
+        // across snapshots. The source attaches them only to stoppage snapshots, so they ride that snapshot's Delay.
+        val yd = d?.takeIf { it.awayYards != null && it.homeYards != null }
         return ScoreBugView(
             s.away, s.home, top, bottom, dim = waiting || stale, goalSeq = goalSeq, goalSide = goal, clockSecs = clockSecs,
             gameId = game?.id,
@@ -818,6 +821,8 @@ class ScoreBugMachine(
                 flagId = flagId.takeIf { marks && flagUntil?.let { now < it } == true },
                 heldDown = if (drawn) nflHeldDown else null,
                 field = if (drawn) nflField else null,
+                awayYards = yd?.awayYards,
+                homeYards = yd?.homeYards,
             ),
         )
     }
