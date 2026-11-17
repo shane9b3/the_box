@@ -46,7 +46,7 @@ class StackedNflGeometryTest {
         near(m.STRIPE_W * s, K.STACKED_NFL_STRIPE_W, "stripe"); near(m.POSS_STRIPE_W * s, K.STACKED_NFL_POSS_STRIPE_W, "poss stripe")
         near(m.LOGO_ML * s, K.STACKED_NFL_LOGO_ML, "logo ml"); near(m.LOGO_SLOT_W * s, K.STACKED_NFL_LOGO_SLOT_W, "logo slot")
         near((m.LOGO_ML + m.LOGO_SLOT_W + m.CENTRE_PL) * s, K.STACKED_NFL_CODE_DX, "code dx")
-        near(m.CODE_PX * s, K.STACKED_NFL_CODE_PX, "code px"); near(m.BALL * s, K.STACKED_NFL_BALL, "ball"); near(m.BALL_GAP * s, K.STACKED_NFL_BALL_GAP, "ball gap")
+        near(m.CODE_PX * s, K.STACKED_NFL_CODE_PX, "code px"); near(21.0, K.STACKED_NFL_BALL, "ball raised from the mock's 30 × .45 = 13.5 (owner 2026-11-16)"); near(m.BALL_GAP * s, K.STACKED_NFL_BALL_GAP, "ball gap")
         near(m.PIP_W * s, K.STACKED_NFL_PIP_W, "pip w"); near(m.PIP_GAP * s, K.STACKED_NFL_PIP_GAP, "pip gap"); near(m.PIP_R * s, K.STACKED_NFL_PIP_R, "pip r")
         near(3.0, K.STACKED_NFL_PIP_H, "pip h raised (S-D12)")
         near((120 - 70) / 2.0 * s, K.STACKED_NFL_CODE_TOP, "code top")
@@ -69,7 +69,8 @@ class StackedNflGeometryTest {
         near(m.BLOCK_GAP * s, K.STACKED_NFL_BLOCK_GAP, "block gap")
         near(110 * s, K.STACKED_NFL_STREAK1_W, "streak 1"); near(40 * s, K.STACKED_NFL_STREAK2_W, "streak 2"); near(40 * s, K.STACKED_NFL_STREAK_OVERHANG, "streak overhang")
         assertEquals(8f, K.STACKED_TAKEOVER_PAD_TIGHT)
-        near(17.1, G.BALL_TOP, "ball centred on the code line")
+        near(13.35, G.BALL_TOP, "ball centred on the code line (17.1 with the old 13.5)")
+        assertTrue(G.BALL_TOP + K.STACKED_NFL_BALL < K.STACKED_NFL_PIP_TOP, "the ball's box (34.35) ends above the pips (40.05)")
     }
 
     // ------------------------------------------------------------------ the mirror
@@ -165,11 +166,11 @@ class StackedNflGeometryTest {
 
     @Test
     fun theLeftCornerPositionsAreTheDesigns() {
-        // §5.2: code at 78.3 / 81.0; WSH ends at 143.7; ball 149.1–162.6 with the possession stripe; pips at 81.0 + 12.6 i.
+        // §5.2: code at 78.3 / 81.0; WSH ends at 143.7; ball 149.1–170.1 (21, owner 2026-11-16) with the possession stripe; pips at 81.0 + 12.6 i.
         near(78.3, G.codeX(G.stripeW(0f)), "code narrow"); near(81.0, G.codeX(G.stripeW(1f)), "code wide")
         near(62.7, codeW("WSH"), "WSH", 0.05); near(31.3, codeW("SF"), "SF", 0.6)
         val cx = G.codeX(G.stripeW(1f))
-        near(162.6, G.ballX(cx, codeW("WSH")) + K.STACKED_NFL_BALL, "ball end with WSH", 0.05)
+        near(170.1, G.ballX(cx, codeW("WSH")) + K.STACKED_NFL_BALL, "ball end with WSH", 0.05)
         near(81.0 + 2 * 12.6 + 9.9, G.pipX(cx, 2) + K.STACKED_NFL_PIP_W, "last pip end")
         assertTrue(K.STACKED_NFL_PIP_TOP + K.STACKED_NFL_PIP_H <= StackedNflMock.CODE_PX * 0 + 54f, "pips end above the 54 row")
         near(43.05, K.STACKED_NFL_PIP_TOP + K.STACKED_NFL_PIP_H, "pip bottom")
@@ -366,9 +367,9 @@ class StackedNflGeometryTest {
                 near(-(scoreL - ballEnd).toDouble(), m, "$code mirrored gap is the reflection")
             }
         }
-        // §5.2's narrowest: WSH, 23.9 to "88" (186.5).
+        // §5.2's narrowest: WSH, 16.4 to "88" (186.5) with the 21 ball (23.9 with the old 13.5).
         val wsh = G.SCORE_RIGHT - bold.width("88", K.STACKED_NFL_SCORE_PX, tnum = true) - (G.ballX(81f, codeW("WSH")) + K.STACKED_NFL_BALL)
-        near(23.9, wsh, "WSH gap", 0.05)
+        near(16.4, wsh, "WSH gap", 0.05)
         // A 4-letter code steps down by 2 px to 18, never ellipsised; null only past 18.
         val four = G.codePx(1f) { px -> bold.width("WWWW", px, 0.01f) }
         assertTrue(four == null || four < K.STACKED_NFL_CODE_PX, "WWWW $four")
