@@ -126,6 +126,9 @@ internal object StackedNflTestKit {
     fun staleInBreak() = view(top = CentreText.NoUpdate, bottom = null, dim = true, down = null, tab = null)
     fun delayedInBreak() = view(top = CentreText.Delayed, bottom = null, dim = true, down = null, tab = null)
 
+    /** (NFL YDS) [v] carrying both teams' total yards, as the machine shows a stoppage snapshot's (`NflView`). */
+    fun yds(v: ScoreBugView, away: Int, home: Int): ScoreBugView = v.copy(nfl = v.nfl!!.copy(awayYards = away, homeYards = home))
+
     /** The real layout table. */
     fun targets(v: ScoreBugView): StackedNflTargets = StackedNflTargets.of(v)
 
@@ -149,6 +152,8 @@ internal object StackedNflTestKit {
         StackedNflTimeline.samplePips(Side.AWAY, still, a, a, 0f, from, out)
         StackedNflTimeline.samplePips(Side.HOME, still, h, h, 0f, from, out)
         StackedNflTimeline.sampleFlag(0f, true, out)
+        // (NFL YDS) The column at rest; closed (every v1 look) it is exactly the frame's defaults.
+        StackedNflTimeline.sample(StackedNflTrack.YDS, still, 0f, from, t.ydsOpen, out)
         return out
     }
 
@@ -212,6 +217,9 @@ internal object StackedNflTestKit {
 
     /** The lead's contact-sheet folder for the integration pass (outside the repo); created on demand. */
     val SHEETS = File("/private/tmp/claude-501/-Users-shawnjohnson-Projects-The-Box/dedf5c50-b6f4-4a8c-a23c-fadfe67ec05f/scratchpad/nfl-stacked/fix")
+
+    /** (NFL YDS WP-2) The YDS column's contact sheets and strips for the lead and the owner (outside the repo). */
+    val YDS_SHEETS = File("/private/tmp/claude-501/-Users-shawnjohnson-Projects-The-Box/dedf5c50-b6f4-4a8c-a23c-fadfe67ec05f/scratchpad/yds-shots")
 
     fun near(a: Int, b: Int, tol: Int) =
         abs(Color.red(a) - Color.red(b)) <= tol && abs(Color.green(a) - Color.green(b)) <= tol && abs(Color.blue(a) - Color.blue(b)) <= tol

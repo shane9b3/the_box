@@ -119,6 +119,69 @@ class StackedNflPainterAllocationTest {
         }
     }
 
+    /**
+     * (NFL YDS §3.7, §4.3) The YDS column allocates nothing per frame: open (396, timeout bar), opening (the width and
+     * the contents' fade and slide in), closing, and in a break (306) with the clock folding; both mirror states, both
+     * sizes, with the takeover pinned at 396 over it.
+     */
+    @Test
+    fun drawFrameWithTheYdsColumnAllocatesNothing() {
+        for (large in listOf(false, true)) {
+            val s = if (large) K.SCORE_LARGE_SCALE else 1f
+            val m = if (large) K.GOAL_LAYER_MARGIN_LARGE else K.GOAL_LAYER_MARGIN
+            val bmp = Bitmap.createBitmap(Math.round(K.STACKED_NFL_FOOTPRINT_W * s + 2 * m), Math.round((K.STACKED_H + K.STACKED_BAR_H) * s + 2 * m), Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp).apply { translate(m + (K.STACKED_NFL_FOOTPRINT_W - K.STACKED_ROWS_W) * s, m) }
+            val p = StackedNflPainter(s, large, bold, italic)
+            val shadow = p.bakeShadow()
+            val sp = StackedNflScorePainter(s, large, barlow, bold, kit.SPEC)
+            val pair = kit.pair("KC", "BUF")
+            val logo = kit.logo("KC", Math.round(58.5f * s))
+            sp.begin(Side.AWAY, listOf(NflScore(NflScoreKind.FIELD_GOAL, 3, 27, 17)), pair.away.goal, logo, "KC", "BUF", K.STACKED_NFL_FOOTPRINT_W)
+            val glow = sp.bakeGlow(K.STACKED_NFL_FOOTPRINT_W, K.STACKED_H + K.STACKED_BAR_H)
+            val timeout = kit.yds(kit.view(homeTimeouts = 1, timeout = NflTimeoutMark(Side.HOME, 1, confirmed = true)), 142, -2)
+            val half = kit.yds(kit.halftime(), 389, 312)
+            val tg = kit.targets(timeout)
+            val hg = kit.targets(half)
+            val open = kit.rest(tg)
+            val closed = kit.rest(tg).also { kit.at(it, StackedNflTrack.YDS, StackedNflTransition.STILL, 0f, app.thebox.core.sports.StackedNflFrame(), to = false) }
+            val frames = Array(300) { i ->
+                when (i % 4) {
+                    0 -> kit.at(kit.rest(tg), StackedNflTrack.YDS, StackedNflTransition.OPEN, (i * 2.2f) % 650f, closed)
+                    1 -> kit.at(kit.rest(tg), StackedNflTrack.YDS, StackedNflTransition.CLOSE, (i * 2.2f) % 650f, open, to = false)
+                    2 -> kit.rest(tg)
+                    else -> kit.at(kit.rest(hg), StackedNflTrack.CLOCK, StackedNflTransition.CLOSE, (i * 1.5f) % 450f, open, to = false)
+                }
+            }
+            val states = arrayOf(kit.state(p, timeout, res), kit.state(p, half, res))
+            val bar = NflBarContent().also { p.fillBar(it, tg.bar!!, pair, "KC", "BUF", res) }
+            val scores = Array(300) { kit.score(it * 16f, NflScoreKind.FIELD_GOAL) }
+            val a = StackedNflDrawArgs().apply { colours = pair; awayLogo = logo; homeLogo = kit.logo("BUF", Math.round(58.5f * s)); this.shadow = shadow }
+            for (mirrored in listOf(false, true)) for (up in listOf(false, true)) {
+                a.mirrored = mirrored
+                a.up = up
+                a.takeover = null; a.glow = null; a.glowOn = false
+                val plain = allocated {
+                    for (i in frames.indices) {
+                        a.state = states[if (i % 4 == 3) 1 else 0]; a.frame = frames[i]; a.bar = bar; a.barPrev = null
+                        a.score = null; a.takeoverOn = false
+                        p.drawFrame(canvas, a)
+                    }
+                }
+                a.takeover = sp; a.glow = glow; a.glowOn = true
+                val takeover = allocated {
+                    for (i in frames.indices) {
+                        a.state = states[0]; a.frame = open; a.bar = bar; a.barPrev = null
+                        a.score = scores[i]; a.scoreSide = Side.AWAY; a.takeoverOn = true
+                        p.drawFrame(canvas, a)
+                    }
+                }
+                println("StackedNflPainter.drawFrame YDS × 300 ${if (large) "Large" else "Std"} m=$mirrored up=$up: plain $plain B, takeover $takeover B")
+                assertTrue("yds plain: $plain B", plain < LIMIT)
+                assertTrue("yds takeover: $takeover B", takeover < LIMIT)
+            }
+        }
+    }
+
     private companion object {
         /** The pill's own bound for 300 frames (GA §8.3), best effort under Robolectric. */
         const val LIMIT = 4_096L

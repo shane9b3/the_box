@@ -94,7 +94,14 @@ class StackedNflEndToEndTest {
     private var wall0 = 0L
     private lateinit var m: ScoreBugMachine
 
-    private fun push() { repo.bug.value = m.view() }
+    /**
+     * (NFL YDS) Identity except in the yards case: the machine's `NflView` yards are WP-1's (§1.11), built in parallel;
+     * until they land the case fills a stoppage view's yards from its snapshot here. With WP-1 the view already carries
+     * them and this is a no-op.
+     */
+    private var yardsShim: (app.thebox.core.sports.ScoreBugView) -> app.thebox.core.sports.ScoreBugView = { it }
+
+    private fun push() { repo.bug.value = m.view()?.let(yardsShim) }
 
     private fun follow(first: GameSnapshot, delaySec: Int = 0) {
         wall0 = first.startUtcMs + 30 * 60_000L
@@ -629,6 +636,70 @@ class StackedNflEndToEndTest {
             assertTrue(args().takeoverOn)
             advanceTakeoverTo(4_700f); advance(500)
         }
+    }
+
+    // ------------------------------------------------------------------ NFL YDS (docs/design/m6-nfl-stacked-yds.md §4.3)
+
+    /**
+     * (NFL YDS §4.3, one case) The live type-21 fixture with both teams' yards on its snapshot (as the source attaches
+     * them, `LeagueDetail.Nfl.awayYards` / `homeYards`) through the real machine, runner and painters: the 396 box with
+     * the digits drawn between the rows and the clock (mirrored, top right); the next play closes it to 333 by 650 ms.
+     * Its layer is sized from `STACKED_NFL_FOOTPRINT_W` (N2; [render] stays the v1 one).
+     */
+    @Test
+    fun aTeamTimeoutWithYardsOpensThe396BoxAndTheNextPlayClosesIt() {
+        fun withYards(s: GameSnapshot) = s.copy(detail = (s.detail as app.thebox.core.sports.LeagueDetail.Nfl).copy(awayYards = 142, homeYards = -2))
+        yardsShim = { v ->
+            val n = v.nfl
+            if (n != null && n.timeout != null && n.awayYards == null) v.copy(nfl = n.copy(awayYards = 142, homeYards = -2)) else v
+        }
+        start(fx("scoreboard-live-clock-lag-a"))
+        assertEquals(K.STACKED_NFL_W_MAX, f().boxW, 1e-3f)
+        poll(withYards(fx("scoreboard-live-team-timeout-type21")))
+        assertEquals("TIMEOUT LAR | 2 LEFT", words())
+        assertTrue("the YDS track opened", movesOf(StackedNflTrack.YDS).any { it.kind == StackedNflTransition.OPEN })
+        advance(700)
+        assertEquals("rows + YDS + clock", K.STACKED_NFL_FOOTPRINT_W, f().boxW, 1e-3f)
+        assertEquals("142" to "−2", args().state!!.awayYds to args().state!!.homeYds)
+        val shot = renderFootprint()
+        save("yds-timeout-type21", shot)
+        assertTrue("mirrored", args().mirrored)
+        // Mirrored: the column is just left of the rows (x −63..0), the digits white on the box fill.
+        fun bright(x0: Float, x1: Float, y0: Float, y1: Float): Int {
+            var n = 0
+            for (y in (shot.oy + y0 * shot.k).toInt() until (shot.oy + y1 * shot.k).toInt()) for (x in (shot.ox + x0 * shot.k).toInt() until (shot.ox + x1 * shot.k).toInt()) {
+                val p = shot.bmp.getPixel(x, y)
+                if (Color.red(p) > 200 && Color.green(p) > 200 && Color.blue(p) > 200) n++
+            }
+            return n
+        }
+        assertTrue("the away row's digits", bright(-59f, -4f, 14f, 40f) > 20)
+        assertTrue("the home row's digits", bright(-59f, -4f, 68f, 94f) > 20)
+        assertTrue("the clock after the column", bright(-149f, -67f, K.STACKED_NFL_PERIOD_SLOT_H + 4f, K.STACKED_H - 4f) > 20)
+        assertTrue(rule.onNodeWithTag(SCORE_BUG_TAG).fetchSemanticsNode().config[SemanticsProperties.ContentDescription].joinToString()
+            .contains("Total yards"))
+        poll(fx("scoreboard-live-after-timeout"), gapMs = 5_000)
+        assertEquals(NflBarKind.PLAY, barKey()!!.kind)
+        assertEquals(StackedNflTransition.CLOSE, movesOf(StackedNflTrack.YDS).last().kind)
+        advance(650)
+        assertEquals("closed by 650 ms", K.STACKED_NFL_W_MAX, f().boxW, 1e-3f)
+        save("yds-after-timeout", renderFootprint())
+    }
+
+    /** As [render], into a layer sized from the YDS footprint (`STACKED_NFL_FOOTPRINT_W` + 2 M). */
+    private fun renderFootprint(): Shot {
+        val large = placement.size == ScoreBugSize.LARGE
+        val k = if (large) K.SCORE_LARGE_SCALE else 1f
+        val mg = if (large) K.GOAL_LAYER_MARGIN_LARGE else K.GOAL_LAYER_MARGIN
+        val bmp = Bitmap.createBitmap(Math.round(K.STACKED_NFL_FOOTPRINT_W * k + 2 * mg), Math.round((K.STACKED_H + K.STACKED_BAR_H) * k + 2 * mg), Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.drawColor(Color.rgb(20, 22, 28))
+        val a = args()
+        val ox = mg + if (a.mirrored) (K.STACKED_NFL_FOOTPRINT_W - K.STACKED_ROWS_W) * k else 0f
+        val oy = mg + if (a.up) K.STACKED_BAR_H * k else 0f
+        c.translate(ox, oy)
+        probe.draw!!(c)
+        return Shot(bmp, ox, oy, k)
     }
 
     private companion object {
