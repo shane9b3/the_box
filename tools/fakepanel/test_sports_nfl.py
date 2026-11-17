@@ -9,6 +9,7 @@ import os
 import struct
 import sys
 import unittest
+import urllib.error
 import urllib.request
 import zlib
 
@@ -194,105 +195,15 @@ class TestTimeline(NflCase):
         self.assertNotIn("situation", self.comp(e))
         self.assertTrue(all(isinstance(c["score"], str) for c in self.comp(e)["competitors"]))
 
-    def test_the_total_is_985_s_and_every_window_is_25_s_or_more_but_the_one_10_s_window(self):
+    def test_the_total_is_985_s_and_every_window_is_25_s_or_more_but_the_short_ones(self):
         lens = [w["len"] for w in sports_nfl.W if w["len"] is not None]
         self.assertEqual(985, sum(lens))
         self.assertEqual(sports_nfl.TIMELINE_DEFAULT_S, 985)
         short = [w["label"] for w in sports_nfl.W if w["len"] is not None and w["len"] < 25]
-        self.assertEqual(["q1 score before the play (10 s)"], short)
-        self.assertEqual(10, sports_nfl.W[[w["label"] for w in sports_nfl.W].index(short[0])]["len"])
+        # the S1 split (yards design 1.12): "end 1st" / "end 3rd" are 10 s, each followed by a 15 s change of ends
+        self.assertEqual(["q1 score before the play (10 s)", "end 1st", "q2 change of ends", "end 3rd", "q4 change of ends"], short)
+        self.assertEqual([10, 10, 15, 10, 15], [w["len"] for w in sports_nfl.W if w["label"] in short])
 
-    def test_coin_toss_then_kickoff_without_possession_then_with(self):
-        e = self.at("q1 coin toss", 1)
-        s = self.comp(e)["situation"]
-        self.assertEqual(0, s["down"])
-        self.assertEqual("70", s["lastPlay"]["type"]["id"])
-        self.assertNotIn("possession", s)
-        e = self.at("q1 kick-off, no possession", 1)
-        s = self.comp(e)["situation"]
-        self.assertEqual("1st & 10", s["shortDownDistanceText"])
-        self.assertEqual("KC 25", s["possessionText"])
-        self.assertNotIn("possession", s)
-        self.assertEqual("53", s["lastPlay"]["type"]["id"])
-        self.assertEqual("12", s["lastPlay"]["team"]["id"])
-        e = self.at("q1 KC ball", 1)
-        self.assertEqual("12", self.comp(e)["situation"]["possession"])
-
-    def test_yard_line_is_home_relative(self):
-        s = self.comp(self.at("q1 KC ball", 1))["situation"]
-        self.assertEqual(75, s["yardLine"])  # KC's own 25 is 75 yards from BUF's goal line
-        s = self.comp(self.at("q1 3rd and 2, OPP 38", 1))["situation"]
-        self.assertEqual((38, "BUF 38", 2), (s["yardLine"], s["possessionText"], s["distance"]))
-        s = self.comp(self.at("q1 BUF 2nd and 7", 1))["situation"]
-        self.assertEqual((28, "BUF 28"), (s["yardLine"], s["possessionText"]))
-        s = self.comp(self.at("q1 extra point, KC kick-off", 1))["situation"]
-        self.assertEqual((65, -1, 0), (s["yardLine"], s["down"], s["distance"]))  # KC kicks from KC 35
-
-    def test_red_zone_goal_to_go_and_the_ten_second_stale_window(self):
-        s = self.comp(self.at("q1 1st and goal, red zone", 1))["situation"]
-        self.assertTrue(s["isRedZone"])
-        self.assertEqual("1st & Goal", s["shortDownDistanceText"])
-        e = self.at("q1 score before the play (10 s)", 1)
-        self.assertEqual({"away": "6", "home": "0"}, self.score(e))
-        stale = self.comp(e)["situation"]
-        self.assertEqual("1st & Goal", stale["shortDownDistanceText"], "the situation is still the previous window's")
-        self.assertEqual(10, sports_nfl.W[[w["label"] for w in sports_nfl.W].index("q1 score before the play (10 s)")]["len"])
-
-    def test_try_extra_point_and_kickoff_bodies(self):
-        e = self.at("q1 try", 1)
-        s = self.comp(e)["situation"]
-        self.assertEqual((-1, 10, True), (s["down"], s["distance"], s["isRedZone"]))
-        self.assertNotIn("possession", s)
-        self.assertEqual((67, 6), (int(s["lastPlay"]["type"]["id"]), s["lastPlay"]["scoreValue"]))
-        e = self.at("q1 extra point, KC kick-off", 1)
-        self.assertEqual({"away": "7", "home": "0"}, self.score(e))
-        self.assertEqual("12", self.comp(e)["situation"]["possession"])
-
-    def test_every_scoring_kind_is_in_the_timeline(self):
-        e = self.at("q2 field goal, dead ball", 1)
-        s = self.comp(e)["situation"]
-        self.assertEqual({"away": "7", "home": "3"}, self.score(e))
-        self.assertEqual(("59", 3), (s["lastPlay"]["type"]["id"], s["lastPlay"]["scoreValue"]))
-        e = self.at("q2 +7 pair in one body", 1)
-        self.assertEqual({"away": "14", "home": "3"}, self.score(e))
-        e = self.at("q3 safety, KC free kick", 1)
-        s = self.comp(e)["situation"]
-        self.assertEqual({"away": "14", "home": "5"}, self.score(e))
-        self.assertEqual("Safety", s["lastPlay"]["type"]["text"])
-        self.assertEqual(80, s["yardLine"])  # a free kick from KC's 20
-        e = self.at("q4 KC safety, BUF free kick", 1)
-        self.assertEqual({"away": "16", "home": "16"}, self.score(e))
-        self.assertEqual(20, self.comp(e)["situation"]["yardLine"])
-
-    def test_buf_receives_kcs_free_kick(self):
-        s = self.comp(self.at("q3 BUF receives the free kick", 1))["situation"]
-        self.assertEqual("2", s["possession"])  # BUF's team id
-        self.assertEqual("BUF 45", s["possessionText"])
-
-    def test_defensive_td_and_the_two_point_try_as_a_real_down(self):
-        e = self.at("q3 defensive TD, stale situation", 1)
-        self.assertEqual({"away": "14", "home": "11"}, self.score(e))
-        s = self.comp(e)["situation"]
-        self.assertEqual("KC 40", s["possessionText"], "stale")
-        self.assertEqual("36", s["lastPlay"]["type"]["id"])
-        e = self.at("q3 two-point try as a real down", 1)
-        s = self.comp(e)["situation"]
-        self.assertEqual((1, 2, "2"), (s["down"], s["distance"], s["possession"]))
-        self.assertEqual("1st & Goal", s["shortDownDistanceText"])
-        e = self.at("q3 two-point good, BUF kick-off", 1)
-        self.assertEqual({"away": "14", "home": "13"}, self.score(e))
-
-    def test_clocks_are_frozen_through_every_try_window(self):
-        for first, last in (("q1 score before the play (10 s)", "q1 extra point, KC kick-off"),
-                            ("q3 defensive TD, stale situation", "q3 two-point good, BUF kick-off")):
-            labels = [w["label"] for w in sports_nfl.W]
-            clocks = set()
-            for i in range(labels.index(first), labels.index(last) + 1):
-                for off in (1, sports_nfl.W[i]["len"] - 1):
-                    e = self.at(labels[i], off)
-                    clocks.add(self.comp(e)["status"]["clock"])
-            self.assertEqual(1, len(clocks), (first, clocks))
-        # while a running window counts down 1 s/s
         a = self.comp(self.at("q1 KC ball", 1))["status"]["clock"]
         b = self.comp(self.at("q1 KC ball", 11))["status"]["clock"]
         self.assertEqual(10.0, a - b)
@@ -601,6 +512,197 @@ class TestPerEvent(NflCase):
         sports_nfl.check_config({"sports_nfl_faults": {"event_status": 400, "event_older_s": 5, "stall_ms": 1, "max_age": 1}})
         with self.assertRaises(ValueError):
             sports_nfl.check_config({"sports_nfl_faults": {"event_stat": 400}})
+
+
+STATS = "/v2/sports/football/leagues/nfl/events/401899001/competitions/401899001/competitors/{}/statistics"
+KC, BUF = "12", "2"
+
+
+class TestYards(NflCase):
+    """docs/design/m6-nfl-stacked-yds.md 4.5: the statistics route, the carried yards, the S1 windows, the faults and the jump."""
+
+    def yards(self, tid, label, off=1):
+        self.at(label, off)
+        st, h, body = self.raw(STATS.format(tid))
+        return st, h, (json.loads(body) if st == 200 else body)
+
+    @staticmethod
+    def totals(j):
+        return [(c["name"], s["name"], s["value"], s["displayValue"])
+                for c in j["splits"]["categories"] for s in c["stats"] if s["name"] == "totalYards"]
+
+    def test_the_route_answers_espns_shape(self):
+        st, h, j = self.yards(KC, "q2 BUF ball")
+        self.assertEqual(200, st)
+        self.assertEqual("max-age=10", h["cache-control"])
+        self.assertIn("$ref", j)
+        self.assertIn("competition", j)
+        self.assertIn("team", j)
+        cats = {c["name"]: c for c in j["splits"]["categories"]}
+        self.assertEqual(["general", "passing", "rushing", "receiving", "defensive", "kicking"], list(cats))
+        self.assertEqual([], cats["passing"]["athletes"])
+        self.assertEqual([("passing", "totalYards", 142.0, "142"), ("rushing", "totalYards", 142.0, "142"),
+                          ("receiving", "totalYards", 142.0, "142")], self.totals(j))
+        self.assertTrue(all(s["name"] != "totalYards" for s in cats["general"]["stats"]))
+        self.assertEqual(13, len(cats["general"]["stats"]))
+        self.assertTrue(all(isinstance(s["value"], float) and isinstance(s["displayValue"], str)
+                            for c in cats.values() for s in c["stats"]))
+        size = len(json.dumps(j))
+        self.assertTrue(30_000 < size < 60_000, size)
+
+    def test_team_ids_match_the_scoreboard(self):
+        e = self.at("q2 BUF ball", 1)
+        ids = {c["homeAway"]: c["id"] for c in self.comp(e)["competitors"]}
+        self.assertEqual({"away": KC, "home": BUF}, ids)
+        self.assertEqual(142.0, self.totals(self.yards(ids["away"], "q2 BUF ball")[2])[0][2])
+        self.assertEqual(51.0, self.totals(self.yards(ids["home"], "q2 BUF ball")[2])[0][2])
+
+    def test_404_before_kickoff_for_unknown_ids_and_for_a_null_value(self):
+        cases = [self.yards(KC, "pre"), self.yards("99", "q2 BUF ball"),
+                 self.raw("/v2/sports/football/leagues/nfl/events/777/competitions/777/competitors/12/statistics"),
+                 self.raw("/v2/sports/football/leagues/nfl/events/401899001/competitions/555/competitors/12/statistics")]
+        for c in cases:
+            self.assertEqual(404, c[0])
+        _, h, body = cases[0]
+        self.assertEqual({"error": {"code": 404, "message": "no instance found"}}, json.loads(body))
+        self.assertEqual("application/json", h["content-type"].split(";")[0])
+        self.panel.cfg["sports_nfl_script"] = {"401899001": {"homeYards": None}}
+        self.assertEqual(404, self.yards(BUF, "q2 BUF ball")[0])
+        self.assertEqual(200, self.yards(KC, "q2 BUF ball")[0])
+        self.panel.cfg["sports_nfl_script"] = {"401899001": {"gone": True}}
+        self.assertEqual(404, self.raw(STATS.format(KC))[0])
+        self.panel.cfg["sports_nfl_script"] = {}
+        self.assertEqual(200, self.raw(STATS.format(KC))[0])
+        self.panel.cfg["sports_nfl_script"] = {"401899001": {"awayYards": 7, "homeYards": -99}}
+        self.assertEqual((7.0, -99.0), (self.totals(self.yards(KC, "q2 BUF ball")[2])[0][2],
+                                        self.totals(self.yards(BUF, "q2 BUF ball")[2])[0][2]))
+
+    def test_the_default_yards_grow_and_cover_every_digit_case(self):
+        expect = [("q1 coin toss", 0, 0), ("q1 3rd and 2, OPP 38", 41, 0), ("q1 BUF 2nd and 7", 75, -2),
+                  ("end 1st", 75, -2), ("q2 change of ends", 75, -2), ("q2 field goal, dead ball", 75, 48),
+                  ("q2 BUF ball", 142, 51), ("halftime", 142, 51), ("q3 KC ball", 251, 187), ("end 3rd", 268, 187),
+                  ("q4 change of ends", 268, 187), ("end 4th", 355, 312), ("ot KC 1st and goal at 8", 381, 312),
+                  ("ot walk-off touchdown (post)", 389, 312), ("final", 389, 312)]
+        for label, a, h in expect:
+            st1, _, ja = self.yards(KC, label)
+            st2, _, jh = self.yards(BUF, label)
+            self.assertEqual((200, 200), (st1, st2), label)
+            self.assertEqual((float(a), float(h)), (self.totals(ja)[0][2], self.totals(jh)[0][2]), label)
+        self.assertEqual("-2", self.totals(self.yards(BUF, "q1 BUF 2nd and 7")[2])[0][3])
+        a = [w["awayYards"] for w in sports_nfl.W[1:]]
+        self.assertEqual(sorted(a), a, "KC's total never goes down")
+
+    def test_s1_end_period_then_change_of_ends(self):
+        labels = [w["label"] for w in sports_nfl.W]
+        self.assertEqual(10, sports_nfl.W[labels.index("end 1st")]["len"])
+        self.assertEqual(15, sports_nfl.W[labels.index("q2 change of ends")]["len"])
+        self.assertEqual(985, sum(w["len"] for w in sports_nfl.W if w["len"] is not None), "the timeline stays 985 s")
+        for end, change, period in (("end 1st", "q2 change of ends", 1), ("end 3rd", "q4 change of ends", 3)):
+            a = self.comp(self.at(end, 1))
+            self.assertEqual(("STATUS_END_PERIOD", period, 0.0),
+                             (a["status"]["type"]["name"], a["status"]["period"], a["status"]["clock"]))
+            c = self.comp(self.at(change, 1))
+            st = c["status"]
+            self.assertEqual("STATUS_IN_PROGRESS", st["type"]["name"])
+            self.assertEqual("in", st["type"]["state"])
+            self.assertEqual((period + 1, 900.0, "15:00"), (st["period"], st["clock"], st["displayClock"]))
+            lp = c["situation"]["lastPlay"]
+            self.assertEqual(("2", "End Period"), (lp["type"]["id"], lp["type"]["text"]))
+            self.assertEqual(f"END QUARTER {period}", lp["text"])
+            self.assertEqual(f"END QUARTER {period}", a["situation"]["lastPlay"]["text"])
+            self.assertIn("down", c["situation"])
+            self.assertIn("awayTimeouts", c["situation"])
+            late = self.comp(self.at(change, 14))
+            self.assertEqual(st["clock"], late["status"]["clock"], "frozen at 15:00")
+            self.assertEqual("2", late["situation"]["lastPlay"]["type"]["id"])
+        nxt = self.comp(self.at("q2 BUF 1st at KC 30", 1))
+        self.assertEqual("24", nxt["situation"]["lastPlay"]["type"]["id"], "the first play ends the change of ends")
+        self.assertEqual(2, nxt["status"]["period"])
+
+    def test_stats_status_and_stall_hit_the_stats_route_only(self):
+        import time
+        self.at("q2 BUF ball", 1)
+        self.admin("/admin/config", {"sports_nfl_faults": {"stats_status": 429, "retry_after": 3}})
+        st, h, _ = self.raw(STATS.format(KC))
+        self.assertEqual((429, "3"), (st, h["retry-after"]))
+        self.assertEqual(200, self.raw(BOARD)[0])
+        self.assertEqual(200, self.raw(BOARD + "/401899001")[0])
+        self.admin("/admin/config", {"sports_nfl_faults": {"stats_status": 503}})
+        self.assertEqual(503, self.raw(STATS.format(BUF))[0])
+        self.admin("/admin/config", {"sports_nfl_faults": {"stats_stall_ms": 600}})
+        t0 = time.time()
+        self.assertEqual(200, self.raw(STATS.format(KC))[0])
+        self.assertGreaterEqual(time.time() - t0, 0.55)
+        t0 = time.time()
+        self.assertEqual(200, self.raw(BOARD)[0])
+        self.assertLess(time.time() - t0, 0.5)
+        self.admin("/admin/config", {"sports_nfl_faults": {"status": 503}})
+        self.assertEqual(503, self.raw(STATS.format(KC))[0], "the global status fault applies")
+        self.admin("/admin/config", {"sports_nfl_faults": {"pad_bytes": 100}})
+        self.assertIn("pad", json.loads(self.raw(STATS.format(KC))[2]))
+
+    def test_requests_are_in_the_sports_log(self):
+        self.at("q2 BUF ball", 1)
+        self.raw(STATS.format(KC))
+        self.raw(STATS.format("99"))
+        _, _, body = self.raw("/admin/stats")
+        log = json.loads(body)["sports"]["log"]
+        got = [(r["path"], r["status"]) for r in log if r["path"].startswith("/v2/")]
+        self.assertEqual([(STATS.format(KC), 200), (STATS.format("99"), 404)], got[-2:])
+
+    def test_the_jump_moves_the_clock_to_a_named_window_forward_or_back(self):
+        import time
+        for label in ("halftime", "q1 BUF 2nd and 7", "final", "pre"):
+            j = self.admin("/admin/sports-nfl", {"jump": label})
+            cur = [w for w in j["windows"] if w["current"]]
+            self.assertEqual([label], [w["label"] for w in cur])
+            self.assertAlmostEqual(1.0, time.time() - j["anchor_unix"] - window_start(label), delta=0.5)
+        self.admin("/admin/sports-nfl", {"jump": "halftime"})
+        name = self.comp(self.get_json(BOARD)[1]["events"][1])["status"]["type"]["name"]
+        self.assertEqual("STATUS_HALFTIME", name)
+
+    def test_the_jump_follows_the_timeline_scale(self):
+        import time
+        self.panel.cfg["sports_nfl_timeline_s"] = 985 * 3
+        j = self.admin("/admin/sports-nfl", {"jump": "end 3rd"})
+        self.assertAlmostEqual(3 * window_start("end 3rd") + 1, time.time() - j["anchor_unix"], delta=0.5)
+        self.assertEqual("end 3rd", sports_nfl.W[self.nfl.featured(time.time())["window"]]["label"])
+
+    def test_an_unknown_jump_label_is_a_400_that_lists_the_labels(self):
+        before = self.nfl.anchor
+        req = urllib.request.Request(f"http://127.0.0.1:{self.port}/admin/sports-nfl", json.dumps({"jump": "nope"}).encode(),
+                                     method="POST")
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urllib.request.urlopen(req, timeout=5)
+        self.assertEqual(400, cm.exception.code)
+        body = json.loads(cm.exception.read())
+        self.assertIn("q2 BUF ball", body["windows"])
+        self.assertEqual(before, self.nfl.anchor)
+
+    def test_get_lists_the_windows_with_start_times(self):
+        with urllib.request.urlopen(f"http://127.0.0.1:{self.port}/admin/sports-nfl", timeout=5) as r:
+            j = json.loads(r.read())
+        ws = {w["label"]: w for w in j["windows"]}
+        self.assertEqual(len(sports_nfl.W), len(j["windows"]))
+        for label in ("q2 BUF ball", "halftime", "end 1st", "q2 change of ends", "final", "ot KC 1st and goal at 8"):
+            self.assertAlmostEqual(window_start(label), ws[label]["start_s"], places=1)
+        self.assertAlmostEqual(j["anchor_unix"] + 275, ws["end 1st"]["start_unix"], places=1)
+        self.assertIsNone(ws["final"]["len_s"])
+        self.assertEqual(10, ws["end 1st"]["len_s"])
+
+    def test_yards_and_fault_rejections(self):
+        for patch in ({"sports_nfl_script": {"401899001": {"awayYards": 1000}}},
+                      {"sports_nfl_script": {"401899001": {"homeYards": -100}}},
+                      {"sports_nfl_script": {"401899001": {"homeYards": 1.5}}},
+                      {"sports_nfl_script": {"401899001": {"awayYards": "7"}}},
+                      {"sports_nfl_faults": {"stats_status": 99}},
+                      {"sports_nfl_faults": {"stats_status": True}},
+                      {"sports_nfl_faults": {"stats_stall_ms": -1}},
+                      {"sports_nfl_faults": {"stats_lag_s": 5}}):
+            with self.assertRaises(ValueError, msg=str(patch)):
+                sports_nfl.check_config(patch)
+        sports_nfl.check_config({"sports_nfl_script": {"401899001": {"awayYards": -99, "homeYards": None}},
+                                 "sports_nfl_faults": {"stats_status": 429, "stats_stall_ms": 4000}})
 
 
 class TestRestart(NflCase):

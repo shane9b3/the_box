@@ -318,10 +318,32 @@ debug origin (`files/debug/sports_base`) serves both leagues:
   coin toss, kick-off (no `possession`), drive, red zone, a TD with the 10 s score-before-play window, try, extra point, FG,
   a +7 pair in one body, halftime, a safety (BUF receives the free kick), a defensive TD with a two-point try drawn as a real
   down, a second FG, a KC safety, 16-16, overtime and a walk-off TD on a `post` body (period 5). Every window is 25 s or more
-  except the one 10 s window. Clocks run 1 s/s in running windows and are frozen in breaks, tries and kick-offs.
+  except the 10 s and 15 s windows below. Clocks run 1 s/s in running windows and are frozen in breaks, tries and kick-offs.
   `situation.yardLine` is home-relative (BUF's goal line).
+- The change of ends (S1, docs/design/m6-nfl-stacked-yds.md 1.12): "end 1st" and "end 3rd" are 10 s `STATUS_END_PERIOD` windows,
+  each followed by a 15 s "q2 change of ends" / "q4 change of ends" window: `STATUS_IN_PROGRESS`, the next period, the clock
+  frozen at 15:00, `lastPlay` type 2 "End Period" with the text "END QUARTER n", the situation kept (as ESPN's live bodies).
+  The next window's first play ends it. The timeline is still 985 s (10 + 15 = the old 25 s break).
+- `GET /v2/sports/football/leagues/nfl/events/{eid}/competitions/{eid}/competitors/{tid}/statistics` (ESPN's core API, the NFL
+  yards column; the app reaches it through the same `sports_base` origin): the team's season-to-date statistics in ESPN's shape,
+  `splits.categories[].stats[]`, with `totalYards` (float `value`, string `displayValue`) repeated in `passing`, `rushing` and
+  `receiving` among filler stats (about 40 KB). `Cache-Control: max-age=10`. Team ids are the scoreboard's (KC `12`, BUF `2`).
+  404 JSON `{"error":{"code":404,"message":"no instance found"}}` before kick-off (`pre`), for an unknown event or team, for a
+  `gone` event and for a null scripted total. The global `status`, `stall_s` / `stall_ms`, `pad_bytes` and `max_age` faults apply;
+  every request is in `sports.log`.
+- The totals are the script keys `awayYards` / `homeYards` (integers -99..999, or `null` for a 404), carried from window to
+  window. Defaults (KC / BUF): 0 / 0 to "q1 3rd and 2, OPP 38" 41 / 0, "q1 BUF 2nd and 7" 75 / -2, "q2 field goal, dead ball"
+  75 / 48, "q2 BUF ball" 142 / 51, "q3 KC ball" 251 / 187, "end 3rd" 268 / 187, "end 4th" 355 / 312, "ot KC 1st and goal at 8"
+  381 / 312, the post windows 389 / 312: one, two and three digits and a negative.
 - `POST /admin/sports-nfl {"restart": true}` (or `{"anchor_unix": T}`) re-anchors the NFL timeline; `POST /admin/sports
-  {"restart": true}` restarts both (N8); `GET /admin/sports-nfl` shows the slate.
+  {"restart": true}` restarts both (N8); `GET /admin/sports-nfl` shows the slate and `"windows"`: every window as `{label,
+  start_s, len_s, start_unix, current}` (seconds from the anchor at the current `sports_nfl_timeline_s` scale).
+- `POST /admin/sports-nfl {"jump": "<window label>"}` moves the script clock to that window's start (it began 1 s ago, at the
+  current scale), forward or back; an unknown label is a 400 that lists the labels. Useful labels: "q2 BUF kick-off" (type 74
+  official timeout), "q2 KC red zone, two-minute warning" (75), "q2 BUF ball" (team timeout), "halftime", "end 1st", "q2 change
+  of ends", "end 3rd", "end 4th", "ot KC 1st and goal at 8", "ot walk-off touchdown (post)", "final". **Jump forward only**: the
+  app treats a backward jump as an older body and ignores it (its newer-play-id guard), so to repeat a step restart the timeline
+  (`{"restart": true}`) and the app, then follow again.
 - `sports_nfl_script`: `{"<event id>": {state, name, period, clock, away, home, possession, down, distance, yardLine,
   possessionText, shortDownDistanceText, isRedZone, lastPlayType, lastPlayScoreValue, lastPlayTeam, awayTimeouts,
   homeTimeouts, lastPlayText, lastPlayId, situation: null, gone}}`
@@ -362,12 +384,20 @@ debug origin (`files/debug/sports_base`) serves both leagues:
   Flag bar: 8 s. No bar for official timeouts or the two-minute warning. A script `lastPlayId` lower than one already shown
   must never start a bar.
 - `sports_nfl_faults`: the NHL keys (`status`, `score_status`, `html_404`, `retry_after`, `pad_bytes`, `age`, `no_date`, `stall_s`,
-  `stall_ms`, `max_age`), plus two for the per-event route only: `event_status` (400 or a JSON 404 → the app falls back to
+  `stall_ms`, `max_age`), plus `stats_status` (HTTP status for the statistics route only, e.g. 404, 429, 503) and
+  `stats_stall_ms` (delay in ms before the statistics route answers; the board and event routes are untouched), plus two for the
+  per-event route only: `event_status` (400 or a JSON 404 → the app falls back to
   the dated board after two; 403 or 429 → the app slows to 10 s or more; with `html_404` a 404 is HTML, which never
   switches) and `event_older_s` (the event as it was N s ago: an older body the app must not show).
 - NFL API requests are noted in `/admin/stats` → `sports.log` (`path`, `status`, `unix`) with the NHL ones, so poll gaps can be
   read: e.g. `curl -s localhost:8080/admin/stats | python3 -c 'import json,sys; [print(r["unix"], r["path"]) for r in json.load(sys.stdin)["sports"]["log"]]'`.
   The panel does not gzip, so the app's MB/h figure reads higher here than against ESPN.
+- Compact yards test (NFL Stacked YDS column): run `fakepanel.py --port 8080 --sports --sports-nfl`, write
+  `files/debug/sports_base` = `http://10.0.2.2:8080`, `POST /admin/config {"sports_nfl_timeline_s": 2955}` (x3), follow KC @ BUF
+  in Stacked, then walk forward: `{"jump": "q1 BUF 2nd and 7"}` (YDS 75 / -2, then "END OF 1ST" through the change of ends),
+  `{"jump": "q2 BUF ball"}` (142 / 51), `{"jump": "halftime"}`, `{"jump": "end 3rd"}` (268 / 187), `{"jump": "end 4th"}`. Faults:
+  `{"sports_nfl_faults": {"stats_status": 404}}` (column stays closed), `{"stats_stall_ms": 4000}` (closed, the break bar on
+  time), `{"stats_status": 429}` (closed, no further stats requests). Watch the stats requests in `/admin/stats` `sports.log`.
 - `sample_espn.py --event {id} --out {dir}` records the real ESPN board for one event (§1.6): a JSONL log plus the raw body of
   every state change.
 
