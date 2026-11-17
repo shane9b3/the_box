@@ -6,7 +6,7 @@ package app.thebox.core.sports
 import app.thebox.core.sports.SportsConstants as K
 
 /** (NFL Stacked §4.1) The runner's layout tracks. Append-only. */
-enum class StackedNflTrack { CLOCK, BAR, STRIPE_AWAY, STRIPE_HOME, BALL_AWAY, BALL_HOME, PIPS_AWAY, PIPS_HOME }
+enum class StackedNflTrack { CLOCK, BAR, STRIPE_AWAY, STRIPE_HOME, BALL_AWAY, BALL_HOME, PIPS_AWAY, PIPS_HOME, YDS }
 
 /**
  * (NFL Stacked §4.1, §4.4) A track's transition. [OPEN] / [CLOSE]: the clock column's open / fold, the bar's open / close,
@@ -34,6 +34,8 @@ enum class StackedNflTransition { OPEN, CLOSE, REKEY, BURN, STILL }
  * - BALL_AWAY / BALL_HOME: alpha, scale and rotation of each possession ball ([ballAwayAlpha] …).
  * - PIPS_AWAY / PIPS_HOME: per pip index 0..2 (index 0 nearest the logo), [pipAway] / [pipHome] 1 = lit … 0 = used, and
  *   [pipAwayBurn] / [pipHomeBurn] the burn's white flash 0..1 over the lit colour.
+ * - YDS (NFL YDS §3.5): [ydsWidth] (fraction of `STACKED_NFL_YDS_W`, 0 = closed), its contents' [ydsAlpha] and [ydsDx]
+ *   (`STACKED_NFL_YDS_DX` ↔ 0; the painter negates it when mirrored).
  */
 class StackedNflFrame {
     var clockWidth = 1f
@@ -65,8 +67,15 @@ class StackedNflFrame {
     val pipAwayBurn = FloatArray(PIPS)
     val pipHomeBurn = FloatArray(PIPS)
 
-    /** The drawn top part's width in Standard design px: the rows plus the open fraction of the clock column. */
-    val boxW: Float get() = K.STACKED_ROWS_W + clockWidth * K.STACKED_CLOCK_W
+    var ydsWidth = 0f
+    var ydsAlpha = 0f
+    var ydsDx = K.STACKED_NFL_YDS_DX
+
+    /**
+     * The drawn top part's width in Standard design px: the rows plus the open fractions of the YDS and clock columns
+     * (`ydsWidth` 0 adds an exact 0, so every frame without the column keeps its width bit for bit).
+     */
+    val boxW: Float get() = K.STACKED_ROWS_W + ydsWidth * K.STACKED_NFL_YDS_W + clockWidth * K.STACKED_CLOCK_W
 
     /** The open bar's height in Standard design px (0 when closed). */
     val barH: Float get() = barHeight * K.STACKED_BAR_H
@@ -96,6 +105,9 @@ class StackedNflFrame {
         o.pipHome.copyInto(pipHome)
         o.pipAwayBurn.copyInto(pipAwayBurn)
         o.pipHomeBurn.copyInto(pipHomeBurn)
+        ydsWidth = o.ydsWidth
+        ydsAlpha = o.ydsAlpha
+        ydsDx = o.ydsDx
     }
 
     companion object {
@@ -129,6 +141,8 @@ class StackedNflFrame {
  *   α .15 at 200 → lit), then fades to used 400 ease; the others move as a count change. Length 2 000.
  * - **FLAG** ([sampleFlag]): the shake 2 × 500 after 150 (`flagShake`, ease-in-out per segment, ±2.7 / ±1.8); the
  *   icon's wave −8° ⇄ +8° alternate 600 per half (`flagWave`), while the flag bar shows.
+ * - **YDS** (NFL YDS §3.5, the mock's `.yds` / `.yds-in`): open width 450 Std, contents α 300 / x 350 ease after 300
+ *   (650); close contents α / x 200 ease, width 450 Std after 200 (650). REKEY acts as OPEN.
  * - **STILL** (R20, §4.4): every track snaps to its rest state `to`; a REKEY cuts; no shake, wave (0°) or burn (the
  *   burnt pip is used at once).
  *
@@ -187,6 +201,7 @@ object StackedNflTimeline {
                 out.ballHomeDeg = ch(d0, if (opening) 0f else K.STACKED_NFL_BALL_FROM_DEG, t, 0L, K.STACKED_NFL_BALL_MOVE_MS, SPRING)
             }
             StackedNflTrack.PIPS_AWAY, StackedNflTrack.PIPS_HOME -> Unit // samplePips
+            StackedNflTrack.YDS -> yds(opening, t, from, out)
         }
         return out
     }
@@ -270,6 +285,7 @@ object StackedNflTimeline {
         when (track) {
             StackedNflTrack.CLOCK -> out.clockWidth = if (open) 1f else 0f
             StackedNflTrack.BAR -> { out.barHeight = if (open) 1f else 0f; out.barClosed = !open }
+            StackedNflTrack.YDS -> out.ydsWidth = if (open) 1f else 0f
             else -> Unit
         }
         return out
@@ -302,6 +318,11 @@ object StackedNflTimeline {
             StackedNflTrack.PIPS_AWAY, StackedNflTrack.PIPS_HOME ->
                 if (kind == StackedNflTransition.BURN) K.STACKED_NFL_BURN_CYCLES * K.STACKED_NFL_BURN_CYCLE_MS + K.STACKED_NFL_PIP_MS
                 else K.STACKED_NFL_PIP_MS
+            StackedNflTrack.YDS -> when {
+                kind == StackedNflTransition.BURN -> 0L
+                close -> maxOf(K.STACKED_NFL_YDS_OUT_MS, K.STACKED_NFL_YDS_CLOSE_DELAY_MS + K.STACKED_NFL_YDS_MS)
+                else -> maxOf(K.STACKED_NFL_YDS_MS, K.STACKED_NFL_YDS_IN_DELAY_MS + maxOf(K.STACKED_NFL_YDS_IN_ALPHA_MS, K.STACKED_NFL_YDS_IN_MOVE_MS))
+            }
         }
         return ms.toFloat()
     }
@@ -315,6 +336,19 @@ object StackedNflTimeline {
         } else {
             out.clockWidth = ch(from.clockWidth, 0f, t, 0L, K.STACKED_CLOCK_MS, STD)
             out.clockAlpha = ch(from.clockAlpha, 0f, t, 0L, K.STACKED_CLOCK_OUT_MS, EASE)
+        }
+    }
+
+    /** (NFL YDS §3.5) The YDS column: the mock's `.yds` width and `.yds-in` contents transitions. */
+    private fun yds(open: Boolean, t: Float, from: StackedNflFrame, out: StackedNflFrame) {
+        if (open) {
+            out.ydsWidth = ch(from.ydsWidth, 1f, t, 0L, K.STACKED_NFL_YDS_MS, STD)
+            out.ydsAlpha = ch(from.ydsAlpha, 1f, t, K.STACKED_NFL_YDS_IN_DELAY_MS, K.STACKED_NFL_YDS_IN_ALPHA_MS, EASE)
+            out.ydsDx = ch(from.ydsDx, 0f, t, K.STACKED_NFL_YDS_IN_DELAY_MS, K.STACKED_NFL_YDS_IN_MOVE_MS, EASE)
+        } else {
+            out.ydsAlpha = ch(from.ydsAlpha, 0f, t, 0L, K.STACKED_NFL_YDS_OUT_MS, EASE)
+            out.ydsDx = ch(from.ydsDx, K.STACKED_NFL_YDS_DX, t, 0L, K.STACKED_NFL_YDS_OUT_MS, EASE)
+            out.ydsWidth = ch(from.ydsWidth, 0f, t, K.STACKED_NFL_YDS_CLOSE_DELAY_MS, K.STACKED_NFL_YDS_MS, STD)
         }
     }
 
@@ -409,6 +443,11 @@ object StackedNflTimeline {
                 out.ballHomeDeg = if (on) 0f else K.STACKED_NFL_BALL_FROM_DEG
             }
             StackedNflTrack.PIPS_AWAY, StackedNflTrack.PIPS_HOME -> Unit // samplePips
+            StackedNflTrack.YDS -> {
+                out.ydsWidth = if (on) 1f else 0f
+                out.ydsAlpha = if (on) 1f else 0f
+                out.ydsDx = if (on) 0f else K.STACKED_NFL_YDS_DX
+            }
         }
     }
 }

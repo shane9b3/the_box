@@ -132,18 +132,30 @@ object EspnMapper {
             else -> null
         }
 
-        val period = status.int("period")?.takeIf { it >= 1 }
+        val bodyPeriod = status.int("period")?.takeIf { it >= 1 }
         val sit = comp.situation as? JsonObject
         val lastPlay = sit?.obj("lastPlay")?.let { lastPlay(it, ::sideOfId) }
 
-        val secs = status.double("clock")?.takeIf { it.isFinite() }?.let { floor(it).toInt() }
+        val bodySecs = status.double("clock")?.takeIf { it.isFinite() }?.let { floor(it).toInt() }
             ?: status.str("displayClock")?.let(::parseMmSs)
+        val cancelled = name == "STATUS_POSTPONED" || name == "STATUS_CANCELED" || name == "STATUS_CANCELLED"
+        // (NFL YDS §1.12, S1) ESPN's change of ends: after one `STATUS_END_PERIOD` sample the board reads the next quarter
+        // IN_PROGRESS at 15:00 with `lastPlay` "End Period" (type 2) for minutes, until the first snap. It is mapped exactly
+        // as the `STATUS_END_PERIOD` body of the previous quarter, so both bug styles keep "End of 1st" / "END OF 3RD".
+        val changeOfEnds = state == "in" && !cancelled &&
+            name != "STATUS_END_PERIOD" && name != "STATUS_HALFTIME" &&
+            !beforeKickoff(bodyPeriod, away.score, home.score, sit, bodySecs) &&
+            (bodyPeriod == 2 || bodyPeriod == 4) &&
+            sit?.obj("lastPlay")?.obj("type")?.str("id") == SportsConstants.NFL_TYPE_END_PERIOD &&
+            bodySecs != null && bodySecs >= SportsConstants.NFL_QUARTER_SECS
+        val period = if (changeOfEnds) bodyPeriod!! - 1 else bodyPeriod
+        val secs = if (changeOfEnds) 0 else bodySecs
         val phase = when {
-            name == "STATUS_POSTPONED" || name == "STATUS_CANCELED" || name == "STATUS_CANCELLED" ->
-                if (state == "in") GamePhase.LIVE else GamePhase.POSTPONED
+            cancelled -> if (state == "in") GamePhase.LIVE else GamePhase.POSTPONED
             state == "pre" ->
                 if (serverDateMs != null && serverDateMs >= start - SportsConstants.NFL_PRE_WINDOW_MS) GamePhase.PRE else GamePhase.SCHEDULED
             state == "post" -> GamePhase.FINAL
+            changeOfEnds -> GamePhase.INTERMISSION
             // S8 (ruling 4): ESPN goes `in` at the coin toss; the bug appears with the first logged play after it.
             beforeKickoff(period, away.score, home.score, sit, secs) -> GamePhase.PRE
             name == "STATUS_END_PERIOD" || name == "STATUS_HALFTIME" -> GamePhase.INTERMISSION

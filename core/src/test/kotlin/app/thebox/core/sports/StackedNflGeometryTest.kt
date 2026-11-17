@@ -46,7 +46,7 @@ class StackedNflGeometryTest {
         near(m.STRIPE_W * s, K.STACKED_NFL_STRIPE_W, "stripe"); near(m.POSS_STRIPE_W * s, K.STACKED_NFL_POSS_STRIPE_W, "poss stripe")
         near(m.LOGO_ML * s, K.STACKED_NFL_LOGO_ML, "logo ml"); near(m.LOGO_SLOT_W * s, K.STACKED_NFL_LOGO_SLOT_W, "logo slot")
         near((m.LOGO_ML + m.LOGO_SLOT_W + m.CENTRE_PL) * s, K.STACKED_NFL_CODE_DX, "code dx")
-        near(m.CODE_PX * s, K.STACKED_NFL_CODE_PX, "code px"); near(m.BALL * s, K.STACKED_NFL_BALL, "ball"); near(m.BALL_GAP * s, K.STACKED_NFL_BALL_GAP, "ball gap")
+        near(m.CODE_PX * s, K.STACKED_NFL_CODE_PX, "code px"); near(21.0, K.STACKED_NFL_BALL, "ball raised from the mock's 30 × .45 = 13.5 (owner 2026-11-16)"); near(m.BALL_GAP * s, K.STACKED_NFL_BALL_GAP, "ball gap")
         near(m.PIP_W * s, K.STACKED_NFL_PIP_W, "pip w"); near(m.PIP_GAP * s, K.STACKED_NFL_PIP_GAP, "pip gap"); near(m.PIP_R * s, K.STACKED_NFL_PIP_R, "pip r")
         near(3.0, K.STACKED_NFL_PIP_H, "pip h raised (S-D12)")
         near((120 - 70) / 2.0 * s, K.STACKED_NFL_CODE_TOP, "code top")
@@ -69,7 +69,8 @@ class StackedNflGeometryTest {
         near(m.BLOCK_GAP * s, K.STACKED_NFL_BLOCK_GAP, "block gap")
         near(110 * s, K.STACKED_NFL_STREAK1_W, "streak 1"); near(40 * s, K.STACKED_NFL_STREAK2_W, "streak 2"); near(40 * s, K.STACKED_NFL_STREAK_OVERHANG, "streak overhang")
         assertEquals(8f, K.STACKED_TAKEOVER_PAD_TIGHT)
-        near(17.1, G.BALL_TOP, "ball centred on the code line")
+        near(13.35, G.BALL_TOP, "ball centred on the code line (17.1 with the old 13.5)")
+        assertTrue(G.BALL_TOP + K.STACKED_NFL_BALL < K.STACKED_NFL_PIP_TOP, "the ball's box (34.35) ends above the pips (40.05)")
     }
 
     // ------------------------------------------------------------------ the mirror
@@ -165,11 +166,11 @@ class StackedNflGeometryTest {
 
     @Test
     fun theLeftCornerPositionsAreTheDesigns() {
-        // §5.2: code at 78.3 / 81.0; WSH ends at 143.7; ball 149.1–162.6 with the possession stripe; pips at 81.0 + 12.6 i.
+        // §5.2: code at 78.3 / 81.0; WSH ends at 143.7; ball 149.1–170.1 (21, owner 2026-11-16) with the possession stripe; pips at 81.0 + 12.6 i.
         near(78.3, G.codeX(G.stripeW(0f)), "code narrow"); near(81.0, G.codeX(G.stripeW(1f)), "code wide")
         near(62.7, codeW("WSH"), "WSH", 0.05); near(31.3, codeW("SF"), "SF", 0.6)
         val cx = G.codeX(G.stripeW(1f))
-        near(162.6, G.ballX(cx, codeW("WSH")) + K.STACKED_NFL_BALL, "ball end with WSH", 0.05)
+        near(170.1, G.ballX(cx, codeW("WSH")) + K.STACKED_NFL_BALL, "ball end with WSH", 0.05)
         near(81.0 + 2 * 12.6 + 9.9, G.pipX(cx, 2) + K.STACKED_NFL_PIP_W, "last pip end")
         assertTrue(K.STACKED_NFL_PIP_TOP + K.STACKED_NFL_PIP_H <= StackedNflMock.CODE_PX * 0 + 54f, "pips end above the 54 row")
         near(43.05, K.STACKED_NFL_PIP_TOP + K.STACKED_NFL_PIP_H, "pip bottom")
@@ -366,9 +367,9 @@ class StackedNflGeometryTest {
                 near(-(scoreL - ballEnd).toDouble(), m, "$code mirrored gap is the reflection")
             }
         }
-        // §5.2's narrowest: WSH, 23.9 to "88" (186.5).
+        // §5.2's narrowest: WSH, 16.4 to "88" (186.5) with the 21 ball (23.9 with the old 13.5).
         val wsh = G.SCORE_RIGHT - bold.width("88", K.STACKED_NFL_SCORE_PX, tnum = true) - (G.ballX(81f, codeW("WSH")) + K.STACKED_NFL_BALL)
-        near(23.9, wsh, "WSH gap", 0.05)
+        near(16.4, wsh, "WSH gap", 0.05)
         // A 4-letter code steps down by 2 px to 18, never ellipsised; null only past 18.
         val four = G.codePx(1f) { px -> bold.width("WWWW", px, 0.01f) }
         assertTrue(four == null || four < K.STACKED_NFL_CODE_PX, "WWWW $four")
@@ -413,5 +414,46 @@ class StackedNflGeometryTest {
         assertEquals(3f, G.pipRealPx(1920f, 1f)); assertEquals(6f, G.pipRealPx(3840f, 1f))
         // The mock's 2.7 would be 1.8 at 720p (S-D12).
         assertTrue(2.7f * 1280f / 1920f < 2f)
+    }
+
+    /**
+     * (NFL YDS §3.3, §3.7) The YDS column and the clock column after it, at 396 (in-play stoppage) and 306 (break), both
+     * mirror states: `[rows][YDS][clock]` on the left, `[clock][YDS][rows]` from the edge inwards on the right; the old
+     * forms are the `ydsW = 0` ones, exactly.
+     */
+    @Test
+    fun theYdsColumnSitsBetweenTheRowsAndTheClockOnBothSides() {
+        val y = K.STACKED_NFL_YDS_W
+        val c = K.STACKED_CLOCK_W
+        assertEquals(396f, K.STACKED_NFL_FOOTPRINT_W)
+        // 396, left: rows 0–243, YDS 243–306, clock 306–396.
+        assertEquals(243f, G.ydsX(396f, y, false))
+        assertEquals(306f, G.clockX(396f, c, y, false))
+        assertEquals(306f, G.clockContentX(396f, y, false))
+        assertEquals(0f, G.rowsLeft(396f, false))
+        // 396, mirrored: clock 0–90, YDS 90–153, rows 153–396.
+        assertEquals(0f, G.clockX(396f, c, y, true))
+        assertEquals(0f, G.clockContentX(396f, y, true))
+        assertEquals(90f, G.ydsX(396f, y, true))
+        assertEquals(153f, G.rowsLeft(396f, true))
+        // 306 (a break: the clock folded): YDS beside the rows on both sides; the folded clock's contents just past it.
+        assertEquals(243f, G.ydsX(306f, y, false)); assertEquals(306f, G.clockX(306f, 0f, y, false))
+        assertEquals(0f, G.ydsX(306f, y, true)); assertEquals(63f, G.rowsLeft(306f, true))
+        assertEquals(-90f, G.clockContentX(306f, y, true), "mirrored: the folded contents beyond the screen-edge side, clipped")
+        // Mid-open (half the column, 364.5): the clock moves with the open width; mirrored the YDS content anchors on the rows.
+        assertEquals(274.5f, G.clockX(364.5f, c, y / 2f, false))
+        assertEquals(0f, G.clockX(364.5f, c, y / 2f, true))
+        assertEquals(90f, G.ydsX(364.5f, y / 2f, true))
+        // The mirror identity: each mirrored edge is the reflection of the left one.
+        for (boxW in listOf(396f, 364.5f, 306f, 333f)) for (yw in listOf(0f, y / 2f, y)) for (cw in listOf(0f, c / 2f, c)) {
+            assertEquals(boxW - G.ydsX(boxW, yw, false) - yw, G.ydsX(boxW, yw, true), 1e-3f)
+            assertEquals(boxW - G.clockX(boxW, cw, yw, false) - cw, G.clockX(boxW, cw, yw, true), 1e-3f)
+            assertEquals(boxW - G.clockContentX(boxW, yw, false) - c, G.clockContentX(boxW, yw, true), 1e-3f)
+        }
+        // The old forms are the ydsW = 0 forms, bit for bit (every v1 golden keeps its pixels).
+        for (boxW in listOf(333f, 288f, 243f)) for (m in listOf(false, true)) for (cw in listOf(0f, 45f, 90f)) {
+            assertEquals(G.clockX(boxW, cw, 0f, m), G.clockX(boxW, cw, m))
+            assertEquals(G.clockContentX(boxW, 0f, m), G.clockContentX(boxW, m))
+        }
     }
 }

@@ -64,6 +64,7 @@ import app.thebox.core.sports.NflScoreFrame
 import app.thebox.core.sports.NflScoreKind
 import app.thebox.core.sports.NflScoreSpec
 import app.thebox.core.sports.NflScoreTimeline
+import app.thebox.core.sports.NflYards
 import app.thebox.core.sports.NhlBugStyle
 import app.thebox.core.sports.OverlayGeometry
 import app.thebox.core.sports.PeriodKind
@@ -466,6 +467,8 @@ internal fun StackedNflBug(
     holder.lastFrame = frame
     // The column texts a folding clock column fades out with (a folded column's slot is Blank in the new body).
     if (frame.targets.clockOpen) holder.lastClockBody = frame
+    // (NFL YDS §3.8, S6) The digits a closing YDS column fades out with (the new body has none, or is not open).
+    if (frame.targets.ydsOpen) holder.lastYdsBody = frame
     val isSample = shownView === sample
     val desc = remember(shownView, shownTargets, res) { StackedNflDescribe(res, shownView, shownTargets).text() }
     val liveText = if (isSample) "" else liveTexts.next(shownView, res)
@@ -476,7 +479,7 @@ internal fun StackedNflBug(
     val rightSide = last.l > 960f
 
     // The drawn box at the targets' rest, in design px from the footprint's top-left (§5.1: the rows never move).
-    val restW = nflRestBoxW(shownTargets.clockOpen)
+    val restW = nflRestBoxW(shownTargets.ydsOpen, shownTargets.clockOpen)
     val topBox = ScoreBugPlacement.stackedTopBox(last, shownSize, restW)
     val topH = topBox.b - topBox.t
     val barRest = if (shownTargets.bar != null) K.STACKED_BAR_H * k else 0f
@@ -512,7 +515,7 @@ internal fun StackedNflBug(
         }
         val f = run.sampleForDraw()
         a.frame = f
-        a.state = merge.of(base, f, holder.lastClockBody)
+        a.state = merge.of(base, f, holder.lastClockBody, holder.lastYdsBody)
         a.bar = run.bar
         a.barPrev = run.barPrevForDraw()
         a.colours = pair
@@ -592,7 +595,14 @@ internal const val STACKED_NFL_BADGE = StackedNflMock.SCORE_BADGE * K.STACKED_SC
 private const val FLAG_HOLD_MS = K.NFL_FLAG_MARK_MS
 
 /** The top part's width at rest, Standard design px: the rows plus the open clock column (§5.1: 333 / 243). */
-internal fun nflRestBoxW(clockOpen: Boolean): Float = K.STACKED_ROWS_W + (if (clockOpen) K.STACKED_CLOCK_W else 0f)
+internal fun nflRestBoxW(clockOpen: Boolean): Float = nflRestBoxW(false, clockOpen)
+
+/**
+ * (NFL YDS §3.2) The top part's width at rest with the YDS column: the rows plus each open column (396 at an in-play
+ * stoppage with yards, 333 in play, 306 in a break with yards, 243 without).
+ */
+internal fun nflRestBoxW(ydsOpen: Boolean, clockOpen: Boolean): Float =
+    K.STACKED_ROWS_W + (if (ydsOpen) K.STACKED_NFL_YDS_W else 0f) + (if (clockOpen) K.STACKED_CLOCK_W else 0f)
 
 /**
  * (§4.3, §4.4; review fix U-S1) The pinned takeover's schedule as pure functions of the driver time: when each
@@ -654,6 +664,7 @@ private fun withScores(b: StackedNflFrameState, away: Int, home: Int) = StackedN
     periodText = b.periodText, periodPx = b.periodPx, slot = b.slot, slotText = b.slotText, slotPx = b.slotPx,
     clockSecs = b.clockSecs, columnDim = b.columnDim, targets = b.targets,
     slotBreak = b.slotBreak, slotDy1 = b.slotDy1, slotDy2 = b.slotDy2,
+    awayYds = b.awayYds, homeYds = b.homeYds,
 )
 
 /**
@@ -808,6 +819,8 @@ private class NflStackedHolder {
     var lastFrame: StackedNflFrameState? = null
     /** The last body with the clock column open: the texts a folding column fades out with. */
     var lastClockBody: StackedNflFrameState? = null
+    /** (NFL YDS S6) The last body with the YDS column open: the digits a closing column fades out with. */
+    var lastYdsBody: StackedNflFrameState? = null
     var lastFollowed: ScoreBugView? = null
     var resetPending = false
 
@@ -863,8 +876,8 @@ private class NflTrackRun(val id: StackedNflTrack) {
 }
 
 /**
- * (NFL Stacked §4.1, §4.3; WP-4) The layout runner: eight tracks (CLOCK, BAR, the two row stripes, the two balls, the two
- * pip rows), each kicked only when its own target key changes (a clock-only update just redraws), with CSS-transition
+ * (NFL Stacked §4.1, §4.3; WP-4) The layout runner: nine tracks (CLOCK, BAR, the two row stripes, the two balls, the two
+ * pip rows, YDS (NFL YDS §3.8)), each kicked only when its own target key changes (a clock-only update just redraws), with CSS-transition
  * semantics (a kick starts from the interrupted transition's current value); the flag sub-track; the bar's content
  * ([bar], [barPrev], captured at OPEN / REKEY); the pin (B4) and its score labels; the exact-box glow cache. A plain
  * holder; [epoch], the drivers and the glow epoch are the only state, read only in draw.
@@ -878,8 +891,11 @@ internal class StackedNflRun(private val scope: CoroutineScope, private val hook
     private val ballHome = NflTrackRun(StackedNflTrack.BALL_HOME)
     private val pipsAway = NflTrackRun(StackedNflTrack.PIPS_AWAY)
     private val pipsHome = NflTrackRun(StackedNflTrack.PIPS_HOME)
-    private val tracks = arrayOf(clock, barTrack, stripeAway, stripeHome, ballAway, ballHome, pipsAway, pipsHome)
-    private val layout = arrayOf(clock, barTrack, stripeAway, stripeHome, ballAway, ballHome)
+    /** (NFL YDS §3.8) The YDS column, kicked on `StackedNflTargets.ydsOpen`; pinned like CLOCK. */
+    private val yds = NflTrackRun(StackedNflTrack.YDS)
+    /** Indexed by `StackedNflTrack.ordinal` (YDS appended at 8). */
+    private val tracks = arrayOf(clock, barTrack, stripeAway, stripeHome, ballAway, ballHome, pipsAway, pipsHome, yds)
+    private val layout = arrayOf(clock, barTrack, stripeAway, stripeHome, ballAway, ballHome, yds)
 
     /** What the bar says now, and (during a REKEY) what it said before. */
     val bar = NflBarContent()
@@ -990,6 +1006,8 @@ internal class StackedNflRun(private val scope: CoroutineScope, private val hook
         evalBool(ballHome, tg.possSide == Side.HOME, snap)
         evalPips(pipsAway, Side.AWAY, tg.awayTimeouts, tg.burnSide == Side.AWAY, snap)
         evalPips(pipsHome, Side.HOME, tg.homeTimeouts, tg.burnSide == Side.HOME, snap)
+        // (NFL YDS §2, §3.8) Late yards open the column alone; a refresh (new digits) is not a key change.
+        evalBool(yds, tg.ydsOpen, snap)
     }
 
     // ------------------------------------------------------------------ the pin
@@ -1006,7 +1024,9 @@ internal class StackedNflRun(private val scope: CoroutineScope, private val hook
             pinned = true
             if (!clock.idle) clock.pinSample = true // U-N10: no array per score
             if (!barTrack.idle) barTrack.pinSample = true
-            pinBoxW = nflRestBoxW(clock.want)
+            // NFL YDS §3.6: the YDS track is pinned like CLOCK (its width at the transition's end).
+            if (!yds.idle) yds.pinSample = true
+            pinBoxW = nflRestBoxW(yds.want, clock.want)
             pinBarOpen = barWant != null
             pinH = K.STACKED_H + (if (pinBarOpen) K.STACKED_BAR_H else 0f)
             requestGlow(pinBoxW, pinH)
@@ -1260,8 +1280,8 @@ internal class StackedNflRun(private val scope: CoroutineScope, private val hook
         if (pinned || hidden || running > 0) return
         if (scorePainter?.s != s) return // after a size change the old painter is still set until its effect clears it
         val tg = inTargets ?: return
-        if (clock.want != tg.clockOpen || barWant != tg.bar) return
-        requestGlow(nflRestBoxW(clock.want), K.STACKED_H + (if (barWant != null) K.STACKED_BAR_H else 0f))
+        if (clock.want != tg.clockOpen || yds.want != tg.ydsOpen || barWant != tg.bar) return
+        requestGlow(nflRestBoxW(yds.want, clock.want), K.STACKED_H + (if (barWant != null) K.STACKED_BAR_H else 0f))
     }
 
     private fun key(w: Float, h: Float): Long = ((w * 10f).roundToInt().toLong() shl 32) or ((h * 10f).roundToInt().toLong() and 0xFFFFFFFFL)
@@ -1313,41 +1333,66 @@ private fun bump(s: androidx.compose.runtime.MutableIntState) = Snapshot.without
 
 /**
  * The body a draw hands the painter: [StackedNflFrameState] is immutable, so while the clock column folds (or is pinned
- * open) over a body whose own targets have it folded, the column's texts come from the last body that had it open. Built
- * once per change of its inputs, never per frame.
+ * open) over a body whose own targets have it folded, the column's texts come from the last body that had it open; and
+ * (NFL YDS §3.8, review S6) while the YDS column closes (or is pinned open) over a body whose own targets have it closed,
+ * the digits come from the last body that had it open. The two merges compose, each from its own last body; otherwise
+ * the digits are the current body's (play → halftime: the folding clock's texts from the play body, the opening
+ * column's yards from the halftime body). Built once per change of its inputs, never per frame.
  */
-private class NflBodyMerge {
+internal class NflBodyMerge {
     private var src: StackedNflFrameState? = null
     private var col: StackedNflFrameState? = null
+    private var yd: StackedNflFrameState? = null
     private var out: StackedNflFrameState? = null
 
-    fun of(body: StackedNflFrameState, f: StackedNflFrame, lastClock: StackedNflFrameState?): StackedNflFrameState {
+    fun of(
+        body: StackedNflFrameState,
+        f: StackedNflFrame,
+        lastClock: StackedNflFrameState?,
+        lastYds: StackedNflFrameState? = null,
+    ): StackedNflFrameState {
         val c = if (!body.targets.clockOpen && f.clockWidth > 0f && lastClock != null && lastClock !== body) lastClock else null
-        if (c == null) return body
-        out?.let { if (body === src && c === col) return it }
-        src = body; col = c
+        val y = if (!body.targets.ydsOpen && f.ydsWidth > 0f && lastYds != null && lastYds !== body) lastYds else null
+        if (c == null && y == null) return body
+        out?.let { if (body === src && c === col && y === yd) return it }
+        src = body; col = c; yd = y
+        val k = c ?: body
+        val ys = y ?: body
         return StackedNflFrameState(
             awayAbbrev = body.awayAbbrev, homeAbbrev = body.homeAbbrev, awayScore = body.awayScore, homeScore = body.homeScore,
-            periodText = c.periodText, periodPx = c.periodPx, slot = c.slot, slotText = c.slotText, slotPx = c.slotPx,
-            clockSecs = c.clockSecs, columnDim = c.columnDim, targets = body.targets,
-            slotBreak = c.slotBreak, slotDy1 = c.slotDy1, slotDy2 = c.slotDy2,
+            periodText = k.periodText, periodPx = k.periodPx, slot = k.slot, slotText = k.slotText, slotPx = k.slotPx,
+            clockSecs = k.clockSecs, columnDim = k.columnDim, targets = body.targets,
+            slotBreak = k.slotBreak, slotDy1 = k.slotDy1, slotDy2 = k.slotDy2,
+            awayYds = ys.awayYds, homeYds = ys.homeYds,
         ).also { out = it }
     }
 }
 
 /**
  * (NFL Stacked §8.4) The semantics string: the Pill's [NflDescribe] (score, clock, possession, down, red zone), plus the
- * timeouts while the pips show them ("Timeouts left: Chiefs 3, Bills 2"). The score string stands alone.
+ * timeouts while the pips show them ("Timeouts left: Chiefs 3, Bills 2"), and (NFL YDS §3.8) the total yards while the
+ * YDS column is open ("Total yards: Chiefs 142, Bills −2"). The score string stands alone.
  */
 internal class StackedNflDescribe(private val res: Resources, private val v: ScoreBugView, private val t: StackedNflTargets) {
     fun text(): String {
-        val base = NflDescribe(res, v).text()
+        var out = NflDescribe(res, v).text()
+        if (v.goalSide != null) return out
         val a = t.awayTimeouts
         val h = t.homeTimeouts
-        if (v.goalSide != null || a == null || h == null || t.timeoutSlots <= 0) return base
-        val sep = if (base.endsWith(".")) " " else ". "
-        return base + sep + res.getString(R.string.sports_desc_nfl_timeouts, nflShortOf(v.away), a, nflShortOf(v.home), h)
+        if (a != null && h != null && t.timeoutSlots > 0) {
+            out += sep(out) + res.getString(R.string.sports_desc_nfl_timeouts, nflShortOf(v.away), a, nflShortOf(v.home), h)
+        }
+        val ay = v.nfl?.awayYards
+        val hy = v.nfl?.homeYards
+        if (t.ydsOpen && ay != null && hy != null) {
+            out += sep(out) + res.getString(
+                R.string.sports_desc_nfl_yards, nflShortOf(v.away), NflYards.text(ay), nflShortOf(v.home), NflYards.text(hy),
+            )
+        }
+        return out
     }
+
+    private fun sep(s: String) = if (s.endsWith(".")) " " else ". "
 }
 
 /**

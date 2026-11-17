@@ -243,4 +243,66 @@ class StackedNflLayoutTest {
         val bgs = keys.map { NflStackedColours.bar(assertNotNull(it), p).bg }
         assertEquals(listOf(p.away.barBg, K.STACKED_BAR_NEUTRAL, K.STACKED_NFL_FLAG_BG, p.home.barBg, K.STACKED_BAR_NEUTRAL), bgs)
     }
+
+    // ------------------------------------------------------------------ NFL YDS §2 (WP-2): ydsOpen
+
+    private fun yds(v: ScoreBugView, a: Int? = 142, h: Int? = 51) = v.copy(nfl = v.nfl!!.copy(awayYards = a, homeYards = h))
+
+    /** [v] with yards gives exactly [v]'s targets but [StackedNflTargets.ydsOpen] (no REKEY, no other track kicks). */
+    private fun onlyYds(v: ScoreBugView): Boolean {
+        val with = of(yds(v))
+        assertEquals(of(v), with.copy(ydsOpen = false), "yards change nothing but ydsOpen")
+        assertFalse(of(v).ydsOpen, "no yards, no column")
+        return with.ydsOpen
+    }
+
+    @Test
+    fun theYdsColumnOpensWhenTheViewCarriesBothTeamsYards() {
+        // Play, PAT, kick-off (an official timeout or the two-minute warning keeps its bar, S2), the neutral bar.
+        assertTrue(onlyYds(view()))
+        assertTrue(onlyYds(view(down = DownText.Pat, tab = NflTab(kc, TabLead.BALL, TabTail.ExtraPoint))))
+        assertTrue(onlyYds(view(down = DownText.Kickoff, tab = NflTab(buf, TabLead.BALL, TabTail.Field(FieldZone.OWN, 35)))))
+        assertTrue(onlyYds(view(tab = null)))
+        // A timeout mark, confirmed or the fallback (unconfirmed).
+        assertTrue(onlyYds(view(timeout = NflTimeoutMark(buf, 1, true), home = 1)))
+        assertTrue(onlyYds(view(timeout = NflTimeoutMark(kc, 2, false), away = 2)))
+        // No situation (bar closed): known, though in practice never (no lastPlay, no key).
+        assertTrue(onlyYds(view(down = null, tab = null)))
+        // Breaks and Final (the mock's `half`, SR4a): folded with the column.
+        for (top in listOf(CentreText.Halftime, CentreText.EndOf(PeriodLabel(PeriodKind.REG, 1)), CentreText.Final(PeriodKind.REG), CentreText.Final(PeriodKind.OT))) {
+            assertTrue(onlyYds(brk(view(down = null, tab = null), top)), "$top")
+        }
+        // One side's yards only: closed (both or neither).
+        assertFalse(of(yds(view(), h = null)).ydsOpen)
+        assertFalse(of(yds(view(), a = null)).ydsOpen)
+        // Negative and zero values are values.
+        assertTrue(of(yds(view(), -2, 0)).ydsOpen)
+    }
+
+    @Test
+    fun theYdsColumnStaysClosedOnTheFlagAndInAStaleOrWaitingPlayState() {
+        // The flag bar never has the column, even when the view carries yards (above a timeout, RC4).
+        assertFalse(of(yds(view(flagId = "9"))).ydsOpen)
+        assertFalse(of(yds(view(flagId = "9", timeout = NflTimeoutMark(buf, 1, true)))).ydsOpen)
+        assertEquals(of(view(flagId = "9")), of(yds(view(flagId = "9"))))
+        // Stale / waiting in play: play is not stopped as far as the view knows.
+        for (top in listOf(CentreText.NoUpdate, CentreText.Delayed)) {
+            for (v in listOf(view(), view(timeout = NflTimeoutMark(buf, 1, true)), view(down = null, tab = null))) {
+                val t = of(dimmed(yds(v), top, inPlay = true))
+                assertFalse(t.ydsOpen, "$top in play")
+                assertNull(t.bar)
+            }
+        }
+    }
+
+    @Test
+    fun aStaleOrWaitingBreakKeepsTheColumnTheNhlSogRule() {
+        // ST §8 / review N6: the break look is held, with the values of the view's own snapshot.
+        for (top in listOf(CentreText.NoUpdate, CentreText.Delayed)) {
+            val t = of(dimmed(yds(view(down = null, tab = null)), top, inPlay = false))
+            assertTrue(t.ydsOpen, "$top in a break")
+            assertFalse(t.clockOpen)
+            assertFalse(of(dimmed(view(down = null, tab = null), top, inPlay = false)).ydsOpen, "$top in a break, no yards")
+        }
+    }
 }

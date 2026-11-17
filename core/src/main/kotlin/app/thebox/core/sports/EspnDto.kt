@@ -57,3 +57,23 @@ class EspnCompetitorDto(
     val score: JsonElement? = null,
     val team: JsonElement? = null,
 )
+
+/*
+ * (NFL YDS §1.7, review S3) ESPN's per-team statistics
+ * (`sports.core.api.espn.com/v2/sports/football/leagues/nfl/events/{id}/competitions/{id}/competitors/{team}/statistics`):
+ * only `splits.categories[].{name, stats[].{name, value, displayValue}}` is typed; the rest (`$ref`, `athletes`,
+ * descriptions) is skipped by the reader (`ignoreUnknownKeys`). Decoded by `EspnScoreSource` through its usual capped,
+ * drained `call()`; read by `NflYards.totalYards`.
+ */
+@Serializable
+class EspnStatsDto(val splits: EspnStatsSplitsDto? = null)
+
+@Serializable
+class EspnStatsSplitsDto(val categories: List<EspnStatsCategoryDto>? = null)
+
+@Serializable
+class EspnStatsCategoryDto(val name: JsonElement? = null, val stats: List<EspnStatDto>? = null)
+
+/** One stat: [name] ("totalYards"), [value] (a number, 123.0) and [displayValue] (a string, "123"; "-2"). */
+@Serializable
+class EspnStatDto(val name: JsonElement? = null, val value: JsonElement? = null, val displayValue: JsonElement? = null)

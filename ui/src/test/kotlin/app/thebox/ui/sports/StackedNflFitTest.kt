@@ -173,7 +173,7 @@ class StackedNflFitTest {
         for (large in listOf(false, true)) {
             val sp = scorer(large)
             val s = scale(large)
-            for (boxW in listOf(K.STACKED_ROWS_W, K.STACKED_NFL_W_MAX)) for (kind in NflScoreKind.entries) for (t in teams) {
+            for (boxW in listOf(K.STACKED_ROWS_W, K.STACKED_NFL_W_MAX) + YDS_WIDTHS) for (kind in NflScoreKind.entries) for (t in teams) {
                 sp.begin(Side.AWAY, listOf(NflScore(kind, 6, 88, 88)), kit.KC.goal, null, t, "BUF", boxW)
                 val what = "$kind at $boxW ($t) ${if (large) "Large" else "Std"}"
                 val w = boxW * s
@@ -224,7 +224,7 @@ class StackedNflFitTest {
             for (x in 0 until spr.width) for (y in 0 until spr.height) if (Color.alpha(spr.getPixel(x, y)) > 0) { c0 = minOf(c0, x); c1 = maxOf(c1, x) }
             val inkL = c0.toFloat() / spr.width
             val inkR = (c1 + 1).toFloat() / spr.width
-            for (boxW in listOf(K.STACKED_ROWS_W, K.STACKED_NFL_W_MAX)) for (kind in kicks) for ((corner, mirrored) in corners) {
+            for (boxW in listOf(K.STACKED_ROWS_W, K.STACKED_NFL_W_MAX) + YDS_WIDTHS) for (kind in kicks) for ((corner, mirrored) in corners) {
                 for (score in listOf(NflScore(kind, if (kind == NflScoreKind.FIELD_GOAL) 3 else 1, 88, 88), NflScore(kind, 1, 7, 0))) {
                     sp.begin(Side.AWAY, listOf(score), kit.KC.goal, null, "KC", "BUF", boxW)
                     val what = "$kind $corner ${if (large) "Large" else "Std"} at $boxW, ${sp.tallyText}"
@@ -328,8 +328,98 @@ class StackedNflFitTest {
         }
     }
 
+    // ------------------------------------------------------------------ NFL YDS (docs/design/m6-nfl-stacked-yds.md §3.1, §3.4)
+
+    /**
+     * §3.4: one to three digits and "−99" (U+2212) fit the 63 column at 21.6 with 6 px of air each side (the budget 51),
+     * through the real `Paint` at both sizes; the digits are tabular; "YDS" fits too; the digits centre on each row by
+     * the "0" bounds (27 / 81) and the label on the rows' line (54); the label clears both rows' digits by ≥ 12 (§3.1).
+     */
+    @Test
+    fun theYdsDigitsAndTheLabelFitTheColumn() {
+        val air = 6f
+        for (large in listOf(false, true)) {
+            val p = painter(large)
+            val s = scale(large)
+            val what = if (large) "Large" else "Std"
+            assertEquals(K.STACKED_NFL_YDS_W * s, p.ydsWidth, 1e-3f)
+            val texts = listOf(0, 7, 41, 88, 142, 888, 999, -2, -9, -99).map { app.thebox.core.sports.NflYards.text(it) }
+            for (t in texts) {
+                val ink = p.ydsInk(t, label = false)
+                assertTrue("$what \"$t\": ink ${ink.left}..${ink.right} inside ${air * s}..${(K.STACKED_NFL_YDS_W - air) * s}", ink.left >= air * s && ink.right <= (K.STACKED_NFL_YDS_W - air) * s)
+            }
+            // The design's widths (tabular 0.600 em at 21.6): "888" 38.9, "−99" 37.8, "−2" 24.9, "0" 13.0.
+            assertEquals(38.9f * s, p.ydsAdvance("888"), 0.6f * s)
+            // "−99": the design's 37.8 took U+2212 at its proportional 0.551 em; under `tnum` the bundled font gives the
+            // minus a tabular cell too (measured 39.0), still well inside the 51 budget.
+            assertEquals(39.0f * s, p.ydsAdvance("−99"), 0.6f * s)
+            assertEquals(13.0f * s, p.ydsAdvance("0"), 0.3f * s)
+            assertEquals("tabular", p.ydsAdvance("111"), p.ydsAdvance("888"), 1e-3f)
+            val label = p.ydsInk(res.getString(R.string.sports_stacked_yds), label = true)
+            assertTrue("$what label ${label.width() / s} fits", label.left >= air * s && label.right <= (K.STACKED_NFL_YDS_W - air) * s)
+            val rowH = K.STACKED_H * s / 2f
+            val zeroA = p.ydsInk("0", false, row = 0)
+            val zeroH = p.ydsInk("0", false, row = 1)
+            assertEquals("$what away digits centred at 27", rowH / 2f, zeroA.centerY(), 0.5f)
+            assertEquals("$what home digits centred at 81", rowH * 1.5f, zeroH.centerY(), 0.5f)
+            val s0 = p.ydsInk("S", label = true)
+            assertEquals("$what label centred on the line (54)", rowH, s0.centerY(), 0.5f)
+            for (t in texts) {
+                val a = p.ydsInk(t, false, row = 0)
+                val h = p.ydsInk(t, false, row = 1)
+                assertTrue("$what \"$t\": away digits clear the label ${label.top - a.bottom}", label.top - a.bottom >= 12f * s)
+                assertTrue("$what \"$t\": the label clears the home digits ${h.top - label.bottom}", h.top - label.bottom >= 12f * s)
+            }
+        }
+    }
+
+    /** §3.2: nothing of a YDS look (396 and 306, opening and closing) is drawn outside the 396 footprint, any corner. */
+    @Test
+    fun nothingOfTheYdsBoxLeavesTheFootprint() {
+        val mark = app.thebox.core.sports.NflTimeoutMark(Side.HOME, 1, true)
+        val timeout = kit.yds(kit.view(homeTimeouts = 1, timeout = mark), 999, -99)
+        val half = kit.yds(kit.halftime(), 389, 312)
+        val tg = kit.targets(timeout)
+        val closed = kit.rest(tg).also { kit.at(it, app.thebox.core.sports.StackedNflTrack.YDS, app.thebox.core.sports.StackedNflTransition.STILL, 0f, app.thebox.core.sports.StackedNflFrame(), to = false) }
+        val looks = listOf(
+            timeout to kit.rest(tg),
+            timeout to kit.at(kit.rest(tg), app.thebox.core.sports.StackedNflTrack.YDS, app.thebox.core.sports.StackedNflTransition.OPEN, 400f, closed),
+            timeout to kit.at(kit.rest(tg), app.thebox.core.sports.StackedNflTrack.YDS, app.thebox.core.sports.StackedNflTransition.CLOSE, 100f, kit.rest(tg), to = false),
+            half to kit.rest(kit.targets(half)),
+        )
+        for (large in listOf(false, true)) {
+            val s = scale(large)
+            val p = painter(large)
+            val m = if (large) K.GOAL_LAYER_MARGIN_LARGE else K.GOAL_LAYER_MARGIN
+            val lw = Math.round(K.STACKED_NFL_FOOTPRINT_W * s + 2 * m)
+            val lh = Math.round((K.STACKED_H + K.STACKED_BAR_H) * s + 2 * m)
+            for ((v, f) in looks) for (mirrored in listOf(false, true)) for (up in listOf(false, true)) {
+                val bmp = Bitmap.createBitmap(lw, lh, Bitmap.Config.ARGB_8888)
+                val c = Canvas(bmp)
+                c.translate(m + if (mirrored) (K.STACKED_NFL_FOOTPRINT_W - K.STACKED_ROWS_W) * s else 0f, m + if (up) K.STACKED_BAR_H * s else 0f)
+                val key = kit.targets(v).bar
+                val a = StackedNflDrawArgs().apply {
+                    state = kit.state(p, v, res)
+                    frame = f
+                    colours = kit.pair("KC", "BUF")
+                    bar = key?.let { k -> NflBarContent().also { p.fillBar(it, k, colours, "KC", "BUF", res) } }
+                    this.mirrored = mirrored
+                    this.up = up
+                }
+                p.drawFrame(c, a)
+                for (y in 0 until lh) for (x in 0 until lw) {
+                    if (Color.alpha(bmp.getPixel(x, y)) == 0) continue
+                    assertTrue("$key ${f.boxW} m=$mirrored up=$up: pixel ($x, $y) outside the footprint",
+                        x >= m - 1 && x <= m + K.STACKED_NFL_FOOTPRINT_W * s + 1 && y >= m - 1 && y <= m + (K.STACKED_H + K.STACKED_BAR_H) * s + 1)
+                }
+            }
+        }
+    }
+
     private companion object {
         /** Design px kept free at the bar's far end (§2.4: "room ≈ 4"). */
         const val BAR_AIR = 2f
+        /** (NFL YDS §3.6) The takeover's widths with the YDS column: 306 (a break) and 396 (an in-play stoppage). */
+        val YDS_WIDTHS = listOf(K.STACKED_ROWS_W + K.STACKED_NFL_YDS_W, K.STACKED_NFL_FOOTPRINT_W)
     }
 }

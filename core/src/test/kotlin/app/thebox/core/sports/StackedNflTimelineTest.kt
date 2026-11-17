@@ -324,8 +324,12 @@ class StackedNflTimelineTest {
         assertEquals(K.STACKED_BAR_STRIPE_TRAVEL, closed.stripeBX); assertEquals(K.STACKED_NFL_REKEY_TEXT_DX, closed.barTextDx)
         assertEquals(0f, closed.ballAwayAlpha); assertEquals(0.4f, closed.ballAwayScale); assertEquals(-40f, closed.ballHomeDeg)
         for (tr in StackedNflTrack.entries) assertEquals(0f, StackedNflTimeline.totalMs(tr, S), "$tr still")
-        // The frame's boxW / barH: 333 / 243 and 33 / 0.
-        assertEquals(333f, open.boxW); assertEquals(243f, closed.boxW); assertEquals(33f, open.barH); assertEquals(0f, closed.barH)
+        // The frame's boxW / barH: 396 (rows + YDS + clock, NFL YDS §3.5) / 243 and 33 / 0; YDS rest channels.
+        assertEquals(396f, open.boxW); assertEquals(243f, closed.boxW); assertEquals(33f, open.barH); assertEquals(0f, closed.barH)
+        assertEquals(1f, open.ydsWidth); assertEquals(1f, open.ydsAlpha); assertEquals(0f, open.ydsDx)
+        assertEquals(0f, closed.ydsWidth); assertEquals(0f, closed.ydsAlpha); assertEquals(K.STACKED_NFL_YDS_DX, closed.ydsDx)
+        // A frame with the YDS column at rest closed keeps the v1 widths exactly (333 play, 243 break).
+        assertEquals(333f, StackedNflFrame().boxW)
     }
 
     @Test

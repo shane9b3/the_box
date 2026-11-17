@@ -31,6 +31,9 @@ import app.thebox.core.sports.NflLastPlay
 import app.thebox.core.sports.NflPlay
 import app.thebox.core.sports.NflScoreKind
 import app.thebox.core.sports.NflStackedColours
+import app.thebox.core.sports.NflYardsFixtures
+import app.thebox.core.sports.NflYardsPlanner
+import app.thebox.core.sports.YardsResult
 import app.thebox.core.sports.NhlBugStyle
 import app.thebox.core.sports.PeriodKind
 import app.thebox.core.sports.ScoreBugMachine
@@ -131,10 +134,13 @@ class StackedNflEndToEndTest {
         }
     }
 
-    /** A poll [gapMs] after the last one, received and shown at once (SEEN, no delay). */
-    private fun poll(s: GameSnapshot, gapMs: Long = 20_000) {
+    /**
+     * A poll [gapMs] after the last one, received and shown at once (SEEN, no delay). With [yards] the snapshot first goes
+     * through [sourced], the yards step as `EspnScoreSource` runs it.
+     */
+    private fun poll(s: GameSnapshot, gapMs: Long = 20_000, yards: Pair<Int, Int>? = null) {
         advance(gapMs, 250)
-        m.fetched(Fetch.Ok(s, now, wall0 + now, 0))
+        m.fetched(Fetch.Ok(if (yards != null) sourced(s, yards) else s, now, wall0 + now, 0))
         push()
         rule.waitForIdle()
         rule.mainClock.advanceTimeBy(16)
@@ -145,6 +151,21 @@ class StackedNflEndToEndTest {
         placement = p
         Snapshot.sendApplyNotifications()
         advance(1_000)
+    }
+
+    // ------------------------------------------------------------------ the yards step (NFL YDS §1.6, §1.7)
+
+    /** One follow's real planner, as `EspnScoreSource` keeps it. */
+    private val planner = NflYardsPlanner()
+
+    /**
+     * (NFL YDS §1.3) `EspnScoreSource.withYards` without the HTTP: the real [NflYardsPlanner] decides whether [s] is a
+     * stoppage that is due, the two statistics calls answer [yards] (away, home), and the snapshot is returned with the
+     * usable yards attached exactly as the source hands it to the machine (none outside a stoppage).
+     */
+    private fun sourced(s: GameSnapshot, yards: Pair<Int, Int>): GameSnapshot {
+        planner.due(s, now)?.let { planner.fetched(it, now, YardsResult.Ok(yards.first, yards.second)) }
+        return planner.attach(s, now)
     }
 
     // ------------------------------------------------------------------ scripted KC @ BUF snapshots
@@ -187,11 +208,16 @@ class StackedNflEndToEndTest {
     private val seaAtLv = GameId(League.NFL, "401873062")
 
     /** A 2026-11-15 fixture (core's test resources) mapped by the real `EspnMapper.game`. */
-    private fun fx(name: String, id: GameId = larAtAri): GameSnapshot {
-        val f = listOf(File("../core/src/test/resources/sports/nfl/$name-2026-11-15.json"), File("core/src/test/resources/sports/nfl/$name-2026-11-15.json"))
+    private fun fx(name: String, id: GameId = larAtAri): GameSnapshot = mapped("$name-2026-11-15", id)
+
+    /** (NFL YDS) A 2026-11-16 live2 board (`NflYardsFixtures`, LAC @ BAL) mapped by the real `EspnMapper.game`. */
+    private fun fy(name: String): GameSnapshot = mapped(name, NflYardsFixtures.LAC_AT_BAL)
+
+    private fun mapped(file: String, id: GameId): GameSnapshot {
+        val f = listOf(File("../core/src/test/resources/sports/nfl/$file.json"), File("core/src/test/resources/sports/nfl/$file.json"))
             .first { it.isFile }
         val dto = json.decodeFromString(EspnGameDto.serializer(), f.readText())
-        return requireNotNull(EspnMapper.game(dto, id, null, "https://a.espncdn.com/")) { name }
+        return requireNotNull(EspnMapper.game(dto, id, null, "https://a.espncdn.com/")) { file }
     }
 
     // ------------------------------------------------------------------ observation
@@ -629,6 +655,130 @@ class StackedNflEndToEndTest {
             assertTrue(args().takeoverOn)
             advanceTakeoverTo(4_700f); advance(500)
         }
+    }
+
+    // ------------------------------------------------------------------ NFL YDS (docs/design/m6-nfl-stacked-yds.md §4.3)
+
+    /**
+     * (NFL YDS §4.3) The live type-21 fixture through the yards step ([sourced]: the real planner attaches both teams'
+     * yards to its snapshot), the real machine (its `NflView` copies them), the runner and the painters: the 396 box with
+     * the digits drawn between the rows and the clock (mirrored, top right); the next play (no stoppage, so the step
+     * attaches nothing) closes it to 333 by 650 ms. Its layer is sized from `STACKED_NFL_FOOTPRINT_W` (N2; [render] stays
+     * the v1 one).
+     */
+    @Test
+    fun aTeamTimeoutWithYardsOpensThe396BoxAndTheNextPlayClosesIt() {
+        val yards = 142 to -2
+        start(fx("scoreboard-live-clock-lag-a"))
+        assertEquals(K.STACKED_NFL_W_MAX, f().boxW, 1e-3f)
+        poll(fx("scoreboard-live-team-timeout-type21"), yards = yards)
+        assertEquals("the machine's view carries the snapshot's yards", 142, repo.bug.value!!.nfl!!.awayYards)
+        assertEquals("TIMEOUT LAR | 2 LEFT", words())
+        assertTrue("the YDS track opened", movesOf(StackedNflTrack.YDS).any { it.kind == StackedNflTransition.OPEN })
+        advance(700)
+        assertEquals("rows + YDS + clock", K.STACKED_NFL_FOOTPRINT_W, f().boxW, 1e-3f)
+        assertEquals("142" to "−2", args().state!!.awayYds to args().state!!.homeYds)
+        val shot = renderFootprint()
+        save("yds-timeout-type21", shot)
+        assertTrue("mirrored", args().mirrored)
+        // Mirrored: the column is just left of the rows (x −63..0), the digits white on the box fill.
+        fun bright(x0: Float, x1: Float, y0: Float, y1: Float): Int {
+            var n = 0
+            for (y in (shot.oy + y0 * shot.k).toInt() until (shot.oy + y1 * shot.k).toInt()) for (x in (shot.ox + x0 * shot.k).toInt() until (shot.ox + x1 * shot.k).toInt()) {
+                val p = shot.bmp.getPixel(x, y)
+                if (Color.red(p) > 200 && Color.green(p) > 200 && Color.blue(p) > 200) n++
+            }
+            return n
+        }
+        assertTrue("the away row's digits", bright(-59f, -4f, 14f, 40f) > 20)
+        assertTrue("the home row's digits", bright(-59f, -4f, 68f, 94f) > 20)
+        assertTrue("the clock after the column", bright(-149f, -67f, K.STACKED_NFL_PERIOD_SLOT_H + 4f, K.STACKED_H - 4f) > 20)
+        assertTrue(rule.onNodeWithTag(SCORE_BUG_TAG).fetchSemanticsNode().config[SemanticsProperties.ContentDescription].joinToString()
+            .contains("Total yards"))
+        poll(fx("scoreboard-live-after-timeout"), gapMs = 5_000, yards = yards)
+        assertNull("the next play: the step attaches nothing", repo.bug.value!!.nfl!!.awayYards)
+        assertEquals(NflBarKind.PLAY, barKey()!!.kind)
+        assertEquals(StackedNflTransition.CLOSE, movesOf(StackedNflTrack.YDS).last().kind)
+        advance(650)
+        assertEquals("closed by 650 ms", K.STACKED_NFL_W_MAX, f().boxW, 1e-3f)
+        save("yds-after-timeout", renderFootprint())
+    }
+
+    /**
+     * (NFL YDS §1.12, S1) The live2 change of ends (LAC @ BAL, 2026-11-16) through the real mapper, the yards step, the
+     * machine, the runner and the painters: the official timeout (74) opens the column beside its unchanged play bar
+     * (396); `STATUS_END_PERIOD` (which also carries LAC's later points: the takeover pins 396 first) folds the clock to the
+     * END OF 1ST bar with the column (306); the change-of-ends body (P2
+     * 15:00, `lastPlay` type 2) is the same `"E1"` stoppage, so the bar, the column and its digits stay with no move and no
+     * second fetch; the first Q2 snap (type 5, the clock still 15:00) closes the column and opens the clock (333).
+     */
+    @Test
+    fun theChangeOfEndsKeepsEndOf1stAndTheColumnUntilTheFirstPlay() {
+        start(sourced(fy(NflYardsFixtures.OFFICIAL_TIMEOUT), 70 to -2))
+        assertEquals(NflBarKind.PLAY, barKey()!!.kind)
+        assertEquals("rows + YDS + clock", K.STACKED_NFL_FOOTPRINT_W, f().boxW, 1e-3f)
+        assertEquals("70" to "−2", args().state!!.awayYds to args().state!!.homeYds)
+
+        poll(fy(NflYardsFixtures.END_PERIOD), gapMs = 10_000, yards = 75 to -2)
+        assertTrue("the machine's view: ${repo.bug.value!!.top}", repo.bug.value!!.top is CentreText.EndOf)
+        assertEquals(75, repo.bug.value!!.nfl!!.awayYards)
+        // LAC scored between the two live2 samples (0–10 at the end of the 1st): the takeover pins the pre-score layout
+        // (396, the timeout's digits), and the break with its column comes at the release (§3.6).
+        advance(1_000)
+        assertTrue("the score's takeover", args().takeoverOn)
+        assertEquals("pinned", K.STACKED_NFL_FOOTPRINT_W, f().boxW, 1e-3f)
+        advance(6_000)
+        assertFalse(args().takeoverOn)
+        assertEquals(NflBarKind.END_PERIOD, barKey()!!.kind)
+        assertEquals("END OF 1ST", words())
+        assertEquals("rows + YDS", K.STACKED_ROWS_W + K.STACKED_NFL_YDS_W, f().boxW, 1e-3f)
+        assertEquals("75" to "−2", args().state!!.awayYds to args().state!!.homeYds)
+        save("yds-end-1st", renderFootprint())
+        val ydsMoves = movesOf(StackedNflTrack.YDS).size
+        val barMoves = movesOf(StackedNflTrack.BAR).size
+        val clockMoves = movesOf(StackedNflTrack.CLOCK).size
+
+        for (gap in listOf(10_000L, 10_000L)) {
+            // The change-of-ends body, twice (20 s into the stoppage: the refresh is not due yet); the step answers other
+            // digits, which must not be read: same key, no fetch.
+            poll(fy(NflYardsFixtures.CHANGE_OF_ENDS), gapMs = gap, yards = 99 to 99)
+            assertTrue("mapped to the end of the 1st (S1)", repo.bug.value!!.top is CentreText.EndOf)
+            assertEquals(75, repo.bug.value!!.nfl!!.awayYards)
+            assertEquals(NflBarKind.END_PERIOD, barKey()!!.kind)
+            assertEquals("END OF 1ST", words())
+            advance(1_000)
+            assertEquals(K.STACKED_ROWS_W + K.STACKED_NFL_YDS_W, f().boxW, 1e-3f)
+            assertEquals("75" to "−2", args().state!!.awayYds to args().state!!.homeYds)
+            assertEquals("no YDS move", ydsMoves, movesOf(StackedNflTrack.YDS).size)
+            assertEquals("no bar move", barMoves, movesOf(StackedNflTrack.BAR).size)
+            assertEquals("no clock move", clockMoves, movesOf(StackedNflTrack.CLOCK).size)
+        }
+        save("yds-change-of-ends", renderFootprint())
+
+        poll(fy(NflYardsFixtures.FIRST_PLAY_AFTER_CHANGE_OF_ENDS), gapMs = 10_000, yards = 80 to 1)
+        assertNull("in play: no yards", repo.bug.value!!.nfl!!.awayYards)
+        advance(1_000)
+        assertEquals(NflBarKind.PLAY, barKey()!!.kind)
+        assertEquals(StackedNflTransition.CLOSE, movesOf(StackedNflTrack.YDS).last().kind)
+        assertEquals(StackedNflTransition.OPEN, movesOf(StackedNflTrack.CLOCK).last().kind)
+        assertEquals("rows + clock", K.STACKED_NFL_W_MAX, f().boxW, 1e-3f)
+        save("yds-first-play-after-change-of-ends", renderFootprint())
+    }
+
+    /** As [render], into a layer sized from the YDS footprint (`STACKED_NFL_FOOTPRINT_W` + 2 M). */
+    private fun renderFootprint(): Shot {
+        val large = placement.size == ScoreBugSize.LARGE
+        val k = if (large) K.SCORE_LARGE_SCALE else 1f
+        val mg = if (large) K.GOAL_LAYER_MARGIN_LARGE else K.GOAL_LAYER_MARGIN
+        val bmp = Bitmap.createBitmap(Math.round(K.STACKED_NFL_FOOTPRINT_W * k + 2 * mg), Math.round((K.STACKED_H + K.STACKED_BAR_H) * k + 2 * mg), Bitmap.Config.ARGB_8888)
+        val c = Canvas(bmp)
+        c.drawColor(Color.rgb(20, 22, 28))
+        val a = args()
+        val ox = mg + if (a.mirrored) (K.STACKED_NFL_FOOTPRINT_W - K.STACKED_ROWS_W) * k else 0f
+        val oy = mg + if (a.up) K.STACKED_BAR_H * k else 0f
+        c.translate(ox, oy)
+        probe.draw!!(c)
+        return Shot(bmp, ox, oy, k)
     }
 
     private companion object {

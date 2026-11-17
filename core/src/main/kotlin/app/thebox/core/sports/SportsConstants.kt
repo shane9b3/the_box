@@ -686,15 +686,73 @@ object SportsConstants {
     const val NFL_TYPE_TIMEOUT = "21"
 
     // ---- footprint and texts (§2.3, §2.4, §5.1)
-    /** The widest drawn box, rows + clock (333); the footprint is this × ([STACKED_H] + [STACKED_BAR_H]) = 333 × 141. */
+    /**
+     * The play box, rows + clock (333): the takeover's reference width (`StackedNflGeometry.arcK`) and the pinned score
+     * label's full-width test. (NFL YDS §3.2) Not the footprint any more: that is [STACKED_NFL_FOOTPRINT_W].
+     */
     const val STACKED_NFL_W_MAX = STACKED_ROWS_W + STACKED_CLOCK_W
-    /** The yards column (Appendix A): not built in v1, and not in the footprint (RC6). */
-    const val STACKED_NFL_YDS_ENABLED = false
+    /**
+     * (docs/design/m6-nfl-stacked-yds.md, owner approval 2026-11-16) The YDS column is built: it is in the footprint and
+     * the follow may fetch team yards. False = the v1 behaviour (footprint 333, no fetch).
+     */
+    const val STACKED_NFL_YDS_ENABLED = true
+
+    // ---- the YDS column (docs/design/m6-nfl-stacked-yds.md §3; Standard design px, ms)
+    /** The column's open width (140 mock). */
+    const val STACKED_NFL_YDS_W = 63f
+    /** The footprint's width with the column: rows + YDS + clock (396; Large 495). */
+    const val STACKED_NFL_FOOTPRINT_W = STACKED_NFL_W_MAX + STACKED_NFL_YDS_W
+    /** The digits (Instrument Sans Bold, tabular) and the "YDS" label (tracking .08 em, `STACKED_SOG_LABEL`). */
+    const val STACKED_NFL_YDS_DIGITS_PX = 21.6f
+    const val STACKED_NFL_YDS_LABEL_PX = 18f
+    const val STACKED_NFL_YDS_LABEL_TRACK_EM = 0.08f
+    /** Open: width 450 Std, delay 0; contents α 300 / x 350 ease after 300. Close: contents 200 ease, width after 200. */
+    const val STACKED_NFL_YDS_MS = 450L
+    const val STACKED_NFL_YDS_CLOSE_DELAY_MS = 200L
+    const val STACKED_NFL_YDS_IN_ALPHA_MS = 300L
+    const val STACKED_NFL_YDS_IN_MOVE_MS = 350L
+    const val STACKED_NFL_YDS_IN_DELAY_MS = 300L
+    const val STACKED_NFL_YDS_OUT_MS = 200L
+    /** The contents' x offset when hidden (−12 mock); the painter mirrors it. */
+    const val STACKED_NFL_YDS_DX = -5.4f
+
+    // ---- the yards data path (docs/design/m6-nfl-stacked-yds.md §1)
+    /** Team total yards are kept only in this range, else unknown. */
+    const val NFL_YARDS_MIN = -99
+    const val NFL_YARDS_MAX = 999
+    /** `lastPlay.type.id` of an official (TV) timeout, the two-minute warning, and the end of a period (§1.5, S1, S2). */
+    const val NFL_TYPE_OFFICIAL_TIMEOUT = "74"
+    const val NFL_TYPE_TWO_MINUTE_WARNING = "75"
+    const val NFL_TYPE_END_PERIOD = "2"
+    /** Each statistics call's timeout (S4). */
+    const val NFL_YDS_CALL_TIMEOUT_MS = 2_500L
+    /**
+     * The one refresh in a stoppage comes from the first poll at least this long after the poll that carried the first good
+     * fetch (both `receivedMono`; code review S1).
+     */
+    const val NFL_YDS_REFRESH_MS = 30_000L
+    /** A refresh is used only from a poll at least this long after the poll that read it, still in the stoppage (B1). */
+    const val NFL_YDS_CONFIRM_MS = 20_000L
+    /**
+     * At a team timeout (`"T"` key) only, the refresh and its confirm (integration ruling, live2 2026-11-16 21:25–21:45):
+     * the previous play's yards reached the statistics feed 10–20 s after the type-21 timeout appeared on the board, and
+     * team timeouts lasted about 40–60 s. Safe because no play runs during a team timeout, which lasts at least 30 s.
+     */
+    const val NFL_YDS_TIMEOUT_REFRESH_MS = 12_000L
+    const val NFL_YDS_TIMEOUT_CONFIRM_MS = 5_000L
+    /** A failure other than a timeout / IO is retried after this. */
+    const val NFL_YDS_RETRY_MS = 15_000L
+    /** Per stoppage: at most this many attempts, and this many good fetches (the first and one refresh). */
+    const val NFL_YDS_ATTEMPTS_MAX = 3
+    const val NFL_YDS_SUCCESSES_MAX = 2
+    /** A 429 / 403, or two timeout / IO failures in a row, stop the yards (never the scoreboard) for this long (S4). */
+    const val NFL_YDS_BLOCK_MS = 600_000L
+    const val NFL_YDS_STALLS_TO_BLOCK = 2
     /** The team code (Instrument Sans Bold) and the clock (tabular). */
     const val STACKED_NFL_CODE_PX = 25.2f
     const val STACKED_NFL_CLOCK_PX = 27.9f
     /** The possession ball, and its gap after the code's ink. */
-    const val STACKED_NFL_BALL = 13.5f
+    const val STACKED_NFL_BALL = 21f // owner feedback 2026-11-16: 13.5 → 21 (the mock's 30 → 46.7)
     const val STACKED_NFL_BALL_GAP = 5.4f
     /** The possession ball's fill (§6.3, the mock's `#8B4513`; stroked white). */
     const val STACKED_NFL_BALL_FILL = 0xFF8B4513.toInt()

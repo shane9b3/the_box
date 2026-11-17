@@ -23,6 +23,7 @@ import app.thebox.core.sports.NflScoreFrame
 import app.thebox.core.sports.NflScoreKind
 import app.thebox.core.sports.NflShapes
 import app.thebox.core.sports.NflStackedColours
+import app.thebox.core.sports.NflYards
 import app.thebox.core.sports.ScoreBugView
 import app.thebox.core.sports.Side
 import app.thebox.core.sports.SportsConstants as K
@@ -60,6 +61,9 @@ import kotlin.math.tan
  *   1-px white .22 divider under the away row. Mirrored: the reflection [score][ball][code][logo][stripe] (§5.3);
  * - the clock column (90): the inset line on its rows side, the period (21.6, .02 em) on a line ending 6.3 above the 50.4
  *   slot, the 1-px rule 11.7 in, and the clock (27.9 tabular) or "No update" / "Delayed" (two lines when fitted so);
+ * - (NFL YDS §3.1, §3.7) the YDS column (63) between the rows and the clock column, when open: the inset line on its rows
+ *   side, each row's total yards (21.6 Bold tabular, centred on the row; "−2" with U+2212) and "YDS" (18, .08 em,
+ *   `STACKED_SOG_LABEL`) centred on the rows' divider line; the clock column after its open width. Never dimmed;
  * - the bar (33): its background (lerped through a REKEY), two −30° stripes (11.7 wide at 20.7 / 37.8, overhang 4.5), the
  *   words (20 Bold Italic at 63): [flag icon] label | divider | sub, the red-zone patch from the divider, the 1-px white
  *   .22 hairline on its inner edge, the NHL bar's 1-px black .25 text shadow (not on the yellow flag bar).
@@ -82,6 +86,8 @@ internal class StackedNflPainter(
     private val rowH = h / 2f
     private val rowsW = K.STACKED_ROWS_W * s
     private val clockW = K.STACKED_CLOCK_W * s
+    /** (NFL YDS §3.1) The YDS column's full width, device px. */
+    private val ydsW = K.STACKED_NFL_YDS_W * s
     private val radius = StackedMock.BOX_RADIUS * K.STACKED_SCALE * s
     private val line = (K.STACKED_HAIRLINE_W * s).coerceAtLeast(1f)
     private val stripeW = K.STACKED_NFL_STRIPE_W * s
@@ -129,6 +135,9 @@ internal class StackedNflPainter(
     private val periodPaint = text(K.STACKED_NFL_PERIOD_PX, sansBold, Paint.Align.CENTER, PERIOD_TRACK_EM)
     private val slotPaint = text(K.STACKED_NFL_CLOCK_PX, sansBold, Paint.Align.CENTER)
     private val clockPaint = text(K.STACKED_NFL_CLOCK_PX, sansBold, Paint.Align.LEFT, tnum = true)
+    /** (NFL YDS §3.1) The YDS digits (21.6 Bold tabular, centred) and the "YDS" label (18, .08 em). */
+    private val ydsPaint = text(K.STACKED_NFL_YDS_DIGITS_PX, sansBold, Paint.Align.CENTER, tnum = true)
+    private val ydsLabelPaint = text(K.STACKED_NFL_YDS_LABEL_PX, sansBold, Paint.Align.CENTER, K.STACKED_NFL_YDS_LABEL_TRACK_EM)
     private val barPaint = text(K.STACKED_BAR_TEXT_PX, barFont ?: sansBold, Paint.Align.LEFT, BAR_TRACK_EM).apply {
         if (barFont == null) textSkewX = K.STACKED_FAUX_ITALIC_SKEW_X
     }
@@ -156,6 +165,11 @@ internal class StackedNflPainter(
     private val codeBaseline: Float
     private val codeCy: Float
     private val barOffset: Float
+    /** (NFL YDS §3.1) Baseline offsets centring the digits by the "0" bounds and the label by the "S" bounds. */
+    private val ydsOffset: Float
+    private val ydsLabelOffset: Float
+    /** (NFL YDS §3.7) The label, resolved from `sports_stacked_yds` by [frame]; "YDS" until the first frame. */
+    private var ydsLabel = "YDS"
 
     // ---- the clock's digit table (tabular: a new value never moves a digit)
     /** The clock's size in design px: 27.9, stepped down only if "00:00" would not fit the column. */
@@ -197,6 +211,10 @@ internal class StackedNflPainter(
         codeCy = codeTop + codeLine / 2f
         barPaint.getFontMetrics(fm)
         barOffset = -(fm.ascent + fm.descent) / 2f
+        ydsPaint.getTextBounds("0", 0, 1, bounds)
+        ydsOffset = -(bounds.top + bounds.bottom) / 2f
+        ydsLabelPaint.getTextBounds("S", 0, 1, bounds)
+        ydsLabelOffset = -(bounds.top + bounds.bottom) / 2f
 
         var px = K.STACKED_NFL_CLOCK_PX
         fun widest(): Float {
@@ -228,7 +246,7 @@ internal class StackedNflPainter(
         stripePath.close()
     }
 
-    /** The possession ball: the mock's 24-unit football, filled `#8B4513`, stroked white 1.6 / 24, at 1.5× its 13.5 px. */
+    /** The possession ball: the mock's 24-unit football, filled `#8B4513`, stroked white 1.6 / 24, at 1.5× its 21 px (13.5 before owner feedback 2026-11-16). */
     private fun bakeBall(): Bitmap {
         val a = SPRITE_SCALE
         val px = ceil(ballPx * a).toInt().coerceAtLeast(1)
@@ -342,6 +360,11 @@ internal class StackedNflPainter(
         }
         val periodStart = K.STACKED_NFL_PERIOD_PX
         val fit = if (targets.clockSlot == ClockSlot.Clock || slotText.isEmpty()) null else fitSlot(slotText)
+        // (NFL YDS §3.7) Both teams' yards or neither; the label once per frame (as the hockey `sogLabel`).
+        ydsLabel = res.getString(R.string.sports_stacked_yds)
+        val ay = v.nfl?.awayYards
+        val hy = v.nfl?.homeYards
+        val yds = ay != null && hy != null
         return StackedNflFrameState(
             awayAbbrev = v.away.abbrev,
             homeAbbrev = v.home.abbrev,
@@ -362,6 +385,8 @@ internal class StackedNflPainter(
             slotBreak = fit?.brk ?: -1,
             slotDy1 = fit?.dy1 ?: 0f,
             slotDy2 = fit?.dy2 ?: 0f,
+            awayYds = if (yds) NflYards.text(ay!!) else "",
+            homeYds = if (yds) NflYards.text(hy!!) else "",
         )
     }
 
@@ -491,7 +516,7 @@ internal class StackedNflPainter(
      * The whole box for [a] (see [StackedNflDrawArgs] for the coordinates), in the hockey composite's order
      * (`StackedPainter.drawFrame`): the glow ([StackedNflDrawArgs.takeover]'s exact-box masks, when
      * [StackedNflDrawArgs.glowOn]), the shadow ([StackedNflDrawArgs.shadow]), box fill, bar, rows (stripes, logos, codes,
-     * balls, pips, scores, the row flash and the pop), clock column, the takeover over the top part, and the border on
+     * balls, pips, scores, the row flash and the pop), the YDS column, the clock column, the takeover over the top part, and the border on
      * top (the mock's border is outside the content, so the takeover never covers it). Allocation-free.
      */
     fun drawFrame(c: Canvas, a: StackedNflDrawArgs) {
@@ -523,7 +548,9 @@ internal class StackedNflPainter(
         if (bh > 0f) drawBar(c, a, f, bh, l, l + w)
         // 5. The rows.
         drawRows(c, a, st, f, pair, if (scoring) g else null)
-        // 6. The clock column.
+        // 5b. (NFL YDS §3.7) The YDS column, beside the rows.
+        if (f.ydsWidth > 0f) drawYds(c, st, f, mirrored)
+        // 6. The clock column, after the YDS column's open width.
         if (f.clockWidth > 0f) drawClockColumn(c, st, f, mirrored)
         // 7. The takeover over the top part.
         if (drawTakeover) {
@@ -804,11 +831,41 @@ internal class StackedNflPainter(
         }
     }
 
-    /** The clock column beside the rows: contents anchored to its rows-side edge, revealed by a clip of the open width. */
+    /**
+     * (NFL YDS §3.1, §3.7) The YDS column beside the rows (`StackedPainter.drawSog` with NFL names): its contents anchor
+     * to the rows' edge (the inset line there) and are revealed by a clip of the open width, so it opens away from the
+     * rows: rightwards, or leftwards when [mirrored]; the contents' slide `ydsDx` (−5.4 → 0) runs toward the rows on both
+     * sides. Never dimmed (the SOG precedent). Allocation-free: the strings are the body's, the offsets pre-measured.
+     */
+    private fun drawYds(c: Canvas, st: StackedNflFrameState, f: StackedNflFrame, mirrored: Boolean) {
+        val open = f.ydsWidth * ydsW
+        val cl = if (mirrored) -open else rowsW
+        c.withClip(cl, 0f, cl + open, h) {
+            val alpha = f.ydsAlpha
+            if (alpha <= 0f) return@withClip
+            // The contents' left edge. Mirrored, the column's right edge is the rows' left edge (0), and the slide is negated.
+            val x = if (mirrored) -ydsW - f.ydsDx * s else rowsW + f.ydsDx * s
+            fill.color = argb(alpha, K.STACKED_INSET_LINE)
+            if (mirrored) drawRect(x + ydsW - line, 0f, x + ydsW, h, fill) else drawRect(x, 0f, x + line, h, fill)
+            val cx = x + ydsW / 2f
+            ydsPaint.color = argb(alpha, 0xFFFFFF)
+            if (st.awayYds.isNotEmpty()) drawText(st.awayYds, cx, rowH / 2f + ydsOffset, ydsPaint)
+            if (st.homeYds.isNotEmpty()) drawText(st.homeYds, cx, rowH * 1.5f + ydsOffset, ydsPaint)
+            ydsLabelPaint.color = argb(alpha, K.STACKED_SOG_LABEL)
+            drawText(ydsLabel, cx, rowH + ydsLabelOffset, ydsLabelPaint)
+        }
+    }
+
+    /**
+     * The clock column after the YDS column's open width (NFL YDS §3.7, `StackedPainter.kt`'s SOG form): contents
+     * anchored to its rows-side edge, revealed by a clip of the open width; with the YDS column closed the positions are
+     * exactly the v1 ones.
+     */
     private fun drawClockColumn(c: Canvas, st: StackedNflFrameState, f: StackedNflFrame, mirrored: Boolean) {
         val open = f.clockWidth * clockW
-        val x0 = if (mirrored) -clockW else rowsW
-        val cl = if (mirrored) -open else x0
+        val yo = f.ydsWidth * ydsW
+        val x0 = if (mirrored) -yo - clockW else rowsW + yo
+        val cl = if (mirrored) -yo - open else x0
         c.withClip(cl, 0f, cl + open, h) {
             val alpha = f.clockAlpha * (if (st.columnDim) K.STACKED_DIM_ALPHA else 1f)
             if (alpha <= 0f) return@withClip
@@ -930,6 +987,25 @@ internal class StackedNflPainter(
         val scorePx: Float,
         val codePx: Float,
     )
+
+    /**
+     * (NFL YDS §3.4) The ink of [text] in the YDS column as drawn at rest in a left corner (device px, x from the
+     * column's left edge, y from the box's top): the digits on row [row] (0 away, 1 home), or the label when [label].
+     */
+    internal fun ydsInk(text: String, label: Boolean, row: Int = 0): RectF {
+        val p = if (label) ydsLabelPaint else ydsPaint
+        val r = Rect()
+        p.getTextBounds(text, 0, text.length, r)
+        val cy = if (label) rowH + ydsLabelOffset else rowH * (row + 0.5f) + ydsOffset
+        val w = p.measureText(text)
+        val x = ydsW / 2f - w / 2f // centred by its advance (Paint.Align.CENTER)
+        return RectF(x + r.left, cy + r.top, x + r.right, cy + r.bottom)
+    }
+
+    /** (NFL YDS §3.4) The digits' advance (tabular) at their drawn size, device px. */
+    internal fun ydsAdvance(text: String): Float = ydsPaint.measureText(text)
+    internal val ydsWidth: Float get() = ydsW
+    internal val ydsLabelText: String get() = ydsLabel
 
     internal val possStripeWidth: Float get() = possStripeW
     internal val stripeWidth: Float get() = stripeW

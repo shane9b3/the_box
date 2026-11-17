@@ -81,6 +81,13 @@ data class StackedNflTargets(
     val homeTimeouts: Int?,
     val timeoutSlots: Int,
     val burnSide: Side?,
+    /**
+     * (NFL YDS §2; trailing, defaulted) The YDS column is open: the view carries both teams' yards
+     * (`NflView.awayYards` / `homeYards`) and is not a flag or a stale / waiting play state (the source attaches yards
+     * only to stoppage snapshots). A break, Final and a stale / waiting break keep it (the NHL SOG rule); the runner's
+     * pinned score holds the pre-score value. Never dimmed.
+     */
+    val ydsOpen: Boolean = false,
 ) {
     companion object {
         /**
@@ -107,9 +114,14 @@ data class StackedNflTargets(
          * `Blank`. [columnDim] is `v.dim` in every row; [barDim] exactly for `NO_UPDATE` / `DELAYED`. The pips: the
          * view's counts, clamped to `0..timeoutSlots`; hidden (null) when the view has no slots ([timeoutSlots] 0).
          * The pinned score (the runner's) is above every row and is never a target.
+         *
+         * (NFL YDS §2) [ydsOpen] is `known` (the view carries both teams' yards) in every row except the flag (false) and
+         * stale / waiting in play (false).
          */
         fun of(v: ScoreBugView): StackedNflTargets {
             val n = v.nfl
+            // (NFL YDS §2) Both teams' yards on the view's own snapshot.
+            val known = n?.awayYards != null && n.homeYards != null
             val slots = (n?.timeoutSlots ?: 0).coerceIn(0, K.NFL_TIMEOUTS_MAX)
             val away = if (slots > 0) n?.awayTimeouts?.coerceIn(0, slots) else null
             val home = if (slots > 0) n?.homeTimeouts?.coerceIn(0, slots) else null
@@ -124,19 +136,21 @@ data class StackedNflTargets(
             fun folded(bar: NflBarKey) = StackedNflTargets(
                 clockOpen = false, bar = bar, possSide = null, period = v.period, clockSlot = ClockSlot.Blank,
                 columnDim = v.dim, barDim = bar.kind == NflBarKind.NO_UPDATE || bar.kind == NflBarKind.DELAYED,
-                awayTimeouts = away, homeTimeouts = home, timeoutSlots = slots, burnSide = null,
+                awayTimeouts = away, homeTimeouts = home, timeoutSlots = slots, burnSide = null, ydsOpen = known,
             )
 
-            fun open(bar: NflBarKey?, poss: Side?, slot: ClockSlot, burn: Side?) = StackedNflTargets(
+            fun open(bar: NflBarKey?, poss: Side?, slot: ClockSlot, burn: Side?, yds: Boolean = true) = StackedNflTargets(
                 clockOpen = true, bar = bar, possSide = poss, period = v.period, clockSlot = slot, columnDim = v.dim,
                 barDim = false, awayTimeouts = away, homeTimeouts = home, timeoutSlots = slots, burnSide = burn,
+                ydsOpen = yds && known,
             )
 
             // 1. Stale / waiting (RC4: above the break, the flag, the timeout and the play).
             if (dimKind != null) {
                 if (!inPlay) return folded(NflBarKey(dimKind, null))
                 val slot = if (dimKind == NflBarKind.NO_UPDATE) ClockSlot.NoUpdate else ClockSlot.Delayed
-                return open(bar = null, poss = null, slot = slot, burn = null)
+                // NFL YDS §2: in play as far as the view knows: the column stays closed.
+                return open(bar = null, poss = null, slot = slot, burn = null, yds = false)
             }
             // 2. Breaks and Final.
             when (val top = v.top) {
@@ -149,7 +163,8 @@ data class StackedNflTargets(
             val slot = if (v.clockSecs != null) ClockSlot.Clock else ClockSlot.Blank
             val tab = n?.tab
             val poss = tab?.side
-            if (n?.flagId != null) return open(NflBarKey(NflBarKind.FLAG, null), poss, slot, burn = null)
+            // NFL YDS §2: never on the flag bar.
+            if (n?.flagId != null) return open(NflBarKey(NflBarKind.FLAG, null), poss, slot, burn = null, yds = false)
             val mark = n?.timeout
             if (mark != null) {
                 val left = mark.left.coerceIn(0, K.NFL_TIMEOUTS_MAX)
@@ -220,14 +235,32 @@ object StackedNflGeometry {
     fun rowsLeft(boxW: Float, mirrored: Boolean): Float = if (mirrored) boxW - K.STACKED_ROWS_W else 0f
 
     /** The clock column's left edge in the box, [clockW] = `clockWidth × STACKED_CLOCK_W` (left: after the rows; mirrored: outermost left). */
-    fun clockX(boxW: Float, clockW: Float, mirrored: Boolean): Float = boxX(K.STACKED_ROWS_W, clockW, boxW, mirrored)
+    fun clockX(boxW: Float, clockW: Float, mirrored: Boolean): Float = clockX(boxW, clockW, 0f, mirrored)
+
+    /**
+     * (NFL YDS §3.3, §3.7) The clock column's left edge after the YDS column's open width [ydsW] (`ydsWidth ×
+     * STACKED_NFL_YDS_W`): from the screen edge inwards `[rows][YDS][clock]` on the left, `[clock][YDS][rows]` on the
+     * right (at 396 mirrored: clock 0–90, YDS 90–153, rows 153–396).
+     */
+    fun clockX(boxW: Float, clockW: Float, ydsW: Float, mirrored: Boolean): Float = boxX(K.STACKED_ROWS_W + ydsW, clockW, boxW, mirrored)
 
     /**
      * The clock column's contents' 90-wide stack, anchored on the rows' side and clipped by the column while it folds
      * (the CSS's `left: 0; width: 200px` inside the `overflow: hidden` column): left corners at 243, mirrored at
      * `boxW − 243 − 90`.
      */
-    fun clockContentX(boxW: Float, mirrored: Boolean): Float = boxX(K.STACKED_ROWS_W, K.STACKED_CLOCK_W, boxW, mirrored)
+    fun clockContentX(boxW: Float, mirrored: Boolean): Float = clockContentX(boxW, 0f, mirrored)
+
+    /** (NFL YDS §3.7) [clockContentX] after the YDS column's open width [ydsW]: left 243 + [ydsW], mirrored reflected. */
+    fun clockContentX(boxW: Float, ydsW: Float, mirrored: Boolean): Float =
+        boxX(K.STACKED_ROWS_W + ydsW, K.STACKED_CLOCK_W, boxW, mirrored)
+
+    /**
+     * (NFL YDS §3.3, §3.7) The YDS column's left edge in the box, [ydsW] its open width: right after the rows on the left
+     * (243), mirrored right before them (`boxW − 243 − ydsW`). Its contents (63 wide) anchor on the rows' side, so
+     * mirrored they start at `boxW − 243 − 63` and are clipped by the open width.
+     */
+    fun ydsX(boxW: Float, ydsW: Float, mirrored: Boolean): Float = boxX(K.STACKED_ROWS_W, ydsW, boxW, mirrored)
 
     // ------------------------------------------------------------------ the row (§2.3, §5.2; row-local)
 

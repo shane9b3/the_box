@@ -4,6 +4,9 @@ Status: **proposed 2026-11-15; reviewed 2026-11-15 (approve with required change
 2026-11-15.** Review: `docs/review/2026-11-15-nfl-stacked-design-review.md` (RC1–RC9, recommendations 1–9). Decision:
 `docs/decisions/2026-11-15-nfl-score-bug-stacked.md`. Items marked "(RCn)" / "(Rec n)" apply that finding in place.
 
+**(YDS 2026-11-16) The YDS column is built:** `docs/design/m6-nfl-stacked-yds.md` (decision `docs/decisions/2026-11-16-nfl-stacked-yards-column.md`).
+Where this document and that one differ on the column, the footprint or the end-of-quarter shape, that one wins.
+
 Owner request (2026-11-15, verbatim): "please create the NFL stacked bug please use answers from previous NHL builds for
 your baseline". Mock-up: `design/nfl-stacked/StackedNFL.dc.html` ("the mock"; README and two logo PNGs beside it). Its
 inline styles and `<helmet><style>` block are "the CSS"; its `Component` class is "the mock JS".
@@ -42,7 +45,8 @@ All nine required changes are applied, with these rulings where the review left 
 5. **Stale / delayed (RC5): aligned with the baseline.** In play, "No update" / "Delayed" goes in the clock slot and the
    bar **closes**, as NHL Stacked and the NFL Pill do. No deviation.
 6. **YDS column (RC6): out of v1 and out of the footprint.** Footprint **333 × 141** Standard, **416.25 × 176.25** Large;
-   every dependent number re-derived. The column's spec is kept in Appendix A, marked "not built".
+   every dependent number re-derived. The column's spec is kept in Appendix A, marked "not built". *(YDS 2026-11-16:
+   superseded by the owner's approval; the column is built, footprint 396 × 141 / 495 × 176.25, `docs/design/m6-nfl-stacked-yds.md` §3.2.)*
 7. **Overtime pips (RC7):** slots = the highest count seen in that half group (≤ 3).
 8. **Feed facts (RC8)** corrected from the review's live samples; proven items moved out of "not determined"; the still
    unproven ones (halftime `situation`, OT counts, offsetting-foul text, the caller in `lastPlay.team`, a declined foul
@@ -65,10 +69,12 @@ down bar recorded as a deviation (Rec 8); announcements gated (Rec 9). Flag hold
 2. **The data and machine are the NFL Pill's**, plus three additions from fields the scoreboard already sends (all
    proven live, §3.1): timeouts (`situation.awayTimeouts/homeTimeouts`), a **timeout mark** from `lastPlay` type 21
    confirmed by the count, and a **flag** from `lastPlay` type 8 or "PENALTY on".
-3. **No YDS column in v1**: the scoreboard has no team yards; they are only in the 175–662 KB summary (Owner Q2).
+3. **YDS column (YDS 2026-11-16):** team total yards from ESPN's per-team statistics, fetched at stoppages and attached
+   to the snapshot (`docs/design/m6-nfl-stacked-yds.md`). v1 shipped without it.
 4. **Size and look are the NHL Stacked's:** mock × 0.45 (SR1), info text 20 px and bar 33 (ST S5), fixed navy rows
    `#12284F`, team-true colours through `NhlStackedColours.derive` (SR2, SR3), hairline on every bar, ΔE76 stripe swap.
-   Footprint **333 × 141** Standard, **416.25 × 176.25** Large (SR8).
+   Footprint **333 × 141** Standard, **416.25 × 176.25** Large (SR8); with the YDS column (YDS 2026-11-16) **396 × 141**
+   / **495 × 176.25**.
 5. **The bar is open in fresh play** (the mock's structure; R22). It reads down & distance and field ("1ST & 10 | KC 35")
    in the possession team's bar colours and becomes the flag, timeout, score, halftime, end-of-quarter and final bar on
    those events. It closes when stale or waiting in play, and when the feed has no `situation`. Every content change
@@ -135,6 +141,7 @@ down bar recorded as a deviation (Rec 8); announcements gated (Rec 9). Flag hold
 ### 2.1 Scale
 - **0.45** (SR1). Same family as the NHL mock: top part 240 (two 120 rows), bar 66, rows 540, clock column 200.
 - Widest **built** box: rows + clock = 540 + 200 = **740 → 333** (the YDS column, 140 mock, is not built; Appendix A).
+  *(YDS 2026-11-16: rows + YDS + clock = 880 → **396**; the play box stays 333, `STACKED_NFL_W_MAX`.)*
   Height 108 + bar 33 = **141**.
 - Large = × `SCORE_LARGE_SCALE` 1.25.
 - Raised values (ST S5): bar 29.7 → **33**, bar text 17.1 → **20**, tally 6.75 → **20**.
@@ -157,7 +164,7 @@ advances of the bundled files (no kerning; the method reproduces NFL §5.2's "TO
 | Centre block padding-left | 26 | 11.7 | code starts at stripe + 74.7: **78.3** (81.0 with the 6.3 stripe) |
 | Team code | 56 / 800, .01 em, line-height 1 | **25.2** Instrument Sans Bold | widest "WSH" 62.7, narrowest "SF" 31.8 |
 | Code line box top | (120 − 70) / 2 = 25 | 11.25 | block = code 56 + gap 8 + pips 6 |
-| Possession ball | 30 SVG, fill `#8B4513`, stroke white 1.6 / 24 | **13.5**, stroke 0.9 | gap 12 → 5.4 after the code; centred on the code line |
+| Possession ball | 30 SVG, fill `#8B4513`, stroke white 1.6 / 24 | **21**, stroke 1.4 (owner feedback 2026-11-16: enlarged from 13.5, stroke 0.9; it read small on a TV) | gap 12 → 5.4 after the code; centred on the code line |
 | Timeout pips | 3 × (22 × 6, r 2), gap 6, 8 below the code line | **9.9 × 3.0**, r 0.9, gap 2.7, top **40.05** (bottom 43.05) | height raised 2.7 → 3.0 (S-D12, §2.3.1) |
 | Pip colours | lit `#FFD34D`, used white α .22, transition .4 s | same | lit 10.18 : 1 on the row; lit vs used 5.09 |
 | Pip burn | `toBurn` .32 s × 5 | **4 × 400 ms** | flash rule (§4.2) |
@@ -168,7 +175,7 @@ advances of the bundled files (no kerning; the method reproduces NFL §5.2's "TO
 | Clock | 62 / 700 tabular | **27.9** | "15:00" 74.9 + 2 × 5 air ≤ 90 |
 | Box border, radius | 1 `#2B3550`, 6 | 1, 2.7 | |
 | Box shadow | 0 12 36 .55 | nine-slice dy 5.4, σ 8.1, α .55 | ST §6 bake |
-| YDS column | 140 | **not built** | Appendix A |
+| YDS column | 140 | **63** (YDS 2026-11-16) | `m6-nfl-stacked-yds.md` §3.1 |
 
 #### 2.3.1 Pip legibility at 720p (Rec 3)
 1 design px = 1280 / 1920 = 0.667 real px at 720p. The mock's 2.7-px pip is **1.8 real px** tall there, under 2.
@@ -248,7 +255,7 @@ The ×1.05 word pulse overruns by ≤ 4.3 px into the 13.5 gaps (accepted). The 
 |---|---|---|
 | `play` | ball on, stripe 14, bar "1ST & 10 \| KC 35" | `.ball`, `.stripe`, re-key |
 | `flag` | yellow bar, icon waves, contents shake | `flagShake` .5 s ease-in-out, delay .15, × 2 (±6, ±4 mock); `flagWave` .6 s alternate infinite ±8° about (4, 26) |
-| `timeout` | pip burns, bar "TIMEOUT BUF \| 1 LEFT", YDS opens | `toBurn`; `.yds` (not built) |
+| `timeout` | pip burns, bar "TIMEOUT BUF \| 1 LEFT", YDS opens | `toBurn`; `.yds` (built, YDS 2026-11-16) |
 | `half` | ball off, stripes 8, clock folds, YDS opens, "HALFTIME" | `.clockcol` .45 s Std (fold delay 0, open .35); contents .15 / .3 after .5 |
 | `score` / `after` | 3.6 s takeover; then row flash 1.2 s, pop .9 s, bar "EXTRA POINT …" / "KC KICKOFF …" | `s-*`, `sPop*`, `sRow*` |
 | any change | `barKey` bump re-mounts the bar contents | `barIn` .45 s Spring delay .1 (α 0, x −26); `stripeIn` .45 s Spring (x −140), B +.08; bg .35 s ease |
@@ -289,9 +296,10 @@ existing fixtures' key sets by the proposer's `trim.py`; public scoreboard bodie
 | **Penalty, play stands** | the play's own type, "PENALTY on" in the text | text no | `live-sample-2026-11-08.log` 14:36:07 (Kickoff 53), 14:40:27 (Rush 5); summary final (Punt 52, Pass Reception 24) |
 | **Declined foul** | "Penalty on KC-…, Offensive Holding, declined." (mixed case), type 3 | — | summary final `summary-final-401873058` (review espn/); on the scoreboard inferred (same play text), not seen |
 | Flag visible mid-play | no: logged with the resolved play | — | live + 2026-11-08 log |
-| **Team yards** | not on the scoreboard (`competitors[].statistics` = `[]`, full board, per-event `scoreboard/{id}` (9 KB) and final) | — | `sbEvent.json`, `ev_401873045.json`, live `event-401873061-162614.json`; summary `boxscore.teams[].statistics.totalYards` exists: 175 KB in Q1, 662 KB final |
+| **Team yards** | not on the scoreboard (`competitors[].statistics` = `[]`, full board, per-event `scoreboard/{id}` (9 KB) and final) | — | `sbEvent.json`, `ev_401873045.json`, live `event-401873061-162614.json`; summary `boxscore.teams[].statistics.totalYards` exists: 175 KB in Q1, 662 KB final. *(YDS 2026-11-16)* per-team `…/competitors/{id}/statistics` `totalYards`, 8–10 KB gzip each, on the board's sample (lead sampling 2026-11-16; `m6-nfl-stacked-yds.md` §1.1) |
 | Clock lag | the clock can hold across plays, then jump | — | `…clock-lag-a/b…` |
 | End of quarter | `STATUS_END_PERIOD`, situation kept, `lastPlay` 2 | phase yes | `scoreboard-live-end-period-2026-11-08.json` |
+| *(YDS 2026-11-16, S1)* End of quarter, after its one sample | `STATUS_IN_PROGRESS`, next period, 15:00, `lastPlay` type 2, ≈ 3 min until the first snap; mapped to END_PERIOD of the previous period for periods 2 / 4 (lead default, pending the owner) | WP-1 | `scoreboard-live-change-of-ends-2026-11-16.json`; `m6-nfl-stacked-yds.md` §1.12 |
 
 The follow reads the per-event `scoreboard/{id}` first (`data/.../EspnScoreSource.kt:58, 139-150, 212`, review); it
 carries the same `situation`.
@@ -380,6 +388,9 @@ Precedence (RC4): **pinned score (runner) > stale / waiting > break / final > fl
 | Between a pair's takeovers | pinned | pinned | "EXTRA POINT", scorer's colours | NFL lead 3 |
 | Place mode, no follow | KC 24 – BUF 17, "4TH" / "3:42", "1ST & 10 \| KC 35", ball KC, pips 3/2 of 3 | open | PLAY | NFL §4.6 sample |
 
+**YDS column (YDS 2026-11-16):** open whenever the view carries both teams' yards, except on the flag row and stale /
+waiting in play; the bar is unchanged (an official timeout keeps its play / kick-off bar). `m6-nfl-stacked-yds.md` §2.
+
 Pips: drawn whenever the view carries counts and slots, in every row above with rows (they are row content, never
 dimmed); hidden when the counts are null.
 
@@ -426,6 +437,8 @@ CSS); the rest is implemented here.
 | FLAG (sub-track) | shake | text, divider, stripes x: 0 → −2.7 (20 %) → +2.7 (40 %) → −1.8 (60 %) → +1.8 (80 %) → 0, each segment ease-in-out | 500 × 2 | 150 | | none |
 | | wave | icon −8° ⇄ +8° about (2.1, 13.8), alternate, while the flag bar shows (≤ 8 s) | 600 / half | 0 | ease-in-out | 0° |
 
+- *(YDS 2026-11-16)* YDS track: open width 450 Std, contents α 300 / x 350 ease after 300; close contents 200, width
+  450 Std after 200 (`m6-nfl-stacked-yds.md` §3.5).
 - Interrupted transitions start from the current value with full duration and delay.
 - REKEY rather than the NHL change/swap: the mock re-mounts the bar on every change, and the NFL bar changes each play
   (about every 30–40 s). A clock-only update never kicks it (target-key equality).
@@ -498,7 +511,7 @@ existing `sample`, `samplePair`, `sampleStill` delegate to the `(NflScoreSpec.PI
 ### 4.5 TV-performance rules
 
 No blur (GA masks baked for the exact box; ST nine-slice shadow; hard-offset logo shadow; no `setShadowLayer`). One leaf
-layer (footprint + 2 M = **481 × 289** Standard, 568.25 × 328.25 Large), `clipRect` only, never an ancestor of the
+layer (footprint + 2 M = **481 × 289** Standard, 568.25 × 328.25 Large; with the YDS column **544 × 289** / 647 × 328.25, YDS 2026-11-16), `clipRect` only, never an ancestor of the
 surface; the rectangle box makes the Pill's stadium bands (NFL B5) unnecessary. Sprites baked once per size (`ALPHA_8`,
 1.5×): the possession ball (fill + stroke), the takeover ball, the posts, the flag icon. The word atlas is the Pill's
 de-duplicated glyph atlas at the Stacked sizes. Allocation-free draw (GA §2.5). Glow masks at the largest box ≈ 481 × 289
@@ -514,9 +527,13 @@ ALPHA_8 ≈ 139 KB at 1080p each (LRU 2 per size, ST §6).
 |---|---|
 | Play, flag, timeout, stale / waiting in play | 333 (rows + clock) |
 | Halftime, end of quarter, final, stale / waiting in a break | **243** (rows only) |
+| *(YDS 2026-11-16)* an in-play stoppage with yards / a break or Final with yards | **396** / **306** |
 
 `STACKED_NFL_W_MAX = STACKED_ROWS_W + STACKED_CLOCK_W` = **333**; height `STACKED_H + STACKED_BAR_H` = 141. Large
-416.25 × 176.25. (With YDS some day: `+ STACKED_NFL_YDS_W`, a one-constant change with the same tests; Appendix A.)
+416.25 × 176.25. *(YDS 2026-11-16: the footprint is `STACKED_NFL_FOOTPRINT_W` = 396 × 141, Large 495 × 176.25; the table
+below is v1's, superseded by `m6-nfl-stacked-yds.md` §3.2: top right (1428, 56)–(1824, 197), Large (1329, 56)–(1824,
+232.25); top left right edge 492 / 591; halo (1354, −18)–(1898, 271), Large (1253, −20)–(1900, 308.25). The rows do not
+move.)*
 
 | Corner | Standard footprint | Large footprint | Rows | Bar |
 |---|---|---|---|---|
@@ -542,11 +559,12 @@ anchored 333 box and positions the hint from the drawn box (ST N8).
 | 0 – 3.6 (6.3 with possession) | stripe |
 | stripe + 9 … + 63 | logo slot |
 | stripe + 74.7 | code start (78.3 / **81.0**: the wider stripe moves logo, code, ball, pips by 2.7; the score stays, ST §4.3) |
-| code end + 5.4 | ball 13.5 |
+| code end + 5.4 | ball 21 (13.5 before 2026-11-16) |
 | code start | pips, top 40.05 |
 | 183.6 – 228.6 | score slot, right-aligned at 228.6 |
 
-Narrowest gap: 81.0 + 62.7 ("WSH") + 5.4 + 13.5 = 162.6 against "88"'s ink at ≈ 186.5: 23.9 px. `StackedNflFitTest`
+Narrowest gap: 81.0 + 62.7 ("WSH") + 5.4 + 21 = 170.1 against "88"'s ink at ≈ 186.5: 16.4 px (23.9 with the old 13.5
+ball; with the real font WSH advances 61.0 and the drawn gap is 19.2 Standard / 19.6 Large, 17.2 to a mirrored "100"; ≥ 12 / ≥ 4 required). `StackedNflFitTest`
 asserts ≥ 12 for all 32 codes with "88" and the 3-digit fit, both sizes, both mirror states.
 
 ### 5.3 Right-hand mirror
@@ -567,6 +585,7 @@ about the box (x' = box right − (x − box left) − w); alignments swap; noth
 | Ball run / arc | x' = boxW − x − 31.5 (right to left); rotations negated |
 | Goalposts | x' = boxW − x − 40.5 (symmetric drawing) |
 | Row flash, pop | the reflected row / slot |
+| *(YDS 2026-11-16)* YDS column | `[clock][YDS][rows]` from the screen edge; contents at the rows-side edge, slide mirrored |
 
 ### 5.4 Codes, logos, scores
 - Codes are 2–3 letters (WSH, LAR, LAC, JAX checked live). A longer one steps the code down 2 px to 18; never ellipsised.
@@ -817,8 +836,9 @@ upper-cased (`Locale.ROOT`): the Pill's down texts, "EXTRA POINT", "RED ZONE", t
 `sports_no_update` / `sports_delayed` (clock slot), `sports_stacked_no_update` / `sports_stacked_delayed` (break bar).
 
 ### 8.5 Constants (`SportsConstants`; Standard, Large × 1.25)
-`STACKED_NFL_W_MAX` 333 (= rows + clock), `STACKED_NFL_YDS_ENABLED` false, `STACKED_NFL_CODE_PX` 25.2,
-`STACKED_NFL_CLOCK_PX` 27.9, `STACKED_NFL_BALL` 13.5, `STACKED_NFL_BALL_GAP` 5.4, `STACKED_NFL_PIP_W` 9.9, `_H` **3.0**,
+`STACKED_NFL_W_MAX` 333 (= rows + clock; the play box), `STACKED_NFL_YDS_ENABLED` false (YDS 2026-11-16: **true**, with
+`STACKED_NFL_YDS_*`, `STACKED_NFL_FOOTPRINT_W`, `NFL_YDS_*`; `m6-nfl-stacked-yds.md` §5.0), `STACKED_NFL_CODE_PX` 25.2,
+`STACKED_NFL_CLOCK_PX` 27.9, `STACKED_NFL_BALL` 21 (13.5 before 2026-11-16), `STACKED_NFL_BALL_GAP` 5.4, `STACKED_NFL_PIP_W` 9.9, `_H` **3.0**,
 `_R` .9, `_GAP` 2.7, `_TOP` 40.05, `STACKED_NFL_PIP_LIT` `#FFD34D`, `STACKED_NFL_PIP_USED_ALPHA` .22,
 `STACKED_NFL_BURN_CYCLE_MS` 400, `_CYCLES` 4, `STACKED_NFL_BAR_TEXT_GAP` 10.8, `STACKED_NFL_FLAG_BG/FG/B`,
 `STACKED_NFL_FLAG_ICON_W/H` 15.8 / 17.9, `STACKED_NFL_REKEY_BG_MS` 350, `_STRIPE_MS` 450, `_STRIPE_B_DELAY_MS` 80,
@@ -929,7 +949,7 @@ lead appends the `score-bug-stacked-nfl/` hashes (same host header).
 
 | ID | Mock | Here | Why |
 |---|---|---|---|
-| S-D1 | YDS column at timeouts and halftime | not built | no team yards on the scoreboard; Owner Q2; Appendix A |
+| S-D1 | YDS column at timeouts and halftime | not built *(YDS 2026-11-16: built; deviations Y-D1–Y-D5 in `m6-nfl-stacked-yds.md` §9)* | no team yards on the scoreboard; Owner Q2; Appendix A |
 | S-D2 | tally "KC 24 · BUF 17" 15 px; name line | "24 – 17" at 20; name dropped | NFL D4, R7; it does not fit |
 | S-D3 | word at 86/74/80 | fitted to ≥ 28 | the mock overflows its own box |
 | S-D4 | flash 4 × 300, posts 3 × 300, burn 5 × 320 | 450 grid; burn 4 × 400 | flash rule |
@@ -955,6 +975,7 @@ lead appends the `score-bug-stacked-nfl/` hashes (same host header).
 - **The flag wave and a REKEY every play** are new redraw costs (≤ 8 s; 550 ms about every 30–40 s): frame test.
 - **The `NflScoreTimeline` spec split** touches the Pill: guarded bitwise and by the hash gate.
 - **One shared setting** changes the NFL look for existing Stacked users on update (Owner Q1).
+- *(YDS 2026-11-16)* The YDS column's risks: `m6-nfl-stacked-yds.md` §7.
 
 ## 12. Still unproven, with the defensive behaviour
 
@@ -966,6 +987,7 @@ lead appends the `score-bug-stacked-nfl/` hashes (same host header).
 | `lastPlay.team` on a type 21 = the caller? | never used; the caller comes from the count |
 | A declined foul as a scoreboard `lastPlay` | same play text as the summary (inferred); mixed-case "Penalty on" never flags |
 | Glyph kerning | widths are advance sums (NFL §4.3 method); `StackedNflFitTest` measures the real `Paint` |
+| *(YDS 2026-11-16)* END OF nTH lasts one sample, then ≈ 3 min of the next period at 15:00 with `lastPlay` type 2 (live 2026-11-16) | periods 2 / 4 mapped to the end-of-period break (S1, lead default); halftime / Q3 start / OT unproven, unchanged |
 
 ## 13. Owner questions (built on defaults)
 
@@ -973,11 +995,12 @@ lead appends the `score-bug-stacked-nfl/` hashes (same host header).
    Pill stays the default, so most users see no change. *Built on: yes, one shared setting.*
 2. **The yards column.** ESPN's live scoreboard has no team yards. They exist only in the game summary, a second download
    of about 175 KB early in a game, growing to about 660 KB by the end. *Built on: the yards column is left out;
-   everything else in the mock-up is shown.*
+   everything else in the mock-up is shown.* **Answered 2026-11-16: build it, with no on/off switch**
+   (`m6-nfl-stacked-yds.md`).
 
 ---
 
-## Appendix A. The YDS column (**not built**)
+## Appendix A. The YDS column (**not built** in v1; built 2026-11-16: see `m6-nfl-stacked-yds.md` §3, which corrects "312" to 38.9, the source to the per-team statistics feed, and "When")
 
 Kept so that turning it on is a one-constant change (`STACKED_NFL_YDS_ENABLED`) plus a data source (the summary's
 `boxscore.teams[].statistics.totalYards`, 175–662 KB per fetch, one play behind; it would be fetched only at a team

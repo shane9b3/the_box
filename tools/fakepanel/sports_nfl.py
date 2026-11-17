@@ -10,6 +10,9 @@ Routes (ESPN's own paths, so the app only swaps the origin: debug builds, `files
                                                                            unknown digits = 404 JSON "No event found for
                                                                            eventId: …" (max-age=3600); non-digits = 400 JSON,
                                                                            gzip-encoded as ESPN's is (max-age=3019)
+    GET /v2/sports/football/leagues/nfl/events/{eid}/competitions/{eid}/competitors/{tid}/statistics
+                                                                           per-team totals (yards column, docs/design/
+                                                                           m6-nfl-stacked-yds.md 4.5); 404 JSON before kick-off
     GET /combiner/i?img=/i/teamlogos/nfl/500-dark/scoreboard/{abbr}.png&h=200&w=200   a generated placeholder PNG
     anything else under those prefixes                                     404 HTML, as ESPN
 
@@ -58,6 +61,7 @@ import sports
 ET = ZoneInfo("America/New_York")
 TIMELINE_DEFAULT_S = 985
 API_PREFIX = "/apis/site/v2/sports/football/nfl/"
+STATS_PREFIX = "/v2/sports/football/leagues/nfl/"  # ESPN's core API: events/{eid}/competitions/{eid}/competitors/{tid}/statistics
 LOGO_PREFIX = "/combiner/i"
 FEATURED_ID = "401899001"
 SEASON = 2026
@@ -69,10 +73,11 @@ DEFAULTS = {
     "sports_nfl_script": {},          # {event id: {state() key: value}}
     "sports_nfl_faults": {},          # the NHL fault keys (sports.FAULT_KEYS)
 }
-NFL_FAULT_KEYS = sports.FAULT_KEYS + ("event_status", "event_older_s")
+NFL_FAULT_KEYS = sports.FAULT_KEYS + ("event_status", "event_older_s", "stats_status", "stats_stall_ms")
 STATE_KEYS = ("state", "name", "period", "clock", "away", "home", "possession", "down", "distance", "yardLine",
               "possessionText", "shortDownDistanceText", "isRedZone", "lastPlayType", "lastPlayScoreValue",
-              "lastPlayTeam", "situation", "gone", "awayTimeouts", "homeTimeouts", "lastPlayText", "lastPlayId")
+              "lastPlayTeam", "situation", "gone", "awayTimeouts", "homeTimeouts", "lastPlayText", "lastPlayId",
+              "awayYards", "homeYards")
 
 NOT_FOUND_HTML = b"<html><body><h1>404 Not Found</h1></body></html>"
 
@@ -138,6 +143,20 @@ def brk(label, period, away, home, name, prev, last):
     return d
 
 
+def _end_of_period(prev, label, period, away, home, team, change_label):
+    """S1 (docs/design/m6-nfl-stacked-yds.md 1.12): a 10 s STATUS_END_PERIOD window, then the 15 s "change of ends" body: in
+    progress, the next period, the clock frozen at 15:00, `lastPlay` type 2 "END QUARTER n", the situation kept. Together they
+    are the 25 s the one break window had, so the timeline stays 985 s."""
+    text = f"END QUARTER {period}"
+    b = brk(label, period, away, home, "STATUS_END_PERIOD", prev, lp("2", team))
+    b.update(len=10, lastPlayText=text)
+    W.append(b)
+    c = dict(prev)
+    c.update(label=change_label, len=15, period=period + 1, away=away, home=home, run=False, **lp("2", team),
+             lastPlayText=text)
+    W.append(c)
+
+
 W = []  # the windows, in order; each is a dict (see win)
 
 
@@ -169,7 +188,7 @@ def _build():
     last = win("q1 BUF 2nd and 7", 25, 1, 7, 0, True, **down(2, 7, 28, "BUF 28", "home"), **lp("3", "home"),
                lastPlayText="(3:10) J.Allen pass incomplete deep right to S.Diggs. Penalty on KC-C.Jones, Offensive Holding, declined.")
     W.append(last)
-    W.append(brk("end 1st", 1, 7, 0, "STATUS_END_PERIOD", last, lp("2", "home")))
+    _end_of_period(last, "end 1st", 1, 7, 0, "home", "q2 change of ends")
     # Q2
     W.append(win("q2 BUF 1st at KC 30", 25, 2, 7, 0, True, **down(1, 10, 70, "KC 30", "home"), **lp("24", "home")))
     W.append(win("q2 field goal, dead ball", 25, 2, 7, 3, False, **dead(100), **lp("59", "home", 3)))
@@ -197,7 +216,7 @@ def _build():
     W.append(win("q3 two-point good, BUF kick-off", 25, 3, 14, 13, False, **kick(35, "home"), **lp("74", "home")))
     last = win("q3 KC ball", 35, 3, 14, 13, True, **down(1, 10, 75, "KC 25", "away"), **lp("53", "away"))
     W.append(last)
-    W.append(brk("end 3rd", 3, 14, 13, "STATUS_END_PERIOD", last, lp("2", "away")))
+    _end_of_period(last, "end 3rd", 3, 14, 13, "away", "q4 change of ends")
     # Q4
     W.append(win("q4 KC 3rd and 9", 25, 4, 14, 13, True, **down(3, 9, 70, "KC 30", "away"), **lp("21", "away"),
                  awayTimeouts=2, lastPlayText="Timeout #1 by KC at 15:00."))
@@ -236,8 +255,34 @@ def _carry_timeouts():
         w["awayTimeouts"], w["homeTimeouts"] = away, home
 
 
+# Total yards per window (docs/design/m6-nfl-stacked-yds.md 4.5): {label: (away, home)}; every other window carries the last
+# pair. The values cover the app's 1-, 2-, 3-digit and negative cases (BUF's -2 in the first quarter).
+YARDS_AT = {
+    "q1 3rd and 2, OPP 38": (41, 0),
+    "q1 BUF 2nd and 7": (75, -2),
+    "q2 field goal, dead ball": (75, 48),
+    "q2 BUF ball": (142, 51),
+    "q3 KC ball": (251, 187),
+    "end 3rd": (268, 187),
+    "end 4th": (355, 312),
+    "ot KC 1st and goal at 8": (381, 312),
+    "ot walk-off touchdown (post)": (389, 312),
+}
+
+
+def _carry_yards():
+    """`awayYards` / `homeYards` persist between windows like the timeout counts; a window that names them (or the table
+    above) starts a new pair. They start at 0 / 0."""
+    away, home = 0, 0
+    for w in W:
+        away, home = YARDS_AT.get(w["label"], (away, home))
+        away, home = w.get("awayYards", away), w.get("homeYards", home)
+        w["awayYards"], w["homeYards"] = away, home
+
+
 _build()
 _carry_timeouts()
+_carry_yards()
 
 
 def _clocks():
@@ -298,6 +343,11 @@ def check_config(patch):
                 raise ValueError('state must be "pre", "in" or "post"')
             if "situation" in v and v["situation"] is not None:
                 raise ValueError("situation may only be null (the body has no situation)")
+    if "sports_nfl_script" in patch:
+        for v in patch["sports_nfl_script"].values():
+            for k in ("awayYards", "homeYards"):
+                if k in v and v[k] is not None and (isinstance(v[k], bool) or not isinstance(v[k], int) or not -99 <= v[k] <= 999):
+                    raise ValueError(k + " must be an integer -99..999, or null (the statistics route answers 404)")
     if "sports_nfl_faults" in patch:
         f = patch["sports_nfl_faults"]
         if not isinstance(f, dict):
@@ -305,6 +355,12 @@ def check_config(patch):
         bad = [k for k in f if k not in NFL_FAULT_KEYS]
         if bad:
             raise ValueError("unknown sports_nfl_faults keys: " + ", ".join(bad))
+        if "stats_status" in f and f["stats_status"] is not None and (
+                isinstance(f["stats_status"], bool) or not isinstance(f["stats_status"], int) or not 100 <= f["stats_status"] <= 599):
+            raise ValueError("stats_status must be an HTTP status 100..599")
+        if "stats_stall_ms" in f and f["stats_stall_ms"] is not None and (
+                isinstance(f["stats_stall_ms"], bool) or not isinstance(f["stats_stall_ms"], (int, float)) or f["stats_stall_ms"] < 0):
+            raise ValueError("stats_stall_ms must be a number of milliseconds, 0 or more")
 
 
 # ------------------------------------------------------------------ the slate
@@ -348,6 +404,21 @@ class SportsNfl:
         """The windows' lengths in seconds at the current scale (None = open-ended)."""
         k = self.scale()
         return [None if w["len"] is None else w["len"] * k for w in W]
+
+    def window_starts(self):
+        """Seconds from the anchor to each window's start at the current scale."""
+        out, t = [], 0.0
+        for n in self.lengths():
+            out.append(t)
+            t += n or 0.0
+        return out
+
+    def windows(self, now):
+        """[{label, start_s, len_s, start_unix, current}] for the jump: start times in seconds from the anchor, at the scale."""
+        starts, lens = self.window_starts(), self.lengths()
+        cur = self.featured(now)["window"]
+        return [{"label": w["label"], "start_s": round(starts[i], 2), "len_s": None if lens[i] is None else round(lens[i], 2),
+                 "start_unix": round(self.anchor + starts[i], 2), "current": i == cur} for i, w in enumerate(W)]
 
     def featured_start(self):
         return self.anchor + PRE_S * self.scale()
@@ -557,8 +628,11 @@ class SportsNfl:
 # ------------------------------------------------------------------ http
 
 
+STATS_RE = re.compile(re.escape(STATS_PREFIX) + r"events/(\d+)/competitions/(\d+)/competitors/(\d+)/statistics")
+
+
 def is_nfl_path(path):
-    return path.startswith(API_PREFIX) or path == LOGO_PREFIX or path.startswith(LOGO_PREFIX + "/")
+    return path.startswith(API_PREFIX) or path.startswith(STATS_PREFIX) or path == LOGO_PREFIX or path.startswith(LOGO_PREFIX + "/")
 
 
 def handle(h, path):
@@ -616,6 +690,14 @@ def handle(h, path):
         rgb = bytes.fromhex(colour)
         sports.send(h, 200, png(200, 200, rgb), "image/png", {"Cache-Control": "public, max-age=7200", "Date": sports.http_date(now)})
         return True
+    if path.startswith(STATS_PREFIX):
+        if f.get("stats_stall_ms"):
+            time.sleep(float(f["stats_stall_ms"]) / 1000.0)
+        if f.get("status"):
+            return fail(f["status"])
+        if f.get("stats_status"):
+            return fail(f["stats_status"])
+        return stats_route(h, sp, f, headers, path, now, answer)
     if f.get("status"):
         return fail(f["status"])
     m = re.fullmatch(re.escape(API_PREFIX) + r"scoreboard/([^/]+)", path)
@@ -671,6 +753,56 @@ def event_route(h, sp, f, headers, eid, now, fail, answer):
     return answer(e, dict(headers, **{"Cache-Control": "max-age=%d" % ma}))
 
 
+def _stat(name, display, abbr, value, shown):
+    return {"name": name, "displayName": display, "shortDisplayName": abbr, "description": display + ".", "abbreviation": abbr,
+            "value": float(value), "displayValue": shown}
+
+
+def stats_body(eid, tid, yards):
+    """ESPN's per-team statistics (core API) trimmed to what the app reads: `general` carries no total; `passing`, `rushing` and
+    `receiving` each carry the same `totalYards` among filler stats, as the real body does (about 40 KB raw; the real body is 70 KB with more filler categories)."""
+    base = "http://sports.core.api.espn.com/v2/sports/football/leagues/nfl"
+    quals = "?lang=en&region=us"
+
+    def category(name, shown, abbr, n_filler, total):
+        stats = [_stat(f"{name}Stat{i}", f"{shown} stat {i}", f"{abbr}{i}", i * 1.5, f"{i * 1.5:.1f}") for i in range(n_filler)]
+        if total:
+            stats.insert(n_filler // 2, _stat("totalYards", "Total Yards", "YDS", yards, str(yards)))
+        return {"name": name, "displayName": shown, "shortDisplayName": shown, "abbreviation": abbr, "summary": "", "stats": stats,
+                "athletes": []}
+
+    return {"$ref": f"{base}/events/{eid}/competitions/{eid}/competitors/{tid}/statistics/0{quals}",
+            "competition": {"$ref": f"{base}/events/{eid}/competitions/{eid}{quals}"},
+            "team": {"$ref": f"{base}/seasons/{SEASON}/teams/{tid}{quals}"},
+            "splits": {"id": "0", "name": "All Splits", "abbreviation": "Any", "categories": [
+                category("general", "General", "gen", 13, False),
+                category("passing", "Passing", "pass", 46, True),
+                category("rushing", "Rushing", "rush", 28, True),
+                category("receiving", "Receiving", "rec", 29, True),
+                category("defensive", "Defensive", "def", 32, False),
+                category("kicking", "Kicking", "kick", 44, False)]}}
+
+
+def stats_route(h, sp, f, headers, path, now, answer):
+    """The per-team statistics route (docs/design/m6-nfl-stacked-yds.md 4.5): 404 JSON for an unknown event, a team that is
+    not in it, `pre`, `gone` or a null scripted value; otherwise the team's scripted total, `Cache-Control: max-age=10`."""
+    m = STATS_RE.fullmatch(path)
+    yards = None
+    if m and m[1] == m[2]:
+        game = next((g for g in sp.games() if g[0] == m[1]), None)
+        if game is not None:
+            s = sp.state(game, now)
+            side = "away" if m[3] == TEAMS[game[1]][0] else "home" if m[3] == TEAMS[game[2]][0] else None
+            if side and s.get("state") != "pre" and not s.get("gone"):
+                yards = s.get(side + "Yards")
+    if yards is None:
+        h.panel.sports.note(path, 404)
+        sports.send(h, 404, json.dumps({"error": {"code": 404, "message": "no instance found"}}), "application/json", dict(headers))
+        return True
+    ma = int(f["max_age"]) if f.get("max_age") is not None else 10
+    return answer(stats_body(m[1], m[3], int(yards)), dict(headers, **{"Cache-Control": "max-age=%d" % ma}))
+
+
 def _not_found(h, eid, hd):
     h.panel.sports.note(h.path.split("?")[0], 404)
     sports.send(h, 404, json.dumps({"code": 404, "message": "No event found for eventId: " + eid}), "application/json", hd)
@@ -686,7 +818,15 @@ def admin(h, path, data):
         elif "anchor_unix" in data:
             with sp.lock:
                 sp.anchor = float(data["anchor_unix"])
+        elif "jump" in data:
+            labels = [w["label"] for w in W]
+            if data["jump"] not in labels:
+                return h.json({"error": "unknown window label", "windows": labels}, 400)
+            with sp.lock:
+                # the window began 1 s ago at the current scale
+                sp.anchor = time.time() - sp.window_starts()[labels.index(data["jump"])] - 1.0
     now = time.time()
     games = [{"id": g[0], "away": g[1], "home": g[2], "start_unix": g[3], "state": sp.state(g, now)} for g in sp.games()]
     return h.json({"enabled": bool(h.panel.cfg.get("sports") and h.panel.cfg.get("sports_nfl")), "anchor_unix": sp.anchor,
-                   "featured": FEATURED_ID, "featured_day": sp.featured_day().isoformat(), "games": games})
+                   "featured": FEATURED_ID, "featured_day": sp.featured_day().isoformat(), "games": games,
+                   "windows": sp.windows(now)})

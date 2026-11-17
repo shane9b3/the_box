@@ -314,6 +314,11 @@
     <string name="sports_stacked_nfl_points">%1$s +%2$d</string>
     <!-- Joined to the state's description with ". " in code. %1$s/%3$s team names (away, home), %2$d/%4$d their timeouts left. -->
     <string name="sports_desc_nfl_timeouts">Timeouts left: %1$s %2$d, %3$s %4$d</string>
+    <!-- The Stacked NFL bug's yards column label (docs/design/m6-nfl-stacked-yds.md §3.1): team total yards. -->
+    <string name="sports_stacked_yds">YDS</string>
+    <!-- Joined to the description with ". " in code while the yards column shows. %1$s/%3$s team names (away, home),
+         %2$s/%4$s their total yards as drawn ("142", "−2"). -->
+    <string name="sports_desc_nfl_yards">Total yards: %1$s %2$s, %3$s %4$s</string>
     <!-- The live region: once per flag (flagId), and for a confirmed team timeout only (Rec 9). %1$s = the caller's name. -->
     <string name="sports_live_nfl_flag">Flag on the play.</string>
     <!-- The live region for every second flag, so a flag that directly follows another is spoken (a live region speaks

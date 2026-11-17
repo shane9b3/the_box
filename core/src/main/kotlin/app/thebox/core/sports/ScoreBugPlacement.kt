@@ -159,7 +159,7 @@ object ScoreBugPlacement {
     /**
      * (Stacked §4.3; Stacked WP-1) The placed box's width for [league] and [style]. NFL and Pill: [width] (`size`,
      * `league`), unchanged. NHL Stacked: the footprint width, `STACKED_W_MAX` (392), Large × `SCORE_LARGE_SCALE` (490).
-     * (NFL Stacked §5.1, §7) NFL Stacked: the footprint width `STACKED_NFL_W_MAX` (333), Large × 1.25 (416.25).
+     * (NFL Stacked §5.1, §7; NFL YDS §3.2) NFL Stacked: the footprint width `STACKED_NFL_FOOTPRINT_W` (396), Large × 1.25 (495).
      */
     fun width(size: ScoreBugSize, league: League, style: NhlBugStyle): Float = when {
         league == League.NFL && style == NhlBugStyle.STACKED -> nflStackedWidth(size)
@@ -180,11 +180,14 @@ object ScoreBugPlacement {
     }
 
     /**
-     * (NFL Stacked §5.1, RC6; WP-2) The NFL Stacked footprint's width: `STACKED_NFL_W_MAX` (rows + clock, 333; no YDS
-     * column) × [stackedScale], 416.25 Large. The drawn top part is 333 in play and 243 in breaks and at Final
-     * (`stackedTopBox` with `StackedNflFrame.boxW`); the footprint is the widest of them.
+     * (NFL Stacked §5.1; NFL YDS §3.2) The NFL Stacked footprint's width: `STACKED_NFL_FOOTPRINT_W` (rows + YDS + clock,
+     * 396) × [stackedScale], 495 Large; `STACKED_NFL_W_MAX` (333, 416.25) when `STACKED_NFL_YDS_ENABLED` is off. The
+     * drawn top part is 396 at a stoppage with yards, 333 in play, 306 / 243 in breaks and at Final with / without yards
+     * (`stackedTopBox` with `StackedNflFrame.boxW`); the footprint is the widest of them, and the rows never move.
      */
-    private fun nflStackedWidth(size: ScoreBugSize): Float = SportsConstants.STACKED_NFL_W_MAX * stackedScale(size)
+    private fun nflStackedWidth(size: ScoreBugSize): Float =
+        (if (SportsConstants.STACKED_NFL_YDS_ENABLED) SportsConstants.STACKED_NFL_FOOTPRINT_W else SportsConstants.STACKED_NFL_W_MAX) *
+            stackedScale(size)
 
     /**
      * (NFL Stacked §5.1; WP-2) The NFL Stacked footprint's height: (`STACKED_H` + `STACKED_BAR_H`) × [stackedScale]
