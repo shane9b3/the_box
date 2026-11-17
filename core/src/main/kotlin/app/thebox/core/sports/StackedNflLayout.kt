@@ -14,7 +14,7 @@ import app.thebox.core.sports.SportsConstants as K
  *
  * Words (`strings_sports.xml`, all upper case on the bar; label | sub):
  * - [PLAY] "1ST & 10 | KC 35", "3RD | KC 35", "4TH & GOAL | RED ZONE" (sub on red), "… | 50"; no field: label alone;
- * - [PAT] "EXTRA POINT"; [KICKOFF] "LV KICKOFF | LV 35" (never RED ZONE, RC9);
+ * - [PAT] "EXTRA POINT" ("2-PT TRY" with the tail `TabTail.TwoPointTry`, owner ruling 2026-11-16); [KICKOFF] "LV KICKOFF | LV 35" (never RED ZONE, RC9);
  * - [FLAG] [icon] "FLAG ON THE PLAY"; [TIMEOUT] "TIMEOUT BUF | 1 LEFT";
  * - [END_PERIOD] "END OF 1ST" … "END OF OT"; [HALFTIME] "HALFTIME"; [FINAL] "FINAL" / "FINAL/OT";
  * - [NO_UPDATE] "NO UPDATE"; [DELAYED] "DELAYED";
@@ -29,7 +29,8 @@ enum class NflBarKind { PLAY, PAT, KICKOFF, FLAG, TIMEOUT, END_PERIOD, HALFTIME,
  * - [side]: the team whose colours the bar takes ([NflBarKind.PLAY], [NflBarKind.PAT], [NflBarKind.KICKOFF],
  *   [NflBarKind.TIMEOUT], [NflBarKind.SCORE]); null = neutral (or the flag bar).
  * - [down] / [tail]: [NflBarKind.PLAY] and [NflBarKind.KICKOFF] (`NflView.down` / `NflView.tab.tail`, the gated values:
- *   a kick-off never carries `TabTail.RedZone`, RC9). A neutral PLAY key ([side] null, C-N4) carries the raw field
+ *   a kick-off never carries `TabTail.RedZone`, RC9). [NflBarKind.PAT]'s [tail] is `TabTail.TwoPointTry` for a two-point
+ *   try ("2-PT TRY"), else null ("EXTRA POINT"). A neutral PLAY key ([side] null, C-N4) carries the raw field
  *   relative to the away side ([StackedNflTargets.neutralTail]).
  * - [left]: [NflBarKind.TIMEOUT]'s timeouts left (0..3).
  * - [period]: [NflBarKind.END_PERIOD]'s period; [finalKind]: [NflBarKind.FINAL]'s kind (REG "FINAL", OT "FINAL/OT").
@@ -98,7 +99,7 @@ data class StackedNflTargets(
          * | in play, `flagId` set | open | `FLAG` (no side) | the tab's side |
          * | in play, `timeout` set | open | `TIMEOUT` (the caller, `left`); [burnSide] the caller | the tab's side |
          * | in play, `down` a `Down` | open | `PLAY` (the tab's side, null = neutral S-D10; `down`, `tab.tail`) | the tab's side |
-         * | in play, `down` `Pat` | open | `PAT` (the tab's side) | the tab's side |
+         * | in play, `down` `Pat` | open | `PAT` (the tab's side; `tail` `TwoPointTry` when the tab's is) | the tab's side |
          * | in play, `down` `Kickoff` | open | `KICKOFF` (the kicker; `tab.tail`, never `RedZone`: RC9) | the tab's side |
          * | in play, no `down` (no `situation`, or not shown by the machine) | open | **closed** (R21) | the tab's side, if any |
          *
@@ -163,7 +164,7 @@ data class StackedNflTargets(
                     NflBarKind.PLAY, poss, down = d,
                     tail = if (poss != null) tab?.tail else n?.field?.let { neutralTail(it) },
                 )
-                DownText.Pat -> NflBarKey(NflBarKind.PAT, poss)
+                DownText.Pat -> NflBarKey(NflBarKind.PAT, poss, tail = tab?.tail?.takeIf { it == TabTail.TwoPointTry })
                 // RC9: a kick-off never reads RED ZONE, whatever the tab's tail says.
                 DownText.Kickoff -> NflBarKey(NflBarKind.KICKOFF, poss, down = d, tail = tab?.tail?.takeUnless { it == TabTail.RedZone })
             }

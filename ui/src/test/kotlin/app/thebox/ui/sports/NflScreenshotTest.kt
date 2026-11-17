@@ -550,6 +550,27 @@ class NflScreenshotTest {
     }
 
     @Test
+    fun theTwoPointTryTabReadsItsWordsAndFits() {
+        // Owner ruling 2026-11-16: "X BALL | 2-PT TRY" (the down column stays "PAT"). In memory only: no shot is saved.
+        assertEquals("2-PT TRY", res.getString(R.string.sports_tab_2pt_try))
+        for (large in listOf(false, true)) {
+            val r = rig(large)
+            r.labels("WSH", "BUF")
+            for (side in Side.values()) {
+                val two = r.tab.blockWidth(NflTabContent(side, TabLead.BALL, TabTail.TwoPointTry))!!
+                val xp = r.tab.blockWidth(NflTabContent(side, TabLead.BALL, TabTail.ExtraPoint))!!
+                assertTrue("2-PT TRY ${suffix(large)} $two ≤ ${r.tab.room}", two <= r.tab.room)
+                assertTrue("2-PT TRY is its own label ($two vs $xp)", two < xp)
+            }
+            val v = view(kc, buf, 7, 0)
+            val two = render(large, v, content = NflTabContent(Side.AWAY, TabLead.BALL, TabTail.TwoPointTry)).bmp
+            val xp = render(large, v, content = NflTabContent(Side.AWAY, TabLead.BALL, TabTail.ExtraPoint)).bmp
+            assertTrue("the tail is drawn", !two.sameAs(xp))
+        }
+        assertEquals("PAT", std.painter.frame(view(nfl = NflView(DownText.Pat, NflTab(Side.AWAY, TabLead.BALL, TabTail.TwoPointTry))), res).down)
+    }
+
+    @Test
     fun thePairsDigitOverrideIsDrawn() {
         val v = view(kc, buf, 7, 0)
         val own = render(false, v, Side.AWAY, NflScoreKind.TOUCHDOWN, 3_800f).bmp

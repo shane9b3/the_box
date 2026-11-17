@@ -227,6 +227,8 @@
     <string name="sports_tab_opp">OPP %1$d</string>
     <string name="sports_tab_mid">MIDFIELD</string>
     <string name="sports_tab_xp">EXTRA POINT</string>
+    <!-- A pending try drawn by the feed as a real goal-to-go down inside the 5 (owner ruling 2026-11-16). -->
+    <string name="sports_tab_2pt_try">2-PT TRY</string>
     <string name="sports_tab_red_zone">RED ZONE</string>
     <!-- The scoring takeover's words (§5.2), drawn in Barlow Condensed Black Italic. Not translated: fixed graphics, like
          sports_goal_word. -->

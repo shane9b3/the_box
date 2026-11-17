@@ -417,6 +417,11 @@ sealed interface TabTail {
     /** "OWN 35", "OPP 12", "MIDFIELD". */
     data class Field(val zone: FieldZone, val yard: Int) : TabTail
     data object ExtraPoint : TabTail
+    /**
+     * (Owner ruling 2026-11-16) "2-PT TRY": a pending try drawn as a real goal-to-go down inside the 5
+     * (`ScoreBugMachine`); otherwise as [ExtraPoint]. Never RED ZONE.
+     */
+    data object TwoPointTry : TabTail
     /** (Ruling 26) "RED ZONE" on red. */
     data object RedZone : TabTail
 }

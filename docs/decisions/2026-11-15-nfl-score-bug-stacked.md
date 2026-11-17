@@ -46,6 +46,16 @@ Also: the pip height is raised from 2.7 to 3.0 design px so it is 2 real px at 7
 Stacked colour table is its own object; IND @ NE and DAL @ NYG (bars that look like the rows) go to the owner's
 screenshots; one shared setting is built.
 
+## Owner ruling (2026-11-16): "2-PT TRY"
+The owner asked for a two-point try to read "2-PT TRY" instead of "EXTRA POINT" (Stacked bar; Pill tab tail, the Pill's
+down column stays "PAT"). Rule: a pending try reads as a **two-point try** only when the shown play is a real `Down` at
+`tryAt` that is neither the `Down` shown with the snapshot that set the try (the stale body that carried the score) nor
+the last `Down` shown before it (both frozen when the try is set, so repeated polls of the same try-down keep the
+reading), is goal-to-go, and has the ball in the opponent's half at yard ≤ 5 (`TWO_POINT_YARDS`; an unknown field is
+not). Everything else pending reads "EXTRA POINT". Limit: a try that arrives as a dead ball (the only shape seen from
+ESPN so far) cannot be told from a kick and still reads "EXTRA POINT". Design: `docs/design/m6-nfl.md` §3.3,
+`docs/design/m6-nfl-stacked.md` §3.4.
+
 ## Owner questions (built on defaults)
 1. **One "Score bug style" for every sport?** Anyone who picked Stacked for hockey also gets the Stacked football bug.
    *Built on: yes, one shared setting* (Pill stays the default).
