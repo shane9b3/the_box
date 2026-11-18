@@ -108,6 +108,14 @@ object GuideColors {
     const val TEXT_ARCHIVE = 0xD9EEF1F6.toInt()         // .85 past, in archive (product §3.5)
     const val TEXT_TIME_ALPHA = 0.6f                    // cell time line opacity
     const val SKELETON = 0x0FFFFFFF                     // .06
+    // (Owner ruling 2026-11-18, second) The grid's NEW tag blends in: a page full of accent tags was distracting. The
+    // accent tag stays in the focused-programme panel only.
+    const val NEW_TAG_FILL = 0x1FFFFFFF                 // .12 white, a step above the cell fill
+    const val NEW_TAG_TEXT = 0xB3EEF1F6.toInt()         // .7
+    const val NEW_TAG_FILL_PAST = 0x0FFFFFFF            // .06
+    const val NEW_TAG_TEXT_PAST = 0x73EEF1F6.toInt()    // .45, as past titles
+    const val NEW_TAG_FILL_FOCUSED = 0x1F0A0D13         // .12 canvas on the focused (light) cell
+    const val NEW_TAG_TEXT_FOCUSED = 0xBF0A0D13.toInt() // .75
     const val SHADOW = 0x66000000                       // focused cell 0 12 30 rgba(0,0,0,.4)
 }
 

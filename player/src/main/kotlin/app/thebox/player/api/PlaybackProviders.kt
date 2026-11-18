@@ -96,7 +96,7 @@ data class PlaybackSettings(
      * (M6 time-shift, docs/design/m6-timeshift.md §12, lead reconciliation R10) "Pause and rewind", "Keep recording"
      * and "Protect storage". Read once per live cycle (NEXT_TUNE / LIVE). Defaults mirror `PlaybackPrefs`.
      */
-    val timeshift: app.thebox.core.settings.TimeshiftLength = app.thebox.core.settings.TimeshiftLength.AUTO,
+    val timeshift: app.thebox.core.settings.TimeshiftLength = app.thebox.core.settings.TimeshiftFeature.DEFAULT,
     val timeshiftHold: app.thebox.core.settings.TimeshiftHold = app.thebox.core.settings.TimeshiftHold.AUTO,
     val storageProtection: app.thebox.core.settings.StorageProtection = app.thebox.core.settings.StorageProtection.AUTO,
 )

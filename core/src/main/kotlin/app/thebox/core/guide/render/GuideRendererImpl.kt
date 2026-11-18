@@ -570,7 +570,7 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
             }
         }
 
-        if (programme && (flags and ProgrammeFlags.NEW) != 0) drawNewTag(canvas, x0, x1, top, past)
+        if (programme && (flags and ProgrammeFlags.NEW) != 0) drawNewTag(canvas, x0, x1, top, past, focused)
 
         if (onNow && pass != PASS_TEXT) {
             val ph = s * G.PROGRESS_H
@@ -583,22 +583,25 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
     }
 
     /**
-     * (Decision 2026-11-18) The NEW corner tag: an accent tab in the cell's top-right corner with "NEW" in the canvas
-     * colour, the same on a focused cell; half strength on a past cell. It sits above the title line, so it takes no
+     * (Decision 2026-11-18) The NEW corner tag: a tab in the cell's top-right corner in the grid's own greys (a step
+     * above the cell fill, so a page full of them stays calm; the accent tag is the panel's), dark on a focused cell,
+     * dimmer on a past cell. It sits above the title line, so it takes no
      * room from the title. Skipped when the cell is too narrow to leave [GuideGeometry.NEW_TAG_MIN_REST] beside it, and
      * kept inside the grid when the cell runs past the right edge.
      */
-    private fun drawNewTag(canvas: GuideCanvas, x0: Float, x1: Float, top: Float, past: Boolean) {
+    private fun drawNewTag(canvas: GuideCanvas, x0: Float, x1: Float, top: Float, past: Boolean, focused: Boolean) {
         if (newTagTextW < 0f) newTagTextW = width(NEW_TAG, GuideTextStyle.NEW_TAG)
         val w = newTagTextW + 2 * s * G.NEW_TAG_PAD_X
         val right = minOf(x1, contentRight)
         val left = right - w
         if (left - x0 < s * G.NEW_TAG_MIN_REST) return
         val bottom = top + s * G.NEW_TAG_H
-        if (pass != PASS_TEXT) canvas.fillRoundRect(left, top, right, bottom, s * G.CELL_R, if (past) NEW_TAG_FILL_PAST else C.ACCENT)
+        val fill = if (focused) C.NEW_TAG_FILL_FOCUSED else if (past) C.NEW_TAG_FILL_PAST else C.NEW_TAG_FILL
+        val text = if (focused) C.NEW_TAG_TEXT_FOCUSED else if (past) C.NEW_TAG_TEXT_PAST else C.NEW_TAG_TEXT
+        if (pass != PASS_TEXT) canvas.fillRoundRect(left, top, right, bottom, s * G.CELL_R, fill)
         if (pass != PASS_BG) {
             canvas.drawText(NEW_TAG, 0, NEW_TAG.length, left + s * G.NEW_TAG_PAD_X, centredBaseline(top, bottom, GuideTextStyle.NEW_TAG),
-                GuideTextStyle.NEW_TAG, C.CANVAS)
+                GuideTextStyle.NEW_TAG, text)
         }
     }
 
@@ -793,7 +796,6 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
         private const val BUBBLE_FILL = 0xE60A0D13.toInt()          // CANVAS at .9
         private val ACCENT_HALF = alpha(C.ACCENT, 0.5f)
         private const val NEW_TAG = "NEW"
-        private val NEW_TAG_FILL_PAST = alpha(C.ACCENT, 0.5f)
         private const val MAX_ARCHIVE_DAYS = 3650
         private const val MAX_NUMBER_STRINGS = 4096
 

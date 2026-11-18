@@ -19,7 +19,11 @@ class JvmLibraryConventionPlugin : Plugin<Project> {
             targetCompatibility = TARGET_JAVA
         }
         configureKotlinCompilerOptions()
-        tasks.withType<Test>().configureEach { useJUnitPlatform() }
+        tasks.withType<Test>().configureEach {
+            useJUnitPlatform()
+            // The suites still exercise pause and rewind, which is switched off in the app (TimeshiftFeature, 2026-11-18).
+            systemProperty("thebox.timeshift.tests", "1")
+        }
         dependencies {
             add("testImplementation", libs.lib("kotlin-test-junit5"))
             add("testImplementation", platform(libs.lib("junit-bom")))

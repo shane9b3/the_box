@@ -43,6 +43,8 @@ internal fun Project.configureKotlinCompilerOptions() {
     }
     // A hung test fails the task instead of holding the gate forever (a Robolectric looper spin once ran 5 h).
     tasks.withType<Test>().configureEach {
+        // The suites still exercise pause and rewind, which is switched off in the app (TimeshiftFeature, 2026-11-18).
+        systemProperty("thebox.timeshift.tests", "1")
         timeout.set(Duration.ofMinutes(30))
     }
 }

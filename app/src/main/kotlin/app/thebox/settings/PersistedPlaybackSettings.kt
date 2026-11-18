@@ -3,6 +3,7 @@ package app.thebox.settings
 import app.thebox.core.settings.PlaybackPrefs
 import app.thebox.core.settings.SettingsStore
 import app.thebox.core.settings.SubtitleMode
+import app.thebox.core.settings.timeshiftInUse
 import app.thebox.core.settings.state.GuidePrefsMapping.pick
 import app.thebox.core.settings.state.PlaybackDomain
 import app.thebox.data.di.ApplicationScope
@@ -74,7 +75,7 @@ class PersistedPlaybackSettings internal constructor(
             failoverToBackup = p.failoverToBackup,
             resumeAfterStandby = p.resumeAfterStandby,
             // (M6 time-shift, lead reconciliation R10) The controller reads these here, not from the store.
-            timeshift = p.timeshift,
+            timeshift = p.timeshiftInUse,
             timeshiftHold = p.timeshiftHold,
             storageProtection = p.storageProtection,
         )

@@ -223,7 +223,7 @@ class TimeshiftViewModelTest {
         vm.effects.toast(PlayerToast.PAUSE_NO_REWIND_STORAGE, null); idle()
         assertEquals("Saving for rewind failed on this device's storage, so Play returns to live. Change channel and back to try again.", out.last())
         vm.effects.toast(PlayerToast.PAUSE_NO_REWIND_OFF, null); idle()
-        assertEquals("Rewind is turned off, so Play returns to live. To keep your place: Settings → Playback → Pause and rewind → Rewind length.", out.last())
+        assertEquals("Rewind is turned off, so Play returns to live. Pause and rewind is coming in a later version.", out.last())
         vm.effects.toast(PlayerToast.PAUSE_NO_REWIND_SPACE, "0.6 GB"); idle()
         assertEquals("Not enough free storage to save this channel (0.6 GB free), so Play returns to live. Free up space, choose a shorter rewind in Settings → Playback → Pause and rewind → Rewind length, or save to a USB drive or network folder there.", out.last())
         vm.effects.toast(PlayerToast.REWIND_LIMITED_TODAY, null); idle()

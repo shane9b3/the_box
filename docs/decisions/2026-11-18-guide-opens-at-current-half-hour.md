@@ -38,3 +38,6 @@ Owner ruling: new episodes get the app's own mark, a corner tag, instead of the 
   cannot catch that.
 - (Later the same day, owner request) The focused-programme panel shows the same tag beside the time line
   ("10:00 – 11:00 · 1 h  NEW"): `PanelState.isNew`, drawn in `FocusedPanel`.
+- (Second ruling, same day) In the grid the tag no longer uses the accent colour: a page full of accent tags was
+  distracting. It is drawn in the grid's own greys (`GuideColors.NEW_TAG_*`: white .12 fill with .7 text, .06/.45 on a
+  past block, canvas .12/.75 on the focused block). The accent tag stays in the focused-programme panel.

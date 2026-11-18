@@ -156,6 +156,8 @@
     <string name="settings_pb_timeshift_desc_at">Saves the channel you\'re watching so you can pause and rewind up to %1$s. Uses up to %2$s on %3$s while you watch; cleared when you change channel.</string>
     <string name="settings_pb_timeshift_protect_elsewhere">Not used while saving to %1$s.</string>
     <string name="settings_pb_pause_rewind_desc">Pause live TV and rewind. Choose how long and where it\'s saved.</string>
+    <string name="settings_pb_pause_rewind_soon_desc">Pause live TV and rewind. Not available yet: it is coming in a later version.</string>
+    <string name="settings_coming_soon">Coming soon</string>
     <string name="settings_pb_pause_rewind_value">%1$s · %2$s</string>
     <string name="settings_pb_pause_rewind_value_fallback">%1$s · This device (%2$s offline)</string>
     <!-- U-N2 (save-location review 2026-10-24) -->

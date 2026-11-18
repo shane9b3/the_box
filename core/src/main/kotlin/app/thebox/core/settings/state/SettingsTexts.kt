@@ -132,6 +132,8 @@ enum class SettingsText {
     PB_TIMESHIFT_DESC_AT,
     PB_TIMESHIFT_PROTECT_ELSEWHERE,
     PB_PAUSE_REWIND_DESC,
+    PB_PAUSE_REWIND_SOON_DESC,
+    COMING_SOON,
     PB_PAUSE_REWIND_VALUE,
     PB_PAUSE_REWIND_VALUE_FALLBACK,
     /** U-N2 (save-location review 2026-10-24): the chosen folder needs a sign-in, which is not "offline". */

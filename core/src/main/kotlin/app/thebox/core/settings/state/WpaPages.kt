@@ -350,6 +350,11 @@ class WpaPages(
      * USB drive"), just "Off" when rewind is Off; while the cycle falls back: amber "1 hour · This device (NAS offline)".
      */
     private fun pauseRewindLink(p: PlaybackPrefs): SettingsRow {
+        // (Owner ruling 2026-11-18) Switched off in this build: the row stays, greyed out, as "Coming soon".
+        if (!app.thebox.core.settings.TimeshiftFeature.available) {
+            return link(PlaybackRows.PAUSE_REWIND, SettingsRoute.PauseRewind, t(SettingsText.PB_TIMESHIFT), t(SettingsText.PB_PAUSE_REWIND_SOON_DESC))
+                .copy(value = t(SettingsText.COMING_SOON), enabled = false, disabledReason = t(SettingsText.PB_PAUSE_REWIND_SOON_DESC))
+        }
         val place = places.current()
         val length = timeshiftRows(p, place).first { it.id == PauseRewindRows.TIMESHIFT }.value.orEmpty()
         val offline = place.offlineName?.let(::linkName)

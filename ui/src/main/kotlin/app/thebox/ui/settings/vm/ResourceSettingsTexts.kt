@@ -132,6 +132,8 @@ class ResourceSettingsTexts(private val resources: Resources) : SettingsTexts {
         SettingsText.PB_TIMESHIFT_DESC_AT -> R.string.settings_pb_timeshift_desc_at
         SettingsText.PB_TIMESHIFT_PROTECT_ELSEWHERE -> R.string.settings_pb_timeshift_protect_elsewhere
         SettingsText.PB_PAUSE_REWIND_DESC -> R.string.settings_pb_pause_rewind_desc
+        SettingsText.PB_PAUSE_REWIND_SOON_DESC -> R.string.settings_pb_pause_rewind_soon_desc
+        SettingsText.COMING_SOON -> R.string.settings_coming_soon
         SettingsText.PB_PAUSE_REWIND_VALUE -> R.string.settings_pb_pause_rewind_value
         SettingsText.PB_PAUSE_REWIND_VALUE_FALLBACK -> R.string.settings_pb_pause_rewind_value_fallback
         SettingsText.PB_PAUSE_REWIND_VALUE_SIGN_IN -> R.string.settings_pb_pause_rewind_value_sign_in

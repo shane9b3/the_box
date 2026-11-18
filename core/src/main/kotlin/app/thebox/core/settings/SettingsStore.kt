@@ -155,7 +155,7 @@ data class PlaybackPrefs(
     val externalPlayer: String? = null,
     // (M6 time-shift commit 0, docs/design/m6-timeshift.md §12; additive, defaults keep old documents valid)
     /** "Pause and rewind" (SIMPLE): the local buffer length. */
-    val timeshift: TimeshiftLength = TimeshiftLength.AUTO,
+    val timeshift: TimeshiftLength = TimeshiftFeature.DEFAULT, // Off by default (owner ruling 2026-11-18); read it through [timeshiftInUse]
     /** "Keep recording while paused" (ADVANCED): how long a paused tune keeps its provider connection. */
     val timeshiftHold: TimeshiftHold = TimeshiftHold.AUTO,
     /** "Protect built-in storage" (ADVANCED): the internal daily write cap (§8.4). */
@@ -167,6 +167,30 @@ data class PlaybackPrefs(
  * PAUSE_ONLY saves only while paused (§4.5); OFF = no buffer. Persisted by name; append-only.
  */
 @kotlinx.serialization.Serializable enum class TimeshiftLength { AUTO, MIN_15, MIN_30, H_1, H_2, PAUSE_ONLY, OFF }
+
+/**
+ * (Owner ruling 2026-11-18, docs/decisions/2026-11-18-pause-rewind-off.md) Pause and rewind is switched off in this
+ * build: a tester's box stuttered about every 4 s and the buffer (the only thing that writes the stream to storage
+ * while watching) is the suspect, with no such device to test on. While [AVAILABLE] is false nothing is saved, whatever
+ * the stored setting says (an older install or a restored backup may hold Auto), and Settings shows the row greyed
+ * out as "Coming soon". Set [SHIPPED] to true to bring the feature back; stored choices are kept.
+ *
+ * The unit-test suites still exercise the feature: the Gradle test tasks set the system property
+ * `thebox.timeshift.tests`, under which it is available and the default length is Auto, as those tests were written.
+ * The property does not exist on a device, so the app never sees that mode.
+ */
+object TimeshiftFeature {
+    /** What the app ships with. */
+    const val SHIPPED = false
+    private val underTest: Boolean = runCatching { System.getProperty("thebox.timeshift.tests") == "1" }.getOrDefault(false)
+    /** Mutable for the tests of the switched-off state only. */
+    @Volatile var available: Boolean = SHIPPED || underTest
+    /** The default rewind length: Off in the app (all recording is off by default); Auto in the unit-test suites. */
+    val DEFAULT: TimeshiftLength = if (underTest) TimeshiftLength.AUTO else TimeshiftLength.OFF
+}
+
+/** The rewind length playback uses: the stored one while [TimeshiftFeature.available], else Off. */
+val PlaybackPrefs.timeshiftInUse: TimeshiftLength get() = if (TimeshiftFeature.available) timeshift else TimeshiftLength.OFF
 
 /** (M6 commit 0, §7.3, §12) "Keep recording while paused". AUTO = until the buffer is full, on every account (lead ruling 3). */
 @kotlinx.serialization.Serializable enum class TimeshiftHold { AUTO, MIN_10, MIN_30, H_1, UNTIL_FULL }

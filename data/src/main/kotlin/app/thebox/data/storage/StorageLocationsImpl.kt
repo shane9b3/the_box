@@ -8,6 +8,7 @@ import app.thebox.core.common.Outcome
 import app.thebox.core.common.SourceError
 import app.thebox.core.settings.SettingsStore
 import app.thebox.core.settings.TimeshiftLength
+import app.thebox.core.settings.timeshiftInUse
 import app.thebox.core.settings.state.PlaybackDomain
 import app.thebox.core.settings.state.StorageDomain
 import app.thebox.core.storage.LocationState
@@ -179,7 +180,7 @@ class StorageLocationsImpl @Inject constructor(
 
     /** The SMB location the keeper keeps connected: chosen for TIMESHIFT, while rewind is not Off (§9.1). Main-safe. */
     fun keptLocation(): StorageLocation? {
-        if (playback.value.timeshift == TimeshiftLength.OFF) return null
+        if (playback.value.timeshiftInUse == TimeshiftLength.OFF) return null
         val id = chosen(StoragePurpose.TIMESHIFT)
         return prefs.value.locations.firstOrNull { it.id == id && it.kind == StorageKind.SMB && it.smb != null }
     }
