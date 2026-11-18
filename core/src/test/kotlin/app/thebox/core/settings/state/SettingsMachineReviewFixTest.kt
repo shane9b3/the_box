@@ -73,25 +73,6 @@ class SettingsMachineReviewFixTest {
         assertTrue(effects.intents.isEmpty())
     }
 
-    /** C-S5 (§3.2.3): ADVANCED rows are absent in the simple view, except the route's own focus row (error-card routes). */
-    @Test
-    fun advancedRowsAbsentInSimpleViewExceptTheRouteFocus() {
-        val focus = RowId("playlist.user_agent")
-        val route = SettingsRoute.Playlist(3, focus = focus)
-        m.open(route, fromFull = false)
-        val rows = listOf(
-            SettingsRow(RowId("playlist.name"), "Name", kind = RowKind.Text("x", TextHint.NAME)),
-            SettingsRow(RowId("playlist.stream_format"), "Format", kind = RowKind.Info(emptyList()), visibility = Visibility.ADVANCED),
-            SettingsRow(focus, "UA", kind = RowKind.Info(emptyList()), visibility = Visibility.ADVANCED),
-        )
-        show(route, rows)
-        assertEquals(listOf("playlist.name", "playlist.user_agent"), m.ui.value.page?.rows?.map { it.id.key })
-        assertEquals(1, m.ui.value.cursor, "the route's focus row is focused")
-        m.dispatch(SettingsEvent.Advanced(true))
-        show(route, rows, version = 2)
-        assertEquals(3, m.ui.value.page?.rows?.size, "the advanced view shows every row")
-    }
-
     /** C-L5: BACK in move mode puts the row back and the cursor with it. */
     @Test
     fun moveModeBackRestoresTheCursor() {
@@ -159,7 +140,6 @@ class SettingsMachineReviewFixTest {
     fun removePassphraseRowConfirmsThenRuns() {
         val t = BackupTexts { k, _ -> k.name }
         m.open(SettingsRoute.Backup, fromFull = false)
-        m.dispatch(SettingsEvent.Advanced(true))
         val page = BackupPages.backup(BackupPageState(passphraseStored = true), t, advanced = true, version = 1)
         m.dispatch(SettingsEvent.Page(page))
         val i = page.rows.indexOfFirst { it.id == BackupRows.PASSPHRASE_REMOVE }

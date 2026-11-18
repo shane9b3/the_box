@@ -114,7 +114,7 @@ data class GuidePrefs(
     val openGuideOn: app.thebox.core.guide.OpenGuideOn = app.thebox.core.guide.OpenGuideOn.LAST,
     val reminderAutoSwitch: Boolean = false,
     val reminderLeadSec: Int = 60,
-    /** "Show advanced settings" (product S11). */
+    /** Unused since the owner ruling of 2026-11-17 (every setting is always shown); kept so stored prefs and backups still read. */
     val advancedSettings: Boolean = false,
     /**
      * (owner ruling 2026-10-18) Programme posters from TMDB when the EPG has none. On by default: the app ships with its

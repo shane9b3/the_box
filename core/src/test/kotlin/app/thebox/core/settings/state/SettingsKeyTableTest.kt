@@ -80,7 +80,6 @@ class SettingsKeyTableTest {
                 "digits" -> assertEquals(v, assertNotNull(ui.numberPad, where).digits, "$where digits")
                 "key" -> assertEquals(v.toInt(), assertNotNull(ui.numberPad, where).focusedKey, "$where key")
                 "err" -> assertNotNull(ui.numberPad?.error, "$where error line")
-                "adv" -> assertEquals(v.toBoolean(), ui.advanced, "$where advanced")
                 "pin" -> assertEquals(v.toInt(), w.gate.requests.size, "$where pin requests")
                 "mi" -> assertEquals(v.toInt(), assertNotNull(ui.move, where).index, "$where move index")
                 "armed" -> assertEquals(v.toBoolean(), w.effects.armed, "$where armed")
@@ -121,11 +120,10 @@ class SettingsKeyTableTest {
         val PRE: Map<String, () -> SettingsWorld> = mapOf(
             "SECTIONS_ROOT" to { root() },
             "SECTIONS_GUIDE" to { root().apply { act(BoxAction.DOWN) } },
-            "SECTIONS_LAST" to { root().apply { repeat(8) { act(BoxAction.DOWN) } } },
-            "SECTIONS_TOGGLE" to { root().apply { repeat(9) { act(BoxAction.DOWN) } } },
+            "SECTIONS_LAST" to { root().apply { repeat(10) { act(BoxAction.DOWN) } } },
             "PAGE_PLAYBACK_TOP" to { root().apply { enter(SectionId.PLAYBACK) } },
             "PAGE_INTERFACE_LOGOS" to {
-                root().apply { repeat(9) { act(BoxAction.DOWN) }; act(BoxAction.SELECT); act(BoxAction.UP); repeat(5) { act(BoxAction.UP) }; enter(SectionId.INTERFACE); focus(InterfaceRows.LOGOS) }
+                root().apply { enter(SectionId.INTERFACE); focus(InterfaceRows.LOGOS) }
             },
             "PAGE_REMOTE_MAPPING" to { root().apply { enter(SectionId.REMOTE); focus(RemoteRows.MAPPING) } },
             "PAGE_LISTS_NUMBER" to { listsAt("fx.number") },

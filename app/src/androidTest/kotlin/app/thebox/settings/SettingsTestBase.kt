@@ -189,12 +189,6 @@ abstract class SettingsTestBase {
         return st
     }
 
-    /** (M5 integration) Shows the advanced rows (§3.2.3) on the open page, as the sections-pane toggle does. */
-    protected fun showAdvanced() {
-        onMain { settingsMachine().dispatch(app.thebox.core.settings.SettingsEvent.Advanced(true)) }
-        awaitSettings("advanced rows") { it.advanced }
-    }
-
     protected fun awaitPage(what: String, timeoutMs: Long = 10_000, p: (PageModel) -> Boolean): PageModel =
         awaitSettings(what, timeoutMs) { s -> s.page?.let(p) == true }.page!!
 

@@ -254,7 +254,6 @@ class WpaPagesTest {
         pages.apply(RowIntent.Toggle(InterfaceRows.AMBIENT, false))
         pages.apply(RowIntent.Choose(GuideRows.SHIFT, "-90"))
         pages.apply(RowIntent.Choose(GuideRows.PAST_DAYS, "3"))
-        pages.apply(RowIntent.Toggle(SettingsMachineImpl.ADVANCED_ROW, true))
         val p = store.flow(PlaybackDomain).value
         assertEquals(BufferMode.LARGE, p.bufferMode)
         assertTrue(p.tunneling)
@@ -266,7 +265,6 @@ class WpaPagesTest {
         assertEquals(ClockMode.H12, g.clock)
         assertEquals(true, g.miniStill)
         assertEquals(false, g.ambient)
-        assertTrue(g.advancedSettings)
         assertEquals(-90, store.flow(DataDomain).value.globalShiftMin)
         assertEquals(3, store.flow(DataDomain).value.epgPastDays)
         assertEquals("SHIFT_VALUE(−1.5)", row(SectionId.GUIDE, GuideRows.SHIFT).value)

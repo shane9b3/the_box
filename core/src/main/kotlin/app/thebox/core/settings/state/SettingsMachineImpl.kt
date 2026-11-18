@@ -55,7 +55,6 @@ import kotlinx.coroutines.flow.asStateFlow
  * - [SettingsUiState.route] is the open page; [SettingsUiState.stack] its parents (bottom first). In the SECTIONS pane at
  *   the root, `route` is [SettingsRoute.Root] and [SettingsUiState.page] previews the focused section's page.
  * - [SettingsUiState.sections] is empty for the first-run flow and for detached routes (no sections pane).
- *   `sectionCursor == sections.size` focuses the pinned "Show advanced settings" toggle ([ADVANCED_ROW]).
  * - Row indices run over `page.rows` then `page.list` (list index `j` = index − rows.size; `PagedList.loaded` is keyed
  *   by page number `j / pageSize`).
  * - A MultiChoice list edits a working copy: the open page's row shows the toggled selection until the list closes.
@@ -89,7 +88,6 @@ class SettingsMachineImpl(
     private var path: List<SettingsRoute> = listOf(SettingsRoute.Root)
     private var pane = Pane.SECTIONS
     private var detached = false
-    private var advanced = false
     private var sectionCursor = 0
     /** "The last section used this process" (§3.2.1). */
     private var lastSection: SectionId = SectionId.PLAYLISTS
@@ -215,7 +213,6 @@ class SettingsMachineImpl(
             is SettingsEvent.CaptureTimedOut -> captureResult(captureFlow.onTimeout(event.token))
             is SettingsEvent.PinResult -> onPinResult(event)
             is SettingsEvent.Notice -> showNotice(event.text)
-            is SettingsEvent.Advanced -> setAdvanced(event.on, emit = false)
             is SettingsEvent.Tick -> onTick(event.nowMs)
         }
         publish()
@@ -367,28 +364,23 @@ class SettingsMachineImpl(
 
     private fun sectionsKey(a: BoxAction): Boolean {
         val secs = sections()
-        val last = secs.size // the advanced toggle
         when (a) {
             BoxAction.UP -> moveSection(sectionCursor - 1)
             BoxAction.DOWN -> moveSection(sectionCursor + 1)
             BoxAction.PAGE_UP, BoxAction.ZAP_UP -> moveSection(sectionCursor - SECTION_PAGE)
             BoxAction.PAGE_DOWN, BoxAction.ZAP_DOWN -> moveSection(sectionCursor + SECTION_PAGE)
             BoxAction.RIGHT, BoxAction.SELECT -> {
-                if (sectionCursor == last) {
-                    if (a == BoxAction.SELECT) setAdvanced(!advanced, emit = true)
-                } else {
-                    val s = secs[sectionCursor]
-                    lastSection = s
-                    val enter = {
-                        path = listOf(SettingsRoute.Root, SettingsRoute.Section(s))
-                        pane = Pane.PAGE
-                        restoreCursor(currentRoute())
-                        requestDisplayed()
-                        announceRow()
-                    }
-                    // (M5 integration, §3.3.8, §3.9.2) The Parental controls page asks for the PIN while one is set.
-                    if (s == SectionId.PARENTAL) gated(enter) else enter()
+                val s = secs.getOrNull(sectionCursor) ?: return true
+                lastSection = s
+                val enter = {
+                    path = listOf(SettingsRoute.Root, SettingsRoute.Section(s))
+                    pane = Pane.PAGE
+                    restoreCursor(currentRoute())
+                    requestDisplayed()
+                    announceRow()
                 }
+                // (M5 integration, §3.3.8, §3.9.2) The Parental controls page asks for the PIN while one is set.
+                if (s == SectionId.PARENTAL) gated(enter) else enter()
             }
             BoxAction.BACK -> return false // leave Settings (the guide applies the M4 rule)
             else -> Unit
@@ -397,13 +389,12 @@ class SettingsMachineImpl(
     }
 
     private fun moveSection(to: Int) {
-        val clamped = to.coerceIn(0, sections().size)
+        val clamped = to.coerceIn(0, (sections().size - 1).coerceAtLeast(0))
         if (clamped == sectionCursor) return
         sectionCursor = clamped
         sections().getOrNull(sectionCursor)?.let { lastSection = it }
         requestDisplayed()
-        val label = sections().getOrNull(sectionCursor)?.let { texts.section(it) } ?: texts[SettingsText.ADVANCED_TOGGLE]
-        effects.announce(label)
+        sections().getOrNull(sectionCursor)?.let { effects.announce(texts.section(it)) }
     }
 
     private fun pageKey(act: GuideEvent.Act): Boolean {
@@ -865,7 +856,7 @@ class SettingsMachineImpl(
     private fun onPage(incoming: PageModel) {
         // U-S3: a page that lands after Settings closed (a slow build) is dropped; the next visit asks again.
         if (!visitOpen) return
-        val page = if (advanced) incoming else simpleView(incoming)
+        val page = incoming
         val old = pages[page.route]
         if (old != null && old.version > page.version) return
         val keepRows = listRows[page.route]
@@ -907,16 +898,6 @@ class SettingsMachineImpl(
         if (menu != null && findRow(menu!!.row) == null) menu = null
         if (move != null && findRow(move!!.row) == null) move = null
         requestItemsAround(pub)
-    }
-
-    /**
-     * C-S5 (§3.2.3): with "Show advanced settings" off, ADVANCED rows are absent from every page, whoever built it (WP-B's
-     * Playlist page builds them all). The route's own focus row stays: error-card routes target advanced rows (§3.14).
-     */
-    private fun simpleView(page: PageModel): PageModel {
-        if (page.rows.none { it.visibility == Visibility.ADVANCED }) return page
-        val keep = (page.route as? SettingsRoute.Playlist)?.focus
-        return page.copy(rows = page.rows.filter { it.visibility != Visibility.ADVANCED || it.id == keep })
     }
 
     private fun onItems(e: SettingsEvent.Items) {
@@ -961,32 +942,6 @@ class SettingsMachineImpl(
         if (pages[r] == null) effects.loadPage(r) else pages[r]?.let { requestItemsAround(it) }
     }
 
-    private fun setAdvanced(on: Boolean, emit: Boolean) {
-        if (on == advanced) return
-        advanced = on
-        if (emit) {
-            changed += EffectTiming.LIVE
-            effects.onIntent(RowIntent.Toggle(ADVANCED_ROW, on))
-        }
-        val secs = sections()
-        if (pane == Pane.SECTIONS && sectionCursor > secs.size) sectionCursor = secs.size
-        if (pane == Pane.SECTIONS && emit) sectionCursor = secs.size // the cursor stays on the toggle
-        // Advanced rows appear or disappear in every page: rebuild what is shown, drop the rest.
-        val displayed = displayedRoute()
-        pages.keys.retainAll { it == displayed }
-        listRows.keys.retainAll { it == displayed }
-        requested.clear()
-        val cur = currentRoute()
-        if (cur is SettingsRoute.Section && cur.id == SectionId.NETWORK && !on) {
-            path = listOf(SettingsRoute.Root); pane = Pane.SECTIONS
-            sectionCursor = secs.size
-        }
-        // (M5 integration) Publish first: the effects build the page with the *published* `advanced` flag (PageContext);
-        // before this the rebuild still saw the old value and the advanced rows never appeared.
-        publish()
-        displayedRoute()?.let { effects.loadPage(it) }
-    }
-
     private fun onTick(now: Long) {
         if (now >= noticeUntilMs) { notice = null; noticeUntilMs = Long.MAX_VALUE }
         if (now >= captureUntilMs) capture?.let { c -> if (c.captured == null) captureResult(captureFlow.onTimeout(c.token)) }
@@ -1020,8 +975,8 @@ class SettingsMachineImpl(
         pin?.invoke(false)
     }
 
-    // (Score bug WP-4b, docs/design/m6-score-bug.md §7) SPORTS is advanced-only, like NETWORK (every row is ADVANCED).
-    private fun sections(): List<SectionId> = SectionId.entries.filter { advanced || (it != SectionId.NETWORK && it != SectionId.SPORTS) }
+    // (Owner ruling 2026-11-17) Every section and every row is shown: the "Show advanced settings" toggle is gone.
+    private fun sections(): List<SectionId> = SECTION_ORDER
 
     private fun currentRoute(): SettingsRoute = path.last()
 
@@ -1079,7 +1034,6 @@ class SettingsMachineImpl(
             page = displayed,
             cursor = cursor,
             top = top,
-            advanced = advanced,
             choice = choice,
             menu = menu,
             confirm = confirm,
@@ -1103,8 +1057,6 @@ class SettingsMachineImpl(
         /** The default key map with no user overrides (tests and machines built without the router's map). */
         val DEFAULT_KEY_MAP: EffectiveKeyMap = RemappedKeyMap(DefaultKeyMap(), null, null)
 
-        /** The pinned "Show advanced settings" toggle of the sections pane (§3.2.3); `GuidePrefs.advancedSettings`. */
-        val ADVANCED_ROW = RowId("settings.advanced")
         /** (m6-channel-editor §3.2) The editor / pad rows of a page drawn by another screen ([editText], [editNumber]). */
         val EXT_EDIT_ROW = RowId("ext.edit")
         val EXT_NUMBER_ROW = RowId("ext.number")
@@ -1125,6 +1077,15 @@ class SettingsMachineImpl(
         /** CH± / PAGE_UP/DOWN (§3.2.2). */
         const val ROW_PAGE = 8
         const val SECTION_PAGE = 6
+
+        /**
+         * The sections pane's order (owner ruling 2026-11-17: Sports under Interface, About last). Not the enum's order:
+         * [SectionId] keeps its declaration order so nothing keyed on it moves.
+         */
+        val SECTION_ORDER: List<SectionId> = listOf(
+            SectionId.PLAYLISTS, SectionId.GUIDE, SectionId.PLAYBACK, SectionId.CHANNELS, SectionId.INTERFACE, SectionId.SPORTS,
+            SectionId.REMOTE, SectionId.PARENTAL, SectionId.BACKUP, SectionId.NETWORK, SectionId.ABOUT,
+        ).also { check(it.toSet() == SectionId.entries.toSet()) { "SECTION_ORDER misses a section" } }
         /** Paged lists load `[cursor − 16, cursor + 32)` (§3.2.1). */
         const val ITEMS_BEHIND = 16
         const val ITEMS_AHEAD = 32

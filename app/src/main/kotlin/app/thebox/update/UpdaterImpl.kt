@@ -130,6 +130,9 @@ class UpdaterImpl @Inject constructor(
     @Volatile private var offer: Pair<UpdateManifest, ApkEntry>? = null
     @Volatile private var lastManual = false
     private var work: Job? = null
+    /** Main thread: the process went to the background, so the next ON_START is a return to the foreground. */
+    private var wasStopped = false
+    private var foregroundCheck: Job? = null
     /** Second code review S-3: one update job at a time. */
     private val flight = SingleFlight()
     private var jobSeq = 0
@@ -278,17 +281,25 @@ class UpdaterImpl @Inject constructor(
      */
     suspend fun runCheck(manual: Boolean, resume: Boolean = false): UpdateState = runCheckWithOutcome(manual, resume).first
 
+    /**
+     * (Owner ruling 2026-11-17) The app-start check, also run each time the app returns to the foreground: automatic
+     * and silent on failure, it runs while "Check for updates automatically" is on, whatever the 24 h cadence
+     * ([UpdatePolicy.shouldRun]). A busy updater (downloading, installing) is left alone.
+     */
+    suspend fun runStartupCheck(): UpdateState = runCheckWithOutcome(manual = false, resume = false, startup = true).first
+
     /** [runCheck] plus what it ended in for a waiting download (code review S4), returned rather than shared. */
-    private suspend fun runCheckWithOutcome(manual: Boolean, resume: Boolean): Pair<UpdateState, UpdatePolicy.CheckOutcome> = mutex.withLock {
+    private suspend fun runCheckWithOutcome(manual: Boolean, resume: Boolean, startup: Boolean = false): Pair<UpdateState, UpdatePolicy.CheckOutcome> = mutex.withLock {
         var outcome: UpdatePolicy.CheckOutcome = UpdatePolicy.CheckOutcome.NotRun
         val end = withContext(io) {
             store.awaitReady()
             val now = System.currentTimeMillis()
             var prefs = store.flow(UpdateDomain).value
-            if (!UpdatePolicy.shouldRun(prefs, now, manual, checkedThisProcess, resume)) return@withContext _state.value
+            if (!UpdatePolicy.shouldRun(prefs, now, manual, checkedThisProcess, resume, startup)) return@withContext _state.value
             // S1 (review) + S5 (code review): one busy rule, checked and claimed in one step.
             if (!claim(UpdateState.Checking)) return@withContext _state.value
-            checkedThisProcess = true
+            // The app-start check leaves the daily worker its one automatic check of this process.
+            if (!startup) checkedThisProcess = true
             lastManual = manual
             val endpoint = endpoints.current()
             if (!endpoint.enabled) {
@@ -699,10 +710,24 @@ class UpdaterImpl @Inject constructor(
             override fun onStart(owner: LifecycleOwner) {
                 if (watcher.onProcessStarted(now())) onHandOffCheck()
                 if (deferred.onStart()) resumeDeferredHandOff()
+                // (Owner ruling 2026-11-17) Back in the foreground: check again, as an app start does. The first
+                // ON_START of the process is the app start itself (UpdateCheckSchedulerImpl).
+                if (wasStopped) {
+                    wasStopped = false
+                    foregroundCheck?.cancel()
+                    foregroundCheck = appScope.launch(io + guard) {
+                        if (!endpoints.current().enabled) return@launch
+                        delay(UpdateTimings.UPDATE_STARTUP_CHECK_DELAY_MS)
+                        runStartupCheck()
+                    }
+                }
             }
             override fun onResume(owner: LifecycleOwner) { if (watcher.onProcessResumed(now())) onHandOffCheck() }
             override fun onPause(owner: LifecycleOwner) = watcher.onProcessPaused()
-            override fun onStop(owner: LifecycleOwner) = watcher.onProcessStopped()
+            override fun onStop(owner: LifecycleOwner) {
+                wasStopped = true
+                watcher.onProcessStopped()
+            }
         })
         (context.applicationContext as? Application)?.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
             override fun onActivityResumed(activity: Activity) {

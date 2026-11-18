@@ -106,7 +106,6 @@ class PersistenceTest : SettingsTestBase() {
         val before = reprepares()
         openSettings("interface")
         choose("interface.clock", "H24")
-        showAdvanced() // (M5 integration) "Channel numbers" is an advanced row
         activate("interface.numbers")
         leaveSettings()
         Thread.sleep(1_500)
@@ -116,7 +115,6 @@ class PersistenceTest : SettingsTestBase() {
         choose("playback.audio_output", "ALWAYS_DECODE")
         press(KeyEvent.KEYCODE_BACK)
         openSettings("playback")
-        showAdvanced()
         activate("playback.tunneling")
         assertEquals("nothing applied while Settings is open", before, reprepares())
         leaveSettings()

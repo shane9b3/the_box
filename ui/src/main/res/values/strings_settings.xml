@@ -4,7 +4,6 @@
     <!-- UI kit (settings_ui_*). `settings_title` already exists in strings_guide.xml (M3 placeholder), so the shell uses settings_ui_title. -->
     <string name="settings_ui_title">Settings</string>
     <string name="settings_ui_breadcrumb_sep">" › "</string>
-    <string name="settings_ui_show_advanced">Show advanced settings</string>
     <string name="settings_ui_on">On</string>
     <string name="settings_ui_off">Off</string>
     <string name="settings_ui_masked">••••••••</string>
@@ -43,7 +42,6 @@
     <string name="settings_section_network">Network</string>
 
     <!-- WP-A page strings (generated with SettingsText; keep in step) -->
-    <string name="settings_advanced_toggle">Show advanced settings</string>
     <string name="settings_announce_row">%1$s, %2$s, %3$d of %4$d</string>
     <string name="settings_announce_row_no_value">%1$s, %2$d of %3$d</string>
     <string name="settings_capture_timed_out">No key arrived. Press Select to try again.</string>

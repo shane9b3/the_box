@@ -88,8 +88,8 @@ private fun QuickPill(label: String, value: String?, focused: Boolean, checked: 
         if (checked) Line("✓", GuideUi.sans(24, FontWeight.SemiBold, text))
         Line(label, GuideUi.sans(24, FontWeight.SemiBold, text))
         if (value != null && !checked) {
-            Line("·", GuideUi.sans(22, color = text.copy(alpha = 0.7f)))
-            Line(value, GuideUi.sans(22, color = text.copy(alpha = 0.7f)), Modifier.padding(end = 2.dp))
+            Line("·", GuideUi.sans(22, color = GuideUi.secondary(text, focused, 0.7f)))
+            Line(value, GuideUi.sans(22, color = GuideUi.secondary(text, focused, 0.7f)), Modifier.padding(end = 2.dp))
         }
     }
 }

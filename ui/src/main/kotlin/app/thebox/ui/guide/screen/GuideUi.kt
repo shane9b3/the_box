@@ -60,6 +60,15 @@ object GuideUi {
         letterSpacing = if (letterSpacingEm == 0f) TextStyle.Default.letterSpacing else letterSpacingEm.em,
     )
 
+    /**
+     * Secondary text (description, value, count, chevron) in the row's [text] colour: [rest] alpha on the dark panel. On a
+     * focused (FG-filled) row it is at least [FOCUSED_SECONDARY_ALPHA]: the dark text at `.45`-`.65` on the light fill is
+     * the same mid grey as the unfocused text and washes out on a TV (owner report 2026-11-17).
+     */
+    fun secondary(text: Color, focused: Boolean, rest: Float): Color =
+        text.copy(alpha = text.alpha * if (focused) maxOf(rest, FOCUSED_SECONDARY_ALPHA) else rest)
+    const val FOCUSED_SECONDARY_ALPHA = 0.85f
+
     fun mono(size: Int, weight: FontWeight = FontWeight.Normal, color: Color = Fg) = TextStyle(
         fontFamily = BoxFonts.Mono, fontSize = size.sp, fontWeight = weight, color = color, fontFeatureSettings = "tnum",
     )

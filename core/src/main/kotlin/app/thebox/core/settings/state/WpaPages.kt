@@ -688,14 +688,9 @@ class WpaPages(
 
     override suspend fun onIntent(route: SettingsRoute, intent: RowIntent, ctx: PageContext): Boolean = apply(intent)
 
-    /** Writes [intent]; true when it is one of WP-A's section rows (or the advanced toggle). */
+    /** Writes [intent]; true when it is one of WP-A's section rows. */
     fun apply(intent: RowIntent): Boolean {
         val id = intent.row
-        if (id == SettingsMachineImpl.ADVANCED_ROW) {
-            val on = (intent as? RowIntent.Toggle)?.on ?: return true
-            store.update(GuideDomain) { it.copy(advancedSettings = on) }
-            return true
-        }
         val spec = SettingsTree.spec(id) ?: return false
         if (spec.section !in HANDLED || spec.owner != "A" && spec.section != SectionId.SPORTS) return false
         val choose = (intent as? RowIntent.Choose)?.optionId

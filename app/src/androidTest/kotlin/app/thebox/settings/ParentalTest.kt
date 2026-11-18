@@ -120,8 +120,6 @@ class ParentalTest : SettingsTestBase() {
         press(KeyEvent.KEYCODE_BACK)
         // CH± after the 1-hour expiry never lands on a locked channel.
         openSettings("parental")
-        // (M5 integration) "Stay unlocked" is an advanced row (§3.3.8): show advanced settings first.
-        showAdvanced()
         choose("parental.stay_unlocked", "one_hour")
         leaveSettings()
         debugLink("clock_offset_ms=${31_000 + 3_601_000}")

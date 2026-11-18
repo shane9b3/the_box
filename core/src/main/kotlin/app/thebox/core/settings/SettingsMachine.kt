@@ -32,7 +32,6 @@ data class SettingsUiState(
     val cursor: Int = 0,
     /** First visible row index (one-row lookahead scrolling, §3.2.4). */
     val top: Int = 0,
-    val advanced: Boolean = false,
     val choice: ChoiceState? = null,
     val menu: MenuState? = null,
     val confirm: ConfirmState? = null,
@@ -78,8 +77,6 @@ sealed interface SettingsEvent {
     data class CaptureTimedOut(val token: Long) : SettingsEvent
     data class PinResult(val purpose: PinPurpose, val granted: Boolean) : SettingsEvent
     data class Notice(val text: String) : SettingsEvent
-    /** Advanced view toggled elsewhere or restored. */
-    data class Advanced(val on: Boolean) : SettingsEvent
     data class Tick(val nowMs: Long) : SettingsEvent
 }
 

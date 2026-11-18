@@ -111,10 +111,10 @@ private fun MenuLineView(line: MenuLine, label: String, reason: String?, focused
             if (!line.enabled && reason != null) {
                 // The reason stays readable on a disabled line: `.55` of the row colour, not of the dimmed label.
                 val base = if (focused) SettingsUi.Canvas else SettingsUi.Fg
-                Line(reason, GuideUi.sans(20, color = base.copy(alpha = 0.55f)), Modifier.padding(top = 2.dp))
+                Line(reason, GuideUi.sans(20, color = SettingsUi.secondary(base, focused, 0.55f)), Modifier.padding(top = 2.dp))
             }
         }
-        line.count?.let { Line(formatCount(it), GuideUi.mono(22, color = text.copy(alpha = text.alpha * 0.55f)), Modifier.padding(start = 16.dp)) }
+        line.count?.let { Line(formatCount(it), GuideUi.mono(22, color = SettingsUi.secondary(text, focused, 0.55f)), Modifier.padding(start = 16.dp)) }
     }
 }
 
@@ -153,14 +153,14 @@ private fun PickerRow(row: EditorGroupRow, here: Boolean, focused: Boolean, inde
     Row(m.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
             Line(row.name, SettingsUi.OptionLabel.copy(color = text))
-            if (row.hidden && !here) Line(texts.get(EditorText.PICKER_HIDDEN_DETAIL), GuideUi.sans(20, color = text.copy(alpha = text.alpha * 0.55f)))
+            if (row.hidden && !here) Line(texts.get(EditorText.PICKER_HIDDEN_DETAIL), GuideUi.sans(20, color = SettingsUi.secondary(text, focused, 0.55f)))
         }
         Row(Modifier.padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (here) {
-                Line(texts.get(EditorText.PICKER_HERE), EditorUi.Detail.copy(color = text.copy(alpha = text.alpha * 0.65f)))
+                Line(texts.get(EditorText.PICKER_HERE), EditorUi.Detail.copy(color = SettingsUi.secondary(text, focused, 0.65f)))
             } else {
                 GroupBadges(row, text, onLight = focused)
-                Line(formatCount(row.channels), GuideUi.mono(22, color = text.copy(alpha = text.alpha * 0.65f)))
+                Line(formatCount(row.channels), GuideUi.mono(22, color = SettingsUi.secondary(text, focused, 0.65f)))
             }
         }
     }
@@ -191,7 +191,7 @@ fun EditorChoiceCard(choice: EditorChoice, filter: EditorFilter, texts: EditorTe
             Row(m.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
                 val d = SettingsUi.RADIO.dp
                 if (i == selected) Box(Modifier.size(d).background(SettingsUi.Accent, CircleShape))
-                else Box(Modifier.size(d).border(2.dp, text.copy(alpha = 0.45f), CircleShape))
+                else Box(Modifier.size(d).border(2.dp, SettingsUi.secondary(text, focused, 0.45f), CircleShape))
                 Spacer(Modifier.width(18.dp))
                 Line(label, SettingsUi.OptionLabel.copy(color = text))
             }

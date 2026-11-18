@@ -22,6 +22,7 @@ import dagger.hilt.android.EntryPointAccessors
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.concurrent.TimeUnit
 import javax.inject.Inject
@@ -32,6 +33,9 @@ import javax.inject.Inject
  * [UpdatePolicy.firstCheckDelayMs] away (≥ 60 s after the first frame, or the rest of the 24 h since the last check).
  * `about.auto_check` off cancels it ([cancel]). The worker runs [UpdaterImpl.runCheck] (automatic), which applies the
  * cadence again, so an early or duplicated run asks nothing. Returns at once.
+ *
+ * (Owner ruling 2026-11-17) Every app start also checks once, [UpdateTimings.UPDATE_STARTUP_CHECK_DELAY_MS] after the
+ * first frame, while "Check for updates automatically" is on and the build has an update endpoint.
  */
 class UpdateCheckSchedulerImpl @Inject constructor(
     @ApplicationContext private val context: Context,
@@ -40,6 +44,7 @@ class UpdateCheckSchedulerImpl @Inject constructor(
     @ApplicationScope private val scope: CoroutineScope,
     /** D-L14: no daily worker while the build has no update endpoint (debug builds until the harness sets a manifest URL). */
     private val endpoints: UpdateEndpoints,
+    private val updater: dagger.Lazy<UpdaterImpl>,
 ) : UpdateCheckScheduler {
 
     override fun scheduleCheck() {
@@ -48,6 +53,13 @@ class UpdateCheckSchedulerImpl @Inject constructor(
             store.awaitReady()
             val prefs = store.flow(UpdateDomain).value
             val delay = firstRunDelay(UpdatePolicy.firstCheckDelayMs(prefs, System.currentTimeMillis()), endpoints.current().enabled)
+            if (startupCheck(prefs.checkAutomatically, endpoints.current().enabled)) {
+                scope.launch {
+                    delay(UpdateTimings.UPDATE_STARTUP_CHECK_DELAY_MS)
+                    // Never fatal: a failed check is silent and the daily worker still runs.
+                    runCatching { updater.get().runStartupCheck() }.onFailure { BoxLog.w(TAG, "app-start update check failed: ${it.javaClass.simpleName}") }
+                }
+            }
             val wm = WorkManager.getInstance(context)
             if (delay == null) {
                 wm.cancelUniqueWork(WORK)
@@ -73,6 +85,9 @@ class UpdateCheckSchedulerImpl @Inject constructor(
 
         /** D-L14: the worker's first delay, or null (cancel) when checks are off or the endpoint is disabled. */
         fun firstRunDelay(policyDelayMs: Long?, endpointEnabled: Boolean): Long? = policyDelayMs?.takeIf { endpointEnabled }
+
+        /** Whether this start checks for an update: automatic checks on and an update endpoint in this build. */
+        fun startupCheck(checkAutomatically: Boolean, endpointEnabled: Boolean): Boolean = checkAutomatically && endpointEnabled
     }
 }
 

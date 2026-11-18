@@ -56,19 +56,18 @@ class SettingsReachabilityTest {
         val real = seed.playlists?.let { RealPages(it, seed.pinSet) }
         return SettingsWorld(store, env, pinSet = seed.pinSet, applyIntents = false, reloadAfterIntent = false, real = real).also { w ->
             w.advanced = seed.advanced
-            w.machine.dispatch(app.thebox.core.settings.SettingsEvent.Advanced(seed.advanced))
             seed.configureWorld(w)
         }
     }
 
     private data class Key(
         val route: SettingsRoute, val stack: List<SettingsRoute>, val pane: app.thebox.core.settings.Pane, val sectionCursor: Int, val cursor: Int,
-        val advanced: Boolean, val rows: List<RowId>?, val choice: Any?, val menu: Any?, val confirm: Int?, val editor: RowId?,
+        val rows: List<RowId>?, val choice: Any?, val menu: Any?, val confirm: Int?, val editor: RowId?,
         val pad: Triple<RowId, Int, Int>?, val move: Any?, val capture: Boolean,
     )
 
     private fun key(u: SettingsUiState) = Key(
-        u.route, u.stack, u.pane, u.sectionCursor, u.cursor, u.advanced,
+        u.route, u.stack, u.pane, u.sectionCursor, u.cursor,
         // Row ids plus toggle values (so a toggle is flipped both ways); other values are not part of the state.
         u.page?.let { p ->
             p.rows.map { r ->

@@ -51,6 +51,17 @@ class UpdatePolicyTest {
         assertFalse(UpdatePolicy.shouldRun(UpdatePrefs(), now, manual = false, checkedThisProcess = true))
     }
 
+    /** Owner ruling 2026-11-17: every app start checks while automatic checks are on, whatever the cadence. */
+    @Test
+    fun appStartCheckIgnoresTheCadenceButNotTheSwitch() {
+        val justChecked = UpdatePrefs(lastCheckMs = now - 60_000L)
+        assertFalse(UpdatePolicy.shouldRun(justChecked, now, manual = false, checkedThisProcess = false))
+        assertTrue(UpdatePolicy.shouldRun(justChecked, now, manual = false, checkedThisProcess = false, startup = true))
+        assertTrue(UpdatePolicy.shouldRun(justChecked, now, manual = false, checkedThisProcess = true, startup = true))
+        val off = justChecked.copy(checkAutomatically = false)
+        assertFalse(UpdatePolicy.shouldRun(off, now, manual = false, checkedThisProcess = false, startup = true))
+    }
+
     @Test
     fun clockMovedBackCountsAsDue() {
         val prefs = UpdatePrefs(lastCheckMs = now + 3_600_000L)

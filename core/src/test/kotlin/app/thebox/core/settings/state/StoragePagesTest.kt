@@ -79,7 +79,6 @@ class StoragePagesTest {
 
     @Test fun pauseRewindPageIsLengthSaveToAndTheTwoAdvancedRows() {
         val w = world().open(SettingsRoute.PauseRewind)
-        assertEquals(listOf(PauseRewindRows.TIMESHIFT, PauseRewindRows.TIMESHIFT_LOCATION), w.rows().map { it.id }, "simple view")
         val length = w.row(PauseRewindRows.TIMESHIFT)
         assertEquals("PB_TIMESHIFT_LENGTH", length.label)
         val save = w.row(PauseRewindRows.TIMESHIFT_LOCATION)
@@ -89,7 +88,6 @@ class StoragePagesTest {
         assertEquals("SAVE_TO_DESC", save.description)
         assertEquals(EffectTiming.NEXT_TUNE, save.effect)
         assertTrue(save.enabled)
-        w.machine.dispatch(SettingsEvent.Advanced(true)); w.advanced = true; w.pump()
         assertEquals(
             listOf(PauseRewindRows.TIMESHIFT, PauseRewindRows.TIMESHIFT_LOCATION, PauseRewindRows.TIMESHIFT_HOLD, PauseRewindRows.TIMESHIFT_PROTECT),
             w.rows().map { it.id },
@@ -146,7 +144,7 @@ class StoragePagesTest {
         assertEquals("TS_AUTO(TS_HOUR)", length.value, "Auto is 1 h on a drive and fits")
         assertTrue(length.description!!.startsWith("PB_TIMESHIFT_DESC_AT(TS_HOUR,TS_GB("), length.description)
         assertTrue(length.description!!.contains("the USB drive") || length.description!!.contains("PLACE_USB_DRIVE"))
-        w.machine.dispatch(SettingsEvent.Advanced(true)); w.advanced = true; w.pump()
+        w.pump()
         assertTrue(w.row(PauseRewindRows.TIMESHIFT_PROTECT).description!!.contains("PB_TIMESHIFT_PROTECT_ELSEWHERE(PLACE_USB_DRIVE)"))
     }
 

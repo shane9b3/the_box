@@ -14,7 +14,7 @@ import kotlinx.coroutines.flow.emptyFlow
  * What every page builder sees (docs/design/m5-setup-settings.md §3.2.3): the simple/advanced switch and the clock.
  * Data a builder needs beyond that it reads from its own injected sources.
  */
-data class PageContext(val advanced: Boolean, val nowMs: Long)
+data class PageContext(val advanced: Boolean = true, val nowMs: Long)
 
 /**
  * (WP-A seam, §1.3a: one owner per page) Builds the pages of some routes. `:ui`'s `SettingsEffectsImpl` asks the

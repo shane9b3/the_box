@@ -79,7 +79,6 @@ class ReapplyOnExitTest {
     @Test fun liveOnlyVisitCostsNothing() {
         val r = Rig()
         r.store.update(app.thebox.core.settings.state.GuideDomain) { it.copy(advancedSettings = true) }
-        r.machine.dispatch(app.thebox.core.settings.SettingsEvent.Advanced(true))
         r.open(SettingsRoute.Section(SectionId.INTERFACE))
         r.chooseNext(InterfaceRows.CLOCK)
         r.toggle(InterfaceRows.LOGOS)
@@ -95,7 +94,6 @@ class ReapplyOnExitTest {
     @Test fun audioOutputTunnelingAndBufferApplyOnceOnBackOut() {
         val r = Rig()
         r.store.update(app.thebox.core.settings.state.GuideDomain) { it.copy(advancedSettings = true) }
-        r.machine.dispatch(app.thebox.core.settings.SettingsEvent.Advanced(true))
         r.open(SettingsRoute.Section(SectionId.PLAYBACK))
         r.chooseNext(PlaybackRows.BUFFER)
         r.chooseNext(PlaybackRows.AUDIO_OUTPUT)

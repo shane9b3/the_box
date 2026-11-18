@@ -47,7 +47,6 @@ import app.thebox.ui.guide.screen.Line
 const val SETTINGS_ROW_TAG = "settings_row:"
 const val SETTINGS_OPTION_TAG = "settings_option:"
 const val SETTINGS_SECTION_TAG = "settings_section:"
-const val SETTINGS_ADVANCED_TAG = "settings_advanced"
 const val SETTINGS_PLACEHOLDER_ROW_TAG = "settings_row_placeholder:"
 
 /** Height of [row] (§3.1): 76 one line, 104 with a description (or a disabled reason), 72 for list items. */
@@ -161,7 +160,7 @@ private fun RowBody(row: SettingsRow, focused: Boolean, moving: Boolean) {
             secondLine(row)?.let { d ->
                 // (WP-S4, §9.1) An amber description ("Can't reach NAS: saving on this device for now.").
                 val amber = SettingsUi.isWarnText(d) && !focused
-                val color = if (amber) SettingsUi.Amber.copy(alpha = alpha) else text.copy(alpha = 0.55f * alpha)
+                val color = if (amber) SettingsUi.Amber.copy(alpha = alpha) else SettingsUi.secondary(text, focused, 0.55f)
                 // (Update interval §5.2) The interval row's detail (recommendation, time per update, MB an hour, the
                 // floor / slowed / fallback lines) wraps while the row is focused; every other row stays one line.
                 val lines = descLines(row, focused)
@@ -209,7 +208,7 @@ private fun Trailing(row: SettingsRow, focused: Boolean, text: Color) {
             val amber = SettingsUi.isWarnText(row.value) && !focused
             Text(
                 value,
-                style = style.copy(color = if (amber) SettingsUi.Amber.copy(alpha = text.alpha) else text.copy(alpha = text.alpha * 0.65f)),
+                style = style.copy(color = if (amber) SettingsUi.Amber.copy(alpha = text.alpha) else SettingsUi.secondary(text, focused, 0.65f)),
                 maxLines = 1,
                 overflow = if (value.contains("://") || value.contains('.')) TextOverflow.MiddleEllipsis else TextOverflow.Ellipsis,
                 // U-S6: at most 560 px, no longer always 560: a short value leaves the label column (and its lines) the room.
@@ -219,8 +218,8 @@ private fun Trailing(row: SettingsRow, focused: Boolean, text: Color) {
         }
         when (val k = row.kind) {
             is RowKind.Toggle -> TogglePill(k.on, Modifier.semantics { stateDescription = if (k.on) "on" else "off" }, onLight = focused) // U-S9
-            is RowKind.Link -> Line(stringResource(R.string.settings_ui_chevron), SettingsUi.RowLabel.copy(color = text.copy(alpha = text.alpha * 0.45f)))
-            is RowKind.Item -> if (k.route != null) Line(stringResource(R.string.settings_ui_chevron), SettingsUi.RowLabel.copy(color = text.copy(alpha = text.alpha * 0.45f)))
+            is RowKind.Link -> Line(stringResource(R.string.settings_ui_chevron), SettingsUi.RowLabel.copy(color = SettingsUi.secondary(text, focused, 0.45f)))
+            is RowKind.Item -> if (k.route != null) Line(stringResource(R.string.settings_ui_chevron), SettingsUi.RowLabel.copy(color = SettingsUi.secondary(text, focused, 0.45f)))
             is RowKind.Action -> if (k.destructive) Dot(SettingsUi.Bad.copy(alpha = text.alpha), 10)
             else -> Unit
         }
@@ -318,7 +317,7 @@ private fun OptionList(row: SettingsRow, options: List<ChoiceOption>, selected: 
                 if (multi) CheckBox(isSelected, text) else Radio(isSelected, text)
                 Spacer(Modifier.width(18.dp))
                 Line(o.label, SettingsUi.OptionLabel.copy(color = text))
-                o.detail?.let { Line(it, SettingsUi.OptionDetail.copy(color = text.copy(alpha = 0.55f * alpha)), Modifier.padding(start = 16.dp)) }
+                o.detail?.let { Line(it, SettingsUi.OptionDetail.copy(color = SettingsUi.secondary(text, isFocused, 0.55f)), Modifier.padding(start = 16.dp)) }
             }
         }
     }

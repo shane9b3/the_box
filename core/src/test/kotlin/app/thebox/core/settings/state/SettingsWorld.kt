@@ -159,7 +159,8 @@ class SettingsWorld(
     val fixtures = FixturePages()
     val machine = SettingsMachineImpl(effects, { now }, SettingsTexts.KEYS, HintValidator(SettingsTexts.KEYS, WpaPages.rowRules(SettingsTexts.KEYS)))
     val gate = FakePinGate(pinSet)
-    var advanced = false
+    /** The page builders' `advanced` argument; always true in the app since the toggle was removed (2026-11-17). */
+    var advanced = true
     private var version = 1000L
 
     /** C-L2: what the capture overlay's Save handed to the mapping source (`SettingsShellLink.captureSaved`). */
@@ -191,14 +192,13 @@ class SettingsWorld(
                 val i = effects.intents[pendingIntents++]
                 // C-L2: the fixture's capture row behaves like WP-C's mapping source (Run → startCapture).
                 if (i.row == FixturePages.CAPTURE_ROW && i is RowIntent.Run) { machine.startCapture(BoxAction.OPEN_SEARCH, app.thebox.core.input.Press.SHORT); continue }
-                if (i.row == SettingsMachineImpl.ADVANCED_ROW) advanced = (i as RowIntent.Toggle).on
                 if (applyIntents) runBlocking {
                     val ctx = PageContext(advanced, now)
                     val at = machine.ui.value.page?.route ?: machine.ui.value.route
                     // The page's own source first, then the rest (as SettingsEffectsImpl does).
                     if (!(storage.handles(at) && storage.onIntent(at, i, ctx))) wpa.onIntent(at, i, ctx)
                 }
-                if (reloadAfterIntent || i.row == SettingsMachineImpl.ADVANCED_ROW) machine.ui.value.page?.route?.let { effects.loads += it }
+                if (reloadAfterIntent) machine.ui.value.page?.route?.let { effects.loads += it }
             }
             val loads = effects.loads.toList(); effects.loads.clear()
             for (r in loads.distinct()) machine.dispatch(SettingsEvent.Page(page(r)))

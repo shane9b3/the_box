@@ -14,6 +14,12 @@ object UpdateTimings {
      * first frame (the network may still be coming up), whatever the 24 h cadence.
      */
     const val UPDATE_RESUME_CHECK_DELAY_MS = 2_000L
+    /**
+     * (Owner ruling 2026-11-17) Every app start checks this long after the first frame while "Check for updates
+     * automatically" is on, whatever the 24 h cadence. Short, so the card is there when the user arrives; not zero,
+     * because the network may still be coming up.
+     */
+    const val UPDATE_STARTUP_CHECK_DELAY_MS = 2_000L
     /** `update.json` is a few hundred bytes; anything larger is refused before parsing. */
     const val MANIFEST_MAX_BYTES = 65_536
     /** Raw Ed25519 signature (§3.12.1). */
@@ -46,6 +52,8 @@ val UpdateDomain: SettingsDomain<UpdatePrefs> = SettingsDomain(
  *   the first frame. A clock that moved backwards (last check "in the future") counts as due, so a wrong clock cannot
  *   silence updates for ever.
  * - A manual check always runs.
+ * - (Owner ruling 2026-11-17) The app-start check runs on every start while `checkAutomatically` is on, whatever the
+ *   cadence. It does not count as the process's automatic check, so the daily worker still runs when it is due.
  * - At most one automatic check per process start ([checkedThisProcess]), so a long-running box asks once a day through
  *   the periodic worker, never in a loop.
  */
@@ -61,8 +69,10 @@ object UpdatePolicy {
      * on disk, so the user pressed Update and was interrupted (the API 30 "Install unknown apps" grant kills the
      * process): the check runs whatever the cadence, once per process.
      */
-    fun shouldRun(prefs: UpdatePrefs, nowMs: Long, manual: Boolean, checkedThisProcess: Boolean, resume: Boolean = false): Boolean =
-        manual || (!checkedThisProcess && (resume || isDue(prefs, nowMs)))
+    fun shouldRun(
+        prefs: UpdatePrefs, nowMs: Long, manual: Boolean, checkedThisProcess: Boolean, resume: Boolean = false, startup: Boolean = false,
+    ): Boolean =
+        manual || (startup && prefs.checkAutomatically) || (!checkedThisProcess && (resume || isDue(prefs, nowMs)))
 
     /**
      * (review S3, N7) What a start does with `filesDir/update`: [keepVersionCode] is the highest `{versionCode}.apk`

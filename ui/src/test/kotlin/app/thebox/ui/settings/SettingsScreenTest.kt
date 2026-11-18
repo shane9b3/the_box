@@ -81,7 +81,7 @@ class SettingsScreenTest {
         rule.onNodeWithTag(SETTINGS_SECTIONS_TAG).assertExists()
         rule.onNodeWithTag(SETTINGS_PAGE_TAG).assertExists()
         rule.onAllNodesWithText("Playback", useUnmergedTree = true).assertCountEquals(2) // section row + page title
-        rule.onNodeWithText("Show advanced settings", useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("Show advanced settings", useUnmergedTree = true).assertDoesNotExist()
         rule.onNodeWithTag(SETTINGS_BREADCRUMB_TAG, useUnmergedTree = true).assertExists()
         rule.onNodeWithText("Settings › Playback", useUnmergedTree = true).assertExists()
         for (r in rows) rule.onNodeWithTag(SETTINGS_ROW_TAG + r.id.key).assertExists()
@@ -124,13 +124,6 @@ class SettingsScreenTest {
         show(state(pane = Pane.SECTIONS, cursor = 1))
         rule.onNodeWithTag(SETTINGS_SECTION_TAG + 2).assert(isSelected(true))
         rule.onNodeWithTag(SETTINGS_ROW_TAG + "playback.audio_output").assert(isSelected(false))
-    }
-
-    @Test
-    fun advancedToggleFocusedAfterTheLastSection() {
-        val s = state(pane = Pane.SECTIONS)
-        show(s.copy(sectionCursor = s.sections.size))
-        rule.onNodeWithTag(SETTINGS_ADVANCED_TAG).assert(isSelected(true))
     }
 
     @Test

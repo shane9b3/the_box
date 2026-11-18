@@ -109,10 +109,6 @@ class SettingsViewModel internal constructor(
                 live = now
             }
         }
-        machine.dispatch(SettingsEvent.Advanced(store.flow(GuideDomain).value.advancedSettings))
-        s.launch(main) {
-            store.flow(GuideDomain).map { it.advancedSettings }.distinctUntilChanged().collect { machine.dispatch(SettingsEvent.Advanced(it)) }
-        }
         s.launch(main) {
             // U-S1 (code review 2026-10-16): a leading-edge throttle. The first change after REBUILD_MIN_GAP_MS of quiet
             // rebuilds at once (a page's first data no longer waits out a window its placeholder opened, §6.7 "Settings

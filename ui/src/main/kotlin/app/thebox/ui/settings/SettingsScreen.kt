@@ -247,16 +247,6 @@ private fun SectionsPane(ui: SettingsUiState, current: SectionId?, modifier: Mod
                 SectionRow(stringResource(SettingsUi.sectionLabel(id)), focused, current = !focused && id == current, Modifier.testTag(SETTINGS_SECTION_TAG + i))
             }
         }
-        Box(Modifier.fillMaxWidth().height(1.dp).background(SettingsUi.GlassBorder))
-        Spacer(Modifier.height(SettingsUi.SECTION_ROW_GAP.dp))
-        val focused = ui.pane == Pane.SECTIONS && ui.sectionCursor == ui.sections.size && !overlayOpen(ui)
-        val rs = RoundedCornerShape(SettingsUi.ROW_RADIUS.dp)
-        var m = Modifier.fillMaxWidth().height(SettingsUi.SECTION_ROW_H.dp).testTag(SETTINGS_ADVANCED_TAG).semantics { selected = focused }
-        if (focused) m = m.border(SettingsUi.FOCUS_RING.dp, SettingsUi.Accent, rs).background(SettingsUi.Fg, rs)
-        Row(m.padding(start = SettingsUi.SECTION_LABEL_X.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
-            Line(stringResource(R.string.settings_ui_show_advanced), SettingsUi.AdvancedLabel.copy(color = if (focused) SettingsUi.Canvas else SettingsUi.Fg85), Modifier.weight(1f))
-            TogglePill(ui.advanced, onLight = focused) // U-S9
-        }
     }
 }
 

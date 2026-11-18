@@ -193,7 +193,7 @@ fun HeadRow(index: Int, label: String, count: Int?, look: RowLook, modifier: Mod
         if (look == RowLook.CURRENT) CurrentBar()
         Row(Modifier.fillMaxWidth().padding(start = EditorUi.TEXT_X.dp, end = EditorUi.ROW_PAD.dp), verticalAlignment = Alignment.CenterVertically) {
             Line(label, EditorUi.RowName.copy(color = text), Modifier.weight(1f))
-            if (count != null) Line(formatCount(count), EditorUi.RowValue.copy(color = text.copy(alpha = text.alpha * 0.65f)), Modifier.padding(start = 12.dp))
+            if (count != null) Line(formatCount(count), EditorUi.RowValue.copy(color = SettingsUi.secondary(text, look == RowLook.FOCUSED, 0.65f)), Modifier.padding(start = 12.dp))
         }
     }
 }
@@ -215,7 +215,7 @@ fun GroupRowView(row: EditorGroupRow, ticked: Boolean, look: RowLook, texts: Edi
             Row(Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 GroupBadges(row, text, onLight = look == RowLook.FOCUSED)
                 val value = if (row.hiddenChannels > 0) texts.count(EditorText.GROUP_VALUE_HIDDEN, row.channels, row.hiddenChannels) else formatCount(row.channels)
-                Line(value, EditorUi.RowValue.copy(color = text.copy(alpha = text.alpha * 0.65f)))
+                Line(value, EditorUi.RowValue.copy(color = SettingsUi.secondary(text, look == RowLook.FOCUSED, 0.65f)))
             }
         }
     }
@@ -248,7 +248,7 @@ fun ChannelRowView(row: EditorChannelRow, ticked: Boolean, look: RowLook, showLo
             Spacer(Modifier.width((EditorUi.TEXT_X - EditorUi.ROW_PAD - EditorUi.TICK).dp))
             Text(
                 row.number?.toString() ?: "",
-                style = EditorUi.RowValue.copy(color = text.copy(alpha = text.alpha * 0.5f)),
+                style = EditorUi.RowValue.copy(color = SettingsUi.secondary(text, look == RowLook.FOCUSED, 0.5f)),
                 maxLines = 1, overflow = TextOverflow.Clip, textAlign = TextAlign.End,
                 modifier = Modifier.width(EditorUi.NUMBER_W.dp),
             )
@@ -263,7 +263,7 @@ fun ChannelRowView(row: EditorChannelRow, ticked: Boolean, look: RowLook, showLo
             Line(row.name, EditorUi.RowName.copy(color = text), Modifier.weight(1f))
             val detail = channelDetail(row, texts)
             if (detail != null) {
-                Line(detail, EditorUi.Detail.copy(color = text.copy(alpha = text.alpha * 0.55f)), Modifier.padding(start = 16.dp).widthIn(max = DETAIL_MAX_W.dp))
+                Line(detail, EditorUi.Detail.copy(color = SettingsUi.secondary(text, look == RowLook.FOCUSED, 0.55f)), Modifier.padding(start = 16.dp).widthIn(max = DETAIL_MAX_W.dp))
             }
             Row(Modifier.padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 ChannelBadges(row, text, onLight = look == RowLook.FOCUSED)

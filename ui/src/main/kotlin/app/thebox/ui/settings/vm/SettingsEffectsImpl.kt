@@ -53,7 +53,7 @@ class SettingsEffectsImpl(
     private val builds = HashMap<SettingsRoute, Job>()
     private val placeholderVersion = AtomicLong(0)
 
-    private fun ctx() = PageContext(advanced = machine.ui.value.advanced, nowMs = nowMs())
+    private fun ctx() = PageContext(advanced = true, nowMs = nowMs())
 
     private fun sourceFor(route: SettingsRoute): SettingsPageSource? = sources.firstOrNull { it.handles(route) }
 

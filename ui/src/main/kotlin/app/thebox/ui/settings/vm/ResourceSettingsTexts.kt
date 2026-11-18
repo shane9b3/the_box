@@ -25,7 +25,6 @@ class ResourceSettingsTexts(private val resources: Resources) : SettingsTexts {
         SettingsText.SECTION_BACKUP -> R.string.settings_section_backup
         SettingsText.SECTION_ABOUT -> R.string.settings_section_about
         SettingsText.SECTION_NETWORK -> R.string.settings_section_network
-        SettingsText.ADVANCED_TOGGLE -> R.string.settings_advanced_toggle
         SettingsText.ANNOUNCE_ROW -> R.string.settings_announce_row
         SettingsText.ANNOUNCE_ROW_NO_VALUE -> R.string.settings_announce_row_no_value
         SettingsText.CAPTURE_TIMED_OUT -> R.string.settings_capture_timed_out

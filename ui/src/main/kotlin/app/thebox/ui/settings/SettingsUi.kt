@@ -67,6 +67,8 @@ object SettingsUi {
     val White16 = Color.White.copy(alpha = 0.16f)
     val White22 = Color.White.copy(alpha = 0.22f)
     const val DISABLED_ALPHA = 0.4f
+    /** [GuideUi.secondary]: secondary text stays near-solid on a focused (FG-filled) row. */
+    fun secondary(text: Color, focused: Boolean, rest: Float): Color = GuideUi.secondary(text, focused, rest)
 
     // ---- geometry (§3.1 table)
     const val HEADER_X = 64; const val HEADER_Y = 48; const val CLOCK_RIGHT = 64
@@ -107,8 +109,6 @@ object SettingsUi {
     val PageSubtitle: TextStyle get() = GuideUi.sans(24, color = Fg60)
     val RowLabel: TextStyle get() = GuideUi.sans(28, FontWeight.Medium)
     val RowValue: TextStyle get() = GuideUi.sans(26)
-    /** The sections pane's "Show advanced settings" row: one size down so it fits beside the toggle in 420 px. */
-    val AdvancedLabel: TextStyle get() = GuideUi.sans(22)
     val RowValueMono: TextStyle get() = GuideUi.mono(26)
     val RowDesc: TextStyle get() = GuideUi.sans(22)
     /** U-S6: a mono line at the line size (the Test's details under its verdict). */
