@@ -53,7 +53,7 @@ class GuideNavigatorTest {
     fun focusAtNowPlacesWindowAndContext() {
         val c = ctx(halfHours())
         val f = nav.focusAt(4, now, c)
-        assertEquals(h19, f.windowStartMin)
+        assertEquals(at(19, 30), f.windowStartMin, "the window opens at the current half hour (owner ruling 2026-11-18)")
         assertEquals(now, f.anchorMin)
         assertEquals(at(19, 30) to at(20), f.cellStart to f.cellEnd)
         assertEquals(3, f.topRow)
@@ -215,11 +215,11 @@ class GuideNavigatorTest {
     fun toRowFocusesAtNowAndToTimeIsTheDayJump() {
         val c = ctx(halfHours(30), size = 30)
         val r = moved(nav.move(focus(2, at(21), at(21, 30), ws = at(20, 30)), GridMove.TO_ROW, 17, c))
-        assertEquals(17, r.row); assertEquals(now, r.anchorMin); assertEquals(h19, r.windowStartMin); assertEquals(16, r.topRow)
+        assertEquals(17, r.row); assertEquals(now, r.anchorMin); assertEquals(at(19, 30), r.windowStartMin); assertEquals(16, r.topRow)
         val target = now + 1440
         val t = moved(nav.move(focus(2, at(19, 30), at(20), now), GridMove.TO_TIME, target, c))
         assertEquals(target, t.anchorMin)
-        assertEquals(h19 + 1440, t.windowStartMin)
+        assertEquals(h19 + 1440, t.windowStartMin, "a jump to another time keeps the half-hour lead")
         assertEquals(2, t.row)
         assertEquals(CellKind.LOADING, t.cellKind, "outside the snapshot")
     }

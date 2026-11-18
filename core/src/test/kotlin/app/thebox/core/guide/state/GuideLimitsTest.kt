@@ -39,7 +39,7 @@ class GuideLimitsTest {
         assertEquals(utc.floor30(e), utc.clampWs(e - 5000, e, l))
         assertEquals(utc.ceil30(l) - 180, utc.clampWs(l, e, l))
         assertEquals(utc.nowWindow(now), utc.clampWs(utc.nowWindow(now), e, l))
-        assertEquals(now - 17 - 30, utc.nowWindow(now)) // 19:00
+        assertEquals(now - 17, utc.nowWindow(now)) // 19:30: the current half hour (owner ruling 2026-11-18)
     }
 
     @Test fun daysStripWithTonightAndCoverage() {

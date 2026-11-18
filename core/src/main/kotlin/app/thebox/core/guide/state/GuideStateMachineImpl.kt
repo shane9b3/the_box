@@ -2398,6 +2398,7 @@ class GuideStateMachineImpl(
             channelNumber = ch.number, channelName = ch.displayName, genre = genre, onNow = t.cls == CellClass.ON_NOW,
             catchupDays = archiveDays(ch), title = title, timeLine = timeLine, description = description,
             buttons = emptyList(), noInfo = noInfo, imageUrl = imageUrl, // owner ruling 2026-11-01: no panel buttons
+            isNew = t.kind == CellKind.PROGRAMME && (t.flags and app.thebox.core.epg.ProgrammeFlags.NEW) != 0,
         )
         if (p != old) u = u.copy(panel = p)
         // (2026-10-18) Armed on the new panel, not the old one: a description already loaded for the previous cell

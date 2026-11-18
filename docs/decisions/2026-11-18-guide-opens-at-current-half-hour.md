@@ -1,0 +1,40 @@
+# The guide opens at the current half hour (2026-11-18)
+
+Owner ruling: the guide's first column is the half hour now in progress, not the one before it.
+
+## Before
+
+A window placed for now started at `floor30(now) − 30` (the prototype's rule, m3-guide §3.3.2): at 20:40 the grid ran
+from 20:00, so the first column showed the half hour already over.
+
+## Now
+
+- A window placed in the current half hour starts at `floor30(now)`: at 20:40 the grid runs from 20:30. This covers
+  opening the guide, going home, a row jump (number entry) and a day jump that lands in the current half hour.
+- A programme that began before the window is clipped at the left edge, as any cell cut by the window already is.
+- Unchanged: paging while browsing left or right, and a jump to another time, keep the 30 minute lead
+  (`GridConstants.LEAD_MIN`).
+
+## Code
+
+`GridConstants.NOW_LEAD_MIN = 0`; `GuideNavigatorImpl.placedLead` picks it when the anchor is in the current half
+hour; `GuideLimits.nowWindow` follows it.
+
+# NEW corner tag on programme blocks (2026-11-18)
+
+Owner ruling: new episodes get the app's own mark, a corner tag, instead of the provider's "New" written in the title.
+
+- **Tag**: an accent tab (`GuideColors.ACCENT`) in the block's top-right corner, "NEW" in the canvas colour
+  (`GuideTextStyle.NEW_TAG`, 18 px/700), 26 px high. Same on a focused block; half strength on a past block. It sits
+  above the title line, so it takes no room from the title. A block too narrow to leave 24 px beside it has no tag.
+- **Source**: `ProgrammeFlags.NEW`, set by XMLTV `<new/>` (already parsed) or by `NewMarker`, which takes a "new"
+  marker out of the title at import: `ᴺᵉʷ` anywhere; `(New)`, `[New]`, `{New}`, `*New*` at either end; a prefix
+  `New:` / `New -` / `New |`; a suffix `- New` / `| New`; a last word `NEW` in capitals after a mixed-case title.
+  Real titles ("New Amsterdam", "Brand New Day") are left alone.
+- `EpgSchema.IMPORTER_VERSION` is 2, so every guide is rebuilt once from its cached file after the update.
+- Not done: no NEW mark in the focused-programme panel, the full-screen info bar or search results (titles there are
+  clean because the marker is removed at import). A marker in the middle of a title is not recognised.
+- Device finding: Android's ICU regex rejects an unescaped `]` or `}` that the desktop JVM accepts; the unit tests
+  cannot catch that.
+- (Later the same day, owner request) The focused-programme panel shows the same tag beside the time line
+  ("10:00 – 11:00 · 1 h  NEW"): `PanelState.isNew`, drawn in `FocusedPanel`.

@@ -42,8 +42,8 @@ class GuideLimits(private val labels: TimeLabels) {
         return m.coerceIn(lo, hi)
     }
 
-    /** The prototype's window for now: `floor30(now) − 30`. */
-    fun nowWindow(nowMin: Int): Int = floor30(nowMin) - 30
+    /** The window for now: `floor30(now)` (owner ruling 2026-11-18; the prototype's was `floor30(now) − 30`). */
+    fun nowWindow(nowMin: Int): Int = floor30(nowMin) - app.thebox.core.guide.layout.GridConstants.NOW_LEAD_MIN
 
     /** Epoch minute of local [day] at the local time of day of [anchorMin] (DST-safe through the label tables). */
     fun atDayKeepingTime(day: Int, anchorMin: Int): Int =

@@ -4,6 +4,11 @@ package app.thebox.core.guide.layout
 object GridConstants {
     const val SLIVER_MIN = 5
     const val LEAD_MIN = 30
+    /**
+     * (Owner ruling 2026-11-18) The lead of a window placed for now: none, so the guide opens at the current half hour
+     * (it was [LEAD_MIN], which spent the first column on the half hour already over).
+     */
+    const val NOW_LEAD_MIN = 0
     const val TAIL_MIN = 30
     const val SNAP_AFTER_REPEATS = 3
     const val SCROLL_ANIM_MS = 200

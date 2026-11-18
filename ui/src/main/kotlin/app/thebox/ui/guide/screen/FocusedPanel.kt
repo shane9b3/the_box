@@ -57,6 +57,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlin.math.roundToInt
 
 const val FOCUSED_PANEL_TAG = "focused_panel"
+const val FOCUSED_PANEL_NEW_TAG = "focused_panel_new"
 const val PANEL_DESCRIPTION_TAG = "focused_panel_description"
 /** The meta row (genre, ON NOW); absent when it would be empty. */
 const val PANEL_META_TAG = "focused_panel_meta"
@@ -83,7 +84,17 @@ fun FocusedPanel(panel: PanelState?, modifier: Modifier = Modifier, scrollDescri
             MetaRow(panel)
             val titleStyle = remember { BoxTextStyles.Title.copy(color = GuideUi.Fg, lineBreak = LineBreak.Heading) }
             Line(panel.title, titleStyle, maxLines = 2)
-            Line(panel.timeLine, GuideUi.mono(24, color = GuideUi.Fg.copy(alpha = 0.75f)))
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Line(panel.timeLine, GuideUi.mono(24, color = GuideUi.Fg.copy(alpha = 0.75f)))
+                // (Owner request 2026-11-18) The grid's NEW corner tag, beside the programme's length.
+                if (panel.isNew) {
+                    Box(
+                        Modifier.testTag(FOCUSED_PANEL_NEW_TAG)
+                            .background(DesignTokens.Colors.Accent, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 10.dp, vertical = 3.dp),
+                    ) { Line(stringResource(R.string.guide_new_tag), GuideUi.sans(18, FontWeight.Bold, DesignTokens.Colors.Canvas, 0.06f)) }
+                }
+            }
             panel.description?.let { desc ->
                 // A new programme (or a new description) starts the scroll again from the top.
                 key(panel.title, panel.timeLine, desc) {

@@ -68,6 +68,20 @@ class FocusedPanelTest {
         rule.waitForIdle()
     }
 
+    /** Owner request 2026-11-18: a new episode carries the NEW tag beside the programme's length. */
+    @Test fun newEpisodeShowsTheNewTagBesideTheTimeLine() {
+        show(panel(short).copy(isNew = true), scroll = false)
+        rule.onNodeWithTag(FOCUSED_PANEL_NEW_TAG, useUnmergedTree = true).assertExists()
+        val time = rule.onNodeWithText("19:30 – 20:00 · 30 min", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val tag = rule.onNodeWithTag(FOCUSED_PANEL_NEW_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue("the tag follows the time line ($time, $tag)", tag.left > time.right && tag.top < time.bottom && tag.bottom > time.top)
+    }
+
+    @Test fun otherProgrammesHaveNoNewTag() {
+        show(panel(short), scroll = false)
+        rule.onNodeWithTag(FOCUSED_PANEL_NEW_TAG, useUnmergedTree = true).assertDoesNotExist()
+    }
+
     @After fun motionOn() {
         Settings.Global.putFloat(rule.activity.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f)
     }

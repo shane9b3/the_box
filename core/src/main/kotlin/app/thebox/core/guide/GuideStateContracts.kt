@@ -50,6 +50,8 @@ data class PanelState(
     val noInfo: Boolean,
     /** Poster art beside the text (owner request 2026-10-18): the programme's XMLTV icon, with the description. */
     val imageUrl: String? = null,
+    /** (Owner request 2026-11-18) A new episode (`ProgrammeFlags.NEW`): the NEW tag follows the time line. */
+    val isNew: Boolean = false,
 )
 
 data class DayItem(val day: Int, val label: String, val enabled: Boolean, val primeTime: Boolean = false)

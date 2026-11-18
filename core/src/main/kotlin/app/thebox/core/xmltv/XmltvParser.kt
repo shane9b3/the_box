@@ -269,6 +269,8 @@ class XmltvParser(private val factory: () -> XmlPullParser) {
             }
             pickCategories()
             episodes.applyTo(p)
+            // (Decision 2026-11-18) A "new" written into the title becomes the NEW flag; the guide draws its own tag.
+            NewMarker.strip(p.title)?.let { clean -> p.title = clean; p.flags = p.flags or ProgrammeFlags.NEW }
         }
 
         private fun flag(f: Int) {

@@ -3,6 +3,7 @@ package app.thebox.core.guide.render
 import androidx.collection.MutableIntFloatMap
 import androidx.collection.MutableIntObjectMap
 import app.thebox.core.common.Hash64
+import app.thebox.core.epg.ProgrammeFlags
 import app.thebox.core.guide.CellKind
 import app.thebox.core.guide.GuideAsset
 import app.thebox.core.guide.GuideCanvas
@@ -76,6 +77,8 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
     private var labels: TimeLabels? = null
     /** Right edge (device px) of the clip chevron while the focused cell is drawn with it, else −1 (decision 2026-10-19). */
     private var clipCueRight = -1f
+    /** Width of the NEW tag's text at the current scale (−1 = not measured). */
+    private var newTagTextW = -1f
 
     /** Text-fit cache counters (hand-off measurements). */
     val textFitHits: Long get() = titleFit.hits + nameFit.hits
@@ -289,6 +292,7 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
         titleFit.clear(); nameFit.clear()
         rulerW.fill(-1f)
         numberW.clear()
+        newTagTextW = -1f
         for (k in STYLES.indices) {
             val st = STYLES[k]
             ellW[k] = mm.width(ELLIPSIS, 0, 1, st) * widthScale
@@ -566,6 +570,8 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
             }
         }
 
+        if (programme && (flags and ProgrammeFlags.NEW) != 0) drawNewTag(canvas, x0, x1, top, past)
+
         if (onNow && pass != PASS_TEXT) {
             val ph = s * G.PROGRESS_H
             val bx0 = x0 + s * G.PROGRESS_INSET_X
@@ -573,6 +579,26 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
             val pb = bottom - s * G.PROGRESS_INSET_B
             val frac = (now - start).toFloat() / (end - start)
             if (bx1 > bx0) canvas.fillRect(bx0, pb - ph, bx0 + (bx1 - bx0) * frac, pb, if (focused) C.ACCENT else C.CELL_PROGRESS)
+        }
+    }
+
+    /**
+     * (Decision 2026-11-18) The NEW corner tag: an accent tab in the cell's top-right corner with "NEW" in the canvas
+     * colour, the same on a focused cell; half strength on a past cell. It sits above the title line, so it takes no
+     * room from the title. Skipped when the cell is too narrow to leave [GuideGeometry.NEW_TAG_MIN_REST] beside it, and
+     * kept inside the grid when the cell runs past the right edge.
+     */
+    private fun drawNewTag(canvas: GuideCanvas, x0: Float, x1: Float, top: Float, past: Boolean) {
+        if (newTagTextW < 0f) newTagTextW = width(NEW_TAG, GuideTextStyle.NEW_TAG)
+        val w = newTagTextW + 2 * s * G.NEW_TAG_PAD_X
+        val right = minOf(x1, contentRight)
+        val left = right - w
+        if (left - x0 < s * G.NEW_TAG_MIN_REST) return
+        val bottom = top + s * G.NEW_TAG_H
+        if (pass != PASS_TEXT) canvas.fillRoundRect(left, top, right, bottom, s * G.CELL_R, if (past) NEW_TAG_FILL_PAST else C.ACCENT)
+        if (pass != PASS_BG) {
+            canvas.drawText(NEW_TAG, 0, NEW_TAG.length, left + s * G.NEW_TAG_PAD_X, centredBaseline(top, bottom, GuideTextStyle.NEW_TAG),
+                GuideTextStyle.NEW_TAG, C.CANVAS)
         }
     }
 
@@ -766,6 +792,8 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
         private const val BUBBLE_R = 20f
         private const val BUBBLE_FILL = 0xE60A0D13.toInt()          // CANVAS at .9
         private val ACCENT_HALF = alpha(C.ACCENT, 0.5f)
+        private const val NEW_TAG = "NEW"
+        private val NEW_TAG_FILL_PAST = alpha(C.ACCENT, 0.5f)
         private const val MAX_ARCHIVE_DAYS = 3650
         private const val MAX_NUMBER_STRINGS = 4096
 

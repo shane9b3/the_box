@@ -11,6 +11,7 @@ import app.thebox.core.guide.GuideNavigator
 import app.thebox.core.guide.RowStatus
 import app.thebox.core.guide.TimeLabels
 import app.thebox.core.guide.layout.GridConstants.LEAD_MIN
+import app.thebox.core.guide.layout.GridConstants.NOW_LEAD_MIN
 import app.thebox.core.guide.layout.GridConstants.PAGE_ROWS
 import app.thebox.core.guide.layout.GridConstants.TAIL_MIN
 import app.thebox.core.guide.layout.GridConstants.TIME_PAGE_MIN
@@ -24,6 +25,7 @@ import app.thebox.core.guide.layout.GridConstants.TIME_STEP_MIN
  *   `anchor = max(start, ws', earliest)`.
  * - Vertical moves (UP/DOWN/PAGE) keep the window and the anchor and focus the cell containing the anchor (a sliver
  *   resolves to the next focusable cell, else the previous); the top row keeps focus at visible index 1…4.
+ * - A window placed for the current half hour (opening, home, a row or day jump) starts at it: no lead.
  * - Time moves (TIME/STEP) shift window and anchor together; TO_TIME is the day-jump placement; TO_ROW focuses a
  *   row at now (number entry, §3.9.4); RESOLVE re-finds the anchor's cell after a new snapshot.
  * - Minutes outside the snapshot are LOADING cells cut at local :00/:30 (and at the edges of known cells).
@@ -62,7 +64,7 @@ class GuideNavigatorImpl(private val labels: TimeLabels? = null) : GuideNavigato
             GridMove.TO_ROW -> moved(focusAt(arg.coerceIn(0, ctx.lineupSize - 1), ctx.nowMin, ctx), ctx)
             GridMove.TO_TIME -> {
                 val anchor = clampAnchor(arg, ctx)
-                val ws = clampWs(floor30(anchor) - LEAD_MIN, ctx)
+                val ws = clampWs(floor30(anchor) - placedLead(anchor, ctx), ctx)
                 resolveAt(row, anchor, ctx)
                 moved(GridFocus(row, cS, cE, cK, anchor, ws, topFor(row, from.topRow, ctx.lineupSize)), ctx)
             }
@@ -73,10 +75,17 @@ class GuideNavigatorImpl(private val labels: TimeLabels? = null) : GuideNavigato
         }
     }
 
+    /**
+     * The lead of a window placed at [anchor] (opening, home, a row jump, a day jump): [NOW_LEAD_MIN] in the current
+     * half hour, so the guide opens at it (owner ruling 2026-11-18); [LEAD_MIN] at any other time. Paging while
+     * browsing keeps [LEAD_MIN].
+     */
+    private fun placedLead(anchor: Int, ctx: GridContext): Int = if (floor30(anchor) == floor30(ctx.nowMin)) NOW_LEAD_MIN else LEAD_MIN
+
     override fun focusAt(row: Int, atMin: Int, ctx: GridContext): GridFocus {
         val r = if (ctx.lineupSize <= 0) 0 else row.coerceIn(0, ctx.lineupSize - 1)
         val anchor = clampAnchor(atMin, ctx)
-        val ws = clampWs(floor30(anchor) - LEAD_MIN, ctx)
+        val ws = clampWs(floor30(anchor) - placedLead(anchor, ctx), ctx)
         resolveAt(r, anchor, ctx)
         val top = clamp(r - 1, 0, maxOf(0, ctx.lineupSize - GuideGeometry.VISIBLE_ROWS))
         return GridFocus(r, cS, cE, cK, anchor, ws, top)
