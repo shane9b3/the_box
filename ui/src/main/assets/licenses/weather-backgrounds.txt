@@ -1,4 +1,4 @@
-Weather page background photographs, from Wikimedia Commons (https://commons.wikimedia.org).
+Weather page background photographs, from Wikimedia Commons (https://commons.wikimedia.org) unless an entry says otherwise.
 Each image was cropped to 16:9 and resized to 1280x720 from the original; no other changes were made.
 
 weather_bg_clear_day.webp
@@ -56,22 +56,22 @@ weather_bg_rain_night.webp
   Source:  https://commons.wikimedia.org/wiki/File:Perfect_night_(drizzle_remix)_(Explored)_-_Flickr_-_Real_Cowboys_Drive_Cadillacs.jpg
 
 weather_bg_snow_day.webp
-  Title:   Winter snowfall near a forest (Unsplash).jpg
-  Author:  Cameron Kirby ckirby
-  Licence: CC0 (http://creativecommons.org/publicdomain/zero/1.0/deed.en)
-  Source:  https://commons.wikimedia.org/wiki/File:Winter_snowfall_near_a_forest_(Unsplash).jpg
+  Title:   Unsplash photo 1477601263568-180e2c6d046e (snow-covered street)
+  Author:  Unsplash contributor
+  Licence: Unsplash Licence (https://unsplash.com/license)
+  Source:  https://images.unsplash.com/photo-1477601263568-180e2c6d046e
 
 weather_bg_snow_night.webp
-  Title:   20190123 Hollihaka Park Oulu.jpg
-  Author:  Estormiz
-  Licence: CC0 (http://creativecommons.org/publicdomain/zero/1.0/deed.en)
-  Source:  https://commons.wikimedia.org/wiki/File:20190123_Hollihaka_Park_Oulu.jpg
+  Title:   Snowfall in a park at night
+  Author:  Unknown (supplied by the app's owner; carries a widewallpapers.net mark)
+  Licence: Not established
+  Source:  https://i.imgur.com/5yZSM.jpeg
 
 weather_bg_storm.webp
-  Title:   Lightning Above the Mountaintop (iotw2433a).jpg
-  Author:  International Gemini Observatory/NOIRLab/NSF/AURA/J. Chu
-  Licence: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0)
-  Source:  https://commons.wikimedia.org/wiki/File:Lightning_Above_the_Mountaintop_(iotw2433a).jpg
+  Title:   Lightning bolt, Johnston, Iowa (27661834650).jpg
+  Author:  NOAA Photo Library
+  Licence: Public domain (work of the US National Oceanic and Atmospheric Administration, a US federal government agency)
+  Source:  https://commons.wikimedia.org/wiki/File:Lightning_bolt,_Johnston,_Iowa_(27661834650).jpg
 
 weather_bg_fog.webp
   Title:   Khada Gorge Valley Filled with Morning Fog in Georgia.jpg
