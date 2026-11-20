@@ -9,7 +9,7 @@ internal object EpgSchema {
      * it with any importer change that writes different rows from the same XMLTV and settings (a new field, a parse
      * fix): unchanged guides are then rebuilt once from their cached files instead of keeping the old rows.
      */
-    const val IMPORTER_VERSION = "2" // 2 (2026-11-18): a "new" marker in a title becomes ProgrammeFlags.NEW (NewMarker)
+    const val IMPORTER_VERSION = "3" // 2 (2026-11-18): a "new" marker in a title becomes ProgrammeFlags.NEW (NewMarker); 3 (2026-11-19): "live" and LIVE (LiveMarker)
 
     /**
      * Build `programme_by_text` before the bulk load instead of after it (no sort, ~20 % slower inserts).

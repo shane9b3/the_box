@@ -58,6 +58,7 @@ import kotlin.math.roundToInt
 
 const val FOCUSED_PANEL_TAG = "focused_panel"
 const val FOCUSED_PANEL_NEW_TAG = "focused_panel_new"
+const val FOCUSED_PANEL_LIVE_TAG = "focused_panel_live"
 const val PANEL_DESCRIPTION_TAG = "focused_panel_description"
 /** The meta row (genre, ON NOW); absent when it would be empty. */
 const val PANEL_META_TAG = "focused_panel_meta"
@@ -93,6 +94,14 @@ fun FocusedPanel(panel: PanelState?, modifier: Modifier = Modifier, scrollDescri
                             .background(DesignTokens.Colors.Accent, RoundedCornerShape(12.dp))
                             .padding(horizontal = 10.dp, vertical = 3.dp),
                     ) { Line(stringResource(R.string.guide_new_tag), GuideUi.sans(18, FontWeight.Bold, DesignTokens.Colors.Canvas, 0.06f)) }
+                }
+                // (Owner request 2026-11-19) The LIVE tag, in the live colour.
+                if (panel.isLive) {
+                    Box(
+                        Modifier.testTag(FOCUSED_PANEL_LIVE_TAG)
+                            .background(DesignTokens.Colors.Live, RoundedCornerShape(12.dp))
+                            .padding(horizontal = 10.dp, vertical = 3.dp),
+                    ) { Line(stringResource(R.string.guide_live_tag), GuideUi.sans(18, FontWeight.Bold, DesignTokens.Colors.Canvas, 0.06f)) }
                 }
             }
             panel.description?.let { desc ->

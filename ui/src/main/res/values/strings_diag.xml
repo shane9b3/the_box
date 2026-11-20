@@ -189,6 +189,10 @@
     <string name="licences_barlow">Barlow Condensed font</string>
     <string name="licences_tmdb">TMDB API (program posters, with your own key)</string>
     <string name="licences_tmdb_terms">TMDB API terms of use</string>
+    <string name="licences_weather_data">Weather data, radar and map (Open-Meteo, Environment Canada, RainViewer, Natural Earth)</string>
+    <string name="licences_weather_data_terms">CC BY 4.0 and each provider\'s terms</string>
+    <string name="licences_weather_photos">Weather background photographs (Wikimedia Commons)</string>
+    <string name="licences_weather_photos_terms">CC0, public domain and CC BY</string>
     <string name="licences_lgpl">LGPL 2.1 or later</string>
     <string name="licences_apache2">Apache License 2.0</string>
     <string name="licences_mit">MIT License</string>

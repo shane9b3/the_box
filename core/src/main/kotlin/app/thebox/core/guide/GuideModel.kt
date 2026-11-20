@@ -53,7 +53,7 @@ object GuideGeometry {
     /** Reminder dot leading a future title, and its gap to the title. */
     const val REMINDER_DOT = 10f; const val REMINDER_GAP = 7f
     /** (Decision 2026-11-18) The NEW corner tag: height, side padding, and the room a cell must leave beside it. */
-    const val NEW_TAG_H = 26f; const val NEW_TAG_PAD_X = 10f; const val NEW_TAG_MIN_REST = 24f
+    const val NEW_TAG_H = 26f; const val NEW_TAG_PAD_X = 10f; const val NEW_TAG_MIN_REST = 24f; const val NEW_TAG_GAP = 4f
     // Label column marks
     /** ↺ in the label column (decision 2026-10-19: 12 → 20; 2026-11-09: 24). Also the size the ↺ mask is rasterised for. */
     const val LABEL_GLYPH = 24f

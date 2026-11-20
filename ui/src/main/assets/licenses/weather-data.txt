@@ -1,0 +1,19 @@
+Weather page: where the data and the map come from.
+
+Forecast and city search
+  Weather data by Open-Meteo.com (https://open-meteo.com), licensed under CC BY 4.0
+  (https://creativecommons.org/licenses/by/4.0/). The city search uses Open-Meteo's geocoding API, which is built on
+  GeoNames (https://www.geonames.org, CC BY 4.0). Open-Meteo's free API is offered for non-commercial use.
+
+Radar, cities in Canada
+  Contains information licensed under the Data Server End-use Licence of Environment and Climate Change Canada
+  (https://eccc-msc.github.io/open-data/licence/readme_en/). Radar pictures come from the MSC GeoMet service.
+
+Radar, everywhere else
+  Radar pictures by RainViewer (https://www.rainviewer.com), used under its API terms.
+
+Base map of the radar page
+  Made with Natural Earth (https://www.naturalearthdata.com). Free vector map data, in the public domain.
+
+What is sent: the latitude and longitude of the city you picked (or the name typed into the city search), and the
+map area shown on the radar page. The device's own location is never read or sent.

@@ -175,7 +175,7 @@ class KeyRouterImpl(
             if (short == null && long == null) return false
             // SPORTS (docs/design/m6-score-bug.md §5.1) is on Compose focus too: every key but BACK passes through, and BACK
             // goes to the machine unless the screen holds it (its choice list is open: the same "idle" flag as Search).
-            if ((mode == ScreenMode.SEARCH || mode == ScreenMode.SPORTS) && !(short == BoxAction.BACK && (searchFieldIdle() || sinkFocused))) return false
+            if ((mode == ScreenMode.SEARCH || mode == ScreenMode.SPORTS || mode == ScreenMode.WEATHER) && !(short == BoxAction.BACK && (searchFieldIdle() || sinkFocused))) return false
             if (long == null && short != null && !m.handles(short)) return false // H-S4: on to the media session
             consumedDown += code
             heldContext[code] = context

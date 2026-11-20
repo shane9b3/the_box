@@ -66,6 +66,7 @@ const val SETTINGS_TAG = app.thebox.ui.settings.SETTINGS_SCREEN_TAG
 const val VIDEO_LAYER_TAG = "video_layer"
 /** (Score bug commit 0) The SPORTS layer (WP-4a's Sports screen; an opaque canvas until then). */
 const val SPORTS_TAG = "sports_layer"
+const val WEATHER_TAG = "weather_layer"
 /** U-S5: debug composition counter of the root body. */
 const val COMPOSITIONS_ROOT = "AppRoot"
 
@@ -84,7 +85,7 @@ fun holeModeFor(mode: ScreenMode, tuned: TunedState): HoleMode = when (mode) {
     ScreenMode.GUIDE -> if (tuned.still || nothingTuned(tuned)) HoleMode.STILL else HoleMode.MINI
     ScreenMode.FULL -> HoleMode.FULL
     // (Score bug commit 0, docs/design/m6-score-bug.md §5.1) Sports covers the hole, as Search does.
-    ScreenMode.SEARCH, ScreenMode.SETTINGS, ScreenMode.SPORTS -> HoleMode.COVERED
+    ScreenMode.SEARCH, ScreenMode.SETTINGS, ScreenMode.SPORTS, ScreenMode.WEATHER -> HoleMode.COVERED
 }
 
 /** §3.13.2: GUIDE → MINI (HIDDEN while the mini is a still), FULL → FULL, SEARCH/SETTINGS → HIDDEN. */
@@ -175,6 +176,8 @@ fun AppRoot(
     search: @Composable () -> Unit = {},
     /** (docs/design/m6-score-bug.md §5.1) The Sports screen (the activity owns its view model); an opaque canvas by default. */
     sports: @Composable (clock24: Boolean) -> Unit = {},
+    /** (Weather page 2026-11-19) The Weather screen, hosted like [sports]. */
+    weather: @Composable (clock24: Boolean) -> Unit = {},
     /** (M5 integration) WP-D's phone page for `SettingsRoute.PhoneSetup` (the activity owns its view model). */
     settingsPhone: (@Composable (app.thebox.core.settings.PhonePurpose, Long?) -> Unit)? = null,
     /** (M6, docs/design/m6-channel-editor.md §2.0) The channel editor page for `SettingsRoute.ChannelEditor`. */
@@ -339,7 +342,7 @@ fun AppRoot(
     // ON_RESUME (B1) re-takes sink focus. U1 (code review 2026-11-09): not in SEARCH, SPORTS or the settings text editor,
     // which are on Compose focus: on the sink they would never see BACK. Compose keeps their focused child across a pause.
     LifecycleEventEffect(Lifecycle.Event.ON_RESUME) {
-        val composeFocus = ui.mode == ScreenMode.SEARCH || ui.mode == ScreenMode.SPORTS || editorOpen
+        val composeFocus = ui.mode == ScreenMode.SEARCH || ui.mode == ScreenMode.SPORTS || ui.mode == ScreenMode.WEATHER || editorOpen
         if (!composeFocus) requestSinkFocus(requester)
     }
     LaunchedEffect(player) { player?.events?.collect { onEvent(it) } }
@@ -399,6 +402,7 @@ fun AppRoot(
                         ScreenMode.SEARCH -> search()
                         // (docs/design/m6-score-bug.md §5.1) The Sports tab: opaque, covers the hole, on Compose focus.
                         ScreenMode.SPORTS -> Box(Modifier.fillMaxSize().background(app.thebox.ui.theme.DesignTokens.Colors.Canvas).testTag(SPORTS_TAG)) { sports(settings.clock24) }
+                        ScreenMode.WEATHER -> Box(Modifier.fillMaxSize().background(app.thebox.ui.theme.DesignTokens.Colors.Canvas).testTag(WEATHER_TAG)) { weather(settings.clock24) }
                         ScreenMode.SETTINGS -> if (settingsMachine != null) {
                             app.thebox.ui.settings.SettingsScreen(settingsMachine, settings.clock24, phone = settingsPhone, channelEditor = settingsEditor)
                         } else {

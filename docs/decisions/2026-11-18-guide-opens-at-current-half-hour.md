@@ -41,3 +41,19 @@ Owner ruling: new episodes get the app's own mark, a corner tag, instead of the 
 - (Second ruling, same day) In the grid the tag no longer uses the accent colour: a page full of accent tags was
   distracting. It is drawn in the grid's own greys (`GuideColors.NEW_TAG_*`: white .12 fill with .7 text, .06/.45 on a
   past block, canvas .12/.75 on the focused block). The accent tag stays in the focused-programme panel.
+
+# LIVE tag (2026-11-19)
+
+Owner ruling: live broadcasts get the same tag as new episodes.
+
+- **Source**: `ProgrammeFlags.LIVE`, set by XMLTV `<live/>`, a "Live" category (both already parsed), or `LiveMarker`,
+  which takes a "live" marker out of the title at import: the superscript `ᴸᶦᵛᵉ` (also `ᴸᴵⱽᴱ`, `ˡⁱᵛᵉ`) anywhere, and
+  `(Live)`, `[Live]`, `{Live}`, `*Live*` at either end. "Live" is common in real titles, so no bare prefix, suffix or
+  last word is taken ("Live: PGA Tour", "Saturday Night Live", "NHL Hockey LIVE" stay whole).
+- **Grid**: the same grey corner tab as NEW (`drawCornerTag`). A programme that is both shows LIVE left of NEW, 4 px
+  apart; if there is no room for the second tag it is left out.
+- **Focused-programme panel**: a LIVE pill in the live colour (`DesignTokens.Colors.Live`) after the time line, after
+  the NEW pill when both (`PanelState.isLive`).
+- `EpgSchema.IMPORTER_VERSION` is 3, so every guide is rebuilt once from its cached file after the update.
+- Emulator check on the owner's provider: 6,251 programmes flagged live after the rebuild, no raised letters left in
+  any title.

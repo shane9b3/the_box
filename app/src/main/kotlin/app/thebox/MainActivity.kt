@@ -48,6 +48,7 @@ class MainActivity : ComponentActivity() {
     private val player: PlayerViewModel by viewModels()
     private val search: SearchViewModel by viewModels()
     private val sportsVm: app.thebox.ui.sports.SportsViewModel by viewModels()
+    private val weatherVm: app.thebox.ui.weather.WeatherViewModel by viewModels()
     private val settings: app.thebox.ui.settings.vm.SettingsViewModel by viewModels()
     private val phone: app.thebox.ui.backup.PhoneSetupViewModel by viewModels()
     /** (M6, docs/design/m6-channel-editor.md §3.2) The channel editor page; internal for the on-device suite. */
@@ -108,6 +109,7 @@ class MainActivity : ComponentActivity() {
                     search = { SearchScreen(search, onIdleChanged = { idle -> host.searchFieldIdle = idle }) },
                     // The "idle" flag is the router's BACK gate in SEARCH and SPORTS alike (SportsScreen: no choice list open).
                     sports = { clock24 -> app.thebox.ui.sports.SportsScreen(sportsVm, clock24, onBackFreeChanged = { free -> host.searchFieldIdle = free }) },
+                    weather = { clock24 -> app.thebox.ui.weather.WeatherScreen(weatherVm, clock24, onBackFreeChanged = { free -> host.searchFieldIdle = free }) },
                     settingsPhone = { purpose, browse -> app.thebox.ui.backup.PhoneSetupHost(phone, purpose, browse = browse) },
                     settingsEditor = { route -> app.thebox.ui.editor.ChannelEditorHost(channelEditor, route) },
                     grid = { modifier -> GuideGridHost(host.machine, renderer, modifier) },

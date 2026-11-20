@@ -12,6 +12,7 @@
     <!-- Focused-programme panel (§3.9.1). The guide_btn_ strings left are the programme sheet's (S7b); the panel has no buttons (owner ruling 2026-11-01). -->
     <string name="guide_on_now">ON NOW</string>
     <string name="guide_new_tag">NEW</string>
+    <string name="guide_live_tag">LIVE</string>
     <string name="guide_btn_remind">Remind me</string>
     <string name="guide_btn_reminder_set">Reminder set</string>
     <string name="guide_btn_watch_channel_now">Watch channel now</string>

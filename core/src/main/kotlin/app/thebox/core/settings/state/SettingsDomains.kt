@@ -43,6 +43,10 @@ val StorageDomain: SettingsDomain<StoragePrefs> = SettingsDomain(Domains.STORAGE
  */
 val SportsDomain: SettingsDomain<SportsPrefs> = SettingsDomain(Domains.SPORTS, SportsPrefs.serializer(), SportsPrefs())
 
+/** (Weather page, docs/decisions/2026-11-19-weather-page.md) The cities, the default city and the units; **backed up**. */
+val WeatherDomain: SettingsDomain<app.thebox.core.weather.WeatherPrefs> =
+    SettingsDomain(Domains.WEATHER, app.thebox.core.weather.WeatherPrefs.serializer(), app.thebox.core.weather.WeatherPrefs())
+
 /**
  * (Score bug commit 0, §2.6, A-S9) The followed game plus two install facts; device-bound, never backed up. Clearing a
  * follow is `update { it.copy(game = null) }`.

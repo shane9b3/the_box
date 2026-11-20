@@ -41,17 +41,18 @@ const val HEADER_TABS_TAG = "header_tabs"
 internal const val HEADER_CLOCK_TAG = "header_clock"
 internal const val HEADER_DATE_TAG = "header_date"
 /** (docs/design/m6-score-bug.md U-N10) The date gives way before the sync chip does: four tabs fit at 1024 with the longest status. */
-private const val HEADER_DATE_MAX_W = 220f
+/** (Weather tab 2026-11-19) 150, was 220: five tabs. "Thu 19 Nov" is about 125 wide; a longer localized date ellipsizes. */
+private const val HEADER_DATE_MAX_W = 150f
 
 /** Tabs in their order (§3.4.3): Guide · Search · Settings gear. Recordings is hidden until v2 (plan §2). */
 /**
  * (docs/design/m6-score-bug.md §5.1; append-only) SPORTS is drawn between Search and the gear (`TAB_COUNT` 4), so the
  * enum order is not the display order: [SHOWN_TABS] is.
  */
-enum class GuideTab { GUIDE, SEARCH, SETTINGS, SPORTS }
+enum class GuideTab { GUIDE, SEARCH, SETTINGS, SPORTS, WEATHER }
 
 /** The tabs drawn, in display order (index = `GuideUiState.tabFocused`; `GuideStateMachineImpl.TAB_*`). */
-internal val SHOWN_TABS: List<GuideTab> = listOf(GuideTab.GUIDE, GuideTab.SEARCH, GuideTab.SPORTS, GuideTab.SETTINGS)
+internal val SHOWN_TABS: List<GuideTab> = listOf(GuideTab.GUIDE, GuideTab.SEARCH, GuideTab.SPORTS, GuideTab.WEATHER, GuideTab.SETTINGS)
 
 /**
  * The header row at (832, 56) → 1856 (docs/design/m3-guide.md §3.15): wordmark, tab pills, sync chip, then the date
@@ -68,7 +69,8 @@ fun HeaderTabs(zone: Zone, tabFocused: Int, sync: SyncChip?, clock24: Boolean, m
 internal fun HeaderTabsRow(zone: Zone, tabFocused: Int, sync: SyncChip?, modifier: Modifier = Modifier, clock: @Composable () -> Unit) {
     Row(modifier.fillMaxWidth().testTag(HEADER_TABS_TAG), verticalAlignment = Alignment.CenterVertically) {
         Wordmark()
-        Row(Modifier.padding(start = 24.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+        // (Weather tab 2026-11-19) 16 and 4, were 24 and 8: room for the fifth tab beside the status chip at 1024.
+        Row(Modifier.padding(start = 16.dp), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
             SHOWN_TABS.forEachIndexed { i, tab ->
                 val focused = zone == Zone.TABS && tabFocused == i
                 val active = tab == GuideTab.GUIDE
@@ -76,12 +78,15 @@ internal fun HeaderTabsRow(zone: Zone, tabFocused: Int, sync: SyncChip?, modifie
                     focused = focused,
                     fill = if (active) GuideUi.White12 else Color.Transparent,
                     border = if (active) GuideUi.White16 else null,
+                    // (Weather tab 2026-11-19) 14, was 18: five tabs.
+                    padding = androidx.compose.foundation.layout.PaddingValues(horizontal = 14.dp, vertical = 8.dp),
                 ) { contentColor ->
                     val color = if (focused) contentColor else if (active) GuideUi.Fg else GuideUi.Fg60
                     when (tab) {
                         GuideTab.GUIDE -> Line(stringResource(R.string.guide_tab_guide), GuideUi.sans(24, FontWeight.Medium, color))
                         GuideTab.SEARCH -> Line(stringResource(R.string.guide_tab_search), GuideUi.sans(24, FontWeight.Medium, color))
                         GuideTab.SPORTS -> Line(stringResource(R.string.sports_tab), GuideUi.sans(24, FontWeight.Medium, color))
+                        GuideTab.WEATHER -> Line(stringResource(R.string.weather_tab), GuideUi.sans(24, FontWeight.Medium, color))
                         GuideTab.SETTINGS -> {
                             val desc = stringResource(R.string.guide_tab_settings)
                             Gear(color, Modifier.size(22.dp).semantics { contentDescription = desc })

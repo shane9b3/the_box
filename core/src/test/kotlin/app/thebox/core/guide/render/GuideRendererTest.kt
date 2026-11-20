@@ -1,5 +1,6 @@
 package app.thebox.core.guide.render
 
+import app.thebox.core.epg.ProgrammeFlags
 import app.thebox.core.guide.CellKind
 import app.thebox.core.guide.GridFocus
 import app.thebox.core.guide.GuideAsset
@@ -245,6 +246,24 @@ class GuideRendererTest {
         assertTrue(bands.all { near(it.r, m.xOf(now, h19, 0f)) && it.l == 361f })
         // Owner ruling 2026-10-17: no time line in cells (the ruler carries the times).
         assertFalse(texts(ops).any { it.style == GuideTextStyle.CELL_TIME })
+    }
+
+    /** Decisions 2026-11-18 / 2026-11-19: corner tags from the programme flags; LIVE sits left of NEW; none on a narrow cell. */
+    @Test
+    fun newAndLiveCornerTags() {
+        val both = ProgrammeFlags.NEW or ProgrammeFlags.LIVE
+        val rows = listOf(listOf(
+            Cell(at(15), at(19)), Cell(at(19), at(20), title = "Match", flags = both),
+            Cell(at(20), at(21), title = "Game", flags = ProgrammeFlags.LIVE), Cell(at(21), at(21, 5), title = "Tiny", flags = both),
+            Cell(at(21, 5), at(23)),
+        ))
+        val t = texts(draw(frame(rows)))
+        val new = t.single { it.text == "NEW" }
+        val live = t.filter { it.text == "LIVE" }.sortedBy { it.x }
+        assertEquals(2, live.size, "one LIVE per live cell, none on the narrow one")
+        assertTrue(live[0].x < new.x && new.x < m.xOf(at(20), h19, 0f), "LIVE left of NEW inside the first cell")
+        assertTrue(live[1].x > m.xOf(at(20), h19, 0f) && live[1].x < m.xOf(at(21), h19, 0f), "the second cell's LIVE is in its corner")
+        assertTrue(near(live[0].baseline, new.baseline))
     }
 
     @Test

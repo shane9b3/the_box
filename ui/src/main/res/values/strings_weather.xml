@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- The Weather page (docs/decisions/2026-11-19-weather-page.md). -->
+    <string name="weather_tab">Weather</string>
+    <string name="weather_page_forecast">Forecast</string>
+    <string name="weather_page_radar">Live radar</string>
+    <string name="weather_now">NOW</string>
+    <string name="weather_today">Today</string>
+    <string name="weather_feels">Feels like %1$s · H %2$s · L %3$s</string>
+    <string name="weather_next_hours">Next 12 hours</string>
+    <string name="weather_day_hours">%1$s, hour by hour</string>
+    <string name="weather_days">%1$d days</string>
+    <string name="weather_loading">Loading the forecast…</string>
+    <string name="weather_no_city">Add your city to see its weather.</string>
+    <string name="weather_add_city">Add a city</string>
+    <string name="weather_retry">Try again</string>
+    <string name="weather_fail_offline">No internet connection. Check the network, then try again.</string>
+    <string name="weather_fail_answer">The weather service did not answer. Try again in a moment.</string>
+    <string name="weather_fail_radar">The radar service did not answer. Try again in a moment.</string>
+
+    <string name="weather_tile_precip">Precipitation</string>
+    <string name="weather_tile_precip_expected">%1$s expected</string>
+    <string name="weather_tile_precip_none">None expected</string>
+    <string name="weather_tile_wind">Wind</string>
+    <string name="weather_tile_wind_sub">%1$s · gusts %2$s</string>
+    <string name="weather_tile_humidity">Humidity</string>
+    <string name="weather_tile_uv">UV index</string>
+    <string name="weather_tile_sunrise">Sunrise</string>
+    <string name="weather_tile_sunset">Sunset</string>
+    <string name="weather_tile_daylight">Daylight %1$s</string>
+    <string name="weather_tile_sets_in">Sets in %1$s</string>
+    <string name="weather_tile_set_ago">Set %1$s ago</string>
+    <string name="weather_speed_kmh">%1$d km/h</string>
+    <string name="weather_speed_mph">%1$d mph</string>
+    <string name="weather_amount_mm">%1$s mm</string>
+    <string name="weather_amount_in">%1$s in</string>
+    <string name="weather_span_min">%1$d min</string>
+    <string name="weather_span_h">%1$d h</string>
+    <string name="weather_span_h_min">%1$d h %2$d min</string>
+    <plurals name="weather_min_ago">
+        <item quantity="one">%1$d min ago</item>
+        <item quantity="other">%1$d min ago</item>
+    </plurals>
+
+    <string name="weather_sum_through">%1$s through the next 12 hours.</string>
+    <string name="weather_sum_until">%1$s until about %2$s.</string>
+    <string name="weather_sum_from">Dry for now, %1$s likely from about %2$s.</string>
+    <string name="weather_sum_none">No rain or snow expected in the next 12 hours.</string>
+    <string name="weather_sum_breezy">Breezy from the %1$s.</string>
+    <string name="weather_sum_windy">Windy from the %1$s.</string>
+    <string name="weather_kind_rain">rain</string>
+    <string name="weather_kind_snow">snow</string>
+    <string name="weather_kind_storms">thunderstorms</string>
+
+    <!-- In the order of core.weather.Condition. -->
+    <string-array name="weather_conditions">
+        <item>Clear</item>
+        <item>Mainly clear</item>
+        <item>Partly cloudy</item>
+        <item>Overcast</item>
+        <item>Fog</item>
+        <item>Light drizzle</item>
+        <item>Drizzle</item>
+        <item>Freezing drizzle</item>
+        <item>Light rain</item>
+        <item>Rain</item>
+        <item>Heavy rain</item>
+        <item>Freezing rain</item>
+        <item>Light snow</item>
+        <item>Snow</item>
+        <item>Heavy snow</item>
+        <item>Light showers</item>
+        <item>Showers</item>
+        <item>Heavy showers</item>
+        <item>Snow showers</item>
+        <item>Thunderstorm</item>
+        <item>Thunderstorm with hail</item>
+    </string-array>
+    <!-- N, NE, E, SE, S, SW, W, NW. -->
+    <string-array name="weather_compass_short">
+        <item>N</item><item>NE</item><item>E</item><item>SE</item><item>S</item><item>SW</item><item>W</item><item>NW</item>
+    </string-array>
+    <string-array name="weather_compass_long">
+        <item>north</item><item>northeast</item><item>east</item><item>southeast</item><item>south</item><item>southwest</item><item>west</item><item>northwest</item>
+    </string-array>
+    <string-array name="weather_humidity">
+        <item>Dry</item><item>Comfortable</item><item>Humid</item><item>Damp</item>
+    </string-array>
+    <string-array name="weather_uv">
+        <item>Low</item><item>Moderate</item><item>High</item><item>Very high</item><item>Extreme</item>
+    </string-array>
+
+    <string name="weather_cities">Cities</string>
+    <string name="weather_cities_hint">Press OK on a city to show it. The default city is the one the page opens on.</string>
+    <string name="weather_default">Default</string>
+    <string name="weather_set_default">Set as default</string>
+    <string name="weather_remove">Remove %1$s</string>
+    <string name="weather_cities_full">Remove a city to add another</string>
+    <string name="weather_units">Units</string>
+    <string name="weather_units_metric">°C · km/h · mm</string>
+    <string name="weather_units_imperial">°F · mph · in</string>
+    <string name="weather_search_field">City name</string>
+    <string name="weather_search_hint">Type the name of a city.</string>
+    <string name="weather_searching">Searching…</string>
+    <string name="weather_search_none">No city found for “%1$s”. Check the spelling.</string>
+    <string name="weather_added">Added</string>
+
+    <string name="weather_radar_loading">Loading the radar…</string>
+    <string name="weather_radar_play">Play</string>
+    <string name="weather_radar_pause">Pause</string>
+    <string name="weather_radar_previous">Previous radar picture</string>
+    <string name="weather_radar_next">Next radar picture</string>
+    <string name="weather_radar_zoom_in">Zoom in</string>
+    <string name="weather_radar_zoom_out">Zoom out</string>
+    <string name="weather_radar_latest">Latest</string>
+    <string name="weather_radar_credit">Radar: %1$s · Map: Natural Earth</string>
+    <string name="weather_radar_ec" translatable="false">Environment and Climate Change Canada</string>
+    <string name="weather_radar_rv" translatable="false">RainViewer</string>
+    <string name="weather_credit" translatable="false">Weather data by Open-Meteo.com</string>
+</resources>

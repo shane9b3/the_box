@@ -7,8 +7,9 @@ import kotlinx.coroutines.flow.StateFlow
 /**
  * (Score bug commit 0, docs/design/m6-score-bug.md §5.1; append-only) SPORTS is the Sports tab (`HoleMode.COVERED`, as
  * SEARCH). Nothing enters it until WP-4a wires the tab.
+ * (Weather page, docs/decisions/2026-11-19-weather-page.md; append-only) WEATHER is the Weather tab, handled as SPORTS is.
  */
-enum class ScreenMode { GUIDE, FULL, SEARCH, SETTINGS, SPORTS }
+enum class ScreenMode { GUIDE, FULL, SEARCH, SETTINGS, SPORTS, WEATHER }
 /** (owner ruling 2026-11-01) PANEL is kept for the append-only contract but never entered: the panel has no buttons. */
 enum class Zone { TABS, PANEL, HEADER, GRID }
 /**
@@ -52,6 +53,8 @@ data class PanelState(
     val imageUrl: String? = null,
     /** (Owner request 2026-11-18) A new episode (`ProgrammeFlags.NEW`): the NEW tag follows the time line. */
     val isNew: Boolean = false,
+    /** (Owner request 2026-11-19) A live broadcast (`ProgrammeFlags.LIVE`): the LIVE tag follows the time line. */
+    val isLive: Boolean = false,
 )
 
 data class DayItem(val day: Int, val label: String, val enabled: Boolean, val primeTime: Boolean = false)

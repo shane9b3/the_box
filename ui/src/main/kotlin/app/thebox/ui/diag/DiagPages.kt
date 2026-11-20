@@ -606,6 +606,9 @@ class DiagPages @Inject constructor(
             Licence("BarlowCondensed-OFL.txt", R.string.licences_barlow, R.string.licences_ofl),
             // (owner ruling 2026-10-18) The TMDB API terms ask for this attribution wherever posters are shown.
             Licence("TMDB-attribution.txt", R.string.licences_tmdb, R.string.licences_tmdb_terms),
+            // (Weather page, docs/decisions/2026-11-19-weather-page.md) Open-Meteo and the CC BY photographs ask for attribution.
+            Licence("weather-data.txt", R.string.licences_weather_data, R.string.licences_weather_data_terms),
+            Licence("weather-backgrounds.txt", R.string.licences_weather_photos, R.string.licences_weather_photos_terms),
         )
 
         /** The `network` domain: WP-A's object (M5 integration). */

@@ -64,17 +64,19 @@ class HeaderTabsTest {
         assertTrue("clock stays inside the header", clock.left >= row.left)
     }
 
-    /** (docs/design/m6-score-bug.md §5.1, U-N10) Guide · Search · Sports · gear, and the machine's tab count agrees. */
-    @Test fun fourTabsAreDrawnInOrderAndTheClockStillFitsAt1024() {
-        assertEquals(listOf(GuideTab.GUIDE, GuideTab.SEARCH, GuideTab.SPORTS, GuideTab.SETTINGS), SHOWN_TABS)
+    /** (docs/design/m6-score-bug.md §5.1, U-N10; Weather tab 2026-11-19) Guide · Search · Sports · Weather · gear, and the machine's tab count agrees. */
+    @Test fun fiveTabsAreDrawnInOrderAndTheClockStillFitsAt1024() {
+        assertEquals(listOf(GuideTab.GUIDE, GuideTab.SEARCH, GuideTab.SPORTS, GuideTab.WEATHER, GuideTab.SETTINGS), SHOWN_TABS)
+        assertEquals(app.thebox.core.guide.state.GuideStateMachineImpl.TAB_WEATHER, SHOWN_TABS.indexOf(GuideTab.WEATHER))
         assertEquals(app.thebox.core.guide.state.GuideStateMachineImpl.TAB_COUNT, SHOWN_TABS.size)
         assertEquals(app.thebox.core.guide.state.GuideStateMachineImpl.TAB_SPORTS, SHOWN_TABS.indexOf(GuideTab.SPORTS))
         assertEquals(app.thebox.core.guide.state.GuideStateMachineImpl.TAB_SETTINGS, SHOWN_TABS.indexOf(GuideTab.SETTINGS))
         show("Wednesday 30 September", "11:59 PM", failure) // the longest sync text and the longest date and time
         rule.onNodeWithText("Sports").assertExists()
+        rule.onNodeWithText("Weather").assertExists()
         assertClockIsComplete("11:59 PM")
         val status = rule.onNodeWithTag(SYNC_CHIP_TAG).fetchSemanticsNode().boundsInRoot
-        assertTrue("the status keeps useful space beside four tabs", status.width > 40f)
+        assertTrue("the status keeps useful space beside five tabs", status.width > 40f)
     }
 
     @Test fun syncFailureAndLongDateCannotTruncateThe24HourClock() {

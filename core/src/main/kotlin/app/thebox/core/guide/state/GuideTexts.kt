@@ -19,7 +19,7 @@ object GuideTexts {
     const val DASH = " – "
 
     // Announcements (§3.6.6: other zones announce the focused element's label)
-    fun tab(i: Int): String = when (i) { 0 -> "Guide"; 1 -> "Search"; 2 -> "Sports"; else -> "Settings" } + ", tab"
+    fun tab(i: Int): String = when (i) { 0 -> "Guide"; 1 -> "Search"; 2 -> "Sports"; 3 -> "Weather"; else -> "Settings" } + ", tab"
     fun chip(c: HeaderChip, source: String, day: String): String = when (c) {
         HeaderChip.GROUP -> "Group: $source, button"
         HeaderChip.NOW -> "Now, button"

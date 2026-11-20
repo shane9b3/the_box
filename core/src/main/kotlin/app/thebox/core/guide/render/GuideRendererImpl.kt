@@ -79,6 +79,7 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
     private var clipCueRight = -1f
     /** Width of the NEW tag's text at the current scale (−1 = not measured). */
     private var newTagTextW = -1f
+    private var liveTagTextW = -1f
 
     /** Text-fit cache counters (hand-off measurements). */
     val textFitHits: Long get() = titleFit.hits + nameFit.hits
@@ -293,6 +294,7 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
         rulerW.fill(-1f)
         numberW.clear()
         newTagTextW = -1f
+        liveTagTextW = -1f
         for (k in STYLES.indices) {
             val st = STYLES[k]
             ellW[k] = mm.width(ELLIPSIS, 0, 1, st) * widthScale
@@ -570,7 +572,17 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
             }
         }
 
-        if (programme && (flags and ProgrammeFlags.NEW) != 0) drawNewTag(canvas, x0, x1, top, past, focused)
+        if (programme && (flags and (ProgrammeFlags.NEW or ProgrammeFlags.LIVE)) != 0) {
+            var tagRight = minOf(x1, contentRight)
+            if ((flags and ProgrammeFlags.NEW) != 0) {
+                if (newTagTextW < 0f) newTagTextW = width(NEW_TAG, GuideTextStyle.NEW_TAG)
+                tagRight = drawCornerTag(canvas, NEW_TAG, newTagTextW, x0, tagRight, top, past, focused)
+            }
+            if ((flags and ProgrammeFlags.LIVE) != 0 && tagRight > x0) {
+                if (liveTagTextW < 0f) liveTagTextW = width(LIVE_TAG, GuideTextStyle.NEW_TAG)
+                drawCornerTag(canvas, LIVE_TAG, liveTagTextW, x0, tagRight, top, past, focused)
+            }
+        }
 
         if (onNow && pass != PASS_TEXT) {
             val ph = s * G.PROGRESS_H
@@ -588,21 +600,25 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
      * dimmer on a past cell. It sits above the title line, so it takes no
      * room from the title. Skipped when the cell is too narrow to leave [GuideGeometry.NEW_TAG_MIN_REST] beside it, and
      * kept inside the grid when the cell runs past the right edge.
+     *
+     * (Decision 2026-11-19) LIVE is the same tab; on a programme that is both, LIVE sits left of NEW. Returns where the
+     * next tag's right edge goes, or a value at or left of [x0] when there was no room for this one.
      */
-    private fun drawNewTag(canvas: GuideCanvas, x0: Float, x1: Float, top: Float, past: Boolean, focused: Boolean) {
-        if (newTagTextW < 0f) newTagTextW = width(NEW_TAG, GuideTextStyle.NEW_TAG)
-        val w = newTagTextW + 2 * s * G.NEW_TAG_PAD_X
-        val right = minOf(x1, contentRight)
+    private fun drawCornerTag(
+        canvas: GuideCanvas, label: String, textW: Float, x0: Float, right: Float, top: Float, past: Boolean, focused: Boolean,
+    ): Float {
+        val w = textW + 2 * s * G.NEW_TAG_PAD_X
         val left = right - w
-        if (left - x0 < s * G.NEW_TAG_MIN_REST) return
+        if (left - x0 < s * G.NEW_TAG_MIN_REST) return x0
         val bottom = top + s * G.NEW_TAG_H
         val fill = if (focused) C.NEW_TAG_FILL_FOCUSED else if (past) C.NEW_TAG_FILL_PAST else C.NEW_TAG_FILL
         val text = if (focused) C.NEW_TAG_TEXT_FOCUSED else if (past) C.NEW_TAG_TEXT_PAST else C.NEW_TAG_TEXT
         if (pass != PASS_TEXT) canvas.fillRoundRect(left, top, right, bottom, s * G.CELL_R, fill)
         if (pass != PASS_BG) {
-            canvas.drawText(NEW_TAG, 0, NEW_TAG.length, left + s * G.NEW_TAG_PAD_X, centredBaseline(top, bottom, GuideTextStyle.NEW_TAG),
+            canvas.drawText(label, 0, label.length, left + s * G.NEW_TAG_PAD_X, centredBaseline(top, bottom, GuideTextStyle.NEW_TAG),
                 GuideTextStyle.NEW_TAG, text)
         }
+        return left - s * G.NEW_TAG_GAP
     }
 
     private fun drawFocused(canvas: GuideCanvas, frame: GuideFrame, m: GuideMetrics, scrollRow: Float) {
@@ -796,6 +812,7 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
         private const val BUBBLE_FILL = 0xE60A0D13.toInt()          // CANVAS at .9
         private val ACCENT_HALF = alpha(C.ACCENT, 0.5f)
         private const val NEW_TAG = "NEW"
+        private const val LIVE_TAG = "LIVE"
         private const val MAX_ARCHIVE_DAYS = 3650
         private const val MAX_NUMBER_STRINGS = 4096
 

@@ -87,8 +87,11 @@ tabs,tabs_search,LEFT,GUIDE,TABS,none,-,tab:0
 tabs,tabs_search,RIGHT,GUIDE,TABS,none,-,tab:2
 tabs,tabs_sports,RIGHT,GUIDE,TABS,none,-,tab:3
 tabs,tabs_sports,LEFT,GUIDE,TABS,none,-,tab:1
-tabs,tabs_settings,RIGHT,GUIDE,TABS,none,-,tab:3
-tabs,tabs_settings,LEFT,GUIDE,TABS,none,-,tab:2
+tabs,tabs_weather,RIGHT,GUIDE,TABS,none,-,tab:4
+tabs,tabs_weather,LEFT,GUIDE,TABS,none,-,tab:2
+tabs,tabs_weather,SELECT,WEATHER,TABS,none,-,-
+tabs,tabs_settings,RIGHT,GUIDE,TABS,none,-,tab:4
+tabs,tabs_settings,LEFT,GUIDE,TABS,none,-,tab:3
 tabs,tabs,SELECT,GUIDE,GRID,none,-,same
 tabs,tabs_search,SELECT,SEARCH,TABS,none,openSearch,-
 tabs,tabs_sports,SELECT,SPORTS,TABS,none,-,-
@@ -255,7 +258,7 @@ sports,sports,BACK,GUIDE,GRID,none,-,tab:0
 sports,sports,DOWN,SPORTS,TABS,none,-,-
 sports,sports,SELECT,SPORTS,TABS,none,-,-
 sports,sports,OPEN_GUIDE,SPORTS,TABS,none,-,-
-settings,settings,BACK,GUIDE,TABS,none,-,tab:3
+settings,settings,BACK,GUIDE,TABS,none,-,tab:4
 settings,settings,SELECT,SETTINGS,TABS,none,-,-
 # (reviewed 2026-10-16, N11) the Guide key leaves Settings to the grid at now; Exit opens the exit hint there.
 settings,settings,OPEN_GUIDE,GUIDE,GRID,none,-,-

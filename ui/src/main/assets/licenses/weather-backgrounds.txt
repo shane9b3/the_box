@@ -1,0 +1,80 @@
+Weather page background photographs, from Wikimedia Commons (https://commons.wikimedia.org).
+Each image was cropped to 16:9 and resized to 1280x720 from the original; no other changes were made.
+
+weather_bg_clear_day.webp
+  Title:   Quill-shaped cirrus cloud.jpg
+  Author:  W.carter
+  Licence: CC0 (http://creativecommons.org/publicdomain/zero/1.0/deed.en)
+  Source:  https://commons.wikimedia.org/wiki/File:Quill-shaped_cirrus_cloud.jpg
+
+weather_bg_clear_night.webp
+  Title:   Stars over Joshua Tree National Park (21309138101).jpg
+  Author:  Joshua Tree National Park (US National Park Service)
+  Licence: Public domain (work of the US National Park Service, a US federal government agency)
+  Source:  https://commons.wikimedia.org/wiki/File:Stars_over_Joshua_Tree_National_Park_(21309138101).jpg
+
+weather_bg_dusk.webp
+  Title:   Sunset sky water.jpg
+  Author:  Unknown author (source: pikwizard.com)
+  Licence: CC0 (http://creativecommons.org/publicdomain/zero/1.0/deed.en)
+  Source:  https://commons.wikimedia.org/wiki/File:Sunset_sky_water.jpg
+
+weather_bg_partly_day.webp
+  Title:   Cumulus humilis clouds (38786085925).jpg
+  Author:  LiCheng Shih
+  Licence: CC BY 2.0 (https://creativecommons.org/licenses/by/2.0)
+  Source:  https://commons.wikimedia.org/wiki/File:Cumulus_humilis_clouds_(38786085925).jpg
+
+weather_bg_partly_night.webp
+  Title:   Starry Night, Moonless Sky (3997085308).jpg
+  Author:  Jeff Weese
+  Licence: CC BY 2.0 (https://creativecommons.org/licenses/by/2.0)
+  Source:  https://commons.wikimedia.org/wiki/File:Starry_Night,_Moonless_Sky_(3997085308).jpg
+
+weather_bg_cloudy_day.webp
+  Title:   Overcast sky with trees, sep 9 2026.jpg
+  Author:  Logan M Diel
+  Licence: CC0 (http://creativecommons.org/publicdomain/zero/1.0/deed.en)
+  Source:  https://commons.wikimedia.org/wiki/File:Overcast_sky_with_trees,_sep_9_2026.jpg
+
+weather_bg_cloudy_night.webp
+  Title:   Quarry at night. (6669145327).jpg
+  Author:  Simon Harrod from Uk
+  Licence: CC BY 2.0 (https://creativecommons.org/licenses/by/2.0)
+  Source:  https://commons.wikimedia.org/wiki/File:Quarry_at_night._(6669145327).jpg
+
+weather_bg_rain_day.webp
+  Title:   Raindrops on a window in Brastad 3.jpg
+  Author:  W.carter
+  Licence: CC0 (http://creativecommons.org/publicdomain/zero/1.0/deed.en)
+  Source:  https://commons.wikimedia.org/wiki/File:Raindrops_on_a_window_in_Brastad_3.jpg
+
+weather_bg_rain_night.webp
+  Title:   Perfect night (drizzle remix) (Explored) - Flickr - Real Cowboys Drive Cadillacs.jpg
+  Author:  Jason Trbovich from Houston, TX, USA
+  Licence: CC BY 2.0 (https://creativecommons.org/licenses/by/2.0)
+  Source:  https://commons.wikimedia.org/wiki/File:Perfect_night_(drizzle_remix)_(Explored)_-_Flickr_-_Real_Cowboys_Drive_Cadillacs.jpg
+
+weather_bg_snow_day.webp
+  Title:   Winter snowfall near a forest (Unsplash).jpg
+  Author:  Cameron Kirby ckirby
+  Licence: CC0 (http://creativecommons.org/publicdomain/zero/1.0/deed.en)
+  Source:  https://commons.wikimedia.org/wiki/File:Winter_snowfall_near_a_forest_(Unsplash).jpg
+
+weather_bg_snow_night.webp
+  Title:   20190123 Hollihaka Park Oulu.jpg
+  Author:  Estormiz
+  Licence: CC0 (http://creativecommons.org/publicdomain/zero/1.0/deed.en)
+  Source:  https://commons.wikimedia.org/wiki/File:20190123_Hollihaka_Park_Oulu.jpg
+
+weather_bg_storm.webp
+  Title:   Lightning Above the Mountaintop (iotw2433a).jpg
+  Author:  International Gemini Observatory/NOIRLab/NSF/AURA/J. Chu
+  Licence: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0)
+  Source:  https://commons.wikimedia.org/wiki/File:Lightning_Above_the_Mountaintop_(iotw2433a).jpg
+
+weather_bg_fog.webp
+  Title:   Khada Gorge Valley Filled with Morning Fog in Georgia.jpg
+  Author:  David Osipov
+  Licence: CC BY 4.0 (https://creativecommons.org/licenses/by/4.0)
+  Source:  https://commons.wikimedia.org/wiki/File:Khada_Gorge_Valley_Filled_with_Morning_Fog_in_Georgia.jpg

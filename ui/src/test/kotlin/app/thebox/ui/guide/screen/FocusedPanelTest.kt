@@ -80,6 +80,15 @@ class FocusedPanelTest {
     @Test fun otherProgrammesHaveNoNewTag() {
         show(panel(short), scroll = false)
         rule.onNodeWithTag(FOCUSED_PANEL_NEW_TAG, useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithTag(FOCUSED_PANEL_LIVE_TAG, useUnmergedTree = true).assertDoesNotExist()
+    }
+
+    /** Owner request 2026-11-19: a live broadcast carries the LIVE tag, after NEW when it is both. */
+    @Test fun liveBroadcastShowsTheLiveTagAfterTheNewTag() {
+        show(panel(short).copy(isNew = true, isLive = true), scroll = false)
+        val new = rule.onNodeWithTag(FOCUSED_PANEL_NEW_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        val live = rule.onNodeWithTag(FOCUSED_PANEL_LIVE_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+        assertTrue("LIVE follows NEW on the same line ($new, $live)", live.left > new.right && live.top < new.bottom && live.bottom > new.top)
     }
 
     @After fun motionOn() {

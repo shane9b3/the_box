@@ -411,6 +411,7 @@ class RoomSettingsStore @Inject constructor(
             // (Score bug commit 0, docs/design/m6-score-bug.md §7, A-S9) `sports` is restored before its owner registers it;
             // `sports_follow` is known but never exported or imported (NOT_BACKED_UP_DOMAINS).
             Domains.SPORTS, Domains.SPORTS_FOLLOW,
+            Domains.WEATHER,
         )
     }
 }

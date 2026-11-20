@@ -95,6 +95,8 @@ object Domains {
     const val SPORTS = "sports"
     /** (Score bug commit 0, §2.6, A-S9) core.sports.SportsFollowDoc (not backed up: the followed game is device-bound). */
     const val SPORTS_FOLLOW = "sports_follow"
+    /** (Weather page, docs/decisions/2026-11-19-weather-page.md) core.weather.WeatherPrefs (backed up). */
+    const val WEATHER = "weather"
 }
 
 enum class ClockMode { SYSTEM, H12, H24 }
