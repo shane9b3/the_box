@@ -22,6 +22,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -96,7 +97,8 @@ class TheBoxApplication : Application(), Configuration.Provider {
         }
         appScope.launch(Dispatchers.IO) {
             try {
-                settingsStore.awaitReady()
+                // The stored values, not the defaults that `awaitReady` settles for after its timeout (review 2026-11-24).
+                settingsStore.loaded.first { it }
                 val chosen = settingsStore.flow(app.thebox.core.settings.state.StorageDomain).value.timeshiftLocationId
                 if (chosen.startsWith(app.thebox.core.storage.StorageConstants.SMB_ID_PREFIX)) ringTargets.get()
             } catch (e: CancellationException) {
@@ -109,7 +111,8 @@ class TheBoxApplication : Application(), Configuration.Provider {
         // WorkManager entry follows the stored "weekly" choice (on by default), not only a toggle of the row.
         appScope.launch {
             try {
-                settingsStore.awaitReady()
+                // The stored values, not the defaults that `awaitReady` settles for after its timeout (review 2026-11-24).
+                settingsStore.loaded.first { it }
                 startupGate.awaitOpen()
                 autoBackup.get().sync(settingsStore.flow(app.thebox.core.backup.BackupDomain).value.weekly)
             } catch (e: CancellationException) {
@@ -120,7 +123,13 @@ class TheBoxApplication : Application(), Configuration.Provider {
         }
         appScope.launch {
             try {
+                // (Review 2026-11-24) Not before the stored settings are in: with the defaults still in place the
+                // scheduler took a "daily at 03:00" guide update for a changed setting, cancelled the running import
+                // and enqueued a plain 12 h one.
+                settingsStore.loaded.first { it }
                 scheduler.get().onAppStart()
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 BoxLog.e("TheBoxApplication", "app-start scheduling failed", e)
             }

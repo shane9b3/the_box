@@ -128,6 +128,7 @@ class BackupServiceImpl internal constructor(
             lastRestoreLocks = applied?.let { RestoreLocks(it.lockedUids, it.lockedGroups) }
             if (applied != null) {
                 store.update(SetupDomain) { it.copy(completed = true) }
+                store.flush()
                 try {
                     followUp.afterRestore((applied.newPlaylists + applied.reloginPlaylists).distinct(), applied.affected)
                 } catch (e: CancellationException) {
@@ -173,15 +174,20 @@ class BackupServiceImpl internal constructor(
                 index.remove(old.location)
             }
             store.update(BackupDomain) { it.copy(lastAutoAtMs = nowMs, lastAutoFile = stored.name) }
+            // (Review 2026-11-24) A process WorkManager started has no ON_STOP flush: stored now, not after the debounce.
+            store.flush()
             BoxLog.i(TAG) { "weekly backup written (${stored.where}), logins=${pass != null}" }
             Outcome.Ok(stored.name)
         } catch (e: CancellationException) {
             throw e
-        } catch (e: IOException) {
+        } catch (e: Exception) {
+            // IO, SQLite, security and crypto failures alike: a failed backup, never a crashed worker.
             BoxLog.w(TAG, "weekly backup failed: ${e.javaClass.simpleName}")
             Outcome.Err(SourceError.Internal("weekly backup failed"))
         } finally {
             pass?.fill('\u0000')
+            // The "passphrase lost" note a missing blob writes must survive this process too.
+            if (pass == null) runCatching { store.flush() }
         }
     }
 

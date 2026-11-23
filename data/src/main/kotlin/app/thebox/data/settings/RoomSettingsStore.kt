@@ -159,9 +159,14 @@ class RoomSettingsStore @Inject constructor(
     }
 
     override suspend fun flush() {
+        // (Review 2026-11-24) A write that already left the debounce is no longer "dirty" but may not have committed:
+        // it is waited for, so flush() returning means every change made before it is stored.
+        val inFlight = ArrayList<Job>()
         val pending = synchronized(lock) {
+            slots.values.filter { it.read && !it.dirty }.mapNotNullTo(inFlight) { it.writeJob?.takeIf { j -> j.isActive } }
             slots.values.filter { it.read && it.dirty }.onEach { it.writeJob?.cancel(); it.writeJob = null }
         }
+        inFlight.forEach { it.join() }
         pending.forEach { write(it) }
     }
 

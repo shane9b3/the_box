@@ -169,6 +169,17 @@ class RefreshSchedulerTest {
     }
 
     @Test
+    fun aChangedGuideSettingSchedulesNothingWithoutAGuideSource() = runBlocking {
+        // Review 2026-11-24: the settings hook enqueued the periodic guide work even with no guide to update.
+        settings.update { it.copy(epgRefreshIntervalH = 6) }
+        scheduler.rescheduleEpgForChangedSetting()
+        assertEquals(0, infos(RefreshScheduler.EPG_PERIODIC).size)
+        db.epgSourceDao().insert(EpgSourceEntity(name = "u", origin = "USER", credentialRef = "r", urlHash = 1, displaySource = "h", priority = 0, createdAt = 1))
+        scheduler.rescheduleEpgForChangedSetting()
+        assertEquals(TimeUnit.HOURS.toMillis(6), infos(RefreshScheduler.EPG_PERIODIC).single { !it.state.isFinished }.periodicityInfo!!.repeatIntervalMillis)
+    }
+
+    @Test
     fun theDelayToADailyHourFollowsTheLocalClock() {
         val toronto = java.time.ZoneId.of("America/Toronto")
         fun at(local: String) = java.time.LocalDateTime.parse(local).atZone(toronto).toInstant().toEpochMilli()

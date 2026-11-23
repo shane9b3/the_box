@@ -15,6 +15,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import java.util.concurrent.atomic.AtomicBoolean
@@ -52,10 +53,14 @@ class SettingsLifecycle @Inject constructor(
         }
         if (Looper.myLooper() == Looper.getMainLooper()) observe.run() else Handler(Looper.getMainLooper()).post(observe)
         scope.launch {
+            // (Review 2026-11-24) Only changes made after the stored settings are in. Collecting from the start saw
+            // "default, then the stored value" on every cold start with a non-default choice, and replaced the
+            // periodic guide work each time (an import at every launch).
+            store.loaded.first { it }
             store.flow(DataDomain).map { it.epgRefreshIntervalH to it.epgDailyAtHour }.distinctUntilChanged().drop(1).collect {
                 try {
                     // The interval or the daily hour changed: the enqueued work's timing is replaced, not kept.
-                    scheduler.get().scheduleEpgPeriodic(reanchor = true)
+                    scheduler.get().rescheduleEpgForChangedSetting()
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {

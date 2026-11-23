@@ -103,10 +103,33 @@ class RefreshScheduler @Inject constructor(
         workManager.enqueueUniquePeriodicWork(EPG_PERIODIC, policy, builder.build())
     }
 
-    /** True when the enqueued periodic guide work was made for another daily hour (or for none) than the setting now. */
-    private suspend fun epgAnchorChanged(): Boolean {
-        val live = workManager.getWorkInfosForUniqueWorkFlow(EPG_PERIODIC).first().filter { !it.state.isFinished }
-        return live.isNotEmpty() && live.none { anchorTag(settings.current.epgDailyAtHour) in it.tags }
+    private suspend fun epgPeriodicLive(): List<androidx.work.WorkInfo> =
+        workManager.getWorkInfosForUniqueWorkFlow(EPG_PERIODIC).first().filter { !it.state.isFinished }
+
+    /**
+     * Enqueues the periodic guide work again for the settings as they are now, when that is safe: never while it is
+     * running (cancel-and-enqueue would kill an import half way; the next app start catches up). Returns whether it did.
+     */
+    private suspend fun reanchorEpg(): Boolean {
+        if (epgPeriodicLive().any { it.state == androidx.work.WorkInfo.State.RUNNING }) {
+            BoxLog.i(TAG) { "guide update is running: its new schedule waits for the next app start" }
+            return false
+        }
+        scheduleEpgPeriodic(reanchor = true)
+        return true
+    }
+
+    /** The guide update's interval or daily hour changed in Settings. Nothing is scheduled without a guide source. */
+    suspend fun rescheduleEpgForChangedSetting() {
+        if (sourceDao.active().isEmpty()) return
+        reanchorEpg()
+    }
+
+    /** App start: keeps the enqueued work's timing unless it was made for another daily hour (or for none). */
+    private suspend fun scheduleEpgAtAppStart() {
+        val live = epgPeriodicLive()
+        val changed = live.isNotEmpty() && live.none { anchorTag(settings.current.epgDailyAtHour) in it.tags }
+        if (changed) reanchorEpg() else scheduleEpgPeriodic()
     }
 
     override fun importEpgNow(trigger: Trigger) {
@@ -146,7 +169,7 @@ class RefreshScheduler @Inject constructor(
             if (p.updateOnStart && (p.lastSuccessAt == null || now - p.lastSuccessAt >= stale)) refreshNow(p.id, Trigger.APP_START)
         }
         if (sourceDao.active().isEmpty()) return
-        scheduleEpgPeriodic(reanchor = epgAnchorChanged())
+        scheduleEpgAtAppStart()
         val builtAt = try {
             epgStore.info.value?.builtAtMs
         } catch (e: NotImplementedError) {
