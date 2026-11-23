@@ -384,14 +384,19 @@ class PhoneApi(
         return accepted(submission)
     }
 
+    /**
+     * The offer stays until the file was written in full ([HttpResponse.onSent], which a HEAD never runs): a browser
+     * that asks HEAD first, or a download that broke half way, can still fetch it, and a file that was never fetched
+     * is still on the list [dropOffers] deletes (review 2026-11-24: it was taken off the list before it was sent).
+     */
     private fun download(name: String): HttpResponse {
-        val offer = offers.remove(name) ?: return text(404, "Not found")
+        val offer = offers[name] ?: return text(404, "Not found")
         if (!offer.file.isFile) return text(404, "Not found")
         return HttpResponse(
             200,
             securityHeaders() + mapOf("Content-Type" to offer.contentType, "Content-Disposition" to "attachment; filename=\"$name\""),
             file = offer.file,
-            onSent = { offer.file.delete() }, // D-S2: served once, then removed from the TV
+            onSent = { if (offers.remove(name, offer)) offer.file.delete() }, // D-S2: served once, then removed from the TV
         )
     }
 

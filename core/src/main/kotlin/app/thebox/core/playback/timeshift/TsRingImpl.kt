@@ -468,7 +468,8 @@ class TsRingImpl internal constructor(
         val filePos = RING_HEADER_BYTES + pos % cap
         while (dst.hasRemaining()) {
             val n = storage.pread(dst, filePos + dst.position())
-            if (n < 0) throw IOException("ring file ended at ${filePos + dst.position()}")
+            // 0 as well: the storage answers 0 at the end of the file, and waiting for more spun this thread for good.
+            if (n <= 0) throw IOException("ring file ended at ${filePos + dst.position()}")
         }
     }
 
@@ -524,7 +525,7 @@ class TsRingImpl internal constructor(
             var written = 0
             while (view.hasRemaining()) {
                 val w = storage.pwrite(view, filePos + written)
-                if (w < 0) throw IOException("pwrite returned $w")
+                if (w <= 0) throw IOException("pwrite returned $w") // 0 = nothing taken: a retry loop would spin
                 written += w
             }
         } catch (e: IOException) {

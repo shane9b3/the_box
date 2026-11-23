@@ -10,7 +10,9 @@ import org.acra.config.CoreConfiguration
 import org.acra.data.CrashReportData
 import org.acra.data.StringFormat
 import org.acra.ktx.initAcra
-import org.acra.plugins.SimplePluginLoader
+import org.acra.plugins.Plugin
+import org.acra.plugins.PluginLoader
+import org.acra.plugins.ServicePluginLoader
 import org.acra.sender.ReportSender
 import org.acra.sender.ReportSenderFactory
 import java.io.File
@@ -19,8 +21,10 @@ import java.io.File
  * ACRA, local only (docs/design/m5-setup-settings.md §1.1 D3, §1.3a; plan §3 "no telemetry"). Before M5 `acra-core`
  * was a dependency but `ACRA.init` was never called, so crashes were not recorded at all.
  *
- * - **No network sender exists.** ACRA's only sender is [LocalFileSender], loaded through a [SimplePluginLoader] (not the
- *   ServiceLoader, so a transitive sender plugin can never be picked up). It writes each report, redacted with
+ * - **No network sender exists.** ACRA's only sender is [LocalFileSender]: [LocalOnlyPluginLoader] answers every request
+ *   for a sender with it alone, so a transitive sender plugin can never be picked up. ACRA's own collectors and start-up
+ *   processors still come from its ServiceLoader list: ACRA asks the same loader for those, and a loader that knew only
+ *   the sender left every report empty (`{}`; review 2026-11-24). It writes each report, redacted with
  *   [Redact.text], to `filesDir/acra/<epoch-ms>.json` and keeps the newest [KEEP] files; WP-E's log export reads them.
  * - **No logcat, device id, shared preferences or dumpsys** in a report ([FIELDS]): logcat carries Media3 and system
  *   lines that never went through `BoxLog`'s redaction.
@@ -46,14 +50,28 @@ object CrashConfig {
             buildConfigClass = BuildConfig::class.java
             reportFormat = StringFormat.JSON
             reportContent = FIELDS
-            pluginLoader = SimplePluginLoader(LocalFileSenderFactory::class.java)
+            pluginLoader = LocalOnlyPluginLoader()
         }
     }
 
     fun reportDir(context: Context): File = File(context.filesDir, DIR)
 }
 
-/** Instantiated by ACRA's [SimplePluginLoader] (needs a public no-arg constructor). */
+/**
+ * Senders: [LocalFileSenderFactory] and nothing else. Everything else ACRA loads through its plugin loader (the
+ * collectors that fill a report, the start-up processors): ACRA's own list. Stateless and serializable, because ACRA
+ * passes its configuration to the `:acra` process.
+ */
+class LocalOnlyPluginLoader : PluginLoader {
+    override fun <T : Plugin> load(clazz: Class<T>): List<T> =
+        if (clazz.isAssignableFrom(LocalFileSenderFactory::class.java)) listOf(clazz.cast(LocalFileSenderFactory())!!) else ServicePluginLoader().load(clazz)
+
+    override fun <T : Plugin> loadEnabled(config: CoreConfiguration, clazz: Class<T>): List<T> =
+        if (clazz.isAssignableFrom(LocalFileSenderFactory::class.java)) listOf(clazz.cast(LocalFileSenderFactory())!!) else ServicePluginLoader().loadEnabled(config, clazz)
+
+    private companion object { private const val serialVersionUID = 1L }
+}
+
 class LocalFileSenderFactory : ReportSenderFactory {
     override fun create(context: Context, config: CoreConfiguration): ReportSender = LocalFileSender()
 }

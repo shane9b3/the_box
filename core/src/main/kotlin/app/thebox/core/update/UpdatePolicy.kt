@@ -150,6 +150,16 @@ object UpdatePolicy {
 val UpdateState.isBusy: Boolean get() = this is UpdateState.Downloading || this is UpdateState.Verifying || this is UpdateState.ReadyToInstall || this == UpdateState.Installing
 
 /**
+ * (Review 2026-11-24) States an **automatic** check must leave alone: the busy ones, and the cards that wait for the
+ * user in the middle of an install (allow installs from this app, the install did not happen, a failure with its next
+ * step). Opening Android's settings or the installer backgrounds the app, and the check that runs on the way back used
+ * to replace those cards with "checking" and then a fresh offer, although the verified file was already there. A check
+ * the user asks for still starts from them.
+ */
+val UpdateState.blocksAutomaticCheck: Boolean
+    get() = isBusy || this is UpdateState.NeedsPermission || this is UpdateState.NotInstalled || this is UpdateState.Failed
+
+/**
  * (review S6) The hand-off never starts from the background: a file verified there waits for the next process start.
  * Pure; main thread in the updater.
  */

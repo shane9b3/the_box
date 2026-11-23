@@ -213,7 +213,7 @@ class LanHttpServerImpl(
             }
             if (a.responding) return // the watchdog answered
             a.responding = true
-            val sent = writeResponse(conn.output, if (method == "HEAD") response.copy(body = null, file = null) else response)
+            val sent = writeResponse(conn.output, response, head = method == "HEAD")
             BoxLog.i(TAG) { "$method $pathForLog ${response.status} $sent" }
             // D-S2: a single-use download is gone once it was written in full.
             if (method != "HEAD") response.onSent?.let { runCatching(it) }
@@ -252,7 +252,8 @@ class LanHttpServerImpl(
         }
 
         /** Writes status, headers (+ Content-Length, Connection: close) and the body or file; returns the body bytes. */
-        fun writeResponse(raw: OutputStream, r: HttpResponse): Long {
+        /** [head]: the headers of the full answer (its real Content-Length) and no body. */
+        fun writeResponse(raw: OutputStream, r: HttpResponse, head: Boolean = false): Long {
             val out = BufferedOutputStream(raw, 16_384)
             val length = r.body?.size?.toLong() ?: r.file?.length() ?: 0L
             val sb = StringBuilder()
@@ -265,8 +266,10 @@ class LanHttpServerImpl(
             sb.append("Content-Length: ").append(length).append("\r\n")
             sb.append("Connection: close\r\n\r\n")
             out.write(sb.toString().encodeToByteArray())
-            r.body?.let { out.write(it) }
-            r.file?.let { f -> FileInputStream(f).use { it.copyTo(out, LanLimits.UPLOAD_CHUNK_BYTES) } }
+            if (!head) {
+                r.body?.let { out.write(it) }
+                r.file?.let { f -> FileInputStream(f).use { it.copyTo(out, LanLimits.UPLOAD_CHUNK_BYTES) } }
+            }
             out.flush()
             return length
         }

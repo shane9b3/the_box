@@ -40,6 +40,7 @@ import app.thebox.core.update.UpdatePolicy
 import app.thebox.core.update.UpdateState
 import app.thebox.core.update.UpdateTimings
 import app.thebox.core.update.Updater
+import app.thebox.core.update.blocksAutomaticCheck
 import app.thebox.core.update.isBusy
 import app.thebox.data.di.ApplicationScope
 import app.thebox.data.di.DownloadClient
@@ -297,7 +298,8 @@ class UpdaterImpl @Inject constructor(
             var prefs = store.flow(UpdateDomain).value
             if (!UpdatePolicy.shouldRun(prefs, now, manual, checkedThisProcess, resume, startup)) return@withContext _state.value
             // S1 (review) + S5 (code review): one busy rule, checked and claimed in one step.
-            if (!claim(UpdateState.Checking)) return@withContext _state.value
+            // An automatic check also leaves the cards that wait for the user mid-install (review 2026-11-24).
+            if (!claim(UpdateState.Checking) { if (manual) it.isBusy else it.blocksAutomaticCheck }) return@withContext _state.value
             // The app-start check leaves the daily worker its one automatic check of this process.
             if (!startup) checkedThisProcess = true
             lastManual = manual

@@ -370,11 +370,18 @@ class LanHttpServerImplTest {
             // Only the paired phone.
             assertEquals(403, transport.exchange(get("/api/download/TheBox-backup.thebox", host), ip = "192.168.1.77").status)
             val expected = file.readText()
+            // Review 2026-11-24: a browser's HEAD used the one download up (the GET got 404) and left the file behind.
+            val head = transport.exchange(get("/api/download/TheBox-backup.thebox", host, cookie).replaceFirst("GET ", "HEAD "))
+            assertEquals(200, head.status)
+            assertEquals(expected.toByteArray().size.toString(), head.headers["content-length"])
+            assertEquals("", head.body)
+            assertTrue(file.exists())
             val r = transport.exchange(get("/api/download/TheBox-backup.thebox", host, cookie))
             assertEquals(200, r.status)
             assertEquals("attachment; filename=\"TheBox-backup.thebox\"", r.headers["content-disposition"])
             assertEquals(expected, r.body)
             assertEquals(404, transport.exchange(get("/api/download/TheBox-backup.thebox", host, cookie)).status)
+            assertFalse(file.exists(), "served in full, so it is gone from the TV")
         } finally {
             file.delete()
         }
