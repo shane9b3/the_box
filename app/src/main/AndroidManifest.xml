@@ -50,6 +50,8 @@
 
     <!-- Runs on TV boxes and also on phones/tablets; neither touch nor leanback is required. -->
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
+    <!-- The Wi-Fi permissions above would otherwise imply that Wi-Fi hardware is required (Ethernet-only TV boxes). -->
+    <uses-feature android:name="android.hardware.wifi" android:required="false" />
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <!-- screenOrientation=landscape would otherwise imply a required landscape screen. -->
     <uses-feature android:name="android.hardware.screen.landscape" android:required="false" />

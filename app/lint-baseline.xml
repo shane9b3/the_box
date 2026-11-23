@@ -112,17 +112,6 @@
     </issue>
 
     <issue
-        id="LeanbackUsesWifi"
-        message="Requiring Wifi permissions limits app availability on TVs that support only Ethernet"
-        errorLine1="    &lt;uses-permission android:name=&quot;android.permission.CHANGE_WIFI_MULTICAST_STATE&quot; />"
-        errorLine2="    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~">
-        <location
-            file="src/main/AndroidManifest.xml"
-            line="19"
-            column="5"/>
-    </issue>
-
-    <issue
         id="Aligned16KB"
         message="The native library `arm64-v8a/libffmpegJNI.so` (from `__local_aars__:/Users/shawnjohnson/Projects/The_Box/.claude/worktrees/agent-a18ed39266cfe01c7/ffmpeg/libs/media3-decoder-ffmpeg-1.11.1-x86_armeabi-v7a_arm64-v8a.aar:unspecified`) is not 16 KB aligned">
         <location

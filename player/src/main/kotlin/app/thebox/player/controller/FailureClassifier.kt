@@ -255,6 +255,7 @@ internal class FailureClassifier {
  */
 internal val PASSTHROUGH_MIMES: Set<String> = setOf(
     MimeTypes.AUDIO_AC3, MimeTypes.AUDIO_E_AC3, MimeTypes.AUDIO_E_AC3_JOC, MimeTypes.AUDIO_DTS, MimeTypes.AUDIO_DTS_HD,
+    MimeTypes.AUDIO_DTS_UHD_P2, // forced by "Always passthrough" too (review 2026-11-24: its failure fell through to silence)
     MimeTypes.AUDIO_TRUEHD,
 )
 
