@@ -255,8 +255,9 @@ internal class FailureClassifier {
  */
 internal val PASSTHROUGH_MIMES: Set<String> = setOf(
     MimeTypes.AUDIO_AC3, MimeTypes.AUDIO_E_AC3, MimeTypes.AUDIO_E_AC3_JOC, MimeTypes.AUDIO_DTS, MimeTypes.AUDIO_DTS_HD,
-    MimeTypes.AUDIO_DTS_UHD_P2, // forced by "Always passthrough" too (review 2026-11-24: its failure fell through to silence)
     MimeTypes.AUDIO_TRUEHD,
-)
+    // Plus everything "Always passthrough" forces (review 2026-11-24: DTS-UHD P2 was forced there and missing here, so
+    // its failed AudioTrack was not a passthrough failure and playback fell through to silence).
+) + app.thebox.player.engine.AudioOutputPolicy.FORCED_MIMES
 
 internal fun isPassthroughMime(mime: String?): Boolean = mime != null && mime in PASSTHROUGH_MIMES
