@@ -232,6 +232,11 @@ class ParentalSessionImpl @Inject constructor(
 
     /** Channel menu Lock / Unlock (§3.9.1): an explicit `channel_prefs.locked` (unlock = 0 overrides detection, S5). */
     override suspend fun setChannelLocked(identity: ChannelIdentity, locked: Boolean) = withContext(io) {
+        // C-B2, as for groups below (review 2026-11-24: the single-channel unlock had no guard).
+        if (!locked && refusesLowering()) {
+            BoxLog.w(TAG, "channel unlock refused: the session is locked")
+            return@withContext
+        }
         db.writeTransaction {
             exec(
                 "INSERT INTO channel_prefs(playlist_id, stable_key, hidden, locked, watch_count, updated_at) VALUES (?, ?, 0, ?, 0, ?) " +

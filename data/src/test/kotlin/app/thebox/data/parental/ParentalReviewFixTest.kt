@@ -105,6 +105,8 @@ class ParentalReviewFixTest {
         pages.onIntent(SettingsRoute.Groups(p), RowIntent.Menu(RowId("group/0/g:adult"), "unlock"))
         pages.onIntent(SettingsRoute.Groups(p), RowIntent.Menu(RowId("group/0/g:adult"), "reset"))
         session.setGroupLocked(app.thebox.core.guide.GuideSource.Group(p, "g:adult"), false)
+        // Review 2026-11-24: the single-channel unlock had no such guard.
+        session.setChannelLocked(adult, false)
         index.rebuild()
         assertEquals("no PIN was entered: the adult channel must still need it", TuneVerdict.NEEDS_PIN, guard.check(adult))
 

@@ -8,6 +8,7 @@ import app.thebox.core.input.KeyBindingStore
 import app.thebox.core.parental.ParentalDomain
 import app.thebox.core.parental.ParentalHost
 import app.thebox.core.parental.ParentalPinStore
+import app.thebox.core.parental.ParentalAccess
 import app.thebox.core.parental.ParentalSession
 import app.thebox.core.parental.RelockReason
 import app.thebox.core.settings.SettingsStore
@@ -30,6 +31,14 @@ class ParentalPageHost @Inject constructor(
     private val session: ParentalSession,
 ) {
     fun run(command: ParentalRows.Command, host: ParentalHost?, scope: CoroutineScope) {
+        // (Review 2026-11-24, C-B2) The page is entered through the PIN, but it stays on screen after a relock (Lock
+        // now, Home, the one-hour timeout): while a PIN is set and the session is locked, nothing here changes the
+        // policy or removes the PIN. Set / Change PIN ask for the PIN themselves; Lock now only raises protection.
+        val locked = session.state.value.let { it.pinSet && it.access != ParentalAccess.OPEN }
+        if (locked && (command is ParentalRows.Command.Policy || command == ParentalRows.Command.RemovePin)) {
+            BoxLog.w(TAG, "parental change refused: the session is locked")
+            return
+        }
         when (command) {
             is ParentalRows.Command.SetupPin -> host?.startPinSetup(command.change)
             is ParentalRows.Command.Policy -> store.update(ParentalDomain, command.transform)

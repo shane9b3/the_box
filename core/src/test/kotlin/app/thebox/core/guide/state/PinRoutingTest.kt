@@ -239,6 +239,27 @@ class PinRoutingTest {
             assertIs<PinPurpose.Tune>(w.machine.ui.value.pin!!.purpose)
         }
 
+        /** Review 2026-11-24: group stepping walked into a locked group without its door and showed it empty. */
+        @Test fun steppingThroughGroupsPassesOverALockedOne() {
+            val (w, _) = world(pinLocked)
+            fun lineups() = w.calls.calls.filter { it.name == "loadLineup" }.map { it.args[0] }
+            // CH+ / CH− in the groups panel.
+            w.press(GROUPS_PANEL)
+            repeat(8) { w.press(ZAP_DOWN) }
+            assertNull(w.ui.pin, "no prompt from stepping")
+            assertTrue(adultSource !in lineups())
+            assertTrue((w.ui.overlay as Overlay.Groups).let { it.entries[it.current].source } != adultSource)
+            w.press(BACK)
+            // Long Left / Right in full screen, both ways round the list.
+            w.press(SELECT)
+            assertEquals(ScreenMode.FULL, w.ui.mode)
+            val cards = ArrayList<String?>()
+            repeat(6) { w.press(GROUP_NEXT); cards += w.ui.groupCard }
+            repeat(6) { w.press(GROUP_PREV); cards += w.ui.groupCard }
+            assertTrue("Adult" !in cards, cards.toString())
+            assertTrue(adultSource !in lineups())
+        }
+
         /** S16: ON_STOP → ON_START with a locked tuned channel: the prompt, no tune; BACK leaves the guide on All channels. */
         @Test fun resumeRefusedAsksAndBackLeavesTheGuideOnAll() {
             val (w, _) = world(pinOpen)

@@ -792,8 +792,15 @@ class GuideStateMachineImpl(
     private fun cycleGroup(delta: Int) {
         if (sources.isEmpty()) return
         val cur = currentEntryIndex()
-        val next = Math.floorMod((if (cur < 0) 0 else cur) + delta, sources.size)
+        // (Review 2026-11-24) A locked group is passed over: it opens through its PIN door in the groups panel, and
+        // entering it here showed an empty group and left CH+/CH− with nothing to zap to.
+        var next = if (cur < 0) 0 else cur
+        var steps = 0
+        do {
+            next = Math.floorMod(next + delta, sources.size)
+        } while (++steps < sources.size && ParentalRules.needsDoor(sources[next], parental))
         val e = sources[next]
+        if (ParentalRules.needsDoor(e, parental)) return
         applySource(e.source)
         u = u.copy(groupCard = e.label)
         groupCardUntil = curMs + GROUP_CARD_MS
@@ -1593,8 +1600,10 @@ class GuideStateMachineImpl(
                 if (o.entries.isEmpty()) return
                 val dir = if (a.action == BoxAction.ZAP_UP || a.action == BoxAction.PAGE_UP) -1 else 1
                 val from = if (o.focused >= o.shortcuts.size) o.focused - o.shortcuts.size else o.current
-                val next = (from + dir).coerceIn(0, o.entries.size - 1)
-                if (next == from && o.focused >= o.shortcuts.size) return
+                // (Review 2026-11-24) CH± / Page± step over locked groups: only OK on one opens its PIN door.
+                var next = from + dir
+                while (next in o.entries.indices && ParentalRules.needsDoor(o.entries[next], parental)) next += dir
+                if (next !in o.entries.indices) return
                 applySource(o.entries[next].source)
                 u = u.copy(overlay = o.copy(focused = o.shortcuts.size + next, current = next))
                 announceOverlay()
@@ -1951,7 +1960,8 @@ class GuideStateMachineImpl(
     private fun initialSource(entries: List<GuideSourceEntry>): GuideSource? {
         val all = entries.firstOrNull { it.section == SourceSection.ALL }?.source
         return when (guideSettings.openGuideOn) {
-            OpenGuideOn.LAST -> lastSourceHint?.takeIf { h -> entries.any { it.source == h } } ?: all
+            // A last source that is locked now is not restored: it would open as an empty group (review 2026-11-24).
+            OpenGuideOn.LAST -> lastSourceHint?.takeIf { h -> entries.any { it.source == h && !ParentalRules.needsDoor(it, parental) } } ?: all
             OpenGuideOn.FAVOURITES -> entries.firstOrNull { it.section == SourceSection.FAVOURITES && it.count > 0 }?.source ?: all
             OpenGuideOn.ALL -> all
         }

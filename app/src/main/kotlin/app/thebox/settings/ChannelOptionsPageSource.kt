@@ -66,6 +66,7 @@ class ChannelOptionsPageSource @Inject constructor(
     private val store: SettingsStore,
     private val texts: SettingsTexts,
     private val clock: WallClock,
+    private val parental: app.thebox.core.parental.ParentalControls,
 ) : SettingsPageSource {
     private val version = AtomicLong(0)
     private val _notices = MutableSharedFlow<String>(extraBufferCapacity = 4, onBufferOverflow = BufferOverflow.DROP_OLDEST)
@@ -148,6 +149,13 @@ class ChannelOptionsPageSource @Inject constructor(
             ChannelOptionsRows.HIDE -> (intent as? RowIntent.Toggle)?.let { prefs.upsertHidden(id.playlistId, key, it.on, now) }
             ChannelOptionsRows.LOCK -> (intent as? RowIntent.Toggle)?.let { t ->
                 // Off returns the channel to automatic (its group / adult detection); an explicit unlock is WP-C's PIN path.
+                // (Review 2026-11-24, C-B2) Off lowers protection: refused while a PIN is set and the session is locked.
+                // The version bump redraws the row with the stored value.
+                if (!t.on && parental.refusesLowering()) {
+                    BoxLog.w(TAG, "channel lock not removed: the session is locked")
+                    version.incrementAndGet()
+                    return true
+                }
                 editPrefs(id, now) { it.copy(locked = if (t.on) true else null) }
                 if (t.on) _notices.tryEmit(texts[SettingsText.CH_LOCKED_NOTICE])
             }

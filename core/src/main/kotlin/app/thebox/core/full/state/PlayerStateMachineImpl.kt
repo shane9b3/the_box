@@ -1761,8 +1761,13 @@ class PlayerStateMachineImpl(
             BoxAction.ZAP_UP, BoxAction.ZAP_DOWN -> {
                 if (sources.isEmpty()) return true
                 val cur = currentGroupIndex().let { if (it < 0) listGroupFocused else it }
-                val next = (cur + if (a.action == BoxAction.ZAP_UP) -1 else 1).coerceIn(0, sources.size - 1)
-                if (next != cur || currentGroupIndex() < 0) { applyListSource(sources[next].source); listGroupFocused = next }
+                // (Review 2026-11-24) Locked groups are stepped over: only OK on one asks for the PIN.
+                val dir = if (a.action == BoxAction.ZAP_UP) -1 else 1
+                var next = cur + dir
+                while (next in sources.indices && ParentalRules.needsDoor(sources[next], parental)) next += dir
+                if (next !in sources.indices) next = cur
+                val open = !ParentalRules.needsDoor(sources[next], parental)
+                if (open && (next != cur || currentGroupIndex() < 0)) { applyListSource(sources[next].source); listGroupFocused = next }
             }
             BoxAction.DIGIT -> return false
             else -> return bareKey(a, justClosedByBack = false)
