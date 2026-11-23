@@ -12,6 +12,8 @@ import app.thebox.data.testutil.TestDb
 import app.thebox.data.testutil.newPlaylist
 import app.thebox.data.work.ImportMutex
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -74,6 +76,21 @@ class AutoBackupTest {
         assertEquals(names.takeLast(4).toSet() + foreign.name + manual.name, left)
         assertTrue(foreign.exists() && manual.exists())
         assertEquals(names.last(), settings.flow(BackupDomain).value.lastAutoFile)
+    }
+
+    @Test
+    fun weeklyBackupWritesNothingUntilTheStoredSettingsAreIn() = runBlocking {
+        // Review 2026-11-23: a cold start read the default "no stored passphrase" and wrote a backup without logins.
+        val root = File(dir, "cold").apply { mkdirs() }
+        val settings = FakeSettingsStore(readyAtOnce = false)
+        val s = service(RestoreMergeTest.MapBlobs(), settings, DirStorage(root))
+        val run = async(Dispatchers.IO) { s.autoBackup(clock.now()) }
+        delay(300)
+        assertFalse(run.isCompleted)
+        assertTrue(root.listFiles()!!.isEmpty())
+        settings.markReady()
+        assertTrue(run.await() is Outcome.Ok)
+        assertEquals(1, root.listFiles()!!.size)
     }
 
     @Test

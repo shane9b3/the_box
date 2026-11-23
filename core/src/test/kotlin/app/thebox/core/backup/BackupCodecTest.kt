@@ -115,4 +115,25 @@ class BackupCodecTest {
         val s = BackupRecord.Secrets(BACKUP_KDF_NAME, 50_000, "c2FsdA==", "bm9uY2U=", "Y3Q=")
         assertEquals(listOf<BackupRecord>(s), readAll(file(rs = listOf(s))).second)
     }
+
+    @Test
+    fun theWriterRefusesWhatTheReaderWould() {
+        // Review 2026-11-23: an export finished and the reader refused the same file as TOO_LARGE.
+        val whole = file()
+        val longest = whole.decodeToString().lines().maxOf { it.encodeToByteArray().size }
+        fun write(maxBytes: Long, maxLine: Int): ByteArray {
+            val out = ByteArrayOutputStream()
+            val w = BackupWriter(out, maxBytes, maxLine)
+            w.writeHeader(header)
+            records.forEach(w::write)
+            w.finish()
+            return out.toByteArray()
+        }
+        // Exactly at both limits: written, and read back under the same limits.
+        assertEquals(records, readAll(write(whole.size.toLong(), longest), whole.size.toLong(), longest).second)
+        assertFailsWith<BackupTooLargeException> { write(whole.size.toLong(), longest - 1) }
+        assertFailsWith<BackupTooLargeException> { write(whole.size - 1L, longest) }
+        assertEquals(RestoreFailure.TOO_LARGE, failure(whole, whole.size.toLong(), longest - 1))
+        assertEquals(RestoreFailure.TOO_LARGE, failure(whole, whole.size - 1L, longest))
+    }
 }

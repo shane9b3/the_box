@@ -160,7 +160,8 @@ internal class BackupRestorer(
         // Secrets first, each under a fresh ref (deleted again if the transaction fails).
         val written = ArrayList<String>()
         val refFor = HashMap<String, String>() // backup secretRef → new local ref
-        try {
+        val usedRefs = HashSet<String>()
+        val applied: Applied = try {
             for ((ref, secret) in secrets.orEmpty()) {
                 val newRef = creds.newRef()
                 when (val r = creds.put(newRef, secret)) {
@@ -168,32 +169,45 @@ internal class BackupRestorer(
                     is Outcome.Err -> BoxLog.w(TAG, "a login could not be stored (${r.error.code}); that playlist asks for it again")
                 }
             }
-            val usedRefs = HashSet<String>()
-            val applied = importMutex.withLock {
+            importMutex.withLock {
                 usedRefs.clear()
                 db.writeTransaction { apply(this, file, scan, matches, refFor, mode, usedRefs) }
             }
-            // D-S4 (§3.10.4 step 5): the settings documents go live only now that the transaction committed.
-            store.commitImport(committed = true)
-            // Old refs of playlists that got a new login go once the transaction committed, and so do logins written
-            // for nothing (a USER guide that already existed keeps its own; correctness review F7).
-            for (r in applied.oldRefs) creds.delete(r)
-            for (r in written) if (r !in usedRefs) creds.delete(r)
-            return applied.result to applied
         } catch (e: Exception) {
-            store.commitImport(committed = false) // D-S4: rolled back, so nothing of the backup reaches memory
-            if (e is kotlinx.coroutines.CancellationException) {
-                for (r in written) creds.delete(r)
-                throw e
-            }
+            // Nothing committed: nothing of the backup reaches memory (D-S4) and the logins written for it go.
+            runCatching { store.commitImport(committed = false) }
+            for (r in written) runCatching { creds.delete(r) }
+            if (e is kotlinx.coroutines.CancellationException) throw e
             BoxLog.e(TAG, "restore failed; nothing kept", e)
-            for (r in written) creds.delete(r)
             val failure = when (e) {
                 is BackupFormatException -> e.failure
                 else -> RestoreFailure.IO
             }
             return RestoreResult.Failed(failure) to null
         }
+        // The transaction committed: the restored playlists now point at the new logins, so from here on nothing is
+        // undone. A failed step below is logged and the restore still counts (review 2026-11-23: a throwing cleanup
+        // used to delete every new login under the committed rows).
+        try {
+            // D-S4 (§3.10.4 step 5): the settings documents go live only now that the transaction committed.
+            store.commitImport(committed = true)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            BoxLog.e(TAG, "restored settings not applied in memory (they are stored; a restart reads them)", e)
+        }
+        // Old refs of playlists that got a new login go, and so do logins written for nothing (a USER guide that
+        // already existed keeps its own; correctness review F7). One that cannot be deleted stays as an unused row.
+        for (r in applied.oldRefs + written.filter { it !in usedRefs }) {
+            try {
+                creds.delete(r)
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                BoxLog.w(TAG, "an unused login could not be deleted (${e.javaClass.simpleName}); it stays unused")
+            }
+        }
+        return applied.result to applied
     }
 
     private suspend fun apply(

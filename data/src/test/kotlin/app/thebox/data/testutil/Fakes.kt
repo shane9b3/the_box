@@ -45,7 +45,12 @@ class FakeCredentialStore : CredentialStore {
     }
     override suspend fun get(ref: String): Outcome<PlaylistSecret> =
         failGet?.let { Outcome.Err(it) } ?: secrets[ref]?.let { Outcome.Ok(it) } ?: Outcome.Err(SourceError.Credentials(CredentialFailure.MISSING))
-    override suspend fun delete(ref: String) { secrets.remove(ref) }
+    /** When true, [delete] throws (a storage failure during cleanup). */
+    var failDelete = false
+    override suspend fun delete(ref: String) {
+        if (failDelete) throw java.io.IOException("delete failed")
+        secrets.remove(ref)
+    }
 }
 
 /** Serves [bodies] by URL; [notModified] URLs answer 304 when validators are sent. */

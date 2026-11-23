@@ -254,6 +254,22 @@ class RestoreMergeTest {
     }
 
     @Test
+    fun aCleanupFailureAfterTheCommitKeepsTheNewLogins() = runBlocking {
+        // Review 2026-11-23: deleting a replaced login threw after the commit and the handler deleted every new login.
+        val src = graph()
+        seed(src)
+        val file = export(src, "pw")
+        val dst = graph()
+        dst.service.restore(file, "pw".toCharArray(), RestoreMode.MERGE)
+        dst.creds.failDelete = true
+        val result = dst.service.restore(file, "pw".toCharArray(), RestoreMode.MERGE)
+        assertTrue(result.toString(), result is RestoreResult.Done)
+        val refs = dst.db.strings("SELECT credential_ref FROM playlist")
+        assertTrue(refs.isNotEmpty())
+        assertTrue("every playlist still has its login", refs.all { dst.creds.secrets.containsKey(it) })
+    }
+
+    @Test
     fun aSecondRestoreOfTheSameFileChangesNothing() = runBlocking {
         val src = graph()
         seed(src)

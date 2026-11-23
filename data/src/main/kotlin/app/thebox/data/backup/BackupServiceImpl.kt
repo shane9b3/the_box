@@ -28,7 +28,9 @@ import app.thebox.data.work.ImportMutex
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.io.IOException
 import java.io.OutputStream
@@ -145,6 +147,13 @@ class BackupServiceImpl internal constructor(
         (err as? SourceError.Parse)?.let { p -> RestoreFailure.entries.firstOrNull { it.name == p.detail } } ?: RestoreFailure.IO
 
     override suspend fun autoBackup(nowMs: Long): Outcome<String> = withContext(io) {
+        // Review 2026-11-23: in a process WorkManager started cold, the settings were still loading and the default
+        // (no stored passphrase) wrote a backup without logins that counted as this week's. Nothing is written until
+        // the stored settings are in.
+        if (withTimeoutOrNull(SETTINGS_WAIT_MS) { store.loaded.first { it } } == null) {
+            BoxLog.w(TAG, "weekly backup skipped: settings not loaded after $SETTINGS_WAIT_MS ms")
+            return@withContext Outcome.Err(SourceError.Internal("settings not loaded"))
+        }
         val prefs = store.flow(BackupDomain).value
         val pass = if (prefs.passphraseStored) storedPassphrase() else null
         val cal = Calendar.getInstance().apply { timeInMillis = nowMs }
@@ -239,5 +248,9 @@ class BackupServiceImpl internal constructor(
         }
     }
 
-    private companion object { const val TAG = "BackupService" }
+    private companion object {
+        const val TAG = "BackupService"
+        /** How long the weekly backup waits for the settings read before it gives up for this run. */
+        const val SETTINGS_WAIT_MS = 30_000L
+    }
 }

@@ -17,38 +17,55 @@ class BackupFormatException(val failure: RestoreFailure, message: String) : Exce
  * Writes a `.thebox` file (docs/design/m5-setup-settings.md §3.10.1): UTF-8 JSON Lines with LF, line 1 the header,
  * then one record per line, then `End(records)`. Streams: nothing but the current line is held.
  */
-class BackupWriter(private val out: OutputStream) {
+class BackupWriter(
+    private val out: OutputStream,
+    private val maxBytes: Long = BACKUP_MAX_BYTES,
+    private val maxLineBytes: Int = BACKUP_MAX_LINE_BYTES,
+) {
     private var records = 0
     private var finished = false
+    private var total = 0L
 
     /** Writes the header and returns its exact bytes (without the LF): the associated data of the `Secrets` record. */
     fun writeHeader(header: BackupHeader): ByteArray {
         check(records == 0) { "header must come first" }
         val bytes = BackupJson.encodeToString(BackupHeader.serializer(), header).encodeToByteArray()
-        out.write(bytes)
-        out.write(LF)
+        line(bytes)
         return bytes
     }
 
     fun write(record: BackupRecord) {
         check(!finished) { "already finished" }
         require(record !is BackupRecord.End) { "End is written by finish()" }
-        out.write(BackupJson.encodeToString(BackupRecord.serializer(), record).encodeToByteArray())
-        out.write(LF)
+        line(BackupJson.encodeToString(BackupRecord.serializer(), record).encodeToByteArray())
         records++
     }
 
     /** Writes `End(records)` and flushes. */
     fun finish(): Int {
-        out.write(BackupJson.encodeToString(BackupRecord.serializer(), BackupRecord.End(records)).encodeToByteArray())
-        out.write(LF)
+        line(BackupJson.encodeToString(BackupRecord.serializer(), BackupRecord.End(records)).encodeToByteArray())
         out.flush()
         finished = true
         return records
     }
 
+    /**
+     * One line and its LF, inside the limits [BackupReader] enforces: a file this app could not read back is not
+     * written to the end and reported as a success (review 2026-11-23).
+     */
+    private fun line(bytes: ByteArray) {
+        if (bytes.size > maxLineBytes) throw BackupTooLargeException("line over $maxLineBytes bytes")
+        total += bytes.size + 1
+        if (total > maxBytes) throw BackupTooLargeException("file over $maxBytes bytes")
+        out.write(bytes)
+        out.write(LF)
+    }
+
     private companion object { const val LF = '\n'.code }
 }
+
+/** The export would pass a limit the reader refuses (TOO_LARGE); an [java.io.IOException] so every export path fails. */
+class BackupTooLargeException(message: String) : java.io.IOException(message)
 
 /**
  * Reads a `.thebox` file line by line in constant memory: header checks (NOT_A_BACKUP, NEWER_SCHEMA), the size limits

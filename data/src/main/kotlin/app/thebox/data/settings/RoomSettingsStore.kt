@@ -66,6 +66,8 @@ class RoomSettingsStore @Inject constructor(
 
     private val _ready = MutableStateFlow(false)
     override val ready: StateFlow<Boolean> = _ready.asStateFlow()
+    private val _loaded = MutableStateFlow(false)
+    override val loaded: StateFlow<Boolean> = _loaded.asStateFlow()
 
     private class Slot<T>(val domain: SettingsDomain<T>, initial: T, var read: Boolean) {
         val state = MutableStateFlow(initial)
@@ -122,6 +124,7 @@ class RoomSettingsStore @Inject constructor(
                 for (s in slots.values) if (applyReadLocked(s)) toWrite += s
             }
             toWrite.forEach { schedule(it) }
+            _loaded.value = true
             _ready.value = true
             BoxLog.i(TAG) { "settings loaded: ${rows.size} documents in ${clock.now() - startedAt} ms" }
         }

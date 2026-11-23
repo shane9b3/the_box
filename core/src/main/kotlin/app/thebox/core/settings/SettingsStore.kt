@@ -40,6 +40,11 @@ interface SettingsStore {
     val ready: StateFlow<Boolean>
     suspend fun awaitReady()
     /**
+     * True once the stored documents were read (or the read failed for good). Unlike [ready] it does not open on the
+     * load timeout, so a value read after it is the stored one and never a default standing in for it.
+     */
+    val loaded: StateFlow<Boolean> get() = ready
+    /**
      * (M5 commit 0, additive: the `TheBoxApplication` hook of §1.3a, "settingsStore.load() first") Starts the one
      * `SELECT * FROM app_setting` on IO and returns at once; idempotent. [ready] opens when it lands.
      */
