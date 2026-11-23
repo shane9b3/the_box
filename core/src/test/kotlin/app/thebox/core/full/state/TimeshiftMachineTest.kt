@@ -395,4 +395,20 @@ class TimeshiftMachineTest {
         assertEquals(listOf(PlayerToast.PAUSE_NO_REWIND_HLS), w.toasts(mark))
         assertEquals("", w.callsSince(mark).single { it.name == "toast" }.args[1], "an Xtream channel without a playlist name: the VM says \"your playlist\"")
     }
+
+    /** Review 2026-11-24: with the feature switched off (as the app ships), a pause or a rewind gives no false reason. */
+    @Test fun withTheFeatureOffNoReasonIsGiven() {
+        val before = app.thebox.core.settings.TimeshiftFeature.available
+        try {
+            val w = liveWithoutArchive().buffer(available = false, hls = true, off = app.thebox.core.playback.timeshift.BufferOff.NOT_TS)
+            app.thebox.core.settings.TimeshiftFeature.available = false
+            val mark = w.mark()
+            w.press(PLAY_PAUSE)
+            w.press(SEEK_BACK)
+            w.press(SEEK_FORWARD)
+            assertTrue(w.toasts(mark).isEmpty(), w.toasts(mark).toString())
+        } finally {
+            app.thebox.core.settings.TimeshiftFeature.available = before
+        }
+    }
 }

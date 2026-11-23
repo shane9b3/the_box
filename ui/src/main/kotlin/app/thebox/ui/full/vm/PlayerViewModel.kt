@@ -463,8 +463,12 @@ class PlayerViewModel @Inject constructor(
             machine.ui.map { u -> u.info?.let { i -> i.channel?.let { ch -> i.programmes.getOrNull(i.focused)?.let { ch to it } } } }
                 .distinctUntilChanged { a, b -> a?.first?.identityHash == b?.first?.identityHash && a?.second?.rawStartMin == b?.second?.rawStartMin }
                 .collectLatest { pair ->
-                    if (pair == null) return@collectLatest
+                    // (Review 2026-11-24) The synopsis on screen is matched by start time alone, so another channel's
+                    // programme starting at the same minute kept the previous channel's text: it goes as soon as the
+                    // focused programme or its channel changes, before the new one is read.
+                    if (pair == null) { detail.value = null; return@collectLatest }
                     if (detail.value?.rawStartMin == pair.second.rawStartMin && detail.value?.title == pair.second.title) return@collectLatest
+                    detail.value = null
                     delay(DETAIL_DEBOUNCE_MS)
                     val full = try {
                         feed.at(pair.first, pair.second.startMin)

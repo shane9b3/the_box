@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.ui.layout.layout
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -95,7 +96,13 @@ fun ChannelListPanel(state: ChannelListState, host: PlayerHost, modifier: Modifi
             val y = PlayerUi.LIST_HEADER_H + (if (state.previous != null) PlayerUi.LIST_PITCH else 0f) + row * PlayerUi.LIST_PITCH
             Column(
                 Modifier
-                    .offset((PlayerUi.LIST_W - 300f).dp, y.dp)
+                    // Beside the focused row, moved up as far as needed to stay inside the panel: on the last rows
+                    // the menu's bottom items (Hide channel, Lock channel) ran off the screen (review 2026-11-24).
+                    .layout { measurable, constraints ->
+                        val menu = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+                        val top = minOf(y.dp.roundToPx(), PlayerUi.LIST_H.dp.roundToPx() - menu.height - CHANNEL_MENU_MARGIN.dp.roundToPx()).coerceAtLeast(0)
+                        layout(menu.width, menu.height) { menu.place((PlayerUi.LIST_W - 300f).dp.roundToPx(), top) }
+                    }
                     .testTag(CHANNEL_MENU_TAG)
                     .width(280.dp)
                     .background(GuideUi.OverlayFill, RoundedCornerShape(16.dp))
@@ -204,3 +211,6 @@ private fun GroupsColumn(state: ChannelListState) {
 }
 
 private const val GROUPS_VISIBLE = 16
+
+/** Space kept between the channel menu and the bottom edge of the list panel. */
+private const val CHANNEL_MENU_MARGIN = 12f

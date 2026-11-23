@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.FilterQuality
@@ -65,6 +66,8 @@ private const val DEFAULT_ZOOM = 2
 private const val EC_PX_W = 960
 private const val EC_PX_H = 540
 private const val RADAR_ALPHA = 0.8f
+/** The pause between starting one radar frame's pictures and the next older frame's. */
+private const val RADAR_FRAME_STAGGER_MS = 250L
 private const val MAX_LABELS = 36
 
 private val Water = Color(0xFF0A111C)
@@ -122,22 +125,36 @@ internal fun RadarMap(city: WeatherCity, frames: RadarFrames?, state: RadarState
         },
     ) {
         if (frames != null && loader != null) {
+            // (Review 2026-11-24) The newest frame first, then one older frame at a time: every frame at once was up
+            // to 160 tile requests in one burst on opening the page and again on each zoom step.
+            var shown by remember(frames.frames, view) { mutableIntStateOf(1) }
+            LaunchedEffect(frames.frames, view) {
+                while (shown < count) {
+                    delay(RADAR_FRAME_STAGGER_MS)
+                    shown++
+                }
+            }
             frames.frames.forEachIndexed { i, f ->
-                val alpha = if (i == state.frame.coerceIn(0, count - 1)) RADAR_ALPHA else 0f
-                when (frames.source) {
-                    RadarSource.ENV_CANADA -> coil3.compose.AsyncImage(
-                        model = RadarMath.envCanadaUrl(view, EC_PX_W, EC_PX_H, f.key, frames.snow),
-                        contentDescription = null, imageLoader = loader, alpha = alpha, contentScale = ContentScale.FillBounds,
-                        filterQuality = FilterQuality.Low, modifier = Modifier.fillMaxSize(),
-                    )
-                    RadarSource.RAINVIEWER -> {
-                        val tiles = remember(f.key, view) { RadarMath.rainViewerTiles(frames.host, f.key, view, RadarMath.rainViewerTileZoom(view.zoom)) }
-                        tiles.forEach { t ->
-                            coil3.compose.AsyncImage(
-                                model = t.url, contentDescription = null, imageLoader = loader, alpha = alpha,
-                                contentScale = ContentScale.FillBounds, filterQuality = FilterQuality.Low,
-                                modifier = Modifier.offset(t.x.dp, t.y.dp).size(t.size.dp),
-                            )
+                if (i < count - shown) return@forEachIndexed
+                // Which frame shows is read while drawing, not while composing: a frame step redraws and no image is
+                // recomposed (it used to recompose every tile of every frame each 600 ms).
+                val frame = Modifier.fillMaxSize().drawWithContent { if (i == state.frame.coerceIn(0, count - 1)) drawContent() }
+                Box(frame) {
+                    when (frames.source) {
+                        RadarSource.ENV_CANADA -> coil3.compose.AsyncImage(
+                            model = RadarMath.envCanadaUrl(view, EC_PX_W, EC_PX_H, f.key, frames.snow),
+                            contentDescription = null, imageLoader = loader, alpha = RADAR_ALPHA, contentScale = ContentScale.FillBounds,
+                            filterQuality = FilterQuality.Low, modifier = Modifier.fillMaxSize(),
+                        )
+                        RadarSource.RAINVIEWER -> {
+                            val tiles = remember(f.key, view) { RadarMath.rainViewerTiles(frames.host, f.key, view, RadarMath.rainViewerTileZoom(view.zoom)) }
+                            tiles.forEach { t ->
+                                coil3.compose.AsyncImage(
+                                    model = t.url, contentDescription = null, imageLoader = loader, alpha = RADAR_ALPHA,
+                                    contentScale = ContentScale.FillBounds, filterQuality = FilterQuality.Low,
+                                    modifier = Modifier.offset(t.x.dp, t.y.dp).size(t.size.dp),
+                                )
+                            }
                         }
                     }
                 }

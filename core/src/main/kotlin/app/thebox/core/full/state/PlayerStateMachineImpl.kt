@@ -1512,6 +1512,10 @@ class PlayerStateMachineImpl(
      * returns to live (the picture is frozen, so "Live TV continues" would be wrong).
      */
     private fun noRewindToast(forPause: Boolean) {
+        // (Review 2026-11-24) While pause and rewind are switched off in this version (Settings shows them as coming
+        // soon), no reason is given: each of these told the user to change a playlist format or a setting that would
+        // not bring the feature back, or described a buffer that does not exist.
+        if (!app.thebox.core.settings.TimeshiftFeature.available) return
         val b = buffer
         when {
             b != null && b.hls -> effects.toast(PlayerToast.PAUSE_NO_REWIND_HLS, hlsArg())

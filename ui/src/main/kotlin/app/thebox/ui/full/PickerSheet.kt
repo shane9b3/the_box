@@ -78,7 +78,8 @@ fun PickerSheet(state: PickerState, modifier: Modifier = Modifier, clock24: Bool
             val disabled = (c is PickerChoice.Audio && !c.track.supported) || !c.selectable // "Loading games…" reads greyed
             PickerRow(
                 text = PlayerText.choice(res, c, i, clock24),
-                note = if (disabled) stringResource(R.string.player_picker_unsupported) else null,
+                // Only a track this device cannot play says so: "Loading games…" is greyed without that note (review 2026-11-24).
+                note = if (c is PickerChoice.Audio && !c.track.supported) stringResource(R.string.player_picker_unsupported) else null,
                 checked = i == state.current,
                 focused = i == state.focused,
                 disabled = disabled,
