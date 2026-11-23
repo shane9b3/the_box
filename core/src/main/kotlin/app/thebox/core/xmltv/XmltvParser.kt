@@ -269,10 +269,17 @@ class XmltvParser(private val factory: () -> XmlPullParser) {
             }
             pickCategories()
             episodes.applyTo(p)
-            // (Decision 2026-11-18) A "new" written into the title becomes the NEW flag; the guide draws its own tag.
-            NewMarker.strip(p.title)?.let { clean -> p.title = clean; p.flags = p.flags or ProgrammeFlags.NEW }
-            // (Decision 2026-11-19) The same for a "live" marker and the LIVE tag.
-            LiveMarker.strip(p.title)?.let { clean -> p.title = clean; p.flags = p.flags or ProgrammeFlags.LIVE }
+            // (Decision 2026-11-18, 2026-11-19) A "new" or "live" written into the title becomes the NEW or LIVE flag;
+            // the guide draws its own tags. Repeated until neither is found, so the order the provider wrote them in
+            // does not matter ("Hockey (New) (Live)" hid its "(New)" behind the other; review 2026-11-23).
+            var pass = 0
+            while (pass++ < MARKER_PASSES) {
+                val noNew = NewMarker.strip(p.title)
+                if (noNew != null) { p.title = noNew; p.flags = p.flags or ProgrammeFlags.NEW }
+                val noLive = LiveMarker.strip(p.title)
+                if (noLive != null) { p.title = noLive; p.flags = p.flags or ProgrammeFlags.LIVE }
+                if (noNew == null && noLive == null) break
+            }
         }
 
         private fun flag(f: Int) {
@@ -511,6 +518,8 @@ class XmltvParser(private val factory: () -> XmlPullParser) {
         const val MAX_ID_CHARS = 1_024
         const val MAX_URL_CHARS = 8_192
         const val MAX_MARKUP_GAP_BYTES = 1 shl 20
+        /** Rounds of taking "new" and "live" markers out of one title (two markers need two; the rest is margin). */
+        private const val MARKER_PASSES = 4
         private const val TRIM_ROOM = 256
         private const val TAIL = 256
         private const val MAX_CATEGORY_CANDIDATES = 32

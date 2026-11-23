@@ -54,7 +54,8 @@ class SettingsLifecycle @Inject constructor(
         scope.launch {
             store.flow(DataDomain).map { it.epgRefreshIntervalH to it.epgDailyAtHour }.distinctUntilChanged().drop(1).collect {
                 try {
-                    scheduler.get().scheduleEpgPeriodic()
+                    // The interval or the daily hour changed: the enqueued work's timing is replaced, not kept.
+                    scheduler.get().scheduleEpgPeriodic(reanchor = true)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {

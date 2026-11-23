@@ -105,6 +105,18 @@ class XmltvParserTest {
     }
 
     @Test
+    fun newAndLiveMarkersInTheTitleAreTakenInEitherOrder() {
+        // Review 2026-11-23: "(New) (Live)" kept its "(New)" in the title and lost the NEW flag.
+        fun prog(title: String) = "<programme start=\"20260101000000 +0000\" stop=\"20260101010000 +0000\" channel=\"c\"><title>$title</title></programme>"
+        val titles = listOf("Hockey (New) (Live)", "Hockey (Live) (New)", "Hockey ᴺᵉʷ ᴸᶦᵛᵉ", "Hockey ᴸᶦᵛᵉ ᴺᵉʷ", "Hockey (Live)", "Hockey")
+        val xml = "<tv><channel id=\"c\"><display-name>C</display-name></channel>" + titles.joinToString("") { prog(it) } + "</tv>"
+        val got = parse(xml.byteInputStream()).programmes
+        val both = ProgrammeFlags.NEW or ProgrammeFlags.LIVE
+        assertEquals(List(6) { "Hockey" }, got.map { it.title })
+        assertEquals(listOf(both, both, both, both, ProgrammeFlags.LIVE, 0), got.map { it.flags and both })
+    }
+
+    @Test
     fun compressionVariantsAndBomGiveTheSameResult() {
         val expected = parseFile("basic.xml").programmes
         for (name in listOf("basic.xml.gz", "basic.xml.gz.gz", "basic.xml.xz", "basic.zip", "bom.xml")) {

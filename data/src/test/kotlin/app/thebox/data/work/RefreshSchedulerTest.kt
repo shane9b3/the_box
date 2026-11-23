@@ -133,6 +133,57 @@ class RefreshSchedulerTest {
     }
 
     @Test
+    fun theDailyHourSetsWhenThePeriodicGuideWorkStarts() = runBlocking {
+        // Review 2026-11-23: 03:00 and 18:00 gave the same 24 h request.
+        fun live() = infos(RefreshScheduler.EPG_PERIODIC).filter { !it.state.isFinished }
+        val zone = java.time.ZoneId.systemDefault()
+        settings.update { it.copy(epgRefreshIntervalH = 24, epgDailyAtHour = 3) }
+        scheduler.scheduleEpgPeriodic()
+        val at3 = live().single()
+        assertEquals(TimeUnit.HOURS.toMillis(24), at3.periodicityInfo!!.repeatIntervalMillis)
+        assertEquals(DailyDelay.untilNextMs(3, clock.now(), zone), at3.initialDelayMillis)
+        assertTrue(RefreshScheduler.anchorTag(3) in at3.tags)
+
+        // The hour changes in Settings: the work is enqueued again for the new hour.
+        settings.update { it.copy(epgDailyAtHour = 18) }
+        scheduler.scheduleEpgPeriodic(reanchor = true)
+        val at18 = live().single()
+        assertEquals(DailyDelay.untilNextMs(18, clock.now(), zone), at18.initialDelayMillis)
+        assertTrue(RefreshScheduler.anchorTag(18) in at18.tags)
+        assertTrue(at18.id != at3.id)
+
+        // An app start keeps work that is already for the right hour, and replaces work that is for another.
+        db.epgSourceDao().insert(EpgSourceEntity(name = "u", origin = "USER", credentialRef = "r", urlHash = 1, displaySource = "h", priority = 0, createdAt = 1))
+        scheduler.onAppStart()
+        assertEquals(at18.id, live().single().id)
+        settings.update { it.copy(epgDailyAtHour = 5) }
+        scheduler.onAppStart()
+        assertTrue(RefreshScheduler.anchorTag(5) in live().single().tags)
+        assertTrue(live().single().id != at18.id)
+
+        // A plain interval has no start delay.
+        settings.update { it.copy(epgRefreshIntervalH = 12, epgDailyAtHour = null) }
+        scheduler.scheduleEpgPeriodic(reanchor = true)
+        assertEquals(0L, live().single().initialDelayMillis)
+        assertEquals(TimeUnit.HOURS.toMillis(12), live().single().periodicityInfo!!.repeatIntervalMillis)
+    }
+
+    @Test
+    fun theDelayToADailyHourFollowsTheLocalClock() {
+        val toronto = java.time.ZoneId.of("America/Toronto")
+        fun at(local: String) = java.time.LocalDateTime.parse(local).atZone(toronto).toInstant().toEpochMilli()
+        val minute = 60_000L
+        assertEquals(120 * minute, DailyDelay.untilNextMs(3, at("2026-01-10T01:00:00"), toronto))
+        assertEquals(22 * 60 * minute, DailyDelay.untilNextMs(3, at("2026-01-10T05:00:00"), toronto))
+        // Exactly on the hour: the next one, a day away, never a zero delay.
+        assertEquals(24 * 60 * minute, DailyDelay.untilNextMs(3, at("2026-01-10T03:00:00"), toronto))
+        // Spring forward (8 March 2026, 02:00 → 03:00): 02:00 does not exist and lands when the gap ends.
+        assertEquals(90 * minute, DailyDelay.untilNextMs(2, at("2026-03-08T00:30:00"), toronto))
+        // The night the clocks go back has 25 hours.
+        assertEquals(25 * 60 * minute, DailyDelay.untilNextMs(3, at("2026-11-01T03:00:00").let { it - 24 * 60 * minute - 60 * minute }, toronto))
+    }
+
+    @Test
     fun appStartWithOnlyRestorePlaceholdersSchedulesNoGuideWork() = runBlocking {
         // docs/design/m5-restore-placeholder-guides.md §3: a placeholder has no address until the first refresh.
         val restored = db.newPlaylist("restored")

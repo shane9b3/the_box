@@ -22,7 +22,9 @@ import app.thebox.data.di.WallClock
 import app.thebox.data.repo.DataSettings
 import app.thebox.data.repo.EpgWorkRequester
 import app.thebox.data.repo.Trigger
+import java.time.ZoneId
 import java.util.concurrent.TimeUnit
+import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -80,15 +82,31 @@ class RefreshScheduler @Inject constructor(
         workManager.enqueueUniqueWork(refreshName(playlistId), if (user) ExistingWorkPolicy.REPLACE else ExistingWorkPolicy.KEEP, builder.build())
     }
 
-    fun scheduleEpgPeriodic() {
+    /**
+     * The periodic guide update. With "daily at a set time" the 24 h period starts at the next local occurrence of
+     * that hour and the request carries the hour as a tag (review 2026-11-23: the hour was stored and never used, so
+     * 03:00 and 18:00 gave the same request). WorkManager runs it at about that time, later when the box was off.
+     *
+     * UPDATE keeps the timing of work that is already enqueued, so a changed hour needs [reanchor] (cancel and enqueue
+     * again): the settings change passes it, and so does [onAppStart] when the enqueued work is for another hour.
+     */
+    fun scheduleEpgPeriodic(reanchor: Boolean = false) {
         val hours = settings.current.epgRefreshIntervalH.coerceAtLeast(1).toLong()
-        val request = PeriodicWorkRequestBuilder<EpgImportWorker>(hours, TimeUnit.HOURS)
+        val daily = settings.current.epgDailyAtHour
+        val builder = PeriodicWorkRequestBuilder<EpgImportWorker>(hours, TimeUnit.HOURS)
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).setRequiresStorageNotLow(true).build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_S, TimeUnit.SECONDS)
             .setInputData(workDataOf(EpgImportWorker.KEY_TRIGGER to Trigger.PERIODIC.name))
-            .addTag(TAG_SYNC).addTag(TAG_EPG_IMPORT)
-            .build()
-        workManager.enqueueUniquePeriodicWork(EPG_PERIODIC, ExistingPeriodicWorkPolicy.UPDATE, request)
+            .addTag(TAG_SYNC).addTag(TAG_EPG_IMPORT).addTag(anchorTag(daily))
+        if (daily != null) builder.setInitialDelay(DailyDelay.untilNextMs(daily, clock.now(), ZoneId.systemDefault()), TimeUnit.MILLISECONDS)
+        val policy = if (reanchor) ExistingPeriodicWorkPolicy.CANCEL_AND_REENQUEUE else ExistingPeriodicWorkPolicy.UPDATE
+        workManager.enqueueUniquePeriodicWork(EPG_PERIODIC, policy, builder.build())
+    }
+
+    /** True when the enqueued periodic guide work was made for another daily hour (or for none) than the setting now. */
+    private suspend fun epgAnchorChanged(): Boolean {
+        val live = workManager.getWorkInfosForUniqueWorkFlow(EPG_PERIODIC).first().filter { !it.state.isFinished }
+        return live.isNotEmpty() && live.none { anchorTag(settings.current.epgDailyAtHour) in it.tags }
     }
 
     override fun importEpgNow(trigger: Trigger) {
@@ -128,7 +146,7 @@ class RefreshScheduler @Inject constructor(
             if (p.updateOnStart && (p.lastSuccessAt == null || now - p.lastSuccessAt >= stale)) refreshNow(p.id, Trigger.APP_START)
         }
         if (sourceDao.active().isEmpty()) return
-        scheduleEpgPeriodic()
+        scheduleEpgPeriodic(reanchor = epgAnchorChanged())
         val builtAt = try {
             epgStore.info.value?.builtAtMs
         } catch (e: NotImplementedError) {
@@ -147,6 +165,8 @@ class RefreshScheduler @Inject constructor(
         const val TAG_SYNC = "sync"
         const val TAG_PLAYLIST_PREFIX = "playlist:"
         const val TAG_EPG_IMPORT = "epg-import"
+        /** The daily hour a periodic guide request was built for: `epg-anchor-3`, or `epg-anchor-none` for a plain interval. */
+        fun anchorTag(dailyHour: Int?) = "epg-anchor-" + (dailyHour?.toString() ?: "none")
         const val TAG_EPG_PATCH = "epg-patch"
         const val EPG_PERIODIC = "epg-periodic"
         const val EPG_IMPORT = "epg-import"
@@ -155,5 +175,19 @@ class RefreshScheduler @Inject constructor(
 
         fun periodicName(playlistId: Long) = "playlist-periodic-$playlistId"
         fun refreshName(playlistId: Long) = "playlist-refresh-$playlistId"
+    }
+}
+
+/** "Daily at a set time": how long until the next local occurrence of an hour. */
+internal object DailyDelay {
+    /**
+     * Milliseconds from [nowMs] to the next [hour]:00 in [zone], always more than 0 and at most about a day. An hour
+     * the clocks skip (spring forward) lands on the instant the gap ends; an hour that happens twice uses the first.
+     */
+    fun untilNextMs(hour: Int, nowMs: Long, zone: ZoneId): Long {
+        val now = java.time.Instant.ofEpochMilli(nowMs).atZone(zone)
+        var at = now.toLocalDate().atTime(hour.coerceIn(0, 23), 0).atZone(zone)
+        if (!at.isAfter(now)) at = now.toLocalDate().plusDays(1).atTime(hour.coerceIn(0, 23), 0).atZone(zone)
+        return at.toInstant().toEpochMilli() - nowMs
     }
 }

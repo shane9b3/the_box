@@ -153,7 +153,8 @@ class WeatherViewModel internal constructor(
             _state.update { it.copy(search = CitySearchUi(query = q)) }
             return
         }
-        _state.update { it.copy(search = it.search.copy(query = q, loading = true, failed = null)) }
+        // The answers on screen belong to the text that was there before: they go until this text has its own.
+        _state.update { it.copy(search = if (it.search.query == q) it.search.copy(loading = true, failed = null) else CitySearchUi(query = q, loading = true)) }
         searchJob = viewModelScope.launch {
             delay(WeatherTimings.SEARCH_DEBOUNCE_MS)
             val r = repo.search(q, language())

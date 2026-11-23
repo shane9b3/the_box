@@ -21,6 +21,8 @@ data class DataSettingsSnapshot(
     val keepCachedXmltv: KeepCachedXmltv = KeepCachedXmltv.IF_FREE_OVER_1GB,
     /** epg-periodic interval (§3.10). */
     val epgRefreshIntervalH: Int = 12,
+    /** "Daily at a set time": the local hour (0–23) the 24 h epg-periodic work aims for; null = a plain interval. */
+    val epgDailyAtHour: Int? = null,
     /** Added to every channel's guide shift (§2.2). */
     val globalShiftMin: Int = 0,
     /** App-start refresh threshold for playlists with update_on_start (§3.10). */

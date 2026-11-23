@@ -199,6 +199,36 @@ class WeatherScreenTest {
         rule.onNodeWithTag(weatherDayTag(0)).assertIsFocused()
     }
 
+    @Test fun aCityThatKeepsFailingCanBeSwappedForAnother() {
+        // Review 2026-11-23: the city chip was only in the loaded forecast, so a failing default city was a dead end.
+        repo.forecastAnswer = { if (it.id == 1L) WeatherResult.Failed(WeatherFail.NO_ANSWER) else WeatherResult.Ok(forecast(it.id)) }
+        show(london, paris)
+        rule.onNodeWithTag(WEATHER_ACTION_TAG).assertIsFocused()
+        press(listOf(Key.DirectionRight))
+        rule.onNodeWithTag(WEATHER_CITY_TAG).assertIsFocused()
+        press(listOf(Key.DirectionCenter))
+        rule.onNodeWithTag(weatherCityRowTag(1)).assertIsFocused()
+        // Back returns to the button that opened the panel.
+        press(listOf(Key.Back))
+        rule.onNodeWithTag(WEATHER_CITY_TAG).assertIsFocused()
+        press(listOf(Key.DirectionCenter, Key.DirectionDown, Key.DirectionCenter))
+        assertEquals(paris, vm.state.value.city)
+        rule.onNodeWithTag(WEATHER_TEMP_TAG).assertExists()
+    }
+
+    @Test fun changingTheSearchTextDropsTheOldAnswers() {
+        // Review 2026-11-23: the previous text's cities stayed selectable while the new text was being looked up.
+        show()
+        repo.found = listOf(paris)
+        vm.onQuery("Par")
+        idle()
+        assertEquals(listOf(paris), vm.state.value.search.results)
+        vm.onQuery("Lon")
+        assertTrue(vm.state.value.search.results.isEmpty())
+        assertTrue(vm.state.value.search.loading)
+        assertFalse(vm.state.value.search.searched)
+    }
+
     @Test fun theRadarPageAsksForFramesAndFocusesPlay() {
         show(london)
         press(listOf(Key.DirectionUp, Key.DirectionUp))

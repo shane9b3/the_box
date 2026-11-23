@@ -121,12 +121,13 @@ class PersistedDataSettings internal constructor(
         match = extras.match.copy(level = p.matchLevel),
         storeDescriptions = p.storeDescriptions,
         epgRefreshIntervalH = if (p.epgDailyAtHour != null) DAILY_INTERVAL_H else p.epgRefreshIntervalH,
+        epgDailyAtHour = p.epgDailyAtHour?.coerceIn(0, 23),
         globalShiftMin = p.globalShiftMin,
     )
 
     companion object {
         private const val TAG = "PersistedDataSettings"
-        /** "Daily at a set time" runs as a 24 h period (the hour is a scheduling hint, see `SettingsSideEffects`). */
+        /** "Daily at a set time" runs as a 24 h period that `RefreshScheduler` starts at the chosen hour. */
         const val DAILY_INTERVAL_H = 24
 
         /** S12: Auto = max catch-up days of the enabled playlists, at least 1 and at most 7. */

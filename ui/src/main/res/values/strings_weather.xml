@@ -14,6 +14,7 @@
     <string name="weather_no_city">Add your city to see its weather.</string>
     <string name="weather_add_city">Add a city</string>
     <string name="weather_retry">Try again</string>
+    <string name="weather_change_city">Change city</string>
     <string name="weather_fail_offline">No internet connection. Check the network, then try again.</string>
     <string name="weather_fail_answer">The weather service did not answer. Try again in a moment.</string>
     <string name="weather_fail_radar">The radar service did not answer. Try again in a moment.</string>

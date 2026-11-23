@@ -174,8 +174,11 @@ fun WeatherScreen(
                         stringResource(R.string.weather_no_city), stringResource(R.string.weather_add_city), action, forecastTab,
                     ) { panel = CityPanelMode.SEARCH }
                     WeatherBody.Loading -> Message(stringResource(R.string.weather_loading), null, action, forecastTab) {}
+                    // The city chip lives in the forecast, so a city that keeps failing would leave no way to another
+                    // one: the failure offers the city panel itself (review 2026-11-23).
                     is WeatherBody.Failed -> Message(
                         WeatherText.failure(body.kind), stringResource(R.string.weather_retry), action, forecastTab,
+                        second = stringResource(R.string.weather_change_city), secondRequester = cityChip, onSecond = { panel = CityPanelMode.LIST },
                     ) {
                         settled = false
                         viewModel.onRetry()
@@ -304,11 +307,23 @@ private fun Segment(text: String, selected: Boolean, dot: Boolean, requester: Fo
 // ------------------------------------------------------------------ messages
 
 @Composable
-private fun Message(text: String, button: String?, action: FocusRequester, up: FocusRequester, onClick: () -> Unit) {
+private fun Message(
+    text: String,
+    button: String?,
+    action: FocusRequester,
+    up: FocusRequester,
+    second: String? = null,
+    secondRequester: FocusRequester? = null,
+    onSecond: () -> Unit = {},
+    onClick: () -> Unit,
+) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(28.dp)) {
             Line(text, GuideUi.sans(32, color = GuideUi.Fg), Modifier.testTag(WEATHER_MESSAGE_TAG), maxLines = 3)
-            if (button != null) TextButton(button, action, WEATHER_ACTION_TAG, up = up, onClick = onClick)
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                if (button != null) TextButton(button, action, WEATHER_ACTION_TAG, up = up, onClick = onClick)
+                if (second != null && secondRequester != null) TextButton(second, secondRequester, WEATHER_CITY_TAG, up = up, onClick = onSecond)
+            }
         }
     }
 }
