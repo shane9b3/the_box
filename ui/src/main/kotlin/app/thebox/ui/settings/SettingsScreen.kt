@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -201,7 +202,12 @@ private fun focusedRowY(list: LazyListState, cursor: Int, subtitle: Boolean): In
 
 @Composable
 private fun Header(ui: SettingsUiState, section: SectionId?, clock24: Boolean, titles: Map<SettingsRoute, String>) {
-    Line(stringResource(R.string.settings_ui_title), SettingsUi.Title, Modifier.offset(SettingsUi.HEADER_X.dp, SettingsUi.HEADER_Y.dp))
+    // (2026-11-24, text sizes) The title stands on the breadcrumb's top and grows upwards at a larger text size.
+    Line(
+        stringResource(R.string.settings_ui_title), SettingsUi.Title,
+        Modifier.offset(SettingsUi.HEADER_X.dp, SettingsUi.HEADER_Y.dp).height((SettingsUi.BREADCRUMB_Y - SettingsUi.HEADER_Y).dp)
+            .wrapContentHeight(Alignment.Bottom, unbounded = true),
+    )
     val parts = breadcrumbParts(
         stringResource(R.string.settings_ui_title), section?.let { stringResource(SettingsUi.sectionLabel(it)) }, ui.stack, titles, ui.page?.title,
     )

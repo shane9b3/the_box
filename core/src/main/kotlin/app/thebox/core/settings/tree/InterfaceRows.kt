@@ -8,7 +8,7 @@ import app.thebox.core.settings.Visibility
 import app.thebox.core.settings.Visibility.ADVANCED
 import app.thebox.core.settings.Visibility.SIMPLE
 
-/** WP-A: the Interface section (docs/design/m5-setup-settings.md §3.3.6). Every row is LIVE. */
+/** WP-A: the Interface section (docs/design/m5-setup-settings.md §3.3.6). Every row is LIVE but the text size. */
 object InterfaceRows : RowSource {
     val CLOCK = RowId("interface.clock")
     val MINI_PLAYER = RowId("interface.mini_player")
@@ -20,6 +20,9 @@ object InterfaceRows : RowSource {
     val NUMBERS = RowId("interface.numbers")
     val REMINDER_SWITCH = RowId("interface.reminder_switch")
     val REMINDER_LEAD = RowId("interface.reminder_lead")
+    /** (Owner request 2026-11-24) "Text size": read when the app starts, so RESTART with its own "Restart now" row. */
+    val TEXT_SIZE = RowId("interface.text_size")
+    val RESTART_NOW = RowId("interface.restart_now")
 
     override val rows: List<RowSpec> = listOf(
         a(CLOCK, SIMPLE, LIVE),
@@ -31,6 +34,8 @@ object InterfaceRows : RowSource {
         a(NUMBERS, ADVANCED, LIVE),
         a(REMINDER_SWITCH, ADVANCED, LIVE),
         a(REMINDER_LEAD, ADVANCED, LIVE),
+        a(TEXT_SIZE, ADVANCED, EffectTiming.RESTART),
+        a(RESTART_NOW, ADVANCED, EffectTiming.NONE),
     )
 
     private fun a(id: RowId, v: Visibility, e: EffectTiming) = RowSpec(id, SectionId.INTERFACE, v, e, "A")

@@ -367,12 +367,12 @@ private fun ForecastBody(
                         Row(m.padding(horizontal = 14.dp, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                             val color = if (focused) GuideUi.Canvas else GuideUi.Fg
                             Line(ui.city?.label.orEmpty(), GuideUi.mono(22, color = color))
-                            Line("▾", GuideUi.sans(18, color = color.copy(alpha = 0.7f)))
+                            Line("▾", GuideUi.sans(22, color = color.copy(alpha = 0.7f)))
                         }
                     }
                     Line(WeatherText.date(today.date, "EEEE d MMMM", locale), GuideUi.sans(26, color = GuideUi.Fg.copy(alpha = 0.8f)))
                     Box(Modifier.background(DesignTokens.Colors.OnNowFill, RoundedCornerShape(DesignTokens.Radii.Pill)).padding(horizontal = 10.dp, vertical = 3.dp)) {
-                        Line(stringResource(R.string.weather_now), GuideUi.sans(20, FontWeight.SemiBold, DesignTokens.Colors.AccentText, 0.06f))
+                        Line(stringResource(R.string.weather_now), GuideUi.sans(22, FontWeight.SemiBold, DesignTokens.Colors.AccentText, 0.06f))
                     }
                 }
                 Spacer(Modifier.height(10.dp))
@@ -389,7 +389,7 @@ private fun ForecastBody(
                         )
                     }
                 }
-                Line(WeatherText.summary(f, clock24), GuideUi.sans(27, color = GuideUi.Fg.copy(alpha = 0.92f)).copy(lineHeight = androidx.compose.ui.unit.TextUnit(36f, androidx.compose.ui.unit.TextUnitType.Sp)), Modifier.width(820.dp), maxLines = 2)
+                Line(WeatherText.summary(f, clock24), GuideUi.sans(27, color = GuideUi.Fg.copy(alpha = 0.92f)).copy(lineHeight = app.thebox.ui.theme.textSp(36)), Modifier.width(820.dp), maxLines = 2)
             }
             Tiles(f, today, units, clock24, Modifier.width(816.dp))
         }
@@ -409,7 +409,7 @@ private fun ForecastBody(
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 SectionLabel(stringResource(R.string.weather_days, f.days.size), Modifier.weight(1f))
                 // Open-Meteo's licence (CC BY 4.0) asks for this credit where the data is shown.
-                Line(stringResource(R.string.weather_credit), GuideUi.sans(17, color = GuideUi.Fg50), Modifier.padding(end = 14.dp))
+                Line(stringResource(R.string.weather_credit), GuideUi.sans(22, color = GuideUi.Fg50), Modifier.padding(end = 14.dp))
             }
             Spacer(Modifier.height(12.dp))
             Days(f, selected, units, locale, days, cityChip, onDay)
@@ -419,7 +419,7 @@ private fun ForecastBody(
 
 @Composable
 private fun SectionLabel(text: String, modifier: Modifier = Modifier) {
-    Line(text.uppercase(LocalConfiguration.current.locales[0]), GuideUi.sans(18, FontWeight.SemiBold, GuideUi.Fg60, 0.08f), modifier.padding(horizontal = 14.dp))
+    Line(text.uppercase(LocalConfiguration.current.locales[0]), GuideUi.sans(22, FontWeight.SemiBold, GuideUi.Fg60, 0.08f), modifier.padding(horizontal = 14.dp))
 }
 
 @Composable
@@ -465,14 +465,20 @@ private fun Tiles(f: Forecast, today: DayWeather, units: WeatherUnits, clock24: 
 private fun androidx.compose.foundation.layout.RowScope.Tile(label: String, value: String, sub: String) {
     val shape = RoundedCornerShape(18.dp)
     Column(
-        Modifier.weight(1f).height(150.dp).background(WeatherUi.Glass, shape).border(1.dp, WeatherUi.GlassBorder, shape).padding(horizontal = 22.dp, vertical = 18.dp),
+        // (2026-11-24, text sizes) The three lines need about 108 px at the default size and 129 at Largest: the tile
+        // keeps its height and gives up vertical padding.
+        Modifier.weight(1f).height(150.dp).background(WeatherUi.Glass, shape).border(1.dp, WeatherUi.GlassBorder, shape)
+            .padding(horizontal = if (largeText) 12.dp else 22.dp, vertical = if (largeText) 9.dp else 18.dp),
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
-        Line(label.uppercase(LocalConfiguration.current.locales[0]), GuideUi.sans(17, FontWeight.SemiBold, GuideUi.Fg60, 0.08f))
+        Line(label.uppercase(LocalConfiguration.current.locales[0]), GuideUi.sans(22, FontWeight.SemiBold, GuideUi.Fg60, 0.08f))
         Line(value, GuideUi.sans(42, FontWeight.SemiBold))
-        Line(sub, GuideUi.sans(20, color = GuideUi.Fg70))
+        Line(sub, GuideUi.sans(22, color = GuideUi.Fg70))
     }
 }
+
+/** True at the "Text size" row's Larger and Largest: the fixed-height strips trade padding and icon size for the text. */
+private val largeText: Boolean get() = app.thebox.core.settings.UiTextScale.factor > 1f
 
 /** Twelve columns: the time, the sky, the temperature and the chance of rain or snow (blue from 30 %). */
 @Composable
@@ -485,11 +491,11 @@ private fun Hourly(hours: List<HourWeather>, units: WeatherUnits, clock24: Boole
                 horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.SpaceBetween,
             ) {
                 if (h != null) {
-                    Line(WeatherText.hour(h.hour, clock24), GuideUi.mono(19, color = GuideUi.Fg70))
-                    WeatherIcon(h.condition.sky, h.isDay, Modifier.size(46.dp))
+                    Line(WeatherText.hour(h.hour, clock24), GuideUi.mono(22, color = GuideUi.Fg70))
+                    WeatherIcon(h.condition.sky, h.isDay, Modifier.size(if (largeText) 36.dp else 46.dp)) // room for the larger lines
                     Line(WeatherText.temp(h.tempC, units), GuideUi.sans(28, FontWeight.SemiBold))
                     val pop = h.popPct ?: 0
-                    Line(if (pop > 0) "$pop%" else "—", GuideUi.mono(17, color = if (pop >= 30) WeatherUi.RainText else GuideUi.Fg55))
+                    Line(if (pop > 0) "$pop%" else "—", GuideUi.mono(22, color = if (pop >= 30) WeatherUi.RainText else GuideUi.Fg55))
                 }
             }
             if (i < Forecast.HOURLY_SLOTS - 1) Box(Modifier.width(1.dp).fillMaxHeight().background(GuideUi.White08))
@@ -528,12 +534,12 @@ private fun Days(
                             if (i == f.nowDay) stringResource(R.string.weather_today) else WeatherText.date(d.date, "EEE", locale),
                             GuideUi.sans(26, FontWeight.SemiBold, fg), Modifier.weight(1f),
                         )
-                        Line(WeatherText.date(d.date, "d MMM", locale), GuideUi.mono(17, color = fg.copy(alpha = 0.65f)))
+                        Line(WeatherText.date(d.date, "d MMM", locale), GuideUi.mono(22, color = fg.copy(alpha = 0.65f)))
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         WeatherIcon(d.condition.sky, true, Modifier.size(50.dp))
                         Spacer(Modifier.weight(1f))
-                        d.popPct?.takeIf { it > 0 }?.let { Line("$it%", GuideUi.mono(18, color = fg.copy(alpha = 0.75f))) }
+                        d.popPct?.takeIf { it > 0 }?.let { Line("$it%", GuideUi.mono(22, color = fg.copy(alpha = 0.75f))) }
                     }
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Line(WeatherText.temp(d.maxC, units), GuideUi.sans(28, FontWeight.SemiBold, fg), Modifier.weight(1f))

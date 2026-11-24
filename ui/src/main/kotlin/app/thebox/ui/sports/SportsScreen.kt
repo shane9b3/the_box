@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -402,11 +403,12 @@ private fun FocusChip(
 
 @Composable
 private fun CreditRow(ui: SportsUiState) {
-    Row(Modifier.fillMaxWidth().height(28.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+    // (2026-11-24, text sizes) 22 px text: 30 px of line at the default size, more at a larger one.
+    Row(Modifier.fillMaxWidth().heightIn(min = 30.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
         // (CHL §6.6) Per league; the QMJHL's attribution reads "LHJMQ" verbatim.
-        Line(SportsText.credit(LocalResources.current, ui.prefs.league), GuideUi.sans(20, color = GuideUi.Fg55))
+        Line(SportsText.credit(LocalResources.current, ui.prefs.league), GuideUi.sans(22, color = GuideUi.Fg55))
         // NFL §7.2: the board's week ("Week 9"), once a board is shown.
-        ui.boardKey?.let { key -> Line(SportsText.weekLabel(LocalResources.current, key), GuideUi.sans(20, color = GuideUi.Fg55), Modifier.testTag(SPORTS_WEEK_TAG)) }
+        ui.boardKey?.let { key -> Line(SportsText.weekLabel(LocalResources.current, key), GuideUi.sans(22, color = GuideUi.Fg55), Modifier.testTag(SPORTS_WEEK_TAG)) }
         val updated = ui.updatedMono
         if (updated != null) UpdatedText(updated)
     }
@@ -426,7 +428,7 @@ private fun UpdatedText(updatedMono: Long) {
     }
     val minutes = SportsViewModel.minutesSince(updatedMono, now.value)
     val text = if (minutes <= 0) stringResource(R.string.sports_updated_now) else pluralStringResource(R.plurals.sports_updated_min_ago, minutes, minutes)
-    Line(text, GuideUi.sans(20, color = GuideUi.Warn), Modifier.testTag(SPORTS_UPDATED_TAG))
+    Line(text, GuideUi.sans(22, color = GuideUi.Warn), Modifier.testTag(SPORTS_UPDATED_TAG))
 }
 
 // ------------------------------------------------------------------ day chips

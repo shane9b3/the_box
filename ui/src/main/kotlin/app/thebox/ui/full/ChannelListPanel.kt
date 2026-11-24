@@ -133,7 +133,7 @@ private fun Header(state: ChannelListState) {
 private fun PreviousRow(prev: GuideChannel, focused: Boolean, alpha: Float) {
     RowFrame(focused, alpha) { text ->
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            Line(stringResource(R.string.player_list_previous), GuideUi.sans(20, FontWeight.SemiBold, if (focused) text else GuideUi.Accent))
+            Line(stringResource(R.string.player_list_previous), GuideUi.sans(22, FontWeight.SemiBold, if (focused) text else GuideUi.Accent))
             Line(prev.displayName, GuideUi.sans(26, FontWeight.SemiBold, text))
         }
     }

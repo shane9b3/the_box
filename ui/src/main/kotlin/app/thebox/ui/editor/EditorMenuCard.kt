@@ -111,7 +111,7 @@ private fun MenuLineView(line: MenuLine, label: String, reason: String?, focused
             if (!line.enabled && reason != null) {
                 // The reason stays readable on a disabled line: `.55` of the row colour, not of the dimmed label.
                 val base = if (focused) SettingsUi.Canvas else SettingsUi.Fg
-                Line(reason, GuideUi.sans(20, color = SettingsUi.secondary(base, focused, 0.55f)), Modifier.padding(top = 2.dp))
+                Line(reason, GuideUi.sans(22, color = SettingsUi.secondary(base, focused, 0.55f)), Modifier.padding(top = 2.dp))
             }
         }
         line.count?.let { Line(formatCount(it), GuideUi.mono(22, color = SettingsUi.secondary(text, focused, 0.55f)), Modifier.padding(start = 16.dp)) }
@@ -153,7 +153,7 @@ private fun PickerRow(row: EditorGroupRow, here: Boolean, focused: Boolean, inde
     Row(m.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.Center) {
             Line(row.name, SettingsUi.OptionLabel.copy(color = text))
-            if (row.hidden && !here) Line(texts.get(EditorText.PICKER_HIDDEN_DETAIL), GuideUi.sans(20, color = SettingsUi.secondary(text, focused, 0.55f)))
+            if (row.hidden && !here) Line(texts.get(EditorText.PICKER_HIDDEN_DETAIL), GuideUi.sans(22, color = SettingsUi.secondary(text, focused, 0.55f)))
         }
         Row(Modifier.padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (here) {

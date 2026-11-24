@@ -32,6 +32,8 @@ fun StatsOverlay(
     /** (WP-S4, storage locations §10, U-N4) Where this cycle saves: "NAS 3.4 MB/s", "this device (NAS offline)" (`PlayerText.rewindPlaceStat`). */
     rewindPlace: String? = null,
 ) {
+    // (2026-11-24, text sizes) A line is as tall as its 22 px text needs at the user's text size.
+    val lineH = PlayerUi.STATS_LINE_H * maxOf(1f, app.thebox.core.settings.UiTextScale.factor)
     Column(
         modifier
             .testTag(STATS_OVERLAY_TAG)
@@ -40,7 +42,7 @@ fun StatsOverlay(
             .padding(horizontal = 20.dp, vertical = 14.dp),
     ) {
         for (l in lines) {
-            Row(Modifier.height(PlayerUi.STATS_LINE_H.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(Modifier.height(lineH.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Line(stringResource(PlayerText.statLabelRes(l.label)), GuideUi.mono(22, color = GuideUi.Fg55), Modifier.width(LABEL_W.dp))
                 // U-S12 (code review 2026-10-16, B2): the audio line says "Always passthrough" and where Back to Auto is.
                 val value = if (audioOutputForced && l.label == app.thebox.core.full.StatLabel.AUDIO) {
@@ -50,7 +52,7 @@ fun StatsOverlay(
             }
         }
         // (M6 §13, U-N3) "Rewind: 18:20 saved of 30:00 · 1.1 GB" while the tuned channel is buffered; (WP-S4, U-N4) with its place.
-        rewind?.let { Line(if (rewindPlace != null) "$it · $rewindPlace" else it, GuideUi.mono(22), Modifier.height(PlayerUi.STATS_LINE_H.dp)) }
+        rewind?.let { Line(if (rewindPlace != null) "$it · $rewindPlace" else it, GuideUi.mono(22), Modifier.height(lineH.dp)) }
     }
 }
 

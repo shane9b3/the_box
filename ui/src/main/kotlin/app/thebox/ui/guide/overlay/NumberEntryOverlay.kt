@@ -5,7 +5,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -60,7 +62,7 @@ fun NumberEntryOverlay(state: Overlay.Number, modifier: Modifier = Modifier, now
     Column(
         modifier
             .testTag(NUMBER_ENTRY_TAG)
-            .size(320.dp, 160.dp)
+            .width(320.dp).heightIn(min = 160.dp)
             .background(DesignTokens.Colors.Canvas.copy(alpha = 0.92f), shape)
             .border(1.dp, DesignTokens.Colors.GlassBorder, shape)
             .padding(horizontal = 24.dp, vertical = 16.dp)
@@ -78,7 +80,7 @@ fun NumberEntryOverlay(state: Overlay.Number, modifier: Modifier = Modifier, now
                     c.toString(),
                     style = TextStyle(
                         fontFamily = BoxFonts.Mono,
-                        fontSize = 64.sp,
+                        fontSize = app.thebox.ui.theme.textSp(64),
                         fontWeight = FontWeight.Medium,
                         color = if (state.notFound) fg.copy(alpha = 0.5f) else fg,
                         textDecoration = if (i == cursor) TextDecoration.Underline else null,
@@ -94,7 +96,7 @@ fun NumberEntryOverlay(state: Overlay.Number, modifier: Modifier = Modifier, now
                 overflow = TextOverflow.Ellipsis,
                 style = TextStyle(
                     fontFamily = BoxFonts.Sans,
-                    fontSize = 19.sp,
+                    fontSize = app.thebox.ui.theme.textSp(24),
                     fontWeight = FontWeight.SemiBold,
                     color = if (state.notFound) DesignTokens.Colors.Live else Color.White.copy(alpha = 0.75f),
                 ),
@@ -105,7 +107,7 @@ fun NumberEntryOverlay(state: Overlay.Number, modifier: Modifier = Modifier, now
                 nowTitle,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                style = TextStyle(fontFamily = BoxFonts.Sans, fontSize = 15.sp, color = fg.copy(alpha = 0.6f)),
+                style = TextStyle(fontFamily = BoxFonts.Sans, fontSize = app.thebox.ui.theme.textSp(22), color = fg.copy(alpha = 0.6f)),
             )
         }
     }

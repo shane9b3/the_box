@@ -194,7 +194,7 @@ private sealed interface MenuTarget {
 private val Fg = DesignTokens.Colors.Fg
 private val Dim = Fg.copy(alpha = 0.6f)
 private val Body = BoxTextStyles.Body.copy(color = Fg)
-private val Small = BoxTextStyles.Body.copy(color = Dim, fontSize = 24.sp)
+private val Small = BoxTextStyles.Body.copy(color = Dim, fontSize = app.thebox.ui.theme.textSp(24))
 
 @Composable
 private fun Tabs() {
@@ -252,7 +252,7 @@ private fun SearchField(text: String, focus: FocusRequester, onFocus: (Boolean) 
 
 @Composable
 private fun RowTitle(text: String) {
-    BasicText(text, style = Small.copy(color = Dim, fontSize = 26.sp, letterSpacing = 1.5.sp))
+    BasicText(text, style = Small.copy(color = Dim, fontSize = app.thebox.ui.theme.textSp(26), letterSpacing = 1.5.sp))
 }
 
 @Composable
@@ -316,7 +316,7 @@ private fun ChannelCard(ch: GuideChannel, onClick: () -> Unit, onLongClick: (Foc
                 Spacer(Modifier.width(8.dp))
                 ch.number?.let { BasicText(it.toString(), style = Small.copy(color = color.copy(alpha = 0.7f))) }
             }
-            BasicText(ch.displayName, style = Body.copy(color = color, fontSize = 30.sp), maxLines = 1, overflow = TextOverflow.Ellipsis)
+            BasicText(ch.displayName, style = Body.copy(color = color, fontSize = app.thebox.ui.theme.textSp(30)), maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -327,9 +327,9 @@ private fun ProgrammeCard(hit: ProgrammeHit, reminder: Boolean, clock24: Boolean
         val color = cardText()
         Column(verticalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxSize()) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                BasicText(hit.info.title, style = Body.copy(color = color, fontSize = 30.sp), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-                if (hit.inArchive) BasicText("  ↺", style = Body.copy(color = color, fontSize = 28.sp))
-                if (reminder) BasicText("  ●", style = Body.copy(color = DesignTokens.Colors.Live, fontSize = 24.sp))
+                BasicText(hit.info.title, style = Body.copy(color = color, fontSize = app.thebox.ui.theme.textSp(30)), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                if (hit.inArchive) BasicText("  ↺", style = Body.copy(color = color, fontSize = app.thebox.ui.theme.textSp(28)))
+                if (reminder) BasicText("  ●", style = Body.copy(color = DesignTokens.Colors.Live, fontSize = app.thebox.ui.theme.textSp(24)))
             }
             BasicText(hit.channel.displayName, style = Small.copy(color = color.copy(alpha = 0.7f)), maxLines = 1, overflow = TextOverflow.Ellipsis)
             // The configuration's locale (observable: a locale change recomposes); lint NonObservableLocale.

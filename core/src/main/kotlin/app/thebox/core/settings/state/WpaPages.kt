@@ -23,6 +23,8 @@ import app.thebox.core.playback.VideoDecoderMode
 import app.thebox.core.playback.timeshift.TimeshiftConstants
 import app.thebox.core.settings.ChoiceOption
 import app.thebox.core.settings.ClockMode
+import app.thebox.core.settings.TextSize
+import app.thebox.core.settings.UiTextScale
 import app.thebox.core.settings.DataPrefs
 import app.thebox.core.settings.EffectTiming
 import app.thebox.core.settings.GuidePrefs
@@ -503,6 +505,15 @@ class WpaPages(
                 .map { (m, k) -> ChoiceOption(m.name, t(k)) },
             g.clock.name,
         )
+        out += choice(
+            InterfaceRows.TEXT_SIZE, t(SettingsText.IF_TEXT_SIZE),
+            listOf(TextSize.SMALL to SettingsText.TEXT_SIZE_SMALL, TextSize.DEFAULT to SettingsText.TEXT_SIZE_DEFAULT, TextSize.LARGE to SettingsText.TEXT_SIZE_LARGE, TextSize.LARGEST to SettingsText.TEXT_SIZE_LARGEST)
+                .map { (m, k) -> ChoiceOption(m.name, t(k)) },
+            g.textSize.name,
+        ).copy(description = t(SettingsText.IF_TEXT_SIZE_DESC))
+        if (UiTextScale.running != g.textSize) {
+            out += row(InterfaceRows.RESTART_NOW, t(SettingsText.PB_RESTART_NOW), RowKind.Action(), description = t(SettingsText.IF_RESTART_NOW_DESC))
+        }
         val still = GuidePrefsMapping.miniStill(g, env.deviceLowEnd)
         val miniOptions = listOf(ChoiceOption(VIDEO, t(SettingsText.MINI_VIDEO)), ChoiceOption(STILL, t(SettingsText.MINI_STILL)))
         out += choice(InterfaceRows.MINI_PLAYER, t(SettingsText.IF_MINI), miniOptions, if (still) STILL else VIDEO).let { r ->
@@ -769,6 +780,8 @@ class WpaPages(
             PlaybackRows.EXTERNAL_PLAYER -> choose?.let { c -> playback { it.copy(externalPlayer = c.takeIf { p -> p != NO_PLAYER }) } }
 
             InterfaceRows.CLOCK -> choose?.let { c -> enumOf<ClockMode>(c)?.let { m -> guide { it.copy(clock = m) } } }
+            InterfaceRows.TEXT_SIZE -> choose?.let { c -> enumOf<TextSize>(c)?.let { m -> guide { it.copy(textSize = m) } } }
+            InterfaceRows.RESTART_NOW -> if (intent is RowIntent.Run) env.restartNow()
             InterfaceRows.MINI_PLAYER -> choose?.let { c -> guide { it.copy(miniStill = c == STILL) } }
             InterfaceRows.PERFORMANCE -> choose?.let { c -> enumOf<PerformanceMode>(c)?.let { m -> guide { it.copy(performance = m) } } }
             InterfaceRows.SCROLL_DESCRIPTIONS -> on?.let { v -> guide { it.copy(scrollDescriptions = v) } }

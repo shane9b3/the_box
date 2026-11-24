@@ -110,16 +110,16 @@ object SettingsUi {
     val RowLabel: TextStyle get() = GuideUi.sans(28, FontWeight.Medium)
     val RowValue: TextStyle get() = GuideUi.sans(26)
     val RowValueMono: TextStyle get() = GuideUi.mono(26)
-    val RowDesc: TextStyle get() = GuideUi.sans(22)
+    val RowDesc: TextStyle get() = GuideUi.sans(24)
     /** U-S6: a mono line at the line size (the Test's details under its verdict). */
-    val RowDescMono: TextStyle get() = GuideUi.mono(22)
+    val RowDescMono: TextStyle get() = GuideUi.mono(24)
     val OptionLabel: TextStyle get() = GuideUi.sans(26)
-    val OptionDetail: TextStyle get() = GuideUi.sans(22)
+    val OptionDetail: TextStyle get() = GuideUi.sans(24)
     val Notice: TextStyle get() = GuideUi.sans(24, color = Fg70)
     val CardTitle: TextStyle get() = GuideUi.sans(36, FontWeight.SemiBold)
     val CardBody: TextStyle get() = GuideUi.sans(26, color = Fg80).copy(lineHeight = androidx.compose.ui.unit.TextUnit(1.45f, androidx.compose.ui.unit.TextUnitType.Em))
     val Button: TextStyle get() = GuideUi.sans(24, FontWeight.SemiBold)
-    val BadgeText: TextStyle get() = GuideUi.mono(18)
+    val BadgeText: TextStyle get() = GuideUi.mono(22)
 
     /**
      * Values in mono when they are numbers, times or hosts (§3.1 "Row"): digits-only, a clock time, or a host/URL.

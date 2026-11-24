@@ -118,7 +118,7 @@ object EditorUi {
 
     val RowName = GuideUi.sans(26, FontWeight.SemiBold)
     val RowValue = GuideUi.mono(22)
-    val Detail = GuideUi.sans(22)
+    val Detail = GuideUi.sans(24)
     val PaneTitle = GuideUi.sans(30, FontWeight.SemiBold)
     val PaneCounts = GuideUi.mono(22, color = SettingsUi.Fg55)
     val ChipText = GuideUi.sans(22)

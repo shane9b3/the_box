@@ -342,7 +342,9 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
             }
             if (x + ruleW > m.timelineLeft) canvas.fillRect(x, m.headerTop, x + ruleW, m.headerBottom, C.TICK_RULE)
             if (show && lx + tw > m.timelineLeft) canvas.drawText(text, 0, text.length, lx, baseline, GuideTextStyle.RULER, C.TEXT_TICK)
-            minLabelX = -Float.MAX_VALUE
+            // (2026-11-24, text sizes) A dropped label leaves the context label still in the way: at a larger text size
+            // it reaches past the next rule as well, so that label is pushed (or dropped) too.
+            if (show) minLabelX = -Float.MAX_VALUE
             t = next30(l, t)
         }
         canvas.restoreToCount(sv)

@@ -72,6 +72,8 @@ class TheBoxApplication : Application(), Configuration.Provider {
             .build()
 
     override fun onCreate() {
+        // (Owner request 2026-11-24) The stored "Text size", before injection builds anything that measures text.
+        app.thebox.settings.TextSizeBoot.read(this)
         super.onCreate()
         // M5 commit 0: ACRA's sender process (`:acra`) only hands stored crash reports to the local file sender.
         if (CrashConfig.isSenderProcess()) {
@@ -84,6 +86,7 @@ class TheBoxApplication : Application(), Configuration.Provider {
         // once), the log ring before anything logs (it wraps the sink above), crash reports local only, then the update
         // check's schedule.
         settingsStore.load()
+        app.thebox.settings.TextSizeBoot.mirror(this, settingsStore, appScope)
         logRing.install()
         CrashConfig.installLocalOnly(this)
         updates.scheduleCheck()

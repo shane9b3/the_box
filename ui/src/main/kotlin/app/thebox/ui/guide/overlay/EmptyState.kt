@@ -57,7 +57,7 @@ fun EmptyState(empty: EmptyKind?, modifier: Modifier = Modifier, debugHint: Bool
             Line(stringResource(title), GuideUi.sans(36, FontWeight.SemiBold))
             Line(stringResource(step), GuideUi.sans(26, color = GuideUi.Fg70))
             if (debugHint && kind == EmptyKind.NO_PLAYLIST) {
-                Line(stringResource(R.string.guide_empty_no_playlist_debug), GuideUi.mono(20, color = GuideUi.Fg50))
+                Line(stringResource(R.string.guide_empty_no_playlist_debug), GuideUi.mono(22, color = GuideUi.Fg50))
             }
         }
     }

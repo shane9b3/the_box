@@ -10,7 +10,7 @@ import androidx.tv.material3.darkColorScheme
 /** Converts a [DesignTokens.TypeToken] into a Compose [TextStyle] using the bundled fonts. */
 fun DesignTokens.TypeToken.toTextStyle(): TextStyle = TextStyle(
     fontFamily = if (mono) BoxFonts.Mono else BoxFonts.Sans,
-    fontSize = size,
+    fontSize = textSp(size.value),
     fontWeight = weight,
     lineHeight = lineHeight,
     letterSpacing = letterSpacing,

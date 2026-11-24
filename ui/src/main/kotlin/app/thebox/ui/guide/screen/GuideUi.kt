@@ -56,7 +56,7 @@ object GuideUi {
     val FocusRing = 3.dp
 
     fun sans(size: Int, weight: FontWeight = FontWeight.Normal, color: Color = Fg, letterSpacingEm: Float = 0f) = TextStyle(
-        fontFamily = BoxFonts.Sans, fontSize = size.sp, fontWeight = weight, color = color,
+        fontFamily = BoxFonts.Sans, fontSize = app.thebox.ui.theme.textSp(size), fontWeight = weight, color = color,
         letterSpacing = if (letterSpacingEm == 0f) TextStyle.Default.letterSpacing else letterSpacingEm.em,
     )
 
@@ -70,7 +70,7 @@ object GuideUi {
     const val FOCUSED_SECONDARY_ALPHA = 0.85f
 
     fun mono(size: Int, weight: FontWeight = FontWeight.Normal, color: Color = Fg) = TextStyle(
-        fontFamily = BoxFonts.Mono, fontSize = size.sp, fontWeight = weight, color = color, fontFeatureSettings = "tnum",
+        fontFamily = BoxFonts.Mono, fontSize = app.thebox.ui.theme.textSp(size), fontWeight = weight, color = color, fontFeatureSettings = "tnum",
     )
 }
 

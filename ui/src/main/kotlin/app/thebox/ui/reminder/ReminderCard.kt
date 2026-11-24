@@ -84,7 +84,7 @@ fun ReminderCard(state: ReminderCardState, modifier: Modifier = Modifier, clock:
             CardButton(R.string.guide_reminder_switch, focused = !guarded && state.focused == 0, guarded = guarded, tag = REMINDER_SWITCH_TAG)
             CardButton(R.string.guide_reminder_dismiss, focused = !guarded && state.focused == 1, guarded = guarded, tag = REMINDER_DISMISS_TAG)
             Spacer(Modifier.weight(1f))
-            Line(stringResource(R.string.guide_reminder_countdown, state.secondsLeft.coerceAtLeast(0)), GuideUi.mono(20, color = GuideUi.Fg50))
+            Line(stringResource(R.string.guide_reminder_countdown, state.secondsLeft.coerceAtLeast(0)), GuideUi.mono(22, color = GuideUi.Fg50))
         }
     }
 }

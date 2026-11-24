@@ -104,7 +104,7 @@ private fun Pad(state: PinPromptState, nowMs: () -> Long) {
             }
             MessageLine(state, nowMs)
             KeyGrid(state)
-            Line(stringResource(R.string.pin_forgot), GuideUi.sans(22, color = GuideUi.Fg55))
+            Line(stringResource(R.string.pin_forgot), GuideUi.sans(24, color = GuideUi.Fg55))
         }
     }
 }

@@ -71,7 +71,9 @@ fun InfoBar(
             }
             .background(PlayerUi.BarFill, shape)
             .border(1.dp, PlayerUi.Border09, shape)
-            .padding(horizontal = PlayerUi.BAR_PAD_H.dp, vertical = PlayerUi.BAR_PAD_V.dp),
+            // (2026-11-24, text sizes) The four lines need about 166 px at the default size and 196 at Largest: the bar keeps
+            // its 220 px and gives up vertical padding (the logo card keeps its height).
+            .padding(horizontal = PlayerUi.BAR_PAD_H.dp, vertical = if (app.thebox.core.settings.UiTextScale.factor > 1f) 12.dp else PlayerUi.BAR_PAD_V.dp),
         horizontalArrangement = Arrangement.spacedBy(PlayerUi.BAR_GAP.dp),
     ) {
         BarLogo(state.channel)
@@ -132,7 +134,7 @@ internal fun BarHeader(channel: GuideChannel?, pill: PillState?, glyphs: String?
             }
             pill?.let { PlayerPill(it) }
         }
-        glyphs?.let { Line(it, GuideUi.mono(20, color = GuideUi.Fg70), Modifier.testTag(BAR_GLYPHS_TAG)) }
+        glyphs?.let { Line(it, GuideUi.mono(22, color = GuideUi.Fg70), Modifier.testTag(BAR_GLYPHS_TAG)) }
     }
 }
 
@@ -143,7 +145,7 @@ private fun TimeRow(p: ProgrammeInfo, nowMin: Int, channel: GuideChannel?, clock
         // 2 draw ops (track + fill), redrawn every 15 s (M3 mini cadence) without recomposition (§4.1).
         val tick = rememberTicker(PROGRESS_TICK_MS)
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            val style = GuideUi.mono(20, color = GuideUi.Fg70)
+            val style = GuideUi.mono(22, color = GuideUi.Fg70)
             Line(clockOfMin(p.startMin, clock24), style)
             Box(
                 Modifier
@@ -169,7 +171,9 @@ private fun TimeRow(p: ProgrammeInfo, nowMin: Int, channel: GuideChannel?, clock
 
 private fun inArchive(p: ProgrammeInfo, nowMin: Int, channel: GuideChannel?): Boolean {
     val days = channel?.archiveDays ?: 0
-    return days > 0 && p.startMin >= nowMin - days * 1_440
+    // (Review 2026-11-24, Low 9) The raw start, as the player machine decides it (`PlayerStateMachineImpl`): the
+    // panel keeps its archive by real time, and a guide time shift moved this line's cutoff away from the real one.
+    return days > 0 && p.rawStartMin >= nowMin - days * 1_440
 }
 
 /** "↺ 7d · 1080p50 · 5.1 · CC · HDR" (§3.2.4); null when nothing is known. */

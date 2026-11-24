@@ -158,7 +158,7 @@ internal fun TimedPillLabel(p: PillState, @androidx.annotation.StringRes res: In
     val parts = remember(template) { template.split('\u0000').let { (it.getOrNull(0) ?: "") to (it.getOrNull(1) ?: "") } }
     val paint = remember(density) {
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = PILL_TEXT * density
+            textSize = PILL_TEXT * density * app.thebox.core.settings.UiTextScale.factor
             color = GuideUi.Fg.toArgb()
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             letterSpacing = 0.04f
@@ -176,7 +176,7 @@ internal fun TimedPillLabel(p: PillState, @androidx.annotation.StringRes res: In
     }
     Spacer(
         Modifier
-            .size(width.dp, (PILL_TEXT * 1.25f).dp)
+            .size(width.dp, (PILL_TEXT * 1.25f * app.thebox.core.settings.UiTextScale.factor).dp)
             .drawBehind {
                 val now = tick.longValue
                 val ms = p.behindMs + if (p.behindGrows) (now - p.atMs).coerceAtLeast(0) else 0L

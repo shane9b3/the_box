@@ -562,4 +562,18 @@ class GuideRendererTest {
         f.contextLabel = "TONIGHT"
         assertTrue(texts(draw(f)).any { it.style == GuideTextStyle.RULER && it.text == "19:00" })
     }
+
+    /** 2026-11-24 (text sizes): a context label that reaches past the second rule keeps that label clear of it too. */
+    @Test
+    fun aContextLabelPastTheSecondRulePushesThatLabelAsWell() {
+        val f = frame(List(6) { simpleRow() })
+        f.contextLabel = "A VERY VERY LONG CONTEXT ROW" // 28 chars × 11 = 308 px: ends past the 19:30 label's place
+        val ops = draw(f)
+        val ctx = texts(ops).single { it.style == GuideTextStyle.RULER_CONTEXT }
+        val ctxEnd = ctx.x + ctx.text.length * GuideTextStyle.RULER_CONTEXT.sizePx * 0.5f
+        val ticks = texts(ops).filter { it.style == GuideTextStyle.RULER }.sortedBy { it.x }
+        assertTrue(ctxEnd > m.xOf(at(19, 30), h19, 0f) + 12f, "the label reaches past the second rule's label place")
+        assertTrue(ticks.isNotEmpty())
+        assertTrue(ticks.all { it.x >= ctxEnd }, "no tick label under the context label")
+    }
 }

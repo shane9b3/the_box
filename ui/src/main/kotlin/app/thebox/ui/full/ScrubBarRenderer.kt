@@ -65,9 +65,9 @@ class ScrubBarRenderer(private val scale: Float) {
     private val rect = RectF()
     private val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.FILL }
     private val stroke = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = PlayerUi.RING_W * scale }
-    private val small = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 15f * scale; color = FG70 }
-    private val big = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 18f * scale; color = FG; textAlign = Paint.Align.CENTER }
-    private val bubbleText = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 15f * scale; color = CANVAS; textAlign = Paint.Align.CENTER }
+    private val small = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 22f * scale; color = FG70 }
+    private val big = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 24f * scale; color = FG; textAlign = Paint.Align.CENTER }
+    private val bubbleText = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 22f * scale; color = CANVAS; textAlign = Paint.Align.CENTER }
 
     private val left = CharArray(8)
     private val right = CharArray(8)
@@ -99,7 +99,7 @@ class ScrubBarRenderer(private val scale: Float) {
         windowClock.typeface = typeface
         clockW = windowClock.measureText(CLOCK_SAMPLE)
         windowCentre.typeface = typeface
-        monoAdvance = small.measureText("0").takeIf { it > 0f } ?: (9f * scale)
+        monoAdvance = small.measureText("0").takeIf { it > 0f } ?: (13f * scale)
     }
 
     fun draw(canvas: Canvas, state: ScrubState, nowMs: Long, widthPx: Float, heightPx: Float) {
@@ -174,7 +174,7 @@ class ScrubBarRenderer(private val scale: Float) {
             fill.color = ACCENT
             rect.set(bx - half, 0f, bx + half, PlayerUi.BUBBLE_H * s)
             canvas.drawRoundRect(rect, 8f * s, 8f * s, fill)
-            canvas.drawText(bubble, 0, n, bx, 19f * s, bubbleText)
+            canvas.drawText(bubble, 0, n, bx, 23.5f * s, bubbleText)
         }
         // 11–13: labels under the track.
         val labelY = trackB + 26f * s

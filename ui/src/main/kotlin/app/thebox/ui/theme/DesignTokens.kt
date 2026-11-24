@@ -83,6 +83,6 @@ object DesignTokens {
         val CellTitle = TypeToken(26.sp, FontWeight.SemiBold)
 
         /** type.cellTime 20 mono. */
-        val CellTime = TypeToken(20.sp, mono = true)
+        val CellTime = TypeToken(22.sp, mono = true)
     }
 }

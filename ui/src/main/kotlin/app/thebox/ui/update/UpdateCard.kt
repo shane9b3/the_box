@@ -102,4 +102,4 @@ fun UpdateCard(state: UpdateCardState, modifier: Modifier = Modifier) {
 }
 
 @Composable
-private fun Status(text: String) = Line(text, GuideUi.mono(20, color = GuideUi.Fg50))
+private fun Status(text: String) = Line(text, GuideUi.mono(22, color = GuideUi.Fg50))

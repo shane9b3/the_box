@@ -19,7 +19,7 @@
     <string name="weather_fail_answer">The weather service did not answer. Try again in a moment.</string>
     <string name="weather_fail_radar">The radar service did not answer. Try again in a moment.</string>
 
-    <string name="weather_tile_precip">Precipitation</string>
+    <string name="weather_tile_precip">Rain / snow</string>
     <string name="weather_tile_precip_expected">%1$s expected</string>
     <string name="weather_tile_precip_none">None expected</string>
     <string name="weather_tile_wind">Wind</string>

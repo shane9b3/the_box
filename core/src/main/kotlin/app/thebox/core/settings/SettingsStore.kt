@@ -106,6 +106,23 @@ object Domains {
 
 enum class ClockMode { SYSTEM, H12, H24 }
 
+/**
+ * (Owner request 2026-11-24, docs/decisions/2026-11-24-text-sizes.md) The user's text size: [factor] multiplies every
+ * text size of the app (Compose text through the design density's font scale, the guide grid through its paints). The
+ * score bug has its own Size row and does not follow it.
+ */
+enum class TextSize(val factor: Float) { SMALL(0.9f), DEFAULT(1f), LARGE(1.1f), LARGEST(1.2f) }
+
+/**
+ * The text size this process runs with. Set once, before the first frame (the activity reads the stored value through
+ * a small boot mirror), and never changed afterwards: the guide's measured widths are cached per process, so the row
+ * takes effect at the next start.
+ */
+object UiTextScale {
+    @Volatile var running: TextSize = TextSize.DEFAULT
+    val factor: Float get() = running.factor
+}
+
 /** Stored form of the guide/interface rows; PersistedGuideSettings maps it onto GuideSettings (SYSTEM → DateFormat.is24HourFormat). */
 @kotlinx.serialization.Serializable
 data class GuidePrefs(
@@ -135,6 +152,8 @@ data class GuidePrefs(
      * up slowly; Off clips it with an ellipsis (docs/decisions/2026-11-09-guide-panel-description.md).
      */
     val scrollDescriptions: Boolean = true,
+    /** (Owner request 2026-11-24) "Text size"; read at the app's start ([UiTextScale]). */
+    val textSize: TextSize = TextSize.DEFAULT,
 )
 
 enum class SubtitleMode { OFF, ON, FORCED_ONLY }

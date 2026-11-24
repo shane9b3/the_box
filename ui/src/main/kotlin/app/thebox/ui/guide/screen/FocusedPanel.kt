@@ -93,7 +93,7 @@ fun FocusedPanel(panel: PanelState?, modifier: Modifier = Modifier, scrollDescri
                         Modifier.testTag(FOCUSED_PANEL_NEW_TAG)
                             .background(DesignTokens.Colors.Accent, RoundedCornerShape(12.dp))
                             .padding(horizontal = 10.dp, vertical = 3.dp),
-                    ) { Line(stringResource(R.string.guide_new_tag), GuideUi.sans(18, FontWeight.Bold, DesignTokens.Colors.Canvas, 0.06f)) }
+                    ) { Line(stringResource(R.string.guide_new_tag), GuideUi.sans(22, FontWeight.Bold, DesignTokens.Colors.Canvas, 0.06f)) }
                 }
                 // (Owner request 2026-11-19) The LIVE tag, in the live colour.
                 if (panel.isLive) {
@@ -101,7 +101,7 @@ fun FocusedPanel(panel: PanelState?, modifier: Modifier = Modifier, scrollDescri
                         Modifier.testTag(FOCUSED_PANEL_LIVE_TAG)
                             .background(DesignTokens.Colors.Live, RoundedCornerShape(12.dp))
                             .padding(horizontal = 10.dp, vertical = 3.dp),
-                    ) { Line(stringResource(R.string.guide_live_tag), GuideUi.sans(18, FontWeight.Bold, DesignTokens.Colors.Canvas, 0.06f)) }
+                    ) { Line(stringResource(R.string.guide_live_tag), GuideUi.sans(22, FontWeight.Bold, DesignTokens.Colors.Canvas, 0.06f)) }
                 }
             }
             panel.description?.let { desc ->
@@ -261,7 +261,7 @@ private fun MetaRow(panel: PanelState) {
                 Modifier
                     .background(DesignTokens.Colors.OnNowFill, RoundedCornerShape(DesignTokens.Radii.Pill))
                     .padding(horizontal = 10.dp, vertical = 3.dp),
-            ) { Line(stringResource(R.string.guide_on_now), GuideUi.sans(20, FontWeight.SemiBold, DesignTokens.Colors.AccentText, 0.06f)) }
+            ) { Line(stringResource(R.string.guide_on_now), GuideUi.sans(22, FontWeight.SemiBold, DesignTokens.Colors.AccentText, 0.06f)) }
         }
     }
 }

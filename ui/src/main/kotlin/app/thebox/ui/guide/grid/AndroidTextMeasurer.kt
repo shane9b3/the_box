@@ -7,6 +7,7 @@ import androidx.core.content.res.ResourcesCompat
 import app.thebox.core.guide.GuideTextMeasurer
 import app.thebox.core.guide.GuideTextStyle
 import app.thebox.core.guide.render.RescalableTextMeasurer
+import app.thebox.core.settings.UiTextScale
 import app.thebox.ui.R
 
 /**
@@ -60,7 +61,7 @@ internal object GuidePaints {
             val st = STYLES[i]
             Paint(Paint.ANTI_ALIAS_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
                 typeface = faces.of(st)
-                textSize = st.sizePx * scale
+                textSize = st.sizePx * scale * UiTextScale.factor
                 letterSpacing = st.letterSpacingEm
                 fontFeatureSettings = "tnum"
             }
@@ -68,7 +69,7 @@ internal object GuidePaints {
     }
 
     fun applyScale(paints: Array<Paint>, scale: Float) {
-        for (i in paints.indices) paints[i].textSize = STYLES[i].sizePx * scale
+        for (i in paints.indices) paints[i].textSize = STYLES[i].sizePx * scale * UiTextScale.factor
     }
 
     /** The bundled faces (`ui/src/main/res/font`, `BoxFonts`), loaded once per process. */

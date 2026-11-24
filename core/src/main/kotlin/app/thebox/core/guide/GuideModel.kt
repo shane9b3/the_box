@@ -53,7 +53,7 @@ object GuideGeometry {
     /** Reminder dot leading a future title, and its gap to the title. */
     const val REMINDER_DOT = 10f; const val REMINDER_GAP = 7f
     /** (Decision 2026-11-18) The NEW corner tag: height, side padding, and the room a cell must leave beside it. */
-    const val NEW_TAG_H = 26f; const val NEW_TAG_PAD_X = 10f; const val NEW_TAG_MIN_REST = 24f; const val NEW_TAG_GAP = 4f
+    const val NEW_TAG_H = 30f; const val NEW_TAG_PAD_X = 10f; const val NEW_TAG_MIN_REST = 24f; const val NEW_TAG_GAP = 4f
     // Label column marks
     /** ↺ in the label column (decision 2026-10-19: 12 → 20; 2026-11-09: 24). Also the size the ↺ mask is rasterised for. */
     const val LABEL_GLYPH = 24f
@@ -122,7 +122,8 @@ object GuideColors {
 /** Single-line styles drawn by the renderer. Sizes in design px; weights as in docs/01-design-reference.md. */
 enum class GuideTextStyle(val sizePx: Float, val weight: Int, val mono: Boolean, val letterSpacingEm: Float = 0f) {
     // Decision 2026-11-09 (bigger grid, ≈ 1.2×): title 30 → 36, time 20 → 24, ruler 20 → 24, TONIGHT 18 → 22,
-    // number 20 → 24, name 26 → 31, no-info 22 → 26. Floor 18 design px.
+    // number 20 → 24, name 26 → 31, no-info 22 → 26. Floor 22 design px (11 sp on a 1080p TV, the TV type
+    // scale's smallest label; decision 2026-11-24). The user's "Text size" multiplies these in the paints.
     CELL_TITLE(36f, 600, false),
     CELL_TIME(24f, 400, true),
     RULER(24f, 400, true),
@@ -132,7 +133,7 @@ enum class GuideTextStyle(val sizePx: Float, val weight: Int, val mono: Boolean,
     NO_INFO(26f, 500, false),
     BUBBLE(64f, 500, true),
     /** (Decision 2026-11-18) The NEW corner tag of a programme cell. Appended: adapters index styles by ordinal. */
-    NEW_TAG(18f, 700, false, 0.06f),
+    NEW_TAG(22f, 700, false, 0.06f),
 }
 
 /** Cell kinds in a [GuideWindowData]. */

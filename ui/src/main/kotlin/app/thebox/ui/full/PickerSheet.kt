@@ -95,7 +95,7 @@ private fun DividerRow(text: String) {
         Modifier.testTag(PICKER_DIVIDER_TAG).fillMaxWidth().height(DIVIDER_H.dp).padding(horizontal = 14.dp),
         verticalArrangement = Arrangement.Center,
     ) {
-        Line(text, GuideUi.sans(20, FontWeight.SemiBold, GuideUi.Fg50))
+        Line(text, GuideUi.sans(22, FontWeight.SemiBold, GuideUi.Fg50))
         Box(Modifier.padding(top = 4.dp).fillMaxWidth().height(1.dp).background(PlayerUi.Border09))
     }
 }
@@ -121,7 +121,7 @@ private fun PickerRow(text: String, note: String?, checked: Boolean, focused: Bo
         Box(Modifier.width(24.dp)) { if (checked) Line("✓", GuideUi.sans(26, FontWeight.SemiBold, if (focused) fg else GuideUi.Accent)) }
         Column(Modifier.weight(1f)) {
             Line(text, GuideUi.sans(26, FontWeight.Medium, fg))
-            note?.let { Line(it, GuideUi.sans(20, color = fg.copy(alpha = 0.7f))) }
+            note?.let { Line(it, GuideUi.sans(22, color = fg.copy(alpha = 0.7f))) }
         }
     }
 }

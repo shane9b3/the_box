@@ -52,7 +52,8 @@ object PlayerUi {
      */
     const val SCRUB_NODE_T = 916f
     const val SCRUB_NODE_H = 80f
-    const val BUBBLE_H = 26f
+    /** 2026-11-24: 26 → 31 for the 22 px bubble text (the TV type scale's smallest label). */
+    const val BUBBLE_H = 31f
 
     // ---- channel list
     const val LIST_L = 48f

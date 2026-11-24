@@ -111,7 +111,8 @@ internal fun TextButton(
     // a zoom button at its limit, must not drop the focus.
     FocusBox(requester, tag, up = up, onClick = { if (enabled) onClick() }) { focused ->
         var m = Modifier.height(56.dp)
-        if (width != null) m = m.width(width.dp)
+        // (2026-11-24, text sizes) A fixed width was measured for the default size: it grows with a larger text size.
+        if (width != null) m = m.width((width * maxOf(1f, app.thebox.core.settings.UiTextScale.factor)).dp)
         if (description != null) m = m.semantics { contentDescription = description }
         m = if (focused) m.background(GuideUi.Fg, shape).border(GuideUi.FocusRing, GuideUi.Accent, shape)
         else m.background(GuideUi.White10, shape).border(1.dp, GuideUi.White16, shape)

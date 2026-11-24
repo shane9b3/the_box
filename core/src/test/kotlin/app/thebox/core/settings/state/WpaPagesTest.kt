@@ -130,6 +130,21 @@ class WpaPagesTest {
     // ---------------------------------------------------------------- scroll long descriptions (owner request 2026-11-09)
 
     @Test
+    fun textSizeWritesThePrefAndOffersARestartWhileItDiffersFromTheRunningSize() = runTest {
+        val route = SettingsRoute.Section(SectionId.INTERFACE)
+        val r = row(SectionId.INTERFACE, InterfaceRows.TEXT_SIZE)
+        assertEquals(EffectTiming.RESTART, r.effect)
+        assertEquals("TEXT_SIZE_DEFAULT", r.value)
+        assertEquals(4, (r.kind as RowKind.Choice).options.size)
+        assertNull(page(SectionId.INTERFACE).rows.firstOrNull { it.id == InterfaceRows.RESTART_NOW }, "nothing to restart for")
+        assertTrue(pages.onIntent(route, RowIntent.Choose(InterfaceRows.TEXT_SIZE, app.thebox.core.settings.TextSize.LARGEST.name), PageContext(advanced = false, nowMs = 0)))
+        assertEquals(app.thebox.core.settings.TextSize.LARGEST, store.flow(GuideDomain).value.textSize)
+        assertNotNull(page(SectionId.INTERFACE).rows.firstOrNull { it.id == InterfaceRows.RESTART_NOW }, "the stored size is not the running one")
+        assertEquals(1.2f, app.thebox.core.settings.TextSize.LARGEST.factor)
+        assertEquals(0.9f, app.thebox.core.settings.TextSize.SMALL.factor)
+    }
+
+    @Test
     fun scrollDescriptionsIsASimpleToggleOnByDefaultThatWritesThePref() = runTest {
         val r = row(SectionId.INTERFACE, InterfaceRows.SCROLL_DESCRIPTIONS, advanced = false)
         assertEquals(Visibility.SIMPLE, r.visibility)

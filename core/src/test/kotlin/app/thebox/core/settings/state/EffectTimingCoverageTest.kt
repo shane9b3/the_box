@@ -24,6 +24,8 @@ class EffectTimingCoverageTest {
         val store = FakeSettingsStore()
         store.update(NetworkDomain) { it.copy(dns = DnsChoice.CUSTOM) }
         store.update(DataDomain) { it.copy(epgDailyAtHour = 2) }
+        // Not the size this process runs with: the Interface page shows its "Restart now" row.
+        store.update(GuideDomain) { it.copy(textSize = app.thebox.core.settings.TextSize.LARGE) }
         val env = FakePageEnv(running = false)
         val pages = WpaPages(store, SettingsTexts.KEYS, env)
         val built = WpaPages.SECTIONS.flatMap { pages.build(SettingsRoute.Section(it), advanced = true).rows } +
@@ -39,7 +41,7 @@ class EffectTimingCoverageTest {
         val ids = built.map { it.id }.toSet()
         val wpA = SettingsTree.all.filter { it.owner == "A" }
         for (s in wpA) assertTrue(s.id in ids, "spec ${s.id.key} is never built")
-        assertEquals(listOf(PlaybackRows.FFMPEG), wpA.filter { it.effect == EffectTiming.RESTART }.map { it.id })
+        assertEquals(listOf(PlaybackRows.FFMPEG, app.thebox.core.settings.tree.InterfaceRows.TEXT_SIZE), wpA.filter { it.effect == EffectTiming.RESTART }.map { it.id })
         assertEquals(EffectTiming.REPREPARE, SettingsTree.spec(PlaybackRows.AUDIO_OUTPUT)?.effect, "F19 lead ruling")
         assertTrue(ChannelOptionsRows.rows.all { it.visibility == Visibility.SIMPLE })
     }

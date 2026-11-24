@@ -197,7 +197,7 @@ private fun PlaceLabels(map: BaseMap, view: RadarMath.View, city: WeatherCity) {
     }
     labels.forEach { (name, x, y) ->
         Box(Modifier.offset((x - 3).dp, (y - 3).dp).size(6.dp).background(GuideUi.Fg55, CircleShape))
-        Line(name, GuideUi.sans(20, FontWeight.Medium, GuideUi.Fg60), Modifier.offset((x + 10).dp, (y - 14).dp))
+        Line(name, GuideUi.sans(22, FontWeight.Medium, GuideUi.Fg60), Modifier.offset((x + 10).dp, (y - 14).dp))
     }
 }
 
@@ -250,7 +250,7 @@ internal fun RadarControls(
                 R.string.weather_radar_credit,
                 stringResource(if (frames.source == RadarSource.ENV_CANADA) R.string.weather_radar_ec else R.string.weather_radar_rv),
             ),
-            GuideUi.sans(18, color = GuideUi.Fg55), Modifier.align(Alignment.End).padding(bottom = 8.dp),
+            GuideUi.sans(22, color = GuideUi.Fg55), Modifier.align(Alignment.End).padding(bottom = 8.dp),
         )
         Row(
             Modifier.fillMaxWidth().background(Color.Black.copy(alpha = 0.62f), RoundedCornerShape(18.dp)).padding(horizontal = 18.dp, vertical = 14.dp),
@@ -268,11 +268,11 @@ internal fun RadarControls(
             TextButton("▶", forward, RADAR_FORWARD_TAG, up = up, width = 64, description = stringResource(R.string.weather_radar_next)) {
                 state.playing = false; state.frame = (index + 1) % n
             }
-            Column(Modifier.width(200.dp)) {
+            Column(Modifier.width((200 * maxOf(1f, app.thebox.core.settings.UiTextScale.factor)).dp)) {
                 Line(WeatherText.clock(frame.timeSec, city.zone, clock24), GuideUi.mono(30, FontWeight.Medium), Modifier.testTag(RADAR_TIME_TAG))
                 Line(
                     if (index == n - 1) stringResource(R.string.weather_radar_latest) else WeatherText.ago(frames.frames.last().timeSec - frame.timeSec),
-                    GuideUi.sans(20, color = GuideUi.Fg60),
+                    GuideUi.sans(22, color = GuideUi.Fg60),
                 )
             }
             Row(Modifier.weight(1f).height(28.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {

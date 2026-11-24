@@ -208,6 +208,13 @@
     <string name="settings_pb_external">External player</string>
     <string name="settings_pb_external_none_installed">No video player app is installed. Install one from the app store first.</string>
     <string name="settings_if_clock">Clock</string>
+    <string name="settings_if_text_size">Text size</string>
+    <string name="settings_if_text_size_desc">Applies after a restart. The score bug has its own size.</string>
+    <string name="settings_if_restart_now_desc">Restarts The Box so the new text size applies</string>
+    <string name="settings_text_size_small">Smaller</string>
+    <string name="settings_text_size_default">Default</string>
+    <string name="settings_text_size_large">Larger</string>
+    <string name="settings_text_size_largest">Largest</string>
     <string name="settings_clock_system">System</string>
     <string name="settings_clock_12">12-hour</string>
     <string name="settings_clock_24">24-hour</string>

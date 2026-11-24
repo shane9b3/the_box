@@ -38,12 +38,14 @@ private const val SHEET_H = 176f
 @Composable
 fun ProgrammeSheet(state: GuideUiState, anchor: Rect?, modifier: Modifier = Modifier) {
     val o = state.overlay as? Overlay.Sheet ?: return
-    val at = anchoredOrigin(anchor, SHEET_W, SHEET_H)
+    // (2026-11-24, text sizes) The two buttons set the width: the sheet grows with a larger text size.
+    val grow = maxOf(1f, app.thebox.core.settings.UiTextScale.factor)
+    val at = anchoredOrigin(anchor, SHEET_W * grow, SHEET_H * grow)
     val shape = RoundedCornerShape(DesignTokens.Radii.Panel)
     Column(
         modifier
             .offset(at.x.dp, at.y.dp)
-            .width(SHEET_W.dp)
+            .width((SHEET_W * grow).dp)
             .testTag(PROGRAMME_SHEET_TAG)
             .background(GuideUi.OverlayFill, shape)
             .border(1.dp, GuideUi.OverlayBorder, shape)

@@ -115,14 +115,14 @@ private fun androidx.compose.foundation.layout.ColumnScope.CityList(
     }
     Line(stringResource(R.string.weather_cities), GuideUi.sans(40, FontWeight.SemiBold))
     Spacer(Modifier.height(8.dp))
-    Line(stringResource(R.string.weather_cities_hint), GuideUi.sans(22, color = GuideUi.Fg60), maxLines = 2)
+    Line(stringResource(R.string.weather_cities_hint), GuideUi.sans(24, color = GuideUi.Fg60), maxLines = 2)
     Spacer(Modifier.height(24.dp))
     Column(Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         prefs.cities.forEach { c ->
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 PanelRow(rows.getValue(c.id), weatherCityRowTag(c.id), Modifier.weight(1f), onClick = { onPick(c.id) }) { color ->
                     Line(c.label, GuideUi.sans(26, FontWeight.Medium, color), Modifier.weight(1f))
-                    if (c.id == defaultId) Line(stringResource(R.string.weather_default), GuideUi.sans(20, FontWeight.SemiBold, color.copy(alpha = 0.7f)))
+                    if (c.id == defaultId) Line(stringResource(R.string.weather_default), GuideUi.sans(22, FontWeight.SemiBold, color.copy(alpha = 0.7f)))
                 }
                 if (c.id != defaultId) {
                     TextButton(stringResource(R.string.weather_set_default), remember(c.id) { FocusRequester() }, weatherCityDefaultTag(c.id)) {
@@ -202,9 +202,9 @@ private fun androidx.compose.foundation.layout.ColumnScope.CitySearch(ui: Weathe
                 Column(Modifier.weight(1f)) {
                     Line(c.name, GuideUi.sans(26, FontWeight.Medium, if (has) color.copy(alpha = 0.4f) else color))
                     val where = listOfNotNull(c.region, c.country).filter { it.isNotBlank() }.joinToString(", ")
-                    if (where.isNotEmpty()) Line(where, GuideUi.sans(19, color = color.copy(alpha = if (has) 0.35f else 0.65f)))
+                    if (where.isNotEmpty()) Line(where, GuideUi.sans(22, color = color.copy(alpha = if (has) 0.35f else 0.65f)))
                 }
-                if (has) Line(stringResource(R.string.weather_added), GuideUi.sans(20, color = color.copy(alpha = 0.5f)))
+                if (has) Line(stringResource(R.string.weather_added), GuideUi.sans(22, color = color.copy(alpha = 0.5f)))
             }
         }
     }

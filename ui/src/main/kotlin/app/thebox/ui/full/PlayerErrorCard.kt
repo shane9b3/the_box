@@ -72,7 +72,7 @@ fun PlayerErrorCard(state: ErrorCardState, modifier: Modifier = Modifier, archiv
         } else {
             val e = state.error
             Line(stringResource(ErrorText.headline(e.code)), GuideUi.sans(36, FontWeight.SemiBold), maxLines = 2)
-            Line(ErrorText.detailLine(res, e.code, e.detail), GuideUi.mono(20, color = GuideUi.Fg55), maxLines = 2)
+            Line(ErrorText.detailLine(res, e.code, e.detail), GuideUi.mono(22, color = GuideUi.Fg55), maxLines = 2)
             e.retry?.let { retry ->
                 val shownAt = remember(retry) { System.currentTimeMillis() }
                 var elapsed by remember(retry) { mutableLongStateOf(0L) }

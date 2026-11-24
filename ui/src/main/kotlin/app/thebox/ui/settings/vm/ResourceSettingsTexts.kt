@@ -188,6 +188,13 @@ class ResourceSettingsTexts(private val resources: Resources) : SettingsTexts {
         SettingsText.PB_EXTERNAL -> R.string.settings_pb_external
         SettingsText.PB_EXTERNAL_NONE_INSTALLED -> R.string.settings_pb_external_none_installed
         SettingsText.IF_CLOCK -> R.string.settings_if_clock
+        SettingsText.IF_TEXT_SIZE -> R.string.settings_if_text_size
+        SettingsText.IF_TEXT_SIZE_DESC -> R.string.settings_if_text_size_desc
+        SettingsText.IF_RESTART_NOW_DESC -> R.string.settings_if_restart_now_desc
+        SettingsText.TEXT_SIZE_SMALL -> R.string.settings_text_size_small
+        SettingsText.TEXT_SIZE_DEFAULT -> R.string.settings_text_size_default
+        SettingsText.TEXT_SIZE_LARGE -> R.string.settings_text_size_large
+        SettingsText.TEXT_SIZE_LARGEST -> R.string.settings_text_size_largest
         SettingsText.CLOCK_SYSTEM -> R.string.settings_clock_system
         SettingsText.CLOCK_12 -> R.string.settings_clock_12
         SettingsText.CLOCK_24 -> R.string.settings_clock_24

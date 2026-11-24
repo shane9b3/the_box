@@ -8,6 +8,8 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.sp
 import kotlin.math.min
 
 /** Width of the design canvas in design px (docs/01-design-reference.md). */
@@ -29,7 +31,8 @@ private val LocalBoxDesignDensity = staticCompositionLocalOf<Density?> { null }
  * design px is `windowWidthPx / 1920` on a 16:9 window. Android TV runs a 1080p UI at xhdpi
  * (960×540 dp), so design px are not dp; every measurement from the design doc is written
  * directly as `.dp` (and text sizes as `.sp`) under this scale. `fontScale` is pinned to 1 so the
- * system font-size setting cannot break the fixed-canvas layout.
+ * system font-size setting cannot break the fixed-canvas layout; the app's own "Text size" row is applied by
+ * [textSp], which every text style goes through.
  *
  * On a non-16:9 window (phones, ultrawide) the 1920×1080 canvas is fitted inside the window
  * (`min(w / 1920, h / 1080)`), so the canvas never overflows vertically. On every 16:9 TV this
@@ -64,3 +67,11 @@ fun designPxToPx(windowWidthPx: Float, windowHeightPx: Float = 0f): Float {
     val byWidth = windowWidthPx / DESIGN_CANVAS_WIDTH_PX
     return if (windowHeightPx > 0f) min(byWidth, windowHeightPx / DESIGN_CANVAS_HEIGHT_PX) else byWidth
 }
+
+/**
+ * A text size of [designPx] design px at the user's "Text size" (`UiTextScale`, owner request 2026-11-24). Every text
+ * style of the app is built through this. The multiplier is in the style and not in the density's `fontScale`: above
+ * 1.03 Compose applies Android's non-linear font scaling, which leaves sizes this large (design px written as sp)
+ * almost unchanged.
+ */
+fun textSp(designPx: Number): TextUnit = (designPx.toFloat() * app.thebox.core.settings.UiTextScale.factor).sp

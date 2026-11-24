@@ -74,7 +74,7 @@ fun PhoneSetupScreen(ui: PhoneSetupUi, modifier: Modifier = Modifier) {
         if (folder) {
             // WP-S6 (docs/design/m6-storage-locations.md §7.4): the plain-HTTP line below the title, on the TV too.
             Line(
-                stringResource(R.string.storage_phone_plain_http), GuideUi.sans(22, color = GuideUi.Fg65),
+                stringResource(R.string.storage_phone_plain_http), GuideUi.sans(24, color = GuideUi.Fg65),
                 Modifier.offset(64.dp, 124.dp).width(1792.dp).testTag(PHONE_PLAIN_HTTP_TAG), maxLines = 2,
             )
         }
@@ -126,11 +126,11 @@ fun PhoneSetupScreen(ui: PhoneSetupUi, modifier: Modifier = Modifier) {
                     Line(text, GuideUi.sans(24, color = GuideUi.Warn), Modifier.testTag(PHONE_SIGN_IN_FAILED_TAG), maxLines = 3)
                 }
                 if (folder && s.phase == ServerPhase.PAIRED) {
-                    Line(stringResource(R.string.storage_phone_paired_hint), GuideUi.sans(22, color = GuideUi.Fg65), maxLines = 2)
+                    Line(stringResource(R.string.storage_phone_paired_hint), GuideUi.sans(24, color = GuideUi.Fg65), maxLines = 2)
                 }
                 if (ui.vpn) Line(stringResource(R.string.backup_phone_vpn), GuideUi.sans(24, color = GuideUi.Warn), maxLines = 2)
                 Spacer(Modifier.height(16.dp))
-                Line(stringResource(R.string.backup_phone_cant_scan), GuideUi.sans(22, color = GuideUi.Fg55))
+                Line(stringResource(R.string.backup_phone_cant_scan), GuideUi.sans(24, color = GuideUi.Fg55))
             }
         }
         Column(Modifier.align(Alignment.BottomStart).padding(start = 64.dp, end = 64.dp, bottom = 40.dp)) {
@@ -147,9 +147,9 @@ fun PhoneSetupScreen(ui: PhoneSetupUi, modifier: Modifier = Modifier) {
                 Spacer(Modifier.height(16.dp))
             }
             if (hint) {
-                Line(stringResource(R.string.backup_phone_isolation_hint), GuideUi.sans(22, color = GuideUi.Warn), Modifier.width(1792.dp).testTag(PHONE_HINT_TAG), maxLines = 3)
+                Line(stringResource(R.string.backup_phone_isolation_hint), GuideUi.sans(24, color = GuideUi.Warn), Modifier.width(1792.dp).testTag(PHONE_HINT_TAG), maxLines = 3)
             } else {
-                Line(stringResource(R.string.backup_phone_footer), GuideUi.sans(22, color = GuideUi.Fg55), Modifier.testTag(PHONE_FOOTER_TAG), maxLines = 2)
+                Line(stringResource(R.string.backup_phone_footer), GuideUi.sans(24, color = GuideUi.Fg55), Modifier.testTag(PHONE_FOOTER_TAG), maxLines = 2)
             }
         }
     }
