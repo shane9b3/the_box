@@ -78,6 +78,9 @@ class PersistedPlaybackSettings internal constructor(
             timeshift = p.timeshiftInUse,
             timeshiftHold = p.timeshiftHold,
             storageProtection = p.storageProtection,
+            liveSpeedCorrection = p.liveSpeedCorrection,
+            codecQueueing = p.codecQueueing,
+            audioBuffer = p.audioBuffer,
         )
 
         /** The stored form after an update changed [before] into [after] (changed fields only). */
@@ -100,6 +103,9 @@ class PersistedPlaybackSettings internal constructor(
             timeshift = pick(old.timeshift, before.timeshift, after.timeshift),
             timeshiftHold = pick(old.timeshiftHold, before.timeshiftHold, after.timeshiftHold),
             storageProtection = pick(old.storageProtection, before.storageProtection, after.storageProtection),
+            liveSpeedCorrection = pick(old.liveSpeedCorrection, before.liveSpeedCorrection, after.liveSpeedCorrection),
+            codecQueueing = pick(old.codecQueueing, before.codecQueueing, after.codecQueueing),
+            audioBuffer = pick(old.audioBuffer, before.audioBuffer, after.audioBuffer),
         )
     }
 }

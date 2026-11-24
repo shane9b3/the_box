@@ -72,6 +72,8 @@ internal class MediaSourceBuilder(
         archive: ArchiveRequest?,
         // (M6 time-shift, §5.1, §16.4) Non-null: a buffered live tune; the player reads the ring, never the network.
         ring: app.thebox.player.internal.RingOpen?,
+        // (Smooth playback, 2026-11-23) "Keep up with live": false pins an HLS live source at 1.0×.
+        liveSpeedCorrection: Boolean,
     ): MediaSourceWithTelemetry {
         val scheme = schemeOf(ctx.resolved.url)
         if (scheme !in SUPPORTED_SCHEMES) throw UnsupportedStreamFormatException(format, scheme.ifEmpty { "none" })
@@ -106,8 +108,11 @@ internal class MediaSourceBuilder(
                         if (!isArchive) {
                             setLiveConfiguration(
                                 MediaItem.LiveConfiguration.Builder()
-                                    .setMinPlaybackSpeed(HLS_LIVE_MIN_SPEED)
-                                    .setMaxPlaybackSpeed(HLS_LIVE_MAX_SPEED)
+                                    // Off: both ends at 1.0, so Media3's live speed control never leaves it (a speed
+                                    // other than 1.0 breaks the frame cadence, and tunneled or passthrough audio
+                                    // cannot follow it).
+                                    .setMinPlaybackSpeed(if (liveSpeedCorrection) HLS_LIVE_MIN_SPEED else 1f)
+                                    .setMaxPlaybackSpeed(if (liveSpeedCorrection) HLS_LIVE_MAX_SPEED else 1f)
                                     .build(),
                             )
                         }

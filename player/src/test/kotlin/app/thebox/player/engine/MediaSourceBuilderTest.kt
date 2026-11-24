@@ -117,6 +117,19 @@ class MediaSourceBuilderTest {
     }
 
     @Test
+    fun keepUpWithLiveOffPinsHlsLiveAtNormalSpeed() {
+        // Smooth playback 2026-11-23: with the setting off the live speed control has no room to leave 1.0×.
+        val url = "http://panel.example:8080/live/u/p/1.m3u8"
+        val built = builder.build(
+            EngineTestSupport.context(resolved = EngineTestSupport.resolved(url, StreamFormat.HLS)), StreamFormat.HLS, TsCompat.DEFAULT,
+            EngineTestSupport.FakeTransport(clip), null, null, liveSpeedCorrection = false,
+        )
+        val item = built.source.mediaItem
+        assertEquals(1f, item.liveConfiguration.minPlaybackSpeed, 0f)
+        assertEquals(1f, item.liveConfiguration.maxPlaybackSpeed, 0f)
+    }
+
+    @Test
     fun archiveHlsHasNoLiveSpeedBand() {
         val url = "http://panel.example:8080/timeshift/u/p/60/x/1.m3u8"
         val built = builder.build(EngineTestSupport.context(resolved = EngineTestSupport.resolved(url, StreamFormat.HLS)), StreamFormat.HLS, TsCompat.DEFAULT, EngineTestSupport.FakeTransport(clip), archive)

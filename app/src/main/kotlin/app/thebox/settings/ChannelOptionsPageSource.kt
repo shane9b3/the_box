@@ -120,6 +120,8 @@ class ChannelOptionsPageSource @Inject constructor(
                 aspect = m.aspect,
                 decoder = m.videoDecoder,
                 buffer = m.bufferMode,
+                tunnelingOff = m.tunnelingOff,
+                afrAlways = m.afrAlways,
                 audioLanguage = m.audioLanguage,
                 subtitleLanguage = m.subtitleLanguage,
                 favouriteLists = lists,
@@ -173,6 +175,9 @@ class ChannelOptionsPageSource @Inject constructor(
                 if (isTuned(id)) withContext(Dispatchers.Main.immediate) { controller.setVideoDecoderOverride(mode, remember = mode != null) }
             }
             ChannelOptionsRows.BUFFER -> choose?.let { c -> memory.update(id) { it.copy(bufferMode = WpaPages.enumOf<BufferMode>(c)) } }
+            // (Smooth playback, 2026-11-23) Both are read at the channel's next tune.
+            ChannelOptionsRows.TUNNELING -> choose?.let { c -> memory.update(id) { it.copy(tunnelingOff = c == ChannelOptionsPage.OFF) } }
+            ChannelOptionsRows.AFR -> choose?.let { c -> memory.update(id) { it.copy(afrAlways = c == ChannelOptionsPage.ALWAYS) } }
             ChannelOptionsRows.AUDIO_LANG -> if (intent is RowIntent.Run) memory.update(id) { it.copy(audioLanguage = null) }
             ChannelOptionsRows.SUBTITLES -> if (intent is RowIntent.Run) memory.update(id) { it.copy(subtitleLanguage = null) }
             ChannelOptionsRows.EXTERNAL -> if (intent is RowIntent.Run) handOff(id)

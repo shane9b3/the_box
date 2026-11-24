@@ -915,7 +915,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         val s = TuneSession(id, resolved, ctx, transport, format, clock.nowMs())
         s.ringGeneration = ring?.generation ?: -1L
         val built = try {
-            mediaSources.build(ctx, format, if (c.tsCompat > 0) TsCompat.MULTI_PMT else TsCompat.DEFAULT, transport, c.archive?.request, ring)
+            mediaSources.build(ctx, format, if (c.tsCompat > 0) TsCompat.MULTI_PMT else TsCompat.DEFAULT, transport, c.archive?.request, ring, settings.current.liveSpeedCorrection)
         } catch (ex: UnsupportedStreamFormatException) {
             val what = ex.scheme?.let { "scheme $it" } ?: ex.format.name
             BoxLog.w(TAG, "media source $id not built: unsupported $what")
@@ -1109,6 +1109,8 @@ internal class PlaybackControllerImpl @Inject constructor(
         if (c.firstSession) {
             applyAspect(c.memory.aspect ?: s.defaultAspect)
             c.fpsMilli = c.memory.fpsMilli
+            // (Smooth playback, 2026-11-23) "Match frame rate: Always for this channel", before the tune is announced.
+            e.parts.setChannelAfr(if (c.memory.afrAlways && !c.isArchive) app.thebox.core.playback.AfrMode.ALWAYS else null)
             e.parts.displayMode.onTune(c.memory.fpsMilli)
         }
         params.setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, c.audioDropped)
@@ -2076,8 +2078,6 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     override fun onForegroundChanged(foreground: Boolean) {
         eng?.session?.player?.refresh()
-    }
-
         // (Review 2026-11-23, M6) Leaving the app with nothing playing (a card the ladder gave up on, a pause that
         // timed out): the display mode set for the last stream is given back here, because no stop() follows. While
         // something plays, stop() does it.
@@ -2086,6 +2086,8 @@ internal class PlaybackControllerImpl @Inject constructor(
         } catch (e: Exception) {
             BoxLog.w(TAG, "display mode clear failed: ${e.javaClass.simpleName}")
         }
+    }
+
     /** (code review 2026-10-14, E-S4) No rendered video is expected during a standby/HDMI/display-off grace. */
     override fun onGraceChanged(active: Boolean) {
         if (!active) eng?.parts?.watchdog?.reset()
@@ -2533,7 +2535,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         val ring = RingOpen(ts.ring, ts.ring.generation, start.offset, ts.readerTelemetry { null })
         s.ringGeneration = ring.generation
         val built = try {
-            mediaSources.build(ctx, format, if (c.tsCompat > 0) TsCompat.MULTI_PMT else TsCompat.DEFAULT, transport, null, ring)
+            mediaSources.build(ctx, format, if (c.tsCompat > 0) TsCompat.MULTI_PMT else TsCompat.DEFAULT, transport, null, ring, settings.current.liveSpeedCorrection)
         } catch (ex: Exception) {
             BoxLog.w(TAG, "ring source $id not built: ${ex.javaClass.simpleName}")
             s.end()

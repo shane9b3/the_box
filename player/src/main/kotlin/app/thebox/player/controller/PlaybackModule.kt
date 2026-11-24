@@ -162,6 +162,11 @@ internal interface EngineParts {
     fun applyTuneDefaults(audioLanguages: List<String>, textLanguages: List<String>, subtitles: String?, subtitlesEnabled: Boolean) {}
     /** AFR setting changed (S12). */
     fun onAfrModeChanged(mode: AfrMode) {}
+    /**
+     * (Smooth playback, 2026-11-23) The tuned channel's own frame-rate mode (Channel options "Always for this channel"),
+     * or null for the global setting. Set at every tune, before the display controller hears of the tune.
+     */
+    fun setChannelAfr(mode: AfrMode?) {}
     /** API < 31 display-mode switch while playing: pause on [onStarted], resume on [onSettled]. */
     fun setDisplaySwitchListener(onStarted: () -> Unit, onSettled: () -> Unit) {}
     fun release() {}
@@ -219,7 +224,7 @@ internal class DefaultEngineParts(
         profile = { bundle.loadControl.profile },
     )
     private val displayModeImpl = DisplayModeController.create(
-        context, picker, clock, afrMode = { settings.current.afrMode }, setPlayerStrategy = { player.setVideoChangeFrameRateStrategy(it) },
+        context, picker, clock, afrMode = { effectiveAfr() }, setPlayerStrategy = { player.setVideoChangeFrameRateStrategy(it) },
     )
     private val fpsState = MutableStateFlow<Float?>(null)
     private val fpsEstimator = FpsEstimator(picker::snapFps, Looper.getMainLooper()) { onEstimate(it) }
@@ -243,7 +248,7 @@ internal class DefaultEngineParts(
     }
 
     override fun stats(): StreamStats {
-        statsCollector.afr = settings.current.afrMode
+        statsCollector.afr = effectiveAfr()
         statsCollector.displayRefreshHz = displayModeImpl.refreshHz.value
         statsCollector.fps = fpsState.value ?: trackController.video.declaredFps
         return statsCollector.snapshot()
@@ -275,8 +280,24 @@ internal class DefaultEngineParts(
     override fun applyTuneDefaults(audioLanguages: List<String>, textLanguages: List<String>, subtitles: String?, subtitlesEnabled: Boolean) =
         trackController.applyTuneDefaults(audioLanguages, textLanguages, subtitles, subtitlesEnabled)
 
+    /** The tuned channel's override, else the global setting. Main thread. */
+    private var channelAfr: AfrMode? = null
+    private fun effectiveAfr(): AfrMode = channelAfr ?: settings.current.afrMode
+
     override fun onAfrModeChanged(mode: AfrMode) {
-        displayModeImpl.onAfrModeChanged(mode)
+        // The global setting changed; a channel override still wins.
+        displayModeImpl.onAfrModeChanged(effectiveAfr())
+        updateFpsAttachment()
+    }
+
+    override fun setChannelAfr(mode: AfrMode?) {
+        val before = effectiveAfr()
+        channelAfr = mode
+        val now = effectiveAfr()
+        if (now == before) return
+        // As a change of the setting: the player's strategy follows, an applied mode is given back (leaving the channel)
+        // or the vote starts (arriving at it).
+        displayModeImpl.onAfrModeChanged(now)
         updateFpsAttachment()
     }
 
@@ -297,7 +318,7 @@ internal class DefaultEngineParts(
 
     /** §3.9.3: the estimator is attached only while AFR is ALWAYS or the stats overlay is on, until it has an estimate. */
     private fun updateFpsAttachment() {
-        val wanted = !fpsDone && (statsOn || settings.current.afrMode == AfrMode.ALWAYS)
+        val wanted = !fpsDone && (statsOn || effectiveAfr() == AfrMode.ALWAYS)
         if (wanted && !fpsAttached) {
             player.setVideoFrameMetadataListener(fpsEstimator)
             fpsAttached = true

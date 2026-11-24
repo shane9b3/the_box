@@ -173,7 +173,7 @@ internal enum class TsCompat { DEFAULT, MULTI_PMT }
 
 internal interface MediaSourceBuilderApi {
     /** (M6 time-shift commit 0, §16.4) [ring] non-null: a progressive TS source over [TransportFactory.ring] (live only). */
-    fun build(ctx: StreamSessionContext, format: StreamFormat, compat: TsCompat, transport: TransportFactory, archive: app.thebox.core.catchup.ArchiveRequest?, ring: RingOpen? = null): MediaSourceWithTelemetry
+    fun build(ctx: StreamSessionContext, format: StreamFormat, compat: TsCompat, transport: TransportFactory, archive: app.thebox.core.catchup.ArchiveRequest?, ring: RingOpen? = null, liveSpeedCorrection: Boolean = true): MediaSourceWithTelemetry
 }
 internal class MediaSourceWithTelemetry(val source: MediaSource, val telemetry: StreamTelemetry)
 

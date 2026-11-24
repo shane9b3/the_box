@@ -64,7 +64,7 @@ internal class PlayerFactory @Inject constructor(
         val selector = BoxMediaCodecSelector(ffmpegSupports)
         val downmix = StereoDownmixProcessor()
         val audioPolicy = AudioOutputPolicy(downmix)
-        val renderers = BoxRenderersFactory(context, selector, audioPolicy, downmix, softwareAudioFallback, hooks?.codecAdapterFactory)
+        val renderers = BoxRenderersFactory(context, selector, audioPolicy, downmix, softwareAudioFallback, hooks?.codecAdapterFactory, current.codecQueueing, current.audioBuffer)
 
         val lowRam = hooks?.lowRam ?: capabilities.isLowRam
         val loadControl = AdaptiveLoadControl(
@@ -94,7 +94,7 @@ internal class PlayerFactory @Inject constructor(
         applySettings(bundle, current, ffmpegSupports)
         BoxLog.i(TAG) {
             "player created: extensions=${if (softwareAudioFallback) "ON" else "OFF"} lowRam=$lowRam " +
-                "cap=${loadControl.profile.targetBytes} afr=${current.afrMode} tunneling=${current.tunneling}"
+                "cap=${loadControl.profile.targetBytes} afr=${current.afrMode} tunneling=${current.tunneling} queueing=${current.codecQueueing} audioBuffer=${current.audioBuffer}"
         }
         return bundle
     }

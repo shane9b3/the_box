@@ -43,6 +43,18 @@ class ChannelOptionsPageTest {
     }
 
     @Test
+    fun tunnelingAndFrameRateShowTheChannelsOwnChoice() {
+        // Smooth playback 2026-11-23: Default unless the channel has its own (or learned) value; both apply at the next tune.
+        val d = ChannelOptionsPage.build(route, base, SettingsTexts.KEYS, 1)
+        assertEquals("DEFAULT", d.rows.first { it.id == ChannelOptionsRows.TUNNELING }.value)
+        assertEquals("DEFAULT", d.rows.first { it.id == ChannelOptionsRows.AFR }.value)
+        assertTrue(d.rows.first { it.id == ChannelOptionsRows.AFR }.description!!.contains("EFFECT_NEXT_TUNE"))
+        val p = ChannelOptionsPage.build(route, base.copy(tunnelingOff = true, afrAlways = true), SettingsTexts.KEYS, 2)
+        assertEquals("CH_TUNNELING_OFF", p.rows.first { it.id == ChannelOptionsRows.TUNNELING }.value)
+        assertEquals("CH_AFR_ALWAYS", p.rows.first { it.id == ChannelOptionsRows.AFR }.value)
+    }
+
+    @Test
     fun rememberedChoicesAreSelected() {
         val p = ChannelOptionsPage.build(route, base.copy(aspect = AspectMode.ZOOM, shiftMin = 60), SettingsTexts.KEYS, 1)
         assertEquals("ASPECT_ZOOM", p.rows.first { it.id == ChannelOptionsRows.ASPECT }.value)

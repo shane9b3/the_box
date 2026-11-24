@@ -13,6 +13,8 @@ import app.thebox.core.net.DnsChoice
 import app.thebox.core.net.NetworkSettings
 import app.thebox.core.net.PreferIpv4
 import app.thebox.core.playback.AfrMode
+import app.thebox.core.playback.AudioBufferSize
+import app.thebox.core.playback.CodecQueueing
 import app.thebox.core.playback.AspectMode
 import app.thebox.core.playback.AudioOutputMode
 import app.thebox.core.playback.BufferMode
@@ -317,6 +319,22 @@ class WpaPages(
             out += row(PlaybackRows.RESTART_NOW, t(SettingsText.PB_RESTART_NOW), RowKind.Action(), description = t(SettingsText.PB_RESTART_NOW_DESC))
         }
         out += toggle(PlaybackRows.TUNNELING, t(SettingsText.PB_TUNNELING), p.tunneling, t(SettingsText.PB_TUNNELING_DESC))
+        // (Smooth playback, 2026-11-23)
+        out += toggle(PlaybackRows.LIVE_SPEED, t(SettingsText.PB_LIVE_SPEED), p.liveSpeedCorrection, t(SettingsText.PB_LIVE_SPEED_DESC))
+        out += choice(
+            PlaybackRows.CODEC_QUEUEING, t(SettingsText.PB_CODEC_QUEUEING),
+            listOf(
+                ChoiceOption(CodecQueueing.AUTO.name, t(SettingsText.QUEUEING_AUTO)),
+                ChoiceOption(CodecQueueing.ASYNC.name, t(SettingsText.QUEUEING_ASYNC)),
+                ChoiceOption(CodecQueueing.SYNC.name, t(SettingsText.QUEUEING_SYNC)),
+            ),
+            p.codecQueueing.name, t(SettingsText.PB_CODEC_QUEUEING_DESC),
+        )
+        out += choice(
+            PlaybackRows.AUDIO_BUFFER, t(SettingsText.PB_AUDIO_BUFFER),
+            listOf(ChoiceOption(AudioBufferSize.AUTO.name, t(SettingsText.AUDIO_BUFFER_AUTO)), ChoiceOption(AudioBufferSize.LARGE.name, t(SettingsText.AUDIO_BUFFER_LARGE))),
+            p.audioBuffer.name, t(SettingsText.PB_AUDIO_BUFFER_DESC),
+        )
         out += choice(
             PlaybackRows.RECONNECT, t(SettingsText.PB_RECONNECT),
             RECONNECTS.map { ChoiceOption(it.toString(), if (it < 0) t(SettingsText.RECONNECT_UNLIMITED) else t(SettingsText.COUNT, it)) },
@@ -739,6 +757,9 @@ class WpaPages(
             PlaybackRows.FFMPEG -> on?.let { v -> playback { it.copy(softwareAudioFallback = v) } }
             PlaybackRows.RESTART_NOW -> if (intent is RowIntent.Run) env.restartNow()
             PlaybackRows.TUNNELING -> on?.let { v -> playback { it.copy(tunneling = v) } }
+            PlaybackRows.LIVE_SPEED -> on?.let { v -> playback { it.copy(liveSpeedCorrection = v) } }
+            PlaybackRows.CODEC_QUEUEING -> choose?.let { c -> enumOf<CodecQueueing>(c)?.let { m -> playback { it.copy(codecQueueing = m) } } }
+            PlaybackRows.AUDIO_BUFFER -> choose?.let { c -> enumOf<AudioBufferSize>(c)?.let { m -> playback { it.copy(audioBuffer = m) } } }
             PlaybackRows.RECONNECT -> choose?.toIntOrNull()?.let { v -> playback { it.copy(reconnectAttempts = v) } }
             PlaybackRows.FAILOVER -> on?.let { v -> playback { it.copy(failoverToBackup = v) } }
             PlaybackRows.AFTER_STANDBY -> choose?.let { c -> playback { it.copy(resumeAfterStandby = c == RESUME) } }

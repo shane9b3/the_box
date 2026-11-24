@@ -242,6 +242,22 @@ class WpaPagesTest {
     }
 
     @Test
+    fun theSmoothPlaybackRowsWriteTheirValues() {
+        // Smooth playback 2026-11-23: defaults are the behaviour before the rows existed.
+        val before = store.flow(PlaybackDomain).value
+        assertTrue(before.liveSpeedCorrection)
+        assertEquals(app.thebox.core.playback.CodecQueueing.AUTO, before.codecQueueing)
+        assertEquals(app.thebox.core.playback.AudioBufferSize.AUTO, before.audioBuffer)
+        pages.apply(RowIntent.Toggle(PlaybackRows.LIVE_SPEED, false))
+        pages.apply(RowIntent.Choose(PlaybackRows.CODEC_QUEUEING, "SYNC"))
+        pages.apply(RowIntent.Choose(PlaybackRows.AUDIO_BUFFER, "LARGE"))
+        val p = store.flow(PlaybackDomain).value
+        assertEquals(false, p.liveSpeedCorrection)
+        assertEquals(app.thebox.core.playback.CodecQueueing.SYNC, p.codecQueueing)
+        assertEquals(app.thebox.core.playback.AudioBufferSize.LARGE, p.audioBuffer)
+    }
+
+    @Test
     fun intentsWriteTheirDomains() {
         pages.apply(RowIntent.Choose(PlaybackRows.BUFFER, BufferMode.LARGE.name))
         pages.apply(RowIntent.Toggle(PlaybackRows.TUNNELING, true))

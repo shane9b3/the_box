@@ -42,6 +42,10 @@ data class ChannelOptionsSnapshot(
     val aspect: AspectMode?,
     val decoder: VideoDecoderMode?,
     val buffer: BufferMode?,
+    /** (Smooth playback) Tunneled playback is off for this channel (chosen here, or learned after a tunneled decoder failed). */
+    val tunnelingOff: Boolean = false,
+    /** (Smooth playback) This channel always switches the TV to its frame rate, whatever "Match frame rate" says. */
+    val afrAlways: Boolean = false,
     val audioLanguage: String?,
     /** null = follow settings; "" = off on this channel. */
     val subtitleLanguage: String?,
@@ -57,6 +61,9 @@ data class ChannelOptionsSnapshot(
  */
 object ChannelOptionsPage {
     const val DEFAULT = "default"
+    /** Option ids of the per-channel tunneling and frame-rate rows. */
+    const val OFF = "off"
+    const val ALWAYS = "always"
 
     fun build(route: SettingsRoute.Channel, s: ChannelOptionsSnapshot?, texts: SettingsTexts, version: Long): PageModel {
         if (s == null) {
@@ -80,6 +87,16 @@ object ChannelOptionsPage {
         rows += choice(ChannelOptionsRows.ASPECT, t(SettingsText.CH_ASPECT), withDefault(texts, ASPECTS.map { (m, k) -> ChoiceOption(m.name, t(k)) }), s.aspect?.name ?: DEFAULT, texts)
         rows += choice(ChannelOptionsRows.DECODER, t(SettingsText.CH_DECODER), withDefault(texts, DECODERS.map { (m, k) -> ChoiceOption(m.name, t(k)) }), s.decoder?.name ?: DEFAULT, texts)
         rows += choice(ChannelOptionsRows.BUFFER, t(SettingsText.CH_BUFFER), withDefault(texts, BUFFERS.map { (m, k) -> ChoiceOption(m.name, t(k)) }), s.buffer?.name ?: DEFAULT, texts)
+        rows += choice(
+            ChannelOptionsRows.TUNNELING, t(SettingsText.CH_TUNNELING),
+            listOf(ChoiceOption(DEFAULT, t(SettingsText.DEFAULT)), ChoiceOption(OFF, t(SettingsText.CH_TUNNELING_OFF))),
+            if (s.tunnelingOff) OFF else DEFAULT, texts,
+        )
+        rows += choice(
+            ChannelOptionsRows.AFR, t(SettingsText.CH_AFR),
+            listOf(ChoiceOption(DEFAULT, t(SettingsText.DEFAULT)), ChoiceOption(ALWAYS, t(SettingsText.CH_AFR_ALWAYS))),
+            if (s.afrAlways) ALWAYS else DEFAULT, texts,
+        )
         rows += forgetRow(ChannelOptionsRows.AUDIO_LANG, t(SettingsText.CH_AUDIO_LANG), s.audioLanguage?.let { languageName(it) }, texts)
         val subs = when (s.subtitleLanguage) { null -> null; "" -> t(SettingsText.OFF); else -> languageName(s.subtitleLanguage) }
         rows += forgetRow(ChannelOptionsRows.SUBTITLES, t(SettingsText.CH_SUBTITLES), subs, texts)

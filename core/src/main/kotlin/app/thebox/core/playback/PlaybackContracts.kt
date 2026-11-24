@@ -296,6 +296,18 @@ enum class HdrKind { SDR, HDR10, HLG, DOLBY_VISION, UNKNOWN_HDR }
 enum class AspectMode { FIT, FILL, ZOOM, RATIO_16_9, RATIO_4_3 }
 enum class VideoDecoderMode { AUTO, HARDWARE_ONLY, SOFTWARE_PREFERRED }
 /**
+ * (Smooth playback, 2026-11-23) How samples are handed to the hardware decoders. AUTO = Media3's own choice (the
+ * asynchronous path on Android 12 and later, the synchronous one before); ASYNC and SYNC force one. A box whose picture
+ * stutters under one path may play evenly under the other. Read when the player is built. Persisted by name; append-only.
+ */
+enum class CodecQueueing { AUTO, ASYNC, SYNC }
+/**
+ * (Smooth playback, 2026-11-23) The size of the buffer for decoded (PCM) audio. AUTO = Media3's default (250 to 750 ms);
+ * LARGE doubles it, so a slow box rides out a short gap in audio delivery instead of clicking or stalling the clock.
+ * Passthrough audio is not affected. Read when the player is built. Persisted by name; append-only.
+ */
+enum class AudioBufferSize { AUTO, LARGE }
+/**
  * Product §4.4 "Audio output". (M5, docs/design/m5-setup-settings.md §2.12 item 7, B2) FORCE_PASSTHROUGH = "Always
  * passthrough" (decision 2026-10-14): the sink is built with AC-3, E-AC-3, DTS and TrueHD added to the reported
  * capabilities (WP-A, the F19 hook); append-only.

@@ -32,6 +32,10 @@ object PlaybackRows : RowSource {
     val FFMPEG = RowId("playback.ffmpeg")
     val RESTART_NOW = RowId("playback.restart_now")
     val TUNNELING = RowId("playback.tunneling")
+    /** (Smooth playback, 2026-11-23) Three ADVANCED rows against uneven motion on older boxes. */
+    val LIVE_SPEED = RowId("playback.live_speed")
+    val CODEC_QUEUEING = RowId("playback.codec_queueing")
+    val AUDIO_BUFFER = RowId("playback.audio_buffer")
     val RECONNECT = RowId("playback.reconnect")
     val FAILOVER = RowId("playback.failover")
     val AFTER_STANDBY = RowId("playback.after_standby")
@@ -59,6 +63,9 @@ object PlaybackRows : RowSource {
         a(FFMPEG, ADVANCED, RESTART),
         a(RESTART_NOW, ADVANCED, NONE),
         a(TUNNELING, ADVANCED, REPREPARE),
+        a(LIVE_SPEED, ADVANCED, REPREPARE),
+        a(CODEC_QUEUEING, ADVANCED, NEXT_LAUNCH),
+        a(AUDIO_BUFFER, ADVANCED, NEXT_LAUNCH),
         a(RECONNECT, ADVANCED, LIVE),
         a(FAILOVER, ADVANCED, LIVE),
         a(AFTER_STANDBY, ADVANCED, LIVE),

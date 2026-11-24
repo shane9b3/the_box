@@ -156,6 +156,21 @@ class ResourceSettingsTexts(private val resources: Resources) : SettingsTexts {
         SettingsText.PB_RESTART_NOW_DESC -> R.string.settings_pb_restart_now_desc
         SettingsText.PB_TUNNELING -> R.string.settings_pb_tunneling
         SettingsText.PB_TUNNELING_DESC -> R.string.settings_pb_tunneling_desc
+        SettingsText.PB_LIVE_SPEED -> R.string.settings_pb_live_speed
+        SettingsText.PB_LIVE_SPEED_DESC -> R.string.settings_pb_live_speed_desc
+        SettingsText.PB_CODEC_QUEUEING -> R.string.settings_pb_codec_queueing
+        SettingsText.PB_CODEC_QUEUEING_DESC -> R.string.settings_pb_codec_queueing_desc
+        SettingsText.QUEUEING_AUTO -> R.string.settings_queueing_auto
+        SettingsText.QUEUEING_ASYNC -> R.string.settings_queueing_async
+        SettingsText.QUEUEING_SYNC -> R.string.settings_queueing_sync
+        SettingsText.PB_AUDIO_BUFFER -> R.string.settings_pb_audio_buffer
+        SettingsText.PB_AUDIO_BUFFER_DESC -> R.string.settings_pb_audio_buffer_desc
+        SettingsText.AUDIO_BUFFER_AUTO -> R.string.settings_audio_buffer_auto
+        SettingsText.AUDIO_BUFFER_LARGE -> R.string.settings_audio_buffer_large
+        SettingsText.CH_TUNNELING -> R.string.settings_ch_tunneling
+        SettingsText.CH_TUNNELING_OFF -> R.string.settings_ch_tunneling_off
+        SettingsText.CH_AFR -> R.string.settings_ch_afr
+        SettingsText.CH_AFR_ALWAYS -> R.string.settings_ch_afr_always
         SettingsText.PB_RECONNECT -> R.string.settings_pb_reconnect
         SettingsText.RECONNECT_UNLIMITED -> R.string.settings_reconnect_unlimited
         SettingsText.COUNT -> R.string.settings_count

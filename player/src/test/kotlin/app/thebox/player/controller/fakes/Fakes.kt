@@ -195,13 +195,16 @@ internal class FakeMediaSourceBuilder(private val journal: Journal) : MediaSourc
     data class Build(val ctx: StreamSessionContext, val format: StreamFormat, val compat: TsCompat, val archive: ArchiveRequest?, val ring: app.thebox.player.internal.RingOpen? = null)
 
     val builds = mutableListOf<Build>()
+    /** The "Keep up with live" value the last build was given. */
+    var lastLiveSpeedCorrection: Boolean? = null
     val telemetry = HashMap<Long, FakeTelemetry>()
     val ringTelemetry = HashMap<Long, StreamTelemetry>()
     val last: Build get() = builds.last()
     /** Thrown by the next [build] (then cleared), e.g. the real builder's UnsupportedStreamFormatException. */
     var failNext: Exception? = null
 
-    override fun build(ctx: StreamSessionContext, format: StreamFormat, compat: TsCompat, transport: TransportFactory, archive: ArchiveRequest?, ring: app.thebox.player.internal.RingOpen?): MediaSourceWithTelemetry {
+    override fun build(ctx: StreamSessionContext, format: StreamFormat, compat: TsCompat, transport: TransportFactory, archive: ArchiveRequest?, ring: app.thebox.player.internal.RingOpen?, liveSpeedCorrection: Boolean): MediaSourceWithTelemetry {
+        lastLiveSpeedCorrection = liveSpeedCorrection
         failNext?.let { failNext = null; throw it }
         builds += Build(ctx, format, compat, archive, ring)
         journal("build:${ctx.tuneId}:$format${if (ring != null) ":ring@${ring.startOffset}" else ""}")

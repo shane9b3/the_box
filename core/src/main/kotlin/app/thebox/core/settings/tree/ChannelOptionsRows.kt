@@ -24,6 +24,9 @@ object ChannelOptionsRows : RowSource {
     val ASPECT = RowId("channel.aspect")
     val DECODER = RowId("channel.decoder")
     val BUFFER = RowId("channel.buffer")
+    /** (Smooth playback, 2026-11-23) Tunneled playback off, and frame-rate matching Always, for this channel only. */
+    val TUNNELING = RowId("channel.tunneling")
+    val AFR = RowId("channel.afr")
     val AUDIO_LANG = RowId("channel.audio_lang")
     val SUBTITLES = RowId("channel.subtitles")
     val EXTERNAL = RowId("channel.external")
@@ -31,7 +34,7 @@ object ChannelOptionsRows : RowSource {
 
     override val rows: List<RowSpec> = listOf(
         a(FAVOURITES, LIVE), a(HIDE, LIVE), a(LOCK, LIVE), a(FIX_GUIDE, NONE), a(SHIFT, LIVE), a(ASPECT, NEXT_TUNE),
-        a(DECODER, NEXT_TUNE), a(BUFFER, REPREPARE), a(AUDIO_LANG, LIVE), a(SUBTITLES, LIVE), a(EXTERNAL, NONE), a(INFO, NONE),
+        a(DECODER, NEXT_TUNE), a(BUFFER, REPREPARE), a(TUNNELING, NEXT_TUNE), a(AFR, NEXT_TUNE), a(AUDIO_LANG, LIVE), a(SUBTITLES, LIVE), a(EXTERNAL, NONE), a(INFO, NONE),
     )
 
     private fun a(id: RowId, e: EffectTiming) = RowSpec(id, SectionId.CHANNELS, SIMPLE, e, "A")

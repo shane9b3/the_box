@@ -167,6 +167,13 @@ data class PlaybackPrefs(
     val timeshiftHold: TimeshiftHold = TimeshiftHold.AUTO,
     /** "Protect built-in storage" (ADVANCED): the internal daily write cap (§8.4). */
     val storageProtection: StorageProtection = StorageProtection.AUTO,
+    // (Smooth playback, 2026-11-23; additive, the defaults are the behaviour before these rows existed)
+    /** "Keep up with live" (ADVANCED): an HLS live channel may play 3% slower or faster to hold its distance from live. */
+    val liveSpeedCorrection: Boolean = true,
+    /** "Decoder hand-off" (ADVANCED). */
+    val codecQueueing: app.thebox.core.playback.CodecQueueing = app.thebox.core.playback.CodecQueueing.AUTO,
+    /** "Audio buffer" (ADVANCED). */
+    val audioBuffer: app.thebox.core.playback.AudioBufferSize = app.thebox.core.playback.AudioBufferSize.AUTO,
 )
 
 /**

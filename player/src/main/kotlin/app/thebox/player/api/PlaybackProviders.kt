@@ -50,6 +50,11 @@ data class ChannelPlaybackMemory(
      * decoder produced nothing, and the user's next retry tunneled again. Learned bit: this channel plays untunneled.
      */
     val tunnelingOff: Boolean = false,
+    /**
+     * (Smooth playback, 2026-11-23) "Match frame rate: Always for this channel" (Channel options): this channel switches
+     * the TV to its frame rate whatever the global setting says (a sports channel, without a mode switch on every zap).
+     */
+    val afrAlways: Boolean = false,
 )
 
 interface ChannelMemory {
@@ -99,6 +104,13 @@ data class PlaybackSettings(
     val timeshift: app.thebox.core.settings.TimeshiftLength = app.thebox.core.settings.TimeshiftFeature.DEFAULT,
     val timeshiftHold: app.thebox.core.settings.TimeshiftHold = app.thebox.core.settings.TimeshiftHold.AUTO,
     val storageProtection: app.thebox.core.settings.StorageProtection = app.thebox.core.settings.StorageProtection.AUTO,
+    // (Smooth playback, 2026-11-23) Defaults are the behaviour before these settings existed.
+    /** False: an HLS live source gets no speed range (always 1.0×). Read at each prepare. */
+    val liveSpeedCorrection: Boolean = true,
+    /** Read when the player is built (the renderers factory). */
+    val codecQueueing: app.thebox.core.playback.CodecQueueing = app.thebox.core.playback.CodecQueueing.AUTO,
+    /** Read when the player is built (the audio sink's output provider). */
+    val audioBuffer: app.thebox.core.playback.AudioBufferSize = app.thebox.core.playback.AudioBufferSize.AUTO,
 )
 
 interface PlaybackSettingsSource {

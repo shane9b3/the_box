@@ -51,6 +51,8 @@ class RoomChannelMemory @Inject constructor(private val prefs: ChannelPrefsRepos
         const val TS_COMPAT_MASK = 0b011
         const val KNOWN_HDR_BIT = 0b100
         const val TUNNELING_OFF_BIT = 0b1000
+        /** (Smooth playback, 2026-11-23) Channel options "Match frame rate: Always for this channel". */
+        const val AFR_ALWAYS_BIT = 0b10000
 
         fun toMemory(e: ChannelPrefsEntity?): ChannelPlaybackMemory {
             if (e == null) return ChannelPlaybackMemory()
@@ -64,11 +66,12 @@ class RoomChannelMemory @Inject constructor(private val prefs: ChannelPrefsRepos
                 knownHdr = e.playbackFlags and KNOWN_HDR_BIT != 0,
                 fpsMilli = e.fpsMilli,
                 tunnelingOff = e.playbackFlags and TUNNELING_OFF_BIT != 0,
+                afrAlways = e.playbackFlags and AFR_ALWAYS_BIT != 0,
             )
         }
 
         fun flagsOf(m: ChannelPlaybackMemory): Int =
             (m.tsCompatLevel.coerceIn(0, TS_COMPAT_MASK) and TS_COMPAT_MASK) or (if (m.knownHdr) KNOWN_HDR_BIT else 0) or
-                (if (m.tunnelingOff) TUNNELING_OFF_BIT else 0)
+                (if (m.tunnelingOff) TUNNELING_OFF_BIT else 0) or (if (m.afrAlways) AFR_ALWAYS_BIT else 0)
     }
 }
