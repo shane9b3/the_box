@@ -49,6 +49,24 @@ interface ChannelPrefsDao {
     )
     suspend fun upsertFpsMilli(playlistId: Long, stableKey: String, fpsMilli: Int?, now: Long)
 
+    /** (Review 2026-11-24, Low 6) The channel's own lock (null = automatic), one column: a read-then-upsert of the row lost a concurrent write to another column. */
+    @Query(
+        """
+        INSERT INTO channel_prefs(playlist_id, stable_key, hidden, watch_count, updated_at, locked)
+        VALUES (:playlistId, :stableKey, 0, 0, :now, :locked)
+        ON CONFLICT(playlist_id, stable_key) DO UPDATE SET locked = :locked, updated_at = :now""",
+    )
+    suspend fun upsertLocked(playlistId: Long, stableKey: String, locked: Boolean?, now: Long)
+
+    /** (Review 2026-11-24, Low 6) The channel's guide time shift (null = the playlist's), one column. */
+    @Query(
+        """
+        INSERT INTO channel_prefs(playlist_id, stable_key, hidden, watch_count, updated_at, epg_shift_min)
+        VALUES (:playlistId, :stableKey, 0, 0, :now, :shiftMin)
+        ON CONFLICT(playlist_id, stable_key) DO UPDATE SET epg_shift_min = :shiftMin, updated_at = :now""",
+    )
+    suspend fun upsertEpgShift(playlistId: Long, stableKey: String, shiftMin: Int?, now: Long)
+
     @Query(
         """
         INSERT INTO channel_prefs(playlist_id, stable_key, hidden, watch_count, updated_at, audio_lang)

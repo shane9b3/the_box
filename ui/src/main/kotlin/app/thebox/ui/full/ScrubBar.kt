@@ -71,9 +71,11 @@ fun ScrubBar(
     val notSaved = stringResource(R.string.player_scrub_not_saved)
     val renderer = remember(scale) { ScrubBarRenderer(scale).apply { setTypeface(monoTypeface(context)) } }
     renderer.clock24 = clock24
-    renderer.zone = remember { TimeZone.getDefault() }
-    renderer.setLabels(catchup, live)
-    renderer.setWindowLabels(rewindFrom, liveEnd, notSaved)
+    // (Review 2026-11-24, Low 9) The zone is read at each recomposition (it used to be the zone of the bar's first
+    // composition for good); the label arrays are rebuilt only when a string changes.
+    renderer.zone = TimeZone.getDefault()
+    remember(renderer, catchup, live) { renderer.setLabels(catchup, live); catchup }
+    remember(renderer, rewindFrom, liveEnd, notSaved) { renderer.setWindowLabels(rewindFrom, liveEnd, notSaved); rewindFrom }
     val moving = state.advancing || state.pill.behindGrows || state.atLive
     val tick = rememberTicker(1_000L, enabled = moving)
     val shape = RoundedCornerShape(PlayerUi.BAR_R.dp)

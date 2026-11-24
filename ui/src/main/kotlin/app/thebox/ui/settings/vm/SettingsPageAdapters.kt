@@ -33,6 +33,7 @@ import app.thebox.ui.setup.SetupPagesFactory
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.delay
@@ -100,8 +101,30 @@ class SettingsPageAdapters @Inject constructor(
             context, phone, sourceSetup, normalizer, setupStrings, link, scope, main, kotlinx.coroutines.Dispatchers.IO, drafts,
             connect = { r -> setup.onIntent(r, RowIntent.Run(app.thebox.core.settings.RowId(app.thebox.core.setup.pages.XtreamFormPage.ROW_CONNECT)), PageContext(false, System.currentTimeMillis())) },
         )
+        // (Review 2026-11-24, C-B2) The Parental page is entered through the PIN and used to stay on screen after a
+        // relock (Lock now, Home, the one-hour timeout) with rows that refused silently: a relock now closes it, back to
+        // the sections list. The re-check after a yield skips the relock-then-unlock of a PIN change.
+        scope.launch(main) {
+            parental.state.map(::parentalLocked).distinctUntilChanged().collect { locked ->
+                if (!locked) return@collect
+                kotlinx.coroutines.yield()
+                if (parentalLocked(parental.state.value)) leaveParentalPage(link())
+            }
+        }
         return Built(sources, setup, mapping, bridge)
     }
+}
+
+private fun parentalLocked(s: app.thebox.core.parental.ParentalState): Boolean =
+    s.pinSet && s.access != app.thebox.core.parental.ParentalAccess.OPEN
+
+/** Pops the settings stack to the page under the Parental section when that section is open (anywhere in the stack). */
+internal fun leaveParentalPage(link: SettingsShellLink?) {
+    val u = (link as? app.thebox.core.settings.SettingsMachine)?.ui?.value ?: return
+    val path = u.stack + u.route
+    val i = path.indexOf(SettingsRoute.Section(app.thebox.core.settings.SectionId.PARENTAL))
+    if (i <= 0) return
+    link.popTo(path[i - 1])
 }
 
 private fun signal() = MutableSharedFlow<Unit>(extraBufferCapacity = 1, onBufferOverflow = BufferOverflow.DROP_OLDEST)

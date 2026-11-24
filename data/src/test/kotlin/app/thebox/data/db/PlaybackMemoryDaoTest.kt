@@ -63,6 +63,29 @@ class PlaybackMemoryDaoTest {
         assertEquals(true, repo.get(c)!!.hidden)
     }
 
+    /** Review 2026-11-24, Low 6: the channel options' lock and guide shift write their own column and nothing else. */
+    @Test
+    fun lockAndGuideShiftAreColumnTargeted() = runBlocking {
+        val p = db.newPlaylist()
+        val dao = db.channelPrefsDao()
+        dao.upsertPlaybackFlags(p, "a", 0b10001, 1)
+        dao.upsertLocked(p, "a", true, 2)
+        dao.upsertEpgShift(p, "a", -60, 3)
+        val row = dao.get(p, "a")!!
+        assertEquals(true, row.locked)
+        assertEquals(-60, row.epgShiftMin)
+        assertEquals(0b10001, row.playbackFlags)
+        assertEquals(3L, row.updatedAt)
+        dao.upsertLocked(p, "a", null, 4)
+        dao.upsertEpgShift(p, "a", null, 5)
+        assertNull(dao.get(p, "a")!!.locked)
+        assertNull(dao.get(p, "a")!!.epgShiftMin)
+        // A channel with no row yet gets one.
+        dao.upsertEpgShift(p, "b", 30, 6)
+        assertEquals(30, dao.get(p, "b")!!.epgShiftMin)
+        assertEquals(false, dao.get(p, "b")!!.hidden)
+    }
+
     /**
      * Correctness review F4: a playback-memory write that lands between `edit`'s read and its write must not be
      * reverted. The DAO below starts that write from another thread right after the read and gives it 500 ms.

@@ -55,11 +55,19 @@ class MainActivity : ComponentActivity() {
     internal val channelEditor: app.thebox.ui.editor.ChannelEditorViewModel by viewModels()
 
     /** (M5 integration) WP-D's SAF requests (backup to / restore from a file) and WP-B's M3U file pick. */
-    private var backupRequestId = 0L
+    // (Review 2026-11-24, Low 5) Both pending picks are held for the process, not the activity: the system may destroy
+    // the activity while the document picker is in front, and the result is delivered to the new instance. A field of
+    // the old instance lost the request id (the backup page waited for ever) and the route (the picked M3U file was
+    // dropped). After a process death nothing is waiting for either, so neither needs the saved-state bundle.
+    private var backupRequestId: Long
+        get() = pendingBackupRequestId
+        set(value) { pendingBackupRequestId = value }
     private val backupDocument = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { r ->
         documentPicker.picked(backupRequestId, app.thebox.ui.backup.BackupDocuments.resultUri(r.resultCode, r.data))
     }
-    private var m3uRoute: app.thebox.core.settings.SettingsRoute? = null
+    private var m3uRoute: app.thebox.core.settings.SettingsRoute?
+        get() = pendingM3uRoute
+        set(value) { pendingM3uRoute = value }
     private val m3uDocument = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()) { r ->
         val route = m3uRoute ?: return@registerForActivityResult
         m3uRoute = null
@@ -192,5 +200,8 @@ class MainActivity : ComponentActivity() {
         /** `elapsedRealtime` just after the latest instance's first frame drew (I-1 measures from it). */
         @Volatile var firstFrameAtElapsedMs: Long = 0L
             private set
+        /** The document-picker requests in flight (see the fields of the same names). Main thread only. */
+        private var pendingBackupRequestId = 0L
+        private var pendingM3uRoute: app.thebox.core.settings.SettingsRoute? = null
     }
 }

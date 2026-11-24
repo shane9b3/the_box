@@ -616,7 +616,9 @@ internal class PlaybackControllerImpl @Inject constructor(
         val waiting: ((NowPlaying) -> PlaybackState)? =
             if (c.firstMediaReached) ({ np -> PlaybackState.Buffering(np, BufferingCause.RECOVERING, null) }) else null
         // (Ladder fix 2026-11-11) A changed video decoder mode needs a new codec: a buffered re-prepare stops the player
-        // first.
+        // first. (Review 2026-11-24 asked for the same on tunneling and audio changes; left as decided on 2026-11-11,
+        // docs/design/m2-playback-core.md "A repair that needs new decoders gets them": those take effect without a
+        // stop, and `ControllerTimeshiftTest` pins that the last frame is held.)
         launchSession(c, Plan(reuseResolved = c.resolved != null, freshDecoders = videoModeChanged(c)), waiting)
     }
 

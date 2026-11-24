@@ -53,9 +53,12 @@ warning if it falls back to another NDK. Install it with:
      `--enable-nonfree`.
 4. Runs `./gradlew :lib-decoder-ffmpeg:assembleRelease` in the Media3 checkout. It passes a
    generated `--init-script` that sets `ndkPath` to the same NDK and sets `abiFilters` to the built
-   ABIs, so no Media3 file is edited.
+   ABIs, so no Media3 file is edited. The same script passes
+   `-Wl,-z,max-page-size=16384` to the link of `libffmpegJNI.so`: NDK r26 aligns segments to 4 KB
+   by default, and such a library does not load on 16 KB page-size arm64 devices (Android 15+).
 5. Copies the AAR to `out/media3-decoder-ffmpeg-<tag>-<abis joined by _>.aar` and writes
-   `<aar>.sha256`. It checks that `jni/<abi>/libffmpegJNI.so` exists for every requested ABI.
+   `<aar>.sha256`. It checks that `jni/<abi>/libffmpegJNI.so` exists for every requested ABI and
+   that every LOAD segment of the arm64-v8a library is aligned to at least 16 KB.
    It then writes `out/NOTICE-ffmpeg.txt`, which contains:
    - the FFmpeg repo, branch and exact commit
    - the Media3 tag and commit

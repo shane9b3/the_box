@@ -131,7 +131,8 @@ class GuideSearchImpl @Inject constructor(
                     val start = h.rawStartMin + ch.epgShiftMin
                     val end = h.rawEndMin + ch.epgShiftMin
                     val ended = end <= nowMin
-                    val inArchive = ended && ch.archiveDays > 0 && start >= nowMin - ch.archiveDays * 1440
+                    // (Review 2026-11-24, Low 9) The archive cutoff is on the raw start, as the player machine checks it.
+                    val inArchive = ended && ch.archiveDays > 0 && h.rawStartMin >= nowMin - ch.archiveDays * 1440
                     if (ended && !inArchive) continue
                     val bucket = when {
                         ended -> Bucket.ARCHIVE

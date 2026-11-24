@@ -27,7 +27,6 @@ import app.thebox.data.db.dao.EpgMappingDao
 import app.thebox.data.db.dao.FavouriteDao
 import app.thebox.data.db.dao.GroupDao
 import app.thebox.data.db.dao.PlaylistDao
-import app.thebox.data.db.entity.ChannelPrefsEntity
 import app.thebox.data.db.entity.FavouriteEntity
 import app.thebox.data.di.WallClock
 import app.thebox.external.ExternalPlayerLauncher
@@ -158,10 +157,10 @@ class ChannelOptionsPageSource @Inject constructor(
                     version.incrementAndGet()
                     return true
                 }
-                editPrefs(id, now) { it.copy(locked = if (t.on) true else null) }
+                prefs.upsertLocked(id.playlistId, key, if (t.on) true else null, now)
                 if (t.on) _notices.tryEmit(texts[SettingsText.CH_LOCKED_NOTICE])
             }
-            ChannelOptionsRows.SHIFT -> choose?.let { c -> editPrefs(id, now) { it.copy(epgShiftMin = c.toIntOrNull()) } }
+            ChannelOptionsRows.SHIFT -> choose?.let { c -> prefs.upsertEpgShift(id.playlistId, key, c.toIntOrNull(), now) }
             ChannelOptionsRows.ASPECT -> choose?.let { c ->
                 val mode = WpaPages.enumOf<AspectMode>(c)
                 memory.update(id) { it.copy(aspect = mode) }
@@ -199,11 +198,6 @@ class ChannelOptionsPageSource @Inject constructor(
     }
 
     private fun isTuned(id: ChannelIdentity): Boolean = controller.state.value.target?.let { it.identity == id && !it.isArchive } == true
-
-    private suspend fun editPrefs(id: ChannelIdentity, now: Long, change: (ChannelPrefsEntity) -> ChannelPrefsEntity) {
-        val cur = prefs.get(id.playlistId, id.stableKey.value) ?: ChannelPrefsEntity(id.playlistId, id.stableKey.value, updatedAt = now)
-        prefs.upsert(change(cur).copy(updatedAt = now))
-    }
 
     companion object {
         private const val TAG = "ChannelOptions"

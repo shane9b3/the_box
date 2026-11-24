@@ -7,6 +7,7 @@ import app.thebox.core.common.Redact
 import org.acra.ACRA
 import org.acra.ReportField
 import org.acra.config.CoreConfiguration
+import org.acra.config.ReportingAdministrator
 import org.acra.data.CrashReportData
 import org.acra.data.StringFormat
 import org.acra.ktx.initAcra
@@ -24,7 +25,8 @@ import java.io.File
  * - **No network sender exists.** ACRA's only sender is [LocalFileSender]: [LocalOnlyPluginLoader] answers every request
  *   for a sender with it alone, so a transitive sender plugin can never be picked up. ACRA's own collectors and start-up
  *   processors still come from its ServiceLoader list: ACRA asks the same loader for those, and a loader that knew only
- *   the sender left every report empty (`{}`; review 2026-11-24). It writes each report, redacted with
+ *   the sender left every report empty (`{}`; review 2026-11-24). [RedactingAdministrator] redacts the stack trace
+ *   in the crashing process, where the registered secrets are. The sender writes each report, redacted once more with
  *   [Redact.text], to `filesDir/acra/<epoch-ms>.json` and keeps the newest [KEEP] files; WP-E's log export reads them.
  * - **No logcat, device id, shared preferences or dumpsys** in a report ([FIELDS]): logcat carries Media3 and system
  *   lines that never went through `BoxLog`'s redaction.
@@ -63,13 +65,39 @@ object CrashConfig {
  * passes its configuration to the `:acra` process.
  */
 class LocalOnlyPluginLoader : PluginLoader {
-    override fun <T : Plugin> load(clazz: Class<T>): List<T> =
-        if (clazz.isAssignableFrom(LocalFileSenderFactory::class.java)) listOf(clazz.cast(LocalFileSenderFactory())!!) else ServicePluginLoader().load(clazz)
+    override fun <T : Plugin> load(clazz: Class<T>): List<T> = own(clazz) { ServicePluginLoader().load(clazz) }
 
     override fun <T : Plugin> loadEnabled(config: CoreConfiguration, clazz: Class<T>): List<T> =
-        if (clazz.isAssignableFrom(LocalFileSenderFactory::class.java)) listOf(clazz.cast(LocalFileSenderFactory())!!) else ServicePluginLoader().loadEnabled(config, clazz)
+        own(clazz) { ServicePluginLoader().loadEnabled(config, clazz) }
+
+    private fun <T : Plugin> own(clazz: Class<T>, acra: () -> List<T>): List<T> = when {
+        clazz.isAssignableFrom(LocalFileSenderFactory::class.java) -> listOf(clazz.cast(LocalFileSenderFactory())!!)
+        clazz.isAssignableFrom(RedactingAdministrator::class.java) -> acra() + clazz.cast(RedactingAdministrator())!!
+        else -> acra()
+    }
 
     private companion object { private const val serialVersionUID = 1L }
+}
+
+/**
+ * (Review 2026-11-24) Redacts the stack trace in the crashing process, before ACRA stores the report. The sender runs
+ * in the `:acra` process, where no credential was ever registered with [Redact], so its own pass only catches what the
+ * patterns catch (query strings, user-info); an exception message that quotes a password or a token path segment was
+ * written as it stood. Here the registered secrets of the app's process still exist.
+ */
+class RedactingAdministrator : ReportingAdministrator {
+    override fun shouldSendReport(context: Context, config: CoreConfiguration, crashReportData: CrashReportData): Boolean {
+        try {
+            crashReportData.getString(ReportField.STACK_TRACE)?.let { crashReportData.put(ReportField.STACK_TRACE, redactTrace(it)) }
+        } catch (_: Exception) {
+            // The report is still written; the sender's pattern pass runs on it.
+        }
+        return true
+    }
+
+    companion object {
+        fun redactTrace(trace: String): String = Redact.text(trace)
+    }
 }
 
 class LocalFileSenderFactory : ReportSenderFactory {

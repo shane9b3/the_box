@@ -290,6 +290,9 @@ allprojects { p ->
       p.android.ndkPath = ndk
       p.android.defaultConfig.ndk.abiFilters.clear()
       p.android.defaultConfig.ndk.abiFilters.addAll(abis)
+      // 16 KB page sizes (Android 15+ arm64 devices): NDK r26 links with 4 KB segment alignment unless told
+      // otherwise, and such a libffmpegJNI.so does not load there. Harmless on 4 KB devices and 32-bit ABIs.
+      p.android.defaultConfig.externalNativeBuild.cmake.arguments '-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384'
     }
   }
 }
@@ -317,6 +320,20 @@ for abi in "${ABI_LIST[@]}"; do
   grep -q "jni/$abi/libffmpegJNI.so" <<<"$listing" || die "AAR lacks jni/$abi/libffmpegJNI.so"
 done
 grep 'jni/' <<<"$listing"
+
+# 16 KB page alignment of the 64-bit library's LOAD segments (lint: Aligned16KB).
+if [[ " ${ABI_LIST[*]} " == *" arm64-v8a "* ]]; then
+  align_dir="$(mktemp -d)"
+  unzip -q -o "$AAR_OUT" 'jni/arm64-v8a/libffmpegJNI.so' -d "$align_dir"
+  readelf="$ANDROID_NDK/toolchains/llvm/prebuilt/$HOST_PLATFORM/bin/llvm-readelf"
+  load_aligns="$("$readelf" -lW "$align_dir/jni/arm64-v8a/libffmpegJNI.so" | awk '$1 == "LOAD" { print $NF }' | sort -u | tr '\n' ' ')"
+  rm -rf "$align_dir"
+  log "arm64-v8a LOAD alignment: $load_aligns"
+  for a in $load_aligns; do
+    (( a >= 0x4000 )) || die "arm64-v8a/libffmpegJNI.so has a LOAD segment aligned to $a (< 16 KB)"
+  done
+  [[ -n "$load_aligns" ]] || die "Could not read LOAD segments of arm64-v8a/libffmpegJNI.so"
+fi
 
 ( cd "$OUT_DIR" && sha256 "$AAR_NAME" > "$AAR_NAME.sha256" )
 cat "$OUT_DIR/$AAR_NAME.sha256"

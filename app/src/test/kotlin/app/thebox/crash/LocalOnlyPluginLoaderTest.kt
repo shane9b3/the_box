@@ -35,4 +35,14 @@ class LocalOnlyPluginLoaderTest {
     fun itTravelsToTheSenderProcess() {
         ObjectOutputStream(ByteArrayOutputStream()).use { it.writeObject(loader) }
     }
+
+    @Test
+    fun theStackTraceIsRedactedBeforeTheReportIsStored() {
+        val admins = loader.load(org.acra.config.ReportingAdministrator::class.java)
+        assertTrue(admins.any { it is RedactingAdministrator })
+        app.thebox.core.common.Redact.registerSecret("hunter2secret")
+        val stored = RedactingAdministrator.redactTrace("java.io.IOException: 403 for /live/someone/hunter2secret/12.ts")
+        assertTrue(stored, "hunter2secret" !in stored)
+        assertTrue(stored, stored.startsWith("java.io.IOException"))
+    }
 }

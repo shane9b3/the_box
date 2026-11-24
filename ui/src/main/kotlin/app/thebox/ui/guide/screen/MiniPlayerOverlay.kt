@@ -11,6 +11,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
@@ -112,11 +116,16 @@ private fun Logo(channel: GuideChannel?, modifier: Modifier, nameFallback: Boole
     channel ?: return
     val loader = LocalShellImageLoader.current
     val url = channel.logoUrl
-    val image = loader != null && !url.isNullOrBlank()
+    // (Review 2026-11-24, Low 9) A logo that fails to load falls back to the name, as a missing one does.
+    var failed by remember(url) { mutableStateOf(false) }
+    val image = loader != null && !url.isNullOrBlank() && !failed
     if (!image && !nameFallback) return
     Box(modifier, contentAlignment = Alignment.Center) {
         if (image) {
-            AsyncImage(model = url, contentDescription = channel.displayName, imageLoader = loader, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
+            AsyncImage(
+                model = url, contentDescription = channel.displayName, imageLoader = loader, contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize(), onError = { failed = true },
+            )
         } else {
             Line(channel.displayName, GuideUi.sans(30, FontWeight.SemiBold))
         }

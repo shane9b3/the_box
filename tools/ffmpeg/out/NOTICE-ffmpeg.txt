@@ -17,8 +17,8 @@ Media3 source:   https://github.com/androidx/media.git tag 1.11.1, commit 8c6678
 Build script:    libraries/decoder_ffmpeg/src/main/jni/build_ffmpeg.sh at that tag,
                  driven by tools/ffmpeg/build-ffmpeg-aar.sh in The Box repository
 Android NDK:     26.1.10909125, host darwin-x86_64, API level 23
-Artifact:        media3-decoder-ffmpeg-1.11.1-armeabi-v7a_arm64-v8a.aar
-                 sha256 027ab6783425d66425a04c7dbc917b38e4f2b0b216b3f6664c6b2483c16bb6ff
+Artifact:        media3-decoder-ffmpeg-1.11.1-x86_armeabi-v7a_arm64-v8a.aar
+                 sha256 d88345502c4c5fda0b4cbb3e767cd39e10994ac1c00f695fb709ea8ad1e787f5
 
 ($NDK_PATH below = Android NDK 26.1.10909125 root.)
 
@@ -40,6 +40,9 @@ Enabled FFmpeg decoders:
 
 Exact FFmpeg configure flags per ABI:
 
+[x86] licence: LGPL version 2.1 or later
+./configure --libdir=android-libs/x86 --arch=x86 --cpu=i686 --cross-prefix=$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/i686-linux-android23- --nm=$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-nm --ar=$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar --ranlib=$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ranlib --strip=$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strip --disable-asm --target-os=android --enable-static --disable-shared --disable-doc --disable-programs --disable-everything --disable-avdevice --disable-avformat --disable-swscale --disable-postproc --disable-avfilter --disable-symver --enable-swresample --extra-ldexeflags=-pie --disable-v4l2-m2m --disable-vulkan --enable-decoder=ac3 --enable-decoder=eac3 --enable-decoder=dca --enable-decoder=mp3 --enable-decoder=mp2 --enable-decoder=aac --enable-decoder=aac_latm --enable-decoder=truehd --enable-decoder=vorbis --enable-decoder=opus --enable-decoder=flac --enable-decoder=alac --enable-decoder=pcm_mulaw --enable-decoder=pcm_alaw
+
 [armeabi-v7a] licence: LGPL version 2.1 or later
 ./configure --libdir=android-libs/armeabi-v7a --arch=arm --cpu=armv7-a --cross-prefix=$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/armv7a-linux-androideabi23- --nm=$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-nm --ar=$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar --ranlib=$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ranlib --strip=$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strip --extra-cflags='-march=armv7-a -mfloat-abi=softfp' --extra-ldflags='-Wl,--fix-cortex-a8' --target-os=android --enable-static --disable-shared --disable-doc --disable-programs --disable-everything --disable-avdevice --disable-avformat --disable-swscale --disable-postproc --disable-avfilter --disable-symver --enable-swresample --extra-ldexeflags=-pie --disable-v4l2-m2m --disable-vulkan --enable-decoder=ac3 --enable-decoder=eac3 --enable-decoder=dca --enable-decoder=mp3 --enable-decoder=mp2 --enable-decoder=aac --enable-decoder=aac_latm --enable-decoder=truehd --enable-decoder=vorbis --enable-decoder=opus --enable-decoder=flac --enable-decoder=alac --enable-decoder=pcm_mulaw --enable-decoder=pcm_alaw
 
@@ -47,7 +50,7 @@ Exact FFmpeg configure flags per ABI:
 ./configure --libdir=android-libs/arm64-v8a --arch=aarch64 --cpu=armv8-a --cross-prefix=$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/aarch64-linux-android23- --nm=$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-nm --ar=$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ar --ranlib=$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-ranlib --strip=$NDK_PATH/toolchains/llvm/prebuilt/darwin-x86_64/bin/llvm-strip --target-os=android --enable-static --disable-shared --disable-doc --disable-programs --disable-everything --disable-avdevice --disable-avformat --disable-swscale --disable-postproc --disable-avfilter --disable-symver --enable-swresample --extra-ldexeflags=-pie --disable-v4l2-m2m --disable-vulkan --enable-decoder=ac3 --enable-decoder=eac3 --enable-decoder=dca --enable-decoder=mp3 --enable-decoder=mp2 --enable-decoder=aac --enable-decoder=aac_latm --enable-decoder=truehd --enable-decoder=vorbis --enable-decoder=opus --enable-decoder=flac --enable-decoder=alac --enable-decoder=pcm_mulaw --enable-decoder=pcm_alaw
 
 To rebuild: tools/ffmpeg/build-ffmpeg-aar.sh --media3-tag 1.11.1 \
-  --ffmpeg-branch release/6.0 --api-level 23 --abis "armeabi-v7a arm64-v8a" \
+  --ffmpeg-branch release/6.0 --api-level 23 --abis "x86 armeabi-v7a arm64-v8a" \
   --decoders "ac3 eac3 dca mp3 mp2 aac aac_latm truehd vorbis opus flac alac pcm_mulaw pcm_alaw"
 
 ----------------------------------------------------------------------

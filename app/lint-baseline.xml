@@ -112,27 +112,6 @@
     </issue>
 
     <issue
-        id="Aligned16KB"
-        message="The native library `arm64-v8a/libffmpegJNI.so` (from `__local_aars__:/Users/shawnjohnson/Projects/The_Box/.claude/worktrees/agent-a18ed39266cfe01c7/ffmpeg/libs/media3-decoder-ffmpeg-1.11.1-x86_armeabi-v7a_arm64-v8a.aar:unspecified`) is not 16 KB aligned">
-        <location
-            file="$GRADLE_USER_HOME/caches/9.8.1/transforms/936597207d5aad682ff2dc5b52c4ca93/transformed/media3-decoder-ffmpeg-1.11.1-x86_armeabi-v7a_arm64-v8a/jni/arm64-v8a/libffmpegJNI.so"/>
-    </issue>
-
-    <issue
-        id="Aligned16KB"
-        message="The native library `arm64-v8a/libffmpegJNI.so` (from `__local_aars__:/Users/shawnjohnson/Projects/The_Box/.claude/worktrees/agent-a18ed39266cfe01c7/ffmpeg/libs/media3-decoder-ffmpeg-1.11.1-x86_armeabi-v7a_arm64-v8a.aar:unspecified`) is not 16 KB aligned">
-        <location
-            file="$GRADLE_USER_HOME/caches/9.8.1/transforms/936597207d5aad682ff2dc5b52c4ca93/transformed/media3-decoder-ffmpeg-1.11.1-x86_armeabi-v7a_arm64-v8a/jni/arm64-v8a/libffmpegJNI.so"/>
-    </issue>
-
-    <issue
-        id="Aligned16KB"
-        message="The native library `arm64-v8a/libffmpegJNI.so` (from `__local_aars__:/Users/shawnjohnson/Projects/The_Box/.claude/worktrees/agent-a18ed39266cfe01c7/ffmpeg/libs/media3-decoder-ffmpeg-1.11.1-x86_armeabi-v7a_arm64-v8a.aar:unspecified`) is not 16 KB aligned">
-        <location
-            file="$GRADLE_USER_HOME/caches/9.8.1/transforms/936597207d5aad682ff2dc5b52c4ca93/transformed/media3-decoder-ffmpeg-1.11.1-x86_armeabi-v7a_arm64-v8a/jni/arm64-v8a/libffmpegJNI.so"/>
-    </issue>
-
-    <issue
         id="DiscouragedApi"
         message="Fixed screen orientations will be ignored in most cases, starting from Android 16. Android is moving toward a model where apps are expected to adapt to various orientations, display sizes, and aspect ratios."
         errorLine1="            android:screenOrientation=&quot;landscape&quot;"

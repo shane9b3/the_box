@@ -67,4 +67,21 @@ class SettingsViewModelLifecycleTest {
         assertEquals("no page reopened for a route not shown", opens, r.provider.opens)
         assertTrue(r.provider.intents.isEmpty())
     }
+
+    /** Review 2026-11-24 (C-B2): a relock closes the Parental page, back to the page under it; other pages stay. */
+    @Test
+    fun aRelockLeavesTheParentalPage() {
+        val r = SettingsVmRig(firstDataMs = 0)
+        val link = r.machine as app.thebox.core.settings.state.SettingsShellLink
+        r.machine.open(SettingsRoute.Root, fromFull = false)
+        r.advance(100)
+        link.push(SettingsRoute.Section(app.thebox.core.settings.SectionId.PARENTAL)); r.advance(100)
+        assertEquals(SettingsRoute.Section(app.thebox.core.settings.SectionId.PARENTAL), r.machine.ui.value.route)
+        leaveParentalPage(link); r.advance(100)
+        assertEquals(SettingsRoute.Root, r.machine.ui.value.route)
+        // Not on the Parental page: nothing moves.
+        link.push(SettingsRoute.Section(app.thebox.core.settings.SectionId.NETWORK)); r.advance(100)
+        leaveParentalPage(link); r.advance(100)
+        assertEquals(SettingsRoute.Section(app.thebox.core.settings.SectionId.NETWORK), r.machine.ui.value.route)
+    }
 }
