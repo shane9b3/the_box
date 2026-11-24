@@ -261,6 +261,8 @@ class ErrorLadderImpl(
             d,
             e.c.copy(transientRetries = n + 1, baseRotations = e.c.baseRotations + if (rotated) 1 else 0),
             eventual,
+            // (Review 2026-11-23, M4) "Unlimited" keeps trying here as it does in L19: the switch timeout does not end it.
+            timeoutExempt = e.unlimited,
         )
     }
 

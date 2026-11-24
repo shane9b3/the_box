@@ -94,7 +94,9 @@ class StorageTargetsImpl(
     }
 
     private fun ensureKeeperIfChosen() {
-        if (locations.chosen(StoragePurpose.TIMESHIFT).startsWith(StorageConstants.SMB_ID_PREFIX)) keeper
+        // (Review 2026-11-23, M7) Only a location the keeper would keep: not while pause and rewind is off (or not in
+        // the build), when a restored SMB choice would start its thread and network callback for nothing.
+        if (locations.keptLocation() != null) keeper
     }
 
     override fun current(purpose: StoragePurpose): RingTargetChoice {

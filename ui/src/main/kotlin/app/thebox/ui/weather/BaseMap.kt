@@ -26,23 +26,32 @@ internal class BaseMap private constructor(private val layers: Array<Array<Ring>
     fun path(kind: Int, v: RadarMath.View, scale: Float, closed: Boolean): Path {
         val path = Path()
         val rings = layers.getOrNull(kind) ?: return path
-        val qx0 = qx(RadarMath.lonOf(v.left, v.zoom))
-        val qx1 = qx(RadarMath.lonOf(v.right, v.zoom))
         val qy0 = qy(RadarMath.latOf(v.top, v.zoom))
         val qy1 = qy(RadarMath.latOf(v.bottom, v.zoom))
-        for (r in rings) {
-            if (r.maxX < qx0 || r.minX > qx1 || r.maxY < qy0 || r.minY > qy1) continue
-            val xy = r.xy
-            var i = 0
-            while (i < xy.size) {
-                val lon = (xy[i].toInt() and 0xFFFF) / Q * 360.0 - 180.0
-                val lat = 90.0 - (xy[i + 1].toInt() and 0xFFFF) / Q * 180.0
-                val x = ((RadarMath.xOf(lon, v.zoom) - v.left) * scale).toFloat()
-                val y = ((RadarMath.yOf(lat, v.zoom) - v.top) * scale).toFloat()
-                if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
-                i += 2
+        // (Review 2026-11-23, L8) A view across the 180th meridian (a Pacific city) reaches past the world's edge: the
+        // world is drawn again one width to that side, as the radar tiles already wrap.
+        val world = RadarMath.worldSize(v.zoom)
+        for (copy in -1..1) {
+            val shift = copy * world
+            val left = v.left - shift
+            val right = v.right - shift
+            if (right < 0.0 || left > world) continue
+            val qx0 = qx(RadarMath.lonOf(left.coerceAtLeast(0.0), v.zoom))
+            val qx1 = qx(RadarMath.lonOf(right.coerceAtMost(world), v.zoom))
+            for (r in rings) {
+                if (r.maxX < qx0 || r.minX > qx1 || r.maxY < qy0 || r.minY > qy1) continue
+                val xy = r.xy
+                var i = 0
+                while (i < xy.size) {
+                    val lon = (xy[i].toInt() and 0xFFFF) / Q * 360.0 - 180.0
+                    val lat = 90.0 - (xy[i + 1].toInt() and 0xFFFF) / Q * 180.0
+                    val x = ((RadarMath.xOf(lon, v.zoom) + shift - v.left) * scale).toFloat()
+                    val y = ((RadarMath.yOf(lat, v.zoom) - v.top) * scale).toFloat()
+                    if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                    i += 2
+                }
+                if (closed) path.close()
             }
-            if (closed) path.close()
         }
         return path
     }

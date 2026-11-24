@@ -33,7 +33,12 @@ internal interface StreamUrlResolver {
     /** CatchupTarget for M4 (liveUrl and headers keep {{u}}/{{p}}; xtream carries clear credentials). */
     suspend fun catchupTarget(identity: app.thebox.core.refresh.ChannelIdentity): app.thebox.core.catchup.CatchupTarget?
     /** Expands credentials in an ArchiveRequest built by CatchupUrlBuilder (the M2 "last" step, §3.14). */
-    suspend fun expandArchive(identity: app.thebox.core.refresh.ChannelIdentity, request: app.thebox.core.catchup.ArchiveRequest): ResolveOutcome
+    /** [userAgentOverride]: the ladder's User-Agent fallback (L5), as for a live resolve (review 2026-11-23, L2). */
+    suspend fun expandArchive(
+        identity: app.thebox.core.refresh.ChannelIdentity,
+        request: app.thebox.core.catchup.ArchiveRequest,
+        userAgentOverride: String? = null,
+    ): ResolveOutcome
 }
 
 /** Tune target without UI types: a channel identity or a direct URL. */

@@ -79,6 +79,19 @@ class ErrorLadderRulesTest {
     }
 
     @Test
+    fun unlimitedRetriesOfAServerErrorContinuePastTheTimeout() {
+        // (Review 2026-11-23, M4) A 5xx before the first frame, with "Unlimited": not ended by the switch timeout.
+        var c = LadderCounters()
+        repeat(20) { n ->
+            val t = ladder.trace(FailureSignal.Http(500, LoadOrigin.PROGRESSIVE), ctx(mapOf("attempts" to "-1", "ms" to (15_000L + n * 5_000L).toString())).with(c))
+            assertEquals("L15", t.row)
+            assertTrue(t.decision !is LadderDecision.Fail)
+            c = t.counters
+        }
+        assertEquals(20, c.transientRetries)
+    }
+
+    @Test
     fun controllerRetryDelaysJitterTwentyPercent() {
         val low = ErrorLadderImpl(random = { 0.0 })
         val high = ErrorLadderImpl(random = { 1.0 })

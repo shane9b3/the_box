@@ -180,6 +180,8 @@ internal class DisplayModeController(
             evaluate(force = false)
         } else {
             revert("mode $mode")
+            // (Review 2026-11-23, M6) A switch still holding playback (API < 31) is let go, as in [clear].
+            if (holding) settle("mode $mode")
         }
     }
 

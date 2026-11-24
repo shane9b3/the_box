@@ -162,8 +162,10 @@ class TuneGuardImpl @Inject constructor(
             if (!index.loaded) return TuneVerdict.NEEDS_PIN
             if (!index.locked(identity, access)) return TuneVerdict.ALLOWED
             if (access == ParentalAccess.FILTERED_NO_PIN) {
-                val g = index.groupOf(identity)
-                return if (g != null && g in state.openedAnyway) TuneVerdict.ALLOWED else TuneVerdict.NOT_PROTECTED
+                // (Review 2026-11-23, L4) A channel in no group is opened under its playlist, as `openAnyway(identity)`
+                // records it; with null here "Open anyway" never took for it.
+                val g = index.groupOf(identity) ?: GuideSource.All(identity.playlistId)
+                return if (g in state.openedAnyway) TuneVerdict.ALLOWED else TuneVerdict.NOT_PROTECTED
             }
             return TuneVerdict.NEEDS_PIN
         }

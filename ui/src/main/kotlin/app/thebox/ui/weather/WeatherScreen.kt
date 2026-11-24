@@ -42,6 +42,7 @@ import androidx.compose.ui.res.stringArrayResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleStartEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import app.thebox.core.weather.DayWeather
 import app.thebox.core.weather.Forecast
@@ -102,6 +103,16 @@ fun WeatherScreen(
         onDispose {
             viewModel.onLeft()
             onBackFreeChanged(true)
+        }
+    }
+    // (Review 2026-11-23, M3) In the background (Home, standby) the page asks for nothing and the radar loop rests; the
+    // visit's city and page are kept for the return.
+    LifecycleStartEffect(viewModel, radarState) {
+        viewModel.onStarted()
+        radarState.started = true
+        onStopOrDispose {
+            viewModel.onStopped()
+            radarState.started = false
         }
     }
     LaunchedEffect(panel) { onBackFreeChanged(panel == null) }

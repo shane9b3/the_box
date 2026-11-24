@@ -122,8 +122,16 @@ object OpenMeteoMapper {
     }
 
     private fun JsonObject.arr(key: String): JsonArray? = this[key] as? JsonArray
-    private fun JsonObject.strings(key: String): List<String>? =
-        arr(key)?.mapNotNull { (it as? JsonPrimitive)?.takeIf { p -> p.isString }?.content }
+    /**
+     * Every element as text, or null when one is not text (review 2026-11-23, L8): dropping a null time would shift every
+     * later reading onto the wrong hour or day, so such an answer is refused as a whole.
+     */
+    private fun JsonObject.strings(key: String): List<String>? {
+        val a = arr(key) ?: return null
+        val out = ArrayList<String>(a.size)
+        for (e in a) out += (e as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return null
+        return out
+    }
     private fun JsonElement?.prim(): JsonPrimitive? = (this as? JsonPrimitive)?.takeIf { it !is JsonNull }
     private fun JsonArray?.dbl(i: Int): Double? = this?.getOrNull(i).prim()?.doubleOrNull
     private fun JsonArray?.int(i: Int): Int? = this?.getOrNull(i).prim()?.let { it.intOrNull ?: it.doubleOrNull?.toInt() }

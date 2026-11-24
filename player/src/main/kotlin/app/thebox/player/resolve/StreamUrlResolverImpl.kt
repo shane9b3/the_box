@@ -83,11 +83,11 @@ internal class StreamUrlResolverImpl @Inject constructor(
         return CatchupTarget(liveUrl = s.liveUrlTemplate, headers = s.headerTemplates, catchup = inputs.channel.catchup, xtream = s.xtream, winner = null)
     }
 
-    override suspend fun expandArchive(identity: ChannelIdentity, request: ArchiveRequest): ResolveOutcome = guard {
+    override suspend fun expandArchive(identity: ChannelIdentity, request: ArchiveRequest, userAgentOverride: String?): ResolveOutcome = guard {
         when (val inputs = load(identity)) {
             is Loaded.Failed -> inputs.outcome
             is Loaded.Ok -> {
-                val input = inputs.input(settings.current.defaultUserAgent)
+                val input = inputs.input(settings.current.defaultUserAgent).copy(userAgentOverride = userAgentOverride)
                 val b = builder as? StreamUrlBuilderImpl ?: StreamUrlBuilderImpl()
                 registered(b.buildArchive(input, request), inputs.credentials)
             }

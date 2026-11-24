@@ -79,13 +79,15 @@ class LanPhoneLink(
     @Volatile var portOverride: Int? = null
 
     private val lock = Any()
-    private var server: LanHttpServerImpl? = null
-    private var session: PairingSession? = null
-    private var api: PhoneApi? = null
+    // Written under [lock]; @Volatile because the status and submission paths read them from other threads without it
+    // (review 2026-11-23, M13).
+    @Volatile private var server: LanHttpServerImpl? = null
+    @Volatile private var session: PairingSession? = null
+    @Volatile private var api: PhoneApi? = null
     private var ticker: Job? = null
-    private var baseUrl: String? = null
-    private var purpose: PhonePurpose = PhonePurpose.SETUP
-    private var received = false
+    @Volatile private var baseUrl: String? = null
+    @Volatile private var purpose: PhonePurpose = PhonePurpose.SETUP
+    @Volatile private var received = false
     /**
      * D-B3: files offered while no server runs (an export that finishes before the phone screen starts the server);
      * handed to the next session's [PhoneApi], deleted by [stop] when no session takes them.

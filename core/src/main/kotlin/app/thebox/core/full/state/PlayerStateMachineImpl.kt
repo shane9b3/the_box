@@ -939,7 +939,12 @@ class PlayerStateMachineImpl(
             }
             BoxAction.RIGHT -> Unit
             BoxAction.SELECT -> {
-                if (p.focused >= p.choices.size) { picker = p.copy(remember = !(p.remember ?: true)); return true }
+                if (p.focused >= p.choices.size) {
+                    // The "Remember for this channel" row; an empty list without one has nothing to press
+                    // (review 2026-11-23, M13: OK there used to create the row).
+                    if (p.remember != null) picker = p.copy(remember = !p.remember)
+                    return true
+                }
                 val c = p.choices[p.focused]
                 if (p.kind == PickerKind.SCORE_BUG || p.kind == PickerKind.SCORE_DELAY) { scoreSelect(c); return true }
                 if (c is PickerChoice.Audio && !c.track.supported) return true

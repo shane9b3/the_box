@@ -186,6 +186,9 @@ class XtreamClient internal constructor(
                             buf.copyTo(prefixBuf, 0, minOf(PREFIX_BYTES - prefixBuf.size, buf.size))
                         }
                         total += n
+                        // (Review 2026-11-23, M10) A ceiling, as the file fetcher has: a panel that never ends its
+                        // answer (or a decompression bomb behind transparent gzip) must not fill the box's storage.
+                        if (total > MAX_DOWNLOAD_BYTES) throw SourceException(SourceError.Unsupported("file larger than $MAX_DOWNLOAD_BYTES bytes"))
                         sink.write(buf, buf.size)
                     }
                 }
@@ -353,5 +356,7 @@ class XtreamClient internal constructor(
         private const val MAX_EPG_BODY = 16L * 1024 * 1024
         private const val PREFIX_BYTES = 256L
         private const val CHUNK = 64L * 1024
+        /** The largest player-API answer kept (decoded bytes). The largest lists seen are well under a fifth of it. */
+        internal const val MAX_DOWNLOAD_BYTES = 512L * 1024 * 1024
     }
 }

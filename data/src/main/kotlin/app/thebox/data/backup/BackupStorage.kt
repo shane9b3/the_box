@@ -63,6 +63,8 @@ class AndroidBackupStorage @Inject constructor(@ApplicationContext private val c
         if (Build.VERSION.SDK_INT >= 29) {
             try {
                 return writeMediaStore(name, body)
+            } catch (e: app.thebox.core.backup.BackupTooLargeException) {
+                throw e // (Review 2026-11-23, M11) the backup itself is too large: writing it again elsewhere cannot help
             } catch (e: IOException) {
                 BoxLog.w(TAG, "Downloads not writable (${e.javaClass.simpleName}); using app storage")
             } catch (e: SecurityException) {
@@ -75,6 +77,8 @@ class AndroidBackupStorage @Inject constructor(@ApplicationContext private val c
                 if (dir.isDirectory || dir.mkdirs()) {
                     try {
                         return writeFile(File(dir, name), body, StoredBackup.Where.DOWNLOADS)
+                    } catch (e: app.thebox.core.backup.BackupTooLargeException) {
+                        throw e
                     } catch (e: IOException) {
                         BoxLog.w(TAG, "Download/TheBox not writable (${e.javaClass.simpleName}); using app storage")
                     }

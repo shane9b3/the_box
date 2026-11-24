@@ -110,6 +110,20 @@ class WeatherViewModel internal constructor(
         _state.update { it.copy(city = prefs.defaultCity, page = WeatherPage.FORECAST, day = 0, radar = RadarUi(), search = CitySearchUi()) }
     }
 
+    /** (Review 2026-11-23, M3) The app left the foreground with the page open: requests stop, the visit is kept. */
+    fun onStopped() {
+        if (!entered) return
+        entered = false
+        forecastJob?.cancel(); radarJob?.cancel()
+    }
+
+    /** Back in the foreground on the page: read again (the cache answers a forecast that is still fresh). */
+    fun onStarted() {
+        if (entered) return
+        entered = true
+        reload()
+    }
+
     fun onDay(day: Int) = _state.update { it.copy(day = day) }
 
     fun onPage(page: WeatherPage) {

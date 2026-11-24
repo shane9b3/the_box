@@ -574,13 +574,16 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
 
         if (programme && (flags and (ProgrammeFlags.NEW or ProgrammeFlags.LIVE)) != 0) {
             var tagRight = minOf(x1, contentRight)
+            // (Review 2026-11-23, M13) Measured against the cell's visible left edge: a cell scrolled part-way under the
+            // channel column drops a tag that no longer fits, instead of drawing it cut mid-word.
+            val tagLeft = maxOf(x0, m.timelineLeft)
             if ((flags and ProgrammeFlags.NEW) != 0) {
                 if (newTagTextW < 0f) newTagTextW = width(NEW_TAG, GuideTextStyle.NEW_TAG)
-                tagRight = drawCornerTag(canvas, NEW_TAG, newTagTextW, x0, tagRight, top, past, focused)
+                tagRight = drawCornerTag(canvas, NEW_TAG, newTagTextW, tagLeft, tagRight, top, past, focused)
             }
-            if ((flags and ProgrammeFlags.LIVE) != 0 && tagRight > x0) {
+            if ((flags and ProgrammeFlags.LIVE) != 0 && tagRight > tagLeft) {
                 if (liveTagTextW < 0f) liveTagTextW = width(LIVE_TAG, GuideTextStyle.NEW_TAG)
-                drawCornerTag(canvas, LIVE_TAG, liveTagTextW, x0, tagRight, top, past, focused)
+                drawCornerTag(canvas, LIVE_TAG, liveTagTextW, tagLeft, tagRight, top, past, focused)
             }
         }
 

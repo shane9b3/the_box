@@ -33,6 +33,13 @@ interface DataSettings {
     val settings: StateFlow<DataSettingsSnapshot>
     val current: DataSettingsSnapshot get() = settings.value
     fun update(transform: (DataSettingsSnapshot) -> DataSettingsSnapshot)
+
+    /**
+     * (Review 2026-11-23, M12) Returns once [current] holds the stored values and not the defaults a cold process starts
+     * with (a worker woken by WorkManager reads it within milliseconds). It gives up after a bounded wait, so a store
+     * that cannot be read never holds a run back for good. Nothing to wait for by default.
+     */
+    suspend fun awaitLoaded() {}
 }
 
 /** In-memory default (M1). Values reset on process death; M5 replaces the binding with a DataStore one. */

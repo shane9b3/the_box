@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -115,6 +116,12 @@ class PersistedDataSettings internal constructor(
         state.value = map(store.flow(DataDomain).value)
     }
 
+    override suspend fun awaitLoaded() {
+        if (kotlinx.coroutines.withTimeoutOrNull(LOAD_WAIT_MS) { store.loaded.first { it } } == null) {
+            BoxLog.w(TAG, "stored settings not read in time; the run uses the defaults")
+        }
+    }
+
     private fun map(p: DataPrefs): DataSettingsSnapshot = extras.copy(
         epgPastDays = if (p.epgPastDays == 0) autoPastDays(catchupDays) else p.epgPastDays,
         epgFutureDays = p.epgFutureDays,
@@ -129,6 +136,8 @@ class PersistedDataSettings internal constructor(
         private const val TAG = "PersistedDataSettings"
         /** "Daily at a set time" runs as a 24 h period that `RefreshScheduler` starts at the chosen hour. */
         const val DAILY_INTERVAL_H = 24
+        /** [awaitLoaded]'s bound: far longer than a read takes, short against a guide import. */
+        const val LOAD_WAIT_MS = 30_000L
 
         /** S12: Auto = max catch-up days of the enabled playlists, at least 1 and at most 7. */
         fun autoPastDays(maxCatchupDays: Int?): Int = (maxCatchupDays ?: 1).coerceIn(1, 7)
@@ -145,7 +154,12 @@ class PersistedDataSettings internal constructor(
                 matchLevel = GuidePrefsMapping.pick(old.matchLevel, before.match.level, after.match.level),
                 storeDescriptions = GuidePrefsMapping.pick(old.storeDescriptions, before.storeDescriptions, after.storeDescriptions),
                 epgRefreshIntervalH = if (intervalChanged) after.epgRefreshIntervalH else old.epgRefreshIntervalH,
-                epgDailyAtHour = if (intervalChanged) null else old.epgDailyAtHour,
+                // (Review 2026-11-23, L7) A changed daily hour is stored; an interval change alone ends "daily".
+                epgDailyAtHour = when {
+                    after.epgDailyAtHour != before.epgDailyAtHour -> after.epgDailyAtHour
+                    intervalChanged -> null
+                    else -> old.epgDailyAtHour
+                },
                 globalShiftMin = GuidePrefsMapping.pick(old.globalShiftMin, before.globalShiftMin, after.globalShiftMin),
             )
         }

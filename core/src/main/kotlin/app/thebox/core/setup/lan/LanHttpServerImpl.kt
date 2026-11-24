@@ -41,7 +41,8 @@ class LanHttpServerImpl(
     )
 
     private class Active(val conn: LanConnection, val address: String, @Volatile var lastProgressNs: Long, @Volatile var thread: Thread?) {
-        @Volatile var responding = false
+        /** Set once, by whoever answers: the worker or the watchdog's 408, never both (review 2026-11-23, M13). */
+        val responding = java.util.concurrent.atomic.AtomicBoolean(false)
     }
 
     @Volatile private var listener: LanListener? = null
@@ -144,9 +145,8 @@ class LanHttpServerImpl(
         val limitNs = config.socketTimeoutMs * 1_000_000L
         val now = System.nanoTime()
         for (a in active) {
-            if (!a.responding && now - a.lastProgressNs > limitNs) {
+            if (now - a.lastProgressNs > limitNs && a.responding.compareAndSet(false, true)) {
                 BoxLog.i(TAG) { "request timed out" }
-                a.responding = true
                 runCatching { writeResponse(a.conn.output, plain(408, "Request timeout")) }
                 runCatching { a.conn.close() }
                 a.thread?.interrupt()
@@ -211,8 +211,7 @@ class LanHttpServerImpl(
             } catch (e: HttpParseException) {
                 plain(e.status, "Bad request")
             }
-            if (a.responding) return // the watchdog answered
-            a.responding = true
+            if (!a.responding.compareAndSet(false, true)) return // the watchdog answered
             val sent = writeResponse(conn.output, response, head = method == "HEAD")
             BoxLog.i(TAG) { "$method $pathForLog ${response.status} $sent" }
             // D-S2: a single-use download is gone once it was written in full.

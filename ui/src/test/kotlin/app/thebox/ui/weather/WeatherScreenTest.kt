@@ -229,6 +229,21 @@ class WeatherScreenTest {
         assertFalse(vm.state.value.search.searched)
     }
 
+    @Test fun inTheBackgroundThePageAsksForNothingAndKeepsTheVisit() {
+        // Review 2026-11-23 (M3): Home or standby with the page open stops the re-reads; the return reads again.
+        show(london, paris)
+        vm.onCity(paris.id)
+        rule.waitForIdle()
+        val before = repo.forecastCalls.size
+        vm.onStopped()
+        org.robolectric.shadows.ShadowLooper.idleMainLooper(2 * app.thebox.core.weather.WeatherTimings.REFRESH_MS, java.util.concurrent.TimeUnit.MILLISECONDS)
+        assertEquals(before, repo.forecastCalls.size)
+        vm.onStarted()
+        rule.waitForIdle()
+        assertEquals(before + 1, repo.forecastCalls.size)
+        assertEquals(paris, vm.state.value.city)
+    }
+
     @Test fun theRadarPageAsksForFramesAndFocusesPlay() {
         show(london)
         press(listOf(Key.DirectionUp, Key.DirectionUp))

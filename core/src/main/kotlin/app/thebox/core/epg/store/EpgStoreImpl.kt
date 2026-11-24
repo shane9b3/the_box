@@ -485,19 +485,22 @@ class EpgStoreImpl(
         try {
             FileInputStream(src.file).use { fis ->
                 counter.input = fis
-                val decompressed = Compression.decompress(counter.source().buffer())
-                parser.parse(
-                    decompressed.inputStream(),
-                    session,
-                    cancel,
-                    XmltvParser.Options(opts.languages, opts.storeDescriptions, opts.maxDescriptionChars, XmltvTime.resolverFor(src.assumeZone)),
-                )
+                // (Review 2026-11-23, M9) Closed here: a gzip or xz layer holds native memory (the Inflater) until closed.
+                Compression.decompress(counter.source().buffer()).use { decompressed ->
+                    parser.parse(
+                        decompressed.inputStream(),
+                        session,
+                        cancel,
+                        XmltvParser.Options(opts.languages, opts.storeDescriptions, opts.maxDescriptionChars, XmltvTime.resolverFor(src.assumeZone)),
+                    )
+                }
             }
         } catch (e: CancellationException) {
             session.abort()
             throw e
         } catch (e: RuntimeException) {
-            if (e.isSqliteException()) session.abort()
+            // (Review 2026-11-23, M9) Whatever it was: the connection is never left inside the session's transaction.
+            session.abort()
             throw e
         } catch (e: SourceException) {
             error = e.error.code

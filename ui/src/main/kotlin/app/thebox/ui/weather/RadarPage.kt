@@ -80,6 +80,8 @@ internal class RadarState {
     var zoomIndex by mutableIntStateOf(DEFAULT_ZOOM)
     var frame by mutableIntStateOf(0)
     var playing by mutableStateOf(true)
+    /** False while the app is in the background (Home, standby): the loop rests. */
+    var started by mutableStateOf(true)
     val zoom: Double get() = ZOOMS[zoomIndex]
     val canZoomIn: Boolean get() = zoomIndex < ZOOMS.lastIndex
     val canZoomOut: Boolean get() = zoomIndex > 0
@@ -99,9 +101,9 @@ internal fun RadarMap(city: WeatherCity, frames: RadarFrames?, state: RadarState
     // The frame clock: newest frame first shown, then a loop that rests on the newest.
     val count = frames?.frames?.size ?: 0
     LaunchedEffect(frames?.frames) { state.frame = (count - 1).coerceAtLeast(0) }
-    LaunchedEffect(state.playing, count) {
+    LaunchedEffect(state.playing, state.started, count) {
         // System animations off: the newest picture stays; the step buttons still work.
-        if (!state.playing || count < 2 || motionOff()) return@LaunchedEffect
+        if (!state.playing || !state.started || count < 2 || motionOff()) return@LaunchedEffect
         while (true) {
             delay(if (state.frame == count - 1) WeatherTimings.RADAR_LAST_FRAME_HOLD_MS else WeatherTimings.RADAR_FRAME_MS)
             state.frame = (state.frame + 1) % count

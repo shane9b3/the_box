@@ -44,7 +44,10 @@ object QuickBarModel {
         val out = ArrayList<QuickItem>(QuickItem.entries.size)
         if (inArchive) out += QuickItem.JUMP_TO_LIVE else if (live) out += QuickItem.TIME_SHIFT
         val selectedUnsupported = menu.audio.any { it.selected && !it.supported }
-        if (menu.audio.size >= 2 || selectedUnsupported) out += QuickItem.AUDIO
+        // (Review 2026-11-23, M13) The same rule as the picker's own (`openPicker(AUDIO)`): shown exactly when the list
+        // opens. "Always passthrough" keeps it (its "Back to Auto" row is the way out on a one-track channel), and two
+        // tracks of which one can play do not (the pill only led to "no other audio").
+        if (menu.audioOutputForced || menu.audio.count { it.supported } >= 2 || selectedUnsupported) out += QuickItem.AUDIO
         out += QuickItem.ASPECT
         if (menu.text.isNotEmpty()) out += QuickItem.SUBTITLES
         if (scoreBug == ScoreBugItem.AFTER_SUBTITLES) out += QuickItem.SCORE_BUG // (score bug U-S5) right after Subtitles / Picture shape

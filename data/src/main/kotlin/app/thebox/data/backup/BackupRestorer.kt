@@ -155,8 +155,6 @@ internal class BackupRestorer(
         } else {
             null
         }
-        val matches = match(scan, secrets)
-
         // Secrets first, each under a fresh ref (deleted again if the transaction fails).
         val written = ArrayList<String>()
         val refFor = HashMap<String, String>() // backup secretRef → new local ref
@@ -171,12 +169,18 @@ internal class BackupRestorer(
             }
             importMutex.withLock {
                 usedRefs.clear()
+                // (Review 2026-11-23, L3) Matched under the lock: an import running until now may have changed the playlists.
+                val matches = match(scan, secrets)
                 db.writeTransaction { apply(this, file, scan, matches, refFor, mode, usedRefs) }
             }
         } catch (e: Exception) {
             // Nothing committed: nothing of the backup reaches memory (D-S4) and the logins written for it go.
-            runCatching { store.commitImport(committed = false) }
-            for (r in written) runCatching { creds.delete(r) }
+            // (Review 2026-11-23, L3) Also when the restore was cancelled: a suspending delete in a cancelled coroutine
+            // would end at once and leave the logins behind.
+            kotlinx.coroutines.withContext(kotlinx.coroutines.NonCancellable) {
+                runCatching { store.commitImport(committed = false) }
+                for (r in written) runCatching { creds.delete(r) }
+            }
             if (e is kotlinx.coroutines.CancellationException) throw e
             BoxLog.e(TAG, "restore failed; nothing kept", e)
             val failure = when (e) {

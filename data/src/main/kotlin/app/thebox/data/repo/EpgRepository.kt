@@ -189,6 +189,7 @@ class EpgRepository @Inject constructor(
 
     private suspend fun buildLocked(trigger: Trigger, force: Boolean, progress: (String) -> Unit): EpgRunResult {
         recovery.await()
+        settings.awaitLoaded() // the stored retention, description and match settings, not a cold process's defaults
         val started = clock.now()
         val sources = sourceDao.active()
         if (sources.isEmpty()) return EpgRunResult(null, null, skipped = true)
@@ -305,8 +306,12 @@ class EpgRepository @Inject constructor(
         for (p in picked) {
             val src = File(dir, "${p.source.id}.src")
             if (p.fresh) {
-                src.delete()
-                p.file.renameTo(src)
+                // (Review 2026-11-23, L7) The rename replaces the old file in one step; the last-good copy is deleted
+                // only when that is refused, and a failure is logged instead of passing silently.
+                if (!p.file.renameTo(src)) {
+                    src.delete()
+                    if (!p.file.renameTo(src)) BoxLog.w(TAG, "source ${p.source.id}: the new download could not replace the cached file")
+                }
             }
             val st = stats[p.source.id]
             sourceDao.setImported(
@@ -327,6 +332,7 @@ class EpgRepository @Inject constructor(
 
     private suspend fun patchLocked(progress: (String) -> Unit): EpgRunResult {
         recovery.await()
+        settings.awaitLoaded() // the stored retention, description and match settings, not a cold process's defaults
         val started = clock.now()
         val refs = try { matches.pendingPatchRefs(store) } catch (e: NotImplementedError) { emptyList() }
         if (refs.isEmpty()) return EpgRunResult(null, null, skipped = true)

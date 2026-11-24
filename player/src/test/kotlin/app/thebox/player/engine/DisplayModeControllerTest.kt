@@ -292,6 +292,21 @@ class DisplayModeControllerTest {
     }
 
     @Test
+    fun api30TurningTheSettingOffLetsAHeldSwitchGo() {
+        // Review 2026-11-23 (M6): the revert left playback held until the 3 s switch timeout.
+        val c = controller(30)
+        c.onViewport(Viewport.FULL)
+        c.onTune(25_000)
+        idle(2_000)
+        assertEquals(m50.id, c.request.value)
+        assertTrue(c.isHolding)
+        afr = AfrMode.OFF
+        c.onAfrModeChanged(AfrMode.OFF)
+        assertEquals(0, c.request.value)
+        assertFalse(c.isHolding)
+    }
+
+    @Test
     fun api30RevertsTheRequestAfterThirtySecondsInMiniAndOnClear() {
         val c = controller(30)
         c.onViewport(Viewport.FULL)

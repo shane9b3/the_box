@@ -5,6 +5,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -93,7 +94,8 @@ fun PlayerErrorCard(state: ErrorCardState, modifier: Modifier = Modifier, archiv
             )
         }
         if (state.buttons.isNotEmpty()) {
-            Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            // (Review 2026-11-23, M13) Three or four long buttons do not fit one line of the card: they wrap.
+            FlowRow(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 state.buttons.forEachIndexed { i, b ->
                     Chip(
                         focused = i == state.focused,

@@ -1042,7 +1042,7 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     private suspend fun resolveOutcome(r: ResolveRequest): ResolveOutcome = try {
         when (val spec = r.spec) {
-            is Spec.Archive -> resolver.expandArchive(spec.tune.identity, spec.tune.request)
+            is Spec.Archive -> resolver.expandArchive(spec.tune.identity, spec.tune.request, r.userAgent)
             is Spec.Live -> when (val t = spec.target) {
                 is TuneTarget.Channel -> resolver.resolve(TuneTargetKey.Channel(t.identity), r.baseIndex, r.output, r.userAgent)
                 is TuneTarget.DirectUrl -> resolver.resolve(
@@ -2078,6 +2078,14 @@ internal class PlaybackControllerImpl @Inject constructor(
         eng?.session?.player?.refresh()
     }
 
+        // (Review 2026-11-23, M6) Leaving the app with nothing playing (a card the ladder gave up on, a pause that
+        // timed out): the display mode set for the last stream is given back here, because no stop() follows. While
+        // something plays, stop() does it.
+        if (!foreground && !isPlaybackActive()) try {
+            eng?.parts?.displayMode?.clear()
+        } catch (e: Exception) {
+            BoxLog.w(TAG, "display mode clear failed: ${e.javaClass.simpleName}")
+        }
     /** (code review 2026-10-14, E-S4) No rendered video is expected during a standby/HDMI/display-off grace. */
     override fun onGraceChanged(active: Boolean) {
         if (!active) eng?.parts?.watchdog?.reset()
