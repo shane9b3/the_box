@@ -76,7 +76,8 @@ fun InfoBar(
             .padding(horizontal = PlayerUi.BAR_PAD_H.dp, vertical = if (app.thebox.core.settings.UiTextScale.factor > 1f) 12.dp else PlayerUi.BAR_PAD_V.dp),
         horizontalArrangement = Arrangement.spacedBy(PlayerUi.BAR_GAP.dp),
     ) {
-        BarLogo(state.channel)
+        // Centred: at a larger text size the bar's vertical padding shrinks and the card is shorter than the row.
+        BarLogo(state.channel, Modifier.align(Alignment.CenterVertically))
         Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             BarHeader(state.channel, state.pill.takeIf { showPill }, glyphsText(res, state.glyphs, state.channel), title = null, logo = false)
             val focused = state.programmes.getOrNull(state.focused)
@@ -105,10 +106,10 @@ fun InfoBar(
 
 /** The info bar's logo card: the bar's inner height, 8 % fill, the logo fitted inside with a [PlayerUi.BAR_LOGO_PAD] inset. */
 @Composable
-private fun BarLogo(channel: GuideChannel?) {
+private fun BarLogo(channel: GuideChannel?, modifier: Modifier = Modifier) {
     if (channel?.logoUrl.isNullOrBlank()) return
     Box(
-        Modifier
+        modifier
             .size(PlayerUi.BAR_LOGO_W.dp, PlayerUi.BAR_LOGO_H.dp)
             .background(PlayerUi.ChipFill, RoundedCornerShape(PlayerUi.LOGO_R.dp))
             .padding(PlayerUi.BAR_LOGO_PAD.dp)

@@ -17,14 +17,17 @@ fun DesignTokens.TypeToken.toTextStyle(): TextStyle = TextStyle(
     fontFeatureSettings = if (tabularNums) "tnum" else null,
 )
 
-/** Named text styles for the guide; prefer these over the Material slots in app code. */
+/**
+ * Named text styles for the guide; prefer these over the Material slots in app code. Getters: each read builds the
+ * style at the running text size (`textSp`), as `SettingsUi`'s do.
+ */
 object BoxTextStyles {
-    val Title = DesignTokens.Type.Title.toTextStyle()
-    val MiniTitle = DesignTokens.Type.MiniTitle.toTextStyle()
-    val Clock = DesignTokens.Type.Clock.toTextStyle()
-    val Body = DesignTokens.Type.Body.toTextStyle()
-    val CellTitle = DesignTokens.Type.CellTitle.toTextStyle()
-    val CellTime = DesignTokens.Type.CellTime.toTextStyle()
+    val Title: TextStyle get() = DesignTokens.Type.Title.toTextStyle()
+    val MiniTitle: TextStyle get() = DesignTokens.Type.MiniTitle.toTextStyle()
+    val Clock: TextStyle get() = DesignTokens.Type.Clock.toTextStyle()
+    val Body: TextStyle get() = DesignTokens.Type.Body.toTextStyle()
+    val CellTitle: TextStyle get() = DesignTokens.Type.CellTitle.toTextStyle()
+    val CellTime: TextStyle get() = DesignTokens.Type.CellTime.toTextStyle()
 }
 
 private val BoxColorScheme: ColorScheme = with(DesignTokens.Colors) {

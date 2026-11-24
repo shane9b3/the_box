@@ -73,8 +73,8 @@ class ScrubBarRenderer(private val scale: Float) {
     private val right = CharArray(8)
     private val centre = CharArray(48)
     private val bubble = CharArray(16)
-    /** Width of one mono digit at 15 design px, measured once per typeface (the bubble is sized from it). */
-    private var monoAdvance = 9f * scale
+    /** Width of one mono digit at the 22 design px of [small], measured once per typeface (the bubble is sized from it). */
+    private var monoAdvance = 13f * scale
 
     /** Localised words for the centre label, set once by the composable. */
     fun setLabels(catchup: String, live: String) {
@@ -174,7 +174,7 @@ class ScrubBarRenderer(private val scale: Float) {
             fill.color = ACCENT
             rect.set(bx - half, 0f, bx + half, PlayerUi.BUBBLE_H * s)
             canvas.drawRoundRect(rect, 8f * s, 8f * s, fill)
-            canvas.drawText(bubble, 0, n, bx, 23.5f * s, bubbleText)
+            canvas.drawText(bubble, 0, n, bx, 22f * s, bubbleText)
         }
         // 11–13: labels under the track.
         val labelY = trackB + 26f * s

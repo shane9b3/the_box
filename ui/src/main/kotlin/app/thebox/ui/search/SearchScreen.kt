@@ -32,6 +32,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -193,8 +194,8 @@ private sealed interface MenuTarget {
 
 private val Fg = DesignTokens.Colors.Fg
 private val Dim = Fg.copy(alpha = 0.6f)
-private val Body = BoxTextStyles.Body.copy(color = Fg)
-private val Small = BoxTextStyles.Body.copy(color = Dim, fontSize = app.thebox.ui.theme.textSp(24))
+private val Body: TextStyle get() = BoxTextStyles.Body.copy(color = Fg)
+private val Small: TextStyle get() = BoxTextStyles.Body.copy(color = Dim, fontSize = app.thebox.ui.theme.textSp(24))
 
 @Composable
 private fun Tabs() {

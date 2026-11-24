@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -116,12 +117,12 @@ object EditorUi {
     val Fg50 = SettingsUi.Fg.copy(alpha = 0.50f)
     const val HIDDEN_ALPHA = 0.45f
 
-    val RowName = GuideUi.sans(26, FontWeight.SemiBold)
-    val RowValue = GuideUi.mono(22)
-    val Detail = GuideUi.sans(24)
-    val PaneTitle = GuideUi.sans(30, FontWeight.SemiBold)
-    val PaneCounts = GuideUi.mono(22, color = SettingsUi.Fg55)
-    val ChipText = GuideUi.sans(22)
+    val RowName: TextStyle get() = GuideUi.sans(26, FontWeight.SemiBold)
+    val RowValue: TextStyle get() = GuideUi.mono(22)
+    val Detail: TextStyle get() = GuideUi.sans(24)
+    val PaneTitle: TextStyle get() = GuideUi.sans(30, FontWeight.SemiBold)
+    val PaneCounts: TextStyle get() = GuideUi.mono(22, color = SettingsUi.Fg55)
+    val ChipText: TextStyle get() = GuideUi.sans(22)
 }
 
 /** How a row is drawn: plain, focused (FG fill, dark text, accent ring), current (the channels pane's group) or lifted. */

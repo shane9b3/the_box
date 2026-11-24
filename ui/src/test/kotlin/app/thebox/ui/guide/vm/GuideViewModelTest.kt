@@ -284,6 +284,9 @@ class GuideViewModelTest {
     @Test fun hidingTheFocusedChannelKeepsTheIndex() {
         val w = World()
         val vm = w.viewModel()
+        // The first lineup lands from a background thread: without this wait the five keys could arrive before there
+        // was a focus to move (seen once under a loaded machine, 2026-11-24).
+        awaitFocus(vm)
         repeat(5) { vm.machine.dispatch(GuideEvent.Act(BoxAction.DOWN)) }
         idle()
         assertEquals(5, vm.machine.frame.focus!!.row)

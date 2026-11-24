@@ -52,8 +52,11 @@ object PlayerUi {
      */
     const val SCRUB_NODE_T = 916f
     const val SCRUB_NODE_H = 80f
-    /** 2026-11-24: 26 → 31 for the 22 px bubble text (the TV type scale's smallest label). */
-    const val BUBBLE_H = 31f
+    /**
+     * 2026-11-24: 26 → 28 for the 22 px bubble text (the TV type scale's smallest label). The focused playhead's ring
+     * starts at y = 29 of the node (track centre 39 − radius 7 − ring 3) and the live mark at 30: the bubble ends above both.
+     */
+    const val BUBBLE_H = 28f
 
     // ---- channel list
     const val LIST_L = 48f

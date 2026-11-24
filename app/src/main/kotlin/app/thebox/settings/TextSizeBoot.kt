@@ -6,6 +6,7 @@ import app.thebox.core.settings.SettingsStore
 import app.thebox.core.settings.TextSize
 import app.thebox.core.settings.UiTextScale
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
@@ -31,13 +32,22 @@ object TextSizeBoot {
     }
 
     fun mirror(context: Context, store: SettingsStore, scope: CoroutineScope) {
-        val prefs = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
-        scope.launch {
+        scope.launch(Dispatchers.IO) {
             store.loaded.first { it }
-            store.flow(GuideDomain).map { it.textSize }.distinctUntilChanged().collect { size ->
-                if (prefs.getString(KEY, null) != size.name) prefs.edit().putString(KEY, size.name).apply()
-            }
+            store.flow(GuideDomain).map { it.textSize }.distinctUntilChanged().collect { size -> write(context, size) }
         }
+    }
+
+    /**
+     * Writes the mirror and waits for the disk (`commit`, never `apply`: "Restart now" ends the process with
+     * `Runtime.exit`, which does not wait for queued preference writes). Not on the main thread. `RestartNow` calls it
+     * itself before it exits, so the restart never depends on the collector above having run (review of 98ac38c).
+     */
+    @android.annotation.SuppressLint("ApplySharedPref")
+    fun write(context: Context, size: TextSize): Boolean {
+        val prefs = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+        if (prefs.getString(KEY, null) == size.name) return true
+        return prefs.edit().putString(KEY, size.name).commit()
     }
 
     fun parse(stored: String?): TextSize = TextSize.entries.firstOrNull { it.name == stored } ?: TextSize.DEFAULT

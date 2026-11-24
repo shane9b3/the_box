@@ -34,6 +34,8 @@ class RestartNow internal constructor(
     fun restart() {
         scope.launch {
             store.flush()
+            // The stored "Text size" is read from its boot mirror at the next start: on disk before the process ends.
+            withContext(Dispatchers.IO) { TextSizeBoot.write(context, store.flow(app.thebox.core.settings.state.GuideDomain).value.textSize) }
             withContext(Dispatchers.Main) {
                 val pm = context.packageManager
                 val launch = (pm.getLeanbackLaunchIntentForPackage(context.packageName) ?: pm.getLaunchIntentForPackage(context.packageName))?.component
