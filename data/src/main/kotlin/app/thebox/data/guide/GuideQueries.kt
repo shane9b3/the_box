@@ -198,10 +198,36 @@ class GuideQueries @Inject constructor(
      * [access] row) whose provider group contains "<word> team" or whose `tvg_id` ends in ".<word>", at most [limit]
      * (`SportsConstants.HUB_TEAM_QUERY_MAX`). The caller applies `TeamChannelRule.teamOf` to each hit.
      *
-     * Commit 0 stub: no rows, so no channel is a team channel. WP-2 writes the query (`GuideQueriesTeamTest`).
+     * (WP-2) One statement over the lineup (every enabled playlist), in playlist then provider order. The group test reads
+     * the **provider** group (`g0`, what `TeamChannelRule.groupIsTeams` judges), not a group the user moved the channel
+     * to. `LIKE` folds ASCII case ("CA | NHL TEAMS"); [word] is a fixed league word, and `%` / `_` in it would only widen
+     * the candidate set, which `teamOf` narrows again. A full scan of `channel` (neither test can use an index): the hub
+     * runs it once per league per page session (§8.2).
      */
-    @Suppress("UNUSED_PARAMETER", "RedundantSuspendModifier")
-    suspend fun teamChannelCandidates(word: String, access: ParentalAccess, limit: Int): List<TeamChannelHit> = emptyList()
+    suspend fun teamChannelCandidates(word: String, access: ParentalAccess, limit: Int): List<TeamChannelHit> {
+        if (word.isBlank() || limit <= 0) return emptyList()
+        return db.read {
+            usePrepared(
+                "SELECT c.id, c.playlist_id, c.name, COALESCE(cp.custom_name, c.display_name, c.name), g0.name, c.tvg_id " +
+                    LINEUP_FROM + " WHERE $LINEUP_BASE AND (g0.name LIKE '%' || ?2 || ' team%' OR lower(c.tvg_id) LIKE '%.' || ?2) " +
+                    "$PARENTAL_RAW ORDER BY p.sort_index, c.sort_index, c.id LIMIT ?3",
+            ) { st ->
+                st.bindAccess(access)
+                st.bindText(2, word.trim().lowercase())
+                st.bindLong(3, limit.toLong())
+                buildList {
+                    while (st.step()) {
+                        add(
+                            TeamChannelHit(
+                                st.getLong(0), st.getLong(1), st.getText(2), st.getText(3),
+                                if (st.isNull(4)) null else st.getText(4), if (st.isNull(5)) null else st.getText(5),
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
 
     /**
      * One [teamChannelCandidates] row. [name]: the provider name (`c.name`, what `teamOf` reads); [displayName]: the shown

@@ -109,7 +109,20 @@ data class GroupAdminRow(
     val locked: Boolean get() = lockedExplicit ?: adult
 }
 
-data class HiddenChannelRow(val stableKey: String, val name: String, val group: String?, val byUser: Boolean, val ruleId: Long?, val rulePattern: String?)
+/**
+ * One Hidden channels row. [noEvent] (Event channels WP-2, docs/design/m6-event-channels.md §5.5, re-review E1): hidden
+ * by the playlist's "Hide channels with no event" switch (`rule_hidden = 1`, the switch on, an empty-slot name), never
+ * shown as hidden by a user rule.
+ */
+data class HiddenChannelRow(
+    val stableKey: String,
+    val name: String,
+    val group: String?,
+    val byUser: Boolean,
+    val ruleId: Long?,
+    val rulePattern: String?,
+    val noEvent: Boolean = false,
+)
 
 data class HideRuleRow(
     val id: Long,
@@ -136,6 +149,9 @@ data class FavouriteEntryRow(val playlistId: Long, val stableKey: String, val na
 
 /** Pure builders of the Channels pages (`ChannelsPagesTest`). Texts come from [BackupTexts]. */
 object ChannelsPages {
+    /** The playlist page's "Hide channels with no event" row, focused by a [HiddenChannelRow.noEvent] row's link (E1). */
+    val NO_EVENT_SWITCH = RowId(app.thebox.core.setup.pages.PlaylistPage.ROW_HIDE_EMPTY_EVENTS)
+
     fun section(
         t: BackupTexts,
         advanced: Boolean,
@@ -222,7 +238,11 @@ object ChannelsPages {
     }
 
     fun hiddenItem(pid: Long, h: HiddenChannelRow, t: BackupTexts): SettingsRow =
-        if (h.byUser || h.ruleId == null) {
+        if (!h.byUser && h.noEvent) {
+            // E1: the switch is undone on the playlist's settings page, not in Hide rules (which has no such rule).
+            SettingsRow(RowId(ChannelsRows.HIDDEN_PREFIX + h.stableKey), h.name, value = h.group, description = t.get(BackupText.HIDDEN_NO_EVENT),
+                kind = RowKind.Item(route = SettingsRoute.Playlist(pid, NO_EVENT_SWITCH), badges = setOf(Badge.HIDDEN)))
+        } else if (h.byUser || h.ruleId == null) {
             SettingsRow(RowId(ChannelsRows.HIDDEN_PREFIX + h.stableKey), h.name, value = h.group, description = t.get(BackupText.HIDDEN_BY_YOU),
                 kind = RowKind.Item(primary = ChannelsRows.P_UNHIDE, menu = listOf(ChoiceOption(ChannelsRows.P_UNHIDE, t.get(BackupText.HIDDEN_UNHIDE))), badges = setOf(Badge.HIDDEN)))
         } else {

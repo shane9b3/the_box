@@ -46,6 +46,7 @@ import app.thebox.data.repo.PlaylistRepository
 import app.thebox.data.repo.SyncStatusRepository
 import app.thebox.data.repo.Trigger
 import app.thebox.data.repo.read
+import app.thebox.data.rules.HideRulesImpl
 import app.thebox.data.work.RefreshScheduler
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
@@ -81,6 +82,8 @@ class PlaylistSettingsRepository @Inject constructor(
     private val channelDao: ChannelDao,
     private val prefs: ChannelPrefsRepository,
     private val store: EpgStore,
+    /** (Event channels WP-2, §5.5) The hide pass the "Hide channels with no event" switch re-runs. */
+    private val hideRules: HideRulesImpl,
     @param:ApplicationContext private val context: Context,
     @param:ApplicationScope private val scope: CoroutineScope,
     @param:IoDispatcher private val io: CoroutineDispatcher,
@@ -113,6 +116,7 @@ class PlaylistSettingsRepository @Inject constructor(
             namePrefixMode = p.namePrefixMode,
             namePrefixCustom = p.namePrefixCustom,
             refreshIntervalH = p.refreshIntervalH,
+            effectiveIntervalH = RefreshScheduler.effectiveIntervalH(p),
             orderMode = p.orderMode,
             usePlaylistEpg = p.usePlaylistEpg,
             userAgent = p.userAgent,
@@ -130,6 +134,9 @@ class PlaylistSettingsRepository @Inject constructor(
             maxConnectionsOverride = p.maxConnectionsOverride,
             ignoreTlsErrors = p.ignoreTlsErrors,
             lastReport = report,
+            refreshIntervalAuto = p.refreshIntervalAuto,
+            eventCount = p.eventCount,
+            hideEmptyEvents = p.hideEmptyEvents,
         )
     }
 
@@ -225,9 +232,20 @@ class PlaylistSettingsRepository @Inject constructor(
         playlistDao.get(playlistId)?.let(scheduler::schedulePlaylist)
     }
 
+    /** §10: the DAO write also clears `refresh_interval_auto`, so the user's choice stands over the event default. */
     override suspend fun setRefreshInterval(playlistId: Long, hours: Int) {
         playlistDao.setRefreshInterval(playlistId, hours.coerceAtLeast(0))
         playlistDao.get(playlistId)?.let(scheduler::schedulePlaylist)
+    }
+
+    /**
+     * (Event channels WP-2, docs/design/m6-event-channels.md §5.5) Stores the switch, then re-runs the hide pass of
+     * [playlistId] under `ImportMutex` in one write transaction ([HideRulesImpl.apply]), so the lineups change at once:
+     * on hides the empty slots, off shows them again.
+     */
+    override suspend fun setHideEmptyEvents(playlistId: Long, on: Boolean) {
+        playlistDao.setHideEmptyEvents(playlistId, on)
+        hideRules.apply(playlistId)
     }
 
     override suspend fun setOrder(playlistId: Long, mode: String) = playlistDao.setOrderMode(playlistId, mode)

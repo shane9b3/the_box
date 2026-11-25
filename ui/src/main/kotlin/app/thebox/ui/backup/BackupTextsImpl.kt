@@ -50,6 +50,7 @@ class BackupTextsImpl @Inject constructor(@ApplicationContext private val contex
             BackupText.HIDDEN_UNHIDE_ALL_CONFIRM_BODY -> R.string.backup_hidden_unhide_all_confirm_body
             BackupText.HIDDEN_UNHIDE -> R.string.backup_hidden_unhide
             BackupText.HIDDEN_BY_RULE -> R.string.backup_hidden_by_rule
+            BackupText.HIDDEN_NO_EVENT -> R.string.backup_hidden_no_event
             BackupText.HIDDEN_BY_YOU -> R.string.backup_hidden_by_you
             BackupText.NO_HIDDEN -> R.string.backup_no_hidden
             BackupText.UNHIDDEN -> R.string.backup_unhidden
