@@ -97,7 +97,8 @@ class ClipSession(
      * Why a clip did not start; the page shows the §6.8 toast. [LATER]: the service asked for a wait of more than a minute
      * (`Retry-After`, or the key read's back-off), so "Try again in a minute" would not be true.
      */
-    enum class Failure { UNAVAILABLE, OFFLINE, REFUSED, GEO, NOT_FOUND, NOT_PLAYABLE, NO_CLIP, LATER }
+    /** [EXPIRED] (NFL hub §4.6): the clip is past its expiry margin or embargoed. */
+    enum class Failure { UNAVAILABLE, OFFLINE, REFUSED, GEO, NOT_FOUND, NOT_PLAYABLE, NO_CLIP, LATER, EXPIRED }
 
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
@@ -281,6 +282,8 @@ class ClipSession(
                 ClipResult.NotFound -> fail(Failure.NOT_FOUND)
                 ClipResult.Geo -> fail(Failure.GEO)
                 ClipResult.Refused -> fail(Failure.REFUSED)
+                // (NFL hub commit 0) P3: on an auto-advance an expired entry is skipped instead (§4.6).
+                ClipResult.Expired -> fail(Failure.EXPIRED)
                 is ClipResult.Failed -> fail(
                     when {
                         result.kind == FailKind.OFFLINE -> Failure.OFFLINE

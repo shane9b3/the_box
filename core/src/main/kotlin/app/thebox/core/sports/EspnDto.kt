@@ -2,6 +2,7 @@
 // WP-1 (maps them). Changes go through the lead.
 package app.thebox.core.sports
 
+import app.thebox.core.sports.hub.EspnVideoDto
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonElement
 
@@ -55,6 +56,11 @@ class EspnCompetitionDto(
     val leaders: JsonElement? = null,
     /** (Sports Hub §7.2) `[{market: "national" | "home" | "away", names: ["CBS"]}]`. */
     val broadcasts: JsonElement? = null,
+    /**
+     * (NFL hub commit 0, §5.1) The Final Game Highlight only (≤ 1 per game), the summary's video shape; mapped by
+     * `EspnVideoMapper` at the board's server date (P1).
+     */
+    val highlights: List<EspnVideoDto>? = null,
 )
 
 /** One side: [id] the team id, [score] a string ("7"); [team] has `abbreviation`, `displayName`, `shortDisplayName`, `logo`. */

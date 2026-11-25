@@ -93,11 +93,20 @@ import coil3.request.bitmapConfig
 /**
  * What a slot does. A slot's identity is its action (§2.3: focus is restored by action identity): [FOLLOW] is Follow and
  * Following ✓ (Stop following); [CHANNEL] is Watch (one confirmed channel: tunes) or Channels (n) (opens the sheet).
+ * [GOALS] opens the Goals sheet (NHL) or the Scoring sheet (NFL hub §3.1); [WATCH_RECAP] is also ▶ Highlights and
+ * [WATCH_FROM_START] ▶ From start (NFL hub §2.3).
  */
 enum class SlotAction { FOLLOW, CHANNEL, GOALS, WATCH_RECAP, BOX_SCORE, MATCHUP, WATCH_FROM_START, RETRY }
 
-/** The words of a slot (§1.5): short and fixed; the channel's name is never in a label. */
-enum class SlotLabel { FOLLOW, FOLLOWING, WATCH, CHANNELS, CHANNELS_N, FINDING, GOALS, GOALS_N, WATCH_RECAP, RECAP_SOON, BOX_SCORE, MATCHUP, WATCH_FROM_START, RETRY }
+/**
+ * The words of a slot (§1.5): short and fixed; the channel's name is never in a label. (NFL hub commit 0, §2.3) Appended:
+ * [HIGHLIGHTS] (▶ Highlights, action WATCH_RECAP), [HIGHLIGHTS_SOON], [NO_HIGHLIGHTS], [FROM_START] (▶ From start, action
+ * WATCH_FROM_START), [SCORING] and [SCORING_N] (action GOALS, which opens the scoring sheet).
+ */
+enum class SlotLabel {
+    FOLLOW, FOLLOWING, WATCH, CHANNELS, CHANNELS_N, FINDING, GOALS, GOALS_N, WATCH_RECAP, RECAP_SOON, BOX_SCORE, MATCHUP, WATCH_FROM_START, RETRY,
+    HIGHLIGHTS, HIGHLIGHTS_SOON, NO_HIGHLIGHTS, FROM_START, SCORING, SCORING_N,
+}
 
 /** One of the three fixed slots. [action] null = an empty slot (draws nothing, keeps its place). */
 @Immutable
@@ -240,24 +249,8 @@ internal object HubSlots {
         val imminent get() = live || game.startUtcMs - nowMs <= SportsConstants.HUB_IMMINENT_MIN * 60_000L
     }
 
-    /** The default slots of a game's phase (§1.5). */
-    fun default(c: Ctx): List<HubSlot> {
-        if (c.postponed) return List(3) { HubSlot.EMPTY }
-        if (c.final) {
-            return if (c.nhl) {
-                listOf(if (c.detailRetry) forAction(SlotAction.RETRY, c) else forAction(SlotAction.WATCH_RECAP, c), forAction(SlotAction.GOALS, c), forAction(SlotAction.BOX_SCORE, c))
-            } else {
-                listOf(if (c.catchUp.isNotEmpty()) forAction(SlotAction.WATCH_FROM_START, c) else HubSlot.EMPTY, HubSlot.EMPTY, HubSlot.EMPTY)
-            }
-        }
-        val first = if (c.detailRetry) forAction(SlotAction.RETRY, c) else forAction(SlotAction.FOLLOW, c)
-        val third = when {
-            !c.nhl -> HubSlot.EMPTY
-            c.live -> forAction(SlotAction.GOALS, c)
-            else -> forAction(SlotAction.MATCHUP, c)
-        }
-        return listOf(first, forAction(SlotAction.CHANNEL, c), third)
-    }
+    /** The default slots of a game's phase (§1.5): (NFL hub commit 0, §6.6) the league's [HubLeagueUi.slots]. */
+    fun default(c: Ctx): List<HubSlot> = HubLeagues.of(c.group).slots(c)
 
     /** The slot for [action] now: its label and enabled state recomputed (used in place while the set is frozen, §2.3). */
     fun forAction(action: SlotAction?, c: Ctx): HubSlot = when (action) {
@@ -309,8 +302,9 @@ internal object HubSlots {
 @Immutable
 internal data class PanelRow(val label: String, val away: String, val home: String, val better: Side?, val desc: String)
 
+/** [oneLine] (NFL hub §2.4, §6.6): drawn `maxLines = 1` (the NFL's fitted lines); false keeps the NHL's wrap rule. */
 @Immutable
-internal data class SummaryLine(val label: String, val text: String)
+internal data class SummaryLine(val label: String, val text: String, val oneLine: Boolean = false)
 
 internal sealed interface MediaSpec {
     /** A clip's poster over the matchup art: [info] is null until its lookup answered. */
@@ -350,78 +344,41 @@ internal data class PanelContent(
 )
 
 internal object HubPanelContents {
-    private val NHL_LIVE_KINDS = listOf(StatKind.SOG, StatKind.POWER_PLAY, StatKind.HITS, StatKind.BLOCKED, StatKind.FACEOFF_PCT)
-
-    fun build(res: Resources, m: HubPanelModel, clock24: Boolean, factor: Float, locale: Locale = Locale.getDefault()): PanelContent? {
+    /**
+     * The panel's words for [m]. (NFL hub commit 0, §6.6) The league's [HubLeagueUi] gives the rows, summary and media;
+     * [measure] answers text widths for the summary's fitted lines; [lowEnd]: a low-RAM device (the media choice).
+     */
+    fun build(
+        res: Resources,
+        m: HubPanelModel,
+        clock24: Boolean,
+        factor: Float,
+        measure: Measure,
+        locale: Locale = Locale.getDefault(),
+        lowEnd: Boolean = false,
+    ): PanelContent? {
         val g = m.game ?: return null
         val league = g.id.league
         val away = HubNames.of(league, g.away)
         val home = HubNames.of(league, g.home)
         val pill = SportsText.hubPill(res, g, clock24, m.nowMs, locale)
-        val group = league.group
+        val ui = HubLeagues.of(league.group)
         val showScores = g.phase != GamePhase.SCHEDULED && g.phase != GamePhase.PRE && g.phase != GamePhase.POSTPONED
-        val live = g.phase == GamePhase.LIVE || g.phase == GamePhase.INTERMISSION
-        val final = g.phase == GamePhase.FINAL
-        val pre = !live && !final
 
         // ---- rows
-        var rows: List<PanelRow> = emptyList()
-        var extra: List<PanelRow> = emptyList()
-        var header = ""
-        var loading = false
-        var error: String? = null
-        var moreSoon: String? = null
-        when (group) {
-            LeagueGroup.NHL -> {
-                header = res.getString(if (pre) R.string.sports_hub_stats_season else R.string.sports_hub_stats_team)
-                val d = m.detail
-                loading = d == null
-                if (m.detailKind == DetailKind.FAILED && d == null) {
-                    error = failureText(res, m.failure, m.slots, final)
-                    loading = false
-                } else {
-                    rows = if (pre) nhlSeasonRows(res, d, away, home) else nhlGameRows(res, d, away, home)
-                }
-            }
-            LeagueGroup.NFL -> {
-                val x = g.extras
-                val nfl = g.detail as? LeagueDetail.Nfl
-                if (pre) {
-                    header = res.getString(R.string.sports_hub_stats_season)
-                    if (x?.awayRecord != null || x?.homeRecord != null) rows = listOf(simpleRow(res.getString(R.string.sports_hub_stat_record), x.awayRecord, x.homeRecord, away, home, res))
-                } else if (x != null && x.periods.isNotEmpty()) {
-                    header = res.getString(R.string.sports_hub_stats_by_quarter)
-                    rows = x.periods.map { p ->
-                        val label = if (p.label.kind == app.thebox.core.sports.PeriodKind.REG) res.getString(R.string.sports_hub_row_quarter_n, p.label.number) else SportsText.periodWord(res, p.label)
-                        valueRow(label, p.away, p.home, away, home, res)
-                    } + valueRow(res.getString(R.string.sports_hub_row_total), g.away.score ?: x.periods.sumOf { it.away }, g.home.score ?: x.periods.sumOf { it.home }, away, home, res)
-                    if (live && nfl != null) extra = nflLiveRows(res, g, nfl, away, home)
-                }
-                if (rows.isEmpty()) moreSoon = res.getString(R.string.sports_hub_more_soon)
-            }
-            LeagueGroup.CHL -> {
-                val x = g.extras
-                header = res.getString(R.string.sports_hub_stats_team)
-                val r = ArrayList<PanelRow>()
-                if (!pre && x?.awayShots != null && x.homeShots != null) r += valueRow(res.getString(R.string.sports_hub_stat_shots), x.awayShots!!, x.homeShots!!, away, home, res)
-                val pp = g.powerPlay
-                if (live && pp != null) {
-                    val t = pp.secondsRemaining?.let { SportsText.clock(it) } ?: res.getString(R.string.sports_hub_stat_none)
-                    val none = res.getString(R.string.sports_hub_stat_none)
-                    r += PanelRow(
-                        res.getString(R.string.sports_hub_stat_power_play), if (pp.side == Side.AWAY) t else none, if (pp.side == Side.HOME) t else none, null,
-                        res.getString(R.string.sports_hub_desc_stat, res.getString(R.string.sports_hub_stat_power_play), away.nickname, if (pp.side == Side.AWAY) t else none, home.nickname, if (pp.side == Side.HOME) t else none),
-                    )
-                }
-                rows = r
-                if (rows.isEmpty()) moreSoon = res.getString(R.string.sports_hub_more_soon)
-            }
-        }
+        val spec = ui.rows(res, m, g, away, home)
+        val rows: List<PanelRow> = spec.rows
+        val header = spec.header
+        val loading = spec.loading
+        val error: String? = spec.error
+        val moreSoon: String? = spec.moreSoon
 
         // ---- the summary and the plan
-        val summary = summary(res, m, g, away, home)
+        val summarySpec = ui.summary(res, m, g, away, home, measure, factor)
+        val summary = summarySpec.lines
+        val extra: List<PanelRow> = spec.extra + summarySpec.extra
         val channelLine = channelLine(res, m, g, clock24, locale, factor)
-        val mediaSpec = media(res, m, g, clock24, locale)
+        val mediaSpec = ui.media(res, m, g, clock24, locale, lowEnd)
         val note = when {
             m.detail != null && (m.stale || m.failing) && m.statsAtMs != null ->
                 res.getString(R.string.sports_hub_stats_from, SportsText.startTime(m.statsAtMs, clock24, locale))
@@ -448,17 +405,7 @@ internal object HubPanelContents {
 
     // ------------------------------------------------------------------ rows
 
-    private fun nhlGameRows(res: Resources, d: GameDetail?, away: HubName, home: HubName): List<PanelRow> {
-        val none = res.getString(R.string.sports_hub_stat_none)
-        val byKind = d?.gameStats?.associateBy { it.kind }.orEmpty()
-        return NHL_LIVE_KINDS.map { k ->
-            val label = res.getString(statLabel(k))
-            val row = byKind[k]
-            if (row == null) blank(label, none, away, home, res) else statRow(res, label, row, away, home)
-        }
-    }
-
-    private fun statLabel(k: StatKind): Int = when (k) {
+    internal fun statLabel(k: StatKind): Int = when (k) {
         StatKind.SOG -> R.string.sports_hub_stat_sog
         StatKind.POWER_PLAY -> R.string.sports_hub_stat_power_play
         StatKind.HITS -> R.string.sports_hub_stat_hits
@@ -467,30 +414,52 @@ internal object HubPanelContents {
         StatKind.PIM -> R.string.sports_hub_stat_pim
         StatKind.GIVEAWAYS -> R.string.sports_hub_stat_giveaways
         StatKind.TAKEAWAYS -> R.string.sports_hub_stat_takeaways
+        // (NFL hub commit 0, §2.2)
+        StatKind.TOTAL_YARDS -> R.string.sports_hub_stat_total_yards
+        StatKind.PASS_YARDS -> R.string.sports_hub_stat_pass_yards
+        StatKind.RUSH_YARDS -> R.string.sports_hub_stat_rush_yards
+        StatKind.FIRST_DOWNS -> R.string.sports_hub_stat_first_downs
+        StatKind.THIRD_DOWN -> R.string.sports_hub_stat_third_down
+        StatKind.TURNOVERS -> R.string.sports_hub_stat_turnovers
+        StatKind.POSSESSION -> R.string.sports_hub_stat_possession_time
+        StatKind.RECORD -> R.string.sports_hub_stat_record
+        StatKind.LAST_FIVE -> R.string.sports_hub_stat_last5
+        StatKind.POINTS_PG -> R.string.sports_hub_stat_points_pg
+        StatKind.POINTS_ALLOWED_PG -> R.string.sports_hub_stat_points_allowed_pg
+        StatKind.YARDS_PG -> R.string.sports_hub_stat_yards_pg
+        StatKind.YARDS_ALLOWED_PG -> R.string.sports_hub_stat_yards_allowed_pg
     }
 
-    private fun statRow(res: Resources, label: String, row: StatRow, away: HubName, home: HubName): PanelRow {
+    /** (NFL hub commit 0) The NHL's PIM / GIVEAWAYS rule, unchanged; P3 switches it to `StatRules.better` (§6.1). */
+    internal fun statRow(res: Resources, label: String, row: StatRow, away: HubName, home: HubName): PanelRow {
         val a = value(row.away)
         val h = value(row.home)
         val better = compare(row.away, row.home, higherIsBetter = row.kind != StatKind.PIM && row.kind != StatKind.GIVEAWAYS)
         return PanelRow(label, a, h, better, res.getString(R.string.sports_hub_desc_stat, label, away.nickname, a, home.nickname, h))
     }
 
-    private fun value(v: StatValue): String = when (v) {
+    internal fun value(v: StatValue): String = when (v) {
         is StatValue.Count -> v.n.toString()
-        is StatValue.Fraction -> "${v.made}/${v.of}"
+        is StatValue.Fraction -> if (v.dash) "${v.made}-${v.of}" else "${v.made}/${v.of}"
         is StatValue.Pct -> pct(v.value)
+        // (NFL hub commit 0, §2.2) "22.6", "31:31", "4-5-1".
+        is StatValue.Decimal -> String.format(Locale.US, "%.${v.places.coerceIn(0, 3)}f", v.value)
+        is StatValue.Clock -> SportsText.clock(v.seconds)
+        is StatValue.Text -> v.text
     }
 
-    private fun num(v: StatValue): Double = when (v) {
+    /** The compared number; null for a Text or Clock value (never compared, §6.1). */
+    private fun num(v: StatValue): Double? = when (v) {
         is StatValue.Count -> v.n.toDouble()
         is StatValue.Fraction -> v.made.toDouble()
         is StatValue.Pct -> v.value
+        is StatValue.Decimal -> v.value
+        is StatValue.Clock, is StatValue.Text -> null
     }
 
     private fun compare(a: StatValue, h: StatValue, higherIsBetter: Boolean): Side? {
-        val x = num(a)
-        val y = num(h)
+        val x = num(a) ?: return null
+        val y = num(h) ?: return null
         if (x == y) return null
         return if ((x > y) == higherIsBetter) Side.AWAY else Side.HOME
     }
@@ -498,120 +467,19 @@ internal object HubPanelContents {
     /** A fraction (0.272727) or a percentage (27.2727) as "27.3%". */
     internal fun pct(v: Double): String = String.format(Locale.US, "%.1f%%", if (v <= 1.0) v * 100.0 else v)
 
-    private fun nhlSeasonRows(res: Resources, d: GameDetail?, away: HubName, home: HubName): List<PanelRow> {
-        val none = res.getString(R.string.sports_hub_stat_none)
-        val s = d?.season
-        fun ranked(r: Ranked?, fmt: (Double) -> String): String =
-            if (r == null) none else r.rank?.let { res.getString(R.string.sports_hub_stat_ranked, fmt(r.value), SportsText.ordinal(res, it)) } ?: fmt(r.value)
-        fun two(v: Double) = String.format(Locale.US, "%.2f", v)
-        fun row(labelRes: Int, a: String, h: String, better: Side?): PanelRow {
-            val label = res.getString(labelRes)
-            return PanelRow(label, a, h, better, res.getString(R.string.sports_hub_desc_stat, label, away.nickname, a, home.nickname, h))
-        }
-        fun side(a: Ranked?, h: Ranked?, higher: Boolean): Side? =
-            if (a == null || h == null || a.value == h.value) null else if ((a.value > h.value) == higher) Side.AWAY else Side.HOME
-        return listOf(
-            row(R.string.sports_hub_stat_record, s?.awayRecord ?: none, s?.homeRecord ?: none, null),
-            row(R.string.sports_hub_stat_last10, s?.awayLast10?.record ?: none, s?.homeLast10?.record ?: none, null),
-            row(R.string.sports_hub_stat_gf, ranked(s?.awayGf, ::two), ranked(s?.homeGf, ::two), side(s?.awayGf, s?.homeGf, true)),
-            row(R.string.sports_hub_stat_ga, ranked(s?.awayGa, ::two), ranked(s?.homeGa, ::two), side(s?.awayGa, s?.homeGa, false)),
-            row(R.string.sports_hub_stat_pp_pct, ranked(s?.awayPp, ::pct), ranked(s?.homePp, ::pct), side(s?.awayPp, s?.homePp, true)),
-            row(R.string.sports_hub_stat_pk_pct, ranked(s?.awayPk, ::pct), ranked(s?.homePk, ::pct), side(s?.awayPk, s?.homePk, true)),
-        )
-    }
-
-    private fun blank(label: String, none: String, away: HubName, home: HubName, res: Resources) =
+    internal fun blank(label: String, none: String, away: HubName, home: HubName, res: Resources) =
         PanelRow(label, none, none, null, res.getString(R.string.sports_hub_desc_stat, label, away.nickname, none, home.nickname, none))
 
-    private fun valueRow(label: String, a: Int, h: Int, away: HubName, home: HubName, res: Resources) =
+    internal fun valueRow(label: String, a: Int, h: Int, away: HubName, home: HubName, res: Resources) =
         PanelRow(label, a.toString(), h.toString(), if (a == h) null else if (a > h) Side.AWAY else Side.HOME,
             res.getString(R.string.sports_hub_desc_stat, label, away.nickname, a.toString(), home.nickname, h.toString()))
 
-    private fun simpleRow(label: String, a: String?, h: String?, away: HubName, home: HubName, res: Resources): PanelRow {
+    internal fun simpleRow(label: String, a: String?, h: String?, away: HubName, home: HubName, res: Resources): PanelRow {
         val none = res.getString(R.string.sports_hub_stat_none)
         return PanelRow(label, a ?: none, h ?: none, null, res.getString(R.string.sports_hub_desc_stat, label, away.nickname, a ?: none, home.nickname, h ?: none))
     }
 
-    private fun nflLiveRows(res: Resources, g: GameSnapshot, nfl: LeagueDetail.Nfl, away: HubName, home: HubName): List<PanelRow> {
-        val rows = ArrayList<PanelRow>()
-        val none = res.getString(R.string.sports_hub_stat_none)
-        val down = nfl.play as? app.thebox.core.sports.NflPlay.Down
-        if (down != null) {
-            val ord = SportsText.ordinal(res, down.down)
-            val text = when {
-                down.goalToGo -> res.getString(R.string.sports_hub_nfl_down_goal, ord)
-                down.distance != null -> res.getString(R.string.sports_hub_nfl_down_distance, ord, down.distance.toString())
-                else -> ord
-            }
-            rows += PanelRow(res.getString(R.string.sports_hub_stat_down), text, none, null, res.getString(R.string.sports_hub_stat_down) + ": " + text)
-        }
-        nfl.possession?.let { side ->
-            val team = if (side == Side.AWAY) away.nickname else home.nickname
-            rows += PanelRow(res.getString(R.string.sports_hub_stat_possession), if (side == Side.AWAY) team else none, if (side == Side.HOME) team else none, null,
-                res.getString(R.string.sports_hub_stat_possession) + ": " + team)
-        }
-        if (nfl.awayTimeouts != null && nfl.homeTimeouts != null) rows += valueRow(res.getString(R.string.sports_hub_stat_timeouts), nfl.awayTimeouts!!, nfl.homeTimeouts!!, away, home, res)
-        return rows
-    }
-
-    // ------------------------------------------------------------------ summary (§6.7)
-
-    private fun summary(res: Resources, m: HubPanelModel, g: GameSnapshot, away: HubName, home: HubName): List<SummaryLine> {
-        val sep = res.getString(R.string.sports_hub_summary_sep)
-        fun line(label: String, text: String) = SummaryLine(label, label + sep + text)
-        val d = m.detail
-        val out = ArrayList<SummaryLine>()
-        when (g.id.league.group) {
-            LeagueGroup.NHL -> when (g.phase) {
-                GamePhase.FINAL -> {
-                    if (g.finalKind == app.thebox.core.sports.PeriodKind.SO) out += SummaryLine("", res.getString(R.string.sports_hub_won_shootout))
-                    else if (d != null) {
-                        val goal = HubSummary.winningGoal(g, d)
-                        if (goal != null) {
-                            val text = m.winningGoal?.description?.takeIf { it.isNotBlank() } ?: goalSentence(res, goal)
-                            out += line(res.getString(R.string.sports_hub_summary_winning_goal), text)
-                        }
-                    }
-                    if (d != null && d.stars.isNotEmpty()) out += SummaryLine(res.getString(R.string.sports_hub_summary_stars), res.getString(R.string.sports_hub_summary_stars) + " " + d.stars.sortedBy { it.rank }.joinToString(", ") { it.lastName })
-                }
-                GamePhase.LIVE, GamePhase.INTERMISSION -> if (d != null) {
-                    d.goals.lastOrNull()?.let { goal ->
-                        val text = m.latestGoal?.description?.takeIf { it.isNotBlank() } ?: goalSentence(res, goal)
-                        out += line(res.getString(R.string.sports_hub_summary_latest_goal), text)
-                    }
-                    if (d.periods.isNotEmpty()) {
-                        out += line(res.getString(R.string.sports_hub_summary_periods), d.periods.joinToString(sep) { "${SportsText.periodWord(res, it.label)} ${it.away}–${it.home}" })
-                    }
-                }
-                else -> if (d != null) {
-                    d.series?.let { s ->
-                        val text = when {
-                            s.meetingsPlayed <= 0 -> res.getString(R.string.sports_hub_series_first)
-                            s.awayWins == s.homeWins -> res.getString(R.string.sports_hub_series_tied, s.awayWins, s.homeWins)
-                            s.awayWins > s.homeWins -> res.getString(R.string.sports_hub_series_leads, g.away.abbrev, s.awayWins, s.homeWins)
-                            else -> res.getString(R.string.sports_hub_series_leads, g.home.abbrev, s.homeWins, s.awayWins)
-                        }
-                        out += if (s.meetingsPlayed <= 0) SummaryLine("", text) else line(res.getString(R.string.sports_hub_summary_series), text)
-                    }
-                    d.leaders.firstOrNull { it.category.equals("points", true) }?.let { p ->
-                        val parts = listOfNotNull(p.away, p.home).map { "${it.name.substringAfterLast(' ')} ${it.value}" }
-                        if (parts.isNotEmpty()) out += line(res.getString(R.string.sports_hub_summary_points_leaders), parts.joinToString(sep))
-                    }
-                }
-            }
-            LeagueGroup.NFL -> if (g.phase == GamePhase.FINAL || g.phase == GamePhase.LIVE || g.phase == GamePhase.INTERMISSION) {
-                val leaders = g.extras?.leaders.orEmpty()
-                for ((cat, labelRes) in listOf("passing" to R.string.sports_hub_summary_passing, "rushing" to R.string.sports_hub_summary_rushing)) {
-                    // One leader per category for the whole game, from either team: a single line "Name line (TEAM)", never a comparison.
-                    val l = leaders.firstOrNull { it.category.equals(cat, true) } ?: continue
-                    val team = if (l.side == Side.AWAY) g.away.abbrev else g.home.abbrev
-                    out += line(res.getString(labelRes), "${l.name} ${l.line} ($team)".replace("  ", " "))
-                }
-            }
-            LeagueGroup.CHL -> Unit
-        }
-        return out
-    }
+    // ------------------------------------------------------------------ summary (§6.7): the league's (NFL hub §6.6)
 
     /** "Vilardi (4th) from Connor and Morrissey, 1st period 5:11." (§6.7). */
     internal fun goalSentence(res: Resources, goal: GoalItem): String {
@@ -722,40 +590,9 @@ internal object HubPanelContents {
 
     // ------------------------------------------------------------------ media (§1.3)
 
-    private fun media(res: Resources, m: HubPanelModel, g: GameSnapshot, clock24: Boolean, locale: Locale): MediaSpec {
-        val nhl = g.id.league.group == LeagueGroup.NHL
-        // (Review M4) A poster only once its lookup gave a picture and while videos play; otherwise the normal matchup art with
-        // its centre disc and a caption that says why there is no video (never a play disc for something that can't play).
-        fun pictured(info: ClipInfo?) = !m.videoOff && info != null && (info.posterUrl ?: info.thumbnailUrl) != null
-        if (nhl && g.phase == GamePhase.FINAL) {
-            val id = m.detail?.recapId ?: g.media?.recapId
-            val info = m.recap
-            return when {
-                id != null && m.videoOff -> art(res, g, m, res.getString(R.string.sports_hub_caption_videos_off), clock24, locale)
-                id != null && pictured(info) -> {
-                    val caption = info?.durationMs?.let { res.getString(R.string.sports_hub_caption_recap, SportsText.duration(it)) } ?: res.getString(R.string.sports_hub_row_recap)
-                    MediaSpec.Poster(id, info, res.getString(R.string.sports_hub_tag_recap), caption)
-                }
-                id != null -> art(res, g, m, res.getString(R.string.sports_hub_row_recap), clock24, locale)
-                else -> art(res, g, m, res.getString(R.string.sports_hub_caption_recap_soon), clock24, locale)
-            }
-        }
-        if (nhl && (g.phase == GamePhase.LIVE || g.phase == GamePhase.INTERMISSION)) {
-            val clip = m.detail?.goals?.lastOrNull { it.clipId != null }?.clipId
-            val info = m.latestGoal
-            return when {
-                clip != null && m.videoOff -> art(res, g, m, res.getString(R.string.sports_hub_caption_videos_off), clock24, locale)
-                clip != null && pictured(info) -> {
-                    val caption = info?.let { i -> i.durationMs?.let { res.getString(R.string.sports_hub_caption_clip, i.title, SportsText.duration(it)) } ?: i.title }
-                    MediaSpec.Poster(clip, info, res.getString(R.string.sports_hub_tag_latest_goal), caption)
-                }
-                else -> art(res, g, m, res.getString(R.string.sports_hub_caption_goals_soon), clock24, locale)
-            }
-        }
-        return art(res, g, m, m.detail?.venue, clock24, locale)
-    }
+    // (NFL hub commit 0, §6.6) The media choice is the league's ([HubLeagueUi.media]); the art is shared.
 
-    private fun art(res: Resources, g: GameSnapshot, m: HubPanelModel, caption: String?, clock24: Boolean, locale: Locale): MediaSpec.Art {
+    internal fun art(res: Resources, g: GameSnapshot, m: HubPanelModel, caption: String?, clock24: Boolean, locale: Locale): MediaSpec.Art {
         val date = app.thebox.ui.guide.screen.TimeFormats.format("EEE", locale, java.util.Date(g.startUtcMs))
         return when (g.phase) {
             GamePhase.POSTPONED -> MediaSpec.Art(caption, res.getString(R.string.sports_hub_disc_postponed), null)
@@ -839,10 +676,13 @@ internal object HubPanelPlan {
     /**
      * The media height with [rows] rows, [summaryLines] summary lines and a channel line, and the summary dropped from line 2
      * (§1.4: media to its floor, then summary line 2, then line 1) and the optional [extraRows] kept only while the floor holds.
+     *
+     * [extraFloor] (NFL hub commit 0, §2.6): the floor the extra rows must leave; P3 passes `POSTER_DISC_MIN_H` for a
+     * playable poster so the play disc survives. It equals [mediaFloor] for every NHL and art case.
      */
     fun plan(
         factor: Float, mandatoryRows: Int, extraRows: Int, summaryLines: Int, hasChannelLine: Boolean, hasNote: Boolean,
-        mediaFloor: Int, hasRows: Boolean,
+        mediaFloor: Int, hasRows: Boolean, extraFloor: Int = mediaFloor,
     ): Plan {
         fun media(rows: Int, lines: Int): Int {
             var used = 28 + pill(factor) + 12 + headline(factor) + 16 // top padding, pill, gap, headline, gap to the media
@@ -857,7 +697,7 @@ internal object HubPanelPlan {
         // The optional rows first give way: keep as many as the floor allows with the summary at full height.
         var extras = extraRows
         var lines = minOf(summaryLines, 2)
-        while (extras > 0 && media(mandatoryRows + extras, lines) < mediaFloor) extras--
+        while (extras > 0 && media(mandatoryRows + extras, lines) < extraFloor) extras--
         while (lines > 0 && media(mandatoryRows + extras, lines) < mediaFloor) lines--
         return Plan(media(mandatoryRows + extras, lines), lines, extras, mediaFloor)
     }
@@ -908,6 +748,13 @@ internal fun slotText(res: Resources, slot: HubSlot): String = when (slot.label)
     SlotLabel.MATCHUP -> res.getString(R.string.sports_hub_slot_matchup)
     SlotLabel.WATCH_FROM_START -> res.getString(R.string.sports_hub_slot_watch_from_start)
     SlotLabel.RETRY -> res.getString(R.string.sports_hub_slot_retry)
+    // (NFL hub commit 0, §2.3)
+    SlotLabel.HIGHLIGHTS -> res.getString(R.string.sports_hub_slot_highlights)
+    SlotLabel.HIGHLIGHTS_SOON -> res.getString(R.string.sports_hub_slot_highlights_soon)
+    SlotLabel.NO_HIGHLIGHTS -> res.getString(R.string.sports_hub_slot_no_highlights)
+    SlotLabel.FROM_START -> res.getString(R.string.sports_hub_slot_from_start)
+    SlotLabel.SCORING -> res.getString(R.string.sports_hub_slot_scoring)
+    SlotLabel.SCORING_N -> res.getString(R.string.sports_hub_slot_scoring_n, slot.count)
 }
 
 /** The glyph of slot 1 only (U-B3): a plus for Follow, a triangle for a video, a loop for Retry. */
@@ -941,8 +788,9 @@ internal fun HubPanel(
 ) {
     val res = LocalResources.current
     val factor = UiTextScale.factor
-    val content = remember(model, clock24, factor) { HubPanelContents.build(res, model, clock24, factor) }
+    // (NFL hub commit 0, §6.6) The measure first: the build fits the NFL's summary lines with it.
     val measure = rememberHubMeasure()
+    val content = remember(model, clock24, factor, measure) { HubPanelContents.build(res, model, clock24, factor, measure) }
     var focusedSlot by remember { mutableIntStateOf(-1) }
     val shape = RoundedCornerShape(24.dp)
     fun move(delta: Int): Boolean {
@@ -1122,7 +970,7 @@ private fun Summary(c: PanelContent, factor: Float) {
                 append(rest)
             }
             Text(
-                text, style = GuideUi.sans(24, FontWeight.Normal, GuideUi.Fg70), maxLines = if (i == 0 && lines == 2) 2 else 1, overflow = TextOverflow.Ellipsis,
+                text, style = GuideUi.sans(24, FontWeight.Normal, GuideUi.Fg70), maxLines = if (s.oneLine) 1 else if (i == 0 && lines == 2) 2 else 1, overflow = TextOverflow.Ellipsis,
                 onTextLayout = { if (i == 0) wrapped = it.lineCount > 1 },
                 modifier = Modifier.fillMaxWidth().testTag(HUB_SUMMARY_TAG + i),
             )

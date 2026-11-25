@@ -59,12 +59,14 @@ import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.PeriodKind
 import app.thebox.core.sports.PeriodLabel
+import app.thebox.core.sports.Side
 import app.thebox.core.sports.hub.ChannelCandidate
 import app.thebox.core.sports.hub.ClipInfo
 import app.thebox.core.sports.hub.ClipKind
 import app.thebox.core.sports.hub.ClipRef
 import app.thebox.core.sports.hub.GameDetail
 import app.thebox.core.sports.hub.GoalItem
+import app.thebox.core.sports.hub.ScoringEvent
 import app.thebox.core.sports.hub.Strength
 import app.thebox.ui.R
 import app.thebox.ui.guide.screen.GuideUi
@@ -161,17 +163,52 @@ internal sealed interface GoalsRow {
     data class CatchUp(val candidate: ChannelCandidate, val n: Int) : GoalsRow { override val key get() = "catchup:$n:${candidate.channel.identityHash}" }
 }
 
+// (NFL hub commit 0, §6.6) `goalsSheetRows` and `goalQueue` moved verbatim to NhlHubUi.kt.
+
 /**
- * §6.4 order: goals, then (final) recap, condensed game, catch-up rows. (HIGH-1) Without a [detail] there are no goal rows;
- * the recap and condensed game then come from the board's [media].
+ * (NFL hub commit 0, docs/design/m6-nfl-hub.md §3.1, §6.6) The league-neutral row of the scoring sheet (the Goals sheet
+ * renamed in place; the file keeps its name for history). Declared in commit 0 for `HubLeagueUi.scoringRows`; P3 moves
+ * the sheet onto it (the NHL's rows with today's words, so its pixels do not change) and retires [GoalsRow].
  */
-internal fun goalsSheetRows(detail: GameDetail?, catchUp: List<ChannelCandidate>, final: Boolean, media: GameMedia? = null): List<GoalsRow> = buildList {
-    detail?.goals?.forEachIndexed { i, g -> add(GoalsRow.Goal(g, i)) }
-    if (final) {
-        (detail?.recapId ?: media?.recapId)?.let { add(GoalsRow.Video(it, ClipKind.RECAP)) }
-        (detail?.condensedId ?: media?.condensedId)?.let { add(GoalsRow.Video(it, ClipKind.CONDENSED)) }
-        catchUp.filter { it.airing != null }.forEachIndexed { n, c -> add(GoalsRow.CatchUp(c, n)) }
+internal sealed interface ScoringRow {
+    val key: String
+
+    /**
+     * A goal or a scoring play. [line1] / [line2] are the drawn words, [desc] the spoken form (§3.7). [clip]: the NHL
+     * goal's clip (as today); always null for an NFL play (no clip-to-play link, §4.4).
+     */
+    data class Event(
+        val event: ScoringEvent,
+        override val key: String,
+        val line1: String,
+        val line2: String,
+        val desc: String,
+        val icon: RowIcon,
+        val clip: ClipRef? = null,
+    ) : ScoringRow
+
+    /** A video row (Game highlights, a More videos clip, the NHL's recap and condensed game). */
+    data class Video(val ref: ClipRef, val label: String, val durationMs: Long?, val thumbUrl: String?) : ScoringRow {
+        override val key get() = "video:${ref.kind}:${ref.videoId}"
     }
+
+    /** A section header ("More videos"), not focusable. */
+    data class Header(val text: String) : ScoringRow { override val key get() = "header:$text" }
+
+    /** An info row (no highlight yet, video off), not focusable. */
+    data class Info(val text: String) : ScoringRow { override val key get() = "info:$text" }
+
+    /** A "Full game from the start" row. */
+    data class CatchUp(val candidate: ChannelCandidate, val n: Int) : ScoringRow {
+        override val key get() = "catchup:$n:${candidate.channel.identityHash}"
+    }
+}
+
+/** (§3.1) A scoring row's picture: the scorer's headshot (NHL), the scoring team's logo at 64 px (NFL), or none. */
+internal sealed interface RowIcon {
+    data class Headshot(val url: String?) : RowIcon
+    data class TeamLogo(val side: Side) : RowIcon
+    data object None : RowIcon
 }
 
 /** §2.5: the clip just played (U-S14), else live: the latest goal, final: the first row. */
@@ -186,11 +223,6 @@ internal fun goalsSheetInitialRow(rows: List<GoalsRow>, focusVideoId: Long?, fin
     return if (lastGoal >= 0) lastGoal else 0
 }
 
-/** §6.4: that goal and every later goal with a clip; empty when the goal itself has no clip yet. */
-internal fun goalQueue(game: GameSnapshot, goals: List<GoalItem>, from: Int): List<ClipRef> {
-    if (goals.getOrNull(from)?.clipId == null) return emptyList()
-    return goals.drop(from).mapNotNull { g -> g.clipId?.let { ClipRef(it, ClipKind.GOAL, game.id) } }
-}
 
 /** "1st" / "2nd" / "3rd" / "OT" / "2OT" / "SO" (row words). */
 internal fun hubPeriodRow(res: Resources, p: PeriodLabel): String = when (p.kind) {

@@ -1,0 +1,1623 @@
+{
+ "boxscore": {
+  "teams": [
+   {
+    "team": {
+     "id": "4",
+     "location": "Cincinnati",
+     "name": "Bengals",
+     "abbreviation": "CIN",
+     "displayName": "Cincinnati Bengals",
+     "shortDisplayName": "Bengals"
+    },
+    "statistics": [
+     {
+      "name": "firstDowns",
+      "displayValue": "17"
+     },
+     {
+      "name": "firstDownsPassing",
+      "displayValue": "15"
+     },
+     {
+      "name": "firstDownsRushing",
+      "displayValue": "1"
+     },
+     {
+      "name": "firstDownsPenalty",
+      "displayValue": "1"
+     },
+     {
+      "name": "thirdDownEff",
+      "displayValue": "4-12"
+     },
+     {
+      "name": "fourthDownEff",
+      "displayValue": "1-2"
+     },
+     {
+      "name": "totalOffensivePlays",
+      "displayValue": "57"
+     },
+     {
+      "name": "totalYards",
+      "displayValue": "312"
+     },
+     {
+      "name": "yardsPerPlay",
+      "displayValue": "5.5"
+     },
+     {
+      "name": "totalDrives",
+      "displayValue": "10"
+     },
+     {
+      "name": "netPassingYards",
+      "displayValue": "281"
+     },
+     {
+      "name": "completionAttempts",
+      "displayValue": "28/40"
+     },
+     {
+      "name": "yardsPerPass",
+      "displayValue": "6.5"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "0"
+     },
+     {
+      "name": "sacksYardsLost",
+      "displayValue": "3-19"
+     },
+     {
+      "name": "rushingYards",
+      "displayValue": "31"
+     },
+     {
+      "name": "rushingAttempts",
+      "displayValue": "14"
+     },
+     {
+      "name": "yardsPerRushAttempt",
+      "displayValue": "2.2"
+     },
+     {
+      "name": "redZoneAttempts",
+      "displayValue": "1-1"
+     },
+     {
+      "name": "totalPenaltiesYards",
+      "displayValue": "5-39"
+     },
+     {
+      "name": "turnovers",
+      "displayValue": "0"
+     },
+     {
+      "name": "fumblesLost",
+      "displayValue": "0"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "0"
+     },
+     {
+      "name": "defensiveTouchdowns",
+      "displayValue": "0"
+     },
+     {
+      "name": "possessionTime",
+      "displayValue": "28:29"
+     }
+    ],
+    "homeAway": "away"
+   },
+   {
+    "team": {
+     "id": "28",
+     "location": "Washington",
+     "name": "Commanders",
+     "abbreviation": "WSH",
+     "displayName": "Washington Commanders",
+     "shortDisplayName": "Commanders"
+    },
+    "statistics": [
+     {
+      "name": "firstDowns",
+      "displayValue": "23"
+     },
+     {
+      "name": "firstDownsPassing",
+      "displayValue": "13"
+     },
+     {
+      "name": "firstDownsRushing",
+      "displayValue": "8"
+     },
+     {
+      "name": "firstDownsPenalty",
+      "displayValue": "2"
+     },
+     {
+      "name": "thirdDownEff",
+      "displayValue": "2-10"
+     },
+     {
+      "name": "fourthDownEff",
+      "displayValue": "0-0"
+     },
+     {
+      "name": "totalOffensivePlays",
+      "displayValue": "64"
+     },
+     {
+      "name": "totalYards",
+      "displayValue": "428"
+     },
+     {
+      "name": "yardsPerPlay",
+      "displayValue": "6.7"
+     },
+     {
+      "name": "totalDrives",
+      "displayValue": "10"
+     },
+     {
+      "name": "netPassingYards",
+      "displayValue": "278"
+     },
+     {
+      "name": "completionAttempts",
+      "displayValue": "23/35"
+     },
+     {
+      "name": "yardsPerPass",
+      "displayValue": "7.3"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "0"
+     },
+     {
+      "name": "sacksYardsLost",
+      "displayValue": "3-11"
+     },
+     {
+      "name": "rushingYards",
+      "displayValue": "150"
+     },
+     {
+      "name": "rushingAttempts",
+      "displayValue": "26"
+     },
+     {
+      "name": "yardsPerRushAttempt",
+      "displayValue": "5.8"
+     },
+     {
+      "name": "redZoneAttempts",
+      "displayValue": "1-4"
+     },
+     {
+      "name": "totalPenaltiesYards",
+      "displayValue": "5-40"
+     },
+     {
+      "name": "turnovers",
+      "displayValue": "0"
+     },
+     {
+      "name": "fumblesLost",
+      "displayValue": "0"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "0"
+     },
+     {
+      "name": "defensiveTouchdowns",
+      "displayValue": "0"
+     },
+     {
+      "name": "possessionTime",
+      "displayValue": "31:31"
+     }
+    ],
+    "homeAway": "home"
+   }
+  ],
+  "players": [
+   {
+    "team": {
+     "id": "4",
+     "location": "Cincinnati",
+     "name": "Bengals",
+     "abbreviation": "CIN",
+     "displayName": "Cincinnati Bengals",
+     "shortDisplayName": "Bengals"
+    },
+    "statistics": [
+     {
+      "name": "passing",
+      "keys": [
+       "completions/passingAttempts",
+       "passingYards",
+       "yardsPerPassAttempt",
+       "passingTouchdowns",
+       "interceptions",
+       "sacks-sackYardsLost",
+       "adjQBR",
+       "QBRating"
+      ],
+      "labels": [
+       "C/ATT",
+       "YDS",
+       "AVG",
+       "TD",
+       "INT",
+       "SACKS",
+       "QBR",
+       "RTG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "3915511",
+         "displayName": "Joe Burrow"
+        },
+        "stats": [
+         "28/40",
+         "300",
+         "7.5",
+         "2",
+         "0",
+         "3-19",
+         "56.9",
+         "108.3"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "rushing",
+      "keys": [
+       "rushingAttempts",
+       "rushingYards",
+       "yardsPerRushAttempt",
+       "rushingTouchdowns",
+       "longRushing"
+      ],
+      "labels": [
+       "CAR",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "3116389",
+         "displayName": "Samaje Perine"
+        },
+        "stats": [
+         "6",
+         "26",
+         "4.3",
+         "0",
+         "11"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4362238",
+         "displayName": "Chase Brown"
+        },
+        "stats": [
+         "6",
+         "6",
+         "1.0",
+         "0",
+         "3"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "receiving",
+      "keys": [
+       "receptions",
+       "receivingYards",
+       "yardsPerReception",
+       "receivingTouchdowns",
+       "longReception",
+       "receivingTargets"
+      ],
+      "labels": [
+       "REC",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG",
+       "TGTS"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "3116164",
+         "displayName": "Mike Gesicki"
+        },
+        "stats": [
+         "5",
+         "77",
+         "15.4",
+         "0",
+         "32",
+         "6"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "3116389",
+         "displayName": "Samaje Perine"
+        },
+        "stats": [
+         "4",
+         "71",
+         "17.8",
+         "0",
+         "44",
+         "4"
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "team": {
+     "id": "28",
+     "location": "Washington",
+     "name": "Commanders",
+     "abbreviation": "WSH",
+     "displayName": "Washington Commanders",
+     "shortDisplayName": "Commanders"
+    },
+    "statistics": [
+     {
+      "name": "passing",
+      "keys": [
+       "completions/passingAttempts",
+       "passingYards",
+       "yardsPerPassAttempt",
+       "passingTouchdowns",
+       "interceptions",
+       "sacks-sackYardsLost",
+       "adjQBR",
+       "QBRating"
+      ],
+      "labels": [
+       "C/ATT",
+       "YDS",
+       "AVG",
+       "TD",
+       "INT",
+       "SACKS",
+       "QBR",
+       "RTG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4426348",
+         "displayName": "Jayden Daniels"
+        },
+        "stats": [
+         "23/35",
+         "289",
+         "8.3",
+         "0",
+         "0",
+         "3-11",
+         "58.6",
+         "91.2"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "rushing",
+      "keys": [
+       "rushingAttempts",
+       "rushingYards",
+       "yardsPerRushAttempt",
+       "rushingTouchdowns",
+       "longRushing"
+      ],
+      "labels": [
+       "CAR",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4426348",
+         "displayName": "Jayden Daniels"
+        },
+        "stats": [
+         "6",
+         "55",
+         "9.2",
+         "0",
+         "47"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4575131",
+         "displayName": "Jacory Croskey-Merritt"
+        },
+        "stats": [
+         "13",
+         "54",
+         "4.2",
+         "1",
+         "9"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "receiving",
+      "keys": [
+       "receptions",
+       "receivingYards",
+       "yardsPerReception",
+       "receivingTouchdowns",
+       "longReception",
+       "receivingTargets"
+      ],
+      "labels": [
+       "REC",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG",
+       "TGTS"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "5081432",
+         "displayName": "Antonio Williams"
+        },
+        "stats": [
+         "9",
+         "122",
+         "13.6",
+         "0",
+         "42",
+         "11"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4360635",
+         "displayName": "Chig Okonkwo"
+        },
+        "stats": [
+         "4",
+         "66",
+         "16.5",
+         "0",
+         "32",
+         "5"
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "gameInfo": {
+  "venue": {
+   "id": "3719",
+   "fullName": "Northwest Stadium"
+  }
+ },
+ "drives": {
+  "previous": [
+   {
+    "id": "4018730781",
+    "description": "3 plays, 0 yards, 1:56",
+    "yards": 0,
+    "isScore": false,
+    "result": "PUNT",
+    "displayResult": "Punt",
+    "plays": [
+     {
+      "id": "40187307840",
+      "sequenceNumber": "4000",
+      "type": {
+       "id": "53",
+       "text": "Kickoff",
+       "abbreviation": "K"
+      },
+      "text": "D.Stevens kicks 65 yards from WAS 35 to CIN 0. D.Meyers to CIN 24 for 24 yards (K.Medrano; M.Sainristil).",
+      "awayScore": 0,
+      "homeScore": 0,
+      "period": {
+       "number": 1
+      },
+      "clock": {
+       "displayValue": "15:00"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "40187307863",
+      "sequenceNumber": "6300",
+      "type": {
+       "id": "7",
+       "text": "Sack"
+      },
+      "text": "(Shotgun) J.Burrow sacked at CIN 18 for -6 yards (sack split by T.Settle and K.Chaisson).",
+      "awayScore": 0,
+      "homeScore": 0,
+      "period": {
+       "number": 1
+      },
+      "clock": {
+       "displayValue": "14:54"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "40187307883",
+      "sequenceNumber": "8300",
+      "type": {
+       "id": "3",
+       "text": "Pass Incompletion"
+      },
+      "text": "(Shotgun) J.Burrow pass incomplete short right to J.Chase [C.Omenihu].",
+      "awayScore": 0,
+      "homeScore": 0,
+      "period": {
+       "number": 1
+      },
+      "clock": {
+       "displayValue": "14:07"
+      },
+      "scoringPlay": false
+     }
+    ]
+   }
+  ]
+ },
+ "leaders": [
+  {
+   "team": {
+    "id": "28",
+    "displayName": "Washington Commanders",
+    "abbreviation": "WSH"
+   },
+   "leaders": [
+    {
+     "name": "passingYards",
+     "displayName": "Passing Yards",
+     "leaders": [
+      {
+       "displayValue": "23/35, 289 YDS",
+       "value": 289.0,
+       "athlete": {
+        "id": "4426348",
+        "lastName": "Daniels",
+        "displayName": "Jayden Daniels",
+        "shortName": "J. Daniels",
+        "jersey": "5",
+        "position": {
+         "abbreviation": "QB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4426348.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "rushingYards",
+     "displayName": "Rushing Yards",
+     "leaders": [
+      {
+       "displayValue": "6 CAR, 55 YDS",
+       "value": 55.0,
+       "athlete": {
+        "id": "4426348",
+        "lastName": "Daniels",
+        "displayName": "Jayden Daniels",
+        "shortName": "J. Daniels",
+        "jersey": "5",
+        "position": {
+         "abbreviation": "QB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4426348.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "receivingYards",
+     "displayName": "Receiving Yards",
+     "leaders": [
+      {
+       "displayValue": "9 REC, 122 YDS",
+       "value": 122.0,
+       "athlete": {
+        "id": "5081432",
+        "lastName": "Williams",
+        "displayName": "Antonio Williams",
+        "shortName": "A. Williams",
+        "jersey": "14",
+        "position": {
+         "abbreviation": "WR"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/5081432.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "sacks",
+     "displayName": "Sacks",
+     "leaders": [
+      {
+       "displayValue": "1.5",
+       "value": 1.5,
+       "athlete": {
+        "id": "3929956",
+        "lastName": "Settle",
+        "displayName": "Tim Settle",
+        "shortName": "T. Settle",
+        "jersey": "97",
+        "position": {
+         "abbreviation": "DT"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/3929956.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "totalTackles",
+     "displayName": "Tackles",
+     "leaders": [
+      {
+       "displayValue": "12",
+       "value": 12.0,
+       "athlete": {
+        "id": "3127273",
+        "lastName": "Luvu",
+        "displayName": "Frankie Luvu",
+        "shortName": "F. Luvu",
+        "jersey": "4",
+        "position": {
+         "abbreviation": "LB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/3127273.png"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "team": {
+    "id": "4",
+    "displayName": "Cincinnati Bengals",
+    "abbreviation": "CIN"
+   },
+   "leaders": [
+    {
+     "name": "passingYards",
+     "displayName": "Passing Yards",
+     "leaders": [
+      {
+       "displayValue": "28/40, 300 YDS, 2 TD",
+       "value": 300.0,
+       "athlete": {
+        "id": "3915511",
+        "lastName": "Burrow",
+        "displayName": "Joe Burrow",
+        "shortName": "J. Burrow",
+        "jersey": "9",
+        "position": {
+         "abbreviation": "QB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/3915511.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "rushingYards",
+     "displayName": "Rushing Yards",
+     "leaders": [
+      {
+       "displayValue": "6 CAR, 26 YDS",
+       "value": 26.0,
+       "athlete": {
+        "id": "3116389",
+        "lastName": "Perine",
+        "displayName": "Samaje Perine",
+        "shortName": "S. Perine",
+        "jersey": "34",
+        "position": {
+         "abbreviation": "RB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/3116389.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "receivingYards",
+     "displayName": "Receiving Yards",
+     "leaders": [
+      {
+       "displayValue": "5 REC, 77 YDS",
+       "value": 77.0,
+       "athlete": {
+        "id": "3116164",
+        "lastName": "Gesicki",
+        "displayName": "Mike Gesicki",
+        "shortName": "M. Gesicki",
+        "jersey": "88",
+        "position": {
+         "abbreviation": "TE"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/3116164.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "sacks",
+     "displayName": "Sacks",
+     "leaders": [
+      {
+       "displayValue": "3",
+       "value": 3.0,
+       "athlete": {
+        "id": "4240754",
+        "lastName": "Mafe",
+        "displayName": "Boye Mafe",
+        "shortName": "B. Mafe",
+        "jersey": "53",
+        "position": {
+         "abbreviation": "DE"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4240754.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "totalTackles",
+     "displayName": "Tackles",
+     "leaders": [
+      {
+       "displayValue": "10",
+       "value": 10.0,
+       "athlete": {
+        "id": "4431519",
+        "lastName": "Carter",
+        "displayName": "Barrett Carter",
+        "shortName": "B. Carter",
+        "jersey": "49",
+        "position": {
+         "abbreviation": "LB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4431519.png"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "injuries": [
+  {
+   "team": {
+    "id": "28",
+    "displayName": "Washington Commanders",
+    "abbreviation": "WSH"
+   },
+   "injuries": [
+    {
+     "status": "Questionable",
+     "date": "2026-11-25T20:25Z",
+     "athlete": {
+      "id": "2976212",
+      "lastName": "Diggs",
+      "displayName": "Stefon Diggs",
+      "shortName": "S. Diggs",
+      "jersey": "3",
+      "position": {
+       "abbreviation": "WR"
+      }
+     },
+     "details": {
+      "type": "Personal",
+      "location": "Other",
+      "detail": "Not Specified",
+      "side": "Not Specified",
+      "returnDate": "2026-11-29"
+     }
+    },
+    {
+     "status": "Questionable",
+     "date": "2026-11-24T00:16Z",
+     "athlete": {
+      "id": "4239694",
+      "lastName": "Robertson",
+      "displayName": "Amik Robertson",
+      "shortName": "A. Robertson",
+      "jersey": "2",
+      "position": {
+       "abbreviation": "CB"
+      }
+     },
+     "details": {
+      "type": "Ankle",
+      "location": "Leg",
+      "detail": "Not Specified",
+      "side": "Not Specified",
+      "returnDate": "2026-11-29"
+     }
+    },
+    {
+     "status": "Injured Reserve",
+     "date": "2026-11-21T00:56Z",
+     "athlete": {
+      "id": "3051890",
+      "lastName": "Tunsil",
+      "displayName": "Laremy Tunsil",
+      "shortName": "L. Tunsil",
+      "jersey": "78",
+      "position": {
+       "abbreviation": "OT"
+      }
+     },
+     "details": {
+      "type": "Triceps",
+      "location": "Arm",
+      "detail": "Surgery",
+      "side": "Right",
+      "returnDate": "2026-12-20"
+     }
+    }
+   ]
+  },
+  {
+   "team": {
+    "id": "4",
+    "displayName": "Cincinnati Bengals",
+    "abbreviation": "CIN"
+   },
+   "injuries": [
+    {
+     "status": "Questionable",
+     "date": "2026-11-24T12:39Z",
+     "athlete": {
+      "id": "3125082",
+      "lastName": "Risner",
+      "displayName": "Dalton Risner",
+      "shortName": "D. Risner",
+      "jersey": "66",
+      "position": {
+       "abbreviation": "G"
+      }
+     },
+     "details": {
+      "type": "Knee",
+      "location": "Leg",
+      "detail": "Not Specified",
+      "side": "Not Specified",
+      "returnDate": "2026-11-29"
+     }
+    },
+    {
+     "status": "Questionable",
+     "date": "2026-11-24T00:07Z",
+     "athlete": {
+      "id": "4401811",
+      "lastName": "Dugger",
+      "displayName": "Kyle Dugger",
+      "shortName": "K. Dugger",
+      "jersey": "29",
+      "position": {
+       "abbreviation": "S"
+      }
+     },
+     "details": {
+      "type": "Quadriceps",
+      "location": "Leg",
+      "detail": "Not Specified",
+      "side": "Not Specified",
+      "returnDate": "2026-11-29"
+     }
+    },
+    {
+     "status": "Injured Reserve",
+     "date": "2026-11-24T00:04Z",
+     "athlete": {
+      "id": "3125356",
+      "lastName": "Davis",
+      "displayName": "Jalen Davis",
+      "shortName": "J. Davis",
+      "jersey": "35",
+      "position": {
+       "abbreviation": "CB"
+      }
+     },
+     "details": {
+      "type": "Hamstring",
+      "location": "Leg",
+      "detail": "Not Specified",
+      "side": "Left",
+      "returnDate": "2026-11-29"
+     }
+    }
+   ]
+  }
+ ],
+ "pickcenter": [
+  {
+   "provider": {
+    "id": "x",
+    "name": "x",
+    "priority": 0
+   },
+   "details": "x",
+   "overUnder": 0,
+   "spread": 0,
+   "overOdds": 0,
+   "underOdds": 0,
+   "awayTeamOdds": {
+    "favorite": false,
+    "underdog": false,
+    "moneyLine": 0,
+    "spreadOdds": 0,
+    "team": {},
+    "teamId": "x",
+    "favoriteAtOpen": false
+   },
+   "homeTeamOdds": {
+    "favorite": false,
+    "underdog": false,
+    "moneyLine": 0,
+    "spreadOdds": 0,
+    "team": {},
+    "teamId": "x",
+    "favoriteAtOpen": false
+   },
+   "moneyline": {
+    "displayName": "x",
+    "shortDisplayName": "x",
+    "home": {
+     "close": {
+      "odds": "x"
+     },
+     "open": {
+      "odds": "x"
+     }
+    },
+    "away": {
+     "close": {
+      "odds": "x"
+     },
+     "open": {
+      "odds": "x"
+     }
+    }
+   },
+   "pointSpread": {
+    "displayName": "x",
+    "shortDisplayName": "x",
+    "home": {
+     "close": {
+      "line": "x",
+      "odds": "x"
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     }
+    },
+    "away": {
+     "close": {
+      "line": "x",
+      "odds": "x"
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     }
+    }
+   },
+   "total": {
+    "displayName": "x",
+    "shortDisplayName": "x",
+    "over": {
+     "close": {
+      "line": "x",
+      "odds": "x"
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     }
+    },
+    "under": {
+     "close": {
+      "line": "x",
+      "odds": "x"
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     }
+    }
+   },
+   "link": {
+    "text": "x",
+    "language": "x",
+    "rel": [
+     "x"
+    ],
+    "href": "x",
+    "isExternal": false,
+    "isPremium": false
+   },
+   "header": {
+    "text": "x"
+   },
+   "footer": {
+    "disclaimer": "x"
+   }
+  }
+ ],
+ "scoringPlays": [
+  {
+   "id": "4018730781322",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Evan McPherson 38 Yd Field Goal",
+   "awayScore": 3,
+   "homeScore": 0,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 377.0,
+    "displayValue": "6:17"
+   },
+   "team": {
+    "id": "4",
+    "displayName": "Cincinnati Bengals",
+    "abbreviation": "CIN"
+   }
+  },
+  {
+   "id": "4018730781583",
+   "type": {
+    "id": "67",
+    "text": "Passing Touchdown",
+    "abbreviation": "TD"
+   },
+   "text": "Tee Higgins 31 Yd pass from Joe Burrow (Evan McPherson Kick)",
+   "awayScore": 10,
+   "homeScore": 0,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 115.0,
+    "displayValue": "1:55"
+   },
+   "team": {
+    "id": "4",
+    "displayName": "Cincinnati Bengals",
+    "abbreviation": "CIN"
+   }
+  },
+  {
+   "id": "4018730781923",
+   "type": {
+    "id": "68",
+    "text": "Rushing Touchdown",
+    "abbreviation": "TD"
+   },
+   "text": "Jacory Croskey-Merritt 1 Yd Rush (Drew Stevens Kick)",
+   "awayScore": 10,
+   "homeScore": 7,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 12.0,
+    "displayValue": "0:12"
+   },
+   "team": {
+    "id": "28",
+    "displayName": "Washington Commanders",
+    "abbreviation": "WSH"
+   }
+  },
+  {
+   "id": "4018730782226",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Drew Stevens 36 Yd Field Goal",
+   "awayScore": 10,
+   "homeScore": 10,
+   "period": {
+    "number": 3
+   },
+   "clock": {
+    "value": 707.0,
+    "displayValue": "11:47"
+   },
+   "team": {
+    "id": "28",
+    "displayName": "Washington Commanders",
+    "abbreviation": "WSH"
+   }
+  },
+  {
+   "id": "4018730782502",
+   "type": {
+    "id": "67",
+    "text": "Passing Touchdown",
+    "abbreviation": "TD"
+   },
+   "text": "Colbie Young 4 Yd pass from Joe Burrow (Evan McPherson Kick)",
+   "awayScore": 17,
+   "homeScore": 10,
+   "period": {
+    "number": 3
+   },
+   "clock": {
+    "value": 424.0,
+    "displayValue": "7:04"
+   },
+   "team": {
+    "id": "4",
+    "displayName": "Cincinnati Bengals",
+    "abbreviation": "CIN"
+   }
+  },
+  {
+   "id": "4018730782759",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Drew Stevens 40 Yd Field Goal ",
+   "awayScore": 17,
+   "homeScore": 13,
+   "period": {
+    "number": 3
+   },
+   "clock": {
+    "value": 156.0,
+    "displayValue": "2:36"
+   },
+   "team": {
+    "id": "28",
+    "displayName": "Washington Commanders",
+    "abbreviation": "WSH"
+   }
+  },
+  {
+   "id": "4018730783290",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Drew Stevens 25 Yd Field Goal",
+   "awayScore": 17,
+   "homeScore": 16,
+   "period": {
+    "number": 4
+   },
+   "clock": {
+    "value": 632.0,
+    "displayValue": "10:32"
+   },
+   "team": {
+    "id": "28",
+    "displayName": "Washington Commanders",
+    "abbreviation": "WSH"
+   }
+  },
+  {
+   "id": "4018730783780",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Drew Stevens 41 Yd Field Goal",
+   "awayScore": 17,
+   "homeScore": 19,
+   "period": {
+    "number": 4
+   },
+   "clock": {
+    "value": 146.0,
+    "displayValue": "2:26"
+   },
+   "team": {
+    "id": "28",
+    "displayName": "Washington Commanders",
+    "abbreviation": "WSH"
+   }
+  },
+  {
+   "id": "4018730783966",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Evan McPherson 56 Yd Field Goal",
+   "awayScore": 20,
+   "homeScore": 19,
+   "period": {
+    "number": 4
+   },
+   "clock": {
+    "value": 46.0,
+    "displayValue": "0:46"
+   },
+   "team": {
+    "id": "4",
+    "displayName": "Cincinnati Bengals",
+    "abbreviation": "CIN"
+   }
+  },
+  {
+   "id": "4018730784118",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Drew Stevens 26 Yd Field Goal ",
+   "awayScore": 20,
+   "homeScore": 22,
+   "period": {
+    "number": 4
+   },
+   "clock": {
+    "value": 0.0,
+    "displayValue": "0:00"
+   },
+   "team": {
+    "id": "28",
+    "displayName": "Washington Commanders",
+    "abbreviation": "WSH"
+   }
+  }
+ ],
+ "news": {
+  "articles": [
+   {
+    "id": 50597187,
+    "type": "HeadlineNews",
+    "headline": "Sources corroborate Aaron Rodgers' allegations about Steelers HC Mike McCarthy"
+   }
+  ]
+ },
+ "header": {
+  "id": "401873078",
+  "season": {
+   "year": 2026,
+   "current": true,
+   "type": 2
+  },
+  "competitions": [
+   {
+    "id": "401873078",
+    "date": "2026-11-24T01:15Z",
+    "neutralSite": false,
+    "competitors": [
+     {
+      "id": "28",
+      "order": 0,
+      "homeAway": "home",
+      "winner": true,
+      "score": "22",
+      "record": [
+       {
+        "type": "total",
+        "summary": "4-5-1",
+        "displayValue": "4-5-1"
+       },
+       {
+        "type": "home",
+        "summary": "3-2-1",
+        "displayValue": "3-2-1"
+       }
+      ],
+      "possession": false,
+      "team": {
+       "id": "28",
+       "location": "Washington",
+       "name": "Commanders",
+       "nickname": "Commanders",
+       "abbreviation": "WSH",
+       "displayName": "Washington Commanders"
+      }
+     },
+     {
+      "id": "4",
+      "order": 1,
+      "homeAway": "away",
+      "winner": false,
+      "score": "20",
+      "record": [
+       {
+        "type": "total",
+        "summary": "7-3",
+        "displayValue": "7-3"
+       },
+       {
+        "type": "road",
+        "summary": "4-2",
+        "displayValue": "4-2"
+       }
+      ],
+      "possession": false,
+      "team": {
+       "id": "4",
+       "location": "Cincinnati",
+       "name": "Bengals",
+       "nickname": "Bengals",
+       "abbreviation": "CIN",
+       "displayName": "Cincinnati Bengals"
+      }
+     }
+    ],
+    "status": {
+     "type": {
+      "id": "3",
+      "name": "STATUS_FINAL",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "detail": "Final",
+      "shortDetail": "Final"
+     },
+     "isTBDFlex": false
+    }
+   }
+  ],
+  "week": 11
+ },
+ "winprobability": [
+  {
+   "homeWinPercentage": 0.2536,
+   "tiePercentage": 0.0,
+   "playId": "4018730781"
+  }
+ ],
+ "article": {
+  "type": "Recap",
+  "headline": "Jayden Daniels rallies Commanders in final seconds to set up winning kick in 22-20 win over Bengals"
+ },
+ "videos": [
+  {
+   "id": 50579688,
+   "headline": "Commanders storm back, stun Bengals 22-20 on MNF",
+   "description": "Commanders storm back, stun Bengals 22-20 on MNF",
+   "lastModified": "2026-11-24T04:47:34Z",
+   "originalPublishDate": "2026-11-24T04:32:11Z",
+   "duration": 74,
+   "timeRestrictions": {
+    "embargoDate": "2026-11-24T04:32:10Z",
+    "expirationDate": "2026-11-26T04:32:10Z"
+   },
+   "deviceRestrictions": {
+    "devices": [
+     "settop",
+     "tablet",
+     "handset",
+     "ipad",
+     "desktop"
+    ],
+    "type": "whitelist"
+   },
+   "thumbnail": "https://img.invalid/50579688.jpg",
+   "links": {
+    "source": {
+     "href": "https://clips.invalid/50579688/source.mp4",
+     "HLS": {
+      "href": "https://clips.invalid/50579688/playlist.m3u8",
+      "cmaf": {
+       "href": "https://clips.invalid/50579688/cmaf/playlist.m3u8"
+      }
+     }
+    },
+    "mobile": {
+     "href": "https://login.invalid/50579688"
+    }
+   },
+   "tracking": {
+    "coverageType": "Final Game Highlight",
+    "leagueName": "NFL",
+    "sportName": "football"
+   }
+  },
+  {
+   "id": 50578630,
+   "headline": "Joe Burrow heaves a beauty to Tee Higgins for a Bengals TD",
+   "description": "Joe Burrow heaves a beauty to Tee Higgins for a Bengals TD",
+   "lastModified": "2026-11-24T02:45:42Z",
+   "originalPublishDate": "2026-11-24T02:30:58Z",
+   "duration": 23,
+   "timeRestrictions": {
+    "embargoDate": "2026-11-24T02:30:57Z",
+    "expirationDate": "2026-11-26T02:30:00Z"
+   },
+   "deviceRestrictions": {
+    "devices": [
+     "settop",
+     "tablet",
+     "handset",
+     "ipad",
+     "desktop"
+    ],
+    "type": "whitelist"
+   },
+   "thumbnail": "https://img.invalid/50578630.jpg",
+   "links": {
+    "source": {
+     "href": "https://clips.invalid/50578630/source.mp4",
+     "HLS": {
+      "href": "https://clips.invalid/50578630/playlist.m3u8",
+      "cmaf": {
+       "href": "https://clips.invalid/50578630/cmaf/playlist.m3u8"
+      }
+     }
+    },
+    "mobile": {
+     "href": "https://login.invalid/50578630"
+    }
+   },
+   "tracking": {
+    "coverageType": "OnePlay",
+    "leagueName": "NFL",
+    "sportName": "football"
+   }
+  },
+  {
+   "id": 50578740,
+   "headline": "Jacory Croskey-Merritt finds pay dirt for a Commanders TD",
+   "description": "Jacory Croskey-Merritt finds pay dirt for a Commanders TD",
+   "lastModified": "2026-11-24T02:53:07Z",
+   "originalPublishDate": "2026-11-24T02:46:13Z",
+   "duration": 18,
+   "timeRestrictions": {
+    "embargoDate": "2026-11-24T02:46:12Z",
+    "expirationDate": "2026-11-26T02:46:00Z"
+   },
+   "deviceRestrictions": {
+    "devices": [
+     "settop",
+     "tablet",
+     "handset",
+     "ipad",
+     "desktop"
+    ],
+    "type": "whitelist"
+   },
+   "thumbnail": "https://img.invalid/50578740.jpg",
+   "links": {
+    "source": {
+     "href": "https://clips.invalid/50578740/source.mp4",
+     "HLS": {
+      "href": "https://clips.invalid/50578740/playlist.m3u8",
+      "cmaf": {
+       "href": "https://clips.invalid/50578740/cmaf/playlist.m3u8"
+      }
+     }
+    },
+    "mobile": {
+     "href": "https://login.invalid/50578740"
+    }
+   },
+   "tracking": {
+    "coverageType": "OnePlay",
+    "leagueName": "NFL",
+    "sportName": "football"
+   }
+  },
+  {
+   "id": 50579083,
+   "headline": "Stadium lights go out in third quarter of Bengals-Commanders",
+   "description": "Stadium lights go out in third quarter of Bengals-Commanders",
+   "lastModified": "2026-11-24T03:33:48Z",
+   "originalPublishDate": "2026-11-24T03:21:20Z",
+   "duration": 47,
+   "timeRestrictions": {
+    "embargoDate": "2026-11-24T03:21:19Z",
+    "expirationDate": "2026-11-26T03:21:00Z"
+   },
+   "deviceRestrictions": {
+    "devices": [
+     "settop",
+     "tablet",
+     "handset",
+     "ipad",
+     "desktop"
+    ],
+    "type": "whitelist"
+   },
+   "thumbnail": "https://img.invalid/50579083.jpg",
+   "links": {
+    "source": {
+     "href": "https://clips.invalid/50579083/source.mp4",
+     "HLS": {
+      "href": "https://clips.invalid/50579083/playlist.m3u8",
+      "cmaf": {
+       "href": "https://clips.invalid/50579083/cmaf/playlist.m3u8"
+      }
+     }
+    },
+    "mobile": {
+     "href": "https://login.invalid/50579083"
+    }
+   },
+   "tracking": {
+    "coverageType": "OnePlay",
+    "leagueName": "NFL",
+    "sportName": "football"
+   }
+  }
+ ]
+}

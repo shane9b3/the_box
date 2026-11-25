@@ -90,7 +90,7 @@ class ClipSessionTest {
         var gate: CompletableDeferred<Unit>? = null
         val answers = HashMap<Long, ClipResult<Pair<ClipInfo, ClipStream>>>()
         override suspend fun info(ref: ClipRef): ClipResult<ClipInfo> = ClipResult.Ok(ClipInfo(ref, "Title ${ref.videoId}", null, 46_000, null, null))
-        override suspend fun stream(ref: ClipRef): ClipResult<Pair<ClipInfo, ClipStream>> {
+        override suspend fun stream(ref: ClipRef, fresh: Boolean): ClipResult<Pair<ClipInfo, ClipStream>> {
             calls += ref
             gate?.await()
             if (delayMs > 0) delay(delayMs)

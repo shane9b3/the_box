@@ -14,6 +14,8 @@ import kotlin.test.assertTrue
 class DetailPollPolicyTest {
     private val open = DetailGate(sportsOn = true, awake = true, foreground = true, online = true, paused = false)
     private val idle = SportsConstants.HUB_DETAIL_IDLE_MS
+    // (NFL hub commit 0) The signatures take a cadence and the FINAL facts; these cases are the NHL's, unchanged.
+    private val nhl = DetailCadence.NHL
 
     private fun ok(receivedMono: Long, dateMs: Long? = null, ageS: Int = 0) = Fetch.Ok(Unit, receivedMono, dateMs, ageS)
 
@@ -29,7 +31,9 @@ class DetailPollPolicyTest {
         refused: Boolean = false,
         jitter: Double = 0.0,
         now: Long = 1_000_000L,
-    ) = DetailPollPolicy.nextAt(gate, lastOk, phase, recap, endedAgoMs, failures, lastFail, retryAfterS, refused, 1_500L, jitter, now)
+    ) = DetailPollPolicy.nextAt(
+        nhl, gate, lastOk, phase, null, FinalFacts(recap, false, endedAgoMs), failures, lastFail, retryAfterS, refused, 1_500L, jitter, now,
+    )
 
     @Test fun firstRequestIsAtOnceInEveryPhase() {
         for (p in GamePhase.entries) assertEquals(5L, next(p, lastOk = null, now = 5L), p.name)
@@ -99,13 +103,13 @@ class DetailPollPolicyTest {
     }
 
     @Test fun staleAtTwiceThePhaseInterval() {
-        assertFalse(DetailPollPolicy.isStale(0L, GamePhase.LIVE, false, null, 60_000L))
-        assertTrue(DetailPollPolicy.isStale(0L, GamePhase.LIVE, false, null, 60_001L))
-        assertEquals(60_001L, DetailPollPolicy.staleAt(0L, GamePhase.LIVE, false, null))
-        assertFalse(DetailPollPolicy.isStale(0L, GamePhase.PRE, false, null, 2 * idle))
-        assertTrue(DetailPollPolicy.isStale(0L, GamePhase.PRE, false, null, 2 * idle + 1))
-        assertFalse(DetailPollPolicy.isStale(0L, GamePhase.FINAL, true, null, Long.MAX_VALUE / 2), "a done final is never stale")
-        assertNull(DetailPollPolicy.staleAt(0L, GamePhase.POSTPONED, false, null))
-        assertTrue(DetailPollPolicy.isStale(0L, GamePhase.FINAL, false, 1_000L, 2 * idle + 1), "waiting for the recap")
+        assertFalse(DetailPollPolicy.isStale(nhl, 0L, GamePhase.LIVE, FinalFacts(false, false, null), 60_000L))
+        assertTrue(DetailPollPolicy.isStale(nhl, 0L, GamePhase.LIVE, FinalFacts(false, false, null), 60_001L))
+        assertEquals(60_001L, DetailPollPolicy.staleAt(nhl, 0L, GamePhase.LIVE, FinalFacts(false, false, null)))
+        assertFalse(DetailPollPolicy.isStale(nhl, 0L, GamePhase.PRE, FinalFacts(false, false, null), 2 * idle))
+        assertTrue(DetailPollPolicy.isStale(nhl, 0L, GamePhase.PRE, FinalFacts(false, false, null), 2 * idle + 1))
+        assertFalse(DetailPollPolicy.isStale(nhl, 0L, GamePhase.FINAL, FinalFacts(true, false, null), Long.MAX_VALUE / 2), "a done final is never stale")
+        assertNull(DetailPollPolicy.staleAt(nhl, 0L, GamePhase.POSTPONED, FinalFacts(false, false, null)))
+        assertTrue(DetailPollPolicy.isStale(nhl, 0L, GamePhase.FINAL, FinalFacts(false, false, 1_000L), 2 * idle + 1), "waiting for the recap")
     }
 }

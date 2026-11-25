@@ -1,0 +1,1443 @@
+{
+ "boxscore": {
+  "teams": [
+   {
+    "team": {
+     "id": "15",
+     "location": "Miami",
+     "name": "Dolphins",
+     "abbreviation": "MIA",
+     "displayName": "Miami Dolphins",
+     "shortDisplayName": "Dolphins"
+    },
+    "statistics": [
+     {
+      "name": "firstDowns",
+      "displayValue": "10"
+     },
+     {
+      "name": "firstDownsPassing",
+      "displayValue": "5"
+     },
+     {
+      "name": "firstDownsRushing",
+      "displayValue": "4"
+     },
+     {
+      "name": "firstDownsPenalty",
+      "displayValue": "1"
+     },
+     {
+      "name": "thirdDownEff",
+      "displayValue": "2-14"
+     },
+     {
+      "name": "fourthDownEff",
+      "displayValue": "2-4"
+     },
+     {
+      "name": "totalOffensivePlays",
+      "displayValue": "55"
+     },
+     {
+      "name": "totalYards",
+      "displayValue": "185"
+     },
+     {
+      "name": "yardsPerPlay",
+      "displayValue": "3.4"
+     },
+     {
+      "name": "totalDrives",
+      "displayValue": "10"
+     },
+     {
+      "name": "netPassingYards",
+      "displayValue": "86"
+     },
+     {
+      "name": "completionAttempts",
+      "displayValue": "12/33"
+     },
+     {
+      "name": "yardsPerPass",
+      "displayValue": "2.5"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "1"
+     },
+     {
+      "name": "sacksYardsLost",
+      "displayValue": "2-16"
+     },
+     {
+      "name": "rushingYards",
+      "displayValue": "99"
+     },
+     {
+      "name": "rushingAttempts",
+      "displayValue": "20"
+     },
+     {
+      "name": "yardsPerRushAttempt",
+      "displayValue": "5.0"
+     },
+     {
+      "name": "redZoneAttempts",
+      "displayValue": "0-1"
+     },
+     {
+      "name": "totalPenaltiesYards",
+      "displayValue": "3-25"
+     },
+     {
+      "name": "turnovers",
+      "displayValue": "1"
+     },
+     {
+      "name": "fumblesLost",
+      "displayValue": "0"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "1"
+     },
+     {
+      "name": "defensiveTouchdowns",
+      "displayValue": "0"
+     },
+     {
+      "name": "possessionTime",
+      "displayValue": "23:15"
+     }
+    ],
+    "homeAway": "away"
+   },
+   {
+    "team": {
+     "id": "2",
+     "location": "Buffalo",
+     "name": "Bills",
+     "abbreviation": "BUF",
+     "displayName": "Buffalo Bills",
+     "shortDisplayName": "Bills"
+    },
+    "statistics": [
+     {
+      "name": "firstDowns",
+      "displayValue": "25"
+     },
+     {
+      "name": "firstDownsPassing",
+      "displayValue": "17"
+     },
+     {
+      "name": "firstDownsRushing",
+      "displayValue": "7"
+     },
+     {
+      "name": "firstDownsPenalty",
+      "displayValue": "1"
+     },
+     {
+      "name": "thirdDownEff",
+      "displayValue": "9-17"
+     },
+     {
+      "name": "fourthDownEff",
+      "displayValue": "2-2"
+     },
+     {
+      "name": "totalOffensivePlays",
+      "displayValue": "76"
+     },
+     {
+      "name": "totalYards",
+      "displayValue": "405"
+     },
+     {
+      "name": "yardsPerPlay",
+      "displayValue": "5.3"
+     },
+     {
+      "name": "totalDrives",
+      "displayValue": "11"
+     },
+     {
+      "name": "netPassingYards",
+      "displayValue": "310"
+     },
+     {
+      "name": "completionAttempts",
+      "displayValue": "28/46"
+     },
+     {
+      "name": "yardsPerPass",
+      "displayValue": "6.3"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "2"
+     },
+     {
+      "name": "sacksYardsLost",
+      "displayValue": "3-24"
+     },
+     {
+      "name": "rushingYards",
+      "displayValue": "95"
+     },
+     {
+      "name": "rushingAttempts",
+      "displayValue": "27"
+     },
+     {
+      "name": "yardsPerRushAttempt",
+      "displayValue": "3.5"
+     },
+     {
+      "name": "redZoneAttempts",
+      "displayValue": "2-5"
+     },
+     {
+      "name": "totalPenaltiesYards",
+      "displayValue": "7-48"
+     },
+     {
+      "name": "turnovers",
+      "displayValue": "2"
+     },
+     {
+      "name": "fumblesLost",
+      "displayValue": "0"
+     },
+     {
+      "name": "interceptions",
+      "displayValue": "2"
+     },
+     {
+      "name": "defensiveTouchdowns",
+      "displayValue": "0"
+     },
+     {
+      "name": "possessionTime",
+      "displayValue": "36:45"
+     }
+    ],
+    "homeAway": "home"
+   }
+  ],
+  "players": [
+   {
+    "team": {
+     "id": "15",
+     "location": "Miami",
+     "name": "Dolphins",
+     "abbreviation": "MIA",
+     "displayName": "Miami Dolphins",
+     "shortDisplayName": "Dolphins"
+    },
+    "statistics": [
+     {
+      "name": "passing",
+      "keys": [
+       "completions/passingAttempts",
+       "passingYards",
+       "yardsPerPassAttempt",
+       "passingTouchdowns",
+       "interceptions",
+       "sacks-sackYardsLost",
+       "adjQBR",
+       "QBRating"
+      ],
+      "labels": [
+       "C/ATT",
+       "YDS",
+       "AVG",
+       "TD",
+       "INT",
+       "SACKS",
+       "QBR",
+       "RTG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4433971",
+         "displayName": "Kyle McCord"
+        },
+        "stats": [
+         "12/33",
+         "102",
+         "3.1",
+         "0",
+         "1",
+         "2-16",
+         "24.4",
+         "32.6"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "rushing",
+      "keys": [
+       "rushingAttempts",
+       "rushingYards",
+       "yardsPerRushAttempt",
+       "rushingTouchdowns",
+       "longRushing"
+      ],
+      "labels": [
+       "CAR",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4711533",
+         "displayName": "Ollie Gordon II"
+        },
+        "stats": [
+         "11",
+         "69",
+         "6.3",
+         "0",
+         "24"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4569603",
+         "displayName": "Malik Washington"
+        },
+        "stats": [
+         "2",
+         "11",
+         "5.5",
+         "0",
+         "15"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "receiving",
+      "keys": [
+       "receptions",
+       "receivingYards",
+       "yardsPerReception",
+       "receivingTouchdowns",
+       "longReception",
+       "receivingTargets"
+      ],
+      "labels": [
+       "REC",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG",
+       "TGTS"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4869645",
+         "displayName": "Caleb Douglas"
+        },
+        "stats": [
+         "2",
+         "30",
+         "15.0",
+         "0",
+         "16",
+         "10"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4569603",
+         "displayName": "Malik Washington"
+        },
+        "stats": [
+         "3",
+         "30",
+         "10.0",
+         "0",
+         "21",
+         "6"
+        ]
+       }
+      ]
+     }
+    ]
+   },
+   {
+    "team": {
+     "id": "2",
+     "location": "Buffalo",
+     "name": "Bills",
+     "abbreviation": "BUF",
+     "displayName": "Buffalo Bills",
+     "shortDisplayName": "Bills"
+    },
+    "statistics": [
+     {
+      "name": "passing",
+      "keys": [
+       "completions/passingAttempts",
+       "passingYards",
+       "yardsPerPassAttempt",
+       "passingTouchdowns",
+       "interceptions",
+       "sacks-sackYardsLost",
+       "adjQBR",
+       "QBRating"
+      ],
+      "labels": [
+       "C/ATT",
+       "YDS",
+       "AVG",
+       "TD",
+       "INT",
+       "SACKS",
+       "QBR",
+       "RTG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "3918298",
+         "displayName": "Josh Allen"
+        },
+        "stats": [
+         "27/45",
+         "304",
+         "6.8",
+         "1",
+         "2",
+         "3-24",
+         "31.6",
+         "69.1"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4682758",
+         "displayName": "Tommy Doman Jr."
+        },
+        "stats": [
+         "1/1",
+         "30",
+         "30.0",
+         "0",
+         "0",
+         "0-0",
+         "--",
+         "118.8"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "rushing",
+      "keys": [
+       "rushingAttempts",
+       "rushingYards",
+       "yardsPerRushAttempt",
+       "rushingTouchdowns",
+       "longRushing"
+      ],
+      "labels": [
+       "CAR",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4379399",
+         "displayName": "James Cook III"
+        },
+        "stats": [
+         "22",
+         "89",
+         "4.0",
+         "1",
+         "13"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "4429501",
+         "displayName": "Ray Davis"
+        },
+        "stats": [
+         "1",
+         "3",
+         "3.0",
+         "0",
+         "3"
+        ]
+       }
+      ]
+     },
+     {
+      "name": "receiving",
+      "keys": [
+       "receptions",
+       "receivingYards",
+       "yardsPerReception",
+       "receivingTouchdowns",
+       "longReception",
+       "receivingTargets"
+      ],
+      "labels": [
+       "REC",
+       "YDS",
+       "AVG",
+       "TD",
+       "LONG",
+       "TGTS"
+      ],
+      "athletes": [
+       {
+        "athlete": {
+         "id": "4373678",
+         "displayName": "Khalil Shakir"
+        },
+        "stats": [
+         "5",
+         "101",
+         "20.2",
+         "0",
+         "38",
+         "9"
+        ]
+       },
+       {
+        "athlete": {
+         "id": "3915416",
+         "displayName": "DJ Moore"
+        },
+        "stats": [
+         "8",
+         "91",
+         "11.4",
+         "1",
+         "20",
+         "10"
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ "gameInfo": {
+  "venue": {
+   "id": "11938",
+   "fullName": "Highmark Stadium"
+  }
+ },
+ "drives": {
+  "previous": [
+   {
+    "id": "4018730701",
+    "description": "9 plays, 36 yards, 3:56",
+    "yards": 36,
+    "isScore": true,
+    "result": "FG",
+    "displayResult": "Field Goal",
+    "plays": [
+     {
+      "id": "40187307040",
+      "sequenceNumber": "4000",
+      "type": {
+       "id": "53",
+       "text": "Kickoff",
+       "abbreviation": "K"
+      },
+      "text": "D.Carlson kicks 62 yards from MIA 35 to BUF 3. G.Dortch to BUF 39 for 36 yards (J.Wood; K.Louis).",
+      "awayScore": 0,
+      "homeScore": 0,
+      "period": {
+       "number": 1
+      },
+      "clock": {
+       "displayValue": "15:00"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "40187307063",
+      "sequenceNumber": "6300",
+      "type": {
+       "id": "24",
+       "text": "Pass Reception",
+       "abbreviation": "REC"
+      },
+      "text": "(Shotgun) J.Allen pass short left to D.Moore pushed ob at BUF 48 for 9 yards (J.Brents).",
+      "awayScore": 0,
+      "homeScore": 0,
+      "period": {
+       "number": 1
+      },
+      "clock": {
+       "displayValue": "14:52"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "40187307093",
+      "sequenceNumber": "9300",
+      "type": {
+       "id": "5",
+       "text": "Rush",
+       "abbreviation": "RUSH"
+      },
+      "text": "J.Cook right tackle to BUF 48 for no gain (J.Brooks; W.Gay).",
+      "awayScore": 0,
+      "homeScore": 0,
+      "period": {
+       "number": 1
+      },
+      "clock": {
+       "displayValue": "14:24"
+      },
+      "scoringPlay": false
+     }
+    ]
+   }
+  ]
+ },
+ "leaders": [
+  {
+   "team": {
+    "id": "2",
+    "displayName": "Buffalo Bills",
+    "abbreviation": "BUF"
+   },
+   "leaders": [
+    {
+     "name": "passingYards",
+     "displayName": "Passing Yards",
+     "leaders": [
+      {
+       "displayValue": "27/45, 304 YDS, 1 TD, 2 INT",
+       "value": 304.0,
+       "athlete": {
+        "id": "3918298",
+        "lastName": "Allen",
+        "displayName": "Josh Allen",
+        "shortName": "J. Allen",
+        "jersey": "17",
+        "position": {
+         "abbreviation": "QB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/3918298.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "rushingYards",
+     "displayName": "Rushing Yards",
+     "leaders": [
+      {
+       "displayValue": "22 CAR, 89 YDS, 1 TD",
+       "value": 89.0,
+       "athlete": {
+        "id": "4379399",
+        "lastName": "Cook III",
+        "displayName": "James Cook III",
+        "shortName": "J. Cook III",
+        "jersey": "4",
+        "position": {
+         "abbreviation": "RB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4379399.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "receivingYards",
+     "displayName": "Receiving Yards",
+     "leaders": [
+      {
+       "displayValue": "5 REC, 101 YDS",
+       "value": 101.0,
+       "athlete": {
+        "id": "4373678",
+        "lastName": "Shakir",
+        "displayName": "Khalil Shakir",
+        "shortName": "K. Shakir",
+        "jersey": "10",
+        "position": {
+         "abbreviation": "WR"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4373678.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "sacks",
+     "displayName": "Sacks",
+     "leaders": [
+      {
+       "displayValue": "2",
+       "value": 2.0,
+       "athlete": {
+        "id": "4362506",
+        "lastName": "Rousseau",
+        "displayName": "Greg Rousseau",
+        "shortName": "G. Rousseau",
+        "jersey": "15",
+        "position": {
+         "abbreviation": "LB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4362506.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "totalTackles",
+     "displayName": "Tackles",
+     "leaders": [
+      {
+       "displayValue": "5",
+       "value": 5.0,
+       "athlete": {
+        "id": "4676004",
+        "lastName": "Bishop",
+        "displayName": "Cole Bishop",
+        "shortName": "C. Bishop",
+        "jersey": "24",
+        "position": {
+         "abbreviation": "S"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4676004.png"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "team": {
+    "id": "15",
+    "displayName": "Miami Dolphins",
+    "abbreviation": "MIA"
+   },
+   "leaders": [
+    {
+     "name": "passingYards",
+     "displayName": "Passing Yards",
+     "leaders": [
+      {
+       "displayValue": "12/33, 102 YDS, 1 INT",
+       "value": 102.0,
+       "athlete": {
+        "id": "4433971",
+        "lastName": "McCord",
+        "displayName": "Kyle McCord",
+        "shortName": "K. McCord",
+        "jersey": "14",
+        "position": {
+         "abbreviation": "QB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4433971.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "rushingYards",
+     "displayName": "Rushing Yards",
+     "leaders": [
+      {
+       "displayValue": "11 CAR, 69 YDS",
+       "value": 69.0,
+       "athlete": {
+        "id": "4711533",
+        "lastName": "Gordon II",
+        "displayName": "Ollie Gordon II",
+        "shortName": "O. Gordon II",
+        "jersey": "0",
+        "position": {
+         "abbreviation": "RB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4711533.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "receivingYards",
+     "displayName": "Receiving Yards",
+     "leaders": [
+      {
+       "displayValue": "3 REC, 30 YDS",
+       "value": 30.0,
+       "athlete": {
+        "id": "4569603",
+        "lastName": "Washington",
+        "displayName": "Malik Washington",
+        "shortName": "M. Washington",
+        "jersey": "6",
+        "position": {
+         "abbreviation": "WR"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4569603.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "sacks",
+     "displayName": "Sacks",
+     "leaders": [
+      {
+       "displayValue": "1",
+       "value": 1.0,
+       "athlete": {
+        "id": "3932335",
+        "lastName": "Anderson",
+        "displayName": "Zayne Anderson",
+        "shortName": "Z. Anderson",
+        "jersey": "23",
+        "position": {
+         "abbreviation": "S"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/3932335.png"
+        }
+       }
+      }
+     ]
+    },
+    {
+     "name": "totalTackles",
+     "displayName": "Tackles",
+     "leaders": [
+      {
+       "displayValue": "13",
+       "value": 13.0,
+       "athlete": {
+        "id": "4566094",
+        "lastName": "Rodriguez",
+        "displayName": "Jacob Rodriguez",
+        "shortName": "J. Rodriguez",
+        "jersey": "10",
+        "position": {
+         "abbreviation": "LB"
+        },
+        "headshot": {
+         "href": "https://img.invalid/h/4566094.png"
+        }
+       }
+      }
+     ]
+    }
+   ]
+  }
+ ],
+ "injuries": [
+  {
+   "team": {
+    "id": "2",
+    "displayName": "Buffalo Bills",
+    "abbreviation": "BUF"
+   },
+   "injuries": [
+    {
+     "status": "Questionable",
+     "date": "2026-11-25T18:53Z",
+     "athlete": {
+      "id": "4385690",
+      "lastName": "Kincaid",
+      "displayName": "Dalton Kincaid",
+      "shortName": "D. Kincaid",
+      "jersey": "86",
+      "position": {
+       "abbreviation": "TE"
+      }
+     },
+     "details": {
+      "type": "Thumb",
+      "location": "Arm",
+      "detail": "Not Specified",
+      "side": "Not Specified",
+      "returnDate": "2026-11-26"
+     }
+    },
+    {
+     "status": "Questionable",
+     "date": "2026-11-25T00:53Z",
+     "athlete": {
+      "id": "4379778",
+      "lastName": "Benford",
+      "displayName": "Christian Benford",
+      "shortName": "C. Benford",
+      "jersey": "47",
+      "position": {
+       "abbreviation": "CB"
+      }
+     },
+     "details": {
+      "type": "Groin",
+      "location": "Groin",
+      "detail": "Not Specified",
+      "side": "Not Specified",
+      "returnDate": "2026-11-26"
+     }
+    },
+    {
+     "status": "Questionable",
+     "date": "2026-11-24T12:39Z",
+     "athlete": {
+      "id": "4684527",
+      "lastName": "Sanders",
+      "displayName": "T.J. Sanders",
+      "shortName": "T.J. Sanders",
+      "jersey": "98",
+      "position": {
+       "abbreviation": "DT"
+      }
+     },
+     "details": {
+      "type": "Shoulder",
+      "location": "Arm",
+      "detail": "Not Specified",
+      "side": "Not Specified",
+      "returnDate": "2026-11-26"
+     }
+    }
+   ]
+  },
+  {
+   "team": {
+    "id": "15",
+    "displayName": "Miami Dolphins",
+    "abbreviation": "MIA"
+   },
+   "injuries": [
+    {
+     "status": "Questionable",
+     "date": "2026-11-25T21:30Z",
+     "athlete": {
+      "id": "4685637",
+      "lastName": "Woodard",
+      "displayName": "Jackson Woodard",
+      "shortName": "J. Woodard",
+      "jersey": "42",
+      "position": {
+       "abbreviation": "LB"
+      }
+     },
+     "details": {
+      "type": "Hand",
+      "location": "Arm",
+      "returnDate": "2026-11-29"
+     }
+    },
+    {
+     "status": "Questionable",
+     "date": "2026-11-25T21:30Z",
+     "athlete": {
+      "id": "4433974",
+      "lastName": "McGraw",
+      "displayName": "Rodney McGraw",
+      "shortName": "R. McGraw",
+      "jersey": "59",
+      "position": {
+       "abbreviation": "DE"
+      }
+     },
+     "details": {
+      "type": "Shoulder",
+      "location": "Arm",
+      "returnDate": "2026-11-29"
+     }
+    },
+    {
+     "status": "Questionable",
+     "date": "2026-11-25T21:29Z",
+     "athlete": {
+      "id": "4271632",
+      "lastName": "Jackson",
+      "displayName": "Austin Jackson",
+      "shortName": "A. Jackson",
+      "jersey": "73",
+      "position": {
+       "abbreviation": "OT"
+      }
+     },
+     "details": {
+      "type": "Elbow",
+      "location": "Arm",
+      "returnDate": "2026-11-29"
+     }
+    }
+   ]
+  }
+ ],
+ "pickcenter": [
+  {
+   "provider": {
+    "id": "x",
+    "name": "x",
+    "priority": 0
+   },
+   "details": "x",
+   "overUnder": 0,
+   "spread": 0,
+   "overOdds": 0,
+   "underOdds": 0,
+   "awayTeamOdds": {
+    "favorite": false,
+    "underdog": false,
+    "moneyLine": 0,
+    "spreadOdds": 0,
+    "team": {},
+    "teamId": "x",
+    "favoriteAtOpen": false
+   },
+   "homeTeamOdds": {
+    "favorite": false,
+    "underdog": false,
+    "moneyLine": 0,
+    "spreadOdds": 0,
+    "team": {},
+    "teamId": "x",
+    "favoriteAtOpen": false
+   },
+   "moneyline": {
+    "displayName": "x",
+    "shortDisplayName": "x",
+    "home": {
+     "close": {
+      "odds": "x"
+     },
+     "open": {
+      "odds": "x"
+     }
+    },
+    "away": {
+     "close": {
+      "odds": "x"
+     },
+     "open": {
+      "odds": "x"
+     }
+    }
+   },
+   "pointSpread": {
+    "displayName": "x",
+    "shortDisplayName": "x",
+    "home": {
+     "close": {
+      "line": "x",
+      "odds": "x"
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     }
+    },
+    "away": {
+     "close": {
+      "line": "x",
+      "odds": "x"
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     }
+    }
+   },
+   "total": {
+    "displayName": "x",
+    "shortDisplayName": "x",
+    "over": {
+     "close": {
+      "line": "x",
+      "odds": "x"
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     }
+    },
+    "under": {
+     "close": {
+      "line": "x",
+      "odds": "x"
+     },
+     "open": {
+      "line": "x",
+      "odds": "x"
+     }
+    }
+   },
+   "link": {
+    "text": "x",
+    "language": "x",
+    "rel": [
+     "x"
+    ],
+    "href": "x",
+    "isExternal": false,
+    "isPremium": false
+   },
+   "header": {
+    "text": "x"
+   },
+   "footer": {
+    "disclaimer": "x"
+   }
+  }
+ ],
+ "scoringPlays": [
+  {
+   "id": "401873070257",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Tyler Bass 43 Yd Field Goal",
+   "awayScore": 0,
+   "homeScore": 3,
+   "period": {
+    "number": 1
+   },
+   "clock": {
+    "value": 664.0,
+    "displayValue": "11:04"
+   },
+   "team": {
+    "id": "2",
+    "displayName": "Buffalo Bills",
+    "abbreviation": "BUF"
+   }
+  },
+  {
+   "id": "401873070646",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Tyler Bass 54 Yd Field Goal",
+   "awayScore": 0,
+   "homeScore": 6,
+   "period": {
+    "number": 1
+   },
+   "clock": {
+    "value": 327.0,
+    "displayValue": "5:27"
+   },
+   "team": {
+    "id": "2",
+    "displayName": "Buffalo Bills",
+    "abbreviation": "BUF"
+   }
+  },
+  {
+   "id": "4018730701100",
+   "type": {
+    "id": "67",
+    "text": "Passing Touchdown",
+    "abbreviation": "TD"
+   },
+   "text": "DJ Moore 4 Yd pass from Josh Allen (Tyler Bass Kick)",
+   "awayScore": 0,
+   "homeScore": 13,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 803.0,
+    "displayValue": "13:23"
+   },
+   "team": {
+    "id": "2",
+    "displayName": "Buffalo Bills",
+    "abbreviation": "BUF"
+   }
+  },
+  {
+   "id": "4018730701353",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Daniel Carlson 52 Yd Field Goal",
+   "awayScore": 3,
+   "homeScore": 13,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 584.0,
+    "displayValue": "9:44"
+   },
+   "team": {
+    "id": "15",
+    "displayName": "Miami Dolphins",
+    "abbreviation": "MIA"
+   }
+  },
+  {
+   "id": "4018730701707",
+   "type": {
+    "id": "68",
+    "text": "Rushing Touchdown",
+    "abbreviation": "TD"
+   },
+   "text": "James Cook III 1 Yd Rush (Tyler Bass Kick)",
+   "awayScore": 3,
+   "homeScore": 20,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 228.0,
+    "displayValue": "3:48"
+   },
+   "team": {
+    "id": "2",
+    "displayName": "Buffalo Bills",
+    "abbreviation": "BUF"
+   }
+  },
+  {
+   "id": "4018730702024",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Daniel Carlson 52 Yd Field Goal",
+   "awayScore": 6,
+   "homeScore": 20,
+   "period": {
+    "number": 2
+   },
+   "clock": {
+    "value": 74.0,
+    "displayValue": "1:14"
+   },
+   "team": {
+    "id": "15",
+    "displayName": "Miami Dolphins",
+    "abbreviation": "MIA"
+   }
+  },
+  {
+   "id": "4018730702644",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Daniel Carlson 27 Yd Field Goal",
+   "awayScore": 9,
+   "homeScore": 20,
+   "period": {
+    "number": 3
+   },
+   "clock": {
+    "value": 702.0,
+    "displayValue": "11:42"
+   },
+   "team": {
+    "id": "15",
+    "displayName": "Miami Dolphins",
+    "abbreviation": "MIA"
+   }
+  },
+  {
+   "id": "4018730703327",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Tyler Bass 40 Yd Field Goal",
+   "awayScore": 9,
+   "homeScore": 23,
+   "period": {
+    "number": 4
+   },
+   "clock": {
+    "value": 896.0,
+    "displayValue": "14:56"
+   },
+   "team": {
+    "id": "2",
+    "displayName": "Buffalo Bills",
+    "abbreviation": "BUF"
+   }
+  },
+  {
+   "id": "4018730704056",
+   "type": {
+    "id": "59",
+    "text": "Field Goal Good",
+    "abbreviation": "FG"
+   },
+   "text": "Tyler Bass 28 Yd Field Goal",
+   "awayScore": 9,
+   "homeScore": 26,
+   "period": {
+    "number": 4
+   },
+   "clock": {
+    "value": 117.0,
+    "displayValue": "1:57"
+   },
+   "team": {
+    "id": "2",
+    "displayName": "Buffalo Bills",
+    "abbreviation": "BUF"
+   }
+  }
+ ],
+ "news": {
+  "articles": [
+   {
+    "id": 50597187,
+    "type": "HeadlineNews",
+    "headline": "Sources corroborate Aaron Rodgers' allegations about Steelers HC Mike McCarthy"
+   }
+  ]
+ },
+ "winprobability": [
+  {
+   "homeWinPercentage": 0.9482,
+   "tiePercentage": 0.0,
+   "playId": "4018730701"
+  }
+ ],
+ "article": {
+  "type": "Recap",
+  "headline": "Bills' defense feasts in 26-9 win over injury-depleted Dolphins"
+ },
+ "videos": [],
+ "header": {
+  "id": "401873070",
+  "season": {
+   "year": 2026,
+   "current": true,
+   "type": 2
+  },
+  "competitions": [
+   {
+    "id": "401873070",
+    "date": "2026-11-22T18:00Z",
+    "neutralSite": false,
+    "competitors": [
+     {
+      "id": "2",
+      "order": 0,
+      "homeAway": "home",
+      "winner": true,
+      "score": "26",
+      "record": [
+       {
+        "type": "total",
+        "summary": "9-1",
+        "displayValue": "9-1"
+       },
+       {
+        "type": "home",
+        "summary": "4-1",
+        "displayValue": "4-1"
+       }
+      ],
+      "possession": false,
+      "team": {
+       "id": "2",
+       "location": "Buffalo",
+       "name": "Bills",
+       "nickname": "Bills",
+       "abbreviation": "BUF",
+       "displayName": "Buffalo Bills"
+      }
+     },
+     {
+      "id": "15",
+      "order": 1,
+      "homeAway": "away",
+      "winner": false,
+      "score": "9",
+      "record": [
+       {
+        "type": "total",
+        "summary": "1-9",
+        "displayValue": "1-9"
+       },
+       {
+        "type": "road",
+        "summary": "1-5",
+        "displayValue": "1-5"
+       }
+      ],
+      "possession": false,
+      "team": {
+       "id": "15",
+       "location": "Miami",
+       "name": "Dolphins",
+       "nickname": "Dolphins",
+       "abbreviation": "MIA",
+       "displayName": "Miami Dolphins"
+      }
+     }
+    ],
+    "status": {
+     "type": {
+      "id": "3",
+      "name": "STATUS_FINAL",
+      "state": "post",
+      "completed": true,
+      "description": "Final",
+      "detail": "Final",
+      "shortDetail": "Final"
+     },
+     "isTBDFlex": false
+    }
+   }
+  ],
+  "week": 11
+ }
+}

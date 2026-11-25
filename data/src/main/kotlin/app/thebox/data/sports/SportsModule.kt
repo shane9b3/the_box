@@ -50,7 +50,8 @@ abstract class SportsModule {
 
     @Binds abstract fun gameDetailRepository(impl: GameDetailRepositoryImpl): GameDetailRepository
 
-    @Binds abstract fun clipResolver(impl: NhlClipResolver): ClipResolver
+    /** (NFL hub commit 0, §4.2) The league router: NHL → `NhlClipResolver`, NFL → `EspnClipResolver`. */
+    @Binds abstract fun clipResolver(impl: ClipResolvers): ClipResolver
 
     @Binds abstract fun gameChannelMatcher(impl: GameChannelMatcherImpl): GameChannelMatcher
 

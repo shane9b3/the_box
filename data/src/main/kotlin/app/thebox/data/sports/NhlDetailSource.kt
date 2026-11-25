@@ -48,9 +48,6 @@ class NhlDetailSource internal constructor(
     /** Resolved on first use (off the main thread: the repository's first request). */
     private val endpoints: SportsEndpoints by lazy(endpoints)
 
-    /** One detail answer: the [fetch] and whether the landing half failed (the detail then lacks its landing facts). */
-    internal data class DetailAnswer(val fetch: Fetch<GameDetail>, val landingFailed: Boolean)
-
     override suspend fun detail(id: GameId): Fetch<GameDetail> = detailAnswer(id, null).fetch
 
     /** [detail], with the board's [phaseHint] for a detail whose landing failed (§4.2). */

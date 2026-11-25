@@ -792,6 +792,9 @@ private fun ToastBar(t: HubToast, clock24: Boolean, onShown: () -> Unit) {
         HubToastKind.VIDEO_REMOVED -> res.getString(R.string.sports_hub_error_video_removed)
         HubToastKind.VIDEO_NOT_PLAYABLE -> res.getString(R.string.sports_hub_error_video_not_playable)
         HubToastKind.GOAL_NO_VIDEO -> res.getString(R.string.sports_hub_goal_no_video_toast)
+        // (NFL hub commit 0, §3.4, §3.1) P3 picks the ESPN or NHL.com wording by `t.league` for the other kinds.
+        HubToastKind.VIDEO_EXPIRED -> res.getString(R.string.sports_hub_error_video_expired_espn)
+        HubToastKind.PLAY_NO_VIDEO -> res.getString(R.string.sports_hub_play_no_video_toast)
         HubToastKind.STARTS_AT -> res.getString(R.string.sports_hub_starts_at_toast, SportsText.startTime(t.startUtcMs ?: 0L, clock24))
     }
     LaunchedEffect(t.seq) {

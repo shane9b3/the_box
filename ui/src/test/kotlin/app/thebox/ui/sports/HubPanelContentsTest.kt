@@ -58,7 +58,9 @@ class HubPanelContentsTest {
         g.id, g.phase, null, null, null, null, emptyList(), null, emptyList(), goals, emptyList(), emptyList(), null, null, recap, null, emptyList(),
     )
 
-    private fun content(m: HubPanelModel, factor: Float = 1f) = HubPanelContents.build(res, m, clock24 = false, factor = factor)!!
+    // (NFL hub commit 0) `build` takes a text measure (the NFL's fitted summary lines); the NHL words never read it.
+    private val measure: Measure = { text, px, _ -> text.length * px * 0.5f }
+    private fun content(m: HubPanelModel, factor: Float = 1f) = HubPanelContents.build(res, m, clock24 = false, factor = factor, measure = measure)!!
 
     // ------------------------------------------------------------------ H3: the failure's next step is on screen
 

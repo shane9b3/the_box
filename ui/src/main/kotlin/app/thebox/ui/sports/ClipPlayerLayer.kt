@@ -254,6 +254,8 @@ internal fun clipSubLine(res: Resources, ref: ClipRef, game: GameSnapshot?, goal
             val i = goals.indexOfFirst { it.clipId == ref.videoId }
             if (i < 0) null else res.getString(R.string.sports_hub_clip_goal_sub, i + 1, goals.size, a, h, goalWhen(res, goals[i]))
         }
+        // (NFL hub commit 0) P3: "Video 2 of 4 · CIN at WSH · Video: ESPN" (§3.3).
+        ClipKind.PLAY -> null
     }
 }
 

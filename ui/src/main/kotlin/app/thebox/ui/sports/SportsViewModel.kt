@@ -137,11 +137,18 @@ sealed interface HubSheet {
     data class Matchup(override val gameId: GameId) : HubSheet
 }
 
-enum class HubToastKind { VIDEO_UNAVAILABLE, VIDEO_OFFLINE, VIDEO_REFUSED, VIDEO_GEO, VIDEO_REMOVED, VIDEO_NOT_PLAYABLE, GOAL_NO_VIDEO, STARTS_AT, VIDEO_LATER }
+/** [VIDEO_EXPIRED], [PLAY_NO_VIDEO]: (NFL hub commit 0, §3.4, §3.1) appended. */
+enum class HubToastKind {
+    VIDEO_UNAVAILABLE, VIDEO_OFFLINE, VIDEO_REFUSED, VIDEO_GEO, VIDEO_REMOVED, VIDEO_NOT_PLAYABLE, GOAL_NO_VIDEO, STARTS_AT, VIDEO_LATER,
+    VIDEO_EXPIRED, PLAY_NO_VIDEO,
+}
 
-/** A short message with a reason and a next step (§6.8, §5.5). [seq] distinguishes two equal toasts in a row. */
+/**
+ * A short message with a reason and a next step (§6.8, §5.5). [seq] distinguishes two equal toasts in a row. [league]
+ * (NFL hub §3.4): whose wording `SportsScreen` uses (ESPN or NHL.com).
+ */
 @Immutable
-data class HubToast(val kind: HubToastKind, val startUtcMs: Long? = null, val seq: Long = 0L)
+data class HubToast(val kind: HubToastKind, val startUtcMs: Long? = null, val seq: Long = 0L, val league: LeagueGroup = LeagueGroup.NHL)
 
 /**
  * The Sports Hub page's view model (docs/design/m6-sports-hub.md; WP-4). It reads the optional [ScoreRepository] (absent =
@@ -328,6 +335,7 @@ class SportsViewModel internal constructor(
                             ClipSession.Failure.NOT_PLAYABLE -> HubToastKind.VIDEO_NOT_PLAYABLE
                             ClipSession.Failure.NO_CLIP -> HubToastKind.GOAL_NO_VIDEO
                             ClipSession.Failure.LATER -> HubToastKind.VIDEO_LATER
+                            ClipSession.Failure.EXPIRED -> HubToastKind.VIDEO_EXPIRED
                         },
                     )
                 }
@@ -870,26 +878,18 @@ class SportsViewModel internal constructor(
     private inline fun guarded(block: () -> List<ChannelCandidate>): List<ChannelCandidate> =
         runCatching(block).getOrElse { if (it is kotlin.coroutines.cancellation.CancellationException) throw it else emptyList() }
 
-    /** The clip lookups of the shown NHL game (§6.3): the recap and the winning goal's clip; the latest goal's clip. */
+    /**
+     * The clip lookups of the shown game (§6.3): (NFL hub commit 0, §6.6) the league's [HubLeagueUi.clipRefs] (the NHL:
+     * the recap and the winning goal's clip; the latest goal's clip; the NFL and CHL: none).
+     */
     private fun ensureClipInfos() {
         val r = resolver ?: return
         val game = shownGame() ?: return
-        if (game.id.league.group != LeagueGroup.NHL || fetchedId != game.id.id) return
+        if (fetchedId != game.id.id) return
         val ds = detailFlow.value
         val d = (ds as? DetailState.Ready)?.detail?.takeIf { it.id == game.id }
-        val refs = ArrayList<ClipRef>()
-        when (game.phase) {
-            GamePhase.FINAL -> {
-                (d?.recapId ?: game.media?.recapId)?.let { refs += ClipRef(it, ClipKind.RECAP, game.id) }
-                if (d != null) HubSummary.winningGoal(game, d)?.clipId?.let { refs += ClipRef(it, ClipKind.GOAL, game.id) }
-                // (Owner bug 2026-11-25) The condensed game, only while its Goals sheet is open (the row that shows it).
-                val goalsOpen = (_sheet.value as? HubSheet.Goals)?.gameId == game.id
-                if (goalsOpen) (d?.condensedId ?: game.media?.condensedId)?.let { refs += ClipRef(it, ClipKind.CONDENSED, game.id) }
-            }
-            GamePhase.LIVE, GamePhase.INTERMISSION ->
-                d?.goals?.lastOrNull { it.clipId != null }?.clipId?.let { refs += ClipRef(it, ClipKind.GOAL, game.id) }
-            else -> Unit
-        }
+        val goalsOpen = (_sheet.value as? HubSheet.Goals)?.gameId == game.id
+        val refs = HubLeagues.of(game.id.league.group).clipRefs(game, d, clipInfos.value, goalsOpen)
         for (ref in refs) {
             if (!infoRequested.add(ref.videoId)) continue
             viewModelScope.launch {

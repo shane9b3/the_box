@@ -14,9 +14,11 @@ import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.League
 import app.thebox.core.sports.SportsConstants
 import app.thebox.core.sports.hub.BoxScore
+import app.thebox.core.sports.hub.DetailCadence
 import app.thebox.core.sports.hub.DetailPollPolicy
 import app.thebox.core.sports.hub.DetailPollPolicy.DetailGate
 import app.thebox.core.sports.hub.DetailState
+import app.thebox.core.sports.hub.FinalFacts
 import app.thebox.core.sports.hub.GameDetail
 import app.thebox.core.sports.hub.GameDetailRepository
 import app.thebox.data.di.ApplicationScope
@@ -39,15 +41,35 @@ import javax.inject.Singleton
 import kotlin.coroutines.cancellation.CancellationException
 import kotlin.random.Random
 
-/** The repository's view of `NhlDetailSource` (a seam for the loop's tests). */
+/**
+ * One detail answer: the [fetch] and whether the landing half failed (the NHL detail then lacks its landing facts).
+ * (NFL hub commit 0, docs/design/m6-nfl-hub.md §5.5) Moved here from `NhlDetailSource`; [box] (P2): the box score mapped
+ * from the same ESPN summary, so the Box score sheet never makes a second parse.
+ */
+internal data class DetailAnswer(val fetch: Fetch<GameDetail>, val landingFailed: Boolean, val box: Fetch.Ok<BoxScore>? = null)
+
+/** The repository's view of the detail sources (a seam for the loop's tests). */
 internal interface DetailFetcher {
-    suspend fun detail(id: GameId, phaseHint: GamePhase?): NhlDetailSource.DetailAnswer
+    suspend fun detail(id: GameId, phaseHint: GamePhase?): DetailAnswer
     suspend fun boxScore(id: GameId): Fetch<BoxScore>
 
     companion object {
-        fun of(source: NhlDetailSource): DetailFetcher = object : DetailFetcher {
-            override suspend fun detail(id: GameId, phaseHint: GamePhase?) = source.detailAnswer(id, phaseHint)
-            override suspend fun boxScore(id: GameId): Fetch<BoxScore> = source.boxScore(id)
+        /**
+         * (NFL hub commit 0, §6.5) Routes by league: NHL → [nhl], NFL → [espn]. Anything else answers `HTTP_OTHER` without
+         * a request (the loop never asks: those games are BoardOnly).
+         */
+        fun of(nhl: NhlDetailSource, espn: EspnDetailSource): DetailFetcher = object : DetailFetcher {
+            override suspend fun detail(id: GameId, phaseHint: GamePhase?): DetailAnswer = when (id.league) {
+                League.NHL -> nhl.detailAnswer(id, phaseHint)
+                League.NFL -> espn.detailAnswer(id, phaseHint)
+                else -> DetailAnswer(Fetch.Failed(FailKind.HTTP_OTHER, null, ScoreRepositoryImpl.ELAPSED.nowMs()), false)
+            }
+
+            override suspend fun boxScore(id: GameId): Fetch<BoxScore> = when (id.league) {
+                League.NHL -> nhl.boxScore(id)
+                League.NFL -> espn.boxScore(id)
+                else -> Fetch.Failed(FailKind.HTTP_OTHER, null, ScoreRepositoryImpl.ELAPSED.nowMs())
+            }
         }
     }
 }
@@ -79,14 +101,16 @@ class GameDetailRepositoryImpl internal constructor(
     private val random: Random = Random.Default,
     private val dwellMs: Long = SportsConstants.HUB_FETCH_DWELL_MS,
 ) : GameDetailRepository {
+    /** (NFL hub commit 0) Built with both sources; the loop still fetches NHL games only (P2 routes the NFL). */
     @Inject constructor(
         source: NhlDetailSource,
+        espn: EspnDetailSource,
         store: SettingsStore,
         awake: Optional<DeviceAwake>,
         signals: SportsSignals,
         @ApplicationScope scope: CoroutineScope,
         wall: WallClock,
-    ) : this(DetailFetcher.of(source), store, awake.orElse(DeviceAwake.ALWAYS), signals, scope, ScoreRepositoryImpl.ELAPSED, wall::now)
+    ) : this(DetailFetcher.of(source, espn), store, awake.orElse(DeviceAwake.ALWAYS), signals, scope, ScoreRepositoryImpl.ELAPSED, wall::now)
 
     private sealed interface Input {
         data class Show(val game: GameSnapshot?) : Input
@@ -98,7 +122,7 @@ class GameDetailRepositoryImpl internal constructor(
         data class Awake(val on: Boolean) : Input
         data class Foreground(val on: Boolean) : Input
         data class Online(val on: Boolean) : Input
-        data class Fetched(val gen: Int, val id: GameId, val answer: NhlDetailSource.DetailAnswer) : Input
+        data class Fetched(val gen: Int, val id: GameId, val answer: DetailAnswer) : Input
     }
 
     private val inputs = Channel<Input>(Channel.UNLIMITED)
@@ -313,7 +337,7 @@ class GameDetailRepositoryImpl internal constructor(
         gen++
     }
 
-    private fun fetched(id: GameId, a: NhlDetailSource.DetailAnswer) {
+    private fun fetched(id: GameId, a: DetailAnswer) {
         inFlight = null
         when (val f = a.fetch) {
             is Fetch.Ok -> {
@@ -406,8 +430,8 @@ class GameDetailRepositoryImpl internal constructor(
         val entry = cache[game.id.id]
         val phase = phase(game, entry)
         return DetailPollPolicy.nextAt(
-            gate(), entry?.ok, phase, recapPosted(game, entry), endedAgoMs(game), failures, lastFailMono, retryAfterS,
-            refused(), pollPhaseMs, jitter, now,
+            CADENCE, gate(), entry?.ok, phase, entry?.ok?.value?.fetchedPhase, finalFacts(game, entry), failures, lastFailMono,
+            retryAfterS, refused(), pollPhaseMs, jitter, now,
         )
     }
 
@@ -423,7 +447,7 @@ class GameDetailRepositoryImpl internal constructor(
                 throw e
             } catch (e: RuntimeException) {
                 BoxLog.w(TAG, "detail failed: ${e.javaClass.simpleName}")
-                NhlDetailSource.DetailAnswer(Fetch.Failed(FailKind.BAD_BODY, null, mono.nowMs()), false)
+                DetailAnswer(Fetch.Failed(FailKind.BAD_BODY, null, mono.nowMs()), false)
             }
             inputs.trySend(Input.Fetched(myGen, id, answer))
         }
@@ -439,7 +463,7 @@ class GameDetailRepositoryImpl internal constructor(
                     detail = entry.ok.value,
                     fetchedAtMono = entry.ok.receivedMono,
                     failing = failures > 0 || entry.landingFailed || !isOnline,
-                    stale = DetailPollPolicy.isStale(entry.ok.receivedMono, phase, recapPosted(game, entry), endedAgoMs(game), now),
+                    stale = DetailPollPolicy.isStale(CADENCE, entry.ok.receivedMono, phase, finalFacts(game, entry), now),
                 )
             }
             !isOnline -> DetailState.Failed(game.id, FailKind.OFFLINE)
@@ -454,7 +478,7 @@ class GameDetailRepositoryImpl internal constructor(
         val entry = cache[game.id.id]
         val stale = entry?.let {
             val phase = phase(game, it)
-            DetailPollPolicy.staleAt(it.ok.receivedMono, phase, recapPosted(game, it), endedAgoMs(game))?.takeIf { at -> at > now }
+            DetailPollPolicy.staleAt(CADENCE, it.ok.receivedMono, phase, finalFacts(game, it))?.takeIf { at -> at > now }
         }
         if (inFlight != null || !gate().open) return stale
         val fetch = when {
@@ -472,6 +496,10 @@ class GameDetailRepositoryImpl internal constructor(
 
     private fun recapPosted(game: GameSnapshot, entry: Entry?): Boolean =
         entry?.ok?.value?.recapId != null || game.media?.recapId != null
+
+    /** (NFL hub commit 0) The policy's FINAL facts. P2: the NFL's offered highlight and PLAY clips (§5.2). */
+    private fun finalFacts(game: GameSnapshot, entry: Entry?): FinalFacts =
+        FinalFacts(recapPosted(game, entry), playClips = false, endedAgoMs = endedAgoMs(game))
 
     /** Remembers when a game seen unfinished in this process turned FINAL (board or detail). */
     private fun noteEnd(game: GameSnapshot) {
@@ -497,7 +525,9 @@ class GameDetailRepositoryImpl internal constructor(
     companion object {
         private const val TAG = "GameDetail"
         /** A regulation NHL game's usual length, start to final horn, for a game first seen already final. */
-        internal const val GAME_LENGTH_MS = 9_000_000L
+        internal val GAME_LENGTH_MS = DetailCadence.NHL.gameLengthMs
+        /** (NFL hub commit 0) Every game the loop fetches is the NHL's today; P2 picks the cadence by league (§5.2). */
+        private val CADENCE = DetailCadence.NHL
 
         private fun phaseOf(ms: Long?): Long =
             ms?.takeIf { it in SportsConstants.POLL_PHASE_MIN_MS..SportsConstants.POLL_PHASE_MAX_MS } ?: SportsConstants.POLL_PHASE_MIN_MS
