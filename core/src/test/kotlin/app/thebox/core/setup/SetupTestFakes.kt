@@ -72,7 +72,12 @@ class FakePlaylistAdmin : PlaylistAdmin {
     override suspend fun setNamePrefix(playlistId: Long, mode: String, customJson: String?) { calls += "prefix($mode,$customJson)"; edit(playlistId) { it.copy(namePrefixMode = mode, namePrefixCustom = customJson) } }
     override suspend fun previewNamePrefix(playlistId: Long, mode: String, customJson: String?) = preview
     override suspend fun setEnabled(playlistId: Long, on: Boolean) { calls += "enabled($on)" }
-    override suspend fun setRefreshInterval(playlistId: Long, hours: Int) { calls += "interval($hours)"; edit(playlistId) { it.copy(refreshIntervalH = hours) } }
+    // (Event channels §10) Picking an interval clears auto, as `PlaylistDao.setRefreshInterval` does.
+    override suspend fun setRefreshInterval(playlistId: Long, hours: Int) {
+        calls += "interval($hours)"
+        edit(playlistId) { it.copy(refreshIntervalH = hours, refreshIntervalAuto = false, effectiveIntervalH = hours) }
+    }
+    override suspend fun setHideEmptyEvents(playlistId: Long, on: Boolean) { calls += "hideEmptyEvents($on)"; edit(playlistId) { it.copy(hideEmptyEvents = on) } }
     override suspend fun setOrder(playlistId: Long, mode: String) { calls += "order($mode)" }
     override suspend fun setUsePlaylistEpg(playlistId: Long, on: Boolean) { calls += "playlistEpg($on)" }
     override suspend fun setUserAgent(playlistId: Long, userAgent: String?) { calls += "ua($userAgent)"; edit(playlistId) { it.copy(userAgent = userAgent) } }

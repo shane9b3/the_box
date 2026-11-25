@@ -37,6 +37,7 @@ import app.thebox.data.repo.queryLong
 import app.thebox.data.repo.read
 import app.thebox.data.repo.writeTransaction
 import app.thebox.data.rules.RegexBudgetExceeded
+import app.thebox.data.rules.RuleHiddenPass
 import app.thebox.data.rules.RuleMatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
@@ -73,6 +74,8 @@ class ChannelEditorRepositoryImpl @Inject constructor(
     private val clock: WallClock,
     @IoDispatcher private val io: CoroutineDispatcher,
 ) : ChannelEditorRepository {
+    /** (Event channels WP-2, re-review E1) The switch's empty-slot test (`EventNameParser.isEmptySlot`); tests set a fake. */
+    internal var isEmptySlot: (String) -> Boolean = app.thebox.core.events.EventNameParser::isEmptySlot
 
     override suspend fun playlistExists(playlistId: Long): Boolean = withContext(io) {
         db.read { queryLong("SELECT COUNT(*) FROM playlist WHERE id = ?") { bindLong(1, playlistId) } > 0 }
@@ -144,8 +147,18 @@ class ChannelEditorRepositoryImpl @Inject constructor(
             }
             val ruleRows = raw.values.filter { it.ruleHidden }
             if (ruleRows.isNotEmpty()) {
-                val matchers = channelRules(this, ruleRows.map { it.playlistId }.toSet())
-                for (r in ruleRows) r.rulePattern = matchers[r.playlistId]?.firstOrNull { (m, _) -> safeMatch(m, r.rawName) }?.second
+                val playlists = ruleRows.map { it.playlistId }.toSet()
+                val matchers = channelRules(this, playlists)
+                // (Event channels, re-review E1) A row the "Hide channels with no event" switch hides is never shown as
+                // hidden by a user rule: its menu says D_NO_EVENT and points at the playlist's settings.
+                val switchOn = playlists.filterTo(HashSet()) { RuleHiddenPass.hidesEmptyEvents(this, it) }
+                for (r in ruleRows) {
+                    if (RuleHiddenPass.hiddenByNoEvent(r.playlistId in switchOn, true, r.rawName, isEmptySlot)) {
+                        r.noEvent = true
+                        continue
+                    }
+                    r.rulePattern = matchers[r.playlistId]?.firstOrNull { (m, _) -> safeMatch(m, r.rawName) }?.second
+                }
             }
         }
         wanted.map { id -> raw[id]?.toRow() }
@@ -635,13 +648,14 @@ class ChannelEditorRepositoryImpl @Inject constructor(
         val mode: String = st.getText(17)
         val rawName: String = st.getText(18)
         var rulePattern: String? = null
+        var noEvent = false
 
         fun toRow() = EditorChannelRow(
             stableKey = stableKey, name = name, providerName = providerName,
             number = customNumber ?: ChannelRepository.number(mode, number, sortIndex), customNumber = customNumber, logoUrl = logo,
             hidden = hidden, ruleHidden = ruleHidden, rulePattern = rulePattern,
             locked = ownLock, lockedByGroup = if (groupLock) groupName ?: "" else null,
-            favorite = favorite, movedFrom = movedFrom, renamed = renamed,
+            favorite = favorite, movedFrom = movedFrom, renamed = renamed, noEvent = noEvent,
         )
     }
 

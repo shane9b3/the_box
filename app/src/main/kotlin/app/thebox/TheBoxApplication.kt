@@ -50,6 +50,8 @@ class TheBoxApplication : Application(), Configuration.Provider {
     @Inject lateinit var startupGate: StartupGate
     @Inject lateinit var epgRecovery: Lazy<EpgRecovery>
     @Inject lateinit var displayNames: Lazy<DisplayNames>
+    /** (Event channels WP-2, docs/design/m6-event-channels.md §5.2, arch S8) Warmed up after the display-name backfill. */
+    @Inject lateinit var eventIndex: Lazy<app.thebox.core.events.EventIndex>
     // M5 commit 0 (docs/design/m5-setup-settings.md §1.3a): the startup hooks, in order (bodies: WP-A, WP-E).
     @Inject lateinit var settingsStore: app.thebox.core.settings.SettingsStore
     @Inject lateinit var logRing: app.thebox.core.diag.LogRing
@@ -148,6 +150,17 @@ class TheBoxApplication : Application(), Configuration.Provider {
                 throw e
             } catch (e: Exception) {
                 BoxLog.e("TheBoxApplication", "display-name backfill failed", e)
+            }
+            // (Event channels §5.2, §10) Build the event index once now, so a first guide, search or hub use rarely waits,
+            // then follow its event_count with the update interval: on the first start after the v6 upgrade the count
+            // goes from 0 to the real number here, and the 6 h default must not wait for the next refresh.
+            try {
+                eventIndex.get().current()
+                for (p in playlists.get().all()) if (p.enabled) scheduler.get().rescheduleIfChanged(p.id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                BoxLog.e("TheBoxApplication", "event index warm-up failed", e)
             }
         }
     }

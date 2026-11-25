@@ -4,6 +4,7 @@ import app.thebox.core.common.Outcome
 import app.thebox.core.settings.Badge
 import app.thebox.core.settings.ChoiceOption
 import app.thebox.core.settings.ConfirmSpec
+import app.thebox.core.settings.EffectTiming
 import app.thebox.core.settings.PageModel
 import app.thebox.core.settings.RowId
 import app.thebox.core.settings.RowIntent
@@ -13,6 +14,7 @@ import app.thebox.core.settings.SettingsRoute
 import app.thebox.core.settings.SettingsRow
 import app.thebox.core.settings.TextHint
 import app.thebox.core.settings.Tone
+import app.thebox.core.settings.Visibility
 import app.thebox.core.setup.NormalizedInput
 import app.thebox.core.setup.PlaylistDetail
 import app.thebox.core.setup.PlaylistSummary
@@ -199,10 +201,21 @@ class PlaylistPage(private val r: SettingsRoute.Playlist, d: SetupPageDeps) : Se
         rows += action(ROW_REMOVE, t(SetupText.ROW_REMOVE), destructive = true, needsPin = lockSettings())
         // Advanced rows (§3.3.1).
         rows += toggle(ROW_ENABLED, t(SetupText.ROW_ENABLED), s.enabled)
+        // (Event channels WP-2, docs/design/m6-event-channels.md §10, U-E-S6) The row shows the interval the scheduler
+        // uses. While the 6 h event default applies (auto, ≥ 50 events), "Every 6 hours" is selected with the
+        // recommendation; picking any value, 24 h included, clears auto and stands (re-review E13).
+        val eventDefault = eventDefaultApplies(p)
         rows += choice(
             ROW_INTERVAL, t(SetupText.ROW_INTERVAL),
             listOf(6, 12, 24, 0).map { ChoiceOption(it.toString(), if (it == 0) t(SetupText.INTERVAL_MANUAL) else t(SetupText.INTERVAL_HOURS, it)) },
-            p.refreshIntervalH.toString(),
+            p.effectiveIntervalH.toString(),
+            description = if (eventDefault) t(SetupText.INTERVAL_EVENT_DEFAULT) else null,
+        )
+        // (Event channels WP-2, §5.5, owner ruling a) Off by default, on every playlist page; its description says what it
+        // hides (favourites too), so no count query is needed. Advanced, next to the interval: §3.3.13 keeps seven simple rows.
+        rows += row(
+            ROW_HIDE_EMPTY_EVENTS, t(SetupText.ROW_HIDE_EMPTY_EVENTS), RowKind.Toggle(p.hideEmptyEvents),
+            description = t(SetupText.HIDE_EMPTY_EVENTS_DESC), visibility = Visibility.ADVANCED, effect = EffectTiming.LIVE,
         )
         rows += choice(
             ROW_ORDER, t(SetupText.ROW_ORDER),
@@ -358,6 +371,7 @@ class PlaylistPage(private val r: SettingsRoute.Playlist, d: SetupPageDeps) : Se
             is RowIntent.Toggle -> when (intent.row.key) {
                 ROW_UPDATE_ON_START -> launch { d.admin.setUpdateOnStart(id, intent.on) }
                 ROW_ENABLED -> launch { d.admin.setEnabled(id, intent.on) }
+                ROW_HIDE_EMPTY_EVENTS -> launch { d.admin.setHideEmptyEvents(id, intent.on) }
                 ROW_PLAYLIST_EPG -> launch { d.admin.setUsePlaylistEpg(id, intent.on) }
                 ROW_IGNORE_TLS -> if (intent.on) {
                     act(PageAction.Confirm(app.thebox.core.settings.ConfirmSpec(t(SetupText.IGNORE_TLS_TITLE), t(SetupText.IGNORE_TLS_BODY), t(SetupText.IGNORE_TLS_CONFIRM), t(SetupText.ACTION_CANCEL)), RowIntent.Run(RowId(ROW_IGNORE_TLS_CONFIRMED))))
@@ -440,6 +454,8 @@ class PlaylistPage(private val r: SettingsRoute.Playlist, d: SetupPageDeps) : Se
         const val ROW_REMOVE_CONFIRMED = "playlist.remove.confirmed"
         const val ROW_ENABLED = "playlist.enabled"
         const val ROW_INTERVAL = "playlist.interval"
+        /** (Event channels WP-2, §5.5) "Hide channels with no event"; the Hidden channels page links here (E1). */
+        const val ROW_HIDE_EMPTY_EVENTS = "playlist.hide_empty_events"
         const val ROW_ORDER = "playlist.order"
         const val ROW_PLAYLIST_EPG = "playlist.playlist_epg"
         const val ROW_USER_AGENT = "playlist.user_agent"
@@ -469,6 +485,11 @@ class PlaylistPage(private val r: SettingsRoute.Playlist, d: SetupPageDeps) : Se
         const val MENU_REMOVE_BACKUP = "remove_backup"
 
         fun headerRow(name: String) = ROW_HEADER_PREFIX + name
+
+        /** §10: the event default is what the interval row shows (auto, enough events, and the scheduler on 6 h). */
+        fun eventDefaultApplies(p: PlaylistDetail): Boolean =
+            p.refreshIntervalAuto && p.refreshIntervalH > 0 && p.eventCount >= app.thebox.core.events.EventConstants.EVENT_REFRESH_MIN &&
+                p.effectiveIntervalH == app.thebox.core.events.EventConstants.EVENT_REFRESH_H
         fun backupRow(i: Int) = "$ROW_BACKUP_PREFIX$i"
 
         fun statusLabel(s: app.thebox.core.xtream.AccountStatus) = when (s) {

@@ -114,6 +114,9 @@ enum class BackupText {
     PHONE_SCAN, PHONE_OR_OPEN, PHONE_AND_CODE, PHONE_WAITING, PHONE_CONNECTED, PHONE_RECEIVED, PHONE_FOOTER, PHONE_ISOLATION_HINT,
     PHONE_VPN, PHONE_TYPE_ON_TV, PHONE_NEW_CODE, PHONE_FAIL_NO_LAN, PHONE_FAIL_BIND, PHONE_FAIL_WRONG_CODES, PHONE_FAIL_EXPIRED,
     PHONE_STARTING, PHONE_CANT_SCAN, PHONE_TITLE_SETUP, PHONE_TITLE_RESTORE, PHONE_TITLE_BACKUP, PHONE_TITLE_LOGS, PHONE_BACK_HINT,
+    // (Event channels WP-2, docs/design/m6-event-channels.md §5.5, re-review E1) Hidden by the playlist's "Hide channels
+    // with no event" switch: `backup_hidden_no_event`.
+    HIDDEN_NO_EVENT,
 }
 
 /** String lookup for [BackupText] (format args as in `strings_backup.xml`). */
