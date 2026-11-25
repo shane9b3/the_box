@@ -44,6 +44,29 @@ data class SportsEndpoints(val apiBase: String, val logoBase: String) {
             return fromOverride(text)?.also { BoxLog.w(TAG, "debug build: sports endpoints overridden") } ?: DEFAULT
         }
 
+        /**
+         * (Sports Hub §10.3, WP-2) The video hosts under an override origin: `{origin}/bc/player/index.min.js` and
+         * `{origin}/bc/playback/v1/accounts/{acct}/videos/`, marked [NhlVideoEndpoints.debugOverride] (the fake panel is
+         * plain http). Null for the same texts [fromOverride] refuses.
+         */
+        fun videoFromOverride(text: String?): NhlVideoEndpoints? {
+            val api = fromOverride(text) ?: return null
+            val origin = api.apiBase.removeSuffix("/v1/")
+            return NhlVideoEndpoints(
+                origin + NhlVideoEndpoints.FAKE_SCRIPT_PATH,
+                origin + NhlVideoEndpoints.FAKE_PLAYBACK_PATH,
+                debugOverride = true,
+            )
+        }
+
+        /** The video endpoints for this build: [NhlVideoEndpoints.DEFAULT], or the debug override. Off the main thread. */
+        fun resolveVideo(context: Context): NhlVideoEndpoints {
+            val debuggable = SportsDebugOverride.isDebuggable(context.applicationInfo.flags)
+            if (!debuggable) return NhlVideoEndpoints.DEFAULT
+            val text = SportsDebugOverride.text(context.filesDir, debuggable)
+            return videoFromOverride(text)?.also { BoxLog.w(TAG, "debug build: video endpoints overridden") } ?: NhlVideoEndpoints.DEFAULT
+        }
+
         private const val TAG = "SportsEndpoints"
     }
 }

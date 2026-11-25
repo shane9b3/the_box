@@ -239,6 +239,23 @@ class ControllerTimeshiftTest {
         assertFalse(storage.ringFile.exists())
     }
 
+    /** (Sports Hub §6.5, A-B1.5) A clip ends the ring for good, as a catch-up request does (a zap keeps the file). */
+    @Test
+    fun aClipDiscardsTheRingLikeCatchUp() {
+        playBuffered()
+        val file = storage.ringFile
+        assertTrue(file.exists())
+        val id = c.playClip(app.thebox.player.api.ClipTune("https://clips.example/1/master.m3u8?t=FAKETOKEN0123", app.thebox.core.sports.hub.ClipFormat.HLS, null, "Clip"))
+        f.idle()
+        assertTrue(writer.calls.contains("stop:SESSION_END"))
+        assertTrue("the recorder's call is cancelled", f.journal.entries.contains("endSession:$wid"))
+        assertFalse("file deleted", file.exists())
+        assertTrue(ring.closed)
+        assertNull("no local buffer under a clip", c.localBuffer.value)
+        assertEquals(id, c.state.value.target!!.tuneId)
+        assertNull(f.sources.last.ring)
+    }
+
     @Test
     fun switchingFromBufferedTsToHlsDiscardsThePreviouslyAllocatedRing() {
         tune()

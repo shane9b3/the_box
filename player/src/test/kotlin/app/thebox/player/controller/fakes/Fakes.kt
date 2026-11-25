@@ -192,7 +192,7 @@ internal class FakeTransport(private val journal: Journal) : TransportFactory {
 
 @OptIn(UnstableApi::class)
 internal class FakeMediaSourceBuilder(private val journal: Journal) : MediaSourceBuilderApi {
-    data class Build(val ctx: StreamSessionContext, val format: StreamFormat, val compat: TsCompat, val archive: ArchiveRequest?, val ring: app.thebox.player.internal.RingOpen? = null)
+    data class Build(val ctx: StreamSessionContext, val format: StreamFormat, val compat: TsCompat, val archive: ArchiveRequest?, val ring: app.thebox.player.internal.RingOpen? = null, val clip: app.thebox.player.engine.ClipMedia? = null)
 
     val builds = mutableListOf<Build>()
     /** The "Keep up with live" value the last build was given. */
@@ -203,10 +203,10 @@ internal class FakeMediaSourceBuilder(private val journal: Journal) : MediaSourc
     /** Thrown by the next [build] (then cleared), e.g. the real builder's UnsupportedStreamFormatException. */
     var failNext: Exception? = null
 
-    override fun build(ctx: StreamSessionContext, format: StreamFormat, compat: TsCompat, transport: TransportFactory, archive: ArchiveRequest?, ring: app.thebox.player.internal.RingOpen?, liveSpeedCorrection: Boolean): MediaSourceWithTelemetry {
+    override fun build(ctx: StreamSessionContext, format: StreamFormat, compat: TsCompat, transport: TransportFactory, archive: ArchiveRequest?, ring: app.thebox.player.internal.RingOpen?, liveSpeedCorrection: Boolean, clip: app.thebox.player.engine.ClipMedia?): MediaSourceWithTelemetry {
         lastLiveSpeedCorrection = liveSpeedCorrection
         failNext?.let { failNext = null; throw it }
-        builds += Build(ctx, format, compat, archive, ring)
+        builds += Build(ctx, format, compat, archive, ring, clip)
         journal("build:${ctx.tuneId}:$format${if (ring != null) ":ring@${ring.startOffset}" else ""}")
         // (M6) A ring reader's telemetry is the one the time-shift session built (§5.2); tests read it through [ringTelemetry].
         ring?.let { ringTelemetry[ctx.tuneId] = it.telemetry }
@@ -316,9 +316,11 @@ internal class FakeDisplayMode : DisplayModeControllerApi {
     var clears = 0
     override fun attachSurfaceView(view: SurfaceView?) { this.view = view }
     override fun onTune(knownFpsMilli: Int?) { tunes += knownFpsMilli }
-    override fun onFps(fps: Float) = Unit
+    val fpsCalls = mutableListOf<Float>()
+    var settles = 0
+    override fun onFps(fps: Float) { fpsCalls += fps }
     override fun onViewport(viewport: Viewport) { viewports += viewport }
-    override fun awaitSettled(onSettled: () -> Unit) = onSettled()
+    override fun awaitSettled(onSettled: () -> Unit) { settles++; onSettled() }
     override fun clear() { clears++ }
 }
 
@@ -340,7 +342,11 @@ internal class FakeEngine : EngineEnvironment, EngineParts {
     var statsOn = false
     var tuneDefaults: List<Any?>? = null
     var milestoneListener: ((Boolean) -> Unit)? = null
-    override fun beginSession(telemetry: StreamTelemetry?, format: app.thebox.core.playback.StreamFormat, isLive: Boolean, isHls: Boolean) { sessions++ }
+    /** (Sports Hub) `beginSession`'s isLive per session, and every `setChannelAfr` call. */
+    val sessionIsLive = mutableListOf<Boolean>()
+    val channelAfr = mutableListOf<app.thebox.core.playback.AfrMode?>()
+    override fun beginSession(telemetry: StreamTelemetry?, format: app.thebox.core.playback.StreamFormat, isLive: Boolean, isHls: Boolean) { sessions++; sessionIsLive += isLive }
+    override fun setChannelAfr(mode: app.thebox.core.playback.AfrMode?) { channelAfr += mode }
     override fun setFirstMediaListener(listener: ((video: Boolean) -> Unit)?) { milestoneListener = listener }
     override fun setStatsEnabled(enabled: Boolean) { statsOn = enabled }
     override fun applyTuneDefaults(audioLanguages: List<String>, textLanguages: List<String>, subtitles: String?, subtitlesEnabled: Boolean) {
