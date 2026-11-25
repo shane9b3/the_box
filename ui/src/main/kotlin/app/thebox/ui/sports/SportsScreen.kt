@@ -1,7 +1,6 @@
 package app.thebox.ui.sports
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -15,6 +14,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyGridState
@@ -26,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -33,15 +35,20 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.Key
-import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
@@ -49,30 +56,29 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.tv.material3.Text
 import app.thebox.core.guide.FooterHint
-import app.thebox.core.sports.FailKind
+import app.thebox.core.settings.UiTextScale
+import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.League
 import app.thebox.core.sports.LeagueGroup
 import app.thebox.core.sports.group
-import app.thebox.core.sports.ScoreCorner
-import app.thebox.core.sports.SportsConstants
 import app.thebox.ui.R
+import app.thebox.ui.full.PlayerText
 import app.thebox.ui.guide.screen.Chip
 import app.thebox.ui.guide.screen.FooterHints
 import app.thebox.ui.guide.screen.GuideUi
-import app.thebox.ui.full.PlayerText
 import app.thebox.ui.guide.screen.Line
 import app.thebox.ui.theme.DesignTokens
-import androidx.tv.material3.Text
+import java.time.LocalDate
+import java.util.Date
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 const val SPORTS_SCREEN_TAG = "sports_screen"
-const val SPORTS_CORNER_TAG = "sports_corner"
-const val SPORTS_DELAY_TAG = "sports_delay"
-const val SPORTS_MENU_TAG = "sports_menu"
 const val SPORTS_RETRY_TAG = "sports_retry"
 const val SPORTS_MESSAGE_TAG = "sports_message"
 const val SPORTS_UPDATED_TAG = "sports_updated"
@@ -80,39 +86,39 @@ const val SPORTS_SKELETON_TAG = "sports_skeleton"
 const val SPORTS_GRID_TAG = "sports_grid"
 const val SPORTS_WEEK_TAG = "sports_week"
 const val SPORTS_LEAGUE_PILL_TAG = "sports_league_pill"
+const val SPORTS_DATE_TAG = "sports_date"
+const val SPORTS_TIME_TAG = "sports_time"
+const val SPORTS_HEADING_TAG = "sports_heading"
+const val SPORTS_TOAST_TAG = "sports_toast"
+const val SPORTS_SHEET_TAG = "sports_sheet"
 internal fun sportsLeagueTag(league: League) = "sports_league:" + league.name
 /** (CHL §6.3) The group chips `NHL · NFL · CHL`: the same tags as before for NHL and NFL, "sports_league:CHL" for the third. */
 internal fun sportsGroupTag(group: LeagueGroup) = "sports_league:" + group.name
 /** (CHL §6.3) The inline sub-switch's chips `OHL · WHL · QMJHL`, shown only while a CHL league is. */
 internal fun sportsChlTag(league: League) = "sports_chl:" + league.name
 const val SPORTS_CHL_DIVIDER_TAG = "sports_chl_divider"
-internal fun sportsDayTag(day: SportsDay) = "sports_day:" + day.name
-internal fun sportsMenuItemTag(i: Int) = "sports_menu_item:$i"
-
-private enum class ChipMenu { CORNER, DELAY }
 
 /** Design px (1 dp = 1 design px under the root's scale). */
-private const val GRID_BOTTOM_GAP = 16
-/** Corner / Delay chip height and the day chips' height (design px; owner request 2026-11-06). */
+private const val SCROLL_MARGIN = 48
 private const val CHIP_H = 52
-private const val DAY_CHIP_H = 60
-private const val SCROLL_MARGIN = 64
+
+/** The page's focus zones, for the footer's hints (§2.6). */
+private enum class Zone { CARDS, CHIPS }
 
 /**
- * The Sports tab (docs/design/m6-score-bug.md §5; WP-4a). It is on Compose focus like Search: the router passes every key
- * but BACK, and one Back returns to the guide grid (the machine's `onSportsClosed`). While a choice list is open the
- * screen holds BACK ([onBackFreeChanged] false) and closes the list itself.
+ * The Sports Hub page (docs/design/m6-sports-hub.md §1, §2; WP-4). It is on Compose focus like Search: the router passes every
+ * key but BACK, and one Back returns to the guide grid (the machine's `onSportsClosed`). While focus is in the panel or a sheet
+ * is open the screen holds BACK ([onBackFreeChanged] false) and returns focus itself (Back from the panel goes to its card).
  *
- * Layout: title row (96, 56) with the Corner and Delay chips right-aligned to 1824; the credit under the title; the day
- * chips at y 156; the games grid from y 232 (three 564 px columns, 128 px cards, 24 px row gap) down to 16 px above the
- * footer; the footer with a dynamic OK hint from the focused card.
+ * Layout (design px, 1920 × 1080): the title row at y 56; the detail panel (96, 148, 720 × 812); on the right (x 856, 968 wide)
+ * the heading, the day strip at y 196 and the two-column grid of 472 × 304 cards from y 280 to 960; the footer at y 976.
  *
- * Initial focus: the followed game, else the first live card, else the Today chip.
+ * Keys: OK or Menu on any card (and Left from the left column) moves focus to the panel's first enabled slot; slots never
+ * reorder; Back, or Right from the last slot, returns to the same card. No long press anywhere (§2.2). Initial focus: the
+ * followed game, else the first live card, else the Today chip.
  *
- * (NFL WP-5, docs/design/m6-nfl.md §7.3; CHL §6.3) The title row carries the NHL · NFL · CHL chips (the selected one filled;
- * with CHL shown, the inline OHL · WHL · QMJHL switch follows on the same row); Corner
- * and Delay stay right-aligned, and Up from the day chips still lands on Corner, from where Left reaches the league chips.
- * For the NFL the day chips read Last week · This week · Next week and a neighbour the board did not name is disabled.
+ * The page sits over the root's video surface: no `graphicsLayer`, clip or blur on its root. While a clip plays it keeps its
+ * state, including an open Goals sheet, but is not drawn ([ClipPlayerLayer] draws the clip's controls).
  */
 @Composable
 fun SportsScreen(
@@ -122,10 +128,22 @@ fun SportsScreen(
     onBackFreeChanged: (Boolean) -> Unit = {},
 ) {
     val ui by viewModel.state.collectAsStateWithLifecycle()
+    val panel by viewModel.panel.collectAsStateWithLifecycle()
+    val sheet by viewModel.sheet.collectAsStateWithLifecycle()
+    val panelFocused by viewModel.panelFocused.collectAsStateWithLifecycle()
+    val clipInfo by viewModel.clipInfo.collectAsStateWithLifecycle()
+    val videoRefused by viewModel.videoRefused.collectAsStateWithLifecycle()
+    val toast by viewModel.toast.collectAsStateWithLifecycle()
+    val session = viewModel.clipSession
+    val clipState by (session?.state ?: remember { kotlinx.coroutines.flow.MutableStateFlow<ClipSession.State>(ClipSession.State.Idle) }).collectAsStateWithLifecycle()
+    val lastPlayed by (session?.lastPlayed ?: remember { kotlinx.coroutines.flow.MutableStateFlow<app.thebox.core.sports.hub.ClipRef?>(null) }).collectAsStateWithLifecycle()
+    val clipActive = clipState !is ClipSession.State.Idle
+    // Back is free only when neither a sheet, the panel nor the clip layer holds it (the layer reports its own hold).
+    val holdsNothing = androidx.compose.runtime.rememberUpdatedState(sheet == null && !panelFocused)
     val res = LocalResources.current
     val scope = rememberCoroutineScope()
     val gridState = rememberLazyGridState()
-    val marginPx = with(androidx.compose.ui.platform.LocalDensity.current) { SCROLL_MARGIN.dp.roundToPx() }
+    val marginPx = with(LocalDensity.current) { SCROLL_MARGIN.dp.roundToPx() }
 
     DisposableEffect(viewModel) {
         viewModel.onEntered()
@@ -134,33 +152,44 @@ fun SportsScreen(
             onBackFreeChanged(true)
         }
     }
-    val corner = remember { FocusRequester() }
-    val delayChip = remember { FocusRequester() }
-    val dayChips = remember { SportsDay.entries.associateWith { FocusRequester() } }
+    val league = ui.prefs.league
+    val nfl = league.group == LeagueGroup.NFL
     // (CHL §6.3, L7) `NHL · NFL · CHL`, then, with CHL shown, an inline `OHL · WHL · QMJHL` on the same row.
     val groupChips = remember { LeagueGroup.entries.associateWith { FocusRequester() } }
     val subChips = remember { CHL_LEAGUES.associateWith { FocusRequester() } }
-    var focusSub by remember { mutableStateOf(false) }
+    val dayChips = remember { (-SportsHubDays..SportsHubDays).associateWith { FocusRequester() } }
+    val slotRequesters = remember { List(3) { FocusRequester() } }
     val cardRequesters = remember { HashMap<String, FocusRequester>() }
-    var menu by remember { mutableStateOf<ChipMenu?>(null) }
+    var focusSub by remember { mutableStateOf(false) }
     var settled by remember { mutableStateOf(false) }
     var focusedCardId by remember { mutableStateOf<String?>(null) }
+    var lastCardId by remember { mutableStateOf<String?>(null) }
+    var returnCardId by remember { mutableStateOf<String?>(null) }
+    var zone by remember { mutableStateOf(Zone.CARDS) }
+    var focusedSlot by remember { mutableIntStateOf(-1) }
+    var sheetSlot by remember { mutableIntStateOf(0) }
+    var lastSlot by remember { mutableIntStateOf(0) }
+    val selectedChip = dayChips.getValue(if (nfl) ui.offset.coerceIn(-1, 1) else ui.offset)
 
-    LaunchedEffect(Unit) { runCatching { dayChips.getValue(SportsDay.TODAY).requestFocus() } }
-    LaunchedEffect(menu) { onBackFreeChanged(menu == null) }
+    LaunchedEffect(Unit) { runCatching { dayChips.getValue(0).requestFocus() } }
+    // The router holds BACK while focus is in the panel or a sheet is open (the clip layer holds it for its own life).
+    LaunchedEffect(sheet, panelFocused, clipActive) { if (!clipActive) onBackFreeChanged(sheet == null && !panelFocused) }
     // A league switch lists the new league from its top.
-    LaunchedEffect(ui.prefs.league) { gridState.requestScrollToItem(0) }
+    LaunchedEffect(league) { gridState.requestScrollToItem(0) }
     // OK on the CHL chip moves focus to the sub-chip of the league now shown, once the sub-switch has been composed (§6.3).
-    LaunchedEffect(focusSub, ui.prefs.league.group) {
-        if (focusSub && ui.prefs.league.group == LeagueGroup.CHL) {
+    LaunchedEffect(focusSub, league.group) {
+        if (focusSub && league.group == LeagueGroup.CHL) {
             androidx.compose.runtime.withFrameNanos { }
-            runCatching { subChips.getValue(ui.prefs.league).requestFocus() }
+            runCatching { subChips.getValue(league).requestFocus() }
             focusSub = false
         }
     }
 
-    // Initial focus (§5.1): once, when the first board arrives. A load that shows nothing leaves the Today chip focused.
     val body = ui.body
+    val cards = (body as? SportsBody.Games)?.cards.orEmpty()
+    // The panel's initial game starts its dwell once a board shows (§1.3).
+    LaunchedEffect(cards.firstOrNull()?.game?.id, league, ui.offset) { if (cards.isNotEmpty()) viewModel.onBoardShown() }
+    // Initial focus (§2.1): once, when the first board arrives. A load that shows nothing leaves the Today chip focused.
     LaunchedEffect(body is SportsBody.Games, body is SportsBody.Loading) {
         if (body is SportsBody.Loading) return@LaunchedEffect
         if (settled) return@LaunchedEffect
@@ -173,10 +202,44 @@ fun SportsScreen(
         }
     }
 
-    val selectedChip = dayChips.getValue(ui.day)
+    fun focusCard(id: String?) {
+        scope.launch {
+            androidx.compose.runtime.withFrameNanos { }
+            val target = cardRequesters[id] ?: cards.firstOrNull()?.let { cardRequesters[it.game.id.id] }
+            runCatching { target?.requestFocus() }
+        }
+    }
+    fun focusSlot(i: Int) {
+        scope.launch {
+            androidx.compose.runtime.withFrameNanos { }
+            runCatching { slotRequesters[i].requestFocus() }
+        }
+    }
+    fun exitPanel() {
+        viewModel.onPanelExited()
+        focusCard(returnCardId ?: lastCardId)
+    }
+    fun enter(id: String) {
+        returnCardId = id
+        val first = viewModel.enterPanel(id) ?: return
+        lastSlot = first
+        focusSlot(first)
+    }
+    // After a clip: back to the slot that started it (the Goals sheet restores its own focus).
+    LaunchedEffect(clipActive) {
+        if (!clipActive && panelFocused && sheet == null) focusSlot(lastSlot)
+    }
+    // A slot that stops being enabled while focused hands focus to the next enabled one, else to the card (§2.3).
+    LaunchedEffect(panel.slots, panelFocused, focusedSlot) {
+        if (panelFocused && focusedSlot in 0..2 && !panel.slots[focusedSlot].usable && sheet == null && !clipActive) {
+            val next = panel.firstEnabled
+            if (next != null) focusSlot(next) else exitPanel()
+        }
+    }
+
     val off = body is SportsBody.Off
-    val cardsNow = (body as? SportsBody.Games)?.cards.orEmpty()
-    val focusedCard = cardsNow.firstOrNull { it.game.id.id == focusedCardId }
+    val focusedCard = cards.firstOrNull { it.game.id.id == focusedCardId }
+    val showHighlights = !videoRefused
 
     Box(
         modifier
@@ -184,103 +247,179 @@ fun SportsScreen(
             .testTag(SPORTS_SCREEN_TAG)
             .onPreviewKeyEvent { e ->
                 // (Review L6) Any move before the sub-switch has appeared cancels the pending focus pull to its chip.
-                if (focusSub && e.type == KeyEventType.KeyDown && e.key != Key.DirectionCenter) focusSub = false
-                if (menu != null && (e.key == Key.Back || e.key == Key.Escape || e.key == Key.ButtonB)) {
-                    if (e.type == KeyEventType.KeyUp) {
-                        val m = menu
-                        menu = null
-                        scope.launch {
-                            androidx.compose.runtime.withFrameNanos { }
-                            runCatching { (if (m == ChipMenu.CORNER) corner else delayChip).requestFocus() }
-                        }
-                    }
-                    true
-                } else false
+                if (focusSub && e.type == androidx.compose.ui.input.key.KeyEventType.KeyDown && e.key != Key.DirectionCenter) focusSub = false
+                false
             },
     ) {
-        Column(Modifier.fillMaxSize().padding(start = 96.dp, end = 96.dp, top = 56.dp, bottom = 40.dp)) {
-            TitleRow(
-                ui, corner, delayChip, groupChips, subChips, selectedChip, chips = !off, onOpen = { menu = it },
-                onGroup = { g ->
-                    viewModel.onGroup(g)
-                    if (g == LeagueGroup.CHL) focusSub = true
-                },
-                onLeague = viewModel::onLeague,
-            )
-            Spacer(Modifier.height(4.dp))
-            CreditRow(ui)
-            Spacer(Modifier.height(24.dp))
-            // U-N4: with Show Sports off there is nothing to pick: no day chips (and no Corner / Delay chips).
-            // NFL §7.3 (fix pass U4): Up from the day / week chips lands on the shown league's chip (both leagues).
-            // (CHL §6.3) With a CHL league shown the target is its sub-chip.
-            val shown = ui.prefs.league
-            val upTarget = if (shown.group == LeagueGroup.CHL) subChips.getValue(shown) else groupChips.getValue(shown.group)
-            if (off) Spacer(Modifier.height(DAY_CHIP_H.dp)) else DayChips(ui, dayChips, upTarget) { day ->
-                settled = true
-                viewModel.onDay(day)
+        // The page: composed (state kept) but not drawn while a clip plays; no layer, clip or alpha above the surface.
+        Box(
+            Modifier
+                .fillMaxSize()
+                .drawWithContent { if (!clipActive) drawContent() }
+                .drawBehind { if (!clipActive) drawPageBackground() },
+        ) {
+            Column(Modifier.fillMaxSize().padding(start = 96.dp, end = 96.dp, top = 56.dp, bottom = 56.dp)) {
+                TitleRow(ui, groupChips, subChips, selectedChip, chips = !off, clock24 = clock24, onZone = { zone = Zone.CHIPS },
+                    onGroup = { g ->
+                        viewModel.onGroup(g)
+                        if (g == LeagueGroup.CHL) focusSub = true
+                    },
+                    onLeague = viewModel::onLeague,
+                )
+                Spacer(Modifier.height(28.dp))
+                if (off) {
+                    Message(stringResource(R.string.sports_off), retry = false, onRetry = {})
+                } else {
+                    Row(Modifier.fillMaxWidth().height(HubPanelPlan.PANEL_H.dp)) {
+                        HubPanel(
+                            model = panel, clock24 = clock24, slotRequesters = slotRequesters,
+                            onSlot = { i ->
+                                sheetSlot = i
+                                lastSlot = i
+                                viewModel.onSlot(i)
+                            },
+                            onSlotFocus = { focusedSlot = it ?: -1 },
+                            onExit = ::exitPanel,
+                        )
+                        Spacer(Modifier.width(40.dp))
+                        Column(Modifier.width(968.dp)) {
+                            Heading(ui)
+                            Spacer(Modifier.height(16.dp))
+                            // Up from the strip: the shown league's chip (NFL §7.3, fix pass U4; CHL §6.3: its sub-chip).
+                            val upTarget = if (league.group == LeagueGroup.CHL) subChips.getValue(league) else groupChips.getValue(league.group)
+                            DayStrip(
+                                chips = ui.days, selectedOffset = ui.offset, nfl = nfl, requesters = dayChips, up = upTarget,
+                                onDown = {
+                                    // Down from the strip: the card focused last on this day, else the first card (§2.7).
+                                    val id = lastCardId?.takeIf { l -> cards.any { it.game.id.id == l } } ?: cards.firstOrNull()?.game?.id?.id
+                                    if (id == null) false else { focusCard(id); true }
+                                },
+                                onDay = { o ->
+                                    settled = true
+                                    viewModel.onDay(o)
+                                },
+                                modifier = Modifier.fillMaxWidth().height(60.dp).onFocusChanged { if (it.hasFocus) zone = Zone.CHIPS },
+                            )
+                            Spacer(Modifier.height(24.dp))
+                            Box(Modifier.fillMaxWidth().height(680.dp)) {
+                                when (val b = body) {
+                                    SportsBody.Loading -> Skeletons()
+                                    is SportsBody.Games -> GamesGrid(
+                                        b.cards, gridState, clock24, cardRequesters, dayChips.getValue(selectedOffsetOf(ui, nfl)),
+                                        panel = panel, panelFocused = panelFocused, showHighlights = showHighlights, focusedId = focusedCardId,
+                                        onFocus = { id, on, index ->
+                                            if (on) {
+                                                focusedCardId = id
+                                                lastCardId = id
+                                                zone = Zone.CARDS
+                                                viewModel.onCardFocused(id)
+                                                scope.launch { gridState.ensureVisible(index, marginPx) }
+                                            } else if (focusedCardId == id) focusedCardId = null
+                                        },
+                                        onEnter = ::enter,
+                                    )
+                                    is SportsBody.Empty -> Message(emptyText(b, ui), retry = false, onRetry = {})
+                                    is SportsBody.Failed -> Message(SportsText.failure(res, b.kind, league), retry = true, onRetry = {
+                                        // U-S3: the Retry chip leaves with the Failed body, so focus moves to the selected day chip
+                                        // first, and the initial-focus rule runs again for the board that answers.
+                                        runCatching { selectedChip.requestFocus() }
+                                        settled = false
+                                        viewModel.onRetry()
+                                    })
+                                    SportsBody.Off -> Unit
+                                }
+                            }
+                        }
+                    }
+                }
+                Spacer(Modifier.height(16.dp))
+                Footer(ui, hints = footerOf(res, zone, panelFocused, sheet, focusedCard, panel, focusedSlot), updatedMono = ui.updatedMono)
             }
-            Spacer(Modifier.height(24.dp))
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                when (val b = body) {
-                    SportsBody.Loading -> Skeletons()
-                    is SportsBody.Games -> GamesGrid(
-                        b.cards, gridState, clock24, cardRequesters, selectedChip,
-                        onFocus = { id, on, index ->
-                            if (on) {
-                                focusedCardId = id
-                                scope.launch { gridState.ensureVisible(index, marginPx) }
-                            } else if (focusedCardId == id) focusedCardId = null
+            // A sheet takes the right column (§6.4); the grid behind is not focusable while it is open.
+            sheet?.let { sh ->
+                Box(Modifier.padding(start = 856.dp, top = 148.dp).size(968.dp, 812.dp).testTag(SPORTS_SHEET_TAG)) {
+                    SheetHost(
+                        sh, viewModel, panel, clipInfo, lastPlayed?.videoId, clock24,
+                        onClose = {
+                            viewModel.closeSheet()
+                            val i = sheetSlot
+                            if (panelFocused && panel.slots.getOrNull(i)?.usable == true) focusSlot(i) else exitPanel()
                         },
-                        onCard = viewModel::onCard,
                     )
-                    is SportsBody.Empty -> Message(emptyText(b, ui), retry = false, onRetry = {})
-                    is SportsBody.Failed -> Message(SportsText.failure(res, b.kind, ui.prefs.league), retry = true, onRetry = {
-                        // U-S3: the Retry chip leaves with the Failed body, so focus moves to the selected day chip
-                        // first, and the initial-focus rule runs again for the board that answers.
-                        runCatching { selectedChip.requestFocus() }
-                        settled = false
-                        viewModel.onRetry()
-                    })
-                    SportsBody.Off -> Message(stringResource(R.string.sports_off), retry = false, onRetry = {})
                 }
             }
-            Spacer(Modifier.height(GRID_BOTTOM_GAP.dp))
-            FooterHints(footerOf(res, focusedCard), textPx = 24)
         }
-        menu?.let { m ->
-            ChoiceList(
-                kind = m,
-                prefsCorner = ui.prefs.corner,
-                prefsDelay = ui.prefs.delaySec,
-                onPick = { picked ->
-                    when (picked) {
-                        is Pick.Corner -> viewModel.setCorner(picked.corner)
-                        is Pick.Delay -> viewModel.setDelay(picked.seconds)
-                    }
-                    menu = null
-                    scope.launch {
-                        androidx.compose.runtime.withFrameNanos { }
-                        runCatching { (if (m == ChipMenu.CORNER) corner else delayChip).requestFocus() }
-                    }
-                },
-            )
+        if (session != null && clipActive) {
+            ClipPlayerLayer(session = session, onBackFreeChanged = { free -> onBackFreeChanged(free && holdsNothing.value) }, modifier = Modifier.fillMaxSize())
         }
+        toast?.let { t -> ToastBar(t, clock24, onShown = { viewModel.toastShown(t.seq) }) }
     }
 }
 
+private const val SportsHubDays = app.thebox.core.sports.SportsConstants.HUB_DAY_RANGE
+
+private fun selectedOffsetOf(ui: SportsUiState, nfl: Boolean): Int = if (nfl) ui.offset.coerceIn(-1, 1) else ui.offset
+
+/** The page background (§1.1): `Canvas` and one static linear gradient from the top left (`#123D2C`, α 0.85) to clear at 60 % of the diagonal. */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPageBackground() {
+    drawRect(DesignTokens.Colors.Canvas)
+    drawRect(
+        Brush.linearGradient(
+            colors = listOf(Color(0xFF123D2C).copy(alpha = 0.85f), Color.Transparent),
+            start = Offset.Zero, end = Offset(size.width * 0.6f, size.height * 0.6f),
+        ),
+    )
+}
+
 @Composable
-private fun emptyText(b: SportsBody.Empty, ui: SportsUiState): String =
+private fun emptyText(b: SportsBody.Empty, ui: SportsUiState): String {
+    val res = LocalResources.current
+    val league = ui.prefs.league
+    // A day other than yesterday, today or tomorrow: the date and "no games" (the hub's own string).
+    if (league.group != LeagueGroup.NFL && b.offset !in -1..1) {
+        val date = runCatching { LocalDate.parse(b.dayKey) }.getOrNull()
+        if (date != null) return res.getString(R.string.sports_hub_day_no_games_desc, SportsText.spokenDate(date))
+    }
     // NFL §7.2: the off-season has no neighbour either way ("No NFL games this week."); a quiet week points at the chips.
     // CHL §6.5: "No OHL games today. Pick another day above." (the `_league` strings).
-    SportsText.emptyDay(LocalResources.current, b.day, ui.prefs.league, weekOff = !ui.canPrev && !ui.canNext)
+    return SportsText.emptyDay(res, b.day, league, weekOff = !ui.canPrev && !ui.canNext)
+}
 
-/** `← → ↑ ↓ Browse · OK Follow score / OK Stop following (from the focused card) · Back Guide` (U-S9). */
-private fun footerOf(res: android.content.res.Resources, focused: GameCardModel?): List<FooterHint> = buildList {
-    add(FooterHint(res.getString(R.string.sports_footer_keys_browse), res.getString(R.string.sports_footer_browse)))
-    if (focused != null) {
-        add(FooterHint(res.getString(R.string.sports_footer_keys_ok), res.getString(if (focused.followed) R.string.sports_footer_stop else R.string.sports_footer_follow)))
+/** The footer's hints (§2.6). */
+private fun footerOf(
+    res: android.content.res.Resources, zone: Zone, panelFocused: Boolean, sheet: HubSheet?, focused: GameCardModel?,
+    panel: HubPanelModel, focusedSlot: Int,
+): List<FooterHint> = buildList {
+    val ok = res.getString(R.string.sports_footer_keys_ok)
+    val back = res.getString(R.string.sports_footer_keys_back)
+    when {
+        sheet != null -> {
+            add(FooterHint("↑ ↓", res.getString(R.string.sports_hub_hint_choose)))
+            when (sheet) {
+                is HubSheet.Goals -> add(FooterHint(ok, res.getString(R.string.sports_hub_hint_play)))
+                is HubSheet.Channels -> add(FooterHint(ok, res.getString(R.string.sports_hub_hint_watch)))
+                is HubSheet.BoxScoreSheet -> add(FooterHint("← →", res.getString(R.string.sports_hub_hint_away_home)))
+                is HubSheet.Matchup -> Unit
+            }
+            add(FooterHint(back, res.getString(R.string.sports_hub_hint_close)))
+        }
+        panelFocused -> {
+            add(FooterHint("← →", res.getString(R.string.sports_hub_hint_choose)))
+            panel.slots.getOrNull(focusedSlot)?.takeIf { it.usable }?.let { add(FooterHint(ok, slotText(res, it))) }
+            add(FooterHint(back, res.getString(R.string.sports_hub_hint_games)))
+        }
+        zone == Zone.CHIPS || focused == null -> {
+            add(FooterHint(res.getString(R.string.sports_footer_keys_browse), res.getString(R.string.sports_hub_hint_browse)))
+            add(FooterHint(ok, res.getString(R.string.sports_hub_hint_show)))
+            add(FooterHint(back, res.getString(R.string.sports_hub_hint_guide)))
+        }
+        else -> {
+            add(FooterHint(res.getString(R.string.sports_footer_keys_browse), res.getString(R.string.sports_hub_hint_browse)))
+            // "OK Options" is absent when the game has no enabled slot.
+            if (panel.game?.id == focused.game.id && panel.firstEnabled != null) add(FooterHint(ok, res.getString(R.string.sports_hub_hint_options)))
+            add(FooterHint(back, res.getString(R.string.sports_hub_hint_guide)))
+        }
     }
-    add(FooterHint(res.getString(R.string.sports_footer_keys_back), res.getString(R.string.sports_footer_back)))
 }
 
 // ------------------------------------------------------------------ title row
@@ -288,20 +427,19 @@ private fun footerOf(res: android.content.res.Resources, focused: GameCardModel?
 @Composable
 private fun TitleRow(
     ui: SportsUiState,
-    corner: FocusRequester,
-    delayChip: FocusRequester,
     groupChips: Map<LeagueGroup, FocusRequester>,
     subChips: Map<League, FocusRequester>,
     down: FocusRequester,
     chips: Boolean,
-    onOpen: (ChipMenu) -> Unit,
+    clock24: Boolean,
+    onZone: () -> Unit,
     onGroup: (LeagueGroup) -> Unit,
     onLeague: (League) -> Unit,
 ) {
     val res = LocalResources.current
-    Row(Modifier.fillMaxWidth().height(60.dp), verticalAlignment = Alignment.CenterVertically) {
-        Line(stringResource(R.string.sports_title), GuideUi.sans(44, FontWeight.SemiBold))
-        Spacer(Modifier.width(16.dp))
+    Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
+        Line(stringResource(R.string.sports_hub_title), GuideUi.sans(44, FontWeight.SemiBold))
+        Spacer(Modifier.width(32.dp))
         if (!chips) {
             // Show Sports off: nothing to pick, so the shown league reads as a static pill (fix pass U4: not always NHL).
             Box(Modifier.background(GuideUi.White08, RoundedCornerShape(DesignTokens.Radii.Chip)).padding(horizontal = 14.dp, vertical = 5.dp)) {
@@ -310,7 +448,7 @@ private fun TitleRow(
         } else {
             // NFL §7.3 (ruling 24), CHL §6.3 (L7): NHL · NFL · CHL, the shown group filled, 22/600, height 52; with CHL shown, a
             // 1 px divider (16 px of air each side) and OHL · WHL · QMJHL in the same style on the same row, so nothing moves
-            // vertically. Up is consumed; Down reaches the day chips; Left / Right walk the whole row.
+            // vertically. Up is consumed; Down reaches the selected day chip; Left / Right walk the whole row.
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
                 LeagueGroup.entries.forEach { group ->
                     FocusChip(
@@ -319,8 +457,8 @@ private fun TitleRow(
                         tag = sportsGroupTag(group),
                         down = down,
                         selected = group == ui.prefs.league.group,
-                        textPx = 22,
-                        weight = FontWeight.SemiBold,
+                        last = group == LeagueGroup.CHL && ui.prefs.league.group != LeagueGroup.CHL,
+                        onFocus = onZone,
                         onClick = { onGroup(group) },
                     )
                 }
@@ -334,8 +472,8 @@ private fun TitleRow(
                             tag = sportsChlTag(league),
                             down = down,
                             selected = league == ui.prefs.league,
-                            textPx = 22,
-                            weight = FontWeight.SemiBold,
+                            last = league == League.QMJHL,
+                            onFocus = onZone,
                             onClick = { onLeague(league) },
                         )
                     }
@@ -343,39 +481,39 @@ private fun TitleRow(
             }
         }
         Spacer(Modifier.weight(1f))
-        if (!chips) return@Row
-        FocusChip(
-            text = stringResource(R.string.sports_chip_corner, SportsText.corner(res, ui.prefs.corner)),
-            requester = corner,
-            tag = SPORTS_CORNER_TAG,
-            down = down,
-            onClick = { onOpen(ChipMenu.CORNER) },
-        )
-        Spacer(Modifier.width(12.dp))
-        FocusChip(
-            text = stringResource(R.string.sports_chip_delay, SportsText.delay(res, ui.prefs.delaySec)),
-            requester = delayChip,
-            tag = SPORTS_DELAY_TAG,
-            down = down,
-            onClick = { onOpen(ChipMenu.DELAY) },
-        )
+        DateAndTime(clock24)
     }
 }
 
-/** A focusable chip ([height] design px, text [textPx]/500). Up is consumed: there is nothing above the title row (the top bar is not drawn here). */
+/** The date (26/500 `Fg70`) and the time (36/600), right-aligned; not focusable (§1.1). */
+@Composable
+private fun DateAndTime(clock24: Boolean) {
+    val now by produceState(System.currentTimeMillis()) {
+        while (true) {
+            delay(15_000L)
+            value = System.currentTimeMillis()
+        }
+    }
+    val locale = androidx.compose.ui.text.intl.Locale.current.platformLocale
+    val date = app.thebox.ui.guide.screen.TimeFormats.format("EEE, MMM d", locale, Date(now))
+    val time = SportsText.startTime(now, clock24, locale)
+    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Line(date, GuideUi.sans(26, FontWeight.Medium, GuideUi.Fg70), Modifier.testTag(SPORTS_DATE_TAG))
+        Line(time, GuideUi.sans(36, FontWeight.SemiBold), Modifier.testTag(SPORTS_TIME_TAG))
+    }
+}
+
+/** A focusable league chip. Up is consumed: there is nothing above the title row (the top bar is not drawn here). */
 @Composable
 private fun FocusChip(
     text: String,
     requester: FocusRequester,
     tag: String,
     down: FocusRequester? = null,
-    up: FocusRequester? = null,
     selected: Boolean = false,
-    height: Int = CHIP_H,
-    textPx: Int = 24,
-    weight: FontWeight = FontWeight.Medium,
-    /** (NFL §7.2) False = a week the board did not name: dimmed, not focusable, OK does nothing. */
-    enabled: Boolean = true,
+    /** The last chip of the row: Right there changes nothing (the Corner and Delay chips left the page). */
+    last: Boolean = false,
+    onFocus: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -383,34 +521,51 @@ private fun FocusChip(
         Modifier
             .testTag(tag)
             .focusRequester(requester)
-            .focusProperties {
-                canFocus = enabled
-                if (down != null) this.down = down
-                if (up != null) this.up = up
-            }
-            .onPreviewKeyEvent { e -> up == null && e.key == Key.DirectionUp }
-            .onFocusChanged { focused = it.isFocused }
-            .clickable(enabled = enabled, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
+            .focusProperties { if (down != null) this.down = down }
+            .onPreviewKeyEvent { e -> e.key == Key.DirectionUp || (last && e.key == Key.DirectionRight) }
+            .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() }
+            .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
     ) {
         Chip(
             focused = focused,
-            modifier = Modifier.height(height.dp),
-            fill = if (selected) GuideUi.White12 else GuideUi.White08,
+            modifier = Modifier.height(CHIP_H.dp),
+            fill = if (selected) Color(0xFF2F6FD0) else GuideUi.White08,
             border = if (selected) GuideUi.White16 else null,
-        ) { color -> Line(text, GuideUi.sans(textPx, weight, if (enabled) color else color.copy(alpha = 0.35f))) }
+        ) { color -> Line(text, GuideUi.sans(22, FontWeight.SemiBold, if (selected && !focused) Color.White else color)) }
     }
 }
 
+/** "NHL SCORES & SCHEDULE" (24/700, 0.04 em, `Fg70`) and, for the NFL, the board's week (§1.1). */
 @Composable
-private fun CreditRow(ui: SportsUiState) {
-    // (2026-11-24, text sizes) 22 px text: 30 px of line at the default size, more at a larger one.
-    Row(Modifier.fillMaxWidth().heightIn(min = 30.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
-        // (CHL §6.6) Per league; the QMJHL's attribution reads "LHJMQ" verbatim.
-        Line(SportsText.credit(LocalResources.current, ui.prefs.league), GuideUi.sans(22, color = GuideUi.Fg55))
+private fun Heading(ui: SportsUiState) {
+    val res = LocalResources.current
+    Row(Modifier.fillMaxWidth().height(32.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+        Line(
+            res.getString(R.string.sports_hub_heading, PlayerText.leagueName(res, ui.prefs.league)),
+            GuideUi.sans(24, FontWeight.Bold, GuideUi.Fg70, letterSpacingEm = 0.04f), Modifier.testTag(SPORTS_HEADING_TAG),
+        )
         // NFL §7.2: the board's week ("Week 9"), once a board is shown.
-        ui.boardKey?.let { key -> Line(SportsText.weekLabel(LocalResources.current, key), GuideUi.sans(22, color = GuideUi.Fg55), Modifier.testTag(SPORTS_WEEK_TAG)) }
-        val updated = ui.updatedMono
-        if (updated != null) UpdatedText(updated)
+        ui.boardKey?.let { key -> Line(SportsText.weekLabel(res, key), GuideUi.sans(22, color = GuideUi.Fg55), Modifier.testTag(SPORTS_WEEK_TAG)) }
+    }
+}
+
+/** The footer (§1.1): the hints (up to the credit's width), then the credit and, while a re-poll fails, "Updated 2 min ago". */
+@Composable
+private fun Footer(ui: SportsUiState, hints: List<FooterHint>, updatedMono: Long?) {
+    val res = LocalResources.current
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val credit = if (ui.prefs.league.group == LeagueGroup.NHL) res.getString(R.string.sports_hub_credit_nhl) else SportsText.credit(res, ui.prefs.league)
+    val creditW = with(density) { measurer.measure(credit, GuideUi.sans(22, color = GuideUi.Fg55), maxLines = 1, softWrap = false).size.width.toDp() }
+    // (U-S9) 1728 minus the credit and a 32 px gap, so the hints never run into it.
+    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+        FooterHints(hints, textPx = 24, maxWidth = (1728.dp - creditW - 32.dp).coerceAtLeast(0.dp))
+        Spacer(Modifier.weight(1f))
+        if (updatedMono != null) {
+            UpdatedText(updatedMono)
+            Spacer(Modifier.width(24.dp))
+        }
+        Line(credit, GuideUi.sans(22, color = GuideUi.Fg55))
     }
 }
 
@@ -431,38 +586,6 @@ private fun UpdatedText(updatedMono: Long) {
     Line(text, GuideUi.sans(22, color = GuideUi.Warn), Modifier.testTag(SPORTS_UPDATED_TAG))
 }
 
-// ------------------------------------------------------------------ day chips
-
-@Composable
-private fun DayChips(ui: SportsUiState, requesters: Map<SportsDay, FocusRequester>, up: FocusRequester, onDay: (SportsDay) -> Unit) {
-    val nfl = ui.prefs.league.group == LeagueGroup.NFL
-    Row(Modifier.height(DAY_CHIP_H.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        SportsDay.entries.forEach { day ->
-            FocusChip(
-                text = stringResource(
-                    when (day) {
-                        SportsDay.YESTERDAY -> if (nfl) R.string.sports_week_last else R.string.sports_day_yesterday
-                        SportsDay.TODAY -> if (nfl) R.string.sports_week_this else R.string.sports_day_today
-                        SportsDay.TOMORROW -> if (nfl) R.string.sports_week_next else R.string.sports_day_tomorrow
-                    },
-                ),
-                requester = requesters.getValue(day),
-                tag = sportsDayTag(day),
-                up = up,
-                selected = day == ui.day,
-                height = DAY_CHIP_H,
-                textPx = 26,
-                enabled = when (day) {
-                    SportsDay.YESTERDAY -> ui.canPrev
-                    SportsDay.TODAY -> true
-                    SportsDay.TOMORROW -> ui.canNext
-                },
-                onClick = { onDay(day) },
-            )
-        }
-    }
-}
-
 // ------------------------------------------------------------------ games
 
 @Composable
@@ -472,13 +595,18 @@ private fun GamesGrid(
     clock24: Boolean,
     requesters: MutableMap<String, FocusRequester>,
     dayChip: FocusRequester,
+    panel: HubPanelModel,
+    panelFocused: Boolean,
+    showHighlights: Boolean,
+    focusedId: String?,
     onFocus: (id: String, focused: Boolean, index: Int) -> Unit,
-    onCard: (GameCardModel) -> Unit,
+    onEnter: (String) -> Unit,
 ) {
+    val res = LocalResources.current
     LazyVerticalGrid(
-        columns = GridCells.Fixed(3),
+        columns = GridCells.Fixed(2),
         state = state,
-        horizontalArrangement = Arrangement.spacedBy(18.dp),
+        horizontalArrangement = Arrangement.spacedBy(24.dp),
         verticalArrangement = Arrangement.spacedBy(24.dp),
         modifier = Modifier.fillMaxSize().testTag(SPORTS_GRID_TAG),
     ) {
@@ -486,20 +614,28 @@ private fun GamesGrid(
             val id = card.game.id.id
             // Shared map (focus is restored by game id), but created under remember so it is not rebuilt per composition.
             val requester = remember(id) { requesters.getOrPut(id) { FocusRequester() } }
-            GameCard(
+            val options = if (focusedId == id && panel.game?.id == card.game.id) {
+                val labels = panel.slots.filter { it.usable }.joinToString(", ") { slotText(res, it) }
+                if (labels.isEmpty()) null else res.getString(R.string.sports_hub_desc_press_ok, labels)
+            } else null
+            HubCard(
                 card = card,
                 clock24 = clock24,
-                onClick = { onCard(card) },
+                selected = panelFocused && panel.game?.id == card.game.id,
+                leftColumn = index % 2 == 0,
+                showHighlights = showHighlights,
+                optionsText = options,
+                onEnter = { onEnter(id) },
                 onFocusChange = { onFocus(id, it, index) },
                 focusRequester = requester,
-                // Up from the first row goes to the day chips, whichever column it is in (§5.3).
-                modifier = Modifier.focusProperties { if (index < 3) up = dayChip },
+                // Up from the first row goes to the selected day chip, whichever column it is in (§2.2).
+                modifier = Modifier.focusProperties { if (index < 2) up = dayChip },
             )
         }
     }
 }
 
-/** Keeps the focused row at least [margin] px inside the viewport while it scrolls (§5.2). */
+/** Keeps the focused row at least [margin] px inside the viewport while it scrolls (§1.1). */
 private suspend fun LazyGridState.ensureVisible(index: Int, margin: Int) {
     val info = layoutInfo
     val item = info.visibleItemsInfo.firstOrNull { it.index == index } ?: return
@@ -524,23 +660,21 @@ private fun Skeletons() {
         Modifier.fillMaxSize().testTag(SPORTS_SKELETON_TAG).semantics { contentDescription = loading },
         verticalArrangement = Arrangement.spacedBy(24.dp),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) { repeat(3) { SkeletonCard() } }
-        Row(horizontalArrangement = Arrangement.spacedBy(18.dp)) { repeat(2) { SkeletonCard() } }
+        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) { repeat(2) { SkeletonCard() } }
+        Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) { repeat(2) { SkeletonCard() } }
     }
 }
 
 @Composable
 private fun SkeletonCard() {
-    Box(Modifier.width(GameCardMetrics.CARD_W.dp).height(GameCardMetrics.CARD_H.dp).background(Color05, RoundedCornerShape(DesignTokens.Radii.Button)))
+    Box(Modifier.width(HubCardMetrics.CARD_W.dp).height(HubCardMetrics.CARD_H.dp).background(Color.White.copy(alpha = 0.05f), RoundedCornerShape(20.dp)))
 }
 
-private val Color05 = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.05f)
-
-/** An empty or failed day: the reason and the next step (§5.4). Retry shows only for a failure. */
+/** An empty or failed day: the reason and the next step (§4.5). Retry shows only for a failure. */
 @Composable
 private fun Message(text: String, retry: Boolean, onRetry: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(top = 8.dp), verticalArrangement = Arrangement.spacedBy(24.dp)) {
-        Text(text, style = GuideUi.sans(28, FontWeight.Medium, GuideUi.Fg70), modifier = Modifier.width(1200.dp).testTag(SPORTS_MESSAGE_TAG))
+        Text(text, style = GuideUi.sans(28, FontWeight.Medium, GuideUi.Fg70), modifier = Modifier.width(900.dp).testTag(SPORTS_MESSAGE_TAG))
         if (retry) {
             var focused by remember { mutableStateOf(false) }
             Box(
@@ -557,73 +691,60 @@ private fun Message(text: String, retry: Boolean, onRetry: () -> Unit) {
     }
 }
 
-// ------------------------------------------------------------------ the Corner / Delay choice list
+// ------------------------------------------------------------------ sheets and the toast
 
-private sealed interface Pick {
-    data class Corner(val corner: ScoreCorner) : Pick
-    data class Delay(val seconds: Int) : Pick
+/** Composes the sheet for [sheet] through WP-5's frozen signatures (§2.5, §6.4). */
+@Composable
+private fun SheetHost(
+    sheet: HubSheet,
+    vm: SportsViewModel,
+    panel: HubPanelModel,
+    clipInfo: Map<Long, app.thebox.core.sports.hub.ClipInfo>,
+    focusVideoId: Long?,
+    clock24: Boolean,
+    onClose: () -> Unit,
+) {
+    val game = panel.game?.takeIf { it.id == sheet.gameId } ?: return
+    val d = panel.detail
+    when (sheet) {
+        is HubSheet.Goals -> if (d != null) GoalsSheet(
+            game = game, detail = d, clipInfo = clipInfo, catchUp = panel.candidates.filter { it.airing != null }, focusVideoId = focusVideoId,
+            onPlay = vm::playClips, onPlayArchive = vm::playArchive, onMissingClip = vm::missingClip, onClose = onClose, modifier = Modifier.fillMaxSize(),
+        )
+        is HubSheet.Channels -> ChannelSheet(
+            game = game, candidates = if (sheet.archiveOnly) panel.candidates.filter { it.airing != null } else panel.candidates,
+            tunable = game.phase == GamePhase.LIVE || game.phase == GamePhase.INTERMISSION ||
+                game.startUtcMs - System.currentTimeMillis() <= app.thebox.core.sports.SportsConstants.HUB_IMMINENT_MIN * 60_000L,
+            archiveOnly = sheet.archiveOnly, clock24 = clock24, onTune = vm::tune, onPlayArchive = vm::playArchive, onNotYet = vm::channelNotYet,
+            onClose = onClose, modifier = Modifier.fillMaxSize(),
+        )
+        is HubSheet.BoxScoreSheet -> BoxScoreSheet(game = game, box = sheet.box, onRetry = vm::retryBoxScore, onClose = onClose, modifier = Modifier.fillMaxSize())
+        is HubSheet.Matchup -> if (d != null) MatchupSheet(game = game, detail = d, onClose = onClose, modifier = Modifier.fillMaxSize())
+    }
 }
 
-/**
- * The small choice list the Corner and Delay chips open (the context-menu pattern): an opaque panel under the chips,
- * focus on the current value, Up/Down within, OK picks and closes, Back closes (handled by the screen). Left and Right
- * are consumed, and Up/Down stop at the ends, so focus never reaches the screen behind.
- */
+/** The page's toast (§6.8, §5.5): a reason and a next step, for four seconds, over the footer. */
 @Composable
-private fun ChoiceList(kind: ChipMenu, prefsCorner: ScoreCorner, prefsDelay: Int, onPick: (Pick) -> Unit) {
+private fun ToastBar(t: HubToast, clock24: Boolean, onShown: () -> Unit) {
     val res = LocalResources.current
-    val items: List<Pair<String, Pick>> = when (kind) {
-        ChipMenu.CORNER -> ScoreCorner.entries.map { SportsText.corner(res, it) to (Pick.Corner(it) as Pick) }
-        ChipMenu.DELAY -> SportsConstants.DELAY_STEPS_S.map { SportsText.delay(res, it) to (Pick.Delay(it) as Pick) }
+    val text = when (t.kind) {
+        HubToastKind.VIDEO_UNAVAILABLE -> res.getString(R.string.sports_hub_error_video_unavailable)
+        HubToastKind.VIDEO_OFFLINE -> res.getString(R.string.sports_hub_error_video_offline)
+        HubToastKind.VIDEO_REFUSED -> res.getString(R.string.sports_hub_error_video_refused)
+        HubToastKind.VIDEO_GEO -> res.getString(R.string.sports_hub_error_video_geo)
+        HubToastKind.VIDEO_REMOVED -> res.getString(R.string.sports_hub_error_video_removed)
+        HubToastKind.VIDEO_NOT_PLAYABLE -> res.getString(R.string.sports_hub_error_video_not_playable)
+        HubToastKind.GOAL_NO_VIDEO -> res.getString(R.string.sports_hub_goal_no_video_toast)
+        HubToastKind.STARTS_AT -> res.getString(R.string.sports_hub_starts_at_toast, SportsText.startTime(t.startUtcMs ?: 0L, clock24))
     }
-    val current = when (kind) {
-        ChipMenu.CORNER -> items.indexOfFirst { (it.second as Pick.Corner).corner == prefsCorner }
-        ChipMenu.DELAY -> items.indexOfFirst { (it.second as Pick.Delay).seconds == prefsDelay }
-    }.coerceAtLeast(0)
-    val requesters = remember(kind) { List(items.size) { FocusRequester() } }
-    LaunchedEffect(kind) { runCatching { requesters[current].requestFocus() } }
-    val shape = RoundedCornerShape(DesignTokens.Radii.Button)
-    Box(Modifier.fillMaxSize().padding(top = 128.dp, end = 96.dp), contentAlignment = Alignment.TopEnd) {
-        Column(
-            Modifier
-                .testTag(SPORTS_MENU_TAG)
-                .width(320.dp)
-                .background(GuideUi.OverlayFill, shape)
-                .border(1.dp, GuideUi.OverlayBorder, shape)
-                .padding(8.dp),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
-        ) {
-            items.forEachIndexed { i, (label, pick) ->
-                var focused by remember { mutableStateOf(false) }
-                val isCurrent = i == current
-                Box(
-                    Modifier
-                        .testTag(sportsMenuItemTag(i))
-                        .fillMaxWidth()
-                        .focusRequester(requesters[i])
-                        .onPreviewKeyEvent { e ->
-                            when (e.key) {
-                                Key.DirectionLeft, Key.DirectionRight -> true
-                                Key.DirectionUp -> i == 0
-                                Key.DirectionDown -> i == items.lastIndex
-                                else -> false
-                            }
-                        }
-                        .onFocusChanged { focused = it.isFocused }
-                        .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onPick(pick) },
-                ) {
-                    Chip(
-                        focused = focused,
-                        modifier = Modifier.fillMaxWidth().height(56.dp),
-                        shape = RoundedCornerShape(DesignTokens.Radii.Cell),
-                        fill = if (isCurrent) GuideUi.White12 else androidx.compose.ui.graphics.Color.Transparent,
-                    ) { color ->
-                        Line(label, GuideUi.sans(24, if (isCurrent) FontWeight.SemiBold else FontWeight.Medium, color), Modifier.weight(1f))
-                        if (isCurrent) Line("✓", GuideUi.sans(24, FontWeight.SemiBold, color))
-                    }
-                }
-            }
-        }
+    LaunchedEffect(t.seq) {
+        delay(4_000L)
+        onShown()
+    }
+    Box(Modifier.fillMaxSize().padding(bottom = 96.dp), contentAlignment = Alignment.BottomCenter) {
+        Box(
+            Modifier.background(GuideUi.OverlayFill, RoundedCornerShape(16.dp)).padding(horizontal = 28.dp, vertical = 16.dp).testTag(SPORTS_TOAST_TAG),
+        ) { Text(text, style = GuideUi.sans(24, FontWeight.Medium), modifier = Modifier.widthIn(max = 1100.dp)) }
     }
 }
 

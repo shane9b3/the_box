@@ -9,6 +9,8 @@ import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performKeyInput
@@ -101,7 +103,7 @@ class NflSportsTest {
         show()
         rule.onNodeWithTag(sportsLeagueTag(League.NHL)).assertExists()
         rule.onNodeWithTag(sportsLeagueTag(League.NFL)).assertExists()
-        rule.onNodeWithText(str(R.string.sports_credit)).assertExists()
+        rule.onNodeWithText(str(R.string.sports_hub_credit_nhl)).assertExists()
         // Fix pass U4 (§7.3): Up from the day chips lands on the shown league's chip; Right reaches NFL; OK switches.
         press(Key.DirectionUp, Key.DirectionUp)
         rule.onNodeWithTag(sportsLeagueTag(League.NHL)).assertIsFocused()
@@ -113,33 +115,33 @@ class NflSportsTest {
         press(Key.DirectionUp)
         rule.onNodeWithTag(sportsLeagueTag(League.NFL)).assertIsFocused()
         press(Key.DirectionDown)
-        rule.onNodeWithTag(sportsDayTag(SportsDay.TODAY)).assertIsFocused()
+        rule.onNodeWithTag(sportsDayTag(0)).assertIsFocused()
     }
 
     @Test fun anNflBoardReadsLastThisNextWeekWithTheEspnCreditAndTheWeekLabel() {
         week(live, pre)
         show()
         rule.onNodeWithText(str(R.string.sports_credit_espn)).assertExists()
-        rule.onNodeWithText(str(R.string.sports_week_last)).assertExists()
-        rule.onNodeWithText(str(R.string.sports_week_this)).assertExists()
-        rule.onNodeWithText(str(R.string.sports_week_next)).assertExists()
+        rule.onNodeWithText("Last week · Wk 8").assertExists()
+        rule.onNodeWithText("This week · Wk 9").assertExists()
+        rule.onNodeWithText("Next week · Wk 10").assertExists()
         rule.onNodeWithTag(SPORTS_WEEK_TAG).assertTextEquals("Week 9")
         // the cards use the short names
         rule.onNodeWithText("Chiefs").assertExists()
         rule.onNodeWithText("Seahawks").assertExists()
-        rule.onNodeWithTag(sportsDayTag(SportsDay.YESTERDAY)).assertIsEnabled()
-        rule.onNodeWithTag(sportsDayTag(SportsDay.TOMORROW)).assertIsEnabled()
+        rule.onNodeWithTag(sportsDayTag(-1)).assertIsEnabled()
+        rule.onNodeWithTag(sportsDayTag(1)).assertIsEnabled()
     }
 
     @Test fun theWeekChipsAskForTheKeysTheBoardNamedNeverADate() {
         week(live)
         val m = vm()
         show(m)
-        m.onDay(SportsDay.YESTERDAY)
+        m.onDay(-1)
         assertEquals("w2026-2-8", repo.showDayCalls.last())
-        m.onDay(SportsDay.TOMORROW)
+        m.onDay(1)
         assertEquals("w2026-2-10", repo.showDayCalls.last())
-        m.onDay(SportsDay.TODAY)
+        m.onDay(0)
         assertNull(repo.showDayCalls.last())
         assertTrue(repo.showDayCalls.filterNotNull().none { Regex("\\d{4}-\\d{2}-\\d{2}").containsMatchIn(it) })
     }
@@ -158,18 +160,18 @@ class NflSportsTest {
         rule.onNodeWithTag(SPORTS_SKELETON_TAG).assertDoesNotExist()
         rule.onNodeWithTag(SPORTS_WEEK_TAG).assertTextEquals("Week 10")
         rule.onNodeWithText("Seahawks").assertExists()
-        m.onDay(SportsDay.TOMORROW)
+        m.onDay(1)
         assertEquals("w2026-2-11", repo.showDayCalls.last())
-        m.onDay(SportsDay.TODAY)
-        m.onDay(SportsDay.YESTERDAY)
+        m.onDay(0)
+        m.onDay(-1)
         assertEquals("w2026-2-9", repo.showDayCalls.last())
     }
 
     @Test fun aMissingNeighbourDisablesItsChipAtAnEdge() {
         week(live, key = "w2026-3-5", prev = "w2026-3-3", next = null)
         show()
-        rule.onNodeWithTag(sportsDayTag(SportsDay.YESTERDAY)).assertIsEnabled()
-        rule.onNodeWithTag(sportsDayTag(SportsDay.TOMORROW)).assertIsNotEnabled()
+        rule.onNodeWithTag(sportsDayTag(-1)).assertIsEnabled()
+        rule.onNodeWithTag(sportsDayTag(1)).assertIsNotEnabled()
         rule.onNodeWithTag(SPORTS_WEEK_TAG).assertTextEquals("Super Bowl")
     }
 
@@ -177,19 +179,19 @@ class NflSportsTest {
         repo.day.value = DayState.Loading
         val m = vm()
         show(m)
-        rule.onNodeWithTag(sportsDayTag(SportsDay.YESTERDAY)).assertIsNotEnabled()
-        rule.onNodeWithTag(sportsDayTag(SportsDay.TOMORROW)).assertIsNotEnabled()
-        m.onDay(SportsDay.YESTERDAY)
-        m.onDay(SportsDay.TOMORROW)
+        rule.onNodeWithTag(sportsDayTag(-1)).assertIsNotEnabled()
+        rule.onNodeWithTag(sportsDayTag(1)).assertIsNotEnabled()
+        m.onDay(-1)
+        m.onDay(1)
         assertEquals("only the open's own request", listOf<String?>(null), repo.showDayCalls)
     }
 
     @Test fun anEmptyWeekAndTheOffSeasonCarryTheirOwnWords() {
         week(key = "w2026-2-9") // empty, neighbours named by the feed: the chips are still disabled on an empty board (§7.2)
         show()
-        rule.onNodeWithTag(sportsDayTag(SportsDay.YESTERDAY)).assertIsNotEnabled()
+        rule.onNodeWithTag(sportsDayTag(-1)).assertIsNotEnabled()
         rule.onNodeWithTag(SPORTS_MESSAGE_TAG).assertTextEquals("No NFL games this week.")
-        rule.onNodeWithTag(sportsDayTag(SportsDay.TODAY)).assertIsEnabled()
+        rule.onNodeWithTag(sportsDayTag(0)).assertIsEnabled()
     }
 
     @Test fun anNflFailureSaysEspn() {
@@ -197,9 +199,9 @@ class NflSportsTest {
         show()
         rule.onNodeWithTag(SPORTS_MESSAGE_TAG).assertTextEquals(str(R.string.sports_failed_espn))
         // Integration-pass note: with no board ever loaded no neighbour is known, so both week chips are disabled.
-        rule.onNodeWithTag(sportsDayTag(SportsDay.YESTERDAY)).assertIsNotEnabled()
-        rule.onNodeWithTag(sportsDayTag(SportsDay.TOMORROW)).assertIsNotEnabled()
-        rule.onNodeWithTag(sportsDayTag(SportsDay.TODAY)).assertIsEnabled()
+        rule.onNodeWithTag(sportsDayTag(-1)).assertIsNotEnabled()
+        rule.onNodeWithTag(sportsDayTag(1)).assertIsNotEnabled()
+        rule.onNodeWithTag(sportsDayTag(0)).assertIsEnabled()
     }
 
     @Test fun aStaleBoardOfTheOtherLeagueNeverPassesForTheShownOne() {
@@ -214,9 +216,9 @@ class NflSportsTest {
         week(live)
         show()
         press(Key.DirectionUp) // the card → This week
-        rule.onNodeWithTag(sportsDayTag(SportsDay.TODAY)).assertIsFocused()
+        rule.onNodeWithTag(sportsDayTag(0)).assertIsFocused()
         press(Key.DirectionRight)
-        rule.onNodeWithTag(sportsDayTag(SportsDay.TOMORROW)).assertIsFocused()
+        rule.onNodeWithTag(sportsDayTag(1)).assertIsFocused()
         press(Key.DirectionUp)
         rule.onNodeWithTag(sportsLeagueTag(League.NFL)).assertIsFocused()
     }
@@ -267,7 +269,7 @@ class NflSportsTest {
     @Test fun theLiveCardDetailUsesTheNflQuarter() {
         week(live)
         show()
-        rule.onNodeWithText("4th · 3:42", useUnmergedTree = true).assertExists()
+        rule.onAllNodesWithText("LIVE · Q4 3:42", useUnmergedTree = true).onFirst().assertExists()
     }
 
     @Test fun orderIsLiveThenUpcomingThenFinalThenPostponed() {
