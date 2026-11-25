@@ -130,8 +130,8 @@ class GuideWorld(
 
     fun idle() { tunedHash = 0; send(GuideEvent.Tuned(TunedState(), null)) }
 
-    fun alert(id: Long = 99, startAtMs: Long = nowMs + 60_000, autoSwitch: Boolean = false) =
-        send(GuideEvent.Alert(ReminderAlert(id, channels[1].identity, channels[1].displayName, "Show", startAtMs, late = false, autoSwitch = autoSwitch)))
+    fun alert(id: Long = 99, startAtMs: Long = nowMs + 60_000, autoSwitch: Boolean = false, eventGone: Boolean = false) =
+        send(GuideEvent.Alert(ReminderAlert(id, channels[1].identity, channels[1].displayName, "Show", startAtMs, late = false, autoSwitch = autoSwitch, eventGone = eventGone)))
 
     /** Names of effect calls since [from], without the bookkeeping ones. */
     fun effectsSince(from: Int): List<String> = calls.calls.drop(from).map { it.name }.filter { it !in BOOKKEEPING }

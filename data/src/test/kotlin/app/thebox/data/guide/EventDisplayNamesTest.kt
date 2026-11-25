@@ -27,9 +27,8 @@ import org.robolectric.annotation.Config
  * row after a `RULE_VERSION` bump (only it raises the version, under ImportMutex, paged), a custom name still wins, and
  * the prefix preview skips slot names (re-review E7).
  *
- * Independent of the real parser: [slotOf] stands in for `EventNameParser.slotOf`. **Integration (re-point):** with
- * WP-1 merged, `DisplayNames`/`ChannelNamePrefixImpl` built with their defaults must give `Sportsnet+ 09` and
- * `CA (TSN+ 008)` for the §11.1 rows 3 and 32 (one case, no seam).
+ * Most cases use [slotOf], a stand-in for `EventNameParser.slotOf`. [theProductionSeamsGiveTheRealSlots] builds
+ * `DisplayNames` and `ChannelNamePrefixImpl` with their defaults over the §11.1 rows 3 and 32.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -104,6 +103,20 @@ class EventDisplayNamesTest {
         val no = db.scalar("SELECT id FROM channel WHERE stable_key = 'no'")
         val rows = gg.queries.channels(longArrayOf(id, no), 0, 2)
         assertEquals(listOf("Oilers game", "Sportsnet+ 11"), rows.map { it!!.displayName })
+    }
+
+    @Test
+    fun theProductionSeamsGiveTheRealSlots() = runBlocking {
+        // Integration: DisplayNames and ChannelNamePrefixImpl with their production defaults (the real slotOf), §11.1
+        // rows 3 and 32.
+        val p = db.newPlaylist()
+        db.newChannel(p, "sn09", "Sportsnet+ 09: Vegas @ Edmonton @ 24 Nov 08:00 PM ET", sortIndex = 0)
+        db.newChannel(p, "tsn", "CA (TSN+ 008) | NCAA Men`s Hockey: Bentley vs. Harvard (2026-11-24 19:00:00)", sortIndex = 1)
+        db.newChannel(p, "plain", "Edmonton Oilers", sortIndex = 2)
+        db.exec("UPDATE playlist SET name_prefix_ver = 1 WHERE id = ?", p)
+        val real = DisplayNames(db, db.playlistDao(), ChannelNamePrefixImpl(), g.importMutex, Dispatchers.IO)
+        real.backfill()
+        assertEquals(listOf("Sportsnet+ 09", "CA (TSN+ 008)", "null"), db.strings("SELECT display_name FROM channel ORDER BY sort_index"))
     }
 
     @Test

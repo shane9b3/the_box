@@ -88,7 +88,7 @@ DEFAULTS = {
     **sports_video.DEFAULTS,
     # Sports Hub: catalog channels and XMLTV for the channel link (catalog.py, WP-3; --sports-hub-catalog)
     "sports_hub_catalog": False,
-    # Event and team channels (docs/design/m6-event-channels.md §11.3; events.py, a stub until WP-4; --event-catalog)
+    # Event and team channels (docs/design/m6-event-channels.md §11.3; events.py; --event-catalog)
     **events.DEFAULTS,
 }
 FAULT_DOC = {
@@ -2405,7 +2405,7 @@ def main(argv=None):
     ap.add_argument("--sports-video", action="store_true", help="with --sports: also serve the fake NHL video service (/bc/, sports_video.py)")
     ap.add_argument("--sports-hub-catalog", action="store_true", help="the Sports Hub channel-link catalog channels and XMLTV (catalog.py)")
     ap.add_argument("--event-catalog", action="store_true",
-                    help="the event and team channel catalog (events.py; a stub until the event channels WP-4)")
+                    help="the event and team channel catalog: generated event-slot names, team channels and guide placeholders (events.py; docs/design/m6-event-channels.md §11.3)")
     ap.add_argument("--chl-time-tbd", action="store_true", help="with --sports-chl: one scheduled game per league is \"Time TBD\" (time_tbd \"1\")")
     ap.add_argument("--update-apk-dir", help="U-S14: load every *.apk in this directory as an update APK by name "
                                              "(thebox-update-v2.apk -> v2); select one with the update_apk config key")

@@ -181,13 +181,17 @@
 
     <!-- ==== Channels sheet (§5.3, §5.5) -->
     <!-- CONFIRMED. %1$s = the airing title, %2$s = its time range ("9:00–11:30 PM"). -->
-    <string name="sports_hub_reason_guide">In your guide: %1$s, %2$s</string>
-    <!-- LIKELY, network. %1$s = the network ("Sportsnet"), %2$s = the country ("Canada"). -->
-    <string name="sports_hub_reason_network">%1$s carries this game in %2$s. Your guide doesn\'t list it on this channel.</string>
+    <!-- (Event channels integration 2026-11-25) Time first: at Largest a long title cut the time range (U-E-B1). -->
+    <string name="sports_hub_reason_guide">In your guide, %2$s: %1$s</string>
+    <!-- LIKELY, network. %1$s = the network ("Sportsnet"), %2$s = the country ("Canada"). (Event channels integration
+         2026-11-25) One line in the sheet (about 58 characters at Default, 47 at Largest): the caveat sentence is gone, as
+         elsewhere in the sheet (U-E-S7); a reason that does not start "In your guide" is not a listing. -->
+    <string name="sports_hub_reason_network">%1$s carries this game in %2$s.</string>
     <!-- LIKELY, network without a country. %1$s = the network. -->
-    <string name="sports_hub_reason_network_any">%1$s carries this game. Your guide doesn\'t list it on this channel.</string>
-    <!-- LIKELY, sport listing. %1$s = the airing title, %2$s = its start time. -->
-    <string name="sports_hub_reason_sport_listing">In your guide: %1$s at %2$s. The listing doesn\'t name the teams.</string>
+    <string name="sports_hub_reason_network_any">%1$s carries this game.</string>
+    <!-- LIKELY, sport listing. %1$s = the airing title, %2$s = its start time. (Integration 2026-11-25) Time first, so an
+         ellipsis eats the title's end, never the time (U-E-B1); the title shows that it names no teams. -->
+    <string name="sports_hub_reason_sport_listing">In your guide at %2$s: %1$s</string>
     <!-- Quality variants. %1$s = "FHD, 4K". -->
     <string name="sports_hub_also">Also: %1$s</string>
     <!-- OK on a row of a game more than 30 min away. %1$s = the start time. -->

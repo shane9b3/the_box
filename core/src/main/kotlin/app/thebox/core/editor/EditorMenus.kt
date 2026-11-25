@@ -79,11 +79,15 @@ object EditorMenus {
     /**
      * Why Show is disabled for rule-hidden targets. (Event channels WP-2, docs/design/m6-event-channels.md §5.5,
      * re-review E1) One target hidden by the playlist's "Hide channels with no event" switch says so
-     * ([EditorText.D_NO_EVENT]: turn it off in the playlist's settings), never "change it in Hide rules". Several targets
-     * keep [EditorText.D_RULE]: the summary does not split the two causes.
+     * ([EditorText.D_NO_EVENT]: turn it off in the playlist's settings), never "change it in Hide rules"; one target
+     * hidden by a user rule says [EditorText.D_RULE]. Several targets (or one whose row is not loaded) say
+     * [EditorText.D_RULE_ANY], which names both causes: the summary is an SQL count and does not split them (the switch's
+     * test reads the provider name in Kotlin). Integration 2026-11-25.
      */
-    private fun ruleReason(c: ChannelContext, s: SelectionSummary): EditorText =
-        if (s.total == 1 && c.single?.noEvent == true) EditorText.D_NO_EVENT else EditorText.D_RULE
+    private fun ruleReason(c: ChannelContext, s: SelectionSummary): EditorText {
+        val one = c.single?.takeIf { s.total == 1 } ?: return EditorText.D_RULE_ANY
+        return if (one.noEvent) EditorText.D_NO_EVENT else EditorText.D_RULE
+    }
 
     /** Lines that need no target (an empty list, or the note row focused): Find…, Show…, Sort…. */
     fun noTargetLines(list: EditorList, listCount: Int): List<MenuLine> =

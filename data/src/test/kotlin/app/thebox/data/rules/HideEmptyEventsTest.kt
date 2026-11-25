@@ -50,9 +50,8 @@ import org.robolectric.annotation.Config
  * returns with its event; the Hidden channels page, the channel editor and the Hide rules summary tell the switch from a
  * user rule.
  *
- * Independent of the real parser: [emptySlot] stands in for `EventNameParser.isEmptySlot`. **Integration (re-point):**
- * once WP-1 lands, one case should run `HideRulesImpl.apply` (the production default) over "Sportsnet+ 11: NO EVENT",
- * "NHL 02:" and "NFL GP 02 | Offline" with no seam.
+ * Most cases use [emptySlot], a stand-in for `EventNameParser.isEmptySlot`, so they pin the pass and not the parser.
+ * [theProductionEmptySlotTestHidesTheRealEmptyShapes] runs the pass with its production default over the real shapes.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -94,6 +93,18 @@ class HideEmptyEventsTest {
         switch(false)
         pass()
         assertEquals(emptyList<String>(), hidden())
+    }
+
+    @Test
+    fun theProductionEmptySlotTestHidesTheRealEmptyShapes() = runBlocking {
+        // Integration: RuleHiddenPass.run with its default seam (the real EventNameParser.isEmptySlot).
+        seed()
+        db.newChannel(p, "cbc", "(CA) (CBC 13) |  (2098-12-31 08:00:01)")
+        db.newChannel(p, "snOne", "Sportsnet One")
+        switch(true)
+        db.writeTransaction { RuleHiddenPass.run(this, p) }
+        assertEquals(listOf("bare", "cbc", "empty", "offline"), hidden())
+        assertEquals(4, db.read { RuleHiddenPass.countHiddenByNoEvent(this, p) })
     }
 
     @Test

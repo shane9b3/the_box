@@ -128,6 +128,27 @@ class GuideWindowPagerEventTest {
     }
 
     @Test
+    fun aPlaceholderStartingWithTheEventLosesItsTailSoTheTailNeverShowsTheEvent() {
+        // (Integration) The block starts at the event's minute: its tail would keep raw start 300, where info() answers
+        // the event. The tail is dropped; its time is a gap ("No information").
+        val src = window(
+            Row(0, 60, 300, 60, "No Event Today"),
+            Row(0, 300, 540, 300, "No Event Today"),
+            Row(0, 540, 780, 540, "No Event Today"),
+        )
+        val out = EpgWindow(8)
+        EventOverlay.apply(src, arrayOf<GuideChannel?>(channel(0, event("Montreal @ Colorado", 300, 480))), -100, 1000, { it in FILLERS }, out, BooleanArray(1))
+        assertEquals(
+            listOf(
+                Row(0, 60, 300, 60, "No Event Today"),
+                Row(0, 300, 480, 300, "Montreal @ Colorado", CellFlags.EVENT_NAME, EventConstants.EVENT_TEXT_ID),
+                Row(0, 540, 780, 540, "No Event Today"),
+            ),
+            rows(out),
+        )
+    }
+
+    @Test
     fun aRealListingOverTheSpanWinsAndTheRowsAreCopiedAsTheyAre() {
         val src = window(
             Row(0, 0, 240, 0, "No Event Today"),
@@ -258,6 +279,11 @@ class GuideWindowPagerEventTest {
         p.ensure(0, ws)
         await(p) { it.generation > 0 }
         assertEquals("Montreal @ Colorado", p.info(a, now)?.title, "a placeholder detail gives way to the event")
+        // (Integration) The block starts with the event: its tail [now + 180, now + 240) is not drawn, so no cell there
+        // asks info(a, now) and shows the event's details; the time reads as a gap.
+        val d = await(p) { it.generation > 0 && it.rowCellCount.isNotEmpty() }
+        val tail = cells(d, 0).filter { it.start < now + 240 && it.end > now + 180 }
+        assertTrue(tail.none { it.raw == now && (it.flags and CellFlags.EVENT_NAME) == 0 }, "tail cells: $tail")
         // The provider renamed the slot: same start, another event. The cached answer must not come back (arch S10).
         val b = channel(0, event("Detroit @ Orlando", now, now + 180))
         assertEquals("Detroit @ Orlando", p.info(b, now)?.title)

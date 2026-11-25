@@ -100,7 +100,7 @@ class HubSheetsTest {
         val ch = GuideFixtures.channel(1, name = "CA| SPORTSNET ONTARIO HD")
         fun cand(conf: MatchConfidence, vararg r: MatchReason) = ChannelCandidate(ch, "P", conf, r.toList(), emptyList(), null)
         assertEquals(
-            "Sportsnet carries this game in Canada. Your guide doesn't list it on this channel.",
+            "Sportsnet carries this game in Canada.",
             channelReason(res, cand(MatchConfidence.LIKELY, MatchReason.Broadcaster("Sportsnet", Market.NATIONAL, "CA")), live, false),
         )
         // (Event channels §9.1) No "local channel" wording: a regional broadcaster is a candidate only on guide evidence,
@@ -108,7 +108,9 @@ class HubSheetsTest {
         assertEquals("A national broadcaster carries this game.", channelReason(res, cand(MatchConfidence.POSSIBLE, MatchReason.Broadcaster("SNO", Market.HOME, "CA")), live, false))
         assertEquals("A national broadcaster carries this game.", channelReason(res, cand(MatchConfidence.POSSIBLE), live, false))
         assertEquals("A national broadcaster carries this game.", channelReason(res, cand(MatchConfidence.POSSIBLE, MatchReason.Broadcaster("X1", Market.NATIONAL, null)), live, false))
-        assertTrue(channelReason(res, cand(MatchConfidence.CONFIRMED, MatchReason.Guide("NHL Hockey", 0, 9_000_000, false)), live, true).startsWith("In your guide: NHL Hockey, "))
+        assertTrue(channelReason(res, cand(MatchConfidence.CONFIRMED, MatchReason.Guide("NHL Hockey", 0, 9_000_000, false)), live, true).let { it.startsWith("In your guide, ") && it.endsWith(": NHL Hockey") })
+        assertEquals("Sportsnet carries this game.", channelReason(res, cand(MatchConfidence.LIKELY, MatchReason.Broadcaster("Sportsnet", Market.NATIONAL, null)), live, false))
+        assertTrue(channelReason(res, cand(MatchConfidence.LIKELY, MatchReason.SportListing("NHL Hockey", 0)), live, true).let { it.startsWith("In your guide at ") && it.endsWith(": NHL Hockey") })
         val v = ChannelCandidate(ch, "P", MatchConfidence.CONFIRMED, emptyList(), listOf(GuideFixtures.channel(2, name = "CA| SPORTSNET ONTARIO FHD")), null)
         assertEquals("Also: FHD", alsoLine(res, v))
         assertEquals(".915", svPct(0.915))

@@ -1740,8 +1740,11 @@ class GuideStateMachineImpl(
     private fun onAlert(alert: ReminderAlert?) {
         if (alert == null) { u = u.copy(reminder = null); return }
         val cur = u.reminder
-        if (cur != null && cur.alert.reminderId == alert.reminderId) { u = u.copy(reminder = cur.copy(alert = alert)); return }
-        u = u.copy(reminder = ReminderCardState(alert, focused = 0, secondsLeft = secondsLeft(alert), inputFromMs = curMs + REMINDER_CARD_GUARD_MS))
+        if (cur != null && cur.alert.reminderId == alert.reminderId) {
+            u = u.copy(reminder = cur.copy(alert = alert, focused = if (alert.eventGone) CARD_DISMISS else cur.focused))
+            return
+        }
+        u = u.copy(reminder = ReminderCardState(alert, focused = if (alert.eventGone) CARD_DISMISS else CARD_SWITCH, secondsLeft = secondsLeft(alert), inputFromMs = curMs + REMINDER_CARD_GUARD_MS))
     }
 
     private fun secondsLeft(alert: ReminderAlert): Int {
@@ -1758,10 +1761,13 @@ class GuideStateMachineImpl(
     private fun cardKey(a: GuideEvent.Act) {
         val c = u.reminder ?: return
         if (curMs < c.inputFromMs) return
+        // (Event channels integration 2026-11-25, §6.6) An event no slot lists any more has no "Switch now": its channel
+        // would tune the old slot. The card says to search for the event; Dismiss is its only button.
+        val gone = c.alert.eventGone
         when (a.action) {
-            BoxAction.LEFT -> u = u.copy(reminder = c.copy(focused = 0))
-            BoxAction.RIGHT -> u = u.copy(reminder = c.copy(focused = 1))
-            BoxAction.SELECT -> answerCard(c, accept = c.focused == 0)
+            BoxAction.LEFT -> if (!gone) u = u.copy(reminder = c.copy(focused = CARD_SWITCH))
+            BoxAction.RIGHT -> u = u.copy(reminder = c.copy(focused = CARD_DISMISS))
+            BoxAction.SELECT -> answerCard(c, accept = c.focused == CARD_SWITCH && !gone)
             BoxAction.BACK -> answerCard(c, accept = false)
             else -> Unit
         }
@@ -2677,6 +2683,9 @@ class GuideStateMachineImpl(
         const val ENTRY_HOLD_MS = 700L
         const val REMINDER_CARD_MS = 60_000L
         const val REMINDER_CARD_GUARD_MS = 600L
+        /** The reminder card's buttons ([ReminderCardState.focused]): "Switch now" and "Dismiss". */
+        const val CARD_SWITCH = 0
+        const val CARD_DISMISS = 1
         const val NUMBER_NOT_FOUND_MS = 1_500L
         const val SNAP_AFTER_REPEATS = 3
         const val VISIBLE_ROWS = GuideGeometry.VISIBLE_ROWS

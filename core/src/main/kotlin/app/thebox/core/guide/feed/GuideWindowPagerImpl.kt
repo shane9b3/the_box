@@ -650,7 +650,8 @@ class GuideWindowPagerImpl(
  * 1. if a **real** listing (not [EpgFiller]) overlaps the event's span, the window rows are copied as they are (the
  *    listing wins: it carries the provider's description and flags);
  * 2. otherwise every placeholder overlapping the span is clipped to the parts outside it (a tail keeps its
- *    `rawStartMin`, so `info()` still finds the listing, and loses [ProgrammeFlags.CONTINUATION], so the cell builder
+ *    `rawStartMin`, so `info()` still finds the listing, unless that raw start is the event's own start minute, where
+ *    `info()` answers the event: such a piece is dropped; and loses [ProgrammeFlags.CONTINUATION], so the cell builder
  *    never merges it into the event), and one row is inserted in start order: the event's own minutes (no guide shift),
  *    `rawStartMin = startMin`, [CellFlags.EVENT_NAME], [EventConstants.EVENT_TEXT_ID] and the title.
  *
@@ -695,6 +696,7 @@ internal object EventOverlay {
             for (j in start until k) {
                 val s = src.startMin[j]
                 if (s >= ev.startMin) break
+                if (sharesEventKey(src, j, ev, isFiller)) continue
                 if (src.endMin[j] <= ev.startMin) copy(src, j, out)
                 else piece(src, j, s, ev.startMin, src.flags[j], out)
             }
@@ -706,6 +708,7 @@ internal object EventOverlay {
                 val s = src.startMin[j]
                 val e = src.endMin[j]
                 if (e <= ev.startMin && s < ev.startMin) continue      // emitted before
+                if (sharesEventKey(src, j, ev, isFiller)) continue      // see sharesEventKey
                 if (s >= ev.endMin) {
                     // A continuation right at the event's end continues a clipped placeholder: never the event cell.
                     val f = if (s == ev.endMin) src.flags[j] and ProgrammeFlags.CONTINUATION.inv() else src.flags[j]
@@ -718,6 +721,15 @@ internal object EventOverlay {
         }
         return count
     }
+
+    /**
+     * (Integration 2026-11-25) A placeholder whose raw start is the event's start minute: `info()` keys on the raw start
+     * and answers the event there, so a piece of it outside the span (the tail of a block that starts exactly with the
+     * event, the common BossSports case) would show the event's details in the info panel. Such a piece is dropped:
+     * its time reads as a gap ("No information", or the §6.3 text after an ended event).
+     */
+    private fun sharesEventKey(src: EpgWindow, j: Int, ev: ChannelEvent, isFiller: (String) -> Boolean): Boolean =
+        src.rawStartMin[j] == ev.startMin && isFiller(src.titles[j] ?: "")
 
     /** A real (non-placeholder) listing overlaps `[ev.startMin, ev.endMin)`. */
     private fun realOverlap(src: EpgWindow, from: Int, to: Int, ev: ChannelEvent, isFiller: (String) -> Boolean): Boolean {

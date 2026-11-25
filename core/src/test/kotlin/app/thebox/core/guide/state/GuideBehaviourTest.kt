@@ -346,6 +346,19 @@ class GuideBehaviourTest {
             assertEquals(ScreenMode.GUIDE, w.ui.mode)
         }
 
+        /** Event channels §6.6 (integration): a gone event has no "Switch now"; Dismiss is focused and OK never tunes. */
+        @Test fun aGoneEventOnlyDismisses() {
+            val w = GuideWorld()
+            w.alert(eventGone = true); w.advance(600)
+            assertEquals(1, w.ui.reminder!!.focused)
+            w.press(LEFT)
+            assertEquals(1, w.ui.reminder!!.focused, "Left cannot reach a Switch button that is not there")
+            w.press(SELECT)
+            assertNull(w.ui.reminder)
+            assertEquals(listOf(99L, false), w.calls.last("answerReminder")!!.args)
+            assertEquals(ScreenMode.GUIDE, w.ui.mode)
+        }
+
         @Test fun switchNowGoesFull() {
             val w = GuideWorld()
             w.alert(); w.advance(600); w.press(SELECT)

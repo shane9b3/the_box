@@ -10,9 +10,8 @@ import kotlin.test.assertTrue
  * docs/design/m6-event-channels.md §5.3, §11.1 `ChannelNamePrefixImplTest`: the slot comes first under every rule, plain
  * names keep the prefix logic, and `countChanged` skips slot names (re-review E7).
  *
- * Independent of the real parser: [slotOf] stands in for `EventNameParser.slotOf`. **Integration (re-point):** with WP-1
- * merged, `ChannelNamePrefixImpl()` (the default) must give `Sportsnet+ 09`, `MLS 03`, `CA (TSN+ 008)` and `NHL 02` for
- * the §11.1 rows 3, 15, 32 and 46, and null for rows 55–57.
+ * Most cases use [slotOf], a stand-in for `EventNameParser.slotOf`; [theDefaultSeamIsTheEventParser] checks
+ * `ChannelNamePrefixImpl()` with the real parser over the §11.1 rows 3, 15, 32, 46 and 55–57.
  */
 class ChannelNamePrefixSlotTest {
     private val slots = mapOf(
@@ -68,8 +67,18 @@ class ChannelNamePrefixSlotTest {
 
     @Test
     fun theDefaultSeamIsTheEventParser() {
-        // Commit 0's stub answers null: every name keeps the old behaviour until WP-1 lands.
-        assertEquals("One", ChannelNamePrefixImpl().strip("UK: One", null, NamePrefixRule.Auto))
+        // Integration: the real EventNameParser.slotOf, §11.1 rows 3, 15, 32, 46 (slots) and 55–57 (plain names).
+        val real = ChannelNamePrefixImpl()
+        for (rule in rules) {
+            assertEquals("Sportsnet+ 09", real.strip("Sportsnet+ 09: Vegas @ Edmonton @ 24 Nov 08:00 PM ET", null, rule), "$rule")
+            assertEquals("MLS 03", real.strip("MLS 03 | Nashville SC vs. FC Cincinnati (English) @ 22 Nov 05:10 PM ET", null, rule), "$rule")
+            assertEquals("CA (TSN+ 008)", real.strip("CA (TSN+ 008) | NCAA Men`s Hockey: Bentley vs. Harvard (2026-11-24 19:00:00)", null, rule), "$rule")
+            assertEquals("NHL 02", real.strip("NHL 02:", null, rule), "$rule")
+        }
+        assertNull(real.strip("Sportsnet Oilers", null, NamePrefixRule.Auto))
+        assertNull(real.strip("Edmonton Oilers", null, NamePrefixRule.Auto))
+        assertFalse(real.isSlotName("CA| SPORTSNET ONTARIO HD"))
+        assertEquals("One", real.strip("UK: One", null, NamePrefixRule.Auto))
         assertEquals(1 + app.thebox.core.events.EventNameParser.VERSION, ChannelNamePrefix.RULE_VERSION)
     }
 }

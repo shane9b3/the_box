@@ -162,9 +162,19 @@ class HubEventChannelsTextTest {
                 res.getString(R.string.sports_hub_reason_network_unnamed),
                 res.getString(R.string.sports_hub_also_in, "Sports | NHL Teams (2)"),
                 res.getString(R.string.sports_hub_reason_event_untimed, "Vegas @ Edmonton"),
+                // (Integration) The three older reasons, with the longest network and country fills the NHL feed gives.
+                res.getString(R.string.sports_hub_reason_network, "Prime Video", "United States"),
+                res.getString(R.string.sports_hub_reason_network, "NHL Network", "United States"),
+                res.getString(R.string.sports_hub_reason_network_any, "NHL Network"),
+                res.getString(R.string.sports_hub_reason_sport_listing, "NHL Hockey", "10:30 PM"),
             )) assertTrue("$t at $f", width(t, f) <= sheetW)
             val prefix = res.getString(R.string.sports_hub_reason_event, "10:30 PM", "")
             assertTrue("the time and the title's start are never cut at $f", width(prefix + "Golden Knights", f) <= sheetW)
+            val listing = res.getString(R.string.sports_hub_reason_sport_listing, "", "10:30 PM")
+            assertTrue("a sport listing's time is never cut at $f", width(listing + "NHL Hockey", f) <= sheetW)
+            // (Integration, emulator at Largest) A guide listing's time range comes first too.
+            val guide = res.getString(R.string.sports_hub_reason_guide, "", "10:00 PM–12:30 AM")
+            assertTrue("a guide listing's time range is never cut at $f", width(guide + "NHL Hockey", f) <= sheetW)
         }
         assertEquals(47, res.getString(R.string.sports_hub_reason_team, "Golden Knights").length)
     }
@@ -181,7 +191,7 @@ class HubEventChannelsTextTest {
             channelReason(res, other(2, "NHL GP 01", MatchReason.EventName("Golden Knights @ Oilers", now, false, zoneAssumed = true)), g, false),
         )
         assertEquals("Team channel: always shows Oilers games", channelReason(res, teamCand(Side.HOME), g, false))
-        assertEquals("TNT carries this game.", channelReason(res, other(3, "US: TNT", MatchReason.Broadcaster("TNT", Market.NATIONAL, null)), g, false).substringBefore(" Your"))
+        assertEquals("TNT carries this game.", channelReason(res, other(3, "US: TNT", MatchReason.Broadcaster("TNT", Market.NATIONAL, null)), g, false))
 
         // "Also in <group>": a twin with the same name; the matcher put the twin's group in `group`.
         val twin = teamCand(Side.HOME).copy(variants = listOf(GuideFixtures.channel(5, name = "Edmonton Oilers")), group = "Sports | NHL Teams (2)")

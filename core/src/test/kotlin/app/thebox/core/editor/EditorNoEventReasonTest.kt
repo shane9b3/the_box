@@ -39,8 +39,9 @@ class EditorNoEventReasonTest {
     fun aUserRuleKeepsItsReason() {
         val r = row(noEvent = false, pattern = "Oilers")
         assertEquals(EditorText.D_RULE, showLine(r, EditorMenus.summaryOf(r)).reason)
-        // Several targets: the summary does not split the causes.
-        assertEquals(EditorText.D_RULE, showLine(null, SelectionSummary(2, 0, 2, 0, 0, 0, 0)).reason)
+        // Several targets: the summary does not split the causes, so the reason names both (never "a rule" alone).
+        assertEquals(EditorText.D_RULE_ANY, showLine(null, SelectionSummary(2, 0, 2, 0, 0, 0, 0)).reason)
+        assertEquals(EditorText.D_RULE_ANY, showLine(r, SelectionSummary(2, 0, 2, 0, 0, 0, 0)).reason)
     }
 
     @Test

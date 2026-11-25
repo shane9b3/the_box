@@ -621,7 +621,7 @@ read looks at the same two fields.)
 | Level | Rule | Wording (sheet and channel line, 22/500) |
 |---|---|---|
 | CONFIRMED | B matched | "In your guide: NHL Hockey: Golden Knights at Oilers, 9:00–11:30 PM" |
-| LIKELY | A matched a national code (country agrees or is the channel's tag), or C's window read found a sport listing without team names on an A channel | network: "Sportsnet carries this game in Canada. Your guide doesn't list it on this channel." · sport listing: "In your guide: NHL Hockey at 7:00 PM. The listing doesn't name the teams." |
+| LIKELY | A matched a national code (country agrees or is the channel's tag), or C's window read found a sport listing without team names on an A channel | network: "Sportsnet carries this game in Canada." · sport listing: "In your guide at 7:00 PM: NHL Hockey" (amended 2026-11-25, event channels integration: one sheet line, no caveat sentence; `docs/design/m6-event-channels.md` §17.4) |
 | POSSIBLE | A matched a regional (H / A) code or TSN / RDS, an untagged channel one level down, or an unknown code | regional: "Home team's local channel. It may show a different game where you live." · other: "May carry this game. Check the channel." |
 | dropped | the channel's airing that covers the scheduled start names two other teams | not shown |
 

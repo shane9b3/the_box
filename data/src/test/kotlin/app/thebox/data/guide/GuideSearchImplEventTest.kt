@@ -41,9 +41,9 @@ import java.io.File
  * from the in-memory index (with a team nickname's place), the ±5 min de-duplication (re-review E4), ended events
  * dropped, the slot word never lists an event, empty slots last, and event hits without a guide (U-E-S5).
  *
- * The index is a [FakeEventIndex], the placeholder test and the team table are injected: nothing here depends on WP-1's
- * parser, `EpgFiller` or `TeamNames`. Integration: re-run against the real `EventIndexImpl` with the fake panel's
- * `--event-catalog` (§11.4 state 3).
+ * Most cases use a [FakeEventIndex] with an injected placeholder test and team table, so they pin the search and not
+ * WP-1's parser, `EpgFiller` or `TeamNames`. [theProductionIndexFillerAndTeamsFindTheRealNames] runs the real
+ * `EventIndexImpl`, `EpgFiller` and `TeamNames` over the same seeded names.
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -182,6 +182,23 @@ class GuideSearchImplEventTest {
         val refs = EpgRefResolver(db, db.epgSourceDao(), db.playlistDao(), g.settings)
         val plain = GuideSearchImpl(GuideQueries(db, g.playlists, CatchupResolverImpl(), refs), store, Dispatchers.IO)
         assertTrue(search("oilers", plain).programmes.isEmpty())
+    }
+
+    @Test
+    fun theProductionIndexFillerAndTeamsFindTheRealNames() {
+        // Integration: the real EventIndexImpl (real parser) over the seeded names, the real EpgFiller and TeamNames, via
+        // GuideSearchImpl's @Inject constructor. The names were fetched at nowMs (22:00Z): Vegas @ Edmonton is 8:00 PM ET.
+        runBlocking { db.exec("UPDATE playlist SET last_refresh_at = ? WHERE id = ?", nowMs, p) }
+        val real = app.thebox.data.events.EventIndexImpl(db, db.playlistDao(), Dispatchers.IO, app.thebox.data.testutil.FakeClock(nowMs))
+        val refs = EpgRefResolver(db, db.epgSourceDao(), db.playlistDao(), g.settings)
+        val impl = GuideSearchImpl(GuideQueries(db, g.playlists, CatchupResolverImpl(), refs, events = real), store, Dispatchers.IO, real)
+        val eightEt = EpgTestDb.minutes("2026-11-25T01:00:00Z")
+        val oilers = search("oilers", impl)
+        assertEquals("the nickname also finds Edmonton", setOf("sn09", "nhl01"), oilers.programmes.map(::key).toSet())
+        assertTrue(oilers.programmes.all { it.info.startMin == eightEt })
+        assertEquals("Vegas @ Edmonton", oilers.programmes.single { key(it) == "sn09" }.info.title)
+        assertTrue("the real EpgFiller drops the Next Event block", search("vegas", impl).programmes.none { it.info.title.startsWith("Next Event") })
+        assertTrue(search("sportsnet", impl).programmes.isEmpty())
     }
 
     @Test

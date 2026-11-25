@@ -267,6 +267,9 @@ Examples:
 - "31 Dec" read on Jan 1 gives the past Dec 31.
 - "1 Jan" read on Dec 30 gives the next Jan 1.
 - A June name read in November gives the past June.
+- (Integration correction, 2026-11-25) The window spans 390 days, so every day of the year except 29 Feb has a valid
+  instant in it: "20 Jun" read on 2027-04-30 gives **2027-06-20** (51 days ahead), not `None`. `None` from the year rule
+  only happens for 29 Feb when no leap day lies in the window.
 
 Shape C uses its own year; the year 2098 means an empty slot.
 
@@ -1181,7 +1184,8 @@ is `America/New_York` unless stated. Real names (format examples):
 |---|---|---|---|
 | Year wrap | `NHL 01: Kraken vs. Canucks (12.31 10:00 PM ET)` | 2027-01-01T05:00Z | 2026-12-31 |
 | Year wrap | `Sportsnet+ 03: Oilers @ Flames @ 1 Jan 03:00 PM ET` | 2026-12-30 | 2027-01-01 |
-| Stale name (arch S3) | `MLB 01: Yankees @ Red Sox @ 20 Jun 07:05 PM ET` | Nov 24 | June 20 **2026**; with `now` on Apr 30 2027, `None` (outside the window) |
+| Stale name (arch S3) | `MLB 01: Yankees @ Red Sox @ 20 Jun 07:05 PM ET` | Nov 24 | June 20 **2026**; with `now` on Mar 20 2027, still June 20 2026; with `now` on Apr 30 2027, **June 20 2027** (corrected at integration: the window always holds a June 20; see §3.4) |
+| Leap day | `NHL 01: Kraken vs. Canucks (2.29 8:00 PM ET)` | Feb 20 2027 / Feb 20 2028 | `None` (no leap day in the window; `slotOf` still `NHL 01`) / Feb 29 2028 |
 | D.M order (arch S12) | `(5.11 20:00 CET)` | Nov 4 | Nov 5 |
 | D.M order (arch S12) | `(5.11 20:00 ET)` | Nov 4 | May 11 when that is valid and in the window, else `None` |
 | Invalid | `(2.30 …)`, `25:00 PM`, `13:00 PM` | — | None |
@@ -1680,4 +1684,64 @@ E1–E14 are applied as the reviewer specified (§15.4). The lead accepted all f
 4. **WP-4** after WP-2 merges.
 5. **Integration:** the §11.4 emulator states, the Fire TV Stick gates (§10, §11.2), the code reviews, the release
    gates, and the decision note `docs/decisions/2026-11-25-event-channels.md`.
+
+---
+
+## 17. Integration notes (2026-11-25)
+
+Recorded by the integration pass (Opus) after WP-1 to WP-4 merged on `events`.
+
+### 17.1 WP-1's settled readings
+
+Where §3 left a reading open, WP-1 settled it as follows (`EventNameParser` KDoc, `names.tsv`):
+- `slotOf` and `isEmptySlot` read the structure only, with no clock. A date that exists only in some years (29 Feb),
+  or that lies outside the year window, still has a slot, although `parse` gives `None` for it.
+- An empty slot may also be written `<slot> - NO EVENT` ("LIVE EVENT 02 - NO EVENT"; §2.1 counts it).
+- With a European zone (§3.2), a shape B or E date that is valid only as D.M is read as D.M.
+- A local time in a DST overlap takes the later offset; a time in a gap moves forward by the gap (`java.time`).
+- §3.4's stale-name example is corrected above: the year rule gives `None` only for 29 Feb.
+
+### 17.2 Files touched outside the §12 lists
+
+| File | By | Why |
+|---|---|---|
+| `core/.../editor/EditorTexts.kt` (`EditorText.D_NO_EVENT`; integration: `D_RULE_ANY`) and `ui/.../editor/ResourceEditorTexts.kt` | WP-2, integration | the switch's own reason in the editor's menu (E1); a reason for several targets that names both causes |
+| `core/.../settings/tree/BackupRows.kt` (`BackupText.HIDDEN_NO_EVENT`) and `ui/.../backup/BackupTextsImpl.kt` | WP-2 | the Hidden channels page's reason (E1) |
+| `core/.../editor/ChannelEditorContracts.kt` (`EditorChannelRow.noEvent`) | WP-2 | the row says it is hidden by the switch, not by a user rule |
+| `core/src/test/.../setup/SetupTestFakes.kt` | WP-2 | the new `PlaylistDetail` fields in the setup fakes |
+| `app/.../reminder/ReminderModule.kt` | WP-3 | builds `GuideReminderEventCheck(queries, events, store)` for `ReminderSchedulerImpl` (§6.6) |
+| `data/.../backup/BackupRestorer.kt` | integration | a pre-v6 backup has no `refresh_interval_auto`: the migration's rule applies (auto only for 24 h) |
+| `core/.../guide/state/GuideStateMachineImpl.kt`, `ui/.../reminder/ReminderCard.kt` | integration | a gone event's card has no "Switch now" (§6.6) |
+| `core/.../guide/feed/GuideWindowPagerImpl.kt` | integration | a placeholder piece whose raw start is the event's start is dropped (§6.1) |
+| `data/.../sports/GameChannelMatcherImpl.kt` | integration | a same-name twin in the same group is not a variant (no "Also in <own group>", §9.1) |
+| `ui/res/values/strings_sports_hub.xml` | integration | `reason_network`, `reason_network_any` and `reason_sport_listing` shortened to one sheet line (§9.1) |
+
+### 17.3 Where the hide switch sits
+
+"Hide channels with no event" is an **advanced** row of the playlist's settings page, next to Update interval, not one
+of the simple rows: the playlist page is limited to seven simple rows (`docs/design/m5-setup-settings.md`). §5.5 said
+"shown on every playlist page"; it is, under Advanced. The owner was informed; no change unless the owner asks.
+
+### 17.4 Integration changes
+
+- **Reminder card, gone event (§6.6).** "Switch now" would tune the old slot, so the card offers only Dismiss (focused;
+  Left does nothing). The card's text keeps the reason and the next step ("… Search for it to find where it is now.").
+- **Guide, a placeholder that starts with the event (§6.1).** `info()` keys on the raw start and answers the event on
+  its start minute, so the clipped tail of such a block showed the event's details. The overlay drops a placeholder
+  piece whose raw start equals the event's start; that time reads as a gap ("No information", or §6.3's text after an
+  ended event).
+- **"Also in" (§9.1).** `ChannelCandidate.group` holds either the other group of a same-name twin or the row's own
+  group. A same-name twin in the same group (or with no group) is no longer listed as a variant, so the sheet never
+  reads "Also in <its own group>".
+- **Channel editor, several targets (§5.5).** The summary is an SQL count and cannot split a user rule from the switch,
+  so Show's disabled reason for several targets is `editor_d_rule_any` ("Hidden by a rule or by “Hide channels with no
+  event”. Change it in Hide rules or in this playlist's settings."). One target keeps the precise reason.
+- **Sheet reasons (§9.1).** `reason_network` reads "Sportsnet carries this game in Canada.", `reason_network_any`
+  "TNT carries this game.", `reason_sport_listing` "In your guide at 7:00 PM: NHL Hockey" (time first). The caveat
+  sentences went, as elsewhere in the sheet (U-E-S7): a reason that does not start "In your guide" is not a listing.
+- **Backup (§4.5).** A pre-v6 backup restores `refresh_interval_auto` by the migration's rule.
+- **One-line texts seen cut on the owner's emulator (§9.1, §9.3).** `reason_guide` is time first ("In your guide,
+  7:00–9:30 PM: NHL Hockey : …"; at Largest the title used to push the time out). The switch's description reads "Hides
+  NO EVENT and empty channels, favourites too, until they list an event." (the old one was cut at "…when your p…"). The
+  two hidden-reason strings start "Has no event." so "settings" is no longer cut on the Hidden channels page.
 

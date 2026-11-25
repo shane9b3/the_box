@@ -70,9 +70,9 @@ class ChannelEditorSummaryTest {
         // Mixed hidden: Hide (shown count) first, Show (hidden count) after Reorder.
         assertEquals("HIDE(3)|MOVE_TO_GROUP|REORDER|SHOW(2)", lines(SelectionSummary(5, 2, 0, 0, 0, 0, 0)).names().split('|').take(4).joinToString("|"))
         // Rule-hidden only: Show is disabled with its reason.
-        assertEquals("SHOW!D_RULE", lines(SelectionSummary(2, 0, 2, 0, 0, 0, 0)).names().substringBefore('|'))
+        assertEquals("SHOW!D_RULE_ANY", lines(SelectionSummary(2, 0, 2, 0, 0, 0, 0)).names().substringBefore('|'))
         // Shown plus rule-hidden: Hide, and the disabled Show after Reorder.
-        assertEquals("SHOW!D_RULE", lines(SelectionSummary(3, 0, 1, 0, 0, 0, 0)).names().split('|')[3])
+        assertEquals("SHOW!D_RULE_ANY", lines(SelectionSummary(3, 0, 1, 0, 0, 0, 0)).names().split('|')[3])
         // Some user-hidden, some rule-hidden: Show counts the user's only.
         assertEquals("SHOW(1)", lines(SelectionSummary(3, 1, 2, 0, 0, 0, 0)).names().substringBefore('|'))
         // All favorites: Remove.

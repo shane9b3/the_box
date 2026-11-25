@@ -41,9 +41,9 @@ import java.util.concurrent.atomic.AtomicInteger
  * tally with hysteresis, ASSUMED rows re-resolved, `startingIn` / `current` / `count`, the version on `refresh_seq`, the
  * change-only playlist writes (E9) and the serialised builds.
  *
- * Independent of the real parser: [FakeEventNames] reads a tiny test grammar. **Integration (re-point):** when WP-1's
- * `EventNameParser` lands, add one case building the index with the production constructor over the design's real name
- * shapes (§11.1 rows 3, 7, 21, 32, 38) and check the learned zone and the start minutes.
+ * Most cases use [FakeEventNames], a tiny test grammar, so they pin the index and not the parser. One case
+ * ([theProductionParserOverTheDesignsRealNameShapes]) builds the index with the production constructor and the real
+ * `EventNameParser` over the design's real name shapes (§11.1 rows 3, 7, 21, 32, 38).
  */
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [35])
@@ -319,6 +319,74 @@ class EventIndexImplTest {
         assertTrue("build ${best} ms", best < 2_000)
     }
 
+    @Test
+    fun theProductionParserOverTheDesignsRealNameShapes() = runBlocking {
+        // Integration: the @Inject constructor (the real EventNameParser), §11.1 rows 3, 7, 21, 32 and 38. Twenty more ET
+        // names give the learned zone, so the zone-less MonoMAX name (row 7) is read in New York, not the panel's London.
+        val p = playlist(serverZone = "Europe/London")
+        val g = db.newGroup(p, "g:sn", "Sports | Sportsnet+")
+        val sn09 = db.newChannel(p, "sn09", "Sportsnet+ 09: Vegas @ Edmonton @ 24 Nov 08:00 PM ET", groupId = g)
+        val mono = db.newChannel(p, "mono", "MonoMAX 01: TAURON Liga Energa Trefl Gdańsk vs NEONET Norwid Częstochowa @ 24 Nov 02:50 PM")
+        val nhl01 = db.newChannel(p, "nhl01", "NHL 01: Golden Knights vs. Oilers (11.24 8:00 PM ET)")
+        val tsn = db.newChannel(p, "tsn", "CA (TSN+ 008) | NCAA Men`s Hockey: Bentley vs. Harvard (2026-11-24 19:00:00)")
+        val cbc = db.newChannel(p, "cbc", "(CA) (CBC 13) |  (2098-12-31 08:00:01)")
+        db.newChannel(p, "none", "Sportsnet+ 11: NO EVENT") // no clock: not read
+        repeat(20) { db.newChannel(p, "et$it", "Sportsnet+ ${30 + it}: Game $it @ 24 Nov 0${1 + it % 9}:00 PM ET") }
+        val idx = EventIndexImpl(db, dao, Dispatchers.IO, clock)
+        val s = idx.current()
+        assertEquals(listOf("America/New_York"), db.strings("SELECT event_zone FROM playlist WHERE id = ?", p))
+        val e = s.of(sn09)!!
+        assertEquals("Sportsnet+ 09", e.slot)
+        assertEquals("Sports | Sportsnet+", e.group)
+        assertEquals("Vegas @ Edmonton", e.event.title)
+        assertEquals(minuteOf("2026-11-24T20:00", "America/New_York"), e.event.startMin)
+        assertEquals(EventZoneSource.EXPLICIT, e.event.zone)
+        assertEquals(minuteOf("2026-11-24T14:50", "America/New_York"), s.of(mono)!!.event.startMin)
+        assertEquals(EventZoneSource.ASSUMED, s.of(mono)!!.event.zone)
+        assertEquals(minuteOf("2026-11-24T20:00", "America/New_York"), s.of(nhl01)!!.event.startMin)
+        assertEquals("CA (TSN+ 008)", s.of(tsn)!!.slot)
+        assertEquals(minuteOf("2026-11-24T19:00", "America/Toronto"), s.of(tsn)!!.event.startMin)
+        assertEquals(EventZoneSource.CONVENTION, s.of(tsn)!!.event.zone)
+        assertEquals(ChannelEvent.EMPTY, s.of(cbc)!!.event)
+        assertEquals(24, s.count(p))
+        assertEquals(25, idx.lastBuild!!.rowsRead)
+    }
+
+    @Test
+    fun buildTimeOn13kRowsWithTheRealParser() = runBlocking {
+        // §11.2 sizing with the real parser and the owner's mix of shapes (§2.1): 1,543 events over five shapes, 44 2098
+        // placeholders, 85 unhandled clock names, 3,766 empty slots (no clock) and ordinary channels, 13,109 rows.
+        val p = playlist()
+        val names = realShapedNames()
+        db.writeTransaction {
+            usePrepared(
+                "INSERT INTO channel(playlist_id, stable_key, key_rule, kind, name, norm_name, sort_index, url, is_adult, content_hash, " +
+                    "missing_count, first_seen_at, updated_at) VALUES (?, ?, 'URL', 0, ?, '', ?, 'http://h', 0, 0, 0, 1, 1)",
+            ) { st ->
+                names.forEachIndexed { i, name ->
+                    st.bindLong(1, p); st.bindText(2, "k$i"); st.bindText(3, name); st.bindLong(4, i.toLong())
+                    st.step(); st.reset(); st.clearBindings()
+                }
+            }
+        }
+        val idx = EventIndexImpl(db, dao, Dispatchers.IO, clock)
+        val cold = run { val t = System.nanoTime(); idx.current(); (System.nanoTime() - t) / 1_000_000 }
+        val coldSplit = idx.lastBuild!!.let { "read ${it.readMs}, parse ${it.parseMs}" }
+        val runs = (1..5).map { idx.rebuild(); idx.lastBuild!! }
+        val best = runs.minOf { it.ms }
+        // The parse alone (JIT warm), for the split.
+        val clocked = names.filter { n -> n.indexOf(':').let { it > 0 && it + 2 < n.length && n[it - 1].isDigit() && n[it + 1].isDigit() } || CLOCK.matches(n) }
+        val ctx = app.thebox.core.events.EventParseContext(NOW, ZoneId.of("America/New_York"))
+        repeat(3) { for (n in clocked) app.thebox.core.events.EventNameParser.parse(n, ctx) }
+        val parseMs = (1..5).minOf { val t = System.nanoTime(); for (n in clocked) app.thebox.core.events.EventNameParser.parse(n, ctx); (System.nanoTime() - t) / 1_000_000.0 }
+        println(
+            "EventIndex real parser: ${runs.first().rowsRead} prefiltered rows of ${names.size}, ${runs.first().events} events, " +
+                "cold ${cold} ms ($coldSplit), warm builds ${runs.map { "${it.ms} (read ${it.readMs}, parse ${it.parseMs})" }} ms (best $best), parse of ${clocked.size} clock names alone ${"%.1f".format(parseMs)} ms",
+        )
+        assertEquals(1_543, runs.first().events)
+        assertTrue("build ${best} ms", best < 2_000)
+    }
+
     /** Counts the change-only writes (E9). */
     private class CountingDao(private val d: PlaylistDao) : PlaylistDao by d {
         val zoneWrites = AtomicInteger()
@@ -330,6 +398,29 @@ class EventIndexImplTest {
     companion object {
         /** 2026-11-24T12:00Z. */
         const val NOW = 1_795_521_600_000L
+        private val CLOCK = Regex(".*[0-9]:[0-5][0-9].*")
+
+        /** 13,109 names in the owner's proportions (§2.1), shaped like the real ones (format examples only). */
+        fun realShapedNames(): List<String> {
+            val out = ArrayList<String>(13_109)
+            fun h12(i: Int) = "%02d:%02d %s".format(1 + i % 12, if (i % 2 == 0) 0 else 30, if (i % 3 == 0) "AM" else "PM")
+            for (i in 0 until 288) out += "Sportsnet+ ${i % 40}: Team $i @ Team ${i + 1} @ ${1 + i % 28} Nov ${h12(i)} ET"
+            for (i in 0 until 108) out += "UEFA Champions League ${i % 20}: Club $i - Club ${i + 1} @ ${1 + i % 28} Nov ${h12(i)} London"
+            for (i in 0 until 60) out += "MonoMAX ${i % 9}: Side $i vs Side ${i + 1} @ ${1 + i % 28} Nov ${h12(i)}"
+            for (i in 0 until 430) out += "NHL ${i % 50}: Golden Knights $i vs. Oilers (11.${1 + i % 28} ${1 + i % 12}:00 PM ET)"
+            for (i in 0 until 257) out += "CA (TSN+ ${i % 99}) | NCAA Men`s Hockey: Bentley $i vs. Harvard (2026-11-${10 + i % 18} 19:00:00)"
+            for (i in 0 until 162) out += "NBA LP ${i % 20} | Grizzlies $i @ Hornets (2026-11-${10 + i % 18} 00:00:00)"
+            for (i in 0 until 126) out += "ESPN+ ${i % 60}: Long Beach State $i vs. Arkansas State @ Nov ${1 + i % 28} 3:30PM ET"
+            for (i in 0 until 112) out += "NCAAB ${i % 99}: TEXAS TECH $i @ LOUISVILLE (M) | 11.${1 + i % 28} 8:00 PM | ESPN"
+            for (i in 0 until 44) out += "(CA) (CBC ${i % 20}) |  (2098-12-31 08:00:01)"
+            for (i in 0 until 85) out += "EFL${i % 9}: (CH) Cardiff $i 19:45 Preston 24/11"
+            for (i in 0 until 1_955) out += "Sportsnet+ ${i % 99}: NO EVENT"
+            for (i in 0 until 1_505) out += "NHL ${i % 99}:"
+            for (i in 0 until 262) out += "NFL GP ${i % 20} | Offline"
+            for (i in 0 until 44) out += "Extra ${i % 20}: NO EVENT"
+            while (out.size < 13_109) out += "Channel ${out.size} HD"
+            return out
+        }
     }
 }
 

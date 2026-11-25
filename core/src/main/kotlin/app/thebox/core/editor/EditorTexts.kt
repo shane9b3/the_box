@@ -34,6 +34,8 @@ enum class EditorText {
     // (Event channels WP-2, docs/design/m6-event-channels.md §5.5, re-review E1; append-only) Hidden by the playlist's
     // "Hide channels with no event" switch, not by a user rule: `editor_d_no_event`.
     D_NO_EVENT,
+    // (Event channels integration 2026-11-25; append-only) Several targets hidden by a user rule or by that switch.
+    D_RULE_ANY,
     ;
 
     companion object {

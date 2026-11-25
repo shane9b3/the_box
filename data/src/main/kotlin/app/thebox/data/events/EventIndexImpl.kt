@@ -83,7 +83,8 @@ class EventIndexImpl internal constructor(
     @Volatile var lastBuild: BuildStats? = null
         private set
 
-    data class BuildStats(val rowsRead: Int, val events: Int, val empty: Int, val reparsed: Int, val ms: Long)
+    /** [readMs]: the prefiltered read; [parseMs]: both passes; [ms]: the whole build, writes included. */
+    data class BuildStats(val rowsRead: Int, val events: Int, val empty: Int, val reparsed: Int, val ms: Long, val readMs: Long = 0, val parseMs: Long = 0)
 
     override suspend fun current(): EventSnapshot {
         val have = snapshot
@@ -116,6 +117,7 @@ class EventIndexImpl internal constructor(
         val t0 = System.nanoTime()
         val byPlaylist = keys.associateBy { it.id }
         val rows = readRows(byPlaylist.keys)
+        val tRead = System.nanoTime()
 
         // Pass 1: each playlist's zone as it stands (stored, else the panel's, else UTC) and the EXPLICIT tally.
         val firstZone = HashMap<Long, ZoneId>(keys.size * 2)
@@ -155,6 +157,7 @@ class EventIndexImpl internal constructor(
             reparsed++
         }
 
+        val tParse = System.nanoTime()
         // Entries: EVENTs in start order; an Empty result (the 2098 placeholder) is kept for `of` only.
         val events = ArrayList<EventEntry>()
         val empties = ArrayList<EventEntry>()
@@ -187,8 +190,10 @@ class EventIndexImpl internal constructor(
         val snap = Snapshot(v, key, content, events, empties, counts)
         snapshot = snap
         val ms = (System.nanoTime() - t0) / 1_000_000
-        lastBuild = BuildStats(rows.size, events.size, empties.size, reparsed, ms)
-        BoxLog.i(TAG) { "event index v$v: rows=${rows.size} events=${events.size} empty=${empties.size} reparsed=$reparsed in $ms ms" }
+        val readMs = (tRead - t0) / 1_000_000
+        val parseMs = (tParse - tRead) / 1_000_000
+        lastBuild = BuildStats(rows.size, events.size, empties.size, reparsed, ms, readMs, parseMs)
+        BoxLog.i(TAG) { "event index v$v: rows=${rows.size} events=${events.size} empty=${empties.size} reparsed=$reparsed in $ms ms (read $readMs, parse $parseMs)" }
         if (_version.value != v) _version.value = v
         snap
     }

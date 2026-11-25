@@ -560,17 +560,22 @@ class GameChannelMatcherImpl @Inject constructor(
             acc.alias?.let { add(MatchReason.Broadcaster(it.broadcast.network.trim(), it.broadcast.market, it.broadcast.country)) }
         }
         val own = facts[acc.channel.rowId]
+        fun sameName(m: Kept) = m.acc.channel.displayName.equals(acc.channel.displayName, ignoreCase = true)
         // A same-name variant in another group: the sheet's "Also in <group>" (see the class KDoc).
         val elsewhere = members.drop(1).firstNotNullOfOrNull { m ->
             val g = facts[m.acc.channel.rowId]?.group
-            g?.takeIf { m.acc.channel.displayName.equals(acc.channel.displayName, ignoreCase = true) && it != own?.group }
+            g?.takeIf { sameName(m) && it != own?.group }
         }
+        // (Integration 2026-11-25) A same-name twin in the SAME group (or with no group) is a plain duplicate: it is not
+        // listed as a variant, because the sheet reads any same-name variant as "Also in <group>" and would say
+        // "Also in <its own group>". Variants are display-only (the sheet's line 3).
+        val variants = members.drop(1).filterNot { m -> sameName(m) && facts[m.acc.channel.rowId]?.group.let { it == null || it == own?.group } }
         return ChannelCandidate(
             channel = acc.channel,
             playlistName = own?.playlistName ?: "",
             confidence = head.confidence,
             reasons = reasons,
-            variants = members.drop(1).map { it.acc.channel },
+            variants = variants.map { it.acc.channel },
             airing = acc.guide?.info,
             group = elsewhere ?: own?.group,
         )

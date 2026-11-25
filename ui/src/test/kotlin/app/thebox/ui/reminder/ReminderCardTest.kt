@@ -74,5 +74,8 @@ class ReminderCardTest {
         rule.setContent { BoxTheme { ReminderCard(gone, clock = { now }) } }
         rule.onNodeWithText("Your provider changed World Tonight's channel. Search for it to find where it is now.").assertExists()
         rule.onNodeWithText("World Tonight starts in 1 min on Northline").assertDoesNotExist()
+        // (Integration) No "Switch now": it would tune the old slot. Dismiss stays.
+        rule.onNodeWithTag(REMINDER_SWITCH_TAG).assertDoesNotExist()
+        rule.onNodeWithTag(REMINDER_DISMISS_TAG).assertExists()
     }
 }

@@ -42,6 +42,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.runBlocking
+import app.thebox.data.testutil.strings
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -176,6 +177,18 @@ class GameChannelMatcherEventTest {
     private fun key(c: ChannelCandidate) = key(c.channel.rowId)
     private fun byKey(list: List<ChannelCandidate>) = list.associateBy(::key)
 
+    /** (Integration) A same-name twin in the SAME group is never "Also in <its own group>". */
+    @Test fun aTwinInTheSameGroupIsNotAlsoIn() = runBlocking {
+        val teams = db.strings("SELECT id FROM channel_group WHERE group_key = 'g:t'").single().toLong()
+        val dup = db.newChannel(p1, "vgk2", "Vegas Golden Knights", groupId = teams, sortIndex = 999)
+        val out = GameChannelMatcherImpl(gg.queries, store, db, events, Dispatchers.IO).match(vgkEdm, nowMs, ParentalAccess.LOCKED_AUTO, emptyList())
+        val vgk = out.single { it.channel.rowId == ids.getValue("vgk") || it.channel.rowId == dup }
+        assertEquals(emptyList<Long>(), vgk.variants.map { it.rowId }.filter { it == dup || it == ids.getValue("vgk") })
+        assertEquals("Sports | NHL Teams", vgk.group)
+        // The other-group twin still reads "Also in".
+        assertEquals("Sports | NHL Teams (2)", out.single { it.channel.rowId == ids.getValue("eo") }.group)
+    }
+
     @Test fun theFeaturedGameInRankOrder() {
         val out = run(vgkEdm)
         val keys = out.map(::key)
@@ -307,10 +320,13 @@ class GameChannelMatcherEventTest {
     /** §8.5: `dataToMin`, else `windowToMin` (a generation built before WP-3), else null without a guide. */
     @Test fun theGuideEnd() = runBlocking {
         val built = store.info.value!!
-        assertEquals(built.windowToMin * 60_000L, matcher.guideEndMs())
-        val info = MutableStateFlow<EpgGenerationInfo?>(built.copy(dataToMin = s + 24 * 60))
+        // (Integration) WP-3's build writes dataToMin, so the real store answers it; a pre-WP-3 generation has none.
+        assertEquals(built.dataToMin!! * 60_000L, matcher.guideEndMs())
+        val info = MutableStateFlow<EpgGenerationInfo?>(built.copy(dataToMin = null))
         val fake = object : EpgStore by store { override val info: StateFlow<EpgGenerationInfo?> = info }
         val m = GameChannelMatcherImpl(gg.queries, fake, db, events, Dispatchers.IO)
+        assertEquals("an older generation: the window's end", built.windowToMin * 60_000L, m.guideEndMs())
+        info.value = built.copy(dataToMin = s + 24 * 60)
         assertEquals((s + 24 * 60) * 60_000L, m.guideEndMs())
         assertFalse(ChannelHorizon.beyondGuide(startMs + 20 * 3_600_000L, m.guideEndMs(), nowMs))
         assertTrue(ChannelHorizon.beyondGuide(startMs + 24 * 3_600_000L, m.guideEndMs(), nowMs))
