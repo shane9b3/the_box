@@ -119,4 +119,39 @@ class EpgStoreDataToMinTest {
         empty.build(request(EpgTestDb.xmltv { channel("x", "x") }.writeTo(File(tmp, "e.xml"))), whitelist())
         assertNull(empty.info.value!!.dataToMin)
     }
+
+    /**
+     * Code review 2026-11-25, data Q2: a generation built before `data_to_min` existed gets the same value computed in
+     * memory when it is opened (placeholder-only channels left out, as the build does), not the window's end; nothing
+     * is written into it.
+     */
+    @Test
+    fun anOlderGenerationWithoutTheRowGetsTheBuildsValueInMemory() {
+        store().build(request(guide()), whitelist("real4"))
+        val file = EpgTestDb.currentFile(File(tmp, "epg"))!!
+        BundledSQLiteDriver().open(file.path).let { c ->
+            try {
+                c.prepare("DELETE FROM meta WHERE key = 'data_to_min'").use { it.step() }
+            } finally {
+                c.close()
+            }
+        }
+        assertNull(EpgTestDb.meta(file)["data_to_min"])
+        val reopened = store()
+        reopened.recover()
+        val info = reopened.info.value!!
+        // Real: 600, 1200, 1800, 3000 → 1200, as the build gives; the plain median with the placeholders would be 600.
+        assertEquals(now + 1_200, info.dataToMin)
+        kotlin.test.assertTrue(info.dataToMin!! < info.windowToMin)
+        assertNull(EpgTestDb.meta(file)["data_to_min"], "never written into the live generation")
+    }
+
+    @Test
+    fun anOlderGenerationWithNoProgrammesHasNoDataEnd() {
+        val empty = store("empty")
+        empty.build(request(EpgTestDb.xmltv { channel("x", "x") }.writeTo(File(tmp, "e.xml"))), whitelist())
+        val reopened = store("empty")
+        reopened.recover()
+        assertNull(reopened.info.value!!.dataToMin)
+    }
 }

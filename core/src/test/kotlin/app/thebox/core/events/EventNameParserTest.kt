@@ -87,6 +87,46 @@ class EventNameParserTest {
         }
     }
 
+    /**
+     * Code review 2026-11-25, data m1: the bare forms are slots only in an event-like provider group; "NO EVENT" and the
+     * event shapes in any group. The one-argument answers (the table above) are unchanged.
+     */
+    @Test
+    fun bareFormsNeedAnEventLikeGroup() {
+        for (name in listOf("Sky Sports 1 |", "beIN Sports 3:", "BBC 1 | Offline", "Movies 24/7 | Offline")) {
+            assertTrue(EventNameParser.isBareSlot(name), name)
+            assertFalse(EventNameParser.isEmptySlot(name, "UK | Entertainment"), name)
+            assertFalse(EventNameParser.isEmptySlot(name, null), name)
+            assertEquals(null, EventNameParser.slotOf(name, "UK | Entertainment"), name)
+        }
+        for ((name, group) in listOf("NHL 02:" to "Sports | NHL", "NFL GP 02 | Offline" to "NFL Game Pass", "MLS 04 |" to "LIVE EVENTS", "ESPN UNLTD 254:" to "US| ESPN+ PPV")) {
+            assertTrue(EventNameParser.isEmptySlot(name, group), name)
+            assertTrue(EventNameParser.slotOf(name, group) != null, name)
+        }
+        assertFalse(EventNameParser.isBareSlot("Sportsnet+ 11: NO EVENT"))
+        assertTrue(EventNameParser.isEmptySlot("Sportsnet+ 11: NO EVENT", null))
+        assertFalse(EventNameParser.isBareSlot("Sportsnet+ 09: Vegas @ Edmonton @ 24 Nov 08:00 PM ET"))
+        assertEquals("Sportsnet+ 09", EventNameParser.slotOf("Sportsnet+ 09: Vegas @ Edmonton @ 24 Nov 08:00 PM ET", "Misc"))
+        assertFalse(EventGroups.eventLike(null))
+        assertFalse(EventGroups.eventLike("UK | Entertainment"))
+        assertTrue(EventGroups.eventLike("Sports | OHL/WHL/QMJHL"))
+        assertTrue(EventGroups.eventLike("NHL GP"))
+    }
+
+    /** Code review 2026-11-25, owner item 17: the conservative title case of an ALL-CAPS bare-shape title. */
+    @Test
+    fun titleCaseOfAnAllCapsTitle() {
+        assertEquals("London Knights vs. Erie Otters", EventNameParser.titleCase("LONDON KNIGHTS VS ERIE OTTERS"))
+        assertEquals("Val-D'or vs. Gatineau", EventNameParser.titleCase("VAL-D'OR VS GATINEAU"))
+        assertEquals("OHL Showcase: USA vs. Canada", EventNameParser.titleCase("OHL SHOWCASE: USA VS CANADA"))
+        assertEquals("St. Louis vs. Utah", EventNameParser.titleCase("ST. LOUIS VS. UTAH"))
+        // Mixed case is left alone (only the bare shape applies it, and only to an ALL-CAPS title).
+        val mixed = assertIs<ParsedName.Event>(EventNameParser.parse("OHL 09 | Owen Sound Attack VS Guelph Storm NOV 25 07:00PM ET", ctx))
+        assertEquals("Owen Sound Attack VS Guelph Storm", mixed.title)
+        val m = EventMatchup.of(assertIs<ParsedName.Event>(EventNameParser.parse("OHL 03 | 2026 LONDON KNIGHTS VS ERIE OTTERS NOV 25 07:00PM ET", ctx)).title)
+        assertEquals(Matchup(listOf("london", "knights"), listOf("erie", "otters"), ordered = false), m)
+    }
+
     @Test
     fun deterministicForTheSameInputs() {
         for (row in rows()) {

@@ -233,7 +233,7 @@ class GameChannelMatcherBenchmarkTest {
         val vgk = lastOut.getValue("385")
         assertTrue("both team channels lead", vgk.take(2).all { c -> c.reasons.first() is app.thebox.core.sports.hub.MatchReason.TeamChannel })
         assertTrue("the Vegas @ Edmonton event row", vgk.any { c -> c.reasons.any { it is app.thebox.core.sports.hub.MatchReason.EventName } })
-        // (Sports Hub code review 2026-11-25, L5) Was `size <= 8`, always true under HUB_MATCH_MAX. Guide-confirmed
+        // (Sports Hub code review 2026-11-25, L5) Was `size <= 8`, always true under the old cap of 8 (removed by the owner rulings of 2026-11-25). Guide-confirmed
         // candidates are legitimate for an SN+-only game; a broadcaster reason is not.
         assertTrue("the SN+-only game ran", "382" in lastOut)
         val snPlusOnly = lastOut.getValue("382")

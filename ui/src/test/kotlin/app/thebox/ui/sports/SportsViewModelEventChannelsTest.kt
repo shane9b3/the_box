@@ -77,9 +77,22 @@ class SportsViewModelEventChannelsTest {
         val state = m.panel.value.match as MatchState.BeyondGuide
         assertEquals(2, state.teams.size)
         assertFalse(state.noGuide)
+        // (Owner ruling 2026-11-25) The chip opens the team channels: "Channels (2)", the sheet lists them, OK tunes.
         val slot = m.panel.value.slots[1]
-        assertEquals(SlotLabel.CHANNELS, slot.label)
-        assertFalse("the owner's grey chip", slot.enabled)
+        assertEquals(SlotLabel.CHANNELS_N, slot.label)
+        assertEquals(2, slot.count)
+        assertTrue(slot.enabled)
+        assertEquals(state.teams, m.panel.value.candidates)
+        m.onSlot(1)
+        assertEquals(HubSheet.Channels(far.id, archiveOnly = false), m.sheet.value)
+        // Without a team channel the chip stays grey.
+        matcher.teamAnswers.clear()
+        val none = game("F2", now + 40 * hour)
+        board(far, none)
+        m.closeSheet()
+        m.onPanelExited()
+        m.onCardFocused("F2"); m.enterPanel("F2")
+        assertFalse(m.panel.value.slots[1].enabled)
     }
 
     @Test fun withNoGuideTheFloorIsTwelveHours() {
@@ -125,5 +138,29 @@ class SportsViewModelEventChannelsTest {
         m.tune(m.panel.value.candidates.first())
         assertEquals("Edmonton Oilers", (effects.single() as SportsEffect.Tune).channel.displayName)
         assertTrue("picking a channel never follows", repo.followCalls.isEmpty())
+    }
+
+    /** Code review 2026-11-25, UI m3: a team-channel read cancelled before it answered leaves no sticky placeholder. */
+    @Test fun aCancelledBeyondGuideReadIsReadAgain() {
+        matcher.guideEnd = now + 24 * hour
+        val far = game("F1", now + 30 * hour)
+        matcher.teamAnswers[far.id] = listOf(team(Side.HOME), team(Side.AWAY))
+        matcher.teamGate = kotlinx.coroutines.CompletableDeferred()
+        val m = vm()
+        board(far)
+        m.onCardFocused("F1"); m.enterPanel("F1")
+        val placeholder = m.panel.value.match as MatchState.BeyondGuide
+        assertFalse(placeholder.complete)
+        assertTrue(placeholder.teams.isEmpty())
+        m.onLeft() // cancels the read before it answers
+        matcher.teamGate = null
+        m.enterPanel("F1")
+        assertEquals("read again", 2, matcher.teamCalls.size)
+        val state = m.panel.value.match as MatchState.BeyondGuide
+        assertTrue(state.complete)
+        assertEquals(2, state.teams.size)
+        // A finished answer is kept on the next visit.
+        m.onLeft(); m.enterPanel("F1")
+        assertEquals(2, matcher.teamCalls.size)
     }
 }

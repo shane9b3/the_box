@@ -292,9 +292,10 @@ class EventGameRuleTest {
         assertNull(grade("Sportsnet+ 01: Sportsnet Central: Nov. 24 @ 24 Nov 08:00 PM ET", "Sports | Sportsnet+", vgkEdm))
         // Several matchups.
         assertNull(grade("NHL 01: Golden Knights vs. Oilers • Flames vs. Kraken (11.24 8:00 PM ET)", "Sports | NHL", vgkEdm))
-        // A league without a table, an unknown abbreviation, a game against itself.
+        // (Code review 2026-11-25, owner item 17) A league without a table is graded on the game's own names: two places
+        // are LIKELY at most. An unknown abbreviation, a game against itself: no grade.
         val ohl = game(League.OHL, "LDN", "KIT", "2026-11-25T01:00:00Z")
-        assertNull(grade("OHL 01: London @ Kitchener (11.24 8:00 PM ET)", "Sports | OHL", ohl))
+        assertEquals(grade(MatchConfidence.LIKELY, citiesOnly = true), grade("OHL 01: London @ Kitchener (11.24 8:00 PM ET)", "Sports | OHL", ohl))
         val unknown = game(League.NHL, "XYZ", "EDM", "2026-11-25T01:00:00Z")
         assertNull(grade("NHL 01: Golden Knights vs. Oilers (11.24 8:00 PM ET)", "Sports | NHL", unknown))
         val self = game(League.NHL, "EDM", "EDM", "2026-11-25T01:00:00Z")
@@ -321,5 +322,38 @@ class EventGameRuleTest {
         assertNull(EventGameRule.grade(weird, vgkEdm, emptyList()))
         val big = EventFacts("x".repeat(5_000), " @ ".repeat(500), "|".repeat(100), vgkEdm.startUtcMs, EventZoneSource.EXPLICIT)
         assertNull(EventGameRule.grade(big, vgkEdm, listOf(vgkEdm)))
+    }
+
+    // ------------------------------------------------------------------ code review 2026-11-25, owner item 17
+
+    /** London Knights vs. Erie Otters, 7:00 PM ET on Nov 25 (OHL; ESPN-less: the feed's names and `ChlTeamPlaces`). */
+    private val ldnEr = game(League.OHL, "LDN", "ER", "2026-11-26T00:00:00Z")
+    private val ohl03 = "OHL 03 | 2026 LONDON KNIGHTS VS ERIE OTTERS NOV 25 07:00PM ET"
+
+    @Test
+    fun aJuniorGameMatchesOnItsOwnTeamNames() {
+        assertEquals(grade(MatchConfidence.CONFIRMED), grade(ohl03, "Sports | OHL/WHL/QMJHL", ldnEr))
+        // Home first in the name is fine: "VS" is unordered.
+        assertEquals(grade(MatchConfidence.CONFIRMED), grade("OHL 05 | 2026 ERIE OTTERS VS LONDON KNIGHTS NOV 25 07:00PM ET", "Sports | OHL/WHL/QMJHL", ldnEr))
+        // Nicknames only: LIKELY (junior and AHL clubs share nicknames).
+        assertEquals(grade(MatchConfidence.LIKELY), grade("OHL 06: Knights vs. Otters (11.25 7:00 PM ET)", "Sports | OHL/WHL/QMJHL", ldnEr))
+    }
+
+    @Test
+    fun aJuniorGameDoesNotMatchAnotherGameOrOneSide() {
+        // The same night's other OHL game.
+        val kitWsr = game(League.OHL, "KIT", "WSR", "2026-11-26T00:05:00Z")
+        assertNull(grade(ohl03, "Sports | OHL/WHL/QMJHL", kitWsr))
+        // One side alone is no match.
+        val ldnKit = game(League.OHL, "LDN", "KIT", "2026-11-26T00:00:00Z")
+        assertNull(grade(ohl03, "Sports | OHL/WHL/QMJHL", ldnKit))
+        // A "CHL NN" slot carries AHL games: a WHL game sharing one city with it is not that game, and the prefix proves
+        // nothing either way.
+        val cgyEdm = game(League.WHL, "CGY", "EDM", "2026-11-26T02:00:00Z")
+        assertNull(grade("CHL 03: Calgary vs. Abbotsford (11.25 9:00 PM ET)", "Sports | CHL", cgyEdm))
+        // Both cities shared: LIKELY at most, never CONFIRMED.
+        assertEquals(grade(MatchConfidence.LIKELY, citiesOnly = true), grade("CHL 04: Calgary @ Edmonton (11.25 9:00 PM ET)", "Sports | CHL", cgyEdm))
+        // Another sport's word rules it out.
+        assertNull(grade("Sportsnet+ 40: Calgary @ Edmonton (CFL) @ 25 Nov 09:00 PM ET", "Sports | Sportsnet+", cgyEdm))
     }
 }

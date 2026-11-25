@@ -41,6 +41,59 @@ object EventMatchup {
         false
     }
 
+    /**
+     * (Code review 2026-11-25, UI open item 2) What [title] says besides its matchup, for the hub sheet's reason: the
+     * ": " / " | " segments before and after the matchup's segment ("NHL on TNT", "Hockey") and the bracketed parts of
+     * that segment ("Jets Broadcast"), trimmed and joined by " · ". Null when nothing is left, or when [title] has no
+     * single matchup ([of] is null). Never throws.
+     */
+    fun rest(title: String): String? = try {
+        restImpl(title)
+    } catch (e: Exception) {
+        null
+    }
+
+    private fun restImpl(title: String): String? {
+        if (of(title) == null) return null
+        val segments = splitSegments(title)
+        val at = segments.indices.reversed().firstOrNull { separatorIn(segments[it]) != null }
+        val parts = ArrayList<String>(4)
+        fun add(raw: String) {
+            val t = raw.trim().trim('-', '–', '—', '·', ',').trim()
+            if (t.any { it.isLetterOrDigit() }) parts += t
+        }
+        if (at == null) {
+            brackets(title).forEach(::add)
+        } else {
+            for (i in 0 until at) add(segments[i])
+            brackets(segments[at]).forEach(::add)
+            for (i in at + 1 until segments.size) add(segments[i])
+        }
+        return parts.distinct().joinToString(" · ").takeIf { it.isNotEmpty() }
+    }
+
+    /** The contents of the top-level (), [] and {} groups of [s], in order. */
+    private fun brackets(s: String): List<String> {
+        val out = ArrayList<String>(2)
+        var depth = 0
+        var close = ' '
+        var start = 0
+        for (i in s.indices) {
+            val c = s[i]
+            if (depth == 0) {
+                when (c) {
+                    '(' -> { depth = 1; close = ')'; start = i + 1 }
+                    '[' -> { depth = 1; close = ']'; start = i + 1 }
+                    '{' -> { depth = 1; close = '}'; start = i + 1 }
+                }
+            } else if (c == close) {
+                depth = 0
+                out += s.substring(start, i)
+            }
+        }
+        return out
+    }
+
     private class Found(val segment: String, val sep: Int, val at: Int, val multi: Boolean)
 
     /** Step 1: the last ": " / " | " segment with a separator, else the whole title; steps 2 and 3. */

@@ -161,7 +161,7 @@ fun SearchScreen(viewModel: SearchViewModel, modifier: Modifier = Modifier, onId
                         results.programmes.isEmpty() && state.guideDataMissing -> Hint(stringResource(R.string.search_needs_guide))
                         results.programmes.isEmpty() -> Hint(stringResource(R.string.search_no_programmes))
                         else -> LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
-                            items(results.programmes, key = { "${it.channel.identityHash}:${it.info.rawStartMin}" }) { hit ->
+                            items(results.programmes, key = { "${it.channel.identityHash}:${it.info.rawStartMin}:${if (it.fromName) 'e' else 'g'}" }) { hit ->
                                 ProgrammeCard(
                                     hit,
                                     reminder = state.reminders.contains(hit.channel.identityHash, hit.info.rawStartMin),

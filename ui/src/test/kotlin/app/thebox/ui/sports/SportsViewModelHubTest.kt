@@ -559,6 +559,30 @@ class SportsViewModelHubTest {
         assertEquals("on screen the lookups run again", 2, resolver.infoCalls.size)
     }
 
+    /**
+     * (Owner bug 2026-11-25) The condensed game's row had no thumbnail or duration: its lookup was never made. It is made
+     * when the final game's Goals sheet opens (not while browsing), and its answer lands in `clipInfo`.
+     */
+    @Test fun theCondensedGameIsLookedUpWhenTheGoalsSheetOpens() {
+        val resolver = app.thebox.core.sports.hub.FakeClipResolver()
+        val g = final.copy(media = GameMedia(recapId = 77L, condensedId = 88L, goalClips = 2))
+        val condensed = app.thebox.core.sports.hub.ClipRef(88L, app.thebox.core.sports.hub.ClipKind.CONDENSED, g.id)
+        resolver.infos[88L] = app.thebox.core.sports.hub.ClipResult.Ok(app.thebox.core.sports.hub.ClipInfo(condensed, "Condensed game", null, 600_000L, null, null))
+        repo.board(g)
+        val m = SportsViewModel(repo, null, { 10_000L }, { 1_000_000L }, detail, matcher, resolver, { null }, { app.thebox.core.parental.ParentalAccess.OPEN }) { LocalDate.of(2026, 11, 5) }
+        m.onCardFocused("X1")
+        m.enterPanel("X1")
+        assertTrue("browsing: no condensed lookup", resolver.infoCalls.none { it.videoId == 88L })
+        val goals = m.panel.value.slots.indexOfFirst { it.action == SlotAction.GOALS }
+        assertTrue(goals >= 0 && m.panel.value.slots[goals].usable)
+        m.onSlot(goals)
+        assertEquals(HubSheet.Goals(g.id), m.sheet.value)
+        assertEquals(listOf(condensed), resolver.infoCalls.filter { it.videoId == 88L })
+        assertEquals(600_000L, m.clipInfo.value[88L]?.durationMs)
+        m.onSlot(goals)
+        assertEquals("one lookup", 1, resolver.infoCalls.count { it.videoId == 88L })
+    }
+
     /** (Verification review L-d) The NFL day word reads the local date: a build on the next day is a different panel. */
     @Test fun thePanelChangesAtMidnightButNotWithinTheDay() {
         val zone = java.time.ZoneId.systemDefault()

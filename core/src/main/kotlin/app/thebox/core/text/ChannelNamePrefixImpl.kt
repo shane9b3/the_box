@@ -1,5 +1,7 @@
 package app.thebox.core.text
 
+import app.thebox.core.events.EventGroups
+import app.thebox.core.events.EventNameParser
 import app.thebox.core.common.BoxLog
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -34,7 +36,7 @@ class ChannelNamePrefixImpl(
     @Volatile private var compiled: CompiledRegex? = null
 
     override fun strip(name: String, groupName: String?, rule: NamePrefixRule): String? {
-        slot(name)?.let { return it }
+        slot(name, groupName)?.let { return it }
         return when (rule) {
             NamePrefixRule.Off -> null
             NamePrefixRule.Auto -> auto(name, groupName)
@@ -42,11 +44,14 @@ class ChannelNamePrefixImpl(
         }
     }
 
-    /** True when [name] is an event or empty-slot name, whose shown name is its slot whatever the rule (§5.3). */
-    fun isSlotName(name: String): Boolean = slot(name) != null
+    /**
+     * True when [name] is an event or empty-slot name, whose shown name is its slot whatever the rule (§5.3). (Code review
+     * 2026-11-25, data m1) A bare form ("BBC 1 | Offline") counts only in an event-like provider [group].
+     */
+    fun isSlotName(name: String, group: String?): Boolean = slot(name, group) != null
 
-    private fun slot(name: String): String? = try {
-        slotOf(name)?.takeIf { it.isNotBlank() }
+    private fun slot(name: String, group: String?): String? = try {
+        slotOf(name)?.takeIf { it.isNotBlank() && (!EventNameParser.isBareSlot(name) || EventGroups.eventLike(group)) }
     } catch (e: RuntimeException) {
         null // the parser never throws by contract; a bug there must not break a merge or the backfill
     }
@@ -57,7 +62,7 @@ class ChannelNamePrefixImpl(
      * 5,300 to "changes N of M names" for any rule on the owner's playlist.
      */
     fun countChanged(names: Sequence<Pair<String, String?>>, rule: NamePrefixRule): Int =
-        names.count { (n, g) -> !isSlotName(n) && strip(n, g, rule) != null }
+        names.count { (n, g) -> !isSlotName(n, g) && strip(n, g, rule) != null }
 
     private fun custom(name: String, groupName: String?, rule: NamePrefixRule.Custom): String? {
         val regex = rule.regex

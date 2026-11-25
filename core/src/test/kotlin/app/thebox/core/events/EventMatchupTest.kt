@@ -83,4 +83,16 @@ class EventMatchupTest {
         assertNull(EventMatchup.of("NHL vs. Hockey"))
         assertNull(EventMatchup.of("7 @ 9"))
     }
+
+    /** Code review 2026-11-25, UI open item 2: the hub sheet shows what the title says besides the matchup. */
+    @Test
+    fun theRestOfATitle() {
+        assertEquals("Jets Broadcast", EventMatchup.rest("Winnipeg Jets vs. Boston Bruins (Jets Broadcast)"))
+        assertEquals("NHL on TNT", EventMatchup.rest("NHL on TNT: Golden Knights at Oilers"))
+        assertEquals("Hockey · Bruins Broadcast", EventMatchup.rest("Hockey: Jets vs. Bruins (Bruins Broadcast)"))
+        assertEquals("English", EventMatchup.rest("Vegas @ Edmonton | English"))
+        assertNull(EventMatchup.rest("Golden Knights vs. Oilers"))
+        assertNull(EventMatchup.rest("Vegas @ Edmonton ()"))
+        assertNull(EventMatchup.rest("NHL Tonight (Studio)"), "no single matchup")
+    }
 }

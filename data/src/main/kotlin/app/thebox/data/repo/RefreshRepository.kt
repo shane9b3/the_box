@@ -135,6 +135,9 @@ class RefreshRepository @Inject constructor(
                     }
                 }
                 log(playlistId, trigger, started, report, null, 0)
+                // (Code review 2026-11-25, data m2) `last_refresh_at` moved, so the index key did: names without a year
+                // are read against the new time. Rebuild now, as after a merge, so no reader finds a stale key.
+                afterMerge(playlistId)
                 return RefreshResult(report, null)
             }
 

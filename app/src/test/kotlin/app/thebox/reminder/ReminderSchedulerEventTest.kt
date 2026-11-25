@@ -103,6 +103,29 @@ class ReminderSchedulerEventTest {
         assertEquals(ReminderEventRule.Kind.MOVED, empty.verdict)
     }
 
+    /**
+     * Code review 2026-11-25, UI m5: a guide listing or a slot that re-spells the same game at the same start is the
+     * same programme, not "gone"; another game is still gone.
+     */
+    @Test
+    fun aReSpelledTitleForTheSameSlotAndStartIsTheSame() {
+        val r = reminder(title = "NHL Hockey: Oilers at Flames")
+        val ch = channel(9, ev("Detroit @ Orlando", base + 60))
+        assertEquals(ReminderEventRule.Kind.SAME, ReminderEventRule.decide(r, ch, "NHL: Oilers @ Flames", snapshot()).verdict)
+        val vgk = reminder(title = "Golden Knights vs. Oilers")
+        assertEquals(
+            ReminderEventRule.Kind.SAME,
+            ReminderEventRule.decide(vgk, channel(9, ev("Vegas Golden Knights vs. Edmonton Oilers", base + 60)), null, snapshot()).verdict,
+        )
+        assertEquals("sides in the other order", ReminderEventRule.Kind.SAME, ReminderEventRule.decide(vgk, channel(9, ev("Edmonton @ Vegas", base + 60)), null, snapshot()).verdict)
+        assertEquals(ReminderEventRule.Kind.GONE, ReminderEventRule.decide(vgk, channel(9, ev("Golden Knights vs. Kraken", base + 60)), null, snapshot()).verdict)
+        assertEquals(ReminderEventRule.Kind.GONE, ReminderEventRule.decide(r, ch, "NHL: Flames @ Canucks", snapshot()).verdict)
+        // A re-spelled event on another slot is followed.
+        val moved = ReminderEventRule.decide(vgk, channel(9, ev("Detroit @ Orlando", base + 60)), null, snapshot(entry(25, "Vegas Golden Knights @ Edmonton Oilers", base + 60)))
+        assertEquals(ReminderEventRule.Kind.MOVED, moved.verdict)
+        assertFalse(ReminderEventRule.sameMatchup("New York @ Boston", "New York Rangers @ Boston"))
+    }
+
     // ------------------------------------------------------------------------------------------------ the runtime
 
     private class TestBook(vararg rs: PendingReminder) : ReminderBook {

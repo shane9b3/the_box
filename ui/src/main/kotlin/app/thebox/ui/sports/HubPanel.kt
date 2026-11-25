@@ -106,6 +106,13 @@ data class HubSlot(val action: SlotAction?, val label: SlotLabel = SlotLabel.FOL
     companion object { val EMPTY = HubSlot(null) }
 }
 
+/** The rows a match offers the Channels sheet: the candidates, or the team channels of a game beyond the guide. */
+internal fun candidatesOf(m: MatchState?): List<ChannelCandidate> = when (m) {
+    is MatchState.Done -> m.candidates
+    is MatchState.BeyondGuide -> m.teams
+    else -> emptyList()
+}
+
 /** The channel match of the shown game (§5). */
 sealed interface MatchState {
     /** Nothing asked yet. */
@@ -118,7 +125,15 @@ sealed interface MatchState {
      * line; [noGuide]: there is no guide at all. Commit 0's branch disables Channels and draws no line; WP-4 draws the
      * line and sets it in the content description.
      */
-    data class BeyondGuide(val teams: List<ChannelCandidate>, val noGuide: Boolean) : MatchState
+    data class BeyondGuide(
+        val teams: List<ChannelCandidate>,
+        val noGuide: Boolean,
+        /**
+         * (Code review 2026-11-25, UI m3) False for the placeholder published before `teamChannels` answers: a cancelled
+         * read leaves it behind, and the next visit must read the team channels again instead of keeping it.
+         */
+        val complete: Boolean = true,
+    ) : MatchState
 }
 
 /** Where the shown game's detail stands. */
@@ -159,7 +174,8 @@ class HubPanelModel(
 ) {
     /** The index of the first slot OK / Menu on a card enters (§2.2); null = none (the footer shows no OK). */
     val firstEnabled: Int? get() = slots.indexOfFirst { it.usable }.takeIf { it >= 0 }
-    val candidates: List<ChannelCandidate> get() = (match as? MatchState.Done)?.candidates.orEmpty()
+    /** The sheet's rows: the match, or (owner ruling 2026-11-25) beyond the guide the team channels. */
+    val candidates: List<ChannelCandidate> get() = candidatesOf(match)
 
     fun copy(slots: List<HubSlot> = this.slots): HubPanelModel = HubPanelModel(
         game, followed, detail, detailKind, failure, stale, failing, statsAtMs, awayScore, homeScore, match, recap, latestGoal,
@@ -209,7 +225,7 @@ internal object HubSlots {
         val live get() = game.phase == GamePhase.LIVE || game.phase == GamePhase.INTERMISSION
         val final get() = game.phase == GamePhase.FINAL
         val postponed get() = game.phase == GamePhase.POSTPONED
-        val candidates get() = (match as? MatchState.Done)?.candidates.orEmpty()
+        val candidates get() = candidatesOf(match)
         val catchUp get() = candidates.filter { it.airing != null }
         val recapId get() = detail?.recapId ?: game.media?.recapId
         val goalClips get() = detail?.goals?.count { it.clipId != null } ?: game.media?.goalClips ?: 0
@@ -273,8 +289,11 @@ internal object HubSlots {
                 watchable(c) != null -> HubSlot(SlotAction.CHANNEL, SlotLabel.WATCH, true, 1)
                 else -> HubSlot(SlotAction.CHANNEL, SlotLabel.CHANNELS_N, true, m.candidates.size)
             }
-            // (Event channels commit 0, §8.5) The owner's grey chip: Channels, disabled.
-            is MatchState.BeyondGuide -> HubSlot(SlotAction.CHANNEL, SlotLabel.CHANNELS, false)
+            // (Event channels §8.5; owner ruling 2026-11-25, §18) Beyond the guide the chip opens the team channels when
+            // there are any ("Channels (2)"); it is grey only with none to offer.
+            is MatchState.BeyondGuide ->
+                if (m.teams.isEmpty()) HubSlot(SlotAction.CHANNEL, SlotLabel.CHANNELS, false)
+                else HubSlot(SlotAction.CHANNEL, SlotLabel.CHANNELS_N, true, m.teams.size)
         }
     }
 
@@ -635,36 +654,59 @@ internal object HubPanelContents {
                 val list = if (final) match.candidates.filter { it.airing != null } else match.candidates
                 if (list.isEmpty()) return if (final) null else ChannelLine(res.getString(R.string.sports_hub_no_channel), null)
                 val top = list.first()
-                val more = if (list.size > 1) res.getQuantityString(R.plurals.sports_hub_more, list.size - 1, list.size - 1) else null
-                val tail = more?.let { sep.length + it.length } ?: 0
+                fun moreOf(shown: Int) = (list.size - shown).takeIf { it > 0 }?.let { res.getQuantityString(R.plurals.sports_hub_more, it, it) }
                 val time = if (final || m.imminent) null else SportsText.startTime(g.startUtcMs, clock24, locale)
                 val team = top.reasons.filterIsInstance<MatchReason.TeamChannel>().firstOrNull()
-                val text = if (team != null) {
-                    // (U-E-B3) "Oilers team channel", never a bare team name; (E11) the abbreviation when it would not fit.
-                    fun line(name: String) = if (time == null) res.getString(R.string.sports_hub_on_tv_team, name)
+                if (team != null) {
+                    // (U-E-B3) "Oilers team channel", never a bare team name. (Code review 2026-11-25, UI open item 4) Both
+                    // team channels when the other side's is listed too, top's team first ("7:00 PM: Bruins and Jets team
+                    // channels"); then one nickname; only then (E11) abbreviations.
+                    val other = list.drop(1).firstNotNullOfOrNull { c ->
+                        c.reasons.filterIsInstance<MatchReason.TeamChannel>().firstOrNull { it.side != team.side }
+                    }
+                    fun one(name: String) = if (time == null) res.getString(R.string.sports_hub_on_tv_team, name)
                     else res.getString(R.string.sports_hub_on_tv_team_at, time, name)
-                    line(team.nickname).takeIf { it.length + tail <= budget } ?: line(abbrevOf(g, team.side))
-                } else if (time == null) {
+                    fun two(a: String, b: String) = if (time == null) res.getString(R.string.sports_hub_on_tv_teams, a, b)
+                    else res.getString(R.string.sports_hub_on_tv_teams_at, time, a, b)
+                    val choices = ArrayList<ChannelLine>(4)
+                    if (other != null) choices += ChannelLine(two(team.nickname, other.nickname), moreOf(2))
+                    choices += ChannelLine(one(team.nickname), moreOf(1))
+                    if (other != null) choices += ChannelLine(two(abbrevOf(g, team.side), abbrevOf(g, other.side)), moreOf(2))
+                    choices += ChannelLine(one(abbrevOf(g, team.side)), moreOf(1))
+                    return choices.firstOrNull { it.full(sep).length <= budget } ?: choices.last()
+                }
+                val text = if (time == null) {
                     res.getString(R.string.sports_hub_on_tv, top.channel.displayName, shortReason(res, top))
                 } else {
                     res.getString(R.string.sports_hub_on_tv_at, time, top.channel.displayName)
                 }
-                ChannelLine(text, more)
+                ChannelLine(text, moreOf(1))
             }
-            is MatchState.BeyondGuide -> ChannelLine(beyondText(res, g, match, budget), null, beyond = true)
+            is MatchState.BeyondGuide -> beyondLine(res, g, match, budget, sep)
         }
     }
 
-    /** (§8.5, owner ruling c; U-E-B4, E11) Why Channels is grey: the team channels, else the guide, else no guide at all. */
-    private fun beyondText(res: Resources, g: GameSnapshot, match: MatchState.BeyondGuide, budget: Int): String {
-        val sides = match.teams.flatMap { c -> c.reasons.filterIsInstance<MatchReason.TeamChannel>() }.distinctBy { it.side }.sortedBy { it.side.ordinal }
-        return when (sides.size) {
-            0 -> res.getString(if (match.noGuide) R.string.sports_hub_beyond_guide_none else R.string.sports_hub_beyond_guide)
-            1 -> res.getString(R.string.sports_hub_on_tv_team, sides[0].nickname).takeIf { it.length <= budget }
-                ?: res.getString(R.string.sports_hub_on_tv_team, abbrevOf(g, sides[0].side))
-            else -> res.getString(R.string.sports_hub_beyond_guide_team, sides[0].nickname, sides[1].nickname).takeIf { it.length <= budget }
-                ?: res.getString(R.string.sports_hub_beyond_guide_team, abbrevOf(g, sides[0].side), abbrevOf(g, sides[1].side))
+    /**
+     * (§8.5; owner rulings 2026-11-25, event channels §18) The line of a game beyond the guide. With team channels (the
+     * Channels chip is enabled and lists them): the guide does not reach the game yet, and the team channels will carry it,
+     * named in the matcher's order (the user's team, else home, first): both nicknames, both abbreviations, one nickname,
+     * one abbreviation, the first that fits; never "On TV" (UI m8). "+n more" counts the other rows, as the chip does.
+     * Without one (the chip is grey, item 3 speaks this line): the guide, else no guide at all.
+     */
+    private fun beyondLine(res: Resources, g: GameSnapshot, match: MatchState.BeyondGuide, budget: Int, sep: String): ChannelLine {
+        val sides = match.teams.flatMap { c -> c.reasons.filterIsInstance<MatchReason.TeamChannel>() }.distinctBy { it.side }
+        if (sides.isEmpty()) {
+            return ChannelLine(res.getString(if (match.noGuide) R.string.sports_hub_beyond_guide_none else R.string.sports_hub_beyond_guide), null, beyond = true)
         }
+        fun moreOf(shown: Int) = (match.teams.size - shown).takeIf { it > 0 }?.let { res.getQuantityString(R.plurals.sports_hub_more, it, it) }
+        val choices = ArrayList<ChannelLine>(4)
+        if (sides.size > 1) {
+            choices += ChannelLine(res.getString(R.string.sports_hub_beyond_guide_teams, sides[0].nickname, sides[1].nickname), moreOf(2), beyond = true)
+            choices += ChannelLine(res.getString(R.string.sports_hub_beyond_guide_teams, abbrevOf(g, sides[0].side), abbrevOf(g, sides[1].side)), moreOf(2), beyond = true)
+        }
+        choices += ChannelLine(res.getString(R.string.sports_hub_beyond_guide_one, sides[0].nickname), moreOf(1), beyond = true)
+        choices += ChannelLine(res.getString(R.string.sports_hub_beyond_guide_one, abbrevOf(g, sides[0].side)), moreOf(1), beyond = true)
+        return choices.firstOrNull { it.full(sep).length <= budget } ?: choices.last()
     }
 
     private fun abbrevOf(g: GameSnapshot, side: Side): String = if (side == Side.AWAY) g.away.abbrev else g.home.abbrev
@@ -921,7 +963,7 @@ internal fun HubPanel(
             .semantics {
                 paneTitle = title
                 // (U-E-B4) The grey Channels chip is never focused: the panel itself says why.
-                content?.channelLine?.takeIf { it.beyond }?.let { contentDescription = it.text }
+                greyReason(model, content)?.let { contentDescription = it }
             }
             .onPreviewKeyEvent { e ->
                 if (focusedSlot < 0) false
@@ -957,12 +999,16 @@ internal fun HubPanel(
             ChannelLineRow(line, factor)
         }
         Spacer(Modifier.height(12.dp))
-        Buttons(model, slotRequesters, focusedSlot, entered, onSlot) { i ->
+        Buttons(model, slotRequesters, focusedSlot, entered, onSlot, greyReason(model, content)) { i ->
             focusedSlot = i ?: -1
             onSlotFocus(i)
         }
     }
 }
+
+/** The beyond-guide line while the Channels chip is grey (no team channel to offer), else null. */
+private fun greyReason(model: HubPanelModel, content: PanelContent?): String? =
+    content?.channelLine?.takeIf { it.beyond && model.slots.any { s -> s.action == SlotAction.CHANNEL && !s.enabled } }?.text
 
 /**
  * (Event channels §9.1, U-E-N5) The channel line as two texts in a row: the words ellipsize, " · +n more" is never cut.
@@ -1169,7 +1215,16 @@ private fun lowEnd(): Boolean {
 // ------------------------------------------------------------------ buttons
 
 @Composable
-private fun Buttons(model: HubPanelModel, requesters: List<FocusRequester>, focusedSlot: Int, entered: Boolean, onSlot: (Int) -> Unit, onFocus: (Int?) -> Unit) {
+private fun Buttons(
+    model: HubPanelModel,
+    requesters: List<FocusRequester>,
+    focusedSlot: Int,
+    entered: Boolean,
+    onSlot: (Int) -> Unit,
+    /** (Code review 2026-11-25, UI M3) The beyond-guide line: why Channels is grey, spoken by the slots. */
+    beyondLine: String?,
+    onFocus: (Int?) -> Unit,
+) {
     val res = LocalResources.current
     val factor = UiTextScale.factor
     val focusable = LocalHubFocusable.current && !LocalHubSlotsRefuseFocus.current
@@ -1177,10 +1232,20 @@ private fun Buttons(model: HubPanelModel, requesters: List<FocusRequester>, focu
     val pad = if (large) 20 else 28
     val gap = if (large) 12 else 16
     Row(Modifier.fillMaxWidth().height(HubPanelPlan.buttons(factor).dp), horizontalArrangement = Arrangement.spacedBy(gap.dp), verticalAlignment = Alignment.CenterVertically) {
+        val firstUsable = model.slots.indexOfFirst { it.usable }
         model.slots.forEachIndexed { i, slot ->
             if (slot.action == null) return@forEachIndexed
             val focused = focusedSlot == i
             val text = slotText(res, slot)
+            // (Code review 2026-11-25, UI M3) The grey chip never takes focus, and on a TV accessibility focus follows the
+            // D-pad: the slot that takes focus on entering the panel also says why Channels is grey, and the grey slot
+            // says it for touch.
+            val desc = when {
+                beyondLine == null -> text
+                slot.action == SlotAction.CHANNEL && !slot.enabled -> res.getString(R.string.sports_hub_desc_slot_unavailable, text, beyondLine)
+                i == firstUsable -> res.getString(R.string.sports_hub_desc_slot_channels_note, text, beyondLine)
+                else -> text
+            }
             val glyph = slotGlyph(slot, i)
             Box(
                 Modifier
@@ -1192,7 +1257,7 @@ private fun Buttons(model: HubPanelModel, requesters: List<FocusRequester>, focu
                     .background(if (focused) ButtonFocusFill else GuideUi.White10, RoundedCornerShape(30.dp))
                     .let { if (focused) it.border(3.dp, GuideUi.Accent, RoundedCornerShape(30.dp)) else it.border(1.dp, GuideUi.White16, RoundedCornerShape(30.dp)) }
                     .clickable(enabled = slot.enabled, interactionSource = remember { MutableInteractionSource() }, indication = null) { onSlot(i) }
-                    .semantics { contentDescription = text }
+                    .semantics { contentDescription = desc }
                     .padding(horizontal = pad.dp),
                 contentAlignment = Alignment.Center,
             ) {

@@ -153,11 +153,11 @@ class ChannelEditorRepositoryImpl @Inject constructor(
                 // hidden by a user rule: its menu says D_NO_EVENT and points at the playlist's settings.
                 val switchOn = playlists.filterTo(HashSet()) { RuleHiddenPass.hidesEmptyEvents(this, it) }
                 for (r in ruleRows) {
-                    if (RuleHiddenPass.hiddenByNoEvent(r.playlistId in switchOn, true, r.rawName, isEmptySlot)) {
-                        r.noEvent = true
-                        continue
-                    }
+                    // (Code review 2026-11-25, data m4) A user rule that matches wins: its reason, not the switch's.
                     r.rulePattern = matchers[r.playlistId]?.firstOrNull { (m, _) -> safeMatch(m, r.rawName) }?.second
+                    if (r.rulePattern == null && RuleHiddenPass.hiddenByNoEvent(r.playlistId in switchOn, true, r.rawName, r.providerGroup, isEmptySlot)) {
+                        r.noEvent = true
+                    }
                 }
             }
         }
@@ -647,6 +647,8 @@ class ChannelEditorRepositoryImpl @Inject constructor(
         val renamed = st.getLong(16) != 0L
         val mode: String = st.getText(17)
         val rawName: String = st.getText(18)
+        /** (Code review 2026-11-25, data m1) The provider group's name. */
+        val providerGroup: String? = if (st.isNull(19)) null else st.getText(19)
         var rulePattern: String? = null
         var noEvent = false
 
@@ -677,7 +679,7 @@ class ChannelEditorRepositoryImpl @Inject constructor(
                 "cp.custom_number, c.number, c.sort_index, COALESCE(cp.custom_logo, c.logo_url), COALESCE(cp.hidden, 0), c.rule_hidden, " +
                 "${EditorQueries.OWN_LOCK}, ${EditorQueries.GROUP_LOCK}, COALESCE(gp.custom_name, g.name), ${EditorQueries.FAVORITE}, " +
                 "CASE WHEN gt.id IS NOT NULL AND (g0.id IS NULL OR gt.id != g0.id) THEN COALESCE(gp0.custom_name, g0.name, '') END, " +
-                "cp.custom_name IS NOT NULL, p.numbering_mode, c.name " +
+                "cp.custom_name IS NOT NULL, p.numbering_mode, c.name, g0.name " +
                 EditorQueries.ALL_FROM +
                 "LEFT JOIN group_prefs gp0 ON gp0.playlist_id = c.playlist_id AND gp0.kind = g0.kind AND gp0.group_key = g0.group_key "
 

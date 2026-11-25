@@ -92,7 +92,8 @@ class GuideEventPanelTest {
     fun afterAnEventItMayStillBeOnForThreeHoursThenItHasEnded() {
         val w = world()
         w.toRow(4)
-        assertEquals(GuideTexts.NO_EVENT, w.ui.panel!!.title)
+        // (Code review 2026-11-25, UI m2) The event's own title beside "this event may still be on".
+        assertEquals("Calgary @ Seattle", w.ui.panel!!.title)
         assertEquals(GuideTexts.EVENT_MAY_BE_ON, w.ui.panel!!.description)
         w.press(DOWN)
         assertEquals(GuideTexts.NO_EVENT, w.ui.panel!!.title)
@@ -104,7 +105,20 @@ class GuideEventPanelTest {
         val w = world()
         w.toRow(6)
         assertEquals(GuideTexts.NO_INFORMATION, w.ui.panel!!.title)
-        assertEquals(GuideTexts.nextEvent("Montreal @ Colorado", labels.hm(now + 90)), w.ui.panel!!.description)
+        assertEquals(GuideTexts.nextEvent("Montreal @ Colorado", labels.hmPeriod(now + 90)), w.ui.panel!!.description)
+    }
+
+    /** Code review 2026-11-25, UI m2: the time carries AM / PM in the 12 h form, and the day when it is not today. */
+    @Test
+    fun theNextEventsTimeHasItsPeriodAndDay() {
+        val zone = java.time.ZoneId.of("America/New_York")
+        val t = app.thebox.core.guide.layout.TimeTables(zone, clock24 = false, { now * 60_000L }, java.util.Locale.US)
+        val at = java.time.ZonedDateTime.of(2026, 11, 25, 22, 0, 0, 0, zone).toEpochSecond().toInt() / 60
+        assertEquals("10:00 PM", t.hmPeriod(at))
+        val t24 = app.thebox.core.guide.layout.TimeTables(zone, clock24 = true, { now * 60_000L }, java.util.Locale.US)
+        assertEquals("22:00", t24.hmPeriod(at))
+        assertEquals("Next on this channel: Sharks vs. Ducks, tomorrow at 10:00 PM.", GuideTexts.nextEvent("Sharks vs. Ducks", "10:00 PM", GuideTexts.TOMORROW_WORD))
+        assertEquals("Next on this channel: Sharks vs. Ducks at 10:00 PM.", GuideTexts.nextEvent("Sharks vs. Ducks", "10:00 PM", null))
     }
 
     @Test

@@ -56,7 +56,7 @@ class EventDisplayNamesTest {
         val sports = db.newGroup(p, "g:sports", "SPORTS")
         db.newChannel(p, "ev", "Sportsnet+ 09: Vegas @ Edmonton @ 24 Nov 08:00 PM ET", sortIndex = 0)
         db.newChannel(p, "no", "Sportsnet+ 11: NO EVENT", sortIndex = 1)
-        db.newChannel(p, "bare", "NHL 02:", sortIndex = 2)
+        db.newChannel(p, "bare", "NHL 02:", groupId = sports, sortIndex = 2)
         db.newChannel(p, "uk", "UK: One", sortIndex = 3)
         db.newChannel(p, "plain", "Edmonton Oilers", sortIndex = 4)
         db.newChannel(p, "grp", "SPORTS: ESPN", groupId = sports, sortIndex = 5)

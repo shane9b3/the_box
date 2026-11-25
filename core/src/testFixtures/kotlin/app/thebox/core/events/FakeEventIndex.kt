@@ -9,6 +9,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
  */
 class FakeEventIndex(entries: List<EventEntry> = emptyList()) : EventIndex {
     override val version = MutableStateFlow(0L)
+    private var list: List<EventEntry> = entries
     private var snapshot: EventSnapshot = FakeEventSnapshot(entries, 0L)
     var currentCalls = 0
         private set
@@ -18,12 +19,22 @@ class FakeEventIndex(entries: List<EventEntry> = emptyList()) : EventIndex {
     /** Publishes [entries] as a new snapshot with the next version. */
     fun put(entries: List<EventEntry>) {
         val v = version.value + 1
+        list = entries
         snapshot = FakeEventSnapshot(entries, v)
         version.value = v
     }
 
+    /** The entries of the latest [put] (or the constructor's). */
+    fun entries(): List<EventEntry> = list
+
     override suspend fun current(): EventSnapshot { currentCalls++; return snapshot }
     override suspend fun rebuild(): EventSnapshot { rebuilds++; return snapshot }
+    /** The latest snapshot; [peekNull] makes it answer null (a cold index), as before the first build. */
+    var peekNull = false
+    var prefetches = 0
+        private set
+    override fun peek(): EventSnapshot? = if (peekNull) null else snapshot
+    override fun prefetch() { prefetches++ }
 
     companion object {
         /** An EVENT entry for tests: [startMin] / [endMin] are UTC epoch minutes. */

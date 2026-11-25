@@ -2,7 +2,9 @@ package app.thebox.ui.sports
 
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.focusRequester
@@ -164,6 +166,51 @@ class HubSheetsTest {
         assertEquals(1, notYet)
         // (Event channels §9.1) No footer note: the regional note went with the regional guesses.
         assertTrue(rule.onAllNodesWithText("Regional channels", substring = true, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+    }
+
+    /**
+     * (Owner rulings 2026-11-25, event channels §18) The sheet lists every matched channel: a long list scrolls with the
+     * D-pad (the focused row stays shown, focus never leaves the list at either end), the feeds of one channel are
+     * separate rows in order, and a following feed says it is another feed of the channel above.
+     */
+    @Test
+    fun aLongChannelListScrollsAndEveryFeedIsARow() {
+        val rows = (0 until 30).map { i ->
+            ChannelCandidate(
+                GuideFixtures.channel(100 + i, name = "Channel $i"), "P", MatchConfidence.CONFIRMED,
+                listOf(MatchReason.Broadcaster("TNT", Market.NATIONAL, null)), emptyList(), null, anotherFeed = i in 1..2,
+            )
+        }
+        val tuned = ArrayList<ChannelCandidate>()
+        rule.setContent {
+            BoxTheme { ChannelSheet(live, rows, true, false, false, onTune = { tuned += it }, onPlayArchive = {}, onNotYet = {}, onClose = {}) }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag(hubSheetRowTag("ch:0"), useUnmergedTree = true).assertIsFocused()
+        assertTrue(rule.onAllNodesWithText("Same channel, another feed", useUnmergedTree = true).fetchSemanticsNodes().size == 2)
+        rule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
+        rule.waitForIdle()
+        rule.onNodeWithTag(hubSheetRowTag("ch:1"), useUnmergedTree = true).assertIsFocused()
+        rule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
+        rule.waitForIdle()
+        assertEquals("a following feed is selectable", listOf(rows[1]), tuned)
+        for (i in 2 until 30) {
+            rule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
+            rule.waitForIdle()
+            rule.onNodeWithTag(hubSheetRowTag("ch:$i"), useUnmergedTree = true).assertIsFocused().assertIsDisplayed()
+        }
+        rule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
+        rule.waitForIdle()
+        rule.onNodeWithTag(hubSheetRowTag("ch:29"), useUnmergedTree = true).assertIsFocused()
+        assertTrue("the list is lazy: the first row is no longer composed", rule.onAllNodesWithTag(hubSheetRowTag("ch:0"), useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        for (i in 28 downTo 0) {
+            rule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
+            rule.waitForIdle()
+            rule.onNodeWithTag(hubSheetRowTag("ch:$i"), useUnmergedTree = true).assertIsFocused().assertIsDisplayed()
+        }
+        rule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
+        rule.waitForIdle()
+        rule.onNodeWithTag(hubSheetRowTag("ch:0"), useUnmergedTree = true).assertIsFocused()
     }
 
     @Test

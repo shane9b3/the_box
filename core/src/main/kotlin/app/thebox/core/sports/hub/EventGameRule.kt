@@ -45,7 +45,7 @@ object EventGameRule {
 
     private fun gradeImpl(event: EventFacts, game: GameSnapshot, board: List<GameSnapshot>): Grade? {
         val league = game.id.league
-        if (league != League.NHL && league != League.NFL) return null
+        if (league != League.NHL && league != League.NFL) return gradeByOwnNames(event, game)
         val away = TeamNames.of(league, game.away.abbrev) ?: return null
         val home = TeamNames.of(league, game.home.abbrev) ?: return null
         if (away.abbrev == home.abbrev) return null
@@ -104,6 +104,76 @@ object EventGameRule {
             else -> if (positive && !assumed) MatchConfidence.CONFIRMED else MatchConfidence.LIKELY
         }
         return Grade(confidence, citiesOnly, assumed)
+    }
+
+    /**
+     * (Code review 2026-11-25, search M1) True when [name] or [group] carries one of step 3's negative hints for
+     * [league]: another sport, level or league ("NBA", "College", "(W)"). Search applies it to a place-only hit.
+     * Never throws.
+     */
+    fun otherSport(name: String, group: String?, league: League): Boolean = try {
+        hintsOf(name, group).negative(league)
+    } catch (e: Exception) {
+        false
+    }
+
+    /**
+     * Sports with no other-sport words in the name or group of a junior league's event (code review 2026-11-25, owner
+     * item 17). Not the league words: a slot prefix ("CHL 01" carries AHL games, "OHL 03") is never evidence either way.
+     */
+    private val NEGATIVE_JUNIOR: Set<String> = setOf(
+        "nba", "wnba", "basketball", "mlb", "baseball", "mls", "soccer", "nfl", "football", "cfl", "women", "womens",
+    )
+
+    /**
+     * (Code review 2026-11-25, owner item 17) A league without a [TeamNames] table (OHL, WHL, QMJHL): the event's two
+     * sides against the game's own team names, from the feed (`TeamLine.name`) and `ChlTeamPlaces` (place, nickname,
+     * "place nickname"), folded by [TeamNames.tokens]. Both sides must match (in order for "@" / "at"); one side alone is
+     * no match. Both full names (or the feed's names) → CONFIRMED; any place-only or nickname-only side → LIKELY at most
+     * (AHL and junior clubs share cities and nicknames). An assumed zone → LIKELY. The slot prefix or group label is
+     * never evidence; only other-sport words rule an event out.
+     */
+    private fun gradeByOwnNames(event: EventFacts, game: GameSnapshot): Grade? {
+        val league = game.id.league
+        val delta = event.startUtcMs - game.startUtcMs
+        if (delta < -SportsConstants.HUB_EVENT_BEFORE_MIN * MIN_MS || delta > SportsConstants.HUB_EVENT_AFTER_MIN * MIN_MS) return null
+        val hints = hintsOf(event.name, event.group)
+        if (hints.bracketed || hints.tokens.any { it in NEGATIVE_JUNIOR }) return null
+        val away = ownName(league, game.away) ?: return null
+        val home = ownName(league, game.home) ?: return null
+        val m = EventMatchup.of(event.title) ?: return null
+        var first = TeamNames.sideMatch(m.first, away)
+        var second = TeamNames.sideMatch(m.second, home)
+        if (first == null || second == null) {
+            if (m.ordered) return null
+            first = TeamNames.sideMatch(m.first, home) ?: return null
+            second = TeamNames.sideMatch(m.second, away) ?: return null
+        }
+        val place = TeamNames.Strength.PLACE
+        val citiesOnly = first == place && second == place
+        val assumed = event.zone == EventZoneSource.ASSUMED
+        val full = first == TeamNames.Strength.FULL && second == TeamNames.Strength.FULL
+        val confidence = if (full && !assumed) MatchConfidence.CONFIRMED else MatchConfidence.LIKELY
+        return Grade(confidence, citiesOnly, assumed)
+    }
+
+    /** The game's own names for one side as a [TeamName] (no table row): the feed's name and the CHL place table. */
+    private fun ownName(league: League, line: app.thebox.core.sports.TeamLine): TeamName? {
+        val entry = ChlTeamPlaces.of(league, line.abbrev)
+        val feed = line.name.trim()
+        val full = LinkedHashSet<String>()
+        val nick = ArrayList<String>(1)
+        val places = ArrayList<String>(1)
+        if (entry != null) {
+            full += "${entry.place} ${entry.nickname}"
+            nick += entry.nickname
+            places += entry.place
+            if (entry.cardPlace != entry.place) places += entry.cardPlace
+        }
+        val feedKey = TeamNames.tokens(feed)
+        if (feedKey.isNotEmpty() && nick.none { TeamNames.tokens(it) == feedKey } && places.none { TeamNames.tokens(it) == feedKey }) full += feed
+        if (full.isEmpty()) return null
+        return TeamName(league, line.abbrev, full.toList(), nick, places, emptyList())
     }
 
     /** A side's strength against [team]; a PLACE two clubs share ("New York") is unusable. */

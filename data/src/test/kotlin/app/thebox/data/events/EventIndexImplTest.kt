@@ -59,6 +59,13 @@ class EventIndexImplTest {
     private fun index(p: (String, EventParseContext) -> ParsedName = parser::parse, version: Int = 1) =
         EventIndexImpl(db, dao, Dispatchers.IO, clock, p, version)
 
+    /** A stale key answers at once and builds in the background (code review m2): the snapshot after that build. */
+    private suspend fun EventIndexImpl.fresh(): app.thebox.core.events.EventSnapshot {
+        current()
+        awaitBackground()
+        return current()
+    }
+
     private suspend fun playlist(name: String = "P", serverZone: String? = null, refreshAt: Long? = NOW): Long {
         val id = db.newPlaylist(name)
         db.exec("UPDATE playlist SET server_zone = ?, last_refresh_at = ? WHERE id = ?", serverZone, refreshAt, id)
@@ -158,7 +165,7 @@ class EventIndexImplTest {
         assertEquals("29 < 2 × 15: kept", listOf("America/New_York"), db.strings("SELECT event_zone FROM playlist WHERE id = ?", p))
         db.newChannel(p, "lo29", "L 29: Match 29 @2026-11-24T17:00 Europe/London")
         db.exec("UPDATE playlist SET refresh_seq = refresh_seq + 1 WHERE id = ?", p)
-        idx.current()
+        idx.fresh()
         assertEquals(listOf("Europe/London", "30"), db.strings("SELECT event_zone FROM playlist WHERE id = ?", p) + db.strings("SELECT event_zone_n FROM playlist WHERE id = ?", p))
         assertEquals(1, dao.zoneWrites.get())
     }
@@ -204,13 +211,16 @@ class EventIndexImplTest {
         db.exec("UPDATE channel SET name = 'S 01: New @2026-11-24T19:00 UTC' WHERE id = ?", a)
         assertSame("a rename alone does not move the key", s1, idx.current())
         db.exec("UPDATE playlist SET refresh_seq = refresh_seq + 1 WHERE id = ?", p)
+        // (Code review 2026-11-25, m2) A stale key answers the previous snapshot at once and builds in the background.
+        assertSame("a stale reader does not wait", s1, idx.current())
+        idx.awaitBackground()
         val s2 = idx.current()
         assertNotEquals(s1.version, s2.version)
         assertEquals(s2.version, idx.version.value)
         assertEquals("New", s2.of(a)!!.event.title)
         // last_refresh_at is in the key too.
         db.exec("UPDATE playlist SET last_refresh_at = ? WHERE id = ?", NOW + 60_000, p)
-        val s3 = idx.current()
+        val s3 = idx.fresh()
         assertEquals(2, parser.calls.get() - 1) // rebuilt once more
         assertNotEquals("a keying input changed: a new version (contract)", s2.version, s3.version)
         // rebuild() with nothing changed keeps the version: no reload for the guide.
@@ -236,6 +246,35 @@ class EventIndexImplTest {
         idx.rebuild()
         assertEquals(2, dao.countWrites.get())
         assertEquals(2L, db.scalar("SELECT event_count FROM playlist WHERE id = ?", p))
+    }
+
+    /** Code review 2026-11-25, m7: event_count counts only events that ended less than a day ago. */
+    @Test
+    fun eventCountLeavesOutStaleNames() = runBlocking {
+        val p = playlist()
+        db.newChannel(p, "now", "S 01: Tonight @2026-11-24T18:00 UTC")
+        db.newChannel(p, "old", "S 02: Long Ago @2026-11-20T18:00 UTC")
+        val s = index().rebuild()
+        assertEquals("both are indexed", 2, s.count(p))
+        assertEquals("only the current one counts toward the 6 h default", 1L, db.scalar("SELECT event_count FROM playlist WHERE id = ?", p))
+    }
+
+    /** Code review 2026-11-25, data Q1: peek never waits; prefetch builds in the background and ticks the version. */
+    @Test
+    fun peekAndPrefetch() = runBlocking {
+        val p = playlist()
+        db.newChannel(p, "a", "S 01: Game @2026-11-24T18:00 UTC")
+        val idx = index()
+        assertNull(idx.peek())
+        idx.prefetch()
+        idx.awaitBackground()
+        val s = idx.peek()!!
+        assertEquals(s.version, idx.version.value)
+        assertTrue(s.version > 0)
+        idx.prefetch()
+        idx.awaitBackground()
+        assertSame("fresh: no second build", s, idx.peek())
+        assertEquals(1, parser.calls.get())
     }
 
     @Test

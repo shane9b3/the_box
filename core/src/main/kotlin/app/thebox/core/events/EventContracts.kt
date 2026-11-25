@@ -11,7 +11,11 @@ import java.time.ZoneId
 enum class EventZoneSource { EXPLICIT, CONVENTION, ASSUMED }
 
 /** Which tail matched (§3.2). Tests and logs only. */
-enum class EventShape { AT_DAY_MONTH, AT_MONTH_DAY, PAREN_MONTH_DAY, PIPE_MONTH_DAY, ISO }
+enum class EventShape {
+    AT_DAY_MONTH, AT_MONTH_DAY, PAREN_MONTH_DAY, PIPE_MONTH_DAY, ISO,
+    /** (Code review 2026-11-25, owner item 17) `… MON D hh:mmPM ZONE` at the end with no "@" ("OHL 03 | 2026 … NOV 25 07:00PM ET"). */
+    MONTH_DAY_BARE,
+}
 
 /** [nowUtcMs]: `playlist.last_refresh_at`; [assumedZone]: the learned zone (§3.3). */
 data class EventParseContext(val nowUtcMs: Long, val assumedZone: ZoneId)
@@ -119,12 +123,23 @@ interface EventIndex {
      * [current]'s builds.
      */
     suspend fun rebuild(): EventSnapshot
+
+    /**
+     * (Code review 2026-11-25, data Q1) The last published snapshot, possibly stale, or null before the first build. No
+     * I/O, no suspension: the guide's row loader reads it instead of waiting for a cold build.
+     */
+    fun peek(): EventSnapshot? = null
+
+    /**
+     * (Code review 2026-11-25, data Q1) Starts a build on the application scope when none is running and the snapshot is
+     * missing or stale; returns at once. The [version] tick that follows reloads the guide's rows.
+     */
+    fun prefetch() {}
 }
 
 /**
  * (Commit 0 ruling) Appendix A's event constants that the guide, search, the parser and refresh read. The hub's own
- * (`HUB_EVENT_*`, `HUB_CITIES_CONFIRM_MIN`, `HUB_BOARD_CLASH_MIN`, `HUB_LOOKAHEAD_MIN`, `HUB_TEAM_QUERY_MAX`,
- * `HUB_MATCH_MAX`) are in `app.thebox.core.sports.SportsConstants`, so `guide`, `epg` and `data.work` never import
+ * (`HUB_EVENT_*`, `HUB_CITIES_CONFIRM_MIN`, `HUB_BOARD_CLASH_MIN`, `HUB_LOOKAHEAD_MIN`, `HUB_TEAM_QUERY_MAX`) are in `app.thebox.core.sports.SportsConstants`, so `guide`, `epg` and `data.work` never import
  * `sports`.
  */
 object EventConstants {

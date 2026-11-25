@@ -67,16 +67,20 @@ import kotlin.coroutines.coroutineContext
  *   [EventGameRule] against the game and the shown day's [board]; then `GuideQueries.visible`. A channel that is also a
  *   B / C hit is one candidate with both reasons.
  *
- * **Ranking (§8.6).** Team channels first and never capped, the user's team first (the side whose team channel is a
- * favourite, else the more-watched one, else the home side); then CONFIRMED guide listings, CONFIRMED event names,
- * LIKELY, POSSIBLE. Within a class: favourite, watch count, national before regional, playlist order, provider order.
- * Variants collapse per playlist on the alias key, else on `e:` + folded event title + `|` + start minute for an
- * event-only candidate (re-review E3), else on the name's residue. At most [SportsConstants.HUB_MATCH_MAX] rows besides
- * the team channels; when stage E found an event and none made the cut, the last row is the best event row.
+ * **Ranking (§8.6, §18).** Team channels first, the user's team first (the side whose team channel is a favourite, else
+ * the more-watched one, else the home side); then CONFIRMED guide listings, CONFIRMED event names, LIKELY, POSSIBLE.
+ * Within a class: an event matched by name before a cities-only one, then the event nearest the game's start; then
+ * favourite, watch count, national before regional, playlist order, provider order.
  *
- * **[ChannelCandidate.group].** The shown channel's provider group; when a collapsed variant has the **same** name in
- * another group (a backup group, "NHL Teams (2)"), that variant's group instead, which the sheet shows as
- * "Also in <group>" (the frozen contract has one group field; §9.1 line 3).
+ * **Every matched channel is a row** (owner rulings 2026-11-25): no cap and no folded variants. Feeds of one channel
+ * (same playlist and the same alias key, the `e:` event key for an event-only candidate (re-review E3), the name's
+ * residue, or the same guide channel) sit together: the best-ranked first, then the others in provider order, each
+ * with [ChannelCandidate.anotherFeed] when it shares the first one's guide channel, alias or residue.
+ *
+ * The cost stays bounded without a row ceiling: every stage's reads are bounded (FTS limits, one window read, one team
+ * scan per league, one `visible` query), and ranking makes one `facts` query per 900 ids, never one per row.
+ *
+ * **[ChannelCandidate.group].** The row's own provider group (line 3 when two rows share a name).
  *
  * Cache (A-S5): key `(game, access, EPG generation + patch, enabled playlists' refresh_seq sum, event index version,
  * the board's games)` plus the game's phase, start and broadcasts, LRU [SportsConstants.HUB_DETAIL_LRU], emptied by
@@ -174,7 +178,11 @@ class GameChannelMatcherImpl @Inject constructor(
      */
     override fun guideEndMs(): Long? {
         val i = store.info.value ?: return null
-        return (i.dataToMin ?: i.windowToMin).toLong() * MINUTE_MS
+        i.dataToMin?.let { return it.toLong() * MINUTE_MS }
+        // (Code review 2026-11-25, data Q2 / UI m4) No data end even for an older generation (computed in memory by
+        // `EpgStoreImpl`): never the 7-day window's end, which would offer channels for games days past the guide's data.
+        // A day after the build, as the reviewer recommended; the 12 h floor (`ChannelHorizon`) still applies.
+        return minOf(i.windowToMin.toLong() * MINUTE_MS, i.builtAtMs + GUIDE_END_FALLBACK_MS)
     }
 
     /** (§8.5) Stage T only, ranked as in [match] (the user's team first), for the beyond-guide line. */
@@ -182,7 +190,7 @@ class GameChannelMatcherImpl @Inject constructor(
         try {
             val accs = LinkedHashMap<Long, Acc>()
             teamStage(game, access, librarySeq(), accs)
-            rank(accs.values.toList(), eventFound = false)
+            rank(accs.values.toList(), startMin = 0)
         } catch (e: kotlinx.coroutines.CancellationException) {
             throw e
         } catch (e: Exception) {
@@ -315,7 +323,7 @@ class GameChannelMatcherImpl @Inject constructor(
         val t5 = System.nanoTime()
 
         // ---- confidence, ranking, collapse.
-        val out = rank(accs.values.toList(), eventFound = eventHits > 0)
+        val out = rank(accs.values.toList(), startMin)
         val t6 = System.nanoTime()
         lastStats = Stats(t1 - t0, t2 - t1, t3 - t2, t4 - t3, t5 - t4, t6 - t5, ftsQueries, epgSearches, teamQueried, eventHits)
         return out
@@ -441,7 +449,8 @@ class GameChannelMatcherImpl @Inject constructor(
         startMin: Int,
         accs: LinkedHashMap<Long, Acc>,
     ): Int {
-        if (leagueWord(game.id.league) == null) return 0
+        // (Code review 2026-11-25, owner item 17) Junior leagues too: EventGameRule grades them on the game's own names.
+        if (leagueWord(game.id.league) == null && game.id.league !in app.thebox.core.sports.CHL_LEAGUES) return 0
         val entries = snapshot.startingIn(startMin - SportsConstants.HUB_EVENT_BEFORE_MIN, startMin + SportsConstants.HUB_EVENT_AFTER_MIN)
         if (entries.isEmpty()) return 0
         val graded = LinkedHashMap<Long, EventHit>()
@@ -494,7 +503,7 @@ class GameChannelMatcherImpl @Inject constructor(
 
     private class Kept(val acc: Acc, val confidence: MatchConfidence, val cls: Int)
 
-    private suspend fun rank(accs: List<Acc>, eventFound: Boolean): List<ChannelCandidate> {
+    private suspend fun rank(accs: List<Acc>, startMin: Int): List<ChannelCandidate> {
         val kept = ArrayList<Kept>(accs.size)
         for (a in accs) {
             val c = confidenceOf(a) ?: continue
@@ -515,9 +524,14 @@ class GameChannelMatcherImpl @Inject constructor(
                 else -> Side.HOME
             }
         }
+        // (Code review 2026-11-25, UI open item 3) Inside a class, an event row whose sides matched by name comes before a
+        // cities-only one, then the one starting nearest the game; rows without an event keep the older keys.
+        fun eventDelta(k: Kept): Int = k.acc.event?.let { kotlin.math.abs(it.entry.event.startMin - startMin) } ?: 0
         val sorted = kept.sortedWith(
             compareBy<Kept> { it.cls }
                 .thenBy { val t = it.acc.team; if (t == null || t.side == userSide) 0 else 1 }
+                .thenBy { if (it.acc.event?.grade?.citiesOnly == true) 1 else 0 }
+                .thenBy { eventDelta(it) }
                 .thenBy { if (f(it)?.favourite == true) 0 else 1 }
                 .thenByDescending { f(it)?.watchCount ?: 0 }
                 .thenBy { if (it.acc.alias?.match?.national == false) 1 else 0 }
@@ -525,17 +539,44 @@ class GameChannelMatcherImpl @Inject constructor(
                 .thenBy { f(it)?.sortIndex ?: Int.MAX_VALUE }
                 .thenBy { it.acc.channel.rowId },
         )
-        // Collapse quality variants and same-event duplicates (same playlist): the alias key, else the event key for an
-        // event-only candidate (re-review E3: never the short name), else the residue (guide-only, team channels).
-        val groups = LinkedHashMap<String, MutableList<Kept>>()
-        for (k in sorted) groups.getOrPut("${k.acc.channel.identity.playlistId}\u001F${collapseKey(k.acc)}") { ArrayList(2) } += k
-        val reserved = groups.values.filter { it.first().acc.team != null }
-        val rest = groups.values.filter { it.first().acc.team == null }
-        var capped = rest.take(SportsConstants.HUB_MATCH_MAX)
-        if (eventFound && rest.size > capped.size && capped.none { it.first().acc.event != null }) {
-            rest.firstOrNull { it.first().acc.event != null }?.let { best -> capped = capped.dropLast(1) + listOf(best) }
+        // (Owner rulings 2026-11-25, event channels §18) Every matched channel is its own selectable row: no cap, no
+        // reserved event row, no folded variants. Feeds of one channel form a group whose rows sit together, the
+        // best-ranked first and the rest in provider order: one group per playlist and collapse key (alias, event,
+        // residue, as before), joined with any group whose members share a guide channel ("NESN" and "4K: NESN").
+        // Team channels never join a non-team group.
+        val units = ArrayList<MutableList<Kept>>()
+        val byKey = HashMap<String, MutableList<Kept>>()
+        for (k in sorted) {
+            val pl = k.acc.channel.identity.playlistId
+            val team = if (k.acc.team != null) "t" else "o"
+            val keys = listOfNotNull(
+                "$team\u001F$pl\u001Fk\u001F${collapseKey(k.acc)}",
+                k.acc.channel.epg?.let { "$team\u001F$pl\u001Fg\u001F$it" },
+            )
+            val unit = keys.firstNotNullOfOrNull { byKey[it] } ?: ArrayList<Kept>(2).also { units += it }
+            unit += k
+            for (key in keys) byKey.putIfAbsent(key, unit)
         }
-        return (reserved + capped).map { members -> candidateOf(members, facts) }
+        val out = ArrayList<ChannelCandidate>(kept.size)
+        for (unit in units) {
+            val head = unit.first()
+            val followers = unit.drop(1).sortedWith(
+                compareBy<Kept> { f(it)?.playlistSort ?: Int.MAX_VALUE }.thenBy { f(it)?.sortIndex ?: Int.MAX_VALUE }.thenBy { it.acc.channel.rowId },
+            )
+            out += candidateOf(head, facts, anotherFeed = false)
+            for (m in followers) out += candidateOf(m, facts, anotherFeed = sameFeed(head.acc, m.acc))
+        }
+        return out
+    }
+
+    /**
+     * True when [m] is another feed of [head]'s channel: the same guide channel, or the same alias or name residue. A
+     * group joined only by one event (two slots naming the same game) is not: each row keeps its own reason.
+     */
+    private fun sameFeed(head: Acc, m: Acc): Boolean {
+        if (head.channel.epg != null && head.channel.epg == m.channel.epg) return true
+        val k = collapseKey(head)
+        return !k.startsWith("e:") && k == collapseKey(m)
     }
 
     private fun collapseKey(a: Acc): String {
@@ -547,9 +588,8 @@ class GameChannelMatcherImpl @Inject constructor(
         return "r:" + BroadcastAliases.residue(a.channel.displayName).text
     }
 
-    private fun candidateOf(members: List<Kept>, facts: Map<Long, Facts>): ChannelCandidate {
-        val head = members.first()
-        val acc = head.acc
+    private fun candidateOf(k: Kept, facts: Map<Long, Facts>, anotherFeed: Boolean): ChannelCandidate {
+        val acc = k.acc
         val reasons = buildList {
             acc.team?.let { add(MatchReason.TeamChannel(it.team.fullNames.first(), it.team.nicknames.first(), it.side)) }
             acc.guide?.let { add(MatchReason.Guide(it.info.title, it.info.startMin * MINUTE_MS, it.info.endMin * MINUTE_MS, it.inArchive)) }
@@ -560,24 +600,15 @@ class GameChannelMatcherImpl @Inject constructor(
             acc.alias?.let { add(MatchReason.Broadcaster(it.broadcast.network.trim(), it.broadcast.market, it.broadcast.country)) }
         }
         val own = facts[acc.channel.rowId]
-        fun sameName(m: Kept) = m.acc.channel.displayName.equals(acc.channel.displayName, ignoreCase = true)
-        // A same-name variant in another group: the sheet's "Also in <group>" (see the class KDoc).
-        val elsewhere = members.drop(1).firstNotNullOfOrNull { m ->
-            val g = facts[m.acc.channel.rowId]?.group
-            g?.takeIf { sameName(m) && it != own?.group }
-        }
-        // (Integration 2026-11-25) A same-name twin in the SAME group (or with no group) is a plain duplicate: it is not
-        // listed as a variant, because the sheet reads any same-name variant as "Also in <group>" and would say
-        // "Also in <its own group>". Variants are display-only (the sheet's line 3).
-        val variants = members.drop(1).filterNot { m -> sameName(m) && facts[m.acc.channel.rowId]?.group.let { it == null || it == own?.group } }
         return ChannelCandidate(
             channel = acc.channel,
             playlistName = own?.playlistName ?: "",
-            confidence = head.confidence,
+            confidence = k.confidence,
             reasons = reasons,
-            variants = variants.map { it.acc.channel },
+            variants = emptyList(),
             airing = acc.guide?.info,
-            group = elsewhere ?: own?.group,
+            group = own?.group,
+            anotherFeed = anotherFeed,
         )
     }
 
@@ -644,6 +675,8 @@ class GameChannelMatcherImpl @Inject constructor(
     )
 
     companion object {
+        /** (Code review 2026-11-25) [guideEndMs] when the generation has no data end: the build time plus a day. */
+        const val GUIDE_END_FALLBACK_MS = 24 * 3_600_000L
         private const val TAG = "GameChannelMatcher"
         private const val MINUTE_MS = 60_000L
         /** §5.2 A (A-B3): per code, before the residue rule. */

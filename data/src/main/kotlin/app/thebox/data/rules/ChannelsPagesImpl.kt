@@ -135,12 +135,19 @@ class ChannelsPagesImpl @Inject constructor(
         if (keys.isEmpty() || db.playlistDao().get(pid)?.hideEmptyEvents != true) return emptySet()
         val out = HashSet<String>()
         db.read {
+            // (Code review 2026-11-25, data m4) A row a user channel rule also hides keeps the rule's reason.
+            val rules = RuleHiddenPass.channelRuleMatchers(this, pid)
             for (chunk in keys.chunked(KEY_CHUNK)) {
-                usePrepared("SELECT stable_key, name FROM channel WHERE playlist_id = ? AND stable_key IN (${chunk.joinToString(",") { "?" }})") { st ->
+                usePrepared(
+                    "SELECT c.stable_key, c.name, g0.name FROM channel c " + app.thebox.data.db.dao.ChannelDao.PROVIDER_GROUP_JOIN +
+                        "WHERE c.playlist_id = ? AND c.stable_key IN (${chunk.joinToString(",") { "?" }})",
+                ) { st ->
                     st.bindLong(1, pid)
                     chunk.forEachIndexed { i, k -> st.bindText(i + 2, k) }
                     while (st.step()) {
-                        if (RuleHiddenPass.hiddenByNoEvent(true, true, st.getText(1), isEmptySlot)) out += st.getText(0)
+                        val name = st.getText(1)
+                        val group = if (st.isNull(2)) null else st.getText(2)
+                        if (RuleHiddenPass.hiddenByNoEvent(true, true, name, group, isEmptySlot) && !RuleHiddenPass.userRuleHides(rules, name)) out += st.getText(0)
                     }
                 }
             }

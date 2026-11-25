@@ -674,7 +674,12 @@ class SportsViewModel internal constructor(
                 if (watch != null && slot.label == SlotLabel.WATCH) tune(watch)
                 else _sheet.value = HubSheet.Channels(game.id, archiveOnly = false)
             }
-            SlotAction.GOALS -> _sheet.value = HubSheet.Goals(game.id)
+            SlotAction.GOALS -> {
+                _sheet.value = HubSheet.Goals(game.id)
+                // (Owner bug 2026-11-25) The condensed game's row needs its lookup (thumbnail, duration): made when the
+                // sheet opens, so browsing the grid makes no third lookup per game.
+                ensureClipInfos()
+            }
             SlotAction.WATCH_RECAP -> p.detail?.recapId.let { it ?: game.media?.recapId }?.let { playClips(listOf(ClipRef(it, ClipKind.RECAP, game.id)), 0) }
             SlotAction.BOX_SCORE -> openBoxScore(game)
             SlotAction.MATCHUP -> _sheet.value = HubSheet.Matchup(game.id)
@@ -833,10 +838,11 @@ class SportsViewModel internal constructor(
         val old = matches.value[id]
         if (old is MatchState.Done) return
         // (Event channels §8.5) A game still beyond the guide keeps its state; one the guide now covers is matched.
-        if (old is MatchState.BeyondGuide && beyondGuide(m, game)) return
+        // (Code review 2026-11-25, UI m3) Only a finished answer: a placeholder left by a cancelled read is read again.
+        if (old is MatchState.BeyondGuide && old.complete && beyondGuide(m, game)) return
         matchJob?.cancel()
         // Beyond the guide the slot is the grey Channels at once, never "Finding…" (only the team channels are read).
-        matches.value = matches.value + (id to (if (beyondGuide(m, game)) MatchState.BeyondGuide(emptyList(), m.guideEndMs() == null) else MatchState.Finding))
+        matches.value = matches.value + (id to (if (beyondGuide(m, game)) MatchState.BeyondGuide(emptyList(), m.guideEndMs() == null, complete = false) else MatchState.Finding))
         matchJob = viewModelScope.launch { runMatch(m, game) }
     }
 
@@ -876,6 +882,9 @@ class SportsViewModel internal constructor(
             GamePhase.FINAL -> {
                 (d?.recapId ?: game.media?.recapId)?.let { refs += ClipRef(it, ClipKind.RECAP, game.id) }
                 if (d != null) HubSummary.winningGoal(game, d)?.clipId?.let { refs += ClipRef(it, ClipKind.GOAL, game.id) }
+                // (Owner bug 2026-11-25) The condensed game, only while its Goals sheet is open (the row that shows it).
+                val goalsOpen = (_sheet.value as? HubSheet.Goals)?.gameId == game.id
+                if (goalsOpen) (d?.condensedId ?: game.media?.condensedId)?.let { refs += ClipRef(it, ClipKind.CONDENSED, game.id) }
             }
             GamePhase.LIVE, GamePhase.INTERMISSION ->
                 d?.goals?.lastOrNull { it.clipId != null }?.clipId?.let { refs += ClipRef(it, ClipKind.GOAL, game.id) }

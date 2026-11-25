@@ -20,7 +20,7 @@ class GuideGraph(val g: TestGraph, store: EpgStore = g.store, events: app.thebox
     val db: LibraryDatabase = g.db
     val catchup = CatchupResolverImpl()
     val refs = EpgRefResolver(db, db.epgSourceDao(), db.playlistDao(), g.settings)
-    val queries = GuideQueries(db, g.playlists, catchup, refs)
+    val queries = GuideQueries(db, g.playlists, catchup, refs, events = events)
     val favourites = FavouritesRepository(db.favouriteDao(), g.clock)
     val channelRepo = ChannelRepository(db, db.channelDao(), db.groupDao(), g.playlists, catchup)
     val library = GuideLibraryImpl(

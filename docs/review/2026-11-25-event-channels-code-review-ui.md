@@ -332,3 +332,32 @@ under the cap.
   right. Not run, and there is no device gate result to check.
 - I did not run the gradle gate, lint or any emulator or adb step. One temporary data unit test was run and deleted
   (`EventSearchTerms` cases, M1).
+
+---
+
+## Resolution (fix pass, 2026-11-25)
+
+Recorded in `docs/design/m6-event-channels.md` §18, with the owner's rulings of the same day (§18.1).
+
+| Finding | Status |
+|---|---|
+| M1, team name search noise | Fixed (§18.2), with the five negative cases as tests. |
+| M2, duplicate `LazyRow` key | Fixed both ways (§18.2): same raw start dropped, and the key carries the hit kind; a guide-shift test. |
+| M3, grey chip not spoken | Fixed (§18.3): the slot that takes focus and the grey slot carry the reason; a semantics test on the focused slot. With the owner's ruling (§18.1 item 2) the chip is grey only when no team channel was found. |
+| m1, "a real listing wins" and the window | Deferred (§18.8). |
+| m2, panel text around an event | Fixed (§18.7). |
+| m3, sticky beyond-guide placeholder | Fixed (§18.3), with a view-model test that cancels the first read. |
+| m4, no `dataToMin` | Fixed (§18.4). |
+| m5, re-spelled reminder | Fixed (§18.7) by matchup equivalence (not "any real listing", which could not tell a different programme at the same minute). |
+| m6, the gone card's wording | Fixed as suggested. |
+| m7, measured hub line | Partly: both team names come first; measuring deferred (§18.8). |
+| m8, "On TV:" beyond the guide | Fixed: "Not in guide yet: …" (§18.1 item 2). |
+| m9, city-only CONFIRMED across sports | Deferred (§18.8). |
+| m10, duplicate feeds in cap slots | Superseded by the owner's ruling: no cap; feeds of one guide channel grouped, each selectable (§18.1 item 1). |
+| m11, editor wording | Fixed (§18.7), with a two-line fit test at Default and Largest. |
+| m12, blocking SQLite on Default | Fixed: `withContext(io)`. |
+| Flaky timing assertions | Made robust: best of five batch medians, and the overlay's output pinned. |
+| Open item 1 | Done (§18.7). |
+| Open item 2 | Done (§18.3; `EventMatchup.rest`). |
+| Open item 3 | Superseded: no cap or reservation; event rows ordered by name match then closeness (§18.1, §18.3). |
+| Open item 4 | Done (§18.3); home first kept. |

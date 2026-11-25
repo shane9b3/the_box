@@ -889,8 +889,6 @@ object SportsConstants {
     const val HUB_MATCH_AFTER_MIN = 240
     /** EPG airings kept per text in the guide-title probe. */
     const val HUB_MATCH_PER_TEXT = 40
-    /** Channel candidates shown. */
-    const val HUB_MATCH_MAX = 8
     /** "Watch" and tunable channel rows only for a live game or one starting within this (minutes). */
     const val HUB_IMMINENT_MIN = 30
     /** The hold after a video key read that found no key or was refused (§6.2). */

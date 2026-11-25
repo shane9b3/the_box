@@ -187,12 +187,20 @@ data class ChannelCandidate(
     val playlistName: String,
     val confidence: MatchConfidence,
     val reasons: List<MatchReason>,
-    /** Collapsed quality variants ("Also: FHD, 4K"). */
+    /**
+     * Collapsed quality variants ("Also: FHD, 4K"). (Owner ruling 2026-11-25, event channels §18) The matcher no longer
+     * folds any channel: every feed is its own row, so it leaves this empty; the sheet still draws it when set.
+     */
     val variants: List<GuideChannel>,
     /** For catch-up (§5.6). */
     val airing: ProgrammeInfo?,
     /** (Event channels commit 0, §9.1) The provider group's name: line 3 for duplicate short names, "Also in". */
     val group: String? = null,
+    /**
+     * (Owner ruling 2026-11-25, event channels §18) Another feed of the channel in the row above (the same guide channel,
+     * alias or name residue): the sheet's reason says so instead of repeating the evidence.
+     */
+    val anotherFeed: Boolean = false,
 )
 
 /** `:data` `GameChannelMatcherImpl` (WP-3). */
@@ -208,7 +216,8 @@ interface GameChannelMatcher {
     /** Page open, access change. */
     fun clear()
     /**
-     * (Event channels commit 0, §8.5) The end of usable guide data, epoch ms (`EpgGenerationInfo.dataToMin`, else its
+     * (Event channels commit 0, §8.5) The end of usable guide data, epoch ms (`EpgGenerationInfo.dataToMin`, which an
+     * older generation computes in memory; code review 2026-11-25: else the build time plus a day, capped at
      * `windowToMin`), or null without a guide. Read by `ChannelHorizon.beyondGuide`.
      */
     fun guideEndMs(): Long? = null

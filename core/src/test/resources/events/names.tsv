@@ -202,3 +202,12 @@ NCAAB 203: flohoops: A @ B | 11.24 8:00 PM | ESPN+			EVENT	NCAAB 203	flohoops: A
 NHL 01: @			NONE
 NHL 1234: A @ B @ 24 Nov 08:00 PM ET			NONE
 NHL: A @ B @ 24 Nov 08:00 PM ET			NONE
+# ---- code review 2026-11-25, owner item 17: the bare month-day shape (slot " | ", a leading season, ALL CAPS, no "@")
+OHL 01 | 2026 SAGINAW SPIRIT VS FLINT FIREBIRDS NOV 25 07:00PM ET			EVENT	OHL 01	Saginaw Spirit vs. Flint Firebirds	~	2026-11-25 19:00	America/New_York	EXPLICIT	MONTH_DAY_BARE	2026-11-26T00:00:00Z
+OHL 02 | 2026 SUDBURY WOLVES VS BRANTFORD BULLDOGS NOV 25 07:00PM ET			EVENT	OHL 02	Sudbury Wolves vs. Brantford Bulldogs	~	2026-11-25 19:00	America/New_York	EXPLICIT	MONTH_DAY_BARE
+OHL 03 | 2026 LONDON KNIGHTS VS ERIE OTTERS NOV 25 07:00PM ET			EVENT	OHL 03	London Knights vs. Erie Otters	~	2026-11-25 19:00	America/New_York	EXPLICIT	MONTH_DAY_BARE
+OHL 04 | 2026 KITCHENER RANGERS VS WINDSOR SPITFIRES NOV 25 07:05PM ET			EVENT	OHL 04	Kitchener Rangers vs. Windsor Spitfires	~	2026-11-25 19:05	America/New_York	EXPLICIT	MONTH_DAY_BARE
+# the same group's other names: no date, a weekday and an ordinal day without a month (no usable date), a date without a time
+QMJHL 01: Val-d'Or @ Gatineau - #426			NONE
+QMJHL 13: Halifax @ Saint John - #520 | Fri 7th 11:00PM			NONE
+WHL 16: WHL Top 10 Plays of the Week: March 7, 2025			NONE

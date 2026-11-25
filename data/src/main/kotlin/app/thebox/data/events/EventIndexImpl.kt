@@ -19,7 +19,12 @@ import app.thebox.data.db.dao.PlaylistEventKey
 import app.thebox.data.di.IoDispatcher
 import app.thebox.data.di.WallClock
 import app.thebox.data.repo.read
+import app.thebox.data.di.ApplicationScope
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -49,11 +54,15 @@ import javax.inject.Singleton
  * one pass 1 used.
  *
  * **Writes.** `event_zone` / `event_zone_n` and `event_count` only when they change (re-review E9: `playlist` is a
- * row-content table, so each write reloads the guide's rows).
+ * row-content table, so each write reloads the guide's rows). (Code review 2026-11-25, m3) They run after the snapshot is
+ * published, so a merge or hide pass holding the write connection never delays the readers waiting for the snapshot.
+ * `event_count` (§10) counts only events that ended less than a day ago (m7): stale names never earn the 6 h default.
  *
- * **Concurrency.** Builds are serialised by one [Mutex] and publish an immutable snapshot. A reader that finds a stale
- * snapshot while a build is running gets the previous snapshot at once (the [version] emission that follows reloads the
- * guide); only a reader with no snapshot at all (the first after process start) waits for a build.
+ * **Concurrency.** Builds are serialised by one [Mutex] and publish an immutable snapshot. (Code review 2026-11-25, m2,
+ * Q1) A reader that finds a stale snapshot gets it at once, whether or not a build is running, and starts a build on
+ * the application scope ([prefetch]) when none runs; the [version] emission that follows reloads the guide. Only a reader
+ * with no snapshot at all (the first after process start) waits for a build; the guide's row loader does not even then
+ * ([peek], `GuideQueries.channels(waitForEvents = false)`).
  */
 @Singleton
 class EventIndexImpl internal constructor(
@@ -65,13 +74,20 @@ class EventIndexImpl internal constructor(
     private val parse: (String, EventParseContext) -> ParsedName,
     /** Folded into the key, so a parser bump rebuilds (§5.2). */
     private val parserVersion: Int = EventNameParser.VERSION,
+    /** Where [prefetch] (and a stale [current]) builds in the background: the application scope in production. */
+    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + io),
 ) : EventIndex {
     @Inject constructor(
         db: LibraryDatabase,
         playlistDao: PlaylistDao,
         @IoDispatcher io: CoroutineDispatcher,
         clock: WallClock,
-    ) : this(db, playlistDao, io, clock, EventNameParser::parse)
+        @ApplicationScope scope: CoroutineScope,
+    ) : this(db, playlistDao, io, clock, EventNameParser::parse, EventNameParser.VERSION, scope)
+
+    /** Tests: the real parser on a private background scope. */
+    internal constructor(db: LibraryDatabase, playlistDao: PlaylistDao, io: CoroutineDispatcher, clock: WallClock) :
+        this(db, playlistDao, io, clock, EventNameParser::parse)
 
     private val mutex = Mutex()
     @Volatile private var snapshot: Snapshot? = null
@@ -88,10 +104,14 @@ class EventIndexImpl internal constructor(
 
     override suspend fun current(): EventSnapshot {
         val have = snapshot
-        val keys = withContext(io) { playlistDao.eventKeys() }
-        if (have != null && have.key == keyOf(keys)) return have
-        // Stale with a build under way (the refresh's rebuild, or another reader's): answer the previous snapshot now.
-        if (have != null && mutex.isLocked) return have
+        if (have != null) {
+            val keys = withContext(io) { playlistDao.eventKeys() }
+            if (have.key == keyOf(keys)) return have
+            // (Code review 2026-11-25, m2) Stale: the previous snapshot now, and a build in the background unless one
+            // runs already (the refresh's rebuild, or another reader's). The version tick reloads the guide.
+            prefetch()
+            return have
+        }
         return mutex.withLock {
             val again = snapshot
             val fresh = withContext(io) { playlistDao.eventKeys() }
@@ -100,6 +120,35 @@ class EventIndexImpl internal constructor(
     }
 
     override suspend fun rebuild(): EventSnapshot = mutex.withLock { build(withContext(io) { playlistDao.eventKeys() }) }
+
+    override fun peek(): EventSnapshot? = snapshot
+
+    @Volatile private var background: Job? = null
+
+    override fun prefetch() {
+        if (mutex.isLocked) return
+        synchronized(this) {
+            if (background?.isActive == true) return
+            background = scope.launch {
+                try {
+                    mutex.withLock {
+                        val fresh = withContext(io) { playlistDao.eventKeys() }
+                        val again = snapshot
+                        if (again == null || again.key != keyOf(fresh)) build(fresh)
+                    }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    BoxLog.w(TAG, "background event index build failed: ${e.javaClass.simpleName}")
+                }
+            }
+        }
+    }
+
+    /** Tests: waits for a background build started by [prefetch] or a stale [current]. */
+    internal suspend fun awaitBackground() {
+        background?.join()
+    }
 
     private fun keyOf(keys: List<PlaylistEventKey>): Long {
         var h = Hash64.long(Hash64.OFFSET, parserVersion.toLong())
@@ -138,9 +187,10 @@ class EventIndexImpl internal constructor(
         // The learned zone (§3.3), stored only on a change.
         val chosen = HashMap<Long, ZoneId>(keys.size * 2)
         val storedZoneText = HashMap<Long, String?>(keys.size * 2)
+        val zoneWrites = ArrayList<Triple<Long, String, Int>>(1)
         for (k in keys) {
             val c = chooseZone(k.eventZone, tallies[k.id].orEmpty())
-            if (c.store != null && c.store.zone != k.eventZone) playlistDao.setEventZone(k.id, c.store.zone, c.store.n)
+            if (c.store != null && c.store.zone != k.eventZone) zoneWrites += Triple(k.id, c.store.zone, c.store.n)
             val text = c.store?.zone ?: k.eventZone
             storedZoneText[k.id] = text
             chosen[k.id] = text?.let(::zoneOrNull) ?: fallbackZone(k)
@@ -174,12 +224,17 @@ class EventIndexImpl internal constructor(
         }
         events.sortWith(compareBy<EventEntry> { it.event.startMin }.thenBy { it.channelId })
 
-        // event_count (§10) only on a change.
         val counts = HashMap<Long, Int>()
         for (e in events) counts[e.playlistId] = (counts[e.playlistId] ?: 0) + 1
+        // (Code review 2026-11-25, m7) event_count (§10) counts the events that ended less than a day ago: names a
+        // provider never updates (kept in the past, §3.4) do not earn a playlist the 6 h default.
+        val liveFrom = minuteOf(clock.now()) - LIVE_COUNT_PAST_MIN
+        val liveCounts = HashMap<Long, Int>()
+        for (e in events) if (e.event.endMin > liveFrom) liveCounts[e.playlistId] = (liveCounts[e.playlistId] ?: 0) + 1
+        val countWrites = ArrayList<Pair<Long, Int>>(1)
         for (k in keys) {
-            val n = counts[k.id] ?: 0
-            if (n != k.eventCount) playlistDao.setEventCount(k.id, n)
+            val n = liveCounts[k.id] ?: 0
+            if (n != k.eventCount) countWrites += k.id to n
         }
 
         // The key as it stands after the writes above, so the next `current` does not rebuild for our own zone write.
@@ -195,6 +250,9 @@ class EventIndexImpl internal constructor(
         lastBuild = BuildStats(rows.size, events.size, empties.size, reparsed, ms, readMs, parseMs)
         BoxLog.i(TAG) { "event index v$v: rows=${rows.size} events=${events.size} empty=${empties.size} reparsed=$reparsed in $ms ms (read $readMs, parse $parseMs)" }
         if (_version.value != v) _version.value = v
+        // (Code review 2026-11-25, m3) The playlist writes, only on a change, after the snapshot is out.
+        for ((id, zone, n) in zoneWrites) playlistDao.setEventZone(id, zone, n)
+        for ((id, n) in countWrites) playlistDao.setEventCount(id, n)
         snap
     }
 
@@ -286,6 +344,8 @@ class EventIndexImpl internal constructor(
 
     companion object {
         private const val TAG = "EventIndex"
+        /** (m7) `event_count` counts events whose end is later than now minus this (minutes). */
+        const val LIVE_COUNT_PAST_MIN = 1440
         /** Rows per paged read. */
         const val PAGE = 2_000
 

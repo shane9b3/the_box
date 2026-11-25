@@ -294,7 +294,7 @@ class GuideWindowPagerEventTest {
 
     // ---------------------------------------------------------------------------------------------- cost (§6.7, §11.1)
 
-    /** §11.1: a 300-row window with 60 events builds its overlay in under 1 ms on the JVM (median of 200 runs). */
+    /** §11.1: a 300-row window with 60 events builds its overlay in under 1 ms on the JVM (best of five batch medians). */
     @Test
     fun overlayOf60EventsOver300RowsIsUnderAMillisecond() {
         val ms = overlayMedianMs(rows = 300, events = 60)
@@ -333,16 +333,27 @@ class GuideWindowPagerEventTest {
         }
         val out = EpgWindow(512)
         val filler: (String) -> Boolean = { it in FILLERS }
-        val times = DoubleArray(200)
         repeat(300) { EventOverlay.apply(src, chans, from, to, filler, out, BooleanArray(rows)) } // warm-up (JIT)
-        for (r in times.indices) {
-            val ins = BooleanArray(rows)
-            val t0 = System.nanoTime()
-            if (EventOverlay.anyEvent(chans)) EventOverlay.apply(src, chans, from, to, filler, out, ins)
-            times[r] = (System.nanoTime() - t0) / 1e6
+        // (Code review 2026-11-25, robust timing) The best of five batch medians: a loaded runner slows some batches, not
+        // all five, so the bound measures the overlay and not the machine. The output is pinned too, so a cheap but
+        // wrong overlay cannot pass.
+        val firstSize = out.size
+        var best = Double.MAX_VALUE
+        repeat(5) {
+            val times = DoubleArray(40)
+            for (r in times.indices) {
+                val ins = BooleanArray(rows)
+                val t0 = System.nanoTime()
+                if (EventOverlay.anyEvent(chans)) EventOverlay.apply(src, chans, from, to, filler, out, ins)
+                times[r] = (System.nanoTime() - t0) / 1e6
+                assertEquals(firstSize, out.size, "the overlay is deterministic")
+                // Half the evented rows carry a real listing, which wins (§6.1): the other half get their event.
+                assertEquals(events / 2, ins.count { it }, "an event inserted on each row without a real listing")
+            }
+            times.sort()
+            best = minOf(best, times[times.size / 2])
         }
-        times.sort()
-        return times[times.size / 2]
+        return best
     }
 
     // ---------------------------------------------------------------------------------------------- helpers

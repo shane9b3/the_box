@@ -37,6 +37,7 @@ import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.runningFold
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -131,7 +132,7 @@ class GuideLibraryImpl @Inject constructor(
     }
 
     override suspend fun channels(rowIds: LongArray, from: Int, to: Int): List<GuideChannel?> =
-        withContext(io) { queries.channels(rowIds, from, to) }
+        withContext(io) { queries.channels(rowIds, from, to, waitForEvents = false) }
 
     override suspend fun rowIdOf(identity: ChannelIdentity): Long? = withContext(io) { queries.rowIdOf(identity) }
 
@@ -220,8 +221,12 @@ class GuideLibraryImpl @Inject constructor(
             .drop(1)
             .flowOn(io)
 
-    /** (Event channels §6.5) Every later version of the event index (the current one at subscription is not a change). */
-    private fun eventTicks(): Flow<Unit> = events?.version?.drop(1)?.map { } ?: emptyFlow()
+    /**
+     * (Event channels §6.5; code review 2026-11-25, data Q1 and m6) Every event index version the guide's rows were not
+     * loaded with ([GuideQueries.lastServedVersion]), the one current at subscription included: a build that finished
+     * before the guide subscribed still reloads rows loaded without events, and rows that already carry it do not reload.
+     */
+    private fun eventTicks(): Flow<Unit> = events?.version?.filter { it != queries.lastServedVersion }?.map { } ?: emptyFlow()
 
     /**
      * (code review 2026-10-14, G-S6) Changes of [tables] (which leave out `channel_prefs`) plus changes of the guide's

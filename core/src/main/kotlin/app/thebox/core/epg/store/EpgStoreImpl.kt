@@ -704,6 +704,7 @@ class EpgStoreImpl(
 
     private fun readInfo(c: SQLiteConnection, file: File): EpgGenerationInfo {
         val m = c.readMeta()
+        val windowTo = m[EpgSchema.Meta.WINDOW_TO_MIN]?.toIntOrNull() ?: 0
         return EpgGenerationInfo(
             generation = m[EpgSchema.Meta.GENERATION]?.toLongOrNull() ?: 0,
             patchSeq = m[EpgSchema.Meta.PATCH_SEQ]?.toIntOrNull() ?: 0,
@@ -715,8 +716,50 @@ class EpgStoreImpl(
             windowToMin = m[EpgSchema.Meta.WINDOW_TO_MIN]?.toIntOrNull() ?: 0,
             fts = m[EpgSchema.Meta.FTS] ?: FtsKind.FTS5.id,
             buildInputs = m[EpgSchema.Meta.BUILD_INPUTS],
-            dataToMin = m[EpgSchema.Meta.DATA_TO_MIN]?.toIntOrNull(),
+            // (Code review 2026-11-25, data Q2) A generation built before `data_to_min` existed: the same value, computed
+            // here in memory and never written (readers open the generation read-only; it is built, then swapped).
+            dataToMin = m[EpgSchema.Meta.DATA_TO_MIN]?.toIntOrNull() ?: legacyDataTo(c, windowTo),
         )
+    }
+
+    /**
+     * (Code review 2026-11-25, data Q2) [EpgGenerationInfo.dataToMin] of a generation that has no `data_to_min` row, by
+     * the build's definition ([guideDataEnd]): a channel counts as real when one of its programmes is not a placeholder
+     * ([isFiller], one call per distinct text; a channel stops being read at its first real listing, so only the
+     * placeholder-only channels are read whole). One pass over `epg_channel` and one keyed probe per channel on the
+     * caller's connection; nothing is written. Null when it cannot be computed (no programmes, or an SQLite error);
+     * `GameChannelMatcherImpl.guideEndMs` then uses a short fallback, never the 7-day window's end.
+     */
+    private fun legacyDataTo(c: SQLiteConnection, windowToMin: Int): Int? {
+        val t0 = System.nanoTime()
+        return try {
+            val verdict = HashMap<Long, Boolean>()
+            val real = ArrayList<Int>()
+            val all = ArrayList<Int>()
+            c.query("SELECT p.text_id, t.title FROM programme p JOIN epg_text t ON t.id = p.text_id WHERE p.epg_channel_id = ?") { probe ->
+                c.query("SELECT id, last_end_min FROM epg_channel WHERE programme_count > 0 AND last_end_min IS NOT NULL") { st ->
+                    while (st.step()) {
+                        val end = st.getLong(1).toInt()
+                        all += end
+                        probe.bindLong(1, st.getLong(0))
+                        var hasReal = false
+                        while (probe.step()) {
+                            val filler = verdict.getOrPut(probe.getLong(0)) { isFiller(probe.getText(1)) }
+                            if (!filler) { hasReal = true; break }
+                        }
+                        probe.reset()
+                        if (hasReal) real += end
+                    }
+                }
+            }
+            guideDataEnd(real, all, windowToMin).also {
+                BoxLog.i(TAG) { "guide data end $it computed for an older generation (window end $windowToMin) in ${(System.nanoTime() - t0) / 1_000_000} ms" }
+            }
+        } catch (e: RuntimeException) {
+            if (!e.isSqliteException()) throw e
+            BoxLog.w(TAG, "guide data end not computed for an older generation: ${e.javaClass.simpleName}")
+            null
+        }
     }
 
     /**

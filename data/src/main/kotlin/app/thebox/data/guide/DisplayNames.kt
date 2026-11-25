@@ -47,7 +47,7 @@ class DisplayNames internal constructor(
         prefix: ChannelNamePrefix,
         importMutex: ImportMutex,
         @IoDispatcher io: CoroutineDispatcher,
-    ) : this(db, playlistDao, prefix, importMutex, io, app.thebox.core.events.EventNameParser::slotOf)
+    ) : this(db, playlistDao, prefix, importMutex, io, { n: String -> app.thebox.core.events.EventNameParser.slotOf(n) })
 
     /** Result of one pass (also logged). */
     data class Pass(val playlistId: Long, val scanned: Int, val changed: Int, val ms: Long)
@@ -71,13 +71,15 @@ class DisplayNames internal constructor(
     suspend fun previewCount(playlistId: Long, rule: NamePrefixRule): Int = withContext(io) {
         var changed = 0
         forEachPage(playlistId) { page ->
-            for (r in page) if (!isSlot(r.name) && prefix.strip(r.name, r.group, rule) != null) changed++
+            for (r in page) if (!isSlot(r.name, r.group) && prefix.strip(r.name, r.group, rule) != null) changed++
         }
         changed
     }
 
-    private fun isSlot(name: String): Boolean = try {
-        !slotOf(name).isNullOrBlank()
+    /** (Code review 2026-11-25, data m1) A bare form counts only in an event-like provider [group]. */
+    private fun isSlot(name: String, group: String?): Boolean = try {
+        !slotOf(name).isNullOrBlank() &&
+            (!app.thebox.core.events.EventNameParser.isBareSlot(name) || app.thebox.core.events.EventGroups.eventLike(group))
     } catch (e: RuntimeException) {
         false
     }

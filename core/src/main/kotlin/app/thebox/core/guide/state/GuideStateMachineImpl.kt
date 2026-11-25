@@ -2462,18 +2462,29 @@ class GuideStateMachineImpl(
      * (Event channels docs/design/m6-event-channels.md §6.3, U-E-S3) The panel's title and description for a GAP or
      * NO_EPG cell on a channel whose name lists an event or an empty slot; null keeps the usual "No information".
      * - EMPTY slot: "No event scheduled" and when its next event appears.
-     * - At or after an event that has ended: "No event scheduled"; "may still be on" for
-     *   [EventConstants.EVENT_MAY_BE_ON_MIN] after the estimated end, then "ended".
-     * - Before an event that has not started: "No information" and "Next on this channel: <title> at <time>."
+     * - At or after an event that has ended: for [EventConstants.EVENT_MAY_BE_ON_MIN] after the estimated end the event's
+     *   own title and "may still be on" (code review 2026-11-25, UI m2: never "No event scheduled" beside "this event"),
+     *   then "No event scheduled" and "ended".
+     * - Before an event that has not started: "No information" and "Next on this channel: <title> at <time>.", the time
+     *   with AM / PM in the 12 h form and the day when it is not today ("tomorrow", "Wed 26 Nov").
      */
     private fun eventGapText(ch: GuideChannel, t: Target): Pair<String, String>? {
         val ev = ch.event ?: return null
         return when {
             ev.kind == ChannelEvent.Kind.EMPTY -> GuideTexts.NO_EVENT to GuideTexts.NO_EVENT_NEXT
             ev.title == null -> null
-            ev.endMin <= nowMin && t.start >= ev.endMin -> GuideTexts.NO_EVENT to
-                if (nowMin < ev.endMin + EventConstants.EVENT_MAY_BE_ON_MIN) GuideTexts.EVENT_MAY_BE_ON else GuideTexts.EVENT_ENDED
-            ev.startMin > nowMin && t.end <= ev.startMin -> GuideTexts.NO_INFORMATION to GuideTexts.nextEvent(ev.title, labels.hm(ev.startMin))
+            ev.endMin <= nowMin && t.start >= ev.endMin ->
+                if (nowMin < ev.endMin + EventConstants.EVENT_MAY_BE_ON_MIN) ev.title to GuideTexts.EVENT_MAY_BE_ON
+                else GuideTexts.NO_EVENT to GuideTexts.EVENT_ENDED
+            ev.startMin > nowMin && t.end <= ev.startMin -> {
+                val days = labels.dayOf(ev.startMin) - labels.dayOf(nowMin)
+                val day = when {
+                    days <= 0 -> null
+                    days == 1 -> GuideTexts.TOMORROW_WORD
+                    else -> labels.dayLabel(labels.dayOf(ev.startMin))
+                }
+                GuideTexts.NO_INFORMATION to GuideTexts.nextEvent(ev.title, labels.hmPeriod(ev.startMin), day)
+            }
             else -> null
         }
     }

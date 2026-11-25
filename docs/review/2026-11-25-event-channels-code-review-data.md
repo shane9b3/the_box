@@ -308,3 +308,29 @@ matchup side of the event title.**
 - `tools/fakepanel/events.py` and `catalog.py`: skimmed only (the zones use `zoneinfo`, and the names are generated
   around the featured game). Its tests were not run.
 - The full gradle gate was not run, as instructed. One temporary `:core` unit test exercised the parser and was deleted.
+
+---
+
+## Resolution (fix pass, 2026-11-25)
+
+Recorded in `docs/design/m6-event-channels.md` §18.
+
+| Finding | Status |
+|---|---|
+| M1, place prefix in search | Fixed (§18.2): a place matches only a whole matchup side, with `EventGameRule.otherSport` negative hints; negative tests for Boston University / College, Lakers, La Liga, Las Vegas, LAFC, NYCFC, NYU. |
+| m1, ordinary "N \|", "N:", "N \| Offline" names | Fixed (§18.6): bare forms are slots only in an event-like provider group; the one-argument parser answers and the owner-data counts are unchanged. Residue: a bare-looking ordinary channel inside a sports group. |
+| m2, stale-key readers block | Fixed (§18.5): the previous snapshot plus a background build; NOT_MODIFIED rebuilds. |
+| m3, playlist writes under the build's mutex | Fixed (§18.5): the writes run after the snapshot is published. |
+| m4, user rule plus switch | Fixed (§18.7): the user's rule wins in the editor, the Hidden channels page and the Hide rules count. |
+| m5, warm-up behind the backfill | Fixed (§18.5): its own launch. |
+| m6, double reload / swallowed tick | Fixed (§18.5): `lastServedVersion` replaces `drop(1)`. |
+| m7, stale names in `event_count` | Fixed (§18.5): events that ended less than a day ago. |
+| m8.1, the user's own hide across the switch | Test added (`HideEmptyEventsTest.aUserRuleWinsOverTheSwitchAndTheUsersOwnHideSurvives`). |
+| m8.2, rule plus switch | Test added (same test, and the editor test now expects the rule). |
+| m8.3, a generation without `data_to_min` | Test added (`EpgStoreDataToMinTest.anOlderGenerationWithoutTheRowGetsTheBuildsValueInMemory`). |
+| m8.4, the warm-up's reschedule loop | Deferred: it sits in `:app`; extracting it is beyond this pass. |
+| m8.5, negative search tests | Added (`GuideSearchImplEventTest`). |
+| Perf note, `scanRest` per patch | Deferred: not measured; needs a Fire TV timing. |
+| Q1 | Done as recommended (a) and (b) (§18.5). |
+| Q2 | Done as recommended, by the build's own definition (placeholder-only channels left out); with no value, build time + 24 h (§18.4). |
+| Q3 | Done as recommended, with the optional second rule (other-sport hints) (§18.2). |

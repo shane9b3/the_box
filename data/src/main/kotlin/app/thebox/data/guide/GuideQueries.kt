@@ -52,6 +52,15 @@ class GuideQueries @Inject constructor(
     /** A lineup's row ids (process-local `channel.id`s) and its archive upper bound (§3.3.4). */
     class LineupRows(val ids: LongArray, val archiveDaysUpperBound: Int)
 
+    /**
+     * (Code review 2026-11-25, data Q1, m6) The event index version the guide's rows were last loaded with
+     * (`channels(waitForEvents = false)`; 0 with no snapshot). `GuideLibraryImpl.rowContent` ticks when the index's
+     * version differs, so a build that finished before the guide subscribed still reloads the rows, and one the rows
+     * already carry does not reload them twice.
+     */
+    @Volatile var lastServedVersion: Long = 0L
+        private set
+
     /** Diagnostics (tests): lineup queries run so far. */
     @Volatile var lineupQueries: Int = 0
         private set
@@ -122,12 +131,20 @@ class GuideQueries @Inject constructor(
      * numbering mode (custom number first) and catch-up defaults (cached for the call), [CatchupResolver], then
      * [EpgRefResolver] for the block. An id purged meanwhile yields null.
      */
-    suspend fun channels(rowIds: LongArray, from: Int, to: Int): List<GuideChannel?> {
+    suspend fun channels(rowIds: LongArray, from: Int, to: Int, waitForEvents: Boolean = true): List<GuideChannel?> {
         if (from >= to) return emptyList()
         val t0 = System.nanoTime()
         val wanted = LongArray(to - from) { rowIds[from + it] }
         // (Event channels §5.4) One snapshot per block, read before the library statements (it may build on first use).
-        val eventSnapshot = events?.current()
+        // (Code review 2026-11-25, data Q1) Without [waitForEvents] (the guide's row loader only) a cold index is never
+        // waited for: the block loads with no indexed events (empty slots still come from the name), a build starts in
+        // the background, and the version tick reloads the rows ([lastServedVersion]).
+        val eventSnapshot = if (waitForEvents) {
+            events?.current()
+        } else {
+            events?.let { e -> if (e.peek() != null) e.current() else { e.prefetch(); null } }
+                .also { lastServedVersion = it?.version ?: 0L }
+        }
         val raw = HashMap<Long, RawRow>(wanted.size * 2)
         db.read {
             for (chunk in wanted.asList().chunked(EpgRefResolver.MAX_VARS)) {
@@ -190,7 +207,7 @@ class GuideQueries @Inject constructor(
      * (no clock, no zone), else null. Reads `c.name`, never the custom or display name.
      */
     private fun eventOf(r: RawRow, snapshot: app.thebox.core.events.EventSnapshot?): ChannelEvent? =
-        snapshot?.of(r.id)?.event ?: if (EventNameParser.isEmptySlot(r.name)) ChannelEvent.EMPTY else null
+        snapshot?.of(r.id)?.event ?: if (EventNameParser.isEmptySlot(r.name, r.providerGroup)) ChannelEvent.EMPTY else null
 
     /**
      * (Event channels commit 0, docs/design/m6-event-channels.md §8.2) Stage T's candidates for one league [word] (`nhl`,
@@ -483,6 +500,8 @@ class GuideQueries @Inject constructor(
         val prefShift: Int? = if (st.isNull(20)) null else st.getLong(20).toInt()
         /** (Event channels §5.4) The provider name: the event parser's only input. */
         val name: String = st.getText(21)
+        /** (Code review 2026-11-25, data m1) The provider group's name, for a bare empty form. */
+        val providerGroup: String? = if (st.isNull(22)) null else st.getText(22)
     }
 
     companion object {
@@ -607,8 +626,10 @@ class GuideQueries @Inject constructor(
             "SELECT c.id, c.playlist_id, c.stable_key, COALESCE(cp.custom_name, c.display_name, c.name), cp.custom_number, c.number, " +
                 "c.sort_index, COALESCE(cp.custom_logo, c.logo_url), c.catchup_type, c.catchup_source, c.catchup_days, " +
                 "c.catchup_correction_h, c.timeshift_days, c.tvg_rec_days, c.catchup_time_sec, c.tv_archive, c.tv_archive_days, " +
-                "c.url, c.xtream_stream_id, c.epg_shift_min, cp.epg_shift_min, c.name " +
-                "FROM channel c LEFT JOIN channel_prefs cp ON cp.playlist_id = c.playlist_id AND cp.stable_key = c.stable_key"
+                "c.url, c.xtream_stream_id, c.epg_shift_min, cp.epg_shift_min, c.name, g0.name " +
+                "FROM channel c LEFT JOIN channel_prefs cp ON cp.playlist_id = c.playlist_id AND cp.stable_key = c.stable_key " +
+                // (Code review 2026-11-25, data m1) The provider group: a bare empty form counts only in an event-like one.
+                ChannelDao.PROVIDER_GROUP_JOIN
 
         /** Lineup version (§3.2.1): a hash of the ordered ids; an unchanged version is not re-emitted. */
         fun versionOf(source: GuideSource, ids: LongArray): Long {

@@ -30,7 +30,7 @@ class ChannelNamePrefixSlotTest {
         for (rule in rules) {
             assertEquals("Sportsnet+ 09", p.strip("Sportsnet+ 09: Vegas @ Edmonton @ 24 Nov 08:00 PM ET", "Sports | Sportsnet+", rule), "$rule")
             assertEquals("UK: Sky Sports+ 19", p.strip("UK: Sky Sports+ 19: Football @ 24 Nov 08:00 PM London", "UK | Sky Sports+", rule), "$rule: no prefix strip on a slot")
-            assertEquals("NHL 02", p.strip("NHL 02:", null, rule), "$rule")
+            assertEquals("NHL 02", p.strip("NHL 02:", "Sports | NHL", rule), "$rule")
             assertEquals("CA (TSN+ 008)", p.strip("CA (TSN+ 008) | NCAA Men’s Hockey: Bentley vs. Harvard (2026-11-24 19:00:00)", null, rule), "$rule")
         }
     }
@@ -42,22 +42,22 @@ class ChannelNamePrefixSlotTest {
         assertNull(p.strip("Edmonton Oilers", null, NamePrefixRule.Auto))
         assertNull(p.strip("Sportsnet Oilers", null, NamePrefixRule.Off))
         assertNull(p.strip("blank: x", null, NamePrefixRule.Auto), "a blank slot is no slot: the prefix logic decides")
-        assertFalse(p.isSlotName("blank: x"))
-        assertTrue(p.isSlotName("NHL 02:"))
+        assertFalse(p.isSlotName("blank: x", null))
+        assertTrue(p.isSlotName("NHL 02:", "Sports | NHL"))
     }
 
     @Test
     fun aThrowingSlotSeamFallsBackToThePrefixLogic() {
         val bad = ChannelNamePrefixImpl { error("parser bug") }
         assertEquals("One", bad.strip("UK: One", null, NamePrefixRule.Auto))
-        assertFalse(bad.isSlotName("UK: One"))
+        assertFalse(bad.isSlotName("UK: One", null))
     }
 
     @Test
     fun countChangedSkipsSlotNames() {
         val names = sequenceOf<Pair<String, String?>>(
             "Sportsnet+ 09: Vegas @ Edmonton @ 24 Nov 08:00 PM ET" to null,
-            "NHL 02:" to null,
+            "NHL 02:" to "Sports | NHL",
             "UK: One" to null,
             "Plain" to null,
         )
@@ -73,12 +73,31 @@ class ChannelNamePrefixSlotTest {
             assertEquals("Sportsnet+ 09", real.strip("Sportsnet+ 09: Vegas @ Edmonton @ 24 Nov 08:00 PM ET", null, rule), "$rule")
             assertEquals("MLS 03", real.strip("MLS 03 | Nashville SC vs. FC Cincinnati (English) @ 22 Nov 05:10 PM ET", null, rule), "$rule")
             assertEquals("CA (TSN+ 008)", real.strip("CA (TSN+ 008) | NCAA Men`s Hockey: Bentley vs. Harvard (2026-11-24 19:00:00)", null, rule), "$rule")
-            assertEquals("NHL 02", real.strip("NHL 02:", null, rule), "$rule")
+            assertEquals("NHL 02", real.strip("NHL 02:", "Sports | NHL", rule), "$rule")
         }
         assertNull(real.strip("Sportsnet Oilers", null, NamePrefixRule.Auto))
         assertNull(real.strip("Edmonton Oilers", null, NamePrefixRule.Auto))
-        assertFalse(real.isSlotName("CA| SPORTSNET ONTARIO HD"))
+        assertFalse(real.isSlotName("CA| SPORTSNET ONTARIO HD", "CA | Sports"))
         assertEquals("One", real.strip("UK: One", null, NamePrefixRule.Auto))
         assertEquals(1 + app.thebox.core.events.EventNameParser.VERSION, ChannelNamePrefix.RULE_VERSION)
+    }
+
+    /**
+     * Code review 2026-11-25, data m1: an ordinary channel written like a bare empty slot keeps its full name outside an
+     * event-like group; the same name in a sports group is still a slot.
+     */
+    @Test
+    fun aBareFormOutsideAnEventGroupIsNotASlot() {
+        val real = ChannelNamePrefixImpl()
+        for (name in listOf("Sky Sports 1 |", "beIN Sports 3:", "BBC 1 | Offline", "Movies 24/7 | Offline")) {
+            assertNull(real.strip(name, "UK | Entertainment", NamePrefixRule.Off), name)
+            assertNull(real.strip(name, null, NamePrefixRule.Off), name)
+            assertFalse(real.isSlotName(name, "UK | Entertainment"), name)
+        }
+        assertEquals("NFL GP 02", real.strip("NFL GP 02 | Offline", "Sports | NFL Game Pass", NamePrefixRule.Off))
+        assertEquals("ESPN UNLTD 254", real.strip("ESPN UNLTD 254:", "US| ESPN+ PPV", NamePrefixRule.Off))
+        // Not bare: a "NO EVENT" slot and an event keep their slot in any group.
+        assertEquals("Sportsnet+ 11", real.strip("Sportsnet+ 11: NO EVENT", null, NamePrefixRule.Off))
+        assertEquals("Sportsnet+ 09", real.strip("Sportsnet+ 09: Vegas @ Edmonton @ 24 Nov 08:00 PM ET", "Misc", NamePrefixRule.Off))
     }
 }

@@ -407,9 +407,19 @@ internal class FillerTexts(private val isFiller: (String) -> Boolean) {
                 if (fillerRows.getOrDefault(id, 0) < st.getLong(1).toInt()) real += end
             }
         }
-        val pick = if (real.isNotEmpty()) real else all
-        if (pick.isEmpty()) return null
-        pick.sort()
-        return minOf(pick[(pick.size - 1) / 2], windowToMin)
+        return guideDataEnd(real, all, windowToMin)
     }
+}
+
+/**
+ * (Event channels §8.5) The one definition of the guide's data end, shared by the build ([FillerTexts.dataToMin]) and the
+ * in-memory value of an older generation (`EpgStoreImpl.legacyDataTo`): the median of [real] (the `last_end_min` of
+ * channels with at least one real listing), else of [all] (every channel with programmes), capped at [windowToMin];
+ * null when both are empty. Sorts the list it uses.
+ */
+internal fun guideDataEnd(real: MutableList<Int>, all: MutableList<Int>, windowToMin: Int): Int? {
+    val pick = if (real.isNotEmpty()) real else all
+    if (pick.isEmpty()) return null
+    pick.sort()
+    return minOf(pick[(pick.size - 1) / 2], windowToMin)
 }

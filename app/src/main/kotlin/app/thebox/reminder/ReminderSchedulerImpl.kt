@@ -3,6 +3,7 @@ package app.thebox.reminder
 import app.thebox.core.common.BoxLog
 import app.thebox.core.epg.EpgStore
 import app.thebox.core.events.ChannelEvent
+import app.thebox.core.events.EventMatchup
 import app.thebox.core.events.EventIndex
 import app.thebox.core.events.EventSnapshot
 import app.thebox.core.guide.GuideChannel
@@ -15,9 +16,14 @@ import app.thebox.core.guide.ReminderDecision
 import app.thebox.core.guide.ReminderPlanner
 import app.thebox.core.guide.reminder.ReminderPlannerImpl
 import app.thebox.core.refresh.ChannelIdentity
+import app.thebox.core.sports.League
+import app.thebox.core.sports.TeamName
+import app.thebox.core.sports.TeamNames
 import app.thebox.core.text.NameNormalizer
 import app.thebox.data.guide.GuideQueries
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -27,6 +33,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 
 /**
@@ -295,11 +302,14 @@ fun interface ReminderEventCheck {
  * guide's programme on it at the reminder's raw start (null: none); [snapshot] is the event index. Returns the verdict and,
  * for a move, the found entry's channel id ([Decision.movedTo]).
  *
- * The check applies only when the channel's `event` is not null (an EVENT, or an EMPTY slot):
- * 0. the guide lists a programme at the raw start with the same folded title → same;
- * 1. the channel's event has the same folded title and starts within ± [WINDOW_MIN] → same;
- * 2. another slot of the same playlist has an event with the same folded title within ± [WINDOW_MIN] → moved (the
- *    nearest start wins);
+ * The check applies only when the channel's `event` is not null (an EVENT, or an EMPTY slot). "The same title" is the
+ * same folded title or (code review 2026-11-25, UI m5) the same matchup ([sameMatchup]: "NHL Hockey: Oilers at Flames"
+ * and "NHL: Oilers @ Flames", "Golden Knights vs. Oilers" and "Vegas Golden Knights vs. Edmonton Oilers"), so a guide or
+ * a provider that re-spells the programme does not make it "gone":
+ * 0. the guide lists a programme at the raw start with the same title → same;
+ * 1. the channel's event has the same title and starts within ± [WINDOW_MIN] → same;
+ * 2. another slot of the same playlist has an event with the same title within ± [WINDOW_MIN] → moved (the nearest start
+ *    wins);
  * 3. otherwise → gone.
  */
 object ReminderEventRule {
@@ -320,13 +330,35 @@ object ReminderEventRule {
         return sb.toString()
     }
 
+    /**
+     * True when [a] and [b] name the same two sides in either order: each side ([EventMatchup.of]) read as an NHL or NFL
+     * club when its name equals one ([TeamNames.sideMatch]; a place two clubs share is not a club), else as its tokens.
+     */
+    fun sameMatchup(a: String, b: String): Boolean {
+        val ma = EventMatchup.of(a) ?: return false
+        val mb = EventMatchup.of(b) ?: return false
+        return setOf(sideKey(ma.first), sideKey(ma.second)) == setOf(sideKey(mb.first), sideKey(mb.second))
+    }
+
+    private val clubs: List<TeamName> by lazy { TeamNames.all(League.NHL) + TeamNames.all(League.NFL) }
+
+    private fun sideKey(side: List<String>): String {
+        for (t in clubs) {
+            val s = TeamNames.sideMatch(side, t) ?: continue
+            if (s == TeamNames.Strength.PLACE && TeamNames.placeShared(t.league, side.joinToString(" "))) continue
+            return "${t.league}:${t.abbrev}"
+        }
+        return side.joinToString(" ")
+    }
+
     fun decide(r: PendingReminder, channel: GuideChannel?, listingTitle: String?, snapshot: EventSnapshot): Decision {
         val ev = channel?.event ?: return Decision(Kind.SAME)
         val want = fold(r.title)
-        if (listingTitle != null && fold(listingTitle) == want) return Decision(Kind.SAME)
+        fun same(t: String) = fold(t) == want || sameMatchup(t, r.title)
+        if (listingTitle != null && same(listingTitle)) return Decision(Kind.SAME)
         val start = r.rawStartMin + r.shiftMin
         val evTitle = ev.title
-        if (ev.kind == ChannelEvent.Kind.EVENT && evTitle != null && fold(evTitle) == want && kotlin.math.abs(ev.startMin - start) <= WINDOW_MIN) {
+        if (ev.kind == ChannelEvent.Kind.EVENT && evTitle != null && same(evTitle) && kotlin.math.abs(ev.startMin - start) <= WINDOW_MIN) {
             return Decision(Kind.SAME)
         }
         var best: Long = -1L
@@ -334,7 +366,7 @@ object ReminderEventRule {
         for (e in snapshot.startingIn(start - WINDOW_MIN, start + WINDOW_MIN)) {
             if (e.playlistId != r.identity.playlistId || e.channelId == channel.rowId) continue
             val t = e.event.title ?: continue
-            if (e.event.kind != ChannelEvent.Kind.EVENT || fold(t) != want) continue
+            if (e.event.kind != ChannelEvent.Kind.EVENT || !same(t)) continue
             val delta = kotlin.math.abs(e.event.startMin - start)
             if (delta < bestDelta) { bestDelta = delta; best = e.channelId }
         }
@@ -351,12 +383,15 @@ class GuideReminderEventCheck(
     private val queries: GuideQueries,
     private val events: EventIndex,
     private val store: EpgStore,
+    /** (Code review 2026-11-25, UI m12) The guide reader's blocking SQLite calls run here, not on the caller's pool. */
+    private val io: CoroutineDispatcher = Dispatchers.IO,
 ) : ReminderEventCheck {
     override suspend fun check(r: PendingReminder): EventVerdict {
         val rowId = queries.rowIdOf(r.identity) ?: return EventVerdict.Same
         val ch = queries.channels(longArrayOf(rowId), 0, 1).firstOrNull() ?: return EventVerdict.Same
         if (ch.event == null) return EventVerdict.Same
-        val d = ReminderEventRule.decide(r, ch, listingTitle(ch, r.rawStartMin), events.current())
+        val listing = withContext(io) { listingTitle(ch, r.rawStartMin) }
+        val d = ReminderEventRule.decide(r, ch, listing, events.current())
         return when (d.verdict) {
             ReminderEventRule.Kind.SAME -> EventVerdict.Same
             ReminderEventRule.Kind.GONE -> EventVerdict.Gone

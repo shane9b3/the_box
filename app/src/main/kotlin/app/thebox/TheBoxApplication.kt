@@ -139,6 +139,21 @@ class TheBoxApplication : Application(), Configuration.Provider {
                 BoxLog.e("TheBoxApplication", "app-start scheduling failed", e)
             }
         }
+        // (Code review 2026-11-25, data Q1 and m5) The event index warm-up in its own launch, not behind the EPG recovery
+        // and the display-name backfill: it reads `channel.name` only, so it overlaps app start and the first frame and
+        // the guide's first block rarely finds it cold. Then follow its event_count with the update interval: on the first
+        // start after the v6 upgrade the count goes from 0 to the real number here, and the 6 h default must not wait for
+        // the next refresh.
+        appScope.launch {
+            try {
+                eventIndex.get().current()
+                for (p in playlists.get().all()) if (p.enabled) scheduler.get().rescheduleIfChanged(p.id)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                BoxLog.e("TheBoxApplication", "event index warm-up failed", e)
+            }
+        }
         appScope.launch {
             try {
                 epgRecovery.get().await()
@@ -150,17 +165,6 @@ class TheBoxApplication : Application(), Configuration.Provider {
                 throw e
             } catch (e: Exception) {
                 BoxLog.e("TheBoxApplication", "display-name backfill failed", e)
-            }
-            // (Event channels §5.2, §10) Build the event index once now, so a first guide, search or hub use rarely waits,
-            // then follow its event_count with the update interval: on the first start after the v6 upgrade the count
-            // goes from 0 to the real number here, and the 6 h default must not wait for the next refresh.
-            try {
-                eventIndex.get().current()
-                for (p in playlists.get().all()) if (p.enabled) scheduler.get().rescheduleIfChanged(p.id)
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                BoxLog.e("TheBoxApplication", "event index warm-up failed", e)
             }
         }
     }

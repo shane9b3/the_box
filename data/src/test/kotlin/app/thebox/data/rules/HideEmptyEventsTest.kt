@@ -28,6 +28,7 @@ import app.thebox.data.testutil.FakeClock
 import app.thebox.data.testutil.TestDb
 import app.thebox.data.testutil.TestGraph
 import app.thebox.data.testutil.newChannel
+import app.thebox.data.testutil.newGroup
 import app.thebox.data.testutil.newPlaylist
 import app.thebox.data.testutil.strings
 import app.thebox.data.work.ImportMutex
@@ -71,9 +72,13 @@ class HideEmptyEventsTest {
     private suspend fun switch(on: Boolean) = db.playlistDao().setHideEmptyEvents(p, on)
 
     private suspend fun seed() {
+        val sports = db.newGroup(p, "g:nhl", "Sports | NHL")
+        val tv = db.newGroup(p, "g:uk", "UK | Entertainment")
         db.newChannel(p, "empty", "Sportsnet+ 11: NO EVENT")
-        db.newChannel(p, "bare", "NHL 02:")
-        db.newChannel(p, "offline", "NFL GP 02 | Offline")
+        db.newChannel(p, "bare", "NHL 02:", groupId = sports)
+        db.newChannel(p, "offline", "NFL GP 02 | Offline", groupId = sports)
+        // (Code review 2026-11-25, data m1) An ordinary channel written like a bare slot, outside a sports group: never hidden.
+        db.newChannel(p, "bbc", "BBC 1 | Offline", groupId = tv)
         db.newChannel(p, "event", "Sportsnet+ 09: Vegas @ Edmonton @ 24 Nov 08:00 PM ET")
         db.newChannel(p, "plain", "Edmonton Oilers")
     }
@@ -163,11 +168,14 @@ class HideEmptyEventsTest {
 
     @Test
     fun hiddenByNoEventNeedsTheSwitchTheFlagAndAnEmptyName() {
-        assertTrue(RuleHiddenPass.hiddenByNoEvent(true, true, "NHL 02:", emptySlot))
-        assertFalse(RuleHiddenPass.hiddenByNoEvent(false, true, "NHL 02:", emptySlot))
-        assertFalse(RuleHiddenPass.hiddenByNoEvent(true, false, "NHL 02:", emptySlot))
-        assertFalse(RuleHiddenPass.hiddenByNoEvent(true, true, "Edmonton Oilers", emptySlot))
-        assertFalse("a parser bug is not a hide", RuleHiddenPass.hiddenByNoEvent(true, true, "x") { error("bug") })
+        assertTrue(RuleHiddenPass.hiddenByNoEvent(true, true, "NHL 02:", "Sports | NHL", emptySlot))
+        assertFalse(RuleHiddenPass.hiddenByNoEvent(false, true, "NHL 02:", "Sports | NHL", emptySlot))
+        assertFalse(RuleHiddenPass.hiddenByNoEvent(true, false, "NHL 02:", "Sports | NHL", emptySlot))
+        assertFalse(RuleHiddenPass.hiddenByNoEvent(true, true, "Edmonton Oilers", "Sports | NHL", emptySlot))
+        // (Code review 2026-11-25, data m1) A bare form outside an event-like group is an ordinary channel.
+        assertFalse(RuleHiddenPass.hiddenByNoEvent(true, true, "BBC 1 | Offline", "UK | Entertainment", emptySlot))
+        assertTrue(RuleHiddenPass.hiddenByNoEvent(true, true, "Sportsnet+ 11: NO EVENT", null, emptySlot))
+        assertFalse("a parser bug is not a hide", RuleHiddenPass.hiddenByNoEvent(true, true, "x", null) { error("bug") })
     }
 
     // ---------------------------------------------------------------- E1: the switch's own reason
@@ -218,20 +226,51 @@ class HideEmptyEventsTest {
     fun theEditorMarksTheSwitchsRowsAndKeepsTheUserRulePattern() = runBlocking {
         seed()
         db.hideRuleDao().insert(HideRuleEntity(playlistId = p, target = RuleTarget.CHANNEL_NAME.ordinal, pattern = "Oilers", isRegex = false, createdAt = 1))
-        // An empty slot a user rule also matches: the switch's reason wins (§5.5 "never shown as hidden by a user rule").
+        // (Code review 2026-11-25, data m4) An empty slot a user rule also matches is the rule's: its pattern, not the
+        // switch's reason (it stays hidden when the switch goes off).
         db.hideRuleDao().insert(HideRuleEntity(playlistId = p, target = RuleTarget.CHANNEL_NAME.ordinal, pattern = "NHL 02", isRegex = false, createdAt = 1))
         switch(true)
         pass()
         val repo = ChannelEditorRepositoryImpl(db, ParentalControls.NONE, clock, Dispatchers.IO).also { it.isEmptySlot = emptySlot }
         val ids = repo.channels(p, EditorList.All, EditorFilter.ALL, ParentalAccess.OPEN).ids
         val rows = repo.channelRows(ids, 0, ids.size).filterNotNull().associateBy { it.stableKey }
-        for (k in listOf("empty", "bare", "offline")) {
+        for (k in listOf("empty", "offline")) {
             assertTrue(k, rows.getValue(k).ruleHidden)
             assertTrue(k, rows.getValue(k).noEvent)
             assertNull(k, rows.getValue(k).rulePattern)
         }
+        assertTrue(rows.getValue("bare").ruleHidden)
+        assertFalse(rows.getValue("bare").noEvent)
+        assertEquals("NHL 02", rows.getValue("bare").rulePattern)
         assertFalse(rows.getValue("plain").noEvent)
         assertEquals("Oilers", rows.getValue("plain").rulePattern)
         assertFalse(rows.getValue("event").noEvent)
+    }
+
+    /**
+     * Code review 2026-11-25, data m4 and m8 items 1–2: a row a user rule and the switch both hide keeps the rule's
+     * reason on the Hidden channels page and in the Hide rules count, and stays hidden when the switch goes off; the
+     * user's own hide is never touched by the switch.
+     */
+    @Test
+    fun aUserRuleWinsOverTheSwitchAndTheUsersOwnHideSurvives() = runBlocking {
+        seed()
+        db.hideRuleDao().insert(HideRuleEntity(playlistId = p, target = RuleTarget.CHANNEL_NAME.ordinal, pattern = "NHL 02", isRegex = false, createdAt = 1))
+        db.channelPrefsDao().upsertHidden(p, "empty", true, 1)
+        switch(true)
+        pass()
+        val route = SettingsRoute.HiddenChannels(p)
+        val rows = pages().items(route, 0, 50).associateBy { it.id.key.removePrefix(ChannelsRows.HIDDEN_PREFIX) }
+        assertEquals("HIDDEN_BY_RULE(NHL 02)", rows.getValue("bare").description)
+        assertEquals(BackupText.HIDDEN_NO_EVENT.name, rows.getValue("offline").description)
+        assertEquals("the rule's row is not the switch's", 2, db.read { RuleHiddenPass.countHiddenByNoEvent(this, p, emptySlot) })
+        switch(false)
+        pass()
+        assertEquals(listOf("bare"), hidden())
+        assertEquals("the user's own hide is untouched", listOf("empty"), db.strings("SELECT stable_key FROM channel_prefs WHERE hidden = 1"))
+        switch(true)
+        pass()
+        assertEquals(listOf("bare", "empty", "offline"), hidden())
+        assertEquals(listOf("empty"), db.strings("SELECT stable_key FROM channel_prefs WHERE hidden = 1"))
     }
 }

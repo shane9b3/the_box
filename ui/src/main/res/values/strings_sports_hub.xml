@@ -331,6 +331,15 @@
     <string name="sports_hub_on_tv_team">On TV: %1$s team channel</string>
     <!-- Upcoming. %1$s = the start time, %2$s = the nickname. -->
     <string name="sports_hub_on_tv_team_at">On TV at %1$s: %2$s team channel</string>
+    <!-- (Code review 2026-11-25, UI open item 4) Both team channels listed: top's team first. Live or imminent.
+         %1$s, %2$s = the nicknames (abbreviations when even one nickname does not fit). -->
+    <string name="sports_hub_on_tv_teams">On TV: %1$s and %2$s team channels</string>
+    <!-- Upcoming: time first, so nothing that matters is cut. %1$s = the start time. -->
+    <string name="sports_hub_on_tv_teams_at">%1$s: %2$s and %3$s team channels</string>
+    <!-- (Code review 2026-11-25, UI M3) Spoken. The grey Channels slot: %1$s = "Channels", %2$s = the beyond-guide line. -->
+    <string name="sports_hub_desc_slot_unavailable">%1$s, unavailable. %2$s</string>
+    <!-- Spoken. The slot that takes focus on entering the panel while Channels is grey: %1$s = its label, %2$s = the line. -->
+    <string name="sports_hub_desc_slot_channels_note">%1$s. Channels unavailable: %2$s</string>
     <!-- The never-cut tail of the channel line (U-E-N5). %1$d = other candidates. -->
     <plurals name="sports_hub_more">
         <item quantity="one">+%1$d more</item>
@@ -342,12 +351,27 @@
     <string name="sports_hub_reason_event">From the channel name: %1$s, %2$s</string>
     <!-- Sheet, event whose zone was assumed: no time (U-E-S7). %1$s = the title. -->
     <string name="sports_hub_reason_event_untimed">From the channel name: %1$s</string>
+    <!-- (Code review 2026-11-25, UI open item 2) Sheet, event, as shown: the matchup is the sheet's title, so the time
+         and what else the title says. %1$s = the start time, %2$s = the rest ("Jets Broadcast", "NHL on TNT").
+         The two above stay for the row's spoken description (the whole title). -->
+    <string name="sports_hub_reason_event_rest">Channel name: %1$s · %2$s</string>
+    <!-- Nothing else in the title. %1$s = the start time. -->
+    <string name="sports_hub_reason_event_bare">Channel name lists this game at %1$s</string>
+    <!-- Zone assumed: no time (U-E-S7). %1$s = the rest of the title. -->
+    <string name="sports_hub_reason_event_untimed_rest">Channel name: %1$s</string>
+    <string name="sports_hub_reason_event_untimed_bare">Channel name lists this game</string>
+    <!-- (Owner ruling 2026-11-25) Sheet, a row that is another feed of the channel in the row above. -->
+    <string name="sports_hub_reason_another_feed">Same channel, another feed</string>
     <!-- Sheet, national broadcaster with no usable network name (U-E-N6). (re-review E10) 41 characters. -->
     <string name="sports_hub_reason_network_unnamed">A national broadcaster carries this game.</string>
     <!-- Sheet, third line, a quality variant or a backup group with the same name (U-E-N3). %1$s = the group. -->
     <string name="sports_hub_also_in">Also in %1$s</string>
-    <!-- Channel line beyond the guide (§8.5). %1$s, %2$s = the two teams' nicknames (or abbreviations, E11). -->
-    <string name="sports_hub_beyond_guide_team">On the %1$s and %2$s team channels</string>
+    <!-- (Owner ruling 2026-11-25, event channels §18) Channel line beyond the guide with team channels (the chip opens
+         them): the guide does not reach the game yet, the team channels will carry it. Never "On TV" (not on now).
+         %1$s, %2$s = the nicknames, the user's team (else home) first; abbreviations when they do not fit. -->
+    <string name="sports_hub_beyond_guide_teams">Not in guide yet: %1$s and %2$s team channels</string>
+    <!-- (Code review 2026-11-25, UI m8) Beyond the guide, one team's channel: not "On TV:" for a game days away. -->
+    <string name="sports_hub_beyond_guide_one">Not in guide yet: %1$s team channel</string>
     <string name="sports_hub_beyond_guide">Your guide doesn\'t cover this game yet</string>
     <string name="sports_hub_beyond_guide_none">Channels show 12 hours before the game</string>
 </resources>

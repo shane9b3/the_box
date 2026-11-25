@@ -76,6 +76,8 @@ class FakeGameChannelMatcher : GameChannelMatcher {
     var guideEnd: Long? = null
     val teamAnswers = mutableMapOf<GameId, List<ChannelCandidate>>()
     val teamCalls = mutableListOf<Pair<GameSnapshot, ParentalAccess>>()
+    /** When set, [teamChannels] waits for it (a test cancels the caller meanwhile). */
+    var teamGate: kotlinx.coroutines.CompletableDeferred<Unit>? = null
 
     override suspend fun match(game: GameSnapshot, nowMs: Long, access: ParentalAccess): List<ChannelCandidate> {
         matchCalls += Triple(game, nowMs, access)
@@ -93,6 +95,7 @@ class FakeGameChannelMatcher : GameChannelMatcher {
 
     override suspend fun teamChannels(game: GameSnapshot, access: ParentalAccess): List<ChannelCandidate> {
         teamCalls += game to access
+        teamGate?.await()
         return teamAnswers[game.id].orEmpty()
     }
 }

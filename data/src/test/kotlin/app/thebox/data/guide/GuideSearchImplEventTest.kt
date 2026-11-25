@@ -204,9 +204,85 @@ class GuideSearchImplEventTest {
     @Test
     fun theTermsExpandOnlyTeamNamesAndKeepOtherWords() {
         val t = EventSearchTerms.of("edmonton oilers tv", listOf(oilers))
-        assertEquals(listOf(listOf(listOf("edmonton", "oilers"), listOf("edmonton")), listOf(listOf("tv"))), t)
-        assertTrue(EventSearchTerms.matches(EventSearchTerms.of("oil", listOf(oilers)), EventSearchTerms.words("Golden Knights vs. Oilers")))
-        assertFalse(EventSearchTerms.matches(EventSearchTerms.of("oilers", listOf(oilers)), EventSearchTerms.words("Calgary @ Seattle")))
+        assertEquals(
+            listOf(
+                listOf(EventSearchTerms.Alt(listOf("edmonton", "oilers")), EventSearchTerms.Alt(listOf("edmonton"), listOf("edmonton"), League.NHL)),
+                listOf(EventSearchTerms.Alt(listOf("tv"))),
+            ),
+            t,
+        )
+        assertTrue(EventSearchTerms.matches(EventSearchTerms.of("oil", listOf(oilers)), EventSearchTerms.Target("Golden Knights vs. Oilers")))
+        assertFalse(EventSearchTerms.matches(EventSearchTerms.of("oilers", listOf(oilers)), EventSearchTerms.Target("Calgary @ Seattle")))
         assertEquals(listOf("st", "louis", "montreal"), EventSearchTerms.words("St. Louis @ Montréal"))
+    }
+
+    // ---------------------------------------------------------------- code review 2026-11-25, M1 (both reviews)
+
+    private fun real(q: String) = EventSearchTerms.of(q, app.thebox.core.sports.TeamNames.all(League.NHL) + app.thebox.core.sports.TeamNames.all(League.NFL))
+    private fun finds(q: String, title: String, name: String = "ESPN+ 45: $title", group: String? = "Live Events") =
+        EventSearchTerms.matches(real(q), EventSearchTerms.Target(title, null, name, group))
+
+    @Test
+    fun aPlaceCountsWhenItIsAWholeMatchupSide() {
+        assertTrue(finds("canadiens", "Montreal @ Colorado"))
+        assertTrue(finds("avalanche", "Montreal @ Colorado"))
+        assertTrue(finds("habs", "Montréal vs. Colorado"))
+        assertTrue(finds("blues", "St. Louis @ Chicago"))
+        assertTrue(finds("oilers", "NHL: Vegas @ Edmonton"))
+        // The nickname run is still a prefix match anywhere.
+        assertTrue(finds("bruins", "UCLA Bruins @ USC"))
+        assertTrue(finds("kings", "LA Kings vs. Ducks"))
+        assertTrue(finds("kings", "Los Angeles @ Anaheim"))
+    }
+
+    @Test
+    fun aPlaceThatOnlyStartsAWordOrIsPartOfASideFindsNothing() {
+        assertFalse(finds("bruins", "Boston University vs. Maine"))
+        assertFalse(finds("bruins", "Boston College @ Notre Dame"))
+        assertFalse(finds("bruins", "Basketball: Brown vs. Boston U"))
+        assertFalse(finds("kings", "Lakers vs. Warriors"))
+        assertFalse(finds("kings", "La Liga: Real Madrid vs. Barcelona"))
+        assertFalse(finds("kings", "Lakers @ Celtics"))
+        assertFalse(finds("rams", "Las Vegas Raiders @ Denver Broncos"))
+        assertFalse(finds("rams", "LAFC vs. Seattle"))
+        assertFalse(finds("rangers", "NYCFC vs. Orlando"))
+        assertFalse(finds("jets", "NYU vs. Columbia"))
+    }
+
+    @Test
+    fun aPlaceSideFromAnotherSportFindsNothing() {
+        assertFalse(finds("bruins", "Boston @ Toronto", name = "NBA 03: Boston @ Toronto"))
+        assertFalse(finds("bruins", "Boston @ Toronto", group = "Basketball Events"))
+        assertFalse(finds("oilers", "Edmonton @ Calgary", name = "CFL 02: Edmonton @ Calgary"))
+        assertFalse("an NHL team's place in an NFL event", finds("avalanche", "Colorado @ Denver", name = "NFL 01: Colorado @ Denver"))
+        assertTrue("the same side with a neutral name", finds("bruins", "Boston @ Toronto"))
+    }
+
+    @Test
+    fun anEventAndAListingAtTheSameRawStartOnAShiftedChannelAreOneHit() = runBlocking {
+        // UI review M2: a 60 min shift moves the listing's displayed start an hour off the name's event, but both are
+        // at the same raw minute on the same channel. Only the listing is kept, and the keys stay distinct anyway.
+        val shifted = db.newSource("shifted", shiftMin = 60)
+        val id = db.newChannel(p, "nhl05", "NHL 05: Kraken @ Canucks @ 24 Nov 08:00 PM ET", sortIndex = 50)
+        db.match(p, "nhl05", shifted, "nhl05")
+        ids["nhl05"] = id
+        index.put(index.entries() + ev("nhl05", "Kraken @ Canucks", now + 60))
+        val xml = EpgTestDb.xmltv {
+            channel("nhl05", "NHL 05")
+            programme("nhl05", now + 60, now + 240, "NHL Hockey: Kraken at Canucks")
+        }.writeTo(File(dir.parentFile, "ev-shift-${System.nanoTime()}.xml"))
+        val dir2 = File(TestDb.context.cacheDir, "epg-ev2-${System.nanoTime()}")
+        val store2 = EpgStoreImpl(dir2, AndroidSQLiteDriver(), { Long.MAX_VALUE }, Xml::newPullParser, { nowMs }, forceFts4 = true)
+        try {
+            store2.build(EpgBuildRequest(listOf(EpgSourceFile(shifted, xml)), nowMs, pastDays = 1, futureDays = 2), EpgWhitelistResolver { _, _ -> EpgWhitelist.ALL })
+            val hits = search("kraken", searchImpl(store2)).programmes.filter { key(it) == "nhl05" }
+            assertEquals(listOf("NHL Hockey: Kraken at Canucks"), hits.map { it.info.title })
+            assertEquals(now + 120, hits.single().info.startMin)
+            assertFalse(hits.single().fromName)
+            val keys = search("kraken", searchImpl(store2)).programmes.map { "${it.channel.identityHash}:${it.info.rawStartMin}:${it.fromName}" }
+            assertEquals(keys.size, keys.toSet().size)
+        } finally {
+            dir2.deleteRecursively()
+        }
     }
 }

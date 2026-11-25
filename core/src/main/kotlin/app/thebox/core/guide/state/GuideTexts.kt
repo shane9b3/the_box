@@ -35,6 +35,10 @@ object GuideTexts {
     const val NO_EVENT_NEXT = "Nothing is scheduled on this channel. Its next event appears when your playlist updates, or refresh the playlist in Settings › Playlists."
     /** Before an event's start: "Next on this channel: Montreal @ Colorado at 9:30 PM." */
     fun nextEvent(title: String, time: String) = "Next on this channel: $title at $time."
+    /** (Code review 2026-11-25, UI m2) Not today: [day] is "tomorrow" or a day label ("Wed 26 Nov"). */
+    fun nextEvent(title: String, time: String, day: String?) =
+        if (day == null) nextEvent(title, time) else "Next on this channel: $title, $day at $time."
+    const val TOMORROW_WORD = "tomorrow"
 
     // Announcements (§3.6.6: other zones announce the focused element's label)
     fun tab(i: Int): String = when (i) { 0 -> "Guide"; 1 -> "Search"; 2 -> "Sports"; 3 -> "Weather"; else -> "Settings" } + ", tab"

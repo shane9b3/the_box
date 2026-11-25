@@ -11,6 +11,8 @@ import app.thebox.core.events.EpgFiller
 import app.thebox.core.events.EventConstants
 import app.thebox.core.events.EventEntry
 import app.thebox.core.events.EventIndex
+import app.thebox.core.events.EventMatchup
+import app.thebox.core.sports.hub.EventGameRule
 import app.thebox.core.guide.feed.eventProgrammeInfo
 import app.thebox.core.sports.League
 import app.thebox.core.sports.TeamName
@@ -44,8 +46,8 @@ import kotlin.coroutines.coroutineContext
  * ended hits survive only inside the channel's archive. Cancellable between stages.
  *
  * Event channels (docs/design/m6-event-channels.md §7): guide hits whose title is a provider placeholder ([EpgFiller])
- * are dropped; events read from channel names come from the in-memory [EventIndex] (every query word, or a team
- * nickname's place, prefixes a word of the title or subtitle), filtered by the lineup and parental rules, capped at
+ * are dropped; events read from channel names come from the in-memory [EventIndex] (every query word prefixes a word
+ * of the title or subtitle; a team nickname's place must equal a whole matchup side, [EventSearchTerms]), filtered by the lineup and parental rules, capped at
  * [EventConstants.EVENT_SEARCH_LIMIT] in start order, and dropped when the same channel has a kept guide hit starting
  * within [EventConstants.EVENT_SEARCH_DEDUP_MIN]. They need no guide generation. Empty-slot channels rank last.
  */
@@ -139,15 +141,19 @@ class GuideSearchImpl(
 
     /**
      * (Event channels §7 step 3, re-review E4) Drops an event hit when the same channel has a kept guide hit starting
-     * within ± [EventConstants.EVENT_SEARCH_DEDUP_MIN] of it (the same event, however the listing spells it), then ranks
-     * both lists together.
+     * within ± [EventConstants.EVENT_SEARCH_DEDUP_MIN] of it (the same event, however the listing spells it), or at the
+     * same raw start (code review M2: a guide-shifted channel), then ranks both lists together.
      */
     private fun merge(guide: List<Candidate>, evented: List<Candidate>): List<ProgrammeHit> {
         if (evented.isEmpty()) return guide.map { it.hit }
         val kept = evented.filter { e ->
             guide.none { g ->
-                g.hit.channel.rowId == e.hit.channel.rowId &&
-                    kotlin.math.abs(g.hit.info.startMin - e.hit.info.startMin) <= EventConstants.EVENT_SEARCH_DEDUP_MIN
+                g.hit.channel.rowId == e.hit.channel.rowId && (
+                    kotlin.math.abs(g.hit.info.startMin - e.hit.info.startMin) <= EventConstants.EVENT_SEARCH_DEDUP_MIN ||
+                        // (Code review 2026-11-25, UI M2) A guide shift moves the listing's displayed start but not its
+                        // raw start: the same raw minute on the same channel is the same airing.
+                        g.hit.info.rawStartMin == e.hit.info.rawStartMin
+                    )
             }
         }
         return (guide + kept).sortedWith(order).map { it.hit }
@@ -168,7 +174,7 @@ class GuideSearchImpl(
             val ev = e.event
             val title = ev.title
             if (ev.kind != ChannelEvent.Kind.EVENT || title == null) continue
-            if (EventSearchTerms.matches(terms, EventSearchTerms.words(title) + EventSearchTerms.words(ev.subtitle ?: ""))) matched += e
+            if (EventSearchTerms.matches(terms, EventSearchTerms.Target(title, ev.subtitle, e.name, e.group))) matched += e
         }
         if (matched.isEmpty()) return emptyList()
         val visible = queries.visible(matched.map { it.channelId }, access)
@@ -187,7 +193,7 @@ class GuideSearchImpl(
                 else -> Bucket.LATER
             }
             val title = NameNormalizer.fold(info.title).trim()
-            out += Candidate(ProgrammeHit(ch, info, info.endMin, false), title == folded || title.startsWith(folded), bucket, Int.MAX_VALUE)
+            out += Candidate(ProgrammeHit(ch, info, info.endMin, false, fromName = true), title == folded || title.startsWith(folded), bucket, Int.MAX_VALUE)
         }
         return out
     }
@@ -273,13 +279,32 @@ class GuideSearchImpl(
 }
 
 /**
- * (Event channels, docs/design/m6-event-channels.md §7 step 2, U-E-S5) The query terms of event search. Each term is a
- * list of alternatives, each a list of folded words; a term matches when one alternative's words each prefix a word of
- * the event. A query run that equals a team's nickname or full name ("oilers", "golden knights", "edmonton oilers")
- * becomes one term whose alternatives are the run itself and each of the team's places ("edmonton"), so "oilers" finds
- * "Vegas @ Edmonton". Pure.
+ * (Event channels, docs/design/m6-event-channels.md §7 step 2, U-E-S5; code review 2026-11-25 M1) The query terms of
+ * event search. Each term is a list of alternatives ([Alt]); a term matches when one alternative matches.
+ *
+ * - A word alternative (the user's own words, and a team's nickname or full name run) matches when each of its words
+ *   prefixes a word of the event's title or subtitle.
+ * - A place alternative (a team's place, added when a query run equals that team's nickname or full name: "oilers" adds
+ *   "Edmonton") matches only when it **equals a whole matchup side** of the title ([EventMatchup.of], both sides folded
+ *   by [TeamNames.tokens]), and the provider name and group carry no other-sport hint for the team's league
+ *   ([EventGameRule.otherSport]). So "oilers" finds "Vegas @ Edmonton", but "bruins" does not find "Boston University
+ *   vs. Maine" and "kings" does not find "Lakers @ Celtics" or "La Liga: …". Pure.
  */
 internal object EventSearchTerms {
+    /**
+     * One alternative. [words]: folded words for a prefix match. [side]: non-null for a place alternative, the place's
+     * [TeamNames.tokens], matched by equality with a matchup side; [league]: the place's team's league (the hints).
+     */
+    data class Alt(val words: List<String>, val side: List<String>? = null, val league: League? = null)
+
+    /** What one event offers the terms: its words, and (computed once, on demand) its matchup sides. */
+    class Target(title: String, subtitle: String? = null, val name: String = title, val group: String? = null) {
+        val words: List<String> = words(title) + words(subtitle ?: "")
+        val sides: List<List<String>> by lazy(LazyThreadSafetyMode.NONE) {
+            EventMatchup.of(title)?.let { listOf(it.first, it.second) } ?: emptyList()
+        }
+    }
+
     /** Folded words: runs of letters and digits ("St. Louis" → st, louis; "Montréal" → montreal). */
     fun words(s: String): List<String> {
         val f = NameNormalizer.fold(s)
@@ -294,43 +319,53 @@ internal object EventSearchTerms {
         return out
     }
 
-    fun of(folded: String, teams: List<TeamName>): List<List<List<String>>> {
+    fun of(folded: String, teams: List<TeamName>): List<List<Alt>> {
         val q = words(folded)
         if (q.isEmpty()) return emptyList()
-        // Each team name as words, with the team's places; longest names first so "golden knights" beats "knights".
-        val names = ArrayList<Pair<List<String>, List<List<String>>>>()
+        // Each team name as words, with the team; longest names first so "golden knights" beats "knights".
+        val names = ArrayList<Pair<List<String>, TeamName>>()
         for (t in teams) {
-            val places = t.places.map { words(it) }.filter { it.isNotEmpty() }
-            if (places.isEmpty()) continue
-            for (n in t.fullNames + t.nicknames) words(n).takeIf { it.isNotEmpty() }?.let { names += it to places }
+            if (t.places.isEmpty()) continue
+            for (n in t.fullNames + t.nicknames) words(n).takeIf { it.isNotEmpty() }?.let { names += it to t }
         }
         names.sortByDescending { it.first.size }
-        val out = ArrayList<List<List<String>>>()
+        val out = ArrayList<List<Alt>>()
         var i = 0
         while (i < q.size) {
-            var hit: Pair<List<String>, List<List<String>>>? = null
+            var hit: List<String>? = null
             for (n in names) {
                 val w = n.first
-                if (i + w.size <= q.size && (w.indices).all { q[i + it] == w[it] }) { hit = n; break }
+                if (i + w.size <= q.size && (w.indices).all { q[i + it] == w[it] }) { hit = w; break }
             }
             if (hit != null) {
-                val run = q.subList(i, i + hit.first.size).toList()
+                val run = q.subList(i, i + hit.size).toList()
                 // Every team that shares this name ("Panthers", "Kings") adds its places.
-                val alts = LinkedHashSet<List<String>>().apply {
-                    add(run)
-                    for (n in names) if (n.first == run) addAll(n.second)
+                val alts = LinkedHashSet<Alt>().apply {
+                    add(Alt(run))
+                    for ((w, t) in names) {
+                        if (w != run) continue
+                        for (p in t.places) {
+                            val side = TeamNames.tokens(p)
+                            if (side.isNotEmpty()) add(Alt(words(p), side, t.league))
+                        }
+                    }
                 }
                 out += alts.toList()
                 i += run.size
             } else {
-                out += listOf(listOf(q[i]))
+                out += listOf(Alt(listOf(q[i])))
                 i++
             }
         }
         return out
     }
 
-    fun matches(terms: List<List<List<String>>>, eventWords: List<String>): Boolean = terms.all { alts ->
-        alts.any { alt -> alt.all { w -> eventWords.any { it.startsWith(w) } } }
+    fun matches(terms: List<List<Alt>>, target: Target): Boolean = terms.all { alts -> alts.any { matches(it, target) } }
+
+    private fun matches(alt: Alt, t: Target): Boolean {
+        val side = alt.side ?: return alt.words.all { w -> t.words.any { it.startsWith(w) } }
+        if (t.sides.none { it == side }) return false
+        val league = alt.league ?: return true
+        return !EventGameRule.otherSport(t.name, t.group, league)
     }
 }

@@ -148,5 +148,10 @@ class RefreshSchedulerEventTest {
         assertEquals(1, index.rebuilds)
         assertEquals("rebuilt after `finish` bumped refresh_seq", 1L, index.countAtRebuild)
         assertEquals(6L, periodH(id))
+        // (Code review 2026-11-25, data m2) A 304 moves last_refresh_at, so the index key: it rebuilds then too.
+        g.fetcher.notModified += url
+        val again = repo.refresh(id, Trigger.PERIODIC)
+        assertEquals(app.thebox.core.refresh.RefreshOutcome.NOT_MODIFIED, again.report!!.outcome)
+        assertEquals(2, index.rebuilds)
     }
 }

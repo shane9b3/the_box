@@ -11,6 +11,7 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.thebox.core.events.EventMatchup
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.Market
 import app.thebox.core.sports.hub.ChannelCandidate
@@ -65,11 +66,14 @@ fun ChannelSheet(
                 val third = thirdLine(res, c, manyPlaylists, c.channel.displayName in sharedNames)
                 HubSheetRow(
                     requesters[i], first = i == 0, last = i == rows.lastIndex, key = "ch:$i", height = 96,
-                    description = res.getString(R.string.sports_hub_desc_channel_row, name, c.playlistName, reason),
+                    // (Code review 2026-11-25, UI open item 2) The spoken reason keeps the event's whole title.
+                    description = res.getString(R.string.sports_hub_desc_channel_row, name, c.playlistName, channelReason(res, c, game, clock24, spoken = true)),
                     onClick = {
                         when {
                             archiveOnly -> onPlayArchive(c)
-                            tunable -> onTune(c)
+                            // (Owner ruling 2026-11-25) A team channel is always on: it tunes before its game too
+                            // (the sheet of a game beyond the guide lists only those).
+                            tunable || c.reasons.any { it is MatchReason.TeamChannel } -> onTune(c)
                             else -> onNotYet()
                         }
                     },
@@ -92,8 +96,10 @@ fun ChannelSheet(
  * (no time when its zone was assumed, U-E-S7), a sport listing, a national broadcaster (named with its country, else by
  * its network name of at least 3 characters with a letter, else unnamed, U-E-N6). Never a caveat sentence (U-E-B1).
  */
-internal fun channelReason(res: Resources, c: ChannelCandidate, game: GameSnapshot, clock24: Boolean): String {
+internal fun channelReason(res: Resources, c: ChannelCandidate, game: GameSnapshot, clock24: Boolean, spoken: Boolean = false): String {
     fun time(ms: Long) = SportsText.startTime(ms, clock24)
+    // (Owner ruling 2026-11-25) Another feed of the row above: the evidence is that row's. Spoken in full.
+    if (c.anotherFeed && !spoken) return res.getString(R.string.sports_hub_reason_another_feed)
     c.reasons.filterIsInstance<MatchReason.TeamChannel>().firstOrNull()?.let { t ->
         return res.getString(R.string.sports_hub_reason_team, t.nickname)
     }
@@ -101,8 +107,19 @@ internal fun channelReason(res: Resources, c: ChannelCandidate, game: GameSnapsh
         return res.getString(R.string.sports_hub_reason_guide, g.title, timeRange(g.startMs, g.endMs, clock24))
     }
     c.reasons.filterIsInstance<MatchReason.EventName>().firstOrNull()?.let { e ->
-        return if (e.zoneAssumed) res.getString(R.string.sports_hub_reason_event_untimed, e.title)
-        else res.getString(R.string.sports_hub_reason_event, time(e.startMs), e.title)
+        if (spoken) {
+            return if (e.zoneAssumed) res.getString(R.string.sports_hub_reason_event_untimed, e.title)
+            else res.getString(R.string.sports_hub_reason_event, time(e.startMs), e.title)
+        }
+        // (Code review 2026-11-25, UI open item 2) The event was graded against this game, so its matchup is the sheet's
+        // own title: show the time and what else the title says ("Jets Broadcast", "NHL on TNT").
+        val rest = EventMatchup.rest(e.title)
+        return when {
+            e.zoneAssumed && rest != null -> res.getString(R.string.sports_hub_reason_event_untimed_rest, rest)
+            e.zoneAssumed -> res.getString(R.string.sports_hub_reason_event_untimed_bare)
+            rest != null -> res.getString(R.string.sports_hub_reason_event_rest, time(e.startMs), rest)
+            else -> res.getString(R.string.sports_hub_reason_event_bare, time(e.startMs))
+        }
     }
     c.reasons.filterIsInstance<MatchReason.SportListing>().firstOrNull()?.let { s ->
         return res.getString(R.string.sports_hub_reason_sport_listing, s.title, time(s.startMs))

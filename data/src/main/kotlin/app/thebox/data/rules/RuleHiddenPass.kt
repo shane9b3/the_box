@@ -33,7 +33,8 @@ object RuleHiddenPass {
 
     data class Result(val hiddenGroups: Int, val hiddenChannels: Int, val changedRows: Int, val disabled: List<Long>)
 
-    private class Row(val id: Long, val name: String, val ruleHidden: Boolean)
+    /** [group]: the provider group's name (channels only), for a bare empty form (code review 2026-11-25, data m1). */
+    private class Row(val id: Long, val name: String, val ruleHidden: Boolean, val group: String? = null)
 
     /**
      * Applies the playlist's enabled rules, and the "Hide channels with no event" switch when it is on. [isEmptySlot]:
@@ -118,8 +119,13 @@ object RuleHiddenPass {
      * (Re-review E1) A `rule_hidden` row counts as hidden by the switch, never by a user rule, when the playlist's switch
      * is on and its provider name is an empty slot.
      */
-    fun hiddenByNoEvent(switchOn: Boolean, ruleHidden: Boolean, providerName: String, isEmptySlot: (String) -> Boolean = EventNameParser::isEmptySlot): Boolean =
-        switchOn && ruleHidden && emptySlot(isEmptySlot, providerName)
+    fun hiddenByNoEvent(
+        switchOn: Boolean,
+        ruleHidden: Boolean,
+        providerName: String,
+        providerGroup: String?,
+        isEmptySlot: (String) -> Boolean = { EventNameParser.isEmptySlot(it) },
+    ): Boolean = switchOn && ruleHidden && emptySlot(isEmptySlot, providerName, providerGroup)
 
     /**
      * (Re-review E1) How many live channels of [playlistId] the switch hides and no group rule does: the Hide rules
@@ -127,6 +133,9 @@ object RuleHiddenPass {
      */
     suspend fun countHiddenByNoEvent(conn: PooledConnection, playlistId: Long, isEmptySlot: (String) -> Boolean = EventNameParser::isEmptySlot): Int {
         if (!hidesEmptyEvents(conn, playlistId)) return 0
+        // (Code review 2026-11-25, data m4) A row a user channel rule also hides is the rule's: not counted here, so the
+        // Hide rules summary keeps it under the rule.
+        val rules = channelRuleMatchers(conn, playlistId)
         var n = 0
         var after = Long.MIN_VALUE
         while (true) {
@@ -138,7 +147,8 @@ object RuleHiddenPass {
                 while (st.step()) {
                     rows++
                     last = st.getLong(0)
-                    if (emptySlot(isEmptySlot, st.getText(1))) n++
+                    val name = st.getText(1)
+                    if (emptySlot(isEmptySlot, name, if (st.isNull(2)) null else st.getText(2)) && !userRuleHides(rules, name)) n++
                 }
             }
             if (rows < PAGE) return n
@@ -146,7 +156,7 @@ object RuleHiddenPass {
         }
     }
 
-    private const val NO_EVENT_PAGE = "SELECT c.id, c.name FROM channel c " + ChannelDao.EFFECTIVE_GROUP_JOINS +
+    private const val NO_EVENT_PAGE = "SELECT c.id, c.name, g0.name FROM channel c " + ChannelDao.EFFECTIVE_GROUP_JOINS +
         " WHERE c.playlist_id = ? AND c.id > ? AND c.missing_since IS NULL AND c.rule_hidden = 1 AND COALESCE(g.rule_hidden, 0) = 0" +
         " ORDER BY c.id LIMIT $PAGE"
 
@@ -202,7 +212,7 @@ object RuleHiddenPass {
             // One budget per rule per page (§3.7.3).
             val deadlines = LongArray(matchers.size) { nanoTime() + budgetMs * 1_000_000 }
             for (r in page) {
-                var hit = builtIn != null && emptySlot(builtIn, r.name)
+                var hit = builtIn != null && emptySlot(builtIn, r.name, r.group)
                 if (!hit) for ((i, m) in matchers.withIndex()) {
                     try {
                         if (m.matches(r.name, deadlines[i], nanoTime)) { hit = true; if (!forceAll) break }
@@ -219,22 +229,58 @@ object RuleHiddenPass {
         return Eval(hidden, changes)
     }
 
-    private fun emptySlot(test: (String) -> Boolean, name: String): Boolean = try {
-        test(name)
+    /**
+     * The switch's test: [test] (the parser's `isEmptySlot`), and (code review 2026-11-25, data m1) a bare form ("BBC 1 |
+     * Offline", "beIN Sports 3:") only in an event-like provider [group] (`EventGroups`).
+     */
+    private fun emptySlot(test: (String) -> Boolean, name: String, group: String?): Boolean = try {
+        test(name) && (!EventNameParser.isBareSlot(name) || app.thebox.core.events.EventGroups.eventLike(group))
     } catch (e: RuntimeException) {
         false // the parser never throws by contract; a bug there must not hide or show the whole playlist
     }
+
+    /**
+     * (Code review 2026-11-25, data m4) The playlist's enabled channel-name rules, compiled (a rule that does not compile
+     * is left out; the pass itself disables it). For telling a user rule's hide from the switch's.
+     */
+    suspend fun channelRuleMatchers(conn: PooledConnection, playlistId: Long): List<RuleMatcher> {
+        val out = ArrayList<RuleMatcher>()
+        conn.usePrepared("SELECT id, pattern, is_regex FROM hide_rule WHERE playlist_id = ? AND enabled = 1 AND target = ? ORDER BY id") { st ->
+            st.bindLong(1, playlistId)
+            st.bindLong(2, RuleTarget.CHANNEL_NAME.ordinal.toLong())
+            while (st.step()) {
+                val r = RuleMatcher.compile(st.getLong(0), RuleDraft(RuleTarget.CHANNEL_NAME, st.getText(1), st.getLong(2) != 0L))
+                if (r is RuleMatcher.Result.Ok) out += r.matcher
+            }
+        }
+        return out
+    }
+
+    /** True when one of [matchers] hides [name] (a budget overrun counts as no match). */
+    fun userRuleHides(matchers: List<RuleMatcher>, name: String): Boolean = matchers.any { m ->
+        try {
+            m.matches(name, System.nanoTime() + USER_RULE_BUDGET_NS)
+        } catch (e: RegexBudgetExceeded) {
+            false
+        }
+    }
+
+    private const val USER_RULE_BUDGET_NS = 50_000_000L
 
     /** Pages through [table]'s rows of the playlist by id; [onPage] returns false to stop. */
     private suspend fun scan(conn: PooledConnection, playlistId: Long, table: String, onPage: (List<Row>) -> Boolean) {
         var after = Long.MIN_VALUE
         while (true) {
-            val page = conn.usePrepared(
-                "SELECT id, name, rule_hidden FROM $table WHERE playlist_id = ? AND id > ? AND missing_since IS NULL ORDER BY id LIMIT $PAGE",
-            ) { st ->
+            val sql = if (table == CHANNELS) {
+                "SELECT c.id, c.name, c.rule_hidden, g0.name FROM channel c " + ChannelDao.PROVIDER_GROUP_JOIN +
+                    "WHERE c.playlist_id = ? AND c.id > ? AND c.missing_since IS NULL ORDER BY c.id LIMIT $PAGE"
+            } else {
+                "SELECT id, name, rule_hidden, NULL FROM $table WHERE playlist_id = ? AND id > ? AND missing_since IS NULL ORDER BY id LIMIT $PAGE"
+            }
+            val page = conn.usePrepared(sql) { st ->
                 st.bindLong(1, playlistId)
                 st.bindLong(2, after)
-                buildList { while (st.step()) add(Row(st.getLong(0), st.getText(1), st.getLong(2) != 0L)) }
+                buildList { while (st.step()) add(Row(st.getLong(0), st.getText(1), st.getLong(2) != 0L, if (st.isNull(3)) null else st.getText(3))) }
             }
             if (page.isEmpty()) return
             if (!onPage(page)) return

@@ -23,7 +23,7 @@ object EventNameParser {
      * Keys the event index (§5.2) and feeds `ChannelNamePrefix.RULE_VERSION` (§5.3, re-review E8): bumping it rebuilds
      * both with no manual step.
      */
-    const val VERSION: Int = 1
+    const val VERSION: Int = 2 // 2: code review 2026-11-25 (owner item 17: the bare month-day shape)
 
     /** Longer names are never events (real ones stay under 200 characters); keeps the fuzz cost flat. */
     private const val MAX_LEN = 400
@@ -90,6 +90,37 @@ object EventNameParser {
         false
     }
 
+    /**
+     * (Code review 2026-11-25, data m1) True for the two bare empty forms, `slot sep` with nothing after it ("NHL 02:",
+     * "MLS 04 |") and `slot sep Offline` ("NFL GP 02 | Offline"). An ordinary channel can be written so too ("BBC 1 |
+     * Offline", "beIN Sports 3:"), so these count as slots only in an event-like group ([slotOf] / [isEmptySlot] with a
+     * group). "NO EVENT", the 2098 placeholder and the event shapes are never bare. Never throws.
+     */
+    fun isBareSlot(name: String): Boolean = try {
+        bareImpl(name)
+    } catch (e: Exception) {
+        false
+    }
+
+    /** [slotOf] with the channel's provider [group]: a bare form ([isBareSlot]) outside an event-like group has none. */
+    fun slotOf(name: String, group: String?): String? {
+        val s = slotOf(name) ?: return null
+        return if (!isBareSlot(name) || EventGroups.eventLike(group)) s else null
+    }
+
+    /** [isEmptySlot] with the channel's provider [group]: a bare form ([isBareSlot]) outside an event-like group is not. */
+    fun isEmptySlot(name: String, group: String?): Boolean =
+        isEmptySlot(name) && (!isBareSlot(name) || EventGroups.eventLike(group))
+
+    private fun bareImpl(name: String): Boolean {
+        if (name.length > MAX_LEN) return false
+        val t = trimWs(name)
+        val sepAt = firstSep(t)
+        if (sepAt < 0 || validSlot(t.substring(0, sepAt)) == null) return false
+        val rest = trimWs(t.substring(sepAt + 1))
+        return rest.isEmpty() || rest.equals("Offline", ignoreCase = true)
+    }
+
     // ------------------------------------------------------------------ structure (no clock, no zone)
 
     private class Tail(
@@ -128,7 +159,7 @@ object EventNameParser {
         val t = trimWs(name)
         if (t.isEmpty()) return null
         emptyForm(t)?.let { return it }
-        val tail = tailIso(t) ?: tailParen(t) ?: tailPipe(t) ?: tailAt(t) ?: return null
+        val tail = tailIso(t) ?: tailParen(t) ?: tailPipe(t) ?: tailAt(t) ?: tailBare(t) ?: return null
 
         var head = t.substring(0, tail.start)
         if (tail.shape == EventShape.AT_MONTH_DAY) head = dropTrailingWeekday(head)
@@ -141,6 +172,7 @@ object EventNameParser {
         }
         if (slot == null && tail.shape != EventShape.ISO) return null
 
+        if (tail.shape == EventShape.MONTH_DAY_BARE) titleRaw = bareTitle(titleRaw)
         val (title, subtitle) = cleanTitle(titleRaw, tail.net)
         if (tail.shape == EventShape.ISO && tail.year == PLACEHOLDER_YEAR) return Struct(slot?.text, empty = true)
         if (title.isEmpty()) return if (slot == null) null else Struct(slot.text, empty = true)
@@ -337,6 +369,96 @@ object EventNameParser {
         if (day < 1 || day > MAX_DAYS[month - 1]) return null
         return Tail(shape, at, month, day, -1, clock / 60, clock % 60, 0, zone, null)
     }
+
+    /**
+     * (Code review 2026-11-25, owner item 17) `ws mon ws day ws clock [ws zone]` at the very end with no "@" (shape A / D
+     * own that): "OHL 03 | 2026 LONDON KNIGHTS VS ERIE OTTERS NOV 25 07:00PM ET". The month is a whole word after a
+     * space. Read only after every other tail failed, and only with a valid slot (the structure requires one).
+     */
+    private fun tailBare(t: String): Tail? {
+        // The words from the end: [zone], clock (its AM/PM may be glued or one word apart), day, month.
+        var end = t.length
+        fun prevWord(): Pair<Int, String>? {
+            var e = end
+            while (e > 0 && isWs(t[e - 1])) e--
+            var b = e
+            while (b > 0 && !isWs(t[b - 1])) b--
+            if (b == e) return null
+            return b to t.substring(b, e)
+        }
+        var w = prevWord() ?: return null
+        var zone: String? = null
+        if (w.second.uppercase() in ZONES && w.second.all { it.isLetter() }) {
+            zone = w.second.uppercase(); end = w.first; w = prevWord() ?: return null
+        }
+        var clockText = w.second
+        if (clockText.equals("AM", ignoreCase = true) || clockText.equals("PM", ignoreCase = true)) {
+            end = w.first; val c = prevWord() ?: return null; clockText = c.second + clockText; w = c
+        }
+        val cc = Cursor(clockText, 0, clockText.length)
+        val clock = cc.clock() ?: return null
+        if (!cc.atEnd()) return null
+        end = w.first
+        val dayW = prevWord() ?: return null
+        val dc = Cursor(dayW.second, 0, dayW.second.length)
+        val day = dc.digits(1, 2) ?: return null
+        if (!dc.atEnd()) return null
+        end = dayW.first
+        val monW = prevWord() ?: return null
+        val mc = Cursor(monW.second, 0, monW.second.length)
+        val month = mc.month() ?: return null
+        if (!mc.atEnd()) return null
+        if (monW.first == 0 || !isWs(t[monW.first - 1])) return null
+        if (day < 1 || day > MAX_DAYS[month - 1]) return null
+        return Tail(EventShape.MONTH_DAY_BARE, monW.first, month, day, -1, clock / 60, clock % 60, 0, zone, null)
+    }
+
+    /**
+     * The bare shape's title: a leading 4-digit season or year is dropped (the year comes from the window, §3.4), and an
+     * ALL-CAPS title is set in title case ([titleCase]) so the guide and search do not shout.
+     */
+    private fun bareTitle(raw: String): String {
+        var s = trimWs(raw)
+        if (s.length > 5 && s.substring(0, 4).all { it in '0'..'9' } && isWs(s[4])) s = trimWs(s.substring(5))
+        return if (s.any { it.isLowerCase() } || s.count { it.isLetter() } < 4) s else titleCase(s)
+    }
+
+    /**
+     * Conservative title case for an ALL-CAPS title: each letter run is capitalised and the rest lower-cased, except runs
+     * of up to three letters that stay as written (acronyms: "OHL", "FC", "USA") unless they are a common short word
+     * ("St", "New"; "at", "of" after the first word); "VS" becomes "vs." (the matchup separator, §3.7); a letter after an
+     * apostrophe stays lower case ("D'OR" → "D'or").
+     */
+    internal fun titleCase(s: String): String {
+        val sb = StringBuilder(s.length + 2)
+        var i = 0
+        while (i < s.length) {
+            if (!s[i].isLetter()) { sb.append(s[i]); i++; continue }
+            val b = i
+            while (i < s.length && s[i].isLetter()) i++
+            val run = s.substring(b, i)
+            val afterApostrophe = b > 0 && (s[b - 1] == '\'' || s[b - 1] == '’')
+            // A hyphen or an apostrophe joins letter runs into one word ("VAL-D'OR").
+            fun joiner(c: Char) = c == '-' || c == '\'' || c == '’'
+            val wordStart = b == 0 || !(s[b - 1].isLetterOrDigit() || joiner(s[b - 1]))
+            val wordEnd = i == s.length || !(s[i].isLetterOrDigit() || joiner(s[i]))
+            val lower = run.lowercase()
+            val word = wordStart && wordEnd
+            when {
+                word && lower == "vs" -> sb.append(if (i < s.length && s[i] == '.') "vs" else "vs.")
+                afterApostrophe -> sb.append(lower)
+                word && b > 0 && lower in TITLE_LOWER -> sb.append(lower)
+                word && lower in TITLE_CAP -> sb.append(run[0].uppercaseChar()).append(run.substring(1).lowercase())
+                run.length <= 3 && word -> sb.append(run)
+                else -> sb.append(run[0].uppercaseChar()).append(run.substring(1).lowercase())
+            }
+        }
+        return sb.toString()
+    }
+
+    /** [titleCase]: short words set in lower case inside a title, and short words that are not acronyms. */
+    private val TITLE_LOWER: Set<String> = setOf("at", "of", "and", "the", "de", "du", "des")
+    private val TITLE_CAP: Set<String> = setOf("st", "ste", "mt", "ft", "new", "san", "red", "bay")
 
     /** n1.n2 is month.day; with a European zone, day.month too (arch S12). Year-free. */
     private fun readingValid(n1: Int, n2: Int, zone: String?): Boolean {

@@ -61,7 +61,7 @@ import java.time.Instant
  * docs/design/m6-event-channels.md §8, §11.1 `GameChannelMatcherImplTest`: team channels on both sides, the user's team
  * first and never capped; a regional alias without guide evidence is absent, with a listing it is CONFIRMED; a "Next
  * Event:" placeholder is no evidence; the event stage (grades, groups, hidden and locked); the ranking classes; the E3
- * collapse; the reserved event row; the cache key; `teamChannels` and `guideEndMs`. In-memory Room, a real
+ * key; every matched channel a row, feeds of one channel together (owner rulings 2026-11-25); the cache key; `teamChannels` and `guideEndMs`. In-memory Room, a real
  * `EpgStoreImpl` (Robolectric SQLite, FTS4) and a [FakeEventIndex] (the real `EventGameRule` and `TeamChannelRule`).
  */
 @RunWith(RobolectricTestRunner::class)
@@ -81,6 +81,7 @@ class GameChannelMatcherEventTest {
     private val ids = HashMap<String, Long>()
     private var p1 = 0L
     private val entries = ArrayList<EventEntry>()
+    private var src = 0L
 
     private fun team(abbrev: String, name: String) = TeamLine(abbrev, name, null, null)
     private fun game(id: String, away: TeamLine, home: TeamLine, broadcasts: List<TvBroadcast> = emptyList(), league: League = League.NHL, start: Long = startMs) =
@@ -100,7 +101,7 @@ class GameChannelMatcherEventTest {
         store = EpgStoreImpl(dir, AndroidSQLiteDriver(), { Long.MAX_VALUE }, Xml::newPullParser, { nowMs }, forceFts4 = true)
         gg = GuideGraph(g, store)
         p1 = db.newPlaylist("Main")
-        val src = db.newSource("xmltv")
+        src = db.newSource("xmltv")
         val teams = db.newGroup(p1, "g:t", "Sports | NHL Teams")
         val teams2 = db.newGroup(p1, "g:t2", "Sports | NHL Teams (2)")
         val nhl = db.newGroup(p1, "g:n", "Sports | NHL")
@@ -177,34 +178,61 @@ class GameChannelMatcherEventTest {
     private fun key(c: ChannelCandidate) = key(c.channel.rowId)
     private fun byKey(list: List<ChannelCandidate>) = list.associateBy(::key)
 
-    /** (Integration) A same-name twin in the SAME group is never "Also in <its own group>". */
-    @Test fun aTwinInTheSameGroupIsNotAlsoIn() = runBlocking {
+    /** (Owner ruling 2026-11-25) A same-name twin, in the same group or another, is its own selectable row. */
+    @Test fun aTwinIsItsOwnRowUnderTheFirst() = runBlocking {
         val teams = db.strings("SELECT id FROM channel_group WHERE group_key = 'g:t'").single().toLong()
         val dup = db.newChannel(p1, "vgk2", "Vegas Golden Knights", groupId = teams, sortIndex = 999)
         val out = GameChannelMatcherImpl(gg.queries, store, db, events, Dispatchers.IO).match(vgkEdm, nowMs, ParentalAccess.LOCKED_AUTO, emptyList())
-        val vgk = out.single { it.channel.rowId == ids.getValue("vgk") || it.channel.rowId == dup }
-        assertEquals(emptyList<Long>(), vgk.variants.map { it.rowId }.filter { it == dup || it == ids.getValue("vgk") })
-        assertEquals("Sports | NHL Teams", vgk.group)
-        // The other-group twin still reads "Also in".
-        assertEquals("Sports | NHL Teams (2)", out.single { it.channel.rowId == ids.getValue("eo") }.group)
+        val i = out.indexOfFirst { it.channel.rowId == ids.getValue("vgk") }
+        assertEquals(dup, out[i + 1].channel.rowId)
+        assertFalse(out[i].anotherFeed)
+        assertTrue(out[i + 1].anotherFeed)
+        assertTrue(out.all { it.variants.isEmpty() })
+        assertEquals("Sports | NHL Teams", out[i].group)
+        assertEquals("Sports | NHL Teams (2)", out.single { it.channel.rowId == ids.getValue("eo2") }.group)
+    }
+
+    /**
+     * (Owner rulings 2026-11-25) Feeds that share one guide channel sit together, each its own row: the best-ranked first,
+     * the others in provider order and marked as another feed. Nothing is dropped.
+     */
+    @Test fun aGroupOfFeedsOfOneGuideChannelGivesOneRowEach() = runBlocking {
+        val ca = db.strings("SELECT id FROM channel_group WHERE group_key = 'g:ca'").single().toLong()
+        val feeds = listOf("NESN 4K" to 1001, "NESN" to 1000, "NESN SD" to 1002).map { (name, sort) ->
+            val key = "f$sort"
+            val id = db.newChannel(p1, key, name, groupId = ca, sortIndex = sort)
+            db.match(p1, key, src, "gl3")
+            ids[key] = id
+            key
+        }
+        val out = GameChannelMatcherImpl(gg.queries, store, db, events, Dispatchers.IO).match(mtlTor, nowMs, ParentalAccess.LOCKED_AUTO, emptyList())
+        val keys = out.map(::key)
+        val at = keys.indexOf("gl3")
+        assertEquals(listOf("gl3", "f1000", "f1001", "f1002"), keys.subList(at, at + 4))
+        assertEquals(listOf(false, true, true, true), out.subList(at, at + 4).map { it.anotherFeed })
+        assertTrue(feeds.all { it in keys })
+        assertEquals("2 team channels, 9 listings, 3 more feeds and the event", 15, out.size)
     }
 
     @Test fun theFeaturedGameInRankOrder() {
         val out = run(vgkEdm)
         val keys = out.map(::key)
         // Team channels first, the home side by default; then the guide listing; then the CONFIRMED event names; then LIKELY.
-        assertEquals(listOf("eo", "vgk"), keys.take(2))
-        assertEquals("snw", keys[2])
-        assertEquals(setOf("ev1", "ev2", "ev3"), keys.subList(3, 6).toSet())
-        assertEquals(setOf("tnt", "ev5"), keys.drop(6).toSet())
-        for (absent in listOf("snp", "boss", "sno", "pistons", "decoy", "evhid", "ev1dup", "eo2", "mtl", "tor")) assertFalse(absent, absent in keys)
+        // (Owner rulings 2026-11-25) The backup twin is its own row under its team channel. (Code review UI open item 3)
+        // Event rows: by name before cities-only, then nearest the start; the same event in another slot sits with it.
+        assertEquals(listOf("eo", "eo2", "vgk"), keys.take(3))
+        assertEquals("snw", keys[3])
+        assertEquals(listOf("ev1", "ev1dup", "ev2", "ev3"), keys.subList(4, 8))
+        assertEquals(setOf("tnt", "ev5"), keys.drop(8).toSet())
+        for (absent in listOf("snp", "boss", "sno", "pistons", "decoy", "evhid", "mtl", "tor")) assertFalse(absent, absent in keys)
 
         val m = byKey(out)
         val eo = m.getValue("eo")
         assertEquals(MatchConfidence.CONFIRMED, eo.confidence)
         assertEquals(MatchReason.TeamChannel("Edmonton Oilers", "Oilers", Side.HOME), eo.reasons.first())
-        assertEquals("the backup group's twin folds in", listOf("eo2"), eo.variants.map { key(it.rowId) })
-        assertEquals("Also in: the twin's group", "Sports | NHL Teams (2)", eo.group)
+        assertEquals(emptyList<app.thebox.core.guide.GuideChannel>(), eo.variants)
+        assertEquals("Sports | NHL Teams", eo.group)
+        assertTrue("the twin is another feed", m.getValue("eo2").anotherFeed)
         assertEquals(MatchReason.TeamChannel("Vegas Golden Knights", "Golden Knights", Side.AWAY), m.getValue("vgk").reasons.first())
         assertEquals("Sports | NHL Teams", m.getValue("vgk").group)
 
@@ -213,10 +241,12 @@ class GameChannelMatcherEventTest {
         assertEquals(MatchConfidence.CONFIRMED, snw.confidence)
         assertTrue(snw.reasons.first() is MatchReason.Guide)
 
-        // E3: NHL 01 twice, two different events: two rows; the same event in a third group folds into the first.
+        // E3: NHL 01 twice, two different events: two rows; the same event in a third group is its own row under the
+        // first, with its own reason (another slot, not another feed).
         val ev1 = m.getValue("ev1")
-        assertEquals(listOf("ev1dup"), ev1.variants.map { key(it.rowId) })
-        assertEquals("Sports | NHL (3)", ev1.group)
+        assertEquals("Sports | NHL", ev1.group)
+        assertEquals("Sports | NHL (3)", m.getValue("ev1dup").group)
+        assertFalse(m.getValue("ev1dup").anotherFeed)
         assertEquals(MatchReason.EventName("Golden Knights vs. Oilers", startMs, citiesOnly = false, zoneAssumed = false), ev1.reasons.single())
         assertEquals("Sports | NHL (2)", m.getValue("ev2").group)
         assertEquals((s - 30) * 60_000L, (m.getValue("ev2").reasons.single() as MatchReason.EventName).startMs)
@@ -249,16 +279,17 @@ class GameChannelMatcherEventTest {
         assertEquals(listOf("vgk", "eo"), run(vgkEdm).take(2).map(::key))
         db.exec("INSERT INTO channel_prefs(playlist_id, stable_key, watch_count, updated_at) VALUES (?, 'eo2', 9, 1)", p1)
         matcher.clear()
-        assertEquals("a twin's watch count counts for its side", listOf("eo2", "vgk"), run(vgkEdm).take(2).map(::key))
+        assertEquals("a twin's watch count counts for its side", listOf("eo2", "eo", "vgk"), run(vgkEdm).take(3).map(::key))
     }
 
-    @Test fun teamChannelsAreNeverCappedAndOneEventRowIsKept() {
+    /** (Owner ruling 2026-11-25) No cap: every guide listing and the event are rows, after the team channels. */
+    @Test fun nothingIsDropped() {
         val out = run(mtlTor)
         val keys = out.map(::key)
         assertEquals(listOf("tor", "mtl"), keys.take(2))
-        assertEquals("2 team channels + 8", 10, out.size)
-        assertEquals("the 8th row is the event", "ev7", keys.last())
-        assertEquals(7, keys.count { it.startsWith("gl") })
+        assertEquals("2 team channels + 9 listings + the event", 12, out.size)
+        assertEquals((0 until 9).map { "gl$it" }, keys.subList(2, 11))
+        assertEquals("ev7", keys.last())
         assertEquals(MatchConfidence.CONFIRMED, out.last().confidence)
     }
 
@@ -310,14 +341,14 @@ class GameChannelMatcherEventTest {
 
     @Test fun teamChannelsAloneForTheBeyondGuideLine() = runBlocking {
         val out = matcher.teamChannels(vgkEdm, ParentalAccess.LOCKED_AUTO)
-        assertEquals(listOf("eo", "vgk"), out.map(::key))
+        assertEquals(listOf("eo", "eo2", "vgk"), out.map(::key))
         assertTrue(out.all { c -> c.reasons.single() is MatchReason.TeamChannel })
         assertEquals(emptyList<ChannelCandidate>(), matcher.teamChannels(game("ohl2", team("KIT", "Rangers"), team("LDN", "Knights"), league = League.OHL), ParentalAccess.OPEN))
         val nfl = game("401", team("DAL", "Cowboys"), team("DEN", "Broncos"), league = League.NFL)
         assertEquals("no NFL team channels in this library", emptyList<ChannelCandidate>(), matcher.teamChannels(nfl, ParentalAccess.OPEN))
     }
 
-    /** §8.5: `dataToMin`, else `windowToMin` (a generation built before WP-3), else null without a guide. */
+    /** §8.5: `dataToMin`, else (code review 2026-11-25) the build time plus a day, else null without a guide. */
     @Test fun theGuideEnd() = runBlocking {
         val built = store.info.value!!
         // (Integration) WP-3's build writes dataToMin, so the real store answers it; a pre-WP-3 generation has none.
@@ -325,7 +356,9 @@ class GameChannelMatcherEventTest {
         val info = MutableStateFlow<EpgGenerationInfo?>(built.copy(dataToMin = null))
         val fake = object : EpgStore by store { override val info: StateFlow<EpgGenerationInfo?> = info }
         val m = GameChannelMatcherImpl(gg.queries, fake, db, events, Dispatchers.IO)
-        assertEquals("an older generation: the window's end", built.windowToMin * 60_000L, m.guideEndMs())
+        // (Code review 2026-11-25) No data end at all: a day after the build, never the 7-day window's end.
+        assertEquals("no data end: a day after the build", minOf(built.windowToMin * 60_000L, built.builtAtMs + 24 * 3_600_000L), m.guideEndMs())
+        assertTrue(m.guideEndMs()!! < built.windowToMin * 60_000L)
         info.value = built.copy(dataToMin = s + 24 * 60)
         assertEquals((s + 24 * 60) * 60_000L, m.guideEndMs())
         assertFalse(ChannelHorizon.beyondGuide(startMs + 20 * 3_600_000L, m.guideEndMs(), nowMs))
@@ -334,5 +367,36 @@ class GameChannelMatcherEventTest {
         assertNull(m.guideEndMs())
         assertFalse("no guide: the 12 h floor", ChannelHorizon.beyondGuide(nowMs + 11 * 3_600_000L, m.guideEndMs(), nowMs))
         assertTrue(ChannelHorizon.beyondGuide(nowMs + 12 * 3_600_000L, m.guideEndMs(), nowMs))
+    }
+
+    /**
+     * Code review 2026-11-25, owner item 17: an OHL game finds its event row by the game's own team names (no team table,
+     * no league word needed); the same night's other OHL game and an AHL row in a "CHL NN" slot sharing one city do not.
+     */
+    @Test fun aJuniorGameFindsItsEventRow() = runBlocking {
+        val ohlGroup = db.newGroup(p1, "g:ohl", "Sports | OHL/WHL/QMJHL")
+        val names = mapOf(
+            "ohl03" to "OHL 03 | 2026 LONDON KNIGHTS VS ERIE OTTERS NOV 25 07:00PM ET",
+            "ohl04" to "OHL 04 | 2026 KITCHENER RANGERS VS WINDSOR SPITFIRES NOV 25 07:05PM ET",
+            "chl01" to "CHL 01: London vs. Manitoba (11.24 8:00 PM ET)",
+        )
+        var sort = 500
+        for ((k, n) in names) ids[k] = db.newChannel(p1, k, n, groupId = ohlGroup, sortIndex = sort++)
+        val ctx = app.thebox.core.events.EventParseContext(nowMs, java.time.ZoneId.of("America/New_York"))
+        val extra = names.map { (k, n) ->
+            val e = app.thebox.core.events.EventNameParser.parse(n, ctx) as app.thebox.core.events.ParsedName.Event
+            FakeEventIndex.event(ids.getValue(k), e.title, (e.startUtcMs / 60_000L).toInt(), playlistId = p1, slot = e.slot, group = "Sports | OHL/WHL/QMJHL", name = n)
+        }
+        // Tonight is Nov 24 here: the games are at the rows' own starts.
+        val ldnEr = game("ohl-ldn-er", team("LDN", "London Knights"), team("ER", "Erie Otters"), league = League.OHL, start = extra[0].event.startMin * 60_000L)
+        val kitWsr = game("ohl-kit-wsr", team("KIT", "Kitchener Rangers"), team("WSR", "Windsor Spitfires"), league = League.OHL, start = extra[1].event.startMin * 60_000L)
+        val ldnMb = game("ohl-ldn-x", team("LDN", "London Knights"), team("SAG", "Saginaw Spirit"), league = League.OHL, start = extra[2].event.startMin * 60_000L)
+        val m = GameChannelMatcherImpl(gg.queries, store, db, FakeEventIndex(entries + extra), Dispatchers.IO)
+        val out = m.match(ldnEr, nowMs, ParentalAccess.LOCKED_AUTO, listOf(ldnEr, kitWsr))
+        assertEquals(listOf("ohl03"), out.map(::key))
+        assertEquals(MatchConfidence.CONFIRMED, out.single().confidence)
+        assertEquals("London Knights vs. Erie Otters", (out.single().reasons.single() as MatchReason.EventName).title)
+        assertEquals(listOf("ohl04"), m.match(kitWsr, nowMs, ParentalAccess.LOCKED_AUTO, listOf(ldnEr, kitWsr)).map(::key))
+        assertEquals("an AHL row sharing one city is not the game", emptyList<String>(), m.match(ldnMb, nowMs, ParentalAccess.LOCKED_AUTO, listOf(ldnMb)).map(::key))
     }
 }
