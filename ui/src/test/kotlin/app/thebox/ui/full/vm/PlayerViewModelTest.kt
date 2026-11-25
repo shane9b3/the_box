@@ -116,6 +116,25 @@ class PlayerViewModelTest {
     private fun tunedEvents() = machine.events.filterIsInstance<PlayerEvent.Tuned>()
 
     /**
+     * (Sports Hub §6.5, R-S1) The player machine never hears of an active clip state (the pre-clip channel stays); a
+     * terminal clip state arrives as Idle.
+     */
+    @Test
+    fun clipStatesAreFilteredBeforeTheMachine() {
+        vm()
+        controller.state.value = PlaybackState.Playing(np(1, archive = false)); idle()
+        val before = tunedEvents().size
+        val clip = NowPlaying(2, null, "Game recap", false, StreamFormat.HLS, isClip = true)
+        controller.state.value = PlaybackState.Connecting(clip, ConnectPhase.CONNECTING, 0, 0); idle()
+        controller.state.value = PlaybackState.Playing(clip); idle()
+        assertEquals("active clip states dropped", before, tunedEvents().size)
+        assertEquals(ch.identity, tunedEvents().last().state.identity)
+        controller.state.value = PlaybackState.Stopped(clip, app.thebox.player.api.StopReason.BACKGROUND, resumable = false); idle()
+        assertEquals(MiniPhase.IDLE, tunedEvents().last().state.phase)
+        assertEquals(null, tunedEvents().last().state.identity)
+    }
+
+    /**
      * B1 (§5.0): `Connecting → Error(CATCHUP_NOT_IN_ARCHIVE) → Connecting → Playing` while the archive session probes,
      * with `ArchiveStatus` lagging the `Error` by one emission. The machine never sees ERROR, and never CONNECTING after
      * first media (it would open the error layer and show "Connecting" on every hand-off).

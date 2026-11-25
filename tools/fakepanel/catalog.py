@@ -40,17 +40,67 @@ ADULT_CAT = (5, "Adult 18+")
 ADULT_CH = dict(id=14, name="Late Night 18+", cat=5, archive=False, catchup="", media="std", tvg_id="ch14.test", adult=True)
 
 
+# Sports Hub (docs/design/m6-sports-hub.md section 10.3, WP-3): the channel-link channels, only with config
+# `sports_hub_catalog` (--sports-hub-catalog); off, the catalog is the 13 channels the M2-M6 suites count. Hidden and locked
+# are the app's own settings: hide "CA| SPORTSNET WEST" and lock "US: NHL NETWORK" in the app for checks 9 and 10.
+# (id, name, tvg id, archive). 60 and 61 share a guide id (a quality variant); 62 has none (collapses under 60 by name).
+_HUB = [
+    (60, "CA| SPORTSNET ONTARIO HD", "hub.sno.test", True),
+    (61, "CA| SN ONTARIO FHD", "hub.sno.test", False),
+    (62, "SN - Ontario", "", False),
+    (63, "CA| SPORTSNET 360", "hub.sn360.test", False),
+    (64, "CA| TVA SPORTS", "hub.tvas.test", False),
+    (65, "US: TNT", "", False),
+    (66, "UK: TNT SPORTS 1", "hub.tntuk.test", False),
+    (67, "US: ABC 7 NEW YORK", "hub.abc7.test", False),
+    (68, "US: ESPN 2", "", False),
+    (69, "CA| SPORTSNET WEST", "hub.snw.test", False),
+    (70, "US: NHL NETWORK", "hub.nhln.test", False),
+]
+HUB_CHANNELS = [dict(id=i, name=n, cat=2, archive=a, catchup="xc" if a else "", media="std", tvg_id=t, hub=True)
+                for i, n, t, a in _HUB]
+HUB_BY_ID = {c["id"]: c for c in HUB_CHANNELS}
+# The airings anchor at the hour the panel module loads (the server start), as sports.py anchors the featured game.
+HUB_ANCHOR = int(time.time()) // 3600 * 3600
+
+
+def hub_airings(ch, anchor=None):
+    """[(start, stop, title)] the hub channel [ch] carries (section 10.3): the featured game VGK @ EDM (listed: TNT, HBO MAX,
+    SN, TVAS) on Sportsnet Ontario, a bare "Hockey LNH" on TVA Sports (a sport listing on a channel the aliases match,
+    R-N4), nothing on Sportsnet 360 or ABC 7 for it (R-S3), "Kings at Ducks" on ABC 7 for the second game (guide-only
+    CONFIRMED), the featured game on the hidden and the locked channel too (never / only unlocked), and yesterday's
+    SEA @ VGK at 19:00 Eastern inside Sportsnet Ontario's 3-day archive."""
+    a = HUB_ANCHOR if anchor is None else anchor
+    tv = ch.get("tvg_id")
+    game = (a - 3600, a + 5 * 3600)
+    out = []
+    if tv in ("hub.sno.test", "hub.snw.test", "hub.nhln.test"):
+        out.append((game[0], game[1], "NHL Hockey: Golden Knights at Oilers"))
+    if tv == "hub.sno.test":
+        et = dt.timezone(dt.timedelta(hours=-5))
+        y = dt.datetime.fromtimestamp(a, et).date() - dt.timedelta(days=1)
+        past = int(dt.datetime.combine(y, dt.time(19, 0), et).timestamp())
+        out.append((past, past + 3 * 3600, "NHL Hockey: Kraken at Golden Knights"))
+    if tv == "hub.tvas.test":
+        out.append((game[0], game[1], "Hockey LNH"))
+    if tv == "hub.abc7.test":
+        out.append((game[0], game[1], "NHL Hockey: Kings at Ducks"))
+    return sorted(out)
+
+
 def live_cats(cfg):
     return LIVE_CATS + ([ADULT_CAT] if cfg.get("adult_category") else [])
 
 
 def channels(cfg):
-    return CHANNELS + ([ADULT_CH] if cfg.get("adult_category") else [])
+    return CHANNELS + ([ADULT_CH] if cfg.get("adult_category") else []) + (HUB_CHANNELS if cfg.get("sports_hub_catalog") else [])
 
 
 def channel_by_id(cfg, i):
     if cfg.get("adult_category") and i == ADULT_CH["id"]:
         return ADULT_CH
+    if cfg.get("sports_hub_catalog") and i in HUB_BY_ID:
+        return HUB_BY_ID[i]
     return CH_BY_ID.get(i)
 ARCHIVE_DAYS = 3
 
@@ -215,15 +265,32 @@ def desc(cfg, ch, p):
 
 
 def programmes(ch, t_from, t_to, tz):
+    if ch.get("hub"):
+        yield from hub_programmes(ch, t_from, t_to, tz)
+        return
     s = int(t_from) // SLOT * SLOT
     while s < t_to:
         yield programme(ch, s, tz)
         s += SLOT
 
 
+def hub_programmes(ch, t_from, t_to, tz, anchor=None):
+    """The usual 30-minute slots with the hub airings laid over them (a slot an airing overlaps is left out)."""
+    airs = [x for x in hub_airings(ch, anchor) if x[1] > t_from and x[0] < t_to]
+    out = [{"start": a, "stop": b, "title": t, "desc": f"{ch['name']} - {t}"} for a, b, t in airs]
+    s = int(t_from) // SLOT * SLOT
+    while s < t_to:
+        if not any(a < s + SLOT and s < b for a, b, _ in airs):
+            out.append(programme(ch, s, tz))
+        s += SLOT
+    yield from sorted(out, key=lambda p: p["start"])
+
+
 def epg_listings(cfg, ch, tz, now, short=False, limit=4, syn=None):
     if syn and ch.get("synthetic"):
         return syn.epg_listings(cfg, ch, tz, now, short, limit)
+    if ch.get("hub") and not ch["tvg_id"]:
+        return {"epg_listings": []}  # a hub channel without a guide id has no guide
     plain = cfg.get("epg_plain")
     enc = (lambda s: s) if plain else (lambda s: base64.b64encode(s.encode()).decode())
     cur = int(now) // SLOT * SLOT
@@ -250,11 +317,19 @@ def xmltv(cfg, base, tz_unused, now, offset):
     off_s = sign * (int(offset[1:3]) * 3600 + int(offset[3:5]) * 60)
     zone = dt.timezone(dt.timedelta(seconds=off_s))
     parts = ['<?xml version="1.0" encoding="UTF-8"?>\n<tv generator-info-name="fakepanel">\n']
+    seen = set()  # hub channels 60 and 61 share one guide id; 62, 65 and 68 have none
     for c in channels(cfg):
+        if not c["tvg_id"] or c["tvg_id"] in seen:
+            continue
+        seen.add(c["tvg_id"])
         parts.append(f'<channel id={quoteattr(c["tvg_id"])}><display-name>{escape(c["name"])}</display-name>'
                      f'<icon src={quoteattr(base + "/logo/" + str(c["id"]) + ".png")}/></channel>\n')
     fmt = lambda ts: dt.datetime.fromtimestamp(ts, zone).strftime("%Y%m%d%H%M%S") + " " + offset
+    seen = set()
     for c in channels(cfg):
+        if not c["tvg_id"] or c["tvg_id"] in seen:
+            continue
+        seen.add(c["tvg_id"])
         for p in programmes(c, now - EPG_BACK_DAYS * 86400, now + EPG_FWD_DAYS * 86400, zone):
             parts.append(f'<programme start="{fmt(p["start"])}" stop="{fmt(p["stop"])}" channel={quoteattr(c["tvg_id"])}>'
                          f'<title lang="en">{escape(p["title"])}</title><desc lang="en">{escape(desc(cfg, c, p))}</desc></programme>\n')
