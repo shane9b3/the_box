@@ -63,8 +63,8 @@ class SportsViewModelHubTest {
         r: FakeScoreRepository = repo, withMatcher: Boolean = true, mono: () -> Long = { 10_000L },
     ) = SportsViewModel(r, null, mono, { 1_000_000L }, detail, if (withMatcher) matcher else null, null, { null }, { app.thebox.core.parental.ParentalAccess.OPEN }) { LocalDate.of(2026, 11, 5) }
 
-    private fun FakeScoreRepository.board(vararg g: GameSnapshot, day: String = "2026-11-05", at: Long = 0L, counts: Map<String, Int> = emptyMap()) {
-        this.day.value = DayState.Board(DayBoard(day, null, null, g.toList(), gameCounts = counts), at, false)
+    private fun FakeScoreRepository.board(vararg g: GameSnapshot, day: String = "2026-11-05", at: Long = 0L, counts: Map<String, Int> = emptyMap(), isToday: Boolean = true) {
+        this.day.value = DayState.Board(DayBoard(day, null, null, g.toList(), gameCounts = counts), at, false, isToday)
     }
 
     private fun SportsViewModel.cards() = (state.value.body as SportsBody.Games).cards.map { it.game.id.id }
@@ -80,6 +80,35 @@ class SportsViewModelHubTest {
         channel = GuideFixtures.channel(1, name = name), playlistName = "Main", confidence = confidence,
         reasons = listOf(MatchReason.Broadcaster("SN", Market.NATIONAL, "CA")), variants = emptyList(), airing = airing,
     )
+
+    // ------------------------------------------------------------------ today, when the feed's day lags the calendar
+
+    /** (Owner finding 2026-11-25) In the morning `/score/now` still names yesterday: Today asks for the Eastern date. */
+    @Test fun aFinishedFeedDayBehindTheCalendarMakesTodayAskForItsDate() {
+        val m = vm()
+        m.onEntered()
+        repo.board(final, day = "2026-11-04") // the feed's "now": yesterday, all over
+        assertTrue("never yesterday's games under Today", m.state.value.body is SportsBody.Loading)
+        assertEquals("2026-11-05", repo.showDayCalls.last())
+        repo.day.value = DayState.Board(DayBoard("2026-11-05", null, null, listOf(pre)), 0L, false, isToday = false)
+        assertEquals(listOf("P1"), m.cards())
+        assertEquals("2026-11-05", m.state.value.days.first { it.offset == 0 }.key)
+        // Yesterday, then OK on Today again: the dated day, not `/score/now`.
+        m.onDay(-1)
+        m.onDay(0)
+        assertEquals("2026-11-05", repo.showDayCalls.last())
+    }
+
+    /** After midnight Eastern with a late game still on, the feed's day stays Today. */
+    @Test fun aFeedDayBehindTheCalendarWithAGameStillOnStaysToday() {
+        val m = vm()
+        m.onEntered()
+        val calls = repo.showDayCalls.size
+        repo.board(live, final, day = "2026-11-04")
+        assertEquals(setOf("L1", "X1"), m.cards().toSet())
+        assertEquals("2026-11-04", m.state.value.days.first { it.offset == 0 }.key)
+        assertEquals("no dated request", calls, repo.showDayCalls.size)
+    }
 
     // ------------------------------------------------------------------ keys: OK / Menu / Left enter slot 1
 
@@ -384,7 +413,7 @@ class SportsViewModelHubTest {
         m.onEntered()
         repo.board(live)
         m.onDay(-1)
-        repo.board(final, day = "2026-11-04")
+        repo.board(final, day = "2026-11-04", isToday = false) // a dated day, as the repository marks it
         assertEquals(listOf("X1"), m.cards())
         val calls = repo.showDayCalls.size
         m.onDay(0)

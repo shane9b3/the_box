@@ -227,6 +227,11 @@ class SportsViewModel internal constructor(
     private var tomorrowKey: String? = null
     /** The key of this week's NFL board, or the date of today's board for the others (learned, reset on page entry). */
     private var todayKey: String? = null
+    /**
+     * (Owner finding 2026-11-25) The NHL's `/score/now` keeps naming yesterday for hours after midnight Eastern. Once that
+     * day has nothing left to play, Today is the Eastern calendar date and is asked for by its date; true while that holds.
+     */
+    private var todayDated = false
     /** Day key → number of games, from the boards' `gameCounts` (§3.3), per page entry. */
     private val gameCounts = HashMap<String, Int>()
     /** Past-day boards, kept per page entry (≤ 15) so stepping back across final days does not refetch (§3.2). */
@@ -342,6 +347,7 @@ class SportsViewModel internal constructor(
             tomorrowKey = null
             todayKey = null
         }
+        todayDated = false
         gameCounts.clear()
         pastBoards.clear()
         orderKey = null
@@ -421,6 +427,7 @@ class SportsViewModel internal constructor(
         yesterdayKey = null
         tomorrowKey = null
         todayKey = null
+        todayDated = false
         gameCounts.clear()
         pastBoards.clear()
         store?.update(SportsDomain) { it.copy(league = league, chlLeague = if (league.isChl) league else it.chlLeague) }
@@ -466,7 +473,7 @@ class SportsViewModel internal constructor(
 
     /** The key to ask the repository for; null = today (`/score/now`). */
     private fun dayKeyFor(offset: Int, league: League): String? = when {
-        offset == 0 -> null
+        offset == 0 -> if (todayDated && league.group == LeagueGroup.NHL) todayKey else null
         league.group == LeagueGroup.NFL -> if (offset < 0) yesterdayKey else tomorrowKey // S6: never a date
         else -> anchorDate(league).plusDays(offset.toLong()).toString()
     }
@@ -565,6 +572,25 @@ class SportsViewModel internal constructor(
             todayKey = b.dayKey
             return
         }
+        if (league.group == LeagueGroup.NHL) {
+            // (Owner finding 2026-11-25) `/score/now` names the NHL's own day, which runs hours past midnight Eastern. While
+            // that day still has a game to play (a late west-coast game) it is Today. Once it is all over, Today is the
+            // Eastern date: that day is asked for by its date, instead of waiting behind a skeleton until the feed moves on.
+            val wall = dateFallback(league).toString()
+            val unfinished = b.games.any { it.phase != GamePhase.FINAL && it.phase != GamePhase.POSTPONED }
+            // The feed lags the calendar, it never leads it: a later day here is another chip's board, not today's.
+            if (b.dayKey > wall) return
+            if (b.dayKey == wall || unfinished) {
+                todayKey = b.dayKey
+                return
+            }
+            todayKey = wall
+            if (!todayDated) {
+                todayDated = true
+                if (selected.value == 0) repo?.showDay(wall)
+            }
+            return
+        }
         if (b.dayKey != dayKeyForGuard(-1, league) && b.dayKey != dayKeyForGuard(1, league)) todayKey = b.dayKey
     }
 
@@ -576,6 +602,8 @@ class SportsViewModel internal constructor(
         return when {
             // (Fix pass U2) The NFL trusts the repository's isToday: a week key is never a calendar date, and after a
             // week rollover the new This week equals the stale Next week key.
+            // The NHL: the board `learn` settled on (the feed's own day, or the Eastern date asked for by its date).
+            sel == 0 && league.group == LeagueGroup.NHL -> if (todayDated) b.dayKey == todayKey else day.isToday && b.dayKey == todayKey
             sel == 0 -> day.isToday && (league.group == LeagueGroup.NFL || (b.dayKey != dayKeyForGuard(-1, league) && b.dayKey != dayKeyForGuard(1, league)))
             else -> dayKeyFor(sel, league)?.let { b.dayKey == it } ?: false
         }
