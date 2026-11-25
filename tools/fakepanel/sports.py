@@ -40,6 +40,20 @@ Scripting (config keys, also through `POST /admin/config`):
   "no_date": true (no Date header), "stall_s": S (wait before answering), "stall_ms": MS (a fractional stall, to fake a
   slow box; docs/design/m6-sports-update-interval.md section 6), "max_age": S (overrides max-age and s-maxage)}.
 `GET /admin/sports` shows the slate; `/admin/stats` carries `sports: {requests, by_path, log}`.
+
+Sports Hub (docs/design/m6-sports-hub.md section 10.3; `--set sports_hub=true`, default off so every body above stays
+byte-for-byte as before):
+- the day list: `gameWeek` (today -3 .. +3 with each day's game count), per game `tvBroadcasts`, started games' `goals`
+  with `highlightClip` ids, finals' `threeMinRecap` / `condensedGame` paths (the featured game's appear only at FINAL, so
+  OFF shows "Recap soon"); today gains a PRE game (...0906), a postponed one (...0907, `gameScheduleState` "PPD"), VGK @ EDM live (...0908; TNT,
+  HBO MAX, SN, TVAS) and LAK @ ANA ahead (...0909; ABC), both inside the catalog's airing block;
+- the landing: `tvBroadcasts`, team `record`, `summary.scoring` (goals with names, assists, `highlightClip`, headshots;
+  the pp timeline's own goals when `sports_pp`), `summary.threeStars` once final, `matchup` (leaders, goalies) before the
+  game;
+- `GET /v1/gamecenter/{id}/right-rail` (every phase; shapes as recorded: season stats and last 10 before the game,
+  `linescore`, `shotsByPeriod`, `teamGameStats` once started, `gameVideo` with the recap) and `GET /v1/gamecenter/{id}/boxscore`
+  (`playerByGameStats` once started). Both answer with `sports` on, whatever `sports_hub` says; faults `right_rail_status`
+  and `boxscore_status` (and `status`) apply.
 """
 import copy
 import datetime as dt
@@ -64,9 +78,10 @@ DEFAULTS = {
     "sports_faults": {},
     "sports_pp": False,           # --sports-pp: the power-play timeline, `situation` and `summary.scoring` (needs sports)
     "sports_stacked": False,      # --sports-stacked: the pp timeline plus the Stacked scenario (needs sports)
+    "sports_hub": False,          # --set sports_hub=true: the Sports Hub board facts, extra games and landing blocks
 }
 FAULT_KEYS = ("status", "score_status", "landing_status", "html_404", "retry_after", "pad_bytes", "age", "no_date", "stall_s",
-              "stall_ms", "max_age")
+              "stall_ms", "max_age", "right_rail_status", "boxscore_status")
 STATE_KEYS = ("gameState", "period", "periodType", "secondsRemaining", "running", "inIntermission", "away", "home",
               "scheduleState", "lastPeriodType", "gone", "situationCode", "situationSeconds", "goalStrength", "awaySog", "homeSog")
 
@@ -84,7 +99,13 @@ TEAMS = {
     "BUF": (7, "Buffalo", "Sabres", "#003087"),
     "SEA": (55, "Seattle", "Kraken", "#99d9d9"),
     "VGK": (54, "Vegas", "Golden Knights", "#b4975a"),
+    "LAK": (26, "Los Angeles", "Kings", "#111111"),
+    "ANA": (24, "Anaheim", "Ducks", "#f47a38"),
 }
+# (Sports Hub) Season records for the landing's `record` and the goalie comparison.
+RECORDS = {"CGY": "12-9-3", "EDM": "17-5-4", "UTA": "13-8-2", "MTL": "11-10-3", "TOR": "14-7-3", "BOS": "12-10-2", "NSH": "9-12-3",
+           "COL": "16-6-2", "OTT": "11-9-4", "BUF": "10-11-3", "SEA": "12-9-4", "VGK": "14-6-5",
+           "LAK": "13-8-4", "ANA": "11-11-2"}
 
 # The featured game's timeline at TIMELINE_DEFAULT_S: (length s, state). Live clocks start at the segment length.
 SEGMENTS = [
@@ -151,6 +172,8 @@ def check_config(patch):
         raise ValueError("sports_pp must be true or false")
     if "sports_stacked" in patch and not isinstance(patch["sports_stacked"], bool):
         raise ValueError("sports_stacked must be true or false")
+    if "sports_hub" in patch and not isinstance(patch["sports_hub"], bool):
+        raise ValueError("sports_hub must be true or false")
     if "sports_timeline_s" in patch:
         v = patch["sports_timeline_s"]
         if isinstance(v, bool) or not isinstance(v, (int, float)) or not 30 <= v <= 86400:
@@ -264,7 +287,15 @@ class Sports:
                 (gid(905), "OTT", "BUF", evening - 3600, lambda a: {"gameState": "OFF", "period": 4, "periodType": "OT",
                                                                     "secondsRemaining": 245, "running": False, "inIntermission": False,
                                                                     "away": 2, "home": 1, "lastPeriodType": "OT"}),
-            ]
+            ] + ([
+                # (Sports Hub) one game per phase: PRE, and a postponed one.
+                (gid(906), "SEA", "BUF", self.anchor + 1800, lambda a: {"gameState": "PRE"}),
+                (gid(907), "VGK", "UTA", evening + 1800, lambda a: {"gameState": "FUT", "scheduleState": "PPD"}),
+                # (WP-3's channel checks) Inside the catalog's airing block (panel start -1 h .. +5 h): VGK @ EDM live
+                # (TNT, HBO MAX, SN, TVAS) and LAK @ ANA ahead (ABC).
+                (gid(908), "VGK", "EDM", self.anchor - 1800, self.looping_live),
+                (gid(909), "LAK", "ANA", self.anchor + 3600, lambda a: {"gameState": "FUT"}),
+            ] if self.hub() else [])
         if delta == -1:
             return [
                 (gid(801), "SEA", "VGK", evening, lambda a: {"gameState": "OFF", "period": 3, "periodType": "REG", "secondsRemaining": 0,
@@ -430,6 +461,270 @@ class Sports:
                 latest["strength"] = strength
         return s
 
+    # ---- Sports Hub (docs/design/m6-sports-hub.md section 10.3)
+    def hub(self):
+        return bool(self.panel.cfg.get("sports_hub"))
+
+    @staticmethod
+    def broadcasts(gid, away, home):
+        """`tvBroadcasts`: VGK @ EDM (...0908) lists TNT, HBO MAX, SN and TVAS (as the recorded 2026020385), LAK @ ANA
+        (...0909) ABC and SN; others a national and two regional entries. `network` and `market` as the feed writes them (one entry with a trailing space)."""
+        n = int(gid[-4:])
+        if n == 908:  # VGK @ EDM, as recorded for 2026020385
+            nets = [("N", "US", "TNT", 385), ("N", "US", "HBO MAX", 578), ("N", "CA", "SN", 282), ("N", "CA", "TVAS", 281)]
+        elif n == 909:  # LAK @ ANA on ABC (WP-3: ABC 7 matched through its guide listing only)
+            nets = [("N", "US", "ABC", 303), ("N", "CA", "SN", 282)]
+        else:
+            nets = [("N", "US" if n % 2 else "CA", "NHLN" if n % 2 else "SN", 324), ("A", "US", f"{away}TV ", 700 + n % 100),
+                    ("H", "US", f"{home}TV", 800 + n % 100)]
+        return [{"id": bid, "market": m, "countryCode": c, "network": net, "sequenceNumber": i + 1,
+                 "logoUrls": {"light": f"https://assets.nhle.com/logos/broadcast/{bid}-light.svg",
+                              "dark": f"https://assets.nhle.com/logos/broadcast/{bid}-dark.svg"}}
+                for i, (m, c, net, bid) in enumerate(nets)]
+
+    @staticmethod
+    def video_ids(gid):
+        n = int(gid[-4:])
+        return 6400000000112 + n * 1000, 6500000000112 + n * 1000
+
+    @staticmethod
+    def clip_id(gid, k):
+        return 6600000000112 + int(gid[-4:]) * 1000 + k
+
+    @staticmethod
+    def player(abbrev, k):
+        """A neutral player of [abbrev]: (id, first, last)."""
+        firsts = ("Alex", "Ben", "Chris", "Dan", "Eli", "Finn")
+        lasts = ("Archer", "Brooks", "Carter", "Dawson", "Ellis", "Foster")
+        tid = TEAMS[abbrev][0]
+        return 8400000 + tid * 100 + k, firsts[k % 6], f"{lasts[k % 6]}-{abbrev}"
+
+    def recap_posted(self, gid, s):
+        state = s.get("gameState", "FUT")
+        if gid == self.featured_id():
+            return state == "FINAL"
+        return state in ("OFF", "FINAL")
+
+    def hub_goals(self, gid, s, away, home):
+        """[(period number, periodType, [goal dicts])] in the landing's `summary.scoring` shape (no shootout)."""
+        if s.get("scoring") is not None:  # the pp timeline's own goals
+            out = []
+            k = 0
+            for p in s["scoring"]:
+                goals = []
+                for g in p["goals"]:
+                    side_abbrev = away if not g["isHome"] else home
+                    goals.append(self.goal_dict(gid, k, side_abbrev, g["isHome"], g["awayScore"], g["homeScore"], g["timeInPeriod"],
+                                                g["strength"], g.get("situationCode", "1551")))
+                    k += 1
+                out.append((p["number"], p["periodType"], goals))
+            return out
+        a, h = int(s.get("away") or 0), int(s.get("home") or 0)
+        if s.get("lastPeriodType") == "SO":
+            a, h = (a - 1, h) if a > h else (a, h - 1)
+        period = int(s.get("period") or 1)
+        reg = min(period, 3)
+        sides = []  # False = away, True = home, alternating while both have goals left
+        i = j = 0
+        while i < a or j < h:
+            if i < a and (i <= j or j >= h):
+                sides.append(False)
+                i += 1
+            else:
+                sides.append(True)
+                j += 1
+        periods = {}
+        ca = ch = 0
+        n = len(sides)
+        for k, is_home in enumerate(sides):
+            # The latest goal is in the current period, each earlier one a period before (never before the 1st): the
+            # featured timeline's goals land where it scores them; an overtime winner is in the OT.
+            pn = max(1, reg - (n - 1 - k))
+            if k == n - 1 and period >= 4 and s.get("lastPeriodType") == "OT":
+                pn = 4
+            ca, ch = (ca, ch + 1) if is_home else (ca + 1, ch)
+            ptype = "OT" if pn >= 4 else "REG"
+            periods.setdefault((pn, ptype), []).append(
+                self.goal_dict(gid, k, home if is_home else away, is_home, ca, ch, mmss(300 + 90 * k), "ev", "1551"))
+        return [(pn, pt, goals) for (pn, pt), goals in sorted(periods.items())]
+
+    def goal_dict(self, gid, k, abbrev, is_home, a, h, tip, strength, code):
+        pid, first, last = self.player(abbrev, k % 3)
+        _, af, al = self.player(abbrev, (k + 1) % 3)
+        _, bf, bl = self.player(abbrev, (k + 2) % 3)
+        clip = self.clip_id(gid, k)
+        return {"situationCode": code, "eventId": 100 + k, "strength": strength, "playerId": pid,
+                "firstName": {"default": first}, "lastName": {"default": last}, "name": {"default": f"{first[0]}. {last}"},
+                "teamAbbrev": {"default": abbrev}, "headshot": f"https://assets.nhle.com/mugs/nhl/20262027/{abbrev}/{pid}.png",
+                "highlightClipSharingUrl": f"https://nhl.com/video/{gid}-goal-{clip}", "highlightClip": clip,
+                "goalsToDate": 3 + k, "awayScore": a, "homeScore": h, "timeInPeriod": tip, "shotType": "wrist",
+                "goalModifier": "none",
+                "assists": [{"playerId": 1, "firstName": {"default": af}, "lastName": {"default": al}, "name": {"default": f"{af[0]}. {al}"}, "assistsToDate": 5},
+                            {"playerId": 2, "firstName": {"default": bf}, "lastName": {"default": bl}, "name": {"default": f"{bf[0]}. {bl}"}, "assistsToDate": 2}],
+                "isHome": is_home}
+
+    def three_stars(self, away, home, s):
+        a, h = int(s.get("away") or 0), int(s.get("home") or 0)
+        win, lose = (home, away) if h >= a else (away, home)
+        out = []
+        for rank, (abbrev, k) in enumerate(((win, 0), (win, 1), (lose, 0)), 1):
+            pid, first, last = self.player(abbrev, k)
+            out.append({"star": rank, "playerId": pid, "teamAbbrev": abbrev, "headshot": f"https://assets.nhle.com/mugs/nhl/20262027/{abbrev}/{pid}.png",
+                        "name": {"default": f"{first[0]}. {last}"}, "sweaterNo": 10 + k, "position": "C", "goals": 2 - k, "assists": 1, "points": 3 - k})
+        return out
+
+    def matchup(self, away, home):
+        def leader(abbrev, k, v):
+            pid, first, last = self.player(abbrev, k)
+            return {"playerId": pid, "name": {"default": f"{first[0]}. {last}"}, "firstName": {"default": first}, "lastName": {"default": last},
+                    "sweaterNumber": 10 + k, "positionCode": "C", "headshot": f"https://assets.nhle.com/mugs/nhl/20262027/{abbrev}/{pid}.png", "value": v}
+
+        def goalies(abbrev):
+            out = []
+            for k, (rec, gaa, sv) in enumerate((("10-4-2", 2.61, 0.905), ("4-3-1", 3.02, 0.889))):
+                pid, first, last = self.player(abbrev, 4 + k)
+                out.append({"playerId": pid, "name": {"default": f"{first[0]}. {last}"}, "firstName": {"default": first}, "lastName": {"default": last},
+                            "sweaterNumber": 30 + k, "headshot": f"https://assets.nhle.com/mugs/nhl/20262027/{abbrev}/{pid}.png", "positionCode": "G",
+                            "gamesPlayed": 16 - 8 * k, "record": rec, "gaa": gaa, "savePctg": sv, "shutouts": 1 - k})
+            return out
+        return {"season": 20262027, "gameType": 2,
+                "skaterComparison": {"contextLabel": "last_5_games", "contextSeason": 20262027, "leaders": [
+                    {"category": c, "awayLeader": leader(away, i, 5 - i), "homeLeader": leader(home, i, 6 - i)}
+                    for i, c in enumerate(("points", "goals", "assists"))]},
+                "goalieComparison": {"contextLabel": "regular_season", "contextSeason": 20262027,
+                                     "homeTeam": {"teamTotals": {"record": RECORDS[home]}, "leaders": goalies(home)},
+                                     "awayTeam": {"teamTotals": {"record": RECORDS[away]}, "leaders": goalies(away)}}}
+
+    def hub_game(self, o, day, g, at, base, landing, s):
+        """Adds the hub fields to the game object [o] (day list or landing)."""
+        gid, away, home, _, _ = g
+        state = s.get("gameState", "FUT")
+        started = state not in ("FUT", "PRE")
+        o["tvBroadcasts"] = self.broadcasts(gid, away, home)
+        if started:
+            scoring = self.hub_goals(gid, s, away, home)
+            if landing:
+                o["summary"] = {"scoring": [{"periodDescriptor": {"number": pn, "periodType": pt, "maxRegulationPeriods": 3}, "goals": goals}
+                                            for pn, pt, goals in scoring]}
+                # As recorded (2026-11-25): `threeStars` is an empty list while live.
+                o["summary"]["threeStars"] = self.three_stars(away, home, s) if state in ("OFF", "FINAL", "OVER") else []
+            else:
+                o["goals"] = [dict(x, period=pn, periodDescriptor={"number": pn, "periodType": pt, "maxRegulationPeriods": 3},
+                                   teamAbbrev=x["teamAbbrev"]["default"], mugshot=x["headshot"])
+                              for pn, pt, goals in scoring for x in goals]
+        if not landing and self.recap_posted(gid, s):
+            recap, condensed = self.video_ids(gid)
+            o["threeMinRecap"] = f"/video/{away.lower()}-at-{home.lower()}-recap-{recap}"
+            o["condensedGame"] = f"/video/{away.lower()}-at-{home.lower()}-condensed-game-{condensed}"
+        if landing:
+            o["awayTeam"]["record"] = RECORDS[away]
+            o["homeTeam"]["record"] = RECORDS[home]
+            if not started:
+                o["matchup"] = self.matchup(away, home)
+        return o
+
+    def right_rail(self, day, g, at, base):
+        gid, away, home, start, _ = g
+        s = self.state(g, at)
+        state = s.get("gameState", "FUT")
+        started = state not in ("FUT", "PRE")
+        y, season = season_of(day)
+        series_game = {"id": int(gid), "season": season, "gameType": 2, "gameDate": day.isoformat(), "startTimeUTC": iso_z(start),
+                       "easternUTCOffset": "-05:00", "venueUTCOffset": "-05:00", "gameState": state, "gameScheduleState": s.get("scheduleState", "OK"),
+                       "awayTeam": {"id": TEAMS[away][0], "abbrev": away, "logo": f"{base}/logos/nhl/svg/{away}_light.svg"},
+                       "homeTeam": {"id": TEAMS[home][0], "abbrev": home, "logo": f"{base}/logos/nhl/svg/{home}_light.svg"},
+                       "gameCenterLink": f"/gamecenter/{away.lower()}-vs-{home.lower()}/{day:%Y/%m/%d}/{gid}",
+                       "gameOutcome": {"lastPeriodType": s.get("lastPeriodType") or "REG"}}
+        if started:
+            series_game["awayTeam"]["score"] = s.get("away", 0)
+            series_game["homeTeam"]["score"] = s.get("home", 0)
+        earlier = {"id": int(gid) - 300, "season": season, "gameType": 2, "gameDate": (day - dt.timedelta(days=30)).isoformat(),
+                   "startTimeUTC": iso_z(start - 30 * 86400), "gameState": "OFF", "gameScheduleState": "OK",
+                   "awayTeam": {"id": TEAMS[home][0], "abbrev": home, "score": 3}, "homeTeam": {"id": TEAMS[away][0], "abbrev": away, "score": 2},
+                   "gameOutcome": {"lastPeriodType": "REG"}}
+        o = {"seasonSeries": [earlier, series_game], "seasonSeriesWins": {"awayTeamWins": 0, "homeTeamWins": 1},
+             "gameInfo": {"referees": [], "linesmen": [], "awayTeam": {"headCoach": {"default": "A. Coach"}, "scratches": []},
+                          "homeTeam": {"headCoach": {"default": "B. Coach"}, "scratches": []}}}
+        if self.recap_posted(gid, s):
+            recap, condensed = self.video_ids(gid)
+            o["gameVideo"] = {"threeMinRecap": recap, "condensedGame": condensed}
+        if not started:
+            def season_stats(k):
+                return {"ppPctg": 0.21 + 0.03 * k, "pkPctg": 0.79 + 0.01 * k, "faceoffWinningPctg": 0.5, "goalsForPerGamePlayed": 3.1 + 0.2 * k,
+                        "goalsAgainstPerGamePlayed": 2.9 - 0.1 * k, "ppPctgRank": 10 - k, "pkPctgRank": 12 + k, "faceoffWinningPctgRank": 15,
+                        "goalsForPerGamePlayedRank": 9 - k, "goalsAgainstPerGamePlayedRank": 11 + k}
+            o["teamSeasonStats"] = {"contextLabel": "regular_season", "contextSeason": season, "awayTeam": season_stats(0), "homeTeam": season_stats(1)}
+            o["last10Record"] = {"contextLabel": "last_10_games", "contextSeason": season,
+                                 "awayTeam": {"record": "5-4-1", "streakType": "W", "streak": 2, "pastGameResults": []},
+                                 "homeTeam": {"record": "6-3-1", "streakType": "L", "streak": 1, "pastGameResults": []}}
+            return o
+        scoring = self.hub_goals(gid, s, away, home)
+        period = min(int(s.get("period") or 1), 5)
+        by = []
+        for pn in range(1, period + 1):
+            pt = "REG" if pn <= 3 else ("OT" if pn == 4 else "SO")
+            if pt == "SO":
+                a = 1 if s.get("lastPeriodType") == "SO" and s.get("away", 0) > s.get("home", 0) else 0
+                h = 1 if s.get("lastPeriodType") == "SO" and s.get("home", 0) > s.get("away", 0) else 0
+            else:
+                goals = [x for n, _, gl in scoring if n == pn for x in gl]
+                a = sum(1 for x in goals if not x["isHome"])
+                h = sum(1 for x in goals if x["isHome"])
+            by.append({"periodDescriptor": {"number": pn, "periodType": pt, "maxRegulationPeriods": 3}, "away": a, "home": h})
+        o["linescore"] = {"byPeriod": by, "totals": {"away": s.get("away", 0), "home": s.get("home", 0)}}
+        sog_a = self.sog("away", s.get("away", 0), s)
+        sog_h = self.sog("home", s.get("home", 0), s)
+        reg = [p for p in by if p["periodDescriptor"]["periodType"] != "SO"]
+        o["shotsByPeriod"] = [dict(p, away=(sog_a or 0) // max(len(reg), 1), home=(sog_h or 0) // max(len(reg), 1)) for p in reg]
+        ppa = sum(1 for _, _, gl in scoring for x in gl if not x["isHome"] and x["strength"] == "pp")
+        pph = sum(1 for _, _, gl in scoring for x in gl if x["isHome"] and x["strength"] == "pp")
+        o["teamGameStats"] = [
+            {"category": "sog", "awayValue": sog_a or 0, "homeValue": sog_h or 0},
+            {"category": "faceoffWinningPctg", "awayValue": 0.52, "homeValue": 0.48},
+            {"category": "faceoffWins", "awayValue": "13/25", "homeValue": "12/25"},
+            {"category": "powerPlay", "awayValue": f"{ppa}/{ppa + 2}", "homeValue": f"{pph}/{pph + 1}"},
+            {"category": "powerPlayPctg", "awayValue": round(ppa / (ppa + 2), 6), "homeValue": round(pph / (pph + 1), 6)},
+            {"category": "pim", "awayValue": 6, "homeValue": 4},
+            {"category": "hits", "awayValue": 4 * period, "homeValue": 5 * period},
+            {"category": "blockedShots", "awayValue": 3 * period, "homeValue": 2 * period},
+            {"category": "giveaways", "awayValue": 2 * period, "homeValue": 3 * period},
+            {"category": "takeaways", "awayValue": period, "homeValue": 2 * period},
+        ]
+        return o
+
+    def boxscore(self, day, g, at, base):
+        gid, away, home, start, _ = g
+        o = self.game(day, g, at, base, True)
+        for k in ("summary", "matchup", "tvBroadcasts"):
+            o.pop(k, None)
+        s = self.state(g, at)
+        if s.get("gameState", "FUT") in ("FUT", "PRE"):
+            return o
+        scoring = [x for _, _, gl in self.hub_goals(gid, s, away, home) for x in gl]
+
+        def team(abbrev, is_home):
+            fw, df = [], []
+            for k in range(6):
+                pid, first, last = self.player(abbrev, k)
+                goals = sum(1 for x in scoring if x["isHome"] == is_home and x["playerId"] == pid)
+                assists = sum(1 for x in scoring if x["isHome"] == is_home for a in x["assists"] if a["lastName"]["default"] == last)
+                row = {"playerId": pid, "sweaterNumber": 10 + k, "name": {"default": f"{first[0]}. {last}"}, "position": "C" if k < 4 else "D",
+                       "goals": goals, "assists": assists, "points": goals + assists, "plusMinus": goals - 1, "pim": 0, "hits": k,
+                       "powerPlayGoals": 0, "sog": goals + k, "faceoffWinningPctg": 0.5 if k < 4 else 0.0, "toi": f"{14 + k:02d}:{(17 * k) % 60:02d}",
+                       "blockedShots": k % 3, "shifts": 18 + k, "giveaways": k % 2, "takeaways": 1}
+                (fw if k < 4 else df).append(row)
+            pid, first, last = self.player(abbrev, 4)
+            other = int(s.get("home" if not is_home else "away", 0) or 0)
+            sa = int(self.sog("home" if not is_home else "away", other, s) or 0)
+            gl = [{"playerId": pid, "sweaterNumber": 30, "name": {"default": f"{first[0]}. {last}"}, "position": "G",
+                   "saveShotsAgainst": f"{max(sa - other, 0)}/{sa}", "savePctg": round(max(sa - other, 0) / sa, 6) if sa else None,
+                   "goalsAgainst": other, "toi": "60:00", "starter": True, "shotsAgainst": sa, "saves": max(sa - other, 0)}]
+            if gl[0]["savePctg"] is None:
+                del gl[0]["savePctg"]
+            return {"forwards": fw, "defense": df, "goalies": gl}
+        o["playerByGameStats"] = {"awayTeam": team(away, False), "homeTeam": team(home, True)}
+        return o
+
     # ---- bodies
     @staticmethod
     def sog(side, score, s):
@@ -504,12 +799,20 @@ class Sports:
                                          "goals": p["goals"]} for p in s["scoring"]]}
         if landing:
             o.update({"shootoutInUse": True, "maxPeriods": 5, "regPeriods": 3, "otInUse": True, "tiesInUse": False})
+        if self.hub():
+            self.hub_game(o, day, g, at, base, landing, s)
         return o
 
     def day_body(self, day, at, base):
         games = [self.game(day, g, at, base, False) for g in self.slate(day, at) if not self.state(g, at).get("gone")]
+        week = []
+        if self.hub():
+            for d in range(-3, 4):
+                wd = day + dt.timedelta(days=d)
+                week.append({"date": wd.isoformat(), "dayAbbrev": wd.strftime("%a").upper(),
+                             "numberOfGames": sum(1 for x in self.slate(wd, at) if not self.state(x, at).get("gone"))})
         return {"prevDate": (day - dt.timedelta(days=1)).isoformat(), "currentDate": day.isoformat(),
-                "nextDate": (day + dt.timedelta(days=1)).isoformat(), "gameWeek": [], "oddsPartners": [], "games": games}
+                "nextDate": (day + dt.timedelta(days=1)).isoformat(), "gameWeek": week, "oddsPartners": [], "games": games}
 
     def logo_svg(self, abbrev, dark):
         colour = TEAMS.get(abbrev, (0, "", "", "#%06x" % (zlib.crc32(abbrev.encode()) & 0xFFFFFF)))[3]
@@ -605,6 +908,15 @@ def handle(h, path):
         except ValueError:
             return fail(400, "bad date")
         return answer(sp.day_body(day, at, base))
+    m = re.match(r"^/v1/gamecenter/(\d+)/(right-rail|boxscore)$", path)
+    if m:
+        key = "right_rail_status" if m[2] == "right-rail" else "boxscore_status"
+        if f.get(key):
+            return fail(f[key], key)
+        day, g = sp.find(m[1], at)
+        if g is None or sp.state(g, at).get("gone"):
+            return fail(404, "unknown game")
+        return answer(sp.right_rail(day, g, at, base) if m[2] == "right-rail" else sp.boxscore(day, g, at, base))
     m = re.match(r"^/v1/gamecenter/(\d+)/landing$", path)
     if m:
         if f.get("landing_status"):

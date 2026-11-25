@@ -736,5 +736,47 @@ class TestOff(unittest.TestCase):
             fakepanel.stop_servers(panel, main, lb)
 
 
+
+class TestHubBoardFacts(NflCase):
+    """Sports Hub (docs/design/m6-sports-hub.md section 10.3): records, real per-quarter line scores, leaders, broadcasts."""
+
+    def quarters(self, e):
+        return {c["homeAway"]: [ls["value"] for ls in c["linescores"]] for c in self.comp(e)["competitors"]}
+
+    def test_line_scores_sum_to_the_score_and_land_in_their_quarter(self):
+        for label in ("q1 BUF ball, no possession", "q2 BUF ball", "halftime", "q3 KC ball", "q4 BUF 3rd and 9 at its 2", "ot KC 1st"):
+            e = self.at(label, 3)
+            q = self.quarters(e)
+            sc = self.score(e)
+            for side in ("away", "home"):
+                self.assertEqual(int(sc[side]), int(sum(q[side])), (label, side, q))
+            period = self.comp(e)["status"]["period"]
+            self.assertEqual(period, len(q["away"]), label)
+            self.assertEqual(list(range(1, period + 1)), [ls["period"] for ls in self.comp(e)["competitors"][0]["linescores"]])
+        q = self.quarters(self.at("q2 BUF ball", 3))
+        self.assertGreater(q["away"][0], 0, "KC's first-quarter touchdown stays in the 1st")
+
+    def test_records_leaders_and_broadcasts(self):
+        e = self.at("q2 BUF ball", 3)
+        comp = self.comp(e)
+        rec = {c["homeAway"]: c["records"][0] for c in comp["competitors"]}
+        self.assertEqual({"type": "total", "summary": "8-3"}, {k: rec["away"][k] for k in ("type", "summary")})
+        self.assertEqual("7-4", rec["home"]["summary"])
+        self.assertEqual(["passingYards", "rushingYards", "receivingYards"], [x["name"] for x in comp["leaders"]])
+        ids = {c["id"] for c in comp["competitors"]}
+        for cat in comp["leaders"]:
+            self.assertEqual(1, len(cat["leaders"]), "one game leader per category, as recorded")
+            lead = cat["leaders"][0]
+            self.assertIn(lead["team"]["id"], ids)
+            self.assertTrue(lead["displayValue"] and lead["athlete"]["shortName"])
+        self.assertEqual([{"market": "national", "names": ["CBS"]}], comp["broadcasts"])
+        _, j = self.get_json(BOARD)
+        pre = next(x for x in j["events"] if x["id"] == "401899002")
+        self.assertTrue(all("linescores" not in c for c in self.comp(pre)["competitors"]))
+        self.assertEqual("Any", self.comp(pre)["competitors"][0]["records"][0]["abbreviation"])
+        fin = next(x for x in j["events"] if x["id"] == "401899003")
+        self.assertEqual({"away": [5, 5, 5, 5], "home": [6, 6, 6, 5]}, self.quarters(fin))
+
+
 if __name__ == "__main__":
     unittest.main()
