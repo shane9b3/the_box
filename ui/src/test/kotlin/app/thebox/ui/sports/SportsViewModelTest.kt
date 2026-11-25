@@ -42,6 +42,14 @@ class SportsViewModelTest {
         this.day.value = DayState.Board(SportsFixtures.board(*g, dayKey = day), at, failing)
     }
 
+    /** Follow is slot 1 of the panel now: focus the card, OK enters the panel, OK on slot 1. */
+    private fun SportsViewModel.toggleFollow(id: String) {
+        onCardFocused(id)
+        checkNotNull(enterPanel(id)) { "no enabled slot" }
+        onSlot(0)
+        onPanelExited()
+    }
+
     private fun SportsViewModel.cards(): List<GameCardModel> = (state.value.body as SportsBody.Games).cards
 
     @Test fun orderIsLiveThenPreThenScheduledByStartThenFinal() {
@@ -66,16 +74,16 @@ class SportsViewModelTest {
         val repo = FakeScoreRepository()
         val m = vm(repo)
         repo.board(live, pre)
-        m.onCard(m.cards().first { it.game.id.id == "L1" })
+        m.toggleFollow("L1")
         assertEquals(live, repo.followCalls.last())
         assertEquals("L1", repo.followed.value?.gameId)
         assertTrue(m.cards().first { it.game.id.id == "L1" }.followed)
         // following another game replaces the current one
-        m.onCard(m.cards().first { it.game.id.id == "P1" })
+        m.toggleFollow("P1")
         assertEquals("P1", repo.followed.value?.gameId)
         assertEquals(listOf("P1"), m.cards().filter { it.followed }.map { it.game.id.id })
         // OK on the followed game again stops
-        m.onCard(m.cards().first { it.game.id.id == "P1" })
+        m.toggleFollow("P1")
         assertNull(repo.followCalls.last())
         assertNull(repo.followed.value)
     }
@@ -97,11 +105,11 @@ class SportsViewModelTest {
         val m = vm(repo)
         m.onEntered()
         repo.board(live)
-        m.onDay(SportsDay.YESTERDAY)
+        m.onDay(-1)
         assertEquals("2026-11-04", repo.showDayCalls.last())
-        m.onDay(SportsDay.TOMORROW)
+        m.onDay(1)
         assertEquals("2026-11-06", repo.showDayCalls.last())
-        m.onDay(SportsDay.TODAY)
+        m.onDay(0)
         assertNull(repo.showDayCalls.last())
         assertEquals(SportsDay.TODAY, m.state.value.day)
     }
@@ -110,7 +118,7 @@ class SportsViewModelTest {
         val repo = FakeScoreRepository()
         val m = vm(repo)
         m.onEntered()
-        m.onDay(SportsDay.YESTERDAY)
+        m.onDay(-1)
         assertEquals("2026-11-04", repo.showDayCalls.last())
     }
 
@@ -119,12 +127,12 @@ class SportsViewModelTest {
         val m = vm(repo)
         m.onEntered()
         repo.board(live)
-        m.onDay(SportsDay.YESTERDAY)
+        m.onDay(-1)
         // the repository still holds today's board while yesterday's loads
         assertEquals(SportsBody.Loading, m.state.value.body)
         repo.board(final, day = "2026-11-04")
         assertEquals(listOf("X1"), m.cards().map { it.game.id.id })
-        m.onDay(SportsDay.TODAY)
+        m.onDay(0)
         assertEquals(SportsBody.Loading, m.state.value.body) // yesterday's board is not today's
     }
 
@@ -132,10 +140,10 @@ class SportsViewModelTest {
         val repo = FakeScoreRepository()
         val m = vm(repo)
         repo.board()
-        assertEquals(SportsBody.Empty("2026-11-05", SportsDay.TODAY), m.state.value.body)
-        m.onDay(SportsDay.TOMORROW)
+        assertEquals(SportsBody.Empty("2026-11-05", 0), m.state.value.body)
+        m.onDay(1)
         repo.board(day = "2026-11-06")
-        assertEquals(SportsBody.Empty("2026-11-06", SportsDay.TOMORROW), m.state.value.body)
+        assertEquals(SportsBody.Empty("2026-11-06", 1), m.state.value.body)
     }
 
     @Test fun failuresKeepTheirKindAndRetryAsksTheRepository() {
@@ -146,7 +154,7 @@ class SportsViewModelTest {
         m.onRetry()
         assertEquals(1, repo.retries)
         // OK on the day chip you are on, while a failure shows, retries too
-        m.onDay(SportsDay.TODAY)
+        m.onDay(0)
         assertEquals(2, repo.retries)
     }
 
@@ -162,7 +170,7 @@ class SportsViewModelTest {
 
     @Test fun withoutARepositoryTheTabSaysSoAndMakesNoRequest() {
         val m = SportsViewModel(null, null, { 0L }) { LocalDate.of(2026, 11, 5) }
-        m.onEntered(); m.onDay(SportsDay.YESTERDAY); m.onRetry(); m.onLeft()
+        m.onEntered(); m.onDay(-1); m.onRetry(); m.onLeft()
         assertEquals(SportsBody.Failed(FailKind.IO), m.state.value.body)
     }
 

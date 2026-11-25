@@ -1,30 +1,55 @@
 package app.thebox.ui.sports
 
+import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import app.thebox.core.catchup.archive.ArchivePlayback
+import app.thebox.core.guide.GuideSettingsSource
+import app.thebox.core.parental.ParentalAccess
+import app.thebox.core.parental.ParentalRules
+import app.thebox.core.parental.ParentalSession
+import app.thebox.core.parental.legacyParentalAccess
 import app.thebox.core.settings.SettingsStore
 import app.thebox.core.settings.state.SportsDomain
 import app.thebox.core.sports.DayBoard
 import app.thebox.core.sports.DayState
 import app.thebox.core.sports.DemandOwner
 import app.thebox.core.sports.FailKind
+import app.thebox.core.sports.Fetch
+import app.thebox.core.sports.GameId
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.League
 import app.thebox.core.sports.LeagueGroup
+import app.thebox.core.sports.ScoreRepository
 import app.thebox.core.sports.Sport
+import app.thebox.core.sports.SportsConstants
 import app.thebox.core.sports.SportsDays
+import app.thebox.core.sports.SportsPrefs
 import app.thebox.core.sports.group
 import app.thebox.core.sports.isChl
 import app.thebox.core.sports.sport
-import app.thebox.core.sports.ScoreCorner
-import app.thebox.core.sports.ScoreRepository
-import app.thebox.core.sports.SportsPrefs
+import app.thebox.core.sports.hub.BoxScore
+import app.thebox.core.sports.hub.ChannelCandidate
+import app.thebox.core.sports.hub.ClipInfo
+import app.thebox.core.sports.hub.ClipKind
+import app.thebox.core.sports.hub.ClipRef
+import app.thebox.core.sports.hub.ClipResolver
+import app.thebox.core.sports.hub.ClipResult
+import app.thebox.core.sports.hub.DetailState
+import app.thebox.core.sports.hub.GameChannelMatcher
+import app.thebox.core.sports.hub.GameDetail
+import app.thebox.core.sports.hub.GameDetailRepository
+import app.thebox.player.api.PlaybackController
 import dagger.hilt.android.lifecycle.HiltViewModel
 import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Optional
 import javax.inject.Inject
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -33,13 +58,22 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
 
 /**
- * The three day chips (docs/design/m6-score-bug.md §5.2). For the NFL (ruling 28) they are Last week · This week · Next
- * week: YESTERDAY / TODAY / TOMORROW stand for the previous, current and next ESPN week.
+ * The day chips' meanings for the texts that name a day ("No NHL games yesterday"): [of] maps a strip offset. For the NFL
+ * (ruling 28) YESTERDAY / TODAY / TOMORROW stand for the previous, current and next ESPN week.
  */
-enum class SportsDay { YESTERDAY, TODAY, TOMORROW }
+enum class SportsDay {
+    YESTERDAY, TODAY, TOMORROW;
+
+    companion object {
+        fun of(offset: Int): SportsDay = if (offset < 0) YESTERDAY else if (offset == 0) TODAY else TOMORROW
+    }
+}
 
 /**
  * One card: the snapshot, whether it is the followed game, and the mono instant the board was fetched. [refused] (CHL
@@ -50,11 +84,13 @@ data class GameCardModel(val game: GameSnapshot, val followed: Boolean, val anch
 
 /** What the games area shows (§5.4). */
 sealed interface SportsBody {
-    /** Five static skeleton cards. */
+    /** Skeleton cards. */
     data object Loading : SportsBody
     data class Games(val cards: List<GameCardModel>) : SportsBody
-    /** A loaded day without games: "No NHL games {yesterday / today / tomorrow}. Pick another day above." */
-    data class Empty(val dayKey: String, val day: SportsDay) : SportsBody
+    /** A loaded day without games. [offset] is the strip's offset (0 = today); [day] is its yesterday / today / tomorrow reading. */
+    data class Empty(val dayKey: String, val offset: Int) : SportsBody {
+        val day: SportsDay get() = SportsDay.of(offset)
+    }
     /** [FailKind.OFFLINE] reads "No internet connection…"; everything else "NHL.com did not answer…". */
     data class Failed(val kind: FailKind) : SportsBody
     /**
@@ -69,33 +105,56 @@ sealed interface SportsBody {
  * into minutes against its own tick.
  */
 data class SportsUiState(
-    val day: SportsDay = SportsDay.TODAY,
+    /** The selected chip of the day strip: 0 = today; −7..+7 for the NHL and CHL, −1 / 0 / +1 (weeks) for the NFL. */
+    val offset: Int = 0,
     val body: SportsBody = SportsBody.Loading,
     val updatedMono: Long? = null,
     val prefs: SportsPrefs = SportsPrefs(),
-    /**
-     * (NFL §7.2, S6) Whether the Yesterday / Last week and the Tomorrow / Next week chips can be pressed. The NHL's are
-     * always on (they fall back to the Eastern date); the NFL's are on only when the board named that neighbour.
-     */
-    val canPrev: Boolean = true,
-    val canNext: Boolean = true,
+    /** (Sports Hub §3.1) The strip's chips. */
+    val days: List<DayChip> = defaultDays(),
     /** (NFL §7.2) The shown board's key ("w2026-2-9"): the screen turns it into the week label. Null before a board. */
     val boardKey: String? = null,
-)
+) {
+    val day: SportsDay get() = SportsDay.of(offset)
+    /** (NFL §7.2, S6) Whether the previous / next week chip can be pressed (the board named that neighbour). */
+    val canPrev: Boolean get() = days.firstOrNull { it.offset == -1 }?.enabled ?: false
+    val canNext: Boolean get() = days.firstOrNull { it.offset == 1 }?.enabled ?: false
+
+    companion object {
+        fun defaultDays(): List<DayChip> = (-SportsConstants.HUB_DAY_RANGE..SportsConstants.HUB_DAY_RANGE).map { DayChip(it, null) }
+    }
+}
+
+/** A sheet over the right column (§2.5, §6.4). Restored by game id and action, never by index. */
+sealed interface HubSheet {
+    val gameId: GameId
+    data class Goals(override val gameId: GameId) : HubSheet
+    /** [archiveOnly]: the final NFL / CHL "Watch from start" rows. */
+    data class Channels(override val gameId: GameId, val archiveOnly: Boolean) : HubSheet
+    /** [box] is null while loading. */
+    data class BoxScoreSheet(override val gameId: GameId, val box: Fetch<BoxScore>? = null) : HubSheet
+    data class Matchup(override val gameId: GameId) : HubSheet
+}
+
+enum class HubToastKind { VIDEO_UNAVAILABLE, VIDEO_OFFLINE, VIDEO_REFUSED, VIDEO_GEO, VIDEO_REMOVED, VIDEO_NOT_PLAYABLE, GOAL_NO_VIDEO, STARTS_AT }
+
+/** A short message with a reason and a next step (§6.8, §5.5). [seq] distinguishes two equal toasts in a row. */
+@Immutable
+data class HubToast(val kind: HubToastKind, val startUtcMs: Long? = null, val seq: Long = 0L)
 
 /**
- * The Sports tab's view model (docs/design/m6-score-bug.md §5; WP-4a). It reads the optional [ScoreRepository]
- * (absent = the feature is not bound: the tab shows the failure text and makes no request), asks for `SEARCH`-style
- * demand (`DemandOwner.SPORTS_TAB`) while the screen is on, and maps the day list to cards: live, then pre-game, then
- * scheduled by start time, then final. Follow toasts come from the repository's events (the player view model shows
- * them in every mode); nothing here toasts.
+ * The Sports Hub page's view model (docs/design/m6-sports-hub.md; WP-4). It reads the optional [ScoreRepository] (absent =
+ * the feature is not bound: the page shows the failure text and makes no request), asks for `SPORTS_TAB` demand while the
+ * screen is on, and maps the day list to cards in a **frozen order** (U-S3): live, then pre-game, then scheduled by start,
+ * then final, computed on board load, day change and page entry; re-polls update cards in place, a new game is appended and a
+ * vanished one removed.
  *
- * Day chips: Today is `showDay(null)` (`/score/now`, once per open); Yesterday and Tomorrow are the `prevDay` /
- * `nextDay` of the Today board (falling back to date arithmetic in the NHL's Eastern zone before one has loaded).
+ * The detail panel follows card focus ([onCardFocused]): its pill, headline and matchup art switch at once from the board; the
+ * detail, the channel match and the clip lookups start after `HUB_FETCH_DWELL_MS` of rest, or at once when OK enters the panel
+ * ([enterPanel]). The panel's three slots never reorder and are frozen while focus is in the panel (§2.3).
  *
- * (NFL WP-5, docs/design/m6-nfl.md §7) The league chips write `SportsPrefs.league`. The NFL's chips are weeks, taken only
- * from the board's `prevDay` / `nextDay` (week keys): **no date fallback** (S6), so before the first board, on an empty
- * board or at a season edge the chip is disabled, and an NFL request is never a single date.
+ * Day strip: NHL and CHL 15 days (today −7 … +7, `showDay(key)` on OK); the NFL's three weeks come only from the board's
+ * `prevDay` / `nextDay` (S6: no date fallback). Picking a channel tunes it and does not follow the game (owner ruling).
  */
 @HiltViewModel
 class SportsViewModel internal constructor(
@@ -105,29 +164,71 @@ class SportsViewModel internal constructor(
     private val nowMono: () -> Long,
     /** (CHL §2.3) The wall clock for [SportsDays.today], the CHL's reference-zone date with its 05:00 roll-over. */
     private val nowUtcMs: () -> Long = System::currentTimeMillis,
+    /** The hub's seams; each is optional and the page works without it. */
+    private val detail: GameDetailRepository? = null,
+    private val matcher: GameChannelMatcher? = null,
+    private val resolver: ClipResolver? = null,
+    /** Builds the clip session on the view model's scope (null = no clips). */
+    clipSessionFactory: (CoroutineScope) -> ClipSession? = { null },
+    private val access: () -> ParentalAccess = { ParentalAccess.OPEN },
     /** The NHL's Eastern date, for its date fallback (unchanged; last, so a trailing lambda stays this one); the NFL has none (S6). */
     private val easternToday: () -> LocalDate,
 ) : ViewModel() {
-    @Inject constructor(scores: Optional<ScoreRepository>, store: SettingsStore) :
-        this(scores.orElse(null), store, android.os.SystemClock::elapsedRealtime, System::currentTimeMillis, { LocalDate.now(EASTERN) })
+    @Inject constructor(
+        scores: Optional<ScoreRepository>,
+        store: SettingsStore,
+        detail: Optional<GameDetailRepository>,
+        matcher: Optional<GameChannelMatcher>,
+        resolver: Optional<ClipResolver>,
+        controller: PlaybackController,
+        archive: ArchivePlayback,
+        parental: ParentalSession,
+        settings: GuideSettingsSource,
+    ) : this(
+        scores.orElse(null), store, android.os.SystemClock::elapsedRealtime, System::currentTimeMillis,
+        detail.orElse(null), matcher.orElse(null), resolver.orElse(null),
+        { scope -> ClipSession(controller, archive, resolver.orElse(null), scope) },
+        {
+            val requested = legacyParentalAccess(settings.settings.value.debugUnlocked)
+            if (requested == ParentalAccess.OPEN) requested else ParentalRules.accessFor(parental.state.value, null)
+        },
+        { LocalDate.now(EASTERN) },
+    )
 
-    /**
-     * (Sports Hub commit 0, docs/design/m6-sports-hub.md §6.5, R-S5) The clip layer's state for `AppRoot.sportsClip`.
-     * Stub: always [ClipUi] (no clip); WP-4 / WP-5 drive it from `ClipSession`.
-     */
-    val clipUi: StateFlow<ClipUi> = MutableStateFlow(ClipUi()).asStateFlow()
+    /** The clip session (null without a player); `SportsScreen` composes `ClipPlayerLayer` over it. */
+    val clipSession: ClipSession? = clipSessionFactory(viewModelScope)
 
-    /**
-     * (Sports Hub commit 0, §4.1, A-S6) Tune / archive / resume requests for `GuideViewModel.onSportsEffect` (collected by
-     * `MainActivity`). Stub: never emits.
-     */
-    val effects: SharedFlow<SportsEffect> = MutableSharedFlow<SportsEffect>().asSharedFlow()
+    /** For `AppRoot.sportsClip`: the session's own state, or "no clip". */
+    val clipUi: StateFlow<ClipUi> = clipSession?.ui ?: MutableStateFlow(ClipUi()).asStateFlow()
 
-    private val selected = MutableStateFlow(SportsDay.TODAY)
+    private val _effects = MutableSharedFlow<SportsEffect>(extraBufferCapacity = 8)
+    /** Tune / archive / resume requests for `GuideViewModel.onSportsEffect` (collected by `MainActivity`). */
+    val effects: SharedFlow<SportsEffect> = _effects.asSharedFlow()
 
-    /** Day keys learned from the Today board (null until one loaded). */
+    private val _toast = MutableStateFlow<HubToast?>(null)
+    /** The page's toast (§6.8, §5.5); the screen shows it for a few seconds and calls [toastShown]. */
+    val toast: StateFlow<HubToast?> = _toast.asStateFlow()
+    private var toastSeq = 0L
+
+    private val selected = MutableStateFlow(0)
+
+    /** The card the panel shows (the last one focused on this board); null = the board's initial-focus game. */
+    private val shownId = MutableStateFlow<String?>(null)
+
+    /** The NFL's neighbouring week keys, learned from the This-week board (S6). */
     private var yesterdayKey: String? = null
     private var tomorrowKey: String? = null
+    /** The key of this week's NFL board, or the date of today's board for the others (learned, reset on page entry). */
+    private var todayKey: String? = null
+    /** Day key → number of games, from the boards' `gameCounts` (§3.3), per page entry. */
+    private val gameCounts = HashMap<String, Int>()
+    /** Past-day boards, kept per page entry (≤ 15) so stepping back across final days does not refetch (§3.2). */
+    private val pastBoards = object : LinkedHashMap<String, DayState.Board>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, DayState.Board>?): Boolean = size > 15
+    }
+    private var orderKey: String? = null
+    private var orderIds: List<String> = emptyList()
+    private var boardId: String? = null
 
     val state: StateFlow<SportsUiState> = if (repo == null) {
         MutableStateFlow(SportsUiState(body = SportsBody.Failed(FailKind.IO)))
@@ -139,30 +240,149 @@ class SportsViewModel internal constructor(
                 val nfl = prefs.league.group == LeagueGroup.NFL
                 SportsUiState(
                     sel, body, (day as? DayState.Board)?.takeIf { it.failing }?.fetchedAtMono, prefs,
-                    canPrev = !nfl || yesterdayKey != null, canNext = !nfl || tomorrowKey != null,
+                    days = daysFor(prefs.league),
                     boardKey = (day as? DayState.Board)?.board?.dayKey?.takeIf { nfl },
                 )
             }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, SportsUiState())
     }
 
+    // ------------------------------------------------------------------ the panel
+
+    private val panelFocus = MutableStateFlow(false)
+    /** The slot actions held while focus is in the panel (§2.3); null = not frozen. */
+    private val frozen = MutableStateFlow<List<SlotAction?>?>(null)
+    private val matches = MutableStateFlow<Map<String, MatchState>>(emptyMap())
+    private val clipInfos = MutableStateFlow<Map<Long, ClipInfo>>(emptyMap())
+    /** True while the video service has refused the app (§6.8): the video slots and chips are off for `HUB_VIDEO_KEY_REREAD_MS`. */
+    private val videoOff = MutableStateFlow(false)
+    /** True while the video service has refused the app (§6.8): video slots and the card chip hide. */
+    val videoRefused: StateFlow<Boolean> get() = videoOff.asStateFlow()
+    private val detailFlow: StateFlow<DetailState> = detail?.detail ?: MutableStateFlow(DetailState.None)
+
+    private val _panel = MutableStateFlow(HubPanelModel(game = null))
+    /** What the detail panel shows now; always three slots. */
+    val panel: StateFlow<HubPanelModel> = _panel.asStateFlow()
+
+    private val _sheet = MutableStateFlow<HubSheet?>(null)
+    val sheet: StateFlow<HubSheet?> = _sheet.asStateFlow()
+
+    /** The lookups the page made, by video id (the sheets' durations and thumbnails). */
+    val clipInfo: StateFlow<Map<Long, ClipInfo>> = clipInfos.asStateFlow()
+
+    /** True while focus is in the panel. */
+    val panelFocused: StateFlow<Boolean> = panelFocus.asStateFlow()
+
+    private var fetchJob: Job? = null
+    private var matchJob: Job? = null
+    private var fetchedId: String? = null
+    private var fetchedPhase: GamePhase? = null
+    private val infoRequested = HashSet<Long>()
+    private var videoOffJob: Job? = null
+    private var entered = false
+
+    init {
+        viewModelScope.launch {
+            merge(
+                state.map { }, shownId.map { }, detailFlow.map { }, matches.map { }, clipInfos.map { }, panelFocus.map { },
+                frozen.map { }, videoOff.map { },
+            ).collect {
+                refreshPanel()
+                ensureClipInfos()
+            }
+        }
+        clipSession?.let { s ->
+            viewModelScope.launch {
+                s.state.collect { st ->
+                    val playing = st !is ClipSession.State.Idle
+                    detail?.pause(playing)
+                    if (entered) repo?.reportDemand(DemandOwner.SPORTS_TAB, !playing)
+                }
+            }
+            viewModelScope.launch { s.effects.collect { _effects.emit(it) } }
+            viewModelScope.launch {
+                s.failures.collect { f ->
+                    if (f == ClipSession.Failure.REFUSED) markVideoOff()
+                    toast(
+                        when (f) {
+                            ClipSession.Failure.UNAVAILABLE -> HubToastKind.VIDEO_UNAVAILABLE
+                            ClipSession.Failure.OFFLINE -> HubToastKind.VIDEO_OFFLINE
+                            ClipSession.Failure.REFUSED -> HubToastKind.VIDEO_REFUSED
+                            ClipSession.Failure.GEO -> HubToastKind.VIDEO_GEO
+                            ClipSession.Failure.NOT_FOUND -> HubToastKind.VIDEO_REMOVED
+                            ClipSession.Failure.NOT_PLAYABLE -> HubToastKind.VIDEO_NOT_PLAYABLE
+                            ClipSession.Failure.NO_CLIP -> HubToastKind.GOAL_NO_VIDEO
+                        },
+                    )
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ lifecycle
+
     /** The screen came on: today, once per open, and the day list is wanted (`SEEN`). */
     fun onEntered() {
-        selected.value = SportsDay.TODAY
-        // The NHL relearns its neighbours from the next Today board. The NFL keeps the week keys it learned (S6: there is no
-        // date to fall back to, and an unchanged board does not re-emit); a Today board overwrites them.
+        entered = true
+        selected.value = 0
+        // The NHL relearns today from the next board. The NFL keeps the week keys it learned (S6: there is no date to fall back
+        // to, and an unchanged board does not re-emit); a This-week board overwrites them.
         if (state.value.prefs.league.group != LeagueGroup.NFL) {
             yesterdayKey = null
             tomorrowKey = null
+            todayKey = null
         }
+        gameCounts.clear()
+        pastBoards.clear()
+        orderKey = null
+        orderIds = emptyList()
+        boardId = null
+        shownId.value = null
+        panelFocus.value = false
+        frozen.value = null
+        matches.value = emptyMap()
+        _sheet.value = null
+        fetchedId = null
+        fetchedPhase = null
+        infoRequested.clear()
+        matcher?.clear()
         val r = repo ?: return
-        r.reportDemand(DemandOwner.SPORTS_TAB, true)
+        r.reportDemand(DemandOwner.SPORTS_TAB, clipSession?.state?.value is ClipSession.State.Idle || clipSession == null)
         r.showDay(null)
     }
 
     fun onLeft() {
+        entered = false
         repo?.reportDemand(DemandOwner.SPORTS_TAB, false)
+        fetchJob?.cancel()
+        matchJob?.cancel()
+        detail?.show(null)
+        fetchedId = null
+        panelFocus.value = false
+        frozen.value = null
+        _sheet.value = null
+        if (clipSession != null && clipSession.state.value !is ClipSession.State.Idle) clipSession.close()
     }
+
+    override fun onCleared() {
+        // (R-N1) Ends the clip session without a resume: an effect emitted here would not be delivered.
+        clipSession?.close()
+        detail?.show(null)
+        detail?.trim()
+        matcher?.clear()
+        super.onCleared()
+    }
+
+    /** `onTrimMemory` ≥ RUNNING_LOW (§8.3): the detail, clip-info and match caches go. */
+    fun onTrimMemory() {
+        detail?.trim()
+        clipInfos.value = emptyMap()
+        infoRequested.clear()
+        matches.value = emptyMap()
+        matcher?.clear()
+    }
+
+    // ------------------------------------------------------------------ league and day chips
 
     /**
      * OK on a league chip (NFL §7.3, ruling 24; CHL §6.3): writes the shown league, which the repository answers by loading
@@ -171,9 +391,12 @@ class SportsViewModel internal constructor(
      */
     fun onLeague(league: League) {
         if (state.value.prefs.league == league) return
-        selected.value = SportsDay.TODAY
+        selected.value = 0
         yesterdayKey = null
         tomorrowKey = null
+        todayKey = null
+        gameCounts.clear()
+        pastBoards.clear()
         store?.update(SportsDomain) { it.copy(league = league, chlLeague = if (league.isChl) league else it.chlLeague) }
     }
 
@@ -193,69 +416,113 @@ class SportsViewModel internal constructor(
         )
     }
 
-    /** OK on a day chip. */
-    fun onDay(day: SportsDay) {
+    /** OK on a day chip ([offset] −7..+7; the NFL's −1 / 0 / +1 are weeks): one request, none on focus (§3.2). */
+    fun onDay(offset: Int) {
         val r = repo ?: return
+        val league = state.value.prefs.league
         // S6: an NFL neighbour that the board did not name is not requested (the chip is disabled; this is the guard).
-        if (state.value.prefs.league.group == LeagueGroup.NFL && day != SportsDay.TODAY && dayKeyFor(day, League.NFL) == null) return
-        if (selected.value == day) {
+        if (league.group == LeagueGroup.NFL && offset != 0 && dayKeyFor(offset, league) == null) return
+        if (offset !in allowedOffsets(league)) return
+        if (selected.value == offset) {
             // Pressing the chip you are on is a refresh request only when nothing is showing (a failure or a skeleton).
             if (state.value.body is SportsBody.Failed || state.value.body is SportsBody.Loading) r.retry()
             return
         }
-        selected.value = day
-        r.showDay(dayKeyFor(day, state.value.prefs.league))
+        selected.value = offset
+        val key = dayKeyFor(offset, league)
+        // A past day already read this visit is shown from memory: no request.
+        if (key != null && pastBoards[key] != null) return
+        r.showDay(key)
     }
 
-    /** OK on a card: Follow, or Stop following when it is the followed game. Following another game replaces the current one. */
-    fun onCard(card: GameCardModel) {
-        repo?.follow(if (card.followed) null else card.game)
-    }
-
-    /** OK on Retry (or on a failure's text). */
-    fun onRetry() {
-        repo?.retry()
-    }
-
-    fun setCorner(corner: ScoreCorner) {
-        store?.update(SportsDomain) { it.copy(corner = corner) }
-    }
-
-    fun setDelay(seconds: Int) {
-        store?.update(SportsDomain) { it.copy(delaySec = seconds) }
-    }
+    private fun allowedOffsets(league: League): IntRange =
+        if (league.group == LeagueGroup.NFL) -1..1 else -SportsConstants.HUB_DAY_RANGE..SportsConstants.HUB_DAY_RANGE
 
     /** The key to ask the repository for; null = today (`/score/now`). */
-    private fun dayKeyFor(day: SportsDay, league: League): String? = when (day) {
-        SportsDay.TODAY -> null
-        SportsDay.YESTERDAY -> yesterdayKey ?: dateFallback(-1, league)
-        SportsDay.TOMORROW -> tomorrowKey ?: dateFallback(1, league)
+    private fun dayKeyFor(offset: Int, league: League): String? = when {
+        offset == 0 -> null
+        league.group == LeagueGroup.NFL -> if (offset < 0) yesterdayKey else tomorrowKey // S6: never a date
+        else -> anchorDate(league).plusDays(offset.toLong()).toString()
     }
 
-    /**
-     * The date neighbour before a Today board has loaded: the NHL's Eastern date (unchanged); the CHL's own "today" (§2.3,
-     * [SportsDays.today]); the NFL has none (S6), so its chip is disabled instead.
-     */
-    private fun dateFallback(days: Long, league: League): String? = when (league.group) {
-        LeagueGroup.NHL -> easternToday().plusDays(days).toString()
-        LeagueGroup.NFL -> null
-        LeagueGroup.CHL -> SportsDays.today(league, nowUtcMs()).plusDays(days).toString()
+    /** The date today's chip stands for: today's board when one has loaded, else the league's own date (§3.2). */
+    private fun anchorDate(league: League): LocalDate =
+        todayKey?.let { runCatching { LocalDate.parse(it) }.getOrNull() } ?: dateFallback(league)
+
+    /** The league's date before a today board has loaded: the NHL's Eastern date; the CHL's own "today" (§2.3, [SportsDays.today]). */
+    private fun dateFallback(league: League): LocalDate = when (league.group) {
+        LeagueGroup.NHL -> easternToday()
+        LeagueGroup.NFL -> easternToday() // never used: the NFL has no date chips (S6)
+        LeagueGroup.CHL -> SportsDays.today(league, nowUtcMs())
     }
 
-    private fun bodyOf(day: DayState, followedId: app.thebox.core.sports.GameId?, sel: SportsDay, league: League, refused: Boolean = false): SportsBody = when (day) {
-        DayState.Loading -> SportsBody.Loading
-        is DayState.Failed -> SportsBody.Failed(day.kind)
-        is DayState.Board -> {
-            val b = day.board
-            // A board of the other league (the repository is still switching) never passes for the shown one.
-            if (boardLeague(b) != league) SportsBody.Loading else {
-                // U-N5: only a board the repository says is today's teaches the neighbours, whatever the order of events.
-                if (sel == SportsDay.TODAY && day.isToday) learn(b, league)
-                if (!isFor(day, sel, league)) SportsBody.Loading
-                else if (b.games.isEmpty()) SportsBody.Empty(b.dayKey, sel)
-                else SportsBody.Games(order(b.games, league).map { GameCardModel(it, it.id == followedId, day.fetchedAtMono, refused && it.id == followedId) })
+    private fun daysFor(league: League): List<DayChip> =
+        if (league.group == LeagueGroup.NFL) {
+            listOf(
+                DayChip(-1, yesterdayKey, enabled = yesterdayKey != null),
+                DayChip(0, todayKey),
+                DayChip(1, tomorrowKey, enabled = tomorrowKey != null),
+            )
+        } else {
+            val anchor = anchorDate(league)
+            (-SportsConstants.HUB_DAY_RANGE..SportsConstants.HUB_DAY_RANGE).map { o ->
+                val key = anchor.plusDays(o.toLong()).toString()
+                DayChip(o, key, noGames = gameCounts[key] == 0)
             }
         }
+
+    // ------------------------------------------------------------------ the day list
+
+    private fun bodyOf(day: DayState, followedId: GameId?, sel: Int, league: League, refused: Boolean = false): SportsBody {
+        // A past day read earlier this visit comes from memory (§3.2).
+        val cached = if (sel != 0) dayKeyFor(sel, league)?.let { pastBoards[it] } else null
+        val shown = cached ?: day
+        return when (shown) {
+            DayState.Loading -> SportsBody.Loading
+            is DayState.Failed -> SportsBody.Failed(shown.kind)
+            is DayState.Board -> {
+                val b = shown.board
+                // A board of the other league (the repository is still switching) never passes for the shown one.
+                if (boardLeague(b) != league) SportsBody.Loading else {
+                    // U-N5: only a board the repository says is today's teaches today, whatever the order of events.
+                    if (sel == 0 && shown.isToday) learn(b, league)
+                    b.gameCounts.forEach { (k, n) -> gameCounts[k] = n }
+                    if (cached == null && !isFor(shown, sel, league)) SportsBody.Loading
+                    else {
+                        if (sel != 0 && cached == null && isPast(b, league)) pastBoards[b.dayKey] = shown
+                        if (b.games.isEmpty()) SportsBody.Empty(b.dayKey, sel)
+                        else {
+                            val id = "${league.name}|$sel|${b.dayKey}"
+                            if (boardId != id) { boardId = id; shownId.value = null }
+                            SportsBody.Games(
+                                frozenOrder(id, b.games, league).map { GameCardModel(it, it.id == followedId, shown.fetchedAtMono, refused && it.id == followedId) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /** A board worth keeping: a day before today whose games are all over. */
+    private fun isPast(b: DayBoard, league: League): Boolean =
+        league.group != LeagueGroup.NFL && b.games.isNotEmpty() && b.games.all { it.phase == GamePhase.FINAL || it.phase == GamePhase.POSTPONED } &&
+            runCatching { LocalDate.parse(b.dayKey).isBefore(anchorDate(league)) }.getOrDefault(false)
+
+    /** (U-S3) The order is computed once per board; re-polls keep it, a new game goes last and a vanished one drops out. */
+    private fun frozenOrder(key: String, games: List<GameSnapshot>, league: League): List<GameSnapshot> {
+        if (orderKey != key || orderIds.isEmpty()) {
+            val sorted = order(games, league)
+            orderKey = key
+            orderIds = sorted.map { it.id.id }
+            return sorted
+        }
+        val byId = games.associateBy { it.id.id }
+        val kept = orderIds.mapNotNull { byId[it] }
+        val fresh = order(games.filter { it.id.id !in orderIds }, league)
+        val result = kept + fresh
+        orderIds = result.map { it.id.id }
+        return result
     }
 
     /** (CHL §1.2) A CHL board names its league, so an empty one is never read as an NHL board; older boards are inferred. */
@@ -266,29 +533,296 @@ class SportsViewModel internal constructor(
         if (league.group == LeagueGroup.NFL) {
             // S6: the week keys the board named, or none (an edge, the off-season or an empty board): never a date.
             // (Fix pass U2) Always from a This-week board: once ESPN's week rolls over, the new This week is the key
-            // learned as Next week, and the guard below would skip it forever (the view model lives for days).
+            // learned as Next week, and a "learn once" guard would skip it forever (the view model lives for days).
             yesterdayKey = b.prevDay.takeIf { b.games.isNotEmpty() }
             tomorrowKey = b.nextDay.takeIf { b.games.isNotEmpty() }
+            todayKey = b.dayKey
             return
         }
-        // A board shown for Today that is not already known as another day's: remember its neighbours.
-        if (b.dayKey != yesterdayKey && b.dayKey != tomorrowKey) {
-            yesterdayKey = b.prevDay ?: runCatching { LocalDate.parse(b.dayKey).minusDays(1).toString() }.getOrNull()
-            tomorrowKey = b.nextDay ?: runCatching { LocalDate.parse(b.dayKey).plusDays(1).toString() }.getOrNull()
+        if (b.dayKey != dayKeyForGuard(-1, league) && b.dayKey != dayKeyForGuard(1, league)) todayKey = b.dayKey
+    }
+
+    private fun dayKeyForGuard(offset: Int, league: League): String = anchorDate(league).plusDays(offset.toLong()).toString()
+
+    /** A stale board of another chip's day must not pass for the one just chosen while its load is in flight. */
+    private fun isFor(day: DayState.Board, sel: Int, league: League): Boolean {
+        val b = day.board
+        return when {
+            // (Fix pass U2) The NFL trusts the repository's isToday: a week key is never a calendar date, and after a
+            // week rollover the new This week equals the stale Next week key.
+            sel == 0 -> day.isToday && (league.group == LeagueGroup.NFL || (b.dayKey != dayKeyForGuard(-1, league) && b.dayKey != dayKeyForGuard(1, league)))
+            else -> dayKeyFor(sel, league)?.let { b.dayKey == it } ?: false
         }
     }
 
-    /** A stale board of another chip's day must not pass for the one just chosen while its load is in flight. */
-    private fun isFor(day: DayState.Board, sel: SportsDay, league: League): Boolean {
-        val b = day.board
-        return when (sel) {
-            // (Fix pass U2) The NFL trusts the repository's isToday: a week key is never a calendar date, and after a
-            // week rollover the new This week equals the stale Next week key.
-            SportsDay.TODAY -> day.isToday && (league.group == LeagueGroup.NFL || (b.dayKey != yesterdayKey && b.dayKey != tomorrowKey))
-            SportsDay.YESTERDAY -> dayKeyFor(sel, league)?.let { b.dayKey == it } ?: false
-            SportsDay.TOMORROW -> dayKeyFor(sel, league)?.let { b.dayKey == it } ?: false
+    // ------------------------------------------------------------------ focus, panel and slots
+
+    /** Compose focus moved to a card ([id] null = it left the grid for a chip or the title row: the panel keeps its game). */
+    fun onCardFocused(id: String?) {
+        if (id == null) return
+        if (shownId.value == id) return
+        shownId.value = id
+        val game = currentCards().firstOrNull { it.game.id.id == id }?.game ?: return
+        startFetch(game, immediate = false)
+    }
+
+    /** The screen's first board / a new board: the panel's initial game starts its dwell too. */
+    fun onBoardShown() {
+        val g = shownGame() ?: return
+        startFetch(g, immediate = false)
+    }
+
+    /**
+     * OK or Menu on a card, or Left from the left column (§2.2): focus goes to the panel's first enabled slot. Starts the detail,
+     * the match and the clip lookups at once. Returns the slot index to focus, or null when no slot is enabled (nothing happens).
+     */
+    fun enterPanel(id: String): Int? {
+        if (shownId.value != id) shownId.value = id
+        val game = currentCards().firstOrNull { it.game.id.id == id }?.game ?: return null
+        refreshPanel()
+        // OK skips the dwell: show() again even when this game was already fetched (the repository re-reads at once).
+        detail?.show(game)
+        startFetch(game, immediate = true)
+        refreshPanel()
+        val first = _panel.value.firstEnabled ?: return null
+        frozen.value = _panel.value.slots.map { it.action }
+        panelFocus.value = true
+        refreshPanel()
+        return _panel.value.firstEnabled ?: first
+    }
+
+    /** Focus left the panel (Back, Right from the last slot, or a sheet closed back to a card): the slots thaw. */
+    fun onPanelExited() {
+        panelFocus.value = false
+        frozen.value = null
+    }
+
+    /** A slot's action (§1.5). */
+    fun onSlot(index: Int) {
+        val p = _panel.value
+        val game = p.game ?: return
+        val slot = p.slots.getOrNull(index) ?: return
+        if (!slot.usable) return
+        when (slot.action) {
+            SlotAction.FOLLOW -> repo?.follow(if (p.followed) null else game)
+            SlotAction.RETRY -> detail?.retry()
+            SlotAction.CHANNEL -> {
+                val ctx = ctxOf(p)
+                val watch = HubSlots.watchable(ctx)
+                if (watch != null && slot.label == SlotLabel.WATCH) tune(watch)
+                else _sheet.value = HubSheet.Channels(game.id, archiveOnly = false)
+            }
+            SlotAction.GOALS -> _sheet.value = HubSheet.Goals(game.id)
+            SlotAction.WATCH_RECAP -> p.detail?.recapId.let { it ?: game.media?.recapId }?.let { playClips(listOf(ClipRef(it, ClipKind.RECAP, game.id)), 0) }
+            SlotAction.BOX_SCORE -> openBoxScore(game)
+            SlotAction.MATCHUP -> _sheet.value = HubSheet.Matchup(game.id)
+            SlotAction.WATCH_FROM_START -> {
+                val rows = p.candidates.filter { it.airing != null }
+                if (rows.size == 1) playArchive(rows[0]) else if (rows.isNotEmpty()) _sheet.value = HubSheet.Channels(game.id, archiveOnly = true)
+            }
+            null -> Unit
         }
     }
+
+    /** OK on Retry (or on a failure's text). */
+    fun onRetry() {
+        repo?.retry()
+    }
+
+    fun closeSheet() {
+        _sheet.value = null
+    }
+
+    private fun openBoxScore(game: GameSnapshot) {
+        val d = detail
+        _sheet.value = HubSheet.BoxScoreSheet(game.id, null)
+        if (d == null) { _sheet.value = HubSheet.BoxScoreSheet(game.id, Fetch.Failed(FailKind.IO, null, nowMono())); return }
+        viewModelScope.launch {
+            val box = d.boxScore(game.id)
+            val cur = _sheet.value
+            if (cur is HubSheet.BoxScoreSheet && cur.gameId == game.id) _sheet.value = cur.copy(box = box)
+        }
+    }
+
+    /** Retry in the Box score sheet. */
+    fun retryBoxScore() {
+        val cur = _sheet.value as? HubSheet.BoxScoreSheet ?: return
+        val game = currentCards().firstOrNull { it.game.id == cur.gameId }?.game ?: return
+        openBoxScore(game)
+    }
+
+    // ------------------------------------------------------------------ the sheets' actions
+
+    /** OK on a channel row or on Watch: tunes it, goes full screen, and does **not** follow the game (owner ruling). */
+    fun tune(c: ChannelCandidate) {
+        _effects.tryEmit(SportsEffect.Tune(c.channel))
+    }
+
+    /** OK on a catch-up row / "Watch from start": the existing archive path. */
+    fun playArchive(c: ChannelCandidate) {
+        val info = c.airing ?: return
+        _effects.tryEmit(SportsEffect.PlayArchive(c.channel, info))
+    }
+
+    /** OK on a row of a game that is not on yet (§5.5). */
+    fun channelNotYet() {
+        val g = panel.value.game ?: return
+        toast(HubToastKind.STARTS_AT, g.startUtcMs)
+    }
+
+    fun missingClip() = toast(HubToastKind.GOAL_NO_VIDEO)
+
+    /** Plays [queue]`[`[index]`]` through the clip session (a goal and every later goal, or a recap of one). */
+    fun playClips(queue: List<ClipRef>, index: Int) {
+        val s = clipSession ?: run { toast(HubToastKind.VIDEO_NOT_PLAYABLE); return }
+        s.play(queue, index)
+    }
+
+    fun toastShown(seq: Long) {
+        if (_toast.value?.seq == seq) _toast.value = null
+    }
+
+    private fun toast(kind: HubToastKind, startUtcMs: Long? = null) {
+        _toast.value = HubToast(kind, startUtcMs, ++toastSeq)
+    }
+
+    private fun markVideoOff() {
+        videoOff.value = true
+        videoOffJob?.cancel()
+        videoOffJob = viewModelScope.launch {
+            delay(SportsConstants.HUB_VIDEO_KEY_REREAD_MS)
+            videoOff.value = false
+        }
+    }
+
+    // ------------------------------------------------------------------ fetching for the shown game
+
+    private fun currentCards(): List<GameCardModel> = (state.value.body as? SportsBody.Games)?.cards.orEmpty()
+
+    private fun shownGame(): GameSnapshot? = shownCard()?.game
+
+    private fun shownCard(): GameCardModel? {
+        val cards = currentCards()
+        if (cards.isEmpty()) return null
+        val id = shownId.value
+        return cards.firstOrNull { it.game.id.id == id } ?: cards[initialFocusIndex(cards) ?: 0]
+    }
+
+    /** The panel's game starts its detail, match and clip lookups after the dwell, or at once ([immediate]). */
+    private fun startFetch(game: GameSnapshot, immediate: Boolean) {
+        if (fetchedId == game.id.id && fetchedPhase == game.phase) return
+        fetchJob?.cancel()
+        fetchJob = viewModelScope.launch {
+            if (!immediate) delay(SportsConstants.HUB_FETCH_DWELL_MS)
+            fetchedId = game.id.id
+            fetchedPhase = game.phase
+            detail?.show(game)
+            startMatch(game)
+            ensureClipInfos()
+        }
+    }
+
+    private fun startMatch(game: GameSnapshot) {
+        val id = game.id.id
+        if (game.phase == GamePhase.POSTPONED) return
+        if (matches.value[id] is MatchState.Done) return
+        val m = matcher
+        if (m == null) { matches.value = matches.value + (id to MatchState.Done(emptyList())); return }
+        matchJob?.cancel()
+        matches.value = matches.value + (id to MatchState.Finding)
+        matchJob = viewModelScope.launch {
+            val found = runCatching { m.match(game, nowUtcMs(), access()) }.getOrElse { if (it is kotlin.coroutines.cancellation.CancellationException) throw it else emptyList() }
+            matches.value = matches.value + (id to MatchState.Done(found))
+        }
+    }
+
+    /** The clip lookups of the shown NHL game (§6.3): the recap and the winning goal's clip; the latest goal's clip. */
+    private fun ensureClipInfos() {
+        val r = resolver ?: return
+        val game = shownGame() ?: return
+        if (game.id.league.group != LeagueGroup.NHL || fetchedId != game.id.id) return
+        val ds = detailFlow.value
+        val d = (ds as? DetailState.Ready)?.detail?.takeIf { it.id == game.id }
+        val refs = ArrayList<ClipRef>()
+        when (game.phase) {
+            GamePhase.FINAL -> {
+                (d?.recapId ?: game.media?.recapId)?.let { refs += ClipRef(it, ClipKind.RECAP, game.id) }
+                if (d != null) HubSummary.winningGoal(game, d)?.clipId?.let { refs += ClipRef(it, ClipKind.GOAL, game.id) }
+            }
+            GamePhase.LIVE, GamePhase.INTERMISSION ->
+                d?.goals?.lastOrNull { it.clipId != null }?.clipId?.let { refs += ClipRef(it, ClipKind.GOAL, game.id) }
+            else -> Unit
+        }
+        for (ref in refs) {
+            if (!infoRequested.add(ref.videoId)) continue
+            viewModelScope.launch {
+                when (val res = runCatching { r.info(ref) }.getOrElse { if (it is kotlin.coroutines.cancellation.CancellationException) throw it else null }) {
+                    is ClipResult.Ok -> clipInfos.value = (clipInfos.value + (ref.videoId to res.value)).let { m -> if (m.size > 40) m.entries.drop(m.size - 40).associate { it.toPair() } else m }
+                    ClipResult.Refused -> { infoRequested.remove(ref.videoId); markVideoOff() }
+                    else -> if (res !is ClipResult.NotFound) infoRequested.remove(ref.videoId)
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ building the panel
+
+    private fun ctxOf(p: HubPanelModel): HubSlots.Ctx = HubSlots.Ctx(
+        game = p.game!!, followed = p.followed, detail = p.detail, failure = p.failure,
+        match = p.match, videoOff = videoOff.value, nowMs = p.nowMs, matcherBound = matcher != null,
+    )
+
+    private fun refreshPanel() {
+        _panel.value = buildPanel()
+    }
+
+    private fun buildPanel(): HubPanelModel {
+        val card = shownCard() ?: return HubPanelModel(game = null)
+        val g = card.game
+        val ds = detailFlow.value
+        var d: GameDetail? = null
+        var kind = if (g.id.league.group == LeagueGroup.NHL) DetailKind.NONE else DetailKind.BOARD_ONLY
+        var failure: FailKind? = null
+        var stale = false
+        var failing = false
+        var statsAt: Long? = null
+        val now = nowUtcMs()
+        when (ds) {
+            is DetailState.Ready -> if (ds.detail.id == g.id) {
+                d = ds.detail; kind = DetailKind.READY; stale = ds.stale; failing = ds.failing
+                statsAt = now - (nowMono() - ds.fetchedAtMono).coerceAtLeast(0L)
+            }
+            is DetailState.Loading -> if (ds.id == g.id) kind = DetailKind.LOADING
+            is DetailState.Failed -> if (ds.id == g.id) { kind = DetailKind.FAILED; failure = ds.kind }
+            is DetailState.BoardOnly -> if (ds.id == g.id) kind = DetailKind.BOARD_ONLY
+            DetailState.None -> Unit
+        }
+        // §4.3: the headline's score is the newer of the board's and the detail's answer; a tie takes the board.
+        var away = g.away.score
+        var home = g.home.score
+        val ready = ds as? DetailState.Ready
+        if (d != null && ready != null && (g.phase == GamePhase.LIVE || g.phase == GamePhase.INTERMISSION) && d.awayScore != null && d.homeScore != null &&
+            ready.fetchedAtMono > card.anchorMono
+        ) {
+            away = d.awayScore; home = d.homeScore
+        }
+        val match = matches.value[g.id.id] ?: MatchState.Idle
+        val infos = clipInfos.value
+        val recapId = d?.recapId ?: g.media?.recapId
+        val latest = d?.goals?.lastOrNull { it.clipId != null }?.clipId
+        val winning = if (d != null && g.phase == GamePhase.FINAL) HubSummary.winningGoal(g, d)?.clipId else null
+        val base = HubPanelModel(
+            game = g, followed = card.followed, detail = d, detailKind = kind, failure = failure, stale = stale, failing = failing,
+            statsAtMs = statsAt, awayScore = away, homeScore = home, match = match,
+            recap = recapId?.let { infos[it] }, latestGoal = latest?.let { infos[it] }, winningGoal = winning?.let { infos[it] }, nowMs = now,
+        )
+        val ctx = ctxOf(base)
+        val fr = frozen.value
+        val slots = if (panelFocus.value && fr != null) fr.map { HubSlots.forAction(it, ctx) } else HubSlots.default(ctx)
+        return base.copy(slots = slots)
+    }
+
+    // ------------------------------------------------------------------ the old page's helpers (kept)
 
     companion object {
         val EASTERN: ZoneId = ZoneId.of("America/New_York")

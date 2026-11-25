@@ -51,36 +51,13 @@ class ChlFitTest {
     private fun width(text: String, px: Int, face: android.graphics.Typeface?): Float =
         Paint(Paint.ANTI_ALIAS_FLAG).apply { typeface = face; textSize = px.toFloat() }.measureText(text)
 
-    // ------------------------------------------------------------------ the cards
+    // ------------------------------------------------------------------ the cards (their fit is in HubCardFitTest)
 
     @Test
     fun theTeamCountIs61WithTheExpectedCodeLengths() {
         assertEquals(listOf(20, 23, 18), listOf(ChlTestTeams.OHL.size, ChlTestTeams.WHL.size, ChlTestTeams.QMJHL.size))
         assertEquals(listOf("ER", "NB", "OS"), ChlTestTeams.OHL.map { it.code }.filter { it.length == 2 })
         assertEquals(listOf("BRAM", "FLNT", "NIAG"), ChlTestTeams.ALL.map { it.code }.filter { it.length == 4 })
-    }
-
-    @Test
-    fun everyNicknameFitsTheCardNameColumnAt32SemiboldWithoutAnEllipsis() {
-        val limit = GameCardMetrics.NAME_W.toFloat()
-        for (t in ChlTestTeams.ALL) {
-            val line = SportsFixtures.chlTeam(t.code, t.nickname)
-            assertEquals("a card draws the nickname", t.nickname, cardName(line))
-            val w = width(cardName(line), GameCardMetrics.NAME_PX, semi)
-            assertTrue("${t.league} ${t.nickname} is $w px, the name column is $limit", w <= limit)
-        }
-        // The longest nicknames the design names, and that "City Nickname" does not fit (so the card must use the nickname).
-        for (n in listOf("Thunderbirds", "Winterhawks", "Saguenéens")) assertTrue(n, width(n, GameCardMetrics.NAME_PX, semi) <= limit)
-        assertFalse(width("Blainville-Boisbriand Armada", GameCardMetrics.NAME_PX, semi) <= limit)
-        assertTrue("Golden Knights is the NHL's longest", width("Thunderbirds", GameCardMetrics.NAME_PX, semi) <= width("Golden Knights", GameCardMetrics.NAME_PX, semi))
-    }
-
-    @Test
-    fun everyCodeFitsTheLogoPlateUntilTheLogoLoads() {
-        for (code in ChlTestTeams.CODES) {
-            val w = width(code, 22, semi)
-            assertTrue("$code is $w px on the ${GameCardMetrics.PLATE_W} px plate", w <= GameCardMetrics.PLATE_W - 12)
-        }
     }
 
     // ------------------------------------------------------------------ the picker rows
