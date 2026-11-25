@@ -48,6 +48,7 @@ import app.thebox.ui.full.PlayerHost
 import app.thebox.ui.full.PlayerText
 import app.thebox.ui.guide.vm.GuideViewModel
 import app.thebox.ui.guide.vm.TunedStateMapper
+import app.thebox.ui.guide.vm.withoutActiveClip
 import app.thebox.ui.root.ShellEvent
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -67,6 +68,7 @@ import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -176,7 +178,15 @@ class PlayerViewModel @Inject constructor(
     private var nowRange: IntRange? = null
     private var nowJob: Job? = null
 
-    override val cues: StateFlow<List<Cue>> = combine(controller.cues, guideFull) { c, full -> if (full) c else emptyList() }
+    /**
+     * Cues reach the screen while the guide is FULL, and (Sports Hub §6.5) while the playback target is a clip: the
+     * clip plays full screen with the mode still SPORTS, so the guide is never FULL under it.
+     */
+    override val cues: StateFlow<List<Cue>> = combine(
+        controller.cues,
+        guideFull,
+        controller.state.map { it.target?.isClip == true }.distinctUntilChanged(),
+    ) { c, full, clip -> if (full || clip) c else emptyList() }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     override val archiveFailure: StateFlow<app.thebox.core.catchup.archive.ArchiveFailure?> =
@@ -327,7 +337,8 @@ class PlayerViewModel @Inject constructor(
     private fun forwardFeeds() {
         val scope = viewModelScope
         scope.launch {
-            combine(controller.state, archive.status) { st, status -> st to status }.collect { (st, status) ->
+            // (Sports Hub R-S1) Active clip states never reach the player machine; a terminal one arrives as Idle.
+            combine(controller.state.mapNotNull { it.withoutActiveClip() }, archive.status) { st, status -> st to status }.collect { (st, status) ->
                 val ch = st.target?.identity?.let { channelOf(it) }
                 // (M5, B1) A tune the guard refused never played.
                 val shown = if (st is app.thebox.player.api.PlaybackState.Stopped && st.reason == app.thebox.player.api.StopReason.LOCKED) app.thebox.player.api.PlaybackState.Idle else st

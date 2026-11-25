@@ -21,6 +21,9 @@ import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.source.LoadEventInfo
 import androidx.media3.exoplayer.source.MediaLoadData
 import app.thebox.core.common.BoxLog
+import app.thebox.core.common.Redact
+import app.thebox.core.sports.SportsConstants
+import app.thebox.core.sports.hub.ClipFormat
 import app.thebox.core.common.Outcome
 import app.thebox.core.common.SourceError
 import app.thebox.core.common.AuthReason
@@ -70,6 +73,8 @@ import app.thebox.core.playback.broker.BrokerConstants
 import app.thebox.core.playback.errors.ErrorConstants
 import app.thebox.core.playback.errors.ErrorLadderImpl
 import app.thebox.core.playback.stall.StallConstants
+import app.thebox.player.engine.ClipMedia
+import app.thebox.player.engine.MediaSourceBuilder
 import app.thebox.player.engine.PlayerFactory
 import app.thebox.player.engine.StatsCollector
 import app.thebox.player.engine.UnsupportedStreamFormatException
@@ -78,6 +83,7 @@ import app.thebox.core.source.PlaylistType
 import app.thebox.core.xtream.AccountStatus
 import app.thebox.core.xtream.XtreamAccountInfo
 import app.thebox.player.api.ArchiveTune
+import app.thebox.player.api.ClipTune
 import app.thebox.player.api.BufferingCause
 import app.thebox.player.api.ChannelMemory
 import app.thebox.player.api.ChannelPlaybackMemory
@@ -294,6 +300,8 @@ internal class PlaybackControllerImpl @Inject constructor(
             _previous.value = value
         }
     private var lifecycleStopAtMs = 0L
+    /** (Sports Hub §6.5) The channel a clip (or a queue of clips) replaced: a zap from elsewhere during it starts there. */
+    private var clipZapAnchor: ChannelIdentity? = null
     /**
      * (M4, M2 E-L2) The session whose display-mode gate opened (`awaitSettled`): only then may a resume set
      * `playWhenReady`; before it, the gate itself applies `!c.paused`.
@@ -328,6 +336,11 @@ internal class PlaybackControllerImpl @Inject constructor(
     private sealed interface Spec {
         data class Live(val target: TuneTarget) : Spec
         data class Archive(val tune: ArchiveTune) : Spec
+        /**
+         * (Sports Hub, docs/design/m6-sports-hub.md §6.5, A-B1) One NHL clip ([playClip]): VOD on the one player, no
+         * identity, no resolver, no ladder, no display-mode work, never resumed by the controller.
+         */
+        data class Clip(val tune: ClipTune) : Spec
     }
 
     /** (Keep-decoders WP-0) Decoder cost of the zap in progress; written into its [ZapRecord] and one log line. */
@@ -368,6 +381,8 @@ internal class PlaybackControllerImpl @Inject constructor(
         var firstSession = true
         /** Archive position at stop, so a resume continues there. */
         var archiveResumeAtMs = 0L
+        /** (Sports Hub §6.5) IO / 5xx / stall restarts of this clip cycle so far (at most `HUB_CLIP_RESTARTS`). */
+        var clipRestarts = 0
 
         // Provider facts, read once per cycle.
         var factsLoaded = false
@@ -454,6 +469,11 @@ internal class PlaybackControllerImpl @Inject constructor(
         var fpsMilli: Int? = null
 
         val isArchive: Boolean get() = spec is Spec.Archive
+        /** (Sports Hub §6.5) A clip cycle. `NowPlaying.isArchive` stays false for it (ArchivePlayback never takes it). */
+        val isClip: Boolean get() = spec is Spec.Clip
+        /** (Sports Hub §6.5) Archive or clip: a finite file with a real pause, an end, a seekable playhead. */
+        val isVod: Boolean get() = isArchive || isClip
+        val clip: ClipTune? get() = (spec as? Spec.Clip)?.tune
         val archive: ArchiveTune? get() = (spec as? Spec.Archive)?.tune
         val directTarget: TuneTarget.DirectUrl? get() = (spec as? Spec.Live)?.target as? TuneTarget.DirectUrl
     }
@@ -494,6 +514,25 @@ internal class PlaybackControllerImpl @Inject constructor(
     }
 
     /**
+     * (Sports Hub, docs/design/m6-sports-hub.md §6.1, §6.5, A-B1, A-B2) Plays [tune] as a clip cycle on the one player and
+     * returns its tune id. No guard (a clip has no channel), no resume memory: `ClipSession` owns what comes after. Any
+     * other tune, catch-up, zap or stop simply replaces the cycle.
+     *
+     * (Sports Hub code review 2026-11-25, H1) A clip never starts while the app is away (Home, standby, a display or
+     * HDMI grace): a lookup that answers after the viewer left would otherwise play in the background. Returns
+     * [PlaybackController.CLIP_REFUSED_AWAY] and changes nothing; `ClipSession` ends on it quietly (no toast, no resume).
+     */
+    override fun playClip(tune: ClipTune): Long {
+        if (lifecycle.away) {
+            BoxLog.i(TAG) { "clip refused: the app is not in the foreground" }
+            return PlaybackController.CLIP_REFUSED_AWAY
+        }
+        cancelPendingZap()
+        startCycle(Spec.Clip(tune))
+        return cycle?.firstTuneId ?: -1
+    }
+
+    /**
      * (M5, docs/design/m5-setup-settings.md §3.9.2, B1) The [TuneGuard] backstop for a direct request (tune, catch-up,
      * retry). A refused target never starts: the current stream stops (its connection is released) and the state
      * becomes `Stopped(target = the refused channel, reason = LOCKED, resumable = false)`, from which the guide/player
@@ -531,7 +570,8 @@ internal class PlaybackControllerImpl @Inject constructor(
         val job = scope.launch(start = CoroutineStart.LAZY) {
             zapMutex.withLock {
                 if (generation != zapGeneration) return@withLock
-                val from = _pendingZap.value ?: cycle?.identity ?: return@withLock
+                // (Sports Hub §6.5) Under a clip (no identity) the zap list moves from the channel the clip replaced.
+                val from = _pendingZap.value ?: cycle?.identity ?: clipZapAnchor?.takeIf { cycle?.isClip == true } ?: return@withLock
                 val next = try {
                     allowedNeighbour(list, from, delta)
                 } catch (e: CancellationException) {
@@ -605,7 +645,7 @@ internal class PlaybackControllerImpl @Inject constructor(
      */
     override fun reapplySettings() {
         val c = cycle ?: return
-        if (c.isArchive || c.cardShown) return
+        if (c.isVod || c.cardShown) return
         val st = _state.value
         if (st !is PlaybackState.Playing && st !is PlaybackState.Buffering && st !is PlaybackState.Connecting && st !is PlaybackState.Stalled) return
         // A paused unbuffered live tune resumes with a fresh tune anyway; (M6, §7.6) a buffered one re-prepares its reader
@@ -639,6 +679,8 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     override fun peekExternalHandOff(): ExternalHandOff? {
         val c = cycle ?: return null
+        // (Sports Hub §6.5) A clip's signed address is never handed to another app.
+        if (c.isClip) return null
         val resolved = c.resolved ?: return null
         return ExternalHandOff(url = resolved.url, headers = resolved.headers, title = c.title)
     }
@@ -649,8 +691,8 @@ internal class PlaybackControllerImpl @Inject constructor(
     /** (M5 integration, §3.6.2) The Sources picker: the same cycle, re-resolved on base [index]; the guard still applies. */
     override fun selectServer(index: Int) {
         val c = cycle ?: return
-        // (Fix pass P2) An archive request is a fixed URL on one base: there is nothing to switch to.
-        if (c.isArchive) return
+        // (Fix pass P2) An archive request is a fixed URL on one base: there is nothing to switch to. Nor a clip.
+        if (c.isVod) return
         val count = c.resolved?.baseCount ?: return
         if (index !in 0 until count || index == c.resolved?.baseIndex) return
         if (c.identity != null && refused(c.identity, c.isArchive)) return
@@ -667,6 +709,8 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     override fun retry() {
         val c = cycle ?: return
+        // (Sports Hub §6.5, R-S1) Never restarts a clip cycle on its own: ClipSession's Try again re-resolves and plays.
+        if (c.isClip) return
         if (c.identity != null && refused(c.identity, c.isArchive)) return
         // §4.3 "Retry from the card": fresh counters (new cycle) and a fresh re-resolve window for the channel.
         limiter.reset(limiterKey(c))
@@ -704,25 +748,39 @@ internal class PlaybackControllerImpl @Inject constructor(
         val identity = when (spec) {
             is Spec.Live -> (spec.target as? TuneTarget.Channel)?.identity
             is Spec.Archive -> spec.tune.identity
+            is Spec.Clip -> null
         }
+        val clip = spec is Spec.Clip
         cycle?.let { old ->
             // (M6, §7.2, A-S1) The old cycle's recorder: call cancelled and lease released before anything new opens. A
-            // zap keeps the file for a logical reset; a catch-up request ends the ring for good (§8.3).
-            closeTimeshift(old, discardFile = spec is Spec.Archive)
+            // zap keeps the file for a logical reset; a catch-up request ends the ring for good (§8.3). (Sports Hub §6.5)
+            // So does a clip: the resume after it is a fresh live start anyway.
+            closeTimeshift(old, discardFile = spec is Spec.Archive || clip)
             finishZapRecord(old, "superseded")
-            if (old.identity != null && old.identity != identity && old.firstMediaReached &&
+            // (Sports Hub §6.5, A-B2.4) A clip on either side never moves the previous channel: after "X → clip → X" the
+            // last-channel key still goes to the channel before X.
+            if (!clip && !old.isClip && old.identity != null && old.identity != identity && old.firstMediaReached &&
                 now - old.firstMediaAtMs >= PREVIOUS_CHANNEL_MIN_PLAY_MS
             ) {
                 previousIdentity = old.identity
             }
         }
+        if (clip) {
+            val old = cycle
+            if (old != null && !old.isClip) clipZapAnchor = old.identity
+            else if (old == null) clipZapAnchor = null
+        } else {
+            clipZapAnchor = null
+        }
         cancelCycleJobs()
         val c = Cycle(spec, identity, now)
         c.cycleId = ++cycleSeq
+        if (spec is Spec.Clip) c.title = spec.tune.title
         cycle = c
         // (follow-up 2026-10-14, half of Later N-L2) Per (playlist, stable key): the same stable key in another playlist
-        // is another channel and must not share the 5-min escalation windows.
-        ladder.beginChannel(identity?.let { "${it.playlistId}/${it.stableKey.value}" })
+        // is another channel and must not share the 5-min escalation windows. (Sports Hub §6.5) A clip never asks the
+        // ladder, so it leaves the channel's windows alone for the resume.
+        if (!clip) ladder.beginChannel(identity?.let { "${it.playlistId}/${it.stableKey.value}" })
         importGate.closeForZap()
         // The first-frame counter survives the tune: the shell waits for "the next one" (H-S10).
         _video.value = VideoInfo(aspectMode = settings.current.defaultAspect, renderedFirstFrames = _video.value.renderedFirstFrames)
@@ -735,7 +793,11 @@ internal class PlaybackControllerImpl @Inject constructor(
         zapDecoders.begin(c.cycleId)
         launchSession(c, Plan(refreshAccount = refreshAccount), waiting = null)
         c.firstTuneId = c.currentTuneId
-        eventLog.add(PlaybackEventType.TUNE, c.currentTuneId, if (c.isArchive) "archive" else "live", identity?.stableKey?.value ?: "direct")
+        eventLog.add(
+            PlaybackEventType.TUNE, c.currentTuneId,
+            if (c.isClip) "clip" else if (c.isArchive) "archive" else "live",
+            c.clip?.let { "clip:" + Redact.host(it.url) } ?: identity?.stableKey?.value ?: "direct",
+        )
         traceBegin(c.firstTuneId)
         c.switchDeadlineAtMs = c.startedAtMs + settings.current.streamSwitchTimeoutMs
         armSwitchTimeout(c)
@@ -917,7 +979,10 @@ internal class PlaybackControllerImpl @Inject constructor(
         val s = TuneSession(id, resolved, ctx, transport, format, clock.nowMs())
         s.ringGeneration = ring?.generation ?: -1L
         val built = try {
-            mediaSources.build(ctx, format, if (c.tsCompat > 0) TsCompat.MULTI_PMT else TsCompat.DEFAULT, transport, c.archive?.request, ring, settings.current.liveSpeedCorrection)
+            mediaSources.build(
+                ctx, format, if (c.tsCompat > 0) TsCompat.MULTI_PMT else TsCompat.DEFAULT, transport, c.archive?.request, ring,
+                settings.current.liveSpeedCorrection, c.clip?.let { ClipMedia(it.captionsUrl) },
+            )
         } catch (ex: UnsupportedStreamFormatException) {
             val what = ex.scheme?.let { "scheme $it" } ?: ex.format.name
             BoxLog.w(TAG, "media source $id not built: unsupported $what")
@@ -941,16 +1006,19 @@ internal class PlaybackControllerImpl @Inject constructor(
         // (M4 integration 2026-10-15) A later session of an archive cycle (a ladder re-prepare: L32 software audio, a
         // stall, a retry) continues at the playhead; `stop()` keeps the position, `setMediaSource(resetPosition)` drops it.
         // Without this the file restarted at 0 and a 20 s time-shift fell minutes behind (I-M4-13 on the device).
-        val startAtMs = if (archive == null) 0L else if (c.firstSession) archive.startOffsetMs else p.currentPosition.coerceAtLeast(0)
+        // (Sports Hub §6.5) A clip the same way: its first session starts at `ClipTune.startMs` (the expired-URL
+        // re-resolve), a restart continues at the playhead.
+        val firstAtMs = archive?.startOffsetMs ?: c.clip?.startMs ?: 0L
+        val startAtMs = if (!c.isVod) 0L else if (c.firstSession) firstAtMs else p.currentPosition.coerceAtLeast(0)
         p.setMediaSource(built.source, /* resetPosition = */ true)
         p.prepare()
         zapDecoders.onPrepare(clock.nowMs())
-        if (archive != null && startAtMs > 0) p.seekTo(startAtMs)
+        if (c.isVod && startAtMs > 0) p.seekTo(startAtMs)
         c.firstSession = false
         e.parts.watchdog.bind(built.telemetry)
         e.parts.watchdog.reset()
         // WP-C: per session beginSession + setSessionKind + bind (watchdog), bind (stats), fps estimator reset.
-        e.parts.beginSession(built.telemetry, format, isLive = !c.isArchive, isHls = format == StreamFormat.HLS)
+        e.parts.beginSession(built.telemetry, format, isLive = !c.isVod, isHls = format == StreamFormat.HLS)
         // Stopped in endSession() while a ladder decision runs (§3.7 global guard); started again for the new session.
         e.parts.watchdog.start { verdict -> onStall(verdict) }
         updateExpectations()
@@ -958,10 +1026,16 @@ internal class PlaybackControllerImpl @Inject constructor(
             setActiveState(c, PlaybackState.Connecting(nowPlaying(c), ConnectPhase.CONNECTING, c.attempt, clock.nowMs()))
         }
         eventLog.add(PlaybackEventType.OPEN, id, format.name, resolved.host)
-        e.parts.displayMode.awaitSettled {
-            if (session === s) {
-                settledSession = s
-                p.playWhenReady = !c.paused
+        if (c.isClip) {
+            // (Sports Hub §6.5, A-B1.7) A clip never waits for or asks for a display mode: the TV keeps the mode it has.
+            settledSession = s
+            p.playWhenReady = !c.paused
+        } else {
+            e.parts.displayMode.awaitSettled {
+                if (session === s) {
+                    settledSession = s
+                    p.playWhenReady = !c.paused
+                }
             }
         }
         startPolling()
@@ -1044,6 +1118,8 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     private suspend fun resolveOutcome(r: ResolveRequest): ResolveOutcome = try {
         when (val spec = r.spec) {
+            // (Sports Hub §6.5) No resolver: the clip's signed URL is the stream.
+            is Spec.Clip -> ResolveOutcome.Ok(clipStream(spec.tune))
             is Spec.Archive -> resolver.expandArchive(spec.tune.identity, spec.tune.request, r.userAgent)
             is Spec.Live -> when (val t = spec.target) {
                 is TuneTarget.Channel -> resolver.resolve(TuneTargetKey.Channel(t.identity), r.baseIndex, r.output, r.userAgent)
@@ -1059,6 +1135,29 @@ internal class PlaybackControllerImpl @Inject constructor(
     }
 
     private suspend fun resolve(c: Cycle): ResolvedStream? = handleResolveOutcome(c, resolveOutcome(resolveRequest(c)))
+
+    /**
+     * (Sports Hub §6.5, A-S1) A clip's local [ResolvedStream]: no identity, broker key `clip:<host>` (its own limit, never
+     * the provider's), the default User-Agent only (the transport adds it), HLS or progressive, no Xtream.
+     */
+    private fun clipStream(tune: ClipTune): ResolvedStream {
+        val host = Redact.host(tune.url)
+        return ResolvedStream(
+            identity = null,
+            brokerKey = CLIP_BROKER_PREFIX + host,
+            url = tune.url,
+            headers = emptyMap(),
+            formatHint = if (tune.format == ClipFormat.HLS) StreamFormat.HLS else StreamFormat.PROGRESSIVE_OTHER,
+            xtream = null,
+            output = null,
+            baseIndex = 0,
+            baseCount = 1,
+            host = host,
+            ignoreTlsErrors = false,
+            liveUrlTemplate = "",
+            headerTemplates = emptyMap(),
+        )
+    }
 
     private fun handleResolveOutcome(c: Cycle, outcome: ResolveOutcome): ResolvedStream? {
         return when (outcome) {
@@ -1080,6 +1179,7 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     /** §3.5.1 via WP-A's rule: direct URLs use their own value (broker `d:<host>`), playlists override → account → 1. */
     private fun maxConnections(c: Cycle): Int {
+        if (c.isClip) return BrokerConstants.clamp(SportsConstants.HUB_CLIP_MAX_CONNECTIONS)
         c.directTarget?.let { return BrokerConstants.clamp(it.maxConnections) }
         return BrokerConstants.effectiveMax(c.playlistInfo?.maxConnectionsOverride, c.account?.maxConnections)
     }
@@ -1095,25 +1195,35 @@ internal class PlaybackControllerImpl @Inject constructor(
         val denied = b.audioPolicy.deniedPassthrough + routeDeniedPassthrough
         b.audioPolicy.deniedPassthrough = if (s.audioOutput == AudioOutputMode.ALWAYS_DECODE) denied + "*" else denied
         b.audioPolicy.forceStereo = b.audioPolicy.forceStereo || c.forceStereo || s.audioOutput == AudioOutputMode.STEREO
-        val mode = if (c.isArchive) BufferMode.MEDIUM else c.memory.bufferMode ?: s.bufferMode
+        val mode = if (c.isVod) BufferMode.MEDIUM else c.memory.bufferMode ?: s.bufferMode
         val profile = bufferFsm.profileFor(resolved.brokerKey, mode, engine.isLowRam)
         b.loadControl.profile = profile
         c.profile = profile
-        b.trackSelector.setParameters(b.trackSelector.buildUponParameters().setTunnelingEnabled(s.tunneling && !c.tunnelingOff))
+        // (Sports Hub §6.5) A clip is never tunnelled (short VOD with seeks); nothing about it is learned or saved.
+        b.trackSelector.setParameters(b.trackSelector.buildUponParameters().setTunnelingEnabled(s.tunneling && !c.tunnelingOff && !c.isClip))
 
         val p = b.player
         if (c.firstSession) {
             // §3.8.6 / §3.12 defaults and per-channel memory, once per cycle (WP-C TrackController.applyTuneDefaults).
             val audioLangs = (listOfNotNull(c.memory.audioLanguage) + PlayerFactory.preferredAudioLanguages(s)).distinct().take(3)
-            e.parts.applyTuneDefaults(audioLangs, s.preferredTextLanguages.take(3), c.memory.subtitleLanguage, s.subtitlesEnabled)
+            // (Sports Hub §6.5, integration) A clip's HLS master lists its English rendition with DEFAULT=NO, which the
+            // selector takes only for a preferred language: English joins the list, so the subtitles setting alone decides.
+            val textLangs = s.preferredTextLanguages.take(3)
+                .let { if (c.isClip) (it + MediaSourceBuilder.CLIP_CAPTIONS_LANGUAGE).distinct() else it }
+            e.parts.applyTuneDefaults(audioLangs, textLangs, c.memory.subtitleLanguage, s.subtitlesEnabled)
         }
         val params = p.trackSelectionParameters.buildUpon()
         if (c.firstSession) {
             applyAspect(c.memory.aspect ?: s.defaultAspect)
             c.fpsMilli = c.memory.fpsMilli
-            // (Smooth playback, 2026-11-23) "Match frame rate: Always for this channel", before the tune is announced.
-            e.parts.setChannelAfr(if (c.memory.afrAlways && !c.isArchive) app.thebox.core.playback.AfrMode.ALWAYS else null)
-            e.parts.displayMode.onTune(c.memory.fpsMilli)
+            if (!c.isClip) {
+                // (Sports Hub §6.5, A-B1.7) A clip announces no tune to the display: no channel AFR, no onTune. The channel
+                // after it gets its own (and the viewport a clip held back).
+                syncDisplayViewport(e)
+                // (Smooth playback, 2026-11-23) "Match frame rate: Always for this channel", before the tune is announced.
+                e.parts.setChannelAfr(if (c.memory.afrAlways && !c.isArchive) app.thebox.core.playback.AfrMode.ALWAYS else null)
+                e.parts.displayMode.onTune(c.memory.fpsMilli)
+            }
         }
         params.setTrackTypeDisabled(C.TRACK_TYPE_AUDIO, c.audioDropped)
         params.setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, videoShouldBeDisabled(c))
@@ -1192,6 +1302,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         // (code review 2026-10-14, E-S2) The display-mode controller starts at Viewport.NONE and setViewport() ignores an
         // unchanged value, so the current viewport (FULL by default) must be pushed once, or AFR ALWAYS never evaluates.
         parts.displayMode.onViewport(viewport)
+        displayViewport = viewport
         scope.launch {
             settings.settings.map { it.afrMode }.distinctUntilChanged().drop(1).collect { parts.onAfrModeChanged(it) }
         }
@@ -1218,7 +1329,7 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     private val sessionActions = object : SessionPlayer.Actions {
         override fun isForeground() = lifecycle.isForeground
-        override fun isArchive() = cycle?.isArchive == true
+        override fun isArchive() = cycle?.isVod == true
         override fun title() = cycle?.title
         override fun play() = resume()
         override fun pause() = this@PlaybackControllerImpl.pause()
@@ -1323,7 +1434,8 @@ internal class PlaybackControllerImpl @Inject constructor(
                 setState(PlaybackState.Buffering(np, BufferingCause.REBUFFER, null))
             }
             Player.STATE_ENDED -> {
-                if (c.isArchive) {
+                // (Sports Hub §6.5) A clip's end is an end, never a dead live stream.
+                if (c.isVod) {
                     // (M4, §2.9) `ended` tells the archive session the request ran out (continuation), not a user pause.
                     setState(PlaybackState.Playing(nowPlaying(c), paused = true, warning = c.warning, ended = true))
                 } else {
@@ -1339,7 +1451,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         c.lastRebufferAtMs = now
         c.rebufferCount++
         eventLog.add(PlaybackEventType.REBUFFER, s.tuneId, "", "")
-        if (c.isArchive) return
+        if (c.isVod) return
         val mode = c.memory.bufferMode ?: settings.current.bufferMode
         val next = bufferFsm.onRebuffer(s.resolved.brokerKey, now, mode, engine.isLowRam) ?: return
         eng?.bundle?.loadControl?.profile = next
@@ -1384,6 +1496,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             sessionStartMs = s.startedAtMs,
             isArchive = c.isArchive,
             isHls = s.format == StreamFormat.HLS,
+            isClip = c.isClip,
             lastLoadDataType = s.lastLoadDataType,
             bytesReceived = s.telemetry?.bytesTotal ?: 0,
             passthroughActive = stats.audioPassthrough,
@@ -1591,7 +1704,8 @@ internal class PlaybackControllerImpl @Inject constructor(
         _video.update { it.copy(fps = fps) }
         val c = cycle ?: return
         val milli = (fps * 1000f).roundToInt()
-        if (c.fpsMilli != milli) {
+        // (Sports Hub §6.5) A clip's frame rate never switches the display mode.
+        if (c.fpsMilli != milli && !c.isClip) {
             c.fpsMilli = milli
             c.memory = c.memory.copy(fpsMilli = milli)
             eng?.parts?.displayMode?.onFps(fps)
@@ -1618,9 +1732,12 @@ internal class PlaybackControllerImpl @Inject constructor(
         val st = _state.value
         if (st is PlaybackState.Error || st is PlaybackState.Stopped || st is PlaybackState.Idle) return
         val signal = c.lastSignal
-        val error = PlaybackError(eventualCode(signal), ErrorDetail(signal = signal?.name ?: "SwitchTimeout"))
+        // (Sports Hub code review 2026-11-25, L1) A clip's card and diagnostics never name a channel or the archive.
+        val code = if (!c.isClip) eventualCode(signal) else signal?.let { FailureClassifier.clipCode(it) } ?: PlaybackErrorCode.STREAM_INTERRUPTED
+        val error = PlaybackError(code, ErrorDetail(signal = signal?.name ?: "SwitchTimeout"))
         BoxLog.i(TAG) { "stream switch timeout: ${error.code.key}" }
-        if (settings.current.reconnectAttempts < 0 && signal != null && isTransient(signal)) {
+        // (Sports Hub §6.5) A clip has no unlimited retries behind a card: its restarts are counted (HUB_CLIP_RESTARTS).
+        if (!c.isClip && settings.current.reconnectAttempts < 0 && signal != null && isTransient(signal)) {
             // L19 unlimited: the card shows, retries continue behind it.
             c.cardShown = true
             setState(PlaybackState.Error(nowPlaying(c), enrich(c, error, signal).copy(retry = retryInfo(c, nextAttemptInMs = null))))
@@ -1633,6 +1750,10 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     private fun onFailure(c: Cycle, signal: FailureSignal, error: PlaybackException?, fromWriter: Boolean = false) {
         if (cycle !== c) return
+        if (c.isClip) {
+            onClipFailure(c, signal, error)
+            return
+        }
         c.failureFromWriter = fromWriter
         val now = clock.nowMs()
         val id = c.currentTuneId
@@ -1662,6 +1783,47 @@ internal class PlaybackControllerImpl @Inject constructor(
             decision = LadderDecision.Fail(PlaybackError(eventualCode(signal), ErrorDetail(signal = signal.name)))
         }
         execute(c, decision, signal, error)
+    }
+
+    /**
+     * (Sports Hub §6.5, A-B1.4) A clip skips the ladder: an expired signed URL (403 / 410) fails at once with
+     * `CLIP_EXPIRED` (ClipSession re-resolves); IO, 5xx and stall verdicts restart at the playhead at most
+     * `HUB_CLIP_RESTARTS` times; anything else fails. Nothing is written to channel memory or settings; no tunnelling,
+     * decoder, User-Agent, re-resolve or backup-channel step runs.
+     */
+    private fun onClipFailure(c: Cycle, signal: FailureSignal, error: PlaybackException?) {
+        val id = c.currentTuneId
+        c.lastSignal = signal
+        c.lastErrorAtMs = clock.nowMs()
+        c.failureCount++
+        eventLog.add(PlaybackEventType.ERROR, id, signal.name, error?.errorCodeName ?: "")
+        when (val action = FailureClassifier.clipAction(signal)) {
+            is ClipAction.Fail -> {
+                eventLog.add(PlaybackEventType.DECISION, id, "clip_fail", action.code.key)
+                BoxLog.i(TAG) { "clip failure ${signal.name}: ${action.code.key}" }
+                fail(c, PlaybackError(action.code, ErrorDetail(signal = signal.name)), signal)
+            }
+            ClipAction.Restart -> {
+                if (c.clipRestarts >= SportsConstants.HUB_CLIP_RESTARTS) {
+                    eventLog.add(PlaybackEventType.DECISION, id, "clip_fail", "restarts")
+                    BoxLog.i(TAG) { "clip failure ${signal.name}: restarts used up" }
+                    fail(c, PlaybackError(FailureClassifier.clipCode(signal), ErrorDetail(signal = signal.name)), signal)
+                    return
+                }
+                c.clipRestarts++
+                eventLog.add(PlaybackEventType.DECISION, id, "clip_restart", "${c.clipRestarts}/${SportsConstants.HUB_CLIP_RESTARTS}")
+                BoxLog.i(TAG) { "clip failure ${signal.name}: restart ${c.clipRestarts} at the playhead" }
+                val waiting: (NowPlaying) -> PlaybackState = if (c.firstMediaReached) {
+                    { np -> PlaybackState.Buffering(np, BufferingCause.RECOVERING, null) }
+                } else {
+                    c.attempt++
+                    val attempt = c.attempt
+                    val since = clock.nowMs()
+                    ({ np -> PlaybackState.Connecting(np, ConnectPhase.RESOLVING, attempt, since) })
+                }
+                launchSession(c, Plan(reuseResolved = c.resolved != null), waiting)
+            }
+        }
     }
 
     private fun ladderContext(c: Cycle, reResolveAllowed: Boolean): LadderContext {
@@ -1940,10 +2102,10 @@ internal class PlaybackControllerImpl @Inject constructor(
         if (st !is PlaybackState.Connecting && st !is PlaybackState.Stalled) {
             setState(PlaybackState.Playing(nowPlaying(c), paused = true, warning = c.warning))
         }
-        if (!c.isArchive && c.ts != null) {
+        if (!c.isVod && c.ts != null) {
             // (M6, §7.2) Buffered: the recorder keeps saving; no livePauseJob, no connection release, no re-tune.
             pauseBuffered(c)
-        } else if (!c.isArchive) {
+        } else if (!c.isVod) {
             livePauseJob?.cancel()
             livePauseJob = scope.launch {
                 delay(LIVE_PAUSE_RELEASE_MS)
@@ -1967,7 +2129,8 @@ internal class PlaybackControllerImpl @Inject constructor(
         when (val st = _state.value) {
             is PlaybackState.Playing -> {
                 if (!st.paused) return
-                if (c.isArchive) {
+                // (Sports Hub §6.5) A paused clip resumes as archive does: a real pause, no new connection.
+                if (c.isVod) {
                     c.paused = false
                     player?.playWhenReady = true
                     setState(PlaybackState.Playing(nowPlaying(c), paused = false, warning = c.warning))
@@ -1981,7 +2144,8 @@ internal class PlaybackControllerImpl @Inject constructor(
                 }
             }
             is PlaybackState.Stopped -> {
-                if (!st.resumable) return
+                // (Sports Hub §6.5, R-S1) Only ClipSession restarts a clip.
+                if (!st.resumable || c.isClip) return
                 startCycle(c.specForRestart())
                 if (!c.isArchive) _notices.tryEmit(PlaybackNotice.LiveResumed)
             }
@@ -2023,7 +2187,9 @@ internal class PlaybackControllerImpl @Inject constructor(
             eventLog.add(PlaybackEventType.STOP, c.currentTuneId, reason.name, "")
         }
         BoxLog.i(TAG) { "stop ${reason.name}" }
-        setState(PlaybackState.Stopped(c?.let { nowPlaying(it) }, reason, resumable = reason != StopReason.USER))
+        // (Sports Hub §6.5) A stopped clip is never resumable: Home, standby or HDMI end the clip session (§6.6), and its
+        // signed URL may be expired by the time the viewer is back (A-B1.6).
+        setState(PlaybackState.Stopped(c?.let { nowPlaying(it) }, reason, resumable = reason != StopReason.USER && c?.isClip != true))
         publishLocalBuffer(force = true)
     }
 
@@ -2058,6 +2224,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         val st = _state.value as? PlaybackState.Stopped ?: return
         if (!st.resumable || st.reason !in LIFECYCLE_REASONS) return
         val c = cycle ?: return
+        if (c.isClip) return // nothing to replay (stop() never leaves a clip resumable; belt and braces)
         val away = clock.nowMs() - lifecycleStopAtMs
         val reauth = away >= LifecycleCoordinator.RESUME_REAUTH_AFTER_MS
         if (reauth && !settings.current.resumeAfterStandby) {
@@ -2111,8 +2278,21 @@ internal class PlaybackControllerImpl @Inject constructor(
         if (this.viewport == viewport) return
         this.viewport = viewport
         if (viewport == Viewport.MINI && cycle != null) previewStarted()
-        eng?.parts?.displayMode?.onViewport(viewport)
+        // (Sports Hub §6.5) While a clip plays, the display mode is left alone (FULL would turn AFR on); the next channel
+        // cycle pushes the viewport it missed (syncDisplayViewport).
+        if (cycle?.isClip != true) eng?.parts?.let { syncDisplayViewport(it) }
         applyVideoTrackState()
+    }
+
+    /** The viewport last given to the display-mode controller (pushed once at engine creation). */
+    private var displayViewport: Viewport? = null
+
+    private fun syncDisplayViewport(e: Engine) = syncDisplayViewport(e.parts)
+
+    private fun syncDisplayViewport(parts: EngineParts) {
+        if (displayViewport == viewport) return
+        displayViewport = viewport
+        parts.displayMode.onViewport(viewport)
     }
 
     private fun videoShouldBeDisabled(c: Cycle?): Boolean =
@@ -2235,7 +2415,7 @@ internal class PlaybackControllerImpl @Inject constructor(
 
     override fun seekTo(positionMs: Long) {
         val c = cycle ?: return
-        if (!c.isArchive) return
+        if (!c.isVod) return
         player?.seekTo(positionMs.coerceAtLeast(0))
         session?.lastDisruptionAtMs = clock.nowMs()
         eng?.parts?.watchdog?.reset()
@@ -2249,7 +2429,7 @@ internal class PlaybackControllerImpl @Inject constructor(
             positionMs = p?.currentPosition ?: 0,
             bufferedMs = p?.totalBufferedDuration ?: 0,
             durationMs = p?.duration?.takeIf { it != C.TIME_UNSET && it >= 0 },
-            isSeekable = archive != null && p?.isCurrentMediaItemSeekable == true,
+            isSeekable = c?.isVod == true && p?.isCurrentMediaItemSeekable == true,
             archiveStartUtcMs = archive?.request?.requestStart?.toEpochMilli(),
             localMonoMs = c?.takeIf { it.ts != null && !it.isArchive }?.let { playheadMono(it) },
         )
@@ -2298,7 +2478,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         if (statsEnabled) publishStats()
         if (c.ts != null) pollTimeshift(c)
         val st = _state.value
-        if (st is PlaybackState.Playing && !st.paused && !c.isArchive) {
+        if (st is PlaybackState.Playing && !st.paused && !c.isVod) {
             if (c.lastStableTickAtMs == 0L) c.lastStableTickAtMs = now
             if (now - c.lastStableTickAtMs >= STABLE_TICK_MS && now - c.lastRebufferAtMs >= STABLE_TICK_MS) {
                 c.lastStableTickAtMs = now
@@ -2398,7 +2578,7 @@ internal class PlaybackControllerImpl @Inject constructor(
     private suspend fun decideTimeshift(c: Cycle, format: StreamFormat) {
         if (c.tsDecided) return
         val pending = c.tsPrepare
-        val bufferable = !c.isArchive && (format == StreamFormat.TS || format == StreamFormat.UNKNOWN)
+        val bufferable = !c.isVod && (format == StreamFormat.TS || format == StreamFormat.UNKNOWN)
         if (!bufferable) {
             pending?.release(discardFile = true)
             c.tsDecided = true
@@ -3163,7 +3343,7 @@ internal class PlaybackControllerImpl @Inject constructor(
     }
 
     private fun localBufferState(c: Cycle?, now: Long): LocalBufferState? {
-        if (c == null || c.isArchive) return null
+        if (c == null || c.isVod) return null
         val st = _state.value
         if (st is PlaybackState.Stopped || st is PlaybackState.Idle) return null
         val ts = c.ts
@@ -3219,6 +3399,7 @@ internal class PlaybackControllerImpl @Inject constructor(
         title = c.title,
         isArchive = c.isArchive,
         format = session?.format ?: c.format ?: c.resolved?.formatHint ?: StreamFormat.UNKNOWN,
+        isClip = c.isClip,
     )
 
     private fun setState(s: PlaybackState) {
@@ -3250,6 +3431,8 @@ internal class PlaybackControllerImpl @Inject constructor(
     private fun Cycle.specForRestart(): Spec = when (val sp = spec) {
         is Spec.Archive -> if (archiveResumeAtMs > 0) Spec.Archive(sp.tune.copy(startOffsetMs = archiveResumeAtMs)) else sp
         is Spec.Live -> sp
+        // (Sports Hub §6.5) At the playhead; only reached through a ring relaunch, which a clip (never buffered) has not.
+        is Spec.Clip -> sp.copy(tune = sp.tune.copy(startMs = player?.currentPosition?.coerceAtLeast(0) ?: sp.tune.startMs))
     }
 
     private fun finishZapRecord(c: Cycle, outcome: String) {
@@ -3327,6 +3510,9 @@ internal class PlaybackControllerImpl @Inject constructor(
             else -> false
         }
         const val PREVIOUS_CHANNEL_MIN_PLAY_MS = 1_000L
+
+        /** (Sports Hub §6.5, A-S1) A clip's broker key is `clip:<host>`, with `HUB_CLIP_MAX_CONNECTIONS`. */
+        const val CLIP_BROKER_PREFIX = "clip:"
 
         /** (M5, B1) At most this many guard-refused neighbours are skipped by one zap step. */
         const val MAX_ZAP_GUARD_SKIPS = 64

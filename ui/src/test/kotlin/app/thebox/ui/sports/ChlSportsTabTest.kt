@@ -86,7 +86,7 @@ class ChlSportsTabTest {
         for (g in listOf("NHL", "NFL", "CHL")) rule.onNodeWithTag("sports_league:$g").assertExists()
         for (l in listOf(League.OHL, League.WHL, League.QMJHL)) rule.onNodeWithTag(sportsChlTag(l)).assertDoesNotExist()
         rule.onNodeWithTag(SPORTS_CHL_DIVIDER_TAG).assertDoesNotExist()
-        rule.onNodeWithText(str(R.string.sports_credit)).assertExists()
+        rule.onNodeWithText(str(R.string.sports_hub_credit_nhl)).assertExists()
     }
 
     @Test fun okOnCHLShowsTheRememberedSubLeagueAndMovesFocusToItsChip() {
@@ -115,19 +115,19 @@ class ChlSportsTabTest {
         assertEquals(League.WHL, store.flow(SportsDomain).value.league)
         assertEquals(League.WHL, store.flow(SportsDomain).value.chlLeague)
         rule.onNodeWithTag(sportsChlTag(League.WHL)).assertIsFocused()
-        // Right to QMJHL, then on to the Corner chip: the row is one walk.
+        // Right to QMJHL, the end of the row (the Corner and Delay chips left the page): Right there changes nothing.
         press(listOf(Key.DirectionRight))
         rule.onNodeWithTag(sportsChlTag(League.QMJHL)).assertIsFocused()
         press(listOf(Key.DirectionRight))
-        rule.onNodeWithTag(SPORTS_CORNER_TAG).assertIsFocused()
+        rule.onNodeWithTag(sportsChlTag(League.QMJHL)).assertIsFocused()
         // Left walks back through the sub-chips to CHL and on to NFL.
-        press(listOf(Key.DirectionLeft, Key.DirectionLeft, Key.DirectionLeft, Key.DirectionLeft))
+        press(listOf(Key.DirectionLeft, Key.DirectionLeft, Key.DirectionLeft))
         rule.onNodeWithTag(sportsGroupTag(app.thebox.core.sports.LeagueGroup.CHL)).assertIsFocused()
         press(listOf(Key.DirectionLeft))
         rule.onNodeWithTag(sportsGroupTag(app.thebox.core.sports.LeagueGroup.NFL)).assertIsFocused()
         // Down from any chip goes to the day chips; Up from the day chips returns to the sub-chip.
         press(listOf(Key.DirectionRight, Key.DirectionRight, Key.DirectionRight, Key.DirectionDown))
-        rule.onNodeWithTag(sportsDayTag(SportsDay.TODAY)).assertIsFocused()
+        rule.onNodeWithTag(sportsDayTag(0)).assertIsFocused()
         press(listOf(Key.DirectionUp))
         rule.onNodeWithTag(sportsChlTag(League.WHL)).assertIsFocused()
     }
@@ -149,19 +149,19 @@ class ChlSportsTabTest {
         wire(SportsPrefs(league = League.NHL))
         board(SportsFixtures.game(id = "H1"), league = League.NHL)
         show()
-        val dayTop = bounds(sportsDayTag(SportsDay.TODAY)).top
+        val dayTop = bounds(sportsDayTag(0)).top
         val gridTop = bounds(SPORTS_GRID_TAG).top
         val chipTop = bounds("sports_league:NHL").top
         store.update(SportsDomain) { it.copy(league = League.QMJHL, chlLeague = League.QMJHL) }
         board(SportsFixtures.chlGame(league = League.QMJHL), league = League.QMJHL)
         rule.waitForIdle()
-        assertEquals("the day chips stay put", dayTop, bounds(sportsDayTag(SportsDay.TODAY)).top, 0.5f)
+        assertEquals("the day chips stay put", dayTop, bounds(sportsDayTag(0)).top, 0.5f)
         assertEquals("the grid stays put", gridTop, bounds(SPORTS_GRID_TAG).top, 0.5f)
         for (l in listOf(League.OHL, League.WHL, League.QMJHL)) {
             assertEquals("$l sits on the chips' row", chipTop, bounds(sportsChlTag(l)).top, 0.5f)
         }
-        val corner = bounds(SPORTS_CORNER_TAG)
-        assertTrue("the last sub-chip ends before Corner (${bounds(sportsChlTag(League.QMJHL)).right} vs ${corner.left})", bounds(sportsChlTag(League.QMJHL)).right < corner.left)
+        val date = bounds(SPORTS_DATE_TAG)
+        assertTrue("the last sub-chip ends before the date (${bounds(sportsChlTag(League.QMJHL)).right} vs ${date.left})", bounds(sportsChlTag(League.QMJHL)).right < date.left)
         assertTrue("the divider sits between CHL and OHL", bounds(SPORTS_CHL_DIVIDER_TAG).left > bounds("sports_league:CHL").right && bounds(SPORTS_CHL_DIVIDER_TAG).right < bounds(sportsChlTag(League.OHL)).left)
     }
 
@@ -262,7 +262,7 @@ class ChlSportsTabTest {
         show()
         rule.onNodeWithText("Knights").assertExists()
         rule.onNodeWithText("Steelheads").assertExists()
-        rule.onNodeWithText("Time TBD").assertExists()
+        rule.onNodeWithText("TIME TBD").assertExists()
         // The plate shows the 4-letter code until a logo loads.
         rule.onNodeWithText("BRAM").assertExists()
         val desc = rule.onNodeWithTag(sportsCardTag("2")).fetchSemanticsNode().config[SemanticsProperties.ContentDescription].joinToString()
@@ -289,7 +289,7 @@ class ChlSportsTabTest {
         rule.onNodeWithTag(SPORTS_REFUSED_MATCHUP_TAG + "1", useUnmergedTree = true).assertTextEquals("Knights · Rangers")
         rule.onNodeWithText("Frontenacs").assertExists()
         val desc = rule.onNodeWithTag(sportsCardTag("1")).fetchSemanticsNode().config[SemanticsProperties.ContentDescription].joinToString()
-        assertTrue(desc, desc.startsWith("Knights") && desc.contains("Rangers") && desc.endsWith(text))
+        assertTrue(desc, desc.startsWith("London Knights") && desc.contains("Kitchener Rangers") && desc.contains(text))
         assertTrue("the teams, then the reason", desc.indexOf("Rangers") < desc.indexOf(text))
         // Other kinds keep the card as it was (the bug dims and hides on its own timers).
         repo.followFailure.value = FailKind.TIMEOUT

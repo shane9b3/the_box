@@ -100,6 +100,35 @@ class ExportRedactionTest {
         assertTrue(text.contains("lscluster.hockeytech.com"), "the host may stay; the query may not")
     }
 
+    /**
+     * (Sports Hub §8.4, A-S4) The NHL video key, registered as `NhlVideoKeySource` registers the one it reads
+     * (`registerSecret`), and a clip's signed token, registered as `NhlClipResolver` does (`registerTransient`): a log line
+     * and a crash report whose throwable message carries the key in the playback service's `Accept` form and the signed
+     * address leave no trace of either. Both values are obviously fake.
+     */
+    @Test
+    fun theVideoKeyAndASignedClipTokenLeaveNoTrace() {
+        val key = "FAKE-KEY-FOR-TESTS-ONLY-EXPORT"
+        val token = "FAKETOKENexport0123456789"
+        Redact.registerSecret(key)
+        Redact.registerTransient(token)
+        val signed = "https://manifest.prod.boltdns.net/manifest/v1/hls/v4/clear/6415718365001/abc/6s/master.m3u8?fastly_token=$token"
+        val logs = listOf(
+            "SportsVideo video 6408791393112 stream: ok HLS",
+            "java.lang.IllegalStateException: lookup failed with Accept application/json;pk=$key",
+            "Media3 load error on $signed",
+            "token in the path form /$token/segment_001.ts",
+        )
+        val crash = listOf(
+            """{"STACK_TRACE":"java.io.IOException: 403 on $signed\n\tat okhttp3.internal.http.RetryAndFollowUpInterceptor.intercept(RetryAndFollowUpInterceptor.kt:84)\nCaused by: java.lang.IllegalStateException: pk=$key"}""",
+        )
+        val (text, _) = build(inputs(logs, extra = emptyList(), crash = crash))
+        assertFalse(text.contains(key), text)
+        assertFalse(text.contains(token), text)
+        assertTrue(text.contains("manifest.prod.boltdns.net"), "the host may stay; the token may not")
+        assertTrue(text.contains("video 6408791393112 stream: ok HLS"), "the video id and result kind stay")
+    }
+
     @Test
     fun cleanLogsNeedNoAuditHit() {
         val (text, summary) = build(inputs(listOf("guide opened in 120 ms", "zap 3 → 4 ready 800 ms"), extra = emptyList()))

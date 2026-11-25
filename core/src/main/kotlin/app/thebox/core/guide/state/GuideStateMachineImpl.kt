@@ -401,6 +401,7 @@ class GuideStateMachineImpl(
             is GuideEvent.Sync -> u = u.copy(sync = event.chip)
             is GuideEvent.Metrics -> { frame.metrics = event.metrics; frameDirty = true }
             is GuideEvent.SearchClosed -> onSearchClosed(event.channel, event.tuned, event.archive)
+            is GuideEvent.SportsClosed -> onSportsPicked(event.channel, event.tuned, event.archive)
             is GuideEvent.DataWindow -> { dataWindow = event.window; recomputeLimits(reclamp = true) }
             is GuideEvent.MissedReminders -> if (event.count > 0) effects.toast(GuideToast.REMINDERS_MISSED, event.count.toString())
             // M4 (docs/design/m4-player-ux.md §3.1.1, §0.6, owner ruling 2026-10-15)
@@ -2226,17 +2227,36 @@ class GuideStateMachineImpl(
         // (2026-11-14) Back out of a Search opened from FULL enters the guide from FULL.
         if (channel == null && fromFull && !tunedFromSearch) { enterGuide(EntryFrom.SEARCH); return }
         u = u.copy(mode = ScreenMode.GUIDE, overlay = null, zone = Zone.GRID, tabFocused = TAB_GUIDE)
+        landOnPicked(channel, tunedFromSearch, archive)
+    }
+
+    /**
+     * (Sports Hub, docs/design/m6-sports-hub.md §5.5, §5.6; WP-3) A channel picked on the Sports page: handled as
+     * [onSearchClosed] handles a tuned channel. The page closes into the grid with the Guide tab current (as BACK's
+     * [onSportsClosed] does), focus moves to [channel], and FULL follows its own first active Tuned (a catch-up: the
+     * first archive Tuned), so a refused or failed tune stays in the guide. Picking a channel does not follow the game.
+     */
+    private fun onSportsPicked(channel: GuideChannel, tuned: Boolean, archive: Boolean) {
+        startupFocusPending = false
+        dropEntry(commit = false)
+        if (u.mode == ScreenMode.SPORTS) setMode(ScreenMode.GUIDE)
+        u = u.copy(mode = ScreenMode.GUIDE, overlay = null, zone = Zone.GRID, tabFocused = TAB_GUIDE)
+        landOnPicked(channel, tuned, archive)
+    }
+
+    /** The grid half of [onSearchClosed] and [onSportsPicked]: focus [channel] and arm the FULL follow of its tune. */
+    private fun landOnPicked(channel: GuideChannel?, tuned: Boolean, archive: Boolean) {
         if (channel != null) {
             val l = lineup
             val idx = if (l != null) indexOf(l, channel.rowId) else -1
             // (2026-11-14) A tune from Search takes the guide's lineup as its zap list (GuideViewModel). Only a channel that
             // lineup holds counts as tuned from its group; the tune itself was requested by the search screen already, so
             // the binding waits for its Tuned like any other (a refused or cancelled tune never binds).
-            if (tunedFromSearch && !archive) noteTuneFrom(channel.identityHash, if (idx >= 0 && l != null) l.source else null)
+            if (tuned && !archive) noteTuneFrom(channel.identityHash, if (idx >= 0 && l != null) l.source else null)
             if (idx >= 0) { u = u.copy(zone = Zone.GRID); setFocus(navigator.focusAt(idx, nowMin, ctx(0))) }
             else { u = u.copy(zone = Zone.GRID); applySource(GuideSource.All(channel.identity.playlistId), focusRowId = channel.rowId) }
         }
-        if (tunedFromSearch) {
+        if (tuned) {
             when {
                 channel == null -> if (somethingTuned()) goFull(EnterReason.SEARCH) else { pendingFull = true; pendingFullReason = EnterReason.SEARCH }
                 archive -> pendingArchiveHash = channel.identityHash

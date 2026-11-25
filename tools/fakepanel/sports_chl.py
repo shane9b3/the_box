@@ -455,12 +455,20 @@ class SportsChl:
              "game_status": "", "intermission": "0", "shootout": "1" if st["shootout"] else "0", "playoff": "0",
              "home_team": home, "visiting_team": away, "periods": periods,
              "home_goal_count": str(h_goals) if started else "0", "visiting_goal_count": str(a_goals) if started else "0",
-             "home_shots": "0", "visiting_shots": "0"}
+             "home_shots": str(self.board_shots(st, h_goals, started)), "visiting_shots": str(self.board_shots(st, a_goals, started))}
         for prefix, tid in (("home_team", home), ("visiting_team", away)):
             code, city, nick, _ = TEAMS[client][tid]
             e[prefix + "_code"], e[prefix + "_city"], e[prefix + "_nickname"] = code, city, nick
             e[prefix + "_name"] = f"{city} {nick}"
         return e
+
+    @staticmethod
+    def board_shots(st, goals, started):
+        """(Sports Hub section 10.3) The board's shots for the panel: 0 before the game, else 4 + 2 * goals + 6 * periods
+        started (capped at 3 plus overtime), so a live game's shots rise with the period and the score."""
+        if not started:
+            return 0
+        return 4 + 2 * goals + 6 * min(int(st.get("period") or 1), 4)
 
     def sitekit(self, view, params, payload):
         return {"SiteKit": dict({"Parameters": params, view: payload},

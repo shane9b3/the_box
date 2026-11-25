@@ -236,6 +236,56 @@ class GuideQueries @Inject constructor(
     }
 
     /**
+     * (Sports Hub, docs/design/m6-sports-hub.md §5.2 A, A-B3, A-N2) One broadcaster's channels: `channel_fts` (FTS4)
+     * [match] is quoted phrases joined by upper-case `OR` (no `*`, no parentheses); the lineup predicate and
+     * [PARENTAL_RAW] as [searchChannels] applies them (hidden never, locked only for [access]), every enabled playlist,
+     * `LIMIT` [limit], so the planner drives from the FTS index. The caller applies the residue-equality rule
+     * (`BroadcastAliases`) to [NameHit.name] / [NameHit.displayName].
+     *
+     * (Sports Hub code review 2026-11-25, M3) Keyset paging: rows with `rowid > `[afterId] in FTS docid order (FTS4's own
+     * order, so the `ORDER BY` costs no sort and the `docid >` bound is consumed by the index). The caller pages with the
+     * last [NameHit.id] until a page comes back short, so one token shared by hundreds of channels ("espn") can no longer
+     * cut the national channel before the residue rule sees it.
+     */
+    data class NameHit(val id: Long, val playlistId: Long, val name: String, val displayName: String)
+
+    suspend fun channelsByNameFts(match: String, access: ParentalAccess, limit: Int, afterId: Long = 0L): List<NameHit> = db.read {
+        usePrepared(
+            "SELECT c.id, c.playlist_id, c.name, COALESCE(cp.custom_name, c.display_name, c.name) " +
+                "FROM channel_fts JOIN channel c ON c.id = channel_fts.rowid " +
+                LINEUP_JOINS + "WHERE channel_fts MATCH ?2 AND channel_fts.rowid > ?4 AND $LINEUP_BASE $PARENTAL_RAW " +
+                "ORDER BY channel_fts.rowid LIMIT ?3",
+        ) { st ->
+            st.bindAccess(access)
+            st.bindText(2, match)
+            st.bindLong(3, limit.toLong())
+            st.bindLong(4, afterId)
+            buildList {
+                while (st.step()) add(NameHit(st.getLong(0), st.getLong(1), st.getText(2), st.getText(3)))
+            }
+        }
+    }
+
+    /**
+     * (Sports Hub code review 2026-11-25, L3) The lineup's channels the user renamed (`channel_prefs.custom_name`), which
+     * `channel_fts` does not index (it keeps the provider name). Few in practice; at most [limit], most recently changed
+     * first. The caller applies the same residue rule to [NameHit.displayName] (the custom name).
+     */
+    suspend fun channelsWithCustomName(access: ParentalAccess, limit: Int): List<NameHit> = db.read {
+        usePrepared(
+            "SELECT c.id, c.playlist_id, c.name, cp.custom_name FROM channel c " + LINEUP_JOINS +
+                "WHERE cp.custom_name IS NOT NULL AND cp.custom_name <> '' AND $LINEUP_BASE $PARENTAL_RAW " +
+                "ORDER BY cp.updated_at DESC LIMIT ?2",
+        ) { st ->
+            st.bindAccess(access)
+            st.bindLong(2, limit.toLong())
+            buildList {
+                while (st.step()) add(NameHit(st.getLong(0), st.getLong(1), st.getText(2), st.getText(3)))
+            }
+        }
+    }
+
+    /**
      * Programme search, step 2 (§3.10.2): library channels that map or AUTO-match each EPG ref (both reverse lookups
      * use the v3 `(source_id, xmltv_id)` indexes), batched [REF_BATCH] refs per statement, restricted to the lineup
      * predicate, in playlist then provider order.

@@ -1,0 +1,208 @@
+{
+ "poster": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/image/v1/static/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/fa115085-1935-4818-b33c-cb97bd8e2202/1280x720/match/image.jpg?redacted=1",
+ "thumbnail": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/image/v1/static/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/a980a6f4-73a2-4689-b8ec-c02f88963bf0/208x117/match/image.jpg?redacted=1",
+ "poster_sources": [
+  {
+   "src": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/image/v1/static/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/fa115085-1935-4818-b33c-cb97bd8e2202/1280x720/match/image.jpg?redacted=1"
+  }
+ ],
+ "thumbnail_sources": [
+  {
+   "src": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/image/v1/static/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/a980a6f4-73a2-4689-b8ec-c02f88963bf0/208x117/match/image.jpg?redacted=1"
+  }
+ ],
+ "description": "Mammoth at Jets | Condensed Game",
+ "tags": [
+  "game/gameid-2026020382",
+  "taxonomy/national-broadcast",
+  "taxonomy/condensed-game",
+  "team/teamid-52",
+  "team/teamid-68",
+  "taxonomy/wpg-broadcast",
+  "taxonomy/2026-27"
+ ],
+ "cue_points": [
+  {
+   "id": "3838509006544",
+   "name": "period2",
+   "type": "AD",
+   "time": 313.476846,
+   "metadata": "midroll",
+   "force_stop": true
+  },
+  {
+   "id": "1543940790832",
+   "name": "period3",
+   "type": "AD",
+   "time": 416.262996,
+   "metadata": "midroll",
+   "force_stop": true
+  }
+ ],
+ "custom_fields": {
+  "acl": "site-group-nhl",
+  "audio_language": "en",
+  "broadcast_team": "52",
+  "club_context": "taxonomy/nhl",
+  "content_date": "2026-11-24T03:20:07Z",
+  "game_id": "2026020382",
+  "headline": "UTA at WPG | Condensed Game",
+  "list_availability": "Public",
+  "photo_slug": "uta-at-wpg-condensed-game-6408795191112",
+  "production_source": "wsc-avgen",
+  "slug": "uta-at-wpg-condensed-game-6408795191112",
+  "video_type": "condensed",
+  "wsc_video_id": "79301694"
+ },
+ "account_id": "6415718365001",
+ "sources": [
+  {
+   "codecs": "avc1,mp4a",
+   "ext_x_version": "4",
+   "src": "http://manifest.prod.boltdns.net/manifest/v1/hls/v4/clear/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/6s/master.m3u8?redacted=1",
+   "type": "application/x-mpegURL"
+  },
+  {
+   "codecs": "avc1,mp4a",
+   "ext_x_version": "4",
+   "src": "https://manifest.prod.boltdns.net/manifest/v1/hls/v4/clear/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/6s/master.m3u8?redacted=1",
+   "type": "application/x-mpegURL"
+  },
+  {
+   "codecs": "avc1,mp4a",
+   "profiles": "urn:mpeg:dash:profile:isoff-live:2011",
+   "src": "http://manifest.prod.boltdns.net/manifest/v1/dash/live-baseurl/clear/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/6s/manifest.mpd?redacted=1",
+   "type": "application/dash+xml"
+  },
+  {
+   "codecs": "avc1,mp4a",
+   "profiles": "urn:mpeg:dash:profile:isoff-live:2011",
+   "src": "https://manifest.prod.boltdns.net/manifest/v1/dash/live-baseurl/clear/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/6s/manifest.mpd?redacted=1",
+   "type": "application/dash+xml"
+  },
+  {
+   "avg_bitrate": 2123000,
+   "codec": "H264",
+   "container": "MP4",
+   "duration": 590135,
+   "height": 720,
+   "size": 157175998,
+   "src": "http://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/pmp4/static/clear/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/a2d5d92b-89a3-418d-915d-64bbf85e488d/main.mp4?redacted=1",
+   "width": 1280
+  },
+  {
+   "avg_bitrate": 2123000,
+   "codec": "H264",
+   "container": "MP4",
+   "duration": 590135,
+   "height": 720,
+   "size": 157175998,
+   "src": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/pmp4/static/clear/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/a2d5d92b-89a3-418d-915d-64bbf85e488d/main.mp4?redacted=1",
+   "width": 1280
+  }
+ ],
+ "video_preview": [
+  {
+   "ext_x_version": "7",
+   "src": "http://manifest.prod.boltdns.net/manifest/v2/hls/v7/clear/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/6s/preview.m3u8?redacted=1",
+   "type": "application/x-mpegURL"
+  },
+  {
+   "ext_x_version": "7",
+   "src": "https://manifest.prod.boltdns.net/manifest/v2/hls/v7/clear/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/6s/preview.m3u8?redacted=1",
+   "type": "application/x-mpegURL"
+  }
+ ],
+ "name": "UTA at WPG | Condensed Game",
+ "reference_id": "6ff6c3c1-46d3-46f4-8b30-d0ad6822954c",
+ "long_description": "Watch full game highlights from the matchup between the Utah Mammoth and the Winnipeg Jets, condensing all the action into a 10-minute recap",
+ "duration": 590182,
+ "economics": "AD_SUPPORTED",
+ "text_tracks": [
+  {
+   "id": "d548ce49-59d5-4641-b5ae-bffe8301b4d4",
+   "account_id": "6415718365001",
+   "src": "http://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/text/vtt/clear/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/d548ce49-59d5-4641-b5ae-bffe8301b4d4/text.vtt?redacted=1",
+   "srclang": "en",
+   "label": "en",
+   "kind": "captions",
+   "mime_type": "text/webvtt",
+   "asset_id": null,
+   "sources": [
+    {
+     "src": "http://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/text/vtt/clear/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/d548ce49-59d5-4641-b5ae-bffe8301b4d4/text.vtt?redacted=1"
+    },
+    {
+     "src": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/text/vtt/clear/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/d548ce49-59d5-4641-b5ae-bffe8301b4d4/text.vtt?redacted=1"
+    }
+   ],
+   "in_band_metadata_track_dispatch_type": "",
+   "default": false
+  },
+  {
+   "id": null,
+   "account_id": "6415718365001",
+   "src": "http://manifest.prod.boltdns.net/thumbnail/v1/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/ddce5d75-a3d1-4f64-bcc7-084d8d8c5675/thumbnail.webvtt?redacted=1",
+   "srclang": null,
+   "label": "thumbnails",
+   "kind": "metadata",
+   "mime_type": "text/webvtt",
+   "asset_id": null,
+   "sources": null,
+   "default": false,
+   "width": 480,
+   "height": 270,
+   "bandwidth": 450
+  },
+  {
+   "id": null,
+   "account_id": "6415718365001",
+   "src": "https://manifest.prod.boltdns.net/thumbnail/v1/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/ddce5d75-a3d1-4f64-bcc7-084d8d8c5675/thumbnail.webvtt?redacted=1",
+   "srclang": null,
+   "label": "thumbnails",
+   "kind": "metadata",
+   "mime_type": "text/webvtt",
+   "asset_id": null,
+   "sources": null,
+   "default": false,
+   "width": 480,
+   "height": 270,
+   "bandwidth": 450
+  }
+ ],
+ "published_at": "2026-11-24T03:20:07.974Z",
+ "created_at": "2026-11-24T03:20:07.975Z",
+ "updated_at": "2026-11-24T03:40:35.170Z",
+ "offline_enabled": false,
+ "link": null,
+ "id": "6408795191112",
+ "ad_keys": null,
+ "variants": [
+  {
+   "poster": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/fa115085-1935-4818-b33c-cb97bd8e2202/1280x720/match/image.jpg",
+   "thumbnail": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/a980a6f4-73a2-4689-b8ec-c02f88963bf0/208x117/match/image.jpg",
+   "poster_sources": [
+    {
+     "src": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/fa115085-1935-4818-b33c-cb97bd8e2202/1280x720/match/image.jpg"
+    }
+   ],
+   "thumbnail_sources": [
+    {
+     "src": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/51444d80-dabb-4307-90dc-1d29dadf20d8/a980a6f4-73a2-4689-b8ec-c02f88963bf0/208x117/match/image.jpg"
+    }
+   ],
+   "language": "en-US",
+   "name": "UTA at WPG | Condensed Game",
+   "description": "Mammoth at Jets | Condensed Game",
+   "long_description": "Watch full game highlights from the matchup between the Utah Mammoth and the Winnipeg Jets, condensing all the action into a 10-minute recap",
+   "custom_fields": {
+    "audio_language": "en",
+    "headline": "UTA at WPG | Condensed Game",
+    "homebase_id": "",
+    "slug": "uta-at-wpg-condensed-game-6408795191112",
+    "stats_event_id": ""
+   }
+  }
+ ],
+ "manifest_url_ttl": 3600
+}

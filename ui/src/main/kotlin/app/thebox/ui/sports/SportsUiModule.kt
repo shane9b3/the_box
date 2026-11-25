@@ -1,6 +1,9 @@
 package app.thebox.ui.sports
 
 import app.thebox.core.sports.ScoreRepository
+import app.thebox.core.sports.hub.ClipResolver
+import app.thebox.core.sports.hub.GameChannelMatcher
+import app.thebox.core.sports.hub.GameDetailRepository
 import dagger.BindsOptionalOf
 import dagger.Module
 import dagger.hilt.InstallIn
@@ -15,4 +18,12 @@ import dagger.hilt.components.SingletonComponent
 @InstallIn(SingletonComponent::class)
 abstract class SportsUiModule {
     @BindsOptionalOf abstract fun scoreRepository(): ScoreRepository
+
+    // (Sports Hub commit 0, docs/design/m6-sports-hub.md §11) The same pattern for the hub's seams: `:data`'s SportsModule
+    // binds them, so `Optional<…>` is present in the app and absent in `:ui`-only graphs.
+    @BindsOptionalOf abstract fun gameDetailRepository(): GameDetailRepository
+
+    @BindsOptionalOf abstract fun clipResolver(): ClipResolver
+
+    @BindsOptionalOf abstract fun gameChannelMatcher(): GameChannelMatcher
 }

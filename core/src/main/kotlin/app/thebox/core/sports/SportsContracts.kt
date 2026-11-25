@@ -1,8 +1,10 @@
 // Contract (score bug commit 0): docs/design/m6-score-bug.md §1.1, §2.3, §2.6, §2.7, §4.4, §4.5, §6; power-play commit 0:
 // docs/design/m6-power-play.md §1.3; NFL commit 0: docs/design/m6-nfl.md §2; Stacked commit 0:
-// docs/design/m6-score-bug-stacked-theme.md §1.3, §2.1, §3.3. Changes go through the lead; every enum here is append-only.
+// docs/design/m6-score-bug-stacked-theme.md §1.3, §2.1, §3.3; Sports Hub commit 0: docs/design/m6-sports-hub.md §4.1.
+// Changes go through the lead; every enum here is append-only.
 package app.thebox.core.sports
 
+import app.thebox.core.sports.hub.PeriodScore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.serialization.Serializable
@@ -136,7 +138,41 @@ data class GameSnapshot(
      * always false for the NHL and the NFL.
      */
     val startTbd: Boolean = false,
+    /** (Sports Hub §4.1, appended) NHL `tvBroadcasts[]`; NFL board `broadcasts` (§7.2); CHL empty. */
+    val broadcasts: List<TvBroadcast> = emptyList(),
+    /** (Sports Hub §4.1, appended) NHL only: the board's video facts. */
+    val media: GameMedia? = null,
+    /** (Sports Hub §4.1, appended) NFL and CHL: what their boards already carry (§7.1). */
+    val extras: BoardExtras? = null,
 )
+
+// ------------------------------------------------------------------ Sports Hub §4.1 board facts
+
+/** One listed broadcaster. [network] trimmed ("ABTV " → "ABTV"); [country] upper-case ISO-2 or null. */
+data class TvBroadcast(val network: String, val market: Market, val country: String?)
+
+/** N / H / A; any other market: the entry is dropped by the mapper. Append-only. */
+enum class Market { NATIONAL, HOME, AWAY }
+
+/** NHL board video facts: ids from `threeMinRecap` / `condensedGame` (trailing number of the path) and `goals[].highlightClip`. */
+data class GameMedia(val recapId: Long?, val condensedId: Long?, val goalClips: Int)
+
+/** NFL / CHL board facts the app already receives (Sports Hub §7.1). Every field optional. */
+data class BoardExtras(
+    /** "8-3". */
+    val awayRecord: String?,
+    val homeRecord: String?,
+    /** Quarters / periods, when the board has them. */
+    val periods: List<PeriodScore> = emptyList(),
+    /** NFL game leaders. */
+    val leaders: List<BoardLeader> = emptyList(),
+    /** CHL board shots. */
+    val awayShots: Int? = null,
+    val homeShots: Int? = null,
+)
+
+/** [category]: "passing" | "rushing" | "receiving". */
+data class BoardLeader(val category: String, val side: Side, val name: String, val line: String)
 
 // ------------------------------------------------------------------ NFL §2 the league detail
 
@@ -224,6 +260,8 @@ data class DayBoard(
      * one (`SportsViewModel.boardLeague` infers the league from the games); null = infer (the NHL and NFL sources).
      */
     val league: League? = null,
+    /** (Sports Hub §3.3, appended) Day key → number of games, from the NHL body's `gameWeek[]`; other leagues empty. */
+    val gameCounts: Map<String, Int> = emptyMap(),
 )
 
 /** One HTTP answer. [Ok.serverDateMs]/[Ok.ageS] come from `Date`/`Age` (Age clamped to [0, AGE_MAX_S]); `receivedMono` is stamped by the source. */

@@ -8,6 +8,8 @@ Status:
   marked with its id (A-B1, U-S4, …); the table is §12 "Review reconciliation". Lead sign-off: §13.
 - **Re-reviewed 2026-11-24** (the "Re-review" section of the architecture review): commit 0 cleared with conditions; the
   R-S1 … R-S5 and R-N1 … R-N4 items are folded in and marked (R-S1, …). **Signed off by the lead** (§13).
+- **Integrated 2026-11-25** on `sports-hub` (WP-1 … WP-5 merged); the pass's fixes, emulator states and open items are
+  §15. Decision note `docs/decisions/2026-11-24-sports-hub.md`.
 
 Inputs:
 - `CLAUDE.md`; `docs/00-master-plan.md`; `docs/01-design-reference.md` (1 design px = width ÷ 1920; tokens).
@@ -581,6 +583,12 @@ Market H or A lowers any match to POSSIBLE (a regional broadcast), whatever the 
 joined by upper-case `OR`, no `*`, no parentheses, **no `ORDER BY`**, `LIMIT 200`, through a new
 `GuideQueries.channelsByNameFts(match, access, limit)` that applies the lineup predicate and `PARENTAL_RAW` as
 `searchChannels` does; then the residue rule in Kotlin.
+*(Code review 2026-11-25, M3, L3.)* One token can be shared by hundreds of channels ("espn", "sn"), so a single page of
+200 could cut the national channel before the residue rule ran. The query now pages by keyset on the FTS rowid
+(`rowid > last ORDER BY rowid`, FTS4's own order, no sort) until a page comes back short, 96 residue matches are in hand
+(C's channel cap), or 1 000 rows were read per code (`ALIAS_FTS_MAX_ROWS`, 5 pages). Renamed channels are matched too:
+`channel_fts` holds the provider name only, so one extra read of the lineup's `channel_prefs.custom_name` rows (≤ 200,
+`GuideQueries.channelsWithCustomName`) per match goes through the same residue rule.
 
 **B. Guide titles** (Search's EPG FTS; A-S8, A-N8):
 - Two queries: the two nicknames ("Jets Mammoth"), then the two places ("Winnipeg Utah"). `limit` 80, `perText` 40
@@ -664,7 +672,8 @@ equally existing route. Cost: one sheet row and one effect.
 
 ### 5.7 Cost on a 20,000-channel playlist (Fire TV Stick)
 
-Per game: up to 6 channel-FTS phrase queries (`LIMIT 200`, no `ORDER BY`), 2 live + 2 past team-name EPG FTS queries
+Per game: up to 6 channel-FTS phrase queries (`LIMIT 200` pages, up to 5 per code after the 2026-11-25 review, M3;
+usually 1), one renamed-channel read, 2 live + 2 past team-name EPG FTS queries
 (B), one `EpgReader.window` read for A's channels (C, R-S4), one `channelsForRefs` batch. Estimate 30–150 ms on IO. Runs only for the panel's game (after rest or OK), cancelled on
 move, cached (§5.4). **WP-3 measures p50/p95** on the 20 k synthetic playlist on the Fire TV Stick with the final query
 shape (A-N8); gate p95 ≤ 250 ms, else the alias lookups become one `UNION`. WP-3 also records the B / C hit rate against
@@ -764,8 +773,14 @@ change (A-S6.6).
 - On read: `Redact.registerSecret(key)` at once, so the value is masked in any log, message or throwable text.
 - A 401 or 403 (not `CLIENT_GEO`) from the playback service → drop the key, re-read once, retry the lookup once; still
   refused → `Refused`.
-- **Hold** (`HUB_VIDEO_KEY_REREAD_MS`, 10 min) after any failed read: not found, script fetch failure, or a refused
-  re-read, so the script is read at most once per 10 min per process.
+- **Hold** (`HUB_VIDEO_KEY_REREAD_MS`, 10 min) after a read that found no key, a refused re-read, or a script answer
+  that means "not here" (404, a redirect, an address outside https): `Refused` meanwhile, and the page hides its video
+  slots for the same 10 min (§6.8).
+- **Backoff** after a transient script failure (timeout, IO including offline, 5xx, 429, another status): 30 s
+  (`HUB_VIDEO_KEY_BACKOFF_MIN_MS`), doubling to 1 min (`HUB_VIDEO_KEY_BACKOFF_MAX_MS`), with `Retry-After` as a floor
+  (at most 10 min); the failure's kind is answered meanwhile, so the toast is §6.8's "Try again in a minute", which the
+  1 min cap keeps true. A success resets the backoff. *(Code review 2026-11-25, M1: a Fire TV waking before its Wi-Fi
+  used to turn video off for 10 minutes under a "try again in a minute" toast.)*
 - `BoxLog` says "video key: read" / "video key: not found" / "video key: refused"; never a value, prefix or length.
   Tests and the fake panel use a fake key only.
 
@@ -963,7 +978,7 @@ States: `Idle` → `Resolving(ref, job)` → `Playing(ownedTuneId, queue, index)
 
 | Situation | Where | Text |
 |---|---|---|
-| Lookup timed out / 5xx / IO | toast | "The NHL video service didn't answer. Try again in a minute." |
+| Lookup timed out / 5xx / IO (or the key's script, inside its ≤ 1 min backoff, §6.2) | toast | "The NHL video service didn't answer. Try again in a minute." |
 | Offline | toast | "No internet connection. Videos play again when the network is back." |
 | `Refused` | toast; video slots and "● Highlights" chips hide for 10 min | "NHL videos aren't available in this app right now. Scores and stats still work." |
 | `Geo` | toast | "This video isn't available in your region. The scores and stats still work." (U-S11) |
@@ -1315,6 +1330,74 @@ captions, guessed regional channels, English only, no reminders, catch-up kept.
 5. **NFL and CHL** get scores, records, period scores and leaders on the new page, but no videos and no box score in this
    version. *Default: accept; NHL first.*
 6. **Green background** of the mock-ups for every league. *Default: yes.*
+
+---
+
+## 15. Integration pass (2026-11-25)
+
+All five packages merged on `sports-hub`; one writer, one emulator (`TheBox_TV_API30`, fake panel on port 8090 through
+`files/debug/sports_base`, removed afterwards). Decision note: `docs/decisions/2026-11-24-sports-hub.md`.
+
+### 15.1 Fixed (merged-tree items handed over by the packages)
+
+| Item | Fix |
+|---|---|
+| Captions under a clip | `PlayerViewModel.cues` passes cues while the guide is FULL **or the playback target is a clip** (`PlayerViewModelTest.cuesPassDuringAClip`). Checked on the emulator. |
+| `sports_hub_summary_sep` | Quoted `" · "` in the strings file; `hubSep()` and the panel's padding removed. |
+| HLS captions (A-S3) | The recorded master carries `#EXT-X-MEDIA:TYPE=SUBTITLES,…,NAME="en",DEFAULT=NO,LANGUAGE="en"`, `CLOSED-CAPTIONS=NONE`: `CLIP_HLS_MASTER_CARRIES_CAPTIONS = true` (HLS uses the master's rendition, MP4 still side-loads). The controller adds English to a clip's preferred text languages so the subtitles setting selects a DEFAULT=NO rendition (`PlaybackControllerClipTest.aClipPrefersEnglishText…`). The fake panel's master now has the same shape (`subs.m3u8`). |
+| `ClipPlayerLayer` sub-line | The page passes `game` and `goals` when the clip belongs to the panel's game ("Goal 1 of 2 · TOR at BOS · 1st 05:00" on the emulator). |
+| Two sheet frames | The page wrapped `HubSheetFrame` (which places itself at 856, 148) in a second 968 × 812 box: the host is now the full page. |
+| Focus under a clip | A change of the clip just played (the next goal of a queue) re-ran the Goals sheet's focus request and pulled focus out of the clip layer into the hidden sheet. The sheet's focus target is frozen while a clip plays, and the sheet is re-keyed when a clip ends, so focus lands on the clip just played (also when it was the same clip). |
+| Back hold | Checked: the layer holds Back for its life; on dispose the hold falls back to "sheet open or panel focused". Back mid-clip returned to the Goals sheet on the clip's row; Back after a recap returned to slot 1. |
+| Double rest | The page rested 600 ms and then `show()` made `GameDetailRepositoryImpl` rest another 600 ms. The page now shows twice (`showNow`): per the repository's contract the second show of the resting game skips its rest. OK still fetches at once. `pause(true / false)` around clips matches the repository's gate. |
+| Watch recap on a failed detail | A final game whose board (or detail) carries a recap id keeps **Watch recap** in slot 1 when the stats fail (unless videos are off); the body says "…Trying again automatically. Select Watch recap to see the game." Retry takes slot 1 only when no recap can play (§4.5's rule otherwise unchanged). |
+| Empty day | Days other than yesterday / today / tomorrow read "No NHL games on Tuesday, November 17. Pick another day above." (`sports_empty_day_league`). |
+| Resume ordering | `GuideViewModel` runs a Live or Archive resume only once the root has given the controller a viewport other than the clip's FULL (at most 500 ms, `CLIP_RESUME_VIEWPORT_WAIT_MS`), so the resumed channel prepares under the page. On the emulator the resumed channel's first session had video disabled (HIDDEN), i.e. no full-screen prepare. |
+| Live recording | `HubFixtures.LIVE` gains `pp` (2nd period, EDM power play 1451), `p3` (3rd period, 4–3, seven goals, three without a clip yet) and `final` (regulation, VGK 5–3, eight goals, three stars, no recap posted yet); the game had no overtime. `NhlDetailMapperTest` and `NhlMapperHubTest` assert all three. The recap-posted final was not recorded into the repo (the recap appears later). |
+
+### 15.2 Found on the emulator and fixed
+
+- **Headline cut a long away name** ("Toronto Maple … (1) vs. Boston Bruins (1)"): both names had equal weights, capping each at half the free width
+  although the plan said the full line fits. The home name now takes its own width and the away name the rest.
+- **Matchup disc under the play disc**: with a poster spec the art behind it still drew its centre disc ("LIVE · 2ND 15:51") under the play
+  disc and its own caption. The art under a poster draws no disc and no caption.
+- **Empty panel slab**: an empty board's media place was `White08.copy(alpha = 0.5f)` (white at 50 %); now `White05`.
+- **Focus trap in the panel**: Left from the title row's first chip (and any D-pad search toward the panel) landed on slot 1 without the
+  page entering the panel (chip footer, Right went nowhere, Back left the page). The buttons now take focus only while the page has
+  entered the panel (`HubPanel(entered)`), and the page focuses a slot two frames after entering.
+
+### 15.3 Emulator states (fake panel; screenshots in the session scratchpad `hub-emu/`)
+
+Checked: NHL today with the first live card focused; OK → Follow, Right, Right → Goals; Goals sheet (latest goal focused);
+a goal queue playing with the transport bar and captions (Menu); auto-advance; Back mid-clip → the played row; queue end →
+the played row; channel sheet (owner's playlist: Sportsnet East / Ontario / Pacific / West as LIKELY sport listings with the
+regional warning); final card (recap poster, "Won in the shootout", stars); recap → Back → slot 1; box score; pre-game
+(matchup art, six season rows); Matchup sheet; day −7 (one request per OK, none per focus move); empty day; NFL This week;
+CHL OHL today; detail failure (live: Retry; final with recap: Watch recap); board failure; video "refuse" (Watch recap
+disabled, Highlights chips hidden); Largest text size (one start through the boot mirror, restored by itself).
+Not run: Watch / a Channels row tuning (it would change the owner's last channel), locked and hidden channels (they need a
+change to the owner's data), "rotate" and "expire" modes, catch-up resume (no catch-up under the page), the Fire TV Stick
+items (§10.4 14).
+
+### 15.4 Left open
+
+- Screenshot goldens for the hub's cards, panel, sheets and clip bar (§10.2 "Hash gate") were not written by WP-4 / WP-5; the
+  `sportsHashGate` covers only the old suites plus `sports-tab/sports-tab.png`.
+- At Larger and Largest the live media area is about 165 px: without a real poster the backdrop's 88 px logos sit under the
+  "LATEST GOAL" tag and the caption (cosmetic; real posters cover them).
+- A poster still shows its play disc while videos are off (Watch recap disabled).
+- The code reviews (data, player, guide side, UI) and the release gates.
+
+### 15.5 Gate
+
+`lintAll` clean (no new issues); `:core:test` 4659 (one skipped); `:data:testDebugUnitTest` 810 (four skipped);
+`:player:testDebugUnitTest` 559; `:ui:testDebugUnitTest` 1000; `:app:testDebugUnitTest` 93; `:app:assembleDebug` and the
+`:app` / `:data` androidTest compilations pass. In the gate run `StorageLocationsImplTest.theSmbUserAndDomainAreRedacted`
+(known load-flaky) failed and passed alone; the two new recording tests failed only because their fixtures were copied in
+while that run was going, and `:core:test` passed in full afterwards. Fake panel: 306 Python tests pass. `sportsHashGate`:
+`sports-tab/sports-tab.png` is the only changed entry (re-recorded; the test now pins the title row's clock, which had made
+the PNG follow the host's time); the other 1691, including every score-bug entry, hash equal. Key grep: no real video key
+or signed URL in the tree; only `FAKE-KEY-FOR-TESTS*` literals.
 
 ---
 

@@ -600,5 +600,20 @@ class TimeTbdRouteTest(ChlCase):
         self.assertTrue(all(g["time_tbd"] == "0" for g in games))
 
 
+
+class BoardShotsTest(ChlCase):
+    """Sports Hub (docs/design/m6-sports-hub.md section 10.3): the board's shots rise with the game; none before it."""
+
+    def test_shots(self):
+        self.at("pre")
+        day = self.chl.day("ohl").isoformat()
+        g = json.loads(self.feed("ohl", "gamesbydate", fetch_date=day)[2])["SiteKit"]["Gamesbydate"][0]
+        self.assertEqual(("0", "0"), (g["visiting_shots"], g["home_shots"]))
+        self.at("puck drop", 5)
+        g = json.loads(self.feed("ohl", "gamesbydate", fetch_date=day)[2])["SiteKit"]["Gamesbydate"][0]
+        self.assertGreater(int(g["visiting_shots"]), 0)
+        self.assertGreater(int(g["home_shots"]), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

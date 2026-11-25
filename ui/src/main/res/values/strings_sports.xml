@@ -6,7 +6,6 @@
 <resources>
     <!-- ==== Names (section 0) -->
     <string name="sports_tab">Sports</string>
-    <string name="sports_title">Sports</string>
     <string name="sports_league_nhl">NHL</string>
     <string name="sports_follow">Follow</string>
     <string name="sports_following">Following</string>
@@ -89,28 +88,14 @@
 
     <!-- ==== Sports tab (5) -->
     <!-- Title-row chips (U-N6). %1$s = a corner ("Top right") / a delay ("Off", "30 s"). -->
-    <string name="sports_chip_corner">Corner · %1$s</string>
-    <string name="sports_chip_delay">Delay · %1$s</string>
     <string name="sports_credit">Scores and logos: NHL.com</string>
-    <string name="sports_day_yesterday">Yesterday</string>
-    <string name="sports_day_today">Today</string>
-    <string name="sports_day_tomorrow">Tomorrow</string>
     <!-- Card state column (5.2). %1$s = a period ("2nd"), %2$s = the clock ("10:22"). -->
     <string name="sports_card_live_line">%1$s · %2$s</string>
-    <string name="sports_card_following">✓ Following</string>
-    <string name="sports_card_action_follow">OK Follow score</string>
-    <string name="sports_card_action_stop">OK Stop following</string>
     <!-- Accessibility of a card. %1$s/%3$s away/home names, %2$s/%4$s their scores or "", %5$s the state ("LIVE, 2nd 10:22", "7:00 PM"). -->
-    <string name="sports_card_desc">%1$s %2$s at %3$s %4$s, %5$s</string>
-    <string name="sports_card_desc_following">%1$s %2$s at %3$s %4$s, %5$s. Following</string>
     <!-- Footer (U-S9): key, then label. -->
     <string name="sports_footer_keys_browse">← → ↑ ↓</string>
-    <string name="sports_footer_browse">Browse</string>
     <string name="sports_footer_keys_ok">OK</string>
-    <string name="sports_footer_follow">Follow score</string>
-    <string name="sports_footer_stop">Stop following</string>
     <string name="sports_footer_keys_back">Back</string>
-    <string name="sports_footer_back">Guide</string>
     <!-- Empty and error states (5.4, U-N5) -->
     <string name="sports_empty_yesterday">No NHL games yesterday. Pick another day above.</string>
     <string name="sports_empty_today">No NHL games today. Pick another day above.</string>

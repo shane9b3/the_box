@@ -4,6 +4,7 @@ import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.core.net.toUri
 import androidx.media3.common.C
+import androidx.media3.common.Format
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MimeTypes
 import androidx.media3.common.util.UnstableApi
@@ -13,11 +14,17 @@ import androidx.media3.datasource.TransferListener
 import androidx.media3.exoplayer.hls.DefaultHlsExtractorFactory
 import androidx.media3.exoplayer.hls.HlsMediaSource
 import androidx.media3.exoplayer.source.MediaSource
+import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.extractor.DefaultExtractorsFactory
+import androidx.media3.extractor.Extractor
+import androidx.media3.extractor.ExtractorsFactory
+import androidx.media3.extractor.text.DefaultSubtitleParserFactory
+import androidx.media3.extractor.text.SubtitleExtractor
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import app.thebox.core.catchup.ArchiveRequest
+import app.thebox.core.common.Redact
 import app.thebox.core.playback.LoadOrigin
 import app.thebox.core.playback.PlaybackEventType
 import app.thebox.core.playback.StreamFormat
@@ -48,6 +55,7 @@ internal class UnsupportedStreamFormatException(val format: StreamFormat, val sc
  * | HLS | `HlsMediaSource`, chunkless, `DefaultHlsExtractorFactory(TS_FLAGS)` | `http` | real URL (relative segment URLs) |
  * | PROGRESSIVE_OTHER | progressive, `DefaultExtractorsFactory` | `http` | session placeholder |
  * | DASH | none: [UnsupportedStreamFormatException] | | |
+ * | Clip ([ClipMedia], Sports Hub §6.5) | HLS as above (VOD) or progressive MP4, plus side-loaded WebVTT ([clipSource]) | `http` | as HLS / session placeholder |
  *
  * The session placeholder is `thebox-session://<tuneId>`. `LiveTsDataSource` ignores `dataSpec.uri`; for the `http`
  * transport a thin wrapper maps the placeholder to `ctx.resolved.url` at `open()` and reports the placeholder back
@@ -74,9 +82,12 @@ internal class MediaSourceBuilder(
         ring: app.thebox.player.internal.RingOpen?,
         // (Smooth playback, 2026-11-23) "Keep up with live": false pins an HLS live source at 1.0×.
         liveSpeedCorrection: Boolean,
+        // (Sports Hub §6.5) Non-null: a clip cycle (VOD over the brokered `http` transport, captions side-loaded).
+        clip: ClipMedia?,
     ): MediaSourceWithTelemetry {
         val scheme = schemeOf(ctx.resolved.url)
         if (scheme !in SUPPORTED_SCHEMES) throw UnsupportedStreamFormatException(format, scheme.ifEmpty { "none" })
+        if (clip != null) return clipSource(ctx, format, transport, clip)
         val isArchive = archive != null
         if (ring != null && !isArchive && (format == StreamFormat.TS || format == StreamFormat.UNKNOWN)) {
             // The same progressive TS source and extractor guards (repairs run after the ring, on every read, §4.3), over
@@ -139,6 +150,63 @@ internal class MediaSourceBuilder(
         }
     }
 
+    /**
+     * (Sports Hub §6.5, A-S3) A clip: HLS (VOD; no live speed band) on the real URL, or a progressive MP4 behind the session
+     * placeholder (`Range` passes through [SessionUriDataSource] as for archive). Both over the session's brokered `http`
+     * transport, so `TuneSession.end()` cancels every segment, caption and range call. Captions: side-loaded as a
+     * [MergingMediaSource] beside the media for MP4 always, and for HLS unless [CLIP_HLS_MASTER_CARRIES_CAPTIONS].
+     */
+    private fun clipSource(ctx: StreamSessionContext, format: StreamFormat, transport: TransportFactory, clip: ClipMedia): MediaSourceWithTelemetry {
+        val (factory, telemetry) = transport.http(ctx)
+        val media: MediaSource = when (format) {
+            StreamFormat.HLS -> HlsMediaSource.Factory(factory)
+                .setAllowChunklessPreparation(true)
+                .setLoadErrorHandlingPolicy(policyFor(LoadOrigin.HLS_MANIFEST))
+                // A clip's captions are the declared or side-loaded ones; no phantom CEA-608 track.
+                .setExtractorFactory(DefaultHlsExtractorFactory(HLS_TS_FLAGS, /* exposeCea608WhenMissingDeclarations = */ false))
+                .createMediaSource(
+                    MediaItem.Builder().setUri(ctx.resolved.url.toUri()).setMediaId(ctx.tuneId.toString()).setMimeType(MimeTypes.APPLICATION_M3U8).build(),
+                )
+            StreamFormat.PROGRESSIVE_OTHER -> ProgressiveMediaSource.Factory(
+                SessionUriDataSource.Factory(factory, sessionUri(ctx.tuneId), ctx.resolved.url),
+                DefaultExtractorsFactory(),
+            )
+                .setLoadErrorHandlingPolicy(policyFor(LoadOrigin.ARCHIVE))
+                .createMediaSource(sessionItem(ctx.tuneId))
+            else -> throw UnsupportedStreamFormatException(format)
+        }
+        val captions = clip.captionsUrl
+        val sideload = captions != null && schemeOf(captions).let { it == "http" || it == "https" } &&
+            (format != StreamFormat.HLS || !CLIP_HLS_MASTER_CARRIES_CAPTIONS)
+        if (!sideload) return MediaSourceWithTelemetry(media, telemetry)
+        return MediaSourceWithTelemetry(MergingMediaSource(media, captionsSource(factory, ctx.tuneId, captions!!)), telemetry)
+    }
+
+    /**
+     * One WebVTT file as a text track (`en`, default flag, so the selector takes it whenever text is on), parsed during
+     * extraction like Media3's own side-loading (`DefaultMediaSourceFactory`, 1.11): the 1.11 text renderer takes
+     * `application/x-media3-cues`, not raw VTT samples. The signed address hides behind a placeholder URI.
+     */
+    private fun captionsSource(factory: DataSource.Factory, tuneId: Long, url: String): MediaSource {
+        val placeholder = "$SESSION_SCHEME://$tuneId/captions".toUri()
+        val format = Format.Builder()
+            .setId(CLIP_CAPTIONS_ID)
+            .setSampleMimeType(MimeTypes.TEXT_VTT)
+            .setLanguage(CLIP_CAPTIONS_LANGUAGE)
+            .setLabel(CLIP_CAPTIONS_LABEL)
+            .setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+            .build()
+        val parsers = DefaultSubtitleParserFactory()
+        // With the format given, the extractor declares the cue track, its seek map and endTracks at init (Media3's own
+        // lazy single-track path is package-private).
+        return ProgressiveMediaSource.Factory(
+            SessionUriDataSource.Factory(factory, placeholder, url),
+            ExtractorsFactory { arrayOf<Extractor>(SubtitleExtractor(parsers.create(format), format)) },
+        )
+            .setLoadErrorHandlingPolicy(policyFor(LoadOrigin.ARCHIVE))
+            .createMediaSource(MediaItem.Builder().setUri(placeholder).setMediaId("$tuneId/captions").build())
+    }
+
     /** The session's TS extractor list: compat level and the dead-track guard reporting to the event log. */
     internal fun tsExtractors(ctx: StreamSessionContext, compat: TsCompat): TsExtractorsFactory =
         TsExtractorsFactory(
@@ -160,6 +228,18 @@ internal class MediaSourceBuilder(
 
         /** HLS segments: the TS flags of §3.8.5 (`DefaultHlsExtractorFactory` adds its own HLS-specific flags). */
         const val HLS_TS_FLAGS: Int = DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS
+
+        /**
+         * (Sports Hub §6.5, A-S3) **The captions switch**, settled by the lead's recording of a real goal clip's master
+         * (2026-11-24): it lists `#EXT-X-MEDIA:TYPE=SUBTITLES,…,NAME="en",DEFAULT=NO,LANGUAGE="en"` and
+         * `CLOSED-CAPTIONS=NONE`. So HLS uses the master's own rendition and nothing is side-loaded beside it; the
+         * controller adds English to a clip's preferred text languages so the subtitles setting selects it although it is
+         * DEFAULT=NO. MP4 always side-loads.
+         */
+        const val CLIP_HLS_MASTER_CARRIES_CAPTIONS = true
+        const val CLIP_CAPTIONS_ID = "clip-captions"
+        const val CLIP_CAPTIONS_LANGUAGE = "en"
+        const val CLIP_CAPTIONS_LABEL = "English"
 
         /** URL schemes the transports can open (lower case). */
         val SUPPORTED_SCHEMES = setOf("http", "https", SESSION_SCHEME)
@@ -190,6 +270,14 @@ internal class MediaSourceBuilder(
             else -> type.toString()
         }
     }
+}
+
+/**
+ * (Sports Hub §6.5) What a clip session adds to [MediaSourceBuilder.build]: its side-loaded WebVTT address (signed; the
+ * `toString` names the host only).
+ */
+internal class ClipMedia(val captionsUrl: String?) {
+    override fun toString(): String = "ClipMedia(${captionsUrl?.let { Redact.host(it) } ?: "no captions"})"
 }
 
 /**

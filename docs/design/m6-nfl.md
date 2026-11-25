@@ -1087,6 +1087,9 @@ sentence (the slugs are in the table's source comments in code). It is a seconda
 
 ### 7.3 UI
 
+> **Amended 2026-11-25 (Sports Hub):** the Corner and Delay chips are no longer on the Sports page (Settings › Sports
+> and the quick bar keep them); the title row reads "Sports Hub", then NHL · NFL · CHL. See `docs/design/m6-sports-hub.md` §1.1, §7.
+
 - **Sports tab title row:** "Sports", then two chips **NHL · NFL** (the selected one filled, 22/600, height 52),
   replacing the static "NHL" chip, then Corner and Delay as now.
   - Up from the day chips lands on the league chips. OK on a chip switches.

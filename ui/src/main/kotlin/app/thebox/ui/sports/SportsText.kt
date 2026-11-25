@@ -289,6 +289,160 @@ object SportsText {
         )
     }
 
+    // ------------------------------------------------------------------ Sports Hub (docs/design/m6-sports-hub.md §1.2, §3, §6.7, §8.2)
+
+    /** A status pill: its upper-case [text] and whether the red dot and the live fill are drawn. */
+    data class HubPill(val text: String, val live: Boolean)
+
+    /** "1ST" / "2ND" / "3RD" / "OT" / "2OT" / "SO" (hockey), "Q3" / "OT" (football): the pill's period words (upper case). */
+    fun hubPeriod(res: Resources, p: PeriodLabel, league: League): String = when (p.kind) {
+        PeriodKind.REG -> when (league.sport) {
+            Sport.FOOTBALL -> res.getString(R.string.sports_hub_quarter_n, p.number)
+            Sport.HOCKEY -> when (p.number) {
+                1 -> res.getString(R.string.sports_hub_period_1)
+                2 -> res.getString(R.string.sports_hub_period_2)
+                3 -> res.getString(R.string.sports_hub_period_3)
+                else -> res.getString(R.string.sports_period_n, p.number)
+            }
+        }
+        PeriodKind.OT -> if (p.number <= 1) res.getString(R.string.sports_hub_period_ot) else res.getString(R.string.sports_hub_period_ot_n, p.number)
+        PeriodKind.SO -> res.getString(R.string.sports_hub_period_so)
+    }
+
+    /**
+     * The card's and the panel's status pill (§1.2): `FINAL`, `FINAL/OT`, `FINAL/SO`, `LIVE · 2ND 10:22`, `1ST INT`, `7:00 PM`,
+     * `POSTPONED`, `TIME TBD`; the NFL's upcoming games read `SUN 1:00 PM`, with the date (`MON NOV 30 8:15 PM`) when the start
+     * is more than 5 days away (U-S6). The clock is the snapshot's own value (no local countdown).
+     */
+    fun hubPill(res: Resources, g: GameSnapshot, clock24: Boolean, nowMs: Long = System.currentTimeMillis(), locale: Locale = Locale.getDefault()): HubPill {
+        val league = g.id.league
+        val p = periodOf(g)
+        return when (g.phase) {
+            GamePhase.SCHEDULED, GamePhase.PRE -> HubPill(
+                when {
+                    g.startTbd -> res.getString(R.string.sports_hub_pill_tbd)
+                    league.sport == Sport.FOOTBALL -> nflPill(res, g.startUtcMs, clock24, nowMs, locale)
+                    else -> startTime(g.startUtcMs, clock24, locale)
+                },
+                live = false,
+            )
+            GamePhase.POSTPONED -> HubPill(res.getString(R.string.sports_hub_pill_postponed), false)
+            GamePhase.FINAL -> HubPill(
+                res.getString(
+                    when (g.finalKind) {
+                        PeriodKind.OT -> R.string.sports_hub_pill_final_ot
+                        PeriodKind.SO -> R.string.sports_hub_pill_final_so
+                        PeriodKind.REG, null -> R.string.sports_hub_pill_final
+                    },
+                ),
+                false,
+            )
+            GamePhase.INTERMISSION -> HubPill(intermissionPill(res, g, p, league), live = false)
+            GamePhase.LIVE -> when {
+                p == null -> HubPill(res.getString(R.string.sports_live), true)
+                p.kind == PeriodKind.SO -> HubPill(res.getString(R.string.sports_hub_pill_live, hubPeriod(res, p, league)), true)
+                g.clock?.inIntermission == true -> HubPill(intermissionPill(res, g, p, league), false)
+                else -> {
+                    val secs = g.clock?.secondsRemaining?.coerceAtLeast(0)
+                    val detail = if (secs == null) hubPeriod(res, p, league) else "${hubPeriod(res, p, league)} ${clock(secs)}"
+                    HubPill(res.getString(R.string.sports_hub_pill_live, detail), true)
+                }
+            }
+        }
+    }
+
+    private fun intermissionPill(res: Resources, g: GameSnapshot, p: PeriodLabel?, league: League): String {
+        val kind = (g.detail as? LeagueDetail.Nfl)?.breakKind
+        return when {
+            kind == NflBreak.HALFTIME -> res.getString(R.string.sports_hub_halftime)
+            p != null -> res.getString(R.string.sports_hub_pill_intermission, hubPeriod(res, p, league))
+            else -> res.getString(R.string.sports_live)
+        }
+    }
+
+    private fun nflPill(res: Resources, startUtcMs: Long, clock24: Boolean, nowMs: Long, locale: Locale): String {
+        val zone = java.time.ZoneId.systemDefault()
+        val today = java.time.Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
+        val day = java.time.Instant.ofEpochMilli(startUtcMs).atZone(zone).toLocalDate()
+        val diff = java.time.temporal.ChronoUnit.DAYS.between(today, day)
+        val time = startTime(startUtcMs, clock24, locale)
+        return if (diff in 0..5) {
+            res.getString(R.string.sports_hub_pill_weekday_time, TimeFormats.format("EEE", locale, Date(startUtcMs)).uppercase(locale), time)
+        } else {
+            res.getString(R.string.sports_hub_pill_date_time, TimeFormats.format("EEE MMM d", locale, Date(startUtcMs)).uppercase(locale), time)
+        }
+    }
+
+    /** "1st", "2nd", "3rd", "4th", "11th", "12th", "13th", "21st" (English rules, §8.1 ordinals). */
+    fun ordinal(res: Resources, n: Int): String {
+        val mod100 = n % 100
+        val id = when {
+            mod100 in 11..13 -> R.string.sports_hub_ordinal_th
+            n % 10 == 1 -> R.string.sports_hub_ordinal_st
+            n % 10 == 2 -> R.string.sports_hub_ordinal_nd
+            n % 10 == 3 -> R.string.sports_hub_ordinal_rd
+            else -> R.string.sports_hub_ordinal_th
+        }
+        return res.getString(id, n)
+    }
+
+    /** A period's row/ordinal word in the goal sentences ("1st", "2nd", "3rd", "OT", "2OT", "SO"). */
+    fun periodWord(res: Resources, p: PeriodLabel): String = when (p.kind) {
+        PeriodKind.REG -> if (p.number in 1..3) ordinal(res, p.number) else res.getString(R.string.sports_period_n, p.number)
+        PeriodKind.OT -> if (p.number <= 1) res.getString(R.string.sports_hub_row_ot) else res.getString(R.string.sports_hub_period_ot_n, p.number)
+        PeriodKind.SO -> res.getString(R.string.sports_hub_row_so)
+    }
+
+    /** "4:55" from a duration in ms ("m:ss"; the bug's clock rule). */
+    fun duration(ms: Long): String = clock((ms / 1000L).toInt())
+
+    /** "4 minutes 55 seconds" (§8.2 media and progress descriptions). */
+    fun spokenDuration(res: Resources, ms: Long): String {
+        val s = (ms / 1000L).toInt().coerceAtLeast(0)
+        val m = s / 60
+        val r = s % 60
+        val minutes = if (m > 0) res.getQuantityString(R.plurals.sports_hub_desc_minutes, m, m) else null
+        val seconds = if (r > 0 || m == 0) res.getQuantityString(R.plurals.sports_hub_desc_seconds, r, r) else null
+        return listOfNotNull(minutes, seconds).joinToString(" ")
+    }
+
+    /** The day-strip label of a date chip (§3.1): "Yesterday · Nov 23", "Today · Nov 24", "Tomorrow · Nov 25", "Sat · Nov 21". */
+    fun hubDayLabel(res: Resources, offset: Int, date: java.time.LocalDate, locale: Locale = Locale.getDefault()): String {
+        val short = date.format(java.time.format.DateTimeFormatter.ofPattern("MMM d", locale))
+        return when (offset) {
+            -1 -> res.getString(R.string.sports_hub_day_yesterday, short)
+            0 -> res.getString(R.string.sports_hub_day_today, short)
+            1 -> res.getString(R.string.sports_hub_day_tomorrow, short)
+            else -> res.getString(R.string.sports_hub_day_other, date.format(java.time.format.DateTimeFormatter.ofPattern("EEE", locale)), short)
+        }
+    }
+
+    /** "Saturday, November 21" for the content description of a day (§8.2). */
+    fun spokenDate(date: java.time.LocalDate, locale: Locale = Locale.getDefault()): String =
+        date.format(java.time.format.DateTimeFormatter.ofPattern("EEEE, MMMM d", locale))
+
+    /** An NFL week chip: "Last week · Wk 11" (§3.1); the week number comes from the board's key, "Wk" is absent for a playoff round. */
+    fun hubWeekChip(res: Resources, offset: Int, key: String?): String {
+        val parsed = key?.let { EspnMapper.parseWeekKey(it) }
+        val week = if (parsed != null && parsed.second == 2) res.getString(R.string.sports_hub_week_n, parsed.third)
+            else if (key != null) weekLabel(res, key) else null
+        val base = res.getString(
+            when {
+                offset < 0 -> R.string.sports_week_last
+                offset == 0 -> R.string.sports_week_this
+                else -> R.string.sports_week_next
+            },
+        )
+        return if (week == null) base else res.getString(
+            when {
+                offset < 0 -> R.string.sports_hub_week_last
+                offset == 0 -> R.string.sports_hub_week_this
+                else -> R.string.sports_hub_week_next
+            },
+            week,
+        )
+    }
+
     /** The toast of a repository event (§2.6, §5.3, U-S12); always a reason and a next step. */
     fun toast(res: Resources, e: ScoreEvent): String = when (e) {
         is ScoreEvent.Followed -> if (e.first) res.getString(R.string.sports_toast_following_first, e.game.away, e.game.home)

@@ -79,7 +79,7 @@ class SportsTabScreenshotTest {
         val vm = SportsViewModel(repo, FakeSettingsStore(), { android.os.SystemClock.elapsedRealtime() }) { LocalDate.of(2026, 11, 5) }
         rule.setContent {
             BoxTheme {
-                Box(Modifier.fillMaxSize().background(DesignTokens.Colors.Canvas)) { SportsScreen(vm, clock24 = false) }
+                Box(Modifier.fillMaxSize().background(DesignTokens.Colors.Canvas)) { SportsScreen(vm, clock24 = false, wallClockMs = { FIXED_WALL_MS }) }
             }
         }
         rule.waitForIdle()
@@ -105,3 +105,6 @@ class SportsTabScreenshotTest {
         rule.onNodeWithTag(SPORTS_FOLLOWING_TAG + "L2", useUnmergedTree = true).assertExists()
     }
 }
+
+/** (Sports Hub integration) A fixed instant (2026-11-06 19:55 UTC) for the title row's date and time, so the PNG does not change with the host's clock. */
+private const val FIXED_WALL_MS = 1_793_997_300_000L

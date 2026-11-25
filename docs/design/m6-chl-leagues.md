@@ -1010,6 +1010,10 @@ Code lengths:
 
 ### 6.3 Sports tab and quick-bar sheet (owner decision 3; L7)
 
+> **Amended 2026-11-25 (Sports Hub):** the right-aligned Corner and Delay chips are gone from the page (Settings ›
+> Sports and the quick bar keep them); the chips and the inline sub-switch are unchanged. The page's layout is now
+> `docs/design/m6-sports-hub.md` §1.
+
 **Sports tab** (`SportsScreen.kt` TitleRow, `:266-299`):
 - The league chips read **`NHL · NFL · CHL`**.
 - With CHL selected, the **sub-switch is inline on the same row**: a 1 px `GuideUi.White12` divider (16 px air each

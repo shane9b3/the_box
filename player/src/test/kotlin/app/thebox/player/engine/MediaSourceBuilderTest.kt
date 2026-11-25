@@ -9,6 +9,7 @@ import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.exoplayer.hls.DefaultHlsExtractorFactory
 import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.extractor.ts.TsExtractor
@@ -200,6 +201,109 @@ class MediaSourceBuilderTest {
         val other = EngineTestSupport.StallingDataSource(ByteArray(1))
         SessionUriDataSource(other, placeholder, realUrl).open(DataSpec(Uri.parse("http://cdn.example/seg1.ts")))
         assertEquals(Uri.parse("http://cdn.example/seg1.ts"), other.openedUris.single())
+    }
+
+    // ---- Sports Hub clips (docs/design/m6-sports-hub.md §6.5, A-S3)
+
+    private val clipHls = "https://manifest.example/hls/master.m3u8?fastly_token=FAKETOKEN0123456789"
+    private val clipMp4 = "https://cdn.example/pmp4/main.mp4?fastly_token=FAKETOKEN0123456789"
+    private val clipVtt = "https://cdn.example/text/text.vtt?fastly_token=FAKETOKENvtt456789"
+
+    /**
+     * The recorded NHL master lists its own English SUBTITLES rendition (DEFAULT=NO): an HLS clip uses it and side-loads
+     * nothing, even when the lookup also names a WebVTT file.
+     */
+    @Test
+    fun clipHlsUsesTheMastersOwnCaptionsAndSideloadsNothing() {
+        assertTrue("settled by the recorded master", MediaSourceBuilder.CLIP_HLS_MASTER_CARRIES_CAPTIONS)
+        val transport = EngineTestSupport.FakeTransport(clip)
+        val built = builder.build(
+            EngineTestSupport.context(tuneId = 21, resolved = EngineTestSupport.resolved(clipHls, StreamFormat.HLS)),
+            StreamFormat.HLS, TsCompat.DEFAULT, transport, null, clip = ClipMedia(clipVtt),
+        )
+        assertTrue("no merge beside the master", built.source is HlsMediaSource)
+        assertEquals(listOf("http"), transport.calls)
+        assertEquals(listOf(LoadOrigin.HLS_MANIFEST), origins)
+        assertFalse("the captions token never reaches Media3", built.source.mediaItem.toString().contains("vtt456789"))
+    }
+
+    @Test
+    fun clipHlsWithoutCaptionsIsThePlainHlsSourceWithNoLiveBand() {
+        val transport = EngineTestSupport.FakeTransport(clip)
+        val built = builder.build(
+            EngineTestSupport.context(tuneId = 22, resolved = EngineTestSupport.resolved(clipHls, StreamFormat.HLS)),
+            StreamFormat.HLS, TsCompat.DEFAULT, transport, null, clip = ClipMedia(null),
+        )
+        assertTrue(built.source is HlsMediaSource)
+        assertEquals(androidx.media3.common.MediaItem.LiveConfiguration.UNSET, built.source.mediaItem.liveConfiguration)
+        assertEquals(Uri.parse(clipHls), built.source.mediaItem.localConfiguration!!.uri)
+    }
+
+    @Test
+    fun clipMp4HidesItsAddressAndAlwaysMergesCaptions() {
+        val transport = EngineTestSupport.FakeTransport(clip)
+        val built = builder.build(
+            EngineTestSupport.context(tuneId = 23, resolved = EngineTestSupport.resolved(clipMp4, StreamFormat.PROGRESSIVE_OTHER)),
+            StreamFormat.PROGRESSIVE_OTHER, TsCompat.DEFAULT, transport, null, clip = ClipMedia(clipVtt),
+        )
+        assertTrue(built.source is MergingMediaSource)
+        assertEquals(listOf(LoadOrigin.ARCHIVE, LoadOrigin.ARCHIVE), origins)
+        assertFalse(built.source.mediaItem.toString().contains("FAKETOKEN"))
+        try {
+            builder.build(EngineTestSupport.context(), StreamFormat.DASH, TsCompat.DEFAULT, transport, null, clip = ClipMedia(null))
+            fail("a DASH clip must be refused")
+        } catch (e: UnsupportedStreamFormatException) {
+            assertEquals(StreamFormat.DASH, e.format)
+        }
+    }
+
+    /**
+     * The progressive clip path end to end on a real player: the media and the side-loaded WebVTT both open their real
+     * addresses through the session's transport (behind placeholders), and the English captions track is selected by
+     * default once text is on.
+     */
+    @Test
+    fun aProgressiveClipPlaysWithItsSideloadedEnglishCaptions() {
+        val vtt = "WEBVTT\n\n00:00:00.000 --> 00:00:01.500\nGoal!\n".toByteArray()
+        val opened = mutableListOf<Uri>()
+        val routing = DataSource.Factory {
+            object : androidx.media3.datasource.BaseDataSource(true) {
+                private var inner: androidx.media3.datasource.ByteArrayDataSource? = null
+                private var uri: Uri? = null
+                override fun open(dataSpec: DataSpec): Long {
+                    synchronized(opened) { opened += dataSpec.uri }
+                    uri = dataSpec.uri
+                    val bytes = if (dataSpec.uri.toString().contains(".vtt")) vtt else clip
+                    return androidx.media3.datasource.ByteArrayDataSource(bytes).also { inner = it }.open(dataSpec)
+                }
+                override fun read(buffer: ByteArray, offset: Int, length: Int): Int = inner!!.read(buffer, offset, length)
+                override fun getUri(): Uri? = uri
+                override fun close() { inner?.close(); inner = null }
+            }
+        }
+        val transport = EngineTestSupport.FakeTransport(routing)
+        val built = builder.build(
+            EngineTestSupport.context(tuneId = 24, resolved = EngineTestSupport.resolved(clipMp4, StreamFormat.PROGRESSIVE_OTHER)),
+            StreamFormat.PROGRESSIVE_OTHER, TsCompat.DEFAULT, transport, null, clip = ClipMedia(clipVtt),
+        )
+        val bundle = EngineTestSupport.bundle(context, FakeClock(true))
+        try {
+            // Subtitles on, as the controller's applyTuneDefaults(…, subtitlesEnabled = true) leaves it; no preferred language.
+            TrackController(bundle).applyTuneDefaults(listOf("en"), emptyList(), null, subtitlesEnabled = true)
+            bundle.player.setMediaSource(built.source)
+            bundle.player.prepare()
+            bundle.player.play()
+            TestPlayerRunHelper.runUntilRenderedFirstFrame(bundle.player)
+            assertNull(bundle.player.playerError)
+            val text = bundle.player.currentTracks.groups.filter { it.type == androidx.media3.common.C.TRACK_TYPE_TEXT }
+            assertEquals("one side-loaded text track", 1, text.size)
+            assertEquals("en", text.single().getTrackFormat(0).language)
+            assertTrue("selected by its default flag", text.single().isSelected)
+            val uris = synchronized(opened) { opened.map { it.toString() } }
+            assertTrue(uris.toString(), clipMp4 in uris && clipVtt in uris)
+        } finally {
+            bundle.player.release()
+        }
     }
 
     @Suppress("UNCHECKED_CAST")
