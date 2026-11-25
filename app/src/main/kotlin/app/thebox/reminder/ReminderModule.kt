@@ -58,11 +58,15 @@ object ReminderModule {
         @AppForeground foreground: StateFlow<Boolean>,
         @ApplicationScope scope: CoroutineScope,
         gate: StartupGate,
+        queries: app.thebox.data.guide.GuideQueries,
+        events: app.thebox.core.events.EventIndex,
+        store: app.thebox.core.epg.EpgStore,
     ): ReminderSchedulerImpl {
         // (M3 code review 2026-10-14, O-7) No reminder work until the process is STARTED and the first frame has drawn.
         val ready = combine(foreground, gate.isOpen) { fg, open -> fg && open }
             .stateIn(scope, SharingStarted.Eagerly, foreground.value && gate.isOpen.value)
-        return ReminderSchedulerImpl(book, planner, settings, ready, scope, System::currentTimeMillis)
+        // (Event channels §6.6) The fire-time check of reminders set on event channels.
+        return ReminderSchedulerImpl(book, planner, settings, ready, scope, GuideReminderEventCheck(queries, events, store), System::currentTimeMillis)
     }
 
     @Provides

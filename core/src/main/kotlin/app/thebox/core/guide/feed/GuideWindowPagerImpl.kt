@@ -12,6 +12,11 @@ import app.thebox.core.epg.EpgReader
 import app.thebox.core.epg.EpgStore
 import app.thebox.core.epg.EpgWindow
 import app.thebox.core.epg.ProgrammeDetail
+import app.thebox.core.epg.ProgrammeFlags
+import app.thebox.core.events.ChannelEvent
+import app.thebox.core.events.EpgFiller
+import app.thebox.core.events.EventConstants
+import app.thebox.core.events.EventZoneSource
 import app.thebox.core.guide.CellFlags
 import app.thebox.core.guide.CellKind
 import app.thebox.core.guide.CellSink
@@ -27,6 +32,7 @@ import app.thebox.core.guide.ProgrammeInfo
 import app.thebox.core.guide.RowCellsBuilder
 import app.thebox.core.guide.RowStatus
 import app.thebox.core.guide.TimeLabels
+import app.thebox.core.guide.state.GuideTexts
 import app.thebox.core.guide.render.TextFit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
@@ -56,6 +62,10 @@ import java.util.concurrent.atomic.AtomicReference
  * publication. Generation safety (§0.6): a new generation opens a new reader, re-resolves, re-queries, publishes, then
  * closes the old reader on this thread (M1 Later 11); a patch re-resolves and re-queries; `SQLITE_BUSY` keeps the old
  * snapshot and retries (S7).
+ *
+ * Event channels (docs/design/m6-event-channels.md §6.1, §6.2): a channel whose provider name lists an event
+ * ([GuideChannel.event]) gets that event drawn as a programme by [EventOverlay], with or without a reader, and [info] /
+ * [at] synthesise its details when the guide has no real listing there. Nothing is written to `epg.db`.
  */
 class GuideWindowPagerImpl(
     private val store: EpgStore,
@@ -68,6 +78,8 @@ class GuideWindowPagerImpl(
     /** Test hook: the reader factory (defaults to [EpgStore.openReader]). */
     private val openReader: () -> EpgReader? = store::openReader,
     private val busyRetryMs: Long = BUSY_RETRY_MS,
+    /** (Event channels §6.1) The placeholder-listing test; tests inject one (the real one is WP-1's [EpgFiller]). */
+    private val isFiller: (String) -> Boolean = EpgFiller::isFiller,
 ) : GuideWindowPager {
     private val executor: ExecutorService = Executors.newSingleThreadExecutor { r -> Thread(r, THREAD_NAME).apply { isDaemon = true } }
     private val dispatcher = executor.asCoroutineDispatcher()
@@ -138,6 +150,8 @@ class GuideWindowPagerImpl(
     private var timeLabelsVersion = Int.MIN_VALUE
     private var widthScale = Float.NaN
     private val epgWindow = EpgWindow(512)
+    /** (Event channels §6.1) The reused second window the overlay merges into; only pages with an event use it. */
+    private val merged = EpgWindow(512)
     private val sink = Sink()
     private val infoCache = object : LinkedHashMap<InfoKey, ProgrammeInfo>(INFO_CACHE, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<InfoKey, ProgrammeInfo>?) = size > INFO_CACHE
@@ -153,7 +167,8 @@ class GuideWindowPagerImpl(
     @Volatile var lastQueryMs: Double = 0.0
         private set
 
-    private data class InfoKey(val generation: Long, val identityHash: Long, val rawStart: Int)
+    /** [eventBasis] (Event channels §6.2, arch S10): a renamed event slot with the same start never shows the old title. */
+    private data class InfoKey(val generation: Long, val identityHash: Long, val rawStart: Int, val eventBasis: Long)
 
     init {
         scope.launch { store.info.collect { onInfo(it) } }
@@ -261,21 +276,30 @@ class GuideWindowPagerImpl(
 
     // ------------------------------------------------------------------------------------------------ epg thread
 
+    /**
+     * The guide detail at [rawStartMin]. (Event channels §6.2, arch S10) On the start minute of the channel's event,
+     * when the guide has no listing there or only a placeholder, the event's synthesised info instead, with or without
+     * a reader.
+     */
     override suspend fun info(channel: GuideChannel, rawStartMin: Int): ProgrammeInfo? = onEpg {
-        val r = reader ?: return@onEpg null
-        val key = InfoKey(r.info.generation, channel.identityHash, rawStartMin)
+        val ev = EventOverlay.eventOf(channel)?.takeIf { it.startMin == rawStartMin }
+        val r = reader ?: return@onEpg ev?.let { eventInfo(it) }
+        val key = InfoKey(r.info.generation, channel.identityHash, rawStartMin, channel.event?.basis ?: 0L)
         infoCache[key]?.let { return@onEpg it }
-        val id = idOf(r, channel.epg ?: return@onEpg null)
-        if (id < 0) return@onEpg null
-        val info = r.detail(id, rawStartMin, channel.epgShiftMin)?.toInfo() ?: return@onEpg null
-        infoCache[key] = info
+        val id = channel.epg?.let { idOf(r, it) } ?: -1
+        var info = if (id >= 0) r.detail(id, rawStartMin, channel.epgShiftMin)?.toInfo() else null
+        if (ev != null && (info == null || isFiller(info.title))) info = eventInfo(ev)
+        if (info != null) infoCache[key] = info
         info
     }
 
+    /** The programme airing at [atMin]; (Event channels §6.2) inside the event's span, the event unless a real listing airs. */
     override suspend fun at(channel: GuideChannel, atMin: Int): ProgrammeInfo? = onEpg {
-        val r = reader ?: return@onEpg null
-        val id = idOf(r, channel.epg ?: return@onEpg null)
-        if (id < 0) null else r.at(id, atMin, channel.epgShiftMin)?.toInfo()
+        val ev = EventOverlay.eventOf(channel)?.takeIf { atMin >= it.startMin && atMin < it.endMin }
+        val r = reader ?: return@onEpg ev?.let { eventInfo(it) }
+        val id = channel.epg?.let { idOf(r, it) } ?: -1
+        val listed = if (id >= 0) r.at(id, atMin, channel.epgShiftMin)?.toInfo() else null
+        if (ev != null && (listed == null || isFiller(listed.title))) eventInfo(ev) else listed
     }
 
     private suspend fun <T> onEpg(block: () -> T?): T? {
@@ -424,12 +448,21 @@ class GuideWindowPagerImpl(
             epgWindow.clear()
         }
 
+        // (Event channels §6.1) Fast path: one `event` test per row. Pages with an event merge into [merged].
+        var w = epgWindow
+        var inserted: BooleanArray? = null
+        if (EventOverlay.anyEvent(r.channels)) {
+            val ins = BooleanArray(n)
+            EventOverlay.apply(epgWindow, r.channels, r.fromMin, r.toMin, isFiller, merged, ins)
+            w = merged
+            inserted = ins
+        }
+
         sink.reset()
         val status = ByteArray(n)
         val firstCell = IntArray(n)
         val cellCount = IntArray(n)
         val basis = LongArray(n)
-        val w = epgWindow
         var k = 0
         for (i in 0 until n) {
             val ch = r.channels[i]
@@ -442,7 +475,8 @@ class GuideWindowPagerImpl(
             }
             val start = k
             while (k < w.size && w.channelIndex[k] == i) k++
-            val noEpg = ids[i] < 0 || (start == k && !ch.epgHasData)
+            // (Event channels §6.1 step 3) A row with an inserted event is never NO_EPG: its other time is GAP cells.
+            val noEpg = (inserted == null || !inserted[i]) && (ids[i] < 0 || (start == k && !ch.epgHasData))
             status[i] = if (noEpg) RowStatus.NO_EPG else RowStatus.OK
             cellCount[i] = builder.build(w, start, k, r.fromMin, r.toMin, noEpg, sink)
         }
@@ -457,6 +491,9 @@ class GuideWindowPagerImpl(
     }
 
     private fun ProgrammeDetail.toInfo() = toProgrammeInfo()
+
+    /** (Event channels §6.2) The synthesised details of an event read from the channel name. */
+    private fun eventInfo(ev: ChannelEvent): ProgrammeInfo = EventOverlay.info(ev)
 
     /** Growable scratch arrays on the epg thread; [snapshot] copies them into exact-size fresh arrays. */
     private inner class Sink : CellSink {
@@ -604,3 +641,122 @@ class GuideWindowPagerImpl(
         }
     }
 }
+
+/**
+ * (Event channels, docs/design/m6-event-channels.md §6.1) The read-time overlay of the events read from channel names
+ * onto a guide window. Pure; called on `box-guide-epg` by [GuideWindowPagerImpl.build], and directly by tests.
+ *
+ * For each channel whose [GuideChannel.event] is an EVENT overlapping the window:
+ * 1. if a **real** listing (not [EpgFiller]) overlaps the event's span, the window rows are copied as they are (the
+ *    listing wins: it carries the provider's description and flags);
+ * 2. otherwise every placeholder overlapping the span is clipped to the parts outside it (a tail keeps its
+ *    `rawStartMin`, so `info()` still finds the listing, and loses [ProgrammeFlags.CONTINUATION], so the cell builder
+ *    never merges it into the event), and one row is inserted in start order: the event's own minutes (no guide shift),
+ *    `rawStartMin = startMin`, [CellFlags.EVENT_NAME], [EventConstants.EVENT_TEXT_ID] and the title.
+ *
+ * No synthetic id leaves the snapshot: [EventConstants.EVENT_TEXT_ID] is negative, so no text cache keys on it, and
+ * nothing here is persisted.
+ */
+internal object EventOverlay {
+    /** The channel's event when it is an EVENT with a title and a positive span; null otherwise (EMPTY, ordinary). */
+    fun eventOf(ch: GuideChannel?): ChannelEvent? {
+        val ev = ch?.event ?: return null
+        return if (ev.kind == ChannelEvent.Kind.EVENT && ev.title != null && ev.endMin > ev.startMin) ev else null
+    }
+
+    /** The fast path's test: one field read per row. */
+    fun anyEvent(channels: Array<GuideChannel?>): Boolean {
+        for (c in channels) if (c?.event?.kind == ChannelEvent.Kind.EVENT) return true
+        return false
+    }
+
+    /**
+     * Merges [src] (rows sorted by `(channelIndex, startMin)`) into [out] with the events of [channels] overlaid over
+     * display minutes `[fromMin, toMin)`. [inserted]`[i]` is set when row i received its event. Returns the number of
+     * events inserted.
+     */
+    fun apply(
+        src: EpgWindow, channels: Array<GuideChannel?>, fromMin: Int, toMin: Int,
+        isFiller: (String) -> Boolean, out: EpgWindow, inserted: BooleanArray,
+    ): Int {
+        out.clear()
+        out.ensureCapacity(src.size + channels.size * 2)
+        var count = 0
+        var k = 0
+        for (i in channels.indices) {
+            val start = k
+            while (k < src.size && src.channelIndex[k] == i) k++
+            val ev = eventOf(channels[i])
+            if (ev == null || ev.endMin <= fromMin || ev.startMin >= toMin || realOverlap(src, start, k, ev, isFiller)) {
+                for (j in start until k) copy(src, j, out)
+                continue
+            }
+            // Before the event: rows ending at or before its start, and the heads of clipped placeholders.
+            for (j in start until k) {
+                val s = src.startMin[j]
+                if (s >= ev.startMin) break
+                if (src.endMin[j] <= ev.startMin) copy(src, j, out)
+                else piece(src, j, s, ev.startMin, src.flags[j], out)
+            }
+            add(out, i, ev.startMin, ev.endMin, ev.startMin, CellFlags.EVENT_NAME, EventConstants.EVENT_TEXT_ID, ev.title)
+            inserted[i] = true
+            count++
+            // After it: the tails of clipped placeholders, then rows starting at or after its end.
+            for (j in start until k) {
+                val s = src.startMin[j]
+                val e = src.endMin[j]
+                if (e <= ev.startMin && s < ev.startMin) continue      // emitted before
+                if (s >= ev.endMin) {
+                    // A continuation right at the event's end continues a clipped placeholder: never the event cell.
+                    val f = if (s == ev.endMin) src.flags[j] and ProgrammeFlags.CONTINUATION.inv() else src.flags[j]
+                    piece(src, j, s, e, f, out)
+                } else if (e > ev.endMin) {
+                    piece(src, j, ev.endMin, e, src.flags[j] and ProgrammeFlags.CONTINUATION.inv(), out)
+                }
+                // Otherwise wholly inside the span: dropped.
+            }
+        }
+        return count
+    }
+
+    /** A real (non-placeholder) listing overlaps `[ev.startMin, ev.endMin)`. */
+    private fun realOverlap(src: EpgWindow, from: Int, to: Int, ev: ChannelEvent, isFiller: (String) -> Boolean): Boolean {
+        for (j in from until to) {
+            if (src.startMin[j] < ev.endMin && src.endMin[j] > ev.startMin && !isFiller(src.titles[j] ?: "")) return true
+        }
+        return false
+    }
+
+    private fun copy(src: EpgWindow, j: Int, out: EpgWindow) =
+        add(out, src.channelIndex[j], src.startMin[j], src.endMin[j], src.rawStartMin[j], src.flags[j], src.textId[j], src.titles[j])
+
+    private fun piece(src: EpgWindow, j: Int, s: Int, e: Int, flags: Int, out: EpgWindow) {
+        if (e - s < 1) return
+        add(out, src.channelIndex[j], s, e, src.rawStartMin[j], flags, src.textId[j], src.titles[j])
+    }
+
+    private fun add(out: EpgWindow, ci: Int, s: Int, e: Int, raw: Int, flags: Int, textId: Int, title: String?) {
+        val k = out.size
+        out.ensureCapacity(k + 1)
+        out.channelIndex[k] = ci; out.startMin[k] = s; out.endMin[k] = e; out.rawStartMin[k] = raw
+        out.flags[k] = flags; out.textId[k] = textId; out.titles[k] = title
+        out.size = k + 1
+    }
+
+    /**
+     * (§6.2) The synthesised details: the description says it comes from the name and that the end is estimated, plus
+     * the zone caveat when the zone was assumed. No genre, no episode, flags 0.
+     */
+    fun info(ev: ChannelEvent): ProgrammeInfo {
+        val title = ev.title ?: ""
+        val desc = if (ev.zone == EventZoneSource.ASSUMED) GuideTexts.EVENT_FROM_NAME + " " + GuideTexts.EVENT_ZONE_ASSUMED else GuideTexts.EVENT_FROM_NAME
+        return ProgrammeInfo(ev.startMin, ev.startMin, ev.endMin, title, ev.subtitle, desc, null, null, 0, Hash64.of(title))
+    }
+}
+
+/**
+ * (Event channels, docs/design/m6-event-channels.md §6.2, §7) The details of an event read from a channel name, as the
+ * guide's info panel and search show them: description [GuideTexts.EVENT_FROM_NAME] (+ the zone caveat when the zone
+ * was assumed), no genre, flags 0, `rawStartMin = startMin`.
+ */
+fun eventProgrammeInfo(ev: ChannelEvent): ProgrammeInfo = EventOverlay.info(ev)

@@ -15,6 +15,9 @@ import app.thebox.core.guide.GridMoveResult
 import app.thebox.core.guide.GroupMenuItem
 import app.thebox.core.guide.GroupsShortcut
 import app.thebox.core.guide.GuideChannel
+import app.thebox.core.guide.CellFlags
+import app.thebox.core.events.ChannelEvent
+import app.thebox.core.events.EventConstants
 import app.thebox.core.guide.GuideDataWindow
 import app.thebox.core.guide.GuideEffects
 import app.thebox.core.guide.GuideEvent
@@ -2402,14 +2405,24 @@ class GuideStateMachineImpl(
         val old = u.panel
         if (newCell) { panelToken++; info = null }
         val noInfo = t.kind == CellKind.GAP || t.kind == CellKind.NO_EPG
+        // (Event channels §6.3, U-E-S3) The time around a channel name's event, and an empty slot, say so.
+        val around = if (noInfo) eventGapText(ch, t) else null
+        val fromName = t.kind == CellKind.PROGRAMME && (t.flags and CellFlags.EVENT_NAME) != 0
         val title = when {
             t.kind == CellKind.PROGRAMME -> t.title ?: GuideTexts.NO_INFORMATION
+            around != null -> around.first
             noInfo -> GuideTexts.NO_INFORMATION
             else -> GuideTexts.LOADING
         }
         val timeLine = when {
             t.kind == CellKind.LOADING -> ""
             noInfo -> labels.hm(t.start) + GuideTexts.DASH + labels.hm(t.end)
+            // (Event channels §6.4, U-E-N2) "8:00 PM – about 11:00 PM · From the channel name": the end is estimated.
+            fromName -> buildString {
+                append(labels.hm(t.start)).append(GuideTexts.DASH).append(GuideTexts.ABOUT).append(labels.hm(t.end))
+                append(GuideTexts.SEP).append(GuideTexts.FROM_NAME)
+                if (t.cls == CellClass.PAST) append(GuideTexts.SEP).append(GuideTexts.NOT_IN_CATCHUP)
+            }
             else -> buildString {
                 append(labels.hm(t.start)).append(GuideTexts.DASH).append(labels.hm(t.end))
                 append(GuideTexts.SEP).append(labels.duration(t.end - t.start))
@@ -2417,6 +2430,7 @@ class GuideStateMachineImpl(
             }
         }
         val description = when {
+            around != null -> around.second
             t.kind == CellKind.NO_EPG -> GuideTexts.NO_GUIDE_DATA_CHANNEL
             t.kind == CellKind.GAP -> GuideTexts.NO_GUIDE_DATA_TIME
             newCell -> null
@@ -2436,6 +2450,26 @@ class GuideStateMachineImpl(
         // (2026-10-18) Armed on the new panel, not the old one: a description already loaded for the previous cell
         // used to leave the timer unarmed, so the next cell's description never arrived until a further move.
         if (newCell) armDescription()
+    }
+
+    /**
+     * (Event channels docs/design/m6-event-channels.md §6.3, U-E-S3) The panel's title and description for a GAP or
+     * NO_EPG cell on a channel whose name lists an event or an empty slot; null keeps the usual "No information".
+     * - EMPTY slot: "No event scheduled" and when its next event appears.
+     * - At or after an event that has ended: "No event scheduled"; "may still be on" for
+     *   [EventConstants.EVENT_MAY_BE_ON_MIN] after the estimated end, then "ended".
+     * - Before an event that has not started: "No information" and "Next on this channel: <title> at <time>."
+     */
+    private fun eventGapText(ch: GuideChannel, t: Target): Pair<String, String>? {
+        val ev = ch.event ?: return null
+        return when {
+            ev.kind == ChannelEvent.Kind.EMPTY -> GuideTexts.NO_EVENT to GuideTexts.NO_EVENT_NEXT
+            ev.title == null -> null
+            ev.endMin <= nowMin && t.start >= ev.endMin -> GuideTexts.NO_EVENT to
+                if (nowMin < ev.endMin + EventConstants.EVENT_MAY_BE_ON_MIN) GuideTexts.EVENT_MAY_BE_ON else GuideTexts.EVENT_ENDED
+            ev.startMin > nowMin && t.end <= ev.startMin -> GuideTexts.NO_INFORMATION to GuideTexts.nextEvent(ev.title, labels.hm(ev.startMin))
+            else -> null
+        }
     }
 
     private fun armDescription() {
@@ -2571,7 +2605,10 @@ class GuideStateMachineImpl(
     ) {
         fun info(): ProgrammeInfo {
             val loaded = info
-            if (loaded != null && channel != null && infoHash == channel.identityHash && loaded.rawStartMin == rawStart) return loaded
+            // (Event channels §6.2, arch S10) The title too: a renamed event slot with the same start is another event.
+            if (loaded != null && channel != null && infoHash == channel.identityHash && loaded.rawStartMin == rawStart &&
+                (titleKey == 0L || loaded.titleHash == 0L || loaded.titleHash == titleKey)
+            ) return loaded
             return ProgrammeInfo(rawStart, start, end, title ?: "", null, null, null, null, flags, titleKey)
         }
     }
@@ -2595,7 +2632,10 @@ class GuideStateMachineImpl(
             }
         }
         val days = if (ch == null) 0 else archiveDays(ch)
-        val covered = days > 0 && kind == CellKind.PROGRAMME && raw >= nowMin - days * GuideLimits.MIN_PER_DAY && start <= nowMin
+        // (Event channels §6.4, arch S6) An event read from the channel name is never in catch-up: no archive Watch, no
+        // Watch from start, no Start-over. Its end is estimated and a past slot's archive may hold another event.
+        val covered = days > 0 && kind == CellKind.PROGRAMME && (flags and CellFlags.EVENT_NAME) == 0 &&
+            raw >= nowMin - days * GuideLimits.MIN_PER_DAY && start <= nowMin
         val cls = when (kind) {
             CellKind.PROGRAMME -> when {
                 end <= nowMin -> if (covered) CellClass.PAST_ARCHIVE else CellClass.PAST
