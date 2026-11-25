@@ -107,7 +107,7 @@ class HubPanelContentsTest {
         assertTrue(content(HubPanelModel(final, detail = fd, detailKind = DetailKind.READY, recap = recapInfo, videoOff = true)).media is MediaSpec.Art)
     }
 
-    @Test fun thePlayDiscIsDroppedWhereItWouldMeetTheCaption() {
+    @Test fun thePlayDiscStaysInTheTallerPanelAtEverySize() {
         val d = detail(live, listOf(goal(55L)))
         val info = ClipInfo(ClipRef(55L, ClipKind.GOAL, live.id), "Vilardi strikes first", null, 46_000L, "https://img.test/p.jpg", null)
         val m = HubPanelModel(live, detail = d, detailKind = DetailKind.READY, latestGoal = info)
@@ -121,8 +121,10 @@ class HubPanelContentsTest {
         rule.onNodeWithTag(HUB_PLAY_DISC_TAG, useUnmergedTree = true).assertExists()
         size.value = TextSize.LARGEST
         rule.waitForIdle()
-        assertTrue("Largest: ${content(m, 1.2f).plan.mediaH} px", content(m, 1.2f).plan.mediaH < HubPanelPlan.POSTER_DISC_MIN_H)
-        rule.onNodeWithTag(HUB_PLAY_DISC_TAG, useUnmergedTree = true).assertDoesNotExist()
+        // Owner change 2026-11-25: the 864-high panel gives the media 52 px more, so the disc now fits at Largest too (the
+        // drop rule, heightDp >= POSTER_DISC_MIN_H, is unchanged).
+        assertTrue("Largest: ${content(m, 1.2f).plan.mediaH} px", content(m, 1.2f).plan.mediaH >= HubPanelPlan.POSTER_DISC_MIN_H)
+        rule.onNodeWithTag(HUB_PLAY_DISC_TAG, useUnmergedTree = true).assertExists()
     }
 
     // ------------------------------------------------------------------ M5 / M8: the headline as composed

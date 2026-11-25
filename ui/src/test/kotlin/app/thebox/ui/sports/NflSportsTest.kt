@@ -103,7 +103,6 @@ class NflSportsTest {
         show()
         rule.onNodeWithTag(sportsLeagueTag(League.NHL)).assertExists()
         rule.onNodeWithTag(sportsLeagueTag(League.NFL)).assertExists()
-        rule.onNodeWithText(str(R.string.sports_hub_credit_nhl)).assertExists()
         // Fix pass U4 (§7.3): Up from the day chips lands on the shown league's chip; Right reaches NFL; OK switches.
         press(Key.DirectionUp, Key.DirectionUp)
         rule.onNodeWithTag(sportsLeagueTag(League.NHL)).assertIsFocused()
@@ -118,10 +117,9 @@ class NflSportsTest {
         rule.onNodeWithTag(sportsDayTag(0)).assertIsFocused()
     }
 
-    @Test fun anNflBoardReadsLastThisNextWeekWithTheEspnCreditAndTheWeekLabel() {
+    @Test fun anNflBoardReadsLastThisNextWeekWithTheWeekLabel() {
         week(live, pre)
         show()
-        rule.onNodeWithText(str(R.string.sports_credit_espn)).assertExists()
         rule.onNodeWithText("Last week · Wk 8").assertExists()
         rule.onNodeWithText("This week · Wk 9").assertExists()
         rule.onNodeWithText("Next week · Wk 10").assertExists()

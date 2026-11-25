@@ -35,8 +35,8 @@ class HubPanelFitTest {
         HubPanelPlan.plan(f, rows, extra, summary, channel, note, floor, hasRows = rows > 0)
 
     @Test fun theDefaultSizeMatchesTheSpecsNumbers() {
-        assertEquals("live and final NHL", 212, plan(1.0f, 5, summary = 2, floor = poster).mediaH)
-        assertEquals("pre-game NHL", 174, plan(1.0f, 6, summary = 2, floor = art).mediaH)
+        assertEquals("live and final NHL", 264, plan(1.0f, 5, summary = 2, floor = poster).mediaH)
+        assertEquals("pre-game NHL", 226, plan(1.0f, 6, summary = 2, floor = art).mediaH)
     }
 
     @Test fun everyPhaseKeepsItsMediaFloorAtEverySize() {
@@ -56,14 +56,19 @@ class HubPanelFitTest {
         }
     }
 
-    @Test fun summaryLineTwoGivesWayAtTheLargestSizes() {
+    // Owner change 2026-11-25: the panel is 864 high (was 812), so the 52 extra px keep summary line 2 even at Largest (§1.4's
+    // drop order still applies when the floors bite: the line goes before the media goes under its floor).
+    @Test fun theSummaryKeepsBothLinesAtTheLargestSizeInTheTallerPanel() {
         val live = plan(1.2f, 5, summary = 2, floor = poster)
-        assertEquals("§1.4: summary line 2 dropped at Largest", 1, live.summaryLines)
-        assertTrue("media ${live.mediaH}", live.mediaH in poster..poster + 20)
+        assertEquals("both lines fit at Largest in 864", 2, live.summaryLines)
+        assertTrue("media ${live.mediaH}", live.mediaH >= poster)
         val pre = plan(1.2f, 6, summary = 2, floor = art)
-        assertEquals(1, pre.summaryLines)
+        assertEquals(2, pre.summaryLines)
         assertEquals("the default keeps both lines", 2, plan(1.0f, 5, summary = 2, floor = poster).summaryLines)
-        assertEquals("Smaller does not shrink the rows", 212, plan(0.9f, 5, summary = 2, floor = poster).mediaH)
+        assertEquals("Smaller does not shrink the rows", 264, plan(0.9f, 5, summary = 2, floor = poster).mediaH)
+        // The drop order itself: with more rows than the floor allows, the line drops before the media gives way.
+        val tight = plan(1.2f, 7, summary = 2, floor = poster)
+        assertTrue("tight $tight", tight.summaryLines < 2 && tight.mediaH >= poster)
     }
 
     @Test fun theHeadlineNamesGiveWayAndNoScoreIsEverCut() {

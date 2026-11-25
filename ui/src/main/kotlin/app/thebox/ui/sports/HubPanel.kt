@@ -722,7 +722,7 @@ internal object HubSummary {
 // =====================================================================================================================
 
 internal object HubPanelPlan {
-    const val PANEL_H = 812
+    const val PANEL_H = 864
     const val INNER_W = 664
     const val POSTER_FLOOR = 160
     /** (Review M4) The poster's play disc is drawn only in a media area at least this tall (it would meet the caption below). */
@@ -774,7 +774,7 @@ internal object HubPanelPlan {
 
 
 // =====================================================================================================================
-// The panel (§1.3): 720 × 812, inner 664
+// The panel (§1.3): 720 × 864 (owner change 2026-11-25: was 812), inner 664
 // =====================================================================================================================
 
 const val HUB_PANEL_TAG = "hub_panel"

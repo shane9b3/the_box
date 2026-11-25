@@ -86,7 +86,6 @@ class ChlSportsTabTest {
         for (g in listOf("NHL", "NFL", "CHL")) rule.onNodeWithTag("sports_league:$g").assertExists()
         for (l in listOf(League.OHL, League.WHL, League.QMJHL)) rule.onNodeWithTag(sportsChlTag(l)).assertDoesNotExist()
         rule.onNodeWithTag(SPORTS_CHL_DIVIDER_TAG).assertDoesNotExist()
-        rule.onNodeWithText(str(R.string.sports_hub_credit_nhl)).assertExists()
     }
 
     @Test fun okOnCHLShowsTheRememberedSubLeagueAndMovesFocusToItsChip() {
@@ -217,19 +216,6 @@ class ChlSportsTabTest {
     }
 
     // ------------------------------------------------------------------ credit, empty, failed, refused
-
-    @Test fun theCreditNamesTheLeagueAndTheQmjhlKeepsLhjmqVerbatim() {
-        wire(SportsPrefs(league = League.OHL))
-        board(SportsFixtures.chlGame(), league = League.OHL)
-        show()
-        rule.onNodeWithText("Official statistics provided by Ontario Hockey League · Powered by HockeyTech.com").assertExists()
-        for ((league, who) in listOf(League.WHL to "Western Hockey League", League.QMJHL to "LHJMQ")) {
-            store.update(SportsDomain) { it.copy(league = league, chlLeague = league) }
-            board(SportsFixtures.chlGame(league = league), league = league)
-            rule.waitForIdle()
-            rule.onNodeWithText("Official statistics provided by $who · Powered by HockeyTech.com").assertExists()
-        }
-    }
 
     @Test fun anEmptyCHLDayAndTheFailuresNameTheLeagueAndTheNextStep() {
         wire(SportsPrefs(league = League.WHL, chlLeague = League.WHL))

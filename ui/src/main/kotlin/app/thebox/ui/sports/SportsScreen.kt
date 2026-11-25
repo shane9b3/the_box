@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -56,11 +55,9 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.Text
-import app.thebox.core.guide.FooterHint
 import app.thebox.core.settings.UiTextScale
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.League
@@ -69,7 +66,6 @@ import app.thebox.core.sports.group
 import app.thebox.ui.R
 import app.thebox.ui.full.PlayerText
 import app.thebox.ui.guide.screen.Chip
-import app.thebox.ui.guide.screen.FooterHints
 import app.thebox.ui.guide.screen.GuideUi
 import app.thebox.ui.guide.screen.Line
 import app.thebox.ui.theme.DesignTokens
@@ -102,16 +98,13 @@ const val SPORTS_CHL_DIVIDER_TAG = "sports_chl_divider"
 private const val SCROLL_MARGIN = 48
 private const val CHIP_H = 52
 
-/** The page's focus zones, for the footer's hints (§2.6). */
-private enum class Zone { CARDS, CHIPS }
-
 /**
  * The Sports Hub page (docs/design/m6-sports-hub.md §1, §2; WP-4). It is on Compose focus like Search: the router passes every
  * key but BACK, and one Back returns to the guide grid (the machine's `onSportsClosed`). While focus is in the panel or a sheet
  * is open the screen holds BACK ([onBackFreeChanged] false) and returns focus itself (Back from the panel goes to its card).
  *
- * Layout (design px, 1920 × 1080): the title row at y 56; the detail panel (96, 148, 720 × 812); on the right (x 856, 968 wide)
- * the heading, the day strip at y 196 and the two-column grid of 472 × 304 cards from y 280 to 960; the footer at y 976.
+ * Layout (design px, 1920 × 1080): the title row at y 56 (64 high), 40 of air; the detail panel (96, 160, 720 × 864); on the right (x 856, 968 wide)
+ * the heading, the day strip at y 196 and the two-column grid of 472 × 304 cards from y 292 to 1024 (no footer: the hints and credits left, owner change 2026-11-25).
  *
  * Keys: OK or Menu on any card (and Left from the left column) moves focus to the panel's first enabled slot; slots never
  * reorder; Back, or Right from the last slot, returns to the same card. No long press anywhere (§2.2). Initial focus: the
@@ -178,7 +171,6 @@ fun SportsScreen(
     var focusedCardId by remember { mutableStateOf<String?>(null) }
     var lastCardId by remember { mutableStateOf<String?>(null) }
     var returnCardId by remember { mutableStateOf<String?>(null) }
-    var zone by remember { mutableStateOf(Zone.CARDS) }
     var focusedSlot by remember { mutableIntStateOf(-1) }
     var sheetSlot by remember { mutableIntStateOf(0) }
     var lastSlot by remember { mutableIntStateOf(0) }
@@ -303,7 +295,6 @@ fun SportsScreen(
     }
 
     val off = body is SportsBody.Off
-    val focusedCard = cards.firstOrNull { it.game.id.id == focusedCardId }
     val showHighlights = !videoRefused
 
     Box(
@@ -326,14 +317,14 @@ fun SportsScreen(
             // (Review H1, H2) Nothing on the page takes focus behind an open sheet or under a clip.
             androidx.compose.runtime.CompositionLocalProvider(LocalHubFocusable provides (sheet == null && !clipActive)) {
             Column(Modifier.fillMaxSize().padding(start = 96.dp, end = 96.dp, top = 56.dp, bottom = 56.dp)) {
-                TitleRow(ui, groupChips, subChips, selectedChip, chips = !off, clock24 = clock24, wallClockMs = wallClockMs, onZone = { zone = Zone.CHIPS },
+                TitleRow(ui, groupChips, subChips, selectedChip, chips = !off, clock24 = clock24, wallClockMs = wallClockMs,
                     onGroup = { g ->
                         viewModel.onGroup(g)
                         if (g == LeagueGroup.CHL) focusSub = true
                     },
                     onLeague = viewModel::onLeague,
                 )
-                Spacer(Modifier.height(28.dp))
+                Spacer(Modifier.height(40.dp))
                 if (off) {
                     Message(stringResource(R.string.sports_off), retry = false, onRetry = {})
                 } else {
@@ -370,10 +361,10 @@ fun SportsScreen(
                                     settled = true
                                     viewModel.onDay(o)
                                 },
-                                modifier = Modifier.fillMaxWidth().height(60.dp).onFocusChanged { if (it.hasFocus) zone = Zone.CHIPS },
+                                modifier = Modifier.fillMaxWidth().height(60.dp),
                             )
                             Spacer(Modifier.height(24.dp))
-                            Box(Modifier.fillMaxWidth().height(680.dp)) {
+                            Box(Modifier.fillMaxWidth().height(732.dp)) {
                                 when (val b = body) {
                                     SportsBody.Loading -> Skeletons()
                                     is SportsBody.Games -> GamesGrid(
@@ -386,7 +377,6 @@ fun SportsScreen(
                                             else if (on) {
                                                 focusedCardId = id
                                                 lastCardId = id
-                                                zone = Zone.CARDS
                                                 viewModel.onCardFocused(id)
                                                 scope.launch { gridState.ensureVisible(index, marginPx) }
                                             } else if (focusedCardId == id) focusedCardId = null
@@ -407,11 +397,9 @@ fun SportsScreen(
                         }
                     }
                 }
-                Spacer(Modifier.height(16.dp))
-                Footer(ui, hints = footerOf(res, zone, panelFocused, sheet, focusedCard, panel, focusedSlot), updatedMono = ui.updatedMono)
             }
             }
-            // A sheet takes the right column (§6.4). The sheet draws its own frame at x 856, y 148 (HubSheetFrame), so the
+            // A sheet takes the right column (§6.4). The sheet draws its own frame at x 856, y 160 (HubSheetFrame), so the
             // host is the full page; the grid behind is not focusable while it is open. Re-keyed after each clip, so focus
             // lands again on the clip just played even when it was the same clip as before (U-S14).
             sheet?.let { sh ->
@@ -486,43 +474,6 @@ private fun emptyText(b: SportsBody.Empty, ui: SportsUiState): String {
     return SportsText.emptyDay(res, b.day, league, weekOff = !ui.canPrev && !ui.canNext)
 }
 
-/** The footer's hints (§2.6). */
-private fun footerOf(
-    res: android.content.res.Resources, zone: Zone, panelFocused: Boolean, sheet: HubSheet?, focused: GameCardModel?,
-    panel: HubPanelModel, focusedSlot: Int,
-): List<FooterHint> = buildList {
-    val ok = res.getString(R.string.sports_footer_keys_ok)
-    val back = res.getString(R.string.sports_footer_keys_back)
-    when {
-        sheet != null -> {
-            add(FooterHint("↑ ↓", res.getString(R.string.sports_hub_hint_choose)))
-            when (sheet) {
-                is HubSheet.Goals -> add(FooterHint(ok, res.getString(R.string.sports_hub_hint_play)))
-                is HubSheet.Channels -> add(FooterHint(ok, res.getString(R.string.sports_hub_hint_watch)))
-                is HubSheet.BoxScoreSheet -> add(FooterHint("← →", res.getString(R.string.sports_hub_hint_away_home)))
-                is HubSheet.Matchup -> Unit
-            }
-            add(FooterHint(back, res.getString(R.string.sports_hub_hint_close)))
-        }
-        panelFocused -> {
-            add(FooterHint("← →", res.getString(R.string.sports_hub_hint_choose)))
-            panel.slots.getOrNull(focusedSlot)?.takeIf { it.usable }?.let { add(FooterHint(ok, slotText(res, it))) }
-            add(FooterHint(back, res.getString(R.string.sports_hub_hint_games)))
-        }
-        zone == Zone.CHIPS || focused == null -> {
-            add(FooterHint(res.getString(R.string.sports_footer_keys_browse), res.getString(R.string.sports_hub_hint_browse)))
-            add(FooterHint(ok, res.getString(R.string.sports_hub_hint_show)))
-            add(FooterHint(back, res.getString(R.string.sports_hub_hint_guide)))
-        }
-        else -> {
-            add(FooterHint(res.getString(R.string.sports_footer_keys_browse), res.getString(R.string.sports_hub_hint_browse)))
-            // "OK Options" is absent when the game has no enabled slot.
-            if (panel.game?.id == focused.game.id && panel.firstEnabled != null) add(FooterHint(ok, res.getString(R.string.sports_hub_hint_options)))
-            add(FooterHint(back, res.getString(R.string.sports_hub_hint_guide)))
-        }
-    }
-}
-
 // ------------------------------------------------------------------ title row
 
 @Composable
@@ -534,7 +485,6 @@ private fun TitleRow(
     chips: Boolean,
     clock24: Boolean,
     wallClockMs: () -> Long,
-    onZone: () -> Unit,
     onGroup: (LeagueGroup) -> Unit,
     onLeague: (League) -> Unit,
 ) {
@@ -560,7 +510,6 @@ private fun TitleRow(
                         down = down,
                         selected = group == ui.prefs.league.group,
                         last = group == LeagueGroup.CHL && ui.prefs.league.group != LeagueGroup.CHL,
-                        onFocus = onZone,
                         onClick = { onGroup(group) },
                     )
                 }
@@ -575,8 +524,7 @@ private fun TitleRow(
                             down = down,
                             selected = league == ui.prefs.league,
                             last = league == League.QMJHL,
-                            onFocus = onZone,
-                            onClick = { onLeague(league) },
+                                onClick = { onLeague(league) },
                         )
                     }
                 }
@@ -615,7 +563,6 @@ private fun FocusChip(
     selected: Boolean = false,
     /** The last chip of the row: Right there changes nothing (the Corner and Delay chips left the page). */
     last: Boolean = false,
-    onFocus: () -> Unit = {},
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
@@ -626,7 +573,7 @@ private fun FocusChip(
             .focusRequester(requester)
             .focusProperties { canFocus = focusable; if (down != null) this.down = down }
             .onPreviewKeyEvent { e -> e.key == Key.DirectionUp || (last && e.key == Key.DirectionRight) }
-            .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() }
+            .onFocusChanged { focused = it.isFocused }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
     ) {
         Chip(
@@ -649,26 +596,11 @@ private fun Heading(ui: SportsUiState) {
         )
         // NFL §7.2: the board's week ("Week 9"), once a board is shown.
         ui.boardKey?.let { key -> Line(SportsText.weekLabel(res, key), GuideUi.sans(22, color = GuideUi.Fg55), Modifier.testTag(SPORTS_WEEK_TAG)) }
-    }
-}
-
-/** The footer (§1.1): the hints (up to the credit's width), then the credit and, while a re-poll fails, "Updated 2 min ago". */
-@Composable
-private fun Footer(ui: SportsUiState, hints: List<FooterHint>, updatedMono: Long?) {
-    val res = LocalResources.current
-    val measurer = rememberTextMeasurer()
-    val density = LocalDensity.current
-    val credit = if (ui.prefs.league.group == LeagueGroup.NHL) res.getString(R.string.sports_hub_credit_nhl) else SportsText.credit(res, ui.prefs.league)
-    val creditW = with(density) { measurer.measure(credit, GuideUi.sans(22, color = GuideUi.Fg55), maxLines = 1, softWrap = false).size.width.toDp() }
-    // (U-S9) 1728 minus the credit and a 32 px gap, so the hints never run into it.
-    Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
-        FooterHints(hints, textPx = 24, maxWidth = (1728.dp - creditW - 32.dp).coerceAtLeast(0.dp))
-        Spacer(Modifier.weight(1f))
-        if (updatedMono != null) {
-            UpdatedText(updatedMono)
-            Spacer(Modifier.width(24.dp))
+        // While a board's re-poll fails: "Updated 2 min ago" at the row's right end (the footer is gone).
+        ui.updatedMono?.let { mono ->
+            Spacer(Modifier.weight(1f))
+            UpdatedText(mono)
         }
-        Line(credit, GuideUi.sans(22, color = GuideUi.Fg55))
     }
 }
 

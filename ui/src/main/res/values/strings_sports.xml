@@ -88,12 +88,10 @@
 
     <!-- ==== Sports tab (5) -->
     <!-- Title-row chips (U-N6). %1$s = a corner ("Top right") / a delay ("Off", "30 s"). -->
-    <string name="sports_credit">Scores and logos: NHL.com</string>
     <!-- Card state column (5.2). %1$s = a period ("2nd"), %2$s = the clock ("10:22"). -->
     <string name="sports_card_live_line">%1$s · %2$s</string>
     <!-- Accessibility of a card. %1$s/%3$s away/home names, %2$s/%4$s their scores or "", %5$s the state ("LIVE, 2nd 10:22", "7:00 PM"). -->
-    <!-- Footer (U-S9): key, then label. -->
-    <string name="sports_footer_keys_browse">← → ↑ ↓</string>
+    <!-- Clip controls: key words. -->
     <string name="sports_footer_keys_ok">OK</string>
     <string name="sports_footer_keys_back">Back</string>
     <!-- Empty and error states (5.4, U-N5) -->
@@ -234,7 +232,6 @@
     <!-- The off-season board: both neighbour chips are disabled. -->
     <string name="sports_week_off">No NFL games this week.</string>
     <string name="sports_failed_espn">ESPN did not answer. Press OK to try again; scores may be down for a few minutes.</string>
-    <string name="sports_credit_espn">Scores and logos: ESPN</string>
     <!-- %1$s = away abbreviation, %2$s = home abbreviation. -->
     <string name="sports_toast_not_listed_espn">ESPN no longer lists %1$s – %2$s. Follow another game in Sports.</string>
     <!-- The live region (§8). %1$s/%3$s the short names (away, home: "Chiefs"), %2$d/%4$d the scores, %5$s the scorer's
@@ -340,13 +337,6 @@
     <string name="sports_picker_chl_league">CHL league · %1$s</string>
     <!-- A card's or picker row's start time when the league lists the game's time as to be decided (§3.2 time_tbd). -->
     <string name="sports_time_tbd">Time TBD</string>
-    <!-- The credit line (§6.6, P9): the feed's own attribution, built from resources. %1$s = sports_credit_chl_ohl / _whl /
-         _qmjhl. -->
-    <string name="sports_credit_chl">Official statistics provided by %1$s · Powered by HockeyTech.com</string>
-    <string name="sports_credit_chl_ohl" translatable="false">Ontario Hockey League</string>
-    <string name="sports_credit_chl_whl" translatable="false">Western Hockey League</string>
-    <!-- (Q2) The QMJHL's required attribution, verbatim; "QMJHL" is used everywhere else. -->
-    <string name="sports_credit_chl_qmjhl" translatable="false">LHJMQ</string>
     <!-- Settings → Sports, the update interval's slowed note for a league timed from completion other than the NFL.
          %1$s = the league ("OHL"). Key: SettingsText.SPORTS_INTERVAL_SLOWED_LEAGUE. -->
     <string name="settings_sports_interval_slowed_league">%1$s scores asked the app to check less often, so it checks every 10 s or slower for now.</string>

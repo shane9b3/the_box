@@ -1401,6 +1401,10 @@ or signed URL in the tree; only `FAKE-KEY-FOR-TESTS*` literals.
 
 ---
 
+### 15.6 Owner change 2026-11-25: footer removed
+
+At the owner's request the page's footer is gone: the key hints ("OK Options", "Back Guide", ...) and the attribution at the right ("Scores, stats and video: NHL.com", the NFL and CHL credits) are no longer drawn, and their strings and `SportsText.credit` are deleted. The freed 64 design px go to the content: the title-to-content gap is 40 (was 28), the detail panel is 720 × 864 (`HubPanelPlan.PANEL_H`, was 812; the extra 52 goes to the media area), the right column's grid box is 732 high (was 680), and the sheet frame is 968 × 864 at y 160 (was 812 at y 148). The content's bottom edge now sits on the 56 px safe margin (y 1024). "Updated 2 min ago" (shown while a re-poll fails) moved to the right end of the heading row. Earlier sections describing the footer (§1.1, §2.6) are left as written and are superseded by this note.
+
 ## Appendix A: new constants (`SportsConstants`)
 
 | Name | Value | Use |

@@ -15,7 +15,7 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onFirst
-import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performKeyInput
@@ -32,7 +32,6 @@ import androidx.compose.ui.test.assertContentDescriptionEquals
 import app.thebox.core.sports.League
 import app.thebox.core.sports.SportsFixtures
 import app.thebox.ui.R
-import app.thebox.ui.guide.screen.footerHintTag
 import app.thebox.ui.theme.BoxTheme
 import java.time.LocalDate
 import org.junit.Assert.assertEquals
@@ -250,17 +249,10 @@ class SportsScreenTest {
         rule.onNodeWithTag(SPORTS_FOLLOWING_TAG + "L1", useUnmergedTree = true).assertDoesNotExist()
     }
 
-    @Test fun theFooterHintsFollowTheZone() {
+    @Test fun thePageHasNoCreditLine() {
         board(live, live2)
         show()
-        rule.onNodeWithText(str(R.string.sports_hub_hint_options), useUnmergedTree = true).assertExists()
-        rule.onNodeWithText(str(R.string.sports_hub_hint_guide), useUnmergedTree = true).assertExists()
-        press(Key.DirectionCenter)
-        rule.onNodeWithText(str(R.string.sports_hub_hint_choose), useUnmergedTree = true).assertExists()
-        rule.onNodeWithText(str(R.string.sports_hub_hint_games), useUnmergedTree = true).assertExists()
-        rule.onAllNodesWithText(str(R.string.sports_hub_slot_follow), useUnmergedTree = true).assertCountEquals(2) // the button and the footer's hint
-        press(Key.Back, Key.DirectionUp)
-        rule.onNodeWithText(str(R.string.sports_hub_hint_show), useUnmergedTree = true).assertExists()
+        rule.onNodeWithText("NHL.com", substring = true, useUnmergedTree = true).assertDoesNotExist()
     }
 
     @Test fun aPostponedCardHasNoOptionsAndOkDoesNothing() {
@@ -270,7 +262,6 @@ class SportsScreenTest {
         rule.onNodeWithTag(sportsDayTag(0)).assertIsFocused()
         press(Key.DirectionDown)
         rule.onNodeWithTag(sportsCardTag("PP")).assertIsFocused()
-        rule.onNodeWithText(str(R.string.sports_hub_hint_options), useUnmergedTree = true).assertDoesNotExist()
         press(Key.DirectionCenter)
         rule.onNodeWithTag(sportsCardTag("PP")).assertIsFocused()
     }
@@ -282,10 +273,9 @@ class SportsScreenTest {
         rule.onAllNodesWithText("LIVE · 2ND 10:22", useUnmergedTree = true).onFirst().assertExists() // the card's pill, the panel's and its art
     }
 
-    @Test fun theChipsShowTheCreditAndTheTitle() {
+    @Test fun theChipsShowTheTitle() {
         board(pre)
         show()
-        rule.onNodeWithText(str(R.string.sports_hub_credit_nhl)).assertExists()
         rule.onNodeWithText(str(R.string.sports_league_nhl)).assertExists()
         rule.onNodeWithText(str(R.string.sports_hub_title)).assertExists()
         rule.onNodeWithTag(SPORTS_HEADING_TAG).assertTextEquals("NHL SCORES & SCHEDULE")
@@ -360,6 +350,10 @@ class SportsScreenTest {
         show()
         rule.onNodeWithTag(sportsCardTag("L1")).assertExists()
         rule.onNodeWithTag(SPORTS_UPDATED_TAG).assertTextEquals(str(R.string.sports_updated_now))
+        // It sits on the heading's row, at the right end of the right column (owner change 2026-11-25: the footer is gone).
+        val h = rule.onNodeWithTag(SPORTS_HEADING_TAG).fetchSemanticsNode().boundsInRoot
+        val u = rule.onNodeWithTag(SPORTS_UPDATED_TAG).fetchSemanticsNode().boundsInRoot
+        org.junit.Assert.assertTrue("updated $u right of the heading $h", u.left >= h.right && u.center.y > h.top && u.center.y < h.bottom)
     }
 
     @Test fun theUpdatedLineIsAbsentWhileTheBoardIsFresh() {

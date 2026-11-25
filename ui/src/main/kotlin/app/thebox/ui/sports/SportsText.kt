@@ -271,24 +271,6 @@ object SportsText {
         )
     }
 
-    /** (CHL §6.6, P9, Q2) The Sports tab's credit line; the QMJHL's reads "LHJMQ" verbatim (the feed's required attribution). */
-    fun credit(res: Resources, league: League): String = when (league.group) {
-        LeagueGroup.NHL -> res.getString(R.string.sports_credit)
-        LeagueGroup.NFL -> res.getString(R.string.sports_credit_espn)
-        LeagueGroup.CHL -> res.getString(
-            R.string.sports_credit_chl,
-            res.getString(
-                when (league) {
-                    League.OHL -> R.string.sports_credit_chl_ohl
-                    League.WHL -> R.string.sports_credit_chl_whl
-                    League.QMJHL -> R.string.sports_credit_chl_qmjhl
-                    // Unreachable under the group check above; the OHL's text is the neutral choice.
-                    League.NHL, League.NFL -> R.string.sports_credit_chl_ohl
-                },
-            ),
-        )
-    }
-
     // ------------------------------------------------------------------ Sports Hub (docs/design/m6-sports-hub.md §1.2, §3, §6.7, §8.2)
 
     /** A status pill: its upper-case [text] and whether the red dot and the live fill are drawn. */

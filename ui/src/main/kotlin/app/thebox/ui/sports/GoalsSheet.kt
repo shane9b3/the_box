@@ -323,7 +323,7 @@ internal fun focusedOf(color: Color): Boolean = color == GuideUi.Canvas
 internal fun isBack(e: KeyEvent): Boolean = e.key == Key.Back || e.key == Key.Escape || e.key == Key.ButtonB
 
 /**
- * §6.4 frame for every sheet: over the right column, x 856, y 148, w 968, h 812, radius 24, `OverlayFill` + 1 px
+ * §6.4 frame for every sheet: over the right column, x 856, y 160, w 968, h 864, radius 24, `OverlayFill` + 1 px
  * `OverlayBorder`, padding 28; [title] 32/600; a `LazyColumn` of focusable rows from y 84 (inside the frame). Focus goes to
  * row [initialRow] on open and again when [focusKey] changes; Back (on key up) calls [onClose]; Left / Right never leave
  * the sheet. [header] sits between the title and the list (the box score's tabs). Opaque, no layer.
@@ -404,8 +404,8 @@ internal fun HubSheetFrame(
     Box(modifier.fillMaxSize().testTag(HUB_SHEET_TAG)) {
         Column(
             Modifier
-                .padding(start = 856.dp, top = 148.dp)
-                .size(968.dp, 812.dp)
+                .padding(start = 856.dp, top = 160.dp)
+                .size(968.dp, 864.dp)
                 .onFocusChanged { focus[0] = it.hasFocus }
                 .focusGroup()
                 .background(GuideUi.OverlayFill, shape)

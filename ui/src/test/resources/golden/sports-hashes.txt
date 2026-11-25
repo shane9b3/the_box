@@ -1293,7 +1293,7 @@ a94f710c8ed57ad9ed4a901f306523a81a2e8c6283581a85876afafbd17dc7e3  score-bug/stat
 0338c36df0d0b9bf41fc2a198ed53080e1b47914f5b90be3d95c056c7a7d0e1b  score-bug/state-so.png
 6aac14c491a0f65109e0a328244aa8ce0510f7546af7f77f5776529fea6f23c3  score-bug/state-stale.png
 a8dc9b96921d1bc2f1f151cd8518cfd3b93f711f20fc2305430c738e3933ab68  score-bug/white-ice-live.png
-a099d34a5dd6b18b97f04b4e308e1f8de61fcc9c821041930825263d1697f5a3  sports-tab/sports-tab.png
+c41f4b2f2be5f194dd1f83a0234acc5ff76f487e39d5e83beb8ccaea66eb74c0  sports-tab/sports-tab.png
 # 2026-11-15 (NFL Stacked integration pass): appended score-bug-stacked-nfl/ (StackedNflScreenshotTest through the real
 #   pipeline: StackedNflTargets.of, StackedNflTimeline, NflStackedColours, NflScoreSpec.STACKED). Taken on the host above,
 #   two clean runs hashed equal; every line above is unchanged. Pending the owner's review of the shots (design §9.3).
@@ -1717,6 +1717,9 @@ a73e6ff75e1084d8bec6177d5e9f6265e69599a398415eacf6682dff62a4dbf4  score-bug-stac
 #   re-rendered with the 21 ball on the merged tree (StackedNflScreenshotTest, same host, two runs hashed equal). The other
 #   13 yds-* lines, the 406 other score-bug-stacked-nfl/ lines and the 210 nfl-screenshots/ (Pill) lines hash equal on
 #   the merged tree; no other line changed (those suites were not re-run here).
+# 2026-11-25 (owner change: Sports Hub footer removed, panel 864 high): seven changed on purpose: sports-tab/sports-tab.png and
+#   hub-panel-{final,live,pre}-{default,largest}: the hints and credits are gone, the detail panel is 864 high (was 812) and the grid
+#   box 732 (was 680); the title row is unchanged. hub-cards-* are unchanged. Every other hash is unchanged.
 249f87fe5007e654740bca1c9cfbdd32ce55b18eef8e6e2ee6786db1acdffa5b  score-bug-stacked-nfl/yds-close-t425-br-std.png
 171811b5a1c6a0832c9472fa3923ff53c93f6e310a29b4d5ec90d88cc6a6482a  score-bug-stacked-nfl/yds-close-t425-tl-std.png
 e3dd0eeb1086b66ae8c6303f6f7a442be81d1843480dc7844b54261ff8d4b230  score-bug-stacked-nfl/yds-end-1st-negative-br-std.png
@@ -1745,9 +1748,9 @@ d4dcf3965d075bd39826d090aacadf4c1c748d6a31ea0a882fac2da8dad51349  score-bug-stac
 95fff51c8a23f0e4b126182c7132d986cc291a70d8d56d4fbf17e80b7083becf  score-bug-stacked-nfl/yds-timeout-tr-std.png
 67619012a10577426a763ee7c8b021e6ed1180cb0a919a2753bbbfcf0e242083  sports-tab/hub-cards-default.png
 f0fa6ca7fb703382fbcd0ee00e03e667b157af7f450a38e4cf1823aae7e01034  sports-tab/hub-cards-largest.png
-487babafd6c77fe95c04fd82cd1ab7b835d1f1c2c8b3935df310dc973ed27bad  sports-tab/hub-panel-final-default.png
-edd4f8818ddd9b721a316c718828f1c73218bee7f907ca311611ce268cf5fcd2  sports-tab/hub-panel-final-largest.png
-ff95a7eaf1eee839322e466e1ee0036d2310089831b16211974de3e3c1eeba0a  sports-tab/hub-panel-live-default.png
-5176362b7695333eef3bbdd1d80d75add7c2aebf6d0ce7bee3db9d82e346dd86  sports-tab/hub-panel-live-largest.png
-6a83924fcf3d25b0e30f214c9ebb08b84044016b4e8b49aac06fbcaef7935a51  sports-tab/hub-panel-pre-default.png
-4724114b5907067ad305eaaf3e264011b4cf9a096b5274c953cd3aaa2feff57b  sports-tab/hub-panel-pre-largest.png
+6cabdce4f038bf7ddae39df0fa9af0f1833db12f1ab55dc7fcbb33daddab9f65  sports-tab/hub-panel-final-default.png
+3f16b1f1039166ee742e972c4efe81585546bb13c7d24514e1299f110264ebc6  sports-tab/hub-panel-final-largest.png
+3ea7e2a395fae260ea4a16e4d1b3711b4eef3896d3f1a8f728d37ebc3e20ce09  sports-tab/hub-panel-live-default.png
+c2b36a4cdbdd0600b773238eec5663a2268885a48d65fd373189e2da4014e6c0  sports-tab/hub-panel-live-largest.png
+bec7aaefa6fca8734764a31592c91d8130a3269baa1ef7a2d5082ab876dda360  sports-tab/hub-panel-pre-default.png
+c07a0bdd7d7519d86363b37aa479fdada90036d1f0a9fc6b06a64b83202f75bf  sports-tab/hub-panel-pre-largest.png

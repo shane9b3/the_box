@@ -9,8 +9,6 @@
     <string name="sports_hub_title">Sports Hub</string>
     <!-- %1$s = the league name ("NHL", "NFL", "OHL"). -->
     <string name="sports_hub_heading">%1$s SCORES &amp; SCHEDULE</string>
-    <!-- The credit (§1.1); the NFL and CHL credits stay sports_credit_espn / sports_credit_chl. -->
-    <string name="sports_hub_credit_nhl">Scores, stats and video: NHL.com</string>
 
     <!-- ==== Day strip (§3.1). %1$s = the short date ("Nov 23"). -->
     <string name="sports_hub_day_yesterday">Yesterday · %1$s</string>
@@ -269,17 +267,7 @@
     <string name="sports_hub_clip_try_again">Try again</string>
     <string name="sports_hub_clip_back">Back</string>
 
-    <!-- ==== Footer hint labels (§2.6, §6.5) -->
-    <string name="sports_hub_hint_browse">Browse</string>
-    <string name="sports_hub_hint_options">Options</string>
-    <string name="sports_hub_hint_guide">Guide</string>
-    <string name="sports_hub_hint_choose">Choose</string>
-    <string name="sports_hub_hint_games">Games</string>
-    <string name="sports_hub_hint_show">Show</string>
-    <string name="sports_hub_hint_play">Play</string>
-    <string name="sports_hub_hint_watch">Watch</string>
-    <string name="sports_hub_hint_away_home">Away / Home</string>
-    <string name="sports_hub_hint_close">Close</string>
+    <!-- ==== Clip control labels (§6.5) -->
     <string name="sports_hub_hint_pause">Pause</string>
     <string name="sports_hub_hint_seek">10 s</string>
     <string name="sports_hub_hint_done">Done</string>
