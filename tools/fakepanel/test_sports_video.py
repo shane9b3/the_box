@@ -108,6 +108,16 @@ class VideoCase(unittest.TestCase):
         st, _, master = self.raw(self.path_of(hls))
         self.assertEqual(200, st)
         self.assertIn("#EXT-X-STREAM-INF", master.decode())
+        # The real master's shape: its own English rendition, DEFAULT=NO, no closed captions.
+        media = next(l for l in master.decode().splitlines() if l.startswith("#EXT-X-MEDIA:TYPE=SUBTITLES"))
+        self.assertIn('LANGUAGE="en"', media)
+        self.assertIn("DEFAULT=NO", media)
+        self.assertIn("CLOSED-CAPTIONS=NONE", master.decode())
+        subs = hls.rsplit("/", 1)[0] + "/" + media.split('URI="', 1)[1].rstrip('"')
+        st, _, spl = self.raw(self.path_of(subs))
+        self.assertEqual(200, st)
+        self.assertEqual("#EXT-X-ENDLIST", spl.decode().splitlines()[-1])
+        self.assertTrue(any(l.startswith("text.vtt?token=fake-") for l in spl.decode().splitlines()))
         variant = hls.rsplit("/", 1)[0] + "/" + master.decode().strip().splitlines()[-1]
         st, _, pl = self.raw(self.path_of(variant))
         lines = pl.decode().splitlines()

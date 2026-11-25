@@ -96,16 +96,22 @@ object HubFixtures {
     const val CLIP_CONDENSED = DIR + "clip-condensed.json"
     const val CLIP_GOAL = DIR + "clip-goal.json"
 
+    /** The recorded phases of 2026020385 in the repo (see [LIVE]). */
+    val LIVE_PHASES: List<String> = listOf("p1", "int", "pp", "p3", "final")
+
     /**
-     * The live recording of 2026020385 (§10.5 lead task 1) is **not in the repo yet**. When the lead adds it, the files go
-     * here as `score-now-385-{p1,int,p3,final}.json`, `gc-2026020385-{right-rail,landing,boxscore}-{p1,int,p3,final}.json`,
-     * `clip-goal-live.json`, `clip-recap-385.json` and `master-goal.m3u8`; WP-1's live-phase mapper tests are gated on them
-     * (A-S9). Until then this list is empty and those tests are skipped.
+     * The live recording of 2026020385 (§10.5 lead task 1): per phase `score-now-385-{phase}.json` and
+     * `gc-2026020385-{right-rail,landing,boxscore}-{phase}.json`. WP-1's live-phase mapper tests run on them (A-S9). The
+     * clip lookups and the HLS master were recorded by the lead but are not fixtures (their signed addresses).
      */
-    val LIVE: List<String> = listOf("p1", "int").flatMap { phase ->
+    val LIVE: List<String> = LIVE_PHASES.flatMap { phase ->
         // (WP-1) Recorded 2026-11-25 by the lead: p1 = 01:31:31 UTC, 1st period 8:37, VGK 2-0, VGK power play (1541), the
         // first goal's clip id posted, the second's not yet; int = 01:49:55 UTC, 1st intermission (LIVE + inIntermission).
-        // Query strings scrubbed to `?redacted=1`. No p3 / final in the repo yet.
+        // (Integration) pp = 02:37:06 UTC, 2nd period 3:09, VGK 2-1, EDM power play (1451), three goal clips posted;
+        // p3 = 03:15:06 UTC, 3rd period 12:10, VGK 4-3, seven goals, the last three without a clip id yet;
+        // final = 03:42:50 UTC, FINAL in regulation, VGK 5-3, eight goals (the empty-netter's clip not posted yet), three
+        // stars, no recap yet (no `threeMinRecap` on the board, no `gameVideo` in the right-rail). No overtime.
+        // Query strings scrubbed to `?redacted=1`.
         listOf("score-now-385-$phase.json") +
             listOf("right-rail", "landing", "boxscore").map { "gc-2026020385-$it-$phase.json" }
     }.map { DIR + it }

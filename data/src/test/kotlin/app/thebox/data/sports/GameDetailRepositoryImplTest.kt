@@ -142,6 +142,15 @@ class GameDetailRepositoryImplTest {
         assertEquals(listOf("4"), h.fetcher.calls.map { it.first })
     }
 
+    /** (Integration) The page's showNow(): it has rested already, so two shows back to back fetch at once (one rest, not two). */
+    @Test fun twoShowsBackToBackFetchAtOnce() = runTest {
+        val h = harness()
+        h.repo.show(game())
+        h.repo.show(game())
+        runCurrent()
+        assertEquals(listOf("2026020385" to 0L), h.fetcher.calls)
+    }
+
     @Test fun showingTheRestingGameAgainSkipsTheRest() = runTest {
         val h = harness()
         h.repo.show(game())

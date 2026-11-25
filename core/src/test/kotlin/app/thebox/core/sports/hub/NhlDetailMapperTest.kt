@@ -261,5 +261,46 @@ class NhlDetailMapperTest {
         assertEquals(2, int.goals.size)
     }
 
+    /** (Integration) The home power play in the 2nd period and the 3rd period of the recorded game. */
+    @Test fun recordedPowerPlayAndThirdPeriod() {
+        fun at(phase: String) = assertNotNull(
+            NhlDetailMapper.detail(
+                vgk, obj(HubFixtures.LIVE.single { it.endsWith("right-rail-$phase.json") }),
+                obj(HubFixtures.LIVE.single { it.endsWith("landing-$phase.json") }), null,
+            ),
+        )
+        val pp = at("pp")
+        assertEquals(GamePhase.LIVE, pp.fetchedPhase)
+        assertEquals(2 to 1, pp.awayScore to pp.homeScore)
+        assertEquals(listOf(Strength.PP, Strength.EV, Strength.EV), pp.goals.map { it.strength })
+        assertEquals(listOf(6408849287112L, 6408850179112L, 6408851594112L), pp.goals.map { it.clipId })
+        assertEquals(
+            listOf(PeriodScore(PeriodLabel(PeriodKind.REG, 1), 2, 0), PeriodScore(PeriodLabel(PeriodKind.REG, 2), 0, 1)),
+            pp.periods,
+        )
+        assertTrue(pp.gameStats.any { it.kind == StatKind.SOG })
+
+        val p3 = at("p3")
+        assertEquals(GamePhase.LIVE, p3.fetchedPhase)
+        assertEquals(4 to 3, p3.awayScore to p3.homeScore)
+        assertEquals(7, p3.goals.size)
+        assertEquals(listOf(null, null, null), p3.goals.takeLast(3).map { it.clipId }, "the last three goals' clips are not posted yet")
+        assertEquals(listOf(2 to 0, 0 to 2, 2 to 1), p3.periods.map { it.away to it.home })
+        assertEquals(listOf(1, 2, 3), p3.periods.map { it.label.number })
+        assertNull(p3.recapId)
+        assertEquals(emptyList(), p3.stars, "threeStars is empty while live")
+
+        // The final in regulation, before the recap is posted.
+        val fin = at("final")
+        assertEquals(GamePhase.FINAL, fin.fetchedPhase)
+        assertEquals(5 to 3, fin.awayScore to fin.homeScore)
+        assertEquals(8, fin.goals.size)
+        assertNull(fin.goals.last().clipId, "the last goal's clip is not posted yet")
+        assertEquals(listOf(2 to 0, 0 to 2, 3 to 1), fin.periods.map { it.away to it.home })
+        assertTrue(fin.periods.all { it.label.kind == PeriodKind.REG })
+        assertEquals(3, fin.stars.size)
+        assertNull(fin.recapId, "no recap minutes after the final")
+    }
+
     private fun shootoutWinner(d: GameDetail): Int = if (d.periods.any { it.label.kind == PeriodKind.SO }) 1 else 0
 }

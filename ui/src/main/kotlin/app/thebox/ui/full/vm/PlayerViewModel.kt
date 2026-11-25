@@ -178,7 +178,15 @@ class PlayerViewModel @Inject constructor(
     private var nowRange: IntRange? = null
     private var nowJob: Job? = null
 
-    override val cues: StateFlow<List<Cue>> = combine(controller.cues, guideFull) { c, full -> if (full) c else emptyList() }
+    /**
+     * Cues reach the screen while the guide is FULL, and (Sports Hub §6.5) while the playback target is a clip: the
+     * clip plays full screen with the mode still SPORTS, so the guide is never FULL under it.
+     */
+    override val cues: StateFlow<List<Cue>> = combine(
+        controller.cues,
+        guideFull,
+        controller.state.map { it.target?.isClip == true }.distinctUntilChanged(),
+    ) { c, full, clip -> if (full || clip) c else emptyList() }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     override val archiveFailure: StateFlow<app.thebox.core.catchup.archive.ArchiveFailure?> =

@@ -231,17 +231,18 @@ class SportsViewModelHubTest {
         scheduler.advanceTimeBy(599)
         assertTrue("nothing before the rest", detail.showCalls.isEmpty())
         scheduler.advanceTimeBy(2)
-        assertEquals(listOf("L1"), detail.showCalls.map { it?.id?.id })
+        // Shown twice: the second show() skips the repository's own rest (the page rested already).
+        assertEquals(listOf("L1", "L1"), detail.showCalls.map { it?.id?.id })
         // Four quick moves: only the one that rests is fetched.
         m.onCardFocused("L2"); scheduler.advanceTimeBy(200)
         m.onCardFocused("L1"); scheduler.advanceTimeBy(200)
         m.onCardFocused("L2"); scheduler.advanceTimeBy(200)
-        assertEquals(1, detail.showCalls.size)
+        assertEquals(2, detail.showCalls.size)
         scheduler.advanceTimeBy(600)
-        assertEquals(listOf("L1", "L2"), detail.showCalls.map { it?.id?.id })
+        assertEquals(listOf("L1", "L1", "L2", "L2"), detail.showCalls.map { it?.id?.id })
         // OK shows again at once, with no dwell, even for a game already shown.
         m.enterPanel("L2")
-        assertEquals(listOf("L1", "L2", "L2"), detail.showCalls.map { it?.id?.id })
+        assertEquals(listOf("L1", "L1", "L2", "L2", "L2", "L2"), detail.showCalls.map { it?.id?.id })
     }
 
     @Test fun thePanelSwitchesSynchronouslyWithFocusAndANewBoardStartsOnItsInitialGame() {
@@ -303,6 +304,21 @@ class SportsViewModelHubTest {
         m.onPanelExited()
         detail.detail.value = DetailState.Failed(live.id, FailKind.HTTP_429)
         assertEquals("no Retry while the back-off runs", SlotAction.FOLLOW, m.panel.value.slots[0].action)
+    }
+
+    /** (Integration) A final game whose board carries the recap keeps Watch recap in slot 1 when the detail fails. */
+    @Test fun aFailedDetailKeepsWatchRecapWhenTheBoardCarriesTheRecap() {
+        val m = vm()
+        val withRecap = final.copy(media = GameMedia(recapId = 77L, condensedId = null, goalClips = 3))
+        repo.board(withRecap)
+        m.onCardFocused("X1")
+        detail.detail.value = DetailState.Failed(withRecap.id, FailKind.TIMEOUT)
+        assertEquals(listOf(SlotAction.WATCH_RECAP, SlotAction.GOALS, SlotAction.BOX_SCORE), m.actions())
+        assertTrue("Watch recap stays usable", m.panel.value.slots[0].usable)
+        // Without a recap id anywhere, Retry takes slot 1 as the design says.
+        repo.board(final)
+        detail.detail.value = DetailState.Failed(final.id, FailKind.TIMEOUT)
+        assertEquals(SlotAction.RETRY, m.panel.value.slots[0].action)
     }
 
     @Test fun theLiveDetailWithoutSeasonDataStillOffersItsSlots() {

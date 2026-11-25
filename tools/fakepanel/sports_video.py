@@ -8,7 +8,7 @@ machine. A debug build pointed at the panel (`files/debug/sports_base`) sends bo
                                                              `policyKey:""` default, then the fake key (the app's scan
                                                              must continue past the empty one)
     GET /bc/playback/v1/accounts/{acct}/videos/{id}          the lookup; requires `Accept: application/json;pk=<key>`
-    GET /bc/media/{id}/master.m3u8 | variant.m3u8 | seg_NNN.ts | main.mp4 | text.vtt | poster.jpg
+    GET /bc/media/{id}/master.m3u8 | variant.m3u8 | subs.m3u8 | seg_NNN.ts | main.mp4 | text.vtt | poster.jpg
                                                              media: the panel's own ffmpeg `testsrc2` clip (the "std"
                                                              variant under tools/fakepanel/media/, git-ignored) as a
                                                              2 s-segment VOD HLS, its MP4 (`vod.mp4`, Range supported)
@@ -60,7 +60,7 @@ DEFAULTS = {
 }
 
 LOOKUP = re.compile(r"^/bc/playback/v1/accounts/([^/]+)/videos/([^/]+)$")
-MEDIA = re.compile(r"^/bc/media/(\d+)/(master\.m3u8|variant\.m3u8|seg_(\d{3})\.ts|main\.mp4|text\.vtt|poster\.jpg)$")
+MEDIA = re.compile(r"^/bc/media/(\d+)/(master\.m3u8|variant\.m3u8|subs\.m3u8|seg_(\d{3})\.ts|main\.mp4|text\.vtt|poster\.jpg)$")
 
 
 def check_config(patch):
@@ -254,8 +254,13 @@ def media(h, vid, name, seg, mode):
     q = "?token=" + urllib.parse.quote(token)
     segs = v.segments()
     if name == "master.m3u8":
+        # The real master's shape (lead recording 2026-11-24): its own English subtitles rendition, DEFAULT=NO, and
+        # CLOSED-CAPTIONS=NONE on the variant.
         body = "#EXTM3U\n#EXT-X-VERSION:4\n" \
-               "#EXT-X-STREAM-INF:BANDWIDTH=2400000,AVERAGE-BANDWIDTH=2200000,RESOLUTION=1280x720,CODECS=\"avc1.64001f,mp4a.40.2\"\n" \
+               "#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID=\"subs\",NAME=\"en\",DEFAULT=NO,AUTOSELECT=NO,LANGUAGE=\"en\"," \
+               "URI=\"subs.m3u8" + q + "\"\n" \
+               "#EXT-X-STREAM-INF:BANDWIDTH=2400000,AVERAGE-BANDWIDTH=2200000,RESOLUTION=1280x720,CODECS=\"avc1.64001f,mp4a.40.2\"," \
+               "SUBTITLES=\"subs\",CLOSED-CAPTIONS=NONE\n" \
                "variant.m3u8" + q + "\n"
         return h.send(200, body, "application/vnd.apple.mpegurl")
     if name == "variant.m3u8":
@@ -264,6 +269,11 @@ def media(h, vid, name, seg, mode):
         for i in range(len(segs)):
             lines += ["#EXTINF:%.3f," % SEG_S, "seg_%03d.ts%s" % (i, q)]
         lines.append("#EXT-X-ENDLIST")
+        return h.send(200, "\n".join(lines) + "\n", "application/vnd.apple.mpegurl")
+    if name == "subs.m3u8":
+        total = SEG_S * len(segs)
+        lines = ["#EXTM3U", "#EXT-X-VERSION:3", "#EXT-X-TARGETDURATION:%d" % int(total + 0.5), "#EXT-X-PLAYLIST-TYPE:VOD",
+                 "#EXT-X-MEDIA-SEQUENCE:0", "#EXTINF:%.3f," % total, "text.vtt" + q, "#EXT-X-ENDLIST"]
         return h.send(200, "\n".join(lines) + "\n", "application/vnd.apple.mpegurl")
     if name.startswith("seg_"):
         i = int(seg)

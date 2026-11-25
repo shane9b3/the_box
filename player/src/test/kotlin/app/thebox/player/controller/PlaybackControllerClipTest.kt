@@ -124,6 +124,24 @@ class PlaybackControllerClipTest {
         assertNull("a clip's signed address is never handed off", c.peekExternalHandOff())
     }
 
+    /**
+     * (Integration) The NHL master's English rendition is DEFAULT=NO: English joins a clip's preferred text languages so
+     * the subtitles setting alone selects it; a live channel keeps the settings' list untouched.
+     */
+    @Test
+    fun aClipPrefersEnglishTextSoTheSubtitlesSettingSelectsTheRendition() {
+        f.settings.update { it.copy(subtitlesEnabled = true, preferredTextLanguages = listOf("fr")) }
+        clip()
+        assertEquals(listOf(listOf("fr", "en")), f.engine.tuneDefaults!!.subList(1, 2))
+        assertEquals(true, f.engine.tuneDefaults!![3])
+        val p = f.playerFactory.bundle!!.player.trackSelectionParameters
+        assertEquals(listOf("fr", "en"), p.preferredTextLanguages)
+        assertFalse("text on", androidx.media3.common.C.TRACK_TYPE_TEXT in p.disabledTrackTypes)
+
+        c.tune(TuneTarget.Channel(CH1)); f.idle()
+        assertEquals(listOf("fr"), f.engine.tuneDefaults!![1])
+    }
+
     @Test
     fun anMp4ClipIsProgressiveStartsAtItsOffsetAndSeeks() {
         clip(mp4)

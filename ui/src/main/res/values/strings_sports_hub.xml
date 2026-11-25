@@ -123,7 +123,7 @@
     <string name="sports_hub_ordinal_th">%1$dth</string>
 
     <!-- ==== Summary (§6.7). A label, then " · ", then the text. -->
-    <string name="sports_hub_summary_sep"> · </string>
+    <string name="sports_hub_summary_sep">" · "</string>
     <string name="sports_hub_summary_winning_goal">Game-winning goal</string>
     <string name="sports_hub_summary_stars">Stars:</string>
     <string name="sports_hub_summary_latest_goal">Latest goal</string>
@@ -274,6 +274,8 @@
 
     <!-- ==== Errors: detail (§4.5) -->
     <string name="sports_hub_error_detail_retry">Couldn\'t load game stats from NHL.com. Trying again automatically. Select Retry to try now.</string>
+    <!-- (Integration) A final game whose recap is known keeps Watch recap in slot 1, so no Retry button is named. -->
+    <string name="sports_hub_error_detail_auto">Couldn\'t load game stats from NHL.com. Trying again automatically. Select Watch recap to see the game.</string>
     <string name="sports_hub_error_detail_limited">NHL.com is limiting requests right now. Stats load again in a few minutes.</string>
     <string name="sports_hub_error_detail_changed">NHL.com changed how it sends game stats. Scores still update; stats need an app update.</string>
     <string name="sports_hub_error_detail_offline">No internet connection. Stats load again when the network is back.</string>

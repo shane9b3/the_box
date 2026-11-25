@@ -134,6 +134,21 @@ class PlayerViewModelTest {
         assertEquals(null, tunedEvents().last().state.identity)
     }
 
+    /** (Sports Hub §6.5, integration) Cues pass while a clip plays although the guide is not FULL; none before or after. */
+    @Test
+    fun cuesPassDuringAClip() {
+        val vm = vm()
+        val cue = androidx.media3.common.text.Cue.Builder().setText("Goal").build()
+        controller.cues.value = listOf(cue)
+        controller.state.value = PlaybackState.Playing(np(1, archive = false)); idle()
+        assertTrue("guide not FULL, no clip: no cues", vm.cues.value.isEmpty())
+        val clip = NowPlaying(2, null, "Game recap", false, StreamFormat.HLS, isClip = true)
+        controller.state.value = PlaybackState.Playing(clip); idle()
+        assertEquals(listOf(cue), vm.cues.value)
+        controller.state.value = PlaybackState.Playing(np(3, archive = false)); idle()
+        assertTrue("back to the live channel under the page: no cues", vm.cues.value.isEmpty())
+    }
+
     /**
      * B1 (§5.0): `Connecting → Error(CATCHUP_NOT_IN_ARCHIVE) → Connecting → Playing` while the archive session probes,
      * with `ArchiveStatus` lagging the `Error` by one emission. The machine never sees ERROR, and never CONNECTING after

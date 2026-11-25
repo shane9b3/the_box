@@ -125,7 +125,7 @@ class NhlMapperHubTest {
     }
 
     @Test fun recordedLiveBoards() {
-        val live = HubFixtures.LIVE.filter { it.contains("score-now-385") }
+        val live = HubFixtures.LIVE.filter { it.contains("score-now-385") && !it.endsWith("-final.json") }
         if (live.isEmpty()) return
         for (path in live) {
             val g = board(path).games.single { it.id.id == "2026020385" }
@@ -136,5 +136,14 @@ class NhlMapperHubTest {
         val p1 = board(live.single { it.endsWith("-p1.json") }).games.single { it.id.id == "2026020385" }
         assertEquals(GameMedia(null, null, goalClips = 1), p1.media, "a goal's clip id is posted minutes after the goal")
         assertEquals(GamePhase.INTERMISSION, board(live.single { it.endsWith("-int.json") }).games.single { it.id.id == "2026020385" }.phase)
+        // (Integration) The 2nd-period power play: three goals, all clips posted; the 3rd period: seven goals, four clips.
+        fun media(phase: String) = board(live.single { it.endsWith("-$phase.json") }).games.single { it.id.id == "2026020385" }.media
+        assertEquals(GameMedia(null, null, goalClips = 3), media("pp"))
+        assertEquals(GameMedia(null, null, goalClips = 4), media("p3"))
+        // The final, minutes after the horn: no recap or condensed game yet, seven of eight goal clips posted.
+        val fin = board(HubFixtures.LIVE.single { it.endsWith("score-now-385-final.json") }).games.single { it.id.id == "2026020385" }
+        assertEquals(GamePhase.FINAL, fin.phase)
+        assertEquals(5 to 3, fin.away.score to fin.home.score)
+        assertEquals(GameMedia(null, null, goalClips = 7), fin.media)
     }
 }

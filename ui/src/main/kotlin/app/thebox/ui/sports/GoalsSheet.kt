@@ -186,7 +186,7 @@ internal fun goalWhen(res: Resources, g: GoalItem): String = res.getString(R.str
 
 /** Line 1: "G. Vilardi (4) · PP" (tags PP, SH, EN; nothing at even strength). */
 internal fun goalLine1(res: Resources, g: GoalItem): String {
-    val sep = hubSep(res)
+    val sep = res.getString(R.string.sports_hub_summary_sep)
     val name = g.scorerTotal?.let { res.getString(R.string.sports_hub_goal_line1, g.scorer, it) } ?: g.scorer
     val tags = buildList {
         when (g.strength) {
@@ -201,7 +201,7 @@ internal fun goalLine1(res: Resources, g: GoalItem): String {
 
 /** Line 2: "1st 5:11 · WPG leads 1–0 · Connor, Morrissey" ("Tied 2–2"; "· Video soon" without a clip). */
 internal fun goalLine2(res: Resources, game: GameSnapshot, g: GoalItem): String {
-    val sep = hubSep(res)
+    val sep = res.getString(R.string.sports_hub_summary_sep)
     val score = when {
         g.away == g.home -> res.getString(R.string.sports_hub_goal_tied, g.away, g.home)
         g.away > g.home -> res.getString(R.string.sports_hub_goal_leads, game.away.abbrev, g.away, g.home)
@@ -412,8 +412,3 @@ internal fun HubSheetRow(
     ) { content(color) }
 }
 
-/**
- * " · " (`sports_hub_summary_sep`). Android trims the unquoted spaces of that frozen string, so it reads "·"; the spaces
- * are put back here (reported to the lead for a quoted `" · "` in the strings file).
- */
-internal fun hubSep(res: Resources): String = res.getString(R.string.sports_hub_summary_sep).trim().let { " $it " }

@@ -233,7 +233,7 @@ private fun TransportBar(res: Resources, s: ClipSession.State, pos: PositionSnap
 
 /** "OK Pause · ← → 10 s · Back Done" */
 private fun clipHints(res: Resources): String {
-    val sep = hubSep(res)
+    val sep = res.getString(R.string.sports_hub_summary_sep)
     return listOf(
         "OK " + res.getString(R.string.sports_hub_hint_pause),
         "← → " + res.getString(R.string.sports_hub_hint_seek),

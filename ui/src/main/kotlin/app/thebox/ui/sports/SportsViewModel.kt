@@ -580,8 +580,10 @@ class SportsViewModel internal constructor(
         if (shownId.value != id) shownId.value = id
         val game = currentCards().firstOrNull { it.game.id.id == id }?.game ?: return null
         refreshPanel()
-        // OK skips the dwell: show() again even when this game was already fetched (the repository re-reads at once).
-        detail?.show(game)
+        // OK skips the rest. The repository rests HUB_FETCH_DWELL_MS on a new game and skips the rest on a second show() of the
+        // game resting (GameDetailRepositoryImpl's contract), so the page shows twice; an already-fetched game is re-read by
+        // the poll policy as usual.
+        showNow(game)
         startFetch(game, immediate = true)
         refreshPanel()
         val first = _panel.value.firstEnabled ?: return null
@@ -716,10 +718,21 @@ class SportsViewModel internal constructor(
             if (!immediate) delay(SportsConstants.HUB_FETCH_DWELL_MS)
             fetchedId = game.id.id
             fetchedPhase = game.phase
-            detail?.show(game)
+            showNow(game)
             startMatch(game)
             ensureClipInfos()
         }
+    }
+
+    /**
+     * The page has rested already (or OK skipped the rest): a first show() of a new game makes the repository start its own
+     * rest, and a second show() of that game skips it, so the detail request starts now and the browse rest is 600 ms, not
+     * twice that.
+     */
+    private fun showNow(game: GameSnapshot) {
+        val d = detail ?: return
+        d.show(game)
+        d.show(game)
     }
 
     private fun startMatch(game: GameSnapshot) {

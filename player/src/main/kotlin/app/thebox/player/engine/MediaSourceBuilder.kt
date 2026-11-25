@@ -230,14 +230,13 @@ internal class MediaSourceBuilder(
         const val HLS_TS_FLAGS: Int = DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES or DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS
 
         /**
-         * (Sports Hub §6.5, A-S3) **The captions switch.** Whether the NHL's HLS master lists an `EXT-X-MEDIA
-         * TYPE=SUBTITLES` rendition is not known until the lead records one (§10.5 lead task 1). `false` (the default):
-         * the clip's WebVTT is side-loaded beside the HLS source too, so captions work either way (if the master does
-         * carry them the viewer may see two English entries; the default-flagged side-loaded one is selected). `true`:
-         * HLS uses the master's own rendition, selected by `applyTuneDefaults(…, subtitlesEnabled)`, nothing side-loaded.
-         * MP4 always side-loads.
+         * (Sports Hub §6.5, A-S3) **The captions switch**, settled by the lead's recording of a real goal clip's master
+         * (2026-11-24): it lists `#EXT-X-MEDIA:TYPE=SUBTITLES,…,NAME="en",DEFAULT=NO,LANGUAGE="en"` and
+         * `CLOSED-CAPTIONS=NONE`. So HLS uses the master's own rendition and nothing is side-loaded beside it; the
+         * controller adds English to a clip's preferred text languages so the subtitles setting selects it although it is
+         * DEFAULT=NO. MP4 always side-loads.
          */
-        const val CLIP_HLS_MASTER_CARRIES_CAPTIONS = false
+        const val CLIP_HLS_MASTER_CARRIES_CAPTIONS = true
         const val CLIP_CAPTIONS_ID = "clip-captions"
         const val CLIP_CAPTIONS_LANGUAGE = "en"
         const val CLIP_CAPTIONS_LABEL = "English"

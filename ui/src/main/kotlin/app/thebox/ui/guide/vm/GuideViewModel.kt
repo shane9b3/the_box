@@ -92,6 +92,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -161,6 +162,9 @@ class GuideViewModel @Inject constructor(
     /** (owner ruling 2026-10-18) Programme posters for the focused panel (`:data`'s TMDB lookup; NONE in tests). */
     artwork: app.thebox.core.art.ProgrammeArtwork = app.thebox.core.art.ProgrammeArtwork.NONE,
 ) : ViewModel(), ShellHost, ShellEffects {
+    /** The viewport the root last gave (the resume after a clip waits for the page's own, see [onSportsEffect]). */
+    private val hostViewport = MutableStateFlow<Viewport?>(null)
+    private var resumeJob: Job? = null
 
     /**
      * (M5, B1) Every tune the guide's effects, Search and the startup make asks the guard first; a refusal opens the
@@ -313,7 +317,10 @@ class GuideViewModel @Inject constructor(
 
     override val events: Flow<ShellEvent> = shellEvents.receiveAsFlow()
 
-    override fun setViewport(viewport: Viewport) = controller.setViewport(viewport)
+    override fun setViewport(viewport: Viewport) {
+        hostViewport.value = viewport
+        controller.setViewport(viewport)
+    }
 
     override fun onWindowSize(widthPx: Int, heightPx: Int) {
         if (widthPx <= 0 || heightPx <= 0 || (widthPx == windowW && heightPx == windowH)) return
@@ -388,12 +395,27 @@ class GuideViewModel @Inject constructor(
                 machine.dispatch(GuideEvent.SportsClosed(effect.channel, tuned = true, archive = true))
             }
             is SportsEffect.Resume -> when (val p = effect.point) {
-                is ResumePoint.Live -> guarded.tune(TuneTarget.Channel(p.identity), effects.currentLineup?.let { LineupZapList(it, library) })
-                is ResumePoint.Archive -> effects.resumeArchive(p)
                 ResumePoint.Nothing -> controller.stop(StopReason.USER)
+                else -> {
+                    resumeJob?.cancel()
+                    resumeJob = viewModelScope.launch {
+                        // (Integration, §6.5) The root gives the controller the page's viewport back on its next frame after
+                        // the clip hides. The resumed channel waits for it, so it prepares under the page: no full-screen
+                        // picture and no display-mode switch for a viewport the page no longer has.
+                        if (hostViewport.value == Viewport.FULL) {
+                            withTimeoutOrNull(CLIP_RESUME_VIEWPORT_WAIT_MS) { hostViewport.first { it != Viewport.FULL } }
+                        }
+                        when (p) {
+                            is ResumePoint.Live -> guarded.tune(TuneTarget.Channel(p.identity), effects.currentLineup?.let { LineupZapList(it, library) })
+                            is ResumePoint.Archive -> effects.resumeArchive(p)
+                            ResumePoint.Nothing -> Unit
+                        }
+                    }
+                }
             }
         }
     }
+
 
     // ---- feeds (§3.16.1)
 
@@ -820,3 +842,6 @@ private object NoUpdateCards : app.thebox.core.update.UpdateCardSource {
     override val updatedNotice: kotlinx.coroutines.flow.StateFlow<String?> = kotlinx.coroutines.flow.MutableStateFlow(null)
     override fun noticeShown() = Unit
 }
+
+/** (Sports Hub integration) The longest a resume after a clip waits for the root to give the page its viewport back. */
+internal const val CLIP_RESUME_VIEWPORT_WAIT_MS = 500L

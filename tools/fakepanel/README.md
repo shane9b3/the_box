@@ -300,6 +300,27 @@ adb shell run-as app.thebox.debug sh -c 'mkdir -p files/debug && echo http://10.
 adb shell am force-stop app.thebox.debug   # then start the app; delete the file to go back to api-web.nhle.com
 ```
 
+## Sports Hub: board facts, game detail, video and the channel link (docs/design/m6-sports-hub.md §10.3)
+
+All default off, so every body above stays as it was:
+
+- `--set sports_hub=true` (needs `--sports`; `sports.py`): the day list gains `gameWeek`, `tvBroadcasts`, goals with
+  `highlightClip` ids and finals' recap / condensed-game paths, plus a pre-game, a postponed game, VGK @ EDM live and
+  LAK @ ANA ahead; the landing gains records, `summary.scoring`, `threeStars` and `matchup`. `GET
+  /v1/gamecenter/{id}/right-rail` and `/boxscore` answer with `--sports` whatever the switch (faults `right_rail_status`,
+  `boxscore_status`). NFL (`--sports-nfl`) and CHL (`--sports-chl`) boards carry records, quarters, leaders, broadcasts and
+  shots for the new panel.
+- `--sports-video` (needs `--sports`; `sports_video.py`): the fake NHL video service under `/bc/`: the player script (an
+  empty `policyKey:""` default, then `FAKE-KEY-FOR-TESTS-ONLY-0001`), the lookup (wants that key in `Accept`) and the
+  media: a 2 s-segment VOD HLS whose master lists an English `SUBTITLES` rendition with `DEFAULT=NO` (the real master's
+  shape), its MP4 with `Range`, and a WebVTT file. Modes through `POST /admin/sports_video {"mode": ...}`: `ok`,
+  `refuse`, `rotate`, `geo`, `missing`, `slow`, `expire` (see the module's docstring). A video id ending in 404 is a 404.
+- `--sports-hub-catalog` (`catalog.py`): the channel-link catalog channels ("CA| SPORTSNET ONTARIO HD", "SN - Ontario",
+  "US: TNT", "US: ABC 7 NEW YORK", a hidden and a locked channel, …) and their XMLTV for VGK @ EDM and LAK @ ANA.
+
+The debug override `files/debug/sports_base` (above) also sends both video hosts to `{origin}/bc/...`. A panel on another
+port is reached from the emulator as `http://10.0.2.2:<port>`.
+
 ## Sports: the fake ESPN NFL scoreboard (docs/design/m6-nfl.md §9)
 
 `--sports --sports-nfl` (config `sports_nfl: true`; needs `sports`) adds ESPN's own paths from `sports_nfl.py`, so the same

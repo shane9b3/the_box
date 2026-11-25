@@ -9,6 +9,10 @@ over any channel. Start with the NHL. Look: dark glass, very modern, fully round
 corners. Mock-up: away logo · away score | clock over period | home score · home logo
 (`design/score-bug-mockup.png`).
 
+> **Amended 2026-11-25 (Sports Hub, `docs/decisions/2026-11-24-sports-hub.md`):** on the Sports page, Follow moved from
+> OK on the card to the detail panel's slot 1 (OK on a card now enters the panel's three buttons); a finished game offers
+> no Follow. The quick bar's Score bug sheet is unchanged.
+
 ## Owner rulings (2026-11-05)
 1. **Live by default.** The main use is following a game you are *not* watching, so
    updates show as soon as the feed has them. A **user-set delay** is an option

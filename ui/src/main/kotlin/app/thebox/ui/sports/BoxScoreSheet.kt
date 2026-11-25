@@ -191,7 +191,7 @@ internal fun boxRows(team: TeamBox?, failed: Boolean): List<BoxRow> = buildList 
 
 /** "C. McDavid · C" (the contract carries no sweater number, so `sports_hub_box_player_cell` is not used). */
 internal fun playerCell(res: Resources, name: String, pos: String): String =
-    if (pos.isBlank()) name else name + hubSep(res) + pos
+    if (pos.isBlank()) name else name + res.getString(R.string.sports_hub_summary_sep) + pos
 
 private const val NONE = "–"
 

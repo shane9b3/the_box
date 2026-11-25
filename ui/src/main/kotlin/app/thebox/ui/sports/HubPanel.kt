@@ -179,7 +179,12 @@ internal object HubSlots {
         val recapId get() = detail?.recapId ?: game.media?.recapId
         val goalClips get() = detail?.goals?.count { it.clipId != null } ?: game.media?.goalClips ?: 0
         val goalCount get() = detail?.goals?.size ?: game.media?.goalClips ?: 0
-        val detailRetry get() = nhl && failure != null && failure in RETRYABLE
+        /**
+         * Slot 1 is Retry while a retryable failure has nothing cached (§4.5), except on a final game whose recap id the
+         * board already carries (and videos are not off): Watch recap stays in slot 1 and the panel body says the stats
+         * retry on their own.
+         */
+        val detailRetry get() = nhl && failure != null && failure in RETRYABLE && !(final && recapId != null && !videoOff)
         /** Live, or starting within `HUB_IMMINENT_MIN` (§5.5): Watch tunes and sheet rows tune. */
         val imminent get() = live || game.startUtcMs - nowMs <= SportsConstants.HUB_IMMINENT_MIN * 60_000L
     }
@@ -316,7 +321,7 @@ internal object HubPanelContents {
                 val d = m.detail
                 loading = d == null
                 if (m.detailKind == DetailKind.FAILED && d == null) {
-                    error = failureText(res, m.failure)
+                    error = failureText(res, m.failure, retrySlot = m.slots.any { it.action == SlotAction.RETRY })
                     loading = false
                 } else {
                     rows = if (pre) nhlSeasonRows(res, d, away, home) else nhlGameRows(res, d, away, home)
@@ -494,8 +499,7 @@ internal object HubPanelContents {
     // ------------------------------------------------------------------ summary (§6.7)
 
     private fun summary(res: Resources, m: HubPanelModel, g: GameSnapshot, away: HubName, home: HubName): List<SummaryLine> {
-        // The resource loses its spaces (Android trims unquoted ones): pad in code, whichever form the resource has.
-        val sep = " " + res.getString(R.string.sports_hub_summary_sep).trim() + " "
+        val sep = res.getString(R.string.sports_hub_summary_sep)
         fun line(label: String, text: String) = SummaryLine(label, label + sep + text)
         val d = m.detail
         val out = ArrayList<SummaryLine>()
@@ -637,13 +641,16 @@ internal object HubPanelContents {
         else -> res.getString(R.string.sports_hub_desc_media_matchup, away.nickname, home.nickname, SportsText.startTime(g.startUtcMs, clock24, locale))
     }
 
-    /** The reason and the next step for a failed detail (§4.5). */
-    fun failureText(res: Resources, kind: FailKind?): String = res.getString(
+    /**
+     * The reason and the next step for a failed detail (§4.5). Without a Retry slot (a final game whose board carries the
+     * recap keeps Watch recap in slot 1) the next step is the automatic retry and the recap, never a button not shown.
+     */
+    fun failureText(res: Resources, kind: FailKind?, retrySlot: Boolean = true): String = res.getString(
         when (kind) {
             FailKind.HTTP_429, FailKind.REFUSED -> R.string.sports_hub_error_detail_limited
             FailKind.BAD_BODY -> R.string.sports_hub_error_detail_changed
             FailKind.OFFLINE -> R.string.sports_hub_error_detail_offline
-            else -> R.string.sports_hub_error_detail_retry
+            else -> if (retrySlot) R.string.sports_hub_error_detail_retry else R.string.sports_hub_error_detail_auto
         },
     )
 }
@@ -776,6 +783,12 @@ internal fun HubPanel(
     onSlotFocus: (Int?) -> Unit,
     onExit: () -> Unit,
     modifier: Modifier = Modifier,
+    /**
+     * (Integration) The buttons take focus only while the page has entered the panel (OK, Menu or Left on a card). Without
+     * this, a D-pad search from the title row's first chip or the strip's first chip landed on slot 1 with the page not
+     * knowing (wrong footer, Back left the page, Right went nowhere).
+     */
+    entered: Boolean = true,
 ) {
     val res = LocalResources.current
     val factor = UiTextScale.factor
@@ -812,7 +825,8 @@ internal fun HubPanel(
         if (content == null || g == null) {
             // An empty board: the media area's place filled with White05 and no buttons.
             Spacer(Modifier.height((HubPanelPlan.pill(factor) + 12 + HubPanelPlan.headline(factor) + 16).dp))
-            Box(Modifier.fillMaxWidth().weight(1f).background(GuideUi.White08.copy(alpha = 0.5f), RoundedCornerShape(16.dp)))
+            // (Integration) White05 as the design says (`White08.copy(alpha = 0.5f)` was white at 50 %, a bright grey slab).
+            Box(Modifier.fillMaxWidth().weight(1f).background(PanelFill, RoundedCornerShape(16.dp)))
             Spacer(Modifier.height(28.dp))
             return@Column
         }
@@ -831,7 +845,7 @@ internal fun HubPanel(
             Line(it, GuideUi.sans(22, FontWeight.Medium, GuideUi.Fg70), Modifier.fillMaxWidth().height(HubPanelPlan.channel(factor).dp).testTag(HUB_CHANNEL_LINE_TAG))
         }
         Spacer(Modifier.height(12.dp))
-        Buttons(model, slotRequesters, focusedSlot, onSlot) { i ->
+        Buttons(model, slotRequesters, focusedSlot, entered, onSlot) { i ->
             focusedSlot = i ?: -1
             onSlotFocus(i)
         }
@@ -857,9 +871,12 @@ private fun Headline(c: PanelContent, modifier: Modifier) {
         },
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(awayName, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        // (Integration) The plan measured the whole line. When it fits, the home name takes its own width and the away name
+        // the rest (weighted children are measured last, so the scores are never cut). Equal weights on both would cap
+        // each name at half the free width and cut a long away name ("Toronto Maple …") beside a short home one.
+        Text(awayName, style = style, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
         Text(if (scored) " (${c.awayScore}) vs. " else " vs. ", style = style, maxLines = 1, softWrap = false)
-        Text(homeName, style = style, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        Text(homeName, style = style, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, modifier = if (plan.ellipsis) Modifier.weight(1f, fill = false) else Modifier)
         if (scored) Text(" (${c.homeScore})", style = style, maxLines = 1, softWrap = false)
     }
 }
@@ -946,8 +963,9 @@ private fun HubMedia(c: PanelContent, g: GameSnapshot, modifier: Modifier) {
             Box(Modifier.fillMaxSize().background(PanelFill))
             return@Box
         }
-        val centreTop = art?.centreTop ?: SportsText.hubPill(LocalResources.current, g, false).text
-        MatchupArt(g.away, g.home, g.id.league, centreTop, art?.centreBottom, art?.caption, heightDp, Modifier.fillMaxSize())
+        // (Integration) Under a poster the art is only the backdrop until the picture decodes (or when it never does): no
+        // centre disc and no caption of its own, so nothing sits under the play disc or the poster's caption.
+        MatchupArt(g.away, g.home, g.id.league, art?.centreTop, art?.centreBottom, art?.caption, heightDp, Modifier.fillMaxSize())
         if (spec is MediaSpec.Poster) {
             val loader = LocalShellImageLoader.current
             val low = lowEnd()
@@ -1000,7 +1018,7 @@ private fun lowEnd(): Boolean {
 // ------------------------------------------------------------------ buttons
 
 @Composable
-private fun Buttons(model: HubPanelModel, requesters: List<FocusRequester>, focusedSlot: Int, onSlot: (Int) -> Unit, onFocus: (Int?) -> Unit) {
+private fun Buttons(model: HubPanelModel, requesters: List<FocusRequester>, focusedSlot: Int, entered: Boolean, onSlot: (Int) -> Unit, onFocus: (Int?) -> Unit) {
     val res = LocalResources.current
     val factor = UiTextScale.factor
     val large = HubCardMetrics.large(factor)
@@ -1017,7 +1035,7 @@ private fun Buttons(model: HubPanelModel, requesters: List<FocusRequester>, focu
                     .testTag(hubSlotTag(i))
                     .height(HubPanelPlan.buttons(factor).dp)
                     .focusRequester(requesters[i])
-                    .focusProperties { canFocus = slot.enabled }
+                    .focusProperties { canFocus = slot.enabled && entered }
                     .onFocusChanged { if (it.isFocused) onFocus(i) else if (focusedSlot == i) onFocus(null) }
                     .background(if (focused) ButtonFocusFill else GuideUi.White10, RoundedCornerShape(30.dp))
                     .let { if (focused) it.border(3.dp, GuideUi.Accent, RoundedCornerShape(30.dp)) else it.border(1.dp, GuideUi.White16, RoundedCornerShape(30.dp)) }

@@ -547,6 +547,11 @@ countdown, 2026-11-05).*
 
 ## 5. Sports tab
 
+> **Superseded 2026-11-25** by the Sports Hub page (`docs/design/m6-sports-hub.md`, decision
+> `docs/decisions/2026-11-24-sports-hub.md`): a detail panel, a 15-day strip and a two-column card grid; Follow is the
+> panel's slot 1 (OK on a card enters the panel); the Corner and Delay chips left the page. The score bug itself, its
+> demand rules and the quick bar are unchanged. This section is kept as the history of the first tab.
+
 ### 5.1 Place and keys (U-S7)
 
 - **Top bar:** Guide · Search · **Sports** · ⚙ (`GuideTab.SPORTS`, `TAB_COUNT` 4). The header-fit test is re-run at

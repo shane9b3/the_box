@@ -103,7 +103,7 @@ internal fun leaderCategory(res: Resources, category: String): String = when (ca
 
 /** "2.41 GAA · .915 SV%" pieces after the record. */
 internal fun goalieLine(res: Resources, g: Goalie): String {
-    val sep = hubSep(res)
+    val sep = res.getString(R.string.sports_hub_summary_sep)
     return listOfNotNull(
         g.record,
         g.gaa?.let { String.format(Locale.US, "%.2f", it) + " " + res.getString(R.string.sports_hub_matchup_gaa) },

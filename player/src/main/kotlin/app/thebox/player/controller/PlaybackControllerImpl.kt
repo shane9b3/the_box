@@ -74,6 +74,7 @@ import app.thebox.core.playback.errors.ErrorConstants
 import app.thebox.core.playback.errors.ErrorLadderImpl
 import app.thebox.core.playback.stall.StallConstants
 import app.thebox.player.engine.ClipMedia
+import app.thebox.player.engine.MediaSourceBuilder
 import app.thebox.player.engine.PlayerFactory
 import app.thebox.player.engine.StatsCollector
 import app.thebox.player.engine.UnsupportedStreamFormatException
@@ -1197,7 +1198,11 @@ internal class PlaybackControllerImpl @Inject constructor(
         if (c.firstSession) {
             // §3.8.6 / §3.12 defaults and per-channel memory, once per cycle (WP-C TrackController.applyTuneDefaults).
             val audioLangs = (listOfNotNull(c.memory.audioLanguage) + PlayerFactory.preferredAudioLanguages(s)).distinct().take(3)
-            e.parts.applyTuneDefaults(audioLangs, s.preferredTextLanguages.take(3), c.memory.subtitleLanguage, s.subtitlesEnabled)
+            // (Sports Hub §6.5, integration) A clip's HLS master lists its English rendition with DEFAULT=NO, which the
+            // selector takes only for a preferred language: English joins the list, so the subtitles setting alone decides.
+            val textLangs = s.preferredTextLanguages.take(3)
+                .let { if (c.isClip) (it + MediaSourceBuilder.CLIP_CAPTIONS_LANGUAGE).distinct() else it }
+            e.parts.applyTuneDefaults(audioLangs, textLangs, c.memory.subtitleLanguage, s.subtitlesEnabled)
         }
         val params = p.trackSelectionParameters.buildUpon()
         if (c.firstSession) {

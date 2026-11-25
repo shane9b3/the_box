@@ -209,18 +209,22 @@ class MediaSourceBuilderTest {
     private val clipMp4 = "https://cdn.example/pmp4/main.mp4?fastly_token=FAKETOKEN0123456789"
     private val clipVtt = "https://cdn.example/text/text.vtt?fastly_token=FAKETOKENvtt456789"
 
+    /**
+     * The recorded NHL master lists its own English SUBTITLES rendition (DEFAULT=NO): an HLS clip uses it and side-loads
+     * nothing, even when the lookup also names a WebVTT file.
+     */
     @Test
-    fun clipHlsIsVodOverHttpAndSideloadsCaptionsWhileTheSwitchIsOff() {
-        assertFalse("the default until the recorded master settles it", MediaSourceBuilder.CLIP_HLS_MASTER_CARRIES_CAPTIONS)
+    fun clipHlsUsesTheMastersOwnCaptionsAndSideloadsNothing() {
+        assertTrue("settled by the recorded master", MediaSourceBuilder.CLIP_HLS_MASTER_CARRIES_CAPTIONS)
         val transport = EngineTestSupport.FakeTransport(clip)
         val built = builder.build(
             EngineTestSupport.context(tuneId = 21, resolved = EngineTestSupport.resolved(clipHls, StreamFormat.HLS)),
             StreamFormat.HLS, TsCompat.DEFAULT, transport, null, clip = ClipMedia(clipVtt),
         )
-        assertTrue(built.source is MergingMediaSource)
+        assertTrue("no merge beside the master", built.source is HlsMediaSource)
         assertEquals(listOf("http"), transport.calls)
-        assertEquals(listOf(LoadOrigin.HLS_MANIFEST, LoadOrigin.ARCHIVE), origins)
-        assertFalse("the captions token stays out of Media3", built.source.mediaItem.toString().contains("vtt456789"))
+        assertEquals(listOf(LoadOrigin.HLS_MANIFEST), origins)
+        assertFalse("the captions token never reaches Media3", built.source.mediaItem.toString().contains("vtt456789"))
     }
 
     @Test

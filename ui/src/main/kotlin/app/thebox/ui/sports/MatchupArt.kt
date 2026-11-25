@@ -35,14 +35,15 @@ import app.thebox.ui.guide.screen.Line
  * (Sports Hub WP-4, docs/design/m6-sports-hub.md §1.3) The matchup art: the area split on a 12 degree diagonal into the two
  * teams' primary colours (each darkened until white text has 4.5 : 1), the logos 120 px (88 below a 160 px area) centred in
  * their halves, and a centre disc (`#0B0E14`) with [centreTop] over [centreBottom]. [caption] (the venue, 22/500) sits at the
- * bottom. Static brushes only: no blur, no graphics layer.
+ * bottom. Static brushes only: no blur, no graphics layer. [centreTop] null draws no disc (under a poster, whose play disc
+ * takes the centre).
  */
 @Composable
 internal fun MatchupArt(
     away: TeamLine,
     home: TeamLine,
     league: League,
-    centreTop: String,
+    centreTop: String?,
     centreBottom: String?,
     caption: String?,
     heightDp: Int,
@@ -68,7 +69,7 @@ internal fun MatchupArt(
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { HubLogo(away, league, logo, logo, align = Alignment.Center) }
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { HubLogo(home, league, logo, logo, align = Alignment.Center) }
         }
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        if (centreTop != null) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             val d = if (compact) 88 else 120
             Column(
                 Modifier.defaultMinSize(d.dp, d.dp).background(Color(0xFF0B0E14), RoundedCornerShape(50)).padding(horizontal = 12.dp),

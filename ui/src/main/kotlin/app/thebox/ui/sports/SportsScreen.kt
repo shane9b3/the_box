@@ -126,6 +126,8 @@ fun SportsScreen(
     clock24: Boolean,
     modifier: Modifier = Modifier,
     onBackFreeChanged: (Boolean) -> Unit = {},
+    /** The title row's date and time (tests pass a fixed clock so the screenshot does not change with the time of day). */
+    wallClockMs: () -> Long = System::currentTimeMillis,
 ) {
     val ui by viewModel.state.collectAsStateWithLifecycle()
     val panel by viewModel.panel.collectAsStateWithLifecycle()
@@ -138,6 +140,16 @@ fun SportsScreen(
     val clipState by (session?.state ?: remember { kotlinx.coroutines.flow.MutableStateFlow<ClipSession.State>(ClipSession.State.Idle) }).collectAsStateWithLifecycle()
     val lastPlayed by (session?.lastPlayed ?: remember { kotlinx.coroutines.flow.MutableStateFlow<app.thebox.core.sports.hub.ClipRef?>(null) }).collectAsStateWithLifecycle()
     val clipActive = clipState !is ClipSession.State.Idle
+    // The Goals sheet's focus target (the clip just played) is frozen while a clip plays: a change under the clip (the
+    // next goal of the queue) would move focus from the clip layer into the hidden sheet. [clipEpoch] counts ended clips.
+    var sheetFocusVideoId by remember { mutableStateOf<Long?>(null) }
+    var clipEpoch by remember { mutableIntStateOf(0) }
+    LaunchedEffect(clipActive, lastPlayed) { if (!clipActive) sheetFocusVideoId = lastPlayed?.videoId }
+    var wasClipActive by remember { mutableStateOf(false) }
+    LaunchedEffect(clipActive) {
+        if (wasClipActive && !clipActive) clipEpoch++
+        wasClipActive = clipActive
+    }
     // Back is free only when neither a sheet, the panel nor the clip layer holds it (the layer reports its own hold).
     val holdsNothing = androidx.compose.runtime.rememberUpdatedState(sheet == null && !panelFocused)
     val res = LocalResources.current
@@ -211,6 +223,8 @@ fun SportsScreen(
     }
     fun focusSlot(i: Int) {
         scope.launch {
+            // Two frames: the buttons become focusable once `panelFocused` has recomposed the panel (HubPanel.entered).
+            androidx.compose.runtime.withFrameNanos { }
             androidx.compose.runtime.withFrameNanos { }
             runCatching { slotRequesters[i].requestFocus() }
         }
@@ -259,7 +273,7 @@ fun SportsScreen(
                 .drawBehind { if (!clipActive) drawPageBackground() },
         ) {
             Column(Modifier.fillMaxSize().padding(start = 96.dp, end = 96.dp, top = 56.dp, bottom = 56.dp)) {
-                TitleRow(ui, groupChips, subChips, selectedChip, chips = !off, clock24 = clock24, onZone = { zone = Zone.CHIPS },
+                TitleRow(ui, groupChips, subChips, selectedChip, chips = !off, clock24 = clock24, wallClockMs = wallClockMs, onZone = { zone = Zone.CHIPS },
                     onGroup = { g ->
                         viewModel.onGroup(g)
                         if (g == LeagueGroup.CHL) focusSub = true
@@ -280,6 +294,7 @@ fun SportsScreen(
                             },
                             onSlotFocus = { focusedSlot = it ?: -1 },
                             onExit = ::exitPanel,
+                            entered = panelFocused,
                         )
                         Spacer(Modifier.width(40.dp))
                         Column(Modifier.width(968.dp)) {
@@ -335,22 +350,40 @@ fun SportsScreen(
                 Spacer(Modifier.height(16.dp))
                 Footer(ui, hints = footerOf(res, zone, panelFocused, sheet, focusedCard, panel, focusedSlot), updatedMono = ui.updatedMono)
             }
-            // A sheet takes the right column (§6.4); the grid behind is not focusable while it is open.
+            // A sheet takes the right column (§6.4). The sheet draws its own frame at x 856, y 148 (HubSheetFrame), so the
+            // host is the full page; the grid behind is not focusable while it is open. Re-keyed after each clip, so focus
+            // lands again on the clip just played even when it was the same clip as before (U-S14).
             sheet?.let { sh ->
-                Box(Modifier.padding(start = 856.dp, top = 148.dp).size(968.dp, 812.dp).testTag(SPORTS_SHEET_TAG)) {
-                    SheetHost(
-                        sh, viewModel, panel, clipInfo, lastPlayed?.videoId, clock24,
-                        onClose = {
-                            viewModel.closeSheet()
-                            val i = sheetSlot
-                            if (panelFocused && panel.slots.getOrNull(i)?.usable == true) focusSlot(i) else exitPanel()
-                        },
-                    )
+                androidx.compose.runtime.key(clipEpoch) {
+                    Box(Modifier.fillMaxSize().testTag(SPORTS_SHEET_TAG)) {
+                        SheetHost(
+                            sh, viewModel, panel, clipInfo, sheetFocusVideoId, clock24,
+                            onClose = {
+                                viewModel.closeSheet()
+                                val i = sheetSlot
+                                if (panelFocused && panel.slots.getOrNull(i)?.usable == true) focusSlot(i) else exitPanel()
+                            },
+                        )
+                    }
                 }
             }
         }
         if (session != null && clipActive) {
-            ClipPlayerLayer(session = session, onBackFreeChanged = { free -> onBackFreeChanged(free && holdsNothing.value) }, modifier = Modifier.fillMaxSize())
+            // The sub-line's teams and "Goal k of n" come from the panel's game when the clip belongs to it.
+            val clipGameId = when (val s = clipState) {
+                is ClipSession.State.Playing -> s.queue.getOrNull(s.index)?.gameId
+                is ClipSession.State.Resolving -> s.ref.gameId
+                is ClipSession.State.Failed -> s.queue.getOrNull(s.index)?.gameId
+                ClipSession.State.Idle -> null
+            }
+            val clipGame = panel.game?.takeIf { it.id == clipGameId }
+            ClipPlayerLayer(
+                session = session,
+                onBackFreeChanged = { free -> onBackFreeChanged(free && holdsNothing.value) },
+                modifier = Modifier.fillMaxSize(),
+                game = clipGame,
+                goals = if (clipGame != null) panel.detail?.goals.orEmpty() else emptyList(),
+            )
         }
         toast?.let { t -> ToastBar(t, clock24, onShown = { viewModel.toastShown(t.seq) }) }
     }
@@ -375,10 +408,10 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawPageBackground(
 private fun emptyText(b: SportsBody.Empty, ui: SportsUiState): String {
     val res = LocalResources.current
     val league = ui.prefs.league
-    // A day other than yesterday, today or tomorrow: the date and "no games" (the hub's own string).
+    // A day other than yesterday, today or tomorrow: "No NHL games on Saturday, November 21. Pick another day above."
     if (league.group != LeagueGroup.NFL && b.offset !in -1..1) {
         val date = runCatching { LocalDate.parse(b.dayKey) }.getOrNull()
-        if (date != null) return res.getString(R.string.sports_hub_day_no_games_desc, SportsText.spokenDate(date))
+        if (date != null) return res.getString(R.string.sports_empty_day_league, PlayerText.leagueName(res, league), SportsText.spokenDate(date))
     }
     // NFL §7.2: the off-season has no neighbour either way ("No NFL games this week."); a quiet week points at the chips.
     // CHL §6.5: "No OHL games today. Pick another day above." (the `_league` strings).
@@ -432,6 +465,7 @@ private fun TitleRow(
     down: FocusRequester,
     chips: Boolean,
     clock24: Boolean,
+    wallClockMs: () -> Long,
     onZone: () -> Unit,
     onGroup: (LeagueGroup) -> Unit,
     onLeague: (League) -> Unit,
@@ -481,17 +515,17 @@ private fun TitleRow(
             }
         }
         Spacer(Modifier.weight(1f))
-        DateAndTime(clock24)
+        DateAndTime(clock24, wallClockMs)
     }
 }
 
 /** The date (26/500 `Fg70`) and the time (36/600), right-aligned; not focusable (§1.1). */
 @Composable
-private fun DateAndTime(clock24: Boolean) {
-    val now by produceState(System.currentTimeMillis()) {
+private fun DateAndTime(clock24: Boolean, wallClockMs: () -> Long) {
+    val now by produceState(wallClockMs()) {
         while (true) {
             delay(15_000L)
-            value = System.currentTimeMillis()
+            value = wallClockMs()
         }
     }
     val locale = androidx.compose.ui.text.intl.Locale.current.platformLocale

@@ -88,7 +88,7 @@ fun ChannelSheet(
                         Line(name, GuideUi.sans(26, FontWeight.SemiBold, color))
                         val second = GuideUi.secondary(color, focusedOf(color), 0.70f)
                         Line(reason, GuideUi.sans(22, FontWeight.Medium, second), Modifier.fillMaxWidth())
-                        val third = listOfNotNull(c.playlistName.takeIf { manyPlaylists }, also).joinToString(hubSep(res))
+                        val third = listOfNotNull(c.playlistName.takeIf { manyPlaylists }, also).joinToString(res.getString(R.string.sports_hub_summary_sep))
                         if (third.isNotEmpty()) Line(third, GuideUi.sans(22, FontWeight.Medium, second))
                     }
                 }

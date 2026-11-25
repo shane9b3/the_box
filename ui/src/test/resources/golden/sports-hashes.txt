@@ -7,6 +7,9 @@
 # differ by anti-aliasing rounding: regenerate the list there from 5472974, never "fix" it from a changed tree.
 # 2026-11-14 (CHL WP-5, lead ruling): sports-tab/sports-tab.png changed on purpose, the title row has a third chip, CHL
 #   (was c0aa7099...; only the chip's pixels differ). Every other hash is unchanged.
+# 2026-11-25 (Sports Hub integration): sports-tab/sports-tab.png changed on purpose (the new Sports Hub page; the title
+#   row's clock pinned by the test, so the PNG no longer follows the host's time). Two runs hashed equal; every other hash
+#   is unchanged (sportsHashGate: 1 of 1692 differed before this line, that one).
 # host: Mac OS X 15.0.1 x86_64 jdk 21.0.2
 #   (machine-read by the gate: os.name, os.version, os.arch and java.version of the Gradle JVM, which runs the unit tests.
 #   On any other host the gate is SKIPPED with a message, never failed; regenerate the list there to gate on it.)
@@ -1278,7 +1281,7 @@ a94f710c8ed57ad9ed4a901f306523a81a2e8c6283581a85876afafbd17dc7e3  score-bug/stat
 0338c36df0d0b9bf41fc2a198ed53080e1b47914f5b90be3d95c056c7a7d0e1b  score-bug/state-so.png
 6aac14c491a0f65109e0a328244aa8ce0510f7546af7f77f5776529fea6f23c3  score-bug/state-stale.png
 a8dc9b96921d1bc2f1f151cd8518cfd3b93f711f20fc2305430c738e3933ab68  score-bug/white-ice-live.png
-dba857ff9fccb994aa63f457b0530751f5fce82a28e66285a3b88c125717b539  sports-tab/sports-tab.png
+5e354f33c8303b80418b58885eb8a7b6950fd7ec809cac64e327578fd4fd9279  sports-tab/sports-tab.png
 # 2026-11-15 (NFL Stacked integration pass): appended score-bug-stacked-nfl/ (StackedNflScreenshotTest through the real
 #   pipeline: StackedNflTargets.of, StackedNflTimeline, NflStackedColours, NflScoreSpec.STACKED). Taken on the host above,
 #   two clean runs hashed equal; every line above is unchanged. Pending the owner's review of the shots (design §9.3).

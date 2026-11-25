@@ -225,6 +225,20 @@ class GuideViewModelClipFilterTest {
         assertEquals(TuneTarget.Channel(x.identity), w.controller.tunes.last().first)
     }
 
+    /** (Integration) The resumed channel prepares only once the root has given the page its viewport back. */
+    @Test fun resumeWaitsForThePagesViewport() {
+        val w = World()
+        val vm = w.viewModel()
+        vm.setViewport(app.thebox.core.playback.Viewport.HIDDEN)
+        vm.setViewport(app.thebox.core.playback.Viewport.FULL) // the clip's hole
+        val before = w.controller.tunes.size
+        vm.onSportsEffect(SportsEffect.Resume(ResumePoint.Live(x.identity))); idle()
+        assertEquals("no tune while the viewport is still the clip's", before, w.controller.tunes.size)
+        vm.setViewport(app.thebox.core.playback.Viewport.HIDDEN); idle()
+        assertEquals(TuneTarget.Channel(x.identity), w.controller.tunes.last().first)
+        assertEquals(before + 1, w.controller.tunes.size)
+    }
+
     /** R-N3: the catch-up resumes through playProgramme (timeShift carried), then seeks on the first PLAYING. */
     @Test fun resumeArchiveSeeksOnTheFirstPlaying() {
         val w = World()
