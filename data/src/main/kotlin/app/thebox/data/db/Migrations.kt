@@ -14,6 +14,8 @@ import androidx.sqlite.execSQL
  * and a backfilled `uid`, which an auto-migration would do by rebuilding the table.
  * 4 → 5 is hand-written ([MIGRATION_4_5], docs/design/m6-channel-editor.md §3.6): `channel_prefs.custom_group_key` and
  * its index, with no rebuild.
+ * 5 → 6 is hand-written ([MIGRATION_5_6], docs/design/m6-event-channels.md §4.5): five `playlist` columns, with no
+ * rebuild.
  *
  * Policy:
  * - Every schema change bumps `LibraryDatabase.VERSION`, commits the new exported JSON under
@@ -84,5 +86,27 @@ object Migrations {
         }
     }
 
-    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+    /**
+     * v5 → v6 (docs/design/m6-event-channels.md §4.5): five `playlist` columns, `ADD COLUMN` only; no table rebuild, no
+     * index, no `channel` column and no event backfill (events are derived at read time, §5.1). `refresh_interval_auto`
+     * is 1 only where `refresh_interval_h` is the default 24: Manual (0) and every other chosen interval stay the user's
+     * (§10; a 24 h chosen before v6 cannot be told from the default, re-review E13). Other rows get 0 / NULL: no
+     * behaviour change until the event work packages read them.
+     */
+    val SQL_5_6: List<String> = listOf(
+        "ALTER TABLE `playlist` ADD COLUMN `hide_empty_events` INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE `playlist` ADD COLUMN `refresh_interval_auto` INTEGER NOT NULL DEFAULT 1",
+        "ALTER TABLE `playlist` ADD COLUMN `event_zone` TEXT",
+        "ALTER TABLE `playlist` ADD COLUMN `event_zone_n` INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE `playlist` ADD COLUMN `event_count` INTEGER NOT NULL DEFAULT 0",
+        "UPDATE `playlist` SET `refresh_interval_auto` = 0 WHERE `refresh_interval_h` != 24",
+    )
+
+    val MIGRATION_5_6: Migration = object : Migration(5, 6) {
+        override fun migrate(connection: SQLiteConnection) {
+            for (sql in SQL_5_6) connection.execSQL(sql)
+        }
+    }
+
+    val ALL: Array<Migration> = arrayOf(MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
 }

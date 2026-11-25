@@ -39,6 +39,9 @@
     <string name="backup_hidden_unhide">Unhide</string>
     <string name="backup_hidden_by_rule">Hidden by the rule “%1$s”: change it in Hide rules</string>
     <string name="backup_hidden_by_you">Hidden by you · OK to unhide</string>
+    <!-- (Event channels commit 0, docs/design/m6-event-channels.md §5.5, §9.3, re-review E1) A row the playlist's
+         "Hide channels with no event" switch hides; it links to the playlist's settings page. -->
+    <string name="backup_hidden_no_event">Hidden because it has no event. Turn off “Hide channels with no event” in this playlist\'s settings.</string>
     <string name="backup_no_hidden">No hidden channels.</string>
     <string name="backup_unhidden">Back in the guide.</string>
     <string name="backup_rules_title">Hide rules</string>

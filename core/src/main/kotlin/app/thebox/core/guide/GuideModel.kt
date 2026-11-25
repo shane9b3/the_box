@@ -176,6 +176,12 @@ data class GuideChannel(
     val epgHasData: Boolean,
     /** [GuideChannel.hashOf] of [identity]; the renderer's key for tuned/reminder/suspect lookups. */
     val identityHash: Long,
+    /**
+     * (Event channels commit 0, docs/design/m6-event-channels.md §5.4) The event the provider's channel name lists
+     * (`EventSnapshot.of(rowId)`), an EMPTY slot (`EventNameParser.isEmptySlot`), or null for an ordinary channel. Part
+     * of equality, and folded into [epgBasisOf] so a renamed event slot re-queries and redraws (arch B5).
+     */
+    val event: app.thebox.core.events.ChannelEvent? = null,
 ) {
     /**
      * (code review 2026-10-14, O-2) The renderer's `TextFit` key for [displayName], computed where the row is built
@@ -203,6 +209,12 @@ object CellFlags {
     const val RTL: Int = 1 shl 29
     /** Title contains a combining mark, variation selector or ZWJ: grapheme cuts use `BreakIterator` (S6). */
     const val COMPLEX: Int = 1 shl 28
+    /**
+     * (Event channels commit 0, docs/design/m6-event-channels.md §4.4, §6.1; arch B4) The cell is an event read from
+     * the channel's name, not a guide listing: its end is estimated, so catch-up is never offered on it (§6.4). Bit 27
+     * is free: `ProgrammeFlags` uses 0–12, [COMPLEX] 28, [RTL] 29 and [SLIVER] 30.
+     */
+    const val EVENT_NAME: Int = 1 shl 27
 }
 
 /**
@@ -299,6 +311,10 @@ val ProgrammeInfo.rawEndMin: Int get() = rawStartMin + (endMin - startMin)
  * (amended 2026-10-14, §2.13 item 20) A row's programme basis (B5/S10a): 0 = not loaded, otherwise a hash of
  * (epg ref, epgShiftMin). The pager stamps it per row on every snapshot ([GuideWindowData.rowEpgBasis]); the state
  * machine accepts a snapshot built from an older rows version when every row's basis is unchanged.
+ *
+ * (Event channels commit 0, docs/design/m6-event-channels.md §4.4, arch B5) The channel's [GuideChannel.event] basis is
+ * folded in when there is one, so a renamed event slot re-queries even when its guide ref and shift are unchanged. A
+ * channel without an event hashes exactly as before.
  */
 fun epgBasisOf(ch: GuideChannel?): Long {
     if (ch == null) return 0L
@@ -306,5 +322,7 @@ fun epgBasisOf(ch: GuideChannel?): Long {
     var h = app.thebox.core.common.Hash64.long(app.thebox.core.common.Hash64.of(null), ch.epgShiftMin.toLong())
     h = app.thebox.core.common.Hash64.long(h, ref?.sourceId ?: -1L)
     h = app.thebox.core.common.Hash64.str(h, ref?.xmltvId)
+    val ev = ch.event
+    if (ev != null) h = app.thebox.core.common.Hash64.long(h, ev.basis)
     return if (h == 0L) 1L else h
 }

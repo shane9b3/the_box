@@ -334,6 +334,11 @@ enum class SetupText {
     FIX_SHIFT_NONE,
     FIX_SHIFT_HOURS,
     SINGLE_CHANNEL_NAME,
+    /** (Event channels commit 0, docs/design/m6-event-channels.md §9.3, §5.5) The playlist page's switch and its description. */
+    ROW_HIDE_EMPTY_EVENTS,
+    HIDE_EMPTY_EVENTS_DESC,
+    /** (Event channels commit 0, §10) The Update interval row's description while the 6 h event default applies. */
+    INTERVAL_EVENT_DEFAULT,
 }
 
 /**

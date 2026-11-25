@@ -326,4 +326,32 @@
         <item quantity="one">%1$d second</item>
         <item quantity="other">%1$d seconds</item>
     </plurals>
+
+    <!-- ==== (Event channels commit 0, docs/design/m6-event-channels.md §9.1) Additions only; WP-4 wires them and deletes
+         the regional strings. Channel line and sheet text at 22/500; nothing under 22 design px. -->
+    <!-- Channel line short reason (U-E-S8: the guide's phrase). -->
+    <string name="sports_hub_reason_short_event">from the channel name</string>
+    <!-- Channel line with a team channel on top. %1$s = the nickname ("Oilers"). -->
+    <string name="sports_hub_on_tv_team">On TV: %1$s team channel</string>
+    <!-- Upcoming. %1$s = the start time, %2$s = the nickname. -->
+    <string name="sports_hub_on_tv_team_at">On TV at %1$s: %2$s team channel</string>
+    <!-- The never-cut tail of the channel line (U-E-N5). %1$d = other candidates. -->
+    <plurals name="sports_hub_more">
+        <item quantity="one">+%1$d more</item>
+        <item quantity="other">+%1$d more</item>
+    </plurals>
+    <!-- Sheet, team channel. %1$s = the nickname. (re-review E10) 47 characters with "Golden Knights": fits at Largest. -->
+    <string name="sports_hub_reason_team">Team channel: always shows %1$s games</string>
+    <!-- Sheet, event. %1$s = the start time, %2$s = the title (time first: an ellipsis eats the title's end, U-E-B1). -->
+    <string name="sports_hub_reason_event">From the channel name: %1$s, %2$s</string>
+    <!-- Sheet, event whose zone was assumed: no time (U-E-S7). %1$s = the title. -->
+    <string name="sports_hub_reason_event_untimed">From the channel name: %1$s</string>
+    <!-- Sheet, national broadcaster with no usable network name (U-E-N6). (re-review E10) 41 characters. -->
+    <string name="sports_hub_reason_network_unnamed">A national broadcaster carries this game.</string>
+    <!-- Sheet, third line, a quality variant or a backup group with the same name (U-E-N3). %1$s = the group. -->
+    <string name="sports_hub_also_in">Also in %1$s</string>
+    <!-- Channel line beyond the guide (§8.5). %1$s, %2$s = the two teams' nicknames (or abbreviations, E11). -->
+    <string name="sports_hub_beyond_guide_team">On the %1$s and %2$s team channels</string>
+    <string name="sports_hub_beyond_guide">Your guide doesn\'t cover this game yet</string>
+    <string name="sports_hub_beyond_guide_none">Channels show 12 hours before the game</string>
 </resources>

@@ -182,6 +182,9 @@
     <string name="editor_d_reorder_all">Too many to move by hand. Use Sort, or tick fewer channels.</string>
     <string name="editor_d_single">Pick one channel to rename or number it.</string>
     <string name="editor_d_rule">Hidden by a rule. Change it in Hide rules (advanced settings).</string>
+    <!-- (Event channels commit 0, docs/design/m6-event-channels.md §5.5, §9.3, re-review E1) Hidden by the playlist's
+         "Hide channels with no event" switch, not by a user rule. -->
+    <string name="editor_d_no_event">Hidden because it has no event. Turn off “Hide channels with no event” in this playlist\'s settings.</string>
     <string name="editor_d_locked_by_group">Locked by its group, %1$s. Unlock the group to unlock this channel.</string>
     <string name="editor_d_no_groups">Move needs a second group. Refresh the playlist if one is missing.</string>
     <string name="editor_d_group_tick_first">Tick groups with OK first.</string>

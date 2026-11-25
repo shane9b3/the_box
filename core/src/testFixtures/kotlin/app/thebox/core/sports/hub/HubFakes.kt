@@ -60,19 +60,41 @@ class FakeClipResolver : ClipResolver {
     }
 }
 
-/** (Sports Hub commit 0) A [GameChannelMatcher] answering [answers] by game id (empty by default); calls recorded. */
+/**
+ * (Sports Hub commit 0) A [GameChannelMatcher] answering [answers] by game id (empty by default); calls recorded.
+ *
+ * (Event channels commit 0, docs/design/m6-event-channels.md §8.5) Both `match` overloads record into [matchCalls]; the
+ * four-argument one also records its board in [boards] (one entry per call, in order). [guideEnd] is what [guideEndMs]
+ * answers (null: no guide), and [teamAnswers] what [teamChannels] answers by game id; [teamCalls] records those calls.
+ */
 class FakeGameChannelMatcher : GameChannelMatcher {
     val answers = mutableMapOf<GameId, List<ChannelCandidate>>()
     val matchCalls = mutableListOf<Triple<GameSnapshot, Long, ParentalAccess>>()
+    val boards = mutableListOf<List<GameSnapshot>>()
     var clears = 0
         private set
+    var guideEnd: Long? = null
+    val teamAnswers = mutableMapOf<GameId, List<ChannelCandidate>>()
+    val teamCalls = mutableListOf<Pair<GameSnapshot, ParentalAccess>>()
 
     override suspend fun match(game: GameSnapshot, nowMs: Long, access: ParentalAccess): List<ChannelCandidate> {
         matchCalls += Triple(game, nowMs, access)
         return answers[game.id].orEmpty()
     }
 
+    override suspend fun match(game: GameSnapshot, nowMs: Long, access: ParentalAccess, board: List<GameSnapshot>): List<ChannelCandidate> {
+        boards += board
+        return match(game, nowMs, access)
+    }
+
     override fun clear() { clears++ }
+
+    override fun guideEndMs(): Long? = guideEnd
+
+    override suspend fun teamChannels(game: GameSnapshot, access: ParentalAccess): List<ChannelCandidate> {
+        teamCalls += game to access
+        return teamAnswers[game.id].orEmpty()
+    }
 }
 
 /**

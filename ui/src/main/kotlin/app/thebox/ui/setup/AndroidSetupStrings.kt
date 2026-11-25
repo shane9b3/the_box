@@ -344,6 +344,9 @@ class AndroidSetupStrings(private val context: Context) : SetupStrings {
             SetupText.FIX_SHIFT_NONE -> R.string.setup_fix_shift_none
             SetupText.FIX_SHIFT_HOURS -> R.string.setup_fix_shift_hours
             SetupText.SINGLE_CHANNEL_NAME -> R.string.setup_single_channel_name
+            SetupText.ROW_HIDE_EMPTY_EVENTS -> R.string.setup_row_hide_empty_events
+            SetupText.HIDE_EMPTY_EVENTS_DESC -> R.string.setup_hide_empty_events_desc
+            SetupText.INTERVAL_EVENT_DEFAULT -> R.string.setup_interval_event_default
         }
     }
 }

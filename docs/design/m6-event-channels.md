@@ -1416,6 +1416,83 @@ Owns and lands:
 - **Gate:** commit 0 passes `./gradlew :core:test :app:assembleDebug :data:compileDebugUnitTestKotlin
   :ui:compileDebugUnitTestKotlin` and `lintAll` on its own (E14: the smoke build compiles neither test source set).
 
+#### Commit 0 rulings (2026-11-25)
+
+Where §4 left a signature open, commit 0 chose as follows. Every choice is in the code with its KDoc; the work packages
+build against these.
+
+1. **`EventEntry.name`** (a sixth, last constructor parameter): the raw provider name. Stage E fills
+   `EventFacts.name` from it, so the hints read the whole name (§8.4) with no second query.
+2. **`EventIndex.rebuild(): EventSnapshot`**: rebuilds whatever the key says and returns the new snapshot. It is
+   serialised with `current()`'s builds. `RefreshRepository` calls it after `finish` (§5.2, §10).
+3. **Empty values.**
+   - `EventSnapshot.EMPTY` (companion) is version 0 and has no entries. The commit 0 `EventIndexImpl` always answers it.
+   - `ChannelEvent.EMPTY = ChannelEvent(EMPTY, null, null, 0, 0, ASSUMED)` is what `GuideQueries.channels` gives an
+     `isEmptySlot` name that has no index entry (§5.4).
+4. **Where Appendix A lives.**
+   - The hub's constants are in `SportsConstants`: `HUB_EVENT_BEFORE_MIN`, `HUB_EVENT_AFTER_MIN`,
+     `HUB_CITIES_CONFIRM_MIN`, `HUB_BOARD_CLASH_MIN`, `HUB_LOOKAHEAD_MIN` and `HUB_TEAM_QUERY_MAX`. `HUB_MATCH_MAX = 8`
+     already existed.
+   - Every other constant is in a new `app.thebox.core.events.EventConstants`, so the guide, `epg`, search and the
+     scheduler never import `sports`. It holds the search limit and de-duplication window, `EVENT_MAY_BE_ON_MIN`, the
+     refresh default, the zone sample count and hysteresis factor, the year window, the four durations and
+     `EVENT_TEXT_ID`.
+5. **Stub answers.**
+   - `parse` returns `None`; `slotOf`, `EventMatchup.of`, `TeamNames.of`, `sideMatch`, `TeamChannelRule.teamOf` and
+     `EventGameRule.grade` return null.
+   - `isEmptySlot`, `isFiller`, `groupIsTeams` and `placeShared` return false; `all` and `tokens` return empty.
+   - `EventDuration.minutes` returns `EVENT_MIN_SHOW` (60).
+6. **`GuideQueries`.**
+   - `teamChannelCandidates(word: String, access: ParentalAccess, limit: Int): List<GuideQueries.TeamChannelHit>`, with
+     `TeamChannelHit(id, playlistId, name, displayName, group, tvgId)`: `name` is `c.name`, `displayName` is the
+     COALESCE, and `group` is `g0.name`.
+   - `channels()` reads `events?.current()` once per block, before the library statements. `BLOCK_SELECT` gains `c.name`
+     as column 21.
+7. **`PlaylistDao`.**
+   - `setRefreshInterval` also writes `refresh_interval_auto = 0`, which is §10's "picking a value clears auto". Its only
+     caller is the settings row, and nothing reads the flag before WP-2.
+   - New setters: `setHideEmptyEvents`, `setRefreshIntervalAuto` (backup merge and tests), `setEventZone(id, zone, n)` and
+     `setEventCount`.
+   - New reads: `eventKeys()` and `observeEventKeys()` give enabled playlists only as `PlaylistEventKey(id, refreshSeq,
+     lastRefreshAt, serverZone, eventZone, eventZoneN, eventCount, refreshIntervalH, refreshIntervalAuto,
+     hideEmptyEvents)`.
+   - `PlaylistEntity.refreshIntervalAuto` defaults to true, like the column, so a new playlist starts on auto.
+8. **Migration.** It runs the five `ADD COLUMN`s, then
+   `UPDATE playlist SET refresh_interval_auto = 0 WHERE refresh_interval_h != 24`.
+9. **Strings.**
+   - The reminder strings (`reminder_event_moved`, `reminder_event_now_on`) go in `strings_guide.xml`, next to
+     `guide_reminder_*`. That file is the existing reminder strings file.
+   - The setup keys are `SetupText.ROW_HIDE_EMPTY_EVENTS`, `HIDE_EMPTY_EVENTS_DESC` and `INTERVAL_EVENT_DEFAULT`.
+10. **`MatchState.BeyondGuide` stub.** The slot is `HubSlot(CHANNEL, CHANNELS, enabled = false)`, and `channelLine`
+    returns null. `SportsViewModel` never sets the state before WP-4.
+11. **Fakes.**
+    - `FakeGameChannelMatcher`: the four-argument `match` records its board in `boards` and delegates to the
+      three-argument one, which records `matchCalls`. It also has `guideEnd` (what `guideEndMs()` answers), plus
+      `teamAnswers` and `teamCalls`.
+    - `FakeEventIndex(entries)`: `put(entries)` publishes a new snapshot and bumps `version`. It counts `current()` and
+      `rebuild()` calls. `FakeEventIndex.event(...)` builds an EVENT entry.
+    - `FakeEventSnapshot` scans linearly.
+12. **`events.py` hooks** for WP-4: `categories(cfg)`, `channels(cfg, now_unix)`, `programmes(cfg, ch, t_from, t_to,
+    tz)` and `admin(h, path, data)`, on the route `/admin/events`. The stub validates `shift_min` (an integer) and
+    `names` (`"next"` or `"reset"`), and otherwise does nothing.
+13. **`RULE_VERSION` goes from 1 to 2 in commit 0.**
+    - With the stub parser, the startup backfill re-derives every display name once and writes no row (`slotOf` is
+      null), so nothing on screen changes.
+    - **Caveat:** a device that runs a build between commit 0 and the WP-1 + WP-2 merge stamps `name_prefix_ver = 2`.
+      It would then not re-run the backfill when the real `slotOf` lands.
+    - Ruling: no such intermediate build goes to the owner's device. If one does, integration bumps
+      `EventNameParser.VERSION` to 2 before release, which costs only one backfill and one index rebuild.
+14. **Tests in commit 0.**
+    - `core/.../events/EventContractsTest`:
+      - every `ProgrammeFlags` and `CellFlags` constant is one bit and disjoint from the others (reflection);
+      - `epgBasisOf` is unchanged without an event and follows a renamed or moved event;
+      - the §11.1 `ChannelHorizonTest` cases;
+      - `EventSnapshot.EMPTY`;
+      - the `RULE_VERSION` link.
+    - `data/.../db/Migration5To6Test`: the five columns, the auto rule, no other table touched, and the new DAO
+      methods.
+    - The stubs' answers are deliberately not pinned, so WP-1 never edits a commit 0 test.
+
 ### Packages
 
 | WP | Owns (every file it touches) | Model | Depends on | Size |

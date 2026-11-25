@@ -115,8 +115,11 @@ interface PlaylistDao {
     @Query("UPDATE playlist SET order_mode = :mode WHERE id = :id")
     suspend fun setOrderMode(id: Long, mode: String)
 
-    /** 0 = manual. */
-    @Query("UPDATE playlist SET refresh_interval_h = :hours WHERE id = :id")
+    /**
+     * 0 = manual. (Event channels commit 0, docs/design/m6-event-channels.md §10) The user picked it, so it also clears
+     * `refresh_interval_auto`: the choice stands over the event default. Its only caller is the settings row.
+     */
+    @Query("UPDATE playlist SET refresh_interval_h = :hours, refresh_interval_auto = 0 WHERE id = :id")
     suspend fun setRefreshInterval(id: Long, hours: Int)
 
     @Query("UPDATE playlist SET use_playlist_epg = :value WHERE id = :id")
@@ -152,4 +155,53 @@ interface PlaylistDao {
 
     @Query("UPDATE playlist SET ignore_tls_errors = :value WHERE id = :id")
     suspend fun setIgnoreTlsErrors(id: Long, value: Boolean)
+
+    // ---- Event channels commit 0 (docs/design/m6-event-channels.md §4.5, §5.2, §5.5, §10): v6 columns, one per write.
+
+    /** The "Hide channels with no event" switch (§5.5). The caller re-runs the hide pass (WP-2). */
+    @Query("UPDATE playlist SET hide_empty_events = :on WHERE id = :id")
+    suspend fun setHideEmptyEvents(id: Long, on: Boolean)
+
+    /** Restores the event default of the update interval (backup merge, tests). The settings row uses [setRefreshInterval]. */
+    @Query("UPDATE playlist SET refresh_interval_auto = :auto WHERE id = :id")
+    suspend fun setRefreshIntervalAuto(id: Long, auto: Boolean)
+
+    /** The learned zone and its sample count (§3.3). `EventIndexImpl` calls it only when they change (re-review E9). */
+    @Query("UPDATE playlist SET event_zone = :zone, event_zone_n = :n WHERE id = :id")
+    suspend fun setEventZone(id: Long, zone: String?, n: Int)
+
+    /** Live events after the last index build (§5.2). Only when it changes (E9): `playlist` reloads the guide's rows. */
+    @Query("UPDATE playlist SET event_count = :count WHERE id = :id")
+    suspend fun setEventCount(id: Long, count: Int)
+
+    /** The event index's key inputs of every **enabled** playlist (§5.2), by id. */
+    @Query("SELECT $EVENT_KEY_COLUMNS FROM playlist WHERE enabled = 1 ORDER BY id")
+    suspend fun eventKeys(): List<PlaylistEventKey>
+
+    /** [eventKeys] as a flow: it re-emits on every `playlist` write; the index compares keys before rebuilding. */
+    @Query("SELECT $EVENT_KEY_COLUMNS FROM playlist WHERE enabled = 1 ORDER BY id")
+    fun observeEventKeys(): Flow<List<PlaylistEventKey>>
 }
+
+private const val EVENT_KEY_COLUMNS =
+    "id, refresh_seq, last_refresh_at, server_zone, event_zone, event_zone_n, event_count, refresh_interval_h, " +
+        "refresh_interval_auto, hide_empty_events"
+
+/**
+ * (Event channels commit 0, docs/design/m6-event-channels.md §5.2, §10) One enabled playlist's event inputs: the index key
+ * (`id`, [refreshSeq], [lastRefreshAt], [eventZone]), the learned-zone state and fallback ([eventZoneN], [serverZone]),
+ * and what the scheduler and the hide pass read ([eventCount], [refreshIntervalH], [refreshIntervalAuto],
+ * [hideEmptyEvents]).
+ */
+data class PlaylistEventKey(
+    val id: Long,
+    @androidx.room.ColumnInfo(name = "refresh_seq") val refreshSeq: Long,
+    @androidx.room.ColumnInfo(name = "last_refresh_at") val lastRefreshAt: Long?,
+    @androidx.room.ColumnInfo(name = "server_zone") val serverZone: String?,
+    @androidx.room.ColumnInfo(name = "event_zone") val eventZone: String?,
+    @androidx.room.ColumnInfo(name = "event_zone_n") val eventZoneN: Int,
+    @androidx.room.ColumnInfo(name = "event_count") val eventCount: Int,
+    @androidx.room.ColumnInfo(name = "refresh_interval_h") val refreshIntervalH: Int,
+    @androidx.room.ColumnInfo(name = "refresh_interval_auto") val refreshIntervalAuto: Boolean,
+    @androidx.room.ColumnInfo(name = "hide_empty_events") val hideEmptyEvents: Boolean,
+)

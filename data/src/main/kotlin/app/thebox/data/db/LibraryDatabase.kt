@@ -62,6 +62,9 @@ import kotlinx.coroutines.CoroutineDispatcher
  *
  * v5 (docs/design/m6-channel-editor.md §3.6): `channel_prefs.custom_group_key` (Move to group) and
  * `index_channel_prefs_group`, by the hand-written [Migrations.MIGRATION_4_5] (no table rebuild).
+ *
+ * v6 (docs/design/m6-event-channels.md §4.5): `playlist.hide_empty_events`, `refresh_interval_auto`, `event_zone`,
+ * `event_zone_n` and `event_count`, by the hand-written [Migrations.MIGRATION_5_6] (`ADD COLUMN` only, no rebuild).
  */
 @Database(
     version = LibraryDatabase.VERSION,
@@ -114,7 +117,7 @@ abstract class LibraryDatabase : RoomDatabase() {
     abstract fun editorDao(): app.thebox.data.db.dao.EditorDao
 
     companion object {
-        const val VERSION = 5
+        const val VERSION = 6
         const val NAME = "library.db"
 
         /** Production builder (§2.1.3). Tests pass `AndroidSQLiteDriver` (Robolectric) instead. */

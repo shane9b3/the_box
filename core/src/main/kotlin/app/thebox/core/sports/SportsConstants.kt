@@ -919,6 +919,20 @@ object SportsConstants {
     const val HUB_CLIP_BAR_MS = 4_000L
     /** "Up next" before the next queued goal. */
     const val HUB_UP_NEXT_MS = 1_500L
+
+    // ---- (Event channels commit 0, docs/design/m6-event-channels.md Appendix A: the hub's constants; the event
+    // constants the guide, search and refresh read are in `app.thebox.core.events.EventConstants`, Commit 0 rulings)
+    /** Stage E: an event's start must lie in [game start − before, game start + after] (minutes, §8.3, §8.4). */
+    const val HUB_EVENT_BEFORE_MIN = 90
+    const val HUB_EVENT_AFTER_MIN = 45
+    /** |Δ| at or under this (minutes) lets an ordered cities-only NHL event name be CONFIRMED (§8.4, re-review E6). */
+    const val HUB_CITIES_CONFIRM_MIN = 15
+    /** Another game on the board involving either place within ± this (minutes) blocks the cities-only upgrade (§8.4). */
+    const val HUB_BOARD_CLASH_MIN = 180
+    /** The guide horizon's floor: a game starting at or after max(guide end, now + this) is beyond the guide (§8.5). */
+    const val HUB_LOOKAHEAD_MIN = 720
+    /** Stage T: the most rows `GuideQueries.teamChannelCandidates` returns per league (§8.2). */
+    const val HUB_TEAM_QUERY_MAX = 400
 }
 
 /**

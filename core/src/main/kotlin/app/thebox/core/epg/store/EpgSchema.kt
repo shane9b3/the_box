@@ -134,5 +134,7 @@ internal object EpgSchema {
         const val APP_VERSION = "app_version"
         /** (2026-11-10, review S1) [app.thebox.core.epg.EpgBuildRequest.buildInputs] of the last full build. */
         const val BUILD_INPUTS = "build_inputs"
+        /** (Event channels commit 0, §8.5) [app.thebox.core.epg.EpgGenerationInfo.dataToMin]; written by WP-3. */
+        const val DATA_TO_MIN = "data_to_min"
     }
 }

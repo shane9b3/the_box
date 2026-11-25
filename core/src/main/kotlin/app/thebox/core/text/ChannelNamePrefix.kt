@@ -15,7 +15,13 @@ interface ChannelNamePrefix {
     fun strip(name: String, groupName: String?, rule: NamePrefixRule): String?
 
     companion object {
-        /** Bump when the Auto algorithm changes; the startup backfill recomputes every playlist below it. */
-        const val RULE_VERSION = 1
+        /**
+         * Bump when the Auto algorithm changes; the startup backfill recomputes every playlist below it.
+         *
+         * (Event channels commit 0, docs/design/m6-event-channels.md §5.3, re-review E8) Linked to the event parser: a
+         * slot short name ("Sportsnet+ 09") comes first in `strip`, so a parser bump re-runs the backfill with no manual
+         * step. Bump the `1` for an Auto change, [app.thebox.core.events.EventNameParser.VERSION] for a parser change.
+         */
+        const val RULE_VERSION = 1 + app.thebox.core.events.EventNameParser.VERSION
     }
 }

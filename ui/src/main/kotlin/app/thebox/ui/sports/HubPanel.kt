@@ -113,6 +113,13 @@ sealed interface MatchState {
     data object Idle : MatchState
     data object Finding : MatchState
     data class Done(val candidates: List<ChannelCandidate>) : MatchState
+    /**
+     * (Event channels commit 0, docs/design/m6-event-channels.md §4.4, §8.5) The game starts beyond the guide
+     * (`ChannelHorizon.beyondGuide`): no channel search runs. [teams]: the game's team channels (stage T), named by the
+     * line; [noGuide]: there is no guide at all. Commit 0's branch disables Channels and draws no line; WP-4 draws the
+     * line and sets it in the content description.
+     */
+    data class BeyondGuide(val teams: List<ChannelCandidate>, val noGuide: Boolean) : MatchState
 }
 
 /** Where the shown game's detail stands. */
@@ -267,6 +274,8 @@ internal object HubSlots {
                 watchable(c) != null -> HubSlot(SlotAction.CHANNEL, SlotLabel.WATCH, true, 1)
                 else -> HubSlot(SlotAction.CHANNEL, SlotLabel.CHANNELS_N, true, m.candidates.size)
             }
+            // (Event channels commit 0, §8.5) The owner's grey chip: Channels, disabled.
+            is MatchState.BeyondGuide -> HubSlot(SlotAction.CHANNEL, SlotLabel.CHANNELS, false)
         }
     }
 
@@ -618,6 +627,8 @@ internal object HubPanelContents {
                 else res.getString(R.string.sports_hub_on_tv_at, SportsText.startTime(g.startUtcMs, clock24, locale), name)
                 if (list.size > 1) res.getQuantityString(R.plurals.sports_hub_on_tv_more, list.size - 1, base, list.size - 1) else base
             }
+            // (Event channels commit 0, §8.5) Stub: no line yet; WP-4 draws the beyond-guide line (§9.1).
+            is MatchState.BeyondGuide -> null
         }
     }
 

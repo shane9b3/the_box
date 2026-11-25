@@ -331,4 +331,9 @@
     <string name="setup_fix_shift_none">None</string>
     <string name="setup_fix_shift_hours">%1$s h</string>
     <string name="setup_single_channel_name">Single channel</string>
+    <!-- (Event channels commit 0, docs/design/m6-event-channels.md §9.3) The playlist page's switch (§5.5). -->
+    <string name="setup_row_hide_empty_events">Hide channels with no event</string>
+    <string name="setup_hide_empty_events_desc">Hides channels whose name says NO EVENT or lists nothing, favourites too. They come back when your provider names an event.</string>
+    <!-- The Update interval row's description while the 6 h event default applies (§10). -->
+    <string name="setup_interval_event_default">Recommended: this playlist\'s channel names list upcoming events.</string>
 </resources>
