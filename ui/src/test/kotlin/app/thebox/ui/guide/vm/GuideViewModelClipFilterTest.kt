@@ -267,6 +267,24 @@ class GuideViewModelClipFilterTest {
         assertEquals("the resume never replaces the newer tune", before, w.controller.tunes.size)
     }
 
+    /**
+     * (Verification review L-e) A foreign tune made after the clip ended but before the effect was delivered: the owner the
+     * effect carries (the clip's tune) makes it newer, so the resume does not replace it.
+     */
+    @Test fun aForeignTuneBeforeTheEffectArrivesSkipsTheResume() {
+        val w = World()
+        val vm = w.viewModel()
+        vm.setViewport(app.thebox.core.playback.Viewport.HIDDEN)
+        vm.setViewport(app.thebox.core.playback.Viewport.FULL)
+        w.controller.state.value = PlaybackState.Playing(clip(100)); idle()
+        // The clip ended as tune 100; the intent's tune 111 starts before MainActivity delivers the resume.
+        w.controller.state.value = PlaybackState.Connecting(live(channels[7], 111), ConnectPhase.CONNECTING, 1, 0); idle()
+        val before = w.controller.tunes.size
+        vm.onSportsEffect(SportsEffect.Resume(ResumePoint.Live(x.identity), ownerTuneId = 100)); idle()
+        vm.setViewport(app.thebox.core.playback.Viewport.HIDDEN); idle()
+        assertEquals("the resume never replaces the newer tune", before, w.controller.tunes.size)
+    }
+
     /** (M2) The clip itself still owning the player after the wait: the resume goes ahead. */
     @Test fun theResumeStillRunsWhenOnlyTheClipOwnedThePlayer() {
         val w = World()

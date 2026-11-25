@@ -136,7 +136,7 @@ sealed interface HubSheet {
     data class Matchup(override val gameId: GameId) : HubSheet
 }
 
-enum class HubToastKind { VIDEO_UNAVAILABLE, VIDEO_OFFLINE, VIDEO_REFUSED, VIDEO_GEO, VIDEO_REMOVED, VIDEO_NOT_PLAYABLE, GOAL_NO_VIDEO, STARTS_AT }
+enum class HubToastKind { VIDEO_UNAVAILABLE, VIDEO_OFFLINE, VIDEO_REFUSED, VIDEO_GEO, VIDEO_REMOVED, VIDEO_NOT_PLAYABLE, GOAL_NO_VIDEO, STARTS_AT, VIDEO_LATER }
 
 /** A short message with a reason and a next step (§6.8, §5.5). [seq] distinguishes two equal toasts in a row. */
 @Immutable
@@ -196,7 +196,7 @@ class SportsViewModel internal constructor(
         { LocalDate.now(EASTERN) },
     ) {
         // (Review L1) `MainActivity.onTrimMemory` reaches the guide's trim singleton only; the page's caches register there.
-        trimHandle = guideTrim.register { _, _ -> onTrimMemory() }
+        trimHandle = guideTrim.register { level, uiHidden -> onTrimMemory(level, uiHidden) }
     }
 
     /** The registration with `GuideTrim` (the injected constructor only); closed in [onCleared]. */
@@ -321,6 +321,7 @@ class SportsViewModel internal constructor(
                             ClipSession.Failure.NOT_FOUND -> HubToastKind.VIDEO_REMOVED
                             ClipSession.Failure.NOT_PLAYABLE -> HubToastKind.VIDEO_NOT_PLAYABLE
                             ClipSession.Failure.NO_CLIP -> HubToastKind.GOAL_NO_VIDEO
+                            ClipSession.Failure.LATER -> HubToastKind.VIDEO_LATER
                         },
                     )
                 }
@@ -386,14 +387,24 @@ class SportsViewModel internal constructor(
         super.onCleared()
     }
 
-    /** `onTrimMemory` ≥ RUNNING_LOW (§8.3): the detail, clip-info and match caches go. */
-    fun onTrimMemory() {
+    /**
+     * `onTrimMemory` ≥ RUNNING_LOW (§8.3): the detail, clip-info and match caches go.
+     *
+     * (Verification review L-c) `TRIM_MEMORY_UI_HIDDEN` alone is not memory pressure (it comes every time the app goes to
+     * the background): nothing is dropped, so the detail repository keeps its end-time facts. Under real pressure while
+     * the UI is hidden nothing network-related starts: the clip-info cache (at most 40 small entries) and the record of
+     * what was asked are kept, so no lookup is made again in the background; they go at the next trim on screen.
+     */
+    @Suppress("DEPRECATION") // the TRIM_MEMORY_* levels are still delivered on the API levels we ship to (25–35)
+    fun onTrimMemory(level: Int = android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW, uiHidden: Boolean = false) {
+        if (level == android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN) return
         detail?.trim()
-        clipInfos.value = emptyMap()
-        infoRequested.clear()
         // The shown game keeps its match (its Channels slot would otherwise read "Finding…" until focus moves).
         matches.value = matches.value.filterKeys { it == fetchedId }
         matcher?.clear()
+        if (uiHidden) return
+        clipInfos.value = emptyMap()
+        infoRequested.clear()
         ensureClipInfos()
     }
 

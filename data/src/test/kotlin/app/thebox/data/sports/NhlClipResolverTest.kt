@@ -205,6 +205,7 @@ class NhlClipResolverTest {
         answers["404"] = { json("""[{"error_code":"VIDEO_NOT_FOUND"}]""", 404) }
         answers["503"] = { json("busy", 503) }
         answers["429"] = { json("slow down", 429) }
+        answers["428"] = { MockResponse.Builder().code(429).addHeader("Retry-After", "300").body("slow down").build() }
         answers["999"] = { json("not json at all") }
         answers["998"] = { json("""{"name":"x","sources":[{"src":"https://a.test/v.mpd","type":"application/dash+xml"}]}""") }
         answers["997"] = { json("""{"name":"${"x".repeat(70_000)}"}""") }
@@ -212,6 +213,7 @@ class NhlClipResolverTest {
         assertEquals(ClipResult.NotFound, r.info(ref(404)))
         assertEquals(ClipResult.Failed(FailKind.HTTP_5XX), r.info(ref(503)))
         assertEquals(ClipResult.Failed(FailKind.HTTP_429), r.stream(ref(429)))
+        assertEquals("(L-a) the lookup's Retry-After travels", ClipResult.Failed(FailKind.HTTP_429, 300), r.stream(ref(428)))
         assertEquals(ClipResult.Failed(FailKind.BAD_BODY), r.info(ref(999)))
         assertEquals("nothing playable", ClipResult.Failed(FailKind.BAD_BODY), r.stream(ref(998)))
         assertTrue("the metadata of an unplayable video still maps", r.info(ref(998)) is ClipResult.Ok)
@@ -293,9 +295,10 @@ class NhlClipResolverTest {
         scriptStatus = 429
         scriptRetryAfterS = 120
         val (r, _) = resolver()
-        assertEquals(ClipResult.Failed(FailKind.HTTP_429), r.info(ref(1)))
+        // (Verification review L-a) The wait the service asked for travels with the failure, so the toast can be truthful.
+        assertEquals(ClipResult.Failed(FailKind.HTTP_429, 120), r.info(ref(1)))
         nowMono += SportsConstants.HUB_VIDEO_KEY_BACKOFF_MAX_MS
-        r.info(ref(1))
+        assertEquals("inside the hold: the rest of the wait", ClipResult.Failed(FailKind.HTTP_429, 60), r.info(ref(1)))
         assertEquals("Retry-After 120 s outlasts the 1 min cap", 1, scriptReads())
         nowMono += 60_000
         scriptStatus = 200

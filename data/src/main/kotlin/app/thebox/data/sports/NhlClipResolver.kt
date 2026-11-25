@@ -101,14 +101,14 @@ class NhlClipResolver internal constructor(
         if (!ep.allowed(url)) return ClipResult.Refused
         val first = when (val k = keys.key()) {
             is NhlVideoKeySource.Answer.Ok -> k.value
-            is NhlVideoKeySource.Answer.Unavailable -> return unavailable(k.kind)
+            is NhlVideoKeySource.Answer.Unavailable -> return unavailable(k.kind, k.retryAfterS)
         }
         val r = fetch(url, first)
         if (r !is Denied) return r.result
         keys.invalidate(first)
         val second = when (val k = keys.key()) {
             is NhlVideoKeySource.Answer.Ok -> k.value
-            is NhlVideoKeySource.Answer.Unavailable -> return unavailable(k.kind)
+            is NhlVideoKeySource.Answer.Unavailable -> return unavailable(k.kind, k.retryAfterS)
         }
         val again = fetch(url, second)
         if (again !is Denied) return again.result
@@ -116,7 +116,7 @@ class NhlClipResolver internal constructor(
         return ClipResult.Refused
     }
 
-    private fun unavailable(kind: FailKind): ClipResult<Nothing> = if (kind == FailKind.REFUSED) ClipResult.Refused else ClipResult.Failed(kind)
+    private fun unavailable(kind: FailKind, retryAfterS: Int?): ClipResult<Nothing> = if (kind == FailKind.REFUSED) ClipResult.Refused else ClipResult.Failed(kind, retryAfterS)
 
     /** A fetch's outcome; [Denied] = 401 or 403 without `CLIENT_GEO` (the key was refused). */
     private sealed interface Outcome { val result: ClipResult<JsonObject> }
@@ -147,8 +147,8 @@ class NhlClipResolver internal constructor(
         401 -> Denied
         403 -> if (capped(res)?.contains(GEO_SUBCODE) == true) Answered(ClipResult.Geo) else Denied
         404 -> Answered(ClipResult.NotFound)
-        429 -> Answered(ClipResult.Failed(FailKind.HTTP_429))
-        in 500..599 -> Answered(ClipResult.Failed(FailKind.HTTP_5XX))
+        429 -> Answered(ClipResult.Failed(FailKind.HTTP_429, NhlHttp.retryAfterS(res)))
+        in 500..599 -> Answered(ClipResult.Failed(FailKind.HTTP_5XX, NhlHttp.retryAfterS(res)))
         else -> Answered(ClipResult.Failed(FailKind.HTTP_OTHER)).also { if (code in 300..399) BoxLog.w(TAG, "video lookup: unexpected redirect $code") }
     }
 

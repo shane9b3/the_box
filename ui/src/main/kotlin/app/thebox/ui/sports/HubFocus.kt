@@ -10,3 +10,10 @@ import androidx.compose.runtime.compositionLocalOf
  * The default (true) is for a sheet or a card composed on its own (tests).
  */
 internal val LocalHubFocusable = compositionLocalOf { true }
+
+/**
+ * (Verification review, M2 give-up test) True makes the panel's slots refuse focus, so a test can drive the page's
+ * give-up path (the enter request fails for three frames: the page leaves the panel and focus returns to the card).
+ * Always false in the app.
+ */
+internal val LocalHubSlotsRefuseFocus = compositionLocalOf { false }

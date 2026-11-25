@@ -124,7 +124,7 @@ enum class DetailKind { NONE, LOADING, READY, FAILED, BOARD_ONLY }
  *
  * (Review L3) [nowMs] is the wall clock of the build and is **not** part of equality: two builds that differ only in it are
  * the same model, so the state flow does not re-emit and the panel does not rebuild its words for every merged emission.
- * What the panel reads from the clock is in the equality through [imminent] and [slots].
+ * What the panel reads from the clock is in the equality through [imminent], [slots] and the local date ([nowDay]).
  */
 @Immutable
 class HubPanelModel(
@@ -160,9 +160,16 @@ class HubPanelModel(
         winningGoal, slots, nowMs, videoOff, imminent,
     )
 
+    /**
+     * (Verification review L-d) The one thing the panel's words read from [nowMs] besides [imminent]: the local date, which
+     * makes an NFL start "SUN 1:00 PM" or "MON NOV 30 8:15 PM" (the pill and the matchup art's centre). It is in the
+     * equality, so the words change at midnight even when nothing else does; a later time on the same day is still equal.
+     */
+    private val nowDay: Long get() = java.time.Instant.ofEpochMilli(nowMs).atZone(java.time.ZoneId.systemDefault()).toLocalDate().toEpochDay()
+
     private fun parts(): List<Any?> = listOf(
         game, followed, detail, detailKind, failure, stale, failing, statsAtMs, awayScore, homeScore, match, recap, latestGoal,
-        winningGoal, slots, videoOff, imminent,
+        winningGoal, slots, videoOff, imminent, nowDay,
     )
 
     override fun equals(other: Any?): Boolean = this === other || (other is HubPanelModel && parts() == other.parts())
@@ -245,9 +252,9 @@ internal object HubSlots {
             if (c.recapId != null) HubSlot(SlotAction.WATCH_RECAP, SlotLabel.WATCH_RECAP, !c.videoOff)
             else HubSlot(SlotAction.WATCH_RECAP, SlotLabel.RECAP_SOON, false)
         SlotAction.BOX_SCORE -> HubSlot(SlotAction.BOX_SCORE, SlotLabel.BOX_SCORE, true)
-        SlotAction.MATCHUP -> HubSlot(
-            SlotAction.MATCHUP, SlotLabel.MATCHUP, c.detail != null && (c.detail.leaders.isNotEmpty() || c.detail.goalies != null),
-        )
+        // (Verification review MED-1) Enabled exactly when the Matchup sheet has rows (a goalie pair with two empty lists
+        // draws none).
+        SlotAction.MATCHUP -> HubSlot(SlotAction.MATCHUP, SlotLabel.MATCHUP, c.detail != null && hasMatchupRows(c.detail))
         SlotAction.WATCH_FROM_START -> HubSlot(SlotAction.WATCH_FROM_START, SlotLabel.WATCH_FROM_START, c.catchUp.isNotEmpty())
     }
 
@@ -1015,7 +1022,15 @@ private fun HubMedia(c: PanelContent, g: GameSnapshot, modifier: Modifier) {
         }
         // (Integration) Under a poster the art is only the backdrop until the picture decodes (or when it never does): no
         // centre disc and no caption of its own, so nothing sits under the play disc or the poster's caption.
-        MatchupArt(g.away, g.home, g.id.league, art?.centreTop, art?.centreBottom, art?.caption, heightDp, Modifier.fillMaxSize())
+        // (Emulator E1) Under a poster the logos keep clear of its tag (top) and caption (bottom); their heights follow the
+        // text size, so they are measured rather than assumed.
+        val poster = spec as? MediaSpec.Poster
+        val tagH = if (poster != null) POSTER_TAG_INSET + lineHeightDp(GuideUi.sans(22, FontWeight.Bold)) + 8 else 0
+        val captionH = if (poster?.caption != null) lineHeightDp(GuideUi.sans(26, FontWeight.SemiBold)) + 26 else 0
+        MatchupArt(
+            g.away, g.home, g.id.league, art?.centreTop, art?.centreBottom, art?.caption, heightDp, Modifier.fillMaxSize(),
+            topReserveDp = tagH, bottomReserveDp = captionH,
+        )
         if (spec is MediaSpec.Poster) {
             val loader = LocalShellImageLoader.current
             val low = lowEnd()
@@ -1036,7 +1051,7 @@ private fun HubMedia(c: PanelContent, g: GameSnapshot, modifier: Modifier) {
                 )
             }
             // The tag (top-left), the play disc (decoration, never focusable) and the caption over a static gradient.
-            Box(Modifier.align(Alignment.TopStart).padding(12.dp).background(Black60, RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 4.dp)) {
+            Box(Modifier.align(Alignment.TopStart).padding(POSTER_TAG_INSET.dp).testTag(HUB_POSTER_TAG_TAG).background(Black60, RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 4.dp)) {
                 Line(spec.tag, GuideUi.sans(22, FontWeight.Bold))
             }
             // (Review M4) Decoration only (U-N11): below POSTER_DISC_MIN_H (Larger, Largest) the 88 px disc would run into the
@@ -1051,7 +1066,7 @@ private fun HubMedia(c: PanelContent, g: GameSnapshot, modifier: Modifier) {
             }
             spec.caption?.let {
                 Box(
-                    Modifier.align(Alignment.BottomStart).fillMaxWidth()
+                    Modifier.align(Alignment.BottomStart).fillMaxWidth().testTag(HUB_POSTER_CAPTION_TAG)
                         .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.7f))))
                         .padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 10.dp),
                 ) { Line(it, GuideUi.sans(26, FontWeight.SemiBold)) }
@@ -1059,6 +1074,11 @@ private fun HubMedia(c: PanelContent, g: GameSnapshot, modifier: Modifier) {
         }
     }
 }
+
+/** The poster tag's inset from the media area's top-left corner (design px). */
+private const val POSTER_TAG_INSET = 12
+internal const val HUB_POSTER_TAG_TAG = "hub_poster_tag"
+internal const val HUB_POSTER_CAPTION_TAG = "hub_poster_caption"
 
 /** (A-N3) Low-memory devices take the thumbnail at 16 bits; the app has no per-screen device class, so the system's flag. */
 @Composable
@@ -1073,7 +1093,7 @@ private fun lowEnd(): Boolean {
 private fun Buttons(model: HubPanelModel, requesters: List<FocusRequester>, focusedSlot: Int, entered: Boolean, onSlot: (Int) -> Unit, onFocus: (Int?) -> Unit) {
     val res = LocalResources.current
     val factor = UiTextScale.factor
-    val focusable = LocalHubFocusable.current
+    val focusable = LocalHubFocusable.current && !LocalHubSlotsRefuseFocus.current
     val large = HubCardMetrics.large(factor)
     val pad = if (large) 20 else 28
     val gap = if (large) 12 else 16

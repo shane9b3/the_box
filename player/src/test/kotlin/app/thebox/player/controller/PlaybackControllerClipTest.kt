@@ -314,7 +314,7 @@ class PlaybackControllerClipTest {
         lc.onProcessStop() // Home while interactive: the live channel stops at once
         val stopped = f.state as PlaybackState.Stopped
         val builds = f.sources.builds.size
-        assertEquals(-1L, c.playClip(hls))
+        assertEquals(app.thebox.player.api.PlaybackController.CLIP_REFUSED_AWAY, c.playClip(hls))
         f.idle()
         assertEquals("no clip source is built in the background", builds, f.sources.builds.size)
         assertEquals("the lifecycle stop stays as it was", stopped, f.state)
@@ -323,7 +323,7 @@ class PlaybackControllerClipTest {
         f.idle()
         f.device.interactive = false
         lc.onScreenOff() // the standby grace
-        assertEquals(-1L, c.playClip(hls))
+        assertEquals(app.thebox.player.api.PlaybackController.CLIP_REFUSED_AWAY, c.playClip(hls))
 
         lc.onScreenOn()
         f.device.interactive = true

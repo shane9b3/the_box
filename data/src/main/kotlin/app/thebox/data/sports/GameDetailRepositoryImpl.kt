@@ -143,7 +143,9 @@ class GameDetailRepositoryImpl internal constructor(
                 val r = fetchBox(id)
                 flight.answer.complete(r)
                 return r
-            } catch (e: CancellationException) {
+            } catch (e: Throwable) {
+                // (Verification review L-b) Cancelled or anything else thrown past fetchBox (an Error, a checked
+                // IOException from a fetcher): the waiters are released to try again, never left suspended.
                 flight.answer.complete(null)
                 throw e
             } finally {

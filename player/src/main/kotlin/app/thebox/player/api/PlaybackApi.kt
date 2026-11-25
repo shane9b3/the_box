@@ -111,9 +111,15 @@ interface PlaybackController {
     // Sports Hub commit 0 (docs/design/m6-sports-hub.md §6.1, §6.5): WP-2 overrides it in PlaybackControllerImpl.
     /**
      * Plays [tune] on the one player (a clip cycle, `Spec.Clip`); returns the clip cycle's tune id. Nothing about
-     * resuming (A-B2): `ClipSession` owns that. Default for fakes: -1 (nothing played).
+     * resuming (A-B2): `ClipSession` owns that. Default for fakes: -1 (nothing played). (Verification review MED-2)
+     * [CLIP_REFUSED_AWAY] when the app is away (Home, standby, a display or HDMI grace): not a failure, nothing to tell.
      */
     fun playClip(tune: ClipTune): Long = -1
+
+    companion object {
+        /** [playClip]'s answer while the app is not in the foreground: nothing started, and nothing is wrong. */
+        const val CLIP_REFUSED_AWAY = -2L
+    }
 }
 
 /** (Time-shift) The local buffer of the current live cycle. Wall times converted once per snapshot from mono. */

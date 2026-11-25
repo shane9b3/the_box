@@ -16,8 +16,11 @@ sealed interface SportsEffect {
     data class Tune(val channel: GuideChannel) : SportsEffect
     /** Play [info] from the archive (Search's `playArchive` path), then `SportsClosed(…, archive = true)` (§5.6). */
     data class PlayArchive(val channel: GuideChannel, val info: ProgrammeInfo) : SportsEffect
-    /** ClipSession's resume (§6.6). */
-    data class Resume(val point: ResumePoint) : SportsEffect
+    /**
+     * ClipSession's resume (§6.6). [ownerTuneId] (verification review L-e, additive): the tune id that owned the player
+     * when the clip ended; a non-clip tune past it made before the resume runs wins. -1 = unknown (read at delivery).
+     */
+    data class Resume(val point: ResumePoint, val ownerTuneId: Long = -1L) : SportsEffect
 }
 
 /** What AppRoot reads about the clip layer (§6.5). */

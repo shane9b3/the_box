@@ -78,6 +78,8 @@ class NhlVideoKeySource internal constructor(
     /** Mono ms until which no read is made, and what is answered meanwhile. */
     private var holdUntilMs = Long.MIN_VALUE
     private var holdKind = FailKind.REFUSED
+    /** (L-a) The hold was set by the service's `Retry-After`: answers inside it carry the rest of the wait. */
+    private var holdByServer = false
     /** The next transient backoff (M1); reset by a successful read or a refusal hold. */
     private var nextBackoffMs = SportsConstants.HUB_VIDEO_KEY_BACKOFF_MIN_MS
 
@@ -91,7 +93,7 @@ class NhlVideoKeySource internal constructor(
         return lock.withLock {
             key?.let { return@withLock Answer.Ok(it) }
             val now = mono.nowMs()
-            if (now < holdUntilMs) return@withLock Answer.Unavailable(holdKind)
+            if (now < holdUntilMs) return@withLock Answer.Unavailable(holdKind, if (holdByServer) secondsUntil(now) else null)
             when (val r = read()) {
                 is Answer.Ok -> {
                     Redact.registerSecret(r.value)
@@ -103,7 +105,8 @@ class NhlVideoKeySource internal constructor(
                 is Answer.Unavailable -> {
                     if (r.kind == FailKind.REFUSED) hold(r.kind) else backOff(r.kind, r.retryAfterS)
                     if (r.kind == FailKind.REFUSED) BoxLog.w(TAG, "video key: not found") else BoxLog.w(TAG, "video key: script ${r.kind.name}")
-                    r
+                    // (L-a) The wait that now applies, when the service set it (the floor may be capped below its ask).
+                    if (holdByServer) r.copy(retryAfterS = secondsUntil(now)) else r
                 }
             }
         }
@@ -126,9 +129,12 @@ class NhlVideoKeySource internal constructor(
         BoxLog.w(TAG, "video key: refused")
     }
 
+    private fun secondsUntil(now: Long): Int = ((holdUntilMs - now + 999) / 1000).coerceAtLeast(0L).toInt()
+
     private fun hold(kind: FailKind) {
         holdUntilMs = mono.nowMs() + SportsConstants.HUB_VIDEO_KEY_REREAD_MS
         holdKind = kind
+        holdByServer = false
         nextBackoffMs = SportsConstants.HUB_VIDEO_KEY_BACKOFF_MIN_MS
     }
 
@@ -138,6 +144,7 @@ class NhlVideoKeySource internal constructor(
         val wait = maxOf(nextBackoffMs, floor).coerceAtMost(SportsConstants.HUB_VIDEO_KEY_REREAD_MS)
         holdUntilMs = mono.nowMs() + wait
         holdKind = kind
+        holdByServer = floor > nextBackoffMs
         nextBackoffMs = (nextBackoffMs * 2).coerceAtMost(SportsConstants.HUB_VIDEO_KEY_BACKOFF_MAX_MS)
     }
 

@@ -93,8 +93,11 @@ class ClipSession(
         data class Failed(val queue: List<ClipRef>, val index: Int) : State
     }
 
-    /** Why a clip did not start; the page shows the §6.8 toast. */
-    enum class Failure { UNAVAILABLE, OFFLINE, REFUSED, GEO, NOT_FOUND, NOT_PLAYABLE, NO_CLIP }
+    /**
+     * Why a clip did not start; the page shows the §6.8 toast. [LATER]: the service asked for a wait of more than a minute
+     * (`Retry-After`, or the key read's back-off), so "Try again in a minute" would not be true.
+     */
+    enum class Failure { UNAVAILABLE, OFFLINE, REFUSED, GEO, NOT_FOUND, NOT_PLAYABLE, NO_CLIP, LATER }
 
     private val _state = MutableStateFlow<State>(State.Idle)
     val state: StateFlow<State> = _state.asStateFlow()
@@ -250,6 +253,13 @@ class ClipSession(
                     // R-N3: what the first clip interrupts is read now, not before the lookup.
                     if (!playedAny) resume = snapshot()
                     val id = controller.playClip(ClipTune(stream.url, stream.format, stream.captionsUrl, info.title, startMs))
+                    if (id == PlaybackController.CLIP_REFUSED_AWAY) {
+                        // (Verification review MED-2) The app is away (Home, standby grace): nothing failed, so no toast,
+                        // and nothing is resumed now (a tune in the standby grace would play in the background); the
+                        // controller's own lifecycle resume decides what plays on return.
+                        lose("the app is away")
+                        return@launch
+                    }
                     if (id < 0) {
                         BoxLog.i(TAG) { "clip ${ref.videoId}: the player did not start it" }
                         fail(Failure.UNAVAILABLE)
@@ -272,10 +282,12 @@ class ClipSession(
                 ClipResult.Geo -> fail(Failure.GEO)
                 ClipResult.Refused -> fail(Failure.REFUSED)
                 is ClipResult.Failed -> fail(
-                    when (result.kind) {
-                        FailKind.OFFLINE -> Failure.OFFLINE
-                        FailKind.BAD_BODY -> Failure.NOT_PLAYABLE
-                        FailKind.REFUSED -> Failure.REFUSED
+                    when {
+                        result.kind == FailKind.OFFLINE -> Failure.OFFLINE
+                        result.kind == FailKind.BAD_BODY -> Failure.NOT_PLAYABLE
+                        result.kind == FailKind.REFUSED -> Failure.REFUSED
+                        // (Verification review L-a) "Try again in a minute" is only true when the wait is a minute or less.
+                        (result.retryAfterS ?: 0) > LATER_AFTER_S -> Failure.LATER
                         else -> Failure.UNAVAILABLE
                     },
                 )
@@ -382,8 +394,11 @@ class ClipSession(
     /** Hides the layer first (A-S2), then asks for the resume. */
     private fun endWithResume() {
         val point = resume ?: ResumePoint.Nothing
+        // (Verification review L-e) What owns the player as the clip ends, so a tune made between now and the effect's
+        // delivery (an intent, a PIN success) is seen as newer than the clip and wins over the resume.
+        val owner = controller.state.value.target?.tuneId ?: ownedTuneId
         end()
-        _effects.tryEmit(SportsEffect.Resume(point))
+        _effects.tryEmit(SportsEffect.Resume(point, owner))
     }
 
     private fun end() {
@@ -430,6 +445,8 @@ class ClipSession(
         const val SEEK_END_GUARD_MS = 1_000L
         /** The "Up next" title is the cached `info()`; it never holds the next clip up for long. */
         const val UP_NEXT_LOOKUP_MS = 1_000L
+        /** A wait longer than this (s) is not "a minute": the toast says "Try again later" ([Failure.LATER]). */
+        const val LATER_AFTER_S = 60
         val LIFECYCLE_REASONS = setOf(StopReason.BACKGROUND, StopReason.STANDBY, StopReason.HDMI_UNPLUGGED, StopReason.DISPLAY_OFF)
         val ACTIVE_ARCHIVE = setOf(
             ArchivePhase.STARTING, ArchivePhase.PROBING, ArchivePhase.PLAYING, ArchivePhase.PAUSED,

@@ -350,7 +350,11 @@ fun SportsScreen(
                             entered = panelEntered,
                         )
                         Spacer(Modifier.width(40.dp))
-                        Column(Modifier.width(968.dp)) {
+                        // (Emulator E2) A sheet covers the right column with a rounded frame: the heading and the cards
+                        // behind it are not drawn while it is open, so nothing shows through its corners. Drawing is
+                        // skipped only (no layer or clip; the column stays composed and keeps its state).
+                        val sheetOpen = sheet != null
+                        Column(Modifier.width(968.dp).drawWithContent { if (!sheetOpen) drawContent() }) {
                             Heading(ui)
                             Spacer(Modifier.height(16.dp))
                             // Up from the strip: the shown league's chip (NFL §7.3, fix pass U4; CHL §6.3: its sub-chip).
@@ -809,15 +813,27 @@ private fun SheetHost(
     onPressed: (app.thebox.core.sports.hub.ClipRef) -> Unit,
     onClose: () -> Unit,
 ) {
-    val game = panel.game?.takeIf { it.id == sheet.gameId } ?: return
     // (Review M1) The sheet keeps the last detail of its game while the panel's detail is briefly absent (the detail loop
     // restarting): an open sheet never stops drawing with focus inside it.
     val kept = remember { arrayOfNulls<app.thebox.core.sports.hub.GameDetail>(1) }
     val d = (panel.detail?.also { kept[0] = it } ?: kept[0])?.takeIf { it.id == sheet.gameId }
+    val game = panel.game?.takeIf { it.id == sheet.gameId }
+    // (Verification review HIGH-1) An open sheet that would draw nothing (its game gone from the panel, a Matchup without
+    // its detail) holds Back with nothing focused: it closes instead, and onClose puts focus back on the page.
+    if (game == null || (sheet is HubSheet.Matchup && d == null)) {
+        val close by androidx.compose.runtime.rememberUpdatedState(onClose)
+        LaunchedEffect(sheet) { close() }
+        return
+    }
     when (sheet) {
-        is HubSheet.Goals -> if (d != null) GoalsSheet(
+        // (HIGH-1) The slot is usable from the board's goal count alone: without a detail the sheet says why the goals
+        // are not listed yet and what to do, and its frame holds focus so Back works.
+        is HubSheet.Goals -> GoalsSheet(
             game = game, detail = d, clipInfo = clipInfo, catchUp = panel.candidates.filter { it.airing != null }, focusVideoId = focusVideoId,
             onPlay = { q, i -> q.getOrNull(i)?.let(onPressed); vm.playClips(q, i) }, onPlayArchive = vm::playArchive, onMissingClip = vm::missingClip, onClose = onClose, modifier = Modifier.fillMaxSize(),
+            note = if (d != null) null else LocalResources.current.getString(
+                if (panel.detailKind == DetailKind.FAILED) R.string.sports_hub_goals_failed else R.string.sports_hub_goals_loading,
+            ),
         )
         is HubSheet.Channels -> ChannelSheet(
             game = game, candidates = if (sheet.archiveOnly) panel.candidates.filter { it.airing != null } else panel.candidates,
@@ -837,6 +853,7 @@ private fun ToastBar(t: HubToast, clock24: Boolean, onShown: () -> Unit) {
     val res = LocalResources.current
     val text = when (t.kind) {
         HubToastKind.VIDEO_UNAVAILABLE -> res.getString(R.string.sports_hub_error_video_unavailable)
+        HubToastKind.VIDEO_LATER -> res.getString(R.string.sports_hub_error_video_later)
         HubToastKind.VIDEO_OFFLINE -> res.getString(R.string.sports_hub_error_video_offline)
         HubToastKind.VIDEO_REFUSED -> res.getString(R.string.sports_hub_error_video_refused)
         HubToastKind.VIDEO_GEO -> res.getString(R.string.sports_hub_error_video_geo)

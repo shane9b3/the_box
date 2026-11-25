@@ -68,8 +68,11 @@ class ClipSessionTest {
         val textSelections = ArrayList<TrackRef?>()
         override val state get() = base.state
         override val tracks get() = base.tracks
+        /** The app is away: [playClip] answers [PlaybackController.CLIP_REFUSED_AWAY], as the real controller does. */
+        var away = false
         override fun playClip(tune: ClipTune): Long {
             clips += tune
+            if (away) return PlaybackController.CLIP_REFUSED_AWAY
             val id = nextTuneId
             nextTuneId += 10
             base.state.value = PlaybackState.Connecting(clipNp(id, tune.title), app.thebox.player.api.ConnectPhase.CONNECTING, 0, 0)
@@ -127,7 +130,7 @@ class ClipSessionTest {
         assertEquals(recap(7), rig.session.lastPlayed.value)
         rig.session.back()
         runCurrent()
-        assertEquals(listOf<SportsEffect>(SportsEffect.Resume(ResumePoint.Live(x))), rig.effects)
+        assertEquals(listOf<SportsEffect>(SportsEffect.Resume(ResumePoint.Live(x), ownerTuneId = 100)), rig.effects)
         assertEquals(listOf(false), rig.showingAtEffect)
         assertEquals(ClipSession.State.Idle, rig.session.state.value)
         assertFalse("retry() is never used on a clip", "retry" in rig.controller.base.calls)
@@ -170,7 +173,7 @@ class ClipSessionTest {
         runCurrent()
         rig.session.back()
         runCurrent()
-        assertEquals(listOf<SportsEffect>(SportsEffect.Resume(ResumePoint.Live(x))), rig.effects)
+        assertEquals(listOf<SportsEffect>(SportsEffect.Resume(ResumePoint.Live(x), ownerTuneId = 100)), rig.effects)
     }
 
     @Test
@@ -180,7 +183,7 @@ class ClipSessionTest {
         runCurrent()
         rig.session.back()
         runCurrent()
-        assertEquals(listOf<SportsEffect>(SportsEffect.Resume(ResumePoint.Nothing)), rig.effects)
+        assertEquals(listOf<SportsEffect>(SportsEffect.Resume(ResumePoint.Nothing, ownerTuneId = 100)), rig.effects)
     }
 
     @Test
@@ -294,7 +297,7 @@ class ClipSessionTest {
         assertEquals(listOf("Clip 2"), rig.controller.clips.map { it.title })
         rig.session.back()
         runCurrent()
-        assertEquals(listOf<SportsEffect>(SportsEffect.Resume(ResumePoint.Live(x))), rig.effects)
+        assertEquals(listOf<SportsEffect>(SportsEffect.Resume(ResumePoint.Live(x), ownerTuneId = 100)), rig.effects)
     }
 
     @Test
@@ -333,7 +336,7 @@ class ClipSessionTest {
         assertTrue(rig.session.state.value is ClipSession.State.Failed)
         rig.session.back()
         runCurrent()
-        assertEquals(listOf<SportsEffect>(SportsEffect.Resume(ResumePoint.Live(x))), rig.effects)
+        assertEquals(listOf<SportsEffect>(SportsEffect.Resume(ResumePoint.Live(x), ownerTuneId = 100)), rig.effects)
     }
 
     @Test
@@ -353,7 +356,7 @@ class ClipSessionTest {
         assertTrue(rig.effects.isEmpty())
         rig.controller.base.state.value = PlaybackState.Playing(rig.controller.clipNp(110), paused = true, ended = true)
         runCurrent()
-        assertEquals("the end of the queue resumes the snapshot", listOf<SportsEffect>(SportsEffect.Resume(ResumePoint.Live(x))), rig.effects)
+        assertEquals("the end of the queue resumes the snapshot", listOf<SportsEffect>(SportsEffect.Resume(ResumePoint.Live(x), ownerTuneId = 110)), rig.effects)
     }
 
     @Test
@@ -380,6 +383,57 @@ class ClipSessionTest {
         assertEquals(listOf(ClipSession.Failure.GEO, ClipSession.Failure.NOT_PLAYABLE), rig.failures)
         assertTrue(rig.controller.clips.isEmpty())
         assertTrue(rig.effects.isEmpty())
+    }
+
+    /**
+     * (Verification review MED-2) The player refuses the clip because the app is away (Home, a standby grace): no toast,
+     * and in a queue no resume (a tune during the standby grace would play in the background).
+     */
+    @Test
+    fun aClipRefusedBecauseTheAppIsAwayEndsQuietly() = runTest {
+        val rig = Rig(this)
+        rig.live(x)
+        rig.session.play(listOf(goal(1), goal(2)), 0)
+        runCurrent()
+        rig.controller.base.state.value = PlaybackState.Playing(rig.controller.clipNp(100), paused = true, ended = true)
+        runCurrent()
+        rig.controller.away = true
+        advanceTimeBy(SportsConstants.HUB_UP_NEXT_MS + 1)
+        runCurrent()
+        assertEquals("the second clip was asked for and refused", 2, rig.controller.clips.size)
+        assertEquals(ClipSession.State.Idle, rig.session.state.value)
+        assertFalse(rig.session.ui.value.showing)
+        assertTrue("no toast: nothing failed", rig.failures.isEmpty())
+        assertTrue("no resume while the app is away", rig.effects.isEmpty())
+    }
+
+    /** (Verification review L-a) A wait of more than a minute is not "Try again in a minute". */
+    @Test
+    fun aLongRetryAfterIsTryAgainLater() = runTest {
+        val resolver = SlowResolver().apply {
+            answers[7] = ClipResult.Failed(FailKind.HTTP_429, retryAfterS = 600)
+            answers[8] = ClipResult.Failed(FailKind.HTTP_429, retryAfterS = 30)
+            answers[9] = ClipResult.Failed(FailKind.HTTP_429)
+        }
+        val rig = Rig(this, resolver)
+        rig.live(x)
+        for (id in 7L..9L) {
+            rig.session.play(listOf(recap(id)), 0)
+            runCurrent()
+        }
+        assertEquals(listOf(ClipSession.Failure.LATER, ClipSession.Failure.UNAVAILABLE, ClipSession.Failure.UNAVAILABLE), rig.failures)
+    }
+
+    /** (Verification review L-e) The resume carries the tune that owned the player when the clip ended. */
+    @Test
+    fun theResumeCarriesTheOwnerAtTheEnd() = runTest {
+        val rig = Rig(this)
+        rig.live(x)
+        rig.session.play(listOf(recap(7)), 0)
+        runCurrent()
+        rig.controller.base.state.value = PlaybackState.Playing(rig.controller.clipNp(100), ended = true)
+        runCurrent()
+        assertEquals(100L, (rig.effects.single() as SportsEffect.Resume).ownerTuneId)
     }
 
     @Test

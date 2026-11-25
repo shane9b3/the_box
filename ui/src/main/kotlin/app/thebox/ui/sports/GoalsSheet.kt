@@ -4,6 +4,7 @@ import android.content.res.Resources
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -53,6 +54,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import app.thebox.core.sports.GameMedia
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.PeriodKind
@@ -74,6 +76,10 @@ import coil3.request.ImageRequest
 
 const val HUB_SHEET_TAG = "hub_sheet"
 const val GOALS_SHEET_TAG = "hub_goals_sheet"
+/** (HIGH-1) The frame's title: the sheet's focus target while it has no row. */
+const val HUB_SHEET_FRAME_TAG = "hub_sheet_frame"
+/** (HIGH-1) The Goals sheet's line while its goals are loading or did not load. */
+const val GOALS_SHEET_NOTE_TAG = "hub_goals_sheet_note"
 fun hubSheetRowTag(key: String) = "hub_sheet_row:$key"
 
 /**
@@ -91,7 +97,12 @@ fun hubSheetRowTag(key: String) = "hub_sheet_row:$key"
 @Composable
 fun GoalsSheet(
     game: GameSnapshot,
-    detail: GameDetail,
+    /**
+     * (HIGH-1) Null while the game's detail is loading or did not load: the slot is usable from the board's goal count, so
+     * the sheet opens anyway with [note] (the reason and the next step) and, for a final game, the board's recap and
+     * condensed game and the catch-up rows; the goals appear when the detail arrives.
+     */
+    detail: GameDetail?,
     clipInfo: Map<Long, ClipInfo>,
     catchUp: List<ChannelCandidate>,
     focusVideoId: Long?,
@@ -100,10 +111,11 @@ fun GoalsSheet(
     onMissingClip: () -> Unit,
     onClose: () -> Unit,
     modifier: Modifier = Modifier,
+    note: String? = null,
 ) {
     val res = LocalResources.current
     val final = game.phase == GamePhase.FINAL
-    val rows = remember(detail, catchUp, final) { goalsSheetRows(detail, catchUp, final) }
+    val rows = remember(detail, catchUp, final, game.media) { goalsSheetRows(detail, catchUp, final, game.media) }
     val initial = goalsSheetInitialRow(rows, focusVideoId, final)
     HubSheetFrame(
         title = res.getString(R.string.sports_hub_sheet_goals, game.away.abbrev, game.home.abbrev),
@@ -114,11 +126,16 @@ fun GoalsSheet(
         modifier = modifier.testTag(GOALS_SHEET_TAG),
         rowsKey = rows,
     ) { requesters ->
+        if (detail == null && note != null) {
+            item(key = "note") {
+                Line(note, GuideUi.sans(24, FontWeight.Medium, GuideUi.Fg70), Modifier.padding(horizontal = 16.dp, vertical = 8.dp).testTag(GOALS_SHEET_NOTE_TAG), maxLines = 3)
+            }
+        }
         rows.forEachIndexed { i, row ->
             item(key = row.key) {
                 when (row) {
                     is GoalsRow.Goal -> GoalRowView(res, game, row.goal, row.key, clipInfo[row.goal.clipId], requesters[i], first = i == 0, last = i == rows.lastIndex) {
-                        val q = goalQueue(game, detail.goals, row.index)
+                        val q = goalQueue(game, detail?.goals.orEmpty(), row.index)
                         if (q.isEmpty()) onMissingClip() else onPlay(q, 0)
                     }
                     is GoalsRow.Video -> VideoRowView(res, row, clipInfo[row.videoId], requesters[i], first = i == 0, last = i == rows.lastIndex) {
@@ -144,12 +161,15 @@ internal sealed interface GoalsRow {
     data class CatchUp(val candidate: ChannelCandidate, val n: Int) : GoalsRow { override val key get() = "catchup:$n:${candidate.channel.identityHash}" }
 }
 
-/** §6.4 order: goals, then (final) recap, condensed game, catch-up rows. */
-internal fun goalsSheetRows(detail: GameDetail, catchUp: List<ChannelCandidate>, final: Boolean): List<GoalsRow> = buildList {
-    detail.goals.forEachIndexed { i, g -> add(GoalsRow.Goal(g, i)) }
+/**
+ * §6.4 order: goals, then (final) recap, condensed game, catch-up rows. (HIGH-1) Without a [detail] there are no goal rows;
+ * the recap and condensed game then come from the board's [media].
+ */
+internal fun goalsSheetRows(detail: GameDetail?, catchUp: List<ChannelCandidate>, final: Boolean, media: GameMedia? = null): List<GoalsRow> = buildList {
+    detail?.goals?.forEachIndexed { i, g -> add(GoalsRow.Goal(g, i)) }
     if (final) {
-        detail.recapId?.let { add(GoalsRow.Video(it, ClipKind.RECAP)) }
-        detail.condensedId?.let { add(GoalsRow.Video(it, ClipKind.CONDENSED)) }
+        (detail?.recapId ?: media?.recapId)?.let { add(GoalsRow.Video(it, ClipKind.RECAP)) }
+        (detail?.condensedId ?: media?.condensedId)?.let { add(GoalsRow.Video(it, ClipKind.CONDENSED)) }
         catchUp.filter { it.airing != null }.forEachIndexed { n, c -> add(GoalsRow.CatchUp(c, n)) }
     }
 }
@@ -312,6 +332,11 @@ internal fun isBack(e: KeyEvent): Boolean = e.key == Key.Back || e.key == Key.Es
  * pressed, a failure replacing the rows, rows arriving after open), focus goes to [refocus] (default: row [initialRow]),
  * so Back (handled only with focus inside) always works. (Review H2) No request is made while [LocalHubFocusable] is false
  * (a clip plays over the sheet): the clip layer keeps focus whatever the rows do.
+ *
+ * (Verification review HIGH-1, MED-1) A sheet with no row to focus (the goals still loading, a channel list emptied by a
+ * re-match, a matchup without rows) would leave nothing focused and Back dead, since the page behind is not focusable.
+ * Whenever there is no row and no [refocus] target, the frame's title takes focus itself ([HUB_SHEET_FRAME_TAG]), so Back
+ * always reaches [onClose]; once rows arrive focus moves on to them.
  */
 @Composable
 internal fun HubSheetFrame(
@@ -334,16 +359,26 @@ internal fun HubSheetFrame(
     val shape = RoundedCornerShape(DesignTokens.Radii.Panel)
     val focusable = LocalHubFocusable.current
     // Focus facts, read only by the effects (plain holders: no recomposition on every focus move). [0] = the frame holds
-    // focus, [1] = a row of the list holds it.
-    val focus = remember { BooleanArray(2) }
+    // focus, [1] = a row of the list holds it, [2] = the frame's own title holds it (HIGH-1).
+    val focus = remember { BooleanArray(3) }
     // Composed before the change is applied, so it still sees the row that is about to leave.
     val rowHadFocus = remember(rowsKey) { focus[1] }
+    // (HIGH-1) The frame's own focus target, used only while the sheet has nothing else to focus.
+    val frameRequester = remember { FocusRequester() }
+    val selfFocus = rowCount == 0 && refocus == null
     val target by androidx.compose.runtime.rememberUpdatedState(
-        refocus ?: { if (rowCount == 0) null else initialRow.coerceIn(0, rowCount - 1).let { requesters[it] to it } },
+        refocus ?: { if (rowCount == 0) frameRequester to null else initialRow.coerceIn(0, rowCount - 1).let { requesters[it] to it } },
     )
+    // Composed before the change is applied: the frame's title held focus (an empty sheet whose rows now arrive).
+    val frameHadFocus = remember(rowsKey) { focus[2] }
     if (takeInitialFocus) {
         LaunchedEffect(focusKey) {
-            if (rowCount == 0 || !focusable) return@LaunchedEffect
+            if (!focusable) return@LaunchedEffect
+            if (rowCount == 0) {
+                withFrameNanos { }
+                if (refocus == null) runCatching { frameRequester.requestFocus() }
+                return@LaunchedEffect
+            }
             val i = initialRow.coerceIn(0, rowCount - 1)
             listState.scrollToItem(i)
             withFrameNanos { }
@@ -355,11 +390,12 @@ internal fun HubSheetFrame(
     LaunchedEffect(rowsKey, focusable) {
         val first = !opened
         opened = true
-        if (first && (!takeInitialFocus || rowCount > 0)) return@LaunchedEffect
+        if (first) return@LaunchedEffect
         withFrameNanos { }
-        // Lost: nothing in the sheet has focus, or the focused row left (the frame's group then hands focus to its first
-        // child, which is not where the user was).
-        if (!focusable || (focus[0] && !(rowHadFocus && !focus[1]))) return@LaunchedEffect
+        // Lost: nothing in the sheet has focus, the focused row left (the frame's group then hands focus to its first
+        // child, which is not where the user was), or the frame's title held it and rows have arrived.
+        val lost = !focus[0] || (rowHadFocus && !focus[1]) || (frameHadFocus && rowCount > 0) || (focus[2] && rowCount > 0)
+        if (!focusable || !lost) return@LaunchedEffect
         val (req, index) = target() ?: return@LaunchedEffect
         if (index != null) listState.scrollToItem(index)
         withFrameNanos { }
@@ -385,7 +421,18 @@ internal fun HubSheetFrame(
                 }
                 .padding(28.dp),
         ) {
-            Box(Modifier.fillMaxWidth().height(56.dp), contentAlignment = Alignment.CenterStart) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .testTag(HUB_SHEET_FRAME_TAG)
+                    .focusRequester(frameRequester)
+                    .onFocusChanged { focus[2] = it.isFocused }
+                    .focusProperties { canFocus = focusable && selfFocus }
+                    .onPreviewKeyEvent { e -> e.key == Key.DirectionLeft || e.key == Key.DirectionRight || e.key == Key.DirectionUp || e.key == Key.DirectionDown }
+                    .focusable(),
+                contentAlignment = Alignment.CenterStart,
+            ) {
                 Line(title, GuideUi.sans(32, FontWeight.SemiBold))
             }
             header?.invoke()

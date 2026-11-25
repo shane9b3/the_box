@@ -80,6 +80,7 @@ internal sealed interface MatchupRow {
 
 /** §6.4: the three leader rows (Points, Goals, Assists, in that order when present), then up to two goalies per team. */
 internal fun matchupRows(d: GameDetail): List<MatchupRow> = buildList {
+    if (!hasMatchupRows(d)) return@buildList
     val order = listOf("points", "goals", "assists")
     val leaders = d.leaders.sortedBy { p -> order.indexOf(p.category.lowercase(Locale.ROOT)).let { if (it < 0) order.size else it } }
     if (leaders.isNotEmpty()) {
@@ -93,6 +94,9 @@ internal fun matchupRows(d: GameDetail): List<MatchupRow> = buildList {
         for (i in 0 until n) add(MatchupRow.Goalies(g.away.getOrNull(i), g.home.getOrNull(i)))
     }
 }
+
+/** Whether [matchupRows] has anything to show (the MATCHUP slot's enabled rule, HubSlots.forAction). */
+internal fun hasMatchupRows(d: GameDetail): Boolean = d.leaders.isNotEmpty() || d.goalies?.let { it.away.isNotEmpty() || it.home.isNotEmpty() } == true
 
 internal fun leaderCategory(res: Resources, category: String): String = when (category.lowercase(Locale.ROOT)) {
     "points" -> res.getString(R.string.sports_hub_matchup_points)

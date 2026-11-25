@@ -385,12 +385,18 @@ class SportsScreenTest {
     }
     private lateinit var hubVm: SportsViewModel
 
-    private fun showHub() {
+    private fun showHub(matcher: app.thebox.core.sports.hub.GameChannelMatcher? = null, slotsRefuseFocus: Boolean = false) {
         hubVm = SportsViewModel(
-            repo, store, { android.os.SystemClock.elapsedRealtime() }, { 1_000_000L }, hubDetail, null, null,
+            repo, store, { android.os.SystemClock.elapsedRealtime() }, { 1_000_000L }, hubDetail, matcher, null,
             { scope -> ClipSession(app.thebox.ui.shelltest.FakePlaybackController(), app.thebox.core.full.fakes.FakeArchivePlayback(), resolver, scope) },
         ) { LocalDate.of(2026, 11, 5) }
-        rule.setContent { BoxTheme { SportsScreen(hubVm, clock24 = false, onBackFreeChanged = { backFree += it }) } }
+        rule.setContent {
+            BoxTheme {
+                androidx.compose.runtime.CompositionLocalProvider(LocalHubSlotsRefuseFocus provides slotsRefuseFocus) {
+                    SportsScreen(hubVm, clock24 = false, onBackFreeChanged = { backFree += it })
+                }
+            }
+        }
         rule.waitForIdle()
     }
 
@@ -493,6 +499,70 @@ class SportsScreenTest {
         press(Key.Back)
         rule.onNodeWithTag(BOX_SCORE_SHEET_TAG).assertDoesNotExist()
         rule.onNodeWithTag(hubSlotTag(2)).assertIsFocused()
+    }
+
+    /**
+     * (Verification review HIGH-1) The Goals slot is usable from the board's goal count while the detail still loads: the
+     * sheet opens with its note, its frame holds focus, and Back closes it back to the Goals slot.
+     */
+    @Test fun goalsWithoutTheDetailHoldFocusAndBackReturnsToTheSlot() {
+        val withGoals = live.copy(media = app.thebox.core.sports.GameMedia(null, null, goalClips = 2))
+        board(withGoals, live2)
+        showHub()
+        hubDetail.detail.value = app.thebox.core.sports.hub.DetailState.Loading(withGoals.id)
+        rule.waitForIdle()
+        openGoals()
+        rule.onNodeWithTag(HUB_SHEET_FRAME_TAG, useUnmergedTree = true).assertIsFocused()
+        rule.onNodeWithText(str(R.string.sports_hub_goals_loading), useUnmergedTree = true).assertExists()
+        assertFalse("Back is held by the sheet", backFree.last())
+        press(Key.Back)
+        rule.onNodeWithTag(GOALS_SHEET_TAG).assertDoesNotExist()
+        rule.onNodeWithTag(hubSlotTag(2)).assertIsFocused()
+    }
+
+    /**
+     * (Verification review MED-1) A re-match after a phase change empties the open Channels sheet under focus: the frame
+     * takes focus and Back closes the sheet onto a card (the Channels slot is now disabled).
+     */
+    @Test fun aChannelsSheetEmptiedByARematchKeepsBackWorking() {
+        val matcher = app.thebox.core.sports.hub.FakeGameChannelMatcher()
+        fun cand(name: String) = app.thebox.core.sports.hub.ChannelCandidate(
+            app.thebox.core.guide.fakes.GuideFixtures.channel(name.length, name = name), "Main", app.thebox.core.sports.hub.MatchConfidence.LIKELY,
+            listOf(app.thebox.core.sports.hub.MatchReason.Broadcaster("SN", app.thebox.core.sports.Market.NATIONAL, "CA")), emptyList(), null,
+        )
+        matcher.answers[pre.id] = listOf(cand("Sportsnet"), cand("TVA Sports"))
+        board(pre)
+        showHub(matcher)
+        rule.onNodeWithTag(sportsDayTag(0)).assertIsFocused()
+        press(Key.DirectionDown)
+        rule.onNodeWithTag(sportsCardTag("P1")).assertIsFocused()
+        press(Key.DirectionCenter)
+        rule.onNodeWithTag(hubSlotTag(0)).assertIsFocused()
+        press(Key.DirectionRight)
+        rule.onNodeWithTag(hubSlotTag(1)).assertIsFocused()
+        press(Key.DirectionCenter)
+        rule.onNodeWithTag(CHANNEL_SHEET_TAG).assertExists()
+        rule.onNodeWithTag(hubSheetRowTag("ch:0"), useUnmergedTree = true).assertIsFocused()
+        matcher.answers[pre.id] = emptyList()
+        board(pre.copy(phase = GamePhase.LIVE, period = 1, periodKind = app.thebox.core.sports.PeriodKind.REG, clock = app.thebox.core.sports.GameClock(1_100, true, false)))
+        rule.waitForIdle()
+        rule.onNodeWithTag(hubSheetRowTag("ch:0"), useUnmergedTree = true).assertDoesNotExist()
+        rule.onNodeWithTag(HUB_SHEET_FRAME_TAG, useUnmergedTree = true).assertIsFocused()
+        press(Key.Back)
+        rule.onNodeWithTag(CHANNEL_SHEET_TAG).assertDoesNotExist()
+        rule.onNodeWithTag(sportsCardTag("P1")).assertIsFocused()
+    }
+
+    /** (Review M2) The enter request fails for three frames: the page leaves the panel and focus goes back to the card. */
+    @Test fun aSlotThatNeverTakesFocusSendsFocusBackToTheCard() {
+        board(live, live2)
+        showHub(slotsRefuseFocus = true)
+        rule.onNodeWithTag(sportsCardTag("L1")).assertIsFocused()
+        press(Key.DirectionCenter)
+        rule.onNodeWithTag(sportsCardTag("L1")).assertIsFocused()
+        for (i in 0..2) assertFalse("slot $i", focusedNow(hubSlotTag(i)))
+        assertFalse("the page left the panel", hubVm.panelFocused.value)
+        assertTrue("Back is free again", backFree.last())
     }
 
     private fun focusedNow(tag: String): Boolean =

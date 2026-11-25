@@ -224,6 +224,9 @@
     <string name="sports_hub_goal_leads">%1$s leads %2$d–%3$d</string>
     <string name="sports_hub_goal_tied">Tied %1$d–%2$d</string>
     <string name="sports_hub_goal_video_soon">Video soon</string>
+    <!-- (Verification review HIGH-1) The Goals sheet opened from the board's goal count before the game's detail answered. -->
+    <string name="sports_hub_goals_loading">Loading the goal list from NHL.com. It shows here in a moment; press Back to close.</string>
+    <string name="sports_hub_goals_failed">NHL.com didn\'t send the goal list. It tries again on its own; press Back to close and check back shortly.</string>
     <string name="sports_hub_goal_no_video_toast">This goal\'s video isn\'t posted yet. It usually appears a few minutes after the goal.</string>
     <string name="sports_hub_row_recap">Game recap</string>
     <!-- %1$s = the duration ("9:50"). -->
@@ -294,6 +297,8 @@
 
     <!-- ==== Errors: video (§6.8) -->
     <string name="sports_hub_error_video_unavailable">The NHL video service didn\'t answer. Try again in a minute.</string>
+    <!-- (Verification review L-a) The service asked for a wait of more than a minute (429 / Retry-After, or the key read's hold). -->
+    <string name="sports_hub_error_video_later">The NHL video service asked the app to wait a while before asking again. Try again later.</string>
     <string name="sports_hub_error_video_offline">No internet connection. Videos play again when the network is back.</string>
     <string name="sports_hub_error_video_refused">NHL videos aren\'t available in this app right now. Scores and stats still work.</string>
     <string name="sports_hub_error_video_geo">This video isn\'t available in your region. The scores and stats still work.</string>

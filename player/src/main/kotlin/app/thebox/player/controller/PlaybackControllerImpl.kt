@@ -519,13 +519,13 @@ internal class PlaybackControllerImpl @Inject constructor(
      * other tune, catch-up, zap or stop simply replaces the cycle.
      *
      * (Sports Hub code review 2026-11-25, H1) A clip never starts while the app is away (Home, standby, a display or
-     * HDMI grace): a lookup that answers after the viewer left would otherwise play in the background. Returns -1 and
-     * changes nothing; `ClipSession` ends on it.
+     * HDMI grace): a lookup that answers after the viewer left would otherwise play in the background. Returns
+     * [PlaybackController.CLIP_REFUSED_AWAY] and changes nothing; `ClipSession` ends on it quietly (no toast, no resume).
      */
     override fun playClip(tune: ClipTune): Long {
         if (lifecycle.away) {
             BoxLog.i(TAG) { "clip refused: the app is not in the foreground" }
-            return -1
+            return PlaybackController.CLIP_REFUSED_AWAY
         }
         cancelPendingZap()
         startCycle(Spec.Clip(tune))

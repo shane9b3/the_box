@@ -216,7 +216,11 @@ sealed interface ClipResult<out T> {
     data object NotFound : ClipResult<Nothing>
     data object Geo : ClipResult<Nothing>
     data object Refused : ClipResult<Nothing>
-    data class Failed(val kind: FailKind) : ClipResult<Nothing>
+    /**
+     * [retryAfterS] (verification review L-a, additive): the seconds the service asked to wait (its `Retry-After`, or the
+     * rest of the key read's back-off it set); null when it named none.
+     */
+    data class Failed(val kind: FailKind, val retryAfterS: Int? = null) : ClipResult<Nothing>
 }
 
 /** `:data` `NhlClipResolver` (WP-2). */

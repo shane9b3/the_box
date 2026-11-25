@@ -507,6 +507,67 @@ class SportsViewModelHubTest {
         assertEquals(before, m.panel.value)
     }
 
+    /**
+     * (Verification review L-c) UI_HIDDEN alone drops nothing; a trim under pressure while hidden makes no clip lookup;
+     * a trim on screen clears the lookups and asks again.
+     */
+    @Suppress("DEPRECATION")
+    @Test fun aTrimWhileHiddenMakesNoLookupAndUiHiddenAloneDropsNothing() {
+        val resolver = app.thebox.core.sports.hub.FakeClipResolver()
+        val withRecap = final.copy(media = GameMedia(recapId = 77L, condensedId = null, goalClips = 0))
+        repo.board(withRecap)
+        val m = SportsViewModel(repo, null, { 10_000L }, { 1_000_000L }, detail, matcher, resolver, { null }, { app.thebox.core.parental.ParentalAccess.OPEN }) { LocalDate.of(2026, 11, 5) }
+        m.onCardFocused("X1")
+        m.enterPanel("X1")
+        assertEquals("the recap's lookup", 1, resolver.infoCalls.size)
+        m.onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN, uiHidden = true)
+        assertEquals("UI_HIDDEN is not memory pressure: the repository keeps its facts", 0, detail.trims)
+        m.onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_BACKGROUND, uiHidden = true)
+        assertEquals(1, detail.trims)
+        assertEquals("no lookup in the background", 1, resolver.infoCalls.size)
+        m.onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW, uiHidden = false)
+        assertEquals(2, detail.trims)
+        assertEquals("on screen the lookups run again", 2, resolver.infoCalls.size)
+    }
+
+    /** (Verification review L-d) The NFL day word reads the local date: a build on the next day is a different panel. */
+    @Test fun thePanelChangesAtMidnightButNotWithinTheDay() {
+        val zone = java.time.ZoneId.systemDefault()
+        val midnight = java.time.LocalDate.of(2026, 11, 26).atStartOfDay(zone).toInstant().toEpochMilli()
+        val a = HubPanelModel(game = pre, nowMs = midnight - 3_600_000L)
+        assertEquals("the same day, an hour apart", a, HubPanelModel(game = pre, nowMs = midnight - 60_000L))
+        assertFalse("the next day", a == HubPanelModel(game = pre, nowMs = midnight + 60_000L))
+    }
+
+    /** (Verification review MED-1) Matchup is enabled exactly when its sheet has rows: two empty goalie lists draw none. */
+    @Test fun matchupIsEnabledOnlyWithRowsToShow() {
+        val m = vm()
+        repo.board(pre)
+        m.onCardFocused("P1")
+        val empty = detailOf(pre).copy(goalies = app.thebox.core.sports.hub.GoaliePair(emptyList(), emptyList()))
+        detail.detail.value = DetailState.Ready(empty, fetchedAtMono = 0L, failing = false, stale = false)
+        assertEquals(SlotAction.MATCHUP, m.panel.value.slots[2].action)
+        assertFalse("no rows: disabled", m.panel.value.slots[2].enabled)
+        assertTrue(matchupRows(empty).isEmpty())
+        val one = empty.copy(goalies = app.thebox.core.sports.hub.GoaliePair(listOf(app.thebox.core.sports.hub.Goalie("Vejmelka", "8-4-1", 2.41, 0.915, null)), emptyList()))
+        detail.detail.value = DetailState.Ready(one, fetchedAtMono = 0L, failing = false, stale = false)
+        assertTrue(m.panel.value.slots[2].enabled)
+        assertTrue(matchupRows(one).isNotEmpty())
+    }
+
+    /** (Verification review HIGH-1) The Goals slot is usable from the board's count with no detail: it opens the sheet. */
+    @Test fun goalsOpensFromTheBoardCountWhileTheDetailLoads() {
+        val m = vm()
+        val withGoals = live.copy(media = GameMedia(null, null, goalClips = 2))
+        repo.board(withGoals)
+        m.onCardFocused("L1")
+        detail.detail.value = DetailState.Loading(withGoals.id)
+        m.enterPanel("L1")
+        assertTrue(m.panel.value.slots[2].usable)
+        m.onSlot(2)
+        assertEquals(HubSheet.Goals(withGoals.id), m.sheet.value)
+    }
+
     private fun clockless(m: SportsViewModel) = m.panelFocused.value
 
     private fun collect(m: SportsViewModel): MutableList<SportsEffect> {

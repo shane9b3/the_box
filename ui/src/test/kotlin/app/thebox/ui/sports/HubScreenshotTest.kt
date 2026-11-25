@@ -238,5 +238,46 @@ class HubScreenshotTest {
         }
     }
 
+    /**
+     * (Emulator E1) At every text size the media area's tag, logos and caption never overlap: the logos shrink to the band
+     * between the tag and the caption, and are dropped below `MatchupArtFit.LOGO_MIN`.
+     */
+    @Test
+    fun theMediaTagLogosAndCaptionNeverOverlap() {
+        val model = mutableStateOf(liveModel())
+        val size = mutableStateOf(TextSize.DEFAULT)
+        UiTextScale.running = size.value
+        rule.setContent {
+            UiTextScale.running = size.value
+            BoxTheme {
+                key(size.value) {
+                    Box(Modifier.testTag(SHOT).background(DesignTokens.Colors.Canvas).padding(16.dp)) {
+                        HubPanel(model.value, clock24 = false, slotRequesters = androidx.compose.runtime.remember { List(3) { FocusRequester() } }, onSlot = {}, onSlotFocus = {}, onExit = {}, entered = false)
+                    }
+                }
+            }
+        }
+        fun bounds(tag: String): androidx.compose.ui.geometry.Rect? {
+            val nodes = rule.onAllNodes(androidx.compose.ui.test.hasTestTag(tag), useUnmergedTree = true).fetchSemanticsNodes()
+            // A child the art measured but did not place (its caption, when the start-time disc needs the room) draws nothing.
+            return nodes.firstOrNull()?.takeIf { it.layoutInfo.isPlaced }?.boundsInRoot
+        }
+        var logosSeen = 0
+        for (s in TextSize.entries) {
+            size.value = s
+            for ((phase, m) in listOf("live" to liveModel(), "final" to finalModel(), "pre" to preModel())) {
+                model.value = m
+                rule.waitForIdle()
+                val logos = listOfNotNull(bounds(HUB_ART_LOGO_TAG + "away"), bounds(HUB_ART_LOGO_TAG + "home"))
+                logosSeen += logos.size
+                val over = listOfNotNull(bounds(HUB_POSTER_TAG_TAG), bounds(HUB_POSTER_CAPTION_TAG), bounds(HUB_ART_CAPTION_TAG))
+                for (l in logos) for (o in over) {
+                    assertTrue("$phase at $s: a logo $l overlaps $o", l.intersect(o).let { it.width <= 0.5f || it.height <= 0.5f })
+                }
+            }
+        }
+        assertTrue("the logos are drawn where they fit", logosSeen > 0)
+    }
+
     private companion object { const val SHOT = "hub_shot" }
 }

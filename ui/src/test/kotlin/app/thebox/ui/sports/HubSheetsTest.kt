@@ -253,6 +253,47 @@ class HubSheetsTest {
         rule.onNodeWithTag(hubSheetRowTag("lead:1"), useUnmergedTree = true).assertIsFocused()
     }
 
+    /**
+     * (Verification review MED-1) A sheet with no row (a Matchup without leaders or goalies, a Goals sheet before its
+     * detail): the frame's title takes focus, so Back closes it; goal rows arriving then take focus from the title.
+     */
+    @Test
+    fun aSheetWithoutRowsHoldsFocusInItsFrameAndBackCloses() {
+        var closed = 0
+        val empty = detail().copy(leaders = emptyList(), goalies = null)
+        rule.setContent { BoxTheme { MatchupSheet(live, empty, onClose = { closed++ }) } }
+        rule.waitForIdle()
+        rule.onNodeWithTag(HUB_SHEET_FRAME_TAG, useUnmergedTree = true).assertIsFocused()
+        rule.onRoot().performKeyInput { pressKey(Key.Back) }
+        rule.waitForIdle()
+        assertEquals(1, closed)
+    }
+
+    @Test
+    fun aGoalsSheetWithoutItsDetailHoldsFocusThenHandsItToTheRows() {
+        var closed = 0
+        val d = androidx.compose.runtime.mutableStateOf<GameDetail?>(null)
+        rule.setContent {
+            BoxTheme { GoalsSheet(live, d.value, emptyMap(), emptyList(), null, onPlay = { _, _ -> }, onPlayArchive = {}, onMissingClip = {}, onClose = { closed++ }, note = "Loading") }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag(HUB_SHEET_FRAME_TAG, useUnmergedTree = true).assertIsFocused()
+        rule.onNodeWithTag(GOALS_SHEET_NOTE_TAG, useUnmergedTree = true).assertExists()
+        d.value = detail()
+        rule.waitForIdle()
+        rule.onNodeWithTag(hubSheetRowTag("goal:2"), useUnmergedTree = true).assertIsFocused()
+        rule.onRoot().performKeyInput { pressKey(Key.Back) }
+        rule.waitForIdle()
+        assertEquals(1, closed)
+    }
+
+    @Test
+    fun aFinalGoalsSheetWithoutItsDetailListsTheBoardsVideos() {
+        val media = app.thebox.core.sports.GameMedia(recapId = 70L, condensedId = 80L, goalClips = 3)
+        assertEquals(listOf("video:RECAP:70", "video:CONDENSED:80"), goalsSheetRows(null, emptyList(), final = true, media = media).map { it.key })
+        assertTrue("live: nothing to list before the detail", goalsSheetRows(null, emptyList(), final = false, media = media).isEmpty())
+    }
+
     @Test
     fun clipLayerHoldsBackAndBackEndsTheSession() {
         val controller = FakePlaybackController()

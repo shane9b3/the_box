@@ -18,6 +18,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.font.FontWeight
@@ -50,9 +51,25 @@ internal fun MatchupArt(
     caption: String?,
     heightDp: Int,
     modifier: Modifier = Modifier,
+    /**
+     * (Emulator E1) Design px at the top and the bottom that something drawn over the art takes (the poster's tag and its
+     * caption); the logos stay in the band between, with the art's own [caption] reserved the same way.
+     */
+    topReserveDp: Int = 0,
+    bottomReserveDp: Int = 0,
 ) {
     val compact = heightDp < 160
-    val logo = if (compact) 88 else 120
+    val nominal = if (compact) 88 else 120
+    // (Emulator E1) At the larger text sizes the area is short and the tag and caption are tall: the logos shrink to the
+    // band between them and, below LOGO_MIN, are not drawn, so they never sit under the tag or the caption.
+    val captionH = if (caption != null) lineHeightDp(GuideUi.sans(22, FontWeight.Medium)) + 16 else 0
+    // The layout below drops the caption when no centre disc fits above it; then it reserves nothing either.
+    val discH = if (centreTop != null) {
+        val text = lineHeightDp(GuideUi.sans(26, FontWeight.Bold)) + if (centreBottom != null) lineHeightDp(GuideUi.sans(22, FontWeight.Medium)) else 0
+        maxOf(88, text)
+    } else 0
+    val ownCaption = if (caption != null && (centreTop == null || discH <= heightDp - captionH)) captionH else 0
+    val logo = MatchupArtFit.logoSize(heightDp, topReserveDp, maxOf(bottomReserveDp, ownCaption), nominal)
     val left = MatchupColours.of(league, away.abbrev)
     val right = MatchupColours.of(league, home.abbrev)
     Box(
@@ -67,9 +84,14 @@ internal fun MatchupArt(
             drawPath(r, right)
         },
     ) {
-        Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { HubLogo(away, league, logo, logo, align = Alignment.Center) }
-            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { HubLogo(home, league, logo, logo, align = Alignment.Center) }
+        if (logo > 0) {
+            Row(
+                Modifier.fillMaxSize().padding(top = topReserveDp.dp, bottom = maxOf(bottomReserveDp, ownCaption).dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { HubLogo(away, league, logo, logo, Modifier.testTag(HUB_ART_LOGO_TAG + "away"), align = Alignment.Center) }
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { HubLogo(home, league, logo, logo, Modifier.testTag(HUB_ART_LOGO_TAG + "home"), align = Alignment.Center) }
+            }
         }
         // (Review M4) The disc and the caption never overlap: the disc is centred in the room above the caption; when the
         // full disc does not fit there the 88 px one is used; when neither does (pre-game at Largest) the caption goes and
@@ -82,7 +104,7 @@ internal fun MatchupArt(
                 }
                 if (caption != null) {
                     Box(
-                        Modifier.fillMaxWidth()
+                        Modifier.fillMaxWidth().testTag(HUB_ART_CAPTION_TAG)
                             .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f))))
                             .padding(horizontal = 16.dp, vertical = 8.dp),
                         contentAlignment = Alignment.Center,
@@ -118,6 +140,37 @@ internal fun MatchupArt(
         }
     }
 }
+
+/** (Emulator E1) The logos' size in the band the tag and the caption leave. */
+internal object MatchupArtFit {
+    /** Below this (design px) a logo is not drawn: a smaller one reads as a smudge, and overlapping is never allowed. */
+    const val LOGO_MIN = 40
+    /** Air between a logo and the tag or caption above and below it. */
+    const val LOGO_MARGIN = 4
+
+    /** [nominal] when the band holds it, else the band itself, else 0 (no logos). */
+    fun logoSize(heightDp: Int, topReserveDp: Int, bottomReserveDp: Int, nominal: Int): Int {
+        val band = heightDp - topReserveDp - bottomReserveDp - 2 * LOGO_MARGIN
+        return when {
+            band >= nominal -> nominal
+            band >= LOGO_MIN -> band
+            else -> 0
+        }
+    }
+}
+
+/** The height in design px (1 dp = 1 design px under the root's scale) of one line of [style]. */
+@Composable
+internal fun lineHeightDp(style: androidx.compose.ui.text.TextStyle): Int {
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    return androidx.compose.runtime.remember(style, density) {
+        with(density) { kotlin.math.ceil(measurer.measure("Ag", style, maxLines = 1).size.height.toDp().value).toInt() }
+    }
+}
+
+internal const val HUB_ART_LOGO_TAG = "hub_art_logo:"
+internal const val HUB_ART_CAPTION_TAG = "hub_art_caption"
 
 @Composable
 private fun CentreDisc(d: Int, top: String, bottom: String?) {

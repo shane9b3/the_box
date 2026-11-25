@@ -72,7 +72,14 @@ class GameDetailRepositoryImplTest {
             return answer(id, mono.nowMs())
         }
 
-        override suspend fun boxScore(id: GameId): Fetch<BoxScore> { boxCalls++; boxGate?.await(); return box }
+        /** Thrown once (then cleared) by the next [boxScore] after its gate. */
+        var boxThrow: Throwable? = null
+        override suspend fun boxScore(id: GameId): Fetch<BoxScore> {
+            boxCalls++
+            boxGate?.await()
+            boxThrow?.let { boxThrow = null; throw it }
+            return box
+        }
     }
 
     private class H(
@@ -447,6 +454,23 @@ class GameDetailRepositoryImplTest {
         runCurrent()
         h.fetcher.boxGate!!.complete(Unit)
         assertTrue(b.await() is Fetch.Ok)
+        assertEquals(2, h.fetcher.boxCalls)
+    }
+
+    /** (Verification review L-b) The owner's call throws something fetchBox does not catch: a waiter is released, never stuck. */
+    @Test fun aWaiterIsReleasedWhenTheOwnersCallThrows() = runTest {
+        val h = harness()
+        h.fetcher.boxGate = CompletableDeferred()
+        h.fetcher.boxThrow = java.io.IOException("socket closed")
+        val id = GameId(League.NHL, "1")
+        val a = async { runCatching { h.repo.boxScore(id) } }
+        runCurrent()
+        val b = async { h.repo.boxScore(id) }
+        runCurrent()
+        h.fetcher.boxGate!!.complete(Unit)
+        assertTrue("the owner sees its own failure", a.await().exceptionOrNull() is java.io.IOException)
+        val answer = kotlinx.coroutines.withTimeoutOrNull(5_000) { b.await() }
+        assertTrue("the waiter fetched for itself: $answer", answer is Fetch.Ok)
         assertEquals(2, h.fetcher.boxCalls)
     }
 

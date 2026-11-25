@@ -406,7 +406,9 @@ class GuideViewModel @Inject constructor(
                     resumeJob?.cancel()
                     // (M2) What owns the player as the resume is asked for (the clip, or nothing); a non-clip tune past it
                     // (an intent, Watch Next, a PIN success, a settings re-tune) made during the wait wins.
-                    val ownerAtEffect = controller.state.value.target?.tuneId ?: -1L
+                    // (Verification review L-e) Captured by ClipSession when the clip ended, so a tune made between the end
+                    // and this delivery counts as newer; read here only when the effect does not carry it.
+                    val ownerAtEffect = effect.ownerTuneId.takeIf { it >= 0 } ?: controller.state.value.target?.tuneId ?: -1L
                     resumeJob = viewModelScope.launch {
                         // (Integration, §6.5) The root gives the controller the page's viewport back on its next frame after
                         // the clip hides. The resumed channel waits for it, so it prepares under the page: no full-screen
