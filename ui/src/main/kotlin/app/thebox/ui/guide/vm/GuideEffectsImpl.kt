@@ -27,13 +27,21 @@ import app.thebox.core.guide.ReminderAlerts
 import app.thebox.core.guide.ReminderBook
 import app.thebox.player.api.PlaybackController
 import app.thebox.player.api.TuneTarget
+import app.thebox.core.catchup.archive.ArchiveFailure
+import app.thebox.core.catchup.archive.ArchivePhase
+import app.thebox.core.catchup.archive.ArchivePlayback
+import app.thebox.core.catchup.archive.ArchiveStart
+import app.thebox.core.sports.hub.ResumePoint
+import app.thebox.ui.playback.CatchupFailure
 import app.thebox.ui.playback.CatchupLaunch
 import app.thebox.ui.playback.CatchupLauncher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.withContext
 
 /** UI-level effects the shell (root composable / activity) performs. Main thread. */
@@ -75,6 +83,10 @@ class GuideEffectsImpl(
     private val delegates: EffectDelegates = EffectDelegates.NONE,
     /** (owner ruling 2026-10-18) Poster lookup for a panel whose programme has no EPG icon; NONE = off. */
     private val artwork: ProgrammeArtwork = ProgrammeArtwork.NONE,
+    /** (Sports Hub §6.6, WP-3) The catch-up engine [resumeArchive] resumes through; null: no archive resume (tests). */
+    private val archive: ArchivePlayback? = null,
+    /** Bounded wait for the resumed session's first PLAYING before its seek (R-N3). */
+    private val resumeSeekWaitMs: Long = RESUME_SEEK_WAIT_MS,
 ) : GuideEffects {
 
     private var lineupJob: Job? = null
@@ -183,6 +195,51 @@ class GuideEffectsImpl(
             when (val r = catchup.play(channel, info, rawEnd)) {
                 CatchupLaunch.Started -> Unit
                 is CatchupLaunch.Failed -> shell.toast(GuideToast.CATCHUP_FAILED, r.reason.name)
+            }
+        }
+    }
+
+    private var resumeJob: Job? = null
+
+    /**
+     * (Sports Hub, docs/design/m6-sports-hub.md §6.6, A-B2, R-N3; WP-3) Resumes the catch-up a clip interrupted through
+     * the public path Search's catch-up takes: `ArchivePlayback.playProgramme(channel, programme, rawEndMin, timeShift)`,
+     * so the resumed catch-up is a full session (continuation, programme-frame scrub, variant fallback) and a session
+     * that started from live pause or rewind keeps its −MM:SS pill. Then the seek to [ResumePoint.Archive.playheadMs]
+     * (programme frame) on the new session's **first PLAYING** status, not before: a seek issued before the first media is
+     * planned without a position (`ArchivePlaybackImpl.seekTo`). No seek when the playhead is within
+     * [RESUME_SEEK_MIN_MS] of the programme's start (the request already starts there), when the session fails or ends,
+     * or when no PLAYING arrives within [resumeSeekWaitMs]. A synchronous failure toasts CATCHUP_FAILED with its reason.
+     */
+    fun resumeArchive(point: ResumePoint.Archive) {
+        val a = archive ?: return
+        resumeJob?.cancel()
+        resumeJob = scope.launch {
+            try {
+                when (val r = a.playProgramme(point.channel, point.programme, point.rawEndMin, point.timeShift)) {
+                    ArchiveStart.Started -> Unit
+                    is ArchiveStart.Failed -> { shell.toast(GuideToast.CATCHUP_FAILED, catchupFailureOf(r.reason).name); return@launch }
+                }
+                val startMs = point.programme.rawStartMin * MINUTE_MS
+                if (point.playheadMs - startMs < RESUME_SEEK_MIN_MS) return@launch
+                val hash = point.channel.identityHash
+                var began = false
+                val first = withTimeoutOrNull(resumeSeekWaitMs) {
+                    a.status.first { st ->
+                        if (st.phase != ArchivePhase.IDLE) began = true
+                        when {
+                            st.identityHash != hash && st.phase != ArchivePhase.IDLE -> true // another session took over
+                            st.phase == ArchivePhase.PLAYING || st.phase == ArchivePhase.FAILED -> true
+                            st.phase == ArchivePhase.IDLE && began -> true // ended before playing
+                            else -> false
+                        }
+                    }
+                }
+                if (first != null && first.phase == ArchivePhase.PLAYING && first.identityHash == hash) a.seekTo(point.playheadMs, 0)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                BoxLog.w(TAG, "archive resume failed: ${e.javaClass.simpleName}")
             }
         }
     }
@@ -327,6 +384,8 @@ class GuideEffectsImpl(
     fun close() {
         lineupJob?.cancel()
         lineupJob = null
+        resumeJob?.cancel()
+        resumeJob = null
     }
 
     private fun artworkHint(info: ProgrammeInfo): ArtworkHint = when {
@@ -351,5 +410,19 @@ class GuideEffectsImpl(
         private const val TAG = "GuideEffects"
         /** GuideSessionStore flag: the first "Remind me" explained that reminders need the app open (§3.11.3). */
         const val FLAG_REMINDER_EXPLAINED = GuideSessionStore.FLAG_REMINDER_EXPLAINED
+        private const val MINUTE_MS = 60_000L
+        /** (Sports Hub §6.6) A resume playhead this close to the programme's start plays from the start. */
+        const val RESUME_SEEK_MIN_MS = 5_000L
+        /** (Sports Hub §6.6) How long the resume waits for the session's first PLAYING before giving up the seek. */
+        const val RESUME_SEEK_WAIT_MS = 20_000L
+
+        /** `CatchupLauncherImpl`'s mapping ([ArchiveFailure] → the toast's [CatchupFailure]). */
+        internal fun catchupFailureOf(reason: ArchiveFailure): CatchupFailure = when (reason) {
+            ArchiveFailure.CHANNEL_GONE -> CatchupFailure.CHANNEL_GONE
+            ArchiveFailure.NO_ARCHIVE -> CatchupFailure.NO_ARCHIVE
+            ArchiveFailure.OUTSIDE_ARCHIVE, ArchiveFailure.NO_PROGRAMME, ArchiveFailure.NOT_IN_ARCHIVE -> CatchupFailure.OUTSIDE_ARCHIVE
+            ArchiveFailure.UNSUPPORTED_MODE, ArchiveFailure.PLAYBACK -> CatchupFailure.UNSUPPORTED_MODE
+            ArchiveFailure.CREDENTIALS -> CatchupFailure.CREDENTIALS
+        }
     }
 }

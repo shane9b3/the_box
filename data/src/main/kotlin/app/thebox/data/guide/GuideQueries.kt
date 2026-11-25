@@ -236,6 +236,30 @@ class GuideQueries @Inject constructor(
     }
 
     /**
+     * (Sports Hub, docs/design/m6-sports-hub.md §5.2 A, A-B3, A-N2) One broadcaster's channels: `channel_fts` (FTS4)
+     * [match] is quoted phrases joined by upper-case `OR` (no `*`, no parentheses); the lineup predicate and
+     * [PARENTAL_RAW] as [searchChannels] applies them (hidden never, locked only for [access]), every enabled playlist,
+     * **no `ORDER BY`** and `LIMIT` [limit], so the planner drives from the FTS index and the cut is not in playlist
+     * order. The caller applies the residue-equality rule (`BroadcastAliases`) to [NameHit.name] / [NameHit.displayName].
+     */
+    data class NameHit(val id: Long, val playlistId: Long, val name: String, val displayName: String)
+
+    suspend fun channelsByNameFts(match: String, access: ParentalAccess, limit: Int): List<NameHit> = db.read {
+        usePrepared(
+            "SELECT c.id, c.playlist_id, c.name, COALESCE(cp.custom_name, c.display_name, c.name) " +
+                "FROM channel_fts JOIN channel c ON c.id = channel_fts.rowid " +
+                LINEUP_JOINS + "WHERE channel_fts MATCH ?2 AND $LINEUP_BASE $PARENTAL_RAW LIMIT ?3",
+        ) { st ->
+            st.bindAccess(access)
+            st.bindText(2, match)
+            st.bindLong(3, limit.toLong())
+            buildList {
+                while (st.step()) add(NameHit(st.getLong(0), st.getLong(1), st.getText(2), st.getText(3)))
+            }
+        }
+    }
+
+    /**
      * Programme search, step 2 (§3.10.2): library channels that map or AUTO-match each EPG ref (both reverse lookups
      * use the v3 `(source_id, xmltv_id)` indexes), batched [REF_BATCH] refs per statement, restricted to the lineup
      * predicate, in playlist then provider order.

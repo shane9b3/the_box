@@ -81,6 +81,8 @@ import app.thebox.ui.guide.grid.GuideTrim
 import app.thebox.ui.full.PlayerHost
 import app.thebox.ui.full.vm.PlayerGuideBridge
 import app.thebox.ui.search.SearchEffect
+import app.thebox.ui.sports.SportsEffect
+import app.thebox.core.sports.hub.ResumePoint
 import app.thebox.ui.input.KeyRouter
 import app.thebox.ui.playback.CatchupLauncher
 import app.thebox.ui.root.ShellEvent
@@ -102,6 +104,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -237,6 +240,7 @@ class GuideViewModel @Inject constructor(
         onLineup = ::onLineup,
         delegates = delegates,
         artwork = artwork,
+        archive = archive,
     )
 
     override val machine: GuideStateMachine = stateMachineFactory.create(effects, navigator, labels, renderer, System::currentTimeMillis)
@@ -362,14 +366,34 @@ class GuideViewModel @Inject constructor(
         }
     }
 
-    // ---- Sports host (Sports Hub commit 0, docs/design/m6-sports-hub.md §5.5, §5.6, §6.6; R-S5)
+    // ---- Sports host (Sports Hub, docs/design/m6-sports-hub.md §5.5, §5.6, §6.6; WP-3)
 
     /**
-     * Every [SportsEffect][app.thebox.ui.sports.SportsEffect] of the Sports page (`MainActivity` collects
-     * `SportsViewModel.effects` into it). Main thread. Stub: WP-3 implements Tune, PlayArchive and Resume.
+     * Every [SportsEffect] of the Sports page (`MainActivity` collects `SportsViewModel.effects` into it). Main thread.
+     * - [SportsEffect.Tune]: the guarded tune with the guide's lineup as zap list (a refusal opens the PIN prompt through
+     *   [onRefused]), then [GuideEvent.SportsClosed]: the grid focuses the channel and FULL follows its first Tuned. The
+     *   game is **not** followed (owner ruling 2).
+     * - [SportsEffect.PlayArchive]: Search's catch-up launch, then `SportsClosed(archive = true)` (FULL on the first
+     *   archive Tuned only; a failed launch toasts and stays in the guide).
+     * - [SportsEffect.Resume]: what `ClipSession` snapshot before a clip, through the public paths (§6.6); the page stays.
      */
-    @Suppress("UNUSED_PARAMETER")
-    fun onSportsEffect(effect: app.thebox.ui.sports.SportsEffect) = Unit
+    fun onSportsEffect(effect: SportsEffect) {
+        when (effect) {
+            is SportsEffect.Tune -> {
+                guarded.tune(TuneTarget.Channel(effect.channel.identity), effects.currentLineup?.let { LineupZapList(it, library) })
+                machine.dispatch(GuideEvent.SportsClosed(effect.channel, tuned = true, archive = false))
+            }
+            is SportsEffect.PlayArchive -> {
+                effects.playArchive(effect.channel, effect.info)
+                machine.dispatch(GuideEvent.SportsClosed(effect.channel, tuned = true, archive = true))
+            }
+            is SportsEffect.Resume -> when (val p = effect.point) {
+                is ResumePoint.Live -> guarded.tune(TuneTarget.Channel(p.identity), effects.currentLineup?.let { LineupZapList(it, library) })
+                is ResumePoint.Archive -> effects.resumeArchive(p)
+                ResumePoint.Nothing -> controller.stop(StopReason.USER)
+            }
+        }
+    }
 
     // ---- feeds (§3.16.1)
 
@@ -459,7 +483,8 @@ class GuideViewModel @Inject constructor(
         scope.launch { alerts.current.collect { machine.dispatch(GuideEvent.Alert(it)) } }
         forwardParental()
         scope.launch {
-            combine(controller.state, archive.status, settingsSource.settings, tunedRowsVersion) { st, a, s, _ -> Triple(st, a, s) }.collect { (st, a, s) ->
+            // (Sports Hub R-S1) Active clip states never reach the machine; a terminal one arrives as Idle (withoutActiveClip).
+            combine(controller.state.mapNotNull { it.withoutActiveClip() }, archive.status, settingsSource.settings, tunedRowsVersion) { st, a, s, _ -> Triple(st, a, s) }.collect { (st, a, s) ->
                 val identity = st.target?.identity
                 val channel = identity?.let { channelOf(it) }
                 // H-B1: the HDR poster is not a still. It is the controller's MINI state (video track off, viewport
@@ -670,7 +695,9 @@ class GuideViewModel @Inject constructor(
         }
         scope.launch {
             var lastLockedTune = -1L
-            controller.state.collect { st ->
+            controller.state.collect { raw ->
+                // (Sports Hub R-S1) While a clip plays the session keeps the pre-clip channel; after one, nothing plays.
+                val st = raw.withoutActiveClip() ?: return@collect
                 val playing = when (st) {
                     is PlaybackState.Playing, is PlaybackState.Buffering, is PlaybackState.Connecting, is PlaybackState.Stalled -> st.target?.identity
                     else -> null
@@ -765,6 +792,25 @@ class GuideViewModel @Inject constructor(
         } catch (e: Exception) {
             ""
         }
+    }
+}
+
+/**
+ * (Sports Hub, docs/design/m6-sports-hub.md §6.5, A-B2.5, R-S1) The clip filter of the guide's and the player's
+ * `controller.state` collectors, before `TunedStateMapper` and `parentalControls.watching`:
+ * - an **active** clip state (Connecting, Buffering, Playing, Stalled whose target `isClip`) is dropped (null): while the
+ *   clip plays the machines keep the pre-clip channel, so `tunedFrom`, Last channel and the score bug are untouched and
+ *   a resume of the same channel is no identity change;
+ * - a **terminal** clip state (Stopped, Error) becomes [PlaybackState.Idle]: after a clip that ends without a resume
+ *   (Home or standby mid-clip, `ResumePoint.Nothing`, an ownership loss) the machines see "nothing tuned", which is the
+ *   truth (no stale PLAYING on the mini player, no OK that goes FULL without tuning, no Retry aimed at the clip);
+ * - every other state passes unchanged.
+ */
+internal fun PlaybackState.withoutActiveClip(): PlaybackState? {
+    if (target?.isClip != true) return this
+    return when (this) {
+        is PlaybackState.Connecting, is PlaybackState.Buffering, is PlaybackState.Playing, is PlaybackState.Stalled -> null
+        is PlaybackState.Stopped, is PlaybackState.Error, PlaybackState.Idle -> PlaybackState.Idle
     }
 }
 
