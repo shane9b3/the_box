@@ -9,8 +9,12 @@ import kotlinx.serialization.json.JsonElement
  * The lenient ESPN site-scoreboard DTO. Only the spine is typed; every leaf the bug reads is a `JsonElement?`, read by
  * the mapper's lenient helpers (a string, a number or a missing value all work; anything else is null for that field
  * only, ruling 21). A spine that changes type (`events` not a list) fails the decode: `BAD_BODY`, the existing stale
- * path. Decoded with `Json { ignoreUnknownKeys = true }`, so `leaders`, `odds`, `headlines`, `broadcasts` and the rest
- * are skipped by the reader and never built.
+ * path. Decoded with `Json { ignoreUnknownKeys = true }`, so `odds`, `headlines`, `geoBroadcasts` and the rest are
+ * skipped by the reader and never built.
+ *
+ * (Sports Hub WP-1, docs/design/m6-sports-hub.md §7.1, A-N4) `competitors[].records` / `linescores` and
+ * `competitions[].leaders` / `broadcasts` are typed as `JsonElement?` (a few hundred bytes to ~3 KB per game) and read by
+ * path; an absent or odd value can never fail a board. Verified against recorded boards (pre, in and post) before use.
  */
 
 /** `scoreboard` (the week) or `scoreboard?dates=` / `?seasontype=&week=`: the list and the week's calendar. */
@@ -47,6 +51,10 @@ class EspnCompetitionDto(
     val competitors: List<EspnCompetitorDto>? = null,
     val status: JsonElement? = null,
     val situation: JsonElement? = null,
+    /** (Sports Hub §7.1) The game leaders: `[{name: "passingYards" | …, leaders: [{displayValue, athlete, team}]}]`. */
+    val leaders: JsonElement? = null,
+    /** (Sports Hub §7.2) `[{market: "national" | "home" | "away", names: ["CBS"]}]`. */
+    val broadcasts: JsonElement? = null,
 )
 
 /** One side: [id] the team id, [score] a string ("7"); [team] has `abbreviation`, `displayName`, `shortDisplayName`, `logo`. */
@@ -56,6 +64,10 @@ class EspnCompetitorDto(
     val homeAway: JsonElement? = null,
     val score: JsonElement? = null,
     val team: JsonElement? = null,
+    /** (Sports Hub §7.1) `[{type: "total", summary: "8-3"}, …]`. */
+    val records: JsonElement? = null,
+    /** (Sports Hub §7.1) `[{value: 7.0, period: 1}, …]`, one per quarter played. */
+    val linescores: JsonElement? = null,
 )
 
 /*

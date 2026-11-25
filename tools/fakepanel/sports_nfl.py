@@ -93,6 +93,15 @@ TEAMS = {
     "DEN": ("7", "Denver", "Broncos", "fb4f14", "002244"),
 }
 
+# (Sports Hub section 10.3) Board facts the app reads for the panel: records, leaders, national broadcasters.
+RECORDS = {"KC": "8-3", "BUF": "7-4", "NYJ": "2-9", "NE": "6-5", "SF": "9-2", "SEA": "5-6", "LV": "3-8", "DEN": "6-5"}
+LEADERS = {abbr: {"passingYards": qb, "rushingYards": rb, "receivingYards": wr} for abbr, qb, rb, wr in (
+    ("KC", "Patrick Mahomes", "Isiah Pacheco", "Travis Kelce"), ("BUF", "Josh Allen", "James Cook", "Khalil Shakir"),
+    ("NYJ", "Justin Fields", "Breece Hall", "Garrett Wilson"), ("NE", "Drake Maye", "Rhamondre Stevenson", "Hunter Henry"),
+    ("SF", "Brock Purdy", "Christian McCaffrey", "George Kittle"), ("SEA", "Sam Darnold", "Kenneth Walker", "Jaxon Smith-Njigba"),
+    ("LV", "Geno Smith", "Ashton Jeanty", "Brock Bowers"), ("DEN", "Bo Nix", "J.K. Dobbins", "Courtland Sutton"))}
+BROADCASTS = {FEATURED_ID: "CBS", "401899002": "Fox", "401899003": "Prime Video", "401899004": "NBC"}
+
 # ESPN play type id -> (text, abbreviation)
 PLAY_TYPES = {
     "70": ("Coin Toss", "CT"), "53": ("Kickoff", "K"), "5": ("Rush", "RUSH"), "24": ("Pass Reception", "REC"),
@@ -548,20 +557,30 @@ class SportsNfl:
             if state == "post":
                 c["winner"] = (s.get("away") or 0) > (s.get("home") or 0) if side == "away" else (s.get("home") or 0) > (s.get("away") or 0)
             if started:
-                # `score` is a string, as ESPN's. linescores: all points in the current quarter (the app never reads them).
+                # `score` is a string, as ESPN's. (Sports Hub section 10.3) linescores: the real points of each quarter played,
+                # as recorded (`value` a float, `displayValue` a string, `period` 1..4, 5 = OT).
                 sc = s.get(side) or 0
                 c["score"] = str(sc)
-                c["linescores"] = [{"value": float(sc if p == max(period, 1) else 0), "displayValue": str(sc if p == max(period, 1) else 0), "period": p}
-                                   for p in range(1, max(period, 1) + 1)]
+                c["linescores"] = [{"value": float(v), "displayValue": str(v), "period": p}
+                                   for p, v in enumerate(quarters[side], 1)]
             else:
                 c["score"] = "0"
+            # (Sports Hub) The record, as ESPN's `records[]` with the "total" entry first.
+            c["records"] = [{"name": "overall", "abbreviation": "Any" if state == "pre" else "Game", "type": "total", "summary": RECORDS[abbr]},
+                            {"name": "Home", "type": "home", "summary": "3-1"}, {"name": "Road", "type": "road", "summary": "2-2"}]
             return c
+
+        quarters = self.quarter_scores(game, at, s) if started else {"away": [], "home": []}
 
         comp = {"id": eid, "uid": f"s:20~l:28~e:{eid}~c:{eid}", "date": iso_min(start), "startDate": iso_min(start),
                 "timeValid": True, "neutralSite": False,
                 "competitors": [competitor("home", home, 0), competitor("away", away, 1)], "status": status}
         if started and s.get("situation") and state == "in":
             comp["situation"] = self.situation(eid, s, ids, away, home)
+        # (Sports Hub section 10.3) Game leaders (one per category for the whole game, either team, as recorded; pre-game
+        # leaders are season leaders) and the national broadcaster.
+        comp["leaders"] = self.leaders(away, home, ids, s, started)
+        comp["broadcasts"] = [{"market": "national", "names": [BROADCASTS.get(eid, "CBS")]}]
         local = dt.datetime.fromtimestamp(start, ET)
         return {"id": eid, "uid": f"s:20~l:28~e:{eid}", "date": iso_min(start), "name": f"{TEAMS[away][1]} {TEAMS[away][2]} at {TEAMS[home][1]} {TEAMS[home][2]}",
                 "shortName": f"{away} @ {home}", "season": {"year": SEASON, "type": 2, "slug": "regular-season"},
@@ -600,6 +619,63 @@ class SportsNfl:
         if s.get("possession") in ids:
             sit["possession"] = ids[s["possession"]]
         return sit
+
+    def quarter_scores(self, game, at, s):
+        """{"away": [points per quarter played], "home": [...]} summing to the body's scores. The featured game is replayed
+        from its start in small steps (the timeline is a pure function of time), so a score lands in the quarter it was
+        made in; a fixed game splits its total over its quarters."""
+        period = max(int(s.get("period") or 1), 1)
+        total = {"away": int(s.get("away") or 0), "home": int(s.get("home") or 0)}
+        if game[0] != FEATURED_ID or (self.panel.cfg.get("sports_nfl_script") or {}).get(game[0]):
+            out = {}
+            for side, t in total.items():
+                q = [t // period] * period
+                for i in range(t - sum(q)):
+                    q[i] += 1
+                out[side] = q
+            return out
+        start = game[3]
+        span = max(0.0, at - start)
+        step = max(1.0, span / 1500.0)
+        by_end = {"away": [0] * (period + 1), "home": [0] * (period + 1)}  # cumulative score at the end of each quarter
+        t = start
+        while t <= at:
+            st = game[4](t)
+            p = min(max(int(st.get("period") or 1), 1), period)
+            for side in ("away", "home"):
+                v = int(st.get(side) or 0)
+                for q in range(p, period + 1):
+                    by_end[side][q] = max(by_end[side][q], v)
+            t += step
+        out = {}
+        for side in ("away", "home"):
+            cum = by_end[side]
+            cum[period] = total[side]
+            out[side] = [max(0, cum[q] - (cum[q - 1] if q > 1 else 0)) for q in range(1, period + 1)]
+            out[side][-1] += total[side] - sum(out[side])
+        return out
+
+    @staticmethod
+    def leaders(away, home, ids, s, started):
+        """ESPN's `competitions[].leaders`: passing, rushing and receiving yards. In and after the game one game leader per
+        category (passing and receiving for the side ahead, rushing for the other); before it, season leaders."""
+        a, h = int(s.get("away") or 0), int(s.get("home") or 0)
+        ahead, other = ("away", "home") if a > h else ("home", "away")
+        sides = {"away": away, "home": home}
+        out = []
+        for cat, short, pick in (("passingYards", "PASS", ahead), ("rushingYards", "RUSH", other), ("receivingYards", "REC", ahead)):
+            abbr = sides[pick]
+            name = LEADERS[abbr][cat]
+            yards = (40 + 15 * (a + h)) if started else 1200
+            line = {"passingYards": f"{8 + a + h}/{12 + a + h}, {yards} YDS, 1 TD",
+                    "rushingYards": f"{6 + a // 3} CAR, {yards // 3} YDS",
+                    "receivingYards": f"{3 + h // 7} REC, {yards // 2} YDS"}[cat]
+            out.append({"name": cat, "displayName": cat.replace("Yards", " Leader").title(), "shortDisplayName": short,
+                        "leaders": [{"displayValue": line, "value": float(yards),
+                                     "athlete": {"id": f"9{ids[pick]}{len(out)}", "fullName": name, "displayName": name,
+                                                 "shortName": name[0] + ". " + name.split(" ", 1)[1], "team": {"id": ids[pick]}},
+                                     "team": {"id": ids[pick]}}]})
+        return out
 
     def leagues(self):
         return [{"id": "28", "uid": "s:20~l:28", "name": "National Football League", "abbreviation": "NFL", "slug": "nfl",

@@ -734,5 +734,134 @@ class TestStackedScenario(PpCase):
         self.assertEqual("FINAL", self.at(self.P3 + 110 + 30 + 20 + 20 + 20 + 5)["gameState"])
 
 
+
+class TestSportsHub(SportsCase):
+    """Sports Hub (docs/design/m6-sports-hub.md section 10.3): `sports_hub` adds the board facts, two games, the landing's
+    blocks and the right-rail / boxscore routes; off, the bodies stay as the golden above."""
+    overrides = {"sports": True, "sports_hub": True}
+
+    def body_at(self, t, gid=None, kind="landing"):
+        sp = self.panel.sports
+        day = sp.today(sp.anchor)
+        at = sp.anchor + t
+        g = next(x for x in sp.slate(day, at) if gid is None or x[0] == gid) if gid else sp.slate(day, at)[0]
+        if kind == "landing":
+            return sp.game(day, g, at, "http://x", True)
+        if kind == "list":
+            return sp.game(day, g, at, "http://x", False)
+        if kind == "right-rail":
+            return sp.right_rail(day, g, at, "http://x")
+        return sp.boxscore(day, g, at, "http://x")
+
+    def test_day_list_has_game_week_broadcasts_and_one_game_per_phase(self):
+        d = self.today()
+        _, j = self.get_json(f"/v1/score/{d.isoformat()}")
+        self.assertEqual(7, len(j["gameWeek"]))
+        self.assertEqual({"date": d.isoformat(), "dayAbbrev": d.strftime("%a").upper(), "numberOfGames": 9}, j["gameWeek"][3])
+        self.assertEqual(0, j["gameWeek"][0]["numberOfGames"])
+        self.assertEqual(9, len(j["games"]))
+        states = {(x["gameState"], x["gameScheduleState"]) for x in j["games"]}
+        self.assertTrue({("FUT", "OK"), ("PRE", "OK"), ("LIVE", "OK"), ("OFF", "OK"), ("FUT", "PPD")} <= states, states)
+        by = {x["id"] % 10000: x for x in j["games"]}
+        vgk = by[908]
+        self.assertEqual(("VGK", "EDM", "LIVE"), (vgk["awayTeam"]["abbrev"], vgk["homeTeam"]["abbrev"], vgk["gameState"]))
+        self.assertEqual(["TNT", "HBO MAX", "SN", "TVAS"], [b["network"] for b in vgk["tvBroadcasts"]])
+        lak = by[909]
+        self.assertEqual(("LAK", "ANA", "FUT"), (lak["awayTeam"]["abbrev"], lak["homeTeam"]["abbrev"], lak["gameState"]))
+        self.assertIn("ABC", [b["network"] for b in lak["tvBroadcasts"]])
+        anchor = self.panel.sports.anchor
+        for g in (vgk, lak):  # inside the catalog's airing block: panel start -1 h .. +5 h
+            start = dt.datetime.strptime(g["startTimeUTC"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=dt.timezone.utc).timestamp()
+            self.assertTrue(anchor - 3600 <= start <= anchor + 5 * 3600, g["id"])
+        other = next(x for x in j["games"] if x["id"] % 10000 == 902)
+        self.assertEqual(["N", "A", "H"], [b["market"] for b in other["tvBroadcasts"]])
+        self.assertTrue(other["tvBroadcasts"][1]["network"].endswith(" "), "one network with a trailing space, as the feed")
+        off = next(x for x in j["games"] if x["id"] % 10000 == 905)
+        self.assertRegex(off["threeMinRecap"], r"^/video/ott-at-buf-recap-\d+$")
+        self.assertRegex(off["condensedGame"], r"-\d+$")
+        self.assertEqual(3, len(off["goals"]))
+        self.assertTrue(all(isinstance(x["highlightClip"], int) for x in off["goals"]))
+        self.assertEqual("OT", off["goals"][-1]["periodDescriptor"]["periodType"], "the OT winner")
+
+    def test_featured_recap_appears_only_at_final(self):
+        off = self.body_at(330, kind="list")
+        self.assertEqual("OFF", off["gameState"])
+        self.assertNotIn("threeMinRecap", off)
+        self.assertNotIn("gameVideo", self.body_at(330, kind="right-rail"))
+        fin = self.body_at(400, kind="list")
+        self.assertEqual("FINAL", fin["gameState"])
+        self.assertIn("threeMinRecap", fin)
+        self.assertIn("threeMinRecap", self.body_at(400, kind="right-rail")["gameVideo"])
+
+    def test_landing_blocks_by_phase(self):
+        fut = self.body_at(0)
+        self.assertIn("matchup", fut)
+        self.assertEqual(["points", "goals", "assists"], [x["category"] for x in fut["matchup"]["skaterComparison"]["leaders"]])
+        self.assertEqual(2, len(fut["matchup"]["goalieComparison"]["awayTeam"]["leaders"]))
+        self.assertEqual("12-9-3", fut["awayTeam"]["record"])
+        self.assertNotIn("summary", fut)
+        p2 = self.body_at(45 + 60 + 30 + 40)  # 2nd period, after the CGY goal
+        self.assertNotIn("matchup", p2)
+        goals = [g for p in p2["summary"]["scoring"] for g in p["goals"]]
+        self.assertEqual(1, len(goals))
+        self.assertEqual(2, p2["summary"]["scoring"][0]["periodDescriptor"]["number"], "the goal is in the period it was scored")
+        self.assertEqual([], p2["summary"]["threeStars"], "as recorded: empty while live")
+        fin = self.body_at(400)
+        self.assertEqual([1, 2, 3], [x["star"] for x in fin["summary"]["threeStars"]])
+        reg = [g for p in fin["summary"]["scoring"] for g in p["goals"]]
+        self.assertEqual(2, len(reg), "the shootout winner is not a goal")
+        self.assertEqual((1, 1), (reg[-1]["awayScore"], reg[-1]["homeScore"]))
+
+    def test_right_rail_shapes(self):
+        fut = self.body_at(0, kind="right-rail")
+        self.assertTrue({"seasonSeries", "seasonSeriesWins", "gameInfo", "teamSeasonStats", "last10Record"} <= set(fut))
+        self.assertNotIn("linescore", fut)
+        live = self.body_at(45 + 60 + 30 + 40, kind="right-rail")
+        self.assertNotIn("teamSeasonStats", live)
+        self.assertEqual([1, 2], [p["periodDescriptor"]["number"] for p in live["linescore"]["byPeriod"]])
+        self.assertEqual(1, sum(p["away"] for p in live["linescore"]["byPeriod"]))
+        cats = [x["category"] for x in live["teamGameStats"]]
+        self.assertEqual(["sog", "faceoffWinningPctg", "faceoffWins", "powerPlay", "powerPlayPctg", "pim", "hits", "blockedShots",
+                          "giveaways", "takeaways"], cats)
+        self.assertRegex(live["teamGameStats"][3]["awayValue"], r"^\d+/\d+$")
+        fin = self.body_at(400, kind="right-rail")
+        self.assertEqual("SO", fin["linescore"]["byPeriod"][-1]["periodDescriptor"]["periodType"])
+        self.assertEqual({"away": 1, "home": 2}, fin["linescore"]["totals"])
+
+    def test_boxscore_shapes(self):
+        self.assertNotIn("playerByGameStats", self.body_at(0, kind="boxscore"))
+        b = self.body_at(400, kind="boxscore")["playerByGameStats"]
+        self.assertEqual(4, len(b["awayTeam"]["forwards"]))
+        self.assertEqual(2, len(b["homeTeam"]["defense"]))
+        self.assertEqual(1, len(b["homeTeam"]["goalies"]))
+        g = b["homeTeam"]["goalies"][0]
+        self.assertEqual(g["shotsAgainst"] - g["goalsAgainst"], g["saves"])
+
+    def test_routes_and_faults(self):
+        gid = self.featured()
+        _, rr = self.get_json(f"/v1/gamecenter/{gid}/right-rail")
+        self.assertIn("seasonSeries", rr)
+        _, bx = self.get_json(f"/v1/gamecenter/{gid}/boxscore")
+        self.assertEqual(int(gid), bx["id"])
+        self.assertEqual(404, self.raw("/v1/gamecenter/1999020001/right-rail")[0])
+        self.admin("/admin/config", {"sports_faults": {"right_rail_status": 503}})
+        try:
+            self.assertEqual(503, self.raw(f"/v1/gamecenter/{gid}/right-rail")[0])
+            self.assertEqual(200, self.raw(f"/v1/gamecenter/{gid}/boxscore")[0])
+            self.assertEqual(200, self.raw(f"/v1/gamecenter/{gid}/landing")[0])
+        finally:
+            self.admin("/admin/config", {"sports_faults": {}})
+        with self.assertRaises(ValueError):
+            sports.check_config({"sports_hub": "yes"})
+
+    def test_postponed_game_has_a_detail(self):
+        sp = self.panel.sports
+        gid = next(x[0] for x in sp.slate(sp.today(sp.anchor), sp.anchor) if x[0].endswith("0907"))
+        _, j = self.get_json(f"/v1/gamecenter/{gid}/landing")
+        self.assertEqual("PPD", j["gameScheduleState"])
+        _, rr = self.get_json(f"/v1/gamecenter/{gid}/right-rail")
+        self.assertIn("teamSeasonStats", rr)
+
+
 if __name__ == "__main__":
     unittest.main()

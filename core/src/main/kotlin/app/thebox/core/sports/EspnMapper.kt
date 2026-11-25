@@ -1,6 +1,7 @@
 // Contract (NFL commit 0, docs/design/m6-nfl.md §1.3, B3): the signatures are fixed; WP-1 writes the bodies.
 package app.thebox.core.sports
 
+import app.thebox.core.sports.hub.PeriodScore
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonNull
@@ -36,7 +37,7 @@ object EspnMapper {
     /** The week or a dated board. [DayBoard.dayKey] is the week key (`w2026-2-9`) or the ET date ("2026-11-08"). */
     fun board(dto: EspnBoardDto, serverDateMs: Long?, logoBase: String): DayBoard? {
         val events = dto.events ?: return null
-        val games = events.mapNotNull { event(it, serverDateMs, logoBase) }
+        val games = events.mapNotNull { event(it, serverDateMs, logoBase, boardFacts = true) }
         val week = weekOf(dto)
         if (week != null) {
             val (prev, next) = neighbours(dto, week)
@@ -107,7 +108,7 @@ object EspnMapper {
 
     // ------------------------------------------------------------------ one event
 
-    private fun event(e: EspnEventDto, serverDateMs: Long?, logoBase: String): GameSnapshot? {
+    private fun event(e: EspnEventDto, serverDateMs: Long?, logoBase: String, boardFacts: Boolean = false): GameSnapshot? {
         val id = e.id.str()?.takeIf { it.isNotEmpty() && it.all(Char::isDigit) } ?: return null
         val start = e.date.str()?.let(::parseUtc) ?: return null
         val comp = e.competitions?.firstOrNull() ?: return null
@@ -189,7 +190,109 @@ object EspnMapper {
             clock = clock,
             finalKind = finalKind,
             detail = detail(sit, away, home, ::sideOfId, breakKind, lastPlay),
+            broadcasts = if (boardFacts) broadcasts(comp.broadcasts) else emptyList(),
+            extras = if (boardFacts) extras(comp, awayC, homeC, state, ::sideOfId) else null,
         )
+    }
+
+    // ------------------------------------------------------------------ Sports Hub board facts (m6-sports-hub.md §7.1, §7.2)
+
+    private val RECORD = Regex("\\d{1,2}-\\d{1,2}(-\\d{1,2})?")
+    private val LEADER_CATEGORIES = mapOf("passingYards" to "passing", "rushingYards" to "rushing", "receivingYards" to "receiving")
+
+    /**
+     * The board's records, quarters and game leaders (day list only; the follow's per-event snapshot carries none). Null
+     * when the board has none of them. Recorded shapes (2026-11-08, -16, -24): `records[]` with the `type: "total"` entry
+     * first; `linescores[]` one per quarter played (from `in`), `period` 1..4, 5+ = overtime; `competitions[].leaders[]`
+     * one leader per category for the whole game (either team), its side from `team.id`. Pre-game leaders are season
+     * leaders and are not read.
+     */
+    private fun extras(
+        comp: EspnCompetitionDto,
+        awayC: EspnCompetitorDto,
+        homeC: EspnCompetitorDto,
+        state: String,
+        sideOf: (String?) -> Side?,
+    ): BoardExtras? {
+        val started = state != "pre"
+        val periods = if (started) periods(awayC.linescores, homeC.linescores) else emptyList()
+        val leaders = if (started) leaders(comp.leaders, sideOf) else emptyList()
+        val x = BoardExtras(record(awayC.records), record(homeC.records), periods, leaders)
+        return x.takeUnless { it.awayRecord == null && it.homeRecord == null && periods.isEmpty() && leaders.isEmpty() }
+    }
+
+    private fun record(el: JsonElement?): String? {
+        val arr = el as? JsonArray ?: return null
+        val objs = arr.mapNotNull { it as? JsonObject }
+        val total = objs.firstOrNull { it.str("type") == "total" } ?: objs.firstOrNull() ?: return null
+        return total.str("summary")?.trim()?.takeIf { RECORD.matches(it) }
+    }
+
+    private fun periods(away: JsonElement?, home: JsonElement?): List<PeriodScore> {
+        val a = lineScores(away)
+        val h = lineScores(home)
+        return a.keys.filter { it in h }.sorted().map { p ->
+            val label = if (p >= OT_FIRST) PeriodLabel(PeriodKind.OT, p - REG_PERIODS) else PeriodLabel(PeriodKind.REG, p)
+            PeriodScore(label, a.getValue(p), h.getValue(p))
+        }
+    }
+
+    /** `linescores[]` → period → points; an entry without `period` takes its 1-based position. */
+    private fun lineScores(el: JsonElement?): Map<Int, Int> {
+        val arr = el as? JsonArray ?: return emptyMap()
+        val out = HashMap<Int, Int>()
+        arr.forEachIndexed { i, e ->
+            val o = e as? JsonObject ?: return@forEachIndexed
+            val p = (o.int("period") ?: (i + 1)).takeIf { it in 1..MAX_PERIODS } ?: return@forEachIndexed
+            val v = o.int("value")?.takeIf { it in 0..MAX_POINTS } ?: o.str("displayValue")?.toIntOrNull()?.takeIf { it in 0..MAX_POINTS }
+                ?: return@forEachIndexed
+            out.putIfAbsent(p, v)
+        }
+        return out
+    }
+
+    private fun leaders(el: JsonElement?, sideOf: (String?) -> Side?): List<BoardLeader> {
+        val arr = el as? JsonArray ?: return emptyList()
+        val out = ArrayList<BoardLeader>()
+        for (c in arr) {
+            val co = c as? JsonObject ?: continue
+            val category = LEADER_CATEGORIES[co.str("name")] ?: continue
+            val list = co["leaders"] as? JsonArray ?: continue
+            for (l in list) {
+                val lo = l as? JsonObject ?: continue
+                val athlete = lo.obj("athlete") ?: continue
+                val side = sideOf(lo.obj("team")?.str("id") ?: athlete.obj("team")?.str("id")) ?: continue
+                val name = (athlete.str("shortName") ?: athlete.str("displayName"))?.trim()?.takeIf { it.isNotEmpty() } ?: continue
+                val line = lo.str("displayValue")?.trim()?.takeIf { it.isNotEmpty() } ?: continue
+                out += BoardLeader(category, side, name, line)
+            }
+        }
+        return out
+    }
+
+    /**
+     * (§7.2) `broadcasts[] {market, names[]}`: "national" → NATIONAL, "home" / "away" → HOME / AWAY, any other market
+     * dropped; country US (ESPN's US scoreboard). Recorded: national only ("CBS", "Fox", "NBC", "ESPN", "Prime Video").
+     */
+    private fun broadcasts(el: JsonElement?): List<TvBroadcast> {
+        val arr = el as? JsonArray ?: return emptyList()
+        val out = ArrayList<TvBroadcast>()
+        for (b in arr) {
+            val o = b as? JsonObject ?: continue
+            val market = when (o.str("market")?.trim()?.lowercase()) {
+                "national" -> Market.NATIONAL
+                "home" -> Market.HOME
+                "away" -> Market.AWAY
+                else -> continue
+            }
+            val names = o["names"] as? JsonArray ?: continue
+            for (n in names) {
+                val name = (n as? JsonPrimitive)?.takeIf { it.isString }?.content?.trim()?.takeIf { it.isNotEmpty() } ?: continue
+                val tv = TvBroadcast(name, market, "US")
+                if (tv !in out) out += tv
+            }
+        }
+        return out
     }
 
     /**
@@ -322,6 +425,8 @@ object EspnMapper {
 
     private const val REG_PERIODS = 4
     private const val OT_FIRST = 5
+    private const val MAX_PERIODS = 10
+    private const val MAX_POINTS = 99
 
     private val EASTERN: ZoneId = ZoneId.of("America/New_York")
 

@@ -261,6 +261,8 @@ object HockeyTechMapper {
             clock = c.clock,
             finalKind = c.finalKind,
             startTbd = startTbd,
+            // (Sports Hub §7.1) The board's shots for the panel; the board has no records or periods.
+            extras = if (aSog != null || hSog != null) BoardExtras(null, null, awayShots = aSog, homeShots = hSog) else null,
         )
         return snap to facts
     }

@@ -102,5 +102,11 @@ object HubFixtures {
      * `clip-goal-live.json`, `clip-recap-385.json` and `master-goal.m3u8`; WP-1's live-phase mapper tests are gated on them
      * (A-S9). Until then this list is empty and those tests are skipped.
      */
-    val LIVE: List<String> = emptyList()
+    val LIVE: List<String> = listOf("p1", "int").flatMap { phase ->
+        // (WP-1) Recorded 2026-11-25 by the lead: p1 = 01:31:31 UTC, 1st period 8:37, VGK 2-0, VGK power play (1541), the
+        // first goal's clip id posted, the second's not yet; int = 01:49:55 UTC, 1st intermission (LIVE + inIntermission).
+        // Query strings scrubbed to `?redacted=1`. No p3 / final in the repo yet.
+        listOf("score-now-385-$phase.json") +
+            listOf("right-rail", "landing", "boxscore").map { "gc-2026020385-$it-$phase.json" }
+    }.map { DIR + it }
 }

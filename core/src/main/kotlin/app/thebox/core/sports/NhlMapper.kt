@@ -27,7 +27,7 @@ object NhlMapper {
         val games = (body["games"] as? JsonArray)
             ?.mapNotNull { (it as? JsonObject)?.let { g -> game(g, dayKey, logoBase, landing = false) } }
             ?: emptyList()
-        return DayBoard(dayKey, body.str("prevDate"), body.str("nextDate"), games)
+        return DayBoard(dayKey, body.str("prevDate"), body.str("nextDate"), games, gameCounts = gameCounts(body["gameWeek"]))
     }
 
     /** `/v1/gamecenter/{id}/landing`: names are `placeName + commonName`; the period is `periodDescriptor.number`. */
@@ -100,7 +100,74 @@ object NhlMapper {
             finalKind = finalKind,
             powerPlay = powerPlay(g.obj("situation")),
             lastGoal = if (landing) lastGoal(g.obj("summary")) else null,
+            // (Sports Hub §4.1) Board facts on the day list only: the follow's landing snapshot stays as before.
+            broadcasts = if (landing) emptyList() else broadcasts(g["tvBroadcasts"]),
+            media = if (landing) null else media(g),
         )
+    }
+
+    // ------------------------------------------------------------------ Sports Hub board facts (m6-sports-hub.md §4.1)
+
+    private val COUNTRY = Regex("[A-Z]{2}")
+    private val DAY_KEY = Regex("\\d{4}-\\d{2}-\\d{2}")
+    private val TRAILING_ID = Regex("(\\d{6,19})$")
+
+    /**
+     * `tvBroadcasts[]` (the day list and the landing): `market` N / H / A, `network` trimmed and non-blank, `countryCode`
+     * upper-cased and kept only as two letters. An entry with another market, no network or an odd shape is dropped; the
+     * same (network, market, country) twice is kept once. Source order (the feed's `sequenceNumber` order).
+     */
+    internal fun broadcasts(el: JsonElement?): List<TvBroadcast> {
+        val arr = el as? JsonArray ?: return emptyList()
+        val out = ArrayList<TvBroadcast>(arr.size)
+        for (e in arr) {
+            val b = e as? JsonObject ?: continue
+            val market = when (b.str("market")?.trim()?.uppercase()) {
+                "N" -> Market.NATIONAL
+                "H" -> Market.HOME
+                "A" -> Market.AWAY
+                else -> continue
+            }
+            val network = b.str("network")?.trim()?.takeIf { it.isNotEmpty() } ?: continue
+            val country = b.str("countryCode")?.trim()?.uppercase()?.takeIf { COUNTRY.matches(it) }
+            val tv = TvBroadcast(network, market, country)
+            if (tv !in out) out += tv
+        }
+        return out
+    }
+
+    /**
+     * The day-list game's video facts: the recap and condensed-game ids are the trailing number of `threeMinRecap` /
+     * `condensedGame` (a path such as `/video/cbj-at-njd-recap-6408793654112`; a bare number is accepted too), and
+     * [GameMedia.goalClips] counts `goals[]` with a numeric `highlightClip`. Null when the game has none of them.
+     */
+    internal fun media(g: JsonObject): GameMedia? {
+        val recap = videoId(g["threeMinRecap"])
+        val condensed = videoId(g["condensedGame"])
+        val clips = (g["goals"] as? JsonArray)?.count { (it as? JsonObject)?.let { goal -> videoId(goal["highlightClip"]) } != null } ?: 0
+        if (recap == null && condensed == null && clips == 0) return null
+        return GameMedia(recap, condensed, clips)
+    }
+
+    /** A video id: a positive JSON number, or the trailing digits of a path (query and fragment ignored). */
+    internal fun videoId(el: JsonElement?): Long? {
+        val p = (el as? JsonPrimitive)?.takeUnless { it.isNull() } ?: return null
+        val text = p.content.trim().substringBefore('?').substringBefore('#').trimEnd('/')
+        val digits = if (p.isString) TRAILING_ID.find(text)?.groupValues?.get(1) else text
+        return digits?.toLongOrNull()?.takeIf { it > 0 }
+    }
+
+    /** `gameWeek[] {date, numberOfGames}` → day key → count; odd entries are skipped. */
+    private fun gameCounts(el: JsonElement?): Map<String, Int> {
+        val arr = el as? JsonArray ?: return emptyMap()
+        val out = LinkedHashMap<String, Int>()
+        for (e in arr) {
+            val o = e as? JsonObject ?: continue
+            val day = o.str("date")?.takeIf { DAY_KEY.matches(it) } ?: continue
+            val n = o.int("numberOfGames")?.takeIf { it >= 0 } ?: continue
+            out[day] = n
+        }
+        return out
     }
 
     // ------------------------------------------------------------------ power play (docs/design/m6-power-play.md §1.2)
