@@ -304,6 +304,32 @@ class RootTreeRuleTest {
         rule.onNodeWithTag(app.thebox.ui.full.SUBTITLE_LAYER_TAG, useUnmergedTree = true).assertDoesNotExist()
     }
 
+    /**
+     * (Sports Hub, docs/design/m6-sports-hub.md §6.5, A-S2; WP-5) A clip on the Sports page: FULL on the whole window, no
+     * layer on any ancestor of the video layer, and the subtitle layer a direct sibling between HoleChrome and the sink.
+     */
+    @Test
+    fun aSportsClipKeepsTheRule() {
+        val host = FakeShellHost(FakeGuideStateMachine(GuideUiState(mode = ScreenMode.SPORTS, tuned = playing())), player = app.thebox.ui.shelltest.FakePlayerHost())
+        val np = app.thebox.player.api.NowPlaying(100, null, "Clip", false, app.thebox.core.playback.StreamFormat.HLS, isClip = true)
+        host.playbackFlow.value = app.thebox.player.api.PlaybackState.Playing(np)
+        val clip = androidx.compose.runtime.mutableStateOf(app.thebox.ui.sports.ClipUi(showing = true, tuneId = 100))
+        rule.setContent { BoxTheme { AppRoot(host, sportsClip = clip, grid = { m -> Spacer(m.graphicsLayer()) }) } }
+        rule.waitForIdle()
+        assertEquals(Viewport.FULL, host.viewports.last())
+        assertEquals(listOf(0, 0, 1920, 1080), windowRect(surfaceView()).toList())
+        val video = layoutOf(VIDEO_LAYER_TAG)
+        for (a in ancestors(video)) {
+            val topLevel = a.parentInfo?.parentInfo == null
+            assertFalse(a.getModifierInfo().any { mi -> LAYER_NAMES.any { mi.modifier::class.java.name.contains(it) } })
+            if (!topLevel) assertFalse(a.getModifierInfo().any { it.extra != null })
+        }
+        val tags = rule.onRoot(useUnmergedTree = true).fetchSemanticsNode().children.mapNotNull { it.config.getOrNull(SemanticsProperties.TestTag) }
+        val order = listOf(VIDEO_LAYER_TAG, AMBIENT_TAG, HOLE_CHROME_TAG, app.thebox.ui.full.SUBTITLE_LAYER_TAG, KEY_SINK_TAG)
+        assertEquals(order, tags.filter { it in order })
+        assertTrue("the Sports layer is inside the key sink", ancestors(layoutOf(SPORTS_TAG)).contains(layoutOf(KEY_SINK_TAG)))
+    }
+
     private companion object {
         val LAYER_NAMES = listOf("GraphicsLayer", "Clip", "Shadow", "RenderEffect", "Alpha")
     }
