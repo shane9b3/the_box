@@ -31,6 +31,7 @@ import app.thebox.core.sports.isChl
 import app.thebox.core.sports.sport
 import app.thebox.core.sports.hub.BoxScore
 import app.thebox.core.sports.hub.ChannelCandidate
+import app.thebox.core.sports.hub.ChannelHorizon
 import app.thebox.core.sports.hub.ClipInfo
 import app.thebox.core.sports.hub.ClipKind
 import app.thebox.core.sports.hub.ClipRef
@@ -673,7 +674,12 @@ class SportsViewModel internal constructor(
                 if (watch != null && slot.label == SlotLabel.WATCH) tune(watch)
                 else _sheet.value = HubSheet.Channels(game.id, archiveOnly = false)
             }
-            SlotAction.GOALS -> _sheet.value = HubSheet.Goals(game.id)
+            SlotAction.GOALS -> {
+                _sheet.value = HubSheet.Goals(game.id)
+                // (Owner bug 2026-11-25) The condensed game's row needs its lookup (thumbnail, duration): made when the
+                // sheet opens, so browsing the grid makes no third lookup per game.
+                ensureClipInfos()
+            }
             SlotAction.WATCH_RECAP -> p.detail?.recapId.let { it ?: game.media?.recapId }?.let { playClips(listOf(ClipRef(it, ClipKind.RECAP, game.id)), 0) }
             SlotAction.BOX_SCORE -> openBoxScore(game)
             SlotAction.MATCHUP -> _sheet.value = HubSheet.Matchup(game.id)
@@ -820,27 +826,49 @@ class SportsViewModel internal constructor(
         detail?.show(game)
         val m = matcher ?: return
         if (game.phase == GamePhase.POSTPONED) return
-        val id = game.id.id
         matchJob?.cancel()
-        matchJob = viewModelScope.launch {
-            val found = runCatching { m.match(game, nowUtcMs(), access()) }.getOrElse { if (it is kotlin.coroutines.cancellation.CancellationException) throw it else emptyList() }
-            matches.value = matches.value + (id to MatchState.Done(found))
-        }
+        matchJob = viewModelScope.launch { runMatch(m, game) }
     }
 
     private fun startMatch(game: GameSnapshot) {
         val id = game.id.id
         if (game.phase == GamePhase.POSTPONED) return
-        if (matches.value[id] is MatchState.Done) return
         val m = matcher
         if (m == null) { matches.value = matches.value + (id to MatchState.Done(emptyList())); return }
+        val old = matches.value[id]
+        if (old is MatchState.Done) return
+        // (Event channels §8.5) A game still beyond the guide keeps its state; one the guide now covers is matched.
+        // (Code review 2026-11-25, UI m3) Only a finished answer: a placeholder left by a cancelled read is read again.
+        if (old is MatchState.BeyondGuide && old.complete && beyondGuide(m, game)) return
         matchJob?.cancel()
-        matches.value = matches.value + (id to MatchState.Finding)
-        matchJob = viewModelScope.launch {
-            val found = runCatching { m.match(game, nowUtcMs(), access()) }.getOrElse { if (it is kotlin.coroutines.cancellation.CancellationException) throw it else emptyList() }
-            matches.value = matches.value + (id to MatchState.Done(found))
-        }
+        // Beyond the guide the slot is the grey Channels at once, never "Finding…" (only the team channels are read).
+        matches.value = matches.value + (id to (if (beyondGuide(m, game)) MatchState.BeyondGuide(emptyList(), m.guideEndMs() == null, complete = false) else MatchState.Finding))
+        matchJob = viewModelScope.launch { runMatch(m, game) }
     }
+
+    /** (Event channels §8.5, owner ruling c) True when [game] starts beyond the guide: no channel search runs. */
+    private fun beyondGuide(m: GameChannelMatcher, game: GameSnapshot): Boolean =
+        game.phase != GamePhase.FINAL && game.phase != GamePhase.LIVE && game.phase != GamePhase.INTERMISSION &&
+            ChannelHorizon.beyondGuide(game.startUtcMs, m.guideEndMs(), nowUtcMs())
+
+    /**
+     * The match of [game] (IO inside the matcher): beyond the guide only the two team channels (`teamChannels`, for the
+     * line); otherwise the full match with the shown day's games as the board (the cities-only rule, §8.4).
+     */
+    private suspend fun runMatch(m: GameChannelMatcher, game: GameSnapshot) {
+        val id = game.id.id
+        val state: MatchState = if (beyondGuide(m, game)) {
+            val teams = guarded { m.teamChannels(game, access()) }
+            MatchState.BeyondGuide(teams, m.guideEndMs() == null)
+        } else {
+            val board = currentCards().map { it.game }.filter { it.id.league == game.id.league }
+            MatchState.Done(guarded { m.match(game, nowUtcMs(), access(), board) })
+        }
+        matches.value = matches.value + (id to state)
+    }
+
+    private inline fun guarded(block: () -> List<ChannelCandidate>): List<ChannelCandidate> =
+        runCatching(block).getOrElse { if (it is kotlin.coroutines.cancellation.CancellationException) throw it else emptyList() }
 
     /** The clip lookups of the shown NHL game (§6.3): the recap and the winning goal's clip; the latest goal's clip. */
     private fun ensureClipInfos() {
@@ -854,6 +882,9 @@ class SportsViewModel internal constructor(
             GamePhase.FINAL -> {
                 (d?.recapId ?: game.media?.recapId)?.let { refs += ClipRef(it, ClipKind.RECAP, game.id) }
                 if (d != null) HubSummary.winningGoal(game, d)?.clipId?.let { refs += ClipRef(it, ClipKind.GOAL, game.id) }
+                // (Owner bug 2026-11-25) The condensed game, only while its Goals sheet is open (the row that shows it).
+                val goalsOpen = (_sheet.value as? HubSheet.Goals)?.gameId == game.id
+                if (goalsOpen) (d?.condensedId ?: game.media?.condensedId)?.let { refs += ClipRef(it, ClipKind.CONDENSED, game.id) }
             }
             GamePhase.LIVE, GamePhase.INTERMISSION ->
                 d?.goals?.lastOrNull { it.clipId != null }?.clipId?.let { refs += ClipRef(it, ClipKind.GOAL, game.id) }

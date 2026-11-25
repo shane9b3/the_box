@@ -1,5 +1,6 @@
 package app.thebox.data.guide
 
+import app.thebox.core.events.EventIndex
 import app.thebox.core.parental.ParentalAccess
 import app.thebox.core.guide.GroupAction
 import app.thebox.core.guide.GuideChannel
@@ -35,6 +36,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.runningFold
 import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.withContext
 import javax.inject.Inject
@@ -59,6 +62,12 @@ class GuideLibraryImpl @Inject constructor(
     private val channelDao: ChannelDao,
     private val clock: WallClock,
     @IoDispatcher private val io: CoroutineDispatcher,
+    /**
+     * (Event channels, docs/design/m6-event-channels.md §6.5, arch B5) The event index: [rowContent] also ticks on its
+     * version, so rows loaded before a rebuild are loaded again with their new events. Null (tests that construct this
+     * class directly): no event ticks.
+     */
+    private val events: EventIndex? = null,
 ) : GuideLibrary {
 
     /**
@@ -123,7 +132,7 @@ class GuideLibraryImpl @Inject constructor(
     }
 
     override suspend fun channels(rowIds: LongArray, from: Int, to: Int): List<GuideChannel?> =
-        withContext(io) { queries.channels(rowIds, from, to) }
+        withContext(io) { queries.channels(rowIds, from, to, waitForEvents = false) }
 
     override suspend fun rowIdOf(identity: ChannelIdentity): Long? = withContext(io) { queries.rowIdOf(identity) }
 
@@ -199,14 +208,25 @@ class GuideLibraryImpl @Inject constructor(
         queries.channels(longArrayOf(id), 0, 1).firstOrNull()
     }
 
-    /** B5/F3: ticks (debounced 500 ms) on any change that can alter a loaded row without changing lineup membership. */
+    /**
+     * B5/F3: ticks (debounced 500 ms) on any change that can alter a loaded row without changing lineup membership.
+     * (Event channels §6.5) That includes an event index rebuild: `GuideChannel.event` comes from the index, and a rebuild
+     * after a refresh can land after the library writes have settled.
+     */
     @OptIn(FlowPreview::class)
     override val rowContent: Flow<Long> =
-        trigger(ROW_CONTENT_TABLES, withRecentCount = false, emitInitial = false)
+        merge(trigger(ROW_CONTENT_TABLES, withRecentCount = false, emitInitial = false), eventTicks())
             .debounce(ROW_CONTENT_DEBOUNCE_MS)
             .runningFold(0L) { n, _ -> n + 1 }
             .drop(1)
             .flowOn(io)
+
+    /**
+     * (Event channels §6.5; code review 2026-11-25, data Q1 and m6) Every event index version the guide's rows were not
+     * loaded with ([GuideQueries.lastServedVersion]), the one current at subscription included: a build that finished
+     * before the guide subscribed still reloads rows loaded without events, and rows that already carry it do not reload.
+     */
+    private fun eventTicks(): Flow<Unit> = events?.version?.filter { it != queries.lastServedVersion }?.map { } ?: emptyFlow()
 
     /**
      * (code review 2026-10-14, G-S6) Changes of [tables] (which leave out `channel_prefs`) plus changes of the guide's

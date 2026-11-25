@@ -24,15 +24,31 @@ import javax.inject.Singleton
  * change is never a channel change for the differ.
  *
  * Triggers: app start (after `EpgRecovery`, after the first frame) calls [backfill]; M5's setting calls [setRule].
+ *
+ * (Event channels WP-2, docs/design/m6-event-channels.md §5.1, §5.3) Event and empty-slot names store their slot
+ * ("Sportsnet+ 09") through [ChannelNamePrefix.strip]. Nothing else changes here: `RULE_VERSION` is
+ * `1 + EventNameParser.VERSION`, so the startup [backfill] re-derives every playlist after a parser bump, and only
+ * [recompute] (under [ImportMutex], in pages) ever raises `name_prefix_ver` (arch B3). [previewCount] skips slot names
+ * (re-review E7).
  */
 @Singleton
-class DisplayNames @Inject constructor(
+class DisplayNames internal constructor(
     private val db: LibraryDatabase,
     private val playlistDao: PlaylistDao,
     private val prefix: ChannelNamePrefix,
     private val importMutex: ImportMutex,
-    @IoDispatcher private val io: CoroutineDispatcher,
+    private val io: CoroutineDispatcher,
+    /** The slot seam: `EventNameParser.slotOf` in production, a fake in tests. */
+    private val slotOf: (String) -> String?,
 ) {
+    @Inject constructor(
+        db: LibraryDatabase,
+        playlistDao: PlaylistDao,
+        prefix: ChannelNamePrefix,
+        importMutex: ImportMutex,
+        @IoDispatcher io: CoroutineDispatcher,
+    ) : this(db, playlistDao, prefix, importMutex, io, { n: String -> app.thebox.core.events.EventNameParser.slotOf(n) })
+
     /** Result of one pass (also logged). */
     data class Pass(val playlistId: Long, val scanned: Int, val changed: Int, val ms: Long)
 
@@ -48,11 +64,24 @@ class DisplayNames @Inject constructor(
         return recompute(playlistId)
     }
 
-    /** How many channels of [playlistId] [rule] would rename (M5 editor preview, §3.12.2). Read-only. */
+    /**
+     * How many channels of [playlistId] [rule] would rename (M5 editor preview, §3.12.2). Read-only. (Event channels,
+     * re-review E7) Event and empty-slot names are skipped: they show their slot under every rule, Off included.
+     */
     suspend fun previewCount(playlistId: Long, rule: NamePrefixRule): Int = withContext(io) {
         var changed = 0
-        forEachPage(playlistId) { page -> for (r in page) if (prefix.strip(r.name, r.group, rule) != null) changed++ }
+        forEachPage(playlistId) { page ->
+            for (r in page) if (!isSlot(r.name, r.group) && prefix.strip(r.name, r.group, rule) != null) changed++
+        }
         changed
+    }
+
+    /** (Code review 2026-11-25, data m1) A bare form counts only in an event-like provider [group]. */
+    private fun isSlot(name: String, group: String?): Boolean = try {
+        !slotOf(name).isNullOrBlank() &&
+            (!app.thebox.core.events.EventNameParser.isBareSlot(name) || app.thebox.core.events.EventGroups.eventLike(group))
+    } catch (e: RuntimeException) {
+        false
     }
 
     suspend fun recompute(playlistId: Long): Pass? = importMutex.withLock {

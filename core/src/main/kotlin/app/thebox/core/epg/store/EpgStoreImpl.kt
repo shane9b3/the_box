@@ -6,6 +6,7 @@ import androidx.sqlite.SQLiteDriver
 import androidx.sqlite.driver.bundled.BundledSQLiteDriver
 import androidx.sqlite.driver.bundled.SQLITE_OPEN_READONLY
 import app.thebox.core.common.BoxLog
+import app.thebox.core.events.EpgFiller
 import app.thebox.core.common.CancelCheck
 import app.thebox.core.common.ImportGate
 import app.thebox.core.common.SourceError
@@ -58,6 +59,8 @@ class EpgStoreImpl(
     private val xmlParser: () -> XmlPullParser,
     private val clock: () -> Long,
     private val forceFts4: Boolean = false,
+    /** (Event channels §8.5) The placeholder-listing test behind [EpgGenerationInfo.dataToMin]; tests inject one. */
+    private val isFiller: (String) -> Boolean = EpgFiller::isFiller,
 ) : EpgStore {
     private val files = GenerationFiles(dir)
     private val parser = XmltvParser(xmlParser)
@@ -150,6 +153,7 @@ class EpgStoreImpl(
             val (from, to) = window(request.nowMs, request.pastDays, request.futureDays)
             val texts = TextDedup(conn, firstId = 1, seedFromDb = false)
             val ids = IdCounter(1)
+            val fillers = FillerTexts(isFiller)
             val stats = ArrayList<EpgSourceStat>(request.sources.size)
             // Closed on every path: an unfinalized statement turns conn.close() into a zombie connection that
             // keeps the deleted .building file's space and the page cache (code review M1, S-8).
@@ -159,7 +163,7 @@ class EpgStoreImpl(
                     val r = importSource(
                         conn, src, ImportMode.REBUILD, resolver, null, from, to, texts, ids,
                         SourceOptions(request.storeDescriptions, request.maxDescriptionChars, request.preferredLanguages),
-                        gate, cancel, progress,
+                        gate, cancel, progress, fillers,
                     )
                     stats += r.stat
                     if (r.failed) {
@@ -184,6 +188,7 @@ class EpgStoreImpl(
             val programmes = conn.longOrNull("SELECT count(*) FROM programme")?.toInt() ?: 0
             val channels = conn.longOrNull("SELECT count(*) FROM epg_channel")?.toInt() ?: 0
             val textCount = conn.longOrNull("SELECT count(*) FROM epg_text")?.toInt() ?: 0
+            val dataTo = dataToMin(fillers, conn, to)
             val now = clock()
             conn.inTransaction {
                 writeSourceStats(conn, stats, now)
@@ -201,6 +206,7 @@ class EpgStoreImpl(
                     EpgSchema.Meta.COMPLETE to "1",
                 )
                 request.buildInputs?.let { meta[EpgSchema.Meta.BUILD_INPUTS] = it }
+                dataTo?.let { meta[EpgSchema.Meta.DATA_TO_MIN] = it.toString() }
                 conn.putMeta(meta)
             }
             conn.exec("PRAGMA journal_mode=DELETE")
@@ -261,13 +267,15 @@ class EpgStoreImpl(
             val ids = IdCounter(maxId(conn, "epg_channel") + 1)
             val (from, to) = window(request.nowMs, request.pastDays, request.futureDays)
             val stats = ArrayList<EpgSourceStat>()
+            // Every kept programme passes through the sessions (untouched channels are dropped), so the marks are complete.
+            val fillers = FillerTexts(isFiller)
             try {
                 for (src in request.sources) {
                     cancel.throwIfCancelled()
                     val r = importSource(
                         conn, src, ImportMode.IN_PLACE, resolver, null, from, to, texts, ids,
                         SourceOptions(request.storeDescriptions, request.maxDescriptionChars, request.preferredLanguages),
-                        gate, cancel, progress,
+                        gate, cancel, progress, fillers,
                     )
                     stats += r.stat
                     if (r.failed) {
@@ -290,6 +298,7 @@ class EpgStoreImpl(
                 conn.exec("ANALYZE")
             }
             val programmes = conn.longOrNull("SELECT count(*) FROM programme")?.toInt() ?: 0
+            val dataTo = if (report == null) dataToMin(fillers, conn, to) else null
             val now = clock()
             conn.inTransaction(immediate = true) {
                 if (report == null) {
@@ -310,6 +319,7 @@ class EpgStoreImpl(
                     val inputs = request.buildInputs
                     if (inputs != null) meta[EpgSchema.Meta.BUILD_INPUTS] = inputs
                     else conn.query("DELETE FROM meta WHERE key = ?", { bindText(1, EpgSchema.Meta.BUILD_INPUTS) }) { it.step() }
+                    putDataTo(conn, meta, dataTo)
                 }
                 conn.putMeta(meta)
             }
@@ -397,6 +407,7 @@ class EpgStoreImpl(
             val ids = IdCounter(maxId(conn, "epg_channel") + 1)
             val (from, to) = window(request.nowMs, request.pastDays, request.futureDays)
             val stats = ArrayList<EpgSourceStat>()
+            val fillers = FillerTexts(isFiller)
             var failed: Long? = null
             try {
                 for (src in request.sources) {
@@ -406,7 +417,7 @@ class EpgStoreImpl(
                     val r = importSource(
                         conn, src, ImportMode.PATCH, null, wanted, from, to, texts, ids,
                         SourceOptions(request.storeDescriptions, request.maxDescriptionChars, request.preferredLanguages),
-                        gate, cancel, progress,
+                        gate, cancel, progress, fillers,
                     )
                     stats += r.stat
                     if (r.failed) {
@@ -418,15 +429,18 @@ class EpgStoreImpl(
                 texts.close() // S-8: also on cancellation and SQLite errors
             }
             val programmes = conn.longOrNull("SELECT count(*) FROM programme")?.toInt() ?: 0
+            // (Event channels §8.5) The sessions saw only the patched channels: classify the other texts, then recompute.
+            val windowTo = conn.textOrNull("SELECT value FROM meta WHERE key = ?") { bindText(1, EpgSchema.Meta.WINDOW_TO_MIN) }?.toIntOrNull()
+            val dataTo = if (windowTo != null) dataToMin(fillers, conn, windowTo, scanRest = true) else null
             conn.inTransaction(immediate = true) {
                 val seq = (conn.textOrNull("SELECT value FROM meta WHERE key = 'patch_seq'")?.toIntOrNull() ?: 0) + 1
-                conn.putMeta(
-                    mapOf(
-                        EpgSchema.Meta.PATCH_SEQ to seq.toString(),
-                        EpgSchema.Meta.PROGRAMME_COUNT to programmes.toString(),
-                        EpgSchema.Meta.CHANNEL_COUNT to (conn.longOrNull("SELECT count(*) FROM epg_channel") ?: 0L).toString(),
-                    ),
+                val meta = hashMapOf(
+                    EpgSchema.Meta.PATCH_SEQ to seq.toString(),
+                    EpgSchema.Meta.PROGRAMME_COUNT to programmes.toString(),
+                    EpgSchema.Meta.CHANNEL_COUNT to (conn.longOrNull("SELECT count(*) FROM epg_channel") ?: 0L).toString(),
                 )
+                if (windowTo != null) putDataTo(conn, meta, dataTo)
+                conn.putMeta(meta)
             }
             return EpgImportReport(
                 mode = EpgImportReport.Mode.PATCH,
@@ -470,6 +484,7 @@ class EpgStoreImpl(
         gate: ImportGate,
         cancel: CancelCheck,
         progress: Throttle,
+        fillers: FillerTexts?,
     ): SourceResult {
         val total = src.file.length()
         val counter = CountingInputStream()
@@ -477,7 +492,9 @@ class EpgStoreImpl(
             conn, src.sourceId, mode, resolver, patchIds, windowFrom, windowTo, texts, ids,
             if (mode == ImportMode.REBUILD) EpgSchema.REBUILD_BATCH_ROWS else EpgSchema.PATCH_BATCH_ROWS,
             gate, cancel,
-        ) { kept -> progress.emit(EpgProgress(src.sourceId, EpgProgress.Stage.PARSING, counter.count, total, kept)) }
+            { kept -> progress.emit(EpgProgress(src.sourceId, EpgProgress.Stage.PARSING, counter.count, total, kept)) },
+            fillers,
+        )
         progress.emit(EpgProgress(src.sourceId, EpgProgress.Stage.PARSING, 0, total, 0), force = true)
         session.begin()
         var truncated = false
@@ -687,6 +704,7 @@ class EpgStoreImpl(
 
     private fun readInfo(c: SQLiteConnection, file: File): EpgGenerationInfo {
         val m = c.readMeta()
+        val windowTo = m[EpgSchema.Meta.WINDOW_TO_MIN]?.toIntOrNull() ?: 0
         return EpgGenerationInfo(
             generation = m[EpgSchema.Meta.GENERATION]?.toLongOrNull() ?: 0,
             patchSeq = m[EpgSchema.Meta.PATCH_SEQ]?.toIntOrNull() ?: 0,
@@ -698,7 +716,75 @@ class EpgStoreImpl(
             windowToMin = m[EpgSchema.Meta.WINDOW_TO_MIN]?.toIntOrNull() ?: 0,
             fts = m[EpgSchema.Meta.FTS] ?: FtsKind.FTS5.id,
             buildInputs = m[EpgSchema.Meta.BUILD_INPUTS],
+            // (Code review 2026-11-25, data Q2) A generation built before `data_to_min` existed: the same value, computed
+            // here in memory and never written (readers open the generation read-only; it is built, then swapped).
+            dataToMin = m[EpgSchema.Meta.DATA_TO_MIN]?.toIntOrNull() ?: legacyDataTo(c, windowTo),
         )
+    }
+
+    /**
+     * (Code review 2026-11-25, data Q2) [EpgGenerationInfo.dataToMin] of a generation that has no `data_to_min` row, by
+     * the build's definition ([guideDataEnd]): a channel counts as real when one of its programmes is not a placeholder
+     * ([isFiller], one call per distinct text; a channel stops being read at its first real listing, so only the
+     * placeholder-only channels are read whole). One pass over `epg_channel` and one keyed probe per channel on the
+     * caller's connection; nothing is written. Null when it cannot be computed (no programmes, or an SQLite error);
+     * `GameChannelMatcherImpl.guideEndMs` then uses a short fallback, never the 7-day window's end.
+     */
+    private fun legacyDataTo(c: SQLiteConnection, windowToMin: Int): Int? {
+        val t0 = System.nanoTime()
+        return try {
+            val verdict = HashMap<Long, Boolean>()
+            val real = ArrayList<Int>()
+            val all = ArrayList<Int>()
+            c.query("SELECT p.text_id, t.title FROM programme p JOIN epg_text t ON t.id = p.text_id WHERE p.epg_channel_id = ?") { probe ->
+                c.query("SELECT id, last_end_min FROM epg_channel WHERE programme_count > 0 AND last_end_min IS NOT NULL") { st ->
+                    while (st.step()) {
+                        val end = st.getLong(1).toInt()
+                        all += end
+                        probe.bindLong(1, st.getLong(0))
+                        var hasReal = false
+                        while (probe.step()) {
+                            val filler = verdict.getOrPut(probe.getLong(0)) { isFiller(probe.getText(1)) }
+                            if (!filler) { hasReal = true; break }
+                        }
+                        probe.reset()
+                        if (hasReal) real += end
+                    }
+                }
+            }
+            guideDataEnd(real, all, windowToMin).also {
+                BoxLog.i(TAG) { "guide data end $it computed for an older generation (window end $windowToMin) in ${(System.nanoTime() - t0) / 1_000_000} ms" }
+            }
+        } catch (e: RuntimeException) {
+            if (!e.isSqliteException()) throw e
+            BoxLog.w(TAG, "guide data end not computed for an older generation: ${e.javaClass.simpleName}")
+            null
+        }
+    }
+
+    /**
+     * (Event channels, docs/design/m6-event-channels.md §8.5) [EpgGenerationInfo.dataToMin] on the build thread: under a
+     * second inside a 26–70 s build. Logged with its cost; a failure only leaves the value out (readers fall back to the
+     * window's end), never the build.
+     */
+    private fun dataToMin(fillers: FillerTexts, conn: SQLiteConnection, windowToMin: Int, scanRest: Boolean = false): Int? {
+        val t0 = System.nanoTime()
+        return try {
+            if (scanRest) fillers.scanRest(conn)
+            fillers.dataToMin(conn, windowToMin).also {
+                BoxLog.i(TAG) { "guide data end $it (window end $windowToMin, ${fillers.filler.size} placeholder texts) in ${(System.nanoTime() - t0) / 1_000_000} ms" }
+            }
+        } catch (e: RuntimeException) {
+            if (!e.isSqliteException()) throw e
+            BoxLog.w(TAG, "guide data end not computed: ${e.javaClass.simpleName}")
+            null
+        }
+    }
+
+    /** Writes [value] into [meta], or deletes an older generation's row when there is none (in place, patch). */
+    private fun putDataTo(conn: SQLiteConnection, meta: MutableMap<String, String>, value: Int?) {
+        if (value != null) meta[EpgSchema.Meta.DATA_TO_MIN] = value.toString()
+        else conn.query("DELETE FROM meta WHERE key = ?", { bindText(1, EpgSchema.Meta.DATA_TO_MIN) }) { it.step() }
     }
 
     private fun isComplete(c: SQLiteConnection): Boolean =

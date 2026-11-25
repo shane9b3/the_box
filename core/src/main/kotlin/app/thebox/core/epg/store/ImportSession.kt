@@ -1,5 +1,6 @@
 package app.thebox.core.epg.store
 
+import androidx.collection.MutableIntIntMap
 import androidx.collection.MutableIntSet
 import androidx.collection.MutableObjectIntMap
 import androidx.sqlite.SQLiteConnection
@@ -45,6 +46,8 @@ internal class ImportSession(
     private val gate: ImportGate,
     private val cancel: CancelCheck,
     private val onBatch: (programmesKept: Int) -> Unit,
+    /** (Event channels §8.5) Marks the placeholder text ids as programmes arrive; null: not tracked. */
+    private val fillers: FillerTexts? = null,
 ) : XmltvHandler {
     private val decision = MutableObjectIntMap<String>(1024)
     val acceptedChannels = MutableIntSet(256)
@@ -171,6 +174,7 @@ internal class ImportSession(
 
     override fun onProgramme(p: XmltvProgramme) {
         val textId = texts.idFor(p)
+        fillers?.mark(textId, p.title)
         val ch = current.toLong()
         val start = p.startMin
         if (!p.hasStop()) {
@@ -346,4 +350,76 @@ internal class ImportSession(
         private const val ACCEPTED = 1
         private const val REJECTED = 2
     }
+}
+
+/**
+ * (Event channels, docs/design/m6-event-channels.md §8.5) The placeholder ("No Event Today", "Next Event: …") text ids of
+ * one generation, for [dataToMin]. [ImportSession] marks each text id once as its programmes arrive (one [isFiller] call
+ * per distinct text); a patch, which sees only the patched channels, then [scanRest]s the texts it never saw.
+ * Build-thread only.
+ */
+internal class FillerTexts(private val isFiller: (String) -> Boolean) {
+    private val checked = MutableIntSet(4096)
+    val filler = MutableIntSet(64)
+
+    fun mark(textId: Int, title: String) {
+        if (checked.add(textId) && isFiller(title)) filler.add(textId)
+    }
+
+    /** Classifies every `epg_text` row not seen yet (a patch: the untouched channels' texts). */
+    fun scanRest(conn: SQLiteConnection) {
+        conn.query("SELECT id, title FROM epg_text") { st ->
+            while (st.step()) {
+                val id = st.getLong(0).toInt()
+                if (!checked.contains(id)) mark(id, st.getText(1))
+            }
+        }
+    }
+
+    /**
+     * The end of usable guide data (epoch minutes): the median `last_end_min` over the channels with programmes that
+     * hold at least one real listing, capped at [windowToMin]. Channels holding only placeholders are left out (for the
+     * owner, BossSports' blocks stop hours before the real listings do, §2.4). With no such channel, the median over
+     * every channel with programmes; with none at all, null. One grouped count per placeholder text id
+     * (`programme_by_text` covers it) and one pass over `epg_channel`.
+     */
+    fun dataToMin(conn: SQLiteConnection, windowToMin: Int): Int? {
+        val fillerRows = MutableIntIntMap()
+        if (filler.isNotEmpty()) {
+            conn.query("SELECT epg_channel_id, count(*) FROM programme WHERE text_id = ? GROUP BY epg_channel_id") { st ->
+                filler.forEach { id ->
+                    st.bindLong(1, id.toLong())
+                    while (st.step()) {
+                        val ch = st.getLong(0).toInt()
+                        fillerRows[ch] = fillerRows.getOrDefault(ch, 0) + st.getLong(1).toInt()
+                    }
+                    st.reset()
+                }
+            }
+        }
+        val real = ArrayList<Int>()
+        val all = ArrayList<Int>()
+        conn.query("SELECT id, programme_count, last_end_min FROM epg_channel WHERE programme_count > 0 AND last_end_min IS NOT NULL") { st ->
+            while (st.step()) {
+                val id = st.getLong(0).toInt()
+                val end = st.getLong(2).toInt()
+                all += end
+                if (fillerRows.getOrDefault(id, 0) < st.getLong(1).toInt()) real += end
+            }
+        }
+        return guideDataEnd(real, all, windowToMin)
+    }
+}
+
+/**
+ * (Event channels §8.5) The one definition of the guide's data end, shared by the build ([FillerTexts.dataToMin]) and the
+ * in-memory value of an older generation (`EpgStoreImpl.legacyDataTo`): the median of [real] (the `last_end_min` of
+ * channels with at least one real listing), else of [all] (every channel with programmes), capped at [windowToMin];
+ * null when both are empty. Sorts the list it uses.
+ */
+internal fun guideDataEnd(real: MutableList<Int>, all: MutableList<Int>, windowToMin: Int): Int? {
+    val pick = if (real.isNotEmpty()) real else all
+    if (pick.isEmpty()) return null
+    pick.sort()
+    return minOf(pick[(pick.size - 1) / 2], windowToMin)
 }

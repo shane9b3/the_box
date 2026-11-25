@@ -112,6 +112,11 @@ interface GuideNavigator {
 interface TimeLabels {
     /** "19:30" / "7:30" for display epoch minute [min]. Returned strings are interned table entries. */
     fun hm(min: Int): String
+    /**
+     * (Code review 2026-11-25, UI m2) "19:30" / "7:30 PM": [hm] with the period in the 12 h form, for sentences (the
+     * ruler and cells drop it). The default is [hm].
+     */
+    fun hmPeriod(min: Int): String = hm(min)
     /** Minute of day in the device zone. */
     fun minuteOfDay(min: Int): Int
     /** Local day number (epoch day in the device zone). */

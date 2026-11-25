@@ -1,6 +1,7 @@
 package app.thebox.data.di
 
 import app.thebox.core.epg.EpgStore
+import app.thebox.core.events.EventIndex
 import app.thebox.core.guide.GuideDataWindowSource
 import app.thebox.core.guide.GuideLibrary
 import app.thebox.core.guide.GuideRowsCacheFactory
@@ -13,6 +14,7 @@ import app.thebox.core.guide.feed.GuideRowsCacheImpl
 import app.thebox.core.guide.feed.GuideWindowPagerImpl
 import app.thebox.core.text.ChannelNamePrefix
 import app.thebox.core.text.ChannelNamePrefixImpl
+import app.thebox.data.events.EventIndexImpl
 import app.thebox.data.guide.GuideDataWindowSourceImpl
 import app.thebox.data.guide.GuideLibraryImpl
 import app.thebox.data.guide.GuideSearchImpl
@@ -40,6 +42,8 @@ abstract class GuideDataModule {
     // (M5, WP-A) GuideSettingsSource → PersistedGuideSettings, bound in data/.../settings/SettingsDataModule.
     @Binds abstract fun syncFeed(impl: SyncFeedImpl): SyncFeed
     @Binds abstract fun dataWindow(impl: GuideDataWindowSourceImpl): GuideDataWindowSource
+    /** (Event channels commit 0, docs/design/m6-event-channels.md §5.2) The event index; a stub until WP-2. */
+    @Binds abstract fun eventIndex(impl: EventIndexImpl): EventIndex
 
     companion object {
         @Provides fun rowsCacheFactory(): GuideRowsCacheFactory = GuideRowsCacheFactory { library, scope -> GuideRowsCacheImpl(library, scope) }

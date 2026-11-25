@@ -59,6 +59,12 @@ data class PlaylistDetail(
     val namePrefixMode: String,
     val namePrefixCustom: String?,
     val refreshIntervalH: Int,
+    /**
+     * (Event channels commit 0, docs/design/m6-event-channels.md §10, re-review E14) The interval the scheduler uses:
+     * `EventConstants.EVENT_REFRESH_H` while [refreshIntervalAuto] is set and [eventCount] ≥ `EVENT_REFRESH_MIN`, else
+     * [refreshIntervalH]. Declared after [refreshIntervalH] so it can default to it.
+     */
+    val effectiveIntervalH: Int = refreshIntervalH,
     val orderMode: String,
     val usePlaylistEpg: Boolean,
     val userAgent: String?,
@@ -79,6 +85,12 @@ data class PlaylistDetail(
     val maxConnectionsOverride: Int?,
     val ignoreTlsErrors: Boolean,
     val lastReport: RefreshReport?,
+    /** (Event channels commit 0, §10) `playlist.refresh_interval_auto`: true until the user picks an update interval. */
+    val refreshIntervalAuto: Boolean = false,
+    /** (Event channels commit 0, §5.2) `playlist.event_count`: live events after the last index build. */
+    val eventCount: Int = 0,
+    /** (Event channels commit 0, §5.5) `playlist.hide_empty_events`: the "Hide channels with no event" switch. */
+    val hideEmptyEvents: Boolean = false,
 )
 
 /** A playlist's source with its secrets, for the edit-in-place page (memory only, never logged). */
@@ -110,6 +122,7 @@ interface PlaylistAdmin {
     suspend fun setNamePrefix(playlistId: Long, mode: String, customJson: String?)
     suspend fun previewNamePrefix(playlistId: Long, mode: String, customJson: String?): PrefixPreview
     suspend fun setEnabled(playlistId: Long, on: Boolean)
+    /** (Event channels commit 0, §10) Also clears `refresh_interval_auto`, so the user's choice stands (WP-2). */
     suspend fun setRefreshInterval(playlistId: Long, hours: Int)
     suspend fun setOrder(playlistId: Long, mode: String)
     suspend fun setUsePlaylistEpg(playlistId: Long, on: Boolean)
@@ -123,6 +136,12 @@ interface PlaylistAdmin {
     suspend fun setPadding(playlistId: Long, beforeSec: Int?, afterSec: Int?)
     suspend fun setMaxConnections(playlistId: Long, max: Int?)
     suspend fun setIgnoreTls(playlistId: Long, on: Boolean)
+    /**
+     * (Event channels commit 0, docs/design/m6-event-channels.md §5.5, re-review E14) Stores `hide_empty_events`, then
+     * re-runs the hide pass under `ImportMutex` (WP-2). The default body does nothing, so commit 0 and the test fakes
+     * compile.
+     */
+    suspend fun setHideEmptyEvents(playlistId: Long, on: Boolean) {}
 }
 
 /** A group in the onboarding review (§3.4.6). */

@@ -61,6 +61,20 @@ class GuideScrollBenchmark(private val perf: String) {
     @Test
     fun scrollRight10Hz() = journey { repeatKey(KeyEvent.KEYCODE_DPAD_RIGHT, 100, 100) }
 
+    /**
+     * (Event channels, docs/design/m6-event-channels.md §11.2) The event page: with the panel up with `--event-catalog`
+     * (ids 80–129: about 30 % of a page's rows are event channels, several over 4 h placeholder blocks), CH− pages to the
+     * event rows, then 100× DOWN at 25 Hz and 50× RIGHT at 10 Hz across them, so every window build runs the overlay.
+     * Gate: `guide-draw` and frame P90 within 0.5 ms of [scrollDown25Hz] on the same panel (the window build itself is
+     * logged by `GuidePager` at debug level: `timing query=… build=…`).
+     */
+    @Test
+    fun scrollEventRows25Hz() = journey {
+        repeatKey(KeyEvent.KEYCODE_CHANNEL_DOWN, 10, 250)
+        repeatKey(KeyEvent.KEYCODE_DPAD_DOWN, 100, 40)
+        repeatKey(KeyEvent.KEYCODE_DPAD_RIGHT, 50, 100)
+    }
+
     @Test
     fun pageChannelUp() = journey {
         repeatKey(KeyEvent.KEYCODE_CHANNEL_DOWN, 20, 250) // page down first, so CH+ has rows to page back over

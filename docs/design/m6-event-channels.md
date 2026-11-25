@@ -267,6 +267,9 @@ Examples:
 - "31 Dec" read on Jan 1 gives the past Dec 31.
 - "1 Jan" read on Dec 30 gives the next Jan 1.
 - A June name read in November gives the past June.
+- (Integration correction, 2026-11-25) The window spans 390 days, so every day of the year except 29 Feb has a valid
+  instant in it: "20 Jun" read on 2027-04-30 gives **2027-06-20** (51 days ahead), not `None`. `None` from the year rule
+  only happens for 29 Feb when no leap day lies in the window.
 
 Shape C uses its own year; the year 2098 means an empty slot.
 
@@ -304,6 +307,8 @@ The guide shows the end as "about" (U-E-N2, §6.4).
 | 17 | relative day | `TV2 NO 19: UEFA Champions League Porto - Napoli I dag 20:00` | 17 | **no**: Norwegian "today" only |
 | 18 | weekday + ordinal | `QMJHL 18: Charlottetown @ Rimouski - #529 \| Sat 8th 9:00PM` | 9 | **no**: no month (stale, Nov 8) |
 | 19 | time only | `LIVE EVENT 02 - 7:45pm USAC Jason Leffler Memorial Kern` | 1 | **no**: no date |
+| 20 | bare month-day (§18) | `OHL 03 \| 2026 LONDON KNIGHTS VS ERIE OTTERS NOV 25 07:00PM ET` | 0 in the copy (the owner's report, Nov 25) | yes, `MONTH_DAY_BARE`: the leading season dropped, ALL CAPS set in title case |
+| 21 | date without a time | `WHL 16: WHL Top 10 Plays of the Week: March 7, 2025` | — | **no**: not an event |
 
 ### 3.7 Matchup sides (`EventMatchup`, `:core`; arch S1, S2)
 
@@ -901,7 +906,9 @@ Worked cases (Golden Knights at Oilers, 8:00 PM ET, Nov 24):
   (3,266 for the owner).
 - `dataToMin` is the median `last_end_min` over the other channels with programmes, capped at `window_to_min`.
 - Cost: under 1 s on the build thread inside a 26–70 s build.
-- Older generations have no value; `guideEndMs()` then uses `window_to_min`.
+- Older generations have no value; `guideEndMs()` then uses `window_to_min`. (Amended 2026-11-25, code review data Q2,
+  §18: `EpgStoreImpl.readInfo` computes it in memory by the build's definition; with no value at all, `guideEndMs()` is
+  the build time plus 24 h, capped at `window_to_min`.)
 
 **Arch N5 rejected.** Arch N5 proposed computing this at match time from the open reader. The placeholder scan over
 `epg_text` measured 0.9 s on the Mac (about 3–5 s on the Stick) and would land on the first hub open. Its "mapped
@@ -911,7 +918,8 @@ are mapped (§2.4).
 **Rule.**
 - `SportsViewModel.startMatch`: if `ChannelHorizon.beyondGuide(start, m.guideEndMs(), now)`, set
   `MatchState.BeyondGuide(teams = m.teamChannels(game, access), noGuide = m.guideEndMs() == null)` and run no other
-  stage. Slot 2 is a **disabled** "Channels" (the owner's grey chip).
+  stage. Slot 2 is a **disabled** "Channels" (the owner's grey chip). (Amended 2026-11-25, owner ruling, §18: with team
+  channels found the chip is enabled, "Channels (n)", and opens them; it is grey only with none.)
 - `now + 12 h` keeps tonight's games when the guide is stale or missing. Team channels and event names need no guide.
 - For the owner (a guide about 24 h deep, §2.4), tonight's and tomorrow-night's games before about 1 AM ET of the day
   after tomorrow are matched; later games are grey until the next morning's guide build.
@@ -948,7 +956,8 @@ Within each class: favourite, watch count, national before regional, playlist or
 - Team channels keep the residue key.
 
 **Cap.** `HUB_MATCH_MAX = 8` rows besides the team channels. When stage E found any event and none made the 8, the 8th
-row is the best event row.
+row is the best event row. (Superseded 2026-11-25 by the owner's rulings, §18: no cap, no reserved row, no folded
+variants; feeds of one channel grouped; event rows exact before cities-only, then nearest the start.)
 
 **Watch slot.** Unchanged rule (exactly one CONFIRMED candidate and imminent). NHL and NFL games therefore show
 "Channels (n)", and the sheet opens with row 0, the user's team channel, focused (owner ruling b).
@@ -1181,7 +1190,8 @@ is `America/New_York` unless stated. Real names (format examples):
 |---|---|---|---|
 | Year wrap | `NHL 01: Kraken vs. Canucks (12.31 10:00 PM ET)` | 2027-01-01T05:00Z | 2026-12-31 |
 | Year wrap | `Sportsnet+ 03: Oilers @ Flames @ 1 Jan 03:00 PM ET` | 2026-12-30 | 2027-01-01 |
-| Stale name (arch S3) | `MLB 01: Yankees @ Red Sox @ 20 Jun 07:05 PM ET` | Nov 24 | June 20 **2026**; with `now` on Apr 30 2027, `None` (outside the window) |
+| Stale name (arch S3) | `MLB 01: Yankees @ Red Sox @ 20 Jun 07:05 PM ET` | Nov 24 | June 20 **2026**; with `now` on Mar 20 2027, still June 20 2026; with `now` on Apr 30 2027, **June 20 2027** (corrected at integration: the window always holds a June 20; see §3.4) |
+| Leap day | `NHL 01: Kraken vs. Canucks (2.29 8:00 PM ET)` | Feb 20 2027 / Feb 20 2028 | `None` (no leap day in the window; `slotOf` still `NHL 01`) / Feb 29 2028 |
 | D.M order (arch S12) | `(5.11 20:00 CET)` | Nov 4 | Nov 5 |
 | D.M order (arch S12) | `(5.11 20:00 ET)` | Nov 4 | May 11 when that is valid and in the window, else `None` |
 | Invalid | `(2.30 …)`, `25:00 PM`, `13:00 PM` | — | None |
@@ -1416,6 +1426,83 @@ Owns and lands:
 - **Gate:** commit 0 passes `./gradlew :core:test :app:assembleDebug :data:compileDebugUnitTestKotlin
   :ui:compileDebugUnitTestKotlin` and `lintAll` on its own (E14: the smoke build compiles neither test source set).
 
+#### Commit 0 rulings (2026-11-25)
+
+Where §4 left a signature open, commit 0 chose as follows. Every choice is in the code with its KDoc; the work packages
+build against these.
+
+1. **`EventEntry.name`** (a sixth, last constructor parameter): the raw provider name. Stage E fills
+   `EventFacts.name` from it, so the hints read the whole name (§8.4) with no second query.
+2. **`EventIndex.rebuild(): EventSnapshot`**: rebuilds whatever the key says and returns the new snapshot. It is
+   serialised with `current()`'s builds. `RefreshRepository` calls it after `finish` (§5.2, §10).
+3. **Empty values.**
+   - `EventSnapshot.EMPTY` (companion) is version 0 and has no entries. The commit 0 `EventIndexImpl` always answers it.
+   - `ChannelEvent.EMPTY = ChannelEvent(EMPTY, null, null, 0, 0, ASSUMED)` is what `GuideQueries.channels` gives an
+     `isEmptySlot` name that has no index entry (§5.4).
+4. **Where Appendix A lives.**
+   - The hub's constants are in `SportsConstants`: `HUB_EVENT_BEFORE_MIN`, `HUB_EVENT_AFTER_MIN`,
+     `HUB_CITIES_CONFIRM_MIN`, `HUB_BOARD_CLASH_MIN`, `HUB_LOOKAHEAD_MIN` and `HUB_TEAM_QUERY_MAX`. `HUB_MATCH_MAX = 8`
+     already existed.
+   - Every other constant is in a new `app.thebox.core.events.EventConstants`, so the guide, `epg`, search and the
+     scheduler never import `sports`. It holds the search limit and de-duplication window, `EVENT_MAY_BE_ON_MIN`, the
+     refresh default, the zone sample count and hysteresis factor, the year window, the four durations and
+     `EVENT_TEXT_ID`.
+5. **Stub answers.**
+   - `parse` returns `None`; `slotOf`, `EventMatchup.of`, `TeamNames.of`, `sideMatch`, `TeamChannelRule.teamOf` and
+     `EventGameRule.grade` return null.
+   - `isEmptySlot`, `isFiller`, `groupIsTeams` and `placeShared` return false; `all` and `tokens` return empty.
+   - `EventDuration.minutes` returns `EVENT_MIN_SHOW` (60).
+6. **`GuideQueries`.**
+   - `teamChannelCandidates(word: String, access: ParentalAccess, limit: Int): List<GuideQueries.TeamChannelHit>`, with
+     `TeamChannelHit(id, playlistId, name, displayName, group, tvgId)`: `name` is `c.name`, `displayName` is the
+     COALESCE, and `group` is `g0.name`.
+   - `channels()` reads `events?.current()` once per block, before the library statements. `BLOCK_SELECT` gains `c.name`
+     as column 21.
+7. **`PlaylistDao`.**
+   - `setRefreshInterval` also writes `refresh_interval_auto = 0`, which is §10's "picking a value clears auto". Its only
+     caller is the settings row, and nothing reads the flag before WP-2.
+   - New setters: `setHideEmptyEvents`, `setRefreshIntervalAuto` (backup merge and tests), `setEventZone(id, zone, n)` and
+     `setEventCount`.
+   - New reads: `eventKeys()` and `observeEventKeys()` give enabled playlists only as `PlaylistEventKey(id, refreshSeq,
+     lastRefreshAt, serverZone, eventZone, eventZoneN, eventCount, refreshIntervalH, refreshIntervalAuto,
+     hideEmptyEvents)`.
+   - `PlaylistEntity.refreshIntervalAuto` defaults to true, like the column, so a new playlist starts on auto.
+8. **Migration.** It runs the five `ADD COLUMN`s, then
+   `UPDATE playlist SET refresh_interval_auto = 0 WHERE refresh_interval_h != 24`.
+9. **Strings.**
+   - The reminder strings (`reminder_event_moved`, `reminder_event_now_on`) go in `strings_guide.xml`, next to
+     `guide_reminder_*`. That file is the existing reminder strings file.
+   - The setup keys are `SetupText.ROW_HIDE_EMPTY_EVENTS`, `HIDE_EMPTY_EVENTS_DESC` and `INTERVAL_EVENT_DEFAULT`.
+10. **`MatchState.BeyondGuide` stub.** The slot is `HubSlot(CHANNEL, CHANNELS, enabled = false)`, and `channelLine`
+    returns null. `SportsViewModel` never sets the state before WP-4.
+11. **Fakes.**
+    - `FakeGameChannelMatcher`: the four-argument `match` records its board in `boards` and delegates to the
+      three-argument one, which records `matchCalls`. It also has `guideEnd` (what `guideEndMs()` answers), plus
+      `teamAnswers` and `teamCalls`.
+    - `FakeEventIndex(entries)`: `put(entries)` publishes a new snapshot and bumps `version`. It counts `current()` and
+      `rebuild()` calls. `FakeEventIndex.event(...)` builds an EVENT entry.
+    - `FakeEventSnapshot` scans linearly.
+12. **`events.py` hooks** for WP-4: `categories(cfg)`, `channels(cfg, now_unix)`, `programmes(cfg, ch, t_from, t_to,
+    tz)` and `admin(h, path, data)`, on the route `/admin/events`. The stub validates `shift_min` (an integer) and
+    `names` (`"next"` or `"reset"`), and otherwise does nothing.
+13. **`RULE_VERSION` goes from 1 to 2 in commit 0.**
+    - With the stub parser, the startup backfill re-derives every display name once and writes no row (`slotOf` is
+      null), so nothing on screen changes.
+    - **Caveat:** a device that runs a build between commit 0 and the WP-1 + WP-2 merge stamps `name_prefix_ver = 2`.
+      It would then not re-run the backfill when the real `slotOf` lands.
+    - Ruling: no such intermediate build goes to the owner's device. If one does, integration bumps
+      `EventNameParser.VERSION` to 2 before release, which costs only one backfill and one index rebuild.
+14. **Tests in commit 0.**
+    - `core/.../events/EventContractsTest`:
+      - every `ProgrammeFlags` and `CellFlags` constant is one bit and disjoint from the others (reflection);
+      - `epgBasisOf` is unchanged without an event and follows a renamed or moved event;
+      - the §11.1 `ChannelHorizonTest` cases;
+      - `EventSnapshot.EMPTY`;
+      - the `RULE_VERSION` link.
+    - `data/.../db/Migration5To6Test`: the five columns, the auto rule, no other table touched, and the new DAO
+      methods.
+    - The stubs' answers are deliberately not pinned, so WP-1 never edits a commit 0 test.
+
 ### Packages
 
 | WP | Owns (every file it touches) | Model | Depends on | Size |
@@ -1604,3 +1691,191 @@ E1–E14 are applied as the reviewer specified (§15.4). The lead accepted all f
 5. **Integration:** the §11.4 emulator states, the Fire TV Stick gates (§10, §11.2), the code reviews, the release
    gates, and the decision note `docs/decisions/2026-11-25-event-channels.md`.
 
+---
+
+## 17. Integration notes (2026-11-25)
+
+Recorded by the integration pass (Opus) after WP-1 to WP-4 merged on `events`.
+
+### 17.1 WP-1's settled readings
+
+Where §3 left a reading open, WP-1 settled it as follows (`EventNameParser` KDoc, `names.tsv`):
+- `slotOf` and `isEmptySlot` read the structure only, with no clock. A date that exists only in some years (29 Feb),
+  or that lies outside the year window, still has a slot, although `parse` gives `None` for it.
+- An empty slot may also be written `<slot> - NO EVENT` ("LIVE EVENT 02 - NO EVENT"; §2.1 counts it).
+- With a European zone (§3.2), a shape B or E date that is valid only as D.M is read as D.M.
+- A local time in a DST overlap takes the later offset; a time in a gap moves forward by the gap (`java.time`).
+- §3.4's stale-name example is corrected above: the year rule gives `None` only for 29 Feb.
+
+### 17.2 Files touched outside the §12 lists
+
+| File | By | Why |
+|---|---|---|
+| `core/.../editor/EditorTexts.kt` (`EditorText.D_NO_EVENT`; integration: `D_RULE_ANY`) and `ui/.../editor/ResourceEditorTexts.kt` | WP-2, integration | the switch's own reason in the editor's menu (E1); a reason for several targets that names both causes |
+| `core/.../settings/tree/BackupRows.kt` (`BackupText.HIDDEN_NO_EVENT`) and `ui/.../backup/BackupTextsImpl.kt` | WP-2 | the Hidden channels page's reason (E1) |
+| `core/.../editor/ChannelEditorContracts.kt` (`EditorChannelRow.noEvent`) | WP-2 | the row says it is hidden by the switch, not by a user rule |
+| `core/src/test/.../setup/SetupTestFakes.kt` | WP-2 | the new `PlaylistDetail` fields in the setup fakes |
+| `app/.../reminder/ReminderModule.kt` | WP-3 | builds `GuideReminderEventCheck(queries, events, store)` for `ReminderSchedulerImpl` (§6.6) |
+| `data/.../backup/BackupRestorer.kt` | integration | a pre-v6 backup has no `refresh_interval_auto`: the migration's rule applies (auto only for 24 h) |
+| `core/.../guide/state/GuideStateMachineImpl.kt`, `ui/.../reminder/ReminderCard.kt` | integration | a gone event's card has no "Switch now" (§6.6) |
+| `core/.../guide/feed/GuideWindowPagerImpl.kt` | integration | a placeholder piece whose raw start is the event's start is dropped (§6.1) |
+| `data/.../sports/GameChannelMatcherImpl.kt` | integration | a same-name twin in the same group is not a variant (no "Also in <own group>", §9.1) |
+| `ui/res/values/strings_sports_hub.xml` | integration | `reason_network`, `reason_network_any` and `reason_sport_listing` shortened to one sheet line (§9.1) |
+
+### 17.3 Where the hide switch sits
+
+"Hide channels with no event" is an **advanced** row of the playlist's settings page, next to Update interval, not one
+of the simple rows: the playlist page is limited to seven simple rows (`docs/design/m5-setup-settings.md`). §5.5 said
+"shown on every playlist page"; it is, under Advanced. The owner was informed; no change unless the owner asks.
+
+### 17.4 Integration changes
+
+- **Reminder card, gone event (§6.6).** "Switch now" would tune the old slot, so the card offers only Dismiss (focused;
+  Left does nothing). The card's text keeps the reason and the next step ("… Search for it to find where it is now.").
+- **Guide, a placeholder that starts with the event (§6.1).** `info()` keys on the raw start and answers the event on
+  its start minute, so the clipped tail of such a block showed the event's details. The overlay drops a placeholder
+  piece whose raw start equals the event's start; that time reads as a gap ("No information", or §6.3's text after an
+  ended event).
+- **"Also in" (§9.1).** `ChannelCandidate.group` holds either the other group of a same-name twin or the row's own
+  group. A same-name twin in the same group (or with no group) is no longer listed as a variant, so the sheet never
+  reads "Also in <its own group>".
+- **Channel editor, several targets (§5.5).** The summary is an SQL count and cannot split a user rule from the switch,
+  so Show's disabled reason for several targets is `editor_d_rule_any` ("Hidden by a rule or by “Hide channels with no
+  event”. Change it in Hide rules or in this playlist's settings."). One target keeps the precise reason.
+- **Sheet reasons (§9.1).** `reason_network` reads "Sportsnet carries this game in Canada.", `reason_network_any`
+  "TNT carries this game.", `reason_sport_listing` "In your guide at 7:00 PM: NHL Hockey" (time first). The caveat
+  sentences went, as elsewhere in the sheet (U-E-S7): a reason that does not start "In your guide" is not a listing.
+- **Backup (§4.5).** A pre-v6 backup restores `refresh_interval_auto` by the migration's rule.
+- **One-line texts seen cut on the owner's emulator (§9.1, §9.3).** `reason_guide` is time first ("In your guide,
+  7:00–9:30 PM: NHL Hockey : …"; at Largest the title used to push the time out). The switch's description reads "Hides
+  NO EVENT and empty channels, favourites too, until they list an event." (the old one was cut at "…when your p…"). The
+  two hidden-reason strings start "Has no event." so "settings" is no longer cut on the Hidden channels page.
+
+
+### 17.5 Cold start (amended by §18.5)
+
+The index warm-up, the stale-key read and the guide's row loader changed after the code reviews; §18.5 records the
+current behaviour. `EventIndex` gained `peek()` and `prefetch()`, and `GuideQueries.channels` gained `waitForEvents`.
+
+---
+
+## 18. Code review changes (2026-11-25)
+
+The fix pass after `docs/review/2026-11-25-event-channels-code-review-data.md` and
+`docs/review/2026-11-25-event-channels-code-review-ui.md`, with the owner's rulings of the same day. Each review ends
+with a "Resolution" section mapping its findings to this one.
+
+### 18.1 Owner rulings (2026-11-25)
+
+1. **The Channels sheet lists every matched channel.** No cap (`HUB_MATCH_MAX` removed), no reserved event row, no
+   folded variants. Feeds of one channel (the same playlist and the same alias key, event key or name residue, or the
+   same guide channel: "NESN" and "4K: NESN", SD / HD / FHD) form a group: the best-ranked first with its full reason,
+   then the others in provider order, each its own selectable row whose reason is "Same channel, another feed" (a
+   group joined only by one event, two slots naming the same game, keeps each row's own reason). Team channels stay
+   first. "Channels (n)" and the hub line's "+n more" count every row. `ChannelCandidate.variants` is always empty from
+   the matcher (the sheet still draws it when set); `ChannelCandidate.anotherFeed` is new. The matcher adds no per-row
+   query (one `facts` statement per 900 ids), so no row ceiling was added. The sheet is a lazy list; a 30-row test pins
+   D-pad scrolling, the focused row in view and no focus loss at either end.
+2. **Beyond the guide, the Channels chip opens the team channels.** With at least one team channel found, slot 2 is
+   enabled ("Channels (2)") and the sheet lists them, the user's team (else home) first, reason "Team channel: always
+   shows <Team> games". A team channel tunes from the sheet before its game too (it is always on); other rows keep the
+   "not yet" rule. The chip is grey only with no team channel, and then §18.3's spoken reason applies. The line reads
+   "Not in guide yet: Bruins and Jets team channels" (both nicknames, else both abbreviations, else one nickname, else
+   one abbreviation; never "On TV", which reads as on now). Every league with team channels.
+3. **A slot prefix or a group label is never evidence of the league** ("CHL NN" slots carry AHL games). Leagues without
+   a team table (OHL, WHL, QMJHL) match an event only on the game's own team names (§18.6).
+
+### 18.2 Search
+
+- **A team's place counts only as a whole matchup side** (both reviews' M1). A query run that equals a team's nickname
+  or full name still matches as a word prefix anywhere ("bruins" finds "UCLA Bruins @ USC"); each of the team's places
+  matches only when it equals a side of `EventMatchup.of(title)` (both folded by `TeamNames.tokens`) and the name and
+  group carry none of `EventGameRule`'s other-sport hints for the team's league (`EventGameRule.otherSport`, new).
+  "canadiens" and "avalanche" find "Montreal @ Colorado"; "bruins" no longer finds Boston University or Boston College;
+  "kings" / "rams" no longer find the Lakers, La Liga or Las Vegas; "rangers" no longer finds NYCFC.
+- **No duplicate list key** (UI M2). An event hit is dropped when the same channel has a kept guide hit at the same raw
+  start (a guide shift moves only the displayed start), and `ProgrammeHit.fromName` makes the Search list's key unique
+  per hit kind.
+
+### 18.3 Hub
+
+- **The grey chip's reason is spoken** (UI M3). While the chip is grey, the slot that takes focus on entering the panel
+  is described "<label>. Channels unavailable: <line>" and the grey slot "Channels, unavailable. <line>"; the panel keeps
+  its own description for touch.
+- **A cancelled team-channel read is read again** (UI m3). The placeholder `BeyondGuide` carries `complete = false`, and
+  only a complete one is kept on the next visit.
+- **The hub line names both team channels** when both are listed and it fits ("7:00 PM: Bruins and Jets team channels ·
+  +8 more"), then one nickname, then abbreviations; the order is the candidates' (the user's team, else home).
+- **Event rows**: inside a class, matched by name before cities-only, then nearest the game's start.
+- **The sheet's event reason** drops the matchup the sheet's title already names: "Channel name: 7:00 PM · Jets
+  Broadcast" (`EventMatchup.rest`), "Channel name lists this game at 7:00 PM" when nothing else is left, and the untimed
+  forms. The row's spoken description keeps the whole title.
+
+### 18.4 Guide end of an older generation (data Q2, UI m4)
+
+`EpgStoreImpl.readInfo` computes `dataToMin` in memory when the `data_to_min` row is missing, by the build's own
+definition (`guideDataEnd`): the median `last_end_min` over channels with at least one real (non-placeholder) listing,
+else over every channel with programmes, capped at `window_to_min`. A channel stops being read at its first real
+listing, so only placeholder-only channels are read whole. Nothing is written into the live generation. When it cannot
+be computed (no programmes, an SQLite error), `guideEndMs()` is the build time plus 24 h, capped at `window_to_min`
+(the UI reviewer's recommendation), never the 7-day window's end.
+
+### 18.5 Cold start (data Q1, m2, m5, m6)
+
+- The app's index warm-up runs in its own launch at start, not behind the EPG recovery and the display-name backfill.
+- `EventIndex.current()` with a stale key answers the previous snapshot at once and starts a background build on the
+  application scope (`prefetch`); only a reader with no snapshot waits. `peek()` and `prefetch()` have default bodies.
+- A NOT_MODIFIED refresh rebuilds the index too (its `last_refresh_at`, part of the key, moved).
+- `GuideQueries.channels(…, waitForEvents = true)`: only the guide's row loader (`GuideLibraryImpl.channels`) passes
+  false. It never waits for a cold index: the block loads without indexed events (empty slots still come from the name),
+  a build starts, and `rowContent` ticks when the index version differs from the one the rows were loaded with
+  (`GuideQueries.lastServedVersion`), the version current at subscription included. Search, the matcher and reminders
+  keep waiting.
+- The index's playlist writes (`event_zone`, `event_count`) run after the snapshot is published (data m3), and
+  `event_count` counts only events that ended less than a day ago (data m7).
+
+### 18.6 Names (data m1; owner item 17). `EventNameParser.VERSION` 1 → 2
+
+- **Bare forms need an event-like group.** "slot:" / "slot |" with nothing after it and "slot | Offline"
+  (`EventNameParser.isBareSlot`) are slots only when the channel's provider group is event-like (`EventGroups`: a
+  sports, PPV, event, live or league word). "BBC 1 | Offline" in "UK | Entertainment" keeps its full name and is never
+  hidden by the switch. The one-argument `slotOf` / `isEmptySlot` answers are unchanged; the display names, the hide
+  pass, the guide's empty-slot fallback, the Hidden channels page and the editor pass the provider group.
+  Known residue: a bare-looking ordinary channel inside a sports group ("Sky Sports 1 |" in "UK Sports") still reads
+  as a slot.
+- **The bare month-day shape** (§3.6 row 20, `EventShape.MONTH_DAY_BARE`): `slot " | " [yyyy] title MON D hh:mmPM
+  [ZONE]` with no "@". The leading 4-digit season is dropped (the year comes from §3.4's window), and an ALL-CAPS title
+  is set in conservative title case ("London Knights vs. Erie Otters"; acronyms of up to three letters kept). Names with
+  a weekday and an ordinal day but no month ("Fri 7th 11:00PM") stay `None`: no usable date. A date without a time is not
+  an event.
+- The bump rebuilds the index and, through `ChannelNamePrefix.RULE_VERSION` (2 → 3), re-runs the display-name backfill.
+- **Junior leagues** (`EventGameRule.gradeByOwnNames`): the event's two sides against the game's own names (the feed's
+  name, `ChlTeamPlaces` place, nickname and "place nickname"). Both sides must match ("@" / "at" in order); one side is
+  no match. Both full names → CONFIRMED; a place-only or nickname-only side → LIKELY at most; an assumed zone → LIKELY.
+  Only other-sport words rule an event out; the league words and slot prefixes are not evidence. Stage E runs for
+  OHL / WHL / QMJHL games.
+
+### 18.7 Reminders, editor, guide panel, hide reasons
+
+- **Reminders** (UI m5, m6, m12): "the same title" also means the same matchup (`ReminderEventRule.sameMatchup`: each
+  side read as an NHL / NFL club when it names one, else its tokens), in steps 0–2, so a re-spelled listing or slot is
+  not "gone". The gone card reads "“%1$s” is no longer on this channel. Search for it to find where it is now." The
+  guide reader's calls run on the IO dispatcher.
+- **Editor** (UI open item 1): the menu's reason wraps to two lines (`MENU_LINE_REASON_H` 116); the reasons are "Hidden
+  by a rule. Change it in Hide rules.", "No event. Turn off the no-event switch in playlist settings." and
+  "Hidden by a rule or the no-event switch. See Hide rules or settings."; the skipped notice names both causes.
+- **Guide panel** (UI m2): during the may-still-be-on window the title is the ended event's title; "Next on this channel
+  … at 10:00 PM" has AM / PM in the 12 h form (`TimeLabels.hmPeriod`) and "tomorrow" or the day when not today.
+- **Hide reasons** (data m4): a row a user channel rule and the switch both hide is the rule's (its pattern in the
+  editor, "Hidden by rule" on the Hidden channels page, counted under the rule in Hide rules) and stays hidden when the
+  switch goes off.
+
+### 18.8 Deferred
+
+| Finding | Why |
+|---|---|
+| UI m1, "a real listing wins" depends on the window and a late listing hides the event | Changes the overlay's rule; rare (only football's 210 min estimate exceeds the 180 min margin). Needs a pager design note and the emulator. |
+| UI m7, measure the hub line instead of counting characters | Both team names now come first with the character budget; measuring needs the text measurer threaded into `HubPanelContents.build`. |
+| UI m9, city-only CONFIRMED across sports | The reviewer was unsure it is worth it before the owner sees a real case. |
+| data m8 item 4, a test for the warm-up's reschedule loop | It sits in `:app`; extracting it is a refactor beyond this pass. |
+| data perf note, `FillerTexts.scanRest` per patch | Not measured; needs a Fire TV timing first. |

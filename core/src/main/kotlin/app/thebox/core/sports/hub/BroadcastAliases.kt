@@ -1,5 +1,6 @@
 package app.thebox.core.sports.hub
 
+import app.thebox.core.events.EpgFiller
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.League
 import app.thebox.core.sports.Market
@@ -433,7 +434,16 @@ object GameListing {
         return listOfNotNull(nick.takeIf { it.isNotEmpty() }, place?.takeIf { it.isNotEmpty() }, full.takeIf { it.isNotEmpty() && it != nick }).distinct()
     }
 
+    /**
+     * (Event channels, docs/design/m6-event-channels.md §8.1, §2.3) A provider placeholder listing ("No Event Today",
+     * "Next Event: Golden Knights at Oilers at 07:30PM EST …", "Signing Off", "Upcoming - …"): never evidence for stages B
+     * and C, though "Next Event:" blocks name both teams. `EpgFiller` decides; the title is the only signal.
+     */
+    fun isPlaceholder(title: String): Boolean = EpgFiller.isFiller(title)
+
+    /** What [title] (and [subtitle]) say about [teams]'s game; [Kind.NONE] for a placeholder title ([isPlaceholder]). */
     fun classify(title: String, subtitle: String?, teams: Teams): Kind {
+        if (isPlaceholder(title)) return Kind.NONE
         val text = if (subtitle.isNullOrBlank()) title else "$title $subtitle"
         val tokens = words(text)
         val away = teams.away.any { contains(tokens, it) }

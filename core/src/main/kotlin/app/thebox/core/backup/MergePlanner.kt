@@ -70,12 +70,17 @@ object MergePlanner {
         return scheme.lowercase() + "://" + authority.lowercase() + path
     }
 
-    /** User-settable `playlist` columns a backup carries (§3.10.2); learned columns are never read from a file. */
+    /**
+     * User-settable `playlist` columns a backup carries (§3.10.2); learned columns are never read from a file.
+     * (Event channels WP-2, docs/design/m6-event-channels.md §4.5) v6: the "Hide channels with no event" switch and
+     * `refresh_interval_auto` (whether the update interval is still the default, §10). The derived `event_zone`,
+     * `event_zone_n` and `event_count` stay home.
+     */
     val PLAYLIST_COLUMNS: Set<String> = linkedSetOf(
         "user_agent", "extra_headers_json", "use_playlist_epg", "update_on_start", "refresh_interval_h", "numbering_mode", "order_mode",
         "xtream_output", "content_types", "extgrp_sticky", "charset_override", "catchup_mode_setting", "catchup_days_override",
         "token_zone_setting", "padding_before_sec", "padding_after_sec", "max_connections_override", "ignore_tls_errors",
-        "name_prefix_mode", "name_prefix_custom",
+        "name_prefix_mode", "name_prefix_custom", "hide_empty_events", "refresh_interval_auto",
     )
 
     /**

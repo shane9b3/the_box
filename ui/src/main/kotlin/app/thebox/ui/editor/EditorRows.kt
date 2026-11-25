@@ -94,8 +94,10 @@ object EditorUi {
     const val MENU_PAD = 16
     const val MENU_TITLE_H = 40
     const val MENU_LINE_H = 60
-    /** A disabled line with its reason underneath. */
-    const val MENU_LINE_REASON_H = 84
+    /** A disabled line with its reason underneath: (code review 2026-11-25, UI open item 1) up to two 22 px lines. */
+    const val MENU_LINE_REASON_H = 116
+    /** The reason's width inside the menu card: [MENU_W] less the card's and the row's side padding. */
+    const val MENU_REASON_W = MENU_W - 2 * MENU_PAD - 2 * 20
     const val CHOICE_W = 420
     const val PICKER_X = 600
     const val PICKER_Y = 160

@@ -16,15 +16,15 @@ import app.thebox.data.testutil.TestGraph
 import kotlinx.coroutines.Dispatchers
 
 /** The WP-B guide graph over a [TestGraph] (real Room on Robolectric, fakes for the network). */
-class GuideGraph(val g: TestGraph, store: EpgStore = g.store) {
+class GuideGraph(val g: TestGraph, store: EpgStore = g.store, events: app.thebox.core.events.EventIndex? = null) {
     val db: LibraryDatabase = g.db
     val catchup = CatchupResolverImpl()
     val refs = EpgRefResolver(db, db.epgSourceDao(), db.playlistDao(), g.settings)
-    val queries = GuideQueries(db, g.playlists, catchup, refs)
+    val queries = GuideQueries(db, g.playlists, catchup, refs, events = events)
     val favourites = FavouritesRepository(db.favouriteDao(), g.clock)
     val channelRepo = ChannelRepository(db, db.channelDao(), db.groupDao(), g.playlists, catchup)
     val library = GuideLibraryImpl(
-        db, queries, db.playlistDao(), db.groupDao(), db.favouriteDao(), favourites, db.channelPrefsDao(), channelRepo, db.channelDao(), g.clock, Dispatchers.IO,
+        db, queries, db.playlistDao(), db.groupDao(), db.favouriteDao(), favourites, db.channelPrefsDao(), channelRepo, db.channelDao(), g.clock, Dispatchers.IO, events,
     )
     val prefix = ChannelNamePrefixImpl()
     val displayNames = DisplayNames(db, db.playlistDao(), prefix, g.importMutex, Dispatchers.IO)

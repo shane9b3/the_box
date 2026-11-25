@@ -621,12 +621,14 @@ read looks at the same two fields.)
 | Level | Rule | Wording (sheet and channel line, 22/500) |
 |---|---|---|
 | CONFIRMED | B matched | "In your guide: NHL Hockey: Golden Knights at Oilers, 9:00–11:30 PM" |
-| LIKELY | A matched a national code (country agrees or is the channel's tag), or C's window read found a sport listing without team names on an A channel | network: "Sportsnet carries this game in Canada. Your guide doesn't list it on this channel." · sport listing: "In your guide: NHL Hockey at 7:00 PM. The listing doesn't name the teams." |
+| LIKELY | A matched a national code (country agrees or is the channel's tag), or C's window read found a sport listing without team names on an A channel | network: "Sportsnet carries this game in Canada." · sport listing: "In your guide at 7:00 PM: NHL Hockey" (amended 2026-11-25, event channels integration: one sheet line, no caveat sentence; `docs/design/m6-event-channels.md` §17.4) |
 | POSSIBLE | A matched a regional (H / A) code or TSN / RDS, an untagged channel one level down, or an unknown code | regional: "Home team's local channel. It may show a different game where you live." · other: "May carry this game. Check the channel." |
 | dropped | the channel's airing that covers the scheduled start names two other teams | not shown |
 
 Order: confidence, favourite, watch count, national before regional, playlist order, provider order. Quality variants of
-one residue collapse to the best-ranked channel ("Also: FHD, 4K" on its row). At most 8 candidates (`HUB_MATCH_MAX`). The
+one residue collapse to the best-ranked channel ("Also: FHD, 4K" on its row). At most 8 candidates (`HUB_MATCH_MAX`).
+(Amended 2026-11-25, owner rulings, `docs/design/m6-event-channels.md` §18: no cap and no folded variants; every matched
+channel is its own selectable row, the feeds of one channel grouped under its first row.) The
 sheet always ends with "Regional channels may show a different game where you are."
 
 Channel line (§1.3): the top candidate's name and a short reason ("in your guide", "national broadcaster", "local
@@ -807,10 +809,14 @@ What the panel asks for (only the panel's game; after rest or OK):
 | Phase | `info()` lookups | Used for |
 |---|---|---|
 | Final | recap; the game-winning goal's clip | poster + caption; the summary sentence |
+| Final, Goals sheet open | the condensed game (amended 2026-11-25, owner bug) | the sheet's "Condensed game" row: thumbnail and duration |
 | Live, intermission | the latest goal's clip | poster + caption; the summary sentence |
 | Others | none | |
 
-At most two lookups (≈ 3 KB gzip each) per game, cached 10 min.
+At most two lookups (≈ 3 KB gzip each) per game while browsing, cached 10 min; a third (the condensed game) only when
+that final game's Goals sheet opens, so browsing the grid never makes it. The same handling as the others: Refused →
+videos off; NotFound keeps the id marked as asked. The signed image URL is only in the `ClipInfo` held in memory; it is
+never logged or stored.
 
 ### 6.4 Sheets (shared frame) and the Goals sheet
 

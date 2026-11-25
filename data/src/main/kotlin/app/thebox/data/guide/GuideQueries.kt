@@ -7,6 +7,9 @@ import app.thebox.core.catchup.PlaylistCatchupDefaults
 import app.thebox.core.common.BoxLog
 import app.thebox.core.common.Hash64
 import app.thebox.core.epg.EpgChannelRef
+import app.thebox.core.events.ChannelEvent
+import app.thebox.core.events.EventIndex
+import app.thebox.core.events.EventNameParser
 import app.thebox.core.guide.GuideChannel
 import app.thebox.core.guide.GuideSource
 import app.thebox.core.model.Catchup
@@ -40,9 +43,23 @@ class GuideQueries @Inject constructor(
     private val refs: EpgRefResolver,
     /** (code review 2026-10-14, O-1) Per-playlist facts cached behind table invalidation (null: read every call). */
     private val meta: GuideMetaCache? = null,
+    /**
+     * (Event channels commit 0, docs/design/m6-event-channels.md §5.4, re-review E14) The event index [channels] reads
+     * once per block; null (tests that construct this class directly): no indexed events, only the empty-slot fallback.
+     */
+    private val events: EventIndex? = null,
 ) {
     /** A lineup's row ids (process-local `channel.id`s) and its archive upper bound (§3.3.4). */
     class LineupRows(val ids: LongArray, val archiveDaysUpperBound: Int)
+
+    /**
+     * (Code review 2026-11-25, data Q1, m6) The event index version the guide's rows were last loaded with
+     * (`channels(waitForEvents = false)`; 0 with no snapshot). `GuideLibraryImpl.rowContent` ticks when the index's
+     * version differs, so a build that finished before the guide subscribed still reloads the rows, and one the rows
+     * already carry does not reload them twice.
+     */
+    @Volatile var lastServedVersion: Long = 0L
+        private set
 
     /** Diagnostics (tests): lineup queries run so far. */
     @Volatile var lineupQueries: Int = 0
@@ -114,10 +131,20 @@ class GuideQueries @Inject constructor(
      * numbering mode (custom number first) and catch-up defaults (cached for the call), [CatchupResolver], then
      * [EpgRefResolver] for the block. An id purged meanwhile yields null.
      */
-    suspend fun channels(rowIds: LongArray, from: Int, to: Int): List<GuideChannel?> {
+    suspend fun channels(rowIds: LongArray, from: Int, to: Int, waitForEvents: Boolean = true): List<GuideChannel?> {
         if (from >= to) return emptyList()
         val t0 = System.nanoTime()
         val wanted = LongArray(to - from) { rowIds[from + it] }
+        // (Event channels §5.4) One snapshot per block, read before the library statements (it may build on first use).
+        // (Code review 2026-11-25, data Q1) Without [waitForEvents] (the guide's row loader only) a cold index is never
+        // waited for: the block loads with no indexed events (empty slots still come from the name), a build starts in
+        // the background, and the version tick reloads the rows ([lastServedVersion]).
+        val eventSnapshot = if (waitForEvents) {
+            events?.current()
+        } else {
+            events?.let { e -> if (e.peek() != null) e.current() else { e.prefetch(); null } }
+                .also { lastServedVersion = it?.version ?: 0L }
+        }
         val raw = HashMap<Long, RawRow>(wanted.size * 2)
         db.read {
             for (chunk in wanted.asList().chunked(EpgRefResolver.MAX_VARS)) {
@@ -167,12 +194,70 @@ class GuideQueries @Inject constructor(
                 epgShiftMin = epg?.shiftMin ?: 0,
                 epgHasData = epg?.hasData ?: false,
                 identityHash = GuideChannel.hashOf(r.identity),
+                event = eventOf(r, eventSnapshot),
             )
         }
         val ms = (System.nanoTime() - t0) / 1e6
         if (ms > BLOCK_LOG_MS) BoxLog.i(TAG) { "row block of ${wanted.size} in ${"%.1f".format(ms)} ms" }
         return out
     }
+
+    /**
+     * (Event channels commit 0, §5.4) The row's event: the index entry, else an EMPTY slot read from the provider name
+     * (no clock, no zone), else null. Reads `c.name`, never the custom or display name.
+     */
+    private fun eventOf(r: RawRow, snapshot: app.thebox.core.events.EventSnapshot?): ChannelEvent? =
+        snapshot?.of(r.id)?.event ?: if (EventNameParser.isEmptySlot(r.name, r.providerGroup)) ChannelEvent.EMPTY else null
+
+    /**
+     * (Event channels commit 0, docs/design/m6-event-channels.md §8.2) Stage T's candidates for one league [word] (`nhl`,
+     * `nfl`): lineup-visible channels (the lineup and parental predicates, so never a missing, hidden or locked-for-
+     * [access] row) whose provider group contains "<word> team" or whose `tvg_id` ends in ".<word>", at most [limit]
+     * (`SportsConstants.HUB_TEAM_QUERY_MAX`). The caller applies `TeamChannelRule.teamOf` to each hit.
+     *
+     * (WP-2) One statement over the lineup (every enabled playlist), in playlist then provider order. The group test reads
+     * the **provider** group (`g0`, what `TeamChannelRule.groupIsTeams` judges), not a group the user moved the channel
+     * to. `LIKE` folds ASCII case ("CA | NHL TEAMS"); [word] is a fixed league word, and `%` / `_` in it would only widen
+     * the candidate set, which `teamOf` narrows again. A full scan of `channel` (neither test can use an index): the hub
+     * runs it once per league per page session (§8.2).
+     */
+    suspend fun teamChannelCandidates(word: String, access: ParentalAccess, limit: Int): List<TeamChannelHit> {
+        if (word.isBlank() || limit <= 0) return emptyList()
+        return db.read {
+            usePrepared(
+                "SELECT c.id, c.playlist_id, c.name, COALESCE(cp.custom_name, c.display_name, c.name), g0.name, c.tvg_id " +
+                    LINEUP_FROM + " WHERE $LINEUP_BASE AND (g0.name LIKE '%' || ?2 || ' team%' OR lower(c.tvg_id) LIKE '%.' || ?2) " +
+                    "$PARENTAL_RAW ORDER BY p.sort_index, c.sort_index, c.id LIMIT ?3",
+            ) { st ->
+                st.bindAccess(access)
+                st.bindText(2, word.trim().lowercase())
+                st.bindLong(3, limit.toLong())
+                buildList {
+                    while (st.step()) {
+                        add(
+                            TeamChannelHit(
+                                st.getLong(0), st.getLong(1), st.getText(2), st.getText(3),
+                                if (st.isNull(4)) null else st.getText(4), if (st.isNull(5)) null else st.getText(5),
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * One [teamChannelCandidates] row. [name]: the provider name (`c.name`, what `teamOf` reads); [displayName]: the shown
+     * name (`COALESCE(custom_name, display_name, name)`); [group]: the provider group's name (`g0.name`); [tvgId]: `c.tvg_id`.
+     */
+    data class TeamChannelHit(
+        val id: Long,
+        val playlistId: Long,
+        val name: String,
+        val displayName: String,
+        val group: String?,
+        val tvgId: String?,
+    )
 
     /**
      * (code review 2026-10-14, G-S6) A hash of the `channel_prefs` columns the guide reads (hidden, locked, custom
@@ -413,6 +498,10 @@ class GuideQueries @Inject constructor(
         val xtreamStreamId: Long? = if (st.isNull(18)) null else st.getLong(18)
         val channelShift: Int? = if (st.isNull(19)) null else st.getLong(19).toInt()
         val prefShift: Int? = if (st.isNull(20)) null else st.getLong(20).toInt()
+        /** (Event channels §5.4) The provider name: the event parser's only input. */
+        val name: String = st.getText(21)
+        /** (Code review 2026-11-25, data m1) The provider group's name, for a bare empty form. */
+        val providerGroup: String? = if (st.isNull(22)) null else st.getText(22)
     }
 
     companion object {
@@ -537,8 +626,10 @@ class GuideQueries @Inject constructor(
             "SELECT c.id, c.playlist_id, c.stable_key, COALESCE(cp.custom_name, c.display_name, c.name), cp.custom_number, c.number, " +
                 "c.sort_index, COALESCE(cp.custom_logo, c.logo_url), c.catchup_type, c.catchup_source, c.catchup_days, " +
                 "c.catchup_correction_h, c.timeshift_days, c.tvg_rec_days, c.catchup_time_sec, c.tv_archive, c.tv_archive_days, " +
-                "c.url, c.xtream_stream_id, c.epg_shift_min, cp.epg_shift_min " +
-                "FROM channel c LEFT JOIN channel_prefs cp ON cp.playlist_id = c.playlist_id AND cp.stable_key = c.stable_key"
+                "c.url, c.xtream_stream_id, c.epg_shift_min, cp.epg_shift_min, c.name, g0.name " +
+                "FROM channel c LEFT JOIN channel_prefs cp ON cp.playlist_id = c.playlist_id AND cp.stable_key = c.stable_key " +
+                // (Code review 2026-11-25, data m1) The provider group: a bare empty form counts only in an event-like one.
+                ChannelDao.PROVIDER_GROUP_JOIN
 
         /** Lineup version (§3.2.1): a hash of the ordered ids; an unchanged version is not re-emitted. */
         fun versionOf(source: GuideSource, ids: LongArray): Long {

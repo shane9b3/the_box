@@ -90,8 +90,9 @@
         <item quantity="other">%1$d groups shown</item>
     </plurals>
     <plurals name="editor_n_skipped_rule">
-        <item quantity="one">%1$d stays hidden by a rule. Change it in Hide rules.</item>
-        <item quantity="other">%1$d stay hidden by a rule. Change it in Hide rules.</item>
+        <!-- (Code review 2026-11-25, UI open item 1) The count cannot tell a user rule from the no-event switch: both. -->
+        <item quantity="one">%1$d stays hidden by a rule or by “Hide channels with no event”. See Hide rules or playlist settings.</item>
+        <item quantity="other">%1$d stay hidden by a rule or by “Hide channels with no event”. See Hide rules or playlist settings.</item>
     </plurals>
     <plurals name="editor_n_moved">
         <item quantity="one">Moved %1$d channel to %2$s</item>
@@ -181,7 +182,13 @@
     <string name="editor_d_reorder_filter">Set Show to All to reorder.</string>
     <string name="editor_d_reorder_all">Too many to move by hand. Use Sort, or tick fewer channels.</string>
     <string name="editor_d_single">Pick one channel to rename or number it.</string>
-    <string name="editor_d_rule">Hidden by a rule. Change it in Hide rules (advanced settings).</string>
+    <!-- (Code review 2026-11-25, UI open item 1) The menu's reason line wraps to two lines; these fit two at Largest. -->
+    <string name="editor_d_rule">Hidden by a rule. Change it in Hide rules.</string>
+    <!-- (Event channels commit 0, docs/design/m6-event-channels.md §5.5, §9.3, re-review E1) Hidden by the playlist's
+         "Hide channels with no event" switch, not by a user rule. -->
+    <string name="editor_d_no_event">No event. Turn off the no-event switch in playlist settings.</string>
+    <!-- (Event channels integration 2026-11-25) Several targets: a user rule or the "Hide channels with no event" switch. -->
+    <string name="editor_d_rule_any">Hidden by a rule or the no-event switch. See Hide rules or settings.</string>
     <string name="editor_d_locked_by_group">Locked by its group, %1$s. Unlock the group to unlock this channel.</string>
     <string name="editor_d_no_groups">Move needs a second group. Refresh the playlist if one is missing.</string>
     <string name="editor_d_group_tick_first">Tick groups with OK first.</string>

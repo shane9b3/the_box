@@ -6,24 +6,35 @@ import app.thebox.core.epg.EpgReader
 import app.thebox.core.epg.EpgSearchHit
 import app.thebox.core.epg.EpgStore
 import app.thebox.core.epg.EpgWindow
+import app.thebox.core.events.EventEntry
+import app.thebox.core.events.EventIndex
+import app.thebox.core.events.EventSnapshot
 import app.thebox.core.guide.GuideChannel
 import app.thebox.core.guide.ProgrammeInfo
 import app.thebox.core.parental.ParentalAccess
 import app.thebox.core.sports.GameId
 import app.thebox.core.sports.GamePhase
 import app.thebox.core.sports.GameSnapshot
+import app.thebox.core.sports.League
+import app.thebox.core.sports.Side
 import app.thebox.core.sports.SportsConstants
+import app.thebox.core.sports.TeamChannelRule
+import app.thebox.core.sports.TeamName
+import app.thebox.core.sports.TeamNames
 import app.thebox.core.sports.TvBroadcast
 import app.thebox.core.sports.hub.BroadcastAliases
 import app.thebox.core.sports.hub.ChannelCandidate
+import app.thebox.core.sports.hub.EventFacts
+import app.thebox.core.sports.hub.EventGameRule
 import app.thebox.core.sports.hub.GameChannelMatcher
 import app.thebox.core.sports.hub.GameListing
 import app.thebox.core.sports.hub.MatchConfidence
 import app.thebox.core.sports.hub.MatchReason
 import app.thebox.data.db.LibraryDatabase
+import app.thebox.data.db.dao.ChannelDao
 import app.thebox.data.di.IoDispatcher
-import app.thebox.data.guide.GuideQueries
 import app.thebox.data.guide.EpgRefResolver
+import app.thebox.data.guide.GuideQueries
 import app.thebox.data.repo.read
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.ensureActive
@@ -33,34 +44,54 @@ import javax.inject.Singleton
 import kotlin.coroutines.coroutineContext
 
 /**
- * (Sports Hub, docs/design/m6-sports-hub.md §5.2 – §5.4; WP-3; A-B3, A-S5, A-S8, R-S2 – R-S4) Which of the user's
- * channels carry a game, across every enabled playlist, under the caller's [ParentalAccess] (hidden channels and groups
- * never; locked ones only when [access] lets them through, exactly as Search filters them).
+ * (Sports Hub, docs/design/m6-sports-hub.md §5.2 – §5.4; event channels, docs/design/m6-event-channels.md §8) Which of
+ * the user's channels carry a game, across every enabled playlist, under the caller's [ParentalAccess] (hidden channels
+ * and groups never; locked ones only when [access] lets them through, exactly as Search filters them).
  *
  * - **A, broadcaster aliases.** One `channel_fts` phrase query per listed code (`GuideQueries.channelsByNameFts`, FTS4
  *   phrases, `LIMIT 200`, no `ORDER BY`), then residue **equality** and the country check in Kotlin
- *   ([BroadcastAliases]). Streaming-only codes and local affiliates have no aliases.
+ *   ([BroadcastAliases]). Streaming-only codes and local affiliates have no aliases. (Event channels §8.1) A channel
+ *   whose only evidence is a **regional** alias is never a candidate: the alias only seeds C, so a regional channel shows
+ *   when its guide names the game (CONFIRMED) or carries the sport (LIKELY).
  * - **C, window read of A's channels** (R-S4). One `EpgReader.window` over the game window `[start − 30 min,
  *   start + 4 h]` for every A channel with guide data; an airing naming the game confirms it, a sport-word airing that
  *   names no teams is a [MatchReason.SportListing] (LIKELY), an airing covering the scheduled start that names two other
- *   teams drops the channel. Subtitles are read (`EpgReader.detail`) only for sport-word airings that do not name the
- *   game in their title.
+ *   teams drops the channel. Placeholder listings ("No Event Today", "Next Event: …") are never evidence
+ *   ([GameListing.classify]).
  * - **B, guide titles** (Search's EPG FTS). The two nicknames, then the two places; live / upcoming through `search`,
- *   ended through `searchPast` over Search's `archiveDaysAll` span (at most 7 days), `perText`
- *   [SportsConstants.HUB_MATCH_PER_TEXT]; airings overlapping the window in display minutes; refs → channels confirmed
- *   by the guide's resolution rule; ended airings only inside the channel's archive (Search's rule).
+ *   ended through `searchPast` over Search's `archiveDaysAll` span (at most 7 days).
+ * - **T, team channels** (§8.2). `GuideQueries.teamChannelCandidates` once per league, access and library state (cached
+ *   until [clear]), narrowed by `TeamChannelRule.teamOf`; both teams' channels are CONFIRMED with a
+ *   [MatchReason.TeamChannel].
+ * - **E, event channels** (§8.3, §8.4). `EventSnapshot.startingIn(start − 90 min, start + 45 min)`, graded by
+ *   [EventGameRule] against the game and the shown day's [board]; then `GuideQueries.visible`. A channel that is also a
+ *   B / C hit is one candidate with both reasons.
  *
- * Ranking (§5.3): confidence, favourite, watch count, national before regional, playlist order, provider order. Quality
- * variants of one feed (same playlist, same canonical alias key or residue) collapse to the best-ranked channel. At most
- * [SportsConstants.HUB_MATCH_MAX]. Cache (A-S5): key `(game, access, EPG generation + patch)` plus the game's phase,
- * start and broadcasts (a superset: a board update or a phase change reads again), LRU [SportsConstants.HUB_DETAIL_LRU],
- * emptied by [clear] (page open, any access change).
+ * **Ranking (§8.6, §18).** Team channels first, the user's team first (the side whose team channel is a favourite, else
+ * the more-watched one, else the home side); then CONFIRMED guide listings, CONFIRMED event names, LIKELY, POSSIBLE.
+ * Within a class: an event matched by name before a cities-only one, then the event nearest the game's start; then
+ * favourite, watch count, national before regional, playlist order, provider order.
+ *
+ * **Every matched channel is a row** (owner rulings 2026-11-25): no cap and no folded variants. Feeds of one channel
+ * (same playlist and the same alias key, the `e:` event key for an event-only candidate (re-review E3), the name's
+ * residue, or the same guide channel) sit together: the best-ranked first, then the others in provider order, each
+ * with [ChannelCandidate.anotherFeed] when it shares the first one's guide channel, alias or residue.
+ *
+ * The cost stays bounded without a row ceiling: every stage's reads are bounded (FTS limits, one window read, one team
+ * scan per league, one `visible` query), and ranking makes one `facts` query per 900 ids, never one per row.
+ *
+ * **[ChannelCandidate.group].** The row's own provider group (line 3 when two rows share a name).
+ *
+ * Cache (A-S5): key `(game, access, EPG generation + patch, enabled playlists' refresh_seq sum, event index version,
+ * the board's games)` plus the game's phase, start and broadcasts, LRU [SportsConstants.HUB_DETAIL_LRU], emptied by
+ * [clear] (page open, any access change), which also drops the team maps.
  */
 @Singleton
 class GameChannelMatcherImpl @Inject constructor(
     private val queries: GuideQueries,
     private val store: EpgStore,
     private val db: LibraryDatabase,
+    private val events: EventIndex,
     @IoDispatcher private val io: CoroutineDispatcher,
 ) : GameChannelMatcher {
 
@@ -72,6 +103,9 @@ class GameChannelMatcherImpl @Inject constructor(
         val phase: GamePhase,
         val startUtcMs: Long,
         val broadcasts: List<TvBroadcast>,
+        val librarySeq: Long,
+        val eventsVersion: Long,
+        val board: List<Pair<GameId, Long>>,
     )
 
     private val cache = object : LinkedHashMap<Key, List<ChannelCandidate>>(32, 0.75f, true) {
@@ -79,9 +113,27 @@ class GameChannelMatcherImpl @Inject constructor(
             size > SportsConstants.HUB_DETAIL_LRU
     }
 
+    /** Stage T's map per (league, access, library state): team abbreviation → its channels, in lineup order. */
+    private data class TeamKey(val league: League, val access: ParentalAccess, val librarySeq: Long)
+
+    private val teamMaps = HashMap<TeamKey, Map<String, List<GuideQueries.TeamChannelHit>>>()
+
     /** Diagnostics (benchmark, tests): the stage timings of the last uncached [match], in ns. */
-    class Stats(val aliasNs: Long, val windowNs: Long, val guideNs: Long, val rankNs: Long, val ftsQueries: Int, val epgSearches: Int) {
-        val totalNs: Long get() = aliasNs + windowNs + guideNs + rankNs
+    class Stats(
+        val aliasNs: Long,
+        val windowNs: Long,
+        val guideNs: Long,
+        val teamNs: Long,
+        val eventNs: Long,
+        val rankNs: Long,
+        val ftsQueries: Int,
+        val epgSearches: Int,
+        /** Stage T read the database (false: the cached team map). */
+        val teamQueried: Boolean,
+        /** Stage E's graded, visible hits. */
+        val eventHits: Int,
+    ) {
+        val totalNs: Long get() = aliasNs + windowNs + guideNs + teamNs + eventNs + rankNs
     }
 
     @Volatile var lastStats: Stats? = null
@@ -91,24 +143,60 @@ class GameChannelMatcherImpl @Inject constructor(
     @Volatile var computations: Int = 0
         private set
 
-    override suspend fun match(game: GameSnapshot, nowMs: Long, access: ParentalAccess): List<ChannelCandidate> = withContext(io) {
-        val info = store.info.value
-        val key = Key(game.id, access, info?.generation ?: -1L, info?.patchSeq ?: -1, game.phase, game.startUtcMs, game.broadcasts)
-        synchronized(cache) { cache[key] }?.let { return@withContext it }
-        val out = try {
-            compute(game, nowMs, access)
-        } catch (e: kotlinx.coroutines.CancellationException) {
-            throw e
-        } catch (e: Exception) {
-            BoxLog.w(TAG, "match failed: ${e.javaClass.simpleName}")
-            return@withContext emptyList()
+    override suspend fun match(game: GameSnapshot, nowMs: Long, access: ParentalAccess): List<ChannelCandidate> =
+        match(game, nowMs, access, emptyList())
+
+    override suspend fun match(game: GameSnapshot, nowMs: Long, access: ParentalAccess, board: List<GameSnapshot>): List<ChannelCandidate> =
+        withContext(io) {
+            val out = try {
+                val info = store.info.value
+                val snapshot = events.current()
+                val librarySeq = librarySeq()
+                val key = Key(
+                    game.id, access, info?.generation ?: -1L, info?.patchSeq ?: -1, game.phase, game.startUtcMs, game.broadcasts,
+                    librarySeq, snapshot.version, board.filter { it.id != game.id }.map { it.id to it.startUtcMs }.sortedBy { it.first.id },
+                )
+                synchronized(cache) { cache[key] }?.let { return@withContext it }
+                compute(game, nowMs, access, board, snapshot, librarySeq).also { synchronized(cache) { cache[key] = it } }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                BoxLog.w(TAG, "match failed: ${e.javaClass.simpleName}")
+                emptyList()
+            }
+            out
         }
-        synchronized(cache) { cache[key] = out }
-        out
-    }
 
     override fun clear() {
         synchronized(cache) { cache.clear() }
+        synchronized(teamMaps) { teamMaps.clear() }
+    }
+
+    /**
+     * (§8.5) The end of usable guide data: `EpgGenerationInfo.dataToMin`, else (a generation built before it was
+     * written) its `windowToMin`; null without a guide. `ChannelHorizon.beyondGuide` adds the now + 12 h floor.
+     */
+    override fun guideEndMs(): Long? {
+        val i = store.info.value ?: return null
+        i.dataToMin?.let { return it.toLong() * MINUTE_MS }
+        // (Code review 2026-11-25, data Q2 / UI m4) No data end even for an older generation (computed in memory by
+        // `EpgStoreImpl`): never the 7-day window's end, which would offer channels for games days past the guide's data.
+        // A day after the build, as the reviewer recommended; the 12 h floor (`ChannelHorizon`) still applies.
+        return minOf(i.windowToMin.toLong() * MINUTE_MS, i.builtAtMs + GUIDE_END_FALLBACK_MS)
+    }
+
+    /** (§8.5) Stage T only, ranked as in [match] (the user's team first), for the beyond-guide line. */
+    override suspend fun teamChannels(game: GameSnapshot, access: ParentalAccess): List<ChannelCandidate> = withContext(io) {
+        try {
+            val accs = LinkedHashMap<Long, Acc>()
+            teamStage(game, access, librarySeq(), accs)
+            rank(accs.values.toList(), startMin = 0)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            BoxLog.w(TAG, "team channels failed: ${e.javaClass.simpleName}")
+            emptyList()
+        }
     }
 
     // ------------------------------------------------------------------ the work
@@ -117,16 +205,36 @@ class GameChannelMatcherImpl @Inject constructor(
 
     private class Airing(val info: ProgrammeInfo, val inArchive: Boolean)
 
+    private class TeamHit(val team: TeamName, val side: Side)
+
+    private class EventHit(val entry: EventEntry, val grade: EventGameRule.Grade)
+
     private class Acc(val channel: GuideChannel) {
         var alias: AliasHit? = null
         var guide: Airing? = null
         var sport: Airing? = null
         var dropped = false
+        var team: TeamHit? = null
+        var event: EventHit? = null
     }
 
-    private class Facts(val playlistName: String, val playlistSort: Int, val sortIndex: Int, val favourite: Boolean, val watchCount: Int)
+    private class Facts(
+        val playlistName: String,
+        val playlistSort: Int,
+        val sortIndex: Int,
+        val favourite: Boolean,
+        val watchCount: Int,
+        val group: String?,
+    )
 
-    private suspend fun compute(game: GameSnapshot, nowMs: Long, access: ParentalAccess): List<ChannelCandidate> {
+    private suspend fun compute(
+        game: GameSnapshot,
+        nowMs: Long,
+        access: ParentalAccess,
+        board: List<GameSnapshot>,
+        snapshot: EventSnapshot,
+        librarySeq: Long,
+    ): List<ChannelCandidate> {
         computations++
         val nowMin = Math.floorDiv(nowMs, MINUTE_MS).toInt()
         val startMin = Math.floorDiv(game.startUtcMs, MINUTE_MS).toInt()
@@ -204,10 +312,20 @@ class GameChannelMatcherImpl @Inject constructor(
         guideHits(live + past, teams, fromMin, toMin, nowMin, access, accs)
         val t3 = System.nanoTime()
 
-        // ---- confidence, ranking, collapse.
-        val out = rank(accs.values.toList())
+        // ---- T: team channels.
+        val teamQueried = teamStage(game, access, librarySeq, accs)
+        coroutineContext.ensureActive()
         val t4 = System.nanoTime()
-        lastStats = Stats(t1 - t0, t2 - t1, t3 - t2, t4 - t3, ftsQueries, epgSearches)
+
+        // ---- E: event channels.
+        val eventHits = eventStage(game, access, board, snapshot, startMin, accs)
+        coroutineContext.ensureActive()
+        val t5 = System.nanoTime()
+
+        // ---- confidence, ranking, collapse.
+        val out = rank(accs.values.toList(), startMin)
+        val t6 = System.nanoTime()
+        lastStats = Stats(t1 - t0, t2 - t1, t3 - t2, t4 - t3, t5 - t4, t6 - t5, ftsQueries, epgSearches, teamQueried, eventHits)
         return out
     }
 
@@ -227,7 +345,8 @@ class GameChannelMatcherImpl @Inject constructor(
             var subtitle: String? = null
             var kind = GameListing.classify(title, null, teams)
             val covers = start <= startMin && startMin < end
-            if (kind != GameListing.Kind.GAME && (covers || GameListing.hasSportWord(title, teams))) {
+            // A placeholder ("Next Event: …") is never evidence: classify answers NONE, and its subtitle is not read.
+            if (kind != GameListing.Kind.GAME && !GameListing.isPlaceholder(title) && (covers || GameListing.hasSportWord(title, teams))) {
                 subtitle = reader.detail(epgIds[win.channelIndex[i]], raw, acc.channel.epgShiftMin)?.subtitle
                 if (subtitle != null) kind = GameListing.classify(title, subtitle, teams)
             }
@@ -288,54 +407,212 @@ class GameChannelMatcherImpl @Inject constructor(
         }
     }
 
-    private suspend fun rank(accs: List<Acc>): List<ChannelCandidate> {
-        val kept = ArrayList<Pair<Acc, MatchConfidence>>(accs.size)
-        for (a in accs) {
-            val c = when {
-                a.guide != null -> MatchConfidence.CONFIRMED
-                a.dropped -> null
-                a.alias != null -> if (a.sport != null) MatchConfidence.LIKELY else a.alias!!.match.confidence
-                else -> null
-            } ?: continue
-            kept += a to c
-        }
-        if (kept.isEmpty()) return emptyList()
-        val facts = facts(kept.map { it.first.channel.rowId })
-        val sorted = kept.sortedWith(
-            compareBy<Pair<Acc, MatchConfidence>> { it.second.ordinal }
-                .thenBy { if (facts[it.first.channel.rowId]?.favourite == true) 0 else 1 }
-                .thenByDescending { facts[it.first.channel.rowId]?.watchCount ?: 0 }
-                .thenBy { if (it.first.alias?.match?.national == false) 1 else 0 }
-                .thenBy { facts[it.first.channel.rowId]?.playlistSort ?: Int.MAX_VALUE }
-                .thenBy { facts[it.first.channel.rowId]?.sortIndex ?: Int.MAX_VALUE }
-                .thenBy { it.first.channel.rowId },
-        )
-        // Collapse quality variants: same playlist, same canonical feed key (alias) or residue (guide-only).
-        val groups = LinkedHashMap<String, MutableList<Pair<Acc, MatchConfidence>>>()
-        for (p in sorted) {
-            val ch = p.first.channel
-            val feed = p.first.alias?.match?.key ?: ("r:" + BroadcastAliases.residue(ch.displayName).text)
-            groups.getOrPut("${ch.identity.playlistId}\u001F$feed") { ArrayList(2) } += p
-        }
-        return groups.values.take(SportsConstants.HUB_MATCH_MAX).map { members ->
-            val (acc, confidence) = members.first()
-            val reasons = buildList {
-                acc.guide?.let { add(MatchReason.Guide(it.info.title, it.info.startMin * MINUTE_MS, it.info.endMin * MINUTE_MS, it.inArchive)) }
-                if (acc.guide == null) acc.sport?.let { add(MatchReason.SportListing(it.info.title, it.info.startMin * MINUTE_MS)) }
-                acc.alias?.let { add(MatchReason.Broadcaster(it.broadcast.network.trim(), it.broadcast.market, it.broadcast.country)) }
+    /**
+     * T (§8.2): the two teams' channels into [accs]. Returns true when the team map was read from the database (not the
+     * cached map).
+     */
+    private suspend fun teamStage(game: GameSnapshot, access: ParentalAccess, librarySeq: Long, accs: LinkedHashMap<Long, Acc>): Boolean {
+        val league = game.id.league
+        val word = leagueWord(league) ?: return false
+        val away = TeamNames.of(league, game.away.abbrev)
+        val home = TeamNames.of(league, game.home.abbrev)
+        if (away == null && home == null) return false
+        val key = TeamKey(league, access, librarySeq)
+        var queried = false
+        val map = synchronized(teamMaps) { teamMaps[key] } ?: run {
+            queried = true
+            val byTeam = HashMap<String, MutableList<GuideQueries.TeamChannelHit>>()
+            for (h in queries.teamChannelCandidates(word, access, SportsConstants.HUB_TEAM_QUERY_MAX)) {
+                val t = TeamChannelRule.teamOf(league, h.name, h.group, h.tvgId) ?: continue
+                byTeam.getOrPut(t.abbrev) { ArrayList(2) } += h
             }
-            ChannelCandidate(
-                channel = acc.channel,
-                playlistName = facts[acc.channel.rowId]?.playlistName ?: "",
-                confidence = confidence,
-                reasons = reasons,
-                variants = members.drop(1).map { it.first.channel },
-                airing = acc.guide?.info,
-            )
+            synchronized(teamMaps) { teamMaps[key] = byTeam }
+            byTeam
         }
+        val wanted = LinkedHashMap<Long, TeamHit>()
+        for ((team, side) in listOf(away to Side.AWAY, home to Side.HOME)) {
+            if (team == null) continue
+            for (h in map[team.abbrev].orEmpty()) wanted.putIfAbsent(h.id, TeamHit(team, side))
+        }
+        val missing = wanted.keys.filter { it !in accs }.toLongArray()
+        if (missing.isNotEmpty()) for (ch in queries.channels(missing, 0, missing.size)) if (ch != null) accs[ch.rowId] = Acc(ch)
+        for ((id, hit) in wanted) accs[id]?.team = hit
+        return queried
     }
 
-    /** Playlist name and the ranking facts of [ids] (one statement per chunk). */
+    /** E (§8.3): events starting near the game, graded, then the lineup and parental filter. Returns the kept hits. */
+    private suspend fun eventStage(
+        game: GameSnapshot,
+        access: ParentalAccess,
+        board: List<GameSnapshot>,
+        snapshot: EventSnapshot,
+        startMin: Int,
+        accs: LinkedHashMap<Long, Acc>,
+    ): Int {
+        // (Code review 2026-11-25, owner item 17) Junior leagues too: EventGameRule grades them on the game's own names.
+        if (leagueWord(game.id.league) == null && game.id.league !in app.thebox.core.sports.CHL_LEAGUES) return 0
+        val entries = snapshot.startingIn(startMin - SportsConstants.HUB_EVENT_BEFORE_MIN, startMin + SportsConstants.HUB_EVENT_AFTER_MIN)
+        if (entries.isEmpty()) return 0
+        val graded = LinkedHashMap<Long, EventHit>()
+        for (e in entries) {
+            val title = e.event.title ?: continue
+            val grade = EventGameRule.grade(EventFacts(e.name, title, e.group, e.event.startMin * MINUTE_MS, e.event.zone), game, board) ?: continue
+            val hit = EventHit(e, grade)
+            val old = graded[e.channelId]
+            if (old == null || betterEvent(hit, old, startMin)) graded[e.channelId] = hit
+        }
+        if (graded.isEmpty()) return 0
+        val visible = queries.visible(graded.keys, access)
+        if (visible.isEmpty()) return 0
+        val missing = visible.filter { it !in accs }.toLongArray()
+        if (missing.isNotEmpty()) for (ch in queries.channels(missing, 0, missing.size)) if (ch != null) accs[ch.rowId] = Acc(ch)
+        var kept = 0
+        for (id in visible) {
+            val acc = accs[id] ?: continue
+            acc.event = graded.getValue(id)
+            kept++
+        }
+        return kept
+    }
+
+    /** The candidate's level from its best evidence, or null when it is not a candidate (§8.1, §8.4). */
+    private fun confidenceOf(a: Acc): MatchConfidence? {
+        if (a.team != null || a.guide != null) return MatchConfidence.CONFIRMED
+        var best: MatchConfidence? = a.event?.grade?.confidence
+        val alias = a.alias
+        if (alias != null && !a.dropped) {
+            // §8.1: a regional alias alone is no evidence; with a sport listing it is LIKELY.
+            val c = when {
+                a.sport != null -> MatchConfidence.LIKELY
+                alias.match.national -> alias.match.confidence
+                else -> null
+            }
+            if (c != null && (best == null || c.ordinal < best.ordinal)) best = c
+        }
+        return best
+    }
+
+    /** §8.6 classes: team channels, CONFIRMED guide listings, CONFIRMED event names, LIKELY, POSSIBLE. */
+    private fun classOf(a: Acc, c: MatchConfidence): Int = when {
+        a.team != null -> 0
+        c == MatchConfidence.CONFIRMED && a.guide != null -> 1
+        c == MatchConfidence.CONFIRMED -> 2
+        c == MatchConfidence.LIKELY -> 3
+        else -> 4
+    }
+
+    private class Kept(val acc: Acc, val confidence: MatchConfidence, val cls: Int)
+
+    private suspend fun rank(accs: List<Acc>, startMin: Int): List<ChannelCandidate> {
+        val kept = ArrayList<Kept>(accs.size)
+        for (a in accs) {
+            val c = confidenceOf(a) ?: continue
+            kept += Kept(a, c, classOf(a, c))
+        }
+        if (kept.isEmpty()) return emptyList()
+        val facts = facts(kept.map { it.acc.channel.rowId })
+        fun f(k: Kept) = facts[k.acc.channel.rowId]
+
+        // The user's team (§8.6): the side whose team channel is a favourite, else the more-watched one, else home.
+        val teamKept = kept.filter { it.acc.team != null }
+        val userSide: Side = run {
+            fun fav(s: Side) = teamKept.any { it.acc.team!!.side == s && f(it)?.favourite == true }
+            fun watch(s: Side) = teamKept.filter { it.acc.team!!.side == s }.maxOfOrNull { f(it)?.watchCount ?: 0 } ?: 0
+            when {
+                fav(Side.AWAY) != fav(Side.HOME) -> if (fav(Side.AWAY)) Side.AWAY else Side.HOME
+                watch(Side.AWAY) != watch(Side.HOME) -> if (watch(Side.AWAY) > watch(Side.HOME)) Side.AWAY else Side.HOME
+                else -> Side.HOME
+            }
+        }
+        // (Code review 2026-11-25, UI open item 3) Inside a class, an event row whose sides matched by name comes before a
+        // cities-only one, then the one starting nearest the game; rows without an event keep the older keys.
+        fun eventDelta(k: Kept): Int = k.acc.event?.let { kotlin.math.abs(it.entry.event.startMin - startMin) } ?: 0
+        val sorted = kept.sortedWith(
+            compareBy<Kept> { it.cls }
+                .thenBy { val t = it.acc.team; if (t == null || t.side == userSide) 0 else 1 }
+                .thenBy { if (it.acc.event?.grade?.citiesOnly == true) 1 else 0 }
+                .thenBy { eventDelta(it) }
+                .thenBy { if (f(it)?.favourite == true) 0 else 1 }
+                .thenByDescending { f(it)?.watchCount ?: 0 }
+                .thenBy { if (it.acc.alias?.match?.national == false) 1 else 0 }
+                .thenBy { f(it)?.playlistSort ?: Int.MAX_VALUE }
+                .thenBy { f(it)?.sortIndex ?: Int.MAX_VALUE }
+                .thenBy { it.acc.channel.rowId },
+        )
+        // (Owner rulings 2026-11-25, event channels §18) Every matched channel is its own selectable row: no cap, no
+        // reserved event row, no folded variants. Feeds of one channel form a group whose rows sit together, the
+        // best-ranked first and the rest in provider order: one group per playlist and collapse key (alias, event,
+        // residue, as before), joined with any group whose members share a guide channel ("NESN" and "4K: NESN").
+        // Team channels never join a non-team group.
+        val units = ArrayList<MutableList<Kept>>()
+        val byKey = HashMap<String, MutableList<Kept>>()
+        for (k in sorted) {
+            val pl = k.acc.channel.identity.playlistId
+            val team = if (k.acc.team != null) "t" else "o"
+            val keys = listOfNotNull(
+                "$team\u001F$pl\u001Fk\u001F${collapseKey(k.acc)}",
+                k.acc.channel.epg?.let { "$team\u001F$pl\u001Fg\u001F$it" },
+            )
+            val unit = keys.firstNotNullOfOrNull { byKey[it] } ?: ArrayList<Kept>(2).also { units += it }
+            unit += k
+            for (key in keys) byKey.putIfAbsent(key, unit)
+        }
+        val out = ArrayList<ChannelCandidate>(kept.size)
+        for (unit in units) {
+            val head = unit.first()
+            val followers = unit.drop(1).sortedWith(
+                compareBy<Kept> { f(it)?.playlistSort ?: Int.MAX_VALUE }.thenBy { f(it)?.sortIndex ?: Int.MAX_VALUE }.thenBy { it.acc.channel.rowId },
+            )
+            out += candidateOf(head, facts, anotherFeed = false)
+            for (m in followers) out += candidateOf(m, facts, anotherFeed = sameFeed(head.acc, m.acc))
+        }
+        return out
+    }
+
+    /**
+     * True when [m] is another feed of [head]'s channel: the same guide channel, or the same alias or name residue. A
+     * group joined only by one event (two slots naming the same game) is not: each row keeps its own reason.
+     */
+    private fun sameFeed(head: Acc, m: Acc): Boolean {
+        if (head.channel.epg != null && head.channel.epg == m.channel.epg) return true
+        val k = collapseKey(head)
+        return !k.startsWith("e:") && k == collapseKey(m)
+    }
+
+    private fun collapseKey(a: Acc): String {
+        a.alias?.let { return it.match.key }
+        val e = a.event
+        if (e != null && a.team == null && a.guide == null && a.sport == null) {
+            return "e:" + TeamNames.tokens(e.entry.event.title.orEmpty()).joinToString(" ") + "|" + e.entry.event.startMin
+        }
+        return "r:" + BroadcastAliases.residue(a.channel.displayName).text
+    }
+
+    private fun candidateOf(k: Kept, facts: Map<Long, Facts>, anotherFeed: Boolean): ChannelCandidate {
+        val acc = k.acc
+        val reasons = buildList {
+            acc.team?.let { add(MatchReason.TeamChannel(it.team.fullNames.first(), it.team.nicknames.first(), it.side)) }
+            acc.guide?.let { add(MatchReason.Guide(it.info.title, it.info.startMin * MINUTE_MS, it.info.endMin * MINUTE_MS, it.inArchive)) }
+            if (acc.guide == null) acc.sport?.let { add(MatchReason.SportListing(it.info.title, it.info.startMin * MINUTE_MS)) }
+            acc.event?.let { e ->
+                add(MatchReason.EventName(e.entry.event.title.orEmpty(), e.entry.event.startMin * MINUTE_MS, e.grade.citiesOnly, e.grade.zoneAssumed))
+            }
+            acc.alias?.let { add(MatchReason.Broadcaster(it.broadcast.network.trim(), it.broadcast.market, it.broadcast.country)) }
+        }
+        val own = facts[acc.channel.rowId]
+        return ChannelCandidate(
+            channel = acc.channel,
+            playlistName = own?.playlistName ?: "",
+            confidence = k.confidence,
+            reasons = reasons,
+            variants = emptyList(),
+            airing = acc.guide?.info,
+            group = own?.group,
+            anotherFeed = anotherFeed,
+        )
+    }
+
+    /** Playlist name, group and the ranking facts of [ids] (one statement per chunk). */
     private suspend fun facts(ids: List<Long>): Map<Long, Facts> {
         val out = HashMap<Long, Facts>(ids.size * 2)
         db.read {
@@ -343,14 +620,19 @@ class GameChannelMatcherImpl @Inject constructor(
                 val marks = chunk.joinToString(",") { "?" }
                 usePrepared(
                     "SELECT c.id, p.name, p.sort_index, c.sort_index, COALESCE(cp.watch_count, 0), " +
-                        "EXISTS (SELECT 1 FROM favourite f WHERE f.playlist_id = c.playlist_id AND f.stable_key = c.stable_key) " +
+                        "EXISTS (SELECT 1 FROM favourite f WHERE f.playlist_id = c.playlist_id AND f.stable_key = c.stable_key), g0.name " +
                         "FROM channel c JOIN playlist p ON p.id = c.playlist_id " +
                         "LEFT JOIN channel_prefs cp ON cp.playlist_id = c.playlist_id AND cp.stable_key = c.stable_key " +
+                        // The provider group (§9.1 "Also in", duplicate names), never the user's moved group.
+                        ChannelDao.PROVIDER_GROUP_JOIN +
                         "WHERE c.id IN ($marks)",
                 ) { st ->
                     chunk.forEachIndexed { i, id -> st.bindLong(i + 1, id) }
                     while (st.step()) {
-                        out[st.getLong(0)] = Facts(st.getText(1), st.getLong(2).toInt(), st.getLong(3).toInt(), st.getLong(5) != 0L, st.getLong(4).toInt())
+                        out[st.getLong(0)] = Facts(
+                            st.getText(1), st.getLong(2).toInt(), st.getLong(3).toInt(), st.getLong(5) != 0L, st.getLong(4).toInt(),
+                            if (st.isNull(6)) null else st.getText(6),
+                        )
                     }
                 }
             }
@@ -358,8 +640,27 @@ class GameChannelMatcherImpl @Inject constructor(
         return out
     }
 
+    /** The enabled playlists' `refresh_seq` sum: a refresh, an enable or a disable moves it (cache keys). */
+    private suspend fun librarySeq(): Long = db.read {
+        usePrepared("SELECT COALESCE(SUM(refresh_seq), 0), COUNT(*) FROM playlist WHERE enabled = 1") { st ->
+            if (st.step()) st.getLong(0) * 31 + st.getLong(1) else 0L
+        }
+    }
+
+    private fun leagueWord(league: League): String? = when (league) {
+        League.NHL -> "nhl"
+        League.NFL -> "nfl"
+        else -> null
+    }
+
     private fun better(a: BroadcastAliases.AliasMatch, b: BroadcastAliases.AliasMatch): Boolean =
         a.confidence.ordinal < b.confidence.ordinal || (a.confidence == b.confidence && a.national && !b.national)
+
+    /** A higher grade wins, then the event starting nearest the game. */
+    private fun betterEvent(a: EventHit, b: EventHit, startMin: Int): Boolean {
+        if (a.grade.confidence != b.grade.confidence) return a.grade.confidence.ordinal < b.grade.confidence.ordinal
+        return kotlin.math.abs(a.entry.event.startMin - startMin) < kotlin.math.abs(b.entry.event.startMin - startMin)
+    }
 
     /** The airing covering the scheduled start wins, then the one starting nearest to it. */
     private fun closer(a: Airing, b: Airing, startMin: Int): Boolean {
@@ -374,6 +675,8 @@ class GameChannelMatcherImpl @Inject constructor(
     )
 
     companion object {
+        /** (Code review 2026-11-25) [guideEndMs] when the generation has no data end: the build time plus a day. */
+        const val GUIDE_END_FALLBACK_MS = 24 * 3_600_000L
         private const val TAG = "GameChannelMatcher"
         private const val MINUTE_MS = 60_000L
         /** §5.2 A (A-B3): per code, before the residue rule. */

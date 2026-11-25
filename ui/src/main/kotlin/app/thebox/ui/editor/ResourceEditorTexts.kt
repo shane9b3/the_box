@@ -153,6 +153,8 @@ class ResourceEditorTexts @Inject constructor(@ApplicationContext private val co
         EditorText.CHANNELS_COUNT_NONE -> throw IllegalArgumentException("quantity string: $key")
         EditorText.D_SINGLE -> R.string.editor_d_single
         EditorText.D_RULE -> R.string.editor_d_rule
+        EditorText.D_NO_EVENT -> R.string.editor_d_no_event
+        EditorText.D_RULE_ANY -> R.string.editor_d_rule_any
         EditorText.D_LOCKED_BY_GROUP -> R.string.editor_d_locked_by_group
         EditorText.D_NO_GROUPS -> R.string.editor_d_no_groups
         EditorText.D_GROUP_TICK_FIRST -> R.string.editor_d_group_tick_first

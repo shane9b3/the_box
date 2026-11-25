@@ -4,7 +4,6 @@ import android.content.res.Resources
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -12,10 +11,10 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import app.thebox.core.events.EventMatchup
 import app.thebox.core.sports.GameSnapshot
 import app.thebox.core.sports.Market
 import app.thebox.core.sports.hub.ChannelCandidate
-import app.thebox.core.sports.hub.MatchConfidence
 import app.thebox.core.sports.hub.MatchReason
 import app.thebox.ui.R
 import app.thebox.ui.full.ChannelLogo
@@ -24,12 +23,14 @@ import app.thebox.ui.guide.screen.Line
 import java.util.Locale
 
 const val CHANNEL_SHEET_TAG = "hub_channel_sheet"
-const val CHANNEL_SHEET_NOTE_TAG = "hub_channel_sheet_note"
 
 /**
- * (Sports Hub, docs/design/m6-sports-hub.md §5.3, §5.5, §5.6; WP-5) The Channels sheet: one 96 px row per candidate
- * (logo, name, the §5.3 reason, the playlist line when candidates come from more than one playlist, "Also: FHD, 4K"),
- * ending with the regional note. [archiveOnly]: the final NFL / CHL "Watch from start" rows (OK → [onPlayArchive]).
+ * (Sports Hub, docs/design/m6-sports-hub.md §5.3, §5.5, §5.6; WP-5; event channels, docs/design/m6-event-channels.md
+ * §9.1) The Channels sheet: one 96 px row per candidate. Line 1 the (short) name; line 2 one short reason, time first so
+ * an ellipsis eats the end of a title, never the time (U-E-B1); line 3 the playlist when candidates come from more than
+ * one, "Also: FHD, 4K" or "Also in <group>", and the group when two rows share a name. No footer (the regional note is
+ * gone with the regional guesses). The matcher puts the user's team channel first, so row 0, focused on open, is it
+ * (owner ruling b). [archiveOnly]: the final NFL / CHL "Watch from start" rows (OK → [onPlayArchive]).
  * Otherwise OK → [onTune] when [tunable] (live, or starting within `HUB_IMMINENT_MIN`), else [onNotYet] (the page's
  * "The game starts at …" toast). Focus on the first row; Back calls [onClose].
  */
@@ -49,6 +50,7 @@ fun ChannelSheet(
     val res = LocalResources.current
     val rows = remember(candidates, archiveOnly) { if (archiveOnly) candidates.filter { it.airing != null } else candidates }
     val manyPlaylists = remember(rows) { rows.map { it.playlistName }.distinct().size > 1 }
+    val sharedNames = remember(rows) { rows.groupingBy { it.channel.displayName }.eachCount().filterValues { it > 1 }.keys }
     HubSheetFrame(
         title = res.getString(R.string.sports_hub_sheet_channels, game.away.abbrev, game.home.abbrev),
         rowCount = rows.size,
@@ -56,29 +58,22 @@ fun ChannelSheet(
         focusKey = game.id,
         onClose = onClose,
         modifier = modifier.testTag(CHANNEL_SHEET_TAG),
-        footer = {
-            item(key = "note") {
-                Line(
-                    res.getString(R.string.sports_hub_regional_note),
-                    GuideUi.sans(22, FontWeight.Medium, GuideUi.Fg70),
-                    Modifier.padding(horizontal = 16.dp).testTag(CHANNEL_SHEET_NOTE_TAG),
-                    maxLines = 2,
-                )
-            }
-        },
     ) { requesters ->
         rows.forEachIndexed { i, c ->
             item(key = "ch:$i:${c.channel.identityHash}") {
                 val name = c.channel.displayName
                 val reason = channelReason(res, c, game, clock24)
-                val also = alsoLine(res, c)
+                val third = thirdLine(res, c, manyPlaylists, c.channel.displayName in sharedNames)
                 HubSheetRow(
                     requesters[i], first = i == 0, last = i == rows.lastIndex, key = "ch:$i", height = 96,
-                    description = res.getString(R.string.sports_hub_desc_channel_row, name, c.playlistName, reason),
+                    // (Code review 2026-11-25, UI open item 2) The spoken reason keeps the event's whole title.
+                    description = res.getString(R.string.sports_hub_desc_channel_row, name, c.playlistName, channelReason(res, c, game, clock24, spoken = true)),
                     onClick = {
                         when {
                             archiveOnly -> onPlayArchive(c)
-                            tunable -> onTune(c)
+                            // (Owner ruling 2026-11-25) A team channel is always on: it tunes before its game too
+                            // (the sheet of a game beyond the guide lists only those).
+                            tunable || c.reasons.any { it is MatchReason.TeamChannel } -> onTune(c)
                             else -> onNotYet()
                         }
                     },
@@ -88,7 +83,6 @@ fun ChannelSheet(
                         Line(name, GuideUi.sans(26, FontWeight.SemiBold, color))
                         val second = GuideUi.secondary(color, focusedOf(color), 0.70f)
                         Line(reason, GuideUi.sans(22, FontWeight.Medium, second), Modifier.fillMaxWidth())
-                        val third = listOfNotNull(c.playlistName.takeIf { manyPlaylists }, also).joinToString(res.getString(R.string.sports_hub_summary_sep))
                         if (third.isNotEmpty()) Line(third, GuideUi.sans(22, FontWeight.Medium, second))
                     }
                 }
@@ -98,30 +92,58 @@ fun ChannelSheet(
 }
 
 /**
- * §5.3 wording for one candidate: the guide listing (CONFIRMED), a sport listing or a national broadcaster (LIKELY), a
- * home / away local channel or the generic line (POSSIBLE).
+ * The one-line reason of a row (§5.3; event channels §9.1): a team channel, the guide listing, the channel name's event
+ * (no time when its zone was assumed, U-E-S7), a sport listing, a national broadcaster (named with its country, else by
+ * its network name of at least 3 characters with a letter, else unnamed, U-E-N6). Never a caveat sentence (U-E-B1).
  */
-internal fun channelReason(res: Resources, c: ChannelCandidate, game: GameSnapshot, clock24: Boolean): String {
+internal fun channelReason(res: Resources, c: ChannelCandidate, game: GameSnapshot, clock24: Boolean, spoken: Boolean = false): String {
     fun time(ms: Long) = SportsText.startTime(ms, clock24)
+    // (Owner ruling 2026-11-25) Another feed of the row above: the evidence is that row's. Spoken in full.
+    if (c.anotherFeed && !spoken) return res.getString(R.string.sports_hub_reason_another_feed)
+    c.reasons.filterIsInstance<MatchReason.TeamChannel>().firstOrNull()?.let { t ->
+        return res.getString(R.string.sports_hub_reason_team, t.nickname)
+    }
     c.reasons.filterIsInstance<MatchReason.Guide>().firstOrNull()?.let { g ->
         return res.getString(R.string.sports_hub_reason_guide, g.title, timeRange(g.startMs, g.endMs, clock24))
     }
-    if (c.confidence != MatchConfidence.POSSIBLE) {
-        c.reasons.filterIsInstance<MatchReason.SportListing>().firstOrNull()?.let { s ->
-            return res.getString(R.string.sports_hub_reason_sport_listing, s.title, time(s.startMs))
+    c.reasons.filterIsInstance<MatchReason.EventName>().firstOrNull()?.let { e ->
+        if (spoken) {
+            return if (e.zoneAssumed) res.getString(R.string.sports_hub_reason_event_untimed, e.title)
+            else res.getString(R.string.sports_hub_reason_event, time(e.startMs), e.title)
         }
-        c.reasons.filterIsInstance<MatchReason.Broadcaster>().firstOrNull { it.market == Market.NATIONAL }?.let { b ->
-            val country = b.country?.let { countryName(it) }
-            return if (country != null) res.getString(R.string.sports_hub_reason_network, b.network, country)
-            else res.getString(R.string.sports_hub_reason_network_any, b.network)
+        // (Code review 2026-11-25, UI open item 2) The event was graded against this game, so its matchup is the sheet's
+        // own title: show the time and what else the title says ("Jets Broadcast", "NHL on TNT").
+        val rest = EventMatchup.rest(e.title)
+        return when {
+            e.zoneAssumed && rest != null -> res.getString(R.string.sports_hub_reason_event_untimed_rest, rest)
+            e.zoneAssumed -> res.getString(R.string.sports_hub_reason_event_untimed_bare)
+            rest != null -> res.getString(R.string.sports_hub_reason_event_rest, time(e.startMs), rest)
+            else -> res.getString(R.string.sports_hub_reason_event_bare, time(e.startMs))
         }
     }
-    val b = c.reasons.filterIsInstance<MatchReason.Broadcaster>().firstOrNull()
-    return when (b?.market) {
-        Market.HOME -> res.getString(R.string.sports_hub_reason_home_local)
-        Market.AWAY -> res.getString(R.string.sports_hub_reason_away_local)
-        else -> res.getString(R.string.sports_hub_reason_possible)
+    c.reasons.filterIsInstance<MatchReason.SportListing>().firstOrNull()?.let { s ->
+        return res.getString(R.string.sports_hub_reason_sport_listing, s.title, time(s.startMs))
     }
+    val b = c.reasons.filterIsInstance<MatchReason.Broadcaster>().firstOrNull { it.market == Market.NATIONAL }
+    if (b != null) {
+        val country = b.country?.let { countryName(it) }
+        if (country != null) return res.getString(R.string.sports_hub_reason_network, b.network, country)
+        if (b.network.length >= 3 && b.network.any { it.isLetter() }) return res.getString(R.string.sports_hub_reason_network_any, b.network)
+    }
+    return res.getString(R.string.sports_hub_reason_network_unnamed)
+}
+
+/**
+ * Line 3 of a row (§9.1): the playlist when there are several ([manyPlaylists]), the variants ("Also: FHD" for a
+ * quality variant, "Also in <group>" for the same name in another group: the matcher puts that group in
+ * [ChannelCandidate.group]), then the row's group when another row has the same name ([sharedName]). Joined by " · ".
+ */
+internal fun thirdLine(res: Resources, c: ChannelCandidate, manyPlaylists: Boolean, sharedName: Boolean): String {
+    val twin = c.variants.any { it.displayName.equals(c.channel.displayName, ignoreCase = true) }
+    val alsoIn = c.group?.takeIf { twin }?.let { res.getString(R.string.sports_hub_also_in, it) }
+    val group = c.group?.takeIf { sharedName && !twin }
+    return listOfNotNull(c.playlistName.takeIf { manyPlaylists }, alsoLine(res, c), alsoIn, group)
+        .joinToString(res.getString(R.string.sports_hub_summary_sep))
 }
 
 /** "9:00–11:30 PM" (12 h: the period once, at the end, when both ends share it) or "21:00–23:30". */
@@ -142,13 +164,15 @@ private fun countryName(code: String): String? {
 }
 
 /**
- * "Also: FHD, 4K": for each collapsed variant, the words of its name that the shown channel's name lacks (the quality
+ * "Also: FHD, 4K": for each collapsed variant with another name, the words of its name that the shown channel's name lacks (the quality
  * tag), else its whole name.
  */
 internal fun alsoLine(res: Resources, c: ChannelCandidate): String? {
-    if (c.variants.isEmpty()) return null
+    // A variant with the very same name is "Also in <group>" (thirdLine), not a tag.
+    val others = c.variants.filterNot { it.displayName.equals(c.channel.displayName, ignoreCase = true) }
+    if (others.isEmpty()) return null
     val mine = words(c.channel.displayName).toSet()
-    val tags = c.variants.map { v ->
+    val tags = others.map { v ->
         val extra = words(v.displayName).filter { it !in mine }
         if (extra.isEmpty()) v.displayName else extra.joinToString(" ")
     }.distinct()

@@ -46,6 +46,11 @@ data class EditorChannelRow(
     val locked: Boolean, val lockedByGroup: String?,
     /** In the default Favorites list (FavouritesRepository.defaultList()). */
     val favorite: Boolean, val movedFrom: String?, val renamed: Boolean,
+    /**
+     * (Event channels WP-2, docs/design/m6-event-channels.md §5.5, re-review E1) [ruleHidden] by the playlist's "Hide
+     * channels with no event" switch, not by a user rule ([rulePattern] is then null): the menu says `D_NO_EVENT`.
+     */
+    val noEvent: Boolean = false,
 )
 
 /** A paged window over an ordered list (§4): [count] rows, pages of [PAGE] loaded around the cursor. */

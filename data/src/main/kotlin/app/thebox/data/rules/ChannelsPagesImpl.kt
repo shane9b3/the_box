@@ -57,6 +57,12 @@ class ChannelsPagesImpl @Inject constructor(
     /** (M5 integration, WP-C §1.6a) Group locks go through the one parental write path. */
     private val controls: app.thebox.core.parental.ParentalControls = app.thebox.core.parental.ParentalControls.NONE,
 ) : SectionPages {
+    /**
+     * (Event channels WP-2, re-review E1) The empty-slot test of the "Hide channels with no event" switch
+     * (`EventNameParser.isEmptySlot`); tests set a fake.
+     */
+    internal var isEmptySlot: (String) -> Boolean = app.thebox.core.events.EventNameParser::isEmptySlot
+
     private val version = AtomicLong()
     private val _invalidations = MutableSharedFlow<SettingsRoute>(extraBufferCapacity = 8)
     override val invalidations: Flow<SettingsRoute> = _invalidations.asSharedFlow()
@@ -107,12 +113,46 @@ class ChannelsPagesImpl @Inject constructor(
             }
             is SettingsRoute.HiddenChannels -> {
                 val pattern = firstChannelRulePattern(route.playlistId)
-                db.hiddenChannelsDao().entries(route.playlistId, from, limit).map {
-                    ChannelsPages.hiddenItem(route.playlistId, HiddenChannelRow(it.stableKey, it.name, it.groupName, it.byUser, if (it.ruleHidden) 0L else null, pattern), texts)
+                val entries = db.hiddenChannelsDao().entries(route.playlistId, from, limit)
+                val noEvent = noEventKeys(route.playlistId, entries.filter { it.ruleHidden && !it.byUser }.map { it.stableKey })
+                entries.map {
+                    ChannelsPages.hiddenItem(
+                        route.playlistId,
+                        HiddenChannelRow(it.stableKey, it.name, it.groupName, it.byUser, if (it.ruleHidden) 0L else null, pattern, noEvent = it.stableKey in noEvent),
+                        texts,
+                    )
                 }
             }
             else -> emptyList()
         }
+    }
+
+    /**
+     * (Re-review E1) Of [keys] (rule-hidden rows of one page), those the "Hide channels with no event" switch hides: the
+     * switch is on and the provider name (`c.name`, not the shown name) is an empty slot. Empty while the switch is off.
+     */
+    private suspend fun noEventKeys(pid: Long, keys: List<String>): Set<String> {
+        if (keys.isEmpty() || db.playlistDao().get(pid)?.hideEmptyEvents != true) return emptySet()
+        val out = HashSet<String>()
+        db.read {
+            // (Code review 2026-11-25, data m4) A row a user channel rule also hides keeps the rule's reason.
+            val rules = RuleHiddenPass.channelRuleMatchers(this, pid)
+            for (chunk in keys.chunked(KEY_CHUNK)) {
+                usePrepared(
+                    "SELECT c.stable_key, c.name, g0.name FROM channel c " + app.thebox.data.db.dao.ChannelDao.PROVIDER_GROUP_JOIN +
+                        "WHERE c.playlist_id = ? AND c.stable_key IN (${chunk.joinToString(",") { "?" }})",
+                ) { st ->
+                    st.bindLong(1, pid)
+                    chunk.forEachIndexed { i, k -> st.bindText(i + 2, k) }
+                    while (st.step()) {
+                        val name = st.getText(1)
+                        val group = if (st.isNull(2)) null else st.getText(2)
+                        if (RuleHiddenPass.hiddenByNoEvent(true, true, name, group, isEmptySlot) && !RuleHiddenPass.userRuleHides(rules, name)) out += st.getText(0)
+                    }
+                }
+            }
+        }
+        return out
     }
 
     private suspend fun firstChannelRulePattern(pid: Long): String? =
@@ -134,7 +174,11 @@ class ChannelsPagesImpl @Inject constructor(
             lockedGroups = db.groupAdminDao().lockedCount(pid),
             hiddenChannels = db.hiddenChannelsDao().count(pid),
             rules = ruleList.size,
-            ruleHiddenChannels = db.read { usePrepared(RULE_HIDDEN_COUNT) { st -> st.bindLong(1, pid); st.step(); st.getLong(0).toInt() } },
+            // (Re-review E1) Only what a user rule hides: the "Hide channels with no event" switch is not a rule.
+            ruleHiddenChannels = db.read {
+                val all = usePrepared(RULE_HIDDEN_COUNT) { st -> st.bindLong(1, pid); st.step(); st.getLong(0).toInt() }
+                (all - RuleHiddenPass.countHiddenByNoEvent(this, pid, isEmptySlot)).coerceAtLeast(0)
+            },
             favouriteLists = db.favouriteDao().lists().size,
         )
     }
@@ -338,6 +382,8 @@ class ChannelsPagesImpl @Inject constructor(
 
     companion object {
         private val LIVE = EntryKind.LIVE.ordinal
+        /** Stable keys per `IN (…)` read (the page is `PagedList.PAGE_SIZE` rows; far under SQLite's variable limit). */
+        private const val KEY_CHUNK = 500
 
         /** The guide domain: WP-A's object (M5 integration). */
         val GUIDE: SettingsDomain<GuidePrefs> get() = app.thebox.core.settings.state.GuideDomain

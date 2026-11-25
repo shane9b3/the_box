@@ -44,6 +44,11 @@ const val REMINDER_DISMISS_TAG = "reminder_dismiss"
  * §3.11.3, S2). The logic (modality, the 600 ms input guard, the countdown) is the state machine's (WP-D); the card
  * shows the guard: until [ReminderCardState.inputFromMs] the buttons are dimmed, carry no focus ring and are marked
  * disabled for accessibility, so an in-flight OK visibly cannot accept.
+ *
+ * Event channels (docs/design/m6-event-channels.md §6.6, §9.4): when the event moved to another slot the card adds
+ * "Now on <slot>" (the alert already names the new channel); when no slot lists it any more the card says the provider
+ * changed its channel and to search for it, instead of the start line, and offers only Dismiss (no "Switch now": the
+ * alert's channel is the old slot).
  */
 @Composable
 fun ReminderCard(state: ReminderCardState, modifier: Modifier = Modifier, clock: () -> Long = System::currentTimeMillis) {
@@ -59,7 +64,9 @@ fun ReminderCard(state: ReminderCardState, modifier: Modifier = Modifier, clock:
     val guarded = guardTick >= 0 && clock() < state.inputFromMs
     val a = state.alert
     val now = clock()
-    val text = if (a.late || now >= a.startAtMs) {
+    val text = if (a.eventGone) {
+        stringResource(R.string.reminder_event_moved, a.title)
+    } else if (a.late || now >= a.startAtMs) {
         val ago = ((now - a.startAtMs) / 60_000L).toInt().coerceAtLeast(0)
         stringResource(R.string.guide_reminder_started, a.title, ago, a.channelName)
     } else {
@@ -80,8 +87,13 @@ fun ReminderCard(state: ReminderCardState, modifier: Modifier = Modifier, clock:
             Dot(GuideUi.Live, 10.dp)
             Line(text, GuideUi.sans(26, FontWeight.SemiBold), Modifier.weight(1f), maxLines = 2)
         }
+        if (a.movedFrom != null && !a.eventGone) {
+            Line(stringResource(R.string.reminder_event_now_on, a.channelName), GuideUi.sans(22, FontWeight.Normal, GuideUi.Fg70), maxLines = 1)
+        }
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            CardButton(R.string.guide_reminder_switch, focused = !guarded && state.focused == 0, guarded = guarded, tag = REMINDER_SWITCH_TAG)
+            // (Integration 2026-11-25) No "Switch now" for a gone event: it would tune the old slot. The text above says
+            // to search for it; Dismiss is the only button (the machine focuses it and ignores Left).
+            if (!a.eventGone) CardButton(R.string.guide_reminder_switch, focused = !guarded && state.focused == 0, guarded = guarded, tag = REMINDER_SWITCH_TAG)
             CardButton(R.string.guide_reminder_dismiss, focused = !guarded && state.focused == 1, guarded = guarded, tag = REMINDER_DISMISS_TAG)
             Spacer(Modifier.weight(1f))
             Line(stringResource(R.string.guide_reminder_countdown, state.secondsLeft.coerceAtLeast(0)), GuideUi.mono(22, color = GuideUi.Fg50))

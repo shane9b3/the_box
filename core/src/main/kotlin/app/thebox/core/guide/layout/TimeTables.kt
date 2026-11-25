@@ -60,6 +60,12 @@ class TimeTables(
         return if (t.clock24) HM24[m] else HM12[m]
     }
 
+    override fun hmPeriod(min: Int): String {
+        val t = tables
+        val m = minuteOfDay(t, min)
+        return if (t.clock24) HM24[m] else HM12[m] + if (m < 720) " AM" else " PM"
+    }
+
     override fun minuteOfDay(min: Int): Int = minuteOfDay(tables, min)
 
     override fun dayOf(min: Int): Int = Math.floorDiv(min + offsetMin(tables, min), 1440)

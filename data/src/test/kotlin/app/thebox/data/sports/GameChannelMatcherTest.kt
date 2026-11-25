@@ -154,7 +154,7 @@ class GameChannelMatcherTest {
             programme("s360", s - 1440, s - 1440 + 180, "NHL Hockey: Kraken at Golden Knights")
         }.writeTo(File(dir.parentFile, "hub-match-${System.nanoTime()}.xml"))
         store.build(EpgBuildRequest(listOf(EpgSourceFile(src, xml)), nowMs, pastDays = 7, futureDays = 7), EpgWhitelistResolver { _, _ -> EpgWhitelist.ALL })
-        matcher = GameChannelMatcherImpl(gg.queries, store, db, Dispatchers.IO)
+        matcher = GameChannelMatcherImpl(gg.queries, store, db, app.thebox.core.events.FakeEventIndex(), Dispatchers.IO)
     }
 
     @After fun tearDown() { db.close(); dir.deleteRecursively() }
@@ -175,8 +175,11 @@ class GameChannelMatcherTest {
         assertTrue(son.reasons.first() is MatchReason.Guide)
         assertTrue(son.reasons.any { it is MatchReason.Broadcaster && it.network == "SN" })
         assertEquals("NHL Hockey: Golden Knights at Oilers", son.airing?.title)
-        assertEquals(setOf("sonf", "son2"), son.variants.map { v -> ids.entries.single { it.value == v.rowId }.key }.toSet())
+        // (Owner rulings 2026-11-25) The other feeds of Sportsnet Ontario are rows right under it, in provider order.
+        assertTrue(son.variants.isEmpty())
         assertEquals("the first candidate", "son", key(out.first()))
+        assertEquals(listOf("sonf", "son2"), out.subList(1, 3).map(::key))
+        assertTrue(out.subList(1, 3).all { it.anotherFeed })
 
         val tvas = m.getValue("tvas")
         assertEquals(MatchConfidence.LIKELY, tvas.confidence)
@@ -186,8 +189,7 @@ class GameChannelMatcherTest {
         assertEquals("teams in the subtitle", MatchConfidence.CONFIRMED, m.getValue("mx").confidence)
         assertEquals("Second", m.getValue("p2son").playlistName)
 
-        for (absent in listOf("s360", "tntuk", "abc7", "espn2", "snw", "nhln", "sne", "sonf", "son2")) assertFalse(absent, absent in m)
-        assertTrue(out.size <= 8)
+        for (absent in listOf("s360", "tntuk", "abc7", "espn2", "snw", "nhln", "sne")) assertFalse(absent, absent in m)
     }
 
     @Test fun affiliateOnlyThroughTheGuide() {
@@ -249,14 +251,17 @@ class GameChannelMatcherTest {
         assertNull(early["jx"]?.takeIf { it.airing?.title == "NFL Football: Jets at Bills" })
     }
 
-    /** 24 airings of one text across 2 playlists × 12 variants are kept whole (perText 40) and collapse per playlist. */
-    @Test fun variantCollapseKeepsEveryAiring() {
+    /**
+     * 24 airings of one text across 2 playlists × 12 variants are kept whole (perText 40). (Owner rulings 2026-11-25) Each
+     * is a row; a playlist's 12 sit together, the first with its reason and the rest as other feeds.
+     */
+    @Test fun everyVariantIsARowGroupedPerPlaylist() {
         val bosTor = game("2026020402", team("BOS", "Bruins"), team("TOR", "Maple Leafs"))
         val out = run(bosTor)
-        assertEquals(2, out.size)
-        assertEquals(listOf("Main", "Second"), out.map { it.playlistName })
-        assertEquals(listOf(11, 11), out.map { it.variants.size })
-        assertTrue(out.all { it.confidence == MatchConfidence.CONFIRMED })
+        assertEquals(24, out.size)
+        assertEquals(List(12) { "Main" } + List(12) { "Second" }, out.map { it.playlistName })
+        assertEquals(listOf(false) + List(11) { true } + listOf(false) + List(11) { true }, out.map { it.anotherFeed })
+        assertTrue(out.all { it.variants.isEmpty() && it.confidence == MatchConfidence.CONFIRMED })
     }
 
     @Test fun lockedFollowsTheAccessAndHiddenNever() {

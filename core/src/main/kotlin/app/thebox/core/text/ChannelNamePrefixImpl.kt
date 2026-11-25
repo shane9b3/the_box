@@ -1,5 +1,7 @@
 package app.thebox.core.text
 
+import app.thebox.core.events.EventGroups
+import app.thebox.core.events.EventNameParser
 import app.thebox.core.common.BoxLog
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
@@ -16,21 +18,51 @@ import kotlinx.serialization.json.putJsonArray
  * ISO-3166 alpha-2/alpha-3 code (or `UK`) that is not in [EXCLUDED_TAGS], or when it equals the entry's group name and
  * has no lower-case letter. No regex on the Auto path; pure and allocation-light (one substring per changed name).
  *
+ * (Event channels WP-2, docs/design/m6-event-channels.md §5.3, U-E-B2) An event or empty-slot name ("Sportsnet+ 09: Vegas
+ * @ Edmonton @ 24 Nov 08:00 PM ET", "NHL 02:") shows its slot ("Sportsnet+ 09") under **every** rule, Off included: [strip]
+ * returns [slotOf] first. The slot needs no clock and no zone, so it is safe to store in `display_name`; a custom name
+ * still wins (`COALESCE(custom_name, display_name, name)`), and search keeps matching the raw name (`channel_fts`).
+ * `ChannelNamePrefix.RULE_VERSION` is `1 + EventNameParser.VERSION`, so a parser change re-runs the backfill.
+ *
  * Thread-safe: the only state is the compiled custom regex, published through one volatile reference.
+ *
+ * @param slotOf the slot of an event or empty-slot name, else null: `EventNameParser.slotOf`; a fake in tests.
  */
-class ChannelNamePrefixImpl : ChannelNamePrefix {
+class ChannelNamePrefixImpl(
+    private val slotOf: (String) -> String? = app.thebox.core.events.EventNameParser::slotOf,
+) : ChannelNamePrefix {
     private class CompiledRegex(val source: String, val pattern: UserRegex?)
 
     @Volatile private var compiled: CompiledRegex? = null
 
-    override fun strip(name: String, groupName: String?, rule: NamePrefixRule): String? = when (rule) {
-        NamePrefixRule.Off -> null
-        NamePrefixRule.Auto -> auto(name, groupName)
-        is NamePrefixRule.Custom -> custom(name, groupName, rule)
+    override fun strip(name: String, groupName: String?, rule: NamePrefixRule): String? {
+        slot(name, groupName)?.let { return it }
+        return when (rule) {
+            NamePrefixRule.Off -> null
+            NamePrefixRule.Auto -> auto(name, groupName)
+            is NamePrefixRule.Custom -> custom(name, groupName, rule)
+        }
     }
 
-    /** How many of [names] (name, group) the rule changes: the M5 editor's preview count (§3.12.2). */
-    fun countChanged(names: Sequence<Pair<String, String?>>, rule: NamePrefixRule): Int = names.count { (n, g) -> strip(n, g, rule) != null }
+    /**
+     * True when [name] is an event or empty-slot name, whose shown name is its slot whatever the rule (§5.3). (Code review
+     * 2026-11-25, data m1) A bare form ("BBC 1 | Offline") counts only in an event-like provider [group].
+     */
+    fun isSlotName(name: String, group: String?): Boolean = slot(name, group) != null
+
+    private fun slot(name: String, group: String?): String? = try {
+        slotOf(name)?.takeIf { it.isNotBlank() && (!EventNameParser.isBareSlot(name) || EventGroups.eventLike(group)) }
+    } catch (e: RuntimeException) {
+        null // the parser never throws by contract; a bug there must not break a merge or the backfill
+    }
+
+    /**
+     * How many of [names] (name, group) the rule changes: the M5 editor's preview count (§3.12.2). (Event channels,
+     * re-review E7) Slot names are skipped: every rule, Off included, shows their slot, so counting them would add about
+     * 5,300 to "changes N of M names" for any rule on the owner's playlist.
+     */
+    fun countChanged(names: Sequence<Pair<String, String?>>, rule: NamePrefixRule): Int =
+        names.count { (n, g) -> !isSlotName(n, g) && strip(n, g, rule) != null }
 
     private fun custom(name: String, groupName: String?, rule: NamePrefixRule.Custom): String? {
         val regex = rule.regex

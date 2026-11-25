@@ -34,6 +34,7 @@ import sports  # noqa: E402
 import sports_nfl  # noqa: E402
 import sports_chl  # noqa: E402
 import sports_video  # noqa: E402
+import events  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PKT = 188
@@ -87,6 +88,8 @@ DEFAULTS = {
     **sports_video.DEFAULTS,
     # Sports Hub: catalog channels and XMLTV for the channel link (catalog.py, WP-3; --sports-hub-catalog)
     "sports_hub_catalog": False,
+    # Event and team channels (docs/design/m6-event-channels.md §11.3; events.py; --event-catalog)
+    **events.DEFAULTS,
 }
 FAULT_DOC = {
     "redirect": False, "token_ttl": None, "linger": 0, "linger_status": 403, "close_every": 0,
@@ -1081,6 +1084,7 @@ class Panel:
         sports_nfl.check_config(patch)
         sports_chl.check_config(patch)
         sports_video.check_config(patch)
+        events.check_config(patch)
         if "sports_hub_catalog" in patch and not isinstance(patch["sports_hub_catalog"], bool):
             raise ValueError("sports_hub_catalog must be true or false")
         if "dns_records" in patch and not isinstance(patch["dns_records"], dict):
@@ -1533,6 +1537,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return sports_chl.admin(self, path, data)
         if path == "/admin/sports_video":
             return sports_video.admin(self, path, data)
+        if path == "/admin/events":
+            return events.admin(self, path, data)
         if path == "/admin/now":
             now = time.time()
             return self.json({"unix": now, "panel_wall": dt.datetime.fromtimestamp(now, p.tz()).strftime("%Y-%m-%d %H:%M:%S"),
@@ -2398,6 +2404,8 @@ def main(argv=None):
     ap.add_argument("--chl-drop-penalties", type=int, metavar="N", help="with --sports-chl: every Nth penalties request is a 503 (B3)")
     ap.add_argument("--sports-video", action="store_true", help="with --sports: also serve the fake NHL video service (/bc/, sports_video.py)")
     ap.add_argument("--sports-hub-catalog", action="store_true", help="the Sports Hub channel-link catalog channels and XMLTV (catalog.py)")
+    ap.add_argument("--event-catalog", action="store_true",
+                    help="the event and team channel catalog: generated event-slot names, team channels and guide placeholders (events.py; docs/design/m6-event-channels.md §11.3)")
     ap.add_argument("--chl-time-tbd", action="store_true", help="with --sports-chl: one scheduled game per league is \"Time TBD\" (time_tbd \"1\")")
     ap.add_argument("--update-apk-dir", help="U-S14: load every *.apk in this directory as an update APK by name "
                                              "(thebox-update-v2.apk -> v2); select one with the update_apk config key")
@@ -2451,6 +2459,8 @@ def main(argv=None):
         cfg["sports_video"] = True
     if a.sports_hub_catalog:
         cfg["sports_hub_catalog"] = True
+    if a.event_catalog:
+        cfg["event_catalog"] = True
     if a.chl_timeline is not None:
         cfg["sports_chl_timeline_s"] = a.chl_timeline
     if a.chl_refuse:

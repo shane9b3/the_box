@@ -168,6 +168,18 @@ sealed interface MatchReason {
     data class SportListing(val title: String, val startMs: Long) : MatchReason
     /** The channel's name equals a broadcaster alias NHL.com (or ESPN) lists. Never a local affiliate (R-S3). */
     data class Broadcaster(val network: String, val market: Market, val country: String?) : MatchReason
+    /**
+     * (Event channels commit 0, docs/design/m6-event-channels.md §8.2) The channel is [side]'s team channel: its name
+     * equals the team's name and its group or tvg id says so. [team]: the full name ("Edmonton Oilers"); [nickname]:
+     * "Oilers".
+     */
+    data class TeamChannel(val team: String, val nickname: String, val side: Side) : MatchReason
+    /**
+     * (Event channels commit 0, §8.3, §8.4) The channel's name lists the game as an event. [title]: the cleaned event
+     * title; [startMs]: its start; [citiesOnly]: both sides matched by place only; [zoneAssumed]: the name had no zone
+     * (`EventZoneSource.ASSUMED`), so the hub shows no time.
+     */
+    data class EventName(val title: String, val startMs: Long, val citiesOnly: Boolean, val zoneAssumed: Boolean) : MatchReason
 }
 
 data class ChannelCandidate(
@@ -175,17 +187,42 @@ data class ChannelCandidate(
     val playlistName: String,
     val confidence: MatchConfidence,
     val reasons: List<MatchReason>,
-    /** Collapsed quality variants ("Also: FHD, 4K"). */
+    /**
+     * Collapsed quality variants ("Also: FHD, 4K"). (Owner ruling 2026-11-25, event channels §18) The matcher no longer
+     * folds any channel: every feed is its own row, so it leaves this empty; the sheet still draws it when set.
+     */
     val variants: List<GuideChannel>,
     /** For catch-up (§5.6). */
     val airing: ProgrammeInfo?,
+    /** (Event channels commit 0, §9.1) The provider group's name: line 3 for duplicate short names, "Also in". */
+    val group: String? = null,
+    /**
+     * (Owner ruling 2026-11-25, event channels §18) Another feed of the channel in the row above (the same guide channel,
+     * alias or name residue): the sheet's reason says so instead of repeating the evidence.
+     */
+    val anotherFeed: Boolean = false,
 )
 
 /** `:data` `GameChannelMatcherImpl` (WP-3). */
 interface GameChannelMatcher {
     suspend fun match(game: GameSnapshot, nowMs: Long, access: ParentalAccess): List<ChannelCandidate>
+    /**
+     * (Event channels commit 0, docs/design/m6-event-channels.md §8.3, §8.4; re-review E14) [match] with [board]: the
+     * other games the hub has loaded for the shown league's day (`SportsViewModel` passes `repo.day`), for the
+     * cities-only upgrade of an event name. The default body ignores [board] so commit 0 compiles; WP-4 overrides it.
+     */
+    suspend fun match(game: GameSnapshot, nowMs: Long, access: ParentalAccess, board: List<GameSnapshot>): List<ChannelCandidate> =
+        match(game, nowMs, access)
     /** Page open, access change. */
     fun clear()
+    /**
+     * (Event channels commit 0, §8.5) The end of usable guide data, epoch ms (`EpgGenerationInfo.dataToMin`, which an
+     * older generation computes in memory; code review 2026-11-25: else the build time plus a day, capped at
+     * `windowToMin`), or null without a guide. Read by `ChannelHorizon.beyondGuide`.
+     */
+    fun guideEndMs(): Long? = null
+    /** (Event channels commit 0, §8.5) [game]'s two team channels only (stage T), for the beyond-guide line. */
+    suspend fun teamChannels(game: GameSnapshot, access: ParentalAccess): List<ChannelCandidate> = emptyList()
 }
 
 // ------------------------------------------------------------------ §6.1 video

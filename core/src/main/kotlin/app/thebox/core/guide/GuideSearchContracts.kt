@@ -7,6 +7,11 @@ data class ProgrammeHit(
     val rawEndMin: Int,
     /** Past and inside the channel's archive (catch-up glyph, OK plays catch-up). */
     val inArchive: Boolean,
+    /**
+     * (Code review 2026-11-25, UI M2) Read from the channel's name (event channels §7), not from the guide. Part of the
+     * hit's identity: a guide listing and a name's event can share a channel and a raw start.
+     */
+    val fromName: Boolean = false,
 )
 
 data class SearchResults(

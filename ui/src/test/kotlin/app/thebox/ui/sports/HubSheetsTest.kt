@@ -2,12 +2,15 @@ package app.thebox.ui.sports
 
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
+import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.assertIsNotFocused
 import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performKeyInput
@@ -99,15 +102,17 @@ class HubSheetsTest {
         val ch = GuideFixtures.channel(1, name = "CA| SPORTSNET ONTARIO HD")
         fun cand(conf: MatchConfidence, vararg r: MatchReason) = ChannelCandidate(ch, "P", conf, r.toList(), emptyList(), null)
         assertEquals(
-            "Sportsnet carries this game in Canada. Your guide doesn't list it on this channel.",
+            "Sportsnet carries this game in Canada.",
             channelReason(res, cand(MatchConfidence.LIKELY, MatchReason.Broadcaster("Sportsnet", Market.NATIONAL, "CA")), live, false),
         )
-        assertEquals(
-            "Home team's local channel. It may show a different game where you live.",
-            channelReason(res, cand(MatchConfidence.POSSIBLE, MatchReason.Broadcaster("SNO", Market.HOME, "CA")), live, false),
-        )
-        assertEquals("May carry this game. Check the channel.", channelReason(res, cand(MatchConfidence.POSSIBLE), live, false))
-        assertTrue(channelReason(res, cand(MatchConfidence.CONFIRMED, MatchReason.Guide("NHL Hockey", 0, 9_000_000, false)), live, true).startsWith("In your guide: NHL Hockey, "))
+        // (Event channels §9.1) No "local channel" wording: a regional broadcaster is a candidate only on guide evidence,
+        // and a row without a nameable network says so plainly (U-E-N6).
+        assertEquals("A national broadcaster carries this game.", channelReason(res, cand(MatchConfidence.POSSIBLE, MatchReason.Broadcaster("SNO", Market.HOME, "CA")), live, false))
+        assertEquals("A national broadcaster carries this game.", channelReason(res, cand(MatchConfidence.POSSIBLE), live, false))
+        assertEquals("A national broadcaster carries this game.", channelReason(res, cand(MatchConfidence.POSSIBLE, MatchReason.Broadcaster("X1", Market.NATIONAL, null)), live, false))
+        assertTrue(channelReason(res, cand(MatchConfidence.CONFIRMED, MatchReason.Guide("NHL Hockey", 0, 9_000_000, false)), live, true).let { it.startsWith("In your guide, ") && it.endsWith(": NHL Hockey") })
+        assertEquals("Sportsnet carries this game.", channelReason(res, cand(MatchConfidence.LIKELY, MatchReason.Broadcaster("Sportsnet", Market.NATIONAL, null)), live, false))
+        assertTrue(channelReason(res, cand(MatchConfidence.LIKELY, MatchReason.SportListing("NHL Hockey", 0)), live, true).let { it.startsWith("In your guide at ") && it.endsWith(": NHL Hockey") })
         val v = ChannelCandidate(ch, "P", MatchConfidence.CONFIRMED, emptyList(), listOf(GuideFixtures.channel(2, name = "CA| SPORTSNET ONTARIO FHD")), null)
         assertEquals("Also: FHD", alsoLine(res, v))
         assertEquals(".915", svPct(0.915))
@@ -159,7 +164,53 @@ class HubSheetsTest {
         rule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
         rule.waitForIdle()
         assertEquals(1, notYet)
-        rule.onNodeWithTag(CHANNEL_SHEET_NOTE_TAG, useUnmergedTree = true).fetchSemanticsNode()
+        // (Event channels §9.1) No footer note: the regional note went with the regional guesses.
+        assertTrue(rule.onAllNodesWithText("Regional channels", substring = true, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+    }
+
+    /**
+     * (Owner rulings 2026-11-25, event channels §18) The sheet lists every matched channel: a long list scrolls with the
+     * D-pad (the focused row stays shown, focus never leaves the list at either end), the feeds of one channel are
+     * separate rows in order, and a following feed says it is another feed of the channel above.
+     */
+    @Test
+    fun aLongChannelListScrollsAndEveryFeedIsARow() {
+        val rows = (0 until 30).map { i ->
+            ChannelCandidate(
+                GuideFixtures.channel(100 + i, name = "Channel $i"), "P", MatchConfidence.CONFIRMED,
+                listOf(MatchReason.Broadcaster("TNT", Market.NATIONAL, null)), emptyList(), null, anotherFeed = i in 1..2,
+            )
+        }
+        val tuned = ArrayList<ChannelCandidate>()
+        rule.setContent {
+            BoxTheme { ChannelSheet(live, rows, true, false, false, onTune = { tuned += it }, onPlayArchive = {}, onNotYet = {}, onClose = {}) }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag(hubSheetRowTag("ch:0"), useUnmergedTree = true).assertIsFocused()
+        assertTrue(rule.onAllNodesWithText("Same channel, another feed", useUnmergedTree = true).fetchSemanticsNodes().size == 2)
+        rule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
+        rule.waitForIdle()
+        rule.onNodeWithTag(hubSheetRowTag("ch:1"), useUnmergedTree = true).assertIsFocused()
+        rule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
+        rule.waitForIdle()
+        assertEquals("a following feed is selectable", listOf(rows[1]), tuned)
+        for (i in 2 until 30) {
+            rule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
+            rule.waitForIdle()
+            rule.onNodeWithTag(hubSheetRowTag("ch:$i"), useUnmergedTree = true).assertIsFocused().assertIsDisplayed()
+        }
+        rule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
+        rule.waitForIdle()
+        rule.onNodeWithTag(hubSheetRowTag("ch:29"), useUnmergedTree = true).assertIsFocused()
+        assertTrue("the list is lazy: the first row is no longer composed", rule.onAllNodesWithTag(hubSheetRowTag("ch:0"), useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
+        for (i in 28 downTo 0) {
+            rule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
+            rule.waitForIdle()
+            rule.onNodeWithTag(hubSheetRowTag("ch:$i"), useUnmergedTree = true).assertIsFocused().assertIsDisplayed()
+        }
+        rule.onRoot().performKeyInput { pressKey(Key.DirectionUp) }
+        rule.waitForIdle()
+        rule.onNodeWithTag(hubSheetRowTag("ch:0"), useUnmergedTree = true).assertIsFocused()
     }
 
     @Test

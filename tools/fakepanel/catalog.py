@@ -6,6 +6,8 @@ import random
 import time
 from xml.sax.saxutils import escape, quoteattr
 
+import events
+
 SLOT = 1800  # EPG slot length, seconds
 EPG_BACK_DAYS = 3
 EPG_FWD_DAYS = 3
@@ -85,22 +87,35 @@ def hub_airings(ch, anchor=None):
         out.append((game[0], game[1], "Hockey LNH"))
     if tv == "hub.abc7.test":
         out.append((game[0], game[1], "NHL Hockey: Kings at Ducks"))
+    if tv == events.HUB_TNT_TVG:  # event catalog on: TNT has a guide id and lists the featured game (event channels §11.3)
+        a0, b0 = events.featured_window()
+        out.append((a0, b0, events.FEATURED_TITLE))
     return sorted(out)
 
 
 def live_cats(cfg):
-    return LIVE_CATS + ([ADULT_CAT] if cfg.get("adult_category") else [])
+    return LIVE_CATS + ([ADULT_CAT] if cfg.get("adult_category") else []) + events.categories(cfg)
+
+
+def _hub(cfg, c):
+    """(Event channels §11.3) With the event catalog on, the hub's "US: TNT" has a guide id and lists the featured game."""
+    if c["id"] == 65 and events.enabled(cfg):
+        return dict(c, tvg_id=events.HUB_TNT_TVG)
+    return c
 
 
 def channels(cfg):
-    return CHANNELS + ([ADULT_CH] if cfg.get("adult_category") else []) + (HUB_CHANNELS if cfg.get("sports_hub_catalog") else [])
+    hub = [_hub(cfg, c) for c in HUB_CHANNELS] if cfg.get("sports_hub_catalog") else []
+    return CHANNELS + ([ADULT_CH] if cfg.get("adult_category") else []) + hub + events.channels(cfg, time.time())
 
 
 def channel_by_id(cfg, i):
     if cfg.get("adult_category") and i == ADULT_CH["id"]:
         return ADULT_CH
     if cfg.get("sports_hub_catalog") and i in HUB_BY_ID:
-        return HUB_BY_ID[i]
+        return _hub(cfg, HUB_BY_ID[i])
+    if events.enabled(cfg) and 80 <= i <= 129:
+        return events.channel_by_id(cfg, i)
     return CH_BY_ID.get(i)
 ARCHIVE_DAYS = 3
 
@@ -265,6 +280,9 @@ def desc(cfg, ch, p):
 
 
 def programmes(ch, t_from, t_to, tz):
+    if ch.get("event"):
+        yield from event_programmes(ch, t_from, t_to, tz)
+        return
     if ch.get("hub"):
         yield from hub_programmes(ch, t_from, t_to, tz)
         return
@@ -286,11 +304,29 @@ def hub_programmes(ch, t_from, t_to, tz, anchor=None):
     yield from sorted(out, key=lambda p: p["start"])
 
 
+def event_programmes(ch, t_from, t_to, tz):
+    """(Event channels §11.3) A guide-listed channel: the usual slots with the featured game laid over them; a
+    BossSports-style slot: its 4 h blocks only; any other event or team channel: nothing."""
+    if ch.get("noguide") or not ch.get("tvg_id"):
+        return
+    if events.listed(ch):
+        airs = list(events.programmes(None, ch, t_from, t_to, tz))
+        s = int(t_from) // SLOT * SLOT
+        out = list(airs)
+        while s < t_to:
+            if not any(p["start"] < s + SLOT and s < p["stop"] for p in airs):
+                out.append(programme(ch, s, tz))
+            s += SLOT
+        yield from sorted(out, key=lambda p: p["start"])
+        return
+    yield from events.programmes(None, ch, t_from, t_to, tz)
+
+
 def epg_listings(cfg, ch, tz, now, short=False, limit=4, syn=None):
     if syn and ch.get("synthetic"):
         return syn.epg_listings(cfg, ch, tz, now, short, limit)
-    if ch.get("hub") and not ch["tvg_id"]:
-        return {"epg_listings": []}  # a hub channel without a guide id has no guide
+    if (ch.get("hub") or ch.get("event")) and (not ch["tvg_id"] or ch.get("noguide")):
+        return {"epg_listings": []}  # a hub or event channel without a guide id has no guide (team channels: none)
     plain = cfg.get("epg_plain")
     enc = (lambda s: s) if plain else (lambda s: base64.b64encode(s.encode()).decode())
     cur = int(now) // SLOT * SLOT
@@ -319,7 +355,7 @@ def xmltv(cfg, base, tz_unused, now, offset):
     parts = ['<?xml version="1.0" encoding="UTF-8"?>\n<tv generator-info-name="fakepanel">\n']
     seen = set()  # hub channels 60 and 61 share one guide id; 62, 65 and 68 have none
     for c in channels(cfg):
-        if not c["tvg_id"] or c["tvg_id"] in seen:
+        if not c["tvg_id"] or c["tvg_id"] in seen or c.get("noguide"):
             continue
         seen.add(c["tvg_id"])
         parts.append(f'<channel id={quoteattr(c["tvg_id"])}><display-name>{escape(c["name"])}</display-name>'
@@ -327,7 +363,7 @@ def xmltv(cfg, base, tz_unused, now, offset):
     fmt = lambda ts: dt.datetime.fromtimestamp(ts, zone).strftime("%Y%m%d%H%M%S") + " " + offset
     seen = set()
     for c in channels(cfg):
-        if not c["tvg_id"] or c["tvg_id"] in seen:
+        if not c["tvg_id"] or c["tvg_id"] in seen or c.get("noguide"):
             continue
         seen.add(c["tvg_id"])
         for p in programmes(c, now - EPG_BACK_DAYS * 86400, now + EPG_FWD_DAYS * 86400, zone):

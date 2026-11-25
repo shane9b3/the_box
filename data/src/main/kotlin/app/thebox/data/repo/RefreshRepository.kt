@@ -10,6 +10,7 @@ import app.thebox.core.common.Redact
 import app.thebox.core.common.SourceError
 import app.thebox.core.common.SourceException
 import app.thebox.core.epg.EpgStore
+import app.thebox.core.events.EventIndex
 import app.thebox.core.io.Compression
 import app.thebox.core.m3u.M3uParseOptions
 import app.thebox.core.m3u.M3uPlaylistParser
@@ -47,6 +48,7 @@ import app.thebox.data.di.IoDispatcher
 import app.thebox.data.di.WallClock
 import app.thebox.data.net.ContentCopier
 import app.thebox.data.work.ImportMutex
+import app.thebox.data.work.RefreshScheduler
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.isActive
@@ -93,6 +95,10 @@ class RefreshRepository @Inject constructor(
     @param:Named(PLAYLIST_CACHE_DIR) private val cacheDir: File,
     @param:IoDispatcher private val io: CoroutineDispatcher,
     private val clock: WallClock,
+    /** (Event channels WP-2, docs/design/m6-event-channels.md §5.2) Rebuilt after the merge's `finish`; null in tests. */
+    private val events: EventIndex? = null,
+    /** (Event channels WP-2, §10) The reschedule hook after the rebuild (the 6 h event default); null in tests. */
+    private val scheduler: RefreshScheduler? = null,
 ) : PlaylistRefresher {
 
     /**
@@ -129,6 +135,9 @@ class RefreshRepository @Inject constructor(
                     }
                 }
                 log(playlistId, trigger, started, report, null, 0)
+                // (Code review 2026-11-25, data m2) `last_refresh_at` moved, so the index key did: names without a year
+                // are read against the new time. Rebuild now, as after a merge, so no reader finds a stale key.
+                afterMerge(playlistId)
                 return RefreshResult(report, null)
             }
 
@@ -158,6 +167,11 @@ class RefreshRepository @Inject constructor(
                     withBackgroundPriority { differ.merge(producer, RoomExistingChannels(db, playlistId), sink, ctx, cancel) }
                 }
             }
+
+            // 3b. (Event channels §5.2, §10) The event index after `finish`, before the library signal settles: it re-reads
+            // every live name, writes event_count / event_zone on a change and bumps its version (the guide reloads).
+            // Then the update interval, which follows event_count while it is the default. Neither fails the refresh.
+            afterMerge(playlistId)
 
             // 4. Header, account, EPG sources, B1.
             var sourcesChanged = false
@@ -219,6 +233,23 @@ class RefreshRepository @Inject constructor(
             // (§3.10 step 6: a log row on success and on failure). Only the class name: messages may hold URLs.
             BoxLog.e(TAG, "playlist $playlistId refresh crashed", e)
             return fail(playlist, trigger, started, SourceError.Internal(e.javaClass.simpleName))
+        }
+    }
+
+    private suspend fun afterMerge(playlistId: Long) {
+        try {
+            events?.rebuild()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            BoxLog.w(TAG, "event index rebuild failed: ${e.javaClass.simpleName}")
+        }
+        try {
+            scheduler?.rescheduleIfChanged(playlistId)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            BoxLog.w(TAG, "reschedule after refresh failed: ${e.javaClass.simpleName}")
         }
     }
 

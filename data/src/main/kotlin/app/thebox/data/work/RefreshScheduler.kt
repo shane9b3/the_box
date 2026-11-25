@@ -13,6 +13,7 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import app.thebox.core.common.BoxLog
 import app.thebox.core.epg.EpgStore
+import app.thebox.core.events.EventConstants
 import app.thebox.data.db.dao.EpgSourceDao
 import app.thebox.data.db.dao.PlaylistDao
 import app.thebox.data.db.dao.RefreshLogDao
@@ -38,6 +39,11 @@ import javax.inject.Singleton
  * | `epg-periodic` | periodic 12 h, UPDATE | EpgImportWorker | CONNECTED, storageNotLow |
  * | `epg-import` | one-time, APPEND_OR_REPLACE | EpgImportWorker | CONNECTED |
  * | `epg-patch` | one-time, APPEND_OR_REPLACE, no input | EpgPatchWorker | none (cached files) |
+ *
+ * (Event channels WP-2, docs/design/m6-event-channels.md §10) The playlist's period is its **effective** interval
+ * ([effectiveIntervalH]): while `refresh_interval_auto` is set (the user never picked one), a playlist with at least
+ * `EVENT_REFRESH_MIN` events updates every `EVENT_REFRESH_H` hours. Manual (0) is never overridden, and picking any value
+ * clears the flag. [rescheduleIfChanged] is the hook after a refresh's index rebuild and after the start-up warm-up.
  */
 @Singleton
 class RefreshScheduler @Inject constructor(
@@ -52,17 +58,35 @@ class RefreshScheduler @Inject constructor(
 
     fun schedulePlaylist(p: PlaylistEntity) {
         val name = periodicName(p.id)
-        if (p.refreshIntervalH <= 0 || !p.enabled) {
+        val hours = effectiveIntervalH(p)
+        if (hours <= 0 || !p.enabled) {
             workManager.cancelUniqueWork(name)
             return
         }
-        val request = PeriodicWorkRequestBuilder<PlaylistRefreshWorker>(p.refreshIntervalH.toLong(), TimeUnit.HOURS)
+        val request = PeriodicWorkRequestBuilder<PlaylistRefreshWorker>(hours.toLong(), TimeUnit.HOURS)
             .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).setRequiresStorageNotLow(true).build())
             .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, BACKOFF_S, TimeUnit.SECONDS)
             .setInputData(PlaylistRefreshWorker.input(p.id, Trigger.PERIODIC))
             .addTag(TAG_SYNC).addTag(TAG_PLAYLIST_PREFIX + p.id)
             .build()
         workManager.enqueueUniquePeriodicWork(name, ExistingPeriodicWorkPolicy.UPDATE, request)
+    }
+
+    /**
+     * (Event channels §10, the reschedule hook) Re-registers [playlistId]'s periodic refresh when its effective interval
+     * differs from the enqueued work's period, or when none is enqueued. Never cancels: Manual and disabled playlists are
+     * cancelled by the settings path (a running periodic refresh calls this, and must not cancel itself). Returns
+     * whether it scheduled.
+     */
+    suspend fun rescheduleIfChanged(playlistId: Long): Boolean {
+        val p = playlistDao.get(playlistId) ?: return false
+        val hours = effectiveIntervalH(p)
+        if (hours <= 0 || !p.enabled) return false
+        val live = workManager.getWorkInfosForUniqueWorkFlow(periodicName(playlistId)).first().filter { !it.state.isFinished }
+        if (live.any { it.periodicityInfo?.repeatIntervalMillis == TimeUnit.HOURS.toMillis(hours.toLong()) }) return false
+        BoxLog.i(TAG) { "playlist $playlistId: update interval now ${hours}h" }
+        schedulePlaylist(p)
+        return true
     }
 
     fun cancelPlaylist(playlistId: Long) {
@@ -197,6 +221,15 @@ class RefreshScheduler @Inject constructor(
         const val BACKOFF_S = 30L
 
         fun periodicName(playlistId: Long) = "playlist-periodic-$playlistId"
+
+        /**
+         * §10: the interval the scheduler uses. [auto] (`refresh_interval_auto`: the user never picked one) with at least
+         * `EVENT_REFRESH_MIN` live events gives `EVENT_REFRESH_H`; otherwise [intervalH]. Manual (≤ 0) is never overridden.
+         */
+        fun effectiveIntervalH(intervalH: Int, auto: Boolean, eventCount: Int): Int =
+            if (intervalH > 0 && auto && eventCount >= EventConstants.EVENT_REFRESH_MIN) EventConstants.EVENT_REFRESH_H else intervalH
+
+        fun effectiveIntervalH(p: PlaylistEntity): Int = effectiveIntervalH(p.refreshIntervalH, p.refreshIntervalAuto, p.eventCount)
         fun refreshName(playlistId: Long) = "playlist-refresh-$playlistId"
     }
 }

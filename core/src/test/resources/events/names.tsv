@@ -1,0 +1,213 @@
+# EventNameParserTest fixtures (docs/design/m6-event-channels.md §11.1). Tab-separated:
+# name	now (ISO instant; empty = 2026-11-24T12:00:00Z)	assumed zone (empty = America/New_York)	kind (EVENT/EMPTY/NONE)	slot	title	subtitle	local start (in the zone column)	zone id	source	shape	utc start (optional)
+# "~" is null. Real provider names are format examples only (§2.1, §3.6): channel names, no URL, id or credential.
+#
+# ---- §11.1 real names (1-60)
+Sportsnet+ 01: Sportsnet Central: Nov. 23 @ 24 Nov 05:00 AM ET			EVENT	Sportsnet+ 01	Sportsnet Central: Nov. 23	~	2026-11-24 05:00	America/New_York	EXPLICIT	AT_DAY_MONTH
+Sportsnet+ 08: Detroit @ Orlando @ 24 Nov 07:00 PM ET			EVENT	Sportsnet+ 08	Detroit @ Orlando	~	2026-11-24 19:00	America/New_York	EXPLICIT	AT_DAY_MONTH
+Sportsnet+ 09: Vegas @ Edmonton @ 24 Nov 08:00 PM ET			EVENT	Sportsnet+ 09	Vegas @ Edmonton	~	2026-11-24 20:00	America/New_York	EXPLICIT	AT_DAY_MONTH	2026-11-25T01:00:00Z
+Sportsnet+ 10: Dallas @ Denver @ 24 Nov 10:00 PM ET			EVENT	Sportsnet+ 10	Dallas @ Denver	~	2026-11-24 22:00	America/New_York	EXPLICIT	AT_DAY_MONTH
+NHL 01: NHL on TNT: Golden Knights at Oilers @ 24 Nov 07:30 PM ET			EVENT	NHL 01	NHL on TNT: Golden Knights at Oilers	~	2026-11-24 19:30	America/New_York	EXPLICIT	AT_DAY_MONTH
+UEFA Champions League 01: Galatasaray - Aston Villa @ 24 Nov 05:00 PM London			EVENT	UEFA Champions League 01	Galatasaray - Aston Villa	~	2026-11-24 17:00	Europe/London	EXPLICIT	AT_DAY_MONTH	2026-11-24T17:00:00Z
+MonoMAX 01: TAURON Liga Energa Trefl Gdańsk vs NEONET Norwid Częstochowa @ 24 Nov 02:50 PM			EVENT	MonoMAX 01	TAURON Liga Energa Trefl Gdańsk vs NEONET Norwid Częstochowa	~	2026-11-24 14:50	America/New_York	ASSUMED	AT_DAY_MONTH
+F1 TV 08: [4K] F1 LIVE @ 20 Nov 11:00 PM			EVENT	F1 TV 08	[4K] F1 LIVE	~	2026-11-20 23:00	America/New_York	ASSUMED	AT_DAY_MONTH
+DAZN CA 13: Boston vs. Barrow @ 24 Nov 02:45 PM ET			EVENT	DAZN CA 13	Boston vs. Barrow	~	2026-11-24 14:45	America/New_York	EXPLICIT	AT_DAY_MONTH
+NBA 03: Mavericks vs. Nuggets @ 24 Nov 09:58 PM ET			EVENT	NBA 03	Mavericks vs. Nuggets	~	2026-11-24 21:58	America/New_York	EXPLICIT	AT_DAY_MONTH
+Paramount+ 05: UEFA Champions League: Bodø/Glimt vs. LASK @ 24 Nov 01:00 PM ET			EVENT	Paramount+ 05	UEFA Champions League: Bodø/Glimt vs. LASK	~	2026-11-24 13:00	America/New_York	EXPLICIT	AT_DAY_MONTH
+NCAAB 49: #5 Texas Tech vs. #25 Louisville (Quarterfinal #3) @ 24 Nov 08:00 PM ET			EVENT	NCAAB 49	#5 Texas Tech vs. #25 Louisville (Quarterfinal #3)	~	2026-11-24 20:00	America/New_York	EXPLICIT	AT_DAY_MONTH
+Sky Sports + 20: Basketball NBA Dallas Mavericks @ Denver Nuggets @ 25 Nov 02:55 AM London			EVENT	Sky Sports + 20	Basketball NBA Dallas Mavericks @ Denver Nuggets	~	2026-11-25 02:55	Europe/London	EXPLICIT	AT_DAY_MONTH
+Apple TV F1 27: AppleTV 27 | Formula 1: Las Vegas: Race - Fernando Alonso (English) @ 21 Nov 10:45 PM ET			EVENT	Apple TV F1 27	AppleTV 27 | Formula 1: Las Vegas: Race - Fernando Alonso (English)	~	2026-11-21 22:45	America/New_York	EXPLICIT	AT_DAY_MONTH
+MLS 03 | Nashville SC vs. FC Cincinnati (English) @ 22 Nov 05:10 PM ET			EVENT	MLS 03	Nashville SC vs. FC Cincinnati (English)	~	2026-11-22 17:10	America/New_York	EXPLICIT	AT_DAY_MONTH
+SEC+ / ACC extra 08: Northeastern vs. Boston College (ACCNX) @ 24 Nov 06:00 PM ET			EVENT	SEC+ / ACC extra 08	Northeastern vs. Boston College (ACCNX)	~	2026-11-24 18:00	America/New_York	EXPLICIT	AT_DAY_MONTH
+Sportsnet+ 23: Montreal @ Colorado @ 25 Nov 09:30 OM ET			EVENT	Sportsnet+ 23	Montreal @ Colorado	~	2026-11-25 21:30	America/New_York	EXPLICIT	AT_DAY_MONTH	2026-11-26T02:30:00Z
+Sportsnet+ 01: Sportsnet Central: Nov. 25 @ 25 Nov 09:00 AM ET			EVENT	Sportsnet+ 01	Sportsnet Central: Nov. 25	~	2026-11-25 09:00	America/New_York	EXPLICIT	AT_DAY_MONTH
+MAX UK 06: UK Championship | Qualifying: Luca Brecel - Luo Zetao @ 24 Nov 02:30 PM London			EVENT	MAX UK 06	UK Championship | Qualifying: Luca Brecel - Luo Zetao	~	2026-11-24 14:30	Europe/London	EXPLICIT	AT_DAY_MONTH
+TSN+ 08: NCAA Men's Hockey: Bentley vs. Harvard @ 24 Nov 07:00 PM ET			EVENT	TSN+ 08	NCAA Men's Hockey: Bentley vs. Harvard	~	2026-11-24 19:00	America/New_York	EXPLICIT	AT_DAY_MONTH
+NHL 01: Golden Knights vs. Oilers (11.24 8:00 PM ET)			EVENT	NHL 01	Golden Knights vs. Oilers	~	2026-11-24 20:00	America/New_York	EXPLICIT	PAREN_MONTH_DAY	2026-11-25T01:00:00Z
+ESPN UNLTD 001: NFL: NFL Football: 2026 Week 11 Cincinnati Bengals vs. Washington Commanders (11.24 5:00 AM ET)			EVENT	ESPN UNLTD 001	NFL: NFL Football: 2026 Week 11 Cincinnati Bengals vs. Washington Commanders	~	2026-11-24 05:00	America/New_York	EXPLICIT	PAREN_MONTH_DAY
+ESPN UNLTD 002: SEC Network: Samford vs. Auburn (11.24 5:30 AM ET)			EVENT	ESPN UNLTD 002	SEC Network: Samford vs. Auburn	~	2026-11-24 05:30	America/New_York	EXPLICIT	PAREN_MONTH_DAY
+MAX 002: NHL on TNT: Golden Knights at Oilers (11.24 07:30 PM ET)			EVENT	MAX 002	NHL on TNT: Golden Knights at Oilers	~	2026-11-24 19:30	America/New_York	EXPLICIT	PAREN_MONTH_DAY
+CHL 02: Tucson vs. Texas (11.24 8:00 PM ET)			EVENT	CHL 02	Tucson vs. Texas	~	2026-11-24 20:00	America/New_York	EXPLICIT	PAREN_MONTH_DAY
+FLO HOCKEY 022: flohockey: Camrose vs Drayton Valley (11.24 08:00 PM ET)			EVENT	FLO HOCKEY 022	Camrose vs Drayton Valley	flohockey	2026-11-24 20:00	America/New_York	EXPLICIT	PAREN_MONTH_DAY
+PARAMOUNT + 006: uefa-champions-league: RB Leipzig vs. Lens (11.24 2:00 PM ET)			EVENT	PARAMOUNT + 006	RB Leipzig vs. Lens	uefa-champions-league	2026-11-24 14:00	America/New_York	EXPLICIT	PAREN_MONTH_DAY
+Pie Per View 1: Arsenal vs. Dortmund [AMZ] (11.24 14:00 ET / 19:00 UTC)			EVENT	Pie Per View 1	Arsenal vs. Dortmund [AMZ]	~	2026-11-24 14:00	America/New_York	EXPLICIT	PAREN_MONTH_DAY	2026-11-24T19:00:00Z
+NBA 01: Pistons vs. Magic (11.24 7:00 PM ET)			EVENT	NBA 01	Pistons vs. Magic	~	2026-11-24 19:00	America/New_York	EXPLICIT	PAREN_MONTH_DAY
+TRILLER 001: India A vs UAE (11.24 01:00 AM ET)			EVENT	TRILLER 001	India A vs UAE	~	2026-11-24 01:00	America/New_York	EXPLICIT	PAREN_MONTH_DAY
+ESPN UNLTD 199: NCAA Men's Basketball: CLEM vs. WASH • SAM vs. GT (11.24 8:00 PM ET)			EVENT	ESPN UNLTD 199	NCAA Men's Basketball: CLEM vs. WASH • SAM vs. GT	~	2026-11-24 20:00	America/New_York	EXPLICIT	PAREN_MONTH_DAY
+CA (TSN+ 008) | NCAA Men`s Hockey: Bentley vs. Harvard (2026-11-24 19:00:00)			EVENT	CA (TSN+ 008)	NCAA Men’s Hockey: Bentley vs. Harvard	~	2026-11-24 19:00:00	America/Toronto	CONVENTION	ISO
+AU (STAN 01) | Galatasaray v Aston Villa  UEFA Champions League Matchday 5 2026/2027 (2026-11-25 04:40:50)			EVENT	AU (STAN 01)	Galatasaray v Aston Villa UEFA Champions League Matchday 5 2026/2027	~	2026-11-25 04:40:50	Australia/Sydney	CONVENTION	ISO	2026-11-24T17:40:50Z
+(UK) (Dazn 028) | NFL Game Pass | Bengals @ Commanders (2026-11-24 01:15:00)			EVENT	(UK) (Dazn 028)	NFL Game Pass | Bengals @ Commanders	~	2026-11-24 01:15:00	Europe/London	CONVENTION	ISO
+NFL GP 01 | Bengals @ Commanders (2026-11-24 01:15:00)			EVENT	NFL GP 01	Bengals @ Commanders	~	2026-11-24 01:15:00	America/New_York	ASSUMED	ISO
+(PDC 37) | 2026/27 World Championships | Day 4 _ Evening Session: 2026/27 World Championships | English (2026-12-14 14:00:00)			EVENT	(PDC 37)	2026/27 World Championships | Day 4 _ Evening Session: 2026/27 World Championships | English	~	2026-12-14 14:00:00	America/New_York	ASSUMED	ISO
+NBA LP 01 | Grizzlies @ Hornets (2026-11-24 00:00:00)			EVENT	NBA LP 01	Grizzlies @ Hornets	~	2026-11-24 00:00:00	America/New_York	ASSUMED	ISO
+(CA) (CBC 13) |  (2098-12-31 08:00:01)			EMPTY	(CA) (CBC 13)
+ESPN+ 26: Long Beach State vs. Arkansas State @ Nov 24 3:30PM ET			EVENT	ESPN+ 26	Long Beach State vs. Arkansas State	~	2026-11-24 15:30	America/New_York	EXPLICIT	AT_MONTH_DAY
+BIG10+ 01: Basketball (M) Sacred Heart at Rutgers Tue @ Nov 24 06:00PM ET			EVENT	BIG10+ 01	Basketball (M) Sacred Heart at Rutgers	~	2026-11-24 18:00	America/New_York	EXPLICIT	AT_MONTH_DAY
+Kayo AU 03: Football Sky Bet Championship Wolves v Derby County @ Nov 25 5:52AM AEST			EVENT	Kayo AU 03	Football Sky Bet Championship Wolves v Derby County	~	2026-11-25 05:52	+10:00	EXPLICIT	AT_MONTH_DAY	2026-11-24T19:52:00Z
+ESPN+ 11: Tue, 11/24 - The Rich Eisen Show @ Nov 24 12:00PM ET			EVENT	ESPN+ 11	Tue, 11/24 - The Rich Eisen Show	~	2026-11-24 12:00	America/New_York	EXPLICIT	AT_MONTH_DAY
+NCAAB 081: 9 TEXAS TECH @ 23 LOUISVILLE (M) | 11.24 8:00 PM | ESPN			EVENT	NCAAB 081	9 TEXAS TECH @ 23 LOUISVILLE (M)	ESPN	2026-11-24 20:00	America/New_York	CONVENTION	PIPE_MONTH_DAY
+NCAAB 098: SAN JOSÉ STATE @ ARIZONA STATE (W) | 11.24 8:30 PM | ESPN+			EVENT	NCAAB 098	SAN JOSÉ STATE @ ARIZONA STATE (W)	ESPN+	2026-11-24 20:30	America/New_York	CONVENTION	PIPE_MONTH_DAY
+Sportsnet+ 11: NO EVENT			EMPTY	Sportsnet+ 11
+NHL 02:			EMPTY	NHL 02
+Sportsnet+ 29 :			EMPTY	Sportsnet+ 29
+NFL GP 02 | Offline			EMPTY	NFL GP 02
+Pie Per View 2:			EMPTY	Pie Per View 2
+EFL03: (CH) Cardiff 19:45 Preston 24/11			NONE
+TV2 NO 19: UEFA Champions League Porto - Napoli I dag 20:00			NONE
+QMJHL 18: Charlottetown @ Rimouski - #529 | Sat 8th 9:00PM			NONE
+LIVE EVENT 02 - 7:45pm USAC Jason Leffler Memorial Kern			NONE
+QMJHL 01: Val-d'Or @ Gatineau - #426			NONE
+Sportsnet Oilers			NONE
+Edmonton Oilers			NONE
+CA| SPORTSNET ONTARIO HD			NONE
+◈ NHL Replay 1 ᴴᴰ			NONE
+Radio: Detroit Pistons			NONE
+DAZN UK 30: NHL.TV | Kings @ Canadiens @ 23 Nov 07:00 PM ET			EVENT	DAZN UK 30	NHL.TV | Kings @ Canadiens	~	2026-11-23 19:00	America/New_York	EXPLICIT	AT_DAY_MONTH
+#
+# ---- more real formats (61-78)
+LIVE EVENT 04 - NO EVENT			EMPTY	LIVE EVENT 04
+USA Soccer01:			EMPTY	USA Soccer01
+ESPN UNLTD 254:			EMPTY	ESPN UNLTD 254
+NBA LP 03 | Offline			EMPTY	NBA LP 03
+(CA) (CBC 16) |  (2098-12-31 08:00:04)			EMPTY	(CA) (CBC 16)
+(Fanatiz 001) | Chapecoense vs Palmeiras (2026-11-24 16:00:00)			EVENT	(Fanatiz 001)	Chapecoense vs Palmeiras	~	2026-11-24 16:00:00	America/New_York	ASSUMED	ISO
+(UK) (Dazn 008) |  AFLW Awards | Awards 2026 (2026-11-23 08:30:00)			EVENT	(UK) (Dazn 008)	AFLW Awards | Awards 2026	~	2026-11-23 08:30:00	Europe/London	CONVENTION	ISO
+CA (TSN+ 086) | NFL on TSN: TBD vs. TBD (2026-11-29 13:00:05)			EVENT	CA (TSN+ 086)	NFL on TSN: TBD vs. TBD	~	2026-11-29 13:00:05	America/Toronto	CONVENTION	ISO
+NCAAF 001: KENT STATE AT EASTERN MICHIGAN | 11.24 7:00PM | ESPN+			EVENT	NCAAF 001	KENT STATE AT EASTERN MICHIGAN	ESPN+	2026-11-24 19:00	America/New_York	CONVENTION	PIPE_MONTH_DAY
+Kayo AU 15: Basketball NCAA Men's Basketball Kansas State v Gonzaga @ Nov 25 3:30PM AEST			EVENT	Kayo AU 15	Basketball NCAA Men's Basketball Kansas State v Gonzaga	~	2026-11-25 15:30	+10:00	EXPLICIT	AT_MONTH_DAY
+F1 TV 13: McLaren: Lando Norris @ 20 Nov 11:00 PM			EVENT	F1 TV 13	McLaren: Lando Norris	~	2026-11-20 23:00	America/New_York	ASSUMED	AT_DAY_MONTH
+UEFA01: (CL) Galatasaray SK 17:45 Aston Villa 24/11			NONE
+NFL 01: No games scheduled			NONE
+LIVE EVENT 34 -			NONE
+EVENT 04			NONE
+NCAAF 097			NONE
+Sky Sport Bundesliga 4 [Match Time]			NONE
+QMJHL 14: Acadie-Bathurst @ Rouyn-Noranda - #522 | Sat 8th 12:00AM			NONE
+#
+# ---- the owner's two examples, read on Nov 25
+Sportsnet+ 01: Sportsnet Central: Nov. 25 @ 25 Nov 09:00 AM ET	2026-11-25T02:55:55Z		EVENT	Sportsnet+ 01	Sportsnet Central: Nov. 25	~	2026-11-25 09:00	America/New_York	EXPLICIT	AT_DAY_MONTH	2026-11-25T14:00:00Z
+Sportsnet+ 23: Montreal @ Colorado @ 25 Nov 09:30 OM ET	2026-11-25T02:55:55Z		EVENT	Sportsnet+ 23	Montreal @ Colorado	~	2026-11-25 21:30	America/New_York	EXPLICIT	AT_DAY_MONTH	2026-11-26T02:30:00Z
+#
+# ---- ordinary channels: never events, never slots
+CA: TSN 4 HD			NONE
+US: ESPN 2			NONE
+24/7: Seinfeld			NONE
+ESPN 8: The Ocho			NONE
+Movie 1: Ocean's 11 (2001)			NONE
+BBC One: News at 6:00			NONE
+NHL 01: Golden Knights vs. Oilers			NONE
+Sportsnet+ 09: Vegas @ Edmonton			NONE
+#
+# ---- year wrap, both directions; stale names (arch S3)
+NHL 01: Kraken vs. Canucks (12.31 10:00 PM ET)	2027-01-01T05:00:00Z		EVENT	NHL 01	Kraken vs. Canucks	~	2026-12-31 22:00	America/New_York	EXPLICIT	PAREN_MONTH_DAY
+Sportsnet+ 03: Oilers @ Flames @ 1 Jan 03:00 PM ET	2026-12-30T12:00:00Z		EVENT	Sportsnet+ 03	Oilers @ Flames	~	2027-01-01 15:00	America/New_York	EXPLICIT	AT_DAY_MONTH
+Sportsnet+ 03: Oilers @ Flames @ 31 Dec 03:00 PM ET	2027-01-01T12:00:00Z		EVENT	Sportsnet+ 03	Oilers @ Flames	~	2026-12-31 15:00	America/New_York	EXPLICIT	AT_DAY_MONTH
+MLB 01: Yankees @ Red Sox @ 20 Jun 07:05 PM ET			EVENT	MLB 01	Yankees @ Red Sox	~	2026-06-20 19:05	America/New_York	EXPLICIT	AT_DAY_MONTH
+MLB 01: Yankees @ Red Sox @ 20 Jun 07:05 PM ET	2027-03-20T12:00:00Z		EVENT	MLB 01	Yankees @ Red Sox	~	2026-06-20 19:05	America/New_York	EXPLICIT	AT_DAY_MONTH
+# The window is 390 days wide, so a June name read on Apr 30 is the coming June (+51 d), never None (WP-1 report).
+MLB 01: Yankees @ Red Sox @ 20 Jun 07:05 PM ET	2027-04-30T12:00:00Z		EVENT	MLB 01	Yankees @ Red Sox	~	2027-06-20 19:05	America/New_York	EXPLICIT	AT_DAY_MONTH
+NCAA Baseball 01: LSU @ Florida (6.22 7:00 PM ET)			EVENT	NCAA Baseball 01	LSU @ Florida	~	2026-06-22 19:00	America/New_York	EXPLICIT	PAREN_MONTH_DAY
+Fanatiz 02: Boca vs River @ Jan 23 7:00PM ET			EVENT	Fanatiz 02	Boca vs River	~	2027-01-23 19:00	America/New_York	EXPLICIT	AT_MONTH_DAY
+#
+# ---- D.M order for European zones (arch S12)
+Ligue 1 03: PSG vs. Lyon (5.11 20:00 CET)	2026-11-04T12:00:00Z		EVENT	Ligue 1 03	PSG vs. Lyon	~	2026-11-05 20:00	Europe/Paris	EXPLICIT	PAREN_MONTH_DAY	2026-11-05T19:00:00Z
+Ligue 1 03: PSG vs. Lyon (5.11 20:00 ET)	2026-11-04T12:00:00Z		EVENT	Ligue 1 03	PSG vs. Lyon	~	2026-05-11 20:00	America/New_York	EXPLICIT	PAREN_MONTH_DAY
+Ligue 1 04: Lens vs. Nice (25.11 20:00 CET)	2026-11-04T12:00:00Z		EVENT	Ligue 1 04	Lens vs. Nice	~	2026-11-25 20:00	Europe/Paris	EXPLICIT	PAREN_MONTH_DAY
+EPL 05: Arsenal v Spurs | 5.11 20:00 UTC	2026-11-04T12:00:00Z		EVENT	EPL 05	Arsenal v Spurs	~	2026-11-05 20:00	UTC	EXPLICIT	PIPE_MONTH_DAY
+Ligue 1 04: Lens vs. Nice (25.11 20:00 ET)	2026-11-04T12:00:00Z		NONE
+#
+# ---- invalid dates and clocks
+NHL 01: Kraken vs. Canucks (2.30 8:00 PM ET)			NONE
+NHL 01: Kraken vs. Canucks (13.05 8:00 PM ET)			NONE
+NHL 01: Kraken vs. Canucks (0.05 8:00 PM ET)			NONE
+Sportsnet+ 04: Leafs @ Sens @ 24 Nov 25:00 PM ET			NONE
+Sportsnet+ 04: Leafs @ Sens @ 24 Nov 13:00 PM ET			NONE
+Sportsnet+ 04: Leafs @ Sens @ 24 Nov 00:30 AM ET			NONE
+Sportsnet+ 04: Leafs @ Sens @ 24 Nov 08:60 PM ET			NONE
+Sportsnet+ 04: Leafs @ Sens @ 24 Nov 24:00 ET			NONE
+Sportsnet+ 04: Leafs @ Sens @ 31 Nov 08:00 PM ET			NONE
+Sportsnet+ 04: Leafs @ Sens @ 24 Nob 08:00 PM ET			NONE
+Sportsnet+ 04: Leafs @ Sens @ 24 Nov 08:00 PM XYZ			NONE
+Sportsnet+ 04: Leafs @ Sens @ 24 Nov 08:00 PM ET extra			NONE
+Sportsnet+ 04: Leafs @ Sens @ 24 Nov 8 PM ET			NONE
+Sportsnet+ 04: Leafs @ Sens@ 24 Nov 08:00 PM ET			NONE
+(PDC 40) | Day 5 (2026-02-30 14:00:00)			NONE
+(PDC 40) | Day 5 (2026-11-24 24:00:00)			NONE
+(PDC 40) | Day 5 (26-11-24 14:00:00)			NONE
+# 29 Feb: a slot (the structure is year-free) but no event unless a leap year is in the window.
+NHL 01: Kraken vs. Canucks (2.29 8:00 PM ET)	2027-02-20T12:00:00Z		NONE	NHL 01
+NHL 01: Kraken vs. Canucks (2.29 8:00 PM ET)	2028-02-20T12:00:00Z		EVENT	NHL 01	Kraken vs. Canucks	~	2028-02-29 20:00	America/New_York	EXPLICIT	PAREN_MONTH_DAY
+#
+# ---- 12 h and 24 h clocks, weekdays, months, zones
+Sportsnet+ 04: Midnight Show @ 24 Nov 12:00 AM ET			EVENT	Sportsnet+ 04	Midnight Show	~	2026-11-24 00:00	America/New_York	EXPLICIT	AT_DAY_MONTH
+Sportsnet+ 04: Noon Show @ 24 Nov 12:30 PM ET			EVENT	Sportsnet+ 04	Noon Show	~	2026-11-24 12:30	America/New_York	EXPLICIT	AT_DAY_MONTH
+Sportsnet+ 04: Noon Show @ 24 Nov 12:30 OM ET			EVENT	Sportsnet+ 04	Noon Show	~	2026-11-24 12:30	America/New_York	EXPLICIT	AT_DAY_MONTH
+DAZN UK 40: Woking vs. Worthing @ 24 Nov 19:45 London			EVENT	DAZN UK 40	Woking vs. Worthing	~	2026-11-24 19:45	Europe/London	EXPLICIT	AT_DAY_MONTH
+NHL 05: Late Show (11.24 0:30 ET)			EVENT	NHL 05	Late Show	~	2026-11-24 00:30	America/New_York	EXPLICIT	PAREN_MONTH_DAY
+NHL 05: Late Show (11.24 23:59 ET)			EVENT	NHL 05	Late Show	~	2026-11-24 23:59	America/New_York	EXPLICIT	PAREN_MONTH_DAY
+(PDC 41) | Late Session (2026-11-24 23:59:59)	2026-11-24T12:00:00Z	Europe/London	EVENT	(PDC 41)	Late Session	~	2026-11-24 23:59:59	Europe/London	ASSUMED	ISO
+MonoMAX 01: TAURON Liga Energa Trefl Gdańsk vs NEONET Norwid Częstochowa @ 24 Nov 02:50 PM		Europe/Warsaw	EVENT	MonoMAX 01	TAURON Liga Energa Trefl Gdańsk vs NEONET Norwid Częstochowa	~	2026-11-24 14:50	Europe/Warsaw	ASSUMED	AT_DAY_MONTH	2026-11-24T13:50:00Z
+Sportsnet+ 07: Leafs @ Sens @ Tue 24 Nov 07:00 PM ET			EVENT	Sportsnet+ 07	Leafs @ Sens	~	2026-11-24 19:00	America/New_York	EXPLICIT	AT_DAY_MONTH
+Sportsnet+ 07: Leafs @ Sens @ Tue, 24 Nov 07:00 PM ET			EVENT	Sportsnet+ 07	Leafs @ Sens	~	2026-11-24 19:00	America/New_York	EXPLICIT	AT_DAY_MONTH
+MLB 02: Cubs @ Mets @ Sept. 3 7:10PM ET			EVENT	MLB 02	Cubs @ Mets	~	2026-09-03 19:10	America/New_York	EXPLICIT	AT_MONTH_DAY
+MLB 02: Cubs @ Mets @ sep 3 7:10 pm et			EVENT	MLB 02	Cubs @ Mets	~	2026-09-03 19:10	America/New_York	EXPLICIT	AT_MONTH_DAY
+ESPN+ 30: Kings vs. Ducks @ Nov 24 7:00PM PT			EVENT	ESPN+ 30	Kings vs. Ducks	~	2026-11-24 19:00	America/Los_Angeles	EXPLICIT	AT_MONTH_DAY
+ESPN+ 31: Stars vs. Wild @ Nov 24 7:00PM CST			EVENT	ESPN+ 31	Stars vs. Wild	~	2026-11-24 19:00	America/Chicago	EXPLICIT	AT_MONTH_DAY
+ESPN+ 32: Avalanche vs. Mammoth @ Nov 24 7:00PM MT			EVENT	ESPN+ 32	Avalanche vs. Mammoth	~	2026-11-24 19:00	America/Denver	EXPLICIT	AT_MONTH_DAY
+ESPN+ 33: Show @ Nov 24 7:00PM EDT			EVENT	ESPN+ 33	Show	~	2026-11-24 19:00	America/New_York	EXPLICIT	AT_MONTH_DAY
+DAZN UK 41: Show @ 24 Nov 07:00 PM GMT			EVENT	DAZN UK 41	Show	~	2026-11-24 19:00	UTC	EXPLICIT	AT_DAY_MONTH
+DAZN UK 42: Show @ 24 Nov 07:00 PM UK			EVENT	DAZN UK 42	Show	~	2026-11-24 19:00	Europe/London	EXPLICIT	AT_DAY_MONTH
+DAZN DE 01: Show @ 24 Nov 07:00 PM CEST			EVENT	DAZN DE 01	Show	~	2026-11-24 19:00	Europe/Paris	EXPLICIT	AT_DAY_MONTH	2026-11-24T18:00:00Z
+Kayo AU 04: Show @ Nov 25 5:52AM AEDT			EVENT	Kayo AU 04	Show	~	2026-11-25 05:52	+11:00	EXPLICIT	AT_MONTH_DAY	2026-11-24T18:52:00Z
+NCAAB 200: A @ B | 11.24 8:00 PM PT | ESPN+			EVENT	NCAAB 200	A @ B	ESPN+	2026-11-24 20:00	America/Los_Angeles	EXPLICIT	PIPE_MONTH_DAY
+NCAAB 201: A @ B | 11.24 8:00 PM			EVENT	NCAAB 201	A @ B	~	2026-11-24 20:00	America/New_York	CONVENTION	PIPE_MONTH_DAY
+US (Peacock 01) | A vs B (2026-11-24 20:00:00)			EVENT	US (Peacock 01)	A vs B	~	2026-11-24 20:00:00	America/New_York	CONVENTION	ISO
+(GB) (Sky 01) | A vs B (2026-11-24 20:00)			EVENT	(GB) (Sky 01)	A vs B	~	2026-11-24 20:00	Europe/London	CONVENTION	ISO
+flowrestling: Jay JH Tournament (Mat 6) (2026-11-24 11:00:00)			EVENT	~	Jay JH Tournament (Mat 6)	flowrestling	2026-11-24 11:00:00	America/New_York	ASSUMED	ISO
+#
+# ---- DST change days: an overlap takes the later offset; a gap moves forward
+Sportsnet+ 03: Show @ 8 Mar 03:00 AM ET	2026-03-01T12:00:00Z		EVENT	Sportsnet+ 03	Show	~	2026-03-08 03:00	America/New_York	EXPLICIT	AT_DAY_MONTH	2026-03-08T07:00:00Z
+Sportsnet+ 03: Show @ 8 Mar 01:30 AM ET	2026-03-01T12:00:00Z		EVENT	Sportsnet+ 03	Show	~	2026-03-08 01:30	America/New_York	EXPLICIT	AT_DAY_MONTH	2026-03-08T06:30:00Z
+Sportsnet+ 03: Show @ 8 Mar 02:30 AM ET	2026-03-01T12:00:00Z		EVENT	Sportsnet+ 03	Show	~	2026-03-08 03:30	America/New_York	EXPLICIT	AT_DAY_MONTH	2026-03-08T07:30:00Z
+Sportsnet+ 03: Show @ 1 Nov 01:30 AM ET	2026-10-25T12:00:00Z		EVENT	Sportsnet+ 03	Show	~	2026-11-01 01:30	America/New_York	EXPLICIT	AT_DAY_MONTH	2026-11-01T06:30:00Z
+DAZN UK 43: Show @ 29 Mar 01:30 AM London	2026-03-20T12:00:00Z		EVENT	DAZN UK 43	Show	~	2026-03-29 02:30	Europe/London	EXPLICIT	AT_DAY_MONTH	2026-03-29T01:30:00Z
+DAZN UK 43: Show @ 25 Oct 01:30 AM London	2026-10-20T12:00:00Z		EVENT	DAZN UK 43	Show	~	2026-10-25 01:30	Europe/London	EXPLICIT	AT_DAY_MONTH	2026-10-25T01:30:00Z
+#
+# ---- empty slots of all four kinds, and titles that clean to nothing
+Sportsnet+ 12: no event			EMPTY	Sportsnet+ 12
+Setanta 01 | OFFLINE			EMPTY	Setanta 01
+NHL 03:			EMPTY	NHL 03
+MLS 04 |			EMPTY	MLS 04
+(CA) (CBC 13) | Something (2098-12-31 08:00:01)			EMPTY	(CA) (CBC 13)
+(CA) (CBC 17) |  (2026-11-24 08:00:00)			EMPTY	(CA) (CBC 17)
+Sportsnet+ 05: @ 24 Nov 08:00 PM ET			EMPTY	Sportsnet+ 05
+Sportsnet+ 05:  -  @ 24 Nov 08:00 PM ET			EMPTY	Sportsnet+ 05
+NHL 03: (11.24 8:00 PM ET)			EMPTY	NHL 03
+NCAAB 202:  | 11.24 8:00 PM | ESPN+			EMPTY	NCAAB 202
+ESPN+ 40: Tue @ Nov 24 3:30PM ET			EMPTY	ESPN+ 40
+(2026-11-24 08:00:00)			NONE
+#
+# ---- title clean-up
+Sportsnet+ 06:   Leafs    @   Sens   - @ 24 Nov 07:00 PM ET			EVENT	Sportsnet+ 06	Leafs @ Sens	~	2026-11-24 19:00	America/New_York	EXPLICIT	AT_DAY_MONTH
+NCAAB 203: flohoops: A @ B | 11.24 8:00 PM | ESPN+			EVENT	NCAAB 203	flohoops: A @ B	ESPN+	2026-11-24 20:00	America/New_York	CONVENTION	PIPE_MONTH_DAY
+#
+# ---- junk
+			NONE
+@@@@			NONE
+(			NONE
+)			NONE
+:			NONE
+|			NONE
+@ 24 Nov 08:00 PM ET			NONE
+NHL 01: @			NONE
+NHL 1234: A @ B @ 24 Nov 08:00 PM ET			NONE
+NHL: A @ B @ 24 Nov 08:00 PM ET			NONE
+# ---- code review 2026-11-25, owner item 17: the bare month-day shape (slot " | ", a leading season, ALL CAPS, no "@")
+OHL 01 | 2026 SAGINAW SPIRIT VS FLINT FIREBIRDS NOV 25 07:00PM ET			EVENT	OHL 01	Saginaw Spirit vs. Flint Firebirds	~	2026-11-25 19:00	America/New_York	EXPLICIT	MONTH_DAY_BARE	2026-11-26T00:00:00Z
+OHL 02 | 2026 SUDBURY WOLVES VS BRANTFORD BULLDOGS NOV 25 07:00PM ET			EVENT	OHL 02	Sudbury Wolves vs. Brantford Bulldogs	~	2026-11-25 19:00	America/New_York	EXPLICIT	MONTH_DAY_BARE
+OHL 03 | 2026 LONDON KNIGHTS VS ERIE OTTERS NOV 25 07:00PM ET			EVENT	OHL 03	London Knights vs. Erie Otters	~	2026-11-25 19:00	America/New_York	EXPLICIT	MONTH_DAY_BARE
+OHL 04 | 2026 KITCHENER RANGERS VS WINDSOR SPITFIRES NOV 25 07:05PM ET			EVENT	OHL 04	Kitchener Rangers vs. Windsor Spitfires	~	2026-11-25 19:05	America/New_York	EXPLICIT	MONTH_DAY_BARE
+# the same group's other names: no date, a weekday and an ordinal day without a month (no usable date), a date without a time
+QMJHL 01: Val-d'Or @ Gatineau - #426			NONE
+QMJHL 13: Halifax @ Saint John - #520 | Fri 7th 11:00PM			NONE
+WHL 16: WHL Top 10 Plays of the Week: March 7, 2025			NONE

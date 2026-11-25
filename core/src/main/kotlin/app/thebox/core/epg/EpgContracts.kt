@@ -126,6 +126,13 @@ data class EpgGenerationInfo(
     val fts: String,
     /** (2026-11-10, review S1) [EpgBuildRequest.buildInputs] of the last full build; null for a generation built before. */
     val buildInputs: String? = null,
+    /**
+     * (Event channels commit 0, docs/design/m6-event-channels.md §8.5) The end of usable guide data, epoch minutes: the
+     * median last programme end over channels holding at least one real (non-placeholder) listing, capped at
+     * [windowToMin]. Null for a generation built before it was written (no
+     * [app.thebox.core.epg.store.EpgSchema.Meta.DATA_TO_MIN] row); readers then fall back to [windowToMin].
+     */
+    val dataToMin: Int? = null,
 )
 
 fun interface FreeSpace {

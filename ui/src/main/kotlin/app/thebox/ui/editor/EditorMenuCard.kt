@@ -111,7 +111,8 @@ private fun MenuLineView(line: MenuLine, label: String, reason: String?, focused
             if (!line.enabled && reason != null) {
                 // The reason stays readable on a disabled line: `.55` of the row colour, not of the dimmed label.
                 val base = if (focused) SettingsUi.Canvas else SettingsUi.Fg
-                Line(reason, GuideUi.sans(22, color = SettingsUi.secondary(base, focused, 0.55f)), Modifier.padding(top = 2.dp))
+                // (Code review 2026-11-25, UI open item 1) Two lines, so the next step is never cut.
+                Line(reason, GuideUi.sans(22, color = SettingsUi.secondary(base, focused, 0.55f)), Modifier.padding(top = 2.dp), maxLines = 2)
             }
         }
         line.count?.let { Line(formatCount(it), GuideUi.mono(22, color = SettingsUi.secondary(text, focused, 0.55f)), Modifier.padding(start = 16.dp)) }

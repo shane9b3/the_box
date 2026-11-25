@@ -60,6 +60,12 @@
     <string name="guide_reminder_switch">Switch now</string>
     <string name="guide_reminder_dismiss">Dismiss</string>
     <string name="guide_reminder_countdown">%1$d s</string>
+    <!-- (Event channels commit 0, docs/design/m6-event-channels.md §6.6, §9.4) A reminder on an event channel whose event
+         is gone. %1$s = the reminder's title. -->
+    <!-- (Code review 2026-11-25, UI m6) No possessive on a title ("Oilers's"), and no claim of a move nobody saw. -->
+    <string name="reminder_event_moved">“%1$s” is no longer on this channel. Search for it to find where it is now.</string>
+    <!-- The event moved to another slot. %1$s = the new short name. -->
+    <string name="reminder_event_now_on">Now on %1$s</string>
 
     <!-- Toasts (GuideToast, S13) -->
     <string name="toast_reason_step">%1$s. %2$s.</string>

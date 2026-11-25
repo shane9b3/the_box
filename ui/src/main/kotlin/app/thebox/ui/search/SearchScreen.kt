@@ -155,11 +155,13 @@ fun SearchScreen(viewModel: SearchViewModel, modifier: Modifier = Modifier, onId
                         Spacer(Modifier.height(32.dp))
                     }
                     RowTitle(stringResource(R.string.search_programmes))
+                    // (Event channels §7 step 5, U-E-S5) Events read from channel names need no guide: the row is drawn
+                    // whenever it has hits, and "needs guide data" shows only when it is empty.
                     when {
-                        state.guideDataMissing -> Hint(stringResource(R.string.search_needs_guide))
+                        results.programmes.isEmpty() && state.guideDataMissing -> Hint(stringResource(R.string.search_needs_guide))
                         results.programmes.isEmpty() -> Hint(stringResource(R.string.search_no_programmes))
                         else -> LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp), contentPadding = PaddingValues(vertical = 8.dp)) {
-                            items(results.programmes, key = { "${it.channel.identityHash}:${it.info.rawStartMin}" }) { hit ->
+                            items(results.programmes, key = { "${it.channel.identityHash}:${it.info.rawStartMin}:${if (it.fromName) 'e' else 'g'}" }) { hit ->
                                 ProgrammeCard(
                                     hit,
                                     reminder = state.reminders.contains(hit.channel.identityHash, hit.info.rawStartMin),

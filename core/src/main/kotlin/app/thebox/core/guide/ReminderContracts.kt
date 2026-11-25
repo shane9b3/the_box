@@ -40,6 +40,17 @@ data class ReminderAlert(
     /** True when shown after the start (missed while the app was closed or in the background). */
     val late: Boolean,
     val autoSwitch: Boolean,
+    /**
+     * (Event channels commit 0, docs/design/m6-event-channels.md §6.6) The event moved to another slot: [identity] is the
+     * slot it is on now and this is the old slot's short name ("Sportsnet+ 09"). The card reads `reminder_event_now_on`
+     * with the new channel's name. Null when the reminder fires on its own channel.
+     */
+    val movedFrom: String? = null,
+    /**
+     * (Event channels commit 0, §6.6) The event the reminder was set on is no longer listed by any slot of its playlist:
+     * no auto-switch, and the card says `reminder_event_moved`.
+     */
+    val eventGone: Boolean = false,
 )
 
 sealed interface ReminderDecision {

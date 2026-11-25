@@ -85,6 +85,23 @@ data class PlaylistEntity(
     val uid: String? = newUid(),
     /** v4: bumped on every hide-rule change of this playlist; the rule pass recomputes `rule_hidden` when it moves. */
     @ColumnInfo(name = "hide_rules_ver", defaultValue = "0") val hideRulesVer: Int = 0,
+    /**
+     * v6 (docs/design/m6-event-channels.md §4.5, §5.5): the "Hide channels with no event" switch; the hide pass hides
+     * empty event slots while it is on. Backed up (`MergePlanner.PLAYLIST_COLUMNS`, WP-2).
+     */
+    @ColumnInfo(name = "hide_empty_events", defaultValue = "0") val hideEmptyEvents: Boolean = false,
+    /**
+     * v6 (§10): true until the user picks an update interval; while true, a playlist with at least
+     * `EventConstants.EVENT_REFRESH_MIN` events updates every `EVENT_REFRESH_H` hours. The migration sets it only where
+     * [refreshIntervalH] is the default 24 (re-review E13). Backed up.
+     */
+    @ColumnInfo(name = "refresh_interval_auto", defaultValue = "1") val refreshIntervalAuto: Boolean = true,
+    /** v6 (§3.3): the learned zone id of this playlist's event names; null until learned. Derived, not backed up. */
+    @ColumnInfo(name = "event_zone") val eventZone: String? = null,
+    /** v6 (§3.3): [eventZone]'s sample count at its last change (the hysteresis). */
+    @ColumnInfo(name = "event_zone_n", defaultValue = "0") val eventZoneN: Int = 0,
+    /** v6 (§5.2): live events after the last index build; read by the scheduler at app start (§10). */
+    @ColumnInfo(name = "event_count", defaultValue = "0") val eventCount: Int = 0,
 ) {
     companion object {
         /** 32 lower-case hex chars, the same shape as the migration's `lower(hex(randomblob(16)))`. */

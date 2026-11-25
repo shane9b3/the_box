@@ -31,6 +31,11 @@ enum class EditorText {
     // Code review 2026-10-18 (S4, S7, S8, N1, N2; append-only)
     D_REORDER_HIDDEN_GROUPS, D_REORDER_LOCKED, C_SORT_GROUPS_TITLE, C_SORT_GROUPS_BODY, C_PROVIDER_GROUPS_BODY,
     GROUP_VALUE_HIDDEN, GROUPS_COUNT_NONE, CHANNELS_COUNT_NONE, E_SUMMARY,
+    // (Event channels WP-2, docs/design/m6-event-channels.md §5.5, re-review E1; append-only) Hidden by the playlist's
+    // "Hide channels with no event" switch, not by a user rule: `editor_d_no_event`.
+    D_NO_EVENT,
+    // (Event channels integration 2026-11-25; append-only) Several targets hidden by a user rule or by that switch.
+    D_RULE_ANY,
     ;
 
     companion object {

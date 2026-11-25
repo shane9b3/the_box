@@ -442,7 +442,7 @@ internal class BackupRestorer(
     }
 
     private suspend fun applyPlaylistColumns(conn: PooledConnection, id: Long, settings: Map<String, JsonElement>) {
-        val fields = settings.filterKeys { it in MergePlanner.PLAYLIST_COLUMNS }.filterValues { it is JsonPrimitive }
+        val fields = withLegacyIntervalAuto(settings.filterKeys { it in MergePlanner.PLAYLIST_COLUMNS }.filterValues { it is JsonPrimitive })
         if (fields.isEmpty()) return
         val names = fields.keys.toList()
         conn.exec("UPDATE playlist SET ${names.joinToString { "$it = ?" }} WHERE id = ?") {
@@ -547,6 +547,21 @@ internal class BackupRestorer(
 
     private companion object { const val TAG = "BackupRestorer" }
 }
+
+/**
+ * (Event channels integration, docs/design/m6-event-channels.md §4.5, §10) A pre-v6 backup carries `refresh_interval_h`
+ * but no `refresh_interval_auto`. Without this, a restored playlist would keep whatever the device row holds (a new row
+ * starts on auto), so a user's 12 h could turn into the 6 h event default. The migration's rule applies instead: auto
+ * only when the interval is the old default, 24 h. A field the backup does carry is left as it is.
+ */
+internal fun withLegacyIntervalAuto(fields: Map<String, JsonElement>): Map<String, JsonElement> {
+    if (REFRESH_INTERVAL_AUTO in fields) return fields
+    val hours = (fields[REFRESH_INTERVAL_H] as? JsonPrimitive)?.content?.toLongOrNull() ?: return fields
+    return fields + (REFRESH_INTERVAL_AUTO to JsonPrimitive(if (hours == 24L) 1 else 0))
+}
+
+private const val REFRESH_INTERVAL_H = "refresh_interval_h"
+private const val REFRESH_INTERVAL_AUTO = "refresh_interval_auto"
 
 /** The v5 move column (docs/design/m6-channel-editor.md §3.6). */
 private const val CUSTOM_GROUP_KEY = "custom_group_key"
