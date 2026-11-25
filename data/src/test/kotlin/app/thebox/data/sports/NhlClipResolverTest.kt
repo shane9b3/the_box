@@ -20,6 +20,7 @@ import mockwebserver3.Dispatcher
 import mockwebserver3.MockResponse
 import mockwebserver3.MockWebServer
 import mockwebserver3.RecordedRequest
+import mockwebserver3.SocketEffect
 import okhttp3.OkHttpClient
 import okio.Buffer
 import okio.GzipSink
@@ -51,6 +52,8 @@ class NhlClipResolverTest {
     @Volatile private var accepted: String = KEY_A
     @Volatile private var scriptStatus = 200
     @Volatile private var gzipScript = false
+    @Volatile private var scriptRetryAfterS: Int? = null
+    @Volatile private var scriptDisconnect = false
     /** Per video id: a scripted answer that overrides the default (a fixture body when the key is accepted). */
     private val answers = HashMap<String, (RecordedRequest) -> MockResponse>()
 
@@ -99,7 +102,11 @@ class NhlClipResolverTest {
     }
 
     private fun script(): MockResponse {
-        if (scriptStatus != 200) return MockResponse.Builder().code(scriptStatus).body("busy").build()
+        if (scriptDisconnect) return MockResponse.Builder().onResponseStart(SocketEffect.CloseSocket()).build()
+        if (scriptStatus != 200) {
+            return MockResponse.Builder().code(scriptStatus).body("busy")
+                .apply { scriptRetryAfterS?.let { addHeader("Retry-After", it.toString()) } }.build()
+        }
         val text = "/*! fake player */!function(){var c={policyKey:\"\",accountId:\"0\"};" +
             (scriptKey?.let { "window.cfg={\"policyKey\" : \"$it\",x:1};" } ?: "") + "}();"
         if (!gzipScript) return MockResponse.Builder().code(200).addHeader("Content-Type", "application/javascript").body(text).build()
@@ -212,6 +219,19 @@ class NhlClipResolverTest {
         assertEquals(1, scriptReads())
     }
 
+    /** (Sports Hub code review 2026-11-25, L2) A lookup redirect, even https → https to another host, is not followed. */
+    @Test fun aLookupRedirectIsNeverFollowed() = runBlocking {
+        val other = MockWebServer().apply { start() }
+        try {
+            answers["301"] = { MockResponse.Builder().code(302).addHeader("Location", other.url("/elsewhere/301").toString()).build() }
+            val (r, _) = resolver()
+            assertEquals(ClipResult.Failed(FailKind.HTTP_OTHER), r.info(ref(301)))
+            assertEquals("the other host never saw the key header", 0, other.requestCount)
+        } finally {
+            other.close()
+        }
+    }
+
     @Test fun holdAfterAScriptWithoutAKey() = runBlocking {
         scriptKey = null
         val (r, _) = resolver()
@@ -225,14 +245,60 @@ class NhlClipResolverTest {
         assertEquals(2, scriptReads())
     }
 
-    @Test fun holdAfterAScriptFailure() = runBlocking {
+    /**
+     * (Sports Hub code review 2026-11-25, M1) A transient script failure backs off from 30 s, doubling to the 1 min cap,
+     * instead of holding video off for 10 minutes; the toast's "Try again in a minute" is then true.
+     */
+    @Test fun aTransientScriptFailureBacksOffShortly() = runBlocking {
         scriptStatus = 500
         val (r, _) = resolver()
         assertEquals(ClipResult.Failed(FailKind.HTTP_5XX), r.info(ref(1)))
-        scriptStatus = 200
         assertEquals(ClipResult.Failed(FailKind.HTTP_5XX), r.info(ref(1)))
-        assertEquals(1, scriptReads())
-        nowMono += SportsConstants.HUB_VIDEO_KEY_REREAD_MS
+        assertEquals("inside the backoff: no read", 1, scriptReads())
+        nowMono += SportsConstants.HUB_VIDEO_KEY_BACKOFF_MIN_MS
+        assertEquals(ClipResult.Failed(FailKind.HTTP_5XX), r.info(ref(1)))
+        assertEquals("30 s later it is read again", 2, scriptReads())
+        nowMono += SportsConstants.HUB_VIDEO_KEY_BACKOFF_MIN_MS
+        assertEquals(ClipResult.Failed(FailKind.HTTP_5XX), r.info(ref(1)))
+        assertEquals("the second wait doubled", 2, scriptReads())
+        nowMono += SportsConstants.HUB_VIDEO_KEY_BACKOFF_MAX_MS - SportsConstants.HUB_VIDEO_KEY_BACKOFF_MIN_MS
+        r.info(ref(1))
+        assertEquals(3, scriptReads())
+        nowMono += SportsConstants.HUB_VIDEO_KEY_BACKOFF_MAX_MS
+        r.info(ref(1))
+        assertEquals("never more than a minute", 4, scriptReads())
+        scriptStatus = 200
+        nowMono += SportsConstants.HUB_VIDEO_KEY_BACKOFF_MAX_MS
+        assertTrue(r.info(ref(1)) is ClipResult.Ok)
+        assertEquals(5, scriptReads())
+    }
+
+    /** (M1) A script read that breaks off (offline after standby) is IO and backs off; it never turns video off for 10 min. */
+    @Test fun aBrokenScriptReadBacksOffAsIo() = runBlocking {
+        scriptDisconnect = true
+        val (r, _) = resolver()
+        val first = r.info(ref(1))
+        assertTrue("$first", first is ClipResult.Failed && first.kind in setOf(FailKind.IO, FailKind.TIMEOUT))
+        val reads = scriptReads()
+        assertTrue(reads >= 1)
+        assertEquals(first, r.stream(ref(1)))
+        assertEquals("inside the backoff: no read", reads, scriptReads())
+        scriptDisconnect = false
+        nowMono += SportsConstants.HUB_VIDEO_KEY_BACKOFF_MIN_MS
+        assertTrue("30 s later the network is back and video works", r.stream(ref(1)) is ClipResult.Ok)
+    }
+
+    /** (M1) `Retry-After` is the backoff's floor; a key that is absent still holds for 10 minutes. */
+    @Test fun retryAfterIsTheBackoffFloor() = runBlocking {
+        scriptStatus = 429
+        scriptRetryAfterS = 120
+        val (r, _) = resolver()
+        assertEquals(ClipResult.Failed(FailKind.HTTP_429), r.info(ref(1)))
+        nowMono += SportsConstants.HUB_VIDEO_KEY_BACKOFF_MAX_MS
+        r.info(ref(1))
+        assertEquals("Retry-After 120 s outlasts the 1 min cap", 1, scriptReads())
+        nowMono += 60_000
+        scriptStatus = 200
         assertTrue(r.info(ref(1)) is ClipResult.Ok)
         assertEquals(2, scriptReads())
     }

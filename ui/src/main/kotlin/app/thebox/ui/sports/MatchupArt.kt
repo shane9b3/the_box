@@ -18,6 +18,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.layout.Layout
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import app.thebox.core.sports.Contrast
@@ -69,24 +71,62 @@ internal fun MatchupArt(
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { HubLogo(away, league, logo, logo, align = Alignment.Center) }
             Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { HubLogo(home, league, logo, logo, align = Alignment.Center) }
         }
-        if (centreTop != null) Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            val d = if (compact) 88 else 120
-            Column(
-                Modifier.defaultMinSize(d.dp, d.dp).background(Color(0xFF0B0E14), RoundedCornerShape(50)).padding(horizontal = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
-            ) {
-                Line(centreTop, GuideUi.sans(26, FontWeight.Bold))
-                if (centreBottom != null) Line(centreBottom, GuideUi.sans(22, FontWeight.Medium, GuideUi.Fg70))
+        // (Review M4) The disc and the caption never overlap: the disc is centred in the room above the caption; when the
+        // full disc does not fit there the 88 px one is used; when neither does (pre-game at Largest) the caption goes and
+        // the disc keeps the centre (the start time matters more than the venue).
+        Layout(
+            content = {
+                if (centreTop != null) {
+                    CentreDisc(if (compact) 88 else 120, centreTop, centreBottom)
+                    CentreDisc(88, centreTop, centreBottom)
+                }
+                if (caption != null) {
+                    Box(
+                        Modifier.fillMaxWidth()
+                            .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f))))
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { Line(caption, GuideUi.sans(22, FontWeight.Medium)) }
+                }
+            },
+            modifier = Modifier.fillMaxSize(),
+        ) { ms, c ->
+            val w = c.maxWidth
+            val h = c.maxHeight
+            val loose = Constraints(maxWidth = w, maxHeight = h)
+            val disc = if (centreTop != null) ms[0].measure(loose) else null
+            val small = if (centreTop != null) ms[1].measure(loose) else null
+            val cap = if (caption != null) ms[if (centreTop != null) 2 else 0].measure(Constraints.fixedWidth(w).copy(maxHeight = h)) else null
+            val room = h - (cap?.height ?: 0)
+            layout(w, h) {
+                val shown = when {
+                    disc == null -> null
+                    cap == null -> disc
+                    disc.height <= room -> disc
+                    small != null && small.height <= room -> small
+                    else -> null
+                }
+                when {
+                    disc == null -> cap?.place(0, h - cap.height)
+                    shown != null -> {
+                        shown.place((w - shown.width) / 2, (room - shown.height) / 2)
+                        cap?.place(0, h - cap.height)
+                    }
+                    else -> disc.place((w - disc.width) / 2, (h - disc.height) / 2)
+                }
             }
         }
-        if (caption != null) {
-            Box(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth()
-                    .background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.6f))))
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                contentAlignment = Alignment.Center,
-            ) { Line(caption, GuideUi.sans(22, FontWeight.Medium)) }
-        }
+    }
+}
+
+@Composable
+private fun CentreDisc(d: Int, top: String, bottom: String?) {
+    Column(
+        Modifier.defaultMinSize(d.dp, d.dp).background(Color(0xFF0B0E14), RoundedCornerShape(50)).padding(horizontal = 12.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
+    ) {
+        Line(top, GuideUi.sans(26, FontWeight.Bold))
+        if (bottom != null) Line(bottom, GuideUi.sans(22, FontWeight.Medium, GuideUi.Fg70))
     }
 }
 

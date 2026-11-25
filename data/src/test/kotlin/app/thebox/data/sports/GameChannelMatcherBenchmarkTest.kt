@@ -161,6 +161,7 @@ class GameChannelMatcherBenchmarkTest {
         val totals = ArrayList<Double>()
         val stages = ArrayList<GameChannelMatcherImpl.Stats>()
         val found = LinkedHashMap<String, Int>()
+        val lastOut = HashMap<String, List<app.thebox.core.sports.hub.ChannelCandidate>>()
         repeat(12) {
             for (gme in slate) {
                 matcher.clear()
@@ -169,6 +170,7 @@ class GameChannelMatcherBenchmarkTest {
                 totals += (System.nanoTime() - t) / 1e6
                 stages += matcher.lastStats!!
                 found[gme.id.id] = out.size
+                lastOut[gme.id.id] = out
             }
         }
         fun pct(xs: List<Double>, p: Double): Double = xs.sorted()[((xs.size - 1) * p).toInt()]
@@ -184,7 +186,14 @@ class GameChannelMatcherBenchmarkTest {
         println(report)
         File(System.getProperty("java.io.tmpdir"), "hub-matcher-benchmark.txt").writeText(report)
         assertTrue("VGK @ EDM finds its channels", (found["385"] ?: 0) > 0)
-        assertTrue("SN+-only game: no alias candidate", (found["382"] ?: 0) <= 8)
+        // (Sports Hub code review 2026-11-25, L5) Was `size <= 8`, always true under HUB_MATCH_MAX. Guide-confirmed
+        // candidates are legitimate for an SN+-only game; a broadcaster reason is not.
+        assertTrue("the SN+-only game ran", "382" in lastOut)
+        val snPlusOnly = lastOut.getValue("382")
+        assertTrue(
+            "SN+-only game: no alias candidate, got ${snPlusOnly.map { it.reasons }}",
+            snPlusOnly.none { c -> c.reasons.any { it is app.thebox.core.sports.hub.MatchReason.Broadcaster } },
+        )
         assertTrue("JVM sanity bound (not the device gate): p95 ${pct(totals, 0.95)} ms", pct(totals, 0.95) < 3_000)
     }
 }

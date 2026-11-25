@@ -20,6 +20,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.pressKey
+import androidx.compose.ui.test.performSemanticsAction
 import app.thebox.core.settings.fakes.FakeSettingsStore
 import app.thebox.core.settings.state.SportsDomain
 import app.thebox.core.sports.DayState
@@ -366,6 +367,177 @@ class SportsScreenTest {
         show()
         rule.onNodeWithTag(SPORTS_UPDATED_TAG).assertDoesNotExist()
         rule.onNodeWithTag(sportsDayTag(0)).assertIsNotFocused()
+    }
+
+    // ------------------------------------------------------------------ review 2026-11-25: focus behind sheets and under clips
+
+    private val hubDetail = app.thebox.core.sports.hub.FakeGameDetailRepository()
+    /** A clip lookup that never answers (the clip stays Resolving: the layer is up), or fails when [failLookups]. */
+    private val lookup = kotlinx.coroutines.CompletableDeferred<Unit>()
+    private var failLookups = false
+    private val resolver = object : app.thebox.core.sports.hub.ClipResolver {
+        override suspend fun info(ref: app.thebox.core.sports.hub.ClipRef) = app.thebox.core.sports.hub.ClipResult.NotFound
+        override suspend fun stream(ref: app.thebox.core.sports.hub.ClipRef): app.thebox.core.sports.hub.ClipResult<Pair<app.thebox.core.sports.hub.ClipInfo, app.thebox.core.sports.hub.ClipStream>> {
+            if (failLookups) return app.thebox.core.sports.hub.ClipResult.NotFound
+            lookup.await()
+            return app.thebox.core.sports.hub.ClipResult.NotFound
+        }
+    }
+    private lateinit var hubVm: SportsViewModel
+
+    private fun showHub() {
+        hubVm = SportsViewModel(
+            repo, store, { android.os.SystemClock.elapsedRealtime() }, { 1_000_000L }, hubDetail, null, null,
+            { scope -> ClipSession(app.thebox.ui.shelltest.FakePlaybackController(), app.thebox.core.full.fakes.FakeArchivePlayback(), resolver, scope) },
+        ) { LocalDate.of(2026, 11, 5) }
+        rule.setContent { BoxTheme { SportsScreen(hubVm, clock24 = false, onBackFreeChanged = { backFree += it }) } }
+        rule.waitForIdle()
+    }
+
+    private fun hubGoal(n: Int, clip: Long?) = app.thebox.core.sports.hub.GoalItem(
+        app.thebox.core.sports.PeriodLabel(app.thebox.core.sports.PeriodKind.REG, 1), "5:1$n", app.thebox.core.sports.Side.HOME, "G. Scorer$n", "Scorer$n", n,
+        emptyList(), app.thebox.core.sports.hub.Strength.EV, false, 0, n, clip, null,
+    )
+
+    private fun hubDetailOf(g: GameSnapshot, goals: List<app.thebox.core.sports.hub.GoalItem>, recap: Long? = null) = app.thebox.core.sports.hub.GameDetail(
+        g.id, g.phase, null, null, null, null, emptyList(), null, emptyList(), goals, emptyList(), emptyList(), null, null, recap, null, emptyList(),
+    )
+
+    private fun ready(d: app.thebox.core.sports.hub.GameDetail) {
+        hubDetail.detail.value = app.thebox.core.sports.hub.DetailState.Ready(d, fetchedAtMono = 0L, failing = false, stale = false)
+        rule.waitForIdle()
+    }
+
+    /** OK on the live card, then Right to Goals (Channels is disabled without a matcher), OK: the Goals sheet. */
+    private fun openGoals() {
+        press(Key.DirectionCenter)
+        rule.onNodeWithTag(hubSlotTag(0)).assertIsFocused()
+        press(Key.DirectionRight)
+        rule.onNodeWithTag(hubSlotTag(2)).assertIsFocused()
+        press(Key.DirectionCenter)
+        rule.onNodeWithTag(GOALS_SHEET_TAG).assertExists()
+    }
+
+    /** (Review H2) A clip plays over the open Goals sheet; a new goal changes the sheet's rows: the clip layer keeps focus. */
+    @Test fun aNewGoalUnderAClipNeverPullsFocusIntoTheHiddenSheet() {
+        board(live, live2)
+        showHub()
+        ready(hubDetailOf(live, listOf(hubGoal(1, 11), hubGoal(2, 12))))
+        openGoals()
+        rule.onNodeWithTag(hubSheetRowTag("goal:1"), useUnmergedTree = true).assertIsFocused()
+        press(Key.DirectionCenter) // plays goal 2: the lookup hangs, the layer is up
+        rule.onNodeWithTag(CLIP_LAYER_TAG).assertIsFocused()
+        ready(hubDetailOf(live, listOf(hubGoal(1, 11), hubGoal(2, 12), hubGoal(3, 13))))
+        rule.onNodeWithTag(CLIP_LAYER_TAG).assertIsFocused()
+        // Nothing under the layer can be focused either: a card or a hidden row refuses a focus request.
+        rule.onNodeWithTag(sportsCardTag("L2")).performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.RequestFocus)
+        rule.onNodeWithTag(hubSheetRowTag("goal:0"), useUnmergedTree = true).performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.RequestFocus)
+        rule.waitForIdle()
+        rule.onNodeWithTag(CLIP_LAYER_TAG).assertIsFocused()
+        assertFalse("Back stays held under the clip", backFree.last())
+    }
+
+    /** (Review L5, M8) A lookup that fails plays nothing: focus returns to the row the user pressed, not the latest goal. */
+    @Test fun afterAFailedLookupFocusReturnsToThePressedRow() {
+        failLookups = true
+        board(live, live2)
+        showHub()
+        ready(hubDetailOf(live, listOf(hubGoal(1, 11), hubGoal(2, 12), hubGoal(3, 13))))
+        openGoals()
+        rule.onNodeWithTag(hubSheetRowTag("goal:2"), useUnmergedTree = true).assertIsFocused()
+        press(Key.DirectionUp, Key.DirectionCenter) // goal 2's lookup fails at once
+        rule.onNodeWithTag(GOALS_SHEET_TAG).assertExists()
+        rule.onNodeWithTag(hubSheetRowTag("goal:1"), useUnmergedTree = true).assertIsFocused()
+    }
+
+    /** (Review M8) Back during a recap's lookup returns to slot 1 (Watch recap). */
+    @Test fun afterARecapFocusReturnsToSlotOne() {
+        val withRecap = final.copy(media = app.thebox.core.sports.GameMedia(recapId = 70L, condensedId = null, goalClips = 0))
+        repo.followed.value = SportsFixtures.followedOf(withRecap)
+        board(withRecap)
+        showHub()
+        rule.onNodeWithTag(sportsCardTag("X1")).assertIsFocused()
+        press(Key.DirectionCenter)
+        rule.onNodeWithTag(hubSlotTag(0)).assertIsFocused()
+        press(Key.DirectionCenter)
+        rule.onNodeWithTag(CLIP_LAYER_TAG).assertIsFocused()
+        press(Key.Back)
+        rule.onNodeWithTag(CLIP_LAYER_TAG).assertDoesNotExist()
+        rule.onNodeWithTag(hubSlotTag(0)).assertIsFocused()
+        assertFalse("the panel still holds Back", backFree.last())
+    }
+
+    /** (Review H1) While a sheet is open nothing behind it takes focus; Retry keeps focus in the sheet and Back still closes it. */
+    @Test fun theBoxScoreRetryKeepsFocusAndThePageBehindIsNotFocusable() {
+        board(final, live)
+        showHub()
+        rule.onNodeWithTag(sportsCardTag("L1")).assertIsFocused()
+        press(Key.DirectionRight)
+        rule.onNodeWithTag(sportsCardTag("X1")).assertIsFocused()
+        press(Key.DirectionCenter) // final, no recap: Box score is the first enabled slot
+        rule.onNodeWithTag(hubSlotTag(2)).assertIsFocused()
+        press(Key.DirectionCenter)
+        rule.onNodeWithTag(BOX_SCORE_SHEET_TAG).assertExists()
+        rule.onNodeWithTag(boxScoreTabTag(app.thebox.core.sports.Side.AWAY), useUnmergedTree = true).assertIsFocused()
+        rule.onNodeWithTag(sportsCardTag("L1")).performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.RequestFocus)
+        rule.onNodeWithTag(sportsDayTag(0)).performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.RequestFocus)
+        rule.waitForIdle()
+        rule.onNodeWithTag(sportsCardTag("L1")).assertIsNotFocused()
+        rule.onNodeWithTag(boxScoreTabTag(app.thebox.core.sports.Side.AWAY), useUnmergedTree = true).assertIsFocused()
+        press(Key.DirectionDown)
+        rule.onNodeWithTag(hubSheetRowTag("retry"), useUnmergedTree = true).assertIsFocused()
+        press(Key.DirectionCenter)
+        assertEquals(2, hubDetail.boxScoreCalls.size)
+        assertTrue("focus stays in the sheet", rule.onAllNodes(androidx.compose.ui.test.isFocused(), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty())
+        rule.onNodeWithTag(sportsCardTag("L1")).assertIsNotFocused()
+        press(Key.Back)
+        rule.onNodeWithTag(BOX_SCORE_SHEET_TAG).assertDoesNotExist()
+        rule.onNodeWithTag(hubSlotTag(2)).assertIsFocused()
+    }
+
+    private fun focusedNow(tag: String): Boolean =
+        rule.onNodeWithTag(tag).fetchSemanticsNode().config.getOrElse(SemanticsProperties.Focused) { false }
+
+    /** (Integration focus trap, review M8) Left from the first title chip or the first day chip never lands on a slot. */
+    @Test fun leftFromTheFirstChipsNeverEntersThePanel() {
+        board(pre, future)
+        show()
+        rule.onNodeWithTag(sportsDayTag(0)).assertIsFocused()
+        press(Key.DirectionUp)
+        rule.onNodeWithTag(sportsLeagueTag(League.NHL)).assertIsFocused()
+        press(Key.DirectionLeft)
+        for (i in 0..2) assertFalse("slot $i", focusedNow(hubSlotTag(i)))
+        press(Key.DirectionDown)
+        rule.onNodeWithTag(sportsDayTag(0)).performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.RequestFocus)
+        rule.waitForIdle()
+        for (k in 0 until 8) press(Key.DirectionLeft)
+        rule.onNodeWithTag(sportsDayTag(-7)).assertIsFocused()
+        for (i in 0..2) assertFalse("slot $i", focusedNow(hubSlotTag(i)))
+        assertTrue("Back is free: the page never entered the panel", backFree.last())
+    }
+
+    /** (Review M6) The focused card leaves the board on a re-poll: its neighbour by index takes focus. */
+    @Test fun aFocusedCardThatLeavesTheBoardHandsFocusToItsNeighbour() {
+        board(live, live2, pre)
+        show()
+        rule.onNodeWithTag(sportsCardTag("L1")).assertIsFocused()
+        board(live2, pre)
+        rule.waitForIdle()
+        rule.onNodeWithTag(sportsCardTag("L2")).assertIsFocused()
+    }
+
+    /** (Review M1, M6) The panel's game leaves the board while focus is in its panel: the page leaves the panel for the neighbour. */
+    @Test fun thePanelsGameLeavingTheBoardReturnsFocusToACard() {
+        board(live, live2, pre)
+        show()
+        press(Key.DirectionCenter)
+        rule.onNodeWithTag(hubSlotTag(0)).assertIsFocused()
+        board(live2, pre)
+        rule.waitForIdle()
+        rule.onNodeWithTag(sportsCardTag("L2")).assertIsFocused()
+        assertTrue("Back is free again", backFree.last())
+        press(Key.DirectionCenter, Key.DirectionCenter)
+        assertEquals("slot 1 acts on the game shown, not the vanished one", "L2", repo.followed.value?.gameId)
     }
 
     @Test fun leavingTheScreenDropsTheDemand() {

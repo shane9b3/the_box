@@ -121,9 +121,13 @@ enum class DetailKind { NONE, LOADING, READY, FAILED, BOARD_ONLY }
 /**
  * What the panel shows for one game. [detail] is set only when its id equals [game]'s id (U-S2: a late answer for another
  * game is dropped). [slots] always has three entries.
+ *
+ * (Review L3) [nowMs] is the wall clock of the build and is **not** part of equality: two builds that differ only in it are
+ * the same model, so the state flow does not re-emit and the panel does not rebuild its words for every merged emission.
+ * What the panel reads from the clock is in the equality through [imminent] and [slots].
  */
 @Immutable
-data class HubPanelModel(
+class HubPanelModel(
     val game: GameSnapshot?,
     val followed: Boolean = false,
     val detail: GameDetail? = null,
@@ -142,10 +146,28 @@ data class HubPanelModel(
     val winningGoal: ClipInfo? = null,
     val slots: List<HubSlot> = List(3) { HubSlot.EMPTY },
     val nowMs: Long = 0L,
+    /** (Review M4) The video service refused the app: the media area shows no poster, play disc or video tag. */
+    val videoOff: Boolean = false,
+    /** Live, or starting within `HUB_IMMINENT_MIN` (§5.5): the channel line names the reason instead of the start time. */
+    val imminent: Boolean = false,
 ) {
     /** The index of the first slot OK / Menu on a card enters (§2.2); null = none (the footer shows no OK). */
     val firstEnabled: Int? get() = slots.indexOfFirst { it.usable }.takeIf { it >= 0 }
     val candidates: List<ChannelCandidate> get() = (match as? MatchState.Done)?.candidates.orEmpty()
+
+    fun copy(slots: List<HubSlot> = this.slots): HubPanelModel = HubPanelModel(
+        game, followed, detail, detailKind, failure, stale, failing, statsAtMs, awayScore, homeScore, match, recap, latestGoal,
+        winningGoal, slots, nowMs, videoOff, imminent,
+    )
+
+    private fun parts(): List<Any?> = listOf(
+        game, followed, detail, detailKind, failure, stale, failing, statsAtMs, awayScore, homeScore, match, recap, latestGoal,
+        winningGoal, slots, videoOff, imminent,
+    )
+
+    override fun equals(other: Any?): Boolean = this === other || (other is HubPanelModel && parts() == other.parts())
+    override fun hashCode(): Int = parts().hashCode()
+    override fun toString(): String = "HubPanelModel(game=${game?.id}, kind=$detailKind, failure=$failure, slots=$slots)"
 }
 
 // =====================================================================================================================
@@ -321,7 +343,7 @@ internal object HubPanelContents {
                 val d = m.detail
                 loading = d == null
                 if (m.detailKind == DetailKind.FAILED && d == null) {
-                    error = failureText(res, m.failure, retrySlot = m.slots.any { it.action == SlotAction.RETRY })
+                    error = failureText(res, m.failure, m.slots, final)
                     loading = false
                 } else {
                     rows = if (pre) nhlSeasonRows(res, d, away, home) else nhlGameRows(res, d, away, home)
@@ -481,9 +503,11 @@ internal object HubPanelContents {
         val none = res.getString(R.string.sports_hub_stat_none)
         val down = nfl.play as? app.thebox.core.sports.NflPlay.Down
         if (down != null) {
-            val text = buildString {
-                append(SportsText.ordinal(res, down.down))
-                if (down.goalToGo) append(" & Goal") else down.distance?.let { append(" & ").append(it) }
+            val ord = SportsText.ordinal(res, down.down)
+            val text = when {
+                down.goalToGo -> res.getString(R.string.sports_hub_nfl_down_goal, ord)
+                down.distance != null -> res.getString(R.string.sports_hub_nfl_down_distance, ord, down.distance.toString())
+                else -> ord
             }
             rows += PanelRow(res.getString(R.string.sports_hub_stat_down), text, none, null, res.getString(R.string.sports_hub_stat_down) + ": " + text)
         }
@@ -583,8 +607,7 @@ internal object HubPanelContents {
                 if (list.isEmpty()) return if (final) null else res.getString(R.string.sports_hub_no_channel)
                 val top = list.first()
                 val name = top.channel.displayName
-                val imminent = g.phase == GamePhase.LIVE || g.phase == GamePhase.INTERMISSION || g.startUtcMs - m.nowMs <= SportsConstants.HUB_IMMINENT_MIN * 60_000L
-                val base = if (final || imminent) res.getString(R.string.sports_hub_on_tv, name, shortReason(res, top))
+                val base = if (final || m.imminent) res.getString(R.string.sports_hub_on_tv, name, shortReason(res, top))
                 else res.getString(R.string.sports_hub_on_tv_at, SportsText.startTime(g.startUtcMs, clock24, locale), name)
                 if (list.size > 1) res.getQuantityString(R.plurals.sports_hub_on_tv_more, list.size - 1, base, list.size - 1) else base
             }
@@ -603,21 +626,33 @@ internal object HubPanelContents {
 
     private fun media(res: Resources, m: HubPanelModel, g: GameSnapshot, clock24: Boolean, locale: Locale): MediaSpec {
         val nhl = g.id.league.group == LeagueGroup.NHL
+        // (Review M4) A poster only once its lookup gave a picture and while videos play; otherwise the normal matchup art with
+        // its centre disc and a caption that says why there is no video (never a play disc for something that can't play).
+        fun pictured(info: ClipInfo?) = !m.videoOff && info != null && (info.posterUrl ?: info.thumbnailUrl) != null
         if (nhl && g.phase == GamePhase.FINAL) {
             val id = m.detail?.recapId ?: g.media?.recapId
-            return if (id != null) {
-                val info = m.recap
-                val caption = info?.durationMs?.let { res.getString(R.string.sports_hub_caption_recap, SportsText.duration(it)) } ?: res.getString(R.string.sports_hub_row_recap)
-                MediaSpec.Poster(id, info, res.getString(R.string.sports_hub_tag_recap), caption)
-            } else art(res, g, m, res.getString(R.string.sports_hub_caption_recap_soon), clock24, locale)
+            val info = m.recap
+            return when {
+                id != null && m.videoOff -> art(res, g, m, res.getString(R.string.sports_hub_caption_videos_off), clock24, locale)
+                id != null && pictured(info) -> {
+                    val caption = info?.durationMs?.let { res.getString(R.string.sports_hub_caption_recap, SportsText.duration(it)) } ?: res.getString(R.string.sports_hub_row_recap)
+                    MediaSpec.Poster(id, info, res.getString(R.string.sports_hub_tag_recap), caption)
+                }
+                id != null -> art(res, g, m, res.getString(R.string.sports_hub_row_recap), clock24, locale)
+                else -> art(res, g, m, res.getString(R.string.sports_hub_caption_recap_soon), clock24, locale)
+            }
         }
         if (nhl && (g.phase == GamePhase.LIVE || g.phase == GamePhase.INTERMISSION)) {
             val clip = m.detail?.goals?.lastOrNull { it.clipId != null }?.clipId
             val info = m.latestGoal
-            return if (clip != null) {
-                val caption = info?.let { i -> i.durationMs?.let { res.getString(R.string.sports_hub_caption_clip, i.title, SportsText.duration(it)) } ?: i.title }
-                MediaSpec.Poster(clip, info, res.getString(R.string.sports_hub_tag_latest_goal), caption)
-            } else art(res, g, m, res.getString(R.string.sports_hub_caption_goals_soon), clock24, locale)
+            return when {
+                clip != null && m.videoOff -> art(res, g, m, res.getString(R.string.sports_hub_caption_videos_off), clock24, locale)
+                clip != null && pictured(info) -> {
+                    val caption = info?.let { i -> i.durationMs?.let { res.getString(R.string.sports_hub_caption_clip, i.title, SportsText.duration(it)) } ?: i.title }
+                    MediaSpec.Poster(clip, info, res.getString(R.string.sports_hub_tag_latest_goal), caption)
+                }
+                else -> art(res, g, m, res.getString(R.string.sports_hub_caption_goals_soon), clock24, locale)
+            }
         }
         return art(res, g, m, m.detail?.venue, clock24, locale)
     }
@@ -642,15 +677,20 @@ internal object HubPanelContents {
     }
 
     /**
-     * The reason and the next step for a failed detail (§4.5). Without a Retry slot (a final game whose board carries the
-     * recap keeps Watch recap in slot 1) the next step is the automatic retry and the recap, never a button not shown.
+     * The reason and the next step for a failed detail (§4.5), from the slots actually on screen (review H3): a usable Retry
+     * slot → "Select Retry"; else a final game with a usable Watch recap → "Select Watch recap"; else (the slots were frozen
+     * before the failure, so slot 1 is still Follow, or Watch recap is off) → Back, then OK, lands on Retry.
      */
-    fun failureText(res: Resources, kind: FailKind?, retrySlot: Boolean = true): String = res.getString(
+    fun failureText(res: Resources, kind: FailKind?, slots: List<HubSlot>, final: Boolean): String = res.getString(
         when (kind) {
             FailKind.HTTP_429, FailKind.REFUSED -> R.string.sports_hub_error_detail_limited
             FailKind.BAD_BODY -> R.string.sports_hub_error_detail_changed
             FailKind.OFFLINE -> R.string.sports_hub_error_detail_offline
-            else -> if (retrySlot) R.string.sports_hub_error_detail_retry else R.string.sports_hub_error_detail_auto
+            else -> when {
+                slots.any { it.action == SlotAction.RETRY && it.usable } -> R.string.sports_hub_error_detail_retry
+                final && slots.any { it.action == SlotAction.WATCH_RECAP && it.usable } -> R.string.sports_hub_error_detail_auto
+                else -> R.string.sports_hub_error_detail_back
+            }
         },
     )
 }
@@ -676,6 +716,8 @@ internal object HubPanelPlan {
     const val PANEL_H = 812
     const val INNER_W = 664
     const val POSTER_FLOOR = 160
+    /** (Review M4) The poster's play disc is drawn only in a media area at least this tall (it would meet the caption below). */
+    const val POSTER_DISC_MIN_H = 200
     const val ART_FLOOR = 120
     /** An error text in place of the rows takes the room of this many rows (a reason and a next step, up to three lines). */
     const val ERROR_ROWS = 3
@@ -729,10 +771,13 @@ internal object HubPanelPlan {
 const val HUB_PANEL_TAG = "hub_panel"
 const val HUB_PILL_TAG = "hub_panel_pill"
 const val HUB_HEADLINE_TAG = "hub_panel_headline"
+internal const val HUB_HEADLINE_AWAY_TAG = "hub_panel_headline_away"
+internal const val HUB_HEADLINE_HOME_TAG = "hub_panel_headline_home"
 const val HUB_CHANNEL_LINE_TAG = "hub_panel_channel"
 const val HUB_ERROR_TAG = "hub_panel_error"
 const val HUB_NOTE_TAG = "hub_panel_note"
 const val HUB_MEDIA_TAG = "hub_panel_media"
+internal const val HUB_PLAY_DISC_TAG = "hub_panel_play_disc"
 const val HUB_SUMMARY_TAG = "hub_panel_summary:"
 internal fun hubSlotTag(i: Int) = "hub_slot:$i"
 internal fun hubStatRowTag(i: Int) = "hub_stat_row:$i"
@@ -793,6 +838,7 @@ internal fun HubPanel(
     val res = LocalResources.current
     val factor = UiTextScale.factor
     val content = remember(model, clock24, factor) { HubPanelContents.build(res, model, clock24, factor) }
+    val measure = rememberHubMeasure()
     var focusedSlot by remember { mutableIntStateOf(-1) }
     val shape = RoundedCornerShape(24.dp)
     fun move(delta: Int): Boolean {
@@ -834,7 +880,7 @@ internal fun HubPanel(
             StatusPill(content.pill, Modifier.testTag(HUB_PILL_TAG), height = HubPanelPlan.pill(factor))
         }
         Spacer(Modifier.height(12.dp))
-        Headline(content, Modifier.fillMaxWidth().height(HubPanelPlan.headline(factor).dp))
+        Headline(content, Modifier.fillMaxWidth().height(HubPanelPlan.headline(factor).dp), measure)
         Spacer(Modifier.height(16.dp))
         HubMedia(content, g, Modifier.fillMaxWidth().weight(1f).testTag(HUB_MEDIA_TAG))
         Spacer(Modifier.height(16.dp))
@@ -854,30 +900,34 @@ internal fun HubPanel(
 
 /** `[away name][ (n)] vs. [home name][ (n)]` (§1.3, U-B4): only the names give way; the scores never shrink or ellipsize. */
 @Composable
-private fun Headline(c: PanelContent, modifier: Modifier) {
-    val measure = rememberHubMeasure()
+private fun Headline(c: PanelContent, modifier: Modifier, measure: Measure) {
+    val res = LocalResources.current
     val density = LocalDensity.current
     val factor = UiTextScale.factor
-    val plan = remember(c.away, c.home, c.awayScore, c.homeScore, factor, density.density) {
-        HubFit.headline(c.away, c.home, c.awayScore, c.homeScore, with(density) { HubPanelPlan.INNER_W.dp.toPx() }, measure)
+    val words = remember(res) { HubFit.HeadlineWords.of(res) }
+    val plan = remember(c.away, c.home, c.awayScore, c.homeScore, factor, density.density, words) {
+        HubFit.headline(c.away, c.home, c.awayScore, c.homeScore, with(density) { HubPanelPlan.INNER_W.dp.toPx() }, measure, words)
     }
     val style = GuideUi.sans(plan.designPx, FontWeight.SemiBold)
     val awayName = if (plan.nicknames) c.away.nickname else c.away.full
     val homeName = if (plan.nicknames) c.home.nickname else c.home.full
     val scored = c.awayScore != null && c.homeScore != null
+    val desc = if (scored) res.getString(R.string.sports_hub_desc_headline_score, awayName, c.awayScore!!, homeName, c.homeScore!!)
+    else res.getString(R.string.sports_hub_desc_headline, awayName, homeName)
     Row(
-        modifier.testTag(HUB_HEADLINE_TAG).semantics(mergeDescendants = true) {
-            contentDescription = if (scored) "$awayName (${c.awayScore}) vs. $homeName (${c.homeScore})" else "$awayName vs. $homeName"
-        },
+        modifier.testTag(HUB_HEADLINE_TAG).semantics(mergeDescendants = true) { contentDescription = desc },
         horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
     ) {
-        // (Integration) The plan measured the whole line. When it fits, the home name takes its own width and the away name
-        // the rest (weighted children are measured last, so the scores are never cut). Equal weights on both would cap
-        // each name at half the free width and cut a long away name ("Toronto Maple …") beside a short home one.
-        Text(awayName, style = style, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-        Text(if (scored) " (${c.awayScore}) vs. " else " vs. ", style = style, maxLines = 1, softWrap = false)
-        Text(homeName, style = style, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, modifier = if (plan.ellipsis) Modifier.weight(1f, fill = false) else Modifier)
-        if (scored) Text(" (${c.homeScore})", style = style, maxLines = 1, softWrap = false)
+        // (Integration, review M5) The plan measured the four parts as laid out (each rounded up). When they fit, the home
+        // name takes its own width and the away name the rest (weighted children are measured last, so the scores are never
+        // cut). When the names must ellipsize, each name's weight is its measured width, so a short home nickname does not
+        // keep half of the free width while a long away one is cut (the equal split §15.2 removed).
+        val awayMod = Modifier.weight(if (plan.ellipsis) plan.awayWeight else 1f, fill = false)
+        val homeMod = if (plan.ellipsis) Modifier.weight(plan.homeWeight, fill = false) else Modifier
+        Text(awayName, style = style, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, modifier = awayMod.testTag(HUB_HEADLINE_AWAY_TAG))
+        Text(words.middle(c.awayScore, c.homeScore), style = style, maxLines = 1, softWrap = false)
+        Text(homeName, style = style, maxLines = 1, softWrap = false, overflow = TextOverflow.Ellipsis, modifier = homeMod.testTag(HUB_HEADLINE_HOME_TAG))
+        if (scored) Text(words.tail(c.homeScore), style = style, maxLines = 1, softWrap = false)
     }
 }
 
@@ -989,7 +1039,9 @@ private fun HubMedia(c: PanelContent, g: GameSnapshot, modifier: Modifier) {
             Box(Modifier.align(Alignment.TopStart).padding(12.dp).background(Black60, RoundedCornerShape(8.dp)).padding(horizontal = 12.dp, vertical = 4.dp)) {
                 Line(spec.tag, GuideUi.sans(22, FontWeight.Bold))
             }
-            Box(Modifier.align(Alignment.Center).size(88.dp).background(Black50, CircleShape), contentAlignment = Alignment.Center) {
+            // (Review M4) Decoration only (U-N11): below POSTER_DISC_MIN_H (Larger, Largest) the 88 px disc would run into the
+            // caption, so it is not drawn.
+            if (heightDp >= HubPanelPlan.POSTER_DISC_MIN_H) Box(Modifier.align(Alignment.Center).size(88.dp).background(Black50, CircleShape).testTag(HUB_PLAY_DISC_TAG), contentAlignment = Alignment.Center) {
                 Box(
                     Modifier.size(28.dp).drawBehind {
                         val p = Path().apply { moveTo(size.width * 0.15f, 0f); lineTo(size.width, size.height / 2f); lineTo(size.width * 0.15f, size.height); close() }
@@ -1021,6 +1073,7 @@ private fun lowEnd(): Boolean {
 private fun Buttons(model: HubPanelModel, requesters: List<FocusRequester>, focusedSlot: Int, entered: Boolean, onSlot: (Int) -> Unit, onFocus: (Int?) -> Unit) {
     val res = LocalResources.current
     val factor = UiTextScale.factor
+    val focusable = LocalHubFocusable.current
     val large = HubCardMetrics.large(factor)
     val pad = if (large) 20 else 28
     val gap = if (large) 12 else 16
@@ -1035,7 +1088,7 @@ private fun Buttons(model: HubPanelModel, requesters: List<FocusRequester>, focu
                     .testTag(hubSlotTag(i))
                     .height(HubPanelPlan.buttons(factor).dp)
                     .focusRequester(requesters[i])
-                    .focusProperties { canFocus = slot.enabled && entered }
+                    .focusProperties { canFocus = slot.enabled && entered && focusable }
                     .onFocusChanged { if (it.isFocused) onFocus(i) else if (focusedSlot == i) onFocus(null) }
                     .background(if (focused) ButtonFocusFill else GuideUi.White10, RoundedCornerShape(30.dp))
                     .let { if (focused) it.border(3.dp, GuideUi.Accent, RoundedCornerShape(30.dp)) else it.border(1.dp, GuideUi.White16, RoundedCornerShape(30.dp)) }

@@ -213,6 +213,58 @@ class ClipSessionTest {
         assertTrue(rig.effects.isEmpty())
     }
 
+    /** (Sports Hub code review 2026-11-25, H1) Home or standby during the lookup: no playClip, Idle, no resume. */
+    @Test
+    fun homeDuringTheLookupNeverPlaysAndResumesNothing() = runTest {
+        val resolver = SlowResolver().apply { gate = CompletableDeferred() }
+        val rig = Rig(this, resolver)
+        rig.live(x)
+        rig.session.play(listOf(goal(1), goal(2)), 0)
+        runCurrent()
+        assertTrue(rig.session.state.value is ClipSession.State.Resolving)
+        rig.controller.base.state.value = PlaybackState.Stopped(
+            NowPlaying(5, x, "Live", isArchive = false, format = StreamFormat.TS), StopReason.BACKGROUND, resumable = true,
+        )
+        runCurrent()
+        assertEquals(ClipSession.State.Idle, rig.session.state.value)
+        resolver.gate!!.complete(Unit)
+        runCurrent()
+        assertTrue("no playClip after Home", rig.controller.clips.isEmpty())
+        assertTrue("no resume: the controller resumes the live channel itself on return", rig.effects.isEmpty())
+        assertTrue("no toast", rig.failures.isEmpty())
+    }
+
+    /** (H1) The stop lands in the same frame as the answer, before the collector ran: still nothing plays. */
+    @Test
+    fun aStandbyStopNotYetCollectedStillBlocksThePlay() = runTest {
+        val resolver = SlowResolver().apply { gate = CompletableDeferred() }
+        val rig = Rig(this, resolver)
+        rig.live(x)
+        rig.session.play(listOf(recap(7)), 0)
+        runCurrent()
+        rig.controller.base.state.value = PlaybackState.Stopped(
+            NowPlaying(5, x, "Live", isArchive = false, format = StreamFormat.TS), StopReason.STANDBY, resumable = true,
+        )
+        resolver.gate!!.complete(Unit)
+        runCurrent()
+        assertTrue(rig.controller.clips.isEmpty())
+        assertEquals(ClipSession.State.Idle, rig.session.state.value)
+        assertTrue(rig.effects.isEmpty())
+    }
+
+    /** (H1) A lifecycle stop that was already there when OK was pressed (back from standby, no auto-resume) plays. */
+    @Test
+    fun anEarlierLifecycleStopDoesNotBlockAClip() = runTest {
+        val rig = Rig(this)
+        rig.controller.base.state.value = PlaybackState.Stopped(
+            NowPlaying(5, x, "Live", isArchive = false, format = StreamFormat.TS), StopReason.STANDBY, resumable = true,
+        )
+        rig.session.play(listOf(recap(7)), 0)
+        runCurrent()
+        assertEquals(1, rig.controller.clips.size)
+        assertTrue(rig.session.state.value is ClipSession.State.Playing)
+    }
+
     @Test
     fun backDuringTheLookupNeverPlaysAndResumesNothing() = runTest {
         val resolver = SlowResolver().apply { gate = CompletableDeferred() }

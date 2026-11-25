@@ -32,7 +32,9 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -110,6 +112,7 @@ fun GoalsSheet(
         focusKey = focusVideoId,
         onClose = onClose,
         modifier = modifier.testTag(GOALS_SHEET_TAG),
+        rowsKey = rows,
     ) { requesters ->
         rows.forEachIndexed { i, row ->
             item(key = row.key) {
@@ -268,8 +271,10 @@ internal fun ClipThumbnail(videoId: Long, url: String?, width: Dp, height: Dp) {
     Box(Modifier.size(width, height).background(GuideUi.White08, shape)) {
         if (loader != null && !url.isNullOrBlank()) {
             val context = LocalContext.current
-            val w = width.value.toInt()
-            val h = height.value.toInt()
+            // (Review L7) The request in real px (the root scales design px by its density), as HubMedia sizes the poster.
+            val density = androidx.compose.ui.platform.LocalDensity.current
+            val w = with(density) { width.roundToPx() }
+            val h = with(density) { height.roundToPx() }
             val request = remember(videoId, url, w, h) {
                 val key = "nhl-clip:$videoId:${w}x$h"
                 ImageRequest.Builder(context).data(url).memoryCacheKey(key).diskCacheKey(key).size(w, h).build()
@@ -302,6 +307,11 @@ internal fun isBack(e: KeyEvent): Boolean = e.key == Key.Back || e.key == Key.Es
  * `OverlayBorder`, padding 28; [title] 32/600; a `LazyColumn` of focusable rows from y 84 (inside the frame). Focus goes to
  * row [initialRow] on open and again when [focusKey] changes; Back (on key up) calls [onClose]; Left / Right never leave
  * the sheet. [header] sits between the title and the list (the box score's tabs). Opaque, no layer.
+ *
+ * (Review H1) Whenever [rowsKey] changes and nothing in the sheet holds focus (the focused row left with the change: Retry
+ * pressed, a failure replacing the rows, rows arriving after open), focus goes to [refocus] (default: row [initialRow]),
+ * so Back (handled only with focus inside) always works. (Review H2) No request is made while [LocalHubFocusable] is false
+ * (a clip plays over the sheet): the clip layer keeps focus whatever the rows do.
  */
 @Composable
 internal fun HubSheetFrame(
@@ -314,25 +324,54 @@ internal fun HubSheetFrame(
     listState: LazyListState = rememberLazyListState(),
     requesters: List<FocusRequester> = remember(rowCount) { List(rowCount) { FocusRequester() } },
     takeInitialFocus: Boolean = true,
+    rowsKey: Any? = rowCount,
+    /** The target after a change of [rowsKey] left the sheet without focus, with the list index to scroll to (null = none). */
+    refocus: (() -> Pair<FocusRequester, Int?>?)? = null,
     header: (@Composable () -> Unit)? = null,
     footer: LazyListScope.() -> Unit = {},
     content: LazyListScope.(requesters: List<FocusRequester>) -> Unit,
 ) {
     val shape = RoundedCornerShape(DesignTokens.Radii.Panel)
+    val focusable = LocalHubFocusable.current
+    // Focus facts, read only by the effects (plain holders: no recomposition on every focus move). [0] = the frame holds
+    // focus, [1] = a row of the list holds it.
+    val focus = remember { BooleanArray(2) }
+    // Composed before the change is applied, so it still sees the row that is about to leave.
+    val rowHadFocus = remember(rowsKey) { focus[1] }
+    val target by androidx.compose.runtime.rememberUpdatedState(
+        refocus ?: { if (rowCount == 0) null else initialRow.coerceIn(0, rowCount - 1).let { requesters[it] to it } },
+    )
     if (takeInitialFocus) {
-        LaunchedEffect(focusKey, rowCount) {
-            if (rowCount == 0) return@LaunchedEffect
+        LaunchedEffect(focusKey) {
+            if (rowCount == 0 || !focusable) return@LaunchedEffect
             val i = initialRow.coerceIn(0, rowCount - 1)
             listState.scrollToItem(i)
             withFrameNanos { }
             runCatching { requesters[i].requestFocus() }
         }
     }
+    // The first run is the open (the initial request above, or the sheet's own); later runs are changes of the rows.
+    var opened by remember { mutableStateOf(false) }
+    LaunchedEffect(rowsKey, focusable) {
+        val first = !opened
+        opened = true
+        if (first && (!takeInitialFocus || rowCount > 0)) return@LaunchedEffect
+        withFrameNanos { }
+        // Lost: nothing in the sheet has focus, or the focused row left (the frame's group then hands focus to its first
+        // child, which is not where the user was).
+        if (!focusable || (focus[0] && !(rowHadFocus && !focus[1]))) return@LaunchedEffect
+        val (req, index) = target() ?: return@LaunchedEffect
+        if (index != null) listState.scrollToItem(index)
+        withFrameNanos { }
+        runCatching { req.requestFocus() }
+    }
     Box(modifier.fillMaxSize().testTag(HUB_SHEET_TAG)) {
         Column(
             Modifier
                 .padding(start = 856.dp, top = 148.dp)
                 .size(968.dp, 812.dp)
+                .onFocusChanged { focus[0] = it.hasFocus }
+                .focusGroup()
                 .background(GuideUi.OverlayFill, shape)
                 .border(1.dp, GuideUi.OverlayBorder, shape)
                 .onPreviewKeyEvent { e ->
@@ -351,7 +390,7 @@ internal fun HubSheetFrame(
             }
             header?.invoke()
             LazyColumn(
-                Modifier.fillMaxWidth().weight(1f),
+                Modifier.fillMaxWidth().weight(1f).onFocusChanged { focus[1] = it.hasFocus },
                 state = listState,
                 verticalArrangement = Arrangement.spacedBy(16.dp),
                 contentPadding = PaddingValues(top = 4.dp, bottom = 4.dp),
@@ -383,11 +422,13 @@ internal fun HubSheetRow(
 ) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(DesignTokens.Radii.Row)
+    val focusable = LocalHubFocusable.current
     var m = Modifier
         .testTag(hubSheetRowTag(key))
         .fillMaxWidth()
         .height(height.dp)
         .focusRequester(requester)
+        .focusProperties { canFocus = focusable }
         .onPreviewKeyEvent { e ->
             when (e.key) {
                 Key.DirectionLeft, Key.DirectionRight -> true

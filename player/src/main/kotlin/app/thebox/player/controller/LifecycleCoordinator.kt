@@ -77,6 +77,17 @@ internal class LifecycleCoordinator(
     var graceReason: StopReason? = null
         private set
 
+    /**
+     * (Sports Hub code review 2026-11-25, H1) An `ON_STOP` arrived and no `ON_START` since: Home, standby or another app.
+     * Unlike `!isForeground` this is false before the first process event, so a coordinator whose observers never came
+     * up (or a test that never drives them) does not refuse playback forever.
+     */
+    var stoppedSinceStart: Boolean = false
+        private set
+
+    /** (H1) No new playback may start of its own accord: the app is away, or a standby / display / HDMI grace runs. */
+    val away: Boolean get() = stoppedSinceStart || graceReason != null
+
     private var started = false
     private var hdmiPlugged: Boolean? = null
     /** An HDMI 1 → 0 transition was seen and no re-plug since (never the initial sticky broadcast). */
@@ -96,6 +107,7 @@ internal class LifecycleCoordinator(
     fun onProcessStart() {
         publishAwake()
         isForeground = true
+        stoppedSinceStart = false
         target.onForegroundChanged(true)
         cancelGrace("start")
         target.resumeAfterLifecycle()
@@ -104,6 +116,7 @@ internal class LifecycleCoordinator(
     fun onProcessStop() {
         publishAwake()
         isForeground = false
+        stoppedSinceStart = true
         target.onForegroundChanged(false)
         val interactive = device.isInteractive()
         val displayOn = device.isDisplayOn()

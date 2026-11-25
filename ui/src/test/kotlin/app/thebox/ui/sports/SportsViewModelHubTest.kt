@@ -424,6 +424,89 @@ class SportsViewModelHubTest {
         assertEquals(clockless(m), false)
     }
 
+    // ------------------------------------------------------------------ review 2026-11-25 (M1, M3, M7, L1, L3)
+
+    /** (Review M1) The sheet's game leaves the board: the sheet closes and focus leaves the panel (the screen moves it to a card). */
+    @Test fun aSheetWhoseGameLeavesTheBoardClosesAndThePanelThaws() {
+        val m = vm()
+        repo.board(final, live)
+        m.onCardFocused("X1")
+        m.enterPanel("X1")
+        m.onSlot(2)
+        assertTrue(m.sheet.value is HubSheet.BoxScoreSheet)
+        repo.board(live)
+        assertNull("the sheet closed with its game", m.sheet.value)
+        assertFalse("focus left the panel", m.panelFocused.value)
+        assertEquals("L1", m.panel.value.game?.id?.id)
+    }
+
+    /** (Review M3) An empty day after resting on a live game: the old game's detail and match stop. */
+    @Test fun anEmptyBoardStopsTheDetailOfTheGameNoLongerShown() {
+        val m = vm()
+        repo.board(live)
+        m.onCardFocused("L1")
+        scheduler.advanceTimeBy(601)
+        assertEquals("L1", detail.showCalls.last()?.id?.id)
+        repo.board(day = "2026-11-05")
+        assertNull("the repository is told nothing is shown", detail.showCalls.last())
+        val calls = detail.showCalls.size
+        repo.board(day = "2026-11-05")
+        assertEquals("said once", calls, detail.showCalls.size)
+    }
+
+    /** (Review M7) A pre-game game going live under the panel: the repository sees the new phase and the match runs again. */
+    @Test fun aPhaseChangeOfTheShownGameReachesTheRepositoryAndTheMatcher() {
+        val m = vm()
+        repo.board(pre)
+        m.onCardFocused("P1")
+        scheduler.advanceTimeBy(601)
+        assertEquals(1, matcher.matchCalls.size)
+        val shows = detail.showCalls.size
+        val nowLive = pre.copy(phase = GamePhase.LIVE, period = 1, periodKind = PeriodKind.REG, clock = GameClock(1200, true, false))
+        repo.board(nowLive)
+        assertEquals("one show, no rest", shows + 1, detail.showCalls.size)
+        assertEquals(GamePhase.LIVE, detail.showCalls.last()?.phase)
+        assertEquals("the match ran again", 2, matcher.matchCalls.size)
+        repo.board(nowLive)
+        assertEquals("an unchanged phase shows nothing more", shows + 1, detail.showCalls.size)
+    }
+
+    /** A card focused in passing while a sheet or the panel holds focus never changes the panel's game. */
+    @Test fun aCardFocusedWhileThePanelHoldsFocusChangesNothing() {
+        val m = vm()
+        repo.board(live, live2)
+        m.onCardFocused("L1")
+        m.enterPanel("L1")
+        m.onCardFocused("L2")
+        assertEquals("L1", m.panel.value.game?.id?.id)
+        assertTrue(m.panelFocused.value)
+    }
+
+    /** (Review L1) The trim keeps the shown game's match, so its Channels slot does not fall back to "Finding…". */
+    @Test fun aMemoryTrimKeepsTheShownGamesMatch() {
+        val m = vm()
+        repo.board(live)
+        matcher.answers[live.id] = listOf(candidate(), candidate("TVA Sports", MatchConfidence.LIKELY))
+        m.onCardFocused("L1")
+        m.enterPanel("L1")
+        assertEquals(SlotLabel.CHANNELS_N, m.panel.value.slots[1].label)
+        m.onTrimMemory()
+        assertEquals(1, detail.trims)
+        assertEquals(SlotLabel.CHANNELS_N, m.panel.value.slots[1].label)
+    }
+
+    /** (Review L3) A re-emission with only a later clock is the same panel: the state flow does not emit it. */
+    @Test fun thePanelIsNotRebuiltForAClockTick() {
+        var now = 1_000_000L
+        val m = SportsViewModel(repo, null, { 10_000L }, { now }, detail, matcher, null, { null }, { app.thebox.core.parental.ParentalAccess.OPEN }) { LocalDate.of(2026, 11, 5) }
+        repo.board(live)
+        val before = m.panel.value
+        now += 5_000L
+        repo.board(live) // a re-poll with the same snapshot
+        assertTrue("the same instance: nothing re-emitted", before === m.panel.value || before == m.panel.value)
+        assertEquals(before, m.panel.value)
+    }
+
     private fun clockless(m: SportsViewModel) = m.panelFocused.value
 
     private fun collect(m: SportsViewModel): MutableList<SportsEffect> {

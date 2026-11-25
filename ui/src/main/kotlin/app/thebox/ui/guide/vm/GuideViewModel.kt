@@ -387,23 +387,37 @@ class GuideViewModel @Inject constructor(
     fun onSportsEffect(effect: SportsEffect) {
         when (effect) {
             is SportsEffect.Tune -> {
+                // (Sports Hub code review 2026-11-25, M2) A tune made while a clip's resume waits wins over that resume.
+                cancelClipResume()
                 guarded.tune(TuneTarget.Channel(effect.channel.identity), effects.currentLineup?.let { LineupZapList(it, library) })
                 machine.dispatch(GuideEvent.SportsClosed(effect.channel, tuned = true, archive = false))
             }
             is SportsEffect.PlayArchive -> {
+                cancelClipResume()
                 effects.playArchive(effect.channel, effect.info)
                 machine.dispatch(GuideEvent.SportsClosed(effect.channel, tuned = true, archive = true))
             }
             is SportsEffect.Resume -> when (val p = effect.point) {
-                ResumePoint.Nothing -> controller.stop(StopReason.USER)
+                ResumePoint.Nothing -> {
+                    cancelClipResume()
+                    controller.stop(StopReason.USER)
+                }
                 else -> {
                     resumeJob?.cancel()
+                    // (M2) What owns the player as the resume is asked for (the clip, or nothing); a non-clip tune past it
+                    // (an intent, Watch Next, a PIN success, a settings re-tune) made during the wait wins.
+                    val ownerAtEffect = controller.state.value.target?.tuneId ?: -1L
                     resumeJob = viewModelScope.launch {
                         // (Integration, §6.5) The root gives the controller the page's viewport back on its next frame after
                         // the clip hides. The resumed channel waits for it, so it prepares under the page: no full-screen
                         // picture and no display-mode switch for a viewport the page no longer has.
                         if (hostViewport.value == Viewport.FULL) {
                             withTimeoutOrNull(CLIP_RESUME_VIEWPORT_WAIT_MS) { hostViewport.first { it != Viewport.FULL } }
+                        }
+                        val now = controller.state.value.target
+                        if (now != null && !now.isClip && now.tuneId > ownerAtEffect) {
+                            BoxLog.i(TAG) { "clip resume skipped: tune ${now.tuneId} started during the wait" }
+                            return@launch
                         }
                         when (p) {
                             is ResumePoint.Live -> guarded.tune(TuneTarget.Channel(p.identity), effects.currentLineup?.let { LineupZapList(it, library) })
@@ -416,6 +430,11 @@ class GuideViewModel @Inject constructor(
         }
     }
 
+    /** (M2) A tune from the page, or the end of the session, cancels a clip resume still waiting for the viewport. */
+    private fun cancelClipResume() {
+        resumeJob?.cancel()
+        resumeJob = null
+    }
 
     // ---- feeds (§3.16.1)
 

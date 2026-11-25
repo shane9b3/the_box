@@ -44,6 +44,9 @@ class NhlClipResolver internal constructor(
 
     private val client: OkHttpClient = client.newBuilder()
         .callTimeout(LOOKUP_CALL_TIMEOUT_MS, TimeUnit.MILLISECONDS)
+        // (Sports Hub code review 2026-11-25, L2) No redirect at all: OkHttp keeps the `Accept: …;pk=` header across a
+        // host change (it strips only `Authorization`), and the lookup never expects one (`classify` treats 3xx as such).
+        .followRedirects(false)
         .followSslRedirects(false)
         .cache(null)
         .build()

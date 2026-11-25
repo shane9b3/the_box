@@ -3,6 +3,10 @@ package app.thebox.ui.sports
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsFocused
+import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.foundation.focusable
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
@@ -177,11 +181,66 @@ class HubSheetsTest {
         rule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
         rule.waitForIdle()
         rule.onNodeWithTag(hubSheetRowTag("sk:2"), useUnmergedTree = true).assertIsFocused()
+        // (Review H1, M8) A failure replaces the rows under the focused skater: focus goes to Retry, not nowhere.
         fetch.value = Fetch.Failed(app.thebox.core.sports.FailKind.IO, null, 0)
         rule.waitForIdle()
-        rule.onNodeWithTag(BOX_SCORE_RETRY_TAG, useUnmergedTree = true).fetchSemanticsNode()
+        rule.onNodeWithTag(hubSheetRowTag("retry"), useUnmergedTree = true).assertIsFocused()
         assertEquals(listOf(BoxRow.Error, BoxRow.Retry), boxRows(null, failed = true))
         assertEquals(0, retries)
+    }
+
+    /**
+     * (Review H1) OK on Retry: the view model sets the sheet back to loading, which removes the focused Retry row. Focus must
+     * land on the shown team's tab (and on Retry again if the retry fails), so Back still closes the sheet.
+     */
+    @Test
+    fun retryInTheBoxScoreKeepsFocusInTheSheetAndBackStillCloses() {
+        val fetch = androidx.compose.runtime.mutableStateOf<Fetch<BoxScore>?>(Fetch.Failed(app.thebox.core.sports.FailKind.TIMEOUT, null, 0))
+        var retries = 0
+        var closed = 0
+        rule.setContent { BoxTheme { BoxScoreSheet(final, fetch.value, onRetry = { retries++; fetch.value = null }, onClose = { closed++ }) } }
+        rule.waitForIdle()
+        rule.onNodeWithTag(boxScoreTabTag(Side.AWAY), useUnmergedTree = true).assertIsFocused()
+        rule.onRoot().performKeyInput { pressKey(Key.DirectionDown) }
+        rule.waitForIdle()
+        rule.onNodeWithTag(hubSheetRowTag("retry"), useUnmergedTree = true).assertIsFocused()
+        rule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
+        rule.waitForIdle()
+        assertEquals("OK on Retry retries", 1, retries)
+        rule.onNodeWithTag(boxScoreTabTag(Side.AWAY), useUnmergedTree = true).assertIsFocused()
+        rule.onRoot().performKeyInput { pressKey(Key.Back) }
+        rule.waitForIdle()
+        assertEquals("Back closes the sheet after a retry", 1, closed)
+    }
+
+    /** (Review H2) Under a clip ([LocalHubFocusable] false) a change of the rows never pulls focus into the hidden sheet. */
+    @Test
+    fun aHiddenGoalsSheetTakesNoFocusWhenItsRowsChange() {
+        val d = androidx.compose.runtime.mutableStateOf(detail(goals.take(2)))
+        val focusable = androidx.compose.runtime.mutableStateOf(true)
+        val other = androidx.compose.ui.focus.FocusRequester()
+        rule.setContent {
+            BoxTheme {
+                androidx.compose.foundation.layout.Box {
+                    androidx.compose.runtime.CompositionLocalProvider(LocalHubFocusable provides focusable.value) {
+                        GoalsSheet(live, d.value, emptyMap(), emptyList(), null, onPlay = { _, _ -> }, onPlayArchive = {}, onMissingClip = {}, onClose = {})
+                    }
+                    androidx.compose.foundation.layout.Box(
+                        androidx.compose.ui.Modifier.testTag("other").focusRequester(other).focusable(),
+                    )
+                }
+            }
+        }
+        rule.waitForIdle()
+        rule.onNodeWithTag(hubSheetRowTag("goal:1"), useUnmergedTree = true).assertIsFocused()
+        focusable.value = false
+        rule.runOnIdle { other.requestFocus() }
+        rule.waitForIdle()
+        rule.onNodeWithTag("other").assertIsFocused()
+        d.value = detail(goals) // a new goal arrives while the clip plays
+        rule.waitForIdle()
+        rule.onNodeWithTag("other").assertIsFocused()
+        rule.onNodeWithTag(hubSheetRowTag("goal:2"), useUnmergedTree = true).assertIsNotFocused()
     }
 
     @Test

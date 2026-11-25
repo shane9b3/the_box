@@ -291,6 +291,47 @@ class PlaybackControllerClipTest {
         assertEquals(PlaybackErrorCode.CLIP_EXPIRED, (f.state as PlaybackState.Error).error.code)
     }
 
+    /** (Sports Hub code review 2026-11-25, L1) A clip's switch timeout uses the clip codes, never NO_DATA_TIMEOUT. */
+    @Test
+    fun aClipSwitchTimeoutIsStreamInterrupted() {
+        clip()
+        f.exo.emitState(Player.STATE_READY)
+        f.idle()
+        f.advance(15_100)
+        val err = f.state as PlaybackState.Error
+        assertEquals(PlaybackErrorCode.STREAM_INTERRUPTED, err.error.code)
+        assertTrue(err.target!!.isClip)
+    }
+
+    /** (Sports Hub code review 2026-11-25, H1) A lookup that answers after Home or during a standby grace starts nothing. */
+    @Test
+    fun aClipNeverStartsWhileTheAppIsAway() {
+        val lc = c.lifecycle
+        lc.onProcessStart()
+        c.tune(TuneTarget.Channel(CH1))
+        f.idle()
+        f.play()
+        lc.onProcessStop() // Home while interactive: the live channel stops at once
+        val stopped = f.state as PlaybackState.Stopped
+        val builds = f.sources.builds.size
+        assertEquals(-1L, c.playClip(hls))
+        f.idle()
+        assertEquals("no clip source is built in the background", builds, f.sources.builds.size)
+        assertEquals("the lifecycle stop stays as it was", stopped, f.state)
+
+        lc.onProcessStart()
+        f.idle()
+        f.device.interactive = false
+        lc.onScreenOff() // the standby grace
+        assertEquals(-1L, c.playClip(hls))
+
+        lc.onScreenOn()
+        f.device.interactive = true
+        f.idle()
+        assertTrue("back in the foreground a clip plays", clip() > 0)
+        assertTrue(target().isClip)
+    }
+
     @Test
     fun retryAndResumeNeverRestartAClipCycle() {
         clip()

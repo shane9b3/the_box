@@ -22,6 +22,7 @@ import app.thebox.core.sports.hub.GameDetail
 import app.thebox.core.sports.hub.TeamBox
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.async
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.test.TestScope
@@ -58,6 +59,7 @@ class GameDetailRepositoryImplTest {
         var answer: (GameId, Long) -> NhlDetailSource.DetailAnswer = { id, now -> NhlDetailSource.DetailAnswer(ok(detail(id), now), false) }
         var box: Fetch<BoxScore> = Fetch.Ok(BoxScore(TeamBox(emptyList(), emptyList()), TeamBox(emptyList(), emptyList())), 0L, null, 0)
         var boxCalls = 0
+        var boxGate: CompletableDeferred<Unit>? = null
 
         override suspend fun detail(id: GameId, phaseHint: GamePhase?): NhlDetailSource.DetailAnswer {
             calls += id.id to mono.nowMs()
@@ -70,7 +72,7 @@ class GameDetailRepositoryImplTest {
             return answer(id, mono.nowMs())
         }
 
-        override suspend fun boxScore(id: GameId): Fetch<BoxScore> { boxCalls++; return box }
+        override suspend fun boxScore(id: GameId): Fetch<BoxScore> { boxCalls++; boxGate?.await(); return box }
     }
 
     private class H(
@@ -388,6 +390,74 @@ class GameDetailRepositoryImplTest {
         runCurrent()
         assertEquals(FailKind.HTTP_OTHER, (h.repo.boxScore(GameId(League.NHL, "1")) as Fetch.Failed).kind)
         assertEquals(1, h.fetcher.boxCalls)
+    }
+
+    /**
+     * (Sports Hub code review 2026-11-25, L4) One landing failure during a live game keeps the cached goals, stars and
+     * leaders (marked failing) instead of emptying them until the next poll.
+     */
+    @Test fun aFailedLandingKeepsTheCachedLandingFacts() = runTest {
+        val h = harness()
+        val star = app.thebox.core.sports.hub.Star(1, "Connor McDavid", "McDavid", "EDM", null)
+        val leader = app.thebox.core.sports.hub.LeaderPair("goals", app.thebox.core.sports.hub.Leader("A", 9, null), null)
+        h.fetcher.answer = { id, now -> NhlDetailSource.DetailAnswer(ok(detail(id).copy(stars = listOf(star), leaders = listOf(leader)), now), false) }
+        h.repo.show(game())
+        settle(600)
+        assertEquals(listOf(star), h.ready.detail.stars)
+        assertFalse(h.ready.failing)
+        h.fetcher.answer = { id, now ->
+            NhlDetailSource.DetailAnswer(ok(detail(id).copy(venue = null, awayScore = null, homeScore = null), now), landingFailed = true)
+        }
+        settle(30_000)
+        assertEquals(2, h.fetcher.calls.size)
+        assertEquals("the stars stay", listOf(star), h.ready.detail.stars)
+        assertEquals(listOf(leader), h.ready.detail.leaders)
+        assertEquals("Rogers Place", h.ready.detail.venue)
+        assertEquals("the old landing scores are not passed off as the new answer's", null, h.ready.detail.awayScore)
+        assertTrue("still failing", h.ready.failing)
+    }
+
+    /** (L6) The sheet opened twice quickly: one box-score request, both callers get its answer. */
+    @Test fun twoBoxScoreCallsForOneGameShareOneRequest() = runTest {
+        val h = harness()
+        h.fetcher.boxGate = CompletableDeferred()
+        val id = GameId(League.NHL, "1")
+        val a = async { h.repo.boxScore(id) }
+        val b = async { h.repo.boxScore(id) }
+        runCurrent()
+        h.fetcher.boxGate!!.complete(Unit)
+        assertTrue(a.await() is Fetch.Ok)
+        assertTrue(b.await() is Fetch.Ok)
+        assertEquals(1, h.fetcher.boxCalls)
+        // Done: the next call is a new request.
+        h.repo.boxScore(id)
+        assertEquals(2, h.fetcher.boxCalls)
+    }
+
+    /** (L6) The first caller cancelled (the sheet closed): a waiting caller makes the request itself. */
+    @Test fun aWaiterWhoseOwnerWasCancelledFetchesItself() = runTest {
+        val h = harness()
+        h.fetcher.boxGate = CompletableDeferred()
+        val id = GameId(League.NHL, "1")
+        val a = async { h.repo.boxScore(id) }
+        runCurrent()
+        val b = async { h.repo.boxScore(id) }
+        runCurrent()
+        a.cancel()
+        runCurrent()
+        h.fetcher.boxGate!!.complete(Unit)
+        assertTrue(b.await() is Fetch.Ok)
+        assertEquals(2, h.fetcher.boxCalls)
+    }
+
+    /** (L7) The ids seen unfinished are bounded without a trim. */
+    @Test fun seenUnfinishedIsBounded() = runTest {
+        val h = harness()
+        for (i in 0 until SportsConstants.HUB_DETAIL_LRU * 3) {
+            h.repo.show(game(id = "20260200$i"))
+            runCurrent()
+        }
+        assertTrue("${h.repo.seenUnfinishedCount}", h.repo.seenUnfinishedCount <= SportsConstants.HUB_DETAIL_LRU)
     }
 
     companion object {

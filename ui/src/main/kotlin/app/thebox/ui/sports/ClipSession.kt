@@ -19,6 +19,7 @@ import app.thebox.player.api.ClipTune
 import app.thebox.player.api.PlaybackController
 import app.thebox.player.api.PlaybackState
 import app.thebox.player.api.PositionSnapshot
+import app.thebox.player.api.StopReason
 import app.thebox.player.api.TrackInfo
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -127,6 +128,11 @@ class ClipSession(
     private var watchJob: Job? = null
     /** Bumped on every start and end; a lookup that comes back under an older one is dropped. */
     private var generation = 0L
+    /**
+     * (Sports Hub code review 2026-11-25, H1) The player state when the session began, until a different one is seen:
+     * a `Stopped(BACKGROUND)` that was already there is not "Home during the lookup".
+     */
+    private var stateAtStart: PlaybackState? = null
 
     /** Plays [queue]`[`[index]`]`, then the later entries (goals auto-advance; a recap or condensed game is a queue of one). */
     fun play(queue: List<ClipRef>, index: Int) {
@@ -235,6 +241,12 @@ class ClipSession(
             when (result) {
                 is ClipResult.Ok -> {
                     val (info, stream) = result.value
+                    // (H1) A lifecycle stop the collector has not delivered yet still means the viewer left.
+                    val now = controller.state.value
+                    if (!playedAny && now != stateAtStart && now is PlaybackState.Stopped && now.reason in LIFECYCLE_REASONS) {
+                        lose("stopped (${now.reason}) during the lookup")
+                        return@launch
+                    }
                     // R-N3: what the first clip interrupts is read now, not before the lookup.
                     if (!playedAny) resume = snapshot()
                     val id = controller.playClip(ClipTune(stream.url, stream.format, stream.captionsUrl, info.title, startMs))
@@ -280,6 +292,7 @@ class ClipSession(
 
     private fun watch() {
         watchJob?.cancel()
+        stateAtStart = controller.state.value
         watchJob = scope.launch {
             launch { controller.state.collect { onPlayback(it) } }
             controller.tracks.collect { t ->
@@ -290,7 +303,14 @@ class ClipSession(
     }
 
     private fun onPlayback(st: PlaybackState) {
-        if (resume == null || !playedAny) return
+        if (resume == null) return
+        if (!playedAny) {
+            // (H1) Home, standby or HDMI while the first lookup runs: the viewer left, so nothing may start afterwards.
+            if (st == stateAtStart) return
+            stateAtStart = null
+            if (st is PlaybackState.Stopped && st.reason in LIFECYCLE_REASONS) lose("stopped (${st.reason}) during the lookup")
+            return
+        }
         val t = st.target
         // Ownership (A-B2): any other tune past ours, a stop of the clip (Home, standby, HDMI) or nothing tuned at all.
         if (t != null && !t.isClip && t.tuneId > ownedTuneId) return lose("tune ${t.tuneId} took the player")
@@ -380,6 +400,7 @@ class ClipSession(
         expiredRetriedIndex = -1
         endedHandledTuneId = -1L
         lastPositionMs = 0L
+        stateAtStart = null
     }
 
     /** §6.6: what the clip interrupts. */
@@ -409,6 +430,7 @@ class ClipSession(
         const val SEEK_END_GUARD_MS = 1_000L
         /** The "Up next" title is the cached `info()`; it never holds the next clip up for long. */
         const val UP_NEXT_LOOKUP_MS = 1_000L
+        val LIFECYCLE_REASONS = setOf(StopReason.BACKGROUND, StopReason.STANDBY, StopReason.HDMI_UNPLUGGED, StopReason.DISPLAY_OFF)
         val ACTIVE_ARCHIVE = setOf(
             ArchivePhase.STARTING, ArchivePhase.PROBING, ArchivePhase.PLAYING, ArchivePhase.PAUSED,
             ArchivePhase.SEEKING, ArchivePhase.CONTINUING,

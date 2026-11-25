@@ -21,6 +21,7 @@ import app.thebox.core.sports.hub.GameDetail
 import app.thebox.core.sports.hub.GameDetailRepository
 import app.thebox.data.di.ApplicationScope
 import app.thebox.data.di.WallClock
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
@@ -112,18 +113,52 @@ class GameDetailRepositoryImpl internal constructor(
     /** The gate as the loop last saw it, for [boxScore] (called from the view model, off the loop). */
     @Volatile private var gateSnapshot = DetailGate(sportsOn = false, awake = false, foreground = false, online = false, paused = false)
 
+    /**
+     * (Sports Hub code review 2026-11-25, L6) One box-score call per game at a time: a second caller for the same game
+     * (the sheet opened twice quickly) waits for the first one's answer instead of sending its own request. Each call
+     * still runs in its caller's coroutine, so the caller's scope (the sheet, a game switch) cancels it; a waiter whose
+     * owner was cancelled makes the call itself.
+     */
+    private class BoxFlight(val id: GameId, val answer: CompletableDeferred<Fetch<BoxScore>?>)
+    private val boxLock = Any()
+    private var boxInFlight: BoxFlight? = null
+
     override suspend fun boxScore(id: GameId): Fetch<BoxScore> {
         val g = gateSnapshot
         if (!g.online) return Fetch.Failed(FailKind.OFFLINE, null, mono.nowMs())
         if (!g.open || id.league != League.NHL) return Fetch.Failed(FailKind.HTTP_OTHER, null, mono.nowMs())
-        return try {
-            fetcher.boxScore(id)
-        } catch (e: CancellationException) {
-            throw e
-        } catch (e: RuntimeException) {
-            BoxLog.w(TAG, "box score failed: ${e.javaClass.simpleName}")
-            Fetch.Failed(FailKind.BAD_BODY, null, mono.nowMs())
+        while (true) {
+            var mine = false
+            val flight = synchronized(boxLock) {
+                boxInFlight?.takeIf { it.id == id } ?: BoxFlight(id, CompletableDeferred()).also {
+                    boxInFlight = it
+                    mine = true
+                }
+            }
+            if (!mine) {
+                flight.answer.await()?.let { return it }
+                continue // the owner was cancelled: try again (as the owner, or behind a newer one)
+            }
+            try {
+                val r = fetchBox(id)
+                flight.answer.complete(r)
+                return r
+            } catch (e: CancellationException) {
+                flight.answer.complete(null)
+                throw e
+            } finally {
+                synchronized(boxLock) { if (boxInFlight === flight) boxInFlight = null }
+            }
         }
+    }
+
+    private suspend fun fetchBox(id: GameId): Fetch<BoxScore> = try {
+        fetcher.boxScore(id)
+    } catch (e: CancellationException) {
+        throw e
+    } catch (e: RuntimeException) {
+        BoxLog.w(TAG, "box score failed: ${e.javaClass.simpleName}")
+        Fetch.Failed(FailKind.BAD_BODY, null, mono.nowMs())
     }
 
     private fun post(i: Input) {
@@ -141,7 +176,18 @@ class GameDetailRepositoryImpl internal constructor(
     private val endedAt = object : LinkedHashMap<String, Long>(16, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Long>?): Boolean = size > SportsConstants.HUB_DETAIL_LRU
     }
-    private val seenUnfinished = HashSet<String>()
+    /**
+     * Game ids seen unfinished in this process (the recap wait's trigger). (Sports Hub code review 2026-11-25, L7) An
+     * access-ordered LRU of the same size as [endedAt], so it is bounded without a [trim].
+     */
+    private val seenUnfinished: MutableSet<String> = java.util.Collections.newSetFromMap(
+        object : LinkedHashMap<String, Boolean>(16, 0.75f, true) {
+            override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Boolean>?): Boolean = size > SportsConstants.HUB_DETAIL_LRU
+        },
+    )
+
+    /** For tests (L7): the size of [seenUnfinished]. Read on the loop's thread only. */
+    internal val seenUnfinishedCount: Int get() = seenUnfinished.size
 
     private var shown: GameSnapshot? = null
     private var dwellUntil: Long? = null
@@ -269,7 +315,7 @@ class GameDetailRepositoryImpl internal constructor(
         inFlight = null
         when (val f = a.fetch) {
             is Fetch.Ok -> {
-                cache[id.id] = Entry(f, a.landingFailed)
+                cache[id.id] = Entry(if (a.landingFailed) keepLanding(f, cache[id.id]) else f, a.landingFailed)
                 failures = 0
                 lastFailMono = null
                 retryAfterS = null
@@ -280,6 +326,31 @@ class GameDetailRepositoryImpl internal constructor(
             Fetch.NotFound -> failed(FailKind.HTTP_OTHER, mono.nowMs(), null)
             is Fetch.Failed -> failed(f.kind, f.receivedMono, f.retryAfterS)
         }
+    }
+
+    /**
+     * (Sports Hub code review 2026-11-25, L4) A refetch whose landing call failed keeps the landing facts of the cached
+     * answer (goals, stars, leaders, goalies, venue, broadcasts, records) instead of emptying them until the next poll;
+     * the entry is still `landingFailed`, so the panel shows `failing`. The landing scores are not carried: they would
+     * pass for the newer answer's under the newest-`Date` score rule (§4.3), so the board's scores are used meanwhile.
+     */
+    private fun keepLanding(f: Fetch.Ok<GameDetail>, old: Entry?): Fetch.Ok<GameDetail> {
+        val prev = old?.ok?.value ?: return f
+        val now = f.value
+        val season = now.season?.let { s ->
+            s.copy(awayRecord = s.awayRecord ?: prev.season?.awayRecord, homeRecord = s.homeRecord ?: prev.season?.homeRecord)
+        } ?: prev.season
+        return f.copy(
+            value = now.copy(
+                venue = now.venue ?: prev.venue,
+                season = season,
+                goals = now.goals.ifEmpty { prev.goals },
+                stars = now.stars.ifEmpty { prev.stars },
+                leaders = now.leaders.ifEmpty { prev.leaders },
+                goalies = now.goalies ?: prev.goalies,
+                broadcasts = now.broadcasts.ifEmpty { prev.broadcasts },
+            ),
+        )
     }
 
     private fun failed(kind: FailKind, atMono: Long, retryAfter: Int?) {

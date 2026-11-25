@@ -138,16 +138,34 @@ class GameChannelMatcherImpl @Inject constructor(
         val t0 = System.nanoTime()
         var ftsQueries = 0
         val aliasById = HashMap<Long, AliasHit>()
+        fun take(h: GuideQueries.NameHit, b: TvBroadcast): Boolean {
+            val m = BroadcastAliases.match(h.name, b)
+                ?: (if (h.displayName != h.name) BroadcastAliases.match(h.displayName, b) else null)
+                ?: return false
+            val old = aliasById[h.id]
+            if (old == null || better(m, old.match)) aliasById[h.id] = AliasHit(m, b)
+            return true
+        }
+        // (Sports Hub code review 2026-11-25, L3) Renamed channels: channel_fts keeps the provider name only.
+        var renamed: List<GuideQueries.NameHit>? = null
         for (b in game.broadcasts.distinct()) {
             val match = BroadcastAliases.ftsMatch(b.network) ?: continue
-            ftsQueries++
-            for (h in queries.channelsByNameFts(match, access, ALIAS_FTS_LIMIT)) {
-                val m = BroadcastAliases.match(h.name, b)
-                    ?: (if (h.displayName != h.name) BroadcastAliases.match(h.displayName, b) else null)
-                    ?: continue
-                val old = aliasById[h.id]
-                if (old == null || better(m, old.match)) aliasById[h.id] = AliasHit(m, b)
+            // (M3) Page through the token's channels (keyset on rowid) until the FTS answer runs out, enough residue
+            // matches are in hand for C, or ALIAS_FTS_MAX_ROWS were read.
+            var after = 0L
+            var read = 0
+            var matched = 0
+            while (read < ALIAS_FTS_MAX_ROWS && matched < WINDOW_MAX_CHANNELS) {
+                val page = queries.channelsByNameFts(match, access, minOf(ALIAS_FTS_LIMIT, ALIAS_FTS_MAX_ROWS - read), after)
+                ftsQueries++
+                for (h in page) if (take(h, b)) matched++
+                read += page.size
+                coroutineContext.ensureActive()
+                if (page.size < ALIAS_FTS_LIMIT) break
+                after = page.last().id
             }
+            val r = renamed ?: queries.channelsWithCustomName(access, RENAMED_MAX).also { renamed = it }
+            for (h in r) take(h, b)
             coroutineContext.ensureActive()
         }
         val accs = LinkedHashMap<Long, Acc>()
@@ -360,6 +378,13 @@ class GameChannelMatcherImpl @Inject constructor(
         private const val MINUTE_MS = 60_000L
         /** §5.2 A (A-B3): per code, before the residue rule. */
         const val ALIAS_FTS_LIMIT = 200
+        /**
+         * (Sports Hub code review 2026-11-25, M3) The alias pages stop after this many rows per code: 5 pages, so a token
+         * that hundreds of channels share still reaches the national channel without an unbounded read on a Fire TV.
+         */
+        const val ALIAS_FTS_MAX_ROWS = 1_000
+        /** (L3) The renamed channels read once per match. */
+        const val RENAMED_MAX = 200
         /** §5.2 B: EPG FTS airings per query. */
         const val GUIDE_LIMIT = 80
         /** Search's look-back cap (`GuideSearchImpl.PAST_DAYS`). */

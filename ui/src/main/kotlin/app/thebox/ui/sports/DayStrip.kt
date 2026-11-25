@@ -131,8 +131,9 @@ internal fun DayStrip(
         ) {
             chips.forEach { chip ->
                 val date = if (nfl) null else chip.key?.let { k -> runCatching { LocalDate.parse(k) }.getOrNull() }
+                // (Review L6) A key that does not parse (never expected) still reads as a day ("Mon · Nov 23"), never an ISO date.
                 val label = if (nfl) SportsText.hubWeekChip(res, chip.offset, chip.key)
-                else date?.let { SportsText.hubDayLabel(res, chip.offset, it) } ?: today.toString()
+                else SportsText.hubDayLabel(res, chip.offset, date ?: today.plusDays(chip.offset.toLong()))
                 val desc = if (chip.noGames && date != null) res.getString(R.string.sports_hub_day_no_games_desc, SportsText.spokenDate(date)) else label
                 val idx = indexOf.getValue(chip.offset)
                 DayChipView(
@@ -174,6 +175,7 @@ private fun DayChipView(
 ) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(30.dp)
+    val focusable = LocalHubFocusable.current
     val ink = when {
         selected -> Ink
         !enabled -> GuideUi.Fg.copy(alpha = 0.35f)
@@ -186,7 +188,7 @@ private fun DayChipView(
             .height(60.dp)
             .onGloballyPositioned { onPlaced(it.positionInParent().x.toInt(), it.size.width) }
             .focusRequester(requester)
-            .focusProperties { canFocus = enabled; this.up = up }
+            .focusProperties { canFocus = enabled && focusable; this.up = up }
             .onFocusChanged { focused = it.isFocused; onFocus(it.isFocused) }
             .onPreviewKeyEvent { e ->
                 when {

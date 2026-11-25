@@ -70,6 +70,15 @@
     <string name="sports_hub_caption_clip">%1$s (%2$s)</string>
     <string name="sports_hub_caption_recap_soon">Recap not posted yet</string>
     <string name="sports_hub_caption_goals_soon">Goal videos appear a few minutes after each goal</string>
+    <!-- (Review M4) The media area's caption while the video service has refused the app (no poster, no play disc). -->
+    <string name="sports_hub_caption_videos_off">NHL videos aren\'t available right now</string>
+    <!-- (Review L2) The headline's fixed words: "Vegas Golden Knights (3) vs. Edmonton Oilers (2)". -->
+    <string name="sports_hub_headline_vs">vs.</string>
+    <!-- %1$d = a team's score in the headline. -->
+    <string name="sports_hub_headline_score">(%1$d)</string>
+    <!-- (Review L2) NFL down rows. %1$s = the down ("3rd"); %2$s = the yards to go. -->
+    <string name="sports_hub_nfl_down_goal">%1$s &amp; Goal</string>
+    <string name="sports_hub_nfl_down_distance">%1$s &amp; %2$s</string>
     <string name="sports_hub_disc_postponed">Postponed</string>
 
     <!-- ==== Stats block (§1.3, §7.1) -->
@@ -276,6 +285,8 @@
     <string name="sports_hub_error_detail_retry">Couldn\'t load game stats from NHL.com. Trying again automatically. Select Retry to try now.</string>
     <!-- (Integration) A final game whose recap is known keeps Watch recap in slot 1, so no Retry button is named. -->
     <string name="sports_hub_error_detail_auto">Couldn\'t load game stats from NHL.com. Trying again automatically. Select Watch recap to see the game.</string>
+    <!-- (Review H3) The slots were frozen before the failure (slot 1 still Follow, or Watch recap off): Back, then OK, lands on Retry. -->
+    <string name="sports_hub_error_detail_back">Couldn\'t load game stats from NHL.com. Trying again automatically. To try now, press Back, then OK, then select Retry.</string>
     <string name="sports_hub_error_detail_limited">NHL.com is limiting requests right now. Stats load again in a few minutes.</string>
     <string name="sports_hub_error_detail_changed">NHL.com changed how it sends game stats. Scores still update; stats need an app update.</string>
     <string name="sports_hub_error_detail_offline">No internet connection. Stats load again when the network is back.</string>
@@ -296,6 +307,10 @@
     <!-- Card before the game. %1$s away, %2$s home. -->
     <string name="sports_hub_desc_card_matchup">%1$s at %2$s.</string>
     <string name="sports_hub_desc_following">Following.</string>
+    <!-- (Review L2) The panel's headline. %1$s away name, %2$d away score, %3$s home name, %4$d home score. -->
+    <string name="sports_hub_desc_headline_score">%1$s (%2$d) vs. %3$s (%4$d)</string>
+    <!-- Before the game. %1$s away, %2$s home. -->
+    <string name="sports_hub_desc_headline">%1$s vs. %2$s</string>
     <!-- %1$s = the enabled slot labels, comma-joined. -->
     <string name="sports_hub_desc_press_ok">Press OK for options: %1$s.</string>
     <!-- Panel pane title. %1$s / %2$s = away / home nicknames. -->

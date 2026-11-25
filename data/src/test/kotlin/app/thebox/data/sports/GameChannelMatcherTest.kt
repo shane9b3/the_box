@@ -299,4 +299,32 @@ class GameChannelMatcherTest {
         val g = game("2026020403", team("NSH", "Predators"), team("COL", "Avalanche"), broadcasts = listOf(TvBroadcast("SN+", Market.NATIONAL, "CA"), TvBroadcast("Prime Video", Market.NATIONAL, "US")))
         assertEquals(emptyList<ChannelCandidate>(), run(g))
     }
+
+    private fun allIds(list: List<ChannelCandidate>) = list.flatMap { c -> listOf(c.channel.rowId) + c.variants.map { it.rowId } }.toSet()
+
+    /**
+     * (Sports Hub code review 2026-11-25, M3) More than 200 channels share the "espn" token ahead of the national one (lower
+     * docids, the FTS answer's first rows). The alias pages read past them, so "US: ESPN" is still found.
+     */
+    @Test fun theNationalChannelIsFoundBehindMoreThan200NearMisses() = runBlocking {
+        val brands = listOf("BRASIL", "DEPORTES", "CARIBBEAN", "NEWS", "EXTRA", "AFRICA")
+        for (i in 0 until 260) db.newChannel(p1, "near$i", "LAT: ESPN ${brands[i % brands.size]} ${i / brands.size + 1}", sortIndex = 1_000 + i)
+        val espn = db.newChannel(p1, "espn", "US: ESPN", sortIndex = 2_000)
+        val g = game("2026020410", team("BOS", "Bruins"), team("TOR", "Maple Leafs"), broadcasts = listOf(TvBroadcast("ESPN", Market.NATIONAL, "US")))
+        val out = matcher.match(g, nowMs, ParentalAccess.LOCKED_AUTO)
+        assertTrue("US: ESPN behind 260 near misses", espn in allIds(out))
+        assertTrue("no near miss is a candidate", out.none { it.channel.displayName.contains("ESPN ") })
+    }
+
+    /**
+     * (L3) A channel the user renamed is found by its new name, though channel_fts keeps the provider name ("CA: CH 42"
+     * shares no token with any Sportsnet alias).
+     */
+    @Test fun aRenamedChannelIsFoundByItsCustomName() = runBlocking {
+        val renamed = db.newChannel(p1, "ch42", "CA: CH 42", sortIndex = 3_000)
+        db.exec("INSERT INTO channel_prefs(playlist_id, stable_key, custom_name, updated_at) VALUES (?, 'ch42', 'Sportsnet Ontario', 2)", p1)
+        val g = game("2026020411", team("MTL", "Canadiens"), team("TOR", "Maple Leafs"), broadcasts = listOf(TvBroadcast("SN", Market.NATIONAL, "CA")))
+        val out = matcher.match(g, nowMs, ParentalAccess.LOCKED_AUTO)
+        assertTrue("the renamed channel is a candidate or a variant", renamed in allIds(out))
+    }
 }

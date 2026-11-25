@@ -144,11 +144,12 @@ fun SportsScreen(
     // next goal of the queue) would move focus from the clip layer into the hidden sheet. [clipEpoch] counts ended clips.
     var sheetFocusVideoId by remember { mutableStateOf<Long?>(null) }
     var clipEpoch by remember { mutableIntStateOf(0) }
-    LaunchedEffect(clipActive, lastPlayed) { if (!clipActive) sheetFocusVideoId = lastPlayed?.videoId }
-    var wasClipActive by remember { mutableStateOf(false) }
-    LaunchedEffect(clipActive) {
-        if (wasClipActive && !clipActive) clipEpoch++
-        wasClipActive = clipActive
+    // (Review L5) The row the user pressed, and what had played last at that moment: a lookup that fails plays nothing, so
+    // focus returns to the pressed row rather than to the clip before it.
+    var pressedVideoId by remember { mutableStateOf<Long?>(null) }
+    var lastAtPress by remember { mutableStateOf<app.thebox.core.sports.hub.ClipRef?>(null) }
+    LaunchedEffect(clipActive, lastPlayed) {
+        if (!clipActive) sheetFocusVideoId = if (pressedVideoId != null && lastPlayed == lastAtPress) pressedVideoId else lastPlayed?.videoId
     }
     // Back is free only when neither a sheet, the panel nor the clip layer holds it (the layer reports its own hold).
     val holdsNothing = androidx.compose.runtime.rememberUpdatedState(sheet == null && !panelFocused)
@@ -181,7 +182,13 @@ fun SportsScreen(
     var focusedSlot by remember { mutableIntStateOf(-1) }
     var sheetSlot by remember { mutableIntStateOf(0) }
     var lastSlot by remember { mutableIntStateOf(0) }
+    // (Review M2) The panel's buttons take focus from the moment the page decides to enter (set before the request), not
+    // when the view model's flag has come back through recomposition.
+    var panelEntered by remember { mutableStateOf(false) }
+    // (The view model's live value: a quick Back then OK must not drop the new entry.)
+    LaunchedEffect(panelFocused) { if (!panelFocused && !viewModel.panelFocused.value) panelEntered = false }
     val selectedChip = dayChips.getValue(if (nfl) ui.offset.coerceIn(-1, 1) else ui.offset)
+    val selectedChipNow by androidx.compose.runtime.rememberUpdatedState(selectedChip)
 
     LaunchedEffect(Unit) { runCatching { dayChips.getValue(0).requestFocus() } }
     // The router holds BACK while focus is in the panel or a sheet is open (the clip layer holds it for its own life).
@@ -199,6 +206,9 @@ fun SportsScreen(
 
     val body = ui.body
     val cards = (body as? SportsBody.Games)?.cards.orEmpty()
+    val cardsNow by androidx.compose.runtime.rememberUpdatedState(cards)
+    /** Each game id's last index on this page (kept for ids that left), for "focus moves to its neighbour by index" (§1.2). */
+    val cardIndex = remember { HashMap<String, Int>() }
     // The panel's initial game starts its dwell once a board shows (§1.3).
     LaunchedEffect(cards.firstOrNull()?.game?.id, league, ui.offset) { if (cards.isNotEmpty()) viewModel.onBoardShown() }
     // Initial focus (§2.1): once, when the first board arrives. A load that shows nothing leaves the Today chip focused.
@@ -214,34 +224,75 @@ fun SportsScreen(
         }
     }
 
+    /**
+     * Focus to the card of [id] once the list has settled; (review M6) a card that left the board hands focus to the card now
+     * at its old index (§1.2), and an empty board to the selected day chip, so focus is never lost.
+     */
     fun focusCard(id: String?) {
         scope.launch {
             androidx.compose.runtime.withFrameNanos { }
-            val target = cardRequesters[id] ?: cards.firstOrNull()?.let { cardRequesters[it.game.id.id] }
-            runCatching { target?.requestFocus() }
-        }
-    }
-    fun focusSlot(i: Int) {
-        scope.launch {
-            // Two frames: the buttons become focusable once `panelFocused` has recomposed the panel (HubPanel.entered).
-            androidx.compose.runtime.withFrameNanos { }
-            androidx.compose.runtime.withFrameNanos { }
-            runCatching { slotRequesters[i].requestFocus() }
+            val list = cardsNow
+            if (list.isEmpty()) { runCatching { selectedChipNow.requestFocus() }; return@launch }
+            val target = id?.takeIf { i -> list.any { it.game.id.id == i } }
+                ?: list[((id?.let { cardIndex[it] }) ?: 0).coerceIn(0, list.lastIndex)].game.id.id
+            val index = list.indexOfFirst { it.game.id.id == target }
+            if (gridState.layoutInfo.visibleItemsInfo.none { it.index == index }) {
+                gridState.scrollToItem(index)
+                androidx.compose.runtime.withFrameNanos { }
+            }
+            runCatching { cardRequesters[target]?.requestFocus() }
         }
     }
     fun exitPanel() {
+        panelEntered = false
         viewModel.onPanelExited()
         focusCard(returnCardId ?: lastCardId)
+    }
+    fun focusSlot(i: Int) {
+        scope.launch {
+            // (Review M2) The buttons are focusable once the page has recomposed with `panelEntered` (and, after a sheet or
+            // a clip, with the page focusable again): try for up to three frames, then give up and return to the card, so
+            // the page is never half in the panel (footer, Back hold and selected card without focus there).
+            repeat(3) {
+                androidx.compose.runtime.withFrameNanos { }
+                if (runCatching { slotRequesters[i].requestFocus() }.getOrDefault(false)) return@launch
+            }
+            exitPanel()
+        }
     }
     fun enter(id: String) {
         returnCardId = id
         val first = viewModel.enterPanel(id) ?: return
+        panelEntered = true
         lastSlot = first
         focusSlot(first)
     }
-    // After a clip: back to the slot that started it (the Goals sheet restores its own focus).
+    // After a clip: back to the slot that started it (the Goals sheet restores its own focus when it is re-keyed), or to the
+    // card when the panel was left under the clip (its game left the board).
+    var wasClipActive by remember { mutableStateOf(false) }
     LaunchedEffect(clipActive) {
-        if (!clipActive && panelFocused && sheet == null) focusSlot(lastSlot)
+        if (wasClipActive && !clipActive) {
+            clipEpoch++
+            if (sheet == null) { if (panelFocused) focusSlot(lastSlot) else focusCard(returnCardId ?: lastCardId) }
+        }
+        wasClipActive = clipActive
+    }
+    // (Review M1) The view model closed the sheet or left the panel by itself (the game left the board, the day rolled
+    // over): focus goes to the card (or its neighbour), never nowhere with Back held.
+    val held = sheet != null || panelFocused
+    var wasHeld by remember { mutableStateOf(false) }
+    LaunchedEffect(held) {
+        if (wasHeld && !held && !clipActive && viewModel.sheet.value == null && !viewModel.panelFocused.value) focusCard(returnCardId ?: lastCardId)
+        wasHeld = held
+    }
+    // (Review M6) The focused card left the board on a re-poll: its neighbour by index takes focus.
+    val cardIds = cards.map { it.game.id.id }
+    // Read in the composition that changes the list, before the card's item leaves (Compose may then move focus anywhere).
+    val focusedBefore = remember(cardIds) { focusedCardId }
+    LaunchedEffect(cardIds) {
+        val gone = focusedBefore?.takeIf { it !in cardIds && cardIndex.containsKey(it) }
+        if (gone != null && !viewModel.panelFocused.value && viewModel.sheet.value == null && !clipActive) focusCard(gone)
+        cardIds.forEachIndexed { i, id -> cardIndex[id] = i }
     }
     // A slot that stops being enabled while focused hands focus to the next enabled one, else to the card (§2.3).
     LaunchedEffect(panel.slots, panelFocused, focusedSlot) {
@@ -272,6 +323,8 @@ fun SportsScreen(
                 .drawWithContent { if (!clipActive) drawContent() }
                 .drawBehind { if (!clipActive) drawPageBackground() },
         ) {
+            // (Review H1, H2) Nothing on the page takes focus behind an open sheet or under a clip.
+            androidx.compose.runtime.CompositionLocalProvider(LocalHubFocusable provides (sheet == null && !clipActive)) {
             Column(Modifier.fillMaxSize().padding(start = 96.dp, end = 96.dp, top = 56.dp, bottom = 56.dp)) {
                 TitleRow(ui, groupChips, subChips, selectedChip, chips = !off, clock24 = clock24, wallClockMs = wallClockMs, onZone = { zone = Zone.CHIPS },
                     onGroup = { g ->
@@ -294,7 +347,7 @@ fun SportsScreen(
                             },
                             onSlotFocus = { focusedSlot = it ?: -1 },
                             onExit = ::exitPanel,
-                            entered = panelFocused,
+                            entered = panelEntered,
                         )
                         Spacer(Modifier.width(40.dp))
                         Column(Modifier.width(968.dp)) {
@@ -323,7 +376,10 @@ fun SportsScreen(
                                         b.cards, gridState, clock24, cardRequesters, dayChips.getValue(selectedOffsetOf(ui, nfl)),
                                         panel = panel, panelFocused = panelFocused, showHighlights = showHighlights, focusedId = focusedCardId,
                                         onFocus = { id, on, index ->
-                                            if (on) {
+                                            // A card focused in passing while the page turns unfocusable (a sheet opening, a
+                                            // clip starting) is not the user's move.
+                                            if (on && (viewModel.sheet.value != null || viewModel.panelFocused.value || clipActive)) Unit
+                                            else if (on) {
                                                 focusedCardId = id
                                                 lastCardId = id
                                                 zone = Zone.CARDS
@@ -350,20 +406,28 @@ fun SportsScreen(
                 Spacer(Modifier.height(16.dp))
                 Footer(ui, hints = footerOf(res, zone, panelFocused, sheet, focusedCard, panel, focusedSlot), updatedMono = ui.updatedMono)
             }
+            }
             // A sheet takes the right column (§6.4). The sheet draws its own frame at x 856, y 148 (HubSheetFrame), so the
             // host is the full page; the grid behind is not focusable while it is open. Re-keyed after each clip, so focus
             // lands again on the clip just played even when it was the same clip as before (U-S14).
             sheet?.let { sh ->
                 androidx.compose.runtime.key(clipEpoch) {
+                    // (Review H2) Under a clip the (hidden) sheet takes no focus either, whatever its rows do.
+                    androidx.compose.runtime.CompositionLocalProvider(LocalHubFocusable provides !clipActive) {
                     Box(Modifier.fillMaxSize().testTag(SPORTS_SHEET_TAG)) {
                         SheetHost(
                             sh, viewModel, panel, clipInfo, sheetFocusVideoId, clock24,
+                            onPressed = { ref ->
+                                pressedVideoId = ref.videoId
+                                lastAtPress = lastPlayed
+                            },
                             onClose = {
                                 viewModel.closeSheet()
                                 val i = sheetSlot
                                 if (panelFocused && panel.slots.getOrNull(i)?.usable == true) focusSlot(i) else exitPanel()
                             },
                         )
+                    }
                     }
                 }
             }
@@ -551,11 +615,12 @@ private fun FocusChip(
     onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val focusable = LocalHubFocusable.current
     Box(
         Modifier
             .testTag(tag)
             .focusRequester(requester)
-            .focusProperties { if (down != null) this.down = down }
+            .focusProperties { canFocus = focusable; if (down != null) this.down = down }
             .onPreviewKeyEvent { e -> e.key == Key.DirectionUp || (last && e.key == Key.DirectionRight) }
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
@@ -637,6 +702,8 @@ private fun GamesGrid(
     onEnter: (String) -> Unit,
 ) {
     val res = LocalResources.current
+    // (Review L9) One measurer for the whole grid (was two per card).
+    val measure = rememberHubMeasure()
     LazyVerticalGrid(
         columns = GridCells.Fixed(2),
         state = state,
@@ -662,6 +729,7 @@ private fun GamesGrid(
                 onEnter = { onEnter(id) },
                 onFocusChange = { onFocus(id, it, index) },
                 focusRequester = requester,
+                measure = measure,
                 // Up from the first row goes to the selected day chip, whichever column it is in (§2.2).
                 modifier = Modifier.focusProperties { if (index < 2) up = dayChip },
             )
@@ -711,9 +779,11 @@ private fun Message(text: String, retry: Boolean, onRetry: () -> Unit) {
         Text(text, style = GuideUi.sans(28, FontWeight.Medium, GuideUi.Fg70), modifier = Modifier.width(900.dp).testTag(SPORTS_MESSAGE_TAG))
         if (retry) {
             var focused by remember { mutableStateOf(false) }
+            val focusable = LocalHubFocusable.current
             Box(
                 Modifier
                     .testTag(SPORTS_RETRY_TAG)
+                    .focusProperties { canFocus = focusable }
                     .onFocusChanged { focused = it.isFocused }
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onRetry),
             ) {
@@ -736,14 +806,18 @@ private fun SheetHost(
     clipInfo: Map<Long, app.thebox.core.sports.hub.ClipInfo>,
     focusVideoId: Long?,
     clock24: Boolean,
+    onPressed: (app.thebox.core.sports.hub.ClipRef) -> Unit,
     onClose: () -> Unit,
 ) {
     val game = panel.game?.takeIf { it.id == sheet.gameId } ?: return
-    val d = panel.detail
+    // (Review M1) The sheet keeps the last detail of its game while the panel's detail is briefly absent (the detail loop
+    // restarting): an open sheet never stops drawing with focus inside it.
+    val kept = remember { arrayOfNulls<app.thebox.core.sports.hub.GameDetail>(1) }
+    val d = (panel.detail?.also { kept[0] = it } ?: kept[0])?.takeIf { it.id == sheet.gameId }
     when (sheet) {
         is HubSheet.Goals -> if (d != null) GoalsSheet(
             game = game, detail = d, clipInfo = clipInfo, catchUp = panel.candidates.filter { it.airing != null }, focusVideoId = focusVideoId,
-            onPlay = vm::playClips, onPlayArchive = vm::playArchive, onMissingClip = vm::missingClip, onClose = onClose, modifier = Modifier.fillMaxSize(),
+            onPlay = { q, i -> q.getOrNull(i)?.let(onPressed); vm.playClips(q, i) }, onPlayArchive = vm::playArchive, onMissingClip = vm::missingClip, onClose = onClose, modifier = Modifier.fillMaxSize(),
         )
         is HubSheet.Channels -> ChannelSheet(
             game = game, candidates = if (sheet.archiveOnly) panel.candidates.filter { it.airing != null } else panel.candidates,

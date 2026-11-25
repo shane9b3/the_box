@@ -184,6 +184,7 @@ class SportsViewModel internal constructor(
         archive: ArchivePlayback,
         parental: ParentalSession,
         settings: GuideSettingsSource,
+        guideTrim: app.thebox.ui.guide.grid.GuideTrim,
     ) : this(
         scores.orElse(null), store, android.os.SystemClock::elapsedRealtime, System::currentTimeMillis,
         detail.orElse(null), matcher.orElse(null), resolver.orElse(null),
@@ -193,7 +194,13 @@ class SportsViewModel internal constructor(
             if (requested == ParentalAccess.OPEN) requested else ParentalRules.accessFor(parental.state.value, null)
         },
         { LocalDate.now(EASTERN) },
-    )
+    ) {
+        // (Review L1) `MainActivity.onTrimMemory` reaches the guide's trim singleton only; the page's caches register there.
+        trimHandle = guideTrim.register { _, _ -> onTrimMemory() }
+    }
+
+    /** The registration with `GuideTrim` (the injected constructor only); closed in [onCleared]. */
+    private var trimHandle: AutoCloseable? = null
 
     /** The clip session (null without a player); `SportsScreen` composes `ClipPlayerLayer` over it. */
     val clipSession: ClipSession? = clipSessionFactory(viewModelScope)
@@ -280,6 +287,8 @@ class SportsViewModel internal constructor(
     private val infoRequested = HashSet<Long>()
     private var videoOffJob: Job? = null
     private var entered = false
+    /** The game whose panel focus is in (§2.3); null while focus is outside the panel. */
+    private var enteredId: GameId? = null
 
     init {
         viewModelScope.launch {
@@ -338,6 +347,7 @@ class SportsViewModel internal constructor(
         orderIds = emptyList()
         boardId = null
         shownId.value = null
+        enteredId = null
         panelFocus.value = false
         frozen.value = null
         matches.value = emptyMap()
@@ -358,6 +368,7 @@ class SportsViewModel internal constructor(
         matchJob?.cancel()
         detail?.show(null)
         fetchedId = null
+        enteredId = null
         panelFocus.value = false
         frozen.value = null
         _sheet.value = null
@@ -365,6 +376,8 @@ class SportsViewModel internal constructor(
     }
 
     override fun onCleared() {
+        trimHandle?.close()
+        trimHandle = null
         // (R-N1) Ends the clip session without a resume: an effect emitted here would not be delivered.
         clipSession?.close()
         detail?.show(null)
@@ -378,8 +391,10 @@ class SportsViewModel internal constructor(
         detail?.trim()
         clipInfos.value = emptyMap()
         infoRequested.clear()
-        matches.value = emptyMap()
+        // The shown game keeps its match (its Channels slot would otherwise read "Finding…" until focus moves).
+        matches.value = matches.value.filterKeys { it == fetchedId }
         matcher?.clear()
+        ensureClipInfos()
     }
 
     // ------------------------------------------------------------------ league and day chips
@@ -560,6 +575,9 @@ class SportsViewModel internal constructor(
     /** Compose focus moved to a card ([id] null = it left the grid for a chip or the title row: the panel keeps its game). */
     fun onCardFocused(id: String?) {
         if (id == null) return
+        // While the panel or a sheet has focus the panel stays on its game (§2.3): a card can only be focused there in passing
+        // (the page turning unfocusable behind a sheet or a clip), and that never changes the game.
+        if (panelFocus.value || _sheet.value != null) return
         if (shownId.value == id) return
         shownId.value = id
         val game = currentCards().firstOrNull { it.game.id.id == id }?.game ?: return
@@ -587,6 +605,7 @@ class SportsViewModel internal constructor(
         startFetch(game, immediate = true)
         refreshPanel()
         val first = _panel.value.firstEnabled ?: return null
+        enteredId = game.id
         frozen.value = _panel.value.slots.map { it.action }
         panelFocus.value = true
         refreshPanel()
@@ -595,6 +614,7 @@ class SportsViewModel internal constructor(
 
     /** Focus left the panel (Back, Right from the last slot, or a sheet closed back to a card): the slots thaw. */
     fun onPanelExited() {
+        enteredId = null
         panelFocus.value = false
         frozen.value = null
     }
@@ -735,6 +755,40 @@ class SportsViewModel internal constructor(
         d.show(game)
     }
 
+    /**
+     * (Review M3) Nothing is shown (an empty or failed board, a league or day being loaded): the previous game's detail and
+     * match stop, so nothing is polled for a game no longer on screen (§0.1).
+     */
+    private fun stopFetching() {
+        if (fetchedId == null && fetchJob == null && matchJob == null) return
+        fetchJob?.cancel()
+        fetchJob = null
+        matchJob?.cancel()
+        matchJob = null
+        fetchedId = null
+        fetchedPhase = null
+        detail?.show(null)
+    }
+
+    /**
+     * (Review M7) A re-poll changed the shown game's phase (pre-game → live, live → final): the repository gets the newer
+     * snapshot once (no rest), so its poll cadence follows the phase, and the channel match runs again (upcoming and imminent
+     * games match differently). The previous answer stays on screen until the new one arrives.
+     */
+    private fun followPhase(game: GameSnapshot) {
+        if (fetchedId != game.id.id || fetchedPhase == null || fetchedPhase == game.phase) return
+        fetchedPhase = game.phase
+        detail?.show(game)
+        val m = matcher ?: return
+        if (game.phase == GamePhase.POSTPONED) return
+        val id = game.id.id
+        matchJob?.cancel()
+        matchJob = viewModelScope.launch {
+            val found = runCatching { m.match(game, nowUtcMs(), access()) }.getOrElse { if (it is kotlin.coroutines.cancellation.CancellationException) throw it else emptyList() }
+            matches.value = matches.value + (id to MatchState.Done(found))
+        }
+    }
+
     private fun startMatch(game: GameSnapshot) {
         val id = game.id.id
         if (game.phase == GamePhase.POSTPONED) return
@@ -786,7 +840,14 @@ class SportsViewModel internal constructor(
     )
 
     private fun refreshPanel() {
-        _panel.value = buildPanel()
+        val p = buildPanel()
+        _panel.value = p
+        val game = p.game
+        // (Review M1, M6) The panel's game changed under an open sheet or a focused panel (a re-poll dropped it, the board's day
+        // rolled over, a new board): the sheet closes and focus leaves the panel; the screen moves focus to a card.
+        _sheet.value?.let { if (it.gameId != game?.id) _sheet.value = null }
+        if (panelFocus.value && enteredId != null && enteredId != game?.id) onPanelExited()
+        if (game == null) stopFetching() else followPhase(game)
     }
 
     private fun buildPanel(): HubPanelModel {
@@ -803,7 +864,8 @@ class SportsViewModel internal constructor(
         when (ds) {
             is DetailState.Ready -> if (ds.detail.id == g.id) {
                 d = ds.detail; kind = DetailKind.READY; stale = ds.stale; failing = ds.failing
-                statsAt = now - (nowMono() - ds.fetchedAtMono).coerceAtLeast(0L)
+                // (Review L3) To the minute ("Stats from 8:12 PM"), so two builds a millisecond apart are equal models.
+                statsAt = (now - (nowMono() - ds.fetchedAtMono).coerceAtLeast(0L)) / 60_000L * 60_000L
             }
             is DetailState.Loading -> if (ds.id == g.id) kind = DetailKind.LOADING
             is DetailState.Failed -> if (ds.id == g.id) { kind = DetailKind.FAILED; failure = ds.kind }
@@ -828,6 +890,8 @@ class SportsViewModel internal constructor(
             game = g, followed = card.followed, detail = d, detailKind = kind, failure = failure, stale = stale, failing = failing,
             statsAtMs = statsAt, awayScore = away, homeScore = home, match = match,
             recap = recapId?.let { infos[it] }, latestGoal = latest?.let { infos[it] }, winningGoal = winning?.let { infos[it] }, nowMs = now,
+            videoOff = videoOff.value,
+            imminent = g.phase == GamePhase.LIVE || g.phase == GamePhase.INTERMISSION || g.startUtcMs - now <= SportsConstants.HUB_IMMINENT_MIN * 60_000L,
         )
         val ctx = ctxOf(base)
         val fr = frozen.value

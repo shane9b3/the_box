@@ -517,8 +517,16 @@ internal class PlaybackControllerImpl @Inject constructor(
      * (Sports Hub, docs/design/m6-sports-hub.md §6.1, §6.5, A-B1, A-B2) Plays [tune] as a clip cycle on the one player and
      * returns its tune id. No guard (a clip has no channel), no resume memory: `ClipSession` owns what comes after. Any
      * other tune, catch-up, zap or stop simply replaces the cycle.
+     *
+     * (Sports Hub code review 2026-11-25, H1) A clip never starts while the app is away (Home, standby, a display or
+     * HDMI grace): a lookup that answers after the viewer left would otherwise play in the background. Returns -1 and
+     * changes nothing; `ClipSession` ends on it.
      */
     override fun playClip(tune: ClipTune): Long {
+        if (lifecycle.away) {
+            BoxLog.i(TAG) { "clip refused: the app is not in the foreground" }
+            return -1
+        }
         cancelPendingZap()
         startCycle(Spec.Clip(tune))
         return cycle?.firstTuneId ?: -1
@@ -1724,7 +1732,9 @@ internal class PlaybackControllerImpl @Inject constructor(
         val st = _state.value
         if (st is PlaybackState.Error || st is PlaybackState.Stopped || st is PlaybackState.Idle) return
         val signal = c.lastSignal
-        val error = PlaybackError(eventualCode(signal), ErrorDetail(signal = signal?.name ?: "SwitchTimeout"))
+        // (Sports Hub code review 2026-11-25, L1) A clip's card and diagnostics never name a channel or the archive.
+        val code = if (!c.isClip) eventualCode(signal) else signal?.let { FailureClassifier.clipCode(it) } ?: PlaybackErrorCode.STREAM_INTERRUPTED
+        val error = PlaybackError(code, ErrorDetail(signal = signal?.name ?: "SwitchTimeout"))
         BoxLog.i(TAG) { "stream switch timeout: ${error.code.key}" }
         // (Sports Hub §6.5) A clip has no unlimited retries behind a card: its restarts are counted (HUB_CLIP_RESTARTS).
         if (!c.isClip && settings.current.reconnectAttempts < 0 && signal != null && isTransient(signal)) {

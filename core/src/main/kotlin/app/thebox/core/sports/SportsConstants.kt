@@ -893,8 +893,15 @@ object SportsConstants {
     const val HUB_MATCH_MAX = 8
     /** "Watch" and tunable channel rows only for a live game or one starting within this (minutes). */
     const val HUB_IMMINENT_MIN = 30
-    /** The hold after any failed video key read. */
+    /** The hold after a video key read that found no key or was refused (§6.2). */
     const val HUB_VIDEO_KEY_REREAD_MS = 600_000L
+    /**
+     * (Sports Hub code review 2026-11-25, M1) The first wait after a key read that failed for a transient reason (timeout,
+     * IO, 5xx, 429); it doubles on each further transient failure up to [HUB_VIDEO_KEY_BACKOFF_MAX_MS], with `Retry-After`
+     * as a floor. The cap keeps the toast's "Try again in a minute" true.
+     */
+    const val HUB_VIDEO_KEY_BACKOFF_MIN_MS = 30_000L
+    const val HUB_VIDEO_KEY_BACKOFF_MAX_MS = 60_000L
     /** The decoded player-script scan cap. */
     const val HUB_VIDEO_SCRIPT_MAX = 2_097_152L
     /** The video lookup body cap. */

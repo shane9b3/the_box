@@ -26,6 +26,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -82,9 +83,10 @@ fun BoxScoreSheet(
     val focusable = rows.indices.filter { rows[it].focusable }
     val requesters = remember(side, rows.size) { List(rows.size) { FocusRequester() } }
     val listState = rememberLazyListState()
+    val hubFocusable = LocalHubFocusable.current
     LaunchedEffect(Unit) {
         withFrameNanos { }
-        runCatching { tabs.getValue(Side.AWAY).requestFocus() }
+        if (hubFocusable) runCatching { tabs.getValue(Side.AWAY).requestFocus() }
     }
     LaunchedEffect(side) { listState.scrollToItem(0) }
     val firstRow = focusable.firstOrNull()?.let { requesters[it] }
@@ -98,6 +100,13 @@ fun BoxScoreSheet(
         listState = listState,
         requesters = requesters,
         takeInitialFocus = false,
+        // (Review H1) Retry (or a failure replacing the rows) removes the focused row: focus goes to Retry when the sheet
+        // shows one, else to the shown team's tab, so Back keeps working.
+        rowsKey = rows,
+        refocus = {
+            val retry = rows.indexOf(BoxRow.Retry)
+            if (retry >= 0) requesters[retry] to retry else tabs.getValue(side) to null
+        },
         header = {
             Row(Modifier.padding(bottom = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 for (s in Side.entries) {
@@ -257,9 +266,11 @@ private fun BoxTab(
 ) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(DesignTokens.Radii.Pill)
+    val focusable = LocalHubFocusable.current
     var m = Modifier
         .testTag(tag)
         .focusRequester(requester)
+        .focusProperties { canFocus = focusable }
         .onPreviewKeyEvent { e ->
             val down = e.type == KeyEventType.KeyDown
             when (e.key) {

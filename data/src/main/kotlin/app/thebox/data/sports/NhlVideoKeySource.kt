@@ -32,15 +32,20 @@ import kotlin.coroutines.resumeWithException
 /**
  * (Sports Hub, docs/design/m6-sports-hub.md §6.2, A-S4, A-N6; WP-2) The playback key, read at run time from the public
  * player script: memory only, once per process on first need, `Redact.registerSecret` at once, a hold of
- * `HUB_VIDEO_KEY_REREAD_MS` after any failed read, one re-read after a 401 / 403. Never logged, stored or written down.
+ * `HUB_VIDEO_KEY_REREAD_MS` after a read that found no key or was refused, a short backoff after a transient failure,
+ * one re-read after a 401 / 403. Never logged, stored or written down.
  *
  * - The script is fetched over **https only** (the debug build's fake-panel override excepted, [NhlVideoEndpoints.allowed]),
  *   with no `Origin` and no `Referer`, and an https → http redirect is not followed.
  * - The scan ([KeyScan]) reads `body.source()` (OkHttp's transparent gzip, so the cap counts decoded bytes) up to
  *   [SportsConstants.HUB_VIDEO_SCRIPT_MAX] and keeps the first **valid** candidate: an empty default or a placeholder is
  *   skipped and the scan continues.
- * - A failed read (no valid key, the script unreachable, a refused re-read) holds every further read for
- *   [SportsConstants.HUB_VIDEO_KEY_REREAD_MS], so the script is read at most once per 10 min per process after a failure.
+ * - A read that found no valid key, or a refused re-read, holds every further read for
+ *   [SportsConstants.HUB_VIDEO_KEY_REREAD_MS] (10 min), answering [FailKind.REFUSED] meanwhile.
+ * - (Sports Hub code review 2026-11-25, M1) A transient failure (timeout, IO, 5xx, 429, another status) backs off instead:
+ *   [SportsConstants.HUB_VIDEO_KEY_BACKOFF_MIN_MS] doubling to [SportsConstants.HUB_VIDEO_KEY_BACKOFF_MAX_MS], with
+ *   `Retry-After` as a floor (bounded by the 10 min hold), answering the failure's kind meanwhile. A Fire TV that wakes
+ *   before its Wi-Fi does no longer turns video off for 10 minutes.
  * - Log lines: "video key: read" / "video key: not found" / "video key: refused" / "video key: script <kind>"; never a
  *   value, a prefix or a length.
  */
@@ -58,7 +63,7 @@ class NhlVideoKeySource internal constructor(
         class Ok(val value: String) : Answer {
             override fun toString() = "Ok(***)"
         }
-        data class Unavailable(val kind: FailKind) : Answer
+        data class Unavailable(val kind: FailKind, val retryAfterS: Int? = null) : Answer
     }
 
     private val client: OkHttpClient = client.newBuilder()
@@ -73,6 +78,8 @@ class NhlVideoKeySource internal constructor(
     /** Mono ms until which no read is made, and what is answered meanwhile. */
     private var holdUntilMs = Long.MIN_VALUE
     private var holdKind = FailKind.REFUSED
+    /** The next transient backoff (M1); reset by a successful read or a refusal hold. */
+    private var nextBackoffMs = SportsConstants.HUB_VIDEO_KEY_BACKOFF_MIN_MS
 
     /** The endpoints of this build, resolved once (the debug override file is read on IO). */
     suspend fun endpoints(): NhlVideoEndpoints =
@@ -89,11 +96,12 @@ class NhlVideoKeySource internal constructor(
                 is Answer.Ok -> {
                     Redact.registerSecret(r.value)
                     key = r.value
+                    nextBackoffMs = SportsConstants.HUB_VIDEO_KEY_BACKOFF_MIN_MS
                     BoxLog.i(TAG) { "video key: read" }
                     r
                 }
                 is Answer.Unavailable -> {
-                    hold(r.kind)
+                    if (r.kind == FailKind.REFUSED) hold(r.kind) else backOff(r.kind, r.retryAfterS)
                     if (r.kind == FailKind.REFUSED) BoxLog.w(TAG, "video key: not found") else BoxLog.w(TAG, "video key: script ${r.kind.name}")
                     r
                 }
@@ -121,6 +129,16 @@ class NhlVideoKeySource internal constructor(
     private fun hold(kind: FailKind) {
         holdUntilMs = mono.nowMs() + SportsConstants.HUB_VIDEO_KEY_REREAD_MS
         holdKind = kind
+        nextBackoffMs = SportsConstants.HUB_VIDEO_KEY_BACKOFF_MIN_MS
+    }
+
+    /** (M1) A transient failure: wait [nextBackoffMs] (at least `Retry-After`), then double it up to the cap. */
+    private fun backOff(kind: FailKind, retryAfterS: Int?) {
+        val floor = (retryAfterS ?: 0).toLong() * 1000
+        val wait = maxOf(nextBackoffMs, floor).coerceAtMost(SportsConstants.HUB_VIDEO_KEY_REREAD_MS)
+        holdUntilMs = mono.nowMs() + wait
+        holdKind = kind
+        nextBackoffMs = (nextBackoffMs * 2).coerceAtMost(SportsConstants.HUB_VIDEO_KEY_BACKOFF_MAX_MS)
     }
 
     private suspend fun read(): Answer {
@@ -132,8 +150,8 @@ class NhlVideoKeySource internal constructor(
                 when (val code = res.code) {
                     200 -> KeyScan.scan(res.body.source(), SportsConstants.HUB_VIDEO_SCRIPT_MAX)
                         ?.let { Answer.Ok(it) } ?: Answer.Unavailable(FailKind.REFUSED)
-                    429 -> Answer.Unavailable(FailKind.HTTP_429)
-                    in 500..599 -> Answer.Unavailable(FailKind.HTTP_5XX)
+                    429 -> Answer.Unavailable(FailKind.HTTP_429, NhlHttp.retryAfterS(res))
+                    in 500..599 -> Answer.Unavailable(FailKind.HTTP_5XX, NhlHttp.retryAfterS(res))
                     else -> Answer.Unavailable(if (code in 300..399 || code == 404) FailKind.REFUSED else FailKind.HTTP_OTHER)
                 }
             }

@@ -26,6 +26,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -132,6 +133,8 @@ internal fun HubCard(
     onFocusChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
+    /** (Review L9) The grid passes one measurer for every card; a lone card makes its own. */
+    measure: Measure = rememberHubMeasure(),
 ) {
     val res = LocalResources.current
     val g = card.game
@@ -155,6 +158,7 @@ internal fun HubCard(
             if (optionsText != null) append(' ').append(optionsText)
         }
     }
+    val focusable = LocalHubFocusable.current
     val ring = when {
         focused -> Modifier.border(4.dp, GuideUi.Accent, shape)
         selected -> Modifier.border(2.dp, GuideUi.Accent, shape)
@@ -166,6 +170,7 @@ internal fun HubCard(
             .fillMaxWidth()
             .testTag(sportsCardTag(g.id.id))
             .let { if (focusRequester != null) it.focusRequester(focusRequester) else it }
+            .focusProperties { canFocus = focusable }
             .onFocusChanged { focused = it.isFocused; onFocusChange(it.isFocused) }
             // Menu opens the panel; Left from the left column does the same (§2.2). OK is the clickable's.
             .onPreviewKeyEvent { e ->
@@ -183,7 +188,6 @@ internal fun HubCard(
             if (refused != null) {
                 Box(Modifier.fillMaxWidth().height(HubCardMetrics.REFUSED_MATCHUP_H.dp), contentAlignment = Alignment.CenterStart) {
                     val matchup = res.getString(R.string.sports_card_live_line, away.nickname, home.nickname)
-                    val measure = rememberHubMeasure()
                     val widthPx = with(LocalDensity.current) { HubCardMetrics.INNER_W.dp.toPx() }
                     val size = remember(matchup, factor, widthPx) { HubFit.size(HubFit.NAME_SIZES, listOf(matchup), widthPx, 600, measure) }
                     Line(matchup, GuideUi.sans(size, FontWeight.SemiBold), Modifier.fillMaxWidth().testTag(SPORTS_REFUSED_MATCHUP_TAG + g.id.id))
@@ -197,9 +201,9 @@ internal fun HubCard(
                 val winner = if (g.phase == GamePhase.FINAL && g.away.score != null && g.home.score != null) {
                     if (g.away.score!! > g.home.score!!) 0 else if (g.home.score!! > g.away.score!!) 1 else -1
                 } else -1
-                TeamRow(g.away, away, league, 0, g.phase, winner, SPORTS_AWAY_NAME_TAG + g.id.id)
+                TeamRow(g.away, away, league, 0, g.phase, winner, SPORTS_AWAY_NAME_TAG + g.id.id, measure)
                 Spacer(Modifier.height(HubCardMetrics.ROW_GAP.dp))
-                TeamRow(g.home, home, league, 1, g.phase, winner, SPORTS_HOME_NAME_TAG + g.id.id)
+                TeamRow(g.home, home, league, 1, g.phase, winner, SPORTS_HOME_NAME_TAG + g.id.id, measure)
             }
             Spacer(Modifier.weight(1f))
             BottomRow(pill, g.id.id, card.followed, showHighlights && g.media?.let { it.recapId != null || it.condensedId != null || it.goalClips > 0 } == true)
@@ -209,9 +213,8 @@ internal fun HubCard(
 
 /** One team row: the logo slot, the name column (place over nickname) and the score (§1.2). */
 @Composable
-private fun TeamRow(team: TeamLine, name: HubName, league: League, index: Int, phase: GamePhase, winner: Int, nameTag: String) {
+private fun TeamRow(team: TeamLine, name: HubName, league: League, index: Int, phase: GamePhase, winner: Int, nameTag: String, measure: Measure) {
     val factor = UiTextScale.factor
-    val measure = rememberHubMeasure()
     val density = LocalDensity.current
     val nameCol = HubCardMetrics.nameW(factor)
     val nameSize = remember(name, factor, density.density) { HubFit.nameSize(name, with(density) { nameCol.dp.toPx() }, measure) }

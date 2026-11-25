@@ -239,6 +239,46 @@ class GuideViewModelClipFilterTest {
         assertEquals(before + 1, w.controller.tunes.size)
     }
 
+    /** (Sports Hub code review 2026-11-25, M2) A page tune during the resume's viewport wait cancels the resume. */
+    @Test fun aPageTuneDuringTheResumeWaitWins() {
+        val w = World()
+        val vm = w.viewModel()
+        vm.setViewport(app.thebox.core.playback.Viewport.HIDDEN)
+        vm.setViewport(app.thebox.core.playback.Viewport.FULL)
+        w.controller.state.value = PlaybackState.Playing(clip(100)); idle()
+        val before = w.controller.tunes.size
+        vm.onSportsEffect(SportsEffect.Resume(ResumePoint.Live(x.identity))); idle()
+        vm.onSportsEffect(SportsEffect.Tune(channels[6])); idle()
+        vm.setViewport(app.thebox.core.playback.Viewport.HIDDEN); idle()
+        assertEquals(listOf<TuneTarget>(TuneTarget.Channel(channels[6].identity)), w.controller.tunes.drop(before).map { it.first })
+    }
+
+    /** (M2) A tune from elsewhere (an intent, Watch Next, a PIN success) during the wait is not overridden by the resume. */
+    @Test fun aForeignTuneDuringTheResumeWaitSkipsTheResume() {
+        val w = World()
+        val vm = w.viewModel()
+        vm.setViewport(app.thebox.core.playback.Viewport.HIDDEN)
+        vm.setViewport(app.thebox.core.playback.Viewport.FULL)
+        w.controller.state.value = PlaybackState.Playing(clip(100)); idle()
+        val before = w.controller.tunes.size
+        vm.onSportsEffect(SportsEffect.Resume(ResumePoint.Live(x.identity))); idle()
+        w.controller.state.value = PlaybackState.Connecting(live(channels[7], 111), ConnectPhase.CONNECTING, 1, 0); idle()
+        vm.setViewport(app.thebox.core.playback.Viewport.HIDDEN); idle()
+        assertEquals("the resume never replaces the newer tune", before, w.controller.tunes.size)
+    }
+
+    /** (M2) The clip itself still owning the player after the wait: the resume goes ahead. */
+    @Test fun theResumeStillRunsWhenOnlyTheClipOwnedThePlayer() {
+        val w = World()
+        val vm = w.viewModel()
+        vm.setViewport(app.thebox.core.playback.Viewport.HIDDEN)
+        vm.setViewport(app.thebox.core.playback.Viewport.FULL)
+        w.controller.state.value = PlaybackState.Playing(clip(100)); idle()
+        vm.onSportsEffect(SportsEffect.Resume(ResumePoint.Live(x.identity))); idle()
+        vm.setViewport(app.thebox.core.playback.Viewport.HIDDEN); idle()
+        assertEquals(TuneTarget.Channel(x.identity), w.controller.tunes.last().first)
+    }
+
     /** R-N3: the catch-up resumes through playProgramme (timeShift carried), then seeks on the first PLAYING. */
     @Test fun resumeArchiveSeeksOnTheFirstPlaying() {
         val w = World()

@@ -583,6 +583,12 @@ Market H or A lowers any match to POSSIBLE (a regional broadcast), whatever the 
 joined by upper-case `OR`, no `*`, no parentheses, **no `ORDER BY`**, `LIMIT 200`, through a new
 `GuideQueries.channelsByNameFts(match, access, limit)` that applies the lineup predicate and `PARENTAL_RAW` as
 `searchChannels` does; then the residue rule in Kotlin.
+*(Code review 2026-11-25, M3, L3.)* One token can be shared by hundreds of channels ("espn", "sn"), so a single page of
+200 could cut the national channel before the residue rule ran. The query now pages by keyset on the FTS rowid
+(`rowid > last ORDER BY rowid`, FTS4's own order, no sort) until a page comes back short, 96 residue matches are in hand
+(C's channel cap), or 1 000 rows were read per code (`ALIAS_FTS_MAX_ROWS`, 5 pages). Renamed channels are matched too:
+`channel_fts` holds the provider name only, so one extra read of the lineup's `channel_prefs.custom_name` rows (≤ 200,
+`GuideQueries.channelsWithCustomName`) per match goes through the same residue rule.
 
 **B. Guide titles** (Search's EPG FTS; A-S8, A-N8):
 - Two queries: the two nicknames ("Jets Mammoth"), then the two places ("Winnipeg Utah"). `limit` 80, `perText` 40
@@ -666,7 +672,8 @@ equally existing route. Cost: one sheet row and one effect.
 
 ### 5.7 Cost on a 20,000-channel playlist (Fire TV Stick)
 
-Per game: up to 6 channel-FTS phrase queries (`LIMIT 200`, no `ORDER BY`), 2 live + 2 past team-name EPG FTS queries
+Per game: up to 6 channel-FTS phrase queries (`LIMIT 200` pages, up to 5 per code after the 2026-11-25 review, M3;
+usually 1), one renamed-channel read, 2 live + 2 past team-name EPG FTS queries
 (B), one `EpgReader.window` read for A's channels (C, R-S4), one `channelsForRefs` batch. Estimate 30–150 ms on IO. Runs only for the panel's game (after rest or OK), cancelled on
 move, cached (§5.4). **WP-3 measures p50/p95** on the 20 k synthetic playlist on the Fire TV Stick with the final query
 shape (A-N8); gate p95 ≤ 250 ms, else the alias lookups become one `UNION`. WP-3 also records the B / C hit rate against
@@ -766,8 +773,14 @@ change (A-S6.6).
 - On read: `Redact.registerSecret(key)` at once, so the value is masked in any log, message or throwable text.
 - A 401 or 403 (not `CLIENT_GEO`) from the playback service → drop the key, re-read once, retry the lookup once; still
   refused → `Refused`.
-- **Hold** (`HUB_VIDEO_KEY_REREAD_MS`, 10 min) after any failed read: not found, script fetch failure, or a refused
-  re-read, so the script is read at most once per 10 min per process.
+- **Hold** (`HUB_VIDEO_KEY_REREAD_MS`, 10 min) after a read that found no key, a refused re-read, or a script answer
+  that means "not here" (404, a redirect, an address outside https): `Refused` meanwhile, and the page hides its video
+  slots for the same 10 min (§6.8).
+- **Backoff** after a transient script failure (timeout, IO including offline, 5xx, 429, another status): 30 s
+  (`HUB_VIDEO_KEY_BACKOFF_MIN_MS`), doubling to 1 min (`HUB_VIDEO_KEY_BACKOFF_MAX_MS`), with `Retry-After` as a floor
+  (at most 10 min); the failure's kind is answered meanwhile, so the toast is §6.8's "Try again in a minute", which the
+  1 min cap keeps true. A success resets the backoff. *(Code review 2026-11-25, M1: a Fire TV waking before its Wi-Fi
+  used to turn video off for 10 minutes under a "try again in a minute" toast.)*
 - `BoxLog` says "video key: read" / "video key: not found" / "video key: refused"; never a value, prefix or length.
   Tests and the fake panel use a fake key only.
 
@@ -965,7 +978,7 @@ States: `Idle` → `Resolving(ref, job)` → `Playing(ownedTuneId, queue, index)
 
 | Situation | Where | Text |
 |---|---|---|
-| Lookup timed out / 5xx / IO | toast | "The NHL video service didn't answer. Try again in a minute." |
+| Lookup timed out / 5xx / IO (or the key's script, inside its ≤ 1 min backoff, §6.2) | toast | "The NHL video service didn't answer. Try again in a minute." |
 | Offline | toast | "No internet connection. Videos play again when the network is back." |
 | `Refused` | toast; video slots and "● Highlights" chips hide for 10 min | "NHL videos aren't available in this app right now. Scores and stats still work." |
 | `Geo` | toast | "This video isn't available in your region. The scores and stats still work." (U-S11) |

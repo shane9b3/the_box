@@ -234,10 +234,11 @@ private fun TransportBar(res: Resources, s: ClipSession.State, pos: PositionSnap
 /** "OK Pause · ← → 10 s · Back Done" */
 private fun clipHints(res: Resources): String {
     val sep = res.getString(R.string.sports_hub_summary_sep)
+    // (Review L2) The key names from the strings file, as the page's footer uses them.
     return listOf(
-        "OK " + res.getString(R.string.sports_hub_hint_pause),
+        res.getString(R.string.sports_footer_keys_ok) + " " + res.getString(R.string.sports_hub_hint_pause),
         "← → " + res.getString(R.string.sports_hub_hint_seek),
-        "Back " + res.getString(R.string.sports_hub_hint_done),
+        res.getString(R.string.sports_footer_keys_back) + " " + res.getString(R.string.sports_hub_hint_done),
     ).joinToString(sep)
 }
 
