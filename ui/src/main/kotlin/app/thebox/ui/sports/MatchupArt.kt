@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -69,6 +70,15 @@ internal fun MatchupArt(
         maxOf(88, text)
     } else 0
     val ownCaption = if (caption != null && (centreTop == null || discH <= heightDp - captionH)) captionH else 0
+    // (Emulator, 2026-11-25) A live game's centre pill ("LIVE · 2ND 12:19") is wider than the gap two centred logos leave:
+    // the logos are centred in what the pill leaves on each side, so the pill never covers them.
+    val centreW = if (centreTop != null) {
+        val text = maxOf(
+            lineWidthDp(centreTop, GuideUi.sans(26, FontWeight.Bold)),
+            if (centreBottom != null) lineWidthDp(centreBottom, GuideUi.sans(22, FontWeight.Medium)) else 0,
+        ) + 24
+        maxOf(if (compact) 88 else 120, text)
+    } else 0
     val logo = MatchupArtFit.logoSize(heightDp, topReserveDp, maxOf(bottomReserveDp, ownCaption), nominal)
     val left = MatchupColours.of(league, away.abbrev)
     val right = MatchupColours.of(league, home.abbrev)
@@ -90,6 +100,7 @@ internal fun MatchupArt(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { HubLogo(away, league, logo, logo, Modifier.testTag(HUB_ART_LOGO_TAG + "away"), align = Alignment.Center) }
+                if (centreW > 0) androidx.compose.foundation.layout.Spacer(Modifier.width(centreW.dp))
                 Box(Modifier.weight(1f), contentAlignment = Alignment.Center) { HubLogo(home, league, logo, logo, Modifier.testTag(HUB_ART_LOGO_TAG + "home"), align = Alignment.Center) }
             }
         }
@@ -166,6 +177,16 @@ internal fun lineHeightDp(style: androidx.compose.ui.text.TextStyle): Int {
     val density = androidx.compose.ui.platform.LocalDensity.current
     return androidx.compose.runtime.remember(style, density) {
         with(density) { kotlin.math.ceil(measurer.measure("Ag", style, maxLines = 1).size.height.toDp().value).toInt() }
+    }
+}
+
+/** The width in design px of [text] on one line of [style]. */
+@Composable
+internal fun lineWidthDp(text: String, style: androidx.compose.ui.text.TextStyle): Int {
+    val measurer = androidx.compose.ui.text.rememberTextMeasurer()
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    return androidx.compose.runtime.remember(text, style, density) {
+        with(density) { kotlin.math.ceil(measurer.measure(text, style, maxLines = 1).size.width.toDp().value).toInt() }
     }
 }
 

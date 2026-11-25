@@ -670,6 +670,8 @@ internal object HubPanelContents {
             GamePhase.POSTPONED -> MediaSpec.Art(caption, res.getString(R.string.sports_hub_disc_postponed), null)
             GamePhase.SCHEDULED, GamePhase.PRE ->
                 MediaSpec.Art(caption, if (g.startTbd) res.getString(R.string.sports_hub_pill_tbd) else SportsText.startTime(g.startUtcMs, clock24, locale), date)
+            // A live game needs no weekday under its clock: it is on now.
+            GamePhase.LIVE, GamePhase.INTERMISSION -> MediaSpec.Art(caption, SportsText.hubPill(res, g, clock24, m.nowMs, locale).text, null)
             else -> MediaSpec.Art(caption, SportsText.hubPill(res, g, clock24, m.nowMs, locale).text, date)
         }
     }
