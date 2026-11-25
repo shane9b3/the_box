@@ -252,7 +252,8 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
         val nowMin = frame.nowMin
         when {
             f.cellStart <= nowMin && nowMin < f.cellEnd -> sb.append(", on now")
-            f.cellEnd <= nowMin && c >= 0 && inArchive(frame, ch, d!!.cellRawStart[c], d.cellEnd[c]) -> sb.append(", catch-up available")
+            f.cellEnd <= nowMin && c >= 0 && (d!!.cellFlags[c] and CellFlags.EVENT_NAME) == 0 &&
+                inArchive(frame, ch, d.cellRawStart[c], d.cellEnd[c]) -> sb.append(", catch-up available")
         }
         if (c >= 0 && d!!.cellKind[c] == CellKind.PROGRAMME && frame.reminders.contains(ch.identityHash, d.cellRawStart[c])) {
             sb.append(", reminder set")
@@ -524,7 +525,9 @@ class GuideRendererImpl(private val measurer: GuideTextMeasurer) : GuideRenderer
         val onNow = programme && start <= now && now < end
         val past = programme && end <= now
         val archiveStart = now - minOf(ch.archiveDays, MAX_ARCHIVE_DAYS) * 1440
-        val archived = past && ch.archiveDays > 0 && d.cellRawStart[c] >= archiveStart
+        // (Event channels §6.4, arch S6) An event read from the channel name is never offered as catch-up: its end is
+        // estimated and a past slot's archive may hold another event. The one renderer change.
+        val archived = past && ch.archiveDays > 0 && (flags and CellFlags.EVENT_NAME) == 0 && d.cellRawStart[c] >= archiveStart
         val suspect = archived && isSuspect(frame, ch)
         val textColor = when {
             focused -> C.CANVAS

@@ -57,4 +57,22 @@ class ReminderCardTest {
         rule.onNodeWithText("World Tonight started 5 min ago on Northline").assertExists()
         rule.onNodeWithTag(REMINDER_SWITCH_TAG).assertIsEnabled()
     }
+
+    /** Event channels §6.6, §9.4: the event moved to another slot; the card names the slot it is on now. */
+    @Test
+    fun movedEventSaysWhereItIsNow() {
+        val moved = state().let { it.copy(alert = it.alert.copy(channelName = "Sportsnet+ 25", movedFrom = "Sportsnet+ 09")) }
+        rule.setContent { BoxTheme { ReminderCard(moved, clock = { now }) } }
+        rule.onNodeWithText("World Tonight starts in 1 min on Sportsnet+ 25").assertExists()
+        rule.onNodeWithText("Now on Sportsnet+ 25").assertExists()
+    }
+
+    /** Event channels §6.6, §9.4: no slot lists the event any more; the card says so and how to find it. */
+    @Test
+    fun goneEventSaysToSearchForIt() {
+        val gone = state().let { it.copy(alert = it.alert.copy(eventGone = true)) }
+        rule.setContent { BoxTheme { ReminderCard(gone, clock = { now }) } }
+        rule.onNodeWithText("Your provider changed World Tonight's channel. Search for it to find where it is now.").assertExists()
+        rule.onNodeWithText("World Tonight starts in 1 min on Northline").assertDoesNotExist()
+    }
 }
