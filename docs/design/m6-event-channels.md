@@ -6,7 +6,8 @@ Status:
   `docs/review/2026-11-25-event-channels-design-review-ux.md` (U-E-B1–B4, U-E-S1–S10, U-E-N1–N6).
 - **Revised 2026-11-25** (this version) on the lead's rulings and the owner's final rulings of 2026-11-25. Every finding
   is applied in place and marked with its id; §15 "Review responses" lists each one with what changed and where.
-  Waiting for the lead's sign-off before commit 0.
+- **Re-reviewed 2026-11-25**: `docs/review/2026-11-25-event-channels-design-rereview.md` cleared the design with 14
+  small edits, E1–E14, all applied (§15.4). **Signed off by the lead** (last section).
 
 Inputs:
 - `CLAUDE.md`; `docs/00-master-plan.md`; `docs/01-design-reference.md` (1 design px = width ÷ 1920).
@@ -36,7 +37,7 @@ Words on screen: the existing set. New: *team channel*, *channel name*, *event*.
 | Short names (U-E-B2) | Event and empty-slot channels show their parsed **slot** ("Sportsnet+ 09") wherever a channel name is drawn. It is stored through the **existing `display_name` column** (time-independent; `DisplayNames` backfill, `RULE_VERSION` bump). A custom name always wins. Search still matches the raw text, because `channel_fts` indexes `name`. |
 | Empty slots | Owner ruling: a per-playlist switch, **Hide channels with no event**, off by default. It is applied through the existing `rule_hidden` pass. In the guide, an empty slot keeps "No information" cells; its panel says "No event scheduled". |
 | Guide | A read-time **overlay** in the guide pager. On an event channel, the event is drawn as a programme. Provider placeholder listings ("No Event Today", "Next Event: …", "Signing Off") are **clipped around it**. A real listing that overlaps the event wins (§6.1, measured in §2.3). Nothing is written to `epg.db`. |
-| Search | Events come from the in-memory index (prefix match on title and subtitle; a team's nickname also finds its city). Placeholder listings are dropped from programme results. An event and a guide listing on the same channel within 15 min of each other are shown once, as the listing (§7). |
+| Search | Events come from the in-memory index (prefix match on title and subtitle; a team's nickname also finds its city). Placeholder listings are dropped from programme results. An event and a guide listing on the same channel within 5 min of each other are shown once, as the listing (§7). |
 | Sports matcher | Two new stages: **T** (team channels) and **E** (events whose two sides name the game's two teams **by exact name**, starting 90 min before to 45 min after the game). Placeholder listings never count as guide evidence. Watch stays "Channels (n)", with the user's team channel focused first (owner ruling). |
 | Outside the guide download | The Channels slot is **grey** and no channel search runs when the game starts at or after `max(guide data end, now + 12 h)`. The guide data end is the median last programme end over guide channels that hold at least one real listing. The line names the two team channels when they exist (owner ruling). |
 | Zones | A zone word in the name wins. ISO-dated names use their country tag, and the US-college pipe shape is Eastern. Otherwise the playlist's **learned zone** applies: the most common explicit zone among its live event names, with hysteresis. Once learned, it never falls back to the panel's zone. No setting in v1. |
@@ -173,7 +174,8 @@ So renames alone did not queue an EPG patch in this log (arch S7; §10 keeps a g
 - **Right-anchored.** It reads the tail first and fails after one comparison on a name that cannot end a handled
   shape.
 - **Input is the provider name** (`channel.name`), never the custom name or `display_name`.
-- `VERSION = 1`. It keys the event index (§5.2) and `ChannelNamePrefix.RULE_VERSION` (§5.3). Bumping it rebuilds both.
+- `VERSION = 1`. It keys the event index (§5.2), and `ChannelNamePrefix.RULE_VERSION = 1 + VERSION` (§5.3; re-review
+  E8). Bumping it rebuilds both, with no manual step.
 - **Three entry points:**
   - `parse(name, ctx)` returns the full result;
   - `slotOf(name)` returns the slot of an event or empty-slot name. It needs no clock and no zone, so it can be stored in
@@ -498,7 +500,10 @@ data class ChannelCandidate(
     val group: String? = null,
 )
 interface GameChannelMatcher {
-    suspend fun match(game: GameSnapshot, nowMs: Long, access: ParentalAccess, board: List<GameSnapshot> = emptyList()): List<ChannelCandidate>
+    suspend fun match(game: GameSnapshot, nowMs: Long, access: ParentalAccess): List<ChannelCandidate>   // unchanged
+    /** (re-review E14) An overload with a default body, so commit 0 compiles; WP-4 overrides it. */
+    suspend fun match(game: GameSnapshot, nowMs: Long, access: ParentalAccess, board: List<GameSnapshot>): List<ChannelCandidate> =
+        match(game, nowMs, access)
     fun clear()
     /** §8.5: the end of usable guide data (epoch ms), or null without a guide. */
     fun guideEndMs(): Long? = null
@@ -508,9 +513,12 @@ interface GameChannelMatcher {
 ```
 
 - **`core/.../setup/SetupPorts.kt`**
-  - The playlist settings snapshot gains `refreshIntervalAuto: Boolean`, `effectiveIntervalH: Int`, `eventCount: Int`
-    and `hideEmptyEvents: Boolean`.
-  - The admin port gains `suspend fun setHideEmptyEvents(playlistId: Long, on: Boolean)`.
+  - The playlist settings snapshot (`PlaylistDetail`) gains `refreshIntervalAuto: Boolean = false`,
+    `effectiveIntervalH: Int = refreshIntervalH` (declared after `refreshIntervalH`), `eventCount: Int = 0` and
+    `hideEmptyEvents: Boolean = false`. The defaults keep `PlaylistSettingsRepository` and the four test fakes compiling
+    (re-review E14).
+  - The admin port (`PlaylistAdmin`) gains `suspend fun setHideEmptyEvents(playlistId: Long, on: Boolean) {}`, with a
+    default body for the same reason.
   - `setRefreshInterval` also clears the auto flag (§10).
 - **`core/.../setup/SetupText.kt`**: the §9.3 entries. **`core/.../guide/state/GuideTexts.kt`**: §9.2.
   **`core/.../sports/SportsConstants.kt`**: Appendix A.
@@ -546,7 +554,7 @@ No `channel` column, no index and no event backfill: the arch N1 decision (§5.1
 | Search | `EventSnapshot.current` plus a prefix match | A full-text search on names returns thousands of "NO EVENT" rows for "nhl" (arch N3). Scanning ≤ 1,543 titles in memory is exact and cheap. |
 
 **Cold-start cost** on a Fire TV Stick:
-- one indexed read of `channel` with the GLOB prefilter: 1,672 of 13,109 rows, 0.12 s on the Mac including process
+- one full scan of `channel` with the GLOB prefilter (a GLOB cannot use an index; re-review §2.1): 1,672 of 13,109 rows, 0.12 s on the Mac including process
   start, estimated ≤ 40 ms on the device;
 - ~1,700 parses at ~5–20 µs each: ≤ 35 ms;
 - the tally and the sort.
@@ -579,7 +587,8 @@ year depends on `now`.
 - **Pass 2:** re-parse only the ASSUMED names with the learned zone.
 - **Build:**
   - sorted `IntArray` starts with parallel entry arrays, and a `LongObjectMap` by id;
-  - write `event_count`, and `event_zone` when it changed;
+  - write `event_count` and `event_zone` **only when they change** (re-review E9). `playlist` is a row-content table
+    (`GuideLibraryImpl` `ROW_CONTENT_TABLES`), so each write reloads the guide rows;
   - emit `version`.
 - **Concurrency:** builds are serialised (one `Mutex`). A build runs on IO and publishes an immutable snapshot. Readers
   never block on a build except the first one after process start.
@@ -588,8 +597,15 @@ year depends on `now`.
 ### 5.3 Short names (U-E-B2)
 
 `ChannelNamePrefixImpl.strip(name, group, rule)` returns `EventNameParser.slotOf(name)` when it is non-null, for every
-prefix rule, including the "off" rule. Otherwise it applies the existing prefix logic. `ChannelNamePrefix.RULE_VERSION`
-goes up by one.
+prefix rule, including the "off" rule. Otherwise it applies the existing prefix logic.
+
+**The version link is mechanical (re-review E8).** `ChannelNamePrefix.kt` (commit 0) declares
+`const val RULE_VERSION = 1 + EventNameParser.VERSION` (2 today). A parser bump then re-runs the display-name backfill
+with no manual step.
+
+**The prefix preview skips slot names (re-review E7).** `DisplayNames.previewCount` and
+`ChannelNamePrefixImpl.countChanged` skip names where `EventNameParser.slotOf(name) != null`. Otherwise the playlist
+page's "changes N of M names" would add about 5,300 for every rule, Off included.
 
 | Case | Shown name |
 |---|---|
@@ -618,7 +634,20 @@ It calls `eventIndex.current()` once per page.
   is not a regex.
 - **When a slot changes:** an empty slot that gets an event name at a refresh is recomputed in `finish` and shows
   again.
-- **Favourites:** a favourite stays visible, because user data outranks rules, as for every hide rule.
+- **Favourites (re-review E2):** a favourite empty slot is hidden too, because hide rules apply to every lineup
+  (`ChannelDao.HIDDEN`). It comes back with its next event. The switch's description says so (§9.3); no extra
+  machinery.
+- **Its own reason (re-review E1).** A row counts as hidden by the switch when it has `rule_hidden = 1`, its playlist
+  has `hide_empty_events = 1` and `EventNameParser.isEmptySlot(name)` is true. Such a row is never shown as hidden by a
+  user rule:
+  - The Hidden channels page (`ChannelsPagesImpl.kt`, `ChannelsRows.hiddenItem`) shows `backup_hidden_no_event` and
+    links to the playlist's settings page, not to Hide rules.
+  - The channel editor (`ChannelEditorRepositoryImpl.kt`, which already resolves the rule per row; `EditorMenus.kt`)
+    shows `editor_d_no_event` with the same link.
+  - The Hide rules summary counts only channels that a user rule hides.
+
+  Without this, the Hidden channels page would list about 3,700 rows as "Hidden by the rule “”: change it in Hide
+  rules", a dead end.
 
 ---
 
@@ -719,9 +748,12 @@ The grid keeps "No information" cells (U-E-N1 left as is: it would need a per-ro
 
 ### 6.6 Reminders on event cells (arch S5, U-E-S9)
 
-`ReminderSchedulerImpl` (`:app`) resolves the reminder's channel when a reminder becomes due. If that channel has an
-`EventSnapshot` entry or had one (`event` not null):
+At fire time, `ReminderSchedulerImpl` (`:app`) resolves the reminder's channel through `GuideQueries.channels`. The
+lookup is suspend and runs outside `synchronized(lock)`. The check applies when that channel's `event` is not null
+(EVENT, or EMPTY through the `isEmptySlot` fallback; re-review E5):
 
+0. **Listing.** If the guide has a programme on the channel at the reminder's raw start with the same folded title,
+   fire as today.
 1. **Same event.** The current event's folded title equals the reminder's title and its start is within ±30 min: fire
    as today.
 2. **Moved.** Otherwise, look in the same playlist's snapshot for an event with the same folded title starting within
@@ -733,8 +765,9 @@ The grid keeps "No information" cells (U-E-N1 left as is: it would need a per-ro
 A reminder on a channel without an event is unchanged.
 
 An M3U provider whose event slots carry `tvg-id`s uses the TVG key rule. That rule puts the name in the key
-(`StableKeyDeriverImpl`, line 31), so a rename makes a new key, and the reminder is orphaned by the existing path. A
-test pins this; it is stated, not fixed. Xtream (`xc:<stream id>`) and URL keys do not change.
+(`StableKeyDeriverImpl`, line 31), so a rename makes a new key, and the reminder is orphaned by the existing path. The
+NAME_GROUP rule (`ng:<name>|<group>`) also puts the name in the key (E5). A test pins this; it is stated, not fixed.
+Xtream (`xc:<stream id>`) and URL keys do not change.
 
 ### 6.7 Cost (Fire TV Stick)
 
@@ -756,10 +789,10 @@ test pins this; it is stated, not fixed. Xtream (`xc:<stream id>`) and URL keys 
       prefixes a word of the title or the subtitle.
    3. **Filter.** Apply the lineup and parental filter through `queries.visible(ids, access)`, then load the channels.
    4. **Cap.** `EVENT_SEARCH_LIMIT = 60`, in start order.
-3. **De-duplicate** (from §2.3). Drop an event hit when the same channel has a kept guide hit starting within
-   **±15 min** of the event's start. In the data, every overlapping real listing for the same event starts at exactly
-   the name's minute, even when the words differ ("FAU" against "Florida Atlantic"). A listing further away is a
-   different event, and both are shown.
+3. **De-duplicate** (from §2.3; re-review E4). Drop an event hit when the same channel has a kept guide hit starting
+   within **±5 min** of the event's start (`EVENT_SEARCH_DEDUP_MIN = 5`). Every same-event listing starts at the name's
+   minute, even when the words differ ("FAU" against "Florida Atlantic"). Three different-event listings start at
+   exactly +15, so a ±15 window would drop real hits. A listing further away is a different event, and both are shown.
 4. **Show.**
    - Each event hit is a `ProgrammeHit` with the §6.2 info, bucketed like guide hits (on now, upcoming, later).
    - Channel results are unchanged, except that empty slots rank last.
@@ -837,12 +870,17 @@ Cost: an in-memory scan of ≤ 1,543 entries (< 2 ms), plus one `visible` query 
 | Both sides FULL or NICKNAME, a cross-league nickname, no positive hint | LIKELY | LIKELY |
 | One side PLACE, the other FULL or NICKNAME | CONFIRMED with a positive hint, else LIKELY | LIKELY |
 | Both sides PLACE, positive hint | CONFIRMED (`citiesOnly`) | LIKELY |
-| Both sides PLACE, ordered and in the right order, **\|Δ\| ≤ 15 min, and no other game on `board` involving either place within ±3 h** | **CONFIRMED** (`citiesOnly`) | LIKELY |
+| Both sides PLACE, ordered and in the right order, **\|Δ\| ≤ 15 min, no other game on `board` involving either place within ±3 h, and the league is the NHL** (re-review E6) | **CONFIRMED** (`citiesOnly`) | LIKELY |
 | Both sides PLACE, ordered and in the right order, otherwise | LIKELY (`citiesOnly`) | no grade |
 | Both sides PLACE, unordered, no hint | no grade | no grade |
 
 `board` holds the loaded day's games of the shown league (`SportsViewModel` passes `repo.day`). Other leagues' boards
 are not loaded on the page; the negative hints and the arena argument cover them.
+
+**Cities-only CONFIRMED is NHL only (re-review E6).** For the NFL, an ordered cities-only name with |Δ| ≤ 15 and a clean
+board is LIKELY. NHL teams share arenas with NBA teams, so two leagues cannot play the same city pair at the same time;
+NFL stadiums are not shared with NBA arenas. Without this rule, `Sportsnet+ 10: Dallas @ Denver` (an NBA game,
+Mavericks at Nuggets) would confirm a DAL at DEN NFL game.
 
 Worked cases (Golden Knights at Oilers, 8:00 PM ET, Nov 24):
 
@@ -879,7 +917,8 @@ are mapped (§2.4).
   after tomorrow are matched; later games are grey until the next morning's guide build.
 
 **Line** (§9.1):
-- with team channels found: "On the Golden Knights and Oilers team channels";
+- with team channels found: "On the Golden Knights and Oilers team channels", or with abbreviations ("On the VGK and
+  EDM team channels") when it would not fit (§9.1, E11);
 - with none: "Your guide doesn't cover this game yet";
 - with no guide at all: "Channels show 12 hours before the game".
 
@@ -891,14 +930,22 @@ The line is added to the panel's content description, because the disabled chip 
    - **Reserved:** never counted in the cap.
    - **Order:** the **user's team** first, then the other.
    - **"The user's team":** the app has no team follow, so it is the side whose team channel is a **favourite**, else
-     the one with the higher **watch count**, else the **home** side.
+     the one with the higher **watch count**, else the **home** side. The lead confirmed this reading of "the followed
+     team's channel first" to the owner on 2026-11-25.
 2. **CONFIRMED guide listings.**
 3. **CONFIRMED event names.**
 4. **LIKELY**: event names, sport listings, tagged national broadcasters.
 5. **POSSIBLE**: untagged or unknown-code national broadcasters.
 
-Within each class: favourite, watch count, national before regional, playlist order, provider order. Collapse works as
-today (same playlist and same alias key or residue).
+Within each class: favourite, watch count, national before regional, playlist order, provider order.
+
+**Collapse** works as today (same playlist and same alias key or residue), with one exception (re-review E3):
+- A candidate whose only evidence is an event name collapses on `e:` + folded event title + `|` + start minute, never on
+  the short name.
+- Same-event duplicates fold into "Also in <group>". Different events stay separate rows, and line 3 shows the group.
+- Why: `NHL 01` in `Sports | NHL` (8:00 PM) and `NHL 01` in `Sports | NHL (2)` ("NHL on TNT", 7:30 PM) carry different
+  events. The owner's data has 69 duplicate slot names.
+- Team channels keep the residue key.
 
 **Cap.** `HUB_MATCH_MAX = 8` rows besides the team channels. When stage E found any event and none made the 8, the 8th
 row is the best event row.
@@ -927,7 +974,8 @@ The hub's p95 ≤ 250 ms gate (hub §5.7) is re-measured by WP-4.
 - `sports_hub_reason_home_local`;
 - `sports_hub_reason_away_local`;
 - `sports_hub_regional_note`, with the sheet's footer item and `CHANNEL_SHEET_NOTE_TAG`;
-- `sports_hub_reason_possible`.
+- `sports_hub_reason_possible`;
+- `sports_hub_on_tv_more` (re-review E12: `sports_hub_more` replaces it).
 
 **Added in commit 0** (channel line and sheet text at 22/500; nothing under 22 design px):
 
@@ -941,13 +989,15 @@ The hub's p95 ≤ 250 ms gate (hub §5.7) is re-measured by WP-4.
 <!-- The never-cut tail of the channel line (U-E-N5). %1$d = other candidates. -->
 <plurals name="sports_hub_more"><item quantity="one">+%1$d more</item><item quantity="other">+%1$d more</item></plurals>
 <!-- Sheet, team channel. %1$s = the nickname. -->
-<string name="sports_hub_reason_team">Team channel. %1$s games are always on it.</string>
+<!-- (re-review E10) 47 characters with "Golden Knights": fits at Largest. -->
+<string name="sports_hub_reason_team">Team channel: always shows %1$s games</string>
 <!-- Sheet, event. %1$s = the start time, %2$s = the title (time first: an ellipsis eats the title's end, U-E-B1). -->
 <string name="sports_hub_reason_event">From the channel name: %1$s, %2$s</string>
 <!-- Sheet, event whose zone was assumed: no time (U-E-S7). %1$s = the title. -->
 <string name="sports_hub_reason_event_untimed">From the channel name: %1$s</string>
 <!-- Sheet, national broadcaster with no usable network name (U-E-N6). -->
-<string name="sports_hub_reason_network_unnamed">A national broadcaster carries this game. Your guide doesn\'t list it on this channel.</string>
+<!-- (re-review E10) 41 characters. -->
+<string name="sports_hub_reason_network_unnamed">A national broadcaster carries this game.</string>
 <!-- Sheet, third line, a quality variant or a backup group with the same name (U-E-N3). %1$s = the group. -->
 <string name="sports_hub_also_in">Also in %1$s</string>
 <!-- Channel line beyond the guide (§8.5). -->
@@ -971,9 +1021,20 @@ The hub's p95 ≤ 250 ms gate (hub §5.7) is re-measured by WP-4.
 | Event name | "from the channel name" | `reason_event`; `reason_event_untimed` when `zoneAssumed` |
 | Broadcaster | "national broadcaster" | `reason_network` with a country; `reason_network_any` with a network name of at least 3 characters that has a letter; else `reason_network_unnamed` |
 
+**`shortReason` fallback (re-review E12).** With `reason_short_local` gone, the fallback in `HubPanel.shortReason` (around
+line 629) is "national broadcaster".
+
 **Channel line layout (U-E-N5).** Two texts in a row: the name part, which ellipsizes, and " · " + `sports_hub_more`,
-which is never cut. The worst case at Largest is "On TV at 10:30 PM: Golden Knights team channel", which ellipsizes
-before "+8 more".
+which is never cut.
+
+**Abbreviation fallback (re-review E11).** This applies to `on_tv_team`, `on_tv_team_at` and `beyond_guide_team`. When
+the filled text plus the tail exceeds the hub budget (55 characters at Default, 45 at Largest), the caller uses the team
+abbreviations instead of the nicknames:
+- "On the VGK and CBJ team channels" (32 characters);
+- "On TV at 10:30 PM: VGK team channel · +8 more" (45 characters).
+
+Otherwise Largest would show "On TV at 10:30 PM: Golden Knigh…", which reads as a team again (U-E-B3). The `HubPanel`
+line tests cover the fallback.
 
 ### 9.2 `GuideTexts` (`:core`, English constants as today; frozen in commit 0)
 
@@ -993,8 +1054,15 @@ fun nextEvent(title: String, time: String) = "Next on this channel: $title at $t
 
 ```xml
 <string name="setup_row_hide_empty_events">Hide channels with no event</string>
-<string name="setup_hide_empty_events_desc">Hides channels whose name says NO EVENT or lists nothing. They come back when your provider names an event.</string>
+<string name="setup_hide_empty_events_desc">Hides channels whose name says NO EVENT or lists nothing, favourites too. They come back when your provider names an event.</string>
 <string name="setup_interval_event_default">Recommended: this playlist\'s channel names list upcoming events.</string>
+```
+
+Hidden-reason strings for the switch (re-review E1; commit 0, in `strings_backup.xml` and `strings_editor.xml`):
+
+```xml
+<string name="backup_hidden_no_event">Hidden because it has no event. Turn off “Hide channels with no event” in this playlist\'s settings.</string>
+<string name="editor_d_no_event">Hidden because it has no event. Turn off “Hide channels with no event” in this playlist\'s settings.</string>
 ```
 
 ### 9.4 Reminder card
@@ -1019,6 +1087,8 @@ fun nextEvent(title: String, time: String) = "Next on this channel: $title at $t
   - Picking any value in the Update interval row clears `auto`, so the user's choice stands.
 - **Settings row.** While `auto` is set and the effective interval is 6 h, the row shows "Every 6 hours" selected, with
   `setup_interval_event_default` as its description. `PlaylistPages.kt` builds this row.
+- **Limitation (re-review E13).** A playlist whose 24 h was chosen before v6 cannot be told from the default, so it
+  becomes auto. The row shows "Every 6 hours" with the recommendation, and picking 24 h again keeps it.
 - **Reschedule hook.** `RefreshRepository`, after `finish`, rebuilds the index (§5.2). If the effective interval
   changed, it calls `RefreshScheduler.schedulePlaylist`. App start and settings changes reschedule as today.
 - **Cost evidence (§2.5).**
@@ -1148,7 +1218,8 @@ A fuzz test covers the rest.
 - a New York place-only side;
 - the cross-league pair;
 - negative hints from the group only, from the slot only, and inside a side;
-- the cities-only upgrade: with and without another game on the board, |Δ| = 15 and 16.
+- the cities-only upgrade: with and without another game on the board, |Δ| = 15 and 16;
+- `Sportsnet+ 10: Dallas @ Denver` against a DAL at DEN NFL game at the same minute: LIKELY, never CONFIRMED (E6).
 
 **`ChannelHorizonTest`**: no guide; a guide end before now; an end between now and now + 12 h; a start exactly at the
 end.
@@ -1166,14 +1237,18 @@ end.
 - `ChannelNamePrefixImplTest`: slot first under every rule; no slot for plain names.
 - `DisplayNames` backfill on a `RULE_VERSION` bump; a custom name still wins.
 - `RuleHiddenPassTest`: the built-in empty-slot matcher on and off; a slot that gains an event shows again; a favourite
-  stays visible.
+  empty slot is hidden and returns with an event (E2).
+- Hidden-reason test (E1): with the switch on, the Hidden channels page row shows `backup_hidden_no_event` and links to
+  the playlist page; the editor shows `editor_d_no_event`; the Hide rules summary does not count these rows.
+- `DisplayNames.previewCount` and `ChannelNamePrefixImpl.countChanged` skip slot names (E7).
 - `RefreshSchedulerTest`: auto with 50 or more events gives 6 h; Manual stays manual; a user value stands; the
   reschedule hook.
 - `GuideQueriesTeamTest`: the parental and hidden rules.
 - `GuideSearchImplEventTest`:
   - placeholders dropped;
   - "oilers" finds `Vegas @ Edmonton`;
-  - the ±15 min de-duplication with an `FAU` / `Florida Atlantic` pair;
+  - the ±5 min de-duplication with an `FAU` / `Florida Atlantic` pair, and a different-event listing at exactly +15
+    that keeps both hits (E4);
   - ended events dropped;
   - "sportsnet" does not list an event;
   - empty slots last.
@@ -1205,7 +1280,7 @@ end.
 **Reminder and UI tests:**
 - `ReminderSchedulerEventTest` (`:app`): same event, moved, gone; the M3U TVG key is orphaned.
 - `HubSlotsTest`: BeyondGuide disables Channels and shows no "Finding".
-- `HubPanel` line strings for each case, with the never-cut "+n more".
+- `HubPanel` line strings for each case, with the never-cut "+n more", and the abbreviation fallback at Largest (E11).
 - `ChannelSheet`: the reasons, no footer, line 3 with the group for duplicate short names.
 - `SearchScreen`: event hits with `guideDataMissing`.
 
@@ -1297,8 +1372,11 @@ parser), the categories carry the documented counts, and the XMLTV placeholder b
 
 ## 12. Work packages (file ownership disjoint after commit 0)
 
-**Prerequisite.** The lead lands the in-flight hub change (864 px panel, no hint row; arch S11) before commit 0.
-Branch `event-channels`.
+**Prerequisites.** Both have landed on `main`: the Sports Hub footer change as `9d9a009` (864 px panel, no hint row,
+no credit; arch S11) and the Today fix as `b37512c`. Branch `event-channels`.
+
+**Build order** (re-review E14): commit 0, then WP-1, WP-2 and WP-3 in parallel, then WP-4 after WP-2 merges (it needs
+the `teamChannelCandidates` body).
 
 ### Commit 0 (lead, Opus)
 
@@ -1314,37 +1392,44 @@ Owns and lands:
   - `epg/EpgContracts.kt`, `epg/store/EpgSchema.kt` (constant);
   - `sports/hub/HubContracts.kt`, `sports/SportsConstants.kt`;
   - `guide/state/GuideTexts.kt`;
-  - `setup/SetupPorts.kt`, `setup/SetupText.kt`.
+  - `setup/SetupPorts.kt`, `setup/SetupText.kt` (E14 defaults);
+  - `text/ChannelNamePrefix.kt` (`RULE_VERSION = 1 + EventNameParser.VERSION`, re-review E8).
 - **`:data`:**
   - `db/entity/PlaylistEntity.kt`, `db/Migrations.kt` (`MIGRATION_5_6`), `db/LibraryDatabase.kt` (v6),
     `data/schemas/…/6.json`;
   - `db/dao/PlaylistDao.kt` (the new columns' setters and getters);
   - `events/EventIndexImpl.kt` as a stub (an empty snapshot) plus its binding in `di/GuideDataModule.kt`;
-  - `guide/GuideQueries.kt`: the `BLOCK_SELECT` `c.name` column, `channels()` filling `event` from the index (complete),
-    and a `teamChannelCandidates` stub.
+  - `guide/GuideQueries.kt`: the `BLOCK_SELECT` `c.name` column; `channels()` filling `event` from the index (complete);
+    a `teamChannelCandidates` stub; and the constructor parameter `private val events: EventIndex? = null`, because two
+    `:data` tests construct `GuideQueries` directly (E14).
 - **`:ui`:**
   - `sports/HubPanel.kt` (`MatchState.BeyondGuide`, stub branch);
   - `res/values/strings_sports_hub.xml` (§9.1 additions only);
   - `res/values/strings_setup.xml` with `ui/.../setup/AndroidSetupStrings.kt` (§9.3);
-  - the reminder strings (§9.4) in the existing reminder strings file.
+  - the reminder strings (§9.4) in the existing reminder strings file;
+  - `res/values/strings_backup.xml` and `res/values/strings_editor.xml` (the two E1 strings, §9.3).
 - **Tools and fakes:**
   - `tools/fakepanel/fakepanel.py` (switch, `DEFAULTS`, routes to `events.py`) and a stub `events.py`;
   - in `core/src/testFixtures`: `FakeEventIndex`, `FakeGameChannelMatcher` (`guideEndMs`, `teamChannels`).
-- **Gate:** commit 0 passes `./gradlew :core:test :app:assembleDebug` and `lintAll` on its own.
+- **`GameChannelMatcherImpl.kt` is not touched:** the three-argument `match` stays, and the four-argument overload has a
+  default body (§4.4, E14).
+- **Gate:** commit 0 passes `./gradlew :core:test :app:assembleDebug :data:compileDebugUnitTestKotlin
+  :ui:compileDebugUnitTestKotlin` and `lintAll` on its own (E14: the smoke build compiles neither test source set).
 
 ### Packages
 
 | WP | Owns (every file it touches) | Model | Depends on | Size |
 |---|---|---|---|---|
 | **WP-1** parser and rules (`:core`, pure) | `core/.../events/EventNameParser.kt`, `EventMatchup.kt`, `EventDuration.kt`, `EpgFiller.kt`; `core/.../sports/TeamNames.kt`, `TeamChannelRule.kt`; `core/.../sports/hub/EventGameRule.kt`; `core/src/test/resources/events/names.tsv`; their tests (§11.1 `:core` parser, matchup, duration, filler, team, rule) | Opus | C0 | ~1,000 + ~1,000 tests |
-| **WP-2** library, index, names, hiding, refresh | `data/.../events/EventIndexImpl.kt`; `core/.../text/ChannelNamePrefixImpl.kt` and `core/.../text/ChannelNamePrefix.kt` (`RULE_VERSION`); `data/.../rules/RuleHiddenPass.kt`; `data/.../setup/PlaylistSettingsRepository.kt`; `data/.../work/RefreshScheduler.kt`; `data/.../repo/RefreshRepository.kt` (index rebuild and reschedule after `finish`); `core/.../setup/pages/PlaylistPages.kt` (the switch row, the interval row); `core/.../backup/MergePlanner.kt` (`PLAYLIST_COLUMNS` + 2); `data/.../guide/GuideQueries.kt` (`teamChannelCandidates` body); `app/.../TheBoxApplication.kt` (index warm-up after the display-name backfill); their tests; the §10 gate | Sonnet under this spec; Opus review | C0; WP-1 for real parses in integration tests (unit tests use a fake parser) | ~700 + ~900 tests |
-| **WP-3** guide, search, reminders, guide end | `core/.../guide/feed/GuideWindowPagerImpl.kt`; `core/.../guide/state/GuideStateMachineImpl.kt`; `core/.../guide/render/GuideRendererImpl.kt` (one flag test); `data/.../guide/GuideLibraryImpl.kt` (reload on `EventIndex.version`); `core/.../epg/store/EpgStoreImpl.kt`, `core/.../epg/store/ImportSession.kt` (placeholder text ids, `dataToMin`); `data/.../guide/GuideSearchImpl.kt`; `ui/.../search/SearchScreen.kt`; `app/.../reminder/ReminderSchedulerImpl.kt`; `ui/.../reminder/ReminderCard.kt`; their tests; the `GuideScrollBenchmark` event page | Opus | C0; WP-1's `EpgFiller` for real data (stub returns false) | ~600 + ~700 tests |
-| **WP-4** channel link and hub | `data/.../sports/GameChannelMatcherImpl.kt`; `core/.../sports/hub/BroadcastAliases.kt` (`GameListing` placeholder rule only); `ui/.../sports/SportsViewModel.kt` (`startMatch`, `board`, BeyondGuide); `ui/.../sports/HubPanel.kt` (slots, the two-part line, short reasons, content description); `ui/.../sports/ChannelSheet.kt` (reasons, line 3, footer removal); the §9.1 deletions in `strings_sports_hub.xml`; `tools/fakepanel/events.py`, `catalog.py` (category hook, tvg ids for TNT and truTV), `test_events.py`, `README.md`; the matcher benchmark; their tests | Opus (matcher), Sonnet (UI text) | C0; WP-1 merged before its matcher tests run against the real rules | ~800 + ~900 tests |
+| **WP-2** library, index, names, hiding, refresh | `data/.../events/EventIndexImpl.kt`; `core/.../text/ChannelNamePrefixImpl.kt` (slot first, `countChanged` skips slots); `data/.../guide/DisplayNames.kt` (`previewCount` skips slots, E7); `data/.../rules/RuleHiddenPass.kt`; `data/.../rules/ChannelsPagesImpl.kt`, `core/.../settings/tree/ChannelsRows.kt`, `data/.../editor/ChannelEditorRepositoryImpl.kt`, `core/.../editor/EditorMenus.kt` (the switch's own hidden reason and link, E1); `data/.../setup/PlaylistSettingsRepository.kt`; `data/.../work/RefreshScheduler.kt`; `data/.../repo/RefreshRepository.kt` (index rebuild and reschedule after `finish`); `core/.../setup/pages/PlaylistPages.kt` (the switch row, the interval row); `core/.../backup/MergePlanner.kt` (`PLAYLIST_COLUMNS` + 2); `data/.../guide/GuideQueries.kt` (`teamChannelCandidates` body); `app/.../TheBoxApplication.kt` (index warm-up after the display-name backfill); their tests; the §10 gate | Sonnet under this spec; Opus review | C0; WP-1 for real parses in integration tests (unit tests use a fake parser) | ~700 + ~900 tests |
+| **WP-3** guide, search, reminders, guide end | `core/.../guide/feed/GuideWindowPagerImpl.kt`; `core/.../guide/state/GuideStateMachineImpl.kt`; `core/.../guide/render/GuideRendererImpl.kt` (one flag test); `data/.../guide/GuideLibraryImpl.kt` (reload on `EventIndex.version`); `core/.../epg/store/EpgStoreImpl.kt`, `core/.../epg/store/ImportSession.kt` (placeholder text ids, `dataToMin`); `data/.../guide/GuideSearchImpl.kt`; `ui/.../search/SearchScreen.kt`; `core/.../epg/store/EpgReaderImpl.kt` (only if the §6.1 title check needs it, E14); `app/.../reminder/ReminderSchedulerImpl.kt`; `ui/.../reminder/ReminderCard.kt`; their tests; the `GuideScrollBenchmark` event page | Opus | C0; WP-1's `EpgFiller` for real data (stub returns false) | ~600 + ~700 tests |
+| **WP-4** channel link and hub | `data/.../sports/GameChannelMatcherImpl.kt`; `core/.../sports/hub/BroadcastAliases.kt` (`GameListing` placeholder rule only); `ui/.../sports/SportsViewModel.kt` (`startMatch`, `board`, BeyondGuide); `ui/.../sports/HubPanel.kt` (slots, the two-part line, short reasons, content description); `ui/.../sports/ChannelSheet.kt` (reasons, line 3, footer removal); the §9.1 deletions in `strings_sports_hub.xml`; `ui/src/test/resources/golden/sports-hashes.txt` (the two-part line and line 3 change the goldens); `tools/fakepanel/events.py`, `catalog.py` (category hook, tvg ids for TNT and truTV), `test_events.py`, `README.md`; the matcher benchmark; their tests | Opus (matcher), Sonnet (UI text) | C0; **WP-2 merged** (the `teamChannelCandidates` body, E14); WP-1 merged before its matcher tests run against the real rules | ~800 + ~900 tests |
 | **Integration and review** | merge; §11.4; Fire TV Stick timings (§11.2) and the §10 gate; code reviews (data, guide, UI); release gates (plan §6); decision note `docs/decisions/2026-11-25-event-channels.md` (owner rulings, the user's-team interpretation, the gate result); amend `m6-sports-hub.md` §5.3, §5.5, §8.1 and `tools/fakepanel/README.md` | Opus | all | — |
 
 **Shared files.** No file has two owners after commit 0. `GuideQueries.kt` (commit 0, then WP-2),
 `HubPanel.kt` and `strings_sports_hub.xml` (commit 0, then WP-4), and `events.py` (commit 0's stub, then WP-4) are
-touched in sequence. `TheBoxApplication.kt` belongs to WP-2 only.
+touched in sequence. `TheBoxApplication.kt` belongs to WP-2 only. `GameChannelMatcherImpl.kt` is untouched by commit 0.
+After the re-review edits, no file is claimed by two packages and none is claimed by no package.
 
 ---
 
@@ -1366,9 +1451,9 @@ touched in sequence. `TheBoxApplication.kt` belongs to WP-2 only.
 
 ## 14. Open questions for the owner
 
-None. The owner's rulings of 2026-11-25 and the lead's defaults settle every earlier question (§15.3). One
-interpretation is recorded for the lead in the decision note: "the followed team's channel first" uses the favourite
-team channel, else the more-watched one, else home, because the app has no team follow (§8.6).
+None. The owner's rulings of 2026-11-25 and the lead's defaults settle every earlier question (§15.3). The lead
+confirmed to the owner that "the followed team's channel first" means the favourited team channel, else the more-watched
+one, else the home team's, because the app has no team follow (§8.6).
 
 ---
 
@@ -1378,7 +1463,7 @@ team channel, else the more-watched one, else home, because the app has no team 
 
 | Id | Finding | Response | Where |
 |---|---|---|---|
-| B1 | Half the events already have guide data; the "EPG wins" and search rules were unknown | **Measured** on the owner's `epg.db`. 777 BossSports-linked events; 564 have only placeholders over the event and 59 nothing; 154 have a real listing (146 at the same minute). Rule: placeholders are clipped and the event drawn; a real listing wins. Search drops placeholders and de-duplicates at ±15 min. Stages B and C ignore placeholders. Premise sentences fixed. | §2.3, §6.1, §7, §8.1 |
+| B1 | Half the events already have guide data; the "EPG wins" and search rules were unknown | **Measured** on the owner's `epg.db`. 777 BossSports-linked events; 564 have only placeholders over the event and 59 nothing; 154 have a real listing (146 at the same minute). Rule: placeholders are clipped and the event drawn; a real listing wins. Search drops placeholders and de-duplicates at ±5 min (re-review E4). Stages B and C ignore placeholders. Premise sentences fixed. | §2.3, §6.1, §7, §8.1 |
 | B2 | Zone and event count tallied from changed rows only | Gone by design: the index tallies every live row. Hysteresis (20 samples and 2×); no panel fallback once learned; `event_count` written from the whole index. | §3.3, §5.2 |
 | B3 | Version stamped in `finish` | Gone: no per-row event data. The only stored derivation (the slot in `display_name`) uses `DisplayNames`, the only raiser of the version, under `ImportMutex`, paged. | §5.1, §5.3 |
 | B4 | `EVENT_NAME` collides with `RTL` | Bit 27, with a disjointness test, in commit 0. | §4.4, §11.1 |
@@ -1442,6 +1527,28 @@ team channel, else the more-watched one, else home, because the app has no team 
 | 8 | One-press Watch | owner ruling b: keep Channels (n) |
 | 9 | Short names | lead ruling 5 |
 
+### 15.4 Re-review edits (E1–E14, all applied)
+
+| Id | Edit | Where |
+|---|---|---|
+| E1 | The hide switch has its own hidden reason (Hidden channels page, editor, Hide rules summary) and two strings; four files added to WP-2 | §5.5, §9.3, §11.1, §12 |
+| E2 | A favourite empty slot is hidden while the switch is on; stated in the design and in the description string; test changed | §5.5, §9.3, §11.1 |
+| E3 | Event-only candidates collapse on event title and start, never on the short name | §8.6 |
+| E4 | Search de-duplication ±5 min; a +15 test | §7, §11.1, Appendix A |
+| E5 | Reminder check: lookup through `GuideQueries.channels` outside the lock, an EMPTY fallback, step 0 for a listing; NAME_GROUP keys noted | §6.6 |
+| E6 | Cities-only CONFIRMED is NHL only; the `Dallas @ Denver` fixture | §8.4, §11.1 |
+| E7 | The prefix preview skips slot names; `DisplayNames.kt` added to WP-2 | §5.3, §11.1, §12 |
+| E8 | `RULE_VERSION = 1 + EventNameParser.VERSION`; `ChannelNamePrefix.kt` moves to commit 0 | §3.1, §5.3, §12 |
+| E9 | `event_count` and `event_zone` are written only on change | §5.2 |
+| E10 | `reason_team` and `reason_network_unnamed` shortened to fit | §9.1 |
+| E11 | Abbreviation fallback for the team lines | §8.5, §9.1, §11.1 |
+| E12 | `sports_hub_on_tv_more` deleted; the `shortReason` fallback stated | §9.1 |
+| E13 | The pre-v6 24 h limitation stated | §10 |
+| E14 | `match` overload with a default body; `PlaylistDetail` / `PlaylistAdmin` defaults; the `GuideQueries` constructor default; the extended gate; WP-4 after WP-2; `EpgReaderImpl.kt` named for WP-3 | §4.4, §12 |
+
+Also from the re-review text: the GLOB prefilter is a full scan, not an indexed read (§5.1); the golden-hash file
+belongs to WP-4 (§12).
+
 ---
 
 ## Appendix A: constants
@@ -1455,10 +1562,45 @@ team channel, else the more-watched one, else home, because the app has no team 
 | `HUB_TEAM_QUERY_MAX` | 400 | stage T rows per league |
 | `HUB_MATCH_MAX` | 8 | rows besides team channels (§8.6) |
 | `EVENT_SEARCH_LIMIT` | 60 | search's event hits (§7) |
-| `EVENT_SEARCH_DEDUP_MIN` | 15 | event vs listing on one channel (§7) |
+| `EVENT_SEARCH_DEDUP_MIN` | 5 | event vs listing on one channel (§7; re-review E4) |
 | `EVENT_MAY_BE_ON_MIN` | 180 | after the estimated end (§6.3) |
 | `EVENT_REFRESH_H` / `EVENT_REFRESH_MIN` | 6 / 50 | the default interval (§10) |
 | `EVENT_ZONE_MIN_SAMPLES` / hysteresis factor | 20 / 2 | the learned zone (§3.3) |
 | Year window | −300 d / +90 d | §3.4 |
 | `EventDuration` | 210 / 135 / 180 / 60 | football / soccer / other matchup / show |
 | `EVENT_TEXT_ID` | −2 | synthetic text id (§6.1) |
+
+---
+
+## 16. Lead sign-off (2026-11-25)
+
+**The design is cleared.** The re-review (`docs/review/2026-11-25-event-channels-design-rereview.md`) cleared it, and
+E1–E14 are applied as the reviewer specified (§15.4). The lead accepted all fourteen, with three rulings:
+- **E2:** state the true behaviour (a favourited empty slot is hidden while the switch is on) in the design and in the
+  switch's description; no new machinery.
+- **E13:** state the limitation.
+- **E14:** use the overload and defaults, extend the commit-0 gate, and make WP-4 wait for WP-2.
+
+**Owner rulings (final, 2026-11-25):**
+1. Empty slots: a per-playlist "Hide channels with no event" switch, off until the user turns it on. While it is on, it
+   also hides a favourited empty slot (E2).
+2. Watch slot: keep "Channels (n)" for NHL and NFL games, with the user's team channel focused first. "The followed
+   team" means the favourited team channel, else the more-watched one, else the home team's; the lead confirmed this to
+   the owner.
+3. Beyond the guide: the Channels chip is grey, and the line names the two team channels.
+4. Defaults the lead accepted for the owner:
+   - the learned zone, with no setting in v1, and never a fallback to the panel's zone once learned;
+   - 6 h as a default update interval only, never over Manual or a user-chosen interval;
+   - city-only names with no warning sentence, CONFIRMED under U-E-S7's rule (NHL only, E6);
+   - the EFL / UEFA style not parsed in v1.
+5. Short names: event and empty-slot channels show their parsed slot, and a custom name always wins.
+
+**Build order:**
+1. **Prerequisites, landed:** `9d9a009` (the Sports Hub footer change) and `b37512c` (the Today fix).
+2. **Commit 0 (lead):** the §12 list, gated by `:core:test :app:assembleDebug :data:compileDebugUnitTestKotlin
+   :ui:compileDebugUnitTestKotlin` and `lintAll`.
+3. **WP-1, WP-2 and WP-3 in parallel.**
+4. **WP-4** after WP-2 merges.
+5. **Integration:** the §11.4 emulator states, the Fire TV Stick gates (§10, §11.2), the code reviews, the release
+   gates, and the decision note `docs/decisions/2026-11-25-event-channels.md`.
+
