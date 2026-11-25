@@ -79,13 +79,37 @@ const val BOOT_BLANK_MAX_MS = 8_000L
  * (`VideoInfo.renderedFirstFrames`, code review 2026-10-14, H-S10), waiting at most this long (N6).
  */
 const val STILL_TO_FULL_MAX_WAIT_MS = 2_000L
+/**
+ * (Sports Hub, docs/design/m6-sports-hub.md §6.5, A-S2; WP-5) How long the clip hole stays black waiting for the clip's
+ * first rendered frame. Longer than [STILL_TO_FULL_MAX_WAIT_MS]: a clip's first frame comes after a manifest and a
+ * segment from the NHL's CDN (often 2–4 s), and lifting the black early would show the surface's last live frame.
+ */
+const val CLIP_BLACK_MAX_WAIT_MS = 10_000L
+/** (Sports Hub §6.5) The clip transport bar's top (design px); captions sit above it while a clip shows. */
+const val CLIP_BAR_TOP = 852f
 
-/** §3.13.2: what the hole shows for the displayed mode. */
-fun holeModeFor(mode: ScreenMode, tuned: TunedState): HoleMode = when (mode) {
+/**
+ * §3.13.2: what the hole shows for the displayed mode. (Sports Hub §6.5) [clip]: a Sports clip plays full screen
+ * ([clipHoleFull]); SPORTS is then FULL instead of COVERED.
+ */
+fun holeModeFor(mode: ScreenMode, tuned: TunedState, clip: Boolean = false): HoleMode = when (mode) {
     ScreenMode.GUIDE -> if (tuned.still || nothingTuned(tuned)) HoleMode.STILL else HoleMode.MINI
     ScreenMode.FULL -> HoleMode.FULL
+    ScreenMode.SPORTS -> if (clip) HoleMode.FULL else HoleMode.COVERED
     // (Score bug commit 0, docs/design/m6-score-bug.md §5.1) Sports covers the hole, as Search does.
-    ScreenMode.SEARCH, ScreenMode.SETTINGS, ScreenMode.SPORTS, ScreenMode.WEATHER -> HoleMode.COVERED
+    ScreenMode.SEARCH, ScreenMode.SETTINGS, ScreenMode.WEATHER -> HoleMode.COVERED
+}
+
+/**
+ * (Sports Hub §6.5, A-S2; WP-5) The FULL hole comes from a clip: the Sports page is shown, its clip layer is up
+ * ([ClipUi.showing][app.thebox.ui.sports.ClipUi.showing], true only after `playClip` returned) and the player is not on
+ * a later non-clip tune. The last condition covers the frames between a resume tune and the page's `showing = false`
+ * (ClipSession clears it first, this is the backstop): a tune past the clip's never gets the FULL hole under the page.
+ */
+fun clipHoleFull(shown: ScreenMode, clip: app.thebox.ui.sports.ClipUi, playback: PlaybackState): Boolean {
+    if (shown != ScreenMode.SPORTS || !clip.showing) return false
+    val t = playback.target ?: return true
+    return t.isClip || t.tuneId <= clip.tuneId
 }
 
 /** §3.13.2: GUIDE → MINI (HIDDEN while the mini is a still), FULL → FULL, SEARCH/SETTINGS → HIDDEN. */
@@ -142,7 +166,7 @@ fun reminderEndFor(shown: ScreenMode, player: PlayerUiState): Float = reminderEn
  *   VideoLayer                 // the one SurfaceView; first, because it clears with an unclipped CLEAR on API ≤ 30
  *   AmbientBackground          // own default layer (B8): base, ambient bitmap, hole shadow; never inside the video rect
  *   HoleChrome                 // corners, ring, letterbox, still, scrim; drawn after the surface
- *   SubtitleLayer              // (M4, FULL only) AndroidView(SubtitleView) on the video rect; a direct child (N11)
+ *   SubtitleLayer              // (M4, FULL; Sports Hub: SPORTS + clip) AndroidView(SubtitleView) on the video rect; a direct child (N11)
  *   Box(key sink) {            // the one key sink (WP-D's KeyRouter.sinkModifier), survives every mode change
  *     GUIDE | FULL | SEARCH | SETTINGS screen (M5: SettingsScreen, in-tree overlays only); reminder card; toast
  *   }
@@ -178,10 +202,11 @@ fun AppRoot(
     sports: @Composable (clock24: Boolean) -> Unit = {},
     /**
      * (Sports Hub commit 0, docs/design/m6-sports-hub.md §6.5) The clip layer's state (`SportsViewModel.clipUi`). WP-5
-     * reads it: `holeModeFor` gives FULL for SPORTS while [ClipUi.showing][app.thebox.ui.sports.ClipUi.showing], `beneath`
-     * is not updated then, and the hole stays black until the clip's first frame. Unused until then.
+     * reads it: `holeModeFor` gives FULL for SPORTS while [ClipUi.showing][app.thebox.ui.sports.ClipUi.showing]
+     * ([clipHoleFull]), `beneath` is not updated then, the hole stays black until the clip's first frame, the root draws
+     * no canvas behind the page and `SubtitleLayer` is composed.
      */
-    @Suppress("UNUSED_PARAMETER") sportsClip: androidx.compose.runtime.State<app.thebox.ui.sports.ClipUi> = app.thebox.ui.sports.NoSportsClip,
+    sportsClip: androidx.compose.runtime.State<app.thebox.ui.sports.ClipUi> = app.thebox.ui.sports.NoSportsClip,
     /** (Weather page 2026-11-19) The Weather screen, hosted like [sports]. */
     weather: @Composable (clock24: Boolean) -> Unit = {},
     /** (M5 integration) WP-D's phone page for `SettingsRoute.PhoneSetup` (the activity owns its view model). */
@@ -281,10 +306,26 @@ fun AppRoot(
         scrim.animateTo(0f, tween(SCRIM_MS, easing = LinearEasing))
     }
 
-    val holeMode = if (screenOff) HoleMode.COVERED else holeModeFor(shown, ui.tuned)
-    // The viewport of the last uncovered hole (HIDDEN before there was one, e.g. a first-run Settings).
+    // ---- (Sports Hub §6.5, A-S2) a clip on the Sports page: FULL hole, black until the clip's first frame.
+    val clipUi = sportsClip.value
+    val clipFull = clipHoleFull(shown, clipUi, playback)
+    val clipScrim = remember { Animatable(0f) }
+    LaunchedEffect(clipFull, clipUi.tuneId) {
+        if (!clipFull) {
+            clipScrim.snapTo(0f)
+            return@LaunchedEffect
+        }
+        val framesBefore = host.video.value.renderedFirstFrames
+        clipScrim.snapTo(1f)
+        withTimeoutOrNull(CLIP_BLACK_MAX_WAIT_MS) { host.video.first { it.renderedFirstFrames != framesBefore } }
+        clipScrim.animateTo(0f, tween(SCRIM_MS, easing = LinearEasing))
+    }
+
+    val holeMode = if (screenOff) HoleMode.COVERED else holeModeFor(shown, ui.tuned, clip = clipFull)
+    // The viewport of the last uncovered hole (HIDDEN before there was one, e.g. a first-run Settings). (Sports Hub §6.5,
+    // A-S2) Not while the FULL hole comes from a clip: after it the live channel gets back the viewport it had under the page.
     val beneath = remember { arrayOf(Viewport.HIDDEN) }
-    if (holeMode != HoleMode.COVERED) beneath[0] = viewportFor(holeMode)
+    if (holeMode != HoleMode.COVERED && !clipFull) beneath[0] = viewportFor(holeMode)
     val viewport = viewportFor(holeMode, screenOff, beneath[0])
     LaunchedEffect(viewport) { host.setViewport(viewport) }
     val sticky = remember { StickyVideo() }
@@ -380,13 +421,15 @@ fun AppRoot(
                 // everything except the video rect.
                 videoLayer(rects.video)
                 AmbientBackground(host.ambient, rects.video, ambientShadowHole, black = holeMode == HoleMode.FULL || screenOff || bootBlank)
-                if (!bootBlank) HoleChrome(rects, holeMode, host.ambient, scrim = { scrim.value }, poster = holeMode == HoleMode.MINI && video.posterMode)
+                if (!bootBlank) HoleChrome(rects, holeMode, host.ambient, scrim = { maxOf(scrim.value, clipScrim.value) }, poster = holeMode == HoleMode.MINI && video.posterMode)
                 val videoRect = rects.video
-                if (shown == ScreenMode.FULL && !screenOff && player != null && videoRect != null) {
-                    val barTop = when (playerBar) {
-                        PlayerBar.INFO_OR_SCRUB -> PlayerUi.BAR_T * density
-                        PlayerBar.QUICK -> PlayerUi.QUICK_T * density
-                        PlayerBar.NONE -> null
+                // (Sports Hub §6.5, A-S2) Also for a clip on the Sports page, over its transport bar.
+                if (((shown == ScreenMode.FULL && !screenOff) || clipFull) && player != null && videoRect != null) {
+                    val barTop = when {
+                        clipFull -> CLIP_BAR_TOP * density
+                        playerBar == PlayerBar.INFO_OR_SCRUB -> PlayerUi.BAR_T * density
+                        playerBar == PlayerBar.QUICK -> PlayerUi.QUICK_T * density
+                        else -> null
                     }
                     SubtitleLayer(cues, videoRect, subtitleLiftPx(videoRect, barTop, density)) // U-B2
                 }
@@ -407,7 +450,10 @@ fun AppRoot(
                         ScreenMode.FULL -> FullScreenHost(ui, player = player, clock24 = settings.clock24, lowEnd = lowEnd, hostFacts = scoreFacts)
                         ScreenMode.SEARCH -> search()
                         // (docs/design/m6-score-bug.md §5.1) The Sports tab: opaque, covers the hole, on Compose focus.
-                        ScreenMode.SPORTS -> Box(Modifier.fillMaxSize().background(app.thebox.ui.theme.DesignTokens.Colors.Canvas).testTag(SPORTS_TAG)) { sports(settings.clock24) }
+                        // (Sports Hub §6.5) No canvas while a clip shows: the page composes its transparent clip layer.
+                        ScreenMode.SPORTS -> Box(
+                            Modifier.fillMaxSize().then(if (clipFull) Modifier else Modifier.background(app.thebox.ui.theme.DesignTokens.Colors.Canvas)).testTag(SPORTS_TAG),
+                        ) { sports(settings.clock24) }
                         ScreenMode.WEATHER -> Box(Modifier.fillMaxSize().background(app.thebox.ui.theme.DesignTokens.Colors.Canvas).testTag(WEATHER_TAG)) { weather(settings.clock24) }
                         ScreenMode.SETTINGS -> if (settingsMachine != null) {
                             app.thebox.ui.settings.SettingsScreen(settingsMachine, settings.clock24, phone = settingsPhone, channelEditor = settingsEditor)
