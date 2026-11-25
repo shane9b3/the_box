@@ -28,6 +28,10 @@
     <string name="error_catchup_missing">This program isn\'t in the catch-up archive</string>
     <string name="error_channel_missing">This channel is no longer in your playlist</string>
     <string name="error_internal">Something went wrong in the player</string>
+    <!-- (Sports Hub commit 0, docs/design/m6-sports-hub.md §6.1, R-S5) CLIP_EXPIRED. The step line is for the clip
+         layer's own card (WP-5); ErrorText.step(code) keeps the shared RETRY line, as ErrorTextTest requires. -->
+    <string name="error_clip_expired">The video link expired</string>
+    <string name="error_clip_expired_step">Select Try again to load it again</string>
 
     <!-- Next steps, one per NextStep. RETRY is the only one the remote can act on from the card in M3 (OK). -->
     <string name="error_step_retry">Press OK to retry</string>

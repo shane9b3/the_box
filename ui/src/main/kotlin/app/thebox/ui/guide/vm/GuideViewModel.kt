@@ -362,6 +362,15 @@ class GuideViewModel @Inject constructor(
         }
     }
 
+    // ---- Sports host (Sports Hub commit 0, docs/design/m6-sports-hub.md §5.5, §5.6, §6.6; R-S5)
+
+    /**
+     * Every [SportsEffect][app.thebox.ui.sports.SportsEffect] of the Sports page (`MainActivity` collects
+     * `SportsViewModel.effects` into it). Main thread. Stub: WP-3 implements Tune, PlayArchive and Resume.
+     */
+    @Suppress("UNUSED_PARAMETER")
+    fun onSportsEffect(effect: app.thebox.ui.sports.SportsEffect) = Unit
+
     // ---- feeds (§3.16.1)
 
     private fun forwardFeeds(reminderBook: ReminderBook) {

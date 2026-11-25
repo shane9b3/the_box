@@ -86,6 +86,7 @@ object PlayerFixtures {
             CATCHUP_NOT_IN_ARCHIVE -> ErrorDetail(httpStatus = 404, host = HOST)
             CHANNEL_NOT_FOUND -> ErrorDetail()
             INTERNAL -> ErrorDetail(signal = "Unknown")
+            CLIP_EXPIRED -> ErrorDetail(httpStatus = 403, host = HOST)
         }
         // (WP-C finding, 2026-10-15) The only card the controller shows while retrying is the switch-timeout card
         // before first media (NO_DATA_TIMEOUT, unlimited retries); STREAM_INTERRUPTED after first media is

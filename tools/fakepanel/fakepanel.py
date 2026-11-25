@@ -33,6 +33,7 @@ import ed25519  # noqa: E402
 import sports  # noqa: E402
 import sports_nfl  # noqa: E402
 import sports_chl  # noqa: E402
+import sports_video  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 PKT = 188
@@ -82,6 +83,10 @@ DEFAULTS = {
     **sports_nfl.DEFAULTS,
     # CHL leagues (docs/design/m6-chl-leagues.md §7.3): fake HockeyTech under /hockeytech/, /firebase/svf/, /leaguestat/
     **sports_chl.DEFAULTS,
+    # Sports Hub (docs/design/m6-sports-hub.md §10.3): the fake video service under /bc/ (sports_video.py, WP-2)
+    **sports_video.DEFAULTS,
+    # Sports Hub: catalog channels and XMLTV for the channel link (catalog.py, WP-3; --sports-hub-catalog)
+    "sports_hub_catalog": False,
 }
 FAULT_DOC = {
     "redirect": False, "token_ttl": None, "linger": 0, "linger_status": 403, "close_every": 0,
@@ -954,6 +959,7 @@ class Panel:
         self.sports = sports.Sports(self)
         self.sports_nfl = sports_nfl.SportsNfl(self)
         self.sports_chl = sports_chl.SportsChl(self)
+        self.sports_video = sports_video.SportsVideo(self)
         self.clips, self.vod_data, self.vod_ctype = build_media(
             media_dir or os.path.join(HERE, "media"), use_ffmpeg, self.log)
 
@@ -1074,6 +1080,9 @@ class Panel:
         sports.check_config(patch)
         sports_nfl.check_config(patch)
         sports_chl.check_config(patch)
+        sports_video.check_config(patch)
+        if "sports_hub_catalog" in patch and not isinstance(patch["sports_hub_catalog"], bool):
+            raise ValueError("sports_hub_catalog must be true or false")
         if "dns_records" in patch and not isinstance(patch["dns_records"], dict):
             raise ValueError("dns_records must be an object {name: ipv4}")
         for table in [patch.get("faults") or {}] + list((patch.get("stream_faults") or {}).values()):
@@ -1123,6 +1132,7 @@ class Panel:
         self.sports.reset()
         self.sports_nfl.reset()  # NFL N8: one restart restarts both timelines
         self.sports_chl.reset()
+        self.sports_video.reset()
 
     # ---- M5: update manifest (docs/design/m5-setup-settings.md §3.12.1, §6.4)
     def update_public_hex(self):
@@ -1413,6 +1423,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return None
         if sports_chl.handle(self, path):
             return None
+        if sports_video.handle(self, path):
+            return None
         if path == "/player_api.php":
             return self.player_api()
         if path.startswith("/update/"):
@@ -1519,6 +1531,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return sports_nfl.admin(self, path, data)
         if path == "/admin/sports-chl":
             return sports_chl.admin(self, path, data)
+        if path == "/admin/sports_video":
+            return sports_video.admin(self, path, data)
         if path == "/admin/now":
             now = time.time()
             return self.json({"unix": now, "panel_wall": dt.datetime.fromtimestamp(now, p.tz()).strftime("%Y-%m-%d %H:%M:%S"),
@@ -2382,6 +2396,8 @@ def main(argv=None):
     ap.add_argument("--chl-firebase-refuse", action="store_true", help="with --sports-chl: every Firebase request is 401 Permission denied")
     ap.add_argument("--chl-null-live", action="store_true", help="with --sports-chl: the featured game's nodes are null while live (S5)")
     ap.add_argument("--chl-drop-penalties", type=int, metavar="N", help="with --sports-chl: every Nth penalties request is a 503 (B3)")
+    ap.add_argument("--sports-video", action="store_true", help="with --sports: also serve the fake NHL video service (/bc/, sports_video.py)")
+    ap.add_argument("--sports-hub-catalog", action="store_true", help="the Sports Hub channel-link catalog channels and XMLTV (catalog.py)")
     ap.add_argument("--chl-time-tbd", action="store_true", help="with --sports-chl: one scheduled game per league is \"Time TBD\" (time_tbd \"1\")")
     ap.add_argument("--update-apk-dir", help="U-S14: load every *.apk in this directory as an update APK by name "
                                              "(thebox-update-v2.apk -> v2); select one with the update_apk config key")
@@ -2429,6 +2445,12 @@ def main(argv=None):
         if chl_flags and not a.sports_chl:
             ap.error("the --chl-* switches need --sports-chl")
         cfg["sports_chl"] = True
+    if a.sports_video:
+        if not a.sports:
+            ap.error("--sports-video needs --sports")
+        cfg["sports_video"] = True
+    if a.sports_hub_catalog:
+        cfg["sports_hub_catalog"] = True
     if a.chl_timeline is not None:
         cfg["sports_chl_timeline_s"] = a.chl_timeline
     if a.chl_refuse:

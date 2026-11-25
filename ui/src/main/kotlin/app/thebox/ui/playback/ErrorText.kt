@@ -43,6 +43,7 @@ object ErrorText {
         PlaybackErrorCode.CATCHUP_NOT_IN_ARCHIVE -> R.string.error_catchup_missing
         PlaybackErrorCode.CHANNEL_NOT_FOUND -> R.string.error_channel_missing
         PlaybackErrorCode.INTERNAL -> R.string.error_internal
+        PlaybackErrorCode.CLIP_EXPIRED -> R.string.error_clip_expired // (Sports Hub commit 0, §6.1)
     }
 
     /** The next step for the code's default steps. */

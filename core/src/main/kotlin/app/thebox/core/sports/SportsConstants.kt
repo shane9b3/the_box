@@ -872,6 +872,46 @@ object SportsConstants {
     /** A pip's lit ⇄ used transition (`.to` background-color / opacity .4s), and the burn's white α at its peak (`toBurn` 50 %). */
     const val STACKED_NFL_PIP_MS = 400L
     const val STACKED_NFL_BURN_ALPHA = 0.15f
+
+    // ---- (Sports Hub commit 0, docs/design/m6-sports-hub.md Appendix A)
+    /** Detail, match and clip-info requests start after this much rest on a card (or at once on OK). */
+    const val HUB_FETCH_DWELL_MS = 600L
+    /** The day strip: today −this … +this (NHL and CHL). */
+    const val HUB_DAY_RANGE = 7
+    /** Scheduled / pre-game detail re-read. */
+    const val HUB_DETAIL_IDLE_MS = 300_000L
+    /** A final game's detail is re-read every [HUB_DETAIL_IDLE_MS] while its recap is missing, for this long after the end. */
+    const val HUB_RECAP_WAIT_MS = 10_800_000L
+    /** The detail and match LRU caches. */
+    const val HUB_DETAIL_LRU = 24
+    /** The game window for guide titles: start − before … start + after (minutes). */
+    const val HUB_MATCH_BEFORE_MIN = 30
+    const val HUB_MATCH_AFTER_MIN = 240
+    /** EPG airings kept per text in the guide-title probe. */
+    const val HUB_MATCH_PER_TEXT = 40
+    /** Channel candidates shown. */
+    const val HUB_MATCH_MAX = 8
+    /** "Watch" and tunable channel rows only for a live game or one starting within this (minutes). */
+    const val HUB_IMMINENT_MIN = 30
+    /** The hold after any failed video key read. */
+    const val HUB_VIDEO_KEY_REREAD_MS = 600_000L
+    /** The decoded player-script scan cap. */
+    const val HUB_VIDEO_SCRIPT_MAX = 2_097_152L
+    /** The video lookup body cap. */
+    const val HUB_VIDEO_BODY_MAX = 65_536L
+    /** The clip info cache's time to live. */
+    const val HUB_CLIP_META_TTL_MS = 600_000L
+    /** `max_connections` of the `clip:<host>` broker key. */
+    const val HUB_CLIP_MAX_CONNECTIONS = 4
+    /** IO / 5xx restarts before a clip fails. */
+    const val HUB_CLIP_RESTARTS = 2
+    /** The clip transport's seek steps. */
+    const val HUB_CLIP_SEEK_MS = 10_000L
+    const val HUB_CLIP_SEEK_LONG_MS = 30_000L
+    /** The clip transport bar's auto-hide. */
+    const val HUB_CLIP_BAR_MS = 4_000L
+    /** "Up next" before the next queued goal. */
+    const val HUB_UP_NEXT_MS = 1_500L
 }
 
 /**

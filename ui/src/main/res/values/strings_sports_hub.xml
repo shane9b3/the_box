@@ -1,0 +1,319 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Sports Hub commit 0 (docs/design/m6-sports-hub.md §8.1): every text of the new Sports page, its panel, sheets and clip
+     player. FROZEN after commit 0: changes go through the lead. American spelling. Words: Goals, Recap, Condensed game,
+     Box score, Matchup, Channels, Watch. Never "feed", "API", "key", "Brightcove", "policy" or "guide data". Away team
+     first ("UTA at WPG"). Errors name the reason, then the next step; contractions and plain verbs (U-S11).
+     Footer hints are the label only: FooterHints draws the key caps (OK, Back, the arrows) itself. -->
+<resources>
+    <!-- ==== Title row and heading (§1.1) -->
+    <string name="sports_hub_title">Sports Hub</string>
+    <!-- %1$s = the league name ("NHL", "NFL", "OHL"). -->
+    <string name="sports_hub_heading">%1$s SCORES &amp; SCHEDULE</string>
+    <!-- The credit (§1.1); the NFL and CHL credits stay sports_credit_espn / sports_credit_chl. -->
+    <string name="sports_hub_credit_nhl">Scores, stats and video: NHL.com</string>
+
+    <!-- ==== Day strip (§3.1). %1$s = the short date ("Nov 23"). -->
+    <string name="sports_hub_day_yesterday">Yesterday · %1$s</string>
+    <string name="sports_hub_day_today">Today · %1$s</string>
+    <string name="sports_hub_day_tomorrow">Tomorrow · %1$s</string>
+    <!-- %1$s = the short weekday ("Sat"), %2$s = the short date ("Nov 21"). -->
+    <string name="sports_hub_day_other">%1$s · %2$s</string>
+    <!-- Content description of a day known to have no games. %1$s = the spoken date ("Saturday, November 21"). -->
+    <string name="sports_hub_day_no_games_desc">%1$s, no games</string>
+    <!-- NFL weeks (S6). %1$s = sports_hub_week_n. -->
+    <string name="sports_hub_week_last">Last week · %1$s</string>
+    <string name="sports_hub_week_this">This week · %1$s</string>
+    <string name="sports_hub_week_next">Next week · %1$s</string>
+    <!-- %1$d = the week number. -->
+    <string name="sports_hub_week_n">Wk %1$d</string>
+
+    <!-- ==== Status pills (§1.2): upper case. -->
+    <string name="sports_hub_pill_final">FINAL</string>
+    <string name="sports_hub_pill_final_ot">FINAL/OT</string>
+    <string name="sports_hub_pill_final_so">FINAL/SO</string>
+    <!-- %1$s = the period and clock ("2ND 10:22"); the red dot is drawn, not text. -->
+    <string name="sports_hub_pill_live">LIVE · %1$s</string>
+    <!-- %1$s = the period ("1ST"). -->
+    <string name="sports_hub_pill_intermission">%1$s INT</string>
+    <string name="sports_hub_pill_postponed">POSTPONED</string>
+    <string name="sports_hub_pill_tbd">TIME TBD</string>
+    <!-- NFL upcoming (U-S6). %1$s = the weekday ("SUN"), %2$s = the time ("1:00 PM"). -->
+    <string name="sports_hub_pill_weekday_time">%1$s %2$s</string>
+    <!-- NFL upcoming outside the shown week. %1$s = weekday and date ("MON NOV 30"), %2$s = the time. -->
+    <string name="sports_hub_pill_date_time">%1$s %2$s</string>
+    <!-- Periods in the pills, upper case. -->
+    <string name="sports_hub_period_1">1ST</string>
+    <string name="sports_hub_period_2">2ND</string>
+    <string name="sports_hub_period_3">3RD</string>
+    <string name="sports_hub_period_ot">OT</string>
+    <!-- %1$d = the overtime number, 2 or more. -->
+    <string name="sports_hub_period_ot_n">%1$dOT</string>
+    <string name="sports_hub_period_so">SO</string>
+    <!-- NFL quarters in the pills. %1$d = the quarter. -->
+    <string name="sports_hub_quarter_n">Q%1$d</string>
+    <string name="sports_hub_halftime">HALFTIME</string>
+
+    <!-- ==== Card chips (§1.2) -->
+    <string name="sports_hub_chip_following">✓ Following</string>
+    <string name="sports_hub_chip_highlights">Highlights</string>
+
+    <!-- ==== Headline (§1.3). %1$s / %2$s = the away / home names, %3$d / %4$d their scores. -->
+    <string name="sports_hub_headline_scored">%1$s (%3$d) vs. %2$s (%4$d)</string>
+    <string name="sports_hub_headline">%1$s vs. %2$s</string>
+
+    <!-- ==== Media area (§1.3) -->
+    <string name="sports_hub_tag_recap">RECAP</string>
+    <string name="sports_hub_tag_latest_goal">LATEST GOAL</string>
+    <!-- %1$s = the duration ("4:55"). -->
+    <string name="sports_hub_caption_recap">Game recap (%1$s)</string>
+    <!-- %1$s = the clip title ("Vilardi strikes first"), %2$s = its duration ("0:46"). -->
+    <string name="sports_hub_caption_clip">%1$s (%2$s)</string>
+    <string name="sports_hub_caption_recap_soon">Recap not posted yet</string>
+    <string name="sports_hub_caption_goals_soon">Goal videos appear a few minutes after each goal</string>
+    <string name="sports_hub_disc_postponed">Postponed</string>
+
+    <!-- ==== Stats block (§1.3, §7.1) -->
+    <string name="sports_hub_stats_team">TEAM STATS</string>
+    <string name="sports_hub_stats_season">SEASON</string>
+    <string name="sports_hub_stats_by_period">BY PERIOD</string>
+    <string name="sports_hub_stats_by_quarter">BY QUARTER</string>
+    <!-- A value not known yet (loading). -->
+    <string name="sports_hub_stat_none">–</string>
+    <!-- Game stats (StatKind). -->
+    <string name="sports_hub_stat_sog">Shots on goal</string>
+    <string name="sports_hub_stat_power_play">Power play</string>
+    <string name="sports_hub_stat_hits">Hits</string>
+    <string name="sports_hub_stat_blocked">Blocked shots</string>
+    <string name="sports_hub_stat_faceoff_pct" formatted="false">Faceoff %</string>
+    <string name="sports_hub_stat_pim">Penalty minutes</string>
+    <string name="sports_hub_stat_giveaways">Giveaways</string>
+    <string name="sports_hub_stat_takeaways">Takeaways</string>
+    <!-- Season comparison (pre-game). -->
+    <string name="sports_hub_stat_record">Record</string>
+    <string name="sports_hub_stat_last10">Last 10</string>
+    <string name="sports_hub_stat_gf">Goals for per game</string>
+    <string name="sports_hub_stat_ga">Goals against per game</string>
+    <string name="sports_hub_stat_pp_pct" formatted="false">Power play %</string>
+    <string name="sports_hub_stat_pk_pct" formatted="false">Penalty kill %</string>
+    <!-- A ranked value. %1$s = the value ("3.4"), %2$s = the ordinal rank ("5th"). -->
+    <string name="sports_hub_stat_ranked">%1$s (%2$s)</string>
+    <!-- Period rows ("1st"…, then the total). -->
+    <string name="sports_hub_row_period_1">1st</string>
+    <string name="sports_hub_row_period_2">2nd</string>
+    <string name="sports_hub_row_period_3">3rd</string>
+    <string name="sports_hub_row_ot">OT</string>
+    <string name="sports_hub_row_so">SO</string>
+    <string name="sports_hub_row_total">T</string>
+    <!-- NFL rows. %1$d = the quarter. -->
+    <string name="sports_hub_row_quarter_n">Q%1$d</string>
+    <string name="sports_hub_stat_possession">Possession</string>
+    <string name="sports_hub_stat_down">Down</string>
+    <string name="sports_hub_stat_timeouts">Timeouts</string>
+    <!-- CHL rows. -->
+    <string name="sports_hub_stat_shots">Shots</string>
+    <!-- Failing or stale detail (§4.3). %1$s = the time of the shown stats ("8:12 PM"). -->
+    <string name="sports_hub_stats_from">Stats from %1$s</string>
+    <!-- NFL / CHL with nothing extra (§7.1). -->
+    <string name="sports_hub_more_soon">More game details come for the NHL first.</string>
+
+    <!-- ==== Ordinals. %1$d = the number; the code picks st / nd / rd / th by English rules (11th, 12th, 13th). -->
+    <string name="sports_hub_ordinal_st">%1$dst</string>
+    <string name="sports_hub_ordinal_nd">%1$dnd</string>
+    <string name="sports_hub_ordinal_rd">%1$drd</string>
+    <string name="sports_hub_ordinal_th">%1$dth</string>
+
+    <!-- ==== Summary (§6.7). A label, then " · ", then the text. -->
+    <string name="sports_hub_summary_sep"> · </string>
+    <string name="sports_hub_summary_winning_goal">Game-winning goal</string>
+    <string name="sports_hub_summary_stars">Stars:</string>
+    <string name="sports_hub_summary_latest_goal">Latest goal</string>
+    <string name="sports_hub_summary_periods">Periods</string>
+    <string name="sports_hub_summary_series">Season series</string>
+    <string name="sports_hub_summary_points_leaders">Points leaders (last 5)</string>
+    <string name="sports_hub_summary_passing">Passing</string>
+    <string name="sports_hub_summary_rushing">Rushing</string>
+    <string name="sports_hub_summary_receiving">Receiving</string>
+    <!-- Built goal sentence. %1$s = the scorer's last name, %2$s = the ordinal of his goal ("4th"), %3$s = the assists
+         ("Connor and Morrissey"), %4$s = the period ("1st"), %5$s = the time ("5:11"). -->
+    <string name="sports_hub_goal_sentence">%1$s (%2$s) from %3$s, %4$s period %5$s.</string>
+    <!-- Unassisted: %1$s scorer, %2$s ordinal, %3$s period, %4$s time. -->
+    <string name="sports_hub_goal_sentence_solo">%1$s (%2$s), %3$s period %4$s.</string>
+    <!-- Joining two assists. -->
+    <string name="sports_hub_and">%1$s and %2$s</string>
+    <string name="sports_hub_won_shootout">Won in the shootout.</string>
+    <!-- Series. %1$s = the leading team's abbreviation, %2$d / %3$d the wins (leader first). -->
+    <string name="sports_hub_series_leads">%1$s leads %2$d–%3$d</string>
+    <string name="sports_hub_series_tied">Tied %1$d–%2$d</string>
+    <string name="sports_hub_series_first">First meeting this season</string>
+
+    <!-- ==== Slots (§1.5): short and fixed; the channel name is never in a label. -->
+    <string name="sports_hub_slot_follow">Follow</string>
+    <string name="sports_hub_slot_following">Following ✓</string>
+    <string name="sports_hub_slot_watch">Watch</string>
+    <string name="sports_hub_slot_channels">Channels</string>
+    <string name="sports_hub_slot_channels_n">Channels (%1$d)</string>
+    <string name="sports_hub_slot_finding">Finding…</string>
+    <string name="sports_hub_slot_goals">Goals</string>
+    <string name="sports_hub_slot_goals_n">Goals (%1$d)</string>
+    <string name="sports_hub_slot_watch_recap">Watch recap</string>
+    <string name="sports_hub_slot_recap_soon">Recap soon</string>
+    <string name="sports_hub_slot_box_score">Box score</string>
+    <string name="sports_hub_slot_matchup">Matchup</string>
+    <string name="sports_hub_slot_watch_from_start">Watch from start</string>
+    <string name="sports_hub_slot_retry">Retry</string>
+
+    <!-- ==== Channel line (§1.3, §5.3). %1$s = the channel name, %2$s = the short reason. -->
+    <string name="sports_hub_on_tv">On TV: %1$s · %2$s</string>
+    <!-- %1$s = sports_hub_on_tv, %2$d = the number of other candidates. -->
+    <plurals name="sports_hub_on_tv_more">
+        <item quantity="one">%1$s · +%2$d more</item>
+        <item quantity="other">%1$s · +%2$d more</item>
+    </plurals>
+    <!-- Upcoming (more than 30 min away). %1$s = the start time, %2$s = the channel name. -->
+    <string name="sports_hub_on_tv_at">On TV at %1$s: %2$s</string>
+    <string name="sports_hub_finding_channel">Finding a channel…</string>
+    <string name="sports_hub_no_channel">No channel found in your playlists</string>
+    <string name="sports_hub_reason_short_guide">in your guide</string>
+    <string name="sports_hub_reason_short_national">national broadcaster</string>
+    <string name="sports_hub_reason_short_local">local channel, may differ</string>
+
+    <!-- ==== Channels sheet (§5.3, §5.5) -->
+    <!-- CONFIRMED. %1$s = the airing title, %2$s = its time range ("9:00–11:30 PM"). -->
+    <string name="sports_hub_reason_guide">In your guide: %1$s, %2$s</string>
+    <!-- LIKELY, network. %1$s = the network ("Sportsnet"), %2$s = the country ("Canada"). -->
+    <string name="sports_hub_reason_network">%1$s carries this game in %2$s. Your guide doesn\'t list it on this channel.</string>
+    <!-- LIKELY, network without a country. %1$s = the network. -->
+    <string name="sports_hub_reason_network_any">%1$s carries this game. Your guide doesn\'t list it on this channel.</string>
+    <!-- LIKELY, sport listing. %1$s = the airing title, %2$s = its start time. -->
+    <string name="sports_hub_reason_sport_listing">In your guide: %1$s at %2$s. The listing doesn\'t name the teams.</string>
+    <string name="sports_hub_reason_home_local">Home team\'s local channel. It may show a different game where you live.</string>
+    <string name="sports_hub_reason_away_local">Away team\'s local channel. It may show a different game where you live.</string>
+    <string name="sports_hub_reason_possible">May carry this game. Check the channel.</string>
+    <string name="sports_hub_regional_note">Regional channels may show a different game where you are.</string>
+    <!-- Quality variants. %1$s = "FHD, 4K". -->
+    <string name="sports_hub_also">Also: %1$s</string>
+    <!-- OK on a row of a game more than 30 min away. %1$s = the start time. -->
+    <string name="sports_hub_starts_at_toast">The game starts at %1$s. Come back then to watch it.</string>
+    <!-- Catch-up row. %1$s = the channel name. -->
+    <string name="sports_hub_catchup_row">Full game from the start · %1$s (catch-up)</string>
+
+    <!-- ==== Sheet titles (§6.4). %1$s / %2$s = the away / home abbreviations ("UTA", "WPG"). -->
+    <string name="sports_hub_sheet_goals">Goals · %1$s at %2$s</string>
+    <string name="sports_hub_sheet_channels">Channels · %1$s at %2$s</string>
+    <string name="sports_hub_sheet_box_score">Box score · %1$s at %2$s</string>
+    <string name="sports_hub_sheet_matchup">Matchup · %1$s at %2$s</string>
+
+    <!-- ==== Goals sheet (§6.4) -->
+    <!-- Line 1. %1$s = "G. Vilardi", %2$d = his goals to date. -->
+    <string name="sports_hub_goal_line1">%1$s (%2$d)</string>
+    <string name="sports_hub_goal_tag_pp">PP</string>
+    <string name="sports_hub_goal_tag_sh">SH</string>
+    <string name="sports_hub_goal_tag_en">EN</string>
+    <!-- Line 2 pieces, joined by " · ". %1$s = the period ("1st"), %2$s = the time ("5:11"). -->
+    <string name="sports_hub_goal_when">%1$s %2$s</string>
+    <!-- %1$s = the leading team's abbreviation, %2$d / %3$d = the score, leader first. -->
+    <string name="sports_hub_goal_leads">%1$s leads %2$d–%3$d</string>
+    <string name="sports_hub_goal_tied">Tied %1$d–%2$d</string>
+    <string name="sports_hub_goal_video_soon">Video soon</string>
+    <string name="sports_hub_goal_no_video_toast">This goal\'s video isn\'t posted yet. It usually appears a few minutes after the goal.</string>
+    <string name="sports_hub_row_recap">Game recap</string>
+    <!-- %1$s = the duration ("9:50"). -->
+    <string name="sports_hub_row_condensed">Condensed game · %1$s</string>
+    <string name="sports_hub_row_condensed_plain">Condensed game</string>
+
+    <!-- ==== Box score sheet (§6.4, U-N7) -->
+    <string name="sports_hub_box_player">Player</string>
+    <string name="sports_hub_box_g">G</string>
+    <string name="sports_hub_box_a">A</string>
+    <string name="sports_hub_box_p">P</string>
+    <string name="sports_hub_box_plus_minus">+/−</string>
+    <string name="sports_hub_box_sog">SOG</string>
+    <string name="sports_hub_box_toi">TOI</string>
+    <string name="sports_hub_box_forwards">Forwards</string>
+    <string name="sports_hub_box_defense">Defense</string>
+    <string name="sports_hub_box_goalies">Goalies</string>
+    <string name="sports_hub_box_sa">SA</string>
+    <string name="sports_hub_box_sv">SV</string>
+    <string name="sports_hub_box_sv_pct" formatted="false">SV%</string>
+    <!-- Player cell. %1$s = the name, %2$s = the sweater number, %3$s = the position ("C"). -->
+    <string name="sports_hub_box_player_cell">%1$s · #%2$s · %3$s</string>
+
+    <!-- ==== Matchup sheet (§6.4) -->
+    <string name="sports_hub_matchup_leaders">Leaders · last 5 games</string>
+    <string name="sports_hub_matchup_points">Points</string>
+    <string name="sports_hub_matchup_goals">Goals</string>
+    <string name="sports_hub_matchup_assists">Assists</string>
+    <string name="sports_hub_matchup_goalies">Goalies · this season</string>
+    <string name="sports_hub_matchup_gaa">GAA</string>
+    <string name="sports_hub_matchup_sv_pct" formatted="false">SV%</string>
+
+    <!-- ==== Clip player (§6.5) -->
+    <!-- %1$d / %2$d = goal k of n; %3$s / %4$s = away / home abbreviations; %5$s = when ("1st 5:11"). -->
+    <string name="sports_hub_clip_goal_sub">Goal %1$d of %2$d · %3$s at %4$s · %5$s</string>
+    <string name="sports_hub_clip_recap_sub">Game recap · %1$s at %2$s</string>
+    <string name="sports_hub_clip_condensed_sub">Condensed game · %1$s at %2$s</string>
+    <!-- %1$s = the next clip's title. -->
+    <string name="sports_hub_clip_up_next">Up next: %1$s</string>
+    <string name="sports_hub_clip_try_again">Try again</string>
+    <string name="sports_hub_clip_back">Back</string>
+
+    <!-- ==== Footer hint labels (§2.6, §6.5) -->
+    <string name="sports_hub_hint_browse">Browse</string>
+    <string name="sports_hub_hint_options">Options</string>
+    <string name="sports_hub_hint_guide">Guide</string>
+    <string name="sports_hub_hint_choose">Choose</string>
+    <string name="sports_hub_hint_games">Games</string>
+    <string name="sports_hub_hint_show">Show</string>
+    <string name="sports_hub_hint_play">Play</string>
+    <string name="sports_hub_hint_watch">Watch</string>
+    <string name="sports_hub_hint_away_home">Away / Home</string>
+    <string name="sports_hub_hint_close">Close</string>
+    <string name="sports_hub_hint_pause">Pause</string>
+    <string name="sports_hub_hint_seek">10 s</string>
+    <string name="sports_hub_hint_done">Done</string>
+
+    <!-- ==== Errors: detail (§4.5) -->
+    <string name="sports_hub_error_detail_retry">Couldn\'t load game stats from NHL.com. Trying again automatically. Select Retry to try now.</string>
+    <string name="sports_hub_error_detail_limited">NHL.com is limiting requests right now. Stats load again in a few minutes.</string>
+    <string name="sports_hub_error_detail_changed">NHL.com changed how it sends game stats. Scores still update; stats need an app update.</string>
+    <string name="sports_hub_error_detail_offline">No internet connection. Stats load again when the network is back.</string>
+    <string name="sports_hub_error_box_score">Couldn\'t load the box score from NHL.com. Select Retry, or press Back to close.</string>
+
+    <!-- ==== Errors: video (§6.8) -->
+    <string name="sports_hub_error_video_unavailable">The NHL video service didn\'t answer. Try again in a minute.</string>
+    <string name="sports_hub_error_video_offline">No internet connection. Videos play again when the network is back.</string>
+    <string name="sports_hub_error_video_refused">NHL videos aren\'t available in this app right now. Scores and stats still work.</string>
+    <string name="sports_hub_error_video_geo">This video isn\'t available in your region. The scores and stats still work.</string>
+    <string name="sports_hub_error_video_removed">The NHL removed this video. Pick another clip.</string>
+    <string name="sports_hub_error_video_not_playable">This video can\'t play on this device. Scores and stats still work.</string>
+    <string name="sports_hub_error_video_stopped">The video stopped loading. Select Try again, or press Back to return to the game.</string>
+
+    <!-- ==== Content descriptions (§8.2) -->
+    <!-- Card. %1$s away name, %2$d away score, %3$s home name, %4$d home score. -->
+    <string name="sports_hub_desc_card_score">%1$s %2$d, at %3$s %4$d.</string>
+    <!-- Card before the game. %1$s away, %2$s home. -->
+    <string name="sports_hub_desc_card_matchup">%1$s at %2$s.</string>
+    <string name="sports_hub_desc_following">Following.</string>
+    <!-- %1$s = the enabled slot labels, comma-joined. -->
+    <string name="sports_hub_desc_press_ok">Press OK for options: %1$s.</string>
+    <!-- Panel pane title. %1$s / %2$s = away / home nicknames. -->
+    <string name="sports_hub_desc_panel">Game details: %1$s at %2$s</string>
+    <!-- Stat row. %1$s label, %2$s away nickname, %3$s away value, %4$s home nickname, %5$s home value. -->
+    <string name="sports_hub_desc_stat">%1$s: %2$s %3$s, %4$s %5$s</string>
+    <!-- Media. %1$s = the spoken duration ("4 minutes 55"). -->
+    <string name="sports_hub_desc_media_recap">Game recap, %1$s</string>
+    <!-- Media. %1$s away, %2$s home, %3$s the start time. -->
+    <string name="sports_hub_desc_media_matchup">Matchup: %1$s at %2$s, %3$s</string>
+    <!-- Clip progress. %1$s / %2$s = spoken durations. -->
+    <string name="sports_hub_desc_progress">%1$s of %2$s</string>
+    <!-- Channel row. %1$s name, %2$s playlist, %3$s reason. -->
+    <string name="sports_hub_desc_channel_row">%1$s, %2$s. %3$s</string>
+    <plurals name="sports_hub_desc_minutes">
+        <item quantity="one">%1$d minute</item>
+        <item quantity="other">%1$d minutes</item>
+    </plurals>
+    <plurals name="sports_hub_desc_seconds">
+        <item quantity="one">%1$d second</item>
+        <item quantity="other">%1$d seconds</item>
+    </plurals>
+</resources>

@@ -7,6 +7,7 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.compose.runtime.collectAsState
 import androidx.lifecycle.lifecycleScope
 import app.thebox.core.guide.GuideRenderer
 import app.thebox.player.api.PlaybackController
@@ -107,6 +108,8 @@ class MainActivity : ComponentActivity() {
         player.runTicker(lifecycle)
         host.startup()
         lifecycleScope.launch { search.effects.collect { host.onSearchEffect(it) } }
+        // (Sports Hub commit 0, docs/design/m6-sports-hub.md §4.1, A-S6) Tune / catch-up / clip resume from the Sports page.
+        lifecycleScope.launch { sportsVm.effects.collect { host.onSportsEffect(it) } }
         setContent {
             BoxTheme {
                 AppRoot(
@@ -117,6 +120,8 @@ class MainActivity : ComponentActivity() {
                     search = { SearchScreen(search, onIdleChanged = { idle -> host.searchFieldIdle = idle }) },
                     // The "idle" flag is the router's BACK gate in SEARCH and SPORTS alike (SportsScreen: no choice list open).
                     sports = { clock24 -> app.thebox.ui.sports.SportsScreen(sportsVm, clock24, onBackFreeChanged = { free -> host.searchFieldIdle = free }) },
+                    // (Sports Hub commit 0, §6.5) The clip layer's state: SPORTS + a clip → a FULL hole (WP-5).
+                    sportsClip = sportsVm.clipUi.collectAsState(),
                     weather = { clock24 -> app.thebox.ui.weather.WeatherScreen(weatherVm, clock24, onBackFreeChanged = { free -> host.searchFieldIdle = free }) },
                     settingsPhone = { purpose, browse -> app.thebox.ui.backup.PhoneSetupHost(phone, purpose, browse = browse) },
                     settingsEditor = { route -> app.thebox.ui.editor.ChannelEditorHost(channelEditor, route) },

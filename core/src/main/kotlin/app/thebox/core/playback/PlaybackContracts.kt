@@ -156,6 +156,8 @@ enum class PlaybackErrorCode(val key: String, val defaultSteps: List<NextStep>) 
     CATCHUP_NOT_IN_ARCHIVE("play.catchup_missing", listOf(NextStep.WATCH_LIVE, NextStep.TRY_OTHER_CATCHUP_MODE)),
     CHANNEL_NOT_FOUND("play.channel_missing", listOf(NextStep.REFRESH_PLAYLIST)),
     INTERNAL("play.internal", listOf(NextStep.RETRY, NextStep.DIAGNOSTICS)),
+    /** (Sports Hub commit 0, docs/design/m6-sports-hub.md §6.1, R-S5) A 403 / 410 on a clip's media: its signed URL expired. */
+    CLIP_EXPIRED("play.clip_expired", listOf(NextStep.RETRY)),
 }
 
 /** Facts shown in the error card's detail line. All strings are already redacted (hosts only, no paths/queries). */

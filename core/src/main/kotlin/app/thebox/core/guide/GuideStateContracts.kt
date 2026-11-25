@@ -146,6 +146,12 @@ sealed interface GuideEvent {
      * follows the first archive Tuned only (a failed launch stays in the guide).
      */
     data class SearchClosed(val channel: GuideChannel?, val tuned: Boolean, val archive: Boolean = false) : GuideEvent
+    /**
+     * (Sports Hub commit 0, docs/design/m6-sports-hub.md §5.5, A-S6) SPORTS closed after a channel was picked there:
+     * handled as [SearchClosed] handles a tuned channel (focus [channel] in the grid, go FULL on its first Tuned; [archive]:
+     * a catch-up launch, FULL follows the first archive Tuned only). The BACK path (`onSportsClosed()`) is unchanged.
+     */
+    data class SportsClosed(val channel: GuideChannel, val tuned: Boolean, val archive: Boolean) : GuideEvent
     data class DataWindow(val window: GuideDataWindow) : GuideEvent
     /** Missed reminders found on start (N5): a toast with the count. */
     data class MissedReminders(val count: Int) : GuideEvent

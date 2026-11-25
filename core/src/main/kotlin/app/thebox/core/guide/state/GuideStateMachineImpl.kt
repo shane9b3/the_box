@@ -401,6 +401,8 @@ class GuideStateMachineImpl(
             is GuideEvent.Sync -> u = u.copy(sync = event.chip)
             is GuideEvent.Metrics -> { frame.metrics = event.metrics; frameDirty = true }
             is GuideEvent.SearchClosed -> onSearchClosed(event.channel, event.tuned, event.archive)
+            // (Sports Hub commit 0) WP-3 handles it as onSearchClosed does a tuned channel (§5.5); nothing sends it yet.
+            is GuideEvent.SportsClosed -> Unit
             is GuideEvent.DataWindow -> { dataWindow = event.window; recomputeLimits(reclamp = true) }
             is GuideEvent.MissedReminders -> if (event.count > 0) effects.toast(GuideToast.REMINDERS_MISSED, event.count.toString())
             // M4 (docs/design/m4-player-ux.md §3.1.1, §0.6, owner ruling 2026-10-15)

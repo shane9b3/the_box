@@ -176,6 +176,12 @@ fun AppRoot(
     search: @Composable () -> Unit = {},
     /** (docs/design/m6-score-bug.md §5.1) The Sports screen (the activity owns its view model); an opaque canvas by default. */
     sports: @Composable (clock24: Boolean) -> Unit = {},
+    /**
+     * (Sports Hub commit 0, docs/design/m6-sports-hub.md §6.5) The clip layer's state (`SportsViewModel.clipUi`). WP-5
+     * reads it: `holeModeFor` gives FULL for SPORTS while [ClipUi.showing][app.thebox.ui.sports.ClipUi.showing], `beneath`
+     * is not updated then, and the hole stays black until the clip's first frame. Unused until then.
+     */
+    @Suppress("UNUSED_PARAMETER") sportsClip: androidx.compose.runtime.State<app.thebox.ui.sports.ClipUi> = app.thebox.ui.sports.NoSportsClip,
     /** (Weather page 2026-11-19) The Weather screen, hosted like [sports]. */
     weather: @Composable (clock24: Boolean) -> Unit = {},
     /** (M5 integration) WP-D's phone page for `SettingsRoute.PhoneSetup` (the activity owns its view model). */

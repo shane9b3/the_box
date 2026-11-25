@@ -1,0 +1,192 @@
+{
+ "poster": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/image/v1/static/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/39e9aaf8-2190-4f59-9fa9-58af1955477b/1280x720/match/image.jpg?redacted=1",
+ "thumbnail": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/image/v1/static/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/4e09c4dc-b610-4a7b-8593-b7db6ea2c0e4/208x117/match/image.jpg?redacted=1",
+ "poster_sources": [
+  {
+   "src": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/image/v1/static/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/39e9aaf8-2190-4f59-9fa9-58af1955477b/1280x720/match/image.jpg?redacted=1"
+  }
+ ],
+ "thumbnail_sources": [
+  {
+   "src": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/image/v1/static/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/4e09c4dc-b610-4a7b-8593-b7db6ea2c0e4/208x117/match/image.jpg?redacted=1"
+  }
+ ],
+ "description": "UTA@WPG: Vilardi gets Jets on the board first",
+ "tags": [
+  "game/gameid-2026020382",
+  "taxonomy/highlight",
+  "team/teamid-52",
+  "player/playerid-8480014",
+  "taxonomy/goal",
+  "taxonomy/2026-27",
+  "taxonomy/real-time-highlight",
+  "taxonomy/nhl"
+ ],
+ "cue_points": [],
+ "custom_fields": {
+  "acl": "site-group-nhl",
+  "audio_language": "en",
+  "broadcast_team": "52",
+  "club_context": "taxonomy/nhl",
+  "content_date": "2026-11-24T00:55:28Z",
+  "game_id": "2026020382",
+  "headline": "Vilardi strikes first",
+  "list_availability": "Public",
+  "photo_slug": "gettyimages-2306092200",
+  "production_source": "wsc-avgen",
+  "slug": "uta-wpg-vilardi-scores-goal-against-sebastian-cossa-6408791393112",
+  "stats_event_id": "116",
+  "video_type": "highlight",
+  "wsc_video_id": "79276799"
+ },
+ "account_id": "6415718365001",
+ "sources": [
+  {
+   "codecs": "avc1,mp4a",
+   "ext_x_version": "4",
+   "src": "http://manifest.prod.boltdns.net/manifest/v1/hls/v4/clear/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/6s/master.m3u8?redacted=1",
+   "type": "application/x-mpegURL"
+  },
+  {
+   "codecs": "avc1,mp4a",
+   "ext_x_version": "4",
+   "src": "https://manifest.prod.boltdns.net/manifest/v1/hls/v4/clear/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/6s/master.m3u8?redacted=1",
+   "type": "application/x-mpegURL"
+  },
+  {
+   "codecs": "avc1,mp4a",
+   "profiles": "urn:mpeg:dash:profile:isoff-live:2011",
+   "src": "http://manifest.prod.boltdns.net/manifest/v1/dash/live-baseurl/clear/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/6s/manifest.mpd?redacted=1",
+   "type": "application/dash+xml"
+  },
+  {
+   "codecs": "avc1,mp4a",
+   "profiles": "urn:mpeg:dash:profile:isoff-live:2011",
+   "src": "https://manifest.prod.boltdns.net/manifest/v1/dash/live-baseurl/clear/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/6s/manifest.mpd?redacted=1",
+   "type": "application/dash+xml"
+  },
+  {
+   "avg_bitrate": 2161000,
+   "codec": "H264",
+   "container": "MP4",
+   "duration": 46000,
+   "height": 720,
+   "size": 12469614,
+   "src": "http://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/pmp4/static/clear/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/532806e4-a4c2-4f50-b5b9-7950e3763064/main.mp4?redacted=1",
+   "width": 1280
+  },
+  {
+   "avg_bitrate": 2161000,
+   "codec": "H264",
+   "container": "MP4",
+   "duration": 46000,
+   "height": 720,
+   "size": 12469614,
+   "src": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/pmp4/static/clear/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/532806e4-a4c2-4f50-b5b9-7950e3763064/main.mp4?redacted=1",
+   "width": 1280
+  }
+ ],
+ "video_preview": [
+  {
+   "ext_x_version": "7",
+   "src": "http://manifest.prod.boltdns.net/manifest/v2/hls/v7/clear/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/6s/preview.m3u8?redacted=1",
+   "type": "application/x-mpegURL"
+  },
+  {
+   "ext_x_version": "7",
+   "src": "https://manifest.prod.boltdns.net/manifest/v2/hls/v7/clear/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/6s/preview.m3u8?redacted=1",
+   "type": "application/x-mpegURL"
+  }
+ ],
+ "name": "Vilardi strikes first",
+ "reference_id": "87cee8c0-c645-4604-8c62-5bd3b874abb4",
+ "long_description": "Kyle Connor sends the feed to Gabriel Vilardi who lifts the backhand top-shelf, beating Sebastian Cossa to open the scoring",
+ "duration": 46045,
+ "economics": "AD_SUPPORTED",
+ "text_tracks": [
+  {
+   "id": "ad3fd056-a611-4e87-91b9-d2775cebe617",
+   "account_id": "6415718365001",
+   "src": "http://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/text/vtt/clear/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/ad3fd056-a611-4e87-91b9-d2775cebe617/text.vtt?redacted=1",
+   "srclang": "en",
+   "label": "en",
+   "kind": "captions",
+   "mime_type": "text/webvtt",
+   "asset_id": null,
+   "sources": [
+    {
+     "src": "http://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/text/vtt/clear/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/ad3fd056-a611-4e87-91b9-d2775cebe617/text.vtt?redacted=1"
+    },
+    {
+     "src": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/text/vtt/clear/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/ad3fd056-a611-4e87-91b9-d2775cebe617/text.vtt?redacted=1"
+    }
+   ],
+   "in_band_metadata_track_dispatch_type": "",
+   "default": false
+  },
+  {
+   "id": null,
+   "account_id": "6415718365001",
+   "src": "http://manifest.prod.boltdns.net/thumbnail/v1/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/fe876305-c669-4280-b996-68735ec56549/thumbnail.webvtt?redacted=1",
+   "srclang": null,
+   "label": "thumbnails",
+   "kind": "metadata",
+   "mime_type": "text/webvtt",
+   "asset_id": null,
+   "sources": null,
+   "default": false,
+   "width": 480,
+   "height": 270,
+   "bandwidth": 455
+  },
+  {
+   "id": null,
+   "account_id": "6415718365001",
+   "src": "https://manifest.prod.boltdns.net/thumbnail/v1/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/fe876305-c669-4280-b996-68735ec56549/thumbnail.webvtt?redacted=1",
+   "srclang": null,
+   "label": "thumbnails",
+   "kind": "metadata",
+   "mime_type": "text/webvtt",
+   "asset_id": null,
+   "sources": null,
+   "default": false,
+   "width": 480,
+   "height": 270,
+   "bandwidth": 455
+  }
+ ],
+ "published_at": "2026-11-24T00:55:28.514Z",
+ "created_at": "2026-11-24T00:55:28.514Z",
+ "updated_at": "2026-11-24T03:39:05.351Z",
+ "offline_enabled": false,
+ "link": null,
+ "id": "6408791393112",
+ "ad_keys": null,
+ "variants": [
+  {
+   "poster": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/39e9aaf8-2190-4f59-9fa9-58af1955477b/1280x720/match/image.jpg",
+   "thumbnail": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/4e09c4dc-b610-4a7b-8593-b7db6ea2c0e4/208x117/match/image.jpg",
+   "poster_sources": [
+    {
+     "src": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/39e9aaf8-2190-4f59-9fa9-58af1955477b/1280x720/match/image.jpg"
+    }
+   ],
+   "thumbnail_sources": [
+    {
+     "src": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/39d7d149-5c24-402c-89a8-2e8e26e85ae3/4e09c4dc-b610-4a7b-8593-b7db6ea2c0e4/208x117/match/image.jpg"
+    }
+   ],
+   "language": "en-US",
+   "name": "Vilardi strikes first",
+   "description": "UTA@WPG: Vilardi gets Jets on the board first",
+   "long_description": "Kyle Connor sends the feed to Gabriel Vilardi who lifts the backhand top-shelf, beating Sebastian Cossa to open the scoring",
+   "custom_fields": {
+    "audio_language": "en",
+    "headline": "Vilardi strikes first",
+    "slug": "uta-wpg-vilardi-scores-goal-against-sebastian-cossa-6408791393112",
+    "stats_event_id": "116"
+   }
+  }
+ ],
+ "manifest_url_ttl": 3600
+}

@@ -1,0 +1,295 @@
+{
+ "poster": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/image/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/3ea8f6b4-a818-42b1-89e6-6573263ac312/1280x720/match/image.jpg?redacted=1",
+ "thumbnail": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/image/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/1d98e6d9-cc4c-4557-9e87-940ee87a72ff/208x117/match/image.jpg?redacted=1",
+ "poster_sources": [
+  {
+   "src": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/image/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/3ea8f6b4-a818-42b1-89e6-6573263ac312/1280x720/match/image.jpg?redacted=1"
+  }
+ ],
+ "thumbnail_sources": [
+  {
+   "src": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/image/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/1d98e6d9-cc4c-4557-9e87-940ee87a72ff/208x117/match/image.jpg?redacted=1"
+  }
+ ],
+ "description": "UTA at WPG | Recap",
+ "tags": [
+  "game/gameid-2026020382",
+  "taxonomy/national-broadcast",
+  "taxonomy/game-recap",
+  "taxonomy/highlight",
+  "team/teamid-52",
+  "team/teamid-68",
+  "taxonomy/wpg-broadcast",
+  "taxonomy/2026-27"
+ ],
+ "cue_points": [],
+ "custom_fields": {
+  "acl": "site-group-nhl",
+  "audio_language": "en",
+  "broadcast_team": "52",
+  "club_context": "taxonomy/nhl",
+  "content_date": "2026-11-24T03:20:04Z",
+  "game_id": "2026020382",
+  "headline": "UTA at WPG | Recap",
+  "list_availability": "Public",
+  "photo_slug": "uta-at-wpg-recap-6408795671112",
+  "production_source": "wsc-avgen",
+  "slug": "uta-at-wpg-recap-6408795671112",
+  "video_type": "recap",
+  "wsc_video_id": "79301617"
+ },
+ "account_id": "6415718365001",
+ "sources": [
+  {
+   "codecs": "avc1,mp4a",
+   "ext_x_version": "4",
+   "src": "http://manifest.prod.boltdns.net/manifest/v1/hls/v4/clear/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/6s/master.m3u8?redacted=1",
+   "type": "application/x-mpegURL"
+  },
+  {
+   "codecs": "avc1,mp4a",
+   "ext_x_version": "4",
+   "src": "https://manifest.prod.boltdns.net/manifest/v1/hls/v4/clear/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/6s/master.m3u8?redacted=1",
+   "type": "application/x-mpegURL"
+  },
+  {
+   "codecs": "avc1,mp4a",
+   "profiles": "urn:mpeg:dash:profile:isoff-live:2011",
+   "src": "http://manifest.prod.boltdns.net/manifest/v1/dash/live-baseurl/clear/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/6s/manifest.mpd?redacted=1",
+   "type": "application/dash+xml"
+  },
+  {
+   "codecs": "avc1,mp4a",
+   "profiles": "urn:mpeg:dash:profile:isoff-live:2011",
+   "src": "https://manifest.prod.boltdns.net/manifest/v1/dash/live-baseurl/clear/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/6s/manifest.mpd?redacted=1",
+   "type": "application/dash+xml"
+  },
+  {
+   "avg_bitrate": 2122000,
+   "codec": "H264",
+   "container": "MP4",
+   "duration": 295127,
+   "height": 720,
+   "size": 78553796,
+   "src": "http://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/pmp4/static/clear/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/ec2ed752-e637-4028-ba6f-7e1f6d636e65/main.mp4?redacted=1",
+   "width": 1280
+  },
+  {
+   "avg_bitrate": 2122000,
+   "codec": "H264",
+   "container": "MP4",
+   "duration": 295127,
+   "height": 720,
+   "size": 78553796,
+   "src": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/pmp4/static/clear/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/ec2ed752-e637-4028-ba6f-7e1f6d636e65/main.mp4?redacted=1",
+   "width": 1280
+  }
+ ],
+ "video_preview": [
+  {
+   "ext_x_version": "7",
+   "src": "http://manifest.prod.boltdns.net/manifest/v2/hls/v7/clear/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/6s/preview.m3u8?redacted=1",
+   "type": "application/x-mpegURL"
+  },
+  {
+   "ext_x_version": "7",
+   "src": "https://manifest.prod.boltdns.net/manifest/v2/hls/v7/clear/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/6s/preview.m3u8?redacted=1",
+   "type": "application/x-mpegURL"
+  }
+ ],
+ "name": "UTA at WPG | Recap",
+ "reference_id": "8be9e7f4-c802-4f9d-a6ce-06e05be5175c",
+ "long_description": "Game-changing highlights from the matchup between the Utah Mammoth and the Winnipeg Jets",
+ "duration": 295172,
+ "economics": "AD_SUPPORTED",
+ "text_tracks": [
+  {
+   "id": "fbc43862-d0f6-4cd4-904f-6edd08ac39c7",
+   "account_id": "6415718365001",
+   "src": "http://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/text/vtt/clear/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/fbc43862-d0f6-4cd4-904f-6edd08ac39c7/text.vtt?redacted=1",
+   "srclang": "en",
+   "label": "en",
+   "kind": "captions",
+   "mime_type": "text/webvtt",
+   "asset_id": null,
+   "sources": [
+    {
+     "src": "http://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/text/vtt/clear/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/fbc43862-d0f6-4cd4-904f-6edd08ac39c7/text.vtt?redacted=1"
+    },
+    {
+     "src": "https://fastly-signed-us-east-1-prod.brightcovecdn.com/media/v1/text/vtt/clear/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/fbc43862-d0f6-4cd4-904f-6edd08ac39c7/text.vtt?redacted=1"
+    }
+   ],
+   "in_band_metadata_track_dispatch_type": "",
+   "default": false
+  },
+  {
+   "id": null,
+   "account_id": "6415718365001",
+   "src": "http://manifest.prod.boltdns.net/thumbnail/v1/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/48f5676a-f320-4123-94a8-51db3f527570/thumbnail.webvtt?redacted=1",
+   "srclang": null,
+   "label": "thumbnails",
+   "kind": "metadata",
+   "mime_type": "text/webvtt",
+   "asset_id": null,
+   "sources": null,
+   "default": false,
+   "width": 480,
+   "height": 270,
+   "bandwidth": 449
+  },
+  {
+   "id": null,
+   "account_id": "6415718365001",
+   "src": "https://manifest.prod.boltdns.net/thumbnail/v1/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/48f5676a-f320-4123-94a8-51db3f527570/thumbnail.webvtt?redacted=1",
+   "srclang": null,
+   "label": "thumbnails",
+   "kind": "metadata",
+   "mime_type": "text/webvtt",
+   "asset_id": null,
+   "sources": null,
+   "default": false,
+   "width": 480,
+   "height": 270,
+   "bandwidth": 449
+  }
+ ],
+ "published_at": "2026-11-24T03:20:04.904Z",
+ "created_at": "2026-11-24T03:20:04.904Z",
+ "updated_at": "2026-11-24T03:41:43.649Z",
+ "offline_enabled": false,
+ "link": null,
+ "id": "6408795671112",
+ "ad_keys": null,
+ "variants": [
+  {
+   "poster": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/3ea8f6b4-a818-42b1-89e6-6573263ac312/1280x720/match/image.jpg",
+   "thumbnail": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/1d98e6d9-cc4c-4557-9e87-940ee87a72ff/208x117/match/image.jpg",
+   "poster_sources": [
+    {
+     "src": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/3ea8f6b4-a818-42b1-89e6-6573263ac312/1280x720/match/image.jpg"
+    }
+   ],
+   "thumbnail_sources": [
+    {
+     "src": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/1d98e6d9-cc4c-4557-9e87-940ee87a72ff/208x117/match/image.jpg"
+    }
+   ],
+   "language": "es",
+   "name": "UTA at WPG | Recap",
+   "custom_fields": {
+    "audio_language": "en",
+    "headline": "Resumen: WPG 4, UTA 2",
+    "slug": "uta-at-wpg-recap-6408795671112"
+   }
+  },
+  {
+   "poster": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/3ea8f6b4-a818-42b1-89e6-6573263ac312/1280x720/match/image.jpg",
+   "thumbnail": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/1d98e6d9-cc4c-4557-9e87-940ee87a72ff/208x117/match/image.jpg",
+   "poster_sources": [
+    {
+     "src": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/3ea8f6b4-a818-42b1-89e6-6573263ac312/1280x720/match/image.jpg"
+    }
+   ],
+   "thumbnail_sources": [
+    {
+     "src": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/1d98e6d9-cc4c-4557-9e87-940ee87a72ff/208x117/match/image.jpg"
+    }
+   ],
+   "language": "cs",
+   "name": "UTA at WPG | Recap",
+   "custom_fields": {
+    "audio_language": "en",
+    "headline": "Sestřih: WPG-UTA 4:2",
+    "slug": "uta-at-wpg-recap-6408795671112"
+   }
+  },
+  {
+   "poster": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/3ea8f6b4-a818-42b1-89e6-6573263ac312/1280x720/match/image.jpg",
+   "thumbnail": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/1d98e6d9-cc4c-4557-9e87-940ee87a72ff/208x117/match/image.jpg",
+   "poster_sources": [
+    {
+     "src": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/3ea8f6b4-a818-42b1-89e6-6573263ac312/1280x720/match/image.jpg"
+    }
+   ],
+   "thumbnail_sources": [
+    {
+     "src": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/1d98e6d9-cc4c-4557-9e87-940ee87a72ff/208x117/match/image.jpg"
+    }
+   ],
+   "language": "sv",
+   "name": "UTA at WPG | Recap",
+   "custom_fields": {
+    "audio_language": "en",
+    "headline": "Höjdpunkter: WPG-UTA 4-2",
+    "slug": "uta-at-wpg-recap-6408795671112"
+   }
+  },
+  {
+   "poster": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/3ea8f6b4-a818-42b1-89e6-6573263ac312/1280x720/match/image.jpg",
+   "thumbnail": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/1d98e6d9-cc4c-4557-9e87-940ee87a72ff/208x117/match/image.jpg",
+   "poster_sources": [
+    {
+     "src": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/3ea8f6b4-a818-42b1-89e6-6573263ac312/1280x720/match/image.jpg"
+    }
+   ],
+   "thumbnail_sources": [
+    {
+     "src": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/1d98e6d9-cc4c-4557-9e87-940ee87a72ff/208x117/match/image.jpg"
+    }
+   ],
+   "language": "fi",
+   "name": "UTA at WPG | Recap",
+   "custom_fields": {
+    "audio_language": "en",
+    "headline": "Kooste: WPG-UTA 4-2",
+    "slug": "uta-at-wpg-recap-6408795671112"
+   }
+  },
+  {
+   "poster": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/3ea8f6b4-a818-42b1-89e6-6573263ac312/1280x720/match/image.jpg",
+   "thumbnail": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/1d98e6d9-cc4c-4557-9e87-940ee87a72ff/208x117/match/image.jpg",
+   "poster_sources": [
+    {
+     "src": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/3ea8f6b4-a818-42b1-89e6-6573263ac312/1280x720/match/image.jpg"
+    }
+   ],
+   "thumbnail_sources": [
+    {
+     "src": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/1d98e6d9-cc4c-4557-9e87-940ee87a72ff/208x117/match/image.jpg"
+    }
+   ],
+   "language": "sk",
+   "name": "UTA at WPG | Recap",
+   "custom_fields": {
+    "audio_language": "en",
+    "headline": "Zostrih: WPG-UTA 4:2",
+    "slug": "uta-at-wpg-recap-6408795671112"
+   }
+  },
+  {
+   "poster": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/3ea8f6b4-a818-42b1-89e6-6573263ac312/1280x720/match/image.jpg",
+   "thumbnail": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/1d98e6d9-cc4c-4557-9e87-940ee87a72ff/208x117/match/image.jpg",
+   "poster_sources": [
+    {
+     "src": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/3ea8f6b4-a818-42b1-89e6-6573263ac312/1280x720/match/image.jpg"
+    }
+   ],
+   "thumbnail_sources": [
+    {
+     "src": "https://cf-images.us-east-1.prod.boltdns.net/v1/static/6415718365001/96976a69-bc1a-4c05-8633-9027f51bc195/1d98e6d9-cc4c-4557-9e87-940ee87a72ff/208x117/match/image.jpg"
+    }
+   ],
+   "language": "en-US",
+   "name": "UTA at WPG | Recap",
+   "description": "UTA at WPG | Recap",
+   "long_description": "Game-changing highlights from the matchup between the Utah Mammoth and the Winnipeg Jets",
+   "custom_fields": {
+    "audio_language": "en",
+    "headline": "UTA at WPG | Recap",
+    "slug": "uta-at-wpg-recap-6408795671112"
+   }
+  }
+ ],
+ "manifest_url_ttl": 3600
+}

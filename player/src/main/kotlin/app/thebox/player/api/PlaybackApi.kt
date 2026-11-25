@@ -2,8 +2,10 @@ package app.thebox.player.api
 
 import androidx.media3.common.Player
 import app.thebox.core.catchup.ArchiveRequest
+import app.thebox.core.common.Redact
 import app.thebox.core.playback.*
 import app.thebox.core.refresh.ChannelIdentity
+import app.thebox.core.sports.hub.ClipFormat
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
 
@@ -105,6 +107,13 @@ interface PlaybackController {
      * within `GAP_HANDOFF_TIMEOUT_MS`.
      */
     fun skipGapLocal(): Boolean = false
+
+    // Sports Hub commit 0 (docs/design/m6-sports-hub.md §6.1, §6.5): WP-2 overrides it in PlaybackControllerImpl.
+    /**
+     * Plays [tune] on the one player (a clip cycle, `Spec.Clip`); returns the clip cycle's tune id. Nothing about
+     * resuming (A-B2): `ClipSession` owns that. Default for fakes: -1 (nothing played).
+     */
+    fun playClip(tune: ClipTune): Long = -1
 }
 
 /** (Time-shift) The local buffer of the current live cycle. Wall times converted once per snapshot from mono. */
@@ -204,6 +213,15 @@ interface ZapList {
 /** [request] comes straight from CatchupUrlBuilder.build (credentials still templated; M2 expands them last). */
 data class ArchiveTune(val identity: ChannelIdentity, val request: ArchiveRequest, val startOffsetMs: Long = 0)
 
+/**
+ * (Sports Hub commit 0, §6.1) One clip for [PlaybackController.playClip]: a signed media [url] (never logged: the
+ * `toString` names the host only), its [format], an optional WebVTT [captionsUrl], the [title] for `NowPlaying`, and
+ * where to start ([startMs], for the expired-URL re-resolve).
+ */
+data class ClipTune(val url: String, val format: ClipFormat, val captionsUrl: String?, val title: String, val startMs: Long = 0) {
+    override fun toString() = "ClipTune(${Redact.host(url)}, $format)"
+}
+
 // ---- M3 commit 0 (docs/design/m3-guide.md §2.8): the catch-up seam, additive.
 
 /** (reviewed 2026-10-14, S13) Distinguishes "channel gone" from "credentials missing" so the toast names the right next step. */
@@ -241,6 +259,8 @@ data class NowPlaying(
     val title: String?,
     val isArchive: Boolean,
     val format: StreamFormat,
+    /** (Sports Hub commit 0, §6.5) A clip cycle: identity null, [isArchive] false, [title] the clip's title. */
+    val isClip: Boolean = false,
 )
 
 enum class ConnectPhase { RESOLVING, WAITING_FOR_SLOT, CONNECTING, BUFFERING_INITIAL, SWITCHING_DISPLAY_MODE }

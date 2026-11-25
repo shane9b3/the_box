@@ -13,6 +13,10 @@ import app.thebox.core.sports.DeviceAwake
 import app.thebox.core.sports.League
 import app.thebox.core.sports.ScoreRepository
 import app.thebox.core.sports.ScoreSource
+import app.thebox.core.sports.hub.ClipResolver
+import app.thebox.core.sports.hub.GameChannelMatcher
+import app.thebox.core.sports.hub.GameDetailRepository
+import app.thebox.core.sports.hub.GameDetailSource
 import app.thebox.data.di.ApiClient
 import dagger.Binds
 import dagger.BindsOptionalOf
@@ -40,6 +44,15 @@ abstract class SportsModule {
     @Binds abstract fun scoreRepository(impl: ScoreRepositoryImpl): ScoreRepository
 
     @BindsOptionalOf abstract fun deviceAwake(): DeviceAwake
+
+    // (Sports Hub commit 0, docs/design/m6-sports-hub.md §11) Bindings only; the implementations are WP-1, WP-2 and WP-3's.
+    @Binds abstract fun gameDetailSource(impl: NhlDetailSource): GameDetailSource
+
+    @Binds abstract fun gameDetailRepository(impl: GameDetailRepositoryImpl): GameDetailRepository
+
+    @Binds abstract fun clipResolver(impl: NhlClipResolver): ClipResolver
+
+    @Binds abstract fun gameChannelMatcher(impl: GameChannelMatcherImpl): GameChannelMatcher
 
     companion object {
         @Provides

@@ -25,9 +25,13 @@ import java.time.LocalDate
 import java.time.ZoneId
 import java.util.Optional
 import javax.inject.Inject
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 
@@ -106,6 +110,18 @@ class SportsViewModel internal constructor(
 ) : ViewModel() {
     @Inject constructor(scores: Optional<ScoreRepository>, store: SettingsStore) :
         this(scores.orElse(null), store, android.os.SystemClock::elapsedRealtime, System::currentTimeMillis, { LocalDate.now(EASTERN) })
+
+    /**
+     * (Sports Hub commit 0, docs/design/m6-sports-hub.md §6.5, R-S5) The clip layer's state for `AppRoot.sportsClip`.
+     * Stub: always [ClipUi] (no clip); WP-4 / WP-5 drive it from `ClipSession`.
+     */
+    val clipUi: StateFlow<ClipUi> = MutableStateFlow(ClipUi()).asStateFlow()
+
+    /**
+     * (Sports Hub commit 0, §4.1, A-S6) Tune / archive / resume requests for `GuideViewModel.onSportsEffect` (collected by
+     * `MainActivity`). Stub: never emits.
+     */
+    val effects: SharedFlow<SportsEffect> = MutableSharedFlow<SportsEffect>().asSharedFlow()
 
     private val selected = MutableStateFlow(SportsDay.TODAY)
 
