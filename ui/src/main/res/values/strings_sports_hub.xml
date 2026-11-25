@@ -169,20 +169,15 @@
     <string name="sports_hub_slot_watch_from_start">Watch from start</string>
     <string name="sports_hub_slot_retry">Retry</string>
 
-    <!-- ==== Channel line (§1.3, §5.3). %1$s = the channel name, %2$s = the short reason. -->
+    <!-- ==== Channel line (§1.3, §5.3). %1$s = the channel name, %2$s = the short reason. The " · +n more" tail is
+         sports_hub_more, drawn apart so it is never cut (event channels U-E-N5). -->
     <string name="sports_hub_on_tv">On TV: %1$s · %2$s</string>
-    <!-- %1$s = sports_hub_on_tv, %2$d = the number of other candidates. -->
-    <plurals name="sports_hub_on_tv_more">
-        <item quantity="one">%1$s · +%2$d more</item>
-        <item quantity="other">%1$s · +%2$d more</item>
-    </plurals>
     <!-- Upcoming (more than 30 min away). %1$s = the start time, %2$s = the channel name. -->
     <string name="sports_hub_on_tv_at">On TV at %1$s: %2$s</string>
     <string name="sports_hub_finding_channel">Finding a channel…</string>
     <string name="sports_hub_no_channel">No channel found in your playlists</string>
     <string name="sports_hub_reason_short_guide">in your guide</string>
     <string name="sports_hub_reason_short_national">national broadcaster</string>
-    <string name="sports_hub_reason_short_local">local channel, may differ</string>
 
     <!-- ==== Channels sheet (§5.3, §5.5) -->
     <!-- CONFIRMED. %1$s = the airing title, %2$s = its time range ("9:00–11:30 PM"). -->
@@ -193,10 +188,6 @@
     <string name="sports_hub_reason_network_any">%1$s carries this game. Your guide doesn\'t list it on this channel.</string>
     <!-- LIKELY, sport listing. %1$s = the airing title, %2$s = its start time. -->
     <string name="sports_hub_reason_sport_listing">In your guide: %1$s at %2$s. The listing doesn\'t name the teams.</string>
-    <string name="sports_hub_reason_home_local">Home team\'s local channel. It may show a different game where you live.</string>
-    <string name="sports_hub_reason_away_local">Away team\'s local channel. It may show a different game where you live.</string>
-    <string name="sports_hub_reason_possible">May carry this game. Check the channel.</string>
-    <string name="sports_hub_regional_note">Regional channels may show a different game where you are.</string>
     <!-- Quality variants. %1$s = "FHD, 4K". -->
     <string name="sports_hub_also">Also: %1$s</string>
     <!-- OK on a row of a game more than 30 min away. %1$s = the start time. -->
@@ -327,8 +318,9 @@
         <item quantity="other">%1$d seconds</item>
     </plurals>
 
-    <!-- ==== (Event channels commit 0, docs/design/m6-event-channels.md §9.1) Additions only; WP-4 wires them and deletes
-         the regional strings. Channel line and sheet text at 22/500; nothing under 22 design px. -->
+    <!-- ==== (Event channels commit 0, docs/design/m6-event-channels.md §9.1) Added in commit 0; WP-4 wired them and
+         deleted the regional strings (reason_short_local, reason_home_local, reason_away_local, reason_possible,
+         regional_note) and on_tv_more. Channel line and sheet text at 22/500; nothing under 22 design px. -->
     <!-- Channel line short reason (U-E-S8: the guide's phrase). -->
     <string name="sports_hub_reason_short_event">from the channel name</string>
     <!-- Channel line with a team channel on top. %1$s = the nickname ("Oilers"). -->

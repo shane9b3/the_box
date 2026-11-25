@@ -20,7 +20,6 @@ import app.thebox.core.sports.hub.Ranked
 import app.thebox.core.sports.hub.StatKind
 import app.thebox.core.sports.hub.StatRow
 import app.thebox.core.sports.hub.StatValue
-import app.thebox.core.sports.Market
 import app.thebox.ui.R
 import java.util.Locale
 import androidx.compose.foundation.background
@@ -323,7 +322,7 @@ internal data class PanelContent(
     /** The reason + next step in place of the rows (§4.5). */
     val error: String?,
     val summary: List<SummaryLine>,
-    val channelLine: String?,
+    val channelLine: HubPanelContents.ChannelLine?,
     val media: MediaSpec,
     val mediaDesc: String,
     /** NFL / CHL with nothing extra (§7.1): the one line instead of rows. */
@@ -402,7 +401,7 @@ internal object HubPanelContents {
 
         // ---- the summary and the plan
         val summary = summary(res, m, g, away, home)
-        val channelLine = channelLine(res, m, g, clock24, locale)
+        val channelLine = channelLine(res, m, g, clock24, locale, factor)
         val mediaSpec = media(res, m, g, clock24, locale)
         val note = when {
             m.detail != null && (m.stale || m.failing) && m.statsAtMs != null ->
@@ -611,32 +610,71 @@ internal object HubPanelContents {
 
     // ------------------------------------------------------------------ channel line (§1.3, §5.3)
 
-    private fun channelLine(res: Resources, m: HubPanelModel, g: GameSnapshot, clock24: Boolean, locale: Locale): String? {
+    /**
+     * The channel line (§1.3, §5.3; event channels §8.5, §9.1): [text] ellipsizes, [more] (" · +n more", U-E-N5) is never
+     * cut; [beyond]: the game is beyond the guide (the line explains the grey Channels chip).
+     */
+    @Immutable
+    internal data class ChannelLine(val text: String, val more: String?, val beyond: Boolean = false) {
+        fun full(sep: String): String = if (more == null) text else text + sep + more
+    }
+
+    /** (E11) The hub line's budget in characters: 55 at Default, 45 at Largest (the 664 px line at 22 design px). */
+    internal fun lineBudget(factor: Float): Int = (HUB_LINE_CHARS / factor.coerceAtLeast(0.5f)).toInt()
+
+    internal fun channelLine(res: Resources, m: HubPanelModel, g: GameSnapshot, clock24: Boolean, locale: Locale, factor: Float = 1f): ChannelLine? {
         if (g.phase == GamePhase.POSTPONED) return null
         val final = g.phase == GamePhase.FINAL
         val nhlFinal = final && g.id.league.group == LeagueGroup.NHL
         if (final && !nhlFinal) return null
+        val sep = res.getString(R.string.sports_hub_summary_sep)
+        val budget = lineBudget(factor)
         return when (val match = m.match) {
-            MatchState.Idle, MatchState.Finding -> if (final) null else res.getString(R.string.sports_hub_finding_channel)
+            MatchState.Idle, MatchState.Finding -> if (final) null else ChannelLine(res.getString(R.string.sports_hub_finding_channel), null)
             is MatchState.Done -> {
                 val list = if (final) match.candidates.filter { it.airing != null } else match.candidates
-                if (list.isEmpty()) return if (final) null else res.getString(R.string.sports_hub_no_channel)
+                if (list.isEmpty()) return if (final) null else ChannelLine(res.getString(R.string.sports_hub_no_channel), null)
                 val top = list.first()
-                val name = top.channel.displayName
-                val base = if (final || m.imminent) res.getString(R.string.sports_hub_on_tv, name, shortReason(res, top))
-                else res.getString(R.string.sports_hub_on_tv_at, SportsText.startTime(g.startUtcMs, clock24, locale), name)
-                if (list.size > 1) res.getQuantityString(R.plurals.sports_hub_on_tv_more, list.size - 1, base, list.size - 1) else base
+                val more = if (list.size > 1) res.getQuantityString(R.plurals.sports_hub_more, list.size - 1, list.size - 1) else null
+                val tail = more?.let { sep.length + it.length } ?: 0
+                val time = if (final || m.imminent) null else SportsText.startTime(g.startUtcMs, clock24, locale)
+                val team = top.reasons.filterIsInstance<MatchReason.TeamChannel>().firstOrNull()
+                val text = if (team != null) {
+                    // (U-E-B3) "Oilers team channel", never a bare team name; (E11) the abbreviation when it would not fit.
+                    fun line(name: String) = if (time == null) res.getString(R.string.sports_hub_on_tv_team, name)
+                    else res.getString(R.string.sports_hub_on_tv_team_at, time, name)
+                    line(team.nickname).takeIf { it.length + tail <= budget } ?: line(abbrevOf(g, team.side))
+                } else if (time == null) {
+                    res.getString(R.string.sports_hub_on_tv, top.channel.displayName, shortReason(res, top))
+                } else {
+                    res.getString(R.string.sports_hub_on_tv_at, time, top.channel.displayName)
+                }
+                ChannelLine(text, more)
             }
-            // (Event channels commit 0, §8.5) Stub: no line yet; WP-4 draws the beyond-guide line (§9.1).
-            is MatchState.BeyondGuide -> null
+            is MatchState.BeyondGuide -> ChannelLine(beyondText(res, g, match, budget), null, beyond = true)
         }
     }
 
+    /** (§8.5, owner ruling c; U-E-B4, E11) Why Channels is grey: the team channels, else the guide, else no guide at all. */
+    private fun beyondText(res: Resources, g: GameSnapshot, match: MatchState.BeyondGuide, budget: Int): String {
+        val sides = match.teams.flatMap { c -> c.reasons.filterIsInstance<MatchReason.TeamChannel>() }.distinctBy { it.side }.sortedBy { it.side.ordinal }
+        return when (sides.size) {
+            0 -> res.getString(if (match.noGuide) R.string.sports_hub_beyond_guide_none else R.string.sports_hub_beyond_guide)
+            1 -> res.getString(R.string.sports_hub_on_tv_team, sides[0].nickname).takeIf { it.length <= budget }
+                ?: res.getString(R.string.sports_hub_on_tv_team, abbrevOf(g, sides[0].side))
+            else -> res.getString(R.string.sports_hub_beyond_guide_team, sides[0].nickname, sides[1].nickname).takeIf { it.length <= budget }
+                ?: res.getString(R.string.sports_hub_beyond_guide_team, abbrevOf(g, sides[0].side), abbrevOf(g, sides[1].side))
+        }
+    }
+
+    private fun abbrevOf(g: GameSnapshot, side: Side): String = if (side == Side.AWAY) g.away.abbrev else g.home.abbrev
+
+    /** The line's short reason (§9.1): the guide, the channel name, else (re-review E12) "national broadcaster". */
     private fun shortReason(res: Resources, c: ChannelCandidate): String = res.getString(
         when {
             c.reasons.any { it is MatchReason.Guide || it is MatchReason.SportListing } -> R.string.sports_hub_reason_short_guide
-            c.confidence == MatchConfidence.LIKELY && c.reasons.any { it is MatchReason.Broadcaster && it.market == Market.NATIONAL } -> R.string.sports_hub_reason_short_national
-            else -> R.string.sports_hub_reason_short_local
+            c.reasons.any { it is MatchReason.EventName } -> R.string.sports_hub_reason_short_event
+            else -> R.string.sports_hub_reason_short_national
         },
     )
 
@@ -794,6 +832,10 @@ const val HUB_HEADLINE_TAG = "hub_panel_headline"
 internal const val HUB_HEADLINE_AWAY_TAG = "hub_panel_headline_away"
 internal const val HUB_HEADLINE_HOME_TAG = "hub_panel_headline_home"
 const val HUB_CHANNEL_LINE_TAG = "hub_panel_channel"
+/** The channel line's never-cut " · +n more" (U-E-N5). */
+const val HUB_CHANNEL_MORE_TAG = "hub_panel_channel_more"
+/** (E11) Characters of the hub's one-line slots at Default (22 design px on 664 px); 45 at Largest. */
+internal const val HUB_LINE_CHARS = 55
 const val HUB_ERROR_TAG = "hub_panel_error"
 const val HUB_NOTE_TAG = "hub_panel_note"
 const val HUB_MEDIA_TAG = "hub_panel_media"
@@ -876,7 +918,11 @@ internal fun HubPanel(
             .testTag(HUB_PANEL_TAG)
             .background(PanelFill, shape).border(1.dp, GuideUi.White08, shape)
             .padding(28.dp)
-            .semantics { paneTitle = title }
+            .semantics {
+                paneTitle = title
+                // (U-E-B4) The grey Channels chip is never focused: the panel itself says why.
+                content?.channelLine?.takeIf { it.beyond }?.let { contentDescription = it.text }
+            }
             .onPreviewKeyEvent { e ->
                 if (focusedSlot < 0) false
                 else when (e.key) {
@@ -906,15 +952,35 @@ internal fun HubPanel(
         Spacer(Modifier.height(16.dp))
         Stats(content)
         Summary(content, factor)
-        content.channelLine?.let {
+        content.channelLine?.let { line ->
             Spacer(Modifier.height(16.dp))
-            Line(it, GuideUi.sans(22, FontWeight.Medium, GuideUi.Fg70), Modifier.fillMaxWidth().height(HubPanelPlan.channel(factor).dp).testTag(HUB_CHANNEL_LINE_TAG))
+            ChannelLineRow(line, factor)
         }
         Spacer(Modifier.height(12.dp))
         Buttons(model, slotRequesters, focusedSlot, entered, onSlot) { i ->
             focusedSlot = i ?: -1
             onSlotFocus(i)
         }
+    }
+}
+
+/**
+ * (Event channels §9.1, U-E-N5) The channel line as two texts in a row: the words ellipsize, " · +n more" is never cut.
+ * The row reads as one sentence to TalkBack.
+ */
+@Composable
+private fun ChannelLineRow(line: HubPanelContents.ChannelLine, factor: Float) {
+    val res = LocalResources.current
+    val sep = res.getString(R.string.sports_hub_summary_sep)
+    val style = GuideUi.sans(22, FontWeight.Medium, GuideUi.Fg70)
+    Row(
+        Modifier.fillMaxWidth().height(HubPanelPlan.channel(factor).dp).testTag(HUB_CHANNEL_LINE_TAG)
+            .semantics(mergeDescendants = true) { contentDescription = line.full(sep) },
+        // Top, as the one-text line was drawn in its fixed-height slot.
+        verticalAlignment = Alignment.Top,
+    ) {
+        Line(line.text, style, Modifier.weight(1f, fill = false))
+        line.more?.let { Line(sep + it, style, Modifier.testTag(HUB_CHANNEL_MORE_TAG)) }
     }
 }
 
