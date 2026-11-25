@@ -18,6 +18,7 @@ import app.thebox.core.playback.ConnectionLimitException
 import app.thebox.core.playback.FailureSignal
 import app.thebox.core.playback.LoadOrigin
 import app.thebox.core.playback.NetworkFailureKind
+import app.thebox.core.playback.PlaybackErrorCode
 import app.thebox.core.playback.StallKind
 import app.thebox.core.playback.timeshift.RecordStop
 import app.thebox.core.playback.timeshift.RingBoundaryException
@@ -59,6 +60,11 @@ internal class FailureClassifier {
          * failure carrying it is the recorder's, not stale. null = no time-shift writer.
          */
         val writerTuneId: Long? = null,
+        /**
+         * (Sports Hub, docs/design/m6-sports-hub.md §6.5, A-B1.4) A clip cycle: VOD like archive, its HTTP failures
+         * reported under the clip's own origin; the controller then applies [clipAction] instead of the ladder.
+         */
+        val isClip: Boolean = false,
     )
 
     fun classify(error: PlaybackException, facts: Facts): FailureSignal? {
@@ -194,6 +200,8 @@ internal class FailureClassifier {
 
     private fun origin(facts: Facts): LoadOrigin = when {
         facts.isArchive -> LoadOrigin.ARCHIVE
+        // (Sports Hub §6.5) A clip's MP4 is a finite file, loaded under the archive policy.
+        facts.isClip && !facts.isHls -> LoadOrigin.ARCHIVE
         facts.isHls -> when (facts.lastLoadDataType) {
             C.DATA_TYPE_MANIFEST -> LoadOrigin.HLS_MANIFEST
             C.DATA_TYPE_MEDIA, C.DATA_TYPE_MEDIA_INITIALIZATION -> LoadOrigin.HLS_SEGMENT
@@ -238,6 +246,43 @@ internal class FailureClassifier {
             return out
         }
 
+        /**
+         * (Sports Hub §6.5, A-B1.4) The clip rule: a 403 / 410 on the clip's media (manifest, segment, file or captions)
+         * is an expired signed URL → `CLIP_EXPIRED` at once (ClipSession re-resolves once). Network trouble, 5xx / 408 /
+         * 429 and every stall verdict → [ClipAction.Restart]. Anything else (decoders, parsing, other statuses) fails with
+         * [clipCode].
+         */
+        fun clipAction(signal: FailureSignal): ClipAction = when (signal) {
+            is FailureSignal.Http -> when {
+                signal.status == 403 || signal.status == 410 -> ClipAction.Fail(PlaybackErrorCode.CLIP_EXPIRED)
+                signal.status >= 500 || signal.status == 408 || signal.status == 429 -> ClipAction.Restart
+                else -> ClipAction.Fail(clipCode(signal))
+            }
+            is FailureSignal.Network -> if (signal.kind == NetworkFailureKind.CLEARTEXT) ClipAction.Fail(clipCode(signal)) else ClipAction.Restart
+            is FailureSignal.ReconnectExhausted, is FailureSignal.TinyBody, is FailureSignal.Stall, is FailureSignal.Stuck,
+            FailureSignal.BehindLiveWindow -> ClipAction.Restart
+            // An IO error Media3 reported without an HTTP or socket cause in the chain (2xxx codes).
+            is FailureSignal.Unknown -> if (signal.media3ErrorCode in IO_ERROR_CODES) ClipAction.Restart else ClipAction.Fail(clipCode(signal))
+            else -> ClipAction.Fail(clipCode(signal))
+        }
+
+        /**
+         * The code a clip fails with: the live mapping, except that nothing names a channel or the catch-up archive (a
+         * clip has neither). `ClipPlayerLayer` shows its own card text; the code feeds diagnostics and the fallback card.
+         */
+        fun clipCode(signal: FailureSignal): PlaybackErrorCode {
+            if (signal is FailureSignal.Http && (signal.status == 403 || signal.status == 410)) return PlaybackErrorCode.CLIP_EXPIRED
+            return when (val code = PlaybackControllerImpl.eventualCode(signal)) {
+                PlaybackErrorCode.CHANNEL_OFFLINE, PlaybackErrorCode.CATCHUP_NOT_IN_ARCHIVE, PlaybackErrorCode.CHANNEL_NOT_FOUND,
+                PlaybackErrorCode.FORBIDDEN, PlaybackErrorCode.AUTH_REJECTED, PlaybackErrorCode.CONNECTION_LIMIT,
+                PlaybackErrorCode.FORMAT_REFUSED -> PlaybackErrorCode.STREAM_INTERRUPTED
+                else -> code
+            }
+        }
+
+        /** `PlaybackException.ERROR_CODE_IO_*` (2000–2999). */
+        private val IO_ERROR_CODES = 2000..2999
+
         /** (M6 time-shift) The first ring exception in [error]'s cause chain, or null. */
         fun ringException(error: Throwable): RingException? = causeChain(error).firstOrNull { it is RingException } as RingException?
 
@@ -247,6 +292,13 @@ internal class FailureClassifier {
             return if (uri.scheme == SESSION_SCHEME) uri.host?.toLongOrNull() else null
         }
     }
+}
+
+/** (Sports Hub §6.5) What a clip cycle does with a failure ([FailureClassifier.clipAction]): no ladder, no learning. */
+internal sealed interface ClipAction {
+    /** At most `HUB_CLIP_RESTARTS` new sessions at the playhead, then [FailureClassifier.clipCode]. */
+    data object Restart : ClipAction
+    data class Fail(val code: PlaybackErrorCode) : ClipAction
 }
 
 /**
