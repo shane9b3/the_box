@@ -8,6 +8,7 @@ import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performKeyInput
@@ -102,11 +103,11 @@ class HubSheetsTest {
             "Sportsnet carries this game in Canada. Your guide doesn't list it on this channel.",
             channelReason(res, cand(MatchConfidence.LIKELY, MatchReason.Broadcaster("Sportsnet", Market.NATIONAL, "CA")), live, false),
         )
-        assertEquals(
-            "Home team's local channel. It may show a different game where you live.",
-            channelReason(res, cand(MatchConfidence.POSSIBLE, MatchReason.Broadcaster("SNO", Market.HOME, "CA")), live, false),
-        )
-        assertEquals("May carry this game. Check the channel.", channelReason(res, cand(MatchConfidence.POSSIBLE), live, false))
+        // (Event channels §9.1) No "local channel" wording: a regional broadcaster is a candidate only on guide evidence,
+        // and a row without a nameable network says so plainly (U-E-N6).
+        assertEquals("A national broadcaster carries this game.", channelReason(res, cand(MatchConfidence.POSSIBLE, MatchReason.Broadcaster("SNO", Market.HOME, "CA")), live, false))
+        assertEquals("A national broadcaster carries this game.", channelReason(res, cand(MatchConfidence.POSSIBLE), live, false))
+        assertEquals("A national broadcaster carries this game.", channelReason(res, cand(MatchConfidence.POSSIBLE, MatchReason.Broadcaster("X1", Market.NATIONAL, null)), live, false))
         assertTrue(channelReason(res, cand(MatchConfidence.CONFIRMED, MatchReason.Guide("NHL Hockey", 0, 9_000_000, false)), live, true).startsWith("In your guide: NHL Hockey, "))
         val v = ChannelCandidate(ch, "P", MatchConfidence.CONFIRMED, emptyList(), listOf(GuideFixtures.channel(2, name = "CA| SPORTSNET ONTARIO FHD")), null)
         assertEquals("Also: FHD", alsoLine(res, v))
@@ -159,7 +160,8 @@ class HubSheetsTest {
         rule.onRoot().performKeyInput { pressKey(Key.DirectionCenter) }
         rule.waitForIdle()
         assertEquals(1, notYet)
-        rule.onNodeWithTag(CHANNEL_SHEET_NOTE_TAG, useUnmergedTree = true).fetchSemanticsNode()
+        // (Event channels §9.1) No footer note: the regional note went with the regional guesses.
+        assertTrue(rule.onAllNodesWithText("Regional channels", substring = true, useUnmergedTree = true).fetchSemanticsNodes().isEmpty())
     }
 
     @Test

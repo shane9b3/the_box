@@ -154,7 +154,7 @@ class GameChannelMatcherTest {
             programme("s360", s - 1440, s - 1440 + 180, "NHL Hockey: Kraken at Golden Knights")
         }.writeTo(File(dir.parentFile, "hub-match-${System.nanoTime()}.xml"))
         store.build(EpgBuildRequest(listOf(EpgSourceFile(src, xml)), nowMs, pastDays = 7, futureDays = 7), EpgWhitelistResolver { _, _ -> EpgWhitelist.ALL })
-        matcher = GameChannelMatcherImpl(gg.queries, store, db, Dispatchers.IO)
+        matcher = GameChannelMatcherImpl(gg.queries, store, db, app.thebox.core.events.FakeEventIndex(), Dispatchers.IO)
     }
 
     @After fun tearDown() { db.close(); dir.deleteRecursively() }

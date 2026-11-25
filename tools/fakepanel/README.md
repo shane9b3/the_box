@@ -317,6 +317,29 @@ All default off, so every body above stays as it was:
   `refuse`, `rotate`, `geo`, `missing`, `slow`, `expire` (see the module's docstring). A video id ending in 404 is a 404.
 - `--sports-hub-catalog` (`catalog.py`): the channel-link catalog channels ("CA| SPORTSNET ONTARIO HD", "SN - Ontario",
   "US: TNT", "US: ABC 7 NEW YORK", a hidden and a locked channel, …) and their XMLTV for VGK @ EDM and LAK @ ANA.
+- `--event-catalog` (config `event_catalog: true`; `events.py`; docs/design/m6-event-channels.md §11.3): event and team
+  channels, ids 80–129 in categories 30–42, with **names generated at request time** around the featured game VGK @ EDM
+  (sports.py's hub game 0908, 30 min before the server start), so they always read "today". Use it with
+  `--sports --sports-hub-catalog` for the hub's channel link:
+  - team channels without guide data: `Sports | NHL Teams` (Vegas Golden Knights, Edmonton Oilers, Montreal Canadiens,
+    Utah Mammoth with tvg id `UtahHockeyClub.nhl`), `Sports | NHL Teams (2)` (a second Edmonton Oilers: "Also in"),
+    `Sports | NFL Teams` (NYJ, NE, KC, BUF). Config `event_team_channels: false` leaves them out;
+  - seven guide-listed channels for the featured game in `CA | Sports` (Sportsnet Oilers / Pacific / East / One, truTV,
+    TSN 2, ESPN); with the hub catalog also "US: TNT" (given tvg id `ev.tnt.test`), Sportsnet West and Ontario;
+  - `Sports | Sportsnet+` (shape A, ET): `Sportsnet+ 09: Vegas @ Edmonton` at the game's minute, an NBA decoy, a morning
+    show, `NO EVENT`, `Sportsnet+ 12:`, `Sportsnet+ 29 :`, a game that ended 2 h ago, one from yesterday and the owner's
+    `… OM ET`; `Sports | NHL` and `Sports | NHL (2)`: two `NHL 01` slots with different events (shapes B and A);
+  - BossSports-style `Sports | ESPN+` slots (shape D, tvg ids `fake.boss.espnplus.0N`) whose XMLTV is 4 h blocks: "No
+    Event Today", one "Next Event: <title> at <h:mm>PM EST on <Mon D>" before the event, one "Signing Off" after it,
+    and on slots 02 / 03 a real 4 h listing at the name's minute (02 spelled differently: "FAU vs. SIUE" against
+    "Florida Atlantic vs. SIU Edwardsville");
+  - shape E (`Sports | NCAA Basketball (2)`), shape C tagged and the 2098 placeholder (`Sports | TSN+ (2)`), untagged
+    shape C and `| Offline` (`Sports | NBA League Pass`), London (`UK | Sky Sports+`), `Sports | NBA`, and
+    `Sportsnet Oilers` (never a team channel).
+
+  Admin: `POST /admin/events {"shift_min": n}` moves every event by n minutes (cumulative); `{"names": "next"}` swaps
+  the slots to the next set (after a playlist refresh `Sportsnet+ 09`'s event is on `Sportsnet+ 10`); `{"names":
+  "reset"}` restores both. `GET /admin/events` lists the state and the current names.
 
 The debug override `files/debug/sports_base` (above) also sends both video hosts to `{origin}/bc/...`. A panel on another
 port is reached from the emulator as `http://10.0.2.2:<port>`.
@@ -483,6 +506,7 @@ Streams log when they end. `--verbose` adds request headers.
 From the repo root: `python3 -m unittest tools/fakepanel/test_fakepanel.py`.
 With `-I` (which drops the cwd from `sys.path`) use `python3 -I -m unittest discover -s tools/fakepanel -p test_fakepanel.py`.
 The sports routes: `python3 -I -m unittest discover -s tools/fakepanel -p 'test_sports*.py'` (about 10 s; the NHL golden is in it).
+The event catalog: `python3 -I -m unittest discover -s tools/fakepanel -p test_events.py`.
 Tests start the server on ephemeral ports with the null-packet media and need neither ffmpeg nor network.
 
 ## Live TS timestamps

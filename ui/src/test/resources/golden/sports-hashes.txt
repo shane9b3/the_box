@@ -22,6 +22,11 @@
 # 2026-11-25 (Sports Hub emulator repeat, lead): three changed on purpose: sports-tab/sports-tab.png (was 30fefe5d...),
 #   hub-panel-pre-default (53e74a43...), hub-panel-pre-largest (92969341...): the matchup art centres its logos in what the centre
 #   disc or pill leaves on each side, so a live game's wide clock pill never covers them. Every other hash is unchanged.
+# 2026-11-25 (Event channels WP-4, U-E-N5): two changed on purpose: hub-panel-live-default (was 3ea7e2a3...) and
+#   hub-panel-live-largest (c2b36a4c...): the channel line is two texts, the words (which ellipsize) and " · +1 more"
+#   (never cut). At Largest the words now end "national broadcas…" and "+1 more" is whole (it was the part cut); at
+#   Default the same words, laid out as two runs. The pre-game shots (one candidate, no tail) and sports-tab.png hash
+#   equal. Every other hash is unchanged (sportsHashGate: 2 of 1700 differed before this line, those two).
 # host: Mac OS X 15.0.1 x86_64 jdk 21.0.2
 #   (machine-read by the gate: os.name, os.version, os.arch and java.version of the Gradle JVM, which runs the unit tests.
 #   On any other host the gate is SKIPPED with a message, never failed; regenerate the list there to gate on it.)
@@ -1750,7 +1755,7 @@ d4dcf3965d075bd39826d090aacadf4c1c748d6a31ea0a882fac2da8dad51349  score-bug-stac
 f0fa6ca7fb703382fbcd0ee00e03e667b157af7f450a38e4cf1823aae7e01034  sports-tab/hub-cards-largest.png
 6cabdce4f038bf7ddae39df0fa9af0f1833db12f1ab55dc7fcbb33daddab9f65  sports-tab/hub-panel-final-default.png
 3f16b1f1039166ee742e972c4efe81585546bb13c7d24514e1299f110264ebc6  sports-tab/hub-panel-final-largest.png
-3ea7e2a395fae260ea4a16e4d1b3711b4eef3896d3f1a8f728d37ebc3e20ce09  sports-tab/hub-panel-live-default.png
-c2b36a4cdbdd0600b773238eec5663a2268885a48d65fd373189e2da4014e6c0  sports-tab/hub-panel-live-largest.png
+6d572cdb620ab6ba85d0a77f85baa2bfcd28a1c5dfe7201cbda124f69b633eab  sports-tab/hub-panel-live-default.png
+925411aef67309ec6e6b61c08afab255b93089005a7e14cc1e4f051d083d056a  sports-tab/hub-panel-live-largest.png
 bec7aaefa6fca8734764a31592c91d8130a3269baa1ef7a2d5082ab876dda360  sports-tab/hub-panel-pre-default.png
 c07a0bdd7d7519d86363b37aa479fdada90036d1f0a9fc6b06a64b83202f75bf  sports-tab/hub-panel-pre-largest.png
